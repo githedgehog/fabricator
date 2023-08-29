@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+option go_package = "go.githedgehog.com/fabricator/pkg/vlab";
+
+package vlab;
+
+message StatusRequest {
+}
+
+message StatusResponse {
+    bool ok = 1;
+    string message = 2;
+}
+
+service Service {
+    rpc Status(StatusRequest) returns (StatusResponse);
+}
