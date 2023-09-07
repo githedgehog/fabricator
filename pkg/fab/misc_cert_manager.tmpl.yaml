@@ -1,0 +1,31 @@
+installCRDs: true
+
+image:
+  repository: {{ .controllerRef.RepoName }}
+  tag: {{ .controllerRef.Tag }}
+  pullPolicy: IfNotPresent
+
+webhook:
+    image:
+        repository: {{ .webhookRef.RepoName }}
+        tag: {{ .webhookRef.Tag }}
+        pullPolicy: IfNotPresent
+
+cainjector:
+    image:
+        repository: {{ .cainjectorRef.RepoName }}
+        tag: {{ .cainjectorRef.Tag }}
+        pullPolicy: IfNotPresent
+
+acmesolver:
+    image:
+        repository: {{ .acmesolverRef.RepoName }}
+        tag: {{ .acmesolverRef.Tag }}
+        pullPolicy: IfNotPresent
+
+startupapicheck:
+    image:
+        repository: {{ .ctlRef.RepoName }}
+        tag: {{ .ctlRef.Tag }}
+        pullPolicy: IfNotPresent
+

@@ -1,0 +1,42 @@
+image:
+  repository: {{ .ref.RepoName }}
+  tag: {{ .ref.Tag }}
+  pullPolicy: Always
+service:
+  type: ClusterIP
+  clusterIP: 10.143.42.42 # TODO
+  ports:
+    # insecure:
+    #   port: 80
+    #   targetPort: 8080
+    secure:
+      port: 443
+      targetPort: 8443
+settings:
+  issue_certificates: false
+  listeners:
+    insecure:
+      dynll:
+        device_name: ""
+        listening_port: 80
+  control_vip: {{ .controlVIP }}
+  dns_servers: # TODO
+    - 10.143.0.10
+  ntp_servers:
+    - das-boot-ntp-udp.default.svc.cluster.local
+  syslog_servers:
+    - das-boot-rsyslog.default.svc.cluster.local
+  kube_subnets: # TODO
+    - 10.142.0.0/16
+    - 10.143.0.0/16
+  artifacts:
+    oci_registries:
+      - url: oci://registry.default:5000/githedgehog
+        ca:
+          secretName: oci-ca
+          certKey: cert.pem
+          mountPath: /etc/hedgehog/seeder-certs/oci-ca
+securityContext:
+  privileged: true
+  runAsUser: 0
+  runAsGroup: 0

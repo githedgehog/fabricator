@@ -1,0 +1,16 @@
+apiServer: {{ .apiServer }}
+controlVIP: {{ .controlVIP }}
+vpcVLANRange:
+  min: {{ .vpcVLANMin }}
+  max: {{ .vpcVLANMax }}
+users:
+{{ range .users }}
+- name: {{ .Name }}
+  password: {{ .Password }}
+  role: {{ .Role }}
+{{ end }}
+agentRepo: {{ .agentRepo }}
+agentRepoCA: |
+{{ .agentRepoCA | indent 2 }}
+dhcpdConfigMap: fabric-dhcp-server-config
+dhcpdConfigKey: dhcpd.conf

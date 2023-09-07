@@ -1,0 +1,11 @@
+reloader:
+  # autoReloadAll: true # TODO
+  reloadOnCreate: true
+  syncAfterRestart: true
+  reloadStrategy: default # Set to default, env-vars or annotations
+
+  deployment:
+    image:
+      name: {{ .ref.RepoName }}
+      tag: {{ .ref.Tag }}
+      # pullPolicy: IfNotPresent

@@ -1,0 +1,9 @@
+controllerManager:
+  kubeRbacProxy:
+    image:
+      repository: {{ .proxyRef.RepoName }}
+      tag: {{ .proxyRef.Tag }}
+  manager:
+    image:
+      repository: {{ .ref.RepoName }}
+      tag: {{ .ref.Tag }}

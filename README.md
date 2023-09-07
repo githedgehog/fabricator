@@ -1,4 +1,57 @@
 # fabricator
+
+## Steps to setup on ubuntu 22.04
+
+I recommend using tmux or byobu. Byobu is already installed in Ubuntu and you can activate it for all sessions by
+
+```
+byobu-enable
+```
+
+and when you'll log back, you'll be in it already.
+
+You'd need to have docker installed:
+
+```
+curl -fsSL https://get.docker.com -o install-docker.sh
+sudo sh install-docker.sh
+sudo usermod -aG docker $USER
+newgrp docker
+```
+
+If you're running in the lab login into the registry mirror with user `lab` and regular lab password:
+
+```
+docker login https://m.l.hhdev.io:31000
+```
+
+Install some deps
+
+```
+sudo apt update
+// optional: sudo apt upgrade -y
+sudo apt install -y qemu-kvm swtpm-tools tpm2-tools socat
+sudo usermod -aG kvm $USER
+newgrp kvm
+kvm-ok
+```
+
+Good output:
+
+```
+ubuntu@sl-hhfab-test-01:~$ kvm-ok
+INFO: /dev/kvm exists
+KVM acceleration can be used
+```
+
+Tips:
+
+```
+socat -,raw,echo=0,escape=0x1d unix-connect:.hhfab/vlab-vms/switch-1/serial.sock
+```
+
+
+
 // TODO(user): Add simple overview of use/purpose
 
 ## Description

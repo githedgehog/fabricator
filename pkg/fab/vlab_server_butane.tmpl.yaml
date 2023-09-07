@@ -1,0 +1,38 @@
+variant: flatcar
+version: 1.0.0
+
+passwd:
+  users:
+    - name: {{ .username }}
+      ssh_authorized_keys:
+        {{ range .authorizedKeys}}
+        - {{ . }}
+        {{ end }}
+      groups:
+        - wheel
+      shell: /bin/bash
+
+storage:
+  files:
+    # disable updates - we really don't care on a dev machine
+    # they are just annoying here at the moment
+    # it disables them by setting the server to an invalid value
+    # yes, I know, but even Flatcar says to do so
+    # source: https://www.flatcar.org/docs/latest/setup/releases/update-strategies/#disable-automatic-updates
+    - path: /etc/flatcar/update.conf
+      mode: 0644
+      contents:
+        inline: |
+          SERVER=disabled
+
+    # set a great hostname
+    - path: /etc/hostname
+      mode: 0644
+      overwrite: true
+      contents:
+        inline: "{{ .hostname }}"
+
+    - path: /etc/hosts
+      append:
+        - inline: |
+            127.0.0.1 {{ .hostname }}

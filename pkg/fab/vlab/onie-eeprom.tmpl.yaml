@@ -1,0 +1,23 @@
+tlvs:
+  product_name: Hedgehog ONIE kvm_x86_64 Virtual Machine
+  part_number: hh-onie-kvm_x86_64-%s
+  serial_number: %s
+  mac_base:
+    - 0x0c
+    - 0x20
+    - 0x12
+    - 0xfe
+    - 0x%02d
+    - 0x00
+  manufacture_date: %s
+  device_version: 1
+  label_revision: null
+  platform_name: x86_64-kvm_x86_64-r0
+  onie_version: master-01091853-dirty
+  num_macs: %d
+  manufacturer: Caprica Systems
+  country_code: US
+  vendor: Hedgehog
+  diag_version: null
+  service_tag: null
+  vendor_extension: null

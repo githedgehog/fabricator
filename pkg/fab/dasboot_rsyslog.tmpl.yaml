@@ -1,0 +1,5 @@
+image:
+  repository: {{ .ref.RepoName }}
+  tag: {{ .ref.Tag }}
+pvc:
+  storageClassName: ""

@@ -1,0 +1,10 @@
+node-name: "{{ .controlNodeName }}"
+cluster-cidr: 10.142.0.0/16
+service-cidr: 10.143.0.0/16
+cluster-dns: 10.143.0.10
+write-kubeconfig-mode: "0644"
+tls-san: # TODO add public control node IP?
+  - 127.0.0.1
+  - {{ .controlVIP }}
+secrets-encryption: true
+cluster-init: true

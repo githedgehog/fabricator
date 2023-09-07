@@ -1,0 +1,41 @@
+replicaCount: 1
+image:
+  repository: {{ .ref.RepoName }}
+  pullPolicy: IfNotPresent
+  tag: {{ .ref.Tag }}
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+service:
+  type: ClusterIP
+  port: 5000
+
+persistence: true
+pvc:
+  create: true
+  storage: 30Gi
+
+secretFiles: {}
+externalSecrets:
+  - secretName: zot-secret
+    mountPath: /secrets
+
+httpGet:
+  scheme: HTTPS
+
+mountConfig: true
+configFiles:
+  config.json: |-
+    {
+      "log": { "level": "debug" },
+      "storage": { "rootDirectory": "/var/lib/registry" },
+      "http": {
+        "address": "0.0.0.0",
+        "port": "5000",
+        "tls": {
+          "cert": "/secrets/cert.pem",
+          "key": "/secrets/key.pem"
+        }
+      }
+    }

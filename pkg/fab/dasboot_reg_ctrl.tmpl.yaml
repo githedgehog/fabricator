@@ -1,0 +1,4 @@
+image:
+  repository: {{ .ref.RepoName }}
+  tag: {{ .ref.Tag }}
+  pullPolicy: Always

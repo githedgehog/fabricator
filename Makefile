@@ -66,9 +66,9 @@ test: manifests generate fmt vet envtest ## Run tests.
 
 ##@ Build
 
-.PHONY: build
-build: manifests generate fmt vet ## Build manager binary.
-	go build -o bin/manager cmd/main.go
+# .PHONY: build
+# build: manifests generate fmt vet ## Build manager binary.
+# 	go build -o bin/manager cmd/main.go
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
@@ -161,3 +161,29 @@ $(CONTROLLER_GEN): $(LOCALBIN)
 envtest: $(ENVTEST) ## Download envtest-setup locally if necessary.
 $(ENVTEST): $(LOCALBIN)
 	test -s $(LOCALBIN)/setup-envtest || GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
+
+
+##@ CLI hhfab
+
+VERSION ?= $(shell hack/version.sh)
+OCI_REPO ?= registry.local:31000/githedgehog/fabricator
+
+.PHONY: hhfab
+hhfab: build-embed-cnc-bin ## Build hhfab CLI
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/hhfab -ldflags="-w -s -X main.version=$(VERSION)" --tags containers_image_openpgp ./cmd/hhfab
+
+.PHONY: build-embed-cnc-bin
+build-embed-cnc-bin: ## Build CNC binaries to embed into hhfab
+	touch pkg/fab/cnc/bin/hhfab-recipe
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o pkg/fab/cnc/bin/hhfab-recipe -ldflags="-w -s -X main.version=$(VERSION)" --tags containers_image_openpgp ./cmd/hhfab-recipe
+
+.PHONY: build
+build: hhfab
+
+.PHONY: hhfab-push
+hhfab-push: hhfab ## Push hhfab CLI to OCI registry
+	cd bin && oras push $(OCI_REPO)/hhfab:$(VERSION) hhfab
+	cd bin && oras push $(OCI_REPO)/hhfab:latest hhfab
+
+.PHONY: push
+push: hhfab-push
