@@ -132,7 +132,7 @@ jobs:
 
       - name: Publish Images, Helm charts and Bins on release
         run: |
-          OCI_REPO=ghcr.io/githedgehog/fabric make push
+          OCI_REPO=ghcr.io/githedgehog/fabricator make push
 
       - name: Setup tmate session for debug
         if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
