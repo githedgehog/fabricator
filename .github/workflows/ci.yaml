@@ -87,7 +87,7 @@ jobs:
 
       - name: hhfab init and build
         run: |
-          bin/hhfab-init --wt collapsedcore --wp vlab -p vlab
+          bin/hhfab init --wt collapsedcore --wp vlab -p vlab
           bin/hhfab build -v
           ls -lah .hhfab
 
