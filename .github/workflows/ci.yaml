@@ -1,7 +1,7 @@
-name: CI/CD
+name: CI
 
 concurrency:
-  group: cicd-${{ github.head_ref || github.run_id }}
+  group: ci-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
 
 on:
@@ -76,6 +76,11 @@ jobs:
       #     path: bin
       #     key: bin-${{ hashFiles('hack/tools.mk') }}
 
+      - name: Setup git for private Go modules
+        env:
+          GH_ACCESS_TOKEN: ${{ secrets.GH_ACCESS_TOKEN }}
+        run: git config --global url.https://$GH_ACCESS_TOKEN@github.com/.insteadOf https://github.com/
+
       - name: Build all
         run: |
           make build
@@ -119,6 +124,11 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup git for private Go modules
+        env:
+          GH_ACCESS_TOKEN: ${{ secrets.GH_ACCESS_TOKEN }}
+        run: git config --global url.https://$GH_ACCESS_TOKEN@github.com/.insteadOf https://github.com/
 
       - name: Publish Images, Helm charts and Bins on release
         run: |
