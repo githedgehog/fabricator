@@ -39,7 +39,7 @@ func setupLogger(verbose, brief bool) error {
 	)
 	slog.SetDefault(logger)
 
-	slog.Debug(motd)
+	slog.Debug("\n" + motd)
 	slog.Debug("Version: " + version)
 
 	return nil
