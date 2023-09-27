@@ -85,6 +85,12 @@ jobs:
         run: |
           make build
 
+      - name: hhfab init and build
+        run: |
+          bin/hhfab-init --wt collapsedcore --wp vlab -p vlab
+          bin/hhfab build -v
+          ls -lah .hhfab
+
       - name: Setup tmate session for debug
         if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
         uses: mxschmitt/action-tmate@v3
