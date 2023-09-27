@@ -100,18 +100,18 @@ func (vm *VM) RunVM(ctx context.Context) func() error {
 		}
 
 		// total for default vlab (control + 2 x switch + 2 x server)
-		// default: 16 vCPU 19.456 GB RAM
+		// default: 16 vCPU 20.480 GB RAM
 		// compact: 14 vCPU 13.312 GB RAM
 
 		cpu := "2"
-		memory := "1536"
+		memory := "1024"
 		if vm.OS == VMOS_ONIE {
 			cpu = "4"
 			memory = "5120"
 		}
 		if vm.IsControl {
 			cpu = "4"
-			memory = "6144"
+			memory = "8192" // TODO cut down to 6144?
 		}
 		if vm.Cfg.Compact {
 			cpu = "1"
