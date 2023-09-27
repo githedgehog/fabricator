@@ -160,7 +160,7 @@ func (cfg *Fabric) Build(basedir string, preset cnc.Preset, get cnc.GetComponent
 			),
 		})
 
-	run(BundleControlInstall, STAGE_INSTALL_3_FABRIC, "fabric-hhfctl",
+	run(BundleControlInstall, STAGE_INSTALL_3_FABRIC, "kubectl-fabric-install",
 		&cnc.FilesORAS{
 			Ref: cfg.CtlRef,
 			Files: []cnc.File{

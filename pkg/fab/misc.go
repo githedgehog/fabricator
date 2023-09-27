@@ -78,7 +78,7 @@ func (cfg *Misc) Build(basedir string, preset cnc.Preset, get cnc.GetComponent, 
 
 	target := BaseConfig(get).Target
 
-	run(BundleControlInstall, STAGE_INSTALL_2_MISC, "k9s-hhfctl",
+	run(BundleControlInstall, STAGE_INSTALL_2_MISC, "k9s-install",
 		&cnc.FilesORAS{
 			Ref: cfg.K9sRef,
 			Files: []cnc.File{
