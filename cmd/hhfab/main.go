@@ -11,7 +11,6 @@ import (
 	"github.com/mattn/go-isatty"
 	"github.com/pkg/errors"
 	"github.com/urfave/cli/v2"
-	"go.githedgehog.com/fabric/pkg/wiring/sample"
 	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/fab/cnc"
 )
@@ -78,11 +77,11 @@ func main() {
 		presets = append(presets, string(p))
 	}
 
-	sampleTypes := []string{"collapsedcore"} // TODO move to fabric
-	samplePresets := []string{}
-	for _, p := range sample.PresetsAll {
-		samplePresets = append(samplePresets, string(p))
-	}
+	// sampleTypes := []string{"collapsedcore"} // TODO move to fabric
+	// samplePresets := []string{}
+	// for _, p := range sample.PresetsAll {
+	// 	samplePresets = append(samplePresets, string(p))
+	// }
 
 	var dryRun, nopack bool
 
@@ -107,7 +106,7 @@ func main() {
 			{
 				Name:    "init",
 				Aliases: []string{"i"},
-				Usage:   "initialize fabricator optionally from existing config",
+				Usage:   "initialize fabricator with specified PRESET",
 				Flags: append([]cli.Flag{
 					basedirFlag,
 					verboseFlag,
@@ -116,7 +115,7 @@ func main() {
 						Name:        "preset",
 						Aliases:     []string{"p"},
 						Usage:       "use preset `PRESET` (one of: " + strings.Join(presets, ", ") + ")",
-						Value:       "vlab",
+						Required:    true,
 						Destination: &preset,
 					},
 					&cli.StringFlag{
@@ -125,18 +124,19 @@ func main() {
 						Usage:       "use wiring diagram from `FILE` (or dir), use '-' to read from stdin instead",
 						Destination: &wiring,
 					},
-					&cli.StringFlag{
-						Name:        "wiring-type",
-						Aliases:     []string{"wt"},
-						Usage:       "use wiring diagram sample type (one of: " + strings.Join(sampleTypes, ", ") + ")",
-						Destination: &wiringGenType,
-					},
-					&cli.StringFlag{
-						Name:        "wiring-preset",
-						Aliases:     []string{"wp"},
-						Usage:       "use wiring diagram sample preset (one of: " + strings.Join(samplePresets, ", ") + ")",
-						Destination: &wiringGenPreset,
-					},
+					// TODO support specifying wiring type and preset explicitly
+					// &cli.StringFlag{
+					// 	Name:        "wiring-type",
+					// 	Aliases:     []string{"wt"},
+					// 	Usage:       "use wiring diagram sample type (one of: " + strings.Join(sampleTypes, ", ") + ")",
+					// 	Destination: &wiringGenType,
+					// },
+					// &cli.StringFlag{
+					// 	Name:        "wiring-preset",
+					// 	Aliases:     []string{"wp"},
+					// 	Usage:       "use wiring diagram sample preset (one of: " + strings.Join(samplePresets, ", ") + ")",
+					// 	Destination: &wiringGenPreset,
+					// },
 					// TODO support loading from existing config
 					// &cli.StringFlag{
 					// 	Name:        "config",

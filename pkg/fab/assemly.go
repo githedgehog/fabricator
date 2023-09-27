@@ -103,7 +103,7 @@ var (
 )
 
 const (
-	PRESET_BM   cnc.Preset = "bm"
+	PRESET_BM   cnc.Preset = "lab"
 	PRESET_VLAB cnc.Preset = "vlab"
 )
 

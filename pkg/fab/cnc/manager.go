@@ -132,9 +132,13 @@ func (mngr *Manager) Init(basedir string, preset Preset, wiringPath string, wiri
 		return fmt.Errorf("unknown preset: %s", preset)
 	}
 
-	if wiringGenPreset == "" {
-		wiringGenPreset = string(sample.SAMPLE_CC_VLAB)
+	if wiringGenType == "" {
+		wiringGenType = "collapsedcore"
 	}
+	if wiringGenPreset == "" {
+		wiringGenPreset = string(preset)
+	}
+
 	ok := false
 	for _, preset := range sample.PresetsAll {
 		if sample.Preset(wiringGenPreset) == preset {
@@ -160,6 +164,7 @@ func (mngr *Manager) Init(basedir string, preset Preset, wiringPath string, wiri
 		if wiringGenType != "collapsedcore" {
 			return errors.Errorf("unknown wiring sample: %s", wiringGenType)
 		}
+		slog.Info("Generating wiring", "type", wiringGenType, "preset", wiringGenPreset)
 		data, err := sample.CollapsedCore(sample.Preset(wiringGenPreset))
 		if err != nil {
 			return errors.Wrapf(err, "error generating wiring sample %s", wiringGenType)

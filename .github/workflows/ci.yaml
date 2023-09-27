@@ -58,6 +58,12 @@ jobs:
     # needs:
     #   - cache-tools
 
+    strategy:
+      matrix:
+        preset:
+          - lab
+          - vlab
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -69,12 +75,6 @@ jobs:
         with:
           go-version: stable
           cache: true
-
-      # - name: Cache dev tools
-      #   uses: actions/cache@v3
-      #   with:
-      #     path: bin
-      #     key: bin-${{ hashFiles('hack/tools.mk') }}
 
       - name: Setup git for private Go modules
         env:
@@ -94,7 +94,7 @@ jobs:
 
       - name: hhfab init and build
         run: |
-          bin/hhfab init --wt collapsedcore --wp vlab -p vlab
+          bin/hhfab init -p ${{ matrix.preset }}
           bin/hhfab build -v
           ls -lah .hhfab
 
