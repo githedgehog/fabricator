@@ -138,6 +138,7 @@ const (
 	STAGE_INSTALL_2_MISC                     // Install misc services and wait for them to be ready
 	STAGE_INSTALL_3_FABRIC                   // Install Fabric and wait for it to be ready
 	STAGE_INSTALL_4_DASBOOT                  // Install Das Boot and wait for it to be ready
+	STAGE_INSTALL_9_RELOADER
 
 	STAGE_MAX // Keep it last so we can iterate over all stages
 )

@@ -78,7 +78,7 @@ func (cfg *Misc) Build(basedir string, preset cnc.Preset, get cnc.GetComponent, 
 
 	target := BaseConfig(get).Target
 
-	run(BundleControlInstall, STAGE_INSTALL_2_MISC, "k9s-install",
+	run(BundleControlInstall, STAGE_INSTALL_0_PREP, "k9s-install",
 		&cnc.FilesORAS{
 			Ref: cfg.K9sRef,
 			Files: []cnc.File{
@@ -150,19 +150,24 @@ func (cfg *Misc) Build(basedir string, preset cnc.Preset, get cnc.GetComponent, 
 				)),
 		})
 
-	run(BundleControlInstall, STAGE_INSTALL_2_MISC, "reloader-image",
+	install(BundleControlInstall, STAGE_INSTALL_2_MISC, "cert-manager-wait",
+		&cnc.WaitKube{
+			Name: "deployment/cert-manager",
+		})
+
+	run(BundleControlInstall, STAGE_INSTALL_9_RELOADER, "reloader-image",
 		&cnc.SyncOCI{
 			Ref:    cfg.ReloaderImageRef,
 			Target: target,
 		})
 
-	run(BundleControlInstall, STAGE_INSTALL_2_MISC, "reloader-chart",
+	run(BundleControlInstall, STAGE_INSTALL_9_RELOADER, "reloader-chart",
 		&cnc.SyncOCI{
 			Ref:    cfg.ReloaderChartRef,
 			Target: target,
 		})
 
-	run(BundleControlInstall, STAGE_INSTALL_2_MISC, "reloader-install",
+	run(BundleControlInstall, STAGE_INSTALL_9_RELOADER, "reloader-install",
 		&cnc.FileGenerate{
 			File: cnc.File{
 				Name:          "reloader-install.yaml",
@@ -179,12 +184,7 @@ func (cfg *Misc) Build(basedir string, preset cnc.Preset, get cnc.GetComponent, 
 				)),
 		})
 
-	install(BundleControlInstall, STAGE_INSTALL_2_MISC, "cert-manager-wait",
-		&cnc.WaitKube{
-			Name: "deployment/cert-manager",
-		})
-
-	install(BundleControlInstall, STAGE_INSTALL_2_MISC, "reloader-wait",
+	install(BundleControlInstall, STAGE_INSTALL_9_RELOADER, "reloader-wait",
 		&cnc.WaitKube{
 			Name: "deployment/reloader-reloader",
 		})

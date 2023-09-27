@@ -1,5 +1,5 @@
 reloader:
-  # autoReloadAll: true # TODO
+  utoReloadAll: true
   reloadOnCreate: true
   syncAfterRestart: true
   reloadStrategy: default # Set to default, env-vars or annotations
