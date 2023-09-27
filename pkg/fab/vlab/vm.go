@@ -99,8 +99,32 @@ func (vm *VM) RunVM(ctx context.Context) func() error {
 			return errors.Wrapf(err, "error starting tpm")
 		}
 
-		cpu := "4"
-		memory := "8192"
+		// total for default vlab (control + 2 x switch + 2 x server)
+		// default: 16 vCPU 19.456 GB RAM
+		// compact: 14 vCPU 13.312 GB RAM
+
+		cpu := "2"
+		memory := "1536"
+		if vm.OS == VMOS_ONIE {
+			cpu = "4"
+			memory = "5120"
+		}
+		if vm.IsControl {
+			cpu = "4"
+			memory = "6144"
+		}
+		if vm.Cfg.Compact {
+			cpu = "1"
+			memory = "512"
+			if vm.OS == VMOS_ONIE {
+				cpu = "4"
+				memory = "3584"
+			}
+			if vm.IsControl {
+				cpu = "4"
+				memory = "5120"
+			}
+		}
 
 		args := []string{
 			"-name", vm.Name,

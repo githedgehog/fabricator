@@ -263,6 +263,10 @@ func main() {
 								Name:  "kill-stale-vms",
 								Usage: "kill stale vms before starting",
 							},
+							&cli.BoolFlag{
+								Name:  "compact",
+								Usage: "run more lightweight vms, small risks",
+							},
 						},
 						Before: func(ctx *cli.Context) error {
 							return setupLogger(verbose, brief)
@@ -280,7 +284,7 @@ func main() {
 
 							killStaleVMs := cCtx.Bool("kill-stale-vms")
 
-							return errors.Wrap(svc.StartServer(killStaleVMs), "error starting vlab")
+							return errors.Wrap(svc.StartServer(killStaleVMs, cCtx.Bool("compact")), "error starting vlab")
 						},
 					},
 					{
