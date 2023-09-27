@@ -72,12 +72,14 @@ var (
 	}
 
 	// Fabric
-	REF_FABRIC_VERSION   = cnc.Ref{Tag: "v0.16.5"}
-	REF_FABRIC_API_CHART = cnc.Ref{Name: "fabric/charts/fabric-api"}
-	REF_FABRIC_CHART     = cnc.Ref{Name: "fabric/charts/fabric"}
-	REF_FABRIC_IMAGE     = cnc.Ref{Name: "fabric/fabric"}
-	REF_FABRIC_AGENT     = cnc.Ref{Name: "fabric/agent"}
-	REF_FABRIC_CTL       = cnc.Ref{Name: "fabric/hhfctl"}
+	REF_FABRIC_VERSION           = cnc.Ref{Tag: "v0.16.6"}
+	REF_FABRIC_API_CHART         = cnc.Ref{Name: "fabric/charts/fabric-api"}
+	REF_FABRIC_CHART             = cnc.Ref{Name: "fabric/charts/fabric"}
+	REF_FABRIC_IMAGE             = cnc.Ref{Name: "fabric/fabric"}
+	REF_FABRIC_AGENT             = cnc.Ref{Name: "fabric/agent"}
+	REF_FABRIC_CTL               = cnc.Ref{Name: "fabric/hhfctl"}
+	REF_FABRIC_DHCP_SERVER       = cnc.Ref{Name: "fabric/fabric-dhcp-server"}
+	REF_FABRIC_DHCP_SERVER_CHART = cnc.Ref{Name: "fabric/charts/fabric-dhcp-server"}
 
 	// Misc
 	REF_K9S        = cnc.Ref{Name: "fabricator/k9s", Tag: "v0.27.4"}

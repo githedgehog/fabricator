@@ -18,13 +18,18 @@ var fabricValuesTemplate string
 //go:embed fabric_config.tmpl.yaml
 var fabricConfigTemplate string
 
+//go:embed fabric_dhcp_server_values.tmpl.yaml
+var fabricDHCPServerTemplate string
+
 type Fabric struct {
-	Ref               cnc.Ref `json:"ref,omitempty"`
-	FabricApiChartRef cnc.Ref `json:"fabricApiChartRef,omitempty"`
-	FabricChartRef    cnc.Ref `json:"fabricChartRef,omitempty"`
-	FabricImageRef    cnc.Ref `json:"fabricImageRef,omitempty"`
-	AgentRef          cnc.Ref `json:"agentRef,omitempty"`
-	CtlRef            cnc.Ref `json:"ctlRef,omitempty"`
+	Ref                      cnc.Ref `json:"ref,omitempty"`
+	FabricApiChartRef        cnc.Ref `json:"fabricApiChartRef,omitempty"`
+	FabricChartRef           cnc.Ref `json:"fabricChartRef,omitempty"`
+	FabricImageRef           cnc.Ref `json:"fabricImageRef,omitempty"`
+	AgentRef                 cnc.Ref `json:"agentRef,omitempty"`
+	CtlRef                   cnc.Ref `json:"ctlRef,omitempty"`
+	FabricDHCPServerRef      cnc.Ref `json:"dhcpServerRef,omitempty"`
+	FabricDHCPServerChartRef cnc.Ref `json:"dhcpServerChartRef,omitempty"`
 }
 
 var _ cnc.Component = (*Fabric)(nil)
@@ -48,6 +53,8 @@ func (cfg *Fabric) Hydrate(preset cnc.Preset) error {
 	cfg.FabricImageRef = cfg.FabricImageRef.Fallback(REF_FABRIC_IMAGE)
 	cfg.AgentRef = cfg.AgentRef.Fallback(REF_FABRIC_AGENT)
 	cfg.CtlRef = cfg.CtlRef.Fallback(REF_FABRIC_CTL)
+	cfg.FabricDHCPServerRef = cfg.FabricDHCPServerRef.Fallback(REF_FABRIC_DHCP_SERVER)
+	cfg.FabricDHCPServerChartRef = cfg.FabricDHCPServerChartRef.Fallback(REF_FABRIC_DHCP_SERVER_CHART)
 
 	return nil
 }
@@ -58,6 +65,8 @@ func (cfg *Fabric) Build(basedir string, preset cnc.Preset, get cnc.GetComponent
 	cfg.FabricImageRef = cfg.FabricImageRef.Fallback(cfg.Ref, BaseConfig(get).Source)
 	cfg.AgentRef = cfg.AgentRef.Fallback(cfg.Ref, BaseConfig(get).Source)
 	cfg.CtlRef = cfg.CtlRef.Fallback(cfg.Ref, BaseConfig(get).Source)
+	cfg.FabricDHCPServerRef = cfg.FabricDHCPServerRef.Fallback(cfg.Ref, BaseConfig(get).Source)
+	cfg.FabricDHCPServerChartRef = cfg.FabricDHCPServerChartRef.Fallback(cfg.Ref, BaseConfig(get).Source)
 
 	target := BaseConfig(get).Target
 	targetInCluster := BaseConfig(get).TargetInCluster
@@ -90,6 +99,18 @@ func (cfg *Fabric) Build(basedir string, preset cnc.Preset, get cnc.GetComponent
 		&cnc.SyncOCI{
 			Ref:    cfg.AgentRef,
 			Target: target.Fallback(cnc.Ref{Name: "agent/x86_64", Tag: "latest"}),
+		})
+
+	run(BundleControlInstall, STAGE_INSTALL_3_FABRIC, "fabric-dhcp-server-image",
+		&cnc.SyncOCI{
+			Ref:    cfg.FabricDHCPServerRef,
+			Target: target,
+		})
+
+	run(BundleControlInstall, STAGE_INSTALL_3_FABRIC, "fabric-dhcp-server-chart",
+		&cnc.SyncOCI{
+			Ref:    cfg.FabricDHCPServerChartRef,
+			Target: target,
 		})
 
 	run(BundleControlInstall, STAGE_INSTALL_3_FABRIC, "fabric-install",
@@ -128,6 +149,14 @@ func (cfg *Fabric) Build(basedir string, preset cnc.Preset, get cnc.GetComponent
 						"users", DEFAULT_USERS,
 					),
 				),
+				cnc.KubeHelmChart("fabric-dhcp-server", "default", helm.HelmChartSpec{
+					TargetNamespace: "default",
+					Chart:           "oci://" + targetInCluster.Fallback(cfg.FabricDHCPServerChartRef).RepoName(),
+					Version:         cfg.FabricDHCPServerChartRef.Tag,
+					RepoCA:          ZotConfig(get).TLS.CA.Cert,
+				}, cnc.FromTemplate(fabricDHCPServerTemplate,
+					"ref", target.Fallback(cfg.FabricDHCPServerRef),
+				)),
 			),
 		})
 
