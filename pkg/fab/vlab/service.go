@@ -341,21 +341,27 @@ func (svc *Service) AddControlHostFwdLink(vm *VM) error {
 func portIdForName(name string) (int, error) {
 	if strings.HasPrefix(name, "Management0") {
 		return 0, nil
-	} else if strings.HasPrefix(name, "Ethernet") {
+	} else if strings.HasPrefix(name, "Ethernet") { // sonic interface naming is straighforward
 		port, _ := strings.CutPrefix(name, "Ethernet")
 		idx, error := strconv.Atoi(port)
 
 		return idx + 1, errors.Wrapf(error, "error converting port name '%s' to port id", name)
-	} else if strings.HasPrefix(name, "nic0/port") {
+	} else if strings.HasPrefix(name, "nic0/port") { // just old convention
 		port, _ := strings.CutPrefix(name, "nic0/port")
 		idx, error := strconv.Atoi(port)
 
 		return idx, errors.Wrapf(error, "error converting port name '%s' to port id", name)
-	} else if strings.HasPrefix(name, "eth") {
+	} else if strings.HasPrefix(name, "eth") { // that's the naming we get when using virtio-net-pci
 		port, _ := strings.CutPrefix(name, "eth")
 		idx, error := strconv.Atoi(port)
 
 		return idx, errors.Wrapf(error, "error converting port name '%s' to port id", name)
+	} else if strings.HasPrefix(name, "enp0s") { // it seems like that's the naming we get for e1000
+		port, _ := strings.CutPrefix(name, "enp0s")
+		idx, error := strconv.Atoi(port)
+
+		// ouch, this is a hack, but it seems like the only way to get the right port id for now
+		return idx - 2, errors.Wrapf(error, "error converting port name '%s' to port id", name)
 	} else {
 		return -1, errors.Errorf("unsupported port name '%s'", name)
 	}

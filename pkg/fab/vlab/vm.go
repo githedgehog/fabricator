@@ -161,12 +161,12 @@ func (vm *VM) RunVM(ctx context.Context) func() error {
 					// TODO optionally make control node isolated using ",restrict=yes"
 					"-netdev", fmt.Sprintf("user,id=%s,hostfwd=tcp:127.0.0.1:%d-:22,hostfwd=tcp:127.0.0.1:%d-:6443,hostfwd=tcp:127.0.0.1:%d-:31000,hostname=%s,domainname=local,dnssearch=local,net=10.100.0.0/24,dhcpstart=10.100.0.10",
 						link.DevID, link.SSHPort, link.KubePort, link.RegistryPort, vm.Name),
-					"-device", fmt.Sprintf("virtio-net-pci,netdev=%s,mac=%s", link.DevID, link.MAC),
+					"-device", fmt.Sprintf("e1000,netdev=%s,mac=%s", link.DevID, link.MAC),
 				)
 			} else {
 				args = append(args,
 					"-netdev", fmt.Sprintf("socket,id=%s,udp=127.0.0.1:%d,localaddr=127.0.0.1:%d", link.DevID, link.LocalIfPort, link.DestIfPort),
-					"-device", fmt.Sprintf("virtio-net-pci,netdev=%s,mac=%s", link.DevID, link.MAC),
+					"-device", fmt.Sprintf("e1000,netdev=%s,mac=%s", link.DevID, link.MAC),
 				)
 			}
 		}
