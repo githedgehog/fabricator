@@ -388,14 +388,14 @@ func (op *SyncOCI) Build(basedir string) error {
 
 	skip := true
 
-	info, err := os.Stat(path)
+	info, err := os.Stat(filepath.Join(path, "index.json"))
 	if os.IsNotExist(err) {
 		skip = false
 		slog.Debug("File is missing", "name", path)
 	} else if err != nil {
 		return errors.Wrapf(err, "error statting file %s", path)
-	} else if !info.IsDir() {
-		return errors.Errorf("dir expected but file found %s", path)
+	} else if info.IsDir() {
+		return errors.Errorf("file expected but dir found %s", path)
 	} else {
 		slog.Debug("File is present", "name", path)
 	}
