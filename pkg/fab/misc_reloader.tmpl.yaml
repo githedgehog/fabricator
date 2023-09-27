@@ -1,5 +1,6 @@
 reloader:
-  utoReloadAll: true
+  watchGlobally: false
+  autoReloadAll: true
   reloadOnCreate: true
   syncAfterRestart: true
   reloadStrategy: default # Set to default, env-vars or annotations
