@@ -262,6 +262,21 @@ func (vm *VM) RunInstall(ctx context.Context) func() error {
 			os.Exit(0)
 		}
 
+		if vm.Cfg.RunComplete != "" {
+			slog.Info("Running script after control node installation as requested")
+
+			err = execCmd(ctx, "", false, vm.Cfg.RunComplete, []string{
+				"KUBECONFIG=" + filepath.Join(vm.Cfg.Basedir, "kubeconfig.yaml"),
+			})
+			if err != nil {
+				return errors.Wrapf(err, "error running script after control node installation")
+			}
+
+			// TODO do graceful shutdown
+			slog.Info("Exiting after script after control node installation as requested")
+			os.Exit(0)
+		}
+
 		return nil
 	}
 
