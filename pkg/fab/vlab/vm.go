@@ -85,6 +85,10 @@ func (vm *VM) Run(ctx context.Context, eg *errgroup.Group) {
 
 func (vm *VM) RunVM(ctx context.Context) func() error {
 	return func() error {
+		if vm.Cfg.DryRun {
+			return nil
+		}
+
 		// <-vm.TPMReady
 		time.Sleep(3 * time.Second) // TODO please, no!
 
@@ -171,10 +175,6 @@ func (vm *VM) RunVM(ctx context.Context) func() error {
 			return errors.Errorf("error running control vm: no ssh port found")
 		}
 
-		if vm.Cfg.DryRun {
-			return nil
-		}
-
 		return errors.Wrapf(execCmd(ctx, vm.Basedir, true, "qemu-system-x86_64", []string{}, args...), "error running vm")
 	}
 }
@@ -185,12 +185,12 @@ func (vm *VM) RunInstall(ctx context.Context) func() error {
 			return nil
 		}
 
-		if vm.Cfg.DryRun {
+		if vm.Installed.Is() {
+			slog.Debug("Control node is already installed", "name", vm.Name)
 			return nil
 		}
 
-		if vm.Installed.Is() {
-			slog.Debug("Control node is already installed", "name", vm.Name)
+		if vm.Cfg.DryRun {
 			return nil
 		}
 
