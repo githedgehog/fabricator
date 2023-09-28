@@ -156,9 +156,7 @@ jobs:
           bin/hhfab build -v
           ls -lah .hhfab
 
-          # for now, just run with sudo to simplify things
-          sudo bin/hhfab vlab up -v --install-complete
-
+          bin/hhfab vlab up -v --install-complete
       - name: Setup tmate session for debug
         # Get back to: && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
         if: ${{ failure() }}
