@@ -277,6 +277,10 @@ func (vm *VM) RunInstall(ctx context.Context) func() error {
 
 func (vm *VM) RunTPM(ctx context.Context) func() error {
 	return func() error {
+		if vm.Cfg.DryRun {
+			return nil
+		}
+
 		err := execCmd(ctx, vm.Basedir, true, "swtpm", []string{}, "socket", "--tpm2", "--tpmstate", "dir=tpm",
 			"--ctrl", "type=unixio,path=tpm.sock.ctrl", "--server", "type=unixio,path=tpm.sock", "--pid", "file=tpm.pid",
 			"--log", "level=1", "--flags", "startup-clear")
