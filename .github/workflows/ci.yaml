@@ -151,8 +151,8 @@ jobs:
       - name: Login to lab registry
         uses: docker/login-action@v3
         with:
-          registry: ${{ secrets.LAB_REGISTRY }}
-          username: ${{ secrets.LAB_REGISTRY_USERNAME }}
+          registry: m.l.hhdev.io:31000
+          username: lab
           password: ${{ secrets.LAB_REGISTRY_TOKEN }}
 
       - name: hhfab init and build
