@@ -147,10 +147,17 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # TODO enable local pull-through cache
+      - name: Login to lab registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.LAB_REGISTRY }}
+          username: ${{ secrets.LAB_REGISTRY_USERNAME }}
+          password: ${{ secrets.LAB_REGISTRY_TOKEN }}
+
       - name: hhfab init and build
         run: |
           export XDG_CONFIG_HOME=$(pwd)
+          export HHFAB_BASE_REPO=m.l.hhdev.io:31000/githedgehog
 
           bin/hhfab init -p vlab -v
           bin/hhfab build -v
@@ -158,6 +165,7 @@ jobs:
 
           bin/hhfab vlab up -v --install-complete
       - name: Setup tmate session for debug
+        # TODO
         # Get back to: && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
         if: ${{ failure() }}
         uses: mxschmitt/action-tmate@v3
