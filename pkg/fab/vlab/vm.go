@@ -492,7 +492,7 @@ func execCmd(ctx context.Context, basedir string, quiet bool, name string, env [
 
 	outputs := []io.Writer{logFile}
 
-	if !quiet {
+	if !quiet || slog.Default().Enabled(ctx, slog.LevelDebug) {
 		outputs = append(outputs, os.Stdout)
 	}
 
