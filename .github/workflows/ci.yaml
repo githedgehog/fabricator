@@ -150,6 +150,8 @@ jobs:
       # TODO enable local pull-through cache
       - name: hhfab init and build
         run: |
+          export XDG_CONFIG_HOME=$(pwd)
+
           bin/hhfab init -p vlab -v
           bin/hhfab build -v
           ls -lah .hhfab
