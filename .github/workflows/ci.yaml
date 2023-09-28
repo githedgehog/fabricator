@@ -135,9 +135,7 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y qemu-kvm swtpm-tools tpm2-tools socat openssh-client
-          id -u
-          id -u -n
-          # sudo usermod -aG kvm $USER
+          sudo usermod -aG kvm $(id -u -n)
           # newgrp kvm
 
       - name: Login to ghcr.io
