@@ -10,7 +10,6 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/davecgh/go-spew/spew"
 	"github.com/mholt/archiver/v4"
 	"github.com/pkg/errors"
 	"github.com/urfave/cli/v2"
@@ -124,13 +123,8 @@ func (mngr *Manager) prepare() error {
 	return nil
 }
 
-func (mngr *Manager) Init(basedir string, preset Preset, wiringPath string, wiringGenType string, wiringGenPreset string) error {
+func (mngr *Manager) Init(basedir string, fromConfig string, preset Preset, wiringPath string, wiringGenType string, wiringGenPreset string) error {
 	mngr.basedir = basedir
-	mngr.preset = preset
-
-	if !slices.Contains(mngr.presets, preset) {
-		return fmt.Errorf("unknown preset: %s", preset)
-	}
 
 	if wiringGenType == "" {
 		wiringGenType = "collapsedcore"
@@ -175,6 +169,24 @@ func (mngr *Manager) Init(basedir string, preset Preset, wiringPath string, wiri
 		return errors.New("wiring path or wiring gen must be specified")
 	}
 
+	if fromConfig != "" {
+		slog.Info("Loading existing config", "from", fromConfig)
+		err := mngr.loadConfig(fromConfig)
+		if err != nil {
+			return errors.Wrapf(err, "error existing loading config")
+		}
+
+		if mngr.preset != "" && preset != mngr.preset {
+			return errors.Errorf("loaded config preset mismatch: %s != %s", preset, mngr.preset)
+		}
+	}
+
+	mngr.preset = preset
+
+	if !slices.Contains(mngr.presets, preset) {
+		return fmt.Errorf("unknown preset: %s", preset)
+	}
+
 	err := mngr.prepare()
 	if err != nil {
 		return errors.Wrapf(err, "error preparing")
@@ -198,22 +210,9 @@ func (mngr *Manager) Save() error {
 		return errors.Wrapf(err, "error creating basedir %s", mngr.basedir)
 	}
 
-	saver := &ManagerSaver{
-		Preset: mngr.preset,
-		Config: map[string]any{},
-	}
-
-	for _, comp := range mngr.components {
-		if !comp.IsEnabled(mngr.preset) {
-			continue
-		}
-
-		saver.Config[comp.Name()] = comp
-	}
-
-	data, err := yaml.Marshal(saver)
+	data, err := mngr.configData()
 	if err != nil {
-		return errors.Wrapf(err, "error marshaling config")
+		return errors.Wrapf(err, "error getting config data")
 	}
 
 	err = os.WriteFile(filepath.Join(mngr.basedir, "config.yaml"), data, 0o644)
@@ -229,10 +228,30 @@ func (mngr *Manager) Save() error {
 	return nil
 }
 
-func (mngr *Manager) Load(basedir string) error {
-	mngr.basedir = basedir
+func (mngr *Manager) configData() ([]byte, error) {
+	saver := &ManagerSaver{
+		Preset: mngr.preset,
+		Config: map[string]any{},
+	}
 
-	data, err := os.ReadFile(filepath.Join(basedir, "config.yaml"))
+	for _, comp := range mngr.components {
+		if !comp.IsEnabled(mngr.preset) {
+			continue
+		}
+
+		saver.Config[comp.Name()] = comp
+	}
+
+	data, err := yaml.Marshal(saver)
+	if err != nil {
+		return nil, errors.Wrapf(err, "error marshaling config")
+	}
+
+	return data, nil
+}
+
+func (mngr *Manager) loadConfig(fromConfig string) error {
+	data, err := os.ReadFile(fromConfig)
 	if err != nil {
 		return errors.Wrapf(err, "error reading config")
 	}
@@ -260,6 +279,17 @@ func (mngr *Manager) Load(basedir string) error {
 				return errors.Wrapf(err, "error unmarshaling config for component %s", comp.Name())
 			}
 		}
+	}
+
+	return nil
+}
+
+func (mngr *Manager) Load(basedir string) error {
+	mngr.basedir = basedir
+
+	err := mngr.loadConfig(filepath.Join(basedir, "config.yaml"))
+	if err != nil {
+		return errors.Wrapf(err, "error loading config")
 	}
 
 	wiringData, err := wiring.LoadDataFrom(filepath.Join(basedir, "wiring.yaml"))
@@ -536,9 +566,17 @@ func (adder *opAdder) addRunOp(bundle Bundle, stage Stage, name string, op RunOp
 }
 
 func (mngr *Manager) Dump() error {
-	slog.Info("Dumping")
+	slog.Info("Dumping hydrated config")
+
 	mngr.wiring = nil
-	spew.Dump(mngr)
+
+	data, err := mngr.configData()
+	if err != nil {
+		return errors.Wrapf(err, "error getting config data")
+	}
+
+	fmt.Println()
+	fmt.Println(string(data))
 
 	return nil
 }

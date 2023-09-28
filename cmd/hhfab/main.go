@@ -63,7 +63,7 @@ func main() {
 		Destination: &brief,
 	}
 
-	var basedir, preset, wiring, wiringGenType, wiringGenPreset string
+	var basedir, fromConfig, preset, wiring, wiringGenType, wiringGenPreset string
 	basedirFlag := &cli.StringFlag{
 		Name:        "basedir",
 		Aliases:     []string{"d"},
@@ -112,6 +112,12 @@ func main() {
 					verboseFlag,
 					briefFlag,
 					&cli.StringFlag{
+						Name:        "config",
+						Aliases:     []string{"c"},
+						Usage:       "start from existing config `FILE`",
+						Destination: &fromConfig,
+					},
+					&cli.StringFlag{
 						Name:        "preset",
 						Aliases:     []string{"p"},
 						Usage:       "use preset `PRESET` (one of: " + strings.Join(presets, ", ") + ")",
@@ -137,13 +143,6 @@ func main() {
 					// 	Usage:       "use wiring diagram sample preset (one of: " + strings.Join(samplePresets, ", ") + ")",
 					// 	Destination: &wiringGenPreset,
 					// },
-					// TODO support loading from existing config
-					// &cli.StringFlag{
-					// 	Name:        "config",
-					// 	Aliases:     []string{"c"},
-					// 	Usage:       "start from existing config `FILE`",
-					// 	Destination: &config,
-					// },
 					// TODO support reset before init, is it really needed?
 					// &cli.BoolFlag{
 					// 	Name:        "reset",
@@ -155,7 +154,7 @@ func main() {
 					return setupLogger(verbose, brief)
 				},
 				Action: func(cCtx *cli.Context) error {
-					err := mngr.Init(basedir, cnc.Preset(preset), wiring, wiringGenType, wiringGenPreset)
+					err := mngr.Init(basedir, fromConfig, cnc.Preset(preset), wiring, wiringGenType, wiringGenPreset)
 					if err != nil {
 						return errors.Wrap(err, "error initializing")
 					}
