@@ -155,7 +155,7 @@ jobs:
           ls -lah .hhfab
 
           bin/hhfab vlab up -v --dry-run
-          sudo bin/hhfab vlab up -v --install-complete
+          sudo bin/hhfab vlab up -v --run-complete hack/vlab-test.sh
       - name: Setup tmate session for debug
         if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
         uses: mxschmitt/action-tmate@v3
