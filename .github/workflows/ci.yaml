@@ -139,7 +139,7 @@ jobs:
           #   sudo usermod -aG kvm runner
           # and load needed modules (on the host)
           # sudo modprobe nbd
-          sudo usermod -aG kvm runner
+          #sudo usermod -aG kvm runner
 
       - name: Login to ghcr.io
         uses: docker/login-action@v3
@@ -164,7 +164,8 @@ jobs:
           bin/hhfab build -v
           ls -lah .hhfab
 
-          bin/hhfab vlab up -v --install-complete
+          bin/hhfab vlab up -v --dry-run
+          sudo bin/hhfab vlab up -v --install-complete
       - name: Setup tmate session for debug
         # TODO
         # Get back to: && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
