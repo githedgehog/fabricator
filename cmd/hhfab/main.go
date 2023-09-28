@@ -267,6 +267,14 @@ func main() {
 								Name:  "compact",
 								Usage: "run more lightweight vms, small risks",
 							},
+							&cli.BoolFlag{
+								Name:  "install-complete",
+								Usage: "run installer and complete vlab (for testing)",
+							},
+							&cli.StringFlag{
+								Name:  "run-complete",
+								Usage: "run installer, run provided script and than complete vlab (for testing)",
+							},
 						},
 						Before: func(ctx *cli.Context) error {
 							return setupLogger(verbose, brief)
@@ -284,7 +292,8 @@ func main() {
 
 							killStaleVMs := cCtx.Bool("kill-stale-vms")
 
-							return errors.Wrap(svc.StartServer(killStaleVMs, cCtx.Bool("compact")), "error starting vlab")
+							return errors.Wrap(svc.StartServer(killStaleVMs, cCtx.Bool("compact"),
+								cCtx.Bool("install-complete"), cCtx.String("run-complete")), "error starting vlab")
 						},
 					},
 					{

@@ -256,6 +256,12 @@ func (vm *VM) RunInstall(ctx context.Context) func() error {
 			return errors.Wrapf(err, "error marking control node as installed")
 		}
 
+		if vm.Cfg.InstallComplete {
+			// TODO do graceful shutdown
+			slog.Info("Exiting after control node installation as requested")
+			os.Exit(0)
+		}
+
 		return nil
 	}
 
