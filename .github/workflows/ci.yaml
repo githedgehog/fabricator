@@ -133,6 +133,7 @@ jobs:
 
       - name: VLAB deps
         run: |
+          sudo apt update
           sudo apt install -y qemu-kvm swtpm-tools tpm2-tools socat openssh-client
           sudo usermod -aG kvm $USER
           newgrp kvm
