@@ -135,8 +135,10 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y qemu-kvm swtpm-tools tpm2-tools socat openssh-client
-          sudo usermod -aG kvm $USER
-          newgrp kvm
+          id -u
+          id -u -n
+          # sudo usermod -aG kvm $USER
+          # newgrp kvm
 
       - name: Login to ghcr.io
         uses: docker/login-action@v3
