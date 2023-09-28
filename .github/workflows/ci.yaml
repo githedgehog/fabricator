@@ -139,6 +139,7 @@ jobs:
           #   sudo usermod -aG kvm runner
           # and load needed modules (on the host)
           # sudo modprobe nbd
+          sudo usermod -aG kvm runner
 
       - name: Login to ghcr.io
         uses: docker/login-action@v3
