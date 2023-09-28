@@ -159,7 +159,8 @@ jobs:
           bin/hhfab vlab up -v
 
       - name: Setup tmate session for debug
-        if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
+        # Get back to: && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
+        if: ${{ failure() }}
         uses: mxschmitt/action-tmate@v3
         timeout-minutes: 30
         with:
