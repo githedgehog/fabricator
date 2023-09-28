@@ -48,6 +48,8 @@ type Service struct {
 type Config struct {
 	DryRun            bool
 	Compact           bool
+	InstallComplete   bool
+	RunComplete       string
 	Basedir           string
 	Wiring            *wiring.Data
 	ControlIgnition   string
@@ -173,8 +175,10 @@ func (svc *Service) checkForStaleVMs(ctx context.Context, killStaleVMs bool) err
 	return nil
 }
 
-func (svc *Service) StartServer(killStaleVMs bool, compact bool) error {
+func (svc *Service) StartServer(killStaleVMs bool, compact bool, installComplete bool, runComplete string) error {
 	svc.cfg.Compact = compact
+	svc.cfg.InstallComplete = installComplete
+	svc.cfg.RunComplete = runComplete
 
 	for _, cmd := range RequiredCommands {
 		_, err := exec.LookPath(cmd)

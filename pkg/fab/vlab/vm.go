@@ -85,6 +85,10 @@ func (vm *VM) Run(ctx context.Context, eg *errgroup.Group) {
 
 func (vm *VM) RunVM(ctx context.Context) func() error {
 	return func() error {
+		if vm.Cfg.DryRun {
+			return nil
+		}
+
 		// <-vm.TPMReady
 		time.Sleep(3 * time.Second) // TODO please, no!
 
@@ -171,10 +175,6 @@ func (vm *VM) RunVM(ctx context.Context) func() error {
 			return errors.Errorf("error running control vm: no ssh port found")
 		}
 
-		if vm.Cfg.DryRun {
-			return nil
-		}
-
 		return errors.Wrapf(execCmd(ctx, vm.Basedir, true, "qemu-system-x86_64", []string{}, args...), "error running vm")
 	}
 }
@@ -185,12 +185,12 @@ func (vm *VM) RunInstall(ctx context.Context) func() error {
 			return nil
 		}
 
-		if vm.Cfg.DryRun {
+		if vm.Installed.Is() {
+			slog.Debug("Control node is already installed", "name", vm.Name)
 			return nil
 		}
 
-		if vm.Installed.Is() {
-			slog.Debug("Control node is already installed", "name", vm.Name)
+		if vm.Cfg.DryRun {
 			return nil
 		}
 
@@ -256,6 +256,27 @@ func (vm *VM) RunInstall(ctx context.Context) func() error {
 			return errors.Wrapf(err, "error marking control node as installed")
 		}
 
+		if vm.Cfg.InstallComplete {
+			// TODO do graceful shutdown
+			slog.Info("Exiting after control node installation as requested")
+			os.Exit(0)
+		}
+
+		if vm.Cfg.RunComplete != "" {
+			slog.Info("Running script after control node installation as requested")
+
+			err = execCmd(ctx, "", false, vm.Cfg.RunComplete, []string{
+				"KUBECONFIG=" + filepath.Join(vm.Cfg.Basedir, "kubeconfig.yaml"),
+			})
+			if err != nil {
+				return errors.Wrapf(err, "error running script after control node installation")
+			}
+
+			// TODO do graceful shutdown
+			slog.Info("Exiting after script after control node installation as requested")
+			os.Exit(0)
+		}
+
 		return nil
 	}
 
@@ -271,6 +292,10 @@ func (vm *VM) RunInstall(ctx context.Context) func() error {
 
 func (vm *VM) RunTPM(ctx context.Context) func() error {
 	return func() error {
+		if vm.Cfg.DryRun {
+			return nil
+		}
+
 		err := execCmd(ctx, vm.Basedir, true, "swtpm", []string{}, "socket", "--tpm2", "--tpmstate", "dir=tpm",
 			"--ctrl", "type=unixio,path=tpm.sock.ctrl", "--server", "type=unixio,path=tpm.sock", "--pid", "file=tpm.pid",
 			"--log", "level=1", "--flags", "startup-clear")
@@ -492,7 +517,7 @@ func execCmd(ctx context.Context, basedir string, quiet bool, name string, env [
 
 	outputs := []io.Writer{logFile}
 
-	if !quiet {
+	if !quiet || slog.Default().Enabled(ctx, slog.LevelDebug) {
 		outputs = append(outputs, os.Stdout)
 	}
 
