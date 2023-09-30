@@ -269,7 +269,8 @@ func (vm *VM) RunInstall(ctx context.Context) func() error {
 				"KUBECONFIG=" + filepath.Join(vm.Cfg.Basedir, "kubeconfig.yaml"),
 			})
 			if err != nil {
-				return errors.Wrapf(err, "error running script after control node installation")
+				slog.Error("error running script after control node installation", "error", err)
+				os.Exit(1)
 			}
 
 			// TODO do graceful shutdown
