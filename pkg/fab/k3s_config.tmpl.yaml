@@ -6,5 +6,6 @@ write-kubeconfig-mode: "0644"
 tls-san: # TODO add public control node IP?
   - 127.0.0.1
   - {{ .controlVIP }}
+  - kube-fabric.local
 secrets-encryption: true
 cluster-init: true
