@@ -274,7 +274,7 @@ func (vm *VM) RunInstall(ctx context.Context) func() error {
 			}
 
 			// TODO do graceful shutdown
-			slog.Info("Exiting after script after control node installation as requested")
+			slog.Info("Exiting after script succeded (after control node installation) as requested")
 			os.Exit(0)
 		}
 
