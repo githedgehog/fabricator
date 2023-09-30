@@ -122,7 +122,6 @@ func (cfg *Fabric) Build(basedir string, preset cnc.Preset, get cnc.GetComponent
 		slog.Info("Adding dev users", "users", users)
 		for idx := range users {
 			users[idx].SSHKeys = append(users[idx].SSHKeys, BaseConfig(get).AuthorizedKeys...)
-			users[idx].SSHKeys = append(users[idx].SSHKeys, DEV_SSH_KEY)
 			slog.Info("Adding dev ssh keys to user", "user", users[idx])
 		}
 	}

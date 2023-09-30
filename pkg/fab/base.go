@@ -65,13 +65,18 @@ func (cfg *Base) Hydrate(preset cnc.Preset) error {
 		if !slices.Contains(cfg.AuthorizedKeys, val) {
 			cfg.AuthorizedKeys = append(cfg.AuthorizedKeys, val)
 		}
+		if cfg.Dev && !slices.Contains(cfg.AuthorizedKeys, DEV_SSH_KEY) {
+			cfg.AuthorizedKeys = append(cfg.AuthorizedKeys, DEV_SSH_KEY)
+		}
 	}
 
 	if preset == PRESET_VLAB {
 		cfg.Dev = true
 	}
 
-	slog.Warn("Attention! Development mode enabled - this is not secure! Default users and keys will be created.")
+	if cfg.Dev {
+		slog.Warn("Attention! Development mode enabled - this is not secure! Default users and keys will be created.")
+	}
 
 	return nil
 }

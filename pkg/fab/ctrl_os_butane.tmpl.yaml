@@ -6,7 +6,7 @@ passwd:
     - name: {{ .username }}
       ssh_authorized_keys:
         {{ range .authorizedKeys}}
-        - {{ . }}
+        - "{{ . }}"
         {{ end }}
       groups:
         - wheel
