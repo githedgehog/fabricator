@@ -9,22 +9,18 @@ import (
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1alpha2"
 	"go.githedgehog.com/fabric/pkg/wiring"
 	"go.githedgehog.com/fabricator/pkg/fab/cnc"
-	"golang.org/x/exp/slices"
 )
 
 const (
 	FLATCAR_CONTROL_USER = "core"
 	CONTROL_OS_IGNITION  = "ignition.json"
-	DEFAULT_SSH_KEY      = "ssh-key"
+	DEFAULT_VLAB_SSH_KEY = "ssh-key"
 )
 
 //go:embed ctrl_os_butane.tmpl.yaml
 var controlButaneTemplate string
 
-type ControlOS struct {
-	ExtraAuthorizedKeys     []string `json:"extraAuthorizedKeys,omitempty"`
-	extraAuthorizedKeysFlag cli.StringSlice
-}
+type ControlOS struct{}
 
 var _ cnc.Component = (*ControlOS)(nil)
 
@@ -37,31 +33,15 @@ func (cfg *ControlOS) IsEnabled(preset cnc.Preset) bool {
 }
 
 func (cfg *ControlOS) Flags() []cli.Flag {
-	return []cli.Flag{
-		&cli.StringSliceFlag{
-			Name:        "extra-authorized-key",
-			Usage:       "Extra SSH public keys to add to the control node",
-			EnvVars:     []string{"HHFAB_EXTRA_AUTHORIZED_KEY"},
-			Destination: &cfg.extraAuthorizedKeysFlag,
-		},
-	}
+	return nil
 }
 
 func (cfg *ControlOS) Hydrate(preset cnc.Preset) error {
 	// TODO add ignition template to the config?
-	for _, val := range cfg.extraAuthorizedKeysFlag.Value() {
-		if val == "" {
-			continue
-		}
-		if !slices.Contains(cfg.ExtraAuthorizedKeys, val) {
-			cfg.ExtraAuthorizedKeys = append(cfg.ExtraAuthorizedKeys, val)
-		}
-	}
-
 	return nil
 }
 
-func (cfg *ControlOS) Build(basedir string, preset cnc.Preset, _ cnc.GetComponent, data *wiring.Data, run cnc.AddBuildOp, install cnc.AddRunOp) error {
+func (cfg *ControlOS) Build(basedir string, preset cnc.Preset, get cnc.GetComponent, data *wiring.Data, run cnc.AddBuildOp, install cnc.AddRunOp) error {
 	hostname, err := getControlNodeName(data)
 	if err != nil {
 		return err
@@ -69,12 +49,15 @@ func (cfg *ControlOS) Build(basedir string, preset cnc.Preset, _ cnc.GetComponen
 
 	username := FLATCAR_CONTROL_USER
 
-	key, error := cnc.ReadOrGenerateSSHKey(basedir, DEFAULT_SSH_KEY, fmt.Sprintf("%s@%s", username, hostname))
-	if error != nil {
-		return error
-	}
+	authorizedKeys := BaseConfig(get).ExtraAuthorizedKeys
+	if preset == PRESET_VLAB {
+		key, error := cnc.ReadOrGenerateSSHKey(basedir, DEFAULT_VLAB_SSH_KEY, fmt.Sprintf("%s@%s", username, hostname))
+		if error != nil {
+			return error
+		}
 
-	authorizedKets := append(cfg.ExtraAuthorizedKeys, key)
+		authorizedKeys = append(authorizedKeys, key)
+	}
 
 	ports, err := buildControlPorts(data)
 	if err != nil {
@@ -92,7 +75,7 @@ func (cfg *ControlOS) Build(basedir string, preset cnc.Preset, _ cnc.GetComponen
 				"cfg", cfg,
 				"username", username,
 				"hostname", hostname,
-				"authorizedKeys", authorizedKets,
+				"authorizedKeys", authorizedKeys,
 				"ports", ports,
 				"controlVIP", controlVIP,
 			),

@@ -19,15 +19,17 @@ var (
 	ZOT_NODE_PORT    = 31000
 	VPC_VLAN_MIN     = 1000
 	VPC_VLAN_MAX     = 1999
-	DEFAULT_USERS    = []agentapi.UserCreds{
+
+	DEV_SSH_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGpF2+9I1Nj4BcN7y6DjzTbq1VcUYIRGyfzId5ZoBEFj" // 1P: Fabric Dev SSH Key Shared
+	DEV_USERS   = []agentapi.UserCreds{
 		{
 			Name:     "admin",
-			Password: "$5$8nAYPGcl4l6G7Av1$Qi4/gnM0yPtGv9kjpMh78NuNSfQWy7vR1rulHpurL36",
+			Password: "$5$8nAYPGcl4l6G7Av1$Qi4/gnM0yPtGv9kjpMh78NuNSfQWy7vR1rulHpurL36", // 1P: Fabric Dev SONiC Admin
 			Role:     "admin",
 		},
 		{
 			Name:     "op",
-			Password: "$5$oj/NxDtFw3eTyini$VHwdjWXSNYRxlFMu.1S5ZlGJbUF/CGmCAZIBroJlax4",
+			Password: "$5$oj/NxDtFw3eTyini$VHwdjWXSNYRxlFMu.1S5ZlGJbUF/CGmCAZIBroJlax4", // 1P: Fabric Dev SONiC Operator
 			Role:     "operator",
 		},
 	}
@@ -182,7 +184,7 @@ func LoadVLAB(basedir string, mngr *cnc.Manager, dryRun bool) (*vlab.Service, er
 		ServerIgnitionDir: filepath.Join(basedir, BundleServerOS.Name),
 		ControlInstaller:  filepath.Join(basedir, BundleControlInstall.Name),
 		FilesDir:          filepath.Join(basedir, BundleVlabFiles.Name),
-		SshKey:            filepath.Join(basedir, DEFAULT_SSH_KEY),
+		SshKey:            filepath.Join(basedir, DEFAULT_VLAB_SSH_KEY),
 	})
 	if err != nil {
 		return nil, errors.Wrapf(err, "error loading VLAB")

@@ -8,6 +8,7 @@ import (
 	helm "github.com/k3s-io/helm-controller/pkg/apis/helm.cattle.io/v1"
 	"github.com/pkg/errors"
 	"github.com/urfave/cli/v2"
+	agentapi "go.githedgehog.com/fabric/api/agent/v1alpha2"
 	"go.githedgehog.com/fabric/pkg/wiring"
 	"go.githedgehog.com/fabricator/pkg/fab/cnc"
 )
@@ -113,6 +114,11 @@ func (cfg *Fabric) Build(basedir string, preset cnc.Preset, get cnc.GetComponent
 			Target: target,
 		})
 
+	users := []agentapi.UserCreds{}
+	if BaseConfig(get).Dev {
+		users = append(users, DEV_USERS...)
+	}
+
 	run(BundleControlInstall, STAGE_INSTALL_3_FABRIC, "fabric-install",
 		&cnc.FileGenerate{
 			File: cnc.File{
@@ -146,7 +152,7 @@ func (cfg *Fabric) Build(basedir string, preset cnc.Preset, get cnc.GetComponent
 						"vpcVLANMax", VPC_VLAN_MAX,
 						"agentRepo", target.Fallback(cfg.AgentRef).RepoName(),
 						"agentRepoCA", ZotConfig(get).TLS.CA.Cert,
-						"users", DEFAULT_USERS,
+						"users", users,
 					),
 				),
 				cnc.KubeHelmChart("fabric-dhcp-server", "default", helm.HelmChartSpec{

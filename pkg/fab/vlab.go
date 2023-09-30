@@ -78,7 +78,7 @@ func (cfg *VLAB) Build(basedir string, preset cnc.Preset, get cnc.GetComponent, 
 		})
 
 	username := FLATCAR_CONTROL_USER
-	key, error := cnc.ReadOrGenerateSSHKey(basedir, DEFAULT_SSH_KEY, fmt.Sprintf("%s@%s", username, "server")) // TODO server?
+	key, error := cnc.ReadOrGenerateSSHKey(basedir, DEFAULT_VLAB_SSH_KEY, fmt.Sprintf("%s@%s", username, "server")) // TODO server?
 	if error != nil {
 		return error
 	}
