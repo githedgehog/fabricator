@@ -4,6 +4,7 @@ import (
 	"bytes"
 	_ "embed"
 	"fmt"
+	"log/slog"
 
 	helm "github.com/k3s-io/helm-controller/pkg/apis/helm.cattle.io/v1"
 	"github.com/pkg/errors"
@@ -115,8 +116,15 @@ func (cfg *Fabric) Build(basedir string, preset cnc.Preset, get cnc.GetComponent
 		})
 
 	users := []agentapi.UserCreds{}
+	slog.Info("Base config", "dev", BaseConfig(get).Dev)
 	if BaseConfig(get).Dev {
 		users = append(users, DEV_USERS...)
+		slog.Info("Adding dev users", "users", users)
+		for idx := range users {
+			users[idx].SSHKeys = append(users[idx].SSHKeys, BaseConfig(get).AuthorizedKeys...)
+			users[idx].SSHKeys = append(users[idx].SSHKeys, DEV_SSH_KEY)
+			slog.Info("Adding dev ssh keys to user", "user", users[idx])
+		}
 	}
 
 	run(BundleControlInstall, STAGE_INSTALL_3_FABRIC, "fabric-install",

@@ -2,7 +2,6 @@ package fab
 
 import (
 	_ "embed"
-	"fmt"
 
 	"github.com/pkg/errors"
 	"github.com/urfave/cli/v2"
@@ -46,25 +45,19 @@ func (cfg *ControlOS) Build(basedir string, preset cnc.Preset, get cnc.GetCompon
 	if err != nil {
 		return err
 	}
-
 	username := FLATCAR_CONTROL_USER
+	authorizedKeys := BaseConfig(get).AuthorizedKeys
 
-	authorizedKeys := BaseConfig(get).ExtraAuthorizedKeys
-	if preset == PRESET_VLAB {
-		key, error := cnc.ReadOrGenerateSSHKey(basedir, DEFAULT_VLAB_SSH_KEY, fmt.Sprintf("%s@%s", username, hostname))
-		if error != nil {
-			return error
-		}
-
-		authorizedKeys = append(authorizedKeys, key)
+	if len(authorizedKeys) == 0 {
+		return errors.New("no authorized keys found for control node, you'll not be able to login")
 	}
+
+	controlVIP := CONTROL_VIP + CONTROL_VIP_MASK
 
 	ports, err := buildControlPorts(data)
 	if err != nil {
 		return err
 	}
-
-	controlVIP := CONTROL_VIP + CONTROL_VIP_MASK
 
 	run(BundleControlOS, STAGE, "ignition-control",
 		&cnc.FileGenerate{

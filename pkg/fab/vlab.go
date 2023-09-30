@@ -13,10 +13,9 @@ import (
 var serverButaneTemplate string
 
 type VLAB struct {
-	ONIERef                   cnc.Ref  `json:"onieRef,omitempty"`
-	FlatcarRef                cnc.Ref  `json:"flatcarRef,omitempty"`
-	EEPROMEditRef             cnc.Ref  `json:"eepromEditRef,omitempty"`
-	ExtraServerAuthorizedKeys []string `json:"extraServerAuthorizedKeys,omitempty"`
+	ONIERef       cnc.Ref `json:"onieRef,omitempty"`
+	FlatcarRef    cnc.Ref `json:"flatcarRef,omitempty"`
+	EEPROMEditRef cnc.Ref `json:"eepromEditRef,omitempty"`
 }
 
 var _ cnc.Component = (*VLAB)(nil)
@@ -78,12 +77,6 @@ func (cfg *VLAB) Build(basedir string, preset cnc.Preset, get cnc.GetComponent, 
 		})
 
 	username := FLATCAR_CONTROL_USER
-	key, error := cnc.ReadOrGenerateSSHKey(basedir, DEFAULT_VLAB_SSH_KEY, fmt.Sprintf("%s@%s", username, "server")) // TODO server?
-	if error != nil {
-		return error
-	}
-
-	authorizedKets := append(cfg.ExtraServerAuthorizedKeys, key)
 
 	for _, server := range data.Server.All() {
 		if server.IsControl() {
@@ -98,7 +91,7 @@ func (cfg *VLAB) Build(basedir string, preset cnc.Preset, get cnc.GetComponent, 
 					"cfg", cfg,
 					"username", username,
 					"hostname", server.Name,
-					"authorizedKeys", authorizedKets,
+					"authorizedKeys", BaseConfig(get).AuthorizedKeys,
 				),
 			})
 	}

@@ -1,6 +1,9 @@
 package fab
 
 import (
+	"log/slog"
+
+	"github.com/pkg/errors"
 	"github.com/urfave/cli/v2"
 	"go.githedgehog.com/fabric/pkg/wiring"
 	"go.githedgehog.com/fabricator/pkg/fab/cnc"
@@ -8,13 +11,13 @@ import (
 )
 
 type Base struct {
-	Source              cnc.Ref  `json:"source,omitempty"`
-	Target              cnc.Ref  `json:"target,omitempty"`
-	TargetInCluster     cnc.Ref  `json:"targetInCluster,omitempty"`
-	ExtraAuthorizedKeys []string `json:"extraAuthorizedKeys,omitempty"`
-	Dev                 bool
+	Source          cnc.Ref  `json:"source,omitempty"`
+	Target          cnc.Ref  `json:"target,omitempty"`
+	TargetInCluster cnc.Ref  `json:"targetInCluster,omitempty"`
+	AuthorizedKeys  []string `json:"authorizedKeys,omitempty"`
+	Dev             bool     `json:"dev,omitempty"`
 
-	extraAuthorizedKeysFlag cli.StringSlice
+	authorizedKeysFlag cli.StringSlice
 }
 
 var _ cnc.Component = (*Base)(nil)
@@ -36,10 +39,10 @@ func (cfg *Base) Flags() []cli.Flag {
 			Destination: &cfg.Source.Repo,
 		},
 		&cli.StringSliceFlag{
-			Name:        "extra-authorized-key",
-			Usage:       "Extra SSH public keys to add to the control node",
-			EnvVars:     []string{"HHFAB_EXTRA_AUTHORIZED_KEY"},
-			Destination: &cfg.extraAuthorizedKeysFlag,
+			Name:        "authorized-key",
+			Usage:       "SSH public keys to add to the control node, first will be used for SONiC users",
+			EnvVars:     []string{"HHFAB_AUTHORIZED_KEY"},
+			Destination: &cfg.authorizedKeysFlag,
 		},
 		&cli.BoolFlag{
 			Name:        "dev",
@@ -55,12 +58,12 @@ func (cfg *Base) Hydrate(preset cnc.Preset) error {
 	cfg.Target = cfg.Target.Fallback(REF_TARGET)
 	cfg.TargetInCluster = cfg.TargetInCluster.Fallback(REF_TARGET_INCLUSTER)
 
-	for _, val := range cfg.extraAuthorizedKeysFlag.Value() {
+	for _, val := range cfg.authorizedKeysFlag.Value() {
 		if val == "" {
 			continue
 		}
-		if !slices.Contains(cfg.ExtraAuthorizedKeys, val) {
-			cfg.ExtraAuthorizedKeys = append(cfg.ExtraAuthorizedKeys, val)
+		if !slices.Contains(cfg.AuthorizedKeys, val) {
+			cfg.AuthorizedKeys = append(cfg.AuthorizedKeys, val)
 		}
 	}
 
@@ -68,10 +71,21 @@ func (cfg *Base) Hydrate(preset cnc.Preset) error {
 		cfg.Dev = true
 	}
 
+	slog.Warn("Attention! Development mode enabled - this is not secure! Default users and keys will be created.")
+
 	return nil
 }
 
 func (cfg *Base) Build(basedir string, preset cnc.Preset, get cnc.GetComponent, wiring *wiring.Data, run cnc.AddBuildOp, install cnc.AddRunOp) error {
+	if preset == PRESET_VLAB {
+		key, err := cnc.ReadOrGenerateSSHKey(basedir, DEFAULT_VLAB_SSH_KEY, "vlab")
+		if err != nil {
+			return errors.Wrapf(err, "error reading or generating vlab ssh key")
+		}
+
+		cfg.AuthorizedKeys = append([]string{key}, cfg.AuthorizedKeys...)
+	}
+
 	return nil
 }
 

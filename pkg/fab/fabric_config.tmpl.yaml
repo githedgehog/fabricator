@@ -8,6 +8,10 @@ users:
 - name: {{ .Name }}
   password: {{ .Password }}
   role: {{ .Role }}
+  sshKeys:
+  {{ range .SSHKeys }}
+  - "{{ . }}"
+  {{ end }}
 {{ end }}
 agentRepo: {{ .agentRepo }}
 agentRepoCA: |

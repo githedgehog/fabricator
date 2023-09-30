@@ -443,7 +443,7 @@ func (svc *Service) vmSelector(name string, mode string, msg string) (*VM, error
 		Label:     msg,
 		Items:     vms,
 		Templates: templates,
-		Size:      5,
+		Size:      10,
 		Searcher:  searcher,
 	}
 
