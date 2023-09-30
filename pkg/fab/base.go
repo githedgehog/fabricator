@@ -65,9 +65,9 @@ func (cfg *Base) Hydrate(preset cnc.Preset) error {
 		if !slices.Contains(cfg.AuthorizedKeys, val) {
 			cfg.AuthorizedKeys = append(cfg.AuthorizedKeys, val)
 		}
-		if cfg.Dev && !slices.Contains(cfg.AuthorizedKeys, DEV_SSH_KEY) {
-			cfg.AuthorizedKeys = append(cfg.AuthorizedKeys, DEV_SSH_KEY)
-		}
+	}
+	if cfg.Dev && !slices.Contains(cfg.AuthorizedKeys, DEV_SSH_KEY) {
+		cfg.AuthorizedKeys = append(cfg.AuthorizedKeys, DEV_SSH_KEY)
 	}
 
 	if preset == PRESET_VLAB {
