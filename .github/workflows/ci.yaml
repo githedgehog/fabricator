@@ -94,7 +94,7 @@ jobs:
 
       - name: hhfab init and build
         run: |
-          bin/hhfab init -p ${{ matrix.preset }}
+          bin/hhfab init -p ${{ matrix.preset }} --dev -v
           bin/hhfab build -v
           ls -lah .hhfab
 
