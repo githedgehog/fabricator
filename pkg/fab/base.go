@@ -74,14 +74,14 @@ func (cfg *Base) Hydrate(preset cnc.Preset) error {
 		cfg.Dev = true
 	}
 
-	if cfg.Dev {
-		slog.Warn("Attention! Development mode enabled - this is not secure! Default users and keys will be created.")
-	}
-
 	return nil
 }
 
 func (cfg *Base) Build(basedir string, preset cnc.Preset, get cnc.GetComponent, wiring *wiring.Data, run cnc.AddBuildOp, install cnc.AddRunOp) error {
+	if cfg.Dev {
+		slog.Warn("Attention! Development mode enabled - this is not secure! Default users and keys will be created.")
+	}
+
 	if preset == PRESET_VLAB {
 		key, err := cnc.ReadOrGenerateSSHKey(basedir, DEFAULT_VLAB_SSH_KEY, "vlab")
 		if err != nil {
