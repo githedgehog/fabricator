@@ -26,6 +26,7 @@ const (
 	REGISTRY_PORT        = 31000
 	SSH_PORT_BASE        = 22000
 	IF_PORT_BASE         = 30000
+	IF_PORT_NULL         = IF_PORT_BASE + 9000
 	IF_PORT_VM_ID_MULT   = 100
 	IF_PORT_PORT_ID_MULT = 1
 )
@@ -144,6 +145,9 @@ func (svc *Service) checkForStaleVMs(ctx context.Context, killStaleVMs bool) err
 	for _, pr := range processes {
 		cmd, err := pr.CmdlineSliceWithContext(ctx)
 		if err != nil {
+			if strings.Contains(err.Error(), "no such file or directory") {
+				continue
+			}
 			return errors.Wrap(err, "error getting process cmdline")
 		}
 
@@ -282,16 +286,27 @@ func (svc *Service) AddConnection(conn *wiringapi.Connection) error {
 			switch2 := link.Switch2
 			links = append(links, [2]wiringapi.IPort{&switch1, &switch2})
 		}
+	} else if conn.Spec.NAT != nil {
+		links = append(links, [2]wiringapi.IPort{&conn.Spec.NAT.Link.Switch, &wiringapi.BasePortName{
+			Port: "nat",
+		}})
 	}
 
 	for _, link := range links {
-		err := svc.AddLink(link[0], link[1])
-		if err != nil {
-			return err
-		}
-		err = svc.AddLink(link[1], link[0])
-		if err != nil {
-			return err
+		if link[1].DeviceName() == "nat" {
+			err := svc.AddNullLink(link[0])
+			if err != nil {
+				return err
+			}
+		} else {
+			err := svc.AddLink(link[0], link[1])
+			if err != nil {
+				return err
+			}
+			err = svc.AddLink(link[1], link[0])
+			if err != nil {
+				return err
+			}
 		}
 	}
 
@@ -319,6 +334,27 @@ func (svc *Service) AddLink(local wiringapi.IPort, dest wiringapi.IPort) error {
 		DestName:      destVM.Name,
 		DestIfPort:    svc.ifPortFor(destVM, destPortID),
 		DestPortName:  dest.PortName(),
+	})
+
+	return nil
+}
+
+func (svc *Service) AddNullLink(local wiringapi.IPort) error {
+	localVM := svc.vms[local.DeviceName()]
+
+	localPortID, err := portIdForName(local.LocalPortName())
+	if err != nil {
+		return err
+	}
+
+	localVM.Links = append(localVM.Links, &Link{
+		DevID:         fmt.Sprintf("eth%d", localPortID),
+		MAC:           svc.macFor(localVM, localPortID),
+		LocalIfPort:   svc.ifPortFor(localVM, localPortID),
+		LocalPortName: local.PortName(),
+		DestName:      "null",
+		DestIfPort:    IF_PORT_NULL,
+		DestPortName:  "null",
 	})
 
 	return nil
