@@ -20,8 +20,9 @@ var (
 	VPC_VLAN_MIN     = 1000
 	VPC_VLAN_MAX     = 1999
 
-	DEV_SSH_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGpF2+9I1Nj4BcN7y6DjzTbq1VcUYIRGyfzId5ZoBEFj" // 1P: Fabric Dev SSH Key Shared
-	DEV_USERS   = []agentapi.UserCreds{
+	DEV_SSH_KEY     = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGpF2+9I1Nj4BcN7y6DjzTbq1VcUYIRGyfzId5ZoBEFj" // 1P: Fabric Dev SSH Key Shared
+	DEV_PASSWORD    = "$5$8nAYPGcl4l6G7Av1$Qi4/gnM0yPtGv9kjpMh78NuNSfQWy7vR1rulHpurL36"                  // 1P: Fabric Dev SONiC Admin
+	DEV_SONIC_USERS = []agentapi.UserCreds{
 		{
 			Name:     "admin",
 			Password: "$5$8nAYPGcl4l6G7Av1$Qi4/gnM0yPtGv9kjpMh78NuNSfQWy7vR1rulHpurL36", // 1P: Fabric Dev SONiC Admin

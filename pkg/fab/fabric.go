@@ -118,7 +118,7 @@ func (cfg *Fabric) Build(basedir string, preset cnc.Preset, get cnc.GetComponent
 	users := []agentapi.UserCreds{}
 	slog.Info("Base config", "dev", BaseConfig(get).Dev)
 	if BaseConfig(get).Dev {
-		users = append(users, DEV_USERS...)
+		users = append(users, DEV_SONIC_USERS...)
 		slog.Info("Adding dev users", "users", users)
 		for idx := range users {
 			users[idx].SSHKeys = append(users[idx].SSHKeys, BaseConfig(get).AuthorizedKeys...)

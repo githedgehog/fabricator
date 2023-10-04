@@ -4,6 +4,7 @@ version: 1.0.0
 passwd:
   users:
     - name: {{ .username }}
+      password_hash: {{ .passwordHash }}
       ssh_authorized_keys:
         {{ range .authorizedKeys}}
         - "{{ . }}"

@@ -2,6 +2,7 @@ package fab
 
 import (
 	_ "embed"
+	"strings"
 
 	"github.com/pkg/errors"
 	"github.com/urfave/cli/v2"
@@ -19,12 +20,14 @@ const (
 //go:embed ctrl_os_butane.tmpl.yaml
 var controlButaneTemplate string
 
-type ControlOS struct{}
+type ControlOS struct {
+	PasswordHash string `json:"passwordHash,omitempty"`
+}
 
 var _ cnc.Component = (*ControlOS)(nil)
 
 func (cfg *ControlOS) Name() string {
-	return "os"
+	return "control-os"
 }
 
 func (cfg *ControlOS) IsEnabled(preset cnc.Preset) bool {
@@ -32,11 +35,19 @@ func (cfg *ControlOS) IsEnabled(preset cnc.Preset) bool {
 }
 
 func (cfg *ControlOS) Flags() []cli.Flag {
-	return nil
+	return []cli.Flag{
+		&cli.StringFlag{
+			Name:        "control-password-hash",
+			Usage:       "Password hash for the control node user 'core' (use 'openssl passwd -5' and pass with '' or escape to avoid shell $ substitution)",
+			EnvVars:     []string{"HHFAB_CONTROL_PASSWORD_HASH"},
+			Destination: &cfg.PasswordHash,
+		},
+	}
 }
 
 func (cfg *ControlOS) Hydrate(preset cnc.Preset) error {
 	// TODO add ignition template to the config?
+
 	return nil
 }
 
@@ -48,8 +59,16 @@ func (cfg *ControlOS) Build(basedir string, preset cnc.Preset, get cnc.GetCompon
 	username := FLATCAR_CONTROL_USER
 	authorizedKeys := BaseConfig(get).AuthorizedKeys
 
-	if len(authorizedKeys) == 0 {
-		return errors.New("no authorized keys found for control node, you'll not be able to login")
+	if cfg.PasswordHash == "" && BaseConfig(get).Dev {
+		cfg.PasswordHash = DEV_PASSWORD
+	}
+
+	if cfg.PasswordHash != "" && !strings.HasPrefix(cfg.PasswordHash, "$5$") {
+		return errors.Errorf("control node password hash is expected to be a hash, not a password, use 'openssl passwd -5' to generate one")
+	}
+
+	if len(authorizedKeys) == 0 && cfg.PasswordHash == "" {
+		return errors.Errorf("no authorized keys or password found for control node, you'll not be able to login")
 	}
 
 	controlVIP := CONTROL_VIP + CONTROL_VIP_MASK
@@ -71,6 +90,7 @@ func (cfg *ControlOS) Build(basedir string, preset cnc.Preset, get cnc.GetCompon
 				"authorizedKeys", authorizedKeys,
 				"ports", ports,
 				"controlVIP", controlVIP,
+				"passwordHash", cfg.PasswordHash,
 			),
 		})
 
