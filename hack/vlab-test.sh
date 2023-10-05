@@ -6,6 +6,7 @@ function control {
     bin/hhfab vlab ssh --vm control-1 PATH=/opt/bin "$@"
 }
 
+sleep 10 # give agent ctrl a chance to process everything
 control kubectl get agent -o wide
 control kubectl wait --for=condition=Applied --timeout=3600s agent/switch-1 agent/switch-2
 control kubectl get agent -o wide
@@ -18,5 +19,6 @@ control kubectl fabric vpc attach --vpc vpc-2 --conn server-2--mclag--switch-1--
 
 control kubectl fabric vpc peer --vpc vpc-1 --vpc vpc-2
 
+sleep 10 # give agent ctrl a chance to process everything
 control kubectl wait --for=condition=Applied --timeout=3600s agent/switch-1 agent/switch-2
 control kubectl get agent -o wide
