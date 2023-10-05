@@ -18,5 +18,5 @@ control kubectl fabric vpc attach --vpc vpc-2 --conn server-2--mclag--switch-1--
 
 control kubectl fabric vpc peer --vpc vpc-1 --vpc vpc-2
 
-control kubectl wait --for=condition=Applied --timeout=300s agent/switch-1 agent/switch-2
+control kubectl wait --for=condition=Applied --timeout=3600s agent/switch-1 agent/switch-2
 control kubectl get agent -o wide
