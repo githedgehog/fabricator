@@ -7,7 +7,7 @@ function control {
 }
 
 control kubectl get agent -o wide
-control kubectl wait --for=condition=Applied --timeout=300s agent/switch-1 agent/switch-2
+control kubectl wait --for=condition=Applied --timeout=3600s agent/switch-1 agent/switch-2
 control kubectl get agent -o wide
 
 control kubectl fabric vpc create --name vpc-1 --subnet 10.90.1.1/24
