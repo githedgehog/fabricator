@@ -124,6 +124,12 @@ func (mngr *Manager) prepare() error {
 }
 
 func (mngr *Manager) Init(basedir string, fromConfig string, preset Preset, wiringPath string, wiringGenType string, wiringGenPreset string) error {
+	if _, err := os.Stat(basedir); err == nil {
+		if !os.IsNotExist(err) {
+			return errors.Errorf("basedir %s already exists, please, remove it first", basedir)
+		}
+	}
+
 	mngr.basedir = basedir
 
 	if wiringGenType == "" {
