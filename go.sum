@@ -578,6 +578,8 @@ go.githedgehog.com/fabric v0.17.14 h1:2y5uD5FT8VtjXOIQay0Ac/H5ZPvkqSoJnNEH/l4Ict
 go.githedgehog.com/fabric v0.17.14/go.mod h1:GqQEO9NfV65iL9CMheoWn2XYstV8Bsm2YjVjiI5WRts=
 go.githedgehog.com/fabric v0.17.15 h1:2NzHZAEgk6MHrNSMfM5NzE6qymh1yVcy7uLKMTae64g=
 go.githedgehog.com/fabric v0.17.15/go.mod h1:GqQEO9NfV65iL9CMheoWn2XYstV8Bsm2YjVjiI5WRts=
+go.githedgehog.com/fabric v0.17.16 h1:I/iLoF2OJtUVUD4q7ELnL+Kz/AFvPS4GLWflMzWqdnw=
+go.githedgehog.com/fabric v0.17.16/go.mod h1:sPmJvopeVufjtyV8JTplVxhDNMUX9wpPlbn42nBzflk=
 go.mongodb.org/mongo-driver v1.7.3/go.mod h1:NqaYOwnXWr5Pm7AOpO5QFxKJ503nbMse/R79oO62zWg=
 go.mongodb.org/mongo-driver v1.7.5/go.mod h1:VXEWRZ6URJIkUq2SCAyapmhH0ZLRBP+FT4xhp5Zvxng=
 go.mongodb.org/mongo-driver v1.10.0/go.mod h1:wsihk0Kdgv8Kqu1Anit4sfK+22vSFbUrAVEYRhCXrA8=
