@@ -97,10 +97,16 @@ func (cfg *Fabric) Build(basedir string, preset cnc.Preset, get cnc.GetComponent
 			Target: target,
 		})
 
+	run(BundleControlInstall, STAGE_INSTALL_3_FABRIC, "fabric-agent-seeder",
+		&cnc.SyncOCI{
+			Ref:    cfg.AgentRef,
+			Target: target.Fallback(cnc.Ref{Name: "fabric/agent/x86_64", Tag: "latest"}),
+		})
+
 	run(BundleControlInstall, STAGE_INSTALL_3_FABRIC, "fabric-agent",
 		&cnc.SyncOCI{
 			Ref:    cfg.AgentRef,
-			Target: target.Fallback(cnc.Ref{Name: "agent/x86_64", Tag: "latest"}),
+			Target: target,
 		})
 
 	run(BundleControlInstall, STAGE_INSTALL_3_FABRIC, "fabric-dhcp-server-image",
