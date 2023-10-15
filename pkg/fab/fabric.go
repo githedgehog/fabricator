@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"fmt"
 	"log/slog"
+	"slices"
 
 	helm "github.com/k3s-io/helm-controller/pkg/apis/helm.cattle.io/v1"
 	"github.com/pkg/errors"
@@ -32,6 +33,8 @@ type Fabric struct {
 	CtlRef                   cnc.Ref `json:"ctlRef,omitempty"`
 	FabricDHCPServerRef      cnc.Ref `json:"dhcpServerRef,omitempty"`
 	FabricDHCPServerChartRef cnc.Ref `json:"dhcpServerChartRef,omitempty"`
+	VPCBackend               string  `json:"vpcBackend,omitempty"`
+	SNATAllowed              bool    `json:"snatAllowed,omitempty"`
 }
 
 var _ cnc.Component = (*Fabric)(nil)
@@ -45,7 +48,20 @@ func (cfg *Fabric) IsEnabled(preset cnc.Preset) bool {
 }
 
 func (cfg *Fabric) Flags() []cli.Flag {
-	return nil
+	return []cli.Flag{
+		&cli.StringFlag{
+			Name:        "vpc-backend",
+			Usage:       "VPC backend (VRF-based or ACL-based VPC implementation), using incorrect value may result in undefined behavior",
+			EnvVars:     []string{"HHFAB_FABRIC_VPC_BACKEND"},
+			Destination: &cfg.VPCBackend,
+		},
+		&cli.BoolFlag{
+			Name:        "snat-allowed",
+			Usage:       "Allow SNAT for VPCs, using SNAT may result in undefined behavior",
+			EnvVars:     []string{"HHFAB_FABRIC_SNAT_ALLOWED"},
+			Destination: &cfg.SNATAllowed,
+		},
+	}
 }
 
 func (cfg *Fabric) Hydrate(preset cnc.Preset) error {
@@ -57,6 +73,17 @@ func (cfg *Fabric) Hydrate(preset cnc.Preset) error {
 	cfg.CtlRef = cfg.CtlRef.Fallback(REF_FABRIC_CTL)
 	cfg.FabricDHCPServerRef = cfg.FabricDHCPServerRef.Fallback(REF_FABRIC_DHCP_SERVER)
 	cfg.FabricDHCPServerChartRef = cfg.FabricDHCPServerChartRef.Fallback(REF_FABRIC_DHCP_SERVER_CHART)
+
+	if cfg.VPCBackend == "" {
+		if preset == PRESET_BM {
+			cfg.VPCBackend = "acl"
+		} else if preset == PRESET_VLAB {
+			cfg.VPCBackend = "vrf"
+		}
+	}
+	if !slices.Contains(agentapi.VPCBackendValues, agentapi.VPCBackend(cfg.VPCBackend)) {
+		return errors.Errorf("invalid VPC backend %q", cfg.VPCBackend)
+	}
 
 	return nil
 }
@@ -72,6 +99,15 @@ func (cfg *Fabric) Build(basedir string, preset cnc.Preset, get cnc.GetComponent
 
 	target := BaseConfig(get).Target
 	targetInCluster := BaseConfig(get).TargetInCluster
+
+	if preset == PRESET_BM && cfg.VPCBackend != "acl" {
+		slog.Warn("VPC backend is not ACL with BM preset, this may result in undefined behavior")
+	} else if preset == PRESET_VLAB && cfg.VPCBackend != "vrf" {
+		slog.Warn("VPC backend is not VRF with VLAB preset, this may result in undefined behavior")
+	}
+	if cfg.SNATAllowed {
+		slog.Warn("SNAT is allowed, this may result in undefined behavior")
+	}
 
 	wiringData := &bytes.Buffer{}
 	err := wiring.Write(wiringData) // TODO extract to lib
@@ -166,6 +202,8 @@ func (cfg *Fabric) Build(basedir string, preset cnc.Preset, get cnc.GetComponent
 						"agentRepo", target.Fallback(cfg.AgentRef).RepoName(),
 						"agentRepoCA", ZotConfig(get).TLS.CA.Cert,
 						"users", users,
+						"vpcBackend", cfg.VPCBackend,
+						"snatAllowed", cfg.SNATAllowed,
 					),
 				),
 				cnc.KubeHelmChart("fabric-dhcp-server", "default", helm.HelmChartSpec{

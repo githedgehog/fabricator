@@ -580,6 +580,10 @@ go.githedgehog.com/fabric v0.17.15 h1:2NzHZAEgk6MHrNSMfM5NzE6qymh1yVcy7uLKMTae64
 go.githedgehog.com/fabric v0.17.15/go.mod h1:GqQEO9NfV65iL9CMheoWn2XYstV8Bsm2YjVjiI5WRts=
 go.githedgehog.com/fabric v0.17.16 h1:I/iLoF2OJtUVUD4q7ELnL+Kz/AFvPS4GLWflMzWqdnw=
 go.githedgehog.com/fabric v0.17.16/go.mod h1:sPmJvopeVufjtyV8JTplVxhDNMUX9wpPlbn42nBzflk=
+go.githedgehog.com/fabric v0.18.0 h1:Fl8u1/84Y7pMpvfS/RYPjdJbH1xd2eUKGegw7u4tMNw=
+go.githedgehog.com/fabric v0.18.0/go.mod h1:/DgtDb/YiY8GDykb0bx5f/uHcXlzHar7zECEaEQrQl8=
+go.githedgehog.com/fabric v0.18.1 h1:xFt6TK5pJ3X3bho1ZLrQWF4lxI61mTJi3w0F6bu4MI4=
+go.githedgehog.com/fabric v0.18.1/go.mod h1:/DgtDb/YiY8GDykb0bx5f/uHcXlzHar7zECEaEQrQl8=
 go.mongodb.org/mongo-driver v1.7.3/go.mod h1:NqaYOwnXWr5Pm7AOpO5QFxKJ503nbMse/R79oO62zWg=
 go.mongodb.org/mongo-driver v1.7.5/go.mod h1:VXEWRZ6URJIkUq2SCAyapmhH0ZLRBP+FT4xhp5Zvxng=
 go.mongodb.org/mongo-driver v1.10.0/go.mod h1:wsihk0Kdgv8Kqu1Anit4sfK+22vSFbUrAVEYRhCXrA8=

@@ -18,3 +18,5 @@ agentRepoCA: |
 {{ .agentRepoCA | indent 2 }}
 dhcpdConfigMap: fabric-dhcp-server-config
 dhcpdConfigKey: dhcpd.conf
+vpcBackend: {{ .vpcBackend }}
+snatAllowed: {{ .snatAllowed }}
