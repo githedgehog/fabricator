@@ -213,10 +213,10 @@ func (op *WaitKube) Hydrate() error {
 		return errors.New("name should be in form resourcetype/name")
 	}
 	if op.Timeout == 0 {
-		op.Timeout = 5 * time.Minute
+		op.Timeout = 10 * time.Minute
 	}
 	if op.TimeoutResource == 0 {
-		op.TimeoutResource = 5 * time.Minute
+		op.TimeoutResource = 10 * time.Minute
 	}
 	if op.Interval == 0 {
 		op.Interval = 3 * time.Second

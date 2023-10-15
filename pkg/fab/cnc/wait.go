@@ -11,6 +11,7 @@ type WaitParams struct {
 	Delay    time.Duration `json:"delay,omitempty"`
 	Interval time.Duration `json:"interval,omitempty"`
 	Attempts int           `json:"attempts,omitempty"`
+	// TODO Timeout?
 }
 
 func (w *WaitParams) Hydrate() error {

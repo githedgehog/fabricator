@@ -131,9 +131,9 @@ func (cfg *Zot) Build(basedir string, preset cnc.Preset, get cnc.GetComponent, w
 		&cnc.WaitURL{
 			URL: ZOT_CHECK_URL,
 			Wait: cnc.WaitParams{
-				Delay:    30 * time.Second,
+				Delay:    10 * time.Second,
 				Interval: 5 * time.Second,
-				Attempts: 60, // ~5min
+				Attempts: 120, // ~10min
 			},
 		})
 
