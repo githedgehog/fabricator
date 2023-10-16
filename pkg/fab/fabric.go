@@ -204,6 +204,7 @@ func (cfg *Fabric) Build(basedir string, preset cnc.Preset, get cnc.GetComponent
 						"users", users,
 						"vpcBackend", cfg.VPCBackend,
 						"snatAllowed", cfg.SNATAllowed,
+						"vpcSubnet", VPC_SUBNET,
 					),
 				),
 				cnc.KubeHelmChart("fabric-dhcp-server", "default", helm.HelmChartSpec{
