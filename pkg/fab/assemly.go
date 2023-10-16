@@ -49,7 +49,7 @@ var (
 	REF_ZOT_TARGET_IMAGE = cnc.Ref{Repo: "ghcr.io/project-zot", Name: "zot-minimal-linux-amd64"}
 
 	// Das Boot
-	REF_DASBOOT_VERSION       = cnc.Ref{Tag: "v0.9.0"}
+	REF_DASBOOT_VERSION       = cnc.Ref{Tag: "v0.8.2"}
 	REF_DASBOOT_CRDS_CHART    = cnc.Ref{Name: "das-boot/charts/das-boot-crds"}
 	REF_DASBOOT_SEEDER_CHART  = cnc.Ref{Name: "das-boot/charts/das-boot-seeder"}
 	REF_DASBOOT_SEEDER_IMAGE  = cnc.Ref{Name: "das-boot/das-boot-seeder"}
