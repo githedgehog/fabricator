@@ -69,7 +69,8 @@ var (
 	REF_SONIC_TARGET_VERSION  = cnc.Ref{Tag: "latest"}
 	REF_SONIC_TARGETS_DEFAULT = []cnc.Ref{
 		{Name: "sonic/x86_64-dellemc_s5248f_c3538-r0"},
-		{Name: "sonic/x86_64-cel_seastone_2-r0"},
+		{Name: "sonic/x86_64-cel_seastone_2-r0"},  // DS3000
+		{Name: "sonic/x86_64-cel_silverstone-r0"}, // DS4000
 	}
 	REF_SONIC_TARGETS_VLAB = []cnc.Ref{
 		{Name: "sonic/x86_64-kvm_x86_64-r0"},
