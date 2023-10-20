@@ -22,6 +22,7 @@ storage:
     # source: https://www.flatcar.org/docs/latest/setup/releases/update-strategies/#disable-automatic-updates
     - path: /etc/flatcar/update.conf
       mode: 0644
+      overwrite: true
       contents:
         inline: |
           SERVER=disabled
