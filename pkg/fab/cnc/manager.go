@@ -132,6 +132,19 @@ func (mngr *Manager) Init(basedir string, fromConfig string, preset Preset, wiri
 
 	mngr.basedir = basedir
 
+	if wiringPath != "" && wiringGenType != "" {
+		return errors.New("wiring path and wiring gen are mutually exclusive")
+	}
+
+	if wiringPath != "" {
+		slog.Info("Loading wiring", "from", wiringPath)
+		wiring, err := wiring.LoadDataFrom(wiringPath)
+		if err != nil {
+			return errors.Wrapf(err, "error loading wiring from %s", wiringPath)
+		}
+		mngr.wiring = wiring
+	}
+
 	if wiringGenType == "" {
 		wiringGenType = "collapsedcore"
 	}
@@ -150,17 +163,7 @@ func (mngr *Manager) Init(basedir string, fromConfig string, preset Preset, wiri
 		return errors.Errorf("unknown wiring preset: %s", wiringGenPreset)
 	}
 
-	if wiringPath != "" && wiringGenType != "" {
-		return errors.New("wiring path and wiring gen are mutually exclusive")
-	}
-	if wiringPath != "" {
-		wiring, err := wiring.LoadDataFrom(filepath.Join(basedir, "wiring.yaml"))
-		if err != nil {
-			return errors.Wrapf(err, "error loading wiring from %s", wiringPath)
-		}
-		mngr.wiring = wiring
-	}
-	if wiringGenType != "" {
+	if wiringPath == "" && wiringGenType != "" {
 		if wiringGenType != "collapsedcore" {
 			return errors.Errorf("unknown wiring sample: %s", wiringGenType)
 		}
@@ -171,6 +174,7 @@ func (mngr *Manager) Init(basedir string, fromConfig string, preset Preset, wiri
 		}
 		mngr.wiring = data
 	}
+
 	if wiringPath == "" && wiringGenType == "" {
 		return errors.New("wiring path or wiring gen must be specified")
 	}
