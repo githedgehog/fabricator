@@ -26,6 +26,10 @@ var SSH_QUIET_FLAGS = []string{
 	"-o", "LogLevel=ERROR",
 }
 
+const (
+	NICS_PER_PCI_BRIDGE = 32
+)
+
 //go:embed onie-eeprom.tmpl.yaml
 var onieEepromConfigTmpl string
 
@@ -149,13 +153,15 @@ func (vm *VM) RunVM(ctx context.Context) func() error {
 				"-fw_cfg", "name=opt/org.flatcar-linux/config,file=ignition.json",
 			)
 		} else if vm.OS == VMOS_ONIE {
-			args = append(args,
-				// TODO why it's needed and should we apply it to all VMs?
-				"-device", "pcie-root-port,bus=pcie.0,id=rp1,slot=1", "-device", "pcie-pci-bridge,id=br1,bus=rp1",
-			)
+			for idx := 0; idx <= len(vm.Links)/NICS_PER_PCI_BRIDGE; idx++ {
+				args = append(args,
+					"-device", fmt.Sprintf("i82801b11-bridge,id=dmi_pci_bridge%d", idx),
+					"-device", fmt.Sprintf("pci-bridge,id=pci-bridge%d,bus=dmi_pci_bridge%d,chassis_nr=0x1,addr=0x%d,shpc=off", idx, idx, idx),
+				)
+			}
 		}
 
-		for _, link := range vm.Links {
+		for idx, link := range vm.Links {
 			if link.IsHostFwd {
 				args = append(args,
 					// TODO optionally make control node isolated using ",restrict=yes"
@@ -164,9 +170,15 @@ func (vm *VM) RunVM(ctx context.Context) func() error {
 					"-device", fmt.Sprintf("e1000,netdev=%s,mac=%s", link.DevID, link.MAC),
 				)
 			} else {
+				bus := ""
+
+				if vm.OS == VMOS_ONIE {
+					bus = fmt.Sprintf(",bus=pci-bridge%d,addr=0x%x", idx/NICS_PER_PCI_BRIDGE, idx%NICS_PER_PCI_BRIDGE)
+				}
+
 				args = append(args,
 					"-netdev", fmt.Sprintf("socket,id=%s,udp=127.0.0.1:%d,localaddr=127.0.0.1:%d", link.DevID, link.LocalIfPort, link.DestIfPort),
-					"-device", fmt.Sprintf("e1000,netdev=%s,mac=%s", link.DevID, link.MAC),
+					"-device", fmt.Sprintf("e1000,netdev=%s,mac=%s%s", link.DevID, link.MAC, bus),
 				)
 			}
 		}

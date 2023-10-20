@@ -327,7 +327,7 @@ func (svc *Service) AddLink(local wiringapi.IPort, dest wiringapi.IPort) error {
 	}
 
 	localVM.Links = append(localVM.Links, &Link{
-		DevID:         fmt.Sprintf("eth%d", localPortID),
+		DevID:         fmt.Sprintf("eth%02d", localPortID),
 		MAC:           svc.macFor(localVM, localPortID),
 		LocalIfPort:   svc.ifPortFor(localVM, localPortID),
 		LocalPortName: local.PortName(),
@@ -348,7 +348,7 @@ func (svc *Service) AddNullLink(local wiringapi.IPort) error {
 	}
 
 	localVM.Links = append(localVM.Links, &Link{
-		DevID:         fmt.Sprintf("eth%d", localPortID),
+		DevID:         fmt.Sprintf("eth%02d", localPortID),
 		MAC:           svc.macFor(localVM, localPortID),
 		LocalIfPort:   svc.ifPortFor(localVM, localPortID),
 		LocalPortName: local.PortName(),
