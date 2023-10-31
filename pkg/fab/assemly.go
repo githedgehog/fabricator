@@ -8,6 +8,7 @@ import (
 	"github.com/pkg/errors"
 	agentapi "go.githedgehog.com/fabric/api/agent/v1alpha2"
 	"go.githedgehog.com/fabricator/pkg/fab/cnc"
+	"go.githedgehog.com/fabricator/pkg/fab/hlab"
 	"go.githedgehog.com/fabricator/pkg/fab/vlab"
 )
 
@@ -133,6 +134,9 @@ var (
 	BundleVlabVMs = cnc.Bundle{ // Special case, just to keep name
 		Name: "vlab-vms",
 	}
+	BundleHlabFiles = cnc.Bundle{ // Special case, just to keep name
+		Name: "hlab-files",
+	}
 )
 
 // We expect services installed during the stage to be available at the end of it
@@ -162,6 +166,7 @@ func NewCNCManager() *cnc.Manager {
 			&DasBoot{},
 			&Fabric{},
 			&VLAB{},
+			&ServerOS{},
 		},
 	)
 }
@@ -191,6 +196,27 @@ func LoadVLAB(basedir string, mngr *cnc.Manager, dryRun bool) (*vlab.Service, er
 	})
 	if err != nil {
 		return nil, errors.Wrapf(err, "error loading VLAB")
+	}
+
+	return svc, nil
+}
+
+func LoadHLAB(basedir string, mngr *cnc.Manager, dryRun bool, config string, kubeconfig string) (*hlab.Service, error) {
+	if mngr.Preset() != PRESET_BM {
+		return nil, errors.Errorf("only lab preset supported, found %s", mngr.Preset())
+	}
+
+	svc, err := hlab.Load(&hlab.ServiceConfig{
+		DryRun:            dryRun,
+		Basedir:           basedir,
+		ControlIgnition:   filepath.Join(basedir, BundleControlOS.Name, CONTROL_OS_IGNITION),
+		ServerIgnitionDir: filepath.Join(basedir, BundleServerOS.Name),
+		FilesDir:          filepath.Join(basedir, BundleHlabFiles.Name),
+		Config:            config,
+		Kubeconfig:        kubeconfig,
+	})
+	if err != nil {
+		return nil, errors.Wrapf(err, "error loading HLAB")
 	}
 
 	return svc, nil

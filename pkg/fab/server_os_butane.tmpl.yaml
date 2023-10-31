@@ -4,9 +4,10 @@ version: 1.0.0
 passwd:
   users:
     - name: {{ .username }}
+      password_hash: {{ .passwordHash }}
       ssh_authorized_keys:
         {{ range .authorizedKeys}}
-        - {{ . }}
+        - "{{ . }}"
         {{ end }}
       groups:
         - wheel
@@ -21,6 +22,7 @@ storage:
     # source: https://www.flatcar.org/docs/latest/setup/releases/update-strategies/#disable-automatic-updates
     - path: /etc/flatcar/update.conf
       mode: 0644
+      overwrite: true
       contents:
         inline: |
           SERVER=disabled

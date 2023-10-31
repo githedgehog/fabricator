@@ -9,9 +9,6 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab/cnc"
 )
 
-//go:embed vlab_server_butane.tmpl.yaml
-var serverButaneTemplate string
-
 type VLAB struct {
 	ONIERef       cnc.Ref `json:"onieRef,omitempty"`
 	FlatcarRef    cnc.Ref `json:"flatcarRef,omitempty"`

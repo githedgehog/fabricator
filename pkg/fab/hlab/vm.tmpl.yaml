@@ -1,0 +1,101 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  labels:
+    hlab.githedgehog.com/env: {{ .env }}
+  name: {{ .name }}-configdrive
+type: Opaque
+stringData:
+  userdata: >-
+{{ .ignition | indent 4 }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  annotations:
+    harvesterhci.io/imageId: {{ .imageID }}
+    volume.beta.kubernetes.io/storage-provisioner: driver.longhorn.io
+    volume.kubernetes.io/storage-provisioner: driver.longhorn.io
+  labels:
+    hlab.githedgehog.com/env: {{ .env }}
+  name: {{ .name }}-disk-0
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: {{ .disk }}
+  storageClassName: {{ .storageClass }}
+  volumeMode: Block
+---
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  annotations:
+    field.cattle.io/description: {{ .description }}
+    network.harvesterhci.io/ips: "[]"
+  labels:
+    hlab.githedgehog.com/env: {{ .env }}
+    harvesterhci.io/creator: harvester
+  name: {{ .name }}
+spec:
+  runStrategy: RerunOnFailure
+  template:
+    metadata:
+      annotations:
+        harvesterhci.io/sshNames: "[]"
+      labels:
+        harvesterhci.io/vmName: {{ .name }}
+    spec:
+      domain:
+        machine:
+          type: ""
+        cpu:
+          cores: {{ .cpu }}
+          sockets: 1
+          threads: 1
+        devices:
+          {{ if .mgmtNetworkEnable }}
+          interfaces:
+            - bridge: {}
+              model: virtio
+              name: default
+          {{ end }}
+          disks:
+            - name: disk-0
+              disk:
+                bus: virtio
+              bootOrder: 1
+            - name: cloudinitdisk
+              disk:
+                bus: virtio
+          hostDevices:
+            {{ range .hostDevices -}}
+            - deviceName: {{ .DeviceName }}
+              name: {{ .Name }}
+            {{ end }}
+        resources:
+          limits:
+            memory: {{ .memory }}
+            cpu: "{{ .cpu }}"
+        features:
+          acpi:
+            enabled: true
+      evictionStrategy: LiveMigrate
+      hostname: {{ .name }}
+      {{ if .mgmtNetworkEnable }}
+      networks:
+        - name: default
+          multus:
+            networkName: {{ .mgmtNetworkName }}
+      {{ end }}
+      volumes:
+        - name: disk-0
+          persistentVolumeClaim:
+            claimName: {{ .name }}-disk-0
+        - name: cloudinitdisk
+          cloudInitConfigDrive:
+            secretRef:
+              name: {{ .name }}-configdrive
+      affinity: {}
+      terminationGracePeriodSeconds: 10

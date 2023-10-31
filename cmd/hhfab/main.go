@@ -92,6 +92,8 @@ func main() {
 		Destination: &vm,
 	}
 
+	var hlabConfig, hlabKubeconfig string
+
 	mngr := fab.NewCNCManager()
 
 	cli.VersionFlag.(*cli.BoolFlag).Aliases = []string{"V"}
@@ -236,9 +238,8 @@ func main() {
 				},
 			},
 			{
-				Name:    "vlab",
-				Aliases: []string{"v"},
-				Usage:   "vlab management",
+				Name:  "vlab",
+				Usage: "fully virtual lab (VLAB) management",
 				Flags: []cli.Flag{
 					basedirFlag,
 					verboseFlag,
@@ -374,6 +375,112 @@ func main() {
 							}
 
 							return errors.Wrap(svc.List(), "error vm list")
+						},
+					},
+				},
+			},
+			{
+				Name:  "hlab",
+				Usage: "hybrid hardware lab (HLAB) with virtual control/servers management and hardware switches",
+				Flags: []cli.Flag{
+					basedirFlag,
+					verboseFlag,
+					briefFlag,
+				},
+				Subcommands: []*cli.Command{
+					{
+						Name:  "create",
+						Usage: "create control/server VMs",
+						Flags: []cli.Flag{
+							basedirFlag,
+							verboseFlag,
+							briefFlag,
+							&cli.BoolFlag{
+								Name:        "dry-run",
+								Usage:       "dry run, prepare vms but not actually run them",
+								Destination: &dryRun,
+							},
+							&cli.StringFlag{
+								Name:        "config",
+								Usage:       "use config `FILE`",
+								Aliases:     []string{"c"},
+								EnvVars:     []string{"HHFAB_HLAB_CONFIG"},
+								Value:       "hlab.yaml",
+								Destination: &hlabConfig,
+							},
+							&cli.StringFlag{
+								Name:        "kubeconfig",
+								Usage:       "use harvester kubeconfig `FILE`",
+								Aliases:     []string{"k"},
+								EnvVars:     []string{"KUBECONFIG", "HHFAB_HLAB_KUBECONFIG"},
+								Destination: &hlabKubeconfig,
+							},
+							&cli.BoolFlag{
+								Name:  "cleanup-existing",
+								Usage: "cleanup existing VMs before creating new ones",
+								Value: true, // TODO is it a good default?
+							},
+						},
+						Before: func(ctx *cli.Context) error {
+							return setupLogger(verbose, brief)
+						},
+						Action: func(cCtx *cli.Context) error {
+							err := mngr.Load(basedir)
+							if err != nil {
+								return errors.Wrap(err, "error loading")
+							}
+
+							svc, err := fab.LoadHLAB(basedir, mngr, dryRun, hlabConfig, hlabKubeconfig)
+							if err != nil {
+								return errors.Wrap(err, "error loading hlab")
+							}
+
+							return errors.Wrapf(svc.CreateVMs(cCtx.Bool("cleanup-existing")), "error creating VMs")
+						},
+					},
+					{
+						Name:  "cleanup",
+						Usage: "cleanup VMs",
+						Flags: []cli.Flag{
+							basedirFlag,
+							verboseFlag,
+							briefFlag,
+							&cli.BoolFlag{
+								Name:        "dry-run",
+								Usage:       "dry run, prepare vms but not actually run them",
+								Destination: &dryRun,
+							},
+							&cli.StringFlag{
+								Name:        "config",
+								Usage:       "use config `FILE`",
+								Aliases:     []string{"c"},
+								EnvVars:     []string{"HHFAB_HLAB_CONFIG"},
+								Value:       "hlab.yaml",
+								Destination: &hlabConfig,
+							},
+							&cli.StringFlag{
+								Name:        "kubeconfig",
+								Usage:       "use harvester kubeconfig `FILE`",
+								Aliases:     []string{"k"},
+								EnvVars:     []string{"KUBECONFIG", "HHFAB_HLAB_KUBECONFIG"},
+								Destination: &hlabKubeconfig,
+							},
+						},
+						Before: func(ctx *cli.Context) error {
+							return setupLogger(verbose, brief)
+						},
+						Action: func(cCtx *cli.Context) error {
+							err := mngr.Load(basedir)
+							if err != nil {
+								return errors.Wrap(err, "error loading")
+							}
+
+							svc, err := fab.LoadHLAB(basedir, mngr, dryRun, hlabConfig, hlabKubeconfig)
+							if err != nil {
+								return errors.Wrap(err, "error loading hlab")
+							}
+
+							return errors.Wrapf(svc.CleanupVMs(), "error cleaning up VMs")
 						},
 					},
 				},
