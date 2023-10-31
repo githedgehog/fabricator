@@ -48,7 +48,7 @@ type Service struct {
 
 type Config struct {
 	DryRun            bool
-	Compact           bool // TODO expose as flag
+	Compact           bool
 	InstallComplete   bool
 	RunComplete       string
 	Basedir           string
