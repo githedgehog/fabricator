@@ -6,6 +6,7 @@ go 1.21
 
 require (
 	github.com/Masterminds/sprig v2.22.0+incompatible
+	github.com/Masterminds/sprig/v3 v3.2.3
 	github.com/containers/image/v5 v5.27.1-0.20230911141411-81c35e010bab
 	github.com/coreos/butane v0.18.0
 	github.com/google/uuid v1.3.1
@@ -39,7 +40,6 @@ require (
 	github.com/Masterminds/goutils v1.1.1 // indirect
 	github.com/Masterminds/semver v1.5.0 // indirect
 	github.com/Masterminds/semver/v3 v3.2.0 // indirect
-	github.com/Masterminds/sprig/v3 v3.2.3 // indirect
 	github.com/Microsoft/go-winio v0.6.1 // indirect
 	github.com/Microsoft/hcsshim v0.10.0 // indirect
 	github.com/VividCortex/ewma v1.2.0 // indirect
