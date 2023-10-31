@@ -146,6 +146,7 @@ jobs:
           password: ${{ secrets.LAB_REGISTRY_TOKEN }}
 
       - name: hhfab init and build
+        # TODO replace --install-complete with --run-complete hack/vlab-test.sh
         run: |
           export XDG_CONFIG_HOME=$(pwd)/.config
           export HHFAB_BASE_REPO=m.l.hhdev.io:31000/githedgehog
@@ -155,7 +156,7 @@ jobs:
           ls -lah .hhfab
 
           bin/hhfab vlab up -v --dry-run
-          sudo bin/hhfab vlab up -v --run-complete hack/vlab-test.sh
+          sudo bin/hhfab vlab up -v --install-complete
       - name: Setup tmate session for debug
         if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
         uses: mxschmitt/action-tmate@v3
