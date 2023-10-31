@@ -42,7 +42,7 @@ storage:
     #
     # Loopback with Control VIP
     #
-    - path: /etc/systemd/network/01-loopback.network
+    - path: /etc/systemd/network/000-loopback.network
       mode: 0644
       contents:
         inline: |
@@ -64,7 +64,20 @@ storage:
     # per port/switch configuration
     #
     {{ range .ports }}
-    - path: /etc/systemd/network/02-{{ .PortName }}-{{ .SwitchName }}.network
+    {{ if .MAC }}
+    - path: /etc/systemd/network/{{ .ID }}-{{ .PortName }}.link
+      mode: 0644
+      contents:
+        inline: |
+          [Match]
+          MACAddress={{ .MAC }}
+          Type=ether
+
+          [Link]
+          Name={{ .SwitchName }}
+          Description=Connected to {{ .SwitchName }}
+    {{ end }}
+    - path: /etc/systemd/network/{{ .ID }}-{{ .PortName }}-{{ .SwitchName }}.network
       mode: 0644
       contents:
         inline: |

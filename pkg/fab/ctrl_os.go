@@ -2,6 +2,7 @@ package fab
 
 import (
 	_ "embed"
+	"fmt"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -108,23 +109,31 @@ func getControlNodeName(data *wiring.Data) (string, error) {
 }
 
 type renderPort struct {
+	ID         string
 	PortName   string
 	SwitchName string
 	IP         string
+	MAC        string
 }
 
 func buildControlPorts(data *wiring.Data) ([]renderPort, error) {
 	res := []renderPort{}
 
-	for _, conn := range data.Connection.All() {
+	for idx, conn := range data.Connection.All() {
 		if conn.Spec.Management == nil {
 			continue
 		}
 
+		switchName := conn.Spec.Management.Link.Switch.DeviceName()
+		portName := conn.Spec.Management.Link.Server.LocalPortName()
+		mac := conn.Spec.Management.Link.Server.MAC
+
 		port := renderPort{
-			PortName:   conn.Spec.Management.Link.Server.LocalPortName(),
+			ID:         fmt.Sprintf("1%02d", idx),
+			SwitchName: switchName,
+			PortName:   portName,
 			IP:         conn.Spec.Management.Link.Server.IP,
-			SwitchName: conn.Spec.Management.Link.Switch.DeviceName(),
+			MAC:        mac,
 		}
 
 		res = append(res, port)
