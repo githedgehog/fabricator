@@ -290,6 +290,20 @@ func (svc *Service) AddConnection(conn *wiringapi.Connection) error {
 		links = append(links, [2]wiringapi.IPort{&conn.Spec.NAT.Link.Switch, &wiringapi.BasePortName{
 			Port: "nat",
 		}})
+	} else if conn.Spec.Fabric != nil {
+		for _, link := range conn.Spec.Fabric.Links {
+			spine := link.Spine
+			leaf := link.Leaf
+			links = append(links, [2]wiringapi.IPort{&spine, &leaf})
+		}
+	} else if conn.Spec.VPCLoopback != nil {
+		for _, link := range conn.Spec.VPCLoopback.Links {
+			switch1 := link.Switch1
+			switch2 := link.Switch2
+			links = append(links, [2]wiringapi.IPort{&switch1, &switch2})
+		}
+	} else {
+		return errors.Errorf("unsupported connection type")
 	}
 
 	for _, link := range links {
