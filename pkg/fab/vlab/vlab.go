@@ -267,6 +267,12 @@ func (svc *Service) AddConnection(conn *wiringapi.Connection) error {
 
 	if conn.Spec.Unbundled != nil {
 		links = append(links, [2]wiringapi.IPort{&conn.Spec.Unbundled.Link.Server, &conn.Spec.Unbundled.Link.Switch})
+	} else if conn.Spec.Bundled != nil {
+		for _, link := range conn.Spec.Bundled.Links {
+			server := link.Server
+			switch1 := link.Switch
+			links = append(links, [2]wiringapi.IPort{&server, &switch1})
+		}
 	} else if conn.Spec.Management != nil {
 		links = append(links, [2]wiringapi.IPort{&conn.Spec.Management.Link.Server, &conn.Spec.Management.Link.Switch})
 	} else if conn.Spec.MCLAG != nil {
