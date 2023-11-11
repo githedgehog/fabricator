@@ -83,7 +83,7 @@ func main() {
 	// 	samplePresets = append(samplePresets, string(p))
 	// }
 
-	var dryRun, nopack bool
+	var dryRun, hydrate, nopack bool
 
 	var vm string
 	vmFlag := &cli.StringFlag{
@@ -151,12 +151,18 @@ func main() {
 					// 	Usage:       "reset configs in basedir before init if present",
 					// 	Destination: &reset,
 					// },
+					&cli.BoolFlag{
+						Name:        "auto-hydrate",
+						Usage:       "automatically hydrate wiring diagram if needed (if some IPs/ASN/etc missing)",
+						Value:       true,
+						Destination: &hydrate,
+					},
 				}, mngr.Flags()...),
 				Before: func(cCtx *cli.Context) error {
 					return setupLogger(verbose, brief)
 				},
 				Action: func(cCtx *cli.Context) error {
-					err := mngr.Init(basedir, fromConfig, cnc.Preset(preset), wiring, wiringGenType, wiringGenPreset)
+					err := mngr.Init(basedir, fromConfig, cnc.Preset(preset), wiring, wiringGenType, wiringGenPreset, hydrate)
 					if err != nil {
 						return errors.Wrap(err, "error initializing")
 					}

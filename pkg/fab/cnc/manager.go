@@ -16,6 +16,7 @@ import (
 	"go.githedgehog.com/fabric/pkg/wiring"
 	"go.githedgehog.com/fabric/pkg/wiring/sample"
 	"go.githedgehog.com/fabricator/pkg/fab/cnc/bin"
+	fabwiring "go.githedgehog.com/fabricator/pkg/fab/wiring"
 	"golang.org/x/exp/slices"
 	"sigs.k8s.io/yaml"
 )
@@ -123,7 +124,7 @@ func (mngr *Manager) prepare() error {
 	return nil
 }
 
-func (mngr *Manager) Init(basedir string, fromConfig string, preset Preset, wiringPath string, wiringGenType string, wiringGenPreset string) error {
+func (mngr *Manager) Init(basedir string, fromConfig string, preset Preset, wiringPath string, wiringGenType string, wiringGenPreset string, hydrate bool) error {
 	if _, err := os.Stat(basedir); err == nil {
 		if !os.IsNotExist(err) {
 			return errors.Errorf("basedir %s already exists, please, remove it first", basedir)
@@ -197,8 +198,28 @@ func (mngr *Manager) Init(basedir string, fromConfig string, preset Preset, wiri
 		return fmt.Errorf("unknown preset: %s", preset)
 	}
 
-	err := mngr.prepare()
-	if err != nil {
+	// TODO rework wiring generation & handling
+
+	if err := fabwiring.IsHydrated(mngr.wiring); err != nil {
+		err = errors.Wrapf(err, "error validating wiring")
+
+		if hydrate {
+			slog.Warn("Wiring is not hydrated, hydrating", "err", err)
+
+			// TODO make configurable
+			if err := fabwiring.Hydrate(mngr.wiring, fabwiring.HydrateConfig{
+				Subnet:       "172.30.0.0/16",
+				SpineASN:     65100,
+				LeafASNStart: 65101,
+			}); err != nil {
+				return errors.Wrapf(err, "error hydrating wiring")
+			}
+		} else {
+			return err
+		}
+	}
+
+	if err := mngr.prepare(); err != nil {
 		return errors.Wrapf(err, "error preparing")
 	}
 
