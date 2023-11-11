@@ -69,20 +69,21 @@ var (
 
 	REF_SONIC_TARGET_VERSION  = cnc.Ref{Tag: "latest"}
 	REF_SONIC_TARGETS_DEFAULT = []cnc.Ref{
-		{Name: "sonic/x86_64-dellemc_s5248f_c3538-r0"},
-		{Name: "sonic/x86_64-cel_seastone_2-r0"},  // DS3000
-		{Name: "sonic/x86_64-cel_silverstone-r0"}, // DS4000
+		{Name: "sonic/x86_64-dellemc_s5248f_c3538-r0"}, // S5248
+		{Name: "sonic/x86_64-cel_seastone_2-r0"},       // DS3000
+		{Name: "sonic/x86_64-cel_silverstone-r0"},      // DS4000
 	}
 	REF_SONIC_TARGETS_VLAB = []cnc.Ref{
 		{Name: "sonic/x86_64-kvm_x86_64-r0"},
 	}
 
 	// Fabric
-	REF_FABRIC_VERSION           = cnc.Ref{Tag: "v0.20.4"}
+	REF_FABRIC_VERSION           = cnc.Ref{Tag: "v0.20.5"}
 	REF_FABRIC_API_CHART         = cnc.Ref{Name: "fabric/charts/fabric-api"}
 	REF_FABRIC_CHART             = cnc.Ref{Name: "fabric/charts/fabric"}
 	REF_FABRIC_IMAGE             = cnc.Ref{Name: "fabric/fabric"}
 	REF_FABRIC_AGENT             = cnc.Ref{Name: "fabric/agent"}
+	REF_FABRIC_CONTROL_AGENT     = cnc.Ref{Name: "fabric/agent"}
 	REF_FABRIC_CTL               = cnc.Ref{Name: "fabric/hhfctl"}
 	REF_FABRIC_DHCP_SERVER       = cnc.Ref{Name: "fabric/fabric-dhcp-server"}
 	REF_FABRIC_DHCP_SERVER_CHART = cnc.Ref{Name: "fabric/charts/fabric-dhcp-server"}

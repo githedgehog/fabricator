@@ -11,6 +11,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/urfave/cli/v2"
 	agentapi "go.githedgehog.com/fabric/api/agent/v1alpha2"
+	"go.githedgehog.com/fabric/pkg/manager/config"
 	"go.githedgehog.com/fabric/pkg/wiring"
 	"go.githedgehog.com/fabricator/pkg/fab/cnc"
 )
@@ -30,6 +31,7 @@ type Fabric struct {
 	FabricChartRef           cnc.Ref `json:"fabricChartRef,omitempty"`
 	FabricImageRef           cnc.Ref `json:"fabricImageRef,omitempty"`
 	AgentRef                 cnc.Ref `json:"agentRef,omitempty"`
+	ControlAgentRef          cnc.Ref `json:"controlAgentRef,omitempty"`
 	CtlRef                   cnc.Ref `json:"ctlRef,omitempty"`
 	FabricDHCPServerRef      cnc.Ref `json:"dhcpServerRef,omitempty"`
 	FabricDHCPServerChartRef cnc.Ref `json:"dhcpServerChartRef,omitempty"`
@@ -70,6 +72,7 @@ func (cfg *Fabric) Hydrate(preset cnc.Preset) error {
 	cfg.FabricChartRef = cfg.FabricChartRef.Fallback(REF_FABRIC_CHART)
 	cfg.FabricImageRef = cfg.FabricImageRef.Fallback(REF_FABRIC_IMAGE)
 	cfg.AgentRef = cfg.AgentRef.Fallback(REF_FABRIC_AGENT)
+	cfg.ControlAgentRef = cfg.ControlAgentRef.Fallback(REF_FABRIC_CONTROL_AGENT)
 	cfg.CtlRef = cfg.CtlRef.Fallback(REF_FABRIC_CTL)
 	cfg.FabricDHCPServerRef = cfg.FabricDHCPServerRef.Fallback(REF_FABRIC_DHCP_SERVER)
 	cfg.FabricDHCPServerChartRef = cfg.FabricDHCPServerChartRef.Fallback(REF_FABRIC_DHCP_SERVER_CHART)
@@ -93,6 +96,7 @@ func (cfg *Fabric) Build(basedir string, preset cnc.Preset, get cnc.GetComponent
 	cfg.FabricChartRef = cfg.FabricChartRef.Fallback(cfg.Ref, BaseConfig(get).Source)
 	cfg.FabricImageRef = cfg.FabricImageRef.Fallback(cfg.Ref, BaseConfig(get).Source)
 	cfg.AgentRef = cfg.AgentRef.Fallback(cfg.Ref, BaseConfig(get).Source)
+	cfg.ControlAgentRef = cfg.ControlAgentRef.Fallback(cfg.Ref, BaseConfig(get).Source)
 	cfg.CtlRef = cfg.CtlRef.Fallback(cfg.Ref, BaseConfig(get).Source)
 	cfg.FabricDHCPServerRef = cfg.FabricDHCPServerRef.Fallback(cfg.Ref, BaseConfig(get).Source)
 	cfg.FabricDHCPServerChartRef = cfg.FabricDHCPServerChartRef.Fallback(cfg.Ref, BaseConfig(get).Source)
@@ -157,6 +161,24 @@ func (cfg *Fabric) Build(basedir string, preset cnc.Preset, get cnc.GetComponent
 			Target: target,
 		})
 
+	run(BundleControlInstall, STAGE_INSTALL_3_FABRIC, "fabric-control-agent",
+		&cnc.FilesORAS{
+			Ref: cfg.ControlAgentRef,
+			Files: []cnc.File{
+				{
+					Name:          "agent",
+					InstallTarget: "/opt/hedgehog/bin",
+					InstallMode:   0o755,
+				},
+			},
+		})
+
+	install(BundleControlInstall, STAGE_INSTALL_3_FABRIC, "fabric-control-agent-install",
+		&cnc.ExecCommand{
+			Name: "/opt/hedgehog/bin/agent",
+			Args: []string{"install", "--control", "--agent-path", "/opt/hedgehog/bin/agent", "--agent-user", "root"},
+		})
+
 	users := []agentapi.UserCreds{}
 	slog.Info("Base config", "dev", BaseConfig(get).Dev)
 	if BaseConfig(get).Dev {
@@ -192,6 +214,7 @@ func (cfg *Fabric) Build(basedir string, preset cnc.Preset, get cnc.GetComponent
 					"ref", target.Fallback(cfg.FabricImageRef),
 					"proxyRef", target.Fallback(MiscConfig(get).RBACProxyImageRef),
 				)),
+				// TODO use config struct for generation
 				cnc.KubeConfigMap("fabric-config", "default",
 					"config.yaml",
 					cnc.FromTemplate(fabricConfigTemplate,
@@ -205,6 +228,7 @@ func (cfg *Fabric) Build(basedir string, preset cnc.Preset, get cnc.GetComponent
 						"vpcBackend", cfg.VPCBackend,
 						"snatAllowed", cfg.SNATAllowed,
 						"vpcSubnet", VPC_SUBNET,
+						"fabricMode", config.FabricModeCollapsedCore, // TODO make configurable
 					),
 				),
 				cnc.KubeHelmChart("fabric-dhcp-server", "default", helm.HelmChartSpec{

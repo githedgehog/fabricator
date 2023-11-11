@@ -21,3 +21,4 @@ dhcpdConfigKey: dhcpd.conf
 vpcBackend: {{ .vpcBackend }}
 snatAllowed: {{ .snatAllowed }}
 vpcSubnet: {{ .vpcSubnet }}
+fabricMode: {{ .fabricMode }}
