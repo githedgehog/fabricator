@@ -13,7 +13,7 @@ import (
 )
 
 var (
-	CONTROL_VIP      = "192.168.42.1"
+	CONTROL_VIP      = "172.30.1.1"
 	CONTROL_VIP_MASK = "/32"
 	ZOT_CHECK_URL    = fmt.Sprintf("https://%s:%d/v2/_catalog", CONTROL_VIP, ZOT_NODE_PORT)
 	K3S_API_PORT     = 6443
@@ -78,7 +78,7 @@ var (
 	}
 
 	// Fabric
-	REF_FABRIC_VERSION           = cnc.Ref{Tag: "v0.20.1"}
+	REF_FABRIC_VERSION           = cnc.Ref{Tag: "v0.20.4"}
 	REF_FABRIC_API_CHART         = cnc.Ref{Name: "fabric/charts/fabric-api"}
 	REF_FABRIC_CHART             = cnc.Ref{Name: "fabric/charts/fabric"}
 	REF_FABRIC_IMAGE             = cnc.Ref{Name: "fabric/fabric"}

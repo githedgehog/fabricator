@@ -582,6 +582,12 @@ go.githedgehog.com/fabric v0.20.0 h1:UE4LqZZuwucifl+2tDkwoY2H8Y92Zm3DXvH1z1A8guU
 go.githedgehog.com/fabric v0.20.0/go.mod h1:/DgtDb/YiY8GDykb0bx5f/uHcXlzHar7zECEaEQrQl8=
 go.githedgehog.com/fabric v0.20.1 h1:SCFWjapY83B2mFsQv+3yowRfhEiN5lf+QxYRdLw+zpg=
 go.githedgehog.com/fabric v0.20.1/go.mod h1:/DgtDb/YiY8GDykb0bx5f/uHcXlzHar7zECEaEQrQl8=
+go.githedgehog.com/fabric v0.20.2 h1:Ez/+9CVyWAGHOshgHCIYPc1G9KrhfUgaamTt8X/dZ6A=
+go.githedgehog.com/fabric v0.20.2/go.mod h1:/DgtDb/YiY8GDykb0bx5f/uHcXlzHar7zECEaEQrQl8=
+go.githedgehog.com/fabric v0.20.3 h1:hRu1ymzXnz/3q6+SkNrZzyWU+Po8wulWkrRhdLWiHgU=
+go.githedgehog.com/fabric v0.20.3/go.mod h1:/DgtDb/YiY8GDykb0bx5f/uHcXlzHar7zECEaEQrQl8=
+go.githedgehog.com/fabric v0.20.4 h1:1dmNdXdbDMPMX+l49saVUWKs2jTEnakr7+t0vq/yDp0=
+go.githedgehog.com/fabric v0.20.4/go.mod h1:/DgtDb/YiY8GDykb0bx5f/uHcXlzHar7zECEaEQrQl8=
 go.mongodb.org/mongo-driver v1.7.3/go.mod h1:NqaYOwnXWr5Pm7AOpO5QFxKJ503nbMse/R79oO62zWg=
 go.mongodb.org/mongo-driver v1.7.5/go.mod h1:VXEWRZ6URJIkUq2SCAyapmhH0ZLRBP+FT4xhp5Zvxng=
 go.mongodb.org/mongo-driver v1.10.0/go.mod h1:wsihk0Kdgv8Kqu1Anit4sfK+22vSFbUrAVEYRhCXrA8=
