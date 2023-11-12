@@ -113,8 +113,13 @@ func (cfg *Fabric) Build(basedir string, preset cnc.Preset, get cnc.GetComponent
 		slog.Warn("SNAT is allowed, this may result in undefined behavior")
 	}
 
+	controlNodeName, err := getControlNodeName(wiring)
+	if err != nil {
+		return errors.Wrap(err, "error getting control node name")
+	}
+
 	wiringData := &bytes.Buffer{}
-	err := wiring.Write(wiringData) // TODO extract to lib
+	err = wiring.Write(wiringData) // TODO extract to lib
 	if err != nil {
 		return errors.Wrap(err, "error writing wiring data")
 	}
@@ -258,6 +263,11 @@ func (cfg *Fabric) Build(basedir string, preset cnc.Preset, get cnc.GetComponent
 	install(BundleControlInstall, STAGE_INSTALL_3_FABRIC, "fabric-wait",
 		&cnc.WaitKube{
 			Name: "deployment/fabric-controller-manager",
+		})
+
+	install(BundleControlInstall, STAGE_INSTALL_3_FABRIC, "control-agent-wait",
+		&cnc.WaitKube{
+			Name: "controlagent/" + controlNodeName,
 		})
 
 	run(BundleControlInstall, STAGE_INSTALL_3_FABRIC, "fabric-wiring",

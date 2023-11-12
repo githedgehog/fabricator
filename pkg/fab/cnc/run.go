@@ -273,6 +273,11 @@ func (op *WaitKube) Run(basedir string) error {
 		cmd = exec.Command("kubectl",
 			"rollout", "status",
 			"--timeout="+op.Timeout.String(), op.Name)
+	} else if strings.HasPrefix(op.Name, "controlagent") {
+		cmd = exec.Command("kubectl",
+			"wait",
+			"--for=condition=applied",
+			"--timeout="+op.Timeout.String(), op.Name)
 	}
 	// otherwise we've just waited for the resource to exist
 
