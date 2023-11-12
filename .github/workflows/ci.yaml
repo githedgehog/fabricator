@@ -173,7 +173,7 @@ jobs:
     needs:
       # - cache-tools
       - build
-      # - vlab
+      - vlab
 
     steps:
       - name: Checkout repository
