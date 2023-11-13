@@ -34,15 +34,15 @@ storage:
       contents:
         inline: "{{ .hostname }}"
 
-    - path: /etc/hosts # TODO
+    - path: /etc/hosts
       append:
         - inline: |
             127.0.0.1 {{ .hostname }} registry.local
 
     #
-    # Loopback with Control VIP
+    # Loopback with Control VIP for initial setup
     #
-    - path: /etc/systemd/network/000-loopback.network
+    - path: /etc/systemd/network/hh-0-init--loopback.network
       mode: 0644
       contents:
         inline: |
@@ -59,40 +59,6 @@ storage:
           Address=127.0.0.1/8
           Address=::1/128
           Address={{ .controlVIP }}
-
-    #
-    # per port/switch configuration
-    #
-    {{ range .ports }}
-    {{ if .MAC }}
-    - path: /etc/systemd/network/{{ .ID }}-{{ .PortName }}.link
-      mode: 0644
-      contents:
-        inline: |
-          [Match]
-          MACAddress={{ .MAC }}
-          Type=ether
-
-          [Link]
-          Name={{ .SwitchName }}
-          Description=Connected to {{ .SwitchName }}
-    {{ end }}
-    - path: /etc/systemd/network/{{ .ID }}-{{ .PortName }}-{{ .SwitchName }}.network
-      mode: 0644
-      contents:
-        inline: |
-          [Match]
-          Name={{ .PortName }}
-          Type=ether
-
-          [Network]
-          LinkLocalAddressing=ipv6
-          LLDP=yes
-          EmitLLDP=yes
-          IPv6AcceptRA=yes
-          IPv6SendRA=yes
-          Address={{ .IP }}
-    {{ end }}
 
   links:
     - path: /home/core/.kube/config
