@@ -15,9 +15,9 @@ import (
 
 var (
 	HH_SUBNET                        = "172.30.0.0/16" // All Hedgehog Fabric IPs assignment will happen from this subnet
-	CONTROL_KUBE_CLUSTER_CIDR        = "10.142.0.0/16"
-	CONTROL_KUBE_SERVICE_CIDR        = "10.143.0.0/16"
-	CONTROL_KUBE_CLUSTER_DNS         = "10.143.0.10"
+	CONTROL_KUBE_CLUSTER_CIDR        = "172.28.0.0/16"
+	CONTROL_KUBE_SERVICE_CIDR        = "172.29.0.0/16"
+	CONTROL_KUBE_CLUSTER_DNS         = "172.29.0.10"
 	CONTROL_VIP                      = "172.30.1.1"
 	CONTROL_VIP_MASK                 = "/32"
 	ASN_SPINE                 uint32 = 65100
@@ -57,7 +57,7 @@ var (
 	REF_ZOT_TARGET_IMAGE = cnc.Ref{Repo: "ghcr.io/project-zot", Name: "zot-minimal-linux-amd64"}
 
 	// Das Boot
-	DAS_BOOT_SEEDER_CLUSTER_IP = "10.143.42.42"
+	DAS_BOOT_SEEDER_CLUSTER_IP = "172.29.42.42"
 
 	REF_DASBOOT_VERSION       = cnc.Ref{Tag: "v0.9.2"}
 	REF_DASBOOT_CRDS_CHART    = cnc.Ref{Name: "das-boot/charts/das-boot-crds"}
