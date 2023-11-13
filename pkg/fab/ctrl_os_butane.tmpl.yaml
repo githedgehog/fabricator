@@ -42,7 +42,7 @@ storage:
     #
     # Loopback with Control VIP for initial setup
     #
-    - path: /etc/systemd/network/hh-0-init--loopback.network
+    - path: /etc/systemd/network/00-hh-0-init--loopback.network
       mode: 0644
       contents:
         inline: |
