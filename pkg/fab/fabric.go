@@ -265,11 +265,6 @@ func (cfg *Fabric) Build(basedir string, preset cnc.Preset, get cnc.GetComponent
 			Name: "deployment/fabric-controller-manager",
 		})
 
-	install(BundleControlInstall, STAGE_INSTALL_3_FABRIC, "control-agent-wait",
-		&cnc.WaitKube{
-			Name: "controlagent/" + controlNodeName,
-		})
-
 	run(BundleControlInstall, STAGE_INSTALL_3_FABRIC, "fabric-wiring",
 		&cnc.FileGenerate{
 			File: cnc.File{
@@ -278,6 +273,11 @@ func (cfg *Fabric) Build(basedir string, preset cnc.Preset, get cnc.GetComponent
 				InstallName:   "hh-wiring.yaml",
 			},
 			Content: cnc.FromValue(wiringData.String()),
+		})
+
+	install(BundleControlInstall, STAGE_INSTALL_3_FABRIC, "control-agent-wait",
+		&cnc.WaitKube{
+			Name: "controlagent/" + controlNodeName,
 		})
 
 	return nil
