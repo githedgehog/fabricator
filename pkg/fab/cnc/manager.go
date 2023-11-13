@@ -74,17 +74,19 @@ type Manager struct {
 	bundles    []Bundle
 	maxStage   Stage
 	components []Component
+	hydrateCfg *fabwiring.HydrateConfig
 
 	addedBuildOps map[string]any
 	addedRunOps   map[string]any
 }
 
-func New(presets []Preset, bundles []Bundle, maxStage Stage, components []Component) *Manager {
+func New(presets []Preset, bundles []Bundle, maxStage Stage, components []Component, hydrateCfg *fabwiring.HydrateConfig) *Manager {
 	mngr := &Manager{
 		presets:    presets,
 		bundles:    bundles,
 		maxStage:   maxStage,
 		components: components,
+		hydrateCfg: hydrateCfg,
 	}
 
 	return mngr
@@ -206,12 +208,7 @@ func (mngr *Manager) Init(basedir string, fromConfig string, preset Preset, wiri
 		if hydrate {
 			slog.Warn("Wiring is not hydrated, hydrating", "err", err)
 
-			// TODO make configurable
-			if err := fabwiring.Hydrate(mngr.wiring, fabwiring.HydrateConfig{
-				Subnet:       "172.30.0.0/16",
-				SpineASN:     65100,
-				LeafASNStart: 65101,
-			}); err != nil {
+			if err := fabwiring.Hydrate(mngr.wiring, mngr.hydrateCfg); err != nil {
 				return errors.Wrapf(err, "error hydrating wiring")
 			}
 		} else {

@@ -2,6 +2,7 @@ package fab
 
 import (
 	_ "embed"
+	"slices"
 
 	"github.com/pkg/errors"
 	"github.com/urfave/cli/v2"
@@ -18,7 +19,7 @@ type K3s struct {
 	ClusterCIDR string   `json:"clusterCIDR,omitempty"`
 	ServiceCIDR string   `json:"serviceCIDR,omitempty"`
 	ClusterDNS  string   `json:"clusterDNS,omitempty"`
-	ExtraTLSSAN []string `json:"extraTLSSAN,omitempty"`
+	TLSSAN      []string `json:"tlsSAN,omitempty"`
 }
 
 var _ cnc.Component = (*K3s)(nil)
@@ -37,6 +38,29 @@ func (cfg *K3s) Flags() []cli.Flag {
 
 func (cfg *K3s) Hydrate(preset cnc.Preset) error {
 	cfg.Ref = cfg.Ref.Fallback(REF_K3S)
+
+	if cfg.ClusterCIDR == "" {
+		cfg.ClusterCIDR = CONTROL_KUBE_CLUSTER_CIDR
+	}
+
+	if cfg.ServiceCIDR == "" {
+		cfg.ServiceCIDR = CONTROL_KUBE_SERVICE_CIDR
+	}
+
+	if cfg.ClusterDNS == "" {
+		cfg.ClusterDNS = CONTROL_KUBE_CLUSTER_DNS
+	}
+
+	for _, tlsSAN := range []string{
+		"127.0.0.1",
+		"kube-fabric.local",
+		CONTROL_VIP,
+		// TODO add configurable SANs
+	} {
+		if !slices.Contains(cfg.TLSSAN, tlsSAN) {
+			cfg.TLSSAN = append(cfg.TLSSAN, tlsSAN)
+		}
+	}
 
 	return nil
 }
@@ -80,7 +104,6 @@ func (cfg *K3s) Build(basedir string, preset cnc.Preset, get cnc.GetComponent, w
 			Content: cnc.FromTemplate(k3sConfigTemplate,
 				"cfg", cfg,
 				"controlNodeName", controlNodeName,
-				"controlVIP", CONTROL_VIP,
 			),
 		})
 

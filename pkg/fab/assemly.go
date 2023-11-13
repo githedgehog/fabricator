@@ -10,17 +10,24 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab/cnc"
 	"go.githedgehog.com/fabricator/pkg/fab/hlab"
 	"go.githedgehog.com/fabricator/pkg/fab/vlab"
+	fabwiring "go.githedgehog.com/fabricator/pkg/fab/wiring"
 )
 
 var (
-	CONTROL_VIP      = "172.30.1.1"
-	CONTROL_VIP_MASK = "/32"
-	ZOT_CHECK_URL    = fmt.Sprintf("https://%s:%d/v2/_catalog", CONTROL_VIP, ZOT_NODE_PORT)
-	K3S_API_PORT     = 6443
-	ZOT_NODE_PORT    = 31000
-	VPC_VLAN_MIN     = 1000
-	VPC_VLAN_MAX     = 1999
-	VPC_SUBNET       = "10.0.0.0/8"
+	HH_SUBNET                        = "172.30.0.0/16" // All Hedgehog Fabric IPs assignment will happen from this subnet
+	CONTROL_KUBE_CLUSTER_CIDR        = "10.142.0.0/16"
+	CONTROL_KUBE_SERVICE_CIDR        = "10.143.0.0/16"
+	CONTROL_KUBE_CLUSTER_DNS         = "10.143.0.10"
+	CONTROL_VIP                      = "172.30.1.1"
+	CONTROL_VIP_MASK                 = "/32"
+	ASN_SPINE                 uint32 = 65100
+	ASN_LEAF_START            uint32 = 65101
+	ZOT_CHECK_URL                    = fmt.Sprintf("https://%s:%d/v2/_catalog", CONTROL_VIP, ZOT_NODE_PORT)
+	K3S_API_PORT                     = 6443
+	ZOT_NODE_PORT                    = 31000
+	VPC_VLAN_MIN                     = 1000
+	VPC_VLAN_MAX                     = 1999
+	VPC_SUBNET                       = "10.0.0.0/8"
 
 	DEV_SSH_KEY     = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGpF2+9I1Nj4BcN7y6DjzTbq1VcUYIRGyfzId5ZoBEFj" // 1P: Fabric Dev SSH Key Shared
 	DEV_PASSWORD    = "$5$8nAYPGcl4l6G7Av1$Qi4/gnM0yPtGv9kjpMh78NuNSfQWy7vR1rulHpurL36"                  // 1P: Fabric Dev SONiC Admin
@@ -168,6 +175,11 @@ func NewCNCManager() *cnc.Manager {
 			&Fabric{},
 			&VLAB{},
 			&ServerOS{},
+		},
+		&fabwiring.HydrateConfig{
+			Subnet:       HH_SUBNET,
+			SpineASN:     ASN_SPINE,
+			LeafASNStart: ASN_LEAF_START,
 		},
 	)
 }

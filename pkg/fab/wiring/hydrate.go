@@ -70,7 +70,7 @@ const (
 	FABRIC_IP_NET        = 20 // can take more than one /24, let's book 10
 )
 
-func Hydrate(data *wiring.Data, cfg HydrateConfig) error {
+func Hydrate(data *wiring.Data, cfg *HydrateConfig) error {
 	if !strings.HasSuffix(cfg.Subnet, ".0.0/16") {
 		return errors.Errorf("Subnet %s is expected to be x.y.0.0/16", cfg.Subnet)
 	}
