@@ -137,3 +137,7 @@ func (cfg *K3s) ControlNodeName(data *wiring.Data) (string, error) {
 
 	return name, nil
 }
+
+func K3sConfig(get cnc.GetComponent) *K3s {
+	return get((&K3s{}).Name()).(*K3s)
+}

@@ -36,6 +36,7 @@ type DasBoot struct {
 	RegCtrlChartRef cnc.Ref    `json:"regCtrlChartRef,omitempty"`
 	RegCtrlImageRef cnc.Ref    `json:"regCtrlImageRef,omitempty"`
 	TLS             DasBootTLS `json:"tls,omitempty"`
+	ClusterIP       string     `json:"clusterIP,omitempty"`
 }
 
 type DasBootTLS struct {
@@ -100,6 +101,10 @@ func (cfg *DasBoot) Hydrate(preset cnc.Preset) error {
 		return errors.Wrap(err, "error ensuring OCI Repo Certs") // TODO
 	}
 
+	if cfg.ClusterIP == "" {
+		cfg.ClusterIP = DAS_BOOT_SEEDER_CLUSTER_IP
+	}
+
 	return nil
 }
 
@@ -116,6 +121,8 @@ func (cfg *DasBoot) Build(basedir string, preset cnc.Preset, get cnc.GetComponen
 
 	target := BaseConfig(get).Target
 	targetInCluster := BaseConfig(get).TargetInCluster
+
+	k3sCfg := K3sConfig(get)
 
 	run(BundleControlInstall, STAGE_INSTALL_4_DASBOOT, "das-boot-rsyslog-image",
 		&cnc.SyncOCI{
@@ -206,6 +213,8 @@ func (cfg *DasBoot) Build(basedir string, preset cnc.Preset, get cnc.GetComponen
 				}, cnc.FromTemplate(dasBootSeederValuesTemplate,
 					"ref", target.Fallback(cfg.SeederImageRef),
 					"controlVIP", CONTROL_VIP+CONTROL_VIP_MASK,
+					"k3sCfg", k3sCfg,
+					"clusterIP", cfg.ClusterIP,
 				)),
 				cnc.KubeHelmChart("das-boot-registration-controller", "default", helm.HelmChartSpec{
 					TargetNamespace: "default",

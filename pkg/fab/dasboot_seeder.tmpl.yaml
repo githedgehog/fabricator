@@ -4,7 +4,7 @@ image:
   pullPolicy: Always
 service:
   type: ClusterIP
-  clusterIP: 10.143.42.42 # TODO
+  clusterIP: {{ .clusterIP }}
   ports:
     # insecure:
     #   port: 80
@@ -20,15 +20,15 @@ settings:
         device_name: ""
         listening_port: 80
   control_vip: {{ .controlVIP }}
-  dns_servers: # TODO
-    - 10.143.0.10
+  dns_servers:
+    - {{ .k3sCfg.ClusterDNS }}
   ntp_servers:
     - das-boot-ntp-udp.default.svc.cluster.local
   syslog_servers:
     - das-boot-rsyslog.default.svc.cluster.local
-  kube_subnets: # TODO
-    - 10.142.0.0/16
-    - 10.143.0.0/16
+  kube_subnets:
+    - {{ .k3sCfg.ClusterCIDR }}
+    - {{ .k3sCfg.ServiceCIDR }}
   artifacts:
     oci_registries:
       - url: oci://registry.default:5000/githedgehog
