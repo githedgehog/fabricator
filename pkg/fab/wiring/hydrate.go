@@ -66,7 +66,7 @@ const (
 
 	CONTROL_IP_NET       = 2
 	SWITCH_IP_NET        = 10
-	MCLAG_SESSION_IP_NET = 11
+	MCLAG_SESSION_IP_NET = 5
 	FABRIC_IP_NET        = 20 // can take more than one /24, let's book 10
 )
 
