@@ -22,3 +22,4 @@ vpcBackend: {{ .vpcBackend }}
 snatAllowed: {{ .snatAllowed }}
 vpcSubnet: {{ .vpcSubnet }}
 fabricMode: {{ .fabricMode }}
+vs: {{ .vs }}

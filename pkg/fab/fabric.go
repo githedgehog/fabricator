@@ -234,6 +234,7 @@ func (cfg *Fabric) Build(basedir string, preset cnc.Preset, get cnc.GetComponent
 						"snatAllowed", cfg.SNATAllowed,
 						"vpcSubnet", VPC_SUBNET,
 						"fabricMode", config.FabricModeSpineLeaf, // TODO make configurable
+						"vs", preset == PRESET_VLAB,
 					),
 				),
 				cnc.KubeHelmChart("fabric-dhcp-server", "default", helm.HelmChartSpec{
