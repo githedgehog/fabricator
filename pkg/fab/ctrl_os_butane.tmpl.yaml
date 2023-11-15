@@ -14,6 +14,19 @@ passwd:
       shell: /bin/bash
 
 storage:
+  directories:
+    - path: /home/core/.config
+      user:
+        name: core
+
+    - path: /home/core/.config/k9s
+      user:
+        name: core
+
+    - path: /home/core/.kube
+      user:
+        name: core
+
   files:
     # disable updates - we really don't care on a dev machine
     # they are just annoying here at the moment
@@ -39,9 +52,7 @@ storage:
         - inline: |
             127.0.0.1 {{ .hostname }} registry.local
 
-    #
     # Loopback with Control VIP for initial setup
-    #
     - path: /etc/systemd/network/00-hh-0-init--loopback.network
       mode: 0644
       contents:
@@ -59,6 +70,58 @@ storage:
           Address=127.0.0.1/8
           Address=::1/128
           Address={{ .controlVIP }}
+
+    # K9s plugin to reboot and reinstall switches
+    - path: /home/core/.config/k9s/plugin.yml
+      user:
+        name: core
+      mode: 0644
+      contents:
+        inline: |
+          plugin:
+            fabricswitchreboot:
+              shortCut: r
+              description: Reboot
+              scopes:
+              - switch
+              - agent
+              confirm: true
+              background: false
+              command: kubectl
+              args:
+              - fabric
+              - switch
+              - reboot
+              - --name
+              - $NAME
+              - --yes
+            fabricswitchreinstall:
+              shortCut: Shift-R
+              description: Reinstall
+              scopes:
+              - switch
+              - agent
+              confirm: true
+              background: false
+              command: kubectl
+              args:
+              - fabric
+              - switch
+              - reinstall
+              - --name
+              - $NAME
+              - --yes
+            fabricswitchssh:
+              shortCut: Shift-S
+              description: SSH
+              scopes:
+              - switch
+              - agent
+              confirm: true
+              background: false
+              command: ssh
+              args:
+              - admin@$NAME
 
   links:
     - path: /home/core/.kube/config
