@@ -165,8 +165,89 @@ func (b *SpineLeafBuilder) Build() (*wiring.Data, error) {
 			return nil, err
 		}
 
-		// TODO generate 4 x servers
-		serverID++
+		// 2 x mclag conn servers
+		for i := 0; i < 2; i++ {
+			serverName := fmt.Sprintf("server-%02d", serverID)
+
+			if _, err := b.createServer(serverName, wiringapi.ServerSpec{
+				Description: fmt.Sprintf("S-%02d MCLAG %s %s", serverID, leaf1Name, leaf2Name),
+			}); err != nil {
+				return nil, err
+			}
+
+			if _, err := b.createConnection(wiringapi.ConnectionSpec{
+				MCLAG: &wiringapi.ConnMCLAG{
+					Links: []wiringapi.ServerToSwitchLink{
+						{
+							Server: wiringapi.BasePortName{Port: b.nextServerPort(serverName)},
+							Switch: wiringapi.BasePortName{Port: b.nextSwitchPort(leaf1Name)},
+						},
+						{
+							Server: wiringapi.BasePortName{Port: b.nextServerPort(serverName)},
+							Switch: wiringapi.BasePortName{Port: b.nextSwitchPort(leaf2Name)},
+						},
+					},
+				},
+			}); err != nil {
+				return nil, err
+			}
+
+			serverID++
+		}
+
+		// unbundled conn server to leaf1
+		{
+			serverName := fmt.Sprintf("server-%02d", serverID)
+
+			if _, err := b.createServer(serverName, wiringapi.ServerSpec{
+				Description: fmt.Sprintf("S-%02d Unbundled %s", serverID, leaf1Name),
+			}); err != nil {
+				return nil, err
+			}
+
+			if _, err := b.createConnection(wiringapi.ConnectionSpec{
+				Unbundled: &wiringapi.ConnUnbundled{
+					Link: wiringapi.ServerToSwitchLink{
+						Server: wiringapi.BasePortName{Port: b.nextServerPort(serverName)},
+						Switch: wiringapi.BasePortName{Port: b.nextSwitchPort(leaf1Name)},
+					},
+				},
+			}); err != nil {
+				return nil, err
+			}
+
+			serverID++
+		}
+
+		// bundled conn server to leaf2
+		{
+			serverName := fmt.Sprintf("server-%02d", serverID)
+
+			if _, err := b.createServer(serverName, wiringapi.ServerSpec{
+				Description: fmt.Sprintf("S-%02d Bundled %s", serverID, leaf2Name),
+			}); err != nil {
+				return nil, err
+			}
+
+			if _, err := b.createConnection(wiringapi.ConnectionSpec{
+				Bundled: &wiringapi.ConnBundled{
+					Links: []wiringapi.ServerToSwitchLink{
+						{
+							Server: wiringapi.BasePortName{Port: b.nextServerPort(serverName)},
+							Switch: wiringapi.BasePortName{Port: b.nextSwitchPort(leaf2Name)},
+						},
+						{
+							Server: wiringapi.BasePortName{Port: b.nextServerPort(serverName)},
+							Switch: wiringapi.BasePortName{Port: b.nextSwitchPort(leaf2Name)},
+						},
+					},
+				},
+			}); err != nil {
+				return nil, err
+			}
+
+			serverID++
+		}
 	}
 
 	for idx := uint8(1); idx <= b.OrphanLeafsCount; idx++ {
@@ -186,10 +267,63 @@ func (b *SpineLeafBuilder) Build() (*wiring.Data, error) {
 			return nil, err
 		}
 
-		// TODO generate 2 x servers
+		// unbundled conn server
+		{
+			serverName := fmt.Sprintf("server-%02d", serverID)
+
+			if _, err := b.createServer(serverName, wiringapi.ServerSpec{
+				Description: fmt.Sprintf("S-%02d Unbundled %s", serverID, leafName),
+			}); err != nil {
+				return nil, err
+			}
+
+			if _, err := b.createConnection(wiringapi.ConnectionSpec{
+				Unbundled: &wiringapi.ConnUnbundled{
+					Link: wiringapi.ServerToSwitchLink{
+						Server: wiringapi.BasePortName{Port: b.nextServerPort(serverName)},
+						Switch: wiringapi.BasePortName{Port: b.nextSwitchPort(leafName)},
+					},
+				},
+			}); err != nil {
+				return nil, err
+			}
+
+			serverID++
+		}
+
+		// bundled conn server
+		{
+			serverName := fmt.Sprintf("server-%02d", serverID)
+
+			if _, err := b.createServer(serverName, wiringapi.ServerSpec{
+				Description: fmt.Sprintf("S-%02d Bundled %s", serverID, leafName),
+			}); err != nil {
+				return nil, err
+			}
+
+			if _, err := b.createConnection(wiringapi.ConnectionSpec{
+				Bundled: &wiringapi.ConnBundled{
+					Links: []wiringapi.ServerToSwitchLink{
+						{
+							Server: wiringapi.BasePortName{Port: b.nextServerPort(serverName)},
+							Switch: wiringapi.BasePortName{Port: b.nextSwitchPort(leafName)},
+						},
+						{
+							Server: wiringapi.BasePortName{Port: b.nextServerPort(serverName)},
+							Switch: wiringapi.BasePortName{Port: b.nextSwitchPort(leafName)},
+						},
+					},
+				},
+			}); err != nil {
+				return nil, err
+			}
+
+			serverID++
+		}
 	}
 
 	if b.Hydrated {
+		// TODO extract to a single place
 		if err := Hydrate(b.data, &HydrateConfig{
 			Subnet:       "172.30.0.0/16",
 			SpineASN:     65100,
@@ -211,9 +345,18 @@ func (b *SpineLeafBuilder) nextSwitchPort(switchName string) string {
 	return portName
 }
 
-func (b *SpineLeafBuilder) nextServerPort(serverName string) string {
+func (b *SpineLeafBuilder) nextControlPort(serverName string) string {
 	ifaceID := b.ifaceTracker[serverName]
 	portName := fmt.Sprintf("%s/enp0s%d", serverName, ifaceID+3)
+	ifaceID++
+	b.ifaceTracker[serverName] = ifaceID
+
+	return portName
+}
+
+func (b *SpineLeafBuilder) nextServerPort(serverName string) string {
+	ifaceID := b.ifaceTracker[serverName]
+	portName := fmt.Sprintf("%s/enp0s%d", serverName, ifaceID+2)
 	ifaceID++
 	b.ifaceTracker[serverName] = ifaceID
 
@@ -307,7 +450,7 @@ func (b *SpineLeafBuilder) createManagementConnection(switchName string) (*wirin
 		Management: &wiringapi.ConnMgmt{
 			Link: wiringapi.ConnMgmtLink{
 				Server: wiringapi.ConnMgmtLinkServer{
-					BasePortName: wiringapi.BasePortName{Port: b.nextServerPort(CONTROL)},
+					BasePortName: wiringapi.BasePortName{Port: b.nextControlPort(CONTROL)},
 				},
 				Switch: wiringapi.ConnMgmtLinkSwitch{
 					BasePortName: wiringapi.BasePortName{Port: fmt.Sprintf("%s/Management0", switchName)},
