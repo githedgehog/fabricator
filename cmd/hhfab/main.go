@@ -13,6 +13,7 @@ import (
 	"github.com/urfave/cli/v2"
 	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/fab/cnc"
+	"go.githedgehog.com/fabricator/pkg/fab/wiring"
 )
 
 var version = "(devel)"
@@ -63,7 +64,7 @@ func main() {
 		Destination: &brief,
 	}
 
-	var basedir, fromConfig, preset, wiring, wiringGenType, wiringGenPreset string
+	var basedir, fromConfig, preset, wiringPath, wiringGenType, wiringGenPreset string
 	basedirFlag := &cli.StringFlag{
 		Name:        "basedir",
 		Aliases:     []string{"d"},
@@ -130,7 +131,7 @@ func main() {
 						Name:        "wiring-path",
 						Aliases:     []string{"wiring", "w"},
 						Usage:       "use wiring diagram from `FILE` (or dir), use '-' to read from stdin instead",
-						Destination: &wiring,
+						Destination: &wiringPath,
 					},
 					// TODO support specifying wiring type and preset explicitly
 					// &cli.StringFlag{
@@ -162,7 +163,7 @@ func main() {
 					return setupLogger(verbose, brief)
 				},
 				Action: func(cCtx *cli.Context) error {
-					err := mngr.Init(basedir, fromConfig, cnc.Preset(preset), wiring, wiringGenType, wiringGenPreset, hydrate)
+					err := mngr.Init(basedir, fromConfig, cnc.Preset(preset), wiringPath, wiringGenType, wiringGenPreset, hydrate)
 					if err != nil {
 						return errors.Wrap(err, "error initializing")
 					}
@@ -487,6 +488,56 @@ func main() {
 							}
 
 							return errors.Wrapf(svc.CleanupVMs(), "error cleaning up VMs")
+						},
+					},
+				},
+			},
+			{
+				Name:  "wiring",
+				Usage: "tools for working with wiring diagram",
+				Flags: []cli.Flag{
+					basedirFlag,
+					verboseFlag,
+					briefFlag,
+				},
+				Subcommands: []*cli.Command{
+					{
+						Name:  "sample",
+						Usage: "sample wiring diagram",
+						Flags: []cli.Flag{
+							verboseFlag,
+							briefFlag,
+							// TODO
+						},
+						Subcommands: []*cli.Command{
+							{
+								Name:  "spine-leaf",
+								Usage: "sample wiring diagram for spine-leaf topology",
+								Flags: []cli.Flag{
+									verboseFlag,
+									briefFlag,
+									// TODO
+								},
+								Before: func(ctx *cli.Context) error {
+									return setupLogger(verbose, brief)
+								},
+								Action: func(cCtx *cli.Context) error {
+									data, err := (&wiring.SpineLeafBuilder{
+										VLAB:              true,
+										SpinesCount:       2,
+										FabricLinksCount:  4,
+										MCLAGLeafsCount:   4,
+										OrphanLeafsCount:  2,
+										MCLAGSessionLinks: 2,
+										MCLAGPeerLinks:    2,
+									}).Build()
+									if err != nil {
+										return errors.Wrap(err, "error building sample")
+									}
+
+									return errors.Wrapf(data.Write(os.Stdout), "error writing sample")
+								},
+							},
 						},
 					},
 				},
