@@ -112,15 +112,23 @@ storage:
               - $NAME
               - --yes
             fabricswitchssh:
-              shortCut: Shift-S
+              shortCut: s
               description: SSH
               scopes:
               - switch
               - agent
-              confirm: true
+              confirm: false
               background: false
               command: ssh
               args:
+              - -o
+              - GlobalKnownHostsFile=/dev/null
+              - -o
+              - UserKnownHostsFile=/dev/null
+              - -o
+              - StrictHostKeyChecking=no
+              - -o
+              - LogLevel=ERROR
               - admin@$NAME
 
   links:
