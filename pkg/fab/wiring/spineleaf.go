@@ -15,9 +15,11 @@ const (
 )
 
 type SpineLeafBuilder struct {
-	Defaulted         bool  // true if default should be called on created objects
-	Hydrated          bool  // true if wiring diagram should be hydrated
-	VLAB              bool  // true if VLAB mode is enabled
+	Defaulted bool // true if default should be called on created objects
+	Hydrated  bool // true if wiring diagram should be hydrated
+	// VLAB              bool  // true if VLAB mode is enabled
+	ChainControlLink  bool  // true if not all switches attached directly to control node
+	ControlLinksCount uint8 // number of control links to generate
 	SpinesCount       uint8 // number of spines to generate
 	FabricLinksCount  uint8 // number of links for each spine <> leaf pair
 	MCLAGLeafsCount   uint8 // number of MCLAG server-leafs to generate
@@ -70,46 +72,6 @@ func (b *SpineLeafBuilder) Build() (*wiring.Data, error) {
 
 	switchID := uint8(1) // switch ID counter
 
-	for spineID := uint8(1); spineID <= b.SpinesCount; spineID++ {
-		spineName := fmt.Sprintf("spine-%02d", spineID)
-
-		if _, err := b.createSwitch(spineName, wiringapi.SwitchSpec{
-			Role:        wiringapi.SwitchRoleSpine,
-			Description: fmt.Sprintf("VS-%02d", switchID),
-		}); err != nil {
-			return nil, err
-		}
-
-		switchID++
-
-		if _, err := b.createManagementConnection(spineName); err != nil {
-			return nil, err
-		}
-
-		for leafID := uint8(1); leafID <= b.MCLAGLeafsCount+b.OrphanLeafsCount; leafID++ {
-			leafName := fmt.Sprintf("leaf-%02d", leafID)
-
-			links := []wiringapi.FabricLink{}
-			for spinePortID := uint8(0); spinePortID < b.FabricLinksCount; spinePortID++ {
-				spinePort := b.nextSwitchPort(spineName)
-				leafPort := b.nextSwitchPort(leafName)
-
-				links = append(links, wiringapi.FabricLink{
-					Spine: wiringapi.ConnFabricLinkSwitch{BasePortName: wiringapi.BasePortName{Port: spinePort}},
-					Leaf:  wiringapi.ConnFabricLinkSwitch{BasePortName: wiringapi.BasePortName{Port: leafPort}},
-				})
-			}
-
-			if _, err := b.createConnection(wiringapi.ConnectionSpec{
-				Fabric: &wiringapi.ConnFabric{
-					Links: links,
-				},
-			}); err != nil {
-				return nil, err
-			}
-		}
-	}
-
 	leafID := uint8(1)   // leaf ID counter
 	serverID := uint8(1) // server ID counter
 
@@ -130,15 +92,24 @@ func (b *SpineLeafBuilder) Build() (*wiring.Data, error) {
 			return nil, err
 		}
 
+		if !b.ChainControlLink {
+			if _, err := b.createManagementConnection(leaf1Name); err != nil {
+				return nil, err
+			}
+			if _, err := b.createManagementConnection(leaf2Name); err != nil {
+				return nil, err
+			}
+		} else if leafID < b.ControlLinksCount {
+			if _, err := b.createControlConnection(leaf1Name); err != nil {
+				return nil, err
+			}
+			if _, err := b.createControlConnection(leaf2Name); err != nil {
+				return nil, err
+			}
+		}
+
 		switchID += 2
 		leafID += 2
-
-		if _, err := b.createManagementConnection(leaf1Name); err != nil {
-			return nil, err
-		}
-		if _, err := b.createManagementConnection(leaf2Name); err != nil {
-			return nil, err
-		}
 
 		sessionLinks := []wiringapi.SwitchToSwitchLink{}
 		for i := uint8(0); i < b.MCLAGSessionLinks; i++ {
@@ -260,12 +231,18 @@ func (b *SpineLeafBuilder) Build() (*wiring.Data, error) {
 			return nil, err
 		}
 
+		if !b.ChainControlLink {
+			if _, err := b.createManagementConnection(leafName); err != nil {
+				return nil, err
+			}
+		} else if leafID < b.ControlLinksCount {
+			if _, err := b.createControlConnection(leafName); err != nil {
+				return nil, err
+			}
+		}
+
 		switchID++
 		leafID++
-
-		if _, err := b.createManagementConnection(leafName); err != nil {
-			return nil, err
-		}
 
 		// unbundled conn server
 		{
@@ -319,6 +296,48 @@ func (b *SpineLeafBuilder) Build() (*wiring.Data, error) {
 			}
 
 			serverID++
+		}
+	}
+
+	for spineID := uint8(1); spineID <= b.SpinesCount; spineID++ {
+		spineName := fmt.Sprintf("spine-%02d", spineID)
+
+		if _, err := b.createSwitch(spineName, wiringapi.SwitchSpec{
+			Role:        wiringapi.SwitchRoleSpine,
+			Description: fmt.Sprintf("VS-%02d", switchID),
+		}); err != nil {
+			return nil, err
+		}
+
+		if !b.ChainControlLink {
+			if _, err := b.createManagementConnection(spineName); err != nil {
+				return nil, err
+			}
+		}
+
+		switchID++
+
+		for leafID := uint8(1); leafID <= b.MCLAGLeafsCount+b.OrphanLeafsCount; leafID++ {
+			leafName := fmt.Sprintf("leaf-%02d", leafID)
+
+			links := []wiringapi.FabricLink{}
+			for spinePortID := uint8(0); spinePortID < b.FabricLinksCount; spinePortID++ {
+				spinePort := b.nextSwitchPort(spineName)
+				leafPort := b.nextSwitchPort(leafName)
+
+				links = append(links, wiringapi.FabricLink{
+					Spine: wiringapi.ConnFabricLinkSwitch{BasePortName: wiringapi.BasePortName{Port: spinePort}},
+					Leaf:  wiringapi.ConnFabricLinkSwitch{BasePortName: wiringapi.BasePortName{Port: leafPort}},
+				})
+			}
+
+			if _, err := b.createConnection(wiringapi.ConnectionSpec{
+				Fabric: &wiringapi.ConnFabric{
+					Links: links,
+				},
+			}); err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -455,6 +474,21 @@ func (b *SpineLeafBuilder) createManagementConnection(switchName string) (*wirin
 				Switch: wiringapi.ConnMgmtLinkSwitch{
 					BasePortName: wiringapi.BasePortName{Port: fmt.Sprintf("%s/Management0", switchName)},
 					ONIEPortName: "eth0",
+				},
+			},
+		},
+	})
+}
+
+func (b *SpineLeafBuilder) createControlConnection(switchName string) (*wiringapi.Connection, error) {
+	return b.createConnection(wiringapi.ConnectionSpec{
+		Management: &wiringapi.ConnMgmt{
+			Link: wiringapi.ConnMgmtLink{
+				Server: wiringapi.ConnMgmtLinkServer{
+					BasePortName: wiringapi.BasePortName{Port: b.nextControlPort(CONTROL)},
+				},
+				Switch: wiringapi.ConnMgmtLinkSwitch{
+					BasePortName: wiringapi.BasePortName{Port: b.nextSwitchPort(switchName)},
 				},
 			},
 		},

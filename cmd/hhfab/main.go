@@ -523,7 +523,9 @@ func main() {
 								},
 								Action: func(cCtx *cli.Context) error {
 									data, err := (&wiring.SpineLeafBuilder{
-										VLAB:              true,
+										// VLAB:              true,
+										ChainControlLink:  true,
+										ControlLinksCount: 2,
 										SpinesCount:       2,
 										FabricLinksCount:  4,
 										MCLAGLeafsCount:   4,
