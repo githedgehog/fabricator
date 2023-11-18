@@ -127,8 +127,31 @@ func Load(cfg *Config) (*Service, error) {
 	}
 
 	for _, vm := range svc.vms {
+		if vm.OS == VMOS_ONIE {
+			usedDevs := map[int]bool{}
+			maxDevID := 0
+			for _, link := range vm.Links {
+				if link.DevID > maxDevID {
+					maxDevID = link.DevID
+				}
+				usedDevs[link.DevID] = true
+			}
+
+			for devID := 0; devID <= maxDevID; devID++ {
+				if !usedDevs[devID] {
+					vm.Links = append(vm.Links, &Link{
+						DevID:        devID,
+						DevName:      fmt.Sprintf("eth%02d", devID),
+						MAC:          svc.macFor(vm, devID),
+						LocalIfPort:  svc.ifPortFor(vm, devID),
+						Disconnected: true,
+					})
+				}
+			}
+		}
+
 		sort.Slice(vm.Links, func(i, j int) bool {
-			return vm.Links[i].DevID < vm.Links[j].DevID
+			return vm.Links[i].DevName < vm.Links[j].DevName
 		})
 	}
 
@@ -202,11 +225,11 @@ func (svc *Service) StartServer(killStaleVMs bool, compact bool, installComplete
 		slog.Info("VM", "id", vm.ID, "name", vm.Name)
 
 		sort.Slice(vm.Links, func(i, j int) bool {
-			return vm.Links[i].DevID < vm.Links[j].DevID
+			return vm.Links[i].DevName < vm.Links[j].DevName
 		})
 
 		for _, link := range vm.Links {
-			slog.Info(">>> Link", "dev", link.DevID, "mac", link.MAC, "local", link.LocalPortName, "dest", link.DestPortName)
+			slog.Info(">>> Link", "dev", link.DevName, "mac", link.MAC, "local", link.LocalPortName, "dest", link.DestPortName)
 		}
 	}
 
@@ -347,7 +370,8 @@ func (svc *Service) AddLink(local wiringapi.IPort, dest wiringapi.IPort) error {
 	}
 
 	localVM.Links = append(localVM.Links, &Link{
-		DevID:         fmt.Sprintf("eth%02d", localPortID),
+		DevID:         localPortID,
+		DevName:       fmt.Sprintf("eth%02d", localPortID),
 		MAC:           svc.macFor(localVM, localPortID),
 		LocalIfPort:   svc.ifPortFor(localVM, localPortID),
 		LocalPortName: local.PortName(),
@@ -368,13 +392,15 @@ func (svc *Service) AddNullLink(local wiringapi.IPort) error {
 	}
 
 	localVM.Links = append(localVM.Links, &Link{
-		DevID:         fmt.Sprintf("eth%02d", localPortID),
+		DevID:         localPortID,
+		DevName:       fmt.Sprintf("eth%02d", localPortID),
 		MAC:           svc.macFor(localVM, localPortID),
 		LocalIfPort:   svc.ifPortFor(localVM, localPortID),
 		LocalPortName: local.PortName(),
-		DestName:      "null",
-		DestIfPort:    IF_PORT_NULL,
-		DestPortName:  "null",
+		// DestName:      "null",
+		// DestIfPort:    IF_PORT_NULL,
+		// DestPortName:  "null",
+		// Disconnected:  true,
 	})
 
 	return nil
@@ -384,7 +410,8 @@ func (svc *Service) AddControlHostFwdLink(vm *VM) error {
 	sshPort := svc.sshPortFor(vm)
 
 	vm.Links = append(vm.Links, &Link{
-		DevID:        "eth0",
+		DevID:        0,
+		DevName:      "eth0",
 		MAC:          svc.macFor(vm, 0),
 		IsHostFwd:    true,
 		SSHPort:      sshPort,

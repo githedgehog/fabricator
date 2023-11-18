@@ -59,9 +59,11 @@ type VM struct {
 }
 
 type Link struct {
-	DevID string
-	MAC   string
+	DevID   int
+	DevName string
+	MAC     string
 
+	Disconnected  bool
 	LocalIfPort   int
 	LocalPortName string
 	DestName      string
@@ -166,8 +168,8 @@ func (vm *VM) RunVM(ctx context.Context) func() error {
 				args = append(args,
 					// TODO optionally make control node isolated using ",restrict=yes"
 					"-netdev", fmt.Sprintf("user,id=%s,hostfwd=tcp:127.0.0.1:%d-:22,hostfwd=tcp:127.0.0.1:%d-:6443,hostfwd=tcp:127.0.0.1:%d-:31000,hostname=%s,domainname=local,dnssearch=local,net=10.100.0.0/24,dhcpstart=10.100.0.10",
-						link.DevID, link.SSHPort, link.KubePort, link.RegistryPort, vm.Name),
-					"-device", fmt.Sprintf("e1000,netdev=%s,mac=%s", link.DevID, link.MAC),
+						link.DevName, link.SSHPort, link.KubePort, link.RegistryPort, vm.Name),
+					"-device", fmt.Sprintf("e1000,netdev=%s,mac=%s", link.DevName, link.MAC),
 				)
 			} else {
 				bus := ""
@@ -176,10 +178,16 @@ func (vm *VM) RunVM(ctx context.Context) func() error {
 					bus = fmt.Sprintf(",bus=pci-bridge%d,addr=0x%x", idx/NICS_PER_PCI_BRIDGE, idx%NICS_PER_PCI_BRIDGE)
 				}
 
-				args = append(args,
-					"-netdev", fmt.Sprintf("socket,id=%s,udp=127.0.0.1:%d,localaddr=127.0.0.1:%d", link.DevID, link.LocalIfPort, link.DestIfPort),
-					"-device", fmt.Sprintf("e1000,netdev=%s,mac=%s%s", link.DevID, link.MAC, bus),
-				)
+				if !link.Disconnected {
+					args = append(args,
+						"-netdev", fmt.Sprintf("socket,id=%s,udp=127.0.0.1:%d,localaddr=127.0.0.1:%d", link.DevName, link.LocalIfPort, link.DestIfPort),
+						"-device", fmt.Sprintf("e1000,netdev=%s,mac=%s%s", link.DevName, link.MAC, bus),
+					)
+				} else {
+					args = append(args,
+						"-device", fmt.Sprintf("e1000,mac=%s%s", link.MAC, bus),
+					)
+				}
 			}
 		}
 
