@@ -95,6 +95,9 @@ func main() {
 
 	var hlabConfig, hlabKubeconfig string
 
+	var wgChainControlLink bool
+	var wgControlLinksCount, wgSpinesCount, wgFabricLinksCount, wgMCLAGLeafsCount, wgOrphanLeafsCount, wgMCLAGSessionLinks, wgMCLAGPeerLinks uint
+
 	mngr := fab.NewCNCManager()
 
 	cli.VersionFlag.(*cli.BoolFlag).Aliases = []string{"V"}
@@ -516,22 +519,76 @@ func main() {
 								Flags: []cli.Flag{
 									verboseFlag,
 									briefFlag,
-									// TODO
+									&cli.BoolFlag{
+										Category:    "spine-leaf",
+										Name:        "chain-control-link",
+										Usage:       "chain control links instead of all switches directly connected to control node",
+										Destination: &wgChainControlLink,
+										Value:       false,
+									},
+									&cli.UintFlag{
+										Category:    "spine-leaf",
+										Name:        "control-links-count",
+										Usage:       "number of control links",
+										Destination: &wgControlLinksCount,
+										Value:       2,
+									},
+									&cli.UintFlag{
+										Category:    "spine-leaf",
+										Name:        "spines-count",
+										Usage:       "number of spines",
+										Destination: &wgSpinesCount,
+										Value:       2,
+									},
+									&cli.UintFlag{
+										Category:    "spine-leaf",
+										Name:        "fabric-links-count",
+										Usage:       "number of fabric links",
+										Destination: &wgFabricLinksCount,
+										Value:       2,
+									},
+									&cli.UintFlag{
+										Category:    "spine-leaf",
+										Name:        "mclag-leafs-count",
+										Usage:       "number of mclag leafs (should be even)",
+										Destination: &wgMCLAGLeafsCount,
+										Value:       2,
+									},
+									&cli.UintFlag{
+										Category:    "spine-leaf",
+										Name:        "orphan-leafs-count",
+										Usage:       "number of orphan leafs",
+										Destination: &wgOrphanLeafsCount,
+										Value:       1,
+									},
+									&cli.UintFlag{
+										Category:    "spine-leaf",
+										Name:        "mclag-session-links",
+										Usage:       "number of mclag session links",
+										Destination: &wgMCLAGSessionLinks,
+										Value:       2,
+									},
+									&cli.UintFlag{
+										Category:    "spine-leaf",
+										Name:        "mclag-peer-links",
+										Usage:       "number of mclag peer links",
+										Destination: &wgMCLAGPeerLinks,
+										Value:       2,
+									},
 								},
 								Before: func(ctx *cli.Context) error {
 									return setupLogger(verbose, brief)
 								},
 								Action: func(cCtx *cli.Context) error {
 									data, err := (&wiring.SpineLeafBuilder{
-										// VLAB:              true,
-										ChainControlLink:  true,
-										ControlLinksCount: 2,
-										SpinesCount:       2,
-										FabricLinksCount:  4,
-										MCLAGLeafsCount:   4,
-										OrphanLeafsCount:  2,
-										MCLAGSessionLinks: 2,
-										MCLAGPeerLinks:    2,
+										ChainControlLink:  wgChainControlLink,
+										ControlLinksCount: uint8(wgControlLinksCount),
+										SpinesCount:       uint8(wgSpinesCount),
+										FabricLinksCount:  uint8(wgFabricLinksCount),
+										MCLAGLeafsCount:   uint8(wgMCLAGLeafsCount),
+										OrphanLeafsCount:  uint8(wgOrphanLeafsCount),
+										MCLAGSessionLinks: uint8(wgMCLAGSessionLinks),
+										MCLAGPeerLinks:    uint8(wgMCLAGPeerLinks),
 									}).Build()
 									if err != nil {
 										return errors.Wrap(err, "error building sample")
