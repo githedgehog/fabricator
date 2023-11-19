@@ -167,7 +167,8 @@ func (vm *VM) RunVM(ctx context.Context) func() error {
 			if link.IsHostFwd {
 				args = append(args,
 					// TODO optionally make control node isolated using ",restrict=yes"
-					"-netdev", fmt.Sprintf("user,id=%s,hostfwd=tcp:127.0.0.1:%d-:22,hostfwd=tcp:127.0.0.1:%d-:6443,hostfwd=tcp:127.0.0.1:%d-:31000,hostname=%s,domainname=local,dnssearch=local,net=10.100.0.0/24,dhcpstart=10.100.0.10",
+					// TODO bind to 0.0.0.0 on host so all control node things available from the outside? nice for automations and dev?
+					"-netdev", fmt.Sprintf("user,id=%s,hostfwd=tcp:127.0.0.1:%d-:22,hostfwd=tcp:127.0.0.1:%d-:6443,hostfwd=tcp:127.0.0.1:%d-:31000,hostname=%s,domainname=local,dnssearch=local,net=172.31.0.0/24,dhcpstart=172.31.0.10",
 						link.DevName, link.SSHPort, link.KubePort, link.RegistryPort, vm.Name),
 					"-device", fmt.Sprintf("e1000,netdev=%s,mac=%s", link.DevName, link.MAC),
 				)
