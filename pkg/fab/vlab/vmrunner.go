@@ -131,10 +131,10 @@ func (vm *VM) RunVM(ctx context.Context, svcCfg *ServiceConfig) func() error {
 
 			device += fmt.Sprintf(",bus=pci-bridge%d,addr=0x%x", ifaceID/IFACES_PER_PCI_BRIDGE, ifaceID%IFACES_PER_PCI_BRIDGE)
 
-			args = append(args,
-				"-netdev", netdev,
-				"-device", device,
-			)
+			if netdev != "" {
+				args = append(args, "-netdev", netdev)
+			}
+			args = append(args, "-device", device)
 		}
 
 		return errors.Wrapf(execCmd(ctx, svcCfg, vm.Basedir, true, "qemu-system-x86_64", []string{}, args...), "error running vm")
