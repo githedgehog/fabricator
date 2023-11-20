@@ -1,3 +1,5 @@
 image:
   repository: {{ .ref.RepoName }}
   tag: {{ .ref.Tag }}
+serviceUDP:
+  nodePort: {{ .nodePort }}

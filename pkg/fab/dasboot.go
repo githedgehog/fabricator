@@ -128,8 +128,6 @@ func (cfg *DasBoot) Build(basedir string, preset cnc.Preset, get cnc.GetComponen
 	target := BaseConfig(get).Target
 	targetInCluster := BaseConfig(get).TargetInCluster
 
-	k3sCfg := K3sConfig(get)
-
 	run(BundleControlInstall, STAGE_INSTALL_4_DASBOOT, "das-boot-rsyslog-image",
 		&cnc.SyncOCI{
 			Ref:    cfg.RsyslogImageRef,
@@ -197,13 +195,19 @@ func (cfg *DasBoot) Build(basedir string, preset cnc.Preset, get cnc.GetComponen
 					Chart:           "oci://" + targetInCluster.Fallback(cfg.RsyslogChartRef).RepoName(),
 					Version:         cfg.RsyslogChartRef.Tag,
 					RepoCA:          ZotConfig(get).TLS.CA.Cert,
-				}, cnc.FromTemplate(dasBootRsyslogValuesTemplate, "ref", target.Fallback(cfg.RsyslogImageRef))),
+				}, cnc.FromTemplate(dasBootRsyslogValuesTemplate,
+					"ref", target.Fallback(cfg.RsyslogImageRef),
+					"nodePort", DAS_BOOT_SYSLOG_NODE_PORT,
+				)),
 				cnc.KubeHelmChart("das-boot-ntp", "default", helm.HelmChartSpec{
 					TargetNamespace: "default",
 					Chart:           "oci://" + targetInCluster.Fallback(cfg.NTPChartRef).RepoName(),
 					Version:         cfg.NTPChartRef.Tag,
 					RepoCA:          ZotConfig(get).TLS.CA.Cert,
-				}, cnc.FromTemplate(dasBootNtpValuesTemplate, "ref", target.Fallback(cfg.NTPImageRef))),
+				}, cnc.FromTemplate(dasBootNtpValuesTemplate,
+					"ref", target.Fallback(cfg.NTPImageRef),
+					"nodePort", DAS_BOOT_NTP_NODE_PORT,
+				)),
 				cnc.KubeHelmChart("das-boot-crds", "default", helm.HelmChartSpec{
 					TargetNamespace: "default",
 					Chart:           "oci://" + targetInCluster.Fallback(cfg.CRDsChartRef).RepoName(),
@@ -219,8 +223,8 @@ func (cfg *DasBoot) Build(basedir string, preset cnc.Preset, get cnc.GetComponen
 				}, cnc.FromTemplate(dasBootSeederValuesTemplate,
 					"ref", target.Fallback(cfg.SeederImageRef),
 					"controlVIP", CONTROL_VIP+CONTROL_VIP_MASK,
-					"k3sCfg", k3sCfg,
-					"clusterIP", cfg.ClusterIP,
+					"ntpNodePort", DAS_BOOT_NTP_NODE_PORT,
+					"syslogNodePort", DAS_BOOT_SYSLOG_NODE_PORT,
 				)),
 				cnc.KubeHelmChart("das-boot-registration-controller", "default", helm.HelmChartSpec{
 					TargetNamespace: "default",
