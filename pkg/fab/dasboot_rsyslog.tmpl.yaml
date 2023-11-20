@@ -4,4 +4,5 @@ image:
 pvc:
   storageClassName: ""
 service:
+  type: NodePort
   nodePort: {{ .nodePort }}
