@@ -301,7 +301,7 @@ func (svc *Service) Serial(name string) error {
 
 	slog.Info("Serial", "vm", vm.Name)
 
-	cmdArgs := []string{}
+	var cmdArgs []string
 	var cmd *exec.Cmd
 	if vm.Type == VMTypeSwitchHW {
 		if switchCfg, exists := svc.mngr.cfg.Switches[vm.Name]; exists {
@@ -323,7 +323,7 @@ func (svc *Service) Serial(name string) error {
 			return errors.Errorf("failed to find switch config for %s", vm.Name)
 		}
 	} else {
-		cmdArgs := []string{
+		cmdArgs = []string{
 			"socat",
 			"-,raw,echo=0,escape=0x1d",
 			fmt.Sprintf("unix-connect:%s", filepath.Join(vm.Basedir, "serial.sock")),
