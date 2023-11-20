@@ -3,3 +3,5 @@ image:
   tag: {{ .ref.Tag }}
 pvc:
   storageClassName: ""
+server:
+  nodePort: {{ .nodePort }}

@@ -2,16 +2,6 @@ image:
   repository: {{ .ref.RepoName }}
   tag: {{ .ref.Tag }}
   pullPolicy: Always
-service:
-  type: ClusterIP
-  clusterIP: {{ .clusterIP }}
-  ports:
-    # insecure:
-    #   port: 80
-    #   targetPort: 8080
-    secure:
-      port: 443
-      targetPort: 8443
 settings:
   issue_certificates: false
   listeners:
@@ -19,16 +9,15 @@ settings:
       dynll:
         device_name: ""
         listening_port: 80
+      generic:
+        - {{ .controlVIP }}:80
+    secure:
+      - {{ .controlVIP }}:443
   control_vip: {{ .controlVIP }}
-  dns_servers:
-    - {{ .k3sCfg.ClusterDNS }}
   ntp_servers:
-    - das-boot-ntp-udp.default.svc.cluster.local
+    - {{ .controlVIP }}:{{ .ntpNodePort }}
   syslog_servers:
-    - das-boot-rsyslog.default.svc.cluster.local
-  kube_subnets:
-    - {{ .k3sCfg.ClusterCIDR }}
-    - {{ .k3sCfg.ServiceCIDR }}
+    - {{ .controlVIP }}:{{ .syslogNodePort }}
   artifacts:
     oci_registries:
       - url: oci://registry.default:5000/githedgehog
