@@ -75,6 +75,7 @@ func (vm *VM) RunVM(ctx context.Context, svcCfg *ServiceConfig) func() error {
 		}
 
 		args := []string{
+			"qemu-system-x86_64",
 			"-name", vm.Name,
 			"-uuid", vm.UUID(),
 			"-m", fmt.Sprintf("%dM", vm.Config.RAM),
@@ -137,7 +138,7 @@ func (vm *VM) RunVM(ctx context.Context, svcCfg *ServiceConfig) func() error {
 			args = append(args, "-device", device)
 		}
 
-		return errors.Wrapf(execCmd(ctx, svcCfg, vm.Basedir, true, "qemu-system-x86_64", []string{}, args...), "error running vm")
+		return errors.Wrapf(execCmd(ctx, svcCfg, vm.Basedir, true, "sudo", []string{}, args...), "error running vm")
 	}
 }
 

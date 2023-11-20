@@ -126,6 +126,10 @@ func (svc *Service) StartServer(killStaleVMs bool, installComplete bool, runComp
 	eg, ctx := errgroup.WithContext(context.Background())
 
 	for idx := range vms {
+		if vms[idx].Type == VMTypeSwitchHW {
+			continue
+		}
+
 		err := vms[idx].Prepare(ctx, svc.cfg)
 		if err != nil {
 			return errors.Wrapf(err, "error preparing VM %s", vms[idx].Name)
@@ -133,6 +137,10 @@ func (svc *Service) StartServer(killStaleVMs bool, installComplete bool, runComp
 	}
 
 	for idx := range vms {
+		if vms[idx].Type == VMTypeSwitchHW {
+			continue
+		}
+
 		vms[idx].Run(ctx, eg, svc.cfg)
 		time.Sleep(200 * time.Millisecond)
 	}
@@ -316,10 +324,11 @@ func (svc *Service) Serial(name string) error {
 		}
 	} else {
 		cmdArgs := []string{
+			"socat",
 			"-,raw,echo=0,escape=0x1d",
 			fmt.Sprintf("unix-connect:%s", filepath.Join(vm.Basedir, "serial.sock")),
 		}
-		cmd = exec.Command("socat", cmdArgs...)
+		cmd = exec.Command("sudo", cmdArgs...)
 	}
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout

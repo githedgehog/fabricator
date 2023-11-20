@@ -79,7 +79,7 @@ const (
 	VMTypeControl  VMType = "control"
 	VMTypeServer   VMType = "server"
 	VMTypeSwitchVS VMType = "switch-vs"
-	VMTypeSwitchHW VMType = "switch-hw"
+	VMTypeSwitchHW VMType = "switch-hw" // fake VM to simplify calculations
 )
 
 type VM struct {
@@ -88,7 +88,7 @@ type VM struct {
 	Type       VMType
 	Basedir    string
 	Config     VMConfig
-	Interfaces map[int]VMInterface // TODO fill gaps with empty interfaces
+	Interfaces map[int]VMInterface
 
 	Ready     fileMarker
 	Installed fileMarker
@@ -194,6 +194,16 @@ func NewVMManager(cfg *Config, data *wiring.Data, basedir string, size string) (
 			return nil, errors.Errorf("dublicate server/switch name: %s", sw.Name)
 		}
 
+		if switchCfg, exists := mngr.cfg.Switches[sw.Name]; exists {
+			if switchCfg.Type == ConfigSwitchTypeHW {
+				mngr.vms[sw.Name] = &VM{
+					Name: sw.Name,
+					Type: VMTypeSwitchHW,
+				}
+				continue
+			}
+		}
+
 		mngr.vms[sw.Name] = &VM{
 			ID:         vmID,
 			Name:       sw.Name,
@@ -206,6 +216,10 @@ func NewVMManager(cfg *Config, data *wiring.Data, basedir string, size string) (
 	}
 
 	for _, vm := range mngr.vms {
+		if vm.Type == VMTypeSwitchHW {
+			continue
+		}
+
 		vm.Basedir = filepath.Join(basedir, vm.Name)
 		vm.Ready = fileMarker{path: filepath.Join(vm.Basedir, "ready")}
 		vm.Installed = fileMarker{path: filepath.Join(vm.Basedir, "installed")}
@@ -273,6 +287,10 @@ func NewVMManager(cfg *Config, data *wiring.Data, basedir string, size string) (
 
 	// fill gaps in interfaces
 	for _, vm := range mngr.vms {
+		if vm.Type == VMTypeSwitchHW {
+			continue
+		}
+
 		usedDevs := map[int]bool{}
 		maxDevID := 0
 
@@ -295,12 +313,16 @@ func NewVMManager(cfg *Config, data *wiring.Data, basedir string, size string) (
 
 func (mngr *VMManager) AddLink(local wiringapi.IPort, dest wiringapi.IPort, conn string) error {
 	if local == nil {
-		return errors.Errorf("local port can't be nil")
+		return errors.Errorf("local port can't be nil, conn %s", conn)
 	}
 
 	localVM, exists := mngr.vms[local.DeviceName()]
 	if !exists {
-		return errors.Errorf("%s does not exist", local.DeviceName())
+		return errors.Errorf("%s does not exist, conn %s", local.DeviceName(), conn)
+	}
+
+	if localVM.Type == VMTypeSwitchHW {
+		return nil
 	}
 
 	localPortID, destPortID := -1, -1
@@ -312,6 +334,8 @@ func (mngr *VMManager) AddLink(local wiringapi.IPort, dest wiringapi.IPort, conn
 		return err
 	}
 
+	var linkCfg *LinkConfig
+
 	if dest != nil {
 		destPortID, err = portIdForName(dest.LocalPortName())
 		if err != nil {
@@ -319,25 +343,33 @@ func (mngr *VMManager) AddLink(local wiringapi.IPort, dest wiringapi.IPort, conn
 		}
 		destVM, exists = mngr.vms[dest.DeviceName()]
 		if !exists {
-			return errors.Errorf("dest %s does not exist for %s", dest.DeviceName(), local.PortName())
+			return errors.Errorf("dest %s does not exist for %s, conn %s", dest.DeviceName(), local.PortName(), conn)
+		}
+
+		if lCfg, exists := mngr.cfg.Links[dest.PortName()]; exists {
+			linkCfg = &lCfg
 		}
 	}
 
 	if _, exists := localVM.Interfaces[localPortID]; exists {
-		return errors.Errorf("%s already has interface %d, can't add %s", local.DeviceName(), localPortID, local.PortName())
+		return errors.Errorf("%s already has interface %d, can't add %s, conn %s", local.DeviceName(), localPortID, local.PortName(), conn)
 	}
 
-	if linkCfg, exists := mngr.cfg.Links[local.PortName()]; exists {
-		pci := linkCfg.PCIAddress
-		if pci == "" {
-			return errors.Errorf("pci address required for %s", local.PortName())
+	if linkCfg != nil {
+		if linkCfg.PCIAddress == "" {
+			return errors.Errorf("pci address required for %s, conn %s", local.PortName(), conn)
 		}
 
-		// TODO prepare PCI device for passthrough
+		if destVM.Type != VMTypeSwitchHW {
+			return errors.Errorf("dest %s should be hardware switch if pci mapping specified, conn %s", dest.DeviceName(), conn)
+		}
+
 		localVM.Interfaces[localPortID] = VMInterface{
 			Connection:  conn,
-			Passthrough: pci,
+			Passthrough: linkCfg.PCIAddress,
 		}
+	} else if destVM.Type == VMTypeSwitchHW {
+		return errors.Errorf("pci mapping is missing for hardware switch dest %s, conn %s", dest.DeviceName(), conn)
 	} else {
 		netdev := fmt.Sprintf("socket,udp=127.0.0.1:%d", localVM.ifacePortFor(localPortID))
 		if destVM != nil {
@@ -364,11 +396,23 @@ func (mngr *VMManager) sortedVMs() []*VM {
 
 func (mngr *VMManager) LogOverview() {
 	for _, vm := range mngr.sortedVMs() {
-		slog.Debug("VM", "id", vm.ID, "name", vm.Name, "type", vm.Type)
+		if vm.Type == VMTypeSwitchHW {
+			continue
+		}
+
+		slog.Info("VM", "id", vm.ID, "name", vm.Name, "type", vm.Type)
 		for ifaceID := 0; ifaceID < len(vm.Interfaces); ifaceID++ {
 			iface := vm.Interfaces[ifaceID]
 			slog.Debug(">>> Interface", "id", ifaceID, "netdev", iface.Netdev, "passthrough", iface.Passthrough, "conn", iface.Connection)
 		}
+	}
+
+	for _, vm := range mngr.sortedVMs() {
+		if vm.Type != VMTypeSwitchHW {
+			continue
+		}
+
+		slog.Info("Hardware", "name", vm.Name, "type", vm.Type)
 	}
 }
 
