@@ -222,7 +222,7 @@ func (cfg *DasBoot) Build(basedir string, preset cnc.Preset, get cnc.GetComponen
 					RepoCA:          ZotConfig(get).TLS.CA.Cert,
 				}, cnc.FromTemplate(dasBootSeederValuesTemplate,
 					"ref", target.Fallback(cfg.SeederImageRef),
-					"controlVIP", CONTROL_VIP+CONTROL_VIP_MASK,
+					"controlVIP", CONTROL_VIP,
 					"ntpNodePort", DAS_BOOT_NTP_NODE_PORT,
 					"syslogNodePort", DAS_BOOT_SYSLOG_NODE_PORT,
 				)),
