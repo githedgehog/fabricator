@@ -407,6 +407,36 @@ func main() {
 							return errors.Wrap(svc.List(), "error vm list")
 						},
 					},
+					{
+						Name:  "vfio-pci-bind",
+						Usage: "bind all device used in vlab to vfio-pci driver for pci passthrough",
+						Flags: []cli.Flag{
+							basedirFlag,
+							verboseFlag,
+							briefFlag,
+							&cli.StringFlag{
+								Name:    "config",
+								Usage:   "use vlab config `FILE`",
+								Aliases: []string{"c"},
+							},
+						},
+						Before: func(ctx *cli.Context) error {
+							return setupLogger(verbose, brief)
+						},
+						Action: func(cCtx *cli.Context) error {
+							err := mngr.Load(basedir)
+							if err != nil {
+								return errors.Wrap(err, "error loading")
+							}
+
+							svc, err := fab.LoadVLAB(basedir, mngr, dryRun, cCtx.String("config"), "")
+							if err != nil {
+								return errors.Wrap(err, "error loading vlab")
+							}
+
+							return errors.Wrap(svc.VFIOPCIBindAll(), "error binding to vfio-pci")
+						},
+					},
 				},
 			},
 			{

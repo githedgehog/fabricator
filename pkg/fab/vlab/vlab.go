@@ -117,6 +117,14 @@ func (svc *Service) StartServer(killStaleVMs bool, installComplete bool, runComp
 
 	svc.checkResources()
 
+	for _, vm := range svc.mngr.sortedVMs() {
+		for _, iface := range vm.Interfaces {
+			if iface.Passthrough != "" && !isDeviceBoundToVFIO(iface.Passthrough) {
+				return errors.Errorf("pci device %s is not bound to vfio-pci, used by conn %s, run 'sudo hhfab vlab vfio-pci-bind' to bind", iface.Passthrough, iface.Connection)
+			}
+		}
+	}
+
 	err = InitTPMConfig(context.Background(), svc.cfg)
 	if err != nil {
 		return errors.Wrapf(err, "error initializing TPM config")
@@ -159,6 +167,36 @@ func (svc *Service) checkResources() {
 	}
 
 	slog.Info("Total VM resources", "cpu", fmt.Sprintf("%d vCPUs", cpu), "ram", fmt.Sprintf("%d MB", ram), "disk", fmt.Sprintf("%d GB", disk))
+}
+
+func (svc *Service) VFIOPCIBindAll() error {
+	checked := 0
+
+	for _, vm := range svc.mngr.sortedVMs() {
+		for _, iface := range vm.Interfaces {
+			if iface.Passthrough != "" {
+				checked++
+
+				var err error
+				for attempt := 0; attempt < 6; attempt++ {
+					err = bindDeviceToVFIO(iface.Passthrough)
+					if err == nil {
+						break
+					}
+					time.Sleep(500 * time.Millisecond)
+				}
+				if err != nil {
+					return errors.Wrapf(err, "error binding device %s to vfio-pci", iface.Passthrough)
+				}
+
+				slog.Debug("Device is ready (bound to vfio-pci)", "device", iface.Passthrough)
+			}
+		}
+	}
+
+	slog.Info("All devices are ready (bound to vfio-pci)", "devices", checked)
+
+	return nil
 }
 
 const (
