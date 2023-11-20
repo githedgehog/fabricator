@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/manifoldco/promptui"
 	"github.com/pkg/errors"
@@ -133,6 +134,7 @@ func (svc *Service) StartServer(killStaleVMs bool, installComplete bool, runComp
 
 	for idx := range vms {
 		vms[idx].Run(ctx, eg, svc.cfg)
+		time.Sleep(200 * time.Millisecond)
 	}
 
 	return eg.Wait()
