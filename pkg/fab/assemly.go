@@ -74,16 +74,16 @@ var (
 
 	// SONiC
 	REF_SONIC_BCOM_BASE = cnc.Ref{Name: "sonic-bcom-private", Tag: "base-bin-4.1.1"}
-	REF_SONIC_BCOM_VLAB = cnc.Ref{Name: "sonic-bcom-private", Tag: "vs-bin-4.1.1"}
+	REF_SONIC_BCOM_VS   = cnc.Ref{Name: "sonic-bcom-private", Tag: "vs-bin-4.1.1"}
 
-	REF_SONIC_TARGET_VERSION  = cnc.Ref{Tag: "latest"}
-	REF_SONIC_TARGETS_DEFAULT = []cnc.Ref{
+	REF_SONIC_TARGET_VERSION = cnc.Ref{Tag: "latest"}
+	REF_SONIC_TARGETS_BASE   = []cnc.Ref{
 		{Name: "sonic/x86_64-dellemc_s5248f_c3538-r0"}, // S5248
 		{Name: "sonic/x86_64-dellemc_s5232f_c3538-r0"}, // S5232
 		{Name: "sonic/x86_64-cel_seastone_2-r0"},       // DS3000
 		{Name: "sonic/x86_64-cel_silverstone-r0"},      // DS4000
 	}
-	REF_SONIC_TARGETS_VLAB = []cnc.Ref{
+	REF_SONIC_TARGETS_VS = []cnc.Ref{
 		{Name: "sonic/x86_64-kvm_x86_64-r0"},
 	}
 

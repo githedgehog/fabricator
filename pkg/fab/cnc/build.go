@@ -5,6 +5,7 @@ import (
 	"compress/bzip2"
 	"compress/gzip"
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -380,7 +381,7 @@ func (op *SyncOCI) Hydrate() error {
 }
 
 func (op *SyncOCI) filePath() string {
-	return strings.ReplaceAll(op.Ref.Name, "/", "_") + ".oci"
+	return strings.ReplaceAll(fmt.Sprintf("%s@%s", op.Ref.Name, op.Ref.Tag), "/", "_") + ".oci"
 }
 
 func (op *SyncOCI) Build(basedir string) error {

@@ -35,6 +35,8 @@ type DasBoot struct {
 	SeederImageRef  cnc.Ref    `json:"seederImageRef,omitempty"`
 	RegCtrlChartRef cnc.Ref    `json:"regCtrlChartRef,omitempty"`
 	RegCtrlImageRef cnc.Ref    `json:"regCtrlImageRef,omitempty"`
+	SONiCBaseRef    cnc.Ref    `json:"sonicBaseRef,omitempty"`
+	SONiCVSRef      cnc.Ref    `json:"sonicVSRef,omitempty"`
 	TLS             DasBootTLS `json:"tls,omitempty"`
 	ClusterIP       string     `json:"clusterIP,omitempty"`
 }
@@ -72,6 +74,8 @@ func (cfg *DasBoot) Hydrate(preset cnc.Preset) error {
 	cfg.SeederImageRef = cfg.SeederImageRef.Fallback(REF_DASBOOT_SEEDER_IMAGE)
 	cfg.RegCtrlChartRef = cfg.RegCtrlChartRef.Fallback(REF_DASBOOT_REGCTRL_CHART)
 	cfg.RegCtrlImageRef = cfg.RegCtrlImageRef.Fallback(REF_DASBOOT_REGCTRL_IMAGE)
+	cfg.SONiCBaseRef = cfg.SONiCBaseRef.Fallback(REF_SONIC_BCOM_BASE)
+	cfg.SONiCVSRef = cfg.SONiCVSRef.Fallback(REF_SONIC_BCOM_VS)
 
 	err := cfg.TLS.ServerCA.Ensure("DAS BOOT Server CA", nil, KEY_USAGE_CA, nil, nil, nil) // TODO key usage
 	if err != nil {
@@ -118,6 +122,8 @@ func (cfg *DasBoot) Build(basedir string, preset cnc.Preset, get cnc.GetComponen
 	cfg.SeederChartRef = cfg.SeederChartRef.Fallback(cfg.Ref, BaseConfig(get).Source)
 	cfg.RegCtrlImageRef = cfg.RegCtrlImageRef.Fallback(cfg.Ref, BaseConfig(get).Source)
 	cfg.RegCtrlChartRef = cfg.RegCtrlChartRef.Fallback(cfg.Ref, BaseConfig(get).Source)
+	cfg.SONiCBaseRef = cfg.SONiCBaseRef.Fallback(BaseConfig(get).Source)
+	cfg.SONiCVSRef = cfg.SONiCVSRef.Fallback(BaseConfig(get).Source)
 
 	target := BaseConfig(get).Target
 	targetInCluster := BaseConfig(get).TargetInCluster
@@ -246,23 +252,22 @@ func (cfg *DasBoot) Build(basedir string, preset cnc.Preset, get cnc.GetComponen
 			),
 		})
 
-	sonicSource := REF_SONIC_BCOM_BASE
-	if preset == PRESET_VLAB {
-		sonicSource = REF_SONIC_BCOM_VLAB
-	}
-	sonicSource = sonicSource.Fallback(BaseConfig(get).Source)
-
-	sonicTargets := REF_SONIC_TARGETS_DEFAULT
-	if preset == PRESET_VLAB {
-		sonicTargets = REF_SONIC_TARGETS_VLAB
-	}
-
-	for _, sonicTarget := range sonicTargets {
+	for _, sonicTarget := range REF_SONIC_TARGETS_BASE {
 		run(BundleControlInstall, STAGE_INSTALL_4_DASBOOT, fmt.Sprintf("das-boot-bin-%s", strings.ReplaceAll(sonicTarget.Name, "/", "-")),
 			&cnc.SyncOCI{
-				Ref:    sonicSource,
+				Ref:    cfg.SONiCBaseRef,
 				Target: target.Fallback(REF_SONIC_TARGET_VERSION, sonicTarget),
 			})
+	}
+
+	if preset == PRESET_VLAB {
+		for _, sonicTarget := range REF_SONIC_TARGETS_VS {
+			run(BundleControlInstall, STAGE_INSTALL_4_DASBOOT, fmt.Sprintf("das-boot-bin-%s", strings.ReplaceAll(sonicTarget.Name, "/", "-")),
+				&cnc.SyncOCI{
+					Ref:    cfg.SONiCVSRef,
+					Target: target.Fallback(REF_SONIC_TARGET_VERSION, sonicTarget),
+				})
+		}
 	}
 
 	install(BundleControlInstall, STAGE_INSTALL_4_DASBOOT, "das-boot-seeder-wait",
