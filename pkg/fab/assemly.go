@@ -25,8 +25,8 @@ var (
 	ZOT_CHECK_URL                    = fmt.Sprintf("https://%s:%d/v2/_catalog", CONTROL_VIP, ZOT_NODE_PORT)
 	K3S_API_PORT                     = 6443
 	ZOT_NODE_PORT                    = 31000
-	DAS_BOOT_NTP_NODE_PORT           = 30100
-	DAS_BOOT_SYSLOG_NODE_PORT        = 30101
+	DAS_BOOT_NTP_NODE_PORT           = 30123
+	DAS_BOOT_SYSLOG_NODE_PORT        = 30514
 	VPC_VLAN_MIN                     = 1000
 	VPC_VLAN_MAX                     = 1999
 	VPC_SUBNET                       = "10.0.0.0/8"
