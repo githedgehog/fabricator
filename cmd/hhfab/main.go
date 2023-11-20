@@ -13,6 +13,7 @@ import (
 	"github.com/urfave/cli/v2"
 	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/fab/cnc"
+	"go.githedgehog.com/fabricator/pkg/fab/vlab"
 	"go.githedgehog.com/fabricator/pkg/fab/wiring"
 )
 
@@ -257,13 +258,18 @@ func main() {
 				},
 				Subcommands: []*cli.Command{
 					{
-						Name:    "start",
-						Aliases: []string{"up"},
-						Usage:   "start vlab",
+						Name:    "up",
+						Aliases: []string{"start"},
+						Usage:   "bring up vlab vms",
 						Flags: []cli.Flag{
 							basedirFlag,
 							verboseFlag,
 							briefFlag,
+							&cli.StringFlag{
+								Name:    "config",
+								Usage:   "use vlab config `FILE`",
+								Aliases: []string{"c"},
+							},
 							&cli.BoolFlag{
 								Name:        "dry-run",
 								Usage:       "dry run, prepare vms but not actually run them",
@@ -273,9 +279,9 @@ func main() {
 								Name:  "kill-stale-vms",
 								Usage: "kill stale vms before starting",
 							},
-							&cli.BoolFlag{
-								Name:  "compact",
-								Usage: "run more lightweight vms, small risks",
+							&cli.StringFlag{
+								Name:  "vm-size",
+								Usage: "run with one of the predefined sizes (one of: " + strings.Join(vlab.VM_SIZES, ", ") + ")",
 							},
 							&cli.BoolFlag{
 								Name:  "install-complete",
@@ -295,15 +301,14 @@ func main() {
 								return errors.Wrap(err, "error loading")
 							}
 
-							svc, err := fab.LoadVLAB(basedir, mngr, dryRun)
+							svc, err := fab.LoadVLAB(basedir, mngr, dryRun, cCtx.String("config"), cCtx.String("vm-size"))
 							if err != nil {
 								return errors.Wrap(err, "error loading vlab")
 							}
 
 							killStaleVMs := cCtx.Bool("kill-stale-vms")
 
-							return errors.Wrap(svc.StartServer(killStaleVMs, cCtx.Bool("compact"),
-								cCtx.Bool("install-complete"), cCtx.String("run-complete")), "error starting vlab")
+							return errors.Wrap(svc.StartServer(killStaleVMs, cCtx.Bool("install-complete"), cCtx.String("run-complete")), "error starting vlab")
 						},
 					},
 					{
@@ -315,6 +320,11 @@ func main() {
 							verboseFlag,
 							briefFlag,
 							vmFlag,
+							&cli.StringFlag{
+								Name:    "config",
+								Usage:   "use vlab config `FILE`",
+								Aliases: []string{"c"},
+							},
 						},
 						Before: func(ctx *cli.Context) error {
 							return setupLogger(verbose, brief)
@@ -325,7 +335,7 @@ func main() {
 								return errors.Wrap(err, "error loading")
 							}
 
-							svc, err := fab.LoadVLAB(basedir, mngr, dryRun)
+							svc, err := fab.LoadVLAB(basedir, mngr, dryRun, cCtx.String("config"), "")
 							if err != nil {
 								return errors.Wrap(err, "error loading vlab")
 							}
@@ -342,6 +352,11 @@ func main() {
 							verboseFlag,
 							briefFlag,
 							vmFlag,
+							&cli.StringFlag{
+								Name:    "config",
+								Usage:   "use vlab config `FILE`",
+								Aliases: []string{"c"},
+							},
 						},
 						Before: func(ctx *cli.Context) error {
 							return setupLogger(verbose, brief)
@@ -352,7 +367,7 @@ func main() {
 								return errors.Wrap(err, "error loading")
 							}
 
-							svc, err := fab.LoadVLAB(basedir, mngr, dryRun)
+							svc, err := fab.LoadVLAB(basedir, mngr, dryRun, cCtx.String("config"), "")
 							if err != nil {
 								return errors.Wrap(err, "error loading vlab")
 							}
@@ -369,6 +384,11 @@ func main() {
 							verboseFlag,
 							briefFlag,
 							vmFlag,
+							&cli.StringFlag{
+								Name:    "config",
+								Usage:   "use vlab config `FILE`",
+								Aliases: []string{"c"},
+							},
 						},
 						Before: func(ctx *cli.Context) error {
 							return setupLogger(verbose, brief)
@@ -379,7 +399,7 @@ func main() {
 								return errors.Wrap(err, "error loading")
 							}
 
-							svc, err := fab.LoadVLAB(basedir, mngr, dryRun)
+							svc, err := fab.LoadVLAB(basedir, mngr, dryRun, cCtx.String("config"), "")
 							if err != nil {
 								return errors.Wrap(err, "error loading vlab")
 							}

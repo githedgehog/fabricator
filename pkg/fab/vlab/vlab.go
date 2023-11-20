@@ -7,16 +7,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/manifoldco/promptui"
 	"github.com/pkg/errors"
-	"github.com/shirou/gopsutil/v3/process"
-	wiringapi "go.githedgehog.com/fabric/api/wiring/v1alpha2"
 	"go.githedgehog.com/fabric/pkg/wiring"
-	"golang.org/x/exp/maps"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -42,13 +37,14 @@ var RequiredCommands = []string{
 }
 
 type Service struct {
-	cfg *Config
-	vms map[string]*VM
+	cfg  *ServiceConfig
+	mngr *VMManager
 }
 
-type Config struct {
+type ServiceConfig struct {
+	Config            string
 	DryRun            bool
-	Compact           bool
+	Size              string
 	InstallComplete   bool
 	RunComplete       string
 	Basedir           string
@@ -60,7 +56,7 @@ type Config struct {
 	SshKey            string
 }
 
-func Load(cfg *Config) (*Service, error) {
+func Load(cfg *ServiceConfig) (*Service, error) {
 	if cfg.Wiring == nil {
 		return nil, errors.Errorf("wiring data is not specified")
 	}
@@ -80,130 +76,25 @@ func Load(cfg *Config) (*Service, error) {
 		return nil, errors.Errorf("ssh key is not specified")
 	}
 
+	vlabConfig, err := readConfig(cfg.Config)
+	if err != nil {
+		return nil, errors.Wrapf(err, "error reading VLAB config file %s", cfg.Config)
+	}
+
+	mngr, err := NewVMManager(vlabConfig, cfg.Wiring, cfg.Basedir, cfg.Size)
+	if err != nil {
+		return nil, errors.Wrapf(err, "error creating VM manager")
+	}
+
 	svc := &Service{
-		cfg: cfg,
-		vms: map[string]*VM{},
-	}
-
-	for _, server := range cfg.Wiring.Server.All() {
-		if !server.IsControl() {
-			continue
-		}
-		err := svc.AddVM(server.Name, VMOS_FLATCAR, true)
-		if err != nil {
-			return nil, errors.Wrapf(err, "error adding control VM %s", server.Name)
-		}
-
-		vm := svc.vms[server.Name]
-		err = svc.AddControlHostFwdLink(vm)
-		if err != nil {
-			return nil, errors.Wrapf(err, "error adding control host fwd link for VM %s", server.Name)
-		}
-
-	}
-
-	for _, sw := range cfg.Wiring.Switch.All() {
-		err := svc.AddVM(sw.Name, VMOS_ONIE, false)
-		if err != nil {
-			return nil, errors.Wrapf(err, "error adding switch VM %s", sw.Name)
-		}
-	}
-
-	for _, server := range cfg.Wiring.Server.All() {
-		if server.IsControl() {
-			continue
-		}
-		err := svc.AddVM(server.Name, VMOS_FLATCAR, false)
-		if err != nil {
-			return nil, errors.Wrapf(err, "error adding server VM %s", server.Name)
-		}
-	}
-
-	for _, conn := range cfg.Wiring.Connection.All() {
-		err := svc.AddConnection(conn)
-		if err != nil {
-			return nil, errors.Wrapf(err, "error adding connection %s", conn.Name)
-		}
-	}
-
-	for _, vm := range svc.vms {
-		if vm.OS == VMOS_ONIE {
-			usedDevs := map[int]bool{}
-			maxDevID := 0
-			for _, link := range vm.Links {
-				if link.DevID > maxDevID {
-					maxDevID = link.DevID
-				}
-				usedDevs[link.DevID] = true
-			}
-
-			for devID := 0; devID <= maxDevID; devID++ {
-				if !usedDevs[devID] {
-					vm.Links = append(vm.Links, &Link{
-						DevID:        devID,
-						DevName:      fmt.Sprintf("eth%02d", devID),
-						MAC:          svc.macFor(vm, devID),
-						LocalIfPort:  svc.ifPortFor(vm, devID),
-						Disconnected: true,
-					})
-				}
-			}
-		}
-
-		sort.Slice(vm.Links, func(i, j int) bool {
-			return vm.Links[i].DevName < vm.Links[j].DevName
-		})
+		cfg:  cfg,
+		mngr: mngr,
 	}
 
 	return svc, nil
 }
 
-func (svc *Service) checkForStaleVMs(ctx context.Context, killStaleVMs bool) error {
-	processes, err := process.ProcessesWithContext(ctx)
-	if err != nil {
-		return errors.Wrap(err, "error getting processes")
-	}
-
-	stale := []int32{}
-	for _, pr := range processes {
-		cmd, err := pr.CmdlineSliceWithContext(ctx)
-		if err != nil {
-			if strings.Contains(err.Error(), "no such file or directory") {
-				continue
-			}
-			return errors.Wrap(err, "error getting process cmdline")
-		}
-
-		// only one instance of VLAB supported at the same time
-		if len(cmd) < 6 || cmd[0] != "qemu-system-x86_64" || cmd[1] != "-name" || cmd[3] != "-uuid" {
-			continue
-		}
-		if !strings.HasPrefix(cmd[4], "00000000-0000-0000-0000-0000000000") {
-			continue
-		}
-
-		if killStaleVMs {
-			slog.Warn("Found stale VM process, killing it", "pid", pr.Pid)
-			err = pr.KillWithContext(ctx)
-			if err != nil {
-				return errors.Wrapf(err, "error killing stale VM process %d", pr.Pid)
-			}
-		} else {
-			slog.Error("Found stale VM process", "pid", pr.Pid)
-			stale = append(stale, pr.Pid)
-			// return errors.Errorf("found stale VM process %d, kill it and try again or run vlab with --kill-stale-vms", pr.Pid)
-		}
-	}
-
-	if len(stale) > 0 {
-		return errors.Errorf("found stale VM processes %v, kill them and try again or run vlab with --kill-stale-vms", stale)
-	}
-
-	return nil
-}
-
-func (svc *Service) StartServer(killStaleVMs bool, compact bool, installComplete bool, runComplete string) error {
-	svc.cfg.Compact = compact
+func (svc *Service) StartServer(killStaleVMs bool, installComplete bool, runComplete string) error {
 	svc.cfg.InstallComplete = installComplete
 	svc.cfg.RunComplete = runComplete
 
@@ -214,31 +105,23 @@ func (svc *Service) StartServer(killStaleVMs bool, compact bool, installComplete
 		}
 	}
 
-	slog.Info("Starting VLAB server...", "basedir", svc.cfg.Basedir, "dry-run", svc.cfg.DryRun)
+	slog.Info("Starting VLAB server...", "basedir", svc.cfg.Basedir, "vm-size", svc.cfg.Size, "dry-run", svc.cfg.DryRun)
 
-	err := svc.checkForStaleVMs(context.TODO(), killStaleVMs)
+	err := checkForStaleVMs(context.TODO(), killStaleVMs)
 	if err != nil {
 		return errors.Wrapf(err, "error checking for stale VMs")
 	}
 
-	for _, vm := range svc.sortedVMs() {
-		slog.Info("VM", "id", vm.ID, "name", vm.Name)
+	svc.mngr.LogOverview()
 
-		sort.Slice(vm.Links, func(i, j int) bool {
-			return vm.Links[i].DevName < vm.Links[j].DevName
-		})
-
-		for _, link := range vm.Links {
-			slog.Info(">>> Link", "dev", link.DevName, "mac", link.MAC, "local", link.LocalPortName, "dest", link.DestPortName)
-		}
-	}
+	svc.checkResources()
 
 	err = InitTPMConfig(context.Background(), svc.cfg)
 	if err != nil {
 		return errors.Wrapf(err, "error initializing TPM config")
 	}
 
-	vms := svc.sortedVMs()
+	vms := svc.mngr.sortedVMs()
 	eg, ctx := errgroup.WithContext(context.Background())
 
 	for idx := range vms {
@@ -249,221 +132,23 @@ func (svc *Service) StartServer(killStaleVMs bool, compact bool, installComplete
 	}
 
 	for idx := range vms {
-		vms[idx].Run(ctx, eg)
+		vms[idx].Run(ctx, eg, svc.cfg)
 	}
 
 	return eg.Wait()
 }
 
-func (svc *Service) sortedVMs() []*VM {
-	vms := maps.Values(svc.vms)
-	sort.Slice(vms, func(i, j int) bool {
-		return vms[i].ID < vms[j].ID
-	})
-
-	return vms
-}
-
-func (svc *Service) AddVM(name string, os VMOS, control bool) error {
-	if _, exists := svc.vms[name]; exists {
-		return errors.Errorf("vm with name '%s' already exists", name)
+func (svc *Service) checkResources() {
+	cpu := 0
+	ram := 0
+	disk := 0
+	for _, vm := range svc.mngr.vms {
+		cpu += vm.Config.CPU
+		ram += vm.Config.RAM
+		disk += vm.Config.Disk
 	}
 
-	vm := &VM{
-		Basedir:   filepath.Join(svc.cfg.Basedir, name),
-		ID:        len(svc.vms),
-		Name:      name,
-		OS:        os,
-		IsControl: control,
-		Cfg:       svc.cfg,
-	}
-	vm.Ready = fileMarker{path: filepath.Join(vm.Basedir, "ready")}
-	vm.Installed = fileMarker{path: filepath.Join(vm.Basedir, "installed")}
-
-	svc.vms[name] = vm
-
-	return nil
-}
-
-func (svc *Service) AddConnection(conn *wiringapi.Connection) error {
-	links := [][2]wiringapi.IPort{}
-
-	if conn.Spec.Unbundled != nil {
-		links = append(links, [2]wiringapi.IPort{&conn.Spec.Unbundled.Link.Server, &conn.Spec.Unbundled.Link.Switch})
-	} else if conn.Spec.Bundled != nil {
-		for _, link := range conn.Spec.Bundled.Links {
-			server := link.Server
-			switch1 := link.Switch
-			links = append(links, [2]wiringapi.IPort{&server, &switch1})
-		}
-	} else if conn.Spec.Management != nil {
-		links = append(links, [2]wiringapi.IPort{&conn.Spec.Management.Link.Server, &conn.Spec.Management.Link.Switch})
-	} else if conn.Spec.MCLAG != nil {
-		for _, link := range conn.Spec.MCLAG.Links {
-			server := link.Server
-			switch1 := link.Switch
-			links = append(links, [2]wiringapi.IPort{&server, &switch1})
-		}
-	} else if conn.Spec.MCLAGDomain != nil {
-		for _, link := range conn.Spec.MCLAGDomain.PeerLinks {
-			switch1 := link.Switch1
-			switch2 := link.Switch2
-			links = append(links, [2]wiringapi.IPort{&switch1, &switch2})
-		}
-		for _, link := range conn.Spec.MCLAGDomain.SessionLinks {
-			switch1 := link.Switch1
-			switch2 := link.Switch2
-			links = append(links, [2]wiringapi.IPort{&switch1, &switch2})
-		}
-	} else if conn.Spec.NAT != nil {
-		links = append(links, [2]wiringapi.IPort{&conn.Spec.NAT.Link.Switch, &wiringapi.BasePortName{
-			Port: "nat",
-		}})
-	} else if conn.Spec.Fabric != nil {
-		for _, link := range conn.Spec.Fabric.Links {
-			spine := link.Spine
-			leaf := link.Leaf
-			links = append(links, [2]wiringapi.IPort{&spine, &leaf})
-		}
-	} else if conn.Spec.VPCLoopback != nil {
-		for _, link := range conn.Spec.VPCLoopback.Links {
-			switch1 := link.Switch1
-			switch2 := link.Switch2
-			links = append(links, [2]wiringapi.IPort{&switch1, &switch2})
-		}
-	} else {
-		return errors.Errorf("unsupported connection type")
-	}
-
-	for _, link := range links {
-		if link[1].DeviceName() == "nat" {
-			err := svc.AddNullLink(link[0])
-			if err != nil {
-				return err
-			}
-		} else {
-			err := svc.AddLink(link[0], link[1])
-			if err != nil {
-				return err
-			}
-			err = svc.AddLink(link[1], link[0])
-			if err != nil {
-				return err
-			}
-		}
-	}
-
-	return nil
-}
-
-func (svc *Service) AddLink(local wiringapi.IPort, dest wiringapi.IPort) error {
-	localVM := svc.vms[local.DeviceName()]
-	destVM := svc.vms[dest.DeviceName()]
-
-	localPortID, err := portIdForName(local.LocalPortName())
-	if err != nil {
-		return err
-	}
-	destPortID, err := portIdForName(dest.LocalPortName())
-	if err != nil {
-		return err
-	}
-
-	localVM.Links = append(localVM.Links, &Link{
-		DevID:         localPortID,
-		DevName:       fmt.Sprintf("eth%02d", localPortID),
-		MAC:           svc.macFor(localVM, localPortID),
-		LocalIfPort:   svc.ifPortFor(localVM, localPortID),
-		LocalPortName: local.PortName(),
-		DestName:      destVM.Name,
-		DestIfPort:    svc.ifPortFor(destVM, destPortID),
-		DestPortName:  dest.PortName(),
-	})
-
-	return nil
-}
-
-func (svc *Service) AddNullLink(local wiringapi.IPort) error {
-	localVM := svc.vms[local.DeviceName()]
-
-	localPortID, err := portIdForName(local.LocalPortName())
-	if err != nil {
-		return err
-	}
-
-	localVM.Links = append(localVM.Links, &Link{
-		DevID:         localPortID,
-		DevName:       fmt.Sprintf("eth%02d", localPortID),
-		MAC:           svc.macFor(localVM, localPortID),
-		LocalIfPort:   svc.ifPortFor(localVM, localPortID),
-		LocalPortName: local.PortName(),
-		// DestName:      "null",
-		// DestIfPort:    IF_PORT_NULL,
-		// DestPortName:  "null",
-		// Disconnected:  true,
-	})
-
-	return nil
-}
-
-func (svc *Service) AddControlHostFwdLink(vm *VM) error {
-	sshPort := svc.sshPortFor(vm)
-
-	vm.Links = append(vm.Links, &Link{
-		DevID:        0,
-		DevName:      "eth0",
-		MAC:          svc.macFor(vm, 0),
-		IsHostFwd:    true,
-		SSHPort:      sshPort,
-		KubePort:     KUBE_PORT,
-		RegistryPort: REGISTRY_PORT,
-	})
-
-	vm.SSHPort = sshPort
-
-	return nil
-}
-
-// TODO replace with logic from SwitchProfile and ServerProfile
-func portIdForName(name string) (int, error) {
-	if strings.HasPrefix(name, "Management0") {
-		return 0, nil
-	} else if strings.HasPrefix(name, "Ethernet") { // sonic interface naming is straighforward
-		port, _ := strings.CutPrefix(name, "Ethernet")
-		idx, error := strconv.Atoi(port)
-
-		return idx + 1, errors.Wrapf(error, "error converting port name '%s' to port id", name)
-	} else if strings.HasPrefix(name, "nic0/port") { // just old convention
-		port, _ := strings.CutPrefix(name, "nic0/port")
-		idx, error := strconv.Atoi(port)
-
-		return idx, errors.Wrapf(error, "error converting port name '%s' to port id", name)
-	} else if strings.HasPrefix(name, "eth") { // that's the naming we get when using virtio-net-pci
-		port, _ := strings.CutPrefix(name, "eth")
-		idx, error := strconv.Atoi(port)
-
-		return idx, errors.Wrapf(error, "error converting port name '%s' to port id", name)
-	} else if strings.HasPrefix(name, "enp0s") { // it seems like that's the naming we get for e1000
-		port, _ := strings.CutPrefix(name, "enp0s")
-		idx, error := strconv.Atoi(port)
-
-		// ouch, this is a hack, but it seems like the only way to get the right port id for now
-		return idx - 2, errors.Wrapf(error, "error converting port name '%s' to port id", name)
-	} else {
-		return -1, errors.Errorf("unsupported port name '%s'", name)
-	}
-}
-
-func (svc *Service) sshPortFor(vm *VM) int {
-	return SSH_PORT_BASE + svc.vms[vm.Name].ID
-}
-
-func (svc *Service) macFor(vm *VM, port int) string {
-	return fmt.Sprintf(MAC_ADDR_TMPL, svc.vms[vm.Name].ID, port)
-}
-
-func (svc *Service) ifPortFor(vm *VM, port int) int {
-	return IF_PORT_BASE + svc.vms[vm.Name].ID*IF_PORT_VM_ID_MULT + port*IF_PORT_PORT_ID_MULT
+	slog.Info("Total VM resources", "cpu", fmt.Sprintf("%d vCPUs", cpu), "ram", fmt.Sprintf("%d MB", ram), "disk", fmt.Sprintf("%d GB", disk))
 }
 
 const (
@@ -474,49 +159,34 @@ const (
 func (svc *Service) vmSelector(name string, mode string, msg string) (*VM, error) {
 	vms := []*VM{}
 
-	for _, vm := range svc.sortedVMs() {
+	for _, vm := range svc.mngr.sortedVMs() {
 		if name != "" && vm.Name == name {
 			return vm, nil
 		}
-		if name == "control" && vm.IsControl {
+		if name == "control" && vm.Type == VMTypeControl {
 			return vm, nil
 		}
-		if mode == VM_SELECTOR_SSH && (vm.SSHPort > 0 || vm.OS == VMOS_ONIE) { // TODO only works for directly attached switches
+		if mode == VM_SELECTOR_ALL || mode == VM_SELECTOR_SSH {
 			vms = append(vms, vm)
 		}
-		if mode == VM_SELECTOR_ALL {
-			vms = append(vms, vm)
-		}
-	}
-
-	extraNote := ""
-	if mode == VM_SELECTOR_SSH {
-		extraNote = "{{ if le .SSHPort 0 }}{{ \" (control as jump host)\" | faint }}{{ end }}"
 	}
 
 	templates := &promptui.SelectTemplates{
 		Label:    "{{ .Name }}",
-		Active:   "\U0001F994 {{ .Name | cyan }}" + extraNote,
-		Inactive: "{{ .Name | cyan }}" + extraNote,
-		Selected: "\U0001F994 {{ .Name | red | cyan }}" + extraNote,
+		Active:   "\U0001F994 {{ .Name | cyan }}",
+		Inactive: "{{ .Name | cyan }}",
+		Selected: "\U0001F994 {{ .Name | red | cyan }}",
 		Details: `
 ----------- VM Details ------------
 {{ "ID:" | faint }}	{{ .ID }}
 {{ "Name:" | faint }}	{{ .Name }}
-{{ "OS:" | faint }}	{{ .OS }}
-{{ "Control:" | faint }}	{{ .IsControl }}
-{{ "SSH:" | faint }}	{{ if gt .SSHPort 0 }}127.0.0.1:{{ .SSHPort }}{{ end }}
 {{ "Ready:" | faint }}	{{ .Ready.Is }}
-{{ "Installed:" | faint }}	{{ eq .IsControl .Installed.Is }}
-{{ "Basedir:" | faint }}	{{ .Basedir }}
-{{ "Links:" | faint }}
-{{ range .Links }} {{ .DevID }} {{ .MAC }} {{ .LocalPortName }} {{ .DestPortName }}
-{{ end }}`,
+{{ "Basedir:" | faint }}	{{ .Basedir }}`,
 	}
 
 	searcher := func(input string, index int) bool {
-		pepper := vms[index]
-		name := strings.Replace(strings.ToLower(pepper.Name), " ", "", -1)
+		vm := vms[index]
+		name := strings.Replace(strings.ToLower(vm.Name), " ", "", -1)
 		input = strings.Replace(strings.ToLower(input), " ", "", -1)
 
 		return strings.Contains(name, input)
@@ -526,7 +196,7 @@ func (svc *Service) vmSelector(name string, mode string, msg string) (*VM, error
 		Label:     msg,
 		Items:     vms,
 		Templates: templates,
-		Size:      10,
+		Size:      20,
 		Searcher:  searcher,
 	}
 
@@ -539,40 +209,34 @@ func (svc *Service) vmSelector(name string, mode string, msg string) (*VM, error
 }
 
 func (svc *Service) findJumpForSwitch(name string) (string, string, error) {
-	control := ""
-	target := ""
-
-	for _, conn := range svc.cfg.Wiring.Connection.All() {
-		if conn.Spec.Management != nil {
-			if conn.Spec.Management.Link.Switch.DeviceName() == name {
-				control = conn.Spec.Management.Link.Server.DeviceName()
-				target = conn.Spec.Management.Link.Switch.IP
-
-				break
-			}
-		}
-	}
-
-	if control == "" || target == "" {
-		return "", "", errors.Errorf("failed to find suitable control node to use as jump host for vm %s", name)
-	}
-
 	var controlVM *VM
-	for _, vm := range svc.sortedVMs() {
-		if vm.Name == control {
+	for _, vm := range svc.mngr.sortedVMs() {
+		if vm.Type == VMTypeControl {
 			controlVM = vm
 			break
 		}
 	}
 
 	if controlVM == nil {
-		return "", "", errors.Errorf("failed to find control vm %s to use as jump host", control)
+		return "", "", errors.Errorf("failed to find control vm to use as jump host")
+	}
+
+	target := ""
+	for _, sw := range svc.cfg.Wiring.Switch.All() {
+		if sw.Name == name {
+			target = sw.Spec.IP
+			break
+		}
+	}
+
+	if target == "" {
+		return "", "", errors.Errorf("failed to find switch IP for %s", name)
 	}
 
 	target = strings.SplitN(target, "/", 2)[0] // we don't need the mask
 	target = "admin@" + target
 	proxyCmd := fmt.Sprintf("ssh %s -i %s -W %%h:%%p -p %d core@127.0.0.1",
-		strings.Join(SSH_QUIET_FLAGS, " "), svc.cfg.SshKey, controlVM.SSHPort)
+		strings.Join(SSH_QUIET_FLAGS, " "), svc.cfg.SshKey, controlVM.sshPort())
 
 	return proxyCmd, target, nil
 }
@@ -583,33 +247,27 @@ func (svc *Service) SSH(name string, args []string) error {
 		return err
 	}
 
-	proxyCmd := ""
 	target := "core@127.0.0.1"
-
-	if vm.SSHPort == 0 {
-		if vm.OS == VMOS_ONIE {
-			proxyCmd, target, err = svc.findJumpForSwitch(vm.Name)
-			if err != nil {
-				return err
-			}
-		} else {
-			return errors.Errorf("selected vm %s does not have ssh port", vm.Name)
-		}
-	}
-
-	slog.Info("SSH", "vm", vm.Name)
-
 	cmdArgs := append(SSH_QUIET_FLAGS, "-i", svc.cfg.SshKey)
 
-	if proxyCmd != "" {
+	if vm.Type == VMTypeControl || vm.Type == VMTypeServer {
+		cmdArgs = append(cmdArgs,
+			"-p", fmt.Sprintf("%d", vm.sshPort()),
+		)
+	} else if vm.Type == VMTypeSwitchVS || vm.Type == VMTypeSwitchHW {
+		var proxyCmd string
+		proxyCmd, target, err = svc.findJumpForSwitch(vm.Name)
+		if err != nil {
+			return err
+		}
 		cmdArgs = append(cmdArgs,
 			"-o", "ProxyCommand="+proxyCmd,
 		)
 	} else {
-		cmdArgs = append(cmdArgs,
-			"-p", fmt.Sprintf("%d", vm.SSHPort),
-		)
+		return errors.Errorf("unsupported VM type %s", vm.Type)
 	}
+
+	slog.Info("SSH", "vm", vm.Name)
 
 	cmdArgs = append(cmdArgs, target)
 	cmdArgs = append(cmdArgs, args...)
@@ -633,13 +291,34 @@ func (svc *Service) Serial(name string) error {
 
 	slog.Info("Serial", "vm", vm.Name)
 
-	cmdArgs := []string{
-		"-,raw,echo=0,escape=0x1d",
-		fmt.Sprintf("unix-connect:%s", filepath.Join(vm.Basedir, "serial.sock")),
+	cmdArgs := []string{}
+	var cmd *exec.Cmd
+	if vm.Type == VMTypeSwitchHW {
+		if switchCfg, exists := svc.mngr.cfg.Switches[vm.Name]; exists {
+			if switchCfg.Type != ConfigSwitchTypeHW {
+				return errors.Errorf("switch %s expected to be HW switch but it's not", vm.Name)
+			}
+			if switchCfg.Serial == "" {
+				return errors.Errorf("switch %s doesn't have serial console specified in vlab config", vm.Name)
+			}
+
+			parts := strings.Split(switchCfg.Serial, ":")
+			if len(parts) != 2 {
+				return errors.Errorf("switch %s serial console is malformed", vm.Name)
+			}
+
+			cmdArgs = []string{parts[0], parts[1]}
+			cmd = exec.Command("telnet", cmdArgs...)
+		} else {
+			return errors.Errorf("failed to find switch config for %s", vm.Name)
+		}
+	} else {
+		cmdArgs := []string{
+			"-,raw,echo=0,escape=0x1d",
+			fmt.Sprintf("unix-connect:%s", filepath.Join(vm.Basedir, "serial.sock")),
+		}
+		cmd = exec.Command("socat", cmdArgs...)
 	}
-
-	cmd := exec.Command("socat", cmdArgs...)
-
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

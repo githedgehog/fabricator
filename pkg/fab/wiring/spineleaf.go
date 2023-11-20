@@ -366,7 +366,7 @@ func (b *SpineLeafBuilder) nextSwitchPort(switchName string) string {
 
 func (b *SpineLeafBuilder) nextControlPort(serverName string) string {
 	ifaceID := b.ifaceTracker[serverName]
-	portName := fmt.Sprintf("%s/enp0s%d", serverName, ifaceID+3)
+	portName := fmt.Sprintf("%s/enp2s%d", serverName, ifaceID+1) // value for VLAB
 	ifaceID++
 	b.ifaceTracker[serverName] = ifaceID
 
@@ -375,7 +375,7 @@ func (b *SpineLeafBuilder) nextControlPort(serverName string) string {
 
 func (b *SpineLeafBuilder) nextServerPort(serverName string) string {
 	ifaceID := b.ifaceTracker[serverName]
-	portName := fmt.Sprintf("%s/enp0s%d", serverName, ifaceID+2)
+	portName := fmt.Sprintf("%s/enp2s%d", serverName, ifaceID+1) // value for VLAB
 	ifaceID++
 	b.ifaceTracker[serverName] = ifaceID
 
