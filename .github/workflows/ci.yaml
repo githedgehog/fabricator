@@ -153,7 +153,7 @@ jobs:
           export XDG_CONFIG_HOME=$(pwd)/.config
           export HHFAB_BASE_REPO=m.l.hhdev.io:31000/githedgehog
 
-          bin/hhfab wiring sample spine-leaf --mclag-leafs-count 1 > wiring.yaml
+          bin/hhfab wiring sample spine-leaf --mclag-leafs-count 2 > wiring.yaml
           bin/hhfab init -p vlab -v -w wiring.yaml
           bin/hhfab build -v
           ls -lah .hhfab
