@@ -68,10 +68,10 @@ var (
 	REF_DASBOOT_REGCTRL_CHART = cnc.Ref{Name: "das-boot/charts/das-boot-registration-controller"}
 	REF_DASBOOT_REGCTRL_IMAGE = cnc.Ref{Name: "das-boot/das-boot-registration-controller"}
 
-	REF_DASBOOT_RSYSLOG_CHART = cnc.Ref{Name: "das-boot/charts/rsyslog", Tag: "0.1.1"}
+	REF_DASBOOT_RSYSLOG_CHART = cnc.Ref{Name: "das-boot/charts/rsyslog", Tag: "0.1.2"}
 	REF_DASBOOT_RSYSLOG_IMAGE = cnc.Ref{Name: "das-boot/rsyslog", Tag: "0.1.0"}
 
-	REF_DASBOOT_NTP_CHART = cnc.Ref{Name: "das-boot/charts/ntp", Tag: "0.0.1"}
+	REF_DASBOOT_NTP_CHART = cnc.Ref{Name: "das-boot/charts/ntp", Tag: "0.0.2"}
 	REF_DASBOOT_NTP_IMAGE = cnc.Ref{Name: "das-boot/ntp", Tag: "latest"}
 
 	// SONiC
