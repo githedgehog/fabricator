@@ -1,6 +1,8 @@
 package cnc
 
 import (
+	"strings"
+
 	"github.com/pkg/errors"
 )
 
@@ -47,4 +49,8 @@ func (ref Ref) RepoName() string {
 // TODO maybe rename to smth? and make it work for empty parts
 func (ref Ref) String() string {
 	return ref.Repo + "/" + ref.Name + ":" + ref.Tag
+}
+
+func (ref Ref) IsLocalhost() bool {
+	return strings.HasPrefix(ref.Repo, "127.0.0.1:")
 }

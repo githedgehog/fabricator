@@ -182,7 +182,7 @@ func (op *PushOCI) Summary() string {
 }
 
 func (op *PushOCI) Run(basedir string) error {
-	err := copyOCI("oci:"+filepath.Join(basedir, op.Name), "docker://"+op.Target.String())
+	err := copyOCI("oci:"+filepath.Join(basedir, op.Name), "docker://"+op.Target.String(), false)
 	if err != nil {
 		return err
 	}

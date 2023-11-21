@@ -111,6 +111,10 @@ func (op *FilesORAS) Build(basedir string) error {
 		return errors.Wrapf(err, "error creating oras remote repo %s", op.Ref.Repo+"/"+op.Ref.Name)
 	}
 
+	if op.Ref.IsLocalhost() {
+		repo.PlainHTTP = true
+	}
+
 	// Get credentials from the docker credential store
 	storeOpts := credentials.StoreOptions{}
 	credStore, err := credentials.NewStoreFromDocker(storeOpts)
@@ -406,7 +410,7 @@ func (op *SyncOCI) Build(basedir string) error {
 	} else {
 		slog.Info("Downloading", "ref", op.Ref, "to", path)
 
-		err = copyOCI("docker://"+op.Ref.String(), "oci:"+path)
+		err = copyOCI("docker://"+op.Ref.String(), "oci:"+path, op.Ref.IsLocalhost())
 		if err != nil {
 			return err
 		}
@@ -424,7 +428,7 @@ func (op *SyncOCI) RunOps() []RunOp {
 	}
 }
 
-func copyOCI(from, to string) error {
+func copyOCI(from, to string, insecureSource bool) error {
 	srcRef, err := alltransports.ParseImageName(from)
 	if err != nil {
 		return err
@@ -481,12 +485,18 @@ func copyOCI(from, to string) error {
 		}
 	}()
 
+	var sourceInsecure types.OptionalBool
+	if insecureSource {
+		sourceInsecure = types.OptionalBoolTrue
+	}
+
 	_, err = copy.Image(context.Background(), policyCtx, destRef, srcRef, &copy.Options{
 		ProgressInterval:   1 * time.Second,
 		Progress:           progressChan,
 		ImageListSelection: copy.CopyAllImages,
 		SourceCtx: &types.SystemContext{
-			DockerAuthConfig: getDockerAuthConfigOrNil(srcRef),
+			DockerInsecureSkipTLSVerify: sourceInsecure,
+			DockerAuthConfig:            getDockerAuthConfigOrNil(srcRef),
 		},
 		DestinationCtx: &types.SystemContext{
 			DockerAuthConfig: getDockerAuthConfigOrNil(destRef),
