@@ -13,6 +13,7 @@ settings:
         - {{ .controlVIP }}:80
     secure:
       - {{ .controlVIP }}:443
+  secure_server_name: {{ .controlVIP }}
   control_vip: {{ .controlVIP }}
   ntp_servers:
     - {{ .controlVIP }}:{{ .ntpNodePort }}
