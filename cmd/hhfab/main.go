@@ -2,6 +2,7 @@ package main
 
 import (
 	_ "embed"
+	"fmt"
 	"log/slog"
 	"os"
 	"strings"
@@ -647,6 +648,56 @@ func main() {
 									return errors.Wrapf(data.Write(os.Stdout), "error writing sample")
 								},
 							},
+						},
+					},
+					{
+						Name:  "hydrate",
+						Usage: "hydrate wiring diagram",
+						Flags: []cli.Flag{
+							verboseFlag,
+							briefFlag,
+							&cli.StringFlag{
+								Name:    "wiring",
+								Aliases: []string{"w"},
+								Usage:   "use wiring `FILE`",
+							},
+						},
+						Before: func(ctx *cli.Context) error {
+							return setupLogger(verbose, brief)
+						},
+						Action: func(cCtx *cli.Context) error {
+							err := wiring.HydratePath(cCtx.String("wiring"))
+							if err != nil {
+								return errors.Wrap(err, "error hydrating")
+							}
+
+							return nil
+						},
+					},
+					{
+						Name:  "graph",
+						Usage: "generate dot graph from wiring diagram (experimental)",
+						Flags: []cli.Flag{
+							verboseFlag,
+							briefFlag,
+							&cli.StringFlag{
+								Name:    "wiring",
+								Aliases: []string{"w"},
+								Usage:   "use wiring `FILE`",
+							},
+						},
+						Before: func(ctx *cli.Context) error {
+							return setupLogger(verbose, brief)
+						},
+						Action: func(cCtx *cli.Context) error {
+							data, err := wiring.Visualize(cCtx.String("wiring"))
+							if err != nil {
+								return errors.Wrap(err, "error visualizing")
+							}
+
+							fmt.Println(data)
+
+							return nil
 						},
 					},
 				},

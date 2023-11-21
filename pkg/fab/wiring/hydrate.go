@@ -2,6 +2,7 @@ package wiring
 
 import (
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 
@@ -73,6 +74,28 @@ const (
 	FABRIC_IP_NET        = 30 // can take more than one /24, let's book 10
 )
 
+func HydratePath(wiringPath string) error {
+	if wiringPath == "" {
+		return errors.Errorf("wiring path is not specified")
+	}
+
+	data, err := wiring.LoadDataFrom(wiringPath)
+	if err != nil {
+		return errors.Wrapf(err, "error loading wiring data from %s", wiringPath)
+	}
+
+	// TODO config
+	if err := Hydrate(data, &HydrateConfig{
+		Subnet:       "172.30.0.0/16",
+		SpineASN:     65100,
+		LeafASNStart: 65101,
+	}); err != nil {
+		return errors.Wrapf(err, "error hydrating wiring data")
+	}
+
+	return errors.Wrapf(data.Write(os.Stdout), "error writing wiring data")
+}
+
 func Hydrate(data *wiring.Data, cfg *HydrateConfig) error {
 	if !strings.HasSuffix(cfg.Subnet, ".0.0/16") {
 		return errors.Errorf("Subnet %s is expected to be x.y.0.0/16", cfg.Subnet)
@@ -93,7 +116,7 @@ func Hydrate(data *wiring.Data, cfg *HydrateConfig) error {
 			continue
 		}
 
-		sws, _, _, err := conn.Spec.Endpoints()
+		sws, _, _, _, err := conn.Spec.Endpoints()
 		if err != nil {
 			return errors.Wrapf(err, "error getting endpoints for MCLAG domain connection %s", conn.Name)
 		}
