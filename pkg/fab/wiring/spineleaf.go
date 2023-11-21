@@ -481,6 +481,9 @@ func (b *SpineLeafBuilder) createManagementConnection(switchName string) (*wirin
 }
 
 func (b *SpineLeafBuilder) createControlConnection(switchName string) (*wiringapi.Connection, error) {
+	port := b.nextSwitchPort(switchName)
+	oniePortName := fmt.Sprintf("eth%d", b.ifaceTracker[switchName])
+
 	return b.createConnection(wiringapi.ConnectionSpec{
 		Management: &wiringapi.ConnMgmt{
 			Link: wiringapi.ConnMgmtLink{
@@ -488,7 +491,8 @@ func (b *SpineLeafBuilder) createControlConnection(switchName string) (*wiringap
 					BasePortName: wiringapi.BasePortName{Port: b.nextControlPort(CONTROL)},
 				},
 				Switch: wiringapi.ConnMgmtLinkSwitch{
-					BasePortName: wiringapi.BasePortName{Port: b.nextSwitchPort(switchName)},
+					BasePortName: wiringapi.BasePortName{Port: port},
+					ONIEPortName: oniePortName,
 				},
 			},
 		},
