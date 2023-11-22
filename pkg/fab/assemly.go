@@ -75,18 +75,24 @@ var (
 	REF_DASBOOT_NTP_IMAGE = cnc.Ref{Name: "das-boot/ntp", Tag: "latest"}
 
 	// SONiC
-	REF_SONIC_BCOM_BASE = cnc.Ref{Name: "sonic-bcom-private", Tag: "base-bin-4.1.1"}
-	REF_SONIC_BCOM_VS   = cnc.Ref{Name: "sonic-bcom-private", Tag: "vs-bin-4.1.1"}
+	REF_SONIC_BCOM_BASE   = cnc.Ref{Name: "sonic-bcom-private", Tag: "base-bin-4.1.1"}
+	REF_SONIC_BCOM_CAMPUS = cnc.Ref{Name: "sonic-bcom-private", Tag: "campus-bin-4.1.1"}
+	REF_SONIC_BCOM_VS     = cnc.Ref{Name: "sonic-bcom-private", Tag: "vs-bin-4.1.1"}
 
 	REF_SONIC_TARGET_VERSION = cnc.Ref{Tag: "latest"}
 	REF_SONIC_TARGETS_BASE   = []cnc.Ref{
-		{Name: "sonic/x86_64-dellemc_s5248f_c3538-r0"}, // S5248
-		{Name: "sonic/x86_64-dellemc_s5232f_c3538-r0"}, // S5232
-		{Name: "sonic/x86_64-cel_seastone_2-r0"},       // DS3000
-		{Name: "sonic/x86_64-cel_silverstone-r0"},      // DS4000
+		{Name: "sonic/x86_64-dellemc_s5248f_c3538-r0"}, // Dell S5248
+		{Name: "sonic/x86_64-dellemc_s5232f_c3538-r0"}, // Dell S5232
+		{Name: "sonic/x86_64-cel_seastone_2-r0"},       // Celestica DS3000
+		{Name: "sonic/x86_64-cel_silverstone-r0"},      // Celestica DS4000
+		{Name: "sonic/x86_64-accton_as7726_32x-r0"},    // EdgeCore DCS204
+		{Name: "sonic/x86_64-accton_as7326_56x-r0"},    // EdgeCore DCS203
+	}
+	REF_SONIC_TARGETS_CAMPUS = []cnc.Ref{
+		{Name: "sonic/x86_64-accton_as4630_54npe-r0"}, // EdgeCore EPS202
 	}
 	REF_SONIC_TARGETS_VS = []cnc.Ref{
-		{Name: "sonic/x86_64-kvm_x86_64-r0"},
+		{Name: "sonic/x86_64-kvm_x86_64-r0"}, // VS
 	}
 
 	// Fabric

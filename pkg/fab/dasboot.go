@@ -36,6 +36,7 @@ type DasBoot struct {
 	RegCtrlChartRef cnc.Ref    `json:"regCtrlChartRef,omitempty"`
 	RegCtrlImageRef cnc.Ref    `json:"regCtrlImageRef,omitempty"`
 	SONiCBaseRef    cnc.Ref    `json:"sonicBaseRef,omitempty"`
+	SONiCCampusRef  cnc.Ref    `json:"sonicCampusRef,omitempty"`
 	SONiCVSRef      cnc.Ref    `json:"sonicVSRef,omitempty"`
 	TLS             DasBootTLS `json:"tls,omitempty"`
 	ClusterIP       string     `json:"clusterIP,omitempty"`
@@ -75,6 +76,7 @@ func (cfg *DasBoot) Hydrate(preset cnc.Preset) error {
 	cfg.RegCtrlChartRef = cfg.RegCtrlChartRef.Fallback(REF_DASBOOT_REGCTRL_CHART)
 	cfg.RegCtrlImageRef = cfg.RegCtrlImageRef.Fallback(REF_DASBOOT_REGCTRL_IMAGE)
 	cfg.SONiCBaseRef = cfg.SONiCBaseRef.Fallback(REF_SONIC_BCOM_BASE)
+	cfg.SONiCCampusRef = cfg.SONiCCampusRef.Fallback(REF_SONIC_BCOM_CAMPUS)
 	cfg.SONiCVSRef = cfg.SONiCVSRef.Fallback(REF_SONIC_BCOM_VS)
 
 	err := cfg.TLS.ServerCA.Ensure("DAS BOOT Server CA", nil, KEY_USAGE_CA, nil, nil, nil) // TODO key usage
@@ -123,6 +125,7 @@ func (cfg *DasBoot) Build(basedir string, preset cnc.Preset, get cnc.GetComponen
 	cfg.RegCtrlImageRef = cfg.RegCtrlImageRef.Fallback(cfg.Ref, BaseConfig(get).Source)
 	cfg.RegCtrlChartRef = cfg.RegCtrlChartRef.Fallback(cfg.Ref, BaseConfig(get).Source)
 	cfg.SONiCBaseRef = cfg.SONiCBaseRef.Fallback(BaseConfig(get).Source)
+	cfg.SONiCCampusRef = cfg.SONiCCampusRef.Fallback(BaseConfig(get).Source)
 	cfg.SONiCVSRef = cfg.SONiCVSRef.Fallback(BaseConfig(get).Source)
 
 	target := BaseConfig(get).Target
@@ -260,6 +263,13 @@ func (cfg *DasBoot) Build(basedir string, preset cnc.Preset, get cnc.GetComponen
 		run(BundleControlInstall, STAGE_INSTALL_4_DASBOOT, fmt.Sprintf("das-boot-bin-%s", strings.ReplaceAll(sonicTarget.Name, "/", "-")),
 			&cnc.SyncOCI{
 				Ref:    cfg.SONiCBaseRef,
+				Target: target.Fallback(REF_SONIC_TARGET_VERSION, sonicTarget),
+			})
+	}
+	for _, sonicTarget := range REF_SONIC_TARGETS_CAMPUS {
+		run(BundleControlInstall, STAGE_INSTALL_4_DASBOOT, fmt.Sprintf("das-boot-bin-%s", strings.ReplaceAll(sonicTarget.Name, "/", "-")),
+			&cnc.SyncOCI{
+				Ref:    cfg.SONiCCampusRef,
 				Target: target.Fallback(REF_SONIC_TARGET_VERSION, sonicTarget),
 			})
 	}
