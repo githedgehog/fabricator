@@ -145,8 +145,7 @@ func NewVMManager(cfg *Config, data *wiring.Data, basedir string, size string) (
 				0: {
 					Connection: "host",
 					// TODO optionally make control node isolated using ",restrict=yes"
-					// TODO bind to 0.0.0.0 on host so all control node things available from the outside? nice for automations and dev?
-					Netdev: fmt.Sprintf("user,hostfwd=tcp:127.0.0.1:%d-:22,hostfwd=tcp:127.0.0.1:%d-:6443,hostfwd=tcp:127.0.0.1:%d-:31000,hostname=%s,domainname=local,dnssearch=local,net=172.31.%d.0/24,dhcpstart=172.31.%d.10",
+					Netdev: fmt.Sprintf("user,hostfwd=tcp:0.0.0.0:%d-:22,hostfwd=tcp:0.0.0.0:%d-:6443,hostfwd=tcp:0.0.0.0:%d-:31000,hostname=%s,domainname=local,dnssearch=local,net=172.31.%d.0/24,dhcpstart=172.31.%d.10",
 						sshPortFor(vmID), KUBE_PORT, REGISTRY_PORT, server.Name, vmID, vmID),
 				},
 			},
@@ -179,8 +178,7 @@ func NewVMManager(cfg *Config, data *wiring.Data, basedir string, size string) (
 			Interfaces: map[int]VMInterface{
 				0: {
 					Connection: "host",
-					// TODO bind to 0.0.0.0 on host so all control node things available from the outside? nice for automations and dev?
-					Netdev: fmt.Sprintf("user,hostfwd=tcp:127.0.0.1:%d-:22,hostname=%s,domainname=local,dnssearch=local,net=172.31.%d.0/24,dhcpstart=172.31.%d.10,restrict=yes",
+					Netdev: fmt.Sprintf("user,hostfwd=tcp:0.0.0.0:%d-:22,hostname=%s,domainname=local,dnssearch=local,net=172.31.%d.0/24,dhcpstart=172.31.%d.10,restrict=yes",
 						sshPortFor(vmID), server.Name, vmID, vmID),
 				},
 			},
