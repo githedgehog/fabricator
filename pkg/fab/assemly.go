@@ -61,7 +61,7 @@ var (
 	// Das Boot
 	DAS_BOOT_SEEDER_CLUSTER_IP = "172.29.42.42"
 
-	REF_DASBOOT_VERSION       = cnc.Ref{Tag: "v0.10.0"}
+	REF_DASBOOT_VERSION       = cnc.Ref{Tag: "v0.10.1"}
 	REF_DASBOOT_CRDS_CHART    = cnc.Ref{Name: "das-boot/charts/das-boot-crds"}
 	REF_DASBOOT_SEEDER_CHART  = cnc.Ref{Name: "das-boot/charts/das-boot-seeder"}
 	REF_DASBOOT_SEEDER_IMAGE  = cnc.Ref{Name: "das-boot/das-boot-seeder"}
@@ -118,7 +118,7 @@ var (
 	REF_MISC_RELOADER_CHART = cnc.Ref{Name: "fabricator/charts/reloader", Tag: "1.0.40"}
 
 	// VLAB
-	REF_VLAB_ONIE        = cnc.Ref{Name: "honie", Tag: "dhcp-removed"}
+	REF_VLAB_ONIE        = cnc.Ref{Name: "honie", Tag: "lldp"}
 	REF_VLAB_FLATCAR     = cnc.Ref{Name: "flatcar", Tag: "3510.2.1"}
 	REF_VLAB_EEPROM_EDIT = cnc.Ref{Name: "onie-qcow2-eeprom-edit", Tag: "latest"}
 )
