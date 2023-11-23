@@ -66,7 +66,8 @@ func main() {
 		Destination: &brief,
 	}
 
-	var basedir, fromConfig, preset, wiringPath, wiringGenType, wiringGenPreset string
+	var basedir, fromConfig, preset, wiringGenType, wiringGenPreset string
+	var wiringPath cli.StringSlice
 	basedirFlag := &cli.StringFlag{
 		Name:        "basedir",
 		Aliases:     []string{"d"},
@@ -112,9 +113,8 @@ func main() {
 		EnableBashCompletion:   true,
 		Commands: []*cli.Command{
 			{
-				Name:    "init",
-				Aliases: []string{"i"},
-				Usage:   "initialize fabricator with specified PRESET",
+				Name:  "init",
+				Usage: "initialize fabricator with specified PRESET",
 				Flags: append([]cli.Flag{
 					basedirFlag,
 					verboseFlag,
@@ -132,10 +132,10 @@ func main() {
 						Required:    true,
 						Destination: &preset,
 					},
-					&cli.StringFlag{
-						Name:        "wiring-path",
-						Aliases:     []string{"wiring", "w"},
-						Usage:       "use wiring diagram from `FILE` (or dir), use '-' to read from stdin instead",
+					&cli.StringSliceFlag{
+						Name:        "wiring",
+						Aliases:     []string{"w"},
+						Usage:       "use wiring diagram from `FILE` (or dir), use '-' to read from stdin, use multiple times to merge",
 						Destination: &wiringPath,
 					},
 					// TODO support specifying wiring type and preset explicitly
@@ -168,7 +168,7 @@ func main() {
 					return setupLogger(verbose, brief)
 				},
 				Action: func(cCtx *cli.Context) error {
-					err := mngr.Init(basedir, fromConfig, cnc.Preset(preset), wiringPath, wiringGenType, wiringGenPreset, hydrate)
+					err := mngr.Init(basedir, fromConfig, cnc.Preset(preset), wiringPath.Value(), wiringGenType, wiringGenPreset, hydrate)
 					if err != nil {
 						return errors.Wrap(err, "error initializing")
 					}
@@ -177,9 +177,8 @@ func main() {
 				},
 			},
 			{
-				Name:    "build",
-				Aliases: []string{"b"},
-				Usage:   "build bundles",
+				Name:  "build",
+				Usage: "build bundles",
 				Flags: []cli.Flag{
 					basedirFlag,
 					verboseFlag,
@@ -209,9 +208,8 @@ func main() {
 				},
 			},
 			{
-				Name:    "pack",
-				Aliases: []string{"p"},
-				Usage:   "pack install bundles",
+				Name:  "pack",
+				Usage: "pack install bundles",
 				Flags: []cli.Flag{
 					basedirFlag,
 					verboseFlag,
@@ -259,9 +257,8 @@ func main() {
 				},
 				Subcommands: []*cli.Command{
 					{
-						Name:    "up",
-						Aliases: []string{"start"},
-						Usage:   "bring up vlab vms",
+						Name:  "up",
+						Usage: "bring up vlab vms",
 						Flags: []cli.Flag{
 							basedirFlag,
 							verboseFlag,
@@ -313,9 +310,8 @@ func main() {
 						},
 					},
 					{
-						Name:    "ssh",
-						Aliases: []string{"s"},
-						Usage:   "ssh to vm, args passed to ssh command, will use jump host if needed",
+						Name:  "ssh",
+						Usage: "ssh to vm, args passed to ssh command, will use jump host if needed",
 						Flags: []cli.Flag{
 							basedirFlag,
 							verboseFlag,
@@ -345,9 +341,8 @@ func main() {
 						},
 					},
 					{
-						Name:    "serial",
-						Aliases: []string{"console", "c"},
-						Usage:   "connect to vm serial console, no args for selector",
+						Name:  "serial",
+						Usage: "connect to vm serial console, no args for selector",
 						Flags: []cli.Flag{
 							basedirFlag,
 							verboseFlag,
@@ -378,7 +373,6 @@ func main() {
 					},
 					{
 						Name:    "details",
-						Aliases: []string{"vms"},
 						Usage:   "list all vms with interactive detailed info",
 						Flags: []cli.Flag{
 							basedirFlag,
