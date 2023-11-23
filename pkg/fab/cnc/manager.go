@@ -14,7 +14,6 @@ import (
 	"github.com/pkg/errors"
 	"github.com/urfave/cli/v2"
 	"go.githedgehog.com/fabric/pkg/wiring"
-	"go.githedgehog.com/fabric/pkg/wiring/sample"
 	"go.githedgehog.com/fabricator/pkg/fab/cnc/bin"
 	fabwiring "go.githedgehog.com/fabricator/pkg/fab/wiring"
 	"golang.org/x/exp/slices"
@@ -126,7 +125,7 @@ func (mngr *Manager) prepare() error {
 	return nil
 }
 
-func (mngr *Manager) Init(basedir string, fromConfig string, preset Preset, wiringPath string, wiringGenType string, wiringGenPreset string, hydrate bool) error {
+func (mngr *Manager) Init(basedir string, fromConfig string, preset Preset, wiringPath []string, wiringGenType string, wiringGenPreset string, hydrate bool) error {
 	if _, err := os.Stat(basedir); err == nil {
 		if !os.IsNotExist(err) {
 			return errors.Errorf("basedir %s already exists, please, remove it first", basedir)
@@ -135,17 +134,25 @@ func (mngr *Manager) Init(basedir string, fromConfig string, preset Preset, wiri
 
 	mngr.basedir = basedir
 
-	if wiringPath != "" && wiringGenType != "" {
+	if len(wiringPath) > 0 && wiringGenType != "" {
 		return errors.New("wiring path and wiring gen are mutually exclusive")
 	}
 
-	if wiringPath != "" {
+	if len(wiringPath) > 0 {
 		slog.Info("Loading wiring", "from", wiringPath)
-		wiring, err := wiring.LoadDataFrom(wiringPath)
+		data, err := wiring.New()
 		if err != nil {
-			return errors.Wrapf(err, "error loading wiring from %s", wiringPath)
+			return errors.Wrapf(err, "error creating wiring")
 		}
-		mngr.wiring = wiring
+
+		for _, path := range wiringPath {
+			err = wiring.LoadDataFrom(path, data)
+			if err != nil {
+				return errors.Wrapf(err, "error loading wiring from %s", path)
+			}
+		}
+
+		mngr.wiring = data
 	}
 
 	if wiringGenType == "" {
@@ -155,30 +162,31 @@ func (mngr *Manager) Init(basedir string, fromConfig string, preset Preset, wiri
 		wiringGenPreset = string(preset)
 	}
 
+	// TODO generate new wiring
 	ok := false
-	for _, preset := range sample.PresetsAll {
-		if sample.Preset(wiringGenPreset) == preset {
-			ok = true
-			break
-		}
-	}
+	// for _, preset := range sample.PresetsAll {
+	// 	if sample.Preset(wiringGenPreset) == preset {
+	// 		ok = true
+	// 		break
+	// 	}
+	// }
 	if !ok {
 		return errors.Errorf("unknown wiring preset: %s", wiringGenPreset)
 	}
 
-	if wiringPath == "" && wiringGenType != "" {
-		if wiringGenType != "collapsedcore" {
-			return errors.Errorf("unknown wiring sample: %s", wiringGenType)
-		}
-		slog.Info("Generating wiring", "type", wiringGenType, "preset", wiringGenPreset)
-		data, err := sample.CollapsedCore(sample.Preset(wiringGenPreset))
-		if err != nil {
-			return errors.Wrapf(err, "error generating wiring sample %s", wiringGenType)
-		}
-		mngr.wiring = data
-	}
+	// if wiringPath == "" && wiringGenType != "" {
+	// 	if wiringGenType != "collapsedcore" {
+	// 		return errors.Errorf("unknown wiring sample: %s", wiringGenType)
+	// 	}
+	// 	slog.Info("Generating wiring", "type", wiringGenType, "preset", wiringGenPreset)
+	// 	data, err := sample.CollapsedCore(sample.Preset(wiringGenPreset))
+	// 	if err != nil {
+	// 		return errors.Wrapf(err, "error generating wiring sample %s", wiringGenType)
+	// 	}
+	// 	mngr.wiring = data
+	// }
 
-	if wiringPath == "" && wiringGenType == "" {
+	if len(wiringPath) == 0 && wiringGenType == "" {
 		return errors.New("wiring path or wiring gen must be specified")
 	}
 
@@ -320,7 +328,11 @@ func (mngr *Manager) Load(basedir string) error {
 		return errors.Wrapf(err, "error loading config")
 	}
 
-	wiringData, err := wiring.LoadDataFrom(filepath.Join(basedir, "wiring.yaml"))
+	wiringData, err := wiring.New()
+	if err != nil {
+		return errors.Wrapf(err, "error creating wiring")
+	}
+	err = wiring.LoadDataFrom(filepath.Join(basedir, "wiring.yaml"), wiringData)
 	if err != nil {
 		return errors.Wrapf(err, "error loading wiring")
 	}

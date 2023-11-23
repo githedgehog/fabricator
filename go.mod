@@ -11,7 +11,7 @@ require (
 	github.com/coreos/butane v0.18.0
 	github.com/google/uuid v1.3.1
 	github.com/k3s-io/helm-controller v0.15.4
-	github.com/lmittmann/tint v1.0.2
+	github.com/lmittmann/tint v1.0.3
 	github.com/manifoldco/promptui v0.9.0
 	github.com/mattn/go-isatty v0.0.19
 	github.com/mholt/archiver/v4 v4.0.0-alpha.8
@@ -23,15 +23,15 @@ require (
 	github.com/ulikunitz/xz v0.5.11
 	github.com/urfave/cli/v2 v2.25.7
 	github.com/vbauerster/mpb/v8 v8.6.1
-	go.githedgehog.com/fabric v0.20.17
+	go.githedgehog.com/fabric v0.21.1
 	golang.org/x/exp v0.0.0-20230905200255-921286631fa9
 	golang.org/x/sync v0.4.0
-	k8s.io/api v0.28.3
-	k8s.io/apimachinery v0.28.3
-	k8s.io/client-go v0.28.3
+	k8s.io/api v0.28.4
+	k8s.io/apimachinery v0.28.4
+	k8s.io/client-go v0.28.4
 	oras.land/oras-go/v2 v2.3.0
 	sigs.k8s.io/controller-runtime v0.16.3
-	sigs.k8s.io/yaml v1.3.0
+	sigs.k8s.io/yaml v1.4.0
 )
 
 require (

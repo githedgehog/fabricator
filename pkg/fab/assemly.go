@@ -27,9 +27,6 @@ var (
 	ZOT_NODE_PORT                    = 31000
 	DAS_BOOT_NTP_NODE_PORT           = 30123
 	DAS_BOOT_SYSLOG_NODE_PORT        = 30514
-	VPC_VLAN_MIN                     = 1000
-	VPC_VLAN_MAX                     = 1999
-	VPC_SUBNET                       = "10.0.0.0/8"
 
 	DEV_SSH_KEY     = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGpF2+9I1Nj4BcN7y6DjzTbq1VcUYIRGyfzId5ZoBEFj" // 1P: Fabric Dev SSH Key Shared
 	DEV_PASSWORD    = "$5$8nAYPGcl4l6G7Av1$Qi4/gnM0yPtGv9kjpMh78NuNSfQWy7vR1rulHpurL36"                  // 1P: Fabric Dev SONiC Admin
@@ -96,7 +93,7 @@ var (
 	}
 
 	// Fabric
-	REF_FABRIC_VERSION           = cnc.Ref{Tag: "v0.20.16"}
+	REF_FABRIC_VERSION           = cnc.Ref{Tag: "v0.21.1"}
 	REF_FABRIC_API_CHART         = cnc.Ref{Name: "fabric/charts/fabric-api"}
 	REF_FABRIC_CHART             = cnc.Ref{Name: "fabric/charts/fabric"}
 	REF_FABRIC_IMAGE             = cnc.Ref{Name: "fabric/fabric"}

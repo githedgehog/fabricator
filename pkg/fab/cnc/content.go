@@ -234,3 +234,14 @@ func IgnitionFromButaneTemplate(tmplText string, dataBuilder ...any) ContentGene
 		return string(data), nil
 	}
 }
+
+func YAMLFrom(obj any) ContentGenerator {
+	return func() (string, error) {
+		data, err := yaml.Marshal(obj)
+		if err != nil {
+			return "", errors.Wrap(err, "error marshaling into yaml")
+		}
+
+		return string(data), nil
+	}
+}

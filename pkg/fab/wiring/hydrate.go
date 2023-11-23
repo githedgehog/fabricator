@@ -79,7 +79,11 @@ func HydratePath(wiringPath string) error {
 		return errors.Errorf("wiring path is not specified")
 	}
 
-	data, err := wiring.LoadDataFrom(wiringPath)
+	data, err := wiring.New()
+	if err != nil {
+		return errors.Wrapf(err, "error creating wiring data")
+	}
+	err = wiring.LoadDataFrom(wiringPath, data)
 	if err != nil {
 		return errors.Wrapf(err, "error loading wiring data from %s", wiringPath)
 	}
