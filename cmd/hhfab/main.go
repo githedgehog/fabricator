@@ -96,8 +96,6 @@ func main() {
 		Destination: &vm,
 	}
 
-	var hlabConfig, hlabKubeconfig string
-
 	var wgChainControlLink bool
 	var wgControlLinksCount, wgSpinesCount, wgFabricLinksCount, wgMCLAGLeafsCount, wgOrphanLeafsCount, wgMCLAGSessionLinks, wgMCLAGPeerLinks uint
 

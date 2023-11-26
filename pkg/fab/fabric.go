@@ -19,9 +19,6 @@ import (
 //go:embed fabric_values.tmpl.yaml
 var fabricValuesTemplate string
 
-//go:embed fabric_config.tmpl.yaml
-var fabricConfigTemplate string
-
 //go:embed fabric_dhcp_server_values.tmpl.yaml
 var fabricDHCPServerTemplate string
 
@@ -198,10 +195,10 @@ func (cfg *Fabric) Build(basedir string, preset cnc.Preset, get cnc.GetComponent
 						},
 						VPCPeeringDisabled: false,
 						ReservedSubnets: []string{ // TODO make configurable
-							"172.28.0.0/16",
-							"172.29.0.0/16",
-							"172.30.0.0/16",
-							"172.31.0.0/16",
+							K3sConfig(get).ClusterCIDR,
+							K3sConfig(get).ServiceCIDR,
+							"172.30.0.0/16", // Fabric subnet
+							"172.31.0.0/16", // VLAB
 						},
 						Users:          users,
 						DHCPDConfigMap: "dhcpd.conf",

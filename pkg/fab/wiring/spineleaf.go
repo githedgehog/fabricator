@@ -4,9 +4,11 @@ import (
 	"fmt"
 
 	"github.com/pkg/errors"
+	"go.githedgehog.com/fabric/api/meta"
+	vpcapi "go.githedgehog.com/fabric/api/vpc/v1alpha2"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1alpha2"
 	"go.githedgehog.com/fabric/pkg/wiring"
-	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 const (
@@ -55,6 +57,40 @@ func (b *SpineLeafBuilder) Build() (*wiring.Data, error) {
 	b.data, err = wiring.New()
 	if err != nil {
 		return nil, err
+	}
+
+	if err := b.data.Add(&wiringapi.VLANNamespace{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       wiringapi.KindVLANNamespace,
+			APIVersion: wiringapi.GroupVersion.String(),
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "default",
+		},
+		Spec: wiringapi.VLANNamespaceSpec{
+			Ranges: []meta.VLANRange{
+				{From: 1000, To: 2999},
+			},
+		},
+	}); err != nil {
+		return nil, errors.Wrapf(err, "error creating VLAN namespace")
+	}
+
+	if err := b.data.Add(&vpcapi.IPv4Namespace{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       vpcapi.KindIPv4Namespace,
+			APIVersion: vpcapi.GroupVersion.String(),
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "default",
+		},
+		Spec: vpcapi.IPv4NamespaceSpec{
+			Subnets: []string{
+				"10.0.0.0/8",
+			},
+		},
+	}); err != nil {
+		return nil, errors.Wrapf(err, "error creating IPv4 namespace")
 	}
 
 	b.ifaceTracker = map[string]uint8{}
@@ -384,11 +420,11 @@ func (b *SpineLeafBuilder) nextServerPort(serverName string) string {
 
 func (b *SpineLeafBuilder) createRack(name string, spec wiringapi.RackSpec) (*wiringapi.Rack, error) {
 	rack := &wiringapi.Rack{
-		TypeMeta: meta.TypeMeta{
+		TypeMeta: metav1.TypeMeta{
 			Kind:       wiringapi.KindRack,
 			APIVersion: wiringapi.GroupVersion.String(),
 		},
-		ObjectMeta: meta.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{
 			Name:   name,
 			Labels: map[string]string{},
 		},
@@ -400,11 +436,11 @@ func (b *SpineLeafBuilder) createRack(name string, spec wiringapi.RackSpec) (*wi
 
 func (b *SpineLeafBuilder) createSwitch(name string, spec wiringapi.SwitchSpec) (*wiringapi.Switch, error) {
 	sw := &wiringapi.Switch{
-		TypeMeta: meta.TypeMeta{
+		TypeMeta: metav1.TypeMeta{
 			Kind:       wiringapi.KindSwitch,
 			APIVersion: wiringapi.GroupVersion.String(),
 		},
-		ObjectMeta: meta.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
 			Labels: map[string]string{
 				wiringapi.LabelRack: RACK,
@@ -422,11 +458,11 @@ func (b *SpineLeafBuilder) createSwitch(name string, spec wiringapi.SwitchSpec) 
 
 func (b *SpineLeafBuilder) createServer(name string, spec wiringapi.ServerSpec) (*wiringapi.Server, error) {
 	server := &wiringapi.Server{
-		TypeMeta: meta.TypeMeta{
+		TypeMeta: metav1.TypeMeta{
 			Kind:       wiringapi.KindServer,
 			APIVersion: wiringapi.GroupVersion.String(),
 		},
-		ObjectMeta: meta.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
 			Labels: map[string]string{
 				wiringapi.LabelRack: RACK,
@@ -446,11 +482,11 @@ func (b *SpineLeafBuilder) createConnection(spec wiringapi.ConnectionSpec) (*wir
 	name := spec.GenerateName()
 
 	conn := &wiringapi.Connection{
-		TypeMeta: meta.TypeMeta{
+		TypeMeta: metav1.TypeMeta{
 			Kind:       wiringapi.KindConnection,
 			APIVersion: wiringapi.GroupVersion.String(),
 		},
-		ObjectMeta: meta.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{
 			Name:   name,
 			Labels: map[string]string{},
 		},
