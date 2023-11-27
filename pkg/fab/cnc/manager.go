@@ -163,16 +163,16 @@ func (mngr *Manager) Init(basedir string, fromConfig string, preset Preset, wiri
 	}
 
 	// TODO generate new wiring
-	ok := false
+	// ok := false
 	// for _, preset := range sample.PresetsAll {
 	// 	if sample.Preset(wiringGenPreset) == preset {
 	// 		ok = true
 	// 		break
 	// 	}
 	// }
-	if !ok {
-		return errors.Errorf("unknown wiring preset: %s", wiringGenPreset)
-	}
+	// if !ok {
+	// 	return errors.Errorf("unknown wiring preset: %s", wiringGenPreset)
+	// }
 
 	// if wiringPath == "" && wiringGenType != "" {
 	// 	if wiringGenType != "collapsedcore" {
