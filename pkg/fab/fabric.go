@@ -187,7 +187,7 @@ func (cfg *Fabric) Build(basedir string, preset cnc.Preset, get cnc.GetComponent
 						APIServer:   fmt.Sprintf("%s:%d", CONTROL_VIP, K3S_API_PORT),
 						AgentRepo:   target.Fallback(cfg.AgentRef).RepoName(),
 						AgentRepoCA: ZotConfig(get).TLS.CA.Cert,
-						VPCIRBVLANRangse: []meta.VLANRange{
+						VPCIRBVLANRanges: []meta.VLANRange{
 							{From: 3000, To: 3999}, // TODO make configurable
 						},
 						VPCPeeringVLANRanges: []meta.VLANRange{
