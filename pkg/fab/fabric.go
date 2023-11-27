@@ -201,7 +201,7 @@ func (cfg *Fabric) Build(basedir string, preset cnc.Preset, get cnc.GetComponent
 							"172.31.0.0/16", // VLAB
 						},
 						Users:          users,
-						DHCPDConfigMap: "dhcpd.conf",
+						DHCPDConfigMap: "fabric-dhcp-server-config",
 						DHCPDConfigKey: "dhcpd.conf",
 						FabricMode:     config.FabricModeSpineLeaf, // TODO make configurable
 					},
