@@ -33,18 +33,21 @@ func (cfg *Base) IsEnabled(preset cnc.Preset) bool {
 func (cfg *Base) Flags() []cli.Flag {
 	return []cli.Flag{
 		&cli.StringFlag{
+			Category:    cfg.Name() + FLAG_CATEGORY_CONFIG_BASE_SUFFIX,
 			Name:        "base-repo",
 			Usage:       "Base repo",
 			EnvVars:     []string{"HHFAB_BASE_REPO"},
 			Destination: &cfg.Source.Repo,
 		},
 		&cli.StringSliceFlag{
+			Category:    cfg.Name() + FLAG_CATEGORY_CONFIG_BASE_SUFFIX,
 			Name:        "authorized-key",
 			Usage:       "SSH public keys to add to the control node, first will be used for SONiC users",
 			EnvVars:     []string{"HHFAB_AUTHORIZED_KEY"},
 			Destination: &cfg.authorizedKeysFlag,
 		},
 		&cli.BoolFlag{
+			Category:    cfg.Name() + FLAG_CATEGORY_CONFIG_BASE_SUFFIX,
 			Name:        "dev",
 			Usage:       "Enable development mode (dev users & ssh keys)",
 			EnvVars:     []string{"HHFAB_DEV"},

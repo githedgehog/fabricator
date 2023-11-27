@@ -126,6 +126,10 @@ var (
 )
 
 const (
+	FLAG_CATEGORY_CONFIG_BASE_SUFFIX = " fabricator options"
+)
+
+const (
 	PRESET_BM   cnc.Preset = "lab"
 	PRESET_VLAB cnc.Preset = "vlab"
 )

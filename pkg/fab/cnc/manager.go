@@ -125,7 +125,7 @@ func (mngr *Manager) prepare() error {
 	return nil
 }
 
-func (mngr *Manager) Init(basedir string, fromConfig string, preset Preset, wiringPath []string, wiringGenType string, wiringGenPreset string, hydrate bool) error {
+func (mngr *Manager) Init(basedir string, fromConfig string, preset Preset, wiringPath []string, wiringGen *fabwiring.SpineLeafBuilder, hydrate bool) error {
 	if _, err := os.Stat(basedir); err == nil {
 		if !os.IsNotExist(err) {
 			return errors.Errorf("basedir %s already exists, please, remove it first", basedir)
@@ -134,12 +134,10 @@ func (mngr *Manager) Init(basedir string, fromConfig string, preset Preset, wiri
 
 	mngr.basedir = basedir
 
-	if len(wiringPath) > 0 && wiringGenType != "" {
-		return errors.New("wiring path and wiring gen are mutually exclusive")
-	}
+	// TODO detect both wiring files and gen flags are set
 
 	if len(wiringPath) > 0 {
-		slog.Info("Loading wiring", "from", wiringPath)
+		slog.Info("Loading wiring (ignoring wiring gen flags)", "from", wiringPath)
 		data, err := wiring.New()
 		if err != nil {
 			return errors.Wrapf(err, "error creating wiring")
@@ -153,41 +151,18 @@ func (mngr *Manager) Init(basedir string, fromConfig string, preset Preset, wiri
 		}
 
 		mngr.wiring = data
-	}
+	} else {
+		if wiringGen == nil {
+			return errors.New("wiring gen flags are empty")
+		}
 
-	if wiringGenType == "" {
-		wiringGenType = "collapsedcore"
-	}
-	if wiringGenPreset == "" {
-		wiringGenPreset = string(preset)
-	}
+		slog.Info("Generating wiring from gen flags")
+		data, err := wiringGen.Build()
+		if err != nil {
+			return errors.Wrapf(err, "error generating wiring")
+		}
 
-	// TODO generate new wiring
-	// ok := false
-	// for _, preset := range sample.PresetsAll {
-	// 	if sample.Preset(wiringGenPreset) == preset {
-	// 		ok = true
-	// 		break
-	// 	}
-	// }
-	// if !ok {
-	// 	return errors.Errorf("unknown wiring preset: %s", wiringGenPreset)
-	// }
-
-	// if wiringPath == "" && wiringGenType != "" {
-	// 	if wiringGenType != "collapsedcore" {
-	// 		return errors.Errorf("unknown wiring sample: %s", wiringGenType)
-	// 	}
-	// 	slog.Info("Generating wiring", "type", wiringGenType, "preset", wiringGenPreset)
-	// 	data, err := sample.CollapsedCore(sample.Preset(wiringGenPreset))
-	// 	if err != nil {
-	// 		return errors.Wrapf(err, "error generating wiring sample %s", wiringGenType)
-	// 	}
-	// 	mngr.wiring = data
-	// }
-
-	if len(wiringPath) == 0 && wiringGenType == "" {
-		return errors.New("wiring path or wiring gen must be specified")
+		mngr.wiring = data
 	}
 
 	if fromConfig != "" {
@@ -207,8 +182,6 @@ func (mngr *Manager) Init(basedir string, fromConfig string, preset Preset, wiri
 	if !slices.Contains(mngr.presets, preset) {
 		return fmt.Errorf("unknown preset: %s", preset)
 	}
-
-	// TODO rework wiring generation & handling
 
 	if err := fabwiring.IsHydrated(mngr.wiring); err != nil {
 		err = errors.Wrapf(err, "error validating wiring")

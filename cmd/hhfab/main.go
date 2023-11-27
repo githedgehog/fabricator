@@ -20,6 +20,10 @@ import (
 
 var version = "(devel)"
 
+const (
+	FLAG_CATEGORY_WIRING_GEN = "wiring generator options:"
+)
+
 func setupLogger(verbose, brief bool) error {
 	if verbose && brief {
 		return cli.Exit("verbose and brief are mutually exclusive", 1)
@@ -66,7 +70,7 @@ func main() {
 		Destination: &brief,
 	}
 
-	var basedir, fromConfig, preset, wiringGenType, wiringGenPreset string
+	var basedir, fromConfig, preset string
 	var wiringPath cli.StringSlice
 	basedirFlag := &cli.StringFlag{
 		Name:        "basedir",
@@ -99,7 +103,68 @@ func main() {
 	var wgChainControlLink bool
 	var wgControlLinksCount, wgSpinesCount, wgFabricLinksCount, wgMCLAGLeafsCount, wgOrphanLeafsCount, wgMCLAGSessionLinks, wgMCLAGPeerLinks uint
 
+	wiringGenFlags := []cli.Flag{
+		&cli.BoolFlag{
+			Category:    FLAG_CATEGORY_WIRING_GEN,
+			Name:        "chain-control-link",
+			Usage:       "chain control links instead of all switches directly connected to control node",
+			Destination: &wgChainControlLink,
+			Value:       false,
+		},
+		&cli.UintFlag{
+			Category:    FLAG_CATEGORY_WIRING_GEN,
+			Name:        "control-links-count",
+			Usage:       "number of control links",
+			Destination: &wgControlLinksCount,
+			Value:       2,
+		},
+		&cli.UintFlag{
+			Category:    FLAG_CATEGORY_WIRING_GEN,
+			Name:        "spines-count",
+			Usage:       "number of spines",
+			Destination: &wgSpinesCount,
+			Value:       2,
+		},
+		&cli.UintFlag{
+			Category:    FLAG_CATEGORY_WIRING_GEN,
+			Name:        "fabric-links-count",
+			Usage:       "number of fabric links",
+			Destination: &wgFabricLinksCount,
+			Value:       2,
+		},
+		&cli.UintFlag{
+			Category:    FLAG_CATEGORY_WIRING_GEN,
+			Name:        "mclag-leafs-count",
+			Usage:       "number of mclag leafs (should be even)",
+			Destination: &wgMCLAGLeafsCount,
+			Value:       2,
+		},
+		&cli.UintFlag{
+			Category:    FLAG_CATEGORY_WIRING_GEN,
+			Name:        "orphan-leafs-count",
+			Usage:       "number of orphan leafs",
+			Destination: &wgOrphanLeafsCount,
+			Value:       1,
+		},
+		&cli.UintFlag{
+			Category:    FLAG_CATEGORY_WIRING_GEN,
+			Name:        "mclag-session-links",
+			Usage:       "number of mclag session links",
+			Destination: &wgMCLAGSessionLinks,
+			Value:       2,
+		},
+		&cli.UintFlag{
+			Category:    FLAG_CATEGORY_WIRING_GEN,
+			Name:        "mclag-peer-links",
+			Usage:       "number of mclag peer links",
+			Destination: &wgMCLAGPeerLinks,
+			Value:       2,
+		},
+	}
+
 	mngr := fab.NewCNCManager()
+
+	extraInitFlags := append(wiringGenFlags, mngr.Flags()...)
 
 	cli.VersionFlag.(*cli.BoolFlag).Aliases = []string{"V"}
 	app := &cli.App{
@@ -136,37 +201,28 @@ func main() {
 						Usage:       "use wiring diagram from `FILE` (or dir), use '-' to read from stdin, use multiple times to merge",
 						Destination: &wiringPath,
 					},
-					// TODO support specifying wiring type and preset explicitly
-					// &cli.StringFlag{
-					// 	Name:        "wiring-type",
-					// 	Aliases:     []string{"wt"},
-					// 	Usage:       "use wiring diagram sample type (one of: " + strings.Join(sampleTypes, ", ") + ")",
-					// 	Destination: &wiringGenType,
-					// },
-					// &cli.StringFlag{
-					// 	Name:        "wiring-preset",
-					// 	Aliases:     []string{"wp"},
-					// 	Usage:       "use wiring diagram sample preset (one of: " + strings.Join(samplePresets, ", ") + ")",
-					// 	Destination: &wiringGenPreset,
-					// },
-					// TODO support reset before init, is it really needed?
-					// &cli.BoolFlag{
-					// 	Name:        "reset",
-					// 	Usage:       "reset configs in basedir before init if present",
-					// 	Destination: &reset,
-					// },
 					&cli.BoolFlag{
-						Name:        "auto-hydrate",
+						Name:        "hydrate",
 						Usage:       "automatically hydrate wiring diagram if needed (if some IPs/ASN/etc missing)",
 						Value:       true,
 						Destination: &hydrate,
 					},
-				}, mngr.Flags()...),
+				}, extraInitFlags...),
 				Before: func(cCtx *cli.Context) error {
 					return setupLogger(verbose, brief)
 				},
 				Action: func(cCtx *cli.Context) error {
-					err := mngr.Init(basedir, fromConfig, cnc.Preset(preset), wiringPath.Value(), wiringGenType, wiringGenPreset, hydrate)
+					wiringGen := &wiring.SpineLeafBuilder{
+						ChainControlLink:  wgChainControlLink,
+						ControlLinksCount: uint8(wgControlLinksCount),
+						SpinesCount:       uint8(wgSpinesCount),
+						FabricLinksCount:  uint8(wgFabricLinksCount),
+						MCLAGLeafsCount:   uint8(wgMCLAGLeafsCount),
+						OrphanLeafsCount:  uint8(wgOrphanLeafsCount),
+						MCLAGSessionLinks: uint8(wgMCLAGSessionLinks),
+						MCLAGPeerLinks:    uint8(wgMCLAGPeerLinks),
+					}
+					err := mngr.Init(basedir, fromConfig, cnc.Preset(preset), wiringPath.Value(), wiringGen, hydrate)
 					if err != nil {
 						return errors.Wrap(err, "error initializing")
 					}
@@ -453,66 +509,10 @@ func main() {
 							{
 								Name:  "spine-leaf",
 								Usage: "sample wiring diagram for spine-leaf topology",
-								Flags: []cli.Flag{
+								Flags: append([]cli.Flag{
 									verboseFlag,
 									briefFlag,
-									&cli.BoolFlag{
-										Category:    "spine-leaf",
-										Name:        "chain-control-link",
-										Usage:       "chain control links instead of all switches directly connected to control node",
-										Destination: &wgChainControlLink,
-										Value:       false,
-									},
-									&cli.UintFlag{
-										Category:    "spine-leaf",
-										Name:        "control-links-count",
-										Usage:       "number of control links",
-										Destination: &wgControlLinksCount,
-										Value:       2,
-									},
-									&cli.UintFlag{
-										Category:    "spine-leaf",
-										Name:        "spines-count",
-										Usage:       "number of spines",
-										Destination: &wgSpinesCount,
-										Value:       2,
-									},
-									&cli.UintFlag{
-										Category:    "spine-leaf",
-										Name:        "fabric-links-count",
-										Usage:       "number of fabric links",
-										Destination: &wgFabricLinksCount,
-										Value:       2,
-									},
-									&cli.UintFlag{
-										Category:    "spine-leaf",
-										Name:        "mclag-leafs-count",
-										Usage:       "number of mclag leafs (should be even)",
-										Destination: &wgMCLAGLeafsCount,
-										Value:       2,
-									},
-									&cli.UintFlag{
-										Category:    "spine-leaf",
-										Name:        "orphan-leafs-count",
-										Usage:       "number of orphan leafs",
-										Destination: &wgOrphanLeafsCount,
-										Value:       1,
-									},
-									&cli.UintFlag{
-										Category:    "spine-leaf",
-										Name:        "mclag-session-links",
-										Usage:       "number of mclag session links",
-										Destination: &wgMCLAGSessionLinks,
-										Value:       2,
-									},
-									&cli.UintFlag{
-										Category:    "spine-leaf",
-										Name:        "mclag-peer-links",
-										Usage:       "number of mclag peer links",
-										Destination: &wgMCLAGPeerLinks,
-										Value:       2,
-									},
-								},
+								}, wiringGenFlags...),
 								Before: func(ctx *cli.Context) error {
 									return setupLogger(verbose, brief)
 								},

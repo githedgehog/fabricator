@@ -38,6 +38,7 @@ func (cfg *ControlOS) IsEnabled(preset cnc.Preset) bool {
 func (cfg *ControlOS) Flags() []cli.Flag {
 	return []cli.Flag{
 		&cli.StringFlag{
+			Category:    cfg.Name() + FLAG_CATEGORY_CONFIG_BASE_SUFFIX,
 			Name:        "control-password-hash",
 			Usage:       "Password hash for the control node user 'core' (use 'openssl passwd -5' and pass with '' or escape to avoid shell $ substitution)",
 			EnvVars:     []string{"HHFAB_CONTROL_PASSWORD_HASH"},

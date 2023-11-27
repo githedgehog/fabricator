@@ -31,6 +31,7 @@ func (cfg *ServerOS) IsEnabled(preset cnc.Preset) bool {
 func (cfg *ServerOS) Flags() []cli.Flag {
 	return []cli.Flag{
 		&cli.StringFlag{
+			Category:    cfg.Name() + FLAG_CATEGORY_CONFIG_BASE_SUFFIX,
 			Name:        "server-password-hash",
 			Usage:       "Password hash for the server nodes user 'core' (use 'openssl passwd -5' and pass with '' or escape to avoid shell $ substitution)",
 			EnvVars:     []string{"HHFAB_SERVER_PASSWORD_HASH"},
