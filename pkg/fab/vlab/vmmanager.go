@@ -367,7 +367,7 @@ func (mngr *VMManager) AddLink(local wiringapi.IPort, dest wiringapi.IPort, conn
 			Passthrough: linkCfg.PCIAddress,
 		}
 	} else if destVM.Type == VMTypeSwitchHW {
-		return errors.Errorf("pci mapping is missing for hardware switch dest %s, conn %s", dest.DeviceName(), conn)
+		return errors.Errorf("pci mapping is missing for %s, conn %s", dest.PortName(), conn)
 	} else {
 		netdev := fmt.Sprintf("socket,udp=127.0.0.1:%d", localVM.ifacePortFor(localPortID))
 		if destVM != nil {

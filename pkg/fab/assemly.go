@@ -203,7 +203,7 @@ const (
 	KEY_USAGE_SERVER = x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment
 )
 
-func LoadVLAB(basedir string, mngr *cnc.Manager, dryRun bool, config, size string) (*vlab.Service, error) {
+func LoadVLAB(basedir string, mngr *cnc.Manager, dryRun bool, size string) (*vlab.Service, error) {
 	if mngr.Preset() != PRESET_VLAB {
 		return nil, errors.Errorf("only vlab preset supported, found %s", mngr.Preset())
 	}
@@ -211,7 +211,6 @@ func LoadVLAB(basedir string, mngr *cnc.Manager, dryRun bool, config, size strin
 	svc, err := vlab.Load(&vlab.ServiceConfig{
 		DryRun:            dryRun,
 		Size:              size,
-		Config:            config,
 		Basedir:           filepath.Join(basedir, BundleVlabVMs.Name),
 		Wiring:            mngr.Wiring(),
 		ControlIgnition:   filepath.Join(basedir, BundleControlOS.Name, CONTROL_OS_IGNITION),

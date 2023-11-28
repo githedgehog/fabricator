@@ -43,7 +43,6 @@ type Service struct {
 }
 
 type ServiceConfig struct {
-	Config            string
 	DryRun            bool
 	Size              string
 	InstallComplete   bool
@@ -77,9 +76,9 @@ func Load(cfg *ServiceConfig) (*Service, error) {
 		return nil, errors.Errorf("ssh key is not specified")
 	}
 
-	vlabConfig, err := readConfig(cfg.Config)
+	vlabConfig, err := readConfigFromWiring(cfg.Wiring)
 	if err != nil {
-		return nil, errors.Wrapf(err, "error reading VLAB config file %s", cfg.Config)
+		return nil, errors.Wrapf(err, "error reading VLAB config from wiring")
 	}
 
 	mngr, err := NewVMManager(vlabConfig, cfg.Wiring, cfg.Basedir, cfg.Size)

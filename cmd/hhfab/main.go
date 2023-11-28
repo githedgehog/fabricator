@@ -317,11 +317,6 @@ func main() {
 							basedirFlag,
 							verboseFlag,
 							briefFlag,
-							&cli.StringFlag{
-								Name:    "config",
-								Usage:   "use vlab config `FILE`",
-								Aliases: []string{"c"},
-							},
 							&cli.BoolFlag{
 								Name:        "dry-run",
 								Usage:       "dry run, prepare vms but not actually run them",
@@ -353,7 +348,7 @@ func main() {
 								return errors.Wrap(err, "error loading")
 							}
 
-							svc, err := fab.LoadVLAB(basedir, mngr, dryRun, cCtx.String("config"), cCtx.String("vm-size"))
+							svc, err := fab.LoadVLAB(basedir, mngr, dryRun, cCtx.String("vm-size"))
 							if err != nil {
 								return errors.Wrap(err, "error loading vlab")
 							}
@@ -371,11 +366,6 @@ func main() {
 							verboseFlag,
 							briefFlag,
 							vmFlag,
-							&cli.StringFlag{
-								Name:    "config",
-								Usage:   "use vlab config `FILE`",
-								Aliases: []string{"c"},
-							},
 						},
 						Before: func(ctx *cli.Context) error {
 							return setupLogger(verbose, brief)
@@ -386,7 +376,7 @@ func main() {
 								return errors.Wrap(err, "error loading")
 							}
 
-							svc, err := fab.LoadVLAB(basedir, mngr, dryRun, cCtx.String("config"), "")
+							svc, err := fab.LoadVLAB(basedir, mngr, dryRun, "")
 							if err != nil {
 								return errors.Wrap(err, "error loading vlab")
 							}
@@ -402,11 +392,6 @@ func main() {
 							verboseFlag,
 							briefFlag,
 							vmFlag,
-							&cli.StringFlag{
-								Name:    "config",
-								Usage:   "use vlab config `FILE`",
-								Aliases: []string{"c"},
-							},
 						},
 						Before: func(ctx *cli.Context) error {
 							return setupLogger(verbose, brief)
@@ -417,7 +402,7 @@ func main() {
 								return errors.Wrap(err, "error loading")
 							}
 
-							svc, err := fab.LoadVLAB(basedir, mngr, dryRun, cCtx.String("config"), "")
+							svc, err := fab.LoadVLAB(basedir, mngr, dryRun, "")
 							if err != nil {
 								return errors.Wrap(err, "error loading vlab")
 							}
@@ -433,11 +418,6 @@ func main() {
 							verboseFlag,
 							briefFlag,
 							vmFlag,
-							&cli.StringFlag{
-								Name:    "config",
-								Usage:   "use vlab config `FILE`",
-								Aliases: []string{"c"},
-							},
 						},
 						Before: func(ctx *cli.Context) error {
 							return setupLogger(verbose, brief)
@@ -448,7 +428,7 @@ func main() {
 								return errors.Wrap(err, "error loading")
 							}
 
-							svc, err := fab.LoadVLAB(basedir, mngr, dryRun, cCtx.String("config"), "")
+							svc, err := fab.LoadVLAB(basedir, mngr, dryRun, "")
 							if err != nil {
 								return errors.Wrap(err, "error loading vlab")
 							}
@@ -463,11 +443,6 @@ func main() {
 							basedirFlag,
 							verboseFlag,
 							briefFlag,
-							&cli.StringFlag{
-								Name:    "config",
-								Usage:   "use vlab config `FILE`",
-								Aliases: []string{"c"},
-							},
 						},
 						Before: func(ctx *cli.Context) error {
 							return setupLogger(verbose, brief)
@@ -478,7 +453,7 @@ func main() {
 								return errors.Wrap(err, "error loading")
 							}
 
-							svc, err := fab.LoadVLAB(basedir, mngr, dryRun, cCtx.String("config"), "")
+							svc, err := fab.LoadVLAB(basedir, mngr, dryRun, "")
 							if err != nil {
 								return errors.Wrap(err, "error loading vlab")
 							}
