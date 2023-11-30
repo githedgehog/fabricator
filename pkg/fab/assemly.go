@@ -105,6 +105,7 @@ var (
 	// Misc
 	REF_K9S        = cnc.Ref{Name: "fabricator/k9s", Tag: "v0.27.4"}
 	REF_RBAC_PROXY = cnc.Ref{Name: "fabricator/kube-rbac-proxy", Tag: "v0.14.1"}
+	REF_TOOLBOX    = cnc.Ref{Name: "fabricator/toolbox", Tag: "latest"}
 
 	// Cert manager
 	REF_CERT_MANAGER_VERSION    = cnc.Ref{Tag: "v1.13.0"}
@@ -144,6 +145,10 @@ var (
 	BundleControlOS = cnc.Bundle{
 		Name: "control-os",
 	}
+	BundleServerInstall = cnc.Bundle{
+		Name:        "server-install",
+		IsInstaller: true,
+	}
 	BundleServerOS = cnc.Bundle{
 		Name: "server-os",
 	}
@@ -174,7 +179,7 @@ const (
 func NewCNCManager() *cnc.Manager {
 	return cnc.New(
 		Presets,
-		[]cnc.Bundle{BundleControlInstall, BundleControlOS, BundleVlabFiles, BundleServerOS},
+		[]cnc.Bundle{BundleControlInstall, BundleControlOS, BundleServerInstall, BundleServerOS, BundleVlabFiles},
 		STAGE_MAX,
 		[]cnc.Component{
 			&Base{},

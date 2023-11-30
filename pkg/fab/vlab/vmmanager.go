@@ -42,7 +42,7 @@ var FullControlVM = VMConfig{
 
 var DefaultServerVM = VMConfig{
 	CPU:  2,
-	RAM:  512,
+	RAM:  768,
 	Disk: 10,
 }
 
@@ -50,7 +50,9 @@ var CompactServerVM = VMConfig{
 	CPU: 1,
 }
 
-var FullServerVM = VMConfig{}
+var FullServerVM = VMConfig{
+	RAM: 1024,
+}
 
 var DefaultSwitchVM = VMConfig{
 	CPU:  4,

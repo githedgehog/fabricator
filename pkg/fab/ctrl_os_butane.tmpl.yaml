@@ -71,6 +71,14 @@ storage:
           Address=::1/128
           Address={{ .controlVIP }}
 
+    - path: /etc/default/toolbox
+      mode: 0644
+      contents:
+        inline: |
+          TOOLBOX_DOCKER_IMAGE=ghcr.io/githedgehog/toolbox
+          TOOLBOX_DOCKER_TAG=latest
+          TOOLBOX_USER=root
+
     # K9s plugin to reboot and reinstall switches
     - path: /home/core/.config/k9s/plugin.yml
       user:

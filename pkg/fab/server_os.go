@@ -15,7 +15,8 @@ import (
 var serverButaneTemplate string
 
 type ServerOS struct {
-	PasswordHash string `json:"passwordHash,omitempty"`
+	PasswordHash string  `json:"passwordHash,omitempty"`
+	ToolboxRef   cnc.Ref `json:"toolboxRef,omitempty"`
 }
 
 var _ cnc.Component = (*ServerOS)(nil)
@@ -25,7 +26,7 @@ func (cfg *ServerOS) Name() string {
 }
 
 func (cfg *ServerOS) IsEnabled(preset cnc.Preset) bool {
-	return true
+	return preset == PRESET_VLAB
 }
 
 func (cfg *ServerOS) Flags() []cli.Flag {
@@ -41,10 +42,14 @@ func (cfg *ServerOS) Flags() []cli.Flag {
 }
 
 func (cfg *ServerOS) Hydrate(preset cnc.Preset) error {
+	cfg.ToolboxRef = cfg.ToolboxRef.Fallback(REF_TOOLBOX)
+
 	return nil
 }
 
 func (cfg *ServerOS) Build(basedir string, preset cnc.Preset, get cnc.GetComponent, data *wiring.Data, run cnc.AddBuildOp, install cnc.AddRunOp) error {
+	cfg.ToolboxRef = cfg.ToolboxRef.Fallback(BaseConfig(get).Source)
+
 	username := FLATCAR_CONTROL_USER
 	authorizedKeys := BaseConfig(get).AuthorizedKeys
 
@@ -78,6 +83,27 @@ func (cfg *ServerOS) Build(basedir string, preset cnc.Preset, get cnc.GetCompone
 					"passwordHash", cfg.PasswordHash,
 				),
 			})
+	}
+
+	for _, bundle := range []cnc.Bundle{BundleControlInstall, BundleServerInstall} {
+		run(bundle, STAGE_INSTALL_0_PREP, "toolbox",
+			&cnc.FilesORAS{
+				Ref: cfg.ToolboxRef,
+				Files: []cnc.File{
+					{
+						Name:          "toolbox.tar",
+						InstallTarget: "/opt/hedgehog",
+						InstallMode:   0o644,
+					},
+				},
+			})
+
+		install(bundle, STAGE_INSTALL_0_PREP, "toolbox-load",
+			&cnc.ExecCommand{
+				Name: "ctr",
+				Args: []string{"image", "import", "/opt/hedgehog/toolbox.tar"},
+			})
+
 	}
 
 	return nil

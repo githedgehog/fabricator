@@ -38,3 +38,11 @@ storage:
       append:
         - inline: |
             127.0.0.1 {{ .hostname }}
+
+    - path: /etc/default/toolbox
+      mode: 0644
+      contents:
+        inline: |
+          TOOLBOX_DOCKER_IMAGE=ghcr.io/githedgehog/toolbox
+          TOOLBOX_DOCKER_TAG=latest
+          TOOLBOX_USER=root

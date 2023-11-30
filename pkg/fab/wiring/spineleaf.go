@@ -435,6 +435,8 @@ func (b *SpineLeafBuilder) createRack(name string, spec wiringapi.RackSpec) (*wi
 }
 
 func (b *SpineLeafBuilder) createSwitch(name string, spec wiringapi.SwitchSpec) (*wiringapi.Switch, error) {
+	spec.Profile = "vs" // TODO temp hack
+
 	sw := &wiringapi.Switch{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       wiringapi.KindSwitch,
