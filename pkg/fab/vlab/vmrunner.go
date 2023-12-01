@@ -35,9 +35,7 @@ func (vm *VM) Run(ctx context.Context, eg *errgroup.Group, svcCfg *ServiceConfig
 
 	eg.Go(vm.RunVM(ctx, svcCfg))
 
-	if vm.Type == VMTypeControl {
-		eg.Go(vm.RunInstall(ctx, svcCfg))
-	}
+	eg.Go(vm.RunInstall(ctx, svcCfg))
 }
 
 func (vm *VM) RunTPM(ctx context.Context, svcCfg *ServiceConfig) func() error {
@@ -144,12 +142,12 @@ func (vm *VM) RunVM(ctx context.Context, svcCfg *ServiceConfig) func() error {
 
 func (vm *VM) RunInstall(ctx context.Context, svcCfg *ServiceConfig) func() error {
 	run := func(ctx context.Context) error {
-		if vm.Type != VMTypeControl {
+		if vm.Type != VMTypeControl && vm.Type != VMTypeServer {
 			return nil
 		}
 
 		if vm.Installed.Is() {
-			slog.Debug("Control node is already installed", "name", vm.Name)
+			slog.Debug("VM is already installed", "name", vm.Name)
 			return nil
 		}
 
@@ -157,12 +155,12 @@ func (vm *VM) RunInstall(ctx context.Context, svcCfg *ServiceConfig) func() erro
 			return nil
 		}
 
-		slog.Info("Installing control node")
+		slog.Info("Installing VM", "name", vm.Name, "type", vm.Type)
 
 		ctx, cancel := context.WithTimeoutCause(ctx, 10*time.Minute, errors.New("controller installation timed out")) // TODO
 		defer cancel()
 
-		slog.Info("Waiting for control node ssh")
+		slog.Debug("Waiting for VM ssh", "name", vm.Name, "type", vm.Type)
 
 		ticker := time.NewTicker(5 * time.Second) // TODO
 		defer ticker.Stop()
@@ -174,7 +172,7 @@ func (vm *VM) RunInstall(ctx context.Context, svcCfg *ServiceConfig) func() erro
 				err := vm.ssh(ctx, svcCfg, true, "hostname")
 				if err != nil {
 					// just waiting
-					slog.Debug("Can't ssh to control node", "error", err)
+					slog.Debug("Can't ssh to VM", "name", vm.Name, "type", vm.Type, "error", err)
 				} else {
 					break loop
 				}
@@ -182,7 +180,7 @@ func (vm *VM) RunInstall(ctx context.Context, svcCfg *ServiceConfig) func() erro
 				return ctx.Err()
 			}
 		}
-		slog.Info("Control node ssh is available")
+		slog.Info("VM ssh is available", "name", vm.Name, "type", vm.Type)
 
 		// TODO k3s really don't like when we don't have default route
 		// err := vm.ssh(ctx, "sudo ip route add default via 10.100.0.2 dev eth0")
@@ -190,33 +188,43 @@ func (vm *VM) RunInstall(ctx context.Context, svcCfg *ServiceConfig) func() erro
 		// 	return errors.Wrap(err, "error setting default route")
 		// }
 
-		slog.Info("Uploading installer")
-		err := vm.upload(ctx, svcCfg, false, svcCfg.ControlInstaller+".tgz", "~/")
+		installerPath := svcCfg.ControlInstaller
+		if vm.Type == VMTypeServer {
+			installerPath = svcCfg.ServerInstaller
+		}
+		installer := filepath.Base(installerPath)
+
+		slog.Info("Uploading installer", "name", vm.Name, "type", vm.Type, "installer", installer)
+		err := vm.upload(ctx, svcCfg, false, installerPath+".tgz", "~/")
 		if err != nil {
 			return errors.Wrap(err, "error uploading installer")
 		}
-		slog.Debug("Installer uploaded")
+		slog.Debug("Installer uploaded", "name", vm.Name, "type", vm.Type, "installer", installer)
 
-		slog.Info("Running installer on control node")
-		installCmd := "tar xzf control-install.tgz && cd control-install && sudo ./hhfab-recipe run"
+		slog.Info("Running installer on VM", "name", vm.Name, "type", vm.Type, "installer", installer)
+		installCmd := fmt.Sprintf("tar xzf %s.tgz && cd %s && sudo ./hhfab-recipe run", installer, installer)
 		if slog.Default().Enabled(ctx, slog.LevelDebug) {
 			installCmd += " -v"
 		}
 		err = vm.ssh(ctx, svcCfg, false, installCmd)
 		if err != nil {
-			return errors.Wrap(err, "error installing control node")
+			return errors.Wrap(err, "error installing vm")
+		}
+
+		slog.Info("VM installed", "name", vm.Name, "type", vm.Type, "installer", installer)
+
+		err = vm.Installed.Mark()
+		if err != nil {
+			return errors.Wrapf(err, "error marking vm as installed")
+		}
+
+		if vm.Type != VMTypeControl {
+			return nil
 		}
 
 		err = vm.download(ctx, svcCfg, true, "/etc/rancher/k3s/k3s.yaml", filepath.Join(svcCfg.Basedir, "kubeconfig.yaml"))
 		if err != nil {
 			return errors.Wrapf(err, "error downloading kubeconfig")
-		}
-
-		slog.Info("Control node installed")
-
-		err = vm.Installed.Mark()
-		if err != nil {
-			return errors.Wrapf(err, "error marking control node as installed")
 		}
 
 		if svcCfg.InstallComplete {
@@ -247,7 +255,7 @@ func (vm *VM) RunInstall(ctx context.Context, svcCfg *ServiceConfig) func() erro
 	return func() error {
 		err := run(ctx)
 		if err != nil {
-			slog.Error("Error installing control node", "error", err)
+			slog.Error("Error installing VM", "name", vm.Name, "type", vm.Type, "error", err)
 		}
 
 		return nil

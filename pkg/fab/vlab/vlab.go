@@ -52,6 +52,7 @@ type ServiceConfig struct {
 	ControlIgnition   string
 	ServerIgnitionDir string
 	ControlInstaller  string
+	ServerInstaller   string
 	FilesDir          string
 	SshKey            string
 }
@@ -68,6 +69,9 @@ func Load(cfg *ServiceConfig) (*Service, error) {
 	}
 	if cfg.ControlInstaller == "" {
 		return nil, errors.Errorf("control installer file is not specified")
+	}
+	if cfg.ServerInstaller == "" {
+		return nil, errors.Errorf("server installer file is not specified")
 	}
 	if cfg.FilesDir == "" {
 		return nil, errors.Errorf("files dir is not specified")

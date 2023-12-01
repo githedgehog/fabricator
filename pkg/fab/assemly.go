@@ -221,6 +221,7 @@ func LoadVLAB(basedir string, mngr *cnc.Manager, dryRun bool, size string) (*vla
 		ControlIgnition:   filepath.Join(basedir, BundleControlOS.Name, CONTROL_OS_IGNITION),
 		ServerIgnitionDir: filepath.Join(basedir, BundleServerOS.Name),
 		ControlInstaller:  filepath.Join(basedir, BundleControlInstall.Name),
+		ServerInstaller:   filepath.Join(basedir, BundleServerInstall.Name),
 		FilesDir:          filepath.Join(basedir, BundleVlabFiles.Name),
 		SshKey:            filepath.Join(basedir, DEFAULT_VLAB_SSH_KEY),
 	})
