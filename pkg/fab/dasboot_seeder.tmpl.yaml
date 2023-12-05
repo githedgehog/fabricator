@@ -6,6 +6,9 @@ settings:
   issue_certificates: false
   listeners:
     insecure:
+      dynll:
+        device_name: ""
+        listening_port: 80
       generic:
         - {{ .controlVIP }}:80
     secure:
