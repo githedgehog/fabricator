@@ -437,8 +437,9 @@ func main() {
 						},
 					},
 					{
-						Name:  "vfio-pci-bind",
-						Usage: "bind all device used in vlab to vfio-pci driver for pci passthrough",
+						Name:     "vfio-pci-bind",
+						Category: "Hybrid (Baremetal switches + VMs)",
+						Usage:    "bind all device used in vlab to vfio-pci driver for pci passthrough",
 						Flags: []cli.Flag{
 							basedirFlag,
 							verboseFlag,
@@ -459,6 +460,32 @@ func main() {
 							}
 
 							return errors.Wrap(svc.VFIOPCIBindAll(), "error binding to vfio-pci")
+						},
+					},
+					{
+						Name:     "create-vpc-per-server",
+						Category: "Testing",
+						Usage:    "Create VPC for each server with valid connection and configure IP/VLAN on it",
+						Flags: []cli.Flag{
+							basedirFlag,
+							verboseFlag,
+							briefFlag,
+						},
+						Before: func(ctx *cli.Context) error {
+							return setupLogger(verbose, brief)
+						},
+						Action: func(cCtx *cli.Context) error {
+							err := mngr.Load(basedir)
+							if err != nil {
+								return errors.Wrap(err, "error loading")
+							}
+
+							svc, err := fab.LoadVLAB(basedir, mngr, dryRun, "")
+							if err != nil {
+								return errors.Wrap(err, "error loading vlab")
+							}
+
+							return errors.Wrap(svc.CreateVPCPerServer(), "error creating VPC per server")
 						},
 					},
 				},

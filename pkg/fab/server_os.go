@@ -14,6 +14,9 @@ import (
 //go:embed server_os_butane.tmpl.yaml
 var serverButaneTemplate string
 
+//go:embed server_os_hhnet
+var hhnetTemplate string
+
 type ServerOS struct {
 	PasswordHash string  `json:"passwordHash,omitempty"`
 	ToolboxRef   cnc.Ref `json:"toolboxRef,omitempty"`
@@ -105,6 +108,16 @@ func (cfg *ServerOS) Build(basedir string, preset cnc.Preset, get cnc.GetCompone
 			})
 
 	}
+
+	run(BundleServerInstall, STAGE_INSTALL_0_PREP, "hhnet",
+		&cnc.FileGenerate{
+			File: cnc.File{
+				Name:          "hhnet",
+				InstallTarget: "/opt/bin",
+				InstallMode:   0o755,
+			},
+			Content: cnc.FromValue(hhnetTemplate),
+		})
 
 	return nil
 }
