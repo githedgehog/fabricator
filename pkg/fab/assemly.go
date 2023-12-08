@@ -87,11 +87,8 @@ var (
 		// first within the platform-accton repository before we can use them.
 		// This is why we are creating tags *only* for the 54NPE.
 		{
-			src: cnc.Ref{Name: "honie/onie-updater-x86_64-accton_as4630-r0"},
-			targets: []cnc.Ref{
-				{Name: "onie/onie-updater-x86_64-accton_as4630-r0"},
-				{Name: "onie/onie-updater-x86_64-accton_as4630_54npe-r0"},
-			},
+			src:     cnc.Ref{Name: "honie/onie-updater-x86_64-accton_as4630-r0"},
+			targets: []cnc.Ref{{Name: "onie/onie-updater-x86_64-accton_as4630_54npe-r0"}},
 		},
 		{
 			src:     cnc.Ref{Name: "honie/onie-updater-x86_64-accton_as7326_56x-r0"},
@@ -107,12 +104,12 @@ var (
 		{
 			src: cnc.Ref{Name: "honie/onie-updater-x86_64-dellemc_s5200_c3538-r0"},
 			targets: []cnc.Ref{
-				{Name: "onie/onie-updater-x86_64-dellemc_s5200_c3538-r0"},
-				{Name: "onie/onie-updater-x86_64-dellemc_s5212f_c3538-r0"},
-				{Name: "onie/onie-updater-x86_64-dellemc_s5224f_c3538-r0"},
+				// {Name: "onie/onie-updater-x86_64-dellemc_s5200_c3538-r0"},
+				// {Name: "onie/onie-updater-x86_64-dellemc_s5212f_c3538-r0"},
+				// {Name: "onie/onie-updater-x86_64-dellemc_s5224f_c3538-r0"},
 				{Name: "onie/onie-updater-x86_64-dellemc_s5232f_c3538-r0"},
 				{Name: "onie/onie-updater-x86_64-dellemc_s5248f_c3538-r0"},
-				{Name: "onie/onie-updater-x86_64-dellemc_s5296f_c3538-r0"},
+				// {Name: "onie/onie-updater-x86_64-dellemc_s5296f_c3538-r0"},
 			},
 		},
 	}
