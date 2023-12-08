@@ -70,6 +70,53 @@ var (
 	REF_DASBOOT_NTP_CHART = cnc.Ref{Name: "das-boot/charts/ntp", Tag: "0.0.2"}
 	REF_DASBOOT_NTP_IMAGE = cnc.Ref{Name: "das-boot/ntp", Tag: "latest"}
 
+	// ONIE
+	REF_HONIE_VERSION         = cnc.Ref{Tag: "0.0.1"}
+	REF_ONIE_TARGET_VERSION   = cnc.Ref{Tag: "latest"} // the target tag currently *must* always be "latest" as this is hardcoded in DAS BOOT
+	REF_ONIE_SRCTARGETS_PAIRS = []struct {
+		src     cnc.Ref
+		targets []cnc.Ref
+	}{
+		{
+			src:     cnc.Ref{Name: "honie/onie-updater-x86_64-kvm_x86_64-r0"},
+			targets: []cnc.Ref{{Name: "onie/onie-updater-x86_64-kvm_x86_64-r0"}},
+		},
+		// Technically there are more platforms within the AS4630 family.
+		// However, our HONIE image will only work on the AS4630-54NPE.
+		// The other platforms have even different lane mapping etc. and need to be prepared for
+		// first within the platform-accton repository before we can use them.
+		// This is why we are creating tags *only* for the 54NPE.
+		{
+			src: cnc.Ref{Name: "honie/onie-updater-x86_64-accton_as4630-r0"},
+			targets: []cnc.Ref{
+				{Name: "onie/onie-updater-x86_64-accton_as4630-r0"},
+				{Name: "onie/onie-updater-x86_64-accton_as4630_54npe-r0"},
+			},
+		},
+		{
+			src:     cnc.Ref{Name: "honie/onie-updater-x86_64-accton_as7326_56x-r0"},
+			targets: []cnc.Ref{{Name: "onie/onie-updater-x86_64-accton_as7326_56x-r0"}},
+		},
+		{
+			src:     cnc.Ref{Name: "honie/onie-updater-x86_64-accton_as7726_32x-r0"},
+			targets: []cnc.Ref{{Name: "onie/onie-updater-x86_64-accton_as7726_32x-r0"}},
+		},
+		// Technically the HONIE image is prepared for *all* the devices in the S5200 family.
+		// This is why we are creating tags for all of the platforms already.
+		// However, officially we are only supporting the 5232 and 5248.
+		{
+			src: cnc.Ref{Name: "honie/onie-updater-x86_64-dellemc_s5200_c3538-r0"},
+			targets: []cnc.Ref{
+				{Name: "onie/onie-updater-x86_64-dellemc_s5200_c3538-r0"},
+				{Name: "onie/onie-updater-x86_64-dellemc_s5212f_c3538-r0"},
+				{Name: "onie/onie-updater-x86_64-dellemc_s5224f_c3538-r0"},
+				{Name: "onie/onie-updater-x86_64-dellemc_s5232f_c3538-r0"},
+				{Name: "onie/onie-updater-x86_64-dellemc_s5248f_c3538-r0"},
+				{Name: "onie/onie-updater-x86_64-dellemc_s5296f_c3538-r0"},
+			},
+		},
+	}
+
 	// SONiC
 	REF_SONIC_BCOM_BASE   = cnc.Ref{Name: "sonic-bcom-private", Tag: "base-bin-4.1.1"}
 	REF_SONIC_BCOM_CAMPUS = cnc.Ref{Name: "sonic-bcom-private", Tag: "campus-bin-4.1.1"}

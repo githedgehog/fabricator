@@ -259,6 +259,16 @@ func (cfg *DasBoot) Build(basedir string, preset cnc.Preset, get cnc.GetComponen
 			),
 		})
 
+	for _, srcTargetsPair := range REF_ONIE_SRCTARGETS_PAIRS {
+		for _, srcTargetsPairTarget := range srcTargetsPair.targets {
+			run(BundleControlInstall, STAGE_INSTALL_4_DASBOOT, fmt.Sprintf("honie-%s", strings.ReplaceAll(srcTargetsPairTarget.Name, "/", "-")),
+				&cnc.SyncOCI{
+					Ref:    srcTargetsPair.src.Fallback(REF_HONIE_VERSION),
+					Target: srcTargetsPairTarget.Fallback(REF_ONIE_TARGET_VERSION),
+				})
+		}
+	}
+
 	for _, sonicTarget := range REF_SONIC_TARGETS_BASE {
 		run(BundleControlInstall, STAGE_INSTALL_4_DASBOOT, fmt.Sprintf("das-boot-bin-%s", strings.ReplaceAll(sonicTarget.Name, "/", "-")),
 			&cnc.SyncOCI{
