@@ -128,6 +128,7 @@ func (cfg *DasBoot) Build(basedir string, preset cnc.Preset, get cnc.GetComponen
 	cfg.SONiCCampusRef = cfg.SONiCCampusRef.Fallback(BaseConfig(get).Source)
 	cfg.SONiCVSRef = cfg.SONiCVSRef.Fallback(BaseConfig(get).Source)
 
+	source := BaseConfig(get).Source
 	target := BaseConfig(get).Target
 	targetInCluster := BaseConfig(get).TargetInCluster
 
@@ -263,8 +264,8 @@ func (cfg *DasBoot) Build(basedir string, preset cnc.Preset, get cnc.GetComponen
 		for _, srcTargetsPairTarget := range srcTargetsPair.targets {
 			run(BundleControlInstall, STAGE_INSTALL_4_DASBOOT, fmt.Sprintf("honie-%s", strings.ReplaceAll(srcTargetsPairTarget.Name, "/", "-")),
 				&cnc.SyncOCI{
-					Ref:    srcTargetsPair.src.Fallback(REF_HONIE_VERSION),
-					Target: srcTargetsPairTarget.Fallback(REF_ONIE_TARGET_VERSION),
+					Ref:    srcTargetsPair.src.Fallback(source, REF_HONIE_VERSION),
+					Target: srcTargetsPairTarget.Fallback(target, REF_ONIE_TARGET_VERSION),
 				})
 		}
 	}
