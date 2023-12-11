@@ -101,7 +101,7 @@ func main() {
 	}
 
 	var wgChainControlLink bool
-	var wgControlLinksCount, wgSpinesCount, wgFabricLinksCount, wgMCLAGLeafsCount, wgOrphanLeafsCount, wgMCLAGSessionLinks, wgMCLAGPeerLinks uint
+	var wgControlLinksCount, wgSpinesCount, wgFabricLinksCount, wgMCLAGLeafsCount, wgOrphanLeafsCount, wgMCLAGSessionLinks, wgMCLAGPeerLinks, wgVPCLoopbacks uint
 
 	wiringGenFlags := []cli.Flag{
 		&cli.BoolFlag{
@@ -158,6 +158,13 @@ func main() {
 			Name:        "mclag-peer-links",
 			Usage:       "number of mclag peer links",
 			Destination: &wgMCLAGPeerLinks,
+			Value:       2,
+		},
+		&cli.UintFlag{
+			Category:    FLAG_CATEGORY_WIRING_GEN,
+			Name:        "vpc-loopbacks",
+			Usage:       "number of vpc loopbacks",
+			Destination: &wgVPCLoopbacks,
 			Value:       2,
 		},
 	}
@@ -221,6 +228,7 @@ func main() {
 						OrphanLeafsCount:  uint8(wgOrphanLeafsCount),
 						MCLAGSessionLinks: uint8(wgMCLAGSessionLinks),
 						MCLAGPeerLinks:    uint8(wgMCLAGPeerLinks),
+						VPCLoopbacks:      uint8(wgVPCLoopbacks),
 					}
 					err := mngr.Init(basedir, fromConfig, cnc.Preset(preset), wiringPath.Value(), wiringGen, hydrate)
 					if err != nil {
@@ -528,6 +536,7 @@ func main() {
 										OrphanLeafsCount:  uint8(wgOrphanLeafsCount),
 										MCLAGSessionLinks: uint8(wgMCLAGSessionLinks),
 										MCLAGPeerLinks:    uint8(wgMCLAGPeerLinks),
+										VPCLoopbacks:      uint8(wgVPCLoopbacks),
 									}).Build()
 									if err != nil {
 										return errors.Wrap(err, "error building sample")

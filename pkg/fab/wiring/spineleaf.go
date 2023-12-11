@@ -28,6 +28,7 @@ type SpineLeafBuilder struct {
 	OrphanLeafsCount  uint8 // number of non-MCLAG server-leafs to generate
 	MCLAGSessionLinks uint8 // number of MCLAG session links to generate
 	MCLAGPeerLinks    uint8 // number of MCLAG peer links to generate
+	VPCLoopbacks      uint8 // number of VPC loopbacks to generate per leaf switch
 
 	data         *wiring.Data
 	ifaceTracker map[string]uint8 // next available interface ID for each switch
@@ -370,6 +371,30 @@ func (b *SpineLeafBuilder) Build() (*wiring.Data, error) {
 			if _, err := b.createConnection(wiringapi.ConnectionSpec{
 				Fabric: &wiringapi.ConnFabric{
 					Links: links,
+				},
+			}); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	if b.VPCLoopbacks > 0 {
+		for _, sw := range b.data.Switch.All() {
+			if !sw.Spec.Role.IsLeaf() {
+				continue
+			}
+
+			loops := []wiringapi.SwitchToSwitchLink{}
+			for i := uint8(0); i < b.VPCLoopbacks; i++ {
+				loops = append(loops, wiringapi.SwitchToSwitchLink{
+					Switch1: wiringapi.BasePortName{Port: b.nextSwitchPort(sw.Name)},
+					Switch2: wiringapi.BasePortName{Port: b.nextSwitchPort(sw.Name)},
+				})
+			}
+
+			if _, err := b.createConnection(wiringapi.ConnectionSpec{
+				VPCLoopback: &wiringapi.ConnVPCLoopback{
+					Links: loops,
 				},
 			}); err != nil {
 				return nil, err
