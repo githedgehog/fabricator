@@ -41,7 +41,7 @@ func (vm *VM) Run(ctx context.Context, eg *errgroup.Group, svcCfg *ServiceConfig
 func (vm *VM) RunTPM(ctx context.Context, svcCfg *ServiceConfig) func() error {
 	return func() error {
 		err := execCmd(ctx, svcCfg, vm.Basedir, true, "swtpm", []string{}, "socket", "--tpm2", "--tpmstate", "dir=tpm",
-			"--ctrl", "type=unixio,path=tpm.sock.ctrl", "--server", "type=unixio,path=tpm.sock", "--pid", "file=tpm.pid",
+			"--ctrl", "type=unixio,path=tpm.sock.ctrl", "--pid", "file=tpm.pid",
 			"--log", "level=1", "--flags", "startup-clear")
 		if err != nil {
 			return errors.Wrapf(err, "error starting tpm")
@@ -61,17 +61,6 @@ func (vm *VM) RunVM(ctx context.Context, svcCfg *ServiceConfig) func() error {
 
 		slog.Info("Running VM", "id", vm.ID, "name", vm.Name, "type", vm.Type)
 
-		if vm.Type == VMTypeControl || vm.Type == VMTypeSwitchVS {
-			// This is an ugly workaround in a bug in swtpm:
-			// If you specify both --server and --ctrl flags for the socket swtpm,
-			// then it exits if you start with QEMU directly. If you run a command,
-			// then it will continue to work.
-			err := execCmd(ctx, svcCfg, vm.Basedir, true, "tpm2", []string{"TPM2TOOLS_TCTI=swtpm:path=tpm.sock"}, "startup")
-			if err != nil {
-				return errors.Wrapf(err, "error starting tpm")
-			}
-		}
-
 		args := []string{
 			"qemu-system-x86_64",
 			"-name", vm.Name,
@@ -79,7 +68,7 @@ func (vm *VM) RunVM(ctx context.Context, svcCfg *ServiceConfig) func() error {
 			"-m", fmt.Sprintf("%dM", vm.Config.RAM),
 			"-machine", "q35,accel=kvm,smm=on", "-cpu", "host", "-smp", fmt.Sprintf("%d", vm.Config.CPU),
 			"-object", "rng-random,filename=/dev/urandom,id=rng0", "-device", "virtio-rng-pci,rng=rng0",
-			"-drive", "if=virtio,file=os.img",
+			"-drive", "if=virtio,file=os.img,index=0",
 			"-drive", "if=pflash,file=efi_code.fd,format=raw,readonly=on",
 			"-drive", "if=pflash,file=efi_vars.fd,format=raw",
 			"-display", "none",
@@ -88,6 +77,13 @@ func (vm *VM) RunVM(ctx context.Context, svcCfg *ServiceConfig) func() error {
 			"-monitor", "unix:monitor.sock,server,nowait",
 			"-qmp", "unix:qmp.sock,server,nowait",
 			"-global", "ICH9-LPC.disable_s3=1",
+		}
+
+		usbfi, _ := os.Stat(filepath.Join(vm.Basedir, "usb.img"))
+		if usbfi != nil {
+			args = append(args,
+				"-drive", "if=virtio,file=usb.img,index=1",
+			)
 		}
 
 		if vm.Type == VMTypeControl || vm.Type == VMTypeSwitchVS {
