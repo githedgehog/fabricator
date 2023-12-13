@@ -12,7 +12,7 @@ require (
 	github.com/k3s-io/helm-controller v0.15.4
 	github.com/lmittmann/tint v1.0.3
 	github.com/manifoldco/promptui v0.9.0
-	github.com/mattn/go-isatty v0.0.19
+	github.com/mattn/go-isatty v0.0.20
 	github.com/melbahja/goph v1.4.0
 	github.com/mholt/archiver/v4 v4.0.0-alpha.8
 	github.com/mitchellh/hashstructure/v2 v2.0.2
@@ -23,9 +23,9 @@ require (
 	github.com/ulikunitz/xz v0.5.11
 	github.com/urfave/cli/v2 v2.25.7
 	github.com/vbauerster/mpb/v8 v8.6.1
-	go.githedgehog.com/fabric v0.21.13
+	go.githedgehog.com/fabric v0.21.14
 	golang.org/x/crypto v0.15.0
-	golang.org/x/exp v0.0.0-20230905200255-921286631fa9
+	golang.org/x/exp v0.0.0-20231006140011-7918f672742d
 	golang.org/x/sync v0.4.0
 	k8s.io/api v0.28.4
 	k8s.io/apimachinery v0.28.4
@@ -136,7 +136,7 @@ require (
 	github.com/opencontainers/runtime-spec v1.1.0 // indirect
 	github.com/opencontainers/selinux v1.11.0 // indirect
 	github.com/ostreedev/ostree-go v0.0.0-20210805093236-719684c64e4f // indirect
-	github.com/pierrec/lz4/v4 v4.1.15 // indirect
+	github.com/pierrec/lz4/v4 v4.1.18 // indirect
 	github.com/pkg/sftp v1.13.5 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/power-devops/perfstat v0.0.0-20210106213030-5aafc221ea8c // indirect
@@ -184,8 +184,8 @@ require (
 	golang.org/x/tools v0.14.0 // indirect
 	gomodules.xyz/jsonpatch/v2 v2.4.0 // indirect
 	google.golang.org/appengine v1.6.8 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20230711160842-782d3b101e98 // indirect
-	google.golang.org/grpc v1.58.0-dev // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20230920204549-e6e6cdab5c13 // indirect
+	google.golang.org/grpc v1.58.2 // indirect
 	google.golang.org/protobuf v1.31.0 // indirect
 	gopkg.in/go-jose/go-jose.v2 v2.6.1 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
