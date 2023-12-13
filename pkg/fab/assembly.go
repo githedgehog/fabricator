@@ -171,7 +171,7 @@ var (
 )
 
 const (
-	FLAG_CATEGORY_CONFIG_BASE_SUFFIX = " fabricator options"
+	FLAG_CATEGORY_CONFIG_BASE_SUFFIX = " fabricator options:"
 )
 
 const (
