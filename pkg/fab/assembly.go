@@ -123,6 +123,7 @@ var (
 	REF_SONIC_TARGETS_BASE   = []cnc.Ref{
 		{Name: "sonic/x86_64-dellemc_s5248f_c3538-r0"}, // Dell S5248
 		{Name: "sonic/x86_64-dellemc_s5232f_c3538-r0"}, // Dell S5232
+		{Name: "sonic/x86_64-cel_questone_2-r0"},       // Celestica DS2000
 		{Name: "sonic/x86_64-cel_seastone_2-r0"},       // Celestica DS3000
 		{Name: "sonic/x86_64-cel_silverstone-r0"},      // Celestica DS4000
 		{Name: "sonic/x86_64-accton_as7726_32x-r0"},    // EdgeCore DCS204
