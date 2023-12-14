@@ -7,6 +7,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/urfave/cli/v2"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1alpha2"
+	"go.githedgehog.com/fabric/pkg/manager/config"
 	"go.githedgehog.com/fabric/pkg/wiring"
 	"go.githedgehog.com/fabricator/pkg/fab/cnc"
 )
@@ -36,7 +37,7 @@ func (cfg *K3s) Flags() []cli.Flag {
 	return nil
 }
 
-func (cfg *K3s) Hydrate(preset cnc.Preset) error {
+func (cfg *K3s) Hydrate(preset cnc.Preset, fabricMode config.FabricMode) error {
 	cfg.Ref = cfg.Ref.Fallback(REF_K3S)
 
 	if cfg.ClusterCIDR == "" {
@@ -65,7 +66,7 @@ func (cfg *K3s) Hydrate(preset cnc.Preset) error {
 	return nil
 }
 
-func (cfg *K3s) Build(basedir string, preset cnc.Preset, get cnc.GetComponent, wiring *wiring.Data, run cnc.AddBuildOp, install cnc.AddRunOp) error {
+func (cfg *K3s) Build(basedir string, preset cnc.Preset, fabricMode config.FabricMode, get cnc.GetComponent, wiring *wiring.Data, run cnc.AddBuildOp, install cnc.AddRunOp) error {
 	cfg.Ref = cfg.Ref.Fallback(BaseConfig(get).Source)
 
 	run(BundleControlInstall, STAGE_INSTALL_0_PREP, "k3s-airgap-files",

@@ -13,6 +13,7 @@ import (
 	"github.com/mholt/archiver/v4"
 	"github.com/pkg/errors"
 	"github.com/urfave/cli/v2"
+	"go.githedgehog.com/fabric/pkg/manager/config"
 	"go.githedgehog.com/fabric/pkg/wiring"
 	"go.githedgehog.com/fabricator/pkg/fab/cnc/bin"
 	fabwiring "go.githedgehog.com/fabricator/pkg/fab/wiring"
@@ -41,10 +42,10 @@ type Component interface {
 	// e.g. if we want other components to be able to use some values of that component config - it should be here
 	// e.g. generate TLS certificates
 	// if we want to make sure that same value is used on every build - it should be set here
-	Hydrate(preset Preset) error
+	Hydrate(preset Preset, fabricMode config.FabricMode) error
 
 	// TODO rename run -> build, install -> run?
-	Build(basedir string, preset Preset, get GetComponent, wiring *wiring.Data, run AddBuildOp, install AddRunOp) error
+	Build(basedir string, preset Preset, fabricMode config.FabricMode, get GetComponent, wiring *wiring.Data, run AddBuildOp, install AddRunOp) error
 }
 
 type (
@@ -74,6 +75,7 @@ type Manager struct {
 	maxStage   Stage
 	components []Component
 	hydrateCfg *fabwiring.HydrateConfig
+	fabricMode config.FabricMode
 
 	addedBuildOps map[string]any
 	addedRunOps   map[string]any
@@ -116,7 +118,7 @@ func (mngr *Manager) prepare() error {
 			continue
 		}
 
-		err := comp.Hydrate(mngr.preset)
+		err := comp.Hydrate(mngr.preset, mngr.fabricMode)
 		if err != nil {
 			return errors.Wrapf(err, "error hydrating component %s", comp.Name())
 		}
@@ -125,14 +127,19 @@ func (mngr *Manager) prepare() error {
 	return nil
 }
 
-func (mngr *Manager) Init(basedir string, fromConfig string, preset Preset, wiringPath []string, wiringGen *fabwiring.SpineLeafBuilder, hydrate bool) error {
+func (mngr *Manager) Init(basedir string, fromConfig string, preset Preset, fabricMode config.FabricMode, wiringPath []string, wiringGen *fabwiring.Builder, hydrate bool) error {
 	if _, err := os.Stat(basedir); err == nil {
 		if !os.IsNotExist(err) {
 			return errors.Errorf("basedir %s already exists, please, remove it first", basedir)
 		}
 	}
 
+	if !slices.Contains(config.FabricModes, fabricMode) {
+		return errors.Errorf("unknown fabric mode: %s", fabricMode)
+	}
+
 	mngr.basedir = basedir
+	mngr.fabricMode = fabricMode
 
 	// TODO detect both wiring files and gen flags are set
 
@@ -348,7 +355,7 @@ func (mngr *Manager) Build(pack bool) error {
 		slog.Info("Building", "component", comp.Name())
 
 		adder := &opAdder{mngr: mngr}
-		err := comp.Build(mngr.basedir, mngr.preset, mngr.getComponent, mngr.wiring, adder.addBuildOp, adder.addRunOp)
+		err := comp.Build(mngr.basedir, mngr.preset, mngr.fabricMode, mngr.getComponent, mngr.wiring, adder.addBuildOp, adder.addRunOp)
 		if err != nil {
 			return errors.Wrapf(err, "error building component %s", comp.Name())
 		}

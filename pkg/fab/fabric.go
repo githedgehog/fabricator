@@ -48,7 +48,7 @@ func (cfg *Fabric) Flags() []cli.Flag {
 	return []cli.Flag{}
 }
 
-func (cfg *Fabric) Hydrate(preset cnc.Preset) error {
+func (cfg *Fabric) Hydrate(preset cnc.Preset, fabricMode config.FabricMode) error {
 	cfg.Ref = cfg.Ref.Fallback(REF_FABRIC_VERSION)
 	cfg.FabricApiChartRef = cfg.FabricApiChartRef.Fallback(REF_FABRIC_API_CHART)
 	cfg.FabricChartRef = cfg.FabricChartRef.Fallback(REF_FABRIC_CHART)
@@ -62,7 +62,7 @@ func (cfg *Fabric) Hydrate(preset cnc.Preset) error {
 	return nil
 }
 
-func (cfg *Fabric) Build(basedir string, preset cnc.Preset, get cnc.GetComponent, wiring *wiring.Data, run cnc.AddBuildOp, install cnc.AddRunOp) error {
+func (cfg *Fabric) Build(basedir string, preset cnc.Preset, fabricMode config.FabricMode, get cnc.GetComponent, wiring *wiring.Data, run cnc.AddBuildOp, install cnc.AddRunOp) error {
 	cfg.FabricApiChartRef = cfg.FabricApiChartRef.Fallback(cfg.Ref, BaseConfig(get).Source)
 	cfg.FabricChartRef = cfg.FabricChartRef.Fallback(cfg.Ref, BaseConfig(get).Source)
 	cfg.FabricImageRef = cfg.FabricImageRef.Fallback(cfg.Ref, BaseConfig(get).Source)
@@ -203,7 +203,7 @@ func (cfg *Fabric) Build(basedir string, preset cnc.Preset, get cnc.GetComponent
 						Users:          users,
 						DHCPDConfigMap: "fabric-dhcp-server-config",
 						DHCPDConfigKey: "dhcpd.conf",
-						FabricMode:     config.FabricModeSpineLeaf, // TODO make configurable
+						FabricMode:     fabricMode,
 					},
 				)),
 				cnc.KubeHelmChart("fabric-dhcp-server", "default", helm.HelmChartSpec{

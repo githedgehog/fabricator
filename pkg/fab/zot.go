@@ -7,6 +7,7 @@ import (
 	helm "github.com/k3s-io/helm-controller/pkg/apis/helm.cattle.io/v1"
 	"github.com/pkg/errors"
 	"github.com/urfave/cli/v2"
+	"go.githedgehog.com/fabric/pkg/manager/config"
 	"go.githedgehog.com/fabric/pkg/wiring"
 	"go.githedgehog.com/fabricator/pkg/fab/cnc"
 	core "k8s.io/api/core/v1"
@@ -40,7 +41,7 @@ func (cfg *Zot) Flags() []cli.Flag {
 	return nil
 }
 
-func (cfg *Zot) Hydrate(preset cnc.Preset) error {
+func (cfg *Zot) Hydrate(preset cnc.Preset, fabricMode config.FabricMode) error {
 	cfg.Ref = cfg.Ref.Fallback(REF_ZOT)
 
 	err := cfg.TLS.CA.Ensure(OCI_REPO_CA_CN, nil, KEY_USAGE_CA, nil, nil, nil)
@@ -57,7 +58,7 @@ func (cfg *Zot) Hydrate(preset cnc.Preset) error {
 	return nil
 }
 
-func (cfg *Zot) Build(basedir string, preset cnc.Preset, get cnc.GetComponent, wiring *wiring.Data, run cnc.AddBuildOp, install cnc.AddRunOp) error {
+func (cfg *Zot) Build(basedir string, preset cnc.Preset, fabricMode config.FabricMode, get cnc.GetComponent, wiring *wiring.Data, run cnc.AddBuildOp, install cnc.AddRunOp) error {
 	cfg.Ref = cfg.Ref.Fallback(BaseConfig(get).Source)
 
 	run(BundleControlInstall, STAGE_INSTALL_0_PREP, "zot-airgap-files",

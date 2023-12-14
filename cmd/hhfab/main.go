@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/mattn/go-isatty"
 	"github.com/pkg/errors"
 	"github.com/urfave/cli/v2"
+	"go.githedgehog.com/fabric/pkg/manager/config"
 	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/fab/cnc"
 	"go.githedgehog.com/fabricator/pkg/fab/vlab"
@@ -85,12 +87,6 @@ func main() {
 		presets = append(presets, string(p))
 	}
 
-	// sampleTypes := []string{"collapsedcore"} // TODO move to fabric
-	// samplePresets := []string{}
-	// for _, p := range sample.PresetsAll {
-	// 	samplePresets = append(samplePresets, string(p))
-	// }
-
 	var dryRun, hydrate, nopack bool
 
 	var vm string
@@ -100,72 +96,76 @@ func main() {
 		Destination: &vm,
 	}
 
+	var fabricMode string
 	var wgChainControlLink bool
 	var wgControlLinksCount, wgSpinesCount, wgFabricLinksCount, wgMCLAGLeafsCount, wgOrphanLeafsCount, wgMCLAGSessionLinks, wgMCLAGPeerLinks, wgVPCLoopbacks uint
 
+	fabricModes := []string{}
+	for _, m := range config.FabricModes {
+		fabricModes = append(fabricModes, string(m))
+	}
+
 	wiringGenFlags := []cli.Flag{
+		&cli.StringFlag{
+			Name:        "fabric-mode",
+			Aliases:     []string{"m"},
+			Usage:       "fabric mode (one of: " + strings.Join(fabricModes, ", ") + ")",
+			Destination: &fabricMode,
+			Value:       string(config.FabricModeSpineLeaf),
+		},
 		&cli.BoolFlag{
 			Category:    FLAG_CATEGORY_WIRING_GEN,
 			Name:        "chain-control-link",
-			Usage:       "chain control links instead of all switches directly connected to control node",
+			Usage:       "chain control links instead of all switches directly connected to control node if fabric mode is spine-leaf",
 			Destination: &wgChainControlLink,
-			Value:       false,
 		},
 		&cli.UintFlag{
 			Category:    FLAG_CATEGORY_WIRING_GEN,
 			Name:        "control-links-count",
-			Usage:       "number of control links",
+			Usage:       "number of control links if chain-control-link is enabled",
 			Destination: &wgControlLinksCount,
-			Value:       2,
 		},
 		&cli.UintFlag{
 			Category:    FLAG_CATEGORY_WIRING_GEN,
 			Name:        "spines-count",
-			Usage:       "number of spines",
+			Usage:       "number of spines if fabric mode is spine-leaf",
 			Destination: &wgSpinesCount,
-			Value:       2,
 		},
 		&cli.UintFlag{
 			Category:    FLAG_CATEGORY_WIRING_GEN,
 			Name:        "fabric-links-count",
-			Usage:       "number of fabric links",
+			Usage:       "number of fabric links if fabric mode is spine-leaf",
 			Destination: &wgFabricLinksCount,
-			Value:       2,
 		},
 		&cli.UintFlag{
 			Category:    FLAG_CATEGORY_WIRING_GEN,
 			Name:        "mclag-leafs-count",
 			Usage:       "number of mclag leafs (should be even)",
 			Destination: &wgMCLAGLeafsCount,
-			Value:       2,
 		},
 		&cli.UintFlag{
 			Category:    FLAG_CATEGORY_WIRING_GEN,
 			Name:        "orphan-leafs-count",
 			Usage:       "number of orphan leafs",
 			Destination: &wgOrphanLeafsCount,
-			Value:       1,
 		},
 		&cli.UintFlag{
 			Category:    FLAG_CATEGORY_WIRING_GEN,
 			Name:        "mclag-session-links",
-			Usage:       "number of mclag session links",
+			Usage:       "number of mclag session links for each mclag leaf",
 			Destination: &wgMCLAGSessionLinks,
-			Value:       2,
 		},
 		&cli.UintFlag{
 			Category:    FLAG_CATEGORY_WIRING_GEN,
 			Name:        "mclag-peer-links",
-			Usage:       "number of mclag peer links",
+			Usage:       "number of mclag peer links for each mclag leaf",
 			Destination: &wgMCLAGPeerLinks,
-			Value:       2,
 		},
 		&cli.UintFlag{
 			Category:    FLAG_CATEGORY_WIRING_GEN,
 			Name:        "vpc-loopbacks",
-			Usage:       "number of vpc loopbacks",
+			Usage:       "number of vpc loopbacks for each switch",
 			Destination: &wgVPCLoopbacks,
-			Value:       2,
 		},
 	}
 
@@ -219,7 +219,12 @@ func main() {
 					return setupLogger(verbose, brief)
 				},
 				Action: func(cCtx *cli.Context) error {
-					wiringGen := &wiring.SpineLeafBuilder{
+					if !slices.Contains(fabricModes, fabricMode) {
+						return errors.Errorf("invalid fabric mode %s (supported: %s)", fabricMode, strings.Join(fabricModes, ", "))
+					}
+
+					wiringGen := &wiring.Builder{
+						FabricMode:        config.FabricMode(fabricMode),
 						ChainControlLink:  wgChainControlLink,
 						ControlLinksCount: uint8(wgControlLinksCount),
 						SpinesCount:       uint8(wgSpinesCount),
@@ -230,7 +235,7 @@ func main() {
 						MCLAGPeerLinks:    uint8(wgMCLAGPeerLinks),
 						VPCLoopbacks:      uint8(wgVPCLoopbacks),
 					}
-					err := mngr.Init(basedir, fromConfig, cnc.Preset(preset), wiringPath.Value(), wiringGen, hydrate)
+					err := mngr.Init(basedir, fromConfig, cnc.Preset(preset), config.FabricMode(fabricMode), wiringPath.Value(), wiringGen, hydrate)
 					if err != nil {
 						return errors.Wrap(err, "error initializing")
 					}
@@ -509,42 +514,36 @@ func main() {
 				Subcommands: []*cli.Command{
 					{
 						Name:  "sample",
-						Usage: "sample wiring diagram",
-						Flags: []cli.Flag{
+						Usage: "sample wiring diagram (would work for vlab)",
+						Flags: append([]cli.Flag{
 							verboseFlag,
 							briefFlag,
-							// TODO
+						}, wiringGenFlags...),
+						Before: func(ctx *cli.Context) error {
+							return setupLogger(verbose, brief)
 						},
-						Subcommands: []*cli.Command{
-							{
-								Name:  "spine-leaf",
-								Usage: "sample wiring diagram for spine-leaf topology",
-								Flags: append([]cli.Flag{
-									verboseFlag,
-									briefFlag,
-								}, wiringGenFlags...),
-								Before: func(ctx *cli.Context) error {
-									return setupLogger(verbose, brief)
-								},
-								Action: func(cCtx *cli.Context) error {
-									data, err := (&wiring.SpineLeafBuilder{
-										ChainControlLink:  wgChainControlLink,
-										ControlLinksCount: uint8(wgControlLinksCount),
-										SpinesCount:       uint8(wgSpinesCount),
-										FabricLinksCount:  uint8(wgFabricLinksCount),
-										MCLAGLeafsCount:   uint8(wgMCLAGLeafsCount),
-										OrphanLeafsCount:  uint8(wgOrphanLeafsCount),
-										MCLAGSessionLinks: uint8(wgMCLAGSessionLinks),
-										MCLAGPeerLinks:    uint8(wgMCLAGPeerLinks),
-										VPCLoopbacks:      uint8(wgVPCLoopbacks),
-									}).Build()
-									if err != nil {
-										return errors.Wrap(err, "error building sample")
-									}
+						Action: func(cCtx *cli.Context) error {
+							if !slices.Contains(fabricModes, fabricMode) {
+								return errors.Errorf("invalid fabric mode %s (supported: %s)", fabricMode, strings.Join(fabricModes, ", "))
+							}
 
-									return errors.Wrapf(data.Write(os.Stdout), "error writing sample")
-								},
-							},
+							data, err := (&wiring.Builder{
+								FabricMode:        config.FabricMode(fabricMode),
+								ChainControlLink:  wgChainControlLink,
+								ControlLinksCount: uint8(wgControlLinksCount),
+								SpinesCount:       uint8(wgSpinesCount),
+								FabricLinksCount:  uint8(wgFabricLinksCount),
+								MCLAGLeafsCount:   uint8(wgMCLAGLeafsCount),
+								OrphanLeafsCount:  uint8(wgOrphanLeafsCount),
+								MCLAGSessionLinks: uint8(wgMCLAGSessionLinks),
+								MCLAGPeerLinks:    uint8(wgMCLAGPeerLinks),
+								VPCLoopbacks:      uint8(wgVPCLoopbacks),
+							}).Build()
+							if err != nil {
+								return errors.Wrap(err, "error building sample")
+							}
+
+							return errors.Wrapf(data.Write(os.Stdout), "error writing sample")
 						},
 					},
 					{

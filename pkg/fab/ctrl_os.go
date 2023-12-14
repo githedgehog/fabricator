@@ -8,6 +8,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/urfave/cli/v2"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1alpha2"
+	"go.githedgehog.com/fabric/pkg/manager/config"
 	"go.githedgehog.com/fabric/pkg/wiring"
 	"go.githedgehog.com/fabricator/pkg/fab/cnc"
 )
@@ -47,13 +48,13 @@ func (cfg *ControlOS) Flags() []cli.Flag {
 	}
 }
 
-func (cfg *ControlOS) Hydrate(preset cnc.Preset) error {
+func (cfg *ControlOS) Hydrate(preset cnc.Preset, fabricMode config.FabricMode) error {
 	// TODO add ignition template to the config?
 
 	return nil
 }
 
-func (cfg *ControlOS) Build(basedir string, preset cnc.Preset, get cnc.GetComponent, data *wiring.Data, run cnc.AddBuildOp, install cnc.AddRunOp) error {
+func (cfg *ControlOS) Build(basedir string, preset cnc.Preset, fabricMode config.FabricMode, get cnc.GetComponent, data *wiring.Data, run cnc.AddBuildOp, install cnc.AddRunOp) error {
 	hostname, err := getControlNodeName(data)
 	if err != nil {
 		return err

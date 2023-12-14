@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/urfave/cli/v2"
+	"go.githedgehog.com/fabric/pkg/manager/config"
 	"go.githedgehog.com/fabric/pkg/wiring"
 	"go.githedgehog.com/fabricator/pkg/fab/cnc"
 )
@@ -29,7 +30,7 @@ func (cfg *VLAB) Flags() []cli.Flag {
 	return nil
 }
 
-func (cfg *VLAB) Hydrate(preset cnc.Preset) error {
+func (cfg *VLAB) Hydrate(preset cnc.Preset, fabricMode config.FabricMode) error {
 	cfg.ONIERef = cfg.ONIERef.Fallback(REF_VLAB_ONIE)
 	cfg.FlatcarRef = cfg.FlatcarRef.Fallback(REF_VLAB_FLATCAR)
 	cfg.EEPROMEditRef = cfg.EEPROMEditRef.Fallback(REF_VLAB_EEPROM_EDIT)
@@ -38,7 +39,7 @@ func (cfg *VLAB) Hydrate(preset cnc.Preset) error {
 	return nil
 }
 
-func (cfg *VLAB) Build(basedir string, preset cnc.Preset, get cnc.GetComponent, data *wiring.Data, run cnc.AddBuildOp, install cnc.AddRunOp) error {
+func (cfg *VLAB) Build(basedir string, preset cnc.Preset, fabricMode config.FabricMode, get cnc.GetComponent, data *wiring.Data, run cnc.AddBuildOp, install cnc.AddRunOp) error {
 	cfg.ONIERef = cfg.ONIERef.Fallback(BaseConfig(get).Source)
 	cfg.FlatcarRef = cfg.FlatcarRef.Fallback(BaseConfig(get).Source)
 	cfg.EEPROMEditRef = cfg.EEPROMEditRef.Fallback(BaseConfig(get).Source)

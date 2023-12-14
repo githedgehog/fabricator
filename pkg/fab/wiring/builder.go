@@ -2,11 +2,13 @@ package wiring
 
 import (
 	"fmt"
+	"log/slog"
 
 	"github.com/pkg/errors"
 	"go.githedgehog.com/fabric/api/meta"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1alpha2"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1alpha2"
+	"go.githedgehog.com/fabric/pkg/manager/config"
 	"go.githedgehog.com/fabric/pkg/wiring"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -16,33 +18,78 @@ const (
 	CONTROL = "control-1"
 )
 
-type SpineLeafBuilder struct {
-	Defaulted bool // true if default should be called on created objects
-	Hydrated  bool // true if wiring diagram should be hydrated
-	// VLAB              bool  // true if VLAB mode is enabled
-	ChainControlLink  bool  // true if not all switches attached directly to control node
-	ControlLinksCount uint8 // number of control links to generate
-	SpinesCount       uint8 // number of spines to generate
-	FabricLinksCount  uint8 // number of links for each spine <> leaf pair
-	MCLAGLeafsCount   uint8 // number of MCLAG server-leafs to generate
-	OrphanLeafsCount  uint8 // number of non-MCLAG server-leafs to generate
-	MCLAGSessionLinks uint8 // number of MCLAG session links to generate
-	MCLAGPeerLinks    uint8 // number of MCLAG peer links to generate
-	VPCLoopbacks      uint8 // number of VPC loopbacks to generate per leaf switch
+type Builder struct {
+	Defaulted         bool              // true if default should be called on created objects
+	Hydrated          bool              // true if wiring diagram should be hydrated
+	FabricMode        config.FabricMode // fabric mode
+	ChainControlLink  bool              // true if not all switches attached directly to control node
+	ControlLinksCount uint8             // number of control links to generate
+	SpinesCount       uint8             // number of spines to generate
+	FabricLinksCount  uint8             // number of links for each spine <> leaf pair
+	MCLAGLeafsCount   uint8             // number of MCLAG server-leafs to generate
+	OrphanLeafsCount  uint8             // number of non-MCLAG server-leafs to generate
+	MCLAGSessionLinks uint8             // number of MCLAG session links to generate
+	MCLAGPeerLinks    uint8             // number of MCLAG peer links to generate
+	VPCLoopbacks      uint8             // number of VPC loopbacks to generate per leaf switch
 
 	data         *wiring.Data
 	ifaceTracker map[string]uint8 // next available interface ID for each switch
 }
 
-func (b *SpineLeafBuilder) Build() (*wiring.Data, error) {
-	if b.SpinesCount == 0 {
-		return nil, fmt.Errorf("spines count must be greater than 0")
+func (b *Builder) Build() (*wiring.Data, error) {
+	if b.FabricMode == config.FabricModeSpineLeaf {
+		if b.ChainControlLink && b.ControlLinksCount == 0 {
+			b.ControlLinksCount = 2
+		}
+		if b.SpinesCount == 0 {
+			b.SpinesCount = 2
+		}
+		if b.FabricLinksCount == 0 {
+			b.FabricLinksCount = 2
+		}
+		if b.MCLAGLeafsCount == 0 && b.OrphanLeafsCount == 0 {
+			b.MCLAGLeafsCount = 2
+			b.OrphanLeafsCount = 1
+		}
+	} else if b.FabricMode == config.FabricModeCollapsedCore {
+		if b.ChainControlLink {
+			return nil, fmt.Errorf("control link chaining not supported for collapsed core fabric mode")
+		}
+		if b.SpinesCount > 0 {
+			return nil, fmt.Errorf("spines not supported for collapsed core fabric mode")
+		}
+		if b.FabricLinksCount > 0 {
+			return nil, fmt.Errorf("fabric links not supported for collapsed core fabric mode")
+		}
+
+		if b.MCLAGLeafsCount == 0 {
+			b.MCLAGLeafsCount = 2
+		}
+		if b.MCLAGLeafsCount > 2 {
+			return nil, fmt.Errorf("MCLAG leafs count must be 2 for collapsed core fabric mode")
+		}
+		if b.OrphanLeafsCount > 0 {
+			return nil, fmt.Errorf("orphan leafs not supported for collapsed core fabric mode")
+		}
+	} else {
+		return nil, fmt.Errorf("unsupported fabric mode %s", b.FabricMode)
+	}
+
+	if b.MCLAGSessionLinks == 0 {
+		b.MCLAGSessionLinks = 2
+	}
+	if b.MCLAGPeerLinks == 0 {
+		b.MCLAGPeerLinks = 2
+	}
+	if b.VPCLoopbacks == 0 {
+		b.VPCLoopbacks = 2
+	}
+
+	if b.ChainControlLink && b.ControlLinksCount == 0 {
+		return nil, fmt.Errorf("control links count must be greater than 0 if chaining control links")
 	}
 	if b.MCLAGLeafsCount%2 != 0 {
 		return nil, fmt.Errorf("MCLAG leafs count must be even")
-	}
-	if b.FabricLinksCount == 0 {
-		return nil, fmt.Errorf("fabric links count must be greater than 0")
 	}
 	if b.MCLAGLeafsCount+b.OrphanLeafsCount == 0 {
 		return nil, fmt.Errorf("total leafs count must be greater than 0")
@@ -53,6 +100,14 @@ func (b *SpineLeafBuilder) Build() (*wiring.Data, error) {
 	if b.MCLAGLeafsCount > 0 && b.MCLAGPeerLinks == 0 {
 		return nil, fmt.Errorf("MCLAG peer links count must be greater than 0")
 	}
+
+	slog.Info("Building wiring diagram", "fabricMode", b.FabricMode, "chainControlLink", b.ChainControlLink, "controlLinksCount", b.ControlLinksCount)
+	if b.FabricMode == config.FabricModeSpineLeaf {
+		slog.Info("                    >>>", "spinesCount", b.SpinesCount, "fabricLinksCount", b.FabricLinksCount)
+	}
+	slog.Info("                    >>>", "mclagLeafsCount", b.MCLAGLeafsCount, "orphanLeafsCount", b.OrphanLeafsCount)
+	slog.Info("                    >>>", "mclagSessionLinks", b.MCLAGSessionLinks, "mclagPeerLinks", b.MCLAGPeerLinks)
+	slog.Info("                    >>>", "vpcLoopbacks", b.VPCLoopbacks)
 
 	var err error
 	b.data, err = wiring.New()
@@ -416,7 +471,7 @@ func (b *SpineLeafBuilder) Build() (*wiring.Data, error) {
 	return b.data, nil
 }
 
-func (b *SpineLeafBuilder) nextSwitchPort(switchName string) string {
+func (b *Builder) nextSwitchPort(switchName string) string {
 	ifaceID := b.ifaceTracker[switchName]
 	portName := fmt.Sprintf("%s/Ethernet%d", switchName, ifaceID)
 	ifaceID++
@@ -425,7 +480,7 @@ func (b *SpineLeafBuilder) nextSwitchPort(switchName string) string {
 	return portName
 }
 
-func (b *SpineLeafBuilder) nextControlPort(serverName string) string {
+func (b *Builder) nextControlPort(serverName string) string {
 	ifaceID := b.ifaceTracker[serverName]
 	portName := fmt.Sprintf("%s/enp2s%d", serverName, ifaceID+1) // value for VLAB
 	ifaceID++
@@ -434,7 +489,7 @@ func (b *SpineLeafBuilder) nextControlPort(serverName string) string {
 	return portName
 }
 
-func (b *SpineLeafBuilder) nextServerPort(serverName string) string {
+func (b *Builder) nextServerPort(serverName string) string {
 	ifaceID := b.ifaceTracker[serverName]
 	portName := fmt.Sprintf("%s/enp2s%d", serverName, ifaceID+1) // value for VLAB
 	ifaceID++
@@ -443,7 +498,7 @@ func (b *SpineLeafBuilder) nextServerPort(serverName string) string {
 	return portName
 }
 
-func (b *SpineLeafBuilder) createRack(name string, spec wiringapi.RackSpec) (*wiringapi.Rack, error) {
+func (b *Builder) createRack(name string, spec wiringapi.RackSpec) (*wiringapi.Rack, error) {
 	rack := &wiringapi.Rack{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       wiringapi.KindRack,
@@ -459,7 +514,7 @@ func (b *SpineLeafBuilder) createRack(name string, spec wiringapi.RackSpec) (*wi
 	return rack, errors.Wrapf(b.data.Add(rack), "error creating rack %s", name)
 }
 
-func (b *SpineLeafBuilder) createSwitch(name string, spec wiringapi.SwitchSpec) (*wiringapi.Switch, error) {
+func (b *Builder) createSwitch(name string, spec wiringapi.SwitchSpec) (*wiringapi.Switch, error) {
 	spec.Profile = "vs" // TODO temp hack
 
 	sw := &wiringapi.Switch{
@@ -483,7 +538,7 @@ func (b *SpineLeafBuilder) createSwitch(name string, spec wiringapi.SwitchSpec) 
 	return sw, errors.Wrapf(b.data.Add(sw), "error creating switch %s", name)
 }
 
-func (b *SpineLeafBuilder) createServer(name string, spec wiringapi.ServerSpec) (*wiringapi.Server, error) {
+func (b *Builder) createServer(name string, spec wiringapi.ServerSpec) (*wiringapi.Server, error) {
 	server := &wiringapi.Server{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       wiringapi.KindServer,
@@ -505,7 +560,7 @@ func (b *SpineLeafBuilder) createServer(name string, spec wiringapi.ServerSpec) 
 	return server, errors.Wrapf(b.data.Add(server), "error creating server %s", name)
 }
 
-func (b *SpineLeafBuilder) createConnection(spec wiringapi.ConnectionSpec) (*wiringapi.Connection, error) {
+func (b *Builder) createConnection(spec wiringapi.ConnectionSpec) (*wiringapi.Connection, error) {
 	name := spec.GenerateName()
 
 	conn := &wiringapi.Connection{
@@ -527,7 +582,7 @@ func (b *SpineLeafBuilder) createConnection(spec wiringapi.ConnectionSpec) (*wir
 	return conn, errors.Wrapf(b.data.Add(conn), "error creating connection %s", name)
 }
 
-func (b *SpineLeafBuilder) createManagementConnection(switchName string) (*wiringapi.Connection, error) {
+func (b *Builder) createManagementConnection(switchName string) (*wiringapi.Connection, error) {
 	return b.createConnection(wiringapi.ConnectionSpec{
 		Management: &wiringapi.ConnMgmt{
 			Link: wiringapi.ConnMgmtLink{
@@ -543,7 +598,7 @@ func (b *SpineLeafBuilder) createManagementConnection(switchName string) (*wirin
 	})
 }
 
-func (b *SpineLeafBuilder) createControlConnection(switchName string) (*wiringapi.Connection, error) {
+func (b *Builder) createControlConnection(switchName string) (*wiringapi.Connection, error) {
 	port := b.nextSwitchPort(switchName)
 	oniePortName := fmt.Sprintf("eth%d", b.ifaceTracker[switchName])
 
