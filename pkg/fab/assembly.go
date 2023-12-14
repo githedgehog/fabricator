@@ -57,7 +57,7 @@ var (
 	// Das Boot
 	DAS_BOOT_SEEDER_CLUSTER_IP = "172.29.42.42"
 
-	REF_DASBOOT_VERSION       = cnc.Ref{Tag: "v0.11.1"}
+	REF_DASBOOT_VERSION       = cnc.Ref{Tag: "v0.11.2"}
 	REF_DASBOOT_CRDS_CHART    = cnc.Ref{Name: "das-boot/charts/das-boot-crds"}
 	REF_DASBOOT_SEEDER_CHART  = cnc.Ref{Name: "das-boot/charts/das-boot-seeder"}
 	REF_DASBOOT_SEEDER_IMAGE  = cnc.Ref{Name: "das-boot/das-boot-seeder"}
