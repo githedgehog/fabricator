@@ -109,6 +109,9 @@ func (mngr *Manager) prepare() error {
 	if mngr.preset == "" {
 		return errors.New("preset is empty")
 	}
+	if mngr.fabricMode == "" {
+		return errors.New("fabricMode is empty")
+	}
 	if mngr.wiring == nil {
 		return errors.New("wiring is empty")
 	}
@@ -139,7 +142,6 @@ func (mngr *Manager) Init(basedir string, fromConfig string, preset Preset, fabr
 	}
 
 	mngr.basedir = basedir
-	mngr.fabricMode = fabricMode
 
 	// TODO detect both wiring files and gen flags are set
 
@@ -185,6 +187,7 @@ func (mngr *Manager) Init(basedir string, fromConfig string, preset Preset, fabr
 	}
 
 	mngr.preset = preset
+	mngr.fabricMode = fabricMode
 
 	if !slices.Contains(mngr.presets, preset) {
 		return fmt.Errorf("unknown preset: %s", preset)
@@ -208,7 +211,7 @@ func (mngr *Manager) Init(basedir string, fromConfig string, preset Preset, fabr
 		return errors.Wrapf(err, "error preparing")
 	}
 
-	slog.Info("Initialized", "preset", mngr.preset,
+	slog.Info("Initialized", "preset", mngr.preset, "fabricMode", mngr.fabricMode,
 		"config", filepath.Join(mngr.basedir, "config.yaml"),
 		"wiring", filepath.Join(mngr.basedir, "wiring.yaml"))
 
@@ -216,8 +219,9 @@ func (mngr *Manager) Init(basedir string, fromConfig string, preset Preset, fabr
 }
 
 type ManagerSaver struct {
-	Preset Preset         `json:"preset,omitempty"`
-	Config map[string]any `json:"config,omitempty"`
+	Preset     Preset            `json:"preset,omitempty"`
+	FabricMode config.FabricMode `json:"fabricMode,omitempty"`
+	Config     map[string]any    `json:"config,omitempty"`
 }
 
 func (mngr *Manager) Save() error {
@@ -246,8 +250,9 @@ func (mngr *Manager) Save() error {
 
 func (mngr *Manager) configData() ([]byte, error) {
 	saver := &ManagerSaver{
-		Preset: mngr.preset,
-		Config: map[string]any{},
+		Preset:     mngr.preset,
+		FabricMode: mngr.fabricMode,
+		Config:     map[string]any{},
 	}
 
 	for _, comp := range mngr.components {
@@ -279,6 +284,7 @@ func (mngr *Manager) loadConfig(fromConfig string) error {
 	}
 
 	mngr.preset = saver.Preset
+	mngr.fabricMode = saver.FabricMode
 
 	for idx, comp := range mngr.components {
 		if !comp.IsEnabled(mngr.preset) {

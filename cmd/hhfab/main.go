@@ -219,6 +219,9 @@ func main() {
 					return setupLogger(verbose, brief)
 				},
 				Action: func(cCtx *cli.Context) error {
+					if fabricMode == "" {
+						fabricMode = string(config.FabricModeSpineLeaf)
+					}
 					if !slices.Contains(fabricModes, fabricMode) {
 						return errors.Errorf("invalid fabric mode %s (supported: %s)", fabricMode, strings.Join(fabricModes, ", "))
 					}
@@ -523,6 +526,9 @@ func main() {
 							return setupLogger(verbose, brief)
 						},
 						Action: func(cCtx *cli.Context) error {
+							if fabricMode == "" {
+								fabricMode = string(config.FabricModeSpineLeaf)
+							}
 							if !slices.Contains(fabricModes, fabricMode) {
 								return errors.Errorf("invalid fabric mode %s (supported: %s)", fabricMode, strings.Join(fabricModes, ", "))
 							}
