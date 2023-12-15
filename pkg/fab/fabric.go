@@ -32,6 +32,7 @@ type Fabric struct {
 	CtlRef                   cnc.Ref `json:"ctlRef,omitempty"`
 	FabricDHCPServerRef      cnc.Ref `json:"dhcpServerRef,omitempty"`
 	FabricDHCPServerChartRef cnc.Ref `json:"dhcpServerChartRef,omitempty"`
+	BaseVPCCommunity         string  `json:"baseVPCCommunity,omitempty"`
 }
 
 var _ cnc.Component = (*Fabric)(nil)
@@ -45,7 +46,15 @@ func (cfg *Fabric) IsEnabled(preset cnc.Preset) bool {
 }
 
 func (cfg *Fabric) Flags() []cli.Flag {
-	return []cli.Flag{}
+	return []cli.Flag{
+		&cli.StringFlag{
+			Category:    cfg.Name() + FLAG_CATEGORY_CONFIG_BASE_SUFFIX,
+			Name:        "base-vpc-community",
+			Usage:       "Base community to stamp on VPC routes",
+			Destination: &cfg.BaseVPCCommunity,
+			Value:       "50000:0",
+		},
+	}
 }
 
 func (cfg *Fabric) Hydrate(preset cnc.Preset, fabricMode config.FabricMode) error {
@@ -200,10 +209,11 @@ func (cfg *Fabric) Build(basedir string, preset cnc.Preset, fabricMode config.Fa
 							"172.30.0.0/16", // Fabric subnet
 							"172.31.0.0/16", // VLAB
 						},
-						Users:          users,
-						DHCPDConfigMap: "fabric-dhcp-server-config",
-						DHCPDConfigKey: "dhcpd.conf",
-						FabricMode:     fabricMode,
+						Users:            users,
+						DHCPDConfigMap:   "fabric-dhcp-server-config",
+						DHCPDConfigKey:   "dhcpd.conf",
+						FabricMode:       fabricMode,
+						BaseVPCCommunity: cfg.BaseVPCCommunity,
 					},
 				)),
 				cnc.KubeHelmChart("fabric-dhcp-server", "default", helm.HelmChartSpec{
