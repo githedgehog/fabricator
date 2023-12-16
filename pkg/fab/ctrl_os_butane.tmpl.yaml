@@ -103,6 +103,22 @@ storage:
               - --name
               - $NAME
               - --yes
+            fabricswitchpowerreset:
+              shortCut: Shift-K
+              description: Power Reset
+              scopes:
+              - switch
+              - agent
+              confirm: true
+              background: false
+              command: kubectl
+              args:
+              - fabric
+              - switch
+              - power-reset
+              - --name
+              - $NAME
+              - --yes
             fabricswitchreinstall:
               shortCut: Shift-R
               description: Reinstall
