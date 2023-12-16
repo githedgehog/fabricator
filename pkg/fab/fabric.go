@@ -33,6 +33,7 @@ type Fabric struct {
 	FabricDHCPServerRef      cnc.Ref `json:"dhcpServerRef,omitempty"`
 	FabricDHCPServerChartRef cnc.Ref `json:"dhcpServerChartRef,omitempty"`
 	BaseVPCCommunity         string  `json:"baseVPCCommunity,omitempty"`
+	ServerFacingMTUOffset    uint    `json:"serverFacingMTUOffset,omitempty"`
 }
 
 var _ cnc.Component = (*Fabric)(nil)
@@ -53,6 +54,13 @@ func (cfg *Fabric) Flags() []cli.Flag {
 			Usage:       "Base community to stamp on VPC routes",
 			Destination: &cfg.BaseVPCCommunity,
 			Value:       "50000:0",
+		},
+		&cli.UintFlag{
+			Category:    cfg.Name() + FLAG_CATEGORY_CONFIG_BASE_SUFFIX,
+			Name:        "server-facing-mtu-offset",
+			Usage:       "Offset to apply to server-facing MTU",
+			Destination: &cfg.ServerFacingMTUOffset,
+			Value:       64,
 		},
 	}
 }
@@ -206,14 +214,17 @@ func (cfg *Fabric) Build(basedir string, preset cnc.Preset, fabricMode config.Fa
 						ReservedSubnets: []string{ // TODO make configurable
 							K3sConfig(get).ClusterCIDR,
 							K3sConfig(get).ServiceCIDR,
-							"172.30.0.0/16", // Fabric subnet
-							"172.31.0.0/16", // VLAB
+							"172.30.0.0/16", // Fabric subnet // TODO make configurable
+							"172.31.0.0/16", // VLAB subnet // TODO make configurable
 						},
-						Users:            users,
-						DHCPDConfigMap:   "fabric-dhcp-server-config",
-						DHCPDConfigKey:   "dhcpd.conf",
-						FabricMode:       fabricMode,
-						BaseVPCCommunity: cfg.BaseVPCCommunity,
+						Users:                 users,
+						DHCPDConfigMap:        "fabric-dhcp-server-config",
+						DHCPDConfigKey:        "dhcpd.conf",
+						FabricMode:            fabricMode,
+						BaseVPCCommunity:      cfg.BaseVPCCommunity,
+						VPCLoopbackSubnet:     "172.30.240.0/20", // TODO make configurable
+						FabricMTU:             9100,              // TODO make configurable
+						ServerFacingMTUOffset: uint16(cfg.ServerFacingMTUOffset),
 					},
 				)),
 				cnc.KubeHelmChart("fabric-dhcp-server", "default", helm.HelmChartSpec{
