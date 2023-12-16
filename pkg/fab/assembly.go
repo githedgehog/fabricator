@@ -71,7 +71,7 @@ var (
 	REF_DASBOOT_NTP_IMAGE = cnc.Ref{Name: "das-boot/ntp", Tag: "latest"}
 
 	// ONIE
-	REF_HONIE_VERSION         = cnc.Ref{Tag: "0.0.1"}
+	REF_HONIE_VERSION         = cnc.Ref{Tag: "0.1.3"}
 	REF_ONIE_TARGET_VERSION   = cnc.Ref{Tag: "latest"} // the target tag currently *must* always be "latest" as this is hardcoded in DAS BOOT
 	REF_ONIE_SRCTARGETS_PAIRS = []struct {
 		src     cnc.Ref
