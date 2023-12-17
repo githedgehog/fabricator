@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	_ "embed"
 	"fmt"
 	"log/slog"
@@ -501,7 +502,64 @@ func main() {
 								return errors.Wrap(err, "error loading vlab")
 							}
 
-							return errors.Wrap(svc.CreateVPCPerServer(), "error creating VPC per server")
+							return errors.Wrap(svc.CreateVPCPerServer(context.Background()), "error creating VPC per server")
+						},
+					},
+					{
+						Name:     "test-server-connectivity",
+						Category: "Testing",
+						Usage:    "Test connectivity for all present servers and externals based on peerings",
+						Flags: []cli.Flag{
+							basedirFlag,
+							verboseFlag,
+							briefFlag,
+							&cli.BoolFlag{
+								Name:  "vpc",
+								Usage: "test VPC connectivity",
+								Value: true,
+							},
+							&cli.BoolFlag{
+								Name:  "ext",
+								Usage: "test external connectivity",
+								Value: true,
+							},
+							&cli.UintFlag{
+								Name:  "vpc-ping",
+								Usage: "test VPC connectivity with ping, specify number of packets, 0 to disable",
+								Value: 3,
+							},
+							&cli.UintFlag{
+								Name:  "vpc-iperf",
+								Usage: "test VPC connectivity with iperf, specify number of seconds, 0 to disable",
+								Value: 5,
+							},
+							&cli.BoolFlag{
+								Name:  "ext-curl",
+								Usage: "test external connectivity with curl (just 8.8.8.8)",
+								Value: true,
+							},
+						},
+						Before: func(ctx *cli.Context) error {
+							return setupLogger(verbose, brief)
+						},
+						Action: func(cCtx *cli.Context) error {
+							err := mngr.Load(basedir)
+							if err != nil {
+								return errors.Wrap(err, "error loading")
+							}
+
+							svc, err := fab.LoadVLAB(basedir, mngr, dryRun, "")
+							if err != nil {
+								return errors.Wrap(err, "error loading vlab")
+							}
+
+							return errors.Wrap(svc.TestServerConnectivity(context.Background(), vlab.ServerConnectivityTestConfig{
+								VPC:      cCtx.Bool("vpc"),
+								Ext:      cCtx.Bool("ext"),
+								VPCPing:  cCtx.Uint("vpc-ping"),
+								VPCIperf: cCtx.Uint("vpc-iperf"),
+								ExtCurl:  cCtx.Bool("ext-curl"),
+							}), "error testing server connectivity")
 						},
 					},
 				},

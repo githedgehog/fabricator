@@ -8,6 +8,8 @@ require (
 	github.com/Masterminds/sprig v2.22.0+incompatible
 	github.com/containers/image/v5 v5.27.1-0.20230911141411-81c35e010bab
 	github.com/coreos/butane v0.18.0
+	github.com/dustin/go-humanize v1.0.1
+	github.com/fatih/color v1.16.0
 	github.com/google/uuid v1.4.0
 	github.com/k3s-io/helm-controller v0.15.4
 	github.com/lmittmann/tint v1.0.3
@@ -116,6 +118,7 @@ require (
 	github.com/letsencrypt/boulder v0.0.0-20230213213521-fdfea0d469b6 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
+	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-runewidth v0.0.15 // indirect
 	github.com/mattn/go-shellwords v1.0.12 // indirect
 	github.com/mattn/go-sqlite3 v1.14.17 // indirect
