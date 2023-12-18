@@ -480,9 +480,9 @@ func main() {
 						},
 					},
 					{
-						Name:     "create-vpc-per-server",
+						Name:     "setup-vpc-per-server",
 						Category: "Testing",
-						Usage:    "Create VPC for each server with valid connection and configure IP/VLAN on it",
+						Usage:    "Setup VPC and VPCAttachment for each server with valid connection and configure IP/VLAN on it",
 						Flags: []cli.Flag{
 							basedirFlag,
 							verboseFlag,
@@ -502,7 +502,7 @@ func main() {
 								return errors.Wrap(err, "error loading vlab")
 							}
 
-							return errors.Wrap(svc.CreateVPCPerServer(context.Background()), "error creating VPC per server")
+							return errors.Wrap(svc.SetupVPCPerServer(context.Background()), "error creating VPC per server")
 						},
 					},
 					{
@@ -538,6 +538,11 @@ func main() {
 								Usage: "test external connectivity with curl (just 8.8.8.8)",
 								Value: true,
 							},
+							&cli.BoolFlag{
+								Name:  "agent-check",
+								Usage: "check if agent is running and legit on all servers",
+								Value: true,
+							},
 						},
 						Before: func(ctx *cli.Context) error {
 							return setupLogger(verbose, brief)
@@ -554,12 +559,81 @@ func main() {
 							}
 
 							return errors.Wrap(svc.TestServerConnectivity(context.Background(), vlab.ServerConnectivityTestConfig{
-								VPC:      cCtx.Bool("vpc"),
-								Ext:      cCtx.Bool("ext"),
-								VPCPing:  cCtx.Uint("vpc-ping"),
-								VPCIperf: cCtx.Uint("vpc-iperf"),
-								ExtCurl:  cCtx.Bool("ext-curl"),
+								AgentCheck: cCtx.Bool("agent-check"),
+								VPC:        cCtx.Bool("vpc"),
+								Ext:        cCtx.Bool("ext"),
+								VPCPing:    cCtx.Uint("vpc-ping"),
+								VPCIperf:   cCtx.Uint("vpc-iperf"),
+								ExtCurl:    cCtx.Bool("ext-curl"),
 							}), "error testing server connectivity")
+						},
+					},
+					{
+						Name:     "setup-test-scenario",
+						Category: "Testing",
+						Usage:    "Setup test scenario with VPC/External Peerings, run with -h for more info",
+						UsageText: strings.TrimSpace(strings.ReplaceAll(`
+							Setup test scenario with VPC/External Peerings by specifying requests in the format described below.
+
+							Example command:
+
+							$ hhfab vlab setup-test-scenario 1+2 2+3:r 2+4:r=border 1~as5835 2~as5835:subnets=sub1,sub2:prefixes=0.0.0.0/0,22.22.22.0/24_le28
+
+							Which will produce:
+							1. VPC peering between vpc-1 and vpc-2
+							2. Remote VPC peering between vpc-2 and vpc-3 on switch group if only one switch group is present
+							3. Remote VPC peering between vpc-2 and vpc-4 on switch group named border
+							4. External peering for vpc-1 with External as5835 with default vpc subnet and any routes from external permitted
+							5. External peering for vpc-2 with External as5835 with subnets sub1 and sub2 exposed from vpc-2 and default route
+							   from external permitted as well any route that belongs to 22.22.22.0/24 but <= /28
+
+							VPC Peerings:
+
+							1-2 -- VPC peering between vpc-1 and vpc-2
+							1-2:r -- remote VPC peering between vpc-1 and vpc-2 on switch group if only one switch group is present
+							1-2:r=border -- remote VPC peering between vpc-1 and vpc-2 on switch group named border
+							1-2:remote=border -- same as above
+
+							External Peerings:
+
+							1~as5835 -- external peering for vpc-1 with External as5835
+							1~ -- external peering for vpc-1 with external if only one external is present for ipv4 namespace of vpc-1, allowing
+								default subnet and any route from external
+							1~:subnets=default@prefixes=0.0.0.0/0 -- external peering for vpc-1 with auth external with default vpc subnet and
+								default route from external permitted
+							1~as5835:vpc_subnets=default,other:ext_prefixes=0.0.0.0/0_le32_ge32,22.22.22.0/24 -- same but with more details
+						`, "							", "")),
+						Flags: []cli.Flag{
+							basedirFlag,
+							verboseFlag,
+							briefFlag,
+							&cli.BoolFlag{
+								Name:  "dry-run",
+								Usage: "print resulting setup, but don't apply",
+							},
+							&cli.BoolFlag{
+								Name:  "cleanup",
+								Usage: "cleanup all vpc/external peerings before setting up test scenario",
+							},
+						},
+						Before: func(ctx *cli.Context) error {
+							return setupLogger(verbose, brief)
+						},
+						Action: func(cCtx *cli.Context) error {
+							err := mngr.Load(basedir)
+							if err != nil {
+								return errors.Wrap(err, "error loading")
+							}
+
+							svc, err := fab.LoadVLAB(basedir, mngr, dryRun, "")
+							if err != nil {
+								return errors.Wrap(err, "error loading vlab")
+							}
+
+							return errors.Wrap(svc.SetupTestScenario(context.Background(), vlab.TestScenarioSetupConfig{
+								DryRun:   cCtx.Bool("dry-run"),
+								Requests: cCtx.Args().Slice(),
+							}), "error setting up test scenario")
 						},
 					},
 				},

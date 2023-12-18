@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -58,7 +59,11 @@ type netConfig struct {
 	Net     string
 }
 
-func (svc *Service) CreateVPCPerServer(ctx context.Context) error {
+func (svc *Service) SetupVPCPerServer(ctx context.Context) error {
+	start := time.Now()
+
+	slog.Info("Setting up VPCs and VPCAttachments per server")
+
 	os.Setenv("KUBECONFIG", filepath.Join(svc.cfg.Basedir, "kubeconfig.yaml"))
 	kube, err := kubeClient()
 	if err != nil {
@@ -104,7 +109,7 @@ func (svc *Service) CreateVPCPerServer(ctx context.Context) error {
 		vpcName, _ := strings.CutPrefix(server.Name, "server-")
 		vpcName = "vpc-" + vpcName
 
-		slog.Info("Creating VPC + Attachment for server...", "vpc", vpcName, "server", server.Name, "conn", conn.Name)
+		slog.Info("Enforcing VPC + Attachment for server...", "vpc", vpcName, "server", server.Name, "conn", conn.Name)
 
 		vlan := fmt.Sprintf("%d", 1000+idx)
 		vpc := &vpcapi.VPC{
@@ -186,6 +191,8 @@ func (svc *Service) CreateVPCPerServer(ctx context.Context) error {
 	}
 
 	for _, netconf := range netconfs {
+		start := time.Now()
+
 		slog.Info("Configuring networking for server...", "server", netconf.Name, "netconf", netconf.Net)
 
 		client, err := goph.NewConn(&goph.Config{
@@ -214,13 +221,36 @@ func (svc *Service) CreateVPCPerServer(ctx context.Context) error {
 
 		strOut := strings.TrimSpace(string(out))
 
-		slog.Info("Server network configured", "server", netconf.Name, "output", strOut)
+		slog.Info("Server network configured", "server", netconf.Name, "output", strOut, "took", time.Since(start))
+	}
+
+	slog.Info("VPCs and VPCAttachments created, IP addresses discovered", "took", time.Since(start))
+
+	return nil
+}
+
+func checkAgents(ctx context.Context, kube client.WithWatch) error {
+	agentList := &agentapi.AgentList{}
+	if err := kube.List(ctx, agentList, client.InNamespace("default")); err != nil {
+		return errors.Wrapf(err, "error listing agents")
+	}
+
+	for _, agent := range agentList.Items {
+		if agent.Status.LastHeartbeat.Time.Before(time.Now().Add(-2 * time.Minute)) {
+			return errors.Errorf("agent %s last heartbeat is too old", agent.Name)
+		}
+
+		if agent.Status.LastAppliedGen != agent.Generation {
+			return errors.Errorf("agent %s last applied gen %d doesn't match current gen %d", agent.Name, agent.Status.LastAppliedGen, agent.Generation)
+		}
 	}
 
 	return nil
 }
 
 type ServerConnectivityTestConfig struct {
+	AgentCheck bool
+
 	VPC      bool
 	VPCPing  uint
 	VPCIperf uint
@@ -230,6 +260,8 @@ type ServerConnectivityTestConfig struct {
 }
 
 func (svc *Service) TestServerConnectivity(ctx context.Context, cfg ServerConnectivityTestConfig) error {
+	start := time.Now()
+
 	slog.Info("Starting connectivity test", "vpc", cfg.VPC, "vpcPing", cfg.VPCPing, "vpcIperf", cfg.VPCIperf, "ext", cfg.Ext, "extCurl", cfg.ExtCurl)
 
 	os.Setenv("KUBECONFIG", filepath.Join(svc.cfg.Basedir, "kubeconfig.yaml"))
@@ -238,18 +270,9 @@ func (svc *Service) TestServerConnectivity(ctx context.Context, cfg ServerConnec
 		return errors.Wrapf(err, "error creating kube client")
 	}
 
-	agentList := &agentapi.AgentList{}
-	if err := kube.List(ctx, agentList, client.InNamespace("default")); err != nil {
-		return errors.Wrapf(err, "error listing agents")
-	}
-
-	for _, agent := range agentList.Items {
-		if agent.Status.LastHeartbeat.Time.Before(time.Now().Add(-1 * time.Minute)) {
-			return errors.Errorf("agent %s last heartbeat is too old", agent.Name)
-		}
-
-		if agent.Status.LastAppliedGen != agent.Generation {
-			return errors.Errorf("agent %s last applied gen %d doesn't match current gen %d", agent.Name, agent.Status.LastAppliedGen, agent.Generation)
+	if cfg.AgentCheck {
+		if err := checkAgents(ctx, kube); err != nil {
+			return errors.Wrapf(err, "error checking agents")
 		}
 	}
 
@@ -281,7 +304,7 @@ serverLoop:
 			continue
 		}
 
-		slog.Debug("Checking", "server", server.Name)
+		slog.Debug("Processing", "server", server.Name)
 
 		vm := svc.mngr.vms[server.Name]
 		if vm == nil {
@@ -369,7 +392,7 @@ serverLoop:
 			srv.VPC = &someCopy
 		}
 
-		out, err := svc.ssh(ctx, srv, "ip a s | grep 'inet 10\\.0' | awk '/inet / {print $2}'", 0)
+		out, err := svc.ssh(ctx, srv, "ip a s | grep 'inet 10\\.' | awk '/inet / {print $2}'", 0)
 		if err != nil {
 			return errors.Wrapf(err, "error getting IP for server %s", srv.Name)
 		}
@@ -641,7 +664,7 @@ serverLoop:
 		}
 	}
 
-	slog.Info("Connectivity test complete", "tested", totalTested, "passed", totalPassed, "failed", totalTested-totalPassed)
+	slog.Info("Connectivity test complete", "tested", totalTested, "passed", totalPassed, "failed", totalTested-totalPassed, "took", time.Since(start))
 
 	if totalTested-totalPassed > 0 {
 		os.Exit(1)
@@ -729,4 +752,332 @@ func parseIperf3Report(data string) (*Iperf3Report, error) {
 	}
 
 	return report, nil
+}
+
+type TestScenarioSetupConfig struct {
+	DryRun     bool
+	CleanupAll bool
+	Requests   []string
+}
+
+// TODO move vpc creation to here, just have flag --vpc-per-server
+func (svc *Service) SetupTestScenario(ctx context.Context, cfg TestScenarioSetupConfig) error {
+	start := time.Now()
+
+	slog.Info("Setting up test scenario", "dryRun", cfg.DryRun, "numRequests", len(cfg.Requests))
+
+	os.Setenv("KUBECONFIG", filepath.Join(svc.cfg.Basedir, "kubeconfig.yaml"))
+	kube, err := kubeClient()
+	if err != nil {
+		return errors.Wrapf(err, "error creating kube client")
+	}
+
+	if err := checkAgents(ctx, kube); err != nil {
+		return errors.Wrapf(err, "error checking agents")
+	}
+
+	externalList := &vpcapi.ExternalList{}
+	if err := kube.List(ctx, externalList, client.InNamespace("default")); err != nil {
+		return errors.Wrapf(err, "error listing externals")
+	}
+
+	switchGroupList := &wiringapi.SwitchGroupList{}
+	if err := kube.List(ctx, switchGroupList, client.InNamespace("default")); err != nil {
+		return errors.Wrapf(err, "error listing switch groups")
+	}
+
+	vpcPeerings := map[string]*vpcapi.VPCPeeringSpec{}
+	externalPeerings := map[string]*vpcapi.ExternalPeeringSpec{}
+
+	reqNames := map[string]bool{}
+	for _, req := range cfg.Requests {
+		parts := strings.Split(req, ":")
+		if len(parts) < 1 {
+			return errors.Errorf("invalid request format")
+		}
+
+		reqName := parts[0]
+		if reqNames[reqName] {
+			return errors.Errorf("duplicate request name %s", reqName)
+		}
+		reqNames[reqName] = true
+
+		slog.Debug("Parsing request", "name", reqName, "options", parts[1:])
+
+		vpMark := strings.Contains(reqName, "+")
+		epMark := strings.Contains(reqName, "~")
+
+		if vpMark && !epMark {
+			reqNameParts := strings.Split(reqName, "+")
+			if len(reqNameParts) != 2 {
+				return errors.Errorf("invalid VPC peering request %s", reqName)
+			}
+
+			slices.Sort(reqNameParts)
+
+			vpc1 := reqNameParts[0]
+			vpc2 := reqNameParts[1]
+
+			if vpc1 == "" || vpc2 == "" {
+				return errors.Errorf("invalid VPC peering request %s, both VPCs should be non-empty", reqName)
+			}
+
+			if !strings.HasPrefix(vpc1, "vpc-") {
+				vpc1 = "vpc-" + vpc1
+			}
+			if !strings.HasPrefix(vpc2, "vpc-") {
+				vpc2 = "vpc-" + vpc2
+			}
+
+			vpcPeering := &vpcapi.VPCPeeringSpec{
+				Permit: []map[string]vpcapi.VPCPeer{
+					{
+						vpc1: {},
+						vpc2: {},
+					},
+				},
+			}
+
+			for idx, option := range parts[1:] {
+				parts := strings.Split(option, "=")
+				if len(parts) > 2 {
+					return errors.Errorf("invalid VPC peering option #%d %s", idx, option)
+				}
+
+				optName := parts[0]
+				optValue := ""
+				if len(parts) == 2 {
+					optValue = parts[1]
+				}
+
+				if optName == "r" || optName == "remote" {
+					if optValue == "" {
+						if len(switchGroupList.Items) != 1 {
+							return errors.Errorf("invalid VPC peering option #%d %s, auto switch group only supported when it's exactly one switch group", idx, option)
+						}
+
+						vpcPeering.Remote = switchGroupList.Items[0].Name
+					}
+
+					vpcPeering.Remote = optValue
+				} else {
+					return errors.Errorf("invalid VPC peering option #%d %s", idx, option)
+				}
+			}
+
+			vpcPeerings[fmt.Sprintf("%s--%s", vpc1, vpc2)] = vpcPeering
+		} else if !vpMark && epMark {
+			reqNameParts := strings.Split(reqName, "~")
+			if len(reqNameParts) != 2 {
+				return errors.Errorf("invalid external peering request %s", reqName)
+			}
+
+			vpc := reqNameParts[0]
+			ext := reqNameParts[1]
+
+			if vpc == "" {
+				return errors.Errorf("invalid external peering request %s, VPC should be non-empty", reqName)
+			}
+			if ext == "" {
+				return errors.Errorf("invalid external peering request %s, external should be non-empty", reqName)
+			}
+
+			if !strings.HasPrefix(vpc, "vpc-") {
+				vpc = "vpc-" + vpc
+			}
+
+			extPeering := &vpcapi.ExternalPeeringSpec{
+				Permit: vpcapi.ExternalPeeringSpecPermit{
+					VPC: vpcapi.ExternalPeeringSpecVPC{
+						Name:    vpc,
+						Subnets: []string{},
+					},
+					External: vpcapi.ExternalPeeringSpecExternal{
+						Name:     ext,
+						Prefixes: []vpcapi.ExternalPeeringSpecPrefix{},
+					},
+				},
+			}
+
+			for idx, option := range parts[1:] {
+				parts := strings.Split(option, "=")
+				if len(parts) > 2 {
+					return errors.Errorf("invalid VPC peering option #%d %s", idx, option)
+				}
+
+				optName := parts[0]
+				optValue := ""
+				if len(parts) == 2 {
+					optValue = parts[1]
+				}
+
+				if optName == "vpc_subnets" || optName == "subnets" {
+					if optValue == "" {
+						return errors.Errorf("invalid external peering option #%d %s, VPC subnet names should be non-empty", idx, option)
+					}
+
+					extPeering.Permit.VPC.Subnets = append(extPeering.Permit.VPC.Subnets, strings.Split(optValue, ",")...)
+				} else if optName == "ext_prefixes" || optName == "prefixes" {
+					if optValue == "" {
+						return errors.Errorf("invalid external peering option #%d %s, external prefixes should be non-empty", idx, option)
+					}
+
+					for _, rawPrefix := range strings.Split(optValue, ",") {
+						prefix := vpcapi.ExternalPeeringSpecPrefix{
+							Prefix: rawPrefix,
+						}
+						if strings.Contains(rawPrefix, "_") {
+							prefixParts := strings.Split(rawPrefix, "_")
+							if len(prefixParts) > 3 {
+								return errors.Errorf("invalid external peering option #%d %s, external prefix should be in format prefix_leXX_geYY", idx, option)
+							}
+
+							prefix.Prefix = prefixParts[0]
+
+							for _, prefixPart := range prefixParts[1:] {
+								if strings.HasPrefix(prefixPart, "le") {
+									le, err := strconv.Atoi(strings.TrimPrefix(prefixPart, "le"))
+									if err != nil {
+										return errors.Errorf("invalid external peering option #%d %s, external prefix should be in format prefix_leXX_geYY", idx, option)
+									}
+
+									prefix.Le = uint8(le)
+								} else if strings.HasPrefix(prefixPart, "ge") {
+									ge, err := strconv.Atoi(strings.TrimPrefix(prefixPart, "ge"))
+									if err != nil {
+										return errors.Errorf("invalid external peering option #%d %s, external prefix should be in format prefix_leXX_geYY", idx, option)
+									}
+
+									prefix.Ge = uint8(ge)
+								} else {
+									return errors.Errorf("invalid external peering option #%d %s, external prefix should be in format prefix_leXX_geYY", idx, option)
+								}
+							}
+						}
+
+						extPeering.Permit.External.Prefixes = append(extPeering.Permit.External.Prefixes, prefix)
+					}
+				} else {
+					return errors.Errorf("invalid external peering option #%d %s", idx, option)
+				}
+			}
+
+			if len(extPeering.Permit.VPC.Subnets) == 0 {
+				extPeering.Permit.VPC.Subnets = []string{"default"}
+			}
+			slices.Sort(extPeering.Permit.VPC.Subnets)
+
+			if len(extPeering.Permit.External.Prefixes) == 0 {
+				extPeering.Permit.External.Prefixes = []vpcapi.ExternalPeeringSpecPrefix{
+					{
+						Prefix: "0.0.0.0/0",
+						Le:     32,
+					},
+				}
+			}
+			slices.SortFunc(extPeering.Permit.External.Prefixes, func(a, b vpcapi.ExternalPeeringSpecPrefix) int {
+				return strings.Compare(a.Prefix, b.Prefix)
+			})
+
+			externalPeerings[fmt.Sprintf("%s--%s", vpc, ext)] = extPeering
+		} else {
+			return errors.Errorf("invalid request name %s", reqName)
+		}
+	}
+
+	vpcPeeringList := &vpcapi.VPCPeeringList{}
+	if err := kube.List(ctx, vpcPeeringList, client.InNamespace("default")); err != nil {
+		return errors.Wrapf(err, "error listing VPC peerings")
+	}
+	for _, peering := range vpcPeeringList.Items {
+		if !cfg.CleanupAll && vpcPeerings[peering.Name] != nil {
+			continue
+		}
+
+		slog.Info("Deleting existing VPC peering", "name", peering.Name)
+
+		if cfg.DryRun {
+			continue
+		}
+
+		if err := client.IgnoreNotFound(kube.Delete(ctx, &peering)); err != nil {
+			return errors.Wrapf(err, "error deleting VPC peering %s", peering.Name)
+		}
+	}
+
+	externalPeeringList := &vpcapi.ExternalPeeringList{}
+	if err := kube.List(ctx, externalPeeringList, client.InNamespace("default")); err != nil {
+		return errors.Wrapf(err, "error listing external peerings")
+	}
+	for _, peering := range externalPeeringList.Items {
+		if !cfg.CleanupAll && externalPeerings[peering.Name] != nil {
+			continue
+		}
+
+		slog.Info("Deleting existing external peering", "name", peering.Name)
+
+		if cfg.DryRun {
+			continue
+		}
+
+		if err := client.IgnoreNotFound(kube.Delete(ctx, &peering)); err != nil {
+			return errors.Wrapf(err, "error deleting external peering %s", peering.Name)
+		}
+	}
+
+	for name, vpcPeeringSpec := range vpcPeerings {
+		vpc1, vpc2, err := vpcPeeringSpec.VPCs()
+		if err != nil {
+			return errors.Wrapf(err, "error getting VPCs for peering %s", name)
+		}
+
+		slog.Info("Enforcing VPC Peering", "name", name,
+			"vpc1", vpc1, "vpc2", vpc2, "remote", vpcPeeringSpec.Remote)
+
+		if cfg.DryRun {
+			continue
+		}
+
+		vpcPeering := &vpcapi.VPCPeering{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: "default",
+			},
+		}
+		if _, err := ctrlutil.CreateOrUpdate(ctx, kube, vpcPeering, func() error {
+			vpcPeering.Spec = *vpcPeeringSpec
+
+			return nil
+		}); err != nil {
+			return errors.Wrapf(err, "error updating VPC peering %s", name)
+		}
+	}
+
+	for name, extPeeringSpec := range externalPeerings {
+		slog.Info("Enforcing External Peering", "name", name,
+			"vpc", extPeeringSpec.Permit.VPC.Name, "vpcSubnets", extPeeringSpec.Permit.VPC.Subnets,
+			"external", extPeeringSpec.Permit.External.Name, "externalPrefixes", extPeeringSpec.Permit.External.Prefixes)
+
+		if cfg.DryRun {
+			continue
+		}
+
+		extPeering := &vpcapi.ExternalPeering{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: "default",
+			},
+		}
+		if _, err := ctrlutil.CreateOrUpdate(ctx, kube, extPeering, func() error {
+			extPeering.Spec = *extPeeringSpec
+
+			return nil
+		}); err != nil {
+			return errors.Wrapf(err, "error updating external")
+		}
+	}
+
+	slog.Info("Test scenario setup complete", "took", time.Since(start))
+
+	return nil
 }
