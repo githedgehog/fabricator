@@ -534,7 +534,7 @@ serverLoop:
 
 						slog.Error("Connectivity not expected, ping not failed", "from", server.Name, "to", vpcPeer)
 						failed = true
-					} else if !peerConnected && err != nil && len(out) > 0 && !strings.Contains(out, "0 received, 100% packet loss") {
+					} else if !peerConnected && err != nil && len(out) > 0 && !strings.Contains(out, "100% packet loss") {
 						passed = false
 
 						slog.Error("Connectivity not expected, ping failed without '100% packet loss' message", "from", server.Name, "to", vpcPeer, "err", err)
