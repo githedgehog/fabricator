@@ -313,7 +313,7 @@ type ServerConnectivityTestConfig struct {
 func (svc *Service) TestConnectivity(ctx context.Context, cfg ServerConnectivityTestConfig) error {
 	start := time.Now()
 
-	slog.Info("Starting connectivity test", "vpc", cfg.VPC, "vpcPing", cfg.VPCPing, "vpcIperf", cfg.VPCIperf, "ext", cfg.Ext, "extCurl", cfg.ExtCurl)
+	slog.Info("Starting connectivity test", "vpc", cfg.VPC, "vpcPing", cfg.VPCPing, "vpcIperf", cfg.VPCIperf, "vpcIperfSpeed", cfg.VPCIperf, "ext", cfg.Ext, "extCurl", cfg.ExtCurl)
 
 	os.Setenv("KUBECONFIG", filepath.Join(svc.cfg.Basedir, "kubeconfig.yaml"))
 	kube, err := kubeClient()
