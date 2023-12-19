@@ -142,7 +142,7 @@ func (b *Builder) Build() (*wiring.Data, error) {
 		},
 		Spec: vpcapi.IPv4NamespaceSpec{
 			Subnets: []string{
-				"10.0.0.0/8",
+				"10.0.0.0/16",
 			},
 		},
 	}); err != nil {
