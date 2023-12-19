@@ -745,9 +745,11 @@ serverLoop:
 		}
 	}
 
-	slog.Info("Connectivity test complete", "tested", totalTested, "passed", totalPassed, "failed", totalTested-totalPassed, "took", time.Since(start))
+	if totalTested == totalPassed {
+		slog.Info("Connectivity test complete", "tested", totalTested, "passed", totalPassed, "failed", totalTested-totalPassed, "took", time.Since(start))
+	} else {
+		slog.Error("Connectivity test failed", "tested", totalTested, "passed", totalPassed, "failed", totalTested-totalPassed, "took", time.Since(start))
 
-	if totalTested-totalPassed > 0 {
 		os.Exit(1)
 	}
 
