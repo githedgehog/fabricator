@@ -558,6 +558,11 @@ func main() {
 								Name:  "cleanup",
 								Usage: "cleanup all vpc/external peerings before setting up test scenario",
 							},
+							&cli.BoolFlag{
+								Name:  "agent-check",
+								Usage: "check if agent is running and legit on all servers",
+								Value: true,
+							},
 						},
 						Before: func(ctx *cli.Context) error {
 							return setupLogger(verbose, brief)
@@ -574,8 +579,10 @@ func main() {
 							}
 
 							return errors.Wrap(svc.SetupPeerings(context.Background(), vlab.SetupPeeringsConfig{
-								DryRun:   cCtx.Bool("dry-run"),
-								Requests: cCtx.Args().Slice(),
+								AgentCheck: cCtx.Bool("agent-check"),
+								DryRun:     cCtx.Bool("dry-run"),
+								CleanupAll: cCtx.Bool("cleanup"),
+								Requests:   cCtx.Args().Slice(),
 							}), "error setting up test scenario")
 						},
 					},

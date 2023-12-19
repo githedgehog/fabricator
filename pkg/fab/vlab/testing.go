@@ -839,6 +839,7 @@ func parseIperf3Report(data string) (*Iperf3Report, error) {
 }
 
 type SetupPeeringsConfig struct {
+	AgentCheck bool
 	DryRun     bool
 	CleanupAll bool
 	Requests   []string
@@ -856,8 +857,10 @@ func (svc *Service) SetupPeerings(ctx context.Context, cfg SetupPeeringsConfig) 
 		return errors.Wrapf(err, "error creating kube client")
 	}
 
-	if err := checkAgents(ctx, kube); err != nil {
-		return errors.Wrapf(err, "error checking agents")
+	if cfg.AgentCheck {
+		if err := checkAgents(ctx, kube); err != nil {
+			return errors.Wrapf(err, "error checking agents")
+		}
 	}
 
 	externalList := &vpcapi.ExternalList{}
