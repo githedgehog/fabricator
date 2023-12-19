@@ -70,6 +70,25 @@ func (svc *Service) SetupVPCPerServer(ctx context.Context) error {
 		return errors.Wrapf(err, "error creating kube client")
 	}
 
+	ipns := &vpcapi.IPv4Namespace{}
+	if err := kube.Get(ctx, client.ObjectKey{Name: "default", Namespace: "default"}, ipns); err != nil {
+		return errors.Wrapf(err, "error getting default IPv4 namespace")
+	}
+	if len(ipns.Spec.Subnets) < 1 {
+		return errors.Errorf("no IPv4 subnets found in default namespace")
+	}
+	_, ipNet, err := net.ParseCIDR(ipns.Spec.Subnets[0])
+	if err != nil {
+		return errors.Wrapf(err, "error parsing default IPv4 subnet")
+	}
+	prefixLen, _ := ipNet.Mask.Size()
+	if prefixLen != 16 {
+		return errors.Errorf("default IPv4 subnet prefix length is not 16")
+	}
+	if ipNet.IP.To4()[0] != 10 {
+		return errors.Errorf("default IPv4 subnet is not in 10.0.0.0/8")
+	}
+
 	idx := 1
 
 	netconfs := []netConfig{}
@@ -118,16 +137,26 @@ func (svc *Service) SetupVPCPerServer(ctx context.Context) error {
 				Namespace: "default", // TODO ns
 			},
 		}
+
+		ip := slices.Clone(ipNet.IP.To4())
+		ip[2] += byte(idx)
+		vpcSubnet := ip.String() + "/24"
+
+		ip[3] = 10
+		dhcpStart := ip.String()
+
 		_, err = ctrlutil.CreateOrUpdate(ctx, kube, vpc, func() error {
 			vpc.Spec = vpcapi.VPCSpec{
+				IPv4Namespace: "default",
+				VLANNamespace: "default",
 				Subnets: map[string]*vpcapi.VPCSubnet{
 					"default": {
-						Subnet: fmt.Sprintf("10.0.%d.0/24", idx),
+						Subnet: vpcSubnet,
 						VLAN:   vlan,
 						DHCP: vpcapi.VPCDHCP{
 							Enable: true,
 							Range: &vpcapi.VPCDHCPRange{
-								Start: fmt.Sprintf("10.0.%d.10", idx),
+								Start: dhcpStart,
 							},
 						},
 					},
@@ -251,9 +280,10 @@ func checkAgents(ctx context.Context, kube client.WithWatch) error {
 type ServerConnectivityTestConfig struct {
 	AgentCheck bool
 
-	VPC      bool
-	VPCPing  uint
-	VPCIperf uint
+	VPC           bool
+	VPCPing       uint
+	VPCIperf      uint
+	VPCIperfSpeed uint
 
 	Ext     bool
 	ExtCurl bool
@@ -615,7 +645,7 @@ serverLoop:
 								"received", humanize.Bytes(uint64(report.End.SumReceived.Bytes)),
 							)
 
-							if report.End.SumSent.BitsPerSecond < 8500000000 { // TODO make configurable
+							if report.End.SumSent.BitsPerSecond < float64(cfg.VPCIperfSpeed)*1000000 {
 								passed = false
 
 								slog.Error("Connectivity expected, iperf speed too low", "from", server.Name, "to", vpcPeer, "speed", humanize.Bytes(uint64(report.End.SumSent.BitsPerSecond/8))+"/s")

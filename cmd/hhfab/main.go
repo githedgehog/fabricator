@@ -531,7 +531,12 @@ func main() {
 							&cli.UintFlag{
 								Name:  "vpc-iperf",
 								Usage: "test VPC connectivity with iperf, specify number of seconds, 0 to disable",
-								Value: 5,
+								Value: 10,
+							},
+							&cli.UintFlag{
+								Name:  "vpc-iperf-speed",
+								Usage: "iperf speed test threshold (Mbit/s), if speed is lower than this value, test will fail",
+								Value: 8500,
 							},
 							&cli.BoolFlag{
 								Name:  "ext-curl",
@@ -564,6 +569,7 @@ func main() {
 								Ext:        cCtx.Bool("ext"),
 								VPCPing:    cCtx.Uint("vpc-ping"),
 								VPCIperf:   cCtx.Uint("vpc-iperf"),
+								VPCIperfSpeed: cCtx.Uint("vpc-iperf-speed"),
 								ExtCurl:    cCtx.Bool("ext-curl"),
 							}), "error testing server connectivity")
 						},
