@@ -269,6 +269,8 @@ func NewVMManager(cfg *Config, data *wiring.Data, basedir string, size string) (
 				switch2 := link.Switch2
 				links = append(links, [2]wiringapi.IPort{&switch1, &switch2})
 			}
+		} else if conn.Spec.External != nil {
+			links = append(links, [2]wiringapi.IPort{&conn.Spec.External.Link.Switch, nil})
 		} else {
 			return nil, errors.Errorf("unsupported connection type %s", conn.Name)
 		}
@@ -313,7 +315,7 @@ func NewVMManager(cfg *Config, data *wiring.Data, basedir string, size string) (
 
 func (mngr *VMManager) AddLink(local wiringapi.IPort, dest wiringapi.IPort, conn string) error {
 	if local == nil {
-		return errors.Errorf("local port can't be nil, conn %s", conn)
+		return nil
 	}
 
 	localVM, exists := mngr.vms[local.DeviceName()]
