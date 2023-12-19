@@ -846,7 +846,7 @@ type SetupPeeringsConfig struct {
 func (svc *Service) SetupPeerings(ctx context.Context, cfg SetupPeeringsConfig) error {
 	start := time.Now()
 
-	slog.Info("Setting up test scenario", "dryRun", cfg.DryRun, "numRequests", len(cfg.Requests))
+	slog.Info("Setting up VPC and External peerings", "dryRun", cfg.DryRun, "numRequests", len(cfg.Requests))
 
 	os.Setenv("KUBECONFIG", filepath.Join(svc.cfg.Basedir, "kubeconfig.yaml"))
 	kube, err := kubeClient()
@@ -1159,7 +1159,7 @@ func (svc *Service) SetupPeerings(ctx context.Context, cfg SetupPeeringsConfig) 
 		}
 	}
 
-	slog.Info("Test scenario setup complete", "took", time.Since(start))
+	slog.Info("VPC and External Peerings setup complete", "took", time.Since(start))
 
 	return nil
 }
