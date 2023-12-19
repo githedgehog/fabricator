@@ -514,8 +514,13 @@ func main() {
 							verboseFlag,
 							briefFlag,
 							&cli.BoolFlag{
+								Name:  "invpc",
+								Usage: "test connectivity beween servers in a single VPC",
+								Value: true,
+							},
+							&cli.BoolFlag{
 								Name:  "vpc",
-								Usage: "test VPC connectivity",
+								Usage: "test connectivity between servers in different VPCs",
 								Value: true,
 							},
 							&cli.BoolFlag{
@@ -564,13 +569,14 @@ func main() {
 							}
 
 							return errors.Wrap(svc.TestServerConnectivity(context.Background(), vlab.ServerConnectivityTestConfig{
-								AgentCheck: cCtx.Bool("agent-check"),
-								VPC:        cCtx.Bool("vpc"),
-								Ext:        cCtx.Bool("ext"),
-								VPCPing:    cCtx.Uint("vpc-ping"),
-								VPCIperf:   cCtx.Uint("vpc-iperf"),
+								AgentCheck:    cCtx.Bool("agent-check"),
+								InVPC:         cCtx.Bool("invpc"),
+								VPC:           cCtx.Bool("vpc"),
+								Ext:           cCtx.Bool("ext"),
+								VPCPing:       cCtx.Uint("vpc-ping"),
+								VPCIperf:      cCtx.Uint("vpc-iperf"),
 								VPCIperfSpeed: cCtx.Uint("vpc-iperf-speed"),
-								ExtCurl:    cCtx.Bool("ext-curl"),
+								ExtCurl:       cCtx.Bool("ext-curl"),
 							}), "error testing server connectivity")
 						},
 					},

@@ -280,6 +280,7 @@ func checkAgents(ctx context.Context, kube client.WithWatch) error {
 type ServerConnectivityTestConfig struct {
 	AgentCheck bool
 
+	InVPC         bool
 	VPC           bool
 	VPCPing       uint
 	VPCIperf      uint
@@ -450,6 +451,24 @@ serverLoop:
 	}
 	slices.Sort(sortedServer)
 
+	if cfg.InVPC {
+		for _, serverName := range sortedServer {
+			server := servers[serverName]
+
+			for _, other := range sortedServer {
+				if serverName == other {
+					continue
+				}
+
+				if servers[other].VPC != nil {
+					if servers[other].VPC.Name == server.VPC.Name {
+						server.InVPCPeers = append(server.InVPCPeers, other)
+					}
+				}
+			}
+		}
+	}
+
 	for _, peering := range vpcPeeringList.Items {
 		vpc1, vpc2, err := peering.Spec.VPCs()
 		if err != nil {
@@ -533,7 +552,7 @@ serverLoop:
 		server := servers[name]
 		slices.Sort(server.VPCPeers)
 
-		slog.Info("To be tested", "server", server.Name, "vpcPeers", server.VPCPeers, "externals", server.Externals)
+		slog.Info("To be tested", "server", server.Name, "inVPCPeers", server.InVPCPeers, "vpcPeers", server.VPCPeers, "externals", server.Externals)
 
 		if cfg.VPC {
 			for _, vpcPeer := range sortedServer {
@@ -545,7 +564,7 @@ serverLoop:
 
 				totalTested += 1
 
-				peerConnected := slices.Contains(server.VPCPeers, vpcPeer)
+				peerConnected := slices.Contains(server.VPCPeers, vpcPeer) || slices.Contains(server.InVPCPeers, vpcPeer)
 
 				if cfg.VPCPing > 0 {
 					cmd := fmt.Sprintf("ping -c %d -W 1 %s", cfg.VPCPing, servers[vpcPeer].IP)
@@ -717,8 +736,9 @@ type Server struct {
 	Subnet          string
 	ExternalPeering *vpcapi.ExternalPeering
 
-	VPCPeers  []string
-	Externals []string
+	InVPCPeers []string
+	VPCPeers   []string
+	Externals  []string
 
 	IP string
 }
