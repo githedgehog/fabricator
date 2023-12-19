@@ -622,7 +622,7 @@ func main() {
 							&cli.UintFlag{
 								Name:  "vpc-iperf-speed",
 								Usage: "iperf speed test threshold (Mbit/s), if speed is lower than this value, test will fail",
-								Value: 8500,
+								Value: 8000,
 							},
 							&cli.BoolFlag{
 								Name:  "ext-curl",
