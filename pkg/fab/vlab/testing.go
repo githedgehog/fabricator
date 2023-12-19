@@ -59,10 +59,30 @@ type netConfig struct {
 	Net     string
 }
 
-func (svc *Service) SetupVPCPerServer(ctx context.Context) error {
+type SetupVPCsConfig struct {
+	Type string
+}
+
+const (
+	VPCSetupTypeVPCPerServer       = "vpc-per-server"
+	VPCSetupTypeSingleVPC          = "single-vpc"
+	VPCSetupTypeVPCSubnetPerServer = "subnet-per-server"
+)
+
+var VPCSetupTypes = []string{
+	VPCSetupTypeVPCPerServer,
+	// VPCSetupTypeSingleVPC,
+	// VPCSetupTypeVPCSubnetPerServer,
+}
+
+func (svc *Service) SetupVPCs(ctx context.Context, cfg SetupVPCsConfig) error {
 	start := time.Now()
 
-	slog.Info("Setting up VPCs and VPCAttachments per server")
+	if !slices.Contains(VPCSetupTypes, cfg.Type) {
+		return errors.Errorf("invalid VPC setup type %s", cfg.Type)
+	}
+
+	slog.Info("Setting up VPCs and VPCAttachments for servers")
 
 	os.Setenv("KUBECONFIG", filepath.Join(svc.cfg.Basedir, "kubeconfig.yaml"))
 	kube, err := kubeClient()
@@ -131,12 +151,6 @@ func (svc *Service) SetupVPCPerServer(ctx context.Context) error {
 		slog.Info("Enforcing VPC + Attachment for server...", "vpc", vpcName, "server", server.Name, "conn", conn.Name)
 
 		vlan := fmt.Sprintf("%d", 1000+idx)
-		vpc := &vpcapi.VPC{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      fmt.Sprintf("vpc-%d", idx),
-				Namespace: "default", // TODO ns
-			},
-		}
 
 		ip := slices.Clone(ipNet.IP.To4())
 		ip[2] += byte(idx)
@@ -145,6 +159,12 @@ func (svc *Service) SetupVPCPerServer(ctx context.Context) error {
 		ip[3] = 10
 		dhcpStart := ip.String()
 
+		vpc := &vpcapi.VPC{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      fmt.Sprintf("vpc-%d", idx),
+				Namespace: "default", // TODO ns
+			},
+		}
 		_, err = ctrlutil.CreateOrUpdate(ctx, kube, vpc, func() error {
 			vpc.Spec = vpcapi.VPCSpec{
 				IPv4Namespace: "default",
@@ -290,7 +310,7 @@ type ServerConnectivityTestConfig struct {
 	ExtCurl bool
 }
 
-func (svc *Service) TestServerConnectivity(ctx context.Context, cfg ServerConnectivityTestConfig) error {
+func (svc *Service) TestConnectivity(ctx context.Context, cfg ServerConnectivityTestConfig) error {
 	start := time.Now()
 
 	slog.Info("Starting connectivity test", "vpc", cfg.VPC, "vpcPing", cfg.VPCPing, "vpcIperf", cfg.VPCIperf, "ext", cfg.Ext, "extCurl", cfg.ExtCurl)
@@ -804,14 +824,14 @@ func parseIperf3Report(data string) (*Iperf3Report, error) {
 	return report, nil
 }
 
-type TestScenarioSetupConfig struct {
+type SetupPeeringsConfig struct {
 	DryRun     bool
 	CleanupAll bool
 	Requests   []string
 }
 
 // TODO move vpc creation to here, just have flag --vpc-per-server
-func (svc *Service) SetupTestScenario(ctx context.Context, cfg TestScenarioSetupConfig) error {
+func (svc *Service) SetupPeerings(ctx context.Context, cfg SetupPeeringsConfig) error {
 	start := time.Now()
 
 	slog.Info("Setting up test scenario", "dryRun", cfg.DryRun, "numRequests", len(cfg.Requests))
