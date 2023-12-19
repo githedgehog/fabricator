@@ -704,30 +704,42 @@ serverLoop:
 		}
 
 		if cfg.Ext {
-			for _, external := range server.Externals {
-				if cfg.ExtCurl {
-					totalTested += 1
+			if cfg.ExtCurl {
+				totalTested += 1
 
-					cmd := "toolbox -q timeout 5 curl --insecure https://8.8.8.8" // TODO make configurable
-					slog.Debug("Testing external connectivity using curl", "from", name, "to", external, "cmd", cmd)
+				connected := len(server.Externals) > 0
 
-					out, err := svc.ssh(ctx, server, cmd, 10)
-					if err != nil {
-						slog.Error("External connectivity expected, curl failed", "from", server.Name, "to", external, "err", err)
+				cmd := "toolbox -q timeout 5 curl --insecure https://8.8.8.8" // TODO make configurable
+				slog.Debug("Testing external connectivity using curl", "from", name, "cmd", cmd)
+
+				out, err := svc.ssh(ctx, server, cmd, 10)
+				if connected && err != nil {
+					slog.Error("External connectivity expected, curl failed", "from", server.Name, "err", err)
+					color.Red(strings.TrimSpace(out))
+				} else if connected && err == nil {
+					if !strings.Contains(out, "302 Moved") {
+						slog.Error("External connectivity expected, curl succeeded but doesn't contain 302 Moved", "from", server.Name)
 						color.Red(strings.TrimSpace(out))
 					} else {
-						if !strings.Contains(out, "302 Moved") {
-							slog.Error("External connectivity expected, curl succeeded but doesn't contain 302 Moved", "from", server.Name, "to", external)
-							color.Red(strings.TrimSpace(out))
-						} else {
-							totalPassed += 1
+						totalPassed += 1
 
-							slog.Info("External connectivity expected, curl succeeded", "from", server.Name, "to", external)
-							if slog.Default().Enabled(ctx, slog.LevelDebug) {
-								color.Green(strings.TrimSpace(out))
-							}
+						slog.Info("External connectivity expected, curl succeeded", "from", server.Name)
+						if slog.Default().Enabled(ctx, slog.LevelDebug) {
+							color.Green(strings.TrimSpace(out))
 						}
 					}
+				} else if !connected && err != nil {
+					totalPassed += 1
+
+					slog.Info("External connectivity not expected, curl failed", "from", server.Name)
+					if slog.Default().Enabled(ctx, slog.LevelDebug) {
+						color.Green(strings.TrimSpace(out))
+					}
+				} else if !connected && err == nil {
+					slog.Error("External connectivity not expected, curl succeeded", "from", server.Name)
+					color.Red(strings.TrimSpace(out))
+				} else {
+					return errors.Errorf("unexpected result")
 				}
 			}
 		}
