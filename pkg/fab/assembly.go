@@ -115,9 +115,9 @@ var (
 	}
 
 	// SONiC
-	REF_SONIC_BCOM_BASE   = cnc.Ref{Name: "sonic-bcom-private", Tag: "base-bin-4.1.1"}
-	REF_SONIC_BCOM_CAMPUS = cnc.Ref{Name: "sonic-bcom-private", Tag: "campus-bin-4.1.1"}
-	REF_SONIC_BCOM_VS     = cnc.Ref{Name: "sonic-bcom-private", Tag: "vs-bin-4.1.1"}
+	REF_SONIC_BCOM_BASE   = cnc.Ref{Name: "sonic-bcom-private", Tag: "base-bin-4.2.0"}
+	REF_SONIC_BCOM_CAMPUS = cnc.Ref{Name: "sonic-bcom-private", Tag: "campus-bin-4.2.0"}
+	REF_SONIC_BCOM_VS     = cnc.Ref{Name: "sonic-bcom-private", Tag: "vs-bin-4.2.0"}
 
 	REF_SONIC_TARGET_VERSION = cnc.Ref{Tag: "latest"}
 	REF_SONIC_TARGETS_BASE   = []cnc.Ref{
