@@ -255,18 +255,23 @@ func (vm *VM) RunInstall(ctx context.Context, svcCfg *ServiceConfig) func() erro
 				os.Exit(1)
 			}
 
-			slog.Info("Running script after switches are ready as requested")
+			if svcCfg.ReadyComplete != "noop" {
+				slog.Info("Running script after switches are ready as requested")
 
-			err = execCmd(ctx, svcCfg, "", false, svcCfg.ReadyComplete, []string{
-				"KUBECONFIG=" + filepath.Join(svcCfg.Basedir, "kubeconfig.yaml"),
-			})
-			if err != nil {
-				slog.Error("error running script after switches are ready", "error", err)
-				os.Exit(1)
+				err = execCmd(ctx, svcCfg, "", false, svcCfg.ReadyComplete, []string{
+					"KUBECONFIG=" + filepath.Join(svcCfg.Basedir, "kubeconfig.yaml"),
+				})
+				if err != nil {
+					slog.Error("error running script after switches are ready", "error", err)
+					os.Exit(1)
+				}
+
+				slog.Info("Exiting after script succeded (after switches are ready) as requested")
+			} else {
+				slog.Info("Exiting after switches are ready as requested")
 			}
 
 			// TODO do graceful shutdown
-			slog.Info("Exiting after script succeded (after switches are ready) as requested")
 			os.Exit(0)
 		}
 
