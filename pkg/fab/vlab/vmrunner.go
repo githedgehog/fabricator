@@ -40,6 +40,8 @@ func (vm *VM) Run(ctx context.Context, eg *errgroup.Group, svcCfg *ServiceConfig
 
 func (vm *VM) RunTPM(ctx context.Context, svcCfg *ServiceConfig) func() error {
 	return func() error {
+		slog.Info("Running swtpm (may require sudo password)", "name", vm.Name)
+
 		err := execCmd(ctx, svcCfg, vm.Basedir, true, "sudo", []string{},
 			"swtpm", "socket", "--tpm2", "--tpmstate", "dir=tpm",
 			"--ctrl", "type=unixio,path=tpm.sock.ctrl", "--pid", "file=tpm.pid",
