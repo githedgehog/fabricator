@@ -106,7 +106,7 @@ jobs:
           limit-access-to-actor: true
 
   vlab:
-    runs-on: ["vlab"]
+    runs-on: lab
     # needs:
     #   - cache-tools
     timeout-minutes: 120
