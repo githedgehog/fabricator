@@ -330,10 +330,10 @@ func (vm *VM) Prepare(ctx context.Context, svcCfg *ServiceConfig) error {
 			return errors.Wrapf(err, "error creating tpm dir")
 		}
 
-		slog.Info("Initializing TPM", "name", vm.Name)
+		slog.Info("Initializing TPM (may require sudo password)", "name", vm.Name)
 
-		err = execCmd(ctx, svcCfg, vm.Basedir, true, "swtpm_setup", []string{},
-			"--tpm2", "--tpmstate", "tpm", "--createek", "--decryption", "--create-ek-cert", "--create-platform-cert",
+		err = execCmd(ctx, svcCfg, vm.Basedir, true, "sudo", []string{},
+			"swtpm_setup", "--tpm2", "--tpmstate", "tpm", "--createek", "--decryption", "--create-ek-cert", "--create-platform-cert",
 			"--create-spk", "--vmid", vm.Name, "--overwrite", "--display")
 		if err != nil {
 			return errors.Wrapf(err, "error initializing tpm")
