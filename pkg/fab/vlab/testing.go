@@ -54,6 +54,8 @@ func kubeClient() (client.WithWatch, error) {
 }
 
 func waitForSwitchesReady(svcCfg *ServiceConfig) error {
+	start := time.Now()
+
 	slog.Info("Waiting for all switches to be ready")
 
 	os.Setenv("KUBECONFIG", filepath.Join(svcCfg.Basedir, "kubeconfig.yaml"))
@@ -101,7 +103,7 @@ func waitForSwitchesReady(svcCfg *ServiceConfig) error {
 		slog.Info("Switches ready status", "ready", readyList, "notReady", notReadyList)
 
 		if allReady {
-			slog.Info("All switches are ready")
+			slog.Info("All switches are ready", "took", time.Since(start))
 			return nil
 		}
 
