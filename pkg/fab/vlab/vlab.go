@@ -47,6 +47,7 @@ type ServiceConfig struct {
 	Size              string
 	InstallComplete   bool
 	RunComplete       string
+	ReadyComplete     string
 	Basedir           string
 	Wiring            *wiring.Data
 	ControlIgnition   string
@@ -98,9 +99,10 @@ func Load(cfg *ServiceConfig) (*Service, error) {
 	return svc, nil
 }
 
-func (svc *Service) StartServer(killStaleVMs bool, installComplete bool, runComplete string) error {
+func (svc *Service) StartServer(killStaleVMs bool, installComplete bool, runComplete string, readyComplete string) error {
 	svc.cfg.InstallComplete = installComplete
 	svc.cfg.RunComplete = runComplete
+	svc.cfg.ReadyComplete = readyComplete
 
 	for _, cmd := range RequiredCommands {
 		_, err := exec.LookPath(cmd)

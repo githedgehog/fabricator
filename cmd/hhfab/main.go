@@ -355,6 +355,10 @@ func main() {
 								Name:  "run-complete",
 								Usage: "run installer, run provided script and than complete vlab (for testing)",
 							},
+							&cli.StringFlag{
+								Name:  "ready-complete",
+								Usage: "wait for switches ready, run provided script and than complete vlab (for testing)",
+							},
 						},
 						Before: func(ctx *cli.Context) error {
 							return setupLogger(verbose, brief)
@@ -372,7 +376,11 @@ func main() {
 
 							killStaleVMs := cCtx.Bool("kill-stale-vms")
 
-							return errors.Wrap(svc.StartServer(killStaleVMs, cCtx.Bool("install-complete"), cCtx.String("run-complete")), "error starting vlab")
+							return errors.Wrap(svc.StartServer(killStaleVMs,
+								cCtx.Bool("install-complete"),
+								cCtx.String("run-complete"),
+								cCtx.String("ready-complete"),
+							), "error starting vlab")
 						},
 					},
 					{
