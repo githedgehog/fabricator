@@ -40,7 +40,8 @@ func (vm *VM) Run(ctx context.Context, eg *errgroup.Group, svcCfg *ServiceConfig
 
 func (vm *VM) RunTPM(ctx context.Context, svcCfg *ServiceConfig) func() error {
 	return func() error {
-		err := execCmd(ctx, svcCfg, vm.Basedir, true, "swtpm", []string{}, "socket", "--tpm2", "--tpmstate", "dir=tpm",
+		err := execCmd(ctx, svcCfg, vm.Basedir, true, "sudo", []string{},
+			"swtpm", "socket", "--tpm2", "--tpmstate", "dir=tpm",
 			"--ctrl", "type=unixio,path=tpm.sock.ctrl", "--pid", "file=tpm.pid",
 			"--log", "level=1", "--flags", "startup-clear")
 		if err != nil {
