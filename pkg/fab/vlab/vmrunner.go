@@ -457,7 +457,7 @@ func execCmd(ctx context.Context, svcCfg *ServiceConfig, basedir string, quiet b
 	cmd.Dir = basedir
 	cmd.Env = append(os.Environ(), env...)
 
-	logFileName := filepath.Join(basedir, "exec.log")
+	logFileName := filepath.Join(basedir, fmt.Sprintf("exec-%d.log", time.Now().UnixMilli()))
 	logFile, err := os.OpenFile(logFileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return errors.Wrapf(err, "error opening log file %s", logFileName)
