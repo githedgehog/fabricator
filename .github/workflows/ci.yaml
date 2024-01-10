@@ -105,65 +105,65 @@ jobs:
         with:
           limit-access-to-actor: true
 
-  # vlab:
-  #   runs-on: ["vlab"]
-  #   # needs:
-  #   #   - cache-tools
-  #   timeout-minutes: 120
+  vlab:
+    runs-on: ["vlab"]
+    # needs:
+    #   - cache-tools
+    timeout-minutes: 120
 
-  #   steps:
-  #     - name: Checkout repository
-  #       uses: actions/checkout@v4
-  #       with:
-  #         fetch-depth: 0
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-  #     - name: Setup Go
-  #       uses: actions/setup-go@v4
-  #       with:
-  #         go-version: stable
-  #         cache: true
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: stable
+          cache: true
 
-  #     - name: Setup git for private Go modules
-  #       env:
-  #         GH_ACCESS_TOKEN: ${{ secrets.GH_ACCESS_TOKEN }}
-  #       run: git config --global url.https://$GH_ACCESS_TOKEN@github.com/.insteadOf https://github.com/
+      - name: Setup git for private Go modules
+        env:
+          GH_ACCESS_TOKEN: ${{ secrets.GH_ACCESS_TOKEN }}
+        run: git config --global url.https://$GH_ACCESS_TOKEN@github.com/.insteadOf https://github.com/
 
-  #     - name: Build hhfab
-  #       run: |
-  #         make hhfab
+      - name: Build hhfab
+        run: |
+          make hhfab
 
-  #     - name: Login to ghcr.io
-  #       uses: docker/login-action@v3
-  #       with:
-  #         registry: ghcr.io
-  #         username: ${{ github.actor }}
-  #         password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Login to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-  #     - name: Login to lab registry
-  #       uses: docker/login-action@v3
-  #       with:
-  #         registry: m.l.hhdev.io:31000
-  #         username: lab
-  #         password: ${{ secrets.LAB_REGISTRY_TOKEN }}
+      - name: Login to lab registry
+        uses: docker/login-action@v3
+        with:
+          registry: m.l.hhdev.io:31000
+          username: lab
+          password: ${{ secrets.LAB_REGISTRY_TOKEN }}
 
-  #     - name: hhfab init and build
-  #       # TODO replace --install-complete with --run-complete hack/vlab-test.sh
-  #       run: |
-  #         export XDG_CONFIG_HOME=$(pwd)/.config
-  #         export HHFAB_BASE_REPO=m.l.hhdev.io:31000/githedgehog
+      - name: hhfab init and build
+        # TODO replace --install-complete with --run-complete hack/vlab-test.sh
+        run: |
+          export XDG_CONFIG_HOME=$(pwd)/.config
+          export HHFAB_BASE_REPO=m.l.hhdev.io:31000/githedgehog
 
-  #         bin/hhfab init -p vlab -v
-  #         bin/hhfab build -v
-  #         ls -lah .hhfab
+          bin/hhfab init -p vlab -v
+          bin/hhfab build -v
+          ls -lah .hhfab
 
-  #         bin/hhfab vlab up -v --dry-run
-  #         sudo bin/hhfab vlab up -v --install-complete
-  #     - name: Setup tmate session for debug
-  #       if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
-  #       uses: mxschmitt/action-tmate@v3
-  #       timeout-minutes: 30
-  #       with:
-  #         limit-access-to-actor: true
+          bin/hhfab vlab up -v --dry-run
+          sudo bin/hhfab vlab up -v --install-complete
+      - name: Setup tmate session for debug
+        if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
+        uses: mxschmitt/action-tmate@v3
+        timeout-minutes: 120
+        with:
+          limit-access-to-actor: true
 
   publish:
     runs-on: lab
