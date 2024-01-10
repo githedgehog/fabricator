@@ -53,6 +53,64 @@ func kubeClient() (client.WithWatch, error) {
 	return client, nil
 }
 
+func waitForSwitchesReady(svcCfg *ServiceConfig) error {
+	slog.Info("Waiting for all switches to be ready")
+
+	os.Setenv("KUBECONFIG", filepath.Join(svcCfg.Basedir, "kubeconfig.yaml"))
+	kube, err := kubeClient()
+	if err != nil {
+		return errors.Wrapf(err, "error creating kube client")
+	}
+
+	ready := map[string]bool{}
+	for _, switchName := range svcCfg.Wiring.Switch.All() {
+		ready[switchName.Name] = false
+	}
+
+	// TODO add timeout
+	for {
+		agents := agentapi.AgentList{}
+		if err := kube.List(context.Background(), &agents, client.InNamespace("default")); err != nil {
+			return errors.Wrapf(err, "error listing agents")
+		}
+
+		for _, agent := range agents.Items {
+			if agent.Generation == agent.Status.LastAppliedGen {
+				ready[agent.Name] = true
+				continue
+			}
+		}
+
+		allReady := true
+		for _, swReady := range ready {
+			if !swReady {
+				allReady = false
+			}
+		}
+
+		readyList := []string{}
+		notReadyList := []string{}
+		for sw, swReady := range ready {
+			if swReady {
+				readyList = append(readyList, sw)
+			} else {
+				notReadyList = append(notReadyList, sw)
+			}
+		}
+
+		slog.Info("Switches ready status", "ready", readyList, "notReady", notReadyList)
+
+		if allReady {
+			slog.Info("All switches are ready")
+			return nil
+		}
+
+		time.Sleep(5 * time.Second) // TODO make configurable
+	}
+
+	return nil
+}
+
 type netConfig struct {
 	Name    string
 	SSHPort uint
