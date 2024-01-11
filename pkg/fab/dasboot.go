@@ -41,6 +41,7 @@ type DasBoot struct {
 	SONiCVSRef      cnc.Ref    `json:"sonicVSRef,omitempty"`
 	TLS             DasBootTLS `json:"tls,omitempty"`
 	ClusterIP       string     `json:"clusterIP,omitempty"`
+	NTPServers      string     `json:"ntpServers,omitempty"`
 }
 
 type DasBootTLS struct {
@@ -62,7 +63,15 @@ func (cfg *DasBoot) IsEnabled(preset cnc.Preset) bool {
 }
 
 func (cfg *DasBoot) Flags() []cli.Flag {
-	return nil
+	return []cli.Flag{
+		&cli.StringFlag{
+			Category:    cfg.Name() + FLAG_CATEGORY_CONFIG_BASE_SUFFIX,
+			Name:        "ntp-servers",
+			Usage:       "Upstream NTP servers (comma-separated list)",
+			Destination: &cfg.NTPServers,
+			Value:       "time.cloudflare.com,time1.google.com,time2.google.com,time3.google.com,time4.google.com",
+		},
+	}
 }
 
 func (cfg *DasBoot) Hydrate(preset cnc.Preset, fabricMode config.FabricMode) error {
@@ -213,6 +222,7 @@ func (cfg *DasBoot) Build(basedir string, preset cnc.Preset, fabricMode config.F
 					"ref", target.Fallback(cfg.NTPImageRef),
 					"nodePort", DAS_BOOT_NTP_NODE_PORT,
 					"hostNetwork", "true",
+					"ntpServers", cfg.NTPServers,
 				)),
 				cnc.KubeHelmChart("das-boot-crds", "default", helm.HelmChartSpec{
 					TargetNamespace: "default",
