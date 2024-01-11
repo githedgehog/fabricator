@@ -212,6 +212,7 @@ func (cfg *DasBoot) Build(basedir string, preset cnc.Preset, fabricMode config.F
 				}, cnc.FromTemplate(dasBootNtpValuesTemplate,
 					"ref", target.Fallback(cfg.NTPImageRef),
 					"nodePort", DAS_BOOT_NTP_NODE_PORT,
+					"hostNetwork", "true",
 				)),
 				cnc.KubeHelmChart("das-boot-crds", "default", helm.HelmChartSpec{
 					TargetNamespace: "default",
