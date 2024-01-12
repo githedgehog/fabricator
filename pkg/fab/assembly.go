@@ -3,6 +3,7 @@ package fab
 import (
 	"crypto/x509"
 	"fmt"
+	"os/user"
 	"path/filepath"
 
 	"github.com/pkg/errors"
@@ -258,9 +259,16 @@ func LoadVLAB(basedir string, mngr *cnc.Manager, dryRun bool, size string) (*vla
 		return nil, errors.Errorf("only vlab preset supported, found %s", mngr.Preset())
 	}
 
+	sudoSwtpm := false
+	u, err := user.Current()
+	if err != nil && u.Username == "runner" { // quick hack for GHA with self-hosted runners
+		sudoSwtpm = true
+	}
+
 	svc, err := vlab.Load(&vlab.ServiceConfig{
 		DryRun:            dryRun,
 		Size:              size,
+		SudoSwtpm:         sudoSwtpm,
 		Basedir:           filepath.Join(basedir, BundleVlabVMs.Name),
 		Wiring:            mngr.Wiring(),
 		ControlIgnition:   filepath.Join(basedir, BundleControlOS.Name, CONTROL_OS_IGNITION),

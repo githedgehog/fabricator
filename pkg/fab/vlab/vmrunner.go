@@ -38,11 +38,19 @@ func (vm *VM) Run(ctx context.Context, eg *errgroup.Group, svcCfg *ServiceConfig
 	eg.Go(vm.RunInstall(ctx, svcCfg))
 }
 
+func (svcCfg *ServiceConfig) tpmSudo() string {
+	if svcCfg.SudoSwtpm {
+		return "sudo"
+	} else {
+		return "time"
+	}
+}
+
 func (vm *VM) RunTPM(ctx context.Context, svcCfg *ServiceConfig) func() error {
 	return func() error {
 		slog.Info("Running swtpm (may require sudo password)", "name", vm.Name)
 
-		err := execCmd(ctx, svcCfg, vm.Basedir, true, "sudo", []string{},
+		err := execCmd(ctx, svcCfg, vm.Basedir, true, svcCfg.tpmSudo(), []string{},
 			"swtpm", "socket", "--tpm2", "--tpmstate", "dir=tpm",
 			"--ctrl", "type=unixio,path=tpm.sock.ctrl", "--pid", "file=tpm.pid",
 			"--log", "level=1", "--flags", "startup-clear")
@@ -362,7 +370,7 @@ func (vm *VM) Prepare(ctx context.Context, svcCfg *ServiceConfig) error {
 
 		slog.Info("Initializing TPM (may require sudo password)", "name", vm.Name)
 
-		err = execCmd(ctx, svcCfg, vm.Basedir, true, "sudo", []string{},
+		err = execCmd(ctx, svcCfg, vm.Basedir, true, svcCfg.tpmSudo(), []string{},
 			"swtpm_setup", "--tpm2", "--tpmstate", "tpm", "--createek", "--decryption", "--create-ek-cert", "--create-platform-cert",
 			"--create-spk", "--vmid", vm.Name, "--overwrite", "--display")
 		if err != nil {

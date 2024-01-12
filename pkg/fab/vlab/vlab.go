@@ -45,6 +45,7 @@ type Service struct {
 type ServiceConfig struct {
 	DryRun            bool
 	Size              string
+	SudoSwtpm         bool
 	InstallComplete   bool
 	RunComplete       string
 	ReadyComplete     string
