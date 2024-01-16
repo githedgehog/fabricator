@@ -46,6 +46,7 @@ type ServiceConfig struct {
 	DryRun            bool
 	Size              string
 	SudoSwtpm         bool
+	CharNBDDev        string
 	InstallComplete   bool
 	RunComplete       string
 	ReadyComplete     string
@@ -100,7 +101,8 @@ func Load(cfg *ServiceConfig) (*Service, error) {
 	return svc, nil
 }
 
-func (svc *Service) StartServer(killStaleVMs bool, installComplete bool, runComplete string, readyComplete string) error {
+func (svc *Service) StartServer(killStaleVMs bool, charNBDDev string, installComplete bool, runComplete string, readyComplete string) error {
+	svc.cfg.CharNBDDev = charNBDDev
 	svc.cfg.InstallComplete = installComplete
 	svc.cfg.RunComplete = runComplete
 	svc.cfg.ReadyComplete = readyComplete

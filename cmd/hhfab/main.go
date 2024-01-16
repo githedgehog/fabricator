@@ -344,6 +344,12 @@ func main() {
 								Usage: "kill stale vms before starting",
 							},
 							&cli.StringFlag{
+								Name:    "char-nbd-dev",
+								Usage:   "use provided char device for nbd (for creating VM images for switches)",
+								EnvVars: []string{"HHFAB_CHAR_NBD_DEV"},
+								Value:   "/dev/nbd0",
+							},
+							&cli.StringFlag{
 								Name:  "vm-size",
 								Usage: "run with one of the predefined sizes (one of: " + strings.Join(vlab.VM_SIZES, ", ") + ")",
 							},
@@ -374,9 +380,9 @@ func main() {
 								return errors.Wrap(err, "error loading vlab")
 							}
 
-							killStaleVMs := cCtx.Bool("kill-stale-vms")
-
-							return errors.Wrap(svc.StartServer(killStaleVMs,
+							return errors.Wrap(svc.StartServer(
+								cCtx.Bool("kill-stale-vms"),
+								cCtx.String("char-nbd-dev"),
 								cCtx.Bool("install-complete"),
 								cCtx.String("run-complete"),
 								cCtx.String("ready-complete"),

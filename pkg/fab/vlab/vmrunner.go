@@ -353,10 +353,13 @@ func (vm *VM) Prepare(ctx context.Context, svcCfg *ServiceConfig) error {
 			return errors.Wrapf(err, "error writing onie-eeprom.yaml")
 		}
 
-		slog.Info("Writing ONIE EEPROM (may require sudo password)", "name", vm.Name)
+		slog.Info("Writing ONIE EEPROM (may require sudo password)", "name", vm.Name, "nbd", svcCfg.CharNBDDev)
 
 		err = execCmd(ctx, svcCfg, "", true, "sudo", []string{}, filepath.Join(svcCfg.FilesDir, "onie-qcow2-eeprom-edit"),
-			"--log-level=debug", "write", "--force", "--input", filepath.Join(vm.Basedir, "onie-eeprom.yaml"), filepath.Join(vm.Basedir, "os.img"))
+			"--log-level=debug", "write", "--force",
+			"--char-nbd-dev", svcCfg.CharNBDDev,
+			"--input", filepath.Join(vm.Basedir, "onie-eeprom.yaml"),
+			filepath.Join(vm.Basedir, "os.img"))
 		if err != nil {
 			return errors.Wrapf(err, "error writing onie-eeprom.yaml")
 		}
