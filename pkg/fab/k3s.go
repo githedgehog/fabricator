@@ -21,6 +21,8 @@ type K3s struct {
 	ServiceCIDR string   `json:"serviceCIDR,omitempty"`
 	ClusterDNS  string   `json:"clusterDNS,omitempty"`
 	TLSSAN      []string `json:"tlsSAN,omitempty"`
+
+	tlsSAN cli.StringSlice
 }
 
 var _ cnc.Component = (*K3s)(nil)
@@ -34,7 +36,14 @@ func (cfg *K3s) IsEnabled(preset cnc.Preset) bool {
 }
 
 func (cfg *K3s) Flags() []cli.Flag {
-	return nil
+	return []cli.Flag{
+		&cli.StringSliceFlag{
+			Name:        "tls-san",
+			Usage:       "TLS SANs for K8s API / control plane",
+			EnvVars:     []string{"HHFAB_TLS_SAN"},
+			Destination: &cfg.tlsSAN,
+		},
+	}
 }
 
 func (cfg *K3s) Hydrate(preset cnc.Preset, fabricMode config.FabricMode) error {
@@ -52,12 +61,11 @@ func (cfg *K3s) Hydrate(preset cnc.Preset, fabricMode config.FabricMode) error {
 		cfg.ClusterDNS = CONTROL_KUBE_CLUSTER_DNS
 	}
 
-	for _, tlsSAN := range []string{
+	for _, tlsSAN := range append([]string{
 		"127.0.0.1",
 		"kube-fabric.local",
 		CONTROL_VIP,
-		// TODO add configurable SANs
-	} {
+	}, cfg.tlsSAN.Value()...) {
 		if !slices.Contains(cfg.TLSSAN, tlsSAN) {
 			cfg.TLSSAN = append(cfg.TLSSAN, tlsSAN)
 		}
