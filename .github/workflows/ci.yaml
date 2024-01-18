@@ -53,7 +53,7 @@ jobs:
   #         limit-access-to-actor: true
 
   build:
-    runs-on: vlab
+    runs-on: lab
     # needs:
     #   - cache-tools
     timeout-minutes: 30
@@ -165,12 +165,12 @@ jobs:
           limit-access-to-actor: true
 
   publish:
-    runs-on: vlab
+    runs-on: lab
     if: startsWith(github.event.ref, 'refs/tags/') && github.event_name == 'push'
     needs:
       # - cache-tools
       - build
-      # - vlab
+      - vlab
 
     steps:
       - name: Checkout repository
