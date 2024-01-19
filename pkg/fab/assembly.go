@@ -129,6 +129,7 @@ var (
 		{Name: "sonic/x86_64-cel_silverstone-r0"},      // Celestica DS4000
 		{Name: "sonic/x86_64-accton_as7726_32x-r0"},    // EdgeCore DCS204
 		{Name: "sonic/x86_64-accton_as7326_56x-r0"},    // EdgeCore DCS203
+		{Name: "sonic/x86_64-accton_as7712_32x-r0"},    // Edgecore AS7712-32X
 	}
 	REF_SONIC_TARGETS_CAMPUS = []cnc.Ref{
 		{Name: "sonic/x86_64-accton_as4630_54npe-r0"}, // EdgeCore EPS202
