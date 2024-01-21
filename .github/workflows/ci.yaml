@@ -66,12 +66,8 @@ jobs:
         preset:
           - lab
           - vlab
-        include:
+        exclude:
           - preset: lab
-            hh-dhcpd: false
-          - preset: vlab
-            hh-dhcpd: false
-          - preset: vlab
             hh-dhcpd: true
 
     steps:
