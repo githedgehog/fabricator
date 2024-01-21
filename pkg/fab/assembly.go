@@ -148,6 +148,8 @@ var (
 	REF_FABRIC_CTL               = cnc.Ref{Name: "fabric/hhfctl"}
 	REF_FABRIC_DHCP_SERVER       = cnc.Ref{Name: "fabric/fabric-dhcp-server"}
 	REF_FABRIC_DHCP_SERVER_CHART = cnc.Ref{Name: "fabric/charts/fabric-dhcp-server"}
+	REF_FABRIC_DHCPD             = cnc.Ref{Name: "fabric/fabric-dhcpd"}
+	REF_FABRIC_DHCPD_CHART       = cnc.Ref{Name: "fabric/charts/fabric-dhcpd"}
 
 	// Misc
 	REF_K9S        = cnc.Ref{Name: "fabricator/k9s", Tag: "v0.27.4"}

@@ -22,6 +22,9 @@ var fabricValuesTemplate string
 //go:embed fabric_dhcp_server_values.tmpl.yaml
 var fabricDHCPServerTemplate string
 
+//go:embed fabric_dhcpd_values.tmpl.yaml
+var fabricDHCPDTemplate string
+
 type Fabric struct {
 	Ref                      cnc.Ref `json:"ref,omitempty"`
 	FabricApiChartRef        cnc.Ref `json:"fabricApiChartRef,omitempty"`
@@ -32,8 +35,11 @@ type Fabric struct {
 	CtlRef                   cnc.Ref `json:"ctlRef,omitempty"`
 	FabricDHCPServerRef      cnc.Ref `json:"dhcpServerRef,omitempty"`
 	FabricDHCPServerChartRef cnc.Ref `json:"dhcpServerChartRef,omitempty"`
+	FabricDHCPDRef           cnc.Ref `json:"dhcpdRef,omitempty"`
+	FabricDHCPDChartRef      cnc.Ref `json:"dhcpdChartRef,omitempty"`
 	BaseVPCCommunity         string  `json:"baseVPCCommunity,omitempty"`
 	ServerFacingMTUOffset    uint    `json:"serverFacingMTUOffset,omitempty"`
+	HedgehogDHCPD            bool    `json:"hedgehogDHCPD,omitempty"`
 }
 
 var _ cnc.Component = (*Fabric)(nil)
@@ -62,6 +68,13 @@ func (cfg *Fabric) Flags() []cli.Flag {
 			Destination: &cfg.ServerFacingMTUOffset,
 			Value:       64,
 		},
+		&cli.BoolFlag{
+			Category:    cfg.Name() + FLAG_CATEGORY_CONFIG_BASE_SUFFIX,
+			Name:        "hedgehog-dhcpd",
+			Usage:       "Use Hedgehog DHCPD instead of ISC DHCPD (enables multi ipv4 namespace DHCP with overlapping subnets)",
+			Destination: &cfg.HedgehogDHCPD,
+			Value:       false,
+		},
 	}
 }
 
@@ -75,6 +88,8 @@ func (cfg *Fabric) Hydrate(preset cnc.Preset, fabricMode config.FabricMode) erro
 	cfg.CtlRef = cfg.CtlRef.Fallback(REF_FABRIC_CTL)
 	cfg.FabricDHCPServerRef = cfg.FabricDHCPServerRef.Fallback(REF_FABRIC_DHCP_SERVER)
 	cfg.FabricDHCPServerChartRef = cfg.FabricDHCPServerChartRef.Fallback(REF_FABRIC_DHCP_SERVER_CHART)
+	cfg.FabricDHCPDRef = cfg.FabricDHCPDRef.Fallback(REF_FABRIC_DHCPD)
+	cfg.FabricDHCPDChartRef = cfg.FabricDHCPDChartRef.Fallback(REF_FABRIC_DHCPD_CHART)
 
 	return nil
 }
@@ -88,6 +103,8 @@ func (cfg *Fabric) Build(basedir string, preset cnc.Preset, fabricMode config.Fa
 	cfg.CtlRef = cfg.CtlRef.Fallback(cfg.Ref, BaseConfig(get).Source)
 	cfg.FabricDHCPServerRef = cfg.FabricDHCPServerRef.Fallback(cfg.Ref, BaseConfig(get).Source)
 	cfg.FabricDHCPServerChartRef = cfg.FabricDHCPServerChartRef.Fallback(cfg.Ref, BaseConfig(get).Source)
+	cfg.FabricDHCPDRef = cfg.FabricDHCPDRef.Fallback(cfg.Ref, BaseConfig(get).Source)
+	cfg.FabricDHCPDChartRef = cfg.FabricDHCPDChartRef.Fallback(cfg.Ref, BaseConfig(get).Source)
 
 	target := BaseConfig(get).Target
 	targetInCluster := BaseConfig(get).TargetInCluster
@@ -174,6 +191,27 @@ func (cfg *Fabric) Build(basedir string, preset cnc.Preset, fabricMode config.Fa
 		}
 	}
 
+	var dhcp cnc.KubeObjectProvider
+	if !cfg.HedgehogDHCPD {
+		dhcp = cnc.KubeHelmChart("fabric-dhcp-server", "default", helm.HelmChartSpec{
+			TargetNamespace: "default",
+			Chart:           "oci://" + targetInCluster.Fallback(cfg.FabricDHCPServerChartRef).RepoName(),
+			Version:         cfg.FabricDHCPServerChartRef.Tag,
+			RepoCA:          ZotConfig(get).TLS.CA.Cert,
+		}, cnc.FromTemplate(fabricDHCPServerTemplate,
+			"ref", target.Fallback(cfg.FabricDHCPServerRef),
+		))
+	} else {
+		dhcp = cnc.KubeHelmChart("fabric-dhcpd", "default", helm.HelmChartSpec{
+			TargetNamespace: "default",
+			Chart:           "oci://" + targetInCluster.Fallback(cfg.FabricDHCPDChartRef).RepoName(),
+			Version:         cfg.FabricDHCPDChartRef.Tag,
+			RepoCA:          ZotConfig(get).TLS.CA.Cert,
+		}, cnc.FromTemplate(fabricDHCPDTemplate,
+			"ref", target.Fallback(cfg.FabricDHCPDRef),
+		))
+	}
+
 	run(BundleControlInstall, STAGE_INSTALL_3_FABRIC, "fabric-install",
 		&cnc.FileGenerate{
 			File: cnc.File{
@@ -227,14 +265,7 @@ func (cfg *Fabric) Build(basedir string, preset cnc.Preset, fabricMode config.Fa
 						ServerFacingMTUOffset: uint16(cfg.ServerFacingMTUOffset),
 					},
 				)),
-				cnc.KubeHelmChart("fabric-dhcp-server", "default", helm.HelmChartSpec{
-					TargetNamespace: "default",
-					Chart:           "oci://" + targetInCluster.Fallback(cfg.FabricDHCPServerChartRef).RepoName(),
-					Version:         cfg.FabricDHCPServerChartRef.Tag,
-					RepoCA:          ZotConfig(get).TLS.CA.Cert,
-				}, cnc.FromTemplate(fabricDHCPServerTemplate,
-					"ref", target.Fallback(cfg.FabricDHCPServerRef),
-				)),
+				dhcp,
 			),
 		})
 
