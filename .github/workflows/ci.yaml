@@ -60,9 +60,19 @@ jobs:
 
     strategy:
       matrix:
+        hh-dhcpd:
+          - false
+          - true
         preset:
           - lab
           - vlab
+        include:
+          - preset: lab
+            hh-dhcpd: false
+          - preset: vlab
+            hh-dhcpd: false
+          - preset: vlab
+            hh-dhcpd: true
 
     steps:
       - name: Checkout repository
@@ -94,7 +104,7 @@ jobs:
 
       - name: hhfab init and build
         run: |
-          bin/hhfab init -p ${{ matrix.preset }} --dev -v
+          bin/hhfab init -p ${{ matrix.preset }} --hedgehog-dhcpd ${{ matrix.hh-dhcpd }} --dev -v
           bin/hhfab build -v
           ls -lah .hhfab
 
@@ -110,6 +120,12 @@ jobs:
     # needs:
     #   - cache-tools
     timeout-minutes: 120
+
+    strategy:
+      matrix:
+        hh-dhcpd:
+          - false
+          - true
 
     steps:
       - name: Checkout repository
@@ -152,7 +168,7 @@ jobs:
           export XDG_CONFIG_HOME=$(pwd)/.config
           export HHFAB_BASE_REPO=m.l.hhdev.io:31000/githedgehog
 
-          bin/hhfab init -p vlab -v
+          bin/hhfab init -p vlab --hedgehog-dhcpd ${{ matrix.hh-dhcpd }} --dev -v
           bin/hhfab build -v
           ls -lah .hhfab
 
