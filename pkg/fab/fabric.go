@@ -39,7 +39,7 @@ type Fabric struct {
 	FabricDHCPDChartRef      cnc.Ref `json:"dhcpdChartRef,omitempty"`
 	BaseVPCCommunity         string  `json:"baseVPCCommunity,omitempty"`
 	ServerFacingMTUOffset    uint    `json:"serverFacingMTUOffset,omitempty"`
-	HedgehogDHCPD            bool    `json:"hedgehogDHCPD,omitempty"`
+	DHCPServer               string  `json:"dhcpServer,omitempty"`
 }
 
 var _ cnc.Component = (*Fabric)(nil)
@@ -57,23 +57,23 @@ func (cfg *Fabric) Flags() []cli.Flag {
 		&cli.StringFlag{
 			Category:    cfg.Name() + FLAG_CATEGORY_CONFIG_BASE_SUFFIX,
 			Name:        "base-vpc-community",
-			Usage:       "Base community to stamp on VPC routes",
+			Usage:       "base community to stamp on VPC routes",
 			Destination: &cfg.BaseVPCCommunity,
 			Value:       "50000:0",
 		},
 		&cli.UintFlag{
 			Category:    cfg.Name() + FLAG_CATEGORY_CONFIG_BASE_SUFFIX,
 			Name:        "server-facing-mtu-offset",
-			Usage:       "Offset to apply to server-facing MTU",
+			Usage:       "offset to apply to server-facing MTU",
 			Destination: &cfg.ServerFacingMTUOffset,
 			Value:       64,
 		},
-		&cli.BoolFlag{
+		&cli.StringFlag{
 			Category:    cfg.Name() + FLAG_CATEGORY_CONFIG_BASE_SUFFIX,
-			Name:        "hedgehog-dhcpd",
-			Usage:       "Use Hedgehog DHCPD instead of ISC DHCPD (enables multi ipv4 namespace DHCP with overlapping subnets)",
-			Destination: &cfg.HedgehogDHCPD,
-			Value:       false,
+			Name:        "dhcpd",
+			Usage:       "use 'hedgehog' DHCPD to enables multi ipv4 namespace DHCP with overlapping subnets (one of 'hedgehog', 'isc')",
+			Destination: &cfg.DHCPServer,
+			Value:       "isc",
 		},
 	}
 }
@@ -90,6 +90,10 @@ func (cfg *Fabric) Hydrate(preset cnc.Preset, fabricMode config.FabricMode) erro
 	cfg.FabricDHCPServerChartRef = cfg.FabricDHCPServerChartRef.Fallback(REF_FABRIC_DHCP_SERVER_CHART)
 	cfg.FabricDHCPDRef = cfg.FabricDHCPDRef.Fallback(REF_FABRIC_DHCPD)
 	cfg.FabricDHCPDChartRef = cfg.FabricDHCPDChartRef.Fallback(REF_FABRIC_DHCPD_CHART)
+
+	if cfg.DHCPServer != "isc" && cfg.DHCPServer != "hedgehog" {
+		return errors.Errorf("invalid dhcp server impl %q", cfg.DHCPServer)
+	}
 
 	return nil
 }
@@ -192,7 +196,7 @@ func (cfg *Fabric) Build(basedir string, preset cnc.Preset, fabricMode config.Fa
 	}
 
 	var dhcp cnc.KubeObjectProvider
-	if !cfg.HedgehogDHCPD {
+	if cfg.DHCPServer == "isc" {
 		dhcp = cnc.KubeHelmChart("fabric-dhcp-server", "default", helm.HelmChartSpec{
 			TargetNamespace: "default",
 			Chart:           "oci://" + targetInCluster.Fallback(cfg.FabricDHCPServerChartRef).RepoName(),
@@ -201,7 +205,7 @@ func (cfg *Fabric) Build(basedir string, preset cnc.Preset, fabricMode config.Fa
 		}, cnc.FromTemplate(fabricDHCPServerTemplate,
 			"ref", target.Fallback(cfg.FabricDHCPServerRef),
 		))
-	} else {
+	} else if cfg.DHCPServer == "hedgehog" {
 		dhcp = cnc.KubeHelmChart("fabric-dhcpd", "default", helm.HelmChartSpec{
 			TargetNamespace: "default",
 			Chart:           "oci://" + targetInCluster.Fallback(cfg.FabricDHCPDChartRef).RepoName(),

@@ -60,15 +60,15 @@ jobs:
 
     strategy:
       matrix:
-        hh-dhcpd:
-          - false
-          - true
         preset:
           - lab
           - vlab
+        dhcpd:
+          - isc
+          - hedgehog
         exclude:
-          - preset: lab
-            hh-dhcpd: true
+          - preset: vlab
+            dhcpd: hedgehog
 
     steps:
       - name: Checkout repository
@@ -100,7 +100,7 @@ jobs:
 
       - name: hhfab init and build
         run: |
-          bin/hhfab init -p=${{ matrix.preset }} --hedgehog-dhcpd=${{ matrix.hh-dhcpd }} --dev -v
+          bin/hhfab init -p=${{ matrix.preset }} --dhcpd=${{ matrix.dhcpd }} --dev -v
           bin/hhfab build -v
           ls -lah .hhfab
 
@@ -119,9 +119,9 @@ jobs:
 
     strategy:
       matrix:
-        hh-dhcpd:
-          - false
-          - true
+        dhcpd:
+          - isc
+          - hedgehog
 
     steps:
       - name: Checkout repository
@@ -164,7 +164,7 @@ jobs:
           export XDG_CONFIG_HOME=$(pwd)/.config
           export HHFAB_BASE_REPO=m.l.hhdev.io:31000/githedgehog
 
-          bin/hhfab init -p=vlab --hedgehog-dhcpd=${{ matrix.hh-dhcpd }} --dev -v
+          bin/hhfab init -p=vlab --dhcpd=${{ matrix.dhcpd }} --dev -v
           bin/hhfab build -v
           ls -lah .hhfab
 
