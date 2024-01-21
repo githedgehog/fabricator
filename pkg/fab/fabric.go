@@ -166,6 +166,18 @@ func (cfg *Fabric) Build(basedir string, preset cnc.Preset, fabricMode config.Fa
 			Target: target,
 		})
 
+	run(BundleControlInstall, STAGE_INSTALL_3_FABRIC, "fabric-dhcpd-image",
+		&cnc.SyncOCI{
+			Ref:    cfg.FabricDHCPDRef,
+			Target: target,
+		})
+
+	run(BundleControlInstall, STAGE_INSTALL_3_FABRIC, "fabric-dhcpd-chart",
+		&cnc.SyncOCI{
+			Ref:    cfg.FabricDHCPDChartRef,
+			Target: target,
+		})
+
 	run(BundleControlInstall, STAGE_INSTALL_3_FABRIC, "fabric-control-agent",
 		&cnc.FilesORAS{
 			Ref: cfg.ControlAgentRef,
