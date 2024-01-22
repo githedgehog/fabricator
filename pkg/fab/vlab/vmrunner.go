@@ -28,14 +28,16 @@ const (
 	IFACES_PER_PCI_BRIDGE = 32
 )
 
-func (vm *VM) Run(ctx context.Context, eg *errgroup.Group, svcCfg *ServiceConfig) {
+func (vm *VM) Run(ctx context.Context, eg *errgroup.Group, svc *Service) {
+	svcCfg := svc.cfg
+
 	if vm.Type == VMTypeControl || vm.Type == VMTypeSwitchVS {
 		eg.Go(vm.RunTPM(ctx, svcCfg))
 	}
 
 	eg.Go(vm.RunVM(ctx, svcCfg))
 
-	eg.Go(vm.RunInstall(ctx, svcCfg))
+	eg.Go(vm.RunInstall(ctx, svc))
 }
 
 func (svcCfg *ServiceConfig) tpmSudo() string {
@@ -147,7 +149,7 @@ func (vm *VM) RunVM(ctx context.Context, svcCfg *ServiceConfig) func() error {
 	}
 }
 
-func (vm *VM) RunInstall(ctx context.Context, svcCfg *ServiceConfig) func() error {
+func (vm *VM) RunInstall(ctx context.Context, svc *Service) func() error {
 	run := func(ctx context.Context) error {
 		if vm.Type != VMTypeControl && vm.Type != VMTypeServer {
 			return nil
@@ -158,6 +160,7 @@ func (vm *VM) RunInstall(ctx context.Context, svcCfg *ServiceConfig) func() erro
 			return nil
 		}
 
+		svcCfg := svc.cfg
 		if svcCfg.DryRun {
 			return nil
 		}
@@ -256,28 +259,48 @@ func (vm *VM) RunInstall(ctx context.Context, svcCfg *ServiceConfig) func() erro
 			os.Exit(0)
 		}
 
-		if svcCfg.ReadyComplete != "" {
-			err = waitForSwitchesReady(svcCfg)
-			if err != nil {
+		if len(svcCfg.ReadyComplete) > 0 {
+			slog.Info("Waiting for all switches to get read as requested and run commands after that")
+			if err := waitForSwitchesReady(svcCfg); err != nil {
 				slog.Error("error waiting switches are ready", "error", err)
 				os.Exit(1)
 			}
+		}
 
-			if svcCfg.ReadyComplete != "noop" {
+		for _, cmd := range svcCfg.ReadyComplete {
+			if cmd == "setup-vpcs" {
+				slog.Info("Running setup-vpcs after switches are ready as requested")
+
+				if err := svc.SetupVPCs(ctx, SetupVPCsConfig{
+					Type: VPCSetupTypeVPCPerServer,
+				}); err != nil {
+					slog.Error("error running setup-vpcs after switches are ready", "error", err)
+				}
+			} else if strings.HasPrefix(cmd, "setup-peerings:") {
+				slog.Info("Running setup-peerings after switches are ready as requested")
+
+				// TODO
+				slog.Warn("setup-peerings command is not implemented yet")
+			} else if strings.HasPrefix(cmd, "test-connectivity:") {
+				slog.Info("Running test-connectivity after switches are ready as requested")
+
+				// TODO
+				slog.Warn("test-connectivity command is not implemented yet")
+			} else if cmd != "noop" {
 				slog.Info("Running script after switches are ready as requested")
 
-				err = execCmd(ctx, svcCfg, "", false, svcCfg.ReadyComplete, []string{
+				err = execCmd(ctx, svcCfg, "", false, cmd, []string{
 					"KUBECONFIG=" + filepath.Join(svcCfg.Basedir, "kubeconfig.yaml"),
 				})
 				if err != nil {
 					slog.Error("error running script after switches are ready", "error", err)
 					os.Exit(1)
 				}
-
-				slog.Info("Exiting after script succeded (after switches are ready) as requested")
-			} else {
-				slog.Info("Exiting after switches are ready as requested")
 			}
+		}
+
+		if len(svcCfg.ReadyComplete) > 0 {
+			slog.Info("Exiting after switches are ready as requested")
 
 			// TODO do graceful shutdown
 			os.Exit(0)
