@@ -168,7 +168,7 @@ jobs:
           bin/hhfab build -v
           ls -lah .hhfab
 
-          bin/hhfab vlab up -v --ready-complete=setup-vpcs
+          bin/hhfab vlab up -v --ready=setup-vpcs --ready=exit
       - name: Setup tmate session for debug
         if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
         uses: mxschmitt/action-tmate@v3

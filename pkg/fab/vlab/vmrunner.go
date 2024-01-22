@@ -259,15 +259,15 @@ func (vm *VM) RunInstall(ctx context.Context, svc *Service) func() error {
 			os.Exit(0)
 		}
 
-		if len(svcCfg.ReadyComplete) > 0 {
-			slog.Info("Waiting for all switches to get read as requested and run commands after that")
+		if len(svcCfg.OnReady) > 0 {
+			slog.Info("Waiting for all switches to get ready as requested and run commands after that")
 			if err := waitForSwitchesReady(svcCfg); err != nil {
 				slog.Error("error waiting switches are ready", "error", err)
 				os.Exit(1)
 			}
 		}
 
-		for _, cmd := range svcCfg.ReadyComplete {
+		for _, cmd := range svcCfg.OnReady {
 			if cmd == "setup-vpcs" {
 				slog.Info("Running setup-vpcs after switches are ready as requested")
 
@@ -280,12 +280,17 @@ func (vm *VM) RunInstall(ctx context.Context, svc *Service) func() error {
 				slog.Info("Running setup-peerings after switches are ready as requested")
 
 				// TODO
-				slog.Warn("setup-peerings command is not implemented yet")
+				slog.Warn("setup-peerings command is not implemented yet, skipping")
 			} else if strings.HasPrefix(cmd, "test-connectivity:") {
 				slog.Info("Running test-connectivity after switches are ready as requested")
 
 				// TODO
-				slog.Warn("test-connectivity command is not implemented yet")
+				slog.Warn("test-connectivity command is not implemented yet, skipping")
+			} else if cmd == "exit" {
+				slog.Info("Exiting after switches are ready as requested")
+
+				// TODO do graceful shutdown
+				os.Exit(0)
 			} else if cmd != "noop" {
 				slog.Info("Running script after switches are ready as requested")
 
@@ -297,13 +302,6 @@ func (vm *VM) RunInstall(ctx context.Context, svc *Service) func() error {
 					os.Exit(1)
 				}
 			}
-		}
-
-		if len(svcCfg.ReadyComplete) > 0 {
-			slog.Info("Exiting after switches are ready as requested")
-
-			// TODO do graceful shutdown
-			os.Exit(0)
 		}
 
 		return nil

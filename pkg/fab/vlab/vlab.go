@@ -49,7 +49,7 @@ type ServiceConfig struct {
 	CharNBDDev        string
 	InstallComplete   bool
 	RunComplete       string
-	ReadyComplete     []string
+	OnReady           []string
 	Basedir           string
 	Wiring            *wiring.Data
 	ControlIgnition   string
@@ -101,11 +101,11 @@ func Load(cfg *ServiceConfig) (*Service, error) {
 	return svc, nil
 }
 
-func (svc *Service) StartServer(killStaleVMs bool, charNBDDev string, installComplete bool, runComplete string, readyComplete []string) error {
+func (svc *Service) StartServer(killStaleVMs bool, charNBDDev string, installComplete bool, runComplete string, onReady []string) error {
 	svc.cfg.CharNBDDev = charNBDDev
 	svc.cfg.InstallComplete = installComplete
 	svc.cfg.RunComplete = runComplete
-	svc.cfg.ReadyComplete = readyComplete
+	svc.cfg.OnReady = onReady
 
 	for _, cmd := range RequiredCommands {
 		_, err := exec.LookPath(cmd)

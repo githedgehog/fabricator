@@ -362,8 +362,8 @@ func main() {
 								Usage: "run installer, run provided script and than complete vlab (for testing)",
 							},
 							&cli.StringSliceFlag{
-								Name:  "ready-complete",
-								Usage: "wait for switches ready, run provided commands/scripts and than complete vlab (for testing)",
+								Name:  "ready",
+								Usage: "wait for switches ready, run provided commands/scripts and optionally complete vlab (for testing)",
 							},
 						},
 						Before: func(ctx *cli.Context) error {
@@ -385,7 +385,7 @@ func main() {
 								cCtx.String("char-nbd-dev"),
 								cCtx.Bool("install-complete"),
 								cCtx.String("run-complete"),
-								cCtx.StringSlice("ready-complete"),
+								cCtx.StringSlice("ready"),
 							), "error starting vlab")
 						},
 					},
