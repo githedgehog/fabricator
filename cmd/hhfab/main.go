@@ -320,7 +320,7 @@ func main() {
 			},
 			{
 				Name:  "vlab",
-				Usage: "fully virtual lab (VLAB) management",
+				Usage: "fully virtual or hybrid lab (VLAB) management",
 				Flags: []cli.Flag{
 					basedirFlag,
 					verboseFlag,
