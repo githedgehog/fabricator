@@ -272,6 +272,7 @@ func (cfg *Fabric) Build(basedir string, preset cnc.Preset, fabricMode config.Fa
 							"172.31.0.0/16", // VLAB subnet // TODO make configurable
 						},
 						Users:                 users,
+						DHCPMode:              config.DHCPMode(cfg.DHCPServer),
 						DHCPDConfigMap:        "fabric-dhcp-server-config",
 						DHCPDConfigKey:        "dhcpd.conf",
 						FabricMode:            fabricMode,
