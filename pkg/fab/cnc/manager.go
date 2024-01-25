@@ -197,7 +197,7 @@ func (mngr *Manager) Init(basedir string, fromConfig string, preset Preset, fabr
 		err = errors.Wrapf(err, "error validating wiring")
 
 		if hydrate {
-			slog.Warn("Wiring is not hydrated, hydrating", "reason", err)
+			slog.Warn("Wiring is not hydrated, hydrating", "reason", err.Error())
 
 			if err := fabwiring.Hydrate(mngr.wiring, mngr.hydrateCfg); err != nil {
 				return errors.Wrapf(err, "error hydrating wiring")

@@ -244,6 +244,12 @@ func NewVMManager(cfg *Config, data *wiring.Data, basedir string, size string) (
 				switch1 := link.Switch
 				links = append(links, [2]wiringapi.IPort{&server, &switch1})
 			}
+		} else if conn.Spec.ESLAG != nil {
+			for _, link := range conn.Spec.ESLAG.Links {
+				server := link.Server
+				switch1 := link.Switch
+				links = append(links, [2]wiringapi.IPort{&server, &switch1})
+			}
 		} else if conn.Spec.MCLAGDomain != nil {
 			for _, link := range conn.Spec.MCLAGDomain.PeerLinks {
 				switch1 := link.Switch1
@@ -255,8 +261,6 @@ func NewVMManager(cfg *Config, data *wiring.Data, basedir string, size string) (
 				switch2 := link.Switch2
 				links = append(links, [2]wiringapi.IPort{&switch1, &switch2})
 			}
-		} else if conn.Spec.NAT != nil {
-			links = append(links, [2]wiringapi.IPort{&conn.Spec.NAT.Link.Switch, nil})
 		} else if conn.Spec.Fabric != nil {
 			for _, link := range conn.Spec.Fabric.Links {
 				spine := link.Spine

@@ -100,6 +100,7 @@ func main() {
 	var fabricMode string
 	var wgChainControlLink bool
 	var wgControlLinksCount, wgSpinesCount, wgFabricLinksCount, wgMCLAGLeafsCount, wgOrphanLeafsCount, wgMCLAGSessionLinks, wgMCLAGPeerLinks, wgVPCLoopbacks uint
+	var wgESLAGLeafGroups string
 
 	fabricModes := []string{}
 	for _, m := range config.FabricModes {
@@ -143,6 +144,12 @@ func main() {
 			Name:        "mclag-leafs-count",
 			Usage:       "number of mclag leafs (should be even)",
 			Destination: &wgMCLAGLeafsCount,
+		},
+		&cli.StringFlag{
+			Category:    FLAG_CATEGORY_WIRING_GEN,
+			Name:        "eslag-leaf-groups",
+			Usage:       "eslag leaf groups (comma separated list of number of ESLAG switches in each group, should be 2-4 per group, e.g. 2,4,2 for 3 groups with 2, 4 and 2 switches)",
+			Destination: &wgESLAGLeafGroups,
 		},
 		&cli.UintFlag{
 			Category:    FLAG_CATEGORY_WIRING_GEN,
@@ -234,6 +241,7 @@ func main() {
 						SpinesCount:       uint8(wgSpinesCount),
 						FabricLinksCount:  uint8(wgFabricLinksCount),
 						MCLAGLeafsCount:   uint8(wgMCLAGLeafsCount),
+						ESLAGLeafGroups:   wgESLAGLeafGroups,
 						OrphanLeafsCount:  uint8(wgOrphanLeafsCount),
 						MCLAGSessionLinks: uint8(wgMCLAGSessionLinks),
 						MCLAGPeerLinks:    uint8(wgMCLAGPeerLinks),
@@ -711,6 +719,7 @@ func main() {
 								SpinesCount:       uint8(wgSpinesCount),
 								FabricLinksCount:  uint8(wgFabricLinksCount),
 								MCLAGLeafsCount:   uint8(wgMCLAGLeafsCount),
+								ESLAGLeafGroups:   wgESLAGLeafGroups,
 								OrphanLeafsCount:  uint8(wgOrphanLeafsCount),
 								MCLAGSessionLinks: uint8(wgMCLAGSessionLinks),
 								MCLAGPeerLinks:    uint8(wgMCLAGPeerLinks),
