@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"fmt"
 	"log/slog"
+	"slices"
 
 	helm "github.com/k3s-io/helm-controller/pkg/apis/helm.cattle.io/v1"
 	"github.com/pkg/errors"
@@ -73,7 +74,7 @@ func (cfg *Fabric) Flags() []cli.Flag {
 			Name:        "dhcpd",
 			Usage:       "use 'hedgehog' DHCPD to enables multi ipv4 namespace DHCP with overlapping subnets (one of 'hedgehog', 'isc')",
 			Destination: &cfg.DHCPServer,
-			Value:       "isc",
+			Value:       string(config.DHCPModeHedgehog),
 		},
 	}
 }
@@ -91,8 +92,8 @@ func (cfg *Fabric) Hydrate(preset cnc.Preset, fabricMode config.FabricMode) erro
 	cfg.FabricDHCPDRef = cfg.FabricDHCPDRef.Fallback(REF_FABRIC_DHCPD)
 	cfg.FabricDHCPDChartRef = cfg.FabricDHCPDChartRef.Fallback(REF_FABRIC_DHCPD_CHART)
 
-	if cfg.DHCPServer != "isc" && cfg.DHCPServer != "hedgehog" {
-		return errors.Errorf("invalid dhcp server impl %q", cfg.DHCPServer)
+	if !slices.Contains(config.DHCPModes, config.DHCPMode(cfg.DHCPServer)) {
+		return errors.Errorf("invalid dhcp server mode %q", cfg.DHCPServer)
 	}
 
 	return nil
