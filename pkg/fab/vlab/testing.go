@@ -114,9 +114,10 @@ func waitForSwitchesReady(svcCfg *ServiceConfig) error {
 }
 
 type netConfig struct {
-	Name    string
-	SSHPort uint
-	Net     string
+	Name     string
+	SSHPort  uint
+	Net      string
+	ConnName string
 }
 
 type SetupVPCsConfig struct {
@@ -193,7 +194,7 @@ func (svc *Service) SetupVPCs(ctx context.Context, cfg SetupVPCsConfig) error {
 				continue
 			}
 
-			if some.Spec.Unbundled == nil && some.Spec.Bundled == nil && some.Spec.MCLAG == nil {
+			if some.Spec.Unbundled == nil && some.Spec.Bundled == nil && some.Spec.MCLAG == nil && some.Spec.ESLAG == nil {
 				continue
 			}
 
@@ -283,12 +284,18 @@ func (svc *Service) SetupVPCs(ctx context.Context, cfg SetupVPCsConfig) error {
 					net += " " + link.Server.LocalPortName()
 				}
 			}
+			if conn.Spec.ESLAG != nil {
+				for _, link := range conn.Spec.ESLAG.Links {
+					net += " " + link.Server.LocalPortName()
+				}
+			}
 		}
 
 		netconfs = append(netconfs, netConfig{
-			Name:    server.Name,
-			SSHPort: uint(vm.sshPort()),
-			Net:     net,
+			Name:     server.Name,
+			SSHPort:  uint(vm.sshPort()),
+			Net:      net,
+			ConnName: conn.Name,
 		})
 
 		idx += 1
@@ -302,7 +309,7 @@ func (svc *Service) SetupVPCs(ctx context.Context, cfg SetupVPCsConfig) error {
 	for _, netconf := range netconfs {
 		start := time.Now()
 
-		slog.Info("Configuring networking for server...", "server", netconf.Name, "netconf", netconf.Net)
+		slog.Info("Configuring networking for server...", "server", netconf.Name, "netconf", netconf.Net, "conn", netconf.ConnName)
 
 		client, err := goph.NewConn(&goph.Config{
 			User:     "core",
@@ -431,7 +438,7 @@ serverLoop:
 		}
 
 		for _, some := range svc.cfg.Wiring.Connection.All() {
-			if some.Spec.Unbundled == nil && some.Spec.Bundled == nil && some.Spec.MCLAG == nil {
+			if some.Spec.Unbundled == nil && some.Spec.Bundled == nil && some.Spec.MCLAG == nil && some.Spec.ESLAG == nil {
 				continue
 			}
 
@@ -462,6 +469,10 @@ serverLoop:
 				srv.ConnectionType = wiringapi.CONNECTION_TYPE_BUNDLED
 			} else if some.Spec.MCLAG != nil {
 				srv.ConnectionType = wiringapi.CONNECTION_TYPE_MCLAG
+			} else if some.Spec.ESLAG != nil {
+				srv.ConnectionType = wiringapi.CONNECTION_TYPE_ESLAG
+			} else {
+				return errors.Errorf("unexpected connection type")
 			}
 		}
 
