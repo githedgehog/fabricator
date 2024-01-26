@@ -359,7 +359,7 @@ func (b *Builder) Build() (*wiring.Data, error) {
 	}
 
 	for eslagID := uint8(0); eslagID < uint8(len(eslagLeafGroups)); eslagID++ {
-		sg := fmt.Sprintf("eslag-%d", eslagID)
+		sg := fmt.Sprintf("eslag-%d", eslagID+1)
 		if _, err := b.createSwitchGroup(sg); err != nil {
 			return nil, err
 		}
@@ -372,7 +372,7 @@ func (b *Builder) Build() (*wiring.Data, error) {
 
 			if _, err := b.createSwitch(leafName, wiringapi.SwitchSpec{
 				Role:        wiringapi.SwitchRoleServerLeaf,
-				Description: fmt.Sprintf("VS-%02d ESLAG %d", switchID+eslagLeafID, eslagID),
+				Description: fmt.Sprintf("VS-%02d ESLAG %d", switchID+eslagLeafID, eslagID+1),
 				Groups:      []string{sg},
 				Redundancy: wiringapi.SwitchRedundancy{
 					Group: sg,
