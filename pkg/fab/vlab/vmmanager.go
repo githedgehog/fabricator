@@ -19,6 +19,8 @@ const (
 	VM_SIZE_COMPACT = "compact" // minimal working setup, applied on top of default
 	VM_SIZE_FULL    = "full"    // full setup as specified in requirements and more real switch resources, applied on top of default
 	VM_SIZE_HUGE    = "huge"    // full setup with more resources for servers, applied on top of default
+
+	VIRTUAL_EDGE_ANNOTATION = "external.hhfab.fabric.githedgehog.com/dest" // HHFAB annotation to specify destination for external connection
 )
 
 var VM_SIZES = []string{VM_SIZE_DEFAULT, VM_SIZE_COMPACT, VM_SIZE_FULL, VM_SIZE_HUGE}
@@ -301,7 +303,16 @@ func NewVMManager(cfg *Config, data *wiring.Data, basedir string, size string, r
 				links = append(links, [2]wiringapi.IPort{&switch1, &switch2})
 			}
 		} else if conn.Spec.External != nil {
-			links = append(links, [2]wiringapi.IPort{&conn.Spec.External.Link.Switch, nil})
+			var destSide wiringapi.BasePortName
+
+			annotation := conn.GetAnnotations()
+			if annotation != nil {
+				destSide.Port = annotation[VIRTUAL_EDGE_ANNOTATION]
+				if destSide.Port == "" {
+					return nil, errors.Errorf("missing annotation for external connection %s", conn.Name)
+				}
+			}
+			links = append(links, [2]wiringapi.IPort{&conn.Spec.External.Link.Switch, &destSide})
 		} else {
 			return nil, errors.Errorf("unsupported connection type %s", conn.Name)
 		}
