@@ -50,6 +50,7 @@ type ServiceConfig struct {
 	InstallComplete   bool
 	RunComplete       string
 	OnReady           []string
+	RestrictServers   bool
 	Basedir           string
 	Wiring            *wiring.Data
 	ControlIgnition   string
@@ -88,7 +89,7 @@ func Load(cfg *ServiceConfig) (*Service, error) {
 		return nil, errors.Wrapf(err, "error reading VLAB config from wiring")
 	}
 
-	mngr, err := NewVMManager(vlabConfig, cfg.Wiring, cfg.Basedir, cfg.Size)
+	mngr, err := NewVMManager(vlabConfig, cfg.Wiring, cfg.Basedir, cfg.Size, cfg.RestrictServers)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error creating VM manager")
 	}

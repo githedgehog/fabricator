@@ -257,7 +257,7 @@ const (
 	KEY_USAGE_SERVER = x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment
 )
 
-func LoadVLAB(basedir string, mngr *cnc.Manager, dryRun bool, size string) (*vlab.Service, error) {
+func LoadVLAB(basedir string, mngr *cnc.Manager, dryRun bool, size string, restrictServers bool) (*vlab.Service, error) {
 	if mngr.Preset() != PRESET_VLAB {
 		return nil, errors.Errorf("only vlab preset supported, found %s", mngr.Preset())
 	}
@@ -278,6 +278,7 @@ func LoadVLAB(basedir string, mngr *cnc.Manager, dryRun bool, size string) (*vla
 		ServerIgnitionDir: filepath.Join(basedir, BundleServerOS.Name),
 		ControlInstaller:  filepath.Join(basedir, BundleControlInstall.Name),
 		ServerInstaller:   filepath.Join(basedir, BundleServerInstall.Name),
+		RestrictServers:   restrictServers,
 		FilesDir:          filepath.Join(basedir, BundleVlabFiles.Name),
 		SshKey:            filepath.Join(basedir, DEFAULT_VLAB_SSH_KEY),
 	})

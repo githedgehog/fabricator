@@ -18,9 +18,10 @@ const (
 	VM_SIZE_DEFAULT = "default" // meaningful VM sizes for dev & testing
 	VM_SIZE_COMPACT = "compact" // minimal working setup, applied on top of default
 	VM_SIZE_FULL    = "full"    // full setup as specified in requirements and more real switch resources, applied on top of default
+	VM_SIZE_HUGE    = "huge"    // full setup with more resources for servers, applied on top of default
 )
 
-var VM_SIZES = []string{VM_SIZE_DEFAULT, VM_SIZE_COMPACT, VM_SIZE_FULL}
+var VM_SIZES = []string{VM_SIZE_DEFAULT, VM_SIZE_COMPACT, VM_SIZE_FULL, VM_SIZE_HUGE}
 
 var DefaultControlVM = VMConfig{
 	CPU:  6,
@@ -40,6 +41,12 @@ var FullControlVM = VMConfig{
 	Disk: 250,
 }
 
+var HugeControlVM = VMConfig{
+	CPU:  8,
+	RAM:  16384,
+	Disk: 250,
+}
+
 var DefaultServerVM = VMConfig{
 	CPU:  2,
 	RAM:  768,
@@ -51,7 +58,12 @@ var CompactServerVM = VMConfig{
 }
 
 var FullServerVM = VMConfig{
-	RAM: 1024,
+	RAM: 2048,
+}
+
+var HugeServerVM = VMConfig{
+	CPU: 4,
+	RAM: 8192,
 }
 
 var DefaultSwitchVM = VMConfig{
@@ -67,6 +79,10 @@ var CompactSwitchVM = VMConfig{
 }
 
 var FullSwitchVM = VMConfig{
+	RAM: 8192,
+}
+
+var HugeSwitchVM = VMConfig{
 	RAM: 8192,
 }
 
@@ -102,7 +118,7 @@ type VMInterface struct {
 	Passthrough string
 }
 
-func NewVMManager(cfg *Config, data *wiring.Data, basedir string, size string) (*VMManager, error) {
+func NewVMManager(cfg *Config, data *wiring.Data, basedir string, size string, restrictServers bool) (*VMManager, error) {
 	cfg.VMs.Control = cfg.VMs.Control.DefaultsFrom(DefaultControlVM)
 	cfg.VMs.Server = cfg.VMs.Server.DefaultsFrom(DefaultServerVM)
 	cfg.VMs.Switch = cfg.VMs.Switch.DefaultsFrom(DefaultSwitchVM)
@@ -120,6 +136,11 @@ func NewVMManager(cfg *Config, data *wiring.Data, basedir string, size string) (
 		cfg.VMs.Control = cfg.VMs.Control.OverrideBy(FullControlVM)
 		cfg.VMs.Server = cfg.VMs.Server.OverrideBy(FullServerVM)
 		cfg.VMs.Switch = cfg.VMs.Switch.OverrideBy(FullSwitchVM)
+	}
+	if size == VM_SIZE_HUGE {
+		cfg.VMs.Control = cfg.VMs.Control.OverrideBy(HugeControlVM)
+		cfg.VMs.Server = cfg.VMs.Server.OverrideBy(HugeServerVM)
+		cfg.VMs.Switch = cfg.VMs.Switch.OverrideBy(HugeSwitchVM)
 	}
 
 	mngr := &VMManager{
@@ -172,6 +193,13 @@ func NewVMManager(cfg *Config, data *wiring.Data, basedir string, size string) (
 			return nil, errors.Errorf("dublicate server/switch name: %s", server.Name)
 		}
 
+		netdev := fmt.Sprintf("user,hostfwd=tcp:0.0.0.0:%d-:22,hostname=%s,domainname=local,dnssearch=local,net=172.31.%d.0/24,dhcpstart=172.31.%d.10",
+			sshPortFor(vmID), server.Name, vmID, vmID)
+
+		if restrictServers {
+			netdev += ",restrict=yes"
+		}
+
 		mngr.vms[server.Name] = &VM{
 			ID:     vmID,
 			Name:   server.Name,
@@ -180,8 +208,7 @@ func NewVMManager(cfg *Config, data *wiring.Data, basedir string, size string) (
 			Interfaces: map[int]VMInterface{
 				0: {
 					Connection: "host",
-					Netdev: fmt.Sprintf("user,hostfwd=tcp:0.0.0.0:%d-:22,hostname=%s,domainname=local,dnssearch=local,net=172.31.%d.0/24,dhcpstart=172.31.%d.10,restrict=yes",
-						sshPortFor(vmID), server.Name, vmID, vmID),
+					Netdev:     netdev,
 				},
 			},
 		}

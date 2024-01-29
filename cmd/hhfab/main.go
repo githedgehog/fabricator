@@ -373,6 +373,11 @@ func main() {
 								Name:  "ready",
 								Usage: "wait for switches ready, run provided commands/scripts and optionally complete vlab (for testing)",
 							},
+							&cli.BoolFlag{
+								Name:  "restrict-servers",
+								Usage: "create servers (except control nodes) in isolated networks with restricted external/internet access (disable for external/internet access)",
+								Value: true,
+							},
 						},
 						Before: func(ctx *cli.Context) error {
 							return setupLogger(verbose, brief)
@@ -383,7 +388,7 @@ func main() {
 								return errors.Wrap(err, "error loading")
 							}
 
-							svc, err := fab.LoadVLAB(basedir, mngr, dryRun, cCtx.String("vm-size"))
+							svc, err := fab.LoadVLAB(basedir, mngr, dryRun, cCtx.String("vm-size"), cCtx.Bool("restrict-servers"))
 							if err != nil {
 								return errors.Wrap(err, "error loading vlab")
 							}
@@ -415,7 +420,7 @@ func main() {
 								return errors.Wrap(err, "error loading")
 							}
 
-							svc, err := fab.LoadVLAB(basedir, mngr, dryRun, "")
+							svc, err := fab.LoadVLAB(basedir, mngr, dryRun, "", true)
 							if err != nil {
 								return errors.Wrap(err, "error loading vlab")
 							}
@@ -441,7 +446,7 @@ func main() {
 								return errors.Wrap(err, "error loading")
 							}
 
-							svc, err := fab.LoadVLAB(basedir, mngr, dryRun, "")
+							svc, err := fab.LoadVLAB(basedir, mngr, dryRun, "", true)
 							if err != nil {
 								return errors.Wrap(err, "error loading vlab")
 							}
@@ -467,7 +472,7 @@ func main() {
 								return errors.Wrap(err, "error loading")
 							}
 
-							svc, err := fab.LoadVLAB(basedir, mngr, dryRun, "")
+							svc, err := fab.LoadVLAB(basedir, mngr, dryRun, "", true)
 							if err != nil {
 								return errors.Wrap(err, "error loading vlab")
 							}
@@ -493,7 +498,7 @@ func main() {
 								return errors.Wrap(err, "error loading")
 							}
 
-							svc, err := fab.LoadVLAB(basedir, mngr, dryRun, "")
+							svc, err := fab.LoadVLAB(basedir, mngr, dryRun, "", true)
 							if err != nil {
 								return errors.Wrap(err, "error loading vlab")
 							}
@@ -524,7 +529,7 @@ func main() {
 								return errors.Wrap(err, "error loading")
 							}
 
-							svc, err := fab.LoadVLAB(basedir, mngr, dryRun, "")
+							svc, err := fab.LoadVLAB(basedir, mngr, dryRun, "", true)
 							if err != nil {
 								return errors.Wrap(err, "error loading vlab")
 							}
@@ -595,7 +600,7 @@ func main() {
 								return errors.Wrap(err, "error loading")
 							}
 
-							svc, err := fab.LoadVLAB(basedir, mngr, dryRun, "")
+							svc, err := fab.LoadVLAB(basedir, mngr, dryRun, "", true)
 							if err != nil {
 								return errors.Wrap(err, "error loading vlab")
 							}
@@ -666,7 +671,7 @@ func main() {
 								return errors.Wrap(err, "error loading")
 							}
 
-							svc, err := fab.LoadVLAB(basedir, mngr, dryRun, "")
+							svc, err := fab.LoadVLAB(basedir, mngr, dryRun, "", true)
 							if err != nil {
 								return errors.Wrap(err, "error loading vlab")
 							}
