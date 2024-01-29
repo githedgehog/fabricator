@@ -530,6 +530,15 @@ serverLoop:
 
 		srv.IP = ip.String()
 
+		out, err = svc.ssh(ctx, srv, "toolbox hostname", 10)
+		if err != nil {
+			return errors.Wrapf(err, "error getting hostname for server %s", srv.Name)
+		}
+
+		if !strings.Contains(out, srv.Name) {
+			return errors.Errorf("server %s hostname doesn't match expected", srv.Name)
+		}
+
 		slog.Info("Found", "server", srv.Name, "conn", srv.ConnectionType, "switches", srv.ConnectedTo,
 			"vpc", srv.VPC.Name, "subnet", srv.Subnet+":"+srv.VPC.Spec.Subnets[srv.Subnet].Subnet, "ip", srv.IP)
 
