@@ -275,6 +275,7 @@ func (vm *VM) RunInstall(ctx context.Context, svc *Service) func() error {
 					Type: VPCSetupTypeVPCPerServer,
 				}); err != nil {
 					slog.Error("error running setup-vpcs after switches are ready", "error", err)
+					os.Exit(1)
 				}
 			} else if strings.HasPrefix(cmd, "setup-peerings:") {
 				slog.Info("Running setup-peerings after switches are ready as requested")
