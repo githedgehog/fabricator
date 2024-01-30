@@ -793,7 +793,7 @@ func main() {
 	}
 
 	if err := app.Run(os.Args); err != nil {
-		slog.Error("Failed", "err", err)
+		slog.Error("Failed", "err", err.Error())
 		os.Exit(1)
 	}
 }
