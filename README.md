@@ -1,5 +1,25 @@
 # fabricator
 
+## Updating 3rd-party artifacts
+
+### Flatcar Linux
+
+```bash
+wget "https://stable.release.flatcar-linux.net/amd64-usr/current/flatcar_production_qemu_image.img"
+wget "https://stable.release.flatcar-linux.net/amd64-usr/current/flatcar_production_qemu_uefi_efi_code.fd"
+wget "https://stable.release.flatcar-linux.net/amd64-usr/current/flatcar_production_qemu_uefi_efi_vars.fd"
+
+mv flatcar_production_qemu_image.img flatcar.img
+mv flatcar_production_qemu_uefi_efi_code.fd flatcar_efi_code.fd
+mv flatcar_production_qemu_uefi_efi_vars.fd flatcar_efi_vars.fd
+
+ls -lah
+
+oras push ghcr.io/githedgehog/flatcar:VERSION flatcar*
+```
+
+`VERSION` is the version of the image, e.g. `2605.12.0`, taken from "stable" at https://www.flatcar.org/releases
+
 ## Steps to setup on ubuntu 22.04
 
 I recommend using tmux or byobu. Byobu is already installed in Ubuntu and you can activate it for all sessions by

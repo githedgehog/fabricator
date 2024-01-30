@@ -57,8 +57,7 @@ func (cfg *VLAB) Build(basedir string, preset cnc.Preset, fabricMode config.Fabr
 
 	run(BundleVlabFiles, STAGE, "flatcar",
 		&cnc.FilesORAS{
-			Ref:    cfg.FlatcarRef,
-			Unpack: []string{"flatcar.img.bz2"},
+			Ref: cfg.FlatcarRef,
 			Files: []cnc.File{
 				{Name: "flatcar.img"},
 				{Name: "flatcar_efi_code.fd"},

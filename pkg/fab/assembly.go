@@ -171,7 +171,7 @@ var (
 
 	// VLAB
 	REF_VLAB_ONIE        = cnc.Ref{Name: "honie", Tag: "lldp"}
-	REF_VLAB_FLATCAR     = cnc.Ref{Name: "flatcar", Tag: "3510.2.1"}
+	REF_VLAB_FLATCAR     = cnc.Ref{Name: "flatcar", Tag: "3760.2.0"}
 	REF_VLAB_EEPROM_EDIT = cnc.Ref{Name: "onie-qcow2-eeprom-edit", Tag: "latest"}
 )
 
