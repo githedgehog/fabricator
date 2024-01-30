@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -303,16 +304,17 @@ func NewVMManager(cfg *Config, data *wiring.Data, basedir string, size string, r
 				links = append(links, [2]wiringapi.IPort{&switch1, &switch2})
 			}
 		} else if conn.Spec.External != nil {
-			var destSide wiringapi.BasePortName
-
-			annotation := conn.GetAnnotations()
-			if annotation != nil {
-				destSide.Port = annotation[VIRTUAL_EDGE_ANNOTATION]
-				if destSide.Port == "" {
-					return nil, errors.Errorf("missing annotation for external connection %s", conn.Name)
+			var destSide *wiringapi.BasePortName
+			annotations := conn.GetAnnotations()
+			if annotations != nil {
+				if destPort, ok := annotations[VIRTUAL_EDGE_ANNOTATION]; ok && strings.Contains(destPort, "/") {
+					destSide = &wiringapi.BasePortName{
+						Port: destPort,
+					}
 				}
 			}
-			links = append(links, [2]wiringapi.IPort{&conn.Spec.External.Link.Switch, &destSide})
+
+			links = append(links, [2]wiringapi.IPort{&conn.Spec.External.Link.Switch, destSide})
 		} else {
 			return nil, errors.Errorf("unsupported connection type %s", conn.Name)
 		}
@@ -356,7 +358,7 @@ func NewVMManager(cfg *Config, data *wiring.Data, basedir string, size string, r
 }
 
 func (mngr *VMManager) AddLink(local wiringapi.IPort, dest wiringapi.IPort, conn string) error {
-	if local == nil {
+	if local == nil || reflect.ValueOf(local).IsNil() {
 		return nil
 	}
 
@@ -380,7 +382,7 @@ func (mngr *VMManager) AddLink(local wiringapi.IPort, dest wiringapi.IPort, conn
 
 	var linkCfg *LinkConfig
 
-	if dest != nil {
+	if dest != nil || !reflect.ValueOf(local).IsNil() {
 		destPortID, err = portIdForName(dest.LocalPortName())
 		if err != nil {
 			return err
