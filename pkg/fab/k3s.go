@@ -118,7 +118,7 @@ func (cfg *K3s) Build(basedir string, preset cnc.Preset, fabricMode config.Fabri
 
 	install(BundleControlInstall, STAGE_INSTALL_1_K3SZOT, "k3s-airgap-install",
 		&cnc.ExecCommand{
-			Name: "k3s-install",
+			Name: "k3s-install.sh",
 			Args: []string{"--disable=servicelb,traefik"},
 			Env: []string{
 				"INSTALL_K3S_SKIP_DOWNLOAD=true",
