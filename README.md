@@ -20,6 +20,22 @@ oras push ghcr.io/githedgehog/flatcar:VERSION flatcar*
 
 `VERSION` is the version of the image, e.g. `2605.12.0`, taken from "stable" at https://www.flatcar.org/releases
 
+### K3s
+
+```bash
+wget "https://github.com/k3s-io/k3s/releases/download/v1.29.1%2Bk3s1/k3s"
+wget "https://github.com/k3s-io/k3s/releases/download/v1.29.1%2Bk3s1/k3s-airgap-images-amd64.tar.gz"
+wget "https://raw.githubusercontent.com/k3s-io/k3s/v1.29.1%2Bk3s1/install.sh"
+
+mv install.sh k3s-install.sh
+
+ls -lah
+
+oras push ghcr.io/githedgehog/k3s:VERSION k3s*
+```
+
+`VERSION` is the version of the K3s with `+` replaced with `-`. E.g. `1.29.1-k3s1`
+
 ## Steps to setup on ubuntu 22.04
 
 I recommend using tmux or byobu. Byobu is already installed in Ubuntu and you can activate it for all sessions by

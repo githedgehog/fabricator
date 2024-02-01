@@ -82,7 +82,7 @@ func (cfg *K3s) Build(basedir string, preset cnc.Preset, fabricMode config.Fabri
 			Ref: cfg.Ref,
 			Files: []cnc.File{
 				{
-					Name:          "k3s-install", // TODO rename to k3s-install.sh
+					Name:          "k3s-install.sh",
 					InstallTarget: "/opt/bin",
 					InstallMode:   0o755,
 				},
