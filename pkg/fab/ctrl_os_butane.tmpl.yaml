@@ -80,13 +80,13 @@ storage:
           TOOLBOX_USER=root
 
     # K9s plugin to reboot and reinstall switches
-    - path: /home/core/.config/k9s/plugin.yml
+    - path: /home/core/.config/k9s/plugins.yaml
       user:
         name: core
       mode: 0644
       contents:
         inline: |
-          plugin:
+          plugins:
             fabricswitchreboot:
               shortCut: r
               description: Reboot
