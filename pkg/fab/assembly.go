@@ -139,7 +139,7 @@ var (
 	}
 
 	// Fabric
-	REF_FABRIC_VERSION           = cnc.Ref{Tag: "v0.26.11"}
+	REF_FABRIC_VERSION           = cnc.Ref{Tag: "v0.27.0"}
 	REF_FABRIC_API_CHART         = cnc.Ref{Name: "fabric/charts/fabric-api"}
 	REF_FABRIC_CHART             = cnc.Ref{Name: "fabric/charts/fabric"}
 	REF_FABRIC_IMAGE             = cnc.Ref{Name: "fabric/fabric"}
