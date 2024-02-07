@@ -167,7 +167,12 @@ func (vm *VM) RunInstall(ctx context.Context, svc *Service) func() error {
 
 		slog.Info("Installing VM", "name", vm.Name, "type", vm.Type)
 
-		ctx, cancel := context.WithTimeoutCause(ctx, 10*time.Minute, errors.New("controller installation timed out")) // TODO
+		timeout := 10 * time.Minute // TODO
+		if len(svcCfg.OnReady) > 0 {
+			timeout = 60 * time.Minute // TODO
+		}
+
+		ctx, cancel := context.WithTimeoutCause(ctx, timeout, errors.New("controller installation timed out")) // TODO
 		defer cancel()
 
 		slog.Debug("Waiting for VM ssh", "name", vm.Name, "type", vm.Type)

@@ -109,8 +109,6 @@ func waitForSwitchesReady(svcCfg *ServiceConfig) error {
 
 		time.Sleep(5 * time.Second) // TODO make configurable
 	}
-
-	return nil
 }
 
 type netConfig struct {
