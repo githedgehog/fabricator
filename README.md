@@ -23,15 +23,15 @@ oras push ghcr.io/githedgehog/flatcar:VERSION flatcar*
 ### K3s
 
 ```bash
-wget "https://github.com/k3s-io/k3s/releases/download/v1.29.1%2Bk3s1/k3s"
-wget "https://github.com/k3s-io/k3s/releases/download/v1.29.1%2Bk3s1/k3s-airgap-images-amd64.tar.gz"
-wget "https://raw.githubusercontent.com/k3s-io/k3s/v1.29.1%2Bk3s1/install.sh"
+wget "https://github.com/k3s-io/k3s/releases/download/v1.29.1%2Bk3s2/k3s"
+wget "https://github.com/k3s-io/k3s/releases/download/v1.29.1%2Bk3s2/k3s-airgap-images-amd64.tar.gz"
+wget "https://raw.githubusercontent.com/k3s-io/k3s/v1.29.1%2Bk3s2/install.sh"
 
 mv install.sh k3s-install.sh
 
 ls -lah
 
-oras push ghcr.io/githedgehog/k3s:VERSION k3s*
+oras push ghcr.io/githedgehog/k3s:v1.29.1-k3s2 k3s*
 ```
 
 `VERSION` is the version of the K3s with `+` replaced with `-`. E.g. `1.29.1-k3s1`

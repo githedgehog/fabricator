@@ -49,7 +49,7 @@ var (
 	REF_TARGET_INCLUSTER = REF_TARGET
 
 	// K3s
-	REF_K3S = cnc.Ref{Name: "k3s", Tag: "v1.29.1-k3s1"}
+	REF_K3S = cnc.Ref{Name: "k3s", Tag: "v1.29.1-k3s2"}
 
 	// Zot
 	REF_ZOT              = cnc.Ref{Name: "zot", Tag: "v1.4.3"}
