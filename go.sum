@@ -572,6 +572,8 @@ github.com/yusufpapurcu/wmi v1.2.3 h1:E1ctvB7uKFMOJw3fdOW32DwGE9I7t++CRUEMKvFoFi
 github.com/yusufpapurcu/wmi v1.2.3/go.mod h1:SBZ9tNy3G9/m5Oi98Zks0QjeHVDvuK0qfxQmPyzfmi0=
 go.githedgehog.com/fabric v0.28.0 h1:JGD3lVXWoVwS6beZpVmx8HQ2YT5immK5BVXBc7DX1v4=
 go.githedgehog.com/fabric v0.28.0/go.mod h1:QppjYmqB3J1TphZqmOvLBUHOd2fCxRBuL0w1dOCEoAE=
+go.githedgehog.com/fabric v0.28.1 h1:0zdyYDr5yPo9n7LK8tP1Rm9PQk/LOUr83XmGZYNCxVQ=
+go.githedgehog.com/fabric v0.28.1/go.mod h1:QppjYmqB3J1TphZqmOvLBUHOd2fCxRBuL0w1dOCEoAE=
 go.mongodb.org/mongo-driver v1.7.3/go.mod h1:NqaYOwnXWr5Pm7AOpO5QFxKJ503nbMse/R79oO62zWg=
 go.mongodb.org/mongo-driver v1.7.5/go.mod h1:VXEWRZ6URJIkUq2SCAyapmhH0ZLRBP+FT4xhp5Zvxng=
 go.mongodb.org/mongo-driver v1.10.0/go.mod h1:wsihk0Kdgv8Kqu1Anit4sfK+22vSFbUrAVEYRhCXrA8=
