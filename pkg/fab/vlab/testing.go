@@ -73,6 +73,8 @@ func waitForSwitchesReady(svcCfg *ServiceConfig) error {
 	retries := 3
 
 	for {
+		time.Sleep(5 * time.Second) // TODO make configurable
+
 		agents := agentapi.AgentList{}
 		if err := kube.List(context.Background(), &agents, client.InNamespace("default")); err != nil {
 			errs += 1
@@ -114,8 +116,6 @@ func waitForSwitchesReady(svcCfg *ServiceConfig) error {
 			slog.Info("All switches are ready", "took", time.Since(start))
 			return nil
 		}
-
-		time.Sleep(5 * time.Second) // TODO make configurable
 	}
 }
 
