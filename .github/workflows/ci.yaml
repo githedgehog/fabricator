@@ -119,6 +119,9 @@ jobs:
 
     strategy:
       matrix:
+        mode:
+          - collapsed-core
+          - spine-leaf
         dhcpd:
           - isc
           - hedgehog
@@ -164,7 +167,7 @@ jobs:
           export XDG_CONFIG_HOME=$(pwd)/.config
           export HHFAB_BASE_REPO=m.l.hhdev.io:31000/githedgehog
 
-          bin/hhfab init -p=vlab --dhcpd=${{ matrix.dhcpd }} --dev -v
+          bin/hhfab init -p=vlab --fabric-mode=${{ matrix.mode }} --dhcpd=${{ matrix.dhcpd }} --dev -v
           bin/hhfab build -v
           ls -lah .hhfab
 
