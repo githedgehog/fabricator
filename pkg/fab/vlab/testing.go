@@ -69,10 +69,18 @@ func waitForSwitchesReady(svcCfg *ServiceConfig) error {
 		ready[switchName.Name] = false
 	}
 
-	// TODO add timeout
+	errs := 0
+	retries := 3
+
 	for {
 		agents := agentapi.AgentList{}
 		if err := kube.List(context.Background(), &agents, client.InNamespace("default")); err != nil {
+			errs += 1
+			if errs <= retries {
+				slog.Warn("Error listing agents", "retries", fmt.Sprintf("%d/%d", errs, retries), "err", err)
+				continue
+			}
+
 			return errors.Wrapf(err, "error listing agents")
 		}
 
