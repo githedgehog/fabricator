@@ -304,17 +304,18 @@ func NewVMManager(cfg *Config, data *wiring.Data, basedir string, size string, r
 				links = append(links, [2]wiringapi.IPort{&switch1, &switch2})
 			}
 		} else if conn.Spec.External != nil {
-			var destSide *wiringapi.BasePortName
 			annotations := conn.GetAnnotations()
 			if annotations != nil {
-				if destPort, ok := annotations[VIRTUAL_EDGE_ANNOTATION]; ok && strings.Contains(destPort, "/") {
-					destSide = &wiringapi.BasePortName{
-						Port: destPort,
-					}
+				destSide := wiringapi.BasePortName{
+					Port: annotations[VIRTUAL_EDGE_ANNOTATION],
 				}
+				if destSide.Port == "" || !strings.Contains(destSide.Port, "/") {
+					return nil, errors.Errorf("missing or invalid annotation for external connection %s", conn.Name)
+				}
+				links = append(links, [2]wiringapi.IPort{&conn.Spec.External.Link.Switch, &destSide})
+			} else {
+				links = append(links, [2]wiringapi.IPort{&conn.Spec.External.Link.Switch, nil})
 			}
-
-			links = append(links, [2]wiringapi.IPort{&conn.Spec.External.Link.Switch, destSide})
 		} else {
 			return nil, errors.Errorf("unsupported connection type %s", conn.Name)
 		}
