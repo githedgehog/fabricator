@@ -3,3 +3,4 @@ image:
   tag: {{ .ref.Tag }}
 serviceUDP:
   nodePort: {{ .nodePort }}
+hostNetwork: {{ .hostNetwork }}
