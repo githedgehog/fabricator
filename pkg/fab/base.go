@@ -5,13 +5,15 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/urfave/cli/v2"
-	"go.githedgehog.com/fabric/pkg/manager/config"
+	"go.githedgehog.com/fabric/api/meta"
 	"go.githedgehog.com/fabric/pkg/wiring"
 	"go.githedgehog.com/fabricator/pkg/fab/cnc"
 	"golang.org/x/exp/slices"
 )
 
 type Base struct {
+	cnc.NoValidationComponent
+
 	Source          cnc.Ref  `json:"source,omitempty"`
 	Target          cnc.Ref  `json:"target,omitempty"`
 	TargetInCluster cnc.Ref  `json:"targetInCluster,omitempty"`
@@ -57,7 +59,7 @@ func (cfg *Base) Flags() []cli.Flag {
 	}
 }
 
-func (cfg *Base) Hydrate(preset cnc.Preset, fabricMode config.FabricMode) error {
+func (cfg *Base) Hydrate(preset cnc.Preset, fabricMode meta.FabricMode) error {
 	cfg.Source = cfg.Source.Fallback(REF_SOURCE)
 	cfg.Target = cfg.Target.Fallback(REF_TARGET)
 	cfg.TargetInCluster = cfg.TargetInCluster.Fallback(REF_TARGET_INCLUSTER)
@@ -81,7 +83,7 @@ func (cfg *Base) Hydrate(preset cnc.Preset, fabricMode config.FabricMode) error 
 	return nil
 }
 
-func (cfg *Base) Build(basedir string, preset cnc.Preset, fabricMode config.FabricMode, get cnc.GetComponent, wiring *wiring.Data, run cnc.AddBuildOp, install cnc.AddRunOp) error {
+func (cfg *Base) Build(basedir string, preset cnc.Preset, fabricMode meta.FabricMode, get cnc.GetComponent, wiring *wiring.Data, run cnc.AddBuildOp, install cnc.AddRunOp) error {
 	if cfg.Dev {
 		slog.Warn("Attention! Development mode enabled - this is not secure! Default users and keys will be created.")
 	}

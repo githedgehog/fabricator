@@ -7,7 +7,7 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/urfave/cli/v2"
-	"go.githedgehog.com/fabric/pkg/manager/config"
+	"go.githedgehog.com/fabric/api/meta"
 	"go.githedgehog.com/fabric/pkg/wiring"
 	"go.githedgehog.com/fabricator/pkg/fab/cnc"
 )
@@ -19,6 +19,8 @@ var serverButaneTemplate string
 var hhnetTemplate string
 
 type ServerOS struct {
+	cnc.NoValidationComponent
+
 	PasswordHash string  `json:"passwordHash,omitempty"`
 	ToolboxRef   cnc.Ref `json:"toolboxRef,omitempty"`
 }
@@ -45,13 +47,13 @@ func (cfg *ServerOS) Flags() []cli.Flag {
 	}
 }
 
-func (cfg *ServerOS) Hydrate(preset cnc.Preset, fabricMode config.FabricMode) error {
+func (cfg *ServerOS) Hydrate(preset cnc.Preset, fabricMode meta.FabricMode) error {
 	cfg.ToolboxRef = cfg.ToolboxRef.Fallback(REF_TOOLBOX)
 
 	return nil
 }
 
-func (cfg *ServerOS) Build(basedir string, preset cnc.Preset, fabricMode config.FabricMode, get cnc.GetComponent, data *wiring.Data, run cnc.AddBuildOp, install cnc.AddRunOp) error {
+func (cfg *ServerOS) Build(basedir string, preset cnc.Preset, fabricMode meta.FabricMode, get cnc.GetComponent, data *wiring.Data, run cnc.AddBuildOp, install cnc.AddRunOp) error {
 	cfg.ToolboxRef = cfg.ToolboxRef.Fallback(BaseConfig(get).Source)
 
 	username := FLATCAR_CONTROL_USER

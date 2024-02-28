@@ -5,7 +5,7 @@ import (
 
 	helm "github.com/k3s-io/helm-controller/pkg/apis/helm.cattle.io/v1"
 	"github.com/urfave/cli/v2"
-	"go.githedgehog.com/fabric/pkg/manager/config"
+	"go.githedgehog.com/fabric/api/meta"
 	"go.githedgehog.com/fabric/pkg/wiring"
 	"go.githedgehog.com/fabricator/pkg/fab/cnc"
 )
@@ -17,6 +17,8 @@ var certManagerValuesTemplate string
 var reloaderValuesTemplate string
 
 type Misc struct {
+	cnc.NoValidationComponent
+
 	K9sRef                   cnc.Ref `json:"k9sRef,omitempty"`
 	RBACProxyImageRef        cnc.Ref `json:"rbacProxyRef,omitempty"`
 	CertManagerRef           cnc.Ref `json:"certManagerRef,omitempty"`
@@ -44,7 +46,7 @@ func (cfg *Misc) Flags() []cli.Flag {
 	return nil
 }
 
-func (cfg *Misc) Hydrate(preset cnc.Preset, fabricMode config.FabricMode) error {
+func (cfg *Misc) Hydrate(preset cnc.Preset, fabricMode meta.FabricMode) error {
 	cfg.K9sRef = cfg.K9sRef.Fallback(REF_K9S)
 	cfg.RBACProxyImageRef = cfg.RBACProxyImageRef.Fallback(REF_RBAC_PROXY)
 
@@ -62,7 +64,7 @@ func (cfg *Misc) Hydrate(preset cnc.Preset, fabricMode config.FabricMode) error 
 	return nil
 }
 
-func (cfg *Misc) Build(basedir string, preset cnc.Preset, fabricMode config.FabricMode, get cnc.GetComponent, wiring *wiring.Data, run cnc.AddBuildOp, install cnc.AddRunOp) error {
+func (cfg *Misc) Build(basedir string, preset cnc.Preset, fabricMode meta.FabricMode, get cnc.GetComponent, wiring *wiring.Data, run cnc.AddBuildOp, install cnc.AddRunOp) error {
 	cfg.K9sRef = cfg.K9sRef.Fallback(BaseConfig(get).Source)
 	cfg.RBACProxyImageRef = cfg.RBACProxyImageRef.Fallback(BaseConfig(get).Source)
 

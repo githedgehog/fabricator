@@ -8,7 +8,7 @@ import (
 	helm "github.com/k3s-io/helm-controller/pkg/apis/helm.cattle.io/v1"
 	"github.com/pkg/errors"
 	"github.com/urfave/cli/v2"
-	"go.githedgehog.com/fabric/pkg/manager/config"
+	"go.githedgehog.com/fabric/api/meta"
 	"go.githedgehog.com/fabric/pkg/wiring"
 	"go.githedgehog.com/fabricator/pkg/fab/cnc"
 )
@@ -26,6 +26,8 @@ var dasBootSeederValuesTemplate string
 var dasBootRegCtrlValuesTemplate string
 
 type DasBoot struct {
+	cnc.NoValidationComponent
+
 	Ref             cnc.Ref    `json:"ref,omitempty"`
 	RsyslogChartRef cnc.Ref    `json:"rsyslogChartRef,omitempty"`
 	RsyslogImageRef cnc.Ref    `json:"rsyslogImageRef,omitempty"`
@@ -74,7 +76,7 @@ func (cfg *DasBoot) Flags() []cli.Flag {
 	}
 }
 
-func (cfg *DasBoot) Hydrate(preset cnc.Preset, fabricMode config.FabricMode) error {
+func (cfg *DasBoot) Hydrate(preset cnc.Preset, fabricMode meta.FabricMode) error {
 	cfg.Ref = cfg.Ref.Fallback(REF_DASBOOT_VERSION)
 	cfg.RsyslogChartRef = cfg.RsyslogChartRef.Fallback(REF_DASBOOT_RSYSLOG_CHART)
 	cfg.RsyslogImageRef = cfg.RsyslogImageRef.Fallback(REF_DASBOOT_RSYSLOG_IMAGE)
@@ -124,7 +126,7 @@ func (cfg *DasBoot) Hydrate(preset cnc.Preset, fabricMode config.FabricMode) err
 	return nil
 }
 
-func (cfg *DasBoot) Build(basedir string, preset cnc.Preset, fabricMode config.FabricMode, get cnc.GetComponent, wiring *wiring.Data, run cnc.AddBuildOp, install cnc.AddRunOp) error {
+func (cfg *DasBoot) Build(basedir string, preset cnc.Preset, fabricMode meta.FabricMode, get cnc.GetComponent, wiring *wiring.Data, run cnc.AddBuildOp, install cnc.AddRunOp) error {
 	cfg.RsyslogImageRef = cfg.RsyslogImageRef.Fallback(BaseConfig(get).Source)
 	cfg.RsyslogChartRef = cfg.RsyslogChartRef.Fallback(BaseConfig(get).Source)
 	cfg.NTPImageRef = cfg.NTPImageRef.Fallback(BaseConfig(get).Source)

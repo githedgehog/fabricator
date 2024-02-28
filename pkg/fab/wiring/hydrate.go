@@ -160,6 +160,10 @@ func Hydrate(data *wiring.Data, cfg *HydrateConfig) error {
 
 			leaf++
 		}
+
+		if err := data.Update(sw); err != nil {
+			return errors.Wrapf(err, "error updating switch %s", sw.Name)
+		}
 	}
 
 	control := 0
@@ -186,6 +190,10 @@ func Hydrate(data *wiring.Data, cfg *HydrateConfig) error {
 					}
 				}
 			}
+		}
+
+		if err := data.Update(conn); err != nil {
+			return errors.Wrapf(err, "error updating connection %s", conn.Name)
 		}
 	}
 

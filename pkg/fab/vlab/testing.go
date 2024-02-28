@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -1107,25 +1106,29 @@ func (svc *Service) SetupPeerings(ctx context.Context, cfg SetupPeeringsConfig) 
 
 							prefix.Prefix = prefixParts[0]
 
-							for _, prefixPart := range prefixParts[1:] {
-								if strings.HasPrefix(prefixPart, "le") {
-									le, err := strconv.Atoi(strings.TrimPrefix(prefixPart, "le"))
-									if err != nil {
-										return errors.Errorf("invalid external peering option #%d %s, external prefix should be in format prefix_leXX_geYY", idx, option)
-									}
-
-									prefix.Le = uint8(le)
-								} else if strings.HasPrefix(prefixPart, "ge") {
-									ge, err := strconv.Atoi(strings.TrimPrefix(prefixPart, "ge"))
-									if err != nil {
-										return errors.Errorf("invalid external peering option #%d %s, external prefix should be in format prefix_leXX_geYY", idx, option)
-									}
-
-									prefix.Ge = uint8(ge)
-								} else {
-									return errors.Errorf("invalid external peering option #%d %s, external prefix should be in format prefix_leXX_geYY", idx, option)
-								}
+							if len(prefixParts) > 1 {
+								return errors.Errorf("invalid external peering option #%d %s, external prefix should be in format prefix", idx, option)
 							}
+
+							// for _, prefixPart := range prefixParts[1:] {
+							// 	if strings.HasPrefix(prefixPart, "le") {
+							// 		le, err := strconv.Atoi(strings.TrimPrefix(prefixPart, "le"))
+							// 		if err != nil {
+							// 			return errors.Errorf("invalid external peering option #%d %s, external prefix should be in format prefix_leXX_geYY", idx, option)
+							// 		}
+
+							// 		prefix.Le = uint8(le)
+							// 	} else if strings.HasPrefix(prefixPart, "ge") {
+							// 		ge, err := strconv.Atoi(strings.TrimPrefix(prefixPart, "ge"))
+							// 		if err != nil {
+							// 			return errors.Errorf("invalid external peering option #%d %s, external prefix should be in format prefix_leXX_geYY", idx, option)
+							// 		}
+
+							// 		prefix.Ge = uint8(ge)
+							// 	} else {
+							// 		return errors.Errorf("invalid external peering option #%d %s, external prefix should be in format prefix_leXX_geYY", idx, option)
+							// 	}
+							// }
 						}
 
 						extPeering.Permit.External.Prefixes = append(extPeering.Permit.External.Prefixes, prefix)
@@ -1144,7 +1147,7 @@ func (svc *Service) SetupPeerings(ctx context.Context, cfg SetupPeeringsConfig) 
 				extPeering.Permit.External.Prefixes = []vpcapi.ExternalPeeringSpecPrefix{
 					{
 						Prefix: "0.0.0.0/0",
-						Le:     32,
+						// Le:     32,
 					},
 				}
 			}

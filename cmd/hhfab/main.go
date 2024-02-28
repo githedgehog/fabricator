@@ -14,7 +14,7 @@ import (
 	"github.com/mattn/go-isatty"
 	"github.com/pkg/errors"
 	"github.com/urfave/cli/v2"
-	"go.githedgehog.com/fabric/pkg/manager/config"
+	"go.githedgehog.com/fabric/api/meta"
 	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/fab/cnc"
 	"go.githedgehog.com/fabricator/pkg/fab/vlab"
@@ -103,7 +103,7 @@ func main() {
 	var wgESLAGLeafGroups string
 
 	fabricModes := []string{}
-	for _, m := range config.FabricModes {
+	for _, m := range meta.FabricModes {
 		fabricModes = append(fabricModes, string(m))
 	}
 
@@ -113,7 +113,7 @@ func main() {
 			Aliases:     []string{"m"},
 			Usage:       "fabric mode (one of: " + strings.Join(fabricModes, ", ") + ")",
 			Destination: &fabricMode,
-			Value:       string(config.FabricModeSpineLeaf),
+			Value:       string(meta.FabricModeSpineLeaf),
 		},
 		&cli.BoolFlag{
 			Category:    FLAG_CATEGORY_WIRING_GEN,
@@ -228,14 +228,14 @@ func main() {
 				},
 				Action: func(cCtx *cli.Context) error {
 					if fabricMode == "" {
-						fabricMode = string(config.FabricModeSpineLeaf)
+						fabricMode = string(meta.FabricModeSpineLeaf)
 					}
 					if !slices.Contains(fabricModes, fabricMode) {
 						return errors.Errorf("invalid fabric mode %s (supported: %s)", fabricMode, strings.Join(fabricModes, ", "))
 					}
 
 					wiringGen := &wiring.Builder{
-						FabricMode:        config.FabricMode(fabricMode),
+						FabricMode:        meta.FabricMode(fabricMode),
 						ChainControlLink:  wgChainControlLink,
 						ControlLinksCount: uint8(wgControlLinksCount),
 						SpinesCount:       uint8(wgSpinesCount),
@@ -247,7 +247,7 @@ func main() {
 						MCLAGPeerLinks:    uint8(wgMCLAGPeerLinks),
 						VPCLoopbacks:      uint8(wgVPCLoopbacks),
 					}
-					err := mngr.Init(basedir, fromConfig, cnc.Preset(preset), config.FabricMode(fabricMode), wiringPath.Value(), wiringGen, hydrate)
+					err := mngr.Init(basedir, fromConfig, cnc.Preset(preset), meta.FabricMode(fabricMode), wiringPath.Value(), wiringGen, hydrate)
 					if err != nil {
 						return errors.Wrap(err, "error initializing")
 					}
@@ -711,14 +711,14 @@ func main() {
 						},
 						Action: func(cCtx *cli.Context) error {
 							if fabricMode == "" {
-								fabricMode = string(config.FabricModeSpineLeaf)
+								fabricMode = string(meta.FabricModeSpineLeaf)
 							}
 							if !slices.Contains(fabricModes, fabricMode) {
 								return errors.Errorf("invalid fabric mode %s (supported: %s)", fabricMode, strings.Join(fabricModes, ", "))
 							}
 
 							data, err := (&wiring.Builder{
-								FabricMode:        config.FabricMode(fabricMode),
+								FabricMode:        meta.FabricMode(fabricMode),
 								ChainControlLink:  wgChainControlLink,
 								ControlLinksCount: uint8(wgControlLinksCount),
 								SpinesCount:       uint8(wgSpinesCount),

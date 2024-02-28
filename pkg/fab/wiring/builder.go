@@ -10,7 +10,6 @@ import (
 	"go.githedgehog.com/fabric/api/meta"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1alpha2"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1alpha2"
-	"go.githedgehog.com/fabric/pkg/manager/config"
 	"go.githedgehog.com/fabric/pkg/wiring"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -21,26 +20,26 @@ const (
 )
 
 type Builder struct {
-	Defaulted         bool              // true if default should be called on created objects
-	Hydrated          bool              // true if wiring diagram should be hydrated
-	FabricMode        config.FabricMode // fabric mode
-	ChainControlLink  bool              // true if not all switches attached directly to control node
-	ControlLinksCount uint8             // number of control links to generate
-	SpinesCount       uint8             // number of spines to generate
-	FabricLinksCount  uint8             // number of links for each spine <> leaf pair
-	MCLAGLeafsCount   uint8             // number of MCLAG server-leafs to generate
-	ESLAGLeafGroups   string            // eslag leaf groups - comma separated list of number of ESLAG switches in each group, should be 2-4 per group, e.g. 2,4,2 for 3 groups with 2, 4 and 2 switches
-	OrphanLeafsCount  uint8             // number of non-MCLAG server-leafs to generate
-	MCLAGSessionLinks uint8             // number of MCLAG session links to generate
-	MCLAGPeerLinks    uint8             // number of MCLAG peer links to generate
-	VPCLoopbacks      uint8             // number of VPC loopbacks to generate per leaf switch
+	Defaulted         bool            // true if default should be called on created objects
+	Hydrated          bool            // true if wiring diagram should be hydrated
+	FabricMode        meta.FabricMode // fabric mode
+	ChainControlLink  bool            // true if not all switches attached directly to control node
+	ControlLinksCount uint8           // number of control links to generate
+	SpinesCount       uint8           // number of spines to generate
+	FabricLinksCount  uint8           // number of links for each spine <> leaf pair
+	MCLAGLeafsCount   uint8           // number of MCLAG server-leafs to generate
+	ESLAGLeafGroups   string          // eslag leaf groups - comma separated list of number of ESLAG switches in each group, should be 2-4 per group, e.g. 2,4,2 for 3 groups with 2, 4 and 2 switches
+	OrphanLeafsCount  uint8           // number of non-MCLAG server-leafs to generate
+	MCLAGSessionLinks uint8           // number of MCLAG session links to generate
+	MCLAGPeerLinks    uint8           // number of MCLAG peer links to generate
+	VPCLoopbacks      uint8           // number of VPC loopbacks to generate per leaf switch
 
 	data         *wiring.Data
 	ifaceTracker map[string]uint8 // next available interface ID for each switch
 }
 
 func (b *Builder) Build() (*wiring.Data, error) {
-	if b.FabricMode == config.FabricModeSpineLeaf {
+	if b.FabricMode == meta.FabricModeSpineLeaf {
 		if b.ChainControlLink && b.ControlLinksCount == 0 {
 			b.ControlLinksCount = 2
 		}
@@ -55,7 +54,7 @@ func (b *Builder) Build() (*wiring.Data, error) {
 			b.ESLAGLeafGroups = "2"
 			b.OrphanLeafsCount = 1
 		}
-	} else if b.FabricMode == config.FabricModeCollapsedCore {
+	} else if b.FabricMode == meta.FabricModeCollapsedCore {
 		if b.ChainControlLink {
 			return nil, fmt.Errorf("control link chaining not supported for collapsed core fabric mode")
 		}
@@ -131,7 +130,7 @@ func (b *Builder) Build() (*wiring.Data, error) {
 	}
 
 	slog.Info("Building wiring diagram", "fabricMode", b.FabricMode, "chainControlLink", b.ChainControlLink, "controlLinksCount", b.ControlLinksCount)
-	if b.FabricMode == config.FabricModeSpineLeaf {
+	if b.FabricMode == meta.FabricModeSpineLeaf {
 		slog.Info("                    >>>", "spinesCount", b.SpinesCount, "fabricLinksCount", b.FabricLinksCount)
 		slog.Info("                    >>>", "eslagLeafGroups", b.ESLAGLeafGroups)
 	}

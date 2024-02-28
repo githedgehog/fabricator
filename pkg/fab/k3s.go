@@ -6,8 +6,8 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/urfave/cli/v2"
+	"go.githedgehog.com/fabric/api/meta"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1alpha2"
-	"go.githedgehog.com/fabric/pkg/manager/config"
 	"go.githedgehog.com/fabric/pkg/wiring"
 	"go.githedgehog.com/fabricator/pkg/fab/cnc"
 )
@@ -16,6 +16,8 @@ import (
 var k3sConfigTemplate string
 
 type K3s struct {
+	cnc.NoValidationComponent
+
 	Ref         cnc.Ref  `json:"ref,omitempty"`
 	ClusterCIDR string   `json:"clusterCIDR,omitempty"`
 	ServiceCIDR string   `json:"serviceCIDR,omitempty"`
@@ -46,7 +48,7 @@ func (cfg *K3s) Flags() []cli.Flag {
 	}
 }
 
-func (cfg *K3s) Hydrate(preset cnc.Preset, fabricMode config.FabricMode) error {
+func (cfg *K3s) Hydrate(preset cnc.Preset, fabricMode meta.FabricMode) error {
 	cfg.Ref = cfg.Ref.Fallback(REF_K3S)
 
 	if cfg.ClusterCIDR == "" {
@@ -74,7 +76,7 @@ func (cfg *K3s) Hydrate(preset cnc.Preset, fabricMode config.FabricMode) error {
 	return nil
 }
 
-func (cfg *K3s) Build(basedir string, preset cnc.Preset, fabricMode config.FabricMode, get cnc.GetComponent, wiring *wiring.Data, run cnc.AddBuildOp, install cnc.AddRunOp) error {
+func (cfg *K3s) Build(basedir string, preset cnc.Preset, fabricMode meta.FabricMode, get cnc.GetComponent, wiring *wiring.Data, run cnc.AddBuildOp, install cnc.AddRunOp) error {
 	cfg.Ref = cfg.Ref.Fallback(BaseConfig(get).Source)
 
 	run(BundleControlInstall, STAGE_INSTALL_0_PREP, "k3s-airgap-files",

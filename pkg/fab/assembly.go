@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/pkg/errors"
-	agentapi "go.githedgehog.com/fabric/api/agent/v1alpha2"
+	"go.githedgehog.com/fabric/api/meta"
 	"go.githedgehog.com/fabricator/pkg/fab/cnc"
 	"go.githedgehog.com/fabricator/pkg/fab/vlab"
 	fabwiring "go.githedgehog.com/fabricator/pkg/fab/wiring"
@@ -30,7 +30,7 @@ var (
 
 	DEV_SSH_KEY     = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGpF2+9I1Nj4BcN7y6DjzTbq1VcUYIRGyfzId5ZoBEFj" // 1P: Fabric Dev SSH Key Shared
 	DEV_PASSWORD    = "$5$8nAYPGcl4l6G7Av1$Qi4/gnM0yPtGv9kjpMh78NuNSfQWy7vR1rulHpurL36"                  // 1P: Fabric Dev SONiC Admin
-	DEV_SONIC_USERS = []agentapi.UserCreds{
+	DEV_SONIC_USERS = []meta.UserCreds{
 		{
 			Name:     "admin",
 			Password: "$5$8nAYPGcl4l6G7Av1$Qi4/gnM0yPtGv9kjpMh78NuNSfQWy7vR1rulHpurL36", // 1P: Fabric Dev SONiC Admin

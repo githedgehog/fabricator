@@ -2,6 +2,7 @@ package fab
 
 import (
 	"bytes"
+	"context"
 	_ "embed"
 	"fmt"
 	"log/slog"
@@ -10,10 +11,8 @@ import (
 	helm "github.com/k3s-io/helm-controller/pkg/apis/helm.cattle.io/v1"
 	"github.com/pkg/errors"
 	"github.com/urfave/cli/v2"
-	agentapi "go.githedgehog.com/fabric/api/agent/v1alpha2"
 	"go.githedgehog.com/fabric/api/meta"
-	"go.githedgehog.com/fabric/pkg/manager/config"
-	"go.githedgehog.com/fabric/pkg/wiring"
+	wiringlib "go.githedgehog.com/fabric/pkg/wiring"
 	"go.githedgehog.com/fabricator/pkg/fab/cnc"
 )
 
@@ -74,12 +73,12 @@ func (cfg *Fabric) Flags() []cli.Flag {
 			Name:        "dhcpd",
 			Usage:       "use 'hedgehog' DHCPD to enables multi ipv4 namespace DHCP with overlapping subnets (one of 'hedgehog', 'isc')",
 			Destination: &cfg.DHCPServer,
-			Value:       string(config.DHCPModeHedgehog),
+			Value:       string(meta.DHCPModeHedgehog),
 		},
 	}
 }
 
-func (cfg *Fabric) Hydrate(preset cnc.Preset, fabricMode config.FabricMode) error {
+func (cfg *Fabric) Hydrate(preset cnc.Preset, fabricMode meta.FabricMode) error {
 	cfg.Ref = cfg.Ref.Fallback(REF_FABRIC_VERSION)
 	cfg.FabricApiChartRef = cfg.FabricApiChartRef.Fallback(REF_FABRIC_API_CHART)
 	cfg.FabricChartRef = cfg.FabricChartRef.Fallback(REF_FABRIC_CHART)
@@ -92,14 +91,72 @@ func (cfg *Fabric) Hydrate(preset cnc.Preset, fabricMode config.FabricMode) erro
 	cfg.FabricDHCPDRef = cfg.FabricDHCPDRef.Fallback(REF_FABRIC_DHCPD)
 	cfg.FabricDHCPDChartRef = cfg.FabricDHCPDChartRef.Fallback(REF_FABRIC_DHCPD_CHART)
 
-	if !slices.Contains(config.DHCPModes, config.DHCPMode(cfg.DHCPServer)) {
+	if !slices.Contains(meta.DHCPModes, meta.DHCPMode(cfg.DHCPServer)) {
 		return errors.Errorf("invalid dhcp server mode %q", cfg.DHCPServer)
 	}
 
 	return nil
 }
 
-func (cfg *Fabric) Build(basedir string, preset cnc.Preset, fabricMode config.FabricMode, get cnc.GetComponent, wiring *wiring.Data, run cnc.AddBuildOp, install cnc.AddRunOp) error {
+func (cfg *Fabric) buildFabricConfig(fabricMode meta.FabricMode, get cnc.GetComponent) *meta.FabricConfig {
+	users := []meta.UserCreds{}
+	slog.Info("Base config", "dev", BaseConfig(get).Dev)
+	if BaseConfig(get).Dev {
+		users = append(users, DEV_SONIC_USERS...)
+		slog.Info("Adding dev users", "users", users)
+		for idx := range users {
+			users[idx].SSHKeys = append(users[idx].SSHKeys, BaseConfig(get).AuthorizedKeys...)
+			slog.Info("Adding dev ssh keys to user", "user", users[idx])
+		}
+	}
+
+	target := BaseConfig(get).Target
+
+	return &meta.FabricConfig{
+		ControlVIP:  CONTROL_VIP + CONTROL_VIP_MASK,
+		APIServer:   fmt.Sprintf("%s:%d", CONTROL_VIP, K3S_API_PORT),
+		AgentRepo:   target.Fallback(cfg.AgentRef).RepoName(),
+		AgentRepoCA: ZotConfig(get).TLS.CA.Cert,
+		VPCIRBVLANRanges: []meta.VLANRange{
+			{From: 3000, To: 3999}, // TODO make configurable
+		},
+		VPCPeeringVLANRanges: []meta.VLANRange{
+			{From: 100, To: 999}, // TODO only 500 needed? make configurable
+		},
+		VPCPeeringDisabled: false,
+		ReservedSubnets: []string{ // TODO make configurable
+			K3sConfig(get).ClusterCIDR,
+			K3sConfig(get).ServiceCIDR,
+			"172.30.0.0/16", // Fabric subnet // TODO make configurable
+			"172.31.0.0/16", // VLAB subnet // TODO make configurable
+		},
+		Users:                 users,
+		DHCPMode:              meta.DHCPMode(cfg.DHCPServer),
+		DHCPDConfigMap:        "fabric-dhcp-server-config",
+		DHCPDConfigKey:        "dhcpd.conf",
+		FabricMode:            fabricMode,
+		BaseVPCCommunity:      cfg.BaseVPCCommunity,
+		VPCLoopbackSubnet:     "172.30.240.0/20", // TODO make configurable
+		FabricMTU:             9100,              // TODO make configurable
+		ServerFacingMTUOffset: uint16(cfg.ServerFacingMTUOffset),
+		ESLAGMACBase:          "f2:00:00:00:00:00", // TODO make configurable
+		ESLAGESIPrefix:        "00:f2:00:00:",      // TODO make configurable
+	}
+}
+
+func (cfg *Fabric) Validate(basedir string, preset cnc.Preset, fabricMode meta.FabricMode, get cnc.GetComponent, wiring *wiringlib.Data) error {
+	fabricCfg := cfg.buildFabricConfig(fabricMode, get)
+
+	slog.Debug("Validating wiring diagram")
+	if err := wiringlib.ValidateFabric(context.TODO(), wiring.Native, fabricCfg); err != nil {
+		return errors.Wrapf(err, "error validating wiring")
+	}
+	slog.Info("Wiring diagram is valid")
+
+	return nil
+}
+
+func (cfg *Fabric) Build(basedir string, preset cnc.Preset, fabricMode meta.FabricMode, get cnc.GetComponent, wiring *wiringlib.Data, run cnc.AddBuildOp, install cnc.AddRunOp) error {
 	cfg.FabricApiChartRef = cfg.FabricApiChartRef.Fallback(cfg.Ref, BaseConfig(get).Source)
 	cfg.FabricChartRef = cfg.FabricChartRef.Fallback(cfg.Ref, BaseConfig(get).Source)
 	cfg.FabricImageRef = cfg.FabricImageRef.Fallback(cfg.Ref, BaseConfig(get).Source)
@@ -197,17 +254,6 @@ func (cfg *Fabric) Build(basedir string, preset cnc.Preset, fabricMode config.Fa
 			Args: []string{"install", "--control", "--agent-path", "/opt/hedgehog/bin/agent", "--agent-user", "root"},
 		})
 
-	users := []agentapi.UserCreds{}
-	slog.Info("Base config", "dev", BaseConfig(get).Dev)
-	if BaseConfig(get).Dev {
-		users = append(users, DEV_SONIC_USERS...)
-		slog.Info("Adding dev users", "users", users)
-		for idx := range users {
-			users[idx].SSHKeys = append(users[idx].SSHKeys, BaseConfig(get).AuthorizedKeys...)
-			slog.Info("Adding dev ssh keys to user", "user", users[idx])
-		}
-	}
-
 	var dhcp cnc.KubeObjectProvider
 	if cfg.DHCPServer == "isc" {
 		dhcp = cnc.KubeHelmChart("fabric-dhcp-server", "default", helm.HelmChartSpec{
@@ -228,6 +274,8 @@ func (cfg *Fabric) Build(basedir string, preset cnc.Preset, fabricMode config.Fa
 			"ref", target.Fallback(cfg.FabricDHCPDRef),
 		))
 	}
+
+	fabricCfg := cfg.buildFabricConfig(fabricMode, get)
 
 	run(BundleControlInstall, STAGE_INSTALL_3_FABRIC, "fabric-install",
 		&cnc.FileGenerate{
@@ -254,36 +302,7 @@ func (cfg *Fabric) Build(basedir string, preset cnc.Preset, fabricMode config.Fa
 					"proxyRef", target.Fallback(MiscConfig(get).RBACProxyImageRef),
 				)),
 				cnc.KubeConfigMap("fabric-config", "default", "config.yaml", cnc.YAMLFrom(
-					&config.Fabric{
-						ControlVIP:  CONTROL_VIP + CONTROL_VIP_MASK,
-						APIServer:   fmt.Sprintf("%s:%d", CONTROL_VIP, K3S_API_PORT),
-						AgentRepo:   target.Fallback(cfg.AgentRef).RepoName(),
-						AgentRepoCA: ZotConfig(get).TLS.CA.Cert,
-						VPCIRBVLANRanges: []meta.VLANRange{
-							{From: 3000, To: 3999}, // TODO make configurable
-						},
-						VPCPeeringVLANRanges: []meta.VLANRange{
-							{From: 100, To: 999}, // TODO only 500 needed? make configurable
-						},
-						VPCPeeringDisabled: false,
-						ReservedSubnets: []string{ // TODO make configurable
-							K3sConfig(get).ClusterCIDR,
-							K3sConfig(get).ServiceCIDR,
-							"172.30.0.0/16", // Fabric subnet // TODO make configurable
-							"172.31.0.0/16", // VLAB subnet // TODO make configurable
-						},
-						Users:                 users,
-						DHCPMode:              config.DHCPMode(cfg.DHCPServer),
-						DHCPDConfigMap:        "fabric-dhcp-server-config",
-						DHCPDConfigKey:        "dhcpd.conf",
-						FabricMode:            fabricMode,
-						BaseVPCCommunity:      cfg.BaseVPCCommunity,
-						VPCLoopbackSubnet:     "172.30.240.0/20", // TODO make configurable
-						FabricMTU:             9100,              // TODO make configurable
-						ServerFacingMTUOffset: uint16(cfg.ServerFacingMTUOffset),
-						ESLAGMACBase:          "f2:00:00:00:00:00", // TODO make configurable
-						ESLAGESIPrefix:        "00:f2:00:00:",      // TODO make configurable
-					},
+					fabricCfg,
 				)),
 				dhcp,
 			),

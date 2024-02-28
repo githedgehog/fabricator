@@ -13,7 +13,7 @@ import (
 	"github.com/mholt/archiver/v4"
 	"github.com/pkg/errors"
 	"github.com/urfave/cli/v2"
-	"go.githedgehog.com/fabric/pkg/manager/config"
+	"go.githedgehog.com/fabric/api/meta"
 	"go.githedgehog.com/fabric/pkg/wiring"
 	"go.githedgehog.com/fabricator/pkg/fab/cnc/bin"
 	fabwiring "go.githedgehog.com/fabricator/pkg/fab/wiring"
@@ -42,10 +42,18 @@ type Component interface {
 	// e.g. if we want other components to be able to use some values of that component config - it should be here
 	// e.g. generate TLS certificates
 	// if we want to make sure that same value is used on every build - it should be set here
-	Hydrate(preset Preset, fabricMode config.FabricMode) error
+	Hydrate(preset Preset, fabricMode meta.FabricMode) error
+
+	Validate(basedir string, preset Preset, fabricMode meta.FabricMode, get GetComponent, wiring *wiring.Data) error
 
 	// TODO rename run -> build, install -> run?
-	Build(basedir string, preset Preset, fabricMode config.FabricMode, get GetComponent, wiring *wiring.Data, run AddBuildOp, install AddRunOp) error
+	Build(basedir string, preset Preset, fabricMode meta.FabricMode, get GetComponent, wiring *wiring.Data, run AddBuildOp, install AddRunOp) error
+}
+
+type NoValidationComponent struct{}
+
+func (c *NoValidationComponent) Validate(basedir string, preset Preset, fabricMode meta.FabricMode, get GetComponent, wiring *wiring.Data) error {
+	return nil
 }
 
 type (
@@ -75,7 +83,7 @@ type Manager struct {
 	maxStage   Stage
 	components []Component
 	hydrateCfg *fabwiring.HydrateConfig
-	fabricMode config.FabricMode
+	fabricMode meta.FabricMode
 
 	addedBuildOps map[string]any
 	addedRunOps   map[string]any
@@ -127,17 +135,28 @@ func (mngr *Manager) prepare() error {
 		}
 	}
 
+	for _, comp := range mngr.components {
+		if !comp.IsEnabled(mngr.preset) {
+			continue
+		}
+
+		err := comp.Validate(mngr.basedir, mngr.preset, mngr.fabricMode, mngr.getComponent, mngr.wiring)
+		if err != nil {
+			return errors.Wrapf(err, "error validating component %s", comp.Name())
+		}
+	}
+
 	return nil
 }
 
-func (mngr *Manager) Init(basedir string, fromConfig string, preset Preset, fabricMode config.FabricMode, wiringPath []string, wiringGen *fabwiring.Builder, hydrate bool) error {
+func (mngr *Manager) Init(basedir string, fromConfig string, preset Preset, fabricMode meta.FabricMode, wiringPath []string, wiringGen *fabwiring.Builder, hydrate bool) error {
 	if _, err := os.Stat(basedir); err == nil {
 		if !os.IsNotExist(err) {
 			return errors.Errorf("basedir %s already exists, please, remove it first", basedir)
 		}
 	}
 
-	if !slices.Contains(config.FabricModes, fabricMode) {
+	if !slices.Contains(meta.FabricModes, fabricMode) {
 		return errors.Errorf("unknown fabric mode: %s", fabricMode)
 	}
 
@@ -219,9 +238,9 @@ func (mngr *Manager) Init(basedir string, fromConfig string, preset Preset, fabr
 }
 
 type ManagerSaver struct {
-	Preset     Preset            `json:"preset,omitempty"`
-	FabricMode config.FabricMode `json:"fabricMode,omitempty"`
-	Config     map[string]any    `json:"config,omitempty"`
+	Preset     Preset          `json:"preset,omitempty"`
+	FabricMode meta.FabricMode `json:"fabricMode,omitempty"`
+	Config     map[string]any  `json:"config,omitempty"`
 }
 
 func (mngr *Manager) Save() error {
