@@ -98,18 +98,7 @@ func (cfg *Fabric) Hydrate(preset cnc.Preset, fabricMode meta.FabricMode) error 
 	return nil
 }
 
-func (cfg *Fabric) buildFabricConfig(fabricMode meta.FabricMode, get cnc.GetComponent) *meta.FabricConfig {
-	users := []meta.UserCreds{}
-	slog.Info("Base config", "dev", BaseConfig(get).Dev)
-	if BaseConfig(get).Dev {
-		users = append(users, DEV_SONIC_USERS...)
-		slog.Info("Adding dev users", "users", users)
-		for idx := range users {
-			users[idx].SSHKeys = append(users[idx].SSHKeys, BaseConfig(get).AuthorizedKeys...)
-			slog.Info("Adding dev ssh keys to user", "user", users[idx])
-		}
-	}
-
+func (cfg *Fabric) buildFabricConfig(fabricMode meta.FabricMode, get cnc.GetComponent, users []meta.UserCreds) *meta.FabricConfig {
 	target := BaseConfig(get).Target
 
 	return &meta.FabricConfig{
@@ -145,13 +134,11 @@ func (cfg *Fabric) buildFabricConfig(fabricMode meta.FabricMode, get cnc.GetComp
 }
 
 func (cfg *Fabric) Validate(basedir string, preset cnc.Preset, fabricMode meta.FabricMode, get cnc.GetComponent, wiring *wiringlib.Data) error {
-	fabricCfg := cfg.buildFabricConfig(fabricMode, get)
+	fabricCfg := cfg.buildFabricConfig(fabricMode, get, []meta.UserCreds{})
 
-	slog.Debug("Validating wiring diagram")
 	if err := wiringlib.ValidateFabric(context.TODO(), wiring.Native, fabricCfg); err != nil {
 		return errors.Wrapf(err, "error validating wiring")
 	}
-	slog.Info("Wiring diagram is valid")
 
 	return nil
 }
@@ -275,7 +262,18 @@ func (cfg *Fabric) Build(basedir string, preset cnc.Preset, fabricMode meta.Fabr
 		))
 	}
 
-	fabricCfg := cfg.buildFabricConfig(fabricMode, get)
+	users := []meta.UserCreds{}
+	slog.Info("Base config", "dev", BaseConfig(get).Dev)
+	if BaseConfig(get).Dev {
+		users = append(users, DEV_SONIC_USERS...)
+		slog.Info("Adding dev users", "users", users)
+		for idx := range users {
+			users[idx].SSHKeys = append(users[idx].SSHKeys, BaseConfig(get).AuthorizedKeys...)
+			slog.Info("Adding dev ssh keys to user", "user", users[idx])
+		}
+	}
+
+	fabricCfg := cfg.buildFabricConfig(fabricMode, get, users)
 
 	run(BundleControlInstall, STAGE_INSTALL_3_FABRIC, "fabric-install",
 		&cnc.FileGenerate{
