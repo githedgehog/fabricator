@@ -30,7 +30,7 @@ func (c *Cache) Load(basedir string) error {
 		return err
 	}
 
-	return yaml.Unmarshal(data, c)
+	return yaml.UnmarshalStrict(data, c)
 }
 
 func (c *Cache) hash(values ...any) (uint64, error) {

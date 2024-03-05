@@ -83,7 +83,7 @@ func (r *Recipe) Load(basedir string) error {
 	}
 
 	saver := &RecipeSaver{}
-	err = yaml.Unmarshal(data, saver)
+	err = yaml.UnmarshalStrict(data, saver)
 	if err != nil {
 		return errors.Wrap(err, "error unmarshaling recipe")
 	}
@@ -105,7 +105,7 @@ func (r *Recipe) Load(basedir string) error {
 			return errors.Wrap(err, "error marshaling op")
 		}
 
-		err = yaml.Unmarshal(data, op)
+		err = yaml.UnmarshalStrict(data, op)
 		if err != nil {
 			return errors.Wrap(err, "error unmarshaling op")
 		}

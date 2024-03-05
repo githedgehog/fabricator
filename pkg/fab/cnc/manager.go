@@ -297,7 +297,7 @@ func (mngr *Manager) loadConfig(fromConfig string) error {
 	}
 
 	saver := &ManagerSaver{}
-	err = yaml.Unmarshal(data, saver)
+	err = yaml.UnmarshalStrict(data, saver)
 	if err != nil {
 		return errors.Wrapf(err, "error unmarshaling config")
 	}
@@ -315,7 +315,7 @@ func (mngr *Manager) loadConfig(fromConfig string) error {
 			if err != nil {
 				return errors.Wrapf(err, "error marshaling config for component %s", comp.Name())
 			}
-			err = yaml.Unmarshal(data, &mngr.components[idx])
+			err = yaml.UnmarshalStrict(data, &mngr.components[idx])
 			if err != nil {
 				return errors.Wrapf(err, "error unmarshaling config for component %s", comp.Name())
 			}
