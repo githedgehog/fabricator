@@ -29,8 +29,10 @@ import (
 )
 
 const (
-	RACK    = "rack-1"
-	CONTROL = "control-1"
+	RACK              = "rack-1"
+	CONTROL           = "control-1"
+	EXTERNAL          = "virtual-edge-1"
+	VIRTUAL_EDGE_DEST = "external.hhfab.fabric.githedgehog.com/dest" // HHFAB annotation to specify destination for external connection
 )
 
 type Builder struct {
@@ -38,6 +40,7 @@ type Builder struct {
 	Hydrated          bool            // true if wiring diagram should be hydrated
 	FabricMode        meta.FabricMode // fabric mode
 	ChainControlLink  bool            // true if not all switches attached directly to control node
+	External          bool            // true if virtual external should be applied
 	ControlLinksCount uint8           // number of control links to generate
 	SpinesCount       uint8           // number of spines to generate
 	FabricLinksCount  uint8           // number of links for each spine <> leaf pair
@@ -71,6 +74,9 @@ func (b *Builder) Build() (*wiring.Data, error) {
 	} else if b.FabricMode == meta.FabricModeCollapsedCore {
 		if b.ChainControlLink {
 			return nil, fmt.Errorf("control link chaining not supported for collapsed core fabric mode")
+		}
+		if b.External {
+			return nil, fmt.Errorf("external not supported for collapsed core fabric mode")
 		}
 		if b.SpinesCount > 0 {
 			return nil, fmt.Errorf("spines not supported for collapsed core fabric mode")
@@ -572,6 +578,27 @@ func (b *Builder) Build() (*wiring.Data, error) {
 		}
 	}
 
+	// external switch. For now it's only orphan leafs
+	if b.External {
+		if b.OrphanLeafsCount < 1 {
+			return nil, fmt.Errorf("external switch requires at least one orphan leaf")
+		}
+		if _, err := b.createSwitch(EXTERNAL, wiringapi.SwitchSpec{
+			Role:        wiringapi.SwitchRoleVirtualEdge,
+			Description: "Virtual edge",
+		}); err != nil {
+			return nil, err
+		}
+		if _, err := b.createControlConnection(EXTERNAL); err != nil {
+			return nil, err
+		}
+		// (LeafID - 1) is now pointing on the last Orphan Leaf. We will use it to connect external switch to the last orphan leaf
+		if _, err := b.createExternalConnection(fmt.Sprintf("leaf-%02d", leafID-1)); err != nil {
+			return nil, err
+		}
+		leafID++
+	}
+
 	for spineID := uint8(1); spineID <= b.SpinesCount; spineID++ {
 		spineName := fmt.Sprintf("spine-%02d", spineID)
 
@@ -812,4 +839,19 @@ func (b *Builder) createControlConnection(switchName string) (*wiringapi.Connect
 			},
 		},
 	})
+}
+
+func (b *Builder) createExternalConnection(switchName string) (*wiringapi.Connection, error) {
+	conn, err := b.createConnection(wiringapi.ConnectionSpec{
+		External: &wiringapi.ConnExternal{
+			Link: wiringapi.ConnExternalLink{
+				Switch: wiringapi.BasePortName{Port: b.nextSwitchPort(switchName)},
+			},
+		},
+	})
+
+	conn.Annotations = make(map[string]string)
+	conn.Annotations[VIRTUAL_EDGE_DEST] = fmt.Sprintf("%s", b.nextSwitchPort(string(EXTERNAL))) // TODO: Generate it from CLI
+
+	return conn, err
 }
