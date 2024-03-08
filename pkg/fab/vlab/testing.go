@@ -1,3 +1,17 @@
+// Copyright 2023 Hedgehog
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package vlab
 
 import (
@@ -20,6 +34,7 @@ import (
 	agentapi "go.githedgehog.com/fabric/api/agent/v1alpha2"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1alpha2"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1alpha2"
+	"go.githedgehog.com/fabricator/pkg/fab/vlab/testing"
 	"golang.org/x/crypto/ssh"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -28,6 +43,26 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlutil "sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
+
+func (svc *Service) RunTests(ctx context.Context, cfg *testing.RunnerConfig) error {
+	cfg.KubeconfigPath = filepath.Join(svc.cfg.Basedir, "kubeconfig.yaml")
+	cfg.SSHKeyPath = svc.cfg.SshKey
+
+	runner, err := testing.NewRunner(cfg)
+	if err != nil {
+		return errors.Wrapf(err, "error creating runner")
+	}
+
+	return runner.Run(ctx)
+}
+
+func (svc *Service) PrintTestConnections(ctx context.Context, cfg *testing.RunnerConfig) error {
+	kubeconfigPath := filepath.Join(svc.cfg.Basedir, "kubeconfig.yaml")
+
+	return errors.Wrapf(testing.PrintDefaultConnections(ctx, kubeconfigPath), "error printing default connections")
+}
+
+// OLD TOOLS
 
 var scheme = runtime.NewScheme()
 

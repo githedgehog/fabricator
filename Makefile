@@ -64,6 +64,10 @@ vet: ## Run go vet against code.
 test: manifests generate fmt vet envtest ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test ./... -coverprofile cover.out
 
+.PHONY: lint
+lint: ## Run all linters.
+	addlicense -c Hedgehog -ignore ".github/**" -ignore "config/**" -y 2023 .
+
 ##@ Build
 
 # .PHONY: build
@@ -169,7 +173,7 @@ VERSION ?= $(shell hack/version.sh)
 OCI_REPO ?= registry.local:31000/githedgehog/fabricator
 
 .PHONY: hhfab
-hhfab: build-embed-cnc-bin ## Build hhfab CLI
+hhfab: lint fmt vet build-embed-cnc-bin ## Build hhfab CLI
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/hhfab -ldflags="-w -s -X main.version=$(VERSION)" --tags containers_image_openpgp ./cmd/hhfab
 
 .PHONY: build-embed-cnc-bin
