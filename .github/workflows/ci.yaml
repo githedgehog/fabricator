@@ -165,7 +165,7 @@ jobs:
         # TODO replace --install-complete with --run-complete hack/vlab-test.sh
         run: |
           export XDG_CONFIG_HOME=$(pwd)/.config
-          export HHFAB_BASE_REPO=m.l.hhdev.io:31000/githedgehog
+          export HHFAB_BASE_REPO=m-pub.l.hhdev.io:31000/githedgehog
 
           bin/hhfab init -p=vlab --fabric-mode=${{ matrix.mode }} --dhcpd=${{ matrix.dhcpd }} --dev -v
           bin/hhfab build -v
