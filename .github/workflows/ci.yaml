@@ -157,7 +157,7 @@ jobs:
       - name: Login to lab registry
         uses: docker/login-action@v3
         with:
-          registry: m.l.hhdev.io:31000
+          registry: m-pub.l.hhdev.io:31000
           username: lab
           password: ${{ secrets.LAB_REGISTRY_TOKEN }}
 
