@@ -178,7 +178,7 @@ VERSION ?= $(shell hack/version.sh)
 OCI_REPO ?= registry.local:31000/githedgehog/fabricator
 
 .PHONY: hhfab
-hhfab: lint fmt build-embed-cnc-bin vet ## Build hhfab CLI
+hhfab: lint fmt build-embed-cnc-bin ## Build hhfab CLI
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/hhfab -ldflags="-w -s -X main.version=$(VERSION)" --tags containers_image_openpgp ./cmd/hhfab
 
 .PHONY: build-embed-cnc-bin
