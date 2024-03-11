@@ -34,6 +34,7 @@ import (
 	agentapi "go.githedgehog.com/fabric/api/agent/v1alpha2"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1alpha2"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1alpha2"
+	"go.githedgehog.com/fabricator/pkg/fab/vlab/testing"
 	"golang.org/x/crypto/ssh"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -42,6 +43,26 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlutil "sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
+
+func (svc *Service) RunTests(ctx context.Context, cfg *testing.RunnerConfig) error {
+	cfg.KubeconfigPath = filepath.Join(svc.cfg.Basedir, "kubeconfig.yaml")
+	cfg.SSHKeyPath = svc.cfg.SshKey
+
+	runner, err := testing.NewRunner(cfg)
+	if err != nil {
+		return errors.Wrapf(err, "error creating runner")
+	}
+
+	return runner.Run(ctx)
+}
+
+func (svc *Service) PrintTestConnections(ctx context.Context, cfg *testing.RunnerConfig) error {
+	kubeconfigPath := filepath.Join(svc.cfg.Basedir, "kubeconfig.yaml")
+
+	return errors.Wrapf(testing.PrintDefaultConnections(ctx, kubeconfigPath), "error printing default connections")
+}
+
+// OLD TOOLS
 
 var scheme = runtime.NewScheme()
 
@@ -83,10 +104,10 @@ func waitForSwitchesReady(svcCfg *ServiceConfig) error {
 	}
 
 	errs := 0
-	retries := 3
+	retries := 8
 
 	for {
-		time.Sleep(5 * time.Second) // TODO make configurable
+		time.Sleep(15 * time.Second) // TODO make configurable
 
 		agents := agentapi.AgentList{}
 		if err := kube.List(context.Background(), &agents, client.InNamespace("default")); err != nil {
