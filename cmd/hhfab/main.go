@@ -115,6 +115,7 @@ func main() {
 	var wgChainControlLink bool
 	var wgControlLinksCount, wgSpinesCount, wgFabricLinksCount, wgMCLAGLeafsCount, wgOrphanLeafsCount, wgMCLAGSessionLinks, wgMCLAGPeerLinks, wgVPCLoopbacks uint
 	var wgESLAGLeafGroups string
+	var wgExternal bool
 
 	fabricModes := []string{}
 	for _, m := range meta.FabricModes {
@@ -189,6 +190,12 @@ func main() {
 			Usage:       "number of vpc loopbacks for each switch",
 			Destination: &wgVPCLoopbacks,
 		},
+		&cli.BoolFlag{
+			Category:    FLAG_CATEGORY_WIRING_GEN,
+			Name:        "external",
+			Usage:       "include vritual external switch",
+			Destination: &wgExternal,
+		},
 	}
 
 	mngr := fab.NewCNCManager()
@@ -251,6 +258,7 @@ func main() {
 					wiringGen := &wiring.Builder{
 						FabricMode:        meta.FabricMode(fabricMode),
 						ChainControlLink:  wgChainControlLink,
+						External:          wgExternal,
 						ControlLinksCount: uint8(wgControlLinksCount),
 						SpinesCount:       uint8(wgSpinesCount),
 						FabricLinksCount:  uint8(wgFabricLinksCount),

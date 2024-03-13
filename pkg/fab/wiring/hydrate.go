@@ -15,14 +15,19 @@
 package wiring
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/pkg/errors"
+	agentapi "go.githedgehog.com/fabric/api/agent/v1alpha2"
+	vpcapi "go.githedgehog.com/fabric/api/vpc/v1alpha2"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1alpha2"
 	"go.githedgehog.com/fabric/pkg/wiring"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func IsHydrated(data *wiring.Data) error {
@@ -75,6 +80,58 @@ type HydrateConfig struct {
 	LeafASNStart uint32
 }
 
+func createExternal(e agentapi.VirtualEdgeConfig, data *wiring.Data) error {
+	external := &vpcapi.External{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "External",
+			APIVersion: vpcapi.GroupVersion.String(),
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "virtual-edge",
+		},
+		Spec: vpcapi.ExternalSpec{
+			IPv4Namespace:     "default",
+			InboundCommunity:  e.CommunityOut,
+			OutboundCommunity: e.CommunityIn,
+		},
+	}
+	return errors.Wrapf(data.Add(external), "error adding external object")
+}
+
+func createExternalAttachment(e agentapi.VirtualEdgeConfig, data *wiring.Data, conn string) error {
+	vlan, err := strconv.ParseUint(e.IfVlan, 10, 16)
+	if err != nil {
+		return errors.Wrapf(err, "error parsing VLAN %s", e.IfVlan)
+	}
+
+	virtualEdgeIPBits := strings.Split(e.IfIP, "/")
+	virtualEdgeIP := virtualEdgeIPBits[0]
+
+	attachment := &vpcapi.ExternalAttachment{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "ExternalAttachment",
+			APIVersion: vpcapi.GroupVersion.String(),
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "virtual-edge-attachment",
+		},
+		Spec: vpcapi.ExternalAttachmentSpec{
+			External:   "virtual-edge",
+			Connection: conn,
+			Switch: vpcapi.ExternalAttachmentSwitch{
+				VLAN: uint16(vlan),
+				IP:   fmt.Sprintf("%s/24", e.NeighborIP),
+			},
+			Neighbor: vpcapi.ExternalAttachmentNeighbor{
+				ASN: VIRTUAL_EDGE_ASN,
+				IP:  virtualEdgeIP,
+			},
+		},
+	}
+
+	return errors.Wrapf(data.Add(attachment), "error adding external attachment object")
+}
+
 const (
 	SPINE_OFFSET = 200
 	LEAF_OFFSET  = 100
@@ -86,6 +143,9 @@ const (
 	VTEP_IP_NET          = 12
 	CONTROL_IP_NET       = 20 // single /24 is more than enough
 	FABRIC_IP_NET        = 30 // can take more than one /24, let's book 10
+	VIRTUAL_EDGE_IP_NET  = 40 // single /24 is more than enough
+	VIRTUAL_EDGE_CFG     = "virtual-edge.hhfab.fabric.githedgehog.com/external-cfg"
+	VIRTUAL_EDGE_ASN     = 64100
 )
 
 func HydratePath(wiringPath string) error {
@@ -129,21 +189,35 @@ func Hydrate(data *wiring.Data, cfg *HydrateConfig) error {
 	}
 
 	mclagPeer := map[string]string{}
+	var externalSwitches []string
+	var externalConnections []string
 	for _, conn := range data.Connection.All() {
-		if conn.Spec.MCLAGDomain == nil {
-			continue
+		if conn.Spec.MCLAGDomain != nil {
+
+			sws, _, _, _, err := conn.Spec.Endpoints()
+			if err != nil {
+				return errors.Wrapf(err, "error getting endpoints for MCLAG domain connection %s", conn.Name)
+			}
+			if len(sws) != 2 {
+				return errors.Errorf("MCLAG domain connection %s has %d endpoints, expected 2", conn.Name, len(sws))
+			}
+
+			mclagPeer[sws[0]] = sws[1]
+			mclagPeer[sws[1]] = sws[0]
+		}
+		if conn.Spec.External != nil {
+
+			sws, _, _, _, err := conn.Spec.Endpoints()
+			if err != nil {
+				return errors.Wrapf(err, "error getting endpoints for external connection %s", conn.Name)
+			}
+			if len(sws) != 1 {
+				return errors.Errorf("external connection %s has %d endpoints, expected 1", conn.Name, len(sws))
+			}
+			externalSwitches = append(externalSwitches, sws[0])
+			externalConnections = append(externalConnections, conn.Name)
 		}
 
-		sws, _, _, _, err := conn.Spec.Endpoints()
-		if err != nil {
-			return errors.Wrapf(err, "error getting endpoints for MCLAG domain connection %s", conn.Name)
-		}
-		if len(sws) != 2 {
-			return errors.Errorf("MCLAG domain connection %s has %d endpoints, expected 2", conn.Name, len(sws))
-		}
-
-		mclagPeer[sws[0]] = sws[1]
-		mclagPeer[sws[1]] = sws[0]
 	}
 
 	spine := 0
@@ -173,6 +247,46 @@ func Hydrate(data *wiring.Data, cfg *HydrateConfig) error {
 			}
 
 			leaf++
+		}
+		if sw.Spec.Role.IsVirtualEdge() {
+			sw.Spec.ASN = VIRTUAL_EDGE_ASN
+			sw.Spec.IP = fmt.Sprintf("%s.%d.%d/32", cfg.Subnet, SWITCH_IP_NET, leaf+LEAF_OFFSET)
+			sw.Spec.ProtocolIP = fmt.Sprintf("%s.%d.%d/32", cfg.Subnet, PROTOCOL_IP_NET, leaf+LEAF_OFFSET)
+			if len(externalSwitches) != 1 {
+				return errors.Errorf("expected exactly one external switch for virtual edge, got %d", len(externalSwitches))
+			}
+
+			if borderSw := data.Switch.Get(externalSwitches[0]); borderSw != nil {
+				externalConfig := agentapi.VirtualEdgeConfig{
+					ASN:          fmt.Sprintf("%d", borderSw.Spec.ASN),
+					VRF:          "default",
+					CommunityIn:  fmt.Sprintf("%d:%d", VIRTUAL_EDGE_ASN, borderSw.Spec.ASN),
+					CommunityOut: fmt.Sprintf("%d:%d", borderSw.Spec.ASN, VIRTUAL_EDGE_ASN),
+					NeighborIP:   fmt.Sprintf("%s.%d.%d", cfg.Subnet, VIRTUAL_EDGE_IP_NET, 1),
+					IfName:       "Ethernet1",
+					IfVlan:       "200",
+					IfIP:         fmt.Sprintf("%s.%d.%d/24", cfg.Subnet, VIRTUAL_EDGE_IP_NET, leaf+LEAF_OFFSET),
+				}
+
+				encodedConfig := map[string]agentapi.VirtualEdgeConfig{}
+				encodedConfig[borderSw.Name] = externalConfig
+				encoded, err := json.Marshal(encodedConfig)
+				if err != nil {
+					return errors.Wrapf(err, "error encoding external config")
+				}
+				sw.Annotations = make(map[string]string)
+				sw.Annotations[VIRTUAL_EDGE_CFG] = string(encoded)
+
+				err = createExternal(externalConfig, data)
+				if err != nil {
+					return errors.Wrapf(err, "error creating external object")
+				}
+
+				err = createExternalAttachment(externalConfig, data, externalConnections[0])
+				if err != nil {
+					return errors.Wrapf(err, "error creating external attachment object")
+				}
+			}
 		}
 
 		if err := data.Update(sw); err != nil {
