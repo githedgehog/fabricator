@@ -17,6 +17,7 @@ package vlab
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log/slog"
 	"net"
@@ -41,7 +42,19 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlutil "sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
+
+// TODO properly handle logging config for ctrl runtime
+func setupCtrlRuntimeLogs() {
+	opts := zap.Options{
+		Development: true,
+	}
+	opts.BindFlags(flag.CommandLine)
+	flag.Parse()
+
+	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+}
 
 var scheme = runtime.NewScheme()
 
@@ -68,8 +81,6 @@ func kubeClient() (client.WithWatch, error) {
 
 func waitForSwitchesReady(svcCfg *ServiceConfig) error {
 	start := time.Now()
-
-	slog.Info("Waiting for all switches to be ready")
 
 	os.Setenv("KUBECONFIG", filepath.Join(svcCfg.Basedir, "kubeconfig.yaml"))
 	kube, err := kubeClient()
@@ -156,6 +167,8 @@ var VPCSetupTypes = []string{
 }
 
 func (svc *Service) SetupVPCs(ctx context.Context, cfg SetupVPCsConfig) error {
+	setupCtrlRuntimeLogs()
+
 	start := time.Now()
 
 	if !slices.Contains(VPCSetupTypes, cfg.Type) {
@@ -397,6 +410,8 @@ type ServerConnectivityTestConfig struct {
 }
 
 func (svc *Service) TestConnectivity(ctx context.Context, cfg ServerConnectivityTestConfig) error {
+	setupCtrlRuntimeLogs()
+
 	start := time.Now()
 
 	slog.Info("Starting connectivity test", "vpc", cfg.VPC, "vpcPing", cfg.VPCPing, "vpcIperf", cfg.VPCIperf, "vpcIperfSpeed", cfg.VPCIperf, "ext", cfg.Ext, "extCurl", cfg.ExtCurl)
@@ -946,6 +961,8 @@ type SetupPeeringsConfig struct {
 
 // TODO move vpc creation to here, just have flag --vpc-per-server
 func (svc *Service) SetupPeerings(ctx context.Context, cfg SetupPeeringsConfig) error {
+	setupCtrlRuntimeLogs()
+
 	start := time.Now()
 
 	slog.Info("Setting up VPC and External peerings", "dryRun", cfg.DryRun, "numRequests", len(cfg.Requests))
