@@ -169,91 +169,90 @@ func (vm *VM) RunInstall(ctx context.Context, svc *Service) func() error {
 			return nil
 		}
 
-		if vm.Installed.Is() {
-			slog.Debug("VM is already installed", "name", vm.Name)
-			return nil
-		}
-
 		svcCfg := svc.cfg
 		if svcCfg.DryRun {
 			return nil
 		}
 
-		slog.Info("Installing VM", "name", vm.Name, "type", vm.Type)
+		if vm.Installed.Is() {
+			slog.Debug("VM is already installed", "name", vm.Name)
+		} else {
+			slog.Info("Installing VM", "name", vm.Name, "type", vm.Type)
 
-		timeout := 10 * time.Minute // TODO
-		if len(svcCfg.OnReady) > 0 {
-			timeout = 60 * time.Minute // TODO
-		}
-
-		ctx, cancel := context.WithTimeoutCause(ctx, timeout, errors.New("controller installation timed out")) // TODO
-		defer cancel()
-
-		slog.Debug("Waiting for VM ssh", "name", vm.Name, "type", vm.Type)
-
-		ticker := time.NewTicker(5 * time.Second) // TODO
-		defer ticker.Stop()
-
-	loop: // oops, some goto :)
-		for {
-			select {
-			case <-ticker.C:
-				err := vm.ssh(ctx, svcCfg, true, "hostname")
-				if err != nil {
-					// just waiting
-					slog.Debug("Can't ssh to VM", "name", vm.Name, "type", vm.Type, "error", err)
-				} else {
-					break loop
-				}
-			case <-ctx.Done():
-				return ctx.Err()
+			timeout := 10 * time.Minute // TODO
+			if len(svcCfg.OnReady) > 0 {
+				timeout = 60 * time.Minute // TODO
 			}
-		}
-		slog.Info("VM ssh is available", "name", vm.Name, "type", vm.Type)
 
-		// TODO k3s really don't like when we don't have default route
-		// err := vm.ssh(ctx, "sudo ip route add default via 10.100.0.2 dev eth0")
-		// if err != nil {
-		// 	return errors.Wrap(err, "error setting default route")
-		// }
+			ctx, cancel := context.WithTimeoutCause(ctx, timeout, errors.New("controller installation timed out")) // TODO
+			defer cancel()
 
-		installerPath := svcCfg.ControlInstaller
-		if vm.Type == VMTypeServer {
-			installerPath = svcCfg.ServerInstaller
-		}
-		installer := filepath.Base(installerPath)
+			slog.Debug("Waiting for VM ssh", "name", vm.Name, "type", vm.Type)
 
-		slog.Info("Uploading installer", "name", vm.Name, "type", vm.Type, "installer", installer)
-		err := vm.upload(ctx, svcCfg, false, installerPath+".tgz", "~/")
-		if err != nil {
-			return errors.Wrap(err, "error uploading installer")
-		}
-		slog.Debug("Installer uploaded", "name", vm.Name, "type", vm.Type, "installer", installer)
+			ticker := time.NewTicker(5 * time.Second) // TODO
+			defer ticker.Stop()
 
-		slog.Info("Running installer on VM", "name", vm.Name, "type", vm.Type, "installer", installer)
-		installCmd := fmt.Sprintf("tar xzf %s.tgz && cd %s && sudo ./hhfab-recipe run", installer, installer)
-		if slog.Default().Enabled(ctx, slog.LevelDebug) {
-			installCmd += " -v"
-		}
-		err = vm.ssh(ctx, svcCfg, false, installCmd)
-		if err != nil {
-			return errors.Wrap(err, "error installing vm")
-		}
+		loop: // oops, some goto :)
+			for {
+				select {
+				case <-ticker.C:
+					err := vm.ssh(ctx, svcCfg, true, "hostname")
+					if err != nil {
+						// just waiting
+						slog.Debug("Can't ssh to VM", "name", vm.Name, "type", vm.Type, "error", err)
+					} else {
+						break loop
+					}
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
+			slog.Info("VM ssh is available", "name", vm.Name, "type", vm.Type)
 
-		slog.Info("VM installed", "name", vm.Name, "type", vm.Type, "installer", installer)
+			// TODO k3s really don't like when we don't have default route
+			// err := vm.ssh(ctx, "sudo ip route add default via 10.100.0.2 dev eth0")
+			// if err != nil {
+			// 	return errors.Wrap(err, "error setting default route")
+			// }
 
-		err = vm.Installed.Mark()
-		if err != nil {
-			return errors.Wrapf(err, "error marking vm as installed")
+			installerPath := svcCfg.ControlInstaller
+			if vm.Type == VMTypeServer {
+				installerPath = svcCfg.ServerInstaller
+			}
+			installer := filepath.Base(installerPath)
+
+			slog.Info("Uploading installer", "name", vm.Name, "type", vm.Type, "installer", installer)
+			err := vm.upload(ctx, svcCfg, false, installerPath+".tgz", "~/")
+			if err != nil {
+				return errors.Wrap(err, "error uploading installer")
+			}
+			slog.Debug("Installer uploaded", "name", vm.Name, "type", vm.Type, "installer", installer)
+
+			slog.Info("Running installer on VM", "name", vm.Name, "type", vm.Type, "installer", installer)
+			installCmd := fmt.Sprintf("tar xzf %s.tgz && cd %s && sudo ./hhfab-recipe run", installer, installer)
+			if slog.Default().Enabled(ctx, slog.LevelDebug) {
+				installCmd += " -v"
+			}
+			err = vm.ssh(ctx, svcCfg, false, installCmd)
+			if err != nil {
+				return errors.Wrap(err, "error installing vm")
+			}
+
+			err = vm.download(ctx, svcCfg, true, "/etc/rancher/k3s/k3s.yaml", filepath.Join(svcCfg.Basedir, "kubeconfig.yaml"))
+			if err != nil {
+				return errors.Wrapf(err, "error downloading kubeconfig")
+			}
+
+			slog.Info("VM installed", "name", vm.Name, "type", vm.Type, "installer", installer)
+
+			err = vm.Installed.Mark()
+			if err != nil {
+				return errors.Wrapf(err, "error marking vm as installed")
+			}
 		}
 
 		if vm.Type != VMTypeControl {
 			return nil
-		}
-
-		err = vm.download(ctx, svcCfg, true, "/etc/rancher/k3s/k3s.yaml", filepath.Join(svcCfg.Basedir, "kubeconfig.yaml"))
-		if err != nil {
-			return errors.Wrapf(err, "error downloading kubeconfig")
 		}
 
 		if svcCfg.InstallComplete {
@@ -265,10 +264,9 @@ func (vm *VM) RunInstall(ctx context.Context, svc *Service) func() error {
 		if svcCfg.RunComplete != "" {
 			slog.Info("Running script after control node installation as requested")
 
-			err = execCmd(ctx, svcCfg, "", false, svcCfg.RunComplete, []string{
+			if err := execCmd(ctx, svcCfg, "", false, svcCfg.RunComplete, []string{
 				"KUBECONFIG=" + filepath.Join(svcCfg.Basedir, "kubeconfig.yaml"),
-			})
-			if err != nil {
+			}); err != nil {
 				slog.Error("error running script after control node installation", "error", err)
 				os.Exit(1)
 			}
@@ -314,10 +312,9 @@ func (vm *VM) RunInstall(ctx context.Context, svc *Service) func() error {
 			} else if cmd != "noop" {
 				slog.Info("Running script after switches are ready as requested")
 
-				err = execCmd(ctx, svcCfg, "", false, cmd, []string{
+				if err := execCmd(ctx, svcCfg, "", false, cmd, []string{
 					"KUBECONFIG=" + filepath.Join(svcCfg.Basedir, "kubeconfig.yaml"),
-				})
-				if err != nil {
+				}); err != nil {
 					slog.Error("error running script after switches are ready", "error", err)
 					os.Exit(1)
 				}
