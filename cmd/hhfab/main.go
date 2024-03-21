@@ -193,7 +193,7 @@ func main() {
 		&cli.BoolFlag{
 			Category:    FLAG_CATEGORY_WIRING_GEN,
 			Name:        "external",
-			Usage:       "include vritual external switch",
+			Usage:       "include virtual external switch",
 			Destination: &wgExternal,
 		},
 	}
@@ -645,7 +645,7 @@ func main() {
 							briefFlag,
 							&cli.BoolFlag{
 								Name:  "invpc",
-								Usage: "test connectivity beween servers in a single VPC",
+								Usage: "test connectivity between servers in a single VPC",
 								Value: true,
 							},
 							&cli.BoolFlag{
