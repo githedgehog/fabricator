@@ -67,6 +67,13 @@ jobs:
           go-version: oldstable
           cache: true
 
+      # Don't remove it! We shouldn't allow CI to pass if there are any changes not committed after running make
+      - name: Make all (autogeneration) and fail on dirty
+        run: |
+          make lint-lic fmt build
+          git status --short
+          git diff --quiet
+
       - name: Go Lint
         uses: golangci/golangci-lint-action@v4
         with:
@@ -74,13 +81,6 @@ jobs:
           # unfortunately the package cache is creating lots of errors/warnings right now
           # for details: https://github.com/golangci/golangci-lint-action/issues/677
           skip-pkg-cache: true
-
-      # Don't remove it! We shouldn't allow CI to pass if there are any changes not committed after running make
-      - name: Make all (autogeneration) and fail on dirty
-        run: |
-          make lint-lic fmt
-          git status --short
-          git diff --quiet
 
       - name: Run tests
         run: |
