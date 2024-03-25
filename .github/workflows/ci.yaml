@@ -154,6 +154,7 @@ jobs:
     runs-on: vlab
     needs:
       - test
+      - build
     timeout-minutes: 120
 
     strategy:
@@ -222,7 +223,6 @@ jobs:
     runs-on: lab
     if: startsWith(github.event.ref, 'refs/tags/') && github.event_name == 'push'
     needs:
-      - test
       - build
       - vlab
 
