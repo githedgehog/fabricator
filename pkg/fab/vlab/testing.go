@@ -63,6 +63,8 @@ func init() {
 	utilruntime.Must(vpcapi.AddToScheme(scheme))
 	utilruntime.Must(wiringapi.AddToScheme(scheme))
 	utilruntime.Must(agentapi.AddToScheme(scheme))
+
+	setupCtrlRuntimeLogs()
 }
 
 func kubeClient() (client.WithWatch, error) {
@@ -171,8 +173,6 @@ var VPCSetupTypes = []string{
 }
 
 func (svc *Service) SetupVPCs(ctx context.Context, cfg SetupVPCsConfig) error {
-	setupCtrlRuntimeLogs()
-
 	start := time.Now()
 
 	if !slices.Contains(VPCSetupTypes, cfg.Type) {
@@ -417,8 +417,6 @@ type ServerConnectivityTestConfig struct {
 }
 
 func (svc *Service) TestConnectivity(ctx context.Context, cfg ServerConnectivityTestConfig) error {
-	setupCtrlRuntimeLogs()
-
 	start := time.Now()
 
 	slog.Info("Starting connectivity test", "vpc", cfg.VPC, "vpcPing", cfg.VPCPing, "vpcIperf", cfg.VPCIperf, "vpcIperfSpeed", cfg.VPCIperf, "ext", cfg.Ext, "extCurl", cfg.ExtCurl)
@@ -978,8 +976,6 @@ type SetupPeeringsConfig struct {
 
 // TODO move vpc creation to here, just have flag --vpc-per-server
 func (svc *Service) SetupPeerings(ctx context.Context, cfg SetupPeeringsConfig) error {
-	setupCtrlRuntimeLogs()
-
 	start := time.Now()
 
 	slog.Info("Setting up VPC and External peerings", "dryRun", cfg.DryRun, "numRequests", len(cfg.Requests))
