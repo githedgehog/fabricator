@@ -280,6 +280,7 @@ func (vm *VM) RunInstall(ctx context.Context, svc *Service) func() error {
 
 		if len(svcCfg.OnReady) > 0 {
 			slog.Info("Waiting for all switches to get ready as requested and run commands after that")
+			setupCtrlRuntimeLogs()
 			if err := waitForSwitchesReady(ctx, svcCfg); err != nil {
 				slog.Error("error waiting switches are ready", "error", err)
 				os.Exit(1)
