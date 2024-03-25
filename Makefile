@@ -62,7 +62,7 @@ vet: ## Run go vet against code.
 
 .PHONY: test
 test: fmt vet envtest ## Run tests.
-	go test ./... -coverprofile cover.out
+	go test ./... -coverprofile cover.out --tags containers_image_openpgp
 
 .PHONY: lint-lic
 lint-lic: addlicense ## Run addlicense to check if all files have the license header.
