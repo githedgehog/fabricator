@@ -58,11 +58,11 @@ fmt: ## Run go fmt against code.
 
 .PHONY: vet
 vet: ## Run go vet against code.
-	go vet ./...
+	go vet --tags containers_image_openpgp ./...
 
 .PHONY: test
 test: fmt vet envtest ## Run tests.
-	go test ./... -coverprofile cover.out --tags containers_image_openpgp
+	go test --coverprofile cover.out --tags containers_image_openpgp ./...
 
 .PHONY: lint-lic
 lint-lic: addlicense ## Run addlicense to check if all files have the license header.
