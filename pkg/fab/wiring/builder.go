@@ -51,6 +51,10 @@ type Builder struct {
 	MCLAGSessionLinks uint8           // number of MCLAG session links to generate
 	MCLAGPeerLinks    uint8           // number of MCLAG peer links to generate
 	VPCLoopbacks      uint8           // number of VPC loopbacks to generate per leaf switch
+	MCLAGServers      uint8           // number of MCLAG servers to generate for MCLAG switches
+	ESLAGServers      uint8           // number of ESLAG servers to generate for ESLAG switches
+	UnbundledServers  uint8           // number of unbundled servers to generate for switches (only for one of the first switch in the redundancy group or orphan switch)
+	BundledServers    uint8           // number of bundled servers to generate for switches (only for one of the second switch in the redundancy group or orphan switch)
 
 	data         *wiring.Data
 	ifaceTracker map[string]uint8 // next available interface ID for each switch
@@ -158,6 +162,7 @@ func (b *Builder) Build() (*wiring.Data, error) {
 	slog.Info("                    >>>", "mclagLeafsCount", b.MCLAGLeafsCount, "mclagSessionLinks", b.MCLAGSessionLinks, "mclagPeerLinks", b.MCLAGPeerLinks)
 	slog.Info("                    >>>", "orphanLeafsCount", b.OrphanLeafsCount)
 	slog.Info("                    >>>", "vpcLoopbacks", b.VPCLoopbacks)
+	slog.Info("                    >>>", "mclagServers", b.MCLAGServers, "eslagServers", b.ESLAGServers, "unbundledServers", b.UnbundledServers, "bundledServers", b.BundledServers)
 
 	var err error
 	b.data, err = wiring.New()
@@ -293,8 +298,7 @@ func (b *Builder) Build() (*wiring.Data, error) {
 			return nil, err
 		}
 
-		// 2 x mclag conn servers
-		for i := 0; i < 2; i++ {
+		for i := 0; i < int(b.MCLAGServers); i++ {
 			serverName := fmt.Sprintf("server-%02d", serverID)
 
 			if _, err := b.createServer(serverName, wiringapi.ServerSpec{
@@ -323,8 +327,7 @@ func (b *Builder) Build() (*wiring.Data, error) {
 			serverID++
 		}
 
-		// unbundled conn server to leaf1
-		{
+		for i := 0; i < int(b.UnbundledServers); i++ {
 			serverName := fmt.Sprintf("server-%02d", serverID)
 
 			if _, err := b.createServer(serverName, wiringapi.ServerSpec{
@@ -347,8 +350,7 @@ func (b *Builder) Build() (*wiring.Data, error) {
 			serverID++
 		}
 
-		// bundled conn server to leaf2
-		{
+		for i := 0; i < int(b.BundledServers); i++ {
 			serverName := fmt.Sprintf("server-%02d", serverID)
 
 			if _, err := b.createServer(serverName, wiringapi.ServerSpec{
@@ -416,8 +418,7 @@ func (b *Builder) Build() (*wiring.Data, error) {
 		switchID += leafs
 		leafID += leafs
 
-		// 2 x eslag conn servers
-		for i := 0; i < 2; i++ {
+		for i := 0; i < int(b.ESLAGServers); i++ {
 			serverName := fmt.Sprintf("server-%02d", serverID)
 
 			leafNamesStr := strings.Join(leafNames, " ")
@@ -446,8 +447,7 @@ func (b *Builder) Build() (*wiring.Data, error) {
 			serverID++
 		}
 
-		// unbundled conn server to leaf1
-		{
+		for i := 0; i < int(b.UnbundledServers); i++ {
 			serverName := fmt.Sprintf("server-%02d", serverID)
 
 			if _, err := b.createServer(serverName, wiringapi.ServerSpec{
@@ -470,34 +470,35 @@ func (b *Builder) Build() (*wiring.Data, error) {
 			serverID++
 		}
 
-		// bundled conn server to leaf2
 		if leafs > 1 {
-			serverName := fmt.Sprintf("server-%02d", serverID)
+			for i := 0; i < int(b.BundledServers); i++ {
+				serverName := fmt.Sprintf("server-%02d", serverID)
 
-			if _, err := b.createServer(serverName, wiringapi.ServerSpec{
-				Description: fmt.Sprintf("S-%02d Bundled %s", serverID, leafNames[1]),
-			}); err != nil {
-				return nil, err
-			}
+				if _, err := b.createServer(serverName, wiringapi.ServerSpec{
+					Description: fmt.Sprintf("S-%02d Bundled %s", serverID, leafNames[1]),
+				}); err != nil {
+					return nil, err
+				}
 
-			if _, err := b.createConnection(wiringapi.ConnectionSpec{
-				Bundled: &wiringapi.ConnBundled{
-					Links: []wiringapi.ServerToSwitchLink{
-						{
-							Server: wiringapi.BasePortName{Port: b.nextServerPort(serverName)},
-							Switch: wiringapi.BasePortName{Port: b.nextSwitchPort(leafNames[1])},
-						},
-						{
-							Server: wiringapi.BasePortName{Port: b.nextServerPort(serverName)},
-							Switch: wiringapi.BasePortName{Port: b.nextSwitchPort(leafNames[1])},
+				if _, err := b.createConnection(wiringapi.ConnectionSpec{
+					Bundled: &wiringapi.ConnBundled{
+						Links: []wiringapi.ServerToSwitchLink{
+							{
+								Server: wiringapi.BasePortName{Port: b.nextServerPort(serverName)},
+								Switch: wiringapi.BasePortName{Port: b.nextSwitchPort(leafNames[1])},
+							},
+							{
+								Server: wiringapi.BasePortName{Port: b.nextServerPort(serverName)},
+								Switch: wiringapi.BasePortName{Port: b.nextSwitchPort(leafNames[1])},
+							},
 						},
 					},
-				},
-			}); err != nil {
-				return nil, err
-			}
+				}); err != nil {
+					return nil, err
+				}
 
-			serverID++
+				serverID++
+			}
 		}
 	}
 
@@ -524,8 +525,7 @@ func (b *Builder) Build() (*wiring.Data, error) {
 		switchID++
 		leafID++
 
-		// unbundled conn server
-		{
+		for i := 0; i < int(b.UnbundledServers); i++ {
 			serverName := fmt.Sprintf("server-%02d", serverID)
 
 			if _, err := b.createServer(serverName, wiringapi.ServerSpec{
@@ -548,8 +548,7 @@ func (b *Builder) Build() (*wiring.Data, error) {
 			serverID++
 		}
 
-		// bundled conn server
-		{
+		for i := 0; i < int(b.BundledServers); i++ {
 			serverName := fmt.Sprintf("server-%02d", serverID)
 
 			if _, err := b.createServer(serverName, wiringapi.ServerSpec{
@@ -683,7 +682,17 @@ func (b *Builder) Build() (*wiring.Data, error) {
 func (b *Builder) nextSwitchPort(switchName string) string {
 	ifaceID := b.ifaceTracker[switchName]
 	portName := fmt.Sprintf("%s/Ethernet%d", switchName, ifaceID)
-	ifaceID++
+
+	offset := 1
+	if ifaceID >= 48 {
+		offset = 4
+	}
+	ifaceID += uint8(offset)
+
+	if ifaceID > 76 {
+		slog.Error("Too many interfaces for switch", "switch", switchName)
+	}
+
 	b.ifaceTracker[switchName] = ifaceID
 
 	return portName

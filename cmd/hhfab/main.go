@@ -116,6 +116,7 @@ func main() {
 	var wgControlLinksCount, wgSpinesCount, wgFabricLinksCount, wgMCLAGLeafsCount, wgOrphanLeafsCount, wgMCLAGSessionLinks, wgMCLAGPeerLinks, wgVPCLoopbacks uint
 	var wgESLAGLeafGroups string
 	var wgExternal bool
+	var wgMCLAGServers, wgESLAGServers, wgUnbundledServers, wgBundledServers uint
 
 	fabricModes := []string{}
 	for _, m := range meta.FabricModes {
@@ -196,6 +197,34 @@ func main() {
 			Usage:       "include virtual external switch",
 			Destination: &wgExternal,
 		},
+		&cli.UintFlag{
+			Category:    CategoryWiringGen,
+			Name:        "mclag-servers",
+			Usage:       "number of MCLAG servers to generate for MCLAG switches",
+			Destination: &wgMCLAGServers,
+			Value:       2,
+		},
+		&cli.UintFlag{
+			Category:    CategoryWiringGen,
+			Name:        "eslag-servers",
+			Usage:       "number of ESLAG servers to generate for ESLAG switches",
+			Destination: &wgESLAGServers,
+			Value:       2,
+		},
+		&cli.UintFlag{
+			Category:    CategoryWiringGen,
+			Name:        "unbundled-servers",
+			Usage:       "number of unbundled servers to generate for switches (only for one of the first switch in the redundancy group or orphan switch)",
+			Destination: &wgUnbundledServers,
+			Value:       1,
+		},
+		&cli.UintFlag{
+			Category:    CategoryWiringGen,
+			Name:        "bundled-servers",
+			Usage:       "number of bundled servers to generate for switches (only for one of the second switch in the redundancy group or orphan switch)",
+			Destination: &wgBundledServers,
+			Value:       1,
+		},
 	}
 
 	mngr := fab.NewCNCManager()
@@ -268,6 +297,10 @@ func main() {
 						MCLAGSessionLinks: uint8(wgMCLAGSessionLinks),
 						MCLAGPeerLinks:    uint8(wgMCLAGPeerLinks),
 						VPCLoopbacks:      uint8(wgVPCLoopbacks),
+						MCLAGServers:      uint8(wgMCLAGServers),
+						ESLAGServers:      uint8(wgESLAGServers),
+						UnbundledServers:  uint8(wgUnbundledServers),
+						BundledServers:    uint8(wgBundledServers),
 					}
 					err := mngr.Init(basedir, fromConfig, cnc.Preset(preset), meta.FabricMode(fabricMode), wiringPath.Value(), wiringGen, hydrate)
 					if err != nil {
@@ -751,6 +784,10 @@ func main() {
 								MCLAGSessionLinks: uint8(wgMCLAGSessionLinks),
 								MCLAGPeerLinks:    uint8(wgMCLAGPeerLinks),
 								VPCLoopbacks:      uint8(wgVPCLoopbacks),
+								MCLAGServers:      uint8(wgMCLAGServers),
+								ESLAGServers:      uint8(wgESLAGServers),
+								UnbundledServers:  uint8(wgUnbundledServers),
+								BundledServers:    uint8(wgBundledServers),
 							}).Build()
 							if err != nil {
 								return errors.Wrap(err, "error building sample")
