@@ -95,6 +95,7 @@ func createExternal(e agentapi.VirtualEdgeConfig, data *wiring.Data) error {
 			OutboundCommunity: e.CommunityIn,
 		},
 	}
+
 	return errors.Wrapf(data.Add(external), "error adding external object")
 }
 
@@ -123,7 +124,7 @@ func createExternalAttachment(e agentapi.VirtualEdgeConfig, data *wiring.Data, c
 				IP:   fmt.Sprintf("%s/24", e.NeighborIP),
 			},
 			Neighbor: vpcapi.ExternalAttachmentNeighbor{
-				ASN: VIRTUAL_EDGE_ASN,
+				ASN: VirtualEdgeASN,
 				IP:  virtualEdgeIP,
 			},
 		},
@@ -133,19 +134,19 @@ func createExternalAttachment(e agentapi.VirtualEdgeConfig, data *wiring.Data, c
 }
 
 const (
-	SPINE_OFFSET = 200
-	LEAF_OFFSET  = 100
+	SpineOffset = 200
+	LeafOffset  = 100
 
 	// 1 is reserved for the control VIP
-	MCLAG_SESSION_IP_NET = 5
-	SWITCH_IP_NET        = 10
-	PROTOCOL_IP_NET      = 11
-	VTEP_IP_NET          = 12
-	CONTROL_IP_NET       = 20 // single /24 is more than enough
-	FABRIC_IP_NET        = 30 // can take more than one /24, let's book 10
-	VIRTUAL_EDGE_IP_NET  = 40 // single /24 is more than enough
-	VIRTUAL_EDGE_CFG     = "virtual-edge.hhfab.fabric.githedgehog.com/external-cfg"
-	VIRTUAL_EDGE_ASN     = 64100
+	MCLAGSessionIPNet = 5
+	SwitchIPNet       = 10
+	ProtocolIPNet     = 11
+	VTEPIPNet         = 12
+	ControlIPNet      = 20 // single /24 is more than enough
+	FabricIPNet       = 30 // can take more than one /24, let's book 10
+	VirtualEdgeIPNet  = 40 // single /24 is more than enough
+	VirtualEdgeCfg    = "virtual-edge.hhfab.fabric.githedgehog.com/external-cfg"
+	VirtualEdgeASN    = 64100
 )
 
 func HydratePath(wiringPath string) error {
@@ -193,7 +194,6 @@ func Hydrate(data *wiring.Data, cfg *HydrateConfig) error {
 	var externalConnections []string
 	for _, conn := range data.Connection.All() {
 		if conn.Spec.MCLAGDomain != nil {
-
 			sws, _, _, _, err := conn.Spec.Endpoints()
 			if err != nil {
 				return errors.Wrapf(err, "error getting endpoints for MCLAG domain connection %s", conn.Name)
@@ -206,7 +206,6 @@ func Hydrate(data *wiring.Data, cfg *HydrateConfig) error {
 			mclagPeer[sws[1]] = sws[0]
 		}
 		if conn.Spec.External != nil {
-
 			sws, _, _, _, err := conn.Spec.Endpoints()
 			if err != nil {
 				return errors.Wrapf(err, "error getting endpoints for external connection %s", conn.Name)
@@ -217,7 +216,6 @@ func Hydrate(data *wiring.Data, cfg *HydrateConfig) error {
 			externalSwitches = append(externalSwitches, sws[0])
 			externalConnections = append(externalConnections, conn.Name)
 		}
-
 	}
 
 	spine := 0
@@ -225,16 +223,16 @@ func Hydrate(data *wiring.Data, cfg *HydrateConfig) error {
 	for _, sw := range data.Switch.All() {
 		if sw.Spec.Role.IsSpine() {
 			sw.Spec.ASN = cfg.SpineASN
-			sw.Spec.IP = fmt.Sprintf("%s.%d.%d/32", cfg.Subnet, SWITCH_IP_NET, spine+SPINE_OFFSET)
-			sw.Spec.ProtocolIP = fmt.Sprintf("%s.%d.%d/32", cfg.Subnet, PROTOCOL_IP_NET, spine+SPINE_OFFSET)
+			sw.Spec.IP = fmt.Sprintf("%s.%d.%d/32", cfg.Subnet, SwitchIPNet, spine+SpineOffset)
+			sw.Spec.ProtocolIP = fmt.Sprintf("%s.%d.%d/32", cfg.Subnet, ProtocolIPNet, spine+SpineOffset)
 
 			spine++
 		}
 		if sw.Spec.Role.IsLeaf() {
 			sw.Spec.ASN = cfg.LeafASNStart + uint32(leaf)
-			sw.Spec.IP = fmt.Sprintf("%s.%d.%d/32", cfg.Subnet, SWITCH_IP_NET, leaf+LEAF_OFFSET)
-			sw.Spec.ProtocolIP = fmt.Sprintf("%s.%d.%d/32", cfg.Subnet, PROTOCOL_IP_NET, leaf+LEAF_OFFSET)
-			sw.Spec.VTEPIP = fmt.Sprintf("%s.%d.%d/32", cfg.Subnet, VTEP_IP_NET, leaf+LEAF_OFFSET)
+			sw.Spec.IP = fmt.Sprintf("%s.%d.%d/32", cfg.Subnet, SwitchIPNet, leaf+LeafOffset)
+			sw.Spec.ProtocolIP = fmt.Sprintf("%s.%d.%d/32", cfg.Subnet, ProtocolIPNet, leaf+LeafOffset)
+			sw.Spec.VTEPIP = fmt.Sprintf("%s.%d.%d/32", cfg.Subnet, VTEPIPNet, leaf+LeafOffset)
 
 			// MCLAG pair should have the same ASN and VTEP IP
 			if peer, ok := mclagPeer[sw.Name]; ok {
@@ -249,9 +247,9 @@ func Hydrate(data *wiring.Data, cfg *HydrateConfig) error {
 			leaf++
 		}
 		if sw.Spec.Role.IsVirtualEdge() {
-			sw.Spec.ASN = VIRTUAL_EDGE_ASN
-			sw.Spec.IP = fmt.Sprintf("%s.%d.%d/32", cfg.Subnet, SWITCH_IP_NET, leaf+LEAF_OFFSET)
-			sw.Spec.ProtocolIP = fmt.Sprintf("%s.%d.%d/32", cfg.Subnet, PROTOCOL_IP_NET, leaf+LEAF_OFFSET)
+			sw.Spec.ASN = VirtualEdgeASN
+			sw.Spec.IP = fmt.Sprintf("%s.%d.%d/32", cfg.Subnet, SwitchIPNet, leaf+LeafOffset)
+			sw.Spec.ProtocolIP = fmt.Sprintf("%s.%d.%d/32", cfg.Subnet, ProtocolIPNet, leaf+LeafOffset)
 			if len(externalSwitches) != 1 {
 				return errors.Errorf("expected exactly one external switch for virtual edge, got %d", len(externalSwitches))
 			}
@@ -260,12 +258,12 @@ func Hydrate(data *wiring.Data, cfg *HydrateConfig) error {
 				externalConfig := agentapi.VirtualEdgeConfig{
 					ASN:          fmt.Sprintf("%d", borderSw.Spec.ASN),
 					VRF:          "default",
-					CommunityIn:  fmt.Sprintf("%d:%d", VIRTUAL_EDGE_ASN, borderSw.Spec.ASN),
-					CommunityOut: fmt.Sprintf("%d:%d", borderSw.Spec.ASN, VIRTUAL_EDGE_ASN),
-					NeighborIP:   fmt.Sprintf("%s.%d.%d", cfg.Subnet, VIRTUAL_EDGE_IP_NET, 1),
+					CommunityIn:  fmt.Sprintf("%d:%d", VirtualEdgeASN, borderSw.Spec.ASN),
+					CommunityOut: fmt.Sprintf("%d:%d", borderSw.Spec.ASN, VirtualEdgeASN),
+					NeighborIP:   fmt.Sprintf("%s.%d.%d", cfg.Subnet, VirtualEdgeIPNet, 1),
 					IfName:       "Ethernet1",
 					IfVlan:       "200",
-					IfIP:         fmt.Sprintf("%s.%d.%d/24", cfg.Subnet, VIRTUAL_EDGE_IP_NET, leaf+LEAF_OFFSET),
+					IfIP:         fmt.Sprintf("%s.%d.%d/24", cfg.Subnet, VirtualEdgeIPNet, leaf+LeafOffset),
 				}
 
 				encodedConfig := map[string]agentapi.VirtualEdgeConfig{}
@@ -275,7 +273,7 @@ func Hydrate(data *wiring.Data, cfg *HydrateConfig) error {
 					return errors.Wrapf(err, "error encoding external config")
 				}
 				sw.Annotations = make(map[string]string)
-				sw.Annotations[VIRTUAL_EDGE_CFG] = string(encoded)
+				sw.Annotations[VirtualEdgeCfg] = string(encoded)
 
 				err = createExternal(externalConfig, data)
 				if err != nil {
@@ -299,16 +297,16 @@ func Hydrate(data *wiring.Data, cfg *HydrateConfig) error {
 	fabricNet := 0
 	for _, conn := range data.Connection.All() {
 		if conn.Spec.Management != nil {
-			conn.Spec.Management.Link.Server.IP = fmt.Sprintf("%s.%d.%d/31", cfg.Subnet, CONTROL_IP_NET, control)
-			conn.Spec.Management.Link.Switch.IP = fmt.Sprintf("%s.%d.%d/31", cfg.Subnet, CONTROL_IP_NET, control+1)
+			conn.Spec.Management.Link.Server.IP = fmt.Sprintf("%s.%d.%d/31", cfg.Subnet, ControlIPNet, control)
+			conn.Spec.Management.Link.Switch.IP = fmt.Sprintf("%s.%d.%d/31", cfg.Subnet, ControlIPNet, control+1)
 
 			control += 2
 		}
 
 		if conn.Spec.Fabric != nil {
 			for idx := range conn.Spec.Fabric.Links {
-				conn.Spec.Fabric.Links[idx].Spine.IP = fmt.Sprintf("%s.%d.%d/31", cfg.Subnet, FABRIC_IP_NET+fabricNet, fabric)
-				conn.Spec.Fabric.Links[idx].Leaf.IP = fmt.Sprintf("%s.%d.%d/31", cfg.Subnet, FABRIC_IP_NET+fabricNet, fabric+1)
+				conn.Spec.Fabric.Links[idx].Spine.IP = fmt.Sprintf("%s.%d.%d/31", cfg.Subnet, FabricIPNet+fabricNet, fabric)
+				conn.Spec.Fabric.Links[idx].Leaf.IP = fmt.Sprintf("%s.%d.%d/31", cfg.Subnet, FabricIPNet+fabricNet, fabric+1)
 
 				fabric += 2
 				if fabric > 254 {

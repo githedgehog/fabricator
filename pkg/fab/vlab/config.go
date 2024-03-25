@@ -85,13 +85,13 @@ type LinkConfig struct {
 }
 
 const (
-	HHFAB_CFG_PREFIX               = ".hhfab.fabric.githedgehog.com"
-	HHFAB_CFG_TYPE                 = "type" + HHFAB_CFG_PREFIX
-	HHFAB_CFG_SERIAL               = "serial" + HHFAB_CFG_PREFIX
-	HHFAB_CFG_LINK_PREFIX          = "link" + HHFAB_CFG_PREFIX + "/"
-	HHFAB_CFG_PCI_PREFIX           = "pci@"
-	HHFAB_CFG_SERIAL_SCHEME_SSH    = "ssh://"
-	HHFAB_CFG_SERIAL_SCHEME_TELNET = "telnet://"
+	HHFabCfgPrefix             = ".hhfab.fabric.githedgehog.com"
+	HHFabCfgType               = "type" + HHFabCfgPrefix
+	HHFabCfgSerial             = "serial" + HHFabCfgPrefix
+	HHFabCfgLinkPrefix         = "link" + HHFabCfgPrefix + "/"
+	HHFabCfgPCIPrefix          = "pci@"
+	HHFabCfgSerialSchemeSSH    = "ssh://"
+	HHFabCfgSerialSchemeTelnet = "telnet://"
 )
 
 func readConfigFromWiring(data *wiring.Data) (*Config, error) {
@@ -110,28 +110,28 @@ func readConfigFromWiring(data *wiring.Data) (*Config, error) {
 		}
 
 		for key, value := range sw.Annotations {
-			if key == HHFAB_CFG_TYPE {
+			if key == HHFabCfgType {
 				if value == string(ConfigSwitchTypeHW) {
 					swCfg.Type = ConfigSwitchTypeHW
 				} else if value != string(ConfigSwitchTypeVS) {
 					return nil, errors.Errorf("unknown switch type %s for switch %s", value, sw.Name)
 				}
-			} else if key == HHFAB_CFG_SERIAL {
-				if !strings.HasPrefix(value, HHFAB_CFG_SERIAL_SCHEME_SSH) && !strings.HasPrefix(value, HHFAB_CFG_SERIAL_SCHEME_TELNET) {
+			} else if key == HHFabCfgSerial {
+				if !strings.HasPrefix(value, HHFabCfgSerialSchemeSSH) && !strings.HasPrefix(value, HHFabCfgSerialSchemeTelnet) {
 					return nil, errors.Errorf("unknown serial scheme %s for switch %s", value, sw.Name)
 				}
 				swCfg.Serial = value
-			} else if strings.HasPrefix(key, HHFAB_CFG_LINK_PREFIX) {
-				port := key[len(HHFAB_CFG_LINK_PREFIX):]
+			} else if strings.HasPrefix(key, HHFabCfgLinkPrefix) {
+				port := key[len(HHFabCfgLinkPrefix):]
 				if !strings.HasPrefix(port, "Management0") && !strings.HasPrefix(port, "Ethernet") {
 					return nil, errors.Errorf("unknown link type for switch %s port %s (only Management0 and EthernetX supported)", sw.Name, port)
 				}
-				if !strings.HasPrefix(value, HHFAB_CFG_PCI_PREFIX) {
+				if !strings.HasPrefix(value, HHFabCfgPCIPrefix) {
 					return nil, errors.Errorf("unknown link PCI address %s for switch %s port %s", value, sw.Name, port)
 				}
 
 				cfg.Links[sw.Name+"/"+port] = LinkConfig{
-					PCIAddress: value[len(HHFAB_CFG_PCI_PREFIX):],
+					PCIAddress: value[len(HHFabCfgPCIPrefix):],
 				}
 			}
 		}

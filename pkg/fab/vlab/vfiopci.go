@@ -52,37 +52,37 @@ func bindDeviceToVFIO(dev string) error {
 			return errors.Wrapf(err, "error checking for driver for %s", dev)
 		}
 	} else {
-		if file, err := os.OpenFile(filepath.Join(devicePath, "driver", "unbind"), os.O_WRONLY, 0o200); err != nil {
+		file, err := os.OpenFile(filepath.Join(devicePath, "driver", "unbind"), os.O_WRONLY, 0o200)
+		if err != nil {
 			return errors.Wrapf(err, "error opening file to unbind driver for %s", dev)
-		} else {
-			defer file.Close()
-
-			if _, err := file.WriteString(dev); err != nil {
-				return errors.Wrapf(err, "error writing to file to unbind driver for %s", dev)
-			}
 		}
-	}
-
-	if file, err := os.OpenFile("/sys/bus/pci/drivers/vfio-pci/new_id", os.O_WRONLY, 0o200); err != nil {
-		return errors.Wrapf(err, "error opening new_id file to bind to vfio-pci for %s", dev)
-	} else {
-		defer file.Close()
-
-		if _, err := file.WriteString(string(vendorID) + " " + string(deviceID)); err != nil {
-			if !os.IsExist(err) {
-				return errors.Wrapf(err, "error writing to new_id file to bind to vfio-pci for %s", dev)
-			}
-		}
-	}
-
-	if file, err := os.OpenFile("/sys/bus/pci/drivers/vfio-pci/bind", os.O_WRONLY, 0o200); err != nil {
-		return errors.Wrapf(err, "error opening bind file to bind to vfio-pci for %s", dev)
-	} else {
 		defer file.Close()
 
 		if _, err := file.WriteString(dev); err != nil {
-			return errors.Wrapf(err, "error writing to bind file to bind to vfio-pci for %s", dev)
+			return errors.Wrapf(err, "error writing to file to unbind driver for %s", dev)
 		}
+	}
+
+	file, err := os.OpenFile("/sys/bus/pci/drivers/vfio-pci/new_id", os.O_WRONLY, 0o200)
+	if err != nil {
+		return errors.Wrapf(err, "error opening new_id file to bind to vfio-pci for %s", dev)
+	}
+	defer file.Close()
+
+	if _, err := file.WriteString(string(vendorID) + " " + string(deviceID)); err != nil {
+		if !os.IsExist(err) {
+			return errors.Wrapf(err, "error writing to new_id file to bind to vfio-pci for %s", dev)
+		}
+	}
+
+	file, err = os.OpenFile("/sys/bus/pci/drivers/vfio-pci/bind", os.O_WRONLY, 0o200)
+	if err != nil {
+		return errors.Wrapf(err, "error opening bind file to bind to vfio-pci for %s", dev)
+	}
+	defer file.Close()
+
+	if _, err := file.WriteString(dev); err != nil {
+		return errors.Wrapf(err, "error writing to bind file to bind to vfio-pci for %s", dev)
 	}
 
 	if _, err := os.Stat(vfioDevicePath); err != nil {

@@ -47,7 +47,7 @@ func (cfg *K3s) Name() string {
 	return "k3s"
 }
 
-func (cfg *K3s) IsEnabled(preset cnc.Preset) bool {
+func (cfg *K3s) IsEnabled(_ cnc.Preset) bool {
 	return true
 }
 
@@ -62,25 +62,25 @@ func (cfg *K3s) Flags() []cli.Flag {
 	}
 }
 
-func (cfg *K3s) Hydrate(preset cnc.Preset, fabricMode meta.FabricMode) error {
-	cfg.Ref = cfg.Ref.Fallback(REF_K3S)
+func (cfg *K3s) Hydrate(_ cnc.Preset, _ meta.FabricMode) error {
+	cfg.Ref = cfg.Ref.Fallback(RefK3s)
 
 	if cfg.ClusterCIDR == "" {
-		cfg.ClusterCIDR = CONTROL_KUBE_CLUSTER_CIDR
+		cfg.ClusterCIDR = ControlKubeClusterCIDR
 	}
 
 	if cfg.ServiceCIDR == "" {
-		cfg.ServiceCIDR = CONTROL_KUBE_SERVICE_CIDR
+		cfg.ServiceCIDR = ControlKubeServiceCIDR
 	}
 
 	if cfg.ClusterDNS == "" {
-		cfg.ClusterDNS = CONTROL_KUBE_CLUSTER_DNS
+		cfg.ClusterDNS = ControlKubeClusterDNS
 	}
 
 	for _, tlsSAN := range append([]string{
 		"127.0.0.1",
 		"kube-fabric.local",
-		CONTROL_VIP,
+		ControlVIP,
 	}, cfg.tlsSAN.Value()...) {
 		if !slices.Contains(cfg.TLSSAN, tlsSAN) {
 			cfg.TLSSAN = append(cfg.TLSSAN, tlsSAN)
@@ -90,10 +90,10 @@ func (cfg *K3s) Hydrate(preset cnc.Preset, fabricMode meta.FabricMode) error {
 	return nil
 }
 
-func (cfg *K3s) Build(basedir string, preset cnc.Preset, fabricMode meta.FabricMode, get cnc.GetComponent, wiring *wiring.Data, run cnc.AddBuildOp, install cnc.AddRunOp) error {
+func (cfg *K3s) Build(_ string, _ cnc.Preset, _ meta.FabricMode, get cnc.GetComponent, wiring *wiring.Data, run cnc.AddBuildOp, install cnc.AddRunOp) error {
 	cfg.Ref = cfg.Ref.Fallback(BaseConfig(get).Source)
 
-	run(BundleControlInstall, STAGE_INSTALL_0_PREP, "k3s-airgap-files",
+	run(BundleControlInstall, StageInstall0Prep, "k3s-airgap-files",
 		&cnc.FilesORAS{
 			Ref: cfg.Ref,
 			Files: []cnc.File{
@@ -119,7 +119,7 @@ func (cfg *K3s) Build(basedir string, preset cnc.Preset, fabricMode meta.FabricM
 		return errors.Wrap(err, "error getting control node name")
 	}
 
-	run(BundleControlInstall, STAGE_INSTALL_0_PREP, "k3s-config",
+	run(BundleControlInstall, StageInstall0Prep, "k3s-config",
 		&cnc.FileGenerate{
 			File: cnc.File{
 				Name:          "k3s-config.yaml",
@@ -132,7 +132,7 @@ func (cfg *K3s) Build(basedir string, preset cnc.Preset, fabricMode meta.FabricM
 			),
 		})
 
-	install(BundleControlInstall, STAGE_INSTALL_1_K3SZOT, "k3s-airgap-install",
+	install(BundleControlInstall, StageInstall1K3sZot, "k3s-airgap-install",
 		&cnc.ExecCommand{
 			Name: "k3s-install.sh",
 			Args: []string{"--disable=servicelb,traefik"},
@@ -151,9 +151,9 @@ func (cfg *K3s) ControlNodeName(data *wiring.Data) (string, error) {
 		if server.Spec.Type == wiringapi.ServerTypeControl {
 			if name != "" {
 				return "", errors.New("multiple control nodes found")
-			} else {
-				name = server.Name
 			}
+
+			name = server.Name
 		}
 	}
 

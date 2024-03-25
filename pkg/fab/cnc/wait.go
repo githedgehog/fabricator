@@ -43,12 +43,13 @@ func (w *WaitParams) Wait(checker func() error) error {
 	time.Sleep(w.Delay)
 
 	var err error
-	for attempt := 0; attempt < w.Attempts; attempt += 1 {
+	for attempt := 0; attempt < w.Attempts; attempt++ {
 		err = checker()
 		if err != nil {
 			slog.Debug("Attempt failed", "idx", attempt, "max", w.Attempts, "err", err)
 		} else {
 			slog.Debug("Attempt success", "idx", attempt, "max", w.Attempts)
+
 			break
 		}
 

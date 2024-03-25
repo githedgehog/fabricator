@@ -20,10 +20,11 @@ import (
 	"path/filepath"
 
 	"github.com/mitchellh/hashstructure/v2"
+	"github.com/pkg/errors"
 	"sigs.k8s.io/yaml"
 )
 
-const CACHE_FILE = "cache.yaml"
+const CacheFile = "cache.yaml"
 
 type Cache struct {
 	Hashes map[string]uint64 `json:"hashes,omitempty"`
@@ -32,19 +33,19 @@ type Cache struct {
 func (c *Cache) Save(basedir string) error {
 	data, err := yaml.Marshal(c)
 	if err != nil {
-		return err
+		return errors.Wrapf(err, "error marshalling cache")
 	}
 
-	return os.WriteFile(filepath.Join(basedir, CACHE_FILE), data, 0o644)
+	return errors.Wrapf(os.WriteFile(filepath.Join(basedir, CacheFile), data, 0o600), "error writing cache")
 }
 
 func (c *Cache) Load(basedir string) error {
-	data, err := os.ReadFile(filepath.Join(basedir, CACHE_FILE))
+	data, err := os.ReadFile(filepath.Join(basedir, CacheFile))
 	if err != nil {
-		return err
+		return errors.Wrapf(err, "error reading cache")
 	}
 
-	return yaml.UnmarshalStrict(data, c)
+	return errors.Wrapf(yaml.UnmarshalStrict(data, c), "error unmarshalling cache")
 }
 
 func (c *Cache) hash(values ...any) (uint64, error) {
@@ -52,14 +53,14 @@ func (c *Cache) hash(values ...any) (uint64, error) {
 		Hasher: fnv.New64(),
 	})
 	if err != nil {
-		return 0, err
+		return 0, errors.Wrapf(err, "error hashing values")
 	}
 
 	return hash, nil
 }
 
 func (c *Cache) IsActual(name string, values ...any) (bool, error) {
-	hash, err := c.hash(values)
+	hash, err := c.hash(values...)
 	if err != nil {
 		return false, err
 	}
@@ -70,7 +71,7 @@ func (c *Cache) IsActual(name string, values ...any) (bool, error) {
 }
 
 func (c *Cache) Add(name string, values ...any) error {
-	hash, err := c.hash(values)
+	hash, err := c.hash(values...)
 	if err != nil {
 		return err
 	}

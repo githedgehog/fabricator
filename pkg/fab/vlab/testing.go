@@ -35,6 +35,7 @@ import (
 	agentapi "go.githedgehog.com/fabric/api/agent/v1alpha2"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1alpha2"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1alpha2"
+	"go.githedgehog.com/fabric/pkg/util/pointer"
 	"golang.org/x/crypto/ssh"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -67,19 +68,19 @@ func init() {
 func kubeClient() (client.WithWatch, error) {
 	k8scfg, err := ctrl.GetConfig()
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrapf(err, "error getting kube config")
 	}
 	client, err := client.NewWithWatch(k8scfg, client.Options{
 		Scheme: scheme,
 	})
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrapf(err, "error creating kube client")
 	}
 
 	return client, nil
 }
 
-func waitForSwitchesReady(svcCfg *ServiceConfig) error {
+func waitForSwitchesReady(ctx context.Context, svcCfg *ServiceConfig) error {
 	start := time.Now()
 
 	os.Setenv("KUBECONFIG", filepath.Join(svcCfg.Basedir, "kubeconfig.yaml"))
@@ -100,10 +101,11 @@ func waitForSwitchesReady(svcCfg *ServiceConfig) error {
 		time.Sleep(15 * time.Second) // TODO make configurable
 
 		agents := agentapi.AgentList{}
-		if err := kube.List(context.Background(), &agents, client.InNamespace("default")); err != nil {
-			errs += 1
+		if err := kube.List(ctx, &agents, client.InNamespace("default")); err != nil {
+			errs++
 			if errs <= retries {
 				slog.Warn("Error listing agents", "retries", fmt.Sprintf("%d/%d", errs, retries), "err", err)
+
 				continue
 			}
 
@@ -113,6 +115,7 @@ func waitForSwitchesReady(svcCfg *ServiceConfig) error {
 		for _, agent := range agents.Items {
 			if agent.Generation == agent.Status.LastAppliedGen {
 				ready[agent.Name] = true
+
 				continue
 			}
 		}
@@ -138,6 +141,7 @@ func waitForSwitchesReady(svcCfg *ServiceConfig) error {
 
 		if allReady {
 			slog.Info("All switches are ready", "took", time.Since(start))
+
 			return nil
 		}
 	}
@@ -235,11 +239,12 @@ func (svc *Service) SetupVPCs(ctx context.Context, cfg SetupVPCsConfig) error {
 
 		if conn == nil {
 			slog.Info("Skipping server (no connection)...", "server", server.Name)
+
 			return nil
 		}
 
 		vpcName, _ := strings.CutPrefix(server.Name, "server-")
-		vpcName = "vpc-" + vpcName
+		vpcName = "vpc-" + vpcName //nolint:goconst
 
 		slog.Info("Enforcing VPC + Attachment for server...", "vpc", vpcName, "server", server.Name, "conn", conn.Name)
 
@@ -330,10 +335,10 @@ func (svc *Service) SetupVPCs(ctx context.Context, cfg SetupVPCsConfig) error {
 			ConnName: conn.Name,
 		})
 
-		idx += 1
+		idx++
 	}
 
-	auth, err := goph.Key(svc.cfg.SshKey, "")
+	auth, err := goph.Key(svc.cfg.SSHKey, "")
 	if err != nil {
 		return errors.Wrapf(err, "error loading SSH key")
 	}
@@ -349,7 +354,7 @@ func (svc *Service) SetupVPCs(ctx context.Context, cfg SetupVPCsConfig) error {
 			Port:     netconf.SSHPort,
 			Auth:     auth,
 			Timeout:  30 * time.Second,
-			Callback: ssh.InsecureIgnoreHostKey(),
+			Callback: ssh.InsecureIgnoreHostKey(), //nolint:gosec
 		})
 		if err != nil {
 			return errors.Wrapf(err, "error creating SSH client")
@@ -358,12 +363,14 @@ func (svc *Service) SetupVPCs(ctx context.Context, cfg SetupVPCsConfig) error {
 		out, err := client.Run("/opt/bin/hhnet cleanup")
 		if err != nil {
 			slog.Warn("hhnet cleanup error", "err", err, "output", string(out))
+
 			return errors.Wrapf(err, "error running hhnet cleanup")
 		}
 
 		out, err = client.Run("/opt/bin/hhnet " + netconf.Net)
 		if err != nil {
 			slog.Warn("hhnet conf error", "err", err, "output", string(out))
+
 			return errors.Wrapf(err, "error running hhnet")
 		}
 
@@ -461,6 +468,7 @@ serverLoop:
 		vm := svc.mngr.vms[server.Name]
 		if vm == nil {
 			slog.Info("Skipping server (no VM)...", "server", server.Name)
+
 			continue
 		}
 
@@ -483,6 +491,7 @@ serverLoop:
 
 			if len(servers) != 1 {
 				slog.Info("Skipping server (multiple servers in connection)...", "server", server.Name)
+
 				continue serverLoop
 			}
 			if !slices.Contains(servers, server.Name) {
@@ -491,6 +500,7 @@ serverLoop:
 
 			if srv.Connection != nil {
 				slog.Info("Skipping server (multiple connections)...", "server", server.Name)
+
 				continue serverLoop
 			}
 
@@ -498,13 +508,13 @@ serverLoop:
 			srv.Connection = some
 
 			if some.Spec.Unbundled != nil {
-				srv.ConnectionType = wiringapi.CONNECTION_TYPE_UNBUNDLED
+				srv.ConnectionType = wiringapi.ConnectionTypeUnbundled
 			} else if some.Spec.Bundled != nil {
-				srv.ConnectionType = wiringapi.CONNECTION_TYPE_BUNDLED
+				srv.ConnectionType = wiringapi.ConnectionTypeBundled
 			} else if some.Spec.MCLAG != nil {
-				srv.ConnectionType = wiringapi.CONNECTION_TYPE_MCLAG
+				srv.ConnectionType = wiringapi.ConnectionTypeMCLAG
 			} else if some.Spec.ESLAG != nil {
-				srv.ConnectionType = wiringapi.CONNECTION_TYPE_ESLAG
+				srv.ConnectionType = wiringapi.ConnectionTypeESLAG
 			} else {
 				return errors.Errorf("unexpected connection type")
 			}
@@ -512,6 +522,7 @@ serverLoop:
 
 		if srv.Connection == nil {
 			slog.Info("Skipping server (no connection)...", "server", server.Name)
+
 			continue
 		}
 
@@ -522,6 +533,7 @@ serverLoop:
 
 			if srv.VPCAttachment != nil {
 				slog.Info("Skipping server (multiple VPC attachments)...", "server", server.Name)
+
 				continue
 			}
 
@@ -532,6 +544,7 @@ serverLoop:
 
 		if srv.VPCAttachment == nil {
 			slog.Info("Skipping server (no VPC attachment)...", "server", server.Name)
+
 			continue
 		}
 
@@ -649,6 +662,7 @@ serverLoop:
 		for _, prefix := range peering.Spec.Permit.External.Prefixes {
 			if prefix.Prefix == "0.0.0.0/0" {
 				includeDefault = true
+
 				break
 			}
 		}
@@ -696,7 +710,7 @@ serverLoop:
 
 				passed := true
 
-				totalTested += 1
+				totalTested++
 
 				peerConnected := slices.Contains(server.VPCPeers, vpcPeer) || slices.Contains(server.InVPCPeers, vpcPeer)
 
@@ -731,7 +745,7 @@ serverLoop:
 					}
 
 					if slog.Default().Enabled(ctx, slog.LevelDebug) || failed {
-						out = strings.TrimSpace(string(out))
+						out = strings.TrimSpace(out)
 						if failed {
 							color.Red(out)
 						} else {
@@ -760,13 +774,14 @@ serverLoop:
 
 							slog.Error("Error starting iperf server", "host", vpcPeer, "err", err)
 							color.Yellow(strings.TrimSpace(out))
-							return
-						} else {
-							slog.Debug("iperf server output", "host", vpcPeer)
 
-							if slog.Default().Enabled(ctx, slog.LevelDebug) {
-								color.Cyan(strings.TrimSpace(out))
-							}
+							return
+						}
+
+						slog.Debug("iperf server output", "host", vpcPeer)
+
+						if slog.Default().Enabled(ctx, slog.LevelDebug) {
+							color.Cyan(strings.TrimSpace(out))
 						}
 					}()
 
@@ -781,30 +796,32 @@ serverLoop:
 
 							slog.Error("Connectivity expected, iperf failed", "from", server.Name, "to", vpcPeer, "err", err)
 							color.Red(strings.TrimSpace(out)) // TODO think about parsing output and printing only summary
+
 							return
+						}
+
+						report, err := parseIperf3Report(out)
+						if err != nil {
+							passed = false
+
+							slog.Error("Error parsing iperf report", "err", err)
+
+							return
+						}
+
+						slog.Info("iperf3 report", "host", name,
+							"sentSpeed", humanize.Bytes(uint64(report.End.SumSent.BitsPerSecond/8))+"/s",
+							"receivedSpeed", humanize.Bytes(uint64(report.End.SumReceived.BitsPerSecond/8))+"/s",
+							"sent", humanize.Bytes(uint64(report.End.SumSent.Bytes)),
+							"received", humanize.Bytes(uint64(report.End.SumReceived.Bytes)),
+						)
+
+						if report.End.SumSent.BitsPerSecond < float64(cfg.VPCIperfSpeed)*1000000 {
+							passed = false
+
+							slog.Error("Connectivity expected, iperf speed too low", "from", server.Name, "to", vpcPeer, "speed", humanize.Bytes(uint64(report.End.SumSent.BitsPerSecond/8))+"/s")
 						} else {
-							report, err := parseIperf3Report(string(out))
-							if err != nil {
-								passed = false
-
-								slog.Error("Error parsing iperf report", "err", err)
-								return
-							}
-
-							slog.Info("iperf3 report", "host", name,
-								"sentSpeed", humanize.Bytes(uint64(report.End.SumSent.BitsPerSecond/8))+"/s",
-								"receivedSpeed", humanize.Bytes(uint64(report.End.SumReceived.BitsPerSecond/8))+"/s",
-								"sent", humanize.Bytes(uint64(report.End.SumSent.Bytes)),
-								"received", humanize.Bytes(uint64(report.End.SumReceived.Bytes)),
-							)
-
-							if report.End.SumSent.BitsPerSecond < float64(cfg.VPCIperfSpeed)*1000000 {
-								passed = false
-
-								slog.Error("Connectivity expected, iperf speed too low", "from", server.Name, "to", vpcPeer, "speed", humanize.Bytes(uint64(report.End.SumSent.BitsPerSecond/8))+"/s")
-							} else {
-								slog.Info("Connectivity expected, iperf succeeded", "from", server.Name, "to", vpcPeer)
-							}
+							slog.Info("Connectivity expected, iperf succeeded", "from", server.Name, "to", vpcPeer)
 						}
 					}()
 
@@ -812,14 +829,14 @@ serverLoop:
 				}
 
 				if passed {
-					totalPassed += 1
+					totalPassed++
 				}
 			}
 		}
 
 		if cfg.Ext {
 			if cfg.ExtCurl {
-				totalTested += 1
+				totalTested++
 
 				connected := len(server.Externals) > 0
 
@@ -835,7 +852,7 @@ serverLoop:
 						slog.Error("External connectivity expected, curl succeeded but doesn't contain 302 Moved", "from", server.Name)
 						color.Red(strings.TrimSpace(out))
 					} else {
-						totalPassed += 1
+						totalPassed++
 
 						slog.Info("External connectivity expected, curl succeeded", "from", server.Name)
 						if slog.Default().Enabled(ctx, slog.LevelDebug) {
@@ -843,7 +860,7 @@ serverLoop:
 						}
 					}
 				} else if !connected && err != nil {
-					totalPassed += 1
+					totalPassed++
 
 					slog.Info("External connectivity not expected, curl failed", "from", server.Name)
 					if slog.Default().Enabled(ctx, slog.LevelDebug) {
@@ -899,7 +916,7 @@ func (svc *Service) ssh(ctx context.Context, server *Server, cmd string, timeout
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 	defer cancel()
 
-	auth, err := goph.Key(svc.cfg.SshKey, "")
+	auth, err := goph.Key(svc.cfg.SSHKey, "")
 	if err != nil {
 		return "", errors.Wrapf(err, "error loading SSH key")
 	}
@@ -910,7 +927,7 @@ func (svc *Service) ssh(ctx context.Context, server *Server, cmd string, timeout
 		Port:     uint(server.VM.sshPort()),
 		Auth:     auth,
 		Timeout:  30 * time.Second,
-		Callback: ssh.InsecureIgnoreHostKey(),
+		Callback: ssh.InsecureIgnoreHostKey(), //nolint:gosec
 	})
 	if err != nil {
 		return "", errors.Wrapf(err, "error creating SSH client")
@@ -1207,7 +1224,7 @@ func (svc *Service) SetupPeerings(ctx context.Context, cfg SetupPeeringsConfig) 
 			continue
 		}
 
-		if err := client.IgnoreNotFound(kube.Delete(ctx, &peering)); err != nil {
+		if err := client.IgnoreNotFound(kube.Delete(ctx, pointer.To(peering))); err != nil {
 			return errors.Wrapf(err, "error deleting VPC peering %s", peering.Name)
 		}
 	}
@@ -1227,7 +1244,7 @@ func (svc *Service) SetupPeerings(ctx context.Context, cfg SetupPeeringsConfig) 
 			continue
 		}
 
-		if err := client.IgnoreNotFound(kube.Delete(ctx, &peering)); err != nil {
+		if err := client.IgnoreNotFound(kube.Delete(ctx, pointer.To(peering))); err != nil {
 			return errors.Wrapf(err, "error deleting external peering %s", peering.Name)
 		}
 	}

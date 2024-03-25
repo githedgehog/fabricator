@@ -15,7 +15,6 @@
 package fab
 
 import (
-	_ "embed"
 	"fmt"
 
 	"github.com/urfave/cli/v2"
@@ -39,28 +38,28 @@ func (cfg *VLAB) Name() string {
 }
 
 func (cfg *VLAB) IsEnabled(preset cnc.Preset) bool {
-	return preset == PRESET_VLAB
+	return preset == PresetVLAB
 }
 
 func (cfg *VLAB) Flags() []cli.Flag {
 	return nil
 }
 
-func (cfg *VLAB) Hydrate(preset cnc.Preset, fabricMode meta.FabricMode) error {
-	cfg.ONIERef = cfg.ONIERef.Fallback(REF_VLAB_ONIE)
-	cfg.FlatcarRef = cfg.FlatcarRef.Fallback(REF_VLAB_FLATCAR)
-	cfg.EEPROMEditRef = cfg.EEPROMEditRef.Fallback(REF_VLAB_EEPROM_EDIT)
+func (cfg *VLAB) Hydrate(_ cnc.Preset, _ meta.FabricMode) error {
+	cfg.ONIERef = cfg.ONIERef.Fallback(RefVLABONIE)
+	cfg.FlatcarRef = cfg.FlatcarRef.Fallback(RefVLABFlarcar)
+	cfg.EEPROMEditRef = cfg.EEPROMEditRef.Fallback(RefVLABEEPROMEdit)
 
 	// TODO
 	return nil
 }
 
-func (cfg *VLAB) Build(basedir string, preset cnc.Preset, fabricMode meta.FabricMode, get cnc.GetComponent, data *wiring.Data, run cnc.AddBuildOp, install cnc.AddRunOp) error {
+func (cfg *VLAB) Build(_ string, _ cnc.Preset, _ meta.FabricMode, get cnc.GetComponent, data *wiring.Data, run cnc.AddBuildOp, _ cnc.AddRunOp) error {
 	cfg.ONIERef = cfg.ONIERef.Fallback(BaseConfig(get).Source)
 	cfg.FlatcarRef = cfg.FlatcarRef.Fallback(BaseConfig(get).Source)
 	cfg.EEPROMEditRef = cfg.EEPROMEditRef.Fallback(BaseConfig(get).Source)
 
-	run(BundleVlabFiles, STAGE, "onie-files",
+	run(BundleVlabFiles, Stage, "onie-files",
 		&cnc.FilesORAS{
 			Ref:    cfg.ONIERef,
 			Unpack: []string{"onie-kvm_x86_64.qcow2.xz"},
@@ -71,7 +70,7 @@ func (cfg *VLAB) Build(basedir string, preset cnc.Preset, fabricMode meta.Fabric
 			},
 		})
 
-	run(BundleVlabFiles, STAGE, "flatcar",
+	run(BundleVlabFiles, Stage, "flatcar",
 		&cnc.FilesORAS{
 			Ref: cfg.FlatcarRef,
 			Files: []cnc.File{
@@ -81,7 +80,7 @@ func (cfg *VLAB) Build(basedir string, preset cnc.Preset, fabricMode meta.Fabric
 			},
 		})
 
-	run(BundleVlabFiles, STAGE, "onie-qcow2-eeprom-edit",
+	run(BundleVlabFiles, Stage, "onie-qcow2-eeprom-edit",
 		&cnc.FilesORAS{
 			Ref: cfg.EEPROMEditRef, // TODO automatically don't cache latest?
 			Files: []cnc.File{
@@ -89,13 +88,13 @@ func (cfg *VLAB) Build(basedir string, preset cnc.Preset, fabricMode meta.Fabric
 			},
 		})
 
-	username := FLATCAR_CONTROL_USER
+	username := FlatcarControlUser
 
 	for _, server := range data.Server.All() {
 		if server.IsControl() {
 			continue
 		}
-		run(BundleServerOS, STAGE, "ignition-"+server.Name,
+		run(BundleServerOS, Stage, "ignition-"+server.Name,
 			&cnc.FileGenerate{
 				File: cnc.File{
 					Name: fmt.Sprintf("%s.ignition.json", server.Name),

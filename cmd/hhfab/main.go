@@ -38,7 +38,7 @@ import (
 var version = "(devel)"
 
 const (
-	FLAG_CATEGORY_WIRING_GEN = "wiring generator options:"
+	CategoryWiringGen = "wiring generator options:"
 )
 
 func setupLogger(verbose, brief bool) error {
@@ -131,67 +131,67 @@ func main() {
 			Value:       string(meta.FabricModeSpineLeaf),
 		},
 		&cli.BoolFlag{
-			Category:    FLAG_CATEGORY_WIRING_GEN,
+			Category:    CategoryWiringGen,
 			Name:        "chain-control-link",
 			Usage:       "chain control links instead of all switches directly connected to control node if fabric mode is spine-leaf",
 			Destination: &wgChainControlLink,
 		},
 		&cli.UintFlag{
-			Category:    FLAG_CATEGORY_WIRING_GEN,
+			Category:    CategoryWiringGen,
 			Name:        "control-links-count",
 			Usage:       "number of control links if chain-control-link is enabled",
 			Destination: &wgControlLinksCount,
 		},
 		&cli.UintFlag{
-			Category:    FLAG_CATEGORY_WIRING_GEN,
+			Category:    CategoryWiringGen,
 			Name:        "spines-count",
 			Usage:       "number of spines if fabric mode is spine-leaf",
 			Destination: &wgSpinesCount,
 		},
 		&cli.UintFlag{
-			Category:    FLAG_CATEGORY_WIRING_GEN,
+			Category:    CategoryWiringGen,
 			Name:        "fabric-links-count",
 			Usage:       "number of fabric links if fabric mode is spine-leaf",
 			Destination: &wgFabricLinksCount,
 		},
 		&cli.UintFlag{
-			Category:    FLAG_CATEGORY_WIRING_GEN,
+			Category:    CategoryWiringGen,
 			Name:        "mclag-leafs-count",
 			Usage:       "number of mclag leafs (should be even)",
 			Destination: &wgMCLAGLeafsCount,
 		},
 		&cli.StringFlag{
-			Category:    FLAG_CATEGORY_WIRING_GEN,
+			Category:    CategoryWiringGen,
 			Name:        "eslag-leaf-groups",
 			Usage:       "eslag leaf groups (comma separated list of number of ESLAG switches in each group, should be 2-4 per group, e.g. 2,4,2 for 3 groups with 2, 4 and 2 switches)",
 			Destination: &wgESLAGLeafGroups,
 		},
 		&cli.UintFlag{
-			Category:    FLAG_CATEGORY_WIRING_GEN,
+			Category:    CategoryWiringGen,
 			Name:        "orphan-leafs-count",
 			Usage:       "number of orphan leafs",
 			Destination: &wgOrphanLeafsCount,
 		},
 		&cli.UintFlag{
-			Category:    FLAG_CATEGORY_WIRING_GEN,
+			Category:    CategoryWiringGen,
 			Name:        "mclag-session-links",
 			Usage:       "number of mclag session links for each mclag leaf",
 			Destination: &wgMCLAGSessionLinks,
 		},
 		&cli.UintFlag{
-			Category:    FLAG_CATEGORY_WIRING_GEN,
+			Category:    CategoryWiringGen,
 			Name:        "mclag-peer-links",
 			Usage:       "number of mclag peer links for each mclag leaf",
 			Destination: &wgMCLAGPeerLinks,
 		},
 		&cli.UintFlag{
-			Category:    FLAG_CATEGORY_WIRING_GEN,
+			Category:    CategoryWiringGen,
 			Name:        "vpc-loopbacks",
 			Usage:       "number of vpc loopbacks for each switch",
 			Destination: &wgVPCLoopbacks,
 		},
 		&cli.BoolFlag{
-			Category:    FLAG_CATEGORY_WIRING_GEN,
+			Category:    CategoryWiringGen,
 			Name:        "external",
 			Usage:       "include virtual external switch",
 			Destination: &wgExternal,
@@ -244,10 +244,10 @@ func main() {
 						Destination: &hydrate,
 					},
 				}, extraInitFlags...),
-				Before: func(cCtx *cli.Context) error {
+				Before: func(_ *cli.Context) error {
 					return setupLogger(verbose, brief)
 				},
-				Action: func(cCtx *cli.Context) error {
+				Action: func(_ *cli.Context) error {
 					if fabricMode == "" {
 						fabricMode = string(meta.FabricModeSpineLeaf)
 					}
@@ -296,10 +296,10 @@ func main() {
 					// 	Destination: &reset,
 					// },
 				},
-				Before: func(ctx *cli.Context) error {
+				Before: func(_ *cli.Context) error {
 					return setupLogger(verbose, brief)
 				},
-				Action: func(cCtx *cli.Context) error {
+				Action: func(_ *cli.Context) error {
 					err := mngr.Load(basedir)
 					if err != nil {
 						return errors.Wrap(err, "error loading")
@@ -316,10 +316,10 @@ func main() {
 					verboseFlag,
 					briefFlag,
 				},
-				Before: func(ctx *cli.Context) error {
+				Before: func(_ *cli.Context) error {
 					return setupLogger(verbose, brief)
 				},
-				Action: func(cCtx *cli.Context) error {
+				Action: func(_ *cli.Context) error {
 					err := mngr.Load(basedir)
 					if err != nil {
 						return errors.Wrap(err, "error loading")
@@ -336,10 +336,10 @@ func main() {
 					verboseFlag,
 					briefFlag,
 				},
-				Before: func(ctx *cli.Context) error {
+				Before: func(_ *cli.Context) error {
 					return setupLogger(verbose, brief)
 				},
-				Action: func(cCtx *cli.Context) error {
+				Action: func(_ *cli.Context) error {
 					err := mngr.Load(basedir)
 					if err != nil {
 						return errors.Wrap(err, "error loading")
@@ -381,7 +381,7 @@ func main() {
 							},
 							&cli.StringFlag{
 								Name:  "vm-size",
-								Usage: "run with one of the predefined sizes (one of: " + strings.Join(vlab.VM_SIZES, ", ") + ")",
+								Usage: "run with one of the predefined sizes (one of: " + strings.Join(vlab.VMSizes, ", ") + ")",
 							},
 							&cli.BoolFlag{
 								Name:  "install-complete",
@@ -401,7 +401,7 @@ func main() {
 								Value: true,
 							},
 						},
-						Before: func(ctx *cli.Context) error {
+						Before: func(_ *cli.Context) error {
 							return setupLogger(verbose, brief)
 						},
 						Action: func(cCtx *cli.Context) error {
@@ -433,7 +433,7 @@ func main() {
 							briefFlag,
 							vmFlag,
 						},
-						Before: func(ctx *cli.Context) error {
+						Before: func(_ *cli.Context) error {
 							return setupLogger(verbose, brief)
 						},
 						Action: func(cCtx *cli.Context) error {
@@ -459,10 +459,10 @@ func main() {
 							briefFlag,
 							vmFlag,
 						},
-						Before: func(ctx *cli.Context) error {
+						Before: func(_ *cli.Context) error {
 							return setupLogger(verbose, brief)
 						},
-						Action: func(cCtx *cli.Context) error {
+						Action: func(_ *cli.Context) error {
 							err := mngr.Load(basedir)
 							if err != nil {
 								return errors.Wrap(err, "error loading")
@@ -485,10 +485,10 @@ func main() {
 							briefFlag,
 							vmFlag,
 						},
-						Before: func(ctx *cli.Context) error {
+						Before: func(_ *cli.Context) error {
 							return setupLogger(verbose, brief)
 						},
-						Action: func(cCtx *cli.Context) error {
+						Action: func(_ *cli.Context) error {
 							err := mngr.Load(basedir)
 							if err != nil {
 								return errors.Wrap(err, "error loading")
@@ -511,10 +511,10 @@ func main() {
 							verboseFlag,
 							briefFlag,
 						},
-						Before: func(ctx *cli.Context) error {
+						Before: func(_ *cli.Context) error {
 							return setupLogger(verbose, brief)
 						},
-						Action: func(cCtx *cli.Context) error {
+						Action: func(_ *cli.Context) error {
 							err := mngr.Load(basedir)
 							if err != nil {
 								return errors.Wrap(err, "error loading")
@@ -542,7 +542,7 @@ func main() {
 								Value: vlab.VPCSetupTypeVPCPerServer,
 							},
 						},
-						Before: func(ctx *cli.Context) error {
+						Before: func(_ *cli.Context) error {
 							return setupLogger(verbose, brief)
 						},
 						Action: func(cCtx *cli.Context) error {
@@ -613,7 +613,7 @@ func main() {
 								Value: true,
 							},
 						},
-						Before: func(ctx *cli.Context) error {
+						Before: func(_ *cli.Context) error {
 							return setupLogger(verbose, brief)
 						},
 						Action: func(cCtx *cli.Context) error {
@@ -684,7 +684,7 @@ func main() {
 								Value: true,
 							},
 						},
-						Before: func(ctx *cli.Context) error {
+						Before: func(_ *cli.Context) error {
 							return setupLogger(verbose, brief)
 						},
 						Action: func(cCtx *cli.Context) error {
@@ -728,10 +728,10 @@ func main() {
 							verboseFlag,
 							briefFlag,
 						}, wiringGenFlags...),
-						Before: func(ctx *cli.Context) error {
+						Before: func(_ *cli.Context) error {
 							return setupLogger(verbose, brief)
 						},
-						Action: func(cCtx *cli.Context) error {
+						Action: func(_ *cli.Context) error {
 							if fabricMode == "" {
 								fabricMode = string(meta.FabricModeSpineLeaf)
 							}
@@ -771,7 +771,7 @@ func main() {
 								Usage:   "use wiring `FILE`",
 							},
 						},
-						Before: func(ctx *cli.Context) error {
+						Before: func(_ *cli.Context) error {
 							return setupLogger(verbose, brief)
 						},
 						Action: func(cCtx *cli.Context) error {
@@ -795,7 +795,7 @@ func main() {
 								Usage:   "use wiring `FILE`",
 							},
 						},
-						Before: func(ctx *cli.Context) error {
+						Before: func(_ *cli.Context) error {
 							return setupLogger(verbose, brief)
 						},
 						Action: func(cCtx *cli.Context) error {

@@ -28,9 +28,9 @@ import (
 )
 
 const (
-	FLATCAR_CONTROL_USER = "core"
-	CONTROL_OS_IGNITION  = "ignition.json"
-	DEFAULT_VLAB_SSH_KEY = "ssh-key"
+	FlatcarControlUser = "core"
+	ControlOSIgnition  = "ignition.json"
+	DefaultVLABSSHKey  = "ssh-key"
 )
 
 //go:embed ctrl_os_butane.tmpl.yaml
@@ -48,14 +48,14 @@ func (cfg *ControlOS) Name() string {
 	return "control-os"
 }
 
-func (cfg *ControlOS) IsEnabled(preset cnc.Preset) bool {
+func (cfg *ControlOS) IsEnabled(_ cnc.Preset) bool {
 	return true
 }
 
 func (cfg *ControlOS) Flags() []cli.Flag {
 	return []cli.Flag{
 		&cli.StringFlag{
-			Category:    cfg.Name() + FLAG_CATEGORY_CONFIG_BASE_SUFFIX,
+			Category:    cfg.Name() + CategoryConfigBaseSuffix,
 			Name:        "control-password-hash",
 			Usage:       "Password hash for the control node user 'core' (use 'openssl passwd -5' and pass with '' or escape to avoid shell $ substitution)",
 			EnvVars:     []string{"HHFAB_CONTROL_PASSWORD_HASH"},
@@ -64,22 +64,22 @@ func (cfg *ControlOS) Flags() []cli.Flag {
 	}
 }
 
-func (cfg *ControlOS) Hydrate(preset cnc.Preset, fabricMode meta.FabricMode) error {
+func (cfg *ControlOS) Hydrate(_ cnc.Preset, _ meta.FabricMode) error {
 	// TODO add ignition template to the config?
 
 	return nil
 }
 
-func (cfg *ControlOS) Build(basedir string, preset cnc.Preset, fabricMode meta.FabricMode, get cnc.GetComponent, data *wiring.Data, run cnc.AddBuildOp, install cnc.AddRunOp) error {
+func (cfg *ControlOS) Build(_ string, _ cnc.Preset, _ meta.FabricMode, get cnc.GetComponent, data *wiring.Data, run cnc.AddBuildOp, _ cnc.AddRunOp) error {
 	hostname, err := getControlNodeName(data)
 	if err != nil {
 		return err
 	}
-	username := FLATCAR_CONTROL_USER
+	username := FlatcarControlUser
 	authorizedKeys := BaseConfig(get).AuthorizedKeys
 
 	if cfg.PasswordHash == "" && BaseConfig(get).Dev {
-		cfg.PasswordHash = DEV_PASSWORD
+		cfg.PasswordHash = DevPassword
 	}
 
 	if cfg.PasswordHash != "" && !strings.HasPrefix(cfg.PasswordHash, "$5$") {
@@ -90,24 +90,19 @@ func (cfg *ControlOS) Build(basedir string, preset cnc.Preset, fabricMode meta.F
 		return errors.Errorf("no authorized keys or password found for control node, you'll not be able to login")
 	}
 
-	controlVIP := CONTROL_VIP + CONTROL_VIP_MASK
+	controlVIP := ControlVIP + ControlVIPMask
 
-	ports, err := buildControlPorts(data)
-	if err != nil {
-		return err
-	}
-
-	run(BundleControlOS, STAGE, "ignition-control",
+	run(BundleControlOS, Stage, "ignition-control",
 		&cnc.FileGenerate{
 			File: cnc.File{
-				Name: CONTROL_OS_IGNITION,
+				Name: ControlOSIgnition,
 			},
 			Content: cnc.IgnitionFromButaneTemplate(controlButaneTemplate,
 				"cfg", cfg,
 				"username", username,
 				"hostname", hostname,
 				"authorizedKeys", authorizedKeys,
-				"ports", ports,
+				"ports", buildControlPorts(data),
 				"controlVIP", controlVIP,
 				"passwordHash", cfg.PasswordHash,
 			),
@@ -134,7 +129,7 @@ type renderPort struct {
 	MAC        string
 }
 
-func buildControlPorts(data *wiring.Data) ([]renderPort, error) {
+func buildControlPorts(data *wiring.Data) []renderPort {
 	res := []renderPort{}
 
 	for idx, conn := range data.Connection.All() {
@@ -157,5 +152,5 @@ func buildControlPorts(data *wiring.Data) ([]renderPort, error) {
 		res = append(res, port)
 	}
 
-	return res, nil
+	return res
 }

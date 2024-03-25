@@ -44,6 +44,10 @@ type Bundle struct {
 
 type Stage uint8
 
+type ComponentValidate interface {
+	Validate(basedir string, preset Preset, fabricMode meta.FabricMode, get GetComponent, wiring *wiring.Data) error
+}
+
 type Component interface {
 	Name() string
 	IsEnabled(preset Preset) bool
@@ -58,7 +62,7 @@ type Component interface {
 	// if we want to make sure that same value is used on every build - it should be set here
 	Hydrate(preset Preset, fabricMode meta.FabricMode) error
 
-	Validate(basedir string, preset Preset, fabricMode meta.FabricMode, get GetComponent, wiring *wiring.Data) error
+	ComponentValidate
 
 	// TODO rename run -> build, install -> run?
 	Build(basedir string, preset Preset, fabricMode meta.FabricMode, get GetComponent, wiring *wiring.Data, run AddBuildOp, install AddRunOp) error
@@ -66,9 +70,11 @@ type Component interface {
 
 type NoValidationComponent struct{}
 
-func (c *NoValidationComponent) Validate(basedir string, preset Preset, fabricMode meta.FabricMode, get GetComponent, wiring *wiring.Data) error {
+func (c *NoValidationComponent) Validate(_ string, _ Preset, _ meta.FabricMode, _ GetComponent, _ *wiring.Data) error {
 	return nil
 }
+
+var _ ComponentValidate = (*NoValidationComponent)(nil)
 
 type (
 	GetComponent func(string) Component
@@ -223,7 +229,7 @@ func (mngr *Manager) Init(basedir string, fromConfig string, preset Preset, fabr
 	mngr.fabricMode = fabricMode
 
 	if !slices.Contains(mngr.presets, preset) {
-		return fmt.Errorf("unknown preset: %s", preset)
+		return errors.Errorf("unknown preset: %s", preset)
 	}
 
 	if err := fabwiring.IsHydrated(mngr.wiring); err != nil {
@@ -268,7 +274,7 @@ func (mngr *Manager) Save() error {
 		return errors.Wrapf(err, "error getting config data")
 	}
 
-	err = os.WriteFile(filepath.Join(mngr.basedir, "config.yaml"), data, 0o644)
+	err = os.WriteFile(filepath.Join(mngr.basedir, "config.yaml"), data, 0o600)
 	if err != nil {
 		return errors.Wrapf(err, "error writing config")
 	}
@@ -534,29 +540,35 @@ var (
 func (adder *opAdder) validate(bundle Bundle, stage Stage, name string, addedOps map[string]any) bool {
 	if !slices.Contains(adder.mngr.bundles, bundle) {
 		adder.err = errors.Errorf("unknown bundle: %s", bundle.Name)
+
 		return false
 	}
 
 	if stage >= adder.mngr.maxStage {
 		adder.err = errors.Errorf("unknown stage: %d", stage)
+
 		return false
 	}
 
 	if name == "" {
 		adder.err = errors.New("name is empty")
+
 		return false
 	}
 	if !isGoodName(name) {
 		adder.err = errors.Errorf("invalid name '%s', should be %s", name, goodNameRegexp)
+
 		return false
 	}
 	if len(name) < 3 || len(name) > 64 {
 		adder.err = errors.Errorf("invalid name '%s', should be 3-64 chars", name)
+
 		return false
 	}
 
 	if _, exist := addedOps[name]; exist {
 		adder.err = errors.Errorf("duplicate added op name: %s", name)
+
 		return false
 	}
 
@@ -576,18 +588,21 @@ func (adder *opAdder) addBuildOp(bundle Bundle, stage Stage, name string, op Bui
 	err := op.Hydrate()
 	if err != nil {
 		adder.err = errors.Wrapf(err, "error hydrating build op %s", name)
+
 		return
 	}
 
 	err = op.Build(filepath.Join(adder.mngr.basedir, bundle.Name))
 	if err != nil {
 		adder.err = errors.Wrapf(err, "error building op %s", name)
+
 		return
 	}
 
 	runOps := op.RunOps()
 	if len(runOps) > 0 && !bundle.IsInstaller {
 		adder.err = errors.Errorf("build op %s has run ops but bundle %s is not installer", name, bundle.Name)
+
 		return
 	}
 
@@ -613,6 +628,7 @@ func (adder *opAdder) addRunOp(bundle Bundle, stage Stage, name string, op RunOp
 
 	if !bundle.IsInstaller {
 		adder.err = errors.Errorf("build op %s has run ops but bundle %s is not installer", name, bundle.Name)
+
 		return
 	}
 

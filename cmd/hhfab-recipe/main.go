@@ -112,7 +112,7 @@ func main() {
 					briefFlag,
 					dryRunFlag,
 				},
-				Before: func(cCtx *cli.Context) error {
+				Before: func(_ *cli.Context) error {
 					return setupLogger(verbose, brief)
 				},
 				Action: func(cCtx *cli.Context) error {

@@ -46,13 +46,13 @@ func (cfg *ServerOS) Name() string {
 }
 
 func (cfg *ServerOS) IsEnabled(preset cnc.Preset) bool {
-	return preset == PRESET_VLAB
+	return preset == PresetVLAB
 }
 
 func (cfg *ServerOS) Flags() []cli.Flag {
 	return []cli.Flag{
 		&cli.StringFlag{
-			Category:    cfg.Name() + FLAG_CATEGORY_CONFIG_BASE_SUFFIX,
+			Category:    cfg.Name() + CategoryConfigBaseSuffix,
 			Name:        "server-password-hash",
 			Usage:       "Password hash for the server nodes user 'core' (use 'openssl passwd -5' and pass with '' or escape to avoid shell $ substitution)",
 			EnvVars:     []string{"HHFAB_SERVER_PASSWORD_HASH"},
@@ -61,20 +61,20 @@ func (cfg *ServerOS) Flags() []cli.Flag {
 	}
 }
 
-func (cfg *ServerOS) Hydrate(preset cnc.Preset, fabricMode meta.FabricMode) error {
-	cfg.ToolboxRef = cfg.ToolboxRef.Fallback(REF_TOOLBOX)
+func (cfg *ServerOS) Hydrate(_ cnc.Preset, _ meta.FabricMode) error {
+	cfg.ToolboxRef = cfg.ToolboxRef.Fallback(RefToolbox)
 
 	return nil
 }
 
-func (cfg *ServerOS) Build(basedir string, preset cnc.Preset, fabricMode meta.FabricMode, get cnc.GetComponent, data *wiring.Data, run cnc.AddBuildOp, install cnc.AddRunOp) error {
+func (cfg *ServerOS) Build(_ string, _ cnc.Preset, _ meta.FabricMode, get cnc.GetComponent, data *wiring.Data, run cnc.AddBuildOp, install cnc.AddRunOp) error {
 	cfg.ToolboxRef = cfg.ToolboxRef.Fallback(BaseConfig(get).Source)
 
-	username := FLATCAR_CONTROL_USER
+	username := FlatcarControlUser
 	authorizedKeys := BaseConfig(get).AuthorizedKeys
 
 	if cfg.PasswordHash == "" && BaseConfig(get).Dev {
-		cfg.PasswordHash = DEV_PASSWORD
+		cfg.PasswordHash = DevPassword
 	}
 
 	if cfg.PasswordHash != "" && !strings.HasPrefix(cfg.PasswordHash, "$5$") {
@@ -90,7 +90,7 @@ func (cfg *ServerOS) Build(basedir string, preset cnc.Preset, fabricMode meta.Fa
 			continue
 		}
 
-		run(BundleServerOS, STAGE, "ignition-"+server.Name,
+		run(BundleServerOS, Stage, "ignition-"+server.Name,
 			&cnc.FileGenerate{
 				File: cnc.File{
 					Name: fmt.Sprintf("%s.ignition.json", server.Name),
@@ -106,7 +106,7 @@ func (cfg *ServerOS) Build(basedir string, preset cnc.Preset, fabricMode meta.Fa
 	}
 
 	for _, bundle := range []cnc.Bundle{BundleControlInstall, BundleServerInstall} {
-		run(bundle, STAGE_INSTALL_0_PREP, "toolbox",
+		run(bundle, StageInstall0Prep, "toolbox",
 			&cnc.FilesORAS{
 				Ref: cfg.ToolboxRef,
 				Files: []cnc.File{
@@ -118,15 +118,14 @@ func (cfg *ServerOS) Build(basedir string, preset cnc.Preset, fabricMode meta.Fa
 				},
 			})
 
-		install(bundle, STAGE_INSTALL_0_PREP, "toolbox-load",
+		install(bundle, StageInstall0Prep, "toolbox-load",
 			&cnc.ExecCommand{
 				Name: "ctr",
 				Args: []string{"image", "import", "/opt/hedgehog/toolbox.tar"},
 			})
-
 	}
 
-	run(BundleServerInstall, STAGE_INSTALL_0_PREP, "hhnet",
+	run(BundleServerInstall, StageInstall0Prep, "hhnet",
 		&cnc.FileGenerate{
 			File: cnc.File{
 				Name:          "hhnet",

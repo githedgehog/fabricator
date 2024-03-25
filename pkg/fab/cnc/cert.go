@@ -21,9 +21,7 @@ import (
 	cryptorand "crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	_ "embed"
 	"encoding/pem"
-	"fmt"
 	"math/big"
 	mathrand "math/rand"
 	"net"
@@ -33,8 +31,8 @@ import (
 )
 
 const (
-	BLOCK_TYPE_CERT = "CERTIFICATE"
-	BLOCK_TYPE_KEY  = "EC PRIVATE KEY"
+	BlockTypeCert = "CERTIFICATE"
+	BlockTypeKey  = "EC PRIVATE KEY"
 )
 
 type KeyPair struct {
@@ -48,8 +46,8 @@ func (kp *KeyPair) PCert() (*x509.Certificate, error) {
 		return nil, errors.New("failed to parse certificate PEM")
 	}
 
-	if block.Type != BLOCK_TYPE_CERT {
-		return nil, errors.Errorf("invalid block type '%s' while expected '%s'", block.Type, BLOCK_TYPE_CERT)
+	if block.Type != BlockTypeCert {
+		return nil, errors.Errorf("invalid block type '%s' while expected '%s'", block.Type, BlockTypeCert)
 	}
 
 	cert, err := x509.ParseCertificate(block.Bytes)
@@ -66,8 +64,8 @@ func (kp *KeyPair) PKey() (*ecdsa.PrivateKey, error) {
 		return nil, errors.New("failed to parse certificate PEM")
 	}
 
-	if block.Type != BLOCK_TYPE_KEY {
-		return nil, fmt.Errorf("invalid block type '%s' while expected '%s'", block.Type, BLOCK_TYPE_KEY)
+	if block.Type != BlockTypeKey {
+		return nil, errors.Errorf("invalid block type '%s' while expected '%s'", block.Type, BlockTypeKey)
 	}
 
 	key, err := x509.ParseECPrivateKey(block.Bytes)
@@ -102,7 +100,7 @@ func (kp *KeyPair) Ensure(cn string, parent *KeyPair, keyUsage x509.KeyUsage, ex
 	}
 
 	tmpl := &x509.Certificate{
-		SerialNumber: big.NewInt(mathrand.Int63()),
+		SerialNumber: big.NewInt(mathrand.Int63()), //nolint:gosec
 		Subject: pkix.Name{
 			Country:      []string{"US"},
 			Province:     []string{"Washington"},
@@ -129,7 +127,7 @@ func (kp *KeyPair) Ensure(cn string, parent *KeyPair, keyUsage x509.KeyUsage, ex
 		for _, ip := range ips {
 			addr := net.ParseIP(ip)
 			if addr == nil {
-				return fmt.Errorf("invalid IP address '%s'", ip)
+				return errors.Errorf("invalid IP address '%s'", ip)
 			}
 			tmpl.IPAddresses = append(tmpl.IPAddresses, addr)
 		}
@@ -159,7 +157,7 @@ func (kp *KeyPair) Ensure(cn string, parent *KeyPair, keyUsage x509.KeyUsage, ex
 
 	certPem := new(bytes.Buffer)
 	err = pem.Encode(certPem, &pem.Block{
-		Type:  BLOCK_TYPE_CERT,
+		Type:  BlockTypeCert,
 		Bytes: cert,
 	})
 	if err != nil {
@@ -172,7 +170,7 @@ func (kp *KeyPair) Ensure(cn string, parent *KeyPair, keyUsage x509.KeyUsage, ex
 		return errors.Wrapf(err, "error encoding private key")
 	}
 	err = pem.Encode(keyPem, &pem.Block{
-		Type:  BLOCK_TYPE_KEY,
+		Type:  BlockTypeKey,
 		Bytes: keyBytes,
 	})
 	if err != nil {

@@ -20,6 +20,7 @@ import (
 
 	"github.com/pkg/errors"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1alpha2"
+	"go.githedgehog.com/fabric/pkg/util/pointer"
 	"go.githedgehog.com/fabric/pkg/wiring"
 	"go.githedgehog.com/fabricator/pkg/fab/wiring/visual"
 )
@@ -69,14 +70,14 @@ func Visualize(wiringPath string) (string, error) {
 		} else if conn.Spec.Fabric != nil {
 			for _, link := range conn.Spec.Fabric.Links {
 				endpoints[link.Spine.DeviceName()] = append(endpoints[link.Spine.DeviceName()], visual.Endpoint{
-					ID:   endpointID(&link.Spine),
+					ID:   endpointID(pointer.To(link.Spine)),
 					Name: link.Spine.LocalPortName(),
 					Properties: map[string]string{
 						"ip": link.Spine.IP,
 					},
 				})
 				endpoints[link.Leaf.DeviceName()] = append(endpoints[link.Leaf.DeviceName()], visual.Endpoint{
-					ID:   endpointID(&link.Leaf),
+					ID:   endpointID(pointer.To(link.Leaf)),
 					Name: link.Leaf.LocalPortName(),
 					Properties: map[string]string{
 						"ip": link.Leaf.IP,
@@ -84,42 +85,42 @@ func Visualize(wiringPath string) (string, error) {
 				})
 
 				vis.Links = append(vis.Links, visual.Link{
-					From:  endpointID(&link.Spine),
-					To:    endpointID(&link.Leaf),
+					From:  endpointID(pointer.To(link.Spine)),
+					To:    endpointID(pointer.To(link.Leaf)),
 					Color: "orange",
 				})
 			}
 		} else if conn.Spec.MCLAGDomain != nil {
 			for _, link := range append(conn.Spec.MCLAGDomain.PeerLinks, conn.Spec.MCLAGDomain.SessionLinks...) {
 				endpoints[link.Switch1.DeviceName()] = append(endpoints[link.Switch1.DeviceName()], visual.Endpoint{
-					ID:   endpointID(&link.Switch1),
+					ID:   endpointID(pointer.To(link.Switch1)),
 					Name: link.Switch1.LocalPortName(),
 				})
 				endpoints[link.Switch2.DeviceName()] = append(endpoints[link.Switch2.DeviceName()], visual.Endpoint{
-					ID:   endpointID(&link.Switch2),
+					ID:   endpointID(pointer.To(link.Switch2)),
 					Name: link.Switch2.LocalPortName(),
 				})
 
 				vis.Links = append(vis.Links, visual.Link{
-					From:  endpointID(&link.Switch1),
-					To:    endpointID(&link.Switch2),
+					From:  endpointID(pointer.To(link.Switch1)),
+					To:    endpointID(pointer.To(link.Switch2)),
 					Color: "green",
 				})
 			}
 		} else if conn.Spec.VPCLoopback != nil {
 			for _, link := range conn.Spec.VPCLoopback.Links {
 				endpoints[link.Switch1.DeviceName()] = append(endpoints[link.Switch1.DeviceName()], visual.Endpoint{
-					ID:   endpointID(&link.Switch1),
+					ID:   endpointID(pointer.To(link.Switch1)),
 					Name: link.Switch1.LocalPortName(),
 				})
 				endpoints[link.Switch2.DeviceName()] = append(endpoints[link.Switch2.DeviceName()], visual.Endpoint{
-					ID:   endpointID(&link.Switch2),
+					ID:   endpointID(pointer.To(link.Switch2)),
 					Name: link.Switch2.LocalPortName(),
 				})
 
 				vis.Links = append(vis.Links, visual.Link{
-					From:  endpointID(&link.Switch1),
-					To:    endpointID(&link.Switch2),
+					From:  endpointID(pointer.To(link.Switch1)),
+					To:    endpointID(pointer.To(link.Switch2)),
 					Color: "magenta",
 				})
 			}
@@ -143,34 +144,34 @@ func Visualize(wiringPath string) (string, error) {
 		} else if conn.Spec.Bundled != nil {
 			for _, link := range conn.Spec.Bundled.Links {
 				endpoints[link.Server.DeviceName()] = append(endpoints[link.Server.DeviceName()], visual.Endpoint{
-					ID:   endpointID(&link.Server),
+					ID:   endpointID(pointer.To(link.Server)),
 					Name: link.Server.LocalPortName(),
 				})
 				endpoints[link.Switch.DeviceName()] = append(endpoints[link.Switch.DeviceName()], visual.Endpoint{
-					ID:   endpointID(&link.Switch),
+					ID:   endpointID(pointer.To(link.Switch)),
 					Name: link.Switch.LocalPortName(),
 				})
 
 				vis.Links = append(vis.Links, visual.Link{
-					From:  endpointID(&link.Server),
-					To:    endpointID(&link.Switch),
+					From:  endpointID(pointer.To(link.Server)),
+					To:    endpointID(pointer.To(link.Switch)),
 					Color: "blue",
 				})
 			}
 		} else if conn.Spec.MCLAG != nil {
 			for _, link := range conn.Spec.MCLAG.Links {
 				endpoints[link.Server.DeviceName()] = append(endpoints[link.Server.DeviceName()], visual.Endpoint{
-					ID:   endpointID(&link.Server),
+					ID:   endpointID(pointer.To(link.Server)),
 					Name: link.Server.LocalPortName(),
 				})
 				endpoints[link.Switch.DeviceName()] = append(endpoints[link.Switch.DeviceName()], visual.Endpoint{
-					ID:   endpointID(&link.Switch),
+					ID:   endpointID(pointer.To(link.Switch)),
 					Name: link.Switch.LocalPortName(),
 				})
 
 				vis.Links = append(vis.Links, visual.Link{
-					From:  endpointID(&link.Server),
-					To:    endpointID(&link.Switch),
+					From:  endpointID(pointer.To(link.Server)),
+					To:    endpointID(pointer.To(link.Switch)),
 					Color: "purple",
 				})
 			}
@@ -223,7 +224,9 @@ func Visualize(wiringPath string) (string, error) {
 		}
 	}
 
-	return vis.Dot()
+	res, err := vis.Dot()
+
+	return res, errors.Wrapf(err, "error generating graph")
 }
 
 func endpointID(port wiringapi.IPort) string {

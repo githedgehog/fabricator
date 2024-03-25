@@ -49,7 +49,7 @@ func (cfg *Zot) Name() string {
 	return "zot"
 }
 
-func (cfg *Zot) IsEnabled(preset cnc.Preset) bool {
+func (cfg *Zot) IsEnabled(_ cnc.Preset) bool {
 	return true
 }
 
@@ -57,16 +57,16 @@ func (cfg *Zot) Flags() []cli.Flag {
 	return nil
 }
 
-func (cfg *Zot) Hydrate(preset cnc.Preset, fabricMode meta.FabricMode) error {
-	cfg.Ref = cfg.Ref.Fallback(REF_ZOT)
+func (cfg *Zot) Hydrate(_ cnc.Preset, _ meta.FabricMode) error {
+	cfg.Ref = cfg.Ref.Fallback(RefZot)
 
-	err := cfg.TLS.CA.Ensure(OCI_REPO_CA_CN, nil, KEY_USAGE_CA, nil, nil, nil)
+	err := cfg.TLS.CA.Ensure(OCIRepoCACN, nil, KeyUsageCA, nil, nil, nil)
 	if err != nil {
 		return errors.Wrapf(err, "error ensuring OCI Repo CA")
 	}
 
-	err = cfg.TLS.Server.Ensure(OCI_REPO_SERVER_CN, &cfg.TLS.CA, KEY_USAGE_SERVER, nil,
-		[]string{CONTROL_VIP}, []string{"registry.local", "registry.default", "registry.default.svc.cluster.local"})
+	err = cfg.TLS.Server.Ensure(OCIRepoServerCN, &cfg.TLS.CA, KeyUsageServer, nil,
+		[]string{ControlVIP}, []string{"registry.local", "registry.default", "registry.default.svc.cluster.local"})
 	if err != nil {
 		return errors.Wrap(err, "error ensuring OCI Repo Certs")
 	}
@@ -74,10 +74,10 @@ func (cfg *Zot) Hydrate(preset cnc.Preset, fabricMode meta.FabricMode) error {
 	return nil
 }
 
-func (cfg *Zot) Build(basedir string, preset cnc.Preset, fabricMode meta.FabricMode, get cnc.GetComponent, wiring *wiring.Data, run cnc.AddBuildOp, install cnc.AddRunOp) error {
+func (cfg *Zot) Build(_ string, _ cnc.Preset, _ meta.FabricMode, get cnc.GetComponent, _ *wiring.Data, run cnc.AddBuildOp, install cnc.AddRunOp) error {
 	cfg.Ref = cfg.Ref.Fallback(BaseConfig(get).Source)
 
-	run(BundleControlInstall, STAGE_INSTALL_0_PREP, "zot-airgap-files",
+	run(BundleControlInstall, StageInstall0Prep, "zot-airgap-files",
 		&cnc.FilesORAS{
 			Ref: cfg.Ref.Fallback(BaseConfig(get).Source),
 			Files: []cnc.File{
@@ -93,7 +93,7 @@ func (cfg *Zot) Build(basedir string, preset cnc.Preset, fabricMode meta.FabricM
 			},
 		})
 
-	run(BundleControlInstall, STAGE_INSTALL_0_PREP, "zot-install",
+	run(BundleControlInstall, StageInstall0Prep, "zot-install",
 		&cnc.FileGenerate{
 			File: cnc.File{
 				Name:          "zot-install.yaml",
@@ -104,14 +104,14 @@ func (cfg *Zot) Build(basedir string, preset cnc.Preset, fabricMode meta.FabricM
 				cnc.KubeHelmChart("zot", "default", helm.HelmChartSpec{
 					TargetNamespace: "default",
 					Chart:           "https://%{KUBERNETES_API}%/static/charts/hh-zot-chart.tgz",
-				}, cnc.FromTemplate(zotValuesTemplate, "ref", REF_ZOT_TARGET_IMAGE.Fallback(cfg.Ref))),
+				}, cnc.FromTemplate(zotValuesTemplate, "ref", RefZotTargetImage.Fallback(cfg.Ref))),
 				cnc.KubeService("registry", "default", core.ServiceSpec{
 					Type: core.ServiceTypeNodePort,
 					Ports: []core.ServicePort{
 						{
 							Name:       "zot",
 							Port:       5000,
-							NodePort:   int32(ZOT_NODE_PORT),
+							NodePort:   int32(ZotNodePort),
 							TargetPort: intstr.FromString("zot"),
 							Protocol:   core.ProtocolTCP,
 						},
@@ -128,7 +128,7 @@ func (cfg *Zot) Build(basedir string, preset cnc.Preset, fabricMode meta.FabricM
 			),
 		})
 
-	run(BundleControlInstall, STAGE_INSTALL_0_PREP, "zot-ca-file",
+	run(BundleControlInstall, StageInstall0Prep, "zot-ca-file",
 		&cnc.FileGenerate{
 			File: cnc.File{
 				Name:          "zot-ca.crt",
@@ -138,15 +138,15 @@ func (cfg *Zot) Build(basedir string, preset cnc.Preset, fabricMode meta.FabricM
 			Content: cnc.FromValue(cfg.TLS.CA.Cert),
 		})
 
-	install(BundleControlInstall, STAGE_INSTALL_0_PREP, "zot-ca-install",
+	install(BundleControlInstall, StageInstall0Prep, "zot-ca-install",
 		&cnc.ExecCommand{
 			Name: "update-ca-certificates",
 			Args: []string{"|", "grep", "-v", "=\\>"}, // don't print all cert names
 		})
 
-	install(BundleControlInstall, STAGE_INSTALL_1_K3SZOT, "zot-wait",
+	install(BundleControlInstall, StageInstall1K3sZot, "zot-wait",
 		&cnc.WaitURL{
-			URL: ZOT_CHECK_URL,
+			URL: ZotCheckURL,
 			Wait: cnc.WaitParams{
 				Delay:    10 * time.Second,
 				Interval: 5 * time.Second,
