@@ -47,11 +47,12 @@ type RecipeSaverItem struct {
 }
 
 func getShortTypeName(a any) string {
-	if t := reflect.TypeOf(a); t.Kind() == reflect.Ptr {
+	t := reflect.TypeOf(a)
+	if t.Kind() == reflect.Ptr {
 		return t.Elem().Name()
-	} else {
-		return t.Name()
 	}
+
+	return t.Name()
 }
 
 func (r *Recipe) Save(basedir string) error {
@@ -62,6 +63,7 @@ func (r *Recipe) Save(basedir string) error {
 		for _, knownOp := range RunOpsList {
 			if getShortTypeName(action.Op) == getShortTypeName(knownOp) {
 				known = true
+
 				break
 			}
 		}
@@ -82,7 +84,7 @@ func (r *Recipe) Save(basedir string) error {
 		return errors.Wrap(err, "error marshaling recipe")
 	}
 
-	err = os.WriteFile(filepath.Join(basedir, "recipe.yaml"), data, 0o644)
+	err = os.WriteFile(filepath.Join(basedir, "recipe.yaml"), data, 0o600)
 	if err != nil {
 		return errors.Wrap(err, "error writing recipe")
 	}
@@ -110,6 +112,7 @@ func (r *Recipe) Load(basedir string) error {
 		for _, knownOp := range RunOpsList {
 			if getShortTypeName(knownOp) == item.Type {
 				op = reflect.New(reflect.TypeOf(knownOp).Elem()).Interface().(RunOp)
+
 				break
 			}
 		}

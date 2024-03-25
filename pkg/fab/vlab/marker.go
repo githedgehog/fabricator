@@ -29,6 +29,7 @@ func (m fileMarker) Is() bool {
 	if os.IsNotExist(err) {
 		return false
 	}
+
 	return err == nil
 }
 
@@ -38,5 +39,6 @@ func (m fileMarker) Mark() error {
 		return errors.Wrapf(err, "failed to create marker file %s", m.path)
 	}
 	defer f.Close()
+
 	return nil
 }

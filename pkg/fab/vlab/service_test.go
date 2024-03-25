@@ -84,7 +84,7 @@ func Test_portIdForName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.port, func(t *testing.T) {
-			result, err := portIdForName(tt.port)
+			result, err := portIDForName(tt.port)
 			if tt.error && err == nil {
 				t.Errorf("PortIdForName(%s) expected error, got nil", tt.port)
 			}

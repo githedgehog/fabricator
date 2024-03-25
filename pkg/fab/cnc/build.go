@@ -109,6 +109,7 @@ func (op *FilesORAS) Build(basedir string) error {
 
 	if skip {
 		slog.Debug("Downloading SKIPPED (files exists)", "name", op.Ref.Name)
+
 		return nil
 	}
 
@@ -145,10 +146,11 @@ func (op *FilesORAS) Build(basedir string) error {
 	pb := mpb.New(mpb.WithWidth(5))
 	bars := sync.Map{}
 
-	complete := func(ctx context.Context, desc ocispec.Descriptor) error {
+	complete := func(_ context.Context, desc ocispec.Descriptor) error {
 		if v, ok := bars.Load(desc.Digest.String()); ok {
 			v.(*mpb.Bar).SetCurrent(desc.Size)
 		}
+
 		return nil
 	}
 
@@ -156,7 +158,7 @@ func (op *FilesORAS) Build(basedir string) error {
 		CopyGraphOptions: oras.CopyGraphOptions{
 			Concurrency: 3,
 			PreCopy: func(ctx context.Context, desc ocispec.Descriptor) error {
-				if !slog.Default().Enabled(context.Background(), slog.LevelInfo) || desc.Size < 1_000_000 { // skip progress bar if < 1MB
+				if !slog.Default().Enabled(ctx, slog.LevelInfo) || desc.Size < 1_000_000 { // skip progress bar if < 1MB
 					return nil
 				}
 
@@ -185,7 +187,7 @@ func (op *FilesORAS) Build(basedir string) error {
 		},
 	})
 	if err != nil {
-		return err
+		return errors.Wrapf(err, "error copying files from %s", op.Ref.String())
 	}
 
 	pb.Wait()
@@ -213,14 +215,14 @@ func UnpackFile(basedir string, name string) error { // TODO validate we've got 
 	fromPath := filepath.Join(basedir, name)
 	from, err := os.Open(fromPath)
 	if err != nil {
-		return err
+		return errors.Wrapf(err, "error opening file %s", fromPath)
 	}
 	defer from.Close()
 
 	toPath := filepath.Join(basedir, strings.TrimSuffix(name, filepath.Ext(name)))
 	to, err := os.Create(toPath)
 	if err != nil {
-		return err
+		return errors.Wrapf(err, "error creating file %s", toPath)
 	}
 	defer to.Close()
 
@@ -238,7 +240,7 @@ func UnpackFile(basedir string, name string) error { // TODO validate we've got 
 		return errors.New("unknown extension to unpack")
 	}
 	if err != nil {
-		return err
+		return errors.Wrapf(err, "error creating unpack reader for %s", fromPath)
 	}
 
 	writer := bufio.NewWriter(to)
@@ -250,7 +252,7 @@ func UnpackFile(basedir string, name string) error { // TODO validate we've got 
 
 	info, err := from.Stat()
 	if err != nil {
-		return err
+		return errors.Wrapf(err, "error statting file %s", fromPath)
 	}
 
 	var bar *mpb.Bar
@@ -272,7 +274,7 @@ func UnpackFile(basedir string, name string) error { // TODO validate we've got 
 		reader = proxy
 	}
 
-	_, err = io.Copy(writer, reader)
+	_, err = io.Copy(writer, reader) //nolint:gosec
 	if err != nil {
 		return errors.Wrap(err, "error copying while unpacking")
 	}
@@ -285,7 +287,7 @@ func UnpackFile(basedir string, name string) error { // TODO validate we've got 
 
 	err = os.Remove(fromPath)
 	if err != nil {
-		return err
+		return errors.Wrapf(err, "error removing file %s", fromPath)
 	}
 
 	return nil
@@ -338,13 +340,13 @@ func (op *FileGenerate) Build(basedir string) error {
 
 	target, err := os.OpenFile(filepath.Join(basedir, op.File.Name), os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o644)
 	if err != nil {
-		return err
+		return errors.Wrapf(err, "error opening file %s", op.File.Name)
 	}
 	defer target.Close()
 
 	_, err = target.WriteString(content)
 	if err != nil {
-		return err
+		return errors.Wrapf(err, "error writing to file %s", op.File.Name)
 	}
 
 	return nil
@@ -445,18 +447,18 @@ func (op *SyncOCI) RunOps() []RunOp {
 func copyOCI(from, to string, insecureSource bool) error {
 	srcRef, err := alltransports.ParseImageName(from)
 	if err != nil {
-		return err
+		return errors.Wrapf(err, "error parsing source ref %s", from)
 	}
 	destRef, err := alltransports.ParseImageName(to)
 	if err != nil {
-		return err
+		return errors.Wrapf(err, "error parsing dest ref %s", to)
 	}
 
 	policyCtx, err := signature.NewPolicyContext(&signature.Policy{
 		Default: []signature.PolicyRequirement{signature.NewPRInsecureAcceptAnything()},
 	})
 	if err != nil {
-		return err
+		return errors.Wrapf(err, "error creating policy context")
 	}
 
 	progressChan := make(chan types.ProgressProperties)
@@ -489,7 +491,7 @@ func copyOCI(from, to string, insecureSource bool) error {
 							decor.EwmaETA(decor.ET_STYLE_GO, 30, decor.WCSyncSpace), "done",
 						),
 					))
-			} else if p.Event == types.ProgressEventSkipped {
+			} else if p.Event == types.ProgressEventSkipped { //nolint:revive
 				// bars[digest].SetCurrent(p.Artifact.Size)
 			} else {
 				bars[digest].EwmaIncrInt64(int64(p.OffsetUpdate), time.Since(barStart[digest]))
@@ -517,7 +519,7 @@ func copyOCI(from, to string, insecureSource bool) error {
 		},
 	})
 	if err != nil {
-		return err
+		return errors.Wrapf(err, "error copying image from %s to %s", from, to)
 	}
 
 	pb.Wait()
@@ -531,6 +533,7 @@ func getDockerAuthConfigOrNil(ref types.ImageReference) *types.DockerAuthConfig 
 		credStore, err := credentials.NewStoreFromDocker(storeOpts)
 		if err != nil {
 			slog.Warn("Error getting docker credentials store", "err", err)
+
 			return nil
 		}
 
@@ -538,6 +541,7 @@ func getDockerAuthConfigOrNil(ref types.ImageReference) *types.DockerAuthConfig 
 		creds, err := credStore.Get(context.Background(), baseRepo)
 		if err != nil {
 			slog.Warn("Error getting docker credentials", "repo", baseRepo, "err", err)
+
 			return nil
 		}
 

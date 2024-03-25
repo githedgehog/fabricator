@@ -26,10 +26,11 @@ import (
 var runBin []byte
 
 const (
-	RECIPE_BIN_NAME = "hhfab-recipe"
+	RecipeBinName = "hhfab-recipe"
 )
 
 func WriteRunBin(basedir string) error {
-	path := filepath.Join(basedir, RECIPE_BIN_NAME)
-	return errors.Wrapf(os.WriteFile(path, runBin, 0o755), "error writing bin %s", path)
+	path := filepath.Join(basedir, RecipeBinName)
+
+	return errors.Wrapf(os.WriteFile(path, runBin, 0o755), "error writing bin %s", path) //nolint:gosec
 }

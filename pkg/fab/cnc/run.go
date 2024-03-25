@@ -82,15 +82,15 @@ func (op *InstallFile) Summary() string {
 func (op *InstallFile) Run(basedir string) error {
 	err := os.MkdirAll(op.Target, op.MkdirMode)
 	if err != nil {
-		return err
+		return errors.Wrapf(err, "failed to create directory %s", op.Target)
 	}
 
 	content, err := os.ReadFile(filepath.Join(basedir, op.Name))
 	if err != nil {
-		return err
+		return errors.Wrapf(err, "failed to read file %s", op.Name)
 	}
 
-	return os.WriteFile(op.TargetPath(), content, op.Mode)
+	return errors.Wrapf(os.WriteFile(op.TargetPath(), content, op.Mode), "failed to write file %s", op.TargetName)
 }
 
 //
@@ -119,7 +119,7 @@ func (op *ExecCommand) Summary() string {
 }
 
 func (op *ExecCommand) Run(basedir string) error {
-	cmd := exec.Command(op.Name, op.Args...)
+	cmd := exec.Command(op.Name, op.Args...) //nolint:gosec
 
 	cmd.Dir = basedir
 	cmd.Env = append(os.Environ(), op.Env...)
@@ -145,7 +145,7 @@ var _ RunOp = (*WaitURL)(nil)
 func (op *WaitURL) Hydrate() error {
 	_, err := url.ParseRequestURI(op.URL)
 	if err != nil {
-		return err
+		return errors.Wrapf(err, "invalid url %s", op.URL)
 	}
 	if op.StatusCode == 0 {
 		op.StatusCode = http.StatusOK
@@ -158,12 +158,14 @@ func (op *WaitURL) Summary() string {
 	return fmt.Sprintf("wait %s", op.URL)
 }
 
-func (op *WaitURL) Run(basedir string) error {
+func (op *WaitURL) Run(_ string) error {
 	return op.Wait.Wait(func() error {
-		resp, err := http.Get(op.URL)
+		resp, err := http.Get(op.URL) //nolint:noctx
 		if err != nil {
-			return err
+			return errors.Wrapf(err, "failed to get %s", op.URL)
 		}
+		defer resp.Body.Close()
+
 		if resp.StatusCode != op.StatusCode {
 			return errors.Errorf("status code %d, expected %d", resp.StatusCode, op.StatusCode)
 		}
@@ -252,7 +254,7 @@ func (op *WaitKube) waitForResource() error {
 
 		time.Sleep(op.Interval)
 
-		cmd := exec.Command("kubectl", "get", op.Name)
+		cmd := exec.Command("kubectl", "get", op.Name) //nolint:gosec
 
 		if slog.Default().Enabled(context.TODO(), slog.LevelDebug) {
 			cmd.Stdout = os.Stdout
@@ -265,7 +267,7 @@ func (op *WaitKube) waitForResource() error {
 	}
 }
 
-func (op *WaitKube) Run(basedir string) error {
+func (op *WaitKube) Run(_ string) error {
 	// wait for resource existence first
 	err := op.waitForResource()
 	if err != nil {
@@ -274,21 +276,21 @@ func (op *WaitKube) Run(basedir string) error {
 
 	var cmd *exec.Cmd
 	if strings.HasPrefix(op.Name, "deployment") {
-		cmd = exec.Command("kubectl",
+		cmd = exec.Command("kubectl", //nolint:gosec
 			"wait",
 			"--for=condition=available",
-			"--timeout="+op.Timeout.String(), op.Name)
+			"--timeout="+op.Timeout.String(), op.Name) //nolint:goconst
 	} else if strings.HasPrefix(op.Name, "job") {
-		cmd = exec.Command("kubectl",
+		cmd = exec.Command("kubectl", //nolint:gosec
 			"wait",
 			"--for=condition=complete",
 			"--timeout="+op.Timeout.String(), op.Name)
 	} else if strings.HasPrefix(op.Name, "daemonset") {
-		cmd = exec.Command("kubectl",
+		cmd = exec.Command("kubectl", //nolint:gosec
 			"rollout", "status",
 			"--timeout="+op.Timeout.String(), op.Name)
 	} else if strings.HasPrefix(op.Name, "controlagent") {
-		cmd = exec.Command("kubectl",
+		cmd = exec.Command("kubectl", //nolint:gosec
 			"wait",
 			"--for=condition=applied",
 			"--timeout="+op.Timeout.String(), op.Name)

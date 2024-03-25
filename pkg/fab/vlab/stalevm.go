@@ -36,6 +36,7 @@ func checkForStaleVMs(ctx context.Context, killStaleVMs bool) error {
 			if strings.Contains(err.Error(), "no such file or directory") {
 				continue
 			}
+
 			return errors.Wrap(err, "error getting process cmdline")
 		}
 

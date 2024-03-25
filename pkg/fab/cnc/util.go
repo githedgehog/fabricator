@@ -17,6 +17,8 @@ package cnc
 import (
 	"os"
 	"path/filepath"
+
+	"github.com/pkg/errors"
 )
 
 func ReadOrGenerateSSHKey(basedir string, name string, comment string) (string, error) {
@@ -36,7 +38,7 @@ func ReadOrGenerateSSHKey(basedir string, name string, comment string) (string, 
 
 	data, err := os.ReadFile(path + ".pub")
 	if err != nil {
-		return "", err
+		return "", errors.Wrapf(err, "error reading ssh key")
 	}
 
 	return string(data), nil

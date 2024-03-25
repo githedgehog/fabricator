@@ -31,14 +31,14 @@ import (
 )
 
 const (
-	MAC_ADDR_TMPL        = "0c:20:12:fe:%02d:%02d" // if changing update onie-qcow2-eeprom-edit config too
-	KUBE_PORT            = 6443
-	REGISTRY_PORT        = 31000
-	SSH_PORT_BASE        = 22000
-	IF_PORT_BASE         = 30000
-	IF_PORT_NULL         = IF_PORT_BASE + 9000
-	IF_PORT_VM_ID_MULT   = 100
-	IF_PORT_PORT_ID_MULT = 1
+	MACAddrTmpl      = "0c:20:12:fe:%02d:%02d" // if changing update onie-qcow2-eeprom-edit config too
+	KubePort         = 6443
+	RegistryPort     = 31000
+	SSHPortBase      = 22000
+	IfPortBase       = 30000
+	IfPortNull       = IfPortBase + 9000
+	IfPortVMIDMult   = 100
+	IfPortPortIDMult = 1
 )
 
 var RequiredCommands = []string{
@@ -72,7 +72,7 @@ type ServiceConfig struct {
 	ControlInstaller  string
 	ServerInstaller   string
 	FilesDir          string
-	SshKey            string
+	SSHKey            string
 }
 
 func Load(cfg *ServiceConfig) (*Service, error) {
@@ -94,7 +94,7 @@ func Load(cfg *ServiceConfig) (*Service, error) {
 	if cfg.FilesDir == "" {
 		return nil, errors.Errorf("files dir is not specified")
 	}
-	if cfg.SshKey == "" {
+	if cfg.SSHKey == "" {
 		return nil, errors.Errorf("ssh key is not specified")
 	}
 
@@ -176,7 +176,7 @@ func (svc *Service) StartServer(killStaleVMs bool, charNBDDev string, installCom
 		time.Sleep(200 * time.Millisecond)
 	}
 
-	return eg.Wait()
+	return errors.Wrapf(eg.Wait(), "error starting VMs")
 }
 
 func (svc *Service) checkResources() {
@@ -223,8 +223,8 @@ func (svc *Service) VFIOPCIBindAll() error {
 }
 
 const (
-	VM_SELECTOR_SSH = "ssh"
-	VM_SELECTOR_ALL = "all"
+	VMSelectorSSH = "ssh"
+	VMSelectorAll = "all"
 )
 
 func (svc *Service) vmSelector(name string, mode string, msg string) (*VM, error) {
@@ -237,7 +237,7 @@ func (svc *Service) vmSelector(name string, mode string, msg string) (*VM, error
 		if name == "control" && vm.Type == VMTypeControl {
 			return vm, nil
 		}
-		if mode == VM_SELECTOR_ALL || mode == VM_SELECTOR_SSH {
+		if mode == VMSelectorAll || mode == VMSelectorSSH {
 			vms = append(vms, vm)
 		}
 	}
@@ -284,6 +284,7 @@ func (svc *Service) findJumpForSwitch(name string) (string, string, error) {
 	for _, vm := range svc.mngr.sortedVMs() {
 		if vm.Type == VMTypeControl {
 			controlVM = vm
+
 			break
 		}
 	}
@@ -296,6 +297,7 @@ func (svc *Service) findJumpForSwitch(name string) (string, string, error) {
 	for _, sw := range svc.cfg.Wiring.Switch.All() {
 		if sw.Name == name {
 			target = sw.Spec.IP
+
 			break
 		}
 	}
@@ -307,19 +309,19 @@ func (svc *Service) findJumpForSwitch(name string) (string, string, error) {
 	target = strings.SplitN(target, "/", 2)[0] // we don't need the mask
 	target = "admin@" + target
 	proxyCmd := fmt.Sprintf("ssh %s -i %s -W %%h:%%p -p %d core@127.0.0.1",
-		strings.Join(SSH_QUIET_FLAGS, " "), svc.cfg.SshKey, controlVM.sshPort())
+		strings.Join(SSHQuietFlags, " "), svc.cfg.SSHKey, controlVM.sshPort())
 
 	return proxyCmd, target, nil
 }
 
 func (svc *Service) SSH(name string, args []string) error {
-	vm, err := svc.vmSelector(name, VM_SELECTOR_SSH, "SSH to VM:")
+	vm, err := svc.vmSelector(name, VMSelectorSSH, "SSH to VM:")
 	if err != nil {
 		return err
 	}
 
 	target := "core@127.0.0.1"
-	cmdArgs := append(SSH_QUIET_FLAGS, "-i", svc.cfg.SshKey)
+	cmdArgs := append(SSHQuietFlags, "-i", svc.cfg.SSHKey)
 
 	if vm.Type == VMTypeControl || vm.Type == VMTypeServer {
 		cmdArgs = append(cmdArgs,
@@ -351,11 +353,11 @@ func (svc *Service) SSH(name string, args []string) error {
 
 	slog.Debug("Running ssh", "args", strings.Join(cmdArgs, " "))
 
-	return cmd.Run()
+	return errors.Wrapf(cmd.Run(), "error running ssh")
 }
 
 func (svc *Service) Serial(name string) error {
-	vm, err := svc.vmSelector(name, VM_SELECTOR_ALL, "Connect to VM serial console:")
+	vm, err := svc.vmSelector(name, VMSelectorAll, "Connect to VM serial console:")
 	if err != nil {
 		return err
 	}
@@ -399,11 +401,11 @@ func (svc *Service) Serial(name string) error {
 
 	slog.Warn("Use Ctrl+] to escape, if no output try Enter, safe to use Ctrl+C/Ctrl+Z")
 
-	return cmd.Run()
+	return errors.Wrapf(cmd.Run(), "error running socat")
 }
 
 func (svc *Service) List() error {
-	_, err := svc.vmSelector("", VM_SELECTOR_ALL, "Select VM for detailed info:")
+	_, err := svc.vmSelector("", VMSelectorAll, "Select VM for detailed info:")
 	if err != nil {
 		return err
 	}

@@ -34,6 +34,7 @@ func InitTPMConfig(ctx context.Context, svcCfg *ServiceConfig) error {
 			// Most probably it's just refusing to overwrite existing config
 			slog.Debug("swtpm-create-user-config-files failed, ignoring", "error", err)
 		}
+
 		return nil
 	}
 	if !os.IsNotExist(err) {

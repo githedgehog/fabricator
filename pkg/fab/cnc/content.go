@@ -242,6 +242,7 @@ func IgnitionFromButaneTemplate(tmplText string, dataBuilder ...any) ContentGene
 		}
 		if strict && len(report.Entries) > 0 {
 			slog.Warn("butane", "report", report.String())
+
 			return "", errors.New("butane produced warnings and strict mode is enabled")
 		}
 

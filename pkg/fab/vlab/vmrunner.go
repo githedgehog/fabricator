@@ -31,7 +31,7 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-var SSH_QUIET_FLAGS = []string{
+var SSHQuietFlags = []string{
 	"-o", "GlobalKnownHostsFile=/dev/null",
 	"-o", "UserKnownHostsFile=/dev/null",
 	"-o", "StrictHostKeyChecking=no",
@@ -39,7 +39,7 @@ var SSH_QUIET_FLAGS = []string{
 }
 
 const (
-	IFACES_PER_PCI_BRIDGE = 32
+	IfacesPerPCIBridge = 32
 )
 
 func (vm *VM) Run(ctx context.Context, eg *errgroup.Group, svc *Service) {
@@ -57,9 +57,9 @@ func (vm *VM) Run(ctx context.Context, eg *errgroup.Group, svc *Service) {
 func (svcCfg *ServiceConfig) tpmSudo() string {
 	if svcCfg.SudoSwtpm {
 		return "sudo"
-	} else {
-		return "time"
 	}
+
+	return "time"
 }
 
 func (vm *VM) RunTPM(ctx context.Context, svcCfg *ServiceConfig) func() error {
@@ -127,7 +127,7 @@ func (vm *VM) RunVM(ctx context.Context, svcCfg *ServiceConfig) func() error {
 			)
 		}
 
-		for idx := 0; idx <= len(vm.Interfaces)/IFACES_PER_PCI_BRIDGE; idx++ {
+		for idx := 0; idx <= len(vm.Interfaces)/IfacesPerPCIBridge; idx++ {
 			args = append(args,
 				"-device", fmt.Sprintf("i82801b11-bridge,id=dmi_pci_bridge%d", idx),
 				"-device", fmt.Sprintf("pci-bridge,id=pci-bridge%d,bus=dmi_pci_bridge%d,chassis_nr=0x1,addr=0x%d,shpc=off", idx, idx, idx),
@@ -151,7 +151,7 @@ func (vm *VM) RunVM(ctx context.Context, svcCfg *ServiceConfig) func() error {
 				}
 			}
 
-			device += fmt.Sprintf(",bus=pci-bridge%d,addr=0x%x", ifaceID/IFACES_PER_PCI_BRIDGE, ifaceID%IFACES_PER_PCI_BRIDGE)
+			device += fmt.Sprintf(",bus=pci-bridge%d,addr=0x%x", ifaceID/IfacesPerPCIBridge, ifaceID%IfacesPerPCIBridge)
 
 			if netdev != "" {
 				args = append(args, "-netdev", netdev)
@@ -204,7 +204,7 @@ func (vm *VM) RunInstall(ctx context.Context, svc *Service) func() error {
 						break loop
 					}
 				case <-ctx.Done():
-					return ctx.Err()
+					return errors.Wrapf(ctx.Err(), "error waiting for ssh")
 				}
 			}
 			slog.Info("VM ssh is available", "name", vm.Name, "type", vm.Type)
@@ -278,7 +278,7 @@ func (vm *VM) RunInstall(ctx context.Context, svc *Service) func() error {
 
 		if len(svcCfg.OnReady) > 0 {
 			slog.Info("Waiting for all switches to get ready as requested and run commands after that")
-			if err := waitForSwitchesReady(svcCfg); err != nil {
+			if err := waitForSwitchesReady(ctx, svcCfg); err != nil {
 				slog.Error("error waiting switches are ready", "error", err)
 				os.Exit(1)
 			}
@@ -337,10 +337,12 @@ func (vm *VM) RunInstall(ctx context.Context, svc *Service) func() error {
 func (vm *VM) Prepare(ctx context.Context, svcCfg *ServiceConfig) error {
 	if svcCfg.DryRun {
 		slog.Debug("Skipping VM preparation in dry-run mode", "name", vm.Name)
+
 		return nil
 	}
 	if vm.Ready.Is() {
 		slog.Debug("VM is already prepared", "name", vm.Name)
+
 		return nil
 	}
 
@@ -369,7 +371,7 @@ func (vm *VM) Prepare(ctx context.Context, svcCfg *ServiceConfig) error {
 		files["efi_vars.fd"] = filepath.Join(svcCfg.FilesDir, "onie_efi_vars.fd")
 	}
 
-	err = vm.copyFiles(ctx, svcCfg, files)
+	err = vm.copyFiles(ctx, files)
 	if err != nil {
 		return errors.Wrapf(err, "error copying files")
 	}
@@ -386,7 +388,7 @@ func (vm *VM) Prepare(ctx context.Context, svcCfg *ServiceConfig) error {
 		if err != nil {
 			return errors.Wrapf(err, "error generating onie-eeprom.yaml for %s", vm.Name)
 		}
-		err = os.WriteFile(filepath.Join(vm.Basedir, "onie-eeprom.yaml"), []byte(onieEepromConfig), 0o644)
+		err = os.WriteFile(filepath.Join(vm.Basedir, "onie-eeprom.yaml"), []byte(onieEepromConfig), 0o600)
 		if err != nil {
 			return errors.Wrapf(err, "error writing onie-eeprom.yaml")
 		}
@@ -429,7 +431,7 @@ func (vm *VM) Prepare(ctx context.Context, svcCfg *ServiceConfig) error {
 	return nil
 }
 
-func (vm *VM) copyFiles(ctx context.Context, cfg *ServiceConfig, names map[string]string) error {
+func (vm *VM) copyFiles(ctx context.Context, names map[string]string) error {
 	for toName, from := range names {
 		to := filepath.Join(vm.Basedir, toName)
 
@@ -487,9 +489,9 @@ func (vm *VM) copyFiles(ctx context.Context, cfg *ServiceConfig, names map[strin
 }
 
 func (vm *VM) ssh(ctx context.Context, svcCfg *ServiceConfig, quiet bool, command string) error {
-	args := append(SSH_QUIET_FLAGS,
+	args := append(SSHQuietFlags,
 		"-p", fmt.Sprintf("%d", vm.sshPort()),
-		"-i", svcCfg.SshKey,
+		"-i", svcCfg.SSHKey,
 		"core@127.0.0.1",
 		command,
 	)
@@ -498,9 +500,9 @@ func (vm *VM) ssh(ctx context.Context, svcCfg *ServiceConfig, quiet bool, comman
 }
 
 func (vm *VM) upload(ctx context.Context, svcCfg *ServiceConfig, quiet bool, from, to string) error {
-	args := append(SSH_QUIET_FLAGS,
+	args := append(SSHQuietFlags,
 		"-P", fmt.Sprintf("%d", vm.sshPort()),
-		"-i", svcCfg.SshKey,
+		"-i", svcCfg.SSHKey,
 		"-r",
 		from,
 		"core@127.0.0.1:"+to,
@@ -510,9 +512,9 @@ func (vm *VM) upload(ctx context.Context, svcCfg *ServiceConfig, quiet bool, fro
 }
 
 func (vm *VM) download(ctx context.Context, svcCfg *ServiceConfig, quiet bool, from, to string) error {
-	args := append(SSH_QUIET_FLAGS,
+	args := append(SSHQuietFlags,
 		"-P", fmt.Sprintf("%d", vm.sshPort()),
-		"-i", svcCfg.SshKey,
+		"-i", svcCfg.SSHKey,
 		"-r",
 		"core@127.0.0.1:"+from,
 		to,
@@ -523,10 +525,11 @@ func (vm *VM) download(ctx context.Context, svcCfg *ServiceConfig, quiet bool, f
 
 func execCmd(ctx context.Context, svcCfg *ServiceConfig, basedir string, quiet bool, name string, env []string, args ...string) error {
 	argsStr := strings.Join(args, " ")
-	argsStr = strings.ReplaceAll(argsStr, strings.Join(SSH_QUIET_FLAGS, " "), "")
+	argsStr = strings.ReplaceAll(argsStr, strings.Join(SSHQuietFlags, " "), "")
 
 	if svcCfg.DryRun {
 		slog.Debug("Dry-run, skipping command", "name", name, "args", argsStr)
+
 		return nil
 	}
 

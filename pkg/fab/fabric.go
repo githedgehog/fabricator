@@ -41,7 +41,7 @@ var fabricDHCPDTemplate string
 
 type Fabric struct {
 	Ref                      cnc.Ref `json:"ref,omitempty"`
-	FabricApiChartRef        cnc.Ref `json:"fabricApiChartRef,omitempty"`
+	FabricAPIChartRef        cnc.Ref `json:"fabricApiChartRef,omitempty"`
 	FabricChartRef           cnc.Ref `json:"fabricChartRef,omitempty"`
 	FabricImageRef           cnc.Ref `json:"fabricImageRef,omitempty"`
 	AgentRef                 cnc.Ref `json:"agentRef,omitempty"`
@@ -62,28 +62,28 @@ func (cfg *Fabric) Name() string {
 	return "fabric"
 }
 
-func (cfg *Fabric) IsEnabled(preset cnc.Preset) bool {
+func (cfg *Fabric) IsEnabled(_ cnc.Preset) bool {
 	return true
 }
 
 func (cfg *Fabric) Flags() []cli.Flag {
 	return []cli.Flag{
 		&cli.StringFlag{
-			Category:    cfg.Name() + FLAG_CATEGORY_CONFIG_BASE_SUFFIX,
+			Category:    cfg.Name() + CategoryConfigBaseSuffix,
 			Name:        "base-vpc-community",
 			Usage:       "base community to stamp on VPC routes",
 			Destination: &cfg.BaseVPCCommunity,
 			Value:       "50000:0",
 		},
 		&cli.UintFlag{
-			Category:    cfg.Name() + FLAG_CATEGORY_CONFIG_BASE_SUFFIX,
+			Category:    cfg.Name() + CategoryConfigBaseSuffix,
 			Name:        "server-facing-mtu-offset",
 			Usage:       "offset to apply to server-facing MTU",
 			Destination: &cfg.ServerFacingMTUOffset,
 			Value:       64,
 		},
 		&cli.StringFlag{
-			Category:    cfg.Name() + FLAG_CATEGORY_CONFIG_BASE_SUFFIX,
+			Category:    cfg.Name() + CategoryConfigBaseSuffix,
 			Name:        "dhcpd",
 			Usage:       "use 'hedgehog' DHCPD to enables multi ipv4 namespace DHCP with overlapping subnets (one of 'hedgehog', 'isc')",
 			Destination: &cfg.DHCPServer,
@@ -92,18 +92,18 @@ func (cfg *Fabric) Flags() []cli.Flag {
 	}
 }
 
-func (cfg *Fabric) Hydrate(preset cnc.Preset, fabricMode meta.FabricMode) error {
-	cfg.Ref = cfg.Ref.Fallback(REF_FABRIC_VERSION)
-	cfg.FabricApiChartRef = cfg.FabricApiChartRef.Fallback(REF_FABRIC_API_CHART)
-	cfg.FabricChartRef = cfg.FabricChartRef.Fallback(REF_FABRIC_CHART)
-	cfg.FabricImageRef = cfg.FabricImageRef.Fallback(REF_FABRIC_IMAGE)
-	cfg.AgentRef = cfg.AgentRef.Fallback(REF_FABRIC_AGENT)
-	cfg.ControlAgentRef = cfg.ControlAgentRef.Fallback(REF_FABRIC_CONTROL_AGENT)
-	cfg.CtlRef = cfg.CtlRef.Fallback(REF_FABRIC_CTL)
-	cfg.FabricDHCPServerRef = cfg.FabricDHCPServerRef.Fallback(REF_FABRIC_DHCP_SERVER)
-	cfg.FabricDHCPServerChartRef = cfg.FabricDHCPServerChartRef.Fallback(REF_FABRIC_DHCP_SERVER_CHART)
-	cfg.FabricDHCPDRef = cfg.FabricDHCPDRef.Fallback(REF_FABRIC_DHCPD)
-	cfg.FabricDHCPDChartRef = cfg.FabricDHCPDChartRef.Fallback(REF_FABRIC_DHCPD_CHART)
+func (cfg *Fabric) Hydrate(_ cnc.Preset, _ meta.FabricMode) error {
+	cfg.Ref = cfg.Ref.Fallback(RefFabricVersion)
+	cfg.FabricAPIChartRef = cfg.FabricAPIChartRef.Fallback(RefFabricAPIChart)
+	cfg.FabricChartRef = cfg.FabricChartRef.Fallback(RefFabricChart)
+	cfg.FabricImageRef = cfg.FabricImageRef.Fallback(RefFabricImage)
+	cfg.AgentRef = cfg.AgentRef.Fallback(RefFabricAgent)
+	cfg.ControlAgentRef = cfg.ControlAgentRef.Fallback(RefFabricControlAgent)
+	cfg.CtlRef = cfg.CtlRef.Fallback(RefFabricCtl)
+	cfg.FabricDHCPServerRef = cfg.FabricDHCPServerRef.Fallback(RefFabricDHCPServer)
+	cfg.FabricDHCPServerChartRef = cfg.FabricDHCPServerChartRef.Fallback(RefFabricDHCPServerChart)
+	cfg.FabricDHCPDRef = cfg.FabricDHCPDRef.Fallback(RefFabricDHCPD)
+	cfg.FabricDHCPDChartRef = cfg.FabricDHCPDChartRef.Fallback(RefFabricDHCPDChart)
 
 	if !slices.Contains(meta.DHCPModes, meta.DHCPMode(cfg.DHCPServer)) {
 		return errors.Errorf("invalid dhcp server mode %q", cfg.DHCPServer)
@@ -116,8 +116,8 @@ func (cfg *Fabric) buildFabricConfig(fabricMode meta.FabricMode, get cnc.GetComp
 	target := BaseConfig(get).Target
 
 	return &meta.FabricConfig{
-		ControlVIP:  CONTROL_VIP + CONTROL_VIP_MASK,
-		APIServer:   fmt.Sprintf("%s:%d", CONTROL_VIP, K3S_API_PORT),
+		ControlVIP:  ControlVIP + ControlVIPMask,
+		APIServer:   fmt.Sprintf("%s:%d", ControlVIP, K3sAPIPort),
 		AgentRepo:   target.Fallback(cfg.AgentRef).RepoName(),
 		AgentRepoCA: ZotConfig(get).TLS.CA.Cert,
 		VPCIRBVLANRanges: []meta.VLANRange{
@@ -147,7 +147,7 @@ func (cfg *Fabric) buildFabricConfig(fabricMode meta.FabricMode, get cnc.GetComp
 	}
 }
 
-func (cfg *Fabric) Validate(basedir string, preset cnc.Preset, fabricMode meta.FabricMode, get cnc.GetComponent, wiring *wiringlib.Data) error {
+func (cfg *Fabric) Validate(_ string, _ cnc.Preset, fabricMode meta.FabricMode, get cnc.GetComponent, wiring *wiringlib.Data) error {
 	fabricCfg := cfg.buildFabricConfig(fabricMode, get, []meta.UserCreds{})
 
 	if err := wiringlib.ValidateFabric(context.TODO(), wiring.Native, fabricCfg); err != nil {
@@ -157,8 +157,8 @@ func (cfg *Fabric) Validate(basedir string, preset cnc.Preset, fabricMode meta.F
 	return nil
 }
 
-func (cfg *Fabric) Build(basedir string, preset cnc.Preset, fabricMode meta.FabricMode, get cnc.GetComponent, wiring *wiringlib.Data, run cnc.AddBuildOp, install cnc.AddRunOp) error {
-	cfg.FabricApiChartRef = cfg.FabricApiChartRef.Fallback(cfg.Ref, BaseConfig(get).Source)
+func (cfg *Fabric) Build(_ string, _ cnc.Preset, fabricMode meta.FabricMode, get cnc.GetComponent, wiring *wiringlib.Data, run cnc.AddBuildOp, install cnc.AddRunOp) error {
+	cfg.FabricAPIChartRef = cfg.FabricAPIChartRef.Fallback(cfg.Ref, BaseConfig(get).Source)
 	cfg.FabricChartRef = cfg.FabricChartRef.Fallback(cfg.Ref, BaseConfig(get).Source)
 	cfg.FabricImageRef = cfg.FabricImageRef.Fallback(cfg.Ref, BaseConfig(get).Source)
 	cfg.AgentRef = cfg.AgentRef.Fallback(cfg.Ref, BaseConfig(get).Source)
@@ -183,61 +183,61 @@ func (cfg *Fabric) Build(basedir string, preset cnc.Preset, fabricMode meta.Fabr
 		return errors.Wrap(err, "error writing wiring data")
 	}
 
-	run(BundleControlInstall, STAGE_INSTALL_3_FABRIC, "fabric-api-chart",
+	run(BundleControlInstall, StageInstall3Fabric, "fabric-api-chart",
 		&cnc.SyncOCI{
-			Ref:    cfg.FabricApiChartRef,
+			Ref:    cfg.FabricAPIChartRef,
 			Target: target,
 		})
 
-	run(BundleControlInstall, STAGE_INSTALL_3_FABRIC, "fabric-image",
+	run(BundleControlInstall, StageInstall3Fabric, "fabric-image",
 		&cnc.SyncOCI{
 			Ref:    cfg.FabricImageRef,
 			Target: target,
 		})
 
-	run(BundleControlInstall, STAGE_INSTALL_3_FABRIC, "fabric-chart",
+	run(BundleControlInstall, StageInstall3Fabric, "fabric-chart",
 		&cnc.SyncOCI{
 			Ref:    cfg.FabricChartRef,
 			Target: target,
 		})
 
-	run(BundleControlInstall, STAGE_INSTALL_3_FABRIC, "fabric-agent-seeder",
+	run(BundleControlInstall, StageInstall3Fabric, "fabric-agent-seeder",
 		&cnc.SyncOCI{
 			Ref:    cfg.AgentRef,
 			Target: target.Fallback(cnc.Ref{Name: "fabric/agent/x86_64", Tag: "latest"}),
 		})
 
-	run(BundleControlInstall, STAGE_INSTALL_3_FABRIC, "fabric-agent",
+	run(BundleControlInstall, StageInstall3Fabric, "fabric-agent",
 		&cnc.SyncOCI{
 			Ref:    cfg.AgentRef,
 			Target: target,
 		})
 
-	run(BundleControlInstall, STAGE_INSTALL_3_FABRIC, "fabric-dhcp-server-image",
+	run(BundleControlInstall, StageInstall3Fabric, "fabric-dhcp-server-image",
 		&cnc.SyncOCI{
 			Ref:    cfg.FabricDHCPServerRef,
 			Target: target,
 		})
 
-	run(BundleControlInstall, STAGE_INSTALL_3_FABRIC, "fabric-dhcp-server-chart",
+	run(BundleControlInstall, StageInstall3Fabric, "fabric-dhcp-server-chart",
 		&cnc.SyncOCI{
 			Ref:    cfg.FabricDHCPServerChartRef,
 			Target: target,
 		})
 
-	run(BundleControlInstall, STAGE_INSTALL_3_FABRIC, "fabric-dhcpd-image",
+	run(BundleControlInstall, StageInstall3Fabric, "fabric-dhcpd-image",
 		&cnc.SyncOCI{
 			Ref:    cfg.FabricDHCPDRef,
 			Target: target,
 		})
 
-	run(BundleControlInstall, STAGE_INSTALL_3_FABRIC, "fabric-dhcpd-chart",
+	run(BundleControlInstall, StageInstall3Fabric, "fabric-dhcpd-chart",
 		&cnc.SyncOCI{
 			Ref:    cfg.FabricDHCPDChartRef,
 			Target: target,
 		})
 
-	run(BundleControlInstall, STAGE_INSTALL_3_FABRIC, "fabric-control-agent",
+	run(BundleControlInstall, StageInstall3Fabric, "fabric-control-agent",
 		&cnc.FilesORAS{
 			Ref: cfg.ControlAgentRef,
 			Files: []cnc.File{
@@ -249,7 +249,7 @@ func (cfg *Fabric) Build(basedir string, preset cnc.Preset, fabricMode meta.Fabr
 			},
 		})
 
-	install(BundleControlInstall, STAGE_INSTALL_3_FABRIC, "fabric-control-agent-install",
+	install(BundleControlInstall, StageInstall3Fabric, "fabric-control-agent-install",
 		&cnc.ExecCommand{
 			Name: "/opt/hedgehog/bin/agent",
 			Args: []string{"install", "--control", "--agent-path", "/opt/hedgehog/bin/agent", "--agent-user", "root"},
@@ -259,7 +259,7 @@ func (cfg *Fabric) Build(basedir string, preset cnc.Preset, fabricMode meta.Fabr
 	if cfg.DHCPServer == "isc" {
 		dhcp = cnc.KubeHelmChart("fabric-dhcp-server", "default", helm.HelmChartSpec{
 			TargetNamespace: "default",
-			Chart:           "oci://" + targetInCluster.Fallback(cfg.FabricDHCPServerChartRef).RepoName(),
+			Chart:           OCIScheme + targetInCluster.Fallback(cfg.FabricDHCPServerChartRef).RepoName(),
 			Version:         cfg.FabricDHCPServerChartRef.Tag,
 			RepoCA:          ZotConfig(get).TLS.CA.Cert,
 		}, cnc.FromTemplate(fabricDHCPServerTemplate,
@@ -268,7 +268,7 @@ func (cfg *Fabric) Build(basedir string, preset cnc.Preset, fabricMode meta.Fabr
 	} else if cfg.DHCPServer == "hedgehog" {
 		dhcp = cnc.KubeHelmChart("fabric-dhcpd", "default", helm.HelmChartSpec{
 			TargetNamespace: "default",
-			Chart:           "oci://" + targetInCluster.Fallback(cfg.FabricDHCPDChartRef).RepoName(),
+			Chart:           OCIScheme + targetInCluster.Fallback(cfg.FabricDHCPDChartRef).RepoName(),
 			Version:         cfg.FabricDHCPDChartRef.Tag,
 			RepoCA:          ZotConfig(get).TLS.CA.Cert,
 		}, cnc.FromTemplate(fabricDHCPDTemplate,
@@ -279,7 +279,7 @@ func (cfg *Fabric) Build(basedir string, preset cnc.Preset, fabricMode meta.Fabr
 	users := []meta.UserCreds{}
 	slog.Info("Base config", "dev", BaseConfig(get).Dev)
 	if BaseConfig(get).Dev {
-		users = append(users, DEV_SONIC_USERS...)
+		users = append(users, DevSonicUsers...)
 		slog.Info("Adding dev users", "users", users)
 		for idx := range users {
 			users[idx].SSHKeys = append(users[idx].SSHKeys, BaseConfig(get).AuthorizedKeys...)
@@ -289,7 +289,7 @@ func (cfg *Fabric) Build(basedir string, preset cnc.Preset, fabricMode meta.Fabr
 
 	fabricCfg := cfg.buildFabricConfig(fabricMode, get, users)
 
-	run(BundleControlInstall, STAGE_INSTALL_3_FABRIC, "fabric-install",
+	run(BundleControlInstall, StageInstall3Fabric, "fabric-install",
 		&cnc.FileGenerate{
 			File: cnc.File{
 				Name:          "fabric-install.yaml",
@@ -299,14 +299,14 @@ func (cfg *Fabric) Build(basedir string, preset cnc.Preset, fabricMode meta.Fabr
 			Content: cnc.FromKubeObjects(
 				cnc.KubeHelmChart("fabric-api", "default", helm.HelmChartSpec{
 					TargetNamespace: "default",
-					Chart:           "oci://" + targetInCluster.Fallback(cfg.FabricApiChartRef).RepoName(),
-					Version:         cfg.FabricApiChartRef.Tag,
+					Chart:           OCIScheme + targetInCluster.Fallback(cfg.FabricAPIChartRef).RepoName(),
+					Version:         cfg.FabricAPIChartRef.Tag,
 					RepoCA:          ZotConfig(get).TLS.CA.Cert,
 					FailurePolicy:   "abort", // very important not to re-install crd charts
 				}, cnc.FromValue("")),
 				cnc.KubeHelmChart("fabric", "default", helm.HelmChartSpec{
 					TargetNamespace: "default",
-					Chart:           "oci://" + targetInCluster.Fallback(cfg.FabricChartRef).RepoName(),
+					Chart:           OCIScheme + targetInCluster.Fallback(cfg.FabricChartRef).RepoName(),
 					Version:         cfg.FabricChartRef.Tag,
 					RepoCA:          ZotConfig(get).TLS.CA.Cert,
 				}, cnc.FromTemplate(fabricValuesTemplate,
@@ -320,7 +320,7 @@ func (cfg *Fabric) Build(basedir string, preset cnc.Preset, fabricMode meta.Fabr
 			),
 		})
 
-	run(BundleControlInstall, STAGE_INSTALL_3_FABRIC, "kubectl-fabric-install",
+	run(BundleControlInstall, StageInstall3Fabric, "kubectl-fabric-install",
 		&cnc.FilesORAS{
 			Ref: cfg.CtlRef,
 			Files: []cnc.File{
@@ -333,12 +333,12 @@ func (cfg *Fabric) Build(basedir string, preset cnc.Preset, fabricMode meta.Fabr
 			},
 		})
 
-	install(BundleControlInstall, STAGE_INSTALL_3_FABRIC, "fabric-wait",
+	install(BundleControlInstall, StageInstall3Fabric, "fabric-wait",
 		&cnc.WaitKube{
 			Name: "deployment/fabric-controller-manager",
 		})
 
-	run(BundleControlInstall, STAGE_INSTALL_3_FABRIC, "fabric-wiring",
+	run(BundleControlInstall, StageInstall3Fabric, "fabric-wiring",
 		&cnc.FileGenerate{
 			File: cnc.File{
 				Name:          "wiring.yaml",
@@ -348,7 +348,7 @@ func (cfg *Fabric) Build(basedir string, preset cnc.Preset, fabricMode meta.Fabr
 			Content: cnc.FromValue(wiringData.String()),
 		})
 
-	install(BundleControlInstall, STAGE_INSTALL_3_FABRIC, "control-agent-wait",
+	install(BundleControlInstall, StageInstall3Fabric, "control-agent-wait",
 		&cnc.WaitKube{
 			Name: "controlagent/" + controlNodeName,
 		})

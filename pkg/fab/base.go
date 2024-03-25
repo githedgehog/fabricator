@@ -43,28 +43,28 @@ func (cfg *Base) Name() string {
 	return "base"
 }
 
-func (cfg *Base) IsEnabled(preset cnc.Preset) bool {
+func (cfg *Base) IsEnabled(_ cnc.Preset) bool {
 	return true
 }
 
 func (cfg *Base) Flags() []cli.Flag {
 	return []cli.Flag{
 		&cli.StringFlag{
-			Category:    cfg.Name() + FLAG_CATEGORY_CONFIG_BASE_SUFFIX,
+			Category:    cfg.Name() + CategoryConfigBaseSuffix,
 			Name:        "base-repo",
 			Usage:       "Base repo",
 			EnvVars:     []string{"HHFAB_BASE_REPO"},
 			Destination: &cfg.Source.Repo,
 		},
 		&cli.StringSliceFlag{
-			Category:    cfg.Name() + FLAG_CATEGORY_CONFIG_BASE_SUFFIX,
+			Category:    cfg.Name() + CategoryConfigBaseSuffix,
 			Name:        "authorized-key",
 			Usage:       "SSH public keys to add to the control node, first will be used for SONiC users",
 			EnvVars:     []string{"HHFAB_AUTHORIZED_KEY"},
 			Destination: &cfg.authorizedKeysFlag,
 		},
 		&cli.BoolFlag{
-			Category:    cfg.Name() + FLAG_CATEGORY_CONFIG_BASE_SUFFIX,
+			Category:    cfg.Name() + CategoryConfigBaseSuffix,
 			Name:        "dev",
 			Usage:       "Enable development mode (dev users & ssh keys)",
 			EnvVars:     []string{"HHFAB_DEV"},
@@ -73,10 +73,10 @@ func (cfg *Base) Flags() []cli.Flag {
 	}
 }
 
-func (cfg *Base) Hydrate(preset cnc.Preset, fabricMode meta.FabricMode) error {
-	cfg.Source = cfg.Source.Fallback(REF_SOURCE)
-	cfg.Target = cfg.Target.Fallback(REF_TARGET)
-	cfg.TargetInCluster = cfg.TargetInCluster.Fallback(REF_TARGET_INCLUSTER)
+func (cfg *Base) Hydrate(preset cnc.Preset, _ meta.FabricMode) error {
+	cfg.Source = cfg.Source.Fallback(RefSource)
+	cfg.Target = cfg.Target.Fallback(RefTarget)
+	cfg.TargetInCluster = cfg.TargetInCluster.Fallback(RefTargetInCluster)
 
 	for _, val := range cfg.authorizedKeysFlag.Value() {
 		if val == "" {
@@ -86,24 +86,24 @@ func (cfg *Base) Hydrate(preset cnc.Preset, fabricMode meta.FabricMode) error {
 			cfg.AuthorizedKeys = append(cfg.AuthorizedKeys, val)
 		}
 	}
-	if cfg.Dev && !slices.Contains(cfg.AuthorizedKeys, DEV_SSH_KEY) {
-		cfg.AuthorizedKeys = append(cfg.AuthorizedKeys, DEV_SSH_KEY)
+	if cfg.Dev && !slices.Contains(cfg.AuthorizedKeys, DevSSHKey) {
+		cfg.AuthorizedKeys = append(cfg.AuthorizedKeys, DevSSHKey)
 	}
 
-	if preset == PRESET_VLAB {
+	if preset == PresetVLAB {
 		cfg.Dev = true
 	}
 
 	return nil
 }
 
-func (cfg *Base) Build(basedir string, preset cnc.Preset, fabricMode meta.FabricMode, get cnc.GetComponent, wiring *wiring.Data, run cnc.AddBuildOp, install cnc.AddRunOp) error {
+func (cfg *Base) Build(basedir string, preset cnc.Preset, _ meta.FabricMode, _ cnc.GetComponent, _ *wiring.Data, _ cnc.AddBuildOp, _ cnc.AddRunOp) error {
 	if cfg.Dev {
 		slog.Warn("Attention! Development mode enabled - this is not secure! Default users and keys will be created.")
 	}
 
-	if preset == PRESET_VLAB {
-		key, err := cnc.ReadOrGenerateSSHKey(basedir, DEFAULT_VLAB_SSH_KEY, "vlab")
+	if preset == PresetVLAB {
+		key, err := cnc.ReadOrGenerateSSHKey(basedir, DefaultVLABSSHKey, "vlab")
 		if err != nil {
 			return errors.Wrapf(err, "error reading or generating vlab ssh key")
 		}

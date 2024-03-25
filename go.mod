@@ -2,8 +2,6 @@ module go.githedgehog.com/fabricator
 
 go 1.21.1
 
-toolchain go1.21.5
-
 require (
 	github.com/Masterminds/sprig v2.22.0+incompatible
 	github.com/containers/image/v5 v5.27.1-0.20230911141411-81c35e010bab
@@ -25,15 +23,15 @@ require (
 	github.com/ulikunitz/xz v0.5.11
 	github.com/urfave/cli/v2 v2.27.1
 	github.com/vbauerster/mpb/v8 v8.6.1
-	go.githedgehog.com/fabric v0.33.0
+	go.githedgehog.com/fabric v0.34.1
 	golang.org/x/crypto v0.18.0
 	golang.org/x/exp v0.0.0-20231006140011-7918f672742d
 	golang.org/x/sync v0.6.0
-	k8s.io/api v0.29.1
-	k8s.io/apimachinery v0.29.1
-	k8s.io/client-go v0.29.1
+	k8s.io/api v0.29.3
+	k8s.io/apimachinery v0.29.3
+	k8s.io/client-go v0.29.3
 	oras.land/oras-go/v2 v2.4.0
-	sigs.k8s.io/controller-runtime v0.17.0
+	sigs.k8s.io/controller-runtime v0.17.2
 	sigs.k8s.io/yaml v1.4.0
 )
 
@@ -99,7 +97,7 @@ require (
 	github.com/go-openapi/validate v0.22.1 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
-	github.com/golang/protobuf v1.5.3 // indirect
+	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/google/gnostic-models v0.6.8 // indirect
 	github.com/google/go-cmp v0.6.0 // indirect
@@ -190,7 +188,7 @@ require (
 	google.golang.org/appengine v1.6.8 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20231002182017-d307bd883b97 // indirect
 	google.golang.org/grpc v1.60.1 // indirect
-	google.golang.org/protobuf v1.32.0 // indirect
+	google.golang.org/protobuf v1.33.0 // indirect
 	gopkg.in/go-jose/go-jose.v2 v2.6.1 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect

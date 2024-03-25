@@ -30,15 +30,15 @@ import (
 )
 
 const (
-	VM_SIZE_DEFAULT = "default" // meaningful VM sizes for dev & testing
-	VM_SIZE_COMPACT = "compact" // minimal working setup, applied on top of default
-	VM_SIZE_FULL    = "full"    // full setup as specified in requirements and more real switch resources, applied on top of default
-	VM_SIZE_HUGE    = "huge"    // full setup with more resources for servers, applied on top of default
+	VMSizeDefault = "default" // meaningful VM sizes for dev & testing
+	VMSizeCompact = "compact" // minimal working setup, applied on top of default
+	VMSizeFull    = "full"    // full setup as specified in requirements and more real switch resources, applied on top of default
+	VMSizeHuge    = "huge"    // full setup with more resources for servers, applied on top of default
 
-	VIRTUAL_EDGE_ANNOTATION = "external.hhfab.fabric.githedgehog.com/dest" // HHFAB annotation to specify destination for external connection
+	VirtualEdgeAnnotation = "external.hhfab.fabric.githedgehog.com/dest" // HHFAB annotation to specify destination for external connection
 )
 
-var VM_SIZES = []string{VM_SIZE_DEFAULT, VM_SIZE_COMPACT, VM_SIZE_FULL, VM_SIZE_HUGE}
+var VMSizes = []string{VMSizeDefault, VMSizeCompact, VMSizeFull, VMSizeHuge}
 
 var DefaultControlVM = VMConfig{
 	CPU:  6,
@@ -139,22 +139,22 @@ func NewVMManager(cfg *Config, data *wiring.Data, basedir string, size string, r
 	cfg.VMs.Control = cfg.VMs.Control.DefaultsFrom(DefaultControlVM)
 	cfg.VMs.Server = cfg.VMs.Server.DefaultsFrom(DefaultServerVM)
 	cfg.VMs.Switch = cfg.VMs.Switch.DefaultsFrom(DefaultSwitchVM)
-	if size == VM_SIZE_DEFAULT {
+	if size == VMSizeDefault {
 		cfg.VMs.Control = cfg.VMs.Control.OverrideBy(DefaultControlVM)
 		cfg.VMs.Server = cfg.VMs.Server.OverrideBy(DefaultServerVM)
 		cfg.VMs.Switch = cfg.VMs.Switch.OverrideBy(DefaultSwitchVM)
 	}
-	if size == VM_SIZE_COMPACT {
+	if size == VMSizeCompact {
 		cfg.VMs.Control = cfg.VMs.Control.OverrideBy(CompactControlVM)
 		cfg.VMs.Server = cfg.VMs.Server.OverrideBy(CompactServerVM)
 		cfg.VMs.Switch = cfg.VMs.Switch.OverrideBy(CompactSwitchVM)
 	}
-	if size == VM_SIZE_FULL {
+	if size == VMSizeFull {
 		cfg.VMs.Control = cfg.VMs.Control.OverrideBy(FullControlVM)
 		cfg.VMs.Server = cfg.VMs.Server.OverrideBy(FullServerVM)
 		cfg.VMs.Switch = cfg.VMs.Switch.OverrideBy(FullSwitchVM)
 	}
-	if size == VM_SIZE_HUGE {
+	if size == VMSizeHuge {
 		cfg.VMs.Control = cfg.VMs.Control.OverrideBy(HugeControlVM)
 		cfg.VMs.Server = cfg.VMs.Server.OverrideBy(HugeServerVM)
 		cfg.VMs.Switch = cfg.VMs.Switch.OverrideBy(HugeSwitchVM)
@@ -186,7 +186,7 @@ func NewVMManager(cfg *Config, data *wiring.Data, basedir string, size string, r
 					Connection: "host",
 					// TODO optionally make control node isolated using ",restrict=yes"
 					Netdev: fmt.Sprintf("user,hostfwd=tcp:0.0.0.0:%d-:22,hostfwd=tcp:0.0.0.0:%d-:6443,hostfwd=tcp:0.0.0.0:%d-:31000,hostname=%s,domainname=local,dnssearch=local,net=172.31.%d.0/24,dhcpstart=172.31.%d.10",
-						sshPortFor(vmID), KUBE_PORT, REGISTRY_PORT, server.Name, vmID, vmID),
+						sshPortFor(vmID), KubePort, RegistryPort, server.Name, vmID, vmID),
 				},
 			},
 		}
@@ -244,6 +244,7 @@ func NewVMManager(cfg *Config, data *wiring.Data, basedir string, size string, r
 					Name: sw.Name,
 					Type: VMTypeSwitchHW,
 				}
+
 				continue
 			}
 		}
@@ -321,7 +322,7 @@ func NewVMManager(cfg *Config, data *wiring.Data, basedir string, size string, r
 			annotations := conn.GetAnnotations()
 			if annotations != nil {
 				destSide := wiringapi.BasePortName{
-					Port: annotations[VIRTUAL_EDGE_ANNOTATION],
+					Port: annotations[VirtualEdgeAnnotation],
 				}
 				if destSide.Port == "" || !strings.Contains(destSide.Port, "/") {
 					return nil, errors.Errorf("missing or invalid annotation for external connection %s", conn.Name)
@@ -386,11 +387,10 @@ func (mngr *VMManager) AddLink(local wiringapi.IPort, dest wiringapi.IPort, conn
 		return nil
 	}
 
-	localPortID, destPortID := -1, -1
+	destPortID := -1
 	var destVM *VM
-	var err error
 
-	localPortID, err = portIdForName(local.LocalPortName())
+	localPortID, err := portIDForName(local.LocalPortName())
 	if err != nil {
 		return err
 	}
@@ -398,7 +398,7 @@ func (mngr *VMManager) AddLink(local wiringapi.IPort, dest wiringapi.IPort, conn
 	var linkCfg *LinkConfig
 
 	if dest != nil || !reflect.ValueOf(local).IsNil() {
-		destPortID, err = portIdForName(dest.LocalPortName())
+		destPortID, err = portIDForName(dest.LocalPortName())
 		if err != nil {
 			return err
 		}
@@ -482,11 +482,11 @@ func (vm *VM) UUID() string {
 }
 
 func (vm *VM) macFor(iface int) string {
-	return fmt.Sprintf(MAC_ADDR_TMPL, vm.ID, iface)
+	return fmt.Sprintf(MACAddrTmpl, vm.ID, iface)
 }
 
 func (vm *VM) ifacePortFor(iface int) int {
-	return IF_PORT_BASE + vm.ID*IF_PORT_VM_ID_MULT + iface*IF_PORT_PORT_ID_MULT
+	return IfPortBase + vm.ID*IfPortVMIDMult + iface*IfPortPortIDMult
 }
 
 func (vm *VM) sshPort() int {
@@ -494,29 +494,29 @@ func (vm *VM) sshPort() int {
 }
 
 func sshPortFor(vmID int) int {
-	return SSH_PORT_BASE + vmID
+	return SSHPortBase + vmID
 }
 
-func portIdForName(name string) (int, error) {
+func portIDForName(name string) (int, error) {
 	if strings.HasPrefix(name, "Management0") {
 		return 0, nil
 	} else if strings.HasPrefix(name, "Ethernet") { // sonic interface naming is straighforward
 		port, _ := strings.CutPrefix(name, "Ethernet")
-		idx, error := strconv.Atoi(port)
+		idx, err := strconv.Atoi(port)
 
-		return idx + 1, errors.Wrapf(error, "error converting port name '%s' to port id", name)
+		return idx + 1, errors.Wrapf(err, "error converting port name '%s' to port id", name)
 	} else if strings.HasPrefix(name, "port") { // just for simplicity to not try to guess port names on servers
 		port, _ := strings.CutPrefix(name, "port")
-		idx, error := strconv.Atoi(port)
+		idx, err := strconv.Atoi(port)
 
-		return idx, errors.Wrapf(error, "error converting port name '%s' to port id", name)
+		return idx, errors.Wrapf(err, "error converting port name '%s' to port id", name)
 	} else if strings.HasPrefix(name, "enp2s") { // current port naming when using e1000 with flatcar
 		port, _ := strings.CutPrefix(name, "enp2s")
-		idx, error := strconv.Atoi(port)
+		idx, err := strconv.Atoi(port)
 
 		// ouch, this is a hack, but it seems like the only way to get the right port id for now
-		return idx, errors.Wrapf(error, "error converting port name '%s' to port id", name)
-	} else {
-		return -1, errors.Errorf("unsupported port name '%s'", name)
+		return idx, errors.Wrapf(err, "error converting port name '%s' to port id", name)
 	}
+
+	return -1, errors.Errorf("unsupported port name '%s'", name)
 }

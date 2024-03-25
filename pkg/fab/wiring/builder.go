@@ -29,10 +29,11 @@ import (
 )
 
 const (
-	RACK              = "rack-1"
-	CONTROL           = "control-1"
-	EXTERNAL          = "virtual-edge-1"
-	VIRTUAL_EDGE_DEST = "external.hhfab.fabric.githedgehog.com/dest" // HHFAB annotation to specify destination for external connection
+	Rack     = "rack-1"
+	Control  = "control-1"
+	External = "virtual-edge-1"
+
+	VirtualEdgeDest = "external.hhfab.fabric.githedgehog.com/dest" // HHFAB annotation to specify destination for external connection
 )
 
 type Builder struct {
@@ -73,33 +74,33 @@ func (b *Builder) Build() (*wiring.Data, error) {
 		}
 	} else if b.FabricMode == meta.FabricModeCollapsedCore {
 		if b.ChainControlLink {
-			return nil, fmt.Errorf("control link chaining not supported for collapsed core fabric mode")
+			return nil, errors.Errorf("control link chaining not supported for collapsed core fabric mode")
 		}
 		if b.External {
-			return nil, fmt.Errorf("external not supported for collapsed core fabric mode")
+			return nil, errors.Errorf("external not supported for collapsed core fabric mode")
 		}
 		if b.SpinesCount > 0 {
-			return nil, fmt.Errorf("spines not supported for collapsed core fabric mode")
+			return nil, errors.Errorf("spines not supported for collapsed core fabric mode")
 		}
 		if b.FabricLinksCount > 0 {
-			return nil, fmt.Errorf("fabric links not supported for collapsed core fabric mode")
+			return nil, errors.Errorf("fabric links not supported for collapsed core fabric mode")
 		}
 
 		if b.MCLAGLeafsCount == 0 {
 			b.MCLAGLeafsCount = 2
 		}
 		if b.MCLAGLeafsCount > 2 {
-			return nil, fmt.Errorf("MCLAG leafs count must be 2 for collapsed core fabric mode")
+			return nil, errors.Errorf("MCLAG leafs count must be 2 for collapsed core fabric mode")
 		}
 		if b.OrphanLeafsCount > 0 {
-			return nil, fmt.Errorf("orphan leafs not supported for collapsed core fabric mode")
+			return nil, errors.Errorf("orphan leafs not supported for collapsed core fabric mode")
 		}
 
 		if b.ESLAGLeafGroups != "" {
-			return nil, fmt.Errorf("ESLAG not supported for collapsed core fabric mode")
+			return nil, errors.Errorf("ESLAG not supported for collapsed core fabric mode")
 		}
 	} else {
-		return nil, fmt.Errorf("unsupported fabric mode %s", b.FabricMode)
+		return nil, errors.Errorf("unsupported fabric mode %s", b.FabricMode)
 	}
 
 	if b.MCLAGSessionLinks == 0 {
@@ -121,11 +122,11 @@ func (b *Builder) Build() (*wiring.Data, error) {
 			part = strings.TrimSpace(part)
 			leafs, err := strconv.ParseUint(part, 10, 8)
 			if err != nil {
-				return nil, fmt.Errorf("invalid ESLAG leaf group %s", part)
+				return nil, errors.Errorf("invalid ESLAG leaf group %s", part)
 			}
 
 			if leafs < 2 || leafs > 4 {
-				return nil, fmt.Errorf("ESLAG leaf group must have 2-4 leafs")
+				return nil, errors.Errorf("ESLAG leaf group must have 2-4 leafs")
 			}
 
 			totalESLAGLeafs += uint8(leafs)
@@ -134,19 +135,19 @@ func (b *Builder) Build() (*wiring.Data, error) {
 	}
 
 	if b.ChainControlLink && b.ControlLinksCount == 0 {
-		return nil, fmt.Errorf("control links count must be greater than 0 if chaining control links")
+		return nil, errors.Errorf("control links count must be greater than 0 if chaining control links")
 	}
 	if b.MCLAGLeafsCount%2 != 0 {
-		return nil, fmt.Errorf("MCLAG leafs count must be even")
+		return nil, errors.Errorf("MCLAG leafs count must be even")
 	}
 	if b.MCLAGLeafsCount+b.OrphanLeafsCount+totalESLAGLeafs == 0 {
-		return nil, fmt.Errorf("total leafs count must be greater than 0")
+		return nil, errors.Errorf("total leafs count must be greater than 0")
 	}
 	if b.MCLAGLeafsCount > 0 && b.MCLAGSessionLinks == 0 {
-		return nil, fmt.Errorf("MCLAG session links count must be greater than 0")
+		return nil, errors.Errorf("MCLAG session links count must be greater than 0")
 	}
 	if b.MCLAGLeafsCount > 0 && b.MCLAGPeerLinks == 0 {
-		return nil, fmt.Errorf("MCLAG peer links count must be greater than 0")
+		return nil, errors.Errorf("MCLAG peer links count must be greater than 0")
 	}
 
 	slog.Info("Building wiring diagram", "fabricMode", b.FabricMode, "chainControlLink", b.ChainControlLink, "controlLinksCount", b.ControlLinksCount)
@@ -161,7 +162,7 @@ func (b *Builder) Build() (*wiring.Data, error) {
 	var err error
 	b.data, err = wiring.New()
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrapf(err, "error creating wiring data")
 	}
 
 	if err := b.data.Add(&wiringapi.VLANNamespace{
@@ -200,11 +201,11 @@ func (b *Builder) Build() (*wiring.Data, error) {
 
 	b.ifaceTracker = map[string]uint8{}
 
-	if _, err := b.createRack(RACK, wiringapi.RackSpec{}); err != nil {
+	if _, err := b.createRack(Rack, wiringapi.RackSpec{}); err != nil {
 		return nil, err
 	}
 
-	if _, err := b.createServer(CONTROL, wiringapi.ServerSpec{
+	if _, err := b.createServer(Control, wiringapi.ServerSpec{
 		Type:        wiringapi.ServerTypeControl,
 		Description: "Control node",
 	}); err != nil {
@@ -581,22 +582,22 @@ func (b *Builder) Build() (*wiring.Data, error) {
 	// external switch. For now it's only orphan leafs
 	if b.External {
 		if b.OrphanLeafsCount < 1 {
-			return nil, fmt.Errorf("external switch requires at least one orphan leaf")
+			return nil, errors.Errorf("external switch requires at least one orphan leaf")
 		}
-		if _, err := b.createSwitch(EXTERNAL, wiringapi.SwitchSpec{
+		if _, err := b.createSwitch(External, wiringapi.SwitchSpec{
 			Role:        wiringapi.SwitchRoleVirtualEdge,
 			Description: "Virtual edge",
 		}); err != nil {
 			return nil, err
 		}
-		if _, err := b.createControlConnection(EXTERNAL); err != nil {
+		if _, err := b.createControlConnection(External); err != nil {
 			return nil, err
 		}
 		// (LeafID - 1) is now pointing on the last Orphan Leaf. We will use it to connect external switch to the last orphan leaf
 		if _, err := b.createExternalConnection(fmt.Sprintf("leaf-%02d", leafID-1)); err != nil {
 			return nil, err
 		}
-		leafID++
+		leafID++ //nolint:ineffassign
 	}
 
 	for spineID := uint8(1); spineID <= b.SpinesCount; spineID++ {
@@ -722,7 +723,7 @@ func (b *Builder) createRack(name string, spec wiringapi.RackSpec) (*wiringapi.R
 	return rack, errors.Wrapf(b.data.Add(rack), "error creating rack %s", name)
 }
 
-func (b *Builder) createSwitchGroup(name string) (*wiringapi.SwitchGroup, error) {
+func (b *Builder) createSwitchGroup(name string) (*wiringapi.SwitchGroup, error) { //nolint:unparam
 	sg := &wiringapi.SwitchGroup{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       wiringapi.KindSwitchGroup,
@@ -738,7 +739,7 @@ func (b *Builder) createSwitchGroup(name string) (*wiringapi.SwitchGroup, error)
 	return sg, errors.Wrapf(b.data.Add(sg), "error creating switch group %s", name)
 }
 
-func (b *Builder) createSwitch(name string, spec wiringapi.SwitchSpec) (*wiringapi.Switch, error) {
+func (b *Builder) createSwitch(name string, spec wiringapi.SwitchSpec) (*wiringapi.Switch, error) { //nolint:unparam
 	spec.Profile = "vs" // TODO temp hack
 
 	sw := &wiringapi.Switch{
@@ -749,7 +750,7 @@ func (b *Builder) createSwitch(name string, spec wiringapi.SwitchSpec) (*wiringa
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
 			Labels: map[string]string{
-				wiringapi.LabelRack: RACK,
+				wiringapi.LabelRack: Rack,
 			},
 		},
 		Spec: spec,
@@ -762,7 +763,7 @@ func (b *Builder) createSwitch(name string, spec wiringapi.SwitchSpec) (*wiringa
 	return sw, errors.Wrapf(b.data.Add(sw), "error creating switch %s", name)
 }
 
-func (b *Builder) createServer(name string, spec wiringapi.ServerSpec) (*wiringapi.Server, error) {
+func (b *Builder) createServer(name string, spec wiringapi.ServerSpec) (*wiringapi.Server, error) { //nolint:unparam
 	server := &wiringapi.Server{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       wiringapi.KindServer,
@@ -771,7 +772,7 @@ func (b *Builder) createServer(name string, spec wiringapi.ServerSpec) (*wiringa
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
 			Labels: map[string]string{
-				wiringapi.LabelRack: RACK,
+				wiringapi.LabelRack: Rack,
 			},
 		},
 		Spec: spec,
@@ -811,7 +812,7 @@ func (b *Builder) createManagementConnection(switchName string) (*wiringapi.Conn
 		Management: &wiringapi.ConnMgmt{
 			Link: wiringapi.ConnMgmtLink{
 				Server: wiringapi.ConnMgmtLinkServer{
-					BasePortName: wiringapi.BasePortName{Port: b.nextControlPort(CONTROL)},
+					BasePortName: wiringapi.BasePortName{Port: b.nextControlPort(Control)},
 				},
 				Switch: wiringapi.ConnMgmtLinkSwitch{
 					BasePortName: wiringapi.BasePortName{Port: fmt.Sprintf("%s/Management0", switchName)},
@@ -830,7 +831,7 @@ func (b *Builder) createControlConnection(switchName string) (*wiringapi.Connect
 		Management: &wiringapi.ConnMgmt{
 			Link: wiringapi.ConnMgmtLink{
 				Server: wiringapi.ConnMgmtLinkServer{
-					BasePortName: wiringapi.BasePortName{Port: b.nextControlPort(CONTROL)},
+					BasePortName: wiringapi.BasePortName{Port: b.nextControlPort(Control)},
 				},
 				Switch: wiringapi.ConnMgmtLinkSwitch{
 					BasePortName: wiringapi.BasePortName{Port: port},
@@ -851,7 +852,7 @@ func (b *Builder) createExternalConnection(switchName string) (*wiringapi.Connec
 	})
 
 	conn.Annotations = make(map[string]string)
-	conn.Annotations[VIRTUAL_EDGE_DEST] = fmt.Sprintf("%s", b.nextSwitchPort(string(EXTERNAL))) // TODO: Generate it from CLI
+	conn.Annotations[VirtualEdgeDest] = b.nextSwitchPort(string(External)) // TODO: Generate it from CLI
 
 	return conn, err
 }
