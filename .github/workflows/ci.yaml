@@ -52,10 +52,49 @@ jobs:
   #       with:
   #         limit-access-to-actor: true
 
+  test:
+    runs-on: lab
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        # with:
+        #   fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: oldstable
+          cache: true
+
+      - name: Go Lint
+        uses: golangci/golangci-lint-action@v4
+        with:
+          version: latest
+          # unfortunately the package cache is creating lots of errors/warnings right now
+          # for details: https://github.com/golangci/golangci-lint-action/issues/677
+          skip-pkg-cache: true
+
+      # Don't remove it! We shouldn't allow CI to pass if there are any changes not committed after running make
+      - name: Make all (autogeneration) and fail on dirty
+        run: |
+          make lint-lic fmt
+          git status --short
+          git diff --quiet
+
+      - name: Run tests
+        run: |
+          make test
+
+      - name: Setup tmate session for debug
+        if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
+        uses: mxschmitt/action-tmate@v3
+        timeout-minutes: 30
+        with:
+          limit-access-to-actor: true
+
   build:
     runs-on: lab
-    # needs:
-    #   - cache-tools
     timeout-minutes: 30
 
     strategy:
@@ -113,8 +152,8 @@ jobs:
 
   vlab:
     runs-on: vlab
-    # needs:
-    #   - cache-tools
+    needs:
+      - test
     timeout-minutes: 120
 
     strategy:
@@ -183,7 +222,7 @@ jobs:
     runs-on: lab
     if: startsWith(github.event.ref, 'refs/tags/') && github.event_name == 'push'
     needs:
-      # - cache-tools
+      - test
       - build
       - vlab
 
