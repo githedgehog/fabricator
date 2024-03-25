@@ -113,7 +113,7 @@ func waitForSwitchesReady(ctx context.Context, svcCfg *ServiceConfig) error {
 		}
 
 		for _, agent := range agents.Items {
-			if agent.Generation == agent.Status.LastAppliedGen {
+			if agent.Generation == agent.Status.LastAppliedGen && time.Since(agent.Status.LastHeartbeat.Time) < 30*time.Second {
 				ready[agent.Name] = true
 
 				continue
