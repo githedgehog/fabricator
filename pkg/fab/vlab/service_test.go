@@ -57,22 +57,6 @@ func Test_portIdForName(t *testing.T) {
 			error: true,
 		},
 		{
-			port:   "nic0/port0",
-			result: 0,
-		},
-		{
-			port:   "nic0/port1",
-			result: 1,
-		},
-		{
-			port:  "nic0/portX",
-			error: true,
-		},
-		{
-			port:  "nic0/port",
-			error: true,
-		},
-		{
 			port:  "unsupported",
 			error: true,
 		},

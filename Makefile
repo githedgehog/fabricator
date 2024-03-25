@@ -61,12 +61,16 @@ vet: ## Run go vet against code.
 	go vet ./...
 
 .PHONY: test
-test: manifests generate fmt vet envtest ## Run tests.
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test ./... -coverprofile cover.out
+test: fmt vet envtest ## Run tests.
+	go test ./... -coverprofile cover.out
+
+.PHONY: lint-lic
+lint-lic: addlicense ## Run addlicense to check if all files have the license header.
+	$(ADDLICENSE) -c Hedgehog -ignore ".github/**" -ignore "config/**" -y 2023 .
 
 .PHONY: lint
-lint: addlicense ## Run all linters.
-	$(ADDLICENSE) -c Hedgehog -ignore ".github/**" -ignore "config/**" -y 2023 .
+lint: lint-lic golangci-lint ## Run linters
+	$(GOLANGCI_LINT) run ./...
 
 ##@ Build
 
@@ -142,6 +146,7 @@ KUSTOMIZE ?= $(LOCALBIN)/kustomize
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 ADDLICENSE ?= $(LOCALBIN)/addlicense
+GOLANGCI_LINT ?= $(LOCALBIN)/golangci-lint
 
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v5.0.1
@@ -171,6 +176,11 @@ $(ENVTEST): $(LOCALBIN)
 addlicense: $(ADDLICENSE) ## Download addlicense locally if necessary.
 $(ADDLICENSE): $(LOCALBIN)
 	test -s $(LOCALBIN)/addlicense || GOBIN=$(LOCALBIN) go install github.com/google/addlicense@latest
+
+.PHONY: golangci-lint
+golangci-lint: $(GOLANGCI_LINT) ## Download golangci-lint locally if necessary.
+$(GOLANGCI_LINT): $(LOCALBIN)
+	test -s $(LOCALBIN)/golangci-lint || GOBIN=$(LOCALBIN) go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 
 ##@ CLI hhfab
 
