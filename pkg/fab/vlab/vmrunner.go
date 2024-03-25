@@ -238,9 +238,11 @@ func (vm *VM) RunInstall(ctx context.Context, svc *Service) func() error {
 				return errors.Wrap(err, "error installing vm")
 			}
 
-			err = vm.download(ctx, svcCfg, true, "/etc/rancher/k3s/k3s.yaml", filepath.Join(svcCfg.Basedir, "kubeconfig.yaml"))
-			if err != nil {
-				return errors.Wrapf(err, "error downloading kubeconfig")
+			if vm.Type == VMTypeControl {
+				err = vm.download(ctx, svcCfg, true, "/etc/rancher/k3s/k3s.yaml", filepath.Join(svcCfg.Basedir, "kubeconfig.yaml"))
+				if err != nil {
+					return errors.Wrapf(err, "error downloading kubeconfig")
+				}
 			}
 
 			slog.Info("VM installed", "name", vm.Name, "type", vm.Type, "installer", installer)
