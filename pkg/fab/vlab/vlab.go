@@ -136,6 +136,12 @@ func (svc *Service) StartServer(killStaleVMs bool, charNBDDev string, installCom
 		return errors.Wrapf(err, "error checking for stale VMs")
 	}
 
+	if killStaleVMs {
+		slog.Info("Stale VMs killed, exiting, restart without --kill-stale-vms")
+
+		return nil
+	}
+
 	svc.mngr.LogOverview()
 
 	svc.checkResources()
