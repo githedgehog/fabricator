@@ -57,7 +57,6 @@ func checkForStaleVMs(ctx context.Context, killStaleVMs bool) error {
 		} else {
 			slog.Error("Found stale VM process", "pid", pr.Pid)
 			stale = append(stale, pr.Pid)
-			// return errors.Errorf("found stale VM process %d, kill it and try again or run vlab with --kill-stale-vms", pr.Pid)
 		}
 	}
 
