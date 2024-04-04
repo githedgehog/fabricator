@@ -121,11 +121,6 @@ jobs:
           go-version: stable
           cache: true
 
-      - name: Setup git for private Go modules
-        env:
-          GH_ACCESS_TOKEN: ${{ secrets.GH_ACCESS_TOKEN }}
-        run: git config --global url.https://$GH_ACCESS_TOKEN@github.com/.insteadOf https://github.com/
-
       - name: Build all
         run: |
           make build
@@ -177,11 +172,6 @@ jobs:
         with:
           go-version: stable
           cache: true
-
-      - name: Setup git for private Go modules
-        env:
-          GH_ACCESS_TOKEN: ${{ secrets.GH_ACCESS_TOKEN }}
-        run: git config --global url.https://$GH_ACCESS_TOKEN@github.com/.insteadOf https://github.com/
 
       - name: Build hhfab
         run: |
@@ -250,11 +240,6 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Setup git for private Go modules
-        env:
-          GH_ACCESS_TOKEN: ${{ secrets.GH_ACCESS_TOKEN }}
-        run: git config --global url.https://$GH_ACCESS_TOKEN@github.com/.insteadOf https://github.com/
 
       - name: Publish Images, Helm charts and Bins on release
         run: |
