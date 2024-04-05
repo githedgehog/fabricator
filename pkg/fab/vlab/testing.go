@@ -84,69 +84,17 @@ func (svc *Service) RunTests(ctx context.Context, cfg testing.RunnerConfig) erro
 }
 
 func waitForSwitchesReady(ctx context.Context, svcCfg *ServiceConfig) error {
-	start := time.Now()
-
 	kube, err := kubeutil.NewClient(filepath.Join(svcCfg.Basedir, "kubeconfig.yaml"), agentapi.SchemeBuilder)
 	if err != nil {
 		return errors.Wrapf(err, "error creating kube client")
 	}
 
-	ready := map[string]bool{}
-	for _, switchName := range svcCfg.Wiring.Switch.All() {
-		ready[switchName.Name] = false
+	sws := []string{}
+	for _, sw := range svcCfg.Wiring.Switch.All() {
+		sws = append(sws, sw.Name)
 	}
 
-	errs := 0
-	retries := 8
-
-	for {
-		time.Sleep(15 * time.Second) // TODO make configurable
-
-		agents := agentapi.AgentList{}
-		if err := kube.List(ctx, &agents, client.InNamespace("default")); err != nil {
-			errs++
-			if errs <= retries {
-				slog.Warn("Error listing agents", "retries", fmt.Sprintf("%d/%d", errs, retries), "err", err)
-
-				continue
-			}
-
-			return errors.Wrapf(err, "error listing agents")
-		}
-
-		for _, agent := range agents.Items {
-			if agent.Generation == agent.Status.LastAppliedGen && time.Since(agent.Status.LastHeartbeat.Time) < 30*time.Second {
-				ready[agent.Name] = true
-
-				continue
-			}
-		}
-
-		allReady := true
-		for _, swReady := range ready {
-			if !swReady {
-				allReady = false
-			}
-		}
-
-		readyList := []string{}
-		notReadyList := []string{}
-		for sw, swReady := range ready {
-			if swReady {
-				readyList = append(readyList, sw)
-			} else {
-				notReadyList = append(notReadyList, sw)
-			}
-		}
-
-		slog.Info("Switches ready status", "ready", readyList, "notReady", notReadyList)
-
-		if allReady {
-			slog.Info("All switches are ready", "took", time.Since(start))
-
-			return nil
-		}
-	}
+	return errors.Wrapf(testing.WaitForSwitchesReady(ctx, kube, sws), "error waiting for switches to be ready")
 }
 
 type netConfig struct {
