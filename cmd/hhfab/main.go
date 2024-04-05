@@ -32,6 +32,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/fab/cnc"
 	"go.githedgehog.com/fabricator/pkg/fab/vlab"
+	"go.githedgehog.com/fabricator/pkg/fab/vlab/testing"
 	"go.githedgehog.com/fabricator/pkg/fab/wiring"
 )
 
@@ -559,6 +560,39 @@ func main() {
 							}
 
 							return errors.Wrap(svc.VFIOPCIBindAll(), "error binding to vfio-pci")
+						},
+					},
+					{
+						Name:     "test",
+						Category: "Testing",
+						Usage:    "Run tests from the specified file(s)",
+						Flags: []cli.Flag{
+							basedirFlag,
+							verboseFlag,
+							briefFlag,
+							&cli.StringSliceFlag{
+								Name:    "file",
+								Aliases: []string{"f"},
+								Usage:   "test file(s) to run",
+							},
+						},
+						Before: func(_ *cli.Context) error {
+							return setupLogger(verbose, brief)
+						},
+						Action: func(cCtx *cli.Context) error {
+							err := mngr.Load(basedir)
+							if err != nil {
+								return errors.Wrap(err, "error loading")
+							}
+
+							svc, err := fab.LoadVLAB(basedir, mngr, dryRun, "", true)
+							if err != nil {
+								return errors.Wrap(err, "error loading vlab")
+							}
+
+							return errors.Wrap(svc.RunTests(context.Background(), testing.RunnerConfig{
+								TestFiles: cCtx.StringSlice("file"),
+							}), "error running tests")
 						},
 					},
 					{
