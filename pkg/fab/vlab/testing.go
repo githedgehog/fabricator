@@ -35,16 +35,20 @@ import (
 	agentapi "go.githedgehog.com/fabric/api/agent/v1alpha2"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1alpha2"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1alpha2"
+	"go.githedgehog.com/fabric/pkg/util/kubeutil"
 	"go.githedgehog.com/fabric/pkg/util/pointer"
+	"go.githedgehog.com/fabricator/pkg/fab/vlab/testing"
 	"golang.org/x/crypto/ssh"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlutil "sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
+
+func init() {
+	setupCtrlRuntimeLogs()
+}
 
 // TODO properly handle logging config for ctrl runtime
 func setupCtrlRuntimeLogs() {
@@ -57,36 +61,32 @@ func setupCtrlRuntimeLogs() {
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 }
 
-var scheme = runtime.NewScheme()
-
-func init() {
-	utilruntime.Must(vpcapi.AddToScheme(scheme))
-	utilruntime.Must(wiringapi.AddToScheme(scheme))
-	utilruntime.Must(agentapi.AddToScheme(scheme))
-
-	setupCtrlRuntimeLogs()
-}
-
-func kubeClient() (client.WithWatch, error) {
-	k8scfg, err := ctrl.GetConfig()
+func (svc *Service) RunTests(ctx context.Context, cfg testing.RunnerConfig) error {
+	kubeconfig := filepath.Join(svc.cfg.Basedir, "kubeconfig.yaml")
+	kube, err := kubeutil.NewClient(kubeconfig, agentapi.SchemeBuilder, wiringapi.SchemeBuilder, vpcapi.SchemeBuilder)
 	if err != nil {
-		return nil, errors.Wrapf(err, "error getting kube config")
-	}
-	client, err := client.NewWithWatch(k8scfg, client.Options{
-		Scheme: scheme,
-	})
-	if err != nil {
-		return nil, errors.Wrapf(err, "error creating kube client")
+		return errors.Wrapf(err, "error creating kube client")
 	}
 
-	return client, nil
+	sshPorts := map[string]uint{}
+	for name, vm := range svc.mngr.vms {
+		sshPorts[name] = uint(vm.sshPort())
+	}
+
+	cfg.StepHelper = testing.NewVLABStepHelper(kube, sshPorts, svc.cfg.SSHKey)
+
+	runner, err := testing.NewRunner(cfg)
+	if err != nil {
+		return errors.Wrapf(err, "error creating runner")
+	}
+
+	return errors.Wrapf(runner.Run(ctx), "error running tests")
 }
 
 func waitForSwitchesReady(ctx context.Context, svcCfg *ServiceConfig) error {
 	start := time.Now()
 
-	os.Setenv("KUBECONFIG", filepath.Join(svcCfg.Basedir, "kubeconfig.yaml"))
-	kube, err := kubeClient()
+	kube, err := kubeutil.NewClient(filepath.Join(svcCfg.Basedir, "kubeconfig.yaml"), agentapi.SchemeBuilder)
 	if err != nil {
 		return errors.Wrapf(err, "error creating kube client")
 	}
@@ -181,8 +181,7 @@ func (svc *Service) SetupVPCs(ctx context.Context, cfg SetupVPCsConfig) error {
 
 	slog.Info("Setting up VPCs and VPCAttachments for servers")
 
-	os.Setenv("KUBECONFIG", filepath.Join(svc.cfg.Basedir, "kubeconfig.yaml"))
-	kube, err := kubeClient()
+	kube, err := kubeutil.NewClient(filepath.Join(svc.cfg.Basedir, "kubeconfig.yaml"), agentapi.SchemeBuilder, vpcapi.SchemeBuilder, wiringapi.SchemeBuilder)
 	if err != nil {
 		return errors.Wrapf(err, "error creating kube client")
 	}
@@ -377,6 +376,8 @@ func (svc *Service) SetupVPCs(ctx context.Context, cfg SetupVPCsConfig) error {
 		strOut := strings.TrimSpace(string(out))
 
 		slog.Info("Server network configured", "server", netconf.Name, "output", strOut, "took", time.Since(start))
+
+		// TODO make sure IP address belongs to the expected subnet
 	}
 
 	slog.Info("VPCs and VPCAttachments created, IP addresses discovered", "took", time.Since(start))
@@ -421,8 +422,7 @@ func (svc *Service) TestConnectivity(ctx context.Context, cfg ServerConnectivity
 
 	slog.Info("Starting connectivity test", "vpc", cfg.VPC, "vpcPing", cfg.VPCPing, "vpcIperf", cfg.VPCIperf, "vpcIperfSpeed", cfg.VPCIperf, "ext", cfg.Ext, "extCurl", cfg.ExtCurl)
 
-	os.Setenv("KUBECONFIG", filepath.Join(svc.cfg.Basedir, "kubeconfig.yaml"))
-	kube, err := kubeClient()
+	kube, err := kubeutil.NewClient(filepath.Join(svc.cfg.Basedir, "kubeconfig.yaml"), agentapi.SchemeBuilder, vpcapi.SchemeBuilder, wiringapi.SchemeBuilder)
 	if err != nil {
 		return errors.Wrapf(err, "error creating kube client")
 	}
@@ -980,8 +980,7 @@ func (svc *Service) SetupPeerings(ctx context.Context, cfg SetupPeeringsConfig) 
 
 	slog.Info("Setting up VPC and External peerings", "dryRun", cfg.DryRun, "numRequests", len(cfg.Requests))
 
-	os.Setenv("KUBECONFIG", filepath.Join(svc.cfg.Basedir, "kubeconfig.yaml"))
-	kube, err := kubeClient()
+	kube, err := kubeutil.NewClient(filepath.Join(svc.cfg.Basedir, "kubeconfig.yaml"), agentapi.SchemeBuilder, vpcapi.SchemeBuilder, wiringapi.SchemeBuilder)
 	if err != nil {
 		return errors.Wrapf(err, "error creating kube client")
 	}
