@@ -2,6 +2,7 @@ package testing
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -16,7 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func WaitForSwitchesReady(ctx context.Context, kube client.WithWatch, expectedSwitches []string) error {
+func WaitForSwitchesReady(ctx context.Context, kube client.WithWatch, expectedSwitches []string, timeout time.Duration) error {
 	start := time.Now()
 
 	ready := map[string]bool{}
@@ -24,11 +25,20 @@ func WaitForSwitchesReady(ctx context.Context, kube client.WithWatch, expectedSw
 		ready[switchName] = false
 	}
 
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	interval := min(10*time.Second, timeout/10)
+
 	errs := 0
-	retries := 8
+	retries := 10 // ~ timeout
+	attempt := 0
 
 	for {
-		time.Sleep(15 * time.Second) // TODO make configurable
+		if attempt > 0 {
+			time.Sleep(interval)
+		}
+		attempt++
 
 		agents := agentapi.AgentList{}
 		if err := kube.List(ctx, &agents, client.InNamespace("default")); err != nil {
@@ -41,6 +51,8 @@ func WaitForSwitchesReady(ctx context.Context, kube client.WithWatch, expectedSw
 
 			return errors.Wrapf(err, "error listing agents")
 		}
+
+		retries = 0
 
 		for _, agent := range agents.Items {
 			if agent.Generation == agent.Status.LastAppliedGen && time.Since(agent.Status.LastHeartbeat.Time) < 30*time.Second {
@@ -77,13 +89,18 @@ func WaitForSwitchesReady(ctx context.Context, kube client.WithWatch, expectedSw
 	}
 }
 
-func BuildNetconf(ctx context.Context, kube client.Client, server string) ([]string, error) {
+type netconf struct {
+	cmd    string
+	subnet string
+}
+
+func buildNetconf(ctx context.Context, kube client.Client, server string) ([]netconf, error) {
 	attached, err := apiutil.GetAttachedSubnets(ctx, kube, server)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error getting attached subnets")
 	}
 
-	netconfs := []string{}
+	netconfs := []netconf{}
 	for vpcSubnet, attachment := range attached {
 		vpcParts := strings.SplitN(vpcSubnet, "/", 2)
 		if len(vpcParts) != 2 {
@@ -117,31 +134,88 @@ func BuildNetconf(ctx context.Context, kube client.Client, server string) ([]str
 			vlan = vpc.Spec.Subnets[subnetName].VLAN
 		}
 
-		netconf := ""
+		netconfCmd := ""
 		if conn.Spec.Unbundled != nil {
-			netconf = "vlan " + vlan + " " + conn.Spec.Unbundled.Link.Server.LocalPortName()
+			netconfCmd = "vlan " + vlan + " " + conn.Spec.Unbundled.Link.Server.LocalPortName()
 		} else {
-			netconf = "bond " + vlan
+			netconfCmd = "bond " + vlan
 
 			if conn.Spec.Bundled != nil {
 				for _, link := range conn.Spec.Bundled.Links {
-					netconf += " " + link.Server.LocalPortName()
+					netconfCmd += " " + link.Server.LocalPortName()
 				}
 			}
 			if conn.Spec.MCLAG != nil {
 				for _, link := range conn.Spec.MCLAG.Links {
-					netconf += " " + link.Server.LocalPortName()
+					netconfCmd += " " + link.Server.LocalPortName()
 				}
 			}
 			if conn.Spec.ESLAG != nil {
 				for _, link := range conn.Spec.ESLAG.Links {
-					netconf += " " + link.Server.LocalPortName()
+					netconfCmd += " " + link.Server.LocalPortName()
 				}
 			}
 		}
 
-		netconfs = append(netconfs, netconf)
+		netconfs = append(netconfs, netconf{
+			cmd:    netconfCmd,
+			subnet: vpc.Spec.Subnets[subnetName].Subnet,
+		})
 	}
 
 	return netconfs, nil
+}
+
+type Iperf3Report struct {
+	Intervals []Iperf3ReportInterval `json:"intervals"`
+	End       Iperf3ReportEnd        `json:"end"`
+}
+
+type Iperf3ReportInterval struct {
+	Sum Iperf3ReportSum `json:"sum"`
+}
+
+type Iperf3ReportEnd struct {
+	SumSent     Iperf3ReportSum `json:"sum_sent"`
+	SumReceived Iperf3ReportSum `json:"sum_received"`
+}
+
+type Iperf3ReportSum struct {
+	Bytes         int64   `json:"bytes"`
+	BitsPerSecond float64 `json:"bits_per_second"`
+}
+
+func ParseIperf3Report(data string) (*Iperf3Report, error) {
+	report := &Iperf3Report{}
+	if err := json.Unmarshal([]byte(data), report); err != nil {
+		return nil, errors.Wrapf(err, "error unmarshaling iperf3 report")
+	}
+
+	return report, nil
+}
+
+type Duration struct {
+	time.Duration
+}
+
+func (duration *Duration) UnmarshalJSON(b []byte) error {
+	var raw interface{}
+	err := json.Unmarshal(b, &raw)
+	if err != nil {
+		return errors.Wrapf(err, "error unmarshaling duration")
+	}
+
+	switch value := raw.(type) {
+	case float64:
+		duration.Duration = time.Duration(value)
+	case string:
+		duration.Duration, err = time.ParseDuration(value)
+		if err != nil {
+			return errors.Wrapf(err, "error parsing duration")
+		}
+	default:
+		return errors.Errorf("invalid duration type: %T", value)
+	}
+
+	return nil
 }
