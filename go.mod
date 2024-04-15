@@ -2,12 +2,17 @@ module go.githedgehog.com/fabricator
 
 go 1.21.1
 
+toolchain go1.21.5
+
+replace go.githedgehog.com/fabric => /Users/frostman/workspace/hedgehog/fabric
+
 require (
 	github.com/Masterminds/sprig v2.22.0+incompatible
 	github.com/containers/image/v5 v5.27.1-0.20230911141411-81c35e010bab
 	github.com/coreos/butane v0.18.0
+	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc
 	github.com/dustin/go-humanize v1.0.1
-	github.com/fatih/color v1.16.0
+	github.com/fatih/color v1.15.0
 	github.com/google/uuid v1.6.0
 	github.com/k3s-io/helm-controller v0.15.4
 	github.com/lmittmann/tint v1.0.4
@@ -70,7 +75,6 @@ require (
 	github.com/cpuguy83/go-md2man/v2 v2.0.3 // indirect
 	github.com/cyberphone/json-canonicalization v0.0.0-20230710064741-aa7fe85c7dbd // indirect
 	github.com/cyphar/filepath-securejoin v0.2.4 // indirect
-	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/docker/distribution v2.8.2+incompatible // indirect
 	github.com/docker/docker v24.0.6+incompatible // indirect
 	github.com/docker/docker-credential-helpers v0.8.0 // indirect
