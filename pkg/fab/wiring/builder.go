@@ -217,6 +217,10 @@ func (b *Builder) Build() (*wiring.Data, error) {
 		return nil, err
 	}
 
+	if _, err := b.createSwitchGroup("empty"); err != nil {
+		return nil, err
+	}
+
 	switchID := uint8(1) // switch ID counter
 
 	leafID := uint8(1)   // leaf ID counter
