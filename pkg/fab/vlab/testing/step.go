@@ -132,7 +132,9 @@ func (s *StepAPIAbbr) Run(ctx context.Context, h StepHelper) error {
 	return errors.Wrapf(enf.Enforce(ctx, h.Kube()), "error enforcing")
 }
 
-type StepNetconf struct{}
+type StepNetconf struct {
+	toolbox sync.Mutex
+}
 
 var _ Step = (*StepNetconf)(nil)
 
@@ -169,18 +171,8 @@ func (s *StepNetconf) Run(ctx context.Context, h StepHelper) error {
 }
 
 func (s *StepNetconf) setupNetwork(ctx context.Context, h StepHelper, srv string, netconfs []netconf) error {
-	out, err := h.ServerExec(ctx, srv, "toolbox -q hostname", 10*time.Second) // TODO timeout
-	if err != nil {
-		return errors.Wrapf(err, "error getting hostname for server %s", srv)
-	}
-	if strings.Contains(out, "/var/lib/toolbox") {
-		out, err = h.ServerExec(ctx, srv, "toolbox -q hostname", 10*time.Second) // TODO timeout
-		if err != nil {
-			return errors.Wrapf(err, "error getting hostname for server %s", srv)
-		}
-	}
-	if out != srv {
-		return errors.Errorf("server %s hostname %s doesn't match server name", srv, out)
+	if err := s.checkHostnameAndWarmupToolbox(ctx, h, srv); err != nil {
+		return err
 	}
 
 	if len(netconfs) > 1 {
@@ -217,6 +209,29 @@ func (s *StepNetconf) setupNetwork(ctx context.Context, h StepHelper, srv string
 	return nil
 }
 
+func (s *StepNetconf) checkHostnameAndWarmupToolbox(ctx context.Context, h StepHelper, srv string) error {
+	s.toolbox.Lock()
+	defer s.toolbox.Unlock()
+
+	out, err := h.ServerExec(ctx, srv, "toolbox -q hostname", 10*time.Second) // TODO timeout
+	if err != nil {
+		return errors.Wrapf(err, "error getting hostname for server %s", srv)
+	}
+
+	if strings.Contains(out, "/var/lib/toolbox") {
+		out, err = h.ServerExec(ctx, srv, "toolbox -q hostname", 10*time.Second) // TODO timeout
+		if err != nil {
+			return errors.Wrapf(err, "error getting hostname for server %s", srv)
+		}
+	}
+
+	if out != srv {
+		return errors.Errorf("server %s hostname %s doesn't match server name", srv, out)
+	}
+
+	return nil
+}
+
 type StepTestConnectivity struct {
 	PingCount    uint    `json:"pingCount,omitempty"`
 	IPerfSeconds uint    `json:"iperfSeconds,omitempty"`
@@ -225,7 +240,7 @@ type StepTestConnectivity struct {
 	ipDiscovery sync.Mutex
 	ips         map[string]string
 
-	iperf sync.Mutex
+	toolbox sync.Mutex
 }
 
 var _ Step = (*StepTestConnectivity)(nil)
@@ -244,6 +259,7 @@ func (s *StepTestConnectivity) Run(ctx context.Context, h StepHelper) error {
 			continue
 		}
 
+		sourceName := source.Name
 		for _, target := range servers.Items {
 			if target.IsControl() {
 				continue
@@ -252,16 +268,25 @@ func (s *StepTestConnectivity) Run(ctx context.Context, h StepHelper) error {
 				continue
 			}
 
-			sourceName, targetName := source.Name, target.Name
-			reachable, err := apiutil.IsServerReachable(ctx, h.Kube(), sourceName, targetName)
+			targetName := target.Name
+			serverReachable, err := apiutil.IsServerReachable(ctx, h.Kube(), sourceName, targetName)
 			if err != nil {
 				return errors.Wrapf(err, "error checking connectivity")
 			}
 
-			g.Go(withLog(func() error {
-				return s.testServerReachable(ctx, h, sourceName, targetName, reachable)
-			}, "Test connectivity", "source", sourceName, "target", targetName, "reachable", reachable))
+			g.Go(withDebugLog(func() error {
+				return s.testServerReachable(ctx, h, sourceName, targetName, serverReachable)
+			}, "Test server reachable", "source", sourceName, "target", targetName, "reachable", serverReachable))
 		}
+
+		extReachable, err := apiutil.IsExternalSubnetReachable(ctx, h.Kube(), sourceName, "0.0.0.0/0")
+		if err != nil {
+			return errors.Wrapf(err, "error checking external connectivity")
+		}
+
+		g.Go(withDebugLog(func() error {
+			return s.testExternalReachable(ctx, h, sourceName, extReachable)
+		}, "Test external reachable", "source", sourceName, "reachable", extReachable))
 	}
 
 	slog.Debug("All connectivity tests started")
@@ -273,7 +298,7 @@ func (s *StepTestConnectivity) Run(ctx context.Context, h StepHelper) error {
 	return nil
 }
 
-func (s *StepTestConnectivity) testServerReachable(ctx context.Context, h StepHelper, source, target string, reachable bool) error {
+func (s *StepTestConnectivity) testServerReachable(ctx context.Context, h StepHelper, source, target string, expectedReachable bool) error {
 	targetIP, err := s.getServerIP(ctx, h, target)
 	if err != nil {
 		return errors.Wrapf(err, "error getting IP for server %s", target)
@@ -289,31 +314,33 @@ func (s *StepTestConnectivity) testServerReachable(ctx context.Context, h StepHe
 	out, err := h.ServerExec(ctx, source, cmd, time.Duration(s.PingCount+5)*time.Second) // TODO timeout
 
 	pingOk := err == nil && strings.Contains(out, "0% packet loss")
-	if reachable && !pingOk {
+	if expectedReachable && !pingOk {
 		return errors.Errorf("should be reachable but ping failed with output: %s", out)
 	}
 
 	pingFail := err != nil && strings.Contains(out, "100% packet loss")
-	if !reachable && !pingFail {
-		return errors.Errorf("should not be reachable but ping succeeded")
+	if !expectedReachable && !pingFail {
+		return errors.Errorf("should not be reachable but ping succeeded, err: %s", err)
 	}
 
-	slog.Debug("ping report", "source", source, "target", target, "targetIP", targetIP, "reachable", reachable)
+	// TODO handle error
 
-	if !reachable || s.IPerfSeconds == 0 {
+	slog.Debug("ping report", "source", source, "target", target, "targetIP", targetIP, "reachable", expectedReachable)
+
+	if !expectedReachable || s.IPerfSeconds == 0 {
 		return nil
 	}
 
-	s.iperf.Lock()
-	defer s.iperf.Unlock()
+	s.toolbox.Lock()
+	defer s.toolbox.Unlock()
 
 	g := multierror.Group{}
 
 	g.Go(func() error {
-		cmd := fmt.Sprintf("toolbox -q timeout %d iperf3 -s -1", s.IPerfSeconds+7)
-		out, err := h.ServerExec(ctx, target, cmd, time.Duration(s.IPerfSeconds+10)*time.Second) // TODO timeout
+		cmd := fmt.Sprintf("toolbox -q timeout -v %d iperf3 -s -1", s.IPerfSeconds+17)
+		out, err := h.ServerExec(ctx, target, cmd, time.Duration(s.IPerfSeconds+20)*time.Second) // TODO timeout
 		if err != nil {
-			return errors.Wrapf(err, "error starting iperf server: %s", out)
+			return errors.Wrapf(err, "error starting iperf server with cmd %q: %s", cmd, out)
 		}
 
 		return nil
@@ -322,10 +349,10 @@ func (s *StepTestConnectivity) testServerReachable(ctx context.Context, h StepHe
 	g.Go(func() error {
 		time.Sleep(2 * time.Second) // TODO think about more reliable way to wait for server to start
 
-		cmd = fmt.Sprintf("toolbox -q timeout %d iperf3 -J -c %s -t %d", s.IPerfSeconds+5, targetIP, s.IPerfSeconds)
+		cmd = fmt.Sprintf("toolbox -q timeout -v %d iperf3 -J -c %s -t %d", s.IPerfSeconds+5, targetIP, s.IPerfSeconds)
 		out, err := h.ServerExec(ctx, source, cmd, time.Duration(s.IPerfSeconds+10)*time.Second) // TODO timeout
 		if err != nil {
-			return errors.Wrapf(err, "error running iperf client: %s", out)
+			return errors.Wrapf(err, "error running iperf client with cmd %q: %s", cmd, out)
 		}
 
 		report, err := ParseIperf3Report(out)
@@ -353,8 +380,22 @@ func (s *StepTestConnectivity) testServerReachable(ctx context.Context, h StepHe
 	return g.Wait().ErrorOrNil() //nolint:wrapcheck
 }
 
-func (s *StepTestConnectivity) testExternalReachable(ctx context.Context, h StepHelper, source string, reachable bool) error {
-	// TODO implement
+func (s *StepTestConnectivity) testExternalReachable(ctx context.Context, h StepHelper, source string, expectedReachable bool) error {
+	cmd := "timeout -v 30 curl --insecure https://8.8.8.8" // TODO make configurable
+
+	out, err := h.ServerExec(ctx, source, cmd, 32*time.Second) // TODO timeout
+
+	curlOk := err == nil && strings.Contains(out, "302 Moved")
+	if expectedReachable && !curlOk {
+		return errors.Errorf("should be reachable but curl failed with output: %s", out)
+	}
+
+	curlFail := err != nil && strings.Contains(out, "Failed to connect")
+	if !expectedReachable && !curlFail {
+		return errors.Errorf("should not be reachable but curl succeeded with output: %s", out)
+	}
+
+	// TODO handle error
 
 	return nil
 }
@@ -398,6 +439,19 @@ func withLog(f func() error, msg string, args ...any) func() error {
 			slog.Error(msg+" failure", append(args, "err", err.Error())...)
 		} else {
 			slog.Info(msg+" success", args...)
+		}
+
+		return err
+	}
+}
+
+func withDebugLog(f func() error, msg string, args ...any) func() error {
+	return func() error {
+		err := f()
+		if err != nil {
+			slog.Error(msg+" failure", append(args, "err", err.Error())...)
+		} else {
+			slog.Debug(msg+" success", args...)
 		}
 
 		return err
