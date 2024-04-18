@@ -18,10 +18,12 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math/rand"
 	"slices"
 	"time"
 
 	"github.com/pkg/errors"
+	"golang.org/x/exp/maps"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -83,15 +85,22 @@ func (r *Runner) Run(ctx context.Context) error {
 	if r.cfg.RepeatFor > 0 {
 		return errors.Errorf("repeat for is not implemented yet")
 	}
-	if r.cfg.RandomOrder {
-		return errors.Errorf("random order is not implemented yet")
-	}
+
 	if r.cfg.RepeatTimes < 1 {
 		r.cfg.RepeatTimes = 1
 	}
 
-	for run := uint(0); run < r.cfg.RepeatTimes; run++ {
-		for name, test := range r.tests {
+	testNames := maps.Keys(r.tests)
+	if r.cfg.RandomOrder {
+		rand.Shuffle(len(testNames), func(i, j int) {
+			testNames[i], testNames[j] = testNames[j], testNames[i]
+		})
+	}
+
+	for run := uint(1); run <= r.cfg.RepeatTimes; run++ {
+		for _, name := range testNames {
+			test := r.tests[name]
+
 			if len(r.cfg.TestNames) > 0 && !slices.Contains(r.cfg.TestNames, name) {
 				continue
 			}
@@ -102,7 +111,7 @@ func (r *Runner) Run(ctx context.Context) error {
 		}
 
 		if r.cfg.RepeatTimes > 1 {
-			slog.Info("Repeat completed", "run", fmt.Sprintf("%d/%d", run+1, r.cfg.RepeatTimes), "took", time.Since(allStart))
+			slog.Info("Repeat completed", "run", fmt.Sprintf("%d/%d", run, r.cfg.RepeatTimes), "took", time.Since(allStart))
 		}
 	}
 

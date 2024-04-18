@@ -31,6 +31,7 @@ import (
 	"go.githedgehog.com/fabric/pkg/client/apiabbr"
 	"go.githedgehog.com/fabric/pkg/util/apiutil"
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/sync/semaphore"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -260,6 +261,8 @@ func (s *StepTestConnectivity) Run(ctx context.Context, h StepHelper) error {
 		}
 
 		sourceName := source.Name
+		limiter := semaphore.NewWeighted(3) // TODO configurable
+
 		for _, target := range servers.Items {
 			if target.IsControl() {
 				continue
@@ -275,6 +278,11 @@ func (s *StepTestConnectivity) Run(ctx context.Context, h StepHelper) error {
 			}
 
 			g.Go(withDebugLog(func() error {
+				if err := limiter.Acquire(ctx, 1); err != nil {
+					return errors.Wrapf(err, "error acquiring semaphore for server %s", sourceName)
+				}
+				defer limiter.Release(1)
+
 				return s.testServerReachable(ctx, h, sourceName, targetName, serverReachable)
 			}, "Test server reachable", "source", sourceName, "target", targetName, "reachable", serverReachable))
 		}
@@ -285,6 +293,11 @@ func (s *StepTestConnectivity) Run(ctx context.Context, h StepHelper) error {
 		}
 
 		g.Go(withDebugLog(func() error {
+			if err := limiter.Acquire(ctx, 1); err != nil {
+				return errors.Wrapf(err, "error acquiring semaphore for server %s", sourceName)
+			}
+			defer limiter.Release(1)
+
 			return s.testExternalReachable(ctx, h, sourceName, extReachable)
 		}, "Test external reachable", "source", sourceName, "reachable", extReachable))
 	}
@@ -320,7 +333,7 @@ func (s *StepTestConnectivity) testServerReachable(ctx context.Context, h StepHe
 
 	pingFail := err != nil && strings.Contains(out, "100% packet loss")
 	if !expectedReachable && !pingFail {
-		return errors.Errorf("should not be reachable but ping succeeded, err: %s", err)
+		return errors.Errorf("should not be reachable but ping succeeded, err: %v", err)
 	}
 
 	// TODO handle error
@@ -381,7 +394,7 @@ func (s *StepTestConnectivity) testServerReachable(ctx context.Context, h StepHe
 }
 
 func (s *StepTestConnectivity) testExternalReachable(ctx context.Context, h StepHelper, source string, expectedReachable bool) error {
-	cmd := "timeout -v 30 curl --insecure https://8.8.8.8" // TODO make configurable
+	cmd := "timeout -v 5 curl --insecure https://8.8.8.8" // TODO make configurable
 
 	out, err := h.ServerExec(ctx, source, cmd, 32*time.Second) // TODO timeout
 
@@ -390,7 +403,7 @@ func (s *StepTestConnectivity) testExternalReachable(ctx context.Context, h Step
 		return errors.Errorf("should be reachable but curl failed with output: %s", out)
 	}
 
-	curlFail := err != nil && strings.Contains(out, "Failed to connect")
+	curlFail := err != nil && !strings.Contains(out, "302 Moved")
 	if !expectedReachable && !curlFail {
 		return errors.Errorf("should not be reachable but curl succeeded with output: %s", out)
 	}
