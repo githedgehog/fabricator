@@ -15,9 +15,11 @@
 package testing
 
 import (
+	"log/slog"
 	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/pkg/errors"
 	"go.githedgehog.com/fabric/pkg/client/apiabbr"
@@ -39,10 +41,11 @@ type LTest struct {
 type LStep struct {
 	Name string `json:"name,omitempty"`
 
+	WaitReady        *StepWaitReady        `json:"waitready,omitempty"`
 	Enforce          *string               `json:"enforce,omitempty"`
 	Update           *string               `json:"update,omitempty"`
 	Netconf          *StepNetconf          `json:"netconf,omitempty"`
-	TestConnectivity *StepTestConnectivity `json:"test-connectivity,omitempty"`
+	TestConnectivity *StepTestConnectivity `json:"connectivity,omitempty"`
 }
 
 type LStepTestConnectivity struct{}
@@ -54,6 +57,8 @@ func (r *Runner) loadTests() error {
 	tests := map[string]LTest{}
 
 	for _, path := range paths {
+		slog.Info("Loading test file", "path", path)
+
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return errors.Wrapf(err, "error reading file %s", path)
@@ -99,6 +104,8 @@ func (r *Runner) loadTests() error {
 
 	r.tests = map[string]*Test{}
 	for name, lTest := range tests {
+		slog.Info("Loading test", "name", name)
+
 		test, err := r.loadTest(lTest, blocks)
 		if err != nil {
 			return errors.Wrapf(err, "error loading test %s", name)
@@ -115,6 +122,16 @@ func (r *Runner) loadTest(lTest LTest, blocks map[string]string) (*Test, error) 
 
 	for stepIdx, lStep := range lTest.Steps {
 		num := 0
+
+		if lStep.WaitReady != nil {
+			if lStep.WaitReady.Timeout.Duration == 0 {
+				lStep.WaitReady.Timeout.Duration = 5 * time.Minute
+			}
+
+			steps = append(steps, lStep.WaitReady)
+
+			num++
+		}
 
 		if lStep.Enforce != nil {
 			newStep, err := r.loadAbbr(*lStep.Enforce, false, blocks)
@@ -143,6 +160,16 @@ func (r *Runner) loadTest(lTest LTest, blocks map[string]string) (*Test, error) 
 		}
 
 		if lStep.TestConnectivity != nil {
+			if lStep.TestConnectivity.PingCount == 0 {
+				lStep.TestConnectivity.PingCount = 10
+			}
+			if lStep.TestConnectivity.IPerfSeconds == 0 {
+				lStep.TestConnectivity.IPerfSeconds = 5
+			}
+			if lStep.TestConnectivity.IPerfSpeed == 0 {
+				lStep.TestConnectivity.IPerfSpeed = 0.01 // 7000 // TODO autodetect for VS
+			}
+
 			steps = append(steps, lStep.TestConnectivity)
 
 			num++
