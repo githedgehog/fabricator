@@ -570,10 +570,40 @@ func main() {
 							basedirFlag,
 							verboseFlag,
 							briefFlag,
+							&cli.DurationFlag{
+								Name:    "timeout",
+								Aliases: []string{"t"},
+								Usage:   "timeout for running all tests",
+							},
+							&cli.DurationFlag{
+								Name:    "test-timeout",
+								Aliases: []string{"tt"},
+								Usage:   "timeout for running each tests",
+							},
 							&cli.StringSliceFlag{
 								Name:    "file",
 								Aliases: []string{"f"},
 								Usage:   "test file(s) to run",
+							},
+							&cli.StringSliceFlag{
+								Name:    "test-name",
+								Aliases: []string{"n"},
+								Usage:   "test name(s) to run",
+							},
+							&cli.BoolFlag{
+								Name:    "random",
+								Aliases: []string{"r"},
+								Usage:   "run tests in random order",
+							},
+							&cli.UintFlag{
+								Name:    "repeat",
+								Aliases: []string{"rt"},
+								Usage:   "repeat tests specified number of times",
+							},
+							&cli.DurationFlag{
+								Name:    "repeat-for",
+								Aliases: []string{"rf"},
+								Usage:   "repeat tests for specified duration",
 							},
 						},
 						Before: func(_ *cli.Context) error {
@@ -591,7 +621,13 @@ func main() {
 							}
 
 							return errors.Wrap(svc.RunTests(context.Background(), testing.RunnerConfig{
-								TestFiles: cCtx.StringSlice("file"),
+								Timeout:     cCtx.Duration("timeout"),
+								TestTimeout: cCtx.Duration("test-timeout"),
+								TestFiles:   cCtx.StringSlice("file"),
+								TestNames:   cCtx.StringSlice("test-name"),
+								RandomOrder: cCtx.Bool("random"),
+								RepeatTimes: cCtx.Uint("repeat"),
+								RepeatFor:   cCtx.Duration("repeat-for"),
 							}), "error running tests")
 						},
 					},

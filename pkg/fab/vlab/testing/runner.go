@@ -16,6 +16,9 @@ package testing
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/pkg/errors"
@@ -23,8 +26,14 @@ import (
 )
 
 type RunnerConfig struct {
-	StepHelper StepHelper
-	TestFiles  []string
+	StepHelper  StepHelper
+	Timeout     time.Duration
+	TestTimeout time.Duration
+	TestFiles   []string
+	TestNames   []string
+	RandomOrder bool
+	RepeatTimes uint
+	RepeatFor   time.Duration
 }
 
 type Runner struct {
@@ -42,7 +51,7 @@ type Step interface {
 }
 
 type StepHelper interface {
-	Kube() client.Client
+	Kube() client.WithWatch
 	ServerExec(ctx context.Context, server, cmd string, timeout time.Duration) (string, error)
 }
 
@@ -63,13 +72,67 @@ func NewRunner(cfg RunnerConfig) (*Runner, error) {
 }
 
 func (r *Runner) Run(ctx context.Context) error {
-	for name, test := range r.tests {
-		for _, step := range test.steps {
-			if err := step.Run(ctx, r.cfg.StepHelper); err != nil {
+	if r.cfg.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, r.cfg.Timeout)
+		defer cancel()
+	}
+
+	allStart := time.Now()
+
+	if r.cfg.RepeatFor > 0 {
+		return errors.Errorf("repeat for is not implemented yet")
+	}
+	if r.cfg.RandomOrder {
+		return errors.Errorf("random order is not implemented yet")
+	}
+	if r.cfg.RepeatTimes < 1 {
+		r.cfg.RepeatTimes = 1
+	}
+
+	for run := uint(0); run < r.cfg.RepeatTimes; run++ {
+		for name, test := range r.tests {
+			if len(r.cfg.TestNames) > 0 && !slices.Contains(r.cfg.TestNames, name) {
+				continue
+			}
+
+			if err := r.runTest(ctx, name, test); err != nil {
 				return errors.Wrapf(err, "error running test %s", name)
 			}
 		}
+
+		if r.cfg.RepeatTimes > 1 {
+			slog.Info("Repeat completed", "run", fmt.Sprintf("%d/%d", run+1, r.cfg.RepeatTimes), "took", time.Since(allStart))
+		}
 	}
+
+	slog.Info("All tests completed", "took", time.Since(allStart))
+
+	return nil
+}
+
+func (r *Runner) runTest(ctx context.Context, name string, test *Test) error {
+	if r.cfg.TestTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, r.cfg.TestTimeout)
+		defer cancel()
+	}
+
+	testStart := time.Now()
+
+	slog.Info("Running test", "name", name)
+
+	for _, step := range test.steps {
+		stepStart := time.Now()
+
+		if err := step.Run(ctx, r.cfg.StepHelper); err != nil {
+			return errors.Wrapf(err, "error running test %s", name)
+		}
+
+		slog.Info("Step completed", "took", time.Since(stepStart))
+	}
+
+	slog.Info("Test completed", "name", name, "took", time.Since(testStart))
 
 	return nil
 }

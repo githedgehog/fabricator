@@ -16,7 +16,6 @@ package vlab
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -63,7 +62,7 @@ func setupCtrlRuntimeLogs() {
 
 func (svc *Service) RunTests(ctx context.Context, cfg testing.RunnerConfig) error {
 	kubeconfig := filepath.Join(svc.cfg.Basedir, "kubeconfig.yaml")
-	kube, err := kubeutil.NewClient(kubeconfig, agentapi.SchemeBuilder, wiringapi.SchemeBuilder, vpcapi.SchemeBuilder)
+	kube, err := kubeutil.NewClientWithCache(ctx, kubeconfig, agentapi.SchemeBuilder, wiringapi.SchemeBuilder, vpcapi.SchemeBuilder)
 	if err != nil {
 		return errors.Wrapf(err, "error creating kube client")
 	}
@@ -84,7 +83,7 @@ func (svc *Service) RunTests(ctx context.Context, cfg testing.RunnerConfig) erro
 }
 
 func waitForSwitchesReady(ctx context.Context, svcCfg *ServiceConfig) error {
-	kube, err := kubeutil.NewClient(filepath.Join(svcCfg.Basedir, "kubeconfig.yaml"), agentapi.SchemeBuilder)
+	kube, err := kubeutil.NewClient(ctx, filepath.Join(svcCfg.Basedir, "kubeconfig.yaml"), agentapi.SchemeBuilder)
 	if err != nil {
 		return errors.Wrapf(err, "error creating kube client")
 	}
@@ -94,7 +93,7 @@ func waitForSwitchesReady(ctx context.Context, svcCfg *ServiceConfig) error {
 		sws = append(sws, sw.Name)
 	}
 
-	return errors.Wrapf(testing.WaitForSwitchesReady(ctx, kube, sws), "error waiting for switches to be ready")
+	return errors.Wrapf(testing.WaitForSwitchesReady(ctx, kube, sws, 2*time.Hour), "error waiting for switches to be ready")
 }
 
 type netConfig struct {
@@ -129,7 +128,7 @@ func (svc *Service) SetupVPCs(ctx context.Context, cfg SetupVPCsConfig) error {
 
 	slog.Info("Setting up VPCs and VPCAttachments for servers")
 
-	kube, err := kubeutil.NewClient(filepath.Join(svc.cfg.Basedir, "kubeconfig.yaml"), agentapi.SchemeBuilder, vpcapi.SchemeBuilder, wiringapi.SchemeBuilder)
+	kube, err := kubeutil.NewClient(ctx, filepath.Join(svc.cfg.Basedir, "kubeconfig.yaml"), agentapi.SchemeBuilder, vpcapi.SchemeBuilder, wiringapi.SchemeBuilder)
 	if err != nil {
 		return errors.Wrapf(err, "error creating kube client")
 	}
@@ -191,7 +190,7 @@ func (svc *Service) SetupVPCs(ctx context.Context, cfg SetupVPCsConfig) error {
 		}
 
 		vpcName, _ := strings.CutPrefix(server.Name, "server-")
-		vpcName = "vpc-" + vpcName //nolint:goconst
+		vpcName = "vpc-" + vpcName
 
 		slog.Info("Enforcing VPC + Attachment for server...", "vpc", vpcName, "server", server.Name, "conn", conn.Name)
 
@@ -370,7 +369,7 @@ func (svc *Service) TestConnectivity(ctx context.Context, cfg ServerConnectivity
 
 	slog.Info("Starting connectivity test", "vpc", cfg.VPC, "vpcPing", cfg.VPCPing, "vpcIperf", cfg.VPCIperf, "vpcIperfSpeed", cfg.VPCIperf, "ext", cfg.Ext, "extCurl", cfg.ExtCurl)
 
-	kube, err := kubeutil.NewClient(filepath.Join(svc.cfg.Basedir, "kubeconfig.yaml"), agentapi.SchemeBuilder, vpcapi.SchemeBuilder, wiringapi.SchemeBuilder)
+	kube, err := kubeutil.NewClient(ctx, filepath.Join(svc.cfg.Basedir, "kubeconfig.yaml"), agentapi.SchemeBuilder, vpcapi.SchemeBuilder, wiringapi.SchemeBuilder)
 	if err != nil {
 		return errors.Wrapf(err, "error creating kube client")
 	}
@@ -746,7 +745,7 @@ serverLoop:
 							return
 						}
 
-						report, err := parseIperf3Report(out)
+						report, err := testing.ParseIperf3Report(out)
 						if err != nil {
 							passed = false
 
@@ -887,34 +886,6 @@ func (svc *Service) ssh(ctx context.Context, server *Server, cmd string, timeout
 	return string(out), nil
 }
 
-type Iperf3Report struct {
-	Intervals []Iperf3ReportInterval `json:"intervals"`
-	End       Iperf3ReportEnd        `json:"end"`
-}
-
-type Iperf3ReportInterval struct {
-	Sum Iperf3ReportSum `json:"sum"`
-}
-
-type Iperf3ReportEnd struct {
-	SumSent     Iperf3ReportSum `json:"sum_sent"`
-	SumReceived Iperf3ReportSum `json:"sum_received"`
-}
-
-type Iperf3ReportSum struct {
-	Bytes         int64   `json:"bytes"`
-	BitsPerSecond float64 `json:"bits_per_second"`
-}
-
-func parseIperf3Report(data string) (*Iperf3Report, error) {
-	report := &Iperf3Report{}
-	if err := json.Unmarshal([]byte(data), report); err != nil {
-		return nil, errors.Wrapf(err, "error unmarshaling iperf3 report")
-	}
-
-	return report, nil
-}
-
 type SetupPeeringsConfig struct {
 	AgentCheck bool
 	DryRun     bool
@@ -928,7 +899,7 @@ func (svc *Service) SetupPeerings(ctx context.Context, cfg SetupPeeringsConfig) 
 
 	slog.Info("Setting up VPC and External peerings", "dryRun", cfg.DryRun, "numRequests", len(cfg.Requests))
 
-	kube, err := kubeutil.NewClient(filepath.Join(svc.cfg.Basedir, "kubeconfig.yaml"), agentapi.SchemeBuilder, vpcapi.SchemeBuilder, wiringapi.SchemeBuilder)
+	kube, err := kubeutil.NewClient(ctx, filepath.Join(svc.cfg.Basedir, "kubeconfig.yaml"), agentapi.SchemeBuilder, vpcapi.SchemeBuilder, wiringapi.SchemeBuilder)
 	if err != nil {
 		return errors.Wrapf(err, "error creating kube client")
 	}

@@ -279,7 +279,7 @@ func (op *WaitKube) Run(_ string) error {
 		cmd = exec.Command("kubectl", //nolint:gosec
 			"wait",
 			"--for=condition=available",
-			"--timeout="+op.Timeout.String(), op.Name) //nolint:goconst
+			"--timeout="+op.Timeout.String(), op.Name)
 	} else if strings.HasPrefix(op.Name, "job") {
 		cmd = exec.Command("kubectl", //nolint:gosec
 			"wait",
