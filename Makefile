@@ -188,8 +188,15 @@ VERSION ?= $(shell hack/version.sh)
 OCI_REPO ?= registry.local:31000/githedgehog/fabricator
 
 .PHONY: hhfab
-hhfab: fmt build-embed-cnc-bin ## Build hhfab CLI
+hhfab: fmt build-embed-cnc-bin ## Build hhfab CLI for Linux amd64
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/hhfab -ldflags="-w -s -X main.version=$(VERSION)" --tags containers_image_openpgp ./cmd/hhfab
+
+.PHONY: hhfab-all
+hhfab-all: fmt build-embed-cnc-bin ## Build hhfab CLI for all OS/ARCH
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/linux-amd64/hhfab -ldflags="-w -s -X main.version=$(VERSION)" --tags containers_image_openpgp ./cmd/hhfab
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o bin/linux-arm64/hhfab -ldflags="-w -s -X main.version=$(VERSION)" --tags containers_image_openpgp ./cmd/hhfab
+	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -o bin/darwin-amd64/hhfab -ldflags="-w -s -X main.version=$(VERSION)" --tags containers_image_openpgp ./cmd/hhfab
+	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -o bin/darwin-arm64/hhfab -ldflags="-w -s -X main.version=$(VERSION)" --tags containers_image_openpgp ./cmd/hhfab
 
 .PHONY: build-embed-cnc-bin
 build-embed-cnc-bin: ## Build CNC binaries to embed into hhfab
@@ -200,9 +207,13 @@ build-embed-cnc-bin: ## Build CNC binaries to embed into hhfab
 build: hhfab
 
 .PHONY: hhfab-push
-hhfab-push: hhfab ## Push hhfab CLI to OCI registry
-	cd bin && oras push $(OCI_REPO)/hhfab:$(VERSION) hhfab
-	cd bin && oras push $(OCI_REPO)/hhfab:latest hhfab
+hhfab-push: hhfab hhfab-all ## Push hhfab CLI to OCI registry
+	cd bin && oras push $(OCI_REPO)/hhfab:$(VERSION),latest hhfab
+
+	cd bin/linux-amd64 && oras push $(OCI_REPO)/hhfab-linux-amd64:$(VERSION),latest hhfab
+	cd bin/linux-arm64 && oras push $(OCI_REPO)/hhfab-linux-arm64:$(VERSION),latest hhfab
+	cd bin/darwin-amd64 && oras push $(OCI_REPO)/hhfab-darwin-amd64:$(VERSION),latest hhfab
+	cd bin/darwin-arm64 && oras push $(OCI_REPO)/hhfab-darwin-arm64:$(VERSION),latest hhfab
 
 .PHONY: push
 push: hhfab-push
