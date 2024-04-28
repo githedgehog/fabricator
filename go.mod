@@ -4,8 +4,6 @@ go 1.21.1
 
 toolchain go1.21.5
 
-replace go.githedgehog.com/fabric => /Users/frostman/workspace/hedgehog/fabric
-
 require (
 	github.com/Masterminds/sprig v2.22.0+incompatible
 	github.com/containers/image/v5 v5.27.1-0.20230911141411-81c35e010bab
@@ -28,7 +26,7 @@ require (
 	github.com/ulikunitz/xz v0.5.11
 	github.com/urfave/cli/v2 v2.27.1
 	github.com/vbauerster/mpb/v8 v8.6.1
-	go.githedgehog.com/fabric v0.34.1
+	go.githedgehog.com/fabric v0.35.0
 	golang.org/x/crypto v0.18.0
 	golang.org/x/exp v0.0.0-20231006140011-7918f672742d
 	golang.org/x/sync v0.6.0
