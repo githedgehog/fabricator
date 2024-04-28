@@ -16,6 +16,7 @@ run:
   timeout: 10m
   build-tags:
     - containers_image_openpgp
+    - containers_image_storage_stub
 linters:
   disable-all: true
   # Look at this for details: https://golangci-lint.run/usage/linters/

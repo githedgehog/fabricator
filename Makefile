@@ -22,6 +22,8 @@ CONTAINER_TOOL ?= docker
 SHELL = /usr/bin/env bash -o pipefail
 .SHELLFLAGS = -ec
 
+GOFLAGS ?= --tags containers_image_openpgp,containers_image_storage_stub
+
 .PHONY: all
 all: build
 
@@ -58,11 +60,11 @@ fmt: ## Run go fmt against code.
 
 .PHONY: vet
 vet: ## Run go vet against code.
-	go vet --tags containers_image_openpgp ./...
+	go vet $(GOFLAGS) ./...
 
 .PHONY: test
 test: fmt vet envtest ## Run tests.
-	go test --coverprofile cover.out --tags containers_image_openpgp ./...
+	go test --coverprofile cover.out $(GOFLAGS) ./...
 
 .PHONY: lint-lic
 lint-lic: addlicense ## Run addlicense to check if all files have the license header.
@@ -189,19 +191,19 @@ OCI_REPO ?= registry.local:31000/githedgehog/fabricator
 
 .PHONY: hhfab
 hhfab: fmt build-embed-cnc-bin ## Build hhfab CLI for Linux amd64
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/hhfab -ldflags="-w -s -X main.version=$(VERSION)" --tags containers_image_openpgp ./cmd/hhfab
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/hhfab -ldflags="-w -s -X main.version=$(VERSION)" $(GOFLAGS) ./cmd/hhfab
 
 .PHONY: hhfab-all
 hhfab-all: fmt build-embed-cnc-bin ## Build hhfab CLI for all OS/ARCH
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/linux-amd64/hhfab -ldflags="-w -s -X main.version=$(VERSION)" --tags containers_image_openpgp ./cmd/hhfab
-	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o bin/linux-arm64/hhfab -ldflags="-w -s -X main.version=$(VERSION)" --tags containers_image_openpgp ./cmd/hhfab
-	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -o bin/darwin-amd64/hhfab -ldflags="-w -s -X main.version=$(VERSION)" --tags containers_image_openpgp ./cmd/hhfab
-	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -o bin/darwin-arm64/hhfab -ldflags="-w -s -X main.version=$(VERSION)" --tags containers_image_openpgp ./cmd/hhfab
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/linux-amd64/hhfab -ldflags="-w -s -X main.version=$(VERSION)" $(GOFLAGS) ./cmd/hhfab
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o bin/linux-arm64/hhfab -ldflags="-w -s -X main.version=$(VERSION)" $(GOFLAGS) ./cmd/hhfab
+	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -o bin/darwin-amd64/hhfab -ldflags="-w -s -X main.version=$(VERSION)" $(GOFLAGS) ./cmd/hhfab
+	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -o bin/darwin-arm64/hhfab -ldflags="-w -s -X main.version=$(VERSION)" $(GOFLAGS) ./cmd/hhfab
 
 .PHONY: build-embed-cnc-bin
 build-embed-cnc-bin: ## Build CNC binaries to embed into hhfab
 	touch pkg/fab/cnc/bin/hhfab-recipe
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o pkg/fab/cnc/bin/hhfab-recipe -ldflags="-w -s -X main.version=$(VERSION)" --tags containers_image_openpgp ./cmd/hhfab-recipe
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o pkg/fab/cnc/bin/hhfab-recipe -ldflags="-w -s -X main.version=$(VERSION)" $(GOFLAGS) ./cmd/hhfab-recipe
 
 .PHONY: build
 build: hhfab
