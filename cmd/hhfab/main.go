@@ -67,6 +67,8 @@ func setupLogger(verbose, brief bool) error {
 	slog.Debug("\n" + motd)
 	slog.Debug("Version: " + version)
 
+	vlab.SetupCtrlRuntimeLogs()
+
 	return nil
 }
 

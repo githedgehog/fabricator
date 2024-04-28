@@ -45,12 +45,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
-func init() {
-	setupCtrlRuntimeLogs()
-}
-
 // TODO properly handle logging config for ctrl runtime
-func setupCtrlRuntimeLogs() {
+func SetupCtrlRuntimeLogs() {
 	opts := zap.Options{
 		Development: true,
 	}
