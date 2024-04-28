@@ -64,7 +64,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: oldstable
+          go-version: stable
           cache: true
 
       # Don't remove it! We shouldn't allow CI to pass if there are any changes not committed after running make
