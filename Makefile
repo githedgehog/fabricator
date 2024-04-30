@@ -193,6 +193,10 @@ OCI_REPO ?= registry.local:31000/githedgehog/fabricator
 hhfab: fmt build-embed-cnc-bin ## Build hhfab CLI for Linux amd64
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/hhfab -ldflags="-w -s -X main.version=$(VERSION)" $(GOFLAGS) ./cmd/hhfab
 
+.PHONY: hhfab-local
+hhfab-local: fmt build-embed-cnc-bin ## Build hhfab CLI for local OS/ARCH
+	CGO_ENABLED=0 go build -o bin/hhfab -ldflags="-w -s -X main.version=$(VERSION)" $(GOFLAGS) ./cmd/hhfab
+
 .PHONY: hhfab-all
 hhfab-all: fmt build-embed-cnc-bin ## Build hhfab CLI for all OS/ARCH
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/linux-amd64/hhfab -ldflags="-w -s -X main.version=$(VERSION)" $(GOFLAGS) ./cmd/hhfab
