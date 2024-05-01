@@ -44,8 +44,9 @@ func WaitForSwitchesReady(ctx context.Context, kube client.WithWatch, expectedSw
 
 	interval := min(10*time.Second, timeout/10)
 
+	const retries = 10 // ~ timeout
 	errs := 0
-	retries := 10 // ~ timeout
+
 	attempt := 0
 
 	for {
@@ -66,7 +67,7 @@ func WaitForSwitchesReady(ctx context.Context, kube client.WithWatch, expectedSw
 			return errors.Wrapf(err, "error listing agents")
 		}
 
-		retries = 0
+		errs = 0
 
 		for _, agent := range agents.Items {
 			if agent.Generation == agent.Status.LastAppliedGen && time.Since(agent.Status.LastHeartbeat.Time) < 30*time.Second {
