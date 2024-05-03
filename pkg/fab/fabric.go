@@ -40,20 +40,22 @@ var fabricDHCPServerTemplate string
 var fabricDHCPDTemplate string
 
 type Fabric struct {
-	Ref                      cnc.Ref `json:"ref,omitempty"`
-	FabricAPIChartRef        cnc.Ref `json:"fabricApiChartRef,omitempty"`
-	FabricChartRef           cnc.Ref `json:"fabricChartRef,omitempty"`
-	FabricImageRef           cnc.Ref `json:"fabricImageRef,omitempty"`
-	AgentRef                 cnc.Ref `json:"agentRef,omitempty"`
-	ControlAgentRef          cnc.Ref `json:"controlAgentRef,omitempty"`
-	CtlRef                   cnc.Ref `json:"ctlRef,omitempty"`
-	FabricDHCPServerRef      cnc.Ref `json:"dhcpServerRef,omitempty"`
-	FabricDHCPServerChartRef cnc.Ref `json:"dhcpServerChartRef,omitempty"`
-	FabricDHCPDRef           cnc.Ref `json:"dhcpdRef,omitempty"`
-	FabricDHCPDChartRef      cnc.Ref `json:"dhcpdChartRef,omitempty"`
-	BaseVPCCommunity         string  `json:"baseVPCCommunity,omitempty"`
-	ServerFacingMTUOffset    uint    `json:"serverFacingMTUOffset,omitempty"`
-	DHCPServer               string  `json:"dhcpServer,omitempty"`
+	Ref                      cnc.Ref          `json:"ref,omitempty"`
+	FabricAPIChartRef        cnc.Ref          `json:"fabricApiChartRef,omitempty"`
+	FabricChartRef           cnc.Ref          `json:"fabricChartRef,omitempty"`
+	FabricImageRef           cnc.Ref          `json:"fabricImageRef,omitempty"`
+	AgentRef                 cnc.Ref          `json:"agentRef,omitempty"`
+	ControlAgentRef          cnc.Ref          `json:"controlAgentRef,omitempty"`
+	CtlRef                   cnc.Ref          `json:"ctlRef,omitempty"`
+	FabricDHCPServerRef      cnc.Ref          `json:"dhcpServerRef,omitempty"`
+	FabricDHCPServerChartRef cnc.Ref          `json:"dhcpServerChartRef,omitempty"`
+	FabricDHCPDRef           cnc.Ref          `json:"dhcpdRef,omitempty"`
+	FabricDHCPDChartRef      cnc.Ref          `json:"dhcpdChartRef,omitempty"`
+	BaseVPCCommunity         string           `json:"baseVPCCommunity,omitempty"`
+	ServerFacingMTUOffset    uint             `json:"serverFacingMTUOffset,omitempty"`
+	DHCPServer               string           `json:"dhcpServer,omitempty"`
+	AlloyRef                 cnc.Ref          `json:"alloyRef,omitempty"`
+	Alloy                    meta.AlloyConfig `json:"alloy,omitempty"`
 }
 
 var _ cnc.Component = (*Fabric)(nil)
@@ -104,9 +106,15 @@ func (cfg *Fabric) Hydrate(_ cnc.Preset, _ meta.FabricMode) error {
 	cfg.FabricDHCPServerChartRef = cfg.FabricDHCPServerChartRef.Fallback(RefFabricDHCPServerChart)
 	cfg.FabricDHCPDRef = cfg.FabricDHCPDRef.Fallback(RefFabricDHCPD)
 	cfg.FabricDHCPDChartRef = cfg.FabricDHCPDChartRef.Fallback(RefFabricDHCPDChart)
+	cfg.AlloyRef = cfg.AlloyRef.Fallback(RefAlloy)
 
 	if !slices.Contains(meta.DHCPModes, meta.DHCPMode(cfg.DHCPServer)) {
 		return errors.Errorf("invalid dhcp server mode %q", cfg.DHCPServer)
+	}
+
+	cfg.Alloy.Default()
+	if err := cfg.Alloy.Validate(); err != nil {
+		return errors.Wrap(err, "error validating alloy config")
 	}
 
 	return nil
@@ -144,6 +152,9 @@ func (cfg *Fabric) buildFabricConfig(fabricMode meta.FabricMode, get cnc.GetComp
 		ServerFacingMTUOffset: uint16(cfg.ServerFacingMTUOffset),
 		ESLAGMACBase:          "f2:00:00:00:00:00", // TODO make configurable
 		ESLAGESIPrefix:        "00:f2:00:00:",      // TODO make configurable
+		Alloy:                 cfg.Alloy,
+		AlloyRepo:             target.Fallback(cfg.AlloyRef).RepoName(),
+		AlloyVersion:          target.Fallback(cfg.AlloyRef).Tag,
 	}
 }
 
@@ -168,6 +179,7 @@ func (cfg *Fabric) Build(_ string, _ cnc.Preset, fabricMode meta.FabricMode, get
 	cfg.FabricDHCPServerChartRef = cfg.FabricDHCPServerChartRef.Fallback(cfg.Ref, BaseConfig(get).Source)
 	cfg.FabricDHCPDRef = cfg.FabricDHCPDRef.Fallback(cfg.Ref, BaseConfig(get).Source)
 	cfg.FabricDHCPDChartRef = cfg.FabricDHCPDChartRef.Fallback(cfg.Ref, BaseConfig(get).Source)
+	cfg.AlloyRef = cfg.AlloyRef.Fallback(cfg.Ref, BaseConfig(get).Source)
 
 	target := BaseConfig(get).Target
 	targetInCluster := BaseConfig(get).TargetInCluster
@@ -234,6 +246,12 @@ func (cfg *Fabric) Build(_ string, _ cnc.Preset, fabricMode meta.FabricMode, get
 	run(BundleControlInstall, StageInstall3Fabric, "fabric-dhcpd-chart",
 		&cnc.SyncOCI{
 			Ref:    cfg.FabricDHCPDChartRef,
+			Target: target,
+		})
+
+	run(BundleControlInstall, StageInstall3Fabric, "fabric-alloy",
+		&cnc.SyncOCI{
+			Ref:    cfg.AlloyRef,
 			Target: target,
 		})
 
