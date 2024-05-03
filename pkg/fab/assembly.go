@@ -166,6 +166,7 @@ var (
 	RefFabricDHCPServerChart = cnc.Ref{Name: "fabric/charts/fabric-dhcp-server"}
 	RefFabricDHCPD           = cnc.Ref{Name: "fabric/fabric-dhcpd"}
 	RefFabricDHCPDChart      = cnc.Ref{Name: "fabric/charts/fabric-dhcpd"}
+	RefAlloy                 = cnc.Ref{Name: "fabric/alloy", Tag: "v1.0.0"}
 
 	// Misc
 	RefK9s       = cnc.Ref{Name: "fabricator/k9s", Tag: "v0.31.7"}
