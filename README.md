@@ -36,6 +36,22 @@ oras push ghcr.io/githedgehog/k3s:v1.29.1-k3s2 k3s*
 
 `VERSION` is the version of the K3s with `+` replaced with `-`. E.g. `1.29.1-k3s1`
 
+### Grafana Alloy
+
+Download latest version for linux x86_64, unpack and rename binary to `alloy`.
+
+```bash
+oras push ghcr.io/githedgehog/fabric/alloy:v1.0.0 alloy
+```
+
+### Proxy chart
+
+```bash
+docker pull ghcr.io/tarampampam/3proxy:1.9.1
+docker tag ghcr.io/tarampampam/3proxy:1.9.1 ghcr.io/githedgehog/fabric/fabric-proxy:1.9.1
+docker push ghcr.io/githedgehog/fabric/fabric-proxy:1.9.1
+```
+
 ## Steps to setup on ubuntu 22.04
 
 I recommend using tmux or byobu. Byobu is already installed in Ubuntu and you can activate it for all sessions by
