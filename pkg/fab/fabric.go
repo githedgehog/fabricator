@@ -39,6 +39,9 @@ var fabricDHCPServerTemplate string
 //go:embed fabric_dhcpd_values.tmpl.yaml
 var fabricDHCPDTemplate string
 
+//go:embed fabric_proxy_values.tmpl.yaml
+var fabricProxyTemplate string
+
 type Fabric struct {
 	Ref                      cnc.Ref          `json:"ref,omitempty"`
 	FabricAPIChartRef        cnc.Ref          `json:"fabricApiChartRef,omitempty"`
@@ -56,6 +59,9 @@ type Fabric struct {
 	DHCPServer               string           `json:"dhcpServer,omitempty"`
 	AlloyRef                 cnc.Ref          `json:"alloyRef,omitempty"`
 	Alloy                    meta.AlloyConfig `json:"alloy,omitempty"`
+	ControlProxyRef          cnc.Ref          `json:"controlProxyRef,omitempty"`
+	ControlProxyChartRef     cnc.Ref          `json:"controlProxyChartRef,omitempty"`
+	ControlProxy             bool             `json:"controlProxy,omitempty"`
 }
 
 var _ cnc.Component = (*Fabric)(nil)
@@ -91,6 +97,13 @@ func (cfg *Fabric) Flags() []cli.Flag {
 			Destination: &cfg.DHCPServer,
 			Value:       string(meta.DHCPModeHedgehog),
 		},
+		&cli.BoolFlag{
+			Category:    cfg.Name() + CategoryConfigBaseSuffix,
+			Name:        "control-proxy",
+			Usage:       "enable control proxy to allow services running on the switches (e.g. Grafana Alloy) to go to outside through control node",
+			Destination: &cfg.ControlProxy,
+			Value:       false,
+		},
 	}
 }
 
@@ -107,6 +120,8 @@ func (cfg *Fabric) Hydrate(_ cnc.Preset, _ meta.FabricMode) error {
 	cfg.FabricDHCPDRef = cfg.FabricDHCPDRef.Fallback(RefFabricDHCPD)
 	cfg.FabricDHCPDChartRef = cfg.FabricDHCPDChartRef.Fallback(RefFabricDHCPDChart)
 	cfg.AlloyRef = cfg.AlloyRef.Fallback(RefAlloy)
+	cfg.ControlProxyRef = cfg.ControlProxyRef.Fallback(RefControlProxy)
+	cfg.ControlProxyChartRef = cfg.ControlProxyChartRef.Fallback(RefControlProxyChart)
 
 	if !slices.Contains(meta.DHCPModes, meta.DHCPMode(cfg.DHCPServer)) {
 		return errors.Errorf("invalid dhcp server mode %q", cfg.DHCPServer)
@@ -180,6 +195,8 @@ func (cfg *Fabric) Build(_ string, _ cnc.Preset, fabricMode meta.FabricMode, get
 	cfg.FabricDHCPDRef = cfg.FabricDHCPDRef.Fallback(cfg.Ref, BaseConfig(get).Source)
 	cfg.FabricDHCPDChartRef = cfg.FabricDHCPDChartRef.Fallback(cfg.Ref, BaseConfig(get).Source)
 	cfg.AlloyRef = cfg.AlloyRef.Fallback(cfg.Ref, BaseConfig(get).Source)
+	cfg.ControlProxyRef = cfg.ControlProxyRef.Fallback(cfg.Ref, BaseConfig(get).Source)
+	cfg.ControlProxyChartRef = cfg.ControlProxyChartRef.Fallback(cfg.Ref, BaseConfig(get).Source)
 
 	target := BaseConfig(get).Target
 	targetInCluster := BaseConfig(get).TargetInCluster
@@ -252,6 +269,18 @@ func (cfg *Fabric) Build(_ string, _ cnc.Preset, fabricMode meta.FabricMode, get
 	run(BundleControlInstall, StageInstall3Fabric, "fabric-alloy",
 		&cnc.SyncOCI{
 			Ref:    cfg.AlloyRef,
+			Target: target,
+		})
+
+	run(BundleControlInstall, StageInstall3Fabric, "control-proxy-image",
+		&cnc.SyncOCI{
+			Ref:    cfg.ControlProxyRef,
+			Target: target,
+		})
+
+	run(BundleControlInstall, StageInstall3Fabric, "control-proxy-chart",
+		&cnc.SyncOCI{
+			Ref:    cfg.ControlProxyChartRef,
 			Target: target,
 		})
 
@@ -335,6 +364,15 @@ func (cfg *Fabric) Build(_ string, _ cnc.Preset, fabricMode meta.FabricMode, get
 					fabricCfg,
 				)),
 				dhcp,
+				cnc.If(cfg.ControlProxy, cnc.KubeHelmChart("fabric-proxy", "default", helm.HelmChartSpec{
+					TargetNamespace: "default",
+					Chart:           OCIScheme + targetInCluster.Fallback(cfg.ControlProxyChartRef).RepoName(),
+					Version:         cfg.ControlProxyChartRef.Tag,
+					RepoCA:          ZotConfig(get).TLS.CA.Cert,
+				}, cnc.FromTemplate(fabricProxyTemplate,
+					"ref", target.Fallback(cfg.ControlProxyRef),
+					"nodePort", fmt.Sprintf("%d", ControlProxyNodePort),
+				))),
 			),
 		})
 

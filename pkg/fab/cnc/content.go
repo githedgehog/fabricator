@@ -70,8 +70,9 @@ func FromTemplate(tmplText string, dataBuilder ...any) ContentGenerator {
 }
 
 type KubeObjectProvider struct {
-	Obj meta.Object
-	Err error
+	Obj  meta.Object
+	Skip bool
+	Err  error
 }
 
 func FromKubeObjects(objs ...KubeObjectProvider) ContentGenerator {
@@ -82,6 +83,11 @@ func FromKubeObjects(objs ...KubeObjectProvider) ContentGenerator {
 			if obj.Err != nil {
 				return "", errors.Wrapf(obj.Err, "error generating kube object %d", idx)
 			}
+
+			if obj.Skip {
+				continue
+			}
+
 			if obj.Obj == nil {
 				return "", errors.Errorf("kube object %d is nil", idx)
 			}
@@ -104,6 +110,14 @@ func FromKubeObjects(objs ...KubeObjectProvider) ContentGenerator {
 		}
 
 		return buf.String(), nil
+	}
+}
+
+func If(cond bool, obj KubeObjectProvider) KubeObjectProvider {
+	return KubeObjectProvider{
+		Skip: !cond,
+		Obj:  obj.Obj,
+		Err:  obj.Err,
 	}
 }
 
