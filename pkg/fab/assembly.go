@@ -41,6 +41,7 @@ var (
 	ZotNodePort                   = 31000
 	DasBootNTPNodePort            = 30123
 	DasBootSyslogNodePort         = 30514
+	ControlProxyNodePort          = 31028
 
 	DevSSHKey     = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGpF2+9I1Nj4BcN7y6DjzTbq1VcUYIRGyfzId5ZoBEFj" // 1P: Fabric Dev SSH Key Shared
 	DevPassword   = "$5$8nAYPGcl4l6G7Av1$Qi4/gnM0yPtGv9kjpMh78NuNSfQWy7vR1rulHpurL36"                  //nolint:gosec // 1P: Fabric Dev SONiC Admin
@@ -167,6 +168,8 @@ var (
 	RefFabricDHCPD           = cnc.Ref{Name: "fabric/fabric-dhcpd"}
 	RefFabricDHCPDChart      = cnc.Ref{Name: "fabric/charts/fabric-dhcpd"}
 	RefAlloy                 = cnc.Ref{Name: "fabric/alloy", Tag: "v1.0.0"}
+	RefControlProxy          = cnc.Ref{Name: "fabric/fabric-proxy", Tag: "1.9.1"}
+	RefControlProxyChart     = cnc.Ref{Name: "fabric/charts/fabric-proxy"}
 
 	// Misc
 	RefK9s       = cnc.Ref{Name: "fabricator/k9s", Tag: "v0.31.7"}

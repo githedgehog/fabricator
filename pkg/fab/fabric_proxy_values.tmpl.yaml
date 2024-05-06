@@ -1,0 +1,8 @@
+image:
+  repository: {{ .ref.RepoName }}
+  tag: {{ .ref.Tag }}
+
+service:
+  type: NodePort
+  port: 3128
+  nodePort: {{ .nodePort }}
