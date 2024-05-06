@@ -62,6 +62,7 @@ type Fabric struct {
 	ControlProxyRef          cnc.Ref          `json:"controlProxyRef,omitempty"`
 	ControlProxyChartRef     cnc.Ref          `json:"controlProxyChartRef,omitempty"`
 	ControlProxy             bool             `json:"controlProxy,omitempty"`
+	SwitchUsers              []meta.UserCreds `json:"switchUsers,omitempty"`
 }
 
 var _ cnc.Component = (*Fabric)(nil)
@@ -323,14 +324,25 @@ func (cfg *Fabric) Build(_ string, _ cnc.Preset, fabricMode meta.FabricMode, get
 		))
 	}
 
-	users := []meta.UserCreds{}
+	users := append([]meta.UserCreds{}, cfg.SwitchUsers...)
 	slog.Info("Base config", "dev", BaseConfig(get).Dev)
 	if BaseConfig(get).Dev {
-		users = append(users, DevSonicUsers...)
-		slog.Info("Adding dev users", "users", users)
+		for _, devUser := range DevSonicUsers {
+			for _, user := range users {
+				if user.Name == devUser.Name {
+					slog.Warn("Skipping dev user as it's already used", "user", user.Name)
+
+					continue
+				}
+
+				slog.Debug("Adding dev user", "user", user.Name)
+				users = append(users, devUser)
+			}
+		}
+
 		for idx := range users {
 			users[idx].SSHKeys = append(users[idx].SSHKeys, BaseConfig(get).AuthorizedKeys...)
-			slog.Info("Adding dev ssh keys to user", "user", users[idx])
+			slog.Debug("Adding dev ssh keys to user", "user", users[idx])
 		}
 	}
 
