@@ -328,16 +328,22 @@ func (cfg *Fabric) Build(_ string, _ cnc.Preset, fabricMode meta.FabricMode, get
 	slog.Info("Base config", "dev", BaseConfig(get).Dev)
 	if BaseConfig(get).Dev {
 		for _, devUser := range DevSonicUsers {
+			ok := true
 			for _, user := range users {
 				if user.Name == devUser.Name {
 					slog.Warn("Skipping dev user as it's already used", "user", user.Name)
+					ok = false
 
-					continue
+					break
 				}
-
-				slog.Debug("Adding dev user", "user", user.Name)
-				users = append(users, devUser)
 			}
+
+			if !ok {
+				continue
+			}
+
+			slog.Debug("Adding dev user", "user", devUser.Name)
+			users = append(users, devUser)
 		}
 
 		for idx := range users {
