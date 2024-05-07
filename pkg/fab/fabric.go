@@ -352,6 +352,18 @@ func (cfg *Fabric) Build(_ string, _ cnc.Preset, fabricMode meta.FabricMode, get
 		}
 	}
 
+	admin := false
+	for _, user := range users {
+		if user.Name == "admin" {
+			admin = true
+
+			break
+		}
+	}
+	if !admin {
+		return errors.New("switch admin user is required")
+	}
+
 	fabricCfg := cfg.buildFabricConfig(fabricMode, get, users)
 
 	run(BundleControlInstall, StageInstall3Fabric, "fabric-install",
