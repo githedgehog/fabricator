@@ -139,6 +139,8 @@ func (cfg *Fabric) Hydrate(_ cnc.Preset, _ meta.FabricMode) error {
 func (cfg *Fabric) buildFabricConfig(fabricMode meta.FabricMode, get cnc.GetComponent, users []meta.UserCreds) *meta.FabricConfig {
 	target := BaseConfig(get).Target
 
+	cfg.Alloy.ControlProxyURL = fmt.Sprintf("http://%s:%d", ControlVIP, ControlProxyNodePort)
+
 	return &meta.FabricConfig{
 		ControlVIP:  ControlVIP + ControlVIPMask,
 		APIServer:   fmt.Sprintf("%s:%d", ControlVIP, K3sAPIPort),
