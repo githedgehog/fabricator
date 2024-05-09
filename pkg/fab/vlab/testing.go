@@ -190,7 +190,7 @@ func (svc *Service) SetupVPCs(ctx context.Context, cfg SetupVPCsConfig) error {
 
 		slog.Info("Enforcing VPC + Attachment for server...", "vpc", vpcName, "server", server.Name, "conn", conn.Name)
 
-		vlan := fmt.Sprintf("%d", 1000+idx)
+		vlan := uint16(1000 + idx)
 
 		ip := slices.Clone(ipNet.IP.To4())
 		ip[2] += byte(idx)
@@ -249,9 +249,9 @@ func (svc *Service) SetupVPCs(ctx context.Context, cfg SetupVPCsConfig) error {
 
 		net := ""
 		if conn.Spec.Unbundled != nil {
-			net = "vlan " + vlan + " " + conn.Spec.Unbundled.Link.Server.LocalPortName()
+			net = fmt.Sprintf("vlan %d %s", vlan, conn.Spec.Unbundled.Link.Server.LocalPortName())
 		} else {
-			net = "bond " + vlan
+			net = fmt.Sprintf("bond %d", vlan)
 
 			if conn.Spec.Bundled != nil {
 				for _, link := range conn.Spec.Bundled.Links {
