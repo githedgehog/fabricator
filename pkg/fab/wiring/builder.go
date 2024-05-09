@@ -206,10 +206,6 @@ func (b *Builder) Build() (*wiring.Data, error) {
 
 	b.ifaceTracker = map[string]uint8{}
 
-	if _, err := b.createRack(Rack, wiringapi.RackSpec{}); err != nil {
-		return nil, err
-	}
-
 	if _, err := b.createServer(Control, wiringapi.ServerSpec{
 		Type:        wiringapi.ServerTypeControl,
 		Description: "Control node",
@@ -720,22 +716,6 @@ func (b *Builder) nextServerPort(serverName string) string {
 	return portName
 }
 
-func (b *Builder) createRack(name string, spec wiringapi.RackSpec) (*wiringapi.Rack, error) {
-	rack := &wiringapi.Rack{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       wiringapi.KindRack,
-			APIVersion: wiringapi.GroupVersion.String(),
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:   name,
-			Labels: map[string]string{},
-		},
-		Spec: spec,
-	}
-
-	return rack, errors.Wrapf(b.data.Add(rack), "error creating rack %s", name)
-}
-
 func (b *Builder) createSwitchGroup(name string) (*wiringapi.SwitchGroup, error) { //nolint:unparam
 	sg := &wiringapi.SwitchGroup{
 		TypeMeta: metav1.TypeMeta{
@@ -762,9 +742,6 @@ func (b *Builder) createSwitch(name string, spec wiringapi.SwitchSpec) (*wiringa
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
-			Labels: map[string]string{
-				wiringapi.LabelRack: Rack,
-			},
 		},
 		Spec: spec,
 	}
@@ -784,9 +761,6 @@ func (b *Builder) createServer(name string, spec wiringapi.ServerSpec) (*wiringa
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
-			Labels: map[string]string{
-				wiringapi.LabelRack: Rack,
-			},
 		},
 		Spec: spec,
 	}

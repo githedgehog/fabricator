@@ -144,16 +144,16 @@ func buildNetconf(ctx context.Context, kube client.Client, server string) ([]net
 			return nil, errors.Wrapf(err, "failed to get connection %s", attachment.Connection)
 		}
 
-		vlan := "0"
+		vlan := uint16(0)
 		if !attachment.NativeVLAN {
 			vlan = vpc.Spec.Subnets[subnetName].VLAN
 		}
 
 		netconfCmd := ""
 		if conn.Spec.Unbundled != nil {
-			netconfCmd = "vlan " + vlan + " " + conn.Spec.Unbundled.Link.Server.LocalPortName()
+			netconfCmd = fmt.Sprintf("vlan %d %s", vlan, conn.Spec.Unbundled.Link.Server.LocalPortName())
 		} else {
-			netconfCmd = "bond " + vlan
+			netconfCmd = fmt.Sprintf("bond %d", vlan)
 
 			if conn.Spec.Bundled != nil {
 				for _, link := range conn.Spec.Bundled.Links {
