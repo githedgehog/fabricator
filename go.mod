@@ -22,7 +22,7 @@ require (
 	github.com/opencontainers/image-spec v1.1.0
 	github.com/oras-project/oras-credentials-go v0.3.0
 	github.com/pkg/errors v0.9.1
-	github.com/shirou/gopsutil/v3 v3.23.8
+	github.com/shirou/gopsutil/v3 v3.24.4
 	github.com/ulikunitz/xz v0.5.11
 	github.com/urfave/cli/v2 v2.27.1
 	github.com/vbauerster/mpb/v8 v8.6.1
@@ -175,7 +175,7 @@ require (
 	github.com/vbatts/tar-split v0.11.5 // indirect
 	github.com/vincent-petithory/dataurl v1.0.0 // indirect
 	github.com/xrash/smetrics v0.0.0-20201216005158-039620a65673 // indirect
-	github.com/yusufpapurcu/wmi v1.2.3 // indirect
+	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	go.mongodb.org/mongo-driver v1.11.3 // indirect
 	go.mozilla.org/pkcs7 v0.0.0-20210826202110-33d05740a352 // indirect
 	go.opencensus.io v0.24.0 // indirect
