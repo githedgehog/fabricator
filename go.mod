@@ -9,7 +9,7 @@ require (
 	github.com/containers/image/v5 v5.27.1-0.20230911141411-81c35e010bab
 	github.com/coreos/butane v0.18.0
 	github.com/dustin/go-humanize v1.0.1
-	github.com/fatih/color v1.15.0
+	github.com/fatih/color v1.16.0
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/k3s-io/helm-controller v0.15.4
