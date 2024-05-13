@@ -75,7 +75,7 @@ jobs:
           git diff --quiet
 
       - name: Go Lint
-        uses: golangci/golangci-lint-action@v5
+        uses: golangci/golangci-lint-action@v6
         with:
           version: latest
 
