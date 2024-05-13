@@ -233,12 +233,6 @@ func (cfg *Fabric) Build(_ string, _ cnc.Preset, fabricMode meta.FabricMode, get
 			Target: target,
 		})
 
-	run(BundleControlInstall, StageInstall3Fabric, "fabric-agent-seeder",
-		&cnc.SyncOCI{
-			Ref:    cfg.AgentRef,
-			Target: target.Fallback(cnc.Ref{Name: "fabric/agent/x86_64", Tag: "latest"}),
-		})
-
 	run(BundleControlInstall, StageInstall3Fabric, "fabric-agent",
 		&cnc.SyncOCI{
 			Ref:    cfg.AgentRef,
