@@ -15,26 +15,36 @@ mv flatcar_production_qemu_uefi_efi_vars.fd flatcar_efi_vars.fd
 
 ls -lah
 
-oras push ghcr.io/githedgehog/flatcar:VERSION flatcar*
+oras push ghcr.io/githedgehog/flatcar:3815.2.2 flatcar*
 ```
 
-`VERSION` is the version of the image, e.g. `2605.12.0`, taken from "stable" at https://www.flatcar.org/releases
+Where the version (`3815.2.2`) is from "stable" at https://www.flatcar.org/releases
 
 ### K3s
 
 ```bash
-wget "https://github.com/k3s-io/k3s/releases/download/v1.29.1%2Bk3s2/k3s"
-wget "https://github.com/k3s-io/k3s/releases/download/v1.29.1%2Bk3s2/k3s-airgap-images-amd64.tar.gz"
-wget "https://raw.githubusercontent.com/k3s-io/k3s/v1.29.1%2Bk3s2/install.sh"
+wget "https://github.com/k3s-io/k3s/releases/download/v1.30.0%2Bk3s1/k3s"
+wget "https://github.com/k3s-io/k3s/releases/download/v1.30.0%2Bk3s1/k3s-airgap-images-amd64.tar.gz"
+wget "https://raw.githubusercontent.com/k3s-io/k3s/v1.30.0%2Bk3s1/install.sh"
 
 mv install.sh k3s-install.sh
 
 ls -lah
 
-oras push ghcr.io/githedgehog/k3s:v1.29.1-k3s2 k3s*
+oras push ghcr.io/githedgehog/k3s:v1.30.0-k3s1 k3s*
 ```
 
-`VERSION` is the version of the K3s with `+` replaced with `-`. E.g. `1.29.1-k3s1`
+Where the version of the K3s with `+` is replaced with `-`. E.g. `1.30.0-k3s1`
+
+### K9s
+
+```bash
+wget https://github.com/derailed/k9s/releases/download/v0.32.4/k9s_Linux_amd64.tar.gz
+tar -xzvf k9s_Linux_amd64.tar.gz
+
+oras push ghcr.io/githedgehog/fabricator/k9s:v0.32.4 k9s
+```
+
 
 ### Grafana Alloy
 

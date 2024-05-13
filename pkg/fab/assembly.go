@@ -66,7 +66,7 @@ var (
 	RefTargetInCluster = RefTarget
 
 	// K3s
-	RefK3s = cnc.Ref{Name: "k3s", Tag: "v1.29.1-k3s2"}
+	RefK3s = cnc.Ref{Name: "k3s", Tag: "v1.30.0-k3s1"}
 
 	// Zot
 	RefZot            = cnc.Ref{Name: "zot", Tag: "v1.4.3"}
@@ -172,7 +172,7 @@ var (
 	RefControlProxyChart     = cnc.Ref{Name: "fabric/charts/fabric-proxy"}
 
 	// Misc
-	RefK9s       = cnc.Ref{Name: "fabricator/k9s", Tag: "v0.31.7"}
+	RefK9s       = cnc.Ref{Name: "fabricator/k9s", Tag: "v0.32.4"}
 	RefRBACProxy = cnc.Ref{Name: "fabricator/kube-rbac-proxy", Tag: "v0.14.1"}
 	RefToolbox   = cnc.Ref{Name: "fabricator/toolbox", Tag: "latest"}
 
@@ -191,7 +191,7 @@ var (
 
 	// VLAB
 	RefVLABONIE       = cnc.Ref{Name: "honie", Tag: "lldp"}
-	RefVLABFlarcar    = cnc.Ref{Name: "flatcar", Tag: "3760.2.0"}
+	RefVLABFlarcar    = cnc.Ref{Name: "flatcar", Tag: "3815.2.2"}
 	RefVLABEEPROMEdit = cnc.Ref{Name: "onie-qcow2-eeprom-edit", Tag: "latest"}
 )
 
