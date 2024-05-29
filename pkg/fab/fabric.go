@@ -129,9 +129,6 @@ func (cfg *Fabric) Hydrate(_ cnc.Preset, _ meta.FabricMode) error {
 	}
 
 	cfg.Alloy.Default()
-	if err := cfg.Alloy.Validate(); err != nil {
-		return errors.Wrap(err, "error validating alloy config")
-	}
 
 	return nil
 }
@@ -173,6 +170,7 @@ func (cfg *Fabric) buildFabricConfig(fabricMode meta.FabricMode, get cnc.GetComp
 		Alloy:                 cfg.Alloy,
 		AlloyRepo:             target.Fallback(cfg.AlloyRef).RepoName(),
 		AlloyVersion:          target.Fallback(cfg.AlloyRef).Tag,
+		DefaultMaxPathsEBGP:   64,
 	}
 }
 
@@ -181,6 +179,10 @@ func (cfg *Fabric) Validate(_ string, _ cnc.Preset, fabricMode meta.FabricMode, 
 
 	if err := wiringlib.ValidateFabric(context.TODO(), wiring.Native, fabricCfg); err != nil {
 		return errors.Wrapf(err, "error validating wiring")
+	}
+
+	if err := cfg.Alloy.Validate(); err != nil {
+		return errors.Wrap(err, "error validating alloy config")
 	}
 
 	return nil
