@@ -261,7 +261,7 @@ func Hydrate(data *wiring.Data, cfg *HydrateConfig) error {
 					CommunityIn:  fmt.Sprintf("%d:%d", VirtualEdgeASN, borderSw.Spec.ASN),
 					CommunityOut: fmt.Sprintf("%d:%d", borderSw.Spec.ASN, VirtualEdgeASN),
 					NeighborIP:   fmt.Sprintf("%s.%d.%d", cfg.Subnet, VirtualEdgeIPNet, 1),
-					IfName:       "Ethernet1",
+					IfName:       "E1/2",
 					IfVlan:       "200",
 					IfIP:         fmt.Sprintf("%s.%d.%d/24", cfg.Subnet, VirtualEdgeIPNet, leaf+LeafOffset),
 				}
