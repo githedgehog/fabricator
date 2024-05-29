@@ -25,43 +25,35 @@ func Test_portIdForName(t *testing.T) {
 		error  bool
 	}{
 		{
-			port:   "Management0",
-			result: 0,
-		},
-		{
-			port:  "Management1",
-			error: true,
-		},
-		{
-			port:  "ManagementX",
-			error: true,
-		},
-		{
-			port:  "Management",
-			error: true,
-		},
-		{
-			port:   "Ethernet0",
-			result: 1,
-		},
-		{
-			port:   "Ethernet1",
-			result: 2,
-		},
-		{
-			port:  "EthernetX",
-			error: true,
-		},
-		{
-			port:  "Ethernet",
-			error: true,
-		},
-		{
 			port:  "unsupported",
 			error: true,
 		},
 		{
 			port:  "",
+			error: true,
+		},
+		{
+			port:  "M0",
+			error: true,
+		},
+		{
+			port:   "M1",
+			result: 0,
+		},
+		{
+			port:  "M2",
+			error: true,
+		},
+		{
+			port:   "E1/1",
+			result: 1,
+		},
+		{
+			port:   "E1/2",
+			result: 2,
+		},
+		{
+			port:  "E2/1",
 			error: true,
 		},
 	}

@@ -498,13 +498,13 @@ func sshPortFor(vmID int) int {
 }
 
 func portIDForName(name string) (int, error) {
-	if strings.HasPrefix(name, "Management0") {
+	if name == "M1" {
 		return 0, nil
-	} else if strings.HasPrefix(name, "Ethernet") { // sonic interface naming is straighforward
-		port, _ := strings.CutPrefix(name, "Ethernet")
+	} else if strings.HasPrefix(name, "E1/") { // hedgehog port names
+		port, _ := strings.CutPrefix(name, "E1/")
 		idx, err := strconv.Atoi(port)
 
-		return idx + 1, errors.Wrapf(err, "error converting port name '%s' to port id", name)
+		return idx, errors.Wrapf(err, "error converting port name '%s' to port id", name)
 	} else if strings.HasPrefix(name, "port") { // just for simplicity to not try to guess port names on servers
 		port, _ := strings.CutPrefix(name, "port")
 		idx, err := strconv.Atoi(port)

@@ -123,8 +123,8 @@ func readConfigFromWiring(data *wiring.Data) (*Config, error) {
 				swCfg.Serial = value
 			} else if strings.HasPrefix(key, HHFabCfgLinkPrefix) {
 				port := key[len(HHFabCfgLinkPrefix):]
-				if !strings.HasPrefix(port, "Management0") && !strings.HasPrefix(port, "Ethernet") {
-					return nil, errors.Errorf("unknown link type for switch %s port %s (only Management0 and EthernetX supported)", sw.Name, port)
+				if port != "M1" && !strings.HasPrefix(port, "E1/") {
+					return nil, errors.Errorf("unknown link type for switch %s port %s (only M1 and E1/X supported)", sw.Name, port)
 				}
 				if !strings.HasPrefix(value, HHFabCfgPCIPrefix) {
 					return nil, errors.Errorf("unknown link PCI address %s for switch %s port %s", value, sw.Name, port)

@@ -681,7 +681,7 @@ func (b *Builder) Build() (*wiring.Data, error) {
 
 func (b *Builder) nextSwitchPort(switchName string) string {
 	ifaceID := b.ifaceTracker[switchName]
-	portName := fmt.Sprintf("%s/Ethernet%d", switchName, ifaceID)
+	portName := fmt.Sprintf("%s/E1/%d", switchName, ifaceID+1)
 
 	offset := 1
 	if ifaceID >= 48 {
@@ -733,7 +733,7 @@ func (b *Builder) createSwitchGroup(name string) (*wiringapi.SwitchGroup, error)
 }
 
 func (b *Builder) createSwitch(name string, spec wiringapi.SwitchSpec) (*wiringapi.Switch, error) { //nolint:unparam
-	spec.Profile = "vs" // TODO temp hack
+	spec.Profile = meta.SwitchProfileVS
 
 	sw := &wiringapi.Switch{
 		TypeMeta: metav1.TypeMeta{
@@ -802,7 +802,7 @@ func (b *Builder) createManagementConnection(switchName string) (*wiringapi.Conn
 					BasePortName: wiringapi.BasePortName{Port: b.nextControlPort(Control)},
 				},
 				Switch: wiringapi.ConnMgmtLinkSwitch{
-					BasePortName: wiringapi.BasePortName{Port: fmt.Sprintf("%s/Management0", switchName)},
+					BasePortName: wiringapi.BasePortName{Port: fmt.Sprintf("%s/M1", switchName)},
 					ONIEPortName: "eth0",
 				},
 			},
