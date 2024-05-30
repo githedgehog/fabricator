@@ -167,7 +167,7 @@ var (
 	RefFabricDHCPServerChart = cnc.Ref{Name: "fabric/charts/fabric-dhcp-server"}
 	RefFabricDHCPD           = cnc.Ref{Name: "fabric/fabric-dhcpd"}
 	RefFabricDHCPDChart      = cnc.Ref{Name: "fabric/charts/fabric-dhcpd"}
-	RefAlloy                 = cnc.Ref{Name: "fabric/alloy", Tag: "v1.0.0"}
+	RefAlloy                 = cnc.Ref{Name: "fabric/alloy", Tag: "v1.1.1"}
 	RefControlProxy          = cnc.Ref{Name: "fabric/fabric-proxy", Tag: "1.9.1"}
 	RefControlProxyChart     = cnc.Ref{Name: "fabric/charts/fabric-proxy"}
 
