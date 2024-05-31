@@ -586,8 +586,8 @@ github.com/yuin/goldmark v1.2.1/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9dec
 github.com/yuin/goldmark v1.4.13/go.mod h1:6yULJ656Px+3vBD8DxQVa3kxgyrAnzto9xy5taEt/CY=
 github.com/yusufpapurcu/wmi v1.2.4 h1:zFUKzehAFReQwLys1b/iSMl+JQGSCSjtVqQn9bBrPo0=
 github.com/yusufpapurcu/wmi v1.2.4/go.mod h1:SBZ9tNy3G9/m5Oi98Zks0QjeHVDvuK0qfxQmPyzfmi0=
-go.githedgehog.com/fabric v0.39.1 h1:zgrtZsY/hFJRHLzRu29KTcsNRuEp1x2WW9olOZUABrM=
-go.githedgehog.com/fabric v0.39.1/go.mod h1:eqDlft0eE3Z2HYkFbo9m22OaXYC5aQU5NQ+ImGBk+xo=
+go.githedgehog.com/fabric v0.39.2 h1:ND+V1A+uNDujvmlhKjjkka77v3JeG/totoNuRgxHbN4=
+go.githedgehog.com/fabric v0.39.2/go.mod h1:eqDlft0eE3Z2HYkFbo9m22OaXYC5aQU5NQ+ImGBk+xo=
 go.mongodb.org/mongo-driver v1.7.3/go.mod h1:NqaYOwnXWr5Pm7AOpO5QFxKJ503nbMse/R79oO62zWg=
 go.mongodb.org/mongo-driver v1.7.5/go.mod h1:VXEWRZ6URJIkUq2SCAyapmhH0ZLRBP+FT4xhp5Zvxng=
 go.mongodb.org/mongo-driver v1.10.0/go.mod h1:wsihk0Kdgv8Kqu1Anit4sfK+22vSFbUrAVEYRhCXrA8=
