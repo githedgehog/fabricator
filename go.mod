@@ -23,7 +23,7 @@ require (
 	github.com/shirou/gopsutil/v3 v3.24.4
 	github.com/ulikunitz/xz v0.5.11
 	github.com/urfave/cli/v2 v2.27.2
-	github.com/vbauerster/mpb/v8 v8.6.1
+	github.com/vbauerster/mpb/v8 v8.7.3
 	go.githedgehog.com/fabric v0.39.5
 	golang.org/x/crypto v0.22.0
 	golang.org/x/exp v0.0.0-20231006140011-7918f672742d
@@ -151,7 +151,7 @@ require (
 	github.com/prometheus/client_model v0.5.0 // indirect
 	github.com/prometheus/common v0.48.0 // indirect
 	github.com/prometheus/procfs v0.12.0 // indirect
-	github.com/rivo/uniseg v0.4.4 // indirect
+	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/secure-systems-lab/go-securesystemslib v0.7.0 // indirect
 	github.com/shoenig/go-m1cpu v0.1.6 // indirect
