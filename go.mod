@@ -18,7 +18,6 @@ require (
 	github.com/mholt/archiver/v4 v4.0.0-alpha.8
 	github.com/mitchellh/hashstructure/v2 v2.0.2
 	github.com/opencontainers/image-spec v1.1.0
-	github.com/oras-project/oras-credentials-go v0.4.0
 	github.com/pkg/errors v0.9.1
 	github.com/shirou/gopsutil/v3 v3.24.4
 	github.com/ulikunitz/xz v0.5.12

@@ -33,7 +33,6 @@ import (
 	"github.com/containers/image/v5/transports/alltransports"
 	"github.com/containers/image/v5/types"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	credentials "github.com/oras-project/oras-credentials-go"
 	"github.com/pkg/errors"
 	"github.com/ulikunitz/xz"
 	"github.com/vbauerster/mpb/v8"
@@ -42,6 +41,7 @@ import (
 	"oras.land/oras-go/v2/content/file"
 	"oras.land/oras-go/v2/registry/remote"
 	"oras.land/oras-go/v2/registry/remote/auth"
+	"oras.land/oras-go/v2/registry/remote/credentials"
 	"oras.land/oras-go/v2/registry/remote/retry"
 )
 
