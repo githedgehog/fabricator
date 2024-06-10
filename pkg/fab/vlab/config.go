@@ -131,9 +131,6 @@ func readConfigFromWiring(data *wiring.Data) (*Config, error) {
 				if port != "M1" && !strings.HasPrefix(port, "E1/") {
 					return nil, errors.Errorf("unknown link type for switch %s port %s (only M1 and E1_X supported)", sw.Name, port)
 				}
-				if strings.HasPrefix(port, "E1/") && strings.Index(port, "/") != strings.LastIndex(port, "/") {
-					return nil, errors.Errorf("invalid link port %s for switch %s (breakouts aren't allowed)", port, sw.Name)
-				}
 				if !strings.HasPrefix(value, HHFabCfgPCIPrefix) {
 					return nil, errors.Errorf("unknown link PCI address %s for switch %s port %s", value, sw.Name, port)
 				}
