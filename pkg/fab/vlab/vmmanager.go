@@ -387,7 +387,6 @@ func (mngr *VMManager) AddLink(local wiringapi.IPort, dest wiringapi.IPort, conn
 		return nil
 	}
 
-	destPortID := -1
 	var destVM *VM
 
 	localPortID, err := portIDForName(local.LocalPortName())
@@ -398,10 +397,6 @@ func (mngr *VMManager) AddLink(local wiringapi.IPort, dest wiringapi.IPort, conn
 	var linkCfg *LinkConfig
 
 	if dest != nil || !reflect.ValueOf(local).IsNil() {
-		destPortID, err = portIDForName(dest.LocalPortName())
-		if err != nil {
-			return err
-		}
 		destVM, exists = mngr.vms[dest.DeviceName()]
 		if !exists {
 			return errors.Errorf("dest %s does not exist for %s, conn %s", dest.DeviceName(), local.PortName(), conn)
@@ -432,6 +427,11 @@ func (mngr *VMManager) AddLink(local wiringapi.IPort, dest wiringapi.IPort, conn
 	} else if destVM.Type == VMTypeSwitchHW {
 		return errors.Errorf("pci mapping is missing for %s, conn %s", dest.PortName(), conn)
 	} else {
+		destPortID, err := portIDForName(dest.LocalPortName())
+		if err != nil {
+			return err
+		}
+
 		netdev := fmt.Sprintf("socket,udp=127.0.0.1:%d", localVM.ifacePortFor(localPortID))
 		if destVM != nil {
 			netdev += fmt.Sprintf(",localaddr=127.0.0.1:%d", destVM.ifacePortFor(destPortID))
