@@ -162,7 +162,7 @@ var (
 	RefFabricImage           = cnc.Ref{Name: "fabric/fabric"}
 	RefFabricAgent           = cnc.Ref{Name: "fabric/agent"}
 	RefFabricControlAgent    = cnc.Ref{Name: "fabric/agent"}
-	RefFabricCtl             = cnc.Ref{Name: "fabric/hhfctl"}
+	RefFabricCtl             = cnc.Ref{Name: "fabric/hhfctl", Tag: "v0.37.2"}
 	RefFabricDHCPServer      = cnc.Ref{Name: "fabric/fabric-dhcp-server"}
 	RefFabricDHCPServerChart = cnc.Ref{Name: "fabric/charts/fabric-dhcp-server"}
 	RefFabricDHCPD           = cnc.Ref{Name: "fabric/fabric-dhcpd"}
