@@ -173,6 +173,10 @@ jobs:
           - hedgehog
 
     steps:
+      - name: Runner host
+        run: |
+          echo $KUBE_NODE
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
