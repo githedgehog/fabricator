@@ -10,7 +10,7 @@ require (
 	github.com/fatih/color v1.17.0
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/go-multierror v1.1.1
-	github.com/k3s-io/helm-controller v0.16.0
+	github.com/k3s-io/helm-controller v0.16.1
 	github.com/lmittmann/tint v1.0.4
 	github.com/manifoldco/promptui v0.9.0
 	github.com/mattn/go-isatty v0.0.20
