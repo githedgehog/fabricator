@@ -23,7 +23,7 @@ require (
 	github.com/ulikunitz/xz v0.5.12
 	github.com/urfave/cli/v2 v2.27.2
 	github.com/vbauerster/mpb/v8 v8.7.3
-	go.githedgehog.com/fabric v0.39.5
+	go.githedgehog.com/fabric v0.40.0
 	golang.org/x/crypto v0.23.0
 	golang.org/x/exp v0.0.0-20240506185415-9bf2ced13842
 	golang.org/x/sync v0.7.0
