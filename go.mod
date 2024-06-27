@@ -19,7 +19,7 @@ require (
 	github.com/mitchellh/hashstructure/v2 v2.0.2
 	github.com/opencontainers/image-spec v1.1.0
 	github.com/pkg/errors v0.9.1
-	github.com/shirou/gopsutil/v3 v3.24.4
+	github.com/shirou/gopsutil/v3 v3.24.5
 	github.com/ulikunitz/xz v0.5.12
 	github.com/urfave/cli/v2 v2.27.2
 	github.com/vbauerster/mpb/v8 v8.7.3
