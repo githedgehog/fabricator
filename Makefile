@@ -1,4 +1,3 @@
-
 # Image URL to use all building/pushing image targets
 IMG ?= controller:latest
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
@@ -206,8 +205,8 @@ hhfab-all: fmt build-embed-cnc-bin ## Build hhfab CLI for all OS/ARCH
 
 .PHONY: build-embed-cnc-bin
 build-embed-cnc-bin: ## Build CNC binaries to embed into hhfab
-	touch pkg/fab/cnc/bin/hhfab-recipe
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o pkg/fab/cnc/bin/hhfab-recipe -ldflags="-w -s -X main.version=$(VERSION)" $(GOFLAGS) ./cmd/hhfab-recipe
+	touch ~/.hhfab/cnc/bin/hhfab-recipe
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o ~/.hhfab/cnc/bin/hhfab-recipe -ldflags="-w -s -X main.version=$(VERSION)" $(GOFLAGS) ./cmd/hhfab-recipe
 
 .PHONY: build
 build: hhfab
