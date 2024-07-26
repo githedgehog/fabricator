@@ -67,6 +67,8 @@ type Fabric struct {
 
 var _ cnc.Component = (*Fabric)(nil)
 
+var conflictedUsernames = []string{"hhagent", "operator", "netops"}
+
 func (cfg *Fabric) Name() string {
 	return "fabric"
 }
@@ -356,6 +358,9 @@ func (cfg *Fabric) Build(_ string, _ cnc.Preset, fabricMode meta.FabricMode, get
 			admin = true
 
 			break
+		}
+		if conflictedUserNames.Containes(user.Name) {
+			return errors.New("Username %v is not allowed", user.Name)
 		}
 	}
 	if !admin {
