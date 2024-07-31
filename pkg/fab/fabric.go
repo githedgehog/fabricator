@@ -26,6 +26,8 @@ import (
 	"github.com/pkg/errors"
 	"github.com/urfave/cli/v2"
 	"go.githedgehog.com/fabric/api/meta"
+	"go.githedgehog.com/fabric/pkg/agent/alloy"
+	"go.githedgehog.com/fabric/pkg/agent/dozer/bcm"
 	wiringlib "go.githedgehog.com/fabric/pkg/wiring"
 	"go.githedgehog.com/fabricator/pkg/fab/cnc"
 )
@@ -183,6 +185,72 @@ func (cfg *Fabric) Validate(_ string, _ cnc.Preset, fabricMode meta.FabricMode, 
 
 	if err := cfg.Alloy.Validate(); err != nil {
 		return errors.Wrap(err, "error validating alloy config")
+	}
+
+	for _, user := range cfg.SwitchUsers {
+		if slices.Contains([]string{
+			"root",
+			"daemon",
+			"bin",
+			"sys",
+			"adm",
+			"tty",
+			"disk",
+			"lp",
+			"mail",
+			"news",
+			"uucp",
+			"man",
+			"proxy",
+			"kmem",
+			"dialout",
+			"fax",
+			"voice",
+			"cdrom",
+			"floppy",
+			"tape",
+			"sudo",
+			"audio",
+			"dip",
+			"www-data",
+			"backup",
+			"operator",
+			"list",
+			"irc",
+			"src",
+			"gnats",
+			"shadow",
+			"utmp",
+			"video",
+			"sasl",
+			"plugdev",
+			"staff",
+			"games",
+			"users",
+			"nogroup",
+			"systemd-journal",
+			"systemd-timesync",
+			"systemd-network",
+			"systemd-resolve",
+			"docker",
+			"redis",
+			"netadmin",
+			"secadmin",
+			"messagebus",
+			"input",
+			"kvm",
+			"render",
+			"crontab",
+			"i2c",
+			"ssh",
+			"systemd-coredump",
+			"ntp",
+			"frr",
+			bcm.AgentUser,
+			alloy.UserName,
+		}, user.Name) {
+			return errors.Errorf("switch user can't be named %q", user.Name)
+		}
 	}
 
 	return nil
