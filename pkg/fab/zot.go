@@ -66,7 +66,7 @@ func (cfg *Zot) Hydrate(_ cnc.Preset, _ meta.FabricMode) error {
 	}
 
 	err = cfg.TLS.Server.Ensure(OCIRepoServerCN, &cfg.TLS.CA, KeyUsageServer, nil,
-		[]string{ControlVIP}, []string{"registry.local", "registry.default", "registry.default.svc.cluster.local"})
+		[]string{ControlVIP}, []string{"registry.default", "registry.default.svc.cluster.local"})
 	if err != nil {
 		return errors.Wrap(err, "error ensuring OCI Repo Certs")
 	}

@@ -64,7 +64,7 @@ storage:
     - path: /etc/hosts
       append:
         - inline: |
-            127.0.0.1 {{ .hostname }} registry.local
+            127.0.0.1 {{ .hostname }}
 
     # Loopback with Control VIP for initial setup
     - path: /etc/systemd/network/00-hh-0-init--loopback.network
