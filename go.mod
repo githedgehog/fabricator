@@ -5,7 +5,7 @@ go 1.22.0
 require (
 	github.com/Masterminds/sprig v2.22.0+incompatible
 	github.com/containers/image/v5 v5.31.0
-	github.com/coreos/butane v0.18.0
+	github.com/coreos/butane v0.21.0
 	github.com/dustin/go-humanize v1.0.1
 	github.com/fatih/color v1.17.0
 	github.com/google/uuid v1.6.0
@@ -97,7 +97,7 @@ require (
 	github.com/coreos/go-json v0.0.0-20230131223807-18775e0fb4fb // indirect
 	github.com/coreos/go-semver v0.3.1 // indirect
 	github.com/coreos/go-systemd/v22 v22.5.0 // indirect
-	github.com/coreos/ignition/v2 v2.15.0 // indirect
+	github.com/coreos/ignition/v2 v2.18.0 // indirect
 	github.com/coreos/vcontext v0.0.0-20230201181013-d72178a18687 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.4 // indirect
 	github.com/cyberphone/json-canonicalization v0.0.0-20231217050601-ba74d44ecf5f // indirect
