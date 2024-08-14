@@ -156,13 +156,13 @@ var (
 	}
 
 	// Fabric
-	RefFabricVersion         = cnc.Ref{Tag: "v0.42.0"}
+	RefFabricVersion         = cnc.Ref{Tag: "v0.42.1"}
 	RefFabricAPIChart        = cnc.Ref{Name: "fabric/charts/fabric-api"}
 	RefFabricChart           = cnc.Ref{Name: "fabric/charts/fabric"}
 	RefFabricImage           = cnc.Ref{Name: "fabric/fabric"}
 	RefFabricAgent           = cnc.Ref{Name: "fabric/agent"}
 	RefFabricControlAgent    = cnc.Ref{Name: "fabric/agent"}
-	RefFabricCtl             = cnc.Ref{Name: "fabric/hhfctl", Tag: "v0.40.3"}
+	RefFabricCtl             = cnc.Ref{Name: "fabric/hhfctl"}
 	RefFabricDHCPServer      = cnc.Ref{Name: "fabric/fabric-dhcp-server"}
 	RefFabricDHCPServerChart = cnc.Ref{Name: "fabric/charts/fabric-dhcp-server"}
 	RefFabricDHCPD           = cnc.Ref{Name: "fabric/fabric-dhcpd"}
