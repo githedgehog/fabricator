@@ -164,11 +164,11 @@ func (cfg *Fabric) buildFabricConfig(fabricMode meta.FabricMode, get cnc.GetComp
 		DHCPDConfigKey:        "dhcpd.conf",
 		FabricMode:            fabricMode,
 		BaseVPCCommunity:      cfg.BaseVPCCommunity,
-		VPCLoopbackSubnet:     "172.30.240.0/20", // TODO make configurable
-		FabricMTU:             9100,              // TODO make configurable
-		ServerFacingMTUOffset: uint16(cfg.ServerFacingMTUOffset),
-		ESLAGMACBase:          "f2:00:00:00:00:00", // TODO make configurable
-		ESLAGESIPrefix:        "00:f2:00:00:",      // TODO make configurable
+		VPCLoopbackSubnet:     "172.30.240.0/20",                 // TODO make configurable
+		FabricMTU:             9100,                              // TODO make configurable
+		ServerFacingMTUOffset: uint16(cfg.ServerFacingMTUOffset), //nolint:gosec
+		ESLAGMACBase:          "f2:00:00:00:00:00",               // TODO make configurable
+		ESLAGESIPrefix:        "00:f2:00:00:",                    // TODO make configurable
 		Alloy:                 cfg.Alloy,
 		AlloyRepo:             target.Fallback(cfg.AlloyRef).RepoName(),
 		AlloyVersion:          target.Fallback(cfg.AlloyRef).Tag,

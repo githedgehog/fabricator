@@ -120,7 +120,7 @@ func createExternalAttachment(e agentapi.VirtualEdgeConfig, data *wiring.Data, c
 			External:   "virtual-edge",
 			Connection: conn,
 			Switch: vpcapi.ExternalAttachmentSwitch{
-				VLAN: uint16(vlan),
+				VLAN: uint16(vlan), //nolint:gosec
 				IP:   fmt.Sprintf("%s/24", e.NeighborIP),
 			},
 			Neighbor: vpcapi.ExternalAttachmentNeighbor{
@@ -229,7 +229,7 @@ func Hydrate(data *wiring.Data, cfg *HydrateConfig) error {
 			spine++
 		}
 		if sw.Spec.Role.IsLeaf() {
-			sw.Spec.ASN = cfg.LeafASNStart + uint32(leaf)
+			sw.Spec.ASN = cfg.LeafASNStart + uint32(leaf) //nolint:gosec
 			sw.Spec.IP = fmt.Sprintf("%s.%d.%d/32", cfg.Subnet, SwitchIPNet, leaf+LeafOffset)
 			sw.Spec.ProtocolIP = fmt.Sprintf("%s.%d.%d/32", cfg.Subnet, ProtocolIPNet, leaf+LeafOffset)
 			sw.Spec.VTEPIP = fmt.Sprintf("%s.%d.%d/32", cfg.Subnet, VTEPIPNet, leaf+LeafOffset)

@@ -111,7 +111,7 @@ func (cfg *Zot) Build(_ string, _ cnc.Preset, _ meta.FabricMode, get cnc.GetComp
 						{
 							Name:       "zot",
 							Port:       5000,
-							NodePort:   int32(ZotNodePort),
+							NodePort:   int32(ZotNodePort), //nolint:gosec
 							TargetPort: intstr.FromString("zot"),
 							Protocol:   core.ProtocolTCP,
 						},

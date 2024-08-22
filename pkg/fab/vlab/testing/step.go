@@ -324,7 +324,7 @@ func (s *StepTestConnectivity) testServerReachable(ctx context.Context, h StepHe
 
 	cmd := fmt.Sprintf("ping -c %d -W 1 %s", s.PingCount, targetIP) // TODO timeout
 
-	out, err := h.ServerExec(ctx, source, cmd, time.Duration(s.PingCount+5)*time.Second) // TODO timeout
+	out, err := h.ServerExec(ctx, source, cmd, time.Duration(s.PingCount+5)*time.Second) //nolint:gosec // TODO timeout
 
 	pingOk := err == nil && strings.Contains(out, "0% packet loss")
 	if expectedReachable && !pingOk {
@@ -351,7 +351,7 @@ func (s *StepTestConnectivity) testServerReachable(ctx context.Context, h StepHe
 
 	g.Go(func() error {
 		cmd := fmt.Sprintf("toolbox -q timeout -v %d iperf3 -s -1", s.IPerfSeconds+17)
-		out, err := h.ServerExec(ctx, target, cmd, time.Duration(s.IPerfSeconds+20)*time.Second) // TODO timeout
+		out, err := h.ServerExec(ctx, target, cmd, time.Duration(s.IPerfSeconds+20)*time.Second) //nolint:gosec // TODO timeout
 		if err != nil {
 			return errors.Wrapf(err, "error starting iperf server with cmd %q: %s", cmd, out)
 		}
@@ -363,7 +363,7 @@ func (s *StepTestConnectivity) testServerReachable(ctx context.Context, h StepHe
 		time.Sleep(2 * time.Second) // TODO think about more reliable way to wait for server to start
 
 		cmd = fmt.Sprintf("toolbox -q timeout -v %d iperf3 -J -c %s -t %d", s.IPerfSeconds+5, targetIP, s.IPerfSeconds)
-		out, err := h.ServerExec(ctx, source, cmd, time.Duration(s.IPerfSeconds+10)*time.Second) // TODO timeout
+		out, err := h.ServerExec(ctx, source, cmd, time.Duration(s.IPerfSeconds+10)*time.Second) //nolint:gosec // TODO timeout
 		if err != nil {
 			return errors.Wrapf(err, "error running iperf client with cmd %q: %s", cmd, out)
 		}
