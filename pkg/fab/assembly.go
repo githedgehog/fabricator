@@ -133,9 +133,9 @@ var (
 	}
 
 	// SONiC
-	RefSonicBCMBase   = cnc.Ref{Name: "sonic-bcom-private", Tag: "base-bin-4.2.0"}
-	RefSonicBCMCampus = cnc.Ref{Name: "sonic-bcom-private", Tag: "campus-bin-4.2.0"}
-	RefSonicBCMVS     = cnc.Ref{Name: "sonic-bcom-private", Tag: "vs-bin-4.2.0"}
+	RefSonicBCMBase   = cnc.Ref{Name: "sonic-bcom-private", Tag: "base-bin-4.4.0"}
+	RefSonicBCMCampus = cnc.Ref{Name: "sonic-bcom-private", Tag: "campus-bin-4.4.0"}
+	RefSonicBCMVS     = cnc.Ref{Name: "sonic-bcom-private", Tag: "vs-bin-4.4.0"}
 
 	RefSonicTargetVersion = cnc.Ref{Tag: "latest"}
 	RefSonicTargetsBase   = []cnc.Ref{
@@ -156,7 +156,7 @@ var (
 	}
 
 	// Fabric
-	RefFabricVersion         = cnc.Ref{Tag: "v0.42.1"}
+	RefFabricVersion         = cnc.Ref{Tag: "v0.44.0"}
 	RefFabricAPIChart        = cnc.Ref{Name: "fabric/charts/fabric-api"}
 	RefFabricChart           = cnc.Ref{Name: "fabric/charts/fabric"}
 	RefFabricImage           = cnc.Ref{Name: "fabric/fabric"}
