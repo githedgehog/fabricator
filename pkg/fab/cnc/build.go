@@ -494,7 +494,7 @@ func copyOCI(from, to string, insecureSource bool) error {
 			} else if p.Event == types.ProgressEventSkipped { //nolint:revive
 				// bars[digest].SetCurrent(p.Artifact.Size)
 			} else {
-				bars[digest].EwmaIncrInt64(int64(p.OffsetUpdate), time.Since(barStart[digest]))
+				bars[digest].EwmaIncrInt64(int64(p.OffsetUpdate), time.Since(barStart[digest])) //nolint:gosec
 			}
 
 			barStart[digest] = time.Now()

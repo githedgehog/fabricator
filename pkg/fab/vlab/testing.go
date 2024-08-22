@@ -190,7 +190,7 @@ func (svc *Service) SetupVPCs(ctx context.Context, cfg SetupVPCsConfig) error {
 
 		slog.Info("Enforcing VPC + Attachment for server...", "vpc", vpcName, "server", server.Name, "conn", conn.Name)
 
-		vlan := uint16(1000 + idx)
+		vlan := uint16(1000 + idx) //nolint:gosec
 
 		ip := slices.Clone(ipNet.IP.To4())
 		ip[2] += byte(idx)
@@ -659,7 +659,7 @@ serverLoop:
 					cmd := fmt.Sprintf("ping -c %d -W 1 %s", cfg.VPCPing, servers[vpcPeer].IP)
 					slog.Debug("Testing connectivity using ping", "from", name, "to", vpcPeer, "connected", peerConnected, "cmd", cmd)
 
-					out, err := svc.ssh(ctx, server, cmd, int64(cfg.VPCPing)+5)
+					out, err := svc.ssh(ctx, server, cmd, int64(cfg.VPCPing)+5) //nolint:gosec
 
 					failed := false
 					if peerConnected && err != nil {
@@ -709,7 +709,7 @@ serverLoop:
 						slog.Debug("Starting iperf server", "host", vpcPeer, "cmd", cmd)
 
 						// TODO use Cmd directly to start but not wait for it to finish
-						out, err := svc.ssh(ctx, servers[vpcPeer], cmd, int64(cfg.VPCIperf)+10)
+						out, err := svc.ssh(ctx, servers[vpcPeer], cmd, int64(cfg.VPCIperf)+10) //nolint:gosec
 						if err != nil {
 							passed = false
 
@@ -731,7 +731,7 @@ serverLoop:
 
 						time.Sleep(2 * time.Second) // TODO think about more reliable way to wait for server to start
 
-						out, err := svc.ssh(ctx, server, cmd, int64(cfg.VPCIperf)+10)
+						out, err := svc.ssh(ctx, server, cmd, int64(cfg.VPCIperf)+10) //nolint:gosec
 						if err != nil {
 							passed = false
 

@@ -43,11 +43,11 @@ linters:
     - errname
     - errorlint
     - exhaustive
-    - exportloopref
+    - copyloopvar
     - ginkgolinter
     - gocheckcompilerdirectives
     - goconst
-    - goerr113
+    - err113
     - gofmt
     - gosec
     - loggercheck

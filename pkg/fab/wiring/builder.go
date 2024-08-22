@@ -298,7 +298,7 @@ func (b *Builder) Build() (*wiring.Data, error) {
 			return nil, err
 		}
 
-		for i := 0; i < int(b.MCLAGServers); i++ {
+		for i := 0; i < int(b.MCLAGServers); i++ { //nolint:gosec
 			serverName := fmt.Sprintf("server-%02d", serverID)
 
 			if _, err := b.createServer(serverName, wiringapi.ServerSpec{
@@ -327,7 +327,7 @@ func (b *Builder) Build() (*wiring.Data, error) {
 			serverID++
 		}
 
-		for i := 0; i < int(b.UnbundledServers); i++ {
+		for i := 0; i < int(b.UnbundledServers); i++ { //nolint:gosec
 			serverName := fmt.Sprintf("server-%02d", serverID)
 
 			if _, err := b.createServer(serverName, wiringapi.ServerSpec{
@@ -350,7 +350,7 @@ func (b *Builder) Build() (*wiring.Data, error) {
 			serverID++
 		}
 
-		for i := 0; i < int(b.BundledServers); i++ {
+		for i := 0; i < int(b.BundledServers); i++ { //nolint:gosec
 			serverName := fmt.Sprintf("server-%02d", serverID)
 
 			if _, err := b.createServer(serverName, wiringapi.ServerSpec{
@@ -418,7 +418,7 @@ func (b *Builder) Build() (*wiring.Data, error) {
 		switchID += leafs
 		leafID += leafs
 
-		for i := 0; i < int(b.ESLAGServers); i++ {
+		for i := 0; i < int(b.ESLAGServers); i++ { //nolint:gosec
 			serverName := fmt.Sprintf("server-%02d", serverID)
 
 			leafNamesStr := strings.Join(leafNames, " ")
@@ -447,7 +447,7 @@ func (b *Builder) Build() (*wiring.Data, error) {
 			serverID++
 		}
 
-		for i := 0; i < int(b.UnbundledServers); i++ {
+		for i := 0; i < int(b.UnbundledServers); i++ { //nolint:gosec
 			serverName := fmt.Sprintf("server-%02d", serverID)
 
 			if _, err := b.createServer(serverName, wiringapi.ServerSpec{
@@ -471,7 +471,7 @@ func (b *Builder) Build() (*wiring.Data, error) {
 		}
 
 		if leafs > 1 {
-			for i := 0; i < int(b.BundledServers); i++ {
+			for i := 0; i < int(b.BundledServers); i++ { //nolint:gosec
 				serverName := fmt.Sprintf("server-%02d", serverID)
 
 				if _, err := b.createServer(serverName, wiringapi.ServerSpec{
@@ -525,7 +525,7 @@ func (b *Builder) Build() (*wiring.Data, error) {
 		switchID++
 		leafID++
 
-		for i := 0; i < int(b.UnbundledServers); i++ {
+		for i := 0; i < int(b.UnbundledServers); i++ { //nolint:gosec
 			serverName := fmt.Sprintf("server-%02d", serverID)
 
 			if _, err := b.createServer(serverName, wiringapi.ServerSpec{
@@ -548,7 +548,7 @@ func (b *Builder) Build() (*wiring.Data, error) {
 			serverID++
 		}
 
-		for i := 0; i < int(b.BundledServers); i++ {
+		for i := 0; i < int(b.BundledServers); i++ { //nolint:gosec
 			serverName := fmt.Sprintf("server-%02d", serverID)
 
 			if _, err := b.createServer(serverName, wiringapi.ServerSpec{
