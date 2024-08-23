@@ -133,8 +133,8 @@ func (b *Builder) Build() (*wiring.Data, error) {
 				return nil, errors.Errorf("ESLAG leaf group must have 2-4 leafs")
 			}
 
-			totalESLAGLeafs += uint8(leafs)
-			eslagLeafGroups = append(eslagLeafGroups, uint8(leafs))
+			totalESLAGLeafs += uint8(leafs)                         //nolint:gosec
+			eslagLeafGroups = append(eslagLeafGroups, uint8(leafs)) //nolint:gosec
 		}
 	}
 
@@ -298,7 +298,7 @@ func (b *Builder) Build() (*wiring.Data, error) {
 			return nil, err
 		}
 
-		for i := 0; i < int(b.MCLAGServers); i++ { //nolint:gosec
+		for i := 0; i < int(b.MCLAGServers); i++ {
 			serverName := fmt.Sprintf("server-%02d", serverID)
 
 			if _, err := b.createServer(serverName, wiringapi.ServerSpec{
@@ -327,7 +327,7 @@ func (b *Builder) Build() (*wiring.Data, error) {
 			serverID++
 		}
 
-		for i := 0; i < int(b.UnbundledServers); i++ { //nolint:gosec
+		for i := 0; i < int(b.UnbundledServers); i++ {
 			serverName := fmt.Sprintf("server-%02d", serverID)
 
 			if _, err := b.createServer(serverName, wiringapi.ServerSpec{
@@ -350,7 +350,7 @@ func (b *Builder) Build() (*wiring.Data, error) {
 			serverID++
 		}
 
-		for i := 0; i < int(b.BundledServers); i++ { //nolint:gosec
+		for i := 0; i < int(b.BundledServers); i++ {
 			serverName := fmt.Sprintf("server-%02d", serverID)
 
 			if _, err := b.createServer(serverName, wiringapi.ServerSpec{
@@ -380,7 +380,7 @@ func (b *Builder) Build() (*wiring.Data, error) {
 		}
 	}
 
-	for eslagID := uint8(0); eslagID < uint8(len(eslagLeafGroups)); eslagID++ {
+	for eslagID := uint8(0); eslagID < uint8(len(eslagLeafGroups)); eslagID++ { //nolint:gosec
 		sg := fmt.Sprintf("eslag-%d", eslagID+1)
 		if _, err := b.createSwitchGroup(sg); err != nil {
 			return nil, err
@@ -418,7 +418,7 @@ func (b *Builder) Build() (*wiring.Data, error) {
 		switchID += leafs
 		leafID += leafs
 
-		for i := 0; i < int(b.ESLAGServers); i++ { //nolint:gosec
+		for i := 0; i < int(b.ESLAGServers); i++ {
 			serverName := fmt.Sprintf("server-%02d", serverID)
 
 			leafNamesStr := strings.Join(leafNames, " ")
@@ -447,7 +447,7 @@ func (b *Builder) Build() (*wiring.Data, error) {
 			serverID++
 		}
 
-		for i := 0; i < int(b.UnbundledServers); i++ { //nolint:gosec
+		for i := 0; i < int(b.UnbundledServers); i++ {
 			serverName := fmt.Sprintf("server-%02d", serverID)
 
 			if _, err := b.createServer(serverName, wiringapi.ServerSpec{
@@ -471,7 +471,7 @@ func (b *Builder) Build() (*wiring.Data, error) {
 		}
 
 		if leafs > 1 {
-			for i := 0; i < int(b.BundledServers); i++ { //nolint:gosec
+			for i := 0; i < int(b.BundledServers); i++ {
 				serverName := fmt.Sprintf("server-%02d", serverID)
 
 				if _, err := b.createServer(serverName, wiringapi.ServerSpec{
@@ -525,7 +525,7 @@ func (b *Builder) Build() (*wiring.Data, error) {
 		switchID++
 		leafID++
 
-		for i := 0; i < int(b.UnbundledServers); i++ { //nolint:gosec
+		for i := 0; i < int(b.UnbundledServers); i++ {
 			serverName := fmt.Sprintf("server-%02d", serverID)
 
 			if _, err := b.createServer(serverName, wiringapi.ServerSpec{
@@ -548,7 +548,7 @@ func (b *Builder) Build() (*wiring.Data, error) {
 			serverID++
 		}
 
-		for i := 0; i < int(b.BundledServers); i++ { //nolint:gosec
+		for i := 0; i < int(b.BundledServers); i++ {
 			serverName := fmt.Sprintf("server-%02d", serverID)
 
 			if _, err := b.createServer(serverName, wiringapi.ServerSpec{
@@ -687,7 +687,7 @@ func (b *Builder) nextSwitchPort(switchName string) string {
 	if ifaceID >= 48 {
 		offset = 4
 	}
-	ifaceID += uint8(offset)
+	ifaceID += uint8(offset) //nolint:gosec
 
 	if ifaceID > 76 {
 		slog.Error("Too many interfaces for switch", "switch", switchName)

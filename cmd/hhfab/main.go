@@ -291,19 +291,19 @@ func main() {
 						FabricMode:        meta.FabricMode(fabricMode),
 						ChainControlLink:  wgChainControlLink,
 						External:          wgExternal,
-						ControlLinksCount: uint8(wgControlLinksCount),
-						SpinesCount:       uint8(wgSpinesCount),
-						FabricLinksCount:  uint8(wgFabricLinksCount),
-						MCLAGLeafsCount:   uint8(wgMCLAGLeafsCount),
+						ControlLinksCount: uint8(wgControlLinksCount), //nolint:gosec
+						SpinesCount:       uint8(wgSpinesCount),       //nolint:gosec
+						FabricLinksCount:  uint8(wgFabricLinksCount),  //nolint:gosec
+						MCLAGLeafsCount:   uint8(wgMCLAGLeafsCount),   //nolint:gosec
 						ESLAGLeafGroups:   wgESLAGLeafGroups,
-						OrphanLeafsCount:  uint8(wgOrphanLeafsCount),
-						MCLAGSessionLinks: uint8(wgMCLAGSessionLinks),
-						MCLAGPeerLinks:    uint8(wgMCLAGPeerLinks),
-						VPCLoopbacks:      uint8(wgVPCLoopbacks),
-						MCLAGServers:      uint8(wgMCLAGServers),
-						ESLAGServers:      uint8(wgESLAGServers),
-						UnbundledServers:  uint8(wgUnbundledServers),
-						BundledServers:    uint8(wgBundledServers),
+						OrphanLeafsCount:  uint8(wgOrphanLeafsCount),  //nolint:gosec
+						MCLAGSessionLinks: uint8(wgMCLAGSessionLinks), //nolint:gosec
+						MCLAGPeerLinks:    uint8(wgMCLAGPeerLinks),    //nolint:gosec
+						VPCLoopbacks:      uint8(wgVPCLoopbacks),      //nolint:gosec
+						MCLAGServers:      uint8(wgMCLAGServers),      //nolint:gosec
+						ESLAGServers:      uint8(wgESLAGServers),      //nolint:gosec
+						UnbundledServers:  uint8(wgUnbundledServers),  //nolint:gosec
+						BundledServers:    uint8(wgBundledServers),    //nolint:gosec
 					}
 					err := mngr.Init(basedir, fromConfig, cnc.Preset(preset), meta.FabricMode(fabricMode), wiringPath.Value(), wiringGen, hydrate)
 					if err != nil {
@@ -847,19 +847,19 @@ func main() {
 							data, err := (&wiring.Builder{
 								FabricMode:        meta.FabricMode(fabricMode),
 								ChainControlLink:  wgChainControlLink,
-								ControlLinksCount: uint8(wgControlLinksCount),
-								SpinesCount:       uint8(wgSpinesCount),
-								FabricLinksCount:  uint8(wgFabricLinksCount),
-								MCLAGLeafsCount:   uint8(wgMCLAGLeafsCount),
+								ControlLinksCount: uint8(wgControlLinksCount), //nolint:gosec
+								SpinesCount:       uint8(wgSpinesCount),       //nolint:gosec
+								FabricLinksCount:  uint8(wgFabricLinksCount),  //nolint:gosec
+								MCLAGLeafsCount:   uint8(wgMCLAGLeafsCount),   //nolint:gosec
 								ESLAGLeafGroups:   wgESLAGLeafGroups,
-								OrphanLeafsCount:  uint8(wgOrphanLeafsCount),
-								MCLAGSessionLinks: uint8(wgMCLAGSessionLinks),
-								MCLAGPeerLinks:    uint8(wgMCLAGPeerLinks),
-								VPCLoopbacks:      uint8(wgVPCLoopbacks),
-								MCLAGServers:      uint8(wgMCLAGServers),
-								ESLAGServers:      uint8(wgESLAGServers),
-								UnbundledServers:  uint8(wgUnbundledServers),
-								BundledServers:    uint8(wgBundledServers),
+								OrphanLeafsCount:  uint8(wgOrphanLeafsCount),  //nolint:gosec
+								MCLAGSessionLinks: uint8(wgMCLAGSessionLinks), //nolint:gosec
+								MCLAGPeerLinks:    uint8(wgMCLAGPeerLinks),    //nolint:gosec
+								VPCLoopbacks:      uint8(wgVPCLoopbacks),      //nolint:gosec
+								MCLAGServers:      uint8(wgMCLAGServers),      //nolint:gosec
+								ESLAGServers:      uint8(wgESLAGServers),      //nolint:gosec
+								UnbundledServers:  uint8(wgUnbundledServers),  //nolint:gosec
+								BundledServers:    uint8(wgBundledServers),    //nolint:gosec
 							}).Build()
 							if err != nil {
 								return errors.Wrap(err, "error building sample")

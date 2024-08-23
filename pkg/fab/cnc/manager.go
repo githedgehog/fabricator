@@ -414,7 +414,7 @@ func (mngr *Manager) Build(pack bool) error {
 				return errors.Wrapf(err, "error hydrating run op %s", runOp.name)
 			}
 
-			actions[runOp.bundle][int(runOp.stage)] = append(actions[runOp.bundle][int(runOp.stage)], runOp) //nolint:gosec
+			actions[runOp.bundle][int(runOp.stage)] = append(actions[runOp.bundle][int(runOp.stage)], runOp)
 		}
 
 		slog.Debug("Finished", "component", comp.Name())
@@ -429,7 +429,7 @@ func (mngr *Manager) Build(pack bool) error {
 
 		recipe := &Recipe{}
 
-		for stage := 0; stage < int(mngr.maxStage); stage++ { //nolint:gosec
+		for stage := 0; stage < int(mngr.maxStage); stage++ {
 			for _, action := range actions[bundle][stage] {
 				slog.Info("Planned", "bundle", bundle.Name, "name", action.name, "op", action.op.Summary())
 				recipe.Actions = append(recipe.Actions, RecipeAction{
