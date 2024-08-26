@@ -207,7 +207,10 @@ hhfab-all: fmt build-embed-cnc-bin ## Build hhfab CLI for all OS/ARCH
 .PHONY: build-embed-cnc-bin
 build-embed-cnc-bin: ## Build CNC binaries to embed into hhfab
 	touch pkg/fab/cnc/bin/hhfab-recipe
+	touch pkg/fab/cnc/bin/hhfab-flatcar-install
+
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o pkg/fab/cnc/bin/hhfab-recipe -ldflags="-w -s -X main.version=$(VERSION)" $(GOFLAGS) ./cmd/hhfab-recipe
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o pkg/fab/cnc/bin/hhfab-flatcar-install -ldflags="-w -s -X main.version=$(VERSION)" $(GOFLAGS) ./cmd/hhfab-flatcar-install
 
 .PHONY: build
 build: hhfab

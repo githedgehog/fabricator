@@ -146,6 +146,7 @@ jobs:
         run: |
           bin/hhfab init -p=${{ matrix.preset }} --dhcpd=${{ matrix.dhcpd }} --dev -v
           bin/hhfab build -v
+          bin/hhfab build-iso -v
           ls -lah .hhfab
 
       - name: Setup tmate session for debug
@@ -214,6 +215,7 @@ jobs:
 
           bin/hhfab init -p=vlab --fabric-mode=${{ matrix.mode }} --dhcpd=${{ matrix.dhcpd }} --dev -v
           bin/hhfab build -v
+          bin/hhfab build-iso -v
           ls -lah .hhfab
 
           bin/hhfab vlab up -v --ready=setup-vpcs --ready=exit
