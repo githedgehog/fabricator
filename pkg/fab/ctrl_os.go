@@ -25,6 +25,7 @@ import (
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1alpha2"
 	"go.githedgehog.com/fabric/pkg/wiring"
 	"go.githedgehog.com/fabricator/pkg/fab/cnc"
+	"go.githedgehog.com/fabricator/pkg/fab/flatcar/install"
 )
 
 const (
@@ -40,6 +41,8 @@ type ControlOS struct {
 	cnc.NoValidationComponent
 
 	PasswordHash string `json:"passwordHash,omitempty"`
+
+	FlatcarRef cnc.Ref `json:"flatcarRef,omitempty"` // TODO replace with needed files for control iso gen
 }
 
 var _ cnc.Component = (*ControlOS)(nil)
@@ -66,6 +69,8 @@ func (cfg *ControlOS) Flags() []cli.Flag {
 
 func (cfg *ControlOS) Hydrate(_ cnc.Preset, _ meta.FabricMode) error {
 	// TODO add ignition template to the config?
+
+	cfg.FlatcarRef = cfg.FlatcarRef.Fallback(RefVLABFlarcar) // TODO replace with needed files for control iso gen
 
 	return nil
 }
@@ -106,6 +111,34 @@ func (cfg *ControlOS) Build(_ string, _ cnc.Preset, _ meta.FabricMode, get cnc.G
 				"controlVIP", controlVIP,
 				"passwordHash", cfg.PasswordHash,
 			),
+		})
+
+	// TODO replace with needed files and actions
+	// the rest of the method is just an example for the control iso gen
+
+	cfg.FlatcarRef = cfg.FlatcarRef.Fallback(BaseConfig(get).Source)
+
+	run(BundleControlISO, Stage, "flatcar",
+		&cnc.FilesORAS{
+			Ref: cfg.FlatcarRef,
+			Files: []cnc.File{
+				{Name: "flatcar.img"},
+				{Name: "flatcar_efi_code.fd"},
+				{Name: "flatcar_efi_vars.fd"},
+			},
+		})
+
+	run(BundleControlISO, Stage, "flatcar-install-config",
+		&cnc.FileGenerate{
+			File: cnc.File{
+				Name: install.ConfigFile,
+			},
+			Content: cnc.YAMLFrom(install.Config{
+				Hostname:       hostname,
+				Username:       username,
+				PasswordHash:   cfg.PasswordHash,
+				AuthorizedKeys: authorizedKeys,
+			}),
 		})
 
 	return nil

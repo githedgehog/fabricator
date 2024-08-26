@@ -38,8 +38,9 @@ import (
 type Preset string
 
 type Bundle struct {
-	Name        string
-	IsInstaller bool
+	Name         string
+	IsInstaller  bool
+	IsISOBuilder bool
 }
 
 type Stage uint8
@@ -385,9 +386,16 @@ func (mngr *Manager) Build(pack bool) error {
 		}
 
 		if bundle.IsInstaller {
-			err = bin.WriteRunBin(basedir)
+			err = bin.WriteRecipeBin(basedir)
 			if err != nil {
-				return errors.Wrapf(err, "error writing run bin")
+				return errors.Wrapf(err, "error writing recipe bin")
+			}
+		}
+
+		if bundle.IsISOBuilder {
+			err = bin.WriteFlatcarInstallBin(basedir)
+			if err != nil {
+				return errors.Wrapf(err, "error writing flatcar-install bin")
 			}
 		}
 	}

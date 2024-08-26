@@ -23,14 +23,24 @@ import (
 )
 
 //go:embed hhfab-recipe
-var runBin []byte
+var recipeBin []byte
+
+//go:embed hhfab-flatcar-install
+var flatcarInstallBin []byte
 
 const (
-	RecipeBinName = "hhfab-recipe"
+	RecipeBinName         = "hhfab-recipe"
+	FlatcarInstallBinName = "hhfab-flatcar-install"
 )
 
-func WriteRunBin(basedir string) error {
+func WriteRecipeBin(basedir string) error {
 	path := filepath.Join(basedir, RecipeBinName)
 
-	return errors.Wrapf(os.WriteFile(path, runBin, 0o755), "error writing bin %s", path) //nolint:gosec
+	return errors.Wrapf(os.WriteFile(path, recipeBin, 0o755), "error writing bin %s", path) //nolint:gosec
+}
+
+func WriteFlatcarInstallBin(basedir string) error {
+	path := filepath.Join(basedir, FlatcarInstallBinName)
+
+	return errors.Wrapf(os.WriteFile(path, flatcarInstallBin, 0o755), "error writing bin %s", path) //nolint:gosec
 }

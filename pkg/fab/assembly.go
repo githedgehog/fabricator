@@ -230,6 +230,10 @@ var (
 	BundleHlabFiles = cnc.Bundle{ // Special case, just to keep name
 		Name: "hlab-files",
 	}
+	BundleControlISO = cnc.Bundle{
+		Name:         "control-iso",
+		IsISOBuilder: true,
+	}
 )
 
 // We expect services installed during the stage to be available at the end of it
@@ -248,7 +252,7 @@ const (
 func NewCNCManager() *cnc.Manager {
 	return cnc.New(
 		Presets,
-		[]cnc.Bundle{BundleControlInstall, BundleControlOS, BundleServerInstall, BundleServerOS, BundleVlabFiles},
+		[]cnc.Bundle{BundleControlInstall, BundleControlOS, BundleControlISO, BundleServerInstall, BundleServerOS, BundleVlabFiles},
 		StageMax,
 		[]cnc.Component{
 			&Base{},

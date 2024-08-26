@@ -31,6 +31,7 @@ import (
 	"go.githedgehog.com/fabric/api/meta"
 	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/fab/cnc"
+	"go.githedgehog.com/fabricator/pkg/fab/flatcar/iso"
 	"go.githedgehog.com/fabricator/pkg/fab/vlab"
 	"go.githedgehog.com/fabricator/pkg/fab/vlab/testing"
 	"go.githedgehog.com/fabricator/pkg/fab/wiring"
@@ -362,6 +363,26 @@ func main() {
 					}
 
 					return errors.Wrap(mngr.Pack(), "error packing bundles")
+				},
+			},
+			{
+				Name:  "build-iso",
+				Usage: "build installer ISO image(s)",
+				Flags: []cli.Flag{
+					basedirFlag,
+					verboseFlag,
+					briefFlag,
+				},
+				Before: func(_ *cli.Context) error {
+					return setupLogger(verbose, brief)
+				},
+				Action: func(_ *cli.Context) error {
+					err := mngr.Load(basedir)
+					if err != nil {
+						return errors.Wrap(err, "error loading")
+					}
+
+					return errors.Wrap(iso.Build(context.TODO(), basedir), "error building ISO images")
 				},
 			},
 			{
