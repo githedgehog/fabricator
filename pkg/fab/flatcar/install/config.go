@@ -12,10 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package install is the binary that is run when the core user is logged into the live flatcar image.
 package install
 
+// ConfigFile contains info needed for the flacar install to proceed.
 const ConfigFile = "flatcar-install.yaml"
 
+// Config wraps the contents of a ConfigFile in a type.
 type Config struct {
 	Hostname       string   `json:"hostname,omitempty"`
 	Username       string   `json:"username,omitempty"`
