@@ -646,6 +646,18 @@ func main() {
 								Usage: "type of vpc setup, (one of: " + strings.Join(vlab.VPCSetupTypes, ", ") + ")",
 								Value: vlab.VPCSetupTypeVPCPerServer,
 							},
+							&cli.StringSliceFlag{
+								Name:  "dns-server",
+								Usage: "DNS server(s) to use for all VPC subnets, can be specified multiple times",
+							},
+							&cli.StringSliceFlag{
+								Name:  "time-server",
+								Usage: "NTP server(s) to use for all VPC subnets, can be specified multiple times",
+							},
+							&cli.UintFlag{
+								Name:  "interface-mtu",
+								Usage: "Interface MTU to use for all VPCs subnets (doesn't affect switch config, just advertised to clients)",
+							},
 						},
 						Before: func(_ *cli.Context) error {
 							return setupLogger(verbose, brief)
@@ -662,7 +674,10 @@ func main() {
 							}
 
 							return errors.Wrap(svc.SetupVPCs(context.Background(), vlab.SetupVPCsConfig{
-								Type: cCtx.String("type"),
+								Type:         cCtx.String("type"),
+								DNSServers:   cCtx.StringSlice("dns-server"),
+								TimeServers:  cCtx.StringSlice("time-server"),
+								InterfaceMTU: uint16(cCtx.Uint("interface-mtu")), //nolint:gosec
 							}), "error creating VPC per server")
 						},
 					},

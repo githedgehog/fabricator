@@ -100,7 +100,10 @@ type netConfig struct {
 }
 
 type SetupVPCsConfig struct {
-	Type string
+	Type         string
+	DNSServers   []string
+	TimeServers  []string
+	InterfaceMTU uint16
 }
 
 const (
@@ -206,6 +209,16 @@ func (svc *Service) SetupVPCs(ctx context.Context, cfg SetupVPCsConfig) error {
 			},
 		}
 		_, err = ctrlutil.CreateOrUpdate(ctx, kube, vpc, func() error {
+			var options *vpcapi.VPCDHCPOptions
+
+			if cfg.DNSServers != nil || cfg.TimeServers != nil || cfg.InterfaceMTU > 0 {
+				options = &vpcapi.VPCDHCPOptions{
+					DNSServers:   cfg.DNSServers,
+					TimeServers:  cfg.TimeServers,
+					InterfaceMTU: cfg.InterfaceMTU,
+				}
+			}
+
 			vpc.Spec = vpcapi.VPCSpec{
 				IPv4Namespace: "default",
 				VLANNamespace: "default",
@@ -218,6 +231,7 @@ func (svc *Service) SetupVPCs(ctx context.Context, cfg SetupVPCsConfig) error {
 							Range: &vpcapi.VPCDHCPRange{
 								Start: dhcpStart,
 							},
+							Options: options,
 						},
 					},
 				},
