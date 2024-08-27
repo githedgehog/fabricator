@@ -153,7 +153,7 @@ func Do(_ context.Context, basedir string, dryRun bool) error {
 
 	if err != nil {
 		fmt.Printf("Prompt failed %v\n", err)
-		return
+		return err
 	}
 
 	fmt.Printf("You chose %s aka %s", disks.Devices[index].Description, result)
@@ -162,5 +162,5 @@ func Do(_ context.Context, basedir string, dryRun bool) error {
 	// - read config from "basedir" (using sigs.k8s.io/yaml) if file is present
 	// - prompt user for missing values
 
-	return nil
+	return err
 }
