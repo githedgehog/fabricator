@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package install is the binary that is run when the core user is logged into the live flatcar image.
 package install
 
 // ConfigFile contains info needed for the flacar install to proceed.

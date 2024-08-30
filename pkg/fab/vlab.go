@@ -47,7 +47,7 @@ func (cfg *VLAB) Flags() []cli.Flag {
 
 func (cfg *VLAB) Hydrate(_ cnc.Preset, _ meta.FabricMode) error {
 	cfg.ONIERef = cfg.ONIERef.Fallback(RefVLABONIE)
-	cfg.FlatcarRef = cfg.FlatcarRef.Fallback(RefVLABFlarcar)
+	cfg.FlatcarRef = cfg.FlatcarRef.Fallback(RefVLABFlatcar)
 	cfg.EEPROMEditRef = cfg.EEPROMEditRef.Fallback(RefVLABEEPROMEdit)
 
 	// TODO

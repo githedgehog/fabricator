@@ -12,78 +12,90 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package iso will build an efi bootable live image of the flatcar linux distro.
 package iso
 
 import (
 	"context"
-	"fmt"
 	"io"
-	"log"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
 
+	"go.githedgehog.com/fabricator/pkg/fab"
+
 	diskfs "github.com/diskfs/go-diskfs"
 	diskpkg "github.com/diskfs/go-diskfs/disk"
 	"github.com/diskfs/go-diskfs/filesystem"
 	"github.com/diskfs/go-diskfs/partition/gpt"
-	"go.githedgehog.com/fabricator/pkg/fab"
 )
 
 // Copies a file from the local directory to the newly created filesystem, does not rename files.
 func copyFile(dstPath string, srcPath string, destination filesystem.FileSystem, buf []byte) error {
+	slog.Debug("CopyFile", "DstPath", dstPath, "SrcPath", srcPath, "Destination Filesystem", destination.Label())
 	src, err := os.Open(srcPath)
 	if err != nil {
-		log.Print(err)
+		slog.Error("Error opening", "SourcePath", srcPath, "Error:", err.Error())
 	}
 	defer src.Close()
 
-	// needed to place files in the root dir
+	//  "/" is needed to place files in the root dir, diskfs says so
 	if dstPath == "/" {
-		dstPath = "/" + srcPath
+		dstPath = filepath.Join("/", filepath.Base(srcPath))
 	}
 	dest, err := destination.OpenFile(dstPath, os.O_CREATE|os.O_RDWR)
 	if err != nil {
-		log.Print(err)
+		slog.Error("Error opening", "DestPath", dstPath, "Error:", err)
 	}
 	defer dest.Close()
 
-	//Beautiful Copy
 	_, err = io.CopyBuffer(dest, src, buf)
 	return err
 }
 
 // Copies an existing directory structure into the new filesystem.
-func copyTree(localDirName string, destination filesystem.FileSystem) error {
-	err := filepath.Walk(localDirName, func(path string, info os.FileInfo, err error) error {
+func copyTree(workdir, localDirName string, destination filesystem.FileSystem) error {
+	slog.Debug("CopyTree", "LocalDirName", localDirName, "WorkDir", workdir, "Destination", destination.Label())
+	tree := filepath.Join(workdir, localDirName)
+	err := filepath.Walk(tree, func(path string, info os.FileInfo, err error) error {
+		slog.Debug("Filepath Walk", "Path", path, "os.FileInfo", info.Name())
 
-		// This is a folder, so make it in the new filesystem
+		// knock out the workdir
+		relPath, err := filepath.Rel(workdir, path)
+		if err != nil {
+			slog.Error("Error in filepath.Rel", "WorkDir", workdir, "Path", path, "Error", err.Error())
+			return err
+		}
+
 		if info.IsDir() {
-			err = destination.Mkdir("/" + path)
+			err = destination.Mkdir(filepath.Join("/", relPath))
 			if err != nil {
-				log.Fatal("Error with:", path, err)
+				slog.Error("Error", "RelPath", relPath, "Error", err.Error())
 				return err
 			}
 		}
-		// This a file, make it in the new filesystem
 		if !info.IsDir() {
 			buf := make([]byte, 1024*1024)
-			err = copyFile("/"+path, path, destination, buf)
+			dstPath := filepath.Join("/", relPath)
+			err = copyFile(dstPath, path, destination, buf)
 			if err != nil {
-				log.Fatal("Error with:", path, err)
+				slog.Error("copyFile inside of copyTree returned an error", "Path", path, "Error", err.Error())
 				return err
 			}
 
 		}
 
 		return err
-	}) //anon filepath walk function
+	})
+	if err != nil {
+		slog.Error("Walkpath error", "Error", err.Error())
+	}
 	return err
 
 }
 
-func createEfi(diskImg string) {
+func createEfi(diskImg, workdir string) error {
 
 	var (
 		espSize             int64 = 500 * 1024 * 1024      // 500 MiB
@@ -102,7 +114,8 @@ func createEfi(diskImg string) {
 	// create a disk image
 	disk, err := diskfs.Create(diskImg, diskSize, diskfs.Raw, diskfs.SectorSizeDefault)
 	if err != nil {
-		log.Print(err)
+		slog.Error("Unable to create disk image: ", err)
+		return err
 	}
 	// create a partition table
 	table := new(gpt.Table)
@@ -117,24 +130,27 @@ func createEfi(diskImg string) {
 	// will also call initTable under the covers
 	err = disk.Partition(table)
 	if err != nil {
-		log.Print(err)
+		slog.Error("Unable to apply Partition table to disk: ", err.Error())
+		return err
 	}
 	// Check the right stuff is on disk
 	t, err := disk.GetPartitionTable()
 	if err != nil {
-		log.Print(err)
+		slog.Error("Partition table error", err.Error())
+		return err
 	}
-	fmt.Printf("Table: %+v\n", t)
 
 	err = t.Verify(disk.File, uint64(diskSize))
 	if err != nil {
-		log.Print(err)
+		slog.Error("Partition table on disk failed verification", "Error", err.Error())
+		return err
 	}
 
 	espSpec := diskpkg.FilesystemSpec{Partition: 1, FSType: filesystem.TypeFat32, VolumeLabel: "ESP"}
 	espFs, err := disk.CreateFilesystem(espSpec)
 	if err != nil {
-		log.Print(err)
+		slog.Error("Error creating %s filesystem", "disk", espSpec.VolumeLabel, "Error", err.Error())
+		return err
 	}
 
 	// NEED OEM as the disk label things don't work otherwise
@@ -142,38 +158,45 @@ func createEfi(diskImg string) {
 
 	backpackFs, err := disk.CreateFilesystem(backpackSpec)
 	if err != nil {
-		log.Print(err)
+		slog.Error("Error creating %s filesystem", "disk", backpackSpec.VolumeLabel, "Error", err.Error())
+		return err
 	}
 
-	copyTree("EFI", espFs)
-	copyTree("boot", espFs)
+	ex, err := os.Executable()
+	exPath := filepath.Dir(ex)
+	slog.Debug("About to copy tree", "workdir", workdir, "CWD", exPath)
+	err = copyTree(workdir, "/EFI", espFs)
+	if err != nil {
+		slog.Error("Error copying tree", "Error", err.Error())
+		return err
+	}
+	err = copyTree(workdir, "/boot", espFs)
+	if err != nil {
+		slog.Error("Error copying tree", "Error", err.Error())
+		return err
+	}
 
 	buf := make([]byte, 256*1024*1024)
-	copyFile("/", "./flatcar_production_pxe_image.cpio.gz", espFs, buf)
+	err = copyFile("/", workdir+"/flatcar_production_pxe_image.cpio.gz", espFs, buf)
 
-	copyFile("/", "./oem.cpio.gz", espFs, buf)
-	copyFile("/", "./flatcar_production_pxe.vmlinuz", espFs, buf)
-	fmt.Println("Copying flatcar_image.bin.bz2")
-	copyFile("/", "./flatcar_production_image.bin.bz2", backpackFs, buf)
+	err = copyFile("/", workdir+"/oem.cpio.gz", espFs, buf)
+	err = copyFile("/", workdir+"/flatcar_production_pxe.vmlinuz", espFs, buf)
+	err = copyFile("/", workdir+"/flatcar_production_image.bin.bz2", backpackFs, buf)
+	return err
 }
 
-// Build builds the Control Node ISO only, based on the pre-built control-instal bundle, not generic
+// Build builds the Control Node ISO only, the components needed for this are downloaded as a bundle in a previous step.
 func Build(_ context.Context, basedir string) error {
 	start := time.Now()
 
 	installer := filepath.Join(basedir, fab.BundleControlInstall.Name)
-	target := filepath.Join(basedir, "control-node.iso")
+	target := filepath.Join(basedir, "flatcar-live.img")
 	workdir := filepath.Join(basedir, fab.BundleControlISO.Name)
 
 	slog.Info("Building Control Node ISO", "target", target, "workdir", workdir, "installer", installer)
 
-	// TODO implement ISO building
-	// - use "workdir" as working directory where all needed files will be downloaded and configs built (see fab/ctrl_os.go)
-	// - include all files from "installer" path and later run "hhfab-recipe ..." on that files on first boot
-	// - use "target" as final ISO file
-
-	createEfi(target)
+	err := createEfi(target, workdir)
 	slog.Info("ISO building done", "took", time.Since(start))
 
-	return nil
+	return err
 }
