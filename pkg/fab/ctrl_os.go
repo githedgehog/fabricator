@@ -42,7 +42,9 @@ type ControlOS struct {
 
 	PasswordHash string `json:"passwordHash,omitempty"`
 
-	FlatcarRef cnc.Ref `json:"flatcarRef,omitempty"` // TODO replace with needed files for control iso gen
+	// keep this name in sync
+	LiveImageRoot cnc.Ref `json:"liveImageRef,omitempty"` // TODO replace with needed files for control iso gen
+	OEMCpio       cnc.Ref `json:"OEMCpio,omitempty"`      // TODO replace with needed files for control iso gen
 }
 
 var _ cnc.Component = (*ControlOS)(nil)
@@ -70,7 +72,8 @@ func (cfg *ControlOS) Flags() []cli.Flag {
 func (cfg *ControlOS) Hydrate(_ cnc.Preset, _ meta.FabricMode) error {
 	// TODO add ignition template to the config?
 
-	cfg.FlatcarRef = cfg.FlatcarRef.Fallback(RefVLABFlarcar) // TODO replace with needed files for control iso gen
+	cfg.LiveImageRoot = cfg.LiveImageRoot.Fallback(RefLiveImageTree)
+	cfg.OEMCpio = cfg.OEMCpio.Fallback(RefOEMCpio)
 
 	return nil
 }
@@ -115,19 +118,38 @@ func (cfg *ControlOS) Build(_ string, _ cnc.Preset, _ meta.FabricMode, get cnc.G
 
 	// TODO replace with needed files and actions
 	// the rest of the method is just an example for the control iso gen
+	// Needed files:
+	// the live image tree that I pushed to ghcr
+	//   Ignition file it needs to have an ignition file, with the binary that asks questions or starts the installer
+	//   That ignition file needs to be packaged as a cpio.gz archive
 
-	cfg.FlatcarRef = cfg.FlatcarRef.Fallback(BaseConfig(get).Source)
-
-	run(BundleControlISO, Stage, "flatcar",
+	//cfg.FlatcarRef = cfg.FlatcarRef.Fallback(BaseConfig(get).Source)
+	run(BundleControlISO, Stage, "Live-Image-Root",
+		//&cnc.SyncOCI{
 		&cnc.FilesORAS{
-			Ref: cfg.FlatcarRef,
+			Ref: cfg.LiveImageRoot,
 			Files: []cnc.File{
-				{Name: "flatcar.img"},
-				{Name: "flatcar_efi_code.fd"},
-				{Name: "flatcar_efi_vars.fd"},
+				{Name: "iso_root"},
+			},
+		})
+	run(BundleControlISO, Stage, "CPIO-OEM",
+		//&cnc.SyncOCI{
+		&cnc.FilesORAS{
+			Ref: cfg.OEMCpio,
+			Files: []cnc.File{
+				{Name: "oem.cpio.gz"},
 			},
 		})
 
+	//run(BundleControlISO, Stage, "flatcar",
+	//&cnc.SyncOCI{
+	//	Ref: cfg.FlatcarRef,
+	//	Files: []cnc.File{
+	//		{Name: "flatcar.img"},
+	//		{Name: "flatcar_efi_code.fd"},
+	//		{Name: "flatcar_efi_vars.fd"},
+	//	},
+	//	})
 	run(BundleControlISO, Stage, "flatcar-install-config",
 		&cnc.FileGenerate{
 			File: cnc.File{
