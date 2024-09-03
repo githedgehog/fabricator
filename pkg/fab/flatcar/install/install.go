@@ -67,6 +67,7 @@ type BlockDevices struct {
 	Devices []*BlockDevice `json:"blockdevices,omitempty"`
 }
 
+// getDisks is responsible for the call to lsblk, calls a function to normalize / beautify the values
 func getDisks() *BlockDevices {
 	disks := &BlockDevices{}
 	// The exclude arguments are major block numbers, 252 is a ZRAM swap disk, 11 is a SATA attached CD-ROM
@@ -108,7 +109,9 @@ func prettyMetaData(disks *BlockDevices) *BlockDevices {
 	return disks
 }
 
-func Do(_ context.Context, basedir string, dryRun bool) error {
+func checkConfigFile(filePath string) {
+}
+func PreInstallCheck(_ context.Context, basedir string, dryRun bool) error {
 	slog.Debug("Using", "basedir", basedir, "dryRun", dryRun)
 
 	configFile := filepath.Join(basedir, ConfigFile)
@@ -133,6 +136,11 @@ func Do(_ context.Context, basedir string, dryRun bool) error {
 
 	slog.Info("Config", "config", config)
 
+	// TODO implement flatcar installer
+	// - read config from "basedir" (using sigs.k8s.io/yaml) if file is present
+	// - if values missing prompt user for missing values
+	// - if values not missing display values and start countdown
+	//
 	index := -1
 	disks := getDisks()
 
@@ -157,10 +165,6 @@ func Do(_ context.Context, basedir string, dryRun bool) error {
 	}
 
 	fmt.Printf("You chose %s aka %s", disks.Devices[index].Description, result)
-
-	// TODO implement flatcar installer
-	// - read config from "basedir" (using sigs.k8s.io/yaml) if file is present
-	// - prompt user for missing values
 
 	return err
 }

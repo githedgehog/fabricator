@@ -177,6 +177,7 @@ func createEfi(diskImg, workdir string) error {
 	}
 
 	buf := make([]byte, 256*1024*1024)
+	// TODO make this some kind of manifest struct wrapping a slice of filenames
 	err = copyFile("/", workdir+"/flatcar_production_pxe_image.cpio.gz", espFs, buf)
 
 	err = copyFile("/", workdir+"/oem.cpio.gz", espFs, buf)

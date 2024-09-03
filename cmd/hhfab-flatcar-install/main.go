@@ -75,7 +75,7 @@ func main() {
 		Name:        "basedir",
 		Aliases:     []string{"d"},
 		Usage:       "use workir `DIR`",
-		Value:       ".", // TODO should it be some default path?
+		Value:       "/opt/hedgehog/", // TODO verify this is in _all_places
 		Destination: &basedir,
 	}
 
@@ -105,9 +105,10 @@ func main() {
 			return setupLogger(verbose, brief)
 		},
 		Action: func(_ *cli.Context) error {
-			slog.Info("Running flatcar-instal", "version", version)
+			slog.Info("Running flatcar-install", "version", version)
 
-			return errors.Wrapf(install.Do(context.TODO(), basedir, dryRun), "error running flatcar installer")
+			// TODO - Logan this is the entrypoint to fab
+			return errors.Wrapf(install.PreInstallCheck(context.TODO(), basedir, dryRun), "error running flatcar installer")
 		},
 	}
 
