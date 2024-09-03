@@ -189,8 +189,16 @@ $(GOLANGCI_LINT): $(LOCALBIN)
 VERSION ?= $(shell hack/version.sh)
 OCI_REPO ?= registry.local:31000/githedgehog/fabricator
 
+
+# TODO - the butane->ignition step
+# TODO - the cpio step
+# TODO - the push to ghcr
+.PHONY: hhfab-flatcar-install
+hhfab-flatcar-install:
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/hhfab-flatcar-install -ldflags="-w -s -X main.version=$(VERSION)" $(GOFLAGS) ./cmd/hhfab-flatcar-install
+
 .PHONY: hhfab
-hhfab: fmt build-embed-cnc-bin ## Build hhfab CLI for Linux amd64
+hhfab: fmt build-embed-cnc-bin hhfab-flatcar-install ## Build hhfab CLI for Linux amd64
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/hhfab -ldflags="-w -s -X main.version=$(VERSION)" $(GOFLAGS) ./cmd/hhfab
 
 .PHONY: hhfab-local
@@ -198,7 +206,7 @@ hhfab-local: fmt build-embed-cnc-bin ## Build hhfab CLI for local OS/ARCH
 	CGO_ENABLED=0 go build -o bin/hhfab -ldflags="-w -s -X main.version=$(VERSION)" $(GOFLAGS) ./cmd/hhfab
 
 .PHONY: hhfab-all
-hhfab-all: fmt build-embed-cnc-bin ## Build hhfab CLI for all OS/ARCH
+hhfab-all: fmt build-embed-cnc-bin hhfab-flatcar-install ## Build hhfab CLI for all OS/ARCH
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/linux-amd64/hhfab -ldflags="-w -s -X main.version=$(VERSION)" $(GOFLAGS) ./cmd/hhfab
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o bin/linux-arm64/hhfab -ldflags="-w -s -X main.version=$(VERSION)" $(GOFLAGS) ./cmd/hhfab
 	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -o bin/darwin-amd64/hhfab -ldflags="-w -s -X main.version=$(VERSION)" $(GOFLAGS) ./cmd/hhfab
@@ -207,10 +215,8 @@ hhfab-all: fmt build-embed-cnc-bin ## Build hhfab CLI for all OS/ARCH
 .PHONY: build-embed-cnc-bin
 build-embed-cnc-bin: ## Build CNC binaries to embed into hhfab
 	touch pkg/fab/cnc/bin/hhfab-recipe
-	touch pkg/fab/cnc/bin/hhfab-flatcar-install
 
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o pkg/fab/cnc/bin/hhfab-recipe -ldflags="-w -s -X main.version=$(VERSION)" $(GOFLAGS) ./cmd/hhfab-recipe
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o pkg/fab/cnc/bin/hhfab-flatcar-install -ldflags="-w -s -X main.version=$(VERSION)" $(GOFLAGS) ./cmd/hhfab-flatcar-install
 
 .PHONY: build
 build: hhfab
@@ -226,3 +232,4 @@ hhfab-push: hhfab hhfab-all ## Push hhfab CLI to OCI registry
 
 .PHONY: push
 push: hhfab-push
+
