@@ -1,0 +1,48 @@
+variant: flatcar
+version: 1.1.0
+storage:
+  filesystems:
+    - path: /opt/hedgehog
+      device: /dev/disk/by-label/OEM
+      with_mount_unit: true
+      wipe_filesystem: false
+      format: vfat
+  files:
+    - path: /opt/hedgehog/hhfab-flatcar-install
+      overwrite: true
+      contents:
+        local: ./hhfab-flatcar-install
+      mode: 0755
+    - path: /etc/motd.d/fabric.conf
+      mode: 0644
+      contents:
+        inline: "Welcome to the Flatcar Linux Live Environment, presented by HedgeHog"
+
+systemd:
+  units:
+    - name: hello.service
+      enabled: true
+      contents: |
+        [Unit]
+        Description=A hello world unit!
+
+        [Service]
+        Type=oneshot
+        ExecStart=/usr/bin/echo "Hello, World!"
+
+        [Install]
+        WantedBy=multi-user.target
+
+    - name: binary-hello.service
+      enabled: true
+      contents: |
+        [Unit]
+        Description=A hello world unit,from a go binary!
+
+        [Service]
+        Type=oneshot
+        ExecStart=/opt/test-bin
+
+        [Install]
+        WantedBy=multi-user.target
+

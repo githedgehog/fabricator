@@ -107,7 +107,7 @@ func main() {
 		Action: func(_ *cli.Context) error {
 			slog.Info("Running flatcar-install", "version", version)
 
-			// TODO - Logan this is the entrypoint to fab
+			// how to pass the stdin/out handles? Maybe just os.Stdin is enough anywhere
 			return errors.Wrapf(install.PreInstallCheck(context.TODO(), basedir, dryRun), "error running flatcar installer")
 		},
 	}

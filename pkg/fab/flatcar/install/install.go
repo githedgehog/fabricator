@@ -109,41 +109,60 @@ func prettyMetaData(disks *BlockDevices) *BlockDevices {
 	return disks
 }
 
-func checkConfigFile(filePath string) {
-}
-func PreInstallCheck(_ context.Context, basedir string, dryRun bool) error {
-	slog.Debug("Using", "basedir", basedir, "dryRun", dryRun)
+// checks that the config file has all the info needed for install. Prompts user for missing info. A happy path exit means the install can move forward
+func checkConfigFile(configFilePath string, config *Config) (bool, error) {
 
-	configFile := filepath.Join(basedir, ConfigFile)
-	config := Config{}
-
-	if _, err := os.Stat(configFile); err != nil {
+	if _, err := os.Stat(configFilePath); err != nil {
 		if os.IsNotExist(err) {
-			slog.Warn("Config file not found", "file", configFile)
+			slog.Warn("Config file not found", "file", configFilePath)
 		} else {
-			return errors.Wrapf(err, "error checking config file %s", configFile)
+			return false, errors.Wrapf(err, "error checking config file %s", configFilePath)
 		}
 	}
 
-	configData, err := os.ReadFile(configFile)
+	configData, err := os.ReadFile(configFilePath)
 	if err != nil {
-		return errors.Wrapf(err, "error reading config file %s", configFile)
+		return false, errors.Wrapf(err, "error reading config file %s", configFilePath)
 	}
 
-	if err := yaml.Unmarshal(configData, &config); err != nil {
-		return errors.Wrapf(err, "error unmarshalling config file %s", configFile)
+	if err := yaml.Unmarshal(configData, config); err != nil {
+		return false, errors.Wrapf(err, "error unmarshalling config file %s", configFilePath)
+	}
+	slog.Info("ConfigCheck", "config", config)
+	if config.PasswordHash == "" && len(config.AuthorizedKeys) == 0 {
+		// we need a way to login to the installed systemd
+		populatePassword(config)
+
+	}
+	if config.BlockDevicePath == "" {
+		err = populateBlockDevice(config)
+		if err != nil {
+			return false, errors.Wrapf(err, "Error choosing block device")
+		}
+
 	}
 
-	slog.Info("Config", "config", config)
+	return true, nil
 
-	// TODO implement flatcar installer
-	// - read config from "basedir" (using sigs.k8s.io/yaml) if file is present
-	// - if values missing prompt user for missing values
-	// - if values not missing display values and start countdown
-	//
-	index := -1
+}
+
+func populatePassword(config *Config) {
+
+}
+func populateBlockDevice(config *Config) error {
 	disks := getDisks()
 
+	// User provided a size, go with the first matching disk
+	if config.SizeGB != "" {
+		for i, d := range disks.Devices {
+			userHint, _ := strconv.ParseUint(config.SizeGB, 10, 64)
+			if d.Size == userHint {
+				config.BlockDevicePath = disks.Devices[i].Path
+				return nil
+			}
+		}
+
+	}
 	templates := &promptui.SelectTemplates{
 		Label:    "{{ .Description }}",
 		Active:   "\U0001F994 {{ .Description | cyan }}",
@@ -157,14 +176,33 @@ func PreInstallCheck(_ context.Context, basedir string, dryRun bool) error {
 		Templates: templates,
 	}
 
-	index, result, err := prompt.Run()
+	// TODO - check if there is a way to pass os.Stdin, or double check where this is listening
+	// this might be a problem for running at login.
+	index, _, err := prompt.Run()
 
 	if err != nil {
 		fmt.Printf("Prompt failed %v\n", err)
 		return err
 	}
 
-	fmt.Printf("You chose %s aka %s", disks.Devices[index].Description, result)
+	slog.Debug("Block Device Choise", "description", disks.Devices[index].Description, "size", disks.Devices[index].Size)
+	config.BlockDevicePath = disks.Devices[index].Path
+	return nil
 
-	return err
+}
+func PreInstallCheck(_ context.Context, basedir string, dryRun bool) error {
+	slog.Debug("Using", "basedir", basedir, "dryRun", dryRun)
+
+	configFile := filepath.Join(basedir, ConfigFile)
+	config := Config{}
+
+	checkConfigFile(configFile, &config)
+	if dryRun {
+		slog.Info("Config", "config", config)
+		return nil
+	}
+
+	slog.Info("Config Before ignition", "config", config)
+	// TODO Write config to butane/ ignition so we can install
+	return nil
 }

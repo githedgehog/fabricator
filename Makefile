@@ -233,3 +233,11 @@ hhfab-push: hhfab hhfab-all ## Push hhfab CLI to OCI registry
 .PHONY: push
 push: hhfab-push
 
+.PHONY: burn-butane
+burn-butane:
+	butane --output ./cmd/hhfab-flatcar-install/usr/share/oem/config.ign --files-dir ./bin/ ./cmd/hhfab-flatcar-install/backpack.bu
+
+.PHONY: oem-cpio
+oem-cpio: hhfab-flatcar-install burn-butane
+	cd ./cmd/hhfab-flatcar-install/ && find usr | cpio -o -H newc | gzip > ../../bin/oem.cpio.gz
+
