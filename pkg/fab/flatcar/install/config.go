@@ -19,8 +19,10 @@ const ConfigFile = "flatcar-install.yaml"
 
 // Config wraps the contents of a ConfigFile in a type.
 type Config struct {
-	Hostname       string   `json:"hostname,omitempty"`
-	Username       string   `json:"username,omitempty"`
-	PasswordHash   string   `json:"passwordHash,omitempty"`
-	AuthorizedKeys []string `json:"authorizedKeys,omitempty"`
+	Hostname        string   `json:"hostname,omitempty"`
+	Username        string   `json:"username,omitempty"`
+	PasswordHash    string   `json:"passwordHash,omitempty"`
+	AuthorizedKeys  []string `json:"authorizedKeys,omitempty"`
+	BlockDevicePath string   `json:blockDevicePath,omitempty"`
+	SizeGB          string   `json:sizeGB,omitempty"`
 }
