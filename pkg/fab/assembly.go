@@ -195,9 +195,8 @@ var (
 	RefVLABEEPROMEdit = cnc.Ref{Name: "onie-qcow2-eeprom-edit", Tag: "latest"}
 
 	//Logan Testing
-	// TODO change control-iso-root to something about the live image tree
 	RefLiveImageTree = cnc.Ref{Repo: "ghcr.io/mrbojangles3", Name: "control-iso-root", Tag: "0.5"}
-	RefOEMCpio       = cnc.Ref{Repo: "ghcr.io/mrbojangles3", Name: "hedgehog-oem-cpio", Tag: "v0.1"}
+	RefOEMCpio       = cnc.Ref{Repo: "ghcr.io/mrbojangles3", Name: "hedgehog-oem-cpio", Tag: "latest"}
 )
 
 const (
