@@ -183,6 +183,13 @@ func createEfi(diskImg, workdir string) error {
 	err = copyFile("/", workdir+"/oem.cpio.gz", espFs, buf)
 	err = copyFile("/", workdir+"/flatcar_production_pxe.vmlinuz", espFs, buf)
 	err = copyFile("/", workdir+"/flatcar_production_image.bin.bz2", backpackFs, buf)
+	// TODO - we are in control-iso, need to be in control-os/ignition.json
+	// maybe modify the workdir path, since we know we are neighbors
+
+	basePath := filepath.Dir(workdir)
+	ignitionPath := filepath.Join(basePath, "control-os")
+	err = copyFile("/", ignitionPath+"/ignition.json", backpackFs, buf)
+	err = copyTree(basePath, "/control-install", backpackFs)
 	return err
 }
 
