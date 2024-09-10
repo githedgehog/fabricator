@@ -198,7 +198,7 @@ hhfab-flatcar-install:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/hhfab-flatcar-install -ldflags="-w -s -X main.version=$(VERSION)" $(GOFLAGS) ./cmd/hhfab-flatcar-install
 
 .PHONY: hhfab
-hhfab: fmt build-embed-cnc-bin hhfab-flatcar-install ## Build hhfab CLI for Linux amd64
+hhfab: fmt build-embed-cnc-bin ## Build hhfab CLI for Linux amd64
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/hhfab -ldflags="-w -s -X main.version=$(VERSION)" $(GOFLAGS) ./cmd/hhfab
 
 .PHONY: hhfab-local
@@ -235,9 +235,10 @@ push: hhfab-push
 
 .PHONY: burn-butane
 burn-butane:
-	butane --output ./cmd/hhfab-flatcar-install/usr/share/oem/config.ign --files-dir ./bin/ ./cmd/hhfab-flatcar-install/backpack.bu
+	butane --strict --output ./cmd/hhfab-flatcar-install/usr/share/oem/config.ign --files-dir ./bin/ ./cmd/hhfab-flatcar-install/backpack.bu
 
 .PHONY: oem-cpio
 oem-cpio: hhfab-flatcar-install burn-butane
 	cd ./cmd/hhfab-flatcar-install/ && find usr | cpio -o -H newc | gzip > ../../bin/oem.cpio.gz
+	cd ./bin && oras push ghcr.io/mrbojangles3/hedgehog-oem-cpio:$(VERSION),latest oem.cpio.gz
 
