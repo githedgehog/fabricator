@@ -2,13 +2,13 @@ variant: flatcar
 version: 1.1.0
 storage:
   filesystems:
-    - path: /opt/hedgehog
+    - path: /mnt/hedgehog
       device: /dev/disk/by-label/OEM
       with_mount_unit: true
       wipe_filesystem: false
       format: vfat
   files:
-    - path: /opt/hedgehog/hhfab-flatcar-install
+    - path: /mnt/hedgehog/hhfab-flatcar-install
       overwrite: true
       contents:
         local: ./hhfab-flatcar-install
@@ -33,16 +33,17 @@ systemd:
         [Install]
         WantedBy=multi-user.target
 
-    - name: binary-hello.service
+    - name: flatcar-install.service
       enabled: true
       contents: |
         [Unit]
-        Description=A hello world unit,from a go binary!
+	After=default.target
+        Description=Hedgehog crafted automatic flatcar-install
 
         [Service]
         Type=oneshot
-        ExecStart=/opt/test-bin
+        ExecStart=/mnt/hedgehog/hhfab-flatcar-install
 
         [Install]
-        WantedBy=multi-user.target
+        WantedBy=default.target
 
