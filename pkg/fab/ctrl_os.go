@@ -153,10 +153,12 @@ func (cfg *ControlOS) Build(_ string, _ cnc.Preset, _ meta.FabricMode, get cnc.G
 				Name: install.ConfigFile,
 			},
 			Content: cnc.YAMLFrom(install.Config{
-				Hostname:       hostname,
-				Username:       username,
-				PasswordHash:   cfg.PasswordHash,
-				AuthorizedKeys: authorizedKeys,
+				Hostname:        hostname,
+				Username:        username,
+				PasswordHash:    cfg.PasswordHash,
+				AuthorizedKeys:  authorizedKeys,
+				BlockDevicePath: "/dev/vda",
+				SizeGB:          "20",
 			}),
 		})
 
