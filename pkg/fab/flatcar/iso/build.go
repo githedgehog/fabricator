@@ -32,13 +32,14 @@ import (
 )
 
 // Copies a file from the local directory to the newly created filesystem, does not rename files.
-func copyFile(dstPath string, srcPath string, destination filesystem.FileSystem, buf []byte) error {
+// func copyFile(dstPath string, srcPath string, destination filesystem.FileSystem, buf []byte) error {
+func copyFile(dstPath string, srcPath string, destination filesystem.FileSystem) error {
 	slog.Debug("CopyFile", "DstPath", dstPath, "SrcPath", srcPath, "Destination Filesystem", destination.Label())
 	src, err := os.Open(srcPath)
 	if err != nil {
 		slog.Error("Error opening", "SourcePath", srcPath, "Error:", err.Error())
 	}
-	defer src.Close()
+	//defer src.Close()
 
 	//  "/" is needed to place files in the root dir, diskfs says so
 	if dstPath == "/" {
@@ -48,9 +49,12 @@ func copyFile(dstPath string, srcPath string, destination filesystem.FileSystem,
 	if err != nil {
 		slog.Error("CopyFile Error opening", "DestPath", dstPath, "Error:", err)
 	}
-	defer dest.Close()
+	//defer dest.Close()
 
-	_, err = io.CopyBuffer(dest, src, buf)
+	//_, err = io.CopyBuffer(dest, src, buf)
+	_, err = io.Copy(dest, src)
+	src.Close()
+	dest.Close()
 	return err
 }
 
@@ -76,9 +80,10 @@ func copyTree(workdir, localDirName string, destination filesystem.FileSystem) e
 			}
 		}
 		if !info.IsDir() {
-			buf := make([]byte, 1024*1024)
+			//buf := make([]byte, 1024*1024*1024)
 			dstPath := filepath.Join("/", relPath)
-			err = copyFile(dstPath, path, destination, buf)
+			//err = copyFile(dstPath, path, destination, buf)
+			err = copyFile(dstPath, path, destination)
 			if err != nil {
 				slog.Error("copyFile inside of copyTree returned an error", "Path", path, "Error", err.Error())
 				return err
@@ -176,19 +181,28 @@ func createEfi(diskImg, workdir string) error {
 		return err
 	}
 
-	buf := make([]byte, 256*1024*1024)
+	//buf := make([]byte, 256*1024*1024)
 	// TODO make this some kind of manifest struct wrapping a slice of filenames
-	err = copyFile("/", workdir+"/flatcar_production_pxe_image.cpio.gz", espFs, buf)
+	//err = copyFile("/", workdir+"/flatcar_production_pxe_image.cpio.gz", espFs, buf)
+	err = copyFile("/", workdir+"/flatcar_production_pxe_image.cpio.gz", espFs)
 
+	/* Buffered Copy Land
 	err = copyFile("/", workdir+"/oem.cpio.gz", espFs, buf)
 	err = copyFile("/", workdir+"/flatcar_production_pxe.vmlinuz", espFs, buf)
 	err = copyFile("/", workdir+"/flatcar_production_image.bin.bz2", backpackFs, buf)
 	err = copyFile("/", workdir+"/flatcar-install.yaml", backpackFs, buf)
+	*/
+
+	err = copyFile("/", workdir+"/oem.cpio.gz", espFs)
+	err = copyFile("/", workdir+"/flatcar_production_pxe.vmlinuz", espFs)
+	err = copyFile("/", workdir+"/flatcar_production_image.bin.bz2", backpackFs)
+	err = copyFile("/", workdir+"/flatcar-install.yaml", backpackFs)
 
 	basePath := filepath.Dir(workdir)
 	ignitionPath := filepath.Join(basePath, "control-os")
-	err = copyFile("/", ignitionPath+"/ignition.json", backpackFs, buf)
-	//err = copyTree(basePath, "/control-install", backpackFs)
+	//err = copyFile("/", ignitionPath+"/ignition.json", backpackFs, buf)
+	err = copyFile("/", ignitionPath+"/ignition.json", backpackFs)
+	err = copyTree(basePath, "/control-install", backpackFs)
 	return err
 }
 
