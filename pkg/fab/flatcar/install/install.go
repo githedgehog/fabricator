@@ -155,6 +155,7 @@ func populateBlockDevice(config *Config) error {
 		for i, d := range disks.Devices {
 			userHint, _ := strconv.ParseUint(config.SizeGB, 10, 64)
 			if d.Size == userHint {
+				slog.Debug("Used user hint to find block device", "userHint", userHint, "Found Disk", disks.Devices[i].Path)
 				config.BlockDevicePath = disks.Devices[i].Path
 				return nil
 			}
@@ -212,6 +213,9 @@ func launchFlatcarInstaller(config Config) error {
 
 // mountUnbootedFlatcar is reponsible for booting the block device at a known location
 func mountUnbootedFlatcar(config Config) error {
+	//TODO sudo partprobe config.BlockDevicePath
+	// attempt to expand image to
+
 	slog.Info("MountUnbootedFlatcar", "BlockDevice", config.BlockDevicePath)
 	return nil
 
@@ -223,12 +227,12 @@ func copyControlInstallFiles() error {
 	// this is most likely going to be in /opt/hedgehog
 	// Need to sudo mount the config.BlockDevicePath to a temp location
 	// Need to rsync? cp -r ? , something all of the control-os dir to the base system
-	slog.Info("CopyInstall Files", "Destination", "/mnt/opt/hedgehog", "Src", "/mnt/hedgehot/control-os")
+	slog.Info("CopyInstall Files", "Destination", "/mnt/root/hedgehog", "Src", "/mnt/hedgehot/control-os")
 	return nil
 }
 
 func rebootSystem() {
-	slog.Info("Rebooting", "Live image", "Flatcar")
+	slog.Info("Rebooting Live Image")
 }
 
 func PreInstallCheck(_ context.Context, basedir string, dryRun bool) error {

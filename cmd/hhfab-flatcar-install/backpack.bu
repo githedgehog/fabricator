@@ -16,7 +16,7 @@ storage:
     - path: /etc/motd.d/fabric.conf
       mode: 0644
       contents:
-        inline: "Welcome to the Flatcar Linux Live Environment, presented by HedgeHog"
+        inline: "Welcome to the Flatcar Linux Live Environment, presented by HedgeHog.Automatic install started, monitor with journalctl -f -u flatcar-install.service"
 
 
 systemd:
