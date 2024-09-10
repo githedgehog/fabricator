@@ -46,7 +46,7 @@ func copyFile(dstPath string, srcPath string, destination filesystem.FileSystem,
 	}
 	dest, err := destination.OpenFile(dstPath, os.O_CREATE|os.O_RDWR)
 	if err != nil {
-		slog.Error("Error opening", "DestPath", dstPath, "Error:", err)
+		slog.Error("CopyFile Error opening", "DestPath", dstPath, "Error:", err)
 	}
 	defer dest.Close()
 
@@ -98,9 +98,9 @@ func copyTree(workdir, localDirName string, destination filesystem.FileSystem) e
 func createEfi(diskImg, workdir string) error {
 
 	var (
-		espSize             int64 = 500 * 1024 * 1024      // 500 MiB
-		oemSize             int64 = 1 * 1024 * 1024 * 1024 // 1 GiB
-		dataSize            int64 = espSize + oemSize      // 1 GiB + 500MiB
+		espSize             int64 = 500 * 1024 * 1024                               // 500 MiB
+		oemSize             int64 = (10 * 1024 * 1024 * 1024) + (500 * 1024 * 1024) // 10.5 GiB
+		dataSize            int64 = espSize + oemSize                               // 1 GiB + 500MiB
 		blkSize             int64 = 512
 		diskSize            int64 = dataSize + 2*16896 + (1024 * 1024) //GPT partition is 33 LBA in size, there are two of them. gdisk said I was missing a MiB so I added it.
 		espPartitionStart   int64 = 2048
@@ -183,18 +183,18 @@ func createEfi(diskImg, workdir string) error {
 	err = copyFile("/", workdir+"/oem.cpio.gz", espFs, buf)
 	err = copyFile("/", workdir+"/flatcar_production_pxe.vmlinuz", espFs, buf)
 	err = copyFile("/", workdir+"/flatcar_production_image.bin.bz2", backpackFs, buf)
-	// TODO - we are in control-iso, need to be in control-os/ignition.json
-	// maybe modify the workdir path, since we know we are neighbors
+	err = copyFile("/", workdir+"/flatcar-install.yaml", backpackFs, buf)
 
 	basePath := filepath.Dir(workdir)
 	ignitionPath := filepath.Join(basePath, "control-os")
 	err = copyFile("/", ignitionPath+"/ignition.json", backpackFs, buf)
-	err = copyTree(basePath, "/control-install", backpackFs)
+	//err = copyTree(basePath, "/control-install", backpackFs)
 	return err
 }
 
 // Build builds the Control Node ISO only, the components needed for this are downloaded as a bundle in a previous step.
 func Build(_ context.Context, basedir string) error {
+
 	start := time.Now()
 
 	installer := filepath.Join(basedir, fab.BundleControlInstall.Name)
@@ -202,8 +202,10 @@ func Build(_ context.Context, basedir string) error {
 	workdir := filepath.Join(basedir, fab.BundleControlISO.Name)
 
 	slog.Info("Building Control Node ISO", "target", target, "workdir", workdir, "installer", installer)
-
+	//f, err := os.Create("CpuProfile")
+	//pprof.StartCPUProfile(f)
 	err := createEfi(target, workdir)
+	//pprof.StopCPUProfile()
 	slog.Info("ISO building done", "took", time.Since(start))
 
 	return err
