@@ -21,8 +21,6 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
-	"fmt"
-	"log"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -31,7 +29,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/manifoldco/promptui"
 	"github.com/pkg/errors"
 	"sigs.k8s.io/yaml"
 )
@@ -79,10 +76,10 @@ func getDisks() *BlockDevices {
 	stdout, err := lsblkCmd.Output()
 
 	if err != nil {
-		log.Fatal("lsblk error: ", stderr.String())
+		slog.Error("lsblk error", "Stderr", stderr.String())
 	}
 	if err = json.Unmarshal(stdout, disks); err != nil {
-		log.Fatal("Unmarshal:", err)
+		slog.Error("Unmarshal from lsblk", err.Error())
 	}
 
 	slices.SortFunc(disks.Devices, func(a, b *BlockDevice) int {
@@ -109,7 +106,7 @@ func prettyMetaData(disks *BlockDevices) *BlockDevices {
 	return disks
 }
 
-// checks that the config file has all the info needed for install. Prompts user for missing info. A happy path exit means the install can move forward
+// checks that the config file has all the info needed for install. A happy path exit means the install can move forward
 func checkConfigFile(configFilePath string, config *Config) (bool, error) {
 
 	if _, err := os.Stat(configFilePath); err != nil {
@@ -147,6 +144,7 @@ func checkConfigFile(configFilePath string, config *Config) (bool, error) {
 }
 
 func populatePassword(config *Config) {
+	slog.Info("Would be calling populate password")
 
 }
 func populateBlockDevice(config *Config) error {
@@ -163,46 +161,102 @@ func populateBlockDevice(config *Config) error {
 		}
 
 	}
-	templates := &promptui.SelectTemplates{
-		Label:    "{{ .Description }}",
-		Active:   "\U0001F994 {{ .Description | cyan }}",
-		Inactive: "{{ .Description | cyan }}",
-		Selected: "\U0001F994 {{ .Description | red | cyan }}",
-	}
+	// TODO this is the function where we would print the disk options and ask
+	// and ask the user to select the desired disk. It is not simple to automatically
+	// take over an interative login shell in systemd on a system with a RO /home dir
+	// This might be a way to go, use this as login shell ?https://pkg.go.dev/golang.org/x/term
+	/*
+			templates := &promptui.SelectTemplates{
+				Label:    "{{ .Description }}",
+				Active:   "\U0001F994 {{ .Description | cyan }}",
+				Inactive: "{{ .Description | cyan }}",
+				Selected: "\U0001F994 {{ .Description | red | cyan }}",
+			}
 
-	prompt := promptui.Select{
-		Label:     "Select Install Disk",
-		Items:     disks.Devices,
-		Templates: templates,
-	}
+			prompt := promptui.Select{
+				Label:     "Select Install Disk",
+				Items:     disks.Devices,
+				Templates: templates,
+			}
 
-	// TODO - check if there is a way to pass os.Stdin, or double check where this is listening
-	// this might be a problem for running at login.
-	index, _, err := prompt.Run()
+			// TODO - check if there is a way to pass os.Stdin, or double check where this is listening
+			// this might be a problem for running at login.
+				//index, _, err := prompt.Run()
 
-	if err != nil {
-		fmt.Printf("Prompt failed %v\n", err)
-		return err
-	}
+				if err != nil {
+					fmt.Printf("Prompt failed %v\n", err)
+					return err
+				}
 
-	slog.Debug("Block Device Choise", "description", disks.Devices[index].Description, "size", disks.Devices[index].Size)
-	config.BlockDevicePath = disks.Devices[index].Path
+		slog.Debug("Block Device Choice", "description", disks.Devices[index].Description, "size", disks.Devices[index].Size)
+		config.BlockDevicePath = disks.Devices[index].Path
+	*/
 	return nil
 
 }
+func launchFlatcarInstaller(config Config) error {
+	// TODO this is where we will exec the flatcar installer with the values from the ignition.json file
+	//TODO read the config file to find install device
+
+	slog.Info("Running Install", "BlockDevice", config.BlockDevicePath)
+	installCmd := exec.Command("sudo /usr/bin/flatcar-install", "-i", "/mnt/hedgehog/ignition.json", "-d", config.BlockDevicePath, "-f", "/mnt/hedgehog/flatcar_production_image.bin.bz2")
+	var stderr bytes.Buffer
+	installCmd.Stderr = &stderr
+
+	_, err := installCmd.Output()
+	if err != nil {
+		slog.Error("flatcar install error", "Stderr", stderr.String())
+	}
+	return nil
+}
+
+// mountUnbootedFlatcar is reponsible for booting the block device at a known location
+func mountUnbootedFlatcar(config Config) error {
+	slog.Info("MountUnbootedFlatcar", "BlockDevice", config.BlockDevicePath)
+	return nil
+
+}
+
+// copyControlInstallFiles will take the control-os
+func copyControlInstallFiles() error {
+	// TODO after the installer is done, we need to copy the first boot files onto the newely installed but not-yet-booted flatcar system
+	// this is most likely going to be in /opt/hedgehog
+	// Need to sudo mount the config.BlockDevicePath to a temp location
+	// Need to rsync? cp -r ? , something all of the control-os dir to the base system
+	slog.Info("CopyInstall Files", "Destination", "/mnt/opt/hedgehog", "Src", "/mnt/hedgehot/control-os")
+	return nil
+}
+
+func rebootSystem() {
+	slog.Info("Rebooting", "Live image", "Flatcar")
+}
+
 func PreInstallCheck(_ context.Context, basedir string, dryRun bool) error {
 	slog.Debug("Using", "basedir", basedir, "dryRun", dryRun)
 
 	configFile := filepath.Join(basedir, ConfigFile)
 	config := Config{}
 
-	checkConfigFile(configFile, &config)
+	proceed, err := checkConfigFile(configFile, &config)
+	if err != nil {
+		slog.Info("Check config failed", "Error", err.Error())
+		return err
+	}
 	if dryRun {
 		slog.Info("Config", "config", config)
 		return nil
 	}
+	if proceed != true {
+		//TODO Prompt user for config file changes
+	}
 
 	slog.Info("Config Before ignition", "config", config)
-	// TODO Write config to butane/ ignition so we can install
+	// TODO Write missing ssh-keys or password to ignition
+	// this might not be true, since we need
+	launchFlatcarInstaller(config)
+	mountUnbootedFlatcar(config)
+	copyControlInstallFiles()
+	rebootSystem()
+
 	return nil
 }

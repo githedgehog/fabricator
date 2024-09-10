@@ -123,9 +123,7 @@ func (cfg *ControlOS) Build(_ string, _ cnc.Preset, _ meta.FabricMode, get cnc.G
 	//   Ignition file it needs to have an ignition file, with the binary that asks questions or starts the installer
 	//   That ignition file needs to be packaged as a cpio.gz archive
 
-	//cfg.FlatcarRef = cfg.FlatcarRef.Fallback(BaseConfig(get).Source)
 	run(BundleControlISO, Stage, "Live-Image-Root",
-		//&cnc.SyncOCI{
 		&cnc.FilesORAS{
 			Ref: cfg.LiveImageRoot,
 			Files: []cnc.File{
@@ -133,7 +131,6 @@ func (cfg *ControlOS) Build(_ string, _ cnc.Preset, _ meta.FabricMode, get cnc.G
 			},
 		})
 	run(BundleControlISO, Stage, "CPIO-OEM",
-		//&cnc.SyncOCI{
 		&cnc.FilesORAS{
 			Ref: cfg.OEMCpio,
 			Files: []cnc.File{

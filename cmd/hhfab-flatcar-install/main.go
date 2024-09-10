@@ -75,7 +75,7 @@ func main() {
 		Name:        "basedir",
 		Aliases:     []string{"d"},
 		Usage:       "use workir `DIR`",
-		Value:       "/opt/hedgehog/", // TODO verify this is in _all_places
+		Value:       "/mnt/hedgehog/", // TODO verify this is in _all_places
 		Destination: &basedir,
 	}
 
@@ -108,6 +108,7 @@ func main() {
 			slog.Info("Running flatcar-install", "version", version)
 
 			// how to pass the stdin/out handles? Maybe just os.Stdin is enough anywhere
+			// TUI is a PITA to get working inside of systemd, maybe do something...lower tech
 			return errors.Wrapf(install.PreInstallCheck(context.TODO(), basedir, dryRun), "error running flatcar installer")
 		},
 	}
