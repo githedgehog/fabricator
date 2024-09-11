@@ -47,7 +47,7 @@ func copyFile(dstPath string, srcPath string, destination filesystem.FileSystem)
 	}
 	dest, err := destination.OpenFile(dstPath, os.O_CREATE|os.O_RDWR)
 	if err != nil {
-		slog.Error("CopyFile Error opening", "DestPath", dstPath, "Error:", err)
+		slog.Error("CopyFile Error opening", "DestPath", dstPath, "Error:", err.Error())
 	}
 	//defer dest.Close()
 
@@ -202,7 +202,7 @@ func createEfi(diskImg, workdir string) error {
 	ignitionPath := filepath.Join(basePath, "control-os")
 	//err = copyFile("/", ignitionPath+"/ignition.json", backpackFs, buf)
 	err = copyFile("/", ignitionPath+"/ignition.json", backpackFs)
-	err = copyTree(basePath, "/control-install", backpackFs)
+	//err = copyTree(basePath, "/control-install", backpackFs)
 	return err
 }
 
