@@ -203,10 +203,11 @@ func launchFlatcarInstaller(config Config) error {
 	slog.Info("Running Install", "BlockDevice", config.BlockDevicePath)
 	installCmd := exec.Command("sudo /usr/bin/flatcar-install", "-i", "/mnt/hedgehog/ignition.json", "-d", config.BlockDevicePath, "-f", "/mnt/hedgehog/flatcar_production_image.bin.bz2")
 	var stderr bytes.Buffer
+	var stdout bytes.Buffer
 	installCmd.Stderr = &stderr
+	installCmd.Stdout = &stdout
 
-	stdout, err := installCmd.Output()
-	if err != nil {
+	if err := installCmd.Run(); err != nil {
 		slog.Error("flatcar install error", "Stderr", stderr.String())
 		return err
 	}
@@ -237,7 +238,7 @@ func copyControlInstallFiles() error {
 func rebootSystem() {
 	slog.Info("Rebooting Live Image")
 	rebootCmd := exec.Command("sudo", "shutdown", "-r", " +1", "Flatcar installed, Rebooting to installed system")
-	if err := rebootcmd.Run(); err != nil {
+	if err := rebootCmd.Run(); err != nil {
 		slog.Error("Reboot command failed to run")
 	}
 }
