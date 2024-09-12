@@ -1,23 +1,32 @@
-# permissions for end users to view fabricators.
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  labels:
-    app.kubernetes.io/name: fabricator
-    app.kubernetes.io/managed-by: kustomize
-  name: fabricator-fabricator-viewer-role
+  name: manager-role
 rules:
 - apiGroups:
   - fabricator.githedgehog.com
   resources:
   - fabricators
   verbs:
+  - create
+  - delete
   - get
   - list
+  - patch
+  - update
   - watch
+- apiGroups:
+  - fabricator.githedgehog.com
+  resources:
+  - fabricators/finalizers
+  verbs:
+  - update
 - apiGroups:
   - fabricator.githedgehog.com
   resources:
   - fabricators/status
   verbs:
   - get
+  - patch
+  - update

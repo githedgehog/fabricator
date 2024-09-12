@@ -1,0 +1,9 @@
+apiVersion: fabricator.githedgehog.com/v1beta1
+kind: Fabricator
+metadata:
+  labels:
+    app.kubernetes.io/name: fabricator
+    app.kubernetes.io/managed-by: kustomize
+  name: fabricator-sample
+spec:
+  # TODO(user): Add fields here

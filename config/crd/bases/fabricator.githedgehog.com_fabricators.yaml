@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.14.0
+    controller-gen.kubebuilder.io/version: v0.16.1
   name: fabricators.fabricator.githedgehog.com
 spec:
   group: fabricator.githedgehog.com
@@ -14,7 +14,7 @@ spec:
     singular: fabricator
   scope: Namespaced
   versions:
-  - name: v1alpha2
+  - name: v1beta1
     schema:
       openAPIV3Schema:
         description: Fabricator is the Schema for the fabricators API

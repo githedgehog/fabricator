@@ -12,9 +12,14 @@ resources:
 - api:
     crdVersion: v1
     namespaced: true
+  controller: true
   domain: githedgehog.com
   group: fabricator
   kind: Fabricator
-  path: go.githedgehog.com/fabricator/api/fabricator/v1alpha2
-  version: v1alpha2
+  path: go.githedgehog.com/fabricator/api/fabricator/v1beta1
+  version: v1beta1
+  webhooks:
+    defaulting: true
+    validation: true
+    webhookVersion: v1
 version: "3"
