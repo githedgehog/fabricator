@@ -1,13 +1,11 @@
 package hhfab
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 
-	jsonpatch "gopkg.in/evanphx/json-patch.v4"
 	"sigs.k8s.io/yaml"
 )
 
@@ -26,7 +24,6 @@ var ErrContextNotExist = fmt.Errorf("does not exist, create it first using 'hhfa
 
 // Runtime configuration
 type Config struct {
-	Version  string
 	CacheDir string
 	BaseDir  string
 
@@ -46,13 +43,12 @@ type ContextConfig struct {
 }
 
 type RegistryConfig struct {
-	Repo   string `json:"base,omitempty"`
+	Repo   string `json:"repo,omitempty"`
 	Prefix string `json:"prefix,omitempty"`
 }
 
-func Load(version, baseDir, cacheDir string, isContext bool, context string) (*Config, error) {
+func Load(baseDir, cacheDir string, isContext bool, context string) (*Config, error) {
 	cfg := &Config{
-		Version:  version,
 		BaseDir:  baseDir,
 		CacheDir: cacheDir,
 	}
@@ -100,38 +96,4 @@ func Load(version, baseDir, cacheDir string, isContext bool, context string) (*C
 	}
 
 	return cfg, nil
-}
-
-func (cfg ContextConfig) Merge(others ...ContextConfig) (ContextConfig, error) {
-	return mergeConfigs(cfg, others...)
-}
-
-func mergeConfigs[T any](target T, others ...T) (T, error) {
-	if len(others) == 0 {
-		return target, nil
-	}
-
-	origJSON, err := json.Marshal(target)
-	if err != nil {
-		return target, fmt.Errorf("marshalling original config: %w", err)
-	}
-
-	res := target
-	for _, other := range others {
-		otherJSON, err := json.Marshal(other)
-		if err != nil {
-			return target, fmt.Errorf("marshalling other config: %w", err)
-		}
-
-		patchedJSON, err := jsonpatch.MergePatch(origJSON, otherJSON)
-		if err != nil {
-			return target, fmt.Errorf("merging config patch: %w", err)
-		}
-
-		if err := json.Unmarshal(patchedJSON, &res); err != nil {
-			return target, fmt.Errorf("unmarshalling patched: %w", err)
-		}
-	}
-
-	return target, nil
 }

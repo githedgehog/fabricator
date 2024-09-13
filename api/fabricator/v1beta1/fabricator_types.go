@@ -17,31 +17,143 @@ limitations under the License.
 package v1beta1
 
 import (
+	"fmt"
+	"reflect"
+
+	"github.com/go-playground/validator/v10"
+	fmeta "go.githedgehog.com/fabric/api/meta"
+	"go.githedgehog.com/fabricator/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
-// FabricatorSpec defines the desired state of Fabricator
 type FabricatorSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-
-	// Foo is an example field of Fabricator. Edit fabricator_types.go to remove/update
-	Foo string `json:"foo,omitempty"`
+	Config    FabConfig    `json:"config,omitempty"`
+	Overrides FabOverrides `json:"overrides,omitempty"`
 }
 
-// FabricatorStatus defines the observed state of Fabricator
 type FabricatorStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	Versions Versions `json:"versions,omitempty"`
+	// TODO reserved VLANs, subnets, etc.
+}
+
+type FabOverrides struct {
+	Versions Versions `json:"versions,omitempty"`
+}
+
+type FabConfig struct {
+	Control  ControlConfig  `json:"control,omitempty"`
+	Registry RegistryConfig `json:"registry,omitempty"`
+	Fabric   FabricConfig   `json:"fabric,omitempty"`
+}
+
+type ControlConfig struct {
+	ManagementSubnet meta.Prefix `json:"managementSubnet,omitempty"` // TODO should be reserved
+	ControlVIP       meta.Addr   `json:"controlVIP,omitempty"`       // TODO maybe ManagementVIP?
+	TLSSAN           []string    `json:"tlsSAN,omitempty"`           // TODO make sure 127.0.0.1 and controlVIP are always present
+
+	KubeClusterSubnet meta.Prefix `json:"kubeClusterSubnet,omitempty"`
+	KubeServiceSubnet meta.Prefix `json:"kubeServiceSubnet,omitempty"`
+	KubeClusterDNS    meta.Addr   `json:"kubeClusterDNS,omitempty"` // Should be from the service CIDR
+
+	DefaultUser ControlUser `json:"defaultUser,omitempty"`
+}
+
+type ControlUser struct {
+	PasswordHash   string   `json:"password,omitempty"`
+	AuthorizedKeys []string `json:"authorizedKeys,omitempty"`
+}
+
+type RegistryConfig struct {
+	// Airgap bool `json:"airgap,omitempty"` // TODO
+
+	// TODO implement non-airgap
+	// TODO if airgap is true, cache should be empty
+	// Cache  ControlConfigRegistryCache `json:"cache,omitempty"`
+}
+
+type ControlConfigRegistryCache struct {
+	Repo     string `json:"repo,omitempty"`   // ghcr.io
+	Prefix   string `json:"prefix,omitempty"` // githedgehog
+	Username string `json:"username,omitempty"`
+	Password string `json:"password,omitempty"`
+}
+
+type FabricConfig struct {
+	// Mode meta.FabricMode `json:"mode,omitempty"` // TODO remove?
+
+	SpineASN     uint32 `json:"spineASN,omitempty"`
+	LeafASNStart uint32 `json:"leafASNStart,omitempty"`
+	LeafASNEnd   uint32 `json:"leafASNEnd,omitempty"`
+
+	ProtocolSubnet meta.Prefix `json:"protocolSubnet,omitempty"` // TODO should be reserved
+	VTEPSubnet     meta.Prefix `json:"vtepSubnet,omitempty"`     // TODO should be reserved
+	FabricSubnet   meta.Prefix `json:"fabricSubnet,omitempty"`   // TODO should be reserved
+
+	BaseVPCCommunity string            `json:"baseVPCCommunity,omitempty"` // TODO should be reserved
+	VPCIRBVLANs      []fmeta.VLANRange `json:"vpcIRBVLANs,omitempty"`      // TODO should be reserved
+
+	VPCWorkaroundVLANs  []fmeta.VLANRange `json:"vpcWorkaroundVLANs,omitempty"`  // don't need to be reserved
+	VPCWorkaroundSubnet meta.Prefix       `json:"vpcWorkaroundSubnet,omitempty"` // TODO have to be reserved!
+
+	ESLAGMACBase   string `json:"eslaGMACBase,omitempty"`
+	ESLAGESIPrefix string `json:"eslaGESIPrefix,omitempty"`
+
+	DefaultSwitchUsers []SwitchUser `json:"defaultSwitchUsers,omitempty"` // TODO make sure admin user is always present
+}
+
+type SwitchUser struct {
+	Username       string   `json:"username,omitempty"`
+	PasswordHash   string   `json:"password,omitempty"`
+	Role           string   `json:"role,omitempty"` // TODO enum/validate
+	AuthorizedKeys []string `json:"authorizedKeys,omitempty"`
+}
+
+type Versions struct {
+	Platform   PlatformVersions   `json:"platform,omitempty"`
+	Fabricator FabricatorVersions `json:"fabricator,omitempty"`
+	Fabric     FabricVersions     `json:"fabric,omitempty"`
+	VLAB       VLABVersions       `json:"vlab,omitempty"`
+}
+
+type PlatformVersions struct {
+	K3s          meta.Version `json:"k3s,omitempty"`
+	Zot          meta.Version `json:"zot,omitempty"`
+	CertManager  meta.Version `json:"certManager,omitempty"`
+	K9s          meta.Version `json:"k9s,omitempty"`
+	Toolbox      meta.Version `json:"toolbox,omitempty"`
+	Reloader     meta.Version `json:"reloader,omitempty"`
+	ControlProxy meta.Version `json:"controlProxy,omitempty"`
+}
+
+type FabricatorVersions struct {
+	API        meta.Version `json:"api,omitempty"`
+	Controller meta.Version `json:"controller,omitempty"`
+}
+
+type FabricVersions struct {
+	API           meta.Version            `json:"api,omitempty"`
+	Controller    meta.Version            `json:"controller,omitempty"`
+	KubeRBACProxy meta.Version            `json:"kubeRBACProxy,omitempty"`
+	DHCPD         meta.Version            `json:"dhcpd,omitempty"`
+	Boot          meta.Version            `json:"boot,omitempty"`
+	Agent         meta.Version            `json:"agent,omitempty"`
+	ControlAgent  meta.Version            `json:"controlAgent,omitempty"`
+	Ctl           meta.Version            `json:"ctl,omitempty"`
+	Alloy         meta.Version            `json:"alloy,omitempty"`
+	NOS           map[string]meta.Version `json:"nos,omitempty"`
+}
+
+type VLABVersions struct {
+	ONIE    meta.Version `json:"onie,omitempty"`
+	Flatcar meta.Version `json:"flatcar,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-
-// Fabricator is the Schema for the fabricators API
+// +kubebuilder:resource:categories=hedgehog;fabricator,shortName=fab
+// Fabricator defines configuration for the Fabricator controller
 type Fabricator struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -49,6 +161,10 @@ type Fabricator struct {
 	Spec   FabricatorSpec   `json:"spec,omitempty"`
 	Status FabricatorStatus `json:"status,omitempty"`
 }
+
+const (
+	KindFabricator = "Fabricator"
+)
 
 // +kubebuilder:object:root=true
 
@@ -59,6 +175,52 @@ type FabricatorList struct {
 	Items           []Fabricator `json:"items"`
 }
 
+var fabricatorValidate *validator.Validate
+
 func init() {
 	SchemeBuilder.Register(&Fabricator{}, &FabricatorList{})
+
+	fabricatorValidate = validator.New()
+
+	fabricatorValidate.RegisterCustomTypeFunc(func(field reflect.Value) interface{} {
+		if version, ok := field.Interface().(meta.Version); ok {
+			_, err := version.Parse()
+			if err != nil {
+				return err //nolint:wrapcheck
+			}
+		}
+
+		return nil
+	}, meta.Version(""))
+
+	fabricatorValidate.RegisterCustomTypeFunc(func(field reflect.Value) interface{} {
+		if addr, ok := field.Interface().(meta.Addr); ok {
+			_, err := addr.Parse()
+			if err != nil {
+				return err //nolint:wrapcheck
+			}
+		}
+
+		return nil
+	}, meta.Addr(""))
+
+	fabricatorValidate.RegisterCustomTypeFunc(func(field reflect.Value) interface{} {
+		if prefix, ok := field.Interface().(meta.Prefix); ok {
+			_, err := prefix.Parse()
+			if err != nil {
+				return err //nolint:wrapcheck
+			}
+		}
+
+		return nil
+	}, meta.Prefix(""))
+}
+
+func (f *Fabricator) Validate() error {
+	err := fabricatorValidate.Struct(f)
+	if err != nil {
+		return fmt.Errorf("validating: %w", err)
+	}
+
+	return nil
 }
