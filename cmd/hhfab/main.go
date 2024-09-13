@@ -323,7 +323,7 @@ func Run(ctx context.Context) error {
 						Name:        ContextNameFlag,
 						Aliases:     ContextNameFlagAliases,
 						Usage:       "set current context to `NAME`",
-						Value:       defaultContext,
+						Required:    true,
 						Destination: &currentContext,
 						Action:      contextNameValidator,
 					},
