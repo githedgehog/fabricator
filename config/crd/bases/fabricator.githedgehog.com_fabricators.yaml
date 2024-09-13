@@ -8,16 +8,21 @@ metadata:
 spec:
   group: fabricator.githedgehog.com
   names:
+    categories:
+    - hedgehog
+    - fabricator
     kind: Fabricator
     listKind: FabricatorList
     plural: fabricators
+    shortNames:
+    - fab
     singular: fabricator
   scope: Namespaced
   versions:
   - name: v1beta1
     schema:
       openAPIV3Schema:
-        description: Fabricator is the Schema for the fabricators API
+        description: Fabricator defines configuration for the Fabricator controller
         properties:
           apiVersion:
             description: |-
@@ -37,15 +42,221 @@ spec:
           metadata:
             type: object
           spec:
-            description: FabricatorSpec defines the desired state of Fabricator
             properties:
-              foo:
-                description: Foo is an example field of Fabricator. Edit fabricator_types.go
-                  to remove/update
-                type: string
+              config:
+                properties:
+                  control:
+                    properties:
+                      controlVIP:
+                        type: string
+                      defaultUser:
+                        properties:
+                          authorizedKeys:
+                            items:
+                              type: string
+                            type: array
+                          password:
+                            type: string
+                        type: object
+                      kubeClusterDNS:
+                        type: string
+                      kubeClusterSubnet:
+                        type: string
+                      kubeServiceSubnet:
+                        type: string
+                      managementSubnet:
+                        type: string
+                      tlsSAN:
+                        items:
+                          type: string
+                        type: array
+                    type: object
+                  fabric:
+                    properties:
+                      baseVPCCommunity:
+                        type: string
+                      defaultSwitchUsers:
+                        items:
+                          properties:
+                            authorizedKeys:
+                              items:
+                                type: string
+                              type: array
+                            password:
+                              type: string
+                            role:
+                              type: string
+                            username:
+                              type: string
+                          type: object
+                        type: array
+                      eslaGESIPrefix:
+                        type: string
+                      eslaGMACBase:
+                        type: string
+                      fabricSubnet:
+                        type: string
+                      leafASNEnd:
+                        format: int32
+                        type: integer
+                      leafASNStart:
+                        format: int32
+                        type: integer
+                      protocolSubnet:
+                        type: string
+                      spineASN:
+                        format: int32
+                        type: integer
+                      vpcIRBVLANs:
+                        items:
+                          properties:
+                            from:
+                              type: integer
+                            to:
+                              type: integer
+                          type: object
+                        type: array
+                      vpcWorkaroundSubnet:
+                        type: string
+                      vpcWorkaroundVLANs:
+                        items:
+                          properties:
+                            from:
+                              type: integer
+                            to:
+                              type: integer
+                          type: object
+                        type: array
+                      vtepSubnet:
+                        type: string
+                    type: object
+                  registry:
+                    type: object
+                type: object
+              overrides:
+                properties:
+                  versions:
+                    properties:
+                      fabric:
+                        properties:
+                          agent:
+                            type: string
+                          alloy:
+                            type: string
+                          api:
+                            type: string
+                          boot:
+                            type: string
+                          controlAgent:
+                            type: string
+                          controller:
+                            type: string
+                          ctl:
+                            type: string
+                          dhcpd:
+                            type: string
+                          kubeRBACProxy:
+                            type: string
+                          nos:
+                            additionalProperties:
+                              type: string
+                            type: object
+                        type: object
+                      fabricator:
+                        properties:
+                          api:
+                            type: string
+                          controller:
+                            type: string
+                        type: object
+                      platform:
+                        properties:
+                          certManager:
+                            type: string
+                          controlProxy:
+                            type: string
+                          k3s:
+                            type: string
+                          k9s:
+                            type: string
+                          reloader:
+                            type: string
+                          toolbox:
+                            type: string
+                          zot:
+                            type: string
+                        type: object
+                      vlab:
+                        properties:
+                          flatcar:
+                            type: string
+                          onie:
+                            type: string
+                        type: object
+                    type: object
+                type: object
             type: object
           status:
-            description: FabricatorStatus defines the observed state of Fabricator
+            properties:
+              versions:
+                properties:
+                  fabric:
+                    properties:
+                      agent:
+                        type: string
+                      alloy:
+                        type: string
+                      api:
+                        type: string
+                      boot:
+                        type: string
+                      controlAgent:
+                        type: string
+                      controller:
+                        type: string
+                      ctl:
+                        type: string
+                      dhcpd:
+                        type: string
+                      kubeRBACProxy:
+                        type: string
+                      nos:
+                        additionalProperties:
+                          type: string
+                        type: object
+                    type: object
+                  fabricator:
+                    properties:
+                      api:
+                        type: string
+                      controller:
+                        type: string
+                    type: object
+                  platform:
+                    properties:
+                      certManager:
+                        type: string
+                      controlProxy:
+                        type: string
+                      k3s:
+                        type: string
+                      k9s:
+                        type: string
+                      reloader:
+                        type: string
+                      toolbox:
+                        type: string
+                      zot:
+                        type: string
+                    type: object
+                  vlab:
+                    properties:
+                      flatcar:
+                        type: string
+                      onie:
+                        type: string
+                    type: object
+                type: object
             type: object
         type: object
     served: true

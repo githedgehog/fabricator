@@ -27,6 +27,7 @@ import (
 	"github.com/mattn/go-isatty"
 	"github.com/urfave/cli/v2"
 	"go.githedgehog.com/fabricator/pkg/hhfab"
+	"go.githedgehog.com/fabricator/pkg/version"
 	"golang.org/x/term"
 )
 
@@ -36,8 +37,6 @@ const (
 )
 
 var ContextNameFlagAliases = []string{"c"}
-
-var version = "(devel)"
 
 func main() {
 	if err := Run(context.Background()); err != nil {
@@ -164,7 +163,7 @@ func Run(ctx context.Context) error {
 			}
 
 			args := []any{
-				"version", version,
+				"version", version.Version,
 			}
 
 			if isContext {
@@ -195,7 +194,7 @@ func Run(ctx context.Context) error {
 			slog.Info("Hedgehog Fabricator", args...)
 			// }
 
-			cfg, err = hhfab.Load(version, baseDir, cacheDir, isContext, currentContext)
+			cfg, err = hhfab.Load(baseDir, cacheDir, isContext, currentContext)
 			if err != nil {
 				return fmt.Errorf("loading config: %w", err)
 			}
@@ -226,7 +225,7 @@ func Run(ctx context.Context) error {
 	5.  Build Hedgehog installer with 'hhfab build'
 	6.  Use 'hhfab vlab up' to run VLAB (will run build automatically if outdated)
 		`,
-		Version:                version,
+		Version:                version.Version,
 		Suggest:                true,
 		UseShortOptionHandling: true,
 		EnableBashCompletion:   true,
@@ -263,7 +262,7 @@ func Run(ctx context.Context) error {
 						EnvVars: []string{"HHFAB_REG_PREFIX"},
 						Value:   hhfab.DefaultPrefix,
 					},
-					// TODO allow using existing config and wiring
+					// TODO allow using existing config and wiring, maybe default password/keys, airgap, vlab, etc
 				),
 				Before: before(false, false, false),
 				Action: func(c *cli.Context) error {
