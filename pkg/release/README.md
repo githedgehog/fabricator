@@ -49,8 +49,27 @@ helm repo update project-zot
 
 helm pull project-zot/zot --version "${ZOT_CHART_VERSION}"
 mv zot-${ZOT_CHART_VERSION}.tgz "zot-${ZOT_VERSION}".tgz
-helm push "zot-${ZOT_VERSION}.tgz" oci://ghcr.io/githedgehog/fabricator/charts/zot
+helm push "zot-${ZOT_VERSION}.tgz" oci://ghcr.io/githedgehog/fabricator/charts
 oras push "ghcr.io/githedgehog/fabricator/zot-chart:${ZOT_VERSION}" "zot-${ZOT_VERSION}.tgz"
 
 skopeo copy "docker://ghcr.io/project-zot/zot-linux-amd64:${ZOT_VERSION}" "docker://ghcr.io/githedgehog/fabricator/zot:${ZOT_VERSION}"
+```
+
+## Cert-manager
+
+```bash
+export CERT_MANAGER_VERSION="v1.15.3"
+
+helm repo add jetstack https://charts.jetstack.io
+helm repo update jetstack
+
+helm pull jetstack/cert-manager --version "${CERT_MANAGER_VERSION}"
+helm push "cert-manager-${CERT_MANAGER_VERSION}.tgz" oci://ghcr.io/githedgehog/fabricator/charts
+oras push "ghcr.io/githedgehog/fabricator/cert-manager-chart:${CERT_MANAGER_VERSION}" "cert-manager-${CERT_MANAGER_VERSION}.tgz"
+
+skopeo copy --all docker://{quay.io/jetstack,ghcr.io/githedgehog/fabricator}/cert-manager-controller:${CERT_MANAGER_VERSION}
+skopeo copy --all docker://{quay.io/jetstack,ghcr.io/githedgehog/fabricator}/cert-manager-webhook:${CERT_MANAGER_VERSION}
+skopeo copy --all docker://{quay.io/jetstack,ghcr.io/githedgehog/fabricator}/cert-manager-cainjector:${CERT_MANAGER_VERSION}
+skopeo copy --all docker://{quay.io/jetstack,ghcr.io/githedgehog/fabricator}/cert-manager-acmesolver:${CERT_MANAGER_VERSION}
+skopeo copy --all docker://{quay.io/jetstack,ghcr.io/githedgehog/fabricator}/cert-manager-startupapicheck:${CERT_MANAGER_VERSION}
 ```
