@@ -10,7 +10,7 @@ var Versions = fabapi.Versions{
 	Platform: fabapi.PlatformVersions{
 		K3s:          "v1.31.0-k3s1",
 		Zot:          "v2.1.1",
-		CertManager:  "v1.13.0", // TODO upgrade to v1.15.3 or newer
+		CertManager:  "v1.15.3", // TODO upgrade to latest
 		K9s:          "v0.32.4", // TODO upgrade to v0.32.5 or newer
 		Toolbox:      "latest",  // TODO use specific version
 		Reloader:     "v1.0.40", // TODO upgrade or get rid of
