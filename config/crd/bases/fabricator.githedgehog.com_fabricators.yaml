@@ -155,8 +155,6 @@ spec:
                             type: string
                           dhcpd:
                             type: string
-                          kubeRBACProxy:
-                            type: string
                           nos:
                             additionalProperties:
                               type: string
@@ -217,8 +215,6 @@ spec:
                       ctl:
                         type: string
                       dhcpd:
-                        type: string
-                      kubeRBACProxy:
                         type: string
                       nos:
                         additionalProperties:

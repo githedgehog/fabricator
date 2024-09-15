@@ -133,16 +133,15 @@ type FabricatorVersions struct {
 }
 
 type FabricVersions struct {
-	API           meta.Version            `json:"api,omitempty"`
-	Controller    meta.Version            `json:"controller,omitempty"`
-	KubeRBACProxy meta.Version            `json:"kubeRBACProxy,omitempty"`
-	DHCPD         meta.Version            `json:"dhcpd,omitempty"`
-	Boot          meta.Version            `json:"boot,omitempty"`
-	Agent         meta.Version            `json:"agent,omitempty"`
-	ControlAgent  meta.Version            `json:"controlAgent,omitempty"`
-	Ctl           meta.Version            `json:"ctl,omitempty"`
-	Alloy         meta.Version            `json:"alloy,omitempty"`
-	NOS           map[string]meta.Version `json:"nos,omitempty"`
+	API          meta.Version            `json:"api,omitempty"`
+	Controller   meta.Version            `json:"controller,omitempty"`
+	DHCPD        meta.Version            `json:"dhcpd,omitempty"`
+	Boot         meta.Version            `json:"boot,omitempty"`
+	Agent        meta.Version            `json:"agent,omitempty"`
+	ControlAgent meta.Version            `json:"controlAgent,omitempty"`
+	Ctl          meta.Version            `json:"ctl,omitempty"`
+	Alloy        meta.Version            `json:"alloy,omitempty"`
+	NOS          map[string]meta.Version `json:"nos,omitempty"`
 }
 
 type VLABVersions struct {
