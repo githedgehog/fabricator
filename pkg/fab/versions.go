@@ -1,4 +1,4 @@
-package release
+package fab
 
 import (
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
