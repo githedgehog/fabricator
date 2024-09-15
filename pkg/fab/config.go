@@ -1,4 +1,4 @@
-package release
+package fab
 
 import (
 	fmeta "go.githedgehog.com/fabric/api/meta"
