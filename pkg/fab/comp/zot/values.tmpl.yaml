@@ -1,0 +1,54 @@
+replicaCount: 1
+image:
+  repository: {{ .Repo }}
+  pullPolicy: IfNotPresent
+  tag: {{ .Tag }}
+
+service:
+  type: NodePort
+  port: 5000
+  nodePort: {{ .Port }}
+
+httpGet:
+  scheme: HTTPS
+
+persistence: true
+pvc:
+  create: true
+  storage: 30Gi
+
+mountSecret: true
+secretFiles:
+  htpasswd: |-
+{{- range .Users }}{{ . | nindent 4 }}{{ end }}
+{{- if .Sync }}
+  credentials.json: |-
+    {
+      "ghcr.io": {
+        "username": "",
+        "password": ""
+      }
+    }
+{{- end }}
+
+externalSecrets:
+  - secretName: {{ .TLSSecret }}
+    mountPath: /tls
+
+mountConfig: true
+
+configFiles:
+  config.json: |-
+{{ .Config | indent 4 }}
+
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxUnavailable: 1
+
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: false
+    interval: "30s"
+    path: "/metrics"
