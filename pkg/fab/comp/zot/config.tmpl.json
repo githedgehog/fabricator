@@ -1,0 +1,67 @@
+{
+  "log": { "level": "debug" },
+  "storage": { "rootDirectory": "/var/lib/registry" },
+  "http": {
+    "address": "0.0.0.0",
+    "port": "5000",
+    "tls": {
+      "cert": "/tls/tls.crt",
+      "key": "/tls/tls.key"
+    },
+    "auth": { "htpasswd": { "path": "/secret/htpasswd" } },
+    "accessControl": {
+      "repositories": {
+        "**": {
+          "policies": [
+            {
+              "users": ["reader"],
+              "actions": ["read"]
+            },
+            {
+              "users": ["admin", "writer"],
+              "actions": ["read", "create", "update", "delete"]
+            }
+          ],
+          "defaultPolicy": []
+        },
+        "__kubeprobe": {
+          "anonymousPolicy": ["read"]
+        }
+      },
+      "adminPolicy": {
+        "users": ["admin"],
+        "actions": ["read", "create", "update", "delete"]
+      }
+    }
+  },
+  "extensions": {
+{{- if .Sync }}
+    "sync": {
+      "enable": true,
+      "credentialsFile": "/secret/credentials.json",
+      "registries": [
+        {
+          "urls": ["https://ghcr.io"],
+          "onDemand": true,
+          "tlsVerify": true,
+          "content": [
+            {
+              "prefix": "/githedgehog/**"
+            }
+          ]
+        }
+      ]
+    },
+{{- end }}
+    "scrub": {
+      "enable": true,
+      "interval": "24h"
+    },
+    "search": {
+      "enable": true
+    },
+    "ui": {
+      "enable": true
+    }
+  }
+}

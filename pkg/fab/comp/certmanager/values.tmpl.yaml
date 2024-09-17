@@ -1,0 +1,48 @@
+crds:
+  enabled: true
+  keep: true
+
+image:
+  repository: {{ .ControllerRepo }}
+  tag: {{ .ControllerTag }}
+  pullPolicy: IfNotPresent
+
+webhook:
+  image:
+    repository: {{ .WebhookRepo }}
+    tag: {{ .WebhookTag }}
+    pullPolicy: IfNotPresent
+
+cainjector:
+  image:
+    repository: {{ .CAInjectorRepo }}
+    tag: {{ .CAInjectorTag }}
+    pullPolicy: IfNotPresent
+
+acmesolver:
+  image:
+    repository: {{ .ACMESolverRepo }}
+    tag: {{ .ACMESolverTag }}
+    pullPolicy: IfNotPresent
+
+startupapicheck:
+  image:
+    repository: {{ .StartupAPICheckRepo }}
+    tag: {{ .StartupAPICheckTag }}
+    pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxUnavailable: 1
+
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: false
+    interval: "30s"
+  podMonitor:
+    enabled: false
+    interval: "30s"
