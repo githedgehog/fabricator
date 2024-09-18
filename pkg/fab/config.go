@@ -8,7 +8,7 @@ import (
 var Config = fabapi.FabConfig{
 	Control: fabapi.ControlConfig{
 		ManagementSubnet:  "172.30.1.0/24",
-		ControlVIP:        "172.30.1.1",
+		VIP:               "172.30.1.1",
 		TLSSAN:            []string{}, // TODO
 		KubeClusterSubnet: "172.28.0.0/16",
 		KubeServiceSubnet: "172.29.0.0/16",
