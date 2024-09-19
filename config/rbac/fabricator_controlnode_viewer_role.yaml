@@ -1,35 +1,23 @@
----
+# permissions for end users to view controlnodes.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: manager-role
+  labels:
+    app.kubernetes.io/name: fabricator
+    app.kubernetes.io/managed-by: kustomize
+  name: fabricator-controlnode-viewer-role
 rules:
 - apiGroups:
   - fabricator.githedgehog.com
   resources:
   - controlnodes
-  - fabricators
   verbs:
-  - create
-  - delete
   - get
   - list
-  - patch
-  - update
   - watch
 - apiGroups:
   - fabricator.githedgehog.com
   resources:
-  - controlnodes/finalizers
-  - fabricators/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - fabricator.githedgehog.com
-  resources:
   - controlnodes/status
-  - fabricators/status
   verbs:
   - get
-  - patch
-  - update

@@ -76,7 +76,7 @@ spec:
                       baseVPCCommunity:
                         type: string
                       defaultSwitchUsers:
-                        items:
+                        additionalProperties:
                           properties:
                             authorizedKeys:
                               items:
@@ -86,13 +86,11 @@ spec:
                               type: string
                             role:
                               type: string
-                            username:
-                              type: string
                           type: object
-                        type: array
-                      eslaGESIPrefix:
+                        type: object
+                      eslagESIPrefix:
                         type: string
-                      eslaGMACBase:
+                      eslagMACBase:
                         type: string
                       fabricSubnet:
                         type: string
@@ -131,8 +129,17 @@ spec:
                         type: string
                     type: object
                   registry:
+                    properties:
+                      adminPassword:
+                        type: string
+                      readerPassword:
+                        type: string
+                      userPassword:
+                        type: string
                     type: object
                 type: object
+              isBootstrap:
+                type: boolean
               overrides:
                 properties:
                   versions:

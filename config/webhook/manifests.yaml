@@ -10,6 +10,27 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
+      path: /mutate-fabricator-githedgehog-com-v1beta1-controlnode
+  failurePolicy: Fail
+  name: mcontrolnode.kb.io
+  rules:
+  - apiGroups:
+    - fabricator.githedgehog.com
+    apiVersions:
+    - v1beta1
+    operations:
+    - CREATE
+    - UPDATE
+    - DELETE
+    resources:
+    - controlnodes
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
       path: /mutate-fabricator-githedgehog-com-v1beta1-fabricator
   failurePolicy: Fail
   name: mfabricator.kb.io
@@ -31,6 +52,27 @@ kind: ValidatingWebhookConfiguration
 metadata:
   name: validating-webhook-configuration
 webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-fabricator-githedgehog-com-v1beta1-controlnode
+  failurePolicy: Fail
+  name: vcontrolnode.kb.io
+  rules:
+  - apiGroups:
+    - fabricator.githedgehog.com
+    apiVersions:
+    - v1beta1
+    operations:
+    - CREATE
+    - UPDATE
+    - DELETE
+    resources:
+    - controlnodes
+  sideEffects: None
 - admissionReviewVersions:
   - v1
   clientConfig:
