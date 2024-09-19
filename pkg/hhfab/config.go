@@ -1,6 +1,7 @@
 package hhfab
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -74,7 +75,7 @@ type InitConfig struct {
 	Airgap       bool
 }
 
-func Init(c InitConfig) error {
+func Init(ctx context.Context, c InitConfig) error {
 	if err := checkWorkCacheDir(c.WorkDir, c.CacheDir); err != nil {
 		return err
 	}
@@ -195,7 +196,7 @@ func Init(c InitConfig) error {
 			return fmt.Errorf("importing %q: target %q: %w", source, name, ErrExist)
 		}
 
-		if _, err := wiring.Load(data); err != nil {
+		if _, err := wiring.NewWiringLoader().Load(ctx, data); err != nil {
 			return fmt.Errorf("importing %q: loading: %w", source, err)
 		}
 
