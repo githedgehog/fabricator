@@ -10,6 +10,7 @@ import (
 	"dario.cat/mergo"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab"
+	"go.githedgehog.com/fabricator/pkg/wiring"
 	"sigs.k8s.io/yaml"
 )
 
@@ -192,6 +193,10 @@ func Init(c InitConfig) error {
 		}
 		if err == nil {
 			return fmt.Errorf("importing %q: target %q: %w", source, name, ErrExist)
+		}
+
+		if _, err := wiring.Load(data); err != nil {
+			return fmt.Errorf("importing %q: loading: %w", source, err)
 		}
 
 		if err := os.WriteFile(target, data, 0o600); err != nil {
