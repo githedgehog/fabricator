@@ -29,8 +29,9 @@ import (
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
 type FabricatorSpec struct {
-	Config    FabConfig    `json:"config,omitempty"`
-	Overrides FabOverrides `json:"overrides,omitempty"`
+	IsBootstrap bool         `json:"isBootstrap,omitempty"`
+	Config      FabConfig    `json:"config,omitempty"`
+	Overrides   FabOverrides `json:"overrides,omitempty"`
 }
 
 type FabricatorStatus struct {
@@ -50,7 +51,7 @@ type FabConfig struct {
 
 type ControlConfig struct {
 	ManagementSubnet meta.Prefix `json:"managementSubnet,omitempty"` // TODO should be reserved
-	ControlVIP       meta.Addr   `json:"controlVIP,omitempty"`       // TODO maybe ManagementVIP?
+	VIP              meta.Addr   `json:"controlVIP,omitempty"`       // TODO maybe ManagementVIP?
 	TLSSAN           []string    `json:"tlsSAN,omitempty"`           // TODO make sure 127.0.0.1 and controlVIP are always present
 
 	KubeClusterSubnet meta.Prefix `json:"kubeClusterSubnet,omitempty"`
@@ -66,6 +67,10 @@ type ControlUser struct {
 }
 
 type RegistryConfig struct {
+	AdminPasswordHash  string `json:"adminPassword,omitempty"`
+	WriterPasswordHash string `json:"userPassword,omitempty"`
+	ReaderPasswordHash string `json:"readerPassword,omitempty"`
+
 	// Airgap bool `json:"airgap,omitempty"` // TODO
 
 	// TODO implement non-airgap
@@ -97,14 +102,13 @@ type FabricConfig struct {
 	VPCWorkaroundVLANs  []fmeta.VLANRange `json:"vpcWorkaroundVLANs,omitempty"`  // don't need to be reserved
 	VPCWorkaroundSubnet meta.Prefix       `json:"vpcWorkaroundSubnet,omitempty"` // TODO have to be reserved!
 
-	ESLAGMACBase   string `json:"eslaGMACBase,omitempty"`
-	ESLAGESIPrefix string `json:"eslaGESIPrefix,omitempty"`
+	ESLAGMACBase   string `json:"eslagMACBase,omitempty"`
+	ESLAGESIPrefix string `json:"eslagESIPrefix,omitempty"`
 
-	DefaultSwitchUsers []SwitchUser `json:"defaultSwitchUsers,omitempty"` // TODO make sure admin user is always present
+	DefaultSwitchUsers map[string]SwitchUser `json:"defaultSwitchUsers,omitempty"` // TODO make sure admin user is always present
 }
 
 type SwitchUser struct {
-	Username       string   `json:"username,omitempty"`
 	PasswordHash   string   `json:"password,omitempty"`
 	Role           string   `json:"role,omitempty"` // TODO enum/validate
 	AuthorizedKeys []string `json:"authorizedKeys,omitempty"`
