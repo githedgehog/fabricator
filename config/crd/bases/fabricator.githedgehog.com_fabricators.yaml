@@ -75,6 +75,81 @@ spec:
                     properties:
                       baseVPCCommunity:
                         type: string
+                      defaultAlloyConfig:
+                        properties:
+                          agentScrapeIntervalSeconds:
+                            type: integer
+                          collectSyslogEnabled:
+                            type: boolean
+                          controlProxyURL:
+                            type: string
+                          lokiTargets:
+                            additionalProperties:
+                              properties:
+                                basicAuth:
+                                  properties:
+                                    password:
+                                      type: string
+                                    username:
+                                      type: string
+                                  type: object
+                                bearerToken:
+                                  type: string
+                                caPEM:
+                                  type: string
+                                certPEM:
+                                  type: string
+                                insecureSkipVerify:
+                                  type: boolean
+                                labels:
+                                  additionalProperties:
+                                    type: string
+                                  type: object
+                                url:
+                                  type: string
+                                useControlProxy:
+                                  type: boolean
+                              type: object
+                            type: object
+                          prometheusTargets:
+                            additionalProperties:
+                              properties:
+                                basicAuth:
+                                  properties:
+                                    password:
+                                      type: string
+                                    username:
+                                      type: string
+                                  type: object
+                                bearerToken:
+                                  type: string
+                                caPEM:
+                                  type: string
+                                certPEM:
+                                  type: string
+                                insecureSkipVerify:
+                                  type: boolean
+                                labels:
+                                  additionalProperties:
+                                    type: string
+                                  type: object
+                                sendIntervalSeconds:
+                                  type: integer
+                                url:
+                                  type: string
+                                useControlProxy:
+                                  type: boolean
+                              type: object
+                            type: object
+                          unixExporterCollectors:
+                            items:
+                              type: string
+                            type: array
+                          unixExporterEnabled:
+                            type: boolean
+                          unixScrapeIntervalSeconds:
+                            type: integer
+                        type: object
                       defaultSwitchUsers:
                         additionalProperties:
                           properties:
@@ -100,6 +175,10 @@ spec:
                       leafASNStart:
                         format: int32
                         type: integer
+                      managementDHCPStart:
+                        type: string
+                      mode:
+                        type: string
                       protocolSubnet:
                         type: string
                       spineASN:
