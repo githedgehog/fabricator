@@ -67,6 +67,7 @@ type ControlUser struct {
 }
 
 type RegistryConfig struct {
+	// TODO make sure it's not allowed to set at init time
 	AdminPasswordHash  string `json:"adminPassword,omitempty"`
 	WriterPasswordHash string `json:"userPassword,omitempty"`
 	ReaderPasswordHash string `json:"readerPassword,omitempty"`
@@ -86,7 +87,9 @@ type ControlConfigRegistryCache struct {
 }
 
 type FabricConfig struct {
-	// Mode meta.FabricMode `json:"mode,omitempty"` // TODO remove?
+	ManagementDHCPStart meta.Addr `json:"managementDHCPStart,omitempty"` // TODO should be in mgmt subnet
+
+	Mode fmeta.FabricMode `json:"mode,omitempty"`
 
 	SpineASN     uint32 `json:"spineASN,omitempty"`
 	LeafASNStart uint32 `json:"leafASNStart,omitempty"`
@@ -106,6 +109,7 @@ type FabricConfig struct {
 	ESLAGESIPrefix string `json:"eslagESIPrefix,omitempty"`
 
 	DefaultSwitchUsers map[string]SwitchUser `json:"defaultSwitchUsers,omitempty"` // TODO make sure admin user is always present
+	DefaultAlloyConfig fmeta.AlloyConfig     `json:"defaultAlloyConfig,omitempty"`
 }
 
 type SwitchUser struct {
