@@ -29,13 +29,13 @@ import (
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
 type FabricatorSpec struct {
-	IsBootstrap bool         `json:"isBootstrap,omitempty"`
-	Config      FabConfig    `json:"config,omitempty"`
-	Overrides   FabOverrides `json:"overrides,omitempty"`
+	Config    FabConfig    `json:"config,omitempty"`
+	Overrides FabOverrides `json:"overrides,omitempty"`
 }
 
 type FabricatorStatus struct {
-	Versions Versions `json:"versions,omitempty"`
+	IsBootstrap bool     `json:"isBootstrap,omitempty"`
+	Versions    Versions `json:"versions,omitempty"`
 	// TODO reserved VLANs, subnets, etc.
 }
 

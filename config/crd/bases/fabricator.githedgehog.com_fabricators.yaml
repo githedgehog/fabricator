@@ -138,8 +138,6 @@ spec:
                         type: string
                     type: object
                 type: object
-              isBootstrap:
-                type: boolean
               overrides:
                 properties:
                   versions:
@@ -203,6 +201,8 @@ spec:
             type: object
           status:
             properties:
+              isBootstrap:
+                type: boolean
               versions:
                 properties:
                   fabric:

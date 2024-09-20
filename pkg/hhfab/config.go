@@ -4,14 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"dario.cat/mergo"
-	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab"
-	"go.githedgehog.com/fabricator/pkg/wiring"
+	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 	"sigs.k8s.io/yaml"
 )
 
@@ -23,6 +22,7 @@ const (
 	CacheDirSuffix     = "v1"
 	DefaultRepo        = "ghcr.io"
 	DefaultPrefix      = "githedgehog"
+	YAMLExt            = ".yaml"
 )
 
 var (
@@ -68,11 +68,9 @@ type InitConfig struct {
 	CacheDir     string
 	Repo         string
 	Prefix       string
-	WithDefaults bool
 	ImportConfig string
 	Wiring       []string
-	Dev          bool
-	Airgap       bool
+	fab.InitConfigInput
 }
 
 func Init(ctx context.Context, c InitConfig) error {
@@ -93,6 +91,10 @@ func Init(ctx context.Context, c InitConfig) error {
 		Prefix: c.Prefix,
 	}
 
+	if c.Repo != DefaultRepo || c.Prefix != DefaultPrefix {
+		slog.Info("Using custom registry config", "repo", c.Repo, "prefix", c.Prefix)
+	}
+
 	regConfData, err := yaml.Marshal(regConf)
 	if err != nil {
 		return fmt.Errorf("marshalling registry config: %w", err)
@@ -102,45 +104,29 @@ func Init(ctx context.Context, c InitConfig) error {
 		return fmt.Errorf("writing registry config: %w", err)
 	}
 
-	fabCfgData := fab.InitConfigText
-	if c.Dev || c.WithDefaults || len(c.ImportConfig) > 0 {
-		var fabCfg fabapi.FabConfig
-
-		if len(c.ImportConfig) > 0 {
-			importCfgData, err := os.ReadFile(c.ImportConfig)
-			if err != nil {
-				if errors.Is(err, os.ErrNotExist) {
-					return fmt.Errorf("import config %q: %w", c.ImportConfig, ErrNotExist)
-				}
-
-				return fmt.Errorf("reading config %q to import: %w", c.ImportConfig, err)
+	fabCfgData := []byte{}
+	if c.ImportConfig != "" {
+		fabCfgData, err = os.ReadFile(c.ImportConfig)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("import config %q: %w", c.ImportConfig, ErrNotExist)
 			}
 
-			fabCfgData = importCfgData
-
-			if err := yaml.UnmarshalStrict(importCfgData, &fabCfg); err != nil {
-				return fmt.Errorf("unmarshalling config %q to import: %w", c.ImportConfig, err)
-			}
+			return fmt.Errorf("reading config %q to import: %w", c.ImportConfig, err)
 		}
 
-		if c.Dev {
-			if err := mergo.Merge(&fabCfg, fab.DevConfig, mergo.WithOverride); err != nil {
-				return fmt.Errorf("merging dev config: %w", err)
-			}
+		if _, err := apiutil.NewFabLoader().Load(fabCfgData); err != nil {
+			return fmt.Errorf("importing config %q: loading: %w", c.ImportConfig, err)
 		}
 
-		if c.WithDefaults {
-			if err := mergo.Merge(&fabCfg, fab.DefaultConfig); err != nil {
-				return fmt.Errorf("merging dev config: %w", err)
-			}
+		slog.Info("Imported config", "source", c.ImportConfig)
+	} else {
+		fabCfgData, err = fab.InitConfig(ctx, c.InitConfigInput)
+		if err != nil {
+			return fmt.Errorf("generating fab config: %w", err)
 		}
 
-		if c.WithDefaults || c.Dev {
-			fabCfgData, err = yaml.Marshal(fabCfg)
-			if err != nil {
-				return fmt.Errorf("marshalling fab config: %w", err)
-			}
-		}
+		slog.Info("Generated initial config")
 	}
 
 	if err := os.WriteFile(filepath.Join(c.WorkDir, FabConfigFile), fabCfgData, 0o600); err != nil {
@@ -155,6 +141,16 @@ func Init(ctx context.Context, c InitConfig) error {
 		return fmt.Errorf("creating result dir: %w", err)
 	}
 
+	if err := importWiring(c); err != nil {
+		return err
+	}
+
+	// TODO print info about initialized config, created files, next steps, etc.
+
+	return nil
+}
+
+func importWiring(c InitConfig) error {
 	for _, wiringFile := range c.Wiring {
 		name := ""
 		source := ""
@@ -166,15 +162,15 @@ func Init(ctx context.Context, c InitConfig) error {
 
 			source = parts[0]
 			name = parts[1]
-			if !strings.HasSuffix(name, ".yaml") {
-				name += ".yaml"
+			if !strings.HasSuffix(name, YAMLExt) {
+				name += YAMLExt
 			}
 		} else {
 			source = wiringFile
 			name = filepath.Base(wiringFile)
 		}
 
-		if !strings.HasSuffix(source, ".yaml") {
+		if !strings.HasSuffix(source, YAMLExt) {
 			return fmt.Errorf("importing %q: should have .yaml extension", source) //nolint:goerr113
 		}
 
@@ -188,24 +184,25 @@ func Init(ctx context.Context, c InitConfig) error {
 		}
 
 		target := filepath.Join(c.WorkDir, IncludeDir, name)
+		relName := filepath.Join(IncludeDir, name)
 		_, err = os.Stat(target)
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("importing %q: checking target %q: %w", source, name, err)
+			return fmt.Errorf("importing %q: checking target %q: %w", source, relName, err)
 		}
 		if err == nil {
-			return fmt.Errorf("importing %q: target %q: %w", source, name, ErrExist)
+			return fmt.Errorf("importing %q: target %q: %w", source, relName, ErrExist)
 		}
 
-		if _, err := wiring.NewWiringLoader().Load(ctx, data); err != nil {
+		if _, err := apiutil.NewWiringLoader().Load(data); err != nil {
 			return fmt.Errorf("importing %q: loading: %w", source, err)
 		}
 
 		if err := os.WriteFile(target, data, 0o600); err != nil {
-			return fmt.Errorf("importing %q: target %q: writing: %w", source, name, err)
+			return fmt.Errorf("importing %q: target %q: writing: %w", source, relName, err)
 		}
-	}
 
-	// TODO print info about initialized config, created files, next steps, etc.
+		slog.Info("Imported wiring file", "name", relName, "source", source)
+	}
 
 	return nil
 }
@@ -224,7 +221,20 @@ func Load(workDir, cacheDir string) (*Config, error) {
 		return nil, fmt.Errorf("checking config %q: %w", FabConfigFile, err)
 	}
 
-	regConf := RegistryConfig{
+	regConf, err := loadRegConf(workDir)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Config{
+		WorkDir:        workDir,
+		CacheDir:       cacheDir,
+		RegistryConfig: *regConf,
+	}, nil
+}
+
+func loadRegConf(workDir string) (*RegistryConfig, error) {
+	regConf := &RegistryConfig{
 		Repo:   DefaultRepo,
 		Prefix: DefaultPrefix,
 	}
@@ -234,13 +244,64 @@ func Load(workDir, cacheDir string) (*Config, error) {
 		return nil, fmt.Errorf("reading registry config: %w", err)
 	}
 
-	if err := yaml.UnmarshalStrict(regConfData, &regConf); err != nil {
-		return nil, fmt.Errorf("unmarshalling registry config: %w", err)
+	if err == nil {
+		if err := yaml.UnmarshalStrict(regConfData, regConf); err != nil {
+			return nil, fmt.Errorf("unmarshalling registry config: %w", err)
+		}
 	}
 
-	return &Config{
-		WorkDir:        workDir,
-		CacheDir:       cacheDir,
-		RegistryConfig: regConf,
-	}, nil
+	return regConf, nil
+}
+
+func loadWiring(ctx context.Context, workDir string, validate bool) (*apiutil.Loader, error) {
+	includeDir := filepath.Join(workDir, IncludeDir)
+	stat, err := os.Stat(includeDir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("include dir %q: %w", includeDir, ErrNotExist)
+		}
+
+		return nil, fmt.Errorf("checking include dir %q: %w", includeDir, err)
+	}
+	if !stat.IsDir() {
+		return nil, fmt.Errorf("include dir %q: %w", includeDir, ErrNotDir)
+	}
+
+	l := apiutil.NewWiringLoader()
+	files, err := os.ReadDir(includeDir)
+	if err != nil {
+		return nil, fmt.Errorf("reading include dir %q: %w", includeDir, err)
+	}
+
+	for _, file := range files {
+		relName := filepath.Join(IncludeDir, file.Name())
+		if file.IsDir() {
+			slog.Warn("Skipping directory", "name", relName)
+
+			continue
+		}
+		if !strings.HasSuffix(file.Name(), YAMLExt) {
+			slog.Warn("Skipping non-YAML file", "name", file.Name())
+
+			continue
+		}
+
+		data, err := os.ReadFile(filepath.Join(includeDir, file.Name()))
+		if err != nil {
+			return nil, fmt.Errorf("reading wiring %q: %w", relName, err)
+		}
+
+		if err := l.LoadAdd(ctx, data); err != nil {
+			return nil, fmt.Errorf("loading wiring %q: %w", relName, err)
+		}
+	}
+
+	if validate {
+		// TODO pass fabric config
+		if err := apiutil.ValidateFabric(ctx, l, nil); err != nil {
+			return nil, fmt.Errorf("validating wiring: %w", err)
+		}
+	}
+
+	return l, nil
 }

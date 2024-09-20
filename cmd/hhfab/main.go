@@ -11,18 +11,23 @@ import (
 	"github.com/lmittmann/tint"
 	"github.com/mattn/go-isatty"
 	"github.com/urfave/cli/v2"
+	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/hhfab"
 	"go.githedgehog.com/fabricator/pkg/version"
 )
 
 const (
-	FlagCatGlobal          = "Global options:"
-	FlagNameRegistryRepo   = "registry-repo"
-	FlagNameRegistryPrefix = "registry-prefix"
-	FlagNameDev            = "dev"
-	FlagNameConfig         = "config"
-	FlagNameWithDefaults   = "with-defaults"
-	FlagNameWiring         = "wiring"
+	FlagCatGlobal                 = "Global options:"
+	FlagNameRegistryRepo          = "registry-repo"
+	FlagNameRegistryPrefix        = "registry-prefix"
+	FlagNameConfig                = "config"
+	FlagNameWiring                = "wiring"
+	FlagCatGenConfig              = "Generate initial config:"
+	FlagNameDefaultPasswordHash   = "default-password-hash"
+	FlagNameDefaultAuthorizedKeys = "default-authorized-keys"
+	FlagNameTLSSAN                = "tls-san"
+	FlagNameDev                   = "dev"
+	FlagNameAirgap                = "airgap"
 )
 
 func main() {
@@ -164,39 +169,63 @@ func Run(ctx context.Context) error {
 						EnvVars: []string{"HHFAB_REG_PREFIX"},
 						Value:   hhfab.DefaultPrefix,
 					},
-					&cli.BoolFlag{
-						Name:    FlagNameDev,
-						Usage:   "use default credentials (unsafe)",
-						EnvVars: []string{"HHFAB_DEV"},
-					},
 					&cli.StringFlag{
 						Name:    FlagNameConfig,
 						Aliases: []string{"c"},
 						Usage:   "use existing config file `PATH`",
 						EnvVars: []string{"HHFAB_CONFIG"},
 					},
-					&cli.BoolFlag{
-						Name:  FlagNameWithDefaults,
-						Usage: "use full config with all default values",
-					},
 					&cli.StringSliceFlag{
 						Name:    FlagNameWiring,
 						Aliases: []string{"w"},
 						Usage:   "include wiring diagram `FILE` with ext .yaml (any Fabric API objects)",
 					},
+					&cli.StringSliceFlag{
+						Name:    FlagNameTLSSAN,
+						Aliases: []string{"tls"},
+						Usage:   "IPs and DNS names that will be used to access API",
+						EnvVars: []string{"HHFAB_TLS_SAN"},
+					},
+					&cli.StringSliceFlag{
+						Name:    FlagNameDefaultAuthorizedKeys,
+						Aliases: []string{"keys"},
+						Usage:   "default authorized `KEYS` for control and switch users",
+						EnvVars: []string{"HHFAB_AUTH_KEYS"},
+					},
+					&cli.StringFlag{
+						Name:    FlagNameDefaultPasswordHash,
+						Aliases: []string{"passwd"},
+						Usage:   "default password `HASH` for control and switch users",
+						EnvVars: []string{"HHFAB_PASSWD_HASH"},
+					},
+					&cli.BoolFlag{
+						Name:    FlagNameDev,
+						Usage:   "use default credentials (unsafe)",
+						EnvVars: []string{"HHFAB_DEV"},
+					},
+					&cli.BoolFlag{
+						Name:    FlagNameAirgap,
+						Usage:   "airgap mode (no internet access required for installation and operations)",
+						EnvVars: []string{"HHFAB_AIRGAP"},
+						Value:   true,
+					},
 				),
 				Before: before(),
 				Action: func(c *cli.Context) error {
-					if err := hhfab.Init(hhfab.InitConfig{
+					if err := hhfab.Init(ctx, hhfab.InitConfig{
 						WorkDir:      workDir,
 						CacheDir:     cacheDir,
 						Repo:         c.String(FlagNameRegistryRepo),
 						Prefix:       c.String(FlagNameRegistryPrefix),
-						WithDefaults: c.Bool(FlagNameWithDefaults),
 						ImportConfig: c.String(FlagNameConfig),
 						Wiring:       c.StringSlice(FlagNameWiring),
-						Dev:          c.Bool(FlagNameDev),
-						Airgap:       false,
+						InitConfigInput: fab.InitConfigInput{
+							TLSSAN:                c.StringSlice(FlagNameTLSSAN),
+							DefaultPasswordHash:   c.String(FlagNameDefaultPasswordHash),
+							DefaultAuthorizedKeys: c.StringSlice(FlagNameDefaultAuthorizedKeys),
+							Dev:                   c.Bool(FlagNameDev),
+							Airgap:                c.Bool(FlagNameAirgap),
+						},
 					}); err != nil {
 						return fmt.Errorf("initializing: %w", err)
 					}
@@ -217,8 +246,6 @@ func Run(ctx context.Context) error {
 
 					fmt.Println(cfg)
 					panic("not implemented")
-
-					return nil
 				},
 			},
 			{
@@ -234,8 +261,6 @@ func Run(ctx context.Context) error {
 
 					fmt.Println(cfg)
 					panic("not implemented")
-
-					return nil
 				},
 			},
 			{
