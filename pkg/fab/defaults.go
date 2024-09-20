@@ -1,38 +1,9 @@
 package fab
 
 import (
-	"strings"
-
 	fmeta "go.githedgehog.com/fabric/api/meta"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 )
-
-// TODO more comments, instructions on how to generate password hashes, etc.
-var InitConfigText = []byte(strings.TrimSpace(`
-# Fabricator configuration file
-
-control:
-  tlsSAN: [ # add IP addresses or DNS names that will be used to access API
-    # "fabric.local"
-  ]
-
-  defaultUser: # user 'core' on all control nodes
-    # password: "$5$8nAYPGcl4..." # password hash
-    authorizedKeys: [ # optionally add your SSH public keys here
-      # "ssh-ed25519 ..."
-    ]
-
-fabric:
-  defaultSwitchUsers:
-    admin: # at least one user with name 'admin' and role 'admin' is required
-      authorizedKeys: [ # optionally add your SSH public keys here
-       # ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGpF2+9I1Nj4BcN7y6DjzTbq1VcUYIRGyfzId5ZoBEFj
-      ]
-      # password: "$5$8nAYPGcl4..." # password hash
-      role: admin # user role, 'admin' or 'operator' (read-only)
-
-# For more configuration options see https://docs.githedgehog.com
-`))
 
 var DefaultConfig = fabapi.FabConfig{
 	Control: fabapi.ControlConfig{
@@ -59,30 +30,5 @@ var DefaultConfig = fabapi.FabConfig{
 		ESLAGMACBase:        "f2:00:00:00:00:00", // TODO make sure it's really used
 		ESLAGESIPrefix:      "00:f2:00:00:",      // TODO make sure it's really used
 		DefaultSwitchUsers:  map[string]fabapi.SwitchUser{},
-	},
-}
-
-const DevSSHKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGpF2+9I1Nj4BcN7y6DjzTbq1VcUYIRGyfzId5ZoBEFj"
-
-var DevConfig = fabapi.FabConfig{
-	Control: fabapi.ControlConfig{
-		DefaultUser: fabapi.ControlUser{
-			PasswordHash:   "$5$8nAYPGcl4l6G7Av1$Qi4/gnM0yPtGv9kjpMh78NuNSfQWy7vR1rulHpurL36",
-			AuthorizedKeys: []string{DevSSHKey},
-		},
-	},
-	Fabric: fabapi.FabricConfig{
-		DefaultSwitchUsers: map[string]fabapi.SwitchUser{
-			"admin": {
-				PasswordHash:   "$5$8nAYPGcl4l6G7Av1$Qi4/gnM0yPtGv9kjpMh78NuNSfQWy7vR1rulHpurL36",
-				Role:           "admin",
-				AuthorizedKeys: []string{DevSSHKey},
-			},
-			"op": {
-				PasswordHash:   "$5$oj/NxDtFw3eTyini$VHwdjWXSNYRxlFMu.1S5ZlGJbUF/CGmCAZIBroJlax4",
-				Role:           "operator",
-				AuthorizedKeys: []string{DevSSHKey},
-			},
-		},
 	},
 }

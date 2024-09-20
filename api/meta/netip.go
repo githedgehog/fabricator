@@ -36,3 +36,25 @@ func (val Prefix) Parse() (netip.Prefix, error) {
 
 	return prefix, nil
 }
+
+const (
+	AddrDHCP = AddrOrDHCP("dhcp")
+)
+
+type AddrOrDHCP string
+
+func (val AddrOrDHCP) Parse() (bool, netip.Addr, error) {
+	if val == AddrDHCP {
+		return true, netip.Addr{}, nil
+	}
+
+	ip, err := netip.ParseAddr(string(val))
+	if err != nil {
+		return false, netip.Addr{}, fmt.Errorf("parsing addr %q: %w", val, err)
+	}
+	if !ip.Is4() {
+		return false, netip.Addr{}, fmt.Errorf("parsing addr %q: %w", val, ErrIPv4Only)
+	}
+
+	return false, ip, nil
+}

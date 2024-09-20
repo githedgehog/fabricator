@@ -37,16 +37,25 @@ spec:
             type: object
           spec:
             properties:
-              extIP:
-                type: string
-              extIface:
-                type: string
-              mgmtIP:
-                type: string
-              mgmtIface:
-                type: string
-              targetDevice:
-                type: string
+              bootstrap:
+                properties:
+                  disk:
+                    type: string
+                type: object
+              external:
+                properties:
+                  interface:
+                    type: string
+                  ip:
+                    type: string
+                type: object
+              management:
+                properties:
+                  interface:
+                    type: string
+                  ip:
+                    type: string
+                type: object
             type: object
           status:
             type: object

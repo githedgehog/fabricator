@@ -1,4 +1,4 @@
-package wiring
+package apiutil
 
 import (
 	"bufio"
@@ -9,11 +9,9 @@ import (
 	"regexp"
 
 	"github.com/pkg/errors"
-	"go.githedgehog.com/fabric/api/meta"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1alpha2"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1alpha2"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
-	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
@@ -68,7 +66,7 @@ func NewFabLoader() *Loader {
 	}
 }
 
-func (l *Loader) Load(ctx context.Context, data []byte) ([]client.Object, error) {
+func (l *Loader) Load(data []byte) ([]client.Object, error) {
 	res := []client.Object{}
 	multidocReader := utilyaml.NewYAMLReader(bufio.NewReader(bytes.NewReader(data)))
 
@@ -82,14 +80,20 @@ func (l *Loader) Load(ctx context.Context, data []byte) ([]client.Object, error)
 			return nil, fmt.Errorf("object %d: reading: %w", idx, err)
 		}
 
-		rObj, _, err := wiringDecoder.Decode(buf, nil, nil)
+		rObj, _, err := l.decoder.Decode(buf, nil, nil)
 		if err != nil {
 			return nil, fmt.Errorf("object %d: decoding: %w", idx, err)
 		}
 
-		obj, err := processObject(ctx, rObj)
-		if err != nil {
-			return nil, fmt.Errorf("object %d: %s/%s: %w", idx, obj.GetObjectKind().GroupVersionKind().Kind, obj.GetName(), err)
+		kind := rObj.GetObjectKind().GroupVersionKind().Kind
+
+		obj, ok := rObj.(client.Object)
+		if !ok {
+			return nil, fmt.Errorf("object %d: %s: not a client.Object", idx, kind) //nolint:goerr113
+		}
+
+		if err := validateObject(obj); err != nil {
+			return nil, fmt.Errorf("object %d: %s/%s: %w", idx, kind, obj.GetName(), err)
 		}
 
 		res = append(res, obj)
@@ -98,45 +102,19 @@ func (l *Loader) Load(ctx context.Context, data []byte) ([]client.Object, error)
 	return res, nil
 }
 
-func processObject(ctx context.Context, rObj runtime.Object) (client.Object, error) {
-	obj, ok := rObj.(client.Object)
-	if !ok {
-		return nil, fmt.Errorf("not a client.Object") //nolint:goerr113
-	}
-
+func validateObject(obj client.Object) error {
 	if len(obj.GetName()) > 253 {
-		return nil, fmt.Errorf("maximum name length is 253 characters") //nolint:goerr113
+		return fmt.Errorf("maximum name length is 253 characters") //nolint:goerr113
 	}
 	if !nameChecker.MatchString(obj.GetName()) {
-		return nil, fmt.Errorf("name should match a lowercase RFC 1123 subdomain") //nolint:goerr113
+		return fmt.Errorf("name should match a lowercase RFC 1123 subdomain") //nolint:goerr113
 	}
 
-	if metaObj, ok := obj.(meta.Object); ok {
-		metaObj.Default()
-		if _, err := metaObj.Validate(ctx, nil, nil); err != nil {
-			return nil, fmt.Errorf("validating: %w", err)
-		}
-	} else if fabObj, ok := obj.(*fabapi.Fabricator); ok {
-		if obj.GetNamespace() != comp.FabNamespace {
-			return nil, fmt.Errorf("fabricator should be in %q namespace", comp.FabNamespace) //nolint:goerr113
-		}
-		if err := fabObj.Validate(); err != nil {
-			return nil, fmt.Errorf("validating: %w", err)
-		}
-	} else if controlObj, ok := obj.(*fabapi.ControlNode); ok {
-		if obj.GetNamespace() != comp.FabNamespace {
-			return nil, fmt.Errorf("control node(s) should be in %q namespace", comp.FabNamespace) //nolint:goerr113
-		}
-		if err := controlObj.Validate(nil); err != nil {
-			return nil, fmt.Errorf("validating: %w", err)
-		}
-	}
-
-	return obj, nil
+	return nil
 }
 
 func (l *Loader) LoadAdd(ctx context.Context, data []byte) error {
-	objs, err := l.Load(ctx, data)
+	objs, err := l.Load(data)
 	if err != nil {
 		return err
 	}

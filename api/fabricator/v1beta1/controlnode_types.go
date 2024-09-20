@@ -17,19 +17,32 @@ limitations under the License.
 package v1beta1
 
 import (
+	"go.githedgehog.com/fabricator/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
 type ControlNodeSpec struct {
-	TargetDevice string `json:"targetDevice,omitempty"` // TODO need to support some soft raid?
+	Bootstrap  ControlNodeBootstrap  `json:"bootstrap,omitempty"`
+	Management ControlNodeManagement `json:"management,omitempty"`
+	External   ControlNodeExternal   `json:"external,omitempty"`
+}
 
-	MgmtIface string `json:"mgmtIface,omitempty"` // TODO need to support bond?
-	MgmtIP    string `json:"mgmtIP,omitempty"`
+type ControlNodeBootstrap struct {
+	Disk string `json:"disk,omitempty"`
+}
 
-	ExtIface string `json:"extIface,omitempty"` // TODO need to support bond?
-	ExtIP    string `json:"extIP,omitempty"`    // TODO accept DHCP as well, installer should check the ip on the interface and add to the tls-san
+type ControlNodeManagement struct {
+	IP        meta.Addr `json:"ip,omitempty"`
+	Interface string    `json:"interface,omitempty"`
+	// TODO support bond
+}
+
+type ControlNodeExternal struct {
+	IP        meta.AddrOrDHCP `json:"ip,omitempty"`
+	Interface string          `json:"interface,omitempty"`
+	// TODO support bond
 }
 
 type ControlNodeStatus struct{}
@@ -56,4 +69,15 @@ type ControlNodeList struct {
 
 func init() {
 	SchemeBuilder.Register(&ControlNode{}, &ControlNodeList{})
+}
+
+func (c *ControlNode) Validate(fabCfg *FabConfig) error {
+	if fabCfg == nil {
+		return nil
+	}
+
+	// TODO make interactive/non-interactive and iso/non-iso validation
+	// TODO validate the control node spec
+
+	return nil
 }

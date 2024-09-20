@@ -1,0 +1,88 @@
+# Fabricator object and at least one ControlNode are required
+# For more configuration options see https://docs.githedgehog.com
+
+apiVersion: fabricator.githedgehog.com/v1beta1
+kind: Fabricator
+metadata:
+  name: default
+  namespace: fab
+spec:
+  config:
+    control:
+      {{- if .TLSSAN }}
+      tlsSAN: # IPs and DNS names that will be used to access API
+        {{- range .TLSSAN }}
+        - "{{ . }}"
+        {{- end }}
+      {{- else }}
+      #tlsSAN: # IPs and DNS names that will be used to access API
+      #  - "fabric.local"
+      {{- end }}
+
+      defaultUser: # user 'core' on all control nodes
+        {{- if .DefaultPasswordHash }}
+        password: "{{ .DefaultPasswordHash }}" # password hash
+        {{- else }}
+        #password: "$5$8nAYPGcl4..." # password hash
+        {{- end }}
+        {{- if .DefaultAuthorizedKeys }}
+        authorizedKeys:
+          {{- range .DefaultAuthorizedKeys }}
+          - "{{ . }}"
+          {{- end }}
+        {{- else }}
+        #authorizedKeys: # optional SSH authorized keys
+        #  - "ssh-ed25519 AAAAC3Nza..."
+        {{- end }}
+
+    fabric:
+      defaultSwitchUsers:
+        admin: # at least one user with name 'admin' and role 'admin'
+          role: admin
+          {{- if .DefaultPasswordHash }}
+          password: "{{ .DefaultPasswordHash }}" # password hash
+          {{- else }}
+          #password: "$5$8nAYPGcl4..." # password hash
+          {{- end }}
+          {{- if .DefaultAuthorizedKeys }}
+          authorizedKeys:
+            {{- range .DefaultAuthorizedKeys }}
+            - "{{ . }}"
+            {{- end }}
+          {{- else }}
+          #authorizedKeys: # optional SSH authorized keys
+          #  - "ssh-ed25519 AAAAC3Nza..."
+          {{- end }}
+        op: # optional read-only user
+          role: operator
+          {{- if .DefaultPasswordHash }}
+          password: "{{ .DefaultPasswordHash }}" # password hash
+          {{- else }}
+          #password: "$5$8nAYPGcl4..." # password hash
+          {{- end }}
+          {{- if .DefaultAuthorizedKeys }}
+          authorizedKeys:
+            {{- range .DefaultAuthorizedKeys }}
+            - "{{ . }}"
+            {{- end }}
+          {{- else }}
+          #authorizedKeys: # optional SSH authorized keys
+          #  - "ssh-ed25519 AAAAC3Nza..."
+          {{- end }}
+
+---
+apiVersion: fabricator.githedgehog.com/v1beta1
+kind: ControlNode
+metadata:
+  name: control-1
+  namespace: fab
+spec:
+  # bootstrap:
+  #  disk: "sda" # disk to install OS on, e.g. "sda" or "nvme0n1"
+  external:
+    interface: enp2s0 # interface for external
+    ip:	dhcp # IP address for external interface
+  management:
+    interface: enp2s1 # interface for management
+
+# Currently only one ControlNode is supported
