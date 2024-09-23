@@ -6,11 +6,14 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/lmittmann/tint"
 	"github.com/mattn/go-isatty"
 	"github.com/urfave/cli/v2"
+	"go.githedgehog.com/fabric/api/meta"
 	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/hhfab"
 	"go.githedgehog.com/fabricator/pkg/version"
@@ -28,6 +31,7 @@ const (
 	FlagNameTLSSAN                = "tls-san"
 	FlagNameDev                   = "dev"
 	FlagNameAirgap                = "airgap"
+	FlagNameFabricMode            = "fabric-mode"
 )
 
 func main() {
@@ -86,6 +90,11 @@ func Run(ctx context.Context) error {
 		Value:       defaultCacheDir,
 		Destination: &cacheDir,
 		Category:    FlagCatGlobal,
+	}
+
+	fabricModes := []string{}
+	for _, m := range meta.FabricModes {
+		fabricModes = append(fabricModes, string(m))
 	}
 
 	before := func() cli.BeforeFunc {
@@ -180,6 +189,19 @@ func Run(ctx context.Context) error {
 						Aliases: []string{"w"},
 						Usage:   "include wiring diagram `FILE` with ext .yaml (any Fabric API objects)",
 					},
+					&cli.StringFlag{
+						Name:    FlagNameFabricMode,
+						Aliases: []string{"mode", "m"},
+						Usage:   "set fabric mode: one of " + strings.Join(fabricModes, ", "),
+						Value:   string(meta.FabricModeSpineLeaf),
+						Action: func(_ *cli.Context, mode string) error {
+							if !slices.Contains(fabricModes, mode) {
+								return fmt.Errorf("invalid fabric mode %q", mode) //nolint:goerr113
+							}
+
+							return nil
+						},
+					},
 					&cli.StringSliceFlag{
 						Name:    FlagNameTLSSAN,
 						Aliases: []string{"tls"},
@@ -220,6 +242,7 @@ func Run(ctx context.Context) error {
 						ImportConfig: c.String(FlagNameConfig),
 						Wiring:       c.StringSlice(FlagNameWiring),
 						InitConfigInput: fab.InitConfigInput{
+							FabricMode:            meta.FabricMode(c.String(FlagNameFabricMode)),
 							TLSSAN:                c.StringSlice(FlagNameTLSSAN),
 							DefaultPasswordHash:   c.String(FlagNameDefaultPasswordHash),
 							DefaultAuthorizedKeys: c.StringSlice(FlagNameDefaultAuthorizedKeys),
@@ -238,14 +261,17 @@ func Run(ctx context.Context) error {
 				Usage:  "validate config and included wiring files",
 				Flags:  defaultFlags,
 				Before: before(),
-				Action: func(c *cli.Context) error {
-					cfg, err := hhfab.Load(workDir, cacheDir)
+				Action: func(_ *cli.Context) error {
+					cfg, err := hhfab.Load(ctx, workDir, cacheDir)
 					if err != nil {
 						return fmt.Errorf("loading config: %w", err)
 					}
 
-					fmt.Println(cfg)
-					panic("not implemented")
+					if err := cfg.Validate(ctx); err != nil {
+						return fmt.Errorf("validating: %w", err)
+					}
+
+					return nil
 				},
 			},
 			{
@@ -253,8 +279,8 @@ func Run(ctx context.Context) error {
 				Usage:  "build installers",
 				Flags:  defaultFlags,
 				Before: before(),
-				Action: func(c *cli.Context) error {
-					cfg, err := hhfab.Load(workDir, cacheDir)
+				Action: func(_ *cli.Context) error {
+					cfg, err := hhfab.Load(ctx, workDir, cacheDir)
 					if err != nil {
 						return fmt.Errorf("loading config: %w", err)
 					}

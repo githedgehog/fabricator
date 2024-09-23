@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"go.githedgehog.com/fabric/api/meta"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 	"go.githedgehog.com/fabricator/pkg/util/tmplutil"
 )
@@ -21,6 +22,7 @@ const (
 )
 
 type InitConfigInput struct {
+	FabricMode            meta.FabricMode
 	TLSSAN                []string
 	DefaultPasswordHash   string
 	DefaultAuthorizedKeys []string

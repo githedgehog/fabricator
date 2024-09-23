@@ -36,6 +36,7 @@ spec:
         {{- end }}
 
     fabric:
+      mode: {{ .FabricMode }} # "spine-leaf" or "collapsed-core"
       defaultSwitchUsers:
         admin: # at least one user with name 'admin' and role 'admin'
           role: admin
