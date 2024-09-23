@@ -9,7 +9,10 @@ import (
 	"path/filepath"
 	"strings"
 
+	"dario.cat/mergo"
+	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/fabric"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 	"sigs.k8s.io/yaml"
 )
@@ -35,6 +38,8 @@ type Config struct {
 	WorkDir  string
 	CacheDir string
 	RegistryConfig
+	Fab      fabapi.Fabricator
+	Controls []fabapi.ControlNode
 }
 
 type RegistryConfig struct {
@@ -104,7 +109,7 @@ func Init(ctx context.Context, c InitConfig) error {
 		return fmt.Errorf("writing registry config: %w", err)
 	}
 
-	fabCfgData := []byte{}
+	var fabCfgData []byte
 	if c.ImportConfig != "" {
 		fabCfgData, err = os.ReadFile(c.ImportConfig)
 		if err != nil {
@@ -207,7 +212,7 @@ func importWiring(c InitConfig) error {
 	return nil
 }
 
-func Load(workDir, cacheDir string) (*Config, error) {
+func Load(ctx context.Context, workDir, cacheDir string) (*Config, error) {
 	if err := checkWorkCacheDir(workDir, cacheDir); err != nil {
 		return nil, err
 	}
@@ -226,10 +231,31 @@ func Load(workDir, cacheDir string) (*Config, error) {
 		return nil, err
 	}
 
+	l := apiutil.NewFabLoader()
+	fabCfg, err := os.ReadFile(filepath.Join(workDir, FabConfigFile))
+	if err != nil {
+		return nil, fmt.Errorf("reading fab config: %w", err)
+	}
+
+	if err := l.LoadAdd(ctx, fabCfg); err != nil {
+		return nil, fmt.Errorf("loading fab config: %w", err)
+	}
+
+	f, controls, err := apiutil.GetFabAndControls(ctx, l)
+	if err != nil {
+		return nil, fmt.Errorf("getting fabricator and controls nodes: %w", err)
+	}
+
+	if err := mergo.Merge(&f.Spec.Config, *fab.DefaultConfig.DeepCopy()); err != nil {
+		return nil, fmt.Errorf("merging fabricator defaults: %w", err)
+	}
+
 	return &Config{
 		WorkDir:        workDir,
 		CacheDir:       cacheDir,
 		RegistryConfig: *regConf,
+		Fab:            f,
+		Controls:       controls,
 	}, nil
 }
 
@@ -253,8 +279,34 @@ func loadRegConf(workDir string) (*RegistryConfig, error) {
 	return regConf, nil
 }
 
-func loadWiring(ctx context.Context, workDir string, validate bool) (*apiutil.Loader, error) {
-	includeDir := filepath.Join(workDir, IncludeDir)
+func (c *Config) Validate(ctx context.Context) error {
+	// TODO move validation
+	// TODO loadWiringAndHydrate?
+	l, err := c.loadWiring(ctx, false)
+	if err != nil {
+		return fmt.Errorf("loading wiring: %w", err)
+	}
+
+	if err := c.EnsureHydrated(ctx, l, HydrateModeIfNotPresent); err != nil {
+		return fmt.Errorf("ensuring hydrated: %w", err)
+	}
+
+	fabricCfg, err := fabric.GetFabricConfig(c.Fab)
+	if err != nil {
+		return fmt.Errorf("getting fabric config: %w", err)
+	}
+
+	if err := apiutil.ValidateFabric(ctx, l, fabricCfg); err != nil {
+		return fmt.Errorf("validating wiring: %w", err)
+	}
+
+	// TODO validate fabricator, controls and wiring
+
+	return nil
+}
+
+func (c *Config) loadWiring(ctx context.Context, validate bool) (*apiutil.Loader, error) {
+	includeDir := filepath.Join(c.WorkDir, IncludeDir)
 	stat, err := os.Stat(includeDir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -297,8 +349,12 @@ func loadWiring(ctx context.Context, workDir string, validate bool) (*apiutil.Lo
 	}
 
 	if validate {
-		// TODO pass fabric config
-		if err := apiutil.ValidateFabric(ctx, l, nil); err != nil {
+		fabricCfg, err := fabric.GetFabricConfig(c.Fab)
+		if err != nil {
+			return nil, fmt.Errorf("getting fabric config: %w", err)
+		}
+
+		if err := apiutil.ValidateFabric(ctx, l, fabricCfg); err != nil {
 			return nil, fmt.Errorf("validating wiring: %w", err)
 		}
 	}
