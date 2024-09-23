@@ -1,0 +1,517 @@
+package hhfab
+
+import (
+	"cmp"
+	"context"
+	"fmt"
+	"net/netip"
+	"slices"
+
+	"github.com/pkg/errors"
+	fmeta "go.githedgehog.com/fabric/api/meta"
+	wiringapi "go.githedgehog.com/fabric/api/wiring/v1alpha2"
+	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
+	"go.githedgehog.com/fabricator/api/meta"
+	"go.githedgehog.com/fabricator/pkg/util/apiutil"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+)
+
+type HydrateMode string
+
+const (
+	HydrateModeNever        HydrateMode = "never"
+	HydrateModeIfNotPresent HydrateMode = "if-not-present"
+	HydrateModeOverride     HydrateMode = "override"
+	// TODO "auto" to only allocate missing values
+)
+
+var HydrateModes = []HydrateMode{
+	HydrateModeNever,
+	HydrateModeIfNotPresent,
+	HydrateModeOverride,
+}
+
+type HydrationStatus string
+
+const (
+	HydrationStatusNone    HydrationStatus = "none"
+	HydrationStatusPartial HydrationStatus = "partial"
+	HydrationStatusFull    HydrationStatus = "full"
+)
+
+func (c *Config) EnsureHydrated(ctx context.Context, wL *apiutil.Loader, mode HydrateMode) error {
+	if wL == nil {
+		return fmt.Errorf("loader is nil") //nolint:goerr113
+	}
+
+	kube := wL.GetClient()
+
+	h, err := c.getHydration(ctx, kube)
+	if err != nil {
+		return fmt.Errorf("checking if hydrated: %w", err)
+	}
+
+	if mode == HydrateModeNever {
+		if h != HydrationStatusFull {
+			return fmt.Errorf("wiring is not fully hydrated while hydration is disabled, cleanup and/or change hydration mode") //nolint:goerr113
+		}
+
+		return nil
+	} else if mode == HydrateModeIfNotPresent || mode == HydrateModeOverride {
+		if mode == HydrateModeIfNotPresent && h == HydrationStatusFull {
+			return nil
+		}
+
+		if mode == HydrateModeIfNotPresent && h != HydrationStatusNone {
+			return fmt.Errorf("wiring is already partially hydrated, cleanup or change hydration mode") //nolint:goerr113
+		}
+
+		if err := c.hydrate(ctx, kube); err != nil {
+			return fmt.Errorf("hydrating: %w", err)
+		}
+
+		uh, err := c.getHydration(ctx, kube)
+		if err != nil {
+			return fmt.Errorf("checking status after hydration: %w", err)
+		}
+
+		if uh != HydrationStatusFull {
+			return fmt.Errorf("wiring is not fully hydrated after hydration") //nolint:goerr113
+		}
+
+		return nil
+	}
+
+	return fmt.Errorf("unknown hydration mode %q or invalid hydration status", mode) //nolint:goerr113
+}
+
+func (c *Config) getHydration(ctx context.Context, kube client.Reader) (HydrationStatus, error) {
+	status := HydrationStatusPartial
+
+	total := 0
+	missing := 0
+
+	isCC := c.Fab.Spec.Config.Fabric.Mode == fmeta.FabricModeCollapsedCore
+
+	mgmtSubnet, err := c.Fab.Spec.Config.Control.ManagementSubnet.Parse()
+	if err != nil {
+		return status, fmt.Errorf("parsing management subnet: %w", err)
+	}
+
+	controlVIP, err := c.Fab.Spec.Config.Control.VIP.Parse()
+	if err != nil {
+		return status, fmt.Errorf("parsing control VIP: %w", err)
+	}
+
+	mgmtIPs := map[netip.Addr]bool{
+		controlVIP: true,
+	}
+
+	for _, control := range c.Controls {
+		total++
+		if control.Spec.Management.IP != "" {
+			controlIP, err := control.Spec.Management.IP.Parse()
+			if err != nil {
+				return status, fmt.Errorf("parsing control node %s management IP %s: %w", control.Name, control.Spec.Management.IP, err)
+			}
+
+			if !mgmtSubnet.Contains(controlIP) {
+				return status, fmt.Errorf("control node %s management IP %s is not in the management subnet %s", control.Name, controlIP, mgmtSubnet) //nolint:goerr113
+			}
+
+			if _, exist := mgmtIPs[controlIP]; exist {
+				return status, fmt.Errorf("control node %s management IP %s is already in use", control.Name, controlIP) //nolint:goerr113
+			}
+
+			mgmtIPs[controlIP] = true
+		} else {
+			missing++
+		}
+	}
+
+	vtepSubnet, err := c.Fab.Spec.Config.Fabric.VTEPSubnet.Parse()
+	if err != nil && !isCC {
+		return status, fmt.Errorf("parsing VTEP subnet: %w", err)
+	}
+
+	vtepIPs := map[netip.Addr]bool{}
+
+	protocolSubnet, err := c.Fab.Spec.Config.Fabric.ProtocolSubnet.Parse()
+	if err != nil {
+		return status, fmt.Errorf("parsing protocol subnet: %w", err)
+	}
+
+	protocolIPs := map[netip.Addr]bool{}
+
+	asnSpine := c.Fab.Spec.Config.Fabric.SpineASN
+	asnLeafStart := c.Fab.Spec.Config.Fabric.LeafASNStart
+	asnLeafEnd := c.Fab.Spec.Config.Fabric.LeafASNEnd
+
+	leafASNs := map[uint32]bool{}
+
+	mclagPeer := map[string]*wiringapi.Switch{}
+
+	switches := &wiringapi.SwitchList{}
+	if err := kube.List(ctx, switches); err != nil {
+		return status, fmt.Errorf("listing switches: %w", err)
+	}
+
+	for _, sw := range switches.Items {
+		if sw.Spec.Role == "" {
+			return status, errors.Errorf("switch %s role is not set", sw.Name)
+		}
+		if !slices.Contains(wiringapi.SwitchRoles, sw.Spec.Role) {
+			return status, errors.Errorf("switch %s role %q is invalid", sw.Name, sw.Spec.Role)
+		}
+
+		total++
+		if sw.Spec.IP != "" {
+			swIP, err := netip.ParseAddr(sw.Spec.IP)
+			if err != nil {
+				return status, fmt.Errorf("parsing switch %s IP %s: %w", sw.Name, sw.Spec.IP, err)
+			}
+
+			if !mgmtSubnet.Contains(swIP) {
+				return status, fmt.Errorf("switch %s IP %s is not in the management subnet %s", sw.Name, swIP, mgmtSubnet) //nolint:goerr113
+			}
+
+			if _, exist := mgmtIPs[swIP]; exist {
+				return status, fmt.Errorf("switch %s (management) IP %s is already in use", sw.Name, swIP) //nolint:goerr113
+			}
+			mgmtIPs[swIP] = true
+		} else {
+			missing++
+		}
+
+		total++
+		if sw.Spec.ProtocolIP != "" {
+			swProtoIP, err := netip.ParseAddr(sw.Spec.ProtocolIP)
+			if err != nil {
+				return status, fmt.Errorf("parsing switch %s protocol IP %s: %w", sw.Name, sw.Spec.ProtocolIP, err)
+			}
+
+			if !protocolSubnet.Contains(swProtoIP) {
+				return status, fmt.Errorf("switch %s protocol IP %s is not in the protocol subnet %s", sw.Name, swProtoIP, protocolSubnet) //nolint:goerr113
+			}
+
+			if _, exist := protocolIPs[swProtoIP]; exist {
+				return status, fmt.Errorf("switch %s protocol IP %s is already in use", sw.Name, swProtoIP) //nolint:goerr113
+			}
+			protocolIPs[swProtoIP] = true
+		} else {
+			missing++
+		}
+
+		total++
+		if sw.Spec.ASN > 0 {
+			if sw.Spec.Role.IsLeaf() {
+				if sw.Spec.ASN < asnLeafStart || sw.Spec.ASN > asnLeafEnd {
+					return status, fmt.Errorf("leaf %s ASN %d is not in the leaf ASN range %d-%d", sw.Name, sw.Spec.ASN, asnLeafStart, asnLeafEnd) //nolint:goerr113
+				}
+
+				if sw.Spec.Redundancy.Type == fmeta.RedundancyTypeMCLAG {
+					if peer, exist := mclagPeer[sw.Spec.Redundancy.Group]; exist {
+						if peer.Spec.ASN != sw.Spec.ASN {
+							return status, fmt.Errorf("mclag peers should have same ASNs: %s and %s", sw.Name, peer.Name) //nolint:goerr113
+						}
+					} else {
+						mclagPeer[sw.Spec.Redundancy.Group] = &sw
+
+						if _, exist := leafASNs[sw.Spec.ASN]; exist {
+							return status, fmt.Errorf("leaf %s ASN %d is already in use", sw.Name, sw.Spec.ASN) //nolint:goerr113
+						}
+					}
+				} else if _, exist := leafASNs[sw.Spec.ASN]; exist {
+					return status, fmt.Errorf("leaf %s ASN %d is already in use", sw.Name, sw.Spec.ASN) //nolint:goerr113
+				}
+				leafASNs[sw.Spec.ASN] = true
+			}
+
+			if sw.Spec.Role.IsSpine() && sw.Spec.ASN != asnSpine {
+				return status, fmt.Errorf("spine %s ASN %d is not %d", sw.Name, sw.Spec.ASN, asnSpine) //nolint:goerr113
+			}
+		} else {
+			missing++
+		}
+
+		if isCC {
+			continue
+		}
+
+		if sw.Spec.VTEPIP != "" && sw.Spec.Role.IsSpine() {
+			return status, fmt.Errorf("spine %s should not have VTEP IP", sw.Name) //nolint:goerr113
+		}
+
+		if sw.Spec.Role.IsLeaf() {
+			total++
+			if sw.Spec.VTEPIP != "" {
+				swVTEPIP, err := netip.ParseAddr(sw.Spec.VTEPIP)
+				if err != nil {
+					return status, fmt.Errorf("parsing switch %s VTEP IP %s: %w", sw.Name, sw.Spec.VTEPIP, err)
+				}
+
+				if !vtepSubnet.Contains(swVTEPIP) {
+					return status, fmt.Errorf("switch %s VTEP IP %s is not in the VTEP subnet %s", sw.Name, swVTEPIP, vtepSubnet) //nolint:goerr113
+				}
+
+				if sw.Spec.Redundancy.Type == fmeta.RedundancyTypeMCLAG {
+					if peer, exist := mclagPeer[sw.Spec.Redundancy.Group]; exist {
+						if peer.Spec.VTEPIP != sw.Spec.VTEPIP {
+							return status, fmt.Errorf("mclag peers should have same VTEP IPs: %s and %s", sw.Name, peer.Name) //nolint:goerr113
+						}
+					} else {
+						mclagPeer[sw.Spec.Redundancy.Group] = &sw
+
+						if _, exist := vtepIPs[swVTEPIP]; exist {
+							return status, fmt.Errorf("switch %s VTEP IP %s is already in use", sw.Name, swVTEPIP) //nolint:goerr113
+						}
+					}
+				} else if _, exist := vtepIPs[swVTEPIP]; exist {
+					return status, fmt.Errorf("switch %s VTEP IP %s is already in use", sw.Name, swVTEPIP) //nolint:goerr113
+				}
+				vtepIPs[swVTEPIP] = true
+			} else {
+				missing++
+			}
+		}
+	}
+
+	fabricSubnet, err := c.Fab.Spec.Config.Fabric.FabricSubnet.Parse()
+	if err != nil {
+		return status, fmt.Errorf("parsing fabric subnet: %w", err)
+	}
+
+	fabricIPs := map[netip.Addr]bool{}
+
+	conns := &wiringapi.ConnectionList{}
+	if err := kube.List(ctx, conns); err != nil {
+		return status, fmt.Errorf("listing connections: %w", err)
+	}
+
+	for _, conn := range conns.Items {
+		if conn.Spec.Fabric == nil {
+			continue
+		}
+
+		cf := conn.Spec.Fabric
+
+		for idx, link := range cf.Links {
+			total += 2
+			if link.Spine.IP == "" {
+				missing++
+			}
+			if link.Leaf.IP == "" {
+				missing++
+			}
+			if link.Spine.IP == "" || link.Leaf.IP == "" {
+				continue
+			}
+
+			spinePrefix, err := netip.ParsePrefix(link.Spine.IP)
+			if err != nil {
+				return status, fmt.Errorf("parsing fabric connection %s link %d spine IP %s: %w", conn.Name, idx, link.Spine.IP, err)
+			}
+			if spinePrefix.Bits() != 31 {
+				return status, fmt.Errorf("fabric connection %s link %d spine IP %s is not a /31", conn.Name, idx, spinePrefix) //nolint:goerr113
+			}
+
+			spineIP := spinePrefix.Addr()
+			if !fabricSubnet.Contains(spineIP) {
+				return status, fmt.Errorf("fabric connection %s link %d spine IP %s is not in the fabric subnet %s", conn.Name, idx, spineIP, fabricSubnet) //nolint:goerr113
+			}
+			if _, exist := fabricIPs[spineIP]; exist {
+				return status, fmt.Errorf("fabric connection %s link %d spine IP %s is already in use", conn.Name, idx, spineIP) //nolint:goerr113
+			}
+			fabricIPs[spineIP] = true
+
+			leafPrefix, err := netip.ParsePrefix(link.Leaf.IP)
+			if err != nil {
+				return status, fmt.Errorf("parsing fabric connection %s link %d leaf IP %s: %w", conn.Name, idx, link.Leaf.IP, err)
+			}
+			if leafPrefix.Bits() != 31 {
+				return status, fmt.Errorf("fabric connection %s link %d leaf IP %s is not a /31", conn.Name, idx, leafPrefix) //nolint:goerr113
+			}
+
+			leafIP := leafPrefix.Addr()
+			if !fabricSubnet.Contains(leafIP) {
+				return status, fmt.Errorf("fabric connection %s link %d leaf IP %s is not in the fabric subnet %s", conn.Name, idx, leafIP, fabricSubnet) //nolint:goerr113
+			}
+			if _, exist := fabricIPs[leafIP]; exist {
+				return status, fmt.Errorf("fabric connection %s link %d leaf IP %s is already in use", conn.Name, idx, leafIP) //nolint:goerr113
+			}
+			fabricIPs[leafIP] = true
+
+			if spinePrefix.Masked() != leafPrefix.Masked() {
+				return status, fmt.Errorf("fabric connection %s link %d spine IP %s and leaf IP %s are not in the same subnet", conn.Name, idx, spineIP, leafIP) //nolint:goerr113
+			}
+		}
+	}
+
+	switch {
+	case missing == total:
+		return HydrationStatusNone, nil
+	case total > 0 && missing == 0:
+		return HydrationStatusFull, nil
+	case total > 0 && missing > 0:
+		return HydrationStatusPartial, nil
+	}
+
+	return status, fmt.Errorf("invalid hydration status: total=%d, missing=%d", total, missing) //nolint:goerr113
+}
+
+func (c *Config) hydrate(ctx context.Context, kube client.Client) error {
+	isCC := c.Fab.Spec.Config.Fabric.Mode == fmeta.FabricModeCollapsedCore
+
+	mgmtSubnet, err := c.Fab.Spec.Config.Control.ManagementSubnet.Parse()
+	if err != nil {
+		return fmt.Errorf("parsing management subnet: %w", err)
+	}
+
+	controlVIP, err := c.Fab.Spec.Config.Control.VIP.Parse()
+	if err != nil {
+		return fmt.Errorf("parsing control VIP: %w", err)
+	}
+
+	if controlVIP != mgmtSubnet.Masked().Addr().Next() {
+		return fmt.Errorf("control VIP %s is not the first IP of the management subnet %s", controlVIP, mgmtSubnet) //nolint:goerr113
+	}
+
+	nextMgmtIP := controlVIP
+	for i := 0; i < 4; i++ { // reserve few IPs for future use
+		nextMgmtIP = nextMgmtIP.Next()
+	}
+
+	slices.SortFunc(c.Controls, func(a, b fabapi.ControlNode) int {
+		return cmp.Compare(a.Name, b.Name)
+	})
+
+	for idx := range c.Controls {
+		control := &c.Controls[idx]
+		control.Spec.Management.IP = meta.Addr(nextMgmtIP.String())
+		nextMgmtIP = nextMgmtIP.Next()
+	}
+
+	vtepSubnet, err := c.Fab.Spec.Config.Fabric.VTEPSubnet.Parse()
+	if err != nil && !isCC {
+		return fmt.Errorf("parsing VTEP subnet: %w", err)
+	}
+	nextVTEPIP := vtepSubnet.Masked().Addr()
+
+	protocolSubnet, err := c.Fab.Spec.Config.Fabric.ProtocolSubnet.Parse()
+	if err != nil {
+		return fmt.Errorf("parsing protocol subnet: %w", err)
+	}
+	nextProtoIP := protocolSubnet.Masked().Addr()
+
+	spineASN := c.Fab.Spec.Config.Fabric.SpineASN
+	nextLeafASN := c.Fab.Spec.Config.Fabric.LeafASNStart
+
+	switches := &wiringapi.SwitchList{}
+	if err := kube.List(ctx, switches); err != nil {
+		return fmt.Errorf("listing switches: %w", err)
+	}
+
+	slices.SortFunc(switches.Items, func(a, b wiringapi.Switch) int {
+		if a.Spec.Role == b.Spec.Role {
+			return cmp.Compare(a.Name, b.Name)
+		}
+
+		if a.Spec.Role == wiringapi.SwitchRoleSpine {
+			return -1
+		}
+
+		if b.Spec.Role == wiringapi.SwitchRoleSpine {
+			return 1
+		}
+
+		return cmp.Compare(a.Spec.Role, b.Spec.Role)
+	})
+
+	mclagPeer := map[string]*wiringapi.Switch{}
+
+	for idx := range switches.Items {
+		sw := &switches.Items[idx]
+		if sw.Spec.Role == "" {
+			return errors.Errorf("switch %s role is not set", sw.Name)
+		}
+		if !slices.Contains(wiringapi.SwitchRoles, sw.Spec.Role) {
+			return errors.Errorf("switch %s role %q is invalid", sw.Name, sw.Spec.Role)
+		}
+
+		sw.Spec.IP = nextMgmtIP.String()
+		nextMgmtIP = nextMgmtIP.Next()
+
+		sw.Spec.ProtocolIP = nextProtoIP.String()
+		nextProtoIP = nextProtoIP.Next()
+
+		if sw.Spec.Role.IsSpine() {
+			sw.Spec.ASN = spineASN
+		}
+
+		if sw.Spec.Redundancy.Type == fmeta.RedundancyTypeMCLAG {
+			if peer, exist := mclagPeer[sw.Spec.Redundancy.Group]; exist {
+				sw.Spec.ASN = peer.Spec.ASN
+				sw.Spec.VTEPIP = peer.Spec.VTEPIP
+
+				continue
+			}
+
+			mclagPeer[sw.Spec.Redundancy.Group] = sw
+		}
+
+		if sw.Spec.Role.IsLeaf() {
+			sw.Spec.ASN = nextLeafASN
+			nextLeafASN++
+
+			sw.Spec.VTEPIP = ""
+			if !isCC {
+				sw.Spec.VTEPIP = nextVTEPIP.String()
+				nextVTEPIP = nextVTEPIP.Next()
+			}
+		}
+	}
+
+	for _, sw := range switches.Items {
+		if err := kube.Update(ctx, &sw); err != nil {
+			return fmt.Errorf("updating switch %s: %w", sw.Name, err)
+		}
+	}
+
+	fabricSubnet, err := c.Fab.Spec.Config.Fabric.FabricSubnet.Parse()
+	if err != nil {
+		return fmt.Errorf("parsing fabric subnet: %w", err)
+	}
+	nextFabricIP := fabricSubnet.Masked().Addr()
+
+	conns := &wiringapi.ConnectionList{}
+	if err := kube.List(ctx, conns); err != nil {
+		return fmt.Errorf("listing connections: %w", err)
+	}
+
+	slices.SortFunc(conns.Items, func(a, b wiringapi.Connection) int {
+		return cmp.Compare(a.Name, b.Name)
+	})
+
+	for _, conn := range conns.Items {
+		if conn.Spec.Fabric == nil {
+			continue
+		}
+
+		cf := conn.Spec.Fabric
+
+		for idx := range cf.Links {
+			link := &cf.Links[idx]
+			link.Spine.IP = nextFabricIP.String() + "/31"
+			nextFabricIP = nextFabricIP.Next()
+
+			link.Leaf.IP = nextFabricIP.String() + "/31"
+			nextFabricIP = nextFabricIP.Next()
+		}
+
+		if err := kube.Update(ctx, &conn); err != nil {
+			return fmt.Errorf("updating connection %s: %w", conn.Name, err)
+		}
+	}
+
+	return nil
+}
