@@ -4,14 +4,19 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"log/slog"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/pkg/errors"
 	fmeta "go.githedgehog.com/fabric/api/meta"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1alpha2"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/api/meta"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/fabric"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -39,13 +44,79 @@ const (
 	HydrationStatusFull    HydrationStatus = "full"
 )
 
-func (c *Config) EnsureHydrated(ctx context.Context, wL *apiutil.Loader, mode HydrateMode) error {
-	if wL == nil {
-		return fmt.Errorf("loader is nil") //nolint:goerr113
+func (c *Config) loadHydrateValidate(ctx context.Context, mode HydrateMode) error {
+	l, err := c.loadWiring(ctx)
+	if err != nil {
+		return fmt.Errorf("loading wiring: %w", err)
 	}
 
-	kube := wL.GetClient()
+	kube := l.GetClient()
 
+	if err := c.ensureHydrated(ctx, kube, mode); err != nil {
+		return fmt.Errorf("ensuring hydrated: %w", err)
+	}
+
+	fabricCfg, err := fabric.GetFabricConfig(c.Fab)
+	if err != nil {
+		return fmt.Errorf("getting fabric config: %w", err)
+	}
+
+	if err := apiutil.ValidateFabric(ctx, l, fabricCfg); err != nil {
+		return fmt.Errorf("validating wiring: %w", err)
+	}
+
+	c.Wiring = kube
+
+	return nil
+}
+
+func (c *Config) loadWiring(ctx context.Context) (*apiutil.Loader, error) {
+	includeDir := filepath.Join(c.WorkDir, IncludeDir)
+	stat, err := os.Stat(includeDir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("include dir %q: %w", includeDir, ErrNotExist)
+		}
+
+		return nil, fmt.Errorf("checking include dir %q: %w", includeDir, err)
+	}
+	if !stat.IsDir() {
+		return nil, fmt.Errorf("include dir %q: %w", includeDir, ErrNotDir)
+	}
+
+	l := apiutil.NewWiringLoader()
+	files, err := os.ReadDir(includeDir)
+	if err != nil {
+		return nil, fmt.Errorf("reading include dir %q: %w", includeDir, err)
+	}
+
+	for _, file := range files {
+		relName := filepath.Join(IncludeDir, file.Name())
+		if file.IsDir() {
+			slog.Warn("Skipping directory", "name", relName)
+
+			continue
+		}
+		if !strings.HasSuffix(file.Name(), YAMLExt) {
+			slog.Warn("Skipping non-YAML file", "name", file.Name())
+
+			continue
+		}
+
+		data, err := os.ReadFile(filepath.Join(includeDir, file.Name()))
+		if err != nil {
+			return nil, fmt.Errorf("reading wiring %q: %w", relName, err)
+		}
+
+		if err := l.LoadAdd(ctx, data); err != nil {
+			return nil, fmt.Errorf("loading wiring %q: %w", relName, err)
+		}
+	}
+
+	return l, nil
+}
+
+func (c *Config) ensureHydrated(ctx context.Context, kube client.Client, mode HydrateMode) error {
 	h, err := c.getHydration(ctx, kube)
 	if err != nil {
 		return fmt.Errorf("checking if hydrated: %w", err)
@@ -69,6 +140,8 @@ func (c *Config) EnsureHydrated(ctx context.Context, wL *apiutil.Loader, mode Hy
 		if err := c.hydrate(ctx, kube); err != nil {
 			return fmt.Errorf("hydrating: %w", err)
 		}
+
+		slog.Info("Wiring hydrated successfully", "mode", mode)
 
 		uh, err := c.getHydration(ctx, kube)
 		if err != nil {
@@ -107,6 +180,14 @@ func (c *Config) getHydration(ctx context.Context, kube client.Reader) (Hydratio
 		controlVIP: true,
 	}
 
+	mgmtDHCPStart, err := c.Fab.Spec.Config.Fabric.ManagementDHCPStart.Parse()
+	if err != nil {
+		return status, fmt.Errorf("parsing management DHCP start: %w", err)
+	}
+	if !mgmtSubnet.Contains(mgmtDHCPStart) {
+		return status, fmt.Errorf("management DHCP start %s is not in the management subnet %s", mgmtDHCPStart, mgmtSubnet) //nolint:goerr113
+	}
+
 	for _, control := range c.Controls {
 		total++
 		if control.Spec.Management.IP != "" {
@@ -117,6 +198,10 @@ func (c *Config) getHydration(ctx context.Context, kube client.Reader) (Hydratio
 
 			if !mgmtSubnet.Contains(controlIP) {
 				return status, fmt.Errorf("control node %s management IP %s is not in the management subnet %s", control.Name, controlIP, mgmtSubnet) //nolint:goerr113
+			}
+
+			if controlIP.Compare(mgmtDHCPStart) >= 0 {
+				return status, fmt.Errorf("control node %s management IP %s should be less than the management DHCP start %s", control.Name, controlIP, mgmtDHCPStart) //nolint:goerr113
 			}
 
 			if _, exist := mgmtIPs[controlIP]; exist {
@@ -173,6 +258,10 @@ func (c *Config) getHydration(ctx context.Context, kube client.Reader) (Hydratio
 
 			if !mgmtSubnet.Contains(swIP) {
 				return status, fmt.Errorf("switch %s IP %s is not in the management subnet %s", sw.Name, swIP, mgmtSubnet) //nolint:goerr113
+			}
+
+			if swIP.Compare(mgmtDHCPStart) >= 0 {
+				return status, fmt.Errorf("switch %s IP %s should be less than the management DHCP start %s", sw.Name, swIP, mgmtDHCPStart) //nolint:goerr113
 			}
 
 			if _, exist := mgmtIPs[swIP]; exist {

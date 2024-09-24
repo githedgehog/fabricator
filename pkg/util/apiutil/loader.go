@@ -12,6 +12,7 @@ import (
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1alpha2"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1alpha2"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
@@ -66,6 +67,10 @@ func NewFabLoader() *Loader {
 	}
 }
 
+func (l *Loader) GetClient() client.Client {
+	return l.kube
+}
+
 func (l *Loader) Load(data []byte) ([]client.Object, error) {
 	res := []client.Object{}
 	multidocReader := utilyaml.NewYAMLReader(bufio.NewReader(bytes.NewReader(data)))
@@ -90,6 +95,10 @@ func (l *Loader) Load(data []byte) ([]client.Object, error) {
 		obj, ok := rObj.(client.Object)
 		if !ok {
 			return nil, fmt.Errorf("object %d: %s: not a client.Object", idx, kind) //nolint:goerr113
+		}
+
+		if obj.GetNamespace() == "" {
+			obj.SetNamespace(metav1.NamespaceDefault)
 		}
 
 		if err := validateObject(obj); err != nil {
