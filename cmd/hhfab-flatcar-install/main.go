@@ -107,7 +107,6 @@ func main() {
 		Action: func(_ *cli.Context) error {
 			slog.Info("Running flatcar-install", "version", version)
 
-			// how to pass the stdin/out handles? Maybe just os.Stdin is enough anywhere
 			// TUI is a PITA to get working inside of systemd, maybe do something...lower tech
 			return errors.Wrapf(install.PreInstallCheck(context.TODO(), basedir, dryRun), "error running flatcar installer")
 		},
