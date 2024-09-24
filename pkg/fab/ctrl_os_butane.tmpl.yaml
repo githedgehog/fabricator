@@ -176,3 +176,20 @@ storage:
         name: core
       group:
         name: core
+systemd:
+  units:
+    - name: fabric-install.service
+      enabled: true
+      contents: |
+        [Unit]
+        Description="Firstboot installation program for HedgeHog Fabric"
+        ConditionFirstBoot=yes
+
+        [Service]
+        Type=simple
+        ExecStart=/hedgehog/control-install/hhfab-recipe run
+        WorkingDirectory=/hedgehog/control-install/
+
+        [Install]
+        WantedBy=first-boot-complete.target
+

@@ -125,7 +125,7 @@ func checkConfigFile(configFilePath string, config *Config) (bool, error) {
 	if err := yaml.Unmarshal(configData, config); err != nil {
 		return false, errors.Wrapf(err, "error unmarshalling config file %s", configFilePath)
 	}
-	slog.Info("ConfigCheck", "config", config)
+	slog.Debug("ConfigCheck", "config", config)
 	if config.PasswordHash == "" && len(config.AuthorizedKeys) == 0 {
 		// we need a way to login to the installed systemd
 		populatePassword(config)
@@ -195,34 +195,53 @@ func populateBlockDevice(config *Config) error {
 	return nil
 
 }
-func launchFlatcarInstaller(config Config) error {
-	// TODO this is where we will exec the flatcar installer with the values from the ignition.json file
+func launchFlatcarInstaller(config Config, dryrun bool) error {
 	// TODO read the config file to find install device
-	// TODO add plumbing to get dry run bool in here, and flatcar install file
+	// TODO add plumbing to get dry run bool to flatcar install command
 
-	slog.Info("Running Install", "BlockDevice", config.BlockDevicePath)
-	installCmd := exec.Command("sudo /usr/bin/flatcar-install", "-i", "/mnt/hedgehog/ignition.json", "-d", config.BlockDevicePath, "-f", "/mnt/hedgehog/flatcar_production_image.bin.bz2")
+	slog.Debug("Running Install", "BlockDevice", config.BlockDevicePath)
+	installCmd := exec.Command("sudo", "flatcar-install", "-i", "/mnt/hedgehog/ignition.json", "-d", config.BlockDevicePath, "-f", "/mnt/hedgehog/flatcar_production_image.bin.bz2")
 	var stderr bytes.Buffer
-	var stdout bytes.Buffer
+	//var stdout bytes.Buffer
 	installCmd.Stderr = &stderr
-	installCmd.Stdout = &stdout
+	//installCmd.Stdout = &stdout
 
+	if dryrun {
+		slog.Info("DryRun Flatcar install", "Command", installCmd.String())
+		return nil
+	}
+
+	slog.Info("Executing install command", "Commnad", installCmd.String())
 	if err := installCmd.Run(); err != nil {
-		slog.Error("flatcar install error", "Stderr", stderr.String())
+		slog.Error("flatcar install error", "Stderr", stderr.String(), "Command", installCmd.String())
 		return err
 	}
-	slog.Info(stdout.String())
+
 	return nil
 }
 
 // mountUnbootedFlatcar is reponsible for booting the block device at a known location
 func mountUnbootedFlatcar(config Config) error {
-	//TODO sudo partprobe config.BlockDevicePath
-	// attempt to expand image to
 
 	slog.Info("MountUnbootedFlatcar", "BlockDevice", config.BlockDevicePath)
-	return nil
+	partProbeCmd := exec.Command("sudo", "partprobe", config.BlockDevicePath)
+	if err := partProbeCmd.Run(); err != nil {
+		slog.Error("Exec Command exited with error", "Command", partProbeCmd.String(), "Error", err)
+	}
 
+	mkdirCmd := exec.Command("sudo", "mkdir", "/mnt/rootdir")
+	if err := mkdirCmd.Run(); err != nil {
+		slog.Error("Exec Command exited with error", "Command", mkdirCmd.String(), "Error", err)
+	}
+
+	// 6 is the partition number for the oem partition
+	// 9 is the partition number for the root partition
+	mountCmd := exec.Command("sudo", "mount", "-t", "auto", config.BlockDevicePath+"9", "/mnt/rootdir")
+	if err := mountCmd.Run(); err != nil {
+		slog.Error("Exec Command exited with error", "Command", mountCmd.String(), "Error", err)
+	}
+
+	return nil
 }
 
 // copyControlInstallFiles will take the control-os
@@ -231,13 +250,22 @@ func copyControlInstallFiles() error {
 	// this is most likely going to be in /opt/hedgehog
 	// Need to sudo mount the config.BlockDevicePath to a temp location
 	// Need to rsync? cp -r ? , something all of the control-os dir to the base system
-	slog.Info("Copy Install Files:", "Destination", "/mnt/root/hedgehog", "Src", "/mnt/hedgehot/control-os")
+	slog.Info("Rsync Install Files:", "Destination", "/mnt/rootdir/hedgehog", "Src", "/mnt/hedgehog/control-install")
+	// use rsync in the live image for reliable copy
+	rsyncCmd := exec.Command("sudo", "rsync", "--quiet", "--recursive", "/mnt/hedgehog/control-install", "/mnt/rootdir/hedgehog/")
+	if err := rsyncCmd.Run(); err != nil {
+		slog.Error("Exec Command exited with error", "Command", rsyncCmd.String(), "Error", err)
+	}
 	return nil
 }
 
-func rebootSystem() {
+func rebootSystem(dryrun bool) {
 	slog.Info("Rebooting Live Image")
-	rebootCmd := exec.Command("sudo", "shutdown", "-r", " +1", "Flatcar installed, Rebooting to installed system")
+	rebootCmd := exec.Command("sudo", "shutdown", "-r", "+1", "Flatcar installed,Rebooting to installed system")
+	if dryrun {
+		slog.Info("Dryrun reboot", "Command", rebootCmd.String())
+		return
+	}
 	if err := rebootCmd.Run(); err != nil {
 		slog.Error("Reboot command failed to run")
 	}
@@ -251,25 +279,23 @@ func PreInstallCheck(_ context.Context, basedir string, dryRun bool) error {
 
 	proceed, err := checkConfigFile(configFile, &config)
 	if err != nil {
-		slog.Info("Check config failed", "Error", err.Error())
+		slog.Error("Check config failed", "Error", err.Error())
 		return err
 	}
 	if dryRun {
-		slog.Info("Config", "config", config)
-		return nil
+		slog.Info("DryRun Config", "config", config)
 	}
 	if proceed != true {
 		slog.Error("checkConfigFile returned false", "Config", config)
 		//TODO Prompt user for config file changes
 	}
 
-	slog.Info("Config Before ignition", "config", config)
+	slog.Debug("Config Before ignition", "config", config)
 	// TODO Write missing ssh-keys or password to ignition
-	// this might not be true, since we need
-	launchFlatcarInstaller(config)
+	launchFlatcarInstaller(config, dryRun)
 	mountUnbootedFlatcar(config)
 	copyControlInstallFiles()
-	rebootSystem()
+	rebootSystem(dryRun)
 
 	return nil
 }
