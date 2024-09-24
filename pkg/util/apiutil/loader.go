@@ -134,6 +134,7 @@ func (l *Loader) LoadAdd(ctx context.Context, data []byte) error {
 func (l *Loader) Add(ctx context.Context, objs ...client.Object) error {
 	for _, obj := range objs {
 		obj.SetResourceVersion("")
+
 		if err := l.kube.Create(ctx, obj); err != nil {
 			return fmt.Errorf("adding %T: %w", obj, err)
 		}
