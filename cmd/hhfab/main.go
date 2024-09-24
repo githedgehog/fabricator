@@ -111,6 +111,82 @@ func Run(ctx context.Context) error {
 		Destination: &hydrateMode,
 	}
 
+	var wgSpinesCount, wgFabricLinksCount, wgMCLAGLeafsCount, wgOrphanLeafsCount, wgMCLAGSessionLinks, wgMCLAGPeerLinks, wgVPCLoopbacks uint
+	var wgESLAGLeafGroups string
+	var wgExternal bool
+	var wgMCLAGServers, wgESLAGServers, wgUnbundledServers, wgBundledServers uint
+	vlabWiringGenFlags := []cli.Flag{
+		&cli.UintFlag{
+			Name:        "spines-count",
+			Usage:       "number of spines if fabric mode is spine-leaf",
+			Destination: &wgSpinesCount,
+		},
+		&cli.UintFlag{
+			Name:        "fabric-links-count",
+			Usage:       "number of fabric links if fabric mode is spine-leaf",
+			Destination: &wgFabricLinksCount,
+		},
+		&cli.UintFlag{
+			Name:        "mclag-leafs-count",
+			Usage:       "number of mclag leafs (should be even)",
+			Destination: &wgMCLAGLeafsCount,
+		},
+		&cli.StringFlag{
+			Name:        "eslag-leaf-groups",
+			Usage:       "eslag leaf groups (comma separated list of number of ESLAG switches in each group, should be 2-4 per group, e.g. 2,4,2 for 3 groups with 2, 4 and 2 switches)",
+			Destination: &wgESLAGLeafGroups,
+		},
+		&cli.UintFlag{
+			Name:        "orphan-leafs-count",
+			Usage:       "number of orphan leafs",
+			Destination: &wgOrphanLeafsCount,
+		},
+		&cli.UintFlag{
+			Name:        "mclag-session-links",
+			Usage:       "number of mclag session links for each mclag leaf",
+			Destination: &wgMCLAGSessionLinks,
+		},
+		&cli.UintFlag{
+			Name:        "mclag-peer-links",
+			Usage:       "number of mclag peer links for each mclag leaf",
+			Destination: &wgMCLAGPeerLinks,
+		},
+		&cli.UintFlag{
+			Name:        "vpc-loopbacks",
+			Usage:       "number of vpc loopbacks for each switch",
+			Destination: &wgVPCLoopbacks,
+		},
+		&cli.BoolFlag{
+			Name:        "external",
+			Usage:       "include virtual external switch",
+			Destination: &wgExternal,
+		},
+		&cli.UintFlag{
+			Name:        "mclag-servers",
+			Usage:       "number of MCLAG servers to generate for MCLAG switches",
+			Destination: &wgMCLAGServers,
+			Value:       2,
+		},
+		&cli.UintFlag{
+			Name:        "eslag-servers",
+			Usage:       "number of ESLAG servers to generate for ESLAG switches",
+			Destination: &wgESLAGServers,
+			Value:       2,
+		},
+		&cli.UintFlag{
+			Name:        "unbundled-servers",
+			Usage:       "number of unbundled servers to generate for switches (only for one of the first switch in the redundancy group or orphan switch)",
+			Destination: &wgUnbundledServers,
+			Value:       1,
+		},
+		&cli.UintFlag{
+			Name:        "bundled-servers",
+			Usage:       "number of bundled servers to generate for switches (only for one of the second switch in the redundancy group or orphan switch)",
+			Destination: &wgBundledServers,
+			Value:       1,
+		},
+	}
+
 	before := func() cli.BeforeFunc {
 		return func(_ *cli.Context) error {
 			if verbose && brief {
@@ -297,7 +373,68 @@ func Run(ctx context.Context) error {
 				},
 			},
 			{
+				Name: "vlab",
+				Subcommands: []*cli.Command{
+					{
+						Name:    "generate",
+						Aliases: []string{"gen"},
+						Usage:   "generate VLAB wiring diagram",
+						Flags:   append(defaultFlags, vlabWiringGenFlags...),
+						Before:  before(),
+						Action: func(_ *cli.Context) error {
+							builder := hhfab.VLABBuilder{
+								SpinesCount:       uint8(wgSpinesCount),      //nolint:gosec
+								FabricLinksCount:  uint8(wgFabricLinksCount), //nolint:gosec
+								MCLAGLeafsCount:   uint8(wgMCLAGLeafsCount),  //nolint:gosec
+								ESLAGLeafGroups:   wgESLAGLeafGroups,
+								OrphanLeafsCount:  uint8(wgOrphanLeafsCount),  //nolint:gosec
+								MCLAGSessionLinks: uint8(wgMCLAGSessionLinks), //nolint:gosec
+								MCLAGPeerLinks:    uint8(wgMCLAGPeerLinks),    //nolint:gosec
+								VPCLoopbacks:      uint8(wgVPCLoopbacks),      //nolint:gosec
+								MCLAGServers:      uint8(wgMCLAGServers),      //nolint:gosec
+								ESLAGServers:      uint8(wgESLAGServers),      //nolint:gosec
+								UnbundledServers:  uint8(wgUnbundledServers),  //nolint:gosec
+								BundledServers:    uint8(wgBundledServers),    //nolint:gosec
+							}
+
+							if err := hhfab.VLABGenerate(ctx, workDir, cacheDir, builder, hhfab.DefaultVLABGeneratedFile); err != nil {
+								return fmt.Errorf("generating VLAB wiring diagram: %w", err)
+							}
+
+							return nil
+						},
+					},
+				},
+			},
+			{
+				Name:  "sample",
+				Usage: "generate sample wiring diagram",
+				Subcommands: []*cli.Command{
+					{
+						Name:    "spine-leaf",
+						Aliases: []string{"sl"},
+						Usage:   "generate sample spine-leaf wiring diagram",
+						Flags:   defaultFlags,
+						Before:  before(),
+						Action: func(_ *cli.Context) error {
+							panic("not implemented")
+						},
+					},
+					{
+						Name:    "collapsed-core",
+						Aliases: []string{"cc"},
+						Usage:   "generate sample collapsed-core wiring diagram",
+						Flags:   defaultFlags,
+						Before:  before(),
+						Action: func(_ *cli.Context) error {
+							panic("not implemented")
+						},
+					},
+				},
+			},
+			{
 				Name:        "_helpers",
+				Usage:       "shouldn't be used directly, will be called by hhfab automatically",
 				Hidden:      true,
 				Subcommands: []*cli.Command{
 					// TODO things to auto run with sudo
