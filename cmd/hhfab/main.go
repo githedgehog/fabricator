@@ -97,6 +97,20 @@ func Run(ctx context.Context) error {
 		fabricModes = append(fabricModes, string(m))
 	}
 
+	hydrateModes := []string{}
+	for _, m := range hhfab.HydrateModes {
+		hydrateModes = append(hydrateModes, string(m))
+	}
+
+	var hydrateMode string
+	hMode := &cli.StringFlag{
+		Name:        "hydrate-mode",
+		Aliases:     []string{"hm"},
+		Usage:       "set hydrate mode: one of " + strings.Join(hydrateModes, ", "),
+		Value:       string(hhfab.HydrateModeIfNotPresent),
+		Destination: &hydrateMode,
+	}
+
 	before := func() cli.BeforeFunc {
 		return func(_ *cli.Context) error {
 			if verbose && brief {
@@ -259,15 +273,10 @@ func Run(ctx context.Context) error {
 			{
 				Name:   "validate",
 				Usage:  "validate config and included wiring files",
-				Flags:  defaultFlags,
+				Flags:  append(defaultFlags, hMode),
 				Before: before(),
 				Action: func(_ *cli.Context) error {
-					cfg, err := hhfab.Load(ctx, workDir, cacheDir)
-					if err != nil {
-						return fmt.Errorf("loading config: %w", err)
-					}
-
-					if err := cfg.Validate(ctx); err != nil {
+					if err := hhfab.Validate(ctx, workDir, cacheDir, hhfab.HydrateMode(hydrateMode)); err != nil {
 						return fmt.Errorf("validating: %w", err)
 					}
 
@@ -277,16 +286,14 @@ func Run(ctx context.Context) error {
 			{
 				Name:   "build",
 				Usage:  "build installers",
-				Flags:  defaultFlags,
+				Flags:  append(defaultFlags, hMode),
 				Before: before(),
 				Action: func(_ *cli.Context) error {
-					cfg, err := hhfab.Load(ctx, workDir, cacheDir)
-					if err != nil {
-						return fmt.Errorf("loading config: %w", err)
+					if err := hhfab.Build(ctx, workDir, cacheDir, hhfab.HydrateMode(hydrateMode)); err != nil {
+						return fmt.Errorf("building: %w", err)
 					}
 
-					fmt.Println(cfg)
-					panic("not implemented")
+					return nil
 				},
 			},
 			{

@@ -199,7 +199,7 @@ func TestInitConfig(t *testing.T) {
 			l := apiutil.NewFabLoader()
 			require.NoError(t, l.LoadAdd(ctx, data))
 
-			fab, controls, err := apiutil.GetFabAndControls(ctx, l)
+			fab, controls, err := fab.GetFabAndControls(ctx, l.GetClient(), true)
 			require.NoError(t, err)
 
 			fab.APIVersion = ""
