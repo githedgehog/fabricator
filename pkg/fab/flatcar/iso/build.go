@@ -172,7 +172,6 @@ func createEfi(diskImg, workdir string) error {
 		slog.Error("Error creating %s filesystem", "disk", espSpec.VolumeLabel, "Error", err.Error())
 		return err
 	}
-	//slog.Info("espFS", "Values", espFs)
 
 	// NEED OEM as the disk label things don't work otherwise
 	backpackSpec := diskpkg.FilesystemSpec{Partition: 2, FSType: filesystem.TypeFat32, VolumeLabel: "OEM"}
@@ -208,7 +207,6 @@ func createEfi(diskImg, workdir string) error {
 	slog.Debug("path names", "basePath", basePath, "ignitionPath", ignitionPath)
 	err = copyFile("/", ignitionPath+"/ignition.json", backpackFs)
 	err = copyTree(basePath, "/control-install", backpackFs)
-	//err = copyTree(basePath, "/control-install-2", backpackFs)
 	return err
 }
 
@@ -222,10 +220,7 @@ func Build(_ context.Context, basedir string) error {
 	workdir := filepath.Join(basedir, fab.BundleControlISO.Name)
 
 	slog.Info("Building Control Node ISO", "target", target, "workdir", workdir, "installer", installer)
-	//f, err := os.Create("CpuProfile")
-	//pprof.StartCPUProfile(f)
 	err := createEfi(target, workdir)
-	//pprof.StopCPUProfile()
 	slog.Info("ISO building done", "took", time.Since(start))
 
 	return err

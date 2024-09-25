@@ -190,9 +190,6 @@ VERSION ?= $(shell hack/version.sh)
 OCI_REPO ?= registry.local:31000/githedgehog/fabricator
 
 
-# TODO - the butane->ignition step
-# TODO - the cpio step
-# TODO - the push to ghcr
 .PHONY: hhfab-flatcar-install
 hhfab-flatcar-install:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/hhfab-flatcar-install -ldflags="-w -s -X main.version=$(VERSION)" $(GOFLAGS) ./cmd/hhfab-flatcar-install

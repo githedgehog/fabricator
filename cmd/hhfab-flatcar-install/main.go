@@ -75,7 +75,7 @@ func main() {
 		Name:        "basedir",
 		Aliases:     []string{"d"},
 		Usage:       "use workir `DIR`",
-		Value:       "/mnt/hedgehog/", // TODO verify this is in _all_places
+		Value:       "/mnt/hedgehog/",
 		Destination: &basedir,
 	}
 

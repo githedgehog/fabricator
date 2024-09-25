@@ -196,15 +196,12 @@ func populateBlockDevice(config *Config) error {
 
 }
 func launchFlatcarInstaller(config Config, dryrun bool) error {
-	// TODO read the config file to find install device
 	// TODO add plumbing to get dry run bool to flatcar install command
 
 	slog.Debug("Running Install", "BlockDevice", config.BlockDevicePath)
 	installCmd := exec.Command("sudo", "flatcar-install", "-i", "/mnt/hedgehog/ignition.json", "-d", config.BlockDevicePath, "-f", "/mnt/hedgehog/flatcar_production_image.bin.bz2")
 	var stderr bytes.Buffer
-	//var stdout bytes.Buffer
 	installCmd.Stderr = &stderr
-	//installCmd.Stdout = &stdout
 
 	if dryrun {
 		slog.Info("DryRun Flatcar install", "Command", installCmd.String())
@@ -220,7 +217,7 @@ func launchFlatcarInstaller(config Config, dryrun bool) error {
 	return nil
 }
 
-// mountUnbootedFlatcar is reponsible for booting the block device at a known location
+// mountUnbootedFlatcar is reponsible for booting the block device at a known location, so later functions can copy to it
 func mountUnbootedFlatcar(config Config) error {
 
 	slog.Info("MountUnbootedFlatcar", "BlockDevice", config.BlockDevicePath)
@@ -246,10 +243,7 @@ func mountUnbootedFlatcar(config Config) error {
 
 // copyControlInstallFiles will take the control-os
 func copyControlInstallFiles() error {
-	// TODO after the installer is done, we need to copy the first boot files onto the newely installed but not-yet-booted flatcar system
-	// this is most likely going to be in /opt/hedgehog
-	// Need to sudo mount the config.BlockDevicePath to a temp location
-	// Need to rsync? cp -r ? , something all of the control-os dir to the base system
+
 	slog.Info("Rsync Install Files:", "Destination", "/mnt/rootdir/hedgehog", "Src", "/mnt/hedgehog/control-install")
 	// use rsync in the live image for reliable copy
 	rsyncCmd := exec.Command("sudo", "rsync", "--quiet", "--recursive", "/mnt/hedgehog/control-install", "/mnt/rootdir/hedgehog/")
@@ -261,7 +255,7 @@ func copyControlInstallFiles() error {
 
 func rebootSystem(dryrun bool) {
 	slog.Info("Rebooting Live Image")
-	rebootCmd := exec.Command("sudo", "shutdown", "-r", "+1", "Flatcar installed,Rebooting to installed system")
+	rebootCmd := exec.Command("sudo", "shutdown", "-r", "+1", "Flatcar installed, Rebooting to installed system")
 	if dryrun {
 		slog.Info("Dryrun reboot", "Command", rebootCmd.String())
 		return
