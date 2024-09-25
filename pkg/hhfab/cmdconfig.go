@@ -138,12 +138,24 @@ func Init(ctx context.Context, c InitConfig) error {
 		return fmt.Errorf("writing fab config: %w", err)
 	}
 
+	if err := os.RemoveAll(filepath.Join(c.WorkDir, IncludeDir)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("removing include dir: %w", err)
+	}
+
 	if err := os.MkdirAll(filepath.Join(c.WorkDir, IncludeDir), 0o700); err != nil {
 		return fmt.Errorf("creating include dir: %w", err)
 	}
 
+	if err := os.RemoveAll(filepath.Join(c.WorkDir, ResultDir)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("removing result dir: %w", err)
+	}
+
 	if err := os.MkdirAll(filepath.Join(c.WorkDir, ResultDir), 0o700); err != nil {
 		return fmt.Errorf("creating result dir: %w", err)
+	}
+
+	if err := os.RemoveAll(filepath.Join(c.WorkDir, VLABDir)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("removing VLAB dir: %w", err)
 	}
 
 	if err := importWiring(c); err != nil {

@@ -31,6 +31,7 @@ type VLABBuilder struct {
 
 	data         *apiutil.Loader
 	ifaceTracker map[string]uint8 // next available interface ID for each switch
+	switchID     uint             // switch ID counter
 }
 
 func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode meta.FabricMode) error {
@@ -102,8 +103,8 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 				return errors.Errorf("ESLAG leaf group must have 2-4 leafs")
 			}
 
-			totalESLAGLeafs += uint8(leafs)                         //nolint:gosec
-			eslagLeafGroups = append(eslagLeafGroups, uint8(leafs)) //nolint:gosec
+			totalESLAGLeafs += uint8(leafs)
+			eslagLeafGroups = append(eslagLeafGroups, uint8(leafs))
 		}
 	}
 
@@ -203,13 +204,6 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 				Type:  meta.RedundancyTypeMCLAG,
 			},
 		}); err != nil {
-			return err
-		}
-
-		if _, err := b.createManagementConnection(ctx, leaf1Name); err != nil {
-			return err
-		}
-		if _, err := b.createManagementConnection(ctx, leaf2Name); err != nil {
 			return err
 		}
 
@@ -346,10 +340,6 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 			}); err != nil {
 				return err
 			}
-
-			if _, err := b.createManagementConnection(ctx, leafName); err != nil {
-				return err
-			}
 		}
 
 		switchID += leafs
@@ -449,10 +439,6 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 			return err
 		}
 
-		if _, err := b.createManagementConnection(ctx, leafName); err != nil {
-			return err
-		}
-
 		switchID++
 		leafID++
 
@@ -516,10 +502,6 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 			Role:        wiringapi.SwitchRoleSpine,
 			Description: fmt.Sprintf("VS-%02d", switchID),
 		}); err != nil {
-			return err
-		}
-
-		if _, err := b.createManagementConnection(ctx, spineName); err != nil {
 			return err
 		}
 
@@ -627,6 +609,8 @@ func (b *VLABBuilder) createSwitchGroup(ctx context.Context, name string) (*wiri
 
 func (b *VLABBuilder) createSwitch(ctx context.Context, name string, spec wiringapi.SwitchSpec) (*wiringapi.Switch, error) { //nolint:unparam
 	spec.Profile = meta.SwitchProfileVS
+	spec.Boot.MAC = fmt.Sprintf(VLABSwitchMACTmpl, b.switchID)
+	b.switchID++
 
 	sw := &wiringapi.Switch{
 		TypeMeta: metav1.TypeMeta{
@@ -657,7 +641,7 @@ func (b *VLABBuilder) createServer(ctx context.Context, name string, spec wiring
 	return server, errors.Wrapf(b.data.Add(ctx, server), "error creating server %s", name)
 }
 
-func (b *VLABBuilder) createConnection(ctx context.Context, spec wiringapi.ConnectionSpec) (*wiringapi.Connection, error) {
+func (b *VLABBuilder) createConnection(ctx context.Context, spec wiringapi.ConnectionSpec) (*wiringapi.Connection, error) { //nolint:unparam
 	name := spec.GenerateName()
 
 	conn := &wiringapi.Connection{
@@ -673,16 +657,4 @@ func (b *VLABBuilder) createConnection(ctx context.Context, spec wiringapi.Conne
 	}
 
 	return conn, errors.Wrapf(b.data.Add(ctx, conn), "error creating connection %s", name)
-}
-
-func (b *VLABBuilder) createManagementConnection(ctx context.Context, switchName string) (*wiringapi.Connection, error) {
-	return b.createConnection(ctx, wiringapi.ConnectionSpec{
-		Management: &wiringapi.ConnMgmt{
-			Link: wiringapi.ConnMgmtLink{
-				Switch: wiringapi.ConnMgmtLinkSwitch{
-					BasePortName: wiringapi.BasePortName{Port: fmt.Sprintf("%s/M1", switchName)},
-				},
-			},
-		},
-	})
 }
