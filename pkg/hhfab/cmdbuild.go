@@ -9,6 +9,4 @@ func Build(ctx context.Context, workDir, cacheDir string, hMode HydrateMode) err
 	}
 
 	panic("not implemented")
-
-	return nil
 }

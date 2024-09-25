@@ -360,6 +360,32 @@ func Run(ctx context.Context) error {
 				},
 			},
 			{
+				Name:  "sample",
+				Usage: "generate sample wiring diagram",
+				Subcommands: []*cli.Command{
+					{
+						Name:    "spine-leaf",
+						Aliases: []string{"sl"},
+						Usage:   "generate sample spine-leaf wiring diagram",
+						Flags:   defaultFlags,
+						Before:  before(),
+						Action: func(_ *cli.Context) error {
+							panic("not implemented")
+						},
+					},
+					{
+						Name:    "collapsed-core",
+						Aliases: []string{"cc"},
+						Usage:   "generate sample collapsed-core wiring diagram",
+						Flags:   defaultFlags,
+						Before:  before(),
+						Action: func(_ *cli.Context) error {
+							panic("not implemented")
+						},
+					},
+				},
+			},
+			{
 				Name:   "build",
 				Usage:  "build installers",
 				Flags:  append(defaultFlags, hMode),
@@ -404,30 +430,17 @@ func Run(ctx context.Context) error {
 							return nil
 						},
 					},
-				},
-			},
-			{
-				Name:  "sample",
-				Usage: "generate sample wiring diagram",
-				Subcommands: []*cli.Command{
 					{
-						Name:    "spine-leaf",
-						Aliases: []string{"sl"},
-						Usage:   "generate sample spine-leaf wiring diagram",
-						Flags:   defaultFlags,
-						Before:  before(),
+						Name:   "up",
+						Usage:  "run VLAB",
+						Flags:  append(defaultFlags, hMode),
+						Before: before(),
 						Action: func(_ *cli.Context) error {
-							panic("not implemented")
-						},
-					},
-					{
-						Name:    "collapsed-core",
-						Aliases: []string{"cc"},
-						Usage:   "generate sample collapsed-core wiring diagram",
-						Flags:   defaultFlags,
-						Before:  before(),
-						Action: func(_ *cli.Context) error {
-							panic("not implemented")
+							if err := hhfab.VLABUp(ctx, workDir, cacheDir, hhfab.HydrateMode(hydrateMode)); err != nil {
+								return fmt.Errorf("running VLAB: %w", err)
+							}
+
+							return nil
 						},
 					},
 				},
