@@ -188,7 +188,7 @@ func Run(ctx context.Context) error {
 		},
 	}
 
-	before := func() cli.BeforeFunc {
+	before := func(quiet bool) cli.BeforeFunc {
 		return func(_ *cli.Context) error {
 			if verbose && brief {
 				return cli.Exit("verbose and brief are mutually exclusive", 1)
@@ -210,6 +210,10 @@ func Run(ctx context.Context) error {
 				}),
 			)
 			slog.SetDefault(logger)
+
+			if quiet {
+				return nil
+			}
 
 			args := []any{
 				"version", version.Version,
@@ -323,7 +327,7 @@ func Run(ctx context.Context) error {
 						Value:   true,
 					},
 				),
-				Before: before(),
+				Before: before(false),
 				Action: func(c *cli.Context) error {
 					if err := hhfab.Init(ctx, hhfab.InitConfig{
 						WorkDir:      workDir,
@@ -351,7 +355,7 @@ func Run(ctx context.Context) error {
 				Name:   "validate",
 				Usage:  "validate config and included wiring files",
 				Flags:  append(defaultFlags, hMode),
-				Before: before(),
+				Before: before(false),
 				Action: func(_ *cli.Context) error {
 					if err := hhfab.Validate(ctx, workDir, cacheDir, hhfab.HydrateMode(hydrateMode)); err != nil {
 						return fmt.Errorf("validating: %w", err)
@@ -369,7 +373,7 @@ func Run(ctx context.Context) error {
 						Aliases: []string{"sl"},
 						Usage:   "generate sample spine-leaf wiring diagram",
 						Flags:   defaultFlags,
-						Before:  before(),
+						Before:  before(false),
 						Action: func(_ *cli.Context) error {
 							panic("not implemented")
 						},
@@ -379,7 +383,7 @@ func Run(ctx context.Context) error {
 						Aliases: []string{"cc"},
 						Usage:   "generate sample collapsed-core wiring diagram",
 						Flags:   defaultFlags,
-						Before:  before(),
+						Before:  before(false),
 						Action: func(_ *cli.Context) error {
 							panic("not implemented")
 						},
@@ -390,7 +394,7 @@ func Run(ctx context.Context) error {
 				Name:   "build",
 				Usage:  "build installers",
 				Flags:  append(defaultFlags, hMode),
-				Before: before(),
+				Before: before(false),
 				Action: func(_ *cli.Context) error {
 					if err := hhfab.Build(ctx, workDir, cacheDir, hhfab.HydrateMode(hydrateMode)); err != nil {
 						return fmt.Errorf("building: %w", err)
@@ -407,7 +411,7 @@ func Run(ctx context.Context) error {
 						Aliases: []string{"gen"},
 						Usage:   "generate VLAB wiring diagram",
 						Flags:   append(defaultFlags, vlabWiringGenFlags...),
-						Before:  before(),
+						Before:  before(false),
 						Action: func(_ *cli.Context) error {
 							builder := hhfab.VLABBuilder{
 								SpinesCount:       uint8(wgSpinesCount),      //nolint:gosec
@@ -435,7 +439,7 @@ func Run(ctx context.Context) error {
 						Name:   "up",
 						Usage:  "run VLAB",
 						Flags:  append(defaultFlags, hMode),
-						Before: before(),
+						Before: before(false),
 						Action: func(_ *cli.Context) error {
 							if err := hhfab.VLABUp(ctx, workDir, cacheDir, hhfab.HydrateMode(hydrateMode)); err != nil {
 								return fmt.Errorf("running VLAB: %w", err)
@@ -472,7 +476,7 @@ func Run(ctx context.Context) error {
 								},
 							},
 						),
-						Before: before(),
+						Before: before(true),
 						Action: func(c *cli.Context) error {
 							if err := hhfab.PrepareTaps(ctx, c.Int(FlagNameCount)); err != nil {
 								return fmt.Errorf("preparing taps: %w", err)
@@ -485,7 +489,7 @@ func Run(ctx context.Context) error {
 						Name:   "vfio-pci-bind",
 						Usage:  "bind all device used in VLAB to vfio-pci driver for PCI passthrough",
 						Flags:  defaultFlags,
-						Before: before(),
+						Before: before(true),
 						Action: func(c *cli.Context) error {
 							if err := hhfab.PreparePassthrough(ctx, c.Args().Slice()); err != nil {
 								return fmt.Errorf("preparing passthrough: %w", err)

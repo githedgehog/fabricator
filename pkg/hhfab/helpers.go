@@ -15,7 +15,11 @@ import (
 )
 
 func PrepareTaps(_ context.Context, count int) error {
-	slog.Info("Preparing taps", "count", count)
+	if count > 0 {
+		slog.Debug("Preparing taps and bridge", "count", count)
+	} else {
+		slog.Debug("Deleting taps and bridge")
+	}
 
 	br, err := netlink.LinkByName(VLABBridge)
 	if err != nil && !errors.As(err, &netlink.LinkNotFoundError{}) {
@@ -23,7 +27,7 @@ func PrepareTaps(_ context.Context, count int) error {
 	}
 
 	if errors.As(err, &netlink.LinkNotFoundError{}) && count > 0 {
-		slog.Info("Creating bridge", "name", VLABBridge)
+		slog.Debug("Creating bridge", "name", VLABBridge)
 
 		la := netlink.NewLinkAttrs()
 		la.Name = VLABBridge
@@ -32,7 +36,7 @@ func PrepareTaps(_ context.Context, count int) error {
 			return fmt.Errorf("adding bridge %q: %w", VLABBridge, err)
 		}
 	} else if !errors.As(err, &netlink.LinkNotFoundError{}) && count == 0 {
-		slog.Info("Deleting bridge", "name", VLABBridge)
+		slog.Debug("Deleting bridge", "name", VLABBridge)
 
 		if err := netlink.LinkDel(br); err != nil {
 			return fmt.Errorf("deleting bridge %q: %w", VLABBridge, err)
@@ -66,7 +70,7 @@ func PrepareTaps(_ context.Context, count int) error {
 		}
 
 		if tapID >= count {
-			slog.Info("Deleting no more needed tap", "name", name)
+			slog.Debug("Deleting no more needed tap", "name", name)
 
 			if err := netlink.LinkDel(link); err != nil {
 				return fmt.Errorf("deleting tap %q: %w", name, err)
@@ -80,7 +84,7 @@ func PrepareTaps(_ context.Context, count int) error {
 		name := fmt.Sprintf("%s%d", VLABTapPrefix, idx)
 		tap, exist := existing[name]
 		if !exist {
-			slog.Info("Creating tap", "name", name)
+			slog.Debug("Creating tap", "name", name)
 
 			la := netlink.NewLinkAttrs()
 			la.Name = name
@@ -106,11 +110,21 @@ func PrepareTaps(_ context.Context, count int) error {
 		}
 	}
 
+	if count > 0 {
+		slog.Info("Taps and bridge are ready", "count", count)
+	} else {
+		slog.Info("Taps and bridge are deleted")
+	}
+
 	return nil
 }
 
 func PreparePassthrough(_ context.Context, devs []string) error {
-	slog.Info("Preparing passthrough devices", "devices", devs)
+	if len(devs) == 0 {
+		return nil
+	}
+
+	slog.Debug("Preparing devices for passthrough", "devices", devs)
 
 	for _, dev := range devs {
 		var err error
@@ -128,17 +142,9 @@ func PreparePassthrough(_ context.Context, devs []string) error {
 		slog.Debug("Device is ready (bound to vfio-pci)", "device", dev)
 	}
 
-	slog.Info("All devices are ready (bound to vfio-pci)")
+	slog.Info("Devices are ready for passthrough (bound to vfio-pci)", "count", len(devs))
 
 	return nil
-}
-
-func isDeviceBoundToVFIO(dev string) bool {
-	vfioDevicePath := filepath.Join("/sys/bus/pci/drivers/vfio-pci", dev)
-
-	_, err := os.Stat(vfioDevicePath)
-
-	return err == nil
 }
 
 func bindDeviceToVFIO(dev string) error {
@@ -202,4 +208,12 @@ func bindDeviceToVFIO(dev string) error {
 	}
 
 	return nil
+}
+
+func isDeviceBoundToVFIO(dev string) bool {
+	vfioDevicePath := filepath.Join("/sys/bus/pci/drivers/vfio-pci", dev)
+
+	_, err := os.Stat(vfioDevicePath)
+
+	return err == nil
 }
