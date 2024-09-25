@@ -33,6 +33,7 @@ const (
 	FlagNameAirgap                = "airgap"
 	FlagNameFabricMode            = "fabric-mode"
 	FlagNameCount                 = "count"
+	FlagNameKillStale             = "kill-stale"
 )
 
 func main() {
@@ -436,12 +437,19 @@ func Run(ctx context.Context) error {
 						},
 					},
 					{
-						Name:   "up",
-						Usage:  "run VLAB",
-						Flags:  append(defaultFlags, hMode),
+						Name:  "up",
+						Usage: "run VLAB",
+						Flags: append(defaultFlags, hMode,
+							&cli.BoolFlag{
+								Name:    FlagNameKillStale,
+								Usage:   "kill stale VMs",
+								EnvVars: []string{"HHFAB_KILL_STALE"},
+							},
+						),
 						Before: before(false),
-						Action: func(_ *cli.Context) error {
-							if err := hhfab.VLABUp(ctx, workDir, cacheDir, hhfab.HydrateMode(hydrateMode)); err != nil {
+						Action: func(c *cli.Context) error {
+							killStale := c.Bool(FlagNameKillStale)
+							if err := hhfab.VLABUp(ctx, workDir, cacheDir, hhfab.HydrateMode(hydrateMode), killStale); err != nil {
 								return fmt.Errorf("running VLAB: %w", err)
 							}
 
