@@ -23,8 +23,9 @@ type VLAB struct {
 	WorkDir  string
 	CacheDir string
 	RegistryConfig
-	VMs  []VM
-	Taps int
+	VMs          []VM
+	Taps         int
+	Passthroughs []string
 }
 
 type VM struct {
@@ -52,6 +53,7 @@ func (c *Config) VLABFromConfig(cfg *VLABConfig) (*VLAB, error) {
 	}
 
 	vms := []VM{}
+	passthroughs := []string{}
 	tapID := 0
 	controlID := 0
 	for _, name := range orderedVMNames {
@@ -146,6 +148,7 @@ func (c *Config) VLABFromConfig(cfg *VLABConfig) (*VLAB, error) {
 					return nil, fmt.Errorf("missing NIC config for passthrough NIC %d of VM %q", nicID, name) //nolint:goerr113
 				}
 
+				passthroughs = append(passthroughs, nicCfg)
 				device = fmt.Sprintf("vfio-pci,host=%s", nicCfg)
 			} else {
 				return nil, fmt.Errorf("unknown NIC type %q for VM %q", nicType, name) //nolint:goerr113
@@ -187,6 +190,7 @@ func (c *Config) VLABFromConfig(cfg *VLABConfig) (*VLAB, error) {
 		RegistryConfig: c.RegistryConfig,
 		VMs:            vms,
 		Taps:           tapID,
+		Passthroughs:   passthroughs,
 	}, nil
 }
 
