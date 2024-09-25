@@ -452,12 +452,12 @@ func Run(ctx context.Context) error {
 				Hidden: true,
 				Subcommands: []*cli.Command{
 					{
-						Name:  "taps",
-						Usage: "prepare tap devices in a bridge for VLAB",
+						Name:  "setup-taps",
+						Usage: "setup tap devices and a bridge for VLAB",
 						Flags: append(defaultFlags,
 							&cli.IntFlag{
 								Name:     FlagNameCount,
-								Usage:    "number of tap devices to prepare",
+								Usage:    "number of tap devices to prepare (or cleanup if count is 0)",
 								Required: true,
 								Action: func(_ *cli.Context, v int) error {
 									if v < 0 {
@@ -476,6 +476,19 @@ func Run(ctx context.Context) error {
 						Action: func(c *cli.Context) error {
 							if err := hhfab.PrepareTaps(ctx, c.Int(FlagNameCount)); err != nil {
 								return fmt.Errorf("preparing taps: %w", err)
+							}
+
+							return nil
+						},
+					},
+					{
+						Name:   "vfio-pci-bind",
+						Usage:  "bind all device used in VLAB to vfio-pci driver for PCI passthrough",
+						Flags:  defaultFlags,
+						Before: before(),
+						Action: func(c *cli.Context) error {
+							if err := hhfab.PreparePassthrough(ctx, c.Args().Slice()); err != nil {
+								return fmt.Errorf("preparing passthrough: %w", err)
 							}
 
 							return nil
