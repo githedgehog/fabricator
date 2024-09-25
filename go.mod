@@ -2,7 +2,7 @@ module go.githedgehog.com/fabricator
 
 go 1.23.0
 
-replace github.com/diskfs/go-diskfs v1.4.1 => github.com/Frostman/go-diskfs v1.4.1-hh4
+replace github.com/diskfs/go-diskfs v1.4.1 => github.com/frostman/go-diskfs v1.4.1-hh6
 
 require (
 	github.com/Masterminds/sprig v2.22.0+incompatible

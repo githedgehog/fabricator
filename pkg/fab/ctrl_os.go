@@ -137,16 +137,6 @@ func (cfg *ControlOS) Build(_ string, _ cnc.Preset, _ meta.FabricMode, get cnc.G
 				{Name: "oem.cpio.gz"},
 			},
 		})
-
-	//run(BundleControlISO, Stage, "flatcar",
-	//&cnc.SyncOCI{
-	//	Ref: cfg.FlatcarRef,
-	//	Files: []cnc.File{
-	//		{Name: "flatcar.img"},
-	//		{Name: "flatcar_efi_code.fd"},
-	//		{Name: "flatcar_efi_vars.fd"},
-	//	},
-	//	})
 	run(BundleControlISO, Stage, "flatcar-install-config",
 		&cnc.FileGenerate{
 			File: cnc.File{
