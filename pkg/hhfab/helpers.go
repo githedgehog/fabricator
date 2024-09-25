@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shirou/gopsutil/v3/process"
 	"github.com/vishvananda/netlink"
 )
 
@@ -216,4 +217,45 @@ func isDeviceBoundToVFIO(dev string) bool {
 	_, err := os.Stat(vfioDevicePath)
 
 	return err == nil
+}
+
+func CheckStaleVMs(ctx context.Context, kill bool) ([]int32, error) {
+	processes, err := process.ProcessesWithContext(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("getting processes: %w", err)
+	}
+
+	stale := []int32{}
+	for _, pr := range processes {
+		cmd, err := pr.CmdlineSliceWithContext(ctx)
+		if err != nil {
+			if strings.Contains(err.Error(), "no such file or directory") {
+				continue
+			}
+
+			return nil, fmt.Errorf("getting process cmdline: %w", err)
+		}
+
+		// only one instance of VLAB supported at the same time
+		if len(cmd) < 6 || cmd[0] != "qemu-system-x86_64" || cmd[1] != "-name" || cmd[3] != "-uuid" {
+			continue
+		}
+
+		// TODO use const
+		if !strings.HasPrefix(cmd[4], "00000000-0000-0000-0000-0000000000") {
+			continue
+		}
+
+		if kill {
+			slog.Warn("Found stale VM process, killing it", "pid", pr.Pid)
+			err = pr.KillWithContext(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("killing stale VM process %d: %w", pr.Pid, err)
+			}
+		} else {
+			stale = append(stale, pr.Pid)
+		}
+	}
+
+	return stale, nil
 }

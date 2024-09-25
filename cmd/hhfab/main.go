@@ -498,10 +498,19 @@ func Run(ctx context.Context) error {
 							return nil
 						},
 					},
-					// TODO things to auto run with sudo
-					// kill stale vms
-					// create/remove taps/bridges
-					// prepare interfaces for passthrough
+					{
+						Name:   "kill-stale-vms",
+						Usage:  "kill stale VLAB VMs",
+						Flags:  defaultFlags,
+						Before: before(true),
+						Action: func(_ *cli.Context) error {
+							if _, err := hhfab.CheckStaleVMs(ctx, true); err != nil {
+								return fmt.Errorf("killing stale vms: %w", err)
+							}
+
+							return nil
+						},
+					},
 				},
 			},
 		},
