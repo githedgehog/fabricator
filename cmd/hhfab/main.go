@@ -32,6 +32,7 @@ const (
 	FlagNameDev                   = "dev"
 	FlagNameAirgap                = "airgap"
 	FlagNameFabricMode            = "fabric-mode"
+	FlagNameCount                 = "count"
 )
 
 func main() {
@@ -446,10 +447,40 @@ func Run(ctx context.Context) error {
 				},
 			},
 			{
-				Name:        "_helpers",
-				Usage:       "shouldn't be used directly, will be called by hhfab automatically",
-				Hidden:      true,
+				Name:   "_helpers",
+				Usage:  "shouldn't be used directly, will be called by hhfab automatically",
+				Hidden: true,
 				Subcommands: []*cli.Command{
+					{
+						Name:  "taps",
+						Usage: "prepare tap devices in a bridge for VLAB",
+						Flags: append(defaultFlags,
+							&cli.IntFlag{
+								Name:     FlagNameCount,
+								Usage:    "number of tap devices to prepare",
+								Required: true,
+								Action: func(_ *cli.Context, v int) error {
+									if v < 0 {
+										return fmt.Errorf("count must be zero or positive") //nolint:goerr113
+									}
+
+									if v > 100 {
+										return fmt.Errorf("count must be less than 100") //nolint:goerr113
+									}
+
+									return nil
+								},
+							},
+						),
+						Before: before(),
+						Action: func(c *cli.Context) error {
+							if err := hhfab.PrepareTaps(ctx, c.Int(FlagNameCount)); err != nil {
+								return fmt.Errorf("preparing taps: %w", err)
+							}
+
+							return nil
+						},
+					},
 					// TODO things to auto run with sudo
 					// kill stale vms
 					// create/remove taps/bridges
