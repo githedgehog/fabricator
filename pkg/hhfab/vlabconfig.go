@@ -204,9 +204,42 @@ func (c *Config) CreateVLABConfig(ctx context.Context, in VLABConfigOpts) (*VLAB
 		VMs:   map[string]VMConfig{},
 	}
 
+	hw := map[string]bool{}
+	passthrough := map[string]string{}
+	usedPassthroughs := map[string]bool{}
+
+	addPassthroughLinks := func(obj client.Object) (map[string]string, error) {
+		links := getPassthroughLinks(obj)
+
+		for k, v := range links {
+			if _, exist := usedPassthroughs[v]; exist {
+				return nil, fmt.Errorf("duplicate pci address: %q", v) //nolint:goerr113
+			}
+			usedPassthroughs[v] = true
+
+			if _, exist := passthrough[k]; exist {
+				return nil, fmt.Errorf("duplicate passthrough link: %q", k) //nolint:goerr113
+			}
+
+			passthrough[k] = v
+		}
+
+		return links, nil
+	}
+
 	for _, control := range c.Controls {
 		if _, exists := cfg.VMs[control.Name]; exists {
 			return nil, fmt.Errorf("duplicate VM name (control): %q", control.Name) //nolint:goerr113
+		}
+
+		links, err := addPassthroughLinks(&control)
+		if err != nil {
+			return nil, fmt.Errorf("failed to add passthrough links for control %q: %w", control.Name, err)
+		}
+
+		mgmt := NICTypeManagement
+		if pci := links[control.Name+"/enp2s1"]; pci != "" {
+			mgmt = NICTypePassthrough + NICTypeSep + pci
 		}
 
 		cfg.VMs[control.Name] = VMConfig{
@@ -214,32 +247,9 @@ func (c *Config) CreateVLABConfig(ctx context.Context, in VLABConfigOpts) (*VLAB
 			Restricted: in.ControlsRestricted,
 			NICs: map[string]string{
 				"enp2s0": NICTypeUsernet,
-				"enp2s1": NICTypeManagement,
+				"enp2s1": mgmt,
 			},
 		}
-	}
-
-	hw := map[string]bool{}
-	passthrough := map[string]string{}
-	usedPassthroughs := map[string]bool{}
-
-	addPassthroughLinks := func(obj client.Object) error {
-		links := getPassthroughLinks(obj)
-
-		for k, v := range links {
-			if _, exist := usedPassthroughs[v]; exist {
-				return fmt.Errorf("duplicate pci address: %q", v) //nolint:goerr113
-			}
-			usedPassthroughs[v] = true
-
-			if _, exist := passthrough[k]; exist {
-				return fmt.Errorf("duplicate passthrough link: %q", k) //nolint:goerr113
-			}
-
-			passthrough[k] = v
-		}
-
-		return nil
 	}
 
 	servers := &wiringapi.ServerList{}
@@ -255,11 +265,14 @@ func (c *Config) CreateVLABConfig(ctx context.Context, in VLABConfigOpts) (*VLAB
 			return nil, fmt.Errorf("duplicate VM name (server): %q", server.Name) //nolint:goerr113
 		}
 
+		if _, err := addPassthroughLinks(&server); err != nil {
+			return nil, fmt.Errorf("failed to add passthrough links for server %q: %w", server.Name, err)
+		}
+
 		if isHardware(&server) {
 			hw[server.Name] = true
-			if err := addPassthroughLinks(&server); err != nil {
-				return nil, fmt.Errorf("failed to add passthrough links for server %q: %w", server.Name, err)
-			}
+
+			continue
 		}
 
 		cfg.VMs[server.Name] = VMConfig{
@@ -284,11 +297,13 @@ func (c *Config) CreateVLABConfig(ctx context.Context, in VLABConfigOpts) (*VLAB
 			return nil, fmt.Errorf("duplicate VM name (switch): %q", sw.Name) //nolint:goerr113
 		}
 
+		links, err := addPassthroughLinks(&sw)
+		if err != nil {
+			return nil, fmt.Errorf("failed to add passthrough links for switch %q: %w", sw.Name, err)
+		}
+
 		if isHardware(&sw) {
 			hw[sw.Name] = true
-			if err := addPassthroughLinks(&sw); err != nil {
-				return nil, fmt.Errorf("failed to add passthrough links for switch %q: %w", sw.Name, err)
-			}
 
 			continue
 		}
@@ -301,11 +316,16 @@ func (c *Config) CreateVLABConfig(ctx context.Context, in VLABConfigOpts) (*VLAB
 			return nil, fmt.Errorf("switch %q has no MAC", sw.Name) //nolint:goerr113
 		}
 
+		mgmt := NICTypeManagement + NICTypeSep + sw.Spec.Boot.MAC
+		if pci := links[sw.Name+"/M1"]; pci != "" {
+			mgmt = NICTypePassthrough + NICTypeSep + pci
+		}
+
 		cfg.VMs[sw.Name] = VMConfig{
 			Type:       VMTypeSwitch,
 			Restricted: true,
 			NICs: map[string]string{
-				"M1": NICTypeManagement + NICTypeSep + sw.Spec.Boot.MAC,
+				"M1": mgmt,
 			},
 		}
 	}

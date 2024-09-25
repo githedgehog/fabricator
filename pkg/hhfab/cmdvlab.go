@@ -55,7 +55,7 @@ func VLABGenerate(ctx context.Context, workDir, cacheDir string, builder VLABBui
 	return nil
 }
 
-func VLABUp(ctx context.Context, workDir, cacheDir string, hMode HydrateMode) error {
+func VLABUp(ctx context.Context, workDir, cacheDir string, hMode HydrateMode, killStale bool) error {
 	cfg, err := load(ctx, workDir, cacheDir, true, hMode)
 	if err != nil {
 		return err
@@ -72,5 +72,5 @@ func VLABUp(ctx context.Context, workDir, cacheDir string, hMode HydrateMode) er
 	// TODO remove
 	spew.Dump(vlab)
 
-	return cfg.VLABRun(ctx, vlab)
+	return cfg.VLABRun(ctx, vlab, killStale)
 }
