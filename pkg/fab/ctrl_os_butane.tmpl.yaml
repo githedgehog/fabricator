@@ -189,7 +189,7 @@ systemd:
         Type=simple
         ExecStart=/hedgehog/control-install/hhfab-recipe run
         WorkingDirectory=/hedgehog/control-install/
-        Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/bin"
+        Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/bin" "HOME=/home/core"
 
         [Install]
         WantedBy=first-boot-complete.target
