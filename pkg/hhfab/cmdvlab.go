@@ -61,7 +61,7 @@ func VLABUp(ctx context.Context, workDir, cacheDir string, hMode HydrateMode) er
 		return err
 	}
 
-	vlab, err := cfg.CreateVLAB(ctx, VLABConfigOpts{
+	vlab, err := cfg.PrepareVLAB(ctx, VLABConfigOpts{
 		ControlsRestricted: true,
 		ServersRestricted:  true,
 	})
@@ -69,7 +69,8 @@ func VLABUp(ctx context.Context, workDir, cacheDir string, hMode HydrateMode) er
 		return fmt.Errorf("creating VLAB: %w", err)
 	}
 
+	// TODO remove
 	spew.Dump(vlab)
 
-	return nil
+	return cfg.VLABRun(ctx, vlab)
 }

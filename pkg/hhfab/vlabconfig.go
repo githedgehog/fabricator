@@ -101,7 +101,7 @@ type VLABConfigOpts struct {
 	ServersRestricted  bool
 }
 
-func (c *Config) CreateVLAB(ctx context.Context, in VLABConfigOpts) (*VLAB, error) {
+func (c *Config) PrepareVLAB(ctx context.Context, in VLABConfigOpts) (*VLAB, error) {
 	vlabDir := filepath.Join(c.WorkDir, VLABDir)
 	vlabVMsDir := filepath.Join(vlabDir, VLABVMsDir)
 

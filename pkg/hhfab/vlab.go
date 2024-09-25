@@ -15,6 +15,8 @@ const (
 	VLABMaxNICs          = VLABNICsPerPCIBridge * VLABPCIBridges
 	VLABBaseSSHPort      = 22000
 	VLABBaseDirectPort   = 22100
+	VLABTapPrefix        = "hhtap"
+	VLABBridge           = "hhbr"
 )
 
 type VLAB struct {
@@ -137,7 +139,7 @@ func (c *Config) VLABFromConfig(cfg *VLABConfig) (*VLAB, error) {
 				if nicCfg != "" {
 					mac = nicCfg
 				}
-				netdev = fmt.Sprintf("tap,ifname=hhtap%d,script=no,downscript=no", tapID)
+				netdev = fmt.Sprintf("tap,ifname=%s%d,script=no,downscript=no", VLABTapPrefix, tapID)
 				tapID++
 			} else if nicType == NICTypePassthrough {
 				if nicCfg == "" {
