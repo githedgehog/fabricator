@@ -1,7 +1,6 @@
 *.hhfab
 .DS_Store
 *kubeconfig.yaml
-*config.ign
 
 # Binaries for programs and plugins
 *.exe
