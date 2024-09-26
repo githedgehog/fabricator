@@ -27,9 +27,10 @@ const (
 )
 
 type Downloader struct {
-	cacheDir string
-	repo     string
-	prefix   string
+	cacheDir   string
+	repo       string
+	prefix     string
+	orasClient *auth.Client
 }
 
 func NewDownloaderWithDockerCreds(cacheDir, repo, prefix string) (*Downloader, error) {
@@ -38,10 +39,21 @@ func NewDownloaderWithDockerCreds(cacheDir, repo, prefix string) (*Downloader, e
 		return nil, fmt.Errorf("creating cache dir %q: %w", cacheDir, err)
 	}
 
+	storeOpts := credentials.StoreOptions{}
+	credStore, err := credentials.NewStoreFromDocker(storeOpts)
+	if err != nil {
+		return nil, fmt.Errorf("creating docker credential store: %w", err)
+	}
+
 	return &Downloader{
 		cacheDir: cacheDir,
 		repo:     repo,
 		prefix:   prefix,
+		orasClient: &auth.Client{
+			Client:     retry.DefaultClient,
+			Cache:      auth.DefaultCache,
+			Credential: credentials.Credential(credStore),
+		},
 	}, nil
 }
 
@@ -91,17 +103,7 @@ func (d *Downloader) FromORAS(ctx context.Context, destPath, name, version strin
 			repo.PlainHTTP = true
 		}
 
-		storeOpts := credentials.StoreOptions{}
-		credStore, err := credentials.NewStoreFromDocker(storeOpts)
-		if err != nil {
-			return fmt.Errorf("creating docker credential store: %w", err)
-		}
-
-		repo.Client = &auth.Client{
-			Client:     retry.DefaultClient,
-			Cache:      auth.DefaultCache,
-			Credential: credentials.Credential(credStore),
-		}
+		repo.Client = d.orasClient
 
 		slog.Info("Downloading", "name", name, "version", version)
 
