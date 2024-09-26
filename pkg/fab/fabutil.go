@@ -1,8 +1,10 @@
 package fab
 
 import (
+	"cmp"
 	"context"
 	"fmt"
+	"slices"
 
 	"dario.cat/mergo"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
@@ -44,6 +46,10 @@ func GetFabAndControls(ctx context.Context, kube client.Reader, allowNotHydrated
 			return fabapi.Fabricator{}, nil, fmt.Errorf("validating control node %q: %w", control.GetName(), err)
 		}
 	}
+
+	slices.SortFunc(controls.Items, func(a, b fabapi.ControlNode) int {
+		return cmp.Compare(a.Name, b.Name)
+	})
 
 	return *f, controls.Items, nil
 }
