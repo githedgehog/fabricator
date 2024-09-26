@@ -56,7 +56,7 @@ func VLABGenerate(ctx context.Context, workDir, cacheDir string, builder VLABBui
 
 type VLABUpOpts struct {
 	HydrateMode HydrateMode
-	VLABConfigOpts
+	Recreate    bool
 	VLABRunOpts
 }
 
@@ -66,7 +66,7 @@ func VLABUp(ctx context.Context, workDir, cacheDir string, opts VLABUpOpts) erro
 		return err
 	}
 
-	vlab, err := cfg.PrepareVLAB(ctx, opts.VLABConfigOpts)
+	vlab, err := cfg.PrepareVLAB(ctx, opts)
 	if err != nil {
 		return fmt.Errorf("creating VLAB: %w", err)
 	}

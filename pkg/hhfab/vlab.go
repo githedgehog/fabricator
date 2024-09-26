@@ -37,7 +37,7 @@ type VM struct {
 	Size       VMSize
 }
 
-func (c *Config) VLABFromConfig(cfg *VLABConfig) (*VLAB, error) {
+func (c *Config) VLABFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 	orderedVMNames := slices.Collect(maps.Keys(cfg.VMs))
 	slices.SortFunc(orderedVMNames, func(a, b string) int {
 		vma, vmb := cfg.VMs[a], cfg.VMs[b]
@@ -139,6 +139,9 @@ func (c *Config) VLABFromConfig(cfg *VLABConfig) (*VLAB, error) {
 					// TODO use consts and enable for other control VMs
 					netdev += ",hostfwd=tcp:0.0.0.0:6443-:6443,hostfwd=tcp:0.0.0.0:31000-:31000"
 				}
+				if vm.Type == VMTypeControl && opts.ControlsRestricted || vm.Type == VMTypeServer && opts.ServersRestricted {
+					netdev += ",restrict=yes"
+				}
 			} else if nicType == NICTypeManagement {
 				if nicCfg != "" {
 					mac = nicCfg
@@ -186,12 +189,11 @@ func (c *Config) VLABFromConfig(cfg *VLABConfig) (*VLAB, error) {
 		}
 
 		vms = append(vms, VM{
-			ID:         vmID,
-			Name:       name,
-			Type:       vm.Type,
-			Restricted: vm.Restricted,
-			NICs:       paddedNICs,
-			Size:       size,
+			ID:   vmID,
+			Name: name,
+			Type: vm.Type,
+			NICs: paddedNICs,
+			Size: size,
 		})
 	}
 
