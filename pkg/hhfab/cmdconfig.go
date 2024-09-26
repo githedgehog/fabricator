@@ -21,7 +21,6 @@ const (
 	FabConfigFile      = "fab.yaml"
 	IncludeDir         = "include"
 	ResultDir          = "result"
-	CacheDirSuffix     = "v1"
 	DefaultRepo        = "ghcr.io"
 	DefaultPrefix      = "githedgehog"
 	YAMLExt            = ".yaml"
@@ -60,7 +59,7 @@ func checkWorkCacheDir(workDir, cacheDir string) error {
 		return fmt.Errorf("work dir %q: %w", workDir, ErrNotDir)
 	}
 
-	cacheDirPath := filepath.Join(cacheDir, CacheDirSuffix)
+	cacheDirPath := filepath.Join(cacheDir)
 	if err := os.MkdirAll(cacheDirPath, 0o700); err != nil {
 		return fmt.Errorf("creating cache dir %q: %w", cacheDirPath, err)
 	}

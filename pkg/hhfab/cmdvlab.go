@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/davecgh/go-spew/spew"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 )
 
@@ -28,7 +27,7 @@ func VLABGenerate(ctx context.Context, workDir, cacheDir string, builder VLABBui
 	}
 
 	includeDir := filepath.Join(workDir, IncludeDir)
-	wiringFile, err := os.Create(filepath.Join(includeDir, target))
+	wiringFile, err := os.OpenFile(filepath.Join(includeDir, target), os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return fmt.Errorf("creating wiring file: %w", err)
 	}
@@ -55,22 +54,22 @@ func VLABGenerate(ctx context.Context, workDir, cacheDir string, builder VLABBui
 	return nil
 }
 
-func VLABUp(ctx context.Context, workDir, cacheDir string, hMode HydrateMode, killStale bool) error {
-	cfg, err := load(ctx, workDir, cacheDir, true, hMode)
+type VLABUpOpts struct {
+	HydrateMode HydrateMode
+	VLABConfigOpts
+	VLABRunOpts
+}
+
+func VLABUp(ctx context.Context, workDir, cacheDir string, opts VLABUpOpts) error {
+	cfg, err := load(ctx, workDir, cacheDir, true, opts.HydrateMode)
 	if err != nil {
 		return err
 	}
 
-	vlab, err := cfg.PrepareVLAB(ctx, VLABConfigOpts{
-		ControlsRestricted: true,
-		ServersRestricted:  true,
-	})
+	vlab, err := cfg.PrepareVLAB(ctx, opts.VLABConfigOpts)
 	if err != nil {
 		return fmt.Errorf("creating VLAB: %w", err)
 	}
 
-	// TODO remove
-	spew.Dump(vlab)
-
-	return cfg.VLABRun(ctx, vlab, killStale)
+	return cfg.VLABRun(ctx, vlab, opts.VLABRunOpts)
 }

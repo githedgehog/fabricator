@@ -448,8 +448,17 @@ func Run(ctx context.Context) error {
 						),
 						Before: before(false),
 						Action: func(c *cli.Context) error {
-							killStale := c.Bool(FlagNameKillStale)
-							if err := hhfab.VLABUp(ctx, workDir, cacheDir, hhfab.HydrateMode(hydrateMode), killStale); err != nil {
+							if err := hhfab.VLABUp(ctx, workDir, cacheDir, hhfab.VLABUpOpts{
+								HydrateMode: hhfab.HydrateMode(hydrateMode),
+								VLABConfigOpts: hhfab.VLABConfigOpts{
+									Recreate:           false, // TODO flag
+									ControlsRestricted: false, // TODO flag
+									ServersRestricted:  true,  // TODO flag
+								},
+								VLABRunOpts: hhfab.VLABRunOpts{
+									KillStale: c.Bool(FlagNameKillStale),
+								},
+							}); err != nil {
 								return fmt.Errorf("running VLAB: %w", err)
 							}
 

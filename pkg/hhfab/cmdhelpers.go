@@ -241,8 +241,7 @@ func CheckStaleVMs(ctx context.Context, kill bool) ([]int32, error) {
 			continue
 		}
 
-		// TODO use const
-		if !strings.HasPrefix(cmd[4], "00000000-0000-0000-0000-0000000000") {
+		if !strings.HasPrefix(cmd[4], VLABUUIDPrefix) {
 			continue
 		}
 
