@@ -34,7 +34,9 @@ const (
 var VLABCmds = []string{VLABCmdSudo, VLABCmdQemuImg, VLABCmdQemuSystem}
 
 type VLABRunOpts struct {
-	KillStale bool
+	KillStale          bool
+	ControlsRestricted bool
+	ServersRestricted  bool
 }
 
 func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) error {

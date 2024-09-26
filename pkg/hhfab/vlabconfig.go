@@ -47,9 +47,8 @@ type VMSizes struct {
 }
 
 type VMConfig struct {
-	Type       VMType            `json:"type"`
-	Restricted bool              `json:"restricted"`
-	NICs       map[string]string `json:"nics"`
+	Type VMType            `json:"type"`
+	NICs map[string]string `json:"nics"`
 }
 
 type VMType string
@@ -95,13 +94,7 @@ var DefaultSizes = VMSizes{
 	Server:  VMSize{CPU: 2, RAM: 768, Disk: 10},   // TODO 1GB RAM?
 }
 
-type VLABConfigOpts struct {
-	Recreate           bool
-	ControlsRestricted bool
-	ServersRestricted  bool
-}
-
-func (c *Config) PrepareVLAB(ctx context.Context, in VLABConfigOpts) (*VLAB, error) {
+func (c *Config) PrepareVLAB(ctx context.Context, opts VLABUpOpts) (*VLAB, error) {
 	vlabDir := filepath.Join(c.WorkDir, VLABDir)
 	vlabVMsDir := filepath.Join(vlabDir, VLABVMsDir)
 
@@ -117,7 +110,7 @@ func (c *Config) PrepareVLAB(ctx context.Context, in VLABConfigOpts) (*VLAB, err
 		return nil, fmt.Errorf("VLAB directory is not a directory: %q", vlabDir) //nolint:goerr113
 	}
 
-	createCfg := in.Recreate
+	createCfg := opts.Recreate
 	vlabCfgFile := filepath.Join(vlabDir, VLABConfigFile)
 	if _, err := os.Stat(vlabCfgFile); err != nil {
 		if os.IsNotExist(err) {
@@ -136,7 +129,7 @@ func (c *Config) PrepareVLAB(ctx context.Context, in VLABConfigOpts) (*VLAB, err
 			return nil, fmt.Errorf("creating VLAB directories: %w", err)
 		}
 
-		vlabCfg, err := c.CreateVLABConfig(ctx, in)
+		vlabCfg, err := c.CreateVLABConfig(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("creating VLAB config: %w", err)
 		}
@@ -190,7 +183,7 @@ func (c *Config) PrepareVLAB(ctx context.Context, in VLABConfigOpts) (*VLAB, err
 		slog.Info("VLAB config loaded", "file", filepath.Join(VLABDir, VLABConfigFile))
 	}
 
-	vlab, err := c.VLABFromConfig(vlabCfg)
+	vlab, err := c.VLABFromConfig(vlabCfg, opts.VLABRunOpts)
 	if err != nil {
 		return nil, fmt.Errorf("creating VLAB: %w", err)
 	}
@@ -198,7 +191,7 @@ func (c *Config) PrepareVLAB(ctx context.Context, in VLABConfigOpts) (*VLAB, err
 	return vlab, nil
 }
 
-func (c *Config) CreateVLABConfig(ctx context.Context, in VLABConfigOpts) (*VLABConfig, error) {
+func (c *Config) CreateVLABConfig(ctx context.Context) (*VLABConfig, error) {
 	cfg := &VLABConfig{
 		Sizes: DefaultSizes,
 		VMs:   map[string]VMConfig{},
@@ -243,8 +236,7 @@ func (c *Config) CreateVLABConfig(ctx context.Context, in VLABConfigOpts) (*VLAB
 		}
 
 		cfg.VMs[control.Name] = VMConfig{
-			Type:       VMTypeControl,
-			Restricted: in.ControlsRestricted,
+			Type: VMTypeControl,
 			NICs: map[string]string{
 				"enp2s0": NICTypeUsernet,
 				"enp2s1": mgmt,
@@ -276,8 +268,7 @@ func (c *Config) CreateVLABConfig(ctx context.Context, in VLABConfigOpts) (*VLAB
 		}
 
 		cfg.VMs[server.Name] = VMConfig{
-			Type:       VMTypeServer,
-			Restricted: in.ServersRestricted,
+			Type: VMTypeServer,
 			NICs: map[string]string{
 				"enp2s0": NICTypeUsernet,
 			},
@@ -322,8 +313,7 @@ func (c *Config) CreateVLABConfig(ctx context.Context, in VLABConfigOpts) (*VLAB
 		}
 
 		cfg.VMs[sw.Name] = VMConfig{
-			Type:       VMTypeSwitch,
-			Restricted: true,
+			Type: VMTypeSwitch,
 			NICs: map[string]string{
 				"M1": mgmt,
 			},

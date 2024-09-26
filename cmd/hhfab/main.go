@@ -450,13 +450,11 @@ func Run(ctx context.Context) error {
 						Action: func(c *cli.Context) error {
 							if err := hhfab.VLABUp(ctx, workDir, cacheDir, hhfab.VLABUpOpts{
 								HydrateMode: hhfab.HydrateMode(hydrateMode),
-								VLABConfigOpts: hhfab.VLABConfigOpts{
-									Recreate:           false, // TODO flag
+								Recreate:    false, // TODO flag
+								VLABRunOpts: hhfab.VLABRunOpts{
+									KillStale:          c.Bool(FlagNameKillStale),
 									ControlsRestricted: false, // TODO flag
 									ServersRestricted:  true,  // TODO flag
-								},
-								VLABRunOpts: hhfab.VLABRunOpts{
-									KillStale: c.Bool(FlagNameKillStale),
 								},
 							}); err != nil {
 								return fmt.Errorf("running VLAB: %w", err)
