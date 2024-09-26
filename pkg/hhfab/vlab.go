@@ -10,6 +10,7 @@ import (
 )
 
 const (
+	VLABPCIBridgePrefix  = "pcibr"
 	VLABNICsPerPCIBridge = 32
 	VLABPCIBridges       = 2
 	VLABMaxNICs          = VLABNICsPerPCIBridge * VLABPCIBridges
@@ -17,22 +18,23 @@ const (
 	VLABBaseDirectPort   = 22100
 	VLABTapPrefix        = "hhtap"
 	VLABBridge           = "hhbr"
+	VLABUUIDPrefix       = "77924ab4-a93b-41d4-928e-"
+	VLABUUIDTmpl         = VLABUUIDPrefix + "%012d"
 )
 
 type VLAB struct {
-	WorkDir  string
-	CacheDir string
-	RegistryConfig
 	VMs          []VM
 	Taps         int
 	Passthroughs []string
 }
 
 type VM struct {
+	ID         int
 	Name       string
 	Type       VMType
 	Restricted bool
 	NICs       []string
+	Size       VMSize
 }
 
 func (c *Config) VLABFromConfig(cfg *VLABConfig) (*VLAB, error) {
@@ -161,7 +163,7 @@ func (c *Config) VLABFromConfig(cfg *VLABConfig) (*VLAB, error) {
 			if device == "" {
 				device = fmt.Sprintf("e1000,netdev=eth%02d,mac=%s", nicID, mac)
 			}
-			device += fmt.Sprintf(",bus=pcibr%d,addr=0x%x", nicID/VLABNICsPerPCIBridge, nicID%VLABNICsPerPCIBridge)
+			device += fmt.Sprintf(",bus=%s%d,addr=0x%x", VLABPCIBridgePrefix, nicID/VLABNICsPerPCIBridge, nicID%VLABNICsPerPCIBridge)
 
 			nic := ""
 			if netdev != "" {
@@ -176,27 +178,29 @@ func (c *Config) VLABFromConfig(cfg *VLABConfig) (*VLAB, error) {
 			controlID++
 		}
 
+		size := cfg.Sizes.Server
+		if vm.Type == VMTypeSwitch {
+			size = cfg.Sizes.Switch
+		} else if vm.Type == VMTypeControl {
+			size = cfg.Sizes.Control
+		}
+
 		vms = append(vms, VM{
+			ID:         vmID,
 			Name:       name,
 			Type:       vm.Type,
 			Restricted: vm.Restricted,
 			NICs:       paddedNICs,
+			Size:       size,
 		})
 	}
 
 	return &VLAB{
-		WorkDir:        c.WorkDir,
-		CacheDir:       c.CacheDir,
-		RegistryConfig: c.RegistryConfig,
-		VMs:            vms,
-		Taps:           tapID,
-		Passthroughs:   passthroughs,
+		VMs:          vms,
+		Taps:         tapID,
+		Passthroughs: passthroughs,
 	}, nil
 }
-
-// MAC for each NIC, some based on IDs, some explicitly set
-// Direct port ID for each NIC
-// SSH/etc passthrough ports
 
 const (
 	srvPrefix = "enp2s"
