@@ -2,13 +2,11 @@ module go.githedgehog.com/fabricator
 
 go 1.23.0
 
-replace github.com/diskfs/go-diskfs v1.4.1 => github.com/frostman/go-diskfs v1.4.1-hh6
-
 require (
 	github.com/Masterminds/sprig v2.22.0+incompatible
 	github.com/containers/image/v5 v5.31.0
 	github.com/coreos/butane v0.21.0
-	github.com/diskfs/go-diskfs v1.4.1
+	github.com/diskfs/go-diskfs v1.4.2
 	github.com/dustin/go-humanize v1.0.1
 	github.com/fatih/color v1.17.0
 	github.com/google/uuid v1.6.0
