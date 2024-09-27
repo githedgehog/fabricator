@@ -30,6 +30,10 @@ func GetFabAndControls(ctx context.Context, kube client.Reader, allowNotHydrated
 		return fabapi.Fabricator{}, nil, fmt.Errorf("merging fabricator defaults: %w", err)
 	}
 
+	if err := f.CalculateVersions(Versions); err != nil {
+		return fabapi.Fabricator{}, nil, fmt.Errorf("calculating versions: %w", err)
+	}
+
 	controls := &fabapi.ControlNodeList{}
 	if err := kube.List(ctx, controls); err != nil {
 		return fabapi.Fabricator{}, nil, fmt.Errorf("listing control nodes: %w", err)
