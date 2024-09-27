@@ -13,6 +13,7 @@ import (
 
 	"go.githedgehog.com/fabric/pkg/util/logutil"
 	"go.githedgehog.com/fabricator/pkg/artificer"
+	"go.githedgehog.com/fabricator/pkg/fab/recipe"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -180,11 +181,11 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 			// -daemonize
 			// -pidfile
 
-			// if vm.Type == VMTypeControl || vm.Type == VMTypeServer {
-			// 	args = append(args,
-			// 		"-fw_cfg", "name=opt/org.flatcar-linux/config,file=ignition.json",
-			// 	)
-			// }
+			if vm.Type == VMTypeControl {
+				args = append(args,
+					"-fw_cfg", "name=opt/org.flatcar-linux/config,file="+filepath.Join(c.WorkDir, ResultDir, vm.Name+recipe.InstallIgnitionSuffix),
+				)
+			}
 
 			for idx := 0; idx < VLABPCIBridges; idx++ {
 				args = append(args,

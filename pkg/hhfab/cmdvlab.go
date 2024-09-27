@@ -33,7 +33,7 @@ func VLABGenerate(ctx context.Context, workDir, cacheDir string, builder VLABBui
 	}
 	defer wiringFile.Close()
 
-	if err := printWiring(ctx, wL.GetClient(), wiringFile); err != nil {
+	if err := apiutil.PrintWiring(ctx, wL.GetClient(), wiringFile); err != nil {
 		return err
 	}
 
@@ -61,15 +61,21 @@ type VLABUpOpts struct {
 }
 
 func VLABUp(ctx context.Context, workDir, cacheDir string, opts VLABUpOpts) error {
-	cfg, err := load(ctx, workDir, cacheDir, true, opts.HydrateMode)
+	c, err := load(ctx, workDir, cacheDir, true, opts.HydrateMode)
 	if err != nil {
 		return err
 	}
 
-	vlab, err := cfg.PrepareVLAB(ctx, opts)
+	vlab, err := c.PrepareVLAB(ctx, opts)
 	if err != nil {
 		return fmt.Errorf("creating VLAB: %w", err)
 	}
 
-	return cfg.VLABRun(ctx, vlab, opts.VLABRunOpts)
+	// TODO do not rebuild if not needed
+	slog.Info("Building installers")
+	if err := c.build(ctx, BuildOpts{Mode: BuildModeManual}); err != nil {
+		return fmt.Errorf("building: %w", err)
+	}
+
+	return c.VLABRun(ctx, vlab, opts.VLABRunOpts)
 }

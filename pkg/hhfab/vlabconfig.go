@@ -5,14 +5,17 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"dario.cat/mergo"
 	fmeta "go.githedgehog.com/fabric/api/meta"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1alpha2"
+	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/yaml"
 )
@@ -34,6 +37,34 @@ const (
 	HHFabCfgSerialSchemeSSH    = "ssh://"
 	HHFabCfgSerialSchemeTelnet = "telnet://"
 )
+
+const (
+	VLABPCIBridgePrefix  = "pcibr"
+	VLABNICsPerPCIBridge = 32
+	VLABPCIBridges       = 2
+	VLABMaxNICs          = VLABNICsPerPCIBridge * VLABPCIBridges
+	VLABBaseSSHPort      = 22000
+	VLABBaseDirectPort   = 22100
+	VLABTapPrefix        = "hhtap"
+	VLABBridge           = "hhbr"
+	VLABUUIDPrefix       = "77924ab4-a93b-41d4-928e-"
+	VLABUUIDTmpl         = VLABUUIDPrefix + "%012d"
+)
+
+type VLAB struct {
+	VMs          []VM
+	Taps         int
+	Passthroughs []string
+}
+
+type VM struct {
+	ID         int
+	Name       string
+	Type       VMType
+	Restricted bool
+	NICs       []string
+	Size       VMSize
+}
 
 type VLABConfig struct {
 	Sizes VMSizes             `json:"sizes"`
@@ -129,7 +160,7 @@ func (c *Config) PrepareVLAB(ctx context.Context, opts VLABUpOpts) (*VLAB, error
 			return nil, fmt.Errorf("creating VLAB directories: %w", err)
 		}
 
-		vlabCfg, err := c.CreateVLABConfig(ctx)
+		vlabCfg, err := createVLABConfig(ctx, c.Controls, c.Wiring)
 		if err != nil {
 			return nil, fmt.Errorf("creating VLAB config: %w", err)
 		}
@@ -145,6 +176,8 @@ func (c *Config) PrepareVLAB(ctx context.Context, opts VLABUpOpts) (*VLAB, error
 
 		slog.Info("VLAB config created", "file", filepath.Join(VLABDir, VLABConfigFile))
 	}
+
+	// TODO optionally patch control node(s) with their IP/etc instead of DHCP by default
 
 	data, err := os.ReadFile(vlabCfgFile)
 	if err != nil {
@@ -183,7 +216,7 @@ func (c *Config) PrepareVLAB(ctx context.Context, opts VLABUpOpts) (*VLAB, error
 		slog.Info("VLAB config loaded", "file", filepath.Join(VLABDir, VLABConfigFile))
 	}
 
-	vlab, err := c.VLABFromConfig(vlabCfg, opts.VLABRunOpts)
+	vlab, err := vlabFromConfig(vlabCfg, opts.VLABRunOpts)
 	if err != nil {
 		return nil, fmt.Errorf("creating VLAB: %w", err)
 	}
@@ -191,7 +224,7 @@ func (c *Config) PrepareVLAB(ctx context.Context, opts VLABUpOpts) (*VLAB, error
 	return vlab, nil
 }
 
-func (c *Config) CreateVLABConfig(ctx context.Context) (*VLABConfig, error) {
+func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, wiring client.Reader) (*VLABConfig, error) {
 	cfg := &VLABConfig{
 		Sizes: DefaultSizes,
 		VMs:   map[string]VMConfig{},
@@ -220,7 +253,7 @@ func (c *Config) CreateVLABConfig(ctx context.Context) (*VLABConfig, error) {
 		return links, nil
 	}
 
-	for _, control := range c.Controls {
+	for _, control := range controls {
 		if _, exists := cfg.VMs[control.Name]; exists {
 			return nil, fmt.Errorf("duplicate VM name (control): %q", control.Name) //nolint:goerr113
 		}
@@ -245,7 +278,7 @@ func (c *Config) CreateVLABConfig(ctx context.Context) (*VLABConfig, error) {
 	}
 
 	servers := &wiringapi.ServerList{}
-	if err := c.Wiring.List(ctx, servers); err != nil {
+	if err := wiring.List(ctx, servers); err != nil {
 		return nil, fmt.Errorf("failed to list servers: %w", err)
 	}
 	slices.SortFunc(servers.Items, func(a, b wiringapi.Server) int {
@@ -276,7 +309,7 @@ func (c *Config) CreateVLABConfig(ctx context.Context) (*VLABConfig, error) {
 	}
 
 	switches := &wiringapi.SwitchList{}
-	if err := c.Wiring.List(ctx, switches); err != nil {
+	if err := wiring.List(ctx, switches); err != nil {
 		return nil, fmt.Errorf("failed to list switches: %w", err)
 	}
 	slices.SortFunc(switches.Items, func(a, b wiringapi.Switch) int {
@@ -321,7 +354,7 @@ func (c *Config) CreateVLABConfig(ctx context.Context) (*VLABConfig, error) {
 	}
 
 	conns := &wiringapi.ConnectionList{}
-	if err := c.Wiring.List(ctx, conns); err != nil {
+	if err := wiring.List(ctx, conns); err != nil {
 		return nil, fmt.Errorf("failed to list connections: %w", err)
 	}
 	slices.SortFunc(conns.Items, func(a, b wiringapi.Connection) int {
@@ -435,6 +468,173 @@ func (c *Config) CreateVLABConfig(ctx context.Context) (*VLABConfig, error) {
 	return cfg, nil
 }
 
+func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
+	orderedVMNames := slices.Collect(maps.Keys(cfg.VMs))
+	slices.SortFunc(orderedVMNames, func(a, b string) int {
+		vma, vmb := cfg.VMs[a], cfg.VMs[b]
+
+		if vma.Type != vmb.Type {
+			return cmp.Compare(vma.Type, vmb.Type)
+		}
+
+		return cmp.Compare(a, b)
+	})
+
+	vmIDs := map[string]int{}
+	for idx, name := range orderedVMNames {
+		vmIDs[name] = idx
+	}
+
+	vms := []VM{}
+	passthroughs := []string{}
+	tapID := 0
+	controlID := 0
+	for _, name := range orderedVMNames {
+		vm := cfg.VMs[name]
+		vmID := vmIDs[name]
+		maxNICID := uint8(0)
+		nics := map[uint8]string{}
+
+		for nicName, nicConfig := range vm.NICs {
+			nicID, err := getNICID(nicName)
+			if err != nil {
+				return nil, fmt.Errorf("getting NIC ID for %q: %w", nicName, err)
+			}
+			maxNICID = max(maxNICID, nicID)
+
+			nics[nicID] = nicConfig
+		}
+
+		if maxNICID >= VLABMaxNICs {
+			return nil, fmt.Errorf("too many NICs for VM %q: %d", name, len(nics)) //nolint:goerr113
+		}
+
+		paddedNICs := make([]string, int(maxNICID)+1)
+		for idx := uint8(0); idx <= maxNICID; idx++ {
+			if nic, ok := nics[idx]; ok {
+				paddedNICs[idx] = nic
+			} else {
+				paddedNICs[idx] = NICTypeNoop
+			}
+		}
+
+		for nicID, nicCfgRaw := range paddedNICs {
+			if nicID >= VLABMaxNICs {
+				return nil, fmt.Errorf("too many NICs for VM %q: %d", name, len(nics)) //nolint:goerr113
+			}
+
+			mac := fmt.Sprintf(VLABMACTmpl, vmID, nicID)
+
+			nicCfgParts := strings.SplitN(nicCfgRaw, NICTypeSep, 2)
+			nicType := nicCfgParts[0]
+			nicCfg := ""
+			if len(nicCfgParts) > 1 {
+				nicCfg = nicCfgParts[1]
+			}
+
+			netdev := ""
+			device := ""
+			if nicType == NICTypeNoop || nicType == NICTypeDirect {
+				port := getDirectNICPort(vmID, nicID)
+				netdev = fmt.Sprintf("socket,udp=127.0.0.1:%d", port)
+
+				if nicCfg != "" {
+					parts := strings.SplitN(nicCfg, "/", 2)
+					if len(parts) != 2 {
+						return nil, fmt.Errorf("invalid NIC config %q for VM %q", nicCfg, name) //nolint:goerr113
+					}
+
+					otherVM, otherNIC := parts[0], parts[1]
+					otherVMID, ok := vmIDs[otherVM]
+					if !ok {
+						return nil, fmt.Errorf("unknown VM %q in NIC config %q for VM %q", otherVM, nicCfg, name) //nolint:goerr113
+					}
+
+					otherNICID, err := getNICID(otherNIC)
+					if err != nil {
+						return nil, fmt.Errorf("getting NIC ID for %q: %w", nicCfg, err)
+					}
+
+					otherPort := getDirectNICPort(otherVMID, int(otherNICID))
+					netdev += fmt.Sprintf(",localaddr=127.0.0.1:%d", otherPort)
+				}
+			} else if nicType == NICTypeUsernet {
+				if vm.Type == VMTypeSwitch {
+					return nil, fmt.Errorf("usernet NICs are not supported for switch VM %q", name) //nolint:goerr113
+				}
+
+				sshPort := VLABBaseSSHPort + vmID
+				// TODO make subnet configurable
+				netdev = fmt.Sprintf("user,hostname=%s,hostfwd=tcp:0.0.0.0:%d-:22,net=172.31.%d.0/24,dhcpstart=172.31.%d.10", name, sshPort, vmID, vmID)
+				if vm.Type == VMTypeControl && controlID == 0 {
+					// TODO use consts and enable for other control VMs
+					netdev += ",hostfwd=tcp:0.0.0.0:6443-:6443,hostfwd=tcp:0.0.0.0:31000-:31000"
+				}
+				if vm.Type == VMTypeControl && opts.ControlsRestricted || vm.Type == VMTypeServer && opts.ServersRestricted {
+					netdev += ",restrict=yes"
+				}
+			} else if nicType == NICTypeManagement {
+				if nicCfg != "" {
+					mac = nicCfg
+				}
+				netdev = fmt.Sprintf("tap,ifname=%s%d,script=no,downscript=no", VLABTapPrefix, tapID)
+				tapID++
+			} else if nicType == NICTypePassthrough {
+				if nicCfg == "" {
+					return nil, fmt.Errorf("missing NIC config for passthrough NIC %d of VM %q", nicID, name) //nolint:goerr113
+				}
+
+				passthroughs = append(passthroughs, nicCfg)
+				device = fmt.Sprintf("vfio-pci,host=%s", nicCfg)
+			} else {
+				return nil, fmt.Errorf("unknown NIC type %q for VM %q", nicType, name) //nolint:goerr113
+			}
+
+			if netdev != "" {
+				netdev += fmt.Sprintf(",id=eth%02d", nicID)
+			}
+
+			if device == "" {
+				device = fmt.Sprintf("e1000,netdev=eth%02d,mac=%s", nicID, mac)
+			}
+			device += fmt.Sprintf(",bus=%s%d,addr=0x%x", VLABPCIBridgePrefix, nicID/VLABNICsPerPCIBridge, nicID%VLABNICsPerPCIBridge)
+
+			nic := ""
+			if netdev != "" {
+				nic += "-netdev " + netdev + " "
+			}
+			nic += "-device " + device
+
+			paddedNICs[nicID] = nic
+		}
+
+		if vm.Type == VMTypeControl {
+			controlID++
+		}
+
+		size := cfg.Sizes.Server
+		if vm.Type == VMTypeSwitch {
+			size = cfg.Sizes.Switch
+		} else if vm.Type == VMTypeControl {
+			size = cfg.Sizes.Control
+		}
+
+		vms = append(vms, VM{
+			ID:   vmID,
+			Name: name,
+			Type: vm.Type,
+			NICs: paddedNICs,
+			Size: size,
+		})
+	}
+
+	return &VLAB{
+		VMs:          vms,
+		Taps:         tapID,
+		Passthroughs: passthroughs,
+	}, nil
+}
+
 func isHardware(obj client.Object) bool {
 	if obj.GetAnnotations() != nil {
 		t, exist := obj.GetAnnotations()[HHFabCfgType]
@@ -468,4 +668,36 @@ func getPassthroughLinks(obj client.Object) map[string]string {
 	}
 
 	return links
+}
+
+const (
+	srvPrefix = "enp2s"
+	swMPrefix = "M1"
+	swEPrefix = "E1/"
+)
+
+func getNICID(nic string) (uint8, error) {
+	if nic == swMPrefix {
+		return 0, nil
+	}
+
+	raw := ""
+	if strings.HasPrefix(nic, srvPrefix) {
+		raw = nic[len(srvPrefix):]
+	} else if strings.HasPrefix(nic, swEPrefix) {
+		raw = nic[len(swEPrefix):]
+	} else {
+		return 0, fmt.Errorf("invalid NIC ID %q", nic) //nolint:goerr113
+	}
+
+	v, err := strconv.ParseUint(raw, 10, 8)
+	if err != nil {
+		return 0, fmt.Errorf("parsing NIC ID %q: %w", nic, err)
+	}
+
+	return uint8(v), nil
+}
+
+func getDirectNICPort(vmID int, nicID int) int {
+	return VLABBaseDirectPort + 100*vmID + nicID
 }
