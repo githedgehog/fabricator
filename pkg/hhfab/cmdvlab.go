@@ -71,8 +71,6 @@ func VLABUp(ctx context.Context, workDir, cacheDir string, opts VLABUpOpts) erro
 		return fmt.Errorf("creating VLAB: %w", err)
 	}
 
-	// TODO do not rebuild if not needed
-	slog.Info("Building installers")
 	if err := c.build(ctx, BuildOpts{Mode: BuildModeManual}); err != nil {
 		return fmt.Errorf("building: %w", err)
 	}

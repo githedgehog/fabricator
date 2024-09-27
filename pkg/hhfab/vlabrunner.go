@@ -61,17 +61,6 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 		}
 	}
 
-	cpu := uint(0)
-	ram := uint(0)
-	disk := uint(0)
-	for _, vm := range vlab.VMs {
-		cpu += vm.Size.CPU
-		ram += vm.Size.RAM
-		disk += vm.Size.Disk
-	}
-
-	slog.Info("Total VM resources", "cpu", fmt.Sprintf("%d vCPUs", cpu), "ram", fmt.Sprintf("%d MB", ram), "disk", fmt.Sprintf("%d GB", disk))
-
 	if err := execHelper(ctx, c.WorkDir, []string{
 		"setup-taps", "--count", fmt.Sprintf("%d", vlab.Taps),
 	}); err != nil {
@@ -90,21 +79,27 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 		}
 	}
 
+	cpu := uint(0)
+	ram := uint(0)
+	disk := uint(0)
+	for _, vm := range vlab.VMs {
+		cpu += vm.Size.CPU
+		ram += vm.Size.RAM
+		disk += vm.Size.Disk
+	}
+
 	d, err := artificer.NewDownloaderWithDockerCreds(c.CacheDir, c.Repo, c.Prefix)
 	if err != nil {
 		return fmt.Errorf("creating downloader: %w", err)
 	}
 
-	group := &errgroup.Group{}
-	installers := &sync.WaitGroup{}
-
 	for _, vm := range vlab.VMs {
 		vmDir := filepath.Join(c.WorkDir, VLABDir, VLABVMsDir, vm.Name)
 
 		if isPresent(vmDir, VLABOSImageFile, VLABEFICodeFile, VLABEFIVarsFile) {
-			slog.Debug("Using existing VM", "vm", vm.Name, "type", vm.Type)
+			slog.Info("Using existing", "vm", vm.Name, "type", vm.Type)
 		} else {
-			slog.Debug("Preparing", "vm", vm.Name, "type", vm.Type)
+			slog.Info("Preparing new", "vm", vm.Name, "type", vm.Type)
 
 			if err := os.MkdirAll(vmDir, 0o700); err != nil {
 				return fmt.Errorf("creating VM dir %q: %w", vmDir, err)
@@ -154,6 +149,13 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 				return fmt.Errorf("resizing os image: %w", err)
 			}
 		}
+	}
+
+	group := &errgroup.Group{}
+	installers := &sync.WaitGroup{}
+
+	for _, vm := range vlab.VMs {
+		vmDir := filepath.Join(c.WorkDir, VLABDir, VLABVMsDir, vm.Name)
 
 		group.Go(func() error {
 			args := []string{
@@ -222,6 +224,8 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 			})
 		}
 	}
+
+	slog.Info("Starting VMs", "total", len(vlab.VMs), "cpu", fmt.Sprintf("%d vCPUs", cpu), "ram", fmt.Sprintf("%d MB", ram), "disk", fmt.Sprintf("%d GB", disk))
 
 	group.Go(func() error {
 		installers.Wait()
