@@ -1,0 +1,126 @@
+variant: flatcar
+version: 1.0.0
+
+passwd:
+  users:
+    - name: core
+      password_hash: "{{ .PasswordHash }}"
+      {{ if .AuthorizedKeys }}
+      ssh_authorized_keys:
+        {{ range .AuthorizedKeys}}
+        - "{{ . }}"
+        {{ end }}
+      {{ end }}
+      groups:
+        - wheel
+      shell: /bin/bash
+
+systemd:
+  units:
+    - name: locksmithd.service
+      mask: true
+
+storage:
+  files:
+    - path: /etc/flatcar/update.conf
+      mode: 0644
+      overwrite: true
+      contents:
+        inline: |
+          SERVER=disabled
+          REBOOT_STRATEGY=off
+      # https://www.flatcar.org/docs/latest/setup/releases/update-strategies/#disable-automatic-updates
+
+    - path: /etc/hostname
+      mode: 0644
+      overwrite: true
+      contents:
+        inline: "{{ .Hostname }}"
+
+    - path: /etc/hosts
+      append:
+        - inline: |
+            127.0.0.1 {{ .Hostname }}
+
+    - path: /etc/motd.d/hedgehog.conf
+      mode: 0644
+      contents:
+        inline: |
+          This machine is Hedgehog Control Node.
+
+    - path: /etc/systemd/network/10-mgmt.network
+      mode: 0644
+      contents:
+        inline: |
+          [Match]
+          Name={{ .MgmtInterface }}
+          Type=ether
+
+          [Network]
+          Address={{ .MgmtAddress }}
+          Address={{ .ControlVIP }}
+          DHCP=no
+          IPv6AcceptRA=no
+          IPv6SendRA=no
+          LLDP=yes
+          EmitLLDP=yes
+
+    - path: /etc/systemd/network/20-ext.network
+      mode: 0644
+      contents:
+        inline: |
+          [Match]
+          Name={{ .ExtInterface }}
+          Type=ether
+{{ if eq .ExtAddress "dhcp" }}
+          [Network]
+          DHCP=ipv4
+          KeepConfiguration=dhcp-on-stop
+          IPv6AcceptRA=no
+          IPv6SendRA=no
+          LLDP=no
+          EmitLLDP=no
+
+          [DHCP]
+          UseMTU=true
+          UseDomains=true
+
+          [DHCPv4]
+          RoutesToDNS=false
+          UseHostname=false
+{{ else }}
+          [Network]
+          Address={{ .ExtAddress }}
+          {{ if .ExtGateway }}Gateway={{ .ExtGateway }}{{ end }}
+          {{ range .ExtDNS }}
+          DNS={{ . }}
+          {{ end }}
+          DHCP=no
+          IPv6AcceptRA=no
+          IPv6SendRA=no
+          LLDP=no
+          EmitLLDP=no
+{{ end }}
+
+    - path: /etc/systemd/network/99-default.network
+      mode: 0644
+      contents:
+        inline: |
+          [Network]
+          DHCP=no
+
+          [Match]
+          Name=*
+          Type=!loopback bridge tunnel vxlan wireguard
+          Driver=!veth dummy
+
+          [Link]
+          Unmanaged=true
+
+    - path: /etc/default/toolbox
+      mode: 0644
+      contents:
+        inline: |
+          TOOLBOX_DOCKER_IMAGE=ghcr.io/githedgehog/toolbox
+          TOOLBOX_DOCKER_TAG=latest
+          TOOLBOX_USER=root
