@@ -3,6 +3,7 @@ package hhfab
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -10,19 +11,25 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
+	"github.com/melbahja/goph"
 	"go.githedgehog.com/fabric/pkg/util/logutil"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/artificer"
 	"go.githedgehog.com/fabricator/pkg/fab/recipe"
 	"go.githedgehog.com/fabricator/pkg/util/butaneutil"
 	"go.githedgehog.com/fabricator/pkg/util/tmplutil"
+	"golang.org/x/crypto/ssh"
 	"golang.org/x/sync/errgroup"
 )
 
 //go:embed vlab_butane.tmpl.yaml
 var serverButaneTmpl string
+
+//go:embed hhnet.sh
+var hhnet []byte
 
 const (
 	VLABOSImageFile = "os.img"
@@ -233,13 +240,14 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 			return nil
 		})
 
-		if vm.Type == VMTypeControl || vm.Type == VMTypeServer {
+		if vm.Type == VMTypeServer {
 			installers.Add(1)
 			group.Go(func() error {
-				// TODO install VM
-				// TODO some flag to control "fail-on-install" behavior
+				if err := c.serverInstall(ctx, vlab, d, vm); err != nil {
+					slog.Error("Failed to install VM", "vm", vm.Name, "err", err)
 
-				time.Sleep(5 * time.Second)
+					// TODO some flag to control "fail-on-install" behavior
+				}
 
 				// no defer here, as we want to wait for all installers completion without errors
 				installers.Done()
@@ -336,4 +344,91 @@ func serverIgnition(fab fabapi.Fabricator, vm VM) ([]byte, error) {
 	}
 
 	return ign, nil
+}
+
+func (c *Config) serverInstall(ctx context.Context, vlab *VLAB, d *artificer.Downloader, vm VM) error {
+	if vm.Type != VMTypeServer {
+		return fmt.Errorf("wrong VM type %q", vm.Type) //nolint:goerr113
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+
+	auth, err := goph.RawKey(vlab.SSHKey, "")
+	if err != nil {
+		return fmt.Errorf("getting ssh auth: %w", err)
+	}
+
+	// TODO add timeout, make retries on failed commands
+	for {
+		time.Sleep(5 * time.Second)
+
+		client, err := goph.NewConn(&goph.Config{
+			User:     "core",
+			Addr:     "127.0.0.1",
+			Port:     getSSHPort(vm.ID),
+			Auth:     auth,
+			Timeout:  30 * time.Second,
+			Callback: ssh.InsecureIgnoreHostKey(), //nolint:gosec
+		})
+		if err != nil {
+			if errors.Is(err, syscall.ECONNREFUSED) {
+				continue
+			}
+
+			return fmt.Errorf("connecting: %w", err)
+		}
+		defer client.Close()
+
+		out, err := client.RunContext(ctx, "hostname")
+		if err != nil {
+			return fmt.Errorf("checking hostname: %w", err)
+		}
+
+		hostname := strings.TrimSpace(string(out))
+		if hostname != vm.Name {
+			return fmt.Errorf("hostname mismatch: got %q, want %q", hostname, vm.Name) //nolint:goerr113
+		}
+
+		sftp, err := client.NewSftp()
+		if err != nil {
+			return fmt.Errorf("creating sftp: %w", err)
+		}
+		defer sftp.Close()
+
+		f, err := sftp.Create("/tmp/hhnet")
+		if err != nil {
+			return fmt.Errorf("creating hhnet: %w", err)
+		}
+		defer f.Close()
+
+		if _, err := f.Write(hhnet); err != nil {
+			return fmt.Errorf("writing hhnet: %w", err)
+		}
+
+		if _, err := client.RunContext(ctx, "bash -c 'sudo mv /tmp/hhnet /opt/bin/hhnet && chmod +x /opt/bin/hhnet'"); err != nil {
+			return fmt.Errorf("installing hhnet: %w", err)
+		}
+
+		// TODO const
+		if err := d.WithORAS(ctx, "fabricator/toolbox", c.Fab.Status.Versions.Platform.Toolbox, func(cachePath string) error {
+			if err := client.Upload(filepath.Join(cachePath, "toolbox.tar"), "/tmp/toolbox"); err != nil {
+				return fmt.Errorf("uploading: %w", err)
+			}
+
+			return nil
+		}); err != nil {
+			return fmt.Errorf("uploading toolbox: %w", err)
+		}
+
+		if _, err := client.RunContext(ctx, "bash -c 'sudo ctr image import /tmp/toolbox'"); err != nil {
+			return fmt.Errorf("installing toolbox: %w", err)
+		}
+
+		slog.Debug("VM installed", "vm", vm.Name, "type", vm.Type)
+
+		break
+	}
+
+	return nil
 }
