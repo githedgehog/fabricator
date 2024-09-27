@@ -397,7 +397,9 @@ func Run(ctx context.Context) error {
 				Flags:  append(defaultFlags, hMode),
 				Before: before(false),
 				Action: func(_ *cli.Context) error {
-					if err := hhfab.Build(ctx, workDir, cacheDir, hhfab.HydrateMode(hydrateMode)); err != nil {
+					if err := hhfab.Build(ctx, workDir, cacheDir, hhfab.HydrateMode(hydrateMode), hhfab.BuildOpts{
+						Mode: hhfab.BuildModeManual, // TODO
+					}); err != nil {
 						return fmt.Errorf("building: %w", err)
 					}
 
