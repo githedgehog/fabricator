@@ -21,6 +21,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -29,7 +30,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/pkg/errors"
 	"sigs.k8s.io/yaml"
 )
 
@@ -113,17 +113,17 @@ func checkConfigFile(configFilePath string, config *Config) (bool, error) {
 		if os.IsNotExist(err) {
 			slog.Warn("Config file not found", "file", configFilePath)
 		} else {
-			return false, errors.Wrapf(err, "error checking config file %s", configFilePath)
+			return false, fmt.Errorf("Error checking config file %s: %w", configFilePath, err)
 		}
 	}
 
 	configData, err := os.ReadFile(configFilePath)
 	if err != nil {
-		return false, errors.Wrapf(err, "error reading config file %s", configFilePath)
+		return false, fmt.Errorf("Error reading config file %s:%w", configFilePath, err)
 	}
 
 	if err := yaml.Unmarshal(configData, config); err != nil {
-		return false, errors.Wrapf(err, "error unmarshalling config file %s", configFilePath)
+		return false, fmt.Errorf("Error unmarshalling config file %s:%w", configFilePath, err)
 	}
 	slog.Debug("ConfigCheck", "config", config)
 	if config.PasswordHash == "" && len(config.AuthorizedKeys) == 0 {
@@ -134,7 +134,7 @@ func checkConfigFile(configFilePath string, config *Config) (bool, error) {
 	if config.BlockDevicePath == "" {
 		err = populateBlockDevice(config)
 		if err != nil {
-			return false, errors.Wrapf(err, "Error choosing block device")
+			return false, fmt.Errorf("Error choosing block device: %w", err)
 		}
 
 	}
@@ -143,7 +143,7 @@ func checkConfigFile(configFilePath string, config *Config) (bool, error) {
 
 }
 
-func populatePassword(config *Config) {
+func populatePassword(_ *Config) {
 	slog.Info("Would be calling populate password")
 
 }
@@ -210,8 +210,7 @@ func launchFlatcarInstaller(config Config, dryrun bool) error {
 
 	slog.Info("Executing install command", "Commnad", installCmd.String())
 	if err := installCmd.Run(); err != nil {
-		slog.Error("flatcar install error", "Stderr", stderr.String(), "Command", installCmd.String())
-		return err
+		return fmt.Errorf("flatcar install error- stderr %s, command: %s:%w", stderr.String(), installCmd.String(), err)
 	}
 
 	return nil
@@ -265,6 +264,7 @@ func rebootSystem(dryrun bool) {
 	}
 }
 
+// PreInstallCheck will ensure the necessary information is present before starting an installation
 func PreInstallCheck(_ context.Context, basedir string, dryRun bool) error {
 	slog.Debug("Using", "basedir", basedir, "dryRun", dryRun)
 
