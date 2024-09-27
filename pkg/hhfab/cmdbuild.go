@@ -3,6 +3,7 @@ package hhfab
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 
 	"go.githedgehog.com/fabricator/pkg/artificer"
@@ -41,6 +42,8 @@ func (c *Config) build(ctx context.Context, opts BuildOpts) error {
 		return fmt.Errorf("unsupported build mode %q", opts.Mode) //nolint:goerr113
 	}
 
+	slog.Info("Building installers", "mode", opts.Mode)
+
 	// TODO
 	// Manual: Build installer, pack it, build ignition
 	// ISO: Build installer, pack it into ISO
@@ -55,9 +58,6 @@ func (c *Config) build(ctx context.Context, opts BuildOpts) error {
 	for _, control := range c.Controls {
 		if err := (&recipe.ControlInstallBuilder{
 			WorkDir:    resultDir,
-			CacheDir:   c.CacheDir,
-			Repo:       c.Repo,
-			Prefix:     c.Prefix,
 			Fab:        c.Fab,
 			Control:    control,
 			Wiring:     c.Wiring,
