@@ -5,27 +5,25 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 
-	butane "github.com/coreos/butane/config"
-	butanecommon "github.com/coreos/butane/config/common"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/artificer"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/certmanager"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/zot"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
+	"go.githedgehog.com/fabricator/pkg/util/butaneutil"
 	"go.githedgehog.com/fabricator/pkg/util/tmplutil"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+//go:embed control_butane.tmpl.yaml
+var controlButaneTmpl string
+
 type ControlInstallBuilder struct {
 	WorkDir    string
-	CacheDir   string
-	Repo       string
-	Prefix     string
 	Fab        fabapi.Fabricator
 	Control    fabapi.ControlNode
 	Wiring     client.Reader
@@ -147,9 +145,6 @@ func removeIfExists(path string) error {
 	return nil
 }
 
-//go:embed control_butane.tmpl.yaml
-var controlButaneTmpl string
-
 func controlIgnition(fab fabapi.Fabricator, control fabapi.ControlNode) ([]byte, error) {
 	but, err := tmplutil.FromTemplate("butane", controlButaneTmpl, map[string]any{
 		"Hostname":       control.Name,
@@ -167,18 +162,9 @@ func controlIgnition(fab fabapi.Fabricator, control fabapi.ControlNode) ([]byte,
 		return nil, fmt.Errorf("butane: %w", err)
 	}
 
-	options := butanecommon.TranslateBytesOptions{}
-	options.NoResourceAutoCompression = true
-	options.Pretty = true
-
-	ign, report, err := butane.TranslateBytes([]byte(but), options)
+	ign, err := butaneutil.Translate(but)
 	if err != nil {
-		return nil, fmt.Errorf("translating config: %w", err)
-	}
-	if len(report.Entries) > 0 {
-		slog.Warn("butane", "report", report.String())
-
-		return nil, fmt.Errorf("butane produced warnings and strict mode is enabled") //nolint:goerr113
+		return nil, fmt.Errorf("translating butane: %w", err)
 	}
 
 	return ign, nil

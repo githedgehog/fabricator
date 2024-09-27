@@ -1,0 +1,57 @@
+variant: flatcar
+version: 1.0.0
+
+passwd:
+  users:
+    - name: core
+      password_hash: "{{ .PasswordHash }}"
+      {{ if .AuthorizedKeys }}
+      ssh_authorized_keys:
+        {{ range .AuthorizedKeys}}
+        - "{{ . }}"
+        {{ end }}
+      {{ end }}
+      groups:
+        - wheel
+      shell: /bin/bash
+
+systemd:
+  units:
+    - name: locksmithd.service
+      mask: true
+
+storage:
+  files:
+    - path: /etc/flatcar/update.conf
+      mode: 0644
+      overwrite: true
+      contents:
+        inline: |
+          SERVER=disabled
+          REBOOT_STRATEGY=off
+      # https://www.flatcar.org/docs/latest/setup/releases/update-strategies/#disable-automatic-updates
+
+    - path: /etc/hostname
+      mode: 0644
+      overwrite: true
+      contents:
+        inline: "{{ .Hostname }}"
+
+    - path: /etc/hosts
+      append:
+        - inline: |
+            127.0.0.1 {{ .Hostname }}
+
+    - path: /etc/motd.d/hedgehog.conf
+      mode: 0644
+      contents:
+        inline: |
+          Hedgehog VLAB Server
+
+    - path: /etc/default/toolbox
+      mode: 0644
+      contents:
+        inline: |
+          TOOLBOX_DOCKER_IMAGE=ghcr.io/githedgehog/toolbox
+          TOOLBOX_DOCKER_TAG=latest
+          TOOLBOX_USER=root

@@ -46,7 +46,7 @@ storage:
       mode: 0644
       contents:
         inline: |
-          This machine is Hedgehog Control Node.
+          Hedgehog Control Node
 
     - path: /etc/systemd/network/10-mgmt.network
       mode: 0644
