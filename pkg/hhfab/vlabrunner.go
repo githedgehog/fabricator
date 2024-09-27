@@ -2,6 +2,7 @@ package hhfab
 
 import (
 	"context"
+	_ "embed"
 	"fmt"
 	"log/slog"
 	"os"
@@ -12,10 +13,16 @@ import (
 	"time"
 
 	"go.githedgehog.com/fabric/pkg/util/logutil"
+	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/artificer"
 	"go.githedgehog.com/fabricator/pkg/fab/recipe"
+	"go.githedgehog.com/fabricator/pkg/util/butaneutil"
+	"go.githedgehog.com/fabricator/pkg/util/tmplutil"
 	"golang.org/x/sync/errgroup"
 )
+
+//go:embed vlab_butane.tmpl.yaml
+var serverButaneTmpl string
 
 const (
 	VLABOSImageFile = "os.img"
@@ -30,6 +37,8 @@ const (
 	VLABCmdSudo       = "sudo"
 	VLABCmdQemuImg    = "qemu-img"
 	VLABCmdQemuSystem = "qemu-system-x86_64"
+
+	VLABIgnition = "ignition.json"
 )
 
 var VLABCmds = []string{VLABCmdSudo, VLABCmdQemuImg, VLABCmdQemuSystem}
@@ -148,6 +157,17 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 				"vm", vm.Name); err != nil {
 				return fmt.Errorf("resizing os image: %w", err)
 			}
+
+			if vm.Type == VMTypeServer {
+				ign, err := serverIgnition(c.Fab, vm)
+				if err != nil {
+					return fmt.Errorf("generating ignition: %w", err)
+				}
+
+				if err := os.WriteFile(filepath.Join(vmDir, VLABIgnition), ign, 0o600); err != nil {
+					return fmt.Errorf("writing ignition: %w", err)
+				}
+			}
 		}
 	}
 
@@ -183,9 +203,13 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 			// -daemonize
 			// -pidfile
 
-			if vm.Type == VMTypeControl {
+			if vm.Type == VMTypeControl || vm.Type == VMTypeServer {
+				ign := VLABIgnition
+				if vm.Type == VMTypeControl {
+					ign = filepath.Join(c.WorkDir, ResultDir, vm.Name+recipe.InstallIgnitionSuffix)
+				}
 				args = append(args,
-					"-fw_cfg", "name=opt/org.flatcar-linux/config,file="+filepath.Join(c.WorkDir, ResultDir, vm.Name+recipe.InstallIgnitionSuffix),
+					"-fw_cfg", "name=opt/org.flatcar-linux/config,file="+ign,
 				)
 			}
 
@@ -294,4 +318,22 @@ func execHelper(ctx context.Context, baseDir string, args []string) error {
 	}
 
 	return nil
+}
+
+func serverIgnition(fab fabapi.Fabricator, vm VM) ([]byte, error) {
+	but, err := tmplutil.FromTemplate("butane", serverButaneTmpl, map[string]any{
+		"Hostname":       vm.Name,
+		"PasswordHash":   fab.Spec.Config.Control.DefaultUser.PasswordHash,
+		"AuthorizedKeys": fab.Spec.Config.Control.DefaultUser.AuthorizedKeys,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("butane: %w", err)
+	}
+
+	ign, err := butaneutil.Translate(but)
+	if err != nil {
+		return nil, fmt.Errorf("translating butane: %w", err)
+	}
+
+	return ign, nil
 }
