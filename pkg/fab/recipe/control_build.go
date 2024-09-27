@@ -126,6 +126,10 @@ func (b *ControlInstallBuilder) Build(ctx context.Context) error {
 
 	// TODO OCI sync for airgap
 
+	if err := archiveTarGz(ctx, installDir, installArchive); err != nil {
+		return fmt.Errorf("archiving install: %w", err)
+	}
+
 	return nil
 }
 
