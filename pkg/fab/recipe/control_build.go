@@ -2,9 +2,12 @@ package recipe
 
 import (
 	"context"
+	"crypto/sha256"
 	_ "embed"
+	"encoding/base64"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -16,6 +19,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 	"go.githedgehog.com/fabricator/pkg/util/butaneutil"
 	"go.githedgehog.com/fabricator/pkg/util/tmplutil"
+	"go.githedgehog.com/fabricator/pkg/version"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -36,6 +40,7 @@ const (
 	InstallSuffix         = "-install"
 	InstallArchiveSuffix  = InstallSuffix + ".tgz"
 	InstallIgnitionSuffix = InstallSuffix + ".ign"
+	InstallHashSuffix     = InstallSuffix + ".inhash"
 )
 
 func (b *ControlInstallBuilder) Build(ctx context.Context) error {
@@ -44,6 +49,22 @@ func (b *ControlInstallBuilder) Build(ctx context.Context) error {
 	installDir := filepath.Join(b.WorkDir, b.Control.Name+InstallSuffix)
 	installArchive := filepath.Join(b.WorkDir, b.Control.Name+InstallArchiveSuffix)
 	installIgnition := filepath.Join(b.WorkDir, b.Control.Name+InstallIgnitionSuffix)
+	installHash := filepath.Join(b.WorkDir, b.Control.Name+InstallHashSuffix)
+
+	newHash, err := b.hash(ctx)
+	if err != nil {
+		return fmt.Errorf("hashing: %w", err)
+	}
+
+	if existingHash, err := os.ReadFile(installHash); err == nil {
+		if string(existingHash) == newHash && isPresent(installDir, installArchive, installIgnition) {
+			slog.Info("Using existing installers")
+
+			return nil
+		}
+	}
+
+	slog.Info("Building installers")
 
 	if err := removeIfExists(installDir); err != nil {
 		return fmt.Errorf("removing install dir: %w", err)
@@ -130,6 +151,10 @@ func (b *ControlInstallBuilder) Build(ctx context.Context) error {
 		return fmt.Errorf("archiving install: %w", err)
 	}
 
+	if err := os.WriteFile(installHash, []byte(newHash), 0o600); err != nil {
+		return fmt.Errorf("writing hash: %w", err)
+	}
+
 	return nil
 }
 
@@ -172,4 +197,32 @@ func controlIgnition(fab fabapi.Fabricator, control fabapi.ControlNode) ([]byte,
 	}
 
 	return ign, nil
+}
+
+func (b *ControlInstallBuilder) hash(ctx context.Context) (string, error) {
+	h := sha256.New()
+
+	if _, err := h.Write([]byte(version.Version)); err != nil {
+		return "", fmt.Errorf("hashing version: %w", err)
+	}
+
+	if err := apiutil.PrintFab(b.Fab, []fabapi.ControlNode{b.Control}, h); err != nil {
+		return "", fmt.Errorf("hashing fab: %w", err)
+	}
+
+	if err := apiutil.PrintWiring(ctx, b.Wiring, h); err != nil {
+		return "", fmt.Errorf("hashing wiring: %w", err)
+	}
+
+	return base64.URLEncoding.EncodeToString(h.Sum(nil)), nil
+}
+
+func isPresent(files ...string) bool {
+	for _, f := range files {
+		if _, err := os.Stat(f); err != nil {
+			return false
+		}
+	}
+
+	return true
 }
