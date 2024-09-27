@@ -32,6 +32,7 @@ type Downloader struct {
 	repo       string
 	prefix     string
 	orasClient *auth.Client
+	m          sync.Mutex
 }
 
 func NewDownloaderWithDockerCreds(cacheDir, repo, prefix string) (*Downloader, error) {
@@ -68,28 +69,63 @@ func (d *Downloader) FromORAS(ctx context.Context, destPath, name string, versio
 		return fmt.Errorf("no files to download") //nolint:goerr113
 	}
 
+	return d.WithORAS(ctx, name, version, func(cachePath string) error {
+		for _, file := range files {
+			target := file.Target
+			if target == "" {
+				target = file.Name
+			}
+
+			src := filepath.Join(cachePath, file.Name)
+			dst := filepath.Join(destPath, target)
+			if err := copyFileDir(src, dst); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
+}
+
+func (d *Downloader) WithORAS(ctx context.Context, name string, version meta.Version, do func(cachePath string) error) error {
+	cachePath, err := d.getORAS(ctx, name, version)
+	if err != nil {
+		return fmt.Errorf("getting oras: %w", err)
+	}
+
+	if err := do(cachePath); err != nil {
+		return fmt.Errorf("running func: %w", err)
+	}
+
+	return nil
+}
+
+func (d *Downloader) getORAS(ctx context.Context, name string, version meta.Version) (string, error) {
+	d.m.Lock()
+	defer d.m.Unlock()
+
 	cacheName := name + "@" + string(version)
 	cacheName = strings.ReplaceAll(cacheName, "/", "_")
 	cachePath := filepath.Join(d.cacheDir, cacheName)
 
 	stat, err := os.Stat(cachePath)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("stat cache %q: %w", cachePath, err)
+		return "", fmt.Errorf("stat cache %q: %w", cachePath, err)
 	}
 	if err == nil && !stat.IsDir() {
-		return fmt.Errorf("cache %q is not a directory", cachePath) //nolint:goerr113
+		return "", fmt.Errorf("cache %q is not a directory", cachePath) //nolint:goerr113
 	}
 
 	if err != nil && errors.Is(err, os.ErrNotExist) {
 		tmp, err := os.MkdirTemp(d.cacheDir, "download-*")
 		if err != nil {
-			return fmt.Errorf("creating temp dir: %w", err)
+			return "", fmt.Errorf("creating temp dir: %w", err)
 		}
 		defer os.RemoveAll(tmp)
 
 		fs, err := file.New(tmp)
 		if err != nil {
-			return fmt.Errorf("creating oras file store in %q: %w", tmp, err)
+			return "", fmt.Errorf("creating oras file store in %q: %w", tmp, err)
 		}
 		defer fs.Close()
 
@@ -97,7 +133,7 @@ func (d *Downloader) FromORAS(ctx context.Context, destPath, name string, versio
 
 		repo, err := remote.NewRepository(ref)
 		if err != nil {
-			return fmt.Errorf("creating oras remote repo %s: %w", ref, err)
+			return "", fmt.Errorf("creating oras remote repo %s: %w", ref, err)
 		}
 
 		if strings.HasPrefix(d.repo, "127.0.0.1:") || strings.HasPrefix(d.repo, "localhost:") {
@@ -156,31 +192,17 @@ func (d *Downloader) FromORAS(ctx context.Context, destPath, name string, versio
 			},
 		})
 		if err != nil {
-			return errors.Wrapf(err, "error copying files from %s", ref)
+			return "", errors.Wrapf(err, "error copying files from %s", ref)
 		}
 
 		pb.Wait()
 
 		if err := os.Rename(tmp, cachePath); err != nil {
-			return fmt.Errorf("moving %q to %q: %w", tmp, cachePath, err)
+			return "", fmt.Errorf("moving %q to %q: %w", tmp, cachePath, err)
 		}
 	}
 
-	for _, file := range files {
-		target := file.Target
-		if target == "" {
-			target = file.Name
-		}
-
-		src := filepath.Join(cachePath, file.Name)
-		dst := filepath.Join(destPath, target)
-
-		if err := copyFileDir(src, dst); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	return cachePath, nil
 }
 
 func copyFileDir(src, dst string) error {
