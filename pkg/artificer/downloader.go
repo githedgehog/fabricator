@@ -14,6 +14,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/vbauerster/mpb/v8"
 	"github.com/vbauerster/mpb/v8/decor"
+	"go.githedgehog.com/fabricator/api/meta"
 	"oras.land/oras-go/v2"
 	"oras.land/oras-go/v2/content/file"
 	"oras.land/oras-go/v2/registry/remote"
@@ -62,12 +63,12 @@ type ORASFile struct {
 	Target string
 }
 
-func (d *Downloader) FromORAS(ctx context.Context, destPath, name, version string, files []ORASFile) error {
+func (d *Downloader) FromORAS(ctx context.Context, destPath, name string, version meta.Version, files []ORASFile) error {
 	if len(files) == 0 {
 		return fmt.Errorf("no files to download") //nolint:goerr113
 	}
 
-	cacheName := name + "@" + version
+	cacheName := name + "@" + string(version)
 	cacheName = strings.ReplaceAll(cacheName, "/", "_")
 	cachePath := filepath.Join(d.cacheDir, cacheName)
 
@@ -118,7 +119,7 @@ func (d *Downloader) FromORAS(ctx context.Context, destPath, name, version strin
 			return nil
 		}
 
-		_, err = oras.Copy(ctx, repo, version, fs, version, oras.CopyOptions{
+		_, err = oras.Copy(ctx, repo, string(version), fs, string(version), oras.CopyOptions{
 			CopyGraphOptions: oras.CopyGraphOptions{
 				Concurrency: 4,
 				PreCopy: func(ctx context.Context, desc ocispec.Descriptor) error {
@@ -166,8 +167,13 @@ func (d *Downloader) FromORAS(ctx context.Context, destPath, name, version strin
 	}
 
 	for _, file := range files {
+		target := file.Target
+		if target == "" {
+			target = file.Name
+		}
+
 		src := filepath.Join(cachePath, file.Name)
-		dst := filepath.Join(destPath, file.Target)
+		dst := filepath.Join(destPath, target)
 
 		if err := copyFileDir(src, dst); err != nil {
 			return err
