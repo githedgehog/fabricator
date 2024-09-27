@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"dario.cat/mergo"
+	"github.com/charmbracelet/keygen"
 	fmeta "go.githedgehog.com/fabric/api/meta"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1alpha2"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
@@ -23,6 +24,7 @@ import (
 const (
 	VLABDir        = "vlab"
 	VLABConfigFile = "config.yaml"
+	VLABSSHKeyFile = "sshkey"
 	VLABVMsDir     = "vms"
 
 	VLABSwitchMACTmpl = "0c:20:12:ff:%02d:00"
@@ -52,13 +54,14 @@ const (
 )
 
 type VLAB struct {
+	SSHKey       string
 	VMs          []VM
 	Taps         int
 	Passthroughs []string
 }
 
 type VM struct {
-	ID         int
+	ID         uint
 	Name       string
 	Type       VMType
 	Restricted bool
@@ -67,8 +70,9 @@ type VM struct {
 }
 
 type VLABConfig struct {
-	Sizes VMSizes             `json:"sizes"`
-	VMs   map[string]VMConfig `json:"vms"`
+	SSHKey string              `json:"-"`
+	Sizes  VMSizes             `json:"sizes"`
+	VMs    map[string]VMConfig `json:"vms"`
 }
 
 type VMSizes struct {
@@ -210,6 +214,17 @@ func (c *Config) PrepareVLAB(ctx context.Context, opts VLABUpOpts) (*VLAB, error
 
 			// TODO some more validation
 		}
+	}
+
+	sshKeyPath := filepath.Join(vlabDir, VLABSSHKeyFile)
+	pub, prv, err := getOrCreateSSHKey(sshKeyPath)
+	if err != nil {
+		return nil, fmt.Errorf("getting or creating SSH key: %w", err)
+	}
+	vlabCfg.SSHKey = prv
+	c.Fab.Spec.Config.Control.DefaultUser.AuthorizedKeys = append(c.Fab.Spec.Config.Control.DefaultUser.AuthorizedKeys, pub)
+	for _, user := range c.Fab.Spec.Config.Fabric.DefaultSwitchUsers {
+		user.AuthorizedKeys = append(user.AuthorizedKeys, pub)
 	}
 
 	if !createCfg {
@@ -480,9 +495,9 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 		return cmp.Compare(a, b)
 	})
 
-	vmIDs := map[string]int{}
+	vmIDs := map[string]uint{}
 	for idx, name := range orderedVMNames {
-		vmIDs[name] = idx
+		vmIDs[name] = uint(idx) //nolint:gosec
 	}
 
 	vms := []VM{}
@@ -492,8 +507,8 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 	for _, name := range orderedVMNames {
 		vm := cfg.VMs[name]
 		vmID := vmIDs[name]
-		maxNICID := uint8(0)
-		nics := map[uint8]string{}
+		maxNICID := uint(0)
+		nics := map[uint]string{}
 
 		for nicName, nicConfig := range vm.NICs {
 			nicID, err := getNICID(nicName)
@@ -510,7 +525,7 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 		}
 
 		paddedNICs := make([]string, int(maxNICID)+1)
-		for idx := uint8(0); idx <= maxNICID; idx++ {
+		for idx := uint(0); idx <= maxNICID; idx++ {
 			if nic, ok := nics[idx]; ok {
 				paddedNICs[idx] = nic
 			} else {
@@ -535,7 +550,7 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 			netdev := ""
 			device := ""
 			if nicType == NICTypeNoop || nicType == NICTypeDirect {
-				port := getDirectNICPort(vmID, nicID)
+				port := getDirectNICPort(vmID, uint(nicID)) //nolint:gosec
 				netdev = fmt.Sprintf("socket,udp=127.0.0.1:%d", port)
 
 				if nicCfg != "" {
@@ -555,7 +570,7 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 						return nil, fmt.Errorf("getting NIC ID for %q: %w", nicCfg, err)
 					}
 
-					otherPort := getDirectNICPort(otherVMID, int(otherNICID))
+					otherPort := getDirectNICPort(otherVMID, otherNICID)
 					netdev += fmt.Sprintf(",localaddr=127.0.0.1:%d", otherPort)
 				}
 			} else if nicType == NICTypeUsernet {
@@ -563,7 +578,7 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 					return nil, fmt.Errorf("usernet NICs are not supported for switch VM %q", name) //nolint:goerr113
 				}
 
-				sshPort := VLABBaseSSHPort + vmID
+				sshPort := getSSHPort(vmID)
 				// TODO make subnet configurable
 				netdev = fmt.Sprintf("user,hostname=%s,hostfwd=tcp:0.0.0.0:%d-:22,net=172.31.%d.0/24,dhcpstart=172.31.%d.10", name, sshPort, vmID, vmID)
 				if vm.Type == VMTypeControl && controlID == 0 {
@@ -629,6 +644,7 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 	}
 
 	return &VLAB{
+		SSHKey:       cfg.SSHKey,
 		VMs:          vms,
 		Taps:         tapID,
 		Passthroughs: passthroughs,
@@ -676,7 +692,7 @@ const (
 	swEPrefix = "E1/"
 )
 
-func getNICID(nic string) (uint8, error) {
+func getNICID(nic string) (uint, error) {
 	if nic == swMPrefix {
 		return 0, nil
 	}
@@ -695,9 +711,22 @@ func getNICID(nic string) (uint8, error) {
 		return 0, fmt.Errorf("parsing NIC ID %q: %w", nic, err)
 	}
 
-	return uint8(v), nil
+	return uint(v), nil
 }
 
-func getDirectNICPort(vmID int, nicID int) int {
+func getDirectNICPort(vmID uint, nicID uint) uint {
 	return VLABBaseDirectPort + 100*vmID + nicID
+}
+
+func getSSHPort(vmID uint) uint {
+	return VLABBaseSSHPort + vmID
+}
+
+func getOrCreateSSHKey(path string) (string, string, error) {
+	kp, err := keygen.New(path, keygen.WithWrite(), keygen.WithKeyType(keygen.Ed25519))
+	if err != nil {
+		return "", "", fmt.Errorf("preparing key pair: %w", err)
+	}
+
+	return kp.AuthorizedKey(), string(kp.RawPrivateKey()), nil
 }
