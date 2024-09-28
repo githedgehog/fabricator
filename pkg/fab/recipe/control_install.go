@@ -2,14 +2,15 @@ package recipe
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
-	"github.com/davecgh/go-spew/spew"
 	"go.githedgehog.com/fabric/pkg/util/logutil"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab"
@@ -40,10 +41,31 @@ import (
 // install k9s with config and plugins
 
 const (
-	InstallLog = "/var/log/install.log"
+	InstallLog            = "/var/log/install.log"
+	HedgehogDir           = "/opt/hedgehog"
+	InstallMarkerFile     = HedgehogDir + "/.install"
+	InstallMarkerStarted  = "started"
+	InstallMarkerComplete = "complete"
 )
 
 func DoControlInstall(ctx context.Context, workDir string) error {
+	rawMarker, err := os.ReadFile(InstallMarkerFile)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("reading install marker: %w", err)
+	}
+	if err == nil {
+		marker := strings.TrimSpace(string(rawMarker))
+		if marker == InstallMarkerComplete {
+			slog.Info("Control node seems to be already installed", "marker", InstallMarkerFile)
+
+			return nil
+		}
+
+		slog.Info("Control node seems to be partially installed, cleanup and re-run", "marker", InstallMarkerFile, "status", marker)
+
+		return fmt.Errorf("partially installed: %s", marker) //nolint:goerr113
+	}
+
 	l := apiutil.NewFabLoader()
 	fabCfg, err := os.ReadFile(filepath.Join(workDir, FabName))
 	if err != nil {
@@ -73,6 +95,10 @@ func DoControlInstall(ctx context.Context, workDir string) error {
 		return fmt.Errorf("loading wiring config: %w", err)
 	}
 
+	if err := os.MkdirAll(HedgehogDir, 0o755); err != nil {
+		return fmt.Errorf("creating hedgehog dir %q: %w", HedgehogDir, err)
+	}
+
 	return (&ControlInstall{
 		WorkDir: workDir,
 		Fab:     f,
@@ -89,7 +115,9 @@ type ControlInstall struct {
 }
 
 func (c *ControlInstall) Run(ctx context.Context) error {
-	spew.Dump(c.WorkDir, c.Fab, c.Control)
+	if err := os.WriteFile(InstallMarkerFile, []byte(InstallMarkerStarted), 0o644); err != nil { //nolint:gosec
+		return fmt.Errorf("writing install marker: %w", err)
+	}
 
 	if err := c.copyFile(k3s.BinName, filepath.Join(k3s.BinDir, k3s.BinName), 0o755); err != nil {
 		return fmt.Errorf("copying k3s bin: %w", err)
@@ -118,6 +146,10 @@ func (c *ControlInstall) Run(ctx context.Context) error {
 
 	if err := c.k3sInstall(ctx); err != nil {
 		return fmt.Errorf("installing k3s: %w", err)
+	}
+
+	if err := os.WriteFile(InstallMarkerFile, []byte(InstallMarkerComplete), 0o644); err != nil { //nolint:gosec
+		return fmt.Errorf("writing install marker: %w", err)
 	}
 
 	return nil

@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/melbahja/goph"
+	"github.com/pkg/sftp"
 	"go.githedgehog.com/fabric/pkg/util/logutil"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/artificer"
@@ -286,7 +288,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 		}
 	}
 
-	slog.Info("Starting VMs", "total", len(vlab.VMs), "cpu", fmt.Sprintf("%d vCPUs", cpu), "ram", fmt.Sprintf("%d MB", ram), "disk", fmt.Sprintf("%d GB", disk))
+	slog.Info("Starting VMs", "count", len(vlab.VMs), "cpu", fmt.Sprintf("%d vCPUs", cpu), "ram", fmt.Sprintf("%d MB", ram), "disk", fmt.Sprintf("%d GB", disk))
 
 	// TODO if VM start fails, we need to fail all VMs and cleanup
 	group.Go(func() error {
@@ -480,50 +482,65 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 		}
 	} else if vm.Type == VMTypeControl {
 		if !opts.ControlUSB {
-			slog.Debug("Uploading control install", "vm", vm.Name, "type", vm.Type)
-
-			installArchive := vm.Name + recipe.InstallArchiveSuffix
-			local := filepath.Join(c.WorkDir, ResultDir, installArchive)
-			remote := filepath.Join(flatcar.Home, installArchive)
-			if err := client.Upload(local, remote); err != nil {
-				return fmt.Errorf("uploading control install: %w", err)
+			marker, err := sshReadMarker(sftp)
+			if err != nil && !errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("checking for install marker: %w", err)
 			}
+			if err == nil && marker != recipe.InstallMarkerComplete {
+				slog.Error("Control node install was already attempted but not completed", "vm", vm.Name, "type", vm.Type, "marker", marker)
 
-			if out, err := client.RunContext(ctx, fmt.Sprintf("bash -c 'tar xzf %s'", remote)); err != nil {
-				return fmt.Errorf("extracting control install: %w: %s", err, string(out))
+				return fmt.Errorf("not complete install marker: %q", marker) //nolint:goerr113
 			}
+			if err == nil && marker == recipe.InstallMarkerComplete {
+				slog.Debug("Control node install was already completed", "vm", vm.Name, "type", vm.Type)
+			} else {
+				slog.Debug("Uploading control install", "vm", vm.Name, "type", vm.Type)
 
-			// TODO run with just exec so we can see the output online
-			slog.Debug("Running control install", "vm", vm.Name, "type", vm.Type, "logPathInVM", recipe.InstallLog)
-			installCmd := fmt.Sprintf("bash -c 'cd %s && sudo ./%s control install'", vm.Name+recipe.InstallSuffix, recipe.RecipeBin)
-			if out, err := client.RunContext(ctx, installCmd); err != nil {
-				return fmt.Errorf("running control install: %w: %s", err, string(out))
-			}
-			slog.Debug("Control install completed", "vm", vm.Name, "type", vm.Type)
-		} else {
-			slog.Debug("Waiting for control node to be auto installed (via USB)", "vm", vm.Name, "type", vm.Type)
-		}
-
-		ticker := time.NewTicker(5 * time.Second)
-		defer ticker.Stop()
-
-		installed := false
-		for !installed {
-			select {
-			case <-ctx.Done():
-				return fmt.Errorf("context cancelled: %w", ctx.Err())
-			case <-ticker.C:
-				// TODO check for some magic file to appear
-				_, err := sftp.Open("/tmp/installed")
-				if err != nil {
-					if errors.Is(err, os.ErrNotExist) {
-						continue
-					}
-
-					return fmt.Errorf("checking for installed: %w", err)
+				installArchive := vm.Name + recipe.InstallArchiveSuffix
+				local := filepath.Join(c.WorkDir, ResultDir, installArchive)
+				remote := filepath.Join(flatcar.Home, installArchive)
+				if err := client.Upload(local, remote); err != nil {
+					return fmt.Errorf("uploading control install: %w", err)
 				}
 
-				installed = true
+				if out, err := client.RunContext(ctx, fmt.Sprintf("bash -c 'tar xzf %s'", remote)); err != nil {
+					return fmt.Errorf("extracting control install: %w: %s", err, string(out))
+				}
+
+				slog.Info("Running control install", "vm", vm.Name, "type", vm.Type)
+				installCmd := fmt.Sprintf("cd %s && sudo ./%s control install", vm.Name+recipe.InstallSuffix, recipe.RecipeBin)
+				if err := sshExec(ctx, vm, client, installCmd, "control-install", slog.Info); err != nil {
+					return fmt.Errorf("running control install: %w", err)
+				}
+				slog.Debug("Control install completed", "vm", vm.Name, "type", vm.Type)
+			}
+		} else {
+			slog.Debug("Waiting for control node to be auto installed (via USB)", "vm", vm.Name, "type", vm.Type)
+
+			ticker := time.NewTicker(5 * time.Second)
+			defer ticker.Stop()
+
+			installed := false
+			for !installed {
+				select {
+				case <-ctx.Done():
+					return fmt.Errorf("context cancelled: %w", ctx.Err())
+				case <-ticker.C:
+					marker, err := sshReadMarker(sftp)
+					if err != nil {
+						if errors.Is(err, os.ErrNotExist) {
+							continue
+						}
+
+						return err
+					}
+
+					if marker != recipe.InstallMarkerComplete {
+						return fmt.Errorf("not complete install marker: %q", marker) //nolint:goerr113
+					} else {
+						installed = true
+					}
+				}
 			}
 		}
 
@@ -537,4 +554,37 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 	slog.Debug("VM is ready", "vm", vm.Name, "type", vm.Type)
 
 	return nil
+}
+
+func sshExec(ctx context.Context, vm VM, client *goph.Client, exec, name string, log func(msg string, args ...any)) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	cmd, err := client.CommandContext(ctx, "bash", "-c", "'"+exec+"'")
+	if err != nil {
+		return fmt.Errorf("creating ssh command %q: %w", exec, err)
+	}
+
+	cmd.Stdout = logutil.NewSink(ctx, log, name+": ", "vm", vm.Name)
+	cmd.Stderr = logutil.NewSink(ctx, log, name+": ", "vm", vm.Name)
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("running ssh command %q: %w", exec, err)
+	}
+
+	return nil
+}
+
+func sshReadMarker(sftp *sftp.Client) (string, error) {
+	f, err := sftp.Open(recipe.InstallMarkerFile)
+	if err != nil {
+		return "", fmt.Errorf("checking for install marker: %w", err)
+	}
+
+	rawMarker, err := io.ReadAll(f)
+	if err != nil {
+		return "", fmt.Errorf("reading install marker: %w", err)
+	}
+
+	return strings.TrimSpace(string(rawMarker)), nil
 }
