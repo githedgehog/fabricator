@@ -493,8 +493,13 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 				return fmt.Errorf("extracting control install: %w: %s", err, string(out))
 			}
 
-			slog.Debug("Running control install", "vm", vm.Name, "type", vm.Type)
-			// TODO
+			// TODO run with just exec so we can see the output online
+			slog.Debug("Running control install", "vm", vm.Name, "type", vm.Type, "logPathInVM", recipe.InstallLog)
+			installCmd := fmt.Sprintf("bash -c 'cd %s && sudo ./%s control install'", vm.Name+recipe.InstallSuffix, recipe.RecipeBin)
+			if out, err := client.RunContext(ctx, installCmd); err != nil {
+				return fmt.Errorf("running control install: %w: %s", err, string(out))
+			}
+			slog.Debug("Control install completed", "vm", vm.Name, "type", vm.Type)
 		} else {
 			slog.Debug("Waiting for control node to be auto installed (via USB)", "vm", vm.Name, "type", vm.Type)
 		}
@@ -526,7 +531,7 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 			return fmt.Errorf("downloading kubeconfig: %w", err)
 		}
 
-		slog.Debug("Control node is ready", "vm", vm.Name, "type", vm.Type)
+		slog.Info("Control node is ready", "vm", vm.Name, "type", vm.Type)
 	}
 
 	slog.Debug("VM is ready", "vm", vm.Name, "type", vm.Type)
