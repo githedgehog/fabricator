@@ -17,9 +17,11 @@ limitations under the License.
 package v1beta1
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 
+	"dario.cat/mergo"
 	"github.com/go-playground/validator/v10"
 	fmeta "go.githedgehog.com/fabric/api/meta"
 	"go.githedgehog.com/fabricator/api/meta"
@@ -67,6 +69,7 @@ type ControlUser struct {
 }
 
 type RegistryConfig struct {
+	// TODO probably just get rid of this? there should be just a few secrets with predefined names
 	// TODO make sure it's not allowed to set at init time
 	AdminPasswordHash  string `json:"adminPassword,omitempty"`
 	WriterPasswordHash string `json:"userPassword,omitempty"`
@@ -87,9 +90,9 @@ type ControlConfigRegistryCache struct {
 }
 
 type FabricConfig struct {
-	ManagementDHCPStart meta.Addr `json:"managementDHCPStart,omitempty"` // TODO should be in mgmt subnet
-
 	Mode fmeta.FabricMode `json:"mode,omitempty"`
+
+	ManagementDHCPStart meta.Addr `json:"managementDHCPStart,omitempty"` // TODO should be in mgmt subnet
 
 	SpineASN     uint32 `json:"spineASN,omitempty"`
 	LeafASNStart uint32 `json:"leafASNStart,omitempty"`
@@ -223,10 +226,20 @@ func init() {
 	}, meta.Prefix(""))
 }
 
-func (f *Fabricator) Validate() error {
-	err := fabricatorValidate.Struct(f)
+func (f *Fabricator) Validate(ctx context.Context) error {
+	err := fabricatorValidate.StructCtx(ctx, f)
 	if err != nil {
 		return fmt.Errorf("validating: %w", err)
+	}
+
+	return nil
+}
+
+func (f *Fabricator) CalculateVersions(def Versions) error {
+	f.Status.Versions = *f.Spec.Overrides.Versions.DeepCopy()
+
+	if err := mergo.Merge(&f.Status.Versions, def); err != nil {
+		return fmt.Errorf("merging versions: %w", err)
 	}
 
 	return nil
