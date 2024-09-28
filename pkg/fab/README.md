@@ -24,7 +24,7 @@ oras push "ghcr.io/githedgehog/fabricator/flatcar-vlab:${FLATCAR_VERSION}" flatc
 ## K3s
 
 ```bash
-export K3S_VERSION="v1.31.0-k3s1"
+export K3S_VERSION="v1.31.1-k3s1"
 export K3S_VERSION_UPSTREAM="${K3S_VERSION//-/+}"
 
 wget "https://github.com/k3s-io/k3s/releases/download/${K3S_VERSION_UPSTREAM}/k3s"
@@ -92,6 +92,17 @@ docker save -o cert-manager-airgap-images-amd64.tar.gz ghcr.io/githedgehog/fabri
 
 cp cert-manager-${CERT_MANAGER_VERSION}.tgz cert-manager-chart.tgz
 oras push "ghcr.io/githedgehog/fabricator/cert-manager-airgap:${CERT_MANAGER_VERSION}" cert-manager-airgap-images-amd64.tar.gz cert-manager-chart.tgz
+```
+
+## K9s
+
+```bash
+export K9S_VERSION="v0.32.5"
+
+wget "https://github.com/derailed/k9s/releases/download/${K9S_VERSION}/k9s_Linux_amd64.tar.gz"
+tar -xzvf k9s_Linux_amd64.tar.gz
+
+oras push "ghcr.io/githedgehog/fabricator/k9s:${K9S_VERSION}" k9s
 ```
 
 ## ONIE
