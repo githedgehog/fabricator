@@ -457,6 +457,7 @@ func Run(ctx context.Context) error {
 									KillStale:          c.Bool(FlagNameKillStale),
 									ControlsRestricted: false, // TODO flag
 									ServersRestricted:  true,  // TODO flag
+									ControlUSB:         false, // TODO flag
 								},
 							}); err != nil {
 								return fmt.Errorf("running VLAB: %w", err)

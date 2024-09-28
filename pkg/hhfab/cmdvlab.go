@@ -34,7 +34,7 @@ func VLABGenerate(ctx context.Context, workDir, cacheDir string, builder VLABBui
 	defer wiringFile.Close()
 
 	if err := apiutil.PrintWiring(ctx, wL.GetClient(), wiringFile); err != nil {
-		return err
+		return fmt.Errorf("writing wiring file: %w", err)
 	}
 
 	slog.Info("Generated wiring file", "name", target)
