@@ -179,7 +179,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 	}
 
 	group := &errgroup.Group{}
-	installers := &sync.WaitGroup{}
+	postProcesses := &sync.WaitGroup{}
 
 	for _, vm := range vlab.VMs {
 		vmDir := filepath.Join(c.WorkDir, VLABDir, VLABVMsDir, vm.Name)
@@ -240,17 +240,17 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 			return nil
 		})
 
-		if vm.Type == VMTypeServer {
-			installers.Add(1)
+		if vm.Type == VMTypeServer || vm.Type == VMTypeControl {
+			postProcesses.Add(1)
 			group.Go(func() error {
-				if err := c.serverInstall(ctx, vlab, d, vm); err != nil {
-					slog.Error("Failed to install VM", "vm", vm.Name, "err", err)
-
+				if err := c.vmPostProcess(ctx, vlab, d, vm); err != nil {
 					// TODO some flag to control "fail-on-install" behavior
+
+					return fmt.Errorf("post-processing vm %s: %w", vm.Name, err)
 				}
 
 				// no defer here, as we want to wait for all installers completion without errors
-				installers.Done()
+				postProcesses.Done()
 
 				return nil
 			})
@@ -260,9 +260,9 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 	slog.Info("Starting VMs", "total", len(vlab.VMs), "cpu", fmt.Sprintf("%d vCPUs", cpu), "ram", fmt.Sprintf("%d MB", ram), "disk", fmt.Sprintf("%d GB", disk))
 
 	group.Go(func() error {
-		installers.Wait()
+		postProcesses.Wait()
 
-		slog.Info("All VM installers completed")
+		slog.Info("All VM post-processing completed")
 
 		return nil
 	})
@@ -346,9 +346,9 @@ func serverIgnition(fab fabapi.Fabricator, vm VM) ([]byte, error) {
 	return ign, nil
 }
 
-func (c *Config) serverInstall(ctx context.Context, vlab *VLAB, d *artificer.Downloader, vm VM) error {
-	if vm.Type != VMTypeServer {
-		return fmt.Errorf("wrong VM type %q", vm.Type) //nolint:goerr113
+func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Downloader, vm VM) error {
+	if vm.Type != VMTypeServer && vm.Type != VMTypeControl {
+		return nil
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
@@ -390,42 +390,44 @@ func (c *Config) serverInstall(ctx context.Context, vlab *VLAB, d *artificer.Dow
 			return fmt.Errorf("hostname mismatch: got %q, want %q", hostname, vm.Name) //nolint:goerr113
 		}
 
-		sftp, err := client.NewSftp()
-		if err != nil {
-			return fmt.Errorf("creating sftp: %w", err)
-		}
-		defer sftp.Close()
+		if vm.Type == VMTypeServer {
+			sftp, err := client.NewSftp()
+			if err != nil {
+				return fmt.Errorf("creating sftp: %w", err)
+			}
+			defer sftp.Close()
 
-		f, err := sftp.Create("/tmp/hhnet")
-		if err != nil {
-			return fmt.Errorf("creating hhnet: %w", err)
-		}
-		defer f.Close()
+			f, err := sftp.Create("/tmp/hhnet")
+			if err != nil {
+				return fmt.Errorf("creating hhnet: %w", err)
+			}
+			defer f.Close()
 
-		if _, err := f.Write(hhnet); err != nil {
-			return fmt.Errorf("writing hhnet: %w", err)
-		}
-
-		if _, err := client.RunContext(ctx, "bash -c 'sudo mv /tmp/hhnet /opt/bin/hhnet && chmod +x /opt/bin/hhnet'"); err != nil {
-			return fmt.Errorf("installing hhnet: %w", err)
-		}
-
-		// TODO const
-		if err := d.WithORAS(ctx, "fabricator/toolbox", c.Fab.Status.Versions.Platform.Toolbox, func(cachePath string) error {
-			if err := client.Upload(filepath.Join(cachePath, "toolbox.tar"), "/tmp/toolbox"); err != nil {
-				return fmt.Errorf("uploading: %w", err)
+			if _, err := f.Write(hhnet); err != nil {
+				return fmt.Errorf("writing hhnet: %w", err)
 			}
 
-			return nil
-		}); err != nil {
-			return fmt.Errorf("uploading toolbox: %w", err)
+			if _, err := client.RunContext(ctx, "bash -c 'sudo mv /tmp/hhnet /opt/bin/hhnet && chmod +x /opt/bin/hhnet'"); err != nil {
+				return fmt.Errorf("installing hhnet: %w", err)
+			}
+
+			// TODO const
+			if err := d.WithORAS(ctx, "fabricator/toolbox", c.Fab.Status.Versions.Platform.Toolbox, func(cachePath string) error {
+				if err := client.Upload(filepath.Join(cachePath, "toolbox.tar"), "/tmp/toolbox"); err != nil {
+					return fmt.Errorf("uploading: %w", err)
+				}
+
+				return nil
+			}); err != nil {
+				return fmt.Errorf("uploading toolbox: %w", err)
+			}
+
+			if _, err := client.RunContext(ctx, "bash -c 'sudo ctr image import /tmp/toolbox'"); err != nil {
+				return fmt.Errorf("installing toolbox: %w", err)
+			}
 		}
 
-		if _, err := client.RunContext(ctx, "bash -c 'sudo ctr image import /tmp/toolbox'"); err != nil {
-			return fmt.Errorf("installing toolbox: %w", err)
-		}
-
-		slog.Debug("VM installed", "vm", vm.Name, "type", vm.Type)
+		slog.Debug("VM is ready", "vm", vm.Name, "type", vm.Type)
 
 		break
 	}
