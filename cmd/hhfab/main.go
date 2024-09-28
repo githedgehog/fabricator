@@ -455,7 +455,7 @@ func Run(ctx context.Context) error {
 								Recreate:    false, // TODO flag
 								VLABRunOpts: hhfab.VLABRunOpts{
 									KillStale:          c.Bool(FlagNameKillStale),
-									ControlsRestricted: false, // TODO flag
+									ControlsRestricted: true,  // TODO flag
 									ServersRestricted:  true,  // TODO flag
 									ControlUSB:         false, // TODO flag
 								},

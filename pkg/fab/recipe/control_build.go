@@ -13,6 +13,7 @@ import (
 
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/artificer"
+	"go.githedgehog.com/fabricator/pkg/embed/recipebin"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/certmanager"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/zot"
@@ -41,6 +42,7 @@ const (
 	InstallArchiveSuffix  = InstallSuffix + ".tgz"
 	InstallIgnitionSuffix = InstallSuffix + ".ign"
 	InstallHashSuffix     = InstallSuffix + ".inhash"
+	RecipeBin             = "hhfab-recipe"
 )
 
 func (b *ControlInstallBuilder) Build(ctx context.Context) error {
@@ -80,12 +82,17 @@ func (b *ControlInstallBuilder) Build(ctx context.Context) error {
 		return fmt.Errorf("creating install dir: %w", err)
 	}
 
+	if err := os.WriteFile(filepath.Join(installDir, RecipeBin), recipebin.Bytes(), 0o700); err != nil { //nolint:gosec
+		return fmt.Errorf("writing recipe bin: %w", err)
+	}
+
 	if err := b.Downloader.FromORAS(ctx, installDir, k3s.Ref, v.Platform.K3s, []artificer.ORASFile{
 		{
 			Name: k3s.BinName,
 		},
 		{
 			Name: k3s.InstallName,
+			Mode: 0o700,
 		},
 		{
 			Name: k3s.AirgapName,

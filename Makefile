@@ -198,3 +198,13 @@ mv $(1) $(1)-$(3) ;\
 } ;\
 ln -sf $(1)-$(3) $(1)
 endef
+
+##@ Fabricator-specific
+
+.PHONY: embed
+embed: ## Prepare the assets for embedding into the hhfab binary
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build --tags containers_image_openpgp -o ./pkg/embed/recipebin/hhfab-recipe ./cmd/hhfab-recipe
+
+.PHONY: hhfab
+hhfab: embed ## Build the hhfab binary
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build --tags containers_image_openpgp -o ./bin/hhfab ./cmd/hhfab
