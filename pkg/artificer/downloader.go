@@ -62,6 +62,7 @@ func NewDownloaderWithDockerCreds(cacheDir, repo, prefix string) (*Downloader, e
 type ORASFile struct {
 	Name   string
 	Target string
+	Mode   os.FileMode
 }
 
 func (d *Downloader) FromORAS(ctx context.Context, destPath, name string, version meta.Version, files []ORASFile) error {
@@ -80,6 +81,12 @@ func (d *Downloader) FromORAS(ctx context.Context, destPath, name string, versio
 			dst := filepath.Join(destPath, target)
 			if err := copyFileDir(src, dst); err != nil {
 				return err
+			}
+
+			if file.Mode != 0 {
+				if err := os.Chmod(dst, file.Mode); err != nil {
+					return fmt.Errorf("chmod %q: %w", dst, err)
+				}
 			}
 		}
 
