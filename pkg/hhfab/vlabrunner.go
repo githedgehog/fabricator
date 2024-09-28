@@ -18,6 +18,9 @@ import (
 	"go.githedgehog.com/fabric/pkg/util/logutil"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/artificer"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/flatcar"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
+	vlabcomp "go.githedgehog.com/fabricator/pkg/fab/comp/vlab"
 	"go.githedgehog.com/fabricator/pkg/fab/recipe"
 	"go.githedgehog.com/fabricator/pkg/util/butaneutil"
 	"go.githedgehog.com/fabricator/pkg/util/tmplutil"
@@ -32,9 +35,10 @@ var serverButaneTmpl string
 var hhnet []byte
 
 const (
-	VLABOSImageFile = "os.img"
-	VLABEFICodeFile = "efi_code.fd"
-	VLABEFIVarsFile = "efi_vars.fd"
+	VLABOSImageFile  = "os.img"
+	VLABEFICodeFile  = "efi_code.fd"
+	VLABEFIVarsFile  = "efi_vars.fd"
+	VLABUSBImageFile = "usb.img"
 
 	VLABSerialLog  = "serial.log"
 	VLABSerialSock = "serial.sock"
@@ -46,6 +50,8 @@ const (
 	VLABCmdQemuSystem = "qemu-system-x86_64"
 
 	VLABIgnition = "ignition.json"
+
+	VLABKubeConfig = "kubeconfig"
 )
 
 var VLABCmds = []string{VLABCmdSudo, VLABCmdQemuImg, VLABCmdQemuSystem}
@@ -54,6 +60,7 @@ type VLABRunOpts struct {
 	KillStale          bool
 	ControlsRestricted bool
 	ServersRestricted  bool
+	ControlUSB         bool
 }
 
 func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) error {
@@ -121,8 +128,11 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 				return fmt.Errorf("creating VM dir %q: %w", vmDir, err)
 			}
 
-			if vm.Type == VMTypeControl || vm.Type == VMTypeServer {
-				if err := d.FromORAS(ctx, vmDir, "fabricator/flatcar-vlab", "v3975.2.1", []artificer.ORASFile{
+			resize := false
+			if vm.Type == VMTypeControl && !opts.ControlUSB || vm.Type == VMTypeServer {
+				resize = true
+
+				if err := d.FromORAS(ctx, vmDir, vlabcomp.FlatcarRef, vlabcomp.FlatcarVersion(c.Fab), []artificer.ORASFile{
 					{
 						Name:   "flatcar.img",
 						Target: VLABOSImageFile,
@@ -138,8 +148,16 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 				}); err != nil {
 					return fmt.Errorf("copying flatcar files: %w", err)
 				}
+			} else if vm.Type == VMTypeControl && opts.ControlUSB {
+				if err := execCmd(ctx, false, vmDir,
+					VLABCmdQemuImg, []string{"create", "-f", "qcow2", VLABOSImageFile, fmt.Sprintf("%dG", vm.Size.Disk)},
+					"vm", vm.Name); err != nil {
+					return fmt.Errorf("creating empty os image: %w", err)
+				}
 			} else if vm.Type == VMTypeSwitch {
-				if err := d.FromORAS(ctx, vmDir, "fabricator/onie-vlab", "test3", []artificer.ORASFile{
+				resize = true
+
+				if err := d.FromORAS(ctx, vmDir, vlabcomp.ONIERef, vlabcomp.ONIEVersion(c.Fab), []artificer.ORASFile{
 					{
 						Name:   "onie-kvm_x86_64.qcow2",
 						Target: VLABOSImageFile,
@@ -159,10 +177,12 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 				return fmt.Errorf("unsupported VM type %q", vm.Type) //nolint:goerr113
 			}
 
-			if err := execCmd(ctx, false, vmDir,
-				VLABCmdQemuImg, []string{"resize", VLABOSImageFile, fmt.Sprintf("%dG", vm.Size.Disk)},
-				"vm", vm.Name); err != nil {
-				return fmt.Errorf("resizing os image: %w", err)
+			if resize {
+				if err := execCmd(ctx, false, vmDir,
+					VLABCmdQemuImg, []string{"resize", VLABOSImageFile, fmt.Sprintf("%dG", vm.Size.Disk)},
+					"vm", vm.Name); err != nil {
+					return fmt.Errorf("resizing os image: %w", err)
+				}
 			}
 
 			if vm.Type == VMTypeServer {
@@ -210,13 +230,19 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 			// -daemonize
 			// -pidfile
 
-			if vm.Type == VMTypeControl || vm.Type == VMTypeServer {
+			if vm.Type == VMTypeControl && !opts.ControlUSB || vm.Type == VMTypeServer {
 				ign := VLABIgnition
 				if vm.Type == VMTypeControl {
 					ign = filepath.Join(c.WorkDir, ResultDir, vm.Name+recipe.InstallIgnitionSuffix)
 				}
 				args = append(args,
 					"-fw_cfg", "name=opt/org.flatcar-linux/config,file="+ign,
+				)
+			}
+
+			if vm.Type == VMTypeControl && opts.ControlUSB {
+				args = append(args,
+					"-drive", fmt.Sprintf("if=virtio,file=%s,format=raw,index=1", VLABUSBImageFile),
 				)
 			}
 
@@ -234,6 +260,8 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 			slog.Debug("Starting", "vm", vm.Name, "type", vm.Type, "cmd", VLABCmdQemuSystem+" "+strings.Join(args, " "))
 
 			if err := execCmd(ctx, true, vmDir, VLABCmdQemuSystem, args, "vm", vm.Name); err != nil {
+				slog.Error("Failed to start VM", "vm", vm.Name, "type", vm.Type, "err", err)
+
 				return fmt.Errorf("running vm: %w", err)
 			}
 
@@ -243,7 +271,8 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 		if vm.Type == VMTypeServer || vm.Type == VMTypeControl {
 			postProcesses.Add(1)
 			group.Go(func() error {
-				if err := c.vmPostProcess(ctx, vlab, d, vm); err != nil {
+				if err := c.vmPostProcess(ctx, vlab, d, vm, opts); err != nil {
+					slog.Error("Failed to post-process VM", "vm", vm.Name, "type", vm.Type, "err", err)
 					// TODO some flag to control "fail-on-install" behavior
 
 					return fmt.Errorf("post-processing vm %s: %w", vm.Name, err)
@@ -259,10 +288,11 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 
 	slog.Info("Starting VMs", "total", len(vlab.VMs), "cpu", fmt.Sprintf("%d vCPUs", cpu), "ram", fmt.Sprintf("%d MB", ram), "disk", fmt.Sprintf("%d GB", disk))
 
+	// TODO if VM start fails, we need to fail all VMs and cleanup
 	group.Go(func() error {
 		postProcesses.Wait()
 
-		slog.Info("All VM post-processing completed")
+		slog.Info("All VMs are ready")
 
 		return nil
 	})
@@ -346,12 +376,15 @@ func serverIgnition(fab fabapi.Fabricator, vm VM) ([]byte, error) {
 	return ign, nil
 }
 
-func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Downloader, vm VM) error {
+func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Downloader, vm VM, opts VLABRunOpts) error {
 	if vm.Type != VMTypeServer && vm.Type != VMTypeControl {
 		return nil
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	slog.Debug("Waiting for VM to be ready", "vm", vm.Name, "type", vm.Type)
+
+	// TODO more granular timeouts?
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
 
 	auth, err := goph.RawKey(vlab.SSHKey, "")
@@ -359,78 +392,144 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 		return fmt.Errorf("getting ssh auth: %w", err)
 	}
 
-	// TODO add timeout, make retries on failed commands
-	for {
-		time.Sleep(5 * time.Second)
+	slog.Debug("Waiting for ssh", "vm", vm.Name, "type", vm.Type)
 
-		client, err := goph.NewConn(&goph.Config{
-			User:     "core",
-			Addr:     "127.0.0.1",
-			Port:     getSSHPort(vm.ID),
-			Auth:     auth,
-			Timeout:  30 * time.Second,
-			Callback: ssh.InsecureIgnoreHostKey(), //nolint:gosec
-		})
-		if err != nil {
-			if errors.Is(err, syscall.ECONNREFUSED) {
-				continue
-			}
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
 
-			return fmt.Errorf("connecting: %w", err)
-		}
-		defer client.Close()
-
-		out, err := client.RunContext(ctx, "hostname")
-		if err != nil {
-			return fmt.Errorf("checking hostname: %w", err)
-		}
-
-		hostname := strings.TrimSpace(string(out))
-		if hostname != vm.Name {
-			return fmt.Errorf("hostname mismatch: got %q, want %q", hostname, vm.Name) //nolint:goerr113
-		}
-
-		if vm.Type == VMTypeServer {
-			sftp, err := client.NewSftp()
+	var client *goph.Client
+	for client == nil {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("context cancelled: %w", ctx.Err())
+		case <-ticker.C:
+			client, err = goph.NewConn(&goph.Config{
+				User:     "core",
+				Addr:     "127.0.0.1",
+				Port:     getSSHPort(vm.ID),
+				Auth:     auth,
+				Timeout:  10 * time.Second,
+				Callback: ssh.InsecureIgnoreHostKey(), //nolint:gosec
+			})
 			if err != nil {
-				return fmt.Errorf("creating sftp: %w", err)
-			}
-			defer sftp.Close()
-
-			f, err := sftp.Create("/tmp/hhnet")
-			if err != nil {
-				return fmt.Errorf("creating hhnet: %w", err)
-			}
-			defer f.Close()
-
-			if _, err := f.Write(hhnet); err != nil {
-				return fmt.Errorf("writing hhnet: %w", err)
-			}
-
-			if _, err := client.RunContext(ctx, "bash -c 'sudo mv /tmp/hhnet /opt/bin/hhnet && chmod +x /opt/bin/hhnet'"); err != nil {
-				return fmt.Errorf("installing hhnet: %w", err)
-			}
-
-			// TODO const
-			if err := d.WithORAS(ctx, "fabricator/toolbox", c.Fab.Status.Versions.Platform.Toolbox, func(cachePath string) error {
-				if err := client.Upload(filepath.Join(cachePath, "toolbox.tar"), "/tmp/toolbox"); err != nil {
-					return fmt.Errorf("uploading: %w", err)
+				if errors.Is(err, syscall.ECONNREFUSED) {
+					continue
 				}
 
-				return nil
-			}); err != nil {
-				return fmt.Errorf("uploading toolbox: %w", err)
+				return fmt.Errorf("connecting: %w", err)
+			}
+			defer client.Close()
+		}
+	}
+
+	out, err := client.RunContext(ctx, "hostname")
+	if err != nil {
+		return fmt.Errorf("checking hostname: %w", err)
+	}
+
+	hostname := strings.TrimSpace(string(out))
+	if hostname != vm.Name {
+		return fmt.Errorf("hostname mismatch: got %q, want %q", hostname, vm.Name) //nolint:goerr113
+	}
+
+	sftp, err := client.NewSftp()
+	if err != nil {
+		return fmt.Errorf("creating sftp: %w", err)
+	}
+	defer sftp.Close()
+
+	slog.Debug("SSH is ready", "vm", vm.Name, "type", vm.Type)
+
+	if vm.Type == VMTypeServer {
+		slog.Debug("Installing helpers", "vm", vm.Name, "type", vm.Type)
+
+		f, err := sftp.Create("/tmp/hhnet")
+		if err != nil {
+			return fmt.Errorf("creating hhnet: %w", err)
+		}
+		defer f.Close()
+
+		if _, err := f.Write(hhnet); err != nil {
+			return fmt.Errorf("writing hhnet: %w", err)
+		}
+
+		if _, err := client.RunContext(ctx, "bash -c 'sudo mv /tmp/hhnet /opt/bin/hhnet && chmod +x /opt/bin/hhnet'"); err != nil {
+			return fmt.Errorf("installing hhnet: %w", err)
+		}
+
+		if err := d.WithORAS(ctx, flatcar.ToolboxRef, flatcar.ToolboxVersion(c.Fab), func(cachePath string) error {
+			if err := client.Upload(filepath.Join(cachePath, "toolbox.tar"), "/tmp/toolbox"); err != nil {
+				return fmt.Errorf("uploading: %w", err)
 			}
 
-			if _, err := client.RunContext(ctx, "bash -c 'sudo ctr image import /tmp/toolbox'"); err != nil {
-				return fmt.Errorf("installing toolbox: %w", err)
+			return nil
+		}); err != nil {
+			return fmt.Errorf("uploading toolbox image: %w", err)
+		}
+
+		if _, err := client.RunContext(ctx, "bash -c 'sudo ctr image import /tmp/toolbox'"); err != nil {
+			return fmt.Errorf("installing toolbox: %w", err)
+		}
+
+		if err := sftp.Remove("/tmp/toolbox"); err != nil {
+			return fmt.Errorf("removing toolbox image: %w", err)
+		}
+
+		if _, err := client.RunContext(ctx, "bash -c 'toolbox hostname'"); err != nil {
+			return fmt.Errorf("trying toolbox: %w", err)
+		}
+	} else if vm.Type == VMTypeControl {
+		if !opts.ControlUSB {
+			slog.Debug("Uploading control install", "vm", vm.Name, "type", vm.Type)
+
+			installArchive := vm.Name + recipe.InstallArchiveSuffix
+			local := filepath.Join(c.WorkDir, ResultDir, installArchive)
+			remote := filepath.Join(flatcar.Home, installArchive)
+			if err := client.Upload(local, remote); err != nil {
+				return fmt.Errorf("uploading control install: %w", err)
+			}
+
+			if out, err := client.RunContext(ctx, fmt.Sprintf("bash -c 'tar xzf %s'", remote)); err != nil {
+				return fmt.Errorf("extracting control install: %w: %s", err, string(out))
+			}
+
+			slog.Debug("Running control install", "vm", vm.Name, "type", vm.Type)
+			// TODO
+		} else {
+			slog.Debug("Waiting for control node to be auto installed (via USB)", "vm", vm.Name, "type", vm.Type)
+		}
+
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+
+		installed := false
+		for !installed {
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("context cancelled: %w", ctx.Err())
+			case <-ticker.C:
+				// TODO check for some magic file to appear
+				_, err := sftp.Open("/tmp/installed")
+				if err != nil {
+					if errors.Is(err, os.ErrNotExist) {
+						continue
+					}
+
+					return fmt.Errorf("checking for installed: %w", err)
+				}
+
+				installed = true
 			}
 		}
 
-		slog.Debug("VM is ready", "vm", vm.Name, "type", vm.Type)
+		if err := client.Download(k3s.KubeConfigPath, filepath.Join(c.WorkDir, VLABDir, VLABKubeConfig)); err != nil {
+			return fmt.Errorf("downloading kubeconfig: %w", err)
+		}
 
-		break
+		slog.Debug("Control node is ready", "vm", vm.Name, "type", vm.Type)
 	}
+
+	slog.Debug("VM is ready", "vm", vm.Name, "type", vm.Type)
 
 	return nil
 }
