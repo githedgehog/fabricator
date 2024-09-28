@@ -1,0 +1,13 @@
+node-name: "{{ .Name }}"
+node-ip: "{{ .NodeIP }}"
+flannel-iface: "{{ .FlannelIface }}"
+cluster-cidr: "{{ .ClusterSubnet }}"
+service-cidr: "{{ .ServiceSubnet }}"
+cluster-dns: "{{ .ClusterDNS }}"
+write-kubeconfig-mode: "0644"
+tls-san:
+  {{ range .TLSSAN }}
+  - "{{ . }}"
+  {{ end }}
+secrets-encryption: true
+cluster-init: true
