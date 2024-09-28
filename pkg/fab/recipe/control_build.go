@@ -46,8 +46,6 @@ const (
 )
 
 func (b *ControlInstallBuilder) Build(ctx context.Context) error {
-	v := b.Fab.Status.Versions
-
 	installDir := filepath.Join(b.WorkDir, b.Control.Name+InstallSuffix)
 	installArchive := filepath.Join(b.WorkDir, b.Control.Name+InstallArchiveSuffix)
 	installIgnition := filepath.Join(b.WorkDir, b.Control.Name+InstallIgnitionSuffix)
@@ -86,7 +84,7 @@ func (b *ControlInstallBuilder) Build(ctx context.Context) error {
 		return fmt.Errorf("writing recipe bin: %w", err)
 	}
 
-	if err := b.Downloader.FromORAS(ctx, installDir, k3s.Ref, v.Platform.K3s, []artificer.ORASFile{
+	if err := b.Downloader.FromORAS(ctx, installDir, k3s.Ref, k3s.Version(b.Fab), []artificer.ORASFile{
 		{
 			Name: k3s.BinName,
 		},
@@ -101,7 +99,7 @@ func (b *ControlInstallBuilder) Build(ctx context.Context) error {
 		return fmt.Errorf("downloading k3s: %w", err)
 	}
 
-	if err := b.Downloader.FromORAS(ctx, installDir, zot.AirgapRef, v.Platform.Zot, []artificer.ORASFile{
+	if err := b.Downloader.FromORAS(ctx, installDir, zot.AirgapRef, zot.Version(b.Fab), []artificer.ORASFile{
 		{
 			Name: zot.AirgapImageName,
 		},
@@ -112,7 +110,7 @@ func (b *ControlInstallBuilder) Build(ctx context.Context) error {
 		return fmt.Errorf("downloading zot: %w", err)
 	}
 
-	if err := b.Downloader.FromORAS(ctx, installDir, certmanager.AirgapRef, v.Platform.CertManager, []artificer.ORASFile{
+	if err := b.Downloader.FromORAS(ctx, installDir, certmanager.AirgapRef, certmanager.Version(b.Fab), []artificer.ORASFile{
 		{
 			Name: certmanager.AirgapImageName,
 		},
