@@ -6,40 +6,50 @@ import (
 	"time"
 
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
+	"go.githedgehog.com/fabricator/api/meta"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
+	"go.githedgehog.com/fabricator/pkg/util/tmplutil"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
-	ChartName                = "fabricator/charts/cert-manager"
-	ControllerImageName      = "fabricator/cert-manager"
-	WebhookImageName         = "fabricator/cert-manager-webhook"
-	CAInjectorImageName      = "fabricator/cert-manager-cainjector"
-	ACMESolverImageName      = "fabricator/cert-manager-acmesolver"
-	StartupAPICheckImageName = "fabricator/cert-manager-startupapicheck"
+	ChartRef                = "fabricator/charts/cert-manager"
+	ControllerImageRef      = "fabricator/cert-manager"
+	WebhookImageRef         = "fabricator/cert-manager-webhook"
+	CAInjectorImageRef      = "fabricator/cert-manager-cainjector"
+	ACMESolverImageRef      = "fabricator/cert-manager-acmesolver"
+	StartupAPICheckImageRef = "fabricator/cert-manager-startupapicheck"
+	AirgapRef               = "fabricator/cert-manager-airgap"
+	AirgapImageName         = "cert-manager-airgap-images-amd64.tar.gz"
+	AirgapChartName         = "cert-manager-chart.tgz"
 )
+
+func Version(f fabapi.Fabricator) meta.Version {
+	return f.Status.Versions.Platform.CertManager
+}
 
 //go:embed values.tmpl.yaml
 var valuesTmpl string
 
 var (
-	_ comp.KubeInstall = Install
-	_ comp.KubeInstall = InstallFabCA
+	_ comp.KubeInstall   = Install
+	_ comp.KubeInstall   = InstallFabCA
+	_ comp.ListArtifacts = Artifacts
 )
 
 func Install(cfg fabapi.Fabricator) ([]client.Object, error) {
 	version := string(cfg.Status.Versions.Platform.CertManager)
 
-	values, err := comp.FromTemplate("values", valuesTmpl, map[string]any{
-		"ControllerRepo":      comp.ImageURL(cfg, ControllerImageName),
+	values, err := tmplutil.FromTemplate("values", valuesTmpl, map[string]any{
+		"ControllerRepo":      comp.ImageURL(cfg, ControllerImageRef),
 		"ControllerTag":       version,
-		"WebhookRepo":         comp.ImageURL(cfg, WebhookImageName),
+		"WebhookRepo":         comp.ImageURL(cfg, WebhookImageRef),
 		"WebhookTag":          version,
-		"CAInjectorRepo":      comp.ImageURL(cfg, CAInjectorImageName),
+		"CAInjectorRepo":      comp.ImageURL(cfg, CAInjectorImageRef),
 		"CAInjectorTag":       version,
-		"ACMESolverRepo":      comp.ImageURL(cfg, ACMESolverImageName),
+		"ACMESolverRepo":      comp.ImageURL(cfg, ACMESolverImageRef),
 		"ACMESolverTag":       version,
-		"StartupAPICheckRepo": comp.ImageURL(cfg, StartupAPICheckImageName),
+		"StartupAPICheckRepo": comp.ImageURL(cfg, StartupAPICheckImageRef),
 		"StartupAPICheckTag":  version,
 	})
 	if err != nil {
@@ -47,7 +57,7 @@ func Install(cfg fabapi.Fabricator) ([]client.Object, error) {
 	}
 
 	return []client.Object{
-		comp.HelmChart(cfg, "cert-manager", ChartName, version, false, values),
+		comp.HelmChart(cfg, "cert-manager", ChartRef, version, false, values),
 	}, nil
 }
 
@@ -79,5 +89,26 @@ func InstallFabCA(_ fabapi.Fabricator) ([]client.Object, error) {
 				},
 			},
 		}),
+	}, nil
+}
+
+func Artifacts(cfg fabapi.Fabricator) (comp.Artifacts, error) {
+	version := string(cfg.Status.Versions.Platform.CertManager)
+
+	return comp.Artifacts{
+		AirgapOCISync: []string{
+			ChartRef + ":" + version,
+			ControllerImageRef + ":" + version,
+			WebhookImageRef + ":" + version,
+			CAInjectorImageRef + ":" + version,
+			ACMESolverImageRef + ":" + version,
+			StartupAPICheckImageRef + ":" + version,
+		},
+		BootstrapImages: []string{
+			"fabricator/cert-manager-airgap:" + version,
+		},
+		BootstrapCharts: []string{
+			"fabricator/cert-manager-chart:" + version,
+		},
 	}, nil
 }
