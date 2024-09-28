@@ -17,6 +17,8 @@ limitations under the License.
 package v1beta1
 
 import (
+	"context"
+
 	"go.githedgehog.com/fabricator/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -41,6 +43,8 @@ type ControlNodeManagement struct {
 
 type ControlNodeExternal struct {
 	IP        meta.AddrOrDHCP `json:"ip,omitempty"`
+	Gateway   meta.Addr       `json:"gateway,omitempty"`
+	DNS       []meta.Addr     `json:"dns,omitempty"`
 	Interface string          `json:"interface,omitempty"`
 	// TODO support bond
 }
@@ -71,7 +75,7 @@ func init() {
 	SchemeBuilder.Register(&ControlNode{}, &ControlNodeList{})
 }
 
-func (c *ControlNode) Validate(fabCfg *FabConfig) error {
+func (c *ControlNode) Validate(ctx context.Context, fabCfg *FabConfig, allowNotHydrated bool) error {
 	if fabCfg == nil {
 		return nil
 	}

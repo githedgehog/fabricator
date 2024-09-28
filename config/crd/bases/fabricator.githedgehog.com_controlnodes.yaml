@@ -44,6 +44,12 @@ spec:
                 type: object
               external:
                 properties:
+                  dns:
+                    items:
+                      type: string
+                    type: array
+                  gateway:
+                    type: string
                   interface:
                     type: string
                   ip:
