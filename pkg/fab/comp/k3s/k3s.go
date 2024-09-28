@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
+	"go.githedgehog.com/fabricator/api/meta"
 	"go.githedgehog.com/fabricator/pkg/util/tmplutil"
 )
 
@@ -21,6 +22,10 @@ const (
 	ConfigPath     = "/etc/rancher/k3s/config.yaml"
 	KubeConfigPath = "/etc/rancher/k3s/k3s.yaml"
 )
+
+func Version(f fabapi.Fabricator) meta.Version {
+	return f.Status.Versions.Platform.K3s
+}
 
 //go:embed config.tmpl.yaml
 var k3sConfigTmpl string
