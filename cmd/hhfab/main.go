@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-logr/logr"
 	"github.com/lmittmann/tint"
 	"github.com/mattn/go-isatty"
 	"github.com/urfave/cli/v2"
@@ -17,6 +18,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/hhfab"
 	"go.githedgehog.com/fabricator/pkg/version"
+	ctrl "sigs.k8s.io/controller-runtime"
 )
 
 const (
@@ -203,14 +205,14 @@ func Run(ctx context.Context) error {
 			}
 
 			logW := os.Stderr
-			logger := slog.New(
-				tint.NewHandler(logW, &tint.Options{
-					Level:      logLevel,
-					TimeFormat: time.TimeOnly,
-					NoColor:    !isatty.IsTerminal(logW.Fd()),
-				}),
-			)
+			handler := tint.NewHandler(logW, &tint.Options{
+				Level:      logLevel,
+				TimeFormat: time.TimeOnly,
+				NoColor:    !isatty.IsTerminal(logW.Fd()),
+			})
+			logger := slog.New(handler)
 			slog.SetDefault(logger)
+			ctrl.SetLogger(logr.FromSlogHandler(handler))
 
 			if quiet {
 				return nil
