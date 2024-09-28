@@ -5,21 +5,30 @@ import (
 	"fmt"
 
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
+	"go.githedgehog.com/fabricator/api/meta"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
+	"go.githedgehog.com/fabricator/pkg/util/tmplutil"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
-	ChartName      = "fabricator/charts/zot"
-	ImageName      = "fabricator/zot"
-	Port           = 31000
-	ServiceName    = "registry"
-	TLSSecret      = "registry-tls"
-	AdminUsername  = "admin"
-	WriterUsername = "writer"
-	ReaderUsername = "reader"
+	ChartRef        = "fabricator/charts/zot"
+	ImageRef        = "fabricator/zot"
+	AirgapRef       = "fabricator/zot-airgap"
+	AirgapImageName = "zot-airgap-images-amd64.tar.gz"
+	AirgapChartName = "zot-chart.tgz"
+	Port            = 31000
+	ServiceName     = "registry"
+	TLSSecret       = "registry-tls"
+	AdminUsername   = "admin"
+	WriterUsername  = "writer"
+	ReaderUsername  = "reader"
 )
+
+func Version(f fabapi.Fabricator) meta.Version {
+	return f.Status.Versions.Platform.Zot
+}
 
 //go:embed values.tmpl.yaml
 var valuesTmpl string
@@ -27,15 +36,17 @@ var valuesTmpl string
 //go:embed config.tmpl.json
 var configTmpl string
 
+// TODO maybe make an interface for the component? comp.Interface
 var (
-	_ comp.KubeInstall = InstallCert
-	_ comp.KubeInstall = Install
+	_ comp.KubeInstall   = InstallCert
+	_ comp.KubeInstall   = Install
+	_ comp.ListArtifacts = Artifacts
 )
 
 func InstallCert(cfg fabapi.Fabricator) ([]client.Object, error) {
 	return []client.Object{
 		comp.Certificate("registry", comp.CertificateSpec{
-			DNSNames:    []string{fmt.Sprintf("%s.%s.svc.%s", ServiceName, comp.Namespace, comp.ClusterDomain)},
+			DNSNames:    []string{fmt.Sprintf("%s.%s.svc.%s", ServiceName, comp.FabNamespace, comp.ClusterDomain)},
 			IPAddresses: []string{string(cfg.Spec.Config.Control.VIP)},
 			IssuerRef:   comp.IssuerRef(comp.FabCAIssuer),
 			SecretName:  TLSSecret,
@@ -47,7 +58,7 @@ func Install(cfg fabapi.Fabricator) ([]client.Object, error) {
 	version := string(cfg.Status.Versions.Platform.Zot)
 	sync := false
 
-	config, err := comp.FromTemplate("config", configTmpl, map[string]any{
+	config, err := tmplutil.FromTemplate("config", configTmpl, map[string]any{
 		"Sync": sync,
 	})
 	if err != nil {
@@ -60,8 +71,8 @@ func Install(cfg fabapi.Fabricator) ([]client.Object, error) {
 		ReaderUsername + ":" + cfg.Spec.Config.Registry.ReaderPasswordHash,
 	}
 
-	values, err := comp.FromTemplate("values", valuesTmpl, map[string]any{
-		"Repo":      comp.ImageURL(cfg, ImageName),
+	values, err := tmplutil.FromTemplate("values", valuesTmpl, map[string]any{
+		"Repo":      comp.ImageURL(cfg, ImageRef),
 		"Tag":       version,
 		"Port":      Port,
 		"Config":    config,
@@ -76,7 +87,7 @@ func Install(cfg fabapi.Fabricator) ([]client.Object, error) {
 	releaseName := "zot"
 
 	return []client.Object{
-		comp.HelmChart(cfg, releaseName, ChartName, version, false, values),
+		comp.HelmChart(cfg, releaseName, ChartRef, version, false, values),
 		comp.Service(ServiceName, comp.ServiceSpec{
 			Selector: map[string]string{
 				"app.kubernetes.io/instance": releaseName,
@@ -91,5 +102,22 @@ func Install(cfg fabapi.Fabricator) ([]client.Object, error) {
 				},
 			},
 		}),
+	}, nil
+}
+
+func Artifacts(cfg fabapi.Fabricator) (comp.Artifacts, error) {
+	version := string(cfg.Status.Versions.Platform.Zot)
+
+	return comp.Artifacts{
+		AirgapOCISync: []string{
+			ChartRef + ":" + version,
+			ImageRef + ":" + version,
+		},
+		BootstrapImages: []string{
+			"fabricator/zot-airgap:" + version,
+		},
+		BootstrapCharts: []string{
+			"fabricator/zot-chart:" + version,
+		},
 	}, nil
 }
