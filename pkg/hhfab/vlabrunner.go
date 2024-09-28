@@ -509,6 +509,9 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 
 				slog.Info("Running control install", "vm", vm.Name, "type", vm.Type)
 				installCmd := fmt.Sprintf("cd %s && sudo ./%s control install", vm.Name+recipe.InstallSuffix, recipe.RecipeBin)
+				if slog.Default().Enabled(ctx, slog.LevelDebug) {
+					installCmd += " -v"
+				}
 				if err := sshExec(ctx, vm, client, installCmd, "control-install", slog.Info); err != nil {
 					return fmt.Errorf("running control install: %w", err)
 				}
