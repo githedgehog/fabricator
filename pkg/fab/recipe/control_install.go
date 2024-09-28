@@ -10,12 +10,16 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"go.githedgehog.com/fabric/pkg/util/kubeutil"
 	"go.githedgehog.com/fabric/pkg/util/logutil"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
+	corev1 "k8s.io/api/core/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // "install" k3s binary, its config and airgap images
@@ -115,33 +119,10 @@ type ControlInstall struct {
 }
 
 func (c *ControlInstall) Run(ctx context.Context) error {
+	slog.Info("Running control node installation")
+
 	if err := os.WriteFile(InstallMarkerFile, []byte(InstallMarkerStarted), 0o644); err != nil { //nolint:gosec
 		return fmt.Errorf("writing install marker: %w", err)
-	}
-
-	if err := c.copyFile(k3s.BinName, filepath.Join(k3s.BinDir, k3s.BinName), 0o755); err != nil {
-		return fmt.Errorf("copying k3s bin: %w", err)
-	}
-
-	if err := os.MkdirAll(k3s.ImagesDir, 0o755); err != nil {
-		return fmt.Errorf("creating k3s images dir %q: %w", k3s.ImagesDir, err)
-	}
-
-	if err := c.copyFile(k3s.AirgapName, filepath.Join(k3s.ImagesDir, k3s.AirgapName), 0o644); err != nil {
-		return fmt.Errorf("copying k3s airgap: %w", err)
-	}
-
-	k3sCfg, err := k3s.Config(c.Fab, c.Control)
-	if err != nil {
-		return fmt.Errorf("k3s config: %w", err)
-	}
-
-	if err := os.MkdirAll(k3s.ConfigDir, 0o755); err != nil {
-		return fmt.Errorf("creating k3s config dir %q: %w", k3s.ConfigPath, err)
-	}
-
-	if err := os.WriteFile(k3s.ConfigPath, []byte(k3sCfg), 0o644); err != nil { //nolint:gosec
-		return fmt.Errorf("writing file %q: %w", k3s.ConfigPath, err)
 	}
 
 	if err := c.k3sInstall(ctx); err != nil {
@@ -151,6 +132,8 @@ func (c *ControlInstall) Run(ctx context.Context) error {
 	if err := os.WriteFile(InstallMarkerFile, []byte(InstallMarkerComplete), 0o644); err != nil { //nolint:gosec
 		return fmt.Errorf("writing install marker: %w", err)
 	}
+
+	slog.Info("Control node installation complete")
 
 	return nil
 }
@@ -182,9 +165,37 @@ func (c *ControlInstall) copyFile(src, dst string, mode os.FileMode) error {
 }
 
 func (c *ControlInstall) k3sInstall(ctx context.Context) error {
-	ctx, cancel := context.WithCancel(ctx)
+	slog.Info("Installing k3s")
+
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
+	if err := c.copyFile(k3s.BinName, filepath.Join(k3s.BinDir, k3s.BinName), 0o755); err != nil {
+		return fmt.Errorf("copying k3s bin: %w", err)
+	}
+
+	if err := os.MkdirAll(k3s.ImagesDir, 0o755); err != nil {
+		return fmt.Errorf("creating k3s images dir %q: %w", k3s.ImagesDir, err)
+	}
+
+	if err := c.copyFile(k3s.AirgapName, filepath.Join(k3s.ImagesDir, k3s.AirgapName), 0o644); err != nil {
+		return fmt.Errorf("copying k3s airgap: %w", err)
+	}
+
+	k3sCfg, err := k3s.Config(c.Fab, c.Control)
+	if err != nil {
+		return fmt.Errorf("k3s config: %w", err)
+	}
+
+	if err := os.MkdirAll(k3s.ConfigDir, 0o755); err != nil {
+		return fmt.Errorf("creating k3s config dir %q: %w", k3s.ConfigPath, err)
+	}
+
+	if err := os.WriteFile(k3s.ConfigPath, []byte(k3sCfg), 0o644); err != nil { //nolint:gosec
+		return fmt.Errorf("writing file %q: %w", k3s.ConfigPath, err)
+	}
+
+	slog.Debug("Running k3s install")
 	cmd := exec.CommandContext(ctx, "./"+k3s.InstallName, "--disable=servicelb,traefik") //nolint:gosec
 	cmd.Env = append(os.Environ(),
 		"INSTALL_K3S_SKIP_DOWNLOAD=true",
@@ -198,5 +209,36 @@ func (c *ControlInstall) k3sInstall(ctx context.Context) error {
 		return fmt.Errorf("running k3s install: %w", err)
 	}
 
-	return nil
+	slog.Debug("Waiting for k8s node ready")
+
+	kube, err := kubeutil.NewClientWithCore(ctx, k3s.KubeConfigPath)
+	if err != nil {
+		return fmt.Errorf("creating kube client: %w", err)
+	}
+
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("waiting for k8s ready: %w", ctx.Err())
+		case <-ticker.C:
+
+			node := &corev1.Node{}
+			if err := kube.Get(ctx, client.ObjectKey{Name: c.Control.Name}, node); err != nil {
+				slog.Debug("Waiting for K8s node", "node", c.Control.Name, "err", err)
+
+				continue
+			}
+
+			for _, cond := range node.Status.Conditions {
+				if cond.Type == corev1.NodeReady && cond.Status == corev1.ConditionTrue {
+					slog.Debug("K8s node is ready", "node", c.Control.Name)
+
+					return nil
+				}
+			}
+		}
+	}
 }
