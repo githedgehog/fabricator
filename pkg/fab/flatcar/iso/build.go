@@ -29,6 +29,7 @@ import (
 	diskfs "github.com/diskfs/go-diskfs"
 	diskpkg "github.com/diskfs/go-diskfs/disk"
 	"github.com/diskfs/go-diskfs/filesystem"
+	"github.com/diskfs/go-diskfs/filesystem/fat32"
 	"github.com/diskfs/go-diskfs/partition/gpt"
 )
 
@@ -63,7 +64,6 @@ func copyTree(workdir, localDirName string, destination filesystem.FileSystem) e
 	slog.Debug("CopyTree", "LocalDirName", localDirName, "WorkDir", workdir, "Destination", destination.Label())
 	tree := filepath.Join(workdir, localDirName)
 	err := filepath.Walk(tree, func(path string, info os.FileInfo, err error) error {
-
 		// knock out the workdir
 		relPath, err := filepath.Rel(workdir, path)
 		if err != nil {
@@ -91,17 +91,15 @@ func copyTree(workdir, localDirName string, destination filesystem.FileSystem) e
 		return fmt.Errorf("Walkpath error %w", err)
 	}
 	return err
-
 }
 
 func createEfi(diskImg, workdir string) error {
-
 	var (
 		espSize             int64 = 500 * 1024 * 1024                              // 500 MiB
 		oemSize             int64 = (6 * 1024 * 1024 * 1024) + (500 * 1024 * 1024) // 10.5 GiB
 		dataSize                  = espSize + oemSize                              // 1 GiB + 500MiB
 		blkSize             int64 = 512
-		diskSize                  = dataSize + 2*16896 + (1024 * 1024) //GPT partition is 33 LBA in size, there are two of them. gdisk said I was missing a MiB so I added it.
+		diskSize                  = dataSize + 2*16896 + (1024 * 1024) // GPT partition is 33 LBA in size, there are two of them. gdisk said I was missing a MiB so I added it.
 		espPartitionStart   int64 = 2048
 		espPartitionSectors       = espSize / blkSize                             // 1024000 sectors
 		espPartitionEnd           = espPartitionSectors + (espPartitionStart - 1) // 1026047
@@ -120,8 +118,8 @@ func createEfi(diskImg, workdir string) error {
 	table.ProtectiveMBR = true
 
 	table.Partitions = []*gpt.Partition{
-		&gpt.Partition{Start: uint64(espPartitionStart), End: uint64(espPartitionEnd), Type: gpt.EFISystemPartition, Size: uint64(espSize), Name: "HHA"},
-		&gpt.Partition{Start: uint64(oemPartitionStart), End: uint64(oemPartitionEnd), Type: gpt.LinuxFilesystem, Size: uint64(oemSize), Name: "HHB"},
+		{Start: uint64(espPartitionStart), End: uint64(espPartitionEnd), Type: gpt.EFISystemPartition, Size: uint64(espSize), Name: "HHA"},
+		{Start: uint64(oemPartitionStart), End: uint64(oemPartitionEnd), Type: gpt.LinuxFilesystem, Size: uint64(oemSize), Name: "HHB"},
 	}
 
 	// apply the partition table
@@ -146,6 +144,7 @@ func createEfi(diskImg, workdir string) error {
 	if err != nil {
 		return fmt.Errorf("Error creating %s filesystem: %w", espSpec.VolumeLabel, err)
 	}
+	espFs.(*fat32.FileSystem).SetLazy(true)
 
 	// NEED OEM as the disk label things don't work otherwise
 	backpackSpec := diskpkg.FilesystemSpec{Partition: 2, FSType: filesystem.TypeFat32, VolumeLabel: "OEM"}
@@ -156,6 +155,7 @@ func createEfi(diskImg, workdir string) error {
 	if err != nil {
 		return fmt.Errorf("Error creating %s filesystem: %w", backpackSpec.VolumeLabel, err)
 	}
+	backpackFs.(*fat32.FileSystem).SetLazy(true)
 
 	err = copyTree(workdir, "/EFI", espFs)
 	if err != nil {
@@ -199,12 +199,20 @@ func createEfi(diskImg, workdir string) error {
 	if err != nil {
 		return fmt.Errorf("Error copying control-install: %w", err)
 	}
+
+	if err := espFs.(*fat32.FileSystem).Commit(); err != nil {
+		return fmt.Errorf("commiting espFs: %w", err)
+	}
+
+	if err := backpackFs.(*fat32.FileSystem).Commit(); err != nil {
+		return fmt.Errorf("commiting backpackFs: %w", err)
+	}
+
 	return err
 }
 
 // Build builds the Control Node ISO only, the components needed for this are downloaded as a bundle in a previous step.
 func Build(_ context.Context, basedir string) error {
-
 	start := time.Now()
 
 	installer := filepath.Join(basedir, fab.BundleControlInstall.Name)
