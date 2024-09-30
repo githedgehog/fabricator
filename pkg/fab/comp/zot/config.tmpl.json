@@ -8,7 +8,7 @@
       "cert": "/tls/tls.crt",
       "key": "/tls/tls.key"
     },
-    "auth": { "htpasswd": { "path": "/secret/htpasswd" } },
+    "auth": { "htpasswd": { "path": "/htpasswd/htpasswd" } },
     "accessControl": {
       "repositories": {
         "**": {

@@ -4,10 +4,12 @@ import (
 	_ "embed"
 	"fmt"
 
+	"github.com/sethvargo/go-password/password"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/api/meta"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/util/tmplutil"
+	"golang.org/x/crypto/bcrypt"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -21,9 +23,7 @@ const (
 	Port            = 31000
 	ServiceName     = "registry"
 	TLSSecret       = "registry-tls"
-	AdminUsername   = "admin"
-	WriterUsername  = "writer"
-	ReaderUsername  = "reader"
+	HtpasswdSecret  = "registry-htpasswd"
 )
 
 func Version(f fabapi.Fabricator) meta.Version {
@@ -53,20 +53,14 @@ func Install(cfg fabapi.Fabricator) ([]client.Object, error) {
 		return nil, fmt.Errorf("config: %w", err)
 	}
 
-	users := []string{
-		AdminUsername + ":" + cfg.Spec.Config.Registry.AdminPasswordHash,
-		WriterUsername + ":" + cfg.Spec.Config.Registry.WriterPasswordHash,
-		ReaderUsername + ":" + cfg.Spec.Config.Registry.ReaderPasswordHash,
-	}
-
 	values, err := tmplutil.FromTemplate("values", valuesTmpl, map[string]any{
-		"Repo":      comp.ImageURL(cfg, ImageRef),
-		"Tag":       version,
-		"Port":      Port,
-		"Config":    config,
-		"Users":     users,
-		"Sync":      sync,
-		"TLSSecret": TLSSecret,
+		"Repo":           comp.ImageURL(cfg, ImageRef),
+		"Tag":            version,
+		"Port":           Port,
+		"Config":         config,
+		"HtpasswdSecret": HtpasswdSecret,
+		"Sync":           sync,
+		"TLSSecret":      TLSSecret,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("values: %w", err)
@@ -97,6 +91,44 @@ func Install(cfg fabapi.Fabricator) ([]client.Object, error) {
 			},
 		}),
 	}, nil
+}
+
+func NewUsers() (map[string]string, error) {
+	users := map[string]string{}
+	for _, user := range []string{comp.RegistryUserAdmin, comp.RegistryUserWriter, comp.RegistryUserReader} {
+		passwd, err := password.Generate(32, 10, 10, false, true)
+		if err != nil {
+			return nil, fmt.Errorf("generating password: %w", err)
+		}
+
+		users[user] = passwd
+	}
+
+	return users, nil
+}
+
+func InstallUsers(users map[string]string) comp.KubeInstall {
+	return func(_ fabapi.Fabricator) ([]client.Object, error) {
+		objs := []client.Object{}
+
+		htpasswd := ""
+		for user, passwd := range users {
+			hash, err := bcrypt.GenerateFromPassword([]byte(passwd), bcrypt.DefaultCost)
+			if err != nil {
+				return nil, fmt.Errorf("hashing password: %w", err)
+			}
+			htpasswd += fmt.Sprintf("%s:%s\n", user, hash)
+
+			objs = append(objs, comp.NewSecret(comp.RegistryUserSecretPrefix+user, comp.SecretTypeBasicAuth, map[string]string{
+				comp.BasicAuthUsernameKey: user,
+				comp.BasicAuthPasswordKey: passwd,
+			}))
+		}
+
+		return append(objs, comp.NewSecret(HtpasswdSecret, comp.SecretTypeOpaque, map[string]string{
+			"htpasswd": htpasswd,
+		})), nil
+	}
 }
 
 func Artifacts(cfg fabapi.Fabricator) (comp.Artifacts, error) {

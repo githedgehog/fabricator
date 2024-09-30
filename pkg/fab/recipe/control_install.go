@@ -362,6 +362,15 @@ func (c *ControlInstall) installZot(ctx context.Context, kube client.Client) err
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
+	users, err := zot.NewUsers()
+	if err != nil {
+		return fmt.Errorf("creating zot users: %w", err)
+	}
+
+	if err := comp.EnforceKubeInstall(ctx, kube, c.Fab, zot.InstallUsers(users)); err != nil {
+		return fmt.Errorf("enforcing zot users install: %w", err)
+	}
+
 	if err := comp.EnforceKubeInstall(ctx, kube, c.Fab, zot.Install); err != nil {
 		return fmt.Errorf("enforcing zot install: %w", err)
 	}

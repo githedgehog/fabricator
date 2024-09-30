@@ -17,10 +17,8 @@ pvc:
   create: true
   storage: 30Gi
 
-mountSecret: true
+mountSecret: false
 secretFiles:
-  htpasswd: |-
-{{- range .Users }}{{ . | nindent 4 }}{{ end }}
 {{- if .Sync }}
   credentials.json: |-
     {
@@ -34,6 +32,8 @@ secretFiles:
 externalSecrets:
   - secretName: {{ .TLSSecret }}
     mountPath: /tls
+  - secretName: {{ .HtpasswdSecret }}
+    mountPath: /htpasswd
 
 mountConfig: true
 
