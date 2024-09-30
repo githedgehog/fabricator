@@ -36,6 +36,9 @@ const (
 	FlagNameFabricMode            = "fabric-mode"
 	FlagNameCount                 = "count"
 	FlagNameKillStale             = "kill-stale"
+	FlagNameControlsRestricted    = "controls-restricted"
+	FlagNameServersRestricted     = "servers-restricted"
+	FlagNameControlsUSB           = "controls-usb"
 )
 
 func main() {
@@ -449,6 +452,24 @@ func Run(ctx context.Context) error {
 								Usage:   "kill stale VMs",
 								EnvVars: []string{"HHFAB_KILL_STALE"},
 							},
+							&cli.BoolFlag{
+								Name:    FlagNameControlsRestricted,
+								Usage:   "restrict control nodes from having access to the host (effectively access to internet)",
+								EnvVars: []string{"HHFAB_CONTROLS_RESTRICTED"},
+								Value:   true,
+							},
+							&cli.BoolFlag{
+								Name:    FlagNameServersRestricted,
+								Usage:   "restrict server nodes from having access to the host (effectively access to internet)",
+								EnvVars: []string{"HHFAB_SERVERS_RESTRICTED"},
+								Value:   true,
+							},
+							&cli.BoolFlag{
+								Name:    FlagNameControlsUSB,
+								Usage:   "use installer USB image for control node(s)",
+								EnvVars: []string{"HHFAB_CONTROL_USB"},
+								Value:   false,
+							},
 						),
 						Before: before(false),
 						Action: func(c *cli.Context) error {
@@ -457,9 +478,9 @@ func Run(ctx context.Context) error {
 								Recreate:    false, // TODO flag
 								VLABRunOpts: hhfab.VLABRunOpts{
 									KillStale:          c.Bool(FlagNameKillStale),
-									ControlsRestricted: true,  // TODO flag
-									ServersRestricted:  true,  // TODO flag
-									ControlUSB:         false, // TODO flag
+									ControlsRestricted: c.Bool(FlagNameControlsRestricted),
+									ServersRestricted:  c.Bool(FlagNameServersRestricted),
+									ControlUSB:         c.Bool(FlagNameControlsUSB),
 								},
 							}); err != nil {
 								return fmt.Errorf("running VLAB: %w", err)
