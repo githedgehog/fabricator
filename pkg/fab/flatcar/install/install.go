@@ -65,7 +65,7 @@ type BlockDevices struct {
 }
 
 // getDisks is responsible for the call to lsblk, calls a function to normalize / beautify the values
-func getDisks() *BlockDevices {
+func getDisks() (*BlockDevices, error) {
 	disks := &BlockDevices{}
 	// The exclude arguments are major block numbers, 252 is a ZRAM swap disk, 11 is a SATA attached CD-ROM
 	args := []string{"--bytes", "--json", "--exclude", "1,3,7,11,252", "--output", "SIZE,ROTA,HOTPLUG,PATH,NAME,MODEL,TYPE,TRAN"}
@@ -75,17 +75,17 @@ func getDisks() *BlockDevices {
 
 	stdout, err := lsblkCmd.Output()
 	if err != nil {
-		return fmt.Errorf("lsblk error %s: %w", stderr.String(), err)
+		return nil, fmt.Errorf("lsblk error %s: %w", stderr.String(), err)
 	}
 	if err = json.Unmarshal(stdout, disks); err != nil {
-		return fmt.Errorf("Error from Unmarshal on lsblk output: %w", err)
+		return nil, fmt.Errorf("Error from Unmarshal on lsblk output: %w", err)
 	}
 
 	slices.SortFunc(disks.Devices, func(a, b *BlockDevice) int {
 		return cmp.Compare(b.Size, a.Size)
 	})
 
-	return prettyMetaData(disks)
+	return prettyMetaData(disks), nil
 
 }
 
@@ -147,7 +147,10 @@ func populatePassword(_ *Config) {
 
 }
 func populateBlockDevice(config *Config) error {
-	disks := getDisks()
+	disks, err := getDisks()
+	if err != nil {
+		return fmt.Errorf("Error getting disks: %w", err)
+	}
 
 	// User provided a size, go with the first matching disk
 	if config.SizeGB != "" {
