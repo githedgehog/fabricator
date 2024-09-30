@@ -196,19 +196,19 @@ func (c *Config) getHydration(ctx context.Context, kube client.Reader) (Hydratio
 				return status, fmt.Errorf("parsing control node %s management IP %s: %w", control.Name, control.Spec.Management.IP, err)
 			}
 
-			if !mgmtSubnet.Contains(controlIP) {
+			if !mgmtSubnet.Contains(controlIP.Addr()) {
 				return status, fmt.Errorf("control node %s management IP %s is not in the management subnet %s", control.Name, controlIP, mgmtSubnet) //nolint:goerr113
 			}
 
-			if controlIP.Compare(mgmtDHCPStart) >= 0 {
+			if controlIP.Addr().Compare(mgmtDHCPStart) >= 0 {
 				return status, fmt.Errorf("control node %s management IP %s should be less than the management DHCP start %s", control.Name, controlIP, mgmtDHCPStart) //nolint:goerr113
 			}
 
-			if _, exist := mgmtIPs[controlIP]; exist {
+			if _, exist := mgmtIPs[controlIP.Addr()]; exist {
 				return status, fmt.Errorf("control node %s management IP %s is already in use", control.Name, controlIP) //nolint:goerr113
 			}
 
-			mgmtIPs[controlIP] = true
+			mgmtIPs[controlIP.Addr()] = true
 		} else {
 			missing++
 		}
@@ -251,42 +251,42 @@ func (c *Config) getHydration(ctx context.Context, kube client.Reader) (Hydratio
 
 		total++
 		if sw.Spec.IP != "" {
-			swIP, err := netip.ParseAddr(sw.Spec.IP)
+			swIP, err := netip.ParsePrefix(sw.Spec.IP)
 			if err != nil {
 				return status, fmt.Errorf("parsing switch %s IP %s: %w", sw.Name, sw.Spec.IP, err)
 			}
 
-			if !mgmtSubnet.Contains(swIP) {
+			if !mgmtSubnet.Contains(swIP.Addr()) {
 				return status, fmt.Errorf("switch %s IP %s is not in the management subnet %s", sw.Name, swIP, mgmtSubnet) //nolint:goerr113
 			}
 
-			if swIP.Compare(mgmtDHCPStart) >= 0 {
+			if swIP.Addr().Compare(mgmtDHCPStart) >= 0 {
 				return status, fmt.Errorf("switch %s IP %s should be less than the management DHCP start %s", sw.Name, swIP, mgmtDHCPStart) //nolint:goerr113
 			}
 
-			if _, exist := mgmtIPs[swIP]; exist {
+			if _, exist := mgmtIPs[swIP.Addr()]; exist {
 				return status, fmt.Errorf("switch %s (management) IP %s is already in use", sw.Name, swIP) //nolint:goerr113
 			}
-			mgmtIPs[swIP] = true
+			mgmtIPs[swIP.Addr()] = true
 		} else {
 			missing++
 		}
 
 		total++
 		if sw.Spec.ProtocolIP != "" {
-			swProtoIP, err := netip.ParseAddr(sw.Spec.ProtocolIP)
+			swProtoIP, err := netip.ParsePrefix(sw.Spec.ProtocolIP)
 			if err != nil {
 				return status, fmt.Errorf("parsing switch %s protocol IP %s: %w", sw.Name, sw.Spec.ProtocolIP, err)
 			}
 
-			if !protocolSubnet.Contains(swProtoIP) {
+			if !protocolSubnet.Contains(swProtoIP.Addr()) {
 				return status, fmt.Errorf("switch %s protocol IP %s is not in the protocol subnet %s", sw.Name, swProtoIP, protocolSubnet) //nolint:goerr113
 			}
 
-			if _, exist := protocolIPs[swProtoIP]; exist {
+			if _, exist := protocolIPs[swProtoIP.Addr()]; exist {
 				return status, fmt.Errorf("switch %s protocol IP %s is already in use", sw.Name, swProtoIP) //nolint:goerr113
 			}
-			protocolIPs[swProtoIP] = true
+			protocolIPs[swProtoIP.Addr()] = true
 		} else {
 			missing++
 		}
@@ -334,12 +334,12 @@ func (c *Config) getHydration(ctx context.Context, kube client.Reader) (Hydratio
 		if sw.Spec.Role.IsLeaf() {
 			total++
 			if sw.Spec.VTEPIP != "" {
-				swVTEPIP, err := netip.ParseAddr(sw.Spec.VTEPIP)
+				swVTEPIP, err := netip.ParsePrefix(sw.Spec.VTEPIP)
 				if err != nil {
 					return status, fmt.Errorf("parsing switch %s VTEP IP %s: %w", sw.Name, sw.Spec.VTEPIP, err)
 				}
 
-				if !vtepSubnet.Contains(swVTEPIP) {
+				if !vtepSubnet.Contains(swVTEPIP.Addr()) {
 					return status, fmt.Errorf("switch %s VTEP IP %s is not in the VTEP subnet %s", sw.Name, swVTEPIP, vtepSubnet) //nolint:goerr113
 				}
 
@@ -351,14 +351,14 @@ func (c *Config) getHydration(ctx context.Context, kube client.Reader) (Hydratio
 					} else {
 						mclagPeer[sw.Spec.Redundancy.Group] = &sw
 
-						if _, exist := vtepIPs[swVTEPIP]; exist {
+						if _, exist := vtepIPs[swVTEPIP.Addr()]; exist {
 							return status, fmt.Errorf("switch %s VTEP IP %s is already in use", sw.Name, swVTEPIP) //nolint:goerr113
 						}
 					}
-				} else if _, exist := vtepIPs[swVTEPIP]; exist {
+				} else if _, exist := vtepIPs[swVTEPIP.Addr()]; exist {
 					return status, fmt.Errorf("switch %s VTEP IP %s is already in use", sw.Name, swVTEPIP) //nolint:goerr113
 				}
-				vtepIPs[swVTEPIP] = true
+				vtepIPs[swVTEPIP.Addr()] = true
 			} else {
 				missing++
 			}
@@ -476,7 +476,7 @@ func (c *Config) hydrate(ctx context.Context, kube client.Client) error {
 
 	for idx := range c.Controls {
 		control := &c.Controls[idx]
-		control.Spec.Management.IP = meta.Addr(nextMgmtIP.String())
+		control.Spec.Management.IP = meta.Prefix(netip.PrefixFrom(nextMgmtIP, mgmtSubnet.Bits()).String())
 		nextMgmtIP = nextMgmtIP.Next()
 	}
 
@@ -527,10 +527,10 @@ func (c *Config) hydrate(ctx context.Context, kube client.Client) error {
 			return errors.Errorf("switch %s role %q is invalid", sw.Name, sw.Spec.Role)
 		}
 
-		sw.Spec.IP = nextMgmtIP.String()
+		sw.Spec.IP = netip.PrefixFrom(nextMgmtIP, mgmtSubnet.Bits()).String()
 		nextMgmtIP = nextMgmtIP.Next()
 
-		sw.Spec.ProtocolIP = nextProtoIP.String()
+		sw.Spec.ProtocolIP = netip.PrefixFrom(nextProtoIP, protocolSubnet.Bits()).String()
 		nextProtoIP = nextProtoIP.Next()
 
 		if sw.Spec.Role.IsSpine() {
@@ -554,7 +554,7 @@ func (c *Config) hydrate(ctx context.Context, kube client.Client) error {
 
 			sw.Spec.VTEPIP = ""
 			if !isCC {
-				sw.Spec.VTEPIP = nextVTEPIP.String()
+				sw.Spec.VTEPIP = netip.PrefixFrom(nextVTEPIP, vtepSubnet.Bits()).String()
 				nextVTEPIP = nextVTEPIP.Next()
 			}
 		}

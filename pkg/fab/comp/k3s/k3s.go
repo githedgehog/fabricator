@@ -38,9 +38,14 @@ func Config(f fabapi.Fabricator, control fabapi.ControlNode) (string, error) {
 		tlsSAN = append(tlsSAN, string(f.Spec.Config.Control.VIP))
 	}
 
+	nodeIP, err := control.Spec.Management.IP.Parse()
+	if err != nil {
+		return "", fmt.Errorf("parsing control node IP: %w", err)
+	}
+
 	cfg, err := tmplutil.FromTemplate("k3s-config", k3sConfigTmpl, map[string]any{
 		"Name":          control.Name,
-		"NodeIP":        control.Spec.Management.IP,
+		"NodeIP":        nodeIP.Addr(),
 		"FlannelIface":  control.Spec.Management.Interface,
 		"ClusterSubnet": f.Spec.Config.Control.KubeClusterSubnet,
 		"ServiceSubnet": f.Spec.Config.Control.KubeServiceSubnet,

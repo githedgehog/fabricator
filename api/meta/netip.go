@@ -38,22 +38,22 @@ func (val Prefix) Parse() (netip.Prefix, error) {
 }
 
 const (
-	AddrDHCP = AddrOrDHCP("dhcp")
+	PrefixDHCP = PrefixOrDHCP("dhcp")
 )
 
-type AddrOrDHCP string
+type PrefixOrDHCP string
 
-func (val AddrOrDHCP) Parse() (bool, netip.Addr, error) {
-	if val == AddrDHCP {
-		return true, netip.Addr{}, nil
+func (val PrefixOrDHCP) Parse() (bool, netip.Prefix, error) {
+	if val == PrefixDHCP {
+		return true, netip.Prefix{}, nil
 	}
 
-	ip, err := netip.ParseAddr(string(val))
+	ip, err := netip.ParsePrefix(string(val))
 	if err != nil {
-		return false, netip.Addr{}, fmt.Errorf("parsing addr %q: %w", val, err)
+		return false, netip.Prefix{}, fmt.Errorf("parsing prefix %q: %w", val, err)
 	}
-	if !ip.Is4() {
-		return false, netip.Addr{}, fmt.Errorf("parsing addr %q: %w", val, ErrIPv4Only)
+	if !ip.Addr().Is4() {
+		return false, netip.Prefix{}, fmt.Errorf("parsing prefix %q: %w", val, ErrIPv4Only)
 	}
 
 	return false, ip, nil

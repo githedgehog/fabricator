@@ -36,16 +36,16 @@ type ControlNodeBootstrap struct {
 }
 
 type ControlNodeManagement struct {
-	IP        meta.Addr `json:"ip,omitempty"`
-	Interface string    `json:"interface,omitempty"`
+	IP        meta.Prefix `json:"ip,omitempty"`
+	Interface string      `json:"interface,omitempty"`
 	// TODO support bond
 }
 
 type ControlNodeExternal struct {
-	IP        meta.AddrOrDHCP `json:"ip,omitempty"`
-	Gateway   meta.Addr       `json:"gateway,omitempty"`
-	DNS       []meta.Addr     `json:"dns,omitempty"`
-	Interface string          `json:"interface,omitempty"`
+	IP        meta.PrefixOrDHCP `json:"ip,omitempty"`
+	Gateway   meta.Addr         `json:"gateway,omitempty"`
+	DNS       []meta.Addr       `json:"dns,omitempty"`
+	Interface string            `json:"interface,omitempty"`
 	// TODO support bond
 }
 
