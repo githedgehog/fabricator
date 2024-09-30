@@ -19,16 +19,21 @@ import (
 )
 
 const (
-	ClusterDomain        = "cluster.local"
-	FabName              = "default"
-	FabNamespace         = "fab"
-	RegPrefix            = "githedgehog"
-	FabCAIssuer          = "fab-ca"
-	FabCASecret          = FabCAIssuer
-	FabCAConfigMap       = FabCAIssuer
-	RegistryAdminSecret  = "registry-admin"
-	RegistryWriterSecret = "registry-writer"
-	RegistryReaderSecret = "registry-reader" // TODO secret type should be "kubernetes.io/basic-auth"
+	ClusterDomain  = "cluster.local"
+	FabName        = "default"
+	FabNamespace   = "fab"
+	RegPrefix      = "githedgehog"
+	FabCAIssuer    = "fab-ca"
+	FabCASecret    = FabCAIssuer
+	FabCAConfigMap = FabCAIssuer
+
+	RegistryUserAdmin        = "admin"
+	RegistryUserWriter       = "writer"
+	RegistryUserReader       = "reader"
+	RegistryUserSecretPrefix = "registry-user-"
+	RegistryUserAdminSecret  = RegistryUserSecretPrefix + RegistryUserAdmin
+	RegistryUserWriterSecret = RegistryUserSecretPrefix + RegistryUserWriter
+	RegistryUserReaderSecret = RegistryUserSecretPrefix + RegistryUserReader
 )
 
 // TODO local test with the fake client incl components
@@ -49,6 +54,7 @@ type (
 	Node                  = coreapi.Node
 	Deployment            = appsapi.Deployment
 	Issuer                = cmapi.Issuer
+	SecretType            = coreapi.SecretType
 )
 
 const (
@@ -70,6 +76,13 @@ const (
 	IssuerConditionReady = cmapi.IssuerConditionReady
 	ConditionTrue        = coreapi.ConditionTrue
 	CMConditionTrue      = cmmeta.ConditionTrue
+)
+
+const (
+	SecretTypeOpaque     SecretType = coreapi.SecretTypeOpaque
+	SecretTypeBasicAuth  SecretType = coreapi.SecretTypeBasicAuth
+	BasicAuthUsernameKey            = "username"
+	BasicAuthPasswordKey            = "password"
 )
 
 var (
@@ -134,7 +147,7 @@ func NewHelmChart(cfg fabapi.Fabricator, name, chart, version, bootstrapChart st
 
 	if !cfg.Status.IsBootstrap {
 		auth = &LocalObjectReference{
-			Name: RegistryReaderSecret,
+			Name: RegistryUserReaderSecret,
 		}
 
 		ca = &LocalObjectReference{
@@ -214,7 +227,7 @@ func NewNamespace(name string) client.Object {
 	}
 }
 
-func NewSecret(name string, data map[string]string) client.Object {
+func NewSecret(name string, t SecretType, data map[string]string) client.Object {
 	// TODO base64 encode data and Data instead of StringData so DeepEqual works correctly
 
 	return &coreapi.Secret{
@@ -227,6 +240,7 @@ func NewSecret(name string, data map[string]string) client.Object {
 			Namespace: FabNamespace,
 		},
 		StringData: data,
+		Type:       t,
 	}
 }
 

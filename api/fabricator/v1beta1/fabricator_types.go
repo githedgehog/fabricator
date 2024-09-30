@@ -69,12 +69,6 @@ type ControlUser struct {
 }
 
 type RegistryConfig struct {
-	// TODO probably just get rid of this? there should be just a few secrets with predefined names
-	// TODO make sure it's not allowed to set at init time
-	AdminPasswordHash  string `json:"adminPassword,omitempty"`
-	WriterPasswordHash string `json:"userPassword,omitempty"`
-	ReaderPasswordHash string `json:"readerPassword,omitempty"`
-
 	// Airgap bool `json:"airgap,omitempty"` // TODO
 
 	// TODO implement non-airgap

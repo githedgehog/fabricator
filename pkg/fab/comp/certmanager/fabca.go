@@ -26,12 +26,12 @@ const (
 func InstallFabCA(ca *CA) comp.KubeInstall {
 	return func(_ fabapi.Fabricator) ([]client.Object, error) {
 		return []client.Object{
-			comp.NewSecret(comp.FabCASecret, map[string]string{
-				"tls.crt": ca.Crt, // TODO const for keys?
+			comp.NewSecret(comp.FabCASecret, comp.SecretTypeOpaque, map[string]string{
+				"tls.crt": ca.Crt,
 				"tls.key": ca.Key,
 			}),
 			comp.NewConfigMap(comp.FabCAConfigMap, map[string]string{
-				"ca.crt": ca.Crt, // TODO const for keys?
+				"ca.crt": ca.Crt,
 			}),
 			comp.NewIssuer(comp.FabCAIssuer, comp.IssuerSpec{
 				IssuerConfig: comp.IssuerConfig{

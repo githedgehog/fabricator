@@ -208,13 +208,6 @@ spec:
                         type: string
                     type: object
                   registry:
-                    properties:
-                      adminPassword:
-                        type: string
-                      readerPassword:
-                        type: string
-                      userPassword:
-                        type: string
                     type: object
                 type: object
               overrides:
