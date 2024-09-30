@@ -11,16 +11,18 @@ import (
 )
 
 const (
-	Ref            = "fabricator/k3s-airgap"
-	BinName        = "k3s"
-	BinDir         = "/opt/bin"
-	InstallName    = "k3s-install.sh"
-	AirgapName     = "k3s-airgap-images-amd64.tar.gz"
-	ImagesDir      = "/var/lib/rancher/k3s/agent/images"
-	APIPort        = 6443
-	ConfigDir      = "/etc/rancher/k3s"
-	ConfigPath     = "/etc/rancher/k3s/config.yaml"
-	KubeConfigPath = "/etc/rancher/k3s/k3s.yaml"
+	Ref                   = "fabricator/k3s-airgap"
+	BinName               = "k3s"
+	BinDir                = "/opt/bin"
+	InstallName           = "k3s-install.sh"
+	AirgapName            = "k3s-airgap-images-amd64.tar.gz"
+	ImagesDir             = "/var/lib/rancher/k3s/agent/images"
+	BootstrapChartsPrefix = "charts"
+	ChartsDir             = "/var/lib/rancher/k3s/server/static/" + BootstrapChartsPrefix
+	APIPort               = 6443
+	ConfigDir             = "/etc/rancher/k3s"
+	ConfigPath            = "/etc/rancher/k3s/config.yaml"
+	KubeConfigPath        = "/etc/rancher/k3s/k3s.yaml"
 )
 
 func Version(f fabapi.Fabricator) meta.Version {

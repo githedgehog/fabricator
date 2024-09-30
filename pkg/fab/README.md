@@ -53,7 +53,8 @@ skopeo copy "docker://ghcr.io/project-zot/zot-linux-amd64:${ZOT_VERSION}" "docke
 
 docker image rm "ghcr.io/githedgehog/fabricator/zot:${ZOT_VERSION}"
 docker pull --platform linux/amd64 "ghcr.io/githedgehog/fabricator/zot:${ZOT_VERSION}"
-docker save -o zot-airgap-images-amd64.tar.gz "ghcr.io/githedgehog/fabricator/zot:${ZOT_VERSION}"
+docker save -o zot-airgap-images-amd64.tar "ghcr.io/githedgehog/fabricator/zot:${ZOT_VERSION}"
+pigz -v -c zot-airgap-images-amd64.tar > zot-airgap-images-amd64.tar.gz
 
 cp zot-${ZOT_VERSION}.tgz zot-chart.tgz
 oras push "ghcr.io/githedgehog/fabricator/zot-airgap:${ZOT_VERSION}" zot-airgap-images-amd64.tar.gz zot-chart.tgz
@@ -88,7 +89,8 @@ docker pull --platform linux/amd64 "ghcr.io/githedgehog/fabricator/cert-manager-
 docker pull --platform linux/amd64 "ghcr.io/githedgehog/fabricator/cert-manager-acmesolver:${CERT_MANAGER_VERSION}"
 docker pull --platform linux/amd64 "ghcr.io/githedgehog/fabricator/cert-manager-startupapicheck:${CERT_MANAGER_VERSION}"
 
-docker save -o cert-manager-airgap-images-amd64.tar.gz ghcr.io/githedgehog/fabricator/cert-manager-{controller,webhook,cainjector,acmesolver,startupapicheck}:${CERT_MANAGER_VERSION}
+docker save -o cert-manager-airgap-images-amd64.tar ghcr.io/githedgehog/fabricator/cert-manager-{controller,webhook,cainjector,acmesolver,startupapicheck}:${CERT_MANAGER_VERSION}
+pigz -v -c cert-manager-airgap-images-amd64.tar > cert-manager-airgap-images-amd64.tar.gz
 
 cp cert-manager-${CERT_MANAGER_VERSION}.tgz cert-manager-chart.tgz
 oras push "ghcr.io/githedgehog/fabricator/cert-manager-airgap:${CERT_MANAGER_VERSION}" cert-manager-airgap-images-amd64.tar.gz cert-manager-chart.tgz

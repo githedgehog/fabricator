@@ -38,21 +38,9 @@ var configTmpl string
 
 // TODO maybe make an interface for the component? comp.Interface
 var (
-	_ comp.KubeInstall   = InstallCert
 	_ comp.KubeInstall   = Install
 	_ comp.ListArtifacts = Artifacts
 )
-
-func InstallCert(cfg fabapi.Fabricator) ([]client.Object, error) {
-	return []client.Object{
-		comp.Certificate("registry", comp.CertificateSpec{
-			DNSNames:    []string{fmt.Sprintf("%s.%s.svc.%s", ServiceName, comp.FabNamespace, comp.ClusterDomain)},
-			IPAddresses: []string{string(cfg.Spec.Config.Control.VIP)},
-			IssuerRef:   comp.IssuerRef(comp.FabCAIssuer),
-			SecretName:  TLSSecret,
-		}),
-	}, nil
-}
 
 func Install(cfg fabapi.Fabricator) ([]client.Object, error) {
 	version := string(cfg.Status.Versions.Platform.Zot)
@@ -87,8 +75,14 @@ func Install(cfg fabapi.Fabricator) ([]client.Object, error) {
 	releaseName := "zot"
 
 	return []client.Object{
-		comp.HelmChart(cfg, releaseName, ChartRef, version, false, values),
-		comp.Service(ServiceName, comp.ServiceSpec{
+		comp.NewCertificate("registry", comp.CertificateSpec{
+			DNSNames:    []string{fmt.Sprintf("%s.%s.svc.%s", ServiceName, comp.FabNamespace, comp.ClusterDomain)},
+			IPAddresses: []string{string(cfg.Spec.Config.Control.VIP)},
+			IssuerRef:   comp.NewIssuerRef(comp.FabCAIssuer),
+			SecretName:  TLSSecret,
+		}),
+		comp.NewHelmChart(cfg, releaseName, ChartRef, version, AirgapChartName, false, values),
+		comp.NewService(ServiceName, comp.ServiceSpec{
 			Selector: map[string]string{
 				"app.kubernetes.io/instance": releaseName,
 				"app.kubernetes.io/name":     releaseName,
