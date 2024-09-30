@@ -74,12 +74,11 @@ func getDisks() *BlockDevices {
 	lsblkCmd.Stderr = &stderr
 
 	stdout, err := lsblkCmd.Output()
-
 	if err != nil {
-		slog.Error("lsblk error", "Stderr", stderr.String())
+		return fmt.Errorf("lsblk error %s: %w", stderr.String(), err)
 	}
 	if err = json.Unmarshal(stdout, disks); err != nil {
-		slog.Error("Unmarshal from lsblk", err.Error())
+		return fmt.Errorf("Error from Unmarshal on lsblk output: %w", err)
 	}
 
 	slices.SortFunc(disks.Devices, func(a, b *BlockDevice) int {
