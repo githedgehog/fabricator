@@ -10,18 +10,20 @@ import (
 	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
 	helmapi "github.com/k3s-io/helm-controller/pkg/apis/helm.cattle.io/v1"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
+	appsapi "k8s.io/api/apps/v1"
 	coreapi "k8s.io/api/core/v1"
 	metaapi "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlutil "sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/scheme"
 )
 
 const (
 	ClusterDomain        = "cluster.local"
-	Namespace            = "fab"
+	FabName              = "default"
+	FabNamespace         = "fab"
 	RegPrefix            = "githedgehog"
 	FabCAIssuer          = "fab-ca"
-	FabCACertificate     = FabCAIssuer
 	FabCASecret          = FabCAIssuer
 	FabCAConfigMap       = FabCAIssuer
 	RegistryAdminSecret  = "registry-admin"
@@ -44,6 +46,9 @@ type (
 	CertificatePrivateKey = cmapi.CertificatePrivateKey
 	ServiceSpec           = coreapi.ServiceSpec
 	ServicePort           = coreapi.ServicePort
+	Node                  = coreapi.Node
+	Deployment            = appsapi.Deployment
+	Issuer                = cmapi.Issuer
 )
 
 const (
@@ -57,6 +62,37 @@ const (
 	ProtocolTCP  = coreapi.ProtocolTCP
 	ProtocolUDP  = coreapi.ProtocolUDP
 	ProtocolSCTP = coreapi.ProtocolSCTP
+)
+
+const (
+	NodeReady            = coreapi.NodeReady
+	DeploymentAvailable  = appsapi.DeploymentAvailable
+	IssuerConditionReady = cmapi.IssuerConditionReady
+	ConditionTrue        = coreapi.ConditionTrue
+	CMConditionTrue      = cmmeta.ConditionTrue
+)
+
+var (
+	CoreAPISchemeBuilder = &scheme.Builder{
+		GroupVersion:  coreapi.SchemeGroupVersion,
+		SchemeBuilder: coreapi.SchemeBuilder,
+	}
+	AppsAPISchemeBuilder = &scheme.Builder{
+		GroupVersion:  appsapi.SchemeGroupVersion,
+		SchemeBuilder: appsapi.SchemeBuilder,
+	}
+	HelmAPISchemeBuilder = &scheme.Builder{
+		GroupVersion:  helmapi.SchemeGroupVersion,
+		SchemeBuilder: helmapi.SchemeBuilder,
+	}
+	CMApiSchemeBuilder = &scheme.Builder{
+		GroupVersion:  cmapi.SchemeGroupVersion,
+		SchemeBuilder: cmapi.SchemeBuilder,
+	}
+	CMMetaSchemeBuilder = &scheme.Builder{
+		GroupVersion:  cmmeta.SchemeGroupVersion,
+		SchemeBuilder: cmmeta.SchemeBuilder,
+	}
 )
 
 var ErrUnsupportedKind = fmt.Errorf("unsupported kind")
@@ -88,7 +124,7 @@ func Duration(d time.Duration) *metaapi.Duration {
 	return &metaapi.Duration{Duration: d}
 }
 
-func HelmChart(cfg fabapi.Fabricator, name, chart, version string, abortOnFail bool, values string) client.Object {
+func NewHelmChart(cfg fabapi.Fabricator, name, chart, version, bootstrapChart string, abortOnFail bool, values string) client.Object {
 	failurePolicy := ""
 	if abortOnFail {
 		failurePolicy = "abort"
@@ -96,7 +132,7 @@ func HelmChart(cfg fabapi.Fabricator, name, chart, version string, abortOnFail b
 
 	var auth, ca *LocalObjectReference
 
-	if !cfg.Spec.IsBootstrap {
+	if !cfg.Status.IsBootstrap {
 		auth = &LocalObjectReference{
 			Name: RegistryReaderSecret,
 		}
@@ -113,12 +149,12 @@ func HelmChart(cfg fabapi.Fabricator, name, chart, version string, abortOnFail b
 		},
 		ObjectMeta: metaapi.ObjectMeta{
 			Name:      name,
-			Namespace: Namespace,
+			Namespace: FabNamespace,
 		},
 		Spec: helmapi.HelmChartSpec{
-			Chart:           ChartURL(cfg, chart, version),
+			Chart:           ChartURL(cfg, chart, bootstrapChart),
 			Version:         version,
-			TargetNamespace: Namespace,
+			TargetNamespace: FabNamespace,
 			CreateNamespace: true,
 			FailurePolicy:   failurePolicy,
 			AuthSecret:      auth,
@@ -130,7 +166,7 @@ func HelmChart(cfg fabapi.Fabricator, name, chart, version string, abortOnFail b
 	}
 }
 
-func Issuer(name string, spec cmapi.IssuerSpec) client.Object {
+func NewIssuer(name string, spec cmapi.IssuerSpec) client.Object {
 	return &cmapi.Issuer{
 		TypeMeta: metaapi.TypeMeta{
 			APIVersion: cmapi.SchemeGroupVersion.String(),
@@ -138,13 +174,13 @@ func Issuer(name string, spec cmapi.IssuerSpec) client.Object {
 		},
 		ObjectMeta: metaapi.ObjectMeta{
 			Name:      name,
-			Namespace: Namespace,
+			Namespace: FabNamespace,
 		},
 		Spec: spec,
 	}
 }
 
-func Certificate(name string, spec CertificateSpec) client.Object {
+func NewCertificate(name string, spec CertificateSpec) client.Object {
 	return &cmapi.Certificate{
 		TypeMeta: metaapi.TypeMeta{
 			APIVersion: cmapi.SchemeGroupVersion.String(),
@@ -152,13 +188,13 @@ func Certificate(name string, spec CertificateSpec) client.Object {
 		},
 		ObjectMeta: metaapi.ObjectMeta{
 			Name:      name,
-			Namespace: Namespace,
+			Namespace: FabNamespace,
 		},
 		Spec: spec,
 	}
 }
 
-func IssuerRef(name string) CMObjectReference {
+func NewIssuerRef(name string) CMObjectReference {
 	return CMObjectReference{
 		Group: "cert-manager.io",
 		Kind:  "Issuer",
@@ -166,7 +202,19 @@ func IssuerRef(name string) CMObjectReference {
 	}
 }
 
-func Secret(name string, data map[string]string) client.Object {
+func NewNamespace(name string) client.Object {
+	return &coreapi.Namespace{
+		TypeMeta: metaapi.TypeMeta{
+			APIVersion: coreapi.SchemeGroupVersion.String(),
+			Kind:       "Namespace",
+		},
+		ObjectMeta: metaapi.ObjectMeta{
+			Name: name,
+		},
+	}
+}
+
+func NewSecret(name string, data map[string]string) client.Object {
 	// TODO base64 encode data and Data instead of StringData so DeepEqual works correctly
 
 	return &coreapi.Secret{
@@ -176,13 +224,13 @@ func Secret(name string, data map[string]string) client.Object {
 		},
 		ObjectMeta: metaapi.ObjectMeta{
 			Name:      name,
-			Namespace: Namespace,
+			Namespace: FabNamespace,
 		},
 		StringData: data,
 	}
 }
 
-func ConfigMap(name string, data map[string]string) client.Object {
+func NewConfigMap(name string, data map[string]string) client.Object {
 	return &coreapi.ConfigMap{
 		TypeMeta: metaapi.TypeMeta{
 			APIVersion: coreapi.SchemeGroupVersion.String(),
@@ -190,13 +238,13 @@ func ConfigMap(name string, data map[string]string) client.Object {
 		},
 		ObjectMeta: metaapi.ObjectMeta{
 			Name:      name,
-			Namespace: Namespace,
+			Namespace: FabNamespace,
 		},
 		Data: data,
 	}
 }
 
-func Service(name string, spec coreapi.ServiceSpec) client.Object {
+func NewService(name string, spec coreapi.ServiceSpec) client.Object {
 	return &coreapi.Service{
 		TypeMeta: metaapi.TypeMeta{
 			APIVersion: coreapi.SchemeGroupVersion.String(),
@@ -204,7 +252,7 @@ func Service(name string, spec coreapi.ServiceSpec) client.Object {
 		},
 		ObjectMeta: metaapi.ObjectMeta{
 			Name:      name,
-			Namespace: Namespace,
+			Namespace: FabNamespace,
 		},
 		Spec: spec,
 	}
@@ -231,6 +279,13 @@ func CreateOrUpdate(ctx context.Context, kube client.Client, obj client.Object) 
 
 			return nil
 		})
+	case *cmapi.Issuer:
+		tmp := &cmapi.Issuer{ObjectMeta: obj.ObjectMeta}
+		res, err = ctrlutil.CreateOrUpdate(ctx, kube, tmp, func() error {
+			tmp.Spec = obj.Spec
+
+			return nil
+		})
 	case *coreapi.Secret:
 		tmp := &coreapi.Secret{ObjectMeta: obj.ObjectMeta}
 		res, err = ctrlutil.CreateOrUpdate(ctx, kube, tmp, func() error {
@@ -244,6 +299,13 @@ func CreateOrUpdate(ctx context.Context, kube client.Client, obj client.Object) 
 		tmp := &coreapi.ConfigMap{ObjectMeta: obj.ObjectMeta}
 		res, err = ctrlutil.CreateOrUpdate(ctx, kube, tmp, func() error {
 			tmp.Data = obj.Data
+
+			return nil
+		})
+	case *coreapi.Service:
+		tmp := &coreapi.Service{ObjectMeta: obj.ObjectMeta}
+		res, err = ctrlutil.CreateOrUpdate(ctx, kube, tmp, func() error {
+			tmp.Spec = obj.Spec
 
 			return nil
 		})

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
 )
 
 const (
@@ -12,10 +13,8 @@ const (
 	RegistryPrefix = "githedgehog"
 	OCISchema      = "oci://"
 
-	BootstrapImageRepo    = "ghcr.io"
-	BootstrapStatic       = "https://%{KUBERNETES_API}%/static"
-	BootstrapStaticPrefix = "fab"
-	BootstrapStaticCharts = BootstrapStatic + BootstrapStaticPrefix
+	BootstrapImageRepo = "ghcr.io"
+	BootstrapStatic    = "https://%{KUBERNETES_API}%/static"
 )
 
 func RegistryURL(cfg fabapi.Fabricator) string {
@@ -24,22 +23,21 @@ func RegistryURL(cfg fabapi.Fabricator) string {
 
 func ImageURL(cfg fabapi.Fabricator, name string) string {
 	// TODO custom build image archives so we don't need to custom handle it here?
-	if cfg.Spec.IsBootstrap {
+	if cfg.Status.IsBootstrap {
 		return joinURLParts(BootstrapImageRepo, RegistryPrefix, name)
 	}
 
 	return joinURLParts(RegistryURL(cfg), RegistryPrefix, name)
 }
 
-func ChartURL(cfg fabapi.Fabricator, name, ver string) string {
-	if cfg.Spec.IsBootstrap {
-		ver = strings.TrimPrefix(ver, "v")
-
-		if strings.Contains(name, "/") {
-			name = name[strings.LastIndex(name, "/")+1:]
+// TODO change API for proper err handling
+func ChartURL(cfg fabapi.Fabricator, name, bootstrap string) string {
+	if cfg.Status.IsBootstrap {
+		if len(bootstrap) == 0 {
+			return "<missing bootstrap chart>"
 		}
 
-		return joinURLParts(BootstrapStaticCharts, fmt.Sprintf("%s-%s.tgz", name, ver))
+		return joinURLParts(BootstrapStatic, k3s.BootstrapChartsPrefix, bootstrap)
 	}
 
 	return OCISchema + joinURLParts(RegistryURL(cfg), RegistryPrefix, name)

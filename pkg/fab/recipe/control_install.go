@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"time"
 
@@ -16,9 +18,12 @@ import (
 	"go.githedgehog.com/fabric/pkg/util/logutil"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab"
+	"go.githedgehog.com/fabricator/pkg/fab/comp"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/certmanager"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/zot"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
-	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -125,9 +130,31 @@ func (c *ControlInstall) Run(ctx context.Context) error {
 		return fmt.Errorf("writing install marker: %w", err)
 	}
 
-	if err := c.k3sInstall(ctx); err != nil {
+	kube, err := c.installK8s(ctx)
+	if err != nil {
 		return fmt.Errorf("installing k3s: %w", err)
 	}
+
+	c.Fab.Status.IsBootstrap = true
+
+	if err := kube.Create(ctx, comp.NewNamespace(comp.FabNamespace)); err != nil && !apierrors.IsAlreadyExists(err) {
+		return fmt.Errorf("creating namespace %q: %w", comp.FabNamespace, err)
+	}
+
+	if err := c.installCertManager(ctx, kube); err != nil {
+		return fmt.Errorf("installing cert-manager: %w", err)
+	}
+
+	if err := c.installFabCA(ctx, kube); err != nil {
+		return fmt.Errorf("installing fab-ca: %w", err)
+	}
+
+	if err := c.installZot(ctx, kube); err != nil {
+		return fmt.Errorf("installing zot: %w", err)
+	}
+
+	// we need to upload "non-bootstrap" fab config for fabricator
+	c.Fab.Status.IsBootstrap = false
 
 	if err := os.WriteFile(InstallMarkerFile, []byte(InstallMarkerComplete), 0o644); err != nil { //nolint:gosec
 		return fmt.Errorf("writing install marker: %w", err)
@@ -164,35 +191,55 @@ func (c *ControlInstall) copyFile(src, dst string, mode os.FileMode) error {
 	return nil
 }
 
-func (c *ControlInstall) k3sInstall(ctx context.Context) error {
+func (c *ControlInstall) installK8s(ctx context.Context) (client.Client, error) {
 	slog.Info("Installing k3s")
 
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
 	if err := c.copyFile(k3s.BinName, filepath.Join(k3s.BinDir, k3s.BinName), 0o755); err != nil {
-		return fmt.Errorf("copying k3s bin: %w", err)
+		return nil, fmt.Errorf("copying k3s bin: %w", err)
 	}
 
 	if err := os.MkdirAll(k3s.ImagesDir, 0o755); err != nil {
-		return fmt.Errorf("creating k3s images dir %q: %w", k3s.ImagesDir, err)
+		return nil, fmt.Errorf("creating k3s images dir %q: %w", k3s.ImagesDir, err)
+	}
+
+	if err := os.MkdirAll(k3s.ChartsDir, 0o755); err != nil {
+		return nil, fmt.Errorf("creating k3s static dir %q: %w", k3s.ChartsDir, err)
 	}
 
 	if err := c.copyFile(k3s.AirgapName, filepath.Join(k3s.ImagesDir, k3s.AirgapName), 0o644); err != nil {
-		return fmt.Errorf("copying k3s airgap: %w", err)
+		return nil, fmt.Errorf("copying k3s airgap: %w", err)
+	}
+
+	if err := c.copyFile(certmanager.AirgapImageName, filepath.Join(k3s.ImagesDir, certmanager.AirgapImageName), 0o644); err != nil {
+		return nil, fmt.Errorf("copying cert-manager airgap image: %w", err)
+	}
+
+	if err := c.copyFile(certmanager.AirgapChartName, filepath.Join(k3s.ChartsDir, certmanager.AirgapChartName), 0o644); err != nil {
+		return nil, fmt.Errorf("copying cert-manager airgap chart: %w", err)
+	}
+
+	if err := c.copyFile(zot.AirgapImageName, filepath.Join(k3s.ImagesDir, zot.AirgapImageName), 0o644); err != nil {
+		return nil, fmt.Errorf("copying zot airgap image: %w", err)
+	}
+
+	if err := c.copyFile(zot.AirgapChartName, filepath.Join(k3s.ChartsDir, zot.AirgapChartName), 0o644); err != nil {
+		return nil, fmt.Errorf("copying zot airgap chart: %w", err)
 	}
 
 	k3sCfg, err := k3s.Config(c.Fab, c.Control)
 	if err != nil {
-		return fmt.Errorf("k3s config: %w", err)
+		return nil, fmt.Errorf("k3s config: %w", err)
 	}
 
 	if err := os.MkdirAll(k3s.ConfigDir, 0o755); err != nil {
-		return fmt.Errorf("creating k3s config dir %q: %w", k3s.ConfigPath, err)
+		return nil, fmt.Errorf("creating k3s config dir %q: %w", k3s.ConfigPath, err)
 	}
 
 	if err := os.WriteFile(k3s.ConfigPath, []byte(k3sCfg), 0o644); err != nil { //nolint:gosec
-		return fmt.Errorf("writing file %q: %w", k3s.ConfigPath, err)
+		return nil, fmt.Errorf("writing file %q: %w", k3s.ConfigPath, err)
 	}
 
 	slog.Debug("Running k3s install")
@@ -206,14 +253,175 @@ func (c *ControlInstall) k3sInstall(ctx context.Context) error {
 	cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "k3s: ")
 
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("running k3s install: %w", err)
+		return nil, fmt.Errorf("running k3s install: %w", err)
 	}
 
 	slog.Debug("Waiting for k8s node ready")
 
-	kube, err := kubeutil.NewClientWithCore(ctx, k3s.KubeConfigPath)
+	kube, err := kubeutil.NewClient(ctx, k3s.KubeConfigPath,
+		comp.CoreAPISchemeBuilder, comp.AppsAPISchemeBuilder,
+		comp.HelmAPISchemeBuilder, comp.CMApiSchemeBuilder, comp.CMMetaSchemeBuilder,
+	)
 	if err != nil {
-		return fmt.Errorf("creating kube client: %w", err)
+		return nil, fmt.Errorf("creating kube client: %w", err)
+	}
+
+	if err := waitKube(ctx, kube, c.Control.Name, "",
+		&comp.Node{}, func(obj *comp.Node) (bool, error) {
+			for _, cond := range obj.Status.Conditions {
+				if cond.Type == comp.NodeReady && cond.Status == comp.ConditionTrue {
+					return true, nil
+				}
+			}
+
+			return false, nil
+		}); err != nil {
+		return nil, fmt.Errorf("waiting for k8s node ready: %w", err)
+	}
+
+	return kube, nil
+}
+
+func (c *ControlInstall) installCertManager(ctx context.Context, kube client.Client) error {
+	slog.Info("Installing cert-manager")
+
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+
+	if err := comp.EnforceKubeInstall(ctx, kube, c.Fab, certmanager.Install); err != nil {
+		return fmt.Errorf("enforcing cert-manager install: %w", err)
+	}
+
+	slog.Debug("Waiting for cert-manager ready")
+
+	if err := waitKube(ctx, kube, "cert-manager-webhook", comp.FabNamespace,
+		&comp.Deployment{}, func(obj *comp.Deployment) (bool, error) {
+			for _, cond := range obj.Status.Conditions {
+				if cond.Type == comp.DeploymentAvailable && cond.Status == comp.ConditionTrue {
+					return true, nil
+				}
+			}
+
+			return false, nil
+		}); err != nil {
+		return fmt.Errorf("waiting for cert-manager ready: %w", err)
+	}
+
+	return nil
+}
+
+func (c *ControlInstall) installFabCA(ctx context.Context, kube client.Client) error {
+	slog.Info("Installing fab-ca")
+
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+
+	ca, err := certmanager.NewFabCA()
+	if err != nil {
+		return fmt.Errorf("creating fab-ca: %w", err)
+	}
+
+	if err := comp.EnforceKubeInstall(ctx, kube, c.Fab, certmanager.InstallFabCA(ca)); err != nil {
+		return fmt.Errorf("enforcing fab-ca install: %w", err)
+	}
+
+	if err := os.WriteFile("/etc/ssl/certs/hh-fab-ca.crt", []byte(ca.Crt), 0o644); err != nil { //nolint:gosec
+		return fmt.Errorf("writing fab-ca cert: %w", err)
+	}
+
+	cmd := exec.CommandContext(ctx, "update-ca-certificates")
+	cmd.Dir = c.WorkDir
+	cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "update-ca: ")
+	cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "update-ca: ")
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("running update-ca-certificates: %w", err)
+	}
+
+	slog.Debug("Waiting for fab-ca ready")
+
+	if err := waitKube(ctx, kube, comp.FabCAIssuer, comp.FabNamespace,
+		&comp.Issuer{}, func(obj *comp.Issuer) (bool, error) {
+			for _, cond := range obj.Status.Conditions {
+				if cond.Type == comp.IssuerConditionReady && cond.Status == comp.CMConditionTrue {
+					return true, nil
+				}
+			}
+
+			return false, nil
+		}); err != nil {
+		return fmt.Errorf("waiting for fab-ca issuer ready: %w", err)
+	}
+
+	return nil
+}
+
+func (c *ControlInstall) installZot(ctx context.Context, kube client.Client) error {
+	slog.Info("Installing zot")
+
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+
+	if err := comp.EnforceKubeInstall(ctx, kube, c.Fab, zot.Install); err != nil {
+		return fmt.Errorf("enforcing zot install: %w", err)
+	}
+
+	slog.Debug("Waiting for zot ready")
+
+	if err := waitKube(ctx, kube, "zot", comp.FabNamespace,
+		&comp.Deployment{}, func(obj *comp.Deployment) (bool, error) {
+			for _, cond := range obj.Status.Conditions {
+				if cond.Type == comp.DeploymentAvailable && cond.Status == comp.ConditionTrue {
+					return true, nil
+				}
+			}
+
+			return false, nil
+		}); err != nil {
+		return fmt.Errorf("waiting for zot ready: %w", err)
+	}
+
+	if err := waitURL(ctx, "https://"+comp.RegistryURL(c.Fab)+"/v2/_catalog"); err != nil {
+		return fmt.Errorf("waiting for zot endpoint: %w", err)
+	}
+
+	return nil
+}
+
+func waitKube[T client.Object](ctx context.Context, kube client.Client, name, ns string, obj T, check func(obj T) (bool, error)) error {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	t := reflect.TypeOf(obj).Elem().Name()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("waiting for ready: %w", ctx.Err())
+		case <-ticker.C:
+			if err := kube.Get(ctx, client.ObjectKey{Name: name, Namespace: ns}, obj); err != nil {
+				slog.Debug("Waiting for ready", "kind", t, "name", name, "err", err)
+
+				continue
+			}
+
+			ready, err := check(obj)
+			if err != nil {
+				slog.Debug("Checking ready", "kind", t, "name", name, "err", err)
+
+				continue
+			}
+			if ready {
+				return nil
+			}
+		}
+	}
+}
+
+func waitURL(ctx context.Context, url string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return fmt.Errorf("creating request: %w", err)
 	}
 
 	ticker := time.NewTicker(5 * time.Second)
@@ -222,22 +430,18 @@ func (c *ControlInstall) k3sInstall(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("waiting for k8s ready: %w", ctx.Err())
+			return fmt.Errorf("waiting for URL: %w", ctx.Err())
 		case <-ticker.C:
-
-			node := &corev1.Node{}
-			if err := kube.Get(ctx, client.ObjectKey{Name: c.Control.Name}, node); err != nil {
-				slog.Debug("Waiting for K8s node", "node", c.Control.Name, "err", err)
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				slog.Debug("Waiting for URL", "url", url, "err", err)
 
 				continue
 			}
+			resp.Body.Close()
 
-			for _, cond := range node.Status.Conditions {
-				if cond.Type == corev1.NodeReady && cond.Status == corev1.ConditionTrue {
-					slog.Debug("K8s node is ready", "node", c.Control.Name)
-
-					return nil
-				}
+			if resp.StatusCode == http.StatusOK {
+				return nil
 			}
 		}
 	}
