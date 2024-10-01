@@ -53,7 +53,6 @@ const (
 	InstallLog            = "/var/log/install.log"
 	HedgehogDir           = "/opt/hedgehog"
 	InstallMarkerFile     = HedgehogDir + "/.install"
-	InstallMarkerStarted  = "started"
 	InstallMarkerComplete = "complete"
 )
 
@@ -125,10 +124,6 @@ type ControlInstall struct {
 
 func (c *ControlInstall) Run(ctx context.Context) error {
 	slog.Info("Running control node installation")
-
-	if err := os.WriteFile(InstallMarkerFile, []byte(InstallMarkerStarted), 0o644); err != nil { //nolint:gosec
-		return fmt.Errorf("writing install marker: %w", err)
-	}
 
 	kube, err := c.installK8s(ctx)
 	if err != nil {

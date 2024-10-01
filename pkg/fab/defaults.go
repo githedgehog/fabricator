@@ -9,7 +9,7 @@ import (
 var DefaultConfig = fabapi.FabConfig{
 	Control: fabapi.ControlConfig{
 		ManagementSubnet:  "172.30.0.0/21", // 2046 hosts: 172.30.0.1 - 172.30.7.254
-		VIP:               "172.30.0.1",
+		VIP:               "172.30.0.1/32",
 		TLSSAN:            []string{},
 		KubeClusterSubnet: "172.28.0.0/16",
 		KubeServiceSubnet: "172.29.0.0/16",

@@ -177,7 +177,7 @@ func (c *Config) getHydration(ctx context.Context, kube client.Reader) (Hydratio
 	}
 
 	mgmtIPs := map[netip.Addr]bool{
-		controlVIP: true,
+		controlVIP.Addr(): true,
 	}
 
 	mgmtDHCPStart, err := c.Fab.Spec.Config.Fabric.ManagementDHCPStart.Parse()
@@ -461,11 +461,11 @@ func (c *Config) hydrate(ctx context.Context, kube client.Client) error {
 		return fmt.Errorf("parsing control VIP: %w", err)
 	}
 
-	if controlVIP != mgmtSubnet.Masked().Addr().Next() {
+	if controlVIP.Addr() != mgmtSubnet.Masked().Addr().Next() {
 		return fmt.Errorf("control VIP %s is not the first IP of the management subnet %s", controlVIP, mgmtSubnet) //nolint:goerr113
 	}
 
-	nextMgmtIP := controlVIP
+	nextMgmtIP := controlVIP.Addr()
 	for i := 0; i < 4; i++ { // reserve few IPs for future use
 		nextMgmtIP = nextMgmtIP.Next()
 	}

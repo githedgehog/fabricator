@@ -53,8 +53,8 @@ type FabConfig struct {
 
 type ControlConfig struct {
 	ManagementSubnet meta.Prefix `json:"managementSubnet,omitempty"` // TODO should be reserved
-	VIP              meta.Addr   `json:"controlVIP,omitempty"`       // TODO maybe ManagementVIP?
-	TLSSAN           []string    `json:"tlsSAN,omitempty"`           // TODO make sure 127.0.0.1 and controlVIP are always present
+	VIP              meta.Prefix `json:"controlVIP,omitempty"`
+	TLSSAN           []string    `json:"tlsSAN,omitempty"`
 
 	KubeClusterSubnet meta.Prefix `json:"kubeClusterSubnet,omitempty"`
 	KubeServiceSubnet meta.Prefix `json:"kubeServiceSubnet,omitempty"`
