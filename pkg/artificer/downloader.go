@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/containers/image/v5/types"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/vbauerster/mpb/v8"
 	"github.com/vbauerster/mpb/v8/decor"
@@ -225,12 +226,15 @@ func (d *Downloader) GetOCI(ctx context.Context, name string, version meta.Versi
 	return nil
 }
 
+func ociCacheName(name string, version meta.Version) string {
+	return strings.ReplaceAll(name+"@"+string(version), "/", "_") + ".oci"
+}
+
 func (d *Downloader) getOCI(ctx context.Context, name string, version meta.Version) (string, error) {
 	d.m.Lock()
 	defer d.m.Unlock()
 
-	cacheName := name + "@" + string(version)
-	cacheName = strings.ReplaceAll(cacheName, "/", "_") + ".oci"
+	cacheName := ociCacheName(name, version)
 	cachePath := filepath.Join(d.cacheDir, cacheName)
 
 	stat, err := os.Stat(cachePath)
@@ -248,11 +252,24 @@ func (d *Downloader) getOCI(ctx context.Context, name string, version meta.Versi
 		}
 		defer os.RemoveAll(tmp)
 
+		var srcAuth *types.DockerAuthConfig
+		if d.orasClient != nil && d.orasClient.Credential != nil {
+			creds, err := d.orasClient.Credential(ctx, d.repo)
+			if err != nil {
+				slog.Warn("Error getting docker credentials", "repo", d.repo, "err", err)
+			} else if creds.Username != "" && creds.Password != "" {
+				srcAuth = &types.DockerAuthConfig{
+					Username: creds.Username,
+					Password: creds.Password,
+				}
+			}
+		}
+
 		slog.Info("Downloading", "name", name, "version", version, "type", "oci")
 
 		src := "docker://" + strings.Trim(d.repo, "/") + "/" + strings.Trim(d.prefix, "/") + "/" + strings.Trim(name, "/") + ":" + string(version)
 		dst := "oci:" + tmp
-		if err := copyOCI(ctx, src, dst, nil, nil); err != nil {
+		if err := copyOCI(ctx, src, dst, srcAuth, nil); err != nil {
 			return "", fmt.Errorf("downloading OCI: '%s:%s': %w", name, version, err)
 		}
 
