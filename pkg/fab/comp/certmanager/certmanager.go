@@ -35,25 +35,53 @@ var _ comp.KubeInstall = Install
 func Install(cfg fabapi.Fabricator) ([]client.Object, error) {
 	version := string(cfg.Status.Versions.Platform.CertManager)
 
+	controllerRepo, err := comp.ImageURL(cfg, ControllerImageRef)
+	if err != nil {
+		return nil, fmt.Errorf("getting image URL for %q: %w", ControllerImageRef, err)
+	}
+
+	webhookRepo, err := comp.ImageURL(cfg, WebhookImageRef)
+	if err != nil {
+		return nil, fmt.Errorf("getting image URL for %q: %w", WebhookImageRef, err)
+	}
+
+	caInjectorRepo, err := comp.ImageURL(cfg, CAInjectorImageRef)
+	if err != nil {
+		return nil, fmt.Errorf("getting image URL for %q: %w", CAInjectorImageRef, err)
+	}
+
+	acmeSolverRepo, err := comp.ImageURL(cfg, ACMESolverImageRef)
+	if err != nil {
+		return nil, fmt.Errorf("getting image URL for %q: %w", ACMESolverImageRef, err)
+	}
+
+	startupAPICheckRepo, err := comp.ImageURL(cfg, StartupAPICheckImageRef)
+	if err != nil {
+		return nil, fmt.Errorf("getting image URL for %q: %w", StartupAPICheckImageRef, err)
+	}
+
 	values, err := tmplutil.FromTemplate("values", valuesTmpl, map[string]any{
-		"ControllerRepo":      comp.ImageURL(cfg, ControllerImageRef),
+		"ControllerRepo":      controllerRepo,
 		"ControllerTag":       version,
-		"WebhookRepo":         comp.ImageURL(cfg, WebhookImageRef),
+		"WebhookRepo":         webhookRepo,
 		"WebhookTag":          version,
-		"CAInjectorRepo":      comp.ImageURL(cfg, CAInjectorImageRef),
+		"CAInjectorRepo":      caInjectorRepo,
 		"CAInjectorTag":       version,
-		"ACMESolverRepo":      comp.ImageURL(cfg, ACMESolverImageRef),
+		"ACMESolverRepo":      acmeSolverRepo,
 		"ACMESolverTag":       version,
-		"StartupAPICheckRepo": comp.ImageURL(cfg, StartupAPICheckImageRef),
+		"StartupAPICheckRepo": startupAPICheckRepo,
 		"StartupAPICheckTag":  version,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("values: %w", err)
 	}
 
-	return []client.Object{
-		comp.NewHelmChart(cfg, "cert-manager", ChartRef, version, AirgapChartName, false, values),
-	}, nil
+	helmChart, err := comp.NewHelmChart(cfg, "cert-manager", ChartRef, version, AirgapChartName, false, values)
+	if err != nil {
+		return nil, fmt.Errorf("creating Helm chart: %w", err)
+	}
+
+	return []client.Object{helmChart}, nil
 }
 
 var _ comp.ListOCIArtifacts = Artifacts
