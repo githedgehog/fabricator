@@ -29,7 +29,7 @@ systemd:
 
         [Service]
         Type=oneshot
-        ExecStart=/opt/hedgehog/hhfab-flatcar-install
+        ExecStart=/opt/hedgehog/hhfab-flatcar-install /mnt/hedgehog
 
         [Install]
         WantedBy=default.target
