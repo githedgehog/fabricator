@@ -118,6 +118,7 @@ func Install(cfg fabapi.Fabricator) ([]client.Object, error) {
 	proxyValues, err := tmplutil.FromTemplate("proxy-values", proxyValuesTmpl, map[string]any{
 		"Repo": ProxyRef,
 		"Tag":  string(cfg.Status.Versions.Fabric.Proxy),
+		"Port": ProxyNodePort,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("proxy values: %w", err)
