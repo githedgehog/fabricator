@@ -32,36 +32,43 @@ type ControlInstallBuilder struct {
 	Fab        fabapi.Fabricator
 	Control    fabapi.ControlNode
 	Wiring     client.Reader
+	USBImage   bool
 	Downloader *artificer.Downloader
 }
 
 const (
-	FabName               = "fab.yaml"
-	WiringName            = "wiring.yaml"
-	InstallSuffix         = "-install"
-	InstallArchiveSuffix  = InstallSuffix + ".tgz"
-	InstallIgnitionSuffix = InstallSuffix + ".ign"
-	InstallHashSuffix     = InstallSuffix + ".inhash"
-	RecipeBin             = "hhfab-recipe"
+	FabName                      = "fab.yaml"
+	WiringName                   = "wiring.yaml"
+	InstallSuffix                = "-install"
+	InstallArchiveSuffix         = InstallSuffix + ".tgz"
+	InstallIgnitionSuffix        = InstallSuffix + ".ign"
+	InstallUSBImageWorkdirSuffix = InstallSuffix + "-usb.wip"
+	InstallUSBImageSuffix        = InstallSuffix + "-usb.img"
+	InstallHashSuffix            = InstallSuffix + ".inhash"
+	RecipeBin                    = "hhfab-recipe"
 )
 
 func (b *ControlInstallBuilder) Build(ctx context.Context) error {
 	installDir := filepath.Join(b.WorkDir, b.Control.Name+InstallSuffix)
 	installArchive := filepath.Join(b.WorkDir, b.Control.Name+InstallArchiveSuffix)
 	installIgnition := filepath.Join(b.WorkDir, b.Control.Name+InstallIgnitionSuffix)
-	installHash := filepath.Join(b.WorkDir, b.Control.Name+InstallHashSuffix)
+	installHashFile := filepath.Join(b.WorkDir, b.Control.Name+InstallHashSuffix)
 
 	newHash, err := b.hash(ctx)
 	if err != nil {
 		return fmt.Errorf("hashing: %w", err)
 	}
 
-	if existingHash, err := os.ReadFile(installHash); err == nil {
+	if existingHash, err := os.ReadFile(installHashFile); err == nil {
 		if string(existingHash) == newHash && isPresent(installDir, installArchive, installIgnition) {
 			slog.Info("Using existing installers")
 
 			return nil
 		}
+	}
+
+	if err := removeIfExists(installHashFile); err != nil {
+		return fmt.Errorf("removing hash file: %w", err)
 	}
 
 	slog.Info("Building installers")
@@ -74,6 +81,12 @@ func (b *ControlInstallBuilder) Build(ctx context.Context) error {
 	}
 	if err := removeIfExists(installIgnition); err != nil {
 		return fmt.Errorf("removing install ignition: %w", err)
+	}
+	if err := removeIfExists(filepath.Join(b.WorkDir, b.Control.Name+InstallUSBImageWorkdirSuffix)); err != nil {
+		return fmt.Errorf("removing install usb image workdir: %w", err)
+	}
+	if err := removeIfExists(filepath.Join(b.WorkDir, b.Control.Name+InstallUSBImageSuffix)); err != nil {
+		return fmt.Errorf("removing install usb image: %w", err)
 	}
 
 	if err := os.MkdirAll(installDir, 0o700); err != nil {
@@ -141,22 +154,28 @@ func (b *ControlInstallBuilder) Build(ctx context.Context) error {
 		return fmt.Errorf("printing wiring: %w", err)
 	}
 
-	ign, err := controlIgnition(b.Fab, b.Control)
-	if err != nil {
-		return fmt.Errorf("creating ignition: %w", err)
-	}
-
-	if err := os.WriteFile(installIgnition, ign, 0o600); err != nil {
-		return fmt.Errorf("writing ignition: %w", err)
-	}
-
 	// TODO OCI sync for airgap
 
-	if err := archiveTarGz(ctx, installDir, installArchive); err != nil {
-		return fmt.Errorf("archiving install: %w", err)
+	if b.USBImage {
+		if err := b.buildUSBImage(ctx); err != nil {
+			return fmt.Errorf("building USB image: %w", err)
+		}
+	} else {
+		if err := archiveTarGz(ctx, installDir, installArchive); err != nil {
+			return fmt.Errorf("archiving install: %w", err)
+		}
+
+		ign, err := controlIgnition(b.Fab, b.Control)
+		if err != nil {
+			return fmt.Errorf("creating ignition: %w", err)
+		}
+
+		if err := os.WriteFile(installIgnition, ign, 0o600); err != nil {
+			return fmt.Errorf("writing ignition: %w", err)
+		}
 	}
 
-	if err := os.WriteFile(installHash, []byte(newHash), 0o600); err != nil {
+	if err := os.WriteFile(installHashFile, []byte(newHash), 0o600); err != nil {
 		return fmt.Errorf("writing hash: %w", err)
 	}
 
@@ -217,6 +236,10 @@ func (b *ControlInstallBuilder) hash(ctx context.Context) (string, error) {
 
 	if err := apiutil.PrintWiring(ctx, b.Wiring, h); err != nil {
 		return "", fmt.Errorf("hashing wiring: %w", err)
+	}
+
+	if _, err := fmt.Fprintf(h, "%t", b.USBImage); err != nil {
+		return "", fmt.Errorf("hashing usb image flag: %w", err)
 	}
 
 	return base64.URLEncoding.EncodeToString(h.Sum(nil)), nil

@@ -402,8 +402,9 @@ func Run(ctx context.Context) error {
 				Flags:  append(defaultFlags, hMode),
 				Before: before(false),
 				Action: func(_ *cli.Context) error {
-					if err := hhfab.Build(ctx, workDir, cacheDir, hhfab.HydrateMode(hydrateMode), hhfab.BuildOpts{
-						Mode: hhfab.BuildModeManual, // TODO
+					if err := hhfab.Build(ctx, workDir, cacheDir, hhfab.BuildOpts{
+						HydrateMode: hhfab.HydrateMode(hydrateMode),
+						USBImage:    false, // TODO flag
 					}); err != nil {
 						return fmt.Errorf("building: %w", err)
 					}
@@ -475,12 +476,13 @@ func Run(ctx context.Context) error {
 						Action: func(c *cli.Context) error {
 							if err := hhfab.VLABUp(ctx, workDir, cacheDir, hhfab.VLABUpOpts{
 								HydrateMode: hhfab.HydrateMode(hydrateMode),
-								Recreate:    false, // TODO flag
+								Recreate:    false,                       // TODO flag
+								USBImage:    c.Bool(FlagNameControlsUSB), // TODO flag
 								VLABRunOpts: hhfab.VLABRunOpts{
 									KillStale:          c.Bool(FlagNameKillStale),
 									ControlsRestricted: c.Bool(FlagNameControlsRestricted),
 									ServersRestricted:  c.Bool(FlagNameServersRestricted),
-									ControlUSB:         c.Bool(FlagNameControlsUSB),
+									ControlUSB:         c.Bool(FlagNameControlsUSB), // TODO correct flag
 								},
 							}); err != nil {
 								return fmt.Errorf("running VLAB: %w", err)
