@@ -225,5 +225,5 @@ embed: ## Prepare the assets for embedding into the hhfab binary
 	cd $(OEMDIR) && find usr | cpio -o -H newc | gzip -f > oem.cpio.gz
 
 .PHONY: hhfab
-hhfab: embed ## Build the hhfab binary
+hhfab: generate embed ## Build the hhfab binary
 	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build --tags containers_image_openpgp -o ./bin/hhfab ./cmd/hhfab

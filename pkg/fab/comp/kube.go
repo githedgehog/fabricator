@@ -25,7 +25,7 @@ const (
 	RegPrefix      = "githedgehog"
 	FabCAIssuer    = "fab-ca"
 	FabCASecret    = FabCAIssuer
-	FabCAConfigMap = FabCAIssuer
+	FabCAConfigMap = FabCAIssuer // changing name will break fabric manager
 
 	RegistryUserAdmin        = "admin"
 	RegistryUserWriter       = "writer"

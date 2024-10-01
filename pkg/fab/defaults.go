@@ -23,7 +23,7 @@ var DefaultConfig = fabapi.FabConfig{
 		SpineASN:            65100,        // TODO probably switch to 32-bit ASNs
 		LeafASNStart:        65101,
 		LeafASNEnd:          65534,             // only 433 leafs
-		ProtocolSubnet:      "172.30.8.0/21",   // 1022 hosts: 172.30.8.1 - 172.30.11.254
+		ProtocolSubnet:      "172.30.8.0/22",   // 1022 hosts: 172.30.8.1 - 172.30.11.254
 		VTEPSubnet:          "172.30.12.0/22",  // 1022 hosts: 172.30.12.1 - 172.30.15.254
 		FabricSubnet:        "172.30.128.0/17", // 16384 /31 subnets: 172.30.128.1 - 172.30.255.254
 		BaseVPCCommunity:    "50000:0",         // TODO make sure it's really used
