@@ -168,6 +168,7 @@ func (b *ControlInstallBuilder) Build(ctx context.Context) error {
 		return fmt.Errorf("printing wiring: %w", err)
 	}
 
+	// TODO skip if not airgap
 	airgapArts, err := comp.CollectArtifacts(b.Fab,
 		flatcar.Artifacts, certmanager.Artifacts, zot.Artifacts, fabric.Artifacts,
 	)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -14,7 +15,20 @@ import (
 	"github.com/pkg/errors"
 	"github.com/vbauerster/mpb/v8"
 	"github.com/vbauerster/mpb/v8/decor"
+	"go.githedgehog.com/fabricator/api/meta"
 )
+
+func UploadOCIArchive(ctx context.Context, workDir, name string, version meta.Version, repo, prefix, username, password string) error {
+	cacheName := ociCacheName(name, version)
+	srcRef := "oci:" + filepath.Join(workDir, cacheName)
+	dstRef := "docker://" + strings.Trim(repo, "/") + "/" + strings.Trim(prefix, "/") + "/" + strings.Trim(name, "/") + ":" + string(version)
+
+	if err := copyOCI(ctx, srcRef, dstRef, nil, &types.DockerAuthConfig{Username: username, Password: password}); err != nil {
+		return errors.Wrapf(err, "error uploading OCI archive %s to %s", srcRef, dstRef)
+	}
+
+	return nil
+}
 
 func copyOCI(ctx context.Context, src, dst string, srcAuth, dstAuth *types.DockerAuthConfig) error {
 	srcRef, err := alltransports.ParseImageName(src)
@@ -76,9 +90,11 @@ func copyOCI(ctx context.Context, src, dst string, srcAuth, dstAuth *types.Docke
 	}()
 
 	var sourceInsecure types.OptionalBool
-	srcRefName := srcRef.DockerReference().Name()
-	if strings.HasPrefix(srcRefName, "127.0.0.1:") || strings.HasPrefix(srcRefName, "localhost:") {
-		sourceInsecure = types.OptionalBoolTrue
+	if srcRef.Transport().Name() == "docker" {
+		srcRefName := srcRef.DockerReference().Name()
+		if strings.HasPrefix(srcRefName, "127.0.0.1:") || strings.HasPrefix(srcRefName, "localhost:") {
+			sourceInsecure = types.OptionalBoolTrue
+		}
 	}
 
 	_, err = copy.Image(ctx, policyCtx, destRef, srcRef, &copy.Options{

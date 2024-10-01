@@ -17,9 +17,12 @@ import (
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
 	"go.githedgehog.com/fabric/pkg/util/logutil"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
+	"go.githedgehog.com/fabricator/pkg/artificer"
 	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/certmanager"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/fabric"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/flatcar"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/zot"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
@@ -148,8 +151,11 @@ func (c *ControlInstall) Run(ctx context.Context) error {
 		return fmt.Errorf("installing zot: %w", err)
 	}
 
-	// we need to upload "non-bootstrap" fab config for fabricator
+	// we should use in-cluster registry from now on
 	c.Fab.Status.IsBootstrap = false
+
+	// TODO install fabricator with config
+	// TODO install initial wiring
 
 	if err := os.WriteFile(InstallMarkerFile, []byte(InstallMarkerComplete), 0o644); err != nil { //nolint:gosec
 		return fmt.Errorf("writing install marker: %w", err)
@@ -392,6 +398,32 @@ func (c *ControlInstall) installZot(ctx context.Context, kube client.Client) err
 
 	if err := waitURL(ctx, "https://"+regURL+"/v2/_catalog"); err != nil {
 		return fmt.Errorf("waiting for zot endpoint: %w", err)
+	}
+
+	// TODO skip if not airgap
+	// TODO probably read from secret
+	if err := c.uploadAirgap(ctx, regURL, comp.RegistryUserWriter, users[comp.RegistryUserWriter]); err != nil {
+		return fmt.Errorf("uploading airgap artifacts: %w", err)
+	}
+
+	return nil
+}
+
+func (c *ControlInstall) uploadAirgap(ctx context.Context, regURL, username, password string) error {
+	slog.Info("Uploading airgap artifacts")
+
+	airgapArts, err := comp.CollectArtifacts(c.Fab,
+		flatcar.Artifacts, certmanager.Artifacts, zot.Artifacts, fabric.Artifacts,
+	)
+	if err != nil {
+		return fmt.Errorf("collecting airgap artifacts: %w", err)
+	}
+	for ref, version := range airgapArts {
+		slog.Debug("Uploading airgap artifact", "ref", ref, "version", version)
+
+		if err := artificer.UploadOCIArchive(ctx, c.WorkDir, ref, version, regURL, comp.RegPrefix, username, password); err != nil {
+			return fmt.Errorf("uploading airgap artifact %q: %w", ref, err)
+		}
 	}
 
 	return nil
