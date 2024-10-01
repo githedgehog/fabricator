@@ -46,7 +46,8 @@ helm repo add project-zot http://zotregistry.dev/helm-charts
 helm repo update project-zot
 
 helm pull project-zot/zot --version "${ZOT_CHART_VERSION}"
-mv zot-${ZOT_CHART_VERSION}.tgz "zot-${ZOT_VERSION}".tgz
+tar xzf "zot-${ZOT_CHART_VERSION}.tgz"
+helm package zot --version "${ZOT_VERSION}"
 helm push "zot-${ZOT_VERSION}.tgz" oci://ghcr.io/githedgehog/fabricator/charts
 
 skopeo copy "docker://ghcr.io/project-zot/zot-linux-amd64:${ZOT_VERSION}" "docker://ghcr.io/githedgehog/fabricator/zot:${ZOT_VERSION}"
