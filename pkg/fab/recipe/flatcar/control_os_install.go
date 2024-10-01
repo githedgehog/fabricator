@@ -1,0 +1,155 @@
+package flatcar
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+
+	"go.githedgehog.com/fabric/pkg/util/logutil"
+	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
+	"go.githedgehog.com/fabricator/pkg/fab"
+	"go.githedgehog.com/fabricator/pkg/fab/recipe"
+	"go.githedgehog.com/fabricator/pkg/util/apiutil"
+)
+
+const (
+	MountDir = "/mnt/rootdir"
+)
+
+func DoControlOSInstall(ctx context.Context, workDir string) error {
+	dirEntries, err := os.ReadDir(workDir)
+	if err != nil {
+		return fmt.Errorf("reading workdir %q: %w", workDir, err)
+	}
+
+	for _, dirEntry := range dirEntries {
+		if !dirEntry.IsDir() {
+			continue
+		}
+		if !strings.HasSuffix(dirEntry.Name(), recipe.InstallSuffix) {
+			continue
+		}
+
+		fabPath := filepath.Join(workDir, dirEntry.Name(), recipe.FabName)
+		if _, err := os.Stat(fabPath); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+
+			return fmt.Errorf("stat %q: %w", fabPath, err)
+		}
+
+		slog.Info("Loading Fabricator config", "path", fabPath)
+		installDir := filepath.Join(workDir, dirEntry.Name())
+
+		l := apiutil.NewFabLoader()
+		fabData, err := os.ReadFile(filepath.Join(installDir, recipe.FabName))
+		if err != nil {
+			return fmt.Errorf("reading fabricator config: %w", err)
+		}
+		if err := l.LoadAdd(ctx, fabData); err != nil {
+			return fmt.Errorf("loading fabricator config: %w", err)
+		}
+
+		f, controls, err := fab.GetFabAndControls(ctx, l.GetClient(), false)
+		if err != nil {
+			return fmt.Errorf("getting fabricator and controls: %w", err)
+		}
+		if len(controls) != 1 {
+			return fmt.Errorf("expected exactly one control node, got %d", len(controls)) //nolint:goerr113
+		}
+
+		return (&ControlOSInstal{
+			WorkDir:    workDir,
+			InstallDir: installDir,
+			Fab:        f,
+			Control:    controls[0],
+		}).Run(ctx)
+	}
+
+	return nil
+}
+
+type ControlOSInstal struct {
+	WorkDir    string
+	InstallDir string
+	Fab        fabapi.Fabricator
+	Control    fabapi.ControlNode
+}
+
+func (i *ControlOSInstal) Run(ctx context.Context) error {
+	ignition := filepath.Join(i.WorkDir, recipe.ControlISOIgnition)
+	dev := i.Control.Spec.Bootstrap.Disk
+	img := filepath.Join(i.WorkDir, "flatcar_production_image.bin.bz2") // TODO const
+
+	if err := i.execCmd(ctx, true, "lsblk", dev); err != nil {
+		return fmt.Errorf("checking disk %q: %w", dev, err)
+	}
+
+	slog.Info("Installing Flatcar", "dev", dev)
+	if err := i.execCmd(ctx, true, "flatcar-install", "-i", ignition, "-d", dev, "-f", img); err != nil {
+		return fmt.Errorf("installing flatcar: %w", err)
+	}
+
+	slog.Info("Uploading control installer to installed Flatcar")
+	if err := i.execCmd(ctx, true, "partprobe", dev); err != nil {
+		return fmt.Errorf("partprobing: %w", err)
+	}
+
+	if err := os.MkdirAll(MountDir, 0o755); err != nil {
+		return fmt.Errorf("creating mount dir: %w", err)
+	}
+
+	// 9 is the partition number for the root partition
+	if err := i.execCmd(ctx, true, "mount", "-t", "auto", dev+"9", MountDir); err != nil {
+		return fmt.Errorf("mounting root: %w", err)
+	}
+
+	target := filepath.Join(MountDir, "/opt/hedgehog/install")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		return fmt.Errorf("creating target dir: %w", err)
+	}
+
+	if err := i.execCmd(ctx, true, "rsync", "-azP", i.InstallDir, target); err != nil {
+		return fmt.Errorf("rsyncing control-install: %w", err)
+	}
+
+	if err := i.execCmd(ctx, true, "umount", MountDir); err != nil {
+		return fmt.Errorf("unmounting root: %w", err)
+	}
+
+	slog.Info("Rebooting to installed Flatcar, USB drive can be removed")
+	if err := i.execCmd(ctx, true, "shutdown", "-r", "+15s", "Flatcar installed, rebooting to installed system"); err != nil {
+		return fmt.Errorf("rebooting: %w", err)
+	}
+
+	return nil
+}
+
+func (i *ControlOSInstal) execCmd(ctx context.Context, sudo bool, cmdName string, args ...string) error { //nolint:unparam
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	cmdToRun := cmdName
+	argsSummary := strings.Join(args, " ")
+	if sudo {
+		cmdToRun = "sudo"
+		args = append([]string{cmdName}, args...)
+	}
+
+	slog.Debug("Running command", "cmd", cmdName+" "+argsSummary)
+	cmd := exec.CommandContext(ctx, cmdToRun, args...)
+	cmd.Dir = i.WorkDir
+	cmd.Stdout = logutil.NewSink(ctx, slog.Debug, cmdName+": ")
+	cmd.Stderr = logutil.NewSink(ctx, slog.Debug, cmdName+": ")
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("running %q: %w", cmdName, err)
+	}
+
+	return nil
+}

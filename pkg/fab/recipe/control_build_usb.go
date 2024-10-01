@@ -18,7 +18,8 @@ import (
 )
 
 const (
-	ControlISORootRef = "fabricator/control-iso-root"
+	ControlISORootRef  = "fabricator/control-iso-root"
+	ControlISOIgnition = "ignition.json"
 )
 
 var (
@@ -148,12 +149,6 @@ func (b *ControlInstallBuilder) buildUSBImage(ctx context.Context) error {
 
 	slog.Debug("Copying files to installer USB image", "fs", backpackFS.Label(), "control", b.Control.Name)
 
-	// TODO need to use fab.yaml directly
-	// 	{
-	// 	if err := diskFSCopyFile("/", workdir+"/flatcar-install.yaml", backpackFS); err != nil {
-	// 		return fmt.Errorf("copying flatcar-install.yaml: %w", err)
-	// 	}
-	// }
 	if err := diskFSCopyFile("/", filepath.Join(workdir, "/flatcar_production_image.bin.bz2"), backpackFS); err != nil {
 		return fmt.Errorf("copying flatcar image: %w", err)
 	}
@@ -162,15 +157,17 @@ func (b *ControlInstallBuilder) buildUSBImage(ctx context.Context) error {
 		return fmt.Errorf("copying control-install: %w", err)
 	}
 
-	// TODO build proper ignition
-	// {
-	// 	basePath := filepath.Dir(workdir)                     //.hhfab
-	// 	ignitionPath := filepath.Join(basePath, "control-os") //.hhfab/control-os/
-
-	// 	if err := diskFSCopyFile("/", ignitionPath+"/ignition.json", backpackFS); err != nil {
-	// 		return fmt.Errorf("Error copying ignition.json: %w", err)
-	// 	}
-	// }
+	ign, err := controlIgnition(b.Fab, b.Control)
+	if err != nil {
+		return fmt.Errorf("creating ignition: %w", err)
+	}
+	ignFile, err := backpackFS.OpenFile(filepath.Join("/", ControlISOIgnition), os.O_CREATE|os.O_RDWR|os.O_SYNC)
+	if err != nil {
+		return fmt.Errorf("creating ignition file: %w", err)
+	}
+	if _, err := ignFile.Write(ign); err != nil {
+		return fmt.Errorf("writing ignition: %w", err)
+	}
 
 	if err := espFS.(*fat32.FileSystem).Commit(); err != nil {
 		return fmt.Errorf("commiting esp FS: %w", err)
@@ -201,7 +198,7 @@ func diskFSCopyTree(workdir, localDirName string, destination filesystem.FileSys
 		} else {
 			dstPath := filepath.Join("/", relPath)
 			if err := diskFSCopyFile(dstPath, path, destination); err != nil {
-				return fmt.Errorf("copying file %q to %q: %w", localDirName, workdir, err)
+				return fmt.Errorf("copying file %q to %q: %w", localDirName, dstPath, err)
 			}
 		}
 

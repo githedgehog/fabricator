@@ -221,7 +221,7 @@ embed: ## Prepare the assets for embedding into the hhfab binary
 	touch $(OEMDIR)/oem.cpio.gz
 	mkdir -p $(OEMDIR)/usr/share/oem
 	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build --tags containers_image_openpgp -o $(OEMDIR)/hhfab-flatcar-install ./cmd/hhfab-flatcar-install
-	$(BUTANE) --strict --output $(OEMDIR)/usr/share/oem/config.ign --files-dir $(OEMDIR) ./pkg/fab/recipe/control_build_iso_butane.yaml
+	$(BUTANE) --strict --output $(OEMDIR)/usr/share/oem/config.ign --files-dir $(OEMDIR) ./pkg/fab/recipe/control_build_usb_butane.yaml
 	cd $(OEMDIR) && find usr | cpio -o -H newc | gzip -f > oem.cpio.gz
 
 .PHONY: hhfab
