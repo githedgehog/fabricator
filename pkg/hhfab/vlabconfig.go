@@ -579,7 +579,7 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 				}
 			} else if nicType == NICTypeUsernet {
 				if vm.Type == VMTypeSwitch {
-					return nil, fmt.Errorf("usernet NICs are not supported for switch VM %q", name) //nolint:goerr113
+					slog.Warn("Usernet NICs are not supposed to be used for switch", "vm", name)
 				}
 
 				sshPort := getSSHPort(vmID)
