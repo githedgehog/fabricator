@@ -64,10 +64,15 @@ func Install(cfg fabapi.Fabricator) ([]client.Object, error) {
 
 	releaseName := "zot"
 
+	controlVIP, err := cfg.Spec.Config.Control.VIP.Parse()
+	if err != nil {
+		return nil, fmt.Errorf("parsing control VIP: %w", err)
+	}
+
 	return []client.Object{
 		comp.NewCertificate("registry", comp.CertificateSpec{
 			DNSNames:    []string{fmt.Sprintf("%s.%s.svc.%s", ServiceName, comp.FabNamespace, comp.ClusterDomain)},
-			IPAddresses: []string{string(cfg.Spec.Config.Control.VIP)},
+			IPAddresses: []string{controlVIP.Addr().String()},
 			IssuerRef:   comp.NewIssuerRef(comp.FabCAIssuer),
 			SecretName:  TLSSecret,
 		}),

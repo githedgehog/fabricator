@@ -20,6 +20,7 @@ import (
 const (
 	ControlISORootRef  = "fabricator/control-iso-root"
 	ControlISOIgnition = "ignition.json"
+	ControlOSTarget    = "/opt/hedgehog/install"
 )
 
 var (
@@ -157,7 +158,8 @@ func (b *ControlInstallBuilder) buildUSBImage(ctx context.Context) error {
 		return fmt.Errorf("copying control-install: %w", err)
 	}
 
-	ign, err := controlIgnition(b.Fab, b.Control)
+	targetDir := filepath.Join(ControlOSTarget, b.Control.Name+InstallSuffix)
+	ign, err := controlIgnition(b.Fab, b.Control, targetDir)
 	if err != nil {
 		return fmt.Errorf("creating ignition: %w", err)
 	}

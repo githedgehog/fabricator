@@ -109,7 +109,7 @@ func (i *ControlOSInstal) Run(ctx context.Context) error {
 		return fmt.Errorf("mounting root: %w", err)
 	}
 
-	target := filepath.Join(MountDir, "/opt/hedgehog/install")
+	target := filepath.Join(MountDir, recipe.ControlOSTarget)
 	if err := os.MkdirAll(target, 0o755); err != nil {
 		return fmt.Errorf("creating target dir: %w", err)
 	}
@@ -123,7 +123,7 @@ func (i *ControlOSInstal) Run(ctx context.Context) error {
 	}
 
 	slog.Info("Rebooting to installed Flatcar, USB drive can be removed")
-	if err := i.execCmd(ctx, true, "shutdown", "-r", "+15s", "Flatcar installed, rebooting to installed system"); err != nil {
+	if err := i.execCmd(ctx, true, "shutdown", "-r", "now", "Flatcar installed, rebooting to installed system"); err != nil {
 		return fmt.Errorf("rebooting: %w", err)
 	}
 
