@@ -60,6 +60,9 @@ func (c *Config) loadHydrateValidate(ctx context.Context, mode HydrateMode) erro
 	if err != nil {
 		return fmt.Errorf("getting fabric config: %w", err)
 	}
+	if fabricCfg, err = fabricCfg.Init(); err != nil {
+		return fmt.Errorf("initializing fabric config: %w", err)
+	}
 
 	if err := apiutil.ValidateFabric(ctx, l, fabricCfg); err != nil {
 		return fmt.Errorf("validating wiring: %w", err)

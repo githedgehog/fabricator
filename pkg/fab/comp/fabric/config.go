@@ -29,8 +29,7 @@ func GetFabricConfig(f fabapi.Fabricator) (*meta.FabricConfig, error) {
 	return &meta.FabricConfig{
 		ControlVIP:           string(f.Spec.Config.Control.VIP),
 		APIServer:            fmt.Sprintf("%s:%d", controlVIP.Addr().String(), k3s.APIPort),
-		AgentRepo:            "", // TODO
-		AgentRepoCA:          "", // TODO autoread from CM/Secret?
+		AgentRepo:            "TODO", // TODO
 		VPCIRBVLANRanges:     f.Spec.Config.Fabric.VPCIRBVLANs,
 		VPCPeeringVLANRanges: f.Spec.Config.Fabric.VPCWorkaroundVLANs,
 		VPCPeeringDisabled:   false, // TODO remove?
@@ -43,9 +42,6 @@ func GetFabricConfig(f fabapi.Fabricator) (*meta.FabricConfig, error) {
 			string(f.Spec.Config.Fabric.VPCWorkaroundSubnet),
 		},
 		Users:                    users,
-		DHCPMode:                 meta.DHCPModeHedgehog, // TODO remove
-		DHCPDConfigMap:           "",                    // TODO remove
-		DHCPDConfigKey:           "",                    // TODO remove
 		FabricMode:               f.Spec.Config.Fabric.Mode,
 		BaseVPCCommunity:         f.Spec.Config.Fabric.BaseVPCCommunity,
 		VPCLoopbackSubnet:        string(f.Spec.Config.Fabric.VPCWorkaroundSubnet),
@@ -53,9 +49,9 @@ func GetFabricConfig(f fabapi.Fabricator) (*meta.FabricConfig, error) {
 		ServerFacingMTUOffset:    64,   // TODO use
 		ESLAGMACBase:             f.Spec.Config.Fabric.ESLAGMACBase,
 		ESLAGESIPrefix:           f.Spec.Config.Fabric.ESLAGESIPrefix,
-		AlloyRepo:                "",                 // TODO
-		AlloyVersion:             "",                 // TODO
-		Alloy:                    meta.AlloyConfig{}, // TODO
+		AlloyRepo:                "TODO", // TODO
+		AlloyVersion:             string(f.Status.Versions.Fabric.Alloy),
+		Alloy:                    f.Spec.Config.Fabric.DefaultAlloyConfig,
 		DefaultMaxPathsEBGP:      64,
 		AllowExtraSwitchProfiles: false,
 	}, nil

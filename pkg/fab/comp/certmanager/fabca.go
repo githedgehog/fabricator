@@ -31,7 +31,7 @@ func InstallFabCA(ca *CA) comp.KubeInstall {
 				"tls.key": ca.Key,
 			}),
 			comp.NewConfigMap(comp.FabCAConfigMap, map[string]string{
-				"ca.crt": ca.Crt,
+				"ca.crt": ca.Crt, // changing key will break fabric manager
 			}),
 			comp.NewIssuer(comp.FabCAIssuer, comp.IssuerSpec{
 				IssuerConfig: comp.IssuerConfig{

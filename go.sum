@@ -374,8 +374,8 @@ github.com/yuin/goldmark v1.2.1/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9dec
 github.com/yuin/goldmark v1.4.13/go.mod h1:6yULJ656Px+3vBD8DxQVa3kxgyrAnzto9xy5taEt/CY=
 github.com/yusufpapurcu/wmi v1.2.4 h1:zFUKzehAFReQwLys1b/iSMl+JQGSCSjtVqQn9bBrPo0=
 github.com/yusufpapurcu/wmi v1.2.4/go.mod h1:SBZ9tNy3G9/m5Oi98Zks0QjeHVDvuK0qfxQmPyzfmi0=
-go.githedgehog.com/fabric v0.50.0 h1:ua54JEfh6h57nu4KClfcZY/G9Lzd1DOwKyFVjODCKUs=
-go.githedgehog.com/fabric v0.50.0/go.mod h1:LsrSZysv7cm81cveBLyXWQmvPSpLf9dh08MNeUKfz3M=
+go.githedgehog.com/fabric v0.50.2 h1:LcXsuBkiQmpBBX2Vkd6DrISKw8PvDDrkRVUb5cRS6/c=
+go.githedgehog.com/fabric v0.50.2/go.mod h1:LsrSZysv7cm81cveBLyXWQmvPSpLf9dh08MNeUKfz3M=
 go.opencensus.io v0.21.0/go.mod h1:mSImk1erAIZhrmZN+AvHh14ztQfjbGwt4TtuofqLduU=
 go.opencensus.io v0.22.0/go.mod h1:+kGneAE2xo2IficOXnaByMWTGM9T73dGwxeWcUqIpI8=
 go.opencensus.io v0.22.2/go.mod h1:yxeiOL68Rb0Xd1ddK5vPZ/oVn4vY4Ynel7k9FzqtOIw=
