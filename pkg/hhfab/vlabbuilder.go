@@ -28,6 +28,7 @@ type VLABBuilder struct {
 	ESLAGServers      uint8  // number of ESLAG servers to generate for ESLAG switches
 	UnbundledServers  uint8  // number of unbundled servers to generate for switches (only for one of the first switch in the redundancy group or orphan switch)
 	BundledServers    uint8  // number of bundled servers to generate for switches (only for one of the second switch in the redundancy group or orphan switch)
+	NoSwitches        bool   // do not generate any switches
 
 	data         *apiutil.Loader
 	ifaceTracker map[string]uint8 // next available interface ID for each switch
@@ -41,16 +42,18 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 	b.data = l
 
 	if fabricMode == meta.FabricModeSpineLeaf {
-		if b.SpinesCount == 0 {
-			b.SpinesCount = 2
-		}
-		if b.FabricLinksCount == 0 {
-			b.FabricLinksCount = 2
-		}
-		if b.MCLAGLeafsCount == 0 && b.OrphanLeafsCount == 0 && b.ESLAGLeafGroups == "" {
-			b.MCLAGLeafsCount = 2
-			b.ESLAGLeafGroups = "2"
-			b.OrphanLeafsCount = 1
+		if !b.NoSwitches {
+			if b.SpinesCount == 0 {
+				b.SpinesCount = 2
+			}
+			if b.FabricLinksCount == 0 {
+				b.FabricLinksCount = 2
+			}
+			if b.MCLAGLeafsCount == 0 && b.OrphanLeafsCount == 0 && b.ESLAGLeafGroups == "" {
+				b.MCLAGLeafsCount = 2
+				b.ESLAGLeafGroups = "2"
+				b.OrphanLeafsCount = 1
+			}
 		}
 	} else if fabricMode == meta.FabricModeCollapsedCore {
 		if b.SpinesCount > 0 {
@@ -60,7 +63,7 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 			return errors.Errorf("fabric links not supported for collapsed core fabric mode")
 		}
 
-		if b.MCLAGLeafsCount == 0 {
+		if !b.NoSwitches && b.MCLAGLeafsCount == 0 {
 			b.MCLAGLeafsCount = 2
 		}
 		if b.MCLAGLeafsCount > 2 {
@@ -110,9 +113,6 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 
 	if b.MCLAGLeafsCount%2 != 0 {
 		return errors.Errorf("MCLAG leafs count must be even")
-	}
-	if b.MCLAGLeafsCount+b.OrphanLeafsCount+totalESLAGLeafs == 0 {
-		return errors.Errorf("total leafs count must be greater than 0")
 	}
 	if b.MCLAGLeafsCount > 0 && b.MCLAGSessionLinks == 0 {
 		return errors.Errorf("MCLAG session links count must be greater than 0")
