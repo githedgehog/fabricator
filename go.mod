@@ -3,6 +3,7 @@ module go.githedgehog.com/fabricator
 go 1.23.0
 
 replace gopkg.in/natefinch/lumberjack.v2 v2.2.1 => github.com/githedgehog/lumberjack/v2 v2.2.1-hh
+
 replace github.com/diskfs/go-diskfs => github.com/Frostman/go-diskfs v1.4.2-hh3
 
 require (
@@ -12,6 +13,7 @@ require (
 	github.com/cert-manager/cert-manager v1.15.3
 	github.com/charmbracelet/keygen v0.5.1
 	github.com/coreos/butane v0.22.0
+	github.com/diskfs/go-diskfs v1.4.2
 	github.com/go-logr/logr v1.4.2
 	github.com/go-playground/validator/v10 v10.22.1
 	github.com/k3s-io/helm-controller v0.16.4
@@ -68,7 +70,6 @@ require (
 	github.com/coreos/vcontext v0.0.0-20230201181013-d72178a18687 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.4 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
-	github.com/diskfs/go-diskfs v1.4.2 // indirect
 	github.com/djherbis/times v1.6.0 // indirect
 	github.com/dsnet/compress v0.0.1 // indirect
 	github.com/elliotwutingfeng/asciiset v0.0.0-20230602022725-51bbb787efab // indirect

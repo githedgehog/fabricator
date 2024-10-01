@@ -71,7 +71,7 @@ func (b *ControlInstallBuilder) Build(ctx context.Context) error {
 		return fmt.Errorf("removing hash file: %w", err)
 	}
 
-	slog.Info("Building installers")
+	slog.Info("Building installer", "control", b.Control.Name)
 
 	if err := removeIfExists(installDir); err != nil {
 		return fmt.Errorf("removing install dir: %w", err)

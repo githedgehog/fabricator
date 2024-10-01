@@ -17,8 +17,10 @@ var Versions = fabapi.Versions{
 		ControlProxy: "1.9.1",   // TODO use version starting with "v", upgrade or replace with better option
 	},
 	Fabricator: fabapi.FabricatorVersions{
-		API:        meta.Version(version.Version),
-		Controller: meta.Version(version.Version),
+		API:            meta.Version(version.Version),
+		Controller:     meta.Version(version.Version),
+		ControlISORoot: "v0.0.1", // TODO use version from version.Version?
+		ControlISOCPIO: "v0.0.1", // TODO use version from version.Version?
 	},
 	Fabric: fabapi.FabricVersions{ // TODO use version from fabric/version.Version? as a default
 		API:          "v0.50.1",
