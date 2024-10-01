@@ -2,6 +2,7 @@ package zot
 
 import (
 	_ "embed"
+	"encoding/json"
 	"fmt"
 
 	"github.com/sethvargo/go-password/password"
@@ -119,10 +120,15 @@ func NewUsers() (map[string]string, error) {
 }
 
 func InstallUsers(users map[string]string) comp.KubeInstall {
-	return func(_ fabapi.Fabricator) ([]client.Object, error) {
+	return func(cfg fabapi.Fabricator) ([]client.Object, error) {
 		objs := []client.Object{}
-
 		htpasswd := ""
+
+		regURL, err := comp.RegistryURL(cfg)
+		if err != nil {
+			return nil, fmt.Errorf("getting registry URL: %w", err)
+		}
+
 		for user, passwd := range users {
 			hash, err := bcrypt.GenerateFromPassword([]byte(passwd), bcrypt.DefaultCost)
 			if err != nil {
@@ -130,10 +136,30 @@ func InstallUsers(users map[string]string) comp.KubeInstall {
 			}
 			htpasswd += fmt.Sprintf("%s:%s\n", user, hash)
 
-			objs = append(objs, comp.NewSecret(comp.RegistryUserSecretPrefix+user, comp.SecretTypeBasicAuth, map[string]string{
-				comp.BasicAuthUsernameKey: user,
-				comp.BasicAuthPasswordKey: passwd,
-			}))
+			dockerSecret := comp.RegistryUserSecretPrefix + user + comp.RegistryUserSecretDockerSuffix
+			dockerCfg := map[string]any{
+				"auths": map[string]any{
+					regURL: map[string]string{
+						"username": user,
+						"password": passwd,
+					},
+				},
+			}
+
+			dockerCfgBytes, err := json.Marshal(dockerCfg)
+			if err != nil {
+				return nil, fmt.Errorf("marshaling Docker config: %w", err)
+			}
+
+			objs = append(objs,
+				comp.NewSecret(comp.RegistryUserSecretPrefix+user, comp.SecretTypeBasicAuth, map[string]string{
+					comp.BasicAuthUsernameKey: user,
+					comp.BasicAuthPasswordKey: passwd,
+				}),
+				comp.NewSecret(dockerSecret, comp.SecretTypeDockerConfigJSON, map[string]string{
+					comp.DockerConfigJSONKey: string(dockerCfgBytes),
+				}),
+			)
 		}
 
 		return append(objs, comp.NewSecret(HtpasswdSecret, comp.SecretTypeOpaque, map[string]string{

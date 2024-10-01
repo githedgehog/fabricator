@@ -154,6 +154,13 @@ func (c *ControlInstall) Run(ctx context.Context) error {
 	// we should use in-cluster registry from now on
 	c.Fab.Status.IsBootstrap = false
 
+	// TODO move to operator
+	{
+		if err := comp.EnforceKubeInstall(ctx, kube, c.Fab, fabric.Install); err != nil {
+			return fmt.Errorf("enforcing fabric install: %w", err)
+		}
+	}
+
 	// TODO install fabricator with config
 	// TODO install initial wiring
 
