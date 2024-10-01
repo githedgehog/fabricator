@@ -39,7 +39,7 @@ var configTmpl string
 var _ comp.KubeInstall = Install
 
 func Install(cfg fabapi.Fabricator) ([]client.Object, error) {
-	version := string(cfg.Status.Versions.Platform.Zot)
+	version := string(Version(cfg))
 	sync := false
 
 	config, err := tmplutil.FromTemplate("config", configTmpl, map[string]any{
@@ -145,7 +145,7 @@ func InstallUsers(users map[string]string) comp.KubeInstall {
 var _ comp.ListOCIArtifacts = Artifacts
 
 func Artifacts(cfg fabapi.Fabricator) (comp.OCIArtifacts, error) {
-	version := string(Version(cfg))
+	version := Version(cfg)
 
 	return comp.OCIArtifacts{
 		ChartRef: version,

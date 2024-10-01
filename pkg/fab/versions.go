@@ -8,28 +8,28 @@ import (
 
 var Versions = fabapi.Versions{
 	Platform: fabapi.PlatformVersions{
-		K3s:          "v1.31.1-k3s1",
-		Zot:          "v2.1.1",
-		CertManager:  "v1.15.3",
-		K9s:          "v0.32.5",
-		Toolbox:      "latest",  // TODO use specific version, move to fabricator repo
-		Reloader:     "v1.0.40", // TODO upgrade or get rid of?
-		ControlProxy: "1.9.1",   // TODO use version starting with "v", upgrade or replace with better option
+		K3s:         "v1.31.1-k3s1",
+		Zot:         "v2.1.1",
+		CertManager: "v1.15.3",
+		K9s:         "v0.32.5",
+		Toolbox:     "latest",  // TODO use specific version, move to fabricator repo
+		Reloader:    "v1.0.40", // TODO upgrade or get rid of?
 	},
 	Fabricator: fabapi.FabricatorVersions{
 		API:            meta.Version(version.Version),
 		Controller:     meta.Version(version.Version),
-		ControlISORoot: "v0.0.2", // TODO separate repo/versioning to stay up to date with Flatcar?
+		ControlUSBRoot: "v0.0.3", // TODO separate repo/versioning to stay up to date with Flatcar?
 	},
 	Fabric: fabapi.FabricVersions{ // TODO use version from fabric/version.Version? as a default
-		API:          "v0.50.2",
-		Controller:   "v0.50.2",
-		DHCPD:        "v0.50.2",
-		Boot:         "v0.50.2",
-		Agent:        "v0.50.2",
-		ControlAgent: "v0.50.2",
-		Ctl:          "v0.50.2",
-		Alloy:        "v1.1.1", // TODO upgrade to v1.4.x or newer
+		API:        "v0.50.2",
+		Controller: "v0.50.2",
+		DHCPD:      "v0.50.2",
+		Boot:       "v0.50.2",
+		Agent:      "v0.50.2",
+		Ctl:        "v0.50.2",
+		Alloy:      "v1.1.1",  // TODO upgrade to v1.4.x or newer
+		ProxyChart: "v0.50.2", // TODO
+		Proxy:      "1.9.1",   // TODO use version starting with "v", upgrade or replace with better option
 		NOS: map[string]meta.Version{
 			// TODO some enums for NOS "types"?
 			"sonic-bcm-base":   "base-bin-4.4.0",

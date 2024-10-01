@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	ControlISORootRef  = "fabricator/control-iso-root"
-	ControlISOIgnition = "ignition.json"
+	ControlUSBRootRef  = "fabricator/control-usb-root"
+	ControlUSBIgnition = "ignition.json"
 	ControlOSTarget    = "/opt/hedgehog/install"
 )
 
@@ -63,7 +63,7 @@ func (b *ControlInstallBuilder) buildUSBImage(ctx context.Context) error {
 	}
 
 	// TODO(Frostman) use ORAS files directly from cache without copying to workdir
-	if err := b.Downloader.FromORAS(ctx, workdir, ControlISORootRef, b.Fab.Status.Versions.Fabricator.ControlISORoot, []artificer.ORASFile{
+	if err := b.Downloader.FromORAS(ctx, workdir, ControlUSBRootRef, b.Fab.Status.Versions.Fabricator.ControlUSBRoot, []artificer.ORASFile{
 		{Name: "boot"},
 		{Name: "EFI"},
 		{Name: "flatcar_production_image.bin.bz2"},
@@ -130,6 +130,7 @@ func (b *ControlInstallBuilder) buildUSBImage(ctx context.Context) error {
 	}
 	backpackFS.(*fat32.FileSystem).SetLazy(true)
 
+	slog.Info("Copying files to installer USB image, may take up to 5-10 minutes", "control", b.Control.Name)
 	slog.Debug("Copying files to installer USB image", "fs", espFS.Label(), "control", b.Control.Name)
 
 	if err := diskFSCopyTree(workdir, "/EFI", espFS); err != nil {
@@ -163,7 +164,7 @@ func (b *ControlInstallBuilder) buildUSBImage(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("creating ignition: %w", err)
 	}
-	ignFile, err := backpackFS.OpenFile(filepath.Join("/", ControlISOIgnition), os.O_CREATE|os.O_RDWR|os.O_SYNC)
+	ignFile, err := backpackFS.OpenFile(filepath.Join("/", ControlUSBIgnition), os.O_CREATE|os.O_RDWR|os.O_SYNC)
 	if err != nil {
 		return fmt.Errorf("creating ignition file: %w", err)
 	}
@@ -177,6 +178,8 @@ func (b *ControlInstallBuilder) buildUSBImage(ctx context.Context) error {
 	if err := backpackFS.(*fat32.FileSystem).Commit(); err != nil {
 		return fmt.Errorf("commiting backpack FS: %w", err)
 	}
+
+	slog.Info("Installer USB image completed", "control", b.Control.Name, "path", diskImgPath)
 
 	return nil
 }

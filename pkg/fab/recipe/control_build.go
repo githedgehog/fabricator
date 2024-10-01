@@ -14,7 +14,10 @@ import (
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/artificer"
 	"go.githedgehog.com/fabricator/pkg/embed/recipebin"
+	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/certmanager"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/fabric"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/flatcar"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/zot"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
@@ -165,7 +168,17 @@ func (b *ControlInstallBuilder) Build(ctx context.Context) error {
 		return fmt.Errorf("printing wiring: %w", err)
 	}
 
-	// TODO OCI sync for airgap
+	airgapArts, err := comp.CollectArtifacts(b.Fab,
+		flatcar.Artifacts, certmanager.Artifacts, zot.Artifacts, fabric.Artifacts,
+	)
+	if err != nil {
+		return fmt.Errorf("collecting airgap artifacts: %w", err)
+	}
+	for ref, version := range airgapArts {
+		if err := b.Downloader.GetOCI(ctx, ref, version, installDir); err != nil {
+			return fmt.Errorf("downloading airgap artifact %q: %w", ref, err)
+		}
+	}
 
 	if b.USBImage {
 		if err := b.buildUSBImage(ctx); err != nil {

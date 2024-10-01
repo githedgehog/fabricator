@@ -33,7 +33,7 @@ var valuesTmpl string
 var _ comp.KubeInstall = Install
 
 func Install(cfg fabapi.Fabricator) ([]client.Object, error) {
-	version := string(cfg.Status.Versions.Platform.CertManager)
+	version := string(Version(cfg))
 
 	controllerRepo, err := comp.ImageURL(cfg, ControllerImageRef)
 	if err != nil {
@@ -87,14 +87,12 @@ func Install(cfg fabapi.Fabricator) ([]client.Object, error) {
 var _ comp.ListOCIArtifacts = Artifacts
 
 func Artifacts(cfg fabapi.Fabricator) (comp.OCIArtifacts, error) {
-	version := string(Version(cfg))
-
 	return comp.OCIArtifacts{
-		ChartRef:                version,
-		ControllerImageRef:      version,
-		WebhookImageRef:         version,
-		CAInjectorImageRef:      version,
-		ACMESolverImageRef:      version,
-		StartupAPICheckImageRef: version,
+		ChartRef:                Version(cfg),
+		ControllerImageRef:      Version(cfg),
+		WebhookImageRef:         Version(cfg),
+		CAInjectorImageRef:      Version(cfg),
+		ACMESolverImageRef:      Version(cfg),
+		StartupAPICheckImageRef: Version(cfg),
 	}, nil
 }
