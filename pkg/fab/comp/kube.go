@@ -27,13 +27,14 @@ const (
 	FabCASecret    = FabCAIssuer
 	FabCAConfigMap = FabCAIssuer // changing name will break fabric manager
 
-	RegistryUserAdmin        = "admin"
-	RegistryUserWriter       = "writer"
-	RegistryUserReader       = "reader"
-	RegistryUserSecretPrefix = "registry-user-"
-	RegistryUserAdminSecret  = RegistryUserSecretPrefix + RegistryUserAdmin
-	RegistryUserWriterSecret = RegistryUserSecretPrefix + RegistryUserWriter
-	RegistryUserReaderSecret = RegistryUserSecretPrefix + RegistryUserReader
+	RegistryUserAdmin              = "admin"
+	RegistryUserWriter             = "writer"
+	RegistryUserReader             = "reader"
+	RegistryUserSecretPrefix       = "registry-user-"
+	RegistryUserSecretDockerSuffix = "-docker"
+	RegistryUserAdminSecret        = RegistryUserSecretPrefix + RegistryUserAdmin
+	RegistryUserWriterSecret       = RegistryUserSecretPrefix + RegistryUserWriter
+	RegistryUserReaderSecret       = RegistryUserSecretPrefix + RegistryUserReader
 )
 
 // TODO local test with the fake client incl components
@@ -79,10 +80,12 @@ const (
 )
 
 const (
-	SecretTypeOpaque     SecretType = coreapi.SecretTypeOpaque
-	SecretTypeBasicAuth  SecretType = coreapi.SecretTypeBasicAuth
-	BasicAuthUsernameKey            = "username"
-	BasicAuthPasswordKey            = "password"
+	SecretTypeOpaque           SecretType = coreapi.SecretTypeOpaque
+	SecretTypeBasicAuth        SecretType = coreapi.SecretTypeBasicAuth
+	SecretTypeDockerConfigJSON SecretType = coreapi.SecretTypeDockerConfigJson
+	BasicAuthUsernameKey                  = coreapi.BasicAuthUsernameKey
+	BasicAuthPasswordKey                  = coreapi.BasicAuthPasswordKey
+	DockerConfigJSONKey                   = coreapi.DockerConfigJsonKey
 )
 
 var (
@@ -144,12 +147,10 @@ func NewHelmChart(cfg fabapi.Fabricator, name, chart, version, bootstrapChart st
 	}
 
 	var auth, ca *LocalObjectReference
-
 	if !cfg.Status.IsBootstrap {
 		auth = &LocalObjectReference{
-			Name: RegistryUserReaderSecret,
+			Name: RegistryUserReaderSecret + RegistryUserSecretDockerSuffix,
 		}
-
 		ca = &LocalObjectReference{
 			Name: FabCAConfigMap,
 		}
@@ -170,16 +171,14 @@ func NewHelmChart(cfg fabapi.Fabricator, name, chart, version, bootstrapChart st
 			Namespace: FabNamespace,
 		},
 		Spec: helmapi.HelmChartSpec{
-			Chart:           chartURL,
-			Version:         version,
-			TargetNamespace: FabNamespace,
-			CreateNamespace: true,
-			FailurePolicy:   failurePolicy,
-			AuthSecret:      auth,
-			// AuthPassCredentials:  true, // TODO do we need it?
-			// DockerRegistrySecret: &comp.LocalObjectReference{}, // TODO it maybe required for OCI registry
-			RepoCAConfigMap: ca,
-			ValuesContent:   values,
+			Chart:                chartURL,
+			Version:              version,
+			TargetNamespace:      FabNamespace,
+			CreateNamespace:      true,
+			FailurePolicy:        failurePolicy,
+			DockerRegistrySecret: auth,
+			RepoCAConfigMap:      ca,
+			ValuesContent:        values,
 		},
 	}, nil
 }
