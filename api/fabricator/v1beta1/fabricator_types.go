@@ -133,8 +133,10 @@ type PlatformVersions struct {
 }
 
 type FabricatorVersions struct {
-	API        meta.Version `json:"api,omitempty"`
-	Controller meta.Version `json:"controller,omitempty"`
+	API            meta.Version `json:"api,omitempty"`
+	Controller     meta.Version `json:"controller,omitempty"`
+	ControlISORoot meta.Version `json:"controlISORoot,omitempty"`
+	ControlISOCPIO meta.Version `json:"controlISOCPIO,omitempty"`
 }
 
 type FabricVersions struct {
