@@ -100,7 +100,10 @@ type netConfig struct {
 }
 
 type SetupVPCsConfig struct {
-	Type string
+	Type         string
+	DNSServers   []string
+	TimeServers  []string
+	InterfaceMTU uint16
 }
 
 const (
@@ -111,7 +114,7 @@ const (
 
 var VPCSetupTypes = []string{
 	VPCSetupTypeVPCPerServer,
-	// VPCSetupTypeSingleVPC,
+	VPCSetupTypeSingleVPC,
 	// VPCSetupTypeVPCSubnetPerServer,
 }
 
@@ -185,7 +188,12 @@ func (svc *Service) SetupVPCs(ctx context.Context, cfg SetupVPCsConfig) error {
 			return nil
 		}
 
-		vpcName, _ := strings.CutPrefix(server.Name, "server-")
+		vpcName := "1"
+
+		if cfg.Type == VPCSetupTypeVPCPerServer {
+			vpcName, _ = strings.CutPrefix(server.Name, "server-")
+		}
+
 		vpcName = "vpc-" + vpcName
 
 		slog.Info("Enforcing VPC + Attachment for server...", "vpc", vpcName, "server", server.Name, "conn", conn.Name)
@@ -201,11 +209,21 @@ func (svc *Service) SetupVPCs(ctx context.Context, cfg SetupVPCsConfig) error {
 
 		vpc := &vpcapi.VPC{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      fmt.Sprintf("vpc-%d", idx),
+				Name:      vpcName,
 				Namespace: "default", // TODO ns
 			},
 		}
 		_, err = ctrlutil.CreateOrUpdate(ctx, kube, vpc, func() error {
+			var options *vpcapi.VPCDHCPOptions
+
+			if cfg.DNSServers != nil || cfg.TimeServers != nil || cfg.InterfaceMTU > 0 {
+				options = &vpcapi.VPCDHCPOptions{
+					DNSServers:   cfg.DNSServers,
+					TimeServers:  cfg.TimeServers,
+					InterfaceMTU: cfg.InterfaceMTU,
+				}
+			}
+
 			vpc.Spec = vpcapi.VPCSpec{
 				IPv4Namespace: "default",
 				VLANNamespace: "default",
@@ -218,6 +236,7 @@ func (svc *Service) SetupVPCs(ctx context.Context, cfg SetupVPCsConfig) error {
 							Range: &vpcapi.VPCDHCPRange{
 								Start: dhcpStart,
 							},
+							Options: options,
 						},
 					},
 				},
@@ -227,6 +246,22 @@ func (svc *Service) SetupVPCs(ctx context.Context, cfg SetupVPCsConfig) error {
 		})
 		if err != nil {
 			return errors.Wrapf(err, "error creating/updating VPC %s", vpc.Name)
+		}
+
+		attaches := &vpcapi.VPCAttachmentList{}
+		if err := kube.List(ctx, attaches, client.MatchingLabels{
+			wiringapi.LabelConnection: conn.Name,
+		}); err != nil {
+			return errors.Wrapf(err, "error listing other VPC attachments")
+		}
+		for _, attach := range attaches.Items {
+			if attach.Spec.Subnet == vpc.Name+"/default" {
+				continue
+			}
+
+			if err := kube.Delete(ctx, &attach); err != nil {
+				return errors.Wrapf(err, "error deleting other VPC attachment %s", attach.Name)
+			}
 		}
 
 		attach := &vpcapi.VPCAttachment{
@@ -277,7 +312,9 @@ func (svc *Service) SetupVPCs(ctx context.Context, cfg SetupVPCsConfig) error {
 			ConnName: conn.Name,
 		})
 
-		idx++
+		if cfg.Type == VPCSetupTypeVPCPerServer {
+			idx++
+		}
 	}
 
 	auth, err := goph.Key(svc.cfg.SSHKey, "")
@@ -304,14 +341,14 @@ func (svc *Service) SetupVPCs(ctx context.Context, cfg SetupVPCsConfig) error {
 
 		out, err := client.Run("/opt/bin/hhnet cleanup")
 		if err != nil {
-			slog.Warn("hhnet cleanup error", "err", err, "output", string(out))
+			slog.Warn("hhnet cleanup error", "err", err.Error(), "output", string(out))
 
 			return errors.Wrapf(err, "error running hhnet cleanup")
 		}
 
 		out, err = client.Run("/opt/bin/hhnet " + netconf.Net)
 		if err != nil {
-			slog.Warn("hhnet conf error", "err", err, "output", string(out))
+			slog.Warn("hhnet conf error", "err", err.Error(), "output", string(out))
 
 			return errors.Wrapf(err, "error running hhnet")
 		}
@@ -665,7 +702,7 @@ serverLoop:
 					if peerConnected && err != nil {
 						passed = false
 
-						slog.Error("Connectivity expected, ping failed", "from", server.Name, "to", vpcPeer, "err", err)
+						slog.Error("Connectivity expected, ping failed", "from", server.Name, "to", vpcPeer, "err", err.Error())
 						failed = true
 					} else if !peerConnected && err == nil {
 						passed = false
@@ -675,7 +712,7 @@ serverLoop:
 					} else if !peerConnected && err != nil && len(out) > 0 && !strings.Contains(out, "100% packet loss") {
 						passed = false
 
-						slog.Error("Connectivity not expected, ping failed without '100% packet loss' message", "from", server.Name, "to", vpcPeer, "err", err)
+						slog.Error("Connectivity not expected, ping failed without '100% packet loss' message", "from", server.Name, "to", vpcPeer, "err", err.Error())
 						failed = true
 					} else if peerConnected {
 						slog.Info("Connectivity expected, ping succeeded", "from", server.Name, "to", vpcPeer)
@@ -713,7 +750,7 @@ serverLoop:
 						if err != nil {
 							passed = false
 
-							slog.Error("Error starting iperf server", "host", vpcPeer, "err", err)
+							slog.Error("Error starting iperf server", "host", vpcPeer, "err", err.Error())
 							color.Yellow(strings.TrimSpace(out))
 
 							return
@@ -735,7 +772,7 @@ serverLoop:
 						if err != nil {
 							passed = false
 
-							slog.Error("Connectivity expected, iperf failed", "from", server.Name, "to", vpcPeer, "err", err)
+							slog.Error("Connectivity expected, iperf failed", "from", server.Name, "to", vpcPeer, "err", err.Error())
 							color.Red(strings.TrimSpace(out)) // TODO think about parsing output and printing only summary
 
 							return
@@ -745,7 +782,7 @@ serverLoop:
 						if err != nil {
 							passed = false
 
-							slog.Error("Error parsing iperf report", "err", err)
+							slog.Error("Error parsing iperf report", "err", err.Error())
 
 							return
 						}
@@ -786,7 +823,7 @@ serverLoop:
 
 				out, err := svc.ssh(ctx, server, cmd, 10)
 				if connected && err != nil {
-					slog.Error("External connectivity expected, curl failed", "from", server.Name, "err", err)
+					slog.Error("External connectivity expected, curl failed", "from", server.Name, "err", err.Error())
 					color.Red(strings.TrimSpace(out))
 				} else if connected && err == nil {
 					if !strings.Contains(out, "302 Moved") {
