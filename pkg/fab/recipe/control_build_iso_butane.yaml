@@ -1,0 +1,35 @@
+variant: flatcar
+version: 1.1.0
+storage:
+  filesystems:
+    - path: /mnt/hedgehog
+      device: /dev/disk/by-label/OEM
+      with_mount_unit: true
+      wipe_filesystem: false
+      format: vfat
+  files:
+    - path: /opt/hedgehog/hhfab-flatcar-install
+      overwrite: true
+      contents:
+        local: ./hhfab-flatcar-install
+      mode: 0755
+    - path: /etc/motd.d/hedgehog.conf
+      mode: 0644
+      contents:
+        inline: "Welcome to the Flatcar Linux Live Environment, presented by Hedgehog. Automatic install started, monitor with journalctl -f -u flatcar-install.service"
+
+systemd:
+  units:
+    - name: flatcar-install.service
+      enabled: true
+      contents: |
+        [Unit]
+        After=default.target
+        Description=Hedgehog crafted automatic flatcar-install
+
+        [Service]
+        Type=oneshot
+        ExecStart=/opt/hedgehog/hhfab-flatcar-install
+
+        [Install]
+        WantedBy=default.target
