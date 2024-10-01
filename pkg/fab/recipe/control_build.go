@@ -93,7 +93,12 @@ func (b *ControlInstallBuilder) Build(ctx context.Context) error {
 		return fmt.Errorf("creating install dir: %w", err)
 	}
 
-	if err := os.WriteFile(filepath.Join(installDir, RecipeBin), recipebin.Bytes(), 0o700); err != nil { //nolint:gosec
+	// TODO switch to reader & io.Copy
+	recipeBin, err := recipebin.Bytes()
+	if err != nil {
+		return fmt.Errorf("getting recipe bin: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(installDir, RecipeBin), recipeBin, 0o700); err != nil { //nolint:gosec
 		return fmt.Errorf("writing recipe bin: %w", err)
 	}
 

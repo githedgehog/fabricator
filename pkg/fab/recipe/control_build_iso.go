@@ -14,11 +14,11 @@ import (
 	"github.com/diskfs/go-diskfs/filesystem/fat32"
 	"github.com/diskfs/go-diskfs/partition/gpt"
 	"go.githedgehog.com/fabricator/pkg/artificer"
+	"go.githedgehog.com/fabricator/pkg/embed/flatcaroem"
 )
 
 const (
 	ControlISORootRef = "fabricator/control-iso-root"
-	ControlISOCPIORef = "fabricator/control-iso-cpio" // TODO rename: is control-iso-oem a more clear name?
 )
 
 var (
@@ -54,13 +54,8 @@ func (b *ControlInstallBuilder) buildUSBImage(ctx context.Context) error {
 	}); err != nil {
 		return fmt.Errorf("downloading ISO root: %w", err)
 	}
-	// TODO(Frostman) just embed it into hhfab to avoid managing it separately?
-	if err := b.Downloader.FromORAS(ctx, workdir, ControlISOCPIORef, b.Fab.Status.Versions.Fabricator.ControlISOCPIO, []artificer.ORASFile{
-		{
-			Name: "oem.cpio.gz",
-		},
-	}); err != nil {
-		return fmt.Errorf("downloading ISO cpio: %w", err)
+	if err := os.WriteFile(filepath.Join(workdir, "oem.cpio.gz"), flatcaroem.Bytes(), 0o644); err != nil { //nolint:gosec
+		return fmt.Errorf("writing oem cpio: %w", err)
 	}
 
 	diskImgPath := filepath.Join(b.WorkDir, b.Control.Name+InstallUSBImageSuffix)

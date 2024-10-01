@@ -19,8 +19,7 @@ var Versions = fabapi.Versions{
 	Fabricator: fabapi.FabricatorVersions{
 		API:            meta.Version(version.Version),
 		Controller:     meta.Version(version.Version),
-		ControlISORoot: "v0.0.1", // TODO use version from version.Version?
-		ControlISOCPIO: "v0.0.1", // TODO use version from version.Version?
+		ControlISORoot: "v0.0.1", // TODO separate repo/versioning to stay up to date with Flatcar?
 	},
 	Fabric: fabapi.FabricVersions{ // TODO use version from fabric/version.Version? as a default
 		API:          "v0.50.1",

@@ -241,6 +241,8 @@ spec:
                         properties:
                           api:
                             type: string
+                          controlISORoot:
+                            type: string
                           controller:
                             type: string
                         type: object
@@ -303,6 +305,8 @@ spec:
                   fabricator:
                     properties:
                       api:
+                        type: string
+                      controlISORoot:
                         type: string
                       controller:
                         type: string

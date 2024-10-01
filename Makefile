@@ -201,9 +201,28 @@ endef
 
 ##@ Fabricator-specific
 
+BUTANE ?= $(LOCALBIN)/butane
+BUTANE_VERSION ?= v0.22.0
+
+.PHONY: butane
+butane: $(BUTANE) ## Download butane locally if necessary.
+$(BUTANE): $(LOCALBIN)
+	$(call go-install-tool,$(LOCALBIN)/internal,github.com/coreos/butane/internal,$(BUTANE_VERSION))
+	ln -sf $(LOCALBIN)/internal $(BUTANE)
+
+OEMDIR ?= ./pkg/embed/flatcaroem
+
 .PHONY: embed
 embed: ## Prepare the assets for embedding into the hhfab binary
+	touch ./pkg/embed/recipebin/hhfab-recipe.gz
 	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build --tags containers_image_openpgp -o ./pkg/embed/recipebin/hhfab-recipe ./cmd/hhfab-recipe
+	gzip -fk ./pkg/embed/recipebin/hhfab-recipe
+
+	touch $(OEMDIR)/oem.cpio.gz
+	mkdir -p $(OEMDIR)/usr/share/oem
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build --tags containers_image_openpgp -o $(OEMDIR)/hhfab-flatcar-install ./cmd/hhfab-flatcar-install
+	$(BUTANE) --strict --output $(OEMDIR)/usr/share/oem/config.ign --files-dir $(OEMDIR) ./pkg/fab/recipe/control_build_iso_butane.yaml
+	cd $(OEMDIR) && find usr | cpio -o -H newc | gzip -f > oem.cpio.gz
 
 .PHONY: hhfab
 hhfab: embed ## Build the hhfab binary
