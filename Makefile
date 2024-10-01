@@ -213,7 +213,7 @@ $(BUTANE): $(LOCALBIN)
 OEMDIR ?= ./pkg/embed/flatcaroem
 
 .PHONY: embed
-embed: ## Prepare the assets for embedding into the hhfab binary
+embed: butane ## Prepare the assets for embedding into the hhfab binary
 	touch ./pkg/embed/recipebin/hhfab-recipe.gz
 	touch $(OEMDIR)/oem.cpio.gz
 
