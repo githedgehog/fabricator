@@ -36,6 +36,22 @@ var (
 )
 
 func (b *ControlInstallBuilder) buildUSBImage(ctx context.Context) error {
+	if b.Control.Spec.Bootstrap.Disk == "" {
+		return fmt.Errorf("no disk specified for control %q", b.Control.Name) //nolint:goerr113
+	}
+	if b.Control.Spec.Management.IP == "" {
+		return fmt.Errorf("no management IP specified for control %q", b.Control.Name) //nolint:goerr113
+	}
+	if b.Control.Spec.Management.Interface == "" {
+		return fmt.Errorf("no management interface specified for control %q", b.Control.Name) //nolint:goerr113
+	}
+	if b.Control.Spec.External.IP == "" {
+		return fmt.Errorf("no external IP specified for control %q", b.Control.Name) //nolint:goerr113
+	}
+	if b.Control.Spec.External.Interface == "" {
+		return fmt.Errorf("no external interface specified for control %q", b.Control.Name) //nolint:goerr113
+	}
+
 	slog.Info("Building installer USB image", "control", b.Control.Name)
 
 	workdir := filepath.Join(b.WorkDir, b.Control.Name+InstallUSBImageWorkdirSuffix)
