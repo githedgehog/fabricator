@@ -90,8 +90,26 @@ func (i *ControlOSInstal) Run(ctx context.Context) error {
 		return fmt.Errorf("checking disk %q: %w", dev, err)
 	}
 
+	// TODO find a better way to avoid flatcar-install hanging
+	// most probably it's because of the background job trying to write to fifo in blocking way and it's already removed
+	// and/or we somehow waiting for job to finish but there is noone to read from fifo
+	{
+		flatcarInstall, err := os.ReadFile("/usr/bin/flatcar-install")
+		if err != nil {
+			return fmt.Errorf("reading flatcar-install: %w", err)
+		}
+		lineToRemove := "(exec 2>/dev/null ; echo \"done\" > \"${WORKDIR}/disk_modified\") &"
+		if !strings.Contains(string(flatcarInstall), lineToRemove) {
+			return fmt.Errorf("line to be removed not found in flatcar-install: %q", lineToRemove) //nolint:goerr113
+		}
+		flatcarInstall = []byte(strings.ReplaceAll(string(flatcarInstall), lineToRemove, ""))
+		if err := os.WriteFile("/tmp/flatcar-install", flatcarInstall, 0o755); err != nil { //nolint:gosec
+			return fmt.Errorf("writing patched flatcar-install: %w", err)
+		}
+	}
+
 	slog.Info("Installing Flatcar", "dev", dev)
-	if err := i.execCmd(ctx, true, "flatcar-install", "-i", ignition, "-d", dev, "-f", img); err != nil {
+	if err := i.execCmd(ctx, true, "/tmp/flatcar-install", "-i", ignition, "-d", dev, "-f", img); err != nil {
 		return fmt.Errorf("installing flatcar: %w", err)
 	}
 
