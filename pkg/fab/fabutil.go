@@ -30,6 +30,10 @@ func GetFabAndControls(ctx context.Context, kube client.Reader, allowNotHydrated
 		return fabapi.Fabricator{}, nil, fmt.Errorf("merging fabricator defaults: %w", err)
 	}
 
+	if err := f.Validate(ctx); err != nil {
+		return fabapi.Fabricator{}, nil, fmt.Errorf("validating fabricator: %w", err)
+	}
+
 	if err := f.CalculateVersions(Versions); err != nil {
 		return fabapi.Fabricator{}, nil, fmt.Errorf("calculating versions: %w", err)
 	}

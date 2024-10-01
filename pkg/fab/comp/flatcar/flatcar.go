@@ -3,6 +3,7 @@ package flatcar
 import (
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/api/meta"
+	"go.githedgehog.com/fabricator/pkg/fab/comp"
 )
 
 const (
@@ -12,4 +13,12 @@ const (
 
 func ToolboxVersion(f fabapi.Fabricator) meta.Version {
 	return f.Status.Versions.Platform.Toolbox
+}
+
+var _ comp.ListOCIArtifacts = Artifacts
+
+func Artifacts(cfg fabapi.Fabricator) (comp.OCIArtifacts, error) {
+	return comp.OCIArtifacts{
+		ToolboxRef: ToolboxVersion(cfg),
+	}, nil
 }

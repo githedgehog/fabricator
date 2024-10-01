@@ -2,8 +2,8 @@ package artificer
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -11,7 +11,6 @@ import (
 	"sync"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/pkg/errors"
 	"github.com/vbauerster/mpb/v8"
 	"github.com/vbauerster/mpb/v8/decor"
 	"go.githedgehog.com/fabricator/api/meta"
@@ -112,7 +111,7 @@ func (d *Downloader) getORAS(ctx context.Context, name string, version meta.Vers
 	defer d.m.Unlock()
 
 	cacheName := name + "@" + string(version)
-	cacheName = strings.ReplaceAll(cacheName, "/", "_")
+	cacheName = strings.ReplaceAll(cacheName, "/", "_") + ".oras"
 	cachePath := filepath.Join(d.cacheDir, cacheName)
 
 	stat, err := os.Stat(cachePath)
@@ -149,7 +148,7 @@ func (d *Downloader) getORAS(ctx context.Context, name string, version meta.Vers
 
 		repo.Client = d.orasClient
 
-		slog.Info("Downloading", "name", name, "version", version)
+		slog.Info("Downloading", "name", name, "version", version, "type", "oras")
 
 		pb := mpb.New(mpb.WithWidth(5), mpb.WithOutput(os.Stderr))
 		bars := sync.Map{}
@@ -199,7 +198,7 @@ func (d *Downloader) getORAS(ctx context.Context, name string, version meta.Vers
 			},
 		})
 		if err != nil {
-			return "", errors.Wrapf(err, "error copying files from %s", ref)
+			return "", fmt.Errorf("downloading ORAS files from %s: %w", ref, err)
 		}
 
 		pb.Wait()
@@ -212,43 +211,55 @@ func (d *Downloader) getORAS(ctx context.Context, name string, version meta.Vers
 	return cachePath, nil
 }
 
-func copyFileOrDir(src, dst string) error {
-	stat, err := os.Stat(src)
+func (d *Downloader) GetOCI(ctx context.Context, name string, version meta.Version, target string) error {
+	cachePath, err := d.getOCI(ctx, name, version)
 	if err != nil {
-		return fmt.Errorf("stat source %q: %w", src, err)
+		return err
 	}
 
-	if stat.IsDir() {
-		return CopyDir(src, dst)
-	}
-
-	return CopyFile(src, dst)
-}
-
-func CopyFile(src, dst string) error {
-	srcF, err := os.Open(src)
-	if err != nil {
-		return fmt.Errorf("opening %q: %w", src, err)
-	}
-	defer srcF.Close()
-
-	dstF, err := os.Create(dst)
-	if err != nil {
-		return fmt.Errorf("creating %q: %w", dst, err)
-	}
-	defer dstF.Close()
-
-	if _, err := io.Copy(dstF, srcF); err != nil {
-		return fmt.Errorf("copying file %q to %q: %w", src, dst, err)
+	target = filepath.Join(target, filepath.Base(cachePath))
+	if err := CopyDir(cachePath, target); err != nil {
+		return fmt.Errorf("copying %q to %q: %w", cachePath, target, err)
 	}
 
 	return nil
 }
 
-func CopyDir(src, dst string) error {
-	if err := os.CopyFS(dst, os.DirFS(src)); err != nil {
-		return fmt.Errorf("copying dir %q to %q: %w", src, dst, err)
+func (d *Downloader) getOCI(ctx context.Context, name string, version meta.Version) (string, error) {
+	d.m.Lock()
+	defer d.m.Unlock()
+
+	cacheName := name + "@" + string(version)
+	cacheName = strings.ReplaceAll(cacheName, "/", "_") + ".oci"
+	cachePath := filepath.Join(d.cacheDir, cacheName)
+
+	stat, err := os.Stat(cachePath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("stat cache %q: %w", cachePath, err)
+	}
+	if err == nil && !stat.IsDir() {
+		return "", fmt.Errorf("cache %q is not a directory", cachePath) //nolint:goerr113
 	}
 
-	return nil
+	if err != nil && errors.Is(err, os.ErrNotExist) {
+		tmp, err := os.MkdirTemp(d.cacheDir, "download-*")
+		if err != nil {
+			return "", fmt.Errorf("creating temp dir: %w", err)
+		}
+		defer os.RemoveAll(tmp)
+
+		slog.Info("Downloading", "name", name, "version", version, "type", "oci")
+
+		src := "docker://" + strings.Trim(d.repo, "/") + "/" + strings.Trim(d.prefix, "/") + "/" + strings.Trim(name, "/") + ":" + string(version)
+		dst := "oci:" + tmp
+		if err := copyOCI(ctx, src, dst, nil, nil); err != nil {
+			return "", fmt.Errorf("downloading OCI: '%s:%s': %w", name, version, err)
+		}
+
+		if err := os.Rename(tmp, cachePath); err != nil {
+			return "", fmt.Errorf("moving %q to %q: %w", tmp, cachePath, err)
+		}
+	}
+
+	return cachePath, nil
 }

@@ -123,31 +123,31 @@ type Versions struct {
 }
 
 type PlatformVersions struct {
-	K3s          meta.Version `json:"k3s,omitempty"`
-	Zot          meta.Version `json:"zot,omitempty"`
-	CertManager  meta.Version `json:"certManager,omitempty"`
-	K9s          meta.Version `json:"k9s,omitempty"`
-	Toolbox      meta.Version `json:"toolbox,omitempty"`
-	Reloader     meta.Version `json:"reloader,omitempty"`
-	ControlProxy meta.Version `json:"controlProxy,omitempty"`
+	K3s         meta.Version `json:"k3s,omitempty"`
+	Zot         meta.Version `json:"zot,omitempty"`
+	CertManager meta.Version `json:"certManager,omitempty"`
+	K9s         meta.Version `json:"k9s,omitempty"`
+	Toolbox     meta.Version `json:"toolbox,omitempty"`
+	Reloader    meta.Version `json:"reloader,omitempty"`
 }
 
 type FabricatorVersions struct {
 	API            meta.Version `json:"api,omitempty"`
 	Controller     meta.Version `json:"controller,omitempty"`
-	ControlISORoot meta.Version `json:"controlISORoot,omitempty"`
+	ControlUSBRoot meta.Version `json:"controlISORoot,omitempty"`
 }
 
 type FabricVersions struct {
-	API          meta.Version            `json:"api,omitempty"`
-	Controller   meta.Version            `json:"controller,omitempty"`
-	DHCPD        meta.Version            `json:"dhcpd,omitempty"`
-	Boot         meta.Version            `json:"boot,omitempty"`
-	Agent        meta.Version            `json:"agent,omitempty"`
-	ControlAgent meta.Version            `json:"controlAgent,omitempty"`
-	Ctl          meta.Version            `json:"ctl,omitempty"`
-	Alloy        meta.Version            `json:"alloy,omitempty"`
-	NOS          map[string]meta.Version `json:"nos,omitempty"`
+	API        meta.Version            `json:"api,omitempty"`
+	Controller meta.Version            `json:"controller,omitempty"`
+	DHCPD      meta.Version            `json:"dhcpd,omitempty"`
+	Boot       meta.Version            `json:"boot,omitempty"`
+	Agent      meta.Version            `json:"agent,omitempty"`
+	Ctl        meta.Version            `json:"ctl,omitempty"`
+	Alloy      meta.Version            `json:"alloy,omitempty"`
+	ProxyChart meta.Version            `json:"proxyChart,omitempty"`
+	Proxy      meta.Version            `json:"proxy,omitempty"`
+	NOS        map[string]meta.Version `json:"nos,omitempty"`
 }
 
 type VLABVersions struct {

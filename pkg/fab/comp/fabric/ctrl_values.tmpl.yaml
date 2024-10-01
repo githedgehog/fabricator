@@ -1,0 +1,5 @@
+controllerManager:
+  manager:
+    image:
+      repository: {{ .Repo }}
+      tag: {{ .Tag }}

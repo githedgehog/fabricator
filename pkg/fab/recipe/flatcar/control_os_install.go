@@ -82,7 +82,7 @@ type ControlOSInstal struct {
 }
 
 func (i *ControlOSInstal) Run(ctx context.Context) error {
-	ignition := filepath.Join(i.WorkDir, recipe.ControlISOIgnition)
+	ignition := filepath.Join(i.WorkDir, recipe.ControlUSBIgnition)
 	dev := i.Control.Spec.Bootstrap.Disk
 	img := filepath.Join(i.WorkDir, "flatcar_production_image.bin.bz2") // TODO const
 
