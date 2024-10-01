@@ -36,11 +36,7 @@ var valuesTmpl string
 //go:embed config.tmpl.json
 var configTmpl string
 
-// TODO maybe make an interface for the component? comp.Interface
-var (
-	_ comp.KubeInstall   = Install
-	_ comp.ListArtifacts = Artifacts
-)
+var _ comp.KubeInstall = Install
 
 func Install(cfg fabapi.Fabricator) ([]client.Object, error) {
 	version := string(cfg.Status.Versions.Platform.Zot)
@@ -131,19 +127,13 @@ func InstallUsers(users map[string]string) comp.KubeInstall {
 	}
 }
 
-func Artifacts(cfg fabapi.Fabricator) (comp.Artifacts, error) {
-	version := string(cfg.Status.Versions.Platform.Zot)
+var _ comp.ListOCIArtifacts = Artifacts
 
-	return comp.Artifacts{
-		AirgapOCISync: []string{
-			ChartRef + ":" + version,
-			ImageRef + ":" + version,
-		},
-		BootstrapImages: []string{
-			"fabricator/zot-airgap:" + version,
-		},
-		BootstrapCharts: []string{
-			"fabricator/zot-chart:" + version,
-		},
+func Artifacts(cfg fabapi.Fabricator) (comp.OCIArtifacts, error) {
+	version := string(Version(cfg))
+
+	return comp.OCIArtifacts{
+		ChartRef: version,
+		ImageRef: version,
 	}, nil
 }
