@@ -17,6 +17,10 @@ const (
 	BootstrapStatic    = "https://%{KUBERNETES_API}%/static"
 )
 
+type OCIArtifacts map[string]string
+
+type ListOCIArtifacts func(f fabapi.Fabricator) (OCIArtifacts, error)
+
 func RegistryURL(cfg fabapi.Fabricator) string {
 	return fmt.Sprintf("%s:%d", cfg.Spec.Config.Control.VIP, RegistryPort)
 }

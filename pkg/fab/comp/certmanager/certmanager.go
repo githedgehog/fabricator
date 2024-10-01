@@ -30,10 +30,7 @@ func Version(f fabapi.Fabricator) meta.Version {
 //go:embed values.tmpl.yaml
 var valuesTmpl string
 
-var (
-	_ comp.KubeInstall   = Install
-	_ comp.ListArtifacts = Artifacts
-)
+var _ comp.KubeInstall = Install
 
 func Install(cfg fabapi.Fabricator) ([]client.Object, error) {
 	version := string(cfg.Status.Versions.Platform.CertManager)
@@ -59,23 +56,17 @@ func Install(cfg fabapi.Fabricator) ([]client.Object, error) {
 	}, nil
 }
 
-func Artifacts(cfg fabapi.Fabricator) (comp.Artifacts, error) {
-	version := string(cfg.Status.Versions.Platform.CertManager)
+var _ comp.ListOCIArtifacts = Artifacts
 
-	return comp.Artifacts{
-		AirgapOCISync: []string{
-			ChartRef + ":" + version,
-			ControllerImageRef + ":" + version,
-			WebhookImageRef + ":" + version,
-			CAInjectorImageRef + ":" + version,
-			ACMESolverImageRef + ":" + version,
-			StartupAPICheckImageRef + ":" + version,
-		},
-		BootstrapImages: []string{
-			"fabricator/cert-manager-airgap:" + version,
-		},
-		BootstrapCharts: []string{
-			"fabricator/cert-manager-chart:" + version,
-		},
+func Artifacts(cfg fabapi.Fabricator) (comp.OCIArtifacts, error) {
+	version := string(Version(cfg))
+
+	return comp.OCIArtifacts{
+		ChartRef:                version,
+		ControllerImageRef:      version,
+		WebhookImageRef:         version,
+		CAInjectorImageRef:      version,
+		ACMESolverImageRef:      version,
+		StartupAPICheckImageRef: version,
 	}, nil
 }

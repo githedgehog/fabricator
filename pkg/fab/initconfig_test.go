@@ -27,7 +27,7 @@ func TestInitConfig(t *testing.T) {
 				},
 				External: fabapi.ControlNodeExternal{
 					Interface: "enp2s0",
-					IP:        meta.AddrDHCP,
+					IP:        meta.PrefixDHCP,
 				},
 			},
 		},
