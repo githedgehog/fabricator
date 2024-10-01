@@ -57,6 +57,7 @@ func VLABGenerate(ctx context.Context, workDir, cacheDir string, builder VLABBui
 type VLABUpOpts struct {
 	HydrateMode HydrateMode
 	Recreate    bool
+	USBImage    bool
 	VLABRunOpts
 }
 
@@ -71,7 +72,10 @@ func VLABUp(ctx context.Context, workDir, cacheDir string, opts VLABUpOpts) erro
 		return fmt.Errorf("creating VLAB: %w", err)
 	}
 
-	if err := c.build(ctx, BuildOpts{Mode: BuildModeManual}); err != nil {
+	if err := c.build(ctx, BuildOpts{
+		HydrateMode: opts.HydrateMode,
+		USBImage:    opts.USBImage,
+	}); err != nil {
 		return fmt.Errorf("building: %w", err)
 	}
 

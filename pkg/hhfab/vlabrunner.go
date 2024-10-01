@@ -151,10 +151,30 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 					return fmt.Errorf("copying flatcar files: %w", err)
 				}
 			} else if vm.Type == VMTypeControl && opts.ControlUSB {
+				if err := d.FromORAS(ctx, vmDir, vlabcomp.FlatcarRef, vlabcomp.FlatcarVersion(c.Fab), []artificer.ORASFile{
+					{
+						Name:   "flatcar_efi_code.fd",
+						Target: VLABEFICodeFile,
+					},
+					{
+						Name:   "flatcar_efi_vars.fd",
+						Target: VLABEFIVarsFile,
+					},
+				}); err != nil {
+					return fmt.Errorf("copying flatcar files: %w", err)
+				}
+
 				if err := execCmd(ctx, false, vmDir,
 					VLABCmdQemuImg, []string{"create", "-f", "qcow2", VLABOSImageFile, fmt.Sprintf("%dG", vm.Size.Disk)},
 					"vm", vm.Name); err != nil {
 					return fmt.Errorf("creating empty os image: %w", err)
+				}
+
+				if err := artificer.CopyFile(
+					filepath.Join(c.WorkDir, ResultDir, vm.Name+recipe.InstallUSBImageSuffix),
+					filepath.Join(vmDir, VLABUSBImageFile),
+				); err != nil {
+					return fmt.Errorf("copying usb image: %w", err)
 				}
 			} else if vm.Type == VMTypeSwitch {
 				resize = true
@@ -400,7 +420,8 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 	defer ticker.Stop()
 
 	var client *goph.Client
-	for client == nil {
+	ready := false
+	for !ready {
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("context cancelled: %w", ctx.Err())
@@ -421,6 +442,8 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 				return fmt.Errorf("connecting: %w", err)
 			}
 			defer client.Close()
+
+			ready = true
 		}
 	}
 

@@ -79,7 +79,7 @@ func (d *Downloader) FromORAS(ctx context.Context, destPath, name string, versio
 
 			src := filepath.Join(cachePath, file.Name)
 			dst := filepath.Join(destPath, target)
-			if err := copyFileDir(src, dst); err != nil {
+			if err := copyFileOrDir(src, dst); err != nil {
 				return err
 			}
 
@@ -212,20 +212,20 @@ func (d *Downloader) getORAS(ctx context.Context, name string, version meta.Vers
 	return cachePath, nil
 }
 
-func copyFileDir(src, dst string) error {
+func copyFileOrDir(src, dst string) error {
 	stat, err := os.Stat(src)
 	if err != nil {
 		return fmt.Errorf("stat source %q: %w", src, err)
 	}
 
 	if stat.IsDir() {
-		return copyDir(src, dst)
+		return CopyDir(src, dst)
 	}
 
-	return copyFile(src, dst)
+	return CopyFile(src, dst)
 }
 
-func copyFile(src, dst string) error {
+func CopyFile(src, dst string) error {
 	srcF, err := os.Open(src)
 	if err != nil {
 		return fmt.Errorf("opening %q: %w", src, err)
@@ -245,7 +245,7 @@ func copyFile(src, dst string) error {
 	return nil
 }
 
-func copyDir(src, dst string) error {
+func CopyDir(src, dst string) error {
 	if err := os.CopyFS(dst, os.DirFS(src)); err != nil {
 		return fmt.Errorf("copying dir %q to %q: %w", src, dst, err)
 	}
