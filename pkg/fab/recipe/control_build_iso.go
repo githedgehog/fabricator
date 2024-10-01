@@ -136,13 +136,13 @@ func (b *ControlInstallBuilder) buildUSBImage(ctx context.Context) error {
 	if err := diskFSCopyTree(workdir, "/boot", espFS); err != nil {
 		return fmt.Errorf("copying boot dir: %w", err)
 	}
-	if err := diskFSCopyFile("/", workdir+"/flatcar_production_pxe_image.cpio.gz", espFS); err != nil {
+	if err := diskFSCopyFile("/", filepath.Join(workdir, "flatcar_production_pxe_image.cpio.gz"), espFS); err != nil {
 		return fmt.Errorf("copying flatcar cpio: %w", err)
 	}
-	if err := diskFSCopyFile("/", workdir+"/oem.cpio.gz", espFS); err != nil {
+	if err := diskFSCopyFile("/", filepath.Join(workdir, "oem.cpio.gz"), espFS); err != nil {
 		return fmt.Errorf("copying oem cpio: %w", err)
 	}
-	if err := diskFSCopyFile("/", workdir+"/flatcar_production_pxe.vmlinuz", espFS); err != nil {
+	if err := diskFSCopyFile("/", filepath.Join(workdir, "flatcar_production_pxe.vmlinuz"), espFS); err != nil {
 		return fmt.Errorf("copying flatcar vmlinuz: %w", err)
 	}
 
@@ -154,7 +154,7 @@ func (b *ControlInstallBuilder) buildUSBImage(ctx context.Context) error {
 	// 		return fmt.Errorf("copying flatcar-install.yaml: %w", err)
 	// 	}
 	// }
-	if err := diskFSCopyFile("/", workdir+"/flatcar_production_image.bin.bz2", backpackFS); err != nil {
+	if err := diskFSCopyFile("/", filepath.Join(workdir, "/flatcar_production_image.bin.bz2"), backpackFS); err != nil {
 		return fmt.Errorf("copying flatcar image: %w", err)
 	}
 
