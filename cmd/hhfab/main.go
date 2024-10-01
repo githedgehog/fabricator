@@ -120,8 +120,8 @@ func Run(ctx context.Context) error {
 
 	var wgSpinesCount, wgFabricLinksCount, wgMCLAGLeafsCount, wgOrphanLeafsCount, wgMCLAGSessionLinks, wgMCLAGPeerLinks, wgVPCLoopbacks uint
 	var wgESLAGLeafGroups string
-	var wgExternal bool
 	var wgMCLAGServers, wgESLAGServers, wgUnbundledServers, wgBundledServers uint
+	var wgNoSwitches bool
 	vlabWiringGenFlags := []cli.Flag{
 		&cli.UintFlag{
 			Name:        "spines-count",
@@ -163,11 +163,6 @@ func Run(ctx context.Context) error {
 			Usage:       "number of vpc loopbacks for each switch",
 			Destination: &wgVPCLoopbacks,
 		},
-		&cli.BoolFlag{
-			Name:        "external",
-			Usage:       "include virtual external switch",
-			Destination: &wgExternal,
-		},
 		&cli.UintFlag{
 			Name:        "mclag-servers",
 			Usage:       "number of MCLAG servers to generate for MCLAG switches",
@@ -191,6 +186,11 @@ func Run(ctx context.Context) error {
 			Usage:       "number of bundled servers to generate for switches (only for one of the second switch in the redundancy group or orphan switch)",
 			Destination: &wgBundledServers,
 			Value:       1,
+		},
+		&cli.BoolFlag{
+			Name:        "no-switches",
+			Usage:       "do not generate any switches",
+			Destination: &wgNoSwitches,
 		},
 	}
 
@@ -435,6 +435,7 @@ func Run(ctx context.Context) error {
 								ESLAGServers:      uint8(wgESLAGServers),      //nolint:gosec
 								UnbundledServers:  uint8(wgUnbundledServers),  //nolint:gosec
 								BundledServers:    uint8(wgBundledServers),    //nolint:gosec
+								NoSwitches:        wgNoSwitches,
 							}
 
 							if err := hhfab.VLABGenerate(ctx, workDir, cacheDir, builder, hhfab.DefaultVLABGeneratedFile); err != nil {
