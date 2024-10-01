@@ -60,7 +60,13 @@ func (b *ControlInstallBuilder) Build(ctx context.Context) error {
 	}
 
 	if existingHash, err := os.ReadFile(installHashFile); err == nil {
-		if string(existingHash) == newHash && isPresent(installDir, installArchive, installIgnition) {
+		slog.Debug("Checking existing installers", "new", newHash, "existing", string(existingHash))
+
+		files := []string{installDir, installArchive, installIgnition}
+		if b.USBImage {
+			files = []string{installDir, filepath.Join(b.WorkDir, b.Control.Name+InstallUSBImageSuffix)}
+		}
+		if string(existingHash) == newHash && isPresent(files...) {
 			slog.Info("Using existing installers")
 
 			return nil
