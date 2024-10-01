@@ -170,7 +170,7 @@ func (b *ControlInstallBuilder) Build(ctx context.Context) error {
 			return fmt.Errorf("archiving install: %w", err)
 		}
 
-		ign, err := controlIgnition(b.Fab, b.Control)
+		ign, err := controlIgnition(b.Fab, b.Control, "")
 		if err != nil {
 			return fmt.Errorf("creating ignition: %w", err)
 		}
@@ -203,7 +203,7 @@ func removeIfExists(path string) error {
 	return nil
 }
 
-func controlIgnition(fab fabapi.Fabricator, control fabapi.ControlNode) ([]byte, error) {
+func controlIgnition(fab fabapi.Fabricator, control fabapi.ControlNode, autoInstall string) ([]byte, error) {
 	but, err := tmplutil.FromTemplate("butane", controlButaneTmpl, map[string]any{
 		"Hostname":       control.Name,
 		"PasswordHash":   fab.Spec.Config.Control.DefaultUser.PasswordHash,
@@ -215,6 +215,7 @@ func controlIgnition(fab fabapi.Fabricator, control fabapi.ControlNode) ([]byte,
 		"ExtAddress":     control.Spec.External.IP,
 		"ExtGateway":     control.Spec.External.Gateway,
 		"ExtDNS":         control.Spec.External.DNS,
+		"AutoInstall":    autoInstall,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("butane: %w", err)

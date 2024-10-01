@@ -19,6 +19,23 @@ systemd:
   units:
     - name: locksmithd.service
       mask: true
+{{ if .AutoInstall }}
+    - name: fabric-install.service
+      enabled: true
+      contents: |
+        [Unit]
+        Description="Firstboot installation program for Hedgehog Fabricator"
+        ConditionFirstBoot=yes
+
+        [Service]
+        Type=simple
+        ExecStart={{ .AutoInstall }}/hhfab-recipe control install -v
+        WorkingDirectory={{ .AutoInstall }}
+        Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/bin" "HOME=/home/core"
+
+        [Install]
+        WantedBy=first-boot-complete.target
+{{ end }}
 
 storage:
   files:
