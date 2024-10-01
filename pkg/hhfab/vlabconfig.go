@@ -227,6 +227,10 @@ func (c *Config) PrepareVLAB(ctx context.Context, opts VLABUpOpts) (*VLAB, error
 		user.AuthorizedKeys = append(user.AuthorizedKeys, pub)
 	}
 
+	for idx := range c.Controls {
+		c.Controls[idx].Spec.Bootstrap.Disk = "/dev/vda"
+	}
+
 	if !createCfg {
 		slog.Info("VLAB config loaded", "file", filepath.Join(VLABDir, VLABConfigFile))
 	}

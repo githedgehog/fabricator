@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/melbahja/goph"
@@ -435,11 +434,11 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 				Callback: ssh.InsecureIgnoreHostKey(), //nolint:gosec
 			})
 			if err != nil {
-				if errors.Is(err, syscall.ECONNREFUSED) {
-					continue
-				}
+				// if !errors.Is(err, syscall.ECONNREFUSED) {
+				// 	slog.Debug("SSH not ready yet", "vm", vm.Name, "type", vm.Type, "err", err)
+				// }
 
-				return fmt.Errorf("connecting: %w", err)
+				continue
 			}
 			defer client.Close()
 
