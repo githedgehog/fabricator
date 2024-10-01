@@ -215,10 +215,11 @@ OEMDIR ?= ./pkg/embed/flatcaroem
 .PHONY: embed
 embed: ## Prepare the assets for embedding into the hhfab binary
 	touch ./pkg/embed/recipebin/hhfab-recipe.gz
+	touch $(OEMDIR)/oem.cpio.gz
+
 	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build --tags containers_image_openpgp -o ./pkg/embed/recipebin/hhfab-recipe ./cmd/hhfab-recipe
 	gzip -fk ./pkg/embed/recipebin/hhfab-recipe
 
-	touch $(OEMDIR)/oem.cpio.gz
 	mkdir -p $(OEMDIR)/usr/share/oem
 	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build --tags containers_image_openpgp -o $(OEMDIR)/hhfab-flatcar-install ./cmd/hhfab-flatcar-install
 	$(BUTANE) --strict --output $(OEMDIR)/usr/share/oem/config.ign --files-dir $(OEMDIR) ./pkg/fab/recipe/control_build_usb_butane.yaml
