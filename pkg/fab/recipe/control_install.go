@@ -385,7 +385,12 @@ func (c *ControlInstall) installZot(ctx context.Context, kube client.Client) err
 		return fmt.Errorf("waiting for zot ready: %w", err)
 	}
 
-	if err := waitURL(ctx, "https://"+comp.RegistryURL(c.Fab)+"/v2/_catalog"); err != nil {
+	regURL, err := comp.RegistryURL(c.Fab)
+	if err != nil {
+		return fmt.Errorf("getting registry URL: %w", err)
+	}
+
+	if err := waitURL(ctx, "https://"+regURL+"/v2/_catalog"); err != nil {
 		return fmt.Errorf("waiting for zot endpoint: %w", err)
 	}
 

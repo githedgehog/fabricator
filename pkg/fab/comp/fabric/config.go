@@ -20,10 +20,15 @@ func GetFabricConfig(f fabapi.Fabricator) (*meta.FabricConfig, error) {
 		})
 	}
 
+	controlVIP, err := f.Spec.Config.Control.VIP.Parse()
+	if err != nil {
+		return nil, fmt.Errorf("parsing control VIP: %w", err)
+	}
+
 	// TODO align APIs (fabric config field names, check agent spec too)
 	return &meta.FabricConfig{
-		ControlVIP:           fmt.Sprintf("%s/32", f.Spec.Config.Control.VIP),
-		APIServer:            fmt.Sprintf("%s:%d", f.Spec.Config.Control.VIP, k3s.APIPort),
+		ControlVIP:           string(f.Spec.Config.Control.VIP),
+		APIServer:            fmt.Sprintf("%s:%d", controlVIP.Addr().String(), k3s.APIPort),
 		AgentRepo:            "", // TODO
 		AgentRepoCA:          "", // TODO autoread from CM/Secret?
 		VPCIRBVLANRanges:     f.Spec.Config.Fabric.VPCIRBVLANs,

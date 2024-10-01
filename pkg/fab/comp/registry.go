@@ -21,30 +21,44 @@ type OCIArtifacts map[string]string
 
 type ListOCIArtifacts func(f fabapi.Fabricator) (OCIArtifacts, error)
 
-func RegistryURL(cfg fabapi.Fabricator) string {
-	return fmt.Sprintf("%s:%d", cfg.Spec.Config.Control.VIP, RegistryPort)
+func RegistryURL(cfg fabapi.Fabricator) (string, error) {
+	controlVIP, err := cfg.Spec.Config.Control.VIP.Parse()
+	if err != nil {
+		return "", fmt.Errorf("parsing control VIP: %w", err)
+	}
+
+	return fmt.Sprintf("%s:%d", controlVIP.Addr().String(), RegistryPort), nil
 }
 
-func ImageURL(cfg fabapi.Fabricator, name string) string {
+func ImageURL(cfg fabapi.Fabricator, name string) (string, error) {
 	// TODO custom build image archives so we don't need to custom handle it here?
 	if cfg.Status.IsBootstrap {
-		return joinURLParts(BootstrapImageRepo, RegistryPrefix, name)
+		return joinURLParts(BootstrapImageRepo, RegistryPrefix, name), nil
 	}
 
-	return joinURLParts(RegistryURL(cfg), RegistryPrefix, name)
+	regURL, err := RegistryURL(cfg)
+	if err != nil {
+		return "", fmt.Errorf("getting registry URL: %w", err)
+	}
+
+	return joinURLParts(regURL, RegistryPrefix, name), nil
 }
 
-// TODO change API for proper err handling
-func ChartURL(cfg fabapi.Fabricator, name, bootstrap string) string {
+func ChartURL(cfg fabapi.Fabricator, name, bootstrap string) (string, error) {
 	if cfg.Status.IsBootstrap {
 		if len(bootstrap) == 0 {
-			return "<missing bootstrap chart>"
+			return "", fmt.Errorf("bootstrap chart name is required")
 		}
 
-		return joinURLParts(BootstrapStatic, k3s.BootstrapChartsPrefix, bootstrap)
+		return joinURLParts(BootstrapStatic, k3s.BootstrapChartsPrefix, bootstrap), nil
 	}
 
-	return OCISchema + joinURLParts(RegistryURL(cfg), RegistryPrefix, name)
+	regURL, err := RegistryURL(cfg)
+	if err != nil {
+		return "", fmt.Errorf("getting registry URL: %w", err)
+	}
+
+	return OCISchema + joinURLParts(regURL, RegistryPrefix, name), nil
 }
 
 func joinURLParts(parts ...string) string {

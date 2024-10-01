@@ -137,7 +137,7 @@ func Duration(d time.Duration) *metaapi.Duration {
 	return &metaapi.Duration{Duration: d}
 }
 
-func NewHelmChart(cfg fabapi.Fabricator, name, chart, version, bootstrapChart string, abortOnFail bool, values string) client.Object {
+func NewHelmChart(cfg fabapi.Fabricator, name, chart, version, bootstrapChart string, abortOnFail bool, values string) (client.Object, error) {
 	failurePolicy := ""
 	if abortOnFail {
 		failurePolicy = "abort"
@@ -155,6 +155,11 @@ func NewHelmChart(cfg fabapi.Fabricator, name, chart, version, bootstrapChart st
 		}
 	}
 
+	chartURL, err := ChartURL(cfg, chart, bootstrapChart)
+	if err != nil {
+		return nil, fmt.Errorf("getting chart URL: %w", err)
+	}
+
 	return &helmapi.HelmChart{
 		TypeMeta: metaapi.TypeMeta{
 			APIVersion: helmapi.SchemeGroupVersion.String(),
@@ -165,7 +170,7 @@ func NewHelmChart(cfg fabapi.Fabricator, name, chart, version, bootstrapChart st
 			Namespace: FabNamespace,
 		},
 		Spec: helmapi.HelmChartSpec{
-			Chart:           ChartURL(cfg, chart, bootstrapChart),
+			Chart:           chartURL,
 			Version:         version,
 			TargetNamespace: FabNamespace,
 			CreateNamespace: true,
@@ -176,7 +181,7 @@ func NewHelmChart(cfg fabapi.Fabricator, name, chart, version, bootstrapChart st
 			RepoCAConfigMap: ca,
 			ValuesContent:   values,
 		},
-	}
+	}, nil
 }
 
 func NewIssuer(name string, spec cmapi.IssuerSpec) client.Object {

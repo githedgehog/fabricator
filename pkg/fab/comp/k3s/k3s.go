@@ -33,9 +33,14 @@ func Version(f fabapi.Fabricator) meta.Version {
 var k3sConfigTmpl string
 
 func Config(f fabapi.Fabricator, control fabapi.ControlNode) (string, error) {
+	controlVIP, err := f.Spec.Config.Control.VIP.Parse()
+	if err != nil {
+		return "", fmt.Errorf("parsing control VIP: %w", err)
+	}
+
 	tlsSAN := f.Spec.Config.Control.TLSSAN
-	if !slices.Contains(tlsSAN, string(f.Spec.Config.Control.VIP)) {
-		tlsSAN = append(tlsSAN, string(f.Spec.Config.Control.VIP))
+	if !slices.Contains(tlsSAN, controlVIP.Addr().String()) {
+		tlsSAN = append(tlsSAN, controlVIP.Addr().String())
 	}
 
 	nodeIP, err := control.Spec.Management.IP.Parse()

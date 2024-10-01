@@ -49,8 +49,13 @@ func Install(cfg fabapi.Fabricator) ([]client.Object, error) {
 		return nil, fmt.Errorf("config: %w", err)
 	}
 
+	repo, err := comp.ImageURL(cfg, ImageRef)
+	if err != nil {
+		return nil, fmt.Errorf("getting image URL for %q: %w", ImageRef, err)
+	}
+
 	values, err := tmplutil.FromTemplate("values", valuesTmpl, map[string]any{
-		"Repo":           comp.ImageURL(cfg, ImageRef),
+		"Repo":           repo,
 		"Tag":            version,
 		"Port":           Port,
 		"Config":         config,
@@ -69,6 +74,11 @@ func Install(cfg fabapi.Fabricator) ([]client.Object, error) {
 		return nil, fmt.Errorf("parsing control VIP: %w", err)
 	}
 
+	helmChart, err := comp.NewHelmChart(cfg, releaseName, ChartRef, version, AirgapChartName, false, values)
+	if err != nil {
+		return nil, fmt.Errorf("creating Helm chart: %w", err)
+	}
+
 	return []client.Object{
 		comp.NewCertificate("registry", comp.CertificateSpec{
 			DNSNames:    []string{fmt.Sprintf("%s.%s.svc.%s", ServiceName, comp.FabNamespace, comp.ClusterDomain)},
@@ -76,7 +86,7 @@ func Install(cfg fabapi.Fabricator) ([]client.Object, error) {
 			IssuerRef:   comp.NewIssuerRef(comp.FabCAIssuer),
 			SecretName:  TLSSecret,
 		}),
-		comp.NewHelmChart(cfg, releaseName, ChartRef, version, AirgapChartName, false, values),
+		helmChart,
 		comp.NewService(ServiceName, comp.ServiceSpec{
 			Selector: map[string]string{
 				"app.kubernetes.io/instance": releaseName,
