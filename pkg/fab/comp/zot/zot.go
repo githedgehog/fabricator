@@ -106,9 +106,16 @@ func Install(cfg fabapi.Fabricator) ([]client.Object, error) {
 }
 
 func NewUsers() (map[string]string, error) {
+	gen, err := password.NewGenerator(&password.GeneratorInput{
+		Symbols: "~!@#$%^&*()_+`-={}|[]\\:<>?,./",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("creating password generator: %w", err)
+	}
+
 	users := map[string]string{}
 	for _, user := range []string{comp.RegistryUserAdmin, comp.RegistryUserWriter, comp.RegistryUserReader} {
-		passwd, err := password.Generate(32, 10, 10, false, true)
+		passwd, err := gen.Generate(32, 10, 0, false, true)
 		if err != nil {
 			return nil, fmt.Errorf("generating password: %w", err)
 		}
