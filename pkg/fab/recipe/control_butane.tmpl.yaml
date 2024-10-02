@@ -164,3 +164,81 @@ storage:
           TOOLBOX_DOCKER_IMAGE=ghcr.io/githedgehog/toolbox
           TOOLBOX_DOCKER_TAG=latest
           TOOLBOX_USER=root
+
+    # K9s plugin to reboot and reinstall switches
+    - path: /home/core/.config/k9s/plugins.yaml
+      user:
+        name: core
+      mode: 0644
+      contents:
+        inline: |
+          plugins:
+            fabricswitchreboot:
+              shortCut: r
+              description: Reboot
+              scopes:
+              - switch
+              - agent
+              confirm: true
+              background: false
+              command: kubectl
+              args:
+              - fabric
+              - switch
+              - reboot
+              - --name
+              - $NAME
+              - --yes
+            fabricswitchpowerreset:
+              shortCut: Shift-K
+              description: Power Reset
+              scopes:
+              - switch
+              - agent
+              confirm: true
+              background: false
+              command: kubectl
+              args:
+              - fabric
+              - switch
+              - power-reset
+              - --name
+              - $NAME
+              - --yes
+            fabricswitchreinstall:
+              shortCut: Shift-R
+              description: Reinstall
+              scopes:
+              - switch
+              - agent
+              confirm: true
+              background: false
+              command: kubectl
+              args:
+              - fabric
+              - switch
+              - reinstall
+              - --name
+              - $NAME
+              - --yes
+
+  directories:
+    - path: /home/core/.config
+      user:
+        name: core
+
+    - path: /home/core/.config/k9s
+      user:
+        name: core
+
+    - path: /home/core/.kube
+      user:
+        name: core
+
+  links:
+    - path: /home/core/.kube/config
+      target: /etc/rancher/k3s/k3s.yaml
+      user:
+        name: core
+      group:
+        name: core
