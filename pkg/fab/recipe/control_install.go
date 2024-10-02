@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	dhcpapi "go.githedgehog.com/fabric/api/dhcp/v1alpha2"
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
 	"go.githedgehog.com/fabric/pkg/util/logutil"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
@@ -169,8 +170,25 @@ func (c *ControlInstall) Run(ctx context.Context) error {
 
 	// TODO move to operator
 	{
-		if err := comp.EnforceKubeInstall(ctx, kube, c.Fab, fabric.Install); err != nil {
+		if err := comp.EnforceKubeInstall(ctx, kube, c.Fab, fabric.Install(c.Control)); err != nil {
 			return fmt.Errorf("enforcing fabric install: %w", err)
+		}
+
+		if err := waitKube(ctx, kube, "fabric", comp.FabNamespace,
+			&comp.Deployment{}, func(obj *comp.Deployment) (bool, error) {
+				for _, cond := range obj.Status.Conditions {
+					if cond.Type == comp.DeploymentAvailable && cond.Status == comp.ConditionTrue {
+						return true, nil
+					}
+				}
+
+				return false, nil
+			}); err != nil {
+			return fmt.Errorf("waiting for fabric ready: %w", err)
+		}
+
+		if err := comp.EnforceKubeInstall(ctx, kube, c.Fab, fabric.InstallManagementDHCPSubnet); err != nil {
+			return fmt.Errorf("enforcing fabric management dhcp subnet install: %w", err)
 		}
 	}
 
@@ -293,6 +311,8 @@ func (c *ControlInstall) installK8s(ctx context.Context) (client.Client, error) 
 	kube, err := kubeutil.NewClient(ctx, k3s.KubeConfigPath,
 		comp.CoreAPISchemeBuilder, comp.AppsAPISchemeBuilder,
 		comp.HelmAPISchemeBuilder, comp.CMApiSchemeBuilder, comp.CMMetaSchemeBuilder,
+		// TODO remove
+		dhcpapi.SchemeBuilder,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("creating kube client: %w", err)

@@ -9,6 +9,7 @@ import (
 	cmapi "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
 	helmapi "github.com/k3s-io/helm-controller/pkg/apis/helm.cattle.io/v1"
+	dhcpapi "go.githedgehog.com/fabric/api/dhcp/v1alpha2"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	appsapi "k8s.io/api/apps/v1"
 	coreapi "k8s.io/api/core/v1"
@@ -276,6 +277,20 @@ func NewService(name string, spec coreapi.ServiceSpec) client.Object {
 	}
 }
 
+func NewDHCPSubnet(name string, spec dhcpapi.DHCPSubnetSpec) client.Object {
+	return &dhcpapi.DHCPSubnet{
+		TypeMeta: metaapi.TypeMeta{
+			APIVersion: dhcpapi.GroupVersion.String(),
+			Kind:       "DHCPSubnet",
+		},
+		ObjectMeta: metaapi.ObjectMeta{
+			Name:      name,
+			Namespace: metaapi.NamespaceDefault,
+		},
+		Spec: spec,
+	}
+}
+
 func CreateOrUpdate(ctx context.Context, kube client.Client, obj client.Object) (ctrlutil.OperationResult, error) {
 	var res ctrlutil.OperationResult
 	var err error
@@ -322,6 +337,13 @@ func CreateOrUpdate(ctx context.Context, kube client.Client, obj client.Object) 
 		})
 	case *coreapi.Service:
 		tmp := &coreapi.Service{ObjectMeta: obj.ObjectMeta}
+		res, err = ctrlutil.CreateOrUpdate(ctx, kube, tmp, func() error {
+			tmp.Spec = obj.Spec
+
+			return nil
+		})
+	case *dhcpapi.DHCPSubnet:
+		tmp := &dhcpapi.DHCPSubnet{ObjectMeta: obj.ObjectMeta}
 		res, err = ctrlutil.CreateOrUpdate(ctx, kube, tmp, func() error {
 			tmp.Spec = obj.Spec
 
