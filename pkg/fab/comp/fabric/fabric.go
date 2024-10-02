@@ -81,10 +81,15 @@ func Install(cfg fabapi.Fabricator) ([]client.Object, error) {
 	if err != nil {
 		return nil, fmt.Errorf("getting image URL for %q: %w", DHCPRef, err)
 	}
-	// TODO pass Control VIP to listen on
+
+	controlVIP, err := cfg.Spec.Config.Control.VIP.Parse()
+	if err != nil {
+		return nil, fmt.Errorf("parsing control VIP: %w", err)
+	}
 	dhcpValues, err := tmplutil.FromTemplate("dhcp-values", dhcpValuesTmpl, map[string]any{
-		"Repo": dhcpRef,
-		"Tag":  string(cfg.Status.Versions.Fabric.DHCPD),
+		"Repo":          dhcpRef,
+		"Tag":           string(cfg.Status.Versions.Fabric.DHCPD),
+		"ListenAddress": controlVIP.Addr().String(),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("dhcp values: %w", err)
