@@ -65,7 +65,30 @@ storage:
         inline: |
           Hedgehog Control Node
 
-    - path: /etc/systemd/network/10-mgmt.network
+    - path: /etc/systemd/network/10-dummy.netdev
+      mode: 0644
+      contents:
+        inline: |
+          [NetDev]
+          Name=dummy0
+          Kind=dummy
+
+    - path: /etc/systemd/network/11-dummy.network
+      mode: 0644
+      contents:
+        inline: |
+          [Match]
+          Name=dummy0
+
+          [Network]
+          Address={{ .DummyAddress }}
+
+          [Route]
+          Gateway={{ .DummyGateway }}
+          Destination=0.0.0.0/0
+          Metric=42000
+
+    - path: /etc/systemd/network/20-mgmt.network
       mode: 0644
       contents:
         inline: |
@@ -82,7 +105,7 @@ storage:
           LLDP=yes
           EmitLLDP=yes
 
-    - path: /etc/systemd/network/20-ext.network
+    - path: /etc/systemd/network/30-ext.network
       mode: 0644
       contents:
         inline: |

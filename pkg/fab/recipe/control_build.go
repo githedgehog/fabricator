@@ -224,6 +224,14 @@ func removeIfExists(path string) error {
 }
 
 func controlIgnition(fab fabapi.Fabricator, control fabapi.ControlNode, autoInstall string) ([]byte, error) {
+	dummyIP, err := control.Spec.Dummy.IP.Parse()
+	if err != nil {
+		return nil, fmt.Errorf("parsing dummy IP: %w", err)
+	}
+	if dummyIP.Bits() != 31 {
+		return nil, fmt.Errorf("dummy IP must be a /31")
+	}
+
 	but, err := tmplutil.FromTemplate("butane", controlButaneTmpl, map[string]any{
 		"Hostname":       control.Name,
 		"PasswordHash":   fab.Spec.Config.Control.DefaultUser.PasswordHash,
@@ -235,6 +243,8 @@ func controlIgnition(fab fabapi.Fabricator, control fabapi.ControlNode, autoInst
 		"ExtAddress":     control.Spec.External.IP,
 		"ExtGateway":     control.Spec.External.Gateway,
 		"ExtDNS":         control.Spec.External.DNS,
+		"DummyAddress":   dummyIP.Masked().String(),
+		"DummyGateway":   dummyIP.Masked().Addr().Next().String(),
 		"AutoInstall":    autoInstall,
 	})
 	if err != nil {

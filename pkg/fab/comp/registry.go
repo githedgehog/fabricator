@@ -8,7 +8,6 @@ import (
 
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/api/meta"
-	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
 )
 
 const (
@@ -16,8 +15,9 @@ const (
 	RegistryPrefix = "githedgehog"
 	OCISchema      = "oci://"
 
-	BootstrapImageRepo = "ghcr.io"
-	BootstrapStatic    = "https://%{KUBERNETES_API}%/static"
+	BootstrapChartsPrefix = "charts"
+	BootstrapImageRepo    = "ghcr.io"
+	BootstrapStatic       = "https://%{KUBERNETES_API}%/static"
 )
 
 type OCIArtifacts map[string]meta.Version
@@ -68,7 +68,7 @@ func ChartURL(cfg fabapi.Fabricator, name, bootstrap string) (string, error) {
 			return "", fmt.Errorf("bootstrap chart name is required") //nolint:goerr113
 		}
 
-		return JoinURLParts(BootstrapStatic, k3s.BootstrapChartsPrefix, bootstrap), nil
+		return JoinURLParts(BootstrapStatic, BootstrapChartsPrefix, bootstrap), nil
 	}
 
 	regURL, err := RegistryURL(cfg)

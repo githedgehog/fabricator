@@ -191,6 +191,16 @@ func (c *Config) getHydration(ctx context.Context, kube client.Reader) (Hydratio
 		return status, fmt.Errorf("management DHCP start %s is not in the management subnet %s", mgmtDHCPStart, mgmtSubnet) //nolint:goerr113
 	}
 
+	dummySubnet, err := c.Fab.Spec.Config.Control.DummySubnet.Parse()
+	if err != nil {
+		return status, fmt.Errorf("parsing dummy subnet: %w", err)
+	}
+	if dummySubnet.Bits() > 24 {
+		return status, fmt.Errorf("dummy subnet %s should be at least a /24", dummySubnet) //nolint:goerr113
+	}
+
+	dummyIPs := map[netip.Addr]bool{}
+
 	for _, control := range c.Controls {
 		total++
 		if control.Spec.Management.IP != "" {
@@ -212,6 +222,24 @@ func (c *Config) getHydration(ctx context.Context, kube client.Reader) (Hydratio
 			}
 
 			mgmtIPs[controlIP.Addr()] = true
+
+			dummyIP, err := control.Spec.Dummy.IP.Parse()
+			if err != nil {
+				return status, fmt.Errorf("parsing control node %s dummy IP %s: %w", control.Name, control.Spec.Dummy.IP, err)
+			}
+			if dummyIP.Bits() != 31 {
+				return status, fmt.Errorf("control node %s dummy IP %s must be a /31", control.Name, dummyIP) //nolint:goerr113
+			}
+
+			if !dummySubnet.Contains(dummyIP.Addr()) {
+				return status, fmt.Errorf("control node %s dummy IP %s is not in the dummy subnet %s", control.Name, dummyIP, dummySubnet) //nolint:goerr113
+			}
+
+			if _, exist := dummyIPs[dummyIP.Addr()]; exist {
+				return status, fmt.Errorf("control node %s dummy IP %s is already in use", control.Name, dummyIP) //nolint:goerr113
+			}
+
+			dummyIPs[dummyIP.Addr()] = true
 		} else {
 			missing++
 		}
@@ -473,14 +501,25 @@ func (c *Config) hydrate(ctx context.Context, kube client.Client) error {
 		nextMgmtIP = nextMgmtIP.Next()
 	}
 
+	dummySubnet, err := c.Fab.Spec.Config.Control.DummySubnet.Parse()
+	if err != nil {
+		return fmt.Errorf("parsing dummy subnet: %w", err)
+	}
+
+	nextDummyIP := dummySubnet.Masked().Addr()
+
 	slices.SortFunc(c.Controls, func(a, b fabapi.ControlNode) int {
 		return cmp.Compare(a.Name, b.Name)
 	})
 
 	for idx := range c.Controls {
 		control := &c.Controls[idx]
+
 		control.Spec.Management.IP = meta.Prefix(netip.PrefixFrom(nextMgmtIP, mgmtSubnet.Bits()).String())
 		nextMgmtIP = nextMgmtIP.Next()
+
+		control.Spec.Dummy.IP = meta.Prefix(netip.PrefixFrom(nextDummyIP, 31).String())
+		nextDummyIP = nextDummyIP.Next().Next()
 	}
 
 	vtepSubnet, err := c.Fab.Spec.Config.Fabric.VTEPSubnet.Parse()

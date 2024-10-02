@@ -1,0 +1,5 @@
+configs:
+  {{ .Registry }}:
+    auth:
+      username: {{ .Username }}
+      password: "{{ .Password }}"

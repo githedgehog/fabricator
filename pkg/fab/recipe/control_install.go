@@ -110,19 +110,26 @@ func DoControlInstall(ctx context.Context, workDir string) error {
 		return fmt.Errorf("creating hedgehog dir %q: %w", HedgehogDir, err)
 	}
 
+	regUsers, err := zot.NewUsers()
+	if err != nil {
+		return fmt.Errorf("generating zot users: %w", err)
+	}
+
 	return (&ControlInstall{
-		WorkDir: workDir,
-		Fab:     f,
-		Control: controls[0],
-		Wiring:  wL,
+		WorkDir:  workDir,
+		Fab:      f,
+		Control:  controls[0],
+		Wiring:   wL,
+		RegUsers: regUsers,
 	}).Run(ctx)
 }
 
 type ControlInstall struct {
-	WorkDir string
-	Fab     fabapi.Fabricator
-	Control fabapi.ControlNode
-	Wiring  *apiutil.Loader
+	WorkDir  string
+	Fab      fabapi.Fabricator
+	Control  fabapi.ControlNode
+	Wiring   *apiutil.Loader
+	RegUsers map[string]string
 }
 
 func (c *ControlInstall) Run(ctx context.Context) error {
@@ -153,6 +160,11 @@ func (c *ControlInstall) Run(ctx context.Context) error {
 
 	// we should use in-cluster registry from now on
 	c.Fab.Status.IsBootstrap = false
+
+	// TODO skip if not airgap
+	if err := c.uploadAirgap(ctx, comp.RegistryUserWriter, c.RegUsers[comp.RegistryUserWriter]); err != nil {
+		return fmt.Errorf("uploading airgap artifacts: %w", err)
+	}
 
 	// TODO move to operator
 	{
@@ -237,17 +249,24 @@ func (c *ControlInstall) installK8s(ctx context.Context) (client.Client, error) 
 		return nil, fmt.Errorf("copying zot airgap chart: %w", err)
 	}
 
-	k3sCfg, err := k3s.Config(c.Fab, c.Control)
-	if err != nil {
-		return nil, fmt.Errorf("k3s config: %w", err)
-	}
-
 	if err := os.MkdirAll(k3s.ConfigDir, 0o755); err != nil {
 		return nil, fmt.Errorf("creating k3s config dir %q: %w", k3s.ConfigPath, err)
 	}
 
+	k3sCfg, err := k3s.Config(c.Fab, c.Control)
+	if err != nil {
+		return nil, fmt.Errorf("k3s config: %w", err)
+	}
 	if err := os.WriteFile(k3s.ConfigPath, []byte(k3sCfg), 0o644); err != nil { //nolint:gosec
 		return nil, fmt.Errorf("writing file %q: %w", k3s.ConfigPath, err)
+	}
+
+	regCfg, err := k3s.Registries(c.Fab, comp.RegistryUserReader, c.RegUsers[comp.RegistryUserReader])
+	if err != nil {
+		return nil, fmt.Errorf("k3s registries: %w", err)
+	}
+	if err := os.WriteFile(k3s.KubeRegistriesPath, []byte(regCfg), 0o600); err != nil {
+		return nil, fmt.Errorf("writing file %q: %w", k3s.KubeRegistriesPath, err)
 	}
 
 	slog.Debug("Running k3s install")
@@ -370,12 +389,7 @@ func (c *ControlInstall) installZot(ctx context.Context, kube client.Client) err
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
-	users, err := zot.NewUsers()
-	if err != nil {
-		return fmt.Errorf("creating zot users: %w", err)
-	}
-
-	if err := comp.EnforceKubeInstall(ctx, kube, c.Fab, zot.InstallUsers(users)); err != nil {
+	if err := comp.EnforceKubeInstall(ctx, kube, c.Fab, zot.InstallUsers(c.RegUsers)); err != nil {
 		return fmt.Errorf("enforcing zot users install: %w", err)
 	}
 
@@ -407,17 +421,16 @@ func (c *ControlInstall) installZot(ctx context.Context, kube client.Client) err
 		return fmt.Errorf("waiting for zot endpoint: %w", err)
 	}
 
-	// TODO skip if not airgap
-	// TODO probably read from secret
-	if err := c.uploadAirgap(ctx, regURL, comp.RegistryUserWriter, users[comp.RegistryUserWriter]); err != nil {
-		return fmt.Errorf("uploading airgap artifacts: %w", err)
-	}
-
 	return nil
 }
 
-func (c *ControlInstall) uploadAirgap(ctx context.Context, regURL, username, password string) error {
+func (c *ControlInstall) uploadAirgap(ctx context.Context, username, password string) error {
 	slog.Info("Uploading airgap artifacts")
+
+	regURL, err := comp.RegistryURL(c.Fab)
+	if err != nil {
+		return fmt.Errorf("getting registry URL: %w", err)
+	}
 
 	airgapArts, err := comp.CollectArtifacts(c.Fab,
 		flatcar.Artifacts, certmanager.Artifacts, zot.Artifacts, fabric.Artifacts,
