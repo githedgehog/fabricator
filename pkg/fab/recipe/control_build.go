@@ -229,7 +229,7 @@ func controlIgnition(fab fabapi.Fabricator, control fabapi.ControlNode, autoInst
 		return nil, fmt.Errorf("parsing dummy IP: %w", err)
 	}
 	if dummyIP.Bits() != 31 {
-		return nil, fmt.Errorf("dummy IP must be a /31")
+		return nil, fmt.Errorf("dummy IP must be a /31") //nolint:goerr113
 	}
 
 	but, err := tmplutil.FromTemplate("butane", controlButaneTmpl, map[string]any{
