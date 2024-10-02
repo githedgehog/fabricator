@@ -3,16 +3,16 @@ import "hack/tools.just"
 default:
   @just --list
 
-_lint: _touch_embed _golangci_lint
+_gotools: _touch_embed
   @go fmt ./...
   @go vet ./...
 
 # Run linters against code (incl. license headers)
-lint: _license_headers _lint
+lint: _license_headers _gotools _golangci_lint
   @{{golangci_lint}} run --show-stats ./...
 
 # Run golangci-lint to attempt to fix issues
-lint-fix: _license_headers
+lint-fix: _license_headers _gotools _golangci_lint
   @{{golangci_lint}} run --show-stats --fix ./...
 
 oem_dir := "./pkg/embed/flatcaroem"
@@ -39,11 +39,11 @@ _kube_gen: _controller_gen
   # Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects
   {{controller_gen}} rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
 
-_hhfab_build: _kube_gen _hhfab_embed
+_hhfab_build: _license_headers _gotools _kube_gen _hhfab_embed
   {{go_linux_build}} -o ./bin/hhfab ./cmd/hhfab
 
 # Build all artifacts
-build: _hhfab_build && version
+build: _license_headers _gotools _hhfab_build && version
   @echo "Build complete"
 
 # .PHONY: test
