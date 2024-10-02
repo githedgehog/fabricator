@@ -42,6 +42,11 @@ spec:
                   disk:
                     type: string
                 type: object
+              dummy:
+                properties:
+                  ip:
+                    type: string
+                type: object
               external:
                 properties:
                   dns:
