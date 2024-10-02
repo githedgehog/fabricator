@@ -1,3 +1,6 @@
+# Copyright 2024 Hedgehog
+# SPDX-License-Identifier: Apache-2.0
+
 # Build the manager binary
 FROM golang:1.23 AS builder
 ARG TARGETOS
