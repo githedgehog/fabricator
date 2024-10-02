@@ -19,6 +19,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab/comp/fabric"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/flatcar"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/k9s"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/zot"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 	"go.githedgehog.com/fabricator/pkg/util/butaneutil"
@@ -124,6 +125,14 @@ func (b *ControlInstallBuilder) Build(ctx context.Context) error {
 		},
 	}); err != nil {
 		return fmt.Errorf("downloading k3s: %w", err)
+	}
+
+	if err := b.Downloader.FromORAS(ctx, installDir, k9s.Ref, k9s.Version(b.Fab), []artificer.ORASFile{
+		{
+			Name: k9s.BinName,
+		},
+	}); err != nil {
+		return fmt.Errorf("downloading k9s: %w", err)
 	}
 
 	if err := b.Downloader.FromORAS(ctx, installDir, zot.AirgapRef, zot.Version(b.Fab), []artificer.ORASFile{
