@@ -24,14 +24,14 @@ var Versions = fabapi.Versions{
 		ControlUSBRoot: "v0.0.3", // TODO separate repo/versioning to stay up to date with Flatcar?
 	},
 	Fabric: fabapi.FabricVersions{ // TODO use version from fabric/version.Version? as a default
-		API:        "v0.50.6",
-		Controller: "v0.50.6",
-		DHCPD:      "v0.50.6",
-		Boot:       "v0.50.6",
-		Agent:      "v0.50.6",
-		Ctl:        "v0.50.6",
+		API:        "v0.50.7",
+		Controller: "v0.50.7",
+		DHCPD:      "v0.50.7",
+		Boot:       "v0.50.7",
+		Agent:      "v0.50.7",
+		Ctl:        "v0.50.7",
 		Alloy:      "v1.1.1",  // TODO upgrade to v1.4.x or newer
-		ProxyChart: "v0.50.6", // TODO
+		ProxyChart: "v0.50.7", // TODO
 		Proxy:      "1.9.1",   // TODO use version starting with "v", upgrade or replace with better option
 		NOS: map[string]meta.Version{
 			// TODO some enums for NOS "types"?

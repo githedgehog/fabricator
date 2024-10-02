@@ -34,7 +34,7 @@ require (
 	github.com/urfave/cli/v2 v2.27.4
 	github.com/vbauerster/mpb/v8 v8.8.3
 	github.com/vishvananda/netlink v1.3.0
-	go.githedgehog.com/fabric v0.50.5
+	go.githedgehog.com/fabric v0.50.7
 	golang.org/x/crypto v0.26.0
 	golang.org/x/sync v0.8.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
@@ -135,7 +135,7 @@ require (
 	github.com/fsnotify/fsnotify v1.7.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.7.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.3 // indirect
-	github.com/go-chi/chi/v5 v5.0.12 // indirect
+	github.com/go-chi/chi/v5 v5.1.0 // indirect
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
 	github.com/go-git/go-billy/v5 v5.5.0 // indirect
 	github.com/go-git/go-git/v5 v5.11.0 // indirect
