@@ -63,6 +63,8 @@ type ControlConfig struct {
 	DummySubnet meta.Prefix `json:"dummySubnet,omitempty"` // TODO should be reserved
 
 	DefaultUser ControlUser `json:"defaultUser,omitempty"`
+
+	// TODO add back NTP (and NTP servers)
 }
 
 type ControlUser struct {
