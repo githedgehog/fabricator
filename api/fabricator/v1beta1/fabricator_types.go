@@ -60,6 +60,8 @@ type ControlConfig struct {
 	KubeServiceSubnet meta.Prefix `json:"kubeServiceSubnet,omitempty"`
 	KubeClusterDNS    meta.Addr   `json:"kubeClusterDNS,omitempty"` // Should be from the service CIDR
 
+	DummySubnet meta.Prefix `json:"dummySubnet,omitempty"` // TODO should be reserved
+
 	DefaultUser ControlUser `json:"defaultUser,omitempty"`
 }
 

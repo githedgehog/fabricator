@@ -29,6 +29,7 @@ type ControlNodeSpec struct {
 	Bootstrap  ControlNodeBootstrap  `json:"bootstrap,omitempty"`
 	Management ControlNodeManagement `json:"management,omitempty"`
 	External   ControlNodeExternal   `json:"external,omitempty"`
+	Dummy      ControlNodeDummy      `json:"dummy,omitempty"`
 }
 
 type ControlNodeBootstrap struct {
@@ -47,6 +48,10 @@ type ControlNodeExternal struct {
 	DNS       []meta.Addr       `json:"dns,omitempty"`
 	Interface string            `json:"interface,omitempty"`
 	// TODO support bond
+}
+
+type ControlNodeDummy struct {
+	IP meta.Prefix `json:"ip,omitempty"`
 }
 
 type ControlNodeStatus struct{}

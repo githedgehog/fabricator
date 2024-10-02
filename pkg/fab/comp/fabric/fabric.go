@@ -54,43 +54,18 @@ func Install(cfg fabapi.Fabricator) ([]client.Object, error) {
 		return nil, fmt.Errorf("marshalling fabric config: %w", err)
 	}
 
-	/*
-		dhcp = cnc.KubeHelmChart("fabric-dhcpd", "default", helm.HelmChartSpec{
-				TargetNamespace: "default",
-				Chart:           OCIScheme + targetInCluster.Fallback(cfg.FabricDHCPDChartRef).RepoName(),
-				Version:         cfg.FabricDHCPDChartRef.Tag,
-				RepoCA:          ZotConfig(get).TLS.CA.Cert,
-			}, cnc.FromTemplate(fabricDHCPDTemplate,
-				"ref", target.Fallback(cfg.FabricDHCPDRef),
-			))
-					cnc.KubeHelmChart("fabric", "default", helm.HelmChartSpec{
-						TargetNamespace: "default",
-						Chart:           OCIScheme + targetInCluster.Fallback(cfg.FabricChartRef).RepoName(),
-						Version:         cfg.FabricChartRef.Tag,
-						RepoCA:          ZotConfig(get).TLS.CA.Cert,
-					}, cnc.FromTemplate(fabricValuesTemplate,
-						"ref", target.Fallback(cfg.FabricImageRef),
-						"proxyRef", target.Fallback(MiscConfig(get).RBACProxyImageRef),
-					)),
-					cnc.If(cfg.ControlProxy, cnc.KubeHelmChart("fabric-proxy", "default", helm.HelmChartSpec{
-						TargetNamespace: "default",
-						Chart:           OCIScheme + targetInCluster.Fallback(cfg.ControlProxyChartRef).RepoName(),
-						Version:         cfg.ControlProxyChartRef.Tag,
-						RepoCA:          ZotConfig(get).TLS.CA.Cert,
-					}, cnc.FromTemplate(fabricProxyTemplate,
-						"ref", target.Fallback(cfg.ControlProxyRef),
-						"nodePort", fmt.Sprintf("%d", ControlProxyNodePort),
-					))),
-	*/
-
 	apiHelm, err := comp.NewHelmChart(cfg, "fabric-api", APIChartRef,
 		string(cfg.Status.Versions.Fabric.API), "", true, "")
 	if err != nil {
 		return nil, fmt.Errorf("creating fabric API helm chart: %w", err)
 	}
 
+	ctrlRef, err := comp.ImageURL(cfg, CtrlRef)
+	if err != nil {
+		return nil, fmt.Errorf("getting image URL for %q: %w", CtrlRef, err)
+	}
 	ctlrValues, err := tmplutil.FromTemplate("ctrl-values", ctrlValuesTmpl, map[string]any{
-		"Repo": CtrlRef,
+		"Repo": ctrlRef,
 		"Tag":  string(cfg.Status.Versions.Fabric.Controller),
 	})
 	if err != nil {
@@ -102,8 +77,13 @@ func Install(cfg fabapi.Fabricator) ([]client.Object, error) {
 		return nil, fmt.Errorf("creating fabric helm chart: %w", err)
 	}
 
+	dhcpRef, err := comp.ImageURL(cfg, DHCPRef)
+	if err != nil {
+		return nil, fmt.Errorf("getting image URL for %q: %w", DHCPRef, err)
+	}
+	// TODO pass Control VIP to listen on
 	dhcpValues, err := tmplutil.FromTemplate("dhcp-values", dhcpValuesTmpl, map[string]any{
-		"Repo": DHCPRef,
+		"Repo": dhcpRef,
 		"Tag":  string(cfg.Status.Versions.Fabric.DHCPD),
 	})
 	if err != nil {
@@ -115,8 +95,12 @@ func Install(cfg fabapi.Fabricator) ([]client.Object, error) {
 		return nil, fmt.Errorf("creating fabric DHCP helm chart: %w", err)
 	}
 
+	proxyRef, err := comp.ImageURL(cfg, ProxyRef)
+	if err != nil {
+		return nil, fmt.Errorf("getting image URL for %q: %w", ProxyRef, err)
+	}
 	proxyValues, err := tmplutil.FromTemplate("proxy-values", proxyValuesTmpl, map[string]any{
-		"Repo": ProxyRef,
+		"Repo": proxyRef,
 		"Tag":  string(cfg.Status.Versions.Fabric.Proxy),
 		"Port": ProxyNodePort,
 	})
