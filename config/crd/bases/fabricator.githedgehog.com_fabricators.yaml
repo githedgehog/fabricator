@@ -58,6 +58,8 @@ spec:
                           password:
                             type: string
                         type: object
+                      dummySubnet:
+                        type: string
                       kubeClusterDNS:
                         type: string
                       kubeClusterSubnet:
@@ -224,8 +226,6 @@ spec:
                             type: string
                           boot:
                             type: string
-                          controlAgent:
-                            type: string
                           controller:
                             type: string
                           ctl:
@@ -236,6 +236,10 @@ spec:
                             additionalProperties:
                               type: string
                             type: object
+                          proxy:
+                            type: string
+                          proxyChart:
+                            type: string
                         type: object
                       fabricator:
                         properties:
@@ -249,8 +253,6 @@ spec:
                       platform:
                         properties:
                           certManager:
-                            type: string
-                          controlProxy:
                             type: string
                           k3s:
                             type: string
@@ -289,8 +291,6 @@ spec:
                         type: string
                       boot:
                         type: string
-                      controlAgent:
-                        type: string
                       controller:
                         type: string
                       ctl:
@@ -301,6 +301,10 @@ spec:
                         additionalProperties:
                           type: string
                         type: object
+                      proxy:
+                        type: string
+                      proxyChart:
+                        type: string
                     type: object
                   fabricator:
                     properties:
@@ -314,8 +318,6 @@ spec:
                   platform:
                     properties:
                       certManager:
-                        type: string
-                      controlProxy:
                         type: string
                       k3s:
                         type: string
