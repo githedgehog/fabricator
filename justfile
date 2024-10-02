@@ -3,18 +3,16 @@ import "hack/tools.just"
 default:
   @just --list
 
-_lint: _touch_embed _addlicense _golangci_lint
-  # TODO addlicense
+_lint: _touch_embed _golangci_lint
   @go fmt ./...
   @go vet ./...
 
 # Run linters against code (incl. license headers)
-lint: _lint
+lint: _license_headers _lint
   @{{golangci_lint}} run --show-stats ./...
 
 # Run golangci-lint to attempt to fix issues
-lint-fix: _lint
-  # TODO addlicense
+lint-fix: _license_headers
   @{{golangci_lint}} run --show-stats --fix ./...
 
 oem_dir := "./pkg/embed/flatcaroem"

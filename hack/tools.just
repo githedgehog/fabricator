@@ -103,6 +103,9 @@ _goinstall PACKAGE VERSION BINNAME TARGET: _localbin
 # Common recipes
 #
 
+_license_headers: _addlicense
+  {{addlicense}} -l apache -s=only -c Hedgehog -ignore ".github/**" -ignore "config/**" -ignore "**/*.yaml" -ignore "**/*.yml" -v -y 2024 .
+
 # Run linter for GitHub Actions
 lint-gha: _actionlint
    {{actionlint}} -verbose
