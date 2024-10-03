@@ -19,6 +19,7 @@ require (
 	github.com/go-playground/validator/v10 v10.22.1
 	github.com/k3s-io/helm-controller v0.16.4
 	github.com/lmittmann/tint v1.0.5
+	github.com/manifoldco/promptui v0.9.0
 	github.com/mattn/go-isatty v0.0.20
 	github.com/melbahja/goph v1.4.0
 	github.com/mholt/archiver/v4 v4.0.0-alpha.8
@@ -98,6 +99,7 @@ require (
 	github.com/cenkalti/backoff/v3 v3.2.2 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	github.com/chzyer/readline v1.5.1 // indirect
 	github.com/clarketm/json v1.17.1 // indirect
 	github.com/cloudflare/circl v1.3.7 // indirect
 	github.com/connesc/cipherio v0.2.1 // indirect
