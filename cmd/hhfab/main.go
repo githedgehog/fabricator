@@ -487,6 +487,7 @@ func Run(ctx context.Context) error {
 							},
 							&cli.BoolFlag{
 								Name:    FlagNameControlsUSB,
+								Aliases: []string{"usb"},
 								Usage:   "use installer USB image for control node(s)",
 								EnvVars: []string{"HHFAB_CONTROL_USB"},
 								Value:   false,
