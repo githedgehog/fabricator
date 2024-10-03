@@ -33,14 +33,13 @@ const (
 	VLABSwitchMACTmpl = "0c:20:12:ff:%02d:00"
 	VLABMACTmpl       = "0c:20:12:fe:%02d:%02d"
 
-	HHFabCfgPrefix             = ".hhfab.githedgehog.com"
-	HHFabCfgType               = "type" + HHFabCfgPrefix
-	HHFabCfgTypeHW             = "hw"
-	HHFabCfgSerial             = "serial" + HHFabCfgPrefix
-	HHFabCfgLinkPrefix         = "link" + HHFabCfgPrefix + "/"
-	HHFabCfgPCIPrefix          = "pci@"
-	HHFabCfgSerialSchemeSSH    = "ssh://"
-	HHFabCfgSerialSchemeTelnet = "telnet://"
+	HHFabCfgPrefix          = ".hhfab.githedgehog.com"
+	HHFabCfgType            = "type" + HHFabCfgPrefix
+	HHFabCfgTypeHW          = "hw"
+	HHFabCfgSerial          = "serial" + HHFabCfgPrefix
+	HHFabCfgLinkPrefix      = "link" + HHFabCfgPrefix + "/"
+	HHFabCfgPCIPrefix       = "pci@"
+	HHFabCfgSerialSchemeSSH = "ssh://"
 )
 
 const (
@@ -138,6 +137,9 @@ func (c *Config) PrepareVLAB(ctx context.Context, opts VLABUpOpts) (*VLAB, error
 
 	if stat, err := os.Stat(vlabDir); err != nil {
 		if os.IsNotExist(err) {
+			if opts.NoCreate {
+				return nil, fmt.Errorf("VLAB directory does not exist: %q", vlabDir) //nolint:goerr113
+			}
 			if err := os.Mkdir(vlabDir, 0o700); err != nil {
 				return nil, fmt.Errorf("creating VLAB directory: %w", err) //nolint:goerr113
 			}
@@ -148,10 +150,13 @@ func (c *Config) PrepareVLAB(ctx context.Context, opts VLABUpOpts) (*VLAB, error
 		return nil, fmt.Errorf("VLAB directory is not a directory: %q", vlabDir) //nolint:goerr113
 	}
 
-	createCfg := opts.Recreate
+	createCfg := opts.ReCreate
 	vlabCfgFile := filepath.Join(vlabDir, VLABConfigFile)
 	if _, err := os.Stat(vlabCfgFile); err != nil {
 		if os.IsNotExist(err) {
+			if opts.NoCreate {
+				return nil, fmt.Errorf("VLAB config file does not exist: %q", vlabCfgFile) //nolint:goerr113
+			}
 			createCfg = true
 		} else {
 			return nil, fmt.Errorf("checking VLAB config file: %w", err)
@@ -556,6 +561,7 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 
 			netdev := ""
 			device := ""
+			usernet := 0
 			if nicType == NICTypeNoop || nicType == NICTypeDirect {
 				port := getDirectNICPort(vmID, uint(nicID)) //nolint:gosec
 				netdev = fmt.Sprintf("socket,udp=127.0.0.1:%d", port)
@@ -581,6 +587,11 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 					netdev += fmt.Sprintf(",localaddr=127.0.0.1:%d", otherPort)
 				}
 			} else if nicType == NICTypeUsernet {
+				if usernet > 0 {
+					return nil, fmt.Errorf("multiple usernet NICs for VM %q", name) //nolint:goerr113
+				}
+				usernet++
+
 				if vm.Type == VMTypeSwitch {
 					slog.Warn("Usernet NICs are not supposed to be used for switch", "vm", name)
 				}
@@ -666,7 +677,7 @@ func isHardware(obj client.Object) bool {
 				return true
 			}
 
-			slog.Warn("Invalid annotation value: %s=%s", HHFabCfgType, t)
+			slog.Warn("Invalid type annotation value", "kind", obj.GetObjectKind().GroupVersionKind().Kind, "name", obj.GetName(), HHFabCfgType, t)
 		}
 	}
 
@@ -679,7 +690,7 @@ func getPassthroughLinks(obj client.Object) map[string]string {
 	for k, v := range obj.GetAnnotations() {
 		if strings.HasPrefix(k, HHFabCfgLinkPrefix) {
 			if !strings.HasPrefix(v, HHFabCfgPCIPrefix) {
-				slog.Warn("Invalid link value: %s=%s", k, v)
+				slog.Warn("Invalid link annotation value", "kind", obj.GetObjectKind().GroupVersionKind().Kind, "name", obj.GetName(), k, v)
 
 				continue
 			}
@@ -691,6 +702,22 @@ func getPassthroughLinks(obj client.Object) map[string]string {
 	}
 
 	return links
+}
+
+func getSerialInfo(obj client.Object) string {
+	if obj.GetAnnotations() != nil {
+		if v, exist := obj.GetAnnotations()[HHFabCfgSerial]; exist {
+			if strings.HasPrefix(v, HHFabCfgSerialSchemeSSH) {
+				return v[len(HHFabCfgSerialSchemeSSH):]
+			}
+
+			slog.Warn("Invalid serial annotation value", "kind", obj.GetObjectKind().GroupVersionKind().Kind, "name", obj.GetName(), "value", v)
+
+			return ""
+		}
+	}
+
+	return ""
 }
 
 const (

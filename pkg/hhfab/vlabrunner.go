@@ -52,13 +52,23 @@ const (
 	VLABCmdSudo       = "sudo"
 	VLABCmdQemuImg    = "qemu-img"
 	VLABCmdQemuSystem = "qemu-system-x86_64"
+	VLABCmdSocat      = "socat"
+	VLABCmdSSH        = "ssh"
+	VLABCmdLess       = "less"
 
 	VLABIgnition = "ignition.json"
 
 	VLABKubeConfig = "kubeconfig"
 )
 
-var VLABCmds = []string{VLABCmdSudo, VLABCmdQemuImg, VLABCmdQemuSystem}
+var VLABCmds = []string{
+	VLABCmdSudo,
+	VLABCmdQemuImg,
+	VLABCmdQemuSystem,
+	VLABCmdSocat,
+	VLABCmdSSH,
+	VLABCmdLess,
+}
 
 type VLABRunOpts struct {
 	KillStale          bool
@@ -67,12 +77,20 @@ type VLABRunOpts struct {
 	ControlUSB         bool
 }
 
-func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) error {
+func (c *Config) checkForBins() error {
 	for _, cmd := range VLABCmds {
 		_, err := exec.LookPath(cmd)
 		if err != nil {
 			return fmt.Errorf("required command %q is not available", cmd) //nolint:goerr113
 		}
+	}
+
+	return nil
+}
+
+func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) error {
+	if err := c.checkForBins(); err != nil {
+		return err
 	}
 
 	stale, err := CheckStaleVMs(ctx, false)

@@ -197,6 +197,14 @@ func Run(ctx context.Context) error {
 		},
 	}
 
+	var accessName string
+	accessNameFlag := &cli.StringFlag{
+		Name:        "name",
+		Aliases:     []string{"n"},
+		Usage:       "name of the VM or HW to access",
+		Destination: &accessName,
+	}
+
 	before := func(quiet bool) cli.BeforeFunc {
 		return func(_ *cli.Context) error {
 			if verbose && brief {
@@ -480,7 +488,7 @@ func Run(ctx context.Context) error {
 						Action: func(c *cli.Context) error {
 							if err := hhfab.VLABUp(ctx, workDir, cacheDir, hhfab.VLABUpOpts{
 								HydrateMode: hhfab.HydrateMode(hydrateMode),
-								Recreate:    false,                       // TODO flag
+								ReCreate:    false,                       // TODO flag
 								USBImage:    c.Bool(FlagNameControlsUSB), // TODO flag
 								VLABRunOpts: hhfab.VLABRunOpts{
 									KillStale:          c.Bool(FlagNameKillStale),
@@ -490,6 +498,45 @@ func Run(ctx context.Context) error {
 								},
 							}); err != nil {
 								return fmt.Errorf("running VLAB: %w", err)
+							}
+
+							return nil
+						},
+					},
+					{
+						Name:   "ssh",
+						Usage:  "ssh to a VLAB VM or HW if supported",
+						Flags:  append(defaultFlags, accessNameFlag),
+						Before: before(false),
+						Action: func(_ *cli.Context) error {
+							if err := hhfab.DoVLABSSH(ctx, workDir, cacheDir, accessName); err != nil {
+								return fmt.Errorf("ssh: %w", err)
+							}
+
+							return nil
+						},
+					},
+					{
+						Name:   "serial",
+						Usage:  "get serial console of a VLAB VM or HW if supported",
+						Flags:  append(defaultFlags, accessNameFlag),
+						Before: before(false),
+						Action: func(_ *cli.Context) error {
+							if err := hhfab.DoVLABSerial(ctx, workDir, cacheDir, accessName); err != nil {
+								return fmt.Errorf("serial: %w", err)
+							}
+
+							return nil
+						},
+					},
+					{
+						Name:   "seriallog",
+						Usage:  "get serial console log of a VLAB VM or HW if supported",
+						Flags:  append(defaultFlags, accessNameFlag),
+						Before: before(false),
+						Action: func(_ *cli.Context) error {
+							if err := hhfab.DoVLABSerialLog(ctx, workDir, cacheDir, accessName); err != nil {
+								return fmt.Errorf("serial log: %w", err)
 							}
 
 							return nil
