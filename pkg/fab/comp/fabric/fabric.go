@@ -145,12 +145,14 @@ func InstallManagementDHCPSubnet(cfg fabapi.Fabricator) ([]client.Object, error)
 
 	return []client.Object{
 		comp.NewDHCPSubnet(dhcpapi.ManagementSubnet, dhcpapi.DHCPSubnetSpec{
-			Subnet:    dhcpapi.ManagementSubnet,
-			CIDRBlock: mgmt.Masked().String(),
-			Gateway:   mgmt.Addr().Next().String(),
-			StartIP:   string(cfg.Spec.Config.Fabric.ManagementDHCPStart),
-			// TODO endIP?
-			DefaultURL: "http://" + controlVIP.Addr().String() + ":32000/onie", // TODO const
+			Subnet:      dhcpapi.ManagementSubnet,
+			CIDRBlock:   mgmt.Masked().String(),
+			Gateway:     mgmt.Addr().Next().String(),
+			StartIP:     string(cfg.Spec.Config.Fabric.ManagementDHCPStart),
+			EndIP:       string(cfg.Spec.Config.Fabric.ManagementDHCPEnd),
+			DefaultURL:  "http://" + controlVIP.Addr().String() + ":32000/onie", // TODO const
+			DNSServers:  []string{},
+			TimeServers: []string{},
 		}),
 	}, nil
 }

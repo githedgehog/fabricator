@@ -194,6 +194,18 @@ func (c *Config) getHydration(ctx context.Context, kube client.Reader) (Hydratio
 		return status, fmt.Errorf("management DHCP start %s is not in the management subnet %s", mgmtDHCPStart, mgmtSubnet) //nolint:goerr113
 	}
 
+	mgmtDHCPEnd, err := c.Fab.Spec.Config.Fabric.ManagementDHCPEnd.Parse()
+	if err != nil {
+		return status, fmt.Errorf("parsing management DHCP end: %w", err)
+	}
+	if !mgmtSubnet.Contains(mgmtDHCPEnd) {
+		return status, fmt.Errorf("management DHCP end %s is not in the management subnet %s", mgmtDHCPStart, mgmtSubnet) //nolint:goerr113
+	}
+
+	if mgmtDHCPStart.Compare(mgmtDHCPEnd) >= 0 {
+		return status, fmt.Errorf("management DHCP start %s should be less than the management DHCP end %s", mgmtDHCPStart, mgmtDHCPEnd) //nolint:goerr113
+	}
+
 	dummySubnet, err := c.Fab.Spec.Config.Control.DummySubnet.Parse()
 	if err != nil {
 		return status, fmt.Errorf("parsing dummy subnet: %w", err)

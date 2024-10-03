@@ -24,7 +24,8 @@ var DefaultConfig = fabapi.FabConfig{
 	Fabric: fabapi.FabricConfig{
 		Mode:                fmeta.FabricModeSpineLeaf,
 		ManagementDHCPStart: "172.30.4.0", // second half of the management subnet
-		SpineASN:            65100,        // TODO probably switch to 32-bit ASNs
+		ManagementDHCPEnd:   "172.30.7.254",
+		SpineASN:            65100, // TODO probably switch to 32-bit ASNs
 		LeafASNStart:        65101,
 		LeafASNEnd:          65534,             // only 433 leafs
 		ProtocolSubnet:      "172.30.8.0/22",   // 1022 hosts: 172.30.8.1 - 172.30.11.254
