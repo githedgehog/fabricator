@@ -5,7 +5,7 @@ default:
 
 _gotools: _touch_embed
   @go fmt ./...
-  @go vet ./...
+  @go vet {{go_flags}} ./...
 
 # Called in CI
 _lint: _license_headers _gotools
@@ -19,7 +19,8 @@ lint-fix: _lint _golangci_lint
   @{{golangci_lint}} run --show-stats --fix ./...
 
 oem_dir := "./pkg/embed/flatcaroem"
-go_build := "CGO_ENABLED=0 go build --tags containers_image_openpgp"
+go_flags := "--tags containers_image_openpgp,containers_image_storage_stub"
+go_build := "CGO_ENABLED=0 go build " + go_flags
 go_linux_build := "GOOS=linux GOARCH=amd64 " + go_build
 
 _touch_embed:
