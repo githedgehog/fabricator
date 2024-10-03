@@ -166,9 +166,10 @@ func (c *ControlInstall) Run(ctx context.Context) error {
 	// we should use in-cluster registry from now on
 	c.Fab.Status.IsBootstrap = false
 
-	// TODO skip if not airgap
-	if err := c.uploadAirgap(ctx, comp.RegistryUserWriter, c.RegUsers[comp.RegistryUserWriter]); err != nil {
-		return fmt.Errorf("uploading airgap artifacts: %w", err)
+	if c.Fab.Spec.Config.Registry.IsAirgap() {
+		if err := c.uploadAirgap(ctx, comp.RegistryUserWriter, c.RegUsers[comp.RegistryUserWriter]); err != nil {
+			return fmt.Errorf("uploading airgap artifacts: %w", err)
+		}
 	}
 
 	// TODO move to operator

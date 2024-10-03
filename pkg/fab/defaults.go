@@ -20,7 +20,9 @@ var DefaultConfig = fabapi.FabConfig{
 		DummySubnet:       "172.30.127.0/24",
 		DefaultUser:       fabapi.ControlUser{},
 	},
-	Registry: fabapi.RegistryConfig{},
+	Registry: fabapi.RegistryConfig{
+		Mode: fabapi.RegistryModeAirgap,
+	},
 	Fabric: fabapi.FabricConfig{
 		Mode:                fmeta.FabricModeSpineLeaf,
 		ManagementDHCPStart: "172.30.4.0", // second half of the management subnet

@@ -35,18 +35,20 @@
     }
   },
   "extensions": {
-{{- if .Sync }}
+{{- if .Upstream }}
     "sync": {
       "enable": true,
-      "credentialsFile": "/secret/credentials.json",
+      "credentialsFile": "/upstream/credentials.json",
       "registries": [
         {
-          "urls": ["https://ghcr.io"],
+          "urls": ["{{ .UpstreamURL }}"],
           "onDemand": true,
-          "tlsVerify": true,
+          "tlsVerify": {{ .UpstreamTLSVerify }},
           "content": [
             {
-              "prefix": "/githedgehog/**"
+              "prefix": "{{ .UpstreamPrefix }}",
+              "destination": "/githedgehog",
+              "stripPrefix": true
             }
           ]
         }

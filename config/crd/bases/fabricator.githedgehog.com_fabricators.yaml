@@ -212,6 +212,22 @@ spec:
                         type: string
                     type: object
                   registry:
+                    properties:
+                      mode:
+                        type: string
+                      upstream:
+                        properties:
+                          password:
+                            type: string
+                          prefix:
+                            type: string
+                          repo:
+                            type: string
+                          tlsVerify:
+                            type: boolean
+                          username:
+                            type: string
+                        type: object
                     type: object
                 type: object
               overrides:

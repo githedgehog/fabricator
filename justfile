@@ -2,6 +2,7 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 
 import "hack/tools.just"
 
+# Print list of available recipes
 default:
   @just --list
 

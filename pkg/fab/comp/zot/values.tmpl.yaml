@@ -18,22 +18,14 @@ pvc:
   storage: 30Gi
 
 mountSecret: false
-secretFiles:
-{{- if .Sync }}
-  credentials.json: |-
-    {
-      "ghcr.io": {
-        "username": "",
-        "password": ""
-      }
-    }
-{{- end }}
 
 externalSecrets:
   - secretName: {{ .TLSSecret }}
     mountPath: /tls
   - secretName: {{ .HtpasswdSecret }}
     mountPath: /htpasswd
+  - secretName: {{ .UpstreamSecret }}
+    mountPath: /upstream
 
 mountConfig: true
 

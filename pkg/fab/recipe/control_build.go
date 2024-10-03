@@ -180,16 +180,18 @@ func (b *ControlInstallBuilder) Build(ctx context.Context) error {
 		return fmt.Errorf("printing wiring: %w", err)
 	}
 
-	// TODO skip if not airgap
-	airgapArts, err := comp.CollectArtifacts(b.Fab,
-		flatcar.Artifacts, certmanager.Artifacts, zot.Artifacts, fabric.Artifacts,
-	)
-	if err != nil {
-		return fmt.Errorf("collecting airgap artifacts: %w", err)
-	}
-	for ref, version := range airgapArts {
-		if err := b.Downloader.GetOCI(ctx, ref, version, installDir); err != nil {
-			return fmt.Errorf("downloading airgap artifact %q: %w", ref, err)
+	if b.Fab.Spec.Config.Registry.IsAirgap() {
+		airgapArts, err := comp.CollectArtifacts(b.Fab,
+			flatcar.Artifacts, certmanager.Artifacts, zot.Artifacts, fabric.Artifacts,
+		)
+		if err != nil {
+			return fmt.Errorf("collecting airgap artifacts: %w", err)
+		}
+
+		for ref, version := range airgapArts {
+			if err := b.Downloader.GetOCI(ctx, ref, version, installDir); err != nil {
+				return fmt.Errorf("downloading airgap artifact %q: %w", ref, err)
+			}
 		}
 	}
 

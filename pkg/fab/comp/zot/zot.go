@@ -7,6 +7,8 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/sethvargo/go-password/password"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
@@ -19,15 +21,17 @@ import (
 )
 
 const (
-	ChartRef        = "fabricator/charts/zot"
-	ImageRef        = "fabricator/zot"
-	AirgapRef       = "fabricator/zot-airgap"
-	AirgapImageName = "zot-airgap-images-amd64.tar.gz"
-	AirgapChartName = "zot-chart.tgz"
-	Port            = 31000
-	ServiceName     = "registry"
-	TLSSecret       = "registry-tls"
-	HtpasswdSecret  = "registry-htpasswd"
+	ChartRef               = "fabricator/charts/zot"
+	ImageRef               = "fabricator/zot"
+	AirgapRef              = "fabricator/zot-airgap"
+	AirgapImageName        = "zot-airgap-images-amd64.tar.gz"
+	AirgapChartName        = "zot-chart.tgz"
+	Port                   = 31000
+	ServiceName            = "registry"
+	TLSSecret              = "registry-tls"
+	HtpasswdSecret         = "registry-htpasswd"
+	UpstreamSecret         = "registry-upstream"
+	UpstreamCredentialsKey = "credentials.json"
 )
 
 func Version(f fabapi.Fabricator) meta.Version {
@@ -44,11 +48,24 @@ var _ comp.KubeInstall = Install
 
 func Install(cfg fabapi.Fabricator) ([]client.Object, error) {
 	version := string(Version(cfg))
-	sync := false
 
-	config, err := tmplutil.FromTemplate("config", configTmpl, map[string]any{
-		"Sync": sync,
-	})
+	upstream := !cfg.Spec.Config.Registry.IsAirgap() && cfg.Spec.Config.Registry.Upstream != nil
+	configOpts := map[string]any{
+		"Upstream": upstream,
+	}
+	if upstream {
+		configOpts["UpstreamURL"] = cfg.Spec.Config.Registry.Upstream.Repo
+		configOpts["UpstreamPrefix"] = ""
+
+		prefix := strings.Trim(cfg.Spec.Config.Registry.Upstream.Prefix, "/")
+		if prefix != "" {
+			prefix = "/" + prefix
+		}
+		configOpts["UpstreamPrefix"] = prefix + "/**"
+		configOpts["UpstreamTLSVerify"] = strconv.FormatBool(cfg.Spec.Config.Registry.Upstream.TLSVerify)
+	}
+
+	config, err := tmplutil.FromTemplate("config", configTmpl, configOpts)
 	if err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}
@@ -64,7 +81,8 @@ func Install(cfg fabapi.Fabricator) ([]client.Object, error) {
 		"Port":           Port,
 		"Config":         config,
 		"HtpasswdSecret": HtpasswdSecret,
-		"Sync":           sync,
+		"UpstreamSecret": UpstreamSecret,
+		"Upstream":       upstream,
 		"TLSSecret":      TLSSecret,
 	})
 	if err != nil {
@@ -83,12 +101,27 @@ func Install(cfg fabapi.Fabricator) ([]client.Object, error) {
 		return nil, fmt.Errorf("creating Helm chart: %w", err)
 	}
 
+	creds := map[string]any{}
+	if upstream && cfg.Spec.Config.Registry.Upstream.Username != "" && cfg.Spec.Config.Registry.Upstream.Password != "" {
+		creds[cfg.Spec.Config.Registry.Upstream.Repo] = map[string]string{
+			"username": cfg.Spec.Config.Registry.Upstream.Username,
+			"password": cfg.Spec.Config.Registry.Upstream.Password,
+		}
+	}
+	upstreamCreds, err := json.Marshal(creds)
+	if err != nil {
+		return nil, fmt.Errorf("marshaling upstream credentials: %w", err)
+	}
+
 	return []client.Object{
 		comp.NewCertificate("registry", comp.CertificateSpec{
 			DNSNames:    []string{fmt.Sprintf("%s.%s.svc.%s", ServiceName, comp.FabNamespace, comp.ClusterDomain)},
 			IPAddresses: []string{controlVIP.Addr().String()},
 			IssuerRef:   comp.NewIssuerRef(comp.FabCAIssuer),
 			SecretName:  TLSSecret,
+		}),
+		comp.NewSecret(UpstreamSecret, comp.SecretTypeOpaque, map[string]string{
+			UpstreamCredentialsKey: string(upstreamCreds),
 		}),
 		helmChart,
 		comp.NewService(ServiceName, comp.ServiceSpec{

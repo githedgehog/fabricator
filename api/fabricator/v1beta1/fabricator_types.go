@@ -59,19 +59,28 @@ type ControlUser struct {
 	AuthorizedKeys []string `json:"authorizedKeys,omitempty"`
 }
 
-type RegistryConfig struct {
-	// Airgap bool `json:"airgap,omitempty"` // TODO
+type RegistryMode string
 
-	// TODO implement non-airgap
-	// TODO if airgap is true, cache should be empty
-	// Cache  ControlConfigRegistryCache `json:"cache,omitempty"`
+const (
+	RegistryModeAirgap   RegistryMode = "airgap"
+	RegistryModeUpstream RegistryMode = "upstream"
+)
+
+type RegistryConfig struct {
+	Mode     RegistryMode                   `json:"mode,omitempty"`
+	Upstream *ControlConfigRegistryUpstream `json:"upstream,omitempty"`
 }
 
-type ControlConfigRegistryCache struct {
-	Repo     string `json:"repo,omitempty"`   // ghcr.io
-	Prefix   string `json:"prefix,omitempty"` // githedgehog
-	Username string `json:"username,omitempty"`
-	Password string `json:"password,omitempty"`
+func (r RegistryConfig) IsAirgap() bool {
+	return r.Mode == RegistryModeAirgap
+}
+
+type ControlConfigRegistryUpstream struct {
+	Repo      string `json:"repo,omitempty"`   // ghcr.io
+	Prefix    string `json:"prefix,omitempty"` // githedgehog
+	TLSVerify bool   `json:"tlsVerify,omitempty"`
+	Username  string `json:"username,omitempty"`
+	Password  string `json:"password,omitempty"`
 }
 
 type FabricConfig struct {
@@ -217,6 +226,24 @@ func (f *Fabricator) Validate(ctx context.Context) error {
 	err := fabricatorValidate.StructCtx(ctx, f)
 	if err != nil {
 		return fmt.Errorf("validating: %w", err)
+	}
+
+	if f.Spec.Config.Registry.Mode != RegistryModeAirgap && f.Spec.Config.Registry.Mode != RegistryModeUpstream {
+		return fmt.Errorf("invalid registry mode %q", f.Spec.Config.Registry.Mode) //nolint:goerr113
+	}
+
+	if f.Spec.Config.Registry.IsAirgap() && f.Spec.Config.Registry.Upstream != nil {
+		return fmt.Errorf("airgap registry doesn't support upstream") //nolint:goerr113
+	}
+
+	if !f.Spec.Config.Registry.IsAirgap() {
+		if f.Spec.Config.Registry.Upstream == nil {
+			return fmt.Errorf("non-airgap registry requires upstream") //nolint:goerr113
+		}
+
+		if f.Spec.Config.Registry.Upstream.Repo == "" {
+			return fmt.Errorf("upstream registry requires repo") //nolint:goerr113
+		}
 	}
 
 	return nil
