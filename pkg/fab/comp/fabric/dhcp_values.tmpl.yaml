@@ -2,4 +2,4 @@ image:
   repository: {{ .Repo }}
   tag: {{ .Tag }}
 
-listenAddress: {{ .ListenAddress }}
+listenInterface: {{ .ListenInterface }}
