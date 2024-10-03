@@ -169,7 +169,7 @@ jobs:
           username: lab
           password: ${{ secrets.LAB_REGISTRY_TOKEN }}
 
-      - name: hhfab init and build
+      - name: hhfab init and vlab up
         run: |
           export HHFAB_REG_REPO=m-pub.l.hhdev.io:31000
 
