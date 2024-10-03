@@ -7,16 +7,20 @@ _gotools: _touch_embed
   @go fmt ./...
   @go vet ./...
 
+# Called in CI
+_lint: _license_headers _gotools
+
 # Run linters against code (incl. license headers)
-lint: _license_headers _gotools _golangci_lint
+lint: _lint _golangci_lint
   @{{golangci_lint}} run --show-stats ./...
 
 # Run golangci-lint to attempt to fix issues
-lint-fix: _license_headers _gotools _golangci_lint
+lint-fix: _lint _golangci_lint
   @{{golangci_lint}} run --show-stats --fix ./...
 
 oem_dir := "./pkg/embed/flatcaroem"
-go_linux_build := "GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build --tags containers_image_openpgp"
+go_build := "CGO_ENABLED=0 go build --tags containers_image_openpgp"
+go_linux_build := "GOOS=linux GOARCH=amd64 " + go_build
 
 _touch_embed:
   @touch ./pkg/embed/recipebin/hhfab-recipe.gz
@@ -39,8 +43,15 @@ _kube_gen: _controller_gen
   # Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects
   {{controller_gen}} rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
 
+# Generate code/manifests, things to embed, etc
+gen: _kube_gen _hhfab_embed
+
 _hhfab_build: _license_headers _gotools _kube_gen _hhfab_embed
   {{go_linux_build}} -o ./bin/hhfab ./cmd/hhfab
+
+# Build hhfab for local OS/Arch
+hhfab-build-local: _license_headers _gotools _kube_gen _hhfab_embed
+  {{go_build}} -o ./bin/hhfab ./cmd/hhfab
 
 # Build all artifacts
 build: _license_headers _gotools _hhfab_build && version

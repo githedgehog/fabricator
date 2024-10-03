@@ -42,7 +42,7 @@ envtest := localbin / "setup-envtest" + "-" + envtest_version
 @_envtest: _localbin
   [ -f {{envtest}} ] || just _goinstall "sigs.k8s.io/controller-runtime/tools/setup-envtest" {{envtest_version}} "setup-envtest" {{envtest}}
 
-# golangci-lint
+# golangci-lint, keep version in sync with ci.yaml
 golangci_lint_version := "v1.61.0"
 golangci_lint := localbin / "golangci-lint" + "-" + golangci_lint_version
 @_golangci_lint: _localbin

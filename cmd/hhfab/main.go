@@ -408,14 +408,22 @@ func Run(ctx context.Context) error {
 				},
 			},
 			{
-				Name:   "build",
-				Usage:  "build installers",
-				Flags:  append(defaultFlags, hMode),
+				Name:  "build",
+				Usage: "build installers",
+				Flags: append(defaultFlags, hMode,
+					&cli.BoolFlag{
+						Name:    FlagNameControlsUSB,
+						Aliases: []string{"usb"},
+						Usage:   "use installer USB image for control node(s)",
+						EnvVars: []string{"HHFAB_CONTROL_USB"},
+						Value:   false,
+					},
+				),
 				Before: before(false),
-				Action: func(_ *cli.Context) error {
+				Action: func(c *cli.Context) error {
 					if err := hhfab.Build(ctx, workDir, cacheDir, hhfab.BuildOpts{
 						HydrateMode: hhfab.HydrateMode(hydrateMode),
-						USBImage:    false, // TODO flag
+						USBImage:    c.Bool(FlagNameControlsUSB),
 					}); err != nil {
 						return fmt.Errorf("building: %w", err)
 					}
@@ -488,13 +496,13 @@ func Run(ctx context.Context) error {
 						Action: func(c *cli.Context) error {
 							if err := hhfab.VLABUp(ctx, workDir, cacheDir, hhfab.VLABUpOpts{
 								HydrateMode: hhfab.HydrateMode(hydrateMode),
-								ReCreate:    false,                       // TODO flag
-								USBImage:    c.Bool(FlagNameControlsUSB), // TODO flag
+								ReCreate:    false, // TODO flag
+								USBImage:    c.Bool(FlagNameControlsUSB),
 								VLABRunOpts: hhfab.VLABRunOpts{
 									KillStale:          c.Bool(FlagNameKillStale),
 									ControlsRestricted: c.Bool(FlagNameControlsRestricted),
 									ServersRestricted:  c.Bool(FlagNameServersRestricted),
-									ControlUSB:         c.Bool(FlagNameControlsUSB), // TODO correct flag
+									ControlUSB:         c.Bool(FlagNameControlsUSB),
 								},
 							}); err != nil {
 								return fmt.Errorf("running VLAB: %w", err)

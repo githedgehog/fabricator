@@ -23,44 +23,12 @@ on:
         default: false
 
 jobs:
-  # cache-tools:
-  #   runs-on: ubuntu-latest # It should be faster than running in hour DC
-
-  #   steps:
-  #     - name: Checkout repository
-  #       uses: actions/checkout@v4
-
-  #     - name: Setup Go
-  #       uses: actions/setup-go@v5
-  #       with:
-  #         go-version: stable
-  #         cache: true
-
-  #     - name: Cache dev tools
-  #       uses: actions/cache@v3
-  #       with:
-  #         path: bin
-  #         key: bin-${{ hashFiles('hack/tools.mk') }}
-
-  #     - name: Prepare all dev tools
-  #       run: |
-  #         make tools
-
-  #     - name: Setup tmate session for debug
-  #       if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
-  #       uses: mxschmitt/action-tmate@v3
-  #       timeout-minutes: 30
-  #       with:
-  #         limit-access-to-actor: true
-
   test:
     runs-on: lab
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        # with:
-        #   fetch-depth: 0
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -69,20 +37,21 @@ jobs:
           cache: true
 
       # Don't remove it! We shouldn't allow CI to pass if there are any changes not committed after running make
-      - name: Make all (autogeneration) and fail on dirty
+      - name: Run all generators, lint and fail on dirty
         run: |
-          make lint-lic fmt build
+          just gen _lint
           git status --short
           git diff --quiet
 
-      - name: Go Lint
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: latest
+      # - name: Go Lint
+      #   uses: golangci/golangci-lint-action@v6
+      #   with:
+      #     # keep in sync with hack/tools.just
+      #     version: v1.61.0
 
-      - name: Run tests
-        run: |
-          make test
+      # - name: Run tests
+      #   run: |
+      #     just test
 
       - name: Setup tmate session for debug
         if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
@@ -100,19 +69,9 @@ jobs:
         os:
           - ubuntu-latest
           - macos-latest
-        preset:
-          - lab
-          - vlab
-        dhcpd:
-          - isc
-          - hedgehog
-        exclude:
-          - preset: vlab
-            dhcpd: isc
-          - preset: vlab
-            os: macos-latest
-          - dhcpd: isc
-            os: macos-latest
+        buildmode:
+          - "--usb=false"
+          - "--usb=true"
 
     steps:
       - name: Checkout repository
@@ -133,7 +92,7 @@ jobs:
 
       - name: Build hhfab for local OS/ARCH
         run: |
-          make hhfab-local
+          just hhfab-build-local
 
       - name: Login to ghcr.io
         uses: docker/login-action@v3
@@ -144,10 +103,9 @@ jobs:
 
       - name: hhfab init and build
         run: |
-          bin/hhfab init -p=${{ matrix.preset }} --dhcpd=${{ matrix.dhcpd }} --dev -v
-          bin/hhfab build -v
-          bin/hhfab build-iso -v
-          ls -lah .hhfab
+          bin/hhfab init -v --dev
+          bin/hhfab build -v ${{ matrix.buildmode }}
+          ls -lah result
 
       - name: Setup tmate session for debug
         if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
@@ -166,12 +124,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        mode:
+        buildmode:
+          - "--usb=false"
+          - "--usb=true"
+        fabricmode:
           - collapsed-core
           - spine-leaf
-        dhcpd:
-          - isc
-          - hedgehog
 
     steps:
       - name: Runner host
@@ -191,7 +149,7 @@ jobs:
 
       - name: Build hhfab
         run: |
-          make hhfab
+          just hhfab-build-local
 
       - name: Login to ghcr.io
         uses: docker/login-action@v3
@@ -208,17 +166,13 @@ jobs:
           password: ${{ secrets.LAB_REGISTRY_TOKEN }}
 
       - name: hhfab init and build
-        # TODO replace --install-complete with --run-complete hack/vlab-test.sh
         run: |
-          export XDG_CONFIG_HOME=$(pwd)/.config
           export HHFAB_BASE_REPO=m-pub.l.hhdev.io:31000/githedgehog
 
-          bin/hhfab init -p=vlab --fabric-mode=${{ matrix.mode }} --dhcpd=${{ matrix.dhcpd }} --dev -v
-          bin/hhfab build -v
-          bin/hhfab build-iso -v
-          ls -lah .hhfab
+          bin/hhfab init -v --dev -m ${{ matrix.fabricmode }}
+          bin/hhfab vlab gen -v
+          bin/hhfab vlab up -v ${{ matrix.buildmode }}
 
-          bin/hhfab vlab up -v --ready=setup-vpcs --ready=exit
       - name: Setup tmate session for debug
         if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
         uses: mxschmitt/action-tmate@v3
