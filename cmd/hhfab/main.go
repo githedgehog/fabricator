@@ -42,6 +42,8 @@ const (
 	FlagNameControlsRestricted    = "controls-restricted"
 	FlagNameServersRestricted     = "servers-restricted"
 	FlagNameControlsUSB           = "controls-usb"
+	FlagNameFailFast              = "fail-fast"
+	FlagNameExitOnReady           = "exit-on-ready"
 )
 
 func main() {
@@ -492,6 +494,14 @@ func Run(ctx context.Context) error {
 								EnvVars: []string{"HHFAB_CONTROL_USB"},
 								Value:   false,
 							},
+							&cli.BoolFlag{
+								Name:  FlagNameFailFast,
+								Usage: "exit on first error",
+							},
+							&cli.BoolFlag{
+								Name:  FlagNameExitOnReady,
+								Usage: "exit when VLAB is up",
+							},
 						),
 						Before: before(false),
 						Action: func(c *cli.Context) error {
@@ -504,6 +514,8 @@ func Run(ctx context.Context) error {
 									ControlsRestricted: c.Bool(FlagNameControlsRestricted),
 									ServersRestricted:  c.Bool(FlagNameServersRestricted),
 									ControlUSB:         c.Bool(FlagNameControlsUSB),
+									FailFast:           c.Bool(FlagNameFailFast),
+									ExitOnReady:        c.Bool(FlagNameExitOnReady),
 								},
 							}); err != nil {
 								return fmt.Errorf("running VLAB: %w", err)

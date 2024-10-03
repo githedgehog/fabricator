@@ -75,6 +75,8 @@ type VLABRunOpts struct {
 	ControlsRestricted bool
 	ServersRestricted  bool
 	ControlUSB         bool
+	FailFast           bool
+	ExitOnReady        bool
 }
 
 func (c *Config) checkForBins() error {
@@ -304,6 +306,10 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 			if err := execCmd(ctx, true, vmDir, VLABCmdQemuSystem, args, "vm", vm.Name); err != nil {
 				slog.Error("Failed to start VM", "vm", vm.Name, "type", vm.Type, "err", err)
 
+				if opts.FailFast {
+					os.Exit(1)
+				}
+
 				return fmt.Errorf("running vm: %w", err)
 			}
 
@@ -315,7 +321,10 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 			group.Go(func() error {
 				if err := c.vmPostProcess(ctx, vlab, d, vm, opts); err != nil {
 					slog.Error("Failed to post-process VM", "vm", vm.Name, "type", vm.Type, "err", err)
-					// TODO some flag to control "fail-on-install" behavior
+
+					if opts.FailFast {
+						os.Exit(1)
+					}
 
 					return fmt.Errorf("post-processing vm %s: %w", vm.Name, err)
 				}
@@ -335,6 +344,10 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 		postProcesses.Wait()
 
 		slog.Info("All VMs are ready")
+
+		if opts.ExitOnReady {
+			os.Exit(0)
+		}
 
 		return nil
 	})
@@ -531,6 +544,10 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 			}
 			if err == nil && marker != recipe.InstallMarkerComplete {
 				slog.Error("Control node install was already attempted but not completed", "vm", vm.Name, "type", vm.Type, "marker", marker)
+
+				if opts.FailFast {
+					os.Exit(1)
+				}
 
 				return fmt.Errorf("not complete install marker: %q", marker) //nolint:goerr113
 			}
