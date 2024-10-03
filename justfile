@@ -4,19 +4,19 @@ default:
   @just --list
 
 _gotools: _touch_embed
-  @go fmt ./...
-  @go vet {{go_flags}} ./...
+  go fmt ./...
+  go vet {{go_flags}} ./...
 
 # Called in CI
 _lint: _license_headers _gotools
 
 # Run linters against code (incl. license headers)
 lint: _lint _golangci_lint
-  @{{golangci_lint}} run --show-stats ./...
+  {{golangci_lint}} run --show-stats ./...
 
 # Run golangci-lint to attempt to fix issues
 lint-fix: _lint _golangci_lint
-  @{{golangci_lint}} run --show-stats --fix ./...
+  {{golangci_lint}} run --show-stats --fix ./...
 
 oem_dir := "./pkg/embed/flatcaroem"
 go_flags := "--tags containers_image_openpgp,containers_image_storage_stub"
@@ -51,7 +51,7 @@ _hhfab_build: _license_headers _gotools _kube_gen _hhfab_embed
   {{go_linux_build}} -o ./bin/hhfab ./cmd/hhfab
 
 # Build hhfab for local OS/Arch
-hhfab-build-local: _license_headers _gotools _kube_gen _hhfab_embed
+hhfab-build-local: _license_headers _gotools _kube_gen _hhfab_embed && version
   {{go_build}} -o ./bin/hhfab ./cmd/hhfab
 
 # Build all artifacts
