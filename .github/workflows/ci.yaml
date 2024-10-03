@@ -85,6 +85,9 @@ jobs:
           go-version: stable
           cache: true
 
+      - name: Setup Just
+        uses: extractions/setup-just@v2
+
       - name: Setup docker on MacOS
         if: matrix.os == 'macos-latest'
         run: |
