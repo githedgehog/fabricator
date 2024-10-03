@@ -39,7 +39,7 @@ jobs:
       # Don't remove it! We shouldn't allow CI to pass if there are any changes not committed after running make
       - name: Run all generators, lint and fail on dirty
         run: |
-          just gen _lint
+          just --timestamp gen _lint
           git status --short
           git diff --quiet
 
@@ -51,7 +51,7 @@ jobs:
 
       # - name: Run tests
       #   run: |
-      #     just test
+      #     just --timestamp test
 
       - name: Setup tmate session for debug
         if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
@@ -95,7 +95,7 @@ jobs:
 
       - name: Build hhfab for local OS/ARCH
         run: |
-          just hhfab-build-local
+          just --timestamp hhfab-build-local
 
       - name: Login to ghcr.io
         uses: docker/login-action@v3
@@ -152,7 +152,7 @@ jobs:
 
       - name: Build hhfab
         run: |
-          just hhfab-build-local
+          just --timestamp hhfab-build-local
 
       - name: Login to ghcr.io
         uses: docker/login-action@v3

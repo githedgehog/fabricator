@@ -3,6 +3,8 @@ import "hack/tools.just"
 default:
   @just --list
 
+export CGO_ENABLED := "0"
+
 _gotools: _touch_embed
   go fmt ./...
   go vet {{go_flags}} ./...
@@ -20,7 +22,7 @@ lint-fix: _lint _golangci_lint
 
 oem_dir := "./pkg/embed/flatcaroem"
 go_flags := "--tags containers_image_openpgp,containers_image_storage_stub"
-go_build := "CGO_ENABLED=0 go build " + go_flags
+go_build := "go build " + go_flags
 go_linux_build := "GOOS=linux GOARCH=amd64 " + go_build
 
 _touch_embed:
