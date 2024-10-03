@@ -171,7 +171,7 @@ jobs:
 
       - name: hhfab init and build
         run: |
-          export HHFAB_BASE_REPO=m-pub.l.hhdev.io:31000/githedgehog
+          export HHFAB_REG_REPO=m-pub.l.hhdev.io:31000
 
           bin/hhfab init -v --dev -m ${{ matrix.fabricmode }}
           bin/hhfab vlab gen -v
