@@ -41,7 +41,7 @@
       "credentialsFile": "/upstream/credentials.json",
       "registries": [
         {
-          "urls": ["{{ .UpstreamURL }}"],
+          "urls": ["https://{{ .UpstreamURL }}"],
           "onDemand": true,
           "tlsVerify": {{ .UpstreamTLSVerify }},
           "content": [
