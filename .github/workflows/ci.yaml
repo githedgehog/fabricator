@@ -36,6 +36,7 @@ jobs:
           go-version: stable
           cache: true
 
+      # TODO test it works reliably
       # Don't remove it! We shouldn't allow CI to pass if there are any changes not committed after running make
       - name: Run all generators, lint and fail on dirty
         run: |
@@ -62,7 +63,7 @@ jobs:
 
   build:
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 15
 
     strategy:
       matrix:
@@ -122,7 +123,7 @@ jobs:
     needs:
       - test
       - build
-    timeout-minutes: 120
+    timeout-minutes: 30
 
     strategy:
       fail-fast: false
