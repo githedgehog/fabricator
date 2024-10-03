@@ -78,8 +78,8 @@ metadata:
   name: control-1
   namespace: fab
 spec:
-  # bootstrap:
-  #  disk: "sda" # disk to install OS on, e.g. "sda" or "nvme0n1"
+  bootstrap:
+   disk: "/dev/sda" # disk to install OS on, e.g. "sda" or "nvme0n1"
   external:
     interface: enp2s0 # interface for external
     ip:	dhcp # IP address for external interface
