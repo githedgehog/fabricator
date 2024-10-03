@@ -177,7 +177,7 @@ func (c *ControlInstall) Run(ctx context.Context) error {
 			return fmt.Errorf("enforcing fabric install: %w", err)
 		}
 
-		if err := waitKube(ctx, kube, "fabric", comp.FabNamespace,
+		if err := waitKube(ctx, kube, "fabric-controller-manager", comp.FabNamespace,
 			&comp.Deployment{}, func(obj *comp.Deployment) (bool, error) {
 				for _, cond := range obj.Status.Conditions {
 					if cond.Type == comp.DeploymentAvailable && cond.Status == comp.ConditionTrue {

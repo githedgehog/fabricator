@@ -177,6 +177,8 @@ spec:
                       leafASNStart:
                         format: int32
                         type: integer
+                      managementDHCPEnd:
+                        type: string
                       managementDHCPStart:
                         type: string
                       mode:

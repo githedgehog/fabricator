@@ -78,6 +78,7 @@ type FabricConfig struct {
 	Mode fmeta.FabricMode `json:"mode,omitempty"`
 
 	ManagementDHCPStart meta.Addr `json:"managementDHCPStart,omitempty"` // TODO should be in mgmt subnet
+	ManagementDHCPEnd   meta.Addr `json:"managementDHCPEnd,omitempty"`   // TODO should be in mgmt subnet
 
 	SpineASN     uint32 `json:"spineASN,omitempty"`
 	LeafASNStart uint32 `json:"leafASNStart,omitempty"`
