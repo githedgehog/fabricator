@@ -24,7 +24,7 @@ lint-fix: _lint _golangci_lint
   {{golangci_lint}} run --show-stats --fix ./...
 
 oem_dir := "./pkg/embed/flatcaroem"
-go_flags := "--tags containers_image_openpgp,containers_image_storage_stub"
+go_flags := "--tags containers_image_openpgp,containers_image_storage_stub -ldflags=\"-w -s -X go.githedgehog.com/fabricator/pkg/version.Version=" + version + "\""
 go_build := "go build " + go_flags
 go_linux_build := "GOOS=linux GOARCH=amd64 " + go_build
 
