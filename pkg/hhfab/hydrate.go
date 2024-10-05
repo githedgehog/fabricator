@@ -324,6 +324,9 @@ func (c *Config) getHydration(ctx context.Context, kube client.Reader) (Hydratio
 			if err != nil {
 				return status, fmt.Errorf("parsing switch %s protocol IP %s: %w", sw.Name, sw.Spec.ProtocolIP, err)
 			}
+			if swProtoIP.Bits() != 32 {
+				return status, fmt.Errorf("switch %s protocol IP %s must be a /32", sw.Name, swProtoIP) //nolint:goerr113
+			}
 
 			if !protocolSubnet.Contains(swProtoIP.Addr()) {
 				return status, fmt.Errorf("switch %s protocol IP %s is not in the protocol subnet %s", sw.Name, swProtoIP, protocolSubnet) //nolint:goerr113
@@ -383,6 +386,9 @@ func (c *Config) getHydration(ctx context.Context, kube client.Reader) (Hydratio
 				swVTEPIP, err := netip.ParsePrefix(sw.Spec.VTEPIP)
 				if err != nil {
 					return status, fmt.Errorf("parsing switch %s VTEP IP %s: %w", sw.Name, sw.Spec.VTEPIP, err)
+				}
+				if swVTEPIP.Bits() != 32 {
+					return status, fmt.Errorf("switch %s VTEP IP %s must be a /32", sw.Name, swVTEPIP) //nolint:goerr113
 				}
 
 				if !vtepSubnet.Contains(swVTEPIP.Addr()) {
@@ -587,7 +593,7 @@ func (c *Config) hydrate(ctx context.Context, kube client.Client) error {
 		sw.Spec.IP = netip.PrefixFrom(nextMgmtIP, mgmtSubnet.Bits()).String()
 		nextMgmtIP = nextMgmtIP.Next()
 
-		sw.Spec.ProtocolIP = netip.PrefixFrom(nextProtoIP, protocolSubnet.Bits()).String()
+		sw.Spec.ProtocolIP = netip.PrefixFrom(nextProtoIP, 32).String()
 		nextProtoIP = nextProtoIP.Next()
 
 		if sw.Spec.Role.IsSpine() {
@@ -611,7 +617,7 @@ func (c *Config) hydrate(ctx context.Context, kube client.Client) error {
 
 			sw.Spec.VTEPIP = ""
 			if !isCC {
-				sw.Spec.VTEPIP = netip.PrefixFrom(nextVTEPIP, vtepSubnet.Bits()).String()
+				sw.Spec.VTEPIP = netip.PrefixFrom(nextVTEPIP, 32).String()
 				nextVTEPIP = nextVTEPIP.Next()
 			}
 		}
