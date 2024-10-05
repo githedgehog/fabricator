@@ -254,6 +254,10 @@ spec:
                             additionalProperties:
                               type: string
                             type: object
+                          onie:
+                            additionalProperties:
+                              type: string
+                            type: object
                           proxy:
                             type: string
                           proxyChart:
@@ -316,6 +320,10 @@ spec:
                       dhcpd:
                         type: string
                       nos:
+                        additionalProperties:
+                          type: string
+                        type: object
+                      onie:
                         additionalProperties:
                           type: string
                         type: object

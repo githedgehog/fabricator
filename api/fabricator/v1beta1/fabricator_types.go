@@ -149,6 +149,7 @@ type FabricVersions struct {
 	ProxyChart meta.Version            `json:"proxyChart,omitempty"`
 	Proxy      meta.Version            `json:"proxy,omitempty"`
 	NOS        map[string]meta.Version `json:"nos,omitempty"`
+	ONIE       map[string]meta.Version `json:"onie,omitempty"`
 }
 
 type VLABVersions struct {
