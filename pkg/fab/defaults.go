@@ -17,7 +17,7 @@ var DefaultConfig = fabapi.FabConfig{
 		KubeClusterSubnet: "172.28.0.0/16",
 		KubeServiceSubnet: "172.29.0.0/16",
 		KubeClusterDNS:    "172.29.0.10",
-		DummySubnet:       "172.30.127.0/24",
+		DummySubnet:       "172.30.90.0/24",
 		DefaultUser:       fabapi.ControlUser{},
 	},
 	Registry: fabapi.RegistryConfig{
@@ -40,9 +40,10 @@ var DefaultConfig = fabapi.FabConfig{
 		VPCWorkaroundVLANs: []fmeta.VLANRange{
 			{From: 100, To: 3999},
 		},
-		VPCWorkaroundSubnet: "172.30.112.0/19",   // 4096 /31 subnets: 172.30.96.1 - 172.30.127.254 // TODO make sure it's really used
+		VPCWorkaroundSubnet: "172.30.96.0/19",    // 4096 /31 subnets: 172.30.96.1 - 172.30.127.254 // TODO make sure it's really used
 		ESLAGMACBase:        "f2:00:00:00:00:00", // TODO make sure it's really used
 		ESLAGESIPrefix:      "00:f2:00:00:",      // TODO make sure it's really used
+		MCLAGSessionSubnet:  "172.30.95.0/31",
 		DefaultSwitchUsers:  map[string]fabapi.SwitchUser{},
 		DefaultAlloyConfig:  fmeta.AlloyConfig{},
 	},
