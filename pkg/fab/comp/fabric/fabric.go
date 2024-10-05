@@ -6,10 +6,12 @@ package fabric
 import (
 	_ "embed"
 	"fmt"
+	"maps"
 	"net/netip"
 
 	dhcpapi "go.githedgehog.com/fabric/api/dhcp/v1alpha2"
 	"go.githedgehog.com/fabric/api/meta"
+	"go.githedgehog.com/fabric/pkg/boot/server"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
@@ -31,13 +33,17 @@ const (
 	AlloyRef      = "fabric/alloy"
 	ProxyChartRef = "fabric/charts/fabric-proxy"
 	ProxyRef      = "fabric/fabric-proxy"
-	SonicRef      = "sonic-bcom-private"
+	SonicRefBase  = "sonic-bcom-private"
+	OnieRefBase   = "onie-updater-private"
 
 	ProxyNodePort = 31028
 )
 
 //go:embed ctrl_values.tmpl.yaml
 var ctrlValuesTmpl string
+
+//go:embed boot_values.tmpl.yaml
+var bootValuesTmpl string
 
 //go:embed dhcp_values.tmpl.yaml
 var dhcpValuesTmpl string
@@ -51,10 +57,18 @@ func Install(control fabapi.ControlNode) comp.KubeInstall {
 		if err != nil {
 			return nil, fmt.Errorf("getting fabric config: %w", err)
 		}
-
 		fabricCfgYaml, err := yaml.Marshal(fabricCfg)
 		if err != nil {
 			return nil, fmt.Errorf("marshalling fabric config: %w", err)
+		}
+
+		bootCfg, err := GetFabricBootConfig(cfg)
+		if err != nil {
+			return nil, fmt.Errorf("getting fabric boot config: %w", err)
+		}
+		bootCfgYaml, err := yaml.Marshal(bootCfg)
+		if err != nil {
+			return nil, fmt.Errorf("marshalling fabric boot config: %w", err)
 		}
 
 		apiHelm, err := comp.NewHelmChart(cfg, "fabric-api", APIChartRef,
@@ -84,7 +98,6 @@ func Install(control fabapi.ControlNode) comp.KubeInstall {
 		if err != nil {
 			return nil, fmt.Errorf("getting image URL for %q: %w", DHCPRef, err)
 		}
-
 		dhcpValues, err := tmplutil.FromTemplate("dhcp-values", dhcpValuesTmpl, map[string]any{
 			"Repo":            dhcpRef,
 			"Tag":             string(cfg.Status.Versions.Fabric.DHCPD),
@@ -97,6 +110,23 @@ func Install(control fabapi.ControlNode) comp.KubeInstall {
 			string(cfg.Status.Versions.Fabric.DHCPD), "", false, dhcpValues)
 		if err != nil {
 			return nil, fmt.Errorf("creating fabric DHCP helm chart: %w", err)
+		}
+
+		bootRef, err := comp.ImageURL(cfg, BootRef)
+		if err != nil {
+			return nil, fmt.Errorf("getting image URL for %q: %w", BootRef, err)
+		}
+		bootValues, err := tmplutil.FromTemplate("boot-values", bootValuesTmpl, map[string]any{
+			"Repo": bootRef,
+			"Tag":  string(cfg.Status.Versions.Fabric.Boot),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("boot values: %w", err)
+		}
+		bootHelm, err := comp.NewHelmChart(cfg, "fabric-boot", BootChartRef,
+			string(cfg.Status.Versions.Fabric.Boot), "", false, bootValues)
+		if err != nil {
+			return nil, fmt.Errorf("creating fabric boot helm chart: %w", err)
 		}
 
 		proxyRef, err := comp.ImageURL(cfg, ProxyRef)
@@ -117,15 +147,17 @@ func Install(control fabapi.ControlNode) comp.KubeInstall {
 			return nil, fmt.Errorf("creating fabric proxy helm chart: %w", err)
 		}
 
-		// TODO boot
-
 		return []client.Object{
 			apiHelm,
-			comp.NewConfigMap("fabric-config", map[string]string{
+			comp.NewConfigMap("fabric-ctrl-config", map[string]string{
 				"config.yaml": string(fabricCfgYaml),
 			}),
 			ctrlHelm,
 			dhcpHelm,
+			comp.NewConfigMap("fabric-boot-config", map[string]string{
+				"config.yaml": string(bootCfgYaml),
+			}),
+			bootHelm,
 			proxyHelm,
 		}, nil
 	}
@@ -181,7 +213,7 @@ func GetFabricConfig(f fabapi.Fabricator) (*meta.FabricConfig, error) {
 	return &meta.FabricConfig{
 		ControlVIP:           string(f.Spec.Config.Control.VIP),
 		APIServer:            netip.AddrPortFrom(controlVIP.Addr(), k3s.APIPort).String(),
-		AgentRepo:            comp.JoinURLParts(registry, AgentRef),
+		AgentRepo:            comp.JoinURLParts(registry, comp.RegistryPrefix, AgentRef),
 		VPCIRBVLANRanges:     f.Spec.Config.Fabric.VPCIRBVLANs,
 		VPCPeeringVLANRanges: f.Spec.Config.Fabric.VPCWorkaroundVLANs,
 		VPCPeeringDisabled:   false, // TODO remove?
@@ -201,7 +233,7 @@ func GetFabricConfig(f fabapi.Fabricator) (*meta.FabricConfig, error) {
 		ServerFacingMTUOffset:    64,   // TODO use
 		ESLAGMACBase:             f.Spec.Config.Fabric.ESLAGMACBase,
 		ESLAGESIPrefix:           f.Spec.Config.Fabric.ESLAGESIPrefix,
-		AlloyRepo:                comp.JoinURLParts(registry, AlloyRef),
+		AlloyRepo:                comp.JoinURLParts(registry, comp.RegistryPrefix, AlloyRef),
 		AlloyVersion:             string(f.Status.Versions.Fabric.Alloy),
 		Alloy:                    f.Spec.Config.Fabric.DefaultAlloyConfig,
 		DefaultMaxPathsEBGP:      64,
@@ -209,22 +241,78 @@ func GetFabricConfig(f fabapi.Fabricator) (*meta.FabricConfig, error) {
 	}, nil
 }
 
+func GetFabricBootConfig(f fabapi.Fabricator) (*server.Config, error) {
+	regURL, err := comp.RegistryURL(f)
+	if err != nil {
+		return nil, fmt.Errorf("getting registry URL: %w", err)
+	}
+
+	nosRepos := map[meta.NOSType]string{}
+	for nosType := range f.Status.Versions.Fabric.NOS {
+		nosRepos[meta.NOSType(nosType)] = comp.JoinURLParts(regURL, SonicRefBase, nosType)
+	}
+
+	nosVersions := map[meta.NOSType]string{}
+	for nosType, version := range f.Status.Versions.Fabric.NOS {
+		nosVersions[meta.NOSType(nosType)] = string(version)
+	}
+
+	onieRepos := map[string]string{}
+	for platform := range f.Status.Versions.Fabric.ONIE {
+		onieRepos[platform] = comp.JoinURLParts(regURL, OnieRefBase, platform)
+	}
+
+	onieVersions := map[string]string{}
+	for platform, version := range f.Status.Versions.Fabric.ONIE {
+		onieVersions[platform] = string(version)
+	}
+
+	return &server.Config{
+		ControlVIP:           string(f.Spec.Config.Control.VIP),
+		NOSRepos:             nosRepos,
+		NOSVersions:          nosVersions,
+		ONIERepos:            onieRepos,
+		ONIEPlatformVersions: onieVersions,
+	}, nil
+}
+
 var _ comp.ListOCIArtifacts = Artifacts
 
 func Artifacts(cfg fabapi.Fabricator) (comp.OCIArtifacts, error) {
-	return comp.OCIArtifacts{
-		APIChartRef:  cfg.Status.Versions.Fabric.API,
-		CtrlChartRef: cfg.Status.Versions.Fabric.Controller,
-		CtrlRef:      cfg.Status.Versions.Fabric.Controller,
-		DHCPChartRef: cfg.Status.Versions.Fabric.DHCPD,
-		DHCPRef:      cfg.Status.Versions.Fabric.DHCPD,
-		// BootChartRef:  cfg.Status.Versions.Fabric.Boot,
-		// BootRef:       cfg.Status.Versions.Fabric.Boot,
+	arts := comp.OCIArtifacts{}
+
+	// TODO validate versions for NOS and ONIE
+
+	for _, nosType := range []meta.NOSType{
+		meta.NOSTypeSONiCBCMVS,
+		meta.NOSTypeSONiCBCMBase,
+		meta.NOSTypeSONiCBCMCampus,
+	} {
+		arts[SonicRefBase+"/"+string(nosType)] = cfg.Status.Versions.Fabric.NOS[string(nosType)]
+	}
+
+	// TODO some consts?
+	for _, platform := range []string{
+		"x86_64-kvm_x86_64-r0",
+		"x86_64-dellemc_s5200_c3538-r0",
+	} {
+		arts[OnieRefBase+"/"+platform] = cfg.Status.Versions.Fabric.ONIE[platform]
+	}
+
+	maps.Copy(arts, comp.OCIArtifacts{
+		APIChartRef:   cfg.Status.Versions.Fabric.API,
+		CtrlChartRef:  cfg.Status.Versions.Fabric.Controller,
+		CtrlRef:       cfg.Status.Versions.Fabric.Controller,
+		DHCPChartRef:  cfg.Status.Versions.Fabric.DHCPD,
+		DHCPRef:       cfg.Status.Versions.Fabric.DHCPD,
+		BootChartRef:  cfg.Status.Versions.Fabric.Boot,
+		BootRef:       cfg.Status.Versions.Fabric.Boot,
 		AgentRef:      cfg.Status.Versions.Fabric.Agent,
 		CtlRef:        cfg.Status.Versions.Fabric.Ctl,
 		AlloyRef:      cfg.Status.Versions.Fabric.Alloy,
 		ProxyChartRef: cfg.Status.Versions.Fabric.ProxyChart,
 		ProxyRef:      cfg.Status.Versions.Fabric.Proxy,
-		SonicRef:      cfg.Status.Versions.Fabric.NOS["sonic-bcm-vs"], // TODO we need multiple versions for the same name?
-	}, nil
+	})
+
+	return arts, nil
 }
