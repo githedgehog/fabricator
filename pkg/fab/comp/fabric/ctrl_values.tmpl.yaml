@@ -1,4 +1,4 @@
-controllerManager:
+ctrl:
   manager:
     image:
       repository: {{ .Repo }}

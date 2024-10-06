@@ -5,6 +5,7 @@ package fab
 
 import (
 	fmeta "go.githedgehog.com/fabric/api/meta"
+	"go.githedgehog.com/fabric/pkg/ctrl/switchprofile"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/api/meta"
 	"go.githedgehog.com/fabricator/pkg/version"
@@ -42,9 +43,9 @@ var Versions = fabapi.Versions{
 			string(fmeta.NOSTypeSONiCBCMCampus): "v4.4.0",
 		},
 		ONIE: map[string]meta.Version{
-			// TODO some const for platform names?
-			"x86_64-kvm_x86_64-r0":          "test1", // TODO update with proper version
-			"x86_64-dellemc_s5200_c3538-r0": "test1", // TODO update with proper version
+			switchprofile.VS.Spec.Platform:           "test1", // TODO update with proper version
+			switchprofile.DellS5232FON.Spec.Platform: "test1", // TODO update with proper version
+			switchprofile.DellS5248FON.Spec.Platform: "test1", // TODO update with proper version
 		},
 	},
 	VLAB: fabapi.VLABVersions{

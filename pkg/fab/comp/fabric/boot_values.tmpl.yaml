@@ -1,3 +1,11 @@
 image:
   repository: {{ .Repo }}
   tag: {{ .Tag }}
+
+livenessProbe:
+  httpGet:
+    host: {{ .Host }}
+
+readinessProbe:
+  httpGet:
+    host: {{ .Host }}

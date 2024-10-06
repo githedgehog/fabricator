@@ -6,7 +6,6 @@ package fabric
 import (
 	_ "embed"
 	"fmt"
-	"maps"
 	"net/netip"
 
 	dhcpapi "go.githedgehog.com/fabric/api/dhcp/v1alpha2"
@@ -33,7 +32,7 @@ const (
 	AlloyRef      = "fabric/alloy"
 	ProxyChartRef = "fabric/charts/fabric-proxy"
 	ProxyRef      = "fabric/fabric-proxy"
-	SonicRefBase  = "sonic-bcom-private"
+	SonicRefBase  = "sonic-bcm-private"
 	OnieRefBase   = "onie-updater-private"
 
 	ProxyNodePort = 31028
@@ -53,6 +52,11 @@ var proxyValuesTmpl string
 
 func Install(control fabapi.ControlNode) comp.KubeInstall {
 	return func(cfg fabapi.Fabricator) ([]client.Object, error) {
+		controlVIP, err := cfg.Spec.Config.Control.VIP.Parse()
+		if err != nil {
+			return nil, fmt.Errorf("parsing control VIP: %w", err)
+		}
+
 		fabricCfg, err := GetFabricConfig(cfg)
 		if err != nil {
 			return nil, fmt.Errorf("getting fabric config: %w", err)
@@ -119,6 +123,7 @@ func Install(control fabapi.ControlNode) comp.KubeInstall {
 		bootValues, err := tmplutil.FromTemplate("boot-values", bootValuesTmpl, map[string]any{
 			"Repo": bootRef,
 			"Tag":  string(cfg.Status.Versions.Fabric.Boot),
+			"Host": controlVIP.Addr().String(),
 		})
 		if err != nil {
 			return nil, fmt.Errorf("boot values: %w", err)
@@ -224,13 +229,15 @@ func GetFabricConfig(f fabapi.Fabricator) (*meta.FabricConfig, error) {
 			string(f.Spec.Config.Fabric.ProtocolSubnet),
 			string(f.Spec.Config.Fabric.VTEPSubnet),
 			string(f.Spec.Config.Fabric.VPCWorkaroundSubnet),
+			string(f.Spec.Config.Control.DummySubnet),
+			string(f.Spec.Config.Fabric.MCLAGSessionSubnet),
 		},
 		Users:                    users,
 		FabricMode:               f.Spec.Config.Fabric.Mode,
 		BaseVPCCommunity:         f.Spec.Config.Fabric.BaseVPCCommunity,
-		VPCLoopbackSubnet:        string(f.Spec.Config.Fabric.VPCWorkaroundSubnet),
-		FabricMTU:                9100, // TODO use
-		ServerFacingMTUOffset:    64,   // TODO use
+		VPCLoopbackSubnet:        string(f.Spec.Config.Fabric.VPCWorkaroundSubnet), // TODO validate
+		FabricMTU:                9100,                                             // TODO use
+		ServerFacingMTUOffset:    64,                                               // TODO use
 		ESLAGMACBase:             f.Spec.Config.Fabric.ESLAGMACBase,
 		ESLAGESIPrefix:           f.Spec.Config.Fabric.ESLAGESIPrefix,
 		AlloyRepo:                comp.JoinURLParts(registry, comp.RegistryPrefix, AlloyRef),
@@ -238,6 +245,7 @@ func GetFabricConfig(f fabapi.Fabricator) (*meta.FabricConfig, error) {
 		Alloy:                    f.Spec.Config.Fabric.DefaultAlloyConfig,
 		DefaultMaxPathsEBGP:      64,
 		AllowExtraSwitchProfiles: false,
+		MCLAGSessionSubnet:       string(f.Spec.Config.Fabric.MCLAGSessionSubnet), // TODO validate
 	}, nil
 }
 
@@ -249,7 +257,7 @@ func GetFabricBootConfig(f fabapi.Fabricator) (*server.Config, error) {
 
 	nosRepos := map[meta.NOSType]string{}
 	for nosType := range f.Status.Versions.Fabric.NOS {
-		nosRepos[meta.NOSType(nosType)] = comp.JoinURLParts(regURL, SonicRefBase, nosType)
+		nosRepos[meta.NOSType(nosType)] = comp.JoinURLParts(regURL, comp.RegistryPrefix, SonicRefBase, nosType)
 	}
 
 	nosVersions := map[meta.NOSType]string{}
@@ -259,7 +267,7 @@ func GetFabricBootConfig(f fabapi.Fabricator) (*server.Config, error) {
 
 	onieRepos := map[string]string{}
 	for platform := range f.Status.Versions.Fabric.ONIE {
-		onieRepos[platform] = comp.JoinURLParts(regURL, OnieRefBase, platform)
+		onieRepos[platform] = comp.JoinURLParts(regURL, comp.RegistryPrefix, OnieRefBase, platform)
 	}
 
 	onieVersions := map[string]string{}
@@ -279,27 +287,7 @@ func GetFabricBootConfig(f fabapi.Fabricator) (*server.Config, error) {
 var _ comp.ListOCIArtifacts = Artifacts
 
 func Artifacts(cfg fabapi.Fabricator) (comp.OCIArtifacts, error) {
-	arts := comp.OCIArtifacts{}
-
-	// TODO validate versions for NOS and ONIE
-
-	for _, nosType := range []meta.NOSType{
-		meta.NOSTypeSONiCBCMVS,
-		meta.NOSTypeSONiCBCMBase,
-		meta.NOSTypeSONiCBCMCampus,
-	} {
-		arts[SonicRefBase+"/"+string(nosType)] = cfg.Status.Versions.Fabric.NOS[string(nosType)]
-	}
-
-	// TODO some consts?
-	for _, platform := range []string{
-		"x86_64-kvm_x86_64-r0",
-		"x86_64-dellemc_s5200_c3538-r0",
-	} {
-		arts[OnieRefBase+"/"+platform] = cfg.Status.Versions.Fabric.ONIE[platform]
-	}
-
-	maps.Copy(arts, comp.OCIArtifacts{
+	arts := comp.OCIArtifacts{
 		APIChartRef:   cfg.Status.Versions.Fabric.API,
 		CtrlChartRef:  cfg.Status.Versions.Fabric.Controller,
 		CtrlRef:       cfg.Status.Versions.Fabric.Controller,
@@ -312,7 +300,23 @@ func Artifacts(cfg fabapi.Fabricator) (comp.OCIArtifacts, error) {
 		AlloyRef:      cfg.Status.Versions.Fabric.Alloy,
 		ProxyChartRef: cfg.Status.Versions.Fabric.ProxyChart,
 		ProxyRef:      cfg.Status.Versions.Fabric.Proxy,
-	})
+	}
+
+	for nos, version := range cfg.Status.Versions.Fabric.NOS {
+		if nos == "" || version == "" {
+			return nil, fmt.Errorf("empty NOS type or version") //nolint:goerr113
+		}
+
+		arts[comp.JoinURLParts(SonicRefBase, nos)] = version
+	}
+
+	for platform, version := range cfg.Status.Versions.Fabric.ONIE {
+		if platform == "" || version == "" {
+			return nil, fmt.Errorf("empty ONIE platform or version") //nolint:goerr113
+		}
+
+		arts[comp.JoinURLParts(OnieRefBase, platform)] = version
+	}
 
 	return arts, nil
 }
