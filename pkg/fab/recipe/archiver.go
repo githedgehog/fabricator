@@ -7,7 +7,6 @@ import (
 	"compress/gzip"
 	"context"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -15,8 +14,6 @@ import (
 )
 
 func archiveTarGz(ctx context.Context, src, dst string) error {
-	slog.Debug("Archiving", "name", src, "target", dst)
-
 	files, err := archiver.FilesFromDisk(nil, map[string]string{
 		src: filepath.Base(src),
 	})

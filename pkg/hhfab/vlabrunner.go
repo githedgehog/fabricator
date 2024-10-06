@@ -552,9 +552,9 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 				return fmt.Errorf("not complete install marker: %q", marker) //nolint:goerr113
 			}
 			if err == nil && marker == recipe.InstallMarkerComplete {
-				slog.Debug("Control node install was already completed", "vm", vm.Name, "type", vm.Type)
+				slog.Info("Control node install was already completed", "vm", vm.Name, "type", vm.Type)
 			} else {
-				slog.Debug("Uploading control install", "vm", vm.Name, "type", vm.Type)
+				slog.Info("Uploading control install", "vm", vm.Name, "type", vm.Type)
 
 				installArchive := vm.Name + recipe.InstallArchiveSuffix
 				local := filepath.Join(c.WorkDir, ResultDir, installArchive)
