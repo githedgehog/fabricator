@@ -16,11 +16,13 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/lmittmann/tint"
 	"github.com/mattn/go-isatty"
+	slogmulti "github.com/samber/slog-multi"
 	"github.com/urfave/cli/v2"
 	"go.githedgehog.com/fabric/api/meta"
 	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/hhfab"
 	"go.githedgehog.com/fabricator/pkg/version"
+	"gopkg.in/natefinch/lumberjack.v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
@@ -221,11 +223,27 @@ func Run(ctx context.Context) error {
 			}
 
 			logW := os.Stderr
-			handler := tint.NewHandler(logW, &tint.Options{
-				Level:      logLevel,
-				TimeFormat: time.TimeOnly,
-				NoColor:    !isatty.IsTerminal(logW.Fd()),
-			})
+
+			logFile := &lumberjack.Logger{
+				Filename:   "/var/log/hhfab.log",
+				MaxSize:    5, // MB
+				MaxBackups: 4,
+				MaxAge:     30, // days
+				Compress:   true,
+				FileMode:   0o644,
+			}
+
+			handler := slogmulti.Fanout(
+				tint.NewHandler(logW, &tint.Options{
+					Level:      logLevel,
+					TimeFormat: time.TimeOnly,
+					NoColor:    !isatty.IsTerminal(logW.Fd()),
+				}),
+				slog.NewTextHandler(logFile, &slog.HandlerOptions{
+					Level: slog.LevelDebug,
+				}),
+			)
+
 			logger := slog.New(handler)
 			slog.SetDefault(logger)
 			ctrl.SetLogger(logr.FromSlogHandler(handler))
