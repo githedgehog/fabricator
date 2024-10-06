@@ -295,6 +295,16 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, wiring
 			mgmt = NICTypePassthrough + NICTypeSep + pci
 		}
 
+		delete(links, control.Name+"/enp2s1")
+
+		if len(links) > 0 {
+			return nil, fmt.Errorf("unexpected passthrough links for control %q: %v", control.Name, links) //nolint:goerr113
+		}
+
+		if isHardware(&control) {
+			return nil, fmt.Errorf("control VM %q can't be hardware", control.Name) //nolint:goerr113
+		}
+
 		cfg.VMs[control.Name] = VMConfig{
 			Type: VMTypeControl,
 			NICs: map[string]string{
