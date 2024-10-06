@@ -50,6 +50,8 @@ func NewDownloaderWithDockerCreds(cacheDir, repo, prefix string) (*Downloader, e
 		return nil, fmt.Errorf("creating docker credential store: %w", err)
 	}
 
+	slog.Info("Downloader", "cache", cacheDir, "repo", repo, "prefix", prefix)
+
 	return &Downloader{
 		cacheDir: cacheDir,
 		repo:     repo,

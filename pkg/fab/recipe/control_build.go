@@ -106,7 +106,7 @@ func (b *ControlInstallBuilder) Build(ctx context.Context) error {
 		return fmt.Errorf("creating install dir: %w", err)
 	}
 
-	// TODO switch to reader & io.Copy
+	slog.Info("Adding recipe bin to installer", "control", b.Control.Name)
 	recipeBin, err := recipebin.Bytes()
 	if err != nil {
 		return fmt.Errorf("getting recipe bin: %w", err)
@@ -115,6 +115,7 @@ func (b *ControlInstallBuilder) Build(ctx context.Context) error {
 		return fmt.Errorf("writing recipe bin: %w", err)
 	}
 
+	slog.Info("Adding k3s and tools to installer", "control", b.Control.Name)
 	if err := b.Downloader.FromORAS(ctx, installDir, k3s.Ref, k3s.Version(b.Fab), []artificer.ORASFile{
 		{
 			Name: k3s.BinName,
@@ -138,6 +139,7 @@ func (b *ControlInstallBuilder) Build(ctx context.Context) error {
 		return fmt.Errorf("downloading k9s: %w", err)
 	}
 
+	slog.Info("Adding zot to installer", "control", b.Control.Name)
 	if err := b.Downloader.FromORAS(ctx, installDir, zot.AirgapRef, zot.Version(b.Fab), []artificer.ORASFile{
 		{
 			Name: zot.AirgapImageName,
@@ -149,6 +151,7 @@ func (b *ControlInstallBuilder) Build(ctx context.Context) error {
 		return fmt.Errorf("downloading zot: %w", err)
 	}
 
+	slog.Info("Adding cert-manager to installer", "control", b.Control.Name)
 	if err := b.Downloader.FromORAS(ctx, installDir, certmanager.AirgapRef, certmanager.Version(b.Fab), []artificer.ORASFile{
 		{
 			Name: certmanager.AirgapImageName,
@@ -160,6 +163,7 @@ func (b *ControlInstallBuilder) Build(ctx context.Context) error {
 		return fmt.Errorf("downloading cert-manager: %w", err)
 	}
 
+	slog.Info("Adding config and included wiring to installer", "control", b.Control.Name)
 	fabF, err := os.Create(filepath.Join(installDir, FabName))
 	if err != nil {
 		return fmt.Errorf("creating fab file: %w", err)
@@ -181,6 +185,8 @@ func (b *ControlInstallBuilder) Build(ctx context.Context) error {
 	}
 
 	if b.Fab.Spec.Config.Registry.IsAirgap() {
+		slog.Info("Adding airgap artifacts to installer", "control", b.Control.Name)
+
 		airgapArts, err := comp.CollectArtifacts(b.Fab,
 			flatcar.Artifacts, certmanager.Artifacts, zot.Artifacts, fabric.Artifacts,
 		)
@@ -200,10 +206,12 @@ func (b *ControlInstallBuilder) Build(ctx context.Context) error {
 			return fmt.Errorf("building USB image: %w", err)
 		}
 	} else {
+		slog.Info("Archiving installer", "path", installArchive, "control", b.Control.Name)
 		if err := archiveTarGz(ctx, installDir, installArchive); err != nil {
 			return fmt.Errorf("archiving install: %w", err)
 		}
 
+		slog.Info("Creating ignition", "path", installIgnition, "control", b.Control.Name)
 		ign, err := controlIgnition(b.Fab, b.Control, "")
 		if err != nil {
 			return fmt.Errorf("creating ignition: %w", err)

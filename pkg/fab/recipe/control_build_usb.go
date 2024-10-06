@@ -57,7 +57,7 @@ func (b *ControlInstallBuilder) buildUSBImage(ctx context.Context) error {
 		return fmt.Errorf("no external interface specified for control %q", b.Control.Name) //nolint:goerr113
 	}
 
-	slog.Info("Building installer USB image", "control", b.Control.Name)
+	slog.Info("Building installer USB image, may take up to 5-10 minutes", "control", b.Control.Name)
 
 	workdir := filepath.Join(b.WorkDir, b.Control.Name+InstallUSBImageWorkdirSuffix)
 
@@ -133,31 +133,37 @@ func (b *ControlInstallBuilder) buildUSBImage(ctx context.Context) error {
 	}
 	backpackFS.(*fat32.FileSystem).SetLazy(true)
 
-	slog.Info("Copying files to installer USB image, may take up to 5-10 minutes", "control", b.Control.Name)
-	slog.Debug("Copying files to installer USB image", "fs", espFS.Label(), "control", b.Control.Name)
-
+	slog.Info("Copying /EFI to installer USB image", "fs", espFS.Label(), "control", b.Control.Name)
 	if err := diskFSCopyTree(workdir, "/EFI", espFS); err != nil {
 		return fmt.Errorf("copying EFI dir: %w", err)
 	}
+
+	slog.Info("Copying /boot to installer USB image", "fs", espFS.Label(), "control", b.Control.Name)
 	if err := diskFSCopyTree(workdir, "/boot", espFS); err != nil {
 		return fmt.Errorf("copying boot dir: %w", err)
 	}
+
+	slog.Info("Copying flatcar.cpio.gz to installer USB image", "fs", espFS.Label(), "control", b.Control.Name)
 	if err := diskFSCopyFile("/", filepath.Join(workdir, "flatcar_production_pxe_image.cpio.gz"), espFS); err != nil {
 		return fmt.Errorf("copying flatcar cpio: %w", err)
 	}
+
+	slog.Info("Copying oem.cpio.gz to installer USB image", "fs", espFS.Label(), "control", b.Control.Name)
 	if err := diskFSCopyFile("/", filepath.Join(workdir, "oem.cpio.gz"), espFS); err != nil {
 		return fmt.Errorf("copying oem cpio: %w", err)
 	}
+
+	slog.Info("Copying flatcar.vmlinuz to installer USB image", "fs", espFS.Label(), "control", b.Control.Name)
 	if err := diskFSCopyFile("/", filepath.Join(workdir, "flatcar_production_pxe.vmlinuz"), espFS); err != nil {
 		return fmt.Errorf("copying flatcar vmlinuz: %w", err)
 	}
 
-	slog.Debug("Copying files to installer USB image", "fs", backpackFS.Label(), "control", b.Control.Name)
-
+	slog.Info("Copying flatcar.bin to installer USB image", "fs", backpackFS.Label(), "control", b.Control.Name)
 	if err := diskFSCopyFile("/", filepath.Join(workdir, "/flatcar_production_image.bin.bz2"), backpackFS); err != nil {
 		return fmt.Errorf("copying flatcar image: %w", err)
 	}
 
+	slog.Info("Copying control-install to installer USB image", "fs", backpackFS.Label(), "control", b.Control.Name)
 	if err := diskFSCopyTree(b.WorkDir, b.Control.Name+InstallSuffix, backpackFS); err != nil {
 		return fmt.Errorf("copying control-install: %w", err)
 	}
