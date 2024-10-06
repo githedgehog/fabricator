@@ -181,6 +181,8 @@ spec:
                         type: string
                       managementDHCPStart:
                         type: string
+                      mclagSessionSubnet:
+                        type: string
                       mode:
                         type: string
                       protocolSubnet:

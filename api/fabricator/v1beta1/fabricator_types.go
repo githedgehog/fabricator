@@ -106,6 +106,8 @@ type FabricConfig struct {
 	ESLAGMACBase   string `json:"eslagMACBase,omitempty"`
 	ESLAGESIPrefix string `json:"eslagESIPrefix,omitempty"`
 
+	MCLAGSessionSubnet meta.Prefix `json:"mclagSessionSubnet,omitempty"` // TODO should be reserved
+
 	DefaultSwitchUsers map[string]SwitchUser `json:"defaultSwitchUsers,omitempty"` // TODO make sure admin user is always present
 	DefaultAlloyConfig fmeta.AlloyConfig     `json:"defaultAlloyConfig,omitempty"`
 }
