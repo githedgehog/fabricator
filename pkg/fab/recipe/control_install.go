@@ -178,7 +178,7 @@ func (c *ControlInstall) Run(ctx context.Context) error {
 			return fmt.Errorf("enforcing fabric install: %w", err)
 		}
 
-		if err := waitKube(ctx, kube, "fabric-controller-manager", comp.FabNamespace,
+		if err := waitKube(ctx, kube, "fabric-ctrl", comp.FabNamespace,
 			&comp.Deployment{}, func(obj *comp.Deployment) (bool, error) {
 				for _, cond := range obj.Status.Conditions {
 					if cond.Type == comp.DeploymentAvailable && cond.Status == comp.ConditionTrue {
@@ -188,7 +188,33 @@ func (c *ControlInstall) Run(ctx context.Context) error {
 
 				return false, nil
 			}); err != nil {
-			return fmt.Errorf("waiting for fabric ready: %w", err)
+			return fmt.Errorf("waiting for fabric-ctrl ready: %w", err)
+		}
+
+		if err := waitKube(ctx, kube, "fabric-boot", comp.FabNamespace,
+			&comp.Deployment{}, func(obj *comp.Deployment) (bool, error) {
+				for _, cond := range obj.Status.Conditions {
+					if cond.Type == comp.DeploymentAvailable && cond.Status == comp.ConditionTrue {
+						return true, nil
+					}
+				}
+
+				return false, nil
+			}); err != nil {
+			return fmt.Errorf("waiting for fabric-boot ready: %w", err)
+		}
+
+		if err := waitKube(ctx, kube, "fabric-dhcpd", comp.FabNamespace,
+			&comp.Deployment{}, func(obj *comp.Deployment) (bool, error) {
+				for _, cond := range obj.Status.Conditions {
+					if cond.Type == comp.DeploymentAvailable && cond.Status == comp.ConditionTrue {
+						return true, nil
+					}
+				}
+
+				return false, nil
+			}); err != nil {
+			return fmt.Errorf("waiting for fabric-dhcpd ready: %w", err)
 		}
 
 		if err := comp.EnforceKubeInstall(ctx, kube, c.Fab, fabric.InstallManagementDHCPSubnet); err != nil {
