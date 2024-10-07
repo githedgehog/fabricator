@@ -122,8 +122,12 @@ func (i *ControlOSInstal) Run(ctx context.Context) error {
 
 	slog.Info("Expanding On-disk root parition", "dev", dev)
 	// have to delete existing partition
-	if err := i.execCmd(ctx, true, "sgdisk", "--delete=9 ", dev); err != nil {
+	if err := i.execCmd(ctx, true, "sgdisk", "--delete=9", dev); err != nil {
 		return fmt.Errorf("Deleting partition 9 from existing block device: %w", err)
+	}
+
+	if err := i.execCmd(ctx, true, "partprobe", dev); err != nil {
+		return fmt.Errorf("partprobing: %w", err)
 	}
 
 	// 4857856 is the start sector start of the too small root parition
@@ -134,11 +138,18 @@ func (i *ControlOSInstal) Run(ctx context.Context) error {
 		return fmt.Errorf("Creating partition 9 on existing block device: %w", err)
 	}
 
+	if err := i.execCmd(ctx, true, "partprobe", dev); err != nil {
+		return fmt.Errorf("partprobing: %w", err)
+	}
+
 	// The partition resize didn't wipe out the exisiting filesystem so we don't
 	// need to remake it, just expand the one that is on disk already. In our
 	// case we just moving the end of it, not the start
-	if err := i.execCmd(ctx, true, "resize2fs", dev); err != nil {
+	if err := i.execCmd(ctx, true, "resize2fs", dev+"9"); err != nil {
 		return fmt.Errorf("Resizing filesystem on partition 9 on existing block device: %w", err)
+	}
+	if err := i.execCmd(ctx, true, "partprobe", dev); err != nil {
+		return fmt.Errorf("partprobing: %w", err)
 	}
 
 	if err := os.MkdirAll(MountDir, 0o755); err != nil {
