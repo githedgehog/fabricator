@@ -197,7 +197,7 @@ func (c *Config) PrepareVLAB(ctx context.Context, opts VLABUpOpts) (*VLAB, error
 	}
 
 	vlabCfg := &VLABConfig{}
-	if err := yaml.Unmarshal(data, vlabCfg); err != nil {
+	if err := yaml.UnmarshalStrict(data, vlabCfg); err != nil {
 		return nil, fmt.Errorf("unmarshaling VLAB config: %w", err)
 	}
 
