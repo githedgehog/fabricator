@@ -122,23 +122,23 @@ func (i *ControlOSInstal) Run(ctx context.Context) error {
 
 	slog.Info("Expanding On-disk root parition", "dev", dev)
 	// have to delete existing partition
-	if err := i.execCmd(ctx, true, "sgdisk", "-d 9 ", dev); err != nil {
-		return fmt.Errorf("deleting partition 9 from existing dir: %w", err)
+	if err := i.execCmd(ctx, true, "sgdisk", "--delete=9 ", dev); err != nil {
+		return fmt.Errorf("Deleting partition 9 from existing block device: %w", err)
 	}
 
 	// 4857856 is the start sector start of the too small root parition
 	// not expected to change often, disk_layout is set by flatcar
 	// The typecode listed here is a UUID that flatcar uses - https://github.com/flatcar/init/blob/flatcar-master/scripts/extend-filesystems#L15
-	// Called COREOS_RESIZE, we are doing a small expand, then letting the installer bring up the full disk
+	// Called COREOS_RESIZE, we are doing a small expand, then letting the installer exapand to the full disk size.
 	if err := i.execCmd(ctx, true, "sgdisk", "--new=9:4857856:+9G", "--typecode=9:3884dd41-8582-4404-b9a8-e9b84f2df50e", dev); err != nil {
-		return fmt.Errorf("deleting partition 9 from existing dir: %w", err)
+		return fmt.Errorf("Creating partition 9 on existing block device: %w", err)
 	}
 
 	// The partition resize didn't wipe out the exisiting filesystem so we don't
 	// need to remake it, just expand the one that is on disk already. In our
 	// case we just moving the end of it, not the start
 	if err := i.execCmd(ctx, true, "resize2fs", dev); err != nil {
-		return fmt.Errorf("deleting partition 9 from existing dir: %w", err)
+		return fmt.Errorf("Resizing filesystem on partition 9 on existing block device: %w", err)
 	}
 
 	if err := os.MkdirAll(MountDir, 0o755); err != nil {
