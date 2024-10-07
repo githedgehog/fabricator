@@ -123,7 +123,7 @@ func (i *ControlOSInstal) Run(ctx context.Context) error {
 	slog.Info("Expanding On-disk root parition", "dev", dev)
 	// have to delete existing partition
 	if err := i.execCmd(ctx, true, "sgdisk", "--delete=9", dev); err != nil {
-		return fmt.Errorf("Deleting partition 9 from existing block device: %w", err)
+		return fmt.Errorf("deleting partition 9 from existing block device: %w", err)
 	}
 
 	if err := i.execCmd(ctx, true, "partprobe", dev); err != nil {
@@ -135,7 +135,7 @@ func (i *ControlOSInstal) Run(ctx context.Context) error {
 	// The typecode listed here is a UUID that flatcar uses - https://github.com/flatcar/init/blob/flatcar-master/scripts/extend-filesystems#L15
 	// Called COREOS_RESIZE, we are doing a small expand, then letting the installer exapand to the full disk size.
 	if err := i.execCmd(ctx, true, "sgdisk", "--new=9:4857856:+9G", "--typecode=9:3884dd41-8582-4404-b9a8-e9b84f2df50e", dev); err != nil {
-		return fmt.Errorf("Creating partition 9 on existing block device: %w", err)
+		return fmt.Errorf("creating partition 9 on existing block device: %w", err)
 	}
 
 	if err := i.execCmd(ctx, true, "partprobe", dev); err != nil {
@@ -146,8 +146,9 @@ func (i *ControlOSInstal) Run(ctx context.Context) error {
 	// need to remake it, just expand the one that is on disk already. In our
 	// case we just moving the end of it, not the start
 	if err := i.execCmd(ctx, true, "resize2fs", dev+"9"); err != nil {
-		return fmt.Errorf("Resizing filesystem on partition 9 on existing block device: %w", err)
+		return fmt.Errorf("resizing filesystem on partition 9 on existing block device: %w", err)
 	}
+
 	if err := i.execCmd(ctx, true, "partprobe", dev); err != nil {
 		return fmt.Errorf("partprobing: %w", err)
 	}
