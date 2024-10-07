@@ -9,3 +9,12 @@ livenessProbe:
 readinessProbe:
   httpGet:
     host: {{ .Host }}
+
+resources:
+  limits:
+    cpu: 1000m
+  requests:
+    cpu: 100m
+
+# TODO switch to true when it works reliably in our lab
+cachePVC: false

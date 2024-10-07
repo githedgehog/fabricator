@@ -44,3 +44,9 @@ metrics:
     enabled: false
     interval: "30s"
     path: "/metrics"
+
+resources:
+  limits:
+    cpu: 1000m
+  requests:
+    cpu: 100m
