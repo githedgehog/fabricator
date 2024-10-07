@@ -134,8 +134,9 @@ func (i *ControlOSInstal) Run(ctx context.Context) error {
 		return fmt.Errorf("deleting partition 9 from existing dir: %w", err)
 	}
 
-	// We can automatically resize the filesystem on the expanded partition since
-	// in our case we just moving the end of it, not the start
+	// The partition resize didn't wipe out the exisiting filesystem so we don't
+	// need to remake it, just expand the one that is on disk already. In our
+	// case we just moving the end of it, not the start
 	if err := i.execCmd(ctx, true, "resize2fs", dev); err != nil {
 		return fmt.Errorf("deleting partition 9 from existing dir: %w", err)
 	}
