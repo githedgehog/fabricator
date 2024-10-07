@@ -1,4 +1,7 @@
 #!/bin/bash
+# Copyright 2024 Hedgehog
+# SPDX-License-Identifier: Apache-2.0
+
 
 # This script assumes it is being run in Ubuntu
 
