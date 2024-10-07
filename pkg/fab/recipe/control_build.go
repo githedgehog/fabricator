@@ -23,6 +23,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab/comp/flatcar"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k9s"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/reloader"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/zot"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 	"go.githedgehog.com/fabricator/pkg/util/butaneutil"
@@ -188,7 +189,7 @@ func (b *ControlInstallBuilder) Build(ctx context.Context) error {
 		slog.Info("Adding airgap artifacts to installer", "control", b.Control.Name)
 
 		airgapArts, err := comp.CollectArtifacts(b.Fab,
-			flatcar.Artifacts, certmanager.Artifacts, zot.Artifacts, fabric.Artifacts,
+			flatcar.Artifacts, certmanager.Artifacts, zot.Artifacts, reloader.Artifacts, fabric.Artifacts,
 		)
 		if err != nil {
 			return fmt.Errorf("collecting airgap artifacts: %w", err)

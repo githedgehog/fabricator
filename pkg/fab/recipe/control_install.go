@@ -32,6 +32,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab/comp/flatcar"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k9s"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/reloader"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/zot"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -69,6 +70,9 @@ const (
 )
 
 func DoControlInstall(ctx context.Context, workDir string) error {
+	ctx, cancel := context.WithTimeout(ctx, 40*time.Minute)
+	defer cancel()
+
 	rawMarker, err := os.ReadFile(InstallMarkerFile)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("reading install marker: %w", err)
@@ -176,12 +180,14 @@ func (c *ControlInstall) Run(ctx context.Context) error {
 		}
 	}
 
-	// TODO move to operator
+	if err := c.installReloader(ctx, kube); err != nil {
+		return fmt.Errorf("installing reloader: %w", err)
+	}
+
 	if err := c.installFabric(ctx, kube); err != nil {
 		return fmt.Errorf("installing fabric: %w", err)
 	}
 
-	// TODO make sure to wait for fabric-ctrl to be ready before installing wiring
 	if err := c.installWiring(ctx, kube); err != nil {
 		return fmt.Errorf("installing included wiring: %w", err)
 	}
@@ -463,6 +469,29 @@ func (c *ControlInstall) uploadAirgap(ctx context.Context, username, password st
 		if err := artificer.UploadOCIArchive(ctx, c.WorkDir, ref, version, regURL, comp.RegPrefix, username, password); err != nil {
 			return fmt.Errorf("uploading airgap artifact %q: %w", ref, err)
 		}
+	}
+
+	return nil
+}
+
+func (c *ControlInstall) installReloader(ctx context.Context, kube client.Client) error {
+	slog.Info("Installing reloader")
+
+	if err := comp.EnforceKubeInstall(ctx, kube, c.Fab, reloader.Install); err != nil {
+		return fmt.Errorf("enforcing reloader install: %w", err)
+	}
+
+	if err := waitKube(ctx, kube, "reloader-reloader", comp.FabNamespace,
+		&comp.Deployment{}, func(obj *comp.Deployment) (bool, error) {
+			for _, cond := range obj.Status.Conditions {
+				if cond.Type == comp.DeploymentAvailable && cond.Status == comp.ConditionTrue {
+					return true, nil
+				}
+			}
+
+			return false, nil
+		}); err != nil {
+		return fmt.Errorf("waiting for reloader ready: %w", err)
 	}
 
 	return nil

@@ -1,0 +1,11 @@
+reloader:
+  watchGlobally: false
+  autoReloadAll: true
+  reloadOnCreate: true
+  syncAfterRestart: true
+  reloadStrategy: default
+
+  deployment:
+    image:
+      name: {{ .Repo }}
+      tag: {{ .Tag }}
