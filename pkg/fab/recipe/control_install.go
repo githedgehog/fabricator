@@ -29,7 +29,6 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/certmanager"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/fabric"
-	"go.githedgehog.com/fabricator/pkg/fab/comp/flatcar"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k9s"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/reloader"
@@ -457,9 +456,7 @@ func (c *ControlInstall) uploadAirgap(ctx context.Context, username, password st
 		return fmt.Errorf("getting registry URL: %w", err)
 	}
 
-	airgapArts, err := comp.CollectArtifacts(c.Fab,
-		flatcar.Artifacts, certmanager.Artifacts, zot.Artifacts, fabric.Artifacts,
-	)
+	airgapArts, err := comp.CollectArtifacts(c.Fab, AirgapArtifactLists...)
 	if err != nil {
 		return fmt.Errorf("collecting airgap artifacts: %w", err)
 	}

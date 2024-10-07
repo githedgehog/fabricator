@@ -22,6 +22,7 @@ var _ comp.ListOCIArtifacts = Artifacts
 
 func Artifacts(cfg fabapi.Fabricator) (comp.OCIArtifacts, error) {
 	return comp.OCIArtifacts{
+		// TODO do we actually need it in that form?
 		ToolboxRef: ToolboxVersion(cfg),
 	}, nil
 }

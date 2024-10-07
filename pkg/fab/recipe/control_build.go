@@ -56,6 +56,14 @@ const (
 	RecipeBin                    = "hhfab-recipe"
 )
 
+var AirgapArtifactLists = []comp.ListOCIArtifacts{
+	flatcar.Artifacts,
+	certmanager.Artifacts,
+	zot.Artifacts,
+	reloader.Artifacts,
+	fabric.Artifacts,
+}
+
 func (b *ControlInstallBuilder) Build(ctx context.Context) error {
 	installDir := filepath.Join(b.WorkDir, b.Control.Name+InstallSuffix)
 	installArchive := filepath.Join(b.WorkDir, b.Control.Name+InstallArchiveSuffix)
@@ -188,9 +196,7 @@ func (b *ControlInstallBuilder) Build(ctx context.Context) error {
 	if b.Fab.Spec.Config.Registry.IsAirgap() {
 		slog.Info("Adding airgap artifacts to installer", "control", b.Control.Name)
 
-		airgapArts, err := comp.CollectArtifacts(b.Fab,
-			flatcar.Artifacts, certmanager.Artifacts, zot.Artifacts, reloader.Artifacts, fabric.Artifacts,
-		)
+		airgapArts, err := comp.CollectArtifacts(b.Fab, AirgapArtifactLists...)
 		if err != nil {
 			return fmt.Errorf("collecting airgap artifacts: %w", err)
 		}
