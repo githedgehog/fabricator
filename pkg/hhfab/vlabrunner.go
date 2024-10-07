@@ -121,7 +121,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 		}
 	}
 	if len(toBind) > 0 {
-		if err := execHelper(ctx, c.WorkDir, append([]string{"bind-devices"}, toBind...)); err != nil {
+		if err := execHelper(ctx, c.WorkDir, append([]string{"vfio-pci-bind"}, toBind...)); err != nil {
 			return fmt.Errorf("running helper to bind devices: %w", err)
 		}
 	}
