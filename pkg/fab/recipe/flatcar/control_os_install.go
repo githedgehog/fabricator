@@ -116,9 +116,28 @@ func (i *ControlOSInstal) Run(ctx context.Context) error {
 		return fmt.Errorf("installing flatcar: %w", err)
 	}
 
-	slog.Info("Uploading control installer to installed Flatcar")
 	if err := i.execCmd(ctx, true, "partprobe", dev); err != nil {
 		return fmt.Errorf("partprobing: %w", err)
+	}
+
+	slog.Info("Expanding On-disk root parition", "dev", dev)
+	// have to delete existing partition
+	if err := i.execCmd(ctx, true, "sgdisk", "-d 9 ", dev); err != nil {
+		return fmt.Errorf("deleting partition 9 from existing dir: %w", err)
+	}
+
+	// 4857856 is the start sector start of the too small root parition
+	// not expected to change often, disk_layout is set by flatcar
+	// The typecode listed here is a UUID that flatcar uses - https://github.com/flatcar/init/blob/flatcar-master/scripts/extend-filesystems#L15
+	// Called COREOS_RESIZE, we are doing a small expand, then letting the installer bring up the full disk
+	if err := i.execCmd(ctx, true, "sgdisk", "--new=9:4857856:+9G", "--typecode=9:3884dd41-8582-4404-b9a8-e9b84f2df50e", dev); err != nil {
+		return fmt.Errorf("deleting partition 9 from existing dir: %w", err)
+	}
+
+	// We can automatically resize the filesystem on the expanded partition since
+	// in our case we just moving the end of it, not the start
+	if err := i.execCmd(ctx, true, "resize2fs", dev); err != nil {
+		return fmt.Errorf("deleting partition 9 from existing dir: %w", err)
 	}
 
 	if err := os.MkdirAll(MountDir, 0o755); err != nil {
@@ -135,6 +154,7 @@ func (i *ControlOSInstal) Run(ctx context.Context) error {
 		return fmt.Errorf("creating target dir: %w", err)
 	}
 
+	slog.Info("Uploading control installer to installed Flatcar")
 	if err := i.execCmd(ctx, true, "rsync", "-azP", i.InstallDir, target); err != nil {
 		return fmt.Errorf("rsyncing control-install: %w", err)
 	}
