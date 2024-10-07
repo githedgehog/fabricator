@@ -18,6 +18,9 @@ import (
 	"time"
 
 	dhcpapi "go.githedgehog.com/fabric/api/dhcp/v1alpha2"
+	"go.githedgehog.com/fabric/api/meta"
+	vpcapi "go.githedgehog.com/fabric/api/vpc/v1alpha2"
+	wiringapi "go.githedgehog.com/fabric/api/wiring/v1alpha2"
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
 	"go.githedgehog.com/fabric/pkg/util/logutil"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
@@ -32,6 +35,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab/comp/zot"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -173,57 +177,16 @@ func (c *ControlInstall) Run(ctx context.Context) error {
 	}
 
 	// TODO move to operator
-	{
-		if err := comp.EnforceKubeInstall(ctx, kube, c.Fab, fabric.Install(c.Control)); err != nil {
-			return fmt.Errorf("enforcing fabric install: %w", err)
-		}
+	if err := c.installFabric(ctx, kube); err != nil {
+		return fmt.Errorf("installing fabric: %w", err)
+	}
 
-		if err := waitKube(ctx, kube, "fabric-ctrl", comp.FabNamespace,
-			&comp.Deployment{}, func(obj *comp.Deployment) (bool, error) {
-				for _, cond := range obj.Status.Conditions {
-					if cond.Type == comp.DeploymentAvailable && cond.Status == comp.ConditionTrue {
-						return true, nil
-					}
-				}
-
-				return false, nil
-			}); err != nil {
-			return fmt.Errorf("waiting for fabric-ctrl ready: %w", err)
-		}
-
-		if err := waitKube(ctx, kube, "fabric-boot", comp.FabNamespace,
-			&comp.Deployment{}, func(obj *comp.Deployment) (bool, error) {
-				for _, cond := range obj.Status.Conditions {
-					if cond.Type == comp.DeploymentAvailable && cond.Status == comp.ConditionTrue {
-						return true, nil
-					}
-				}
-
-				return false, nil
-			}); err != nil {
-			return fmt.Errorf("waiting for fabric-boot ready: %w", err)
-		}
-
-		if err := waitKube(ctx, kube, "fabric-dhcpd", comp.FabNamespace,
-			&comp.Deployment{}, func(obj *comp.Deployment) (bool, error) {
-				for _, cond := range obj.Status.Conditions {
-					if cond.Type == comp.DeploymentAvailable && cond.Status == comp.ConditionTrue {
-						return true, nil
-					}
-				}
-
-				return false, nil
-			}); err != nil {
-			return fmt.Errorf("waiting for fabric-dhcpd ready: %w", err)
-		}
-
-		if err := comp.EnforceKubeInstall(ctx, kube, c.Fab, fabric.InstallManagementDHCPSubnet); err != nil {
-			return fmt.Errorf("enforcing fabric management dhcp subnet install: %w", err)
-		}
+	// TODO make sure to wait for fabric-ctrl to be ready before installing wiring
+	if err := c.installWiring(ctx, kube); err != nil {
+		return fmt.Errorf("installing included wiring: %w", err)
 	}
 
 	// TODO install fabricator with config
-	// TODO install initial wiring
 
 	if err := os.WriteFile(InstallMarkerFile, []byte(InstallMarkerComplete), 0o644); err != nil { //nolint:gosec
 		return fmt.Errorf("writing install marker: %w", err)
@@ -341,7 +304,8 @@ func (c *ControlInstall) installK8s(ctx context.Context) (client.Client, error) 
 	kube, err := kubeutil.NewClient(ctx, k3s.KubeConfigPath,
 		comp.CoreAPISchemeBuilder, comp.AppsAPISchemeBuilder,
 		comp.HelmAPISchemeBuilder, comp.CMApiSchemeBuilder, comp.CMMetaSchemeBuilder,
-		// TODO remove
+		wiringapi.SchemeBuilder, vpcapi.SchemeBuilder,
+		// TODO move to the operator together with management dhcp subnet creation?
 		dhcpapi.SchemeBuilder,
 	)
 	if err != nil {
@@ -498,6 +462,123 @@ func (c *ControlInstall) uploadAirgap(ctx context.Context, username, password st
 
 		if err := artificer.UploadOCIArchive(ctx, c.WorkDir, ref, version, regURL, comp.RegPrefix, username, password); err != nil {
 			return fmt.Errorf("uploading airgap artifact %q: %w", ref, err)
+		}
+	}
+
+	return nil
+}
+
+func (c *ControlInstall) installFabric(ctx context.Context, kube client.Client) error {
+	slog.Info("Installing fabric")
+
+	if err := comp.EnforceKubeInstall(ctx, kube, c.Fab, fabric.Install(c.Control)); err != nil {
+		return fmt.Errorf("enforcing fabric install: %w", err)
+	}
+
+	if err := waitKube(ctx, kube, "fabric-ctrl", comp.FabNamespace,
+		&comp.Deployment{}, func(obj *comp.Deployment) (bool, error) {
+			for _, cond := range obj.Status.Conditions {
+				if cond.Type == comp.DeploymentAvailable && cond.Status == comp.ConditionTrue {
+					return true, nil
+				}
+			}
+
+			return false, nil
+		}); err != nil {
+		return fmt.Errorf("waiting for fabric-ctrl ready: %w", err)
+	}
+
+	if err := waitKube(ctx, kube, "fabric-boot", comp.FabNamespace,
+		&comp.Deployment{}, func(obj *comp.Deployment) (bool, error) {
+			for _, cond := range obj.Status.Conditions {
+				if cond.Type == comp.DeploymentAvailable && cond.Status == comp.ConditionTrue {
+					return true, nil
+				}
+			}
+
+			return false, nil
+		}); err != nil {
+		return fmt.Errorf("waiting for fabric-boot ready: %w", err)
+	}
+
+	if err := waitKube(ctx, kube, "fabric-dhcpd", comp.FabNamespace,
+		&comp.Deployment{}, func(obj *comp.Deployment) (bool, error) {
+			for _, cond := range obj.Status.Conditions {
+				if cond.Type == comp.DeploymentAvailable && cond.Status == comp.ConditionTrue {
+					return true, nil
+				}
+			}
+
+			return false, nil
+		}); err != nil {
+		return fmt.Errorf("waiting for fabric-dhcpd ready: %w", err)
+	}
+
+	if err := comp.EnforceKubeInstall(ctx, kube, c.Fab, fabric.InstallManagementDHCPSubnet); err != nil {
+		return fmt.Errorf("enforcing fabric management dhcp subnet install: %w", err)
+	}
+
+	return nil
+}
+
+func (c *ControlInstall) installWiring(ctx context.Context, kube client.Client) error {
+	slog.Info("Waiting for all used switch profiles ready")
+
+	switches := &wiringapi.SwitchList{}
+	if err := c.Wiring.List(ctx, switches); err != nil {
+		return fmt.Errorf("listing included switches: %w", err)
+	}
+
+	checkedProfiles := map[string]bool{}
+	for _, sw := range switches.Items {
+		if checkedProfiles[sw.Spec.Profile] {
+			continue
+		}
+
+		slog.Debug("Waiting for switch profile ready", "name", sw.Spec.Profile)
+
+		if err := waitKube(ctx, kube, sw.Spec.Profile, metav1.NamespaceDefault,
+			&wiringapi.SwitchProfile{}, func(obj *wiringapi.SwitchProfile) (bool, error) {
+				return obj.GetName() == sw.Spec.Profile, nil
+			}); err != nil {
+			return fmt.Errorf("waiting for switch profiles ready: %w", err)
+		}
+
+		checkedProfiles[sw.Spec.Profile] = true
+	}
+
+	slog.Info("Installing included wiring")
+
+	for _, objList := range []meta.ObjectList{
+		&wiringapi.VLANNamespaceList{},
+		&vpcapi.IPv4NamespaceList{},
+		&wiringapi.SwitchGroupList{},
+		&wiringapi.SwitchList{},
+		&wiringapi.ServerList{},
+		&vpcapi.VPCList{},
+		&wiringapi.ConnectionList{}, // can be within VPC
+		&vpcapi.VPCAttachmentList{},
+		&vpcapi.VPCPeeringList{},
+		&vpcapi.ExternalList{},
+		&vpcapi.ExternalAttachmentList{},
+		&vpcapi.ExternalPeeringList{},
+		// switch/server profiles are intentionally skipped
+	} {
+		if err := c.Wiring.List(ctx, objList); err != nil {
+			return fmt.Errorf("listing %T: %w", objList, err)
+		}
+
+		for _, obj := range objList.GetItems() {
+			// TODO some careful retries needed here
+
+			kind := obj.GetObjectKind().GroupVersionKind().Kind
+			slog.Debug("Installing included wiring", "kind", kind, "name", obj.GetName())
+
+			obj.SetGeneration(0)
+			obj.SetResourceVersion("")
+			if err := kube.Create(ctx, obj); err != nil {
+				return fmt.Errorf("creating %s/%s: %w", kind, obj.GetName(), err)
+			}
 		}
 	}
 

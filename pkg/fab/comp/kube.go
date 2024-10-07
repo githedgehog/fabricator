@@ -300,6 +300,9 @@ func CreateOrUpdate(ctx context.Context, kube client.Client, obj client.Object) 
 
 	// TODO inject fabricator gen and/or hash labels
 
+	obj.SetGeneration(0)
+	obj.SetResourceVersion("")
+
 	switch obj := obj.(type) {
 	case *helmapi.HelmChart:
 		tmp := &helmapi.HelmChart{ObjectMeta: obj.ObjectMeta}
