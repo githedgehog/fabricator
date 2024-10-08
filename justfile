@@ -31,6 +31,7 @@ go_linux_build := "GOOS=linux GOARCH=amd64 " + go_build
 _touch_embed:
   @touch ./pkg/embed/recipebin/hhfab-recipe.gz
   @touch {{oem_dir}}/oem.cpio.gz
+  @touch {{oem_dir}}/hhfab-flatcar-install
 
 _hhfab_embed: _touch_embed _butane
   # Build hhfab-recipe binary for embedding
