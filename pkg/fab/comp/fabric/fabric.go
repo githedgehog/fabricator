@@ -10,7 +10,7 @@ import (
 
 	dhcpapi "go.githedgehog.com/fabric/api/dhcp/v1alpha2"
 	"go.githedgehog.com/fabric/api/meta"
-	"go.githedgehog.com/fabric/pkg/boot/server"
+	"go.githedgehog.com/fabric/pkg/boot"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
@@ -249,7 +249,7 @@ func GetFabricConfig(f fabapi.Fabricator) (*meta.FabricConfig, error) {
 	}, nil
 }
 
-func GetFabricBootConfig(f fabapi.Fabricator) (*server.Config, error) {
+func GetFabricBootConfig(f fabapi.Fabricator) (*boot.ServerConfig, error) {
 	regURL, err := comp.RegistryURL(f)
 	if err != nil {
 		return nil, fmt.Errorf("getting registry URL: %w", err)
@@ -275,7 +275,7 @@ func GetFabricBootConfig(f fabapi.Fabricator) (*server.Config, error) {
 		onieVersions[platform] = string(version)
 	}
 
-	return &server.Config{
+	return &boot.ServerConfig{
 		ControlVIP:           string(f.Spec.Config.Control.VIP),
 		NOSRepos:             nosRepos,
 		NOSVersions:          nosVersions,

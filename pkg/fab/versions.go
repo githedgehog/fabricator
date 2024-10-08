@@ -11,7 +11,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/version"
 )
 
-var FabricVersion = meta.Version("v0.50.7")
+var FabricVersion = meta.Version("v0.51.2")
 
 var Versions = fabapi.Versions{
 	Platform: fabapi.PlatformVersions{
