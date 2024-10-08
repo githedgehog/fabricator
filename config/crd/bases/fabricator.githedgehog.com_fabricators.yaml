@@ -221,14 +221,14 @@ spec:
                         type: string
                       upstream:
                         properties:
+                          noTLSVerify:
+                            type: boolean
                           password:
                             type: string
                           prefix:
                             type: string
                           repo:
                             type: string
-                          tlsVerify:
-                            type: boolean
                           username:
                             type: string
                         type: object
