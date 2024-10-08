@@ -56,7 +56,7 @@ var Versions = fabapi.Versions{
 		},
 	},
 	VLAB: fabapi.VLABVersions{
-		ONIE:    "test3", // TODO replace with proper version
+		ONIE:    "test5", // TODO replace with proper version
 		Flatcar: "v3975.2.1",
 	},
 }
