@@ -43,8 +43,8 @@ var Versions = fabapi.Versions{
 			string(fmeta.NOSTypeSONiCBCMCampus): "v4.4.0",
 		},
 		ONIE: map[string]meta.Version{
-			switchprofile.DellS5232FON.Spec.Platform:         "test1", // TODO update with proper version
-			switchprofile.DellS5248FON.Spec.Platform:         "test1", // TODO update with proper version
+			switchprofile.DellS5232FON.Spec.Platform:         "test4", // TODO update with proper version
+			switchprofile.DellS5248FON.Spec.Platform:         "test4", // TODO update with proper version
 			switchprofile.CelesticaDS3000.Spec.Platform:      "test1", // TODO update with proper version
 			switchprofile.CelesticaDS4000.Spec.Platform:      "test1", // TODO update with proper version
 			switchprofile.EdgecoreDCS203.Spec.Platform:       "test3", // TODO update with proper version
