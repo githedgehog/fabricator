@@ -110,6 +110,8 @@ type FabricConfig struct {
 
 	DefaultSwitchUsers map[string]SwitchUser `json:"defaultSwitchUsers,omitempty"` // TODO make sure admin user is always present
 	DefaultAlloyConfig fmeta.AlloyConfig     `json:"defaultAlloyConfig,omitempty"`
+
+	IncludeONIE bool `json:"includeONIE,omitempty"`
 }
 
 type SwitchUser struct {
@@ -257,6 +259,10 @@ func (f *Fabricator) CalculateVersions(def Versions) error {
 
 	if err := mergo.Merge(&f.Status.Versions, def); err != nil {
 		return fmt.Errorf("merging versions: %w", err)
+	}
+
+	if !f.Spec.Config.Fabric.IncludeONIE {
+		f.Status.Versions.Fabric.ONIE = map[string]meta.Version{}
 	}
 
 	return nil

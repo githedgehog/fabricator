@@ -37,6 +37,7 @@ spec:
 
     fabric:
       mode: {{ .FabricMode }} # "spine-leaf" or "collapsed-core"
+      {{ if .IncludeONIE }}includeONIE: true{{ end }}
       defaultSwitchUsers:
         admin: # at least one user with name 'admin' and role 'admin'
           role: admin

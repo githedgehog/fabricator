@@ -7,6 +7,7 @@ import (
 	"context"
 	"testing"
 
+	"dario.cat/mergo"
 	"github.com/stretchr/testify/require"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/api/meta"
@@ -25,6 +26,9 @@ func TestInitConfig(t *testing.T) {
 				Namespace: comp.FabNamespace,
 			},
 			Spec: fabapi.ControlNodeSpec{
+				Bootstrap: fabapi.ControlNodeBootstrap{
+					Disk: "/dev/sda",
+				},
 				Management: fabapi.ControlNodeManagement{
 					Interface: "enp2s1",
 				},
@@ -202,12 +206,13 @@ func TestInitConfig(t *testing.T) {
 			l := apiutil.NewFabLoader()
 			require.NoError(t, l.LoadAdd(ctx, data))
 
-			fab, controls, err := fab.GetFabAndControls(ctx, l.GetClient(), true)
+			f, controls, err := fab.GetFabAndControls(ctx, l.GetClient(), true)
 			require.NoError(t, err)
 
-			fab.APIVersion = ""
-			fab.Kind = ""
-			fab.ResourceVersion = ""
+			f.APIVersion = ""
+			f.Kind = ""
+			f.ResourceVersion = ""
+			f.Status = fabapi.FabricatorStatus{}
 
 			require.NotNil(t, controls)
 
@@ -215,9 +220,15 @@ func TestInitConfig(t *testing.T) {
 				controls[i].APIVersion = ""
 				controls[i].Kind = ""
 				controls[i].ResourceVersion = ""
+				controls[i].Status = fabapi.ControlNodeStatus{}
 			}
 
-			require.Equal(t, test.expectedFab, fab)
+			expectedFab := test.expectedFab
+			if err := mergo.Merge(&expectedFab.Spec.Config, *fab.DefaultConfig.DeepCopy()); err != nil {
+				require.NoError(t, err)
+			}
+
+			require.Equal(t, expectedFab, f)
 			require.Equal(t, expectedControls, controls)
 		})
 	}
