@@ -4,6 +4,8 @@
 package v1beta1
 
 import (
+	"fmt"
+
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -16,9 +18,13 @@ var controlnodelog = logf.Log.WithName("controlnode-resource")
 
 // SetupWebhookWithManager will setup the manager to manage the webhooks
 func (r *ControlNode) SetupWebhookWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewWebhookManagedBy(mgr).
+	if err := ctrl.NewWebhookManagedBy(mgr).
 		For(r).
-		Complete()
+		Complete(); err != nil {
+		return fmt.Errorf("creating webhook: %w", err) //nolint:goerr113
+	}
+
+	return nil
 }
 
 // TODO(user): EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
@@ -52,6 +58,8 @@ func (r *ControlNode) ValidateCreate() (admission.Warnings, error) {
 // ValidateUpdate implements webhook.Validator so a webhook will be registered for the type
 func (r *ControlNode) ValidateUpdate(old runtime.Object) (admission.Warnings, error) {
 	controlnodelog.Info("validate update", "name", r.Name)
+
+	_ = old.(*ControlNode)
 
 	// TODO(user): fill in your validation logic upon object update.
 	return nil, nil

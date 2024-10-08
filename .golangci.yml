@@ -64,3 +64,9 @@ linters-settings:
   reassign:
     patterns:
       - ".*"
+
+# TODO remove after controller is used
+issues:
+  exclude-files:
+    - test
+    - internal
