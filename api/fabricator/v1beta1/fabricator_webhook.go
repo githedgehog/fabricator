@@ -5,6 +5,7 @@ package v1beta1
 
 import (
 	"context"
+	"fmt"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -18,9 +19,13 @@ var fabricatorlog = logf.Log.WithName("fabricator-resource")
 
 // SetupWebhookWithManager will setup the manager to manage the webhooks
 func (r *Fabricator) SetupWebhookWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewWebhookManagedBy(mgr).
+	if err := ctrl.NewWebhookManagedBy(mgr).
 		For(r).
-		Complete()
+		Complete(); err != nil {
+		return fmt.Errorf("creating webhook: %w", err) //nolint:goerr113
+	}
+
+	return nil
 }
 
 // TODO(user): EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
@@ -58,6 +63,8 @@ func (r *Fabricator) ValidateCreate() (admission.Warnings, error) {
 // ValidateUpdate implements webhook.Validator so a webhook will be registered for the type
 func (r *Fabricator) ValidateUpdate(old runtime.Object) (admission.Warnings, error) {
 	fabricatorlog.Info("validate update", "name", r.Name)
+
+	_ = old.(*Fabricator)
 
 	if err := r.Validate(context.TODO()); err != nil {
 		return nil, err

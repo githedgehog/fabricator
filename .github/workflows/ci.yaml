@@ -36,7 +36,6 @@ jobs:
           go-version: stable
           cache: true
 
-      # TODO test it works reliably
       # Don't remove it! We shouldn't allow CI to pass if there are any changes not committed after running make
       - name: Run all generators, lint and fail on dirty
         run: |
@@ -44,12 +43,13 @@ jobs:
           git status --short
           git diff --quiet
 
-      # - name: Go Lint
-      #   uses: golangci/golangci-lint-action@v6
-      #   with:
-      #     # keep in sync with hack/tools.just
-      #     version: v1.61.0
+      - name: Go Lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          # keep in sync with hack/tools.just
+          version: v1.61.0
 
+      # TODO run tests again
       # - name: Run tests
       #   run: |
       #     just --timestamp test

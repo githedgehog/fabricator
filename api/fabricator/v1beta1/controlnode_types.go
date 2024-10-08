@@ -72,6 +72,9 @@ func (c *ControlNode) Validate(ctx context.Context, fabCfg *FabConfig, allowNotH
 		return nil
 	}
 
+	_ = ctx
+	_ = allowNotHydrated
+
 	// TODO make interactive/non-interactive and iso/non-iso validation
 	// TODO validate the control node spec
 
