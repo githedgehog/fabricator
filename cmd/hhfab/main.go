@@ -37,7 +37,7 @@ const (
 	FlagNameDefaultAuthorizedKeys = "default-authorized-keys"
 	FlagNameTLSSAN                = "tls-san"
 	FlagNameDev                   = "dev"
-	FlagNameAirgap                = "airgap"
+	FlagIncludeONIE               = "include-onie"
 	FlagNameFabricMode            = "fabric-mode"
 	FlagNameCount                 = "count"
 	FlagNameKillStale             = "kill-stale"
@@ -358,10 +358,10 @@ func Run(ctx context.Context) error {
 						EnvVars: []string{"HHFAB_DEV"},
 					},
 					&cli.BoolFlag{
-						Name:    FlagNameAirgap,
-						Usage:   "airgap mode (no internet access required for installation and operations)",
-						EnvVars: []string{"HHFAB_AIRGAP"},
-						Value:   true,
+						Name:    FlagIncludeONIE,
+						Hidden:  true,
+						Usage:   "include ONIE in the build",
+						EnvVars: []string{"HHFAB_INCLUDE_ONIE"},
 					},
 				),
 				Before: before(false),
@@ -379,7 +379,7 @@ func Run(ctx context.Context) error {
 							DefaultPasswordHash:   c.String(FlagNameDefaultPasswordHash),
 							DefaultAuthorizedKeys: c.StringSlice(FlagNameDefaultAuthorizedKeys),
 							Dev:                   c.Bool(FlagNameDev),
-							Airgap:                c.Bool(FlagNameAirgap),
+							IncludeONIE:           c.Bool(FlagIncludeONIE),
 						},
 					}); err != nil {
 						return fmt.Errorf("initializing: %w", err)

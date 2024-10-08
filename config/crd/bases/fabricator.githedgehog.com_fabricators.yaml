@@ -171,6 +171,8 @@ spec:
                         type: string
                       fabricSubnet:
                         type: string
+                      includeONIE:
+                        type: boolean
                       leafASNEnd:
                         format: int32
                         type: integer

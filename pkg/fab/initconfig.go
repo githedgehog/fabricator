@@ -30,7 +30,7 @@ type InitConfigInput struct {
 	DefaultPasswordHash   string
 	DefaultAuthorizedKeys []string
 	Dev                   bool
-	Airgap                bool
+	IncludeONIE           bool
 }
 
 func InitConfig(ctx context.Context, in InitConfigInput) ([]byte, error) {
