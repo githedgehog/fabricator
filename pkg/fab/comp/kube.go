@@ -17,6 +17,8 @@ import (
 	appsapi "k8s.io/api/apps/v1"
 	coreapi "k8s.io/api/core/v1"
 	metaapi "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlutil "sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/scheme"
@@ -118,8 +120,6 @@ var (
 var ErrUnsupportedKind = fmt.Errorf("unsupported kind")
 
 func EnforceKubeInstall(ctx context.Context, kube client.Client, cfg fabapi.Fabricator, depls ...KubeInstall) error {
-	// TODO support retries and backoff: https://github.com/kubernetes/kubernetes/blob/master/staging/src/k8s.io/client-go/util/retry/util.go#L103
-
 	for _, depl := range depls {
 		objs, err := depl(cfg)
 		if err != nil {
@@ -127,13 +127,39 @@ func EnforceKubeInstall(ctx context.Context, kube client.Client, cfg fabapi.Fabr
 		}
 
 		for _, obj := range objs {
-			res, err := CreateOrUpdate(ctx, kube, obj)
-			if err != nil {
-				return fmt.Errorf("creating or updating %s %s: %w", obj.GetObjectKind().GroupVersionKind().Kind, obj.GetName(), err)
+			kind := obj.GetObjectKind().GroupVersionKind().Kind
+			name := obj.GetName()
+
+			var res ctrlutil.OperationResult
+			var err error
+
+			attempt := 0
+
+			if err := retry.OnError(wait.Backoff{
+				Steps:    10,
+				Duration: 500 * time.Millisecond,
+				Factor:   1.5,
+				Jitter:   0.1,
+			}, func(error) bool {
+				return true
+			}, func() error {
+				if attempt > 0 {
+					slog.Debug("Retrying create or update", "kind", kind, "name", name, "attempt", attempt)
+				}
+
+				attempt++
+
+				res, err = CreateOrUpdate(ctx, kube, obj)
+				if err != nil {
+					return fmt.Errorf("creating or updating %s %s: %w", kind, name, err)
+				}
+
+				return nil
+			}); err != nil {
+				return fmt.Errorf("retrying create or update %s/%s: %w", kind, name, err)
 			}
 
-			// TODO log if something changed?
-			slog.Debug("Enforced", "kind", obj.GetObjectKind().GroupVersionKind().Kind, "name", obj.GetName(), "result", res)
+			slog.Debug("Enforced", "kind", kind, "name", name, "result", res)
 		}
 	}
 

@@ -36,30 +36,10 @@ import (
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
-
-// "install" k3s binary, its config and airgap images
-// generate fabca (root CA) and install it into the system
-// run k3s-install.sh script
-// wait for k8s ready
-// file structure for kubeconfig
-// install cert-manager component
-// wait for cert-manager ready
-// install fabca - just secret + issuer
-// install zot component
-// wait for zot ready
-// upload images into zot if airgap
-// install fabricator component
-// wait for fabricator ready
-// install fab.yaml
-// wait for fabric ready
-// install pre-packaged wiring
-// wait for control agents ready
-
-// control agent: ???
-// /etc/hosts with switches
-// install k9s with config and plugins
 
 const (
 	InstallLog            = "/var/log/install.log"
@@ -595,16 +575,38 @@ func (c *ControlInstall) installWiring(ctx context.Context, kube client.Client) 
 		}
 
 		for _, obj := range objList.GetItems() {
-			// TODO some careful retries needed here
-
 			kind := obj.GetObjectKind().GroupVersionKind().Kind
-			slog.Debug("Installing included wiring", "kind", kind, "name", obj.GetName())
+			name := obj.GetName()
 
 			obj.SetGeneration(0)
 			obj.SetResourceVersion("")
-			if err := kube.Create(ctx, obj); err != nil {
-				return fmt.Errorf("creating %s/%s: %w", kind, obj.GetName(), err)
+
+			attempt := 0
+
+			if err := retry.OnError(wait.Backoff{
+				Steps:    10,
+				Duration: 500 * time.Millisecond,
+				Factor:   1.5,
+				Jitter:   0.1,
+			}, func(err error) bool {
+				return !apierrors.IsConflict(err)
+			}, func() error {
+				if attempt > 0 {
+					slog.Debug("Retrying installing wiring", "kind", kind, "name", name)
+				}
+
+				attempt++
+
+				if err := kube.Create(ctx, obj); err != nil {
+					return fmt.Errorf("creating %s/%s: %w", kind, name, err)
+				}
+
+				return nil
+			}); err != nil {
+				return fmt.Errorf("retrying creating %s/%s: %w", kind, name, err)
 			}
+
+			slog.Debug("Installed included wiring", "kind", kind, "name", name)
 		}
 	}
 
