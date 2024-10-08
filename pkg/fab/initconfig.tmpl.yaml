@@ -8,6 +8,16 @@ metadata:
   namespace: fab
 spec:
   config:
+    {{- if .RegUpstream }}
+    registry:
+      mode: upstream
+      upstream:
+        repo: {{ .RegUpstream.Repo }}
+        prefix: {{ .RegUpstream.Prefix }}
+        noTLSVerify: {{ .RegUpstream.NoTLSVerify }}
+        username: {{ .RegUpstream.Username }}
+        password: {{ .RegUpstream.Password }}
+    {{- end }}
     control:
       {{- if .TLSSAN }}
       tlsSAN: # IPs and DNS names that will be used to access API

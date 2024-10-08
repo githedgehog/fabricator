@@ -192,6 +192,50 @@ func TestInitConfig(t *testing.T) {
 			},
 			err: true,
 		},
+		{
+			name: "include-onie-import-upstream",
+			in: fab.InitConfigInput{
+				IncludeONIE: true,
+				RegUpstream: &fabapi.ControlConfigRegistryUpstream{
+					Repo:        "repo",
+					Prefix:      "prefix",
+					NoTLSVerify: true,
+					Username:    "username",
+					Password:    "password",
+				},
+			},
+			expectedFab: fabapi.Fabricator{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      comp.FabName,
+					Namespace: comp.FabNamespace,
+				},
+				Spec: fabapi.FabricatorSpec{
+					Config: fabapi.FabConfig{
+						Registry: fabapi.RegistryConfig{
+							Mode: fabapi.RegistryModeUpstream,
+							Upstream: &fabapi.ControlConfigRegistryUpstream{
+								Repo:        "repo",
+								Prefix:      "prefix",
+								NoTLSVerify: true,
+								Username:    "username",
+								Password:    "password",
+							},
+						},
+						Fabric: fabapi.FabricConfig{
+							IncludeONIE: true,
+							DefaultSwitchUsers: map[string]fabapi.SwitchUser{
+								"admin": {
+									Role: "admin",
+								},
+								"op": {
+									Role: "operator",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			data, err := fab.InitConfig(ctx, test.in)

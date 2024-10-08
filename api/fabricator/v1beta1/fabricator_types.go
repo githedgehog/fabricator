@@ -76,11 +76,11 @@ func (r RegistryConfig) IsAirgap() bool {
 }
 
 type ControlConfigRegistryUpstream struct {
-	Repo      string `json:"repo,omitempty"`   // ghcr.io
-	Prefix    string `json:"prefix,omitempty"` // githedgehog
-	TLSVerify bool   `json:"tlsVerify,omitempty"`
-	Username  string `json:"username,omitempty"`
-	Password  string `json:"password,omitempty"`
+	Repo        string `json:"repo,omitempty"`   // ghcr.io
+	Prefix      string `json:"prefix,omitempty"` // githedgehog
+	NoTLSVerify bool   `json:"noTLSVerify,omitempty"`
+	Username    string `json:"username,omitempty"`
+	Password    string `json:"password,omitempty"`
 }
 
 type FabricConfig struct {

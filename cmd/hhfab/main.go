@@ -32,6 +32,7 @@ const (
 	FlagNameRegistryPrefix        = "registry-prefix"
 	FlagNameConfig                = "config"
 	FlagNameWiring                = "wiring"
+	FlagNameImportHostUpstream    = "import-host-upstream"
 	FlagCatGenConfig              = "Generate initial config:"
 	FlagNameDefaultPasswordHash   = "default-password-hash"
 	FlagNameDefaultAuthorizedKeys = "default-authorized-keys"
@@ -360,19 +361,26 @@ func Run(ctx context.Context) error {
 					&cli.BoolFlag{
 						Name:    FlagIncludeONIE,
 						Hidden:  true,
-						Usage:   "include ONIE in the build",
+						Usage:   "include tested ONIE updaters for supported switches in the build",
 						EnvVars: []string{"HHFAB_INCLUDE_ONIE"},
+					},
+					&cli.BoolFlag{
+						Name:    FlagNameImportHostUpstream,
+						Hidden:  true,
+						Usage:   "import host repo/prefix and creds from docker config as an upstream registry mode and config (creds will be stored plain text)",
+						EnvVars: []string{"HHFAB_IMPORT_HOST_UPSTREAM"},
 					},
 				),
 				Before: before(false),
 				Action: func(c *cli.Context) error {
 					if err := hhfab.Init(ctx, hhfab.InitConfig{
-						WorkDir:      workDir,
-						CacheDir:     cacheDir,
-						Repo:         c.String(FlagNameRegistryRepo),
-						Prefix:       c.String(FlagNameRegistryPrefix),
-						ImportConfig: c.String(FlagNameConfig),
-						Wiring:       c.StringSlice(FlagNameWiring),
+						WorkDir:            workDir,
+						CacheDir:           cacheDir,
+						Repo:               c.String(FlagNameRegistryRepo),
+						Prefix:             c.String(FlagNameRegistryPrefix),
+						ImportConfig:       c.String(FlagNameConfig),
+						Wiring:             c.StringSlice(FlagNameWiring),
+						ImportHostUpstream: c.Bool(FlagNameImportHostUpstream),
 						InitConfigInput: fab.InitConfigInput{
 							FabricMode:            meta.FabricMode(c.String(FlagNameFabricMode)),
 							TLSSAN:                c.StringSlice(FlagNameTLSSAN),

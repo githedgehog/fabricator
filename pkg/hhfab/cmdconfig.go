@@ -18,6 +18,7 @@ import (
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
+	"oras.land/oras-go/v2/registry/remote/credentials"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/yaml"
 )
@@ -74,12 +75,13 @@ func checkWorkCacheDir(workDir, cacheDir string) error {
 }
 
 type InitConfig struct {
-	WorkDir      string
-	CacheDir     string
-	Repo         string
-	Prefix       string
-	ImportConfig string
-	Wiring       []string
+	WorkDir            string
+	CacheDir           string
+	Repo               string
+	Prefix             string
+	ImportConfig       string
+	Wiring             []string
+	ImportHostUpstream bool
 	fab.InitConfigInput
 }
 
@@ -131,6 +133,20 @@ func Init(ctx context.Context, c InitConfig) error {
 
 		slog.Info("Imported config", "source", c.ImportConfig)
 	} else {
+		if c.ImportHostUpstream {
+			username, password, err := getLocalDockerCredsFor(ctx, c.Repo)
+			if err != nil {
+				return fmt.Errorf("getting creds from docker config: %w", err)
+			}
+
+			c.InitConfigInput.RegUpstream = &fabapi.ControlConfigRegistryUpstream{
+				Repo:     c.Repo,
+				Prefix:   c.Prefix,
+				Username: username,
+				Password: password,
+			}
+		}
+
 		fabCfgData, err = fab.InitConfig(ctx, c.InitConfigInput)
 		if err != nil {
 			return fmt.Errorf("generating fab config: %w", err)
@@ -386,4 +402,19 @@ func checkForSwitchUsers(f fabapi.Fabricator) error {
 	}
 
 	return nil
+}
+
+func getLocalDockerCredsFor(ctx context.Context, repo string) (string, string, error) {
+	storeOpts := credentials.StoreOptions{}
+	credStore, err := credentials.NewStoreFromDocker(storeOpts)
+	if err != nil {
+		return "", "", fmt.Errorf("loading docker config: %w", err)
+	}
+
+	creds, err := credStore.Get(ctx, repo)
+	if err != nil {
+		return "", "", fmt.Errorf("getting creds for %q: %w", repo, err)
+	}
+
+	return creds.Username, creds.Password, nil
 }

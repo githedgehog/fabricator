@@ -62,7 +62,7 @@ func Install(cfg fabapi.Fabricator) ([]client.Object, error) {
 			prefix = "/" + prefix
 		}
 		configOpts["UpstreamPrefix"] = prefix + "/**"
-		configOpts["UpstreamTLSVerify"] = strconv.FormatBool(cfg.Spec.Config.Registry.Upstream.TLSVerify)
+		configOpts["UpstreamTLSVerify"] = strconv.FormatBool(!cfg.Spec.Config.Registry.Upstream.NoTLSVerify)
 	}
 
 	config, err := tmplutil.FromTemplate("config", configTmpl, configOpts)

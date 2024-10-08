@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"go.githedgehog.com/fabric/api/meta"
+	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 	"go.githedgehog.com/fabricator/pkg/util/tmplutil"
 )
@@ -31,6 +32,7 @@ type InitConfigInput struct {
 	DefaultAuthorizedKeys []string
 	Dev                   bool
 	IncludeONIE           bool
+	RegUpstream           *fabapi.ControlConfigRegistryUpstream
 }
 
 func InitConfig(ctx context.Context, in InitConfigInput) ([]byte, error) {
