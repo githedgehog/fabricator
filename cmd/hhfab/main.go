@@ -39,6 +39,7 @@ const (
 	FlagNameTLSSAN                = "tls-san"
 	FlagNameDev                   = "dev"
 	FlagIncludeONIE               = "include-onie"
+	FlagControlNodeMgmtLink       = "control-node-mgmt-link"
 	FlagNameFabricMode            = "fabric-mode"
 	FlagNameCount                 = "count"
 	FlagNameKillStale             = "kill-stale"
@@ -370,6 +371,12 @@ func Run(ctx context.Context) error {
 						Usage:   "import host repo/prefix and creds from docker config as an upstream registry mode and config (creds will be stored plain text)",
 						EnvVars: []string{"HHFAB_IMPORT_HOST_UPSTREAM"},
 					},
+					&cli.StringFlag{
+						Name:    FlagControlNodeMgmtLink,
+						Hidden:  true,
+						Usage:   "control node management link (for pci passthrough for VLAB-only)",
+						EnvVars: []string{"HHFAB_CONTROL_NODE_MGMT_LINK"},
+					},
 				),
 				Before: before(false),
 				Action: func(c *cli.Context) error {
@@ -382,12 +389,13 @@ func Run(ctx context.Context) error {
 						Wiring:             c.StringSlice(FlagNameWiring),
 						ImportHostUpstream: c.Bool(FlagNameImportHostUpstream),
 						InitConfigInput: fab.InitConfigInput{
-							FabricMode:            meta.FabricMode(c.String(FlagNameFabricMode)),
-							TLSSAN:                c.StringSlice(FlagNameTLSSAN),
-							DefaultPasswordHash:   c.String(FlagNameDefaultPasswordHash),
-							DefaultAuthorizedKeys: c.StringSlice(FlagNameDefaultAuthorizedKeys),
-							Dev:                   c.Bool(FlagNameDev),
-							IncludeONIE:           c.Bool(FlagIncludeONIE),
+							FabricMode:                meta.FabricMode(c.String(FlagNameFabricMode)),
+							TLSSAN:                    c.StringSlice(FlagNameTLSSAN),
+							DefaultPasswordHash:       c.String(FlagNameDefaultPasswordHash),
+							DefaultAuthorizedKeys:     c.StringSlice(FlagNameDefaultAuthorizedKeys),
+							Dev:                       c.Bool(FlagNameDev),
+							IncludeONIE:               c.Bool(FlagIncludeONIE),
+							ControlNodeManagementLink: c.String(FlagControlNodeMgmtLink),
 						},
 					}); err != nil {
 						return fmt.Errorf("initializing: %w", err)

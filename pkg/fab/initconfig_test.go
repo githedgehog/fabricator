@@ -19,26 +19,6 @@ import (
 
 func TestInitConfig(t *testing.T) {
 	ctx := context.Background()
-	expectedControls := []fabapi.ControlNode{
-		{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "control-1",
-				Namespace: comp.FabNamespace,
-			},
-			Spec: fabapi.ControlNodeSpec{
-				Bootstrap: fabapi.ControlNodeBootstrap{
-					Disk: "/dev/sda",
-				},
-				Management: fabapi.ControlNodeManagement{
-					Interface: "enp2s1",
-				},
-				External: fabapi.ControlNodeExternal{
-					Interface: "enp2s0",
-					IP:        meta.PrefixDHCP,
-				},
-			},
-		},
-	}
 
 	for _, test := range []struct {
 		name        string
@@ -236,8 +216,60 @@ func TestInitConfig(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "control-node-management-link",
+			in: fab.InitConfigInput{
+				ControlNodeManagementLink: "pci@0000:00:00.0",
+			},
+			expectedFab: fabapi.Fabricator{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      comp.FabName,
+					Namespace: comp.FabNamespace,
+				},
+				Spec: fabapi.FabricatorSpec{
+					Config: fabapi.FabConfig{
+						Fabric: fabapi.FabricConfig{
+							DefaultSwitchUsers: map[string]fabapi.SwitchUser{
+								"admin": {
+									Role: "admin",
+								},
+								"op": {
+									Role: "operator",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			expectedControls := []fabapi.ControlNode{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "control-1",
+						Namespace: comp.FabNamespace,
+					},
+					Spec: fabapi.ControlNodeSpec{
+						Bootstrap: fabapi.ControlNodeBootstrap{
+							Disk: "/dev/sda",
+						},
+						Management: fabapi.ControlNodeManagement{
+							Interface: "enp2s1",
+						},
+						External: fabapi.ControlNodeExternal{
+							Interface: "enp2s0",
+							IP:        meta.PrefixDHCP,
+						},
+					},
+				},
+			}
+			if test.in.ControlNodeManagementLink != "" {
+				expectedControls[0].Annotations = map[string]string{
+					"link.hhfab.githedgehog.com/enp2s1": test.in.ControlNodeManagementLink,
+				}
+			}
+
 			data, err := fab.InitConfig(ctx, test.in)
 			if test.err {
 				require.Error(t, err)
