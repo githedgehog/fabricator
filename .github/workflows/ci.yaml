@@ -36,27 +36,30 @@ jobs:
           go-version: stable
           cache: true
 
-      # Don't remove it! We shouldn't allow CI to pass if there are any changes not committed after running make
-      - name: Run all generators, lint and fail on dirty
+      - name: GHA Lint
         run: |
-          just --timestamp gen _lint
+          just --timestamp lint-gha
+
+      # Don't remove it! We shouldn't allow CI to pass if there are any changes not committed after running just
+      - name: Just all autogeneration and fail on dirty
+        run: |
+          just --timestamp gen docs
           git status --short
           git diff --quiet
 
-      - name: Go Lint
+      - name: Some Go lint
+        run: |
+          just --timestamp _lint
+
+      - name: More Go lint
         uses: golangci/golangci-lint-action@v6
         with:
           # keep in sync with hack/tools.just
           version: v1.61.0
 
-      # TODO run tests again
-      # - name: Run tests
-      #   run: |
-      #     just --timestamp test
-
-      - name: GHA Lint
+      - name: Run tests
         run: |
-          just lint-gha
+          just --timestamp test
 
       - name: Setup tmate session for debug
         if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
