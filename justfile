@@ -15,6 +15,9 @@ _gotools: _touch_embed
 # Called in CI
 _lint: _license_headers _gotools
 
+# Generate, lint, test and build everything
+all: gen docs lint lint-gha test build kube-build && version
+
 # Run linters against code (incl. license headers)
 lint: _lint _golangci_lint
   {{golangci_lint}} run --show-stats ./...
@@ -62,12 +65,53 @@ hhfab-build-local: _license_headers _gotools _kube_gen _hhfab_embed && version
 
 # Build all artifacts
 build: _license_headers _gotools _hhfab_build && version
-  @echo "Build complete"
-
-oci_repo := "127.0.0.1:30000"
-oci_prefix := "githedgehog/fabricator"
+  {{go_linux_build}} -o ./bin/fabricator ./cmd
+  # Build complete
 
 # TODO rework by using existing recipes and installing with helm chart
 # Run e2e tests on existing Kind cluster
 # test-e2e:
 #   go test ./test/e2e/ -v -ginkgo.v
+
+oci_repo := "127.0.0.1:30000"
+oci_prefix := "githedgehog/fabricator"
+
+_helm-fabricator-api: _kustomize _helm _kube_gen
+  @rm config/helm/fabricator-api-v*.tgz || true
+  {{kustomize}} build config/crd > config/helm/fabricator-api/templates/crds.yaml
+  {{helm}} package config/helm/fabricator-api --destination config/helm --version {{version}}
+  {{helm}} lint config/helm/fabricator-api-{{version}}.tgz
+
+_helm-fabricator: _kustomize _helm _helmify _kube_gen
+  @rm config/helm/fabricator-v*.tgz || true
+  @rm config/helm/fabricator/templates/*.yaml config/helm/fabricator/values.yaml || true
+  {{kustomize}} build config/default | {{helmify}} config/helm/fabricator
+  {{helm}} package config/helm/fabricator --destination config/helm --version {{version}}
+  {{helm}} lint config/helm/fabricator-{{version}}.tgz
+
+# Build all K8s artifacts (images and charts)
+kube-build: build (_docker-build "fabricator") _helm-fabricator-api _helm-fabricator && version
+  # Docker images and Helm charts built
+
+# Push all K8s artifacts (images and charts)
+kube-push: kube-build (_helm-push "fabricator-api") (_kube-push "fabricator") && version
+  # Docker images and Helm charts pushed
+
+# Push all K8s artifacts (images and charts) and binaries
+push: kube-push && version
+  cd bin && oras push {{oci_repo}}/{{oci_prefix}}/hhfab:{{version}} hhfab
+
+# Install API on a kind cluster and wait for CRDs to be ready
+test-api: _helm-fabricator-api
+    kind export kubeconfig --name kind || kind create cluster --name kind
+    kind export kubeconfig --name kind
+    {{helm}} install -n default fabricator-api config/helm/fabricator-api-{{version}}.tgz
+    sleep 10
+    kubectl wait --for condition=established --timeout=60s crd/fabricators.fabricator.githedgehog.com
+    kubectl wait --for condition=established --timeout=60s crd/controlnodes.fabricator.githedgehog.com
+    kubectl get crd | grep fabricator
+    kind delete cluster --name kind
+
+# Generate docs
+docs: gen _crd_ref_docs
+  {{crd_ref_docs}} --source-path=./api/ --config=api/docs.config.yaml --renderer=markdown --output-path=./docs/api.md
