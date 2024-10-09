@@ -64,11 +64,10 @@ hhfab-build-local: _license_headers _gotools _kube_gen _hhfab_embed && version
 build: _license_headers _gotools _hhfab_build && version
   @echo "Build complete"
 
-# .PHONY: test
-# test: manifests generate fmt vet envtest ## Run tests.
-# 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
+oci_repo := "127.0.0.1:30000"
+oci_prefix := "githedgehog/fabricator"
 
-# # Utilize Kind or modify the e2e tests to load the image locally, enabling compatibility with other vendors.
-# .PHONY: test-e2e  # Run the e2e tests against a Kind k8s instance that is spun up.
+# TODO rework by using existing recipes and installing with helm chart
+# Run e2e tests on existing Kind cluster
 # test-e2e:
-# 	go test ./test/e2e/ -v -ginkgo.v
+#   go test ./test/e2e/ -v -ginkgo.v
