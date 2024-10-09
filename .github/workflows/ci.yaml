@@ -154,15 +154,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        buildmode:
-          - "--usb=false"
-          - "--usb=true"
         fabricmode:
-          - collapsed-core
           - spine-leaf
+          - collapsed-core
         includeonie:
           - "--include-onie=false"
-          - "--include-onie=true"
+        buildmode:
+          - "--usb=true"
+          - "--usb=false"
+        include:
+          - fabricmode: spine-leaf
+            includeonie: "--include-onie=true"
+            buildmode: "--usb=true"
+          - fabricmode: spine-leaf
+            includeonie: "--include-onie=true"
+            buildmode: "--usb=false"
 
     steps:
       - name: Runner host
