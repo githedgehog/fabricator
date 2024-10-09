@@ -1,6 +1,7 @@
 *.hhfab
 .DS_Store
 *kubeconfig.yaml
+lcov.info
 
 # Binaries for programs and plugins
 *.exe
