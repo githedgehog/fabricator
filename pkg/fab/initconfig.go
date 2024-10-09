@@ -26,13 +26,14 @@ const (
 )
 
 type InitConfigInput struct {
-	FabricMode            meta.FabricMode
-	TLSSAN                []string
-	DefaultPasswordHash   string
-	DefaultAuthorizedKeys []string
-	Dev                   bool
-	IncludeONIE           bool
-	RegUpstream           *fabapi.ControlConfigRegistryUpstream
+	FabricMode                meta.FabricMode
+	TLSSAN                    []string
+	DefaultPasswordHash       string
+	DefaultAuthorizedKeys     []string
+	Dev                       bool
+	IncludeONIE               bool
+	RegUpstream               *fabapi.ControlConfigRegistryUpstream
+	ControlNodeManagementLink string
 }
 
 func InitConfig(ctx context.Context, in InitConfigInput) ([]byte, error) {

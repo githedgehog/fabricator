@@ -88,6 +88,10 @@ kind: ControlNode
 metadata:
   name: control-1
   namespace: fab
+  {{- if .ControlNodeManagementLink }}
+  annotations:
+    link.hhfab.githedgehog.com/enp2s1: {{ .ControlNodeManagementLink}}
+  {{- end }}
 spec:
   bootstrap:
    disk: "/dev/sda" # disk to install OS on, e.g. "sda" or "nvme0n1"
