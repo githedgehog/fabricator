@@ -16,5 +16,4 @@ resources:
   requests:
     cpu: 100m
 
-# TODO switch to true when it works reliably in our lab
-cachePVC: false
+cachePVC: true
