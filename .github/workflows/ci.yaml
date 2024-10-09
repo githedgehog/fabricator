@@ -72,9 +72,11 @@ jobs:
     strategy:
       matrix:
         os:
+          # it's needed to test with ghcr.io and not local mirror
           - ubuntu-latest-x86-4-cores
-          - ubuntu-24.04-arm64-4-core
           - macos-latest
+          # we can add it if there will be any demand
+          # - ubuntu-24.04-arm64-4-core
         buildmode:
           - "--usb=false"
           - "--usb=true"
