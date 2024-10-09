@@ -67,16 +67,21 @@ jobs:
 
   build:
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    timeout-minutes: 10
 
     strategy:
       matrix:
         os:
-          - ubuntu-latest
+          - ubuntu-latest-x86-4-cores
+          - ubuntu-24.04-arm64-4-core
           - macos-latest
         buildmode:
           - "--usb=false"
           - "--usb=true"
+        exclude:
+          # Not enough disk space
+          - os: macos-latest
+            buildmode: "--usb=true"
 
     steps:
       - name: Checkout repository
@@ -153,6 +158,9 @@ jobs:
         fabricmode:
           - collapsed-core
           - spine-leaf
+        includeonie:
+          - "--include-onie=false"
+          - "--include-onie=true"
 
     steps:
       - name: Runner host
@@ -192,7 +200,7 @@ jobs:
         run: |
           export HHFAB_REG_REPO=m-pub.l.hhdev.io:31000
 
-          bin/hhfab init -v --dev -m ${{ matrix.fabricmode }}
+          bin/hhfab init -v --dev -m ${{ matrix.fabricmode }} ${{ matrix.includeonie }}
           bin/hhfab vlab gen -v
           bin/hhfab vlab up -v --fail-fast --exit-on-ready ${{ matrix.buildmode }}
 
