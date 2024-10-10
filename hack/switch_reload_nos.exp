@@ -1,0 +1,39 @@
+#!/usr/bin/expect -f
+# Copyright 2024 Hedgehog
+# SPDX-License-Identifier: Apache-2.0
+
+set force_conservative 1
+
+set timeout -1
+set VM_NAME "$argv[lindex $argv 1]"
+set KEY_DOWN "\033\[B"
+set KEY_UP  "\033\[A"
+set SONIC_OPT "*SON"
+set ONIE_CHAIN "*ONIE: Install OS"
+set ONIE_HIGHLIGHT "*ONIE"
+set DELL_OPT "*EDA"
+
+spawn socat "-,raw,echo=0,escape=0x1d" "unix-connect:vlab/vms/$VM_NAME/serial.sock"
+expect {
+	# Make sure we have seen grub and don't pickup output from chatty switches
+	-ex "GNU GRUB" {
+		-ex $SONIC_OPT {
+			#send_user "cursor on sonic"
+			send -- $KEY_DOWN
+			exp_continue
+		} -ex $DELL_OPT {
+			#send_user "cursor on dell option"
+			send -- $KEY_DOWN
+			exp_continue
+		} -ex $ONIE_HIGHLIGHT {
+			#send_user "cursor on onie"
+			send "\r"
+			exp_continue
+		} -ex $ONIE_CHAIN {
+			#send_user "pressing enter on Install OS"
+			send "\r"
+			exit
+		}
+	}
+}
+exit 
