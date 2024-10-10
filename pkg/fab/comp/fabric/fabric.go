@@ -36,6 +36,9 @@ const (
 	OnieRefBase   = "onie-updater-private"
 
 	ProxyNodePort = 31028
+
+	BinDir     = "/opt/bin"
+	CtlBinName = "hhfctl"
 )
 
 //go:embed ctrl_values.tmpl.yaml
