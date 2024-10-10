@@ -481,6 +481,11 @@ func (c *ControlInstall) installFabric(ctx context.Context, kube client.Client) 
 		return fmt.Errorf("enforcing fabric install: %w", err)
 	}
 
+	// TODO remove if it'll be managed by control agent?
+	if err := c.copyFile(fabric.CtlBinName, filepath.Join(fabric.BinDir, fabric.CtlBinName), 0o755); err != nil {
+		return fmt.Errorf("copying fabricctl bin: %w", err)
+	}
+
 	if err := waitKube(ctx, kube, "fabric-ctrl", comp.FabNamespace,
 		&comp.Deployment{}, func(obj *comp.Deployment) (bool, error) {
 			for _, cond := range obj.Status.Conditions {

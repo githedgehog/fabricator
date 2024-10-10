@@ -193,6 +193,15 @@ func (b *ControlInstallBuilder) Build(ctx context.Context) error {
 		return fmt.Errorf("printing wiring: %w", err)
 	}
 
+	// TODO remove if it'll be managed by control agent?
+	if err := b.Downloader.FromORAS(ctx, installDir, fabric.CtlRef, b.Fab.Status.Versions.Fabric.Ctl, []artificer.ORASFile{
+		{
+			Name: fabric.CtlBinName,
+		},
+	}); err != nil {
+		return fmt.Errorf("downloading fabricctl: %w", err)
+	}
+
 	if b.Fab.Spec.Config.Registry.IsAirgap() {
 		slog.Info("Adding airgap artifacts to installer", "control", b.Control.Name)
 
