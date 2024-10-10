@@ -25,7 +25,7 @@ var Versions = fabapi.Versions{
 	Fabricator: fabapi.FabricatorVersions{
 		API:            meta.Version(version.Version),
 		Controller:     meta.Version(version.Version),
-		ControlUSBRoot: "v0.0.3", // TODO separate repo/versioning to stay up to date with Flatcar?
+		ControlUSBRoot: "v0.0.4", // TODO separate repo/versioning to stay up to date with Flatcar?
 	},
 	Fabric: fabapi.FabricVersions{
 		API:        FabricVersion,
