@@ -31,9 +31,10 @@ const (
 	FlagNameRegistryRepo          = "registry-repo"
 	FlagNameRegistryPrefix        = "registry-prefix"
 	FlagNameConfig                = "config"
+	FlagNameForce                 = "force"
 	FlagNameWiring                = "wiring"
 	FlagNameImportHostUpstream    = "import-host-upstream"
-	FlagCatGenConfig              = "Generate initial config:"
+	FlagCatGenConfig              = "Generate initial config (ignored when importing):"
 	FlagNameDefaultPasswordHash   = "default-password-hash"
 	FlagNameDefaultAuthorizedKeys = "default-authorized-keys"
 	FlagNameTLSSAN                = "tls-san"
@@ -318,16 +319,23 @@ func Run(ctx context.Context) error {
 						Usage:   "use existing config file `PATH`",
 						EnvVars: []string{"HHFAB_CONFIG"},
 					},
+					&cli.BoolFlag{
+						Name:    FlagNameForce,
+						Aliases: []string{"f"},
+						Usage:   "overwrite existing files",
+						EnvVars: []string{"HHFAB_FORCE"},
+					},
 					&cli.StringSliceFlag{
 						Name:    FlagNameWiring,
 						Aliases: []string{"w"},
 						Usage:   "include wiring diagram `FILE` with ext .yaml (any Fabric API objects)",
 					},
 					&cli.StringFlag{
-						Name:    FlagNameFabricMode,
-						Aliases: []string{"mode", "m"},
-						Usage:   "set fabric mode: one of " + strings.Join(fabricModes, ", "),
-						Value:   string(meta.FabricModeSpineLeaf),
+						Category: FlagCatGenConfig,
+						Name:     FlagNameFabricMode,
+						Aliases:  []string{"mode", "m"},
+						Usage:    "set fabric mode: one of " + strings.Join(fabricModes, ", "),
+						Value:    string(meta.FabricModeSpineLeaf),
 						Action: func(_ *cli.Context, mode string) error {
 							if !slices.Contains(fabricModes, mode) {
 								return fmt.Errorf("invalid fabric mode %q", mode) //nolint:goerr113
@@ -337,45 +345,52 @@ func Run(ctx context.Context) error {
 						},
 					},
 					&cli.StringSliceFlag{
-						Name:    FlagNameTLSSAN,
-						Aliases: []string{"tls"},
-						Usage:   "IPs and DNS names that will be used to access API",
-						EnvVars: []string{"HHFAB_TLS_SAN"},
+						Category: FlagCatGenConfig,
+						Name:     FlagNameTLSSAN,
+						Aliases:  []string{"tls"},
+						Usage:    "IPs and DNS names that will be used to access API",
+						EnvVars:  []string{"HHFAB_TLS_SAN"},
 					},
 					&cli.StringSliceFlag{
-						Name:    FlagNameDefaultAuthorizedKeys,
-						Aliases: []string{"keys"},
-						Usage:   "default authorized `KEYS` for control and switch users",
-						EnvVars: []string{"HHFAB_AUTH_KEYS"},
+						Category: FlagCatGenConfig,
+						Name:     FlagNameDefaultAuthorizedKeys,
+						Aliases:  []string{"keys"},
+						Usage:    "default authorized `KEYS` for control and switch users",
+						EnvVars:  []string{"HHFAB_AUTH_KEYS"},
 					},
 					&cli.StringFlag{
-						Name:    FlagNameDefaultPasswordHash,
-						Aliases: []string{"passwd"},
-						Usage:   "default password `HASH` for control and switch users",
-						EnvVars: []string{"HHFAB_PASSWD_HASH"},
+						Category: FlagCatGenConfig,
+						Name:     FlagNameDefaultPasswordHash,
+						Aliases:  []string{"passwd"},
+						Usage:    "default password `HASH` for control and switch users",
+						EnvVars:  []string{"HHFAB_PASSWD_HASH"},
 					},
 					&cli.BoolFlag{
-						Name:    FlagNameDev,
-						Usage:   "use default credentials (unsafe)",
-						EnvVars: []string{"HHFAB_DEV"},
+						Category: FlagCatGenConfig,
+						Name:     FlagNameDev,
+						Usage:    "use default dev credentials (unsafe)",
+						EnvVars:  []string{"HHFAB_DEV"},
 					},
 					&cli.BoolFlag{
-						Name:    FlagIncludeONIE,
-						Hidden:  true,
-						Usage:   "include tested ONIE updaters for supported switches in the build",
-						EnvVars: []string{"HHFAB_INCLUDE_ONIE"},
+						Category: FlagCatGenConfig,
+						Name:     FlagIncludeONIE,
+						Hidden:   true,
+						Usage:    "include tested ONIE updaters for supported switches in the build",
+						EnvVars:  []string{"HHFAB_INCLUDE_ONIE"},
 					},
 					&cli.BoolFlag{
-						Name:    FlagNameImportHostUpstream,
-						Hidden:  true,
-						Usage:   "import host repo/prefix and creds from docker config as an upstream registry mode and config (creds will be stored plain text)",
-						EnvVars: []string{"HHFAB_IMPORT_HOST_UPSTREAM"},
+						Category: FlagCatGenConfig,
+						Name:     FlagNameImportHostUpstream,
+						Hidden:   true,
+						Usage:    "import host repo/prefix and creds from docker config as an upstream registry mode and config (creds will be stored plain text)",
+						EnvVars:  []string{"HHFAB_IMPORT_HOST_UPSTREAM"},
 					},
 					&cli.StringFlag{
-						Name:    FlagControlNodeMgmtLink,
-						Hidden:  true,
-						Usage:   "control node management link (for pci passthrough for VLAB-only)",
-						EnvVars: []string{"HHFAB_CONTROL_NODE_MGMT_LINK"},
+						Category: FlagCatGenConfig,
+						Name:     FlagControlNodeMgmtLink,
+						Hidden:   true,
+						Usage:    "control node management link (for pci passthrough for VLAB-only)",
+						EnvVars:  []string{"HHFAB_CONTROL_NODE_MGMT_LINK"},
 					},
 				),
 				Before: before(false),
@@ -386,6 +401,7 @@ func Run(ctx context.Context) error {
 						Repo:               c.String(FlagNameRegistryRepo),
 						Prefix:             c.String(FlagNameRegistryPrefix),
 						ImportConfig:       c.String(FlagNameConfig),
+						Force:              c.Bool(FlagNameForce),
 						Wiring:             c.StringSlice(FlagNameWiring),
 						ImportHostUpstream: c.Bool(FlagNameImportHostUpstream),
 						InitConfigInput: fab.InitConfigInput{

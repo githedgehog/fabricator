@@ -80,6 +80,7 @@ type InitConfig struct {
 	Repo               string
 	Prefix             string
 	ImportConfig       string
+	Force              bool
 	Wiring             []string
 	ImportHostUpstream bool
 	fab.InitConfigInput
@@ -95,7 +96,13 @@ func Init(ctx context.Context, c InitConfig) error {
 		return fmt.Errorf("checking config %q: %w", FabConfigFile, err)
 	}
 	if err == nil {
-		return fmt.Errorf("config %q: %w", FabConfigFile, ErrExist)
+		if c.Force {
+			slog.Debug("Overwriting existing config", "config", FabConfigFile)
+		} else {
+			slog.Warn("Delete manually or re-run with -f/--force to overwrite", "config", FabConfigFile)
+
+			return fmt.Errorf("config %q: %w", FabConfigFile, ErrExist)
+		}
 	}
 
 	regConf := RegistryConfig{
@@ -127,8 +134,13 @@ func Init(ctx context.Context, c InitConfig) error {
 			return fmt.Errorf("reading config %q to import: %w", c.ImportConfig, err)
 		}
 
-		if _, err := apiutil.NewFabLoader().Load(fabCfgData); err != nil {
-			return fmt.Errorf("importing config %q: loading: %w", c.ImportConfig, err)
+		l := apiutil.NewFabLoader()
+		if err := l.LoadAdd(ctx, fabCfgData); err != nil {
+			return fmt.Errorf("loading config to import %q: loading: %w", c.ImportConfig, err)
+		}
+
+		if _, _, err := fab.GetFabAndControls(ctx, l.GetClient(), true); err != nil {
+			return fmt.Errorf("loading config to import %q: getting fabricator and controls nodes: %w", c.ImportConfig, err)
 		}
 
 		slog.Info("Imported config", "source", c.ImportConfig)
