@@ -117,3 +117,16 @@ export ONIE_VERSION="test"
 
 oras push "ghcr.io/githedgehog/fabricator/onie-vlab:${ONIE_VERSION}" onie-kvm_x86_64.qcow2 onie_efi_code.fd onie_efi_vars.fd
 ```
+
+## NTP
+
+Image is basically taken from cturra/ntp:latest at some point in time.
+
+```bash
+export NTP_VERSION="v0.0.2"
+
+docker image rm cturra/ntp:latest
+docker pull --platform linux/amd64 cturra/ntp:latest
+docker tag cturra/ntp:latest ghcr.io/githedgehog/fabricator/ntp:${NTP_VERSION}
+docker push ghcr.io/githedgehog/fabricator/ntp:${NTP_VERSION}
+```

@@ -1,0 +1,7 @@
+apiVersion: v1
+version: 0.0.3
+description: Installs chrony in Kubernetes
+name: ntp
+sources:
+  - https://github.com/cturra/docker-ntp
+home: https://github.com/greg-redefined/chronyd-kubernetes
