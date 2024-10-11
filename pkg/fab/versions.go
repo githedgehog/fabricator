@@ -11,7 +11,10 @@ import (
 	"go.githedgehog.com/fabricator/pkg/version"
 )
 
-var FabricVersion = meta.Version("v0.51.2")
+var (
+	FabricatorVersion = meta.Version(version.Version)
+	FabricVersion     = meta.Version("v0.51.2")
+)
 
 var Versions = fabapi.Versions{
 	Platform: fabapi.PlatformVersions{
@@ -21,10 +24,12 @@ var Versions = fabapi.Versions{
 		K9s:         "v0.32.5",
 		Toolbox:     "latest",  // TODO use specific version, move to fabricator repo
 		Reloader:    "v1.0.40", // TODO upgrade or get rid of?
+		NTP:         "v0.0.2",
+		NTPChart:    FabricatorVersion,
 	},
 	Fabricator: fabapi.FabricatorVersions{
-		API:            meta.Version(version.Version),
-		Controller:     meta.Version(version.Version),
+		API:            FabricatorVersion,
+		Controller:     FabricatorVersion,
 		ControlUSBRoot: "v0.0.4", // TODO separate repo/versioning to stay up to date with Flatcar?
 	},
 	Fabric: fabapi.FabricVersions{

@@ -23,6 +23,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab/comp/flatcar"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k9s"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/ntp"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/reloader"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/zot"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
@@ -62,6 +63,7 @@ var AirgapArtifactLists = []comp.ListOCIArtifacts{
 	zot.Artifacts,
 	reloader.Artifacts,
 	fabric.Artifacts,
+	ntp.Artifacts,
 }
 
 func (b *ControlInstallBuilder) Build(ctx context.Context) error {

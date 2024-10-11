@@ -35,11 +35,11 @@ func (r *Fabricator) SetupWebhookWithManager(mgr ctrl.Manager) error {
 var _ webhook.Defaulter = &Fabricator{}
 
 // Default implements webhook.Defaulter so a webhook will be registered for the type
-func (r *Fabricator) Default() {
-	fabricatorlog.Info("default", "name", r.Name)
+// func (r *Fabricator) Default() {
+// 	fabricatorlog.Info("default", "name", r.Name)
 
-	// TODO(user): fill in your defaulting logic.
-}
+// 	// TODO(user): fill in your defaulting logic.
+// }
 
 // TODO(user): change verbs to "verbs=create;update;delete" if you want to enable deletion validation.
 // NOTE: The 'path' attribute must follow a specific pattern and should not be modified directly here.

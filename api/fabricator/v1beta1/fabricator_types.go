@@ -51,7 +51,7 @@ type ControlConfig struct {
 
 	DefaultUser ControlUser `json:"defaultUser,omitempty"`
 
-	// TODO add back NTP (and NTP servers)
+	NTPServers []string `json:"ntpServers,omitempty"`
 }
 
 type ControlUser struct {
@@ -134,6 +134,8 @@ type PlatformVersions struct {
 	K9s         meta.Version `json:"k9s,omitempty"`
 	Toolbox     meta.Version `json:"toolbox,omitempty"`
 	Reloader    meta.Version `json:"reloader,omitempty"`
+	NTP         meta.Version `json:"ntp,omitempty"`
+	NTPChart    meta.Version `json:"ntpChart,omitempty"`
 }
 
 type FabricatorVersions struct {
@@ -227,7 +229,21 @@ func init() {
 	}, meta.Prefix(""))
 }
 
+func (f *Fabricator) Default() {
+	if len(f.Spec.Config.Control.NTPServers) == 0 {
+		f.Spec.Config.Control.NTPServers = []string{
+			"time.cloudflare.com",
+			"time1.google.com",
+			"time2.google.com",
+			"time3.google.com",
+			"time4.google.com",
+		}
+	}
+}
+
 func (f *Fabricator) Validate(ctx context.Context) error {
+	f.Default()
+
 	err := fabricatorValidate.StructCtx(ctx, f)
 	if err != nil {
 		return fmt.Errorf("validating: %w", err)

@@ -68,6 +68,10 @@ spec:
                         type: string
                       managementSubnet:
                         type: string
+                      ntpServers:
+                        items:
+                          type: string
+                        type: array
                       tlsSAN:
                         items:
                           type: string
@@ -284,6 +288,10 @@ spec:
                             type: string
                           k9s:
                             type: string
+                          ntp:
+                            type: string
+                          ntpChart:
+                            type: string
                           reloader:
                             type: string
                           toolbox:
@@ -352,6 +360,10 @@ spec:
                       k3s:
                         type: string
                       k9s:
+                        type: string
+                      ntp:
+                        type: string
+                      ntpChart:
                         type: string
                       reloader:
                         type: string
