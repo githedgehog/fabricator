@@ -35,6 +35,7 @@ _Appears in:_
 | `kubeClusterDNS` _[Addr](#addr)_ |  |  |  |
 | `dummySubnet` _[Prefix](#prefix)_ |  |  |  |
 | `defaultUser` _[ControlUser](#controluser)_ |  |  |  |
+| `ntpServers` _string array_ |  |  |  |
 
 
 #### ControlConfigRegistryUpstream
@@ -377,6 +378,8 @@ _Appears in:_
 | `k9s` _[Version](#version)_ |  |  |  |
 | `toolbox` _[Version](#version)_ |  |  |  |
 | `reloader` _[Version](#version)_ |  |  |  |
+| `ntp` _[Version](#version)_ |  |  |  |
+| `ntpChart` _[Version](#version)_ |  |  |  |
 
 
 #### RegistryConfig

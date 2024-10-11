@@ -1,0 +1,7 @@
+image:
+  repository: {{ .Repo }}
+  tag: {{ .Tag }}
+serviceUDP:
+  nodePort: {{ .NodePort }}
+hostNetwork: true
+ntpServers: "{{ .NTPServers }}"

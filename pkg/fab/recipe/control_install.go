@@ -31,6 +31,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab/comp/fabric"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k9s"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/ntp"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/reloader"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/zot"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
@@ -161,6 +162,10 @@ func (c *ControlInstall) Run(ctx context.Context) error {
 
 	if err := c.installReloader(ctx, kube); err != nil {
 		return fmt.Errorf("installing reloader: %w", err)
+	}
+
+	if err := c.installNTP(ctx, kube); err != nil {
+		return fmt.Errorf("installing ntp: %w", err)
 	}
 
 	if err := c.installFabric(ctx, kube); err != nil {
@@ -613,6 +618,29 @@ func (c *ControlInstall) installWiring(ctx context.Context, kube client.Client) 
 
 			slog.Debug("Installed included wiring", "kind", kind, "name", name)
 		}
+	}
+
+	return nil
+}
+
+func (c *ControlInstall) installNTP(ctx context.Context, kube client.Client) error {
+	slog.Info("Installing NTP server")
+
+	if err := comp.EnforceKubeInstall(ctx, kube, c.Fab, ntp.Install); err != nil {
+		return fmt.Errorf("enforcing ntp install: %w", err)
+	}
+
+	if err := waitKube(ctx, kube, "ntp", comp.FabNamespace,
+		&comp.Deployment{}, func(obj *comp.Deployment) (bool, error) {
+			for _, cond := range obj.Status.Conditions {
+				if cond.Type == comp.DeploymentAvailable && cond.Status == comp.ConditionTrue {
+					return true, nil
+				}
+			}
+
+			return false, nil
+		}); err != nil {
+		return fmt.Errorf("waiting for ntp ready: %w", err)
 	}
 
 	return nil
