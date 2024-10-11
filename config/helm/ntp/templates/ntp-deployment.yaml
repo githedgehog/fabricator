@@ -1,0 +1,86 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ template "chrony.fullname" . }}
+  labels:
+    app: {{ template "chrony.name" . }}
+    chart: {{ template "chrony.chart" . }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: {{ template "chrony.name" . }}
+      release: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app: {{ template "chrony.name" . }}
+        release: {{ .Release.Name }}
+    spec:
+      hostNetwork: {{ .Values.hostNetwork }}
+      containers:
+      - name: {{ .Chart.Name }}
+        env:
+        - name: NTP_SERVERS
+          value: {{ .Values.ntpServers }}
+        {{- range $key, $value := .Values.extraEnvVars }}
+        - name: {{ $key | quote }}
+          value: {{ $value | quote }}
+        {{- end }}
+        {{- range $key, $value := .Values.extraEnvVarsSecret }}
+        - name: {{ $key | quote }}
+          valueFrom:
+            secretKeyRef:
+              key: {{ $value.key | quote }}
+              name: {{ $value.name | quote }}
+        {{- end }}
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        ports:
+        - containerPort: 123
+          name: ntp
+          protocol: UDP
+        resources:
+{{ toYaml .Values.resources | indent 10 }}
+        securityContext:
+          capabilities:
+            add:
+            - SYS_NICE
+            - SYS_RESOURCE
+            - SYS_TIME
+        {{- if .Values.probes.liveness.enabled }}
+        livenessProbe:
+          exec:
+            command:
+            - /usr/bin/probe.sh
+          initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
+          failureThreshold: {{ .Values.probes.liveness.failureThreshold }}
+          timeoutSeconds: {{ .Values.probes.liveness.timeoutSeconds }}
+        {{- end }}
+        {{- if .Values.probes.readiness.enabled }}
+        readinessProbe:
+          exec:
+            command:
+            - /usr/bin/probe.sh
+          initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
+          failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
+          timeoutSeconds: {{ .Values.probes.readiness.timeoutSeconds }}
+        {{- end }}
+        volumeMounts:
+        - mountPath: /usr/bin/probe.sh
+          name: probe
+          subPath: probe.sh
+      restartPolicy: Always
+      serviceAccountName: ""
+      volumes:
+      - configMap:
+          defaultMode: 511
+          name: {{ template "chrony.fullname" . }}-probe
+        name: probe

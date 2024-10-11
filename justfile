@@ -90,11 +90,11 @@ _helm-fabricator: _kustomize _helm _helmify _kube_gen
   {{helm}} lint config/helm/fabricator-{{version}}.tgz
 
 # Build all K8s artifacts (images and charts)
-kube-build: build (_docker-build "fabricator") _helm-fabricator-api _helm-fabricator && version
+kube-build: build (_docker-build "fabricator") _helm-fabricator-api _helm-fabricator (_helm-build "ntp") && version
   # Docker images and Helm charts built
 
 # Push all K8s artifacts (images and charts)
-kube-push: kube-build (_helm-push "fabricator-api") (_kube-push "fabricator") && version
+kube-push: kube-build (_helm-push "fabricator-api") (_kube-push "fabricator") (_helm-push "ntp") && version
   # Docker images and Helm charts pushed
 
 # Push all K8s artifacts (images and charts) and binaries

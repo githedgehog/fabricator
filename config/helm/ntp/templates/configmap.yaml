@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ template "chrony.fullname" . }}-probe
+  labels:
+    app: {{ template "chrony.name" . }}
+    chart: {{ template "chrony.chart" . }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+data:
+  probe.sh: |
+    #!/bin/sh
+    /usr/bin/chronyc sources
