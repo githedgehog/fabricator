@@ -270,6 +270,8 @@ func TestInitConfig(t *testing.T) {
 				}
 			}
 
+			test.expectedFab.Default()
+
 			data, err := fab.InitConfig(ctx, test.in)
 			if test.err {
 				require.Error(t, err)
