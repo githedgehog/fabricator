@@ -12,15 +12,15 @@ metadata:
 spec:
   podSelector:
     matchLabels:
-      control-plane: controller-manager
+      control-plane: ctrl
   policyTypes:
     - Ingress
   ingress:
     # This allows ingress traffic from any namespace with the label metrics: enabled
     - from:
-      - namespaceSelector:
-          matchLabels:
-            metrics: enabled  # Only from namespaces with this label
+        - namespaceSelector:
+            matchLabels:
+              metrics: enabled # Only from namespaces with this label
       ports:
         - port: 8443
           protocol: TCP
