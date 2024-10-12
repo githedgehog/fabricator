@@ -28,6 +28,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/certmanager"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/f8s"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/fabric"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k9s"
@@ -176,7 +177,9 @@ func (c *ControlInstall) Run(ctx context.Context) error {
 		return fmt.Errorf("installing included wiring: %w", err)
 	}
 
-	// TODO install fabricator with config
+	if err := c.installFabricator(ctx, kube); err != nil {
+		return fmt.Errorf("installing fabricator and config: %w", err)
+	}
 
 	if err := os.WriteFile(InstallMarkerFile, []byte(InstallMarkerComplete), 0o644); err != nil { //nolint:gosec
 		return fmt.Errorf("writing install marker: %w", err)
@@ -294,7 +297,7 @@ func (c *ControlInstall) installK8s(ctx context.Context) (client.Client, error) 
 	kube, err := kubeutil.NewClient(ctx, k3s.KubeConfigPath,
 		comp.CoreAPISchemeBuilder, comp.AppsAPISchemeBuilder,
 		comp.HelmAPISchemeBuilder, comp.CMApiSchemeBuilder, comp.CMMetaSchemeBuilder,
-		wiringapi.SchemeBuilder, vpcapi.SchemeBuilder,
+		wiringapi.SchemeBuilder, vpcapi.SchemeBuilder, fabapi.SchemeBuilder,
 		// TODO move to the operator together with management dhcp subnet creation?
 		dhcpapi.SchemeBuilder,
 	)
@@ -602,7 +605,7 @@ func (c *ControlInstall) installWiring(ctx context.Context, kube client.Client) 
 				return !apierrors.IsConflict(err)
 			}, func() error {
 				if attempt > 0 {
-					slog.Debug("Retrying installing wiring", "kind", kind, "name", name)
+					slog.Debug("Retrying installing wiring", "kind", kind, "name", name, "attempt", attempt)
 				}
 
 				attempt++
@@ -641,6 +644,34 @@ func (c *ControlInstall) installNTP(ctx context.Context, kube client.Client) err
 			return false, nil
 		}); err != nil {
 		return fmt.Errorf("waiting for ntp ready: %w", err)
+	}
+
+	return nil
+}
+
+func (c *ControlInstall) installFabricator(ctx context.Context, kube client.Client) error {
+	slog.Info("Installing fabricator")
+
+	if err := comp.EnforceKubeInstall(ctx, kube, c.Fab, f8s.Install); err != nil {
+		return fmt.Errorf("enforcing fabricactor install: %w", err)
+	}
+
+	if err := waitKube(ctx, kube, "fabricator-ctrl", comp.FabNamespace,
+		&comp.Deployment{}, func(obj *comp.Deployment) (bool, error) {
+			for _, cond := range obj.Status.Conditions {
+				if cond.Type == comp.DeploymentAvailable && cond.Status == comp.ConditionTrue {
+					return true, nil
+				}
+			}
+
+			return false, nil
+		}); err != nil {
+		return fmt.Errorf("waiting for fabricator-ctrl ready: %w", err)
+	}
+
+	// TODO only install control node if it's not the first one and we're joining the cluster
+	if err := comp.EnforceKubeInstall(ctx, kube, c.Fab, f8s.InstallFabAndControl(c.Control)); err != nil {
+		return fmt.Errorf("installing fabricator config and control nodes: %w", err)
 	}
 
 	return nil

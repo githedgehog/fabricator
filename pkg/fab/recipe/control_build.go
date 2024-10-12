@@ -19,6 +19,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/embed/recipebin"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/certmanager"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/f8s"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/fabric"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/flatcar"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
@@ -64,6 +65,7 @@ var AirgapArtifactLists = []comp.ListOCIArtifacts{
 	reloader.Artifacts,
 	fabric.Artifacts,
 	ntp.Artifacts,
+	f8s.Artifacts,
 }
 
 func (b *ControlInstallBuilder) Build(ctx context.Context) error {
