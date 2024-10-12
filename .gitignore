@@ -2,6 +2,7 @@
 .DS_Store
 *kubeconfig.yaml
 lcov.info
+.zot
 
 # Binaries for programs and plugins
 *.exe
