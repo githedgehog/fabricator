@@ -133,13 +133,17 @@ test path="./...": gen _envtest _gcov2lcov
 # Docker/Helm recipes
 #
 
+oci := ""
+skopeo_dest_insecure := if oci == "http" { "--dest-tls-verify=false" } else { "" }
+oras_insecure := if oci == "http" { "--plain-http" } else { "" }
+
 _docker-build bin: build
   cp bin/{{bin}} config/docker/{{bin}}/
   cd config/docker/{{bin}}/ && docker build -t {{oci_repo}}/{{oci_prefix}}/{{bin}}:{{version}} -f Dockerfile .
 
 skopeo_copy_flags := if env("DOCKER_HOST", "") != "" { "--src-daemon-host " + env_var("DOCKER_HOST") } else { "" }
 _docker-push bin: _skopeo
-  {{skopeo}} --insecure-policy copy {{skopeo_copy_flags}} docker-daemon:{{oci_repo}}/{{oci_prefix}}/{{bin}}:{{version}} docker://{{oci_repo}}/{{oci_prefix}}/{{bin}}:{{version}}
+  {{skopeo}} --insecure-policy copy {{skopeo_copy_flags}} {{skopeo_dest_insecure}} docker-daemon:{{oci_repo}}/{{oci_prefix}}/{{bin}}:{{version}} docker://{{oci_repo}}/{{oci_prefix}}/{{bin}}:{{version}}
 
 _helm-build name: _helm
   @rm config/helm/{{name}}-v*.tgz || true

@@ -99,7 +99,7 @@ kube-push: kube-build (_helm-push "fabricator-api") (_kube-push "fabricator") (_
 
 # Push all K8s artifacts (images and charts) and binaries
 push: kube-push && version
-  cd bin && oras push {{oci_repo}}/{{oci_prefix}}/hhfab:{{version}} hhfab
+  cd bin && oras push {{oras_insecure}} {{oci_repo}}/{{oci_prefix}}/hhfab:{{version}} hhfab
 
 # Install API on a kind cluster and wait for CRDs to be ready
 test-api: _helm-fabricator-api
@@ -115,3 +115,17 @@ test-api: _helm-fabricator-api
 # Generate docs
 docs: gen _crd_ref_docs
   {{crd_ref_docs}} --source-path=./api/ --config=api/docs.config.yaml --renderer=markdown --output-path=./docs/api.md
+
+#
+# Setup local registry
+#
+zot_version := "v2.1.1"
+zot := localbin / "zot" + "-" + zot_version
+zot_os := "linux"
+zot_arch := "amd64"
+@_zot: _localbin
+  [ -f {{zot}} ] || wget --quiet -O {{zot}} https://github.com/project-zot/zot/releases/download/{{zot_version}}/zot-{{zot_os}}-{{zot_arch}} && chmod +x {{zot}}
+
+_localreg: _zot
+  ./hack/localreg.sh
+  {{zot}} serve .zot/config.json 2>&1 | tee .zot/log

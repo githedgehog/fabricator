@@ -24,7 +24,7 @@ on:
 
 jobs:
   test:
-    runs-on: lab
+    runs-on: ubuntu-latest-x86-4-cores
 
     steps:
       - name: Checkout repository
@@ -35,6 +35,9 @@ jobs:
         with:
           go-version: stable
           cache: true
+
+      - name: Setup Just
+        uses: extractions/setup-just@v2
 
       - name: GHA Lint
         run: |
@@ -68,6 +71,7 @@ jobs:
         with:
           limit-access-to-actor: true
 
+  # TODO add a separate full e2e build with USB drive
   build:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
@@ -83,10 +87,10 @@ jobs:
         buildmode:
           - "--usb=false"
           - "--usb=true"
-        exclude:
+        # exclude:
           # Not enough disk space
-          - os: macos-latest
-            buildmode: "--usb=true"
+          # - os: macos-latest
+          #   buildmode: "--usb=true"
 
     steps:
       - name: Checkout repository
@@ -108,10 +112,6 @@ jobs:
         run: |
           brew install docker
 
-      - name: Build hhfab for local OS/ARCH
-        run: |
-          just --timestamp hhfab-build-local
-
       - name: Login to ghcr.io
         uses: docker/login-action@v3
         with:
@@ -119,9 +119,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Build hhfab for local OS/ARCH
+        run: |
+          just hhfab-build-local
+
       - name: hhfab init and build
         run: |
-          bin/hhfab init -v --dev
+          bin/hhfab init -v --dev --import-host-upstream
           bin/hhfab build -v ${{ matrix.buildmode }}
           ls -lah result
 
@@ -189,31 +193,30 @@ jobs:
           go-version: stable
           cache: true
 
+      - name: Setup local registry
+        env:
+          LOCALREG_SYNC_REGISTRY: m-pub.l.hhdev.io:31000
+          LOCALREG_SYNC_USERNAME: lab
+          LOCALREG_SYNC_PASSWORD: ${{ secrets.LAB_REGISTRY_TOKEN }}
+        run: |
+          just --timestamp _localreg &
+
       - name: Build hhfab
         run: |
-          just --timestamp hhfab-build-local
-
-      - name: Login to ghcr.io
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Login to lab registry
-        uses: docker/login-action@v3
-        with:
-          registry: m-pub.l.hhdev.io:31000
-          username: lab
-          password: ${{ secrets.LAB_REGISTRY_TOKEN }}
+          just --timestamp oci_repo=127.0.0.1:30000 oci=http push
 
       - name: hhfab init and vlab up
+        env:
+          HHFAB_REG_REPO: 127.0.0.1:30000
         run: |
-          export HHFAB_REG_REPO=m-pub.l.hhdev.io:31000
-
           bin/hhfab init -v --dev -m ${{ matrix.fabricmode }} ${{ matrix.includeonie }}
           bin/hhfab vlab gen -v
           bin/hhfab vlab up -v --fail-fast --exit-on-ready ${{ matrix.buildmode }}
+
+      - name: Dump local registry logs
+        if: ${{ always() }}
+        run: |
+          cat .zot/log
 
       - name: Setup tmate session for debug
         if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
