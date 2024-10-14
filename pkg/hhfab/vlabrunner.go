@@ -434,18 +434,9 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 
 	go func() {
 		<-ctx.Done()
-
-		slog.Debug("Context done", "err", ctx.Err())
-
 		time.Sleep(15 * time.Second)
-
-		if errors.Is(ctx.Err(), ErrExist) {
-			slog.Debug("Shutting down with code 0 as exit was requested")
-			os.Exit(0)
-		}
-
-		slog.Debug("Shutting down with code 1 due to error", "err", ctx.Err().Error())
-		os.Exit(1)
+		slog.Debug("Force exit with code 2", "err", ctx.Err())
+		os.Exit(2)
 	}()
 
 	if err := group.Wait(); err != nil && !errors.Is(err, ErrExit) {
