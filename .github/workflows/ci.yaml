@@ -211,7 +211,7 @@ jobs:
         run: |
           bin/hhfab init -v --dev -m ${{ matrix.fabricmode }} ${{ matrix.includeonie }}
           bin/hhfab vlab gen -v
-          bin/hhfab vlab up -v --fail-fast --ready setup-vpcs --ready test-connectivity --ready exit ${{ matrix.buildmode }}
+          bin/hhfab vlab up -v --ready setup-vpcs --ready test-connectivity --ready exit ${{ matrix.buildmode }}
 
       - name: Dump local registry logs
         if: ${{ always() }}
