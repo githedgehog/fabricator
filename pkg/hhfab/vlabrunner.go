@@ -408,6 +408,12 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 				case OnReadyTestConnectivity:
 					slog.Warn("Testing connectivity not implemented") // TODO
 				case OnReadyExit:
+					// TODO seems like some graceful shutdown logic isn't working in CI and we're getting stuck w/o this
+					if os.Getenv("GITHUB_ACTIONS") == "true" {
+						slog.Warn("Immediately exiting b/c running in GHA")
+						os.Exit(0)
+					}
+
 					return ErrExit
 				}
 			}
