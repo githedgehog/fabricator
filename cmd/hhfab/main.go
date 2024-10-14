@@ -23,6 +23,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/hhfab"
 	"go.githedgehog.com/fabricator/pkg/version"
 	"gopkg.in/natefinch/lumberjack.v2"
+	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
@@ -250,6 +251,7 @@ func Run(ctx context.Context) error {
 			logger := slog.New(handler)
 			slog.SetDefault(logger)
 			ctrl.SetLogger(logr.FromSlogHandler(handler))
+			klog.SetSlogLogger(logger)
 
 			if quiet {
 				return nil
