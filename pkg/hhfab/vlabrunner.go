@@ -406,7 +406,15 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						return fmt.Errorf("setting up VPCs: %w", err)
 					}
 				case OnReadyTestConnectivity:
-					slog.Warn("Testing connectivity not implemented") // TODO
+					// TODO make it configurable
+					if err := c.TestConnectivity(ctx, vlab, TestConnectivityOpts{
+						WaitSwitchesReady: true,
+						PingsCount:        5,
+						IPerfsCount:       0,
+						CurlsCount:        3,
+					}); err != nil {
+						return fmt.Errorf("testing connectivity: %w", err)
+					}
 				case OnReadyExit:
 					// TODO seems like some graceful shutdown logic isn't working in CI and we're getting stuck w/o this
 					if os.Getenv("GITHUB_ACTIONS") == "true" {

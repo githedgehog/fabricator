@@ -21,9 +21,11 @@ import (
 	"go.githedgehog.com/fabric/api/meta"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1alpha2"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1alpha2"
+	"go.githedgehog.com/fabric/pkg/util/apiutil"
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlutil "sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -54,6 +56,13 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	if opts.SubnetsPerVPC <= 0 {
 		return fmt.Errorf("subnets per VPC must be positive")
 	}
+
+	slog.Info("Setting up VPCs and VPCAttachments",
+		"perSubnet", opts.ServersPerSubnet,
+		"perVPC", opts.SubnetsPerVPC,
+		"wait", opts.WaitSwitchesReady,
+		"cleanup", opts.ForceCleanup,
+	)
 
 	sshPorts := map[string]uint{}
 	for _, vm := range vlab.VMs {
@@ -356,7 +365,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 
 	slog.Info("Configuring networking on servers")
 
-	g := errgroup.Group{}
+	g := &errgroup.Group{}
 	for _, server := range servers.Items {
 		g.Go(func() error {
 			ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
@@ -432,6 +441,237 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	return nil
 }
 
+type TestConnectivityOpts struct {
+	WaitSwitchesReady bool
+	PingsCount        int
+	PingsParallel     int64
+	IPerfsCount       int
+	IPerfsParallel    int64
+	CurlsCount        int
+	CurlsParallel     int64
+}
+
+func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConnectivityOpts) error {
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Minute)
+	defer cancel()
+
+	if opts.PingsParallel <= 0 {
+		opts.PingsParallel = 50
+	}
+	if opts.IPerfsParallel <= 0 {
+		opts.IPerfsParallel = 1
+	}
+	if opts.CurlsParallel <= 0 {
+		opts.CurlsParallel = 50
+	}
+
+	slog.Info("Testing server to server and server to external connectivity")
+
+	sshPorts := map[string]uint{}
+	for _, vm := range vlab.VMs {
+		sshPorts[vm.Name] = getSSHPort(vm.ID)
+	}
+
+	sshAuth, err := goph.RawKey(vlab.SSHKey, "")
+	if err != nil {
+		return fmt.Errorf("getting ssh auth: %w", err)
+	}
+
+	kubeconfig := filepath.Join(c.WorkDir, VLABDir, VLABKubeConfig)
+	kube, err := kubeutil.NewClientWithCache(ctx, kubeconfig,
+		wiringapi.SchemeBuilder,
+		vpcapi.SchemeBuilder,
+		agentapi.SchemeBuilder,
+	)
+	if err != nil {
+		return fmt.Errorf("creating kube client: %w", err)
+	}
+
+	if opts.WaitSwitchesReady {
+		slog.Info("Waiting for switches ready before testing connectivity")
+
+		if err := waitSwitchesReady(ctx, kube); err != nil {
+			return fmt.Errorf("waiting for switches ready: %w", err)
+		}
+	}
+
+	servers := &wiringapi.ServerList{}
+	if err := kube.List(ctx, servers); err != nil {
+		return fmt.Errorf("listing servers: %w", err)
+	}
+
+	slog.Info("Discovering server IPs", "servers", len(servers.Items))
+
+	ips := map[string]netip.Prefix{}
+	sshs := map[string]*goph.Client{}
+	defer func() {
+		for _, client := range sshs {
+			if err := client.Close(); err != nil {
+				slog.Warn("Closing ssh client", "err", err)
+			}
+		}
+	}()
+
+	g := &errgroup.Group{}
+	for _, server := range servers.Items {
+		g.Go(func() error {
+			ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+			defer cancel()
+
+			if err := func() error {
+				sshPort, ok := sshPorts[server.Name]
+				if !ok {
+					return fmt.Errorf("missing ssh port for %q", server.Name)
+				}
+
+				client, err := goph.NewConn(&goph.Config{
+					User:     "core",
+					Addr:     "127.0.0.1",
+					Port:     sshPort,
+					Auth:     sshAuth,
+					Timeout:  10 * time.Second,
+					Callback: ssh.InsecureIgnoreHostKey(), //nolint:gosec
+				})
+				if err != nil {
+					return fmt.Errorf("connecting to %q: %w", server.Name, err)
+				}
+				sshs[server.Name] = client
+
+				out, err := client.RunContext(ctx, "ip -o -4 addr show | awk '{print $2, $4}'")
+				if err != nil {
+					return fmt.Errorf("running ip addr show: %w: out: %s", err, string(out))
+				}
+
+				found := false
+				lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+				for _, line := range lines {
+					fields := strings.Fields(line)
+					if len(fields) != 2 {
+						return fmt.Errorf("unexpected ip addr line %q", line)
+					}
+
+					if fields[0] == "lo" || fields[0] == "enp2s0" {
+						continue
+					}
+
+					if found {
+						return fmt.Errorf("unexpected multiple ip addrs")
+					}
+
+					addr, err := netip.ParsePrefix(fields[1])
+					if err != nil {
+						return fmt.Errorf("parsing ip addr %q: %w", fields[1], err)
+					}
+
+					found = true
+					ips[server.Name] = addr
+
+					slog.Info("Found", "server", server.Name, "addr", addr.String())
+				}
+
+				if !found {
+					return fmt.Errorf("no ip addr found")
+				}
+
+				return nil
+			}(); err != nil {
+				return fmt.Errorf("getting server %q IP: %w", server.Name, err)
+			}
+
+			return nil
+		})
+	}
+
+	if err := g.Wait(); err != nil {
+		return fmt.Errorf("discovering server IPs: %w", err)
+	}
+
+	slog.Info("Running pings, iperfs and curls", "servers", len(servers.Items))
+
+	pings := semaphore.NewWeighted(opts.PingsParallel)
+	iperfs := semaphore.NewWeighted(opts.IPerfsParallel)
+	curls := semaphore.NewWeighted(opts.CurlsParallel)
+
+	g = &errgroup.Group{}
+	for _, serverA := range servers.Items {
+		for _, serverB := range servers.Items {
+			if serverA.Name == serverB.Name {
+				continue
+			}
+
+			g.Go(func() error {
+				if err := func() error {
+					expectedReachable, err := apiutil.IsServerReachable(ctx, kube, serverA.Name, serverB.Name)
+					if err != nil {
+						return fmt.Errorf("checking if should be reachable: %w", err)
+					}
+
+					slog.Debug("Checking connectivity", "from", serverA.Name, "to", serverB.Name, "reachable", expectedReachable)
+
+					ipA, ipB := ips[serverA.Name], ips[serverB.Name]
+					clientA, clientB := sshs[serverA.Name], sshs[serverB.Name]
+
+					if err := checkPing(ctx, opts, pings, serverA.Name, clientA, ipB.Addr(), expectedReachable); err != nil {
+						return fmt.Errorf("checking ping from %s to %s: %w", serverA.Name, serverB.Name, err)
+					}
+
+					// TODO iperf (only one at a time) if reachable
+					_ = iperfs
+					_ = clientB
+					_ = ipA
+
+					return nil
+				}(); err != nil {
+					return fmt.Errorf("testing connectivity from %q to %q: %w", serverA.Name, serverB.Name, err)
+				}
+
+				return nil
+			})
+		}
+
+		g.Go(func() error {
+			if err := func() error {
+				reachable, err := apiutil.IsExternalSubnetReachable(ctx, kube, serverA.Name, "0.0.0.0/0") // TODO test for specific IP
+				if err != nil {
+					return fmt.Errorf("checking if should be reachable: %w", err)
+				}
+
+				slog.Debug("Checking external connectivity", "from", serverA.Name, "reachable", reachable)
+
+				client, err := goph.NewConn(&goph.Config{
+					User:     "core",
+					Addr:     "127.0.0.1",
+					Port:     sshPorts[serverA.Name],
+					Auth:     sshAuth,
+					Timeout:  10 * time.Second,
+					Callback: ssh.InsecureIgnoreHostKey(), //nolint:gosec
+				})
+				if err != nil {
+					return fmt.Errorf("connecting to %q: %w", serverA.Name, err)
+				}
+				defer client.Close()
+
+				// TODO curl
+				_ = curls
+
+				return nil
+			}(); err != nil {
+				return fmt.Errorf("testing connectivity from %q to external: %w", serverA.Name, err)
+			}
+
+			return nil
+		})
+	}
+
+	if err := g.Wait(); err != nil {
+		return fmt.Errorf("testing connectivity: %w", err)
+	}
+
+	slog.Info("All connectivity tested")
+
+	return nil
+}
+
 func waitSwitchesReady(ctx context.Context, kube client.Reader) error {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
@@ -473,6 +713,47 @@ func waitSwitchesReady(ctx context.Context, kube client.Reader) error {
 
 		time.Sleep(15 * time.Second)
 	}
+}
+
+func checkPing(ctx context.Context, opts TestConnectivityOpts, pings *semaphore.Weighted, from string, fromSSH *goph.Client, toIP netip.Addr, expectedReachable bool) error {
+	if opts.PingsCount <= 0 {
+		return nil
+	}
+
+	if err := pings.Acquire(ctx, 1); err != nil {
+		return fmt.Errorf("acquiring ping semaphore: %w", err)
+	}
+	defer pings.Release(1)
+
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute) // TODO configurable
+	defer cancel()
+
+	slog.Debug("Pinging", "from", from, "to", toIP.String())
+
+	cmd := fmt.Sprintf("ping -c %d -W 1 %s", opts.PingsCount, toIP.String()) // TODO wrap with timeout?
+	outR, err := fromSSH.RunContext(ctx, cmd)
+	out := strings.TrimSpace(string(outR))
+
+	pingOk := err == nil && strings.Contains(out, "0% packet loss")
+	pingFail := err != nil && strings.Contains(out, "100% packet loss")
+
+	slog.Debug("Ping result", "from", from, "to", toIP.String(), "expected", expectedReachable, "ok", pingOk, "fail", pingFail, "err", err, "out", out)
+
+	if pingOk == pingFail {
+		return fmt.Errorf("unexpected ping result: %s", out) // TODO replace with custom error?
+	}
+
+	if expectedReachable && !pingOk {
+		return fmt.Errorf("should be reachable but ping failed with output: %s", out) // TODO replace with custom error?
+	}
+
+	if !expectedReachable && !pingFail {
+		return fmt.Errorf("should not be reachable but ping succeeded with output: %s", out) // TODO replace with custom error?
+	}
+
+	// TODO other cases to handle?
+
+	return nil
 }
 
 func VLANsFrom(ranges ...meta.VLANRange) iter.Seq[uint16] {
