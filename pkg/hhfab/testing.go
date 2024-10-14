@@ -261,7 +261,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	}
 
 	if opts.WaitSwitchesReady {
-		slog.Info("Waiting for switches ready")
+		slog.Info("Waiting for switches ready before configuring VPCs and VPCAttachments")
 		if err := waitSwitchesReady(ctx, kube); err != nil {
 			return fmt.Errorf("waiting for switches ready: %w", err)
 		}
