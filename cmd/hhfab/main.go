@@ -48,7 +48,7 @@ const (
 	FlagNameServersRestricted     = "servers-restricted"
 	FlagNameControlsUSB           = "controls-usb"
 	FlagNameFailFast              = "fail-fast"
-	FlagNameExitOnReady           = "exit-on-ready"
+	FlagNameReady                 = "ready"
 )
 
 func main() {
@@ -278,6 +278,11 @@ func Run(ctx context.Context) error {
 		cacheDirFlag,
 		verboseFlag,
 		briefFlag,
+	}
+
+	onReadyCommands := []string{}
+	for _, cmd := range hhfab.AllOnReady {
+		onReadyCommands = append(onReadyCommands, string(cmd))
 	}
 
 	cli.VersionFlag.(*cli.BoolFlag).Aliases = []string{"V"}
@@ -548,9 +553,9 @@ func Run(ctx context.Context) error {
 								Name:  FlagNameFailFast,
 								Usage: "exit on first error",
 							},
-							&cli.BoolFlag{
-								Name:  FlagNameExitOnReady,
-								Usage: "exit when VLAB is up",
+							&cli.StringSliceFlag{
+								Name:  FlagNameReady,
+								Usage: "run commands on all VMs ready (one of: " + strings.Join(onReadyCommands, ", ") + ")",
 							},
 						),
 						Before: before(false),
@@ -565,7 +570,7 @@ func Run(ctx context.Context) error {
 									ServersRestricted:  c.Bool(FlagNameServersRestricted),
 									ControlUSB:         c.Bool(FlagNameControlsUSB),
 									FailFast:           c.Bool(FlagNameFailFast),
-									ExitOnReady:        c.Bool(FlagNameExitOnReady),
+									OnReady:            c.StringSlice(FlagNameReady),
 								},
 							}); err != nil {
 								return fmt.Errorf("running VLAB: %w", err)

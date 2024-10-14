@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -76,7 +77,21 @@ type VLABRunOpts struct {
 	ServersRestricted  bool
 	ControlUSB         bool
 	FailFast           bool
-	ExitOnReady        bool
+	OnReady            []string
+}
+
+type OnReady string
+
+const (
+	OnReadyExit             OnReady = "exit"
+	OnReadySetupVPCs        OnReady = "setup-vpcs"
+	OnReadyTestConnectivity         = "test-connectivity"
+)
+
+var AllOnReady = []OnReady{
+	OnReadyExit,
+	OnReadySetupVPCs,
+	OnReadyTestConnectivity,
 }
 
 func (c *Config) checkForBins() error {
@@ -91,6 +106,17 @@ func (c *Config) checkForBins() error {
 }
 
 func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) error {
+	for _, cmd := range opts.OnReady {
+		if !slices.Contains(AllOnReady, OnReady(cmd)) {
+			return fmt.Errorf("unsupported on-ready command %q", cmd) //nolint:goerr113
+		}
+	}
+
+	if len(opts.OnReady) > 0 && !opts.FailFast {
+		slog.Warn("On-ready commands enables fail-fast")
+		opts.FailFast = true
+	}
+
 	if err := c.checkForBins(); err != nil {
 		return err
 	}
@@ -345,8 +371,41 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 
 		slog.Info("All VMs are ready")
 
-		if opts.ExitOnReady {
-			os.Exit(0)
+		if err := func() error {
+			for _, cmd := range opts.OnReady {
+				slog.Info("Running on-ready command", "command", cmd)
+
+				switch OnReady(cmd) {
+				case OnReadySetupVPCs:
+					// TODO make it configurable
+					if err := c.SetupVPCs(ctx, vlab, SetupVPCsOpts{
+						WaitSwitchesReady: true,
+						VLANNamespace:     "default",
+						IPv4Namespace:     "default",
+						ServersPerSubnet:  1,
+						SubnetsPerVPC:     2, // it makes it possible for some servers to have connectivity
+						DNSServers:        []string{"1.1.1.1", "1.0.0.1"},
+						TimeServers:       []string{"219.239.35.0"},
+					}); err != nil {
+						return fmt.Errorf("setting up VPCs: %w", err)
+					}
+				case OnReadyTestConnectivity:
+					slog.Warn("Testing connectivity not implemented") // TODO
+				case OnReadyExit:
+					slog.Info("Exiting on ready")
+					os.Exit(0) // TODO graceful shutdown
+				}
+			}
+
+			return nil
+		}(); err != nil {
+			slog.Error("Error running on-ready commands", "err", err.Error())
+
+			if opts.FailFast {
+				os.Exit(1)
+			}
+
+			return fmt.Errorf("running on-ready commands: %w", err)
 		}
 
 		return nil
@@ -544,10 +603,6 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 			}
 			if err == nil && marker != recipe.InstallMarkerComplete {
 				slog.Error("Control node install was already attempted but not completed", "vm", vm.Name, "type", vm.Type, "marker", marker)
-
-				if opts.FailFast {
-					os.Exit(1)
-				}
 
 				return fmt.Errorf("not complete install marker: %q", marker) //nolint:goerr113
 			}
