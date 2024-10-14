@@ -12,10 +12,12 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/melbahja/goph"
@@ -94,6 +96,8 @@ var AllOnReady = []OnReady{
 	OnReadyTestConnectivity,
 }
 
+var ErrExit = fmt.Errorf("exit")
+
 func (c *Config) checkForBins() error {
 	for _, cmd := range VLABCmds {
 		_, err := exec.LookPath(cmd)
@@ -106,6 +110,9 @@ func (c *Config) checkForBins() error {
 }
 
 func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) error {
+	ctx, cancel := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
+
 	for _, cmd := range opts.OnReady {
 		if !slices.Contains(AllOnReady, OnReady(cmd)) {
 			return fmt.Errorf("unsupported on-ready command %q", cmd) //nolint:goerr113
@@ -268,8 +275,9 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 		}
 	}
 
-	group := &errgroup.Group{}
+	group, ctx := errgroup.WithContext(ctx)
 	postProcesses := &sync.WaitGroup{}
+	postProcessDone := make(chan struct{})
 
 	for _, vm := range vlab.VMs {
 		vmDir := filepath.Join(c.WorkDir, VLABDir, VLABVMsDir, vm.Name)
@@ -330,13 +338,11 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 			slog.Debug("Starting", "vm", vm.Name, "type", vm.Type, "cmd", VLABCmdQemuSystem+" "+strings.Join(args, " "))
 
 			if err := execCmd(ctx, true, vmDir, VLABCmdQemuSystem, args, "vm", vm.Name); err != nil {
-				slog.Error("Failed to start VM", "vm", vm.Name, "type", vm.Type, "err", err)
+				slog.Warn("Failed running VM", "vm", vm.Name, "type", vm.Type, "err", err)
 
 				if opts.FailFast {
-					os.Exit(1)
+					return fmt.Errorf("running vm: %w", err)
 				}
-
-				return fmt.Errorf("running vm: %w", err)
 			}
 
 			return nil
@@ -346,13 +352,11 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 			postProcesses.Add(1)
 			group.Go(func() error {
 				if err := c.vmPostProcess(ctx, vlab, d, vm, opts); err != nil {
-					slog.Error("Failed to post-process VM", "vm", vm.Name, "type", vm.Type, "err", err)
+					slog.Warn("Failed to post-process VM", "vm", vm.Name, "type", vm.Type, "err", err)
 
 					if opts.FailFast {
-						os.Exit(1)
+						return fmt.Errorf("post-processing vm %s: %w", vm.Name, err)
 					}
-
-					return fmt.Errorf("post-processing vm %s: %w", vm.Name, err)
 				}
 
 				// no defer here, as we want to wait for all installers completion without errors
@@ -365,9 +369,17 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 
 	slog.Info("Starting VMs", "count", len(vlab.VMs), "cpu", fmt.Sprintf("%d vCPUs", cpu), "ram", fmt.Sprintf("%d MB", ram), "disk", fmt.Sprintf("%d GB", disk))
 
-	// TODO if VM start fails, we need to fail all VMs and cleanup
 	group.Go(func() error {
-		postProcesses.Wait()
+		go func() {
+			postProcesses.Wait()
+			close(postProcessDone)
+		}()
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("cancelled: %w", ctx.Err())
+		case <-postProcessDone:
+		}
 
 		slog.Info("All VMs are ready")
 
@@ -392,28 +404,31 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 				case OnReadyTestConnectivity:
 					slog.Warn("Testing connectivity not implemented") // TODO
 				case OnReadyExit:
-					slog.Info("Exiting on ready")
-					os.Exit(0) // TODO graceful shutdown
+					return ErrExit
 				}
 			}
 
 			return nil
 		}(); err != nil {
-			slog.Error("Error running on-ready commands", "err", err.Error())
-
-			if opts.FailFast {
-				os.Exit(1)
+			if errors.Is(err, ErrExit) {
+				return err
 			}
 
-			return fmt.Errorf("running on-ready commands: %w", err)
+			slog.Warn("Error running on-ready commands", "err", err.Error())
+
+			if opts.FailFast {
+				return fmt.Errorf("running on-ready commands: %w", err)
+			}
 		}
 
 		return nil
 	})
 
-	if err := group.Wait(); err != nil {
+	if err := group.Wait(); err != nil && !errors.Is(err, ErrExit) {
 		return fmt.Errorf("running task: %w", err)
 	}
+
+	slog.Info("VLAB finished successfully")
 
 	return nil
 }
@@ -516,7 +531,7 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 	for !ready {
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("context cancelled: %w", ctx.Err())
+			return fmt.Errorf("cancelled: %w", ctx.Err())
 		case <-ticker.C:
 			client, err = goph.NewConn(&goph.Config{
 				User:     "core",
@@ -642,7 +657,7 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 			for !installed {
 				select {
 				case <-ctx.Done():
-					return fmt.Errorf("context cancelled: %w", ctx.Err())
+					return fmt.Errorf("cancelled: %w", ctx.Err())
 				case <-ticker.C:
 					marker, err := sshReadMarker(sftp)
 					if err != nil {
