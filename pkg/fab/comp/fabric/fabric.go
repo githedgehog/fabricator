@@ -37,8 +37,9 @@ const (
 
 	ProxyNodePort = 31028
 
-	BinDir     = "/opt/bin"
-	CtlBinName = "hhfctl"
+	BinDir         = "/opt/bin"
+	CtlBinName     = "hhfctl"
+	CtlDestBinName = "kubectl-fabric"
 )
 
 //go:embed ctrl_values.tmpl.yaml
