@@ -684,6 +684,46 @@ func Run(ctx context.Context) error {
 							return nil
 						},
 					},
+					{
+						Name:  "test-connectivity",
+						Usage: "test connectivity between all servers",
+						Flags: append(defaultFlags, accessNameFlag,
+							&cli.BoolFlag{
+								Name:    "wait-switches-ready",
+								Aliases: []string{"wait"},
+								Usage:   "wait for switches to be ready before testing connectivity",
+								Value:   true,
+							},
+							&cli.IntFlag{
+								Name:  "pings",
+								Usage: "number of pings to send between each pair of servers (0 to disable)",
+								Value: 5,
+							},
+							&cli.IntFlag{
+								Name:  "iperfs",
+								Usage: "seconds of iperf3 test to run between each pair of reachable servers (0 to disable)",
+								Value: 10,
+							},
+							&cli.IntFlag{
+								Name:  "curls",
+								Usage: "number of curl tests to run for each server to test external connectivity (0 to disable)",
+								Value: 3,
+							},
+						),
+						Before: before(false),
+						Action: func(c *cli.Context) error {
+							if err := hhfab.DoVLABTestConnectivity(ctx, workDir, cacheDir, hhfab.TestConnectivityOpts{
+								WaitSwitchesReady: c.Bool("wait-switches-ready"),
+								PingsCount:        c.Int("pings"),
+								IPerfsCount:       c.Int("iperfs"),
+								CurlsCount:        c.Int("curls"),
+							}); err != nil {
+								return fmt.Errorf("testing connectivity: %w", err)
+							}
+
+							return nil
+						},
+					},
 				},
 			},
 			{

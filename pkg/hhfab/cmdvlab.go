@@ -140,3 +140,12 @@ func DoVLABSetupVPCs(ctx context.Context, workDir, cacheDir string, opts SetupVP
 
 	return c.SetupVPCs(ctx, vlab, opts)
 }
+
+func DoVLABTestConnectivity(ctx context.Context, workDir, cacheDir string, opts TestConnectivityOpts) error {
+	c, vlab, err := loadVLABForHelpers(ctx, workDir, cacheDir)
+	if err != nil {
+		return err
+	}
+
+	return c.TestConnectivity(ctx, vlab, opts)
+}
