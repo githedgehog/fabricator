@@ -490,7 +490,7 @@ func (c *ControlInstall) installFabric(ctx context.Context, kube client.Client) 
 	}
 
 	// TODO remove if it'll be managed by control agent?
-	if err := c.copyFile(fabric.CtlBinName, filepath.Join(fabric.BinDir, fabric.CtlBinName), 0o755); err != nil {
+	if err := c.copyFile(fabric.CtlBinName, filepath.Join(fabric.BinDir, fabric.CtlDestBinName), 0o755); err != nil {
 		return fmt.Errorf("copying fabricctl bin: %w", err)
 	}
 
