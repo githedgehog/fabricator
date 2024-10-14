@@ -613,6 +613,68 @@ func Run(ctx context.Context) error {
 							return nil
 						},
 					},
+					{
+						Name:  "setup-vpcs",
+						Usage: "setup VPCs for VLAB",
+						Flags: append(defaultFlags, accessNameFlag,
+							&cli.BoolFlag{
+								Name:    "force-clenup",
+								Aliases: []string{"f"},
+								Usage:   "start with removing all existing VPCs and VPCAttachments",
+							},
+							&cli.StringFlag{
+								Name:  "vlanns",
+								Usage: "VLAN namespace for VPCs",
+								Value: "default",
+							},
+							&cli.StringFlag{
+								Name:  "ipns",
+								Usage: "IPv4 namespace for VPCs",
+								Value: "default",
+							},
+							&cli.IntFlag{
+								Name:  "servers-per-subnet",
+								Usage: "number of servers per subnet",
+								Value: 1,
+							},
+							&cli.IntFlag{
+								Name:  "subnets-per-vpc",
+								Usage: "number of subnets per VPC",
+								Value: 1,
+							},
+							&cli.StringSliceFlag{
+								Name:  "dns-servers",
+								Usage: "DNS servers for VPCs",
+							},
+							&cli.StringSliceFlag{
+								Name:  "time-servers",
+								Usage: "Time servers for VPCs",
+							},
+							&cli.BoolFlag{
+								Name:    "wait-switches-ready",
+								Aliases: []string{"wait"},
+								Usage:   "wait for switches to be ready before and after configuring VPCs and VPCAttachments",
+								Value:   true,
+							},
+						),
+						Before: before(false),
+						Action: func(c *cli.Context) error {
+							if err := hhfab.DoVLABSetupVPCs(ctx, workDir, cacheDir, hhfab.SetupVPCsOpts{
+								WaitSwitchesReady: c.Bool("wait-switches-ready"),
+								ForceCleanup:      c.Bool("force-clenup"),
+								VLANNamespace:     c.String("vlanns"),
+								IPv4Namespace:     c.String("ipns"),
+								ServersPerSubnet:  c.Int("servers-per-subnet"),
+								SubnetsPerVPC:     c.Int("subnets-per-vpc"),
+								DNSServers:        c.StringSlice("dns-servers"),
+								TimeServers:       c.StringSlice("time-servers"),
+							}); err != nil {
+								return fmt.Errorf("setup-vpcs: %w", err)
+							}
+
+							return nil
+						},
+					},
 				},
 			},
 			{

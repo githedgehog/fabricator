@@ -131,3 +131,12 @@ func DoVLABSerialLog(ctx context.Context, workDir, cacheDir, name string) error 
 
 	return c.VLABAccess(ctx, vlab, VLABAccessSerialLog, name)
 }
+
+func DoVLABSetupVPCs(ctx context.Context, workDir, cacheDir string, opts SetupVPCsOpts) error {
+	c, vlab, err := loadVLABForHelpers(ctx, workDir, cacheDir)
+	if err != nil {
+		return err
+	}
+
+	return c.SetupVPCs(ctx, vlab, opts)
+}
