@@ -74,7 +74,7 @@ jobs:
   # TODO add a separate full e2e build with USB drive
   build:
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     strategy:
       matrix:
@@ -156,7 +156,7 @@ jobs:
     needs:
       - test
       - build
-    timeout-minutes: 30
+    timeout-minutes: 60
 
     strategy:
       fail-fast: false
@@ -221,7 +221,7 @@ jobs:
       - name: Setup tmate session for debug
         if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
         uses: mxschmitt/action-tmate@v3
-        timeout-minutes: 120
+        timeout-minutes: 30
         with:
           limit-access-to-actor: true
 
