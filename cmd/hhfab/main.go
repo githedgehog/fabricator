@@ -527,8 +527,9 @@ func Run(ctx context.Context) error {
 						Flags: append(defaultFlags, hMode,
 							&cli.BoolFlag{
 								Name:    FlagNameKillStale,
-								Usage:   "kill stale VMs",
+								Usage:   "kill stale VMs automatically based on VM UUIDs used",
 								EnvVars: []string{"HHFAB_KILL_STALE"},
+								Value:   true,
 							},
 							&cli.BoolFlag{
 								Name:    FlagNameControlsRestricted,
@@ -552,6 +553,7 @@ func Run(ctx context.Context) error {
 							&cli.BoolFlag{
 								Name:  FlagNameFailFast,
 								Usage: "exit on first error",
+								Value: true,
 							},
 							&cli.StringSliceFlag{
 								Name:  FlagNameReady,
