@@ -269,6 +269,8 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 
 	slog.Info("Configuring VPCs and VPCAttachments")
 
+	changed := false
+
 	existingAttaches := &vpcapi.VPCAttachmentList{}
 	if err := kube.List(ctx, existingAttaches); err != nil {
 		return fmt.Errorf("listing existing attachments: %w", err)
@@ -279,6 +281,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 				return fmt.Errorf("deleting attachment %q: %w", attach.Name, err)
 			}
 			slog.Info("Deleted", "attachment", attach.Name)
+			changed = true
 		}
 	}
 
@@ -292,6 +295,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 				return fmt.Errorf("deleting VPC %q: %w", vpc.Name, err)
 			}
 			slog.Info("Deleted", "vpc", vpc.Name)
+			changed = true
 		}
 	}
 
@@ -310,8 +314,10 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		switch res {
 		case ctrlutil.OperationResultCreated:
 			slog.Info("Created", "vpc", vpc.Name, "subnets", len(vpc.Spec.Subnets))
+			changed = true
 		case ctrlutil.OperationResultUpdated:
 			slog.Info("Updated", "vpc", vpc.Name, "subnets", len(vpc.Spec.Subnets))
+			changed = true
 		}
 	}
 
@@ -330,13 +336,19 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		switch res {
 		case ctrlutil.OperationResultCreated:
 			slog.Info("Created attachment", "attachment", attach.Name)
+			changed = true
 		case ctrlutil.OperationResultUpdated:
 			slog.Info("Updated attachment", "attachment", attach.Name)
+			changed = true
 		}
 	}
 
-	if opts.WaitSwitchesReady {
+	if changed && opts.WaitSwitchesReady {
 		slog.Info("Waiting for switches ready after configuring VPCs and VPCAttachments")
+
+		// TODO remove it when we can actually know that changes to VPC/VPCAttachment are reflected in agents
+		time.Sleep(15 * time.Second)
+
 		if err := waitSwitchesReady(ctx, kube); err != nil {
 			return fmt.Errorf("waiting for switches ready: %w", err)
 		}
