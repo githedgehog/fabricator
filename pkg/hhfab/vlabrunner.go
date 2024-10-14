@@ -384,6 +384,10 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 		slog.Info("All VMs are ready")
 
 		if err := func() error {
+			if len(opts.OnReady) > 0 {
+				slog.Info("Running on-ready commands", "commands", opts.OnReady)
+			}
+
 			for _, cmd := range opts.OnReady {
 				slog.Info("Running on-ready command", "command", cmd)
 
@@ -406,6 +410,10 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 				case OnReadyExit:
 					return ErrExit
 				}
+			}
+
+			if len(opts.OnReady) > 0 {
+				slog.Info("All on-ready commands finished")
 			}
 
 			return nil
