@@ -410,7 +410,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 					if err := c.TestConnectivity(ctx, vlab, TestConnectivityOpts{
 						WaitSwitchesReady: true,
 						PingsCount:        5,
-						IPerfsSeconds:     0,
+						IPerfsSeconds:     10,
 						CurlsCount:        3,
 					}); err != nil {
 						return fmt.Errorf("testing connectivity: %w", err)
