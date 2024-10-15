@@ -642,15 +642,11 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 						}
 						if strings.Contains(rawPrefix, "_") {
 							prefixParts := strings.Split(rawPrefix, "_")
-							if len(prefixParts) > 3 {
-								return fmt.Errorf("invalid external peering option #%d %s, external prefix should be in format prefix_leXX_geYY", idx, option)
+							if len(prefixParts) > 1 {
+								return fmt.Errorf("invalid external peering option #%d %s, external prefix should be in format 1.2.3.4/24", idx, option)
 							}
 
 							prefix.Prefix = prefixParts[0]
-
-							if len(prefixParts) > 1 {
-								return fmt.Errorf("invalid external peering option #%d %s, external prefix should be in format prefix", idx, option)
-							}
 						}
 
 						extPeering.Permit.External.Prefixes = append(extPeering.Permit.External.Prefixes, prefix)
