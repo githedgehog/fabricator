@@ -890,32 +890,34 @@ func checkCurl(ctx context.Context, opts TestConnectivityOpts, curls *semaphore.
 	}
 	defer curls.Release(1)
 
-	ctx, cancel := context.WithTimeout(ctx, time.Duration(opts.CurlsCount+10)*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(5*opts.CurlsCount+10)*time.Second)
 	defer cancel()
 
-	slog.Debug("Running curl", "from", from, "to", toIP)
+	slog.Debug("Running curls", "from", from, "to", toIP, "count", opts.CurlsCount)
 
-	outR, err := fromSSH.RunContext(ctx, "timeout -v 5 curl --insecure --connect-timeout 3 --silent https://"+toIP)
-	out := strings.TrimSpace(string(outR))
+	for idx := 0; idx < opts.CurlsCount; idx++ {
+		outR, err := fromSSH.RunContext(ctx, "timeout -v 5 curl --insecure --connect-timeout 3 --silent https://"+toIP)
+		out := strings.TrimSpace(string(outR))
 
-	curlOk := err == nil && strings.Contains(out, "302 Moved")
-	curlFail := err != nil && !strings.Contains(out, "302 Moved")
+		curlOk := err == nil && strings.Contains(out, "302 Moved")
+		curlFail := err != nil && !strings.Contains(out, "302 Moved")
 
-	slog.Debug("Curl result", "from", from, "to", toIP, "expected", expected, "ok", curlOk, "fail", curlFail, "err", err, "out", out)
+		slog.Debug("Curl result", "from", from, "to", toIP, "expected", expected, "ok", curlOk, "fail", curlFail, "err", err, "out", out)
 
-	if curlOk == curlFail {
-		return fmt.Errorf("unexpected curl result: %s", out)
+		if curlOk == curlFail {
+			return fmt.Errorf("unexpected curl result: %s", out)
+		}
+
+		if expected && !curlOk {
+			return fmt.Errorf("should be reachable but curl failed with output: %s", out)
+		}
+
+		if !expected && !curlFail {
+			return fmt.Errorf("should not be reachable but curl succeeded with output: %s", out)
+		}
+
+		// TODO better handle other cases?
 	}
-
-	if expected && !curlOk {
-		return fmt.Errorf("should be reachable but curl failed with output: %s", out)
-	}
-
-	if !expected && !curlFail {
-		return fmt.Errorf("should not be reachable but curl succeeded with output: %s", out)
-	}
-
-	// TODO better handle other cases?
 
 	return nil
 }
