@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/AlekSi/pointer"
 	"github.com/melbahja/goph"
 	agentapi "go.githedgehog.com/fabric/api/agent/v1alpha2"
 	"go.githedgehog.com/fabric/api/meta"
@@ -52,6 +53,8 @@ type SetupVPCsOpts struct {
 func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) error {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
 	defer cancel()
+
+	start := time.Now()
 
 	if opts.ServersPerSubnet <= 0 {
 		return fmt.Errorf("servers per subnet must be positive")
@@ -439,7 +442,356 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		return fmt.Errorf("configuring servers: %w", err)
 	}
 
-	slog.Info("All servers configured and verified")
+	slog.Info("All servers configured and verified", "took", time.Since(start))
+
+	return nil
+}
+
+type SetupPeeringsOpts struct {
+	WaitSwitchesReady bool
+	Requests          []string
+}
+
+// TODO move vpc creation to here, just have flag --vpc-per-server
+func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeeringsOpts) error {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
+	defer cancel()
+
+	start := time.Now()
+
+	slog.Info("Setting up VPC and External Peerings", "numRequests", len(opts.Requests))
+
+	kubeconfig := filepath.Join(c.WorkDir, VLABDir, VLABKubeConfig)
+	kube, err := kubeutil.NewClientWithCache(ctx, kubeconfig,
+		wiringapi.SchemeBuilder,
+		vpcapi.SchemeBuilder,
+		agentapi.SchemeBuilder,
+	)
+	if err != nil {
+		return fmt.Errorf("creating kube client: %w", err)
+	}
+
+	if opts.WaitSwitchesReady {
+		slog.Info("Waiting for switches ready before configuring VPC and External Peerings")
+		if err := waitSwitchesReady(ctx, kube); err != nil {
+			return fmt.Errorf("waiting for switches ready: %w", err)
+		}
+	}
+
+	externalList := &vpcapi.ExternalList{}
+	if err := kube.List(ctx, externalList); err != nil {
+		return fmt.Errorf("listing externals: %w", err)
+	}
+
+	switchGroupList := &wiringapi.SwitchGroupList{}
+	if err := kube.List(ctx, switchGroupList); err != nil {
+		return fmt.Errorf("listing switch groups: %w", err)
+	}
+
+	vpcPeerings := map[string]*vpcapi.VPCPeeringSpec{}
+	externalPeerings := map[string]*vpcapi.ExternalPeeringSpec{}
+
+	reqNames := map[string]bool{}
+	for _, req := range opts.Requests {
+		parts := strings.Split(req, ":")
+		if len(parts) < 1 {
+			return fmt.Errorf("invalid request %q format", req)
+		}
+
+		reqName := parts[0]
+		if reqNames[reqName] {
+			return fmt.Errorf("duplicate request %q name %s", req, reqName)
+		}
+		reqNames[reqName] = true
+
+		slog.Debug("Parsing request", "name", reqName, "options", parts[1:])
+
+		vpMark := strings.Contains(reqName, "+")
+		epMark := strings.Contains(reqName, "~")
+
+		if vpMark && !epMark {
+			reqNameParts := strings.Split(reqName, "+")
+			if len(reqNameParts) != 2 {
+				return fmt.Errorf("invalid VPC peering request %s", reqName)
+			}
+
+			slices.Sort(reqNameParts)
+
+			vpc1 := reqNameParts[0]
+			vpc2 := reqNameParts[1]
+
+			if vpc1 == "" || vpc2 == "" {
+				return fmt.Errorf("invalid VPC peering request %s, both VPCs should be non-empty", reqName)
+			}
+
+			if !strings.HasPrefix(vpc1, "vpc-") {
+				if vpcID, err := strconv.ParseUint(vpc1, 10, 64); err == nil {
+					vpc1 = fmt.Sprintf("%02d", vpcID)
+				}
+
+				vpc1 = "vpc-" + vpc1
+			}
+			if !strings.HasPrefix(vpc2, "vpc-") {
+				if vpcID, err := strconv.ParseUint(vpc2, 10, 64); err == nil {
+					vpc2 = fmt.Sprintf("%02d", vpcID)
+				}
+
+				vpc2 = "vpc-" + vpc2
+			}
+
+			vpcPeering := &vpcapi.VPCPeeringSpec{
+				Permit: []map[string]vpcapi.VPCPeer{
+					{
+						vpc1: {},
+						vpc2: {},
+					},
+				},
+			}
+
+			for idx, option := range parts[1:] {
+				parts := strings.Split(option, "=")
+				if len(parts) > 2 {
+					return fmt.Errorf("invalid VPC peering option #%d %s", idx, option)
+				}
+
+				optName := parts[0]
+				optValue := ""
+				if len(parts) == 2 {
+					optValue = parts[1]
+				}
+
+				if optName == "r" || optName == "remote" {
+					if optValue == "" {
+						if len(switchGroupList.Items) != 1 {
+							return fmt.Errorf("invalid VPC peering option #%d %s, auto switch group only supported when it's exactly one switch group", idx, option)
+						}
+
+						vpcPeering.Remote = switchGroupList.Items[0].Name
+					}
+
+					vpcPeering.Remote = optValue
+				} else {
+					return fmt.Errorf("invalid VPC peering option #%d %s", idx, option)
+				}
+			}
+
+			vpcPeerings[fmt.Sprintf("%s--%s", vpc1, vpc2)] = vpcPeering
+		} else if !vpMark && epMark {
+			reqNameParts := strings.Split(reqName, "~")
+			if len(reqNameParts) != 2 {
+				return fmt.Errorf("invalid external peering request %s", reqName)
+			}
+
+			vpc := reqNameParts[0]
+			ext := reqNameParts[1]
+
+			if vpc == "" {
+				return fmt.Errorf("invalid external peering request %s, VPC should be non-empty", reqName)
+			}
+			if ext == "" {
+				return fmt.Errorf("invalid external peering request %s, external should be non-empty", reqName)
+			}
+
+			if !strings.HasPrefix(vpc, "vpc-") {
+				if vpcID, err := strconv.ParseUint(vpc, 10, 64); err == nil {
+					vpc = fmt.Sprintf("%02d", vpcID)
+				}
+
+				vpc = "vpc-" + vpc
+			}
+
+			extPeering := &vpcapi.ExternalPeeringSpec{
+				Permit: vpcapi.ExternalPeeringSpecPermit{
+					VPC: vpcapi.ExternalPeeringSpecVPC{
+						Name:    vpc,
+						Subnets: []string{},
+					},
+					External: vpcapi.ExternalPeeringSpecExternal{
+						Name:     ext,
+						Prefixes: []vpcapi.ExternalPeeringSpecPrefix{},
+					},
+				},
+			}
+
+			for idx, option := range parts[1:] {
+				parts := strings.Split(option, "=")
+				if len(parts) > 2 {
+					return fmt.Errorf("invalid external peering option #%d %s", idx, option)
+				}
+
+				optName := parts[0]
+				optValue := ""
+				if len(parts) == 2 {
+					optValue = parts[1]
+				}
+
+				if optName == "vpc_subnets" || optName == "subnets" || optName == "s" {
+					if optValue == "" {
+						return fmt.Errorf("invalid external peering option #%d %s, VPC subnet names should be non-empty", idx, option)
+					}
+
+					extPeering.Permit.VPC.Subnets = append(extPeering.Permit.VPC.Subnets, strings.Split(optValue, ",")...)
+				} else if optName == "ext_prefixes" || optName == "prefixes" || optName == "p" {
+					if optValue == "" {
+						return fmt.Errorf("invalid external peering option #%d %s, external prefixes should be non-empty", idx, option)
+					}
+
+					for _, rawPrefix := range strings.Split(optValue, ",") {
+						prefix := vpcapi.ExternalPeeringSpecPrefix{
+							Prefix: rawPrefix,
+						}
+						if strings.Contains(rawPrefix, "_") {
+							prefixParts := strings.Split(rawPrefix, "_")
+							if len(prefixParts) > 3 {
+								return fmt.Errorf("invalid external peering option #%d %s, external prefix should be in format prefix_leXX_geYY", idx, option)
+							}
+
+							prefix.Prefix = prefixParts[0]
+
+							if len(prefixParts) > 1 {
+								return fmt.Errorf("invalid external peering option #%d %s, external prefix should be in format prefix", idx, option)
+							}
+						}
+
+						extPeering.Permit.External.Prefixes = append(extPeering.Permit.External.Prefixes, prefix)
+					}
+				} else {
+					return fmt.Errorf("invalid external peering option #%d %s", idx, option)
+				}
+			}
+
+			if len(extPeering.Permit.VPC.Subnets) == 0 {
+				extPeering.Permit.VPC.Subnets = []string{"default"}
+			}
+			slices.Sort(extPeering.Permit.VPC.Subnets)
+
+			if len(extPeering.Permit.External.Prefixes) == 0 {
+				extPeering.Permit.External.Prefixes = []vpcapi.ExternalPeeringSpecPrefix{
+					{
+						Prefix: "0.0.0.0/0",
+					},
+				}
+			}
+			slices.SortFunc(extPeering.Permit.External.Prefixes, func(a, b vpcapi.ExternalPeeringSpecPrefix) int {
+				return strings.Compare(a.Prefix, b.Prefix)
+			})
+
+			externalPeerings[fmt.Sprintf("%s--%s", vpc, ext)] = extPeering
+		} else {
+			return fmt.Errorf("invalid request name %s", reqName)
+		}
+	}
+
+	changed := false
+
+	vpcPeeringList := &vpcapi.VPCPeeringList{}
+	if err := kube.List(ctx, vpcPeeringList); err != nil {
+		return fmt.Errorf("listing VPC peerings: %w", err)
+	}
+	for _, peering := range vpcPeeringList.Items {
+		if vpcPeerings[peering.Name] != nil {
+			continue
+		}
+
+		slog.Info("Deleting VPCPeering", "name", peering.Name)
+		changed = true
+
+		if err := client.IgnoreNotFound(kube.Delete(ctx, pointer.To(peering))); err != nil {
+			return fmt.Errorf("deleting VPC peering %s: %w", peering.Name, err)
+		}
+	}
+
+	externalPeeringList := &vpcapi.ExternalPeeringList{}
+	if err := kube.List(ctx, externalPeeringList); err != nil {
+		return fmt.Errorf("listing external peerings: %w", err)
+	}
+	for _, peering := range externalPeeringList.Items {
+		if externalPeerings[peering.Name] != nil {
+			continue
+		}
+
+		slog.Info("Deleting ExternalPeering", "name", peering.Name)
+		changed = true
+
+		if err := client.IgnoreNotFound(kube.Delete(ctx, pointer.To(peering))); err != nil {
+			return fmt.Errorf("deleting external peering %s: %w", peering.Name, err)
+		}
+	}
+
+	for name, vpcPeeringSpec := range vpcPeerings {
+		vpc1, vpc2, err := vpcPeeringSpec.VPCs()
+		if err != nil {
+			return fmt.Errorf("error getting VPCs for peering %s: %w", name, err)
+		}
+
+		slog.Info("Enforcing VPCPeering", "name", name,
+			"vpc1", vpc1, "vpc2", vpc2, "remote", vpcPeeringSpec.Remote)
+
+		vpcPeering := &vpcapi.VPCPeering{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: metav1.NamespaceDefault,
+			},
+		}
+		res, err := ctrlutil.CreateOrUpdate(ctx, kube, vpcPeering, func() error {
+			vpcPeering.Spec = *vpcPeeringSpec
+
+			return nil
+		})
+		if err != nil {
+			return fmt.Errorf("error updating VPC peering %s: %w", name, err)
+		}
+
+		if res == ctrlutil.OperationResultCreated {
+			slog.Info("Created VPCPeering", "name", name)
+			changed = true
+		} else if res == ctrlutil.OperationResultUpdated {
+			slog.Info("Updated VPCPeering", "name", name)
+			changed = true
+		}
+	}
+
+	for name, extPeeringSpec := range externalPeerings {
+		slog.Info("Enforcing External Peering", "name", name,
+			"vpc", extPeeringSpec.Permit.VPC.Name, "vpcSubnets", extPeeringSpec.Permit.VPC.Subnets,
+			"external", extPeeringSpec.Permit.External.Name, "externalPrefixes", extPeeringSpec.Permit.External.Prefixes)
+
+		extPeering := &vpcapi.ExternalPeering{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: metav1.NamespaceDefault,
+			},
+		}
+		res, err := ctrlutil.CreateOrUpdate(ctx, kube, extPeering, func() error {
+			extPeering.Spec = *extPeeringSpec
+
+			return nil
+		})
+		if err != nil {
+			return fmt.Errorf("error updating external peering %s: %w", name, err)
+		}
+
+		if res == ctrlutil.OperationResultCreated {
+			slog.Info("Created ExternalPeering", "name", name)
+			changed = true
+		} else if res == ctrlutil.OperationResultUpdated {
+			slog.Info("Updated ExternalPeering", "name", name)
+			changed = true
+		}
+	}
+
+	if changed && opts.WaitSwitchesReady {
+		slog.Info("Waiting for switches ready after configuring VPC and External Peerings")
+
+		// TODO remove it when we can actually know that changes to VPC/VPCAttachment are reflected in agents
+		time.Sleep(15 * time.Second)
+
+		if err := waitSwitchesReady(ctx, kube); err != nil {
+			return fmt.Errorf("waiting for switches ready: %w", err)
+		}
+	}
+
+	slog.Info("VPC and External Peerings setup complete", "took", time.Since(start))
 
 	return nil
 }
@@ -458,6 +810,8 @@ type TestConnectivityOpts struct {
 func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConnectivityOpts) error {
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Minute)
 	defer cancel()
+
+	start := time.Now()
 
 	if opts.PingsParallel <= 0 {
 		opts.PingsParallel = 50
@@ -733,7 +1087,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 		return fmt.Errorf("testing connectivity: %w", err)
 	}
 
-	slog.Info("All connectivity tested successfully")
+	slog.Info("All connectivity tested successfully", "took", time.Since(start))
 
 	return nil
 }
