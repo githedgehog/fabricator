@@ -90,14 +90,14 @@ func (b *ControlInstallBuilder) buildUSBImage(ctx context.Context) error {
 
 	table.Partitions = []*gpt.Partition{
 		{
-			Name:  "HHA", // TODO(mrbojangles3) ESP?
+			Name:  "HHA",
 			Type:  gpt.EFISystemPartition,
 			Size:  espSize,
 			Start: espPartitionStart,
 			End:   espPartitionEnd,
 		},
 		{
-			Name:  "HHB", // TODO(mrbojangles3) OEM?
+			Name:  "HHB",
 			Type:  gpt.LinuxFilesystem,
 			Size:  oemSize,
 			Start: oemPartitionStart,
