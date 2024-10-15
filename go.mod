@@ -8,6 +8,7 @@ replace github.com/diskfs/go-diskfs => github.com/Frostman/go-diskfs v1.4.2-hh3
 
 require (
 	dario.cat/mergo v1.0.1
+	github.com/AlekSi/pointer v1.2.0
 	github.com/Masterminds/semver/v3 v3.3.0
 	github.com/Masterminds/sprig/v3 v3.3.0
 	github.com/cert-manager/cert-manager v1.15.3
@@ -57,7 +58,6 @@ require (
 	cloud.google.com/go/storage v1.40.0 // indirect
 	github.com/0x5a17ed/itkit v0.6.0 // indirect
 	github.com/0x5a17ed/uefi v0.6.1 // indirect
-	github.com/AlekSi/pointer v1.2.0 // indirect
 	github.com/BurntSushi/toml v1.4.0 // indirect
 	github.com/Masterminds/goutils v1.1.1 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
