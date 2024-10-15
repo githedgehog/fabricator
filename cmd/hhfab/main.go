@@ -704,6 +704,11 @@ func Run(ctx context.Context) error {
 								Usage: "seconds of iperf3 test to run between each pair of reachable servers (0 to disable)",
 								Value: 10,
 							},
+							&cli.Float64Flag{
+								Name:  "iperfs-speed",
+								Usage: "minimum speed in Mbits/s for iperf3 test to consider successful (0 to not check speeds)",
+								Value: 8000,
+							},
 							&cli.IntFlag{
 								Name:  "curls",
 								Usage: "number of curl tests to run for each server to test external connectivity (0 to disable)",
@@ -715,7 +720,7 @@ func Run(ctx context.Context) error {
 							if err := hhfab.DoVLABTestConnectivity(ctx, workDir, cacheDir, hhfab.TestConnectivityOpts{
 								WaitSwitchesReady: c.Bool("wait-switches-ready"),
 								PingsCount:        c.Int("pings"),
-								IPerfsCount:       c.Int("iperfs"),
+								IPerfsSeconds:     c.Int("iperfs"),
 								CurlsCount:        c.Int("curls"),
 							}); err != nil {
 								return fmt.Errorf("testing connectivity: %w", err)
