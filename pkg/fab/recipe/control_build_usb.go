@@ -30,7 +30,7 @@ var (
 	espSize             uint64 = 500 * 1024 * 1024
 	oemSize             uint64 = (6 * 1024 * 1024 * 1024) + (500 * 1024 * 1024)
 	dataSize                   = espSize + oemSize
-	blkSize                    = diskfs.SectorSize512 // TODO(mrbojangles3) do we want 4k?
+	blkSize                    = diskfs.SectorSize512
 	diskSize                   = int64(dataSize + 2*16896 + (1024 * 1024))
 	espPartitionStart   uint64 = 2048
 	espPartitionSectors        = espSize / uint64(blkSize)
