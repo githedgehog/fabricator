@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/melbahja/goph"
@@ -633,6 +634,8 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 	iperfs := semaphore.NewWeighted(opts.IPerfsParallel)
 	curls := semaphore.NewWeighted(opts.CurlsParallel)
 
+	errors := sync.Map{}
+
 	g = &errgroup.Group{}
 	for _, serverA := range servers.Items {
 		for _, serverB := range servers.Items {
@@ -662,6 +665,8 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 
 					return nil
 				}(); err != nil {
+					errors.Store("vpcpeer--"+serverA.Name+"--"+serverB.Name, err)
+
 					return fmt.Errorf("testing connectivity from %q to %q: %w", serverA.Name, serverB.Name, err)
 				}
 
@@ -697,6 +702,8 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 
 				return nil
 			}(); err != nil {
+				errors.Store("extpeer--"+serverA.Name, err)
+
 				return fmt.Errorf("testing connectivity from %q to external: %w", serverA.Name, err)
 			}
 
@@ -705,10 +712,18 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 	}
 
 	if err := g.Wait(); err != nil {
+		slog.Error("Error(s) during testing connectivity")
+
+		errors.Range(func(key, value any) bool {
+			slog.Error("Error", "key", key, "err", value)
+
+			return true
+		})
+
 		return fmt.Errorf("testing connectivity: %w", err)
 	}
 
-	slog.Info("All connectivity tested")
+	slog.Info("All connectivity tested successfully")
 
 	return nil
 }
@@ -880,11 +895,13 @@ func checkCurl(ctx context.Context, opts TestConnectivityOpts, curls *semaphore.
 
 	slog.Debug("Running curl", "from", from, "to", toIP)
 
-	outR, err := fromSSH.RunContext(ctx, "timeout -v 5 curl --insecure https://"+toIP)
+	outR, err := fromSSH.RunContext(ctx, "timeout -v 5 curl --insecure --connect-timeout 3 --silent https://"+toIP)
 	out := strings.TrimSpace(string(outR))
 
 	curlOk := err == nil && strings.Contains(out, "302 Moved")
 	curlFail := err != nil && !strings.Contains(out, "302 Moved")
+
+	slog.Debug("Curl result", "from", from, "to", toIP, "expected", expected, "ok", curlOk, "fail", curlFail, "err", err, "out", out)
 
 	if curlOk == curlFail {
 		return fmt.Errorf("unexpected curl result: %s", out)
