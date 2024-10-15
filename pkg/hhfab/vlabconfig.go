@@ -236,6 +236,7 @@ func (c *Config) PrepareVLAB(ctx context.Context, opts VLABUpOpts) (*VLAB, error
 	}
 
 	for idx := range c.Controls {
+		// TODO skip if marked as HW
 		c.Controls[idx].Spec.Bootstrap.Disk = "/dev/vda"
 	}
 
