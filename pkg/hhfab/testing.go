@@ -6,6 +6,7 @@ package hhfab
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"iter"
 	"log/slog"
@@ -33,6 +34,7 @@ import (
 
 const (
 	ServerNamePrefix = "server-"
+	VSIPerfSpeed     = 3
 )
 
 type SetupVPCsOpts struct {
@@ -445,7 +447,8 @@ type TestConnectivityOpts struct {
 	WaitSwitchesReady bool
 	PingsCount        int
 	PingsParallel     int64
-	IPerfsCount       int
+	IPerfsSeconds     int
+	IPerfMinSpeed     float64
 	IPerfsParallel    int64
 	CurlsCount        int
 	CurlsParallel     int64
@@ -487,6 +490,26 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 		return fmt.Errorf("creating kube client: %w", err)
 	}
 
+	switches := &wiringapi.SwitchList{}
+	if err := kube.List(ctx, switches); err != nil {
+		return fmt.Errorf("listing switches: %w", err)
+	}
+	allVS := len(switches.Items) > 0
+	for _, sw := range switches.Items {
+		if sw.Spec.Profile != meta.SwitchProfileVS {
+			allVS = false
+			break
+		}
+	}
+	if allVS {
+		if opts.IPerfMinSpeed > 10*VSIPerfSpeed {
+			slog.Warn("Lowering IPerf min speed as all switches are virtual", "speed", VSIPerfSpeed)
+			opts.IPerfMinSpeed = VSIPerfSpeed
+		} else if opts.IPerfMinSpeed > VSIPerfSpeed {
+			slog.Warn("IPerf min speed is higher than default virtual switch speed", "speed", VSIPerfSpeed)
+		}
+	}
+
 	if opts.WaitSwitchesReady {
 		slog.Info("Waiting for switches ready before testing connectivity")
 
@@ -499,6 +522,24 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 	if err := kube.List(ctx, servers); err != nil {
 		return fmt.Errorf("listing servers: %w", err)
 	}
+
+	serverIDs := map[string]uint64{}
+	for _, server := range servers.Items {
+		if !strings.HasPrefix(server.Name, ServerNamePrefix) {
+			return fmt.Errorf("unexpected server name %q, should be %s<number>", server.Name, ServerNamePrefix)
+		}
+
+		serverID, err := strconv.ParseUint(server.Name[len(ServerNamePrefix):], 10, 64)
+		if err != nil {
+			return fmt.Errorf("parsing server id: %w", err)
+		}
+
+		serverIDs[server.Name] = serverID
+	}
+
+	slices.SortFunc(servers.Items, func(a, b wiringapi.Server) int {
+		return int(serverIDs[a.Name]) - int(serverIDs[b.Name])
+	})
 
 	slog.Info("Discovering server IPs", "servers", len(servers.Items))
 
@@ -608,17 +649,16 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 
 					slog.Debug("Checking connectivity", "from", serverA.Name, "to", serverB.Name, "reachable", expectedReachable)
 
-					ipA, ipB := ips[serverA.Name], ips[serverB.Name]
+					ipB := ips[serverB.Name]
 					clientA, clientB := sshs[serverA.Name], sshs[serverB.Name]
 
-					if err := checkPing(ctx, opts, pings, serverA.Name, clientA, ipB.Addr(), expectedReachable); err != nil {
+					if err := checkPing(ctx, opts, pings, serverA.Name, serverB.Name, clientA, ipB.Addr(), expectedReachable); err != nil {
 						return fmt.Errorf("checking ping from %s to %s: %w", serverA.Name, serverB.Name, err)
 					}
 
-					// TODO iperf (only one at a time) if reachable
-					_ = iperfs
-					_ = clientB
-					_ = ipA
+					if err := checkIPerf(ctx, opts, iperfs, serverA.Name, serverB.Name, clientA, clientB, ipB.Addr(), expectedReachable); err != nil {
+						return fmt.Errorf("checking iperf from %s to %s: %w", serverA.Name, serverB.Name, err)
+					}
 
 					return nil
 				}(); err != nil {
@@ -715,7 +755,7 @@ func waitSwitchesReady(ctx context.Context, kube client.Reader) error {
 	}
 }
 
-func checkPing(ctx context.Context, opts TestConnectivityOpts, pings *semaphore.Weighted, from string, fromSSH *goph.Client, toIP netip.Addr, expectedReachable bool) error {
+func checkPing(ctx context.Context, opts TestConnectivityOpts, pings *semaphore.Weighted, from, to string, fromSSH *goph.Client, toIP netip.Addr, expected bool) error {
 	if opts.PingsCount <= 0 {
 		return nil
 	}
@@ -725,7 +765,7 @@ func checkPing(ctx context.Context, opts TestConnectivityOpts, pings *semaphore.
 	}
 	defer pings.Release(1)
 
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute) // TODO configurable
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(opts.PingsCount+10)*time.Second)
 	defer cancel()
 
 	slog.Debug("Pinging", "from", from, "to", toIP.String())
@@ -737,23 +777,127 @@ func checkPing(ctx context.Context, opts TestConnectivityOpts, pings *semaphore.
 	pingOk := err == nil && strings.Contains(out, "0% packet loss")
 	pingFail := err != nil && strings.Contains(out, "100% packet loss")
 
-	slog.Debug("Ping result", "from", from, "to", toIP.String(), "expected", expectedReachable, "ok", pingOk, "fail", pingFail, "err", err, "out", out)
+	// TODO better logging and handling of errors
+	slog.Debug("Ping result", "from", from, "to", to,
+		"expected", expected, "ok", pingOk, "fail", pingFail, "err", err, "out", out)
 
 	if pingOk == pingFail {
 		return fmt.Errorf("unexpected ping result: %s", out) // TODO replace with custom error?
 	}
 
-	if expectedReachable && !pingOk {
+	if expected && !pingOk {
 		return fmt.Errorf("should be reachable but ping failed with output: %s", out) // TODO replace with custom error?
 	}
 
-	if !expectedReachable && !pingFail {
+	if !expected && !pingFail {
 		return fmt.Errorf("should not be reachable but ping succeeded with output: %s", out) // TODO replace with custom error?
 	}
 
 	// TODO other cases to handle?
 
 	return nil
+}
+
+func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphore.Weighted, from, to string, fromSSH, toSSH *goph.Client, toIP netip.Addr, expected bool) error {
+	if opts.PingsCount <= 0 || !expected {
+		return nil
+	}
+
+	if err := iperfs.Acquire(ctx, 1); err != nil {
+		return fmt.Errorf("acquiring iperf semaphore: %w", err)
+	}
+	defer iperfs.Release(1)
+
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(opts.IPerfsSeconds+10)*time.Second)
+	defer cancel()
+
+	slog.Debug("Running iperf", "from", from, "to", to)
+
+	g, ctx := errgroup.WithContext(ctx)
+
+	g.Go(func() error {
+		out, err := toSSH.RunContext(ctx, "toolbox -q iperf3 -s -1")
+		if err != nil {
+			return fmt.Errorf("running iperf server: %w: %s", err, string(out))
+		}
+
+		return nil
+	})
+
+	g.Go(func() error {
+		time.Sleep(1 * time.Second) // TODO think about more reliable way to wait for server to start
+
+		cmd := fmt.Sprintf("toolbox -q iperf3 -J -c %s -t %d", toIP.String(), opts.IPerfsSeconds)
+		out, err := fromSSH.RunContext(ctx, cmd)
+		if err != nil {
+			return fmt.Errorf("running iperf client: %w: %s", err, string(out))
+		}
+
+		report, err := parseIPerf3Report(out)
+		if err != nil {
+			return fmt.Errorf("parsing iperf report: %w", err)
+		}
+
+		slog.Debug("IPerf3 result", "from", from, "to", to,
+			"sendSpeed", asMbps(report.End.SumSent.BitsPerSecond),
+			"receiveSpeed", asMbps(report.End.SumReceived.BitsPerSecond),
+			"sent", asMB(float64(report.End.SumSent.Bytes)),
+			"received", asMB(float64(report.End.SumReceived.Bytes)),
+		)
+
+		if opts.IPerfMinSpeed > 0 {
+			if report.End.SumSent.BitsPerSecond < opts.IPerfMinSpeed*1_000_000 {
+				return fmt.Errorf("iperf send speed too low: %s < %s", asMbps(report.End.SumSent.BitsPerSecond), asMbps(opts.IPerfMinSpeed*1_000_000))
+			}
+			if report.End.SumReceived.BitsPerSecond < opts.IPerfMinSpeed*1_000_000 {
+				return fmt.Errorf("iperf receive speed too low: %s < %s", asMbps(report.End.SumReceived.BitsPerSecond), asMbps(opts.IPerfMinSpeed*1_000_000))
+			}
+		}
+
+		return nil
+	})
+
+	if err := g.Wait(); err != nil {
+		return fmt.Errorf("running iperf: %w", err)
+	}
+
+	return nil
+}
+
+type iperf3Report struct {
+	Intervals []iperf3ReportInterval `json:"intervals"`
+	End       iperf3ReportEnd        `json:"end"`
+}
+
+type iperf3ReportInterval struct {
+	Sum iperf3ReportSum `json:"sum"`
+}
+
+type iperf3ReportEnd struct {
+	SumSent     iperf3ReportSum `json:"sum_sent"`
+	SumReceived iperf3ReportSum `json:"sum_received"`
+}
+
+type iperf3ReportSum struct {
+	Bytes         int64   `json:"bytes"`
+	BitsPerSecond float64 `json:"bits_per_second"`
+}
+
+func parseIPerf3Report(data []byte) (*iperf3Report, error) {
+	report := &iperf3Report{}
+	if err := json.Unmarshal(data, report); err != nil {
+		return nil, fmt.Errorf("unmarshaling iperf3 report: %w", err)
+	}
+
+	return report, nil
+}
+
+func asMbps(in float64) string {
+	return fmt.Sprintf("%.2f Mbps", in/1_000_000)
+}
+
+func asMB(in float64) string {
+	return fmt.Sprintf("%.2f MB", in/1000/1000)
 }
 
 func VLANsFrom(ranges ...meta.VLANRange) iter.Seq[uint16] {
