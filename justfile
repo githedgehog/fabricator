@@ -56,7 +56,7 @@ _kube_gen: _controller_gen
 # Generate code/manifests, things to embed, etc
 gen: _kube_gen _hhfab_embed
 
-_hhfab_build: _license_headers _gotools _kube_gen _hhfab_embed
+hhfab-build: _license_headers _gotools _kube_gen _hhfab_embed && version
   {{go_linux_build}} -o ./bin/hhfab ./cmd/hhfab
 
 # Build hhfab for local OS/Arch
@@ -64,7 +64,7 @@ hhfab-build-local: _license_headers _gotools _kube_gen _hhfab_embed && version
   {{go_build}} -o ./bin/hhfab ./cmd/hhfab
 
 # Build all artifacts
-build: _license_headers _gotools _hhfab_build && version
+build: _license_headers _gotools hhfab-build && version
   {{go_linux_build}} -o ./bin/fabricator ./cmd
   # Build complete
 
