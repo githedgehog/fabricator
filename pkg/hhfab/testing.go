@@ -35,7 +35,7 @@ import (
 
 const (
 	ServerNamePrefix = "server-"
-	VSIPerfSpeed     = 3
+	VSIPerfSpeed     = 1
 )
 
 type SetupVPCsOpts struct {

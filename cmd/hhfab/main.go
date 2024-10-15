@@ -721,6 +721,7 @@ func Run(ctx context.Context) error {
 								WaitSwitchesReady: c.Bool("wait-switches-ready"),
 								PingsCount:        c.Int("pings"),
 								IPerfsSeconds:     c.Int("iperfs"),
+								IPerfsMinSpeed:    c.Float64("iperfs-speed"),
 								CurlsCount:        c.Int("curls"),
 							}); err != nil {
 								return fmt.Errorf("testing connectivity: %w", err)
