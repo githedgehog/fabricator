@@ -624,7 +624,7 @@ func Run(ctx context.Context) error {
 					},
 					{
 						Name:  "setup-vpcs",
-						Usage: "setup VPCs for VLAB",
+						Usage: "setup VPCs and VPCAttachments for all servers and configure networking on them",
 						Flags: append(defaultFlags, accessNameFlag,
 							&cli.BoolFlag{
 								Name:    "wait-switches-ready",
@@ -686,7 +686,39 @@ func Run(ctx context.Context) error {
 					},
 					{
 						Name:  "setup-peerings",
-						Usage: "setup VPC and External Peerings",
+						Usage: "setup VPC and External Peerings per requests (remove all if empty)",
+						UsageText: strings.TrimSpace(strings.ReplaceAll(`
+							Setup test scenario with VPC/External Peerings by specifying requests in the format described below.
+
+							Example command:
+
+							$ hhfab vlab setup-peerings 1+2 2+4:r=border 1~as5835 2~as5835:subnets=sub1,sub2:prefixes=0.0.0.0/0,22.22.22.0/24
+
+							Which will produce:
+							1. VPC peering between vpc-01 and vpc-02
+							2. Remote VPC peering between vpc-02 and vpc-04 on switch group named border
+							3. External peering for vpc-01 with External as5835 with default vpc subnet and any routes from external permitted
+							4. External peering for vpc-02 with External as5835 with subnets sub1 and sub2 exposed from vpc-02 and default route
+							   from external permitted as well any route that belongs to 22.22.22.0/24
+
+							VPC Peerings:
+
+							1+2 -- VPC peering between vpc-01 and vpc-02
+							demo-1+demo-2 -- VPC peering between demo-1 and demo-2
+							1+2:r -- remote VPC peering between vpc-01 and vpc-02 on switch group if only one switch group is present
+							1+2:r=border -- remote VPC peering between vpc-01 and vpc-02 on switch group named border
+							1+2:remote=border -- same as above
+
+							External Peerings:
+
+							1~as5835 -- external peering for vpc-01 with External as5835
+							1~ -- external peering for vpc-1 with external if only one external is present for ipv4 namespace of vpc-01, allowing
+								default subnet and any route from external
+							1~:subnets=default@prefixes=0.0.0.0/0 -- external peering for vpc-1 with auth external with default vpc subnet and
+								default route from external permitted
+							1~as5835:subnets=default,other:prefixes=0.0.0.0/0_le32_ge32,22.22.22.0/24 -- same but with more details
+							1~as5835:s=default,other:p=0.0.0.0/0_le32_ge32,22.22.22.0/24 -- same as above
+						`, "							", "")),
 						Flags: append(defaultFlags, accessNameFlag,
 							&cli.BoolFlag{
 								Name:    "wait-switches-ready",
