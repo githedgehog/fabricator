@@ -544,14 +544,16 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 
 	slog.Info("Discovering server IPs", "servers", len(servers.Items))
 
-	ips := map[string]netip.Prefix{}
-	sshs := map[string]*goph.Client{}
+	ips := sync.Map{}
+	sshs := sync.Map{}
 	defer func() {
-		for _, client := range sshs {
-			if err := client.Close(); err != nil {
+		sshs.Range(func(key, value any) bool {
+			if err := value.(*goph.Client).Close(); err != nil {
 				slog.Warn("Closing ssh client", "err", err)
 			}
-		}
+
+			return true
+		})
 	}()
 
 	g := &errgroup.Group{}
@@ -577,7 +579,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 				if err != nil {
 					return fmt.Errorf("connecting to %q: %w", server.Name, err)
 				}
-				sshs[server.Name] = client
+				sshs.Store(server.Name, client)
 
 				out, err := client.RunContext(ctx, "ip -o -4 addr show | awk '{print $2, $4}'")
 				if err != nil {
@@ -606,7 +608,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 					}
 
 					found = true
-					ips[server.Name] = addr
+					ips.Store(server.Name, addr)
 
 					slog.Info("Found", "server", server.Name, "addr", addr.String())
 				}
@@ -652,8 +654,23 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 
 					slog.Debug("Checking connectivity", "from", serverA.Name, "to", serverB.Name, "reachable", expectedReachable)
 
-					ipB := ips[serverB.Name]
-					clientA, clientB := sshs[serverA.Name], sshs[serverB.Name]
+					ipBR, ok := ips.Load(serverB.Name)
+					if !ok {
+						return fmt.Errorf("missing IP for %q", serverB.Name)
+					}
+					ipB := ipBR.(netip.Prefix)
+
+					clientAR, ok := sshs.Load(serverA.Name)
+					if !ok {
+						return fmt.Errorf("missing ssh client for %q", serverA.Name)
+					}
+					clientA := clientAR.(*goph.Client)
+
+					clientBR, ok := sshs.Load(serverB.Name)
+					if !ok {
+						return fmt.Errorf("missing ssh client for %q", serverB.Name)
+					}
+					clientB := clientBR.(*goph.Client)
 
 					if err := checkPing(ctx, opts, pings, serverA.Name, serverB.Name, clientA, ipB.Addr(), expectedReachable); err != nil {
 						return fmt.Errorf("checking ping from %s to %s: %w", serverA.Name, serverB.Name, err)
@@ -683,18 +700,11 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 
 				slog.Debug("Checking external connectivity", "from", serverA.Name, "reachable", reachable)
 
-				client, err := goph.NewConn(&goph.Config{
-					User:     "core",
-					Addr:     "127.0.0.1",
-					Port:     sshPorts[serverA.Name],
-					Auth:     sshAuth,
-					Timeout:  10 * time.Second,
-					Callback: ssh.InsecureIgnoreHostKey(), //nolint:gosec
-				})
-				if err != nil {
-					return fmt.Errorf("connecting to %q: %w", serverA.Name, err)
+				clientR, ok := sshs.Load(serverA.Name)
+				if !ok {
+					return fmt.Errorf("missing ssh client for %q", serverA.Name)
 				}
-				defer client.Close()
+				client := clientR.(*goph.Client)
 
 				if err := checkCurl(ctx, opts, curls, serverA.Name, client, "8.8.8.8", reachable); err != nil {
 					return fmt.Errorf("checking curl from %q: %w", serverA.Name, err)
