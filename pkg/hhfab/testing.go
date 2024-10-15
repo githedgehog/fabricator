@@ -448,7 +448,7 @@ type TestConnectivityOpts struct {
 	PingsCount        int
 	PingsParallel     int64
 	IPerfsSeconds     int
-	IPerfMinSpeed     float64
+	IPerfsMinSpeed    float64
 	IPerfsParallel    int64
 	CurlsCount        int
 	CurlsParallel     int64
@@ -502,10 +502,10 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 		}
 	}
 	if allVS {
-		if opts.IPerfMinSpeed > 10*VSIPerfSpeed {
+		if opts.IPerfsMinSpeed > 10*VSIPerfSpeed {
 			slog.Warn("Lowering IPerf min speed as all switches are virtual", "speed", VSIPerfSpeed)
-			opts.IPerfMinSpeed = VSIPerfSpeed
-		} else if opts.IPerfMinSpeed > VSIPerfSpeed {
+			opts.IPerfsMinSpeed = VSIPerfSpeed
+		} else if opts.IPerfsMinSpeed > VSIPerfSpeed {
 			slog.Warn("IPerf min speed is higher than default virtual switch speed", "speed", VSIPerfSpeed)
 		}
 	}
@@ -691,8 +691,9 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 				}
 				defer client.Close()
 
-				// TODO curl
-				_ = curls
+				if err := checkCurl(ctx, opts, curls, serverA.Name, client, "8.8.8.8", reachable); err != nil {
+					return fmt.Errorf("checking curl from %q: %w", serverA.Name, err)
+				}
 
 				return nil
 			}(); err != nil {
@@ -768,7 +769,7 @@ func checkPing(ctx context.Context, opts TestConnectivityOpts, pings *semaphore.
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(opts.PingsCount+10)*time.Second)
 	defer cancel()
 
-	slog.Debug("Pinging", "from", from, "to", toIP.String())
+	slog.Debug("Running ping", "from", from, "to", toIP.String())
 
 	cmd := fmt.Sprintf("ping -c %d -W 1 %s", opts.PingsCount, toIP.String()) // TODO wrap with timeout?
 	outR, err := fromSSH.RunContext(ctx, cmd)
@@ -845,12 +846,12 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphor
 			"received", asMB(float64(report.End.SumReceived.Bytes)),
 		)
 
-		if opts.IPerfMinSpeed > 0 {
-			if report.End.SumSent.BitsPerSecond < opts.IPerfMinSpeed*1_000_000 {
-				return fmt.Errorf("iperf send speed too low: %s < %s", asMbps(report.End.SumSent.BitsPerSecond), asMbps(opts.IPerfMinSpeed*1_000_000))
+		if opts.IPerfsMinSpeed > 0 {
+			if report.End.SumSent.BitsPerSecond < opts.IPerfsMinSpeed*1_000_000 {
+				return fmt.Errorf("iperf send speed too low: %s < %s", asMbps(report.End.SumSent.BitsPerSecond), asMbps(opts.IPerfsMinSpeed*1_000_000))
 			}
-			if report.End.SumReceived.BitsPerSecond < opts.IPerfMinSpeed*1_000_000 {
-				return fmt.Errorf("iperf receive speed too low: %s < %s", asMbps(report.End.SumReceived.BitsPerSecond), asMbps(opts.IPerfMinSpeed*1_000_000))
+			if report.End.SumReceived.BitsPerSecond < opts.IPerfsMinSpeed*1_000_000 {
+				return fmt.Errorf("iperf receive speed too low: %s < %s", asMbps(report.End.SumReceived.BitsPerSecond), asMbps(opts.IPerfsMinSpeed*1_000_000))
 			}
 		}
 
@@ -860,6 +861,44 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphor
 	if err := g.Wait(); err != nil {
 		return fmt.Errorf("running iperf: %w", err)
 	}
+
+	return nil
+}
+
+func checkCurl(ctx context.Context, opts TestConnectivityOpts, curls *semaphore.Weighted, from string, fromSSH *goph.Client, toIP string, expected bool) error {
+	if opts.CurlsCount <= 0 {
+		return nil
+	}
+
+	if err := curls.Acquire(ctx, 1); err != nil {
+		return fmt.Errorf("acquiring curl semaphore: %w", err)
+	}
+	defer curls.Release(1)
+
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(opts.CurlsCount+10)*time.Second)
+	defer cancel()
+
+	slog.Debug("Running curl", "from", from, "to", toIP)
+
+	outR, err := fromSSH.RunContext(ctx, "timeout -v 5 curl --insecure https://"+toIP)
+	out := strings.TrimSpace(string(outR))
+
+	curlOk := err == nil && strings.Contains(out, "302 Moved")
+	curlFail := err != nil && !strings.Contains(out, "302 Moved")
+
+	if curlOk == curlFail {
+		return fmt.Errorf("unexpected curl result: %s", out)
+	}
+
+	if expected && !curlOk {
+		return fmt.Errorf("should be reachable but curl failed with output: %s", out)
+	}
+
+	if !expected && !curlFail {
+		return fmt.Errorf("should not be reachable but curl succeeded with output: %s", out)
+	}
+
+	// TODO better handle other cases?
 
 	return nil
 }
