@@ -627,6 +627,12 @@ func Run(ctx context.Context) error {
 						Usage: "setup VPCs for VLAB",
 						Flags: append(defaultFlags, accessNameFlag,
 							&cli.BoolFlag{
+								Name:    "wait-switches-ready",
+								Aliases: []string{"wait"},
+								Usage:   "wait for switches to be ready before and after configuring VPCs and VPCAttachments",
+								Value:   true,
+							},
+							&cli.BoolFlag{
 								Name:    "force-clenup",
 								Aliases: []string{"f"},
 								Usage:   "start with removing all existing VPCs and VPCAttachments",
@@ -659,12 +665,6 @@ func Run(ctx context.Context) error {
 								Name:  "time-servers",
 								Usage: "Time servers for VPCs",
 							},
-							&cli.BoolFlag{
-								Name:    "wait-switches-ready",
-								Aliases: []string{"wait"},
-								Usage:   "wait for switches to be ready before and after configuring VPCs and VPCAttachments",
-								Value:   true,
-							},
 						),
 						Before: before(false),
 						Action: func(c *cli.Context) error {
@@ -679,6 +679,29 @@ func Run(ctx context.Context) error {
 								TimeServers:       c.StringSlice("time-servers"),
 							}); err != nil {
 								return fmt.Errorf("setup-vpcs: %w", err)
+							}
+
+							return nil
+						},
+					},
+					{
+						Name:  "setup-peerings",
+						Usage: "setup VPC and External Peerings",
+						Flags: append(defaultFlags, accessNameFlag,
+							&cli.BoolFlag{
+								Name:    "wait-switches-ready",
+								Aliases: []string{"wait"},
+								Usage:   "wait for switches to be ready before before and after configuring peerings",
+								Value:   true,
+							},
+						),
+						Before: before(false),
+						Action: func(c *cli.Context) error {
+							if err := hhfab.DoVLABSetupPeerings(ctx, workDir, cacheDir, hhfab.SetupPeeringsOpts{
+								WaitSwitchesReady: c.Bool("wait-switches-ready"),
+								Requests:          c.Args().Slice(),
+							}); err != nil {
+								return fmt.Errorf("setup-peerings: %w", err)
 							}
 
 							return nil
@@ -707,7 +730,7 @@ func Run(ctx context.Context) error {
 							&cli.Float64Flag{
 								Name:  "iperfs-speed",
 								Usage: "minimum speed in Mbits/s for iperf3 test to consider successful (0 to not check speeds)",
-								Value: 7500,
+								Value: 7000,
 							},
 							&cli.IntFlag{
 								Name:  "curls",
@@ -724,7 +747,7 @@ func Run(ctx context.Context) error {
 								IPerfsMinSpeed:    c.Float64("iperfs-speed"),
 								CurlsCount:        c.Int("curls"),
 							}); err != nil {
-								return fmt.Errorf("testing connectivity: %w", err)
+								return fmt.Errorf("test-connectivity: %w", err)
 							}
 
 							return nil
