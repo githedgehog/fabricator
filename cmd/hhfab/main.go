@@ -623,8 +623,9 @@ func Run(ctx context.Context) error {
 						},
 					},
 					{
-						Name:  "setup-vpcs",
-						Usage: "setup VPCs and VPCAttachments for all servers and configure networking on them",
+						Name:    "setup-vpcs",
+						Aliases: []string{"vpcs"},
+						Usage:   "setup VPCs and VPCAttachments for all servers and configure networking on them",
 						Flags: append(defaultFlags, accessNameFlag,
 							&cli.BoolFlag{
 								Name:    "wait-switches-ready",
@@ -648,22 +649,26 @@ func Run(ctx context.Context) error {
 								Value: "default",
 							},
 							&cli.IntFlag{
-								Name:  "servers-per-subnet",
-								Usage: "number of servers per subnet",
-								Value: 1,
+								Name:    "servers-per-subnet",
+								Aliases: []string{"servers"},
+								Usage:   "number of servers per subnet",
+								Value:   1,
 							},
 							&cli.IntFlag{
-								Name:  "subnets-per-vpc",
-								Usage: "number of subnets per VPC",
-								Value: 1,
+								Name:    "subnets-per-vpc",
+								Aliases: []string{"subnets"},
+								Usage:   "number of subnets per VPC",
+								Value:   1,
 							},
 							&cli.StringSliceFlag{
-								Name:  "dns-servers",
-								Usage: "DNS servers for VPCs",
+								Name:    "dns-servers",
+								Aliases: []string{"dns"},
+								Usage:   "DNS servers for VPCs",
 							},
 							&cli.StringSliceFlag{
-								Name:  "time-servers",
-								Usage: "Time servers for VPCs",
+								Name:    "time-servers",
+								Aliases: []string{"ntp"},
+								Usage:   "Time servers for VPCs",
 							},
 						),
 						Before: before(false),
@@ -685,8 +690,9 @@ func Run(ctx context.Context) error {
 						},
 					},
 					{
-						Name:  "setup-peerings",
-						Usage: "setup VPC and External Peerings per requests (remove all if empty)",
+						Name:    "setup-peerings",
+						Aliases: []string{"peers"},
+						Usage:   "setup VPC and External Peerings per requests (remove all if empty)",
 						UsageText: strings.TrimSpace(strings.ReplaceAll(`
 							Setup test scenario with VPC/External Peerings by specifying requests in the format described below.
 
@@ -740,8 +746,9 @@ func Run(ctx context.Context) error {
 						},
 					},
 					{
-						Name:  "test-connectivity",
-						Usage: "test connectivity between all servers",
+						Name:    "test-connectivity",
+						Aliases: []string{"conns"},
+						Usage:   "test connectivity between all servers",
 						Flags: append(defaultFlags, accessNameFlag,
 							&cli.BoolFlag{
 								Name:    "wait-switches-ready",
