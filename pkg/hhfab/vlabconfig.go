@@ -236,8 +236,9 @@ func (c *Config) PrepareVLAB(ctx context.Context, opts VLABUpOpts) (*VLAB, error
 	}
 
 	for idx := range c.Controls {
-		// TODO skip if marked as HW
-		c.Controls[idx].Spec.Bootstrap.Disk = "/dev/vda"
+		if !isHardware(&c.Controls[idx]) {
+			c.Controls[idx].Spec.Bootstrap.Disk = "/dev/vda"
+		}
 	}
 
 	if !createCfg {
