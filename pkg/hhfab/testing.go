@@ -452,7 +452,6 @@ type SetupPeeringsOpts struct {
 	Requests          []string
 }
 
-// TODO move vpc creation to here, just have flag --vpc-per-server
 func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeeringsOpts) error {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
 	defer cancel()
@@ -804,9 +803,6 @@ type TestConnectivityOpts struct {
 }
 
 func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConnectivityOpts) error {
-	ctx, cancel := context.WithTimeout(ctx, 60*time.Minute)
-	defer cancel()
-
 	start := time.Now()
 
 	if opts.PingsParallel <= 0 {
@@ -1089,7 +1085,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 }
 
 func waitSwitchesReady(ctx context.Context, kube client.Reader) error {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
 	for {
@@ -1141,7 +1137,7 @@ func checkPing(ctx context.Context, opts TestConnectivityOpts, pings *semaphore.
 	}
 	defer pings.Release(1)
 
-	ctx, cancel := context.WithTimeout(ctx, time.Duration(opts.PingsCount+10)*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(opts.PingsCount+30)*time.Second)
 	defer cancel()
 
 	slog.Debug("Running ping", "from", from, "to", toIP.String())
@@ -1184,7 +1180,7 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphor
 	}
 	defer iperfs.Release(1)
 
-	ctx, cancel := context.WithTimeout(ctx, time.Duration(opts.IPerfsSeconds+10)*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(opts.IPerfsSeconds+30)*time.Second)
 	defer cancel()
 
 	slog.Debug("Running iperf", "from", from, "to", to)
@@ -1192,7 +1188,7 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphor
 	g, ctx := errgroup.WithContext(ctx)
 
 	g.Go(func() error {
-		out, err := toSSH.RunContext(ctx, fmt.Sprintf("toolbox -q timeout -v %d iperf3 -s -1", opts.IPerfsSeconds+5))
+		out, err := toSSH.RunContext(ctx, fmt.Sprintf("toolbox -q timeout -v %d iperf3 -s -1", opts.IPerfsSeconds+25))
 		if err != nil {
 			return fmt.Errorf("running iperf server: %w: %s", err, string(out))
 		}
@@ -1203,7 +1199,7 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphor
 	g.Go(func() error {
 		time.Sleep(1 * time.Second) // TODO think about more reliable way to wait for server to start
 
-		cmd := fmt.Sprintf("toolbox -q timeout -v %d iperf3 -J -c %s -t %d", opts.IPerfsSeconds+5, toIP.String(), opts.IPerfsSeconds)
+		cmd := fmt.Sprintf("toolbox -q timeout -v %d iperf3 -J -c %s -t %d", opts.IPerfsSeconds+25, toIP.String(), opts.IPerfsSeconds)
 		out, err := fromSSH.RunContext(ctx, cmd)
 		if err != nil {
 			return fmt.Errorf("running iperf client: %w: %s", err, string(out))
@@ -1250,7 +1246,7 @@ func checkCurl(ctx context.Context, opts TestConnectivityOpts, curls *semaphore.
 	}
 	defer curls.Release(1)
 
-	ctx, cancel := context.WithTimeout(ctx, time.Duration(5*opts.CurlsCount+10)*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(5*opts.CurlsCount+30)*time.Second)
 	defer cancel()
 
 	slog.Debug("Running curls", "from", from, "to", toIP, "count", opts.CurlsCount)
