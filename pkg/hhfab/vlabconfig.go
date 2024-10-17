@@ -30,8 +30,8 @@ const (
 	VLABSSHKeyFile = "sshkey"
 	VLABVMsDir     = "vms"
 
-	VLABSwitchMACTmpl = "0c:20:12:ff:%02d:00"
-	VLABMACTmpl       = "0c:20:12:fe:%02d:%02d"
+	VLABSwitchMACTmpl = "0c:20:12:ff:%02x:00"
+	VLABMACTmpl       = "0c:20:12:fe:%02x:%02x"
 
 	HHFabCfgPrefix          = ".hhfab.githedgehog.com"
 	HHFabCfgType            = "type" + HHFabCfgPrefix
