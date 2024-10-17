@@ -1171,7 +1171,7 @@ func checkPing(ctx context.Context, opts TestConnectivityOpts, pings *semaphore.
 }
 
 func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphore.Weighted, from, to string, fromSSH, toSSH *goph.Client, toIP netip.Addr, expected bool) error {
-	if opts.PingsCount <= 0 || !expected {
+	if opts.IPerfsSeconds <= 0 || !expected {
 		return nil
 	}
 
