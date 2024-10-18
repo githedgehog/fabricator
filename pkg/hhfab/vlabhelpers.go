@@ -14,7 +14,7 @@ import (
 	"strings"
 
 	"github.com/manifoldco/promptui"
-	wiringapi "go.githedgehog.com/fabric/api/wiring/v1alpha2"
+	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 )
 
 type VLABAccessType string

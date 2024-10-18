@@ -18,7 +18,7 @@ import (
 	"dario.cat/mergo"
 	"github.com/charmbracelet/keygen"
 	fmeta "go.githedgehog.com/fabric/api/meta"
-	wiringapi "go.githedgehog.com/fabric/api/wiring/v1alpha2"
+	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/yaml"
@@ -30,8 +30,8 @@ const (
 	VLABSSHKeyFile = "sshkey"
 	VLABVMsDir     = "vms"
 
-	VLABSwitchMACTmpl = "0c:20:12:ff:%02d:00"
-	VLABMACTmpl       = "0c:20:12:fe:%02d:%02d"
+	VLABSwitchMACTmpl = "0c:20:12:ff:%02x:00"
+	VLABMACTmpl       = "0c:20:12:fe:%02x:%02x"
 
 	HHFabCfgPrefix          = ".hhfab.githedgehog.com"
 	HHFabCfgType            = "type" + HHFabCfgPrefix
