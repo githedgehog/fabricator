@@ -45,7 +45,7 @@ func Install(cfg fabapi.Fabricator) ([]client.Object, error) {
 	}
 
 	apiChartVersion := string(cfg.Status.Versions.Fabricator.API)
-	apiChart, err := comp.NewHelmChart(cfg, "fabricator-api", APIChartRef, apiChartVersion, "", false, values)
+	apiChart, err := comp.NewHelmChart(cfg, "fabricator-api", APIChartRef, apiChartVersion, "", false, "")
 	if err != nil {
 		return nil, fmt.Errorf("api chart: %w", err)
 	}
