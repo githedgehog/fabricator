@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"net/netip"
 
-	dhcpapi "go.githedgehog.com/fabric/api/dhcp/v1alpha2"
+	dhcpapi "go.githedgehog.com/fabric/api/dhcp/v1beta1"
 	"go.githedgehog.com/fabric/api/meta"
 	"go.githedgehog.com/fabric/pkg/boot"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
