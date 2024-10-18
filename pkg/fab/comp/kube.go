@@ -12,7 +12,7 @@ import (
 	cmapi "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
 	helmapi "github.com/k3s-io/helm-controller/pkg/apis/helm.cattle.io/v1"
-	dhcpapi "go.githedgehog.com/fabric/api/dhcp/v1alpha2"
+	dhcpapi "go.githedgehog.com/fabric/api/dhcp/v1beta1"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	appsapi "k8s.io/api/apps/v1"
 	coreapi "k8s.io/api/core/v1"

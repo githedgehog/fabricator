@@ -17,10 +17,10 @@ import (
 	"strings"
 	"time"
 
-	dhcpapi "go.githedgehog.com/fabric/api/dhcp/v1alpha2"
+	dhcpapi "go.githedgehog.com/fabric/api/dhcp/v1beta1"
 	"go.githedgehog.com/fabric/api/meta"
-	vpcapi "go.githedgehog.com/fabric/api/vpc/v1alpha2"
-	wiringapi "go.githedgehog.com/fabric/api/wiring/v1alpha2"
+	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
+	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
 	"go.githedgehog.com/fabric/pkg/util/logutil"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
