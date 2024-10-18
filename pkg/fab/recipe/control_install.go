@@ -696,6 +696,8 @@ func waitKube[T client.Object](ctx context.Context, kube client.Client, name, ns
 
 	t := reflect.TypeOf(obj).Elem().Name()
 
+	slog.Debug("Waiting for ready", "kind", t, "name", name)
+
 	for {
 		select {
 		case <-ctx.Done():
