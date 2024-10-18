@@ -674,6 +674,19 @@ func (c *ControlInstall) installFabricator(ctx context.Context, kube client.Clie
 		return fmt.Errorf("installing fabricator config and control nodes: %w", err)
 	}
 
+	if err := waitKube(ctx, kube, comp.FabName, comp.FabNamespace,
+		&fabapi.Fabricator{}, func(obj *fabapi.Fabricator) (bool, error) {
+			for _, cond := range obj.Status.Conditions {
+				if cond.Type == fabapi.ConditionApplied && cond.Status == metav1.ConditionTrue {
+					return true, nil
+				}
+			}
+
+			return false, nil
+		}); err != nil {
+		return fmt.Errorf("waiting for fabricator applied: %w", err)
+	}
+
 	return nil
 }
 
