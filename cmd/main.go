@@ -12,6 +12,10 @@ import (
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
+	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
+	fabricatorcontroller "go.githedgehog.com/fabricator/internal/controller/fabricator"
+	"go.githedgehog.com/fabricator/pkg/controller"
+	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -21,9 +25,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
-
-	fabricatorv1beta1 "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
-	fabricatorcontroller "go.githedgehog.com/fabricator/internal/controller/fabricator"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -35,8 +36,10 @@ var (
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
-	utilruntime.Must(fabricatorv1beta1.AddToScheme(scheme))
+	utilruntime.Must(fabapi.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
+
+	utilruntime.Must(comp.HelmAPISchemeBuilder.AddToScheme(scheme))
 }
 
 func main() {
@@ -131,7 +134,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&fabricatorcontroller.FabricatorReconciler{
+	if err = (&controller.FabricatorReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
@@ -139,7 +142,7 @@ func main() {
 		os.Exit(1)
 	}
 	if os.Getenv("ENABLE_WEBHOOKS") != "false" {
-		if err = (&fabricatorv1beta1.Fabricator{}).SetupWebhookWithManager(mgr); err != nil {
+		if err = (&fabapi.Fabricator{}).SetupWebhookWithManager(mgr); err != nil {
 			setupLog.Error(err, "unable to create webhook", "webhook", "Fabricator")
 			os.Exit(1)
 		}
@@ -152,7 +155,7 @@ func main() {
 		os.Exit(1)
 	}
 	if os.Getenv("ENABLE_WEBHOOKS") != "false" {
-		if err = (&fabricatorv1beta1.ControlNode{}).SetupWebhookWithManager(mgr); err != nil {
+		if err = (&fabapi.ControlNode{}).SetupWebhookWithManager(mgr); err != nil {
 			setupLog.Error(err, "unable to create webhook", "webhook", "ControlNode")
 			os.Exit(1)
 		}

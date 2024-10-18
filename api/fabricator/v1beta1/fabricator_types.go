@@ -17,6 +17,10 @@ import (
 
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
+const (
+	ConditionApplied = "Applied"
+)
+
 type FabricatorSpec struct {
 	Config    FabConfig    `json:"config,omitempty"`
 	Overrides FabOverrides `json:"overrides,omitempty"`
@@ -25,6 +29,21 @@ type FabricatorSpec struct {
 type FabricatorStatus struct {
 	IsBootstrap bool     `json:"isBootstrap,omitempty"`
 	Versions    Versions `json:"versions,omitempty"`
+
+	// Time of the last attempt to apply configuration
+	LastAttemptTime metav1.Time `json:"lastAttemptTime,omitempty"`
+	// Generation of the last attempt to apply configuration
+	LastAttemptGen int64 `json:"lastAttemptGen,omitempty"`
+	// Time of the last successful configuration application
+	LastAppliedTime metav1.Time `json:"lastAppliedTime,omitempty"`
+	// Generation of the last successful configuration application
+	LastAppliedGen int64 `json:"lastAppliedGen,omitempty"`
+	// Controller version that applied the last successful configuration
+	LastAppliedController string `json:"lastAppliedController,omitempty"`
+
+	// Conditions of the fabricator, includes readiness marker for use with kubectl wait
+	Conditions []metav1.Condition `json:"conditions"`
+
 	// TODO reserved VLANs, subnets, etc.
 }
 

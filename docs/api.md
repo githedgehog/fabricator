@@ -339,6 +339,12 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `isBootstrap` _boolean_ |  |  |  |
 | `versions` _[Versions](#versions)_ |  |  |  |
+| `lastAttemptTime` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#time-v1-meta)_ | Time of the last attempt to apply configuration |  |  |
+| `lastAttemptGen` _integer_ | Generation of the last attempt to apply configuration |  |  |
+| `lastAppliedTime` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#time-v1-meta)_ | Time of the last successful configuration application |  |  |
+| `lastAppliedGen` _integer_ | Generation of the last successful configuration application |  |  |
+| `lastAppliedController` _string_ | Controller version that applied the last successful configuration |  |  |
+| `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#condition-v1-meta) array_ | Conditions of the fabricator, includes readiness marker for use with kubectl wait |  |  |
 
 
 #### FabricatorVersions

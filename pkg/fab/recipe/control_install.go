@@ -17,10 +17,10 @@ import (
 	"strings"
 	"time"
 
-	dhcpapi "go.githedgehog.com/fabric/api/dhcp/v1alpha2"
+	dhcpapi "go.githedgehog.com/fabric/api/dhcp/v1beta1"
 	"go.githedgehog.com/fabric/api/meta"
-	vpcapi "go.githedgehog.com/fabric/api/vpc/v1alpha2"
-	wiringapi "go.githedgehog.com/fabric/api/wiring/v1alpha2"
+	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
+	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
 	"go.githedgehog.com/fabric/pkg/util/logutil"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
@@ -674,6 +674,19 @@ func (c *ControlInstall) installFabricator(ctx context.Context, kube client.Clie
 		return fmt.Errorf("installing fabricator config and control nodes: %w", err)
 	}
 
+	if err := waitKube(ctx, kube, comp.FabName, comp.FabNamespace,
+		&fabapi.Fabricator{}, func(obj *fabapi.Fabricator) (bool, error) {
+			for _, cond := range obj.Status.Conditions {
+				if cond.Type == fabapi.ConditionApplied && cond.Status == metav1.ConditionTrue {
+					return true, nil
+				}
+			}
+
+			return false, nil
+		}); err != nil {
+		return fmt.Errorf("waiting for fabricator applied: %w", err)
+	}
+
 	return nil
 }
 
@@ -682,6 +695,8 @@ func waitKube[T client.Object](ctx context.Context, kube client.Client, name, ns
 	defer ticker.Stop()
 
 	t := reflect.TypeOf(obj).Elem().Name()
+
+	slog.Debug("Waiting for ready", "kind", t, "name", name)
 
 	for {
 		select {
