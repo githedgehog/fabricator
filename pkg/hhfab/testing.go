@@ -350,10 +350,10 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 
 		switch res {
 		case ctrlutil.OperationResultCreated:
-			slog.Info("Created attachment", "attachment", attach.Name)
+			slog.Info("Created", "vpcattachment", attach.Name)
 			changed = true
 		case ctrlutil.OperationResultUpdated:
-			slog.Info("Updated attachment", "attachment", attach.Name)
+			slog.Info("Updated", "vpcattachment", attach.Name)
 			changed = true
 		}
 	}
@@ -738,10 +738,10 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 		}
 
 		if res == ctrlutil.OperationResultCreated {
-			slog.Info("Created VPCPeering", "name", name)
+			slog.Info("Created", "vpcpeering", name)
 			changed = true
 		} else if res == ctrlutil.OperationResultUpdated {
-			slog.Info("Updated VPCPeering", "name", name)
+			slog.Info("Updated", "vpcpeering", name)
 			changed = true
 		}
 	}
@@ -767,10 +767,10 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 		}
 
 		if res == ctrlutil.OperationResultCreated {
-			slog.Info("Created ExternalPeering", "name", name)
+			slog.Info("Created", "externalpeering", name)
 			changed = true
 		} else if res == ctrlutil.OperationResultUpdated {
-			slog.Info("Updated ExternalPeering", "name", name)
+			slog.Info("Updated", "externalpeering", name)
 			changed = true
 		}
 	}
