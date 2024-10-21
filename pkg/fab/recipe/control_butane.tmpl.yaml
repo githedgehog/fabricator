@@ -173,6 +173,34 @@ storage:
       contents:
         inline: |
           plugins:
+            fabricswitchssh:
+              shortCut: s
+              description: SSH
+              scopes:
+              - switch
+              - agent
+              background: false
+              command: kubectl
+              args:
+              - fabric
+              - switch
+              - ssh
+              - --name
+              - $NAME
+            fabricswitchserial:
+              shortCut: Shift-S
+              description: Serial
+              scopes:
+              - switch
+              - agent
+              background: false
+              command: kubectl
+              args:
+              - fabric
+              - switch
+              - serial
+              - --name
+              - $NAME
             fabricswitchreboot:
               shortCut: r
               description: Reboot
