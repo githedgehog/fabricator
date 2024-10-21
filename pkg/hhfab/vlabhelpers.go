@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +17,9 @@ import (
 	"github.com/manifoldco/promptui"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/hhfctl"
+	"go.githedgehog.com/fabric/pkg/util/kubeutil"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 type VLABAccessType string
@@ -129,8 +133,38 @@ func (c *Config) VLABAccess(ctx context.Context, vlab *VLAB, t VLABAccessType, n
 		} else if entry.IsSwitch {
 			slog.Info("SSH through control node", "name", name, "type", "switch")
 
-			// TODO: implement by calling kubectl fabric on the control node
-			return fmt.Errorf("not implemented: %s", name) //nolint:goerr113
+			kubeconfig := filepath.Join(c.WorkDir, VLABDir, VLABKubeConfig)
+			kube, err := kubeutil.NewClientWithCache(ctx, kubeconfig, wiringapi.SchemeBuilder)
+			if err != nil {
+				return fmt.Errorf("creating kube client: %w", err)
+			}
+
+			sw := &wiringapi.Switch{}
+			if err := kube.Get(ctx, client.ObjectKey{Name: name, Namespace: metav1.NamespaceDefault}, sw); err != nil {
+				return fmt.Errorf("getting switch: %w", err)
+			}
+
+			if sw.Spec.IP == "" {
+				return fmt.Errorf("switch IP not found: %s", name) //nolint:goerr113
+			}
+
+			swIP, err := netip.ParsePrefix(sw.Spec.IP)
+			if err != nil {
+				return fmt.Errorf("parsing switch IP: %w", err)
+			}
+
+			proxyCmd := fmt.Sprintf("ssh %s -i %s -W %%h:%%p -p %d core@127.0.0.1",
+				strings.Join(SSHQuietFlags, " "),
+				filepath.Join(VLABDir, VLABSSHKeyFile),
+				getSSHPort(0), // TODO get control node ID
+			)
+
+			cmdName = VLABCmdSSH
+			args = append(SSHQuietFlags,
+				"-i", filepath.Join(VLABDir, VLABSSHKeyFile),
+				"-o", "ProxyCommand="+proxyCmd,
+				"admin@"+swIP.Addr().String(),
+			)
 		} else {
 			return fmt.Errorf("SSH not available: %s", name) //nolint:goerr113
 		}
