@@ -2,7 +2,7 @@
 # Version handling
 #
 
-version_dirty := `[ -z "$(git status -s)" ] || echo "-$(date +"%H%M%S")"`
+version_dirty := `[ -z "$(git status -s)" ] || echo "-$(LC_ALL=C tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 2)$(date +"%H%M")"`
 version := `git describe --tags --dirty --always` + version_dirty
 
 # Print version that will be used in the build
