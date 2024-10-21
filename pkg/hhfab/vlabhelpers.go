@@ -15,6 +15,7 @@ import (
 
 	"github.com/manifoldco/promptui"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
+	"go.githedgehog.com/fabric/pkg/hhfctl"
 )
 
 type VLABAccessType string
@@ -60,7 +61,7 @@ func (c *Config) VLABAccess(ctx context.Context, vlab *VLAB, t VLABAccessType, n
 	}
 
 	for _, sw := range switches.Items {
-		serial := getSerialInfo(&sw)
+		serial := hhfctl.GetSerialInfo(&sw)
 		if serial == "" {
 			continue
 		}
