@@ -33,13 +33,13 @@ const (
 	VLABSwitchMACTmpl = "0c:20:12:ff:%02x:00"
 	VLABMACTmpl       = "0c:20:12:fe:%02x:%02x"
 
-	HHFabCfgPrefix          = ".hhfab.githedgehog.com"
-	HHFabCfgType            = "type" + HHFabCfgPrefix
-	HHFabCfgTypeHW          = "hw"
-	HHFabCfgSerial          = "serial" + HHFabCfgPrefix
-	HHFabCfgLinkPrefix      = "link" + HHFabCfgPrefix + "/"
-	HHFabCfgPCIPrefix       = "pci@"
-	HHFabCfgSerialSchemeSSH = "ssh://"
+	HHFabCfgPrefix     = ".hhfab.githedgehog.com"
+	HHFabCfgType       = "type" + HHFabCfgPrefix
+	HHFabCfgTypeHW     = "hw"
+	HHFabCfgLinkPrefix = "link" + HHFabCfgPrefix + "/"
+	HHFabCfgPCIPrefix  = "pci@"
+	// HHFabCfgSerial          = "serial" + HHFabCfgPrefix
+	// HHFabCfgSerialSchemeSSH = "ssh://"
 )
 
 const (
@@ -714,22 +714,6 @@ func getPassthroughLinks(obj client.Object) map[string]string {
 	}
 
 	return links
-}
-
-func getSerialInfo(obj client.Object) string {
-	if obj.GetAnnotations() != nil {
-		if v, exist := obj.GetAnnotations()[HHFabCfgSerial]; exist {
-			if strings.HasPrefix(v, HHFabCfgSerialSchemeSSH) {
-				return v[len(HHFabCfgSerialSchemeSSH):]
-			}
-
-			slog.Warn("Invalid serial annotation value", "kind", obj.GetObjectKind().GroupVersionKind().Kind, "name", obj.GetName(), "value", v)
-
-			return ""
-		}
-	}
-
-	return ""
 }
 
 const (
