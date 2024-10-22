@@ -65,13 +65,9 @@ func (c *Config) VLABAccess(ctx context.Context, vlab *VLAB, t VLABAccessType, n
 	}
 
 	for _, sw := range switches.Items {
-		serial := hhfctl.GetSerialInfo(&sw)
-		if serial == "" {
-			continue
-		}
-
 		entry := entries[sw.Name]
-		entry.RemoteSerial = serial
+		entry.RemoteSerial = hhfctl.GetSerialInfo(&sw)
+		entry.IsSwitch = true
 		entries[sw.Name] = entry
 	}
 
