@@ -32,8 +32,6 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab/comp/fabric"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k9s"
-	"go.githedgehog.com/fabricator/pkg/fab/comp/ntp"
-	"go.githedgehog.com/fabricator/pkg/fab/comp/reloader"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/zot"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -135,6 +133,7 @@ func (c *ControlInstall) Run(ctx context.Context) error {
 	}
 
 	c.Fab.Status.IsBootstrap = true
+	c.Fab.Status.IsInstall = true
 
 	if err := kube.Create(ctx, comp.NewNamespace(comp.FabNamespace)); err != nil && !apierrors.IsAlreadyExists(err) {
 		return fmt.Errorf("creating namespace %q: %w", comp.FabNamespace, err)
@@ -161,24 +160,28 @@ func (c *ControlInstall) Run(ctx context.Context) error {
 		}
 	}
 
-	if err := c.installReloader(ctx, kube); err != nil {
+	if err := c.preCacheZot(ctx); err != nil {
+		return fmt.Errorf("pre-caching zot: %w", err)
+	}
+
+	if err := c.installFabricator(ctx, kube); err != nil {
+		return fmt.Errorf("installing fabricator and config: %w", err)
+	}
+
+	if err := c.waitReloader(ctx, kube); err != nil {
 		return fmt.Errorf("installing reloader: %w", err)
 	}
 
-	if err := c.installNTP(ctx, kube); err != nil {
+	if err := c.waitNTP(ctx, kube); err != nil {
 		return fmt.Errorf("installing ntp: %w", err)
 	}
 
-	if err := c.installFabric(ctx, kube); err != nil {
+	if err := c.installWaitFabric(ctx, kube); err != nil {
 		return fmt.Errorf("installing fabric: %w", err)
 	}
 
 	if err := c.installWiring(ctx, kube); err != nil {
 		return fmt.Errorf("installing included wiring: %w", err)
-	}
-
-	if err := c.installFabricator(ctx, kube); err != nil {
-		return fmt.Errorf("installing fabricator and config: %w", err)
 	}
 
 	if err := os.WriteFile(InstallMarkerFile, []byte(InstallMarkerComplete), 0o644); err != nil { //nolint:gosec
@@ -459,12 +462,33 @@ func (c *ControlInstall) uploadAirgap(ctx context.Context, username, password st
 	return nil
 }
 
-func (c *ControlInstall) installReloader(ctx context.Context, kube client.Client) error {
-	slog.Info("Installing reloader")
+func (c *ControlInstall) preCacheZot(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
 
-	if err := comp.EnforceKubeInstall(ctx, kube, c.Fab, reloader.Install); err != nil {
-		return fmt.Errorf("enforcing reloader install: %w", err)
+	slog.Info("Pre-caching Zot image")
+
+	repo, err := zot.ImageURL(c.Fab)
+	if err != nil {
+		return fmt.Errorf("getting zot image URL: %w", err)
 	}
+	img := repo + ":" + string(zot.Version(c.Fab))
+
+	slog.Debug("Pre-caching", "image", img)
+
+	cmd := exec.CommandContext(ctx, "k3s", "crictl", "pull", img)
+	cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "crictl: ")
+	cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "crictl: ")
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("running crictl pull: %w", err)
+	}
+
+	return nil
+}
+
+func (c *ControlInstall) waitReloader(ctx context.Context, kube client.Client) error {
+	slog.Info("Waiting for reloader")
 
 	if err := waitKube(ctx, kube, "reloader-reloader", comp.FabNamespace,
 		&comp.Deployment{}, func(obj *comp.Deployment) (bool, error) {
@@ -482,17 +506,15 @@ func (c *ControlInstall) installReloader(ctx context.Context, kube client.Client
 	return nil
 }
 
-func (c *ControlInstall) installFabric(ctx context.Context, kube client.Client) error {
-	slog.Info("Installing fabric")
-
-	if err := comp.EnforceKubeInstall(ctx, kube, c.Fab, fabric.Install(c.Control)); err != nil {
-		return fmt.Errorf("enforcing fabric install: %w", err)
-	}
+func (c *ControlInstall) installWaitFabric(ctx context.Context, kube client.Client) error {
+	slog.Info("Installing kubectl-fabric")
 
 	// TODO remove if it'll be managed by control agent?
 	if err := c.copyFile(fabric.CtlBinName, filepath.Join(fabric.BinDir, fabric.CtlDestBinName), 0o755); err != nil {
 		return fmt.Errorf("copying fabricctl bin: %w", err)
 	}
+
+	slog.Info("Waiting for fabric services")
 
 	if err := waitKube(ctx, kube, "fabric-ctrl", comp.FabNamespace,
 		&comp.Deployment{}, func(obj *comp.Deployment) (bool, error) {
@@ -533,6 +555,9 @@ func (c *ControlInstall) installFabric(ctx context.Context, kube client.Client) 
 		return fmt.Errorf("waiting for fabric-dhcpd ready: %w", err)
 	}
 
+	slog.Info("Installing fabric management DHCP subnet")
+
+	// TODO move to the operator
 	if err := comp.EnforceKubeInstall(ctx, kube, c.Fab, fabric.InstallManagementDHCPSubnet); err != nil {
 		return fmt.Errorf("enforcing fabric management dhcp subnet install: %w", err)
 	}
@@ -626,12 +651,8 @@ func (c *ControlInstall) installWiring(ctx context.Context, kube client.Client) 
 	return nil
 }
 
-func (c *ControlInstall) installNTP(ctx context.Context, kube client.Client) error {
-	slog.Info("Installing NTP server")
-
-	if err := comp.EnforceKubeInstall(ctx, kube, c.Fab, ntp.Install); err != nil {
-		return fmt.Errorf("enforcing ntp install: %w", err)
-	}
+func (c *ControlInstall) waitNTP(ctx context.Context, kube client.Client) error {
+	slog.Info("Waiting for NTP server")
 
 	if err := waitKube(ctx, kube, "ntp", comp.FabNamespace,
 		&comp.Deployment{}, func(obj *comp.Deployment) (bool, error) {

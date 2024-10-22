@@ -38,6 +38,8 @@ func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
 	utilruntime.Must(comp.HelmAPISchemeBuilder.AddToScheme(scheme))
+	utilruntime.Must(comp.CMApiSchemeBuilder.AddToScheme(scheme))
+	utilruntime.Must(comp.CMMetaSchemeBuilder.AddToScheme(scheme))
 
 	utilruntime.Must(fabapi.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
