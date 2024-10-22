@@ -48,16 +48,16 @@ var Versions = fabapi.Versions{
 			string(fmeta.NOSTypeSONiCBCMCampus): "v4.4.0",
 		},
 		ONIE: map[string]meta.Version{
-			switchprofile.DellS5232FON.Spec.Platform:         "test4", // TODO update with proper version
-			switchprofile.DellS5248FON.Spec.Platform:         "test4", // TODO update with proper version
-			switchprofile.CelesticaDS3000.Spec.Platform:      "test1", // TODO update with proper version
-			switchprofile.CelesticaDS4000.Spec.Platform:      "test1", // TODO update with proper version
-			switchprofile.EdgecoreDCS203.Spec.Platform:       "test3", // TODO update with proper version
-			switchprofile.EdgecoreDCS204.Spec.Platform:       "test2", // TODO update with proper version
-			switchprofile.EdgecoreDCS501.Spec.Platform:       "test2", // TODO update with proper version
-			switchprofile.EdgecoreEPS203.Spec.Platform:       "test2", // TODO update with proper version
-			switchprofile.SupermicroSSEC4632SB.Spec.Platform: "test1", // TODO update with proper version
-			switchprofile.VS.Spec.Platform:                   "test1", // TODO update with proper version
+			switchprofile.DellS5232FON.Spec.Platform:         "v0.1.0",
+			switchprofile.DellS5248FON.Spec.Platform:         "v0.1.0",
+			switchprofile.CelesticaDS3000.Spec.Platform:      "v0.1.0",
+			switchprofile.CelesticaDS4000.Spec.Platform:      "v0.1.0",
+			switchprofile.EdgecoreDCS203.Spec.Platform:       "v0.1.0",
+			switchprofile.EdgecoreDCS204.Spec.Platform:       "v0.1.0",
+			switchprofile.EdgecoreDCS501.Spec.Platform:       "v0.1.0",
+			switchprofile.EdgecoreEPS203.Spec.Platform:       "v0.1.0",
+			switchprofile.SupermicroSSEC4632SB.Spec.Platform: "v0.1.0", // same as DS3000
+			switchprofile.VS.Spec.Platform:                   "v0.1.0",
 		},
 	},
 	VLAB: fabapi.VLABVersions{
