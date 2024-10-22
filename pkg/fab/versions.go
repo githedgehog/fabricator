@@ -30,7 +30,7 @@ var Versions = fabapi.Versions{
 	Fabricator: fabapi.FabricatorVersions{
 		API:            FabricatorVersion,
 		Controller:     FabricatorVersion,
-		ControlUSBRoot: "v0.0.4", // TODO separate repo/versioning to stay up to date with Flatcar?
+		ControlUSBRoot: "v3815.2.5-hh1",
 	},
 	Fabric: fabapi.FabricVersions{
 		API:        FabricVersion,
@@ -40,8 +40,8 @@ var Versions = fabapi.Versions{
 		Agent:      FabricVersion,
 		Ctl:        FabricVersion,
 		Alloy:      "v1.1.1",      // TODO upgrade to v1.4.x or newer
-		ProxyChart: FabricVersion, // TODO
-		Proxy:      "1.9.1",       // TODO use version starting with "v", upgrade or replace with better option
+		ProxyChart: FabricVersion, // TODO switch to a better proxy
+		Proxy:      "1.9.1",       // TODO use version starting with "v"
 		NOS: map[string]meta.Version{
 			string(fmeta.NOSTypeSONiCBCMVS):     "v4.4.0",
 			string(fmeta.NOSTypeSONiCBCMBase):   "v4.4.0",
