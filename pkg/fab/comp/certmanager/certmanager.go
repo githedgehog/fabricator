@@ -99,3 +99,16 @@ func Artifacts(cfg fabapi.Fabricator) (comp.OCIArtifacts, error) {
 		StartupAPICheckImageRef: Version(cfg),
 	}, nil
 }
+
+var (
+	_ comp.KubeStatus = StatusCtrl
+	_ comp.KubeStatus = StatusWebhook
+)
+
+func StatusCtrl(_ fabapi.Fabricator) (string, client.Object, error) {
+	return "cert-manager", &comp.Deployment{}, nil
+}
+
+func StatusWebhook(_ fabapi.Fabricator) (string, client.Object, error) {
+	return "cert-manager-webhook", &comp.Deployment{}, nil
+}

@@ -58,3 +58,9 @@ func Artifacts(cfg fabapi.Fabricator) (comp.OCIArtifacts, error) {
 		ImageRef: cfg.Status.Versions.Platform.NTP,
 	}, nil
 }
+
+var _ comp.KubeStatus = Status
+
+func Status(_ fabapi.Fabricator) (string, client.Object, error) {
+	return "ntp", &comp.Deployment{}, nil
+}

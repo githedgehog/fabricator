@@ -324,3 +324,26 @@ func Artifacts(cfg fabapi.Fabricator) (comp.OCIArtifacts, error) {
 
 	return arts, nil
 }
+
+var (
+	_ comp.KubeStatus = StatusCtrl
+	_ comp.KubeStatus = StatusDHCP
+	_ comp.KubeStatus = StatusBoot
+	_ comp.KubeStatus = StatusProxy
+)
+
+func StatusCtrl(_ fabapi.Fabricator) (string, client.Object, error) {
+	return "fabric-ctrl", &comp.Deployment{}, nil
+}
+
+func StatusDHCP(_ fabapi.Fabricator) (string, client.Object, error) {
+	return "fabric-dhcpd", &comp.Deployment{}, nil
+}
+
+func StatusBoot(_ fabapi.Fabricator) (string, client.Object, error) {
+	return "fabric-boot", &comp.Deployment{}, nil
+}
+
+func StatusProxy(_ fabapi.Fabricator) (string, client.Object, error) {
+	return "fabric-proxy", &comp.Deployment{}, nil
+}
