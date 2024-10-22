@@ -10,7 +10,7 @@ on:
       - master
       - release/*
     tags:
-      - "*"
+      - "v*"
   pull_request:
   schedule:
     - cron: "0 10 * * *" # ~2am PST
@@ -266,7 +266,7 @@ jobs:
 
   publish:
     runs-on: lab
-    if: startsWith(github.event.ref, 'refs/tags/') && github.event_name == 'push'
+    if: startsWith(github.event.ref, 'refs/tags/v') && github.event_name == 'push'
     needs:
       - builds
       - vlab
@@ -299,6 +299,13 @@ jobs:
       - name: Publish Images, Helm charts and Bins on release
         run: |
           just --timestamp oci_repo=ghcr.io push push-multi
+
+      - name: Create GH Release
+        uses: softprops/action-gh-release@v2
+        with:
+          make_latest: true # TODO do it for master only
+          files: |
+            bin/hhfab-*.tar.gz
 
       - name: Setup tmate session for debug
         if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}

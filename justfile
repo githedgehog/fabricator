@@ -66,6 +66,7 @@ hhfab-build-local: _license_headers _gotools _kube_gen _hhfab_embed && version
 
 _hhfab-build GOOS GOARCH: _license_headers _gotools _kube_gen _hhfab_embed
   GOOS={{GOOS}} GOARCH={{GOARCH}} {{go_build}} -o ./bin/hhfab-{{GOOS}}-{{GOARCH}}/hhfab ./cmd/hhfab
+  cd bin && tar -czvf hhfab-{{GOOS}}-{{GOARCH}}-{{version}}.tar.gz hhfab-{{GOOS}}-{{GOARCH}}/hhfab
 
 # Build hhfab and other user-facing binaries for all supported OS/Arch
 build-multi: (_hhfab-build "linux" "amd64") (_hhfab-build "linux" "arm64") (_hhfab-build "darwin" "amd64") (_hhfab-build "darwin" "arm64") && version
