@@ -46,6 +46,15 @@ var configTmpl string
 
 var _ comp.KubeInstall = Install
 
+func ImageURL(cfg fabapi.Fabricator) (string, error) {
+	repo, err := comp.ImageURL(cfg, ImageRef)
+	if err != nil {
+		return "", fmt.Errorf("getting image URL for %q: %w", ImageRef, err)
+	}
+
+	return repo, nil
+}
+
 func Install(cfg fabapi.Fabricator) ([]client.Object, error) {
 	version := string(Version(cfg))
 
@@ -70,10 +79,7 @@ func Install(cfg fabapi.Fabricator) ([]client.Object, error) {
 		return nil, fmt.Errorf("config: %w", err)
 	}
 
-	repo, err := comp.ImageURL(cfg, ImageRef)
-	if err != nil {
-		return nil, fmt.Errorf("getting image URL for %q: %w", ImageRef, err)
-	}
+	repo, err := ImageURL(cfg)
 
 	values, err := tmplutil.FromTemplate("values", valuesTmpl, map[string]any{
 		"Repo":           repo,

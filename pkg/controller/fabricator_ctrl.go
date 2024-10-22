@@ -16,7 +16,12 @@ import (
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/certmanager"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/f8s"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/fabric"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/ntp"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/reloader"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/zot"
 	"go.githedgehog.com/fabricator/pkg/version"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -44,9 +49,14 @@ func (r *FabricatorReconciler) SetupWithManager(mgr ctrl.Manager) error {
 // +kubebuilder:rbac:groups=fabricator.githedgehog.com,resources=fabricators/finalizers,verbs=update
 
 // +kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch;create;update;patch;delete
 
 // +kubebuilder:rbac:groups=helm.cattle.io,resources=helmcharts,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=helm.cattle.io,resources=helmcharts/status,verbs=get
+
+// +kubebuilder:rbac:groups=cert-manager.io,resources=certificates,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=cert-manager.io,resources=certificates/status,verbs=get
 
 func (r *FabricatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	l := log.FromContext(ctx)
@@ -75,6 +85,7 @@ func (r *FabricatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	f.Status.IsBootstrap = false
+	f.Status.IsInstall = false
 
 	apimeta.SetStatusCondition(&f.Status.Conditions, metav1.Condition{
 		Type:               fabapi.ConditionApplied,
@@ -107,11 +118,32 @@ func (r *FabricatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 	control := controls.Items[0]
 
+	if err := comp.EnforceKubeInstall(ctx, r.Client, *f, reloader.Install); err != nil {
+		return ctrl.Result{}, fmt.Errorf("enforcing reloader install: %w", err)
+	}
+
+	if err := comp.EnforceKubeInstall(ctx, r.Client, *f, certmanager.Install); err != nil {
+		return ctrl.Result{}, fmt.Errorf("enforcing cert-manager install: %w", err)
+	}
+
+	if err := comp.EnforceKubeInstall(ctx, r.Client, *f, zot.Install); err != nil {
+		return ctrl.Result{}, fmt.Errorf("enforcing zot install: %w", err)
+	}
+
 	if err := comp.EnforceKubeInstall(ctx, r.Client, *f, fabric.Install(control)); err != nil {
 		return ctrl.Result{}, fmt.Errorf("enforcing fabric install: %w", err)
 	}
 
-	// TODO: reconcile all components
+	if err := comp.EnforceKubeInstall(ctx, r.Client, *f, ntp.Install); err != nil {
+		return ctrl.Result{}, fmt.Errorf("enforcing ntp install: %w", err)
+	}
+
+	// Should be probably always updated last
+	if err := comp.EnforceKubeInstall(ctx, r.Client, *f, f8s.Install); err != nil {
+		return ctrl.Result{}, fmt.Errorf("enforcing fabricactor install: %w", err)
+	}
+
+	// TODO: reconcile all components and collect status
 
 	apimeta.SetStatusCondition(&f.Status.Conditions, metav1.Condition{
 		Type:               fabapi.ConditionApplied,

@@ -133,14 +133,19 @@ func EnforceKubeInstall(ctx context.Context, kube client.Client, cfg fabapi.Fabr
 			var res ctrlutil.OperationResult
 			var err error
 
-			attempt := 0
-
-			if err := retry.OnError(wait.Backoff{
+			backoff := wait.Backoff{
 				Steps:    10,
 				Duration: 500 * time.Millisecond,
 				Factor:   1.5,
 				Jitter:   0.1,
-			}, func(error) bool {
+			}
+
+			if !cfg.Status.IsInstall {
+				backoff.Steps = 1
+			}
+
+			attempt := 0
+			if err := retry.OnError(backoff, func(error) bool {
 				return true
 			}, func() error {
 				if attempt > 0 {

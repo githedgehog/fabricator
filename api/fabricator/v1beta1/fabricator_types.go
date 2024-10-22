@@ -28,6 +28,7 @@ type FabricatorSpec struct {
 
 type FabricatorStatus struct {
 	IsBootstrap bool     `json:"isBootstrap,omitempty"`
+	IsInstall   bool     `json:"isInstall,omitempty"`
 	Versions    Versions `json:"versions,omitempty"`
 
 	// Time of the last attempt to apply configuration
