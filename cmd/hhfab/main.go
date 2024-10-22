@@ -472,7 +472,7 @@ func Run(ctx context.Context) error {
 				Flags: append(defaultFlags, hMode,
 					&cli.BoolFlag{
 						Name:    FlagNameControlsUSB,
-						Aliases: []string{"no-usb"},
+						Aliases: []string{"usb"},
 						Usage:   "use installer USB image for control node(s)",
 						EnvVars: []string{"HHFAB_CONTROL_USB"},
 						Value:   true,
@@ -547,7 +547,7 @@ func Run(ctx context.Context) error {
 							},
 							&cli.BoolFlag{
 								Name:    FlagNameControlsUSB,
-								Aliases: []string{"no-usb"},
+								Aliases: []string{"usb"},
 								Usage:   "use installer USB image for control node(s)",
 								EnvVars: []string{"HHFAB_CONTROL_USB"},
 								Value:   true,
