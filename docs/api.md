@@ -14,6 +14,49 @@ Package v1beta1 contains API Schema definitions for the fabricator v1beta1 API g
 
 
 
+#### ComponentStatus
+
+_Underlying type:_ _string_
+
+
+
+
+
+_Appears in:_
+- [ComponentsStatus](#componentsstatus)
+
+| Field | Description |
+| --- | --- |
+| `` |  |
+| `NotFound` |  |
+| `Pending` |  |
+| `Ready` |  |
+
+
+#### ComponentsStatus
+
+
+
+
+
+
+
+_Appears in:_
+- [FabricatorStatus](#fabricatorstatus)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `certManagerCtrl` _[ComponentStatus](#componentstatus)_ |  |  |  |
+| `certManagerWebhook` _[ComponentStatus](#componentstatus)_ |  |  |  |
+| `reloader` _[ComponentStatus](#componentstatus)_ |  |  |  |
+| `zot` _[ComponentStatus](#componentstatus)_ |  |  |  |
+| `ntp` _[ComponentStatus](#componentstatus)_ |  |  |  |
+| `fabricCtrl` _[ComponentStatus](#componentstatus)_ |  |  |  |
+| `fabricBoot` _[ComponentStatus](#componentstatus)_ |  |  |  |
+| `fabricDHCP` _[ComponentStatus](#componentstatus)_ |  |  |  |
+| `fabricProxy` _[ComponentStatus](#componentstatus)_ |  |  |  |
+
+
 #### ControlConfig
 
 
@@ -338,6 +381,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `isBootstrap` _boolean_ |  |  |  |
+| `isInstall` _boolean_ |  |  |  |
 | `versions` _[Versions](#versions)_ |  |  |  |
 | `lastAttemptTime` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#time-v1-meta)_ | Time of the last attempt to apply configuration |  |  |
 | `lastAttemptGen` _integer_ | Generation of the last attempt to apply configuration |  |  |
@@ -345,6 +389,7 @@ _Appears in:_
 | `lastAppliedGen` _integer_ | Generation of the last successful configuration application |  |  |
 | `lastAppliedController` _string_ | Controller version that applied the last successful configuration |  |  |
 | `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#condition-v1-meta) array_ | Conditions of the fabricator, includes readiness marker for use with kubectl wait |  |  |
+| `components` _[ComponentsStatus](#componentsstatus)_ |  |  |  |
 
 
 #### FabricatorVersions
