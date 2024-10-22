@@ -663,12 +663,17 @@ func Run(ctx context.Context) error {
 							&cli.StringSliceFlag{
 								Name:    "dns-servers",
 								Aliases: []string{"dns"},
-								Usage:   "DNS servers for VPCs",
+								Usage:   "DNS servers for VPCs advertised by DHCP",
 							},
 							&cli.StringSliceFlag{
 								Name:    "time-servers",
 								Aliases: []string{"ntp"},
-								Usage:   "Time servers for VPCs",
+								Usage:   "Time servers for VPCs advertised by DHCP",
+							},
+							&cli.UintFlag{
+								Name:    "interface-mtu",
+								Aliases: []string{"mtu"},
+								Usage:   "interface MTU for VPCs advertised by DHCP",
 							},
 						),
 						Before: before(false),
@@ -682,6 +687,7 @@ func Run(ctx context.Context) error {
 								SubnetsPerVPC:     c.Int("subnets-per-vpc"),
 								DNSServers:        c.StringSlice("dns-servers"),
 								TimeServers:       c.StringSlice("time-servers"),
+								InterfaceMTU:      uint16(c.Uint("interface-mtu")), //nolint:gosec
 							}); err != nil {
 								return fmt.Errorf("setup-vpcs: %w", err)
 							}

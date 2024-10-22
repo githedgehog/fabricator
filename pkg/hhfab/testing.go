@@ -48,6 +48,7 @@ type SetupVPCsOpts struct {
 	SubnetsPerVPC     int
 	DNSServers        []string
 	TimeServers       []string
+	InterfaceMTU      uint16
 }
 
 func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) error {
@@ -193,10 +194,11 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 			}
 
 			var dhcpOpts *vpcapi.VPCDHCPOptions
-			if len(opts.DNSServers) > 0 || len(opts.TimeServers) > 0 {
+			if len(opts.DNSServers) > 0 || len(opts.TimeServers) > 0 || opts.InterfaceMTU > 0 {
 				dhcpOpts = &vpcapi.VPCDHCPOptions{
-					DNSServers:  opts.DNSServers,
-					TimeServers: opts.TimeServers,
+					DNSServers:   opts.DNSServers,
+					TimeServers:  opts.TimeServers,
+					InterfaceMTU: opts.InterfaceMTU,
 				}
 			}
 
