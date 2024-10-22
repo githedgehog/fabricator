@@ -710,7 +710,7 @@ func (c *ControlInstall) installFabricator(ctx context.Context, kube client.Clie
 		return fmt.Errorf("waiting for fabricator applied: %w", err)
 	}
 
-	slog.Info("Waiting for fabricator ready")
+	slog.Info("Waiting for fabricator ready, may take 2-5 minutes")
 
 	if err := waitKube(ctx, kube, comp.FabName, comp.FabNamespace,
 		&fabapi.Fabricator{}, func(obj *fabapi.Fabricator) (bool, error) {
