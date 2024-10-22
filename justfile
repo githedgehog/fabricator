@@ -53,8 +53,9 @@ _kube_gen: _controller_gen
   # Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects
   {{controller_gen}} rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
 
-# Generate code/manifests, things to embed, etc
-gen: _kube_gen _hhfab_embed
+# Generate docs, code/manifests, things to embed, etc
+gen: _kube_gen _hhfab_embed _crd_ref_docs
+  {{crd_ref_docs}} --source-path=./api/ --config=api/docs.config.yaml --renderer=markdown --output-path=./docs/api.md
 
 hhfab-build: _license_headers _gotools _kube_gen _hhfab_embed && version
   {{go_linux_build}} -o ./bin/hhfab ./cmd/hhfab
@@ -111,10 +112,6 @@ test-api: _helm-fabricator-api
     kubectl wait --for condition=established --timeout=60s crd/controlnodes.fabricator.githedgehog.com
     kubectl get crd | grep fabricator
     kind delete cluster --name kind
-
-# Generate docs
-docs: gen _crd_ref_docs
-  {{crd_ref_docs}} --source-path=./api/ --config=api/docs.config.yaml --renderer=markdown --output-path=./docs/api.md
 
 #
 # Setup local registry
