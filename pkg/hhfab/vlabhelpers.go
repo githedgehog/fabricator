@@ -37,7 +37,11 @@ var SSHQuietFlags = []string{
 	"-o", "LogLevel=ERROR",
 }
 
-func (c *Config) VLABAccess(ctx context.Context, vlab *VLAB, t VLABAccessType, name string) error {
+func (c *Config) VLABAccess(ctx context.Context, vlab *VLAB, t VLABAccessType, name string, inArgs []string) error {
+	if len(inArgs) > 0 && t != VLABAccessSSH {
+		return fmt.Errorf("arguments only supported for ssh") //nolint:goerr113
+	}
+
 	if err := c.checkForBins(); err != nil {
 		return err
 	}
@@ -163,6 +167,10 @@ func (c *Config) VLABAccess(ctx context.Context, vlab *VLAB, t VLABAccessType, n
 			)
 		} else {
 			return fmt.Errorf("SSH not available: %s", name) //nolint:goerr113
+		}
+
+		if len(inArgs) > 0 {
+			args = append(args, "PATH=$PATH:/opt/bin "+strings.Join(inArgs, " "))
 		}
 	} else if t == VLABAccessSerial {
 		if entry.SerialSock != "" {

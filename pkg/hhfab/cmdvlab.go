@@ -105,31 +105,31 @@ func loadVLABForHelpers(ctx context.Context, workDir, cacheDir string) (*Config,
 	return c, vlab, nil
 }
 
-func DoVLABSSH(ctx context.Context, workDir, cacheDir, name string) error {
+func DoVLABSSH(ctx context.Context, workDir, cacheDir, name string, args []string) error {
 	c, vlab, err := loadVLABForHelpers(ctx, workDir, cacheDir)
 	if err != nil {
 		return err
 	}
 
-	return c.VLABAccess(ctx, vlab, VLABAccessSSH, name)
+	return c.VLABAccess(ctx, vlab, VLABAccessSSH, name, args)
 }
 
-func DoVLABSerial(ctx context.Context, workDir, cacheDir, name string) error {
+func DoVLABSerial(ctx context.Context, workDir, cacheDir, name string, args []string) error {
 	c, vlab, err := loadVLABForHelpers(ctx, workDir, cacheDir)
 	if err != nil {
 		return err
 	}
 
-	return c.VLABAccess(ctx, vlab, VLABAccessSerial, name)
+	return c.VLABAccess(ctx, vlab, VLABAccessSerial, name, args)
 }
 
-func DoVLABSerialLog(ctx context.Context, workDir, cacheDir, name string) error {
+func DoVLABSerialLog(ctx context.Context, workDir, cacheDir, name string, args []string) error {
 	c, vlab, err := loadVLABForHelpers(ctx, workDir, cacheDir)
 	if err != nil {
 		return err
 	}
 
-	return c.VLABAccess(ctx, vlab, VLABAccessSerialLog, name)
+	return c.VLABAccess(ctx, vlab, VLABAccessSerialLog, name, args)
 }
 
 func DoVLABSetupVPCs(ctx context.Context, workDir, cacheDir string, opts SetupVPCsOpts) error {

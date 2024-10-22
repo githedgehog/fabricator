@@ -588,8 +588,8 @@ func Run(ctx context.Context) error {
 						Usage:  "ssh to a VLAB VM or HW if supported",
 						Flags:  append(defaultFlags, accessNameFlag),
 						Before: before(false),
-						Action: func(_ *cli.Context) error {
-							if err := hhfab.DoVLABSSH(ctx, workDir, cacheDir, accessName); err != nil {
+						Action: func(c *cli.Context) error {
+							if err := hhfab.DoVLABSSH(ctx, workDir, cacheDir, accessName, c.Args().Slice()); err != nil {
 								return fmt.Errorf("ssh: %w", err)
 							}
 
@@ -601,8 +601,8 @@ func Run(ctx context.Context) error {
 						Usage:  "get serial console of a VLAB VM or HW if supported",
 						Flags:  append(defaultFlags, accessNameFlag),
 						Before: before(false),
-						Action: func(_ *cli.Context) error {
-							if err := hhfab.DoVLABSerial(ctx, workDir, cacheDir, accessName); err != nil {
+						Action: func(c *cli.Context) error {
+							if err := hhfab.DoVLABSerial(ctx, workDir, cacheDir, accessName, c.Args().Slice()); err != nil {
 								return fmt.Errorf("serial: %w", err)
 							}
 
@@ -614,8 +614,8 @@ func Run(ctx context.Context) error {
 						Usage:  "get serial console log of a VLAB VM or HW if supported",
 						Flags:  append(defaultFlags, accessNameFlag),
 						Before: before(false),
-						Action: func(_ *cli.Context) error {
-							if err := hhfab.DoVLABSerialLog(ctx, workDir, cacheDir, accessName); err != nil {
+						Action: func(c *cli.Context) error {
+							if err := hhfab.DoVLABSerialLog(ctx, workDir, cacheDir, accessName, c.Args().Slice()); err != nil {
 								return fmt.Errorf("serial log: %w", err)
 							}
 
