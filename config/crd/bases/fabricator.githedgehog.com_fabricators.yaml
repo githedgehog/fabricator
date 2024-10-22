@@ -311,6 +311,27 @@ spec:
             type: object
           status:
             properties:
+              components:
+                properties:
+                  certManagerCtrl:
+                    type: string
+                  certManagerWebhook:
+                    type: string
+                  fabricBoot:
+                    type: string
+                  fabricCtrl:
+                    type: string
+                  fabricDHCP:
+                    type: string
+                  fabricProxy:
+                    type: string
+                  ntp:
+                    type: string
+                  reloader:
+                    type: string
+                  zot:
+                    type: string
+                type: object
               conditions:
                 description: Conditions of the fabricator, includes readiness marker
                   for use with kubectl wait

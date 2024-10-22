@@ -16,6 +16,7 @@ import (
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	appsapi "k8s.io/api/apps/v1"
 	coreapi "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metaapi "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
@@ -409,4 +410,34 @@ func CreateOrUpdate(ctx context.Context, kube client.Client, obj client.Object) 
 	}
 
 	return res, nil
+}
+
+type KubeStatus func(cfg fabapi.Fabricator) (string, client.Object, error)
+
+func GetKubeStatus(ctx context.Context, kube client.Reader, cfg fabapi.Fabricator, status KubeStatus) (fabapi.ComponentStatus, error) {
+	name, obj, err := status(cfg)
+	if err != nil {
+		return fabapi.CompStatusUnknown, fmt.Errorf("getting kube status info: %w", err)
+	}
+
+	if err := kube.Get(ctx, client.ObjectKey{Name: name, Namespace: FabNamespace}, obj); err != nil {
+		if apierrors.IsNotFound(err) {
+			return fabapi.CompStatusNotFound, nil
+		}
+
+		return fabapi.CompStatusUnknown, fmt.Errorf("getting %q: %w", name, err)
+	}
+
+	switch obj := obj.(type) {
+	case *Deployment:
+		for _, cond := range obj.Status.Conditions {
+			if cond.Type == DeploymentAvailable && cond.Status == ConditionTrue {
+				return fabapi.CompStatusReady, nil
+			}
+		}
+	default:
+		return fabapi.CompStatusUnknown, fmt.Errorf("unknown object type %T", obj) //nolint:goerr113
+	}
+
+	return fabapi.CompStatusPending, nil
 }

@@ -62,3 +62,9 @@ func Artifacts(cfg fabapi.Fabricator) (comp.OCIArtifacts, error) {
 		ImageRef: version,
 	}, nil
 }
+
+var _ comp.KubeStatus = Status
+
+func Status(_ fabapi.Fabricator) (string, client.Object, error) {
+	return "reloader-reloader", &comp.Deployment{}, nil
+}

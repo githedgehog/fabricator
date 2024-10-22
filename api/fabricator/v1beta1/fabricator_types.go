@@ -19,6 +19,7 @@ import (
 
 const (
 	ConditionApplied = "Applied"
+	ConditionReady   = "Ready"
 )
 
 type FabricatorSpec struct {
@@ -45,7 +46,42 @@ type FabricatorStatus struct {
 	// Conditions of the fabricator, includes readiness marker for use with kubectl wait
 	Conditions []metav1.Condition `json:"conditions"`
 
+	Components ComponentsStatus `json:"components,omitempty"`
+
 	// TODO reserved VLANs, subnets, etc.
+}
+
+type ComponentStatus string
+
+const (
+	CompStatusUnknown  ComponentStatus = ""
+	CompStatusNotFound ComponentStatus = "NotFound"
+	CompStatusPending  ComponentStatus = "Pending"
+	CompStatusReady    ComponentStatus = "Ready"
+)
+
+type ComponentsStatus struct {
+	CertManagerCtrl    ComponentStatus `json:"certManagerCtrl,omitempty"`
+	CertManagerWebhook ComponentStatus `json:"certManagerWebhook,omitempty"`
+	Reloader           ComponentStatus `json:"reloader,omitempty"`
+	Zot                ComponentStatus `json:"zot,omitempty"`
+	NTP                ComponentStatus `json:"ntp,omitempty"`
+	FabricCtrl         ComponentStatus `json:"fabricCtrl,omitempty"`
+	FabricBoot         ComponentStatus `json:"fabricBoot,omitempty"`
+	FabricDHCP         ComponentStatus `json:"fabricDHCP,omitempty"`
+	FabricProxy        ComponentStatus `json:"fabricProxy,omitempty"`
+}
+
+func (c *ComponentsStatus) IsReady() bool {
+	return c.CertManagerCtrl == CompStatusReady &&
+		c.CertManagerWebhook == CompStatusReady &&
+		c.Reloader == CompStatusReady &&
+		c.Zot == CompStatusReady &&
+		c.NTP == CompStatusReady &&
+		c.FabricCtrl == CompStatusReady &&
+		c.FabricBoot == CompStatusReady &&
+		c.FabricDHCP == CompStatusReady &&
+		c.FabricProxy == CompStatusReady
 }
 
 type FabOverrides struct {
