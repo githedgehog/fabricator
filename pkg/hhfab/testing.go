@@ -29,6 +29,7 @@ import (
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlutil "sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -1101,12 +1102,18 @@ func waitSwitchesReady(ctx context.Context, kube client.Reader) error {
 
 		allReady := true
 		for _, sw := range switches.Items {
+			ready := false
+
 			ag := &agentapi.Agent{}
-			if err := kube.Get(ctx, client.ObjectKey{Name: sw.Name, Namespace: sw.Namespace}, ag); err != nil {
+			err := kube.Get(ctx, client.ObjectKey{Name: sw.Name, Namespace: sw.Namespace}, ag)
+			if err != nil && !apierrors.IsNotFound(err) {
 				return fmt.Errorf("getting agent %q: %w", sw.Name, err)
 			}
 
-			ready := ag.Status.LastAppliedGen == ag.Generation && time.Since(ag.Status.LastHeartbeat.Time) < 1*time.Minute
+			if err == nil {
+				ready = ag.Status.LastAppliedGen == ag.Generation && time.Since(ag.Status.LastHeartbeat.Time) < 1*time.Minute
+			}
+
 			allReady = allReady && ready
 
 			if ready {
