@@ -441,6 +441,19 @@ func Run(ctx context.Context) error {
 				},
 			},
 			{
+				Name:   "versions",
+				Usage:  "print versions of all components",
+				Flags:  append(defaultFlags, hMode),
+				Before: before(false),
+				Action: func(_ *cli.Context) error {
+					if err := hhfab.Versions(ctx, workDir, cacheDir, hhfab.HydrateMode(hydrateMode)); err != nil {
+						return fmt.Errorf("printing versions: %w", err)
+					}
+
+					return nil
+				},
+			},
+			{
 				Name:  "sample",
 				Usage: "generate sample wiring diagram",
 				Subcommands: []*cli.Command{
