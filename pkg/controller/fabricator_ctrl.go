@@ -176,6 +176,8 @@ func (r *FabricatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 		var err error
 
+		// TODO check component versions
+
 		f.Status.Components.CertManagerCtrl, err = comp.GetKubeStatus(ctx, r.Client, *f, certmanager.StatusCtrl)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("getting cert-manager ctrl status: %w", err)
