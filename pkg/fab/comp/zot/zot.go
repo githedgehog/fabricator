@@ -80,6 +80,9 @@ func Install(cfg fabapi.Fabricator) ([]client.Object, error) {
 	}
 
 	repo, err := ImageURL(cfg)
+	if err != nil {
+		return nil, err
+	}
 
 	values, err := tmplutil.FromTemplate("values", valuesTmpl, map[string]any{
 		"Repo":           repo,
