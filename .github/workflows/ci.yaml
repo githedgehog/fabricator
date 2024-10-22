@@ -238,14 +238,13 @@ jobs:
           - "--include-onie=false"
         buildmode:
           - "--usb=true"
-          - "--usb=false"
         include:
+          - fabricmode: spine-leaf
+            includeonie: "--include-onie=false"
+            buildmode: "--usb=false"
           - fabricmode: spine-leaf
             includeonie: "--include-onie=true"
             buildmode: "--usb=true"
-          - fabricmode: spine-leaf
-            includeonie: "--include-onie=true"
-            buildmode: "--usb=false"
 
     steps:
       - name: Runner host
