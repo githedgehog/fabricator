@@ -64,6 +64,12 @@ hhfab-build: _license_headers _gotools _kube_gen _hhfab_embed && version
 hhfab-build-local: _license_headers _gotools _kube_gen _hhfab_embed && version
   {{go_build}} -o ./bin/hhfab ./cmd/hhfab
 
+_hhfab-build GOOS GOARCH: _license_headers _gotools _kube_gen _hhfab_embed
+  GOOS={{GOOS}} GOARCH={{GOARCH}} {{go_build}} -o ./bin/hhfab-{{GOOS}}-{{GOARCH}}/hhfab ./cmd/hhfab
+
+# Build hhfab and other user-facing binaries for all supported OS/Arch
+build-multi: (_hhfab-build "linux" "amd64") (_hhfab-build "linux" "arm64") (_hhfab-build "darwin" "amd64") (_hhfab-build "darwin" "arm64") && version
+
 # Build all artifacts
 build: _license_headers _gotools hhfab-build && version
   {{go_linux_build}} -o ./bin/fabricator ./cmd
@@ -99,8 +105,14 @@ kube-push: kube-build (_helm-push "fabricator-api") (_kube-push "fabricator") (_
   # Docker images and Helm charts pushed
 
 # Push all K8s artifacts (images and charts) and binaries
-push: kube-push && version
+push: kube-push _oras && version
   cd bin && oras push {{oras_insecure}} {{oci_repo}}/{{oci_prefix}}/hhfab:{{version}} hhfab
+
+_hhfab-push GOOS GOARCH: _oras (_hhfab-build GOOS GOARCH)
+  cd bin/hhfab-{{GOOS}}-{{GOARCH}} && oras push {{oras_insecure}} {{oci_repo}}/{{oci_prefix}}/hhfab-{{GOOS}}-{{GOARCH}}:{{version}} hhfab
+
+# Publish hhfab and other user-facing binaries for all supported OS/Arch
+push-multi: (_hhfab-push "linux" "amd64") (_hhfab-push "linux" "arm64") (_hhfab-push "darwin" "amd64") (_hhfab-push "darwin" "arm64") && version
 
 # Install API on a kind cluster and wait for CRDs to be ready
 test-api: _helm-fabricator-api
