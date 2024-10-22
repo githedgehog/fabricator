@@ -115,7 +115,7 @@ jobs:
 
       - name: Build hhfab for local OS/ARCH
         run: |
-          just hhfab-build-local
+          just --timestamp hhfab-build-local
 
       - name: hhfab init and build
         run: |
@@ -151,7 +151,7 @@ jobs:
 
       - name: Build bins for all OS/ARCH
         run: |
-          just build-multi
+          just --timestamp build-multi
 
       - name: Setup tmate session for debug
         if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
