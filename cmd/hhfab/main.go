@@ -475,7 +475,7 @@ func Run(ctx context.Context) error {
 						Aliases: []string{"usb"},
 						Usage:   "use installer USB image for control node(s)",
 						EnvVars: []string{"HHFAB_CONTROL_USB"},
-						Value:   false,
+						Value:   true,
 					},
 				),
 				Before: before(false),
