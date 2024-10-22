@@ -230,9 +230,12 @@ func (c *Config) PrepareVLAB(ctx context.Context, opts VLABUpOpts) (*VLAB, error
 		return nil, fmt.Errorf("getting or creating SSH key: %w", err)
 	}
 	vlabCfg.SSHKey = prv
+
 	c.Fab.Spec.Config.Control.DefaultUser.AuthorizedKeys = append(c.Fab.Spec.Config.Control.DefaultUser.AuthorizedKeys, pub)
-	for _, user := range c.Fab.Spec.Config.Fabric.DefaultSwitchUsers {
+
+	for username, user := range c.Fab.Spec.Config.Fabric.DefaultSwitchUsers {
 		user.AuthorizedKeys = append(user.AuthorizedKeys, pub)
+		c.Fab.Spec.Config.Fabric.DefaultSwitchUsers[username] = user
 	}
 
 	for idx := range c.Controls {
