@@ -233,15 +233,14 @@ func GetFabricConfig(f fabapi.Fabricator) (*meta.FabricConfig, error) {
 			string(f.Spec.Config.Fabric.ProtocolSubnet),
 			string(f.Spec.Config.Fabric.VTEPSubnet),
 			string(f.Spec.Config.Fabric.VPCWorkaroundSubnet),
-			string(f.Spec.Config.Control.DummySubnet),
 			string(f.Spec.Config.Fabric.MCLAGSessionSubnet),
 		},
 		Users:                    users,
 		FabricMode:               f.Spec.Config.Fabric.Mode,
 		BaseVPCCommunity:         f.Spec.Config.Fabric.BaseVPCCommunity,
-		VPCLoopbackSubnet:        string(f.Spec.Config.Fabric.VPCWorkaroundSubnet), // TODO validate
-		FabricMTU:                9100,                                             // TODO use
-		ServerFacingMTUOffset:    64,                                               // TODO use
+		VPCLoopbackSubnet:        string(f.Spec.Config.Fabric.VPCWorkaroundSubnet),
+		FabricMTU:                9100, // TODO use
+		ServerFacingMTUOffset:    64,   // TODO use
 		ESLAGMACBase:             f.Spec.Config.Fabric.ESLAGMACBase,
 		ESLAGESIPrefix:           f.Spec.Config.Fabric.ESLAGESIPrefix,
 		AlloyRepo:                comp.JoinURLParts(registry, comp.RegistryPrefix, AlloyRef),
@@ -249,7 +248,7 @@ func GetFabricConfig(f fabapi.Fabricator) (*meta.FabricConfig, error) {
 		Alloy:                    f.Spec.Config.Fabric.DefaultAlloyConfig,
 		DefaultMaxPathsEBGP:      64,
 		AllowExtraSwitchProfiles: false,
-		MCLAGSessionSubnet:       string(f.Spec.Config.Fabric.MCLAGSessionSubnet), // TODO validate
+		MCLAGSessionSubnet:       string(f.Spec.Config.Fabric.MCLAGSessionSubnet),
 	}, nil
 }
 

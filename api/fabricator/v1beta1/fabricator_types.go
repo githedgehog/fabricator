@@ -6,11 +6,16 @@ package v1beta1
 import (
 	"context"
 	"fmt"
+	"net/netip"
 	"reflect"
+	"slices"
+	"strings"
 
 	"dario.cat/mergo"
 	"github.com/go-playground/validator/v10"
 	fmeta "go.githedgehog.com/fabric/api/meta"
+	"go.githedgehog.com/fabric/pkg/agent/alloy"
+	"go.githedgehog.com/fabric/pkg/agent/dozer/bcm"
 	"go.githedgehog.com/fabricator/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -18,6 +23,9 @@ import (
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
 const (
+	FabName      = "default"
+	FabNamespace = "fab"
+
 	ConditionApplied = "Applied"
 	ConditionReady   = "Ready"
 )
@@ -95,15 +103,15 @@ type FabConfig struct {
 }
 
 type ControlConfig struct {
-	ManagementSubnet meta.Prefix `json:"managementSubnet,omitempty"` // TODO should be reserved
+	ManagementSubnet meta.Prefix `json:"managementSubnet,omitempty"`
 	VIP              meta.Prefix `json:"controlVIP,omitempty"`
 	TLSSAN           []string    `json:"tlsSAN,omitempty"`
 
 	KubeClusterSubnet meta.Prefix `json:"kubeClusterSubnet,omitempty"`
 	KubeServiceSubnet meta.Prefix `json:"kubeServiceSubnet,omitempty"`
-	KubeClusterDNS    meta.Addr   `json:"kubeClusterDNS,omitempty"` // Should be from the service CIDR
+	KubeClusterDNS    meta.Addr   `json:"kubeClusterDNS,omitempty"`
 
-	DummySubnet meta.Prefix `json:"dummySubnet,omitempty"` // TODO should be reserved
+	DummySubnet meta.Prefix `json:"dummySubnet,omitempty"`
 
 	DefaultUser ControlUser `json:"defaultUser,omitempty"`
 
@@ -142,29 +150,29 @@ type ControlConfigRegistryUpstream struct {
 type FabricConfig struct {
 	Mode fmeta.FabricMode `json:"mode,omitempty"`
 
-	ManagementDHCPStart meta.Addr `json:"managementDHCPStart,omitempty"` // TODO should be in mgmt subnet
-	ManagementDHCPEnd   meta.Addr `json:"managementDHCPEnd,omitempty"`   // TODO should be in mgmt subnet
+	ManagementDHCPStart meta.Addr `json:"managementDHCPStart,omitempty"`
+	ManagementDHCPEnd   meta.Addr `json:"managementDHCPEnd,omitempty"`
 
 	SpineASN     uint32 `json:"spineASN,omitempty"`
 	LeafASNStart uint32 `json:"leafASNStart,omitempty"`
 	LeafASNEnd   uint32 `json:"leafASNEnd,omitempty"`
 
-	ProtocolSubnet meta.Prefix `json:"protocolSubnet,omitempty"` // TODO should be reserved
-	VTEPSubnet     meta.Prefix `json:"vtepSubnet,omitempty"`     // TODO should be reserved
-	FabricSubnet   meta.Prefix `json:"fabricSubnet,omitempty"`   // TODO should be reserved
+	ProtocolSubnet meta.Prefix `json:"protocolSubnet,omitempty"`
+	VTEPSubnet     meta.Prefix `json:"vtepSubnet,omitempty"`
+	FabricSubnet   meta.Prefix `json:"fabricSubnet,omitempty"`
 
-	BaseVPCCommunity string            `json:"baseVPCCommunity,omitempty"` // TODO should be reserved
-	VPCIRBVLANs      []fmeta.VLANRange `json:"vpcIRBVLANs,omitempty"`      // TODO should be reserved
+	BaseVPCCommunity string            `json:"baseVPCCommunity,omitempty"`
+	VPCIRBVLANs      []fmeta.VLANRange `json:"vpcIRBVLANs,omitempty"`
 
-	VPCWorkaroundVLANs  []fmeta.VLANRange `json:"vpcWorkaroundVLANs,omitempty"`  // don't need to be reserved
-	VPCWorkaroundSubnet meta.Prefix       `json:"vpcWorkaroundSubnet,omitempty"` // TODO have to be reserved!
+	VPCWorkaroundVLANs  []fmeta.VLANRange `json:"vpcWorkaroundVLANs,omitempty"`
+	VPCWorkaroundSubnet meta.Prefix       `json:"vpcWorkaroundSubnet,omitempty"`
 
 	ESLAGMACBase   string `json:"eslagMACBase,omitempty"`
 	ESLAGESIPrefix string `json:"eslagESIPrefix,omitempty"`
 
-	MCLAGSessionSubnet meta.Prefix `json:"mclagSessionSubnet,omitempty"` // TODO should be reserved
+	MCLAGSessionSubnet meta.Prefix `json:"mclagSessionSubnet,omitempty"`
 
-	DefaultSwitchUsers map[string]SwitchUser `json:"defaultSwitchUsers,omitempty"` // TODO make sure admin user is always present
+	DefaultSwitchUsers map[string]SwitchUser `json:"defaultSwitchUsers,omitempty"`
 	DefaultAlloyConfig fmeta.AlloyConfig     `json:"defaultAlloyConfig,omitempty"`
 
 	IncludeONIE bool `json:"includeONIE,omitempty"`
@@ -172,7 +180,7 @@ type FabricConfig struct {
 
 type SwitchUser struct {
 	PasswordHash   string   `json:"password,omitempty"`
-	Role           string   `json:"role,omitempty"` // TODO enum/validate
+	Role           string   `json:"role,omitempty"`
 	AuthorizedKeys []string `json:"authorizedKeys,omitempty"`
 }
 
@@ -300,6 +308,14 @@ func (f *Fabricator) Default() {
 func (f *Fabricator) Validate(ctx context.Context) error {
 	f.Default()
 
+	if f.Name != FabName {
+		return fmt.Errorf("fabricator name must be %q", FabName) //nolint:goerr113
+	}
+
+	if f.Namespace != FabNamespace {
+		return fmt.Errorf("fabricator namespace must be %q", FabNamespace) //nolint:goerr113
+	}
+
 	err := fabricatorValidate.StructCtx(ctx, f)
 	if err != nil {
 		return fmt.Errorf("validating: %w", err)
@@ -323,6 +339,204 @@ func (f *Fabricator) Validate(ctx context.Context) error {
 		}
 	}
 
+	mgmtSubnet, err := f.Spec.Config.Control.ManagementSubnet.Parse()
+	if err != nil {
+		return fmt.Errorf("parsing management subnet: %w", err)
+	}
+
+	mgmtDHCPStart, err := f.Spec.Config.Fabric.ManagementDHCPStart.Parse()
+	if err != nil {
+		return fmt.Errorf("parsing management DHCP start: %w", err)
+	}
+	if !mgmtSubnet.Contains(mgmtDHCPStart) {
+		return fmt.Errorf("management DHCP start not in management subnet") //nolint:goerr113
+	}
+
+	mgmtDHCPEnd, err := f.Spec.Config.Fabric.ManagementDHCPEnd.Parse()
+	if err != nil {
+		return fmt.Errorf("parsing management DHCP end: %w", err)
+	}
+	if !mgmtSubnet.Contains(mgmtDHCPEnd) {
+		return fmt.Errorf("management DHCP end not in management subnet") //nolint:goerr113
+	}
+
+	controlVIP, err := f.Spec.Config.Control.VIP.Parse()
+	if err != nil {
+		return fmt.Errorf("parsing control VIP: %w", err)
+	}
+	if !mgmtSubnet.Contains(controlVIP.Addr()) {
+		return fmt.Errorf("control VIP not in management subnet") //nolint:goerr113
+	}
+	if controlVIP.Bits() != 32 {
+		return fmt.Errorf("control VIP must be /32") //nolint:goerr113
+	}
+
+	kubeServiceSubnet, err := f.Spec.Config.Control.KubeServiceSubnet.Parse()
+	if err != nil {
+		return fmt.Errorf("parsing kube service subnet: %w", err)
+	}
+
+	kubeClusterSubnet, err := f.Spec.Config.Control.KubeClusterSubnet.Parse()
+	if err != nil {
+		return fmt.Errorf("parsing kube cluster subnet: %w", err)
+	}
+
+	kubeClusterDNS, err := f.Spec.Config.Control.KubeClusterDNS.Parse()
+	if err != nil {
+		return fmt.Errorf("parsing kube cluster DNS: %w", err)
+	}
+	if !kubeServiceSubnet.Contains(kubeClusterDNS) {
+		return fmt.Errorf("kube cluster DNS not in kube service subnet") //nolint:goerr113
+	}
+
+	if kubeClusterSubnet.Overlaps(kubeServiceSubnet) {
+		return fmt.Errorf("kube cluster subnet overlaps kube service subnet") //nolint:goerr113
+	}
+
+	if mgmtSubnet.Overlaps(kubeServiceSubnet) {
+		return fmt.Errorf("management subnet overlaps kube service subnet") //nolint:goerr113
+	}
+
+	if mgmtSubnet.Overlaps(kubeClusterSubnet) {
+		return fmt.Errorf("management subnet overlaps kube cluster subnet") //nolint:goerr113
+	}
+
+	dummySubnet, err := f.Spec.Config.Control.DummySubnet.Parse()
+	if err != nil {
+		return fmt.Errorf("parsing dummy subnet: %w", err)
+	}
+
+	{
+		ph := f.Spec.Config.Control.DefaultUser.PasswordHash
+		if ph == "" {
+			return fmt.Errorf("default control user password hash is required") //nolint:goerr113
+		}
+
+		if !strings.HasPrefix(ph, "$5$") {
+			return fmt.Errorf("default control user password hash must be bcrypt") //nolint:goerr113
+		}
+	}
+
+	{
+		admin := false
+		for username, user := range f.Spec.Config.Fabric.DefaultSwitchUsers {
+			if username == "admin" && user.Role == "admin" {
+				admin = true
+			}
+
+			if !slices.Contains([]string{"admin", "operator"}, user.Role) {
+				return fmt.Errorf("invalid switch user %q role %q", username, user.Role) //nolint:goerr113
+			}
+
+			if user.PasswordHash == "" {
+				return fmt.Errorf("switch user %q password hash is required", username) //nolint:goerr113
+			}
+
+			if !strings.HasPrefix(user.PasswordHash, "$5$") {
+				return fmt.Errorf("switch user %q password hash must be bcrypt", username) //nolint:goerr113
+			}
+		}
+
+		if !admin {
+			return fmt.Errorf("admin switch user with role admin is required") //nolint:goerr113
+		}
+	}
+
+	fm := f.Spec.Config.Fabric.Mode
+	if !slices.Contains(fmeta.FabricModes, fm) {
+		return fmt.Errorf("invalid fabric mode %q", fm) //nolint:goerr113
+	}
+
+	if fm == fmeta.FabricModeSpineLeaf && f.Spec.Config.Fabric.SpineASN == 0 {
+		return fmt.Errorf("spine ASN is required for spine-leaf mode") //nolint:goerr113
+	}
+	if fm == fmeta.FabricModeSpineLeaf && f.Spec.Config.Fabric.LeafASNStart == 0 {
+		return fmt.Errorf("leaf ASN start is required for spine-leaf mode") //nolint:goerr113
+	}
+	if fm == fmeta.FabricModeSpineLeaf && f.Spec.Config.Fabric.LeafASNEnd == 0 {
+		return fmt.Errorf("leaf ASN end is required for spine-leaf mode") //nolint:goerr113
+	}
+	if fm == fmeta.FabricModeSpineLeaf && f.Spec.Config.Fabric.LeafASNStart >= f.Spec.Config.Fabric.LeafASNEnd {
+		return fmt.Errorf("leaf ASN start must be less than leaf ASN end") //nolint:goerr113
+	}
+
+	protoSubnet, err := f.Spec.Config.Fabric.ProtocolSubnet.Parse()
+	if err != nil {
+		return fmt.Errorf("parsing protocol subnet: %w", err)
+	}
+
+	vtepSubnet, err := f.Spec.Config.Fabric.VTEPSubnet.Parse()
+	if err != nil {
+		return fmt.Errorf("parsing VTEP subnet: %w", err)
+	}
+
+	fabricSubnet, err := f.Spec.Config.Fabric.FabricSubnet.Parse()
+	if err != nil {
+		return fmt.Errorf("parsing fabric subnet: %w", err)
+	}
+
+	mclagSessionSubnet, err := f.Spec.Config.Fabric.MCLAGSessionSubnet.Parse()
+	if err != nil {
+		return fmt.Errorf("parsing MCLAG session subnet: %w", err)
+	}
+
+	vpcLoopSubnet, err := f.Spec.Config.Fabric.VPCWorkaroundSubnet.Parse()
+	if err != nil {
+		return fmt.Errorf("parsing VPC workaround subnet: %w", err)
+	}
+
+	// TODO validate actual community
+	if f.Spec.Config.Fabric.BaseVPCCommunity == "" {
+		return fmt.Errorf("base VPC community is required") //nolint:goerr113
+	}
+
+	// TODO validate actual VLANs and that it's a reasonable range
+	if len(f.Spec.Config.Fabric.VPCIRBVLANs) == 0 {
+		return fmt.Errorf("VPC IRB VLANs are required") //nolint:goerr113
+	}
+
+	// TODO validate actual VLANs and that it's a reasonable range
+	if len(f.Spec.Config.Fabric.VPCWorkaroundVLANs) == 0 {
+		return fmt.Errorf("VPC workaround VLANs are required") //nolint:goerr113
+	}
+
+	// TODO validate MAC base
+	if f.Spec.Config.Fabric.ESLAGMACBase == "" {
+		return fmt.Errorf("ESLAG MAC base is required") //nolint:goerr113
+	}
+
+	if f.Spec.Config.Fabric.ESLAGESIPrefix == "" {
+		return fmt.Errorf("ESLAG ESI prefix is required") //nolint:goerr113
+	}
+
+	// TODO validate Alloy config
+
+	reservedSubnets := []netip.Prefix{
+		mgmtSubnet,
+		protoSubnet,
+		vtepSubnet,
+		fabricSubnet,
+		dummySubnet,
+		mclagSessionSubnet,
+		vpcLoopSubnet,
+	}
+
+	for someIdx, some := range reservedSubnets {
+		for otherIdx, other := range reservedSubnets {
+			if someIdx == otherIdx {
+				continue
+			}
+
+			if some.Overlaps(other) {
+				return fmt.Errorf("subnets %s and %s overlap", some, other) //nolint:goerr113
+			}
+		}
+	}
+
+	if err := f.CheckForKnownSwitchUsers(); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -335,6 +549,78 @@ func (f *Fabricator) CalculateVersions(def Versions) error {
 
 	if !f.Spec.Config.Fabric.IncludeONIE {
 		f.Status.Versions.Fabric.ONIE = map[string]meta.Version{}
+	}
+
+	return nil
+}
+
+var knownSwitchUsers = []string{
+	"root",
+	"daemon",
+	"bin",
+	"sys",
+	"adm",
+	"tty",
+	"disk",
+	"lp",
+	"mail",
+	"news",
+	"uucp",
+	"man",
+	"proxy",
+	"kmem",
+	"dialout",
+	"fax",
+	"voice",
+	"cdrom",
+	"floppy",
+	"tape",
+	"sudo",
+	"audio",
+	"dip",
+	"www-data",
+	"backup",
+	"operator",
+	"list",
+	"irc",
+	"src",
+	"gnats",
+	"shadow",
+	"utmp",
+	"video",
+	"sasl",
+	"plugdev",
+	"staff",
+	"games",
+	"users",
+	"nogroup",
+	"systemd-journal",
+	"systemd-timesync",
+	"systemd-network",
+	"systemd-resolve",
+	"docker",
+	"redis",
+	"netadmin",
+	"secadmin",
+	"messagebus",
+	"input",
+	"kvm",
+	"render",
+	"crontab",
+	"i2c",
+	"ssh",
+	"systemd-coredump",
+	"ntp",
+	"frr",
+	bcm.AgentUser,
+	alloy.UserName,
+}
+
+func (f *Fabricator) CheckForKnownSwitchUsers() error {
+	for userName := range f.Spec.Config.Fabric.DefaultSwitchUsers {
+		if slices.Contains(knownSwitchUsers, userName) {
+			return fmt.Errorf("switch user can't be named %q", userName) //nolint:goerr113
+		}
 	}
 
 	return nil

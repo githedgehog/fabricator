@@ -10,11 +10,8 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 
-	"go.githedgehog.com/fabric/pkg/agent/alloy"
-	"go.githedgehog.com/fabric/pkg/agent/dozer/bcm"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
@@ -286,7 +283,7 @@ func Versions(ctx context.Context, workDir, cacheDir string, hMode HydrateMode) 
 	return nil
 }
 
-func load(ctx context.Context, workDir, cacheDir string, wiring bool, mode HydrateMode) (*Config, error) {
+func load(ctx context.Context, workDir, cacheDir string, wiringAndHydration bool, mode HydrateMode) (*Config, error) {
 	if err := checkWorkCacheDir(workDir, cacheDir); err != nil {
 		return nil, err
 	}
@@ -320,11 +317,6 @@ func load(ctx context.Context, workDir, cacheDir string, wiring bool, mode Hydra
 		return nil, fmt.Errorf("getting fabricator and controls nodes: %w", err)
 	}
 
-	// TODO check the same in the Fabricator webhook?
-	if err := checkForSwitchUsers(f); err != nil {
-		return nil, fmt.Errorf("checking for switch users: %w", err)
-	}
-
 	cfg := &Config{
 		WorkDir:        workDir,
 		CacheDir:       cacheDir,
@@ -333,9 +325,15 @@ func load(ctx context.Context, workDir, cacheDir string, wiring bool, mode Hydra
 		Controls:       controls,
 	}
 
-	if wiring {
+	if wiringAndHydration {
 		if err := cfg.loadHydrateValidate(ctx, mode); err != nil {
-			return nil, fmt.Errorf("loading wiring: %w", err)
+			return nil, fmt.Errorf("loading wiring and hydrating: %w", err)
+		}
+
+		for _, control := range cfg.Controls {
+			if err := control.Validate(ctx, &f.Spec.Config, false); err != nil {
+				return nil, fmt.Errorf("validating control node %q: %w", control.Name, err)
+			}
 		}
 	}
 
@@ -360,78 +358,6 @@ func loadRegConf(workDir string) (*RegistryConfig, error) {
 	}
 
 	return regConf, nil
-}
-
-var knownSwitchUsers = []string{
-	"root",
-	"daemon",
-	"bin",
-	"sys",
-	"adm",
-	"tty",
-	"disk",
-	"lp",
-	"mail",
-	"news",
-	"uucp",
-	"man",
-	"proxy",
-	"kmem",
-	"dialout",
-	"fax",
-	"voice",
-	"cdrom",
-	"floppy",
-	"tape",
-	"sudo",
-	"audio",
-	"dip",
-	"www-data",
-	"backup",
-	"operator",
-	"list",
-	"irc",
-	"src",
-	"gnats",
-	"shadow",
-	"utmp",
-	"video",
-	"sasl",
-	"plugdev",
-	"staff",
-	"games",
-	"users",
-	"nogroup",
-	"systemd-journal",
-	"systemd-timesync",
-	"systemd-network",
-	"systemd-resolve",
-	"docker",
-	"redis",
-	"netadmin",
-	"secadmin",
-	"messagebus",
-	"input",
-	"kvm",
-	"render",
-	"crontab",
-	"i2c",
-	"ssh",
-	"systemd-coredump",
-	"ntp",
-	"frr",
-	bcm.AgentUser,
-	alloy.UserName,
-}
-
-func checkForSwitchUsers(f fabapi.Fabricator) error {
-	for userName := range f.Spec.Config.Fabric.DefaultSwitchUsers {
-		if slices.Contains(knownSwitchUsers, userName) {
-			return fmt.Errorf("switch user can't be named %q", userName) //nolint:goerr113
-		}
-	}
-
-	return nil
 }
 
 func getLocalDockerCredsFor(ctx context.Context, repo string) (string, string, error) {

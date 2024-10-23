@@ -5,6 +5,7 @@ package v1beta1
 
 import (
 	"context"
+	"fmt"
 
 	"go.githedgehog.com/fabricator/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -67,16 +68,63 @@ func init() {
 	SchemeBuilder.Register(&ControlNode{}, &ControlNodeList{})
 }
 
-func (c *ControlNode) Validate(ctx context.Context, fabCfg *FabConfig, allowNotHydrated bool) error {
+func (c *ControlNode) Validate(_ context.Context, fabCfg *FabConfig, allowNotHydrated bool) error {
 	if fabCfg == nil {
-		return nil
+		return fmt.Errorf("fabricator config must be non-nil") //nolint:goerr113
 	}
 
-	_ = ctx
-	_ = allowNotHydrated
+	if c.Namespace != FabNamespace {
+		return fmt.Errorf("control node must be in the fabricator namespace %q", FabNamespace) //nolint:goerr113
+	}
 
-	// TODO make interactive/non-interactive and iso/non-iso validation
-	// TODO validate the control node spec
+	if !allowNotHydrated {
+		dummyAddr, err := c.Spec.Dummy.IP.Parse()
+		if err != nil {
+			return fmt.Errorf("parsing dummy IP: %w", err)
+		}
+
+		dummySubnet, err := fabCfg.Control.DummySubnet.Parse()
+		if err != nil {
+			return fmt.Errorf("parsing dummy subnet: %w", err)
+		}
+
+		if !dummySubnet.Contains(dummyAddr.Addr()) {
+			return fmt.Errorf("dummy IP %s not in dummy subnet %s", dummyAddr.String(), dummySubnet.String()) //nolint:goerr113
+		}
+		if dummyAddr.Bits() != 31 {
+			return fmt.Errorf("dummy IP %s should be /31", dummyAddr.String()) //nolint:goerr113
+		}
+
+		managementAddr, err := c.Spec.Management.IP.Parse()
+		if err != nil {
+			return fmt.Errorf("parsing management IP: %w", err)
+		}
+
+		managementSubnet, err := fabCfg.Control.ManagementSubnet.Parse()
+		if err != nil {
+			return fmt.Errorf("parsing management subnet: %w", err)
+		}
+
+		if !managementSubnet.Contains(managementAddr.Addr()) {
+			return fmt.Errorf("management IP %s not in management subnet %s", managementAddr.String(), managementSubnet.String()) //nolint:goerr113
+		}
+
+		if managementAddr.Bits() != managementSubnet.Bits() {
+			return fmt.Errorf("management IP %s not the same subnet as management subnet %s", managementAddr.String(), managementSubnet.String()) //nolint:goerr113
+		}
+	}
+
+	if _, _, err := c.Spec.External.IP.Parse(); err != nil {
+		return fmt.Errorf("parsing external IP: %w", err)
+	}
+
+	if c.Spec.Management.Interface == "" {
+		return fmt.Errorf("management interface must be set") //nolint:goerr113
+	}
+
+	if c.Spec.External.Interface == "" {
+		return fmt.Errorf("external interface must be set") //nolint:goerr113
+	}
 
 	return nil
 }

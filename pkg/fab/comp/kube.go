@@ -27,8 +27,8 @@ import (
 
 const (
 	ClusterDomain  = "cluster.local"
-	FabName        = "default"
-	FabNamespace   = "fab"
+	FabName        = fabapi.FabName
+	FabNamespace   = fabapi.FabNamespace
 	RegPrefix      = "githedgehog"
 	FabCAIssuer    = "fab-ca"
 	FabCASecret    = FabCAIssuer
