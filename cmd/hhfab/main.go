@@ -464,7 +464,7 @@ func Run(ctx context.Context) error {
 						Flags:   defaultFlags,
 						Before:  before(false),
 						Action: func(_ *cli.Context) error {
-							panic("not implemented")
+							return fmt.Errorf("not available") //nolint:goerr113
 						},
 					},
 					{
@@ -474,7 +474,7 @@ func Run(ctx context.Context) error {
 						Flags:   defaultFlags,
 						Before:  before(false),
 						Action: func(_ *cli.Context) error {
-							panic("not implemented")
+							return fmt.Errorf("not available") //nolint:goerr113
 						},
 					},
 				},
