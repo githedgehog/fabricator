@@ -24,31 +24,13 @@ func TestInitConfig(t *testing.T) {
 		name        string
 		in          fab.InitConfigInput
 		expectedFab fabapi.Fabricator
-		err         bool
+		initErr     bool
+		validErr    bool
 	}{
 		{
-			name: "default",
-			in:   fab.InitConfigInput{},
-			expectedFab: fabapi.Fabricator{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      comp.FabName,
-					Namespace: comp.FabNamespace,
-				},
-				Spec: fabapi.FabricatorSpec{
-					Config: fabapi.FabConfig{
-						Fabric: fabapi.FabricConfig{
-							DefaultSwitchUsers: map[string]fabapi.SwitchUser{
-								"admin": {
-									Role: "admin",
-								},
-								"op": {
-									Role: "operator",
-								},
-							},
-						},
-					},
-				},
-			},
+			name:     "default",
+			in:       fab.InitConfigInput{},
+			validErr: true,
 		},
 		{
 			name: "dev",
@@ -170,12 +152,13 @@ func TestInitConfig(t *testing.T) {
 				DefaultPasswordHash: "$5$bar",
 				Dev:                 true,
 			},
-			err: true,
+			initErr: true,
 		},
 		{
 			name: "include-onie-import-upstream",
 			in: fab.InitConfigInput{
-				IncludeONIE: true,
+				DefaultPasswordHash: "$5$bar",
+				IncludeONIE:         true,
 				RegUpstream: &fabapi.ControlConfigRegistryUpstream{
 					Repo:        "repo",
 					Prefix:      "prefix",
@@ -201,14 +184,21 @@ func TestInitConfig(t *testing.T) {
 								Password:    "password",
 							},
 						},
+						Control: fabapi.ControlConfig{
+							DefaultUser: fabapi.ControlUser{
+								PasswordHash: "$5$bar",
+							},
+						},
 						Fabric: fabapi.FabricConfig{
 							IncludeONIE: true,
 							DefaultSwitchUsers: map[string]fabapi.SwitchUser{
 								"admin": {
-									Role: "admin",
+									Role:         "admin",
+									PasswordHash: "$5$bar",
 								},
 								"op": {
-									Role: "operator",
+									Role:         "operator",
+									PasswordHash: "$5$bar",
 								},
 							},
 						},
@@ -219,6 +209,7 @@ func TestInitConfig(t *testing.T) {
 		{
 			name: "control-node-management-link",
 			in: fab.InitConfigInput{
+				DefaultPasswordHash:       "$5$bar",
 				ControlNodeManagementLink: "pci@0000:00:00.0",
 			},
 			expectedFab: fabapi.Fabricator{
@@ -228,13 +219,20 @@ func TestInitConfig(t *testing.T) {
 				},
 				Spec: fabapi.FabricatorSpec{
 					Config: fabapi.FabConfig{
+						Control: fabapi.ControlConfig{
+							DefaultUser: fabapi.ControlUser{
+								PasswordHash: "$5$bar",
+							},
+						},
 						Fabric: fabapi.FabricConfig{
 							DefaultSwitchUsers: map[string]fabapi.SwitchUser{
 								"admin": {
-									Role: "admin",
+									Role:         "admin",
+									PasswordHash: "$5$bar",
 								},
 								"op": {
-									Role: "operator",
+									Role:         "operator",
+									PasswordHash: "$5$bar",
 								},
 							},
 						},
@@ -273,7 +271,7 @@ func TestInitConfig(t *testing.T) {
 			test.expectedFab.Default()
 
 			data, err := fab.InitConfig(ctx, test.in)
-			if test.err {
+			if test.initErr {
 				require.Error(t, err)
 
 				return
@@ -285,6 +283,12 @@ func TestInitConfig(t *testing.T) {
 			require.NoError(t, l.LoadAdd(ctx, data))
 
 			f, controls, err := fab.GetFabAndControls(ctx, l.GetClient(), true)
+			if test.validErr {
+				require.Error(t, err)
+
+				return
+			}
+
 			require.NoError(t, err)
 
 			f.APIVersion = ""
