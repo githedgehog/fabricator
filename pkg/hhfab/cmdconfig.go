@@ -192,7 +192,8 @@ func Init(ctx context.Context, c InitConfig) error {
 		return err
 	}
 
-	// TODO print info about initialized config, created files, next steps, etc.
+	slog.Info("Adjust configs (incl. credentials, modes, subnets, etc.)", "file", FabConfigFile)
+	slog.Info("Include wiring files (.yaml) or adjust imported ones", "dir", IncludeDir)
 
 	return nil
 }

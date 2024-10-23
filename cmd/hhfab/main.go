@@ -293,8 +293,8 @@ func Run(ctx context.Context) error {
 		Usage: "hedgehog fabricator - build, install and run hedgehog",
 		Description: `Create Hedgehog configs, wiring diagram, build an installer and optionally run the virtual lab (VLAB):
 	1.  Initialize working dir by running 'hhfab init', to use default creds use '--dev' (unsafe)
-	2a. If building for physical environment, use 'hhfab wiring sample' to generate sample wiring diagram
-	2b. If building for VLAB, use 'hhfab wiring vlab' to generate VLAB wiring diagram
+	2a. If building for physical environment, use 'hhfab sample' to generate sample wiring diagram
+	2b. If building for VLAB, use 'hhfab vlab gen' to generate VLAB wiring diagram
 	3.  Validate configs and wiring with 'hhfab validate' at any time (optional)
 	4.  Build Hedgehog installer with 'hhfab build'
 	5.  Use 'hhfab vlab up' to run VLAB (will run build automatically if needed)
