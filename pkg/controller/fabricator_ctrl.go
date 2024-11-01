@@ -17,7 +17,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/certmanager"
-	"go.githedgehog.com/fabricator/pkg/fab/comp/f8s"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/f8r"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/fabric"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/ntp"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/reloader"
@@ -145,7 +145,7 @@ func (r *FabricatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 
 		// Should be probably always updated last
-		if err := comp.EnforceKubeInstall(ctx, r.Client, *f, f8s.Install); err != nil {
+		if err := comp.EnforceKubeInstall(ctx, r.Client, *f, f8r.Install); err != nil {
 			return ctrl.Result{}, fmt.Errorf("enforcing fabricactor install: %w", err)
 		}
 
