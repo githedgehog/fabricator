@@ -28,7 +28,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/certmanager"
-	"go.githedgehog.com/fabricator/pkg/fab/comp/f8s"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/f8r"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/fabric"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k9s"
@@ -673,7 +673,7 @@ func (c *ControlInstall) waitNTP(ctx context.Context, kube client.Client) error 
 func (c *ControlInstall) installFabricator(ctx context.Context, kube client.Client) error {
 	slog.Info("Installing fabricator")
 
-	if err := comp.EnforceKubeInstall(ctx, kube, c.Fab, f8s.Install); err != nil {
+	if err := comp.EnforceKubeInstall(ctx, kube, c.Fab, f8r.Install); err != nil {
 		return fmt.Errorf("enforcing fabricactor install: %w", err)
 	}
 
@@ -691,7 +691,7 @@ func (c *ControlInstall) installFabricator(ctx context.Context, kube client.Clie
 	}
 
 	// TODO only install control node if it's not the first one and we're joining the cluster
-	if err := comp.EnforceKubeInstall(ctx, kube, c.Fab, f8s.InstallFabAndControl(c.Control)); err != nil {
+	if err := comp.EnforceKubeInstall(ctx, kube, c.Fab, f8r.InstallFabAndControl(c.Control)); err != nil {
 		return fmt.Errorf("installing fabricator config and control nodes: %w", err)
 	}
 

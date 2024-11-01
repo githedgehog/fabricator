@@ -1,7 +1,7 @@
 // Copyright 2024 Hedgehog
 // SPDX-License-Identifier: Apache-2.0
 
-package f8s
+package f8r
 
 import (
 	_ "embed"
