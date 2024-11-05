@@ -145,7 +145,11 @@ func (i *ControlOSInstal) Run(ctx context.Context) error {
 	// The partition resize didn't wipe out the exisiting filesystem so we don't
 	// need to remake it, just expand the one that is on disk already. In our
 	// case we just moving the end of it, not the start
-	if err := i.execCmd(ctx, true, "resize2fs", dev+"9"); err != nil {
+	partition := "9"
+	if strings.Contains(dev, "nvme") {
+		partition = "p9"
+	}
+	if err := i.execCmd(ctx, true, "resize2fs", dev+partition); err != nil {
 		return fmt.Errorf("resizing filesystem on partition 9 on existing block device: %w", err)
 	}
 
@@ -158,7 +162,7 @@ func (i *ControlOSInstal) Run(ctx context.Context) error {
 	}
 
 	// 9 is the partition number for the root partition
-	if err := i.execCmd(ctx, true, "mount", "-t", "auto", dev+"9", MountDir); err != nil {
+	if err := i.execCmd(ctx, true, "mount", "-t", "auto", dev+partition, MountDir); err != nil {
 		return fmt.Errorf("mounting root: %w", err)
 	}
 
