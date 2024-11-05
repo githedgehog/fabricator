@@ -145,9 +145,9 @@ func (i *ControlOSInstal) Run(ctx context.Context) error {
 	// The partition resize didn't wipe out the exisiting filesystem so we don't
 	// need to remake it, just expand the one that is on disk already. In our
 	// case we just moving the end of it, not the start
-	partition := "p9"
-	if strings.Contains(dev, "sd") {
-		partition = "9"
+	partition := "9"
+	if strings.Contains(dev, "nvme") {
+		partition = "p9"
 	}
 	if err := i.execCmd(ctx, true, "resize2fs", dev+partition); err != nil {
 		return fmt.Errorf("resizing filesystem on partition 9 on existing block device: %w", err)
