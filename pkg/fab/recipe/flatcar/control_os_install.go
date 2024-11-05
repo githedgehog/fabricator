@@ -162,7 +162,7 @@ func (i *ControlOSInstal) Run(ctx context.Context) error {
 	}
 
 	// 9 is the partition number for the root partition
-	if err := i.execCmd(ctx, true, "mount", "-t", "auto", dev+"9", MountDir); err != nil {
+	if err := i.execCmd(ctx, true, "mount", "-t", "auto", dev+partition, MountDir); err != nil {
 		return fmt.Errorf("mounting root: %w", err)
 	}
 
