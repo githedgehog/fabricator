@@ -24,7 +24,7 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest-x86-4-cores
+    runs-on: lab
 
     steps:
       - name: Checkout repository
@@ -131,7 +131,7 @@ jobs:
           limit-access-to-actor: true
 
   build-multi:
-    runs-on: ubuntu-latest
+    runs-on: lab
     timeout-minutes: 15
 
     steps:
