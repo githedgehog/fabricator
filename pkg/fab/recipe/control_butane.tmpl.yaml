@@ -104,6 +104,7 @@ storage:
           IPv6SendRA=no
           LLDP=yes
           EmitLLDP=yes
+          ConfigureWithoutCarrier=yes
 
     - path: /etc/systemd/network/30-ext.network
       mode: 0644
