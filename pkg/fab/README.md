@@ -113,7 +113,7 @@ oras push "ghcr.io/githedgehog/fabricator/k9s:${K9S_VERSION}" k9s
 Manually prepared ONIE image. Probably should be shrunk to the minimum size using `qemu-img convert -O qcow2 <from> <to>`.
 
 ```bash
-export ONIE_VERSION="test"
+export ONIE_VERSION="v0.2.0"
 
 oras push "ghcr.io/githedgehog/fabricator/onie-vlab:${ONIE_VERSION}" onie-kvm_x86_64.qcow2 onie_efi_code.fd onie_efi_vars.fd
 ```
