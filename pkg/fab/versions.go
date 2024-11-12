@@ -61,7 +61,7 @@ var Versions = fabapi.Versions{
 		},
 	},
 	VLAB: fabapi.VLABVersions{
-		ONIE:    "v0.1.0",
+		ONIE:    "v0.2.0",
 		Flatcar: "v3975.2.1",
 	},
 }
