@@ -50,6 +50,7 @@ var Versions = fabapi.Versions{
 		ONIE: map[string]meta.Version{
 			switchprofile.DellS5232FON.Spec.Platform:         "v0.1.0",
 			switchprofile.DellS5248FON.Spec.Platform:         "v0.1.0",
+			switchprofile.DellZ9332FON.Spec.Platform:         "v0.1.0",
 			switchprofile.CelesticaDS3000.Spec.Platform:      "v0.1.0",
 			switchprofile.CelesticaDS4000.Spec.Platform:      "v0.1.0",
 			switchprofile.EdgecoreDCS203.Spec.Platform:       "v0.1.0",
