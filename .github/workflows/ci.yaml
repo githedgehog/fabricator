@@ -264,7 +264,7 @@ jobs:
             exit 1
           fi
 
-  publish:
+  publish-release:
     runs-on: lab
     if: startsWith(github.event.ref, 'refs/tags/v') && github.event_name == 'push'
     needs:
@@ -306,6 +306,49 @@ jobs:
           make_latest: true # TODO do it for master only
           files: |
             bin/hhfab-*.tar.gz
+
+      - name: Setup tmate session for debug
+        if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
+        uses: mxschmitt/action-tmate@v3
+        timeout-minutes: 30
+        with:
+          limit-access-to-actor: true
+
+  publish-master:
+    runs-on: lab
+    if: github.event.ref == 'refs/heads/master' && github.event_name == 'push'
+    needs:
+      - builds
+      - vlab
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+
+      # - name: Cache dev tools
+      #   uses: actions/cache@v3
+      #   with:
+      #     path: bin
+      #     key: bin-${{ hashFiles('hack/tools.mk') }}
+
+      - name: Login to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish Images, Helm charts and Bins for master
+        run: |
+          just --timestamp oci_repo=ghcr.io version_extra=-master push push-multi
 
       - name: Setup tmate session for debug
         if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}

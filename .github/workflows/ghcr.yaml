@@ -1,0 +1,37 @@
+on:
+  schedule:
+    - cron: "0 10 * * *" # ~2am PST
+
+jobs:
+  ghcr-cleanup:
+    strategy:
+      matrix:
+        package:
+          - fabricator/hhfab
+          - fabricator/hhfab-darwin-amd64
+          - fabricator/hhfab-darwin-arm64
+          - fabricator/hhfab-linux-arm64
+          - fabricator/hhfab-linux-amd64
+          - fabricator/fabricator
+          - fabricator/charts/fabricator
+          - fabricator/charts/fabricator-api
+          - fabricator/charts/ntp
+
+    runs-on: ubuntu-latest
+    steps:
+      - name: ghcp-prune
+        uses: vlaurin/action-ghcr-prune@v0.6.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          organization: githedgehog
+          container: fabricator/hhfab
+          dry-run: true
+          keep-younger-than: 14 # days
+          prune-tags-regexes: |
+            ^master-
+            ^pr-
+            -master$
+            -pr$
+            -master-
+            -pr-
+            -dirty-
