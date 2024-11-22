@@ -429,7 +429,7 @@ func Run(ctx context.Context) error {
 			},
 			{
 				Name:   "validate",
-				Usage:  "validate config and included wiring files",
+				Usage:  "validate config and wiring files",
 				Flags:  append(defaultFlags, hMode),
 				Before: before(false),
 				Action: func(_ *cli.Context) error {
@@ -504,7 +504,8 @@ func Run(ctx context.Context) error {
 				},
 			},
 			{
-				Name: "vlab",
+				Name:  "vlab",
+				Usage: "operate Virtual Lab",
 				Subcommands: []*cli.Command{
 					{
 						Name:    "generate",
@@ -729,7 +730,7 @@ func Run(ctx context.Context) error {
 							VPC Peerings:
 
 							1+2 -- VPC peering between vpc-01 and vpc-02
-							demo-1+demo-2 -- VPC peering between demo-1 and demo-2
+							demo-1+demo-2 -- VPC peering between vpc-demo-1 and vpc-demo-2
 							1+2:r -- remote VPC peering between vpc-01 and vpc-02 on switch group if only one switch group is present
 							1+2:r=border -- remote VPC peering between vpc-01 and vpc-02 on switch group named border
 							1+2:remote=border -- same as above
@@ -748,7 +749,7 @@ func Run(ctx context.Context) error {
 							&cli.BoolFlag{
 								Name:    "wait-switches-ready",
 								Aliases: []string{"wait"},
-								Usage:   "wait for switches to be ready before before and after configuring peerings",
+								Usage:   "wait for switches to be ready before and after configuring peerings",
 								Value:   true,
 							},
 						),

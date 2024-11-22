@@ -176,7 +176,7 @@ func (b *ControlInstallBuilder) Build(ctx context.Context) error {
 		return fmt.Errorf("downloading cert-manager: %w", err)
 	}
 
-	slog.Info("Adding config and included wiring to installer", "control", b.Control.Name)
+	slog.Info("Adding config and wiring files to installer", "control", b.Control.Name)
 	fabF, err := os.Create(filepath.Join(installDir, FabName))
 	if err != nil {
 		return fmt.Errorf("creating fab file: %w", err)
