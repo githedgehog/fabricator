@@ -27,7 +27,7 @@ cat > .zot/config.json <<- EOM
       "registries": [
         {
           "urls": [
-            "https://${LOCALREG_SYNC_REGISTRY:-ghcr.io}"
+            "https://${LOCALREG_SYNC_REGISTRY:-$REGISTRY_URL}"
           ],
           "onDemand": true,
           "tlsVerify": true,
@@ -47,9 +47,9 @@ EOM
 
 cat > .zot/creds.json <<- EOM
 {
-  "${LOCALREG_SYNC_REGISTRY:-ghcr.io}": {
-    "username": "${LOCALREG_SYNC_USERNAME:-}",
-    "password": "${LOCALREG_SYNC_PASSWORD:-}"
+  "${LOCALREG_SYNC_REGISTRY:-$REGISTRY_URL}": {
+    "username": "${LOCALREG_SYNC_USERNAME:-$REGISTRY_USERNAME}",
+    "password": "${LOCALREG_SYNC_PASSWORD:-$REGISTRY_PASSWORD}"
   }
 }
 EOM
