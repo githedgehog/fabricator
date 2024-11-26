@@ -26,6 +26,8 @@ function setup_bond() {
     sudo ip l a "$bond_name" type bond miimon 100 mode 802.3ad
 
     for iface in "${@:2}"; do
+        # cannot enslave interface if it is up
+        sudo ip l s "$iface" down 2> /dev/null || true
         sudo ip l s "$iface" master "$bond_name"
     done
 
@@ -44,13 +46,19 @@ function setup_vlan() {
 function get_ip() {
     local iface_name=$1
     local ip=""
+    local max_attempts=60
+    local attempt=0
 
-    # TODO add timeout
     while [ -z "$ip" ]; do
+        attempt=$((attempt + 1))
         ip=$(ip a s "$iface_name" | awk '/inet / {print $2}')
+        [ "$attempt" -ge "$max_attempts" ] && break
         sleep 1
     done
-
+    if [ -z "$ip" ]; then
+        echo "Failed to get IP address for $iface_name" >&2
+        exit 1
+    fi
     echo "$ip"
 }
 
