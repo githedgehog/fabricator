@@ -218,10 +218,6 @@ jobs:
           cache: true
 
       - name: Setup local registry
-        env:
-          LOCALREG_SYNC_REGISTRY: m-pub.l.hhdev.io:31000
-          LOCALREG_SYNC_USERNAME: lab
-          LOCALREG_SYNC_PASSWORD: ${{ secrets.LAB_REGISTRY_TOKEN }}
         run: |
           just --timestamp _localreg &
 
