@@ -39,20 +39,9 @@ jobs:
       - name: Setup Just
         uses: extractions/setup-just@v2
 
-      - name: GHA Lint
+      - name: Lint and generate code
         run: |
-          just --timestamp lint-gha
-
-      # Don't remove it! We shouldn't allow CI to pass if there are any changes not committed after running just
-      - name: Just all autogeneration and fail on dirty
-        run: |
-          just --timestamp gen
-          git status --short
-          git diff --quiet
-
-      - name: Some Go lint
-        run: |
-          just --timestamp _lint
+          just --timestamp lint-gha gen _lint
 
       - name: More Go lint
         uses: golangci/golangci-lint-action@v6
@@ -63,6 +52,12 @@ jobs:
       - name: Run tests
         run: |
           just --timestamp test
+
+      # Don't remove it! We shouldn't allow CI to pass if there are any changes not committed after running gen/lint/test
+      - name: Fail on dirty
+        run: |
+          git status --short
+          git diff --quiet
 
       - name: Setup tmate session for debug
         if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
