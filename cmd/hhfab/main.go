@@ -647,7 +647,7 @@ func Run(ctx context.Context) error {
 								Value:   true,
 							},
 							&cli.BoolFlag{
-								Name:    "force-clenup",
+								Name:    "force-cleanup",
 								Aliases: []string{"f"},
 								Usage:   "start with removing all existing VPCs and VPCAttachments",
 							},
@@ -693,7 +693,7 @@ func Run(ctx context.Context) error {
 						Action: func(c *cli.Context) error {
 							if err := hhfab.DoVLABSetupVPCs(ctx, workDir, cacheDir, hhfab.SetupVPCsOpts{
 								WaitSwitchesReady: c.Bool("wait-switches-ready"),
-								ForceCleanup:      c.Bool("force-clenup"),
+								ForceCleanup:      c.Bool("force-cleanup"),
 								VLANNamespace:     c.String("vlanns"),
 								IPv4Namespace:     c.String("ipns"),
 								ServersPerSubnet:  c.Int("servers-per-subnet"),
