@@ -41,6 +41,9 @@ var serverButaneTmpl string
 //go:embed hhnet.sh
 var hhnet []byte
 
+//go:embed force_reset.sh
+var forceReset []byte
+
 const (
 	VLABOSImageFile  = "os.img"
 	VLABEFICodeFile  = "efi_code.fd"
@@ -640,6 +643,21 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 			return fmt.Errorf("trying toolbox: %w", err)
 		}
 	} else if vm.Type == VMTypeControl {
+		slog.Debug("Installing force_reset", "vm", vm.Name, "type", vm.Type)
+		f, err := sftp.Create("/tmp/force_reset")
+		if err != nil {
+			return fmt.Errorf("creating force_reset: %w", err)
+		}
+		defer f.Close()
+
+		if _, err := f.Write(forceReset); err != nil {
+			return fmt.Errorf("writing force_reset: %w", err)
+		}
+
+		if _, err := client.RunContext(ctx, "bash -c 'sudo mv /tmp/force_reset /opt/bin/force_reset && chmod +x /opt/bin/force_reset'"); err != nil {
+			return fmt.Errorf("installing force_reset: %w", err)
+		}
+
 		if !opts.ControlUSB {
 			marker, err := sshReadMarker(sftp)
 			if err != nil && !errors.Is(err, os.ErrNotExist) {
