@@ -155,6 +155,20 @@ func Run(ctx context.Context) error {
 							return nil
 						},
 					},
+					{
+						Name:   "upgrade",
+						Usage:  "upgrade control node",
+						Flags:  defaultFlags,
+						Before: before(true),
+						Action: func(_ *cli.Context) error {
+							err := recipe.DoControlUpgrade(ctx, workDir)
+							if err != nil {
+								return fmt.Errorf("control upgrade: %w", err)
+							}
+
+							return nil
+						},
+					},
 				},
 			},
 		},

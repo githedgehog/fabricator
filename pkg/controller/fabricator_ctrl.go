@@ -140,6 +140,10 @@ func (r *FabricatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			return ctrl.Result{}, fmt.Errorf("enforcing fabric install: %w", err)
 		}
 
+		if err := comp.EnforceKubeInstall(ctx, r.Client, *f, fabric.InstallManagementDHCPSubnet); err != nil {
+			return ctrl.Result{}, fmt.Errorf("enforcing fabric management dhcp subnet install: %w", err)
+		}
+
 		if err := comp.EnforceKubeInstall(ctx, r.Client, *f, ntp.Install); err != nil {
 			return ctrl.Result{}, fmt.Errorf("enforcing ntp install: %w", err)
 		}
