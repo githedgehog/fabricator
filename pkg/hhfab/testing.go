@@ -1208,7 +1208,7 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphor
 	g.Go(func() error {
 		time.Sleep(1 * time.Second) // TODO think about more reliable way to wait for server to start
 
-		cmd := fmt.Sprintf("toolbox -q timeout -v %d iperf3 -J -c %s -t %d", opts.IPerfsSeconds+25, toIP.String(), opts.IPerfsSeconds)
+		cmd := fmt.Sprintf("toolbox -q timeout -v %d iperf3 -P 4 -J -c %s -t %d", opts.IPerfsSeconds+25, toIP.String(), opts.IPerfsSeconds)
 		out, err := fromSSH.RunContext(ctx, cmd)
 		if err != nil {
 			return fmt.Errorf("running iperf client: %w: %s", err, string(out))
