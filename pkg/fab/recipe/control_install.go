@@ -17,19 +17,15 @@ import (
 	"strings"
 	"time"
 
-	dhcpapi "go.githedgehog.com/fabric/api/dhcp/v1beta1"
 	"go.githedgehog.com/fabric/api/meta"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
 	"go.githedgehog.com/fabric/pkg/util/logutil"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
-	"go.githedgehog.com/fabricator/pkg/artificer"
 	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/certmanager"
-	"go.githedgehog.com/fabricator/pkg/fab/comp/f8r"
-	"go.githedgehog.com/fabricator/pkg/fab/comp/fabric"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k9s"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/zot"
@@ -59,12 +55,12 @@ func DoControlInstall(ctx context.Context, workDir string) error {
 	if err == nil {
 		marker := strings.TrimSpace(string(rawMarker))
 		if marker == InstallMarkerComplete {
-			slog.Info("Control node seems to be already installed", "marker", InstallMarkerFile)
+			slog.Info("Control node seems to be already installed", "status", marker, "marker", InstallMarkerFile)
 
 			return nil
 		}
 
-		slog.Info("Control node seems to be partially installed, cleanup and re-run", "marker", InstallMarkerFile, "status", marker)
+		slog.Info("Control node seems to be partially installed, cleanup and re-run", "status", marker, "marker", InstallMarkerFile)
 
 		return fmt.Errorf("partially installed: %s", marker) //nolint:goerr113
 	}
@@ -108,6 +104,11 @@ func DoControlInstall(ctx context.Context, workDir string) error {
 	}
 
 	return (&ControlInstall{
+		ControlUpgrade: &ControlUpgrade{
+			WorkDir: workDir,
+			Fab:     f,
+			Control: controls[0],
+		},
 		WorkDir:  workDir,
 		Fab:      f,
 		Control:  controls[0],
@@ -117,6 +118,7 @@ func DoControlInstall(ctx context.Context, workDir string) error {
 }
 
 type ControlInstall struct {
+	*ControlUpgrade
 	WorkDir  string
 	Fab      fabapi.Fabricator
 	Control  fabapi.ControlNode
@@ -164,7 +166,7 @@ func (c *ControlInstall) Run(ctx context.Context) error {
 		return fmt.Errorf("pre-caching zot: %w", err)
 	}
 
-	if err := c.installFabricator(ctx, kube); err != nil {
+	if err := c.installFabricator(ctx, kube, true); err != nil {
 		return fmt.Errorf("installing fabricator and config: %w", err)
 	}
 
@@ -193,7 +195,7 @@ func (c *ControlInstall) Run(ctx context.Context) error {
 	return nil
 }
 
-func (c *ControlInstall) copyFile(src, dst string, mode os.FileMode) error {
+func copyFile(src, dst string, mode os.FileMode) error {
 	srcF, err := os.Open(src)
 	if err != nil {
 		return fmt.Errorf("opening %q: %w", src, err)
@@ -225,7 +227,7 @@ func (c *ControlInstall) installK8s(ctx context.Context) (client.Client, error) 
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
-	if err := c.copyFile(k3s.BinName, filepath.Join(k3s.BinDir, k3s.BinName), 0o755); err != nil {
+	if err := copyFile(k3s.BinName, filepath.Join(k3s.BinDir, k3s.BinName), 0o755); err != nil {
 		return nil, fmt.Errorf("copying k3s bin: %w", err)
 	}
 
@@ -237,23 +239,23 @@ func (c *ControlInstall) installK8s(ctx context.Context) (client.Client, error) 
 		return nil, fmt.Errorf("creating k3s static dir %q: %w", k3s.ChartsDir, err)
 	}
 
-	if err := c.copyFile(k3s.AirgapName, filepath.Join(k3s.ImagesDir, k3s.AirgapName), 0o644); err != nil {
+	if err := copyFile(k3s.AirgapName, filepath.Join(k3s.ImagesDir, k3s.AirgapName), 0o644); err != nil {
 		return nil, fmt.Errorf("copying k3s airgap: %w", err)
 	}
 
-	if err := c.copyFile(certmanager.AirgapImageName, filepath.Join(k3s.ImagesDir, certmanager.AirgapImageName), 0o644); err != nil {
+	if err := copyFile(certmanager.AirgapImageName, filepath.Join(k3s.ImagesDir, certmanager.AirgapImageName), 0o644); err != nil {
 		return nil, fmt.Errorf("copying cert-manager airgap image: %w", err)
 	}
 
-	if err := c.copyFile(certmanager.AirgapChartName, filepath.Join(k3s.ChartsDir, certmanager.AirgapChartName), 0o644); err != nil {
+	if err := copyFile(certmanager.AirgapChartName, filepath.Join(k3s.ChartsDir, certmanager.AirgapChartName), 0o644); err != nil {
 		return nil, fmt.Errorf("copying cert-manager airgap chart: %w", err)
 	}
 
-	if err := c.copyFile(zot.AirgapImageName, filepath.Join(k3s.ImagesDir, zot.AirgapImageName), 0o644); err != nil {
+	if err := copyFile(zot.AirgapImageName, filepath.Join(k3s.ImagesDir, zot.AirgapImageName), 0o644); err != nil {
 		return nil, fmt.Errorf("copying zot airgap image: %w", err)
 	}
 
-	if err := c.copyFile(zot.AirgapChartName, filepath.Join(k3s.ChartsDir, zot.AirgapChartName), 0o644); err != nil {
+	if err := copyFile(zot.AirgapChartName, filepath.Join(k3s.ChartsDir, zot.AirgapChartName), 0o644); err != nil {
 		return nil, fmt.Errorf("copying zot airgap chart: %w", err)
 	}
 
@@ -291,7 +293,7 @@ func (c *ControlInstall) installK8s(ctx context.Context) (client.Client, error) 
 		return nil, fmt.Errorf("running k3s install: %w", err)
 	}
 
-	if err := c.copyFile(k9s.BinName, filepath.Join(k3s.BinDir, k9s.BinName), 0o755); err != nil {
+	if err := copyFile(k9s.BinName, filepath.Join(k3s.BinDir, k9s.BinName), 0o755); err != nil {
 		return nil, fmt.Errorf("copying k9s bin: %w", err)
 	}
 
@@ -301,8 +303,6 @@ func (c *ControlInstall) installK8s(ctx context.Context) (client.Client, error) 
 		comp.CoreAPISchemeBuilder, comp.AppsAPISchemeBuilder,
 		comp.HelmAPISchemeBuilder, comp.CMApiSchemeBuilder, comp.CMMetaSchemeBuilder,
 		wiringapi.SchemeBuilder, vpcapi.SchemeBuilder, fabapi.SchemeBuilder,
-		// TODO move to the operator together with management dhcp subnet creation?
-		dhcpapi.SchemeBuilder,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("creating kube client: %w", err)
@@ -439,54 +439,6 @@ func (c *ControlInstall) installZot(ctx context.Context, kube client.Client) err
 	return nil
 }
 
-func (c *ControlInstall) uploadAirgap(ctx context.Context, username, password string) error {
-	slog.Info("Uploading airgap artifacts")
-
-	regURL, err := comp.RegistryURL(c.Fab)
-	if err != nil {
-		return fmt.Errorf("getting registry URL: %w", err)
-	}
-
-	airgapArts, err := comp.CollectArtifacts(c.Fab, AirgapArtifactLists...)
-	if err != nil {
-		return fmt.Errorf("collecting airgap artifacts: %w", err)
-	}
-	for ref, version := range airgapArts {
-		slog.Debug("Uploading airgap artifact", "ref", ref, "version", version)
-
-		if err := artificer.UploadOCIArchive(ctx, c.WorkDir, ref, version, regURL, comp.RegPrefix, username, password); err != nil {
-			return fmt.Errorf("uploading airgap artifact %q: %w", ref, err)
-		}
-	}
-
-	return nil
-}
-
-func (c *ControlInstall) preCacheZot(ctx context.Context) error {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
-	defer cancel()
-
-	slog.Info("Pre-caching Zot image")
-
-	repo, err := zot.ImageURL(c.Fab)
-	if err != nil {
-		return fmt.Errorf("getting zot image URL: %w", err)
-	}
-	img := repo + ":" + string(zot.Version(c.Fab))
-
-	slog.Debug("Pre-caching", "image", img)
-
-	cmd := exec.CommandContext(ctx, "k3s", "crictl", "pull", img)
-	cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "crictl: ")
-	cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "crictl: ")
-
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("running crictl pull: %w", err)
-	}
-
-	return nil
-}
-
 func (c *ControlInstall) waitReloader(ctx context.Context, kube client.Client) error {
 	slog.Info("Waiting for reloader")
 
@@ -507,11 +459,8 @@ func (c *ControlInstall) waitReloader(ctx context.Context, kube client.Client) e
 }
 
 func (c *ControlInstall) installWaitFabric(ctx context.Context, kube client.Client) error {
-	slog.Info("Installing kubectl-fabric")
-
-	// TODO remove if it'll be managed by control agent?
-	if err := c.copyFile(fabric.CtlBinName, filepath.Join(fabric.BinDir, fabric.CtlDestBinName), 0o755); err != nil {
-		return fmt.Errorf("copying fabricctl bin: %w", err)
+	if err := c.installFabricCtl(ctx); err != nil {
+		return fmt.Errorf("installing kubectl-fabric: %w", err)
 	}
 
 	slog.Info("Waiting for fabric services")
@@ -553,13 +502,6 @@ func (c *ControlInstall) installWaitFabric(ctx context.Context, kube client.Clie
 			return false, nil
 		}); err != nil {
 		return fmt.Errorf("waiting for fabric-dhcpd ready: %w", err)
-	}
-
-	slog.Info("Installing fabric management DHCP subnet")
-
-	// TODO move to the operator
-	if err := comp.EnforceKubeInstall(ctx, kube, c.Fab, fabric.InstallManagementDHCPSubnet); err != nil {
-		return fmt.Errorf("enforcing fabric management dhcp subnet install: %w", err)
 	}
 
 	return nil
@@ -665,64 +607,6 @@ func (c *ControlInstall) waitNTP(ctx context.Context, kube client.Client) error 
 			return false, nil
 		}); err != nil {
 		return fmt.Errorf("waiting for ntp ready: %w", err)
-	}
-
-	return nil
-}
-
-func (c *ControlInstall) installFabricator(ctx context.Context, kube client.Client) error {
-	slog.Info("Installing fabricator")
-
-	if err := comp.EnforceKubeInstall(ctx, kube, c.Fab, f8r.Install); err != nil {
-		return fmt.Errorf("enforcing fabricactor install: %w", err)
-	}
-
-	if err := waitKube(ctx, kube, "fabricator-ctrl", comp.FabNamespace,
-		&comp.Deployment{}, func(obj *comp.Deployment) (bool, error) {
-			for _, cond := range obj.Status.Conditions {
-				if cond.Type == comp.DeploymentAvailable && cond.Status == comp.ConditionTrue {
-					return true, nil
-				}
-			}
-
-			return false, nil
-		}); err != nil {
-		return fmt.Errorf("waiting for fabricator-ctrl ready: %w", err)
-	}
-
-	// TODO only install control node if it's not the first one and we're joining the cluster
-	if err := comp.EnforceKubeInstall(ctx, kube, c.Fab, f8r.InstallFabAndControl(c.Control)); err != nil {
-		return fmt.Errorf("installing fabricator config and control nodes: %w", err)
-	}
-
-	slog.Info("Waiting for fabricator applied")
-
-	if err := waitKube(ctx, kube, comp.FabName, comp.FabNamespace,
-		&fabapi.Fabricator{}, func(obj *fabapi.Fabricator) (bool, error) {
-			for _, cond := range obj.Status.Conditions {
-				if cond.Type == fabapi.ConditionApplied && cond.Status == metav1.ConditionTrue {
-					return true, nil
-				}
-			}
-
-			return false, nil
-		}); err != nil {
-		return fmt.Errorf("waiting for fabricator applied: %w", err)
-	}
-
-	slog.Info("Waiting for fabricator ready, may take 2-5 minutes")
-
-	if err := waitKube(ctx, kube, comp.FabName, comp.FabNamespace,
-		&fabapi.Fabricator{}, func(obj *fabapi.Fabricator) (bool, error) {
-			for _, cond := range obj.Status.Conditions {
-				if cond.Type == fabapi.ConditionReady && cond.Status == metav1.ConditionTrue {
-					return true, nil
-				}
-			}
-
-			return false, nil
-		}); err != nil {
-		return fmt.Errorf("waiting for fabricator applied: %w", err)
 	}
 
 	return nil
