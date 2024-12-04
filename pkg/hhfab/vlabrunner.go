@@ -137,8 +137,20 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 		if !opts.KillStale {
 			return fmt.Errorf("%d stale or detached VM(s) found: rerun with --kill-stale for autocleanup", len(stale)) //nolint:goerr113
 		}
+
 		if err := execHelper(ctx, c.WorkDir, []string{"kill-stale-vms"}); err != nil {
 			return fmt.Errorf("running helper to cleanup stale VMs: %w", err)
+		}
+
+		time.Sleep(1 * time.Second)
+
+		stale, err := CheckStaleVMs(ctx, false)
+		if err != nil {
+			return fmt.Errorf("checking for stale VMs after cleanup: %w", err)
+		}
+
+		if len(stale) > 0 {
+			return fmt.Errorf("%d stale or detached VM(s) found after cleanup", len(stale)) //nolint:goerr113
 		}
 	}
 
