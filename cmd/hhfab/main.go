@@ -48,6 +48,7 @@ const (
 	FlagNameControlsRestricted    = "controls-restricted"
 	FlagNameServersRestricted     = "servers-restricted"
 	FlagNameControlsUSB           = "controls-usb"
+	FlagNameControlUpgrade        = "control-upgrade"
 	FlagNameFailFast              = "fail-fast"
 	FlagNameReady                 = "ready"
 )
@@ -567,6 +568,13 @@ func Run(ctx context.Context) error {
 								Value:   false,
 							},
 							&cli.BoolFlag{
+								Name:    FlagNameControlUpgrade,
+								Aliases: []string{"upgrade"},
+								Usage:   "force upgrade control node(s), expected to use after initial successful installation",
+								EnvVars: []string{"HHFAB_CONTROL_UPGRADE"},
+								Value:   false,
+							},
+							&cli.BoolFlag{
 								Name:  FlagNameFailFast,
 								Usage: "exit on first error",
 								Value: true,
@@ -587,6 +595,7 @@ func Run(ctx context.Context) error {
 									ControlsRestricted: c.Bool(FlagNameControlsRestricted),
 									ServersRestricted:  c.Bool(FlagNameServersRestricted),
 									ControlUSB:         c.Bool(FlagNameControlsUSB),
+									ControlUpgrade:     c.Bool(FlagNameControlUpgrade),
 									FailFast:           c.Bool(FlagNameFailFast),
 									OnReady:            c.StringSlice(FlagNameReady),
 								},
