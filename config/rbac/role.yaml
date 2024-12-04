@@ -49,6 +49,18 @@ rules:
   - update
   - watch
 - apiGroups:
+  - dhcp.githedgehog.com
+  resources:
+  - dhcpsubnets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - fabricator.githedgehog.com
   resources:
   - controlnodes
