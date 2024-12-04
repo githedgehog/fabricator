@@ -28,7 +28,10 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k9s"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/zot"
 	coreapi "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -74,17 +77,32 @@ func (c *ControlUpgrade) Run(ctx context.Context) error {
 		return fmt.Errorf("creating kube client: %w", err)
 	}
 
-	fab, control, err := fab.GetFabAndControls(ctx, kube, false)
-	if err != nil {
-		return fmt.Errorf("getting fabricator and control nodes: %w", err)
+	backoff := wait.Backoff{
+		Steps:    10,
+		Duration: 500 * time.Millisecond,
+		Factor:   1.5,
+		Jitter:   0.1,
 	}
 
-	if len(control) != 1 {
-		return fmt.Errorf("expected 1 control node, got %d", len(control)) //nolint:goerr113
-	}
+	if err := retry.OnError(backoff, func(err error) bool {
+		return apierrors.ReasonForError(err) != metav1.StatusReasonUnknown
+	}, func() error {
+		f, control, err := fab.GetFabAndControls(ctx, kube, false)
+		if err != nil {
+			return fmt.Errorf("getting fabricator and control nodes: %w", err)
+		}
 
-	c.Fab = fab
-	c.Control = control[0]
+		if len(control) != 1 {
+			return fmt.Errorf("expected 1 control node, got %d", len(control)) //nolint:goerr113
+		}
+
+		c.Fab = f
+		c.Control = control[0]
+
+		return nil
+	}); err != nil {
+		return fmt.Errorf("retrying getting fabricator and control nodes: %w", err)
+	}
 
 	if err := waitKube(ctx, kube, c.Control.Name, "",
 		&comp.Node{}, func(obj *comp.Node) (bool, error) {
