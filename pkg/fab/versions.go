@@ -30,7 +30,7 @@ var Versions = fabapi.Versions{
 	Fabricator: fabapi.FabricatorVersions{
 		API:            FabricatorVersion,
 		Controller:     FabricatorVersion,
-		ControlUSBRoot: "v3815.2.5-hh2",
+		ControlUSBRoot: "v4081.2.0-hh1",
 	},
 	Fabric: fabapi.FabricVersions{
 		API:        FabricVersion,
@@ -63,6 +63,6 @@ var Versions = fabapi.Versions{
 	},
 	VLAB: fabapi.VLABVersions{
 		ONIE:    "v0.2.0",
-		Flatcar: "v3975.2.1",
+		Flatcar: "v4081.2.0",
 	},
 }
