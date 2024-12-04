@@ -78,6 +78,7 @@ type VLABRunOpts struct {
 	ControlsRestricted bool
 	ServersRestricted  bool
 	ControlUSB         bool
+	ControlUpgrade     bool
 	FailFast           bool
 	OnReady            []string
 }
@@ -640,7 +641,7 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 			return fmt.Errorf("trying toolbox: %w", err)
 		}
 	} else if vm.Type == VMTypeControl {
-		if !opts.ControlUSB {
+		if !opts.ControlUSB || opts.ControlUpgrade {
 			marker, err := sshReadMarker(sftp)
 			if err != nil && !errors.Is(err, os.ErrNotExist) {
 				return fmt.Errorf("checking for install marker: %w", err)
@@ -650,10 +651,14 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 
 				return fmt.Errorf("not complete install marker: %q", marker) //nolint:goerr113
 			}
-			if err == nil && marker == recipe.InstallMarkerComplete {
+			if err == nil && !opts.ControlUpgrade && marker == recipe.InstallMarkerComplete {
 				slog.Info("Control node install was already completed", "vm", vm.Name, "type", vm.Type)
 			} else {
 				slog.Info("Uploading control install", "vm", vm.Name, "type", vm.Type)
+
+				if out, err := client.RunContext(ctx, fmt.Sprintf("bash -c 'rm -rf %s*'", vm.Name)); err != nil {
+					return fmt.Errorf("removing previous control install: %w: %s", err, string(out))
+				}
 
 				installArchive := vm.Name + recipe.InstallArchiveSuffix
 				local := filepath.Join(c.WorkDir, ResultDir, installArchive)
@@ -666,15 +671,20 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 					return fmt.Errorf("extracting control install: %w: %s", err, string(out))
 				}
 
-				slog.Info("Running control install", "vm", vm.Name, "type", vm.Type)
-				installCmd := fmt.Sprintf("cd %s && sudo ./%s control install", vm.Name+recipe.InstallSuffix, recipe.RecipeBin)
+				mode := "install"
+				if opts.ControlUpgrade {
+					mode = "upgrade"
+				}
+
+				slog.Info("Running control "+mode, "vm", vm.Name, "type", vm.Type)
+				installCmd := fmt.Sprintf("cd %s && sudo ./%s control "+mode, vm.Name+recipe.InstallSuffix, recipe.RecipeBin)
 				if slog.Default().Enabled(ctx, slog.LevelDebug) {
 					installCmd += " -v"
 				}
-				if err := sshExec(ctx, vm, client, installCmd, "control-install", slog.Info); err != nil {
-					return fmt.Errorf("running control install: %w", err)
+				if err := sshExec(ctx, vm, client, installCmd, "control-"+mode, slog.Info); err != nil {
+					return fmt.Errorf("running control %s: %w", mode, err)
 				}
-				slog.Debug("Control install completed", "vm", vm.Name, "type", vm.Type)
+				slog.Info("Control "+mode+" completed", "vm", vm.Name, "type", vm.Type)
 			}
 		} else {
 			slog.Debug("Waiting for control node to be auto installed (via USB)", "vm", vm.Name, "type", vm.Type)
