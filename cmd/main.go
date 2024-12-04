@@ -16,6 +16,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/lmittmann/tint"
 	"github.com/mattn/go-isatty"
+	dhcpapi "go.githedgehog.com/fabric/api/dhcp/v1beta1"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	fabricatorcontroller "go.githedgehog.com/fabricator/internal/controller/fabricator"
 	"go.githedgehog.com/fabricator/pkg/controller"
@@ -40,6 +41,8 @@ func init() {
 	utilruntime.Must(comp.HelmAPISchemeBuilder.AddToScheme(scheme))
 	utilruntime.Must(comp.CMApiSchemeBuilder.AddToScheme(scheme))
 	utilruntime.Must(comp.CMMetaSchemeBuilder.AddToScheme(scheme))
+
+	utilruntime.Must(dhcpapi.AddToScheme(scheme))
 
 	utilruntime.Must(fabapi.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
