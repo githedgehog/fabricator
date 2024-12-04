@@ -701,8 +701,19 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 		} else {
 			slog.Debug("Waiting for control node to be auto installed (via USB)", "vm", vm.Name, "type", vm.Type)
 
+			ctx, cancel := context.WithCancel(ctx)
+			defer cancel()
+
 			ticker := time.NewTicker(5 * time.Second)
 			defer ticker.Stop()
+
+			if slog.Default().Enabled(ctx, slog.LevelInfo) {
+				go func() {
+					if err := sshExec(ctx, vm, client, "journalctl -n 100 -fu fabric-install.service", "fabric-install", slog.Info); err != nil {
+						slog.Info("Journalctl on control node failed", "vm", vm.Name, "type", vm.Type, "err", err)
+					}
+				}()
+			}
 
 			installed := false
 			for !installed {
