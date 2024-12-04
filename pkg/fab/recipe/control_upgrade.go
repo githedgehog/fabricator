@@ -25,7 +25,9 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab/comp/f8r"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/fabric"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/k9s"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/zot"
+	coreapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -100,11 +102,21 @@ func (c *ControlUpgrade) Run(ctx context.Context) error {
 	c.Fab.Status.IsBootstrap = false
 	c.Fab.Status.IsInstall = true
 
-	// TODO read reg user
-	regPassword := "password"
+	regSecret := coreapi.Secret{}
+	if err := kube.Get(ctx, client.ObjectKey{
+		Namespace: comp.FabNamespace,
+		Name:      comp.RegistryUserSecretPrefix + comp.RegistryUserWriter,
+	}, &regSecret); err != nil {
+		return fmt.Errorf("getting registry user secret: %w", err)
+	}
+
+	regPassword, ok := regSecret.Data[comp.BasicAuthPasswordKey]
+	if !ok {
+		return errors.New("registry user secret missing password") //nolint:goerr113
+	}
 
 	if c.Fab.Spec.Config.Registry.IsAirgap() {
-		if err := c.uploadAirgap(ctx, comp.RegistryUserWriter, regPassword); err != nil {
+		if err := c.uploadAirgap(ctx, comp.RegistryUserWriter, string(regPassword)); err != nil {
 			return fmt.Errorf("uploading airgap artifacts: %w", err)
 		}
 	}
@@ -119,6 +131,10 @@ func (c *ControlUpgrade) Run(ctx context.Context) error {
 
 	if err := c.installFabricCtl(ctx); err != nil {
 		return fmt.Errorf("installing kubectl-fabric: %w", err)
+	}
+
+	if err := copyFile(k9s.BinName, filepath.Join(k3s.BinDir, k9s.BinName), 0o755); err != nil {
+		return fmt.Errorf("copying k9s bin: %w", err)
 	}
 
 	slog.Info("Control node upgrade complete")
