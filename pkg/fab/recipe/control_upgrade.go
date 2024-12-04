@@ -102,6 +102,15 @@ func (c *ControlUpgrade) Run(ctx context.Context) error {
 	c.Fab.Status.IsBootstrap = false
 	c.Fab.Status.IsInstall = true
 
+	regURL, err := comp.RegistryURL(c.Fab)
+	if err != nil {
+		return fmt.Errorf("getting registry URL: %w", err)
+	}
+
+	if err := waitURL(ctx, "https://"+regURL+"/v2/_catalog"); err != nil {
+		return fmt.Errorf("waiting for zot endpoint: %w", err)
+	}
+
 	regSecret := coreapi.Secret{}
 	if err := kube.Get(ctx, client.ObjectKey{
 		Namespace: comp.FabNamespace,
