@@ -4,6 +4,7 @@
 package f8r
 
 import (
+	"context"
 	_ "embed"
 	"fmt"
 
@@ -75,4 +76,26 @@ func Artifacts(cfg fabapi.Fabricator) (comp.OCIArtifacts, error) {
 		CtrlRef:      cfg.Status.Versions.Fabricator.Controller,
 		CtrlChartRef: cfg.Status.Versions.Fabricator.Controller,
 	}, nil
+}
+
+var (
+	_ comp.KubeStatus = StatusAPI
+	_ comp.KubeStatus = StatusCtrl
+)
+
+func StatusAPI(ctx context.Context, kube client.Reader, cfg fabapi.Fabricator) (fabapi.ComponentStatus, error) {
+	return comp.MergeKubeStatuses(ctx, kube, cfg, //nolint:wrapcheck
+		comp.GetCRDStatus("fabricators.fabricator.githedgehog.com", "v1beta1"),
+		comp.GetCRDStatus("controlnodes.fabricator.githedgehog.com", "v1beta1"),
+	)
+}
+
+func StatusCtrl(ctx context.Context, kube client.Reader, cfg fabapi.Fabricator) (fabapi.ComponentStatus, error) {
+	ref, err := comp.ImageURL(cfg, CtrlRef)
+	if err != nil {
+		return fabapi.CompStatusUnknown, fmt.Errorf("getting image URL for %q: %w", CtrlRef, err)
+	}
+	image := ref + ":" + string(cfg.Status.Versions.Fabricator.Controller)
+
+	return comp.GetDeploymentStatus("fabricator-ctrl", "manager", image)(ctx, kube, cfg)
 }

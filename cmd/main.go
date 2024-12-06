@@ -22,6 +22,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/controller"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/version"
+	apiext "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -37,6 +38,7 @@ var scheme = runtime.NewScheme()
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(apiext.AddToScheme(scheme))
 
 	utilruntime.Must(comp.HelmAPISchemeBuilder.AddToScheme(scheme))
 	utilruntime.Must(comp.CMApiSchemeBuilder.AddToScheme(scheme))

@@ -4,6 +4,7 @@
 package ntp
 
 import (
+	"context"
 	_ "embed"
 	"fmt"
 	"strings"
@@ -61,6 +62,12 @@ func Artifacts(cfg fabapi.Fabricator) (comp.OCIArtifacts, error) {
 
 var _ comp.KubeStatus = Status
 
-func Status(_ fabapi.Fabricator) (string, client.Object, error) {
-	return "ntp", &comp.Deployment{}, nil
+func Status(ctx context.Context, kube client.Reader, cfg fabapi.Fabricator) (fabapi.ComponentStatus, error) {
+	ref, err := comp.ImageURL(cfg, ImageRef)
+	if err != nil {
+		return fabapi.CompStatusUnknown, fmt.Errorf("getting image URL for %q: %w", ImageRef, err)
+	}
+	image := ref + ":" + string(cfg.Status.Versions.Platform.NTP)
+
+	return comp.GetDeploymentStatus("ntp", "ntp", image)(ctx, kube, cfg)
 }

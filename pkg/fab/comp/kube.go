@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
 	cmapi "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
@@ -16,6 +17,7 @@ import (
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	appsapi "k8s.io/api/apps/v1"
 	coreapi "k8s.io/api/core/v1"
+	apiext "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metaapi "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -412,32 +414,92 @@ func CreateOrUpdate(ctx context.Context, kube client.Client, obj client.Object) 
 	return res, nil
 }
 
-type KubeStatus func(cfg fabapi.Fabricator) (string, client.Object, error)
+type KubeStatus func(ctx context.Context, kube client.Reader, cfg fabapi.Fabricator) (fabapi.ComponentStatus, error)
 
-func GetKubeStatus(ctx context.Context, kube client.Reader, cfg fabapi.Fabricator, status KubeStatus) (fabapi.ComponentStatus, error) {
-	name, obj, err := status(cfg)
-	if err != nil {
-		return fabapi.CompStatusUnknown, fmt.Errorf("getting kube status info: %w", err)
-	}
+func GetDeploymentStatus(name, container, image string) KubeStatus {
+	return func(ctx context.Context, kube client.Reader, _ fabapi.Fabricator) (fabapi.ComponentStatus, error) {
+		obj := &Deployment{}
+		if err := kube.Get(ctx, client.ObjectKey{Name: name, Namespace: FabNamespace}, obj); err != nil {
+			if apierrors.IsNotFound(err) {
+				return fabapi.CompStatusNotFound, nil
+			}
 
-	if err := kube.Get(ctx, client.ObjectKey{Name: name, Namespace: FabNamespace}, obj); err != nil {
-		if apierrors.IsNotFound(err) {
-			return fabapi.CompStatusNotFound, nil
+			return fabapi.CompStatusUnknown, fmt.Errorf("getting deployment %q: %w", name, err)
 		}
 
-		return fabapi.CompStatusUnknown, fmt.Errorf("getting %q: %w", name, err)
-	}
+		upToDate := false
+		for _, cont := range obj.Spec.Template.Spec.Containers {
+			if cont.Name == container && cont.Image == image {
+				upToDate = true
 
-	switch obj := obj.(type) {
-	case *Deployment:
-		for _, cond := range obj.Status.Conditions {
-			if cond.Type == DeploymentAvailable && cond.Status == ConditionTrue {
-				return fabapi.CompStatusReady, nil
+				break
 			}
 		}
-	default:
-		return fabapi.CompStatusUnknown, fmt.Errorf("unknown object type %T", obj) //nolint:goerr113
+
+		if upToDate && obj.Status.UpdatedReplicas >= 1 {
+			for _, cond := range obj.Status.Conditions {
+				if cond.Type == DeploymentAvailable && cond.Status == ConditionTrue {
+					return fabapi.CompStatusReady, nil
+				}
+			}
+		}
+
+		return fabapi.CompStatusPending, nil
+	}
+}
+
+func GetCRDStatus(name, version string) KubeStatus {
+	return func(ctx context.Context, kube client.Reader, _ fabapi.Fabricator) (fabapi.ComponentStatus, error) {
+		obj := &apiext.CustomResourceDefinition{}
+		if err := kube.Get(ctx, client.ObjectKey{Name: name, Namespace: metaapi.NamespaceDefault}, obj); err != nil {
+			if apierrors.IsNotFound(err) {
+				return fabapi.CompStatusNotFound, nil
+			}
+
+			return fabapi.CompStatusUnknown, fmt.Errorf("getting crd %q: %w", name, err)
+		}
+
+		versionOk := false
+		for _, v := range obj.Spec.Versions {
+			if v.Name == version {
+				versionOk = true
+			}
+		}
+
+		if versionOk {
+			for _, cond := range obj.Status.Conditions {
+				if cond.Type == apiext.Established && cond.Status == apiext.ConditionTrue {
+					return fabapi.CompStatusReady, nil
+				}
+			}
+		}
+
+		return fabapi.CompStatusPending, nil
+	}
+}
+
+func MergeKubeStatuses(ctx context.Context, kube client.Reader, cfg fabapi.Fabricator, kubeStatus ...KubeStatus) (fabapi.ComponentStatus, error) {
+	status := fabapi.CompStatusReady
+
+	for _, statusFunc := range kubeStatus {
+		kStatus, kErr := statusFunc(ctx, kube, cfg)
+		if kErr != nil {
+			return fabapi.CompStatusUnknown, kErr
+		}
+
+		status = minStatus(status, kStatus)
 	}
 
-	return fabapi.CompStatusPending, nil
+	return status, nil
+}
+
+func minStatus(a, b fabapi.ComponentStatus) fabapi.ComponentStatus {
+	aIdx := slices.Index(fabapi.ComponentStatuses, a)
+	bIdx := slices.Index(fabapi.ComponentStatuses, b)
+
+	if aIdx < bIdx {
+		return a
+	}
+
+	return b
 }
