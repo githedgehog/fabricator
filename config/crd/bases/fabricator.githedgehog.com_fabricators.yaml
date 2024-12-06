@@ -312,10 +312,14 @@ spec:
           status:
             properties:
               components:
+                description: '! WARNING: Make sure to update the IsReady method if
+                  you add or remove components'
                 properties:
                   certManagerCtrl:
                     type: string
                   certManagerWebhook:
+                    type: string
+                  fabricAPI:
                     type: string
                   fabricBoot:
                     type: string
@@ -324,6 +328,10 @@ spec:
                   fabricDHCP:
                     type: string
                   fabricProxy:
+                    type: string
+                  fabricatorAPI:
+                    type: string
+                  fabricatorCtrl:
                     type: string
                   ntp:
                     type: string

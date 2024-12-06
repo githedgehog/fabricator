@@ -68,12 +68,23 @@ const (
 	CompStatusReady    ComponentStatus = "Ready"
 )
 
+var ComponentStatuses = []ComponentStatus{
+	CompStatusUnknown,
+	CompStatusNotFound,
+	CompStatusPending,
+	CompStatusReady,
+}
+
+// ! WARNING: Make sure to update the IsReady method if you add or remove components
 type ComponentsStatus struct {
+	FabricatorAPI      ComponentStatus `json:"fabricatorAPI,omitempty"`
+	FabricatorCtrl     ComponentStatus `json:"fabricatorCtrl,omitempty"`
 	CertManagerCtrl    ComponentStatus `json:"certManagerCtrl,omitempty"`
 	CertManagerWebhook ComponentStatus `json:"certManagerWebhook,omitempty"`
 	Reloader           ComponentStatus `json:"reloader,omitempty"`
 	Zot                ComponentStatus `json:"zot,omitempty"`
 	NTP                ComponentStatus `json:"ntp,omitempty"`
+	FabricAPI          ComponentStatus `json:"fabricAPI,omitempty"`
 	FabricCtrl         ComponentStatus `json:"fabricCtrl,omitempty"`
 	FabricBoot         ComponentStatus `json:"fabricBoot,omitempty"`
 	FabricDHCP         ComponentStatus `json:"fabricDHCP,omitempty"`
@@ -81,7 +92,9 @@ type ComponentsStatus struct {
 }
 
 func (c *ComponentsStatus) IsReady() bool {
-	return c.CertManagerCtrl == CompStatusReady &&
+	return c.FabricatorAPI == CompStatusReady &&
+		c.FabricatorCtrl == CompStatusReady &&
+		c.CertManagerCtrl == CompStatusReady &&
 		c.CertManagerWebhook == CompStatusReady &&
 		c.Reloader == CompStatusReady &&
 		c.Zot == CompStatusReady &&

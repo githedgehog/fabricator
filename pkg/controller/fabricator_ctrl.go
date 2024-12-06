@@ -54,7 +54,9 @@ func (r *FabricatorReconciler) SetupWithManager(mgr ctrl.Manager) error {
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch;create;update;patch;delete
 
-// +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch
+
+// +kubebuilder:rbac:groups=apiextensions.k8s.io,resources=customresourcedefinitions,verbs=get;list;watch
 
 // +kubebuilder:rbac:groups=helm.cattle.io,resources=helmcharts,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=helm.cattle.io,resources=helmcharts/status,verbs=get
@@ -182,49 +184,62 @@ func (r *FabricatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 		var err error
 
-		// TODO check component versions
+		f.Status.Components.FabricatorAPI, err = f8r.StatusAPI(ctx, r.Client, *f)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("getting fabricator api status: %w", err)
+		}
 
-		f.Status.Components.CertManagerCtrl, err = comp.GetKubeStatus(ctx, r.Client, *f, certmanager.StatusCtrl)
+		f.Status.Components.FabricatorCtrl, err = f8r.StatusCtrl(ctx, r.Client, *f)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("getting fabricator ctrl status: %w", err)
+		}
+
+		f.Status.Components.CertManagerCtrl, err = certmanager.StatusCtrl(ctx, r.Client, *f)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("getting cert-manager ctrl status: %w", err)
 		}
 
-		f.Status.Components.CertManagerWebhook, err = comp.GetKubeStatus(ctx, r.Client, *f, certmanager.StatusWebhook)
+		f.Status.Components.CertManagerWebhook, err = certmanager.StatusWebhook(ctx, r.Client, *f)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("getting cert-manager webhook status: %w", err)
 		}
 
-		f.Status.Components.Reloader, err = comp.GetKubeStatus(ctx, r.Client, *f, reloader.Status)
+		f.Status.Components.Reloader, err = reloader.Status(ctx, r.Client, *f)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("getting reloader status: %w", err)
 		}
 
-		f.Status.Components.Zot, err = comp.GetKubeStatus(ctx, r.Client, *f, zot.Status)
+		f.Status.Components.Zot, err = zot.Status(ctx, r.Client, *f)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("getting zot status: %w", err)
 		}
 
-		f.Status.Components.NTP, err = comp.GetKubeStatus(ctx, r.Client, *f, ntp.Status)
+		f.Status.Components.NTP, err = ntp.Status(ctx, r.Client, *f)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("getting ntp status: %w", err)
 		}
 
-		f.Status.Components.FabricCtrl, err = comp.GetKubeStatus(ctx, r.Client, *f, fabric.StatusCtrl)
+		f.Status.Components.FabricAPI, err = fabric.StatusAPI(ctx, r.Client, *f)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("getting fabric api status: %w", err)
+		}
+
+		f.Status.Components.FabricCtrl, err = fabric.StatusCtrl(ctx, r.Client, *f)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("getting fabric ctrl status: %w", err)
 		}
 
-		f.Status.Components.FabricBoot, err = comp.GetKubeStatus(ctx, r.Client, *f, fabric.StatusBoot)
+		f.Status.Components.FabricBoot, err = fabric.StatusBoot(ctx, r.Client, *f)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("getting fabric boot status: %w", err)
 		}
 
-		f.Status.Components.FabricDHCP, err = comp.GetKubeStatus(ctx, r.Client, *f, fabric.StatusDHCP)
+		f.Status.Components.FabricDHCP, err = fabric.StatusDHCP(ctx, r.Client, *f)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("getting fabric dhcp status: %w", err)
 		}
 
-		f.Status.Components.FabricProxy, err = comp.GetKubeStatus(ctx, r.Client, *f, fabric.StatusProxy)
+		f.Status.Components.FabricProxy, err = fabric.StatusProxy(ctx, r.Client, *f)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("getting fabric proxy status: %w", err)
 		}
