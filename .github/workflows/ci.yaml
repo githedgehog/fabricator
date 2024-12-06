@@ -240,10 +240,79 @@ jobs:
         with:
           limit-access-to-actor: true
 
+  vlab-upgrade:
+    runs-on: vlab
+    needs:
+      - test
+      - builds
+    timeout-minutes: 90
+
+    strategy:
+      fail-fast: false
+      matrix:
+        fabricmode:
+          - spine-leaf
+        fromversion:
+          - "beta-1"
+
+    steps:
+      - name: Runner host
+        run: |
+          echo "$KUBE_NODE"
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+
+      - name: Setup local registry
+        run: |
+          just --timestamp _localreg &
+
+      - name: Initial VLAB with old version
+        env:
+          HHFAB_REG_REPO: 127.0.0.1:30000
+        run: |
+          mkdir old
+          curl -fsSL https://i.hhdev.io/hhfab | USE_SUDO=false INSTALL_DIR=./old VERSION="${{ matrix.fromversion }}" bash
+
+          old/hhfab init -v --dev -m ${{ matrix.fabricmode }} --include-onie=true
+          old/hhfab vlab gen -v
+          old/hhfab vlab up -v --ready setup-vpcs --ready test-connectivity --ready exit --usb=true
+
+      - name: Build current hhfab
+        run: |
+          just --timestamp oci_repo=127.0.0.1:30000 oci=http push
+
+      - name: hhfab vlab up --upgrade
+        env:
+          HHFAB_REG_REPO: 127.0.0.1:30000
+        run: |
+          bin/hhfab vlab up -v --ready setup-vpcs --ready test-connectivity --ready exit --upgrade
+
+      - name: Dump local registry logs
+        if: ${{ always() }}
+        run: |
+          cat .zot/log
+
+      - name: Setup tmate session for debug
+        if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
+        uses: mxschmitt/action-tmate@v3
+        timeout-minutes: 30
+        with:
+          limit-access-to-actor: true
+
   vlabs:
     runs-on: ubuntu-latest
     needs:
       - vlab
+      - vlab-upgrade
     if: ${{ always() }}
 
     steps:

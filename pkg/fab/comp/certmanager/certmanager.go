@@ -4,6 +4,7 @@
 package certmanager
 
 import (
+	"context"
 	_ "embed"
 	"fmt"
 
@@ -105,10 +106,22 @@ var (
 	_ comp.KubeStatus = StatusWebhook
 )
 
-func StatusCtrl(_ fabapi.Fabricator) (string, client.Object, error) {
-	return "cert-manager", &comp.Deployment{}, nil
+func StatusCtrl(ctx context.Context, kube client.Reader, cfg fabapi.Fabricator) (fabapi.ComponentStatus, error) {
+	ref, err := comp.ImageURL(cfg, ControllerImageRef)
+	if err != nil {
+		return fabapi.CompStatusUnknown, fmt.Errorf("getting image URL for %q: %w", ControllerImageRef, err)
+	}
+	image := ref + ":" + string(cfg.Status.Versions.Platform.CertManager)
+
+	return comp.GetDeploymentStatus("cert-manager", "cert-manager-controller", image)(ctx, kube, cfg)
 }
 
-func StatusWebhook(_ fabapi.Fabricator) (string, client.Object, error) {
-	return "cert-manager-webhook", &comp.Deployment{}, nil
+func StatusWebhook(ctx context.Context, kube client.Reader, cfg fabapi.Fabricator) (fabapi.ComponentStatus, error) {
+	ref, err := comp.ImageURL(cfg, WebhookImageRef)
+	if err != nil {
+		return fabapi.CompStatusUnknown, fmt.Errorf("getting image URL for %q: %w", WebhookImageRef, err)
+	}
+	image := ref + ":" + string(cfg.Status.Versions.Platform.CertManager)
+
+	return comp.GetDeploymentStatus("cert-manager-webhook", "cert-manager-webhook", image)(ctx, kube, cfg)
 }

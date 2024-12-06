@@ -4,6 +4,7 @@
 package fabric
 
 import (
+	"context"
 	_ "embed"
 	"fmt"
 	"net/netip"
@@ -172,7 +173,6 @@ func Install(control fabapi.ControlNode) comp.KubeInstall {
 	}
 }
 
-// TODO move to fabricator
 func InstallManagementDHCPSubnet(cfg fabapi.Fabricator) ([]client.Object, error) {
 	mgmt, err := cfg.Spec.Config.Control.ManagementSubnet.Parse()
 	if err != nil {
@@ -325,24 +325,56 @@ func Artifacts(cfg fabapi.Fabricator) (comp.OCIArtifacts, error) {
 }
 
 var (
+	_ comp.KubeStatus = StatusAPI
 	_ comp.KubeStatus = StatusCtrl
 	_ comp.KubeStatus = StatusDHCP
 	_ comp.KubeStatus = StatusBoot
 	_ comp.KubeStatus = StatusProxy
 )
 
-func StatusCtrl(_ fabapi.Fabricator) (string, client.Object, error) {
-	return "fabric-ctrl", &comp.Deployment{}, nil
+func StatusAPI(ctx context.Context, kube client.Reader, cfg fabapi.Fabricator) (fabapi.ComponentStatus, error) {
+	return comp.MergeKubeStatuses(ctx, kube, cfg, //nolint:wrapcheck
+		comp.GetCRDStatus("switches.wiring.githedgehog.com", "v1beta1"),
+		comp.GetCRDStatus("connections.wiring.githedgehog.com", "v1beta1"),
+	)
 }
 
-func StatusDHCP(_ fabapi.Fabricator) (string, client.Object, error) {
-	return "fabric-dhcpd", &comp.Deployment{}, nil
+func StatusCtrl(ctx context.Context, kube client.Reader, cfg fabapi.Fabricator) (fabapi.ComponentStatus, error) {
+	ref, err := comp.ImageURL(cfg, CtrlRef)
+	if err != nil {
+		return fabapi.CompStatusUnknown, fmt.Errorf("getting image URL for %q: %w", CtrlRef, err)
+	}
+	image := ref + ":" + string(cfg.Status.Versions.Fabric.Controller)
+
+	return comp.GetDeploymentStatus("fabric-ctrl", "manager", image)(ctx, kube, cfg)
 }
 
-func StatusBoot(_ fabapi.Fabricator) (string, client.Object, error) {
-	return "fabric-boot", &comp.Deployment{}, nil
+func StatusDHCP(ctx context.Context, kube client.Reader, cfg fabapi.Fabricator) (fabapi.ComponentStatus, error) {
+	ref, err := comp.ImageURL(cfg, DHCPRef)
+	if err != nil {
+		return fabapi.CompStatusUnknown, fmt.Errorf("getting image URL for %q: %w", DHCPRef, err)
+	}
+	image := ref + ":" + string(cfg.Status.Versions.Fabric.DHCPD)
+
+	return comp.GetDeploymentStatus("fabric-dhcpd", "fabric-dhcpd", image)(ctx, kube, cfg)
 }
 
-func StatusProxy(_ fabapi.Fabricator) (string, client.Object, error) {
-	return "fabric-proxy", &comp.Deployment{}, nil
+func StatusBoot(ctx context.Context, kube client.Reader, cfg fabapi.Fabricator) (fabapi.ComponentStatus, error) {
+	ref, err := comp.ImageURL(cfg, BootRef)
+	if err != nil {
+		return fabapi.CompStatusUnknown, fmt.Errorf("getting image URL for %q: %w", BootRef, err)
+	}
+	image := ref + ":" + string(cfg.Status.Versions.Fabric.Boot)
+
+	return comp.GetDeploymentStatus("fabric-boot", "fabric-boot", image)(ctx, kube, cfg)
+}
+
+func StatusProxy(ctx context.Context, kube client.Reader, cfg fabapi.Fabricator) (fabapi.ComponentStatus, error) {
+	ref, err := comp.ImageURL(cfg, ProxyRef)
+	if err != nil {
+		return fabapi.CompStatusUnknown, fmt.Errorf("getting image URL for %q: %w", ProxyRef, err)
+	}
+	image := ref + ":" + string(cfg.Status.Versions.Fabric.Proxy)
+
+	return comp.GetDeploymentStatus("fabric-proxy", "fabric-proxy", image)(ctx, kube, cfg)
 }

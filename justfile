@@ -126,6 +126,11 @@ test-api: _helm-fabricator-api
     kubectl get crd | grep fabricator
     kind delete cluster --name kind
 
+# Patch deployment using the default kubeconfig (KUBECONFIG env or ~/.kube/config)
+patch: && version
+  kubectl -n fab patch helmchart/fabricator-api --type=merge -p '{"spec":{"version":"{{version}}"}}'
+  kubectl -n fab patch helmchart/fabricator --type=merge -p '{"spec":{"version":"{{version}}", "set":{"ctrl.manager.image.tag":"{{version}}"}}}'
+
 #
 # Setup local registry
 #
