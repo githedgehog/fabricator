@@ -37,7 +37,7 @@ _Appears in:_
 
 
 
-
+! WARNING: Make sure to update the IsReady method if you add or remove components
 
 
 
@@ -46,11 +46,14 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
+| `fabricatorAPI` _[ComponentStatus](#componentstatus)_ |  |  |  |
+| `fabricatorCtrl` _[ComponentStatus](#componentstatus)_ |  |  |  |
 | `certManagerCtrl` _[ComponentStatus](#componentstatus)_ |  |  |  |
 | `certManagerWebhook` _[ComponentStatus](#componentstatus)_ |  |  |  |
 | `reloader` _[ComponentStatus](#componentstatus)_ |  |  |  |
 | `zot` _[ComponentStatus](#componentstatus)_ |  |  |  |
 | `ntp` _[ComponentStatus](#componentstatus)_ |  |  |  |
+| `fabricAPI` _[ComponentStatus](#componentstatus)_ |  |  |  |
 | `fabricCtrl` _[ComponentStatus](#componentstatus)_ |  |  |  |
 | `fabricBoot` _[ComponentStatus](#componentstatus)_ |  |  |  |
 | `fabricDHCP` _[ComponentStatus](#componentstatus)_ |  |  |  |
