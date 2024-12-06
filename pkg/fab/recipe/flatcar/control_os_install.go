@@ -149,7 +149,11 @@ func (i *ControlOSInstal) Run(ctx context.Context) error {
 	if strings.Contains(dev, "nvme") {
 		partition = "p9"
 	}
-	if err := i.execCmd(ctx, true, "resize2fs", "-f", dev+partition); err != nil {
+	// "-f" in this case is force the check, even if the file system seems clean
+	if err := i.execCmd(ctx, true, "e2fsck", "-f", "-p", dev+partition); err != nil {
+		return fmt.Errorf("e2fsck filesystem on partition 9 on existing block device: %w", err)
+	}
+	if err := i.execCmd(ctx, true, "resize2fs", dev+partition); err != nil {
 		return fmt.Errorf("resizing filesystem on partition 9 on existing block device: %w", err)
 	}
 
