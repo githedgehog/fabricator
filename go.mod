@@ -28,7 +28,7 @@ require (
 	github.com/onsi/gomega v1.36.0
 	github.com/opencontainers/image-spec v1.1.0
 	github.com/pkg/errors v0.9.1
-	github.com/pkg/sftp v1.13.6
+	github.com/pkg/sftp v1.13.7
 	github.com/samber/slog-multi v1.2.4
 	github.com/sethvargo/go-password v0.3.1
 	github.com/shirou/gopsutil/v3 v3.24.5
@@ -41,6 +41,7 @@ require (
 	golang.org/x/sync v0.9.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	k8s.io/api v0.31.2
+	k8s.io/apiextensions-apiserver v0.31.1
 	k8s.io/apimachinery v0.31.2
 	k8s.io/client-go v0.31.2
 	k8s.io/klog/v2 v2.130.1
@@ -322,7 +323,6 @@ require (
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	inet.af/netaddr v0.0.0-20220811202034-502d2d690317 // indirect
-	k8s.io/apiextensions-apiserver v0.31.1 // indirect
 	k8s.io/kube-openapi v0.0.0-20240903163716-9e1beecbcb38 // indirect
 	k8s.io/utils v0.0.0-20240921022957-49e7df575cb6 // indirect
 	sigs.k8s.io/gateway-api v1.1.0 // indirect
