@@ -236,3 +236,37 @@ type VLABAccessInfo struct {
 	IsSwitch     bool   // ssh through control node only
 	RemoteSerial string // ssh to get serial
 }
+
+func (c *Config) VLABPower(ctx context.Context, name string, action string) error {
+	entries := map[string]VLABPowerInfo{}
+
+	// Fetch the switch list
+	switches := wiringapi.SwitchList{}
+	if err := c.Wiring.List(ctx, &switches); err != nil {
+		return fmt.Errorf("failed to list switches: %w", err)
+	}
+
+	// Populate entries
+	for _, sw := range switches.Items {
+		powerInfo := hhfctl.GetPowerInfo(ctx, sw.Name)
+
+		entry := VLABPowerInfo{
+			SwitchPSUs: powerInfo,
+		}
+		entries[sw.Name] = entry
+	}
+
+	// Action Power
+	for swName, entry := range entries {
+		fmt.Printf("Switch: %s\n", swName)
+		for psuName, url := range entry.SwitchPSUs {
+			fmt.Printf("\tPSU: %s, URL: %s\n", psuName, url)
+		}
+	}
+
+	return nil
+}
+
+type VLABPowerInfo struct {
+	SwitchPSUs map[string]string // PSU names and their URLs
+}
