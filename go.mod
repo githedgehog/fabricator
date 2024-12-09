@@ -11,7 +11,7 @@ require (
 	github.com/AlekSi/pointer v1.2.0
 	github.com/Masterminds/semver/v3 v3.3.0
 	github.com/Masterminds/sprig/v3 v3.3.0
-	github.com/cert-manager/cert-manager v1.16.1
+	github.com/cert-manager/cert-manager v1.16.2
 	github.com/charmbracelet/keygen v0.5.1
 	github.com/containers/image/v5 v5.32.2
 	github.com/coreos/butane v0.22.0
@@ -41,6 +41,7 @@ require (
 	golang.org/x/sync v0.9.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	k8s.io/api v0.31.2
+	k8s.io/apiextensions-apiserver v0.31.1
 	k8s.io/apimachinery v0.31.2
 	k8s.io/client-go v0.31.2
 	k8s.io/klog/v2 v2.130.1
@@ -322,7 +323,6 @@ require (
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	inet.af/netaddr v0.0.0-20220811202034-502d2d690317 // indirect
-	k8s.io/apiextensions-apiserver v0.31.1 // indirect
 	k8s.io/kube-openapi v0.0.0-20240903163716-9e1beecbcb38 // indirect
 	k8s.io/utils v0.0.0-20240921022957-49e7df575cb6 // indirect
 	sigs.k8s.io/gateway-api v1.1.0 // indirect
