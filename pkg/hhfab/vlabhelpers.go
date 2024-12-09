@@ -18,6 +18,8 @@ import (
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/hhfctl"
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
+	"go.githedgehog.com/fabricator/pkg/hhfab/pdu/netio"
+	"go.githedgehog.com/fabricator/pkg/hhfab/pdu/utils"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -235,4 +237,77 @@ type VLABAccessInfo struct {
 	SerialLog    string
 	IsSwitch     bool   // ssh through control node only
 	RemoteSerial string // ssh to get serial
+}
+
+func (c *Config) VLABPower(ctx context.Context, name string, action string, pduConf *PDUConfig) error {
+	entries := map[string]VLABPowerInfo{}
+
+	// Fetch the switch list
+	switches := wiringapi.SwitchList{}
+	if err := c.Wiring.List(ctx, &switches); err != nil {
+		return fmt.Errorf("Failed to list switches: %w", err)
+	}
+
+	// Populate entries
+	foundAnnotations := false
+	for _, sw := range switches.Items {
+		// Skip if the name is not "--all" and doesn't match sw.Name
+		if name != "--all" && sw.Name != name {
+			continue
+		}
+		powerInfo := hhfctl.GetPowerInfo(&sw)
+		if len(powerInfo) > 0 {
+			foundAnnotations = true
+		}
+		slog.Debug("Switch", "sw", sw.Name, "annotations", fmt.Sprintf("%v", powerInfo))
+
+		entry := VLABPowerInfo{
+			SwitchPSUs: powerInfo,
+		}
+		entries[sw.Name] = entry
+	}
+
+	if len(entries) == 0 {
+		return fmt.Errorf("no switches found for the given name: %s", name) //nolint:goerr113
+	}
+
+	if !foundAnnotations {
+		targetSW := name
+		if name == "--all" {
+			targetSW = "any switches"
+		}
+
+		return fmt.Errorf("no annotations found for %s", targetSW) //nolint:goerr113
+	}
+
+	// Power action request to PDU API
+	for swName, entry := range entries {
+		for psuName, url := range entry.SwitchPSUs {
+			outletID, err := utils.ExtractOutletID(url)
+			if err != nil {
+				return fmt.Errorf("error extracting outlet ID from URL %s", url) //nolint:goerr113
+			}
+			pduIP, err := utils.GetPDUIPFromURL(url)
+			if err != nil {
+				return fmt.Errorf("error extracting PDU IP from URL %s", url) //nolint:goerr113
+			}
+			// Query credentials from PDU config
+			creds, found := pduConf.PDUs[pduIP]
+			if !found {
+				slog.Error("no credentials found for", "pduIP", pduIP)
+
+				continue
+			}
+			slog.Info("Performing power", "action", action, "on switch", swName, "psu", psuName)
+			if err := netio.ControlOutlet(ctx, pduIP, creds.User, creds.Password, outletID, action); err != nil {
+				return fmt.Errorf("failed to power %s switch %s %s: %w", action, swName, psuName, err)
+			}
+		}
+	}
+
+	return nil
+}
+
+type VLABPowerInfo struct {
+	SwitchPSUs map[string]string // PSU names and their URLs
 }

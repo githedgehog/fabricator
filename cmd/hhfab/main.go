@@ -64,7 +64,7 @@ func main() {
 }
 
 func Run(ctx context.Context) error {
-	var verbose, brief bool
+	var verbose, brief, yes bool
 	verboseFlag := &cli.BoolFlag{
 		Name:        "verbose",
 		Aliases:     []string{"v"},
@@ -80,6 +80,19 @@ func Run(ctx context.Context) error {
 		EnvVars:     []string{"HHFAB_BRIEF"},
 		Destination: &brief,
 		Category:    FlagCatGlobal,
+	}
+	yesFlag := &cli.BoolFlag{
+		Name:        "yes",
+		Aliases:     []string{"y"},
+		Usage:       "assume yes",
+		Destination: &yes,
+	}
+	yesCheck := func(_ *cli.Context) error {
+		if !yes {
+			return cli.Exit("\033[31mWARNING:\033[0m Potentially dangerous operation. Please confirm with --yes if you're sure.", 1)
+		}
+
+		return nil
 	}
 
 	defaultWorkDir, err := os.Getwd()
@@ -832,6 +845,59 @@ func Run(ctx context.Context) error {
 							}
 
 							return nil
+						},
+					},
+					{
+						Name:   "switch",
+						Usage:  "manage switch reinstall or power",
+						Flags:  append(defaultFlags, accessNameFlag),
+						Before: before(false),
+						Subcommands: []*cli.Command{
+							{
+								Name:  "power",
+								Usage: "manage switch power state (ON, OFF, or CYCLE)",
+								Flags: []cli.Flag{
+									&cli.StringFlag{
+										Name:    "name",
+										Aliases: []string{"n"},
+										Usage:   "name of the switch to power ON|OFF|CYCLE",
+									},
+									&cli.BoolFlag{
+										Name:  "all",
+										Usage: "apply action to all switches",
+									},
+									yesFlag,
+								},
+								UsageText: "hhfab vlab switch power [--name <switchName>|--all] <action>",
+								Action: func(c *cli.Context) error {
+									switchName := c.String("name")
+									if c.Bool("all") {
+										switchName = "--all"
+									}
+									if switchName == "" {
+										return fmt.Errorf("missing required flag: --name/-n") //nolint:goerr113
+									}
+
+									if c.NArg() != 1 {
+										return fmt.Errorf("unexpected amount of agruments (use ON, OFF, or CYCLE)") //nolint:goerr113
+									}
+
+									powerAction := strings.ToUpper(c.Args().First())
+									if powerAction != "ON" && powerAction != "OFF" && powerAction != "CYCLE" {
+										return fmt.Errorf("invalid power action: %s (use ON, OFF, or CYCLE)", powerAction) //nolint:goerr113
+									}
+
+									if err := yesCheck(c); err != nil {
+										return err
+									}
+
+									if err := hhfab.DoSwitchPower(ctx, workDir, cacheDir, switchName, powerAction); err != nil {
+										return fmt.Errorf("failed to power switch: %w", err)
+									}
+
+									return nil
+								},
+							},
 						},
 					},
 				},
