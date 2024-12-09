@@ -164,3 +164,27 @@ func DoVLABTestConnectivity(ctx context.Context, workDir, cacheDir string, opts 
 
 	return c.TestConnectivity(ctx, vlab, opts)
 }
+
+func DoSwitchPower(ctx context.Context, workDir, cacheDir, name string, action string) error {
+	c, _, err := loadVLABForHelpers(ctx, workDir, cacheDir)
+	if err != nil {
+		return err
+	}
+
+	// Load PDU configuration from YAML
+	pduConf, err := loadPDUConf(workDir)
+	if err != nil {
+		return fmt.Errorf("failed to load PDU config: %w", err)
+	}
+
+	return c.VLABPower(ctx, name, action, pduConf)
+}
+
+func DoSwitchReinstall(ctx context.Context, workDir, cacheDir, _ string) error {
+	_, _, err := loadVLABForHelpers(ctx, workDir, cacheDir)
+	if err != nil {
+		return err
+	}
+	// TODO: Implement reinstall logic
+	return nil
+}
