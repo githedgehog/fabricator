@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strings"
 
 	"github.com/manifoldco/promptui"
@@ -235,4 +236,54 @@ type VLABAccessInfo struct {
 	SerialLog    string
 	IsSwitch     bool   // ssh through control node only
 	RemoteSerial string // ssh to get serial
+}
+
+func (c *Config) VLABPower(ctx context.Context, name string, action string) error {
+	entries := map[string]VLABPowerInfo{}
+
+	// Fetch the switch list
+	switches := wiringapi.SwitchList{}
+	if err := c.Wiring.List(ctx, &switches); err != nil {
+		return fmt.Errorf("failed to list switches: %w", err)
+	}
+
+	// Populate entries
+	for _, sw := range switches.Items {
+		entry := VLABPowerInfo{
+			SwitchPSU:  sw.Name,
+			PDUPortURL: fmt.Sprintf("%v", hhfctl.GetPowerInfo(&sw)),
+		}
+		entries[sw.Name] = entry
+	}
+
+	// Print switches if --all is passed
+	if name == "--all" {
+		names := make([]string, 0, len(entries))
+		for swName := range entries {
+			names = append(names, swName)
+		}
+		sort.Strings(names)
+
+		for _, swName := range names {
+			entry := entries[swName]
+			fmt.Printf("Switch %s: PSUs: %s PDU: %s Power: %s\n", swName, entry.SwitchPSU, entry.PDUPortURL, action)
+		}
+
+		return nil
+	}
+
+	// Handle specific switch name
+	entry, ok := entries[name]
+	if !ok {
+		return fmt.Errorf("power info not found: %s", name) //nolint:goerr113
+	}
+
+	fmt.Printf("Switch: %s, PSUs: %s\n", entry.SwitchPSU, entry.PDUPortURL)
+
+	return nil
+}
+
+type VLABPowerInfo struct {
+	SwitchPSU  string
+	PDUPortURL string
 }
