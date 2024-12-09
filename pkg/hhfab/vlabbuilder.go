@@ -46,16 +46,16 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 
 	if fabricMode == meta.FabricModeSpineLeaf {
 		if !b.NoSwitches {
-			if b.SpinesCount == 0 {
-				b.SpinesCount = 2
-			}
-			if b.FabricLinksCount == 0 {
-				b.FabricLinksCount = 2
-			}
-			if b.MCLAGLeafsCount == 0 && b.OrphanLeafsCount == 0 && b.ESLAGLeafGroups == "" {
+			if b.MCLAGLeafsCount == 0 && b.OrphanLeafsCount == 0 && b.ESLAGLeafGroups == "" && b.SpinesCount == 0 && b.FabricLinksCount == 0 {
 				b.MCLAGLeafsCount = 2
 				b.ESLAGLeafGroups = "2"
 				b.OrphanLeafsCount = 1
+				b.MCLAGServers = 2
+				b.ESLAGServers = 2
+				b.UnbundledServers = 1
+				b.BundledServers = 1
+				b.SpinesCount = 2
+				b.FabricLinksCount = 2
 			}
 		}
 	} else if fabricMode == meta.FabricModeCollapsedCore {
@@ -83,10 +83,10 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 		return errors.Errorf("unsupported fabric mode %s", fabricMode)
 	}
 
-	if b.MCLAGSessionLinks == 0 {
+	if b.MCLAGSessionLinks == 0 && b.MCLAGLeafsCount > 0 {
 		b.MCLAGSessionLinks = 2
 	}
-	if b.MCLAGPeerLinks == 0 {
+	if b.MCLAGPeerLinks == 0 && b.MCLAGLeafsCount > 0 {
 		b.MCLAGPeerLinks = 2
 	}
 	if b.VPCLoopbacks == 0 {
