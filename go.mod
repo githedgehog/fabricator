@@ -11,7 +11,7 @@ require (
 	github.com/AlekSi/pointer v1.2.0
 	github.com/Masterminds/semver/v3 v3.3.0
 	github.com/Masterminds/sprig/v3 v3.3.0
-	github.com/cert-manager/cert-manager v1.16.1
+	github.com/cert-manager/cert-manager v1.16.2
 	github.com/charmbracelet/keygen v0.5.1
 	github.com/containers/image/v5 v5.33.0
 	github.com/coreos/butane v0.22.0
