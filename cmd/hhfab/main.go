@@ -811,6 +811,73 @@ func Run(ctx context.Context) error {
 							return nil
 						},
 					},
+					{
+						Name:   "switch",
+						Usage:  "manage switch reinstall or power",
+						Flags:  append(defaultFlags, accessNameFlag),
+						Before: before(false),
+						Subcommands: []*cli.Command{
+							{
+								Name:  "reinstall",
+								Usage: "reinstall one or all switches",
+								Flags: []cli.Flag{
+									&cli.StringFlag{
+										Name:    "name",
+										Aliases: []string{"n"},
+										Usage:   "name of the switch to reinstall, or use '--all' for all switches",
+									},
+								},
+								Action: func(c *cli.Context) error {
+									switchName := c.String("name")
+									if switchName == "" {
+										return fmt.Errorf("missing switch name or --all") //nolint:goerr113
+									}
+
+									err := hhfab.DoSwitchReinstall(ctx, workDir, cacheDir, switchName)
+									if err != nil {
+										return fmt.Errorf("reinstall failed: %w", err)
+									}
+
+									return nil
+								},
+								HelpName: "hhfab vlab switch reinstall",
+							},
+							{
+								Name:  "power",
+								Usage: "manage switch power state (ON, OFF, or CYCLE)",
+								Flags: []cli.Flag{
+									&cli.StringFlag{
+										Name:    "name",
+										Aliases: []string{"n"},
+										Usage:   "name of the switch to power ON|OFF|CYCLE, or use '--all' for all switches",
+									},
+								},
+								UsageText: "hhfab vlab switch power [--name <switchName>|--all] <action>",
+								Action: func(c *cli.Context) error {
+									switchName := c.String("name")
+									if switchName == "" {
+										return fmt.Errorf("missing required flag: --name/-n") //nolint:goerr113
+									}
+
+									if c.NArg() < 1 {
+										return fmt.Errorf("missing power action (ON, OFF, CYCLE)") //nolint:goerr113
+									}
+
+									powerAction := c.Args().First()
+									if powerAction != "ON" && powerAction != "OFF" && powerAction != "CYCLE" {
+										return fmt.Errorf("invalid power action: %s (use ON, OFF, or CYCLE)", powerAction) //nolint:goerr113
+									}
+
+									err := hhfab.DoSwitchPower(ctx, workDir, cacheDir, switchName, powerAction)
+									if err != nil {
+										return fmt.Errorf("power operation failed: %w", err) //nolint:goerr113
+									}
+
+									return nil
+								},
+							},
+						},
+					},
 				},
 			},
 			{
