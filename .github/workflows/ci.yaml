@@ -101,6 +101,9 @@ jobs:
         run: |
           brew install docker
 
+      - name: Setup oras
+        uses: oras-project/setup-oras@v1
+
       - name: Setup local registry
         env:
           LOCALREG_SYNC_REGISTRY: ghcr.io
