@@ -96,27 +96,30 @@ jobs:
       - name: Setup Just
         uses: extractions/setup-just@v2
 
-      - name: Setup docker on MacOS
-        if: matrix.os == 'macos-latest'
+      - name: Setup local registry
+        env:
+          LOCALREG_SYNC_REGISTRY: ghcr.io
+          LOCALREG_SYNC_USERNAME: ${{ github.actor }}
+          LOCALREG_SYNC_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          brew install docker
-
-      - name: Login to ghcr.io
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          just --timestamp _localreg &
 
       - name: Build hhfab for local OS/ARCH
         run: |
-          just --timestamp hhfab-build-local
+          just --timestamp oci_repo=127.0.0.1:30000 oci=http push hhfab-build-local
 
       - name: hhfab init and build
+        env:
+          HHFAB_REG_REPO: 127.0.0.1:30000
         run: |
           bin/hhfab init -v --dev --import-host-upstream
           bin/hhfab build -v ${{ matrix.buildmode }}
           ls -lah result
+
+      - name: Dump local registry logs
+        if: ${{ always() }}
+        run: |
+          cat .zot/log
 
       - name: Setup tmate session for debug
         if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}

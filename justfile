@@ -147,8 +147,8 @@ patch: && version
 #
 zot_version := "v2.1.1"
 zot := localbin / "zot" + "-" + zot_version
-zot_os := "linux"
-zot_arch := "amd64"
+zot_os := `hack/os.sh`
+zot_arch := `hack/arch.sh`
 @_zot: _localbin
   [ -f {{zot}} ] || wget --quiet -O {{zot}} https://github.com/project-zot/zot/releases/download/{{zot_version}}/zot-{{zot_os}}-{{zot_arch}} && chmod +x {{zot}}
 
