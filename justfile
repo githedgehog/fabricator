@@ -60,6 +60,9 @@ gen: _kube_gen _hhfab_embed _crd_ref_docs
 hhfab-build: _license_headers _gotools _kube_gen _hhfab_embed && version
   {{go_linux_build}} -o ./bin/hhfab ./cmd/hhfab
 
+hhfabctl-build: _license_headers _gotools _kube_gen && version
+  {{go_linux_build}} -o ./bin/hhfabctl ./cmd/hhfabctl
+
 # Build hhfab for local OS/Arch
 hhfab-build-local: _license_headers _gotools _kube_gen _hhfab_embed && version
   {{go_build}} -o ./bin/hhfab ./cmd/hhfab
@@ -68,11 +71,15 @@ _hhfab-build GOOS GOARCH: _license_headers _gotools _kube_gen _hhfab_embed
   GOOS={{GOOS}} GOARCH={{GOARCH}} {{go_build}} -o ./bin/hhfab-{{GOOS}}-{{GOARCH}}/hhfab ./cmd/hhfab
   cd bin && tar -czvf hhfab-{{GOOS}}-{{GOARCH}}-{{version}}.tar.gz hhfab-{{GOOS}}-{{GOARCH}}/hhfab
 
+_hhfabctl-build GOOS GOARCH: _license_headers _gotools _kube_gen
+  GOOS={{GOOS}} GOARCH={{GOARCH}} {{go_build}} -o ./bin/hhfabctl-{{GOOS}}-{{GOARCH}}/hhfabctl ./cmd/hhfabctl
+  cd bin && tar -czvf hhfabctl-{{GOOS}}-{{GOARCH}}-{{version}}.tar.gz hhfabctl-{{GOOS}}-{{GOARCH}}/hhfabctl
+
 # Build hhfab and other user-facing binaries for all supported OS/Arch
-build-multi: (_hhfab-build "linux" "amd64") (_hhfab-build "linux" "arm64") (_hhfab-build "darwin" "amd64") (_hhfab-build "darwin" "arm64") && version
+build-multi: (_hhfab-build "linux" "amd64") (_hhfab-build "linux" "arm64") (_hhfab-build "darwin" "amd64") (_hhfab-build "darwin" "arm64") (_hhfabctl-build "linux" "amd64") (_hhfabctl-build "linux" "arm64") (_hhfabctl-build "darwin" "amd64") (_hhfabctl-build "darwin" "arm64") && version
 
 # Build all artifacts
-build: _license_headers _gotools hhfab-build && version
+build: _license_headers _gotools hhfab-build hhfabctl-build && version
   {{go_linux_build}} -o ./bin/fabricator ./cmd
   # Build complete
 
@@ -108,12 +115,16 @@ kube-push: kube-build (_helm-push "fabricator-api") (_kube-push "fabricator") (_
 # Push all K8s artifacts (images and charts) and binaries
 push: kube-push _oras && version
   cd bin && oras push {{oras_insecure}} {{oci_repo}}/{{oci_prefix}}/hhfab:{{version}} hhfab
+  cd bin && oras push {{oras_insecure}} {{oci_repo}}/{{oci_prefix}}/hhfabctl:{{version}} hhfabctl
 
 _hhfab-push GOOS GOARCH: _oras (_hhfab-build GOOS GOARCH)
   cd bin/hhfab-{{GOOS}}-{{GOARCH}} && oras push {{oras_insecure}} {{oci_repo}}/{{oci_prefix}}/hhfab-{{GOOS}}-{{GOARCH}}:{{version}} hhfab
 
+_hhfabctl-push GOOS GOARCH: _oras (_hhfabctl-build GOOS GOARCH)
+  cd bin/hhfabctl-{{GOOS}}-{{GOARCH}} && oras push {{oras_insecure}} {{oci_repo}}/{{oci_prefix}}/hhfabctl-{{GOOS}}-{{GOARCH}}:{{version}} hhfabctl
+
 # Publish hhfab and other user-facing binaries for all supported OS/Arch
-push-multi: (_hhfab-push "linux" "amd64") (_hhfab-push "linux" "arm64") (_hhfab-push "darwin" "amd64") (_hhfab-push "darwin" "arm64") && version
+push-multi: (_hhfab-push "linux" "amd64") (_hhfab-push "linux" "arm64") (_hhfab-push "darwin" "amd64") (_hhfab-push "darwin" "arm64") (_hhfabctl-push "linux" "amd64") (_hhfabctl-push "linux" "arm64") (_hhfabctl-push "darwin" "amd64") (_hhfabctl-push "darwin" "arm64") && version
 
 # Install API on a kind cluster and wait for CRDs to be ready
 test-api: _helm-fabricator-api

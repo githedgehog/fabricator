@@ -366,6 +366,7 @@ jobs:
           make_latest: true # TODO do it for master only
           files: |
             bin/hhfab-*.tar.gz
+            bin/hhfabctl-*.tar.gz
 
       - name: Setup tmate session for debug
         if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
