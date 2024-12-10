@@ -123,8 +123,12 @@ _hhfab-push GOOS GOARCH: _oras (_hhfab-build GOOS GOARCH)
 _hhfabctl-push GOOS GOARCH: _oras (_hhfabctl-build GOOS GOARCH)
   cd bin/hhfabctl-{{GOOS}}-{{GOARCH}} && oras push {{oras_insecure}} {{oci_repo}}/{{oci_prefix}}/hhfabctl-{{GOOS}}-{{GOARCH}}:{{version}} hhfabctl
 
+_hhfab-push-multi: (_hhfab-push "linux" "amd64") (_hhfab-push "linux" "arm64") (_hhfab-push "darwin" "amd64") (_hhfab-push "darwin" "arm64")
+
+_hhfabctl-push-multi: (_hhfabctl-push "linux" "amd64") (_hhfabctl-push "linux" "arm64") (_hhfabctl-push "darwin" "amd64") (_hhfabctl-push "darwin" "arm64")
+
 # Publish hhfab and other user-facing binaries for all supported OS/Arch
-push-multi: (_hhfab-push "linux" "amd64") (_hhfab-push "linux" "arm64") (_hhfab-push "darwin" "amd64") (_hhfab-push "darwin" "arm64") (_hhfabctl-push "linux" "amd64") (_hhfabctl-push "linux" "arm64") (_hhfabctl-push "darwin" "amd64") (_hhfabctl-push "darwin" "arm64") && version
+push-multi: _hhfab-push-multi _hhfabctl-push-multi && version
 
 # Install API on a kind cluster and wait for CRDs to be ready
 test-api: _helm-fabricator-api
