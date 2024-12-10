@@ -237,6 +237,11 @@ func (c *ControlUpgrade) installFabricator(ctx context.Context, kube client.Clie
 		return fmt.Errorf("waiting for fabricator-ctrl ready: %w", err)
 	}
 
+	// TODO remove if it'll be managed by control agent?
+	if err := copyFile(f8r.CtlBinName, filepath.Join(f8r.BinDir, f8r.CtlDestBinName), 0o755); err != nil {
+		return fmt.Errorf("copying hhfabctl bin: %w", err)
+	}
+
 	if installConfig {
 		// TODO only install control node if it's not the first one and we're joining the cluster
 		if err := comp.EnforceKubeInstall(ctx, kube, c.Fab, f8r.InstallFabAndControl(c.Control)); err != nil {

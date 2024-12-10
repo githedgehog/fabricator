@@ -279,6 +279,8 @@ spec:
                             type: string
                           controller:
                             type: string
+                          ctl:
+                            type: string
                         type: object
                       platform:
                         properties:
@@ -459,6 +461,8 @@ spec:
                       controlISORoot:
                         type: string
                       controller:
+                        type: string
+                      ctl:
                         type: string
                     type: object
                   platform:
