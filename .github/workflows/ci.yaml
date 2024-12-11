@@ -114,7 +114,7 @@ jobs:
 
       - name: Build hhfab for local OS/ARCH
         run: |
-          just --timestamp oci_repo=127.0.0.1:30000 oci=http _hhfabctl-push "linux" "amd64" hhfab-build-local
+          just --timestamp oci_repo=127.0.0.1:30000 oci=http hhfab-build-local _hhfabctl-push-main
 
       - name: hhfab init and build
         env:
