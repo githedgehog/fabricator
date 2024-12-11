@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"go.githedgehog.com/fabricator/pkg/fab/recipe"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 )
 
@@ -61,7 +62,7 @@ type VLABUpOpts struct {
 	HydrateMode HydrateMode
 	NoCreate    bool
 	ReCreate    bool
-	USBImage    bool
+	BuildMode   recipe.BuildMode
 	VLABRunOpts
 }
 
@@ -78,7 +79,7 @@ func VLABUp(ctx context.Context, workDir, cacheDir string, opts VLABUpOpts) erro
 
 	if err := c.build(ctx, BuildOpts{
 		HydrateMode: opts.HydrateMode,
-		USBImage:    opts.USBImage,
+		BuildMode:   opts.BuildMode,
 	}); err != nil {
 		return fmt.Errorf("building: %w", err)
 	}

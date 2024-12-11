@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/artificer"
@@ -37,12 +38,22 @@ import (
 //go:embed control_butane.tmpl.yaml
 var controlButaneTmpl string
 
+type BuildMode string
+
+const (
+	BuildModeManual BuildMode = "manual"
+	BuildModeUSB    BuildMode = "usb"
+	BuildModeISO    BuildMode = "iso"
+)
+
+var BuildModes = []BuildMode{BuildModeManual, BuildModeUSB, BuildModeISO}
+
 type ControlInstallBuilder struct {
 	WorkDir    string
 	Fab        fabapi.Fabricator
 	Control    fabapi.ControlNode
 	Wiring     client.Reader
-	USBImage   bool
+	Mode       BuildMode
 	Downloader *artificer.Downloader
 }
 
@@ -54,6 +65,7 @@ const (
 	InstallIgnitionSuffix        = InstallSuffix + ".ign"
 	InstallUSBImageWorkdirSuffix = InstallSuffix + "-usb.wip"
 	InstallUSBImageSuffix        = InstallSuffix + "-usb.img"
+	InstallISOImageSuffix        = InstallSuffix + "-usb.iso"
 	InstallHashSuffix            = InstallSuffix + ".inhash"
 	RecipeBin                    = "hhfab-recipe"
 )
@@ -69,6 +81,10 @@ var AirgapArtifactLists = []comp.ListOCIArtifacts{
 }
 
 func (b *ControlInstallBuilder) Build(ctx context.Context) error {
+	if !slices.Contains(BuildModes, b.Mode) {
+		return fmt.Errorf("invalid build mode %q", b.Mode) //nolint:goerr113
+	}
+
 	installDir := filepath.Join(b.WorkDir, b.Control.Name+InstallSuffix)
 	installArchive := filepath.Join(b.WorkDir, b.Control.Name+InstallArchiveSuffix)
 	installIgnition := filepath.Join(b.WorkDir, b.Control.Name+InstallIgnitionSuffix)
@@ -83,8 +99,11 @@ func (b *ControlInstallBuilder) Build(ctx context.Context) error {
 		slog.Debug("Checking existing installers", "new", newHash, "existing", string(existingHash))
 
 		files := []string{installDir, installArchive, installIgnition}
-		if b.USBImage {
+		if b.Mode == BuildModeUSB {
 			files = []string{installDir, filepath.Join(b.WorkDir, b.Control.Name+InstallUSBImageSuffix)}
+		}
+		if b.Mode == BuildModeISO {
+			files = []string{installDir, filepath.Join(b.WorkDir, b.Control.Name+InstallISOImageSuffix)}
 		}
 		if string(existingHash) == newHash && isPresent(files...) {
 			slog.Info("Using existing installers")
@@ -113,6 +132,9 @@ func (b *ControlInstallBuilder) Build(ctx context.Context) error {
 	}
 	if err := removeIfExists(filepath.Join(b.WorkDir, b.Control.Name+InstallUSBImageSuffix)); err != nil {
 		return fmt.Errorf("removing install usb image: %w", err)
+	}
+	if err := removeIfExists(filepath.Join(b.WorkDir, b.Control.Name+InstallISOImageSuffix)); err != nil {
+		return fmt.Errorf("removing install iso image: %w", err)
 	}
 
 	if err := os.MkdirAll(installDir, 0o700); err != nil {
@@ -230,7 +252,7 @@ func (b *ControlInstallBuilder) Build(ctx context.Context) error {
 		}
 	}
 
-	if b.USBImage {
+	if b.Mode == BuildModeUSB || b.Mode == BuildModeISO {
 		if err := b.buildUSBImage(ctx); err != nil {
 			return fmt.Errorf("building USB image: %w", err)
 		}
@@ -325,8 +347,8 @@ func (b *ControlInstallBuilder) hash(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("hashing wiring: %w", err)
 	}
 
-	if _, err := fmt.Fprintf(h, "%t", b.USBImage); err != nil {
-		return "", fmt.Errorf("hashing usb image flag: %w", err)
+	if _, err := fmt.Fprintf(h, "%s", b.Mode); err != nil {
+		return "", fmt.Errorf("hashing build mode: %w", err)
 	}
 
 	return base64.URLEncoding.EncodeToString(h.Sum(nil)), nil

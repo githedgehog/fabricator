@@ -15,6 +15,7 @@ import (
 	"github.com/diskfs/go-diskfs/disk"
 	"github.com/diskfs/go-diskfs/filesystem"
 	"github.com/diskfs/go-diskfs/filesystem/fat32"
+	"github.com/diskfs/go-diskfs/filesystem/iso9660"
 	"github.com/diskfs/go-diskfs/partition/gpt"
 	"go.githedgehog.com/fabricator/pkg/artificer"
 	"go.githedgehog.com/fabricator/pkg/embed/flatcaroem"
@@ -57,7 +58,7 @@ func (b *ControlInstallBuilder) buildUSBImage(ctx context.Context) error {
 		return fmt.Errorf("no external interface specified for control %q", b.Control.Name) //nolint:goerr113
 	}
 
-	slog.Info("Building installer USB image, may take up to 5-10 minutes", "control", b.Control.Name)
+	slog.Info("Building installer image, may take up to 5-10 minutes", "control", b.Control.Name, "mode", b.Mode)
 
 	workdir := filepath.Join(b.WorkDir, b.Control.Name+InstallUSBImageWorkdirSuffix)
 
@@ -69,6 +70,7 @@ func (b *ControlInstallBuilder) buildUSBImage(ctx context.Context) error {
 	if err := b.Downloader.FromORAS(ctx, workdir, ControlUSBRootRef, b.Fab.Status.Versions.Fabricator.ControlUSBRoot, []artificer.ORASFile{
 		{Name: "boot"},
 		{Name: "EFI"},
+		{Name: "images"},
 		{Name: "flatcar_production_image.bin.bz2"},
 		{Name: "flatcar_production_pxe_image.cpio.gz"},
 		{Name: "flatcar_production_pxe.vmlinuz"},
@@ -78,93 +80,131 @@ func (b *ControlInstallBuilder) buildUSBImage(ctx context.Context) error {
 	if err := os.WriteFile(filepath.Join(workdir, "oem.cpio.gz"), flatcaroem.Bytes(), 0o644); err != nil { //nolint:gosec
 		return fmt.Errorf("writing oem cpio: %w", err)
 	}
+	var fs1 filesystem.FileSystem
+	var fs2 filesystem.FileSystem
+	diskImgPath := ""
 
-	diskImgPath := filepath.Join(b.WorkDir, b.Control.Name+InstallUSBImageSuffix)
-	diskImg, err := diskfs.Create(diskImgPath, diskSize, diskfs.Raw, blkSize)
-	if err != nil {
-		return fmt.Errorf("creating disk image: %w", err)
+	if b.Mode == BuildModeUSB {
+		diskImgPath := filepath.Join(b.WorkDir, b.Control.Name+InstallUSBImageSuffix)
+		diskImg, err := diskfs.Create(diskImgPath, diskSize, diskfs.Raw, blkSize)
+		if err != nil {
+			return fmt.Errorf("creating disk image: %w", err)
+		}
+
+		table := new(gpt.Table)
+		table.ProtectiveMBR = true
+
+		table.Partitions = []*gpt.Partition{
+			{
+				Name:  "HHA",
+				Type:  gpt.EFISystemPartition,
+				Size:  espSize,
+				Start: espPartitionStart,
+				End:   espPartitionEnd,
+			},
+			{
+				Name:  "HHB",
+				Type:  gpt.LinuxFilesystem,
+				Size:  oemSize,
+				Start: oemPartitionStart,
+				End:   oemPartitionEnd,
+			},
+		}
+
+		if err := diskImg.Partition(table); err != nil {
+			return fmt.Errorf("applying partition table to disk: %w", err)
+		}
+
+		partTable, err := diskImg.GetPartitionTable()
+		if err != nil {
+			return fmt.Errorf("getting partition table: %w", err)
+		}
+
+		if err := partTable.Verify(diskImg.File, uint64(diskSize)); err != nil { //nolint:gosec
+			return fmt.Errorf("verifying partition table: %w", err)
+		}
+
+		espSpec := disk.FilesystemSpec{Partition: 1, FSType: filesystem.TypeFat32, VolumeLabel: "ESP"}
+		espFS, err := diskImg.CreateFilesystem(espSpec)
+		if err != nil {
+			return fmt.Errorf("creating filesystem %s: %w", espSpec.VolumeLabel, err)
+		}
+		espFS.(*fat32.FileSystem).SetLazy(true)
+
+		backpackSpec := disk.FilesystemSpec{Partition: 2, FSType: filesystem.TypeFat32, VolumeLabel: "HH-MEDIA"}
+		backpackFS, err := diskImg.CreateFilesystem(backpackSpec)
+		if err != nil {
+			return fmt.Errorf("creating filesystem %s: %w", backpackSpec.VolumeLabel, err)
+		}
+		backpackFS.(*fat32.FileSystem).SetLazy(true)
+
+		fs1 = espFS
+		fs2 = backpackFS
+	} else if b.Mode == BuildModeISO {
+		var LogicalBlocksize diskfs.SectorSize = 2048
+		diskImgPath := filepath.Join(b.WorkDir, b.Control.Name+InstallISOImageSuffix)
+		slog.Info("Making ISO from", "path", diskImgPath)
+		diskImg, err := diskfs.Create(diskImgPath, diskSize, diskfs.Raw, LogicalBlocksize)
+		if err != nil {
+			return fmt.Errorf("creating disk image: %w", err)
+		}
+
+		fspec := disk.FilesystemSpec{
+			Partition:   0,
+			FSType:      filesystem.TypeISO9660,
+			VolumeLabel: "HH-MEDIA",
+		}
+		isoFS, err := diskImg.CreateFilesystem(fspec)
+		if err != nil {
+			return fmt.Errorf("creating filesystem: %w", err)
+		}
+		fs1 = isoFS
+		fs2 = isoFS
+	} else {
+		return fmt.Errorf("unsupported build mode %q", b.Mode) //nolint:goerr113
 	}
 
-	table := new(gpt.Table)
-	table.ProtectiveMBR = true
-
-	table.Partitions = []*gpt.Partition{
-		{
-			Name:  "HHA",
-			Type:  gpt.EFISystemPartition,
-			Size:  espSize,
-			Start: espPartitionStart,
-			End:   espPartitionEnd,
-		},
-		{
-			Name:  "HHB",
-			Type:  gpt.LinuxFilesystem,
-			Size:  oemSize,
-			Start: oemPartitionStart,
-			End:   oemPartitionEnd,
-		},
-	}
-
-	if err := diskImg.Partition(table); err != nil {
-		return fmt.Errorf("applying partition table to disk: %w", err)
-	}
-
-	partTable, err := diskImg.GetPartitionTable()
-	if err != nil {
-		return fmt.Errorf("getting partition table: %w", err)
-	}
-
-	if err := partTable.Verify(diskImg.File, uint64(diskSize)); err != nil { //nolint:gosec
-		return fmt.Errorf("verifying partition table: %w", err)
-	}
-
-	espSpec := disk.FilesystemSpec{Partition: 1, FSType: filesystem.TypeFat32, VolumeLabel: "ESP"}
-	espFS, err := diskImg.CreateFilesystem(espSpec)
-	if err != nil {
-		return fmt.Errorf("creating filesystem %s: %w", espSpec.VolumeLabel, err)
-	}
-	espFS.(*fat32.FileSystem).SetLazy(true)
-
-	// NEED OEM as the disk label things don't work otherwise
-	backpackSpec := disk.FilesystemSpec{Partition: 2, FSType: filesystem.TypeFat32, VolumeLabel: "OEM"}
-	backpackFS, err := diskImg.CreateFilesystem(backpackSpec)
-	if err != nil {
-		return fmt.Errorf("creating filesystem %s: %w", backpackSpec.VolumeLabel, err)
-	}
-	backpackFS.(*fat32.FileSystem).SetLazy(true)
-
-	slog.Info("Copying /EFI to installer USB image", "fs", espFS.Label(), "control", b.Control.Name)
-	if err := diskFSCopyTree(workdir, "/EFI", espFS); err != nil {
+	slog.Info("Copying /EFI to installer image", "fs", fs1.Label(), "control", b.Control.Name)
+	if err := diskFSCopyTree(workdir, "/EFI", fs1); err != nil {
 		return fmt.Errorf("copying EFI dir: %w", err)
 	}
 
-	slog.Info("Copying /boot to installer USB image", "fs", espFS.Label(), "control", b.Control.Name)
-	if err := diskFSCopyTree(workdir, "/boot", espFS); err != nil {
+	slog.Info("Copying /boot to installer image", "fs", fs1.Label(), "control", b.Control.Name)
+	if err := diskFSCopyTree(workdir, "/boot", fs1); err != nil {
 		return fmt.Errorf("copying boot dir: %w", err)
 	}
 
-	slog.Info("Copying flatcar.cpio.gz to installer USB image", "fs", espFS.Label(), "control", b.Control.Name)
-	if err := diskFSCopyFile("/", filepath.Join(workdir, "flatcar_production_pxe_image.cpio.gz"), espFS); err != nil {
+	slog.Info("Copying /images to installer image", "fs", fs1.Label(), "control", b.Control.Name)
+	if err := diskFSCopyTree(workdir, "/images", fs1); err != nil {
+		return fmt.Errorf("copying images dir: %w", err)
+	}
+
+	slog.Info("Copying flatcar.cpio.gz to installer image", "fs", fs1.Label(), "control", b.Control.Name)
+	if err := diskFSCopyFile("/", filepath.Join(workdir, "flatcar_production_pxe_image.cpio.gz"), fs1); err != nil {
 		return fmt.Errorf("copying flatcar cpio: %w", err)
 	}
 
-	slog.Info("Copying oem.cpio.gz to installer USB image", "fs", espFS.Label(), "control", b.Control.Name)
-	if err := diskFSCopyFile("/", filepath.Join(workdir, "oem.cpio.gz"), espFS); err != nil {
+	slog.Info("Copying oem.cpio.gz to installer image", "fs", fs1.Label(), "control", b.Control.Name)
+	if err := diskFSCopyFile("/", filepath.Join(workdir, "oem.cpio.gz"), fs1); err != nil {
+		return fmt.Errorf("copying oem cpio: %w", err)
+	}
+	slog.Info("Copying oem.cpio.gz to installer image", "fs", fs1.Label(), "control", b.Control.Name)
+	if err := diskFSCopyFile("/", filepath.Join(workdir, "oem.cpio.gz"), fs1); err != nil {
 		return fmt.Errorf("copying oem cpio: %w", err)
 	}
 
-	slog.Info("Copying flatcar.vmlinuz to installer USB image", "fs", espFS.Label(), "control", b.Control.Name)
-	if err := diskFSCopyFile("/", filepath.Join(workdir, "flatcar_production_pxe.vmlinuz"), espFS); err != nil {
+	slog.Info("Copying flatcar.vmlinuz to installer image", "fs", fs1.Label(), "control", b.Control.Name)
+	if err := diskFSCopyFile("/", filepath.Join(workdir, "flatcar_production_pxe.vmlinuz"), fs1); err != nil {
 		return fmt.Errorf("copying flatcar vmlinuz: %w", err)
 	}
 
-	slog.Info("Copying flatcar.bin to installer USB image", "fs", backpackFS.Label(), "control", b.Control.Name)
-	if err := diskFSCopyFile("/", filepath.Join(workdir, "/flatcar_production_image.bin.bz2"), backpackFS); err != nil {
+	slog.Info("Copying flatcar.bin to installer image", "fs", fs2.Label(), "control", b.Control.Name)
+	if err := diskFSCopyFile("/", filepath.Join(workdir, "/flatcar_production_image.bin.bz2"), fs2); err != nil {
 		return fmt.Errorf("copying flatcar image: %w", err)
 	}
 
-	slog.Info("Copying control-install to installer USB image", "fs", backpackFS.Label(), "control", b.Control.Name)
-	if err := diskFSCopyTree(b.WorkDir, b.Control.Name+InstallSuffix, backpackFS); err != nil {
+	slog.Info("Copying control-install to installer image", "fs", fs2.Label(), "control", b.Control.Name)
+	if err := diskFSCopyTree(b.WorkDir, b.Control.Name+InstallSuffix, fs2); err != nil {
 		return fmt.Errorf("copying control-install: %w", err)
 	}
 
@@ -173,7 +213,7 @@ func (b *ControlInstallBuilder) buildUSBImage(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("creating ignition: %w", err)
 	}
-	ignFile, err := backpackFS.OpenFile(filepath.Join("/", ControlUSBIgnition), os.O_CREATE|os.O_RDWR|os.O_SYNC)
+	ignFile, err := fs2.OpenFile(filepath.Join("/", ControlUSBIgnition), os.O_CREATE|os.O_RDWR|os.O_SYNC)
 	if err != nil {
 		return fmt.Errorf("creating ignition file: %w", err)
 	}
@@ -181,14 +221,39 @@ func (b *ControlInstallBuilder) buildUSBImage(ctx context.Context) error {
 		return fmt.Errorf("writing ignition: %w", err)
 	}
 
-	if err := espFS.(*fat32.FileSystem).Commit(); err != nil {
-		return fmt.Errorf("commiting esp FS: %w", err)
-	}
-	if err := backpackFS.(*fat32.FileSystem).Commit(); err != nil {
-		return fmt.Errorf("commiting backpack FS: %w", err)
+	if b.Mode == BuildModeUSB {
+		if err := fs1.(*fat32.FileSystem).Commit(); err != nil {
+			return fmt.Errorf("commiting esp FS: %w", err)
+		}
+		if err := fs2.(*fat32.FileSystem).Commit(); err != nil {
+			return fmt.Errorf("commiting backpack FS: %w", err)
+		}
+	} else if b.Mode == BuildModeISO {
+		iso, ok := fs1.(*iso9660.FileSystem)
+		if !ok {
+			return fmt.Errorf("not an iso9660 filesystem") //nolint:goerr113
+		}
+
+		options := iso9660.FinalizeOptions{
+			VolumeIdentifier: "HH-MEDIA",
+			RockRidge:        true,
+			ElTorito: &iso9660.ElTorito{
+				Entries: []*iso9660.ElToritoEntry{
+					{
+						Platform:  iso9660.EFI,
+						Emulation: iso9660.NoEmulation,
+						BootFile:  "images/efi.img",
+					},
+				},
+			},
+		}
+
+		if err := iso.Finalize(options); err != nil {
+			return fmt.Errorf("Error finalizing ISO: %w", err)
+		}
 	}
 
-	slog.Info("Installer USB image completed", "control", b.Control.Name, "path", diskImgPath)
+	slog.Info("Installer image completed", "control", b.Control.Name, "path", diskImgPath)
 
 	return nil
 }
