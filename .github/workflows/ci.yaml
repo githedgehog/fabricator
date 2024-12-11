@@ -78,8 +78,9 @@ jobs:
           - ubuntu-24.04-arm64-4-core
           - macos-latest
         buildmode:
-          - "--usb=false"
-          - "--usb=true"
+          - "--mode=manual"
+          - "--mode=usb"
+          - "--mode=iso"
 
     steps:
       - name: Checkout repository
@@ -198,14 +199,18 @@ jobs:
         includeonie:
           - "--include-onie=false"
         buildmode:
-          - "--usb=true"
+          - "--mode=usb"
+          - "--mode=iso"
         include:
           - fabricmode: spine-leaf
             includeonie: "--include-onie=false"
-            buildmode: "--usb=false"
+            buildmode: "--mode=manual"
           - fabricmode: spine-leaf
             includeonie: "--include-onie=true"
-            buildmode: "--usb=true"
+            buildmode: "--mode=usb"
+          - fabricmode: spine-leaf
+            includeonie: "--include-onie=true"
+            buildmode: "--mode=iso"
 
     steps:
       - name: Runner host

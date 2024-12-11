@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"slices"
 
 	"go.githedgehog.com/fabricator/pkg/artificer"
 	"go.githedgehog.com/fabricator/pkg/fab/recipe"
@@ -14,7 +15,7 @@ import (
 
 type BuildOpts struct {
 	HydrateMode HydrateMode
-	USBImage    bool
+	BuildMode   recipe.BuildMode
 	// JoinToken   string // TODO to use specific k3s join token
 }
 
@@ -28,6 +29,10 @@ func Build(ctx context.Context, workDir, cacheDir string, opts BuildOpts) error 
 }
 
 func (c *Config) build(ctx context.Context, opts BuildOpts) error {
+	if !slices.Contains(recipe.BuildModes, opts.BuildMode) {
+		return fmt.Errorf("invalid build mode %q", opts.BuildMode) //nolint:goerr113
+	}
+
 	d, err := artificer.NewDownloaderWithDockerCreds(c.CacheDir, c.Repo, c.Prefix)
 	if err != nil {
 		return fmt.Errorf("creating downloader: %w", err)
@@ -41,7 +46,7 @@ func (c *Config) build(ctx context.Context, opts BuildOpts) error {
 			Fab:        c.Fab,
 			Control:    control,
 			Wiring:     c.Wiring,
-			USBImage:   opts.USBImage,
+			Mode:       opts.BuildMode,
 			Downloader: d,
 		}).Build(ctx); err != nil {
 			return fmt.Errorf("building control node %s installer: %w", control.Name, err)

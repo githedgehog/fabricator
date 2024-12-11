@@ -279,8 +279,13 @@ func (c *ControlInstall) installK8s(ctx context.Context) (client.Client, error) 
 		return nil, fmt.Errorf("writing file %q: %w", k3s.KubeRegistriesPath, err)
 	}
 
+	k3sInstall := "./" + k3s.InstallName
+	if err := os.Chmod(k3sInstall, 0o755); err != nil {
+		return nil, fmt.Errorf("chmod k3s install: %w", err)
+	}
+
 	slog.Debug("Running k3s install")
-	cmd := exec.CommandContext(ctx, "./"+k3s.InstallName, "--disable=servicelb,traefik") //nolint:gosec
+	cmd := exec.CommandContext(ctx, k3sInstall, "--disable=servicelb,traefik")
 	cmd.Env = append(os.Environ(),
 		"INSTALL_K3S_SKIP_DOWNLOAD=true",
 		"INSTALL_K3S_BIN_DIR=/opt/bin",

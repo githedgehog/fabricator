@@ -31,7 +31,7 @@ var Versions = fabapi.Versions{
 		API:            FabricatorVersion,
 		Controller:     FabricatorVersion,
 		Ctl:            FabricatorVersion,
-		ControlUSBRoot: "v4081.2.0-hh1",
+		ControlUSBRoot: "v4081.2.0-hh2",
 	},
 	Fabric: fabapi.FabricVersions{
 		API:        FabricVersion,

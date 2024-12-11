@@ -29,6 +29,7 @@ systemd:
 
         [Service]
         Type=simple
+        ExecStartPre=chmod +x {{ .AutoInstall }}/hhfab-recipe
         ExecStart={{ .AutoInstall }}/hhfab-recipe control install -v
         WorkingDirectory={{ .AutoInstall }}
         Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/bin" "HOME=/home/core"

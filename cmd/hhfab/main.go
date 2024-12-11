@@ -20,6 +20,7 @@ import (
 	"github.com/urfave/cli/v2"
 	"go.githedgehog.com/fabric/api/meta"
 	"go.githedgehog.com/fabricator/pkg/fab"
+	"go.githedgehog.com/fabricator/pkg/fab/recipe"
 	"go.githedgehog.com/fabricator/pkg/hhfab"
 	"go.githedgehog.com/fabricator/pkg/version"
 	"gopkg.in/natefinch/lumberjack.v2"
@@ -47,7 +48,7 @@ const (
 	FlagNameKillStale             = "kill-stale"
 	FlagNameControlsRestricted    = "controls-restricted"
 	FlagNameServersRestricted     = "servers-restricted"
-	FlagNameControlsUSB           = "controls-usb"
+	FlagNameBuildMode             = "build-mode"
 	FlagNameControlUpgrade        = "control-upgrade"
 	FlagNameFailFast              = "fail-fast"
 	FlagNameReady                 = "ready"
@@ -288,6 +289,11 @@ func Run(ctx context.Context) error {
 		onReadyCommands = append(onReadyCommands, string(cmd))
 	}
 
+	buildModes := []string{}
+	for _, m := range recipe.BuildModes {
+		buildModes = append(buildModes, string(m))
+	}
+
 	cli.VersionFlag.(*cli.BoolFlag).Aliases = []string{"V"}
 	app := &cli.App{
 		Name:  "hhfab",
@@ -484,19 +490,19 @@ func Run(ctx context.Context) error {
 				Name:  "build",
 				Usage: "build installers",
 				Flags: append(defaultFlags, hMode,
-					&cli.BoolFlag{
-						Name:    FlagNameControlsUSB,
-						Aliases: []string{"usb"},
-						Usage:   "use installer USB image for control node(s)",
-						EnvVars: []string{"HHFAB_CONTROL_USB"},
-						Value:   true,
+					&cli.StringFlag{
+						Name:    FlagNameBuildMode,
+						Aliases: []string{"mode", "m"},
+						Usage:   "build mode: one of " + strings.Join(buildModes, ", "),
+						EnvVars: []string{"HHFAB_BUILD_MODE"},
+						Value:   string(recipe.BuildModeUSB),
 					},
 				),
 				Before: before(false),
 				Action: func(c *cli.Context) error {
 					if err := hhfab.Build(ctx, workDir, cacheDir, hhfab.BuildOpts{
 						HydrateMode: hhfab.HydrateMode(hydrateMode),
-						USBImage:    c.Bool(FlagNameControlsUSB),
+						BuildMode:   recipe.BuildMode(c.String(FlagNameBuildMode)),
 					}); err != nil {
 						return fmt.Errorf("building: %w", err)
 					}
@@ -560,12 +566,12 @@ func Run(ctx context.Context) error {
 								EnvVars: []string{"HHFAB_SERVERS_RESTRICTED"},
 								Value:   true,
 							},
-							&cli.BoolFlag{
-								Name:    FlagNameControlsUSB,
-								Aliases: []string{"usb"},
-								Usage:   "use installer USB image for control node(s)",
-								EnvVars: []string{"HHFAB_CONTROL_USB"},
-								Value:   false,
+							&cli.StringFlag{
+								Name:    FlagNameBuildMode,
+								Aliases: []string{"mode", "m"},
+								Usage:   "build mode: one of " + strings.Join(buildModes, ", "),
+								EnvVars: []string{"HHFAB_BUILD_MODE"},
+								Value:   string(recipe.BuildModeUSB),
 							},
 							&cli.BoolFlag{
 								Name:    FlagNameControlUpgrade,
@@ -589,12 +595,12 @@ func Run(ctx context.Context) error {
 							if err := hhfab.VLABUp(ctx, workDir, cacheDir, hhfab.VLABUpOpts{
 								HydrateMode: hhfab.HydrateMode(hydrateMode),
 								ReCreate:    false, // TODO flag
-								USBImage:    c.Bool(FlagNameControlsUSB),
+								BuildMode:   recipe.BuildMode(c.String(FlagNameBuildMode)),
 								VLABRunOpts: hhfab.VLABRunOpts{
 									KillStale:          c.Bool(FlagNameKillStale),
 									ControlsRestricted: c.Bool(FlagNameControlsRestricted),
 									ServersRestricted:  c.Bool(FlagNameServersRestricted),
-									ControlUSB:         c.Bool(FlagNameControlsUSB),
+									BuildMode:          recipe.BuildMode(c.String(FlagNameBuildMode)),
 									ControlUpgrade:     c.Bool(FlagNameControlUpgrade),
 									FailFast:           c.Bool(FlagNameFailFast),
 									OnReady:            c.StringSlice(FlagNameReady),

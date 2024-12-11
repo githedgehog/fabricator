@@ -46,6 +46,7 @@ const (
 	VLABEFICodeFile  = "efi_code.fd"
 	VLABEFIVarsFile  = "efi_vars.fd"
 	VLABUSBImageFile = "usb.img"
+	VLABISOImageFile = "usb.iso"
 
 	VLABSerialLog  = "serial.log"
 	VLABSerialSock = "serial.sock"
@@ -77,7 +78,7 @@ type VLABRunOpts struct {
 	KillStale          bool
 	ControlsRestricted bool
 	ServersRestricted  bool
-	ControlUSB         bool
+	BuildMode          recipe.BuildMode
 	ControlUpgrade     bool
 	FailFast           bool
 	OnReady            []string
@@ -199,7 +200,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 			}
 
 			resize := false
-			if vm.Type == VMTypeControl && !opts.ControlUSB || vm.Type == VMTypeServer {
+			if vm.Type == VMTypeControl && opts.BuildMode == recipe.BuildModeManual || vm.Type == VMTypeServer {
 				resize = true
 
 				if err := d.FromORAS(ctx, vmDir, vlabcomp.FlatcarRef, vlabcomp.FlatcarVersion(c.Fab), []artificer.ORASFile{
@@ -218,7 +219,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 				}); err != nil {
 					return fmt.Errorf("copying flatcar files: %w", err)
 				}
-			} else if vm.Type == VMTypeControl && opts.ControlUSB {
+			} else if vm.Type == VMTypeControl && (opts.BuildMode == recipe.BuildModeUSB || opts.BuildMode == recipe.BuildModeISO) {
 				if err := d.FromORAS(ctx, vmDir, vlabcomp.FlatcarRef, vlabcomp.FlatcarVersion(c.Fab), []artificer.ORASFile{
 					{
 						Name:   "flatcar_efi_code.fd",
@@ -238,11 +239,17 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 					return fmt.Errorf("creating empty os image: %w", err)
 				}
 
+				source, target := "", ""
+				if opts.BuildMode == recipe.BuildModeUSB {
+					source, target = vm.Name+recipe.InstallUSBImageSuffix, VLABUSBImageFile
+				} else if opts.BuildMode == recipe.BuildModeISO {
+					source, target = vm.Name+recipe.InstallISOImageSuffix, VLABISOImageFile
+				}
 				if err := artificer.CopyFile(
-					filepath.Join(c.WorkDir, ResultDir, vm.Name+recipe.InstallUSBImageSuffix),
-					filepath.Join(vmDir, VLABUSBImageFile),
+					filepath.Join(c.WorkDir, ResultDir, source),
+					filepath.Join(vmDir, target),
 				); err != nil {
-					return fmt.Errorf("copying usb image: %w", err)
+					return fmt.Errorf("copying image: %w", err)
 				}
 			} else if vm.Type == VMTypeSwitch {
 				resize = true
@@ -305,7 +312,8 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 				"-smp", fmt.Sprintf("%d", vm.Size.CPU),
 				"-object", "rng-random,filename=/dev/urandom,id=rng0",
 				"-device", "virtio-rng-pci,rng=rng0",
-				"-drive", "if=virtio,file=os.img,index=0",
+				"-drive", "if=none,file=os.img,id=disk1",
+				"-device", "virtio-blk-pci,drive=disk1,bootindex=1",
 				"-drive", "if=pflash,file=efi_code.fd,format=raw,readonly=on",
 				"-drive", "if=pflash,file=efi_vars.fd,format=raw",
 				"-display", "none",
@@ -321,7 +329,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 			// -daemonize
 			// -pidfile
 
-			if vm.Type == VMTypeControl && !opts.ControlUSB || vm.Type == VMTypeServer {
+			if vm.Type == VMTypeControl && opts.BuildMode == recipe.BuildModeManual || vm.Type == VMTypeServer {
 				ign := VLABIgnition
 				if vm.Type == VMTypeControl {
 					ign = filepath.Join(c.WorkDir, ResultDir, vm.Name+recipe.InstallIgnitionSuffix)
@@ -331,9 +339,18 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 				)
 			}
 
-			if vm.Type == VMTypeControl && opts.ControlUSB {
+			if vm.Type == VMTypeControl && opts.BuildMode == recipe.BuildModeUSB {
 				args = append(args,
-					"-drive", fmt.Sprintf("if=virtio,file=%s,format=raw,index=1", VLABUSBImageFile),
+					"-drive", fmt.Sprintf("if=none,format=raw,file=%s,id=disk2", VLABUSBImageFile),
+					"-device", "virtio-blk-pci,drive=disk2,bootindex=2",
+				)
+			}
+
+			if vm.Type == VMTypeControl && opts.BuildMode == recipe.BuildModeISO {
+				args = append(args,
+					"-device", "virtio-scsi-pci,id=scsi0",
+					"-device", "scsi-cd,bus=scsi0.0,drive=cdrom0,bootindex=2",
+					"-drive", fmt.Sprintf("id=cdrom0,if=none,readonly=on,file=%s", VLABISOImageFile),
 				)
 			}
 
@@ -653,7 +670,7 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 			return fmt.Errorf("trying toolbox: %w", err)
 		}
 	} else if vm.Type == VMTypeControl {
-		if !opts.ControlUSB || opts.ControlUpgrade {
+		if opts.BuildMode == recipe.BuildModeManual || opts.ControlUpgrade {
 			marker, err := sshReadMarker(sftp)
 			if err != nil && !errors.Is(err, os.ErrNotExist) {
 				return fmt.Errorf("checking for install marker: %w", err)

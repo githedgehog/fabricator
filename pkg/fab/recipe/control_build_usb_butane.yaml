@@ -1,12 +1,6 @@
 variant: flatcar
 version: 1.1.0
 storage:
-  filesystems:
-    - path: /mnt/hedgehog
-      device: /dev/disk/by-label/OEM
-      with_mount_unit: true
-      wipe_filesystem: false
-      format: vfat
   files:
     - path: /opt/hedgehog/hhfab-flatcar-install
       overwrite: true
@@ -33,3 +27,15 @@ systemd:
 
         [Install]
         WantedBy=default.target
+    - name: mnt-hedgehog.mount
+      enabled: true
+      contents: |
+        [Unit]
+        Before=local-fs.target
+        [Mount]
+        What=/dev/disk/by-label/HH-MEDIA
+        Where=/mnt/hedgehog
+        [Install]
+        WantedBy=local-fs.target
+        RequiredBy=flatcar-install.service
+
