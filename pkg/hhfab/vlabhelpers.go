@@ -18,6 +18,8 @@ import (
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/hhfctl"
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
+	"go.githedgehog.com/fabricator/pkg/pdu-mgt/netio"
+	"go.githedgehog.com/fabricator/pkg/pdu-mgt/utils"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -248,7 +250,12 @@ func (c *Config) VLABPower(ctx context.Context, name string, action string) erro
 
 	// Populate entries
 	for _, sw := range switches.Items {
+		// Skip if the name is not "--all" and doesn't match sw.Name
+		if name != "--all" && sw.Name != name {
+			continue
+		}
 		powerInfo := hhfctl.GetPowerInfo(ctx, sw.Name)
+		slog.Debug("Switch", "sw", sw.Name, "annotations", fmt.Sprintf("%v", powerInfo))
 
 		entry := VLABPowerInfo{
 			SwitchPSUs: powerInfo,
@@ -256,11 +263,15 @@ func (c *Config) VLABPower(ctx context.Context, name string, action string) erro
 		entries[sw.Name] = entry
 	}
 
-	// Action Power
+	// Power action request to PDU API
 	for swName, entry := range entries {
-		fmt.Printf("Switch: %s\n", swName)
 		for psuName, url := range entry.SwitchPSUs {
-			fmt.Printf("\tPSU: %s, URL: %s\n", psuName, url)
+			outletID := utils.ExtractOutletID(url)
+			pduIP := utils.GetPDUIPFromURL(url)
+			slog.Info("Performing power", "action", action, "on switch", swName, "psu", psuName)
+			if err := netio.ControlOutlet(pduIP, "user", "password", outletID, action); err != nil { // TODO integrate creds with FabConfig
+				return fmt.Errorf("failed to power %s switch %s %s: %w", action, swName, psuName, err)
+			}
 		}
 	}
 
