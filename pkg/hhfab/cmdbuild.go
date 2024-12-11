@@ -15,6 +15,7 @@ import (
 type BuildOpts struct {
 	HydrateMode HydrateMode
 	USBImage    bool
+	ISOImage    bool
 	// JoinToken   string // TODO to use specific k3s join token
 }
 

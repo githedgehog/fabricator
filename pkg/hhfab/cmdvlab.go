@@ -62,6 +62,7 @@ type VLABUpOpts struct {
 	NoCreate    bool
 	ReCreate    bool
 	USBImage    bool
+	ISOImage    bool
 	VLABRunOpts
 }
 

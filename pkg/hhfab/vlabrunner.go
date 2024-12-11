@@ -78,6 +78,7 @@ type VLABRunOpts struct {
 	ControlsRestricted bool
 	ServersRestricted  bool
 	ControlUSB         bool
+	ControlISO         bool
 	ControlUpgrade     bool
 	FailFast           bool
 	OnReady            []string

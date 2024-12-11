@@ -48,6 +48,7 @@ const (
 	FlagNameControlsRestricted    = "controls-restricted"
 	FlagNameServersRestricted     = "servers-restricted"
 	FlagNameControlsUSB           = "controls-usb"
+	FlagNameControlsISO           = "controls-iso"
 	FlagNameControlUpgrade        = "control-upgrade"
 	FlagNameFailFast              = "fail-fast"
 	FlagNameReady                 = "ready"
@@ -491,12 +492,20 @@ func Run(ctx context.Context) error {
 						EnvVars: []string{"HHFAB_CONTROL_USB"},
 						Value:   true,
 					},
+					&cli.BoolFlag{
+						Name:    FlagNameControlsISO,
+						Aliases: []string{"iso"},
+						Usage:   "use installer iso image for control node(s)",
+						EnvVars: []string{"HHFAB_CONTROL_ISO"},
+						Value:   false,
+					},
 				),
 				Before: before(false),
 				Action: func(c *cli.Context) error {
 					if err := hhfab.Build(ctx, workDir, cacheDir, hhfab.BuildOpts{
 						HydrateMode: hhfab.HydrateMode(hydrateMode),
 						USBImage:    c.Bool(FlagNameControlsUSB),
+						ISOImage:    c.Bool(FlagNameControlsISO),
 					}); err != nil {
 						return fmt.Errorf("building: %w", err)
 					}
@@ -568,6 +577,13 @@ func Run(ctx context.Context) error {
 								Value:   false,
 							},
 							&cli.BoolFlag{
+								Name:    FlagNameControlsISO,
+								Aliases: []string{"iso"},
+								Usage:   "use installer ISO image for control node(s)",
+								EnvVars: []string{"HHFAB_CONTROL_ISO"},
+								Value:   false,
+							},
+							&cli.BoolFlag{
 								Name:    FlagNameControlUpgrade,
 								Aliases: []string{"upgrade"},
 								Usage:   "force upgrade control node(s), expected to use after initial successful installation",
@@ -590,11 +606,13 @@ func Run(ctx context.Context) error {
 								HydrateMode: hhfab.HydrateMode(hydrateMode),
 								ReCreate:    false, // TODO flag
 								USBImage:    c.Bool(FlagNameControlsUSB),
+								ISOImage:    c.Bool(FlagNameControlsISO),
 								VLABRunOpts: hhfab.VLABRunOpts{
 									KillStale:          c.Bool(FlagNameKillStale),
 									ControlsRestricted: c.Bool(FlagNameControlsRestricted),
 									ServersRestricted:  c.Bool(FlagNameServersRestricted),
 									ControlUSB:         c.Bool(FlagNameControlsUSB),
+									ControlISO:         c.Bool(FlagNameControlsISO),
 									ControlUpgrade:     c.Bool(FlagNameControlUpgrade),
 									FailFast:           c.Bool(FlagNameFailFast),
 									OnReady:            c.StringSlice(FlagNameReady),
