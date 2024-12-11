@@ -62,5 +62,8 @@ func GetFabAndControls(ctx context.Context, kube client.Reader, allowNotHydrated
 		return cmp.Compare(a.Name, b.Name)
 	})
 
+	f.APIVersion = fabapi.GroupVersion.String()
+	f.Kind = fabapi.KindFabricator
+
 	return *f, controls.Items, nil
 }

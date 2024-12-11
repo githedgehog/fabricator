@@ -203,7 +203,16 @@ func (b *ControlInstallBuilder) Build(ctx context.Context) error {
 			Name: fabric.CtlBinName,
 		},
 	}); err != nil {
-		return fmt.Errorf("downloading fabricctl: %w", err)
+		return fmt.Errorf("downloading hhfctl: %w", err)
+	}
+
+	// TODO remove if it'll be managed by control agent?
+	if err := b.Downloader.FromORAS(ctx, installDir, f8r.CtlRef, b.Fab.Status.Versions.Fabricator.Ctl, []artificer.ORASFile{
+		{
+			Name: f8r.CtlBinName,
+		},
+	}); err != nil {
+		return fmt.Errorf("downloading hhfabctl: %w", err)
 	}
 
 	if b.Fab.Spec.Config.Registry.IsAirgap() {

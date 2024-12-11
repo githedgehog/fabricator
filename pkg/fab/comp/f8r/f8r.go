@@ -18,6 +18,11 @@ const (
 	CtrlRef      = "fabricator/fabricator"
 	CtrlChartRef = "fabricator/charts/fabricator"
 	APIChartRef  = "fabricator/charts/fabricator-api"
+	CtlRef       = "fabricator/hhfabctl"
+
+	BinDir         = "/opt/bin"
+	CtlBinName     = "hhfabctl"
+	CtlDestBinName = "kubectl-hhfab"
 )
 
 //go:embed values.tmpl.yaml
@@ -75,6 +80,7 @@ func Artifacts(cfg fabapi.Fabricator) (comp.OCIArtifacts, error) {
 		APIChartRef:  cfg.Status.Versions.Fabricator.API,
 		CtrlRef:      cfg.Status.Versions.Fabricator.Controller,
 		CtrlChartRef: cfg.Status.Versions.Fabricator.Controller,
+		CtlRef:       cfg.Status.Versions.Fabricator.Ctl,
 	}, nil
 }
 

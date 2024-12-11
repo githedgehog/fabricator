@@ -60,6 +60,9 @@ gen: _kube_gen _hhfab_embed _crd_ref_docs
 hhfab-build: _license_headers _gotools _kube_gen _hhfab_embed && version
   {{go_linux_build}} -o ./bin/hhfab ./cmd/hhfab
 
+hhfabctl-build: _license_headers _gotools _kube_gen && version
+  {{go_linux_build}} -o ./bin/hhfabctl ./cmd/hhfabctl
+
 # Build hhfab for local OS/Arch
 hhfab-build-local: _license_headers _gotools _kube_gen _hhfab_embed && version
   {{go_build}} -o ./bin/hhfab ./cmd/hhfab
@@ -68,11 +71,15 @@ _hhfab-build GOOS GOARCH: _license_headers _gotools _kube_gen _hhfab_embed
   GOOS={{GOOS}} GOARCH={{GOARCH}} {{go_build}} -o ./bin/hhfab-{{GOOS}}-{{GOARCH}}/hhfab ./cmd/hhfab
   cd bin && tar -czvf hhfab-{{GOOS}}-{{GOARCH}}-{{version}}.tar.gz hhfab-{{GOOS}}-{{GOARCH}}/hhfab
 
+_hhfabctl-build GOOS GOARCH: _license_headers _gotools _kube_gen
+  GOOS={{GOOS}} GOARCH={{GOARCH}} {{go_build}} -o ./bin/hhfabctl-{{GOOS}}-{{GOARCH}}/hhfabctl ./cmd/hhfabctl
+  cd bin && tar -czvf hhfabctl-{{GOOS}}-{{GOARCH}}-{{version}}.tar.gz hhfabctl-{{GOOS}}-{{GOARCH}}/hhfabctl
+
 # Build hhfab and other user-facing binaries for all supported OS/Arch
-build-multi: (_hhfab-build "linux" "amd64") (_hhfab-build "linux" "arm64") (_hhfab-build "darwin" "amd64") (_hhfab-build "darwin" "arm64") && version
+build-multi: (_hhfab-build "linux" "amd64") (_hhfab-build "linux" "arm64") (_hhfab-build "darwin" "amd64") (_hhfab-build "darwin" "arm64") (_hhfabctl-build "linux" "amd64") (_hhfabctl-build "linux" "arm64") (_hhfabctl-build "darwin" "amd64") (_hhfabctl-build "darwin" "arm64") && version
 
 # Build all artifacts
-build: _license_headers _gotools hhfab-build && version
+build: _license_headers _gotools hhfab-build hhfabctl-build && version
   {{go_linux_build}} -o ./bin/fabricator ./cmd
   # Build complete
 
@@ -105,15 +112,27 @@ kube-build: build (_docker-build "fabricator") _helm-fabricator-api _helm-fabric
 kube-push: kube-build (_helm-push "fabricator-api") (_kube-push "fabricator") (_helm-push "ntp") && version
   # Docker images and Helm charts pushed
 
-# Push all K8s artifacts (images and charts) and binaries
-push: kube-push _oras && version
+_hhfab-push-main: _oras hhfab-build && version
   cd bin && oras push {{oras_insecure}} {{oci_repo}}/{{oci_prefix}}/hhfab:{{version}} hhfab
+
+_hhfabctl-push-main: _oras hhfabctl-build && version
+  cd bin && oras push {{oras_insecure}} {{oci_repo}}/{{oci_prefix}}/hhfabctl:{{version}} hhfabctl
+
+# Push all K8s artifacts (images and charts) and binaries
+push: kube-push _hhfab-push-main _hhfabctl-push-main && version
 
 _hhfab-push GOOS GOARCH: _oras (_hhfab-build GOOS GOARCH)
   cd bin/hhfab-{{GOOS}}-{{GOARCH}} && oras push {{oras_insecure}} {{oci_repo}}/{{oci_prefix}}/hhfab-{{GOOS}}-{{GOARCH}}:{{version}} hhfab
 
+_hhfabctl-push GOOS GOARCH: _oras (_hhfabctl-build GOOS GOARCH)
+  cd bin/hhfabctl-{{GOOS}}-{{GOARCH}} && oras push {{oras_insecure}} {{oci_repo}}/{{oci_prefix}}/hhfabctl-{{GOOS}}-{{GOARCH}}:{{version}} hhfabctl
+
+_hhfab-push-multi: (_hhfab-push "linux" "amd64") (_hhfab-push "linux" "arm64") (_hhfab-push "darwin" "amd64") (_hhfab-push "darwin" "arm64")
+
+_hhfabctl-push-multi: (_hhfabctl-push "linux" "amd64") (_hhfabctl-push "linux" "arm64") (_hhfabctl-push "darwin" "amd64") (_hhfabctl-push "darwin" "arm64")
+
 # Publish hhfab and other user-facing binaries for all supported OS/Arch
-push-multi: (_hhfab-push "linux" "amd64") (_hhfab-push "linux" "arm64") (_hhfab-push "darwin" "amd64") (_hhfab-push "darwin" "arm64") && version
+push-multi: _hhfab-push-multi _hhfabctl-push-multi && version
 
 # Install API on a kind cluster and wait for CRDs to be ready
 test-api: _helm-fabricator-api
@@ -135,9 +154,10 @@ patch: && version
 # Setup local registry
 #
 zot_version := "v2.1.1"
-zot := localbin / "zot" + "-" + zot_version
-zot_os := "linux"
-zot_arch := "amd64"
+zot_os := `hack/os.sh`
+zot_arch := `hack/arch.sh`
+zot := localbin / "zot" + "-" + zot_os + "-" + zot_arch + "-" + zot_version
+
 @_zot: _localbin
   [ -f {{zot}} ] || wget --quiet -O {{zot}} https://github.com/project-zot/zot/releases/download/{{zot_version}}/zot-{{zot_os}}-{{zot_arch}} && chmod +x {{zot}}
 

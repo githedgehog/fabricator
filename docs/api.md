@@ -411,6 +411,7 @@ _Appears in:_
 | `api` _[Version](#version)_ |  |  |  |
 | `controller` _[Version](#version)_ |  |  |  |
 | `controlISORoot` _[Version](#version)_ |  |  |  |
+| `ctl` _[Version](#version)_ |  |  |  |
 
 
 #### PlatformVersions
