@@ -112,10 +112,14 @@ kube-build: build (_docker-build "fabricator") _helm-fabricator-api _helm-fabric
 kube-push: kube-build (_helm-push "fabricator-api") (_kube-push "fabricator") (_helm-push "ntp") && version
   # Docker images and Helm charts pushed
 
-# Push all K8s artifacts (images and charts) and binaries
-push: kube-push _oras && version
+_hhfab-push-main: _oras hhfab-build && version
   cd bin && oras push {{oras_insecure}} {{oci_repo}}/{{oci_prefix}}/hhfab:{{version}} hhfab
+
+_hhfabctl-push-main: _oras hhfabctl-build && version
   cd bin && oras push {{oras_insecure}} {{oci_repo}}/{{oci_prefix}}/hhfabctl:{{version}} hhfabctl
+
+# Push all K8s artifacts (images and charts) and binaries
+push: kube-push _hhfab-push-main _hhfabctl-push-main && version
 
 _hhfab-push GOOS GOARCH: _oras (_hhfab-build GOOS GOARCH)
   cd bin/hhfab-{{GOOS}}-{{GOARCH}} && oras push {{oras_insecure}} {{oci_repo}}/{{oci_prefix}}/hhfab-{{GOOS}}-{{GOARCH}}:{{version}} hhfab
