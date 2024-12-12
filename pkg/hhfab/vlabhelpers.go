@@ -276,7 +276,7 @@ func (c *Config) VLABPower(ctx context.Context, name string, action string, pduC
 				continue
 			}
 			slog.Info("Performing power", "action", action, "on switch", swName, "psu", psuName)
-			if err := netio.ControlOutlet(pduIP, creds.User, creds.Password, outletID, action); err != nil {
+			if err := netio.ControlOutlet(ctx, pduIP, creds.User, creds.Password, outletID, action); err != nil {
 				return fmt.Errorf("failed to power %s switch %s %s: %w", action, swName, psuName, err)
 			}
 		}

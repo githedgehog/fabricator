@@ -76,12 +76,9 @@ func GetStatus(pduIP, username, password string) (*NetioResponse, error) {
 	return &netioResp, nil
 }
 
-func ControlOutlet(pduIP, username, password string, outletID int, action string) error {
+func ControlOutlet(ctx context.Context, pduIP, username, password string, outletID int, action string) error {
 	url := fmt.Sprintf("http://%s/netio.json", pduIP)
 	data := fmt.Sprintf(`{"Outputs":[{"ID":%d,"Action":%d}]}`, outletID, actionMap[action])
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, "POST", url, strings.NewReader(data))
 	if err != nil {
