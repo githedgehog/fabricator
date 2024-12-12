@@ -54,6 +54,7 @@ const (
 	InstallIgnitionSuffix        = InstallSuffix + ".ign"
 	InstallUSBImageWorkdirSuffix = InstallSuffix + "-usb.wip"
 	InstallUSBImageSuffix        = InstallSuffix + "-usb.img"
+	InstallISOImageSuffix        = InstallSuffix + "-usb.iso"
 	InstallHashSuffix            = InstallSuffix + ".inhash"
 	RecipeBin                    = "hhfab-recipe"
 )

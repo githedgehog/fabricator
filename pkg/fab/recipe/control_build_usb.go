@@ -15,6 +15,7 @@ import (
 	"github.com/diskfs/go-diskfs/disk"
 	"github.com/diskfs/go-diskfs/filesystem"
 	"github.com/diskfs/go-diskfs/filesystem/fat32"
+	"github.com/diskfs/go-diskfs/filesystem/iso9660"
 	"github.com/diskfs/go-diskfs/partition/gpt"
 	"go.githedgehog.com/fabricator/pkg/artificer"
 	"go.githedgehog.com/fabricator/pkg/embed/flatcaroem"
@@ -189,6 +190,116 @@ func (b *ControlInstallBuilder) buildUSBImage(ctx context.Context) error {
 	}
 
 	slog.Info("Installer USB image completed", "control", b.Control.Name, "path", diskImgPath)
+
+	return nil
+}
+
+func (b *ControlInstallBuilder) buildISOImage(ctx context.Context) error {
+
+	if b.Control.Spec.Bootstrap.Disk == "" {
+		return fmt.Errorf("no disk specified for control %q", b.Control.Name) //nolint:goerr113
+	}
+	if b.Control.Spec.Management.IP == "" {
+		return fmt.Errorf("no management IP specified for control %q", b.Control.Name) //nolint:goerr113
+	}
+	if b.Control.Spec.Management.Interface == "" {
+		return fmt.Errorf("no management interface specified for control %q", b.Control.Name) //nolint:goerr113
+	}
+	if b.Control.Spec.External.IP == "" {
+		return fmt.Errorf("no external IP specified for control %q", b.Control.Name) //nolint:goerr113
+	}
+	if b.Control.Spec.External.Interface == "" {
+		return fmt.Errorf("no external interface specified for control %q", b.Control.Name) //nolint:goerr113
+	}
+
+	slog.Info("Building installer USB image, may take up to 5-10 minutes", "control", b.Control.Name)
+
+	workdir := filepath.Join(b.WorkDir, b.Control.Name+InstallUSBImageWorkdirSuffix)
+
+	if err := os.MkdirAll(workdir, 0o700); err != nil {
+		return fmt.Errorf("creating workdir %q: %w", workdir, err)
+	}
+	if err := b.Downloader.FromORAS(ctx, workdir, ControlUSBRootRef, b.Fab.Status.Versions.Fabricator.ControlUSBRoot, []artificer.ORASFile{
+		{Name: "boot"},
+		{Name: "EFI"},
+		{Name: "images"},
+		{Name: "flatcar_production_image.bin.bz2"},
+		{Name: "flatcar_production_pxe_image.cpio.gz"},
+		{Name: "flatcar_production_pxe.vmlinuz"},
+	}); err != nil {
+		return fmt.Errorf("downloading ISO root: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(workdir, "oem.cpio.gz"), flatcaroem.Bytes(), 0o644); err != nil { //nolint:gosec
+		return fmt.Errorf("writing oem cpio: %w", err)
+	}
+
+	var LogicalBlocksize diskfs.SectorSize = 2048
+	diskImgPath := filepath.Join(b.WorkDir, b.Control.Name+InstallISOImageSuffix)
+	diskImg, err := diskfs.Create(diskImgPath, diskSize, diskfs.Raw, LogicalBlocksize)
+	if err != nil {
+		return fmt.Errorf("creating disk image: %w", err)
+	}
+	// Create the ISO filesystem on the disk image
+	fspec := disk.FilesystemSpec{
+		Partition:   0,
+		FSType:      filesystem.TypeISO9660,
+		VolumeLabel: "hh-media",
+	}
+	isoFS, err := diskImg.CreateFilesystem(fspec)
+	slog.Info("Copying /EFI to installer USB image", "fs", isoFS.Label(), "control", b.Control.Name)
+	if err := diskFSCopyTree(workdir, "/EFI", isoFS); err != nil {
+		return fmt.Errorf("copying EFI dir: %w", err)
+	}
+
+	slog.Info("Copying /boot to installer USB image", "fs", isoFS.Label(), "control", b.Control.Name)
+	if err := diskFSCopyTree(workdir, "/boot", isoFS); err != nil {
+		return fmt.Errorf("copying boot dir: %w", err)
+	}
+
+	slog.Info("Copying flatcar.cpio.gz to installer USB image", "fs", isoFS.Label(), "control", b.Control.Name)
+	if err := diskFSCopyFile("/", filepath.Join(workdir, "flatcar_production_pxe_image.cpio.gz"), isoFS); err != nil {
+		return fmt.Errorf("copying flatcar cpio: %w", err)
+	}
+
+	slog.Info("Copying oem.cpio.gz to installer USB image", "fs", isoFS.Label(), "control", b.Control.Name)
+	if err := diskFSCopyFile("/", filepath.Join(workdir, "oem.cpio.gz"), isoFS); err != nil {
+		return fmt.Errorf("copying oem cpio: %w", err)
+	}
+
+	slog.Info("Copying flatcar.vmlinuz to installer USB image", "fs", isoFS.Label(), "control", b.Control.Name)
+	if err := diskFSCopyFile("/", filepath.Join(workdir, "flatcar_production_pxe.vmlinuz"), isoFS); err != nil {
+		return fmt.Errorf("copying flatcar vmlinuz: %w", err)
+	}
+
+	slog.Info("Copying flatcar.bin to installer USB image", "fs", isoFS.Label(), "control", b.Control.Name)
+	if err := diskFSCopyFile("/", filepath.Join(workdir, "/flatcar_production_image.bin.bz2"), isoFS); err != nil {
+		return fmt.Errorf("copying flatcar image: %w", err)
+	}
+
+	slog.Info("Copying control-install to installer USB image", "fs", isoFS.Label(), "control", b.Control.Name)
+	if err := diskFSCopyTree(b.WorkDir, b.Control.Name+InstallSuffix, isoFS); err != nil {
+		return fmt.Errorf("copying control-install: %w", err)
+	}
+
+	iso, ok := isoFS.(*iso9660.FileSystem)
+	if !ok {
+		return fmt.Errorf("not an iso9660 filesystem pointer: %w", err)
+	}
+	options := iso9660.FinalizeOptions{
+		VolumeIdentifier: "hh-media",
+		ElTorito: &iso9660.ElTorito{
+			Entries: []*iso9660.ElToritoEntry{
+				{
+					Platform:  iso9660.EFI,
+					Emulation: iso9660.NoEmulation,
+					BootFile:  "images/efi.img",
+				},
+			},
+		},
+	}
+	if err := iso.Finalize(options); err != nil {
+		return fmt.Errorf("Error finalizing ISO: %w", err)
+	}
 
 	return nil
 }
