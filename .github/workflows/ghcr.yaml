@@ -1,3 +1,5 @@
+name: GHCR Cleanup
+
 on:
   schedule:
     - cron: "0 10 * * *" # ~2am PST
@@ -12,6 +14,11 @@ jobs:
           - fabricator/hhfab-darwin-arm64
           - fabricator/hhfab-linux-arm64
           - fabricator/hhfab-linux-amd64
+          - fabricator/hhfabctl
+          - fabricator/hhfabctl-darwin-amd64
+          - fabricator/hhfabctl-darwin-arm64
+          - fabricator/hhfabctl-linux-arm64
+          - fabricator/hhfabctl-linux-amd64
           - fabricator/fabricator
           - fabricator/charts/fabricator
           - fabricator/charts/fabricator-api
@@ -25,7 +32,6 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           organization: githedgehog
           container: fabricator/hhfab
-          dry-run: true
           keep-younger-than: 14 # days
           prune-tags-regexes: |
             ^master-
