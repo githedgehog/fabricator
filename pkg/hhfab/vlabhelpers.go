@@ -254,7 +254,7 @@ func (c *Config) VLABPower(ctx context.Context, name string, action string, pduC
 		if name != "--all" && sw.Name != name {
 			continue
 		}
-		powerInfo := hhfctl.GetPowerInfo(ctx, sw.Name)
+		powerInfo := hhfctl.GetPowerInfo(&sw)
 		slog.Debug("Switch", "sw", sw.Name, "annotations", fmt.Sprintf("%v", powerInfo))
 
 		entry := VLABPowerInfo{
