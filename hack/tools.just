@@ -18,6 +18,7 @@ _is_clean:
 #
 
 localbin := "bin"
+localpath := `pwd`
 localbinpath := `pwd`/localbin
 
 _localbin:

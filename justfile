@@ -113,19 +113,19 @@ kube-push: kube-build (_helm-push "fabricator-api") (_kube-push "fabricator") (_
   # Docker images and Helm charts pushed
 
 _hhfab-push-main: _oras hhfab-build && version
-  cd bin && oras push {{oras_insecure}} {{oci_repo}}/{{oci_prefix}}/hhfab:{{version}} hhfab
+  cd bin && {{localpath}}/{{oras}} push {{oras_insecure}} {{oci_repo}}/{{oci_prefix}}/hhfab:{{version}} hhfab
 
 _hhfabctl-push-main: _oras hhfabctl-build && version
-  cd bin && oras push {{oras_insecure}} {{oci_repo}}/{{oci_prefix}}/hhfabctl:{{version}} hhfabctl
+  cd bin && {{localpath}}/{{oras}} push {{oras_insecure}} {{oci_repo}}/{{oci_prefix}}/hhfabctl:{{version}} hhfabctl
 
 # Push all K8s artifacts (images and charts) and binaries
 push: kube-push _hhfab-push-main _hhfabctl-push-main && version
 
 _hhfab-push GOOS GOARCH: _oras (_hhfab-build GOOS GOARCH)
-  cd bin/hhfab-{{GOOS}}-{{GOARCH}} && oras push {{oras_insecure}} {{oci_repo}}/{{oci_prefix}}/hhfab-{{GOOS}}-{{GOARCH}}:{{version}} hhfab
+  cd bin/hhfab-{{GOOS}}-{{GOARCH}} && {{localpath}}/{{oras}} push {{oras_insecure}} {{oci_repo}}/{{oci_prefix}}/hhfab-{{GOOS}}-{{GOARCH}}:{{version}} hhfab
 
 _hhfabctl-push GOOS GOARCH: _oras (_hhfabctl-build GOOS GOARCH)
-  cd bin/hhfabctl-{{GOOS}}-{{GOARCH}} && oras push {{oras_insecure}} {{oci_repo}}/{{oci_prefix}}/hhfabctl-{{GOOS}}-{{GOARCH}}:{{version}} hhfabctl
+  cd bin/hhfabctl-{{GOOS}}-{{GOARCH}} && {{localpath}}/{{oras}} push {{oras_insecure}} {{oci_repo}}/{{oci_prefix}}/hhfabctl-{{GOOS}}-{{GOARCH}}:{{version}} hhfabctl
 
 _hhfab-push-multi: (_hhfab-push "linux" "amd64") (_hhfab-push "linux" "arm64") (_hhfab-push "darwin" "amd64") (_hhfab-push "darwin" "arm64")
 
