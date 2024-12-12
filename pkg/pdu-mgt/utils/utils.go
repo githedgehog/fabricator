@@ -12,17 +12,7 @@ import (
 	"strings"
 	"net/url"
 
-	"github.com/joho/godotenv"
 )
-
-func LoadEnv() error {
-	// Load environment variables from .env file
-	if err := godotenv.Load(); err != nil {
-		return fmt.Errorf("Error loading .env file")
-	}
-	return nil
-}
-
 // ParseOutletJSON parses the JSON file and extracts outlet mappings and unique PDU IPs
 func ParseOutletJSON(jsonFilePath string) (map[string]string, []string, error) {
 	// Read the JSON file
