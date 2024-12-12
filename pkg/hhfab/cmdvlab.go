@@ -171,7 +171,12 @@ func DoSwitchPower(ctx context.Context, workDir, cacheDir, name string, action s
 		return err
 	}
 
-	return c.VLABPower(ctx, name, action)
+	// Load PDU configuration from YAML
+	pduConf, err := loadPDUConf(workDir)
+	if err != nil {
+		return fmt.Errorf("failed to load PDU config: %w", err)
+	}
+	return c.VLABPower(ctx, name, action, pduConf)
 }
 
 func DoSwitchReinstall(ctx context.Context, workDir, cacheDir, name string) error {

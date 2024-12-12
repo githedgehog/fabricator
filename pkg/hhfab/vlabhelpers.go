@@ -239,7 +239,7 @@ type VLABAccessInfo struct {
 	RemoteSerial string // ssh to get serial
 }
 
-func (c *Config) VLABPower(ctx context.Context, name string, action string) error {
+func (c *Config) VLABPower(ctx context.Context, name string, action string, pduConf *PDUConfig) error {
 	entries := map[string]VLABPowerInfo{}
 
 	// Fetch the switch list
@@ -268,8 +268,15 @@ func (c *Config) VLABPower(ctx context.Context, name string, action string) erro
 		for psuName, url := range entry.SwitchPSUs {
 			outletID := utils.ExtractOutletID(url)
 			pduIP := utils.GetPDUIPFromURL(url)
+			// Query credentials from PDU config
+			creds, found := pduConf.PDUs[pduIP]
+			if !found {
+				slog.Error("No credentials found for", "pduIP", pduIP)
+
+				continue
+			}
 			slog.Info("Performing power", "action", action, "on switch", swName, "psu", psuName)
-			if err := netio.ControlOutlet(pduIP, "user", "password", outletID, action); err != nil { // TODO integrate creds with FabConfig
+			if err := netio.ControlOutlet(pduIP, creds.User, creds.Password, outletID, action); err != nil {
 				return fmt.Errorf("failed to power %s switch %s %s: %w", action, swName, psuName, err)
 			}
 		}
