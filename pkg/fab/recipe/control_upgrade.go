@@ -224,8 +224,26 @@ func (c *ControlUpgrade) installFabricator(ctx context.Context, kube client.Clie
 		return fmt.Errorf("enforcing fabricactor install: %w", err)
 	}
 
+	repo, err := comp.ImageURL(c.Fab, f8r.CtrlRef)
+	if err != nil {
+		return fmt.Errorf("getting image URL for %q: %w", f8r.CtrlRef, err)
+	}
+	image := repo + ":" + string(c.Fab.Status.Versions.Fabricator.Controller)
+
+	slog.Debug("Expected fabricator-ctrl", "image", image)
+
 	if err := waitKube(ctx, kube, "fabricator-ctrl", comp.FabNamespace,
 		&comp.Deployment{}, func(obj *comp.Deployment) (bool, error) {
+			for _, c := range obj.Spec.Template.Spec.Containers {
+				if c.Image != image {
+					return false, nil
+				}
+			}
+
+			if obj.Status.UpdatedReplicas == 0 {
+				return false, nil
+			}
+
 			for _, cond := range obj.Status.Conditions {
 				if cond.Type == comp.DeploymentAvailable && cond.Status == comp.ConditionTrue {
 					return true, nil
