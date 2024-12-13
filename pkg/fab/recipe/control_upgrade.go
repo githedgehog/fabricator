@@ -181,11 +181,34 @@ func (c *ControlUpgrade) uploadAirgap(ctx context.Context, username, password st
 	if err != nil {
 		return fmt.Errorf("collecting airgap artifacts: %w", err)
 	}
+
+	backoff := wait.Backoff{
+		Steps:    10,
+		Duration: 500 * time.Millisecond,
+		Factor:   1.5,
+		Jitter:   0.1,
+	}
+
 	for ref, version := range airgapArts {
 		slog.Debug("Uploading airgap artifact", "ref", ref, "version", version)
 
-		if err := artificer.UploadOCIArchive(ctx, c.WorkDir, ref, version, regURL, comp.RegPrefix, username, password); err != nil {
-			return fmt.Errorf("uploading airgap artifact %q: %w", ref, err)
+		attempt := 0
+		if err := retry.OnError(backoff, func(error) bool {
+			return true
+		}, func() error {
+			if attempt > 0 {
+				slog.Debug("Retrying uploading airgap artifact", "name", ref, "version", version, "attempt", attempt)
+			}
+
+			attempt++
+
+			if err := artificer.UploadOCIArchive(ctx, c.WorkDir, ref, version, regURL, comp.RegPrefix, username, password); err != nil {
+				return fmt.Errorf("uploading airgap artifact %q: %w", ref, err)
+			}
+
+			return nil
+		}); err != nil {
+			return fmt.Errorf("retrying uploading airgap artifact %q: %w", ref, err)
 		}
 	}
 
