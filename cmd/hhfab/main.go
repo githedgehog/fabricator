@@ -16,6 +16,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/lmittmann/tint"
 	"github.com/mattn/go-isatty"
+	"github.com/pkg/errors"
 	slogmulti "github.com/samber/slog-multi"
 	"github.com/urfave/cli/v2"
 	"go.githedgehog.com/fabric/api/meta"
@@ -80,6 +81,21 @@ func Run(ctx context.Context) error {
 		EnvVars:     []string{"HHFAB_BRIEF"},
 		Destination: &brief,
 		Category:    FlagCatGlobal,
+	}
+
+	var yes bool
+	yesFlag := &cli.BoolFlag{
+		Name:        "yes",
+		Aliases:     []string{"y"},
+		Usage:       "assume yes",
+		Destination: &yes,
+	}
+	yesCheck := func(_ *cli.Context) error {
+		if !yes {
+			return cli.Exit("Potentially dangerous operation. Please confirm with --yes if you're sure.", 1)
+		}
+
+		return nil
 	}
 
 	defaultWorkDir, err := os.Getwd()
@@ -841,31 +857,6 @@ func Run(ctx context.Context) error {
 						Before: before(false),
 						Subcommands: []*cli.Command{
 							{
-								Name:  "reinstall",
-								Usage: "reinstall one or all switches",
-								Flags: []cli.Flag{
-									&cli.StringFlag{
-										Name:    "name",
-										Aliases: []string{"n"},
-										Usage:   "name of the switch to reinstall, or use '--all' for all switches",
-									},
-								},
-								Action: func(c *cli.Context) error {
-									switchName := c.String("name")
-									if switchName == "" {
-										return fmt.Errorf("missing switch name or --all") //nolint:goerr113
-									}
-
-									err := hhfab.DoSwitchReinstall(ctx, workDir, cacheDir, switchName)
-									if err != nil {
-										return fmt.Errorf("reinstall failed: %w", err)
-									}
-
-									return nil
-								},
-								HelpName: "hhfab vlab switch reinstall",
-							},
-							{
 								Name:  "power",
 								Usage: "manage switch power state (ON, OFF, or CYCLE)",
 								Flags: []cli.Flag{
@@ -874,9 +865,14 @@ func Run(ctx context.Context) error {
 										Aliases: []string{"n"},
 										Usage:   "name of the switch to power ON|OFF|CYCLE, or use '--all' for all switches",
 									},
+									yesFlag,
 								},
 								UsageText: "hhfab vlab switch power [--name <switchName>|--all] <action>",
 								Action: func(c *cli.Context) error {
+									if err := yesCheck(c); err != nil {
+										return wrapErrWithPressToContinue(err)
+									}
+
 									switchName := c.String("name")
 									if switchName == "" {
 										return fmt.Errorf("missing required flag: --name/-n") //nolint:goerr113
@@ -891,12 +887,12 @@ func Run(ctx context.Context) error {
 										return fmt.Errorf("invalid power action: %s (use ON, OFF, or CYCLE)", powerAction) //nolint:goerr113
 									}
 
-									err := hhfab.DoSwitchPower(ctx, workDir, cacheDir, switchName, powerAction)
-									if err != nil {
-										return fmt.Errorf("power operation failed: %w", err) //nolint:goerr113
-									}
-
-									return nil
+									return wrapErrWithPressToContinue(
+										errors.Wrapf(
+											hhfab.DoSwitchPower(ctx, workDir, cacheDir, switchName, powerAction),
+											"failed to power switch",
+										),
+									)
 								},
 							},
 						},
@@ -970,4 +966,18 @@ func Run(ctx context.Context) error {
 	}
 
 	return app.Run(os.Args) //nolint:wrapcheck
+}
+
+func wrapErrWithPressToContinue(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	if strings.Contains(os.Getenv("_"), "k9s") {
+		slog.Error("Failed", "err", err.Error())
+		slog.Warn("Press Enter to continue...")
+		_, _ = fmt.Scanln()
+	}
+
+	return err
 }
