@@ -834,6 +834,39 @@ func Run(ctx context.Context) error {
 							return nil
 						},
 					},
+					{
+						Name:   "switch",
+						Usage:  "manage switch reinstall or power",
+						Flags:  append(defaultFlags, accessNameFlag),
+						Before: before(false),
+						Subcommands: []*cli.Command{
+							{
+								Name:  "reinstall",
+								Usage: "reinstall one or all switches",
+								Flags: []cli.Flag{
+									&cli.StringFlag{
+										Name:    "name",
+										Aliases: []string{"n"},
+										Usage:   "name of the switch to reinstall, or use '--all' for all switches",
+									},
+								},
+								Action: func(c *cli.Context) error {
+									switchName := c.String("name")
+									if switchName == "" {
+										return fmt.Errorf("missing switch name or --all") //nolint:goerr113
+									}
+
+									err := hhfab.DoSwitchReinstall(ctx, workDir, cacheDir, switchName)
+									if err != nil {
+										return fmt.Errorf("reinstall failed: %w", err)
+									}
+
+									return nil
+								},
+								HelpName: "hhfab vlab switch reinstall",
+							},
+						},
+					},
 				},
 			},
 			{

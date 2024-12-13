@@ -236,3 +236,31 @@ type VLABAccessInfo struct {
 	IsSwitch     bool   // ssh through control node only
 	RemoteSerial string // ssh to get serial
 }
+
+func (c *Config) SwitchReinstall(ctx context.Context, WorkDir string, name string) error {
+	if err := c.checkForBins(); err != nil {
+		return err
+	}
+
+	switches := wiringapi.SwitchList{}
+	if err := c.Wiring.List(ctx, &switches); err != nil {
+		return fmt.Errorf("failed to list switches: %w", err)
+	}
+
+	cmdName := ""
+	var args []string
+	cmdName = VLABCmdGrubSelect
+	args = append(args, name, "user", "password")
+	slog.Debug("Running", "cmd", strings.Join(append([]string{cmdName}, args...), " "))
+	cmd := exec.CommandContext(ctx, cmdName, args...)
+	cmd.Dir = c.WorkDir
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to run command: %w", err)
+	}
+
+	return nil
+}
