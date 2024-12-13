@@ -6,8 +6,6 @@ replace gopkg.in/natefinch/lumberjack.v2 v2.2.1 => github.com/githedgehog/lumber
 
 replace github.com/diskfs/go-diskfs => github.com/Frostman/go-diskfs v1.4.2-hh3
 
-replace go.githedgehog.com/fabricator/pkg/pdu-mgt => ./pkg/pdu-mgt
-
 require (
 	dario.cat/mergo v1.0.1
 	github.com/AlekSi/pointer v1.2.0
@@ -40,7 +38,6 @@ require (
 	github.com/vishvananda/netlink v1.3.0
 	go.githedgehog.com/fabric v0.58.0
 	golang.org/x/crypto v0.31.0
-	go.githedgehog.com/fabricator/pkg/pdu-mgt v0.0.0-00010101000000-000000000000
 	golang.org/x/sync v0.10.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	k8s.io/api v0.31.3

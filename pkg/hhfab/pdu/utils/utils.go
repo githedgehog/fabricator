@@ -7,12 +7,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
-	"net/url"
-
 )
+
 // ParseOutletJSON parses the JSON file and extracts outlet mappings and unique PDU IPs
 func ParseOutletJSON(jsonFilePath string) (map[string]string, []string, error) {
 	// Read the JSON file
@@ -56,26 +56,12 @@ func ExtractOutletID(url string) int {
 	if err != nil {
 		log.Fatalf("Error extracting outlet ID: %v", err)
 	}
+
 	return id
 }
 
 func GetPDUIPFromURL(url string) string {
 	parts := strings.Split(url, "/")
+
 	return parts[2]
-}
-
-func ConfirmActions(action string, outlets map[string]string) bool {
-	fmt.Println("The following actions will be performed:")
-	for name, url := range outlets {
-		fmt.Printf("- Perform power %s on %s (%s)\n", action, name, url)
-	}
-	fmt.Print("Do you want to proceed with all actions? (y/n): ")
-
-	var response string
-	if _, err := fmt.Scanln(&response); err != nil {
-		fmt.Printf("Error reading input: %v\n", err)
-		return false // Default to not proceeding on error
-	}
-
-	return strings.ToLower(response) == "y"
 }

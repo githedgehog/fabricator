@@ -18,8 +18,8 @@ import (
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/hhfctl"
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
-	"go.githedgehog.com/fabricator/pkg/pdu-mgt/netio"
-	"go.githedgehog.com/fabricator/pkg/pdu-mgt/utils"
+	"go.githedgehog.com/fabricator/pkg/hhfab/pdu/netio"
+	"go.githedgehog.com/fabricator/pkg/hhfab/pdu/utils"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
