@@ -65,7 +65,7 @@ func main() {
 }
 
 func Run(ctx context.Context) error {
-	var verbose, brief bool
+	var verbose, brief, yes bool
 	verboseFlag := &cli.BoolFlag{
 		Name:        "verbose",
 		Aliases:     []string{"v"},
@@ -82,8 +82,6 @@ func Run(ctx context.Context) error {
 		Destination: &brief,
 		Category:    FlagCatGlobal,
 	}
-
-	var yes bool
 	yesFlag := &cli.BoolFlag{
 		Name:        "yes",
 		Aliases:     []string{"y"},
@@ -92,7 +90,7 @@ func Run(ctx context.Context) error {
 	}
 	yesCheck := func(_ *cli.Context) error {
 		if !yes {
-			return cli.Exit("Potentially dangerous operation. Please confirm with --yes if you're sure.", 1)
+			return cli.Exit("\033[31mWARNING:\033[0m Potentially dangerous operation. Please confirm with --yes if you're sure.", 1)
 		}
 
 		return nil
@@ -863,7 +861,11 @@ func Run(ctx context.Context) error {
 									&cli.StringFlag{
 										Name:    "name",
 										Aliases: []string{"n"},
-										Usage:   "name of the switch to power ON|OFF|CYCLE, or use '--all' for all switches",
+										Usage:   "name of the switch to power ON|OFF|CYCLE",
+									},
+									&cli.BoolFlag{
+										Name:  "all",
+										Usage: "apply action to all switches",
 									},
 									yesFlag,
 								},
@@ -874,15 +876,18 @@ func Run(ctx context.Context) error {
 									}
 
 									switchName := c.String("name")
+									if c.Bool("all") {
+										switchName = "--all"
+									}
 									if switchName == "" {
 										return fmt.Errorf("missing required flag: --name/-n") //nolint:goerr113
 									}
 
-									if c.NArg() < 1 {
-										return fmt.Errorf("missing power action (ON, OFF, CYCLE)") //nolint:goerr113
+									if c.NArg() != 1 {
+										return fmt.Errorf("unexpected amount of agruments (use ON, OFF, or CYCLE)") //nolint:goerr113
 									}
 
-									powerAction := c.Args().First()
+									powerAction := strings.ToUpper(c.Args().First())
 									if powerAction != "ON" && powerAction != "OFF" && powerAction != "CYCLE" {
 										return fmt.Errorf("invalid power action: %s (use ON, OFF, or CYCLE)", powerAction) //nolint:goerr113
 									}
