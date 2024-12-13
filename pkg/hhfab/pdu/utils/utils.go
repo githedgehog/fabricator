@@ -63,5 +63,10 @@ func ExtractOutletID(url string) int {
 func GetPDUIPFromURL(url string) string {
 	parts := strings.Split(url, "/")
 
+	// URL must have at least 3 parts: http://PDUIP/outlet/PORT
+	if len(parts) < 3 {
+		return "", fmt.Errorf("invalid URL format: expected at least 3 parts, got %d", len(parts))
+	}
+
 	return parts[2]
 }
