@@ -6,7 +6,6 @@ package utils
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/url"
 	"os"
 	"strconv"
@@ -49,24 +48,30 @@ func ParseOutletJSON(jsonFilePath string) (map[string]string, []string, error) {
 	return outlets, uniqueIPs, nil
 }
 
-func ExtractOutletID(url string) int {
+func ExtractOutletID(url string) (int, error) {
 	parts := strings.Split(url, "/")
+
+	// Check if URL has at least 1 part (outlet ID is expected to be the last part)
+	if len(parts) < 1 {
+		return 0, fmt.Errorf("invalid URL format: expected at least one part") //nolint:goerr113
+	}
+
 	outletID := parts[len(parts)-1]
 	id, err := strconv.Atoi(outletID)
 	if err != nil {
-		log.Fatalf("Error extracting outlet ID: %v", err)
+		return 0, fmt.Errorf("error extracting outlet ID from '%s': %w", outletID, err) //nolint:goerr113
 	}
 
-	return id
+	return id, nil
 }
 
-func GetPDUIPFromURL(url string) string {
+func GetPDUIPFromURL(url string) (string, error) {
 	parts := strings.Split(url, "/")
 
 	// URL must have at least 3 parts: http://PDUIP/outlet/PORT
 	if len(parts) < 3 {
-		return "", fmt.Errorf("invalid URL format: expected at least 3 parts, got %d", len(parts))
+		return "", fmt.Errorf("invalid URL format: expected at least 3 parts, got %d", len(parts)) //nolint:goerr113
 	}
 
-	return parts[2]
+	return parts[2], nil
 }

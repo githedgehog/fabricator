@@ -266,8 +266,14 @@ func (c *Config) VLABPower(ctx context.Context, name string, action string, pduC
 	// Power action request to PDU API
 	for swName, entry := range entries {
 		for psuName, url := range entry.SwitchPSUs {
-			outletID := utils.ExtractOutletID(url)
-			pduIP := utils.GetPDUIPFromURL(url)
+			outletID, err := utils.ExtractOutletID(url)
+			if err != nil {
+				return fmt.Errorf("Error extracting outlet ID from URL %s", url) //nolint:goerr113
+			}
+			pduIP, err := utils.GetPDUIPFromURL(url)
+			if err != nil {
+				return fmt.Errorf("Error extracting PDU IP from URL %s", url) //nolint:goerr113
+			}
 			// Query credentials from PDU config
 			creds, found := pduConf.PDUs[pduIP]
 			if !found {
