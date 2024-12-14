@@ -171,5 +171,5 @@ func DoSwitchReinstall(ctx context.Context, workDir, cacheDir, name string) erro
 		return err
 	}
 
-	return c.SwitchReinstall(ctx, workDir, name)
+	return c.SwitchReinstall(ctx, name)
 }

@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/manifoldco/promptui"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
@@ -237,29 +238,61 @@ type VLABAccessInfo struct {
 	RemoteSerial string // ssh to get serial
 }
 
-func (c *Config) SwitchReinstall(ctx context.Context, WorkDir string, name string) error {
-	if err := c.checkForBins(); err != nil {
-		return err
-	}
-
+func (c *Config) SwitchReinstall(ctx context.Context, name string) error {
+	// List switches
 	switches := wiringapi.SwitchList{}
 	if err := c.Wiring.List(ctx, &switches); err != nil {
 		return fmt.Errorf("failed to list switches: %w", err)
 	}
 
-	cmdName := ""
-	var args []string
-	cmdName = VLABCmdGrubSelect
-	args = append(args, name, "user", "password")
-	slog.Debug("Running", "cmd", strings.Join(append([]string{cmdName}, args...), " "))
-	cmd := exec.CommandContext(ctx, cmdName, args...)
-	cmd.Dir = c.WorkDir
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	// Filter switches
+	var targets []wiringapi.Switch
+	if name == "--all" {
+		targets = switches.Items
+	} else {
+		for _, sw := range switches.Items {
+			if sw.Name == name {
+				targets = append(targets, sw)
+				break
+			}
+		}
+	}
 
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to run command: %w", err)
+	if len(targets) == 0 {
+		return fmt.Errorf("no switches found for the given name: %s", name)
+	}
+
+	// Run commands in parallel
+	var wg sync.WaitGroup
+	var errs []error
+	var mu sync.Mutex
+
+	for _, sw := range targets {
+		wg.Add(1)
+		go func(sw wiringapi.Switch) {
+			defer wg.Done()
+			cmdName := VLABCmdGrubSelect
+			args := []string{sw.Name, "admin", "HHFab.Admin!"}
+			slog.Debug("Running", "cmd", strings.Join(append([]string{cmdName}, args...), " "))
+
+			cmd := exec.CommandContext(ctx, cmdName, args...)
+			cmd.Dir = c.WorkDir
+			cmd.Stdin = os.Stdin
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+
+			if err := cmd.Run(); err != nil {
+				mu.Lock()
+				errs = append(errs, fmt.Errorf("failed to run command for switch %s: %w", sw.Name, err))
+				mu.Unlock()
+			}
+		}(sw)
+	}
+
+	wg.Wait()
+
+	if len(errs) > 0 {
+		return fmt.Errorf("errors encountered: %v", errs)
 	}
 
 	return nil
