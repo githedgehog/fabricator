@@ -245,16 +245,20 @@ func (c *Config) VLABPower(ctx context.Context, name string, action string, pduC
 	// Fetch the switch list
 	switches := wiringapi.SwitchList{}
 	if err := c.Wiring.List(ctx, &switches); err != nil {
-		return fmt.Errorf("failed to list switches: %w", err)
+		return fmt.Errorf("Failed to list switches: %w", err)
 	}
 
 	// Populate entries
+	foundAnnotations := false
 	for _, sw := range switches.Items {
 		// Skip if the name is not "--all" and doesn't match sw.Name
 		if name != "--all" && sw.Name != name {
 			continue
 		}
 		powerInfo := hhfctl.GetPowerInfo(&sw)
+		if len(powerInfo) > 0 {
+			foundAnnotations = true
+		}
 		slog.Debug("Switch", "sw", sw.Name, "annotations", fmt.Sprintf("%v", powerInfo))
 
 		entry := VLABPowerInfo{
@@ -263,21 +267,29 @@ func (c *Config) VLABPower(ctx context.Context, name string, action string, pduC
 		entries[sw.Name] = entry
 	}
 
+	if len(entries) == 0 {
+		return fmt.Errorf("no switches found for the given name: %s", name) //nolint:goerr113
+	}
+
+	if !foundAnnotations {
+		return fmt.Errorf("no annotations found for any switches") //nolint:goerr113
+	}
+
 	// Power action request to PDU API
 	for swName, entry := range entries {
 		for psuName, url := range entry.SwitchPSUs {
 			outletID, err := utils.ExtractOutletID(url)
 			if err != nil {
-				return fmt.Errorf("Error extracting outlet ID from URL %s", url) //nolint:goerr113
+				return fmt.Errorf("error extracting outlet ID from URL %s", url) //nolint:goerr113
 			}
 			pduIP, err := utils.GetPDUIPFromURL(url)
 			if err != nil {
-				return fmt.Errorf("Error extracting PDU IP from URL %s", url) //nolint:goerr113
+				return fmt.Errorf("error extracting PDU IP from URL %s", url) //nolint:goerr113
 			}
 			// Query credentials from PDU config
 			creds, found := pduConf.PDUs[pduIP]
 			if !found {
-				slog.Error("No credentials found for", "pduIP", pduIP)
+				slog.Error("no credentials found for", "pduIP", pduIP)
 
 				continue
 			}
