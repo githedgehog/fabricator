@@ -9,7 +9,7 @@ replace github.com/diskfs/go-diskfs => github.com/Frostman/go-diskfs v1.4.2-hh3
 require (
 	dario.cat/mergo v1.0.1
 	github.com/AlekSi/pointer v1.2.0
-	github.com/Masterminds/semver/v3 v3.3.0
+	github.com/Masterminds/semver/v3 v3.3.1
 	github.com/Masterminds/sprig/v3 v3.3.0
 	github.com/cert-manager/cert-manager v1.16.2
 	github.com/charmbracelet/keygen v0.5.1
