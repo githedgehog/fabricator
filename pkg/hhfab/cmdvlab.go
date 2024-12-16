@@ -67,6 +67,11 @@ type VLABUpOpts struct {
 }
 
 func VLABUp(ctx context.Context, workDir, cacheDir string, opts VLABUpOpts) error {
+	if opts.ControlUpgrade {
+		opts.BuildMode = recipe.BuildModeManual
+		opts.VLABRunOpts.BuildMode = recipe.BuildModeManual
+	}
+
 	c, err := load(ctx, workDir, cacheDir, true, opts.HydrateMode)
 	if err != nil {
 		return err
