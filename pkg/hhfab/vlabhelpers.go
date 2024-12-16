@@ -201,7 +201,7 @@ func (c *Config) VLABAccess(ctx context.Context, vlab *VLAB, t VLABAccessType, n
 			slog.Info("Serial log", "name", name, "path", entry.SerialLog)
 
 			cmdName = VLABCmdLess
-			args = []string{entry.SerialLog}
+			args = []string{"-r", entry.SerialLog}
 		} else {
 			return fmt.Errorf("Serial log not available: %s", name) //nolint:goerr113
 		}
