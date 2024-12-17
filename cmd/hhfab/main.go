@@ -48,6 +48,7 @@ const (
 	FlagNameKillStale             = "kill-stale"
 	FlagNameControlsRestricted    = "controls-restricted"
 	FlagNameServersRestricted     = "servers-restricted"
+	FlagNameReCreate              = "recreate"
 	FlagNameBuildMode             = "build-mode"
 	FlagNameControlUpgrade        = "control-upgrade"
 	FlagNameFailFast              = "fail-fast"
@@ -549,6 +550,11 @@ func Run(ctx context.Context) error {
 						Usage: "run VLAB",
 						Flags: append(defaultFlags, hMode,
 							&cli.BoolFlag{
+								Name:    FlagNameReCreate,
+								Aliases: []string{"f"},
+								Usage:   "recreate VLAB (destroy and create new config and VMs)",
+							},
+							&cli.BoolFlag{
 								Name:    FlagNameKillStale,
 								Usage:   "kill stale VMs automatically based on VM UUIDs used",
 								EnvVars: []string{"HHFAB_KILL_STALE"},
@@ -586,15 +592,16 @@ func Run(ctx context.Context) error {
 								Value: true,
 							},
 							&cli.StringSliceFlag{
-								Name:  FlagNameReady,
-								Usage: "run commands on all VMs ready (one of: " + strings.Join(onReadyCommands, ", ") + ")",
+								Name:    FlagNameReady,
+								Aliases: []string{"r"},
+								Usage:   "run commands on all VMs ready (one of: " + strings.Join(onReadyCommands, ", ") + ")",
 							},
 						),
 						Before: before(false),
 						Action: func(c *cli.Context) error {
 							if err := hhfab.VLABUp(ctx, workDir, cacheDir, hhfab.VLABUpOpts{
 								HydrateMode: hhfab.HydrateMode(hydrateMode),
-								ReCreate:    false, // TODO flag
+								ReCreate:    c.Bool(FlagNameReCreate),
 								BuildMode:   recipe.BuildMode(c.String(FlagNameBuildMode)),
 								VLABRunOpts: hhfab.VLABRunOpts{
 									KillStale:          c.Bool(FlagNameKillStale),
