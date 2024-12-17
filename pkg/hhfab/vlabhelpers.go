@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/manifoldco/promptui"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
@@ -238,7 +239,7 @@ type VLABAccessInfo struct {
 	RemoteSerial string // ssh to get serial
 }
 
-func (c *Config) SwitchReinstall(ctx context.Context, name string) error {
+func (c *Config) SwitchReinstall(ctx context.Context, name string, verbose bool) error {
 	// List switches
 	switches := wiringapi.SwitchList{}
 	if err := c.Wiring.List(ctx, &switches); err != nil {
@@ -253,13 +254,14 @@ func (c *Config) SwitchReinstall(ctx context.Context, name string) error {
 		for _, sw := range switches.Items {
 			if sw.Name == name {
 				targets = append(targets, sw)
+
 				break
 			}
 		}
 	}
 
 	if len(targets) == 0 {
-		return fmt.Errorf("no switches found for the given name: %s", name)
+		return fmt.Errorf("no switches found for the given name: %s", name) //nolint:goerr113
 	}
 
 	// Run commands in parallel
@@ -271,28 +273,56 @@ func (c *Config) SwitchReinstall(ctx context.Context, name string) error {
 		wg.Add(1)
 		go func(sw wiringapi.Switch) {
 			defer wg.Done()
-			cmdName := VLABCmdGrubSelect
-			args := []string{sw.Name, "admin", "HHFab.Admin!"}
-			slog.Debug("Running", "cmd", strings.Join(append([]string{cmdName}, args...), " "))
 
-			cmd := exec.CommandContext(ctx, cmdName, args...)
+			cmdName := VLABCmdGrubSelect
+			var cmd *exec.Cmd
+			cmd = &exec.Cmd{}
 			cmd.Dir = c.WorkDir
 			cmd.Stdin = os.Stdin
-			cmd.Stdout = os.Stdout
-			cmd.Stderr = os.Stderr
+			args := []string{sw.Name}
+			if verbose {
+				byobuCmd := fmt.Sprintf("byobu new-window -d -n %s '%s %s'", sw.Name, cmdName, strings.Join(args, " "))
+				cmd = exec.CommandContext(ctx, "sh", "-c", byobuCmd)
+				cmd.Stdout = os.Stdout
+				cmd.Stderr = nil
+			} else {
+				cmd = exec.CommandContext(ctx, cmdName, args...)
+				cmd.Stdout = nil
+				cmd.Stderr = os.Stderr // expect messages logged to stderr to show progress
+			}
 
+			slog.Info("Running", "cmd", strings.Join(append([]string{cmdName}, sw.Name+"..."), " "))
 			if err := cmd.Run(); err != nil {
 				mu.Lock()
-				errs = append(errs, fmt.Errorf("failed to run command for switch %s: %w", sw.Name, err))
+				errs = append(errs, fmt.Errorf("\n%s failed for switch %s: %w", cmdName, sw.Name, err))
 				mu.Unlock()
 			}
 		}(sw)
 	}
 
+	for _, sw := range targets {
+		slog.Info("Executing soft-reset on", "switch", sw.Name+"...")
+		if err := hhfctl.SwitchPowerReset(ctx, sw.Name); err != nil {
+			mu.Lock()
+			errs = append(errs, fmt.Errorf("\nfailed to run soft-reset switch %s: %w", sw.Name, err))
+			mu.Unlock()
+			time.Sleep(500 * time.Millisecond)
+		}
+	}
 	wg.Wait()
 
 	if len(errs) > 0 {
-		return fmt.Errorf("errors encountered: %v", errs)
+		return fmt.Errorf("failed switches: %v", errs) //nolint:goerr113
+	}
+
+	if verbose {
+		fmt.Println("Switch reinstall running in Byobu tabs until completed. Switch to them to check progress (Hit F4).")
+	} else {
+		if name == "--all" {
+			fmt.Println("All switches reinstalled successfully.")
+		} else {
+			fmt.Println("Switch", name, "reinstalled successfully.")
+		}
 	}
 
 	return nil

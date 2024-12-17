@@ -856,7 +856,7 @@ func Run(ctx context.Context) error {
 										return fmt.Errorf("missing switch name or --all") //nolint:goerr113
 									}
 
-									err := hhfab.DoSwitchReinstall(ctx, workDir, cacheDir, switchName)
+									err := hhfab.DoSwitchReinstall(ctx, workDir, cacheDir, switchName, verbose)
 									if err != nil {
 										return fmt.Errorf("reinstall failed: %w", err)
 									}
