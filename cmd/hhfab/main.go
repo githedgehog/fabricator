@@ -496,7 +496,7 @@ func Run(ctx context.Context) error {
 						Aliases: []string{"mode", "m"},
 						Usage:   "build mode: one of " + strings.Join(buildModes, ", "),
 						EnvVars: []string{"HHFAB_BUILD_MODE"},
-						Value:   string(recipe.BuildModeUSB),
+						Value:   string(recipe.BuildModeISO),
 					},
 				),
 				Before: before(false),
@@ -577,7 +577,7 @@ func Run(ctx context.Context) error {
 								Aliases: []string{"mode", "m"},
 								Usage:   "build mode: one of " + strings.Join(buildModes, ", "),
 								EnvVars: []string{"HHFAB_BUILD_MODE"},
-								Value:   string(recipe.BuildModeUSB),
+								Value:   string(recipe.BuildModeISO),
 							},
 							&cli.BoolFlag{
 								Name:    FlagNameControlUpgrade,
