@@ -296,7 +296,7 @@ func diskFSCopyFile(dstPath string, srcPath string, destination filesystem.FileS
 	if dstPath == "/" {
 		dstPath = filepath.Join("/", filepath.Base(srcPath))
 	}
-	dest, err := destination.OpenFile(dstPath, os.O_CREATE|os.O_RDWR|os.O_SYNC)
+	dest, err := destination.OpenFile(dstPath, os.O_CREATE|os.O_RDWR|os.O_TRUNC)
 	if err != nil {
 		return fmt.Errorf("opening dest %q: %w", dstPath, err)
 	}
@@ -304,6 +304,12 @@ func diskFSCopyFile(dstPath string, srcPath string, destination filesystem.FileS
 
 	if _, err := io.Copy(dest, src); err != nil {
 		return fmt.Errorf("copying: %w", err)
+	}
+
+	if f, ok := dest.(*os.File); ok {
+		if err := f.Sync(); err != nil {
+			return fmt.Errorf("syncing dest: %w", err)
+		}
 	}
 
 	return nil
