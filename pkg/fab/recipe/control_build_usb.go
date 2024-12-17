@@ -188,10 +188,6 @@ func (b *ControlInstallBuilder) buildUSBImage(ctx context.Context) error {
 	if err := diskFSCopyFile("/", filepath.Join(workdir, "oem.cpio.gz"), fs1); err != nil {
 		return fmt.Errorf("copying oem cpio: %w", err)
 	}
-	slog.Info("Copying oem.cpio.gz to installer image", "fs", fs1.Label(), "control", b.Control.Name)
-	if err := diskFSCopyFile("/", filepath.Join(workdir, "oem.cpio.gz"), fs1); err != nil {
-		return fmt.Errorf("copying oem cpio: %w", err)
-	}
 
 	slog.Info("Copying flatcar.vmlinuz to installer image", "fs", fs1.Label(), "control", b.Control.Name)
 	if err := diskFSCopyFile("/", filepath.Join(workdir, "flatcar_production_pxe.vmlinuz"), fs1); err != nil {
