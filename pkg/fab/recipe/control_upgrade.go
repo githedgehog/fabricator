@@ -120,6 +120,10 @@ func (c *ControlUpgrade) Run(ctx context.Context) error {
 	c.Fab.Status.IsBootstrap = false
 	c.Fab.Status.IsInstall = true
 
+	if err := c.setupTimesync(ctx); err != nil {
+		return fmt.Errorf("setting up timesync: %w", err)
+	}
+
 	regURL, err := comp.RegistryURL(c.Fab)
 	if err != nil {
 		return fmt.Errorf("getting registry URL: %w", err)
@@ -330,6 +334,37 @@ func (c *ControlUpgrade) installFabricCtl(_ context.Context) error {
 	if err := copyFile(fabric.CtlBinName, filepath.Join(fabric.BinDir, fabric.CtlDestBinName), 0o755); err != nil {
 		return fmt.Errorf("copying fabricctl bin: %w", err)
 	}
+
+	return nil
+}
+
+func (c *ControlUpgrade) setupTimesync(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
+	slog.Info("Setting up timesync")
+
+	// TODO remove if it'll be managed by control agent?
+
+	controlVIP, err := c.Fab.Spec.Config.Control.VIP.Parse()
+	if err != nil {
+		return fmt.Errorf("parsing control VIP: %w", err)
+	}
+
+	cfg := []byte(fmt.Sprintf("[Time]\nNTP=%s\n", controlVIP.Addr()))
+	if err := os.WriteFile("/etc/systemd/timesyncd.conf", cfg, 0o644); err != nil { //nolint:gosec
+		return fmt.Errorf("writing timesyncd.conf: %w", err)
+	}
+
+	cmd := exec.CommandContext(ctx, "systemctl", "restart", "systemd-timesyncd")
+	cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "systemctl: ")
+	cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "systemctl: ")
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("restarting systemd-timesyncd: %w", err)
+	}
+
+	// TODO check `timedatectl timesync-status` output
 
 	return nil
 }
