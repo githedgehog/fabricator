@@ -5,6 +5,7 @@ package hhfab
 
 import (
 	"context"
+	_ "embed"
 	"fmt"
 	"log/slog"
 	"net/netip"
@@ -239,6 +240,22 @@ type VLABAccessInfo struct {
 	RemoteSerial string // ssh to get serial
 }
 
+//go:embed grub-selector.exp
+var grubSelectorScript string
+
+const VLABCmdGrubSelect string = "./grub-selector.exp"
+
+func copyGrubSelectScript() error {
+	scriptPath := "./grub-selector.exp"
+	if _, err := os.Stat(scriptPath); os.IsNotExist(err) {
+		// Write the embedded script to a file
+		if err := os.WriteFile(scriptPath, []byte(grubSelectorScript), 0755); err != nil { //nolint:gosec
+			return fmt.Errorf("failed to write script: %w", err)
+		}
+	}
+
+	return nil
+}
 func (c *Config) SwitchReinstall(ctx context.Context, name string, verbose bool) error {
 	// List switches
 	switches := wiringapi.SwitchList{}
@@ -264,10 +281,19 @@ func (c *Config) SwitchReinstall(ctx context.Context, name string, verbose bool)
 		return fmt.Errorf("no switches found for the given name: %s", name) //nolint:goerr113
 	}
 
+	if err := copyGrubSelectScript(); err != nil {
+		fmt.Println("Error copying script:", err)
+
+		return err
+	}
 	// Run commands in parallel
 	var wg sync.WaitGroup
 	var errs []error
 	var mu sync.Mutex
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+
+	start := time.Now()
 
 	for _, sw := range targets {
 		wg.Add(1)
@@ -291,10 +317,10 @@ func (c *Config) SwitchReinstall(ctx context.Context, name string, verbose bool)
 				cmd.Stderr = os.Stderr // expect messages logged to stderr to show progress
 			}
 
-			slog.Debug("Running", "cmd", strings.Join(append([]string{cmdName}, "switch", sw.Name+"..."), " "))
+			slog.Debug("Running cmd " + cmdName + " " + strings.Join(args, " ") + "...")
 			if err := cmd.Run(); err != nil {
 				mu.Lock()
-				errs = append(errs, fmt.Errorf("%s", sw.Name)) //nolint:goerr113
+				errs = append(errs, fmt.Errorf("%s: %w", sw.Name, err)) //nolint:goerr113
 				mu.Unlock()
 			}
 		}(sw)
@@ -308,16 +334,18 @@ func (c *Config) SwitchReinstall(ctx context.Context, name string, verbose bool)
 	wg.Wait()
 
 	if len(errs) > 0 {
-		return fmt.Errorf("failed switches: %v", errs) //nolint:goerr113
+		elapsed := time.Since(start)
+
+		return fmt.Errorf("failed switches: %v (took %v)", errs, elapsed) //nolint:goerr113
 	}
 
 	if verbose {
 		fmt.Println("Switch reinstall running in Byobu tabs until completed. Switch to them to check progress (Hit F4).")
 	} else {
 		if name == "--all" {
-			fmt.Println("All switches reinstalled successfully.")
+			fmt.Println("All switches reinstalled successfully.", "took", time.Since(start))
 		} else {
-			fmt.Println("Switch", name, "reinstalled successfully.")
+			fmt.Println("Switch", name, "reinstalled successfully.", "took", time.Since(start))
 		}
 	}
 
