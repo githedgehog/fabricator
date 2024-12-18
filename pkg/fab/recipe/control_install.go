@@ -178,6 +178,10 @@ func (c *ControlInstall) Run(ctx context.Context) error {
 		return fmt.Errorf("installing ntp: %w", err)
 	}
 
+	if err := c.setupTimesync(ctx); err != nil {
+		return fmt.Errorf("setting up timesync: %w", err)
+	}
+
 	if err := c.installWaitFabric(ctx, kube); err != nil {
 		return fmt.Errorf("installing fabric: %w", err)
 	}
