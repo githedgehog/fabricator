@@ -6,6 +6,7 @@ package hhfab
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/netip"
@@ -256,7 +257,7 @@ func copyGrubSelectScript() error {
 
 	return nil
 }
-func (c *Config) SwitchReinstall(ctx context.Context, name string, verbose bool) error {
+func (c *Config) SwitchReinstall(ctx context.Context, name, mode, user, password string, verbose bool) error {
 	// List switches
 	switches := wiringapi.SwitchList{}
 	if err := c.Wiring.List(ctx, &switches); err != nil {
@@ -301,11 +302,18 @@ func (c *Config) SwitchReinstall(ctx context.Context, name string, verbose bool)
 			defer wg.Done()
 
 			cmdName := VLABCmdGrubSelect
-			var cmd *exec.Cmd
-			cmd = &exec.Cmd{}
+			cmd := &exec.Cmd{}
 			cmd.Dir = c.WorkDir
 			cmd.Stdin = os.Stdin
-			args := []string{sw.Name}
+			var args []string
+
+			if mode == "reload" {
+				args = []string{sw.Name, user, password}
+			}
+			if mode == "soft-reset" {
+				args = []string{sw.Name}
+			}
+
 			if verbose {
 				byobuCmd := fmt.Sprintf("byobu new-window -d -n %s '%s %s'", sw.Name, cmdName, strings.Join(args, " "))
 				cmd = exec.CommandContext(ctx, "sh", "-c", byobuCmd)
@@ -320,16 +328,22 @@ func (c *Config) SwitchReinstall(ctx context.Context, name string, verbose bool)
 			slog.Debug("Running cmd " + cmdName + " " + strings.Join(args, " ") + "...")
 			if err := cmd.Run(); err != nil {
 				mu.Lock()
-				errs = append(errs, fmt.Errorf("%s: %w", sw.Name, err)) //nolint:goerr113
+				if errors.Is(err, context.DeadlineExceeded) {
+					errs = append(errs, fmt.Errorf("%s: timeout (context deadline exceeded)", sw.Name)) //nolint:goerr113
+				} else {
+					errs = append(errs, fmt.Errorf("%s: %w", sw.Name, err)) //nolint:goerr113
+				}
 				mu.Unlock()
 			}
 		}(sw)
 	}
 
-	for _, sw := range targets {
-		time.Sleep(1 * time.Second)
-		slog.Info("Executing soft-reset on", "switch", sw.Name+"...")
-		_ = hhfctl.SwitchPowerReset(ctx, sw.Name)
+	if mode != "reload" {
+		for _, sw := range targets {
+			time.Sleep(1 * time.Second)
+			slog.Info("Executing soft-reset on", "switch", sw.Name+"...")
+			_ = hhfctl.SwitchPowerReset(ctx, sw.Name)
+		}
 	}
 	wg.Wait()
 
