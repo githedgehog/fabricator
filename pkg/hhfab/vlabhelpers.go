@@ -291,23 +291,19 @@ func (c *Config) SwitchReinstall(ctx context.Context, name string, verbose bool)
 				cmd.Stderr = os.Stderr // expect messages logged to stderr to show progress
 			}
 
-			slog.Info("Running", "cmd", strings.Join(append([]string{cmdName}, sw.Name+"..."), " "))
+			slog.Debug("Running", "cmd", strings.Join(append([]string{cmdName}, "switch", sw.Name+"..."), " "))
 			if err := cmd.Run(); err != nil {
 				mu.Lock()
-				errs = append(errs, fmt.Errorf("\n%s failed for switch %s: %w", cmdName, sw.Name, err))
+				errs = append(errs, fmt.Errorf("%s", sw.Name)) //nolint:goerr113
 				mu.Unlock()
 			}
 		}(sw)
 	}
 
 	for _, sw := range targets {
+		time.Sleep(1 * time.Second)
 		slog.Info("Executing soft-reset on", "switch", sw.Name+"...")
-		if err := hhfctl.SwitchPowerReset(ctx, sw.Name); err != nil {
-			mu.Lock()
-			errs = append(errs, fmt.Errorf("\nfailed to run soft-reset switch %s: %w", sw.Name, err))
-			mu.Unlock()
-			time.Sleep(500 * time.Millisecond)
-		}
+		_ = hhfctl.SwitchPowerReset(ctx, sw.Name)
 	}
 	wg.Wait()
 

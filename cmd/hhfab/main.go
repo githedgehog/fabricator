@@ -64,7 +64,7 @@ func main() {
 }
 
 func Run(ctx context.Context) error {
-	var verbose, brief bool
+	var verbose, brief, yes bool
 	verboseFlag := &cli.BoolFlag{
 		Name:        "verbose",
 		Aliases:     []string{"v"},
@@ -80,6 +80,19 @@ func Run(ctx context.Context) error {
 		EnvVars:     []string{"HHFAB_BRIEF"},
 		Destination: &brief,
 		Category:    FlagCatGlobal,
+	}
+	yesFlag := &cli.BoolFlag{
+		Name:        "yes",
+		Aliases:     []string{"y"},
+		Usage:       "assume yes",
+		Destination: &yes,
+	}
+	yesCheck := func(_ *cli.Context) error {
+		if !yes {
+			return cli.Exit("\033[31mWARNING:\033[0m Potentially dangerous operation. Please confirm with --yes if you're sure.", 1)
+		}
+
+		return nil
 	}
 
 	defaultWorkDir, err := os.Getwd()
@@ -849,11 +862,23 @@ func Run(ctx context.Context) error {
 										Aliases: []string{"n"},
 										Usage:   "name of the switch to reinstall, or use '--all' for all switches",
 									},
+									&cli.BoolFlag{
+										Name:  "all",
+										Usage: "apply action to all switches",
+									},
+									yesFlag,
 								},
 								Action: func(c *cli.Context) error {
 									switchName := c.String("name")
+									if c.Bool("all") {
+										switchName = "--all"
+									}
 									if switchName == "" {
 										return fmt.Errorf("missing switch name or --all") //nolint:goerr113
+									}
+
+									if err := yesCheck(c); err != nil {
+										return err
 									}
 
 									err := hhfab.DoSwitchReinstall(ctx, workDir, cacheDir, switchName, verbose)
