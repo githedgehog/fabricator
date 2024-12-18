@@ -16,7 +16,6 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/lmittmann/tint"
 	"github.com/mattn/go-isatty"
-	"github.com/pkg/errors"
 	slogmulti "github.com/samber/slog-multi"
 	"github.com/urfave/cli/v2"
 	"go.githedgehog.com/fabric/api/meta"
@@ -871,10 +870,6 @@ func Run(ctx context.Context) error {
 								},
 								UsageText: "hhfab vlab switch power [--name <switchName>|--all] <action>",
 								Action: func(c *cli.Context) error {
-									if err := yesCheck(c); err != nil {
-										return wrapErrWithPressToContinue(err)
-									}
-
 									switchName := c.String("name")
 									if c.Bool("all") {
 										switchName = "--all"
@@ -892,12 +887,15 @@ func Run(ctx context.Context) error {
 										return fmt.Errorf("invalid power action: %s (use ON, OFF, or CYCLE)", powerAction) //nolint:goerr113
 									}
 
-									return wrapErrWithPressToContinue(
-										errors.Wrapf(
-											hhfab.DoSwitchPower(ctx, workDir, cacheDir, switchName, powerAction),
-											"failed to power switch",
-										),
-									)
+									if err := yesCheck(c); err != nil {
+										return err
+									}
+
+									if err := hhfab.DoSwitchPower(ctx, workDir, cacheDir, switchName, powerAction); err != nil {
+										return fmt.Errorf("failed to power switch: %w", err)
+									}
+
+									return nil
 								},
 							},
 						},
@@ -971,18 +969,4 @@ func Run(ctx context.Context) error {
 	}
 
 	return app.Run(os.Args) //nolint:wrapcheck
-}
-
-func wrapErrWithPressToContinue(err error) error {
-	if err == nil {
-		return nil
-	}
-
-	if strings.Contains(os.Getenv("_"), "k9s") {
-		slog.Error("Failed", "err", err.Error())
-		slog.Warn("Press Enter to continue...")
-		_, _ = fmt.Scanln()
-	}
-
-	return err
 }

@@ -272,7 +272,12 @@ func (c *Config) VLABPower(ctx context.Context, name string, action string, pduC
 	}
 
 	if !foundAnnotations {
-		return fmt.Errorf("no annotations found for any switches") //nolint:goerr113
+		targetSW := name
+		if name == "--all" {
+			targetSW = "any switches"
+		}
+
+		return fmt.Errorf("no annotations found for %s", targetSW) //nolint:goerr113
 	}
 
 	// Power action request to PDU API
