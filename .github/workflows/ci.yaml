@@ -195,22 +195,22 @@ jobs:
       matrix:
         fabricmode:
           - spine-leaf
-          - collapsed-core
         includeonie:
-          - "--include-onie=false"
+          - false
         buildmode:
-          - "--mode=usb"
-          - "--mode=iso"
+          - usb
+          - iso
+          - manual
         include:
+          - fabricmode: collapsed-core
+            includeonie: false
+            buildmode: iso
           - fabricmode: spine-leaf
-            includeonie: "--include-onie=false"
-            buildmode: "--mode=manual"
+            includeonie: true
+            buildmode: usb
           - fabricmode: spine-leaf
-            includeonie: "--include-onie=true"
-            buildmode: "--mode=usb"
-          - fabricmode: spine-leaf
-            includeonie: "--include-onie=true"
-            buildmode: "--mode=iso"
+            includeonie: true
+            buildmode: iso
 
     steps:
       - name: Runner host
@@ -240,9 +240,9 @@ jobs:
         env:
           HHFAB_REG_REPO: 127.0.0.1:30000
         run: |
-          bin/hhfab init -v --dev -m ${{ matrix.fabricmode }} ${{ matrix.includeonie }}
+          bin/hhfab init -v --dev -m ${{ matrix.fabricmode }} --include-onie=${{ matrix.includeonie }}
           bin/hhfab vlab gen -v
-          bin/hhfab vlab up -v --ready setup-vpcs --ready test-connectivity --ready exit ${{ matrix.buildmode }}
+          bin/hhfab vlab up -v --ready setup-vpcs --ready test-connectivity --ready exit --mode=${{ matrix.buildmode }}
 
       - name: Dump local registry logs
         if: ${{ always() }}
@@ -266,10 +266,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        fabricmode:
-          - spine-leaf
-        fromversion:
-          - "beta-1"
+        include:
+          - fabricmode: spine-leaf
+            fromversion: "beta-1"
+            fromflags: "--usb"
+          - fabricmode: spine-leaf
+            fromversion: "24.09"
+            fromflags: "-m=iso"
 
     steps:
       - name: Runner host
@@ -300,7 +303,7 @@ jobs:
 
           old/hhfab init -v --dev -m ${{ matrix.fabricmode }} --include-onie=true
           old/hhfab vlab gen -v
-          old/hhfab vlab up -v --ready setup-vpcs --ready test-connectivity --ready exit --usb=true
+          old/hhfab vlab up -v --ready setup-vpcs --ready test-connectivity --ready exit ${{ matrix.fromflags }}
 
       - name: Build current hhfab
         run: |
@@ -344,8 +347,10 @@ jobs:
     runs-on: lab
     if: startsWith(github.event.ref, 'refs/tags/v') && github.event_name == 'push'
     needs:
-      - builds
+      - build
+      - build-multi
       - vlab
+      - vlab-upgrade
 
     steps:
       - name: Checkout repository
@@ -395,8 +400,10 @@ jobs:
     runs-on: lab
     if: github.event.ref == 'refs/heads/master' && github.event_name == 'push'
     needs:
-      - builds
+      - build
+      - build-multi
       - vlab
+      - vlab-upgrade
 
     steps:
       - name: Checkout repository
