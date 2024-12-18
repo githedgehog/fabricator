@@ -66,6 +66,13 @@ storage:
         inline: |
           Hedgehog Control Node
 
+    - path: /etc/systemd/timesyncd.conf
+      mode: 0644
+      contents:
+        inline: |
+          [Time]
+          NTP={{ .ControlVIP }}
+
     - path: /etc/systemd/network/10-dummy.netdev
       mode: 0644
       contents:
