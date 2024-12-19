@@ -51,12 +51,15 @@ The installation instructions above are for the most part distribution
 agnostic. Some of the configuration files mentioned in the link are below:
 
 <details>
+
 This file:
 * creates a registry with data in `/tmp/zot`
 * runs a localhost only server on port 30000
 * mirrors everything from the githedgehog github repo
+
 <summary> /etc/zot/config.json </summary>
-```json
+
+```
 {
   "log": {
     "level": "debug"
@@ -91,14 +94,18 @@ This file:
     }
   }
 }
+
 ```
 </details>
 
 <details>
+
 This file is supplying credentials for zot to read packages using your github
 account.
+
 <summary>/etc/zot/creds.json</summary>
-```json
+
+```
 
 {
   "ghcr.io": {
@@ -106,11 +113,17 @@ account.
     "password": "READ_ONLY_TOKEN_FROM_GITHUB"
   }
 }
+
 ```
+
 </details>
 
 <details>
+
+A systemd unit file for creating a zot registry.
+
 <summary>/etc/systemd/system/zot.service</summary>
+
 ```
 [Unit]
 Description=OCI Distribution Registry
@@ -133,17 +146,18 @@ WantedBy=multi-user.target
 
 </details>
 
+A `zot` user will need to be created, per the link above.
 
 #### Just push
 
-The fabricator repo uses a [justfile1]
-for building and deploying code. After you have made changes to your code, use
+The fabricator repo uses a [justfile][justfile1] for building and deploying code. After
+you have made changes to your code, use
 `just oci=http push` to build and push your code. All OCI artifacts will be
 versioned using the [version string in tools.just][justfile2]
 and will be pushed to the zot registry on the local machine, the new binaries will be created in `./bin/`
 
-[justfile1](https://github.com/githedgehog/fabricator/blob/21154b09112bdf148957dc75f2ce46d5be7beca0/justfile)
-[justfile2](https://github.com/githedgehog/fabricator/blob/21154b09112bdf148957dc75f2ce46d5be7beca0/hack/tools.just#L7)
+[justfile1]: https://github.com/githedgehog/fabricator/blob/21154b09112bdf148957dc75f2ce46d5be7beca0/justfile
+[justfile2]: https://github.com/githedgehog/fabricator/blob/21154b09112bdf148957dc75f2ce46d5be7beca0/hack/tools.just#L7
 
 #### hhfab
 
