@@ -19,7 +19,7 @@ as OCI compliant artifacts.
 - ghcr.io classic token with package **read** permissions
 - git
 
-#### Create a github Classic Token
+### Create a github Classic Token
 
 1. Log into github.com 
 1. Click on your icon in the top right corner
@@ -38,7 +38,7 @@ as OCI compliant artifacts.
    to configure `zot` in the following step
 
 
-#### Install Zot
+### Install Zot
 
 Zot is an OCI package registry. Zot is used on your local system as a
 pull-through cache for all artifacts that are not being changed locally as part
@@ -148,7 +148,7 @@ WantedBy=multi-user.target
 
 A `zot` user will need to be created, per the link above.
 
-#### Just push
+### Just push
 
 The fabricator repo uses a [justfile][justfile1] for building and deploying code. After
 you have made changes to your code, use
@@ -159,7 +159,7 @@ and will be pushed to the zot registry on the local machine, the new binaries wi
 [justfile1]: https://github.com/githedgehog/fabricator/blob/21154b09112bdf148957dc75f2ce46d5be7beca0/justfile
 [justfile2]: https://github.com/githedgehog/fabricator/blob/21154b09112bdf148957dc75f2ce46d5be7beca0/hack/tools.just#L7
 
-#### hhfab
+### hhfab
 
 If the code you are changing deals with setting up or managing flatcar, hhfab
 will need to be instructed to pull packages from the local zot registry and not
@@ -171,7 +171,7 @@ local changes:
 * `hhfab vlab gen`
 * `hhfab vlab up --mode iso`
 
-#### updating pods
+### updating pods
 
 * (TODO)
 
