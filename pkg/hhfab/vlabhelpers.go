@@ -291,7 +291,7 @@ func (c *Config) SwitchReinstall(ctx context.Context, name, mode, user, password
 	var wg sync.WaitGroup
 	var errs []error
 	var mu sync.Mutex
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
 	defer cancel()
 
 	start := time.Now()
@@ -328,12 +328,16 @@ func (c *Config) SwitchReinstall(ctx context.Context, name, mode, user, password
 			slog.Debug("Running cmd " + cmdName + " " + strings.Join(args, " ") + "...")
 			if err := cmd.Run(); err != nil {
 				mu.Lock()
-				if errors.Is(err, context.DeadlineExceeded) {
+				defer mu.Unlock()
+
+				var exitErr *exec.ExitError
+				if errors.As(err, &exitErr) && errors.Is(ctx.Err(), context.DeadlineExceeded) {
 					errs = append(errs, fmt.Errorf("%s: timeout (context deadline exceeded)", sw.Name)) //nolint:goerr113
+				} else if exitErr != nil {
+					errs = append(errs, fmt.Errorf("%s: killed by signal: %w", sw.Name, exitErr)) //nolint:goerr113
 				} else {
 					errs = append(errs, fmt.Errorf("%s: %w", sw.Name, err)) //nolint:goerr113
 				}
-				mu.Unlock()
 			}
 		}(sw)
 	}
