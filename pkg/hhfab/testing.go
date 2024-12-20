@@ -88,7 +88,7 @@ func GetVPC(ctx context.Context, kube client.Client, name string) (*vpcapi.VPC, 
 
 func GetKubeClient(ctx context.Context, workDir string) (client.Client, error) {
 	kubeconfig := filepath.Join(workDir, VLABDir, VLABKubeConfig)
-	return kubeutil.NewClientWithCache(ctx, kubeconfig,
+	return kubeutil.NewClient(ctx, kubeconfig,
 		wiringapi.SchemeBuilder,
 		vpcapi.SchemeBuilder,
 		agentapi.SchemeBuilder,
