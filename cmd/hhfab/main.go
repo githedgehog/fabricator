@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -23,6 +24,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab/recipe"
 	"go.githedgehog.com/fabricator/pkg/hhfab"
 	"go.githedgehog.com/fabricator/pkg/version"
+	"golang.org/x/term"
 	"gopkg.in/natefinch/lumberjack.v2"
 	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -64,7 +66,7 @@ func main() {
 }
 
 func Run(ctx context.Context) error {
-	var verbose, brief bool
+	var verbose, brief, yes bool
 	verboseFlag := &cli.BoolFlag{
 		Name:        "verbose",
 		Aliases:     []string{"v"},
@@ -80,6 +82,19 @@ func Run(ctx context.Context) error {
 		EnvVars:     []string{"HHFAB_BRIEF"},
 		Destination: &brief,
 		Category:    FlagCatGlobal,
+	}
+	yesFlag := &cli.BoolFlag{
+		Name:        "yes",
+		Aliases:     []string{"y"},
+		Usage:       "assume yes",
+		Destination: &yes,
+	}
+	yesCheck := func(_ *cli.Context) error {
+		if !yes {
+			return cli.Exit("\033[31mWARNING:\033[0m Potentially dangerous operation. Please confirm with --yes if you're sure.", 1)
+		}
+
+		return nil
 	}
 
 	defaultWorkDir, err := os.Getwd()
@@ -832,6 +847,89 @@ func Run(ctx context.Context) error {
 							}
 
 							return nil
+						},
+					},
+					{
+						Name:   "switch",
+						Usage:  "manage switch reinstall or power",
+						Flags:  append(defaultFlags, accessNameFlag),
+						Before: before(false),
+						Subcommands: []*cli.Command{
+							{
+								Name:  "reinstall",
+								Usage: "reinstall one or all switches",
+								Flags: []cli.Flag{
+									&cli.StringFlag{
+										Name:    "name",
+										Aliases: []string{"n"},
+										Usage:   "name of the switch to reinstall, or use '--all' for all switches",
+									},
+									&cli.BoolFlag{
+										Name:  "all",
+										Usage: "apply action to all switches",
+									},
+									&cli.StringFlag{
+										Name:  "mode",
+										Usage: "restart mode: reload, soft-reset, or hard-reset",
+										Value: "reload",
+									},
+									&cli.StringFlag{
+										Name:  "username",
+										Usage: "required for reload mode (if empty, user is prompted)",
+									},
+									&cli.StringFlag{
+										Name:  "password",
+										Usage: "required for reload mode (if empty, user is prompted)",
+									},
+									yesFlag,
+								},
+								Action: func(c *cli.Context) error {
+									switchName := c.String("name")
+									if c.Bool("all") {
+										switchName = "--all"
+									}
+									if switchName == "" {
+										return fmt.Errorf("missing switch name or --all") //nolint:goerr113
+									}
+
+									mode := c.String("mode")
+									validModes := map[string]bool{"reload": true, "soft-reset": true, "hard-reset": true}
+									if !validModes[mode] {
+										return fmt.Errorf("invalid mode: %s", mode) //nolint:goerr113
+									}
+
+									if err := yesCheck(c); err != nil {
+										return err
+									}
+
+									username := c.String("username")
+									password := c.String("password")
+									if mode == "reload" && (username == "" || password == "") {
+										fmt.Print("Enter username: ")
+										if _, err := fmt.Scanln(&username); err != nil {
+											return fmt.Errorf("failed to read username: %w", err)
+										}
+										fmt.Print("Enter password: ")
+										bytePassword, err := term.ReadPassword(syscall.Stdin)
+										if err != nil {
+											return fmt.Errorf("failed to read password: %w", err)
+										}
+										password = string(bytePassword)
+										fmt.Println()
+
+										if username == "" || password == "" {
+											return fmt.Errorf("credentials required for reload mode") //nolint:goerr113
+										}
+									}
+
+									if err := hhfab.DoSwitchReinstall(ctx, workDir, cacheDir, switchName, mode, username, password, verbose); err != nil {
+										return fmt.Errorf("reinstall failed: %w", err)
+									}
+
+									return nil
+								},
+								HelpName: "hhfab vlab switch reinstall",
+							},
 						},
 					},
 				},

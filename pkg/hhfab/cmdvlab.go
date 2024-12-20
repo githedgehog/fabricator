@@ -164,3 +164,12 @@ func DoVLABTestConnectivity(ctx context.Context, workDir, cacheDir string, opts 
 
 	return c.TestConnectivity(ctx, vlab, opts)
 }
+
+func DoSwitchReinstall(ctx context.Context, workDir, cacheDir, name, mode, username, password string, verbose bool) error {
+	c, _, err := loadVLABForHelpers(ctx, workDir, cacheDir)
+	if err != nil {
+		return err
+	}
+
+	return c.SwitchReinstall(ctx, name, mode, username, password, verbose)
+}
