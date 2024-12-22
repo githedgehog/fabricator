@@ -5,6 +5,8 @@ package hhfab
 
 import (
 	"context"
+	_ "embed"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/netip"
@@ -13,6 +15,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/manifoldco/promptui"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
@@ -237,6 +241,163 @@ type VLABAccessInfo struct {
 	SerialLog    string
 	IsSwitch     bool   // ssh through control node only
 	RemoteSerial string // ssh to get serial
+}
+
+//go:embed grub-selector.exp
+var grubSelectorScript string
+
+const VLABCmdGrubSelect string = "./grub-selector.exp"
+
+const AllSwitches string = "ALL"
+
+func copyGrubSelectScript() error {
+	scriptPath := "./grub-selector.exp"
+
+	existingContent, err := os.ReadFile(scriptPath)
+	if err == nil {
+		// Compare the content with the embedded script
+		if string(existingContent) == grubSelectorScript {
+			// No changes, skip writing the file
+			return nil
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("failed to read existing script: %w", err)
+	}
+
+	if err := os.WriteFile(scriptPath, []byte(grubSelectorScript), 0755); err != nil { //nolint:gosec
+		return fmt.Errorf("failed to write script: %w", err)
+	}
+
+	return nil
+}
+
+func (c *Config) SwitchReinstall(ctx context.Context, name, mode, user, password string, verbose bool, pduConf *PDUConfig) error {
+	// List switches
+	switches := wiringapi.SwitchList{}
+	if err := c.Wiring.List(ctx, &switches); err != nil {
+		return fmt.Errorf("failed to list switches: %w", err)
+	}
+
+	// Filter switches
+	var targets []wiringapi.Switch
+	if name == AllSwitches {
+		targets = switches.Items
+	} else {
+		for _, sw := range switches.Items {
+			if sw.Name == name {
+				targets = append(targets, sw)
+
+				break
+			}
+		}
+	}
+
+	if len(targets) == 0 {
+		return fmt.Errorf("no switches found for the given name: %s", name) //nolint:goerr113
+	}
+
+	if err := copyGrubSelectScript(); err != nil {
+		fmt.Println("Error copying script:", err)
+
+		return err
+	}
+	// Run commands in parallel
+	var wg sync.WaitGroup
+	var errs []error
+	var mu sync.Mutex
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
+	defer cancel()
+
+	start := time.Now()
+
+	for _, sw := range targets {
+		wg.Add(1)
+		go func(sw wiringapi.Switch) {
+			defer wg.Done()
+
+			cmdName := VLABCmdGrubSelect
+			cmd := &exec.Cmd{}
+			cmd.Dir = c.WorkDir
+			cmd.Stdin = os.Stdin
+			var args []string
+
+			if mode == "reload" {
+				args = []string{sw.Name, user, password}
+			}
+			if mode == "soft-reset" || mode == "hard-reset" {
+				args = []string{sw.Name}
+			}
+
+			if verbose {
+				_, err := exec.LookPath("byobu")
+				if err == nil {
+					// byobu exists, use it to run the command
+					byobuCmd := fmt.Sprintf("byobu new-window -d -n %s '%s %s'", sw.Name, cmdName, strings.Join(args, " "))
+					cmd = exec.CommandContext(ctx, "sh", "-c", byobuCmd)
+					cmd.Stdout = os.Stdout
+					cmd.Stderr = nil
+				} else {
+					cmd = exec.CommandContext(ctx, cmdName, args...)
+					cmd.Stdout = os.Stdout
+					cmd.Stderr = nil
+				}
+			} else {
+				cmd = exec.CommandContext(ctx, cmdName, args...)
+				cmd.Stdout = nil
+				cmd.Stderr = os.Stderr // expect messages logged to stderr to show progress
+			}
+
+			slog.Debug("Running cmd " + cmdName + " " + strings.Join(args, " ") + "...")
+			if err := cmd.Run(); err != nil {
+				mu.Lock()
+				defer mu.Unlock()
+
+				var exitErr *exec.ExitError
+				if errors.As(err, &exitErr) && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+					errs = append(errs, fmt.Errorf("%s: timeout (context deadline exceeded)", sw.Name)) //nolint:goerr113
+				} else if exitErr != nil {
+					errs = append(errs, fmt.Errorf("%s: killed by signal: %w", sw.Name, exitErr)) //nolint:goerr113
+				} else {
+					errs = append(errs, fmt.Errorf("%s: %w", sw.Name, err)) //nolint:goerr113
+				}
+			}
+		}(sw)
+	}
+
+	if mode == "hard-reset" {
+		for _, sw := range targets {
+			time.Sleep(1 * time.Second)
+			slog.Info("Executing hard-reset on", "switch", sw.Name+"...")
+			_ = c.VLABPower(ctx, sw.Name, "CYCLE", pduConf)
+		}
+	}
+
+	if mode == "soft-reset" {
+		for _, sw := range targets {
+			time.Sleep(1 * time.Second)
+			slog.Info("Executing soft-reset on", "switch", sw.Name+"...")
+			_ = hhfctl.SwitchPowerReset(ctx, sw.Name)
+		}
+	}
+	wg.Wait()
+
+	if len(errs) > 0 {
+		elapsed := time.Since(start)
+
+		return fmt.Errorf("failed switches: %v (took %v)", errs, elapsed) //nolint:goerr113
+	}
+
+	if verbose {
+		fmt.Println("Switch reinstall running in Byobu tabs until completed. Switch to them to check progress (Hit F4).")
+	} else {
+		if name == AllSwitches {
+			fmt.Println("All switches reinstalled successfully.", "took", time.Since(start))
+		} else {
+			fmt.Println("Switch", name, "reinstalled successfully.", "took", time.Since(start))
+		}
+	}
+
+	return nil
 }
 
 func (c *Config) VLABPower(ctx context.Context, name string, action string, pduConf *PDUConfig) error {

@@ -59,6 +59,7 @@ const (
 	VLABCmdSocat      = "socat"
 	VLABCmdSSH        = "ssh"
 	VLABCmdLess       = "less"
+	VLABCmdExpect     = "expect"
 
 	VLABIgnition = "ignition.json"
 
@@ -72,6 +73,7 @@ var VLABCmds = []string{
 	VLABCmdSocat,
 	VLABCmdSSH,
 	VLABCmdLess,
+	VLABCmdExpect,
 }
 
 type VLABRunOpts struct {

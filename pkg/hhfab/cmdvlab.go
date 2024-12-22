@@ -180,11 +180,17 @@ func DoSwitchPower(ctx context.Context, workDir, cacheDir, name string, action s
 	return c.VLABPower(ctx, name, action, pduConf)
 }
 
-func DoSwitchReinstall(ctx context.Context, workDir, cacheDir, _ string) error {
-	_, _, err := loadVLABForHelpers(ctx, workDir, cacheDir)
+func DoSwitchReinstall(ctx context.Context, workDir, cacheDir, name, mode, username, password string, verbose bool) error {
+	c, _, err := loadVLABForHelpers(ctx, workDir, cacheDir)
 	if err != nil {
 		return err
 	}
-	// TODO: Implement reinstall logic
-	return nil
+
+	// Load PDU configuration from YAML
+	pduConf, err := loadPDUConf(workDir)
+	if err != nil {
+		return fmt.Errorf("failed to load PDU config: %w", err)
+	}
+
+	return c.SwitchReinstall(ctx, name, mode, username, password, verbose, pduConf)
 }
