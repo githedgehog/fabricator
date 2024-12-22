@@ -228,6 +228,11 @@ jobs:
           go-version: stable
           cache: true
 
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y expect
+
       - name: Setup local registry
         run: |
           just --timestamp _localreg &
@@ -289,6 +294,11 @@ jobs:
         with:
           go-version: stable
           cache: true
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y expect
 
       - name: Setup local registry
         run: |
