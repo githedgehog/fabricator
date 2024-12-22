@@ -1,0 +1,180 @@
+#!/usr/bin/expect -f
+# Copyright 2024 Hedgehog
+# SPDX-License-Identifier: Apache-2.0
+
+set force_conservative 1
+set timeout -1
+
+if {[llength $argv] == 1} {
+	puts "No credentials are provided, assume external power reset"
+	lassign $argv SW_NAME
+	set POWER_RESET 1
+} elseif {[llength $argv] == 3} {
+	puts "Credentials are provided, will attempt reboot"
+	lassign $argv SW_NAME USER PASSWORD
+	set POWER_RESET 0
+} else {
+	puts "Usage: $argv0 SW_NAME \[USER\] \[PASSWORD\]"
+	exit 1
+}
+
+# Define ANSI escape codes for colors
+set GREY "\033\[38;5;242m"
+set INF "\033\[0;92m"
+set ERR "\033\[0;31m"
+set RESET "\033\[0m"
+set LOG_BG "\033\[49m"
+
+# Helper function to send colorized output to stderr
+proc log_message {loglevel SW_NAME msg} {
+	set current_time [clock format [clock seconds] -format "%H:%M:%S"]
+
+	if {$loglevel == "INF"} {
+		puts stderr "$::LOG_BG$::GREY$current_time$::RESET $::INF$loglevel$::RESET $SW_NAME: $msg"
+	} elseif {$loglevel == "ERR"} {
+		puts stderr "$::LOG_BG$::GREY$current_time$::RESET $::ERR$loglevel$::RESET $SW_NAME: $msg"
+	} else {
+		puts stderr "$::LOG_BG$::GREY$current_time$::RESET $SW_NAME: $msg"
+	}
+}
+
+set KEY_UP   "\033\[A"
+set KEY_DOWN "\033\[B"
+set KEY_HOME "\033\[H"
+set KEY_PGUP "\033\[5~"
+set ONIE_HIGHLIGHT "*ONIE"
+set ONIE_CHAIN_INSTALL "*ONIE: Install OS"
+
+set ERROR_CONNECTION 1
+set ERROR_LOGIN 2
+set ERROR_GRUB 3
+set ERROR_INSTALL 4
+
+# Define a procedure for GRUB menu handling
+proc handle_grub_menu {SW_NAME KEY_HOME KEY_DOWN ONIE_HIGHLIGHT} {
+    log_message "INF" $SW_NAME "GRUB Menu detected"
+    # Select the ONIE option, and finally the Install OS option
+    sleep 1
+    send -- "$KEY_HOME"
+    set timeout 1
+    expect {
+        -ex $ONIE_HIGHLIGHT {
+            set timeout -1
+            send "\r"
+            expect -ex "GNU GRUB"
+            send -- "$KEY_HOME"
+            sleep 1
+            send "\r"
+            expect {
+                "ONIE: OS Install Mode ..." {
+                    log_message "INF" $SW_NAME "ONIE OS Installing..."
+                }
+                timeout {
+                    send "\r"
+                }
+            }
+        }
+        timeout {
+            send -- "$KEY_DOWN"
+            exp_continue
+        }
+    }
+}
+
+# connect to the serial console of the switch
+# using hhfab now for simplicity but might want to do it directly instead?
+puts "connecting to serial of $SW_NAME via hhfab serial..."
+# check if hhfab is in the local folder or in the path
+set HHFAB "NO"
+if {[file exists "./hhfab"]} {
+	set HHFAB "./hhfab"
+} else {
+	set HHFAB [exec which hhfab]
+}
+spawn $HHFAB vlab serial -n $SW_NAME
+expect {
+	-ex "Type the hot key to suspend the connection: <CTRL>Z" {
+		send "\r"
+	}
+	-ex "Use Ctrl+] to escape, if no output try Enter, safe to use Ctrl+C/Ctrl+Z" {
+		send "\r"
+	}
+	-ex "The connection was unsuccessful" {
+		exit $ERROR_CONNECTION
+	}
+}
+
+if { ! $POWER_RESET} {
+	expect {
+		# handle wrong user/password
+		-ex "Login incorrect" {
+			exit $ERROR_LOGIN
+		}
+		# handle user login if not already logged in
+		-re "$SW_NAME login:" {
+			send "$USER\r"
+			exp_continue
+		}
+		-ex "Password:" {
+			send "$PASSWORD\r"
+			exp_continue
+		}
+		# reboot in case we are at the prompt - eventually this will be done via PDU
+		-ex "admin@$SW_NAME:~$" {
+			log_message "INF" $SW_NAME "Rebooting..."
+			send "sudo reboot\r"
+			exp_continue
+		}
+		# same for rescue mode
+		-ex "ONIE:/ #" {
+			send "reboot\r"
+			sleep 5
+			exp_continue
+		}
+		-ex "GNU GRUB" {
+	            handle_grub_menu $SW_NAME $KEY_HOME $KEY_DOWN $ONIE_HIGHLIGHT
+		}
+	}
+} else {
+	expect -timeout 60 -ex "GNU GRUB" {
+		handle_grub_menu $SW_NAME $KEY_HOME $KEY_DOWN $ONIE_HIGHLIGHT
+	} timeout {
+		log_message "ERR" $SW_NAME "Failed to reset. GRUB not detected."
+		exit $ERROR_INSTALL
+	}
+}
+
+# Wait for confirmation of the Install OS option
+expect -timeout 60 -ex "Starting ONIE Service Discovery" {
+	# Wait for successful NOS installation
+	expect -timeout 300 -ex "ONIE: NOS install successful" {
+		log_message "INF" $SW_NAME "NOS installed successfully."
+		set install_success 1
+	} timeout {
+		log_message "ERR" $SW_NAME "Failed to install NOS within 5 minutes from service discovery."
+	}
+} timeout {
+	log_message "ERR" $SW_NAME "Failed to select install mode."
+}
+
+# Exit if install failed
+if {$install_success == 0} {
+	exit $ERROR_INSTALL
+}
+
+# Wait for the login prompt
+expect -timeout 300 -ex "sonic login:" {
+	log_message "INF" $SW_NAME "Sonic login prompt detected."
+} timeout {
+	log_message "ERR" $SW_NAME "Login prompt not detected within 5 minutes."
+	exit $ERROR_INSTALL
+}
+
+# Wait for the "System is ready" message
+expect -timeout 300 -ex "System is ready" {
+	log_message "INF" $SW_NAME "System is ready message detected."
+	exit 0
+} timeout {
+	log_message "ERR" $SW_NAME "System did not become ready within 5 minutes."
+	exit $ERROR_INSTALL
+}
