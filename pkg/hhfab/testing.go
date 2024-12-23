@@ -1163,6 +1163,10 @@ func checkPing(ctx context.Context, opts TestConnectivityOpts, pings *semaphore.
 		"expected", expected, "ok", pingOk, "fail", pingFail, "err", err, "out", out)
 
 	if pingOk == pingFail {
+		if err != nil {
+			return fmt.Errorf("running ping: %w: %s", err, out) // TODO replace with custom error?
+		}
+
 		return fmt.Errorf("unexpected ping result: %s", out) // TODO replace with custom error?
 	}
 
@@ -1270,6 +1274,10 @@ func checkCurl(ctx context.Context, opts TestConnectivityOpts, curls *semaphore.
 		slog.Debug("Curl result", "from", from, "to", toIP, "expected", expected, "ok", curlOk, "fail", curlFail, "err", err, "out", out)
 
 		if curlOk == curlFail {
+			if err != nil {
+				return fmt.Errorf("running curl: %w: %s", err, out) // TODO replace with custom error?
+			}
+
 			return fmt.Errorf("unexpected curl result: %s", out)
 		}
 
