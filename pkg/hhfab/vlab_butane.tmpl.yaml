@@ -55,3 +55,15 @@ storage:
           TOOLBOX_DOCKER_IMAGE=ghcr.io/githedgehog/toolbox
           TOOLBOX_DOCKER_TAG=latest
           TOOLBOX_USER=root
+
+    - path: /etc/systemd/network/99-wildcard.network
+      mode: 0644
+      contents:
+        inline: |
+          [Match]
+          Name=en*
+
+          [Network]
+          DHCP=yes
+          LLDP=yes
+          EmitLLDP=yes
