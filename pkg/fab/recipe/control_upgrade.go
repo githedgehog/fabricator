@@ -28,7 +28,6 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k9s"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/zot"
 	coreapi "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
@@ -78,14 +77,14 @@ func (c *ControlUpgrade) Run(ctx context.Context) error {
 	}
 
 	backoff := wait.Backoff{
-		Steps:    10,
+		Steps:    17,
 		Duration: 500 * time.Millisecond,
 		Factor:   1.5,
 		Jitter:   0.1,
 	}
 
-	if err := retry.OnError(backoff, func(err error) bool {
-		return apierrors.ReasonForError(err) != metav1.StatusReasonUnknown
+	if err := retry.OnError(backoff, func(error) bool {
+		return true
 	}, func() error {
 		f, control, err := fab.GetFabAndControls(ctx, kube, false)
 		if err != nil {
@@ -187,7 +186,7 @@ func (c *ControlUpgrade) uploadAirgap(ctx context.Context, username, password st
 	}
 
 	backoff := wait.Backoff{
-		Steps:    10,
+		Steps:    17,
 		Duration: 500 * time.Millisecond,
 		Factor:   1.5,
 		Jitter:   0.1,
