@@ -137,7 +137,7 @@ func EnforceKubeInstall(ctx context.Context, kube client.Client, cfg fabapi.Fabr
 			var err error
 
 			backoff := wait.Backoff{
-				Steps:    10,
+				Steps:    17,
 				Duration: 500 * time.Millisecond,
 				Factor:   1.5,
 				Jitter:   0.1,
@@ -149,7 +149,7 @@ func EnforceKubeInstall(ctx context.Context, kube client.Client, cfg fabapi.Fabr
 
 			attempt := 0
 			if err := retry.OnError(backoff, func(error) bool {
-				return true
+				return !apierrors.IsConflict(err)
 			}, func() error {
 				if attempt > 0 {
 					slog.Debug("Retrying create or update", "kind", kind, "name", name, "attempt", attempt)

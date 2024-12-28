@@ -573,7 +573,7 @@ func (c *ControlInstall) installWiring(ctx context.Context, kube client.Client) 
 			attempt := 0
 
 			if err := retry.OnError(wait.Backoff{
-				Steps:    10,
+				Steps:    17,
 				Duration: 500 * time.Millisecond,
 				Factor:   1.5,
 				Jitter:   0.1,
