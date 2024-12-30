@@ -21,7 +21,7 @@ if {[llength $argv] == 1} {
 # Define ANSI escape codes for colors
 set GREY "\033\[38;5;242m"
 set INF "\033\[0;92m"
-set ERR "\033\[0;31m"
+set ERR "\033\[38;5;196m"
 set RESET "\033\[0m"
 set LOG_BG "\033\[49m"
 
@@ -49,6 +49,8 @@ set ERROR_CONNECTION 1
 set ERROR_LOGIN 2
 set ERROR_GRUB 3
 set ERROR_INSTALL 4
+set ERROR_TIMEOUT 5
+set ERROR_EOF 6
 
 # Define a procedure for GRUB menu handling
 proc handle_grub_menu {SW_NAME KEY_HOME KEY_DOWN ONIE_HIGHLIGHT} {
@@ -101,6 +103,14 @@ expect {
 	}
 	-ex "The connection was unsuccessful" {
 		exit $ERROR_CONNECTION
+	}
+	timeout {
+		log_message "ERR" $SW_NAME "Connection to console timed out"
+		exit $ERROR_TIMEOUT
+	}
+	eof {
+		log_message "ERR" $SW_NAME "Connection to console failed"
+		exit $ERROR_EOF
 	}
 }
 
