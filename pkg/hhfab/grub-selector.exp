@@ -146,7 +146,7 @@ if { ! $POWER_RESET} {
 		}
 	}
 } else {
-	expect -timeout 60 -ex "GNU GRUB" {
+	expect -timeout 150 -ex "GNU GRUB" {
 		handle_grub_menu $SW_NAME $KEY_HOME $KEY_DOWN $ONIE_HIGHLIGHT
 	} timeout {
 		log_message "ERR" $SW_NAME "Failed to reset. GRUB not detected."
