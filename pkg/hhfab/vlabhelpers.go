@@ -321,17 +321,16 @@ func (c *Config) SwitchReinstall(ctx context.Context, name, mode, user, password
 			cmd.Stdin = os.Stdin
 			var args []string
 
-			if mode == "reload" {
+			if mode == "reboot" {
 				args = []string{sw.Name, user, password}
 			}
-			if mode == "soft-reset" || mode == "hard-reset" {
+			if mode == "hard-reset" {
 				args = []string{sw.Name}
 			}
 
 			if verbose {
-				_, err := exec.LookPath("byobu")
-				if err == nil {
-					// byobu exists, use it to run the command
+				if _, err := exec.LookPath("byobu"); err == nil && name == AllSwitches {
+					// use byobu to show progress in separate tabs
 					byobuCmd := fmt.Sprintf("byobu new-window -d -n %s '%s %s'", sw.Name, cmdName, strings.Join(args, " "))
 					cmd = exec.CommandContext(ctx, "sh", "-c", byobuCmd)
 					cmd.Stdout = os.Stdout
@@ -369,14 +368,6 @@ func (c *Config) SwitchReinstall(ctx context.Context, name, mode, user, password
 			time.Sleep(1 * time.Second)
 			slog.Info("Executing hard-reset on", "switch", sw.Name+"...")
 			_ = c.VLABPower(ctx, sw.Name, "CYCLE", pduConf)
-		}
-	}
-
-	if mode == "soft-reset" {
-		for _, sw := range targets {
-			time.Sleep(1 * time.Second)
-			slog.Info("Executing soft-reset on", "switch", sw.Name+"...")
-			_ = hhfctl.SwitchPowerReset(ctx, sw.Name)
 		}
 	}
 	wg.Wait()
@@ -459,7 +450,7 @@ func (c *Config) VLABPower(ctx context.Context, name string, action string, pduC
 
 				continue
 			}
-			slog.Info("Performing power", "action", action, "on switch", swName, "psu", psuName)
+			slog.Debug("Performing power", "action", action, "on switch", swName, "psu", psuName)
 			if err := netio.ControlOutlet(ctx, pduIP, creds.User, creds.Password, outletID, action); err != nil {
 				return fmt.Errorf("failed to power %s switch %s %s: %w", action, swName, psuName, err)
 			}

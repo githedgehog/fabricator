@@ -873,16 +873,16 @@ func Run(ctx context.Context) error {
 									},
 									&cli.StringFlag{
 										Name:  "mode",
-										Usage: "restart mode: reload, soft-reset, or hard-reset",
-										Value: "reload",
+										Usage: "restart mode: reboot or hard-reset",
+										Value: "reboot",
 									},
 									&cli.StringFlag{
 										Name:  "username",
-										Usage: "required for reload mode (if empty, user is prompted)",
+										Usage: "required for reboot mode (if empty, user is prompted)",
 									},
 									&cli.StringFlag{
 										Name:  "password",
-										Usage: "required for reload mode (if empty, user is prompted)",
+										Usage: "required for reboot mode (if empty, user is prompted)",
 									},
 									yesFlag,
 								},
@@ -896,7 +896,7 @@ func Run(ctx context.Context) error {
 									}
 
 									mode := c.String("mode")
-									validModes := map[string]bool{"reload": true, "soft-reset": true, "hard-reset": true}
+									validModes := map[string]bool{"reboot": true, "hard-reset": true}
 									if !validModes[mode] {
 										return fmt.Errorf("invalid mode: %s", mode) //nolint:goerr113
 									}
@@ -907,7 +907,7 @@ func Run(ctx context.Context) error {
 
 									username := c.String("username")
 									password := c.String("password")
-									if mode == "reload" && (username == "" || password == "") {
+									if mode == "reboot" && (username == "" || password == "") {
 										fmt.Print("Enter username: ")
 										if _, err := fmt.Scanln(&username); err != nil {
 											return fmt.Errorf("failed to read username: %w", err)
@@ -921,7 +921,7 @@ func Run(ctx context.Context) error {
 										fmt.Println()
 
 										if username == "" || password == "" {
-											return fmt.Errorf("credentials required for reload mode") //nolint:goerr113
+											return fmt.Errorf("credentials required for reboot mode") //nolint:goerr113
 										}
 									}
 
