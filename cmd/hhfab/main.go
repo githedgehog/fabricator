@@ -859,17 +859,17 @@ func Run(ctx context.Context) error {
 						Subcommands: []*cli.Command{
 							{
 								Name:      "reinstall",
-								Usage:     "reinstall one or all switches",
-								UsageText: "hhfab vlab switch reinstall [--name <switchName>|--all] <action>",
+								Usage:     "rebot/reset and reinstall NOS on switches",
+								UsageText: "hhfab vlab switch reinstall --all[--name <switchName> [mode reboot|hard-reset]",
 								Flags: []cli.Flag{
 									&cli.StringFlag{
 										Name:    "name",
 										Aliases: []string{"n"},
-										Usage:   "name of the switch to reinstall, or use '--all' for all switches",
+										Usage:   "name of the switch to reinstall",
 									},
 									&cli.BoolFlag{
 										Name:  "all",
-										Usage: "apply action to all switches",
+										Usage: "reinstall all switches",
 									},
 									&cli.StringFlag{
 										Name:  "mode",
@@ -892,7 +892,7 @@ func Run(ctx context.Context) error {
 										switchName = AllSwitches
 									}
 									if switchName == "" {
-										return fmt.Errorf("missing switch name or --all") //nolint:goerr113
+										return fmt.Errorf("missing switch name") //nolint:goerr113
 									}
 
 									mode := c.String("mode")
@@ -948,14 +948,14 @@ func Run(ctx context.Context) error {
 									},
 									yesFlag,
 								},
-								UsageText: "hhfab vlab switch power [--name <switchName>|--all] <action>",
+								UsageText: "hhfab vlab switch power [--all|--name <switchName>] <action>",
 								Action: func(c *cli.Context) error {
 									switchName := c.String("name")
 									if c.Bool("all") {
 										switchName = AllSwitches
 									}
 									if switchName == "" {
-										return fmt.Errorf("missing required flag: --name/-n") //nolint:goerr113
+										return fmt.Errorf("missing switch name") //nolint:goerr113
 									}
 
 									if c.NArg() != 1 {
