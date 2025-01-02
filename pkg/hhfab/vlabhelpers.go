@@ -403,8 +403,8 @@ func (c *Config) VLABPower(ctx context.Context, name string, action string, pduC
 	// Populate entries
 	foundAnnotations := false
 	for _, sw := range switches.Items {
-		// Skip if the name is not "--all" and doesn't match sw.Name
-		if name != "--all" && sw.Name != name {
+		// Skip if the name is not AllSwitches and doesn't match sw.Name
+		if name != AllSwitches && sw.Name != name {
 			continue
 		}
 		powerInfo := hhfctl.GetPowerInfo(&sw)
@@ -425,7 +425,7 @@ func (c *Config) VLABPower(ctx context.Context, name string, action string, pduC
 
 	if !foundAnnotations {
 		targetSW := name
-		if name == "--all" {
+		if name == AllSwitches {
 			targetSW = "any switches"
 		}
 
