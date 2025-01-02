@@ -56,12 +56,14 @@ storage:
           TOOLBOX_DOCKER_TAG=latest
           TOOLBOX_USER=root
 
-    - path: /etc/systemd/network/99-wildcard.network
+    - path: /etc/systemd/network/99-lldp.network
       mode: 0644
       contents:
         inline: |
           [Match]
-          Name=en*
+          Name=*
+          Type=ether
+          Kind=!vlan
 
           [Network]
           DHCP=yes
