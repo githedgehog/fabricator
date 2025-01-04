@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -23,6 +24,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab/recipe"
 	"go.githedgehog.com/fabricator/pkg/hhfab"
 	"go.githedgehog.com/fabricator/pkg/version"
+	"golang.org/x/term"
 	"gopkg.in/natefinch/lumberjack.v2"
 	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -55,6 +57,8 @@ const (
 	FlagNameReady                 = "ready"
 )
 
+const AllSwitches string = "ALL"
+
 func main() {
 	if err := Run(context.Background()); err != nil {
 		// TODO what if slog isn't initialized yet?
@@ -64,7 +68,7 @@ func main() {
 }
 
 func Run(ctx context.Context) error {
-	var verbose, brief bool
+	var verbose, brief, yes bool
 	verboseFlag := &cli.BoolFlag{
 		Name:        "verbose",
 		Aliases:     []string{"v"},
@@ -80,6 +84,19 @@ func Run(ctx context.Context) error {
 		EnvVars:     []string{"HHFAB_BRIEF"},
 		Destination: &brief,
 		Category:    FlagCatGlobal,
+	}
+	yesFlag := &cli.BoolFlag{
+		Name:        "yes",
+		Aliases:     []string{"y"},
+		Usage:       "assume yes",
+		Destination: &yes,
+	}
+	yesCheck := func(_ *cli.Context) error {
+		if !yes {
+			return cli.Exit("\033[31mWARNING:\033[0m Potentially dangerous operation. Please confirm with --yes if you're sure.", 1)
+		}
+
+		return nil
 	}
 
 	defaultWorkDir, err := os.Getwd()
@@ -832,6 +849,135 @@ func Run(ctx context.Context) error {
 							}
 
 							return nil
+						},
+					},
+					{
+						Name:   "switch",
+						Usage:  "manage switch reinstall or power",
+						Flags:  append(defaultFlags, accessNameFlag),
+						Before: before(false),
+						Subcommands: []*cli.Command{
+							{
+								Name:      "reinstall",
+								Usage:     "rebot/reset and reinstall NOS on switches",
+								UsageText: "hhfab vlab switch reinstall --all[--name <switchName> [mode reboot|hard-reset]",
+								Flags: []cli.Flag{
+									&cli.StringFlag{
+										Name:    "name",
+										Aliases: []string{"n"},
+										Usage:   "name of the switch to reinstall",
+									},
+									&cli.BoolFlag{
+										Name:  "all",
+										Usage: "reinstall all switches",
+									},
+									&cli.StringFlag{
+										Name:  "mode",
+										Usage: "restart mode: reboot or hard-reset",
+										Value: "reboot",
+									},
+									&cli.StringFlag{
+										Name:  "username",
+										Usage: "required for reboot mode (if empty, user is prompted)",
+									},
+									&cli.StringFlag{
+										Name:  "password",
+										Usage: "required for reboot mode (if empty, user is prompted)",
+									},
+									yesFlag,
+								},
+								Action: func(c *cli.Context) error {
+									switchName := c.String("name")
+									if c.Bool("all") {
+										switchName = AllSwitches
+									}
+									if switchName == "" {
+										return fmt.Errorf("missing switch name") //nolint:goerr113
+									}
+
+									mode := c.String("mode")
+									validModes := map[string]bool{"reboot": true, "hard-reset": true}
+									if !validModes[mode] {
+										return fmt.Errorf("invalid mode: %s", mode) //nolint:goerr113
+									}
+
+									if err := yesCheck(c); err != nil {
+										return err
+									}
+
+									username := c.String("username")
+									password := c.String("password")
+									if mode == "reboot" && (username == "" || password == "") {
+										fmt.Print("Enter username: ")
+										if _, err := fmt.Scanln(&username); err != nil {
+											return fmt.Errorf("failed to read username: %w", err)
+										}
+										fmt.Print("Enter password: ")
+										bytePassword, err := term.ReadPassword(syscall.Stdin)
+										if err != nil {
+											return fmt.Errorf("failed to read password: %w", err)
+										}
+										password = string(bytePassword)
+										fmt.Println()
+
+										if username == "" || password == "" {
+											return fmt.Errorf("credentials required for reboot mode") //nolint:goerr113
+										}
+									}
+
+									if err := hhfab.DoSwitchReinstall(ctx, workDir, cacheDir, switchName, mode, username, password, verbose); err != nil {
+										return fmt.Errorf("reinstall failed: %w", err)
+									}
+
+									return nil
+								},
+								HelpName: "hhfab vlab switch reinstall",
+							},
+							{
+								Name:  "power",
+								Usage: "manage switch power state (ON, OFF, or CYCLE)",
+								Flags: []cli.Flag{
+									&cli.StringFlag{
+										Name:    "name",
+										Aliases: []string{"n"},
+										Usage:   "name of the switch to power ON|OFF|CYCLE",
+									},
+									&cli.BoolFlag{
+										Name:  "all",
+										Usage: "apply action to all switches",
+									},
+									yesFlag,
+								},
+								UsageText: "hhfab vlab switch power [--all|--name <switchName>] <action>",
+								Action: func(c *cli.Context) error {
+									switchName := c.String("name")
+									if c.Bool("all") {
+										switchName = AllSwitches
+									}
+									if switchName == "" {
+										return fmt.Errorf("missing switch name") //nolint:goerr113
+									}
+
+									if c.NArg() != 1 {
+										return fmt.Errorf("unexpected amount of agruments (use ON, OFF, or CYCLE)") //nolint:goerr113
+									}
+
+									powerAction := strings.ToUpper(c.Args().First())
+									if powerAction != "ON" && powerAction != "OFF" && powerAction != "CYCLE" {
+										return fmt.Errorf("invalid power action: %s (use ON, OFF, or CYCLE)", powerAction) //nolint:goerr113
+									}
+
+									if err := yesCheck(c); err != nil {
+										return err
+									}
+
+									if err := hhfab.DoSwitchPower(ctx, workDir, cacheDir, switchName, powerAction); err != nil {
+										return fmt.Errorf("failed to power switch: %w", err)
+									}
+
+									return nil
+								},
+							},
 						},
 					},
 				},
