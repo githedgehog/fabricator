@@ -18,6 +18,7 @@ as OCI compliant artifacts.
 - [zot v2.1.0](https://zotregistry.dev/v2.1.0/)
 - ghcr.io classic token with package **read** permissions
 - git
+- [just v1.38.0 or greater](https://github.com/casey/just)
 
 ### Create a github Classic Token
 
@@ -167,7 +168,7 @@ the ghcr. To do this, specify the repo pass the `--registry-repo
 127.0.0.1:30000` flag and argument to  `hhfab init` along with other flags.
 From there continue on with the `hhfab` commands. To get vlab running with
 local changes:
-* `hhfab init --dev --registry-repo 127.0.0.1`
+* `hhfab init --dev --registry-repo 127.0.0.1:30000`
 * `hhfab vlab gen`
 * `hhfab vlab up --mode iso`
 
