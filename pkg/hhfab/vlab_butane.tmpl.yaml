@@ -20,6 +20,20 @@ systemd:
     - name: locksmithd.service
       mask: true
 
+    - name: disable-nic-lldp-agent.service
+      enabled: true
+      contents: |
+        [Unit]
+        Description=Disable LLDP on i40e Devices
+        After=network.target
+
+        [Service]
+        ExecStart=/var/lib/scripts/disable_nic_lldp_agent.sh
+        Type=oneshot
+
+        [Install]
+        WantedBy=multi-user.target
+
 storage:
   files:
     - path: /etc/flatcar/update.conf
@@ -69,3 +83,14 @@ storage:
           DHCP=yes
           LLDP=yes
           EmitLLDP=yes
+
+    - path: /var/lib/scripts/disable_nic_lldp_agent.sh
+      mode: 0755
+      contents:
+        inline: |
+          #!/bin/bash
+          for device in /sys/kernel/debug/i40e/*; do
+              if [ -d "$device" ] && [ -w "$device/command" ]; then
+                  echo 'lldp stop' > "$device/command"
+              fi
+          done
