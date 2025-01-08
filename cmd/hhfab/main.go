@@ -146,31 +146,37 @@ func Run(ctx context.Context) error {
 			Name:        "fabric-links-count",
 			Usage:       "number of fabric links if fabric mode is spine-leaf",
 			Destination: &wgFabricLinksCount,
+			Value:       2,
 		},
 		&cli.UintFlag{
 			Name:        "mclag-leafs-count",
 			Usage:       "number of mclag leafs (should be even)",
 			Destination: &wgMCLAGLeafsCount,
+			Value:       2,
 		},
 		&cli.StringFlag{
 			Name:        "eslag-leaf-groups",
 			Usage:       "eslag leaf groups (comma separated list of number of ESLAG switches in each group, should be 2-4 per group, e.g. 2,4,2 for 3 groups with 2, 4 and 2 switches)",
 			Destination: &wgESLAGLeafGroups,
+			Value:       "2",
 		},
 		&cli.UintFlag{
 			Name:        "orphan-leafs-count",
 			Usage:       "number of orphan leafs",
 			Destination: &wgOrphanLeafsCount,
+			Value:       1,
 		},
 		&cli.UintFlag{
 			Name:        "mclag-session-links",
 			Usage:       "number of mclag session links for each mclag leaf",
 			Destination: &wgMCLAGSessionLinks,
+			Value:       2,
 		},
 		&cli.UintFlag{
 			Name:        "mclag-peer-links",
 			Usage:       "number of mclag peer links for each mclag leaf",
 			Destination: &wgMCLAGPeerLinks,
+			Value:       2,
 		},
 		&cli.UintFlag{
 			Name:        "vpc-loopbacks",
