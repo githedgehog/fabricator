@@ -55,7 +55,8 @@ agnostic. Some of the configuration files mentioned in the link are below:
 
 This file:
 * creates a registry with data in `/tmp/zot`
-* runs a localhost only server on port 30000
+* runs a localhost only server on port 30000, depending on your use case you
+  might want to have it bind to 0.0.0.0.
 * mirrors everything from the githedgehog github repo
 
 <summary> /etc/zot/config.json </summary>
@@ -164,16 +165,53 @@ and will be pushed to the zot registry on the local machine, the new binaries wi
 
 If the code you are changing deals with setting up or managing flatcar, hhfab
 will need to be instructed to pull packages from the local zot registry and not
-the ghcr. To do this, specify the repo pass the `--registry-repo
-127.0.0.1:30000` flag and argument to  `hhfab init` along with other flags.
-From there continue on with the `hhfab` commands. To get vlab running with
-local changes:
+the Github container registry (ghcr.io), pass the `--registry-repo 127.0.0.1:30000` 
+flag and argument to `hhfab init` along with other flags. From there continue
+ on with the `hhfab` commands. To get vlab running with local changes:
+
 * `hhfab init --dev --registry-repo 127.0.0.1:30000`
 * `hhfab vlab gen`
 * `hhfab vlab up --mode iso`
 
+
+
+
 ### updating pods
 
-* (TODO)
+In order to update the pods running inside the controller, the registry that is
+used by k3s needs to be pointing to a registry that has the artifacts you want
+loaded into the cluster. Use the `-import-from-host` option when issuing
+`hhfab init`. Which makes the steps to run a development environment
+
+1. `hhfab init --dev --registry-repo my.devbox.com:30000 --import-from-host`
+1. `hhfab vlab gen`
+1. `hhfab vlab up --mode iso`
+
+the `fab.yaml` created in the first step should look similar:
+
+```
+piVersion: fabricator.githedgehog.com/v1beta1                                                                 
+kind: Fabricator                     
+metadata:               
+  name: default                                                                                                
+  namespace: fab         
+spec:                                                                                                          
+  config:
+    registry:
+      mode: upstream                          
+      upstream:  
+        repo: dev-srvr.yourdomain.com:30000
+        prefix: githedgehog
+        noTLSVerify: false
+        username: reader
+        password: reader
+    control:                                                                                                   
+      tlsSAN: # IPs and DNS names that will be used to access API
+        - "vm-srvr.yallywood.com"             
+```
 
 
+Assuming you have configured the environment variable KUBECONFIG set to the
+kubeconfig from your control node you will be able to `just patch` your pods to
+update them with your changes. Confirm this by watching the pods restart either
+via `kubectl` or `k9s`.
