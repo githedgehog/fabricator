@@ -390,6 +390,7 @@ func Run(ctx context.Context) error {
 						Aliases:  []string{"mode", "m"},
 						Usage:    "set fabric mode: one of " + strings.Join(fabricModes, ", "),
 						Value:    string(meta.FabricModeSpineLeaf),
+						EnvVars:  []string{"HHFAB_FABRIC_MODE"},
 						Action: func(_ *cli.Context, mode string) error {
 							if !slices.Contains(fabricModes, mode) {
 								return fmt.Errorf("invalid fabric mode %q", mode) //nolint:goerr113
