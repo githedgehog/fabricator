@@ -342,6 +342,10 @@ func (c *Config) VLABSwitchReinstall(ctx context.Context, opts SwitchReinstallOp
 				} else {
 					errs = append(errs, fmt.Errorf("%s: %w", sw.Name, err)) //nolint:goerr113
 				}
+
+				slog.Error("Failed to reinstall switch", "name", sw.Name, "error", err)
+
+				return
 			}
 
 			if opts.WaitReady {

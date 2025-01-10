@@ -1,10 +1,11 @@
-name: CI
+name: CI-HW
 
 concurrency:
-  group: hwci-${{ github.head_ref || github.run_id }}
+  group: ci-hw-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
 
 on:
+  pull_request:
   workflow_dispatch:
     inputs:
       debug_enabled:
@@ -53,10 +54,12 @@ jobs:
       - name: hhfab init and vlab up
         env:
           HHFAB_REG_REPO: 127.0.0.1:30000
+          HHFAB_CONTROL_NODE_MGMT_LINK: pci@0000:01:00.3
         run: |
-          bin/hhfab init -v --dev -m ${{ matrix.fabricmode }} --include-onie=${{ matrix.includeonie }}
-          bin/hhfab vlab gen -v
-          bin/hhfab vlab up -v --ready setup-vpcs --ready test-connectivity --ready exit --mode=${{ matrix.buildmode }}
+          export PATH=$PATH:$(pwd)/bin
+          wget -O wiring.yaml https://gist.githubusercontent.com/Frostman/993c0bb21b5547a08a459f51d1ef65b7/raw/b07f95abd328ede74e832134a17bd4972c0b11ac/env-ci-1.wiring.yaml
+          bin/hhfab init -v --dev -m ${{ matrix.fabricmode }} --include-onie=${{ matrix.includeonie }} -w wiring.yaml
+          bin/hhfab vlab up -v --ready switch-reinstall --ready setup-vpcs --ready test-connectivity --ready exit --mode=${{ matrix.buildmode }}
 
       - name: Dump local registry logs
         if: ${{ always() }}
