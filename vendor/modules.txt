@@ -1172,7 +1172,7 @@ github.com/letsencrypt/boulder/identifier
 github.com/letsencrypt/boulder/probs
 github.com/letsencrypt/boulder/revocation
 github.com/letsencrypt/boulder/strictyaml
-# github.com/lmittmann/tint v1.0.5
+# github.com/lmittmann/tint v1.0.6
 ## explicit; go 1.21
 github.com/lmittmann/tint
 # github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0
