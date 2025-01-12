@@ -139,6 +139,15 @@ func DoVLABSerialLog(ctx context.Context, workDir, cacheDir, name string, args [
 	return c.VLABAccess(ctx, vlab, VLABAccessSerialLog, name, args)
 }
 
+func DoShowTech(ctx context.Context, workDir, cacheDir string) error {
+	c, vlab, err := loadVLABForHelpers(ctx, workDir, cacheDir)
+	if err != nil {
+		return err
+	}
+
+	return c.VLABShowTech(ctx, vlab)
+}
+
 func DoVLABSetupVPCs(ctx context.Context, workDir, cacheDir string, opts SetupVPCsOpts) error {
 	c, vlab, err := loadVLABForHelpers(ctx, workDir, cacheDir)
 	if err != nil {

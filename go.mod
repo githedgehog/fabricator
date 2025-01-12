@@ -11,6 +11,7 @@ require (
 	github.com/AlekSi/pointer v1.2.0
 	github.com/Masterminds/semver/v3 v3.3.1
 	github.com/Masterminds/sprig/v3 v3.3.0
+	github.com/appleboy/easyssh-proxy v1.5.0
 	github.com/cert-manager/cert-manager v1.16.2
 	github.com/charmbracelet/keygen v0.5.1
 	github.com/containers/image/v5 v5.33.0
@@ -66,6 +67,7 @@ require (
 	github.com/Microsoft/hcsshim v0.12.9 // indirect
 	github.com/ProtonMail/go-crypto v1.1.3 // indirect
 	github.com/STARRY-S/zip v0.2.1 // indirect
+	github.com/ScaleFT/sshkeys v1.2.0 // indirect
 	github.com/Shopify/ejson v1.3.3 // indirect
 	github.com/VividCortex/ewma v1.2.0 // indirect
 	github.com/acarl005/stripansi v0.0.0-20180116102854-5a71ef0e047d // indirect
@@ -121,6 +123,7 @@ require (
 	github.com/cyberphone/json-canonicalization v0.0.0-20231217050601-ba74d44ecf5f // indirect
 	github.com/cyphar/filepath-securejoin v0.3.4 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
+	github.com/dchest/bcrypt_pbkdf v0.0.0-20150205184540-83f37f9c154a // indirect
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/djherbis/times v1.6.0 // indirect
 	github.com/docker/distribution v2.8.3+incompatible // indirect

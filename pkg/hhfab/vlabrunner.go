@@ -434,6 +434,13 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						PDUPassword: os.Getenv(VLABEnvPDUPassword),
 						WaitReady:   false,
 					}); err != nil {
+						if err := c.VLABShowTech(ctx, vlab); err != nil {
+							slog.Warn("Failed to collect show-tech diagnostics", "err", err)
+							if opts.FailFast {
+								return fmt.Errorf("getting show-tech: %w", err)
+							}
+						}
+
 						return fmt.Errorf("reinstalling switches: %w", err)
 					}
 				case OnReadySetupVPCs:
@@ -447,6 +454,13 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						DNSServers:        []string{"1.1.1.1", "1.0.0.1"},
 						TimeServers:       []string{"219.239.35.0"},
 					}); err != nil {
+						if err := c.VLABShowTech(ctx, vlab); err != nil {
+							slog.Warn("Failed to collect show-tech diagnostics", "err", err)
+							if opts.FailFast {
+								return fmt.Errorf("getting show-tech: %w", err)
+							}
+						}
+
 						return fmt.Errorf("setting up VPCs: %w", err)
 					}
 				case OnReadyTestConnectivity:
@@ -457,9 +471,22 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						IPerfsSeconds:     5,
 						CurlsCount:        3,
 					}); err != nil {
+						if err := c.VLABShowTech(ctx, vlab); err != nil {
+							slog.Warn("Failed to collect show-tech diagnostics", "err", err)
+							if opts.FailFast {
+								return fmt.Errorf("getting show-tech: %w", err)
+							}
+						}
+
 						return fmt.Errorf("testing connectivity: %w", err)
 					}
 				case OnReadyExit:
+					if err := c.VLABShowTech(ctx, vlab); err != nil {
+						slog.Warn("Failed to collect show-tech diagnostics", "err", err)
+						if opts.FailFast {
+							return fmt.Errorf("getting show-tech: %w", err)
+						}
+					}
 					// TODO seems like some graceful shutdown logic isn't working in CI and we're getting stuck w/o this
 					if os.Getenv("GITHUB_ACTIONS") == "true" {
 						slog.Warn("Immediately exiting b/c running in GHA")

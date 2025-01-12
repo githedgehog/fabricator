@@ -249,6 +249,13 @@ jobs:
         run: |
           cat .zot/log
 
+      - name: Upload show-tech artifacts
+        uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: show-tech-vlab-${{ matrix.fabricmode }}-${{ matrix.includeonie }}-${{ matrix.buildmode }}
+          path: show-tech-output
+
       - name: Setup tmate session for debug
         if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
         uses: mxschmitt/action-tmate@v3
@@ -395,6 +402,13 @@ jobs:
           source "./lab-ci/envs/$KUBE_NODE/source.sh"
           bin/hhfab init -v --dev --include-onie=${{ matrix.includeonie }} -w "./lab-ci/envs/$KUBE_NODE/wiring.yaml"
           bin/hhfab vlab up -v --ready switch-reinstall --ready setup-vpcs --ready test-connectivity --ready exit --mode=${{ matrix.buildmode }}
+
+      - name: Upload show-tech artifacts
+        uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: show-tech-hlab-${{ matrix.fabricmode }}-${{ matrix.includeonie }}-${{ matrix.buildmode }}
+          path: show-tech-output
 
       - name: Dump local registry logs
         if: ${{ always() }}

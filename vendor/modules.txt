@@ -137,6 +137,9 @@ github.com/ProtonMail/go-crypto/openpgp/x448
 # github.com/STARRY-S/zip v0.2.1
 ## explicit; go 1.22.2
 github.com/STARRY-S/zip
+# github.com/ScaleFT/sshkeys v1.2.0
+## explicit; go 1.13
+github.com/ScaleFT/sshkeys
 # github.com/Shopify/ejson v1.3.3
 ## explicit; go 1.18
 github.com/Shopify/ejson
@@ -155,6 +158,9 @@ github.com/andybalholm/brotli/matchfinder
 # github.com/apparentlymart/go-cidr v1.1.0
 ## explicit
 github.com/apparentlymart/go-cidr/cidr
+# github.com/appleboy/easyssh-proxy v1.5.0
+## explicit; go 1.18
+github.com/appleboy/easyssh-proxy
 # github.com/armon/go-metrics v0.4.1
 ## explicit; go 1.12
 github.com/armon/go-metrics
@@ -666,6 +672,9 @@ github.com/cyphar/filepath-securejoin
 # github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc
 ## explicit
 github.com/davecgh/go-spew/spew
+# github.com/dchest/bcrypt_pbkdf v0.0.0-20150205184540-83f37f9c154a
+## explicit
+github.com/dchest/bcrypt_pbkdf
 # github.com/diskfs/go-diskfs v1.4.2 => github.com/Frostman/go-diskfs v1.4.2-hh3
 ## explicit; go 1.23
 github.com/diskfs/go-diskfs
@@ -1701,6 +1710,7 @@ golang.org/x/crypto/chacha20poly1305
 golang.org/x/crypto/cryptobyte
 golang.org/x/crypto/cryptobyte/asn1
 golang.org/x/crypto/curve25519
+golang.org/x/crypto/ed25519
 golang.org/x/crypto/hkdf
 golang.org/x/crypto/internal/alias
 golang.org/x/crypto/internal/poly1305

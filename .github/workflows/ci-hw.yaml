@@ -79,6 +79,13 @@ jobs:
         run: |
           cat .zot/log
 
+      - name: Upload show-tech artifacts
+        uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: show-tech-hlab-${{ matrix.fabricmode }}-${{ matrix.includeonie }}-${{ matrix.buildmode }}
+          path: show-tech-output
+
       - name: Setup tmate session for debug
         if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
         uses: mxschmitt/action-tmate@v3
