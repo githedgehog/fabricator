@@ -699,6 +699,19 @@ func Run(ctx context.Context) error {
 						},
 					},
 					{
+						Name:   "show-tech",
+						Usage:  "collect diagnostic information from all VLAB devices",
+						Flags:  defaultFlags,
+						Before: before(false),
+						Action: func(_ *cli.Context) error {
+							if err := hhfab.DoShowTech(ctx, workDir, cacheDir); err != nil {
+								return fmt.Errorf("ssh: %w", err)
+							}
+
+							return nil
+						},
+					},
+					{
 						Name:    "setup-vpcs",
 						Aliases: []string{"vpcs"},
 						Usage:   "setup VPCs and VPCAttachments for all servers and configure networking on them",
