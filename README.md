@@ -1,8 +1,8 @@
-# fabricator
-// TODO(user): Add simple overview of use/purpose
+# Fabricator
+// TODO(user): Add a simple overview of use/purpose
 
 ## Description
-// TODO(user): An in-depth paragraph about your project and overview of use
+// TODO(user): An in-depth paragraph about your project and an overview of the use
 
 ## Getting Started
 
@@ -96,3 +96,83 @@ kubectl apply -f https://raw.githubusercontent.com/<org>/fabricator/<tag or bran
 
 More information can be found via the [Kubebuilder Documentation](https://book.kubebuilder.io/introduction.html)
 
+## How to locally build Fabricator using an OCI-native container image registry (Zot)
+
+- First, you should set up zot on your build machine:
+
+https://zotregistry.dev/v2.1.0/install-guides/install-guide-linux/
+
+- Create /etc/zot/config.json:
+```
+{
+  "log": {
+    "level": "debug"
+  },
+  "storage": {
+    "rootDirectory": "/tmp/zot"
+  },
+  "http": {
+    "address": "127.0.0.1",
+    "port": "30000"
+  },
+  "extensions": {
+    "sync": {
+      "enable": true,
+      "credentialsFile": "/etc/zot/creds.json",
+      "registries": [
+        {
+          "urls": [
+            "https://ghcr.io"
+          ],
+          "onDemand": true,
+          "tlsVerify": true,
+          "content": [
+            {
+              "prefix": "/githedgehog/**",
+              "destination": "/githedgehog",
+              "stripPrefix": true
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
+```
+- and /etc/zot/config.json
+```
+{
+  "ghcr.io": {
+    "username": "mrbojangle3",
+    "password":  TODO-GENERATE A CLASSIC TOKEN ON YOUR GITHUB PROFILE FOR THIS PART
+  }
+}
+```
+- To build your packages, use the command: 
+```
+$just oci=http push
+```
+- When running hhfab commands, you need to specify a different repository during initialization with the following command: 
+```
+$ hhfab init --dev --registry-repo 127.0.0.1:30000
+```
+- Create /etc/systemd/system/zot.service:
+```
+[Unit]
+Description=OCI Distribution Registry
+Documentation=https://zotregistry.dev/
+After=network.target auditd.service local-fs.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/zot serve /etc/zot/config.json
+Restart=on-failure
+User=zot
+Group=zot
+LimitNOFILE=500000
+MemoryHigh=30G
+MemoryMax=32G
+
+[Install]
+WantedBy=multi-user.target
+```
