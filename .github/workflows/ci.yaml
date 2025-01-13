@@ -100,7 +100,7 @@ jobs:
       - name: Setup docker on MacOS
         if: matrix.os == 'macos-latest'
         run: |
-          brew install docker
+          brew install --formula docker
 
       - name: Setup oras
         uses: oras-project/setup-oras@v1
