@@ -1,0 +1,71 @@
+name: CI
+
+concurrency:
+  group: hwci-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+on:
+  workflow_dispatch:
+    inputs:
+      debug_enabled:
+        type: boolean
+        description: "Run the build with tmate debugging enabled (https://github.com/marketplace/actions/debugging-with-tmate)"
+        required: false
+        default: false
+
+jobs:
+  vlab:
+    runs-on: hlab
+    timeout-minutes: 600
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - fabricmode: spine-leaf
+            includeonie: true
+            buildmode: iso
+
+    steps:
+      - name: Runner host
+        run: |
+          echo "$KUBE_NODE"
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+
+      - name: Setup local registry
+        run: |
+          just --timestamp _localreg &
+
+      - name: Build hhfab
+        run: |
+          just --timestamp oci_repo=127.0.0.1:30000 oci=http push
+
+      - name: hhfab init and vlab up
+        env:
+          HHFAB_REG_REPO: 127.0.0.1:30000
+        run: |
+          bin/hhfab init -v --dev -m ${{ matrix.fabricmode }} --include-onie=${{ matrix.includeonie }}
+          bin/hhfab vlab gen -v
+          bin/hhfab vlab up -v --ready setup-vpcs --ready test-connectivity --ready exit --mode=${{ matrix.buildmode }}
+
+      - name: Dump local registry logs
+        if: ${{ always() }}
+        run: |
+          cat .zot/log
+
+      - name: Setup tmate session for debug
+        if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
+        uses: mxschmitt/action-tmate@v3
+        timeout-minutes: 30
+        with:
+          limit-access-to-actor: true

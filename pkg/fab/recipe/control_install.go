@@ -178,6 +178,10 @@ func (c *ControlInstall) Run(ctx context.Context) error {
 		return fmt.Errorf("installing ntp: %w", err)
 	}
 
+	if err := c.setupTimesync(ctx); err != nil {
+		return fmt.Errorf("setting up timesync: %w", err)
+	}
+
 	if err := c.installWaitFabric(ctx, kube); err != nil {
 		return fmt.Errorf("installing fabric: %w", err)
 	}
@@ -569,7 +573,7 @@ func (c *ControlInstall) installWiring(ctx context.Context, kube client.Client) 
 			attempt := 0
 
 			if err := retry.OnError(wait.Backoff{
-				Steps:    10,
+				Steps:    17,
 				Duration: 500 * time.Millisecond,
 				Factor:   1.5,
 				Jitter:   0.1,
