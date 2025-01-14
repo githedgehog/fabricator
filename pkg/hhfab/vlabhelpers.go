@@ -271,7 +271,7 @@ func copyGrubSelectScript() error {
 	return nil
 }
 
-func (c *Config) SwitchReinstall(ctx context.Context, name, mode, user, password string, verbose bool, pduConf *PDUConfig) error {
+func (c *Config) SwitchReinstall(ctx context.Context, name, mode, user, password string, verbose, waitReady bool, pduConf *PDUConfig) error {
 	// List switches
 	switches := wiringapi.SwitchList{}
 	if err := c.Wiring.List(ctx, &switches); err != nil {
@@ -327,7 +327,9 @@ func (c *Config) SwitchReinstall(ctx context.Context, name, mode, user, password
 			if mode == "hard-reset" {
 				args = []string{sw.Name}
 			}
-
+			if waitReady {
+				args = append(args, "--wait-ready")
+			}
 			if verbose {
 				if _, err := exec.LookPath("byobu"); err == nil && name == AllSwitches {
 					// use byobu to show progress in separate tabs
@@ -379,12 +381,20 @@ func (c *Config) SwitchReinstall(ctx context.Context, name, mode, user, password
 	}
 
 	if verbose {
-		fmt.Println("Switch reinstall running in Byobu tabs until completed. Switch to them to check progress (Hit F4).")
+		fmt.Println("Switch reinstall running in Byobu tabs. Switch to them to check progress (Hit F4).")
 	} else {
 		if name == AllSwitches {
-			fmt.Println("All switches reinstalled successfully.", "took", time.Since(start))
+			if waitReady {
+				fmt.Println("All switches reinstalled successfully.", "took", time.Since(start))
+			} else {
+				fmt.Println("All switches placed in OS Install Mode.", "took", time.Since(start))
+			}
 		} else {
-			fmt.Println("Switch", name, "reinstalled successfully.", "took", time.Since(start))
+			if waitReady {
+				fmt.Println("Switch", name, "reinstalled successfully.", "took", time.Since(start))
+			} else {
+				fmt.Println("Switch", name, "placed in OS Install Mode.", "took", time.Since(start))
+			}
 		}
 	}
 
