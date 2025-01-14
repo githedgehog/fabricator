@@ -53,7 +53,7 @@ golangci_lint := localbin / "golangci-lint" + "-" + golangci_lint_version
   [ -f {{golangci_lint}} ] || just _goinstall "github.com/golangci/golangci-lint/cmd/golangci-lint" {{golangci_lint_version}} "golangci-lint" {{golangci_lint}}
 
 # butane
-butane_version := "v0.22.0"
+butane_version := "v0.23.0"
 butane := localbin / "butane" + "-" + butane_version
 @_butane: _localbin
   [ -f {{butane}} ] || just _goinstall "github.com/coreos/butane/internal" {{butane_version}} "internal" {{butane}}
