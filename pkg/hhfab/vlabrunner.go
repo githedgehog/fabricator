@@ -91,12 +91,14 @@ type OnReady string
 const (
 	OnReadyExit             OnReady = "exit"
 	OnReadySetupVPCs        OnReady = "setup-vpcs"
+	OnReadySwitchReinstall  OnReady = "switch-reinstall"
 	OnReadyTestConnectivity         = "test-connectivity"
 )
 
 var AllOnReady = []OnReady{
 	OnReadyExit,
 	OnReadySetupVPCs,
+	OnReadySwitchReinstall,
 	OnReadyTestConnectivity,
 }
 
@@ -422,8 +424,16 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 
 			for _, cmd := range opts.OnReady {
 				slog.Info("Running on-ready command", "command", cmd)
-
 				switch OnReady(cmd) {
+				case OnReadySwitchReinstall:
+					if err := c.SwitchReinstall(ctx, SwitchReinstallOpts{
+						Name:      AllSwitches,
+						Mode:      "hard-reset",
+						Verbose:   false,
+						WaitReady: false,
+					}); err != nil {
+						return fmt.Errorf("setting up VPCs: %w", err)
+					}
 				case OnReadySetupVPCs:
 					// TODO make it configurable
 					if err := c.SetupVPCs(ctx, vlab, SetupVPCsOpts{
