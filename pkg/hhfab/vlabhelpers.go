@@ -271,7 +271,7 @@ func copyGrubSelectScript() error {
 	return nil
 }
 
-func (c *Config) SwitchReinstall(ctx context.Context, name, mode, user, password string, verbose, waitReady bool, pduConf *PDUConfig) error {
+func (c *Config) SwitchReinstall(ctx context.Context, opts SwitchReinstallOpts) error {
 	// List switches
 	switches := wiringapi.SwitchList{}
 	if err := c.Wiring.List(ctx, &switches); err != nil {
@@ -280,11 +280,11 @@ func (c *Config) SwitchReinstall(ctx context.Context, name, mode, user, password
 
 	// Filter switches
 	var targets []wiringapi.Switch
-	if name == AllSwitches {
+	if opts.Name == AllSwitches {
 		targets = switches.Items
 	} else {
 		for _, sw := range switches.Items {
-			if sw.Name == name {
+			if sw.Name == opts.Name {
 				targets = append(targets, sw)
 
 				break
@@ -293,7 +293,7 @@ func (c *Config) SwitchReinstall(ctx context.Context, name, mode, user, password
 	}
 
 	if len(targets) == 0 {
-		return fmt.Errorf("no switches found for the given name: %s", name) //nolint:goerr113
+		return fmt.Errorf("no switches found for the given name: %s", opts.Name) //nolint:goerr113
 	}
 
 	if err := copyGrubSelectScript(); err != nil {
@@ -301,6 +301,7 @@ func (c *Config) SwitchReinstall(ctx context.Context, name, mode, user, password
 
 		return err
 	}
+
 	// Run commands in parallel
 	var wg sync.WaitGroup
 	var errs []error
@@ -321,18 +322,18 @@ func (c *Config) SwitchReinstall(ctx context.Context, name, mode, user, password
 			cmd.Stdin = os.Stdin
 			var args []string
 
-			if mode == "reboot" {
-				args = []string{sw.Name, user, password}
+			if opts.Mode == "reboot" {
+				args = []string{sw.Name, opts.Username, opts.Password}
 			}
-			if mode == "hard-reset" {
+			if opts.Mode == "hard-reset" {
 				args = []string{sw.Name}
 			}
-			if waitReady {
+			if opts.WaitReady {
 				args = append(args, "--wait-ready")
 			}
-			if verbose {
-				if _, err := exec.LookPath("byobu"); err == nil && name == AllSwitches {
-					// use byobu to show progress in separate tabs
+			if opts.Verbose {
+				if _, err := exec.LookPath("byobu"); err == nil && opts.Name == AllSwitches {
+					// Use byobu to show progress in separate tabs
 					byobuCmd := fmt.Sprintf("byobu new-window -d -n %s '%s %s'", sw.Name, cmdName, strings.Join(args, " "))
 					cmd = exec.CommandContext(ctx, "sh", "-c", byobuCmd)
 					cmd.Stdout = os.Stdout
@@ -345,7 +346,7 @@ func (c *Config) SwitchReinstall(ctx context.Context, name, mode, user, password
 			} else {
 				cmd = exec.CommandContext(ctx, cmdName, args...)
 				cmd.Stdout = nil
-				cmd.Stderr = os.Stderr // expect messages logged to stderr to show progress
+				cmd.Stderr = os.Stderr // Expect messages logged to stderr to show progress
 			}
 
 			slog.Debug("Running cmd " + cmdName + " " + strings.Join(args, " ") + "...")
@@ -365,11 +366,19 @@ func (c *Config) SwitchReinstall(ctx context.Context, name, mode, user, password
 		}(sw)
 	}
 
-	if mode == "hard-reset" {
+	if opts.Mode == "hard-reset" {
 		for _, sw := range targets {
 			time.Sleep(1 * time.Second)
 			slog.Info("Executing hard-reset on", "switch", sw.Name+"...")
-			_ = c.VLABPower(ctx, sw.Name, "CYCLE", pduConf)
+			hardResetOpts := SwitchPowerOpts{
+				Name:    sw.Name,
+				Action:  "CYCLE",
+				PDUConf: opts.PDUConf,
+			}
+
+			if err := c.VLABPower(ctx, hardResetOpts); err != nil {
+				return fmt.Errorf("failed to execute hard-reset on switch %s: %w", sw.Name, err) //nolint:goerr113
+			}
 		}
 	}
 	wg.Wait()
@@ -380,20 +389,20 @@ func (c *Config) SwitchReinstall(ctx context.Context, name, mode, user, password
 		return fmt.Errorf("failed switches: %v (took %v)", errs, elapsed) //nolint:goerr113
 	}
 
-	if verbose {
+	if opts.Verbose {
 		fmt.Println("Switch reinstall running in Byobu tabs. Switch to them to check progress (Hit F4).")
 	} else {
-		if name == AllSwitches {
-			if waitReady {
+		if opts.Name == AllSwitches {
+			if opts.WaitReady {
 				fmt.Println("All switches reinstalled successfully.", "took", time.Since(start))
 			} else {
 				fmt.Println("All switches placed in OS Install Mode.", "took", time.Since(start))
 			}
 		} else {
-			if waitReady {
-				fmt.Println("Switch", name, "reinstalled successfully.", "took", time.Since(start))
+			if opts.WaitReady {
+				fmt.Println("Switch", opts.Name, "reinstalled successfully.", "took", time.Since(start))
 			} else {
-				fmt.Println("Switch", name, "placed in OS Install Mode.", "took", time.Since(start))
+				fmt.Println("Switch", opts.Name, "placed in OS Install Mode.", "took", time.Since(start))
 			}
 		}
 	}
@@ -401,20 +410,20 @@ func (c *Config) SwitchReinstall(ctx context.Context, name, mode, user, password
 	return nil
 }
 
-func (c *Config) VLABPower(ctx context.Context, name string, action string, pduConf *PDUConfig) error {
+func (c *Config) VLABPower(ctx context.Context, opts SwitchPowerOpts) error {
 	entries := map[string]VLABPowerInfo{}
 
 	// Fetch the switch list
 	switches := wiringapi.SwitchList{}
 	if err := c.Wiring.List(ctx, &switches); err != nil {
-		return fmt.Errorf("Failed to list switches: %w", err)
+		return fmt.Errorf("failed to list switches: %w", err)
 	}
 
 	// Populate entries
 	foundAnnotations := false
 	for _, sw := range switches.Items {
 		// Skip if the name is not AllSwitches and doesn't match sw.Name
-		if name != AllSwitches && sw.Name != name {
+		if opts.Name != AllSwitches && sw.Name != opts.Name {
 			continue
 		}
 		powerInfo := hhfctl.GetPowerInfo(&sw)
@@ -430,12 +439,12 @@ func (c *Config) VLABPower(ctx context.Context, name string, action string, pduC
 	}
 
 	if len(entries) == 0 {
-		return fmt.Errorf("no switches found for the given name: %s", name) //nolint:goerr113
+		return fmt.Errorf("no switches found for the given name: %s", opts.Name) //nolint:goerr113
 	}
 
 	if !foundAnnotations {
-		targetSW := name
-		if name == AllSwitches {
+		targetSW := opts.Name
+		if opts.Name == AllSwitches {
 			targetSW = "any switches"
 		}
 
@@ -447,23 +456,22 @@ func (c *Config) VLABPower(ctx context.Context, name string, action string, pduC
 		for psuName, url := range entry.SwitchPSUs {
 			outletID, err := utils.ExtractOutletID(url)
 			if err != nil {
-				return fmt.Errorf("error extracting outlet ID from URL %s", url) //nolint:goerr113
+				return fmt.Errorf("error extracting outlet ID from URL %s: %w", url, err) //nolint:goerr113
 			}
 			pduIP, err := utils.GetPDUIPFromURL(url)
 			if err != nil {
-				return fmt.Errorf("error extracting PDU IP from URL %s", url) //nolint:goerr113
+				return fmt.Errorf("error extracting PDU IP from URL %s: %w", url, err) //nolint:goerr113
 			}
 			// Query credentials from PDU config
-			creds, found := pduConf.PDUs[pduIP]
+			creds, found := opts.PDUConf.PDUs[pduIP]
 			if !found {
-				slog.Error("no credentials found for", "pduIP", pduIP)
-
-				continue
+				return fmt.Errorf("no credentials found for PDU with IP: %s", pduIP) //nolint:goerr113
 			}
-			slog.Debug("Performing power", "action", action, "on switch", swName, "psu", psuName)
-			if err := netio.ControlOutlet(ctx, pduIP, creds.User, creds.Password, outletID, action); err != nil {
-				return fmt.Errorf("failed to power %s switch %s %s: %w", action, swName, psuName, err)
+			slog.Debug("Performing power", "action", opts.Action, "on switch", swName, "psu", psuName)
+			if err := netio.ControlOutlet(ctx, pduIP, creds.User, creds.Password, outletID, opts.Action); err != nil {
+				return fmt.Errorf("failed to power %s switch %s %s: %w", opts.Action, swName, psuName, err)
 			}
+			slog.Info("Action completed", "switch", swName, "action", opts.Action, "psu", psuName)
 		}
 	}
 
