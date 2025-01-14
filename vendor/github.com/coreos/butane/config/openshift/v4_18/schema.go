@@ -12,12 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.)
 
-package v1_2_exp
+package v4_18
 
 import (
-	base "github.com/coreos/butane/base/v0_7_exp"
+	fcos "github.com/coreos/butane/config/fcos/v1_5"
 )
 
+const ROLE_LABEL_KEY = "machineconfiguration.openshift.io/role"
+
 type Config struct {
-	base.Config `yaml:",inline"`
+	fcos.Config `yaml:",inline"`
+	Metadata    Metadata  `yaml:"metadata"`
+	OpenShift   OpenShift `yaml:"openshift"`
+}
+
+type Metadata struct {
+	Name   string            `yaml:"name"`
+	Labels map[string]string `yaml:"labels,omitempty"`
+}
+
+type OpenShift struct {
+	KernelArguments []string `yaml:"kernel_arguments"`
+	Extensions      []string `yaml:"extensions"`
+	FIPS            *bool    `yaml:"fips"`
+	KernelType      *string  `yaml:"kernel_type"`
 }
