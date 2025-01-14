@@ -349,7 +349,7 @@ func (c *Config) SwitchReinstall(ctx context.Context, opts SwitchReinstallOpts) 
 				cmd.Stderr = os.Stderr // Expect messages logged to stderr to show progress
 			}
 
-			slog.Debug("Running cmd " + cmdName + " " + strings.Join(args, " ") + "...")
+			slog.Debug("Running command", "cmdName", cmdName, "args", []string{sw.Name, opts.Username, "REDACTED"})
 			if err := cmd.Run(); err != nil {
 				mu.Lock()
 				defer mu.Unlock()
