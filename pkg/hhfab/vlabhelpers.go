@@ -236,6 +236,7 @@ func (c *Config) getVLABEntries(ctx context.Context, vlab *VLAB) (map[string]VLA
 	for _, sw := range switches.Items {
 		entry := entries[sw.Name]
 		entry.RemoteSerial = hhfctl.GetSerialInfo(&sw)
+		entry.IsSwitch = true
 		entries[sw.Name] = entry
 	}
 
@@ -323,6 +324,8 @@ func (c *Config) collectShowTech(ctx context.Context, entryName string, entry VL
 	vmType := getVMType(entry)
 	script, ok := scriptConfig.Scripts[vmType]
 	if !ok {
+		slog.Debug("No show-tech script available for", "entry", entryName, "type", vmType)
+
 		return nil // Skip entries with no defined script
 	}
 
