@@ -871,6 +871,10 @@ func Run(ctx context.Context) error {
 										Name:  "all",
 										Usage: "reinstall all switches",
 									},
+									&cli.BoolFlag{
+										Name:  "wait-ready",
+										Usage: "wait until switch(es) are Fabric-ready",
+									},
 									&cli.StringFlag{
 										Name:  "mode",
 										Usage: "restart mode: reboot or hard-reset",
@@ -925,7 +929,7 @@ func Run(ctx context.Context) error {
 										}
 									}
 
-									if err := hhfab.DoSwitchReinstall(ctx, workDir, cacheDir, switchName, mode, username, password, verbose); err != nil {
+									if err := hhfab.DoSwitchReinstall(ctx, workDir, cacheDir, switchName, mode, username, password, verbose, c.Bool("wait-ready")); err != nil {
 										return fmt.Errorf("reinstall failed: %w", err)
 									}
 

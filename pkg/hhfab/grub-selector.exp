@@ -5,6 +5,25 @@
 set force_conservative 1
 set timeout -1
 
+# Initialize variables
+set WAIT_READY 0
+
+# Parse arguments
+for {set i 0} {$i < [llength $argv]} {incr i} {
+    set arg [lindex $argv $i]
+    switch -- $arg {
+        "--wait-ready" {
+            set WAIT_READY 1
+        }
+        default {
+            lappend remaining_args $arg
+        }
+    }
+}
+
+# Reassign the remaining arguments
+set argv $remaining_args
+
 if {[llength $argv] == 1} {
 	puts "No credentials are provided, assume external power reset"
 	lassign $argv SW_NAME
@@ -69,7 +88,7 @@ proc handle_grub_menu {SW_NAME KEY_HOME KEY_DOWN ONIE_HIGHLIGHT} {
             send "\r"
             expect {
                 "ONIE: OS Install Mode ..." {
-                    log_message "INF" $SW_NAME "ONIE OS Installing..."
+                    log_message "INF" $SW_NAME "Entering OS Install Mode..."
                 }
                 timeout {
                     send "\r"
@@ -142,7 +161,7 @@ if { ! $POWER_RESET} {
 			exp_continue
 		}
 		-ex "GNU GRUB" {
-	            handle_grub_menu $SW_NAME $KEY_HOME $KEY_DOWN $ONIE_HIGHLIGHT
+                    handle_grub_menu $SW_NAME $KEY_HOME $KEY_DOWN $ONIE_HIGHLIGHT 
 		}
 	}
 } else {
@@ -154,37 +173,42 @@ if { ! $POWER_RESET} {
 	}
 }
 
-# Wait for confirmation of the Install OS option
-expect -timeout 60 -ex "Starting ONIE Service Discovery" {
-	# Wait for successful NOS installation
-	expect -timeout 300 -ex "ONIE: NOS install successful" {
-		log_message "INF" $SW_NAME "NOS installed successfully."
-		set install_success 1
+if {$WAIT_READY} {
+	# Wait for confirmation of the Install OS option
+	expect -timeout 60 -ex "Starting ONIE Service Discovery" {
+		# Wait for successful NOS installation
+		expect -timeout 300 -ex "ONIE: NOS install successful" {
+			log_message "INF" $SW_NAME "NOS installed successfully."
+			set install_success 1
+		} timeout {
+			log_message "ERR" $SW_NAME "Failed to install NOS within 5 minutes from service discovery."
+		}
 	} timeout {
-		log_message "ERR" $SW_NAME "Failed to install NOS within 5 minutes from service discovery."
+		log_message "ERR" $SW_NAME "Failed to select install mode."
 	}
-} timeout {
-	log_message "ERR" $SW_NAME "Failed to select install mode."
-}
-
-# Exit if install failed
-if {$install_success == 0} {
-	exit $ERROR_INSTALL
-}
-
-# Wait for the login prompt
-expect -timeout 300 -ex "sonic login:" {
-	log_message "INF" $SW_NAME "Sonic login prompt detected."
-} timeout {
-	log_message "ERR" $SW_NAME "Login prompt not detected within 5 minutes."
-	exit $ERROR_INSTALL
-}
-
-# Wait for the "System is ready" message
-expect -timeout 300 -ex "System is ready" {
-	log_message "INF" $SW_NAME "System is ready message detected."
+	
+	# Exit if install failed
+	if {$install_success == 0} {
+		exit $ERROR_INSTALL
+	}
+	
+	# Wait for the login prompt
+	expect -timeout 300 -ex "sonic login:" {
+		log_message "INF" $SW_NAME "Sonic login prompt detected."
+	} timeout {
+		log_message "ERR" $SW_NAME "Login prompt not detected within 5 minutes."
+		exit $ERROR_INSTALL
+	}
+	
+	# Wait for the "System is ready" message
+	expect -timeout 300 -ex "System is ready" {
+		log_message "INF" $SW_NAME "System is ready message detected."
+		exit 0
+	} timeout {
+		log_message "ERR" $SW_NAME "System did not become ready within 5 minutes."
+		exit $ERROR_INSTALL
+	}
+} else {
+	# Skip readiness check
 	exit 0
-} timeout {
-	log_message "ERR" $SW_NAME "System did not become ready within 5 minutes."
-	exit $ERROR_INSTALL
 }
