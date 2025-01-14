@@ -929,7 +929,16 @@ func Run(ctx context.Context) error {
 										}
 									}
 
-									if err := hhfab.DoSwitchReinstall(ctx, workDir, cacheDir, switchName, mode, username, password, verbose, c.Bool("wait-ready")); err != nil {
+									opts := hhfab.SwitchReinstallOpts{
+										Name:      switchName,
+										Mode:      mode,
+										Username:  username,
+										Password:  password,
+										Verbose:   verbose,
+										WaitReady: c.Bool("wait-ready"),
+									}
+
+									if err := hhfab.DoSwitchReinstall(ctx, workDir, cacheDir, opts); err != nil {
 										return fmt.Errorf("reinstall failed: %w", err)
 									}
 
@@ -975,7 +984,12 @@ func Run(ctx context.Context) error {
 										return err
 									}
 
-									if err := hhfab.DoSwitchPower(ctx, workDir, cacheDir, switchName, powerAction); err != nil {
+									opts := hhfab.SwitchPowerOpts{
+										Name:   switchName,
+										Action: powerAction,
+									}
+
+									if err := hhfab.DoSwitchPower(ctx, workDir, cacheDir, opts); err != nil {
 										return fmt.Errorf("failed to power switch: %w", err)
 									}
 

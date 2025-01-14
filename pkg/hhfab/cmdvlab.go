@@ -165,32 +165,48 @@ func DoVLABTestConnectivity(ctx context.Context, workDir, cacheDir string, opts 
 	return c.TestConnectivity(ctx, vlab, opts)
 }
 
-func DoSwitchPower(ctx context.Context, workDir, cacheDir, name string, action string) error {
-	c, _, err := loadVLABForHelpers(ctx, workDir, cacheDir)
-	if err != nil {
-		return err
-	}
-
-	// Load PDU configuration from YAML
-	pduConf, err := loadPDUConf(workDir)
-	if err != nil {
-		return fmt.Errorf("failed to load PDU config: %w", err)
-	}
-
-	return c.VLABPower(ctx, name, action, pduConf)
+type SwitchPowerOpts struct {
+	Name    string     // The name of the switch (or AllSwitches)
+	Action  string     // Power action (e.g., ON, OFF, CYCLE)
+	PDUConf *PDUConfig // PDU configuration
 }
 
-func DoSwitchReinstall(ctx context.Context, workDir, cacheDir, name, mode, username, password string, verbose, waitReady bool) error {
+type SwitchReinstallOpts struct {
+	Name      string     // The name of the switch (or AllSwitches)
+	Mode      string     // "reboot" or "hard-reset"
+	Username  string     // Username for switch access (reboot mode)
+	Password  string     // Password for switch access (reboot mode)
+	Verbose   bool       // Enable verbose logging
+	WaitReady bool       // Wait for the switch to be ready
+	PDUConf   *PDUConfig // PDU configuration for hard-reset mode
+}
+
+func DoSwitchPower(ctx context.Context, workDir, cacheDir string, opts SwitchPowerOpts) error {
 	c, _, err := loadVLABForHelpers(ctx, workDir, cacheDir)
 	if err != nil {
 		return err
 	}
 
 	// Load PDU configuration from YAML
-	pduConf, err := loadPDUConf(workDir)
+	opts.PDUConf, err = loadPDUConf(workDir)
 	if err != nil {
 		return fmt.Errorf("failed to load PDU config: %w", err)
 	}
 
-	return c.SwitchReinstall(ctx, name, mode, username, password, verbose, waitReady, pduConf)
+	return c.VLABPower(ctx, opts)
+}
+
+func DoSwitchReinstall(ctx context.Context, workDir, cacheDir string, opts SwitchReinstallOpts) error {
+	c, _, err := loadVLABForHelpers(ctx, workDir, cacheDir)
+	if err != nil {
+		return err
+	}
+
+	// Load PDU configuration from YAML
+	opts.PDUConf, err = loadPDUConf(workDir)
+	if err != nil {
+		return fmt.Errorf("failed to load PDU config: %w", err)
+	}
+
+	return c.SwitchReinstall(ctx, opts)
 }
