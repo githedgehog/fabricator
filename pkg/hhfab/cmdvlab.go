@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"go.githedgehog.com/fabricator/pkg/fab/recipe"
+	"go.githedgehog.com/fabricator/pkg/hhfab/pdu"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 )
 
@@ -166,19 +167,10 @@ func DoVLABTestConnectivity(ctx context.Context, workDir, cacheDir string, opts 
 }
 
 type SwitchPowerOpts struct {
-	Name    string     // The name of the switch (or AllSwitches)
-	Action  string     // Power action (e.g., ON, OFF, CYCLE)
-	PDUConf *PDUConfig // PDU configuration
-}
-
-type SwitchReinstallOpts struct {
-	Name      string     // The name of the switch (or AllSwitches)
-	Mode      string     // "reboot" or "hard-reset"
-	Username  string     // Username for switch access (reboot mode)
-	Password  string     // Password for switch access (reboot mode)
-	Verbose   bool       // Enable verbose logging
-	WaitReady bool       // Wait for the switch to be ready
-	PDUConf   *PDUConfig // PDU configuration for hard-reset mode
+	Switches    []string   // All switches if empty
+	Action      pdu.Action // Power action (e.g., on, off, cycle)
+	PDUUsername string
+	PDUPassword string
 }
 
 func DoSwitchPower(ctx context.Context, workDir, cacheDir string, opts SwitchPowerOpts) error {
@@ -187,13 +179,29 @@ func DoSwitchPower(ctx context.Context, workDir, cacheDir string, opts SwitchPow
 		return err
 	}
 
-	// Load PDU configuration from YAML
-	opts.PDUConf, err = loadPDUConf(workDir)
-	if err != nil {
-		return fmt.Errorf("failed to load PDU config: %w", err)
-	}
+	return c.VLABSwitchPower(ctx, opts)
+}
 
-	return c.VLABPower(ctx, opts)
+type SwitchReinstallOpts struct {
+	Switches       []string            // All switches if empty
+	Mode           SwitchReinstallMode // "reboot" or "hard-reset"
+	SwitchUsername string              // Username for switch access (reboot mode only )
+	SwitchPassword string              // Password for switch access (reboot mode only)
+	PDUUsername    string              // (hard-reset mode only)
+	PDUPassword    string              // (hard-reset mode only)
+	WaitReady      bool                // Wait for the switch to be ready
+}
+
+type SwitchReinstallMode string
+
+const (
+	ReinstallModeReboot    SwitchReinstallMode = "reboot"
+	ReinstallModeHardReset SwitchReinstallMode = "hard-reset"
+)
+
+var ReinstallModes = []SwitchReinstallMode{
+	ReinstallModeReboot,
+	ReinstallModeHardReset,
 }
 
 func DoSwitchReinstall(ctx context.Context, workDir, cacheDir string, opts SwitchReinstallOpts) error {
@@ -202,11 +210,5 @@ func DoSwitchReinstall(ctx context.Context, workDir, cacheDir string, opts Switc
 		return err
 	}
 
-	// Load PDU configuration from YAML
-	opts.PDUConf, err = loadPDUConf(workDir)
-	if err != nil {
-		return fmt.Errorf("failed to load PDU config: %w", err)
-	}
-
-	return c.SwitchReinstall(ctx, opts)
+	return c.VLABSwitchReinstall(ctx, opts)
 }

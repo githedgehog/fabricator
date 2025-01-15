@@ -23,6 +23,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/fab/recipe"
 	"go.githedgehog.com/fabricator/pkg/hhfab"
+	"go.githedgehog.com/fabricator/pkg/hhfab/pdu"
 	"go.githedgehog.com/fabricator/pkg/version"
 	"golang.org/x/term"
 	"gopkg.in/natefinch/lumberjack.v2"
@@ -56,8 +57,6 @@ const (
 	FlagNameFailFast              = "fail-fast"
 	FlagNameReady                 = "ready"
 )
-
-const AllSwitches string = "ALL"
 
 func main() {
 	if err := Run(context.Background()); err != nil {
@@ -310,6 +309,29 @@ func Run(ctx context.Context) error {
 	buildModes := []string{}
 	for _, m := range recipe.BuildModes {
 		buildModes = append(buildModes, string(m))
+	}
+
+	reinstallModes := []string{}
+	for _, m := range hhfab.ReinstallModes {
+		reinstallModes = append(reinstallModes, string(m))
+	}
+
+	powerActions := []string{}
+	for _, m := range pdu.Actions {
+		powerActions = append(powerActions, string(m))
+	}
+
+	pduFlags := []cli.Flag{
+		&cli.StringFlag{
+			Name:    "pdu-username",
+			Usage:   "PDU username to attempt a reboot (" + string(hhfab.ReinstallModeHardReset) + " mode only)",
+			EnvVars: []string{hhfab.VLABEnvPDUUsername},
+		},
+		&cli.StringFlag{
+			Name:    "pdu-password",
+			Usage:   "PDU password to attempt a reboot (" + string(hhfab.ReinstallModeHardReset) + " mode only)",
+			EnvVars: []string{hhfab.VLABEnvPDUPassword},
+		},
 	}
 
 	cli.VersionFlag.(*cli.BoolFlag).Aliases = []string{"V"}
@@ -852,56 +874,47 @@ func Run(ctx context.Context) error {
 						},
 					},
 					{
-						Name:   "switch",
-						Usage:  "manage switch reinstall or power",
-						Flags:  append(defaultFlags, accessNameFlag),
-						Before: before(false),
+						Name:  "switch",
+						Usage: "manage switch reinstall or power",
+						Flags: append(defaultFlags, accessNameFlag),
 						Subcommands: []*cli.Command{
 							{
-								Name:      "reinstall",
-								Usage:     "rebot/reset and reinstall NOS on switches",
-								UsageText: "hhfab vlab switch reinstall --all[--name <switchName> [mode reboot|hard-reset]",
-								Flags: []cli.Flag{
-									&cli.StringFlag{
+								Name:  "reinstall",
+								Usage: "reboot/reset and reinstall NOS on switches (if no switches specified, all switches will be reinstalled)",
+								Flags: append([]cli.Flag{
+									&cli.StringSliceFlag{
 										Name:    "name",
 										Aliases: []string{"n"},
-										Usage:   "name of the switch to reinstall",
+										Usage:   "switch name to reinstall",
 									},
 									&cli.BoolFlag{
-										Name:  "all",
-										Usage: "reinstall all switches",
-									},
-									&cli.BoolFlag{
-										Name:  "wait-ready",
-										Usage: "wait until switch(es) are Fabric-ready",
+										Name:    "wait-ready",
+										Aliases: []string{"w"},
+										Usage:   "wait until switch(es) are Fabric-ready",
 									},
 									&cli.StringFlag{
-										Name:  "mode",
-										Usage: "restart mode: reboot or hard-reset",
-										Value: "reboot",
+										Name:    "mode",
+										Aliases: []string{"m"},
+										Usage:   "restart mode: " + strings.Join(reinstallModes, ", "),
+										Value:   string(hhfab.ReinstallModeHardReset),
 									},
 									&cli.StringFlag{
-										Name:  "username",
-										Usage: "required for reboot mode (if empty, user is prompted)",
+										Name:    "switch-username",
+										Usage:   "switch username to attempt a reboot (" + string(hhfab.ReinstallModeReboot) + " mode only, prompted for if empty)",
+										EnvVars: []string{"HHFAB_VLAB_REINSTALL_SWITCH_USERNAME"},
 									},
 									&cli.StringFlag{
-										Name:  "password",
-										Usage: "required for reboot mode (if empty, user is prompted)",
+										Name:    "switch-password",
+										Usage:   "switch password to attempt a reboot (" + string(hhfab.ReinstallModeReboot) + " mode only, prompted for if empty)",
+										EnvVars: []string{"HHFAB_VLAB_REINSTALL_SWITCH_PASSWORD"},
 									},
+									verboseFlag,
 									yesFlag,
-								},
+								}, pduFlags...),
+								Before: before(false),
 								Action: func(c *cli.Context) error {
-									switchName := c.String("name")
-									if c.Bool("all") {
-										switchName = AllSwitches
-									}
-									if switchName == "" {
-										return fmt.Errorf("missing switch name") //nolint:goerr113
-									}
-
 									mode := c.String("mode")
-									validModes := map[string]bool{"reboot": true, "hard-reset": true}
-									if !validModes[mode] {
+									if !slices.Contains(reinstallModes, mode) {
 										return fmt.Errorf("invalid mode: %s", mode) //nolint:goerr113
 									}
 
@@ -909,33 +922,43 @@ func Run(ctx context.Context) error {
 										return err
 									}
 
-									username := c.String("username")
-									password := c.String("password")
-									if mode == "reboot" && (username == "" || password == "") {
-										fmt.Print("Enter username: ")
-										if _, err := fmt.Scanln(&username); err != nil {
-											return fmt.Errorf("failed to read username: %w", err)
+									username := c.String("switch-username")
+									password := c.String("switch-password")
+									if mode == string(hhfab.ReinstallModeReboot) {
+										if username == "" {
+											fmt.Print("Enter username: ")
+											if _, err := fmt.Scanln(&username); err != nil {
+												return fmt.Errorf("failed to read username: %w", err)
+											}
 										}
-										fmt.Print("Enter password: ")
-										bytePassword, err := term.ReadPassword(syscall.Stdin)
-										if err != nil {
-											return fmt.Errorf("failed to read password: %w", err)
+
+										if password == "" {
+											fmt.Print("Enter password: ")
+											bytePassword, err := term.ReadPassword(syscall.Stdin)
+											if err != nil {
+												return fmt.Errorf("failed to read password: %w", err)
+											}
+											password = string(bytePassword)
+											fmt.Println()
 										}
-										password = string(bytePassword)
-										fmt.Println()
 
 										if username == "" || password == "" {
 											return fmt.Errorf("credentials required for reboot mode") //nolint:goerr113
 										}
 									}
 
+									if mode == string(hhfab.ReinstallModeHardReset) && (c.String("pdu-username") == "" || c.String("pdu-password") == "") {
+										return fmt.Errorf("PDU credentials required for hard reset mode") //nolint:goerr113
+									}
+
 									opts := hhfab.SwitchReinstallOpts{
-										Name:      switchName,
-										Mode:      mode,
-										Username:  username,
-										Password:  password,
-										Verbose:   verbose,
-										WaitReady: c.Bool("wait-ready"),
+										Switches:       c.StringSlice("name"),
+										Mode:           hhfab.SwitchReinstallMode(mode),
+										SwitchUsername: username,
+										SwitchPassword: password,
+										PDUUsername:    c.String("pdu-username"),
+										PDUPassword:    c.String("pdu-password"),
+										WaitReady:      c.Bool("wait-ready"),
 									}
 
 									if err := hhfab.DoSwitchReinstall(ctx, workDir, cacheDir, opts); err != nil {
@@ -944,40 +967,30 @@ func Run(ctx context.Context) error {
 
 									return nil
 								},
-								HelpName: "hhfab vlab switch reinstall",
 							},
 							{
 								Name:  "power",
-								Usage: "manage switch power state (ON, OFF, or CYCLE)",
-								Flags: []cli.Flag{
-									&cli.StringFlag{
+								Usage: "manage switch power state using the PDU (if no switches specified, all switches will be affected)",
+								Flags: append([]cli.Flag{
+									&cli.StringSliceFlag{
 										Name:    "name",
 										Aliases: []string{"n"},
-										Usage:   "name of the switch to power ON|OFF|CYCLE",
+										Usage:   "switch name to manage power",
 									},
-									&cli.BoolFlag{
-										Name:  "all",
-										Usage: "apply action to all switches",
+									&cli.StringFlag{
+										Name:    "action",
+										Aliases: []string{"a"},
+										Usage:   "power action: one of " + strings.Join(powerActions, ", "),
+										Value:   string(pdu.ActionCycle),
 									},
+									verboseFlag,
 									yesFlag,
-								},
-								UsageText: "hhfab vlab switch power [--all|--name <switchName>] <action>",
+								}, pduFlags...),
+								Before: before(false),
 								Action: func(c *cli.Context) error {
-									switchName := c.String("name")
-									if c.Bool("all") {
-										switchName = AllSwitches
-									}
-									if switchName == "" {
-										return fmt.Errorf("missing switch name") //nolint:goerr113
-									}
-
-									if c.NArg() != 1 {
-										return fmt.Errorf("unexpected amount of agruments (use ON, OFF, or CYCLE)") //nolint:goerr113
-									}
-
-									powerAction := strings.ToUpper(c.Args().First())
-									if powerAction != "ON" && powerAction != "OFF" && powerAction != "CYCLE" {
-										return fmt.Errorf("invalid power action: %s (use ON, OFF, or CYCLE)", powerAction) //nolint:goerr113
+									action := strings.ToLower(c.String("action"))
+									if !slices.Contains(powerActions, action) {
+										return fmt.Errorf("invalid action: %s", action) //nolint:goerr113
 									}
 
 									if err := yesCheck(c); err != nil {
@@ -985,8 +998,10 @@ func Run(ctx context.Context) error {
 									}
 
 									opts := hhfab.SwitchPowerOpts{
-										Name:   switchName,
-										Action: powerAction,
+										Switches:    c.StringSlice("name"),
+										Action:      pdu.Action(action),
+										PDUUsername: c.String("pdu-username"),
+										PDUPassword: c.String("pdu-password"),
 									}
 
 									if err := hhfab.DoSwitchPower(ctx, workDir, cacheDir, opts); err != nil {
