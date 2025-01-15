@@ -88,12 +88,14 @@ type OnReady string
 
 const (
 	OnReadyExit             OnReady = "exit"
+	OnReadyShowTech         OnReady = "show-tech"
 	OnReadySetupVPCs        OnReady = "setup-vpcs"
 	OnReadyTestConnectivity         = "test-connectivity"
 )
 
 var AllOnReady = []OnReady{
 	OnReadyExit,
+	OnReadyShowTech,
 	OnReadySetupVPCs,
 	OnReadyTestConnectivity,
 }
@@ -444,6 +446,10 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						CurlsCount:        3,
 					}); err != nil {
 						return fmt.Errorf("testing connectivity: %w", err)
+					}
+				case OnReadyShowTech:
+					if err := c.VLABShowTech(ctx, vlab); err != nil {
+						return fmt.Errorf("getting show tech: %w", err)
 					}
 				case OnReadyExit:
 					// TODO seems like some graceful shutdown logic isn't working in CI and we're getting stuck w/o this
