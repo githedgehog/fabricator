@@ -1,13 +1,14 @@
 // Copyright 2024 Hedgehog
 // SPDX-License-Identifier: Apache-2.0
 
-package netio
+package pdu
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -35,12 +36,6 @@ type AgentResponse struct {
 	Agent Agent `json:"Agent"`
 }
 
-var actionMap = map[string]int{
-	"OFF":   0,
-	"ON":    1,
-	"CYCLE": 2,
-}
-
 func GetStatus(pduIP, username, password string) (*Response, error) {
 	url := fmt.Sprintf("http://%s/netio.json", pduIP)
 
@@ -64,7 +59,7 @@ func GetStatus(pduIP, username, password string) (*Response, error) {
 	// Check if the response status is 200 OK, otherwise log the response body
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		fmt.Printf("Error response body: %s\n", body)
+		slog.Error("Error response from PDU", "body", body)
 
 		return nil, fmt.Errorf("unexpected response status: %d", resp.StatusCode) //nolint:goerr113
 	}
@@ -78,9 +73,29 @@ func GetStatus(pduIP, username, password string) (*Response, error) {
 	return &Resp, nil
 }
 
-func ControlOutlet(ctx context.Context, pduIP, username, password string, outletID int, action string) error {
+type Action string
+
+const (
+	ActionOn    Action = "on"
+	ActionOff   Action = "off"
+	ActionCycle Action = "cycle"
+)
+
+var Actions = []Action{
+	ActionOn,
+	ActionOff,
+	ActionCycle,
+}
+
+var ActionMap = map[Action]int{
+	ActionOn:    0,
+	ActionOff:   1,
+	ActionCycle: 2,
+}
+
+func ControlOutlet(ctx context.Context, pduIP, username, password string, outletID int, action Action) error {
 	url := fmt.Sprintf("http://%s/netio.json", pduIP)
-	data := fmt.Sprintf(`{"Outputs":[{"ID":%d,"Action":%d}]}`, outletID, actionMap[action])
+	data := fmt.Sprintf(`{"Outputs":[{"ID":%d,"Action":%d}]}`, outletID, ActionMap[action])
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(data))
 	if err != nil {
