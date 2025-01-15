@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -22,7 +23,9 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/fab/recipe"
 	"go.githedgehog.com/fabricator/pkg/hhfab"
+	"go.githedgehog.com/fabricator/pkg/hhfab/pdu"
 	"go.githedgehog.com/fabricator/pkg/version"
+	"golang.org/x/term"
 	"gopkg.in/natefinch/lumberjack.v2"
 	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -64,7 +67,7 @@ func main() {
 }
 
 func Run(ctx context.Context) error {
-	var verbose, brief bool
+	var verbose, brief, yes bool
 	verboseFlag := &cli.BoolFlag{
 		Name:        "verbose",
 		Aliases:     []string{"v"},
@@ -80,6 +83,19 @@ func Run(ctx context.Context) error {
 		EnvVars:     []string{"HHFAB_BRIEF"},
 		Destination: &brief,
 		Category:    FlagCatGlobal,
+	}
+	yesFlag := &cli.BoolFlag{
+		Name:        "yes",
+		Aliases:     []string{"y"},
+		Usage:       "assume yes",
+		Destination: &yes,
+	}
+	yesCheck := func(_ *cli.Context) error {
+		if !yes {
+			return cli.Exit("\033[31mWARNING:\033[0m Potentially dangerous operation. Please confirm with --yes if you're sure.", 1)
+		}
+
+		return nil
 	}
 
 	defaultWorkDir, err := os.Getwd()
@@ -293,6 +309,29 @@ func Run(ctx context.Context) error {
 	buildModes := []string{}
 	for _, m := range recipe.BuildModes {
 		buildModes = append(buildModes, string(m))
+	}
+
+	reinstallModes := []string{}
+	for _, m := range hhfab.ReinstallModes {
+		reinstallModes = append(reinstallModes, string(m))
+	}
+
+	powerActions := []string{}
+	for _, m := range pdu.Actions {
+		powerActions = append(powerActions, string(m))
+	}
+
+	pduFlags := []cli.Flag{
+		&cli.StringFlag{
+			Name:    "pdu-username",
+			Usage:   "PDU username to attempt a reboot (" + string(hhfab.ReinstallModeHardReset) + " mode only)",
+			EnvVars: []string{hhfab.VLABEnvPDUUsername},
+		},
+		&cli.StringFlag{
+			Name:    "pdu-password",
+			Usage:   "PDU password to attempt a reboot (" + string(hhfab.ReinstallModeHardReset) + " mode only)",
+			EnvVars: []string{hhfab.VLABEnvPDUPassword},
+		},
 	}
 
 	cli.VersionFlag.(*cli.BoolFlag).Aliases = []string{"V"}
@@ -832,6 +871,146 @@ func Run(ctx context.Context) error {
 							}
 
 							return nil
+						},
+					},
+					{
+						Name:  "switch",
+						Usage: "manage switch reinstall or power",
+						Flags: append(defaultFlags, accessNameFlag),
+						Subcommands: []*cli.Command{
+							{
+								Name:  "reinstall",
+								Usage: "reboot/reset and reinstall NOS on switches (if no switches specified, all switches will be reinstalled)",
+								Flags: append([]cli.Flag{
+									&cli.StringSliceFlag{
+										Name:    "name",
+										Aliases: []string{"n"},
+										Usage:   "switch name to reinstall",
+									},
+									&cli.BoolFlag{
+										Name:    "wait-ready",
+										Aliases: []string{"w"},
+										Usage:   "wait until switch(es) are Fabric-ready",
+									},
+									&cli.StringFlag{
+										Name:    "mode",
+										Aliases: []string{"m"},
+										Usage:   "restart mode: " + strings.Join(reinstallModes, ", "),
+										Value:   string(hhfab.ReinstallModeHardReset),
+									},
+									&cli.StringFlag{
+										Name:    "switch-username",
+										Usage:   "switch username to attempt a reboot (" + string(hhfab.ReinstallModeReboot) + " mode only, prompted for if empty)",
+										EnvVars: []string{"HHFAB_VLAB_REINSTALL_SWITCH_USERNAME"},
+									},
+									&cli.StringFlag{
+										Name:    "switch-password",
+										Usage:   "switch password to attempt a reboot (" + string(hhfab.ReinstallModeReboot) + " mode only, prompted for if empty)",
+										EnvVars: []string{"HHFAB_VLAB_REINSTALL_SWITCH_PASSWORD"},
+									},
+									verboseFlag,
+									yesFlag,
+								}, pduFlags...),
+								Before: before(false),
+								Action: func(c *cli.Context) error {
+									mode := c.String("mode")
+									if !slices.Contains(reinstallModes, mode) {
+										return fmt.Errorf("invalid mode: %s", mode) //nolint:goerr113
+									}
+
+									if err := yesCheck(c); err != nil {
+										return err
+									}
+
+									username := c.String("switch-username")
+									password := c.String("switch-password")
+									if mode == string(hhfab.ReinstallModeReboot) {
+										if username == "" {
+											fmt.Print("Enter username: ")
+											if _, err := fmt.Scanln(&username); err != nil {
+												return fmt.Errorf("failed to read username: %w", err)
+											}
+										}
+
+										if password == "" {
+											fmt.Print("Enter password: ")
+											bytePassword, err := term.ReadPassword(syscall.Stdin)
+											if err != nil {
+												return fmt.Errorf("failed to read password: %w", err)
+											}
+											password = string(bytePassword)
+											fmt.Println()
+										}
+
+										if username == "" || password == "" {
+											return fmt.Errorf("credentials required for reboot mode") //nolint:goerr113
+										}
+									}
+
+									if mode == string(hhfab.ReinstallModeHardReset) && (c.String("pdu-username") == "" || c.String("pdu-password") == "") {
+										return fmt.Errorf("PDU credentials required for hard reset mode") //nolint:goerr113
+									}
+
+									opts := hhfab.SwitchReinstallOpts{
+										Switches:       c.StringSlice("name"),
+										Mode:           hhfab.SwitchReinstallMode(mode),
+										SwitchUsername: username,
+										SwitchPassword: password,
+										PDUUsername:    c.String("pdu-username"),
+										PDUPassword:    c.String("pdu-password"),
+										WaitReady:      c.Bool("wait-ready"),
+									}
+
+									if err := hhfab.DoSwitchReinstall(ctx, workDir, cacheDir, opts); err != nil {
+										return fmt.Errorf("reinstall failed: %w", err)
+									}
+
+									return nil
+								},
+							},
+							{
+								Name:  "power",
+								Usage: "manage switch power state using the PDU (if no switches specified, all switches will be affected)",
+								Flags: append([]cli.Flag{
+									&cli.StringSliceFlag{
+										Name:    "name",
+										Aliases: []string{"n"},
+										Usage:   "switch name to manage power",
+									},
+									&cli.StringFlag{
+										Name:    "action",
+										Aliases: []string{"a"},
+										Usage:   "power action: one of " + strings.Join(powerActions, ", "),
+										Value:   string(pdu.ActionCycle),
+									},
+									verboseFlag,
+									yesFlag,
+								}, pduFlags...),
+								Before: before(false),
+								Action: func(c *cli.Context) error {
+									action := strings.ToLower(c.String("action"))
+									if !slices.Contains(powerActions, action) {
+										return fmt.Errorf("invalid action: %s", action) //nolint:goerr113
+									}
+
+									if err := yesCheck(c); err != nil {
+										return err
+									}
+
+									opts := hhfab.SwitchPowerOpts{
+										Switches:    c.StringSlice("name"),
+										Action:      pdu.Action(action),
+										PDUUsername: c.String("pdu-username"),
+										PDUPassword: c.String("pdu-password"),
+									}
+
+									if err := hhfab.DoSwitchPower(ctx, workDir, cacheDir, opts); err != nil {
+										return fmt.Errorf("failed to power switch: %w", err)
+									}
+
+									return nil
+								},
+							},
 						},
 					},
 				},
