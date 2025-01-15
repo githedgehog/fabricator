@@ -7,6 +7,7 @@ set timeout -1
 
 # Initialize variables
 set WAIT_READY 0
+set remaining_args {}
 
 # Parse arguments
 for {set i 0} {$i < [llength $argv]} {incr i} {
@@ -70,6 +71,7 @@ set ERROR_GRUB 3
 set ERROR_INSTALL 4
 set ERROR_TIMEOUT 5
 set ERROR_EOF 6
+set ERROR_HHFAB 7
 
 # Define a procedure for GRUB menu handling
 proc handle_grub_menu {SW_NAME KEY_HOME KEY_DOWN ONIE_HIGHLIGHT} {
@@ -102,16 +104,31 @@ proc handle_grub_menu {SW_NAME KEY_HOME KEY_DOWN ONIE_HIGHLIGHT} {
     }
 }
 
-# connect to the serial console of the switch
-# using hhfab now for simplicity but might want to do it directly instead?
-puts "connecting to serial of $SW_NAME via hhfab serial..."
-# check if hhfab is in the local folder or in the path
-set HHFAB "NO"
-if {[file exists "./hhfab"]} {
-	set HHFAB "./hhfab"
+# Check if HHFAB_BIN is set in the environment
+if {[info exists env(HHFAB_BIN)]} {
+	set HHFAB $env(HHFAB_BIN)
 } else {
-	set HHFAB [exec which hhfab]
+	# Fallback to look for hhfab in the local folder or in PATH
+	if {[file exists "./hhfab"]} {
+		set HHFAB "./hhfab"
+	} else {
+		catch {set HHFAB [exec which hhfab]} result
+		if {[string length $result] == 0} {
+			puts "Error: hhfab binary not found in HHFAB_BIN, current directory, or PATH."
+			exit 1
+		}
+		set HHFAB $result
+	}
 }
+
+# Verify that HHFAB contains a valid path
+if {!([file exists $HHFAB] && [file executable $HHFAB])} {
+	log_message "ERR" $SW_NAME "HHFAB does not contain a valid path or is not executable."
+	exit $ERROR_HHFAB
+}
+
+# connect to the serial console of the switch with hhfab
+puts "connecting to serial of $SW_NAME via hhfab serial..."
 spawn $HHFAB vlab serial -n $SW_NAME
 expect {
 	-ex "Type the hot key to suspend the connection: <CTRL>Z" {
