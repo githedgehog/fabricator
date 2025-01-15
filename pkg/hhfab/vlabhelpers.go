@@ -254,7 +254,7 @@ func (c *Config) prepareReinstallScript() (func(), string, error) {
 	cleanup := func() { os.RemoveAll(dir) }
 
 	path := filepath.Join(dir, "vlabhelpers_reinstall.exp")
-	if err := os.WriteFile(path, []byte(reinstallScript), 0o755); err != nil { //nolint:gosec
+	if err := os.WriteFile(path, []byte(reinstallScript), 0o700); err != nil { //nolint:gosec
 		return cleanup, "", fmt.Errorf("failed to write reinstall script: %w", err)
 	}
 
@@ -290,6 +290,15 @@ func (c *Config) VLABSwitchReinstall(ctx context.Context, opts SwitchReinstallOp
 				return fmt.Errorf("switch not found: %s", sw) //nolint:goerr113
 			}
 		}
+	}
+
+	self, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("getting executable path: %w", err)
+	}
+
+	if err := os.Setenv("HHFAB_BIN", self); err != nil {
+		return fmt.Errorf("setting HHFAB_BIN env variable: %w", err)
 	}
 
 	cleanup, script, err := c.prepareReinstallScript()
