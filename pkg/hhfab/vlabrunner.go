@@ -64,6 +64,9 @@ const (
 	VLABIgnition = "ignition.json"
 
 	VLABKubeConfig = "kubeconfig"
+
+	VLABEnvPDUUsername = "HHFAB_VLAB_PDU_USERNAME"
+	VLABEnvPDUPassword = "HHFAB_VLAB_PDU_PASSWORD" //nolint:gosec
 )
 
 var VLABCmds = []string{
@@ -73,7 +76,6 @@ var VLABCmds = []string{
 	VLABCmdSocat,
 	VLABCmdSSH,
 	VLABCmdLess,
-	VLABCmdExpect,
 }
 
 type VLABRunOpts struct {
@@ -426,13 +428,13 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 				slog.Info("Running on-ready command", "command", cmd)
 				switch OnReady(cmd) {
 				case OnReadySwitchReinstall:
-					if err := c.SwitchReinstall(ctx, SwitchReinstallOpts{
-						Name:      AllSwitches,
-						Mode:      "hard-reset",
-						Verbose:   false,
-						WaitReady: false,
+					if err := c.VLABSwitchReinstall(ctx, SwitchReinstallOpts{
+						Mode:        ReinstallModeHardReset,
+						PDUUsername: os.Getenv(VLABEnvPDUUsername),
+						PDUPassword: os.Getenv(VLABEnvPDUPassword),
+						WaitReady:   false,
 					}); err != nil {
-						return fmt.Errorf("setting up VPCs: %w", err)
+						return fmt.Errorf("reinstalling switches: %w", err)
 					}
 				case OnReadySetupVPCs:
 					// TODO make it configurable

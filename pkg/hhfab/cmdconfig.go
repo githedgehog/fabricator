@@ -22,7 +22,6 @@ import (
 
 const (
 	RegistryConfigFile = ".registry.yaml"
-	PDUConfigFile      = ".pdu.yaml"
 	FabConfigFile      = "fab.yaml"
 	IncludeDir         = "include"
 	ResultDir          = "result"
@@ -49,15 +48,6 @@ type Config struct {
 type RegistryConfig struct {
 	Repo   string `json:"repo,omitempty"`
 	Prefix string `json:"prefix,omitempty"`
-}
-
-type PDUAPICreds struct {
-	User     string `yaml:"user"`
-	Password string `yaml:"password"`
-}
-
-type PDUConfig struct {
-	PDUs map[string]PDUAPICreds `yaml:"pdus"`
 }
 
 func checkWorkCacheDir(workDir, cacheDir string) error {
@@ -369,22 +359,6 @@ func loadRegConf(workDir string) (*RegistryConfig, error) {
 	}
 
 	return regConf, nil
-}
-
-func loadPDUConf(workDir string) (*PDUConfig, error) {
-	pduConf := &PDUConfig{}
-	pduConfData, err := os.ReadFile(filepath.Join(workDir, PDUConfigFile))
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("reading registry config: %w", err)
-	}
-
-	if err == nil {
-		if err := yaml.UnmarshalStrict(pduConfData, pduConf); err != nil {
-			return nil, fmt.Errorf("unmarshalling PDU config: %w", err)
-		}
-	}
-
-	return pduConf, nil
 }
 
 func getLocalDockerCredsFor(ctx context.Context, repo string) (string, string, error) {
