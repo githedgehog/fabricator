@@ -22,8 +22,8 @@ import (
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/hhfctl"
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
-	"go.githedgehog.com/fabricator/pkg/hhfab/pdu/netio"
-	"go.githedgehog.com/fabricator/pkg/hhfab/pdu/utils"
+	"go.githedgehog.com/fabric/pkg/util/logutil"
+	"go.githedgehog.com/fabricator/pkg/hhfab/pdu"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -243,113 +243,93 @@ type VLABAccessInfo struct {
 	RemoteSerial string // ssh to get serial
 }
 
-//go:embed grub-selector.exp
-var grubSelectorScript string
+//go:embed vlabhelpers_reinstall.exp
+var reinstallScript string
 
-const VLABCmdGrubSelect string = "./grub-selector.exp"
+func (c *Config) prepareReinstallScript() (func(), string, error) {
+	dir, err := os.MkdirTemp(c.CacheDir, "vlabhelpers_reinstall-*")
+	if err != nil {
+		return nil, "", fmt.Errorf("creating temp dir for reinstall script: %w", err)
+	}
+	cleanup := func() { os.RemoveAll(dir) }
 
-const AllSwitches string = "ALL"
-
-func copyGrubSelectScript() error {
-	scriptPath := "./grub-selector.exp"
-
-	existingContent, err := os.ReadFile(scriptPath)
-	if err == nil {
-		// Compare the content with the embedded script
-		if string(existingContent) == grubSelectorScript {
-			// No changes, skip writing the file
-			return nil
-		}
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("failed to read existing script: %w", err)
+	path := filepath.Join(dir, "vlabhelpers_reinstall.exp")
+	if err := os.WriteFile(path, []byte(reinstallScript), 0o755); err != nil { //nolint:gosec
+		return cleanup, "", fmt.Errorf("failed to write reinstall script: %w", err)
 	}
 
-	if err := os.WriteFile(scriptPath, []byte(grubSelectorScript), 0755); err != nil { //nolint:gosec
-		return fmt.Errorf("failed to write script: %w", err)
-	}
-
-	return nil
+	return cleanup, path, nil
 }
 
-func (c *Config) SwitchReinstall(ctx context.Context, opts SwitchReinstallOpts) error {
-	// List switches
+func (c *Config) VLABSwitchReinstall(ctx context.Context, opts SwitchReinstallOpts) error {
+	start := time.Now()
+
+	slog.Info("Reinstalling switches", "mode", opts.Mode, "switches", opts.Switches)
+
+	_, err := exec.LookPath(VLABCmdExpect)
+	if err != nil {
+		return fmt.Errorf("required command %q is not available", VLABCmdExpect) //nolint:goerr113
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
+	defer cancel()
+
 	switches := wiringapi.SwitchList{}
 	if err := c.Wiring.List(ctx, &switches); err != nil {
 		return fmt.Errorf("failed to list switches: %w", err)
 	}
 
-	// Filter switches
-	var targets []wiringapi.Switch
-	if opts.Name == AllSwitches {
-		targets = switches.Items
-	} else {
+	if len(opts.Switches) > 0 {
+		sws := map[string]bool{}
 		for _, sw := range switches.Items {
-			if sw.Name == opts.Name {
-				targets = append(targets, sw)
+			sws[sw.Name] = true
+		}
 
-				break
+		for _, sw := range opts.Switches {
+			if !sws[sw] {
+				return fmt.Errorf("switch not found: %s", sw) //nolint:goerr113
 			}
 		}
 	}
 
-	if len(targets) == 0 {
-		return fmt.Errorf("no switches found for the given name: %s", opts.Name) //nolint:goerr113
-	}
-
-	if err := copyGrubSelectScript(); err != nil {
-		fmt.Println("Error copying script:", err)
+	cleanup, script, err := c.prepareReinstallScript()
+	if err != nil {
+		if cleanup != nil {
+			cleanup()
+		}
 
 		return err
 	}
+	defer cleanup()
 
-	// Run commands in parallel
 	var wg sync.WaitGroup
 	var errs []error
 	var mu sync.Mutex
-	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
-	defer cancel()
 
-	start := time.Now()
+	for _, sw := range switches.Items {
+		if len(opts.Switches) > 0 && !slices.Contains(opts.Switches, sw.Name) {
+			continue
+		}
 
-	for _, sw := range targets {
 		wg.Add(1)
 		go func(sw wiringapi.Switch) {
 			defer wg.Done()
 
-			cmdName := VLABCmdGrubSelect
-			cmd := &exec.Cmd{}
-			cmd.Dir = c.WorkDir
-			cmd.Stdin = os.Stdin
-			var args []string
+			ctx, cancel := context.WithCancel(ctx)
+			defer cancel()
 
-			if opts.Mode == "reboot" {
-				args = []string{sw.Name, opts.Username, opts.Password}
-			}
-			if opts.Mode == "hard-reset" {
-				args = []string{sw.Name}
+			args := []string{sw.Name}
+			if opts.Mode == ReinstallModeReboot {
+				args = append(args, opts.SwitchUsername, opts.SwitchPassword)
 			}
 			if opts.WaitReady {
 				args = append(args, "--wait-ready")
 			}
-			if opts.Verbose {
-				if _, err := exec.LookPath("byobu"); err == nil && opts.Name == AllSwitches {
-					// Use byobu to show progress in separate tabs
-					byobuCmd := fmt.Sprintf("byobu new-window -d -n %s '%s %s'", sw.Name, cmdName, strings.Join(args, " "))
-					cmd = exec.CommandContext(ctx, "sh", "-c", byobuCmd)
-					cmd.Stdout = os.Stdout
-					cmd.Stderr = nil
-				} else {
-					cmd = exec.CommandContext(ctx, cmdName, args...)
-					cmd.Stdout = os.Stdout
-					cmd.Stderr = nil
-				}
-			} else {
-				cmd = exec.CommandContext(ctx, cmdName, args...)
-				cmd.Stdout = nil
-				cmd.Stderr = os.Stderr // Expect messages logged to stderr to show progress
-			}
 
-			slog.Debug("Running command", "cmdName", cmdName, "args", []string{sw.Name, opts.Username, "REDACTED"})
+			cmd := exec.CommandContext(ctx, script, args...)
+			cmd.Stdout = logutil.NewSink(ctx, slog.Debug, sw.Name+": ")
+			cmd.Stderr = logutil.NewSink(ctx, slog.Debug, sw.Name+": ")
+
 			if err := cmd.Run(); err != nil {
 				mu.Lock()
 				defer mu.Unlock()
@@ -362,122 +342,99 @@ func (c *Config) SwitchReinstall(ctx context.Context, opts SwitchReinstallOpts) 
 				} else {
 					errs = append(errs, fmt.Errorf("%s: %w", sw.Name, err)) //nolint:goerr113
 				}
+
+				slog.Error("Failed to reinstall switch", "name", sw.Name, "error", err)
+
+				return
+			}
+
+			if opts.WaitReady {
+				slog.Info("Switch reinstalled successfully", "name", sw.Name)
+			} else {
+				slog.Info("Switch placed into NOS Install Mode", "name", sw.Name)
 			}
 		}(sw)
 	}
 
-	if opts.Mode == "hard-reset" {
-		for _, sw := range targets {
-			time.Sleep(1 * time.Second)
-			slog.Info("Executing hard-reset on", "switch", sw.Name+"...")
-			hardResetOpts := SwitchPowerOpts{
-				Name:    sw.Name,
-				Action:  "CYCLE",
-				PDUConf: opts.PDUConf,
-			}
+	if opts.Mode == ReinstallModeHardReset {
+		time.Sleep(1 * time.Second)
 
-			if err := c.VLABPower(ctx, hardResetOpts); err != nil {
-				return fmt.Errorf("failed to execute hard-reset on switch %s: %w", sw.Name, err) //nolint:goerr113
-			}
+		if err := c.VLABSwitchPower(ctx, SwitchPowerOpts{
+			Switches:    opts.Switches,
+			Action:      pdu.ActionCycle,
+			PDUUsername: opts.PDUUsername,
+			PDUPassword: opts.PDUPassword,
+		}); err != nil {
+			return fmt.Errorf("executing hard-reset on switches: %w", err)
 		}
 	}
+
 	wg.Wait()
 
 	if len(errs) > 0 {
-		elapsed := time.Since(start)
-
-		return fmt.Errorf("failed switches: %v (took %v)", errs, elapsed) //nolint:goerr113
+		return fmt.Errorf("reinstalling switches: %w", errors.Join(errs...))
 	}
 
-	if opts.Verbose {
-		fmt.Println("Switch reinstall running in Byobu tabs. Switch to them to check progress (Hit F4).")
+	if opts.WaitReady {
+		slog.Info("All switches reinstalled successfully", "took", time.Since(start))
 	} else {
-		if opts.Name == AllSwitches {
-			if opts.WaitReady {
-				fmt.Println("All switches reinstalled successfully.", "took", time.Since(start))
-			} else {
-				fmt.Println("All switches placed in OS Install Mode.", "took", time.Since(start))
-			}
-		} else {
-			if opts.WaitReady {
-				fmt.Println("Switch", opts.Name, "reinstalled successfully.", "took", time.Since(start))
-			} else {
-				fmt.Println("Switch", opts.Name, "placed in OS Install Mode.", "took", time.Since(start))
-			}
-		}
+		slog.Info("All switches placed into NOS Install Mode", "took", time.Since(start))
 	}
 
 	return nil
 }
 
-func (c *Config) VLABPower(ctx context.Context, opts SwitchPowerOpts) error {
-	entries := map[string]VLABPowerInfo{}
+func (c *Config) VLABSwitchPower(ctx context.Context, opts SwitchPowerOpts) error {
+	slog.Info("Power managing switches", "action", opts.Action, "switches", opts.Switches)
 
-	// Fetch the switch list
+	if opts.PDUUsername == "" || opts.PDUPassword == "" {
+		return errors.New("PDU credentials required") //nolint:goerr113
+	}
+
 	switches := wiringapi.SwitchList{}
 	if err := c.Wiring.List(ctx, &switches); err != nil {
 		return fmt.Errorf("failed to list switches: %w", err)
 	}
 
-	// Populate entries
-	foundAnnotations := false
+	if len(opts.Switches) > 0 {
+		sws := map[string]bool{}
+		for _, sw := range switches.Items {
+			sws[sw.Name] = true
+		}
+
+		for _, sw := range opts.Switches {
+			if !sws[sw] {
+				return fmt.Errorf("switch not found: %s", sw) //nolint:goerr113
+			}
+		}
+	}
+
 	for _, sw := range switches.Items {
-		// Skip if the name is not AllSwitches and doesn't match sw.Name
-		if opts.Name != AllSwitches && sw.Name != opts.Name {
+		if len(opts.Switches) > 0 && !slices.Contains(opts.Switches, sw.Name) {
 			continue
 		}
+
 		powerInfo := hhfctl.GetPowerInfo(&sw)
-		if len(powerInfo) > 0 {
-			foundAnnotations = true
-		}
-		slog.Debug("Switch", "sw", sw.Name, "annotations", fmt.Sprintf("%v", powerInfo))
-
-		entry := VLABPowerInfo{
-			SwitchPSUs: powerInfo,
-		}
-		entries[sw.Name] = entry
-	}
-
-	if len(entries) == 0 {
-		return fmt.Errorf("no switches found for the given name: %s", opts.Name) //nolint:goerr113
-	}
-
-	if !foundAnnotations {
-		targetSW := opts.Name
-		if opts.Name == AllSwitches {
-			targetSW = "any switches"
+		if len(powerInfo) == 0 {
+			return fmt.Errorf("no power info found for switch: %s", sw.Name) //nolint:goerr113
 		}
 
-		return fmt.Errorf("no annotations found for %s", targetSW) //nolint:goerr113
-	}
-
-	// Power action request to PDU API
-	for swName, entry := range entries {
-		for psuName, url := range entry.SwitchPSUs {
-			outletID, err := utils.ExtractOutletID(url)
+		for psuName, url := range powerInfo {
+			outletID, err := pdu.ExtractOutletID(url)
 			if err != nil {
-				return fmt.Errorf("error extracting outlet ID from URL %s: %w", url, err) //nolint:goerr113
+				return fmt.Errorf("extracting outlet ID from URL %s: %w", url, err)
 			}
-			pduIP, err := utils.GetPDUIPFromURL(url)
+			pduIP, err := pdu.GetPDUIPFromURL(url)
 			if err != nil {
-				return fmt.Errorf("error extracting PDU IP from URL %s: %w", url, err) //nolint:goerr113
+				return fmt.Errorf("extracting PDU IP from URL %s: %w", url, err)
 			}
-			// Query credentials from PDU config
-			creds, found := opts.PDUConf.PDUs[pduIP]
-			if !found {
-				return fmt.Errorf("no credentials found for PDU with IP: %s", pduIP) //nolint:goerr113
+
+			slog.Debug("Calling PDU API", "switch", sw.Name, "psu", psuName, "action", opts.Action)
+			if err := pdu.ControlOutlet(ctx, pduIP, opts.PDUUsername, opts.PDUPassword, outletID, opts.Action); err != nil {
+				return fmt.Errorf("failed to power %s switch %s %s: %w", opts.Action, sw.Name, psuName, err)
 			}
-			slog.Debug("Performing power", "action", opts.Action, "on switch", swName, "psu", psuName)
-			if err := netio.ControlOutlet(ctx, pduIP, creds.User, creds.Password, outletID, opts.Action); err != nil {
-				return fmt.Errorf("failed to power %s switch %s %s: %w", opts.Action, swName, psuName, err)
-			}
-			slog.Info("Action completed", "switch", swName, "action", opts.Action, "psu", psuName)
 		}
 	}
 
 	return nil
-}
-
-type VLABPowerInfo struct {
-	SwitchPSUs map[string]string // PSU names and their URLs
 }
