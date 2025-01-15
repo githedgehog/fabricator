@@ -59,10 +59,14 @@ const (
 	VLABCmdSocat      = "socat"
 	VLABCmdSSH        = "ssh"
 	VLABCmdLess       = "less"
+	VLABCmdExpect     = "expect"
 
 	VLABIgnition = "ignition.json"
 
 	VLABKubeConfig = "kubeconfig"
+
+	VLABEnvPDUUsername = "HHFAB_VLAB_PDU_USERNAME"
+	VLABEnvPDUPassword = "HHFAB_VLAB_PDU_PASSWORD" //nolint:gosec
 )
 
 var VLABCmds = []string{
@@ -89,12 +93,14 @@ type OnReady string
 const (
 	OnReadyExit             OnReady = "exit"
 	OnReadySetupVPCs        OnReady = "setup-vpcs"
+	OnReadySwitchReinstall  OnReady = "switch-reinstall"
 	OnReadyTestConnectivity         = "test-connectivity"
 )
 
 var AllOnReady = []OnReady{
 	OnReadyExit,
 	OnReadySetupVPCs,
+	OnReadySwitchReinstall,
 	OnReadyTestConnectivity,
 }
 
@@ -420,8 +426,16 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 
 			for _, cmd := range opts.OnReady {
 				slog.Info("Running on-ready command", "command", cmd)
-
 				switch OnReady(cmd) {
+				case OnReadySwitchReinstall:
+					if err := c.VLABSwitchReinstall(ctx, SwitchReinstallOpts{
+						Mode:        ReinstallModeHardReset,
+						PDUUsername: os.Getenv(VLABEnvPDUUsername),
+						PDUPassword: os.Getenv(VLABEnvPDUPassword),
+						WaitReady:   false,
+					}); err != nil {
+						return fmt.Errorf("reinstalling switches: %w", err)
+					}
 				case OnReadySetupVPCs:
 					// TODO make it configurable
 					if err := c.SetupVPCs(ctx, vlab, SetupVPCsOpts{
