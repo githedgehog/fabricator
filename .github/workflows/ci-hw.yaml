@@ -35,7 +35,7 @@ on:
 
 jobs:
   hlab:
-    if: contains(github.event.pull_request.labels.*.name, 'ci-hw')
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci-hw')
     runs-on: hlab
     timeout-minutes: 600
 
