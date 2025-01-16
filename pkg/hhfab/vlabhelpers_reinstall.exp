@@ -34,7 +34,7 @@ if {[llength $argv] == 1} {
 	lassign $argv SW_NAME USER PASSWORD
 	set POWER_RESET 0
 } else {
-	puts "Usage: $argv0 SW_NAME \[USER\] \[PASSWORD\]"
+	puts "Usage: $argv0 SW_NAME \[USER\] \[PASSWORD\] \[--wait-ready\]"
 	exit 1
 }
 
@@ -65,44 +65,11 @@ set KEY_PGUP "\033\[5~"
 set ONIE_HIGHLIGHT "*ONIE"
 set ONIE_CHAIN_INSTALL "*ONIE: Install OS"
 
-set ERROR_CONNECTION 1
+set ERROR_CONSOLE 1
 set ERROR_LOGIN 2
-set ERROR_GRUB 3
-set ERROR_INSTALL 4
-set ERROR_TIMEOUT 5
-set ERROR_EOF 6
-set ERROR_HHFAB 7
-
-# Define a procedure for GRUB menu handling
-proc handle_grub_menu {SW_NAME KEY_HOME KEY_DOWN ONIE_HIGHLIGHT} {
-    log_message "INF" $SW_NAME "GRUB Menu detected"
-    # Select the ONIE option, and finally the Install OS option
-    sleep 1
-    send -- "$KEY_HOME"
-    set timeout 1
-    expect {
-        -ex $ONIE_HIGHLIGHT {
-            set timeout -1
-            send "\r"
-            expect -ex "GNU GRUB"
-            send -- "$KEY_HOME"
-            sleep 1
-            send "\r"
-            expect {
-                "ONIE: OS Install Mode ..." {
-                    log_message "INF" $SW_NAME "Entering OS Install Mode..."
-                }
-                timeout {
-                    send "\r"
-                }
-            }
-        }
-        timeout {
-            send -- "$KEY_DOWN"
-            exp_continue
-        }
-    }
-}
+set ERROR_INSTALL 3
+set ERROR_HHFAB 4
+set ERROR_UNKNOWN 5
 
 # Check if HHFAB_BIN is set in the environment
 if {[info exists env(HHFAB_BIN)]} {
@@ -129,7 +96,12 @@ if {!([file exists $HHFAB] && [file executable $HHFAB])} {
 
 # connect to the serial console of the switch with hhfab
 puts "connecting to serial of $SW_NAME via hhfab serial..."
-spawn $HHFAB vlab serial -n $SW_NAME
+set spawn_result [catch {spawn $HHFAB vlab serial -n $SW_NAME} spawn_error]
+if {$spawn_result != 0} {
+	log_message "ERR" $SW_NAME "$HHFAB Failed with: $spawn_error"
+	exit $ERROR_HHFAB
+}
+
 expect {
 	-ex "Type the hot key to suspend the connection: <CTRL>Z" {
 		send "\r"
@@ -138,59 +110,98 @@ expect {
 		send "\r"
 	}
 	-ex "The connection was unsuccessful" {
-		exit $ERROR_CONNECTION
+		exit $ERROR_CONSOLE
 	}
 	timeout {
 		log_message "ERR" $SW_NAME "Connection to console timed out"
-		exit $ERROR_TIMEOUT
+		exit $ERROR_CONSOLE
 	}
 	eof {
 		log_message "ERR" $SW_NAME "Connection to console failed"
-		exit $ERROR_EOF
+		exit $ERROR_CONSOLE
+	}
+	default {
+		log_message "ERR" $SW_NAME "Unexpected output: [expect_out(buffer)]"
+		exit $ERROR_UNKNOWN
 	}
 }
 
 if { ! $POWER_RESET} {
+	set timeout 100
 	expect {
-		# handle wrong user/password
-		-ex "Login incorrect" {
-			exit $ERROR_LOGIN
-		}
-		# handle user login if not already logged in
-		-re "$SW_NAME login:" {
-			send "$USER\r"
-			exp_continue
-		}
-		-ex "Password:" {
-			send "$PASSWORD\r"
-			exp_continue
-		}
-		# reboot in case we are at the prompt - eventually this will be done via PDU
-		-ex "admin@$SW_NAME:~$" {
-			log_message "INF" $SW_NAME "Rebooting..."
-			send "sudo reboot\r"
-			exp_continue
-		}
-		# same for rescue mode
-		-ex "ONIE:/ #" {
-			send "reboot\r"
-			sleep 5
-			exp_continue
-		}
-		-ex "GNU GRUB" {
-                    handle_grub_menu $SW_NAME $KEY_HOME $KEY_DOWN $ONIE_HIGHLIGHT 
-		}
+	# handle wrong user/password
+	-ex "Login incorrect" {
+		exit $ERROR_LOGIN
 	}
-} else {
-	expect -timeout 150 -ex "GNU GRUB" {
-		handle_grub_menu $SW_NAME $KEY_HOME $KEY_DOWN $ONIE_HIGHLIGHT
-	} timeout {
-		log_message "ERR" $SW_NAME "Failed to reset. GRUB not detected."
-		exit $ERROR_INSTALL
+	# handle user login if not already logged in
+	-re "$SW_NAME login:" {
+		send "$USER\r"
+		exp_continue
+	}
+	-ex "Password:" {
+		send "$PASSWORD\r"
+		exp_continue
+	}
+	# reboot in case we are at the prompt - eventually this will be done via PDU
+	-ex "admin@$SW_NAME:~$" {
+		log_message "INF" $SW_NAME "Rebooting..."
+		send "sudo reboot\r"
+	}
+	# same for rescue mode
+	-ex "ONIE:/ #" {
+		send "reboot\r"
+		sleep 5
+	}
+	timeout {
+		log_message "ERR" $SW_NAME "Login to NOS timed out"
+		exit $ERROR_LOGIN
+	}
+	eof {
+		log_message "ERR" $SW_NAME "Login to NOS failed (EOF)"
+		exit $ERROR_LOGIN
+	}
+	default {
+		log_message "ERR" $SW_NAME "Unexpected output: [expect_out(buffer)]"
+		exit $ERROR_UNKNOWN
+	}
 	}
 }
 
+expect -timeout 150 -ex "GNU GRUB" {
+	log_message "INF" $SW_NAME "GRUB Menu detected"
+	# Select the ONIE option, and finally the Install OS option
+	sleep 1
+	send -- "$KEY_HOME"
+	set timeout 1
+	expect {
+		-ex $ONIE_HIGHLIGHT {
+			set timeout -1
+			send "\r"
+			expect -ex "GNU GRUB"
+			send -- "$KEY_HOME"
+			sleep 1
+			send "\r"
+			expect {
+				"ONIE: OS Install Mode ..." {
+					log_message "INF" $SW_NAME "Entering OS Install Mode..."
+				}
+				timeout {
+					send "\r"
+				}
+			}
+		}
+		timeout {
+			send -- "$KEY_DOWN"
+			exp_continue
+		}
+	}
+} timeout {
+	log_message "ERR" $SW_NAME "Failed to reset. GRUB not detected."
+	exit $ERROR_INSTALL
+}
+
 if {$WAIT_READY} {
+	set install_success 0
 	# Wait for confirmation of the Install OS option
 	expect -timeout 60 -ex "Starting ONIE Service Discovery" {
 		# Wait for successful NOS installation
