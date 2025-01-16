@@ -25,7 +25,9 @@ systemd:
       contents: |
         [Unit]
         Description="Firstboot installation program for Hedgehog Fabricator"
-        ConditionFirstBoot=yes
+        ConditionPathExists=!/opt/hedgehog/.install
+        StartLimitIntervalSec=30
+        StartLimitBurst=3
 
         [Service]
         Type=simple
@@ -33,6 +35,7 @@ systemd:
         ExecStart={{ .AutoInstall }}/hhfab-recipe control install -v
         WorkingDirectory={{ .AutoInstall }}
         Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/bin" "HOME=/home/core"
+        Restart=on-failure
 
         [Install]
         WantedBy=first-boot-complete.target
