@@ -344,10 +344,23 @@ func (c *Config) VLABSwitchReinstall(ctx context.Context, opts SwitchReinstallOp
 				defer mu.Unlock()
 
 				var exitErr *exec.ExitError
-				if errors.As(err, &exitErr) && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				if errors.As(err, &exitErr) {
+					switch exitErr.ExitCode() {
+					case 1: // ERROR_CONSOLE
+						errs = append(errs, fmt.Errorf("%s: Connection to console failed (error code: %d)", sw.Name, exitErr.ExitCode())) //nolint:goerr113
+					case 2: // ERROR_LOGIN
+						errs = append(errs, fmt.Errorf("%s: Login to switch failed (error code: %d)", sw.Name, exitErr.ExitCode())) //nolint:goerr113
+					case 3: // ERROR_INSTALL
+						errs = append(errs, fmt.Errorf("%s: OS Install failed (error code: %d)", sw.Name, exitErr.ExitCode())) //nolint:goerr113
+					case 4: // ERROR_HHFAB
+						errs = append(errs, fmt.Errorf("%s: hhfab vlab serial failed (error code: %d)", sw.Name, exitErr.ExitCode())) //nolint:goerr113
+					case 5: // ERROR_UNKNOWN
+						errs = append(errs, fmt.Errorf("%s: Unknown expect error (error code: %d)", sw.Name, exitErr.ExitCode())) //nolint:goerr113
+					default:
+						errs = append(errs, fmt.Errorf("%s: Unknown error (exit code: %d)", sw.Name, exitErr.ExitCode())) //nolint:goerr113
+					}
+				} else if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 					errs = append(errs, fmt.Errorf("%s: timeout (context deadline exceeded)", sw.Name)) //nolint:goerr113
-				} else if exitErr != nil {
-					errs = append(errs, fmt.Errorf("%s: killed by signal: %w", sw.Name, exitErr)) //nolint:goerr113
 				} else {
 					errs = append(errs, fmt.Errorf("%s: %w", sw.Name, err)) //nolint:goerr113
 				}
