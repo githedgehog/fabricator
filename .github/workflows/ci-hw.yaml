@@ -5,16 +5,6 @@ concurrency:
   cancel-in-progress: true
 
 on:
-  push:
-    branches:
-      - master
-      - release/*
-    tags:
-      - "v*"
-  pull_request:
-    types: [ labeled ]
-  schedule:
-    - cron: "0 10 * * *" # ~2am PST
   workflow_dispatch:
     inputs:
       keep:
@@ -35,7 +25,6 @@ on:
 
 jobs:
   hlab:
-    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci-hw')
     runs-on: hlab
     timeout-minutes: 600
 
