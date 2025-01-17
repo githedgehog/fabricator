@@ -59,7 +59,7 @@ func (c *Config) Wait(ctx context.Context, vlab *VLAB) error {
 	}
 
 	slog.Info("Waiting for all switches ready")
-	if err := waitSwitchesReady(ctx, kube, 0); err != nil {
+	if err := WaitSwitchesReady(ctx, kube, 0, 30*time.Minute); err != nil {
 		return fmt.Errorf("waiting for switches ready: %w", err)
 	}
 
@@ -78,6 +78,40 @@ type SetupVPCsOpts struct {
 	DNSServers        []string
 	TimeServers       []string
 	InterfaceMTU      uint16
+}
+
+func CreateOrUpdateVpc(ctx context.Context, kube client.Client, vpc *vpcapi.VPC) (bool, error) {
+	var changed bool
+	some := &vpcapi.VPC{ObjectMeta: metav1.ObjectMeta{Name: vpc.Name, Namespace: vpc.Namespace}}
+	res, err := ctrlutil.CreateOrUpdate(ctx, kube, some, func() error {
+		some.Spec = vpc.Spec
+		some.Default()
+
+		return nil
+	})
+	if err != nil {
+		return changed, fmt.Errorf("creating or updating VPC %q: %w", vpc.Name, err)
+	}
+
+	switch res {
+	case ctrlutil.OperationResultCreated:
+		slog.Info("Created", "vpc", vpc.Name, "subnets", len(vpc.Spec.Subnets))
+		changed = true
+	case ctrlutil.OperationResultUpdated:
+		slog.Info("Updated", "vpc", vpc.Name, "subnets", len(vpc.Spec.Subnets))
+		changed = true
+	}
+
+	return changed, nil
+}
+
+func GetKubeClient(ctx context.Context, workDir string) (client.Client, error) {
+	kubeconfig := filepath.Join(workDir, VLABDir, VLABKubeConfig)
+	return kubeutil.NewClient(ctx, kubeconfig,
+		wiringapi.SchemeBuilder,
+		vpcapi.SchemeBuilder,
+		agentapi.SchemeBuilder,
+	)
 }
 
 func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) error {
@@ -308,7 +342,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 
 	if opts.WaitSwitchesReady {
 		slog.Info("Waiting for switches ready before configuring VPCs and VPCAttachments")
-		if err := waitSwitchesReady(ctx, kube, 0); err != nil {
+		if err := WaitSwitchesReady(ctx, kube, 0, 30*time.Minute); err != nil {
 			return fmt.Errorf("waiting for switches ready: %w", err)
 		}
 	}
@@ -346,25 +380,11 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	}
 
 	for _, vpc := range vpcs {
-		some := &vpcapi.VPC{ObjectMeta: metav1.ObjectMeta{Name: vpc.Name, Namespace: vpc.Namespace}}
-		res, err := ctrlutil.CreateOrUpdate(ctx, kube, some, func() error {
-			some.Spec = vpc.Spec
-			some.Default()
-
-			return nil
-		})
+		iterChanged, err := CreateOrUpdateVpc(ctx, kube, vpc)
 		if err != nil {
-			return fmt.Errorf("creating or updating VPC %q: %w", vpc.Name, err)
+			return fmt.Errorf("creating or updating vpc %q: %w", vpc.Name, err)
 		}
-
-		switch res {
-		case ctrlutil.OperationResultCreated:
-			slog.Info("Created", "vpc", vpc.Name, "subnets", len(vpc.Spec.Subnets))
-			changed = true
-		case ctrlutil.OperationResultUpdated:
-			slog.Info("Updated", "vpc", vpc.Name, "subnets", len(vpc.Spec.Subnets))
-			changed = true
-		}
+		changed = changed || iterChanged
 	}
 
 	for _, attach := range attaches {
@@ -399,7 +419,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		case <-time.After(15 * time.Second):
 		}
 
-		if err := waitSwitchesReady(ctx, kube, 0); err != nil {
+		if err := WaitSwitchesReady(ctx, kube, 0, 30*time.Minute); err != nil {
 			return fmt.Errorf("waiting for switches ready: %w", err)
 		}
 	}
@@ -507,7 +527,7 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 
 	if opts.WaitSwitchesReady {
 		slog.Info("Waiting for switches ready before configuring VPC and External Peerings")
-		if err := waitSwitchesReady(ctx, kube, 0); err != nil {
+		if err := WaitSwitchesReady(ctx, kube, 0, 30*time.Minute); err != nil {
 			return fmt.Errorf("waiting for switches ready: %w", err)
 		}
 	}
@@ -712,7 +732,16 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 		}
 	}
 
-	changed := false
+	if err := DoSetupPeerings(ctx, kube, vpcPeerings, externalPeerings, opts.WaitSwitchesReady); err != nil {
+		return err
+	}
+	slog.Info("VPC and External Peerings setup complete", "took", time.Since(start))
+
+	return nil
+}
+
+func DoSetupPeerings(ctx context.Context, kube client.Client, vpcPeerings map[string]*vpcapi.VPCPeeringSpec, externalPeerings map[string]*vpcapi.ExternalPeeringSpec, waitReady bool) error {
+	var changed bool
 
 	vpcPeeringList := &vpcapi.VPCPeeringList{}
 	if err := kube.List(ctx, vpcPeeringList); err != nil {
@@ -810,7 +839,7 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 		}
 	}
 
-	if changed && opts.WaitSwitchesReady {
+	if changed && waitReady {
 		slog.Info("Waiting for switches ready after configuring VPC and External Peerings")
 
 		// TODO remove it when we can actually know that changes to VPC/VPCAttachment are reflected in agents
@@ -820,12 +849,10 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 		case <-time.After(15 * time.Second):
 		}
 
-		if err := waitSwitchesReady(ctx, kube, 0); err != nil {
+		if err := WaitSwitchesReady(ctx, kube, 0, 30*time.Minute); err != nil {
 			return fmt.Errorf("waiting for switches ready: %w", err)
 		}
 	}
-
-	slog.Info("VPC and External Peerings setup complete", "took", time.Since(start))
 
 	return nil
 }
@@ -899,7 +926,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 	if opts.WaitSwitchesReady {
 		slog.Info("Waiting for switches ready before testing connectivity")
 
-		if err := waitSwitchesReady(ctx, kube, 30*time.Second); err != nil {
+		if err := WaitSwitchesReady(ctx, kube, 30*time.Second, 30*time.Minute); err != nil {
 			return fmt.Errorf("waiting for switches ready: %w", err)
 		}
 	}
@@ -1123,13 +1150,19 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 	return nil
 }
 
-func waitSwitchesReady(ctx context.Context, kube client.Reader, appliedFor time.Duration) error {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
-	defer cancel()
+func WaitSwitchesReady(ctx context.Context, kube client.Reader, appliedFor time.Duration, timeout time.Duration) error {
+	var waitCtx context.Context
+	var cancel context.CancelFunc
+	if timeout > 0 {
+		waitCtx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	} else {
+		waitCtx = ctx
+	}
 
 	for {
 		switches := &wiringapi.SwitchList{}
-		if err := kube.List(ctx, switches); err != nil {
+		if err := kube.List(waitCtx, switches); err != nil {
 			return fmt.Errorf("listing switches: %w", err)
 		}
 
@@ -1145,7 +1178,7 @@ func waitSwitchesReady(ctx context.Context, kube client.Reader, appliedFor time.
 			updated := false
 
 			ag := &agentapi.Agent{}
-			err := kube.Get(ctx, client.ObjectKey{Name: sw.Name, Namespace: sw.Namespace}, ag)
+			err := kube.Get(waitCtx, client.ObjectKey{Name: sw.Name, Namespace: sw.Namespace}, ag)
 			if err != nil && !apierrors.IsNotFound(err) {
 				return fmt.Errorf("getting agent %q: %w", sw.Name, err)
 			}
@@ -1499,7 +1532,7 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 	fail := false
 
 	slog.Info("Waiting for switches ready before inspecting")
-	if err := waitSwitchesReady(ctx, kube, opts.WaitAppliedFor); err != nil {
+	if err := WaitSwitchesReady(ctx, kube, opts.WaitAppliedFor, 30*time.Minute); err != nil {
 		slog.Error("Failed to wait for switches ready", "err", err)
 		fail = true
 	}
