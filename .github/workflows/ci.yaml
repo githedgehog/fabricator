@@ -312,6 +312,13 @@ jobs:
           old/hhfab vlab gen -v
           old/hhfab vlab up -v --ready setup-vpcs --ready test-connectivity --ready exit ${{ matrix.fromflags }}
 
+      - name: Upload show-tech artifacts
+        uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: show-tech-upgrade-old-${{ matrix.fabricmode }}-${{ matrix.fromversion }}-${{ matrix.fromflags == '--usb' && 'usb' || matrix.fromflags == '-m=iso' && 'iso' }}
+          path: show-tech-output
+
       - name: Build current hhfab
         run: |
           just --timestamp oci_repo=127.0.0.1:30000 oci=http push
@@ -321,6 +328,13 @@ jobs:
           HHFAB_REG_REPO: 127.0.0.1:30000
         run: |
           bin/hhfab vlab up -v --ready setup-vpcs --ready test-connectivity --ready exit --upgrade
+
+      - name: Upload show-tech artifacts
+        uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: show-tech-upgrade-cur-${{ matrix.fabricmode }}-${{ matrix.fromversion }}-${{ matrix.fromflags == '--usb' && 'usb' || matrix.fromflags == '-m=iso' && 'iso' }}
+          path: show-tech-output
 
       - name: Dump local registry logs
         if: ${{ always() }}
