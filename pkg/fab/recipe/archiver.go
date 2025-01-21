@@ -10,11 +10,11 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/mholt/archiver/v4"
+	"github.com/mholt/archives"
 )
 
 func archiveTarGz(ctx context.Context, src, dst string) error {
-	files, err := archiver.FilesFromDisk(nil, map[string]string{
+	files, err := archives.FilesFromDisk(ctx, nil, map[string]string{
 		src: filepath.Base(src),
 	})
 	if err != nil {
@@ -27,12 +27,12 @@ func archiveTarGz(ctx context.Context, src, dst string) error {
 	}
 	defer out.Close()
 
-	format := archiver.CompressedArchive{
-		Compression: archiver.Gz{
+	format := archives.CompressedArchive{
+		Compression: archives.Gz{
 			Multithreaded:    true,
 			CompressionLevel: gzip.BestSpeed,
 		},
-		Archival: archiver.Tar{},
+		Archival: archives.Tar{},
 	}
 
 	err = format.Archive(ctx, out, files)
