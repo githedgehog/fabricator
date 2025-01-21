@@ -375,6 +375,11 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 
 			if err := execCmd(ctx, true, vmDir, VLABCmdQemuSystem, args, "vm", vm.Name); err != nil {
 				slog.Warn("Failed running VM", "vm", vm.Name, "type", vm.Type, "err", err)
+				if err := c.VLABShowTech(ctx, vlab); err != nil {
+					slog.Warn("Failed to collect show-tech diagnostics", "err", err)
+
+					return fmt.Errorf("getting show-tech: %w", err)
+				}
 
 				if opts.FailFast {
 					return fmt.Errorf("running vm: %w", err)
@@ -389,6 +394,11 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 			group.Go(func() error {
 				if err := c.vmPostProcess(ctx, vlab, d, vm, opts); err != nil {
 					slog.Warn("Failed to post-process VM", "vm", vm.Name, "type", vm.Type, "err", err)
+					if err := c.VLABShowTech(ctx, vlab); err != nil {
+						slog.Warn("Failed to collect show-tech diagnostics", "err", err)
+
+						return fmt.Errorf("getting show-tech: %w", err)
+					}
 
 					if opts.FailFast {
 						return fmt.Errorf("post-processing vm %s: %w", vm.Name, err)
@@ -434,11 +444,11 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						PDUPassword: os.Getenv(VLABEnvPDUPassword),
 						WaitReady:   false,
 					}); err != nil {
+						slog.Warn("Failed to reinstall switches", "err", err)
 						if err := c.VLABShowTech(ctx, vlab); err != nil {
 							slog.Warn("Failed to collect show-tech diagnostics", "err", err)
-							if opts.FailFast {
-								return fmt.Errorf("getting show-tech: %w", err)
-							}
+
+							return fmt.Errorf("getting show-tech: %w", err)
 						}
 
 						return fmt.Errorf("reinstalling switches: %w", err)
@@ -454,11 +464,11 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						DNSServers:        []string{"1.1.1.1", "1.0.0.1"},
 						TimeServers:       []string{"219.239.35.0"},
 					}); err != nil {
+						slog.Warn("Failed to setup VPCs", "err", err)
 						if err := c.VLABShowTech(ctx, vlab); err != nil {
 							slog.Warn("Failed to collect show-tech diagnostics", "err", err)
-							if opts.FailFast {
-								return fmt.Errorf("getting show-tech: %w", err)
-							}
+
+							return fmt.Errorf("getting show-tech: %w", err)
 						}
 
 						return fmt.Errorf("setting up VPCs: %w", err)
@@ -471,11 +481,11 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						IPerfsSeconds:     5,
 						CurlsCount:        3,
 					}); err != nil {
+						slog.Warn("Failed to test connectivity", "err", err)
 						if err := c.VLABShowTech(ctx, vlab); err != nil {
 							slog.Warn("Failed to collect show-tech diagnostics", "err", err)
-							if opts.FailFast {
-								return fmt.Errorf("getting show-tech: %w", err)
-							}
+
+							return fmt.Errorf("getting show-tech: %w", err)
 						}
 
 						return fmt.Errorf("testing connectivity: %w", err)
@@ -483,9 +493,8 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 				case OnReadyExit:
 					if err := c.VLABShowTech(ctx, vlab); err != nil {
 						slog.Warn("Failed to collect show-tech diagnostics", "err", err)
-						if opts.FailFast {
-							return fmt.Errorf("getting show-tech: %w", err)
-						}
+
+						return fmt.Errorf("getting show-tech: %w", err)
 					}
 					// TODO seems like some graceful shutdown logic isn't working in CI and we're getting stuck w/o this
 					if os.Getenv("GITHUB_ACTIONS") == "true" {
