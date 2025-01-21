@@ -134,6 +134,9 @@ github.com/ProtonMail/go-crypto/openpgp/packet
 github.com/ProtonMail/go-crypto/openpgp/s2k
 github.com/ProtonMail/go-crypto/openpgp/x25519
 github.com/ProtonMail/go-crypto/openpgp/x448
+# github.com/STARRY-S/zip v0.2.1
+## explicit; go 1.22.2
+github.com/STARRY-S/zip
 # github.com/Shopify/ejson v1.3.3
 ## explicit; go 1.18
 github.com/Shopify/ejson
@@ -145,9 +148,10 @@ github.com/VividCortex/ewma
 # github.com/acarl005/stripansi v0.0.0-20180116102854-5a71ef0e047d
 ## explicit
 github.com/acarl005/stripansi
-# github.com/andybalholm/brotli v1.0.4
-## explicit; go 1.12
+# github.com/andybalholm/brotli v1.1.1
+## explicit; go 1.13
 github.com/andybalholm/brotli
+github.com/andybalholm/brotli/matchfinder
 # github.com/apparentlymart/go-cidr v1.1.0
 ## explicit
 github.com/apparentlymart/go-cidr/cidr
@@ -351,14 +355,15 @@ github.com/aws/smithy-go/waiter
 # github.com/beorn7/perks v1.0.1
 ## explicit; go 1.11
 github.com/beorn7/perks/quantile
-# github.com/bodgit/plumbing v1.2.0
+# github.com/bodgit/plumbing v1.3.0
 ## explicit; go 1.13
 github.com/bodgit/plumbing
-# github.com/bodgit/sevenzip v1.3.0
-## explicit; go 1.17
+# github.com/bodgit/sevenzip v1.6.0
+## explicit; go 1.19
 github.com/bodgit/sevenzip
 github.com/bodgit/sevenzip/internal/aes7z
 github.com/bodgit/sevenzip/internal/bcj2
+github.com/bodgit/sevenzip/internal/bra
 github.com/bodgit/sevenzip/internal/brotli
 github.com/bodgit/sevenzip/internal/bzip2
 github.com/bodgit/sevenzip/internal/deflate
@@ -369,7 +374,7 @@ github.com/bodgit/sevenzip/internal/lzma2
 github.com/bodgit/sevenzip/internal/pool
 github.com/bodgit/sevenzip/internal/util
 github.com/bodgit/sevenzip/internal/zstd
-# github.com/bodgit/windows v1.0.0
+# github.com/bodgit/windows v1.0.1
 ## explicit; go 1.13
 github.com/bodgit/windows
 # github.com/bufbuild/protocompile v0.6.0
@@ -414,7 +419,6 @@ github.com/cloudflare/circl/sign/ed25519
 github.com/cloudflare/circl/sign/ed448
 # github.com/connesc/cipherio v0.2.1
 ## explicit; go 1.14
-github.com/connesc/cipherio
 # github.com/containerd/cgroups/v3 v3.0.3
 ## explicit; go 1.18
 github.com/containerd/cgroups/v3/cgroup1/stats
@@ -730,7 +734,7 @@ github.com/docker/libkv
 github.com/docker/libkv/store
 github.com/docker/libkv/store/boltdb
 github.com/docker/libkv/store/consul
-# github.com/dsnet/compress v0.0.1
+# github.com/dsnet/compress v0.0.2-0.20230904184137-39efe44ab707
 ## explicit; go 1.9
 github.com/dsnet/compress
 github.com/dsnet/compress/bzip2
@@ -934,7 +938,6 @@ github.com/golang/protobuf/ptypes/duration
 github.com/golang/protobuf/ptypes/timestamp
 # github.com/golang/snappy v0.0.4
 ## explicit
-github.com/golang/snappy
 # github.com/google/gnostic-models v0.6.8
 ## explicit; go 1.18
 github.com/google/gnostic-models/compiler
@@ -1088,6 +1091,11 @@ github.com/hashicorp/go-sockaddr/template
 # github.com/hashicorp/golang-lru v1.0.2
 ## explicit; go 1.12
 github.com/hashicorp/golang-lru/simplelru
+# github.com/hashicorp/golang-lru/v2 v2.0.7
+## explicit; go 1.18
+github.com/hashicorp/golang-lru/v2
+github.com/hashicorp/golang-lru/v2/internal
+github.com/hashicorp/golang-lru/v2/simplelru
 # github.com/hashicorp/hcl v1.0.1-vault-5
 ## explicit; go 1.15
 github.com/hashicorp/hcl
@@ -1154,7 +1162,9 @@ github.com/klauspost/compress/gzip
 github.com/klauspost/compress/huff0
 github.com/klauspost/compress/internal/cpuinfo
 github.com/klauspost/compress/internal/godebug
+github.com/klauspost/compress/internal/race
 github.com/klauspost/compress/internal/snapref
+github.com/klauspost/compress/s2
 github.com/klauspost/compress/zip
 github.com/klauspost/compress/zlib
 github.com/klauspost/compress/zstd
@@ -1217,7 +1227,9 @@ github.com/mattn/go-sqlite3
 github.com/melbahja/goph
 # github.com/mholt/archiver/v4 v4.0.0-alpha.8
 ## explicit; go 1.18
-github.com/mholt/archiver/v4
+# github.com/mholt/archives v0.1.0
+## explicit; go 1.22.2
+github.com/mholt/archives
 # github.com/miekg/pkcs11 v1.1.1
 ## explicit; go 1.12
 github.com/miekg/pkcs11
@@ -1257,7 +1269,7 @@ github.com/modern-go/reflect2
 # github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822
 ## explicit
 github.com/munnerz/goautoneg
-# github.com/nwaples/rardecode/v2 v2.0.0-beta.2
+# github.com/nwaples/rardecode/v2 v2.0.0-beta.4.0.20241112120701-034e449c6e78
 ## explicit; go 1.16
 github.com/nwaples/rardecode/v2
 # github.com/oklog/ulid v1.3.1
@@ -1342,7 +1354,7 @@ github.com/opencontainers/selinux/pkg/pwalkdir
 ## explicit
 github.com/ostreedev/ostree-go/pkg/glibobject
 github.com/ostreedev/ostree-go/pkg/otbuiltin
-# github.com/pierrec/lz4/v4 v4.1.18
+# github.com/pierrec/lz4/v4 v4.1.21
 ## explicit; go 1.14
 github.com/pierrec/lz4/v4
 github.com/pierrec/lz4/v4/internal/lz4block
@@ -1457,6 +1469,9 @@ github.com/sirupsen/logrus
 # github.com/skeema/knownhosts v1.3.0
 ## explicit; go 1.17
 github.com/skeema/knownhosts
+# github.com/sorairolake/lzip-go v0.3.5
+## explicit; go 1.22
+github.com/sorairolake/lzip-go
 # github.com/spf13/afero v1.11.0
 ## explicit; go 1.19
 github.com/spf13/afero
@@ -1649,9 +1664,10 @@ go.uber.org/zap/internal/exit
 go.uber.org/zap/internal/pool
 go.uber.org/zap/internal/stacktrace
 go.uber.org/zap/zapcore
-# go4.org v0.0.0-20200411211856-f5505b9728dd
+# go4.org v0.0.0-20230225012048-214862532bf5
 ## explicit; go 1.13
 go4.org/readerutil
+go4.org/syncutil
 # go4.org/intern v0.0.0-20230205224052-192e9f60865c
 ## explicit; go 1.13
 go4.org/intern
