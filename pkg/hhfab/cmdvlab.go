@@ -175,6 +175,24 @@ func DoVLABTestConnectivity(ctx context.Context, workDir, cacheDir string, opts 
 	return c.TestConnectivity(ctx, vlab, opts)
 }
 
+func DoVLABWait(ctx context.Context, workDir, cacheDir string) error {
+	c, vlab, err := loadVLABForHelpers(ctx, workDir, cacheDir)
+	if err != nil {
+		return err
+	}
+
+	return c.Wait(ctx, vlab)
+}
+
+func DoVLABInspect(ctx context.Context, workDir, cacheDir string) error {
+	c, vlab, err := loadVLABForHelpers(ctx, workDir, cacheDir)
+	if err != nil {
+		return err
+	}
+
+	return c.Inspect(ctx, vlab)
+}
+
 type SwitchPowerOpts struct {
 	Switches    []string   // All switches if empty
 	Action      pdu.Action // Power action (e.g., on, off, cycle)

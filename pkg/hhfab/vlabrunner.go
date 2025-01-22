@@ -95,7 +95,9 @@ const (
 	OnReadyExit             OnReady = "exit"
 	OnReadySetupVPCs        OnReady = "setup-vpcs"
 	OnReadySwitchReinstall  OnReady = "switch-reinstall"
-	OnReadyTestConnectivity         = "test-connectivity"
+	OnReadyTestConnectivity OnReady = "test-connectivity"
+	OnReadyWait             OnReady = "wait"
+	OnReadyInspect          OnReady = "inspect"
 )
 
 var AllOnReady = []OnReady{
@@ -103,6 +105,8 @@ var AllOnReady = []OnReady{
 	OnReadySetupVPCs,
 	OnReadySwitchReinstall,
 	OnReadyTestConnectivity,
+	OnReadyWait,
+	OnReadyInspect,
 }
 
 var ErrExit = fmt.Errorf("exit")
@@ -522,6 +526,34 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 					}
 
 					return ErrExit
+				case OnReadyWait:
+					if err := c.Wait(ctx, vlab); err != nil {
+						slog.Warn("Failed to wait for switches ready", "err", err)
+
+						if opts.CollectShowTech {
+							if err := c.VLABShowTech(ctx, vlab); err != nil {
+								slog.Warn("Failed to collect show-tech diagnostics", "err", err)
+
+								return fmt.Errorf("getting show-tech: %w", err)
+							}
+						}
+
+						return fmt.Errorf("waiting: %w", err)
+					}
+				case OnReadyInspect:
+					if err := c.Inspect(ctx, vlab); err != nil {
+						slog.Warn("Failed to inspect", "err", err)
+
+						if opts.CollectShowTech {
+							if err := c.VLABShowTech(ctx, vlab); err != nil {
+								slog.Warn("Failed to collect show-tech diagnostics", "err", err)
+
+								return fmt.Errorf("getting show-tech: %w", err)
+							}
+						}
+
+						return fmt.Errorf("inspecting: %w", err)
+					}
 				}
 			}
 

@@ -11,6 +11,7 @@ import (
 	"iter"
 	"log/slog"
 	"net/netip"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -24,6 +25,7 @@ import (
 	"go.githedgehog.com/fabric/api/meta"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
+	"go.githedgehog.com/fabric/pkg/hhfctl/inspect"
 	"go.githedgehog.com/fabric/pkg/util/apiutil"
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
 	"golang.org/x/crypto/ssh"
@@ -39,6 +41,32 @@ const (
 	ServerNamePrefix = "server-"
 	VSIPerfSpeed     = 1
 )
+
+func (c *Config) Wait(ctx context.Context, vlab *VLAB) error {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
+	defer cancel()
+
+	start := time.Now()
+
+	kubeconfig := filepath.Join(c.WorkDir, VLABDir, VLABKubeConfig)
+	kube, err := kubeutil.NewClientWithCache(ctx, kubeconfig,
+		wiringapi.SchemeBuilder,
+		vpcapi.SchemeBuilder,
+		agentapi.SchemeBuilder,
+	)
+	if err != nil {
+		return fmt.Errorf("creating kube client: %w", err)
+	}
+
+	slog.Info("Waiting for all switches ready")
+	if err := waitSwitchesReady(ctx, kube); err != nil {
+		return fmt.Errorf("waiting for switches ready: %w", err)
+	}
+
+	slog.Info("All switches are ready", "took", time.Since(start))
+
+	return nil
+}
 
 type SetupVPCsOpts struct {
 	WaitSwitchesReady bool
@@ -1398,4 +1426,67 @@ func CollectN[E any](n int, seq iter.Seq[E]) []E {
 	}
 
 	return res[:idx:idx]
+}
+
+func (c *Config) Inspect(ctx context.Context, vlab *VLAB) error {
+	slog.Info("Inspecting fabric")
+
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
+	defer cancel()
+
+	start := time.Now()
+
+	kubeconfig := filepath.Join(c.WorkDir, VLABDir, VLABKubeConfig)
+	kube, err := kubeutil.NewClientWithCache(ctx, kubeconfig,
+		wiringapi.SchemeBuilder,
+		vpcapi.SchemeBuilder,
+		agentapi.SchemeBuilder,
+	)
+	if err != nil {
+		return fmt.Errorf("creating kube client: %w", err)
+	}
+
+	fail := false
+
+	slog.Info("Waiting for switches ready before inspecting")
+	if err := waitSwitchesReady(ctx, kube); err != nil {
+		slog.Error("Failed to wait for switches ready", "err", err)
+		fail = true
+	}
+
+	// workaround to make inspect commands work as is
+	os.Setenv("KUBECONFIG", kubeconfig)
+
+	if err := inspect.Run(ctx, inspect.LLDP, inspect.Args{
+		Verbose: true,
+		Output:  inspect.OutputTypeText,
+	}, inspect.LLDPIn{
+		Strict:   true,
+		Fabric:   true,
+		External: true,
+		Server:   true,
+	}, os.Stdout); err != nil {
+		slog.Error("Failed to inspect LLDP", "err", err)
+		fail = true
+	}
+
+	if err := inspect.Run(ctx, inspect.BGP, inspect.Args{
+		Verbose: true,
+		Output:  inspect.OutputTypeText,
+	}, inspect.BGPIn{
+		Strict: true,
+	}, os.Stdout); err != nil {
+		slog.Error("Failed to inspect BGP", "err", err)
+		fail = true
+	}
+
+	if fail {
+		slog.Error("Failed to inspect fabric", "took", time.Since(start))
+
+		return fmt.Errorf("failed to inspect fabric")
+	}
+
+	slog.Info("Inspect completed", "took", time.Since(start))
+
+	return nil
 }
