@@ -896,6 +896,34 @@ func Run(ctx context.Context) error {
 						},
 					},
 					{
+						Name:    "wait-switches",
+						Aliases: []string{"wait"},
+						Usage:   "wait for all switches to be ready",
+						Flags:   defaultFlags,
+						Before:  before(false),
+						Action: func(_ *cli.Context) error {
+							if err := hhfab.DoVLABWait(ctx, workDir, cacheDir); err != nil {
+								return fmt.Errorf("wait: %w", err)
+							}
+
+							return nil
+						},
+					},
+					{
+						Name:    "inspect-switches",
+						Aliases: []string{"inspect"},
+						Usage:   "wait for ready and inspect all switches",
+						Flags:   defaultFlags,
+						Before:  before(false),
+						Action: func(_ *cli.Context) error {
+							if err := hhfab.DoVLABInspect(ctx, workDir, cacheDir); err != nil {
+								return fmt.Errorf("inspect: %w", err)
+							}
+
+							return nil
+						},
+					},
+					{
 						Name:  "switch",
 						Usage: "manage switch reinstall or power",
 						Flags: append(defaultFlags, accessNameFlag),

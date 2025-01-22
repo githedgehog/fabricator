@@ -749,6 +749,9 @@ github.com/dsnet/compress/bzip2/internal/sais
 github.com/dsnet/compress/internal
 github.com/dsnet/compress/internal/errors
 github.com/dsnet/compress/internal/prefix
+# github.com/dustin/go-humanize v1.0.1
+## explicit; go 1.16
+github.com/dustin/go-humanize
 # github.com/dustin/gojson v0.0.0-20160307161227-2e71ec9dd5ad
 ## explicit
 github.com/dustin/gojson
@@ -1278,6 +1281,9 @@ github.com/nwaples/rardecode/v2
 # github.com/oklog/ulid v1.3.1
 ## explicit
 github.com/oklog/ulid
+# github.com/olekukonko/tablewriter v0.0.5
+## explicit; go 1.12
+github.com/olekukonko/tablewriter
 # github.com/onsi/ginkgo/v2 v2.22.2
 ## explicit; go 1.22.0
 github.com/onsi/ginkgo/v2
@@ -1579,6 +1585,7 @@ go.githedgehog.com/fabric/pkg/agent/switchstate
 go.githedgehog.com/fabric/pkg/boot
 go.githedgehog.com/fabric/pkg/ctrl/switchprofile
 go.githedgehog.com/fabric/pkg/hhfctl
+go.githedgehog.com/fabric/pkg/hhfctl/inspect
 go.githedgehog.com/fabric/pkg/manager/librarian
 go.githedgehog.com/fabric/pkg/util/apiutil
 go.githedgehog.com/fabric/pkg/util/iputil
