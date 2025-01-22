@@ -18,12 +18,12 @@ require (
 	github.com/diskfs/go-diskfs v1.4.2
 	github.com/go-logr/logr v1.4.2
 	github.com/go-playground/validator/v10 v10.22.1
-	github.com/k3s-io/helm-controller v0.16.5
+	github.com/k3s-io/helm-controller v0.16.6
 	github.com/lmittmann/tint v1.0.6
 	github.com/manifoldco/promptui v0.9.0
 	github.com/mattn/go-isatty v0.0.20
 	github.com/melbahja/goph v1.4.0
-	github.com/mholt/archiver/v4 v4.0.0-alpha.8
+	github.com/mholt/archives v0.1.0
 	github.com/onsi/ginkgo/v2 v2.22.2
 	github.com/onsi/gomega v1.36.2
 	github.com/opencontainers/image-spec v1.1.0
@@ -103,7 +103,6 @@ require (
 	github.com/chzyer/readline v1.5.1 // indirect
 	github.com/clarketm/json v1.17.1 // indirect
 	github.com/cloudflare/circl v1.3.7 // indirect
-	github.com/connesc/cipherio v0.2.1 // indirect
 	github.com/containerd/cgroups/v3 v3.0.3 // indirect
 	github.com/containerd/errdefs v0.3.0 // indirect
 	github.com/containerd/errdefs/pkg v0.3.0 // indirect
@@ -164,7 +163,6 @@ require (
 	github.com/golang/glog v1.2.2 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
-	github.com/golang/snappy v0.0.4 // indirect
 	github.com/google/gnostic-models v0.6.8 // indirect
 	github.com/google/go-cmp v0.6.0 // indirect
 	github.com/google/go-containerregistry v0.20.2 // indirect
@@ -221,7 +219,6 @@ require (
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-runewidth v0.0.16 // indirect
 	github.com/mattn/go-sqlite3 v1.14.24 // indirect
-	github.com/mholt/archives v0.1.0 // indirect
 	github.com/miekg/pkcs11 v1.1.1 // indirect
 	github.com/mistifyio/go-zfs/v3 v3.0.1 // indirect
 	github.com/mitchellh/copystructure v1.2.0 // indirect
