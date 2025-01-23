@@ -465,7 +465,7 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB) error {
 	scriptConfig := DefaultShowTechScript()
 
 	outputDir := filepath.Join(c.WorkDir, "show-tech-output")
-	if err := os.MkdirAll(outputDir, 0755); err != nil {
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return fmt.Errorf("creating output directory: %w", err)
 	}
 
@@ -636,7 +636,7 @@ func (c *Config) collectShowTech(ctx context.Context, entryName string, entry VL
 	localFilePath := filepath.Join(outputDir, entryName+"-show-tech.log")
 	localFile, err := os.Create(localFilePath)
 	if err != nil {
-		fmt.Printf("Failed to create local file for %s: %v\n", entryName, err)
+		slog.Error("Failed to create local file", "entry", entryName, "error", err)
 
 		return fmt.Errorf("failed to create local file for %s: %w", entryName, err)
 	}
@@ -645,7 +645,7 @@ func (c *Config) collectShowTech(ctx context.Context, entryName string, entry VL
 	// Run cat command to fetch remote file contents (no scp download available in easy-ssh)
 	stdoutChan, stderrChan, doneChan, errChan, err := ssh.Stream(fmt.Sprintf("cat %s", remoteOutputPath), 60*time.Second)
 	if err != nil {
-		fmt.Printf("Failed to connect to %s: %v\n", entryName, err)
+		slog.Error("Failed to connect", "entry", entryName, "error", err)
 
 		return fmt.Errorf("failed to connect to %s: %w", entryName, err)
 	}
@@ -661,7 +661,7 @@ loop:
 		case line := <-stdoutChan:
 			_, writeErr := localFile.WriteString(line + "\n")
 			if writeErr != nil {
-				fmt.Printf("Failed to write to local file for %s: %v\n", entryName, writeErr)
+				slog.Error("Failed to write to local file", "entry", entryName, "error", writeErr)
 
 				return fmt.Errorf("failed to write to local file for %s: %w", entryName, writeErr)
 			}
@@ -671,7 +671,7 @@ loop:
 			}
 		case err = <-errChan:
 			if err != nil {
-				fmt.Printf("Error while reading from %s: %v\n", entryName, err)
+				slog.Error("Error while reading from remote file", "entry", entryName, "error", err)
 
 				break loop
 			}
@@ -681,7 +681,7 @@ loop:
 	}
 
 	if !isTimeout {
-		fmt.Printf("Timeout occurred while fetching file from %s\n", entryName)
+		slog.Error("Timeout occurred while fetching file", "entry", entryName)
 
 		return fmt.Errorf("timeout occurred while fetching file from %s", entryName) //nolint:goerr113
 	}
