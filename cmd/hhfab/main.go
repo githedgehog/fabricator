@@ -56,6 +56,7 @@ const (
 	FlagNameControlUpgrade        = "control-upgrade"
 	FlagNameFailFast              = "fail-fast"
 	FlagNameReady                 = "ready"
+	FlagNameCollectShowTech       = "collect-show-tech"
 )
 
 func main() {
@@ -636,6 +637,12 @@ func Run(ctx context.Context) error {
 								Aliases: []string{"r"},
 								Usage:   "run commands on all VMs ready (one of: " + strings.Join(onReadyCommands, ", ") + ")",
 							},
+							&cli.BoolFlag{
+								Name:    FlagNameCollectShowTech,
+								Aliases: []string{"collect"},
+								Usage:   "collect show-tech from all devices at exit or error",
+								EnvVars: []string{"HHFAB_VLAB_COLLECT"},
+							},
 						),
 						Before: before(false),
 						Action: func(c *cli.Context) error {
@@ -651,6 +658,7 @@ func Run(ctx context.Context) error {
 									ControlUpgrade:     c.Bool(FlagNameControlUpgrade),
 									FailFast:           c.Bool(FlagNameFailFast),
 									OnReady:            c.StringSlice(FlagNameReady),
+									CollectShowTech:    c.Bool(FlagNameCollectShowTech),
 								},
 							}); err != nil {
 								return fmt.Errorf("running VLAB: %w", err)
