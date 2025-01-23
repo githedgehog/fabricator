@@ -86,6 +86,7 @@ type VLABRunOpts struct {
 	ControlUpgrade     bool
 	FailFast           bool
 	OnReady            []string
+	CollectShowTech    bool
 }
 
 type OnReady string
@@ -375,10 +376,13 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 
 			if err := execCmd(ctx, true, vmDir, VLABCmdQemuSystem, args, "vm", vm.Name); err != nil {
 				slog.Warn("Failed running VM", "vm", vm.Name, "type", vm.Type, "err", err)
-				if err := c.VLABShowTech(ctx, vlab); err != nil {
-					slog.Warn("Failed to collect show-tech diagnostics", "err", err)
 
-					return fmt.Errorf("getting show-tech: %w", err)
+				if opts.CollectShowTech {
+					if err := c.VLABShowTech(ctx, vlab); err != nil {
+						slog.Warn("Failed to collect show-tech diagnostics", "err", err)
+
+						return fmt.Errorf("getting show-tech: %w", err)
+					}
 				}
 
 				if opts.FailFast {
@@ -394,10 +398,13 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 			group.Go(func() error {
 				if err := c.vmPostProcess(ctx, vlab, d, vm, opts); err != nil {
 					slog.Warn("Failed to post-process VM", "vm", vm.Name, "type", vm.Type, "err", err)
-					if err := c.VLABShowTech(ctx, vlab); err != nil {
-						slog.Warn("Failed to collect show-tech diagnostics", "err", err)
 
-						return fmt.Errorf("getting show-tech: %w", err)
+					if opts.CollectShowTech {
+						if err := c.VLABShowTech(ctx, vlab); err != nil {
+							slog.Warn("Failed to collect show-tech diagnostics", "err", err)
+
+							return fmt.Errorf("getting show-tech: %w", err)
+						}
 					}
 
 					if opts.FailFast {
@@ -445,10 +452,13 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						WaitReady:   false,
 					}); err != nil {
 						slog.Warn("Failed to reinstall switches", "err", err)
-						if err := c.VLABShowTech(ctx, vlab); err != nil {
-							slog.Warn("Failed to collect show-tech diagnostics", "err", err)
 
-							return fmt.Errorf("getting show-tech: %w", err)
+						if opts.CollectShowTech {
+							if err := c.VLABShowTech(ctx, vlab); err != nil {
+								slog.Warn("Failed to collect show-tech diagnostics", "err", err)
+
+								return fmt.Errorf("getting show-tech: %w", err)
+							}
 						}
 
 						return fmt.Errorf("reinstalling switches: %w", err)
@@ -465,10 +475,13 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						TimeServers:       []string{"219.239.35.0"},
 					}); err != nil {
 						slog.Warn("Failed to setup VPCs", "err", err)
-						if err := c.VLABShowTech(ctx, vlab); err != nil {
-							slog.Warn("Failed to collect show-tech diagnostics", "err", err)
 
-							return fmt.Errorf("getting show-tech: %w", err)
+						if opts.CollectShowTech {
+							if err := c.VLABShowTech(ctx, vlab); err != nil {
+								slog.Warn("Failed to collect show-tech diagnostics", "err", err)
+
+								return fmt.Errorf("getting show-tech: %w", err)
+							}
 						}
 
 						return fmt.Errorf("setting up VPCs: %w", err)
@@ -482,20 +495,26 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						CurlsCount:        3,
 					}); err != nil {
 						slog.Warn("Failed to test connectivity", "err", err)
-						if err := c.VLABShowTech(ctx, vlab); err != nil {
-							slog.Warn("Failed to collect show-tech diagnostics", "err", err)
 
-							return fmt.Errorf("getting show-tech: %w", err)
+						if opts.CollectShowTech {
+							if err := c.VLABShowTech(ctx, vlab); err != nil {
+								slog.Warn("Failed to collect show-tech diagnostics", "err", err)
+
+								return fmt.Errorf("getting show-tech: %w", err)
+							}
 						}
 
 						return fmt.Errorf("testing connectivity: %w", err)
 					}
 				case OnReadyExit:
-					if err := c.VLABShowTech(ctx, vlab); err != nil {
-						slog.Warn("Failed to collect show-tech diagnostics", "err", err)
+					if opts.CollectShowTech {
+						if err := c.VLABShowTech(ctx, vlab); err != nil {
+							slog.Warn("Failed to collect show-tech diagnostics", "err", err)
 
-						return fmt.Errorf("getting show-tech: %w", err)
+							return fmt.Errorf("getting show-tech: %w", err)
+						}
 					}
+
 					// TODO seems like some graceful shutdown logic isn't working in CI and we're getting stuck w/o this
 					if os.Getenv("GITHUB_ACTIONS") == "true" {
 						slog.Warn("Immediately exiting b/c running in GHA")

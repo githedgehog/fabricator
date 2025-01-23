@@ -239,6 +239,7 @@ jobs:
       - name: hhfab init and vlab up
         env:
           HHFAB_REG_REPO: 127.0.0.1:30000
+          HHFAB_VLAB_COLLECT: true
         run: |
           bin/hhfab init -v --dev -m ${{ matrix.fabricmode }} --include-onie=${{ matrix.includeonie }}
           bin/hhfab vlab gen -v
@@ -304,6 +305,7 @@ jobs:
       - name: Initial VLAB with old version
         env:
           HHFAB_REG_REPO: 127.0.0.1:30000
+          HHFAB_VLAB_COLLECT: true
         run: |
           mkdir old
           curl -fsSL https://i.hhdev.io/hhfab | USE_SUDO=false INSTALL_DIR=./old VERSION="${{ matrix.fromversion }}" bash
@@ -326,6 +328,7 @@ jobs:
       - name: hhfab vlab up --upgrade
         env:
           HHFAB_REG_REPO: 127.0.0.1:30000
+          HHFAB_VLAB_COLLECT: true
         run: |
           bin/hhfab vlab up -v --ready setup-vpcs --ready test-connectivity --ready exit --upgrade
 
@@ -412,6 +415,7 @@ jobs:
       - name: hhfab init and vlab up
         env:
           HHFAB_REG_REPO: 127.0.0.1:30000
+          HHFAB_VLAB_COLLECT: true
         run: |
           source "./lab-ci/envs/$KUBE_NODE/source.sh"
           bin/hhfab init -v --dev --include-onie=${{ matrix.includeonie }} -w "./lab-ci/envs/$KUBE_NODE/wiring.yaml"
