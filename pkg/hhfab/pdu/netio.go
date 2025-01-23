@@ -88,8 +88,8 @@ var Actions = []Action{
 }
 
 var ActionMap = map[Action]int{
-	ActionOn:    0,
-	ActionOff:   1,
+	ActionOff:   0,
+	ActionOn:    1,
 	ActionCycle: 2,
 }
 
