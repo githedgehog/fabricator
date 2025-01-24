@@ -1165,12 +1165,14 @@ func waitSwitchesReady(ctx context.Context, kube client.Reader, appliedFor time.
 				notReadyList = append(notReadyList, sw.Name)
 			}
 
-			if ag.Status.LastAppliedGen != ag.Generation && !updated {
-				notUpdatedList = append(notUpdatedList, sw.Name)
-			}
+			if ag.Status.Version != "" {
+				if ag.Status.LastAppliedGen != ag.Generation && !updated {
+					notUpdatedList = append(notUpdatedList, sw.Name)
+				}
 
-			if ag.Status.LastAppliedGen == ag.Generation && !updated {
-				updateFailedList = append(updateFailedList, sw.Name)
+				if ag.Status.LastAppliedGen == ag.Generation && !updated {
+					updateFailedList = append(updateFailedList, sw.Name)
+				}
 			}
 		}
 
