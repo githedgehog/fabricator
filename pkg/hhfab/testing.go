@@ -393,7 +393,11 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		slog.Info("Waiting for switches ready after configuring VPCs and VPCAttachments")
 
 		// TODO remove it when we can actually know that changes to VPC/VPCAttachment are reflected in agents
-		time.Sleep(15 * time.Second)
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("sleeping before waiting for switches ready: %w", ctx.Err())
+		case <-time.After(15 * time.Second):
+		}
 
 		if err := waitSwitchesReady(ctx, kube, 0); err != nil {
 			return fmt.Errorf("waiting for switches ready: %w", err)
@@ -810,7 +814,11 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 		slog.Info("Waiting for switches ready after configuring VPC and External Peerings")
 
 		// TODO remove it when we can actually know that changes to VPC/VPCAttachment are reflected in agents
-		time.Sleep(15 * time.Second)
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("sleeping before waiting for switches ready: %w", ctx.Err())
+		case <-time.After(15 * time.Second):
+		}
 
 		if err := waitSwitchesReady(ctx, kube, 0); err != nil {
 			return fmt.Errorf("waiting for switches ready: %w", err)
@@ -1194,7 +1202,11 @@ func waitSwitchesReady(ctx context.Context, kube client.Reader, appliedFor time.
 			return nil
 		}
 
-		time.Sleep(15 * time.Second)
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("waiting for switches ready: %w", ctx.Err())
+		case <-time.After(15 * time.Second):
+		}
 	}
 }
 
