@@ -59,7 +59,7 @@ func (c *Config) Wait(ctx context.Context, vlab *VLAB) error {
 	}
 
 	slog.Info("Waiting for all switches ready")
-	if err := waitSwitchesReady(ctx, kube); err != nil {
+	if err := waitSwitchesReady(ctx, kube, 0); err != nil {
 		return fmt.Errorf("waiting for switches ready: %w", err)
 	}
 
@@ -308,7 +308,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 
 	if opts.WaitSwitchesReady {
 		slog.Info("Waiting for switches ready before configuring VPCs and VPCAttachments")
-		if err := waitSwitchesReady(ctx, kube); err != nil {
+		if err := waitSwitchesReady(ctx, kube, 0); err != nil {
 			return fmt.Errorf("waiting for switches ready: %w", err)
 		}
 	}
@@ -395,7 +395,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		// TODO remove it when we can actually know that changes to VPC/VPCAttachment are reflected in agents
 		time.Sleep(15 * time.Second)
 
-		if err := waitSwitchesReady(ctx, kube); err != nil {
+		if err := waitSwitchesReady(ctx, kube, 0); err != nil {
 			return fmt.Errorf("waiting for switches ready: %w", err)
 		}
 	}
@@ -503,7 +503,7 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 
 	if opts.WaitSwitchesReady {
 		slog.Info("Waiting for switches ready before configuring VPC and External Peerings")
-		if err := waitSwitchesReady(ctx, kube); err != nil {
+		if err := waitSwitchesReady(ctx, kube, 0); err != nil {
 			return fmt.Errorf("waiting for switches ready: %w", err)
 		}
 	}
@@ -812,7 +812,7 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 		// TODO remove it when we can actually know that changes to VPC/VPCAttachment are reflected in agents
 		time.Sleep(15 * time.Second)
 
-		if err := waitSwitchesReady(ctx, kube); err != nil {
+		if err := waitSwitchesReady(ctx, kube, 0); err != nil {
 			return fmt.Errorf("waiting for switches ready: %w", err)
 		}
 	}
@@ -891,7 +891,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 	if opts.WaitSwitchesReady {
 		slog.Info("Waiting for switches ready before testing connectivity")
 
-		if err := waitSwitchesReady(ctx, kube); err != nil {
+		if err := waitSwitchesReady(ctx, kube, 30*time.Second); err != nil {
 			return fmt.Errorf("waiting for switches ready: %w", err)
 		}
 	}
@@ -1115,7 +1115,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 	return nil
 }
 
-func waitSwitchesReady(ctx context.Context, kube client.Reader) error {
+func waitSwitchesReady(ctx context.Context, kube client.Reader, appliedFor time.Duration) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
@@ -1144,6 +1144,10 @@ func waitSwitchesReady(ctx context.Context, kube client.Reader) error {
 
 			if err == nil {
 				ready = ag.Status.LastAppliedGen == ag.Generation && time.Since(ag.Status.LastHeartbeat.Time) < 1*time.Minute
+
+				if appliedFor > 0 {
+					ready = ready && time.Since(ag.Status.LastAppliedTime.Time) >= appliedFor
+				}
 
 				expectedVersion := ag.Spec.Version.Default
 				if ag.Spec.Version.Override != "" {
@@ -1175,7 +1179,11 @@ func waitSwitchesReady(ctx context.Context, kube client.Reader) error {
 		slices.Sort(notUpdatedList)
 		slices.Sort(updateFailedList)
 
-		slog.Info("Switches status", "ready", readyList, "notReady", notReadyList)
+		if appliedFor == 0 {
+			slog.Info("Switches status", "ready", readyList, "notReady", notReadyList)
+		} else {
+			slog.Info("Switches status (applied for "+fmt.Sprintf("%.1f minutes", appliedFor.Minutes())+")", "ready", readyList, "notReady", notReadyList)
+		}
 		if len(notUpdatedList) > 0 || len(updateFailedList) > 0 {
 			slog.Info("Switch agents", "notUpdated", notUpdatedList, "updateFailed", updateFailedList)
 		}
@@ -1473,7 +1481,7 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB) error {
 	fail := false
 
 	slog.Info("Waiting for switches ready before inspecting")
-	if err := waitSwitchesReady(ctx, kube); err != nil {
+	if err := waitSwitchesReady(ctx, kube, 2*time.Minute); err != nil {
 		slog.Error("Failed to wait for switches ready", "err", err)
 		fail = true
 	}
