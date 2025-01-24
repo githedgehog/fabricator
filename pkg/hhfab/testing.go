@@ -1127,10 +1127,14 @@ func waitSwitchesReady(ctx context.Context, kube client.Reader) error {
 
 		readyList := []string{}
 		notReadyList := []string{}
+		notUpdatedList := []string{}
+		updateFailedList := []string{}
 
 		allReady := true
+		allUpdated := true
 		for _, sw := range switches.Items {
 			ready := false
+			updated := false
 
 			ag := &agentapi.Agent{}
 			err := kube.Get(ctx, client.ObjectKey{Name: sw.Name, Namespace: sw.Namespace}, ag)
@@ -1140,23 +1144,43 @@ func waitSwitchesReady(ctx context.Context, kube client.Reader) error {
 
 			if err == nil {
 				ready = ag.Status.LastAppliedGen == ag.Generation && time.Since(ag.Status.LastHeartbeat.Time) < 1*time.Minute
+
+				expectedVersion := ag.Spec.Version.Default
+				if ag.Spec.Version.Override != "" {
+					expectedVersion = ag.Spec.Version.Override
+				}
+				updated = ag.Status.Version == expectedVersion
 			}
 
 			allReady = allReady && ready
+			allUpdated = allUpdated && updated
 
 			if ready {
 				readyList = append(readyList, sw.Name)
 			} else {
 				notReadyList = append(notReadyList, sw.Name)
 			}
+
+			if ag.Status.LastAppliedGen != ag.Generation && !updated {
+				notUpdatedList = append(notUpdatedList, sw.Name)
+			}
+
+			if ag.Status.LastAppliedGen == ag.Generation && !updated {
+				updateFailedList = append(updateFailedList, sw.Name)
+			}
 		}
 
 		slices.Sort(readyList)
 		slices.Sort(notReadyList)
+		slices.Sort(notUpdatedList)
+		slices.Sort(updateFailedList)
 
 		slog.Info("Switches status", "ready", readyList, "notReady", notReadyList)
+		if len(notUpdatedList) > 0 || len(updateFailedList) > 0 {
+			slog.Info("Switch agents", "notUpdated", notUpdatedList, "updateFailed", updateFailedList)
+		}
 
-		if allReady {
+		if allReady && allUpdated {
 			return nil
 		}
 
