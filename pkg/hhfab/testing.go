@@ -1275,12 +1275,20 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphor
 	g, ctx := errgroup.WithContext(ctx)
 
 	g.Go(func() error {
-		out, err := toSSH.RunContext(ctx, fmt.Sprintf("toolbox -q timeout -v %d iperf3 -s -1", opts.IPerfsSeconds+25))
-		if err != nil {
-			return fmt.Errorf("running iperf server: %w: %s", err, string(out))
+		maxRetries := 3
+		var lastErr error
+		for attempt := 1; attempt <= maxRetries; attempt++ {
+			slog.Debug("Starting iperf3 server", "server", to, "attempt", attempt)
+			out, err := toSSH.RunContext(ctx, fmt.Sprintf("toolbox -q timeout -v %d iperf3 -s -1", opts.IPerfsSeconds+25))
+			if err == nil {
+				slog.Debug("iperf3 server started successfully", "server", to)
+				return nil
+			}
+			slog.Warn("iperf3 server failed", "server", to, "attempt", attempt, "error", err)
+			lastErr = fmt.Errorf("running iperf server: %w: %s", err, string(out))
+			time.Sleep(2 * time.Second) // Backoff between retries
 		}
-
-		return nil
+		return fmt.Errorf("iperf3 server failed after %d attempts: %w", maxRetries, lastErr)
 	})
 
 	g.Go(func() error {
