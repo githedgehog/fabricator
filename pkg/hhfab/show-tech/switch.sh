@@ -28,7 +28,7 @@ show ip route >> "$OUTPUT_FILE" 2>/dev/null
 echo -e "\n=== ARP Table ===" >> "$OUTPUT_FILE"
 show arp >> "$OUTPUT_FILE" 2>/dev/null
 
-echo -e "\n=== Logs ===" >> "$OUTPUT_FILE"
+echo -e "\n=== System log ===" >> "$OUTPUT_FILE"
 show logging >> "$OUTPUT_FILE" 2>/dev/null
 
 echo -e "\n=== Hedgehog agent status ===" >> "$OUTPUT_FILE"
@@ -36,6 +36,12 @@ systemctl status hedgehog-agent >> "$OUTPUT_FILE" 2>/dev/null
 
 echo -e "\n=== Hedgehog agent logs ===" >> "$OUTPUT_FILE"
 cat /var/log/agent.log >> "$OUTPUT_FILE" 2>/dev/null
+
+echo -e "\n=== SONic Container Logs ===" >> "$OUTPUT_FILE"
+for container in $(docker ps -q); do
+  echo -e "\n=== Logs for container $(docker inspect --format='{{.Name}}' $container | cut -c2-) ===" >> "$OUTPUT_FILE"
+  docker logs "$container" >> "$OUTPUT_FILE" 2>/dev/null
+done
 
 echo "Diagnostics collected to $OUTPUT_FILE"
 
