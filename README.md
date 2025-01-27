@@ -18,7 +18,7 @@ as OCI compliant artifacts.
 - [zot v2.1.0](https://zotregistry.dev/v2.1.0/)
 - ghcr.io classic token with package **read** permissions
 - git
-- [just v1.38.0 or greater](https://github.com/casey/just)
+- [just v1.36.0 or greater](https://github.com/casey/just)
 
 ### Create a github Classic Token
 
