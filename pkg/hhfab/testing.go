@@ -1577,3 +1577,14 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 
 	return nil
 }
+
+type ReleaseTestOpts struct {
+	Regexes     []string
+	InvertRegex bool
+	ResultsFile string
+	HhfabBin    string
+}
+
+func (c *Config) ReleaseTest(ctx context.Context, opts ReleaseTestOpts) error {
+	return RunReleaseTestSuites(ctx, c.WorkDir, c.CacheDir, opts)
+}
