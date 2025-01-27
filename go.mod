@@ -37,7 +37,7 @@ require (
 	github.com/urfave/cli/v2 v2.27.5
 	github.com/vbauerster/mpb/v8 v8.8.3
 	github.com/vishvananda/netlink v1.3.0
-	go.githedgehog.com/fabric v0.59.1
+	go.githedgehog.com/fabric v0.60.0
 	golang.org/x/crypto v0.32.0
 	golang.org/x/sync v0.10.0
 	golang.org/x/term v0.28.0
@@ -252,7 +252,7 @@ require (
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/power-devops/perfstat v0.0.0-20210106213030-5aafc221ea8c // indirect
 	github.com/proglottis/gpgme v0.1.3 // indirect
-	github.com/prometheus/client_golang v1.20.4 // indirect
+	github.com/prometheus/client_golang v1.20.5 // indirect
 	github.com/prometheus/client_model v0.6.1 // indirect
 	github.com/prometheus/common v0.57.0 // indirect
 	github.com/prometheus/procfs v0.15.1 // indirect
