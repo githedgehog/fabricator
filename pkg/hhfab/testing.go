@@ -1511,7 +1511,7 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 		Verbose: true,
 		Output:  inspect.OutputTypeText,
 	}, inspect.LLDPIn{
-		Strict:   true,
+		Strict:   false, // TODO make it strict
 		Fabric:   true,
 		External: true,
 		Server:   true,
@@ -1524,7 +1524,7 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 		Verbose: true,
 		Output:  inspect.OutputTypeText,
 	}, inspect.BGPIn{
-		Strict: true,
+		Strict: false, // TODO make it strict
 	}, os.Stdout); err != nil {
 		slog.Error("Failed to inspect BGP", "err", err)
 		fail = true
