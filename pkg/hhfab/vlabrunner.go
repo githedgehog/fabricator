@@ -400,24 +400,25 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 		if vm.Type == VMTypeServer || vm.Type == VMTypeControl {
 			postProcesses.Add(1)
 			group.Go(func() error {
+				defer postProcesses.Done()
+
+				showTechCtx, showTechCancel := context.WithTimeout(ctx, 5*time.Minute)
+				defer showTechCancel()
+
 				if err := c.vmPostProcess(ctx, vlab, d, vm, opts); err != nil {
 					slog.Warn("Failed to post-process VM", "vm", vm.Name, "type", vm.Type, "err", err)
 
 					if opts.CollectShowTech {
-						if err := c.VLABShowTech(ctx, vlab); err != nil {
-							slog.Warn("Failed to collect show-tech diagnostics", "err", err)
+						if showTechErr := c.VLABShowTech(showTechCtx, vlab); showTechErr != nil {
+							slog.Warn("Failed to collect show-tech diagnostics", "err", showTechErr)
 
-							return fmt.Errorf("getting show-tech: %w", err)
+							return fmt.Errorf("vm post-process error: %w; show-tech error: %w", err, showTechErr) //nolint:goerr113
 						}
 					}
-
 					if opts.FailFast {
 						return fmt.Errorf("post-processing vm %s: %w", vm.Name, err)
 					}
 				}
-
-				// no defer here, as we want to wait for all installers completion without errors
-				postProcesses.Done()
 
 				return nil
 			})
@@ -431,9 +432,17 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 			postProcesses.Wait()
 			close(postProcessDone)
 		}()
-
 		select {
 		case <-ctx.Done():
+			if opts.CollectShowTech {
+				showTechCtx, showTechCancel := context.WithTimeout(ctx, 5*time.Minute)
+				defer showTechCancel()
+
+				if err := c.VLABShowTech(showTechCtx, vlab); err != nil {
+					slog.Warn("Failed to collect show-tech diagnostics during cleanup", "err", err)
+				}
+			}
+
 			return fmt.Errorf("cancelled: %w", ctx.Err())
 		case <-postProcessDone:
 		}
