@@ -913,10 +913,20 @@ func Run(ctx context.Context) error {
 						Name:    "inspect-switches",
 						Aliases: []string{"inspect"},
 						Usage:   "wait for ready and inspect all switches",
-						Flags:   defaultFlags,
-						Before:  before(false),
-						Action: func(_ *cli.Context) error {
-							if err := hhfab.DoVLABInspect(ctx, workDir, cacheDir); err != nil {
+						Flags: append([]cli.Flag{
+							&cli.IntFlag{
+								Name:    "wait-applied-for",
+								Aliases: []string{"wait"},
+								Usage:   "wait for switches being applied for this duration in seconds (0 to only wait for ready)",
+								Value:   120,
+							},
+						},
+							defaultFlags...),
+						Before: before(false),
+						Action: func(c *cli.Context) error {
+							if err := hhfab.DoVLABInspect(ctx, workDir, cacheDir, hhfab.InspectOpts{
+								WaitAppliedFor: time.Duration(c.Int64("wait-applied-for")) * time.Second,
+							}); err != nil {
 								return fmt.Errorf("inspect: %w", err)
 							}
 

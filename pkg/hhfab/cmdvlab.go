@@ -184,13 +184,13 @@ func DoVLABWait(ctx context.Context, workDir, cacheDir string) error {
 	return c.Wait(ctx, vlab)
 }
 
-func DoVLABInspect(ctx context.Context, workDir, cacheDir string) error {
+func DoVLABInspect(ctx context.Context, workDir, cacheDir string, opts InspectOpts) error {
 	c, vlab, err := loadVLABForHelpers(ctx, workDir, cacheDir)
 	if err != nil {
 		return err
 	}
 
-	return c.Inspect(ctx, vlab)
+	return c.Inspect(ctx, vlab, opts)
 }
 
 type SwitchPowerOpts struct {

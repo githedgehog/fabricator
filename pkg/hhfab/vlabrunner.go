@@ -541,7 +541,12 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						return fmt.Errorf("waiting: %w", err)
 					}
 				case OnReadyInspect:
-					if err := c.Inspect(ctx, vlab); err != nil {
+					appliedFor := 2 * time.Minute
+					if opts.ControlUpgrade {
+						appliedFor = 4 * time.Minute
+					}
+
+					if err := c.Inspect(ctx, vlab, InspectOpts{WaitAppliedFor: appliedFor}); err != nil {
 						slog.Warn("Failed to inspect", "err", err)
 
 						if opts.CollectShowTech {

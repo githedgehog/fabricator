@@ -1474,7 +1474,11 @@ func CollectN[E any](n int, seq iter.Seq[E]) []E {
 	return res[:idx:idx]
 }
 
-func (c *Config) Inspect(ctx context.Context, vlab *VLAB) error {
+type InspectOpts struct {
+	WaitAppliedFor time.Duration
+}
+
+func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) error {
 	slog.Info("Inspecting fabric")
 
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
@@ -1495,7 +1499,7 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB) error {
 	fail := false
 
 	slog.Info("Waiting for switches ready before inspecting")
-	if err := waitSwitchesReady(ctx, kube, 2*time.Minute); err != nil {
+	if err := waitSwitchesReady(ctx, kube, opts.WaitAppliedFor); err != nil {
 		slog.Error("Failed to wait for switches ready", "err", err)
 		fail = true
 	}
