@@ -12,7 +12,7 @@ require (
 	github.com/Masterminds/semver/v3 v3.3.1
 	github.com/Masterminds/sprig/v3 v3.3.0
 	github.com/appleboy/easyssh-proxy v1.5.0
-	github.com/cert-manager/cert-manager v1.16.2
+	github.com/cert-manager/cert-manager v1.16.3
 	github.com/charmbracelet/keygen v0.5.1
 	github.com/containers/image/v5 v5.33.0
 	github.com/coreos/butane v0.23.0
