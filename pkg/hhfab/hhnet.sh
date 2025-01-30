@@ -56,7 +56,6 @@ Bond=$bond_name
 LLDP=yes
 EmitLLDP=yes
 [Link]
-MTUBytes=9036
 EOF
     done
 
@@ -101,7 +100,6 @@ Name=$parent_iface
 VLAN=$parent_iface.$vlan_id
 
 [Link]
-MTUBytes=9036
 EOF
 
     sudo networkctl reload 2> /dev/null || true
