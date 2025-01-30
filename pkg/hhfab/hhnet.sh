@@ -24,7 +24,7 @@ function cleanup() {
     sudo rm -f "$NETWORKD_PATH"/20-slave*.network
     sudo rm -f "$NETWORKD_PATH"/30-vlan*.network "$NETWORKD_PATH"/30-vlan*.netdev
 
-    sudo systemctl restart systemd-networkd 2> /dev/null || true
+    sudo networkctl reload 2> /dev/null || true
     sleep 2
 }
 
@@ -53,12 +53,14 @@ EOF
 Name=$iface
 [Network]
 Bond=$bond_name
+LLDP=yes
+EmitLLDP=yes
 [Link]
 MTUBytes=9036
 EOF
     done
 
-    sudo systemctl restart systemd-networkd 2> /dev/null || true
+    sudo networkctl reload 2> /dev/null || true
     sleep 5
 }
 
@@ -102,37 +104,8 @@ VLAN=$parent_iface.$vlan_id
 MTUBytes=9036
 EOF
 
-    sudo systemctl restart systemd-networkd 2> /dev/null || true
+    sudo networkctl reload 2> /dev/null || true
     sleep 5
-}
-
-function wait_for_interface() {
-    local iface_name=$1
-    local max_attempts=60
-    local attempt=0
-    local retry_delay=1
-
-    while true; do
-        attempt=$((attempt + 1))
-
-        local status
-        status=$(sudo networkctl status "$iface_name" 2> /dev/null)
-
-        if echo "$status" | grep -q "State: routable" 2> /dev/null; then
-            return 0
-        elif echo "$status" | grep -q "State: carrier" 2> /dev/null; then
-            return 0
-        elif echo "$status" | grep -q "State: degraded" 2> /dev/null; then
-            return 0
-        fi
-
-        if [ "$attempt" -ge "$max_attempts" ]; then
-            echo "Interface $iface_name failed to become ready after $max_attempts attempts"
-            return 1
-        fi
-
-        sleep "$retry_delay"
-    done
 }
 
 function get_ip() {
@@ -177,9 +150,7 @@ elif [ "$1" == "bond" ]; then
     fi
     setup_bond bond0 "${@:3}" || exit 1
     sleep 1
-    wait_for_interface bond0 || exit 1
     setup_vlan bond0 "$2" || exit 1
-    wait_for_interface "bond0.$2" || exit 1
     get_ip "bond0.$2" || exit 1
     exit 0
 elif [ "$1" == "vlan" ]; then
@@ -188,7 +159,6 @@ elif [ "$1" == "vlan" ]; then
         exit 1
     fi
     setup_vlan "$3" "$2" || exit 1
-    wait_for_interface "$3.$2" || exit 1
     get_ip "$3.$2" || exit 1
     exit 0
 else
