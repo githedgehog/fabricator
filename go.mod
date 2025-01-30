@@ -37,7 +37,7 @@ require (
 	github.com/urfave/cli/v2 v2.27.5
 	github.com/vbauerster/mpb/v8 v8.9.1
 	github.com/vishvananda/netlink v1.3.0
-	go.githedgehog.com/fabric v0.61.0
+	go.githedgehog.com/fabric v0.61.1
 	golang.org/x/crypto v0.32.0
 	golang.org/x/sync v0.10.0
 	golang.org/x/term v0.28.0
@@ -239,11 +239,11 @@ require (
 	github.com/nwaples/rardecode/v2 v2.0.0-beta.4.0.20241112120701-034e449c6e78 // indirect
 	github.com/oklog/ulid v1.3.1 // indirect
 	github.com/olekukonko/tablewriter v0.0.5 // indirect
-	github.com/openconfig/gnmi v0.11.0 // indirect
+	github.com/openconfig/gnmi v0.12.0 // indirect
 	github.com/openconfig/gnmic v0.32.0 // indirect
-	github.com/openconfig/goyang v1.4.5 // indirect
+	github.com/openconfig/goyang v1.6.0 // indirect
 	github.com/openconfig/grpctunnel v0.1.0 // indirect
-	github.com/openconfig/ygot v0.29.19 // indirect
+	github.com/openconfig/ygot v0.29.20 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/runtime-spec v1.2.0 // indirect
 	github.com/opencontainers/selinux v1.11.1 // indirect
@@ -321,8 +321,8 @@ require (
 	google.golang.org/api v0.198.0 // indirect
 	google.golang.org/genproto v0.0.0-20240903143218-8af14fe29dc1 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20240827150818-7e3bb234dfed // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20240903143218-8af14fe29dc1 // indirect
-	google.golang.org/grpc v1.67.0 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20241007155032-5fefd90f89a9 // indirect
+	google.golang.org/grpc v1.67.1 // indirect
 	google.golang.org/protobuf v1.36.1 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.12.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect

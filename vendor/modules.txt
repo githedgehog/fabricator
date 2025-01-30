@@ -1319,8 +1319,8 @@ github.com/onsi/gomega/matchers/support/goraph/edge
 github.com/onsi/gomega/matchers/support/goraph/node
 github.com/onsi/gomega/matchers/support/goraph/util
 github.com/onsi/gomega/types
-# github.com/openconfig/gnmi v0.11.0
-## explicit; go 1.21
+# github.com/openconfig/gnmi v0.12.0
+## explicit; go 1.22.0
 github.com/openconfig/gnmi/errlist
 github.com/openconfig/gnmi/proto/gnmi
 github.com/openconfig/gnmi/proto/gnmi_ext
@@ -1331,14 +1331,14 @@ github.com/openconfig/gnmic/api
 github.com/openconfig/gnmic/target
 github.com/openconfig/gnmic/types
 github.com/openconfig/gnmic/utils
-# github.com/openconfig/goyang v1.4.5
+# github.com/openconfig/goyang v1.6.0
 ## explicit; go 1.14
 github.com/openconfig/goyang/pkg/indent
 github.com/openconfig/goyang/pkg/yang
 # github.com/openconfig/grpctunnel v0.1.0
 ## explicit; go 1.20
 github.com/openconfig/grpctunnel/proto/tunnel
-# github.com/openconfig/ygot v0.29.19
+# github.com/openconfig/ygot v0.29.20
 ## explicit; go 1.18
 github.com/openconfig/ygot/internal/yreflect
 github.com/openconfig/ygot/util
@@ -1569,7 +1569,7 @@ github.com/zealic/xignore
 # go.etcd.io/bbolt v1.3.11
 ## explicit; go 1.22
 go.etcd.io/bbolt
-# go.githedgehog.com/fabric v0.61.0
+# go.githedgehog.com/fabric v0.61.1
 ## explicit; go 1.23.0
 go.githedgehog.com/fabric/api/agent/v1beta1
 go.githedgehog.com/fabric/api/dhcp/v1beta1
@@ -1842,12 +1842,12 @@ google.golang.org/genproto/googleapis/type/expr
 ## explicit; go 1.21
 google.golang.org/genproto/googleapis/api
 google.golang.org/genproto/googleapis/api/annotations
-# google.golang.org/genproto/googleapis/rpc v0.0.0-20240903143218-8af14fe29dc1
+# google.golang.org/genproto/googleapis/rpc v0.0.0-20241007155032-5fefd90f89a9
 ## explicit; go 1.21
 google.golang.org/genproto/googleapis/rpc/code
 google.golang.org/genproto/googleapis/rpc/errdetails
 google.golang.org/genproto/googleapis/rpc/status
-# google.golang.org/grpc v1.67.0
+# google.golang.org/grpc v1.67.1
 ## explicit; go 1.21
 google.golang.org/grpc
 google.golang.org/grpc/attributes
