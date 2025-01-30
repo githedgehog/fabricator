@@ -16,9 +16,12 @@ mv flatcar_production_qemu_image.img flatcar.img
 mv flatcar_production_qemu_uefi_efi_code.fd flatcar_efi_code.fd
 mv flatcar_production_qemu_uefi_efi_vars.fd flatcar_efi_vars.fd
 
+wget "https://update.release.flatcar-linux.net/amd64-usr/${FLATCAR_VERSION_UPSTREAM}/flatcar_production_update.gz"
+
 ls -lah
 
 oras push "ghcr.io/githedgehog/fabricator/flatcar-vlab:${FLATCAR_VERSION}" flatcar.img flatcar_efi_code.fd flatcar_efi_vars.fd
+oras push "ghcr.io/githedgehog/fabricator/flatcar-update:${FLATCAR_VERSION}" flatcar_production_update.gz
 ```
 
 ## K3s
