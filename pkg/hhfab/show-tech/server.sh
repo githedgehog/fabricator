@@ -24,6 +24,23 @@ echo -e "\n=== IP Configuration ===" >> "$OUTPUT_FILE"
 ip addr show >> "$OUTPUT_FILE"
 ip route show >> "$OUTPUT_FILE"
 
+echo -e "\n=== Ping Default Gateway ($DEFAULT_GW) ===" >> "$OUTPUT_FILE"
+DEFAULT_GW=$(ip route | awk '/^default/ {print $3}')
+ping -c 1 "$DEFAULT_GW" >> "$OUTPUT_FILE" 2>&1
+
+
+echo -e "\n=== Ping Other Servers ===" >> "$OUTPUT_FILE"
+OWN_IP=$(ip route get 8.8.8.8 | awk '{for(i=1;i<=NF;i++) if($i=="src") {print $(i+1); exit}}')
+for i in {1..9}; do
+  TARGET_IP="10.0.$i.2"
+
+  if [ "$TARGET_IP" == "$OWN_IP" ]; then
+    continue
+  fi
+
+  ping -c 1 "$TARGET_IP" >> "$OUTPUT_FILE" 2>&1
+done
+
 echo -e "\n=== Detailed Link Information ===" >> "$OUTPUT_FILE"
 networkctl list >> "$OUTPUT_FILE"
 
