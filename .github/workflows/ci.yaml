@@ -246,7 +246,7 @@ jobs:
         run: |
           bin/hhfab init -v --dev -m ${{ matrix.fabricmode }} --include-onie=${{ matrix.includeonie }}
           bin/hhfab vlab gen -v
-          bin/hhfab vlab up -v --ready inspect --ready setup-vpcs --ready test-connectivity --ready exit --mode=${{ matrix.buildmode }}
+          bin/hhfab vlab up -v --ready setup-vpcs --ready inspect --ready test-connectivity --ready exit --mode=${{ matrix.buildmode }}
 
       - name: Dump local registry logs
         if: ${{ always() }}
@@ -333,7 +333,7 @@ jobs:
           HHFAB_REG_REPO: 127.0.0.1:30000
           HHFAB_VLAB_COLLECT: true
         run: |
-          bin/hhfab vlab up -v --ready inspect --ready setup-vpcs --ready test-connectivity --ready exit --upgrade
+          bin/hhfab vlab up -v --ready setup-vpcs --ready inspect --ready test-connectivity --ready exit --upgrade
 
       - name: Upload show-tech artifacts
         uses: actions/upload-artifact@v4
