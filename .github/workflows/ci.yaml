@@ -201,6 +201,16 @@ jobs:
           - usb
           - iso
           - manual
+        multiplier:
+          - 1
+          - 2
+          - 3
+          - 4
+          - 5
+          - 6
+          - 7
+          - 8
+          - 9
         include:
           - fabricmode: collapsed-core
             includeonie: false
@@ -215,7 +225,7 @@ jobs:
     steps:
       - name: Runner host
         run: |
-          echo "$KUBE_NODE"
+          echo "Runner: $KUBE_NODE"
 
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -254,7 +264,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: ${{ always() }}
         with:
-          name: show-tech-vlab-${{ matrix.fabricmode }}-${{ matrix.includeonie }}-${{ matrix.buildmode }}
+          name: show-tech-vlab-${{ matrix.fabricmode }}-${{ matrix.includeonie }}-${{ matrix.buildmode }}-${{ matrix.multiplier }}
           path: show-tech-output
 
       - name: Setup tmate session for debug
