@@ -185,6 +185,10 @@ expect -timeout 150 -ex "GNU GRUB" {
 				"ONIE: OS Install Mode ..." {
 					log_message "INF" $SW_NAME "Entering OS Install Mode..."
 				}
+				eof {
+					log_message "ERR" $SW_NAME "Connection lost before confirming ONIE install mode"
+					exit $ERROR_CONSOLE
+				}
 				timeout {
 					send "\r"
 				}
@@ -193,6 +197,10 @@ expect -timeout 150 -ex "GNU GRUB" {
 		timeout {
 			send -- "$KEY_DOWN"
 			exp_continue
+		}
+		eof {
+			log_message "ERR" $SW_NAME "Connection lost during GRUB menu expect"
+			exit $ERROR_CONSOLE
 		}
 	}
 } timeout {
