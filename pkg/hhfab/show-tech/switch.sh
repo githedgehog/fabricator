@@ -27,6 +27,7 @@ run_cmd "uptime"
 run_cmd "show interface status"
 run_cmd "intfutil -c description"
 run_cmd "show interface counters"
+run_cmd "show lldp table"
 
 run_cmd "show runningconfiguration all"
 run_cmd "show vlan config"
