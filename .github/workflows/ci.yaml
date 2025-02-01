@@ -255,6 +255,15 @@ jobs:
         run: |
           cat .zot/log
 
+      - name: Collect VM Serial Logs
+        if: ${{ always() }}
+        run: |
+          for vm in bin/hhfab/vlab/vms/*; do
+            if [ -f "$vm/serial.log" ]; then
+              cp "$vm/serial.log" "show-tech-output/$(basename $vm)-serial.log"
+            fi
+          done
+
       - name: Upload show-tech artifacts
         uses: actions/upload-artifact@v4
         if: ${{ always() }}
@@ -320,6 +329,15 @@ jobs:
           old/hhfab vlab gen -v
           old/hhfab vlab up -v --ready setup-vpcs --ready test-connectivity --ready exit ${{ matrix.fromflags }}
 
+      - name: Collect VM Serial Logs
+        if: ${{ always() }}
+        run: |
+          for vm in bin/hhfab/vlab/vms/*; do
+            if [ -f "$vm/serial.log" ]; then
+              cp "$vm/serial.log" "show-tech-output/$(basename $vm)-serial.log"
+            fi
+          done
+
       - name: Upload show-tech artifacts
         uses: actions/upload-artifact@v4
         if: ${{ always() }}
@@ -337,6 +355,15 @@ jobs:
           HHFAB_VLAB_COLLECT: true
         run: |
           bin/hhfab vlab up -v --ready setup-vpcs --ready inspect --ready test-connectivity --ready exit --upgrade
+
+      - name: Collect VM Serial Logs
+        if: ${{ always() }}
+        run: |
+          for vm in bin/hhfab/vlab/vms/*; do
+            if [ -f "$vm/serial.log" ]; then
+              cp "$vm/serial.log" "show-tech-output/$(basename $vm)-serial.log"
+            fi
+          done
 
       - name: Upload show-tech artifacts
         uses: actions/upload-artifact@v4
@@ -427,6 +454,15 @@ jobs:
           bin/hhfab init -v --dev --include-onie=${{ matrix.includeonie }} -w "./lab-ci/envs/$KUBE_NODE/wiring.yaml"
           bin/hhfab versions
           bin/hhfab vlab up -v --ready switch-reinstall --ready inspect --ready setup-vpcs --ready test-connectivity --ready exit --mode=${{ matrix.buildmode }}
+
+      - name: Collect VM Serial Logs
+        if: ${{ always() }}
+        run: |
+          for vm in bin/hhfab/vlab/vms/*; do
+            if [ -f "$vm/serial.log" ]; then
+              cp "$vm/serial.log" "show-tech-output/$(basename $vm)-serial.log"
+            fi
+          done
 
       - name: Upload show-tech artifacts
         uses: actions/upload-artifact@v4
