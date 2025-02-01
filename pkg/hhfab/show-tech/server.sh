@@ -24,8 +24,8 @@ echo -e "\n=== IP Configuration ===" >> "$OUTPUT_FILE"
 ip addr show >> "$OUTPUT_FILE"
 ip route show >> "$OUTPUT_FILE"
 
-echo -e "\n=== Ping Default Gateway ($DEFAULT_GW) ===" >> "$OUTPUT_FILE"
 DEFAULT_GW=$(ip route | awk '/^default/ {print $3}')
+echo -e "\n=== Ping Default Gateway ($DEFAULT_GW) ===" >> "$OUTPUT_FILE"
 ping -c 1 "$DEFAULT_GW" >> "$OUTPUT_FILE" 2>&1
 
 
