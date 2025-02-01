@@ -21,13 +21,14 @@ run_sonic_cli_cmd() {
 }
 
 run_cmd "show version"
-run_cmd "hostname"
+run_cmd "show platform summary"
 run_cmd "uptime"
 
 run_cmd "show interface status"
-run_cmd "show interface description"
+run_cmd "intfutil -c description"
 run_cmd "show interface counters"
 
+run_cmd "show runningconfiguration all"
 run_cmd "show vlan config"
 run_cmd "show vlan brief"
 run_cmd "show vxlan interface"
@@ -85,5 +86,16 @@ systemctl status hedgehog-agent >> "$OUTPUT_FILE" 2>/dev/null
 echo -e "\n=== Hedgehog agent logs ===" >> "$OUTPUT_FILE"
 cat /var/log/agent.log >> "$OUTPUT_FILE" 2>/dev/null
 
+echo -e "\n=== Executing: docker ps ===" >> "$OUTPUT_FILE"
+docker ps >> "$OUTPUT_FILE" 2>/dev/null
+
+echo -e "\n=== Collecting Docker Logs ===" >> "$OUTPUT_FILE"
+
+CONTAINERS=$(docker ps --format "{{.Names}}")
+
+for CONTAINER in $CONTAINERS; do
+    echo -e "\n=== Capturing logs for container: $CONTAINER ===" >> "$OUTPUT_FILE"
+    docker logs --tail 100 "$CONTAINER" >> "$OUTPUT_FILE" 2>/dev/null
+done
 echo "Diagnostics collected to $OUTPUT_FILE"
 
