@@ -217,6 +217,7 @@ type SwitchReinstallOpts struct {
 	PDUUsername    string              // (hard-reset mode only)
 	PDUPassword    string              // (hard-reset mode only)
 	WaitReady      bool                // Wait for the switch to be ready
+	Verbose        bool                // To relay the verbose flag
 }
 
 type SwitchReinstallMode string
