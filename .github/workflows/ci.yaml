@@ -258,8 +258,7 @@ jobs:
       - name: Collect VM Serial Logs
         if: ${{ always() }}
         run: |
-          ls -lahR
-          for vm in bin/hhfab/vlab/vms/*; do
+          for vm in ./vlab/vms/*; do
             if [ -f "$vm/serial.log" ]; then
               cp "$vm/serial.log" "show-tech-output/$(basename $vm)-serial.log"
             fi
@@ -333,7 +332,7 @@ jobs:
       - name: Collect VM Serial Logs
         if: ${{ always() }}
         run: |
-          for vm in bin/hhfab/vlab/vms/*; do
+          for vm in ./vlab/vms/*; do
             if [ -f "$vm/serial.log" ]; then
               cp "$vm/serial.log" "show-tech-output/$(basename $vm)-serial.log"
             fi
@@ -360,7 +359,7 @@ jobs:
       - name: Collect VM Serial Logs
         if: ${{ always() }}
         run: |
-          for vm in bin/hhfab/vlab/vms/*; do
+          for vm in ./vlab/vms/*; do
             if [ -f "$vm/serial.log" ]; then
               cp "$vm/serial.log" "show-tech-output/$(basename $vm)-serial.log"
             fi
@@ -459,7 +458,7 @@ jobs:
       - name: Collect VM Serial Logs
         if: ${{ always() }}
         run: |
-          for vm in bin/hhfab/vlab/vms/*; do
+          for vm in ./vlab/vms/*; do
             if [ -f "$vm/serial.log" ]; then
               cp "$vm/serial.log" "show-tech-output/$(basename $vm)-serial.log"
             fi
