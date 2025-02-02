@@ -258,6 +258,7 @@ jobs:
       - name: Collect VM Serial Logs
         if: ${{ always() }}
         run: |
+          mkdir -p show-tech-output
           for vm in ./vlab/vms/*; do
             if [ -f "$vm/serial.log" ]; then
               cp "$vm/serial.log" "show-tech-output/$(basename $vm)-serial.log"
@@ -332,6 +333,7 @@ jobs:
       - name: Collect VM Serial Logs
         if: ${{ always() }}
         run: |
+          mkdir -p show-tech-output
           for vm in ./vlab/vms/*; do
             if [ -f "$vm/serial.log" ]; then
               cp "$vm/serial.log" "show-tech-output/$(basename $vm)-serial.log"
@@ -359,6 +361,7 @@ jobs:
       - name: Collect VM Serial Logs
         if: ${{ always() }}
         run: |
+          mkdir -p show-tech-output
           for vm in ./vlab/vms/*; do
             if [ -f "$vm/serial.log" ]; then
               cp "$vm/serial.log" "show-tech-output/$(basename $vm)-serial.log"
@@ -458,6 +461,7 @@ jobs:
       - name: Collect VM Serial Logs
         if: ${{ always() }}
         run: |
+          mkdir -p show-tech-output
           for vm in ./vlab/vms/*; do
             if [ -f "$vm/serial.log" ]; then
               cp "$vm/serial.log" "show-tech-output/$(basename $vm)-serial.log"
