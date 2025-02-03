@@ -204,6 +204,16 @@ jobs:
           - usb
           - iso
           - manual
+        multiplier:
+          - 1
+          - 2
+          - 3
+          - 4
+          - 5
+          - 6
+          - 7
+          - 8
+          - 9
         include:
           - fabricmode: collapsed-core
             includeonie: false
@@ -257,7 +267,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: ${{ always() }}
         with:
-          name: show-tech-vlab-${{ matrix.fabricmode }}-${{ matrix.includeonie }}-${{ matrix.buildmode }}
+          name: show-tech-vlab-${{ matrix.fabricmode }}-${{ matrix.includeonie }}-${{ matrix.buildmode }}-${{ matrix.multiplier }}
           path: show-tech-output
 
       - name: Setup tmate session for debug
@@ -277,6 +287,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        multiplier:
+          - 1
+          - 2
+          - 3
+          - 4
+          - 5
+          - 6
+          - 7
+          - 8
+          - 9
         include:
           - fabricmode: spine-leaf
             fromversion: "beta-1"
@@ -321,7 +341,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: ${{ always() }}
         with:
-          name: show-tech-upgrade-old-${{ matrix.fabricmode }}-${{ matrix.fromversion }}-${{ matrix.fromflags == '--usb' && 'usb' || matrix.fromflags == '-m=iso' && 'iso' }}
+          name: show-tech-upgrade-old-${{ matrix.fabricmode }}-${{ matrix.fromversion }}-${{ matrix.fromflags == '--usb' && 'usb' || matrix.fromflags == '-m=iso' && 'iso' }}-${{ matrix.multiplier }}
           path: old/show-tech-output
 
       - name: Build current hhfab
@@ -339,7 +359,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: ${{ always() }}
         with:
-          name: show-tech-upgrade-cur-${{ matrix.fabricmode }}-${{ matrix.fromversion }}-${{ matrix.fromflags == '--usb' && 'usb' || matrix.fromflags == '-m=iso' && 'iso' }}
+          name: show-tech-upgrade-cur-${{ matrix.fabricmode }}-${{ matrix.fromversion }}-${{ matrix.fromflags == '--usb' && 'usb' || matrix.fromflags == '-m=iso' && 'iso' }}-${{ matrix.multiplier }}
           path: show-tech-output
 
       - name: Dump local registry logs
@@ -380,6 +400,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        multiplier:
+          - 1
+          - 2
+          - 3
+          - 4
+          - 5
+          - 6
+          - 7
+          - 8
+          - 9
         include:
           - fabricmode: spine-leaf
             includeonie: true
@@ -428,7 +458,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: ${{ always() }}
         with:
-          name: show-tech-hlab-${{ matrix.fabricmode }}-${{ matrix.includeonie }}-${{ matrix.buildmode }}
+          name: show-tech-hlab-${{ matrix.fabricmode }}-${{ matrix.includeonie }}-${{ matrix.buildmode }}-${{ matrix.multiplier }}
           path: show-tech-output
 
       - name: Dump local registry logs
