@@ -167,7 +167,7 @@ if { ! $POWER_RESET} {
 	}
 }
 
-expect -timeout 150 -ex "GNU GRUB" {
+expect -timeout 300 -ex "GNU GRUB" {
 	log_message "INF" $SW_NAME "GRUB Menu detected"
 	# Select the ONIE option, and finally the Install OS option
 	sleep 1
@@ -214,12 +214,12 @@ if {$WAIT_READY} {
 	} timeout {
 		log_message "ERR" $SW_NAME "Failed to select install mode."
 	}
-	
+
 	# Exit if install failed
 	if {$install_success == 0} {
 		exit $ERROR_INSTALL
 	}
-	
+
 	# Wait for the login prompt
 	expect -timeout 300 -ex "sonic login:" {
 		log_message "INF" $SW_NAME "Sonic login prompt detected."
@@ -227,7 +227,7 @@ if {$WAIT_READY} {
 		log_message "ERR" $SW_NAME "Login prompt not detected within 5 minutes."
 		exit $ERROR_INSTALL
 	}
-	
+
 	# Wait for the "System is ready" message
 	expect -timeout 300 -ex "System is ready" {
 		log_message "INF" $SW_NAME "System is ready message detected."
