@@ -1509,6 +1509,7 @@ func CollectN[E any](n int, seq iter.Seq[E]) []E {
 
 type InspectOpts struct {
 	WaitAppliedFor time.Duration
+	Strict         bool
 }
 
 func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) error {
@@ -1544,7 +1545,7 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 		Verbose: true,
 		Output:  inspect.OutputTypeText,
 	}, inspect.LLDPIn{
-		Strict:   false, // TODO make it strict
+		Strict:   opts.Strict,
 		Fabric:   true,
 		External: true,
 		Server:   true,
@@ -1557,7 +1558,7 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 		Verbose: true,
 		Output:  inspect.OutputTypeText,
 	}, inspect.BGPIn{
-		Strict: false, // TODO make it strict
+		Strict: opts.Strict,
 	}, os.Stdout); err != nil {
 		slog.Error("Failed to inspect BGP", "err", err)
 		fail = true
