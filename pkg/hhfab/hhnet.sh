@@ -2,108 +2,45 @@
 # Copyright 2024 Hedgehog
 # SPDX-License-Identifier: Apache-2.0
 
-set -e
 
-NETWORKD_PATH="/etc/systemd/network"
+set -e
 
 function cleanup() {
     for i in {0..3}; do
-        sudo networkctl down "bond$i" 2> /dev/null || true
-        sudo networkctl delete "bond$i" 2> /dev/null || true
+        sudo ip l d "bond$i" 2> /dev/null || true
     done
 
     for i in {1..9}; do
-        sudo networkctl down "enp2s$i" 2> /dev/null || true
+        sudo ip l s "enp2s$i" down 2> /dev/null || true
         for j in {1000..1020}; do
-            sudo networkctl down "enp2s$i.$j" 2> /dev/null || true
-            sudo networkctl delete "enp2s$i.$j" 2> /dev/null || true
+            sudo ip l d "enp2s$i.$j" 2> /dev/null || true
         done
     done
 
-    sudo rm -f "$NETWORKD_PATH"/10-bond*.network "$NETWORKD_PATH"/10-bond*.netdev
-    sudo rm -f "$NETWORKD_PATH"/20-slave*.network
-    sudo rm -f "$NETWORKD_PATH"/30-vlan*.network "$NETWORKD_PATH"/30-vlan*.netdev
-
-    sudo networkctl reload 2> /dev/null || true
-    sleep 2
+    sleep 1
 }
 
 function setup_bond() {
     local bond_name=$1
-    shift
-    local interfaces=("$@")
-    for iface in "${interfaces[@]}"; do
-        if ! sudo networkctl status "$iface" &> /dev/null; then
-            echo "Interface $iface not found"
-            return 1
-        fi
-    done
-    cat << EOF | sudo tee "$NETWORKD_PATH/10-$bond_name.netdev" > /dev/null
-[NetDev]
-Name=$bond_name
-Kind=bond
-[Bond]
-Mode=802.3ad
-LACPTransmitRate=fast
-MIIMonitorSec=1s
-EOF
-    for iface in "${interfaces[@]}"; do
-        cat << EOF | sudo tee "$NETWORKD_PATH/20-slave-$iface.network" > /dev/null
-[Match]
-Name=$iface
-[Network]
-Bond=$bond_name
-LLDP=yes
-EmitLLDP=yes
-[Link]
-EOF
+
+    sudo ip l a "$bond_name" type bond miimon 100 mode 802.3ad
+
+    for iface in "${@:2}"; do
+        # cannot enslave interface if it is up
+        sudo ip l s "$iface" down 2> /dev/null || true
+        sudo ip l s "$iface" master "$bond_name"
     done
 
-    sudo networkctl reload 2> /dev/null || true
-    sleep 5
+    sudo ip l s "$bond_name" up
 }
 
 function setup_vlan() {
-    local parent_iface=$1
+    local iface_name=$1
     local vlan_id=$2
 
-    if ! sudo networkctl status "$parent_iface" &> /dev/null; then
-        echo "Parent interface $parent_iface not found"
-        return 1
-    fi
-
-    sudo networkctl up "$parent_iface" 2> /dev/null || true
-    sleep 2
-
-    cat << EOF | sudo tee "$NETWORKD_PATH/30-vlan-$parent_iface-$vlan_id.netdev" > /dev/null
-[NetDev]
-Name=$parent_iface.$vlan_id
-Kind=vlan
-
-[VLAN]
-Id=$vlan_id
-EOF
-
-    cat << EOF | sudo tee "$NETWORKD_PATH/30-vlan-$parent_iface-$vlan_id.network" > /dev/null
-[Match]
-Name=$parent_iface.$vlan_id
-
-[Network]
-DHCP=yes
-EOF
-
-    cat << EOF | sudo tee "$NETWORKD_PATH/30-$parent_iface.network" > /dev/null
-[Match]
-Name=$parent_iface
-
-[Network]
-VLAN=$parent_iface.$vlan_id
-
-[Link]
-EOF
-
-    sudo networkctl reload 2> /dev/null || true
-    sleep 5
+    sudo ip l s "$iface_name" up
+    sudo ip l a link "$iface_name" name "$iface_name.$vlan_id" type vlan id "$vlan_id"
+    sudo ip l s "$iface_name.$vlan_id" up
 }
 
 function get_ip() {
@@ -125,41 +62,53 @@ function get_ip() {
     echo "$ip"
 }
 
+# Usage:
+# hhnet cleanup
+# hhnet bond 1000 enp2s1 enp2s2 enp2s3 enp2s4
+# hhnet vlan 1000 enp2s1
+
 function usage() {
-    echo "Usage: $0 [command] [...]" >&2
-    echo "  Cleanup all interfaces (enp2s1-9, bond0-3, vlans 1000-1020): " >&2
-    echo "    hhnet cleanup" >&2
-    echo "  Setup bond from provided interfaces (at least one) and vlan on top of it" >&2
-    echo "    hhnet bond 1000 enp2s1 enp2s2 enp2s3 enp2s4" >&2
-    echo "  Setup vlan on top of provided interface (exactly one)" >&2
-    echo "    hhnet vlan 1000 enp2s1" >&2
+    echo "Usage: $0 <cleanup|bond|vlan> [<args> ...]" >&2
+    echo " Cleanup all interfaces (enp2s1-9, bond0-3, vlans 1000-1020): " >&2
+    echo "  hhnet cleanup" >&2
+    echo " Setup bond from provided interfaces (at least one) and vlan on top of it" >&2
+    echo "  hhnet bond 1000 enp2s1 enp2s2 enp2s3 enp2s4" >&2
+    echo " Setup vlan on top of provided interface (exactly one)" >&2
+    echo "  hhnet vlan 1000 enp2s1" >&2
 }
 
 if [ "$#" -lt 1 ]; then
     usage
+
     exit 1
 elif [ "$1" == "cleanup" ]; then
     cleanup
+
     exit 0
 elif [ "$1" == "bond" ]; then
     if [ "$#" -lt 3 ]; then
-        echo "Usage: $0 bond <vlan_id> <interface> [...]" >&2
+        echo "Usage: $0 bond <vlan_id> <iface1> [<iface2> ...]" >&2
         exit 1
     fi
-    setup_bond bond0 "${@:3}" || exit 1
+
+    setup_bond bond0 "${@:3}"
     sleep 1
-    setup_vlan bond0 "$2" || exit 1
-    get_ip "bond0.$2" || exit 1
+    setup_vlan bond0 "$2"
+    get_ip bond0."$2"
+
     exit 0
 elif [ "$1" == "vlan" ]; then
     if [ "$#" -ne 3 ]; then
-        echo "Usage: $0 vlan <vlan_id> <interface>" >&2
+        echo "Usage: $0 vlan <vlan_id> <iface1>" >&2
         exit 1
     fi
-    setup_vlan "$3" "$2" || exit 1
-    get_ip "$3.$2" || exit 1
+
+    setup_vlan "$3" "$2"
+    get_ip "$3"."$2"
+
     exit 0
 else
     usage
+
     exit 1
 fi
