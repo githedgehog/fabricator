@@ -46,7 +46,7 @@ function setup_vlan() {
 function get_ip() {
     local iface_name=$1
     local ip=""
-    local max_attempts=60
+    local max_attempts=300 # 5 minutes
     local attempt=0
 
     while [ -z "$ip" ]; do
