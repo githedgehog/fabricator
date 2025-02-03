@@ -107,6 +107,9 @@ OUTPUT_FILE="/tmp/show-tech.log"
 # Logs & Kernel Information
 # ---------------------------
 {
+  echo -e "\n=== hhnet logs ==="
+  cat /var/log/hhnet.log
+
   echo -e "\n=== systemd-networkd logs ==="
   journalctl -u systemd-networkd 2>/dev/null
 
