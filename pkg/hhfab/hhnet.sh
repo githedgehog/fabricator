@@ -25,6 +25,23 @@ function cleanup() {
     sleep 1
 }
 
+function wait_for_interface() {
+    local iface_name=$1
+    local timeout=30
+    local elapsed=0
+    local start_time=$(date +%s)
+    while ! ip l show "$iface_name" | grep -q "UP"; do
+        sleep 1
+        elapsed=$(( $(date +%s) - start_time ))
+        if [ "$elapsed" -ge "$timeout" ]; then
+            echo "Timeout waiting for $iface_name to come up" >&2 | tee -a "$LOG_FILE"
+            return 1
+        fi
+    done
+    local end_time=$(date +%s)
+    echo "$iface_name is up after $((end_time - start_time)) seconds" >> "$LOG_FILE"
+}
+
 function setup_bond() {
     local bond_name=$1
     local start_time=$(date +%s)
@@ -38,6 +55,8 @@ function setup_bond() {
     done
 
     sudo ip l s "$bond_name" up
+    wait_for_interface "$bond_name" || return 1
+
     local end_time=$(date +%s)
     echo "setup_bond completed in $((end_time - start_time)) seconds" >> "$LOG_FILE"
 }
@@ -50,6 +69,7 @@ function setup_vlan() {
     sudo ip l s "$iface_name" up
     sudo ip l a link "$iface_name" name "$iface_name.$vlan_id" type vlan id "$vlan_id"
     sudo ip l s "$iface_name.$vlan_id" up
+    wait_for_interface "$iface_name.$vlan_id" || return 1
 
     local end_time=$(date +%s)
     echo "setup_vlan completed in $((end_time - start_time)) seconds" >> "$LOG_FILE"
@@ -60,6 +80,7 @@ function get_ip() {
     local ip=""
     local max_attempts=300 # 5 minutes
     local attempt=0
+    local start_time=$(date +%s)
 
     while [ -z "$ip" ]; do
         attempt=$((attempt + 1))
@@ -67,17 +88,13 @@ function get_ip() {
         [ "$attempt" -ge "$max_attempts" ] && break
         sleep 1
     done
-
     if [ -z "$ip" ]; then
-        sudo dhclient "$iface_name" || true
-        sleep 3
-        ip=$(ip a s "$iface_name" | awk '/inet / {print $2}')
-    fi
-
-    if [ -z "$ip" ]; then
-        echo "Failed to get IP address for $iface_name" >&2
+        echo "Failed to get IP address for $iface_name" >&2 | tee -a "$LOG_FILE"
         exit 1
     fi
+
+    local end_time=$(date +%s)
+    echo "get_ip for $iface_name completed in $((end_time - start_time)) seconds" >> "$LOG_FILE"
 
     echo "$ip"
 }
