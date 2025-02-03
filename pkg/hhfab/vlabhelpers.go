@@ -372,11 +372,26 @@ func (c *Config) VLABSwitchReinstall(ctx context.Context, opts SwitchReinstallOp
 
 		if err := c.VLABSwitchPower(ctx, SwitchPowerOpts{
 			Switches:    opts.Switches,
-			Action:      pdu.ActionCycle,
+			Action:      pdu.ActionOff,
 			PDUUsername: opts.PDUUsername,
 			PDUPassword: opts.PDUPassword,
 		}); err != nil {
-			return fmt.Errorf("executing hard-reset on switches: %w", err)
+			return fmt.Errorf("executing power off for switches: %w", err)
+		}
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("sleeping before power switches back on: %w", ctx.Err())
+		case <-time.After(60 * time.Second):
+		}
+
+		if err := c.VLABSwitchPower(ctx, SwitchPowerOpts{
+			Switches:    opts.Switches,
+			Action:      pdu.ActionOn,
+			PDUUsername: opts.PDUUsername,
+			PDUPassword: opts.PDUPassword,
+		}); err != nil {
+			return fmt.Errorf("executing power on for switches: %w", err)
 		}
 	}
 
