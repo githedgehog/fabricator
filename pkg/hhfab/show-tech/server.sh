@@ -30,7 +30,7 @@ OUTPUT_FILE="/tmp/show-tech.log"
 
   echo -e "\n=== IP Configuration ==="
   ip addr show
-  ip route show
+  ip route show table all
 } >> "$OUTPUT_FILE" 2>&1
 
 # ---------------------------
@@ -109,6 +109,9 @@ OUTPUT_FILE="/tmp/show-tech.log"
 {
   echo -e "\n=== hhnet logs ==="
   cat /var/log/hhnet.log
+
+  echo -e "\n=== SSH logs ==="
+  sudo journalctl | grep sshd
 
   echo -e "\n=== systemd-networkd logs ==="
   journalctl -u systemd-networkd 2>/dev/null
