@@ -429,7 +429,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	g := &errgroup.Group{}
 	for _, server := range servers.Items {
 		g.Go(func() error {
-			ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+			ctx, cancel := context.WithTimeout(ctx, 6*time.Minute)
 			defer cancel()
 
 			if err := func() error {
