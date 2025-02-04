@@ -187,6 +187,15 @@ func (b *ControlInstallBuilder) Build(ctx context.Context) error {
 		return fmt.Errorf("downloading zot: %w", err)
 	}
 
+	slog.Info("Adding Flatcar Upgrade bin to installer", "control", b.Control.Name)
+	if err := b.Downloader.FromORAS(ctx, installDir, flatcar.Ref, flatcar.Version(b.Fab), []artificer.ORASFile{
+		{
+			Name: flatcar.BinName,
+		},
+	}); err != nil {
+		return fmt.Errorf("downloading flatcar-update: %w", err)
+	}
+
 	slog.Info("Adding cert-manager to installer", "control", b.Control.Name)
 	if err := b.Downloader.FromORAS(ctx, installDir, certmanager.AirgapRef, certmanager.Version(b.Fab), []artificer.ORASFile{
 		{
