@@ -49,6 +49,31 @@ function cleanup() {
     sleep 1
 }
 
+function wait_interface_up() {
+    local iface_name=$1
+    local timeout=120
+    local interval=1
+    local elapsed=0
+
+    log "Waiting up to ${timeout}s for interface $iface_name to come up"
+
+    while [ $elapsed -lt $timeout ]; do
+        if ip link show "$iface_name" | grep -q "state UP"; then
+            log "Interface $iface_name is up after ${elapsed}s"
+            return 0
+        fi
+        sleep $interval
+        elapsed=$((elapsed + interval))
+
+        if [ $((elapsed % 10)) -eq 0 ]; then
+            log "Still waiting for interface $iface_name to come up (${elapsed}s elapsed)"
+        fi
+    done
+
+    log_error "Interface $iface_name failed to come up within ${timeout}s"
+    return 1
+}
+
 function setup_bond() {
     local bond_name=$1
     log "Setting up bond $bond_name with interfaces: ${*:2}"
@@ -72,6 +97,12 @@ function setup_bond() {
         log_error "Failed to bring up bond $bond_name"
         return 1
     }
+
+    if ! wait_interface_up "$bond_name"; then
+        log_error "Bond interface $bond_name failed to come up properly"
+        return 1
+    fi
+
     log "Successfully set up bond $bond_name"
 }
 
@@ -95,6 +126,11 @@ function setup_vlan() {
         return 1
     }
     
+    if ! wait_interface_up "$iface_name.$vlan_id"; then
+        log_error "VLAN interface $iface_name.$vlan_id failed to come up properly"
+        return 1
+    fi
+
     log "Successfully set up VLAN $vlan_id on $iface_name"
 }
 
