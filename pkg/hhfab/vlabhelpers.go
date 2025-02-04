@@ -336,9 +336,7 @@ func (c *Config) VLABSwitchReinstall(ctx context.Context, opts SwitchReinstallOp
 			if opts.WaitReady {
 				args = append(args, "--wait-ready")
 			}
-			if opts.Verbose {
-				args = append(args, "-v")
-			}
+			args = append(args, "-v")
 
 			cmd := exec.CommandContext(ctx, script, args...)
 			cmd.Stdout = logutil.NewSink(ctx, slog.Debug, sw.Name+": ")
