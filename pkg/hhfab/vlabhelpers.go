@@ -382,7 +382,7 @@ func (c *Config) VLABSwitchReinstall(ctx context.Context, opts SwitchReinstallOp
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("sleeping before power switches back on: %w", ctx.Err())
-		case <-time.After(60 * time.Second):
+		case <-time.After(3 * 60 * time.Second):
 		}
 
 		if err := c.VLABSwitchPower(ctx, SwitchPowerOpts{
