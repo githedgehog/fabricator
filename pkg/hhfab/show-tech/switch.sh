@@ -21,7 +21,6 @@ run_sonic_cli_cmd() {
 }
 
 run_cmd "show version"
-run_cmd "show platform summary"
 run_cmd "uptime"
 
 run_cmd "show interface status"
@@ -80,6 +79,19 @@ show logging >> "$OUTPUT_FILE" 2>/dev/null
 
 echo -e "\n=== Journal ===" >> "$OUTPUT_FILE"
 journalctl >> "$OUTPUT_FILE" 2>/dev/null
+
+echo -e "\n=== dmesg ===" >> "$OUTPUT_FILE"
+run_cmd "sudo dmesg"
+
+echo -e "\n=== Platform details  ===" >> "$OUTPUT_FILE"
+run_cmd "show platform summary"
+run_cmd "show interfaces transceiver presence"
+run_cmd "show interfaces transceiver eeprom"
+run_cmd "show platform syseeprom"
+run_cmd "show platform environment"
+run_cmd "show platform fan"
+run_cmd "show platform temperature"
+run_cmd "show platform psu"
 
 echo -e "\n=== Hedgehog agent status ===" >> "$OUTPUT_FILE"
 systemctl status hedgehog-agent >> "$OUTPUT_FILE" 2>/dev/null
