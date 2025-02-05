@@ -5,42 +5,106 @@
 
 set -e
 
+function wait_for_interface_state() {
+    local iface=$1
+    local state=$2  # "up" or "down"
+    local max_attempts=30
+    local attempt=0
+
+    while [ $attempt -lt $max_attempts ]; do
+        if [ "$state" = "up" ]; then
+            sudo ip link show "$iface" | grep -q "state UP" && return 0
+        else
+            sudo ip link show "$iface" | grep -q "state DOWN" && return 0
+        fi
+        sleep 0.1
+        attempt=$((attempt + 1))
+    done
+
+    echo "ERROR: Interface $iface did not reach state $state within $((max_attempts * 100))ms" >&2
+    exit 1
+}
+
 function cleanup() {
     for i in {0..3}; do
-        sudo ip l d "bond$i" 2> /dev/null || true
+        if ip link show "bond$i" &>/dev/null; then
+            sudo ip link set "bond$i" down 2>/dev/null || true
+            wait_for_interface_state "bond$i" "down"
+            sudo ip link delete "bond$i" 2>/dev/null || true
+        fi
     done
 
     for i in {1..9}; do
-        sudo ip l s "enp2s$i" down 2> /dev/null || true
-        for j in {1000..1020}; do
-            sudo ip l d "enp2s$i.$j" 2> /dev/null || true
-        done
+        if sudo ip link show "enp2s$i" &>/dev/null; then
+            sudo ip link set "enp2s$i" down 2>/dev/null || true
+            wait_for_interface_state "enp2s$i" "down"
+            for j in {1000..1020}; do
+                if sudo ip link show "enp2s$i.$j" &>/dev/null; then
+                    sudo ip link set "enp2s$i.$j" down 2>/dev/null || true
+                    wait_for_interface_state "enp2s$i.$j" "down"
+                    sudo ip link delete "enp2s$i.$j" 2>/dev/null || true
+                fi
+            done
+        fi
     done
 
-    sleep 1
+    sleep 2
 }
 
 function setup_bond() {
     local bond_name=$1
+    shift  # Remove first argument (bond_name)
 
-    sudo ip l a "$bond_name" type bond miimon 100 mode 802.3ad
+    sudo ip link add "$bond_name" type bond miimon 100 mode 802.3ad 2>/dev/null || {
+        echo "ERROR: Failed to create bond $bond_name" >&2
+        exit 1
+    }
 
-    for iface in "${@:2}"; do
-        # cannot enslave interface if it is up
-        sudo ip l s "$iface" down 2> /dev/null || true
-        sudo ip l s "$iface" master "$bond_name"
+    for iface in "$@"; do
+        if ! sudo ip link show "$iface" &>/dev/null; then
+            echo "ERROR: Interface $iface does not exist." >&2
+            exit 1
+        fi
+        sudo ip link set "$iface" down 2>/dev/null
+        wait_for_interface_state "$iface" "down"
+        sudo ip link set "$iface" master "$bond_name" 2>/dev/null || {
+            echo "ERROR: Failed to add $iface to bond $bond_name" >&2
+            exit 1
+        }
     done
 
-    sudo ip l s "$bond_name" up
+    sudo ip link set "$bond_name" up 2>/dev/null
+    wait_for_interface_state "$bond_name" "up" || {
+        echo "ERROR: Bond $bond_name did not come up." >&2
+        exit 1
+    }
 }
 
 function setup_vlan() {
     local iface_name=$1
     local vlan_id=$2
 
-    sudo ip l s "$iface_name" up
-    sudo ip l a link "$iface_name" name "$iface_name.$vlan_id" type vlan id "$vlan_id"
-    sudo ip l s "$iface_name.$vlan_id" up
+    if ! ip link show "$iface_name" &>/dev/null; then
+        echo "ERROR: Interface $iface_name does not exist." >&2
+        exit 1
+    fi
+
+    sudo ip link set "$iface_name" up 2>/dev/null
+    wait_for_interface_state "$iface_name" "up" || {
+        echo "ERROR: Interface $iface_name did not come up." >&2
+        exit 1
+    }
+
+    sudo ip link add link "$iface_name" name "$iface_name.$vlan_id" type vlan id "$vlan_id" 2>/dev/null || {
+        echo "ERROR: Failed to create VLAN $vlan_id on $iface_name" >&2
+        exit 1
+    }
+
+    sudo ip link set "$iface_name.$vlan_id" up 2>/dev/null
+    wait_for_interface_state "$iface_name.$vlan_id" "up" || {
+        echo "ERROR: VLAN $iface_name.$vlan_id did not come up." >&2
+        exit 1
+    }
 }
 
 function get_ip() {
@@ -48,15 +112,14 @@ function get_ip() {
     local ip=""
     local max_attempts=300 # 5 minutes
     local attempt=0
-
     while [ -z "$ip" ]; do
         attempt=$((attempt + 1))
-        ip=$(ip a s "$iface_name" | awk '/inet / {print $2}')
+        ip=$(ip address show "$iface_name" 2>/dev/null | awk '/inet / {print $2}')
         [ "$attempt" -ge "$max_attempts" ] && break
         sleep 1
     done
     if [ -z "$ip" ]; then
-        echo "Failed to get IP address for $iface_name" >&2
+        echo "ERROR: Failed to get IP address for $iface_name" >&2
         exit 1
     fi
     echo "$ip"
