@@ -28,13 +28,14 @@ import (
 )
 
 const (
-	ClusterDomain  = "cluster.local"
-	FabName        = fabapi.FabName
-	FabNamespace   = fabapi.FabNamespace
-	RegPrefix      = "githedgehog"
-	FabCAIssuer    = "fab-ca"
-	FabCASecret    = FabCAIssuer
-	FabCAConfigMap = FabCAIssuer // changing name will break fabric manager
+	ClusterDomain     = "cluster.local"
+	FabName           = fabapi.FabName
+	FabNamespace      = fabapi.FabNamespace
+	RegPrefix         = "githedgehog"
+	FabCAIssuer       = "fab-ca"
+	FabCASecret       = FabCAIssuer
+	FabCAConfigMap    = FabCAIssuer // changing name will break fabric manager
+	FabCAConfigMapKey = "ca.crt"
 
 	RegistryUserAdmin              = "admin"
 	RegistryUserWriter             = "writer"
