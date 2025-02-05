@@ -129,6 +129,23 @@ type ControlInstall struct {
 func (c *ControlInstall) Run(ctx context.Context) error {
 	slog.Info("Running control node installation")
 
+	ca, err := certmanager.NewFabCA()
+	if err != nil {
+		return fmt.Errorf("creating fab-ca: %w", err)
+	}
+
+	if err := os.WriteFile("/etc/ssl/certs/hh-fab-ca.crt", []byte(ca.Crt), 0o644); err != nil { //nolint:gosec
+		return fmt.Errorf("writing fab-ca cert: %w", err)
+	}
+
+	cmd := exec.CommandContext(ctx, "update-ca-certificates")
+	cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "update-ca: ")
+	cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "update-ca: ")
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("running update-ca-certificates: %w", err)
+	}
+
 	kube, err := c.installK8s(ctx)
 	if err != nil {
 		return fmt.Errorf("installing k3s: %w", err)
@@ -145,8 +162,24 @@ func (c *ControlInstall) Run(ctx context.Context) error {
 		return fmt.Errorf("installing cert-manager: %w", err)
 	}
 
-	if err := c.installFabCA(ctx, kube); err != nil {
-		return fmt.Errorf("installing fab-ca: %w", err)
+	caCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+
+	if err := comp.EnforceKubeInstall(caCtx, kube, c.Fab, certmanager.InstallFabCA(ca)); err != nil {
+		return fmt.Errorf("enforcing fab-ca install: %w", err)
+	}
+
+	slog.Debug("Waiting for fab-ca ready")
+	if err := waitKube(caCtx, kube, comp.FabCAIssuer, comp.FabNamespace,
+		&comp.Issuer{}, func(obj *comp.Issuer) (bool, error) {
+			for _, cond := range obj.Status.Conditions {
+				if cond.Type == comp.IssuerConditionReady && cond.Status == comp.CMConditionTrue {
+					return true, nil
+				}
+			}
+			return false, nil
+		}); err != nil {
+		return fmt.Errorf("waiting for fab-ca issuer ready: %w", err)
 	}
 
 	if err := c.installZot(ctx, kube); err != nil {
