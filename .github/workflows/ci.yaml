@@ -466,7 +466,6 @@ jobs:
       - build-multi
       - vlab
       - vlab-upgrade
-      - hlab
 
     steps:
       - name: Checkout repository
@@ -520,7 +519,6 @@ jobs:
       - build-multi
       - vlab
       - vlab-upgrade
-      - hlab
 
     steps:
       - name: Checkout repository
