@@ -128,7 +128,19 @@ func (c *ControlUpgrade) Run(ctx context.Context) error {
 		return fmt.Errorf("getting registry URL: %w", err)
 	}
 
-	if err := waitURL(ctx, "https://"+regURL+"/v2/_catalog"); err != nil {
+	caCM := coreapi.ConfigMap{}
+	if err := kube.Get(ctx, client.ObjectKey{
+		Namespace: comp.FabNamespace,
+		Name:      comp.FabCAConfigMap,
+	}, &caCM); err != nil {
+		return fmt.Errorf("getting CA config map: %w", err)
+	}
+
+	if caCM.Data == nil || caCM.Data[comp.FabCAConfigMapKey] == "" {
+		return errors.New("CA config map missing data") //nolint:goerr113
+	}
+
+	if err := waitURL(ctx, "https://"+regURL+"/v2/_catalog", caCM.Data[comp.FabCAConfigMapKey]); err != nil {
 		return fmt.Errorf("waiting for zot endpoint: %w", err)
 	}
 

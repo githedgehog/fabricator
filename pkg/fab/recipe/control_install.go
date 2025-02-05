@@ -5,6 +5,8 @@ package recipe
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -145,11 +147,12 @@ func (c *ControlInstall) Run(ctx context.Context) error {
 		return fmt.Errorf("installing cert-manager: %w", err)
 	}
 
-	if err := c.installFabCA(ctx, kube); err != nil {
+	ca, err := c.installFabCA(ctx, kube)
+	if err != nil {
 		return fmt.Errorf("installing fab-ca: %w", err)
 	}
 
-	if err := c.installZot(ctx, kube); err != nil {
+	if err := c.installZot(ctx, kube, ca); err != nil {
 		return fmt.Errorf("installing zot: %w", err)
 	}
 
@@ -361,7 +364,7 @@ func (c *ControlInstall) installCertManager(ctx context.Context, kube client.Cli
 	return nil
 }
 
-func (c *ControlInstall) installFabCA(ctx context.Context, kube client.Client) error {
+func (c *ControlInstall) installFabCA(ctx context.Context, kube client.Client) (string, error) {
 	slog.Info("Installing fab-ca")
 
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
@@ -369,15 +372,15 @@ func (c *ControlInstall) installFabCA(ctx context.Context, kube client.Client) e
 
 	ca, err := certmanager.NewFabCA()
 	if err != nil {
-		return fmt.Errorf("creating fab-ca: %w", err)
+		return "", fmt.Errorf("creating fab-ca: %w", err)
 	}
 
 	if err := comp.EnforceKubeInstall(ctx, kube, c.Fab, certmanager.InstallFabCA(ca)); err != nil {
-		return fmt.Errorf("enforcing fab-ca install: %w", err)
+		return "", fmt.Errorf("enforcing fab-ca install: %w", err)
 	}
 
 	if err := os.WriteFile("/etc/ssl/certs/hh-fab-ca.crt", []byte(ca.Crt), 0o644); err != nil { //nolint:gosec
-		return fmt.Errorf("writing fab-ca cert: %w", err)
+		return "", fmt.Errorf("writing fab-ca cert: %w", err)
 	}
 
 	cmd := exec.CommandContext(ctx, "update-ca-certificates")
@@ -386,7 +389,7 @@ func (c *ControlInstall) installFabCA(ctx context.Context, kube client.Client) e
 	cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "update-ca: ")
 
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("running update-ca-certificates: %w", err)
+		return "", fmt.Errorf("running update-ca-certificates: %w", err)
 	}
 
 	slog.Debug("Waiting for fab-ca ready")
@@ -401,13 +404,13 @@ func (c *ControlInstall) installFabCA(ctx context.Context, kube client.Client) e
 
 			return false, nil
 		}); err != nil {
-		return fmt.Errorf("waiting for fab-ca issuer ready: %w", err)
+		return "", fmt.Errorf("waiting for fab-ca issuer ready: %w", err)
 	}
 
-	return nil
+	return ca.Crt, nil
 }
 
-func (c *ControlInstall) installZot(ctx context.Context, kube client.Client) error {
+func (c *ControlInstall) installZot(ctx context.Context, kube client.Client, ca string) error {
 	slog.Info("Installing zot")
 
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
@@ -441,7 +444,7 @@ func (c *ControlInstall) installZot(ctx context.Context, kube client.Client) err
 		return fmt.Errorf("getting registry URL: %w", err)
 	}
 
-	if err := waitURL(ctx, "https://"+regURL+"/v2/_catalog"); err != nil {
+	if err := waitURL(ctx, "https://"+regURL+"/v2/_catalog", ca); err != nil {
 		return fmt.Errorf("waiting for zot endpoint: %w", err)
 	}
 
@@ -653,7 +656,23 @@ func waitKube[T client.Object](ctx context.Context, kube client.Client, name, ns
 	}
 }
 
-func waitURL(ctx context.Context, url string) error {
+func waitURL(ctx context.Context, url string, ca string) error {
+	rootCAs := x509.NewCertPool()
+	if !rootCAs.AppendCertsFromPEM([]byte(ca)) {
+		return errors.New("failed to append CA cert to rootCAs") //nolint:goerr113
+	}
+
+	baseTransport := http.DefaultTransport.(*http.Transport).Clone()
+	baseTransport.TLSClientConfig = &tls.Config{
+		MinVersion:         tls.VersionTLS12,
+		InsecureSkipVerify: false,
+		RootCAs:            rootCAs,
+	}
+
+	client := &http.Client{
+		Transport: baseTransport,
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return fmt.Errorf("creating request: %w", err)
@@ -667,7 +686,7 @@ func waitURL(ctx context.Context, url string) error {
 		case <-ctx.Done():
 			return fmt.Errorf("waiting for URL: %w", ctx.Err())
 		case <-ticker.C:
-			resp, err := http.DefaultClient.Do(req)
+			resp, err := client.Do(req)
 			if err != nil {
 				slog.Debug("Waiting for URL", "url", url, "err", err)
 
