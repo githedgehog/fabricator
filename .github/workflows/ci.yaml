@@ -125,6 +125,7 @@ jobs:
           HHFAB_REG_REPO: 127.0.0.1:30000
         run: |
           bin/hhfab init -v --dev --import-host-upstream
+          bin/hhfab versions
           bin/hhfab build -v ${{ matrix.buildmode }}
           ls -lah result
 
@@ -245,13 +246,24 @@ jobs:
           HHFAB_VLAB_COLLECT: true
         run: |
           bin/hhfab init -v --dev -m ${{ matrix.fabricmode }} --include-onie=${{ matrix.includeonie }}
+          bin/hhfab versions
           bin/hhfab vlab gen -v
-          bin/hhfab vlab up -v --ready inspect --ready setup-vpcs --ready test-connectivity --ready exit --mode=${{ matrix.buildmode }}
+          bin/hhfab vlab up -v --ready setup-vpcs --ready inspect --ready test-connectivity --ready exit --mode=${{ matrix.buildmode }}
 
       - name: Dump local registry logs
         if: ${{ always() }}
         run: |
           cat .zot/log
+
+      - name: Collect VM Serial Logs
+        if: ${{ always() }}
+        run: |
+          mkdir -p show-tech-output
+          for vm in ./vlab/vms/*; do
+            if [ -f "$vm/serial.log" ]; then
+              cp "$vm/serial.log" "show-tech-output/$(basename $vm)-serial.log"
+            fi
+          done
 
       - name: Upload show-tech artifacts
         uses: actions/upload-artifact@v4
@@ -314,8 +326,19 @@ jobs:
           curl -fsSL https://i.hhdev.io/hhfab | USE_SUDO=false INSTALL_DIR=./old VERSION="${{ matrix.fromversion }}" bash
 
           old/hhfab init -v --dev -m ${{ matrix.fabricmode }} --include-onie=true
+          old/hhfab versions
           old/hhfab vlab gen -v
           old/hhfab vlab up -v --ready setup-vpcs --ready test-connectivity --ready exit ${{ matrix.fromflags }}
+
+      - name: Collect VM Serial Logs
+        if: ${{ always() }}
+        run: |
+          mkdir -p show-tech-output
+          for vm in ./vlab/vms/*; do
+            if [ -f "$vm/serial.log" ]; then
+              cp "$vm/serial.log" "show-tech-output/$(basename $vm)-serial.log"
+            fi
+          done
 
       - name: Upload show-tech artifacts
         uses: actions/upload-artifact@v4
@@ -333,7 +356,17 @@ jobs:
           HHFAB_REG_REPO: 127.0.0.1:30000
           HHFAB_VLAB_COLLECT: true
         run: |
-          bin/hhfab vlab up -v --ready inspect --ready setup-vpcs --ready test-connectivity --ready exit --upgrade
+          bin/hhfab vlab up -v --ready setup-vpcs --ready inspect --ready test-connectivity --ready exit --upgrade
+
+      - name: Collect VM Serial Logs
+        if: ${{ always() }}
+        run: |
+          mkdir -p show-tech-output
+          for vm in ./vlab/vms/*; do
+            if [ -f "$vm/serial.log" ]; then
+              cp "$vm/serial.log" "show-tech-output/$(basename $vm)-serial.log"
+            fi
+          done
 
       - name: Upload show-tech artifacts
         uses: actions/upload-artifact@v4
@@ -422,7 +455,18 @@ jobs:
         run: |
           source "./lab-ci/envs/$KUBE_NODE/source.sh"
           bin/hhfab init -v --dev --include-onie=${{ matrix.includeonie }} -w "./lab-ci/envs/$KUBE_NODE/wiring.yaml"
+          bin/hhfab versions
           bin/hhfab vlab up -v --ready switch-reinstall --ready inspect --ready setup-vpcs --ready test-connectivity --ready exit --mode=${{ matrix.buildmode }}
+
+      - name: Collect VM Serial Logs
+        if: ${{ always() }}
+        run: |
+          mkdir -p show-tech-output
+          for vm in ./vlab/vms/*; do
+            if [ -f "$vm/serial.log" ]; then
+              cp "$vm/serial.log" "show-tech-output/$(basename $vm)-serial.log"
+            fi
+          done
 
       - name: Upload show-tech artifacts
         uses: actions/upload-artifact@v4

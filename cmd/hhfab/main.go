@@ -1019,6 +1019,7 @@ func Run(ctx context.Context) error {
 										PDUUsername:    c.String("pdu-username"),
 										PDUPassword:    c.String("pdu-password"),
 										WaitReady:      c.Bool("wait-ready"),
+										Verbose:        c.Bool("verbose"),
 									}
 
 									if err := hhfab.DoSwitchReinstall(ctx, workDir, cacheDir, opts); err != nil {
