@@ -10,10 +10,16 @@ readonly MAX_IP_ATTEMPTS=300
 readonly VLAN_MIN=1
 readonly VLAN_MAX=4094
 
+LOG_FILE="/var/log/hhnet.log"
+sudo touch "$LOG_FILE"
+sudo chmod 666 "$LOG_FILE"
+
+# Redirect stderr to log file
+exec 2>>"$LOG_FILE"
+
 if [[ "${DEBUG:-}" == "1" ]]; then
-    exec 3>&2
-    exec 2>/tmp/hhnet.log
-    set -x
+    exec 3>&2  # Save stderr for debugging (FD 3)
+    set -x     # Enable debug mode (command tracing)
 fi
 
 function log() {
