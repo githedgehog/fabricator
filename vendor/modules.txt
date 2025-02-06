@@ -1569,7 +1569,7 @@ github.com/zealic/xignore
 # go.etcd.io/bbolt v1.3.11
 ## explicit; go 1.22
 go.etcd.io/bbolt
-# go.githedgehog.com/fabric v0.61.1
+# go.githedgehog.com/fabric v0.62.0
 ## explicit; go 1.23.0
 go.githedgehog.com/fabric/api/agent/v1beta1
 go.githedgehog.com/fabric/api/dhcp/v1beta1
