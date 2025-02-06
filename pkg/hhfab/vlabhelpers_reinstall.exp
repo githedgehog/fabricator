@@ -7,6 +7,7 @@ set timeout -1
 
 # Initialize variables
 set WAIT_READY 0
+set VERBOSE 0
 set remaining_args {}
 
 # Parse arguments
@@ -16,6 +17,9 @@ for {set i 0} {$i < [llength $argv]} {incr i} {
         "--wait-ready" {
             set WAIT_READY 1
         }
+        "-v" {
+            set VERBOSE 1
+        }
         default {
             lappend remaining_args $arg
         }
@@ -24,7 +28,6 @@ for {set i 0} {$i < [llength $argv]} {incr i} {
 
 # Reassign the remaining arguments
 set argv $remaining_args
-
 if {[llength $argv] == 1} {
 	puts "No credentials are provided, assume external power reset"
 	lassign $argv SW_NAME
@@ -34,7 +37,7 @@ if {[llength $argv] == 1} {
 	lassign $argv SW_NAME USER PASSWORD
 	set POWER_RESET 0
 } else {
-	puts "Usage: $argv0 SW_NAME \[USER\] \[PASSWORD\] \[--wait-ready\]"
+	puts "Usage: $argv0 SW_NAME \[USER\] \[PASSWORD\] \[--wait-ready\] \[-v\]"
 	exit 1
 }
 
@@ -96,7 +99,11 @@ if {!([file exists $HHFAB] && [file executable $HHFAB])} {
 
 # connect to the serial console of the switch with hhfab
 puts "connecting to serial of $SW_NAME via hhfab serial..."
-set spawn_result [catch {spawn $HHFAB vlab serial -n $SW_NAME} spawn_error]
+set cmd "$HHFAB vlab serial -n $SW_NAME"
+if {$VERBOSE} {
+    append cmd " -v"
+}
+set spawn_result [catch {spawn {*}[split $cmd]} spawn_error]
 if {$spawn_result != 0} {
 	log_message "ERR" $SW_NAME "$HHFAB Failed with: $spawn_error"
 	exit $ERROR_HHFAB
