@@ -22,6 +22,7 @@ import (
 
 	"github.com/melbahja/goph"
 	"github.com/pkg/sftp"
+	"go.githedgehog.com/fabric/pkg/util/kubeutil"
 	"go.githedgehog.com/fabric/pkg/util/logutil"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/artificer"
@@ -686,16 +687,13 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 
 	slog.Debug("Waiting for ssh", "vm", vm.Name, "type", vm.Type)
 
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
-
 	var client *goph.Client
 	ready := false
 	for !ready {
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("cancelled: %w", ctx.Err())
-		case <-ticker.C:
+		case <-time.After(5 * time.Second):
 			client, err = goph.NewConn(&goph.Config{
 				User:     "core",
 				Addr:     "127.0.0.1",
@@ -825,9 +823,6 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 			ctx, cancel := context.WithCancel(ctx)
 			defer cancel()
 
-			ticker := time.NewTicker(5 * time.Second)
-			defer ticker.Stop()
-
 			if slog.Default().Enabled(ctx, slog.LevelInfo) {
 				go func() {
 					if err := sshExec(ctx, vm, client, "journalctl -n 100 -fu fabric-install.service", "fabric-install", slog.Info); err != nil {
@@ -841,7 +836,7 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 				select {
 				case <-ctx.Done():
 					return fmt.Errorf("cancelled: %w", ctx.Err())
-				case <-ticker.C:
+				case <-time.After(5 * time.Second):
 					marker, err := sshReadMarker(sftp)
 					if err != nil {
 						if errors.Is(err, os.ErrNotExist) {
@@ -860,8 +855,47 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 			}
 		}
 
-		if err := client.Download(k3s.KubeConfigPath, filepath.Join(c.WorkDir, VLABDir, VLABKubeConfig)); err != nil {
+		slog.Debug("Control node install marker is complete", "vm", vm.Name, "type", vm.Type)
+
+		kubeconfig := filepath.Join(c.WorkDir, VLABDir, VLABKubeConfig)
+		if err := client.Download(k3s.KubeConfigPath, kubeconfig); err != nil {
 			return fmt.Errorf("downloading kubeconfig: %w", err)
+		}
+		slog.Debug("Control node kubeconfig is downloaded", "path", kubeconfig, "vm", vm.Name, "type", vm.Type)
+
+		slog.Info("Waiting for K8s API to be ready", "vm", vm.Name, "type", vm.Type)
+		api := false
+		var apiErr error
+		for !api {
+			if apiErr != nil {
+				select {
+				case <-ctx.Done():
+					slog.Error("Failed to wait for k8s api", "vm", vm.Name, "type", vm.Type, "err", apiErr)
+
+					return fmt.Errorf("cancelled while waiting for k8s api: %w", ctx.Err())
+				case <-time.After(5 * time.Second):
+				}
+			}
+
+			kube, err := kubeutil.NewClient(ctx, kubeconfig, fabapi.SchemeBuilder)
+			if err != nil {
+				apiErr = err
+				slog.Debug("Failed to create kube client", "err", err)
+
+				continue
+			}
+
+			if err := kube.List(ctx, &fabapi.FabricatorList{}); err != nil {
+				apiErr = err
+				slog.Debug("Failed to list fabricator configs", "vm", vm.Name, "type", vm.Type, "err", err)
+
+				continue
+			}
+
+			apiErr = nil
+			api = true
+
+			slog.Debug("K8s API is ready", "vm", vm.Name, "type", vm.Type)
 		}
 
 		slog.Info("Control node is ready", "vm", vm.Name, "type", vm.Type)
