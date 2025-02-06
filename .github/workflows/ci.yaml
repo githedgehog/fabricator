@@ -11,6 +11,9 @@ on:
       - release/*
     tags:
       - "v*"
+    paths-ignore:
+      - 'docs/**'
+      - 'README.md'
   pull_request:
   schedule:
     - cron: "0 10 * * *" # ~2am PST
@@ -473,7 +476,6 @@ jobs:
       - build-multi
       - vlab
       - vlab-upgrade
-      - hlab
 
     steps:
       - name: Checkout repository
@@ -527,7 +529,6 @@ jobs:
       - build-multi
       - vlab
       - vlab-upgrade
-      - hlab
 
     steps:
       - name: Checkout repository

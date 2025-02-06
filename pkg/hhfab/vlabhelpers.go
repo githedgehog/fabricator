@@ -378,6 +378,8 @@ func (c *Config) VLABSwitchReinstall(ctx context.Context, opts SwitchReinstallOp
 		}); err != nil {
 			return fmt.Errorf("executing hard-reset on switches: %w", err)
 		}
+
+		slog.Info("Switches power cycled")
 	}
 
 	wg.Wait()
@@ -571,7 +573,7 @@ func (c *Config) VLABSwitchPower(ctx context.Context, opts SwitchPowerOpts) erro
 				return fmt.Errorf("extracting PDU IP from URL %s: %w", url, err)
 			}
 
-			slog.Debug("Calling PDU API", "switch", sw.Name, "psu", psuName, "action", opts.Action)
+			slog.Info("Calling PDU API", "switch", sw.Name, "psu", psuName, "pduIP", pduIP, "outletID", outletID, "action", opts.Action)
 			if err := pdu.ControlOutlet(ctx, pduIP, opts.PDUUsername, opts.PDUPassword, outletID, opts.Action); err != nil {
 				return fmt.Errorf("failed to power %s switch %s %s: %w", opts.Action, sw.Name, psuName, err)
 			}
