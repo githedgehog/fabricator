@@ -138,6 +138,7 @@ test path="./...": gen _envtest _gcov2lcov
 oci := ""
 skopeo_dest_insecure := if oci == "http" { "--dest-tls-verify=false" } else { "" }
 oras_insecure := if oci == "http" { "--plain-http" } else { "" }
+helm_insecure_push := if oci == "http" { "--plain-http" } else { "" }
 
 _docker-build bin: build
   cp bin/{{bin}} config/docker/{{bin}}/
@@ -153,7 +154,7 @@ _helm-build name: _helm
   {{helm}} lint config/helm/{{name}}-{{version}}.tgz
 
 _helm-push name: _helm
-  {{helm}} push config/helm/{{name}}-{{version}}.tgz oci://{{oci_repo}}/{{oci_prefix}}/charts
+  {{helm}} push {{helm_insecure_push}} config/helm/{{name}}-{{version}}.tgz oci://{{oci_repo}}/{{oci_prefix}}/charts
 
 _kube-build name: (_docker-build name) (_helm-build name)
 
