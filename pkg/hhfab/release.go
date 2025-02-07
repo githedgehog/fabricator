@@ -27,7 +27,9 @@ var errTestRun = errors.New("test run error")
 var errNoExternals = errors.New("no external peers found")
 var errNoMclags = errors.New("no MCLAG connections found")
 var errNoEslags = errors.New("no ESLAG connections found")
+var errNoBundled = errors.New("no bundled connections found")
 var errNoUnbundled = errors.New("no unbundled connections found")
+var errNotEnoughSpines = errors.New("not enough spines found")
 
 type VPCPeeringTestCtx struct {
 	workDir          string
@@ -186,7 +188,6 @@ func changeAgentStatus(hhfabBin, workDir, swName string, up bool) error {
 	return execNodeCmd(hhfabBin, workDir, swName, fmt.Sprintf("sudo systemctl %s hedgehog-agent.service", map[bool]string{true: "start", false: "stop"}[up]))
 }
 
-// NOTE: shutting down the interface stops the agent, setting it back up restarts the agent
 func changeSwitchPortStatus(hhfabBin, workDir, deviceName, nosPortName string, up bool) error {
 	slog.Debug("Changing switch port status", "device", deviceName, "port", nosPortName, "up", up)
 	if up {
@@ -199,13 +200,7 @@ func changeSwitchPortStatus(hhfabBin, workDir, deviceName, nosPortName string, u
 		); err != nil {
 			return err
 		}
-		if err := changeAgentStatus(hhfabBin, workDir, deviceName, true); err != nil {
-			return err
-		}
 	} else {
-		if err := changeAgentStatus(hhfabBin, workDir, deviceName, false); err != nil {
-			return err
-		}
 		if err := execConfigCmd(
 			hhfabBin,
 			workDir,
@@ -213,8 +208,6 @@ func changeSwitchPortStatus(hhfabBin, workDir, deviceName, nosPortName string, u
 			fmt.Sprintf("interface %s", nosPortName),
 			"shutdown",
 		); err != nil {
-			_ = changeAgentStatus(hhfabBin, workDir, deviceName, true)
-
 			return err
 		}
 	}
@@ -384,6 +377,36 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsSergeisSpecialTest(ctx context.Cont
 	return false, nil
 }
 
+// disable agent, shutdown port, test connectivity, enable agent, set port up
+func shutDownPortAndTest(ctx context.Context, testCtx *VPCPeeringTestCtx, deviceName string, nosPortName string) error {
+	// disable agent
+	if err := changeAgentStatus(testCtx.hhfabBin, testCtx.workDir, deviceName, false); err != nil {
+		return errors.Wrap(err, "failed to disable agent")
+	}
+	defer func() {
+		if err := changeAgentStatus(testCtx.hhfabBin, testCtx.workDir, deviceName, true); err != nil {
+			slog.Error("Failed to enable agent", "error", err)
+		}
+	}()
+
+	// set port down
+	if err := changeSwitchPortStatus(testCtx.hhfabBin, testCtx.workDir, deviceName, nosPortName, false); err != nil {
+		return errors.Wrap(err, "failed to set port down")
+	}
+	defer func() {
+		if err := changeSwitchPortStatus(testCtx.hhfabBin, testCtx.workDir, deviceName, nosPortName, true); err != nil {
+			slog.Error("Failed to set port up", "error", err)
+		}
+	}()
+
+	// test connectivity
+	if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, TestConnectivityOpts{WaitSwitchesReady: false}); err != nil {
+		return errors.Wrap(err, "test connectivity failed")
+	}
+
+	return nil
+}
+
 func (testCtx *VPCPeeringTestCtx) mclagTest(ctx context.Context) (bool, error) {
 	// list connections in the fabric, filter by MC-LAG connection type
 	conns := &wiringapi.ConnectionList{}
@@ -420,22 +443,10 @@ func (testCtx *VPCPeeringTestCtx) mclagTest(ctx context.Context) (bool, error) {
 			if !ok {
 				return false, errors.Errorf("Port %s not found in switch profile %s for switch %s", switchPort.LocalPortName(), profile.Name, deviceName)
 			}
-			// set port down (after disabling agent)
-			if err := changeSwitchPortStatus(testCtx.hhfabBin, testCtx.workDir, deviceName, nosPortName, false); err != nil {
-				return false, errors.Wrap(err, "failed to set port down")
-			}
-			// test connectivity - TODO maybe just individual pings from the servers
-			if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, TestConnectivityOpts{WaitSwitchesReady: false}); err != nil {
-				slog.Error("Connectivity test failed, setting port back up before failing test", "error", err)
-				_ = changeSwitchPortStatus(testCtx.hhfabBin, testCtx.workDir, deviceName, nosPortName, true)
-
-				return false, errors.Wrap(err, "test connectivity failed")
+			if err := shutDownPortAndTest(ctx, testCtx, deviceName, nosPortName); err != nil {
+				return false, err
 			}
 			// TODO: set other link down too and make sure that connectivity is lost
-			// set port up (and then re-enable agent)
-			if err := changeSwitchPortStatus(testCtx.hhfabBin, testCtx.workDir, deviceName, nosPortName, true); err != nil {
-				return false, errors.Wrap(err, "failed to set port up")
-			}
 		}
 	}
 
@@ -478,23 +489,132 @@ func (testCtx *VPCPeeringTestCtx) eslagTest(ctx context.Context) (bool, error) {
 			if !ok {
 				return false, errors.Errorf("Port %s not found in switch profile %s for switch %s", switchPort.LocalPortName(), profile.Name, deviceName)
 			}
-			// set port down (after disabling agent)
-			if err := changeSwitchPortStatus(testCtx.hhfabBin, testCtx.workDir, deviceName, nosPortName, false); err != nil {
-				return false, errors.Wrap(err, "failed to set port down")
-			}
-			// test connectivity - TODO maybe just individual pings from the servers
-			if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, TestConnectivityOpts{WaitSwitchesReady: false}); err != nil {
-				slog.Error("Connectivity test failed, setting port back up before failing test", "error", err)
-				_ = changeSwitchPortStatus(testCtx.hhfabBin, testCtx.workDir, deviceName, nosPortName, true)
-
-				return false, errors.Wrap(err, "test connectivity failed")
+			if err := shutDownPortAndTest(ctx, testCtx, deviceName, nosPortName); err != nil {
+				return false, err
 			}
 			// TODO: set other link down too and make sure that connectivity is lost
-			// set port up (and then re-enable agent)
-			if err := changeSwitchPortStatus(testCtx.hhfabBin, testCtx.workDir, deviceName, nosPortName, true); err != nil {
-				return false, errors.Wrap(err, "failed to set port up")
+		}
+	}
+
+	return false, nil
+}
+
+func (testCtx *VPCPeeringTestCtx) bundledFailoverTest(ctx context.Context) (bool, error) {
+	// list connections in the fabric, filter by bundled connection type
+	conns := &wiringapi.ConnectionList{}
+	if err := testCtx.kube.List(ctx, conns, client.MatchingLabels{wiringapi.LabelConnectionType: wiringapi.ConnectionTypeBundled}); err != nil {
+		return false, errors.Wrap(err, "kube.List")
+	}
+	if len(conns.Items) == 0 {
+		slog.Info("No bundled connections found, skipping test")
+
+		return true, errNoBundled
+	}
+	for _, conn := range conns.Items {
+		slog.Debug("Testing Bundled connection", "connection", conn.Name)
+		if len(conn.Spec.Bundled.Links) < 2 {
+			return false, errors.Errorf("MCLAG connection %s has %d links, expected at least 2", conn.Name, len(conn.Spec.Bundled.Links))
+		}
+		for _, link := range conn.Spec.Bundled.Links {
+			switchPort := link.Switch
+			deviceName := switchPort.DeviceName()
+			// get switch profile to find the port name in sonic-cli
+			sw := &wiringapi.Switch{}
+			if err := testCtx.kube.Get(ctx, client.ObjectKey{Namespace: "default", Name: switchPort.DeviceName()}, sw); err != nil {
+				return false, errors.Wrap(err, "kube.Get")
+			}
+			profile := &wiringapi.SwitchProfile{}
+			if err := testCtx.kube.Get(ctx, client.ObjectKey{Namespace: "default", Name: sw.Spec.Profile}, profile); err != nil {
+				return false, errors.Wrap(err, "kube.Get")
+			}
+			portMap, err := profile.Spec.GetAPI2NOSPortsFor(&sw.Spec)
+			if err != nil {
+				return false, errors.Wrap(err, "GetAPI2NOSPortsFor")
+			}
+			nosPortName, ok := portMap[switchPort.LocalPortName()]
+			if !ok {
+				return false, errors.Errorf("Port %s not found in switch profile %s for switch %s", switchPort.LocalPortName(), profile.Name, deviceName)
+			}
+			if err := shutDownPortAndTest(ctx, testCtx, deviceName, nosPortName); err != nil {
+				return false, err
+			}
+			// TODO: set other link down too and make sure that connectivity is lost
+		}
+	}
+
+	return false, nil
+}
+
+func (testCtx *VPCPeeringTestCtx) spineFailoverTest(ctx context.Context) (bool, error) {
+	// list spines. FIXME: figure a way to filter this directly, if possible
+	switches := &wiringapi.SwitchList{}
+	if err := testCtx.kube.List(ctx, switches); err != nil {
+		return false, errors.Wrap(err, "kube.List")
+	}
+	spines := make([]wiringapi.Switch, 0)
+	for _, sw := range switches.Items {
+		if sw.Spec.Role == wiringapi.SwitchRoleSpine {
+			spines = append(spines, sw)
+		}
+	}
+
+	if len(spines) < 2 {
+		slog.Info("Not enough spines found, skipping test")
+
+		return true, errNotEnoughSpines
+	}
+
+	for i, spine := range spines {
+		if i == 0 {
+			continue
+		}
+		slog.Debug("Disabling links to spine", "spine", spine.Name)
+		// get switch profile to find the port name in sonic-cli
+		profile := &wiringapi.SwitchProfile{}
+		if err := testCtx.kube.Get(ctx, client.ObjectKey{Namespace: "default", Name: spine.Spec.Profile}, profile); err != nil {
+			return false, errors.Wrap(err, "kube.Get")
+		}
+		portMap, err := profile.Spec.GetAPI2NOSPortsFor(&spine.Spec)
+		if err != nil {
+			return false, errors.Wrap(err, "GetAPI2NOSPortsFor")
+		}
+		// disable agent on spine
+		if err := changeAgentStatus(testCtx.hhfabBin, testCtx.workDir, spine.Name, false); err != nil {
+			return false, errors.Wrap(err, "failed to disable agent")
+		}
+		defer func() {
+			slog.Debug("Re-enabling agent on spine", "spine", spine.Name)
+			if err := changeAgentStatus(testCtx.hhfabBin, testCtx.workDir, spine.Name, true); err != nil {
+				slog.Error("Failed to enable agent", "error", err)
+			}
+		}()
+
+		// look for connections that have this spine as a switch
+		conns := &wiringapi.ConnectionList{}
+		if err := testCtx.kube.List(ctx, conns, client.MatchingLabels{wiringapi.ListLabelSwitch(spine.Name): "true", wiringapi.LabelConnectionType: wiringapi.ConnectionTypeFabric}); err != nil {
+			return false, errors.Wrap(err, "kube.List")
+		}
+		slog.Debug(fmt.Sprintf("Found %d connections to spine %s", len(conns.Items), spine.Name))
+		for _, conn := range conns.Items {
+			for _, link := range conn.Spec.Fabric.Links {
+				spinePort := link.Spine.LocalPortName()
+				nosPortName, ok := portMap[spinePort]
+				if !ok {
+					return false, errors.Errorf("Port %s not found in switch profile %s for switch %s", spinePort, profile.Name, spine.Name)
+				}
+				if err := changeSwitchPortStatus(testCtx.hhfabBin, testCtx.workDir, spine.Name, nosPortName, false); err != nil {
+					return false, errors.Wrap(err, "failed to set port down")
+				}
+				// XXX: do we need to set ports back up? restarting the agent should eventually take care of that
 			}
 		}
+	}
+
+	// wait a bit to make sure that the fabric has converged; can't rely on agents as we disabled them
+	slog.Debug("Waiting 30 seconds for fabric to converge")
+	time.Sleep(30 * time.Second)
+	if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, TestConnectivityOpts{WaitSwitchesReady: false}); err != nil {
+		return false, errors.Wrap(err, "test connectivity failed")
 	}
 
 	return false, nil
@@ -1184,12 +1304,20 @@ func makeVpcPeeringsSingleVPCSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 			F:    testCtx.staticExternalTest,
 		},
 		{
-			Name: "MCLAG",
+			Name: "MCLAG Failover",
 			F:    testCtx.mclagTest,
 		},
 		{
-			Name: "ESLAG",
+			Name: "ESLAG Failover",
 			F:    testCtx.eslagTest,
+		},
+		{
+			Name: "Bundled Failover",
+			F:    testCtx.bundledFailoverTest,
+		},
+		{
+			Name: "Spine Failover",
+			F:    testCtx.spineFailoverTest,
 		},
 	}
 	suite.Tests = len(suite.TestCases)
