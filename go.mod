@@ -39,7 +39,7 @@ require (
 	github.com/vishvananda/netlink v1.3.0
 	go.githedgehog.com/fabric v0.61.1
 	golang.org/x/crypto v0.32.0
-	golang.org/x/sync v0.10.0
+	golang.org/x/sync v0.11.0
 	golang.org/x/term v0.29.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	k8s.io/api v0.31.3
