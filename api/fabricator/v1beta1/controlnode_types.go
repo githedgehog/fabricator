@@ -68,6 +68,9 @@ func init() {
 	SchemeBuilder.Register(&ControlNode{}, &ControlNodeList{})
 }
 
+func (c *ControlNode) Default() {
+}
+
 func (c *ControlNode) Validate(_ context.Context, fabCfg *FabConfig, allowNotHydrated bool) error {
 	if fabCfg == nil {
 		return fmt.Errorf("fabricator config must be non-nil") //nolint:goerr113

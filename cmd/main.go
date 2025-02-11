@@ -111,18 +111,18 @@ func run() error {
 		return fmt.Errorf("creating manager: %w", err)
 	}
 
-	if err := (&controller.FabricatorReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme()}).SetupWithManager(mgr); err != nil {
+	if err := controller.SetupFabricatorReconcilerWith(mgr); err != nil {
 		return fmt.Errorf("setting up fabricator controller: %w", err)
 	}
-	if err := (&fabapi.Fabricator{}).SetupWebhookWithManager(mgr); err != nil {
+	if err := controller.SetupFabricatorWebhookWith(mgr); err != nil {
 		return fmt.Errorf("setting up fabricator webhook: %w", err)
 	}
 
-	if err := (&fabapi.ControlNode{}).SetupWebhookWithManager(mgr); err != nil {
+	if err := controller.SetupControlNodeWebhookWith(mgr); err != nil {
 		return fmt.Errorf("setting up controlnode webhook: %w", err)
 	}
 
-	if err := (&fabapi.Node{}).SetupWebhookWithManager(mgr); err != nil {
+	if err := controller.SetupNodeWebhookWith(mgr); err != nil {
 		return fmt.Errorf("setting up node webhook: %w", err)
 	}
 
