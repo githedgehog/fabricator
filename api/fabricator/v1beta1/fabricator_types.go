@@ -113,6 +113,7 @@ type FabConfig struct {
 	Control  ControlConfig  `json:"control,omitempty"`
 	Registry RegistryConfig `json:"registry,omitempty"`
 	Fabric   FabricConfig   `json:"fabric,omitempty"`
+	Gateway  GatewayConfig  `json:"gateway,omitempty"`
 }
 
 type ControlConfig struct {
@@ -197,10 +198,15 @@ type SwitchUser struct {
 	AuthorizedKeys []string `json:"authorizedKeys,omitempty"`
 }
 
+type GatewayConfig struct {
+	ASN uint32 `json:"asn,omitempty"`
+}
+
 type Versions struct {
 	Platform   PlatformVersions   `json:"platform,omitempty"`
 	Fabricator FabricatorVersions `json:"fabricator,omitempty"`
 	Fabric     FabricVersions     `json:"fabric,omitempty"`
+	Gateway    GatewayVersions    `json:"gateway,omitempty"`
 	VLAB       VLABVersions       `json:"vlab,omitempty"`
 }
 
@@ -235,6 +241,8 @@ type FabricVersions struct {
 	NOS        map[string]meta.Version `json:"nos,omitempty"`
 	ONIE       map[string]meta.Version `json:"onie,omitempty"`
 }
+
+type GatewayVersions struct{}
 
 type VLABVersions struct {
 	ONIE    meta.Version `json:"onie,omitempty"`
