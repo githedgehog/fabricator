@@ -4,6 +4,8 @@
 package v1beta1
 
 import (
+	"context"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -38,4 +40,11 @@ type NodeList struct {
 
 func init() {
 	SchemeBuilder.Register(&Node{}, &NodeList{})
+}
+
+func (n *Node) Default() {
+}
+
+func (n *Node) Validate(_ context.Context) error {
+	return nil
 }

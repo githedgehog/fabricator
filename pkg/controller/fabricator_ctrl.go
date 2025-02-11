@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"time"
 
-	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -26,23 +25,6 @@ import (
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
-
-// FabricatorReconciler reconciles a Fabricator object
-type FabricatorReconciler struct {
-	client.Client
-	Scheme *runtime.Scheme
-}
-
-func (r *FabricatorReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	if err := ctrl.NewControllerManagedBy(mgr).
-		Named("Fabricator").
-		For(&fabapi.Fabricator{}).
-		Complete(r); err != nil {
-		return fmt.Errorf("setting up controller: %w", err)
-	}
-
-	return nil
-}
 
 // +kubebuilder:rbac:groups=fabricator.githedgehog.com,resources=fabricators,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=fabricator.githedgehog.com,resources=fabricators/status,verbs=get;update;patch
@@ -63,6 +45,25 @@ func (r *FabricatorReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 // +kubebuilder:rbac:groups=cert-manager.io,resources=certificates,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=cert-manager.io,resources=certificates/status,verbs=get
+
+type FabricatorReconciler struct {
+	client.Client
+}
+
+func SetupFabricatorReconcilerWith(mgr ctrl.Manager) error {
+	r := &FabricatorReconciler{
+		Client: mgr.GetClient(),
+	}
+
+	if err := ctrl.NewControllerManagedBy(mgr).
+		Named("Fabricator").
+		For(&fabapi.Fabricator{}).
+		Complete(r); err != nil {
+		return fmt.Errorf("setting up controller: %w", err)
+	}
+
+	return nil
+}
 
 func (r *FabricatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	l := log.FromContext(ctx)
