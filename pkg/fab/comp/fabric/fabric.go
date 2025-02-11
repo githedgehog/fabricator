@@ -249,6 +249,7 @@ func GetFabricConfig(f fabapi.Fabricator) (*meta.FabricConfig, error) {
 		DefaultMaxPathsEBGP:      64,
 		AllowExtraSwitchProfiles: false,
 		MCLAGSessionSubnet:       string(f.Spec.Config.Fabric.MCLAGSessionSubnet),
+		GatewayASN:               f.Spec.Config.Gateway.ASN,
 	}, nil
 }
 
