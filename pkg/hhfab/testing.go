@@ -1586,5 +1586,11 @@ type ReleaseTestOpts struct {
 }
 
 func (c *Config) ReleaseTest(ctx context.Context, opts ReleaseTestOpts) error {
+	self, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("getting executable path: %w", err)
+	}
+	opts.HhfabBin = self
+
 	return RunReleaseTestSuites(ctx, c.WorkDir, c.CacheDir, opts)
 }
