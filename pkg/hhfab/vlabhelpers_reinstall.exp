@@ -26,39 +26,26 @@ for {set i 0} {$i < [llength $argv]} {incr i} {
     }
 }
 
+# Helper function to send log output to stderr
+proc log_message {loglevel msg} {
+    puts stderr "$loglevel: $msg"
+}
+
 # Reassign the remaining arguments
 set argv $remaining_args
 if {[llength $argv] == 1} {
 	puts "No credentials are provided, assume external power reset"
+	log_message "EXP-DBG" "No credentials provided, assuming external power reset"
 	lassign $argv SW_NAME
 	set POWER_RESET 1
 } elseif {[llength $argv] == 3} {
 	puts "Credentials are provided, will attempt reboot"
+	log_message "EXP-DBG" "Credentials provided, will attempt reboot"
 	lassign $argv SW_NAME USER PASSWORD
 	set POWER_RESET 0
 } else {
 	puts "Usage: $argv0 SW_NAME \[USER\] \[PASSWORD\] \[--wait-ready\] \[-v\]"
 	exit 1
-}
-
-# Define ANSI escape codes for colors
-set GREY "\033\[38;5;242m"
-set INF "\033\[0;92m"
-set ERR "\033\[38;5;196m"
-set RESET "\033\[0m"
-set LOG_BG "\033\[49m"
-
-# Helper function to send colorized output to stderr
-proc log_message {loglevel SW_NAME msg} {
-	set current_time [clock format [clock seconds] -format "%H:%M:%S"]
-
-	if {$loglevel == "INF"} {
-		puts stderr "$::LOG_BG$::GREY$current_time$::RESET $::INF$loglevel$::RESET $SW_NAME: $msg"
-	} elseif {$loglevel == "ERR"} {
-		puts stderr "$::LOG_BG$::GREY$current_time$::RESET $::ERR$loglevel$::RESET $SW_NAME: $msg"
-	} else {
-		puts stderr "$::LOG_BG$::GREY$current_time$::RESET $SW_NAME: $msg"
-	}
 }
 
 set KEY_UP   "\033\[A"
@@ -77,111 +64,125 @@ set ERROR_UNKNOWN 5
 # Check if HHFAB_BIN is set in the environment
 if {[info exists env(HHFAB_BIN)]} {
 	set HHFAB $env(HHFAB_BIN)
+	log_message "EXP-DBG" "Using HHFAB from environment: $HHFAB"
 } else {
 	# Fallback to look for hhfab in the local folder or in PATH
 	if {[file exists "./hhfab"]} {
 		set HHFAB "./hhfab"
+		log_message "EXP-DBG" "Using HHFAB from current directory"
 	} else {
 		catch {set HHFAB [exec which hhfab]} result
 		if {[string length $result] == 0} {
 			puts "Error: hhfab binary not found in HHFAB_BIN, current directory, or PATH."
+			log_message "EXP-ERR" "hhfab binary not found in HHFAB_BIN, current directory, or PATH"
 			exit 1
 		}
 		set HHFAB $result
+		log_message "EXP-DBG" "Using HHFAB from PATH: $HHFAB"
 	}
 }
 
 # Verify that HHFAB contains a valid path
 if {!([file exists $HHFAB] && [file executable $HHFAB])} {
-	log_message "ERR" $SW_NAME "HHFAB does not contain a valid path or is not executable."
+	log_message "EXP-ERR" "HHFAB does not contain a valid path or is not executable."
 	exit $ERROR_HHFAB
 }
 
 # connect to the serial console of the switch with hhfab
 puts "connecting to serial of $SW_NAME via hhfab serial..."
+log_message "EXP-DBG" "Connecting to serial of $SW_NAME via hhfab serial"
 set cmd "$HHFAB vlab serial -n $SW_NAME"
 if {$VERBOSE} {
     append cmd " -v"
 }
 set spawn_result [catch {spawn {*}[split $cmd]} spawn_error]
 if {$spawn_result != 0} {
-	log_message "ERR" $SW_NAME "$HHFAB Failed with: $spawn_error"
+	log_message "EXP-ERR" "$HHFAB Failed with: $spawn_error"
 	exit $ERROR_HHFAB
 }
 
 expect {
 	-ex "Type the hot key to suspend the connection: <CTRL>Z" {
+		log_message "EXP-DBG" "Connected via first console type"
 		send "\r"
 	}
 	-ex "Use Ctrl+] to escape, if no output try Enter, safe to use Ctrl+C/Ctrl+Z" {
+		log_message "EXP-DBG" "Connected via second console type"
 		send "\r"
 	}
 	-ex "The connection was unsuccessful" {
+		log_message "EXP-ERR" "Connection unsuccessful"
 		exit $ERROR_CONSOLE
 	}
 	timeout {
-		log_message "ERR" $SW_NAME "Connection to console timed out"
+		log_message "EXP-ERR" "Connection to console timed out"
 		exit $ERROR_CONSOLE
 	}
 	eof {
-		log_message "ERR" $SW_NAME "Connection to console failed"
+		log_message "EXP-ERR" "Connection to console failed"
 		exit $ERROR_CONSOLE
 	}
 	default {
-		log_message "ERR" $SW_NAME "Unexpected output: [expect_out(buffer)]"
+		log_message "EXP-ERR" "Unexpected output: [expect_out(buffer)]"
 		exit $ERROR_UNKNOWN
 	}
 }
 
 if { ! $POWER_RESET} {
+	log_message "EXP-DBG" "Starting login sequence"
 	set timeout 100
 	expect {
 	# handle wrong user/password
 	-ex "Login incorrect" {
+		log_message "EXP-ERR" "Login incorrect"
 		exit $ERROR_LOGIN
 	}
 	# handle user login if not already logged in
 	-re "$SW_NAME login:" {
+		log_message "EXP-DBG" "Sending username"
 		send "$USER\r"
 		exp_continue
 	}
 	-ex "Password:" {
+		log_message "EXP-DBG" "Sending password"
 		send "$PASSWORD\r"
 		exp_continue
 	}
 	# reboot in case we are at the prompt - eventually this will be done via PDU
 	-ex "admin@$SW_NAME:~$" {
-		log_message "INF" $SW_NAME "Rebooting..."
+		log_message "EXP-DBG" "At prompt, initiating reboot"
 		send "sudo reboot\r"
 	}
 	# same for rescue mode
 	-ex "ONIE:/ #" {
+		log_message "EXP-DBG" "At ONIE prompt, initiating reboot"
 		send "reboot\r"
 		sleep 5
 	}
 	timeout {
-		log_message "ERR" $SW_NAME "Login to NOS timed out"
+		log_message "EXP-ERR" "Login to NOS timed out"
 		exit $ERROR_LOGIN
 	}
 	eof {
-		log_message "ERR" $SW_NAME "Login to NOS failed (EOF)"
+		log_message "EXP-ERR" "Login to NOS failed (EOF)"
 		exit $ERROR_LOGIN
 	}
 	default {
-		log_message "ERR" $SW_NAME "Unexpected output: [expect_out(buffer)]"
+		log_message "EXP-ERR" "Unexpected output: [expect_out(buffer)]"
 		exit $ERROR_UNKNOWN
 	}
 	}
 }
 
 expect -timeout 300 -ex "GNU GRUB" {
-	log_message "INF" $SW_NAME "GRUB Menu detected"
+	log_message "EXP-DBG" "GRUB Menu detected"
 	# Select the ONIE option, and finally the Install OS option
 	sleep 1
 	send -- "$KEY_HOME"
 	set timeout 1
 	expect {
 		-ex $ONIE_HIGHLIGHT {
+			log_message "EXP-DBG" "ONIE option found"
 			set timeout -1
 			send "\r"
 			expect -ex "GNU GRUB"
@@ -190,68 +191,74 @@ expect -timeout 300 -ex "GNU GRUB" {
 			send "\r"
 			expect {
 				"ONIE: OS Install Mode ..." {
-					log_message "INF" $SW_NAME "Entering OS Install Mode..."
+					log_message "EXP-DBG" "Entering OS Install Mode"
 				}
 				eof {
-					log_message "ERR" $SW_NAME "Connection lost before confirming ONIE install mode"
+					log_message "EXP-ERR" "Connection lost before confirming ONIE install mode"
 					exit $ERROR_CONSOLE
 				}
 				timeout {
+					log_message "EXP-DBG" "Sending extra return"
 					send "\r"
 				}
 			}
 		}
 		timeout {
+			log_message "EXP-DBG" "ONIE not found, moving down menu"
 			send -- "$KEY_DOWN"
 			exp_continue
 		}
 		eof {
-			log_message "ERR" $SW_NAME "Connection lost during GRUB menu expect"
+			log_message "EXP-ERR" "Connection lost during GRUB menu expect"
 			exit $ERROR_CONSOLE
 		}
 	}
 } timeout {
-	log_message "ERR" $SW_NAME "Failed to reset. GRUB not detected."
+	log_message "EXP-ERR" "Failed to reset. GRUB not detected"
 	exit $ERROR_INSTALL
 }
 
 if {$WAIT_READY} {
+	log_message "EXP-DBG" "Starting wait-ready sequence"
 	set install_success 0
 	# Wait for confirmation of the Install OS option
+	log_message "EXP-DBG" "Service discovery started"
 	expect -timeout 60 -ex "Starting ONIE Service Discovery" {
 		# Wait for successful NOS installation
 		expect -timeout 300 -ex "ONIE: NOS install successful" {
-			log_message "INF" $SW_NAME "NOS installed successfully."
+			log_message "EXP-DBG" "NOS installed successfully"
 			set install_success 1
 		} timeout {
-			log_message "ERR" $SW_NAME "Failed to install NOS within 5 minutes from service discovery."
+			log_message "EXP-ERR" "Failed to install NOS within 5 minutes from service discovery"
 		}
 	} timeout {
-		log_message "ERR" $SW_NAME "Failed to select install mode."
+		log_message "EXP-ERR" "Failed to select install mode"
 	}
 
 	# Exit if install failed
 	if {$install_success == 0} {
+		log_message "EXP-ERR" "Installation failed"
 		exit $ERROR_INSTALL
 	}
 
 	# Wait for the login prompt
 	expect -timeout 300 -ex "sonic login:" {
-		log_message "INF" $SW_NAME "Sonic login prompt detected."
+		log_message "EXP-DBG" "Sonic login prompt detected"
+
 	} timeout {
-		log_message "ERR" $SW_NAME "Login prompt not detected within 5 minutes."
+		log_message "EXP-ERR" "Login prompt not detected within 5 minutes"
 		exit $ERROR_INSTALL
 	}
 
 	# Wait for the "System is ready" message
 	expect -timeout 300 -ex "System is ready" {
-		log_message "INF" $SW_NAME "System is ready message detected."
+		log_message "EXP-DBG" "System is ready message detected"
 		exit 0
 	} timeout {
-		log_message "ERR" $SW_NAME "System did not become ready within 5 minutes."
+		log_message "EXP-ERR" "System did not become ready within 5 minutes"
 		exit $ERROR_INSTALL
 	}
 } else {
-	# Skip readiness check
+	log_message "EXP-DBG" "Skipping readiness check"
 	exit 0
 }
