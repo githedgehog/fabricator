@@ -17,11 +17,6 @@ import (
 	"github.com/lmittmann/tint"
 	"github.com/mattn/go-isatty"
 	dhcpapi "go.githedgehog.com/fabric/api/dhcp/v1beta1"
-	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
-	fabricatorcontroller "go.githedgehog.com/fabricator/internal/controller/fabricator"
-	"go.githedgehog.com/fabricator/pkg/controller"
-	"go.githedgehog.com/fabricator/pkg/fab/comp"
-	"go.githedgehog.com/fabricator/pkg/version"
 	apiext "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -31,6 +26,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
+
+	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
+	"go.githedgehog.com/fabricator/pkg/controller"
+	"go.githedgehog.com/fabricator/pkg/fab/comp"
+	"go.githedgehog.com/fabricator/pkg/version"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -118,12 +118,14 @@ func run() error {
 		return fmt.Errorf("setting up fabricator webhook: %w", err)
 	}
 
-	if err := (&fabricatorcontroller.ControlNodeReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme()}).SetupWithManager(mgr); err != nil {
-		return fmt.Errorf("setting up controlnode controller: %w", err)
-	}
 	if err := (&fabapi.ControlNode{}).SetupWebhookWithManager(mgr); err != nil {
 		return fmt.Errorf("setting up controlnode webhook: %w", err)
 	}
+
+	if err := (&fabapi.Node{}).SetupWebhookWithManager(mgr); err != nil {
+		return fmt.Errorf("setting up node webhook: %w", err)
+	}
+
 	// +kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {

@@ -219,6 +219,12 @@ spec:
                       vtepSubnet:
                         type: string
                     type: object
+                  gateway:
+                    properties:
+                      asn:
+                        format: int32
+                        type: integer
+                    type: object
                   registry:
                     properties:
                       mode:
@@ -281,6 +287,8 @@ spec:
                             type: string
                           ctl:
                             type: string
+                        type: object
+                      gateway:
                         type: object
                       platform:
                         properties:
@@ -464,6 +472,8 @@ spec:
                         type: string
                       ctl:
                         type: string
+                    type: object
+                  gateway:
                     type: object
                   platform:
                     properties:

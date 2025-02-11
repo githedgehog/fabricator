@@ -11,6 +11,7 @@ Package v1beta1 contains API Schema definitions for the fabricator v1beta1 API g
 ### Resource Types
 - [ControlNode](#controlnode)
 - [Fabricator](#fabricator)
+- [Node](#node)
 
 
 
@@ -256,6 +257,7 @@ _Appears in:_
 | `control` _[ControlConfig](#controlconfig)_ |  |  |  |
 | `registry` _[RegistryConfig](#registryconfig)_ |  |  |  |
 | `fabric` _[FabricConfig](#fabricconfig)_ |  |  |  |
+| `gateway` _[GatewayConfig](#gatewayconfig)_ |  |  |  |
 
 
 #### FabOverrides
@@ -414,6 +416,80 @@ _Appears in:_
 | `ctl` _[Version](#version)_ |  |  |  |
 
 
+#### GatewayConfig
+
+
+
+
+
+
+
+_Appears in:_
+- [FabConfig](#fabconfig)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `asn` _integer_ |  |  |  |
+
+
+#### GatewayVersions
+
+
+
+
+
+
+
+_Appears in:_
+- [Versions](#versions)
+
+
+
+#### Node
+
+
+
+Node is the Schema for the nodes API.
+
+
+
+
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `apiVersion` _string_ | `fabricator.githedgehog.com/v1beta1` | | |
+| `kind` _string_ | `Node` | | |
+| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
+| `spec` _[NodeSpec](#nodespec)_ |  |  |  |
+| `status` _[NodeStatus](#nodestatus)_ |  |  |  |
+
+
+#### NodeSpec
+
+
+
+NodeSpec defines the desired state of Node.
+
+
+
+_Appears in:_
+- [Node](#node)
+
+
+
+#### NodeStatus
+
+
+
+NodeStatus defines the observed state of Node.
+
+
+
+_Appears in:_
+- [Node](#node)
+
+
+
 #### PlatformVersions
 
 
@@ -523,6 +599,7 @@ _Appears in:_
 | `platform` _[PlatformVersions](#platformversions)_ |  |  |  |
 | `fabricator` _[FabricatorVersions](#fabricatorversions)_ |  |  |  |
 | `fabric` _[FabricVersions](#fabricversions)_ |  |  |  |
+| `gateway` _[GatewayVersions](#gatewayversions)_ |  |  |  |
 | `vlab` _[VLABVersions](#vlabversions)_ |  |  |  |
 
 

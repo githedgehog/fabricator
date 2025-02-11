@@ -29,7 +29,7 @@ var DefaultConfig = fabapi.FabConfig{
 		ManagementDHCPEnd:   "172.30.7.254",
 		SpineASN:            65100, // TODO probably switch to 32-bit ASNs
 		LeafASNStart:        65101,
-		LeafASNEnd:          65534,             // only 433 leafs
+		LeafASNEnd:          65533,             // only 432 leafs
 		ProtocolSubnet:      "172.30.8.0/22",   // 1022 hosts: 172.30.8.1 - 172.30.11.254
 		VTEPSubnet:          "172.30.12.0/22",  // 1022 hosts: 172.30.12.1 - 172.30.15.254
 		FabricSubnet:        "172.30.128.0/17", // 16384 /31 subnets: 172.30.128.1 - 172.30.255.254
@@ -46,5 +46,8 @@ var DefaultConfig = fabapi.FabConfig{
 		MCLAGSessionSubnet:  "172.30.95.0/31",
 		DefaultSwitchUsers:  map[string]fabapi.SwitchUser{},
 		DefaultAlloyConfig:  fmeta.AlloyConfig{},
+	},
+	Gateway: fabapi.GatewayConfig{
+		ASN: 65534, // TODO do we need to be able to have gateways with different ASNs?
 	},
 }
