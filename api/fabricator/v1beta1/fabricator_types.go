@@ -469,17 +469,33 @@ func (f *Fabricator) Validate(ctx context.Context) error {
 		return fmt.Errorf("invalid fabric mode %q", fm) //nolint:goerr113
 	}
 
-	if fm == fmeta.FabricModeSpineLeaf && f.Spec.Config.Fabric.SpineASN == 0 {
-		return fmt.Errorf("spine ASN is required for spine-leaf mode") //nolint:goerr113
-	}
-	if fm == fmeta.FabricModeSpineLeaf && f.Spec.Config.Fabric.LeafASNStart == 0 {
-		return fmt.Errorf("leaf ASN start is required for spine-leaf mode") //nolint:goerr113
-	}
-	if fm == fmeta.FabricModeSpineLeaf && f.Spec.Config.Fabric.LeafASNEnd == 0 {
-		return fmt.Errorf("leaf ASN end is required for spine-leaf mode") //nolint:goerr113
-	}
-	if fm == fmeta.FabricModeSpineLeaf && f.Spec.Config.Fabric.LeafASNStart >= f.Spec.Config.Fabric.LeafASNEnd {
-		return fmt.Errorf("leaf ASN start must be less than leaf ASN end") //nolint:goerr113
+	if fm == fmeta.FabricModeSpineLeaf {
+		if f.Spec.Config.Fabric.SpineASN == 0 {
+			return fmt.Errorf("spine ASN is required for spine-leaf mode") //nolint:goerr113
+		}
+		if f.Spec.Config.Fabric.SpineASN >= f.Spec.Config.Fabric.LeafASNStart && f.Spec.Config.Fabric.SpineASN <= f.Spec.Config.Fabric.LeafASNEnd {
+			return fmt.Errorf("spine ASN must be outside leaf ASN range") //nolint:goerr113
+		}
+
+		if f.Spec.Config.Fabric.LeafASNStart == 0 {
+			return fmt.Errorf("leaf ASN start is required for spine-leaf mode") //nolint:goerr113
+		}
+		if f.Spec.Config.Fabric.LeafASNEnd == 0 {
+			return fmt.Errorf("leaf ASN end is required for spine-leaf mode") //nolint:goerr113
+		}
+		if f.Spec.Config.Fabric.LeafASNStart >= f.Spec.Config.Fabric.LeafASNEnd {
+			return fmt.Errorf("leaf ASN start must be less than leaf ASN end") //nolint:goerr113
+		}
+
+		if f.Spec.Config.Gateway.ASN == 0 {
+			return fmt.Errorf("gateway ASN is required for spine-leaf mode") //nolint:goerr113
+		}
+		if f.Spec.Config.Gateway.ASN == f.Spec.Config.Fabric.SpineASN {
+			return fmt.Errorf("gateway ASN must be different from spine ASN") //nolint:goerr113
+		}
+		if f.Spec.Config.Gateway.ASN >= f.Spec.Config.Fabric.LeafASNStart && f.Spec.Config.Gateway.ASN <= f.Spec.Config.Fabric.LeafASNEnd {
+			return fmt.Errorf("gateway ASN must be outside leaf ASN range") //nolint:goerr113
+		}
 	}
 
 	protoSubnet, err := f.Spec.Config.Fabric.ProtocolSubnet.Parse()
