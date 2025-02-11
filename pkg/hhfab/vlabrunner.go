@@ -561,7 +561,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						return fmt.Errorf("inspecting: %w", err)
 					}
 				case OnReadyReleaseTest:
-					if err := c.ReleaseTest(ctx, ReleaseTestOpts{ResultsFile: "release-test.xml", HhfabBin: "bin/hhfab"}); err != nil {
+					if err := c.ReleaseTest(ctx, ReleaseTestOpts{ResultsFile: "release-test.xml"}); err != nil {
 						slog.Warn("Failed to run release test", "err", err)
 
 						return fmt.Errorf("release test: %w", err)
