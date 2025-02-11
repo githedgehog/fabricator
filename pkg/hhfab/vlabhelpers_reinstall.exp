@@ -122,6 +122,17 @@ expect {
 		log_message "EXP-ERR" "Connection to console failed"
 		exit $ERROR_CONSOLE
 	}
+	eof {
+		set waitval [wait]
+		set exit_status [lindex $waitval 3]
+		if {$exit_status == 255} {
+			log_message "EXP-ERR" "SSH connection failed with exit status 255"
+			exit $ERROR_HHFAB
+		} else {
+			log_message "EXP-ERR" "Connection to console failed (EOF) with exit status $exit_status"
+			exit $ERROR_CONSOLE
+		}
+	}	
 	default {
 		log_message "EXP-ERR" "Unexpected output: [expect_out(buffer)]"
 		exit $ERROR_UNKNOWN
