@@ -646,7 +646,7 @@ func (c *Config) collectShowTech(ctx context.Context, entryName string, entry VL
 	}
 
 	chmodCmd := fmt.Sprintf("chmod +x %s && %s", remoteScriptPath, remoteScriptPath)
-	stdout, stderr, done, err := ssh.Run(chmodCmd, 60*time.Second)
+	stdout, stderr, done, err := ssh.Run(chmodCmd, 150*time.Second)
 	if err != nil {
 		return fmt.Errorf("executing show-tech on %s: %w", entryName, err) //nolint:goerr113
 	}
