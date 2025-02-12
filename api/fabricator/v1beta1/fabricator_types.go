@@ -228,6 +228,7 @@ type FabricatorVersions struct {
 	Controller     meta.Version `json:"controller,omitempty"`
 	ControlUSBRoot meta.Version `json:"controlISORoot,omitempty"`
 	Ctl            meta.Version `json:"ctl,omitempty"`
+	Flatcar        meta.Version `json:"flatcar,omitempty"`
 }
 
 type FabricVersions struct {

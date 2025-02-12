@@ -166,8 +166,55 @@ func (c *ControlUpgrade) Run(ctx context.Context) error {
 	if err := copyFile(k9s.BinName, filepath.Join(k3s.BinDir, k9s.BinName), 0o755); err != nil {
 		return fmt.Errorf("copying k9s bin: %w", err)
 	}
+	
+	if err := c.upgradeK8s(ctx, kube); err != nil {
+		return fmt.Errorf("upgrading K8s: %w", err)
+	}
+
+	if err := c.upgradeFlatcar(ctx); err != nil {
+		return fmt.Errorf("upgrading Flatcar: %w", err)
+	}
 
 	slog.Info("Control node upgrade complete")
+
+	return nil
+}
+
+func (c *ControlUpgrade) upgradeFlatcar(ctx context.Context) error {
+	flatcarVersion := string(c.Fab.Status.Versions.Fabricator.Flatcar)
+
+	cmd := exec.CommandContext(ctx, "grep", "^VERSION=", "/etc/os-release")
+
+	if out, err := cmd.Output(); err != nil {
+		return fmt.Errorf("Flatcar Version: %w", err)
+	} else if ret := strings.Compare(string(out[:]), "VERSION="+flatcarVersion[1:]+"\n"); ret == 0 {
+		slog.Info("System already updated running Flatcar", "version", flatcarVersion)
+		return nil
+	}
+
+	slog.Info("Upgrading Flatcar to", "version", flatcarVersion)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*300)
+	defer cancel()
+
+	cmd1 := exec.CommandContext(ctx, "flatcar-update", "--to-version", flatcarVersion, "--to-payload", "/opt/hedgehog/install/control-1-install/flatcar_production_update.gz")
+	cmd1.Stdout = logutil.NewSink(ctx, slog.Debug, "update-flatcar: ")
+	cmd1.Stderr = logutil.NewSink(ctx, slog.Debug, "update-flatcar: ")
+
+	if err := cmd1.Run(); err != nil {
+		return fmt.Errorf("upgrading Flatcar: %w", err)
+	}
+
+	slog.Info("Flatcar upgrade completed")
+	slog.Info("Rebooting Control Node")
+
+	cmd2 := exec.CommandContext(ctx, "reboot")
+	cmd2.Stdout = logutil.NewSink(ctx, slog.Debug, "reboot: ")
+	cmd2.Stderr = logutil.NewSink(ctx, slog.Debug, "reboot: ")
+
+	if err := cmd2.Run(); err != nil {
+		return fmt.Errorf("Rebooting: %w", err)
+	}
 
 	return nil
 }
