@@ -156,6 +156,7 @@ func Run(ctx context.Context) error {
 	var wgESLAGLeafGroups string
 	var wgMCLAGServers, wgESLAGServers, wgUnbundledServers, wgBundledServers uint
 	var wgNoSwitches bool
+	var wgGatewayUplinks uint
 	vlabWiringGenFlags := []cli.Flag{
 		&cli.UintFlag{
 			Name:        "spines-count",
@@ -225,6 +226,13 @@ func Run(ctx context.Context) error {
 			Name:        "no-switches",
 			Usage:       "do not generate any switches",
 			Destination: &wgNoSwitches,
+		},
+		&cli.UintFlag{
+			Name:        "gateway-uplinks",
+			Usage:       "[PREVIEW] number of uplinks for gateway",
+			Hidden:      !preview,
+			Destination: &wgGatewayUplinks,
+			Value:       2,
 		},
 	}
 
@@ -563,6 +571,7 @@ func Run(ctx context.Context) error {
 								UnbundledServers:  uint8(wgUnbundledServers),  //nolint:gosec
 								BundledServers:    uint8(wgBundledServers),    //nolint:gosec
 								NoSwitches:        wgNoSwitches,
+								GatewayUplinks:    uint8(wgGatewayUplinks), //nolint:gosec
 							}
 
 							if err := hhfab.VLABGenerate(ctx, workDir, cacheDir, builder, hhfab.DefaultVLABGeneratedFile); err != nil {

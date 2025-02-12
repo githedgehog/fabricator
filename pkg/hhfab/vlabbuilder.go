@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -14,6 +15,7 @@ import (
 	"go.githedgehog.com/fabric/api/meta"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
+	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -32,13 +34,14 @@ type VLABBuilder struct {
 	UnbundledServers  uint8  // number of unbundled servers to generate for switches (only for one of the first switch in the redundancy group or orphan switch)
 	BundledServers    uint8  // number of bundled servers to generate for switches (only for one of the second switch in the redundancy group or orphan switch)
 	NoSwitches        bool   // do not generate any switches
+	GatewayUplinks    uint8  // number of uplinks for gateway node to the spines
 
 	data         *apiutil.Loader
 	ifaceTracker map[string]uint8 // next available interface ID for each switch
 	switchID     uint             // switch ID counter
 }
 
-func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode meta.FabricMode) error {
+func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode meta.FabricMode, nodes []fabapi.Node) error {
 	if l == nil {
 		return errors.Errorf("loader is nil")
 	}
@@ -93,6 +96,33 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 		b.VPCLoopbacks = 2
 	}
 
+	isGw := false
+	gw := fabapi.Node{}
+	for _, node := range nodes {
+		if slices.Contains(node.Spec.Roles, fabapi.NodeRoleGateway) {
+			if isGw {
+				return errors.Errorf("multiple gateway nodes not supported")
+			}
+
+			isGw = true
+			gw = node
+		}
+	}
+
+	if isGw {
+		if fabricMode != meta.FabricModeSpineLeaf {
+			return errors.Errorf("gateway node only supported for spine-leaf fabric mode")
+		}
+
+		if b.GatewayUplinks == 0 {
+			return errors.Errorf("gateway uplinks count must be greater than 0")
+		}
+
+		if b.GatewayUplinks > b.SpinesCount {
+			return errors.Errorf("gateway uplinks count must be less than or equal to spines count")
+		}
+	}
+
 	totalESLAGLeafs := uint8(0)
 	eslagLeafGroups := []uint8{}
 
@@ -128,6 +158,9 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 	if fabricMode == meta.FabricModeSpineLeaf {
 		slog.Info(">>>", "spinesCount", b.SpinesCount, "fabricLinksCount", b.FabricLinksCount)
 		slog.Info(">>>", "eslagLeafGroups", b.ESLAGLeafGroups)
+		if isGw {
+			slog.Info(">>>", "gatewayUplinks", b.GatewayUplinks)
+		}
 	}
 	slog.Info(">>>", "mclagLeafsCount", b.MCLAGLeafsCount, "mclagSessionLinks", b.MCLAGSessionLinks, "mclagPeerLinks", b.MCLAGPeerLinks)
 	slog.Info(">>>", "orphanLeafsCount", b.OrphanLeafsCount, "vpcLoopbacks", b.VPCLoopbacks)
@@ -527,6 +560,24 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 			if _, err := b.createConnection(ctx, wiringapi.ConnectionSpec{
 				Fabric: &wiringapi.ConnFabric{
 					Links: links,
+				},
+			}); err != nil {
+				return err
+			}
+		}
+
+		if isGw && spineID <= b.GatewayUplinks {
+			spinePort := b.nextSwitchPort(spineName)
+			gwPort := fmt.Sprintf("%s/port%02d", gw.Name, spineID)
+
+			if _, err := b.createConnection(ctx, wiringapi.ConnectionSpec{
+				Gateway: &wiringapi.ConnGateway{
+					Links: []wiringapi.GatewayLink{
+						{
+							Spine:   wiringapi.ConnFabricLinkSwitch{BasePortName: wiringapi.BasePortName{Port: spinePort}},
+							Gateway: wiringapi.ConnGatewayLinkGateway{BasePortName: wiringapi.BasePortName{Port: gwPort}},
+						},
+					},
 				},
 			}); err != nil {
 				return err
