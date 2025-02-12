@@ -404,6 +404,13 @@ func CreateOrUpdate(ctx context.Context, kube client.Client, obj client.Object) 
 
 			return nil
 		})
+	case *fabapi.Node:
+		tmp := &fabapi.Node{ObjectMeta: obj.ObjectMeta}
+		res, err = ctrlutil.CreateOrUpdate(ctx, kube, tmp, func() error {
+			tmp.Spec = obj.Spec
+
+			return nil
+		})
 	default:
 		return ctrlutil.OperationResultNone, fmt.Errorf("%T: %w", obj, ErrUnsupportedKind)
 	}

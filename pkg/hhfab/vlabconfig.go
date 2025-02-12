@@ -81,6 +81,7 @@ type VMSizes struct {
 	Control VMSize `json:"control"`
 	Switch  VMSize `json:"switch"`
 	Server  VMSize `json:"server"`
+	Gateway VMSize `json:"gateway"`
 }
 
 type VMConfig struct {
@@ -94,12 +95,14 @@ const (
 	VMTypeControl VMType = "control"
 	VMTypeSwitch  VMType = "switch"
 	VMTypeServer  VMType = "server"
+	VMTypeGateway VMType = "gateway"
 )
 
 var VMTypes = []VMType{
 	VMTypeControl,
 	VMTypeSwitch,
 	VMTypeServer,
+	VMTypeGateway,
 }
 
 const (
@@ -129,6 +132,7 @@ var DefaultSizes = VMSizes{
 	Control: VMSize{CPU: 6, RAM: 6144, Disk: 100}, // TODO 8GB RAM?
 	Switch:  VMSize{CPU: 4, RAM: 5120, Disk: 50},  // TODO 6GB RAM?
 	Server:  VMSize{CPU: 2, RAM: 768, Disk: 10},   // TODO 1GB RAM?
+	Gateway: VMSize{CPU: 8, RAM: 6144, Disk: 50},  // TODO proper min size
 }
 
 func (c *Config) PrepareVLAB(ctx context.Context, opts VLABUpOpts) (*VLAB, error) {
@@ -172,7 +176,7 @@ func (c *Config) PrepareVLAB(ctx context.Context, opts VLABUpOpts) (*VLAB, error
 			return nil, fmt.Errorf("creating VLAB directories: %w", err)
 		}
 
-		vlabCfg, err := createVLABConfig(ctx, c.Controls, c.Wiring)
+		vlabCfg, err := createVLABConfig(ctx, c.Controls, c.Nodes, c.Wiring)
 		if err != nil {
 			return nil, fmt.Errorf("creating VLAB config: %w", err)
 		}
@@ -256,7 +260,7 @@ func (c *Config) PrepareVLAB(ctx context.Context, opts VLABUpOpts) (*VLAB, error
 	return vlab, nil
 }
 
-func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, wiring client.Reader) (*VLABConfig, error) {
+func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes []fabapi.Node, wiring client.Reader) (*VLABConfig, error) {
 	cfg := &VLABConfig{
 		Sizes: DefaultSizes,
 		VMs:   map[string]VMConfig{},
@@ -315,6 +319,44 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, wiring
 			NICs: map[string]string{
 				"enp2s0": NICTypeUsernet,
 				"enp2s1": mgmt,
+			},
+		}
+	}
+
+	// TODO deduplicate
+	for _, node := range nodes {
+		if len(node.Spec.Roles) != 1 || node.Spec.Roles[0] != fabapi.NodeRoleGateway {
+			return nil, fmt.Errorf("node %q isn't a gateway role", node.Name) //nolint:goerr113
+		}
+
+		if _, exists := cfg.VMs[node.Name]; exists {
+			return nil, fmt.Errorf("duplicate VM name (node): %q", node.Name) //nolint:goerr113
+		}
+
+		links, err := addPassthroughLinks(&node)
+		if err != nil {
+			return nil, fmt.Errorf("failed to add passthrough links for node %q: %w", node.Name, err)
+		}
+
+		mgmt := NICTypeManagement
+		if pci := links[node.Name+"/enp2s0"]; pci != "" {
+			mgmt = NICTypePassthrough + NICTypeSep + pci
+		}
+
+		delete(links, node.Name+"/enp2s0")
+
+		if len(links) > 0 {
+			return nil, fmt.Errorf("unexpected passthrough links for node %q: %v", node.Name, links) //nolint:goerr113
+		}
+
+		if isHardware(&node) {
+			return nil, fmt.Errorf("node VM %q can't be hardware", node.Name) //nolint:goerr113
+		}
+
+		cfg.VMs[node.Name] = VMConfig{
+			Type: VMTypeGateway,
+			NICs: map[string]string{
+				"enp2s0": mgmt,
 			},
 		}
 	}
@@ -463,6 +505,12 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, wiring
 			for _, link := range conn.Spec.Fabric.Links {
 				if err := addLink(link.Spine.Port, link.Leaf.Port); err != nil {
 					return nil, fmt.Errorf("failed to add link for fabric connection %s: %w", conn.Name, err)
+				}
+			}
+		} else if conn.Spec.Gateway != nil {
+			for _, link := range conn.Spec.Gateway.Links {
+				if err := addLink(link.Spine.Port, link.Gateway.Port); err != nil {
+					return nil, fmt.Errorf("failed to add link for gateway connection %s: %w", conn.Name, err)
 				}
 			}
 		} else if conn.Spec.Unbundled != nil {
@@ -665,6 +713,8 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 			size = cfg.Sizes.Switch
 		} else if vm.Type == VMTypeControl {
 			size = cfg.Sizes.Control
+		} else if vm.Type == VMTypeGateway {
+			size = cfg.Sizes.Gateway
 		}
 
 		vms = append(vms, VM{

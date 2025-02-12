@@ -309,7 +309,7 @@ func TestInitConfig(t *testing.T) {
 			if test.in.Gateway {
 				expectedNodes = append(expectedNodes, fabapi.Node{
 					ObjectMeta: metav1.ObjectMeta{
-						Name:      "gateway",
+						Name:      "gateway-1",
 						Namespace: comp.FabNamespace,
 					},
 					Spec: fabapi.NodeSpec{
@@ -318,7 +318,7 @@ func TestInitConfig(t *testing.T) {
 							Disk: "/dev/sda",
 						},
 						Management: fabapi.ControlNodeManagement{
-							Interface: "enp2s1",
+							Interface: "enp2s0",
 						},
 					},
 				})

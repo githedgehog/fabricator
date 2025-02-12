@@ -106,7 +106,7 @@ spec:
 apiVersion: fabricator.githedgehog.com/v1beta1
 kind: Node
 metadata:
-  name: gateway
+  name: gateway-1
   namespace: fab
 spec:
   roles:
