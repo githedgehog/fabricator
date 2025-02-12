@@ -27,7 +27,7 @@ func VLABGenerate(ctx context.Context, workDir, cacheDir string, builder VLABBui
 	}
 
 	wL := apiutil.NewWiringLoader()
-	if err := builder.Build(ctx, wL, cfg.Fab.Spec.Config.Fabric.Mode); err != nil {
+	if err := builder.Build(ctx, wL, cfg.Fab.Spec.Config.Fabric.Mode, cfg.Nodes); err != nil {
 		return err
 	}
 
