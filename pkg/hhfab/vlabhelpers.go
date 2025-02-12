@@ -25,6 +25,8 @@ import (
 	"go.githedgehog.com/fabric/pkg/hhfctl"
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
 	"go.githedgehog.com/fabric/pkg/util/logutil"
+	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
+	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/hhfab/pdu"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -135,6 +137,26 @@ func (c *Config) VLABAccess(ctx context.Context, vlab *VLAB, t VLABAccessType, n
 				"-o", "ProxyCommand="+proxyCmd,
 				"admin@"+swIP,
 			)
+		} else if entry.IsNode {
+			slog.Info("SSH through control node", "name", name, "type", "gateway")
+
+			nodeIP, err := c.getNodeIP(ctx, name)
+			if err != nil {
+				return fmt.Errorf("getting node IP: %w", err)
+			}
+
+			proxyCmd := fmt.Sprintf("ssh %s -i %s -W %%h:%%p -p %d core@127.0.0.1",
+				strings.Join(SSHQuietFlags, " "),
+				filepath.Join(VLABDir, VLABSSHKeyFile),
+				getSSHPort(0), // TODO get control node ID
+			)
+
+			cmdName = VLABCmdSSH
+			args = append(SSHQuietFlags,
+				"-i", filepath.Join(VLABDir, VLABSSHKeyFile),
+				"-o", "ProxyCommand="+proxyCmd,
+				"core@"+nodeIP,
+			)
 		} else {
 			return fmt.Errorf("SSH not available: %s", name) //nolint:goerr113
 		}
@@ -206,6 +228,7 @@ type VLABAccessInfo struct {
 	IsSwitch     bool // ssh through control node only
 	IsControl    bool // Needed to distinguish VM type in show-tech
 	IsServer     bool
+	IsNode       bool   // ssh through control node only
 	RemoteSerial string // ssh to get serial
 }
 
@@ -417,6 +440,7 @@ func (c *Config) getVLABEntries(ctx context.Context, vlab *VLAB) (map[string]VLA
 			IsSwitch:   vm.Type == VMTypeSwitch,
 			IsServer:   vm.Type == VMTypeServer,
 			IsControl:  vm.Type == VMTypeControl,
+			IsNode:     vm.Type == VMTypeGateway,
 		}
 	}
 
@@ -455,6 +479,7 @@ func DefaultShowTechScript() ShowTechScript {
 			VMTypeServer:  serverScript,
 			VMTypeControl: controlScript,
 			VMTypeSwitch:  switchScript,
+			VMTypeGateway: serverScript, // TODO add gateway script
 		},
 	}
 }
@@ -763,6 +788,30 @@ func (c *Config) getSwitchIP(ctx context.Context, entryName string) (string, err
 	}
 
 	return swIP.Addr().String(), nil
+}
+
+func (c *Config) getNodeIP(ctx context.Context, name string) (string, error) {
+	kubeconfig := filepath.Join(c.WorkDir, VLABDir, VLABKubeConfig)
+	kube, err := kubeutil.NewClientWithCache(ctx, kubeconfig, fabapi.SchemeBuilder)
+	if err != nil {
+		return "", fmt.Errorf("creating kube client: %w", err)
+	}
+
+	node := &fabapi.Node{}
+	if err := kube.Get(ctx, client.ObjectKey{Name: name, Namespace: comp.FabNamespace}, node); err != nil {
+		return "", fmt.Errorf("getting node object: %w", err) //nolint:goerr113
+	}
+
+	if node.Spec.Management.IP == "" {
+		return "", fmt.Errorf("node mgmt IP not found: %s", name) //nolint:goerr113
+	}
+
+	nodeIP, err := node.Spec.Management.IP.Parse()
+	if err != nil {
+		return "", fmt.Errorf("parsing node mgmt IP: %w", err)
+	}
+
+	return nodeIP.Addr().String(), nil
 }
 
 func getVMType(entry VLABAccessInfo) VMType {
