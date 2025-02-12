@@ -515,32 +515,6 @@ func Run(ctx context.Context) error {
 				},
 			},
 			{
-				Name:  "sample",
-				Usage: "generate sample wiring diagram",
-				Subcommands: []*cli.Command{
-					{
-						Name:    "spine-leaf",
-						Aliases: []string{"sl"},
-						Usage:   "generate sample spine-leaf wiring diagram",
-						Flags:   defaultFlags,
-						Before:  before(false),
-						Action: func(_ *cli.Context) error {
-							return fmt.Errorf("not available") //nolint:goerr113
-						},
-					},
-					{
-						Name:    "collapsed-core",
-						Aliases: []string{"cc"},
-						Usage:   "generate sample collapsed-core wiring diagram",
-						Flags:   defaultFlags,
-						Before:  before(false),
-						Action: func(_ *cli.Context) error {
-							return fmt.Errorf("not available") //nolint:goerr113
-						},
-					},
-				},
-			},
-			{
 				Name:  "build",
 				Usage: "build installers",
 				Flags: append(defaultFlags, hMode,
