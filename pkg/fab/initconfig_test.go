@@ -240,6 +240,43 @@ func TestInitConfig(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "gateway",
+			in: fab.InitConfigInput{
+				Dev:     true,
+				Gateway: true,
+			},
+			expectedFab: fabapi.Fabricator{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      comp.FabName,
+					Namespace: comp.FabNamespace,
+				},
+				Spec: fabapi.FabricatorSpec{
+					Config: fabapi.FabConfig{
+						Control: fabapi.ControlConfig{
+							DefaultUser: fabapi.ControlUser{
+								PasswordHash:   fab.DevAdminPasswordHash,
+								AuthorizedKeys: []string{fab.DevSSHKey},
+							},
+						},
+						Fabric: fabapi.FabricConfig{
+							DefaultSwitchUsers: map[string]fabapi.SwitchUser{
+								"admin": {
+									Role:           "admin",
+									PasswordHash:   fab.DevAdminPasswordHash,
+									AuthorizedKeys: []string{fab.DevSSHKey},
+								},
+								"op": {
+									Role:           "operator",
+									PasswordHash:   fab.DevAdminPasswordHash,
+									AuthorizedKeys: []string{fab.DevSSHKey},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			expectedControls := []fabapi.ControlNode{
@@ -268,6 +305,25 @@ func TestInitConfig(t *testing.T) {
 				}
 			}
 
+			expectedNodes := []fabapi.Node(nil)
+			if test.in.Gateway {
+				expectedNodes = append(expectedNodes, fabapi.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "gateway",
+						Namespace: comp.FabNamespace,
+					},
+					Spec: fabapi.NodeSpec{
+						Roles: []fabapi.NodeRole{fabapi.NodeRoleGateway},
+						Bootstrap: fabapi.ControlNodeBootstrap{
+							Disk: "/dev/sda",
+						},
+						Management: fabapi.ControlNodeManagement{
+							Interface: "enp2s1",
+						},
+					},
+				})
+			}
+
 			test.expectedFab.Default()
 
 			data, err := fab.InitConfig(ctx, test.in)
@@ -282,7 +338,7 @@ func TestInitConfig(t *testing.T) {
 			l := apiutil.NewFabLoader()
 			require.NoError(t, l.LoadAdd(ctx, data))
 
-			f, controls, err := fab.GetFabAndControls(ctx, l.GetClient(), true)
+			f, controls, nodes, err := fab.GetFabAndNodes(ctx, l.GetClient(), true)
 			if test.validErr {
 				require.Error(t, err)
 
@@ -305,6 +361,13 @@ func TestInitConfig(t *testing.T) {
 				controls[i].Status = fabapi.ControlNodeStatus{}
 			}
 
+			for i := range nodes {
+				nodes[i].APIVersion = ""
+				nodes[i].Kind = ""
+				nodes[i].ResourceVersion = ""
+				nodes[i].Status = fabapi.NodeStatus{}
+			}
+
 			expectedFab := test.expectedFab
 			if err := mergo.Merge(&expectedFab.Spec.Config, *fab.DefaultConfig.DeepCopy()); err != nil {
 				require.NoError(t, err)
@@ -312,6 +375,7 @@ func TestInitConfig(t *testing.T) {
 
 			require.Equal(t, expectedFab, f)
 			require.Equal(t, expectedControls, controls)
+			require.Equal(t, expectedNodes, nodes)
 		})
 	}
 }

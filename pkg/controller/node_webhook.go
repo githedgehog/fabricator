@@ -55,7 +55,12 @@ func (w *NodeWebhook) ValidateCreate(ctx context.Context, obj runtime.Object) (a
 		return nil, fmt.Errorf("expected a Node object but got %T", obj) //nolint:goerr113
 	}
 
-	return nil, n.Validate(ctx) //nolint:wrapcheck
+	f := &fabapi.Fabricator{}
+	if err := w.Get(ctx, client.ObjectKey{}, f); err != nil {
+		return nil, fmt.Errorf("failed to get Fabricator object: %w", err)
+	}
+
+	return nil, n.Validate(ctx, &f.Spec.Config, false) //nolint:wrapcheck
 }
 
 func (w *NodeWebhook) ValidateUpdate(ctx context.Context, oldObj runtime.Object, newObj runtime.Object) (admission.Warnings, error) {
@@ -69,7 +74,12 @@ func (w *NodeWebhook) ValidateUpdate(ctx context.Context, oldObj runtime.Object,
 		return nil, fmt.Errorf("expected a Node new object but got %T", newObj) //nolint:goerr113
 	}
 
-	return nil, c.Validate(ctx) //nolint:wrapcheck
+	f := &fabapi.Fabricator{}
+	if err := w.Get(ctx, client.ObjectKey{}, f); err != nil {
+		return nil, fmt.Errorf("failed to get Fabricator object: %w", err)
+	}
+
+	return nil, c.Validate(ctx, &f.Spec.Config, false) //nolint:wrapcheck
 }
 
 func (w *NodeWebhook) ValidateDelete(_ context.Context, _ runtime.Object) (admission.Warnings, error) {

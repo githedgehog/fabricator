@@ -42,6 +42,7 @@ type Config struct {
 	RegistryConfig
 	Fab      fabapi.Fabricator
 	Controls []fabapi.ControlNode
+	Nodes    []fabapi.Node
 	Wiring   client.Reader
 }
 
@@ -136,7 +137,7 @@ func Init(ctx context.Context, c InitConfig) error {
 			return fmt.Errorf("loading config to import %q: loading: %w", c.ImportConfig, err)
 		}
 
-		if _, _, err := fab.GetFabAndControls(ctx, l.GetClient(), true); err != nil {
+		if _, _, _, err := fab.GetFabAndNodes(ctx, l.GetClient(), true); err != nil {
 			return fmt.Errorf("loading config to import %q: getting fabricator and controls nodes: %w", c.ImportConfig, err)
 		}
 
@@ -313,7 +314,7 @@ func load(ctx context.Context, workDir, cacheDir string, wiringAndHydration bool
 		return nil, fmt.Errorf("loading fab config: %w", err)
 	}
 
-	f, controls, err := fab.GetFabAndControls(ctx, l.GetClient(), true)
+	f, controls, nodes, err := fab.GetFabAndNodes(ctx, l.GetClient(), true)
 	if err != nil {
 		return nil, fmt.Errorf("getting fabricator and controls nodes: %w", err)
 	}
@@ -324,6 +325,7 @@ func load(ctx context.Context, workDir, cacheDir string, wiringAndHydration bool
 		RegistryConfig: *regConf,
 		Fab:            f,
 		Controls:       controls,
+		Nodes:          nodes,
 	}
 
 	if wiringAndHydration {
@@ -334,6 +336,12 @@ func load(ctx context.Context, workDir, cacheDir string, wiringAndHydration bool
 		for _, control := range cfg.Controls {
 			if err := control.Validate(ctx, &f.Spec.Config, false); err != nil {
 				return nil, fmt.Errorf("validating control node %q: %w", control.Name, err)
+			}
+		}
+
+		for _, node := range cfg.Nodes {
+			if err := node.Validate(ctx, &f.Spec.Config, false); err != nil {
+				return nil, fmt.Errorf("validating node %q: %w", node.Name, err)
 			}
 		}
 	}

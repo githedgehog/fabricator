@@ -101,4 +101,18 @@ spec:
   management:
     interface: enp2s1 # interface for management
 
-# Currently only one ControlNode is supported
+{{- if .Gateway }}
+---
+apiVersion: fabricator.githedgehog.com/v1beta1
+kind: Node
+metadata:
+  name: gateway
+  namespace: fab
+spec:
+  roles:
+    - gateway
+  bootstrap:
+   disk: "/dev/sda" # disk to install OS on, e.g. "sda" or "nvme0n1"
+  management:
+    interface: enp2s1 # interface for management
+{{ end }}
