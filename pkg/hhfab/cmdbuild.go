@@ -45,6 +45,7 @@ func (c *Config) build(ctx context.Context, opts BuildOpts) error {
 			WorkDir:    resultDir,
 			Fab:        c.Fab,
 			Control:    control,
+			Nodes:      c.Nodes,
 			Wiring:     c.Wiring,
 			Mode:       opts.BuildMode,
 			Downloader: d,

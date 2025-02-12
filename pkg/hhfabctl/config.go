@@ -21,12 +21,16 @@ func ConfigExport(ctx context.Context) error {
 		return fmt.Errorf("creating k8s client: %w", err)
 	}
 
-	f, controls, _, err := fab.GetFabAndNodes(ctx, kube, false)
+	f, controls, nodes, err := fab.GetFabAndNodes(ctx, kube, false)
 	if err != nil {
 		return fmt.Errorf("getting fabricator and control nodes: %w", err)
 	}
 
 	slices.SortFunc(controls, func(a, b fabapi.ControlNode) int {
+		return cmp.Compare(a.Name, b.Name)
+	})
+
+	slices.SortFunc(nodes, func(a, b fabapi.Node) int {
 		return cmp.Compare(a.Name, b.Name)
 	})
 
@@ -44,6 +48,17 @@ func ConfigExport(ctx context.Context) error {
 
 		if err := kubeutil.PrintObject(&c, out, false); err != nil {
 			return fmt.Errorf("printing control node: %w", err)
+		}
+	}
+
+	for _, n := range nodes {
+		_, err := fmt.Fprintf(out, "---\n")
+		if err != nil {
+			return fmt.Errorf("writing separator: %w", err)
+		}
+
+		if err := kubeutil.PrintObject(&n, out, false); err != nil {
+			return fmt.Errorf("printing node: %w", err)
 		}
 	}
 
