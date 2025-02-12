@@ -14,5 +14,5 @@ const (
 )
 
 func Version(f fabapi.Fabricator) meta.Version {
-	return f.Status.Versions.VLAB.Flatcar
+	return f.Status.Versions.Fabricator.Flatcar
 }
