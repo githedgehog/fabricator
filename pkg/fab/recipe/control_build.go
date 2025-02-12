@@ -52,6 +52,7 @@ type ControlInstallBuilder struct {
 	WorkDir    string
 	Fab        fabapi.Fabricator
 	Control    fabapi.ControlNode
+	Nodes      []fabapi.Node
 	Wiring     client.Reader
 	Mode       BuildMode
 	Downloader *artificer.Downloader
@@ -205,7 +206,7 @@ func (b *ControlInstallBuilder) Build(ctx context.Context) error {
 	}
 	defer fabF.Close()
 
-	if err := apiutil.PrintFab(b.Fab, []fabapi.ControlNode{b.Control}, fabF); err != nil {
+	if err := apiutil.PrintFab(b.Fab, []fabapi.ControlNode{b.Control}, b.Nodes, fabF); err != nil {
 		return fmt.Errorf("printing fab: %w", err)
 	}
 
@@ -339,7 +340,7 @@ func (b *ControlInstallBuilder) hash(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("hashing version: %w", err)
 	}
 
-	if err := apiutil.PrintFab(b.Fab, []fabapi.ControlNode{b.Control}, h); err != nil {
+	if err := apiutil.PrintFab(b.Fab, []fabapi.ControlNode{b.Control}, b.Nodes, h); err != nil {
 		return "", fmt.Errorf("hashing fab: %w", err)
 	}
 

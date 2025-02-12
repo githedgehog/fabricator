@@ -8,6 +8,7 @@ import (
 	_ "embed"
 	"fmt"
 
+	"github.com/samber/lo"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/util/tmplutil"
@@ -70,6 +71,14 @@ func InstallFabAndControl(control fabapi.ControlNode) comp.KubeInstall {
 			&cfg,
 			&control,
 		}, nil
+	}
+}
+
+func InstallNodes(nodes []fabapi.Node) comp.KubeInstall {
+	return func(_ fabapi.Fabricator) ([]client.Object, error) {
+		return lo.Map(nodes, func(item fabapi.Node, _ int) client.Object {
+			return &item
+		}), nil
 	}
 }
 

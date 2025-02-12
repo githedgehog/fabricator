@@ -62,6 +62,7 @@ type ControlUpgrade struct {
 	WorkDir string
 	Fab     fabapi.Fabricator
 	Control fabapi.ControlNode
+	Nodes   []fabapi.Node
 }
 
 func (c *ControlUpgrade) Run(ctx context.Context) error {
@@ -302,6 +303,10 @@ func (c *ControlUpgrade) installFabricator(ctx context.Context, kube client.Clie
 		// TODO only install control node if it's not the first one and we're joining the cluster
 		if err := comp.EnforceKubeInstall(ctx, kube, c.Fab, f8r.InstallFabAndControl(c.Control)); err != nil {
 			return fmt.Errorf("installing fabricator config and control nodes: %w", err)
+		}
+
+		if err := comp.EnforceKubeInstall(ctx, kube, c.Fab, f8r.InstallNodes(c.Nodes)); err != nil {
+			return fmt.Errorf("installing fabricator nodes: %w", err)
 		}
 	}
 
