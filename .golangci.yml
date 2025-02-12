@@ -49,10 +49,10 @@ linters:
     - promlinter
     - reassign
     - revive
-    - tenv
     - unconvert
     - unparam
     - usestdlibvars
+    - usetesting
     - whitespace
     - wrapcheck
 
