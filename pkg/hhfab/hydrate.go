@@ -216,47 +216,61 @@ func (c *Config) getHydration(ctx context.Context, kube client.Reader) (Hydratio
 
 	dummyIPs := map[netip.Addr]bool{}
 
-	for _, control := range c.Controls {
+	processNode := func(name string, mgmt fabapi.ControlNodeManagement, dummy fabapi.ControlNodeDummy) error {
 		total++
-		if control.Spec.Management.IP != "" {
-			controlIP, err := control.Spec.Management.IP.Parse()
+		if mgmt.IP != "" {
+			controlIP, err := mgmt.IP.Parse()
 			if err != nil {
-				return status, fmt.Errorf("parsing control node %s management IP %s: %w", control.Name, control.Spec.Management.IP, err)
+				return fmt.Errorf("parsing control node %s management IP %s: %w", name, mgmt.IP, err)
 			}
 
 			if !mgmtSubnet.Contains(controlIP.Addr()) {
-				return status, fmt.Errorf("control node %s management IP %s is not in the management subnet %s", control.Name, controlIP, mgmtSubnet) //nolint:goerr113
+				return fmt.Errorf("control node %s management IP %s is not in the management subnet %s", name, controlIP, mgmtSubnet) //nolint:goerr113
 			}
 
 			if controlIP.Addr().Compare(mgmtDHCPStart) >= 0 {
-				return status, fmt.Errorf("control node %s management IP %s should be less than the management DHCP start %s", control.Name, controlIP, mgmtDHCPStart) //nolint:goerr113
+				return fmt.Errorf("control node %s management IP %s should be less than the management DHCP start %s", name, controlIP, mgmtDHCPStart) //nolint:goerr113
 			}
 
 			if _, exist := mgmtIPs[controlIP.Addr()]; exist {
-				return status, fmt.Errorf("control node %s management IP %s is already in use", control.Name, controlIP) //nolint:goerr113
+				return fmt.Errorf("control node %s management IP %s is already in use", name, controlIP) //nolint:goerr113
 			}
 
 			mgmtIPs[controlIP.Addr()] = true
 
-			dummyIP, err := control.Spec.Dummy.IP.Parse()
+			dummyIP, err := dummy.IP.Parse()
 			if err != nil {
-				return status, fmt.Errorf("parsing control node %s dummy IP %s: %w", control.Name, control.Spec.Dummy.IP, err)
+				return fmt.Errorf("parsing control node %s dummy IP %s: %w", name, dummy.IP, err)
 			}
 			if dummyIP.Bits() != 31 {
-				return status, fmt.Errorf("control node %s dummy IP %s must be a /31", control.Name, dummyIP) //nolint:goerr113
+				return fmt.Errorf("control node %s dummy IP %s must be a /31", name, dummyIP) //nolint:goerr113
 			}
 
 			if !dummySubnet.Contains(dummyIP.Addr()) {
-				return status, fmt.Errorf("control node %s dummy IP %s is not in the dummy subnet %s", control.Name, dummyIP, dummySubnet) //nolint:goerr113
+				return fmt.Errorf("control node %s dummy IP %s is not in the dummy subnet %s", name, dummyIP, dummySubnet) //nolint:goerr113
 			}
 
 			if _, exist := dummyIPs[dummyIP.Addr()]; exist {
-				return status, fmt.Errorf("control node %s dummy IP %s is already in use", control.Name, dummyIP) //nolint:goerr113
+				return fmt.Errorf("control node %s dummy IP %s is already in use", name, dummyIP) //nolint:goerr113
 			}
 
 			dummyIPs[dummyIP.Addr()] = true
 		} else {
 			missing++
+		}
+
+		return nil
+	}
+
+	for _, control := range c.Controls {
+		if err := processNode(control.Name, control.Spec.Management, control.Spec.Dummy); err != nil {
+			return status, err
+		}
+	}
+
+	for _, node := range c.Nodes {
+		if err := processNode(node.Name, node.Spec.Management, node.Spec.Dummy); err != nil {
+			return status, err
 		}
 	}
 
@@ -540,6 +554,16 @@ func (c *Config) hydrate(ctx context.Context, kube client.Client) error {
 		nextMgmtIP = nextMgmtIP.Next()
 
 		control.Spec.Dummy.IP = meta.Prefix(netip.PrefixFrom(nextDummyIP, 31).String())
+		nextDummyIP = nextDummyIP.Next().Next()
+	}
+
+	for idx := range c.Nodes {
+		node := &c.Nodes[idx]
+
+		node.Spec.Management.IP = meta.Prefix(netip.PrefixFrom(nextMgmtIP, mgmtSubnet.Bits()).String())
+		nextMgmtIP = nextMgmtIP.Next()
+
+		node.Spec.Dummy.IP = meta.Prefix(netip.PrefixFrom(nextDummyIP, 31).String())
 		nextDummyIP = nextDummyIP.Next().Next()
 	}
 
