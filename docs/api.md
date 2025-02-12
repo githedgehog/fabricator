@@ -134,6 +134,7 @@ _Appears in:_
 
 _Appears in:_
 - [ControlNodeSpec](#controlnodespec)
+- [NodeSpec](#nodespec)
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
@@ -150,6 +151,7 @@ _Appears in:_
 
 _Appears in:_
 - [ControlNodeSpec](#controlnodespec)
+- [NodeSpec](#nodespec)
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
@@ -185,6 +187,7 @@ _Appears in:_
 
 _Appears in:_
 - [ControlNodeSpec](#controlnodespec)
+- [NodeSpec](#nodespec)
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
@@ -464,6 +467,22 @@ Node is the Schema for the nodes API.
 | `status` _[NodeStatus](#nodestatus)_ |  |  |  |
 
 
+#### NodeRole
+
+_Underlying type:_ _string_
+
+
+
+
+
+_Appears in:_
+- [NodeSpec](#nodespec)
+
+| Field | Description |
+| --- | --- |
+| `gateway` |  |
+
+
 #### NodeSpec
 
 
@@ -475,6 +494,12 @@ NodeSpec defines the desired state of Node.
 _Appears in:_
 - [Node](#node)
 
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `roles` _[NodeRole](#noderole) array_ |  |  |  |
+| `bootstrap` _[ControlNodeBootstrap](#controlnodebootstrap)_ |  |  |  |
+| `management` _[ControlNodeManagement](#controlnodemanagement)_ |  |  |  |
+| `dummy` _[ControlNodeDummy](#controlnodedummy)_ |  |  |  |
 
 
 #### NodeStatus

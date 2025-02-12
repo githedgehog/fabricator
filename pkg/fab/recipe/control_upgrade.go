@@ -86,7 +86,7 @@ func (c *ControlUpgrade) Run(ctx context.Context) error {
 	if err := retry.OnError(backoff, func(error) bool {
 		return true
 	}, func() error {
-		f, control, err := fab.GetFabAndControls(ctx, kube, false)
+		f, control, _, err := fab.GetFabAndNodes(ctx, kube, false)
 		if err != nil {
 			return fmt.Errorf("getting fabricator and control nodes: %w", err)
 		}

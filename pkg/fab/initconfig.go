@@ -34,6 +34,7 @@ type InitConfigInput struct {
 	IncludeONIE               bool
 	RegUpstream               *fabapi.ControlConfigRegistryUpstream
 	ControlNodeManagementLink string
+	Gateway                   bool
 }
 
 func InitConfig(ctx context.Context, in InitConfigInput) ([]byte, error) {

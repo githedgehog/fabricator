@@ -21,7 +21,7 @@ func ConfigExport(ctx context.Context) error {
 		return fmt.Errorf("creating k8s client: %w", err)
 	}
 
-	f, controls, err := fab.GetFabAndControls(ctx, kube, false)
+	f, controls, _, err := fab.GetFabAndNodes(ctx, kube, false)
 	if err != nil {
 		return fmt.Errorf("getting fabricator and control nodes: %w", err)
 	}

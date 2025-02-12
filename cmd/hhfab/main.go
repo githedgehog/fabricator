@@ -46,6 +46,7 @@ const (
 	FlagNameDev                   = "dev"
 	FlagIncludeONIE               = "include-onie"
 	FlagControlNodeMgmtLink       = "control-node-mgmt-link"
+	FlagGateway                   = "gateway"
 	FlagNameFabricMode            = "fabric-mode"
 	FlagNameCount                 = "count"
 	FlagNameKillStale             = "kill-stale"
@@ -68,6 +69,8 @@ func main() {
 }
 
 func Run(ctx context.Context) error {
+	preview := os.Getenv("HHFAB_PREVIEW") == "true"
+
 	var verbose, brief, yes bool
 	verboseFlag := &cli.BoolFlag{
 		Name:        "verbose",
@@ -430,23 +433,31 @@ func Run(ctx context.Context) error {
 					&cli.BoolFlag{
 						Category: FlagCatGenConfig,
 						Name:     FlagIncludeONIE,
-						Hidden:   true,
-						Usage:    "include tested ONIE updaters for supported switches in the build",
+						Hidden:   !preview,
+						Usage:    "[PREVIEW] include tested ONIE updaters for supported switches in the build",
 						EnvVars:  []string{"HHFAB_INCLUDE_ONIE"},
 					},
 					&cli.BoolFlag{
 						Category: FlagCatGenConfig,
 						Name:     FlagNameImportHostUpstream,
-						Hidden:   true,
-						Usage:    "import host repo/prefix and creds from docker config as an upstream registry mode and config (creds will be stored plain text)",
+						Hidden:   !preview,
+						Usage:    "[PREVIEW] import host repo/prefix and creds from docker config as an upstream registry mode and config (creds will be stored plain text)",
 						EnvVars:  []string{"HHFAB_IMPORT_HOST_UPSTREAM"},
 					},
 					&cli.StringFlag{
 						Category: FlagCatGenConfig,
 						Name:     FlagControlNodeMgmtLink,
-						Hidden:   true,
-						Usage:    "control node management link (for pci passthrough for VLAB-only)",
+						Hidden:   !preview,
+						Usage:    "[PREVIEW] control node management link (for pci passthrough for VLAB-only)",
 						EnvVars:  []string{"HHFAB_CONTROL_NODE_MGMT_LINK"},
+					},
+					&cli.BoolFlag{
+						Category: FlagCatGenConfig,
+						Name:     FlagGateway,
+						Aliases:  []string{"gw"},
+						Hidden:   !preview,
+						Usage:    "[PREVIEW] add and enable gateway node",
+						EnvVars:  []string{"HHFAB_GATEWAY"},
 					},
 				),
 				Before: before(false),
@@ -468,6 +479,7 @@ func Run(ctx context.Context) error {
 							Dev:                       c.Bool(FlagNameDev),
 							IncludeONIE:               c.Bool(FlagIncludeONIE),
 							ControlNodeManagementLink: c.String(FlagControlNodeMgmtLink),
+							Gateway:                   c.Bool(FlagGateway),
 						},
 					}); err != nil {
 						return fmt.Errorf("initializing: %w", err)

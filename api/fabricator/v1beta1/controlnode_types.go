@@ -129,5 +129,9 @@ func (c *ControlNode) Validate(_ context.Context, fabCfg *FabConfig, allowNotHyd
 		return fmt.Errorf("external interface must be set") //nolint:goerr113
 	}
 
+	if c.Spec.Bootstrap.Disk == "" {
+		return fmt.Errorf("bootstrap disk must be set") //nolint:goerr113
+	}
+
 	return nil
 }
