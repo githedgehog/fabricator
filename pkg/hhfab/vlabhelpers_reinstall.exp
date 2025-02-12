@@ -132,7 +132,7 @@ expect {
 			log_message "EXP-ERR" "Connection to console failed (EOF) with exit status $exit_status"
 			exit $ERROR_CONSOLE
 		}
-	}	
+	}
 	default {
 		log_message "EXP-ERR" "Unexpected output: [expect_out(buffer)]"
 		exit $ERROR_UNKNOWN
@@ -220,10 +220,13 @@ expect -timeout 300 -ex "GNU GRUB" {
 			exp_continue
 		}
 		eof {
-			log_message "EXP-ERR" "Connection lost during GRUB menu expect"
+			log_message "EXP-ERR" "Connection lost after seeing the GRUB menu"
 			exit $ERROR_CONSOLE
 		}
 	}
+} eof {
+	log_message "EXP-ERR" "Connection lost during GRUB menu expect"
+	exit $ERROR_CONSOLE
 } timeout {
 	log_message "EXP-ERR" "Failed to reset. GRUB not detected"
 	exit $ERROR_INSTALL
