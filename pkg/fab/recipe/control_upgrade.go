@@ -197,17 +197,18 @@ func (c *ControlUpgrade) upgradeFlatcar(ctx context.Context) error {
 		return fmt.Errorf("Flatcar Version: %w", err)
 	} else if ret := strings.Compare(string(out[:]), "VERSION="+flatcarVersion[1:]+"\n"); ret == 0 {
 		slog.Info("System already updated running Flatcar", "version", flatcarVersion)
+
 		return nil
 	}
 
 	slog.Info("Upgrading Flatcar to", "version", flatcarVersion)
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*300)
+	ctx1, cancel := context.WithTimeout(ctx, time.Second*300)
 	defer cancel()
 
-	cmd1 := exec.CommandContext(ctx, "flatcar-update", "--to-version", flatcarVersion, "--to-payload", "/opt/hedgehog/install/control-1-install/flatcar_production_update.gz")
-	cmd1.Stdout = logutil.NewSink(ctx, slog.Debug, "update-flatcar: ")
-	cmd1.Stderr = logutil.NewSink(ctx, slog.Debug, "update-flatcar: ")
+	cmd1 := exec.CommandContext(ctx1, "flatcar-update", "--to-version", flatcarVersion, "--to-payload", "/opt/hedgehog/install/control-1-install/flatcar_production_update.gz")
+	cmd1.Stdout = logutil.NewSink(ctx1, slog.Debug, "update-flatcar: ")
+	cmd1.Stderr = logutil.NewSink(ctx1, slog.Debug, "update-flatcar: ")
 
 	if err := cmd1.Run(); err != nil {
 		return fmt.Errorf("upgrading Flatcar: %w", err)
