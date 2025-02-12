@@ -17,6 +17,12 @@ cat /etc/os-release >> "$OUTPUT_FILE"
 echo -e "\n=== General Networkctl Status ===" >> "$OUTPUT_FILE"
 networkctl status >> "$OUTPUT_FILE"
 
+echo -e "\n=== Interface Networkctl Status ===" >> "$OUTPUT_FILE"
+networkctl list | awk 'NR > 1 && $2 !~ /(^-|links|^\s*$)/ {print $2}' | while read -r IFACE; do
+    echo -e "\n--- Detailed Info for $IFACE ---" >> "$OUTPUT_FILE"
+    networkctl status "$IFACE" >> "$OUTPUT_FILE" 2>&1
+done
+
 echo -e "\n=== VLAN Configuration ===" >> "$OUTPUT_FILE"
 ip -d link show type vlan >> "$OUTPUT_FILE"
 
