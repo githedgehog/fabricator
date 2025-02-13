@@ -31,10 +31,12 @@ import (
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
+	coreapi "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlutil "sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/scheme"
 )
 
 const (
@@ -1525,6 +1527,10 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 		wiringapi.SchemeBuilder,
 		vpcapi.SchemeBuilder,
 		agentapi.SchemeBuilder,
+		&scheme.Builder{
+			GroupVersion:  coreapi.SchemeGroupVersion,
+			SchemeBuilder: coreapi.SchemeBuilder,
+		},
 	)
 	if err != nil {
 		return fmt.Errorf("creating kube client: %w", err)
@@ -1538,29 +1544,26 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 		fail = true
 	}
 
-	// workaround to make inspect commands work as is
-	os.Setenv("KUBECONFIG", kubeconfig)
-
-	if err := inspect.Run(ctx, inspect.LLDP, inspect.Args{
-		Verbose: true,
-		Output:  inspect.OutputTypeText,
-	}, inspect.LLDPIn{
+	if out, err := inspect.LLDP(ctx, kube, inspect.LLDPIn{
 		Strict:   opts.Strict,
 		Fabric:   true,
 		External: true,
 		Server:   true,
-	}, os.Stdout); err != nil {
+	}); err != nil {
 		slog.Error("Failed to inspect LLDP", "err", err)
+		fail = true
+	} else if err := inspect.Render(inspect.OutputTypeText, os.Stdout, out); err != nil {
+		slog.Error("Inspecting LLDP reveals some errors", "err", err)
 		fail = true
 	}
 
-	if err := inspect.Run(ctx, inspect.BGP, inspect.Args{
-		Verbose: true,
-		Output:  inspect.OutputTypeText,
-	}, inspect.BGPIn{
+	if out, err := inspect.BGP(ctx, kube, inspect.BGPIn{
 		Strict: opts.Strict,
-	}, os.Stdout); err != nil {
+	}); err != nil {
 		slog.Error("Failed to inspect BGP", "err", err)
+		fail = true
+	} else if err := inspect.Render(inspect.OutputTypeText, os.Stdout, out); err != nil {
+		slog.Error("Inspecting BGP reveals some errors", "err", err)
 		fail = true
 	}
 

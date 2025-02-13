@@ -916,9 +916,14 @@ func Run(ctx context.Context) error {
 						Flags: append([]cli.Flag{
 							&cli.IntFlag{
 								Name:    "wait-applied-for",
-								Aliases: []string{"wait"},
+								Aliases: []string{"wait", "w"},
 								Usage:   "wait for switches being applied for this duration in seconds (0 to only wait for ready)",
 								Value:   120,
+							},
+							&cli.BoolFlag{
+								Name:  "strict",
+								Usage: "fail if any switch is not ready or not inspected",
+								Value: true,
 							},
 						},
 							defaultFlags...),
@@ -926,6 +931,7 @@ func Run(ctx context.Context) error {
 						Action: func(c *cli.Context) error {
 							if err := hhfab.DoVLABInspect(ctx, workDir, cacheDir, hhfab.InspectOpts{
 								WaitAppliedFor: time.Duration(c.Int64("wait-applied-for")) * time.Second,
+								Strict:         c.Bool("strict"),
 							}); err != nil {
 								return fmt.Errorf("inspect: %w", err)
 							}
