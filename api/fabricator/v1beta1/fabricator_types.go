@@ -325,6 +325,13 @@ func (f *Fabricator) Default() {
 			"time4.google.com",
 		}
 	}
+
+	if f.Spec.Config.Fabric.LeafASNEnd == 65534 {
+		if f.Spec.Config.Gateway.ASN == 0 || f.Spec.Config.Gateway.ASN == 65534 {
+			f.Spec.Config.Fabric.LeafASNEnd = 65533
+			f.Spec.Config.Gateway.ASN = 65534
+		}
+	}
 }
 
 func (f *Fabricator) Validate(ctx context.Context) error {
