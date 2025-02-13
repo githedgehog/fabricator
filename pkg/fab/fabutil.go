@@ -12,6 +12,7 @@ import (
 	"dario.cat/mergo"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -63,7 +64,9 @@ func GetFabAndNodes(ctx context.Context, kube client.Reader, allowNotHydrated bo
 	})
 
 	nodes := &fabapi.NodeList{}
-	if err := kube.List(ctx, nodes); err != nil {
+	// It's okay if node resources are not found, as we may be upgrading from the older versions
+	// TODO make it strict after we completely migrate to Node objects for everything
+	if err := kube.List(ctx, nodes); err != nil && !apimeta.IsNoMatchError(err) {
 		return fabapi.Fabricator{}, nil, nil, fmt.Errorf("listing nodes: %w", err)
 	}
 	if len(nodes.Items) > 1 {
