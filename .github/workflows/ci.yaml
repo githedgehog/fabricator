@@ -80,10 +80,6 @@ jobs:
           - ubuntu-latest-x86-4-cores
           - ubuntu-24.04-arm64-4-core
           - macos-latest
-        buildmode:
-          - "--mode=manual"
-          - "--mode=usb"
-          - "--mode=iso"
 
     steps:
       - name: Checkout repository
@@ -120,12 +116,25 @@ jobs:
         run: |
           just --timestamp oci_repo=127.0.0.1:30000 oci=http hhfab-build-local _hhfabctl-push-main
 
-      - name: hhfab init and build
+      - name: hhfab init
         env:
           HHFAB_REG_REPO: 127.0.0.1:30000
         run: |
           bin/hhfab init -v --dev --import-host-upstream
-          bin/hhfab build -v ${{ matrix.buildmode }}
+
+      - name: hhfab build --mode=manual
+        run: |
+          bin/hhfab build -v --mode=manual
+          ls -lah result
+
+      - name: hhfab build --mode=usb
+        run: |
+          bin/hhfab build -v --mode=usb
+          ls -lah result
+
+      - name: hhfab build --mode=iso
+        run: |
+          bin/hhfab build -v --mode=iso
           ls -lah result
 
       - name: Dump local registry logs
