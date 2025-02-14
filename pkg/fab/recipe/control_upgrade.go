@@ -312,9 +312,13 @@ func (c *ControlUpgrade) installFabricator(ctx context.Context, kube client.Clie
 
 	slog.Info("Waiting for fabricator applied")
 
+	version := string(c.Fab.Status.Versions.Fabricator.Controller)
 	if err := waitKube(ctx, kube, comp.FabName, comp.FabNamespace,
 		&fabapi.Fabricator{}, func(obj *fabapi.Fabricator) (bool, error) {
 			for _, cond := range obj.Status.Conditions {
+				if obj.Status.LastAppliedController != version {
+					return false, nil
+				}
 				if cond.Type == fabapi.ConditionApplied && cond.Status == metav1.ConditionTrue {
 					return true, nil
 				}
@@ -330,6 +334,9 @@ func (c *ControlUpgrade) installFabricator(ctx context.Context, kube client.Clie
 	if err := waitKube(ctx, kube, comp.FabName, comp.FabNamespace,
 		&fabapi.Fabricator{}, func(obj *fabapi.Fabricator) (bool, error) {
 			for _, cond := range obj.Status.Conditions {
+				if obj.Status.LastAppliedController != version {
+					return false, nil
+				}
 				if cond.Type == fabapi.ConditionReady && cond.Status == metav1.ConditionTrue {
 					return true, nil
 				}
