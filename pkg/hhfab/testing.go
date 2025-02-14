@@ -28,6 +28,7 @@ import (
 	"go.githedgehog.com/fabric/pkg/hhfctl/inspect"
 	"go.githedgehog.com/fabric/pkg/util/apiutil"
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
+	"go.githedgehog.com/fabricator/pkg/fab"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
@@ -1162,6 +1163,11 @@ func WaitSwitchesReady(ctx context.Context, kube client.Reader, appliedFor time.
 		waitCtx = ctx
 	}
 
+	f, _, _, err := fab.GetFabAndNodes(ctx, kube, true)
+	if err != nil {
+		return fmt.Errorf("getting fab: %w", err)
+	}
+
 	for {
 		switches := &wiringapi.SwitchList{}
 		if err := kube.List(waitCtx, switches); err != nil {
@@ -1192,11 +1198,8 @@ func WaitSwitchesReady(ctx context.Context, kube client.Reader, appliedFor time.
 					ready = ready && time.Since(ag.Status.LastAppliedTime.Time) >= appliedFor
 				}
 
-				expectedVersion := ag.Spec.Version.Default
-				if ag.Spec.Version.Override != "" {
-					expectedVersion = ag.Spec.Version.Override
-				}
-				updated = ag.Status.Version == expectedVersion
+				// controller will expect agent of it's own version by default
+				updated = ag.Status.Version == string(f.Status.Versions.Fabric.Controller)
 			}
 
 			allReady = allReady && ready
