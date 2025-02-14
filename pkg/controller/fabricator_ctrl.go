@@ -78,6 +78,27 @@ func (r *FabricatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if err := r.Get(ctx, req.NamespacedName, f); err != nil {
 		return ctrl.Result{}, fmt.Errorf("fetching fabricator: %w", err)
 	}
+	f.Default()
+
+	controls := &fabapi.ControlNodeList{}
+	if err := r.List(ctx, controls); err != nil {
+		return ctrl.Result{}, fmt.Errorf("listing controls: %w", err)
+	}
+	if len(controls.Items) == 0 {
+		return ctrl.Result{}, fmt.Errorf("no control nodes found") //nolint:goerr113
+	}
+	if len(controls.Items) > 1 {
+		return ctrl.Result{}, fmt.Errorf("multiple control nodes found") //nolint:goerr113
+	}
+	control := controls.Items[0]
+	control.Default()
+
+	// That makes sure that we're updating Fab and ControlNodes with the new defaults
+	if err := comp.EnforceKubeInstall(ctx, r.Client, *f, f8r.InstallFabAndControl(control)); err != nil {
+		return ctrl.Result{}, fmt.Errorf("enforcing fabricator and control install defaults: %w", err)
+	}
+
+	// TODO do the same for the nodes
 
 	l = l.WithValues("gen", f.Generation, "res", f.ResourceVersion)
 
@@ -116,18 +137,6 @@ func (r *FabricatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		if err := f.CalculateVersions(fab.Versions); err != nil {
 			return ctrl.Result{}, fmt.Errorf("calculating versions: %w", err)
 		}
-
-		controls := &fabapi.ControlNodeList{}
-		if err := r.List(ctx, controls); err != nil {
-			return ctrl.Result{}, fmt.Errorf("listing controls: %w", err)
-		}
-		if len(controls.Items) == 0 {
-			return ctrl.Result{}, fmt.Errorf("no control nodes found") //nolint:goerr113
-		}
-		if len(controls.Items) > 1 {
-			return ctrl.Result{}, fmt.Errorf("multiple control nodes found") //nolint:goerr113
-		}
-		control := controls.Items[0]
 
 		if err := comp.EnforceKubeInstall(ctx, r.Client, *f, reloader.Install); err != nil {
 			return ctrl.Result{}, fmt.Errorf("enforcing reloader install: %w", err)
