@@ -69,4 +69,7 @@ journalctl -k >> "$OUTPUT_FILE" 2>/dev/null
 echo -e "\n=== Kernel Network Logs ===" >> "$OUTPUT_FILE"
 dmesg | grep -i "network\|bond\|vlan" >> "$OUTPUT_FILE"
 
+echo -e "\n=== SSH Logs ===" >> "$OUTPUT_FILE"
+journalctl -u sshd >> "$OUTPUT_FILE" 2>/dev/null
+
 echo "Diagnostics collected to $OUTPUT_FILE"
