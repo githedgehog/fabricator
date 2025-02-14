@@ -28,6 +28,7 @@ import (
 	"go.githedgehog.com/fabric/pkg/hhfctl/inspect"
 	"go.githedgehog.com/fabric/pkg/util/apiutil"
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
+	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/sync/errgroup"
@@ -56,6 +57,7 @@ func (c *Config) Wait(ctx context.Context, vlab *VLAB) error {
 		wiringapi.SchemeBuilder,
 		vpcapi.SchemeBuilder,
 		agentapi.SchemeBuilder,
+		fabapi.SchemeBuilder,
 	)
 	if err != nil {
 		return fmt.Errorf("creating kube client: %w", err)
@@ -114,6 +116,7 @@ func GetKubeClient(ctx context.Context, workDir string) (client.Client, error) {
 		wiringapi.SchemeBuilder,
 		vpcapi.SchemeBuilder,
 		agentapi.SchemeBuilder,
+		fabapi.SchemeBuilder,
 	)
 }
 
@@ -152,6 +155,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		wiringapi.SchemeBuilder,
 		vpcapi.SchemeBuilder,
 		agentapi.SchemeBuilder,
+		fabapi.SchemeBuilder,
 	)
 	if err != nil {
 		return fmt.Errorf("creating kube client: %w", err)
@@ -523,6 +527,7 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 		wiringapi.SchemeBuilder,
 		vpcapi.SchemeBuilder,
 		agentapi.SchemeBuilder,
+		fabapi.SchemeBuilder,
 	)
 	if err != nil {
 		return fmt.Errorf("creating kube client: %w", err)
@@ -901,6 +906,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 		wiringapi.SchemeBuilder,
 		vpcapi.SchemeBuilder,
 		agentapi.SchemeBuilder,
+		fabapi.SchemeBuilder,
 	)
 	if err != nil {
 		return fmt.Errorf("creating kube client: %w", err)
@@ -1530,6 +1536,7 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 		wiringapi.SchemeBuilder,
 		vpcapi.SchemeBuilder,
 		agentapi.SchemeBuilder,
+		fabapi.SchemeBuilder,
 		&scheme.Builder{
 			GroupVersion:  coreapi.SchemeGroupVersion,
 			SchemeBuilder: coreapi.SchemeBuilder,
