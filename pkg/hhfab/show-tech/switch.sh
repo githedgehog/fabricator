@@ -11,7 +11,7 @@ OUTPUT_FILE="/tmp/show-tech.log"
 
 # Helper function for sonic-cli commands
 run_sonic_cmd() {
-    echo -e "\n=== Executing: sonic-cli -c '$1' ===" | tee -a "$OUTPUT_FILE"
+    echo -e "\n=== Executing: sonic-cli -c '$1' ===" >> "$OUTPUT_FILE"
     sonic-cli -c "$1 | no-more" >> "$OUTPUT_FILE" 2>/dev/null
 }
 
