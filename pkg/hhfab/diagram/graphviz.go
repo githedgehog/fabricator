@@ -5,7 +5,6 @@ package diagram
 
 import (
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,8 +34,6 @@ func GenerateDOT(workDir string, jsonData []byte) error {
 		return fmt.Errorf("writing DOT file: %w", err)
 	}
 
-	slog.Info("Generated graphviz diagram", "file", outputFile)
-
 	return nil
 }
 
@@ -49,7 +46,7 @@ func generateDOT(topo Topology) string {
 	b.WriteString("\tnode [shape=box, style=rounded, fontname=\"Arial\", fontsize=12, height=0.4, width=1.2];\n")
 	b.WriteString("\tedge [fontname=\"Arial\", fontsize=8, dir=none];\n\n")
 
-	layers := sortNodes(topo.Nodes)
+	layers := sortNodes(topo.Nodes, topo.Links)
 
 	// Create legend subgraph (using an HTML table for labels) as in the original.
 	b.WriteString("\tsubgraph cluster_legend {\n")
@@ -153,7 +150,6 @@ func generateDOT(topo Topology) string {
 	}
 
 	b.WriteString("}\n")
-	slog.Debug("Dot graphviz diagram", "nodes", len(topo.Nodes), "links", len(topo.Links))
 
 	return b.String()
 }
