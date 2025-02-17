@@ -510,6 +510,27 @@ func Run(ctx context.Context) error {
 				},
 			},
 			{
+				Name:  "diagram",
+				Usage: "generate a diagram to visualze topology",
+				Flags: append(defaultFlags,
+					&cli.StringFlag{
+						Name:    "format",
+						Aliases: []string{"f"},
+						Usage:   "diagram format: drawio (default), dot (graphviz), mermaid (unsupported)",
+						Value:   "drawio",
+					},
+				),
+				Before: before(false),
+				Action: func(c *cli.Context) error {
+					format := strings.ToLower(c.String("format"))
+					if err := hhfab.Diagram(workDir, format); err != nil {
+						return fmt.Errorf("failed to generate %s diagram: %w", format, err)
+					}
+
+					return nil
+				},
+			},
+			{
 				Name:   "versions",
 				Usage:  "print versions of all components",
 				Flags:  append(defaultFlags, hMode),
