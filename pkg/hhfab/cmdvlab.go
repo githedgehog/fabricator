@@ -5,6 +5,7 @@ package hhfab
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"strings"
 
 	"go.githedgehog.com/fabricator/pkg/fab/recipe"
+	"go.githedgehog.com/fabricator/pkg/hhfab/diagram"
 	"go.githedgehog.com/fabricator/pkg/hhfab/pdu"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 )
@@ -238,4 +240,39 @@ func DoSwitchReinstall(ctx context.Context, workDir, cacheDir string, opts Switc
 	}
 
 	return c.VLABSwitchReinstall(ctx, opts)
+}
+
+func Diagram(workDir, format string) error {
+	includeDir := filepath.Join(workDir, IncludeDir)
+	wiringPath := filepath.Join(includeDir, DefaultVLABGeneratedFile)
+	content, err := os.ReadFile(wiringPath)
+	if err != nil {
+		return fmt.Errorf("reading wiring file: %w", err)
+	}
+
+	loader := apiutil.NewWiringLoader()
+	objs, err := loader.Load(content)
+	if err != nil {
+		return fmt.Errorf("loading wiring YAML: %w", err)
+	}
+
+	jsonData, err := json.MarshalIndent(objs, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling JSON: %w", err)
+	}
+
+	switch strings.ToLower(format) {
+	case "drawio":
+		if err := diagram.GenerateDrawio(workDir, jsonData); err != nil {
+			return fmt.Errorf("generating draw.io diagram: %w", err)
+		}
+	case "dot":
+		if err := diagram.GenerateDOT(workDir, jsonData); err != nil {
+			return fmt.Errorf("generating DOT diagram: %w", err)
+		}
+	case "mermaid":
+		return fmt.Errorf("mermaid format is not supported yet") //nolint:goerr113
+	}
+
+	return nil
 }
