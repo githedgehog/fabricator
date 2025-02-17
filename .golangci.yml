@@ -35,9 +35,11 @@ linters:
     - goconst
     - err113
     - gofmt
+    - goimports
     - gosec
     - loggercheck
     - makezero
+    - misspell
     - musttag
     - nilerr
     - nilnil
@@ -45,6 +47,7 @@ linters:
     - noctx
     - nolintlint
     - nonamedreturns
+    - prealloc
     - predeclared
     - promlinter
     - reassign
