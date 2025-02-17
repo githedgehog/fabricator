@@ -219,10 +219,10 @@ func (b *ControlInstallBuilder) buildUSBImage(ctx context.Context) error {
 
 	if b.Mode == BuildModeUSB {
 		if err := fs1.(*fat32.FileSystem).Commit(); err != nil {
-			return fmt.Errorf("commiting esp FS: %w", err)
+			return fmt.Errorf("committing esp FS: %w", err)
 		}
 		if err := fs2.(*fat32.FileSystem).Commit(); err != nil {
-			return fmt.Errorf("commiting backpack FS: %w", err)
+			return fmt.Errorf("committing backpack FS: %w", err)
 		}
 	} else if b.Mode == BuildModeISO {
 		iso, ok := fs1.(*iso9660.FileSystem)

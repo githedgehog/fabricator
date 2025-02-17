@@ -21,6 +21,7 @@ import (
 
 	"github.com/appleboy/easyssh-proxy"
 	"github.com/manifoldco/promptui"
+	"github.com/samber/lo"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/hhfctl"
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
@@ -533,10 +534,7 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB) error {
 	wg.Wait()
 	close(errChan)
 
-	var errors []error
-	for err := range errChan {
-		errors = append(errors, err)
-	}
+	errors := lo.ChannelToSlice(errChan)
 
 	if successCount.Load() == 0 {
 		return fmt.Errorf("failed to collect any diagnostics: %v", errors) //nolint:goerr113

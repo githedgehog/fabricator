@@ -10,6 +10,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/samber/lo"
 )
 
 // ParseOutletJSON parses the JSON file and extracts outlet mappings and unique PDU IPs
@@ -39,13 +41,7 @@ func ParseOutletJSON(jsonFilePath string) (map[string]string, []string, error) {
 		ipSet[ip] = struct{}{}
 	}
 
-	// Convert the set to a list
-	var uniqueIPs []string
-	for ip := range ipSet {
-		uniqueIPs = append(uniqueIPs, ip)
-	}
-
-	return outlets, uniqueIPs, nil
+	return outlets, lo.Keys(ipSet), nil
 }
 
 func ExtractOutletID(url string) (int, error) {
