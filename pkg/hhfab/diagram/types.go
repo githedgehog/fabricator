@@ -31,12 +31,6 @@ type Topology struct {
 	Links []Link
 }
 
-type LayeredNodes struct {
-	Spine  []Node
-	Leaf   []Node
-	Server []Node
-}
-
 const (
 	EdgeTypeFabric    = "fabric"
 	EdgeTypeMCLAG     = "mclag"

@@ -244,10 +244,35 @@ func DoSwitchReinstall(ctx context.Context, workDir, cacheDir string, opts Switc
 
 func Diagram(workDir, format string) error {
 	includeDir := filepath.Join(workDir, IncludeDir)
-	wiringPath := filepath.Join(includeDir, DefaultVLABGeneratedFile)
-	content, err := os.ReadFile(wiringPath)
+
+	files, err := os.ReadDir(includeDir)
 	if err != nil {
-		return fmt.Errorf("reading wiring file: %w", err)
+		return fmt.Errorf("reading include directory: %w", err)
+	}
+
+	var yamlFiles []string
+	for _, file := range files {
+		if !file.IsDir() && strings.HasSuffix(file.Name(), YAMLExt) {
+			yamlPath := filepath.Join(includeDir, file.Name())
+			yamlFiles = append(yamlFiles, yamlPath)
+			slog.Debug("Found YAML file", "path", yamlPath)
+		}
+	}
+
+	if len(yamlFiles) == 0 {
+		return fmt.Errorf("no YAML files found in include directory") //nolint:goerr113
+	}
+
+	var content []byte
+	for _, file := range yamlFiles {
+		fileContent, err := os.ReadFile(file)
+		if err != nil {
+			return fmt.Errorf("reading file %s: %w", file, err)
+		}
+		if len(content) > 0 {
+			content = append(content, []byte("\n---\n")...)
+		}
+		content = append(content, fileContent...)
 	}
 
 	loader := apiutil.NewWiringLoader()
@@ -261,15 +286,20 @@ func Diagram(workDir, format string) error {
 		return fmt.Errorf("marshaling JSON: %w", err)
 	}
 
-	switch strings.ToLower(format) {
+	format = strings.ToLower(format)
+	switch format {
 	case "drawio":
+		slog.Debug("Generating draw.io diagram")
 		if err := diagram.GenerateDrawio(workDir, jsonData); err != nil {
 			return fmt.Errorf("generating draw.io diagram: %w", err)
 		}
+		slog.Info("Generated draw.io diagram", "file", filepath.Join(workDir, "vlab-diagram.drawio"))
 	case "dot":
+		slog.Debug("Generating DOT diagram")
 		if err := diagram.GenerateDOT(workDir, jsonData); err != nil {
 			return fmt.Errorf("generating DOT diagram: %w", err)
 		}
+		slog.Info("Generated graphviz diagram", "file", filepath.Join(workDir, "vlab-diagram.dot"))
 	case "mermaid":
 		return fmt.Errorf("mermaid format is not supported yet") //nolint:goerr113
 	}

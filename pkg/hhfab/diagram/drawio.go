@@ -6,7 +6,6 @@ package diagram
 import (
 	"encoding/xml"
 	"fmt"
-	"log/slog"
 	"math"
 	"os"
 	"path/filepath"
@@ -85,9 +84,6 @@ func GenerateDrawio(workDir string, jsonData []byte) error {
 		return fmt.Errorf("writing draw.io file: %w", err)
 	}
 
-	slog.Info("Generated draw.io diagram", "file", outputFile)
-	slog.Debug("XML draw.io diagram", "file", outputFile, "nodes", len(topo.Nodes), "links", len(topo.Links))
-
 	return nil
 }
 
@@ -124,7 +120,7 @@ func generateDrawio(topo Topology) *MxGraphModel {
 		spineY        = 100
 	)
 
-	layers := sortNodes(topo.Nodes)
+	layers := sortNodes(topo.Nodes, topo.Links)
 	cellMap := make(map[string]*MxCell)
 
 	totalSpineWidth := len(layers.Spine)*nodeWidth + (len(layers.Spine)-1)*horizontalGap
