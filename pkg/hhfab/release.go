@@ -42,6 +42,8 @@ type VPCPeeringTestCtx struct {
 	hhfabBin         string
 }
 
+// prepare for a test: wipe the fabric and then create the VPCs according to the
+// options in the test context
 func (testCtx *VPCPeeringTestCtx) setupTest(ctx context.Context) error {
 	if err := hhfctl.VPCWipeWithClient(ctx, testCtx.kube); err != nil {
 		return errors.Wrap(err, "WipeBetweenTests")
@@ -53,6 +55,7 @@ func (testCtx *VPCPeeringTestCtx) setupTest(ctx context.Context) error {
 	return nil
 }
 
+// add a single VPC peering spec to an existing map, which will be the input for DoSetupPeerings
 func appendVpcPeeringSpec(vpcPeerings map[string]*vpcapi.VPCPeeringSpec, index1, index2 int, remote string, vpc1Subnets, vpc2Subnets []string) {
 	vpc1 := fmt.Sprintf("vpc-%02d", index1)
 	vpc2 := fmt.Sprintf("vpc-%02d", index2)
@@ -72,6 +75,7 @@ func appendVpcPeeringSpec(vpcPeerings map[string]*vpcapi.VPCPeeringSpec, index1,
 	}
 }
 
+// add a single external peering spec to an existing map, which will be the input for DoSetupPeerings
 func appendExtPeeringSpec(extPeerings map[string]*vpcapi.ExternalPeeringSpec, vpcIndex int, ext string, subnets []string, prefixes []string) {
 	entryName := fmt.Sprintf("vpc-%02d--%s", vpcIndex, ext)
 	vpc := fmt.Sprintf("vpc-%02d", vpcIndex)
@@ -95,6 +99,7 @@ func appendExtPeeringSpec(extPeerings map[string]*vpcapi.ExternalPeeringSpec, vp
 	}
 }
 
+// populate the vpcPeerings map with all possible VPC peering combinations
 func populateFullMeshVpcPeerings(ctx context.Context, kube client.Client, vpcPeerings map[string]*vpcapi.VPCPeeringSpec) error {
 	vpcs := &vpcapi.VPCList{}
 	if err := kube.List(ctx, vpcs); err != nil {
@@ -109,6 +114,8 @@ func populateFullMeshVpcPeerings(ctx context.Context, kube client.Client, vpcPee
 	return nil
 }
 
+// populate the vpcPeerings map with a "full loop" of VPC peering connections, i.e.
+// each VPC is connected to the next one in the list, and the last one is connected to the first
 func populateFullLoopVpcPeerings(ctx context.Context, kube client.Client, vpcPeerings map[string]*vpcapi.VPCPeeringSpec) error {
 	vpcs := &vpcapi.VPCList{}
 	if err := kube.List(ctx, vpcs); err != nil {
@@ -121,6 +128,7 @@ func populateFullLoopVpcPeerings(ctx context.Context, kube client.Client, vpcPee
 	return nil
 }
 
+// populate the externalPeerings map with all possible external VPC peering combinations
 func populateAllExternalVpcPeerings(ctx context.Context, kube client.Client, extPeerings map[string]*vpcapi.ExternalPeeringSpec) error {
 	vpcs := &vpcapi.VPCList{}
 	if err := kube.List(ctx, vpcs); err != nil {
@@ -139,6 +147,9 @@ func populateAllExternalVpcPeerings(ctx context.Context, kube client.Client, ext
 	return nil
 }
 
+// Run a configure command on switch swName via the sonic-cli.
+// Each of the strings in cmds is going to be wrapped in double quotes and
+// passed as a separate argument to sonic-cli.
 func execConfigCmd(hhfabBin, workDir, swName string, cmds ...string) error {
 	cmd := exec.Command(
 		hhfabBin,
@@ -164,6 +175,7 @@ func execConfigCmd(hhfabBin, workDir, swName string, cmds ...string) error {
 	return nil
 }
 
+// Run a command on node nodeName via ssh.
 func execNodeCmd(hhfabBin, workDir, nodeName string, command string) error {
 	cmd := exec.Command(
 		hhfabBin,
@@ -184,10 +196,12 @@ func execNodeCmd(hhfabBin, workDir, nodeName string, command string) error {
 	return nil
 }
 
+// Enable or disable the hedgehog agent on switch swName.
 func changeAgentStatus(hhfabBin, workDir, swName string, up bool) error {
 	return execNodeCmd(hhfabBin, workDir, swName, fmt.Sprintf("sudo systemctl %s hedgehog-agent.service", map[bool]string{true: "start", false: "stop"}[up]))
 }
 
+// Change the admin status of a switch port via the sonic-cli, i.e. by running (no) shutdown on the port.
 func changeSwitchPortStatus(hhfabBin, workDir, deviceName, nosPortName string, up bool) error {
 	slog.Debug("Changing switch port status", "device", deviceName, "port", nosPortName, "up", up)
 	if up {
@@ -215,6 +229,7 @@ func changeSwitchPortStatus(hhfabBin, workDir, deviceName, nosPortName string, u
 	return nil
 }
 
+// ping the IP address ip from node nodeName, expectSuccess determines whether the ping should succeed or fail.
 func pingFromServer(hhfabBin, workDir, nodeName, ip string, expectSuccess bool) error {
 	cmd := exec.Command(
 		hhfabBin,
@@ -246,6 +261,10 @@ func pingFromServer(hhfabBin, workDir, nodeName, ip string, expectSuccess bool) 
 
 // Test functions
 
+// The starter test is presumably an arbitrary point in the space of possible VPC peering configurations.
+// It was presumably chosen because going from this to a full mesh configuration could trigger
+// the gNMI bug. Note that in order to reproduce it one should disable the forced cleanup between
+// tests.
 func (testCtx *VPCPeeringTestCtx) vpcPeeringsStarterTest(ctx context.Context) (bool, error) {
 	// TODO: skip test if we're not in env-1 or env-ci-1 (decide how to deduce that)
 	// 1+2:r=border 1+3 3+5 2+4 4+6 5+6 6+7 7+8 8+9  5~default--5835:s=subnet-01 6~default--5835:s=subnet-01  1~default--5835:s=subnet-01  2~default--5835:s=subnet-01  9~default--5835:s=subnet-01  7~default--5835:s=subnet-01
@@ -287,6 +306,7 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsStarterTest(ctx context.Context) (b
 	return false, nil
 }
 
+// Test connectivity between all VPCs in a full mesh configuration, including all externals.
 func (testCtx *VPCPeeringTestCtx) vpcPeeringsFullMeshAllExternalsTest(ctx context.Context) (bool, error) {
 	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec, 15)
 	if err := populateFullMeshVpcPeerings(ctx, testCtx.kube, vpcPeerings); err != nil {
@@ -308,6 +328,7 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsFullMeshAllExternalsTest(ctx contex
 	return false, nil
 }
 
+// Test connectivity between all VPCs with no peering except of the external ones.
 func (testCtx *VPCPeeringTestCtx) vpcPeeringsOnlyExternalsTest(ctx context.Context) (bool, error) {
 	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec, 0)
 	externalPeerings := make(map[string]*vpcapi.ExternalPeeringSpec, 6)
@@ -329,6 +350,7 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsOnlyExternalsTest(ctx context.Conte
 	return false, nil
 }
 
+// Test connectivity between all VPCs in a full loop configuration, including all externals.
 func (testCtx *VPCPeeringTestCtx) vpcPeeringsFullLoopAllExternalsTest(ctx context.Context) (bool, error) {
 	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec, 6)
 	if err := populateFullLoopVpcPeerings(ctx, testCtx.kube, vpcPeerings); err != nil {
@@ -348,6 +370,7 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsFullLoopAllExternalsTest(ctx contex
 	return false, nil
 }
 
+// Arbitrary configuration which again was shown to occasionally trigger the gNMI bug.
 func (testCtx *VPCPeeringTestCtx) vpcPeeringsSergeisSpecialTest(ctx context.Context) (bool, error) {
 	// TODO: skip test if we're not in env-1 or env-ci-1 (decide how to deduce that)
 	// 1+2 2+3 2+4:r=border 6+5 1~default--5835:s=subnet-01
@@ -407,6 +430,9 @@ func shutDownPortAndTest(ctx context.Context, testCtx *VPCPeeringTestCtx, device
 	return nil
 }
 
+// Basic test for mclag failover.
+// For each mclag connection, set one of the links down by shutting down the port on the switch,
+// then test connectivity. Repeat for the other link.
 func (testCtx *VPCPeeringTestCtx) mclagTest(ctx context.Context) (bool, error) {
 	// list connections in the fabric, filter by MC-LAG connection type
 	conns := &wiringapi.ConnectionList{}
@@ -453,6 +479,9 @@ func (testCtx *VPCPeeringTestCtx) mclagTest(ctx context.Context) (bool, error) {
 	return false, nil
 }
 
+// Basic test for eslag failover.
+// For each eslag connection, set one of the links down by shutting down the port on the switch,
+// then test connectivity. Repeat for the other link.
 func (testCtx *VPCPeeringTestCtx) eslagTest(ctx context.Context) (bool, error) {
 	// list connections in the fabric, filter by ES-LAG connection type
 	conns := &wiringapi.ConnectionList{}
@@ -499,6 +528,9 @@ func (testCtx *VPCPeeringTestCtx) eslagTest(ctx context.Context) (bool, error) {
 	return false, nil
 }
 
+// Basic test for bundled connection failover.
+// For each bundled connection, set one of the links down by shutting down the port on the switch,
+// then test connectivity. Repeat for the other link(s).
 func (testCtx *VPCPeeringTestCtx) bundledFailoverTest(ctx context.Context) (bool, error) {
 	// list connections in the fabric, filter by bundled connection type
 	conns := &wiringapi.ConnectionList{}
@@ -545,6 +577,9 @@ func (testCtx *VPCPeeringTestCtx) bundledFailoverTest(ctx context.Context) (bool
 	return false, nil
 }
 
+// Basic test for spine failover.
+// Iterate over the spine switches (skip the first one), and shut down all links towards them.
+// Test connectivity, then re-enable the links.
 func (testCtx *VPCPeeringTestCtx) spineFailoverTest(ctx context.Context) (bool, error) {
 	// list spines. FIXME: figure a way to filter this directly, if possible
 	switches := &wiringapi.SwitchList{}
@@ -620,6 +655,7 @@ func (testCtx *VPCPeeringTestCtx) spineFailoverTest(ctx context.Context) (bool, 
 	return false, nil
 }
 
+// Vanilla test for VPC peering, just test connectivity without any further restriction
 func (testCtx *VPCPeeringTestCtx) noRestrictionsTest(ctx context.Context) (bool, error) {
 	if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
 		return false, errors.Wrap(err, "DoVLABTestConnectivity")
@@ -628,6 +664,12 @@ func (testCtx *VPCPeeringTestCtx) noRestrictionsTest(ctx context.Context) (bool,
 	return false, nil
 }
 
+// Test VPC peering with multiple subnets and with restrictions.
+// Assumes the scenario has 3 subnets for VPC vpc-01 and vpc-02.
+// 1. Isolate subnet-01 in vpc-01, test connectivity
+// 2. Override isolation with explicit permit list, test connectivity
+// 3. Set restricted flag in subnet-02 in vpc-02, test connectivity
+// 4. Remove all restrictions
 func (testCtx *VPCPeeringTestCtx) multiSubnetsIsolationTest(ctx context.Context) (bool, error) {
 	// FIXME: make sure to reset all changes after the test regardles of early failures
 	// modify vpc-01 to have isolated subnets
@@ -711,6 +753,10 @@ func (testCtx *VPCPeeringTestCtx) multiSubnetsIsolationTest(ctx context.Context)
 	return false, nil
 }
 
+// Test VPC peering with multiple subnets and with subnet filtering.
+// Assumes the scenario has 3 VPCs and at least 2 subnets in each VPC.
+// It creates peering between all VPCs, but restricts the peering to only one subnet
+// between 1-3 and 2-3. It then tests connectivity.
 func (testCtx *VPCPeeringTestCtx) multiSubnetsSubnetFilteringTest(ctx context.Context) (bool, error) {
 	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec, 3)
 	appendVpcPeeringSpec(vpcPeerings, 1, 2, "", []string{}, []string{})
@@ -728,6 +774,13 @@ func (testCtx *VPCPeeringTestCtx) multiSubnetsSubnetFilteringTest(ctx context.Co
 	return false, nil
 }
 
+// Test VPC peering with multiple subnets and with restrictions.
+// Assumes the scenario has 3 subnets for VPC vpc-01.
+// 1. Isolate subnet-01, test connectivity
+// 2. Set restricted flag in subnet-02, test connectivity
+// 3. Set both isolated and restricted flags in subnet-03, test connectivity
+// 4. Override isolation with explicit permit list, test connectivity
+// 5. Remove all restrictions
 func (testCtx *VPCPeeringTestCtx) singleVPCWithRestrictionsTest(ctx context.Context) (bool, error) {
 	// isolate subnet-01
 	vpc := &vpcapi.VPC{}
@@ -1002,6 +1055,10 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool,
 	return false, nil
 }
 
+// Test that DNS, NTP and MTU settings for a VPC are correctly propagated to the servers.
+// For DNS, we check the content of /etc/resolv.conf;
+// for NTP, we check the output of timedatectl show-timesync;
+// for MTU, we check the output of "ip link" on the vlan interface.
 func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (bool, error) {
 	// Get the VPC
 	vpc := &vpcapi.VPC{}
