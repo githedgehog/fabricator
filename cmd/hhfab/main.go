@@ -58,6 +58,7 @@ const (
 	FlagNameFailFast              = "fail-fast"
 	FlagNameReady                 = "ready"
 	FlagNameCollectShowTech       = "collect-show-tech"
+	FlagNameDetach                = "detach"
 )
 
 func main() {
@@ -638,6 +639,11 @@ func Run(ctx context.Context) error {
 								Usage:   "collect show-tech from all devices at exit or error",
 								EnvVars: []string{"HHFAB_VLAB_COLLECT"},
 							},
+							&cli.BoolFlag{
+								Name:    "FlagNameDetach",
+								Aliases: []string{"d"},
+								Usage:   "run VLAB in background",
+							},
 						),
 						Before: before(false),
 						Action: func(c *cli.Context) error {
@@ -654,9 +660,23 @@ func Run(ctx context.Context) error {
 									FailFast:           c.Bool(FlagNameFailFast),
 									OnReady:            c.StringSlice(FlagNameReady),
 									CollectShowTech:    c.Bool(FlagNameCollectShowTech),
+									Detach:             c.Bool(FlagNameDetach),
 								},
 							}); err != nil {
 								return fmt.Errorf("running VLAB: %w", err)
+							}
+
+							return nil
+						},
+					},
+					{
+						Name:   "down",
+						Usage:  "stop VLAB",
+						Flags:  defaultFlags,
+						Before: before(false),
+						Action: func(_ *cli.Context) error {
+							if err := hhfab.VLABDown(ctx, workDir, cacheDir); err != nil {
+								return fmt.Errorf("stopping VLAB: %w", err)
 							}
 
 							return nil

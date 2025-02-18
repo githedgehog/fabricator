@@ -6,6 +6,7 @@ package hhfab
 import (
 	"context"
 	_ "embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -88,6 +89,7 @@ type VLABRunOpts struct {
 	FailFast           bool
 	OnReady            []string
 	CollectShowTech    bool
+	Detach             bool
 }
 
 type OnReady string
@@ -165,6 +167,23 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 		if len(stale) > 0 {
 			return fmt.Errorf("%d stale or detached VM(s) found after cleanup", len(stale)) //nolint:goerr113
 		}
+	}
+
+	state := &VLABState{
+		Running: true,
+		VMs:     make(map[string]*VMState),
+	}
+
+	for _, vm := range vlab.VMs {
+		state.VMs[vm.Name] = &VMState{
+			ID:      vm.ID,
+			Type:    vm.Type,
+			QMPSock: filepath.Join(c.WorkDir, VLABDir, VLABVMsDir, vm.Name, VLABQMPSock),
+		}
+	}
+
+	if err := c.saveVLABState(state); err != nil {
+		return fmt.Errorf("saving initial state: %w", err)
 	}
 
 	if err := execHelper(ctx, c.WorkDir, []string{
@@ -337,9 +356,12 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 				"-global", "ICH9-LPC.disable_s3=1",
 			}
 
-			// for detached:
-			// -daemonize
-			// -pidfile
+			if opts.Detach {
+				args = append(args,
+					"-daemonize",
+					"-pidfile", filepath.Join(vmDir, "qemu.pid"),
+				)
+			}
 
 			if vm.Type == VMTypeControl && opts.BuildMode == recipe.BuildModeManual || vm.Type == VMTypeServer || vm.Type == VMTypeGateway {
 				ign := VLABIgnition
@@ -379,19 +401,30 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 
 			slog.Debug("Starting", "vm", vm.Name, "type", vm.Type, "cmd", VLABCmdQemuSystem+" "+strings.Join(args, " "))
 
-			if err := execCmd(ctx, true, vmDir, VLABCmdQemuSystem, args, "vm", vm.Name); err != nil {
-				slog.Warn("Failed running VM", "vm", vm.Name, "type", vm.Type, "err", err)
+			cmd := exec.CommandContext(ctx, VLABCmdQemuSystem, args...)
+			cmd.Dir = vmDir
+			cmd.Stdin = os.Stdin
+			cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "qemu: ", "vm", vm.Name)
+			cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "qemu: ", "vm", vm.Name)
+			cmd.SysProcAttr = &syscall.SysProcAttr{
+				Setpgid: true,
+			}
 
-				if opts.CollectShowTech {
-					if err := c.VLABShowTech(ctx, vlab); err != nil {
-						slog.Warn("Failed to collect show-tech diagnostics", "err", err)
+			if err := cmd.Start(); err != nil {
+				return fmt.Errorf("starting VM: %w", err)
+			}
 
-						return fmt.Errorf("getting show-tech: %w", err)
+			state.VMs[vm.Name].PID = cmd.Process.Pid
+			if err := c.saveVLABState(state); err != nil {
+				slog.Warn("Failed to save VM state", "vm", vm.Name, "err", err)
+			}
+
+			if !opts.Detach {
+				if err := cmd.Wait(); err != nil {
+					if opts.FailFast {
+						return fmt.Errorf("VM exited: %w", err)
 					}
-				}
-
-				if opts.FailFast {
-					return fmt.Errorf("running vm: %w", err)
+					slog.Warn("VM exited with error", "vm", vm.Name, "err", err)
 				}
 			}
 
@@ -937,4 +970,131 @@ func sshReadMarker(sftp *sftp.Client) (string, error) {
 	}
 
 	return strings.TrimSpace(string(rawMarker)), nil
+}
+
+type VLABState struct {
+	Running bool                `json:"running"`
+	VMs     map[string]*VMState `json:"vms"`
+}
+
+type VMState struct {
+	ID      uint   `json:"id"`
+	Type    VMType `json:"type"`
+	QMPSock string `json:"qmp_sock"`
+	PID     int    `json:"pid"`
+}
+
+func (c *Config) getVLABStatePath() string {
+	return filepath.Join(c.WorkDir, VLABDir, "vlab.state")
+}
+
+func (c *Config) saveVLABState(state *VLABState) error {
+	data, err := json.Marshal(state)
+	if err != nil {
+		return fmt.Errorf("marshaling state: %w", err)
+	}
+
+	if err := os.WriteFile(c.getVLABStatePath(), data, 0600); err != nil {
+		return fmt.Errorf("writing state file: %w", err)
+	}
+
+	return nil
+}
+
+func (c *Config) loadVLABState() (*VLABState, error) {
+	data, err := os.ReadFile(c.getVLABStatePath())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return &VLABState{
+				VMs: make(map[string]*VMState),
+			}, nil
+		}
+
+		return nil, fmt.Errorf("reading state file: %w", err)
+	}
+
+	state := &VLABState{}
+	if err := json.Unmarshal(data, state); err != nil {
+		return nil, fmt.Errorf("unmarshaling state: %w", err)
+	}
+
+	return state, nil
+}
+
+func (c *Config) VLABDown(ctx context.Context, vlab *VLAB) error {
+	slog.Info("Shutting down VLAB VMs")
+
+	state, err := c.loadVLABState()
+	if err != nil {
+		return fmt.Errorf("loading state: %w", err)
+	}
+
+	if !state.Running {
+		return fmt.Errorf("VLAB is not running") //nolint:goerr113
+	}
+
+	group, ctx := errgroup.WithContext(ctx)
+
+	for _, vm := range vlab.VMs {
+		vmState := state.VMs[vm.Name]
+		if vmState == nil {
+			continue
+		}
+
+		group.Go(func() error {
+			slog.Debug("Shutting down VM", "vm", vm.Name, "type", vm.Type)
+
+			// For VMs that support SSH, try graceful shutdown
+			if vm.Type == VMTypeServer || vm.Type == VMTypeControl || vm.Type == VMTypeGateway {
+				if err := c.VLABAccess(ctx, vlab, VLABAccessSSH, vm.Name, []string{"sudo", "shutdown", "-h", "now"}); err != nil {
+					slog.Warn("Failed graceful shutdown, forcing stop", "vm", vm.Name, "type", vm.Type, "err", err)
+				}
+			}
+
+			// Check QMP socket and force stop if needed
+			if _, err := os.Stat(vmState.QMPSock); err == nil {
+				qmpSock := filepath.Clean(vmState.QMPSock)
+				if !strings.HasPrefix(qmpSock, filepath.Join(c.WorkDir, VLABDir)) {
+					return fmt.Errorf("invalid QMP socket path") //nolint:goerr113
+				}
+				cmd := exec.CommandContext(ctx, VLABCmdSocat, "STDIO,raw,echo=0,escape=0x11", "unix-connect:"+qmpSock) // #nosec G204
+				cmd.Dir = filepath.Join(c.WorkDir, VLABDir, VLABVMsDir, vm.Name)
+				cmd.Stdin = strings.NewReader("quit\n")
+				cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "qmp: ", "vm", vm.Name)
+				cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "qmp: ", "vm", vm.Name)
+				if err := cmd.Run(); err != nil {
+					// If QMP fails, try SIGTERM then SIGKILL
+					if vmState.PID > 0 {
+						if err := syscall.Kill(vmState.PID, syscall.SIGTERM); err != nil {
+							slog.Warn("Failed to send SIGTERM", "vm", vm.Name, "pid", vmState.PID, "err", err)
+							if err := syscall.Kill(vmState.PID, syscall.SIGKILL); err != nil {
+								return fmt.Errorf("failed to kill VM %s: %w", vm.Name, err)
+							}
+						}
+					}
+				}
+			}
+
+			return nil
+		})
+	}
+
+	if err := group.Wait(); err != nil {
+		return fmt.Errorf("shutting down VMs: %w", err)
+	}
+
+	// Clean up network resources
+	slog.Info("Cleaning up network resources")
+	if err := execHelper(ctx, c.WorkDir, []string{"setup-taps", "--count", "0"}); err != nil {
+		return fmt.Errorf("cleaning up network resources: %w", err)
+	}
+
+	// Clear state file
+	if err := os.Remove(c.getVLABStatePath()); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("removing state file: %w", err)
+	}
+
+	slog.Info("VLAB shutdown completed successfully")
+
+	return nil
 }
