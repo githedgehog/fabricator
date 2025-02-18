@@ -96,6 +96,18 @@ run_sonic_cmd() {
 } >> "$OUTPUT_FILE" 2>&1
 
 # ---------------------------
+# Broadcom SDK Diagnostics
+# ---------------------------
+{
+    echo -e "\n=== Broadcom Port Status ==="
+    bcmcmd "ps"
+
+    echo -e "\n=== Broadcom PHY Information ==="
+    bcmcmd "phy info"
+
+} >> "$OUTPUT_FILE" 2>&1
+
+# ---------------------------
 # System Logs and Status
 # ---------------------------
 {
