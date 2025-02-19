@@ -1,0 +1,276 @@
+variant: flatcar
+version: 1.0.0
+
+passwd:
+  users:
+    - name: core
+      password_hash: "{{ .PasswordHash }}"
+      {{ if .AuthorizedKeys }}ssh_authorized_keys:{{ range .AuthorizedKeys}}
+        - "{{ . }}"{{ end }}{{ end }}
+      groups:
+        - wheel
+      shell: /bin/bash
+
+storage:
+  files:
+    - path: /etc/flatcar/update.conf
+      mode: 0644
+      overwrite: true
+      contents:
+        inline: |
+          SERVER=disabled
+          REBOOT_STRATEGY=off
+      # https://www.flatcar.org/docs/latest/setup/releases/update-strategies/#disable-automatic-updates
+
+    - path: /etc/hostname
+      mode: 0644
+      overwrite: true
+      contents:
+        inline: "{{ .Hostname }}"
+
+    - path: /etc/profile.d/hedgehog-path.sh
+      mode: 0755
+      contents:
+        inline: |
+          #!/bin/bash
+          export PATH=/opt/hedgehog:$PATH
+
+    - path: /etc/hosts
+      append:
+        - inline: |
+            127.0.0.1 {{ .Hostname }}
+
+    {{range $vrfkey, $vrf := .ExternalVRFs}}
+    - path: /etc/systemd/network/10-{{$vrfkey}}.netdev
+      mode: 0644
+      contents:
+        inline: |
+          [NetDev]
+          Name={{$vrfkey}}
+          Kind=vrf
+
+          [VRF]
+          Table={{$vrf.TableID}}
+
+    {{range $nickey, $nic := $vrf.NICs}}
+    - path: /etc/systemd/network/20-{{$nickey}}.network
+      mode: 0644
+      contents:
+        inline: |
+          [Match]
+          Name={{$nickey}}
+
+          [Network]
+          VRF={{$vrfkey}}
+          Address={{$nic.Prefix}}
+    {{end}}{{end}}
+    - path: /etc/systemd/network/30-enp2s0.network
+      mode: 0644
+      contents:
+        inline: |
+          [Match]
+          Name=enp2s0
+
+          [Network]
+          VRF=default
+          DHCP=yes
+
+    - path: /etc/motd.d/hedgehog.conf
+      mode: 0644
+      contents:
+        inline: |
+          Hedgehog VLAB External Instance
+
+    - path: /etc/frr/frr.conf
+      mode: 0644
+      user:
+        id: 100
+      group:
+        id: 100
+      contents:
+        inline: |
+          hostname {{ .Hostname}}
+          log syslog informational
+          !{{range $vrfkey, $vrf := .ExternalVRFs}}
+          vrf {{$vrfkey}}
+           ip route 0.0.0.0/0 172.31.1.2 enp2s0 nexthop-vrf default
+          !
+          bgp community-list standard {{$vrfkey}}In seq 5 permit {{$vrf.InCommunity}}
+          bgp community-list standard {{$vrfkey}}Out seq 5 permit {{$vrf.OutCommunity}}
+          !
+          route-map {{$vrfkey}}In permit 10
+           match community {{$vrfkey}}In
+          !
+          route-map {{$vrfkey}}Out permit 10
+           set community {{$vrf.OutCommunity}}
+          !
+          route-map {{$vrfkey}}Out deny 2000
+          !{{end}}{{range $vrfkey, $vrf := .ExternalVRFs}}
+          router bgp {{$vrf.ASN}} vrf {{$vrfkey}}
+           bgp log-neighbor-changes
+           no bgp ebgp-requires-policy
+           no bgp network import-check {{range $nickey, $nic := $vrf.NICs}}
+           neighbor {{$nic.NeighborIP}} remote-as {{$nic.NeighborAS}}
+           neighbor {{$nic.NeighborIP}} advertisement-interval 0
+           neighbor {{$nic.NeighborIP}} timers connect 30 {{end}}
+           address-family ipv4 unicast {{range $key, $nic := .NICs}}
+            neighbor {{$nic.NeighborIP}} activate
+            no neighbor {{$nic.NeighborIP}} send-community large
+            neighbor {{$nic.NeighborIP}} route-map {{$vrfkey}}In in
+            neighbor {{$nic.NeighborIP}} route-map {{$vrfkey}}Out out {{end}}
+            maximum-paths 1
+            maximum-paths ibgp 1
+            redistribute static
+            import vrf default
+           !
+           address-family ipv6 unicast
+            maximum-paths 1
+            maximum-paths ibgp 1
+           !
+          !{{end}}
+          router bgp 1
+           address-family ipv4 unicast
+            redistribute static{{range $vrfkey, $vrf := .ExternalVRFs}}
+            import vrf {{$vrfkey}}{{end}}
+           !
+          !
+          line vty
+
+    - path: /etc/frr/vtysh.conf
+      mode: 0644
+      user:
+        id: 100
+      group:
+        id: 100
+      contents:
+        inline: |
+          service integrated-vtysh-config
+
+    - path: /etc/frr/daemons
+      mode: 0644
+      user:
+        id: 100
+      group:
+        id: 100
+      contents:
+        inline: |
+          zebra=yes
+          bgpd=yes
+          mgmtd=yes
+          staticd=yes
+          ospfd=no
+          ospf6d=no
+          ripd=no
+          ripngd=no
+          isisd=no
+          pimd=no
+          ldpd=no
+          nhrpd=no
+          eigrpd=no
+          babeld=no
+          sharpd=no
+          pbrd=no
+          bfdd=no
+          fabricd=no
+          #
+          vtysh_enable=yes
+          zebra_options="   -A 127.0.0.1 -s 90000000"
+          bgpd_options="    -A 127.0.0.1"
+          ospfd_options="   -A 127.0.0.1"
+          ospf6d_options="  -A ::1"
+          ripd_options="    -A 127.0.0.1"
+          ripngd_options="  -A ::1"
+          isisd_options="   -A 127.0.0.1"
+          pimd_options="    -A 127.0.0.1"
+          ldpd_options="    -A 127.0.0.1"
+          mgmtd_options="   -A 127.0.0.1"
+          nhrpd_options="   -A 127.0.0.1"
+          eigrpd_options="  -A 127.0.0.1"
+          babeld_options="  -A 127.0.0.1"
+          sharpd_options="  -A 127.0.0.1"
+          staticd_options=" -A 127.0.0.1"
+          pbrd_options="    -A 127.0.0.1"
+          bfdd_options="    -A 127.0.0.1"
+          fabricd_options=" -A 127.0.0.1"
+          #
+          frr_global_options="--limit-fds 100000"
+
+    - path: /opt/hedgehog/vtysh
+      mode: 0755
+      contents:
+        inline: |
+          #!/bin/bash
+          exec /usr/bin/docker exec -it frr vtysh "$@"
+
+systemd:
+  units:
+    - name: frr.service
+      enabled: true
+      contents: |
+        [Unit]
+        Description=FRRouting Container
+        After=docker.service network-online.target
+        Requires=docker.service
+
+        [Service]
+        Type=simple
+        ExecStartPre=/usr/bin/mkdir -p /etc/frr /var/run/frr
+        ExecStartPre=/usr/bin/chown -R 100:100 /etc/frr /var/run/frr
+        ExecStart=/usr/bin/docker run --name=frr --rm --network=host --privileged -v /etc/frr:/etc/frr:rw -v /var/run/frr:/var/run/frr:rw quay.io/frrouting/frr:10.2.1
+        ExecStop=/usr/bin/docker stop frr
+        Restart=on-failure
+        RestartSec=5
+
+        [Install]
+        WantedBy=multi-user.target
+
+    - name: frr-reload.service
+      enabled: false
+      contents: |
+        [Unit]
+        Description=Reload FRRouting configuration
+        Requisite=frr.service
+        After=frr.service
+        Type=oneshot
+
+        [Service]
+        ExecStart=/usr/bin/docker exec frr /usr/lib/frr/frr-reload
+
+    - name: iptables-nat.service
+      enabled: true
+      contents: |
+        [Unit]
+        Description=Configure NAT iptables rules for external NICs -> enp2s0 forwarding
+        After=network-online.target docker.service
+        Wants=network-online.target
+        Requires=docker.service
+
+        [Service]
+        Type=oneshot
+        # Enable IP forwarding (redundant but for clarity)
+        ExecStart=/usr/bin/sysctl -w net.ipv4.ip_forward=1
+
+        # NAT for outgoing traffic
+        ExecStart=/usr/bin/iptables -t nat -A POSTROUTING -o enp2s0 -j MASQUERADE
+
+        # Forward rules in DOCKER-USER chain
+        {{range $vrfkey, $vrf := .ExternalVRFs}}
+        ExecStart=/usr/bin/iptables -I DOCKER-USER -i {{$vrfkey}} -o enp2s0 -j ACCEPT{{range $nickey, $nic := $vrf.NICs}}
+        ExecStart=/usr/bin/iptables -I DOCKER-USER -i enp2s0 -o {{$nickey}} -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+        {{end}}{{end}}
+
+        # Set network parameters for better forwarding (AI suggested)
+        ExecStart=/usr/bin/sysctl -w net.netfilter.nf_conntrack_tcp_timeout_established=3600
+        ExecStart=/usr/bin/sysctl -w net.netfilter.nf_conntrack_tcp_be_liberal=1
+
+        RemainAfterExit=yes
+
+        [Install]
+        WantedBy=multi-user.target
+
+    - name: systemd-networkd.service
+      dropins:
+        - name: 10-debug.conf
+          contents: |
+            [Service]
+            Environment=SYSTEMD_LOG_LEVEL=debug
