@@ -40,6 +40,9 @@ import (
 //go:embed vlab_butane.tmpl.yaml
 var serverButaneTmpl string
 
+//go:embed vlab_frr_butane.tmpl.yaml
+var frrButaneTmpl string
+
 //go:embed hhnet.sh
 var hhnet []byte
 
@@ -89,6 +92,7 @@ type VLABRunOpts struct {
 	FailFast           bool
 	OnReady            []string
 	CollectShowTech    bool
+	SpawnExternal      bool
 }
 
 type OnReady string
@@ -201,6 +205,9 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 	}
 
 	for _, vm := range vlab.VMs {
+		if vm.Type == VMTypeExternal && !opts.SpawnExternal {
+			continue
+		}
 		vmDir := filepath.Join(c.WorkDir, VLABDir, VLABVMsDir, vm.Name)
 
 		if isPresent(vmDir, VLABOSImageFile, VLABEFICodeFile, VLABEFIVarsFile) {
@@ -213,7 +220,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 			}
 
 			resize := false
-			if vm.Type == VMTypeControl && opts.BuildMode == recipe.BuildModeManual || vm.Type == VMTypeServer || vm.Type == VMTypeGateway {
+			if vm.Type == VMTypeControl && opts.BuildMode == recipe.BuildModeManual || vm.Type == VMTypeServer || vm.Type == VMTypeGateway || vm.Type == VMTypeExternal {
 				resize = true
 
 				if err := d.FromORAS(ctx, vmDir, vlabcomp.FlatcarRef, vlabcomp.FlatcarVersion(c.Fab), []artificer.ORASFile{
@@ -304,6 +311,18 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 				if err := os.WriteFile(filepath.Join(vmDir, VLABIgnition), ign, 0o600); err != nil {
 					return fmt.Errorf("writing ignition: %w", err)
 				}
+			} else if vm.Type == VMTypeExternal {
+				but, ign, err := externalIgnition(c.Fab, vm, vlab.ExternalVRFs)
+				if err != nil {
+					return fmt.Errorf("generating external ignition: %w", err)
+				}
+				if err := os.WriteFile(filepath.Join(vmDir, "butane.yaml"), []byte(but), 0o600); err != nil {
+					return fmt.Errorf("writing external butane: %w", err)
+				}
+
+				if err := os.WriteFile(filepath.Join(vmDir, VLABIgnition), ign, 0o600); err != nil {
+					return fmt.Errorf("writing external ignition: %w", err)
+				}
 			}
 		}
 	}
@@ -313,6 +332,9 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 	postProcessDone := make(chan struct{})
 
 	for _, vm := range vlab.VMs {
+		if vm.Type == VMTypeExternal && !opts.SpawnExternal {
+			continue
+		}
 		vmDir := filepath.Join(c.WorkDir, VLABDir, VLABVMsDir, vm.Name)
 
 		group.Go(func() error {
@@ -342,7 +364,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 			// -daemonize
 			// -pidfile
 
-			if vm.Type == VMTypeControl && opts.BuildMode == recipe.BuildModeManual || vm.Type == VMTypeServer || vm.Type == VMTypeGateway {
+			if vm.Type == VMTypeControl && opts.BuildMode == recipe.BuildModeManual || vm.Type == VMTypeServer || vm.Type == VMTypeGateway || vm.Type == VMTypeExternal {
 				ign := VLABIgnition
 				if vm.Type == VMTypeControl {
 					ign = filepath.Join(c.WorkDir, ResultDir, vm.Name+recipe.InstallIgnitionSuffix)
@@ -399,7 +421,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 			return nil
 		})
 
-		if vm.Type == VMTypeServer || vm.Type == VMTypeControl || vm.Type == VMTypeGateway {
+		if vm.Type == VMTypeServer || vm.Type == VMTypeControl || vm.Type == VMTypeGateway || vm.Type == VMTypeExternal {
 			postProcesses.Add(1)
 			group.Go(func() error {
 				if err := c.vmPostProcess(ctx, vlab, d, vm, opts); err != nil {
@@ -652,6 +674,25 @@ func execHelper(ctx context.Context, baseDir string, args []string) error {
 	return nil
 }
 
+func externalIgnition(fab fabapi.Fabricator, vm VM, extVRFMap map[string]ExternalVRFCfg) (string, []byte, error) {
+	but, err := tmplutil.FromTemplate("butane", frrButaneTmpl, map[string]any{
+		"Hostname":       vm.Name,
+		"PasswordHash":   fab.Spec.Config.Control.DefaultUser.PasswordHash,
+		"AuthorizedKeys": fab.Spec.Config.Control.DefaultUser.AuthorizedKeys,
+		"ExternalVRFs":   extVRFMap,
+	})
+	if err != nil {
+		return "", nil, fmt.Errorf("butane: %w", err)
+	}
+
+	ign, err := butaneutil.Translate(but)
+	if err != nil {
+		return but, nil, fmt.Errorf("translating butane: %w", err)
+	}
+
+	return but, ign, nil
+}
+
 func serverIgnition(fab fabapi.Fabricator, vm VM) ([]byte, error) {
 	but, err := tmplutil.FromTemplate("butane", serverButaneTmpl, map[string]any{
 		"Hostname":       vm.Name,
@@ -671,7 +712,7 @@ func serverIgnition(fab fabapi.Fabricator, vm VM) ([]byte, error) {
 }
 
 func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Downloader, vm VM, opts VLABRunOpts) error {
-	if vm.Type != VMTypeServer && vm.Type != VMTypeControl {
+	if vm.Type == VMTypeSwitch {
 		return nil
 	}
 
