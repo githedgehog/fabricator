@@ -230,7 +230,8 @@ type VLABAccessInfo struct {
 	IsSwitch     bool // ssh through control node only
 	IsControl    bool // Needed to distinguish VM type in show-tech
 	IsServer     bool
-	IsNode       bool   // ssh through control node only
+	IsNode       bool // ssh through control node only
+	IsExternal   bool
 	RemoteSerial string // ssh to get serial
 }
 
@@ -474,7 +475,7 @@ func (c *Config) getVLABEntries(ctx context.Context, vlab *VLAB) (map[string]VLA
 	for _, vm := range vlab.VMs {
 		sshPort := uint(0)
 
-		if len(vm.NICs) > 0 && strings.Contains(vm.NICs[0], "user,") && (vm.Type == VMTypeControl || vm.Type == VMTypeServer) {
+		if len(vm.NICs) > 0 && strings.Contains(vm.NICs[0], "user,") && (vm.Type == VMTypeControl || vm.Type == VMTypeServer || vm.Type == VMTypeExternal) {
 			sshPort = getSSHPort(vm.ID)
 		}
 
@@ -487,6 +488,7 @@ func (c *Config) getVLABEntries(ctx context.Context, vlab *VLAB) (map[string]VLA
 			IsServer:   vm.Type == VMTypeServer,
 			IsControl:  vm.Type == VMTypeControl,
 			IsNode:     vm.Type == VMTypeGateway,
+			IsExternal: vm.Type == VMTypeExternal,
 		}
 	}
 
@@ -522,10 +524,11 @@ type ShowTechScript struct {
 func DefaultShowTechScript() ShowTechScript {
 	return ShowTechScript{
 		Scripts: map[VMType][]byte{
-			VMTypeServer:  serverScript,
-			VMTypeControl: controlScript,
-			VMTypeSwitch:  switchScript,
-			VMTypeGateway: serverScript, // TODO add gateway script
+			VMTypeServer:   serverScript,
+			VMTypeControl:  controlScript,
+			VMTypeSwitch:   switchScript,
+			VMTypeGateway:  serverScript, // TODO add gateway script
+			VMTypeExternal: serverScript, // TODO add external script
 		},
 	}
 }
@@ -865,6 +868,8 @@ func getVMType(entry VLABAccessInfo) VMType {
 		return VMTypeControl
 	case entry.IsServer:
 		return VMTypeServer
+	case entry.IsExternal:
+		return VMTypeExternal
 	default:
 		return ""
 	}
