@@ -625,7 +625,7 @@ func (c *ControlInstall) waitNTP(ctx context.Context, kube client.Client) error 
 	return nil
 }
 
-func waitKube[T client.Object](ctx context.Context, kube client.Client, name, ns string, obj T, check func(obj T) (bool, error)) error {
+func waitKube[T client.Object](ctx context.Context, kube client.Reader, name, ns string, obj T, check func(obj T) (bool, error)) error {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 

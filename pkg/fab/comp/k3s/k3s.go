@@ -7,6 +7,7 @@ import (
 	_ "embed"
 	"fmt"
 	"slices"
+	"strings"
 
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/api/meta"
@@ -22,6 +23,7 @@ const (
 	AirgapName         = "k3s-airgap-images-amd64.tar.gz"
 	ImagesDir          = "/var/lib/rancher/k3s/agent/images"
 	ChartsDir          = "/var/lib/rancher/k3s/server/static/" + comp.BootstrapChartsPrefix
+	ServiceName        = "k3s.service"
 	APIPort            = 6443
 	ConfigDir          = "/etc/rancher/k3s"
 	ConfigPath         = "/etc/rancher/k3s/config.yaml"
@@ -31,6 +33,10 @@ const (
 
 func Version(f fabapi.Fabricator) meta.Version {
 	return f.Status.Versions.Platform.K3s
+}
+
+func KubeVersion(f fabapi.Fabricator) string {
+	return strings.ReplaceAll(string(f.Status.Versions.Platform.K3s), "-", "+")
 }
 
 //go:embed config.tmpl.yaml
