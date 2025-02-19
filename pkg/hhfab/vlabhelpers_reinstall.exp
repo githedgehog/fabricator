@@ -189,17 +189,47 @@ expect -timeout 300 -ex "GNU GRUB" {
 	log_message "EXP-DBG" "GRUB Menu detected"
 	# Select the ONIE option, and finally the Install OS option
 	sleep 1
-	send -- "$KEY_HOME"
+	
+	# Check if spawn ID is still valid
+	if {[catch {send -- "$KEY_HOME"} err]} {
+		log_message "EXP-ERR" "Lost connection while sending KEY_HOME: $err"
+		exit $ERROR_CONSOLE
+	}
+	
 	set timeout 1
 	expect {
 		-ex $ONIE_HIGHLIGHT {
 			log_message "EXP-DBG" "ONIE option found"
 			set timeout -1
-			send "\r"
-			expect -ex "GNU GRUB"
-			send -- "$KEY_HOME"
-			sleep 1
-			send "\r"
+			
+			# Check connection before sending return
+			if {[catch {send "\r"} err]} {
+				log_message "EXP-ERR" "Lost connection while sending return: $err"
+				exit $ERROR_CONSOLE
+			}
+			
+			expect {
+				-ex "GNU GRUB" {
+					if {[catch {send -- "$KEY_HOME"} err]} {
+						log_message "EXP-ERR" "Lost connection while sending second KEY_HOME: $err"
+						exit $ERROR_CONSOLE
+					}
+					sleep 1
+					if {[catch {send "\r"} err]} {
+						log_message "EXP-ERR" "Lost connection while sending final return: $err"
+						exit $ERROR_CONSOLE
+					}
+				}
+				timeout {
+					log_message "EXP-ERR" "Timeout waiting for second GRUB menu"
+					exit $ERROR_CONSOLE
+				}
+				eof {
+					log_message "EXP-ERR" "Connection lost waiting for second GRUB menu"
+					exit $ERROR_CONSOLE
+				}
+			}
+			
 			expect {
 				"ONIE: OS Install Mode ..." {
 					log_message "EXP-DBG" "Entering OS Install Mode"
@@ -210,13 +240,19 @@ expect -timeout 300 -ex "GNU GRUB" {
 				}
 				timeout {
 					log_message "EXP-DBG" "Sending extra return"
-					send "\r"
+					if {[catch {send "\r"} err]} {
+						log_message "EXP-ERR" "Lost connection while sending extra return: $err"
+						exit $ERROR_CONSOLE
+					}
 				}
 			}
 		}
 		timeout {
 			log_message "EXP-DBG" "ONIE not found, moving down menu"
-			send -- "$KEY_DOWN"
+			if {[catch {send -- "$KEY_DOWN"} err]} {
+				log_message "EXP-ERR" "Lost connection while sending KEY_DOWN: $err"
+				exit $ERROR_CONSOLE
+			}
 			exp_continue
 		}
 		eof {
