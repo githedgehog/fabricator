@@ -676,8 +676,12 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 
 	slog.Debug("Waiting for VM to be ready", "vm", vm.Name, "type", vm.Type)
 
-	// TODO more granular timeouts?
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+	timeout := 10 * time.Minute
+	if vm.Type == VMTypeControl {
+		timeout = 40 * time.Minute
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	auth, err := goph.RawKey(vlab.SSHKey, "")
