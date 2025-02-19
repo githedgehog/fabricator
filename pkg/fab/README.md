@@ -24,7 +24,7 @@ oras push "ghcr.io/githedgehog/fabricator/flatcar-vlab:${FLATCAR_VERSION}" flatc
 ## K3s
 
 ```bash
-export K3S_VERSION="v1.31.1-k3s1"
+export K3S_VERSION="v1.32.1-k3s1"
 export K3S_VERSION_UPSTREAM="${K3S_VERSION//-/+}"
 
 wget "https://github.com/k3s-io/k3s/releases/download/${K3S_VERSION_UPSTREAM}/k3s"

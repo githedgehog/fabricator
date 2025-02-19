@@ -18,7 +18,7 @@ var (
 
 var Versions = fabapi.Versions{
 	Platform: fabapi.PlatformVersions{
-		K3s:         "v1.31.1-k3s1",
+		K3s:         "v1.32.1-k3s1",
 		Zot:         "v2.1.1",
 		CertManager: "v1.16.2",
 		K9s:         "v0.32.5",

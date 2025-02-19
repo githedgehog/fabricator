@@ -180,6 +180,10 @@ func (c *ControlUpgrade) Run(ctx context.Context) error {
 		return fmt.Errorf("copying k9s bin: %w", err)
 	}
 
+	if err := c.upgradeK8s(ctx, kube); err != nil {
+		return fmt.Errorf("upgrading K8s: %w", err)
+	}
+
 	slog.Info("Control node upgrade complete")
 
 	return nil
@@ -388,6 +392,73 @@ func (c *ControlUpgrade) setupTimesync(ctx context.Context) error {
 	}
 
 	// TODO check `timedatectl timesync-status` output
+
+	return nil
+}
+
+func (c *ControlUpgrade) upgradeK8s(ctx context.Context, kube client.Reader) error {
+	node := &comp.Node{}
+	if err := kube.Get(ctx, client.ObjectKey{
+		Name: c.Control.Name,
+	}, node); err != nil {
+		return fmt.Errorf("getting control node: %w", err)
+	}
+
+	actual := node.Status.NodeInfo.KubeletVersion
+	desired := k3s.KubeVersion(c.Fab)
+	if actual == desired {
+		slog.Info("System already running desired K8s version", "version", desired)
+
+		return nil
+	}
+
+	slog.Info("Upgrading K8s", "from", actual, "to", desired)
+
+	if err := copyFile(k3s.BinName, filepath.Join(k3s.BinDir, k3s.BinName), 0o755); err != nil {
+		return fmt.Errorf("copying k3s bin: %w", err)
+	}
+
+	if err := os.MkdirAll(k3s.ImagesDir, 0o755); err != nil {
+		return fmt.Errorf("creating k3s images dir %q: %w", k3s.ImagesDir, err)
+	}
+
+	if err := copyFile(k3s.AirgapName, filepath.Join(k3s.ImagesDir, k3s.AirgapName), 0o644); err != nil {
+		return fmt.Errorf("copying k3s airgap: %w", err)
+	}
+
+	slog.Debug("Restarting K3s")
+
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "systemctl", "restart", k3s.ServiceName) //nolint:gosec
+	cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "systemctl: ")
+	cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "systemctl: ")
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("restarting k3s: %w", err)
+	}
+
+	slog.Info("Waiting for K8s node ready with new version", "version", desired)
+
+	if err := waitKube(ctx, kube, c.Control.Name, "",
+		&comp.Node{}, func(node *comp.Node) (bool, error) {
+			if node.Status.NodeInfo.KubeletVersion != desired {
+				return false, nil
+			}
+
+			for _, cond := range node.Status.Conditions {
+				if cond.Type == comp.NodeReady && cond.Status == comp.ConditionTrue {
+					return true, nil
+				}
+			}
+
+			return false, nil
+		}); err != nil {
+		return fmt.Errorf("waiting for k8s node ready: %w", err)
+	}
+
+	slog.Debug("K8s node ready with new version", "version", desired)
 
 	return nil
 }
