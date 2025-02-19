@@ -30,17 +30,25 @@ run_sonic_cmd() {
 {
     echo -e "\n=== Interface Information ==="
     run_sonic_cmd "show interface status"
+    run_sonic_cmd "show interface status err-disabled"
     run_sonic_cmd "show interface description"
     run_sonic_cmd "show interface counters"
     run_sonic_cmd "show lldp table"
 } >> "$OUTPUT_FILE" 2>&1
 
 # ---------------------------
-# VLAN and VXLAN Configuration
+# Configuration
 # ---------------------------
 {
-    echo -e "\n=== VLAN and VXLAN Configuration ==="
+    echo -e "\n=== Running Configuration ==="
     run_sonic_cmd "show running-configuration"
+} >> "$OUTPUT_FILE" 2>&1
+
+# ---------------------------
+# VLAN and VXLAN Information
+# ---------------------------
+{
+    echo -e "\n=== VLAN and VXLAN Information ==="
     run_sonic_cmd "show vlan config"
     run_sonic_cmd "show vlan brief"
     run_sonic_cmd "show vxlan interface"
