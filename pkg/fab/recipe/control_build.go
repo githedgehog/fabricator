@@ -188,9 +188,9 @@ func (b *ControlInstallBuilder) Build(ctx context.Context) error {
 	}
 
 	slog.Info("Adding Flatcar Upgrade bin to installer", "control", b.Control.Name)
-	if err := b.Downloader.FromORAS(ctx, installDir, flatcar.Ref, flatcar.Version(b.Fab), []artificer.ORASFile{
+	if err := b.Downloader.FromORAS(ctx, installDir, flatcar.UpdateRef, flatcar.Version(b.Fab), []artificer.ORASFile{
 		{
-			Name: flatcar.BinName,
+			Name: flatcar.UpdateBinName,
 		},
 	}); err != nil {
 		return fmt.Errorf("downloading flatcar-update: %w", err)
