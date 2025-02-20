@@ -4,9 +4,12 @@
 package recipe
 
 import (
+	"bufio"
 	"context"
 	"errors"
+	"flag"
 	"fmt"
+	"log"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -14,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mattn/go-isatty"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
@@ -24,6 +28,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/f8r"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/fabric"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/flatcar"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k9s"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/zot"
@@ -180,41 +185,100 @@ func (c *ControlUpgrade) Run(ctx context.Context) error {
 	return nil
 }
 
+func askForConfirmation(s string) bool {
+	reader := bufio.NewReader(os.Stdin)
+
+	for {
+		fmt.Printf("%s [y/n]: ", s)
+
+		response, err := reader.ReadString('\n')
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		response = strings.ToLower(strings.TrimSpace(response))
+
+		if response == "y" || response == "yes" {
+			return true
+		} else if response == "n" || response == "no" {
+			return false
+		}
+	}
+}
+
 func (c *ControlUpgrade) upgradeFlatcar(ctx context.Context) error {
-	flatcarVersion := string(c.Fab.Status.Versions.Fabricator.Flatcar)
+	slog.Info("Upgrading Flatcar")
+	const filename = "/etc/os-release"
 
-	cmd := exec.CommandContext(ctx, "grep", "^VERSION=", "/etc/os-release")
+	content, err := os.ReadFile(filename)
+	if err != nil {
+		return fmt.Errorf("could not read /etc/os-release : %w", err)
+	}
 
-	if out, err := cmd.Output(); err != nil {
-		return fmt.Errorf("Flatcar Version: %w", err)
-	} else if ret := strings.Compare(string(out[:]), "VERSION="+flatcarVersion[1:]+"\n"); ret == 0 {
-		slog.Info("System already updated running Flatcar", "version", flatcarVersion)
+	s := string(content)
+	const versionPrefix = "VERSION="
+	version := ""
+	flatcarVersion := string(flatcar.Version(c.Fab))
+
+	for line := range strings.Lines(s) {
+		if strings.HasPrefix(line, versionPrefix) {
+			version = strings.TrimPrefix(line, versionPrefix)
+		}
+	}
+	if version == "" {
+		return fmt.Errorf("could not find version ID in /etc/os-release") //nolint:goerr113
+	}
+
+	if version[:len(version)-1] == flatcarVersion[1:] {
+		slog.Info("System already running desired Flatcar", "version", flatcarVersion)
+
 		return nil
 	}
 
 	slog.Info("Upgrading Flatcar to", "version", flatcarVersion)
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*300)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
-	cmd1 := exec.CommandContext(ctx, "flatcar-update", "--to-version", flatcarVersion, "--to-payload", "/opt/hedgehog/install/control-1-install/flatcar_production_update.gz")
-	cmd1.Stdout = logutil.NewSink(ctx, slog.Debug, "update-flatcar: ")
-	cmd1.Stderr = logutil.NewSink(ctx, slog.Debug, "update-flatcar: ")
+	cmd := exec.CommandContext(ctx, "flatcar-update", "--to-version", flatcarVersion, "--to-payload", flatcar.UpdateBinName)
+	cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "flatcar-update: ")
+	cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "flatcar-update: ")
 
-	if err := cmd1.Run(); err != nil {
+	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("upgrading Flatcar: %w", err)
 	}
 
 	slog.Info("Flatcar upgrade completed")
-	slog.Info("Rebooting Control Node")
 
-	cmd2 := exec.CommandContext(ctx, "reboot")
-	cmd2.Stdout = logutil.NewSink(ctx, slog.Debug, "reboot: ")
-	cmd2.Stderr = logutil.NewSink(ctx, slog.Debug, "reboot: ")
+	yesFlag := flag.Bool("yes", false, "Accept all prompts")
+	flag.Parse()
 
-	if err := cmd2.Run(); err != nil {
-		return fmt.Errorf("Rebooting: %w", err)
+	cmd = exec.CommandContext(ctx, "reboot")
+	cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "reboot: ")
+	cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "reboot: ")
+
+	if *yesFlag {
+		slog.Info("Rebooting Control Node")
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("rebooting: %w", err)
+		}
 	}
+
+	if !isatty.IsTerminal(os.Stdout.Fd()) {
+		slog.Info("A reboot is necessary for the changes to take effect.")
+
+		return nil
+	}
+
+	confirm := askForConfirmation("Do you really want to reset your system?")
+	if confirm {
+		slog.Info("Rebooting Control Node")
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("rebooting: %w", err)
+		}
+	}
+
+	slog.Info("A reboot is necessary for the changes to take effect.")
 
 	return nil
 }
