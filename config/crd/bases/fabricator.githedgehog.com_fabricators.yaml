@@ -311,6 +311,8 @@ spec:
                             type: string
                           ctl:
                             type: string
+                          flatcar:
+                            type: string
                         type: object
                       gateway:
                         type: object
@@ -499,6 +501,8 @@ spec:
                       controller:
                         type: string
                       ctl:
+                        type: string
+                      flatcar:
                         type: string
                     type: object
                   gateway:
