@@ -93,6 +93,15 @@ func VLABUp(ctx context.Context, workDir, cacheDir string, opts VLABUpOpts) erro
 	return c.VLABRun(ctx, vlab, opts.VLABRunOpts)
 }
 
+func VLABDown(ctx context.Context, workDir, cacheDir string) error {
+	c, vlab, err := loadVLABForHelpers(ctx, workDir, cacheDir)
+	if err != nil {
+		return err
+	}
+
+	return c.VLABDown(ctx, vlab)
+}
+
 func loadVLABForHelpers(ctx context.Context, workDir, cacheDir string) (*Config, *VLAB, error) {
 	opts := VLABUpOpts{
 		HydrateMode: HydrateModeIfNotPresent,
