@@ -31,7 +31,7 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           organization: githedgehog
-          container: fabricator/hhfab
+          container: ${{ matrix.package }}
           keep-younger-than: 14 # days
           prune-tags-regexes: |
             ^master-
