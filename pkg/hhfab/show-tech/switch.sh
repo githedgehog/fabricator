@@ -140,3 +140,13 @@ run_sonic_cmd() {
 } >> "$OUTPUT_FILE" 2>&1
 
 echo "Diagnostics collected to $OUTPUT_FILE"
+
+# ---------------------------
+# Sonic Tech Support
+# ---------------------------
+{
+    echo -e "\n=== Sonic Tech Support ==="
+    sonic-cli -c "show tech-support"
+    echo -e "\n=== Listing /var/dump ==="
+    ls -lah /var/dump/
+} >> "$OUTPUT_FILE" 2>&1
