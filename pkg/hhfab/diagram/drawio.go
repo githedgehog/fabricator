@@ -271,7 +271,7 @@ func createLegend() []MxCell {
 		{200, "#666666", false, 2, "Unbundled Server Links"},
 		{230, "#d79b00", true, 2, "ESLAG Server Links"},
 	}
-	var cells []MxCell
+	cells := make([]MxCell, 3+4*len(legendEntries))[:0]
 	cells = append(cells, container, background, title)
 	for i, entry := range legendEntries {
 		startPoint := MxCell{
@@ -355,7 +355,7 @@ func groupLinks(links []Link) []LinkGroup {
 			}
 		}
 	}
-	var result []LinkGroup
+	result := make([]LinkGroup, 0, len(linkMap))
 	for _, group := range linkMap {
 		sort.Slice(group.Links, func(i, j int) bool {
 			return group.Links[i].Speed < group.Links[j].Speed
