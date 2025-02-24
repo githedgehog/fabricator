@@ -454,7 +454,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						Mode:        ReinstallModeHardReset,
 						PDUUsername: os.Getenv(VLABEnvPDUUsername),
 						PDUPassword: os.Getenv(VLABEnvPDUPassword),
-						WaitReady:   false,
+						WaitReady:   true,
 					}); err != nil {
 						slog.Warn("Failed to reinstall switches", "err", err)
 
