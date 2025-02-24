@@ -39,7 +39,7 @@ require (
 	github.com/vbauerster/mpb/v8 v8.9.2
 	github.com/vishvananda/netlink v1.3.0
 	go.githedgehog.com/fabric v0.64.0
-	golang.org/x/crypto v0.33.0
+	golang.org/x/crypto v0.34.0
 	golang.org/x/sync v0.11.0
 	golang.org/x/term v0.29.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
