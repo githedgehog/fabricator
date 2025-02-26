@@ -120,6 +120,253 @@ func GetKubeClient(ctx context.Context, workDir string) (client.Client, error) {
 	)
 }
 
+func ConfigureServers(ctx context.Context, c *Config, vlab *VLAB, opts ConfigureServersOpts) error {
+	slog.Info("Configuring networking on servers")
+
+	// Get SSH authentication
+	sshPorts := map[string]uint{}
+	for _, vm := range vlab.VMs {
+		sshPorts[vm.Name] = getSSHPort(vm.ID)
+	}
+
+	sshAuth, err := goph.RawKey(vlab.SSHKey, "")
+	if err != nil {
+		return fmt.Errorf("getting ssh auth: %w", err)
+	}
+
+	// Get kube client
+	kubeconfig := filepath.Join(c.WorkDir, VLABDir, VLABKubeConfig)
+	kube, err := kubeutil.NewClientWithCache(ctx, kubeconfig,
+		wiringapi.SchemeBuilder,
+		vpcapi.SchemeBuilder,
+		agentapi.SchemeBuilder,
+		fabapi.SchemeBuilder,
+	)
+	if err != nil {
+		return fmt.Errorf("creating kube client: %w", err)
+	}
+
+	// Get server list
+	servers := &wiringapi.ServerList{}
+	if err := kube.List(ctx, servers); err != nil {
+		return fmt.Errorf("listing servers: %w", err)
+	}
+
+	// Sort servers by ID
+	serverIDs := map[string]uint64{}
+	for _, server := range servers.Items {
+		if !strings.HasPrefix(server.Name, ServerNamePrefix) {
+			return fmt.Errorf("unexpected server name %q, should be %s<number>", server.Name, ServerNamePrefix)
+		}
+
+		serverID, err := strconv.ParseUint(server.Name[len(ServerNamePrefix):], 10, 64)
+		if err != nil {
+			return fmt.Errorf("parsing server id: %w", err)
+		}
+
+		serverIDs[server.Name] = serverID
+	}
+
+	slices.SortFunc(servers.Items, func(a, b wiringapi.Server) int {
+		return int(serverIDs[a.Name]) - int(serverIDs[b.Name])
+	})
+
+	// Derive netconfs and expectedSubnets if not provided
+	netconfs := opts.Netconfs
+	expectedSubnets := opts.ExpectedSubnets
+
+	if netconfs == nil || expectedSubnets == nil {
+		slog.Info("Deriving network configurations from existing infrastructure")
+
+		netconfs = make(map[string]string)
+		expectedSubnets = make(map[string]netip.Prefix)
+
+		for _, server := range servers.Items {
+			// Get the connection for this server
+			conns := &wiringapi.ConnectionList{}
+			if err := kube.List(ctx, conns, wiringapi.MatchingLabelsForListLabelServer(server.Name)); err != nil {
+				return fmt.Errorf("listing connections for server %q: %w", server.Name, err)
+			}
+
+			if len(conns.Items) == 0 {
+				return fmt.Errorf("no connections for server %q", server.Name)
+			}
+			if len(conns.Items) > 1 {
+				return fmt.Errorf("multiple connections for server %q", server.Name)
+			}
+
+			conn := conns.Items[0]
+
+			// Find VPC attachments for this connection
+			attachments := &vpcapi.VPCAttachmentList{}
+			if err := kube.List(ctx, attachments); err != nil {
+				return fmt.Errorf("listing vpc attachments: %w", err)
+			}
+
+			var attachment *vpcapi.VPCAttachment
+			for i := range attachments.Items {
+				if attachments.Items[i].Spec.Connection == conn.Name {
+					attachment = &attachments.Items[i]
+					break
+				}
+			}
+
+			if attachment == nil {
+				return fmt.Errorf("no vpc attachment found for connection %q", conn.Name)
+			}
+
+			// Get VPC and subnet from the attachment
+			parts := strings.Split(attachment.Spec.Subnet, "/")
+			if len(parts) != 2 {
+				return fmt.Errorf("invalid subnet format %q", attachment.Spec.Subnet)
+			}
+
+			vpcName := parts[0]
+			subnetName := parts[1]
+
+			vpc := &vpcapi.VPC{}
+			if err := kube.Get(ctx, client.ObjectKey{Name: vpcName, Namespace: metav1.NamespaceDefault}, vpc); err != nil {
+				return fmt.Errorf("getting vpc %q: %w", vpcName, err)
+			}
+
+			subnet, ok := vpc.Spec.Subnets[subnetName]
+			if !ok {
+				return fmt.Errorf("subnet %q not found in vpc %q", subnetName, vpcName)
+			}
+
+			expectedSubnet, err := netip.ParsePrefix(subnet.Subnet)
+			if err != nil {
+				return fmt.Errorf("parsing vpc subnet %s/%s %q: %w", vpcName, subnetName, subnet.Subnet, err)
+			}
+			expectedSubnets[server.Name] = expectedSubnet
+
+			vlan := uint16(0)
+			if !attachment.Spec.NativeVLAN {
+				vlan = subnet.VLAN
+			}
+
+			// Create netconf command
+			netconfCmd := ""
+			if conn.Spec.Unbundled != nil {
+				netconfCmd = fmt.Sprintf("vlan %d %s", vlan, conn.Spec.Unbundled.Link.Server.LocalPortName())
+			} else {
+				netconfCmd = fmt.Sprintf("bond %d", vlan)
+
+				if conn.Spec.Bundled != nil {
+					for _, link := range conn.Spec.Bundled.Links {
+						netconfCmd += " " + link.Server.LocalPortName()
+					}
+				} else if conn.Spec.MCLAG != nil {
+					for _, link := range conn.Spec.MCLAG.Links {
+						netconfCmd += " " + link.Server.LocalPortName()
+					}
+				} else if conn.Spec.ESLAG != nil {
+					for _, link := range conn.Spec.ESLAG.Links {
+						netconfCmd += " " + link.Server.LocalPortName()
+					}
+				} else {
+					return fmt.Errorf("unexpected connection type for server %s conn %q", server.Name, conn.Name)
+				}
+			}
+
+			netconfs[server.Name] = netconfCmd
+		}
+	}
+
+	// Configure each server
+	g := &errgroup.Group{}
+	for _, server := range servers.Items {
+		server := server // Capture for goroutine
+		g.Go(func() error {
+			ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+			defer cancel()
+
+			if err := func() error {
+				sshPort, ok := sshPorts[server.Name]
+				if !ok {
+					return fmt.Errorf("missing ssh port for %q", server.Name)
+				}
+
+				client, err := goph.NewConn(&goph.Config{
+					User:     "core",
+					Addr:     "127.0.0.1",
+					Port:     sshPort,
+					Auth:     sshAuth,
+					Timeout:  10 * time.Second,
+					Callback: ssh.InsecureIgnoreHostKey(), //nolint:gosec
+				})
+				if err != nil {
+					return fmt.Errorf("connecting to %q: %w", server.Name, err)
+				}
+				defer client.Close()
+
+				out, err := client.RunContext(ctx, "toolbox -q hostname")
+				if err != nil {
+					return fmt.Errorf("running toolbox hostname: %w: %s", err, string(out))
+				}
+				hostname := strings.TrimSpace(string(out))
+				if hostname != server.Name {
+					return fmt.Errorf("unexpected hostname %q, expected %q", hostname, server.Name)
+				}
+
+				slog.Debug("Verified", "server", server.Name)
+
+				if !opts.SkipCleanup {
+					out, err = client.RunContext(ctx, "/opt/bin/hhnet cleanup")
+					if err != nil {
+						return fmt.Errorf("running hhnet cleanup: %w: out: %s", err, string(out))
+					}
+				}
+
+				netconfCmd, ok := netconfs[server.Name]
+				if !ok {
+					return fmt.Errorf("missing netconf for %q", server.Name)
+				}
+
+				out, err = client.RunContext(ctx, "/opt/bin/hhnet "+netconfCmd)
+				if err != nil {
+					return fmt.Errorf("running hhnet %q: %w: out: %s", netconfCmd, err, string(out))
+				}
+
+				prefix, err := netip.ParsePrefix(strings.TrimSpace(string(out)))
+				if err != nil {
+					return fmt.Errorf("parsing acquired address %q: %w", string(out), err)
+				}
+
+				expectedSubnet, ok := expectedSubnets[server.Name]
+				if !ok {
+					return fmt.Errorf("missing expected subnet for %q", server.Name)
+				}
+
+				if !expectedSubnet.Contains(prefix.Addr()) || expectedSubnet.Bits() != prefix.Bits() {
+					return fmt.Errorf("unexpected acquired address %q, expected from %v", prefix.String(), expectedSubnet.String())
+				}
+
+				slog.Info("Configured", "server", server.Name, "addr", prefix.String(), "netconf", netconfCmd)
+
+				return nil
+			}(); err != nil {
+				return fmt.Errorf("configuring server %q: %w", server.Name, err)
+			}
+
+			return nil
+		})
+	}
+
+	if err := g.Wait(); err != nil {
+		return fmt.Errorf("configuring servers: %w", err)
+	}
+
+	slog.Info("All servers configured and verified")
+	return nil
+}
+
+type ConfigureServersOpts struct {
+	Netconfs        map[string]string
+	ExpectedSubnets map[string]netip.Prefix
+	SkipCleanup     bool
+}
+
 func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) error {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
@@ -139,16 +386,6 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		"wait", opts.WaitSwitchesReady,
 		"cleanup", opts.ForceCleanup,
 	)
-
-	sshPorts := map[string]uint{}
-	for _, vm := range vlab.VMs {
-		sshPorts[vm.Name] = getSSHPort(vm.ID)
-	}
-
-	sshAuth, err := goph.RawKey(vlab.SSHKey, "")
-	if err != nil {
-		return fmt.Errorf("getting ssh auth: %w", err)
-	}
 
 	kubeconfig := filepath.Join(c.WorkDir, VLABDir, VLABKubeConfig)
 	kube, err := kubeutil.NewClientWithCache(ctx, kubeconfig,
@@ -431,80 +668,14 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		}
 	}
 
-	slog.Info("Configuring networking on servers")
-
-	g := &errgroup.Group{}
-	for _, server := range servers.Items {
-		g.Go(func() error {
-			ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
-			defer cancel()
-
-			if err := func() error {
-				sshPort, ok := sshPorts[server.Name]
-				if !ok {
-					return fmt.Errorf("missing ssh port for %q", server.Name)
-				}
-
-				client, err := goph.NewConn(&goph.Config{
-					User:     "core",
-					Addr:     "127.0.0.1",
-					Port:     sshPort,
-					Auth:     sshAuth,
-					Timeout:  10 * time.Second,
-					Callback: ssh.InsecureIgnoreHostKey(), //nolint:gosec
-				})
-				if err != nil {
-					return fmt.Errorf("connecting to %q: %w", server.Name, err)
-				}
-				defer client.Close()
-
-				out, err := client.RunContext(ctx, "toolbox -q hostname")
-				if err != nil {
-					return fmt.Errorf("running toolbox hostname: %w: %s", err, string(out))
-				}
-				hostname := strings.TrimSpace(string(out))
-				if hostname != server.Name {
-					return fmt.Errorf("unexpected hostname %q, expected %q", hostname, server.Name)
-				}
-
-				slog.Debug("Verified", "server", server.Name)
-
-				out, err = client.RunContext(ctx, "/opt/bin/hhnet cleanup")
-				if err != nil {
-					return fmt.Errorf("running hhnet cleanup: %w: out: %s", err, string(out))
-				}
-
-				out, err = client.RunContext(ctx, "/opt/bin/hhnet "+netconfs[server.Name])
-				if err != nil {
-					return fmt.Errorf("running hhnet %q: %w: out: %s", netconfs[server.Name], err, string(out))
-				}
-
-				prefix, err := netip.ParsePrefix(strings.TrimSpace(string(out)))
-				if err != nil {
-					return fmt.Errorf("parsing acquired address %q: %w", string(out), err)
-				}
-
-				expectedSubnet := expectedSubnets[server.Name]
-				if !expectedSubnet.Contains(prefix.Addr()) || expectedSubnet.Bits() != prefix.Bits() {
-					return fmt.Errorf("unexpected acquired address %q, expected from %v", prefix.String(), expectedSubnet.String())
-				}
-
-				slog.Info("Configured", "server", server.Name, "addr", prefix.String(), "netconf", netconfs[server.Name])
-
-				return nil
-			}(); err != nil {
-				return fmt.Errorf("configuring server %q: %w", server.Name, err)
-			}
-
-			return nil
-		})
+	if err := ConfigureServers(ctx, c, vlab, ConfigureServersOpts{
+		Netconfs:        netconfs,
+		ExpectedSubnets: expectedSubnets,
+	}); err != nil {
+		return err
 	}
 
-	if err := g.Wait(); err != nil {
-		return fmt.Errorf("configuring servers: %w", err)
-	}
-
-	slog.Info("All servers configured and verified", "took", time.Since(start))
+	slog.Info("VPC setup completed", "took", time.Since(start))
 
 	return nil
 }
@@ -1519,8 +1690,10 @@ func CollectN[E any](n int, seq iter.Seq[E]) []E {
 }
 
 type InspectOpts struct {
-	WaitAppliedFor time.Duration
-	Strict         bool
+	WaitAppliedFor   time.Duration
+	Strict           bool
+	ConfigureServers bool
+	SkipCleanup      bool
 }
 
 func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) error {
@@ -1552,6 +1725,17 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 	if err := WaitSwitchesReady(ctx, kube, opts.WaitAppliedFor, 30*time.Minute); err != nil {
 		slog.Error("Failed to wait for switches ready", "err", err)
 		fail = true
+	}
+
+	if opts.ConfigureServers {
+		slog.Info("Configuring servers")
+
+		if err := ConfigureServers(ctx, c, vlab, ConfigureServersOpts{
+			SkipCleanup: opts.SkipCleanup,
+		}); err != nil {
+			slog.Error("Failed to configure servers", "err", err)
+			fail = true
+		}
 	}
 
 	if out, err := inspect.LLDP(ctx, kube, inspect.LLDPIn{
