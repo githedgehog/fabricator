@@ -32,6 +32,7 @@ var Versions = fabapi.Versions{
 		Controller:     FabricatorVersion,
 		Ctl:            FabricatorVersion,
 		ControlUSBRoot: "v4152.2.0-hh1",
+		Flatcar:        "v4152.2.0",
 	},
 	Fabric: fabapi.FabricVersions{
 		API:        FabricVersion,

@@ -10,8 +10,10 @@ import (
 )
 
 const (
-	ToolboxRef = "fabricator/toolbox"
-	Home       = "/home/core"
+	ToolboxRef    = "fabricator/toolbox"
+	Home          = "/home/core"
+	UpdateRef     = "fabricator/flatcar-update"
+	UpdateBinName = "flatcar_production_update.gz"
 )
 
 func ToolboxVersion(f fabapi.Fabricator) meta.Version {
@@ -25,4 +27,8 @@ func Artifacts(cfg fabapi.Fabricator) (comp.OCIArtifacts, error) {
 		// TODO do we actually need it in that form?
 		ToolboxRef: ToolboxVersion(cfg),
 	}, nil
+}
+
+func Version(f fabapi.Fabricator) meta.Version {
+	return f.Status.Versions.Fabricator.Flatcar
 }

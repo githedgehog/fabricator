@@ -4,9 +4,12 @@
 package recipe
 
 import (
+	"bufio"
 	"context"
 	"errors"
+	"flag"
 	"fmt"
+	"log"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -14,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mattn/go-isatty"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
@@ -24,6 +28,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/f8r"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/fabric"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/flatcar"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k9s"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/zot"
@@ -184,7 +189,109 @@ func (c *ControlUpgrade) Run(ctx context.Context) error {
 		return fmt.Errorf("upgrading K8s: %w", err)
 	}
 
+	if err := c.upgradeFlatcar(ctx); err != nil {
+		return fmt.Errorf("upgrading Flatcar: %w", err)
+	}
+
 	slog.Info("Control node upgrade complete")
+
+	return nil
+}
+
+func askForConfirmation(s string) bool {
+	reader := bufio.NewReader(os.Stdin)
+
+	for {
+		fmt.Printf("%s [y/n]: ", s)
+
+		response, err := reader.ReadString('\n')
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		response = strings.ToLower(strings.TrimSpace(response))
+
+		if response == "y" || response == "yes" {
+			return true
+		} else if response == "n" || response == "no" {
+			return false
+		}
+	}
+}
+
+func (c *ControlUpgrade) upgradeFlatcar(ctx context.Context) error {
+	slog.Info("Upgrading Flatcar")
+	const filename = "/etc/os-release"
+
+	content, err := os.ReadFile(filename)
+	if err != nil {
+		return fmt.Errorf("could not read /etc/os-release : %w", err)
+	}
+
+	s := string(content)
+	const versionPrefix = "VERSION="
+	version := ""
+	flatcarVersion := string(flatcar.Version(c.Fab))
+
+	for line := range strings.Lines(s) {
+		if strings.HasPrefix(line, versionPrefix) {
+			version = strings.TrimPrefix(line, versionPrefix)
+		}
+	}
+	if version == "" {
+		return fmt.Errorf("could not find version ID in /etc/os-release") //nolint:goerr113
+	}
+
+	if version[:len(version)-1] == flatcarVersion[1:] {
+		slog.Info("System already running desired Flatcar", "version", flatcarVersion)
+
+		return nil
+	}
+
+	slog.Info("Upgrading Flatcar to", "version", flatcarVersion)
+
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "flatcar-update", "--to-version", flatcarVersion, "--to-payload", flatcar.UpdateBinName)
+	cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "flatcar-update: ")
+	cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "flatcar-update: ")
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("upgrading Flatcar: %w", err)
+	}
+
+	slog.Info("Flatcar upgrade completed")
+
+	yesFlag := flag.Bool("yes", false, "Accept all prompts")
+	flag.Parse()
+
+	cmd = exec.CommandContext(ctx, "reboot")
+	cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "reboot: ")
+	cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "reboot: ")
+
+	if *yesFlag {
+		slog.Info("Rebooting Control Node")
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("rebooting: %w", err)
+		}
+	}
+
+	if !isatty.IsTerminal(os.Stdout.Fd()) {
+		slog.Info("A reboot is necessary for the changes to take effect.")
+
+		return nil
+	}
+
+	confirm := askForConfirmation("Do you really want to reset your system?")
+	if confirm {
+		slog.Info("Rebooting Control Node")
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("rebooting: %w", err)
+		}
+	}
+
+	slog.Info("A reboot is necessary for the changes to take effect.")
 
 	return nil
 }
