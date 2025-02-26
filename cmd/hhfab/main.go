@@ -58,6 +58,10 @@ const (
 	FlagNameFailFast              = "fail-fast"
 	FlagNameReady                 = "ready"
 	FlagNameCollectShowTech       = "collect-show-tech"
+	FlagRegEx                     = "regex"
+	FlagInvertRegex               = "invert-regex"
+	FlagResultsFile               = "results-file"
+	FlagHhfabBinPath              = "hhfab-bin"
 )
 
 func main() {
@@ -929,6 +933,38 @@ func Run(ctx context.Context) error {
 								Strict:         c.Bool("strict"),
 							}); err != nil {
 								return fmt.Errorf("inspect: %w", err)
+							}
+
+							return nil
+						},
+					},
+					{
+						Name:  "release-test",
+						Usage: "run release tests on current VLAB instance",
+						Flags: append(defaultFlags,
+							&cli.StringSliceFlag{
+								Name:    FlagRegEx,
+								Aliases: []string{"r"},
+								Usage:   "run only tests matched by regular expression. can be repeated",
+							},
+							&cli.BoolFlag{
+								Name:  FlagInvertRegex,
+								Usage: "invert regex match",
+							},
+							&cli.StringFlag{
+								Name:  FlagResultsFile,
+								Usage: "path to a file to export test results to in JUnit XML format",
+							},
+						),
+						Before: before(false),
+						Action: func(c *cli.Context) error {
+							opts := hhfab.ReleaseTestOpts{
+								Regexes:     c.StringSlice(FlagRegEx),
+								InvertRegex: c.Bool(FlagInvertRegex),
+								ResultsFile: c.String(FlagResultsFile),
+							}
+							if err := hhfab.DoVLABReleaseTest(ctx, workDir, cacheDir, opts); err != nil {
+								return fmt.Errorf("release-test: %w", err)
 							}
 
 							return nil
