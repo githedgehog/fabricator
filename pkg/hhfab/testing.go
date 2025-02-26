@@ -874,9 +874,14 @@ type TestConnectivityOpts struct {
 	IPerfsParallel    int64
 	CurlsCount        int
 	CurlsParallel     int64
+	Sources           []string
+	Destinations      []string
 }
 
 func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConnectivityOpts) error {
+	if opts.PingsCount == 0 && opts.IPerfsSeconds == 0 && opts.CurlsCount == 0 {
+		return fmt.Errorf("at least one of pings, iperfs or curls should be enabled")
+	}
 	start := time.Now()
 
 	if opts.PingsParallel <= 0 {
@@ -947,6 +952,12 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 
 	serverIDs := map[string]uint64{}
 	for _, server := range servers.Items {
+		// Skip servers not in the list of sources or destinations, if both are specified
+		if len(opts.Sources) > 0 && len(opts.Destinations) > 0 {
+			if !slices.Contains(opts.Sources, server.Name) && !slices.Contains(opts.Destinations, server.Name) {
+				continue
+			}
+		}
 		if !strings.HasPrefix(server.Name, ServerNamePrefix) {
 			return fmt.Errorf("unexpected server name %q, should be %s<number>", server.Name, ServerNamePrefix)
 		}
@@ -978,15 +989,15 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 	}()
 
 	g := &errgroup.Group{}
-	for _, server := range servers.Items {
+	for server := range serverIDs {
 		g.Go(func() error {
 			ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 			defer cancel()
 
 			if err := func() error {
-				sshPort, ok := sshPorts[server.Name]
+				sshPort, ok := sshPorts[server]
 				if !ok {
-					return fmt.Errorf("missing ssh port for %q", server.Name)
+					return fmt.Errorf("missing ssh port for %q", server)
 				}
 
 				client, err := goph.NewConn(&goph.Config{
@@ -998,9 +1009,9 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 					Callback: ssh.InsecureIgnoreHostKey(), //nolint:gosec
 				})
 				if err != nil {
-					return fmt.Errorf("connecting to %q: %w", server.Name, err)
+					return fmt.Errorf("connecting to %q: %w", server, err)
 				}
-				sshs.Store(server.Name, client)
+				sshs.Store(server, client)
 
 				out, err := client.RunContext(ctx, "ip -o -4 addr show | awk '{print $2, $4}'")
 				if err != nil {
@@ -1029,9 +1040,9 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 					}
 
 					found = true
-					ips.Store(server.Name, addr)
+					ips.Store(server, addr)
 
-					slog.Info("Found", "server", server.Name, "addr", addr.String())
+					slog.Info("Found", "server", server, "addr", addr.String())
 				}
 
 				if !found {
@@ -1040,7 +1051,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 
 				return nil
 			}(); err != nil {
-				return fmt.Errorf("getting server %q IP: %w", server.Name, err)
+				return fmt.Errorf("getting server %q IP: %w", server, err)
 			}
 
 			return nil
@@ -1060,86 +1071,108 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 	errors := sync.Map{}
 
 	g = &errgroup.Group{}
-	for _, serverA := range servers.Items {
-		for _, serverB := range servers.Items {
-			if serverA.Name == serverB.Name {
+	if len(opts.Sources) == 0 {
+		opts.Sources = make([]string, len(serverIDs))
+		// copy keys of serverIDs to opts.Sources
+		i := 0
+		for k := range serverIDs {
+			opts.Sources[i] = k
+			i++
+		}
+	}
+	if len(opts.Destinations) == 0 {
+		opts.Destinations = make([]string, len(serverIDs))
+		// copy keys of serverIDs to opts.Destinations
+		i := 0
+		for k := range serverIDs {
+			opts.Destinations[i] = k
+			i++
+		}
+	}
+	for _, serverA := range opts.Sources {
+		for _, serverB := range opts.Destinations {
+			if serverA == serverB {
 				continue
 			}
 
+			if opts.PingsCount > 0 || opts.IPerfsSeconds > 0 {
+				g.Go(func() error {
+					if err := func() error {
+						expectedReachable, err := apiutil.IsServerReachable(ctx, kube, serverA, serverB)
+						if err != nil {
+							return fmt.Errorf("checking if should be reachable: %w", err)
+						}
+
+						slog.Debug("Checking connectivity", "from", serverA, "to", serverB, "reachable", expectedReachable)
+
+						ipBR, ok := ips.Load(serverB)
+						if !ok {
+							return fmt.Errorf("missing IP for %q", serverB)
+						}
+						ipB := ipBR.(netip.Prefix)
+
+						clientAR, ok := sshs.Load(serverA)
+						if !ok {
+							return fmt.Errorf("missing ssh client for %q", serverA)
+						}
+						clientA := clientAR.(*goph.Client)
+
+						clientBR, ok := sshs.Load(serverB)
+						if !ok {
+							return fmt.Errorf("missing ssh client for %q", serverB)
+						}
+						clientB := clientBR.(*goph.Client)
+
+						if err := checkPing(ctx, opts, pings, serverA, serverB, clientA, ipB.Addr(), expectedReachable); err != nil {
+							return fmt.Errorf("checking ping from %s to %s: %w", serverA, serverB, err)
+						}
+
+						if err := checkIPerf(ctx, opts, iperfs, serverA, serverB, clientA, clientB, ipB.Addr(), expectedReachable); err != nil {
+							return fmt.Errorf("checking iperf from %s to %s: %w", serverA, serverB, err)
+						}
+
+						return nil
+					}(); err != nil {
+						errors.Store("vpcpeer--"+serverA+"--"+serverB, err)
+
+						return fmt.Errorf("testing connectivity from %q to %q: %w", serverA, serverB, err)
+					}
+
+					return nil
+				})
+			}
+		}
+
+		if opts.CurlsCount > 0 {
 			g.Go(func() error {
 				if err := func() error {
-					expectedReachable, err := apiutil.IsServerReachable(ctx, kube, serverA.Name, serverB.Name)
+					reachable, err := apiutil.IsExternalSubnetReachable(ctx, kube, serverA, "0.0.0.0/0") // TODO test for specific IP
 					if err != nil {
 						return fmt.Errorf("checking if should be reachable: %w", err)
 					}
 
-					slog.Debug("Checking connectivity", "from", serverA.Name, "to", serverB.Name, "reachable", expectedReachable)
+					slog.Debug("Checking external connectivity", "from", serverA, "reachable", reachable)
 
-					ipBR, ok := ips.Load(serverB.Name)
+					clientR, ok := sshs.Load(serverA)
 					if !ok {
-						return fmt.Errorf("missing IP for %q", serverB.Name)
+						return fmt.Errorf("missing ssh client for %q", serverA)
 					}
-					ipB := ipBR.(netip.Prefix)
+					client := clientR.(*goph.Client)
 
-					clientAR, ok := sshs.Load(serverA.Name)
-					if !ok {
-						return fmt.Errorf("missing ssh client for %q", serverA.Name)
-					}
-					clientA := clientAR.(*goph.Client)
-
-					clientBR, ok := sshs.Load(serverB.Name)
-					if !ok {
-						return fmt.Errorf("missing ssh client for %q", serverB.Name)
-					}
-					clientB := clientBR.(*goph.Client)
-
-					if err := checkPing(ctx, opts, pings, serverA.Name, serverB.Name, clientA, ipB.Addr(), expectedReachable); err != nil {
-						return fmt.Errorf("checking ping from %s to %s: %w", serverA.Name, serverB.Name, err)
-					}
-
-					if err := checkIPerf(ctx, opts, iperfs, serverA.Name, serverB.Name, clientA, clientB, ipB.Addr(), expectedReachable); err != nil {
-						return fmt.Errorf("checking iperf from %s to %s: %w", serverA.Name, serverB.Name, err)
+					if err := checkCurl(ctx, opts, curls, serverA, client, "8.8.8.8", reachable); err != nil {
+						return fmt.Errorf("checking curl from %q: %w", serverA, err)
 					}
 
 					return nil
 				}(); err != nil {
-					errors.Store("vpcpeer--"+serverA.Name+"--"+serverB.Name, err)
+					errors.Store("extpeer--"+serverA, err)
 
-					return fmt.Errorf("testing connectivity from %q to %q: %w", serverA.Name, serverB.Name, err)
+					return fmt.Errorf("testing connectivity from %q to external: %w", serverA, err)
 				}
 
 				return nil
 			})
 		}
-
-		g.Go(func() error {
-			if err := func() error {
-				reachable, err := apiutil.IsExternalSubnetReachable(ctx, kube, serverA.Name, "0.0.0.0/0") // TODO test for specific IP
-				if err != nil {
-					return fmt.Errorf("checking if should be reachable: %w", err)
-				}
-
-				slog.Debug("Checking external connectivity", "from", serverA.Name, "reachable", reachable)
-
-				clientR, ok := sshs.Load(serverA.Name)
-				if !ok {
-					return fmt.Errorf("missing ssh client for %q", serverA.Name)
-				}
-				client := clientR.(*goph.Client)
-
-				if err := checkCurl(ctx, opts, curls, serverA.Name, client, "8.8.8.8", reachable); err != nil {
-					return fmt.Errorf("checking curl from %q: %w", serverA.Name, err)
-				}
-
-				return nil
-			}(); err != nil {
-				errors.Store("extpeer--"+serverA.Name, err)
-
-				return fmt.Errorf("testing connectivity from %q to external: %w", serverA.Name, err)
-			}
-
-			return nil
-		})
 	}
 
 	if err := g.Wait(); err != nil {
