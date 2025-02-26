@@ -846,7 +846,7 @@ func Run(ctx context.Context) error {
 					{
 						Name:    "test-connectivity",
 						Aliases: []string{"conns"},
-						Usage:   "test connectivity between all servers",
+						Usage:   "test connectivity between servers",
 						Flags: append(defaultFlags, accessNameFlag,
 							&cli.BoolFlag{
 								Name:    "wait-switches-ready",
@@ -874,6 +874,16 @@ func Run(ctx context.Context) error {
 								Usage: "number of curl tests to run for each server to test external connectivity (0 to disable)",
 								Value: 3,
 							},
+							&cli.StringSliceFlag{
+								Name:    "source",
+								Aliases: []string{"src"},
+								Usage:   "server to use as source for connectivity tests (default: all servers)",
+							},
+							&cli.StringSliceFlag{
+								Name:    "destination",
+								Aliases: []string{"dst"},
+								Usage:   "server to use as destination for connectivity tests (default: all servers)",
+							},
 						),
 						Before: before(false),
 						Action: func(c *cli.Context) error {
@@ -883,6 +893,8 @@ func Run(ctx context.Context) error {
 								IPerfsSeconds:     c.Int("iperfs"),
 								IPerfsMinSpeed:    c.Float64("iperfs-speed"),
 								CurlsCount:        c.Int("curls"),
+								Sources:           c.StringSlice("source"),
+								Destinations:      c.StringSlice("destination"),
 							}); err != nil {
 								return fmt.Errorf("test-connectivity: %w", err)
 							}
