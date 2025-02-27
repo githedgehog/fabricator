@@ -1193,13 +1193,10 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 }
 
 func WaitSwitchesReady(ctx context.Context, kube client.Reader, appliedFor time.Duration, timeout time.Duration) error {
-	var waitCtx context.Context
-	var cancel context.CancelFunc
 	if timeout > 0 {
-		waitCtx, cancel = context.WithTimeout(ctx, timeout)
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
-	} else {
-		waitCtx = ctx
 	}
 
 	f, _, _, err := fab.GetFabAndNodes(ctx, kube, true)
@@ -1209,7 +1206,7 @@ func WaitSwitchesReady(ctx context.Context, kube client.Reader, appliedFor time.
 
 	for {
 		switches := &wiringapi.SwitchList{}
-		if err := kube.List(waitCtx, switches); err != nil {
+		if err := kube.List(ctx, switches); err != nil {
 			return fmt.Errorf("listing switches: %w", err)
 		}
 
@@ -1225,7 +1222,7 @@ func WaitSwitchesReady(ctx context.Context, kube client.Reader, appliedFor time.
 			updated := false
 
 			ag := &agentapi.Agent{}
-			err := kube.Get(waitCtx, client.ObjectKey{Name: sw.Name, Namespace: sw.Namespace}, ag)
+			err := kube.Get(ctx, client.ObjectKey{Name: sw.Name, Namespace: sw.Namespace}, ag)
 			if err != nil && !apierrors.IsNotFound(err) {
 				return fmt.Errorf("getting agent %q: %w", sw.Name, err)
 			}
