@@ -1243,6 +1243,10 @@ func WaitSwitchesReady(ctx context.Context, kube client.Reader, appliedFor time.
 			return nil
 		}
 
+		if allReady && !allUpdated {
+			return fmt.Errorf("all switches ready but some are not up-to-date")
+		}
+
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("waiting for switches ready: %w", ctx.Err())
