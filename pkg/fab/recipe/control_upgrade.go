@@ -232,12 +232,30 @@ func (c *ControlUpgrade) preCacheZot(ctx context.Context) error {
 
 	slog.Debug("Pre-caching", "image", img)
 
-	cmd := exec.CommandContext(ctx, "k3s", "crictl", "pull", img)
-	cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "crictl: ")
-	cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "crictl: ")
+	for attempt := 1; ; attempt++ {
+		if attempt > 1 {
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("waiting to retry running crictl: %w", ctx.Err())
+			case <-time.After(15 * time.Second):
+			}
+		}
 
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("running crictl pull: %w", err)
+		cmd := exec.CommandContext(ctx, "k3s", "crictl", "pull", img)
+		cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "crictl: ")
+		cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "crictl: ")
+
+		if err := cmd.Run(); err != nil {
+			slog.Debug("Failed to pre-cache Zot image", "image", img, "attempt", attempt, "err", err)
+
+			if attempt >= 10 {
+				return fmt.Errorf("running crictl pull: %w", err)
+			}
+
+			continue
+		}
+
+		break
 	}
 
 	return nil
