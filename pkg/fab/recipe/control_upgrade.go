@@ -124,25 +124,8 @@ func (c *ControlUpgrade) Run(ctx context.Context) error {
 		return fmt.Errorf("setting up timesync: %w", err)
 	}
 
-	regURL, err := comp.RegistryURL(c.Fab)
-	if err != nil {
-		return fmt.Errorf("getting registry URL: %w", err)
-	}
-
-	caCM := coreapi.ConfigMap{}
-	if err := kube.Get(ctx, client.ObjectKey{
-		Namespace: comp.FabNamespace,
-		Name:      comp.FabCAConfigMap,
-	}, &caCM); err != nil {
-		return fmt.Errorf("getting CA config map: %w", err)
-	}
-
-	if caCM.Data == nil || caCM.Data[comp.FabCAConfigMapKey] == "" {
-		return errors.New("CA config map missing data") //nolint:goerr113
-	}
-
-	if err := waitURL(ctx, "https://"+regURL+"/v2/_catalog", caCM.Data[comp.FabCAConfigMapKey]); err != nil {
-		return fmt.Errorf("waiting for zot endpoint: %w", err)
+	if err := c.waitRegistry(ctx, kube); err != nil {
+		return fmt.Errorf("waiting for registry: %w", err)
 	}
 
 	regSecret := coreapi.Secret{}
@@ -459,6 +442,35 @@ func (c *ControlUpgrade) upgradeK8s(ctx context.Context, kube client.Reader) err
 	}
 
 	slog.Debug("K8s node ready with new version", "version", desired)
+
+	if err := c.waitRegistry(ctx, kube); err != nil {
+		return fmt.Errorf("waiting for registry after k8s upgrade: %w", err)
+	}
+
+	return nil
+}
+
+func (c *ControlUpgrade) waitRegistry(ctx context.Context, kube client.Reader) error {
+	regURL, err := comp.RegistryURL(c.Fab)
+	if err != nil {
+		return fmt.Errorf("getting registry URL: %w", err)
+	}
+
+	caCM := coreapi.ConfigMap{}
+	if err := kube.Get(ctx, client.ObjectKey{
+		Namespace: comp.FabNamespace,
+		Name:      comp.FabCAConfigMap,
+	}, &caCM); err != nil {
+		return fmt.Errorf("getting CA config map: %w", err)
+	}
+
+	if caCM.Data == nil || caCM.Data[comp.FabCAConfigMapKey] == "" {
+		return errors.New("CA config map missing data") //nolint:goerr113
+	}
+
+	if err := waitURL(ctx, "https://"+regURL+"/v2/_catalog", caCM.Data[comp.FabCAConfigMapKey]); err != nil {
+		return fmt.Errorf("waiting for zot endpoint: %w", err)
+	}
 
 	return nil
 }
