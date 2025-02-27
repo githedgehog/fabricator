@@ -398,6 +398,9 @@ func (c *ControlUpgrade) setupTimesync(ctx context.Context) error {
 }
 
 func (c *ControlUpgrade) upgradeK8s(ctx context.Context, kube client.Reader) error {
+	ctx, cancel := context.WithTimeout(ctx, 12*time.Minute)
+	defer cancel()
+
 	node := &comp.Node{}
 	if err := kube.Get(ctx, client.ObjectKey{
 		Name: c.Control.Name,
@@ -429,9 +432,6 @@ func (c *ControlUpgrade) upgradeK8s(ctx context.Context, kube client.Reader) err
 
 	slog.Debug("Restarting K3s")
 
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
-	defer cancel()
-
 	cmd := exec.CommandContext(ctx, "systemctl", "restart", k3s.ServiceName) //nolint:gosec
 	cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "systemctl: ")
 	cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "systemctl: ")
@@ -461,9 +461,19 @@ func (c *ControlUpgrade) upgradeK8s(ctx context.Context, kube client.Reader) err
 
 	slog.Debug("K8s node ready with new version", "version", desired)
 
+	slog.Debug("Waiting for registry after K8s upgrade")
+
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("waiting before registry check after upgrade: %w", ctx.Err())
+	case <-time.After(30 * time.Second):
+	}
+
 	if err := c.waitRegistry(ctx, kube); err != nil {
 		return fmt.Errorf("waiting for registry after k8s upgrade: %w", err)
 	}
+
+	slog.Debug("Registry ready after K8s upgrade")
 
 	return nil
 }
