@@ -254,6 +254,13 @@ type VLABVersions struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:categories=hedgehog;fabricator,shortName=fab
+// +kubebuilder:printcolumn:name="CtrlVer",type=string,JSONPath=`.status.versions.fabricator.controller`,priority=0
+// +kubebuilder:printcolumn:name="Gen",type=string,JSONPath=`.metadata.generation`,priority=0
+// +kubebuilder:printcolumn:name="Appl",type=string,JSONPath=`.status.lastAppliedGen`,priority=0
+// +kubebuilder:printcolumn:name="ApplT",type=date,JSONPath=`.status.lastAppliedTime`,priority=0
+// +kubebuilder:printcolumn:name="Status",type=date,JSONPath=`.status.lastStatusCheck`,priority=0
+// +kubebuilder:printcolumn:name="Reg",type=string,JSONPath=`.status.components.zot`,priority=1
+// +kubebuilder:printcolumn:name="Ctrl",type=string,JSONPath=`.status.components.fabricatorCtrl`,priority=1
 // Fabricator defines configuration for the Fabricator controller
 type Fabricator struct {
 	metav1.TypeMeta   `json:",inline"`

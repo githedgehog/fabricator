@@ -19,7 +19,31 @@ spec:
     singular: fabricator
   scope: Namespaced
   versions:
-  - name: v1beta1
+  - additionalPrinterColumns:
+    - jsonPath: .status.versions.fabricator.controller
+      name: CtrlVer
+      type: string
+    - jsonPath: .metadata.generation
+      name: Gen
+      type: string
+    - jsonPath: .status.lastAppliedGen
+      name: Appl
+      type: string
+    - jsonPath: .status.lastAppliedTime
+      name: ApplT
+      type: date
+    - jsonPath: .status.lastStatusCheck
+      name: Status
+      type: date
+    - jsonPath: .status.components.zot
+      name: Reg
+      priority: 1
+      type: string
+    - jsonPath: .status.components.fabricatorCtrl
+      name: Ctrl
+      priority: 1
+      type: string
+    name: v1beta1
     schema:
       openAPIV3Schema:
         description: Fabricator defines configuration for the Fabricator controller
