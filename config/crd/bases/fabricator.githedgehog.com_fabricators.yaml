@@ -431,6 +431,10 @@ spec:
                 description: Time of the last attempt to apply configuration
                 format: date-time
                 type: string
+              lastStatusCheck:
+                description: Time of the last status check
+                format: date-time
+                type: string
               versions:
                 properties:
                   fabric:

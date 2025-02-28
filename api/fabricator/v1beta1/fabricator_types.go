@@ -50,6 +50,8 @@ type FabricatorStatus struct {
 	LastAppliedGen int64 `json:"lastAppliedGen,omitempty"`
 	// Controller version that applied the last successful configuration
 	LastAppliedController string `json:"lastAppliedController,omitempty"`
+	// Time of the last status check
+	LastStatusCheck metav1.Time `json:"lastStatusCheck,omitempty"`
 
 	// Conditions of the fabricator, includes readiness marker for use with kubectl wait
 	Conditions []metav1.Condition `json:"conditions"`

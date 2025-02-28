@@ -342,6 +342,9 @@ func (c *ControlUpgrade) installFabricator(ctx context.Context, kube client.Clie
 				if obj.Status.LastAppliedController != version {
 					return false, nil
 				}
+				if time.Since(obj.Status.LastStatusCheck.Time) > 2*time.Minute {
+					return false, nil
+				}
 				if cond.Type == fabapi.ConditionReady && cond.Status == metav1.ConditionTrue {
 					return true, nil
 				}

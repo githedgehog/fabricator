@@ -427,6 +427,7 @@ func (in *FabricatorStatus) DeepCopyInto(out *FabricatorStatus) {
 	in.Versions.DeepCopyInto(&out.Versions)
 	in.LastAttemptTime.DeepCopyInto(&out.LastAttemptTime)
 	in.LastAppliedTime.DeepCopyInto(&out.LastAppliedTime)
+	in.LastStatusCheck.DeepCopyInto(&out.LastStatusCheck)
 	if in.Conditions != nil {
 		in, out := &in.Conditions, &out.Conditions
 		*out = make([]v1.Condition, len(*in))
