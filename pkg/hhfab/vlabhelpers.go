@@ -766,7 +766,7 @@ func (c *Config) createSSHConfig(ctx context.Context, entryName string, entry VL
 
 func (c *Config) getSwitchIP(ctx context.Context, entryName string) (string, error) {
 	kubeconfig := filepath.Join(c.WorkDir, VLABDir, VLABKubeConfig)
-	kube, err := kubeutil.NewClientWithCache(ctx, kubeconfig, wiringapi.SchemeBuilder)
+	kube, err := kubeutil.NewClient(ctx, kubeconfig, wiringapi.SchemeBuilder)
 	if err != nil {
 		return "", fmt.Errorf("creating kube client: %w", err)
 	}
@@ -790,7 +790,7 @@ func (c *Config) getSwitchIP(ctx context.Context, entryName string) (string, err
 
 func (c *Config) getNodeIP(ctx context.Context, name string) (string, error) {
 	kubeconfig := filepath.Join(c.WorkDir, VLABDir, VLABKubeConfig)
-	kube, err := kubeutil.NewClientWithCache(ctx, kubeconfig, fabapi.SchemeBuilder)
+	kube, err := kubeutil.NewClient(ctx, kubeconfig, fabapi.SchemeBuilder)
 	if err != nil {
 		return "", fmt.Errorf("creating kube client: %w", err)
 	}

@@ -53,7 +53,7 @@ func (c *Config) Wait(ctx context.Context, vlab *VLAB) error {
 	start := time.Now()
 
 	kubeconfig := filepath.Join(c.WorkDir, VLABDir, VLABKubeConfig)
-	kube, err := kubeutil.NewClientWithCache(ctx, kubeconfig,
+	cacheCancel, kube, err := kubeutil.NewClientWithCache(ctx, kubeconfig,
 		wiringapi.SchemeBuilder,
 		vpcapi.SchemeBuilder,
 		agentapi.SchemeBuilder,
@@ -62,6 +62,7 @@ func (c *Config) Wait(ctx context.Context, vlab *VLAB) error {
 	if err != nil {
 		return fmt.Errorf("creating kube client: %w", err)
 	}
+	defer cacheCancel()
 
 	slog.Info("Waiting for all switches ready")
 	if err := WaitSwitchesReady(ctx, kube, 0, 30*time.Minute); err != nil {
@@ -151,7 +152,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	}
 
 	kubeconfig := filepath.Join(c.WorkDir, VLABDir, VLABKubeConfig)
-	kube, err := kubeutil.NewClientWithCache(ctx, kubeconfig,
+	cacheCancel, kube, err := kubeutil.NewClientWithCache(ctx, kubeconfig,
 		wiringapi.SchemeBuilder,
 		vpcapi.SchemeBuilder,
 		agentapi.SchemeBuilder,
@@ -160,6 +161,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	if err != nil {
 		return fmt.Errorf("creating kube client: %w", err)
 	}
+	defer cacheCancel()
 
 	servers := &wiringapi.ServerList{}
 	if err := kube.List(ctx, servers); err != nil {
@@ -523,7 +525,7 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 	slog.Info("Setting up VPC and External Peerings", "numRequests", len(opts.Requests))
 
 	kubeconfig := filepath.Join(c.WorkDir, VLABDir, VLABKubeConfig)
-	kube, err := kubeutil.NewClientWithCache(ctx, kubeconfig,
+	cacheCancel, kube, err := kubeutil.NewClientWithCache(ctx, kubeconfig,
 		wiringapi.SchemeBuilder,
 		vpcapi.SchemeBuilder,
 		agentapi.SchemeBuilder,
@@ -532,6 +534,7 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 	if err != nil {
 		return fmt.Errorf("creating kube client: %w", err)
 	}
+	defer cacheCancel()
 
 	if opts.WaitSwitchesReady {
 		slog.Info("Waiting for switches ready before configuring VPC and External Peerings")
@@ -907,7 +910,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 	}
 
 	kubeconfig := filepath.Join(c.WorkDir, VLABDir, VLABKubeConfig)
-	kube, err := kubeutil.NewClientWithCache(ctx, kubeconfig,
+	cacheCancel, kube, err := kubeutil.NewClientWithCache(ctx, kubeconfig,
 		wiringapi.SchemeBuilder,
 		vpcapi.SchemeBuilder,
 		agentapi.SchemeBuilder,
@@ -916,6 +919,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 	if err != nil {
 		return fmt.Errorf("creating kube client: %w", err)
 	}
+	defer cacheCancel()
 
 	switches := &wiringapi.SwitchList{}
 	if err := kube.List(ctx, switches); err != nil {
@@ -1566,7 +1570,7 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 	start := time.Now()
 
 	kubeconfig := filepath.Join(c.WorkDir, VLABDir, VLABKubeConfig)
-	kube, err := kubeutil.NewClientWithCache(ctx, kubeconfig,
+	cacheCancel, kube, err := kubeutil.NewClientWithCache(ctx, kubeconfig,
 		wiringapi.SchemeBuilder,
 		vpcapi.SchemeBuilder,
 		agentapi.SchemeBuilder,
@@ -1579,6 +1583,7 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 	if err != nil {
 		return fmt.Errorf("creating kube client: %w", err)
 	}
+	defer cacheCancel()
 
 	fail := false
 
