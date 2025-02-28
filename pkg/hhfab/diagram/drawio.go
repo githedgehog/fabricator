@@ -67,14 +67,16 @@ type Point struct {
 	As string  `xml:"as,attr,omitempty"`
 }
 
-func GenerateDrawio(workDir string, jsonData []byte) error {
+func GenerateDrawio(workDir string, jsonData []byte, styleType StyleType) error {
 	outputFile := filepath.Join(workDir, "vlab-diagram.drawio")
 	topo, err := ConvertJSONToTopology(jsonData)
 	if err != nil {
 		return fmt.Errorf("converting JSON to topology: %w", err)
 	}
 
-	model := generateDrawio(topo)
+	style := GetStyle(styleType)
+
+	model := createDrawioModel(topo, style)
 	outputXML, err := xml.MarshalIndent(model, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshaling XML: %w", err)
@@ -87,7 +89,7 @@ func GenerateDrawio(workDir string, jsonData []byte) error {
 	return nil
 }
 
-func generateDrawio(topo Topology) *MxGraphModel {
+func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 	model := &MxGraphModel{
 		Dx:         600,
 		Dy:         700,
@@ -101,6 +103,7 @@ func generateDrawio(topo Topology) *MxGraphModel {
 		PageScale:  1,
 		PageWidth:  600,
 		PageHeight: 1000,
+		Background: style.BackgroundColor,
 		Root: Root{
 			MxCell: []MxCell{
 				{ID: "0"},
@@ -109,7 +112,7 @@ func generateDrawio(topo Topology) *MxGraphModel {
 		},
 	}
 
-	model.Root.MxCell = append(model.Root.MxCell, createLegend()...)
+	model.Root.MxCell = append(model.Root.MxCell, createLegend(style)...)
 
 	const (
 		nodeWidth     = 100
@@ -131,7 +134,7 @@ func generateDrawio(topo Topology) *MxGraphModel {
 			ID:     node.ID,
 			Parent: "1",
 			Value:  node.Label,
-			Style:  getNodeStyle(node),
+			Style:  getNodeStyle(node, style),
 			Vertex: "1",
 			Geometry: &Geometry{
 				X:      float64(x),
@@ -154,7 +157,7 @@ func generateDrawio(topo Topology) *MxGraphModel {
 			ID:     node.ID,
 			Parent: "1",
 			Value:  node.Label,
-			Style:  getNodeStyle(node),
+			Style:  getNodeStyle(node, style),
 			Vertex: "1",
 			Geometry: &Geometry{
 				X:      float64(x),
@@ -177,7 +180,7 @@ func generateDrawio(topo Topology) *MxGraphModel {
 			ID:     node.ID,
 			Parent: "1",
 			Value:  node.Label,
-			Style:  getNodeStyle(node),
+			Style:  getNodeStyle(node, style),
 			Vertex: "1",
 			Geometry: &Geometry{
 				X:      float64(x),
@@ -193,32 +196,21 @@ func generateDrawio(topo Topology) *MxGraphModel {
 
 	linkGroups := groupLinks(topo.Links)
 	for i, group := range linkGroups {
-		createParallelEdges(model, group, cellMap, i)
+		createParallelEdges(model, group, cellMap, i, style)
 	}
 
 	return model
 }
 
-func getNodeStyle(node Node) string {
-	baseStyle := "shape=rectangle;whiteSpace=wrap;html=1;fontSize=11;"
-	rounded := "rounded=1;"
-	colors := ""
-	switch node.Type {
-	case NodeTypeSwitch:
-		if role, ok := node.Properties["role"]; ok && role == SwitchRoleSpine {
-			colors = "fillColor=#f8cecc;strokeColor=#b85450;"
-		} else {
-			colors = "fillColor=#dae8fc;strokeColor=#6c8ebf;"
-		}
-	case NodeTypeServer:
-		rounded = "rounded=0;"
-		colors = "fillColor=#d5e8d4;strokeColor=#82b366;"
-	}
-
-	return baseStyle + rounded + colors
+func getNodeStyle(node Node, style Style) string {
+	return GetNodeStyleFromTheme(node, style)
 }
 
-func createLegend() []MxCell {
+func getLinkStyle(link Link, style Style) string {
+	return GetLinkStyleFromTheme(link, style)
+}
+
+func createLegend(style Style) []MxCell {
 	container := MxCell{
 		ID:     "legend_container",
 		Parent: "1",
@@ -256,21 +248,21 @@ func createLegend() []MxCell {
 			As:     "geometry",
 		},
 	}
+
 	legendEntries := []struct {
-		y      int
-		stroke string
-		dash   bool
-		width  int
-		text   string
+		y     int
+		style string
+		text  string
 	}{
-		{50, "#b85450", false, 3, "Fabric Links"},
-		{80, "#2f5597", true, 2, "MCLAG Peer Links"},
-		{110, "#4472c4", true, 2, "MCLAG Session Links"},
-		{140, "#9cc1f7", true, 2, "MCLAG Server Links"},
-		{170, "#82b366", false, 2, "Bundled Server Links"},
-		{200, "#666666", false, 2, "Unbundled Server Links"},
-		{230, "#d79b00", true, 2, "ESLAG Server Links"},
+		{50, style.FabricLinkStyle, "Fabric Links"},
+		{80, style.MCLAGPeerStyle, "MCLAG Peer Links"},
+		{110, style.MCLAGSessionStyle, "MCLAG Session Links"},
+		{140, style.MCLAGServerStyle, "MCLAG Server Links"},
+		{170, style.BundledServerStyle, "Bundled Server Links"},
+		{200, style.UnbundledStyle, "Unbundled Server Links"},
+		{230, style.ESLAGServerStyle, "ESLAG Server Links"},
 	}
+
 	cells := make([]MxCell, 3+4*len(legendEntries))[:0]
 	cells = append(cells, container, background, title)
 	for i, entry := range legendEntries {
@@ -300,14 +292,11 @@ func createLegend() []MxCell {
 				As:     "geometry",
 			},
 		}
-		lineStyle := fmt.Sprintf("endArrow=none;html=1;strokeWidth=%d;strokeColor=%s;%s",
-			entry.width,
-			entry.stroke,
-			map[bool]string{true: "dashed=1;", false: ""}[entry.dash])
+
 		lineSample := MxCell{
 			ID:     fmt.Sprintf("legend_line_%d", i),
 			Parent: "legend_container",
-			Style:  lineStyle,
+			Style:  entry.style,
 			Edge:   "1",
 			Source: startPoint.ID,
 			Target: endPoint.ID,
@@ -390,7 +379,7 @@ func fixedConnectionPoint(cell *MxCell, targetX, targetY float64) (float64, floa
 	return rx, ry
 }
 
-func createParallelEdges(model *MxGraphModel, group LinkGroup, cellMap map[string]*MxCell, edgeGroupID int) {
+func createParallelEdges(model *MxGraphModel, group LinkGroup, cellMap map[string]*MxCell, edgeGroupID int, style Style) {
 	sourceCell, ok := cellMap[group.Source]
 	if !ok || sourceCell.Geometry == nil {
 		return
@@ -431,9 +420,11 @@ func createParallelEdges(model *MxGraphModel, group LinkGroup, cellMap map[strin
 		relTgtX := (tgtX - targetCell.Geometry.X) / float64(targetCell.Geometry.Width)
 		relTgtY := (tgtY - targetCell.Geometry.Y) / float64(targetCell.Geometry.Height)
 		edgeID := fmt.Sprintf("e%d_%d", edgeGroupID, i)
-		edgeStyle := getLinkStyle(link, true) +
+
+		edgeStyle := getLinkStyle(link, style) +
 			fmt.Sprintf("exitX=%.3f;exitY=%.3f;exitDx=0;exitDy=0;entryX=%.3f;entryY=%.3f;entryDx=0;entryDy=0;",
 				relSrcX, relSrcY, relTgtX, relTgtY)
+
 		edgeCell := MxCell{
 			ID:     edgeID,
 			Parent: "1",
@@ -526,38 +517,4 @@ func calculateLabelRotation(srcX, srcY, tgtX, tgtY float64) float64 {
 	}
 
 	return angle
-}
-
-func getLinkStyle(link Link, isMiddle bool) string {
-	style := "endArrow=none;html=1;strokeWidth=2;"
-	switch link.Type {
-	case EdgeTypeFabric:
-		style += "strokeColor=#b85450;"
-	case EdgeTypeMCLAG:
-		if mclagType, ok := link.Properties["mclagType"]; ok {
-			switch mclagType {
-			case "peer":
-				style += "strokeColor=#2f5597;dashed=1;"
-			case "session":
-				style += "strokeColor=#4472c4;dashed=1;"
-			default:
-				style += "strokeColor=#9cc1f7;dashed=1;"
-			}
-		} else {
-			style += "strokeColor=#9cc1f7;dashed=1;"
-		}
-	case EdgeTypeBundled:
-		style += "strokeColor=#82b366;"
-	case EdgeTypeUnbundled:
-		style += "strokeColor=#666666;"
-	case EdgeTypeESLAG:
-		style += "strokeColor=#d79b00;dashed=1;"
-	default:
-		style += "strokeColor=#000000;"
-	}
-	if isMiddle {
-		style += "fontSize=10;spacing=5;"
-	}
-
-	return style
 }
