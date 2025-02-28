@@ -23,6 +23,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/fab/recipe"
 	"go.githedgehog.com/fabricator/pkg/hhfab"
+	"go.githedgehog.com/fabricator/pkg/hhfab/diagram"
 	"go.githedgehog.com/fabricator/pkg/hhfab/pdu"
 	"go.githedgehog.com/fabricator/pkg/version"
 	"golang.org/x/term"
@@ -346,6 +347,11 @@ func Run(ctx context.Context) error {
 		},
 	}
 
+	diagramStyleTypes := []string{}
+	for _, s := range diagram.StyleTypes {
+		diagramStyleTypes = append(diagramStyleTypes, string(s))
+	}
+
 	cli.VersionFlag.(*cli.BoolFlag).Aliases = []string{"V"}
 	app := &cli.App{
 		Name:  "hhfab",
@@ -519,11 +525,26 @@ func Run(ctx context.Context) error {
 						Usage:   "diagram format: drawio (default), dot (graphviz), mermaid (unsupported)",
 						Value:   "drawio",
 					},
+					&cli.StringFlag{
+						Name:    "style",
+						Aliases: []string{"s"},
+						Usage:   "diagram style (only applies to drawio format): " + strings.Join(diagramStyleTypes, ", "),
+						Value:   string(diagram.StyleDefault),
+						Action: func(_ *cli.Context, style string) error {
+							if !slices.Contains(diagramStyleTypes, style) {
+								return fmt.Errorf("invalid style: %s (available: %s)", style, strings.Join(diagramStyleTypes, ", ")) //nolint:goerr113
+							}
+
+							return nil
+						},
+					},
 				),
 				Before: before(false),
 				Action: func(c *cli.Context) error {
 					format := strings.ToLower(c.String("format"))
-					if err := hhfab.Diagram(workDir, format); err != nil {
+					styleType := diagram.StyleType(c.String("style"))
+
+					if err := hhfab.Diagram(workDir, format, styleType); err != nil {
 						return fmt.Errorf("failed to generate %s diagram: %w", format, err)
 					}
 

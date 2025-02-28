@@ -242,7 +242,7 @@ func DoSwitchReinstall(ctx context.Context, workDir, cacheDir string, opts Switc
 	return c.VLABSwitchReinstall(ctx, opts)
 }
 
-func Diagram(workDir, format string) error {
+func Diagram(workDir, format string, styleType diagram.StyleType) error {
 	includeDir := filepath.Join(workDir, IncludeDir)
 
 	files, err := os.ReadDir(includeDir)
@@ -289,11 +289,11 @@ func Diagram(workDir, format string) error {
 	format = strings.ToLower(format)
 	switch format {
 	case "drawio":
-		slog.Debug("Generating draw.io diagram")
-		if err := diagram.GenerateDrawio(workDir, jsonData); err != nil {
+		slog.Debug("Generating draw.io diagram", "style", styleType)
+		if err := diagram.GenerateDrawio(workDir, jsonData, styleType); err != nil {
 			return fmt.Errorf("generating draw.io diagram: %w", err)
 		}
-		slog.Info("Generated draw.io diagram", "file", filepath.Join(workDir, "vlab-diagram.drawio"))
+		slog.Info("Generated draw.io diagram", "file", filepath.Join(workDir, "vlab-diagram.drawio"), "style", styleType)
 	case "dot":
 		slog.Debug("Generating DOT diagram")
 		if err := diagram.GenerateDOT(workDir, jsonData); err != nil {
