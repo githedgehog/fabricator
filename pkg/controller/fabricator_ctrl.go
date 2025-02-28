@@ -6,8 +6,10 @@ package controller
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
+	"github.com/go-logr/logr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -48,6 +50,7 @@ import (
 
 type FabricatorReconciler struct {
 	client.Client
+	status sync.Mutex
 }
 
 func SetupFabricatorReconcilerWith(mgr ctrl.Manager) error {
@@ -60,6 +63,10 @@ func SetupFabricatorReconcilerWith(mgr ctrl.Manager) error {
 		For(&fabapi.Fabricator{}).
 		Complete(r); err != nil {
 		return fmt.Errorf("setting up controller: %w", err)
+	}
+
+	if err := mgr.Add(r); err != nil {
+		return fmt.Errorf("adding status watcher: %w", err)
 	}
 
 	return nil
@@ -189,105 +196,152 @@ func (r *FabricatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		l.Info("Fabricator already reconciled")
 	}
 
-	if !apimeta.IsStatusConditionTrue(f.Status.Conditions, fabapi.ConditionReady) {
-		l.Info("Checking for components status")
+	return ctrl.Result{}, r.statusCheck(ctx, l, f)
+}
 
-		var err error
-
-		f.Status.Components.FabricatorAPI, err = f8r.StatusAPI(ctx, r.Client, *f)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("getting fabricator api status: %w", err)
-		}
-
-		f.Status.Components.FabricatorCtrl, err = f8r.StatusCtrl(ctx, r.Client, *f)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("getting fabricator ctrl status: %w", err)
-		}
-
-		f.Status.Components.CertManagerCtrl, err = certmanager.StatusCtrl(ctx, r.Client, *f)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("getting cert-manager ctrl status: %w", err)
-		}
-
-		f.Status.Components.CertManagerWebhook, err = certmanager.StatusWebhook(ctx, r.Client, *f)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("getting cert-manager webhook status: %w", err)
-		}
-
-		f.Status.Components.Reloader, err = reloader.Status(ctx, r.Client, *f)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("getting reloader status: %w", err)
-		}
-
-		f.Status.Components.Zot, err = zot.Status(ctx, r.Client, *f)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("getting zot status: %w", err)
-		}
-
-		f.Status.Components.NTP, err = ntp.Status(ctx, r.Client, *f)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("getting ntp status: %w", err)
-		}
-
-		f.Status.Components.FabricAPI, err = fabric.StatusAPI(ctx, r.Client, *f)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("getting fabric api status: %w", err)
-		}
-
-		f.Status.Components.FabricCtrl, err = fabric.StatusCtrl(ctx, r.Client, *f)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("getting fabric ctrl status: %w", err)
-		}
-
-		f.Status.Components.FabricBoot, err = fabric.StatusBoot(ctx, r.Client, *f)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("getting fabric boot status: %w", err)
-		}
-
-		f.Status.Components.FabricDHCP, err = fabric.StatusDHCP(ctx, r.Client, *f)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("getting fabric dhcp status: %w", err)
-		}
-
-		f.Status.Components.FabricProxy, err = fabric.StatusProxy(ctx, r.Client, *f)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("getting fabric proxy status: %w", err)
-		}
-
-		if f.Status.Components.IsReady() {
-			l.Info("Fabricator is ready")
-
-			apimeta.SetStatusCondition(&f.Status.Conditions, metav1.Condition{
-				Type:               fabapi.ConditionReady,
-				Status:             metav1.ConditionTrue,
-				Reason:             "ComponentsReady",
-				ObservedGeneration: f.Generation,
-				Message:            "All components are ready",
-			})
-
-			if err := r.Status().Update(ctx, f); err != nil {
-				return ctrl.Result{}, fmt.Errorf("updating ready status: %w", err)
-			}
-
-			return ctrl.Result{}, nil
-		} else { //nolint:revive
-			l.Info("Fabricator is not ready")
-
-			apimeta.SetStatusCondition(&f.Status.Conditions, metav1.Condition{
-				Type:               fabapi.ConditionReady,
-				Status:             metav1.ConditionFalse,
-				Reason:             "ComponentsPending",
-				ObservedGeneration: f.Generation,
-				Message:            "Not all components are ready",
-			})
-
-			if err := r.Status().Update(ctx, f); err != nil {
-				return ctrl.Result{}, fmt.Errorf("updating not ready status: %w", err)
-			}
-
-			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-		}
+func (r *FabricatorReconciler) statusCheck(ctx context.Context, l logr.Logger, f *fabapi.Fabricator) error {
+	if time.Since(f.Status.LastStatusCheck.Time) < 1*time.Minute && apimeta.IsStatusConditionTrue(f.Status.Conditions, fabapi.ConditionReady) {
+		return nil
 	}
 
-	return ctrl.Result{}, nil
+	r.status.Lock()
+	defer r.status.Unlock()
+
+	l.Info("Checking for components status")
+
+	var err error
+
+	f.Status.Components.FabricatorAPI, err = f8r.StatusAPI(ctx, r.Client, *f)
+	if err != nil {
+		return fmt.Errorf("getting fabricator api status: %w", err)
+	}
+
+	f.Status.Components.FabricatorCtrl, err = f8r.StatusCtrl(ctx, r.Client, *f)
+	if err != nil {
+		return fmt.Errorf("getting fabricator ctrl status: %w", err)
+	}
+
+	f.Status.Components.CertManagerCtrl, err = certmanager.StatusCtrl(ctx, r.Client, *f)
+	if err != nil {
+		return fmt.Errorf("getting cert-manager ctrl status: %w", err)
+	}
+
+	f.Status.Components.CertManagerWebhook, err = certmanager.StatusWebhook(ctx, r.Client, *f)
+	if err != nil {
+		return fmt.Errorf("getting cert-manager webhook status: %w", err)
+	}
+
+	f.Status.Components.Reloader, err = reloader.Status(ctx, r.Client, *f)
+	if err != nil {
+		return fmt.Errorf("getting reloader status: %w", err)
+	}
+
+	f.Status.Components.Zot, err = zot.Status(ctx, r.Client, *f)
+	if err != nil {
+		return fmt.Errorf("getting zot status: %w", err)
+	}
+
+	f.Status.Components.NTP, err = ntp.Status(ctx, r.Client, *f)
+	if err != nil {
+		return fmt.Errorf("getting ntp status: %w", err)
+	}
+
+	f.Status.Components.FabricAPI, err = fabric.StatusAPI(ctx, r.Client, *f)
+	if err != nil {
+		return fmt.Errorf("getting fabric api status: %w", err)
+	}
+
+	f.Status.Components.FabricCtrl, err = fabric.StatusCtrl(ctx, r.Client, *f)
+	if err != nil {
+		return fmt.Errorf("getting fabric ctrl status: %w", err)
+	}
+
+	f.Status.Components.FabricBoot, err = fabric.StatusBoot(ctx, r.Client, *f)
+	if err != nil {
+		return fmt.Errorf("getting fabric boot status: %w", err)
+	}
+
+	f.Status.Components.FabricDHCP, err = fabric.StatusDHCP(ctx, r.Client, *f)
+	if err != nil {
+		return fmt.Errorf("getting fabric dhcp status: %w", err)
+	}
+
+	f.Status.Components.FabricProxy, err = fabric.StatusProxy(ctx, r.Client, *f)
+	if err != nil {
+		return fmt.Errorf("getting fabric proxy status: %w", err)
+	}
+
+	if f.Status.Components.IsReady() {
+		if !apimeta.IsStatusConditionTrue(f.Status.Conditions, fabapi.ConditionReady) {
+			l.Info("All components are ready now")
+		}
+
+		apimeta.SetStatusCondition(&f.Status.Conditions, metav1.Condition{
+			Type:               fabapi.ConditionReady,
+			Status:             metav1.ConditionTrue,
+			Reason:             "ComponentsReady",
+			ObservedGeneration: f.Generation,
+			Message:            "All components are ready",
+		})
+
+		f.Status.LastStatusCheck = metav1.Time{Time: time.Now()}
+
+		if err := r.Status().Update(ctx, f); err != nil {
+			return fmt.Errorf("updating ready status: %w", err)
+		}
+
+		return nil
+	} else { //nolint:revive
+		if apimeta.IsStatusConditionTrue(f.Status.Conditions, fabapi.ConditionReady) {
+			l.Info("Some components are not ready now")
+		}
+
+		apimeta.SetStatusCondition(&f.Status.Conditions, metav1.Condition{
+			Type:               fabapi.ConditionReady,
+			Status:             metav1.ConditionFalse,
+			Reason:             "ComponentsPending",
+			ObservedGeneration: f.Generation,
+			Message:            "Not all components are ready",
+		})
+
+		f.Status.LastStatusCheck = metav1.Time{Time: time.Now()}
+
+		if err := r.Status().Update(ctx, f); err != nil {
+			return fmt.Errorf("updating not ready status: %w", err)
+		}
+
+		return nil
+	}
+}
+
+// Only one status watcher is needed
+func (r *FabricatorReconciler) NeedLeaderElection() bool {
+	return true
+}
+
+// Status watcher
+func (r *FabricatorReconciler) Start(ctx context.Context) error {
+	l := log.FromContext(ctx, "runner", "StatusWatcher")
+
+	for {
+		select {
+		case <-ctx.Done():
+			l.Info("Context done")
+
+			return nil
+		case <-time.After(10 * time.Second):
+			f := &fabapi.Fabricator{}
+			if err := r.Get(ctx, client.ObjectKey{Name: comp.FabName, Namespace: comp.FabNamespace}, f); err != nil {
+				l.Error(err, "Fetching fabricator")
+
+				continue
+			}
+
+			if err := r.statusCheck(ctx, l, f); err != nil {
+				l.Error(err, "Checking status")
+
+				continue
+			}
+		}
+	}
 }
