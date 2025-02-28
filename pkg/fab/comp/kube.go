@@ -82,11 +82,13 @@ const (
 )
 
 const (
-	NodeReady            = coreapi.NodeReady
-	DeploymentAvailable  = appsapi.DeploymentAvailable
-	IssuerConditionReady = cmapi.IssuerConditionReady
-	ConditionTrue        = coreapi.ConditionTrue
-	CMConditionTrue      = cmmeta.ConditionTrue
+	NodeReady             = coreapi.NodeReady
+	DeploymentAvailable   = appsapi.DeploymentAvailable
+	DeploymentProgressing = appsapi.DeploymentProgressing
+	IssuerConditionReady  = cmapi.IssuerConditionReady
+	ConditionTrue         = coreapi.ConditionTrue
+	ConditionFalse        = coreapi.ConditionFalse
+	CMConditionTrue       = cmmeta.ConditionTrue
 )
 
 const (
@@ -446,7 +448,7 @@ func GetDeploymentStatus(name, container, image string) KubeStatus {
 
 		if upToDate && obj.Status.UpdatedReplicas >= 1 {
 			for _, cond := range obj.Status.Conditions {
-				if cond.Type == DeploymentAvailable && cond.Status == ConditionTrue {
+				if cond.Type == DeploymentProgressing && cond.Status == ConditionTrue {
 					return fabapi.CompStatusReady, nil
 				}
 			}
