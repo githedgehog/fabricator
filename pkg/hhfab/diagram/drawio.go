@@ -89,6 +89,9 @@ func GenerateDrawio(workDir string, jsonData []byte, styleType StyleType) error 
 	return nil
 }
 
+// Copyright 2024 Hedgehog
+// SPDX-License-Identifier: Apache-2.0
+
 func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 	model := &MxGraphModel{
 		Dx:         600,
@@ -133,8 +136,8 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 		cell := MxCell{
 			ID:     node.ID,
 			Parent: "1",
-			Value:  node.Label,
-			Style:  getNodeStyle(node, style),
+			Value:  GetNodeLabel(node, style),
+			Style:  GetNodeStyle(node, style),
 			Vertex: "1",
 			Geometry: &Geometry{
 				X:      float64(x),
@@ -156,8 +159,8 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 		cell := MxCell{
 			ID:     node.ID,
 			Parent: "1",
-			Value:  node.Label,
-			Style:  getNodeStyle(node, style),
+			Value:  GetNodeLabel(node, style),
+			Style:  GetNodeStyle(node, style),
 			Vertex: "1",
 			Geometry: &Geometry{
 				X:      float64(x),
@@ -179,8 +182,8 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 		cell := MxCell{
 			ID:     node.ID,
 			Parent: "1",
-			Value:  node.Label,
-			Style:  getNodeStyle(node, style),
+			Value:  GetNodeLabel(node, style),
+			Style:  GetNodeStyle(node, style),
 			Vertex: "1",
 			Geometry: &Geometry{
 				X:      float64(x),
@@ -200,14 +203,6 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 	}
 
 	return model
-}
-
-func getNodeStyle(node Node, style Style) string {
-	return GetNodeStyleFromTheme(node, style)
-}
-
-func getLinkStyle(link Link, style Style) string {
-	return GetLinkStyleFromTheme(link, style)
 }
 
 func createLegend(style Style) []MxCell {
@@ -249,6 +244,8 @@ func createLegend(style Style) []MxCell {
 		},
 	}
 
+	// Using the actual style values from Style struct instead of hardcoded values
+	// This ensures the legend matches the actual link styles used in the diagram
 	legendEntries := []struct {
 		y     int
 		style string
@@ -421,7 +418,7 @@ func createParallelEdges(model *MxGraphModel, group LinkGroup, cellMap map[strin
 		relTgtY := (tgtY - targetCell.Geometry.Y) / float64(targetCell.Geometry.Height)
 		edgeID := fmt.Sprintf("e%d_%d", edgeGroupID, i)
 
-		edgeStyle := getLinkStyle(link, style) +
+		edgeStyle := GetLinkStyleFromTheme(link, style) +
 			fmt.Sprintf("exitX=%.3f;exitY=%.3f;exitDx=0;exitDy=0;entryX=%.3f;entryY=%.3f;entryDx=0;entryDy=0;",
 				relSrcX, relSrcY, relTgtX, relTgtY)
 
