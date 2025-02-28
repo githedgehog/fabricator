@@ -151,6 +151,10 @@ func (c *ControlUpgrade) Run(ctx context.Context) error {
 		return fmt.Errorf("pre-caching zot: %w", err)
 	}
 
+	if err := c.upgradeK8s(ctx, kube); err != nil {
+		return fmt.Errorf("upgrading K8s: %w", err)
+	}
+
 	if err := c.installFabricator(ctx, kube, false); err != nil {
 		return fmt.Errorf("installing fabricator and config: %w", err)
 	}
@@ -161,10 +165,6 @@ func (c *ControlUpgrade) Run(ctx context.Context) error {
 
 	if err := copyFile(k9s.BinName, filepath.Join(k3s.BinDir, k9s.BinName), 0o755); err != nil {
 		return fmt.Errorf("copying k9s bin: %w", err)
-	}
-
-	if err := c.upgradeK8s(ctx, kube); err != nil {
-		return fmt.Errorf("upgrading K8s: %w", err)
 	}
 
 	slog.Info("Control node upgrade complete")
