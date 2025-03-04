@@ -76,7 +76,7 @@ func (r *FabricatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	l := log.FromContext(ctx)
 
 	if req.Name != comp.FabName && req.Namespace != comp.FabNamespace {
-		l.Info("Ignoring Fabricator")
+		l.Info("Ignoring incorrect Fabricator")
 
 		return ctrl.Result{}, nil
 	}
@@ -86,26 +86,6 @@ func (r *FabricatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, fmt.Errorf("fetching fabricator: %w", err)
 	}
 	f.Default()
-
-	controls := &fabapi.ControlNodeList{}
-	if err := r.List(ctx, controls); err != nil {
-		return ctrl.Result{}, fmt.Errorf("listing controls: %w", err)
-	}
-	if len(controls.Items) == 0 {
-		return ctrl.Result{}, fmt.Errorf("no control nodes found") //nolint:goerr113
-	}
-	if len(controls.Items) > 1 {
-		return ctrl.Result{}, fmt.Errorf("multiple control nodes found") //nolint:goerr113
-	}
-	control := controls.Items[0]
-	control.Default()
-
-	// That makes sure that we're updating Fab and ControlNodes with the new defaults
-	if err := comp.EnforceKubeInstall(ctx, r.Client, *f, f8r.InstallFabAndControl(control)); err != nil {
-		return ctrl.Result{}, fmt.Errorf("enforcing fabricator and control install defaults: %w", err)
-	}
-
-	// TODO do the same for the nodes
 
 	l = l.WithValues("gen", f.Generation, "res", f.ResourceVersion)
 
@@ -119,6 +99,30 @@ func (r *FabricatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	outdated := f.Status.LastAppliedController != version.Version || f.Status.LastAppliedGen != f.Generation
 	if outdated || !apimeta.IsStatusConditionTrue(f.Status.Conditions, fabapi.ConditionApplied) {
 		l.Info("Reconciling Fabricator")
+
+		// ensuring defaults for the fabricator and controls first
+
+		controls := &fabapi.ControlNodeList{}
+		if err := r.List(ctx, controls); err != nil {
+			return ctrl.Result{}, fmt.Errorf("listing controls: %w", err)
+		}
+		if len(controls.Items) == 0 {
+			return ctrl.Result{}, fmt.Errorf("no control nodes found") //nolint:goerr113
+		}
+		if len(controls.Items) > 1 {
+			return ctrl.Result{}, fmt.Errorf("multiple control nodes found") //nolint:goerr113
+		}
+		control := controls.Items[0]
+		control.Default()
+
+		// That makes sure that we're updating Fab and ControlNodes with the new defaults
+		if err := comp.EnforceKubeInstall(ctx, r.Client, *f, f8r.InstallFabAndControl(control)); err != nil {
+			return ctrl.Result{}, fmt.Errorf("enforcing fabricator and control install defaults: %w", err)
+		}
+
+		// TODO do the same for the nodes
+
+		// doing the actual reconciliation
 
 		apimeta.SetStatusCondition(&f.Status.Conditions, metav1.Condition{
 			Type:               fabapi.ConditionApplied,
@@ -192,8 +196,6 @@ func (r *FabricatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 
 		l.Info("Reconciled Fabricator")
-	} else {
-		l.Info("Fabricator already reconciled")
 	}
 
 	return ctrl.Result{}, r.statusCheck(ctx, l, f)
