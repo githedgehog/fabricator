@@ -10,6 +10,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
 
+permissions:
+  pull-requests: read
+
 jobs:
   commitlint:
     runs-on: lab
@@ -25,3 +28,9 @@ jobs:
         uses: opensource-nepal/commitlint@v1
         with:
           verbose: true
+
+      - name: Block Merge Commits
+        if: ${{ always() }}
+        uses: Morishiri/block-merge-commits-action@v1.0.1
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
