@@ -74,30 +74,22 @@ KUBECTL="/opt/bin/kubectl"
 # Githedgehog Resources
 # ---------------------------
 {
-    echo -e "\n=== Githedgehog.com Resources ==="
+    echo -e "\n=== githedgehog.com Resources ==="
     
-    # Custom Resource Definitions
-    crds_githedgehog=$($KUBECTL get crds -o custom-columns=":metadata.name" | grep 'githedgehog.com')
-    for crd in $crds_githedgehog; do
-        echo -e "\n=== Instances of $crd ==="
-        $KUBECTL get $crd -A
-    done
-
-    # Namespaced Resources
+    echo -e "\n=== Listing API Resources ==="
     resources_githedgehog=$($KUBECTL api-resources --verbs=list --namespaced=true -o name | grep 'githedgehog.com')
     for resource in $resources_githedgehog; do
-        echo -e "\n=== Instances of $resource ==="
+        echo -e "\n=== Executing: $KUBECTL get $resource -A ==="
         $KUBECTL get $resource -A
     done
 
-    # Non-namespaced Resources
-    resources_non_namespaced_githedgehog=$($KUBECTL api-resources --verbs=list --namespaced=false -o name | grep 'githedgehog.com')
-    for resource in $resources_non_namespaced_githedgehog; do
-        echo -e "\n=== Instances of $resource (non-namespaced) ==="
-        $KUBECTL get $resource
+    echo -e "\n=== Describing API Resources ==="
+    for resource in $resources_githedgehog; do
+        echo -e "\n=== Executing: $KUBECTL describe $resource -A ==="
+        $KUBECTL describe $resource -A
     done
 } >> "$OUTPUT_FILE" 2>&1
-
+    
 # ---------------------------
 # System Logs
 # ---------------------------
