@@ -1,5 +1,7 @@
 # Fabricator
 
+test merge
+
 Fabricator is the repo that holds the scripts and utilities used to build the
 fabric, VLAB, bare metal installers, helm charts, and pods that are used in the
 open network fabric.
