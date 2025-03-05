@@ -5,6 +5,7 @@ package artificer
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -15,7 +16,6 @@ import (
 	"github.com/containers/image/v5/signature"
 	"github.com/containers/image/v5/transports/alltransports"
 	"github.com/containers/image/v5/types"
-	"github.com/pkg/errors"
 	"github.com/vbauerster/mpb/v8"
 	"github.com/vbauerster/mpb/v8/decor"
 	"go.githedgehog.com/fabricator/api/meta"
@@ -27,7 +27,7 @@ func UploadOCIArchive(ctx context.Context, workDir, name string, version meta.Ve
 	dstRef := "docker://" + strings.Trim(repo, "/") + "/" + strings.Trim(prefix, "/") + "/" + strings.Trim(name, "/") + ":" + string(version)
 
 	if err := copyOCI(ctx, srcRef, dstRef, nil, &types.DockerAuthConfig{Username: username, Password: password}); err != nil {
-		return errors.Wrapf(err, "error uploading OCI archive %s to %s", srcRef, dstRef)
+		return fmt.Errorf("uploading OCI archive %s to %s: %w", srcRef, dstRef, err)
 	}
 
 	return nil
@@ -36,18 +36,18 @@ func UploadOCIArchive(ctx context.Context, workDir, name string, version meta.Ve
 func copyOCI(ctx context.Context, src, dst string, srcAuth, dstAuth *types.DockerAuthConfig) error {
 	srcRef, err := alltransports.ParseImageName(src)
 	if err != nil {
-		return errors.Wrapf(err, "error parsing source ref %s", src)
+		return fmt.Errorf("parsing source ref %s: %w", src, err)
 	}
 	destRef, err := alltransports.ParseImageName(dst)
 	if err != nil {
-		return errors.Wrapf(err, "error parsing dest ref %s", dst)
+		return fmt.Errorf("parsing destination ref %s: %w", dst, err)
 	}
 
 	policyCtx, err := signature.NewPolicyContext(&signature.Policy{
 		Default: []signature.PolicyRequirement{signature.NewPRInsecureAcceptAnything()},
 	})
 	if err != nil {
-		return errors.Wrapf(err, "error creating policy context")
+		return fmt.Errorf("creating policy context: %w", err)
 	}
 
 	progressChan := make(chan types.ProgressProperties)
@@ -113,7 +113,7 @@ func copyOCI(ctx context.Context, src, dst string, srcAuth, dstAuth *types.Docke
 		},
 	})
 	if err != nil {
-		return errors.Wrapf(err, "error copying OCI from %s to %s", src, dst)
+		return fmt.Errorf("copying OCI from %s to %s: %w", src, dst, err)
 	}
 
 	pb.Wait()

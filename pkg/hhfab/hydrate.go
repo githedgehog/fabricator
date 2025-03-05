@@ -6,6 +6,7 @@ package hhfab
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/netip"
@@ -14,7 +15,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/pkg/errors"
 	fmeta "go.githedgehog.com/fabric/api/meta"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
@@ -303,10 +303,10 @@ func (c *Config) getHydration(ctx context.Context, kube client.Reader) (Hydratio
 
 	for _, sw := range switches.Items {
 		if sw.Spec.Role == "" {
-			return status, errors.Errorf("switch %s role is not set", sw.Name)
+			return status, fmt.Errorf("switch %s role is not set", sw.Name) //nolint:goerr113
 		}
 		if !slices.Contains(wiringapi.SwitchRoles, sw.Spec.Role) {
-			return status, errors.Errorf("switch %s role %q is invalid", sw.Name, sw.Spec.Role)
+			return status, fmt.Errorf("switch %s role %q is invalid", sw.Name, sw.Spec.Role) //nolint:goerr113
 		}
 
 		total++
@@ -608,10 +608,10 @@ func (c *Config) hydrate(ctx context.Context, kube client.Client) error {
 	for idx := range switches.Items {
 		sw := &switches.Items[idx]
 		if sw.Spec.Role == "" {
-			return errors.Errorf("switch %s role is not set", sw.Name)
+			return fmt.Errorf("switch %s role is not set", sw.Name) //nolint:goerr113
 		}
 		if !slices.Contains(wiringapi.SwitchRoles, sw.Spec.Role) {
-			return errors.Errorf("switch %s role %q is invalid", sw.Name, sw.Spec.Role)
+			return fmt.Errorf("switch %s role %q is invalid", sw.Name, sw.Spec.Role) //nolint:goerr113
 		}
 
 		sw.Spec.IP = netip.PrefixFrom(nextMgmtIP, mgmtSubnet.Bits()).String()
