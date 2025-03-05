@@ -224,6 +224,9 @@ jobs:
             includeonie: true
             buildmode: iso
 
+    env:
+      slug: "${{ matrix.fabricmode }}-${{ matrix.includeonie }}-${{ matrix.buildmode }}"
+
     steps:
       - name: Runner host
         run: |
@@ -257,17 +260,19 @@ jobs:
           bin/hhfab vlab gen -v
           bin/hhfab vlab up -v --ready inspect --ready setup-vpcs --ready test-connectivity --ready exit --mode=${{ matrix.buildmode }}
 
-      - name: Dump local registry logs
-        if: ${{ always() }}
-        run: |
-          cat .zot/log
-
       - name: Upload show-tech artifacts
         uses: actions/upload-artifact@v4
         if: ${{ always() }}
         with:
-          name: show-tech-vlab-${{ matrix.fabricmode }}-${{ matrix.includeonie }}-${{ matrix.buildmode }}
+          name: vlab--${{ env.slug }}--show-tech
           path: show-tech-output
+
+      - name: Upload local registry logs
+        uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: vlab--${{ env.slug }}--registry
+          path: .zot/log
 
       - name: Setup tmate session for debug
         if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
@@ -293,6 +298,9 @@ jobs:
           - fabricmode: spine-leaf
             fromversion: "24.09"
             fromflags: "-m=iso"
+
+    env:
+      slug: "${{ matrix.fabricmode }}-${{ matrix.fromversion }}-${{ matrix.fromflags == '--usb' && 'usb' || matrix.fromflags == '-m=iso' && 'iso' }}"
 
     steps:
       - name: Runner host
@@ -330,7 +338,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: ${{ always() }}
         with:
-          name: show-tech-upgrade-old-${{ matrix.fabricmode }}-${{ matrix.fromversion }}-${{ matrix.fromflags == '--usb' && 'usb' || matrix.fromflags == '-m=iso' && 'iso' }}
+          name: vlab-uprade--${{ env.slug }}--0-before--show-tech
           path: old/show-tech-output
 
       - name: Build current hhfab
@@ -348,7 +356,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: ${{ always() }}
         with:
-          name: show-tech-upgrade-cur-${{ matrix.fabricmode }}-${{ matrix.fromversion }}-${{ matrix.fromflags == '--usb' && 'usb' || matrix.fromflags == '-m=iso' && 'iso' }}
+          name: vlab-uprade--${{ env.slug }}--1-curr--show-tech
           path: show-tech-output
 
       - name: hhfab vlab up after upgrade
@@ -362,13 +370,15 @@ jobs:
         uses: actions/upload-artifact@v4
         if: ${{ always() }}
         with:
-          name: show-tech-upgrade-aft-${{ matrix.fabricmode }}-${{ matrix.fromversion }}-${{ matrix.fromflags == '--usb' && 'usb' || matrix.fromflags == '-m=iso' && 'iso' }}
+          name: vlab-uprade--${{ env.slug }}--2-after--show-tech
           path: show-tech-output
 
-      - name: Dump local registry logs
+      - name: Upload local registry logs
+        uses: actions/upload-artifact@v4
         if: ${{ always() }}
-        run: |
-          cat .zot/log
+        with:
+          name: vlab-upgrade--${{ env.slug }}--registry
+          path: .zot/log
 
       - name: Setup tmate session for debug
         if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
@@ -407,6 +417,9 @@ jobs:
           - fabricmode: spine-leaf
             includeonie: true
             buildmode: iso
+
+    env:
+      slug: "${{ matrix.fabricmode }}-${{ matrix.includeonie }}-${{ matrix.buildmode }}"
 
     steps:
       - name: Runner host
@@ -451,13 +464,15 @@ jobs:
         uses: actions/upload-artifact@v4
         if: ${{ always() }}
         with:
-          name: show-tech-hlab-${{ matrix.fabricmode }}-${{ matrix.includeonie }}-${{ matrix.buildmode }}
+          name: hlab--${{ env.slug }}--show-tech
           path: show-tech-output
 
-      - name: Dump local registry logs
+      - name: Upload local registry logs
+        uses: actions/upload-artifact@v4
         if: ${{ always() }}
-        run: |
-          cat .zot/log
+        with:
+          name: hlab--${{ env.slug }}--registry
+          path: .zot/log
 
       - name: Setup tmate session for debug
         if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
