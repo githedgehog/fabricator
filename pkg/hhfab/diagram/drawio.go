@@ -241,7 +241,7 @@ func createLegend(style Style) []MxCell {
 	background := MxCell{
 		ID:     "legend_bg",
 		Parent: "legend_container",
-		Style:  "rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;",
+		Style:  "rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=none;",
 		Vertex: "1",
 		Geometry: &Geometry{
 			Width:  320,
@@ -253,9 +253,10 @@ func createLegend(style Style) []MxCell {
 		ID:     "legend_title",
 		Parent: "legend_container",
 		Value:  "Network Connection Types",
-		Style:  "text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontStyle=1",
+		Style:  "text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontStyle=1",
 		Vertex: "1",
 		Geometry: &Geometry{
+			X:      20,
 			Y:      10,
 			Width:  320,
 			Height: 20,
