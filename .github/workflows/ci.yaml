@@ -382,12 +382,12 @@ jobs:
     needs:
       - vlab
       - vlab-upgrade
-    if: ${{ always() }}
+    if: ${{ always() && !(needs.vlab.result == 'skipped' && needs.vlab-upgrade.result == 'skipped') }}        
 
     steps:
       - run: |
           result="${{ needs.vlab.result }}"
-          if [[ $result == "success" || $result == "skipped" ]]; then
+          if [[ $result == "success" ]]; then
             exit 0
           else
             exit 1
@@ -470,12 +470,12 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - hlab
-    if: ${{ always() }}
+    if: ${{ always() && !(needs.hlab.result == 'skipped') }}        
 
     steps:
       - run: |
           result="${{ needs.hlab.result }}"
-          if [[ $result == "success" || $result == "skipped" ]]; then
+          if [[ $result == "success" ]]; then
             exit 0
           else
             exit 1
