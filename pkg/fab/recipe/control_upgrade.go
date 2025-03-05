@@ -171,7 +171,7 @@ func (c *ControlUpgrade) Run(ctx context.Context) error {
 	if err := copyFile(k9s.BinName, filepath.Join(k3s.BinDir, k9s.BinName), 0o755); err != nil {
 		return fmt.Errorf("copying k9s bin: %w", err)
 	}
-	
+
 	if err := c.upgradeK8s(ctx, kube); err != nil {
 		return fmt.Errorf("upgrading K8s: %w", err)
 	}
