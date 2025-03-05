@@ -24,6 +24,7 @@ linters:
     - bodyclose
     - containedctx
     - contextcheck
+    - depguard
     - durationcheck
     - errchkjson
     - errname
@@ -67,6 +68,12 @@ linters-settings:
   reassign:
     patterns:
       - ".*"
+  depguard:
+    rules:
+      main:
+        deny:
+          - pkg: "github.com/pkg/errors$"
+            desc: use stdlib errors package
 
 # TODO remove after controller is used
 issues:

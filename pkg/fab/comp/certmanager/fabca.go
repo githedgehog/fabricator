@@ -11,11 +11,11 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"fmt"
 	"math/big"
 	mathrand "math/rand"
 	"time"
 
-	"github.com/pkg/errors"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -67,12 +67,12 @@ func NewFabCA() (*CA, error) {
 
 	key, err := ecdsa.GenerateKey(elliptic.P256(), cryptorand.Reader)
 	if err != nil {
-		return nil, errors.Wrapf(err, "error generating private key")
+		return nil, fmt.Errorf("generating private key: %w", err)
 	}
 
 	cert, err := x509.CreateCertificate(cryptorand.Reader, crt, crt, &key.PublicKey, key)
 	if err != nil {
-		return nil, errors.Wrapf(err, "error creating certificate")
+		return nil, fmt.Errorf("creating certificate: %w", err)
 	}
 
 	certPem := new(bytes.Buffer)
@@ -81,20 +81,20 @@ func NewFabCA() (*CA, error) {
 		Bytes: cert,
 	})
 	if err != nil {
-		return nil, errors.Wrapf(err, "error encoding certificate")
+		return nil, fmt.Errorf("encoding certificate: %w", err)
 	}
 
 	keyPem := new(bytes.Buffer)
 	keyBytes, err := x509.MarshalECPrivateKey(key)
 	if err != nil {
-		return nil, errors.Wrapf(err, "error encoding private key")
+		return nil, fmt.Errorf("encoding private key: %w", err)
 	}
 	err = pem.Encode(keyPem, &pem.Block{
 		Type:  BlockTypeKey,
 		Bytes: keyBytes,
 	})
 	if err != nil {
-		return nil, errors.Wrapf(err, "error encoding private key")
+		return nil, fmt.Errorf("encoding private key: %w", err)
 	}
 
 	return &CA{

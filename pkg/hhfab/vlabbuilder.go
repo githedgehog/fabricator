@@ -11,7 +11,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/pkg/errors"
 	"go.githedgehog.com/fabric/api/meta"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
@@ -43,7 +42,7 @@ type VLABBuilder struct {
 
 func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode meta.FabricMode, nodes []fabapi.Node) error {
 	if l == nil {
-		return errors.Errorf("loader is nil")
+		return fmt.Errorf("loader is nil") //nolint:goerr113
 	}
 	b.data = l
 
@@ -63,27 +62,27 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 		}
 	} else if fabricMode == meta.FabricModeCollapsedCore {
 		if b.SpinesCount > 0 {
-			return errors.Errorf("spines not supported for collapsed core fabric mode")
+			return fmt.Errorf("spines not supported for collapsed core fabric mode") //nolint:goerr113
 		}
 		if b.FabricLinksCount > 0 {
-			return errors.Errorf("fabric links not supported for collapsed core fabric mode")
+			return fmt.Errorf("fabric links not supported for collapsed core fabric mode") //nolint:goerr113
 		}
 
 		if !b.NoSwitches && b.MCLAGLeafsCount == 0 {
 			b.MCLAGLeafsCount = 2
 		}
 		if b.MCLAGLeafsCount > 2 {
-			return errors.Errorf("MCLAG leafs count must be 2 for collapsed core fabric mode")
+			return fmt.Errorf("MCLAG leafs count must be 2 for collapsed core fabric mode") //nolint:goerr113
 		}
 		if b.OrphanLeafsCount > 0 {
-			return errors.Errorf("orphan leafs not supported for collapsed core fabric mode")
+			return fmt.Errorf("orphan leafs not supported for collapsed core fabric mode") //nolint:goerr113
 		}
 
 		if b.ESLAGLeafGroups != "" {
-			return errors.Errorf("ESLAG not supported for collapsed core fabric mode")
+			return fmt.Errorf("ESLAG not supported for collapsed core fabric mode") //nolint:goerr113
 		}
 	} else {
-		return errors.Errorf("unsupported fabric mode %s", fabricMode)
+		return fmt.Errorf("unsupported fabric mode %s", fabricMode) //nolint:goerr113
 	}
 
 	if b.MCLAGSessionLinks == 0 {
@@ -101,7 +100,7 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 	for _, node := range nodes {
 		if slices.Contains(node.Spec.Roles, fabapi.NodeRoleGateway) {
 			if isGw {
-				return errors.Errorf("multiple gateway nodes not supported")
+				return fmt.Errorf("multiple gateway nodes not supported") //nolint:goerr113
 			}
 
 			isGw = true
@@ -111,15 +110,15 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 
 	if isGw {
 		if fabricMode != meta.FabricModeSpineLeaf {
-			return errors.Errorf("gateway node only supported for spine-leaf fabric mode")
+			return fmt.Errorf("gateway node only supported for spine-leaf fabric mode") //nolint:goerr113
 		}
 
 		if b.GatewayUplinks == 0 {
-			return errors.Errorf("gateway uplinks count must be greater than 0")
+			return fmt.Errorf("gateway uplinks count must be greater than 0") //nolint:goerr113
 		}
 
 		if b.GatewayUplinks > b.SpinesCount {
-			return errors.Errorf("gateway uplinks count must be less than or equal to spines count")
+			return fmt.Errorf("gateway uplinks count must be less than or equal to spines count") //nolint:goerr113
 		}
 	}
 
@@ -132,11 +131,11 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 			part = strings.TrimSpace(part)
 			leafs, err := strconv.ParseUint(part, 10, 8)
 			if err != nil {
-				return errors.Errorf("invalid ESLAG leaf group %s", part)
+				return fmt.Errorf("invalid ESLAG leaf group %s", part) //nolint:goerr113
 			}
 
 			if leafs < 2 || leafs > 4 {
-				return errors.Errorf("ESLAG leaf group must have 2-4 leafs")
+				return fmt.Errorf("ESLAG leaf group must have 2-4 leafs") //nolint:goerr113
 			}
 
 			totalESLAGLeafs += uint8(leafs)
@@ -145,13 +144,13 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 	}
 
 	if b.MCLAGLeafsCount%2 != 0 {
-		return errors.Errorf("MCLAG leafs count must be even")
+		return fmt.Errorf("MCLAG leafs count must be even") //nolint:goerr113
 	}
 	if b.MCLAGLeafsCount > 0 && b.MCLAGSessionLinks == 0 {
-		return errors.Errorf("MCLAG session links count must be greater than 0")
+		return fmt.Errorf("MCLAG session links count must be greater than 0") //nolint:goerr113
 	}
 	if b.MCLAGLeafsCount > 0 && b.MCLAGPeerLinks == 0 {
-		return errors.Errorf("MCLAG peer links count must be greater than 0")
+		return fmt.Errorf("MCLAG peer links count must be greater than 0") //nolint:goerr113
 	}
 
 	slog.Info("Building VLAB wiring diagram", "fabricMode", fabricMode)
@@ -180,7 +179,7 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 			},
 		},
 	}); err != nil {
-		return errors.Wrapf(err, "error creating VLAN namespace")
+		return fmt.Errorf("creating VLAN namespace: %w", err) //nolint:goerr113
 	}
 
 	if err := b.data.Add(ctx, &vpcapi.IPv4Namespace{
@@ -197,7 +196,7 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 			},
 		},
 	}); err != nil {
-		return errors.Wrapf(err, "error creating IPv4 namespace")
+		return fmt.Errorf("creating IPv4 namespace: %w", err) //nolint:goerr113
 	}
 
 	b.ifaceTracker = map[string]uint8{}
@@ -588,7 +587,7 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 	if b.VPCLoopbacks > 0 {
 		switches := &wiringapi.SwitchList{}
 		if err := b.data.List(ctx, switches); err != nil {
-			return errors.Wrap(err, "error listing switches")
+			return fmt.Errorf("listing switches: %w", err) //nolint:goerr113
 		}
 
 		for _, sw := range switches.Items {
@@ -658,7 +657,11 @@ func (b *VLABBuilder) createSwitchGroup(ctx context.Context, name string) (*wiri
 		Spec: wiringapi.SwitchGroupSpec{},
 	}
 
-	return sg, errors.Wrapf(b.data.Add(ctx, sg), "error creating switch group %s", name)
+	if err := b.data.Add(ctx, sg); err != nil {
+		return nil, fmt.Errorf("creating switch group %s: %w", name, err) //nolint:goerr113
+	}
+
+	return sg, nil
 }
 
 func (b *VLABBuilder) createSwitch(ctx context.Context, name string, spec wiringapi.SwitchSpec) (*wiringapi.Switch, error) { //nolint:unparam
@@ -677,7 +680,11 @@ func (b *VLABBuilder) createSwitch(ctx context.Context, name string, spec wiring
 		Spec: spec,
 	}
 
-	return sw, errors.Wrapf(b.data.Add(ctx, sw), "error creating switch %s", name)
+	if err := b.data.Add(ctx, sw); err != nil {
+		return nil, fmt.Errorf("creating switch %s: %w", name, err) //nolint:goerr113
+	}
+
+	return sw, nil
 }
 
 func (b *VLABBuilder) createServer(ctx context.Context, name string, spec wiringapi.ServerSpec) (*wiringapi.Server, error) { //nolint:unparam
@@ -692,7 +699,11 @@ func (b *VLABBuilder) createServer(ctx context.Context, name string, spec wiring
 		Spec: spec,
 	}
 
-	return server, errors.Wrapf(b.data.Add(ctx, server), "error creating server %s", name)
+	if err := b.data.Add(ctx, server); err != nil {
+		return nil, fmt.Errorf("creating server %s: %w", name, err) //nolint:goerr113
+	}
+
+	return server, nil
 }
 
 func (b *VLABBuilder) createConnection(ctx context.Context, spec wiringapi.ConnectionSpec) (*wiringapi.Connection, error) { //nolint:unparam
@@ -710,5 +721,9 @@ func (b *VLABBuilder) createConnection(ctx context.Context, spec wiringapi.Conne
 		Spec: spec,
 	}
 
-	return conn, errors.Wrapf(b.data.Add(ctx, conn), "error creating connection %s", name)
+	if err := b.data.Add(ctx, conn); err != nil {
+		return nil, fmt.Errorf("creating connection %s: %w", name, err) //nolint:goerr113
+	}
+
+	return conn, nil
 }
