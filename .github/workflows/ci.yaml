@@ -356,7 +356,7 @@ jobs:
           HHFAB_REG_REPO: 127.0.0.1:30000
           HHFAB_VLAB_COLLECT: true
         run: |
-          bin/hhfab vlab up -v --ready inspect --ready setup-vpcs --ready test-connectivity --ready exit -m=manual
+          bin/hhfab vlab up -v --ready wait --ready exit -m=manual
 
       - name: Upload show-tech artifacts
         uses: actions/upload-artifact@v4
