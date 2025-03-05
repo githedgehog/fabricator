@@ -403,6 +403,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        multiplier:
+          - 0
+          - 1
+          - 2
+          - 3
+          - 4
+          - 5
+          - 6
+          - 7
+          - 8
+          - 9
         include:
           - fabricmode: spine-leaf
             includeonie: true
@@ -451,7 +462,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: ${{ always() }}
         with:
-          name: show-tech-hlab-${{ matrix.fabricmode }}-${{ matrix.includeonie }}-${{ matrix.buildmode }}
+          name: show-tech-hlab-${{ matrix.fabricmode }}-${{ matrix.includeonie }}-${{ matrix.buildmode }}-${{ matrix.multiplier }}
           path: show-tech-output
 
       - name: Dump local registry logs
