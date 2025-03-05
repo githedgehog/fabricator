@@ -518,12 +518,44 @@ func Run(ctx context.Context) error {
 			{
 				Name:  "diagram",
 				Usage: "generate a diagram to visualze topology",
+				UsageText: strings.TrimSpace(`
+			Generate network topology diagrams in different formats from your wiring diagram.
+
+			FORMATS:
+			   drawio (default) - Creates a diagram.io file that can be opened with https://app.diagrams.net/
+			                      You can edit the diagram and export to various formats including PNG, SVG, PDF.
+
+			   dot             - Creates a Graphviz DOT file that can be rendered using Graphviz tools:
+			                      - Install Graphviz: https://graphviz.org/download/
+			                      - Convert to PNG: 'dot -Tpng vlab-diagram.dot -o vlab-diagram.png'
+			                      - Convert to SVG: 'dot -Tsvg vlab-diagram.dot -o vlab-diagram.svg'
+			                      - Convert to PDF: 'dot -Tpdf vlab-diagram.dot -o vlab-diagram.pdf'
+
+			   mermaid         - Not currently supported.
+
+			EXAMPLES:
+			   # Generate default draw.io diagram
+			   hhfab diagram
+
+			   # Generate dot diagram for graphviz
+			   hhfab diagram --format dot
+
+			   # Generate draw.io diagram with custom style
+			   hhfab diagram --format drawio --style hedgehog`),
 				Flags: append(defaultFlags,
 					&cli.StringFlag{
 						Name:    "format",
 						Aliases: []string{"f"},
 						Usage:   "diagram format: drawio (default), dot (graphviz), mermaid (unsupported)",
 						Value:   "drawio",
+						Action: func(_ *cli.Context, format string) error {
+							supportedFormats := []string{"drawio", "dot", "mermaid"}
+							if !slices.Contains(supportedFormats, strings.ToLower(format)) {
+								return fmt.Errorf("invalid format: %s (available: %s)", format, strings.Join(supportedFormats, ", ")) //nolint:goerr113
+							}
+
+							return nil
+						},
 					},
 					&cli.StringFlag{
 						Name:    "style",
@@ -543,7 +575,6 @@ func Run(ctx context.Context) error {
 				Action: func(c *cli.Context) error {
 					format := strings.ToLower(c.String("format"))
 					styleType := diagram.StyleType(c.String("style"))
-
 					if err := hhfab.Diagram(workDir, format, styleType); err != nil {
 						return fmt.Errorf("failed to generate %s diagram: %w", format, err)
 					}
