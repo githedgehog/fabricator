@@ -293,13 +293,23 @@ func Diagram(workDir, format string, styleType diagram.StyleType) error {
 		if err := diagram.GenerateDrawio(workDir, jsonData, styleType); err != nil {
 			return fmt.Errorf("generating draw.io diagram: %w", err)
 		}
-		slog.Info("Generated draw.io diagram", "file", filepath.Join(workDir, "vlab-diagram.drawio"), "style", styleType)
+		filePath := filepath.Join(workDir, "vlab-diagram.drawio")
+		slog.Info("Generated draw.io diagram", "file", filePath, "style", styleType)
+		fmt.Printf("To use this diagram:\n")
+		fmt.Printf("1. Open with https://app.diagrams.net/ or the desktop Draw.io application\n")
+		fmt.Printf("2. You can edit the diagram and export to PNG, SVG, PDF or other formats\n")
 	case "dot":
 		slog.Debug("Generating DOT diagram")
 		if err := diagram.GenerateDOT(workDir, jsonData); err != nil {
 			return fmt.Errorf("generating DOT diagram: %w", err)
 		}
-		slog.Info("Generated graphviz diagram", "file", filepath.Join(workDir, "vlab-diagram.dot"))
+		filePath := filepath.Join(workDir, "vlab-diagram.dot")
+		slog.Info("Generated graphviz diagram", "file", filePath)
+		fmt.Printf("To render this diagram with Graphviz:\n")
+		fmt.Printf("1. Install Graphviz: https://graphviz.org/download/\n")
+		fmt.Printf("2. Convert to PNG: dot -Tpng %s -o vlab-diagram.png\n", filePath)
+		fmt.Printf("3. Convert to SVG: dot -Tsvg %s -o vlab-diagram.svg\n", filePath)
+		fmt.Printf("4. Convert to PDF: dot -Tpdf %s -o vlab-diagram.pdf\n", filePath)
 	case "mermaid":
 		return fmt.Errorf("mermaid format is not supported yet") //nolint:goerr113
 	default:
