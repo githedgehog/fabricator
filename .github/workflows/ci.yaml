@@ -339,7 +339,7 @@ jobs:
         if: ${{ always() }}
         with:
           name: vlab-uprade--${{ env.slug }}--0-before--show-tech
-          path: old/show-tech-output
+          path: show-tech-output
 
       - name: Build current hhfab
         run: |
