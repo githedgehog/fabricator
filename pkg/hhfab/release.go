@@ -307,14 +307,6 @@ func pingFromServer(hhfabBin, workDir, nodeName, ip string, expectSuccess bool) 
 // tests.
 func (testCtx *VPCPeeringTestCtx) vpcPeeringsStarterTest(ctx context.Context) (bool, error) {
 	// 1+2:r=border 1+3 3+5 2+4 4+6 5+6 6+7 7+8 8+9  5~default--5835:s=subnet-01 6~default--5835:s=subnet-01  1~default--5835:s=subnet-01  2~default--5835:s=subnet-01  9~default--5835:s=subnet-01  7~default--5835:s=subnet-01
-
-	ext := &vpcapi.External{}
-	if err := testCtx.kube.Get(ctx, client.ObjectKey{Namespace: "default", Name: testCtx.extName}, ext); err != nil {
-		slog.Warn("External not found, skipping test", "external", testCtx.extName, "error", err)
-
-		return true, fmt.Errorf("external %s not found", testCtx.extName) //nolint:goerr113
-	}
-
 	// check whether border switchgroup exists
 	remote := "border"
 	swGroup := &wiringapi.SwitchGroup{}
@@ -419,14 +411,6 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsFullLoopAllExternalsTest(ctx contex
 // Arbitrary configuration which again was shown to occasionally trigger the gNMI bug.
 func (testCtx *VPCPeeringTestCtx) vpcPeeringsSergeisSpecialTest(ctx context.Context) (bool, error) {
 	// 1+2 2+3 2+4:r=border 6+5 1~default--5835:s=subnet-01
-
-	ext := &vpcapi.External{}
-	if err := testCtx.kube.Get(ctx, client.ObjectKey{Namespace: "default", Name: testCtx.extName}, ext); err != nil {
-		slog.Warn("External not found, skipping test", "external", testCtx.extName, "error", err)
-
-		return true, fmt.Errorf("external %s not found", testCtx.extName) //nolint:goerr113
-	}
-
 	// check whether border switchgroup exists
 	remote := "border"
 	swGroup := &wiringapi.SwitchGroup{}
@@ -762,18 +746,6 @@ func (testCtx *VPCPeeringTestCtx) noRestrictionsTest(ctx context.Context) (bool,
 // 4. Remove all restrictions
 func (testCtx *VPCPeeringTestCtx) multiSubnetsIsolationTest(ctx context.Context) (bool, error) {
 	var returnErr error
-	// check whether we have virtual switches, as they do not support subnet restrictions
-	swList := &wiringapi.SwitchList{}
-	if err := testCtx.kube.List(ctx, swList, client.MatchingLabels{}); err != nil {
-		return false, fmt.Errorf("listing switches: %w", err)
-	}
-	for _, sw := range swList.Items {
-		if sw.Spec.Profile == meta.SwitchProfileVS {
-			slog.Info("Virtual switch found, skipping isolation test", "switch", sw.Name)
-
-			return true, fmt.Errorf("virtual switches do not support isolation") //nolint:goerr113
-		}
-	}
 
 	// modify vpc-01 to have isolated subnets
 	vpc := &vpcapi.VPC{}
@@ -903,19 +875,6 @@ func (testCtx *VPCPeeringTestCtx) multiSubnetsIsolationTest(ctx context.Context)
 // It creates peering between all VPCs, but restricts the peering to only one subnet
 // between 1-3 and 2-3. It then tests connectivity.
 func (testCtx *VPCPeeringTestCtx) multiSubnetsSubnetFilteringTest(ctx context.Context) (bool, error) {
-	// check whether we have virtual switches, as they do not support subnet restrictions
-	swList := &wiringapi.SwitchList{}
-	if err := testCtx.kube.List(ctx, swList, client.MatchingLabels{}); err != nil {
-		return false, fmt.Errorf("listing switches: %w", err)
-	}
-	for _, sw := range swList.Items {
-		if sw.Spec.Profile == meta.SwitchProfileVS {
-			slog.Info("Virtual switch found, skipping filtering test", "switch", sw.Name)
-
-			return true, fmt.Errorf("virtual switches do not support isolation") //nolint:goerr113
-		}
-	}
-
 	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec, 3)
 	appendVpcPeeringSpec(vpcPeerings, 1, 2, "", []string{}, []string{})
 	appendVpcPeeringSpec(vpcPeerings, 1, 3, "", []string{}, []string{"subnet-01"})
@@ -941,18 +900,6 @@ func (testCtx *VPCPeeringTestCtx) multiSubnetsSubnetFilteringTest(ctx context.Co
 // 5. Remove all restrictions
 func (testCtx *VPCPeeringTestCtx) singleVPCWithRestrictionsTest(ctx context.Context) (bool, error) {
 	var returnErr error
-	// check whether we have virtual switches, as they do not support subnet restrictions
-	swList := &wiringapi.SwitchList{}
-	if err := testCtx.kube.List(ctx, swList, client.MatchingLabels{}); err != nil {
-		return false, fmt.Errorf("listing switches: %w", err)
-	}
-	for _, sw := range swList.Items {
-		if sw.Spec.Profile == meta.SwitchProfileVS {
-			slog.Info("Virtual switch found, skipping restriction test", "switch", sw.Name)
-
-			return true, fmt.Errorf("virtual switches do not support isolation") //nolint:goerr113
-		}
-	}
 
 	// isolate subnet-01
 	vpc := &vpcapi.VPC{}
@@ -1567,6 +1514,13 @@ type JUnitTestSuite struct {
 	TestCases []JUnitTestCase `xml:"testcase"`
 }
 
+type SkipFlags struct {
+	NoVirtualSwitch bool `xml:"-"` // skip if there's any virtual switch in the vlab
+	NoNamedExternal bool `xml:"-"` // skip if the named external is not present
+	NoExternals     bool `xml:"-"` // skip if there are no externals
+	ExtendedOnly    bool `xml:"-"` // skip if extended tests are not enabled
+}
+
 type JUnitTestCase struct {
 	XMLName   xml.Name                            `xml:"testcase"`
 	ClassName string                              `xml:"classname,attr"`
@@ -1575,6 +1529,7 @@ type JUnitTestCase struct {
 	Failure   *Failure                            `xml:"failure,omitempty"`
 	Skipped   *Skipped                            `xml:"skipped,omitempty"`
 	F         func(context.Context) (bool, error) `xml:"-"` // function to run
+	SkipFlags SkipFlags                           `xml:"-"` // flags to determine whether to skip the test
 }
 
 type Failure struct {
@@ -1684,7 +1639,7 @@ func regexpSelection(regexes []*regexp.Regexp, invertRegex bool, suite *JUnitTes
 		// - if it didn't match and we are not inverting the regex (match == false, invertRegex == false)
 		if matched == invertRegex {
 			suite.TestCases[i].Skipped = &Skipped{
-				Message: "Skipped by regex selection",
+				Message: "Regex selection",
 			}
 			suite.Skipped++
 		}
@@ -1707,12 +1662,49 @@ func failAllTests(suite *JUnitTestSuite, err error) *JUnitTestSuite {
 	return suite
 }
 
-func selectAndRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, suite *JUnitTestSuite, regexes []*regexp.Regexp, invertRegex bool) *JUnitTestSuite {
+func selectAndRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, suite *JUnitTestSuite, regexes []*regexp.Regexp, invertRegex bool, skipFlags SkipFlags) *JUnitTestSuite {
 	suite = regexpSelection(regexes, invertRegex, suite)
 	if suite.Skipped == suite.Tests {
 		slog.Info("All tests in suite skipped, skipping suite", "suite", suite.Name)
 
 		return suite
+	}
+	for i, test := range suite.TestCases {
+		if test.Skipped != nil {
+			continue
+		}
+		if test.SkipFlags.ExtendedOnly && skipFlags.ExtendedOnly {
+			suite.TestCases[i].Skipped = &Skipped{
+				Message: "Extended tests are not enabled",
+			}
+			suite.Skipped++
+
+			continue
+		}
+		if test.SkipFlags.NoVirtualSwitch && skipFlags.NoVirtualSwitch {
+			suite.TestCases[i].Skipped = &Skipped{
+				Message: "There are virtual switches",
+			}
+			suite.Skipped++
+
+			continue
+		}
+		if test.SkipFlags.NoNamedExternal && skipFlags.NoNamedExternal {
+			suite.TestCases[i].Skipped = &Skipped{
+				Message: fmt.Sprintf("The named external (%s) is not present", testCtx.extName),
+			}
+			suite.Skipped++
+
+			continue
+		}
+		if test.SkipFlags.NoExternals && skipFlags.NoExternals {
+			suite.TestCases[i].Skipped = &Skipped{
+				Message: "There are no externals",
+			}
+			suite.Skipped++
+
+			continue
+		}
 	}
 
 	suite, err := doRunTests(ctx, testCtx, suite)
@@ -1735,6 +1727,9 @@ func makeVpcPeeringsSingleVPCSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 		{
 			Name: "Single VPC with restrictions",
 			F:    testCtx.singleVPCWithRestrictionsTest,
+			SkipFlags: SkipFlags{
+				NoVirtualSwitch: true,
+			},
 		},
 		{
 			Name: "DNS/NTP/MTU",
@@ -1743,22 +1738,37 @@ func makeVpcPeeringsSingleVPCSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 		{
 			Name: "StaticExternal",
 			F:    testCtx.staticExternalTest,
+			SkipFlags: SkipFlags{
+				NoVirtualSwitch: true,
+			},
 		},
 		{
 			Name: "MCLAG Failover",
 			F:    testCtx.mclagTest,
+			SkipFlags: SkipFlags{
+				NoVirtualSwitch: true,
+			},
 		},
 		{
 			Name: "ESLAG Failover",
 			F:    testCtx.eslagTest,
+			SkipFlags: SkipFlags{
+				NoVirtualSwitch: true,
+			},
 		},
 		{
 			Name: "Bundled Failover",
 			F:    testCtx.bundledFailoverTest,
+			SkipFlags: SkipFlags{
+				NoVirtualSwitch: true,
+			},
 		},
 		{
 			Name: "Spine Failover",
 			F:    testCtx.spineFailoverTest,
+			SkipFlags: SkipFlags{
+				NoVirtualSwitch: true,
+			},
 		},
 	}
 	suite.Tests = len(suite.TestCases)
@@ -1778,10 +1788,16 @@ func makeVpcPeeringsMultiVPCSuiteRun(testCtx *VPCPeeringTestCtx) *JUnitTestSuite
 		{
 			Name: "Multi-Subnets isolation",
 			F:    testCtx.multiSubnetsIsolationTest,
+			SkipFlags: SkipFlags{
+				NoVirtualSwitch: true,
+			},
 		},
 		{
 			Name: "Multi-Subnets with filtering",
 			F:    testCtx.multiSubnetsSubnetFilteringTest,
+			SkipFlags: SkipFlags{
+				NoVirtualSwitch: true,
+			},
 		},
 	}
 	suite.Tests = len(suite.TestCases)
@@ -1797,10 +1813,16 @@ func makeVpcPeeringsBasicSuiteRun(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 		{
 			Name: "Starter Test",
 			F:    testCtx.vpcPeeringsStarterTest,
+			SkipFlags: SkipFlags{
+				NoNamedExternal: true,
+			},
 		},
 		{
 			Name: "Only Externals",
 			F:    testCtx.vpcPeeringsOnlyExternalsTest,
+			SkipFlags: SkipFlags{
+				NoExternals: true,
+			},
 		},
 		{
 			Name: "Full Mesh All Externals",
@@ -1813,6 +1835,9 @@ func makeVpcPeeringsBasicSuiteRun(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 		{
 			Name: "Sergei's Special Test",
 			F:    testCtx.vpcPeeringsSergeisSpecialTest,
+			SkipFlags: SkipFlags{
+				NoNamedExternal: true,
+			},
 		},
 	}
 	suite.Tests = len(suite.TestCases)
@@ -1849,19 +1874,51 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 		regexesCompiled = append(regexesCompiled, compiled)
 	}
 
+	// detect if any of the skipFlags conditions are true
+	skipFlags := SkipFlags{
+		ExtendedOnly: rtOtps.Extended,
+	}
+	swList := &wiringapi.SwitchList{}
+	if err := kube.List(ctx, swList, client.MatchingLabels{}); err != nil {
+		return fmt.Errorf("listing switches: %w", err)
+	}
+	for _, sw := range swList.Items {
+		if sw.Spec.Profile == meta.SwitchProfileVS {
+			slog.Info("Virtual switch found", "switch", sw.Name)
+			skipFlags.NoVirtualSwitch = true
+
+			break
+		}
+	}
+	extList := &vpcapi.ExternalList{}
+	if err := kube.List(ctx, extList); err != nil {
+		return fmt.Errorf("listing externals: %w", err)
+	}
+	if len(extList.Items) == 0 {
+		slog.Info("No externals found")
+		skipFlags.NoExternals = true
+		skipFlags.NoNamedExternal = true
+	} else {
+		ext := &vpcapi.External{}
+		if err := kube.Get(ctx, client.ObjectKey{Namespace: "default", Name: extName}, ext); err != nil {
+			slog.Info("Named External not found", "external", extName)
+			skipFlags.NoNamedExternal = true
+		}
+	}
+
 	singleVpcTestCtx := makeTestCtx(kube, opts, workDir, cacheDir, false, extName, rtOtps.HhfabBin, rtOtps.Extended)
 	singleVpcSuite := makeVpcPeeringsSingleVPCSuite(singleVpcTestCtx)
-	singleVpcResults := selectAndRunSuite(ctx, singleVpcTestCtx, singleVpcSuite, regexesCompiled, rtOtps.InvertRegex)
+	singleVpcResults := selectAndRunSuite(ctx, singleVpcTestCtx, singleVpcSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
 
 	opts.ServersPerSubnet = 1
 	multiVpcTestCtx := makeTestCtx(kube, opts, workDir, cacheDir, false, extName, rtOtps.HhfabBin, rtOtps.Extended)
 	multiVpcSuite := makeVpcPeeringsMultiVPCSuiteRun(multiVpcTestCtx)
-	multiVpcResults := selectAndRunSuite(ctx, multiVpcTestCtx, multiVpcSuite, regexesCompiled, rtOtps.InvertRegex)
+	multiVpcResults := selectAndRunSuite(ctx, multiVpcTestCtx, multiVpcSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
 
 	opts.SubnetsPerVPC = 1
 	basicTestCtx := makeTestCtx(kube, opts, workDir, cacheDir, true, extName, rtOtps.HhfabBin, rtOtps.Extended)
 	basicVpcSuite := makeVpcPeeringsBasicSuiteRun(basicTestCtx)
-	basicResults := selectAndRunSuite(ctx, basicTestCtx, basicVpcSuite, regexesCompiled, rtOtps.InvertRegex)
+	basicResults := selectAndRunSuite(ctx, basicTestCtx, basicVpcSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
 
 	slog.Info("*** Recap of the test results ***")
 	printSuiteResults(singleVpcResults)
