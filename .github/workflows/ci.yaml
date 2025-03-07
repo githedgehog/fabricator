@@ -408,7 +408,10 @@ jobs:
 
   hlab:
     runs-on: hlab
-    timeout-minutes: 60
+    timeout-minutes: 210
+    env:
+      slug: "${{ matrix.fabricmode }}-${{ matrix.includeonie }}-${{ matrix.buildmode }}"
+      RunReleaseTest: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'release-test') }}
     needs:
       - test
       - builds
@@ -420,9 +423,6 @@ jobs:
           - fabricmode: spine-leaf
             includeonie: true
             buildmode: iso
-
-    env:
-      slug: "${{ matrix.fabricmode }}-${{ matrix.includeonie }}-${{ matrix.buildmode }}"
 
     steps:
       - name: Runner host
@@ -454,10 +454,28 @@ jobs:
         run: |
           just --timestamp oci_repo=127.0.0.1:30000 oci=http push
 
-      - name: hhfab init and vlab up
+      - name: hhfab release test
         env:
           HHFAB_REG_REPO: 127.0.0.1:30000
           HHFAB_VLAB_COLLECT: true
+        if: ${{ env.RunReleaseTest }}
+        run: |
+          source "./lab-ci/envs/$KUBE_NODE/source.sh"
+          bin/hhfab init -v --dev --include-onie=${{ matrix.includeonie }} -w "./lab-ci/envs/$KUBE_NODE/wiring.yaml"
+          bin/hhfab vlab up -v --ready switch-reinstall --ready inspect --ready setup-vpcs --ready test-connectivity --ready release-test --ready exit --mode=${{ matrix.buildmode }}
+          cat release-test.xml
+
+      - name: Publish Test Results
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        if: ${{ env.RunReleaseTest && !cancelled()}}
+        with:
+          files: release-test.xml
+
+      - name: hhfab basic test-connectivity
+        env:
+          HHFAB_REG_REPO: 127.0.0.1:30000
+          HHFAB_VLAB_COLLECT: true
+        if: ${{ !env.RunReleaseTest }}
         run: |
           source "./lab-ci/envs/$KUBE_NODE/source.sh"
           bin/hhfab init -v --dev --include-onie=${{ matrix.includeonie }} -w "./lab-ci/envs/$KUBE_NODE/wiring.yaml"
@@ -482,7 +500,7 @@ jobs:
       - name: Setup tmate session for debug
         if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
         uses: mxschmitt/action-tmate@v3
-        timeout-minutes: 60
+        timeout-minutes: 120
         with:
           limit-access-to-actor: true
 
