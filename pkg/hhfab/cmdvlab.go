@@ -195,6 +195,15 @@ func DoVLABInspect(ctx context.Context, workDir, cacheDir string, opts InspectOp
 	return c.Inspect(ctx, vlab, opts)
 }
 
+func DoVLABReleaseTest(ctx context.Context, workDir, cacheDir string, opts ReleaseTestOpts) error {
+	c, _, err := loadVLABForHelpers(ctx, workDir, cacheDir)
+	if err != nil {
+		return err
+	}
+
+	return c.ReleaseTest(ctx, opts)
+}
+
 type SwitchPowerOpts struct {
 	Switches    []string   // All switches if empty
 	Action      pdu.Action // Power action (e.g., on, off, cycle)
