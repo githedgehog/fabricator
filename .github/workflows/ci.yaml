@@ -200,7 +200,10 @@ jobs:
     needs:
       - test
       - builds
-    timeout-minutes: 60
+    env:
+      slug: "${{ matrix.fabricmode }}-${{ matrix.includeonie }}-${{ matrix.buildmode }}"
+      RunReleaseTest: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'release-test') }}
+    timeout-minutes: 120
 
     strategy:
       fail-fast: false
@@ -223,9 +226,6 @@ jobs:
           - fabricmode: spine-leaf
             includeonie: true
             buildmode: iso
-
-    env:
-      slug: "${{ matrix.fabricmode }}-${{ matrix.includeonie }}-${{ matrix.buildmode }}"
 
     steps:
       - name: Runner host
@@ -251,10 +251,22 @@ jobs:
         run: |
           just --timestamp oci_repo=127.0.0.1:30000 oci=http push
 
+      - name: hhfab release test
+        env:
+          HHFAB_REG_REPO: 127.0.0.1:30000
+          HHFAB_VLAB_COLLECT: true
+        if: ${{ env.RunReleaseTest }}
+        run: |
+          bin/hhfab init -v --dev -m ${{ matrix.fabricmode }} --include-onie=${{ matrix.includeonie }}
+          bin/hhfab vlab gen -v
+          bin/hhfab vlab up -v --ready inspect --ready setup-vpcs --ready test-connectivity --ready release-test --ready exit --mode=${{ matrix.buildmode }}
+          cat release-test.xml
+
       - name: hhfab init and vlab up
         env:
           HHFAB_REG_REPO: 127.0.0.1:30000
           HHFAB_VLAB_COLLECT: true
+        if: ${{ !env.RunReleaseTest }}
         run: |
           bin/hhfab init -v --dev -m ${{ matrix.fabricmode }} --include-onie=${{ matrix.includeonie }}
           bin/hhfab vlab gen -v
