@@ -28,7 +28,6 @@ require (
 	github.com/onsi/ginkgo/v2 v2.22.2
 	github.com/onsi/gomega v1.36.2
 	github.com/opencontainers/image-spec v1.1.0
-	github.com/pkg/errors v0.9.1
 	github.com/pkg/sftp v1.13.7
 	github.com/samber/lo v1.49.1
 	github.com/samber/slog-multi v1.4.0
@@ -38,7 +37,7 @@ require (
 	github.com/urfave/cli/v2 v2.27.5
 	github.com/vbauerster/mpb/v8 v8.9.3
 	github.com/vishvananda/netlink v1.3.0
-	go.githedgehog.com/fabric v0.65.0
+	go.githedgehog.com/fabric v0.66.0
 	golang.org/x/crypto v0.35.0
 	golang.org/x/sync v0.11.0
 	golang.org/x/term v0.29.0
@@ -251,6 +250,7 @@ require (
 	github.com/ostreedev/ostree-go v0.0.0-20210805093236-719684c64e4f // indirect
 	github.com/pierrec/lz4/v4 v4.1.21 // indirect
 	github.com/pjbgf/sha1cd v0.3.0 // indirect
+	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pkg/xattr v0.4.9 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/power-devops/perfstat v0.0.0-20210106213030-5aafc221ea8c // indirect
