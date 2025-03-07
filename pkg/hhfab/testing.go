@@ -1593,16 +1593,38 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 		fail = true
 	}
 
-	if out, err := inspect.LLDP(ctx, kube, inspect.LLDPIn{
-		Strict:   opts.Strict,
-		Fabric:   true,
-		External: true,
-		Server:   true,
-	}); err != nil {
-		slog.Error("Failed to inspect LLDP", "err", err)
+	var lldpOut inspect.Out
+	var lldpErr error
+
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			slog.Info("Retry attempt", "number", attempt+1)
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("context cancelled during retry: %w", ctx.Err())
+			case <-time.After(10 * time.Second):
+			}
+		}
+
+		lldpOut, lldpErr = inspect.LLDP(ctx, kube, inspect.LLDPIn{
+			Strict:   opts.Strict,
+			Fabric:   true,
+			External: true,
+			Server:   true,
+		})
+
+		if lldpErr == nil {
+			if renderErr := inspect.Render(inspect.OutputTypeText, os.Stdout, lldpOut); renderErr == nil {
+				break
+			}
+		}
+	}
+
+	if lldpErr != nil {
+		slog.Error("Failed to inspect LLDP", "err", lldpErr)
 		fail = true
-	} else if err := inspect.Render(inspect.OutputTypeText, os.Stdout, out); err != nil {
-		slog.Error("Inspecting LLDP reveals some errors", "err", err)
+	} else if renderErr := inspect.Render(inspect.OutputTypeText, os.Stdout, lldpOut); renderErr != nil {
+		slog.Error("Inspecting LLDP reveals some errors", "err", renderErr)
 		fail = true
 	}
 
@@ -1611,8 +1633,8 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 	}); err != nil {
 		slog.Error("Failed to inspect BGP", "err", err)
 		fail = true
-	} else if err := inspect.Render(inspect.OutputTypeText, os.Stdout, out); err != nil {
-		slog.Error("Inspecting BGP reveals some errors", "err", err)
+	} else if renderErr := inspect.Render(inspect.OutputTypeText, os.Stdout, out); renderErr != nil {
+		slog.Error("Inspecting BGP reveals some errors", "err", renderErr)
 		fail = true
 	}
 
