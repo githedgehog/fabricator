@@ -498,6 +498,8 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						PingsCount:        5,
 						IPerfsSeconds:     5,
 						CurlsCount:        3,
+						SSHMaxRetries:     5,
+						SSHRetryDelay:     3 * time.Second,
 					}); err != nil {
 						slog.Warn("Failed to test connectivity", "err", err)
 

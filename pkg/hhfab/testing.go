@@ -879,6 +879,8 @@ type TestConnectivityOpts struct {
 	CurlsParallel     int64
 	Sources           []string
 	Destinations      []string
+	SSHMaxRetries     int
+	SSHRetryDelay     time.Duration
 }
 
 func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConnectivityOpts) error {
@@ -895,6 +897,12 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 	}
 	if opts.CurlsParallel <= 0 {
 		opts.CurlsParallel = 50
+	}
+	if opts.SSHMaxRetries <= 0 {
+		opts.SSHMaxRetries = 3
+	}
+	if opts.SSHRetryDelay <= 0 {
+		opts.SSHRetryDelay = 5 * time.Second
 	}
 
 	slog.Info("Testing server to server and server to external connectivity")
@@ -994,28 +1002,53 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 
 	g := &errgroup.Group{}
 	for server := range serverIDs {
+		serverName := server // Create a copy for the goroutine
 		g.Go(func() error {
 			ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 			defer cancel()
 
 			if err := func() error {
-				sshPort, ok := sshPorts[server]
+				sshPort, ok := sshPorts[serverName]
 				if !ok {
-					return fmt.Errorf("missing ssh port for %q", server)
+					return fmt.Errorf("missing ssh port for %q", serverName)
 				}
 
-				client, err := goph.NewConn(&goph.Config{
-					User:     "core",
-					Addr:     "127.0.0.1",
-					Port:     sshPort,
-					Auth:     sshAuth,
-					Timeout:  10 * time.Second,
-					Callback: ssh.InsecureIgnoreHostKey(), //nolint:gosec
-				})
-				if err != nil {
-					return fmt.Errorf("connecting to %q: %w", server, err)
+				var client *goph.Client
+				var err error
+
+				// Add retry logic for SSH connection
+				for attempt := 0; attempt < opts.SSHMaxRetries; attempt++ {
+					if attempt > 0 {
+						slog.Debug("Retrying SSH connection", "server", serverName, "attempt", attempt+1, "maxRetries", opts.SSHMaxRetries)
+						select {
+						case <-ctx.Done():
+							return fmt.Errorf("context cancelled during SSH retry for %s: %w", serverName, ctx.Err())
+						case <-time.After(opts.SSHRetryDelay):
+							// Wait before retrying
+						}
+					}
+
+					client, err = goph.NewConn(&goph.Config{
+						User:     "core",
+						Addr:     "127.0.0.1",
+						Port:     sshPort,
+						Auth:     sshAuth,
+						Timeout:  10 * time.Second,
+						Callback: ssh.InsecureIgnoreHostKey(), //nolint:gosec
+					})
+
+					if err == nil {
+						break
+					}
+
+					slog.Warn("SSH connection attempt failed", "server", serverName, "attempt", attempt+1, "err", err)
 				}
-				sshs.Store(server, client)
+
+				if err != nil {
+					return fmt.Errorf("connecting to %q after %d attempts: %w", serverName, opts.SSHMaxRetries, err)
+				}
+
+				sshs.Store(serverName, client)
 
 				out, err := client.RunContext(ctx, "ip -o -4 addr show | awk '{print $2, $4}'")
 				if err != nil {
@@ -1044,9 +1077,9 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 					}
 
 					found = true
-					ips.Store(server, addr)
+					ips.Store(serverName, addr)
 
-					slog.Info("Found", "server", server, "addr", addr.String())
+					slog.Info("Found", "server", serverName, "addr", addr.String())
 				}
 
 				if !found {
@@ -1055,7 +1088,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 
 				return nil
 			}(); err != nil {
-				return fmt.Errorf("getting server %q IP: %w", server, err)
+				return fmt.Errorf("getting server %q IP: %w", serverName, err)
 			}
 
 			return nil
@@ -1099,47 +1132,49 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 				continue
 			}
 
+			serverSrc := serverA // Create a copy for the goroutine
+			serverDst := serverB
 			if opts.PingsCount > 0 || opts.IPerfsSeconds > 0 {
 				g.Go(func() error {
 					if err := func() error {
-						expectedReachable, err := apiutil.IsServerReachable(ctx, kube, serverA, serverB)
+						expectedReachable, err := apiutil.IsServerReachable(ctx, kube, serverSrc, serverDst)
 						if err != nil {
 							return fmt.Errorf("checking if should be reachable: %w", err)
 						}
 
-						slog.Debug("Checking connectivity", "from", serverA, "to", serverB, "reachable", expectedReachable)
+						slog.Debug("Checking connectivity", "from", serverSrc, "to", serverDst, "reachable", expectedReachable)
 
-						ipBR, ok := ips.Load(serverB)
+						ipBR, ok := ips.Load(serverDst)
 						if !ok {
-							return fmt.Errorf("missing IP for %q", serverB)
+							return fmt.Errorf("missing IP for %q", serverDst)
 						}
 						ipB := ipBR.(netip.Prefix)
 
-						clientAR, ok := sshs.Load(serverA)
+						clientAR, ok := sshs.Load(serverSrc)
 						if !ok {
-							return fmt.Errorf("missing ssh client for %q", serverA)
+							return fmt.Errorf("missing ssh client for %q", serverSrc)
 						}
 						clientA := clientAR.(*goph.Client)
 
-						clientBR, ok := sshs.Load(serverB)
+						clientBR, ok := sshs.Load(serverDst)
 						if !ok {
-							return fmt.Errorf("missing ssh client for %q", serverB)
+							return fmt.Errorf("missing ssh client for %q", serverDst)
 						}
 						clientB := clientBR.(*goph.Client)
 
-						if err := checkPing(ctx, opts, pings, serverA, serverB, clientA, ipB.Addr(), expectedReachable); err != nil {
-							return fmt.Errorf("checking ping from %s to %s: %w", serverA, serverB, err)
+						if err := checkPing(ctx, opts, pings, serverSrc, serverDst, clientA, ipB.Addr(), expectedReachable); err != nil {
+							return fmt.Errorf("checking ping from %s to %s: %w", serverSrc, serverDst, err)
 						}
 
-						if err := checkIPerf(ctx, opts, iperfs, serverA, serverB, clientA, clientB, ipB.Addr(), expectedReachable); err != nil {
-							return fmt.Errorf("checking iperf from %s to %s: %w", serverA, serverB, err)
+						if err := checkIPerf(ctx, opts, iperfs, serverSrc, serverDst, clientA, clientB, ipB.Addr(), expectedReachable); err != nil {
+							return fmt.Errorf("checking iperf from %s to %s: %w", serverSrc, serverDst, err)
 						}
 
 						return nil
 					}(); err != nil {
-						errors.Store("vpcpeer--"+serverA+"--"+serverB, err)
+						errors.Store("vpcpeer--"+serverSrc+"--"+serverDst, err)
 
-						return fmt.Errorf("testing connectivity from %q to %q: %w", serverA, serverB, err)
+						return fmt.Errorf("testing connectivity from %q to %q: %w", serverSrc, serverDst, err)
 					}
 
 					return nil
@@ -1147,31 +1182,32 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 			}
 		}
 
+		serverSrc := serverA // Create a copy for the goroutine
 		if opts.CurlsCount > 0 {
 			g.Go(func() error {
 				if err := func() error {
-					reachable, err := apiutil.IsExternalSubnetReachable(ctx, kube, serverA, "0.0.0.0/0") // TODO test for specific IP
+					reachable, err := apiutil.IsExternalSubnetReachable(ctx, kube, serverSrc, "0.0.0.0/0") // TODO test for specific IP
 					if err != nil {
 						return fmt.Errorf("checking if should be reachable: %w", err)
 					}
 
-					slog.Debug("Checking external connectivity", "from", serverA, "reachable", reachable)
+					slog.Debug("Checking external connectivity", "from", serverSrc, "reachable", reachable)
 
-					clientR, ok := sshs.Load(serverA)
+					clientR, ok := sshs.Load(serverSrc)
 					if !ok {
-						return fmt.Errorf("missing ssh client for %q", serverA)
+						return fmt.Errorf("missing ssh client for %q", serverSrc)
 					}
 					client := clientR.(*goph.Client)
 
-					if err := checkCurl(ctx, opts, curls, serverA, client, "8.8.8.8", reachable); err != nil {
-						return fmt.Errorf("checking curl from %q: %w", serverA, err)
+					if err := checkCurl(ctx, opts, curls, serverSrc, client, "8.8.8.8", reachable); err != nil {
+						return fmt.Errorf("checking curl from %q: %w", serverSrc, err)
 					}
 
 					return nil
 				}(); err != nil {
-					errors.Store("extpeer--"+serverA, err)
+					errors.Store("extpeer--"+serverSrc, err)
 
-					return fmt.Errorf("testing connectivity from %q to external: %w", serverA, err)
+					return fmt.Errorf("testing connectivity from %q to external: %w", serverSrc, err)
 				}
 
 				return nil
@@ -1308,7 +1344,32 @@ func checkPing(ctx context.Context, opts TestConnectivityOpts, pings *semaphore.
 	slog.Debug("Running ping", "from", from, "to", toIP.String())
 
 	cmd := fmt.Sprintf("ping -c %d -W 1 %s", opts.PingsCount, toIP.String()) // TODO wrap with timeout?
-	outR, err := fromSSH.RunContext(ctx, cmd)
+
+	var outR []byte
+	var err error
+
+	// Add retry logic for SSH command execution
+	for attempt := 0; attempt < opts.SSHMaxRetries; attempt++ {
+		if attempt > 0 {
+			slog.Debug("Retrying ping command", "from", from, "to", toIP.String(), "attempt", attempt+1)
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("context cancelled during ping retry: %w", ctx.Err())
+			case <-time.After(opts.SSHRetryDelay):
+				// Wait before retrying
+			}
+		}
+
+		outR, err = fromSSH.RunContext(ctx, cmd)
+
+		// If there's no error or the error is not related to SSH connection issues, break the loop
+		if err == nil || !strings.Contains(err.Error(), "ssh: rejected: connect failed") {
+			break
+		}
+
+		slog.Warn("SSH error during ping, will retry", "from", from, "to", toIP.String(), "attempt", attempt+1, "err", err)
+	}
+
 	out := strings.TrimSpace(string(outR))
 
 	pingOk := err == nil && strings.Contains(out, "0% packet loss")
@@ -1357,7 +1418,31 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphor
 	g, ctx := errgroup.WithContext(ctx)
 
 	g.Go(func() error {
-		out, err := toSSH.RunContext(ctx, fmt.Sprintf("toolbox -q timeout -v %d iperf3 -s -1", opts.IPerfsSeconds+25))
+		var out []byte
+		var err error
+
+		// Add retry logic for SSH command execution on server side
+		for attempt := 0; attempt < opts.SSHMaxRetries; attempt++ {
+			if attempt > 0 {
+				slog.Debug("Retrying iperf server command", "server", to, "attempt", attempt+1)
+				select {
+				case <-ctx.Done():
+					return fmt.Errorf("context cancelled during iperf server retry: %w", ctx.Err())
+				case <-time.After(opts.SSHRetryDelay):
+					// Wait before retrying
+				}
+			}
+
+			out, err = toSSH.RunContext(ctx, fmt.Sprintf("toolbox -q timeout -v %d iperf3 -s -1", opts.IPerfsSeconds+25))
+
+			// If there's no error or the error is not related to SSH connection issues, break the loop
+			if err == nil || !strings.Contains(err.Error(), "ssh: rejected: connect failed") {
+				break
+			}
+
+			slog.Warn("SSH error during iperf server, will retry", "server", to, "attempt", attempt+1, "err", err)
+		}
+
 		if err != nil {
 			return fmt.Errorf("running iperf server: %w: %s", err, string(out))
 		}
@@ -1369,7 +1454,32 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphor
 		time.Sleep(1 * time.Second) // TODO think about more reliable way to wait for server to start
 
 		cmd := fmt.Sprintf("toolbox -q timeout -v %d iperf3 -P 4 -J -c %s -t %d", opts.IPerfsSeconds+25, toIP.String(), opts.IPerfsSeconds)
-		out, err := fromSSH.RunContext(ctx, cmd)
+
+		var out []byte
+		var err error
+
+		// Add retry logic for SSH command execution on client side
+		for attempt := 0; attempt < opts.SSHMaxRetries; attempt++ {
+			if attempt > 0 {
+				slog.Debug("Retrying iperf client command", "client", from, "attempt", attempt+1)
+				select {
+				case <-ctx.Done():
+					return fmt.Errorf("context cancelled during iperf client retry: %w", ctx.Err())
+				case <-time.After(opts.SSHRetryDelay):
+					// Wait before retrying
+				}
+			}
+
+			out, err = fromSSH.RunContext(ctx, cmd)
+
+			// If there's no error or the error is not related to SSH connection issues, break the loop
+			if err == nil || !strings.Contains(err.Error(), "ssh: rejected: connect failed") {
+				break
+			}
+
+			slog.Warn("SSH error during iperf client, will retry", "client", from, "attempt", attempt+1, "err", err)
+		}
+
 		if err != nil {
 			return fmt.Errorf("running iperf client: %w: %s", err, string(out))
 		}
@@ -1421,7 +1531,31 @@ func checkCurl(ctx context.Context, opts TestConnectivityOpts, curls *semaphore.
 	slog.Debug("Running curls", "from", from, "to", toIP, "count", opts.CurlsCount)
 
 	for idx := 0; idx < opts.CurlsCount; idx++ {
-		outR, err := fromSSH.RunContext(ctx, "timeout -v 5 curl --insecure --connect-timeout 3 --silent https://"+toIP)
+		var outR []byte
+		var err error
+
+		// Add retry logic for SSH command execution
+		for attempt := 0; attempt < opts.SSHMaxRetries; attempt++ {
+			if attempt > 0 {
+				slog.Debug("Retrying curl command", "from", from, "to", toIP, "attempt", attempt+1)
+				select {
+				case <-ctx.Done():
+					return fmt.Errorf("context cancelled during curl retry: %w", ctx.Err())
+				case <-time.After(opts.SSHRetryDelay):
+					// Wait before retrying
+				}
+			}
+
+			outR, err = fromSSH.RunContext(ctx, "timeout -v 5 curl --insecure --connect-timeout 3 --silent https://"+toIP)
+
+			// If there's no error or the error is not related to SSH connection issues, break the loop
+			if err == nil || !strings.Contains(err.Error(), "ssh: rejected: connect failed") {
+				break
+			}
+
+			slog.Warn("SSH error during curl, will retry", "from", from, "to", toIP, "attempt", attempt+1, "err", err)
+		}
+
 		out := strings.TrimSpace(string(outR))
 
 		curlOk := err == nil && strings.Contains(out, "302 Moved")
