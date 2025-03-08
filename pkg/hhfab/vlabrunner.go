@@ -127,6 +127,25 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 	ctx, cancel := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
+	// If show-tech collection is enabled, defer a panic recovery to collect show-tech
+	if opts.CollectShowTech {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("Panic occurred", "recovery", r)
+
+				// Attempt to collect show-tech
+				if showTechErr := c.VLABShowTech(ctx, vlab); showTechErr != nil {
+					slog.Error("Failed to collect show-tech after panic", "err", showTechErr)
+				} else {
+					slog.Info("Successfully collected show-tech after panic")
+				}
+
+				// Re-panic to let the original panic propagate
+				panic(r)
+			}
+		}()
+	}
+
 	for _, cmd := range opts.OnReady {
 		if !slices.Contains(AllOnReady, OnReady(cmd)) {
 			return fmt.Errorf("unsupported on-ready command %q", cmd) //nolint:goerr113
@@ -448,117 +467,54 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 
 			for _, cmd := range opts.OnReady {
 				slog.Info("Running on-ready command", "command", cmd)
-				switch OnReady(cmd) {
-				case OnReadySwitchReinstall:
-					if err := c.VLABSwitchReinstall(ctx, SwitchReinstallOpts{
-						Mode:        ReinstallModeHardReset,
-						PDUUsername: os.Getenv(VLABEnvPDUUsername),
-						PDUPassword: os.Getenv(VLABEnvPDUPassword),
-						WaitReady:   true,
-					}); err != nil {
-						slog.Warn("Failed to reinstall switches", "err", err)
+
+				// Recover from panics in on-ready commands and collect show-tech if enabled
+				if opts.CollectShowTech {
+					func() {
+						defer func() {
+							if r := recover(); r != nil {
+								slog.Error("Panic in on-ready command", "command", cmd, "recovery", r)
+
+								if showTechErr := c.VLABShowTech(ctx, vlab); showTechErr != nil {
+									slog.Error("Failed to collect show-tech after panic in on-ready command", "err", showTechErr)
+								} else {
+									slog.Info("Successfully collected show-tech after panic in on-ready command")
+								}
+
+								// Re-panic to let the original panic propagate
+								panic(r)
+							}
+						}()
+
+						// Execute on-ready command with panic recovery
+						if err := c.executeOnReadyCommand(ctx, vlab, OnReady(cmd), opts); err != nil {
+							slog.Warn("Failed to execute on-ready command", "command", cmd, "err", err)
+
+							if opts.CollectShowTech {
+								if err := c.VLABShowTech(ctx, vlab); err != nil {
+									slog.Warn("Failed to collect show-tech diagnostics", "err", err)
+								}
+							}
+
+							if opts.FailFast {
+								panic(fmt.Errorf("on-ready command %s: %w", cmd, err))
+							}
+						}
+					}()
+				} else {
+					// Execute on-ready command without panic recovery
+					if err := c.executeOnReadyCommand(ctx, vlab, OnReady(cmd), opts); err != nil {
+						slog.Warn("Failed to execute on-ready command", "command", cmd, "err", err)
 
 						if opts.CollectShowTech {
 							if err := c.VLABShowTech(ctx, vlab); err != nil {
 								slog.Warn("Failed to collect show-tech diagnostics", "err", err)
-
-								return fmt.Errorf("getting show-tech: %w", err)
 							}
 						}
 
-						return fmt.Errorf("reinstalling switches: %w", err)
-					}
-				case OnReadySetupVPCs:
-					// TODO make it configurable
-					if err := c.SetupVPCs(ctx, vlab, SetupVPCsOpts{
-						WaitSwitchesReady: true,
-						VLANNamespace:     "default",
-						IPv4Namespace:     "default",
-						ServersPerSubnet:  1,
-						SubnetsPerVPC:     2, // it makes it possible for some servers to have connectivity
-						DNSServers:        []string{"1.1.1.1", "1.0.0.1"},
-						TimeServers:       []string{"219.239.35.0"},
-					}); err != nil {
-						slog.Warn("Failed to setup VPCs", "err", err)
-
-						if opts.CollectShowTech {
-							if err := c.VLABShowTech(ctx, vlab); err != nil {
-								slog.Warn("Failed to collect show-tech diagnostics", "err", err)
-
-								return fmt.Errorf("getting show-tech: %w", err)
-							}
+						if opts.FailFast {
+							return fmt.Errorf("on-ready command %s: %w", cmd, err)
 						}
-
-						return fmt.Errorf("setting up VPCs: %w", err)
-					}
-				case OnReadyTestConnectivity:
-					// TODO make it configurable
-					if err := c.TestConnectivity(ctx, vlab, TestConnectivityOpts{
-						WaitSwitchesReady: true,
-						PingsCount:        5,
-						IPerfsSeconds:     5,
-						CurlsCount:        3,
-						SSHMaxRetries:     5,
-						SSHRetryDelay:     3 * time.Second,
-					}); err != nil {
-						slog.Warn("Failed to test connectivity", "err", err)
-
-						if opts.CollectShowTech {
-							if err := c.VLABShowTech(ctx, vlab); err != nil {
-								slog.Warn("Failed to collect show-tech diagnostics", "err", err)
-
-								return fmt.Errorf("getting show-tech: %w", err)
-							}
-						}
-
-						return fmt.Errorf("testing connectivity: %w", err)
-					}
-				case OnReadyExit:
-					if opts.CollectShowTech {
-						if err := c.VLABShowTech(ctx, vlab); err != nil {
-							slog.Warn("Failed to collect show-tech diagnostics", "err", err)
-
-							return fmt.Errorf("getting show-tech: %w", err)
-						}
-					}
-
-					// TODO seems like some graceful shutdown logic isn't working in CI and we're getting stuck w/o this
-					if os.Getenv("GITHUB_ACTIONS") == "true" {
-						slog.Warn("Immediately exiting b/c running in GHA")
-						os.Exit(0)
-					}
-
-					return ErrExit
-				case OnReadyWait:
-					if err := c.Wait(ctx, vlab); err != nil {
-						slog.Warn("Failed to wait for switches ready", "err", err)
-
-						if opts.CollectShowTech {
-							if err := c.VLABShowTech(ctx, vlab); err != nil {
-								slog.Warn("Failed to collect show-tech diagnostics", "err", err)
-
-								return fmt.Errorf("getting show-tech: %w", err)
-							}
-						}
-
-						return fmt.Errorf("waiting: %w", err)
-					}
-				case OnReadyInspect:
-					if err := c.Inspect(ctx, vlab, InspectOpts{
-						WaitAppliedFor: 2 * time.Minute,
-						Strict:         !opts.ControlUpgrade,
-					}); err != nil {
-						slog.Warn("Failed to inspect", "err", err)
-
-						if opts.CollectShowTech {
-							if err := c.VLABShowTech(ctx, vlab); err != nil {
-								slog.Warn("Failed to collect show-tech diagnostics", "err", err)
-
-								return fmt.Errorf("getting show-tech: %w", err)
-							}
-						}
-
-						return fmt.Errorf("inspecting: %w", err)
 					}
 				}
 			}
@@ -595,6 +551,73 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 	}
 
 	slog.Info("VLAB finished successfully")
+
+	return nil
+}
+
+// executeOnReadyCommand executes a single on-ready command
+func (c *Config) executeOnReadyCommand(ctx context.Context, vlab *VLAB, cmd OnReady, opts VLABRunOpts) error {
+	switch cmd {
+	case OnReadySwitchReinstall:
+		if err := c.VLABSwitchReinstall(ctx, SwitchReinstallOpts{
+			Mode:        ReinstallModeHardReset,
+			PDUUsername: os.Getenv(VLABEnvPDUUsername),
+			PDUPassword: os.Getenv(VLABEnvPDUPassword),
+			WaitReady:   true,
+		}); err != nil {
+			return fmt.Errorf("reinstalling switches: %w", err)
+		}
+	case OnReadySetupVPCs:
+		// TODO make it configurable
+		if err := c.SetupVPCs(ctx, vlab, SetupVPCsOpts{
+			WaitSwitchesReady: true,
+			VLANNamespace:     "default",
+			IPv4Namespace:     "default",
+			ServersPerSubnet:  1,
+			SubnetsPerVPC:     2, // it makes it possible for some servers to have connectivity
+			DNSServers:        []string{"1.1.1.1", "1.0.0.1"},
+			TimeServers:       []string{"219.239.35.0"},
+		}); err != nil {
+			return fmt.Errorf("setting up VPCs: %w", err)
+		}
+	case OnReadyTestConnectivity:
+		// TODO make it configurable
+		if err := c.TestConnectivity(ctx, vlab, TestConnectivityOpts{
+			WaitSwitchesReady: true,
+			PingsCount:        5,
+			IPerfsSeconds:     5,
+			CurlsCount:        3,
+			SSHMaxRetries:     5,
+			SSHRetryDelay:     3 * time.Second,
+		}); err != nil {
+			return fmt.Errorf("testing connectivity: %w", err)
+		}
+	case OnReadyExit:
+		if opts.CollectShowTech {
+			if err := c.VLABShowTech(ctx, vlab); err != nil {
+				return fmt.Errorf("getting show-tech: %w", err)
+			}
+		}
+
+		// TODO seems like some graceful shutdown logic isn't working in CI and we're getting stuck w/o this
+		if os.Getenv("GITHUB_ACTIONS") == "true" {
+			slog.Warn("Immediately exiting b/c running in GHA")
+			os.Exit(0)
+		}
+
+		return ErrExit
+	case OnReadyWait:
+		if err := c.Wait(ctx, vlab); err != nil {
+			return fmt.Errorf("waiting: %w", err)
+		}
+	case OnReadyInspect:
+		if err := c.Inspect(ctx, vlab, InspectOpts{
+			WaitAppliedFor: 2 * time.Minute,
+			Strict:         !opts.ControlUpgrade,
+		}); err != nil {
+			return fmt.Errorf("inspecting: %w", err)
+		}
+	}
 
 	return nil
 }
