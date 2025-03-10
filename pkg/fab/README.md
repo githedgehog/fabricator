@@ -67,7 +67,7 @@ oras push "ghcr.io/githedgehog/fabricator/zot-airgap:${ZOT_VERSION}" zot-airgap-
 ## Cert-manager
 
 ```bash
-export CERT_MANAGER_VERSION="v1.16.2"
+export CERT_MANAGER_VERSION="v1.17.1"
 
 helm repo add jetstack https://charts.jetstack.io
 helm repo update jetstack
