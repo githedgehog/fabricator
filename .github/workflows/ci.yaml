@@ -196,6 +196,8 @@ jobs:
           fi
 
   vlab:
+    if: ${{ !contains(github.event.pull_request.labels.*.name, 'skip-vlab') }}
+
     runs-on: vlab
     needs:
       - test
@@ -282,6 +284,8 @@ jobs:
           limit-access-to-actor: true
 
   vlab-upgrade:
+    if: ${{ !contains(github.event.pull_request.labels.*.name, 'skip-vlab') }}
+
     runs-on: vlab
     needs:
       - test
@@ -404,6 +408,8 @@ jobs:
           fi
 
   hlab:
+    if: ${{ !contains(github.event.pull_request.labels.*.name, 'skip-hlab') }}
+
     runs-on: hlab
     timeout-minutes: 60
     needs:
