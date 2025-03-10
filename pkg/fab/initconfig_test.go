@@ -4,7 +4,6 @@
 package fab_test
 
 import (
-	"context"
 	"testing"
 
 	"dario.cat/mergo"
@@ -18,7 +17,7 @@ import (
 )
 
 func TestInitConfig(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	for _, test := range []struct {
 		name        string
