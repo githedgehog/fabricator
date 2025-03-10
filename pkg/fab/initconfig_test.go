@@ -304,7 +304,7 @@ func TestInitConfig(t *testing.T) {
 				}
 			}
 
-			expectedNodes := []fabapi.Node(nil)
+			expectedNodes := []fabapi.Node{}
 			if test.in.Gateway {
 				expectedNodes = append(expectedNodes, fabapi.Node{
 					ObjectMeta: metav1.ObjectMeta{
