@@ -65,7 +65,7 @@ func (c *Config) Wait(ctx context.Context, vlab *VLAB) error {
 	defer cacheCancel()
 
 	slog.Info("Waiting for all switches ready")
-	if err := WaitSwitchesReady(ctx, kube, 0, 30*time.Minute); err != nil {
+	if err := WaitSwitchesReady(ctx, kube, 1*time.Minute, 30*time.Minute); err != nil {
 		return fmt.Errorf("waiting for switches ready: %w", err)
 	}
 
@@ -351,7 +351,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 
 	if opts.WaitSwitchesReady {
 		slog.Info("Waiting for switches ready before configuring VPCs and VPCAttachments")
-		if err := WaitSwitchesReady(ctx, kube, 0, 30*time.Minute); err != nil {
+		if err := WaitSwitchesReady(ctx, kube, 1*time.Minute, 30*time.Minute); err != nil {
 			return fmt.Errorf("waiting for switches ready: %w", err)
 		}
 	}
@@ -428,7 +428,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		case <-time.After(15 * time.Second):
 		}
 
-		if err := WaitSwitchesReady(ctx, kube, 0, 30*time.Minute); err != nil {
+		if err := WaitSwitchesReady(ctx, kube, 1*time.Minute, 30*time.Minute); err != nil {
 			return fmt.Errorf("waiting for switches ready: %w", err)
 		}
 	}
@@ -538,7 +538,7 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 
 	if opts.WaitSwitchesReady {
 		slog.Info("Waiting for switches ready before configuring VPC and External Peerings")
-		if err := WaitSwitchesReady(ctx, kube, 0, 30*time.Minute); err != nil {
+		if err := WaitSwitchesReady(ctx, kube, 1*time.Minute, 30*time.Minute); err != nil {
 			return fmt.Errorf("waiting for switches ready: %w", err)
 		}
 	}
@@ -860,7 +860,7 @@ func DoSetupPeerings(ctx context.Context, kube client.Client, vpcPeerings map[st
 		case <-time.After(15 * time.Second):
 		}
 
-		if err := WaitSwitchesReady(ctx, kube, 30*time.Second, 30*time.Minute); err != nil {
+		if err := WaitSwitchesReady(ctx, kube, 1*time.Minute, 30*time.Minute); err != nil {
 			return fmt.Errorf("waiting for switches ready: %w", err)
 		}
 	}
@@ -944,7 +944,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 	if opts.WaitSwitchesReady {
 		slog.Info("Waiting for switches ready before testing connectivity")
 
-		if err := WaitSwitchesReady(ctx, kube, 30*time.Second, 30*time.Minute); err != nil {
+		if err := WaitSwitchesReady(ctx, kube, 1*time.Minute, 30*time.Minute); err != nil {
 			return fmt.Errorf("waiting for switches ready: %w", err)
 		}
 	}
