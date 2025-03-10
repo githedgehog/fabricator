@@ -103,7 +103,7 @@ oras push "ghcr.io/githedgehog/fabricator/cert-manager-airgap:${CERT_MANAGER_VER
 ## K9s
 
 ```bash
-export K9S_VERSION="v0.32.5"
+export K9S_VERSION="v0.40.6"
 
 wget "https://github.com/derailed/k9s/releases/download/${K9S_VERSION}/k9s_Linux_amd64.tar.gz"
 tar -xzvf k9s_Linux_amd64.tar.gz
