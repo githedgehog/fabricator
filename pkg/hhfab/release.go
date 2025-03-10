@@ -818,7 +818,7 @@ func (testCtx *VPCPeeringTestCtx) multiSubnetsIsolationTest(ctx context.Context)
 			returnErr = fmt.Errorf("updating VPC vpc-02: %w", err)
 		} else {
 			time.Sleep(5 * time.Second)
-			if err := WaitSwitchesReady(ctx, testCtx.kube, 30*time.Second, 5*time.Minute); err != nil {
+			if err := WaitSwitchesReady(ctx, testCtx.kube, 1*time.Minute, 5*time.Minute); err != nil {
 				returnErr = fmt.Errorf("waiting for switches to be ready: %w", err)
 			} else if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
 				returnErr = fmt.Errorf("testing connectivity with restricted subnet-02: %w", err)
@@ -852,7 +852,7 @@ func (testCtx *VPCPeeringTestCtx) multiSubnetsIsolationTest(ctx context.Context)
 		}
 	}
 	time.Sleep(5 * time.Second)
-	if err := WaitSwitchesReady(ctx, testCtx.kube, 30*time.Second, 5*time.Minute); err != nil {
+	if err := WaitSwitchesReady(ctx, testCtx.kube, 1*time.Minute, 5*time.Minute); err != nil {
 		if returnErr == nil {
 			returnErr = fmt.Errorf("waiting for switches to be ready: %w", err)
 		} else {
@@ -1122,7 +1122,7 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (_ boo
 
 			return
 		}
-		if err := WaitSwitchesReady(ctx, testCtx.kube, 0, 5*time.Minute); err != nil {
+		if err := WaitSwitchesReady(ctx, testCtx.kube, 1*time.Minute, 5*time.Minute); err != nil {
 			waitErr := fmt.Errorf("waiting for switches to be ready: %w", err)
 			if returnErr == nil {
 				returnErr = waitErr
@@ -1200,7 +1200,7 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (_ boo
 
 			return
 		}
-		if err := WaitSwitchesReady(ctx, testCtx.kube, 0, 5*time.Minute); err != nil {
+		if err := WaitSwitchesReady(ctx, testCtx.kube, 1*time.Minute, 5*time.Minute); err != nil {
 			waitErr := fmt.Errorf("waiting for switches to be ready: %w", err)
 			if returnErr == nil {
 				returnErr = waitErr
@@ -1213,7 +1213,7 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (_ boo
 	if err := waitAgentGen(ctx, testCtx.kube, switchName, gen); err != nil {
 		return false, err
 	}
-	if err := WaitSwitchesReady(ctx, testCtx.kube, 0, 5*time.Minute); err != nil {
+	if err := WaitSwitchesReady(ctx, testCtx.kube, 1, 5*time.Minute); err != nil {
 		return false, fmt.Errorf("waiting for switches to be ready: %w", err)
 	}
 	gen, genErr = getAgentGen(ctx, testCtx.kube, switchName)
@@ -1255,7 +1255,7 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (_ boo
 	if err := waitAgentGen(ctx, testCtx.kube, switchName, gen); err != nil {
 		return false, err
 	}
-	if err := WaitSwitchesReady(ctx, testCtx.kube, 0, 5*time.Minute); err != nil {
+	if err := WaitSwitchesReady(ctx, testCtx.kube, 1*time.Minute, 5*time.Minute); err != nil {
 		return false, fmt.Errorf("waiting for switches to be ready: %w", err)
 	}
 
@@ -1402,7 +1402,7 @@ func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (_ bool, re
 
 		// Wait for convergence
 		time.Sleep(5 * time.Second)
-		if err := WaitSwitchesReady(ctx, testCtx.kube, 0, 5*time.Minute); err != nil {
+		if err := WaitSwitchesReady(ctx, testCtx.kube, 1*time.Minute, 5*time.Minute); err != nil {
 			if returnErr == nil {
 				returnErr = fmt.Errorf("waiting for switches to be ready: %w", err)
 			} else {
@@ -1434,7 +1434,7 @@ func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (_ bool, re
 
 	// Wait for convergence
 	time.Sleep(5 * time.Second)
-	if err := WaitSwitchesReady(ctx, testCtx.kube, 0, 5*time.Minute); err != nil {
+	if err := WaitSwitchesReady(ctx, testCtx.kube, 1*time.Minute, 5*time.Minute); err != nil {
 		return false, fmt.Errorf("waiting for switches to be ready: %w", err)
 	}
 
