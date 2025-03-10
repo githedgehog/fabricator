@@ -27,7 +27,7 @@ require (
 	github.com/mholt/archives v0.1.0
 	github.com/onsi/ginkgo/v2 v2.22.2
 	github.com/onsi/gomega v1.36.2
-	github.com/opencontainers/image-spec v1.1.0
+	github.com/opencontainers/image-spec v1.1.1
 	github.com/pkg/sftp v1.13.7
 	github.com/samber/lo v1.49.1
 	github.com/samber/slog-multi v1.4.0
