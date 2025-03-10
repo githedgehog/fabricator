@@ -691,7 +691,7 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 			}
 
 			if device == "" {
-				device = fmt.Sprintf("e1000,netdev=eth%02d,mac=%s", nicID, mac)
+				device = fmt.Sprintf("virtio-net-pci,netdev=eth%02d,mac=%s", nicID, mac)
 			}
 			device += fmt.Sprintf(",bus=%s%d,addr=0x%x", VLABPCIBridgePrefix, nicID/VLABNICsPerPCIBridge, nicID%VLABNICsPerPCIBridge)
 
