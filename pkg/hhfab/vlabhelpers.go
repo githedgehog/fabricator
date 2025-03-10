@@ -289,7 +289,6 @@ func wrapError(switchName string, exitCode int) error {
 
 func (c *Config) VLABSwitchReinstall(ctx context.Context, opts SwitchReinstallOpts) error {
 	start := time.Now()
-
 	slog.Info("Reinstalling switches", "mode", opts.Mode, "switches", opts.Switches)
 
 	_, err := exec.LookPath(VLABCmdExpect)
@@ -297,7 +296,7 @@ func (c *Config) VLABSwitchReinstall(ctx context.Context, opts SwitchReinstallOp
 		return fmt.Errorf("required command %q is not available", VLABCmdExpect) //nolint:goerr113
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
 
 	switches := wiringapi.SwitchList{}
@@ -310,7 +309,6 @@ func (c *Config) VLABSwitchReinstall(ctx context.Context, opts SwitchReinstallOp
 		for _, sw := range switches.Items {
 			sws[sw.Name] = true
 		}
-
 		for _, sw := range opts.Switches {
 			if !sws[sw] {
 				return fmt.Errorf("switch not found: %s", sw) //nolint:goerr113
@@ -322,7 +320,6 @@ func (c *Config) VLABSwitchReinstall(ctx context.Context, opts SwitchReinstallOp
 	if err != nil {
 		return fmt.Errorf("getting executable path: %w", err)
 	}
-
 	if err := os.Setenv("HHFAB_BIN", self); err != nil {
 		return fmt.Errorf("setting HHFAB_BIN env variable: %w", err)
 	}
@@ -350,51 +347,99 @@ func (c *Config) VLABSwitchReinstall(ctx context.Context, opts SwitchReinstallOp
 		go func(sw wiringapi.Switch) {
 			defer wg.Done()
 
-			ctx, cancel := context.WithCancel(ctx)
-			defer cancel()
+			maxAttempts := 3
+			var lastErr error
 
-			args := []string{sw.Name}
-			if opts.Mode == ReinstallModeReboot {
-				args = append(args, opts.SwitchUsername, opts.SwitchPassword)
-			}
-			if opts.WaitReady {
-				args = append(args, "--wait-ready")
-			}
-			args = append(args, "-v")
+			baseBackoff := 1
 
-			cmd := exec.CommandContext(ctx, script, args...)
-			cmd.Stdout = logutil.NewSink(ctx, slog.Debug, sw.Name+": ")
-			cmd.Stderr = logutil.NewSink(ctx, slog.Debug, sw.Name+": ")
+			for attempt := 1; attempt <= maxAttempts; attempt++ {
+				func() {
+					ctx, cancel := context.WithCancel(ctx)
+					defer cancel()
 
-			if err := cmd.Run(); err != nil {
-				mu.Lock()
-				defer mu.Unlock()
+					args := []string{sw.Name}
+					if opts.Mode == ReinstallModeReboot {
+						args = append(args, opts.SwitchUsername, opts.SwitchPassword)
+					}
+					if opts.WaitReady {
+						args = append(args, "--wait-ready")
+					}
+					args = append(args, "-v")
 
-				var exitErr *exec.ExitError
-				if errors.As(err, &exitErr) {
-					errs = append(errs, wrapError(sw.Name, exitErr.ExitCode()))
-				} else if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-					errs = append(errs, fmt.Errorf("%s: timeout (context deadline exceeded)", sw.Name)) //nolint:goerr113
-				} else {
-					errs = append(errs, fmt.Errorf("%s: %w", sw.Name, err)) //nolint:goerr113
+					cmd := exec.CommandContext(ctx, script, args...)
+					cmd.Stdout = logutil.NewSink(ctx, slog.Debug, sw.Name+": ")
+					cmd.Stderr = logutil.NewSink(ctx, slog.Debug, sw.Name+": ")
+
+					err := cmd.Run()
+					if err == nil {
+						lastErr = nil
+
+						return
+					}
+
+					var exitErr *exec.ExitError
+					if errors.As(err, &exitErr) && exitErr.ExitCode() == errorConsole {
+						slog.Info("Reinstall attempt failed", "attempt", attempt, "switch", sw.Name, "reason", "console connection error, initiating hard reset")
+						backoffSeconds := baseBackoff * (1 << (attempt - 1))
+
+						slog.Info("Reinstall attempt failed",
+							"attempt", attempt,
+							"switch", sw.Name,
+							"reason", "console connection error, initiating hard reset",
+							"next_retry_delay", fmt.Sprintf("%ds", backoffSeconds))
+
+						powerOpts := SwitchPowerOpts{
+							Switches:    []string{sw.Name},
+							Action:      pdu.ActionCycle,
+							PDUUsername: opts.PDUUsername,
+							PDUPassword: opts.PDUPassword,
+						}
+						if err := c.VLABSwitchPower(ctx, powerOpts); err != nil {
+							slog.Error("Failed to perform hard reset for switch", "name", sw.Name, "error", err)
+						}
+
+						time.Sleep(time.Second * time.Duration(backoffSeconds))
+						lastErr = wrapError(sw.Name, exitErr.ExitCode())
+
+						return
+					} else if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+						lastErr = fmt.Errorf("%s: timeout (context deadline exceeded)", sw.Name) //nolint:goerr113
+
+						return
+					}
+
+					backoffSeconds := baseBackoff * (1 << (attempt - 1))
+					slog.Info("Reinstall attempt failed with non-console error",
+						"attempt", attempt,
+						"switch", sw.Name,
+						"next_retry_delay", fmt.Sprintf("%ds", backoffSeconds))
+					time.Sleep(time.Second * time.Duration(backoffSeconds))
+
+					lastErr = fmt.Errorf("%s: %w", sw.Name, err)
+				}()
+
+				if lastErr == nil {
+					break
 				}
-
-				slog.Error("Failed to reinstall switch", "name", sw.Name, "error", err)
-
-				return
 			}
 
-			if opts.WaitReady {
-				slog.Info("Switch reinstalled successfully", "name", sw.Name)
+			if lastErr != nil {
+				mu.Lock()
+				errs = append(errs, lastErr)
+				mu.Unlock()
+				slog.Error("Failed to reinstall switch after retries", "name", sw.Name, "error", lastErr)
 			} else {
-				slog.Info("Switch placed into NOS Install Mode", "name", sw.Name)
+				if opts.WaitReady {
+					slog.Info("Switch reinstalled successfully", "name", sw.Name)
+				} else {
+					slog.Info("Switch placed into NOS Install Mode", "name", sw.Name)
+				}
 			}
 		}(sw)
 	}
 
 	if opts.Mode == ReinstallModeHardReset {
 		time.Sleep(1 * time.Second)
-
 		if err := c.VLABSwitchPower(ctx, SwitchPowerOpts{
 			Switches:    opts.Switches,
 			Action:      pdu.ActionCycle,
@@ -403,7 +448,6 @@ func (c *Config) VLABSwitchReinstall(ctx context.Context, opts SwitchReinstallOp
 		}); err != nil {
 			return fmt.Errorf("executing hard-reset on switches: %w", err)
 		}
-
 		slog.Info("Switches power cycled")
 	}
 
