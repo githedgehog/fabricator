@@ -21,7 +21,7 @@ var Versions = fabapi.Versions{
 		K3s:         "v1.32.1-k3s1",
 		Zot:         "v2.1.1",
 		CertManager: "v1.16.2",
-		K9s:         "v0.32.5",
+		K9s:         "v0.40.6",
 		Toolbox:     "latest",  // TODO use specific version, move to fabricator repo
 		Reloader:    "v1.0.40", // TODO upgrade or get rid of?
 		NTP:         "v0.0.2",
