@@ -1,6 +1,8 @@
 # Fabricator object and at least one ControlNode are required
 # For more configuration options see https://docs.githedgehog.com
 
+# For generating password hash use `openssl passwd -5`
+
 apiVersion: fabricator.githedgehog.com/v1beta1
 kind: Fabricator
 metadata:
