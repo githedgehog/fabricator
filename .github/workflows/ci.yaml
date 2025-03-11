@@ -295,12 +295,86 @@ jobs:
           - fabricmode: spine-leaf
             fromversion: "beta-1"
             fromflags: "--usb"
+            x: 0
+          - fabricmode: spine-leaf
+            fromversion: "beta-1"
+            fromflags: "--usb"
+            x: 1
+          - fabricmode: spine-leaf
+            fromversion: "beta-1"
+            fromflags: "--usb"
+            x: 2
+          - fabricmode: spine-leaf
+            fromversion: "beta-1"
+            fromflags: "--usb"
+            x: 3
+          - fabricmode: spine-leaf
+            fromversion: "beta-1"
+            fromflags: "--usb"
+            x: 4
+          - fabricmode: spine-leaf
+            fromversion: "beta-1"
+            fromflags: "--usb"
+            x: 5
+          - fabricmode: spine-leaf
+            fromversion: "beta-1"
+            fromflags: "--usb"
+            x: 6
+          - fabricmode: spine-leaf
+            fromversion: "beta-1"
+            fromflags: "--usb"
+            x: 7
+          - fabricmode: spine-leaf
+            fromversion: "beta-1"
+            fromflags: "--usb"
+            x: 8
+          - fabricmode: spine-leaf
+            fromversion: "beta-1"
+            fromflags: "--usb"
+            x: 9
           - fabricmode: spine-leaf
             fromversion: "24.09"
             fromflags: "-m=iso"
+            x: 0
+          - fabricmode: spine-leaf
+            fromversion: "24.09"
+            fromflags: "-m=iso"
+            x: 1
+          - fabricmode: spine-leaf
+            fromversion: "24.09"
+            fromflags: "-m=iso"
+            x: 2
+          - fabricmode: spine-leaf
+            fromversion: "24.09"
+            fromflags: "-m=iso"
+            x: 3
+          - fabricmode: spine-leaf
+            fromversion: "24.09"
+            fromflags: "-m=iso"
+            x: 4
+          - fabricmode: spine-leaf
+            fromversion: "24.09"
+            fromflags: "-m=iso"
+            x: 5
+          - fabricmode: spine-leaf
+            fromversion: "24.09"
+            fromflags: "-m=iso"
+            x: 6
+          - fabricmode: spine-leaf
+            fromversion: "24.09"
+            fromflags: "-m=iso"
+            x: 7
+          - fabricmode: spine-leaf
+            fromversion: "24.09"
+            fromflags: "-m=iso"
+            x: 8
+          - fabricmode: spine-leaf
+            fromversion: "24.09"
+            fromflags: "-m=iso"
+            x: 9
 
     env:
-      slug: "${{ matrix.fabricmode }}-${{ matrix.fromversion }}-${{ matrix.fromflags == '--usb' && 'usb' || matrix.fromflags == '-m=iso' && 'iso' }}"
+      slug: "${{ matrix.fabricmode }}-${{ matrix.fromversion }}-${{ matrix.fromflags == '--usb' && 'usb' || matrix.fromflags == '-m=iso' && 'iso' }}-${{ matrix.x }}"
 
     steps:
       - name: Runner host
