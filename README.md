@@ -13,7 +13,7 @@ as OCI compliant artifacts.
 ## Local Build Instructions
 
 ### Prerequisites
-- go version v1.23.0+
+- go version v1.24.0+
 - docker version 17.03+. (used for logging into ghcr.io)
 - [zot v2.1.0](https://zotregistry.dev/v2.1.0/)
 - ghcr.io classic token with package **read** permissions
