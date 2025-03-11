@@ -1633,6 +1633,8 @@ type ReleaseTestOpts struct {
 	ResultsFile string
 	HhfabBin    string
 	Extended    bool
+	FailFast    bool
+	PauseOnFail bool
 }
 
 func (c *Config) ReleaseTest(ctx context.Context, opts ReleaseTestOpts) error {

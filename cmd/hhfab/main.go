@@ -63,6 +63,7 @@ const (
 	FlagInvertRegex               = "invert-regex"
 	FlagResultsFile               = "results-file"
 	FlagExtended                  = "extended"
+	FlagPauseOnFail               = "pause-on-fail"
 )
 
 func main() {
@@ -1033,16 +1034,28 @@ func Run(ctx context.Context) error {
 								Usage:   "run only tests matched by regular expression. can be repeated",
 							},
 							&cli.BoolFlag{
-								Name:  FlagInvertRegex,
-								Usage: "invert regex match",
+								Name:    FlagInvertRegex,
+								Aliases: []string{"i"},
+								Usage:   "invert regex match",
 							},
 							&cli.StringFlag{
 								Name:  FlagResultsFile,
 								Usage: "path to a file to export test results to in JUnit XML format",
 							},
 							&cli.BoolFlag{
-								Name:  FlagExtended,
-								Usage: "run extended tests",
+								Name:    FlagExtended,
+								Aliases: []string{"e"},
+								Usage:   "run extended tests",
+							},
+							&cli.BoolFlag{
+								Name:    FlagNameFailFast,
+								Aliases: []string{"f"},
+								Usage:   "stop testing on first failure",
+							},
+							&cli.BoolFlag{
+								Name:    FlagPauseOnFail,
+								Aliases: []string{"p"},
+								Usage:   "pause testing on each scenario failure (for troubleshooting)",
 							},
 						),
 						Before: before(false),
@@ -1052,6 +1065,8 @@ func Run(ctx context.Context) error {
 								InvertRegex: c.Bool(FlagInvertRegex),
 								ResultsFile: c.String(FlagResultsFile),
 								Extended:    c.Bool(FlagExtended),
+								FailFast:    c.Bool(FlagNameFailFast),
+								PauseOnFail: c.Bool(FlagPauseOnFail),
 							}
 							if err := hhfab.DoVLABReleaseTest(ctx, workDir, cacheDir, opts); err != nil {
 								return fmt.Errorf("release-test: %w", err)

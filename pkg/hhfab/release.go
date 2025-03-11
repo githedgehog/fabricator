@@ -31,6 +31,7 @@ var errNoEslags = errors.New("no ESLAG connections found")
 var errNoBundled = errors.New("no bundled connections found")
 var errNoUnbundled = errors.New("no unbundled connections found")
 var errNotEnoughSpines = errors.New("not enough spines found")
+var errInitalSetup = errors.New("initial setup failed")
 
 type VPCPeeringTestCtx struct {
 	workDir          string
@@ -42,6 +43,8 @@ type VPCPeeringTestCtx struct {
 	extName          string
 	hhfabBin         string
 	extended         bool
+	failFast         bool
+	pauseOnFail      bool
 }
 
 // prepare for a test: wipe the fabric and then create the VPCs according to the
@@ -1474,7 +1477,7 @@ func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (_ bool, re
 
 // Utilities and suite runners
 
-func makeTestCtx(kube client.Client, opts SetupVPCsOpts, workDir, cacheDir string, wipeBetweenTests bool, extName, hhfabBin string, extended bool) *VPCPeeringTestCtx {
+func makeTestCtx(kube client.Client, opts SetupVPCsOpts, workDir, cacheDir string, wipeBetweenTests bool, extName string, rtOpts ReleaseTestOpts) *VPCPeeringTestCtx {
 	testCtx := new(VPCPeeringTestCtx)
 	testCtx.kube = kube
 	testCtx.workDir = workDir
@@ -1486,14 +1489,16 @@ func makeTestCtx(kube client.Client, opts SetupVPCsOpts, workDir, cacheDir strin
 		IPerfsSeconds:     3,
 		IPerfsMinSpeed:    8500,
 	}
-	if extended {
+	if rtOpts.Extended {
 		testCtx.tcOpts.CurlsCount = 1
 		testCtx.tcOpts.IPerfsSeconds = 10
 	}
 	testCtx.wipeBetweenTests = wipeBetweenTests
 	testCtx.extName = extName
-	testCtx.hhfabBin = hhfabBin
-	testCtx.extended = extended
+	testCtx.hhfabBin = rtOpts.HhfabBin
+	testCtx.extended = rtOpts.Extended
+	testCtx.failFast = rtOpts.FailFast
+	testCtx.pauseOnFail = rtOpts.PauseOnFail
 
 	return testCtx
 }
@@ -1561,13 +1566,21 @@ func printSuiteResults(ts *JUnitTestSuite) {
 	slog.Info("Test suite summary", "tests", len(ts.TestCases), "passed", numPassed, "skipped", numSkipped, "failed", numFailed, "duration", ts.TimeHuman)
 }
 
+func pauseOnFail() {
+	// pause until the user presses enter
+	slog.Info("Press enter to continue...")
+	var input string
+	_, _ = fmt.Scanln(&input)
+	slog.Info("Continuing...")
+}
+
 func doRunTests(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSuite) (*JUnitTestSuite, error) {
 	suiteStart := time.Now()
 	slog.Info("** Running test suite", "suite", ts.Name, "tests", len(ts.TestCases), "start-time", suiteStart.Format(time.RFC3339))
 
 	// initial setup
 	if err := testCtx.setupTest(ctx); err != nil {
-		return ts, fmt.Errorf("initial test setup: %w", err)
+		return ts, fmt.Errorf("%w: %w", errInitalSetup, err)
 	}
 
 	for i, test := range ts.TestCases {
@@ -1584,6 +1597,12 @@ func doRunTests(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 				}
 				ts.Failures++
 				slog.Error("FAIL", "test", test.Name, "error", fmt.Sprintf("Failed to setupTest between tests: %s", err.Error()))
+				if testCtx.pauseOnFail {
+					pauseOnFail()
+				}
+				if testCtx.failFast {
+					return ts, fmt.Errorf("setupTest failed: %w", err)
+				}
 
 				continue
 			}
@@ -1607,6 +1626,12 @@ func doRunTests(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 			}
 			ts.Failures++
 			slog.Error("FAIL", "test", test.Name, "error", err.Error())
+			if testCtx.pauseOnFail {
+				pauseOnFail()
+			}
+			if testCtx.failFast {
+				return ts, fmt.Errorf("test %s failed: %w", test.Name, err)
+			}
 		} else {
 			slog.Info("PASS", "test", test.Name)
 		}
@@ -1662,12 +1687,12 @@ func failAllTests(suite *JUnitTestSuite, err error) *JUnitTestSuite {
 	return suite
 }
 
-func selectAndRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, suite *JUnitTestSuite, regexes []*regexp.Regexp, invertRegex bool, skipFlags SkipFlags) *JUnitTestSuite {
+func selectAndRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, suite *JUnitTestSuite, regexes []*regexp.Regexp, invertRegex bool, skipFlags SkipFlags) (*JUnitTestSuite, error) {
 	suite = regexpSelection(regexes, invertRegex, suite)
 	if suite.Skipped == suite.Tests {
 		slog.Info("All tests in suite skipped, skipping suite", "suite", suite.Name)
 
-		return suite
+		return suite, nil
 	}
 	for i, test := range suite.TestCases {
 		if test.Skipped != nil {
@@ -1709,10 +1734,19 @@ func selectAndRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, suite *J
 
 	suite, err := doRunTests(ctx, testCtx, suite)
 	if err != nil {
-		return failAllTests(suite, err)
+		// We could get here because:
+		// 1) the initial test setup has failed and we didn't run any tests (regardless of failFast)
+		// 2) one of the tests has failed and failFast is set
+		// we only return the error if we are in failFast mode
+		if errors.Is(err, errInitalSetup) {
+			suite = failAllTests(suite, err)
+		}
+		if testCtx.failFast {
+			return suite, err
+		}
 	}
 
-	return suite
+	return suite, nil
 }
 
 func makeVpcPeeringsSingleVPCSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
@@ -1906,19 +1940,28 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 		}
 	}
 
-	singleVpcTestCtx := makeTestCtx(kube, opts, workDir, cacheDir, false, extName, rtOtps.HhfabBin, rtOtps.Extended)
+	singleVpcTestCtx := makeTestCtx(kube, opts, workDir, cacheDir, false, extName, rtOtps)
 	singleVpcSuite := makeVpcPeeringsSingleVPCSuite(singleVpcTestCtx)
-	singleVpcResults := selectAndRunSuite(ctx, singleVpcTestCtx, singleVpcSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
+	singleVpcResults, err := selectAndRunSuite(ctx, singleVpcTestCtx, singleVpcSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
+	if err != nil && rtOtps.FailFast {
+		return fmt.Errorf("running single VPC suite: %w", err)
+	}
 
 	opts.ServersPerSubnet = 1
-	multiVpcTestCtx := makeTestCtx(kube, opts, workDir, cacheDir, false, extName, rtOtps.HhfabBin, rtOtps.Extended)
+	multiVpcTestCtx := makeTestCtx(kube, opts, workDir, cacheDir, false, extName, rtOtps)
 	multiVpcSuite := makeVpcPeeringsMultiVPCSuiteRun(multiVpcTestCtx)
-	multiVpcResults := selectAndRunSuite(ctx, multiVpcTestCtx, multiVpcSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
+	multiVpcResults, err := selectAndRunSuite(ctx, multiVpcTestCtx, multiVpcSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
+	if err != nil && rtOtps.FailFast {
+		return fmt.Errorf("running multi VPC suite: %w", err)
+	}
 
 	opts.SubnetsPerVPC = 1
-	basicTestCtx := makeTestCtx(kube, opts, workDir, cacheDir, true, extName, rtOtps.HhfabBin, rtOtps.Extended)
+	basicTestCtx := makeTestCtx(kube, opts, workDir, cacheDir, true, extName, rtOtps)
 	basicVpcSuite := makeVpcPeeringsBasicSuiteRun(basicTestCtx)
-	basicResults := selectAndRunSuite(ctx, basicTestCtx, basicVpcSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
+	basicResults, err := selectAndRunSuite(ctx, basicTestCtx, basicVpcSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
+	if err != nil && rtOtps.FailFast {
+		return fmt.Errorf("running basic VPC suite: %w", err)
+	}
 
 	slog.Info("*** Recap of the test results ***")
 	printSuiteResults(singleVpcResults)
