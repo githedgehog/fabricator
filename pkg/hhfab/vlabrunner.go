@@ -26,6 +26,7 @@ import (
 	"go.githedgehog.com/fabric/pkg/util/logutil"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/artificer"
+	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/flatcar"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
 	vlabcomp "go.githedgehog.com/fabricator/pkg/fab/comp/vlab"
@@ -889,11 +890,27 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 				continue
 			}
 
-			if err := kube.List(ctx, &fabapi.FabricatorList{}); err != nil {
+			fabs := &fabapi.FabricatorList{}
+			if err := kube.List(ctx, fabs); err != nil {
 				apiErr = err
 				slog.Debug("Failed to list fabricator configs", "vm", vm.Name, "type", vm.Type, "err", err)
 
 				continue
+			}
+
+			if len(fabs.Items) == 0 {
+				apiErr = fmt.Errorf("no fabricator configs found") //nolint:goerr113
+				slog.Debug("No fabricator configs found", "vm", vm.Name, "type", vm.Type)
+
+				continue
+			}
+
+			if len(fabs.Items) > 1 {
+				return fmt.Errorf("multiple fabricator configs found") //nolint:goerr113
+			}
+
+			if fabs.Items[0].Name != comp.FabName || fabs.Items[0].Namespace != comp.FabNamespace {
+				return fmt.Errorf("fabricator config mismatch: got %s/%s, want %s/%s", fabs.Items[0].Namespace, fabs.Items[0].Name, comp.FabNamespace, comp.FabName) //nolint:goerr113
 			}
 
 			apiErr = nil
