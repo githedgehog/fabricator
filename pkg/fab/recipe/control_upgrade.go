@@ -257,11 +257,20 @@ func (c *ControlUpgrade) upgradeFlatcar(ctx context.Context) error {
 			continue
 		}
 
+		lastErr = nil
 		slog.Info("Flatcar upgrade completed")
 
 		break
 	}
 	if lastErr != nil {
+		cmd := exec.CommandContext(ctx, "journalctl", "-t", "update_engine", "-n", "100")
+		cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "update_engine: ")
+		cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "update_engine: ")
+
+		if err := cmd.Run(); err != nil {
+			slog.Warn("Failed to print update_engine logs", "err", err)
+		}
+
 		return fmt.Errorf("retrying upgrading Flatcar: %w", lastErr)
 	}
 
