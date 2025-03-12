@@ -46,7 +46,7 @@ const (
 	InstallMarkerComplete = "complete"
 )
 
-func DoControlInstall(ctx context.Context, workDir string) error {
+func DoControlInstall(ctx context.Context, workDir string, yes bool) error {
 	ctx, cancel := context.WithTimeout(ctx, 40*time.Minute)
 	defer cancel()
 
@@ -108,6 +108,7 @@ func DoControlInstall(ctx context.Context, workDir string) error {
 	return (&ControlInstall{
 		ControlUpgrade: &ControlUpgrade{
 			WorkDir: workDir,
+			Yes:     yes,
 			Fab:     f,
 			Control: controls[0],
 			Nodes:   nodes,

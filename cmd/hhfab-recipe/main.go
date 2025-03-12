@@ -123,7 +123,17 @@ func Run(ctx context.Context) error {
 		}
 	}
 
+	yes := false
+	yesFlag := &cli.BoolFlag{
+		Name:        "yes",
+		Aliases:     []string{"y"},
+		Usage:       "assume yes for all prompts and run non-interactively",
+		EnvVars:     []string{"HHFAB_YES"},
+		Destination: &yes,
+	}
+
 	defaultFlags := []cli.Flag{
+		yesFlag,
 		workDirFlag,
 		verboseFlag,
 		briefFlag,
@@ -147,7 +157,7 @@ func Run(ctx context.Context) error {
 						Flags:  defaultFlags,
 						Before: before(true),
 						Action: func(_ *cli.Context) error {
-							err := recipe.DoControlInstall(ctx, workDir)
+							err := recipe.DoControlInstall(ctx, workDir, yes)
 							if err != nil {
 								return fmt.Errorf("control install: %w", err)
 							}
@@ -161,7 +171,7 @@ func Run(ctx context.Context) error {
 						Flags:  defaultFlags,
 						Before: before(true),
 						Action: func(_ *cli.Context) error {
-							err := recipe.DoControlUpgrade(ctx, workDir)
+							err := recipe.DoControlUpgrade(ctx, workDir, yes)
 							if err != nil {
 								return fmt.Errorf("control upgrade: %w", err)
 							}

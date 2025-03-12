@@ -7,7 +7,6 @@ import (
 	"bufio"
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"log"
 	"log/slog"
@@ -39,7 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func DoControlUpgrade(ctx context.Context, workDir string) error {
+func DoControlUpgrade(ctx context.Context, workDir string, yes bool) error {
 	ctx, cancel := context.WithTimeout(ctx, 40*time.Minute)
 	defer cancel()
 
@@ -60,11 +59,13 @@ func DoControlUpgrade(ctx context.Context, workDir string) error {
 
 	return (&ControlUpgrade{
 		WorkDir: workDir,
+		Yes:     yes,
 	}).Run(ctx)
 }
 
 type ControlUpgrade struct {
 	WorkDir string
+	Yes     bool
 	Fab     fabapi.Fabricator
 	Control fabapi.ControlNode
 	Nodes   []fabapi.Node
@@ -240,45 +241,52 @@ func (c *ControlUpgrade) upgradeFlatcar(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "flatcar-update", "--to-version", flatcarVersion, "--to-payload", flatcar.UpdateBinName)
-	cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "flatcar-update: ")
-	cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "flatcar-update: ")
+	var lastErr error
+	for attempt := 1; attempt <= 3; attempt++ {
+		if attempt > 1 {
+			slog.Debug("Retrying upgrading Flatcar", "attempt", attempt)
+		}
 
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("upgrading Flatcar: %w", err)
+		cmd := exec.CommandContext(ctx, "flatcar-update", "--to-version", flatcarVersion, "--to-payload", flatcar.UpdateBinName)
+		cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "flatcar-update: ")
+		cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "flatcar-update: ")
+
+		if err := cmd.Run(); err != nil {
+			lastErr = fmt.Errorf("running flatcar-update: %w", err)
+
+			continue
+		}
+
+		slog.Info("Flatcar upgrade completed")
+
+		break
+	}
+	if lastErr != nil {
+		return fmt.Errorf("retrying upgrading Flatcar: %w", lastErr)
 	}
 
-	slog.Info("Flatcar upgrade completed")
-
-	yesFlag := flag.Bool("yes", false, "Accept all prompts")
-	flag.Parse()
-
-	cmd = exec.CommandContext(ctx, "reboot")
-	cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "reboot: ")
-	cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "reboot: ")
-
-	if *yesFlag {
-		slog.Info("Rebooting Control Node")
-		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("rebooting: %w", err)
+	reboot := c.Yes
+	if !reboot && isatty.IsTerminal(os.Stdout.Fd()) {
+		if ok := askForConfirmation("Do you really want to reboot your system?"); ok {
+			reboot = true
 		}
 	}
 
-	if !isatty.IsTerminal(os.Stdout.Fd()) {
-		slog.Info("A reboot is necessary for the changes to take effect.")
+	if reboot {
+		slog.Info("Rebooting Control Node")
+
+		cmd := exec.CommandContext(ctx, "reboot")
+		cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "reboot: ")
+		cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "reboot: ")
+
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("rebooting: %w", err)
+		}
 
 		return nil
 	}
 
-	confirm := askForConfirmation("Do you really want to reset your system?")
-	if confirm {
-		slog.Info("Rebooting Control Node")
-		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("rebooting: %w", err)
-		}
-	}
-
-	slog.Info("A reboot is necessary for the changes to take effect.")
+	slog.Warn("A reboot is necessary for the changes to take effect")
 
 	return nil
 }
