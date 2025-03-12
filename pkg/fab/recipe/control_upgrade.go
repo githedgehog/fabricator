@@ -240,11 +240,51 @@ func (c *ControlUpgrade) upgradeFlatcar(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "flatcar-update", "--to-version", flatcarVersion, "--to-payload", flatcar.UpdateBinName)
+	updatePayloadPath := filepath.Join(c.WorkDir, flatcar.UpdateBinName)
+	_, err = os.Stat(updatePayloadPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("flatcar update payload not found at %s: %w", updatePayloadPath, err)
+		}
+
+		return fmt.Errorf("accessing flatcar update payload: %w", err)
+	}
+
+	flatcarUpdatePath, err := exec.LookPath("flatcar-update")
+	if err != nil {
+		return fmt.Errorf("flatcar-update binary not found: %w", err)
+	}
+
+	cmdStr := fmt.Sprintf("flatcar-update --to-version %s --to-payload %s", flatcarVersion, updatePayloadPath)
+	slog.Debug("Executing update command", "command", cmdStr)
+
+	cmd := exec.CommandContext(ctx, flatcarUpdatePath, "--to-version", flatcarVersion, "--to-payload", updatePayloadPath)
 	cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "flatcar-update: ")
 	cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "flatcar-update: ")
 
 	if err := cmd.Run(); err != nil {
+		exitCode := -1
+		if cmd.ProcessState != nil {
+			exitCode = cmd.ProcessState.ExitCode()
+		}
+		slog.Error("Flatcar update command failed", "error", err, "exit_code", exitCode)
+
+		logCtx, logCancel := context.WithTimeout(ctx, 30*time.Second)
+		defer logCancel()
+
+		logCmd := exec.CommandContext(logCtx, "journalctl", "-t", "update_engine", "-n", "50")
+		logOutput, logErr := logCmd.CombinedOutput()
+		if logErr != nil {
+			slog.Debug("Failed to retrieve update_engine logs", "error", logErr)
+		} else {
+			logs := string(logOutput)
+			for _, line := range strings.Split(logs, "\n") {
+				if line != "" {
+					slog.Debug("update_engine log", "line", line)
+				}
+			}
+		}
+
 		return fmt.Errorf("upgrading Flatcar: %w", err)
 	}
 
@@ -270,7 +310,7 @@ func (c *ControlUpgrade) upgradeFlatcar(ctx context.Context) error {
 		return nil
 	}
 
-	confirm := askForConfirmation("Do you really want to reset your system?")
+	confirm := askForConfirmation("Do you really want to reboot your system?")
 	if confirm {
 		slog.Info("Rebooting Control Node")
 		if err := cmd.Run(); err != nil {
