@@ -577,14 +577,17 @@ func (c *ControlUpgrade) upgradeK8s(ctx context.Context, kube client.Reader) err
 
 	slog.Debug("Waiting for registry after K8s upgrade")
 
-	select {
-	case <-ctx.Done():
-		return fmt.Errorf("waiting before registry check after upgrade: %w", ctx.Err())
-	case <-time.After(30 * time.Second):
-	}
+	// make sure registry is ready after K8s upgrade and up for at least a minute
+	for i := 0; i < 2; i++ {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("waiting before registry check after upgrade: %w", ctx.Err())
+		case <-time.After(30 * time.Second):
+		}
 
-	if err := c.waitRegistry(ctx, kube); err != nil {
-		return fmt.Errorf("waiting for registry after k8s upgrade: %w", err)
+		if err := c.waitRegistry(ctx, kube); err != nil {
+			return fmt.Errorf("waiting for registry after k8s upgrade: %w", err)
+		}
 	}
 
 	slog.Debug("Registry ready after K8s upgrade")
