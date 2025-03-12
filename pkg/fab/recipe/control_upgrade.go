@@ -602,11 +602,29 @@ func (c *ControlUpgrade) waitRegistry(ctx context.Context, kube client.Reader) e
 	}
 
 	caCM := coreapi.ConfigMap{}
-	if err := kube.Get(ctx, client.ObjectKey{
-		Namespace: comp.FabNamespace,
-		Name:      comp.FabCAConfigMap,
-	}, &caCM); err != nil {
-		return fmt.Errorf("getting CA config map: %w", err)
+	attempt := 0
+	if err := retry.OnError(wait.Backoff{
+		Steps:    17,
+		Duration: 500 * time.Millisecond,
+		Factor:   1.5,
+		Jitter:   0.1,
+	}, func(_ error) bool { return true }, func() error {
+		if attempt > 0 {
+			slog.Debug("Retrying getting CA", "attempt", attempt)
+		}
+
+		attempt++
+
+		if err := kube.Get(ctx, client.ObjectKey{
+			Namespace: comp.FabNamespace,
+			Name:      comp.FabCAConfigMap,
+		}, &caCM); err != nil {
+			return fmt.Errorf("getting CA config map: %w", err)
+		}
+
+		return nil
+	}); err != nil {
+		return fmt.Errorf("retrying getting ca: %w", err)
 	}
 
 	if caCM.Data == nil || caCM.Data[comp.FabCAConfigMapKey] == "" {
