@@ -45,9 +45,9 @@ var Versions = fabapi.Versions{
 		ProxyChart: FabricVersion, // TODO switch to a better proxy
 		Proxy:      "1.9.1",       // TODO use version starting with "v"
 		NOS: map[string]meta.Version{
-			string(fmeta.NOSTypeSONiCBCMVS):     "v4.4.0",
-			string(fmeta.NOSTypeSONiCBCMBase):   "v4.4.0",
-			string(fmeta.NOSTypeSONiCBCMCampus): "v4.4.0",
+			string(fmeta.NOSTypeSONiCBCMVS):     "v4.4.1",
+			string(fmeta.NOSTypeSONiCBCMBase):   "v4.4.1",
+			string(fmeta.NOSTypeSONiCBCMCampus): "v4.4.1",
 		},
 		ONIE: map[string]meta.Version{
 			switchprofile.DellS5232FON.Spec.Platform:         "v0.1.0",
