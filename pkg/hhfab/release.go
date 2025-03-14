@@ -302,13 +302,25 @@ func pingFromServer(hhfabBin, workDir, nodeName, ip string, expectSuccess bool) 
 	return nil
 }
 
+// Test function types
+
+// A revert function is a function that undoes a step taken by the test. It is meant
+// to be run after the test is done, regardless of whether it succeeded or failed.
+type RevertFunc func(context.Context) error
+
+// A test function is a function that runs a test. It takes a context and returns
+// a boolean indicating whether the test was skipped (e.g. due to missing resources),
+// a list of revert functions to be run after the test, and an error if the test failed.
+// note that the error contains the reason for the skip if the test was skipped.
+type TestFunc func(context.Context) (bool, []RevertFunc, error)
+
 // Test functions
 
 // The starter test is presumably an arbitrary point in the space of possible VPC peering configurations.
 // It was presumably chosen because going from this to a full mesh configuration could trigger
 // the gNMI bug. Note that in order to reproduce it one should disable the forced cleanup between
 // tests.
-func (testCtx *VPCPeeringTestCtx) vpcPeeringsStarterTest(ctx context.Context) (bool, error) {
+func (testCtx *VPCPeeringTestCtx) vpcPeeringsStarterTest(ctx context.Context) (bool, []RevertFunc, error) {
 	// 1+2:r=border 1+3 3+5 2+4 4+6 5+6 6+7 7+8 8+9  5~default--5835:s=subnet-01 6~default--5835:s=subnet-01  1~default--5835:s=subnet-01  2~default--5835:s=subnet-01  9~default--5835:s=subnet-01  7~default--5835:s=subnet-01
 	// check whether border switchgroup exists
 	remote := "border"
@@ -338,81 +350,81 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsStarterTest(ctx context.Context) (b
 	appendExtPeeringSpec(externalPeerings, 7, testCtx.extName, []string{"subnet-01"}, []string{})
 
 	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, true); err != nil {
-		return false, fmt.Errorf("setting up peerings: %w", err)
+		return false, nil, fmt.Errorf("setting up peerings: %w", err)
 	}
 	if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
-		return false, fmt.Errorf("testing connectivity: %w", err)
+		return false, nil, fmt.Errorf("testing connectivity: %w", err)
 	}
 
-	return false, nil
+	return false, nil, nil
 }
 
 // Test connectivity between all VPCs in a full mesh configuration, including all externals.
-func (testCtx *VPCPeeringTestCtx) vpcPeeringsFullMeshAllExternalsTest(ctx context.Context) (bool, error) {
+func (testCtx *VPCPeeringTestCtx) vpcPeeringsFullMeshAllExternalsTest(ctx context.Context) (bool, []RevertFunc, error) {
 	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec, 15)
 	if err := populateFullMeshVpcPeerings(ctx, testCtx.kube, vpcPeerings); err != nil {
-		return false, fmt.Errorf("populating full mesh VPC peerings: %w", err)
+		return false, nil, fmt.Errorf("populating full mesh VPC peerings: %w", err)
 	}
 
 	externalPeerings := make(map[string]*vpcapi.ExternalPeeringSpec, 6)
 	if err := populateAllExternalVpcPeerings(ctx, testCtx.kube, externalPeerings); err != nil {
-		return false, fmt.Errorf("populating all external VPC peerings: %w", err)
+		return false, nil, fmt.Errorf("populating all external VPC peerings: %w", err)
 	}
 
 	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, true); err != nil {
-		return false, fmt.Errorf("setting up peerings: %w", err)
+		return false, nil, fmt.Errorf("setting up peerings: %w", err)
 	}
 	if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
-		return false, fmt.Errorf("testing connectivity: %w", err)
+		return false, nil, fmt.Errorf("testing connectivity: %w", err)
 	}
 
-	return false, nil
+	return false, nil, nil
 }
 
 // Test connectivity between all VPCs with no peering except of the external ones.
-func (testCtx *VPCPeeringTestCtx) vpcPeeringsOnlyExternalsTest(ctx context.Context) (bool, error) {
+func (testCtx *VPCPeeringTestCtx) vpcPeeringsOnlyExternalsTest(ctx context.Context) (bool, []RevertFunc, error) {
 	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec, 0)
 	externalPeerings := make(map[string]*vpcapi.ExternalPeeringSpec, 6)
 	if err := populateAllExternalVpcPeerings(ctx, testCtx.kube, externalPeerings); err != nil {
-		return false, fmt.Errorf("populating all external VPC peerings: %w", err)
+		return false, nil, fmt.Errorf("populating all external VPC peerings: %w", err)
 	}
 	if len(externalPeerings) == 0 {
 		slog.Info("No external peerings found, skipping test")
 
-		return true, errNoExternals
+		return true, nil, errNoExternals
 	}
 	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, true); err != nil {
-		return false, fmt.Errorf("setting up peerings: %w", err)
+		return false, nil, fmt.Errorf("setting up peerings: %w", err)
 	}
 	if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
-		return false, fmt.Errorf("testing connectivity: %w", err)
+		return false, nil, fmt.Errorf("testing connectivity: %w", err)
 	}
 
-	return false, nil
+	return false, nil, nil
 }
 
 // Test connectivity between all VPCs in a full loop configuration, including all externals.
-func (testCtx *VPCPeeringTestCtx) vpcPeeringsFullLoopAllExternalsTest(ctx context.Context) (bool, error) {
+func (testCtx *VPCPeeringTestCtx) vpcPeeringsFullLoopAllExternalsTest(ctx context.Context) (bool, []RevertFunc, error) {
 	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec, 6)
 	if err := populateFullLoopVpcPeerings(ctx, testCtx.kube, vpcPeerings); err != nil {
-		return false, fmt.Errorf("populating full loop VPC peerings: %w", err)
+		return false, nil, fmt.Errorf("populating full loop VPC peerings: %w", err)
 	}
 	externalPeerings := make(map[string]*vpcapi.ExternalPeeringSpec, 6)
 	if err := populateAllExternalVpcPeerings(ctx, testCtx.kube, externalPeerings); err != nil {
-		return false, fmt.Errorf("populating all external VPC peerings: %w", err)
+		return false, nil, fmt.Errorf("populating all external VPC peerings: %w", err)
 	}
 	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, true); err != nil {
-		return false, fmt.Errorf("setting up peerings: %w", err)
+		return false, nil, fmt.Errorf("setting up peerings: %w", err)
 	}
 	if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
-		return false, fmt.Errorf("testing connectivity: %w", err)
+		return false, nil, fmt.Errorf("testing connectivity: %w", err)
 	}
 
-	return false, nil
+	return false, nil, nil
 }
 
 // Arbitrary configuration which again was shown to occasionally trigger the gNMI bug.
-func (testCtx *VPCPeeringTestCtx) vpcPeeringsSergeisSpecialTest(ctx context.Context) (bool, error) {
+func (testCtx *VPCPeeringTestCtx) vpcPeeringsSergeisSpecialTest(ctx context.Context) (bool, []RevertFunc, error) {
 	// 1+2 2+3 2+4:r=border 6+5 1~default--5835:s=subnet-01
 	// check whether border switchgroup exists
 	remote := "border"
@@ -430,13 +442,13 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsSergeisSpecialTest(ctx context.Cont
 	externalPeerings := make(map[string]*vpcapi.ExternalPeeringSpec, 6)
 	appendExtPeeringSpec(externalPeerings, 1, testCtx.extName, []string{"subnet-01"}, []string{})
 	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, true); err != nil {
-		return false, fmt.Errorf("setting up peerings: %w", err)
+		return false, nil, fmt.Errorf("setting up peerings: %w", err)
 	}
 	if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
-		return false, fmt.Errorf("testing connectivity: %w", err)
+		return false, nil, fmt.Errorf("testing connectivity: %w", err)
 	}
 
-	return false, nil
+	return false, nil, nil
 }
 
 // disable agent, shutdown port on switch, test connectivity, enable agent, set port up
@@ -515,25 +527,25 @@ func shutDownLinkAndTest(ctx context.Context, testCtx *VPCPeeringTestCtx, link w
 // Basic test for mclag failover.
 // For each mclag connection, set one of the links down by shutting down the port on the switch,
 // then test connectivity. Repeat for the other link.
-func (testCtx *VPCPeeringTestCtx) mclagTest(ctx context.Context) (bool, error) {
+func (testCtx *VPCPeeringTestCtx) mclagTest(ctx context.Context) (bool, []RevertFunc, error) {
 	// list connections in the fabric, filter by MC-LAG connection type
 	conns := &wiringapi.ConnectionList{}
 	if err := testCtx.kube.List(ctx, conns, client.MatchingLabels{wiringapi.LabelConnectionType: wiringapi.ConnectionTypeMCLAG}); err != nil {
-		return false, fmt.Errorf("listing connections: %w", err)
+		return false, nil, fmt.Errorf("listing connections: %w", err)
 	}
 	if len(conns.Items) == 0 {
 		slog.Info("No MCLAG connections found, skipping test")
 
-		return true, errNoMclags
+		return true, nil, errNoMclags
 	}
 	for _, conn := range conns.Items {
 		slog.Debug("Testing MCLAG connection", "connection", conn.Name)
 		if len(conn.Spec.MCLAG.Links) != 2 {
-			return false, fmt.Errorf("MCLAG connection %s has %d links, expected 2", conn.Name, len(conn.Spec.MCLAG.Links)) //nolint:goerr113
+			return false, nil, fmt.Errorf("MCLAG connection %s has %d links, expected 2", conn.Name, len(conn.Spec.MCLAG.Links)) //nolint:goerr113
 		}
 		for _, link := range conn.Spec.MCLAG.Links {
 			if err := shutDownLinkAndTest(ctx, testCtx, link); err != nil {
-				return false, err
+				return false, nil, err
 			}
 			// TODO: set other link down too and make sure that connectivity is lost
 			if !testCtx.extended {
@@ -544,31 +556,31 @@ func (testCtx *VPCPeeringTestCtx) mclagTest(ctx context.Context) (bool, error) {
 		}
 	}
 
-	return false, nil
+	return false, nil, nil
 }
 
 // Basic test for eslag failover.
 // For each eslag connection, set one of the links down by shutting down the port on the switch,
 // then test connectivity. Repeat for the other link.
-func (testCtx *VPCPeeringTestCtx) eslagTest(ctx context.Context) (bool, error) {
+func (testCtx *VPCPeeringTestCtx) eslagTest(ctx context.Context) (bool, []RevertFunc, error) {
 	// list connections in the fabric, filter by ES-LAG connection type
 	conns := &wiringapi.ConnectionList{}
 	if err := testCtx.kube.List(ctx, conns, client.MatchingLabels{wiringapi.LabelConnectionType: wiringapi.ConnectionTypeESLAG}); err != nil {
-		return false, fmt.Errorf("listing connections: %w", err)
+		return false, nil, fmt.Errorf("listing connections: %w", err)
 	}
 	if len(conns.Items) == 0 {
 		slog.Info("No ESLAG connections found, skipping test")
 
-		return true, errNoEslags
+		return true, nil, errNoEslags
 	}
 	for _, conn := range conns.Items {
 		slog.Debug("Testing ESLAG connection", "connection", conn.Name)
 		if len(conn.Spec.ESLAG.Links) != 2 {
-			return false, fmt.Errorf("ESLAG connection %s has %d links, expected 2", conn.Name, len(conn.Spec.ESLAG.Links)) //nolint:goerr113
+			return false, nil, fmt.Errorf("ESLAG connection %s has %d links, expected 2", conn.Name, len(conn.Spec.ESLAG.Links)) //nolint:goerr113
 		}
 		for _, link := range conn.Spec.ESLAG.Links {
 			if err := shutDownLinkAndTest(ctx, testCtx, link); err != nil {
-				return false, err
+				return false, nil, err
 			}
 			// TODO: set other link down too and make sure that connectivity is lost
 			if !testCtx.extended {
@@ -579,31 +591,31 @@ func (testCtx *VPCPeeringTestCtx) eslagTest(ctx context.Context) (bool, error) {
 		}
 	}
 
-	return false, nil
+	return false, nil, nil
 }
 
 // Basic test for bundled connection failover.
 // For each bundled connection, set one of the links down by shutting down the port on the switch,
 // then test connectivity. Repeat for the other link(s).
-func (testCtx *VPCPeeringTestCtx) bundledFailoverTest(ctx context.Context) (bool, error) {
+func (testCtx *VPCPeeringTestCtx) bundledFailoverTest(ctx context.Context) (bool, []RevertFunc, error) {
 	// list connections in the fabric, filter by bundled connection type
 	conns := &wiringapi.ConnectionList{}
 	if err := testCtx.kube.List(ctx, conns, client.MatchingLabels{wiringapi.LabelConnectionType: wiringapi.ConnectionTypeBundled}); err != nil {
-		return false, fmt.Errorf("listing connections: %w", err)
+		return false, nil, fmt.Errorf("listing connections: %w", err)
 	}
 	if len(conns.Items) == 0 {
 		slog.Info("No bundled connections found, skipping test")
 
-		return true, errNoBundled
+		return true, nil, errNoBundled
 	}
 	for _, conn := range conns.Items {
 		slog.Debug("Testing Bundled connection", "connection", conn.Name)
 		if len(conn.Spec.Bundled.Links) < 2 {
-			return false, fmt.Errorf("MCLAG connection %s has %d links, expected at least 2", conn.Name, len(conn.Spec.Bundled.Links)) //nolint:goerr113
+			return false, nil, fmt.Errorf("MCLAG connection %s has %d links, expected at least 2", conn.Name, len(conn.Spec.Bundled.Links)) //nolint:goerr113
 		}
 		for _, link := range conn.Spec.Bundled.Links {
 			if err := shutDownLinkAndTest(ctx, testCtx, link); err != nil {
-				return false, err
+				return false, nil, err
 			}
 			// TODO: set other link down too and make sure that connectivity is lost
 			if !testCtx.extended {
@@ -614,19 +626,19 @@ func (testCtx *VPCPeeringTestCtx) bundledFailoverTest(ctx context.Context) (bool
 		}
 	}
 
-	return false, nil
+	return false, nil, nil
 }
 
 // Basic test for spine failover.
 // Iterate over the spine switches (skip the first one), and shut down all links towards them.
 // Test connectivity, then re-enable the links.
-func (testCtx *VPCPeeringTestCtx) spineFailoverTest(ctx context.Context) (bool, error) {
+func (testCtx *VPCPeeringTestCtx) spineFailoverTest(ctx context.Context) (bool, []RevertFunc, error) {
 	var returnErr error
 
 	// list spines, unfortunately we cannot filter by role
 	switches := &wiringapi.SwitchList{}
 	if err := testCtx.kube.List(ctx, switches); err != nil {
-		return false, fmt.Errorf("listing switches: %w", err)
+		return false, nil, fmt.Errorf("listing switches: %w", err)
 	}
 	spines := make([]wiringapi.Switch, 0)
 	for _, sw := range switches.Items {
@@ -638,7 +650,7 @@ func (testCtx *VPCPeeringTestCtx) spineFailoverTest(ctx context.Context) (bool, 
 	if len(spines) < 2 {
 		slog.Info("Not enough spines found, skipping test")
 
-		return true, errNotEnoughSpines
+		return true, nil, errNotEnoughSpines
 	}
 
 outer:
@@ -650,15 +662,15 @@ outer:
 		// get switch profile to find the port name in sonic-cli
 		profile := &wiringapi.SwitchProfile{}
 		if err := testCtx.kube.Get(ctx, client.ObjectKey{Namespace: "default", Name: spine.Spec.Profile}, profile); err != nil {
-			return false, fmt.Errorf("getting switch profile %s: %w", spine.Spec.Profile, err)
+			return false, nil, fmt.Errorf("getting switch profile %s: %w", spine.Spec.Profile, err)
 		}
 		portMap, err := profile.Spec.GetAPI2NOSPortsFor(&spine.Spec)
 		if err != nil {
-			return false, fmt.Errorf("getting API2NOS ports for switch %s: %w", spine.Name, err)
+			return false, nil, fmt.Errorf("getting API2NOS ports for switch %s: %w", spine.Name, err)
 		}
 		// disable agent on spine
 		if err := changeAgentStatus(testCtx.hhfabBin, testCtx.workDir, spine.Name, false); err != nil {
-			return false, fmt.Errorf("disabling HH agent: %w", err)
+			return false, nil, fmt.Errorf("disabling HH agent: %w", err)
 		}
 
 		// look for connections that have this spine as a switch
@@ -729,16 +741,16 @@ outer:
 		}
 	}
 
-	return false, returnErr
+	return false, nil, returnErr
 }
 
 // Vanilla test for VPC peering, just test connectivity without any further restriction
-func (testCtx *VPCPeeringTestCtx) noRestrictionsTest(ctx context.Context) (bool, error) {
+func (testCtx *VPCPeeringTestCtx) noRestrictionsTest(ctx context.Context) (bool, []RevertFunc, error) {
 	if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
-		return false, fmt.Errorf("testing connectivity: %w", err)
+		return false, nil, fmt.Errorf("testing connectivity: %w", err)
 	}
 
-	return false, nil
+	return false, nil, nil
 }
 
 // Test VPC peering with multiple subnets and with restrictions.
@@ -747,29 +759,29 @@ func (testCtx *VPCPeeringTestCtx) noRestrictionsTest(ctx context.Context) (bool,
 // 2. Override isolation with explicit permit list, test connectivity
 // 3. Set restricted flag in subnet-02 in vpc-02, test connectivity
 // 4. Remove all restrictions
-func (testCtx *VPCPeeringTestCtx) multiSubnetsIsolationTest(ctx context.Context) (bool, error) {
+func (testCtx *VPCPeeringTestCtx) multiSubnetsIsolationTest(ctx context.Context) (bool, []RevertFunc, error) {
 	var returnErr error
 
 	// modify vpc-01 to have isolated subnets
 	vpc := &vpcapi.VPC{}
 	if err := testCtx.kube.Get(ctx, client.ObjectKey{Namespace: "default", Name: "vpc-01"}, vpc); err != nil {
-		return false, fmt.Errorf("getting VPC vpc-01: %w", err)
+		return false, nil, fmt.Errorf("getting VPC vpc-01: %w", err)
 	}
 	if len(vpc.Spec.Subnets) != 3 {
-		return false, fmt.Errorf("VPC vpc-01 has %d subnets, expected 3", len(vpc.Spec.Subnets)) //nolint:goerr113
+		return false, nil, fmt.Errorf("VPC vpc-01 has %d subnets, expected 3", len(vpc.Spec.Subnets)) //nolint:goerr113
 	}
 
 	// this is going to be used later, let's get it out of the way
 	vpc2 := &vpcapi.VPC{}
 	if err := testCtx.kube.Get(ctx, client.ObjectKey{Namespace: "default", Name: "vpc-02"}, vpc2); err != nil {
-		return false, fmt.Errorf("getting VPC vpc-02: %w", err)
+		return false, nil, fmt.Errorf("getting VPC vpc-02: %w", err)
 	}
 	if len(vpc2.Spec.Subnets) != 3 {
-		return false, fmt.Errorf("VPC vpc-02 has %d subnets, expected 3", len(vpc2.Spec.Subnets)) //nolint:goerr113
+		return false, nil, fmt.Errorf("VPC vpc-02 has %d subnets, expected 3", len(vpc2.Spec.Subnets)) //nolint:goerr113
 	}
 	subnet2, ok := vpc2.Spec.Subnets["subnet-02"]
 	if !ok {
-		return false, fmt.Errorf("Subnet subnet-02 not found in VPC vpc-02") //nolint:goerr113
+		return false, nil, fmt.Errorf("Subnet subnet-02 not found in VPC vpc-02") //nolint:goerr113
 	}
 
 	permitList := make([]string, 0)
@@ -782,8 +794,31 @@ func (testCtx *VPCPeeringTestCtx) multiSubnetsIsolationTest(ctx context.Context)
 	}
 	_, err := CreateOrUpdateVpc(ctx, testCtx.kube, vpc)
 	if err != nil {
-		return false, fmt.Errorf("updating VPC vpc-01: %w", err)
+		return false, nil, fmt.Errorf("updating VPC vpc-01: %w", err)
 	}
+	reverts := make([]RevertFunc, 0)
+	reverts = append(reverts, func(ctx context.Context) error {
+		slog.Debug("Removing all restrictions")
+		vpc.Spec.Permit = make([][]string, 0)
+		for _, sub := range vpc.Spec.Subnets {
+			sub.Isolated = pointer.To(false)
+		}
+		for _, sub := range vpc2.Spec.Subnets {
+			sub.Restricted = pointer.To(false)
+		}
+		_, err1 := CreateOrUpdateVpc(ctx, testCtx.kube, vpc)
+		_, err2 := CreateOrUpdateVpc(ctx, testCtx.kube, vpc2)
+		if err1 != nil || err2 != nil {
+			return errors.Join(err1, err2)
+		}
+		time.Sleep(5 * time.Second)
+		if err := WaitSwitchesReady(ctx, testCtx.kube, 1*time.Minute, 5*time.Minute); err != nil {
+			return fmt.Errorf("waiting for switches to be ready: %w", err)
+		}
+
+		return nil
+	})
+
 	// TODO: agent generation check to ensure that the change was picked up
 	// (tricky as we need to derive switch name from vpc, which involves quite a few steps)
 	time.Sleep(5 * time.Second)
@@ -829,69 +864,28 @@ func (testCtx *VPCPeeringTestCtx) multiSubnetsIsolationTest(ctx context.Context)
 		}
 	}
 
-	// remove all restrictions for next tests
-	slog.Debug("Removing all restrictions")
-	vpc.Spec.Permit = make([][]string, 0)
-	for _, sub := range vpc.Spec.Subnets {
-		sub.Isolated = pointer.To(false)
-	}
-	for _, sub := range vpc2.Spec.Subnets {
-		sub.Restricted = pointer.To(false)
-	}
-	_, err = CreateOrUpdateVpc(ctx, testCtx.kube, vpc)
-	if err != nil {
-		if returnErr == nil {
-			returnErr = fmt.Errorf("updating VPC vpc-01: %w", err)
-		} else {
-			returnErr = errors.Join(returnErr, fmt.Errorf("updating VPC vpc-01: %w", err))
-		}
-	}
-	_, err = CreateOrUpdateVpc(ctx, testCtx.kube, vpc2)
-	if err != nil {
-		if returnErr == nil {
-			returnErr = fmt.Errorf("updating VPC vpc-02: %w", err)
-		} else {
-			returnErr = errors.Join(returnErr, fmt.Errorf("updating VPC vpc-02: %w", err))
-		}
-	}
-	time.Sleep(5 * time.Second)
-	if err := WaitSwitchesReady(ctx, testCtx.kube, 1*time.Minute, 5*time.Minute); err != nil {
-		if returnErr == nil {
-			returnErr = fmt.Errorf("waiting for switches to be ready: %w", err)
-		} else {
-			returnErr = errors.Join(returnErr, fmt.Errorf("waiting for switches to be ready: %w", err))
-		}
-	}
-
-	// test connectivity
-	if returnErr == nil && testCtx.extended {
-		if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
-			returnErr = fmt.Errorf("testing connectivity after removing all constraints: %w", err)
-		}
-	}
-
-	return false, returnErr
+	return false, reverts, returnErr
 }
 
 // Test VPC peering with multiple subnets and with subnet filtering.
 // Assumes the scenario has 3 VPCs and at least 2 subnets in each VPC.
 // It creates peering between all VPCs, but restricts the peering to only one subnet
 // between 1-3 and 2-3. It then tests connectivity.
-func (testCtx *VPCPeeringTestCtx) multiSubnetsSubnetFilteringTest(ctx context.Context) (bool, error) {
+func (testCtx *VPCPeeringTestCtx) multiSubnetsSubnetFilteringTest(ctx context.Context) (bool, []RevertFunc, error) {
 	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec, 3)
 	appendVpcPeeringSpec(vpcPeerings, 1, 2, "", []string{}, []string{})
 	appendVpcPeeringSpec(vpcPeerings, 1, 3, "", []string{}, []string{"subnet-01"})
 	appendVpcPeeringSpec(vpcPeerings, 2, 3, "", []string{}, []string{"subnet-02"})
 	externalPeerings := make(map[string]*vpcapi.ExternalPeeringSpec, 0)
 	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, true); err != nil {
-		return false, fmt.Errorf("setting up peerings: %w", err)
+		return false, nil, fmt.Errorf("setting up peerings: %w", err)
 	}
 
 	if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
-		return false, fmt.Errorf("testing connectivity: %w", err)
+		return false, nil, fmt.Errorf("testing connectivity: %w", err)
 	}
 
-	return false, nil
+	return false, nil, nil
 }
 
 // Test VPC peering with multiple subnets and with restrictions.
@@ -901,28 +895,28 @@ func (testCtx *VPCPeeringTestCtx) multiSubnetsSubnetFilteringTest(ctx context.Co
 // 3. Set both isolated and restricted flags in subnet-03, test connectivity
 // 4. Override isolation with explicit permit list, test connectivity
 // 5. Remove all restrictions
-func (testCtx *VPCPeeringTestCtx) singleVPCWithRestrictionsTest(ctx context.Context) (bool, error) {
+func (testCtx *VPCPeeringTestCtx) singleVPCWithRestrictionsTest(ctx context.Context) (bool, []RevertFunc, error) {
 	var returnErr error
 
 	// isolate subnet-01
 	vpc := &vpcapi.VPC{}
 	if err := testCtx.kube.Get(ctx, client.ObjectKey{Namespace: "default", Name: "vpc-01"}, vpc); err != nil {
-		return false, fmt.Errorf("getting VPC vpc-01: %w", err)
+		return false, nil, fmt.Errorf("getting VPC vpc-01: %w", err)
 	}
 	if len(vpc.Spec.Subnets) != 3 {
-		return false, fmt.Errorf("VPC vpc-01 has %d subnets, expected 3", len(vpc.Spec.Subnets)) //nolint:goerr113
+		return false, nil, fmt.Errorf("VPC vpc-01 has %d subnets, expected 3", len(vpc.Spec.Subnets)) //nolint:goerr113
 	}
 	subnet1, ok := vpc.Spec.Subnets["subnet-01"]
 	if !ok {
-		return false, errors.New("Subnet subnet-01 not found in VPC vpc-01") //nolint:goerr113
+		return false, nil, errors.New("Subnet subnet-01 not found in VPC vpc-01") //nolint:goerr113
 	}
 	subnet2, ok := vpc.Spec.Subnets["subnet-02"]
 	if !ok {
-		return false, errors.New("Subnet subnet-02 not found in VPC vpc-01") //nolint:goerr113
+		return false, nil, errors.New("Subnet subnet-02 not found in VPC vpc-01") //nolint:goerr113
 	}
 	subnet3, ok := vpc.Spec.Subnets["subnet-03"]
 	if !ok {
-		return false, errors.New("Subnet subnet-03 not found in VPC vpc-01") //nolint:goerr113
+		return false, nil, errors.New("Subnet subnet-03 not found in VPC vpc-01") //nolint:goerr113
 	}
 	permitList := []string{"subnet-01", "subnet-02", "subnet-03"}
 
@@ -930,8 +924,29 @@ func (testCtx *VPCPeeringTestCtx) singleVPCWithRestrictionsTest(ctx context.Cont
 	subnet1.Isolated = pointer.To(true)
 	_, err := CreateOrUpdateVpc(ctx, testCtx.kube, vpc)
 	if err != nil {
-		return false, fmt.Errorf("updating VPC vpc-01: %w", err)
+		return false, nil, fmt.Errorf("updating VPC vpc-01: %w", err)
 	}
+
+	reverts := make([]RevertFunc, 0)
+	reverts = append(reverts, func(ctx context.Context) error {
+		slog.Debug("Removing all restrictions")
+		vpc.Spec.Permit = make([][]string, 0)
+		for _, sub := range vpc.Spec.Subnets {
+			sub.Isolated = pointer.To(false)
+			sub.Restricted = pointer.To(false)
+		}
+		_, err = CreateOrUpdateVpc(ctx, testCtx.kube, vpc)
+		if err != nil {
+			return fmt.Errorf("updating VPC vpc-01: %w", err)
+		}
+		time.Sleep(5 * time.Second)
+		if err := WaitSwitchesReady(ctx, testCtx.kube, 1*time.Minute, 5*time.Minute); err != nil {
+			return fmt.Errorf("waiting for switches to be ready: %w", err)
+		}
+
+		return nil
+	})
+
 	time.Sleep(5 * time.Second)
 	if err := WaitSwitchesReady(ctx, testCtx.kube, 1*time.Minute, 5*time.Minute); err != nil {
 		returnErr = fmt.Errorf("waiting for switches to be ready: %w", err)
@@ -993,38 +1008,7 @@ func (testCtx *VPCPeeringTestCtx) singleVPCWithRestrictionsTest(ctx context.Cont
 		}
 	}
 
-	// remove all restrictions for next tests
-	slog.Debug("Removing all restrictions")
-	vpc.Spec.Permit = make([][]string, 0)
-	for _, sub := range vpc.Spec.Subnets {
-		sub.Isolated = pointer.To(false)
-		sub.Restricted = pointer.To(false)
-	}
-	_, err = CreateOrUpdateVpc(ctx, testCtx.kube, vpc)
-	if err != nil {
-		if returnErr == nil {
-			returnErr = fmt.Errorf("updating VPC vpc-01: %w", err)
-		} else {
-			returnErr = errors.Join(returnErr, fmt.Errorf("updating VPC vpc-01: %w", err))
-		}
-	}
-	time.Sleep(5 * time.Second)
-	if err := WaitSwitchesReady(ctx, testCtx.kube, 1*time.Minute, 5*time.Minute); err != nil {
-		if returnErr == nil {
-			returnErr = fmt.Errorf("waiting for switches to be ready: %w", err)
-		} else {
-			returnErr = errors.Join(returnErr, fmt.Errorf("waiting for switches to be ready: %w", err))
-		}
-	}
-
-	if returnErr == nil && testCtx.extended {
-		// test connectivity
-		if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
-			return false, fmt.Errorf("testing connectivity: %w", err)
-		}
-	}
-
-	return false, returnErr
+	return false, reverts, returnErr
 }
 
 /* test following the manual steps to test static external attachments:
@@ -1039,16 +1023,16 @@ func (testCtx *VPCPeeringTestCtx) singleVPCWithRestrictionsTest(ctx context.Cont
  * 8. add dummy interfaces within the subnets specified in the static external and ping them from the source server
  * 9. cleanup everything and restore the original state
  */
-func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (_ bool, returnErr error) {
+func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool, []RevertFunc, error) {
 	// find an unbundled connection
 	connList := &wiringapi.ConnectionList{}
 	if err := testCtx.kube.List(ctx, connList, client.MatchingLabels{wiringapi.LabelConnectionType: wiringapi.ConnectionTypeUnbundled}); err != nil {
-		return false, fmt.Errorf("listing connections: %w", err)
+		return false, nil, fmt.Errorf("listing connections: %w", err)
 	}
 	if len(connList.Items) == 0 {
 		slog.Info("No unbundled connections found, skipping test")
 
-		return true, errNoUnbundled
+		return true, nil, errNoUnbundled
 	}
 	conn := connList.Items[0]
 	server := conn.Spec.Unbundled.Link.Server.DeviceName()
@@ -1060,16 +1044,16 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (_ boo
 	// get agent generation for the switch
 	gen, genErr := getAgentGen(ctx, testCtx.kube, switchName)
 	if genErr != nil {
-		return false, genErr
+		return false, nil, genErr
 	}
 
 	// Get the corresponding VPCAttachment
 	vpcAttList := &vpcapi.VPCAttachmentList{}
 	if err := testCtx.kube.List(ctx, vpcAttList, client.MatchingLabels{wiringapi.LabelConnection: conn.Name}); err != nil {
-		return false, fmt.Errorf("listing VPCAttachments: %w", err)
+		return false, nil, fmt.Errorf("listing VPCAttachments: %w", err)
 	}
 	if len(vpcAttList.Items) != 1 {
-		return false, fmt.Errorf("Expected 1 VPCAttachment for connection %s, got %d", conn.Name, len(vpcAttList.Items)) //nolint:goerr113
+		return false, nil, fmt.Errorf("Expected 1 VPCAttachment for connection %s, got %d", conn.Name, len(vpcAttList.Items)) //nolint:goerr113
 	}
 	vpcAtt := vpcAttList.Items[0]
 	subnetName := vpcAtt.Spec.SubnetName()
@@ -1078,16 +1062,17 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (_ boo
 	// Get the VPCAttachment's VPC so we can extract the VLAN (for hhnet config)
 	vpc := &vpcapi.VPC{}
 	if err := testCtx.kube.Get(ctx, client.ObjectKey{Namespace: "default", Name: vpcName}, vpc); err != nil {
-		return false, fmt.Errorf("getting VPC %s: %w", vpcName, err)
+		return false, nil, fmt.Errorf("getting VPC %s: %w", vpcName, err)
 	}
 	vlan := vpc.Spec.Subnets[subnetName].VLAN
 	slog.Debug("VLAN for VPCAttachment", "vlan", vlan)
 	// Delete the VPCAttachment
 	slog.Debug("Deleting VPCAttachment", "attachment", vpcAtt.Name)
 	if err := testCtx.kube.Delete(ctx, &vpcAtt); err != nil {
-		return false, fmt.Errorf("deleting VPCAttachment %s: %w", vpcAtt.Name, err)
+		return false, nil, fmt.Errorf("deleting VPCAttachment %s: %w", vpcAtt.Name, err)
 	}
-	defer func() {
+	reverts := make([]RevertFunc, 0)
+	reverts = append(reverts, func(ctx context.Context) error {
 		newVpcAtt := &vpcapi.VPCAttachment{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      vpcAtt.Name,
@@ -1097,84 +1082,40 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (_ boo
 		}
 		gen, genErr := getAgentGen(ctx, testCtx.kube, switchName)
 		if genErr != nil {
-			if returnErr == nil {
-				returnErr = genErr
-			} else {
-				returnErr = errors.Join(returnErr, genErr)
-			}
-
-			return
+			return genErr
 		}
 		slog.Debug("Creating VPCAttachment", "attachment", newVpcAtt.Name)
 		if err := testCtx.kube.Create(ctx, newVpcAtt); err != nil {
-			createErr := fmt.Errorf("creating VPCAttachment %s: %w", newVpcAtt.Name, err)
-			if returnErr == nil {
-				returnErr = createErr
-			} else {
-				returnErr = errors.Join(returnErr, createErr)
-			}
-
-			return
+			return fmt.Errorf("creating VPCAttachment %s: %w", newVpcAtt.Name, err)
 		}
 		if err := waitAgentGen(ctx, testCtx.kube, switchName, gen); err != nil {
-			if returnErr == nil {
-				returnErr = err
-			} else {
-				returnErr = errors.Join(returnErr, err)
-			}
-
-			return
+			return fmt.Errorf("waiting for agent generation: %w", err)
 		}
 		if err := WaitSwitchesReady(ctx, testCtx.kube, 1*time.Minute, 5*time.Minute); err != nil {
-			waitErr := fmt.Errorf("waiting for switches to be ready: %w", err)
-			if returnErr == nil {
-				returnErr = waitErr
-			} else {
-				returnErr = errors.Join(returnErr, waitErr)
-			}
-
-			return
+			return fmt.Errorf("waiting for switches to be ready: %w", err)
 		}
 		slog.Debug("Invoking hhnet cleanup on server", "server", server)
 		if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, server, "/opt/bin/hhnet cleanup"); err != nil {
-			cleanupErr := fmt.Errorf("cleaning up %s via hhnet: %w", server, err)
-			if returnErr == nil {
-				returnErr = cleanupErr
-			} else {
-				returnErr = errors.Join(returnErr, cleanupErr)
-			}
-
-			return
+			return fmt.Errorf("cleaning up %s via hhnet: %w", server, err)
 		}
 		slog.Debug("Configuring VLAN on server", "server", server, "vlan", vlan, "port", serverPortName)
 		if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, server, fmt.Sprintf("/opt/bin/hhnet vlan %d %s", vlan, serverPortName)); err != nil {
-			vlanErr := fmt.Errorf("configuring VLAN on %s: %w", server, err)
-			if returnErr == nil {
-				returnErr = vlanErr
-			} else {
-				returnErr = errors.Join(returnErr, vlanErr)
-			}
-
-			return
+			return fmt.Errorf("configuring VLAN on %s: %w", server, err)
 		}
 		slog.Debug("All state restored")
-	}()
+
+		return nil
+	})
 
 	slog.Debug("Deleting connection", "connection", conn.Name)
 	if err := testCtx.kube.Delete(ctx, &conn); err != nil {
-		return false, fmt.Errorf("deleting connection %s: %w", conn.Name, err)
+		return false, reverts, fmt.Errorf("deleting connection %s: %w", conn.Name, err)
 	}
 
-	defer func() {
+	reverts = append(reverts, func(ctx context.Context) error {
 		gen, genErr := getAgentGen(ctx, testCtx.kube, switchName)
 		if genErr != nil {
-			if returnErr == nil {
-				returnErr = genErr
-			} else {
-				returnErr = errors.Join(returnErr, genErr)
-			}
-
-			return
+			return genErr
 		}
 		newConn := &wiringapi.Connection{
 			ObjectMeta: metav1.ObjectMeta{
@@ -1185,43 +1126,27 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (_ boo
 		}
 		slog.Debug("Creating connection", "connection", newConn.Name)
 		if err := testCtx.kube.Create(ctx, newConn); err != nil {
-			createErr := fmt.Errorf("creating connection %s: %w", newConn.Name, err)
-			if returnErr == nil {
-				returnErr = createErr
-			} else {
-				returnErr = errors.Join(returnErr, createErr)
-			}
-
-			return
+			return fmt.Errorf("creating connection %s: %w", newConn.Name, err)
 		}
 		if err := waitAgentGen(ctx, testCtx.kube, switchName, gen); err != nil {
-			if returnErr == nil {
-				returnErr = err
-			} else {
-				returnErr = errors.Join(returnErr, err)
-			}
-
-			return
+			return fmt.Errorf("waiting for agent generation: %w", err)
 		}
 		if err := WaitSwitchesReady(ctx, testCtx.kube, 1*time.Minute, 5*time.Minute); err != nil {
-			waitErr := fmt.Errorf("waiting for switches to be ready: %w", err)
-			if returnErr == nil {
-				returnErr = waitErr
-			} else {
-				returnErr = errors.Join(returnErr, waitErr)
-			}
+			return fmt.Errorf("waiting for switches to be ready: %w", err)
 		}
-	}()
+
+		return nil
+	})
 
 	if err := waitAgentGen(ctx, testCtx.kube, switchName, gen); err != nil {
-		return false, err
+		return false, reverts, err
 	}
 	if err := WaitSwitchesReady(ctx, testCtx.kube, 1, 5*time.Minute); err != nil {
-		return false, fmt.Errorf("waiting for switches to be ready: %w", err)
+		return false, reverts, fmt.Errorf("waiting for switches to be ready: %w", err)
 	}
 	gen, genErr = getAgentGen(ctx, testCtx.kube, switchName)
 	if genErr != nil {
-		return false, genErr
+		return false, reverts, genErr
 	}
 
 	// Create new connection with static external
@@ -1241,97 +1166,77 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (_ boo
 	}
 	slog.Debug("Creating connection", "connection", staticExtConn.Name)
 	if err := testCtx.kube.Create(ctx, staticExtConn); err != nil {
-		return false, fmt.Errorf("creating connection %s: %w", staticExtConn.Name, err)
+		return false, reverts, fmt.Errorf("creating connection %s: %w", staticExtConn.Name, err)
 	}
-	defer func() {
+	reverts = append(reverts, func(ctx context.Context) error {
 		slog.Debug("Deleting connection", "connection", staticExtConn.Name)
 		if err := testCtx.kube.Delete(ctx, staticExtConn); err != nil {
-			deleteErr := fmt.Errorf("deleting connection %s: %w", staticExtConn.Name, err)
-			if returnErr == nil {
-				returnErr = deleteErr
-			} else {
-				returnErr = errors.Join(returnErr, deleteErr)
-			}
+			return fmt.Errorf("deleting connection %s: %w", staticExtConn.Name, err)
 		}
-	}()
+
+		return nil
+	})
 
 	if err := waitAgentGen(ctx, testCtx.kube, switchName, gen); err != nil {
-		return false, err
+		return false, reverts, err
 	}
 	if err := WaitSwitchesReady(ctx, testCtx.kube, 1*time.Minute, 5*time.Minute); err != nil {
-		return false, fmt.Errorf("waiting for switches to be ready: %w", err)
+		return false, reverts, fmt.Errorf("waiting for switches to be ready: %w", err)
 	}
 
 	// Add address and default route to en2ps1 on the server
 	slog.Debug("Adding address and default route to en2ps1 on the server", "server", server)
 	if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, server, "hhnet cleanup"); err != nil {
-		return false, fmt.Errorf("cleaning up server via hhnet: %w", err)
+		return false, reverts, fmt.Errorf("cleaning up server via hhnet: %w", err)
 	}
 	if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, server, "sudo ip addr add 172.31.255.1/24 dev enp2s1"); err != nil {
-		return false, fmt.Errorf("adding address to server: %w", err)
+		return false, reverts, fmt.Errorf("adding address to server: %w", err)
 	}
 	if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, server, "sudo ip link set dev enp2s1 up"); err != nil {
-		return false, fmt.Errorf("setting up server interface: %w", err)
+		return false, reverts, fmt.Errorf("setting up server interface: %w", err)
 	}
 	if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, server, "sudo ip route add default via 172.31.255.5"); err != nil {
-		return false, fmt.Errorf("adding default route to server: %w", err)
+		return false, reverts, fmt.Errorf("adding default route to server: %w", err)
 	}
 	slog.Debug("Adding dummy inteface with address 10.199.0.100/32 to the server", "server", server)
 	if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, server, "sudo ip link add dummy0 type dummy"); err != nil {
-		return false, fmt.Errorf("adding dummy interface to server: %w", err)
+		return false, reverts, fmt.Errorf("adding dummy interface to server: %w", err)
 	}
 	if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, server, "sudo ip addr add 10.199.0.100/32 dev dummy0"); err != nil {
-		return false, fmt.Errorf("adding address to dummy interface on server: %w", err)
+		return false, reverts, fmt.Errorf("adding address to dummy interface on server: %w", err)
 	}
-	defer func() {
+	reverts = append(reverts, func(_ context.Context) error {
 		slog.Debug("Removing address and default route from en2ps1 on the server", "server", server)
 		if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, server, "sudo ip addr del 172.31.255.1/24 dev enp2s1"); err != nil {
-			addrDelErr := fmt.Errorf("removing address from %s: %w", server, err)
-			if returnErr == nil {
-				returnErr = addrDelErr
-			} else {
-				returnErr = errors.Join(returnErr, addrDelErr)
-			}
-
-			return
+			return fmt.Errorf("removing address from %s: %w", server, err)
 		}
 		if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, server, "sudo ip link del dev dummy0"); err != nil {
-			dummyDelErr := fmt.Errorf("removing dummy interface from %s: %w", server, err)
-			if returnErr == nil {
-				returnErr = dummyDelErr
-			} else {
-				returnErr = errors.Join(returnErr, dummyDelErr)
-			}
-
-			return
+			return fmt.Errorf("removing dummy interface from %s: %w", server, err)
 		}
 		if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, server, "hhnet cleanup"); err != nil {
-			cleanupErr := fmt.Errorf("cleaning up %s via hhnet: %w", server, err)
-			if returnErr == nil {
-				returnErr = cleanupErr
-			} else {
-				returnErr = errors.Join(returnErr, cleanupErr)
-			}
+			return fmt.Errorf("cleaning up %s via hhnet: %w", server, err)
 		}
-	}()
+
+		return nil
+	})
 
 	srcServer, err := getServer1(ctx, testCtx.kube)
 	if err != nil {
-		return false, err
+		return false, reverts, err
 	}
 
 	// Ping the addresses from the source server
 	slog.Debug("Pinging 172.31.255.1", "source-server", srcServer)
 	if err := pingFromServer(testCtx.hhfabBin, testCtx.workDir, srcServer, "172.31.255.1", true); err != nil {
-		return false, fmt.Errorf("ping from %s to 172.31.255.1: %w", srcServer, err)
+		return false, reverts, fmt.Errorf("ping from %s to 172.31.255.1: %w", srcServer, err)
 	}
 	slog.Debug("Pinging 10.199.0.100", "source-server", srcServer)
 	if err := pingFromServer(testCtx.hhfabBin, testCtx.workDir, srcServer, "10.199.0.100", true); err != nil {
-		return false, fmt.Errorf("ping from %s to 10.199.0.100: %w", srcServer, err)
+		return false, reverts, fmt.Errorf("ping from %s to 10.199.0.100: %w", srcServer, err)
 	}
 	slog.Debug("All good, cleaning up")
 
-	return false, nil
+	return false, reverts, nil
 }
 
 // helper to get server-1 (might be called differently depending on the env)
@@ -1353,16 +1258,16 @@ func getServer1(ctx context.Context, kube client.Client) (string, error) {
 // For DNS, we check the content of /etc/resolv.conf;
 // for NTP, we check the output of timedatectl show-timesync;
 // for MTU, we check the output of "ip link" on the vlan interface.
-func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (_ bool, returnErr error) {
+func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (bool, []RevertFunc, error) {
 	// TODO: pick any server, derive other elements (i.e. vpc, hhnet params etc) from it
 	serverName, err := getServer1(ctx, testCtx.kube)
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	// Get the VPC
 	vpc := &vpcapi.VPC{}
 	if err := testCtx.kube.Get(ctx, client.ObjectKey{Namespace: "default", Name: "vpc-01"}, vpc); err != nil {
-		return false, fmt.Errorf("getting VPC vpc-01: %w", err)
+		return false, nil, fmt.Errorf("getting VPC vpc-01: %w", err)
 	}
 
 	// Set DNS, NTP and MTU
@@ -1381,10 +1286,10 @@ func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (_ bool, re
 	}
 	change, err := CreateOrUpdateVpc(ctx, testCtx.kube, vpc)
 	if err != nil || !change {
-		return false, fmt.Errorf("updating VPC vpc-01: %w", err)
+		return false, nil, fmt.Errorf("updating VPC vpc-01: %w", err)
 	}
-
-	defer func() {
+	reverts := make([]RevertFunc, 0)
+	reverts = append(reverts, func(ctx context.Context) error {
 		slog.Debug("Cleaning up")
 		for _, sub := range vpc.Spec.Subnets {
 			sub.DHCP = vpcapi.VPCDHCP{
@@ -1394,60 +1299,38 @@ func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (_ bool, re
 		}
 		_, err = CreateOrUpdateVpc(ctx, testCtx.kube, vpc)
 		if err != nil {
-			if returnErr == nil {
-				returnErr = fmt.Errorf("updating VPC vpc-01: %w", err)
-			} else {
-				returnErr = errors.Join(returnErr, fmt.Errorf("updating VPC vpc-01: %w", err))
-			}
-
-			return
+			return fmt.Errorf("updating VPC vpc-01: %w", err)
 		}
 
 		// Wait for convergence
 		time.Sleep(5 * time.Second)
 		if err := WaitSwitchesReady(ctx, testCtx.kube, 1*time.Minute, 5*time.Minute); err != nil {
-			if returnErr == nil {
-				returnErr = fmt.Errorf("waiting for switches to be ready: %w", err)
-			} else {
-				returnErr = errors.Join(returnErr, fmt.Errorf("waiting for switches to be ready: %w", err))
-			}
-
-			return
+			return fmt.Errorf("waiting for switches to be ready: %w", err)
 		}
 		if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, serverName, "/opt/bin/hhnet cleanup"); err != nil {
-			if returnErr == nil {
-				returnErr = fmt.Errorf("cleaning up interfaces on %s: %w", serverName, err)
-			} else {
-				returnErr = errors.Join(returnErr, fmt.Errorf("cleaning up interfaces on %s: %w", serverName, err))
-			}
-
-			return
+			return fmt.Errorf("cleaning up interfaces on %s: %w", serverName, err)
 		}
 		// TODO: ideally this would be derived rather than hardcoded (extract the code from testing.go)
 		if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, serverName, "/opt/bin/hhnet bond 1001 enp2s1 enp2s2"); err != nil {
-			if returnErr == nil {
-				returnErr = fmt.Errorf("bonding interfaces on %s: %w", serverName, err)
-			} else {
-				returnErr = errors.Join(returnErr, fmt.Errorf("bonding interfaces on %s: %w", serverName, err))
-			}
-
-			return
+			return fmt.Errorf("bonding interfaces on %s: %w", serverName, err)
 		}
-	}()
+
+		return nil
+	})
 
 	// Wait for convergence
 	time.Sleep(5 * time.Second)
 	if err := WaitSwitchesReady(ctx, testCtx.kube, 1*time.Minute, 5*time.Minute); err != nil {
-		return false, fmt.Errorf("waiting for switches to be ready: %w", err)
+		return false, reverts, fmt.Errorf("waiting for switches to be ready: %w", err)
 	}
 
 	// Configure network interfaces on target server
 	slog.Debug("Configuring network interfaces", "server", serverName)
 	if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, serverName, "/opt/bin/hhnet cleanup"); err != nil {
-		return false, fmt.Errorf("cleaning up interfaces on %s: %w", serverName, err)
+		return false, reverts, fmt.Errorf("cleaning up interfaces on %s: %w", serverName, err)
 	}
 	if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, serverName, "/opt/bin/hhnet bond 1001 enp2s1 enp2s2"); err != nil {
-		return false, fmt.Errorf("bonding interfaces on %s: %w", serverName, err)
+		return false, reverts, fmt.Errorf("bonding interfaces on %s: %w", serverName, err)
 	}
 
 	// Check DNS, NTP and MTU
@@ -1469,10 +1352,10 @@ func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (_ bool, re
 		mtuFound = true
 	}
 	if !dnsFound || !ntpFound || !mtuFound {
-		return false, fmt.Errorf("DNS: %v, NTP: %v, MTU: %v", dnsFound, ntpFound, mtuFound) //nolint:goerr113
+		return false, reverts, fmt.Errorf("DNS: %v, NTP: %v, MTU: %v", dnsFound, ntpFound, mtuFound) //nolint:goerr113
 	}
 
-	return false, nil
+	return false, reverts, nil
 }
 
 // Utilities and suite runners
@@ -1527,14 +1410,14 @@ type SkipFlags struct {
 }
 
 type JUnitTestCase struct {
-	XMLName   xml.Name                            `xml:"testcase"`
-	ClassName string                              `xml:"classname,attr"`
-	Name      string                              `xml:"name,attr"`
-	Time      float64                             `xml:"time,attr"`
-	Failure   *Failure                            `xml:"failure,omitempty"`
-	Skipped   *Skipped                            `xml:"skipped,omitempty"`
-	F         func(context.Context) (bool, error) `xml:"-"` // function to run
-	SkipFlags SkipFlags                           `xml:"-"` // flags to determine whether to skip the test
+	XMLName   xml.Name  `xml:"testcase"`
+	ClassName string    `xml:"classname,attr"`
+	Name      string    `xml:"name,attr"`
+	Time      float64   `xml:"time,attr"`
+	Failure   *Failure  `xml:"failure,omitempty"`
+	Skipped   *Skipped  `xml:"skipped,omitempty"`
+	F         TestFunc  `xml:"-"` // function to run
+	SkipFlags SkipFlags `xml:"-"` // flags to determine whether to skip the test
 }
 
 type Failure struct {
@@ -1583,6 +1466,7 @@ func doRunTests(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 		return ts, fmt.Errorf("%w: %w", errInitalSetup, err)
 	}
 
+	prevRevertsFailed := false
 	for i, test := range ts.TestCases {
 		if test.Skipped != nil {
 			slog.Info("SKIP", "test", test.Name, "reason", test.Skipped.Message)
@@ -1590,13 +1474,13 @@ func doRunTests(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 			continue
 		}
 		slog.Info("* Running test", "test", test.Name)
-		if i > 0 && testCtx.wipeBetweenTests {
+		if (i > 0 && testCtx.wipeBetweenTests) || prevRevertsFailed {
 			if err := testCtx.setupTest(ctx); err != nil {
 				ts.TestCases[i].Failure = &Failure{
-					Message: fmt.Sprintf("Failed to setupTest between tests: %s", err.Error()),
+					Message: fmt.Sprintf("Failed to run setupTest between tests: %s", err.Error()),
 				}
 				ts.Failures++
-				slog.Error("FAIL", "test", test.Name, "error", fmt.Sprintf("Failed to setupTest between tests: %s", err.Error()))
+				slog.Error("FAIL", "test", test.Name, "error", fmt.Sprintf("Failed to run setupTest between tests: %s", err.Error()))
 				if testCtx.pauseOnFail {
 					pauseOnFail()
 				}
@@ -1607,20 +1491,39 @@ func doRunTests(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 				continue
 			}
 		}
+		prevRevertsFailed = false
 		testStart := time.Now()
-		skip, err := test.F(ctx)
+		skip, reverts, err := test.F(ctx)
 		ts.TestCases[i].Time = time.Since(testStart).Seconds()
 		if skip {
 			var skipMsg string
 			if err != nil {
 				skipMsg = err.Error()
+			} else {
+				skipMsg = "Skipped by test function (unspecified reason)"
 			}
 			ts.TestCases[i].Skipped = &Skipped{
 				Message: skipMsg,
 			}
 			ts.Skipped++
 			slog.Warn("SKIP", "test", test.Name, "reason", skipMsg)
-		} else if err != nil {
+		}
+		var revertErr error
+		for i := len(reverts) - 1; i >= 0; i-- {
+			revertErr = reverts[i](ctx)
+			if revertErr != nil {
+				slog.Error("Revert failed", "test", test.Name, "error", revertErr.Error())
+				if err == nil {
+					err = revertErr
+				} else {
+					err = errors.Join(err, revertErr)
+				}
+				prevRevertsFailed = true
+
+				break
+			}
+		}
+		if err != nil {
 			ts.TestCases[i].Failure = &Failure{
 				Message: err.Error(),
 			}
