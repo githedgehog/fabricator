@@ -1614,7 +1614,11 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 		})
 
 		if lldpErr == nil {
-			if renderErr := inspect.Render(inspect.OutputTypeText, os.Stdout, lldpOut); renderErr == nil {
+			if withErrors, ok := lldpOut.(inspect.WithErrors); ok {
+				if len(withErrors.Errors()) == 0 {
+					break
+				}
+			} else {
 				break
 			}
 		}
