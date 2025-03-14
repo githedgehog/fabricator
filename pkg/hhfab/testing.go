@@ -65,7 +65,7 @@ func (c *Config) Wait(ctx context.Context, vlab *VLAB) error {
 	defer cacheCancel()
 
 	slog.Info("Waiting for all switches ready")
-	if err := WaitSwitchesReady(ctx, kube, 0, 30*time.Minute); err != nil {
+	if err := WaitSwitchesReady(ctx, kube, 1*time.Minute, 30*time.Minute); err != nil {
 		return fmt.Errorf("waiting for switches ready: %w", err)
 	}
 
@@ -111,9 +111,9 @@ func CreateOrUpdateVpc(ctx context.Context, kube client.Client, vpc *vpcapi.VPC)
 	return changed, nil
 }
 
-func GetKubeClient(ctx context.Context, workDir string) (client.Client, error) {
+func GetKubeClientWithCache(ctx context.Context, workDir string) (context.CancelFunc, client.Client, error) {
 	kubeconfig := filepath.Join(workDir, VLABDir, VLABKubeConfig)
-	return kubeutil.NewClient(ctx, kubeconfig,
+	return kubeutil.NewClientWithCache(ctx, kubeconfig,
 		wiringapi.SchemeBuilder,
 		vpcapi.SchemeBuilder,
 		agentapi.SchemeBuilder,
@@ -351,7 +351,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 
 	if opts.WaitSwitchesReady {
 		slog.Info("Waiting for switches ready before configuring VPCs and VPCAttachments")
-		if err := WaitSwitchesReady(ctx, kube, 0, 30*time.Minute); err != nil {
+		if err := WaitSwitchesReady(ctx, kube, 1*time.Minute, 30*time.Minute); err != nil {
 			return fmt.Errorf("waiting for switches ready: %w", err)
 		}
 	}
@@ -428,7 +428,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		case <-time.After(15 * time.Second):
 		}
 
-		if err := WaitSwitchesReady(ctx, kube, 0, 30*time.Minute); err != nil {
+		if err := WaitSwitchesReady(ctx, kube, 1*time.Minute, 30*time.Minute); err != nil {
 			return fmt.Errorf("waiting for switches ready: %w", err)
 		}
 	}
@@ -538,7 +538,7 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 
 	if opts.WaitSwitchesReady {
 		slog.Info("Waiting for switches ready before configuring VPC and External Peerings")
-		if err := WaitSwitchesReady(ctx, kube, 0, 30*time.Minute); err != nil {
+		if err := WaitSwitchesReady(ctx, kube, 1*time.Minute, 30*time.Minute); err != nil {
 			return fmt.Errorf("waiting for switches ready: %w", err)
 		}
 	}
@@ -860,7 +860,7 @@ func DoSetupPeerings(ctx context.Context, kube client.Client, vpcPeerings map[st
 		case <-time.After(15 * time.Second):
 		}
 
-		if err := WaitSwitchesReady(ctx, kube, 0, 30*time.Minute); err != nil {
+		if err := WaitSwitchesReady(ctx, kube, 1*time.Minute, 30*time.Minute); err != nil {
 			return fmt.Errorf("waiting for switches ready: %w", err)
 		}
 	}
@@ -944,7 +944,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 	if opts.WaitSwitchesReady {
 		slog.Info("Waiting for switches ready before testing connectivity")
 
-		if err := WaitSwitchesReady(ctx, kube, 30*time.Second, 30*time.Minute); err != nil {
+		if err := WaitSwitchesReady(ctx, kube, 1*time.Minute, 30*time.Minute); err != nil {
 			return fmt.Errorf("waiting for switches ready: %w", err)
 		}
 	}
@@ -1323,7 +1323,7 @@ func checkPing(ctx context.Context, opts TestConnectivityOpts, pings *semaphore.
 			return fmt.Errorf("running ping: %w: %s", err, out) // TODO replace with custom error?
 		}
 
-		return fmt.Errorf("unexpected ping result: %s", out) // TODO replace with custom error?
+		return fmt.Errorf("unexpected ping result (expected %t): %s", expected, out) // TODO replace with custom error?
 	}
 
 	if expected && !pingOk {
@@ -1651,4 +1651,24 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 	slog.Info("Inspect completed", "took", time.Since(start))
 
 	return nil
+}
+
+type ReleaseTestOpts struct {
+	Regexes     []string
+	InvertRegex bool
+	ResultsFile string
+	HhfabBin    string
+	Extended    bool
+	FailFast    bool
+	PauseOnFail bool
+}
+
+func (c *Config) ReleaseTest(ctx context.Context, opts ReleaseTestOpts) error {
+	self, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("getting executable path: %w", err)
+	}
+	opts.HhfabBin = self
+
+	return RunReleaseTestSuites(ctx, c.WorkDir, c.CacheDir, opts)
 }
