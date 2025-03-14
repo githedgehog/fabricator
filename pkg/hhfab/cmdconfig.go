@@ -10,8 +10,13 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"strings"
 
+	"encoding/json"
+
+	"github.com/invopop/jsonschema"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
@@ -382,4 +387,310 @@ func getLocalDockerCredsFor(ctx context.Context, repo string) (string, string, e
 	}
 
 	return creds.Username, creds.Password, nil
+}
+
+func GenerateJSONSchema() (string, error) {
+	reflector := &jsonschema.Reflector{
+		DoNotReference:            true,
+		ExpandedStruct:            true,
+		AllowAdditionalProperties: false,
+	}
+
+	wiringLoader := apiutil.NewWiringLoader()
+	fabLoader := apiutil.NewFabLoader()
+
+	wiringScheme := wiringLoader.GetScheme()
+	fabScheme := fabLoader.GetScheme()
+
+	kindSchemas := make(map[string]*jsonschema.Schema)
+	kindVersions := make(map[string]map[string]bool)
+	allAPIVersions := make(map[string]bool)
+
+	for gvk, typ := range wiringScheme.AllKnownTypes() {
+		if !isResourceType(gvk.Kind) {
+			continue
+		}
+
+		instance := newInstance(typ)
+		schema := reflector.Reflect(instance)
+		kindSchemas[gvk.Kind] = schema
+
+		if _, ok := kindVersions[gvk.Kind]; !ok {
+			kindVersions[gvk.Kind] = make(map[string]bool)
+		}
+
+		version := gvk.GroupVersion().String()
+		kindVersions[gvk.Kind][version] = true
+		allAPIVersions[version] = true
+	}
+
+	for gvk, typ := range fabScheme.AllKnownTypes() {
+		if !isResourceType(gvk.Kind) {
+			continue
+		}
+
+		instance := newInstance(typ)
+		schema := reflector.Reflect(instance)
+		kindSchemas[gvk.Kind] = schema
+
+		if _, ok := kindVersions[gvk.Kind]; !ok {
+			kindVersions[gvk.Kind] = make(map[string]bool)
+		}
+
+		version := gvk.GroupVersion().String()
+		kindVersions[gvk.Kind][version] = true
+		allAPIVersions[version] = true
+	}
+
+	// Create a deduplicated list of all unique API versions
+	uniqueVersions := make([]string, 0, len(allAPIVersions))
+	for version := range allAPIVersions {
+		uniqueVersions = append(uniqueVersions, version)
+	}
+	sort.Strings(uniqueVersions)
+
+	baseSchema := map[string]interface{}{
+		"$schema":     "http://json-schema.org/draft-07/schema#",
+		"$id":         "https://githedgehog.com/schemas/fabric",
+		"title":       "GitHedgehog Fabric Schema",
+		"description": "Schema for GitHedgehog Fabric and Wiring resources",
+		"type":        "object",
+		"required":    []string{"apiVersion", "kind", "metadata"},
+		"properties": map[string]interface{}{
+			"apiVersion": map[string]interface{}{
+				"type":        "string",
+				"description": "The versioned schema of this resource",
+				"enum":        uniqueVersions,
+			},
+			"kind": map[string]interface{}{
+				"type":        "string",
+				"description": "The type of the resource",
+			},
+			"metadata": map[string]interface{}{
+				"type":     "object",
+				"required": []string{"name"},
+				"properties": map[string]interface{}{
+					"name": map[string]interface{}{
+						"type":        "string",
+						"description": "Name of the resource",
+					},
+					"namespace": map[string]interface{}{
+						"type":        "string",
+						"description": "Namespace of the resource",
+					},
+				},
+				"additionalProperties": false,
+			},
+			"spec": map[string]interface{}{
+				"type":                 "object",
+				"description":          "Specification of the resource",
+				"additionalProperties": true,
+			},
+		},
+		"additionalProperties": false,
+	}
+
+	definitions := make(map[string]interface{})
+
+	for kind, schema := range kindSchemas {
+		schemaData, err := json.Marshal(schema)
+		if err != nil {
+			continue
+		}
+
+		var schemaMap map[string]interface{}
+		if err := json.Unmarshal(schemaData, &schemaMap); err != nil {
+			continue
+		}
+
+		delete(schemaMap, "$schema")
+
+		if id, exists := schemaMap["$id"].(string); exists && id != "" {
+			schemaMap["$id"] = id
+		}
+
+		// Enforce stricter validation on property objects
+		enforceStrictValidation(schemaMap)
+
+		definitions[kind] = schemaMap
+	}
+
+	baseSchema["definitions"] = definitions
+
+	// Create dependency section to enforce apiVersion and kind combinations
+	apiVersionDependency := make(map[string]interface{})
+
+	for kind, versionsMap := range kindVersions {
+		kindVersionsList := make([]string, 0, len(versionsMap))
+		for version := range versionsMap {
+			kindVersionsList = append(kindVersionsList, version)
+		}
+		sort.Strings(kindVersionsList)
+
+		for _, version := range kindVersionsList {
+			if _, ok := apiVersionDependency[version]; !ok {
+				apiVersionDependency[version] = map[string]interface{}{
+					"properties": map[string]interface{}{
+						"kind": map[string]interface{}{
+							"enum": []string{kind},
+						},
+					},
+				}
+			} else {
+				// Add this kind to the existing version's enum
+				props := apiVersionDependency[version].(map[string]interface{})["properties"].(map[string]interface{})
+				kindEnum := props["kind"].(map[string]interface{})["enum"].([]string)
+				kindEnum = append(kindEnum, kind)
+				props["kind"].(map[string]interface{})["enum"] = kindEnum
+			}
+		}
+	}
+
+	// Convert the apiVersionDependency map to the format needed for dependencies
+	apiVersionConditions := make([]map[string]interface{}, 0, len(apiVersionDependency))
+	for version, condition := range apiVersionDependency {
+		apiVersionConditions = append(apiVersionConditions, map[string]interface{}{
+			"if": map[string]interface{}{
+				"properties": map[string]interface{}{
+					"apiVersion": map[string]interface{}{
+						"enum": []string{version},
+					},
+				},
+			},
+			"then": condition,
+		})
+	}
+
+	baseSchema["allOf"] = apiVersionConditions
+
+	oneOf := make([]map[string]interface{}, 0, len(kindSchemas))
+
+	for kind := range kindSchemas {
+		resourceSchema := map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"kind": map[string]interface{}{
+					"enum": []string{kind},
+				},
+			},
+			"required": []string{"apiVersion", "kind", "metadata"},
+			"allOf": []map[string]interface{}{
+				{
+					"$ref": "#/definitions/" + kind,
+				},
+			},
+		}
+		oneOf = append(oneOf, resourceSchema)
+	}
+
+	baseSchema["oneOf"] = oneOf
+
+	b, err := json.MarshalIndent(baseSchema, "", "\t")
+	if err != nil {
+		return "", fmt.Errorf("marshaling schema: %w", err)
+	}
+
+	return string(b), nil
+}
+
+func enforceStrictValidation(schema map[string]interface{}) {
+	if schema["type"] == "object" {
+		// Set additionalProperties to false for all objects
+		schema["additionalProperties"] = false
+
+		// Process properties recursively
+		if props, ok := schema["properties"].(map[string]interface{}); ok {
+			for _, propSchema := range props {
+				if propMap, ok := propSchema.(map[string]interface{}); ok {
+					enforceStrictValidation(propMap)
+				}
+			}
+		}
+
+		// Process items for arrays
+		if items, ok := schema["items"].(map[string]interface{}); ok {
+			enforceStrictValidation(items)
+		}
+	}
+}
+
+func isResourceType(kind string) bool {
+	if strings.HasSuffix(kind, "List") ||
+		strings.HasSuffix(kind, "Options") ||
+		kind == "Status" ||
+		kind == "WatchEvent" ||
+		kind == "APIGroup" ||
+		kind == "APIGroupList" ||
+		kind == "APIResourceList" ||
+		kind == "APIVersions" {
+		return false
+	}
+
+	return true
+}
+
+func newInstance(t reflect.Type) interface{} {
+	if t.Kind() == reflect.Ptr {
+		return reflect.New(t.Elem()).Interface()
+	}
+
+	return reflect.New(t).Interface()
+}
+
+func WriteJSONSchema(workDir string) error {
+	schema, err := GenerateJSONSchema()
+	if err != nil {
+		return fmt.Errorf("generating schema: %w", err)
+	}
+
+	schemaPath := filepath.Join(workDir, "hhfab.schema.json")
+	if err := os.WriteFile(schemaPath, []byte(schema), 0600); err != nil {
+		return fmt.Errorf("writing schema file: %w", err)
+	}
+
+	if err := GenerateVSCodeSettings(workDir); err != nil {
+		return fmt.Errorf("generating VS Code settings: %w", err)
+	}
+
+	slog.Info("Generated JSONSchema and VS Code settings", "schema", "hhfab.schema.json", "settings", ".vscode/settings.json")
+
+	return nil
+}
+
+func GenerateVSCodeSettings(workDir string) error {
+	settingsDir := filepath.Join(workDir, ".vscode")
+	if err := os.MkdirAll(settingsDir, 0755); err != nil {
+		return fmt.Errorf("creating .vscode directory: %w", err)
+	}
+
+	settings := map[string]interface{}{
+		"yaml.schemas": map[string]interface{}{
+			"./hhfab.schema.json": []string{
+				"fab.yaml",
+				"vlab.generated.yaml",
+				"include/*.yaml",
+			},
+		},
+		"editor.insertSpaces": false,
+		"editor.tabSize":      2,
+
+		"yaml.completion":                          true,
+		"yaml.format.enable":                       true,
+		"yaml.validate":                            true,
+		"yaml.hover":                               true,
+		"yaml.schemaStore.enable":                  true,
+		"yaml.suggest.parentSkeletonSelectedFirst": true,
+	}
+
+	b, err := json.MarshalIndent(settings, "", "\t")
+	if err != nil {
+		return fmt.Errorf("marshaling settings: %w", err)
+	}
+
+	settingsPath := filepath.Join(settingsDir, "settings.json")
+	if err := os.WriteFile(settingsPath, b, 0600); err != nil {
+		return fmt.Errorf("writing settings file: %w", err)
+	}
+
+	return nil
 }

@@ -163,3 +163,7 @@ func (l *Loader) List(ctx context.Context, list client.ObjectList, opts ...clien
 
 	return nil
 }
+
+func (l *Loader) GetScheme() *runtime.Scheme {
+	return l.scheme
+}

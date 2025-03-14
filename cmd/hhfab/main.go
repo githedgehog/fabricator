@@ -583,6 +583,19 @@ func Run(ctx context.Context) error {
 				},
 			},
 			{
+				Name:   "schema",
+				Usage:  "Generate JSONSchema for Fabricator resources",
+				Flags:  defaultFlags,
+				Before: before(false),
+				Action: func(_ *cli.Context) error {
+					if err := hhfab.WriteJSONSchema(workDir); err != nil {
+						return fmt.Errorf("generating schema: %w", err)
+					}
+
+					return nil
+				},
+			},
+			{
 				Name:   "versions",
 				Usage:  "print versions of all components",
 				Flags:  append(defaultFlags, hMode),
