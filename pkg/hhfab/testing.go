@@ -1323,7 +1323,7 @@ func checkPing(ctx context.Context, opts TestConnectivityOpts, pings *semaphore.
 			return fmt.Errorf("running ping: %w: %s", err, out) // TODO replace with custom error?
 		}
 
-		return fmt.Errorf("unexpected ping result: %s", out) // TODO replace with custom error?
+		return fmt.Errorf("unexpected ping result (expected %t): %s", expected, out) // TODO replace with custom error?
 	}
 
 	if expected && !pingOk {
