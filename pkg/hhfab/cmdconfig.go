@@ -268,19 +268,89 @@ func Validate(ctx context.Context, workDir, cacheDir string, hMode HydrateMode) 
 }
 
 func Versions(ctx context.Context, workDir, cacheDir string, hMode HydrateMode) error {
+	configPath := filepath.Join(workDir, FabConfigFile)
+	if _, err := os.Stat(configPath); err != nil && errors.Is(err, os.ErrNotExist) {
+		slog.Info("No configuration found", "file", FabConfigFile, "action", "Showing release versions")
+		freshFab := fabapi.Fabricator{}
+		if err := freshFab.CalculateVersions(fab.Versions); err != nil {
+			return fmt.Errorf("calculating default versions: %w", err)
+		}
+		data, err := yaml.Marshal(freshFab.Status.Versions)
+		if err != nil {
+			return fmt.Errorf("marshalling versions: %w", err)
+		}
+		fmt.Println(string(data))
+
+		return nil
+	}
+
 	cfg, err := load(ctx, workDir, cacheDir, true, hMode)
 	if err != nil {
 		return err
 	}
 
-	slog.Info("Printing versions of all components")
-
-	data, err := yaml.Marshal(cfg.Fab.Status.Versions)
-	if err != nil {
-		return fmt.Errorf("marshalling versions: %w", err)
+	var overrides map[string]map[string]string
+	oData, err := yaml.Marshal(cfg.Fab.Spec.Overrides.Versions)
+	if err == nil {
+		if err := yaml.Unmarshal(oData, &overrides); err != nil {
+			slog.Warn("Failed to unmarshal overrides", "error", err)
+		}
+	} else {
+		slog.Warn("Failed to marshal overrides", "error", err)
 	}
 
-	fmt.Println(string(data))
+	freshFab := fabapi.Fabricator{}
+	if err := freshFab.CalculateVersions(fab.Versions); err != nil {
+		return fmt.Errorf("calculating default versions: %w", err)
+	}
+	releaseData, err := yaml.Marshal(freshFab.Status.Versions)
+	if err != nil {
+		return fmt.Errorf("marshalling release versions: %w", err)
+	}
+	var release map[string]interface{}
+	if err := yaml.Unmarshal(releaseData, &release); err != nil {
+		return fmt.Errorf("unmarshalling release versions: %w", err)
+	}
+
+	if len(overrides) == 0 {
+		slog.Info("Printing versions of all components")
+		fmt.Println(string(releaseData))
+
+		return nil
+	}
+
+	slog.Info("Printing versions of all components (overridden←→release)")
+	merged := make(map[string]interface{})
+	for category, value := range release {
+		if inner, ok := value.(map[string]interface{}); ok {
+			newInner := make(map[string]interface{})
+			if catOvr, ok := overrides[category]; ok {
+				for comp, verValue := range inner {
+					verStr, ok := verValue.(string)
+					if !ok {
+						newInner[comp] = verValue
+
+						continue
+					}
+					if ovrStr, exists := catOvr[comp]; exists {
+						newInner[comp] = fmt.Sprintf("%s←→%s", ovrStr, verStr)
+					} else {
+						newInner[comp] = verStr
+					}
+				}
+			} else {
+				newInner = inner
+			}
+			merged[category] = newInner
+		} else {
+			merged[category] = value
+		}
+	}
+	mergedData, err := yaml.Marshal(merged)
+	if err != nil {
+		return fmt.Errorf("marshalling merged versions: %w", err)
+	}
+	fmt.Println(string(mergedData))
 
 	return nil
 }

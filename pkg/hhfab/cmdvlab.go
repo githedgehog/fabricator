@@ -44,7 +44,8 @@ func VLABGenerate(ctx context.Context, workDir, cacheDir string, builder VLABBui
 		return fmt.Errorf("writing wiring file: %w", err)
 	}
 
-	slog.Info("Generated wiring file", "name", target)
+	relName := filepath.Join(IncludeDir, target)
+	slog.Info("Generated wiring file", "name", relName)
 
 	files, err := os.ReadDir(includeDir)
 	if err != nil {
