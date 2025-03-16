@@ -201,7 +201,7 @@ jobs:
           fi
 
   vlab:
-    runs-on: vlab
+    runs-on: vlab-h
     needs:
       - test
       - builds
@@ -302,7 +302,7 @@ jobs:
           limit-access-to-actor: true
 
   vlab-upgrade:
-    runs-on: vlab
+    runs-on: vlab-h
     needs:
       - test
       - builds
