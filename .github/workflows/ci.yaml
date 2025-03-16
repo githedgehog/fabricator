@@ -38,7 +38,7 @@ on:
 
 jobs:
   test:
-    runs-on: lab
+    runs-on: lab-h
 
     steps:
       - name: Checkout repository
@@ -161,7 +161,7 @@ jobs:
           limit-access-to-actor: true
 
   build-multi:
-    runs-on: lab
+    runs-on: lab-h
     timeout-minutes: 15
 
     steps:
@@ -575,7 +575,7 @@ jobs:
           files: "artifacts/**/release-test.xml"
 
   publish-release:
-    runs-on: lab
+    runs-on: lab-h
     if: startsWith(github.event.ref, 'refs/tags/v') && github.event_name == 'push'
     needs:
       - build
@@ -628,7 +628,7 @@ jobs:
           limit-access-to-actor: true
 
   publish-master:
-    runs-on: lab
+    runs-on: lab-h
     if: github.event.ref == 'refs/heads/master' && github.event_name == 'push'
     needs:
       - build
