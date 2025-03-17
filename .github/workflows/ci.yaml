@@ -19,6 +19,11 @@ on:
     - cron: "0 10 * * *" # ~2am PST
   workflow_dispatch:
     inputs:
+      run_release_test:
+        type: boolean
+        description: "Run release tests in vlab/hlab"
+        required: false
+        default: false
       debug_enabled:
         type: boolean
         description: "Run the build with tmate debugging enabled (https://github.com/marketplace/actions/debugging-with-tmate)"
@@ -200,9 +205,6 @@ jobs:
     needs:
       - test
       - builds
-    env:
-      slug: "${{ matrix.fabricmode }}-${{ matrix.includeonie }}-${{ matrix.buildmode }}"
-      RunReleaseTest: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'release-test') }}
     timeout-minutes: 120
 
     strategy:
@@ -226,6 +228,12 @@ jobs:
           - fabricmode: spine-leaf
             includeonie: true
             buildmode: iso
+
+    env:
+      slug: "${{ matrix.fabricmode }}-${{ matrix.includeonie }}-${{ matrix.buildmode }}"
+
+      # TODO enable for scheduled (github.event_name == 'schedule'), master and release branches?
+      run_release_test: ${{ inputs.run_release_test || contains(github.event.pull_request.labels.*.name, 'release-test') }}
 
     steps:
       - name: Runner host
@@ -255,7 +263,7 @@ jobs:
         env:
           HHFAB_REG_REPO: 127.0.0.1:30000
           HHFAB_VLAB_COLLECT: true
-        if: ${{ env.RunReleaseTest }}
+        if: ${{ env.run_release_test }}
         run: |
           bin/hhfab init -v --dev -m ${{ matrix.fabricmode }} --include-onie=${{ matrix.includeonie }}
           bin/hhfab vlab gen -v
@@ -266,7 +274,7 @@ jobs:
         env:
           HHFAB_REG_REPO: 127.0.0.1:30000
           HHFAB_VLAB_COLLECT: true
-        if: ${{ !env.RunReleaseTest }}
+        if: ${{ !env.run_release_test }}
         run: |
           bin/hhfab init -v --dev -m ${{ matrix.fabricmode }} --include-onie=${{ matrix.includeonie }}
           bin/hhfab vlab gen -v
@@ -420,13 +428,10 @@ jobs:
 
   hlab:
     runs-on: hlab
-    timeout-minutes: 210
-    env:
-      slug: "${{ matrix.fabricmode }}-${{ matrix.includeonie }}-${{ matrix.buildmode }}"
-      RunReleaseTest: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'release-test') }}
     needs:
       - test
       - builds
+    timeout-minutes: 210
 
     strategy:
       fail-fast: false
@@ -435,6 +440,12 @@ jobs:
           - fabricmode: spine-leaf
             includeonie: true
             buildmode: iso
+
+    env:
+      slug: "${{ matrix.fabricmode }}-${{ matrix.includeonie }}-${{ matrix.buildmode }}"
+
+      # TODO enable for scheduled (github.event_name == 'schedule'), master and release branches?
+      run_release_test: ${{ inputs.run_release_test || contains(github.event.pull_request.labels.*.name, 'release-test') }}
 
     steps:
       - name: Runner host
@@ -470,7 +481,7 @@ jobs:
         env:
           HHFAB_REG_REPO: 127.0.0.1:30000
           HHFAB_VLAB_COLLECT: true
-        if: ${{ env.RunReleaseTest }}
+        if: ${{ env.run_release_test }}
         run: |
           source "./lab-ci/envs/$KUBE_NODE/source.sh"
           bin/hhfab init -v --dev --include-onie=${{ matrix.includeonie }} -w "./lab-ci/envs/$KUBE_NODE/wiring.yaml"
@@ -479,7 +490,7 @@ jobs:
 
       - name: Publish Test Results
         uses: EnricoMi/publish-unit-test-result-action@v2
-        if: ${{ env.RunReleaseTest && !cancelled()}}
+        if: ${{ env.run_release_test && !cancelled()}}
         with:
           files: release-test.xml
 
@@ -487,7 +498,7 @@ jobs:
         env:
           HHFAB_REG_REPO: 127.0.0.1:30000
           HHFAB_VLAB_COLLECT: true
-        if: ${{ !env.RunReleaseTest }}
+        if: ${{ !env.run_release_test }}
         run: |
           source "./lab-ci/envs/$KUBE_NODE/source.sh"
           bin/hhfab init -v --dev --include-onie=${{ matrix.includeonie }} -w "./lab-ci/envs/$KUBE_NODE/wiring.yaml"
