@@ -419,8 +419,8 @@ github.com/cert-manager/cert-manager/pkg/apis/meta/v1
 # github.com/cespare/xxhash/v2 v2.3.0
 ## explicit; go 1.11
 github.com/cespare/xxhash/v2
-# github.com/charmbracelet/keygen v0.5.1
-## explicit; go 1.17
+# github.com/charmbracelet/keygen v0.5.3
+## explicit; go 1.23.0
 github.com/charmbracelet/keygen
 # github.com/chzyer/readline v1.5.1
 ## explicit; go 1.15
