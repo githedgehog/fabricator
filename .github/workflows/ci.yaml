@@ -40,7 +40,7 @@ jobs:
           cache: true
 
       - name: Setup Just
-        uses: extractions/setup-just@v2
+        uses: extractions/setup-just@v3
 
       - name: Lint and generate code
         run: |
@@ -94,7 +94,7 @@ jobs:
           cache: true
 
       - name: Setup Just
-        uses: extractions/setup-just@v2
+        uses: extractions/setup-just@v3
 
       - name: Setup docker on MacOS
         if: matrix.os == 'macos-latest'
@@ -166,7 +166,7 @@ jobs:
           cache: true
 
       - name: Setup Just
-        uses: extractions/setup-just@v2
+        uses: extractions/setup-just@v3
 
       - name: Build bins for all OS/ARCH
         run: |
