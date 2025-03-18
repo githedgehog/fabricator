@@ -17,6 +17,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/lmittmann/tint"
 	"github.com/mattn/go-isatty"
+	"github.com/samber/lo"
 	slogmulti "github.com/samber/slog-multi"
 	"github.com/urfave/cli/v2"
 	"go.githedgehog.com/fabric/api/meta"
@@ -55,6 +56,8 @@ const (
 	FlagNameServersRestricted     = "servers-restricted"
 	FlagNameReCreate              = "recreate"
 	FlagNameBuildMode             = "build-mode"
+	FlagNameBuildControls         = "build-controls"
+	FlagNameBuildGateways         = "build-gateways"
 	FlagNameControlUpgrade        = "control-upgrade"
 	FlagNameFailFast              = "fail-fast"
 	FlagNameReady                 = "ready"
@@ -150,12 +153,14 @@ func Run(ctx context.Context) error {
 	}
 
 	var hydrateMode string
-	hMode := &cli.StringFlag{
-		Name:        "hydrate-mode",
-		Aliases:     []string{"hm"},
-		Usage:       "set hydrate mode: one of " + strings.Join(hydrateModes, ", "),
-		Value:       string(hhfab.HydrateModeIfNotPresent),
-		Destination: &hydrateMode,
+	hModeFlags := []cli.Flag{
+		&cli.StringFlag{
+			Name:        "hydrate-mode",
+			Aliases:     []string{"hm"},
+			Usage:       "set hydrate mode: one of " + strings.Join(hydrateModes, ", "),
+			Value:       string(hhfab.HydrateModeIfNotPresent),
+			Destination: &hydrateMode,
+		},
 	}
 
 	var wgSpinesCount, wgFabricLinksCount, wgMCLAGLeafsCount, wgOrphanLeafsCount, wgMCLAGSessionLinks, wgMCLAGPeerLinks, wgVPCLoopbacks uint
@@ -243,11 +248,13 @@ func Run(ctx context.Context) error {
 	}
 
 	var accessName string
-	accessNameFlag := &cli.StringFlag{
-		Name:        "name",
-		Aliases:     []string{"n"},
-		Usage:       "name of the VM or HW to access",
-		Destination: &accessName,
+	accessNameFlags := []cli.Flag{
+		&cli.StringFlag{
+			Name:        "name",
+			Aliases:     []string{"n"},
+			Usage:       "name of the VM or HW to access",
+			Destination: &accessName,
+		},
 	}
 
 	before := func(quiet bool) cli.BeforeFunc {
@@ -357,6 +364,16 @@ func Run(ctx context.Context) error {
 		diagramStyleTypes = append(diagramStyleTypes, string(s))
 	}
 
+	buildModeFlags := []cli.Flag{
+		&cli.StringFlag{
+			Name:    FlagNameBuildMode,
+			Aliases: []string{"mode", "m"},
+			Usage:   "build mode: one of " + strings.Join(buildModes, ", "),
+			EnvVars: []string{"HHFAB_BUILD_MODE"},
+			Value:   string(recipe.BuildModeISO),
+		},
+	}
+
 	cli.VersionFlag.(*cli.BoolFlag).Aliases = []string{"V"}
 	app := &cli.App{
 		Name:  "hhfab",
@@ -377,7 +394,7 @@ func Run(ctx context.Context) error {
 			{
 				Name:  "init",
 				Usage: "initializes working dir (current dir by default) with a new fab.yaml and other files",
-				Flags: append(defaultFlags,
+				Flags: flatten(defaultFlags, []cli.Flag{
 					&cli.StringFlag{
 						Name:    FlagNameRegistryRepo,
 						Usage:   "download artifacts from `REPO`",
@@ -478,7 +495,7 @@ func Run(ctx context.Context) error {
 						Usage:    "[PREVIEW] add and enable gateway node",
 						EnvVars:  []string{"HHFAB_GATEWAY"},
 					},
-				),
+				}),
 				Before: before(false),
 				Action: func(c *cli.Context) error {
 					if err := hhfab.Init(ctx, hhfab.InitConfig{
@@ -510,7 +527,7 @@ func Run(ctx context.Context) error {
 			{
 				Name:   "validate",
 				Usage:  "validate config and wiring files",
-				Flags:  append(defaultFlags, hMode),
+				Flags:  flatten(defaultFlags, hModeFlags),
 				Before: before(false),
 				Action: func(_ *cli.Context) error {
 					if err := hhfab.Validate(ctx, workDir, cacheDir, hhfab.HydrateMode(hydrateMode)); err != nil {
@@ -547,7 +564,7 @@ func Run(ctx context.Context) error {
 
 			   # Generate draw.io diagram with custom style
 			   hhfab diagram --format drawio --style hedgehog`),
-				Flags: append(defaultFlags,
+				Flags: flatten(defaultFlags, []cli.Flag{
 					&cli.StringFlag{
 						Name:    "format",
 						Aliases: []string{"f"},
@@ -575,7 +592,7 @@ func Run(ctx context.Context) error {
 							return nil
 						},
 					},
-				),
+				}),
 				Before: before(false),
 				Action: func(c *cli.Context) error {
 					format := strings.ToLower(c.String("format"))
@@ -590,7 +607,7 @@ func Run(ctx context.Context) error {
 			{
 				Name:   "versions",
 				Usage:  "print versions of all components",
-				Flags:  append(defaultFlags, hMode),
+				Flags:  flatten(defaultFlags, hModeFlags),
 				Before: before(false),
 				Action: func(_ *cli.Context) error {
 					if err := hhfab.Versions(ctx, workDir, cacheDir, hhfab.HydrateMode(hydrateMode)); err != nil {
@@ -603,20 +620,28 @@ func Run(ctx context.Context) error {
 			{
 				Name:  "build",
 				Usage: "build installers",
-				Flags: append(defaultFlags, hMode,
-					&cli.StringFlag{
-						Name:    FlagNameBuildMode,
-						Aliases: []string{"mode", "m"},
-						Usage:   "build mode: one of " + strings.Join(buildModes, ", "),
-						EnvVars: []string{"HHFAB_BUILD_MODE"},
-						Value:   string(recipe.BuildModeISO),
+				Flags: flatten(defaultFlags, hModeFlags, buildModeFlags, []cli.Flag{
+					&cli.BoolFlag{
+						Name:    FlagNameBuildControls,
+						Aliases: []string{"controls"},
+						Usage:   "build control node(s)",
+						Value:   true,
 					},
-				),
+					&cli.BoolFlag{
+						Name:    FlagNameBuildGateways,
+						Aliases: []string{"gateways"},
+						Usage:   "[PREVIEW] build gateway node(s)",
+						Hidden:  !preview,
+						Value:   true,
+					},
+				}),
 				Before: before(false),
 				Action: func(c *cli.Context) error {
 					if err := hhfab.Build(ctx, workDir, cacheDir, hhfab.BuildOpts{
-						HydrateMode: hhfab.HydrateMode(hydrateMode),
-						BuildMode:   recipe.BuildMode(c.String(FlagNameBuildMode)),
+						HydrateMode:   hhfab.HydrateMode(hydrateMode),
+						BuildMode:     recipe.BuildMode(c.String(FlagNameBuildMode)),
+						BuildControls: c.Bool(FlagNameBuildControls),
+						BuildGateways: c.Bool(FlagNameBuildGateways),
 					}); err != nil {
 						return fmt.Errorf("building: %w", err)
 					}
@@ -632,7 +657,7 @@ func Run(ctx context.Context) error {
 						Name:    "generate",
 						Aliases: []string{"gen"},
 						Usage:   "generate VLAB wiring diagram",
-						Flags:   append(defaultFlags, vlabWiringGenFlags...),
+						Flags:   flatten(defaultFlags, vlabWiringGenFlags),
 						Before:  before(false),
 						Action: func(_ *cli.Context) error {
 							builder := hhfab.VLABBuilder{
@@ -662,7 +687,7 @@ func Run(ctx context.Context) error {
 					{
 						Name:  "up",
 						Usage: "run VLAB",
-						Flags: append(defaultFlags, hMode,
+						Flags: flatten(defaultFlags, hModeFlags, buildModeFlags, []cli.Flag{
 							&cli.BoolFlag{
 								Name:    FlagNameReCreate,
 								Aliases: []string{"f"},
@@ -685,13 +710,6 @@ func Run(ctx context.Context) error {
 								Usage:   "restrict server nodes from having access to the host (effectively access to internet)",
 								EnvVars: []string{"HHFAB_SERVERS_RESTRICTED"},
 								Value:   true,
-							},
-							&cli.StringFlag{
-								Name:    FlagNameBuildMode,
-								Aliases: []string{"mode", "m"},
-								Usage:   "build mode: one of " + strings.Join(buildModes, ", "),
-								EnvVars: []string{"HHFAB_BUILD_MODE"},
-								Value:   string(recipe.BuildModeISO),
 							},
 							&cli.BoolFlag{
 								Name:    FlagNameControlUpgrade,
@@ -716,7 +734,7 @@ func Run(ctx context.Context) error {
 								Usage:   "collect show-tech from all devices at exit or error",
 								EnvVars: []string{"HHFAB_VLAB_COLLECT"},
 							},
-						),
+						}),
 						Before: before(false),
 						Action: func(c *cli.Context) error {
 							if err := hhfab.VLABUp(ctx, workDir, cacheDir, hhfab.VLABUpOpts{
@@ -743,7 +761,7 @@ func Run(ctx context.Context) error {
 					{
 						Name:   "ssh",
 						Usage:  "ssh to a VLAB VM or HW if supported",
-						Flags:  append(defaultFlags, accessNameFlag),
+						Flags:  flatten(defaultFlags, accessNameFlags),
 						Before: before(false),
 						Action: func(c *cli.Context) error {
 							if err := hhfab.DoVLABSSH(ctx, workDir, cacheDir, accessName, c.Args().Slice()); err != nil {
@@ -756,7 +774,7 @@ func Run(ctx context.Context) error {
 					{
 						Name:   "serial",
 						Usage:  "get serial console of a VLAB VM or HW if supported",
-						Flags:  append(defaultFlags, accessNameFlag),
+						Flags:  flatten(defaultFlags, accessNameFlags),
 						Before: before(false),
 						Action: func(c *cli.Context) error {
 							if err := hhfab.DoVLABSerial(ctx, workDir, cacheDir, accessName, c.Args().Slice()); err != nil {
@@ -769,7 +787,7 @@ func Run(ctx context.Context) error {
 					{
 						Name:   "seriallog",
 						Usage:  "get serial console log of a VLAB VM or HW if supported",
-						Flags:  append(defaultFlags, accessNameFlag),
+						Flags:  flatten(defaultFlags, accessNameFlags),
 						Before: before(false),
 						Action: func(c *cli.Context) error {
 							if err := hhfab.DoVLABSerialLog(ctx, workDir, cacheDir, accessName, c.Args().Slice()); err != nil {
@@ -796,7 +814,7 @@ func Run(ctx context.Context) error {
 						Name:    "setup-vpcs",
 						Aliases: []string{"vpcs"},
 						Usage:   "setup VPCs and VPCAttachments for all servers and configure networking on them",
-						Flags: append(defaultFlags, accessNameFlag,
+						Flags: flatten(defaultFlags, accessNameFlags, []cli.Flag{
 							&cli.BoolFlag{
 								Name:    "wait-switches-ready",
 								Aliases: []string{"wait"},
@@ -845,7 +863,7 @@ func Run(ctx context.Context) error {
 								Aliases: []string{"mtu"},
 								Usage:   "interface MTU for VPCs advertised by DHCP",
 							},
-						),
+						}),
 						Before: before(false),
 						Action: func(c *cli.Context) error {
 							if err := hhfab.DoVLABSetupVPCs(ctx, workDir, cacheDir, hhfab.SetupVPCsOpts{
@@ -901,14 +919,14 @@ func Run(ctx context.Context) error {
 							1~as5835:subnets=default,other:prefixes=0.0.0.0/0_le32_ge32,22.22.22.0/24 -- same but with more details
 							1~as5835:s=default,other:p=0.0.0.0/0_le32_ge32,22.22.22.0/24 -- same as above
 						`, "							", "")),
-						Flags: append(defaultFlags, accessNameFlag,
+						Flags: flatten(defaultFlags, accessNameFlags, []cli.Flag{
 							&cli.BoolFlag{
 								Name:    "wait-switches-ready",
 								Aliases: []string{"wait"},
 								Usage:   "wait for switches to be ready before and after configuring peerings",
 								Value:   true,
 							},
-						),
+						}),
 						Before: before(false),
 						Action: func(c *cli.Context) error {
 							if err := hhfab.DoVLABSetupPeerings(ctx, workDir, cacheDir, hhfab.SetupPeeringsOpts{
@@ -925,7 +943,7 @@ func Run(ctx context.Context) error {
 						Name:    "test-connectivity",
 						Aliases: []string{"conns"},
 						Usage:   "test connectivity between servers",
-						Flags: append(defaultFlags, accessNameFlag,
+						Flags: flatten(defaultFlags, accessNameFlags, []cli.Flag{
 							&cli.BoolFlag{
 								Name:    "wait-switches-ready",
 								Aliases: []string{"wait"},
@@ -962,7 +980,7 @@ func Run(ctx context.Context) error {
 								Aliases: []string{"dst"},
 								Usage:   "server to use as destination for connectivity tests (default: all servers)",
 							},
-						),
+						}),
 						Before: before(false),
 						Action: func(c *cli.Context) error {
 							if err := hhfab.DoVLABTestConnectivity(ctx, workDir, cacheDir, hhfab.TestConnectivityOpts{
@@ -998,7 +1016,7 @@ func Run(ctx context.Context) error {
 						Name:    "inspect-switches",
 						Aliases: []string{"inspect"},
 						Usage:   "wait for ready and inspect all switches",
-						Flags: append([]cli.Flag{
+						Flags: flatten(defaultFlags, []cli.Flag{
 							&cli.IntFlag{
 								Name:    "wait-applied-for",
 								Aliases: []string{"wait", "w"},
@@ -1010,8 +1028,7 @@ func Run(ctx context.Context) error {
 								Usage: "fail if any switch is not ready or not inspected",
 								Value: true,
 							},
-						},
-							defaultFlags...),
+						}),
 						Before: before(false),
 						Action: func(c *cli.Context) error {
 							if err := hhfab.DoVLABInspect(ctx, workDir, cacheDir, hhfab.InspectOpts{
@@ -1027,7 +1044,7 @@ func Run(ctx context.Context) error {
 					{
 						Name:  "release-test",
 						Usage: "run release tests on current VLAB instance",
-						Flags: append(defaultFlags,
+						Flags: flatten(defaultFlags, []cli.Flag{
 							&cli.StringSliceFlag{
 								Name:    FlagRegEx,
 								Aliases: []string{"r"},
@@ -1057,7 +1074,7 @@ func Run(ctx context.Context) error {
 								Aliases: []string{"p"},
 								Usage:   "pause testing on each scenario failure (for troubleshooting)",
 							},
-						),
+						}),
 						Before: before(false),
 						Action: func(c *cli.Context) error {
 							opts := hhfab.ReleaseTestOpts{
@@ -1078,12 +1095,12 @@ func Run(ctx context.Context) error {
 					{
 						Name:  "switch",
 						Usage: "manage switch reinstall or power",
-						Flags: append(defaultFlags, accessNameFlag),
+						Flags: flatten(defaultFlags, accessNameFlags),
 						Subcommands: []*cli.Command{
 							{
 								Name:  "reinstall",
 								Usage: "reboot/reset and reinstall NOS on switches (if no switches specified, all switches will be reinstalled)",
-								Flags: append([]cli.Flag{
+								Flags: flatten(pduFlags, []cli.Flag{
 									&cli.StringSliceFlag{
 										Name:    "name",
 										Aliases: []string{"n"},
@@ -1112,7 +1129,7 @@ func Run(ctx context.Context) error {
 									},
 									verboseFlag,
 									yesFlag,
-								}, pduFlags...),
+								}),
 								Before: before(false),
 								Action: func(c *cli.Context) error {
 									mode := c.String("mode")
@@ -1173,7 +1190,7 @@ func Run(ctx context.Context) error {
 							{
 								Name:  "power",
 								Usage: "manage switch power state using the PDU (if no switches specified, all switches will be affected)",
-								Flags: append([]cli.Flag{
+								Flags: flatten(pduFlags, []cli.Flag{
 									&cli.StringSliceFlag{
 										Name:    "name",
 										Aliases: []string{"n"},
@@ -1187,7 +1204,7 @@ func Run(ctx context.Context) error {
 									},
 									verboseFlag,
 									yesFlag,
-								}, pduFlags...),
+								}),
 								Before: before(false),
 								Action: func(c *cli.Context) error {
 									action := strings.ToLower(c.String("action"))
@@ -1225,7 +1242,7 @@ func Run(ctx context.Context) error {
 					{
 						Name:  "setup-taps",
 						Usage: "setup tap devices and a bridge for VLAB",
-						Flags: append(defaultFlags,
+						Flags: flatten(defaultFlags, []cli.Flag{
 							&cli.IntFlag{
 								Name:     FlagNameCount,
 								Usage:    "number of tap devices to prepare (or cleanup if count is 0)",
@@ -1242,7 +1259,7 @@ func Run(ctx context.Context) error {
 									return nil
 								},
 							},
-						),
+						}),
 						Before: before(true),
 						Action: func(c *cli.Context) error {
 							if err := hhfab.PrepareTaps(ctx, c.Int(FlagNameCount)); err != nil {
@@ -1284,4 +1301,8 @@ func Run(ctx context.Context) error {
 	}
 
 	return app.Run(os.Args) //nolint:wrapcheck
+}
+
+func flatten[T any, Slice ~[]T](collection ...Slice) Slice {
+	return lo.Flatten(collection)
 }
