@@ -14,8 +14,10 @@ import (
 )
 
 type BuildOpts struct {
-	HydrateMode HydrateMode
-	BuildMode   recipe.BuildMode
+	HydrateMode   HydrateMode
+	BuildMode     recipe.BuildMode
+	BuildControls bool
+	BuildGateways bool
 	// JoinToken   string // TODO to use specific k3s join token
 }
 
