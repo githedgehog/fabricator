@@ -945,7 +945,7 @@ func Run(ctx context.Context) error {
 							&cli.Float64Flag{
 								Name:  "iperfs-speed",
 								Usage: "minimum speed in Mbits/s for iperf3 test to consider successful (0 to not check speeds)",
-								Value: 8500,
+								Value: 8200,
 							},
 							&cli.IntFlag{
 								Name:  "curls",

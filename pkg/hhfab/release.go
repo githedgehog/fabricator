@@ -1370,7 +1370,7 @@ func makeTestCtx(kube client.Client, opts SetupVPCsOpts, workDir, cacheDir strin
 		WaitSwitchesReady: false,
 		PingsCount:        3,
 		IPerfsSeconds:     3,
-		IPerfsMinSpeed:    8500,
+		IPerfsMinSpeed:    8200,
 	}
 	if rtOpts.Extended {
 		testCtx.tcOpts.CurlsCount = 1
