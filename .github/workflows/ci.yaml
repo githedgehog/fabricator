@@ -233,7 +233,7 @@ jobs:
       slug: "${{ matrix.fabricmode }}-${{ matrix.includeonie }}-${{ matrix.buildmode }}"
 
       # TODO enable for scheduled (github.event_name == 'schedule'), master and release branches?
-      run_release_test: ${{ inputs.run_release_test || contains(github.event.pull_request.labels.*.name, 'release-test') }}
+      run_release_test: ${{ inputs.run_release_test == 'true' || contains(github.event.pull_request.labels.*.name, 'release-test') }}
 
     steps:
       - name: Runner host
@@ -263,7 +263,7 @@ jobs:
         env:
           HHFAB_REG_REPO: 127.0.0.1:30000
           HHFAB_VLAB_COLLECT: true
-        if: ${{ env.run_release_test }}
+        if: ${{ env.run_release_test == 'true' }}
         run: |
           bin/hhfab init -v --dev -m ${{ matrix.fabricmode }} --include-onie=${{ matrix.includeonie }}
           bin/hhfab vlab gen -v
@@ -274,7 +274,7 @@ jobs:
         env:
           HHFAB_REG_REPO: 127.0.0.1:30000
           HHFAB_VLAB_COLLECT: true
-        if: ${{ !env.run_release_test }}
+        if: ${{ env.run_release_test != 'true' }}
         run: |
           bin/hhfab init -v --dev -m ${{ matrix.fabricmode }} --include-onie=${{ matrix.includeonie }}
           bin/hhfab vlab gen -v
@@ -445,7 +445,7 @@ jobs:
       slug: "${{ matrix.fabricmode }}-${{ matrix.includeonie }}-${{ matrix.buildmode }}"
 
       # TODO enable for scheduled (github.event_name == 'schedule'), master and release branches?
-      run_release_test: ${{ inputs.run_release_test || contains(github.event.pull_request.labels.*.name, 'release-test') }}
+      run_release_test: ${{ inputs.run_release_test == 'true' || contains(github.event.pull_request.labels.*.name, 'release-test') }}
 
     steps:
       - name: Runner host
@@ -481,7 +481,7 @@ jobs:
         env:
           HHFAB_REG_REPO: 127.0.0.1:30000
           HHFAB_VLAB_COLLECT: true
-        if: ${{ env.run_release_test }}
+        if: ${{ env.run_release_test == 'true' }}
         run: |
           source "./lab-ci/envs/$KUBE_NODE/source.sh"
           bin/hhfab init -v --dev --include-onie=${{ matrix.includeonie }} -w "./lab-ci/envs/$KUBE_NODE/wiring.yaml"
@@ -490,7 +490,7 @@ jobs:
 
       - name: Publish Test Results
         uses: EnricoMi/publish-unit-test-result-action@v2
-        if: ${{ env.run_release_test && !cancelled()}}
+        if: ${{ env.run_release_test == 'true' && !cancelled()}}
         with:
           files: release-test.xml
 
@@ -498,7 +498,7 @@ jobs:
         env:
           HHFAB_REG_REPO: 127.0.0.1:30000
           HHFAB_VLAB_COLLECT: true
-        if: ${{ !env.run_release_test }}
+        if: ${{ env.run_release_test != 'true' }}
         run: |
           source "./lab-ci/envs/$KUBE_NODE/source.sh"
           bin/hhfab init -v --dev --include-onie=${{ matrix.includeonie }} -w "./lab-ci/envs/$KUBE_NODE/wiring.yaml"
