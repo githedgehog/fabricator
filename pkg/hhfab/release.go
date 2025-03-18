@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"os"
 	"os/exec"
 	"regexp"
@@ -25,6 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+var errNoServers = errors.New("no servers found")
 var errNoExternals = errors.New("no external peers found")
 var errNoMclags = errors.New("no MCLAG connections found")
 var errNoEslags = errors.New("no ESLAG connections found")
@@ -1793,11 +1795,24 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 	}
 	defer cacheCancel()
 
+	// figure how many servers per subnet we need to have a single VPC cover all of them,
+	// given a fixed number of subnets per VPC (3)
+	servers := &wiringapi.ServerList{}
+	if err := kube.List(ctx, servers); err != nil {
+		return fmt.Errorf("listing servers: %w", err)
+	}
+	if len(servers.Items) == 0 {
+		return errNoServers
+	}
+	subnetsPerVpc := 3
+	serversPerSubnet := int(math.Ceil(float64(len(servers.Items)) / float64(subnetsPerVpc)))
+	slog.Debug("Calculated servers per subnet for single VPC", "servers", len(servers.Items), "subnets-per-vpc", subnetsPerVpc, "servers-per-subnet", serversPerSubnet)
+
 	opts := SetupVPCsOpts{
 		WaitSwitchesReady: true,
 		ForceCleanup:      true,
-		ServersPerSubnet:  3,
-		SubnetsPerVPC:     3,
+		ServersPerSubnet:  serversPerSubnet,
+		SubnetsPerVPC:     subnetsPerVpc,
 		VLANNamespace:     "default",
 		IPv4Namespace:     "default",
 	}
