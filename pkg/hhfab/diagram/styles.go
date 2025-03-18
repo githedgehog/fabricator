@@ -26,6 +26,7 @@ type Style struct {
 	SpineNodeStyle     string
 	LeafNodeStyle      string
 	ServerNodeStyle    string
+	GatewayNodeStyle   string
 	FabricLinkStyle    string
 	MCLAGPeerStyle     string
 	MCLAGSessionStyle  string
@@ -33,6 +34,7 @@ type Style struct {
 	BundledServerStyle string
 	UnbundledStyle     string
 	ESLAGServerStyle   string
+	GatewayLinkStyle   string
 	BackgroundColor    string
 }
 
@@ -54,6 +56,7 @@ func getDefaultStyle() Style {
 		SpineNodeStyle:     "shape=rectangle;rounded=1;whiteSpace=wrap;html=1;fontSize=11;fillColor=#f8cecc;strokeColor=#b85450;",
 		LeafNodeStyle:      "shape=rectangle;rounded=1;whiteSpace=wrap;html=1;fontSize=11;fillColor=#dae8fc;strokeColor=#6c8ebf;",
 		ServerNodeStyle:    "shape=rectangle;rounded=0;whiteSpace=wrap;html=1;fontSize=11;fillColor=#d5e8d4;strokeColor=#82b366;",
+		GatewayNodeStyle:   "shape=rectangle;rounded=1;whiteSpace=wrap;html=1;fontSize=11;fillColor=#fff2cc;strokeColor=#d6b656;",
 		FabricLinkStyle:    "endArrow=none;html=1;strokeWidth=3;strokeColor=#b85450;",
 		MCLAGPeerStyle:     "endArrow=none;html=1;strokeWidth=2;strokeColor=#2f5597;dashed=1;",
 		MCLAGSessionStyle:  "endArrow=none;html=1;strokeWidth=2;strokeColor=#4472c4;dashed=1;",
@@ -61,13 +64,13 @@ func getDefaultStyle() Style {
 		BundledServerStyle: "endArrow=none;html=1;strokeWidth=2;strokeColor=#82b366;",
 		UnbundledStyle:     "endArrow=none;html=1;strokeWidth=2;strokeColor=#666666;",
 		ESLAGServerStyle:   "endArrow=none;html=1;strokeWidth=2;strokeColor=#d79b00;dashed=1;",
+		GatewayLinkStyle:   "endArrow=none;html=1;strokeWidth=2;strokeColor=#d6b656;",
 		BackgroundColor:    "",
 	}
 }
 
 func getCiscoStyle() Style {
 	return Style{
-		// For Cisco switches: fill is white, stroke is the original switch color.
 		SpineNodeStyle: "shape=mxgraph.cisco19.rect;prIcon=nexus_9300;html=1;" +
 			"fillColor=#ffffff;strokeColor=#00589C;strokeWidth=2;" +
 			"fontColor=#000000;fontSize=11;" +
@@ -76,12 +79,15 @@ func getCiscoStyle() Style {
 			"fillColor=#ffffff;strokeColor=#00589C;strokeWidth=2;" +
 			"fontColor=#000000;fontSize=11;" +
 			"align=center;verticalLabelPosition=middle;verticalAlign=middle;",
-		// For Cisco servers: white fill, gray stroke, and internal labels at bottom right
 		ServerNodeStyle: "shape=mxgraph.cisco19.rect;prIcon=ucs_c_series_server;html=1;" +
 			"fillColor=#ffffff;strokeColor=#999999;strokeWidth=2;" +
 			"fontColor=#000000;fontSize=11;" +
 			"align=right;verticalAlign=bottom;spacingRight=8;spacingBottom=8;",
-
+		GatewayNodeStyle: "shape=mxgraph.cisco19.rect;prIcon=asr_1000;html=1;" +
+			"fillColor=#ffffff;strokeColor=#005073;strokeWidth=2;" +
+			"fontColor=#000000;fontSize=11;" +
+			"align=center;verticalLabelPosition=middle;verticalAlign=middle;" +
+			"perimeter=hexagonPerimeter;",
 		FabricLinkStyle:    "endArrow=none;html=1;strokeWidth=3;strokeColor=#00589C;",
 		MCLAGPeerStyle:     "endArrow=none;html=1;strokeWidth=2;strokeColor=#2f5597;dashed=1;",
 		MCLAGSessionStyle:  "endArrow=none;html=1;strokeWidth=2;strokeColor=#4472c4;dashed=1;",
@@ -89,6 +95,7 @@ func getCiscoStyle() Style {
 		BundledServerStyle: "endArrow=none;html=1;strokeWidth=2;strokeColor=#82b366;",
 		UnbundledStyle:     "endArrow=none;html=1;strokeWidth=2;strokeColor=#666666;",
 		ESLAGServerStyle:   "endArrow=none;html=1;strokeWidth=2;strokeColor=#d79b00;dashed=1;",
+		GatewayLinkStyle:   "endArrow=none;html=1;strokeWidth=2;strokeColor=#005073;",
 		BackgroundColor:    "#ffffff",
 	}
 }
@@ -102,28 +109,28 @@ func getHedgehogStyle() Style {
 			"fillColor=#FFFFFF;strokeColor=" + sandBrown + ";strokeWidth=2;" +
 			"fontColor=#000000;fontSize=11;" +
 			"align=center;verticalLabelPosition=middle;verticalAlign=middle;",
-
 		LeafNodeStyle: "shape=mxgraph.cisco19.rect;prIcon=nexus_9300;html=1;" +
 			"fillColor=#FFFFFF;strokeColor=" + sandBrown + ";strokeWidth=2;" +
 			"fontColor=#000000;fontSize=11;" +
 			"align=center;verticalLabelPosition=middle;verticalAlign=middle;",
-
 		ServerNodeStyle: "shape=mxgraph.cisco19.rect;prIcon=ucs_c_series_server;html=1;" +
 			"fillColor=#FFFFFF;strokeColor=#999999;strokeWidth=2;" +
 			"fontColor=#000000;fontSize=11;" +
 			"align=right;verticalAlign=bottom;spacingRight=8;spacingBottom=8;",
-
-		FabricLinkStyle: "endArrow=none;html=1;strokeWidth=3;strokeColor=" + darkBrown + ";",
-
-		MCLAGPeerStyle:    "endArrow=none;html=1;strokeWidth=2;strokeColor=#8D6E63;dashed=1;",
-		MCLAGSessionStyle: "endArrow=none;html=1;strokeWidth=2;strokeColor=#A1887F;dashed=1;",
-		MCLAGServerStyle:  "endArrow=none;html=1;strokeWidth=2;strokeColor=#BCAAA4;dashed=1;",
-
+		GatewayNodeStyle: "shape=mxgraph.cisco19.rect;prIcon=asr_1000;html=1;" +
+			"fillColor=#FAFAFA;strokeColor=" + sandBrown + ";" +
+			"fontColor=#000000;fontSize=11;" +
+			"align=center;verticalLabelPosition=middle;verticalAlign=middle;" +
+			"perimeter=hexagonPerimeter;",
+		FabricLinkStyle:    "endArrow=none;html=1;strokeWidth=3;strokeColor=" + darkBrown + ";",
+		MCLAGPeerStyle:     "endArrow=none;html=1;strokeWidth=2;strokeColor=#8D6E63;dashed=1;",
+		MCLAGSessionStyle:  "endArrow=none;html=1;strokeWidth=2;strokeColor=#A1887F;dashed=1;",
+		MCLAGServerStyle:   "endArrow=none;html=1;strokeWidth=2;strokeColor=#BCAAA4;dashed=1;",
 		BundledServerStyle: "endArrow=none;html=1;strokeWidth=2;strokeColor=#82b366;",
 		UnbundledStyle:     "endArrow=none;html=1;strokeWidth=2;strokeColor=#666666;",
 		ESLAGServerStyle:   "endArrow=none;html=1;strokeWidth=2;strokeColor=#d79b00;dashed=1;",
-
-		BackgroundColor: "#FFFFFF",
+		GatewayLinkStyle:   "endArrow=none;html=1;strokeWidth=2;strokeColor=" + darkBrown + ";dashed=1;",
+		BackgroundColor:    "#FFFFFF",
 	}
 }
 
@@ -145,6 +152,8 @@ func GetNodeStyleFromTheme(node Node, style Style) string {
 		return style.LeafNodeStyle
 	case NodeTypeServer:
 		return style.ServerNodeStyle
+	case NodeTypeGateway:
+		return style.GatewayNodeStyle
 	default:
 		return style.LeafNodeStyle
 	}
@@ -174,6 +183,8 @@ func GetLinkStyleFromTheme(link Link, style Style) string {
 		return ExtractStyleParameters(style.UnbundledStyle)
 	case EdgeTypeESLAG:
 		return ExtractStyleParameters(style.ESLAGServerStyle)
+	case EdgeTypeGateway:
+		return ExtractStyleParameters(style.GatewayLinkStyle)
 	default:
 		return baseStyle + "strokeColor=#000000;strokeWidth=2;"
 	}
@@ -184,6 +195,8 @@ func GetNodeDimensions(node Node) (int, int) {
 		return 100, 90
 	} else if node.Type == NodeTypeServer {
 		return 100, 60
+	} else if node.Type == NodeTypeGateway {
+		return 100, 90
 	}
 
 	return 100, 100
@@ -220,4 +233,13 @@ func FormatNodeValue(node Node, style Style) string {
 	}
 
 	return node.Label
+}
+
+func IsIconBasedStyle(style Style) bool {
+	return strings.Contains(style.GatewayNodeStyle, "mxgraph.cisco19") ||
+		strings.Contains(style.GatewayNodeStyle, "shape=mxgraph")
+}
+
+func GetGatewayLabelStyle() string {
+	return "rounded=0;whiteSpace=wrap;html=1;strokeColor=none;fontSize=9;"
 }

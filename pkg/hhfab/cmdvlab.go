@@ -5,7 +5,6 @@ package hhfab
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -13,7 +12,6 @@ import (
 	"strings"
 
 	"go.githedgehog.com/fabricator/pkg/fab/recipe"
-	"go.githedgehog.com/fabricator/pkg/hhfab/diagram"
 	"go.githedgehog.com/fabricator/pkg/hhfab/pdu"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 )
@@ -249,81 +247,4 @@ func DoSwitchReinstall(ctx context.Context, workDir, cacheDir string, opts Switc
 	}
 
 	return c.VLABSwitchReinstall(ctx, opts)
-}
-
-func Diagram(workDir, format string, styleType diagram.StyleType) error {
-	includeDir := filepath.Join(workDir, IncludeDir)
-
-	files, err := os.ReadDir(includeDir)
-	if err != nil {
-		return fmt.Errorf("reading include directory: %w", err)
-	}
-
-	var yamlFiles []string
-	for _, file := range files {
-		if !file.IsDir() && strings.HasSuffix(file.Name(), YAMLExt) {
-			yamlPath := filepath.Join(includeDir, file.Name())
-			yamlFiles = append(yamlFiles, yamlPath)
-			slog.Debug("Found YAML file", "path", yamlPath)
-		}
-	}
-
-	if len(yamlFiles) == 0 {
-		return fmt.Errorf("no YAML files found in include directory") //nolint:goerr113
-	}
-
-	var content []byte
-	for _, file := range yamlFiles {
-		fileContent, err := os.ReadFile(file)
-		if err != nil {
-			return fmt.Errorf("reading file %s: %w", file, err)
-		}
-		if len(content) > 0 {
-			content = append(content, []byte("\n---\n")...)
-		}
-		content = append(content, fileContent...)
-	}
-
-	loader := apiutil.NewWiringLoader()
-	objs, err := loader.Load(content)
-	if err != nil {
-		return fmt.Errorf("loading wiring YAML: %w", err)
-	}
-
-	jsonData, err := json.MarshalIndent(objs, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshaling JSON: %w", err)
-	}
-
-	format = strings.ToLower(format)
-	switch format {
-	case "drawio":
-		slog.Debug("Generating draw.io diagram", "style", styleType)
-		if err := diagram.GenerateDrawio(workDir, jsonData, styleType); err != nil {
-			return fmt.Errorf("generating draw.io diagram: %w", err)
-		}
-		filePath := filepath.Join(workDir, "vlab-diagram.drawio")
-		slog.Info("Generated draw.io diagram", "file", filePath, "style", styleType)
-		fmt.Printf("To use this diagram:\n")
-		fmt.Printf("1. Open with https://app.diagrams.net/ or the desktop Draw.io application\n")
-		fmt.Printf("2. You can edit the diagram and export to PNG, SVG, PDF or other formats\n")
-	case "dot":
-		slog.Debug("Generating DOT diagram")
-		if err := diagram.GenerateDOT(workDir, jsonData); err != nil {
-			return fmt.Errorf("generating DOT diagram: %w", err)
-		}
-		filePath := filepath.Join(workDir, "vlab-diagram.dot")
-		slog.Info("Generated graphviz diagram", "file", filePath)
-		fmt.Printf("To render this diagram with Graphviz:\n")
-		fmt.Printf("1. Install Graphviz: https://graphviz.org/download/\n")
-		fmt.Printf("2. Convert to PNG: dot -Tpng %s -o vlab-diagram.png\n", filePath)
-		fmt.Printf("3. Convert to SVG: dot -Tsvg %s -o vlab-diagram.svg\n", filePath)
-		fmt.Printf("4. Convert to PDF: dot -Tpdf %s -o vlab-diagram.pdf\n", filePath)
-	case "mermaid":
-		return fmt.Errorf("mermaid format is not supported yet") //nolint:goerr113
-	default:
-		return fmt.Errorf("unsupported diagram format: %s", format) //nolint:goerr113
-	}
-
-	return nil
 }

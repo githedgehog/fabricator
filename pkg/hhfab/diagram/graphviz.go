@@ -40,15 +40,16 @@ func GenerateDOT(workDir string, jsonData []byte) error {
 func generateDOT(topo Topology) string {
 	var b strings.Builder
 
-	// Begin DOT graph with top-to-bottom ranking and standard styling.
 	b.WriteString("digraph network_topology {\n")
-	b.WriteString("\tgraph [rankdir=TB, nodesep=1.5, ranksep=2.5, splines=line];\n")
+	b.WriteString("\tgraph [rankdir=TB, nodesep=1.5, ranksep=2.5, splines=line, compound=true];\n")
 	b.WriteString("\tnode [shape=box, style=rounded, fontname=\"Arial\", fontsize=12, height=0.4, width=1.2];\n")
 	b.WriteString("\tedge [fontname=\"Arial\", fontsize=8, dir=none];\n\n")
 
+	b.WriteString("\tlegend_anchor [shape=none, width=0, height=0, label=\"\", style=\"\"];\n")
+
 	layers := sortNodes(topo.Nodes, topo.Links)
 
-	// Create legend subgraph (using an HTML table for labels) as in the original.
+	b.WriteString("\t{rank=source; legend_anchor}\n")
 	b.WriteString("\tsubgraph cluster_legend {\n")
 	b.WriteString("\t\tlabel=\"Network Connection Types\";\n")
 	b.WriteString("\t\tlabelloc=\"top\";\n")
@@ -87,28 +88,46 @@ func generateDOT(topo Topology) string {
 	b.WriteString("\t\t\t<TD ALIGN=\"LEFT\" VALIGN=\"MIDDLE\"><FONT COLOR=\"orange\">- - - -</FONT></TD>\n")
 	b.WriteString("\t\t\t<TD ALIGN=\"LEFT\">ESLAG Server Links</TD>\n")
 	b.WriteString("\t\t\t</TR>\n")
+	b.WriteString("\t\t\t<TR>\n")
+	b.WriteString("\t\t\t<TD ALIGN=\"LEFT\" VALIGN=\"MIDDLE\"><FONT COLOR=\"purple\">- - - -</FONT></TD>\n")
+	b.WriteString("\t\t\t<TD ALIGN=\"LEFT\">Gateway Links</TD>\n")
+	b.WriteString("\t\t\t</TR>\n")
 	b.WriteString("\t\t\t</TABLE>\n")
 	b.WriteString("\t\t>];\n")
-	b.WriteString("\t}\n\n")
+	b.WriteString("\t}\n")
+	b.WriteString("\t// Connect legend to anchor to position it at the top-left\n")
+	b.WriteString("\tlegend_anchor -> legend [style=invis];\n\n")
 
-	// Enforce ordering via rank: spines at the top, leaves in the middle, servers at the bottom.
-	b.WriteString("\t{rank=min; ")
+	b.WriteString("\t{rank=same; ")
 	for _, node := range layers.Spine {
 		b.WriteString(fmt.Sprintf("\"%s\"; ", node.ID))
 	}
 	b.WriteString("}\n")
+
+	if len(layers.Gateway) > 0 {
+		b.WriteString("\t{rank=same; ")
+		for _, node := range layers.Gateway {
+			b.WriteString(fmt.Sprintf("\"%s\"; ", node.ID))
+		}
+		b.WriteString("}\n")
+	}
+
 	b.WriteString("\t{rank=same; ")
 	for _, node := range layers.Leaf {
 		b.WriteString(fmt.Sprintf("\"%s\"; ", node.ID))
 	}
 	b.WriteString("}\n")
+
 	b.WriteString("\t{rank=max; ")
 	for _, node := range layers.Server {
 		b.WriteString(fmt.Sprintf("\"%s\"; ", node.ID))
 	}
 	b.WriteString("}\n\n")
 
-	// Node definitions.
+	for _, node := range layers.Gateway {
+		b.WriteString(fmt.Sprintf("\t\"%s\" [label=\"%s\", fillcolor=\"#fff2cc\", style=\"rounded,filled\", color=\"#d6b656\"];\n",
+			node.ID, node.Label))
+	}
 	for _, node := range layers.Spine {
 		b.WriteString(fmt.Sprintf("\t\"%s\" [label=\"%s\", fillcolor=\"#f8cecc\", style=\"rounded,filled\", color=\"#b85450\"];\n",
 			node.ID, node.Label))
@@ -123,13 +142,14 @@ func generateDOT(topo Topology) string {
 	}
 	b.WriteString("\n")
 
-	// Invisible chain edges to enforce left-to-right ordering within each layer.
+	if len(layers.Gateway) > 1 {
+		writeChain(&b, layers.Gateway)
+	}
 	writeChain(&b, layers.Spine)
 	writeChain(&b, layers.Leaf)
 	writeChain(&b, layers.Server)
 	b.WriteString("\n")
 
-	// Visible network connections.
 	b.WriteString("\tedge [style=solid, weight=1];\n")
 	for _, link := range topo.Links {
 		var color, style string
@@ -148,6 +168,9 @@ func generateDOT(topo Topology) string {
 			style = StyleSolid
 		case EdgeTypeESLAG:
 			color = ColorESLAG
+			style = StyleDashed
+		case EdgeTypeGateway:
+			color = "#d6b656"
 			style = StyleDashed
 		default:
 			color = ColorDefault
