@@ -27,9 +27,10 @@ func extractPort(port string) string {
 }
 
 type LayeredNodes struct {
-	Spine  []Node
-	Leaf   []Node
-	Server []Node
+	Spine   []Node
+	Leaf    []Node
+	Server  []Node
+	Gateway []Node
 }
 
 type serverConnection struct {
@@ -128,7 +129,6 @@ func sortNodes(nodes []Node, links []Link) LayeredNodes {
 	var result LayeredNodes
 	leafOrder := make(map[string]int)
 
-	// First separate nodes by type and sort spines
 	for _, node := range nodes {
 		if node.Type == NodeTypeSwitch {
 			if role, ok := node.Properties["role"]; ok && role == SwitchRoleSpine {
@@ -138,15 +138,49 @@ func sortNodes(nodes []Node, links []Link) LayeredNodes {
 			}
 		} else if node.Type == NodeTypeServer {
 			result.Server = append(result.Server, node)
+		} else if node.Type == NodeTypeGateway {
+			result.Gateway = append(result.Gateway, node)
 		}
 	}
 
-	// Sort spine and leaf nodes by ID
+	// Sort spine nodes by description first, then by ID
 	sort.Slice(result.Spine, func(i, j int) bool {
+		descI, hasDescI := result.Spine[i].Properties["description"]
+		descJ, hasDescJ := result.Spine[j].Properties["description"]
+
+		if hasDescI && hasDescJ {
+			if descI != descJ {
+				return descI < descJ
+			}
+		} else if hasDescI {
+			return true
+		} else if hasDescJ {
+			return false
+		}
+
 		return result.Spine[i].ID < result.Spine[j].ID
 	})
+
+	// Sort leaf nodes by description first, then by ID
 	sort.Slice(result.Leaf, func(i, j int) bool {
+		descI, hasDescI := result.Leaf[i].Properties["description"]
+		descJ, hasDescJ := result.Leaf[j].Properties["description"]
+
+		if hasDescI && hasDescJ {
+			if descI != descJ {
+				return descI < descJ
+			}
+		} else if hasDescI {
+			return true
+		} else if hasDescJ {
+			return false
+		}
+
 		return result.Leaf[i].ID < result.Leaf[j].ID
+	})
+
+	sort.Slice(result.Gateway, func(i, j int) bool {
+		return result.Gateway[i].ID < result.Gateway[j].ID
 	})
 
 	// Create leaf order map
@@ -337,13 +371,23 @@ func ConvertJSONToTopology(jsonData []byte) (Topology, error) {
 					Type:  "switch",
 					Label: name,
 				}
+
+				// Initialize properties map if needed
+				if node.Properties == nil {
+					node.Properties = make(map[string]string)
+				}
+
+				// Extract role from spec
 				if role, ok := obj.Spec["role"].(string); ok {
-					if node.Properties == nil {
-						node.Properties = make(map[string]string)
-					}
 					node.Properties["role"] = role
 					node.Label = fmt.Sprintf("%s\n%s", name, role)
 				}
+
+				// Extract description from spec
+				if description, ok := obj.Spec["description"].(string); ok {
+					node.Properties["description"] = description
+				}
+
 				topo.Nodes = append(topo.Nodes, node)
 			}
 
@@ -360,6 +404,35 @@ func ConvertJSONToTopology(jsonData []byte) (Topology, error) {
 					Label: name,
 				}
 				topo.Nodes = append(topo.Nodes, node)
+			}
+
+		case "Node":
+			name, ok := obj.Metadata["name"].(string)
+			if !ok {
+				continue
+			}
+			if !nodeSet[name] {
+				nodeSet[name] = true
+
+				isGateway := false
+				if roles, ok := obj.Spec["roles"].([]interface{}); ok {
+					for _, role := range roles {
+						if r, ok := role.(string); ok && r == "gateway" {
+							isGateway = true
+
+							break
+						}
+					}
+				}
+
+				if isGateway {
+					node := Node{
+						ID:    name,
+						Type:  "gateway",
+						Label: name,
+					}
+					topo.Nodes = append(topo.Nodes, node)
+				}
 			}
 
 		case "Connection":
@@ -495,6 +568,37 @@ func ConvertJSONToTopology(jsonData []byte) (Topology, error) {
 											Source:     source,
 											Target:     target,
 											Type:       "mclag",
+											Properties: props,
+										})
+									}
+								}
+							}
+						}
+					}
+				case "gateway":
+					if m, ok := val.(map[string]interface{}); ok {
+						if arr, ok := m["links"].([]interface{}); ok {
+							for _, linkObj := range arr {
+								if linkMap, ok := linkObj.(map[string]interface{}); ok {
+									props := make(map[string]string)
+									var source, target string
+									if gateway, ok := linkMap["gateway"].(map[string]interface{}); ok {
+										if port, ok := gateway["port"].(string); ok {
+											source = extractNodeID(port)
+											props["sourcePort"] = port
+										}
+									}
+									if spine, ok := linkMap["spine"].(map[string]interface{}); ok {
+										if port, ok := spine["port"].(string); ok {
+											target = extractNodeID(port)
+											props["targetPort"] = port
+										}
+									}
+									if source != "" && target != "" {
+										topo.Links = append(topo.Links, Link{
+											Source:     source,
+											Target:     target,
+											Type:       "gateway",
 											Properties: props,
 										})
 									}

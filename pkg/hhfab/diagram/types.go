@@ -38,8 +38,10 @@ const (
 	EdgeTypeBundled   = "bundled"
 	EdgeTypeUnbundled = "unbundled"
 	EdgeTypeESLAG     = "eslag"
+	EdgeTypeGateway   = "gateway"
 	NodeTypeSwitch    = "switch"
 	NodeTypeServer    = "server"
+	NodeTypeGateway   = "gateway"
 	SwitchRoleSpine   = "spine"
 	SwitchRoleLeaf    = "leaf"
 )
