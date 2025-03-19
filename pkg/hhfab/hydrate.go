@@ -669,19 +669,30 @@ func (c *Config) hydrate(ctx context.Context, kube client.Client) error {
 	})
 
 	for _, conn := range conns.Items {
-		if conn.Spec.Fabric == nil {
+		if conn.Spec.Fabric != nil {
+			cf := conn.Spec.Fabric
+
+			for idx := range cf.Links {
+				link := &cf.Links[idx]
+				link.Spine.IP = nextFabricIP.String() + "/31"
+				nextFabricIP = nextFabricIP.Next()
+
+				link.Leaf.IP = nextFabricIP.String() + "/31"
+				nextFabricIP = nextFabricIP.Next()
+			}
+		} else if conn.Spec.Gateway != nil {
+			cg := conn.Spec.Gateway
+
+			for idx := range cg.Links {
+				link := &cg.Links[idx]
+				link.Spine.IP = nextFabricIP.String() + "/31"
+				nextFabricIP = nextFabricIP.Next()
+
+				link.Gateway.IP = nextFabricIP.String() + "/31"
+				nextFabricIP = nextFabricIP.Next()
+			}
+		} else {
 			continue
-		}
-
-		cf := conn.Spec.Fabric
-
-		for idx := range cf.Links {
-			link := &cf.Links[idx]
-			link.Spine.IP = nextFabricIP.String() + "/31"
-			nextFabricIP = nextFabricIP.Next()
-
-			link.Leaf.IP = nextFabricIP.String() + "/31"
-			nextFabricIP = nextFabricIP.Next()
 		}
 
 		if err := kube.Update(ctx, &conn); err != nil {
