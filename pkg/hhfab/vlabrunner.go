@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -21,6 +22,7 @@ import (
 	"time"
 
 	"github.com/pkg/sftp"
+	"github.com/samber/lo"
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
 	"go.githedgehog.com/fabric/pkg/util/logutil"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
@@ -34,6 +36,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/util/sshutil"
 	"go.githedgehog.com/fabricator/pkg/util/tmplutil"
 	"golang.org/x/sync/errgroup"
+	coreapi "k8s.io/api/core/v1"
 )
 
 //go:embed vlab_butane.tmpl.yaml
@@ -450,6 +453,83 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 		}
 
 		slog.Info("All VMs are ready")
+
+		expected := map[string]bool{}
+		for _, vm := range vlab.VMs {
+			if vm.Type == VMTypeControl || vm.Type == VMTypeGateway {
+				expected[vm.Name] = true
+			}
+		}
+
+		slog.Info("Waiting for all nodes to show up in K8s", "expected", lo.Keys(expected))
+
+		kubeconfig := filepath.Join(c.WorkDir, VLABDir, VLABKubeConfig)
+		ready := false
+		var readyErr error
+		for !ready {
+			if readyErr != nil {
+				select {
+				case <-ctx.Done():
+					slog.Error("Failed to wait for k8s api", "err", readyErr)
+
+					return fmt.Errorf("cancelled while waiting for k8s nodes: %w", ctx.Err())
+				case <-time.After(15 * time.Second):
+				}
+			}
+
+			kube, err := kubeutil.NewClientWithCore(ctx, kubeconfig)
+			if err != nil {
+				readyErr = err
+				slog.Debug("Failed to create kube client", "err", err)
+
+				continue
+			}
+
+			nodes := &coreapi.NodeList{}
+			if err := kube.List(ctx, nodes); err != nil {
+				readyErr = err
+				slog.Debug("Failed to list K8s nodes")
+
+				continue
+			}
+
+			found := map[string]bool{}
+			for _, node := range nodes.Items {
+				ready := false
+				for _, cond := range node.Status.Conditions {
+					// default kubelet heartbeat interval is 5 minutes
+					if cond.Type == coreapi.NodeReady && cond.Status == coreapi.ConditionTrue && time.Since(cond.LastHeartbeatTime.Time) < 6*time.Minute {
+						ready = true
+					}
+				}
+
+				found[node.Name] = ready
+			}
+
+			if !maps.Equal(expected, found) {
+				missing := []string{}
+				notReady := []string{}
+
+				for name := range expected {
+					foundReady, ok := found[name]
+					if !ok {
+						missing = append(missing, name)
+					} else if !foundReady {
+						notReady = append(notReady, name)
+					}
+				}
+
+				readyErr = fmt.Errorf("some k8s nodes are not ready") //nolint:goerr113
+				slog.Debug("Some K8s nodes are not ready", "expected", lo.Keys(expected), "missing", missing, "notReady", notReady)
+
+				continue
+			}
+
+			readyErr = nil
+			ready = true
+
+			slog.Info("All K8s nodes are ready", "expected", lo.Keys(expected))
+		}
 
 		if err := func() error {
 			if len(opts.OnReady) > 0 {
