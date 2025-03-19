@@ -19,9 +19,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/beevik/ntp"
 	"github.com/mattn/go-isatty"
 	"go.githedgehog.com/fabric/pkg/util/logutil"
-	"go.githedgehog.com/fabricator/api/meta"
 	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/flatcar"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/zot"
@@ -219,7 +219,30 @@ func DoUpgrade(ctx context.Context, workDir string, yes bool) error {
 	return nil
 }
 
-func setupTimesync(ctx context.Context, controlVIPCfg meta.Prefix) error {
+func waitNTP(ctx context.Context, controlVIP string) error {
+	slog.Info("Waiting for NTP server on control node(s)")
+
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("waiting for NTP %s: %w", controlVIP, ctx.Err())
+		case <-time.After(5 * time.Second):
+			if _, err := ntp.Time(controlVIP); err != nil {
+				slog.Debug("Waiting for NTP", "addr", controlVIP, "err", err)
+
+				continue
+			}
+
+			return nil
+		}
+	}
+}
+
+func setupTimesync(ctx context.Context, controlVIP string) error {
+	if err := waitNTP(ctx, controlVIP); err != nil {
+		return fmt.Errorf("waiting for NTP: %w", err)
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 
@@ -227,12 +250,7 @@ func setupTimesync(ctx context.Context, controlVIPCfg meta.Prefix) error {
 
 	// TODO remove if it'll be managed by control agent?
 
-	controlVIP, err := controlVIPCfg.Parse()
-	if err != nil {
-		return fmt.Errorf("parsing control VIP: %w", err)
-	}
-
-	cfg := []byte(fmt.Sprintf("[Time]\nNTP=%s\n", controlVIP.Addr()))
+	cfg := []byte(fmt.Sprintf("[Time]\nNTP=%s\n", controlVIP))
 	if err := os.WriteFile("/etc/systemd/timesyncd.conf", cfg, 0o644); err != nil { //nolint:gosec
 		return fmt.Errorf("writing timesyncd.conf: %w", err)
 	}
@@ -397,14 +415,11 @@ func waitURL(ctx context.Context, url string, ca string) error {
 		return fmt.Errorf("creating request: %w", err)
 	}
 
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
-
 	for {
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("waiting for URL: %w", ctx.Err())
-		case <-ticker.C:
+			return fmt.Errorf("waiting for URL %s: %w", url, ctx.Err())
+		case <-time.After(5 * time.Second):
 			resp, err := client.Do(req)
 			if err != nil {
 				slog.Debug("Waiting for URL", "url", url, "err", err)
