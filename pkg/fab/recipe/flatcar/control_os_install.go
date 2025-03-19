@@ -85,7 +85,7 @@ type ControlOSInstal struct {
 }
 
 func (i *ControlOSInstal) Run(ctx context.Context) error {
-	ignition := filepath.Join(i.WorkDir, recipe.ControlUSBIgnition)
+	ignition := filepath.Join(i.WorkDir, recipe.IgnitionFile)
 	dev := i.Control.Spec.Bootstrap.Disk
 	img := filepath.Join(i.WorkDir, "flatcar_production_image.bin.bz2") // TODO const
 
@@ -170,7 +170,7 @@ func (i *ControlOSInstal) Run(ctx context.Context) error {
 		return fmt.Errorf("mounting root: %w", err)
 	}
 
-	target := filepath.Join(MountDir, recipe.ControlOSTarget)
+	target := filepath.Join(MountDir, recipe.OSTargetInstallDir)
 	if err := os.MkdirAll(target, 0o755); err != nil {
 		return fmt.Errorf("creating target dir: %w", err)
 	}
