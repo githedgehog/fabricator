@@ -268,7 +268,7 @@ func (c *ControlInstall) installFabCA(ctx context.Context, kube client.Client) (
 		return "", fmt.Errorf("enforcing fab-ca install: %w", err)
 	}
 
-	if err := os.WriteFile("/etc/ssl/certs/hh-fab-ca.crt", []byte(ca.Crt), 0o644); err != nil { //nolint:gosec
+	if err := os.WriteFile("/etc/ssl/certs/hh-fab-ca.pem", []byte(ca.Crt), 0o644); err != nil { //nolint:gosec
 		return "", fmt.Errorf("writing fab-ca cert: %w", err)
 	}
 
