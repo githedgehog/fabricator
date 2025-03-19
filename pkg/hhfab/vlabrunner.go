@@ -256,9 +256,9 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 
 				source, target := "", ""
 				if opts.BuildMode == recipe.BuildModeUSB {
-					source, target = vm.Name+recipe.InstallUSBImageSuffix, VLABUSBImageFile
+					source, target = recipe.BuildTypeControl+recipe.Separator+vm.Name+recipe.Separator+recipe.InstallUSBImageSuffix, VLABUSBImageFile
 				} else if opts.BuildMode == recipe.BuildModeISO {
-					source, target = vm.Name+recipe.InstallISOImageSuffix, VLABISOImageFile
+					source, target = recipe.BuildTypeControl+recipe.Separator+vm.Name+recipe.Separator+recipe.InstallISOImageSuffix, VLABISOImageFile
 				}
 				if err := artificer.CopyFile(
 					filepath.Join(c.WorkDir, ResultDir, source),
@@ -347,7 +347,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 			if vm.Type == VMTypeControl && opts.BuildMode == recipe.BuildModeManual || vm.Type == VMTypeServer || vm.Type == VMTypeGateway {
 				ign := VLABIgnition
 				if vm.Type == VMTypeControl {
-					ign = filepath.Join(c.WorkDir, ResultDir, vm.Name+recipe.InstallIgnitionSuffix)
+					ign = filepath.Join(c.WorkDir, ResultDir, recipe.BuildTypeControl+recipe.Separator+vm.Name+recipe.Separator+recipe.InstallIgnitionSuffix)
 				}
 				args = append(args,
 					"-fw_cfg", "name=opt/org.flatcar-linux/config,file="+ign,
@@ -804,7 +804,8 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 					return fmt.Errorf("removing previous control install: %w: %s", err, string(out))
 				}
 
-				installArchive := vm.Name + recipe.InstallArchiveSuffix
+				installName := recipe.BuildTypeControl + recipe.Separator + vm.Name + recipe.Separator + recipe.InstallSuffix
+				installArchive := recipe.BuildTypeControl + recipe.Separator + vm.Name + recipe.Separator + recipe.InstallArchiveSuffix
 				local := filepath.Join(c.WorkDir, ResultDir, installArchive)
 				remote := filepath.Join(flatcar.Home, installArchive)
 				if err := client.Upload(local, remote); err != nil {
@@ -821,7 +822,7 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 				}
 
 				slog.Info("Running control "+mode, "vm", vm.Name, "type", vm.Type)
-				installCmd := fmt.Sprintf("cd %s && sudo ./%s control "+mode, vm.Name+recipe.InstallSuffix, recipe.RecipeBin)
+				installCmd := fmt.Sprintf("cd %s && sudo ./%s control "+mode, installName, recipe.RecipeBin)
 				if slog.Default().Enabled(ctx, slog.LevelDebug) {
 					installCmd += " -v"
 				}
