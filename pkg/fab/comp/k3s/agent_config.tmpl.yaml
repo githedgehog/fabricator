@@ -1,0 +1,3 @@
+node-name: "{{ .Name }}"
+node-ip: "{{ .NodeIP }}"
+flannel-iface: "{{ .FlannelIface }}"
