@@ -15,6 +15,12 @@ on:
       - 'docs/**'
       - 'README.md'
   pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - labeled
+      - unlabeled
   schedule:
     - cron: "0 10 * * *" # ~2am PST
   workflow_dispatch:
