@@ -70,5 +70,5 @@ func Run(ctx context.Context) error {
 
 	slog.Info("Hedgehog Fabricator Flatcar Install", args...)
 
-	return flatcar.DoControlOSInstall(ctx, workDir) //nolint:wrapcheck
+	return flatcar.DoOSInstall(ctx, workDir) //nolint:wrapcheck
 }
