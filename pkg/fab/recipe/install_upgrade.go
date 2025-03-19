@@ -126,8 +126,32 @@ func DoInstall(ctx context.Context, workDir string, yes bool) error {
 			return fmt.Errorf("running control install: %w", err)
 		}
 	} else if cfg.Type == TypeNode {
-		slog.Warn("Node installation is not implemented yet")
-		// TODO implement node installation
+		l := apiutil.NewFabLoader()
+		fabCfg, err := os.ReadFile(filepath.Join(workDir, FabName))
+		if err != nil {
+			return fmt.Errorf("reading fab config: %w", err)
+		}
+
+		if err := l.LoadAdd(ctx, fabCfg); err != nil {
+			return fmt.Errorf("loading fab config: %w", err)
+		}
+
+		f, _, nodes, err := fab.GetFabAndNodes(ctx, l.GetClient(), fab.GetFabAndNodesOpts{AllowNoControls: true})
+		if err != nil {
+			return fmt.Errorf("getting fabricator and nodes: %w", err)
+		}
+
+		if len(nodes) != 1 {
+			return fmt.Errorf("expected exactly 1 node, got %d", len(nodes)) //nolint:goerr113
+		}
+
+		if err := (&NodeInstall{
+			WorkDir: workDir,
+			Fab:     f,
+			Node:    nodes[0],
+		}).Run(ctx); err != nil {
+			return fmt.Errorf("running node install: %w", err)
+		}
 	} else {
 		return fmt.Errorf("unknown installer type %q", cfg.Type) //nolint:goerr113
 	}
