@@ -97,7 +97,12 @@ func (c *ControlUpgrade) Run(ctx context.Context) error {
 	c.Fab.Status.IsBootstrap = false
 	c.Fab.Status.IsInstall = true
 
-	if err := setupTimesync(ctx, c.Fab.Spec.Config.Control.VIP); err != nil {
+	controlVIP, err := c.Fab.Spec.Config.Control.VIP.Parse()
+	if err != nil {
+		return fmt.Errorf("parsing control VIP: %w", err)
+	}
+
+	if err := setupTimesync(ctx, controlVIP.Addr().String()); err != nil {
 		return fmt.Errorf("setting up timesync: %w", err)
 	}
 
