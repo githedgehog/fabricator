@@ -20,7 +20,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/melbahja/goph"
 	"github.com/pkg/sftp"
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
 	"go.githedgehog.com/fabric/pkg/util/logutil"
@@ -32,8 +31,8 @@ import (
 	vlabcomp "go.githedgehog.com/fabricator/pkg/fab/comp/vlab"
 	"go.githedgehog.com/fabricator/pkg/fab/recipe"
 	"go.githedgehog.com/fabricator/pkg/util/butaneutil"
+	"go.githedgehog.com/fabricator/pkg/util/sshutil"
 	"go.githedgehog.com/fabricator/pkg/util/tmplutil"
-	"golang.org/x/crypto/ssh"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -701,63 +700,80 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	auth, err := goph.RawKey(vlab.SSHKey, "")
-	if err != nil {
-		return fmt.Errorf("getting ssh auth: %w", err)
-	}
-
 	slog.Debug("Waiting for ssh", "vm", vm.Name, "type", vm.Type)
 
-	var client *goph.Client
-	ready := false
-	for !ready {
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("cancelled: %w", ctx.Err())
-		case <-time.After(5 * time.Second):
-			client, err = goph.NewConn(&goph.Config{
-				User:     "core",
-				Addr:     "127.0.0.1",
-				Port:     getSSHPort(vm.ID),
-				Auth:     auth,
-				Timeout:  10 * time.Second,
-				Callback: ssh.InsecureIgnoreHostKey(), //nolint:gosec
-			})
-			if err != nil {
-				// if !errors.Is(err, syscall.ECONNREFUSED) {
-				// 	slog.Debug("SSH not ready yet", "vm", vm.Name, "type", vm.Type, "err", err)
-				// }
+	ssh := sshutil.Config{
+		SSHKey: vlab.SSHKey,
+	}
+	if vm.Type == VMTypeServer || vm.Type == VMTypeControl {
+		ssh.Remote = sshutil.Remote{
+			User: "core",
+			Host: "127.0.0.1",
+			Port: getSSHPort(vm.ID),
+		}
+	} else if vm.Type == VMTypeGateway {
+		nodeIP := ""
+		for _, node := range c.Nodes {
+			if node.Name == vm.Name {
+				prefix, err := node.Spec.Management.IP.Parse()
+				if err != nil {
+					return fmt.Errorf("parsing node %s management IP: %w", vm.Name, err)
+				}
 
-				continue
+				nodeIP = prefix.Addr().String()
 			}
-			defer client.Close()
+		}
 
-			ready = true
+		controlSSH := uint(0)
+		for _, vm := range vlab.VMs {
+			if vm.Type == VMTypeControl {
+				controlSSH = getSSHPort(vm.ID)
+
+				break
+			}
+		}
+
+		ssh.Remote = sshutil.Remote{
+			User: "core",
+			Host: nodeIP,
+			Port: 22,
+		}
+		ssh.Proxy = &sshutil.Remote{
+			User: "core",
+			Host: "127.0.0.1",
+			Port: controlSSH,
 		}
 	}
 
-	out, err := client.RunContext(ctx, "hostname")
+	if err := ssh.Wait(ctx); err != nil {
+		return fmt.Errorf("waiting for ssh: %w", err)
+	}
+
+	out, _, err := ssh.Run("hostname")
 	if err != nil {
 		return fmt.Errorf("checking hostname: %w", err)
 	}
 
-	hostname := strings.TrimSpace(string(out))
+	hostname := strings.TrimSpace(out)
 	if hostname != vm.Name {
 		return fmt.Errorf("hostname mismatch: got %q, want %q", hostname, vm.Name) //nolint:goerr113
 	}
 
-	sftp, err := client.NewSftp()
+	ftp, cleanup, err := ssh.NewSftp()
+	if cleanup != nil {
+		defer cleanup() //nolint:errcheck
+	}
 	if err != nil {
 		return fmt.Errorf("creating sftp: %w", err)
 	}
-	defer sftp.Close()
+	defer ftp.Close()
 
 	slog.Debug("SSH is ready", "vm", vm.Name, "type", vm.Type)
 
 	if vm.Type == VMTypeServer {
 		slog.Debug("Installing helpers", "vm", vm.Name, "type", vm.Type)
 
-		f, err := sftp.Create("/tmp/hhnet")
+		f, err := ftp.Create("/tmp/hhnet")
 		if err != nil {
 			return fmt.Errorf("creating hhnet: %w", err)
 		}
@@ -767,12 +783,12 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 			return fmt.Errorf("writing hhnet: %w", err)
 		}
 
-		if _, err := client.RunContext(ctx, "bash -c 'sudo mv /tmp/hhnet /opt/bin/hhnet && chmod +x /opt/bin/hhnet'"); err != nil {
+		if _, _, err := ssh.Run("bash -c 'sudo mv /tmp/hhnet /opt/bin/hhnet && chmod +x /opt/bin/hhnet'", 7*time.Minute); err != nil {
 			return fmt.Errorf("installing hhnet: %w", err)
 		}
 
 		if err := d.WithORAS(ctx, flatcar.ToolboxRef, flatcar.ToolboxVersion(c.Fab), func(cachePath string) error {
-			if err := client.Upload(filepath.Join(cachePath, "toolbox.tar"), "/tmp/toolbox"); err != nil {
+			if err := sshutil.UploadPathWith(ftp, filepath.Join(cachePath, "toolbox.tar"), "/tmp/toolbox"); err != nil {
 				return fmt.Errorf("uploading: %w", err)
 			}
 
@@ -781,20 +797,20 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 			return fmt.Errorf("uploading toolbox image: %w", err)
 		}
 
-		if _, err := client.RunContext(ctx, "bash -c 'sudo ctr image import /tmp/toolbox'"); err != nil {
+		if _, _, err := ssh.Run("bash -c 'sudo ctr image import /tmp/toolbox'", 3*time.Minute); err != nil {
 			return fmt.Errorf("installing toolbox: %w", err)
 		}
 
-		if err := sftp.Remove("/tmp/toolbox"); err != nil {
+		if err := ftp.Remove("/tmp/toolbox"); err != nil {
 			return fmt.Errorf("removing toolbox image: %w", err)
 		}
 
-		if _, err := client.RunContext(ctx, "bash -c 'toolbox hostname'"); err != nil {
+		if _, _, err := ssh.Run("bash -c 'toolbox hostname'"); err != nil {
 			return fmt.Errorf("trying toolbox: %w", err)
 		}
 	} else if vm.Type == VMTypeControl || vm.Type == VMTypeGateway {
 		if opts.BuildMode == recipe.BuildModeManual || opts.AutoUpgrade {
-			marker, err := sshReadMarker(sftp)
+			marker, err := sshReadMarker(ftp)
 			if err != nil && !errors.Is(err, os.ErrNotExist) {
 				return fmt.Errorf("checking for install marker: %w", err)
 			}
@@ -814,19 +830,19 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 				}
 				fullName := recipeType + recipe.Separator + vm.Name
 
-				if out, err := client.RunContext(ctx, fmt.Sprintf("bash -c 'rm -rf %s*'", fullName+recipe.Separator)); err != nil {
-					return fmt.Errorf("removing previous installer: %w: %s", err, string(out))
+				if out, _, err := ssh.Run(fmt.Sprintf("bash -c 'rm -rf %s*'", fullName+recipe.Separator)); err != nil {
+					return fmt.Errorf("removing previous installer: %w: %s", err, out)
 				}
 
 				installArchive := fullName + recipe.Separator + recipe.InstallArchiveSuffix
 				local := filepath.Join(c.WorkDir, ResultDir, installArchive)
 				remote := filepath.Join(flatcar.Home, installArchive)
-				if err := client.Upload(local, remote); err != nil {
+				if err := sshutil.UploadPathWith(ftp, local, remote); err != nil {
 					return fmt.Errorf("uploading installer: %w", err)
 				}
 
-				if out, err := client.RunContext(ctx, fmt.Sprintf("bash -c 'tar xzf %s'", remote)); err != nil {
-					return fmt.Errorf("extracting installer: %w: %s", err, string(out))
+				if out, _, err := ssh.Run(fmt.Sprintf("bash -c 'tar xzf %s'", remote), 5*time.Minute); err != nil {
+					return fmt.Errorf("extracting installer: %w: %s", err, out)
 				}
 
 				mode := "install"
@@ -840,7 +856,7 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 				if slog.Default().Enabled(ctx, slog.LevelDebug) {
 					installCmd += " -v"
 				}
-				if err := sshExec(ctx, vm, client, installCmd, mode+"("+vm.Name+")", slog.Info); err != nil {
+				if err := ssh.StreamLog(ctx, installCmd, mode+"("+vm.Name+")", slog.Info, 30*time.Minute); err != nil {
 					return fmt.Errorf("running node %s: %w", mode, err)
 				}
 				slog.Info("Node "+mode+" completed", "vm", vm.Name, "type", vm.Type)
@@ -853,9 +869,9 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 
 			if slog.Default().Enabled(ctx, slog.LevelInfo) {
 				go func() {
-					if err := sshExec(ctx, vm, client, "journalctl -n 100 -fu hhfab-install.service", "hhfab-install("+vm.Name+")", slog.Info); err != nil {
+					if err := ssh.StreamLog(ctx, "journalctl -n 100 -fu hhfab-install.service", "hhfab-install("+vm.Name+")", slog.Info, 30*time.Minute); err != nil {
 						if !errors.Is(err, context.Canceled) {
-							slog.Debug("Journalctl on control node failed", "vm", vm.Name, "type", vm.Type, "err", err)
+							slog.Debug("Journalctl on control node exited", "vm", vm.Name, "type", vm.Type, "err", err)
 						}
 					}
 				}()
@@ -867,7 +883,7 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 				case <-ctx.Done():
 					return fmt.Errorf("cancelled: %w", ctx.Err())
 				case <-time.After(5 * time.Second):
-					marker, err := sshReadMarker(sftp)
+					marker, err := sshReadMarker(ftp)
 					if err != nil {
 						if errors.Is(err, os.ErrNotExist) {
 							continue
@@ -889,7 +905,7 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 
 		if vm.Type == VMTypeControl {
 			kubeconfig := filepath.Join(c.WorkDir, VLABDir, VLABKubeConfig)
-			if err := client.Download(k3s.KubeConfigPath, kubeconfig); err != nil {
+			if err := sshutil.DownloadPathWith(ftp, k3s.KubeConfigPath, kubeconfig); err != nil {
 				return fmt.Errorf("downloading kubeconfig: %w", err)
 			}
 			slog.Debug("Control node kubeconfig is downloaded", "path", kubeconfig, "vm", vm.Name, "type", vm.Type)
@@ -948,25 +964,6 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 	}
 
 	slog.Debug("VM is ready", "vm", vm.Name, "type", vm.Type)
-
-	return nil
-}
-
-func sshExec(ctx context.Context, vm VM, client *goph.Client, exec, name string, log func(msg string, args ...any)) error {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	cmd, err := client.CommandContext(ctx, "bash", "-c", "'"+exec+"'")
-	if err != nil {
-		return fmt.Errorf("creating ssh command %q: %w", exec, err)
-	}
-
-	cmd.Stdout = logutil.NewSink(ctx, log, name+": ", "vm", vm.Name)
-	cmd.Stderr = logutil.NewSink(ctx, log, name+": ", "vm", vm.Name)
-
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("running ssh command %q: %w", exec, err)
-	}
 
 	return nil
 }
