@@ -4,19 +4,15 @@
 package recipe
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"time"
 
-	"github.com/mattn/go-isatty"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
@@ -37,31 +33,6 @@ import (
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
-
-func DoControlUpgrade(ctx context.Context, workDir string, yes bool) error {
-	ctx, cancel := context.WithTimeout(ctx, 40*time.Minute)
-	defer cancel()
-
-	rawMarker, err := os.ReadFile(InstallMarkerFile)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("reading install marker: %w", err)
-	}
-	if err == nil {
-		marker := strings.TrimSpace(string(rawMarker))
-		if marker != InstallMarkerComplete {
-			slog.Info("Control node seems to be not installed successfully", "status", marker, "marker", InstallMarkerFile)
-
-			return nil
-		}
-	} else {
-		return fmt.Errorf("install marker file not found: %w", err)
-	}
-
-	return (&ControlUpgrade{
-		WorkDir: workDir,
-		Yes:     yes,
-	}).Run(ctx)
-}
 
 type ControlUpgrade struct {
 	WorkDir string
@@ -93,7 +64,7 @@ func (c *ControlUpgrade) Run(ctx context.Context) error {
 	if err := retry.OnError(backoff, func(error) bool {
 		return true
 	}, func() error {
-		f, control, _, err := fab.GetFabAndNodes(ctx, kube, false)
+		f, control, _, err := fab.GetFabAndNodes(ctx, kube)
 		if err != nil {
 			return fmt.Errorf("getting fabricator and control nodes: %w", err)
 		}
@@ -126,7 +97,7 @@ func (c *ControlUpgrade) Run(ctx context.Context) error {
 	c.Fab.Status.IsBootstrap = false
 	c.Fab.Status.IsInstall = true
 
-	if err := c.setupTimesync(ctx); err != nil {
+	if err := setupTimesync(ctx, c.Fab.Spec.Config.Control.VIP); err != nil {
 		return fmt.Errorf("setting up timesync: %w", err)
 	}
 
@@ -177,125 +148,11 @@ func (c *ControlUpgrade) Run(ctx context.Context) error {
 		return fmt.Errorf("upgrading K8s: %w", err)
 	}
 
-	if err := c.upgradeFlatcar(ctx); err != nil {
+	if err := upgradeFlatcar(ctx, string(flatcar.Version(c.Fab)), c.Yes); err != nil {
 		return fmt.Errorf("upgrading Flatcar: %w", err)
 	}
 
 	slog.Info("Control node upgrade complete")
-
-	return nil
-}
-
-func askForConfirmation(s string) bool {
-	reader := bufio.NewReader(os.Stdin)
-
-	for {
-		fmt.Printf("%s [y/n]: ", s)
-
-		response, err := reader.ReadString('\n')
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		response = strings.ToLower(strings.TrimSpace(response))
-
-		if response == "y" || response == "yes" {
-			return true
-		} else if response == "n" || response == "no" {
-			return false
-		}
-	}
-}
-
-func (c *ControlUpgrade) upgradeFlatcar(ctx context.Context) error {
-	slog.Info("Upgrading Flatcar")
-	const filename = "/etc/os-release"
-
-	content, err := os.ReadFile(filename)
-	if err != nil {
-		return fmt.Errorf("could not read /etc/os-release : %w", err)
-	}
-
-	s := string(content)
-	const versionPrefix = "VERSION="
-	version := ""
-	flatcarVersion := string(flatcar.Version(c.Fab))
-
-	for line := range strings.Lines(s) {
-		if strings.HasPrefix(line, versionPrefix) {
-			version = strings.TrimPrefix(line, versionPrefix)
-		}
-	}
-	if version == "" {
-		return fmt.Errorf("could not find version ID in /etc/os-release") //nolint:goerr113
-	}
-
-	if version[:len(version)-1] == flatcarVersion[1:] {
-		slog.Info("System already running desired Flatcar", "version", flatcarVersion)
-
-		return nil
-	}
-
-	slog.Info("Upgrading Flatcar to", "version", flatcarVersion)
-
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
-	defer cancel()
-
-	var lastErr error
-	for attempt := 1; attempt <= 3; attempt++ {
-		if attempt > 1 {
-			slog.Debug("Retrying upgrading Flatcar", "attempt", attempt)
-		}
-
-		cmd := exec.CommandContext(ctx, "flatcar-update", "--to-version", flatcarVersion, "--to-payload", flatcar.UpdateBinName)
-		cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "flatcar-update: ")
-		cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "flatcar-update: ")
-
-		if err := cmd.Run(); err != nil {
-			lastErr = fmt.Errorf("running flatcar-update: %w", err)
-
-			continue
-		}
-
-		lastErr = nil
-		slog.Info("Flatcar upgrade completed")
-
-		break
-	}
-	if lastErr != nil {
-		cmd := exec.CommandContext(ctx, "journalctl", "-t", "update_engine", "-n", "100")
-		cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "update_engine: ")
-		cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "update_engine: ")
-
-		if err := cmd.Run(); err != nil {
-			slog.Warn("Failed to print update_engine logs", "err", err)
-		}
-
-		return fmt.Errorf("retrying upgrading Flatcar: %w", lastErr)
-	}
-
-	reboot := c.Yes
-	if !reboot && isatty.IsTerminal(os.Stdout.Fd()) {
-		if ok := askForConfirmation("Do you really want to reboot your system?"); ok {
-			reboot = true
-		}
-	}
-
-	if reboot {
-		slog.Info("Rebooting Control Node")
-
-		cmd := exec.CommandContext(ctx, "reboot")
-		cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "reboot: ")
-		cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "reboot: ")
-
-		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("rebooting: %w", err)
-		}
-
-		return nil
-	}
-
-	slog.Warn("A reboot is necessary for the changes to take effect")
 
 	return nil
 }
@@ -493,37 +350,6 @@ func (c *ControlUpgrade) installFabricCtl(_ context.Context) error {
 	if err := copyFile(fabric.CtlBinName, filepath.Join(fabric.BinDir, fabric.CtlDestBinName), 0o755); err != nil {
 		return fmt.Errorf("copying fabricctl bin: %w", err)
 	}
-
-	return nil
-}
-
-func (c *ControlUpgrade) setupTimesync(ctx context.Context) error {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-	defer cancel()
-
-	slog.Info("Setting up timesync")
-
-	// TODO remove if it'll be managed by control agent?
-
-	controlVIP, err := c.Fab.Spec.Config.Control.VIP.Parse()
-	if err != nil {
-		return fmt.Errorf("parsing control VIP: %w", err)
-	}
-
-	cfg := []byte(fmt.Sprintf("[Time]\nNTP=%s\n", controlVIP.Addr()))
-	if err := os.WriteFile("/etc/systemd/timesyncd.conf", cfg, 0o644); err != nil { //nolint:gosec
-		return fmt.Errorf("writing timesyncd.conf: %w", err)
-	}
-
-	cmd := exec.CommandContext(ctx, "systemctl", "restart", "systemd-timesyncd")
-	cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "systemctl: ")
-	cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "systemctl: ")
-
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("restarting systemd-timesyncd: %w", err)
-	}
-
-	// TODO check `timedatectl timesync-status` output
 
 	return nil
 }

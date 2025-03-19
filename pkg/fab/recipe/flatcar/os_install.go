@@ -83,7 +83,10 @@ func DoOSInstall(ctx context.Context, workDir string) error {
 			return fmt.Errorf("loading fabricator config: %w", err)
 		}
 
-		_, controls, nodes, err := fab.GetFabAndNodes(ctx, l.GetClient(), false)
+		_, controls, nodes, err := fab.GetFabAndNodes(ctx, l.GetClient(), fab.GetFabAndNodesOpts{
+			AllowNotHydrated: true,
+			AllowNoControls:  true,
+		})
 		if err != nil {
 			return fmt.Errorf("getting fabricator, controls and nodes: %w", err)
 		}

@@ -58,7 +58,7 @@ const (
 	FlagNameBuildMode             = "build-mode"
 	FlagNameBuildControls         = "build-controls"
 	FlagNameBuildGateways         = "build-gateways"
-	FlagNameControlUpgrade        = "control-upgrade"
+	FlagNameAutoUpgrade           = "auto-upgrade"
 	FlagNameFailFast              = "fail-fast"
 	FlagNameReady                 = "ready"
 	FlagNameCollectShowTech       = "collect-show-tech"
@@ -712,10 +712,10 @@ func Run(ctx context.Context) error {
 								Value:   true,
 							},
 							&cli.BoolFlag{
-								Name:    FlagNameControlUpgrade,
+								Name:    FlagNameAutoUpgrade,
 								Aliases: []string{"upgrade"},
-								Usage:   "force upgrade control node(s), expected to use after initial successful installation",
-								EnvVars: []string{"HHFAB_CONTROL_UPGRADE"},
+								Usage:   "automatically upgrade all node(s), expected to be used after initial successful installation",
+								EnvVars: []string{"HHFAB_AUTO_UPGRADE"},
 								Value:   false,
 							},
 							&cli.BoolFlag{
@@ -746,7 +746,7 @@ func Run(ctx context.Context) error {
 									ControlsRestricted: c.Bool(FlagNameControlsRestricted),
 									ServersRestricted:  c.Bool(FlagNameServersRestricted),
 									BuildMode:          recipe.BuildMode(c.String(FlagNameBuildMode)),
-									ControlUpgrade:     c.Bool(FlagNameControlUpgrade),
+									AutoUpgrade:        c.Bool(FlagNameAutoUpgrade),
 									FailFast:           c.Bool(FlagNameFailFast),
 									OnReady:            c.StringSlice(FlagNameReady),
 									CollectShowTech:    c.Bool(FlagNameCollectShowTech),

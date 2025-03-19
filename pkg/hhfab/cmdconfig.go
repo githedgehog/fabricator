@@ -137,7 +137,7 @@ func Init(ctx context.Context, c InitConfig) error {
 			return fmt.Errorf("loading config to import %q: loading: %w", c.ImportConfig, err)
 		}
 
-		if _, _, _, err := fab.GetFabAndNodes(ctx, l.GetClient(), true); err != nil {
+		if _, _, _, err := fab.GetFabAndNodes(ctx, l.GetClient(), fab.GetFabAndNodesOpts{AllowNotHydrated: true}); err != nil {
 			return fmt.Errorf("loading config to import %q: getting fabricator and controls nodes: %w", c.ImportConfig, err)
 		}
 
@@ -314,7 +314,7 @@ func load(ctx context.Context, workDir, cacheDir string, wiringAndHydration bool
 		return nil, fmt.Errorf("loading fab config: %w", err)
 	}
 
-	f, controls, nodes, err := fab.GetFabAndNodes(ctx, l.GetClient(), true)
+	f, controls, nodes, err := fab.GetFabAndNodes(ctx, l.GetClient(), fab.GetFabAndNodesOpts{AllowNotHydrated: true})
 	if err != nil {
 		return nil, fmt.Errorf("getting fabricator and controls nodes: %w", err)
 	}

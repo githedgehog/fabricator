@@ -1,0 +1,133 @@
+variant: flatcar
+version: 1.0.0
+
+passwd:
+  users:
+    - name: core
+      password_hash: "{{ .PasswordHash }}"
+      {{ if .AuthorizedKeys }}
+      ssh_authorized_keys:
+        {{ range .AuthorizedKeys}}
+        - "{{ . }}"
+        {{ end }}
+      {{ end }}
+      groups:
+        - wheel
+      shell: /bin/bash
+
+systemd:
+  units:
+    - name: locksmithd.service
+      mask: true
+{{ if .AutoInstall }}
+    - name: hhfab-install.service
+      enabled: true
+      contents: |
+        [Unit]
+        Description="Firstboot installation program for Hedgehog Fabricator"
+        ConditionPathExists=!/opt/hedgehog/.install
+        StartLimitIntervalSec=30
+        StartLimitBurst=3
+
+        [Service]
+        Type=simple
+        ExecStartPre=chmod +x {{ .AutoInstall }}/hhfab-recipe
+        ExecStart={{ .AutoInstall }}/hhfab-recipe install -v
+        WorkingDirectory={{ .AutoInstall }}
+        Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/bin" "HOME=/home/core"
+        Restart=on-failure
+
+        [Install]
+        WantedBy=first-boot-complete.target
+{{ end }}
+
+storage:
+  files:
+    - path: /etc/flatcar/update.conf
+      mode: 0644
+      overwrite: true
+      contents:
+        inline: |
+          SERVER=disabled
+          REBOOT_STRATEGY=off
+      # https://www.flatcar.org/docs/latest/setup/releases/update-strategies/#disable-automatic-updates
+
+    - path: /etc/hostname
+      mode: 0644
+      overwrite: true
+      contents:
+        inline: "{{ .Hostname }}"
+
+    - path: /etc/hosts
+      append:
+        - inline: |
+            127.0.0.1 {{ .Hostname }}
+
+    - path: /etc/motd.d/hedgehog.conf
+      mode: 0644
+      contents:
+        inline: |
+          Hedgehog Node managed by Fabricator
+
+    - path: /etc/systemd/network/10-dummy.netdev
+      mode: 0644
+      contents:
+        inline: |
+          [NetDev]
+          Name=dummy0
+          Kind=dummy
+
+    - path: /etc/systemd/network/11-dummy.network
+      mode: 0644
+      contents:
+        inline: |
+          [Match]
+          Name=dummy0
+
+          [Network]
+          Address={{ .DummyAddress }}
+
+          [Route]
+          Gateway={{ .DummyGateway }}
+          Destination=0.0.0.0/0
+          Metric=42000
+
+    - path: /etc/systemd/network/20-mgmt.network
+      mode: 0644
+      contents:
+        inline: |
+          [Match]
+          Name={{ .MgmtInterface }}
+          Type=ether
+
+          [Network]
+          Address={{ .MgmtAddress }}
+          DHCP=no
+          IPv6AcceptRA=no
+          IPv6SendRA=no
+          LLDP=yes
+          EmitLLDP=yes
+          ConfigureWithoutCarrier=yes
+
+    - path: /etc/systemd/network/99-default.network
+      mode: 0644
+      contents:
+        inline: |
+          [Network]
+          DHCP=no
+
+          [Match]
+          Name=*
+          Type=!loopback bridge tunnel vxlan wireguard
+          Driver=!veth dummy
+
+          [Link]
+          Unmanaged=true
+
+    - path: /etc/default/toolbox
+      mode: 0644
+      contents:
+        inline: |
+          TOOLBOX_DOCKER_IMAGE=ghcr.io/githedgehog/toolbox
+          TOOLBOX_DOCKER_TAG=latest
+          TOOLBOX_USER=root
