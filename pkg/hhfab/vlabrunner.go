@@ -85,7 +85,7 @@ type VLABRunOpts struct {
 	ControlsRestricted bool
 	ServersRestricted  bool
 	BuildMode          recipe.BuildMode
-	ControlUpgrade     bool
+	AutoUpgrade        bool
 	FailFast           bool
 	OnReady            []string
 	CollectShowTech    bool
@@ -215,7 +215,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 			}
 
 			resize := false
-			if vm.Type == VMTypeControl && opts.BuildMode == recipe.BuildModeManual || vm.Type == VMTypeServer || vm.Type == VMTypeGateway {
+			if (vm.Type == VMTypeControl || vm.Type == VMTypeGateway) && opts.BuildMode == recipe.BuildModeManual || vm.Type == VMTypeServer {
 				resize = true
 
 				if err := d.FromORAS(ctx, vmDir, vlabcomp.FlatcarRef, vlabcomp.FlatcarVersion(c.Fab), []artificer.ORASFile{
@@ -234,7 +234,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 				}); err != nil {
 					return fmt.Errorf("copying flatcar files: %w", err)
 				}
-			} else if vm.Type == VMTypeControl && (opts.BuildMode == recipe.BuildModeUSB || opts.BuildMode == recipe.BuildModeISO) {
+			} else if (vm.Type == VMTypeControl || vm.Type == VMTypeGateway) && (opts.BuildMode == recipe.BuildModeUSB || opts.BuildMode == recipe.BuildModeISO) {
 				if err := d.FromORAS(ctx, vmDir, vlabcomp.FlatcarRef, vlabcomp.FlatcarVersion(c.Fab), []artificer.ORASFile{
 					{
 						Name:   "flatcar_efi_code.fd",
@@ -254,11 +254,17 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 					return fmt.Errorf("creating empty os image: %w", err)
 				}
 
+				recipeType := string(recipe.TypeControl)
+				if vm.Type == VMTypeGateway {
+					recipeType = string(recipe.TypeNode)
+				}
+				fullName := recipeType + recipe.Separator + vm.Name
+
 				source, target := "", ""
 				if opts.BuildMode == recipe.BuildModeUSB {
-					source, target = string(recipe.TypeControl)+recipe.Separator+vm.Name+recipe.Separator+recipe.InstallUSBImageSuffix, VLABUSBImageFile
+					source, target = fullName+recipe.Separator+recipe.InstallUSBImageSuffix, VLABUSBImageFile
 				} else if opts.BuildMode == recipe.BuildModeISO {
-					source, target = string(recipe.TypeControl)+recipe.Separator+vm.Name+recipe.Separator+recipe.InstallISOImageSuffix, VLABISOImageFile
+					source, target = fullName+recipe.Separator+recipe.InstallISOImageSuffix, VLABISOImageFile
 				}
 				if err := artificer.CopyFile(
 					filepath.Join(c.WorkDir, ResultDir, source),
@@ -297,7 +303,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 				}
 			}
 
-			if vm.Type == VMTypeServer || vm.Type == VMTypeGateway {
+			if vm.Type == VMTypeServer {
 				ign, err := serverIgnition(c.Fab, vm)
 				if err != nil {
 					return fmt.Errorf("generating ignition: %w", err)
@@ -344,24 +350,26 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 			// -daemonize
 			// -pidfile
 
-			if vm.Type == VMTypeControl && opts.BuildMode == recipe.BuildModeManual || vm.Type == VMTypeServer || vm.Type == VMTypeGateway {
+			if (vm.Type == VMTypeControl || vm.Type == VMTypeGateway) && opts.BuildMode == recipe.BuildModeManual || vm.Type == VMTypeServer {
 				ign := VLABIgnition
 				if vm.Type == VMTypeControl {
 					ign = filepath.Join(c.WorkDir, ResultDir, string(recipe.TypeControl)+recipe.Separator+vm.Name+recipe.Separator+recipe.InstallIgnitionSuffix)
+				} else if vm.Type == VMTypeGateway {
+					ign = filepath.Join(c.WorkDir, ResultDir, string(recipe.TypeNode)+recipe.Separator+vm.Name+recipe.Separator+recipe.InstallIgnitionSuffix)
 				}
 				args = append(args,
 					"-fw_cfg", "name=opt/org.flatcar-linux/config,file="+ign,
 				)
 			}
 
-			if vm.Type == VMTypeControl && opts.BuildMode == recipe.BuildModeUSB {
+			if (vm.Type == VMTypeControl || vm.Type == VMTypeGateway) && opts.BuildMode == recipe.BuildModeUSB {
 				args = append(args,
 					"-drive", fmt.Sprintf("if=none,format=raw,file=%s,id=disk2", VLABUSBImageFile),
 					"-device", "virtio-blk-pci,drive=disk2,bootindex=2",
 				)
 			}
 
-			if vm.Type == VMTypeControl && opts.BuildMode == recipe.BuildModeISO {
+			if (vm.Type == VMTypeControl || vm.Type == VMTypeGateway) && opts.BuildMode == recipe.BuildModeISO {
 				args = append(args,
 					"-device", "virtio-scsi-pci,id=scsi0",
 					"-device", "scsi-cd,bus=scsi0.0,drive=cdrom0,bootindex=2",
@@ -547,7 +555,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 				case OnReadyInspect:
 					if err := c.Inspect(ctx, vlab, InspectOpts{
 						WaitAppliedFor: 2 * time.Minute,
-						Strict:         !opts.ControlUpgrade,
+						Strict:         !opts.AutoUpgrade,
 					}); err != nil {
 						slog.Warn("Failed to inspect", "err", err)
 
@@ -679,14 +687,14 @@ func serverIgnition(fab fabapi.Fabricator, vm VM) ([]byte, error) {
 }
 
 func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Downloader, vm VM, opts VLABRunOpts) error {
-	if vm.Type != VMTypeServer && vm.Type != VMTypeControl {
+	if vm.Type != VMTypeServer && vm.Type != VMTypeControl && vm.Type != VMTypeGateway {
 		return nil
 	}
 
 	slog.Debug("Waiting for VM to be ready", "vm", vm.Name, "type", vm.Type)
 
 	timeout := 10 * time.Minute
-	if vm.Type == VMTypeControl {
+	if vm.Type == VMTypeControl || vm.Type == VMTypeGateway {
 		timeout = 40 * time.Minute
 	}
 
@@ -784,63 +792,71 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 		if _, err := client.RunContext(ctx, "bash -c 'toolbox hostname'"); err != nil {
 			return fmt.Errorf("trying toolbox: %w", err)
 		}
-	} else if vm.Type == VMTypeControl {
-		if opts.BuildMode == recipe.BuildModeManual || opts.ControlUpgrade {
+	} else if vm.Type == VMTypeControl || vm.Type == VMTypeGateway {
+		if opts.BuildMode == recipe.BuildModeManual || opts.AutoUpgrade {
 			marker, err := sshReadMarker(sftp)
 			if err != nil && !errors.Is(err, os.ErrNotExist) {
 				return fmt.Errorf("checking for install marker: %w", err)
 			}
 			if err == nil && marker != recipe.InstallMarkerComplete {
-				slog.Error("Control node install was already attempted but not completed", "vm", vm.Name, "type", vm.Type, "marker", marker)
+				slog.Error("Node install was already attempted but not completed", "vm", vm.Name, "type", vm.Type, "marker", marker)
 
 				return fmt.Errorf("not complete install marker: %q", marker) //nolint:goerr113
 			}
-			if err == nil && !opts.ControlUpgrade && marker == recipe.InstallMarkerComplete {
-				slog.Info("Control node install was already completed", "vm", vm.Name, "type", vm.Type)
+			if err == nil && !opts.AutoUpgrade && marker == recipe.InstallMarkerComplete {
+				slog.Info("Node install was already completed", "vm", vm.Name, "type", vm.Type)
 			} else {
-				slog.Info("Uploading control install", "vm", vm.Name, "type", vm.Type)
+				slog.Info("Uploading installer", "vm", vm.Name, "type", vm.Type)
 
-				if out, err := client.RunContext(ctx, fmt.Sprintf("bash -c 'rm -rf %s*'", vm.Name)); err != nil {
-					return fmt.Errorf("removing previous control install: %w: %s", err, string(out))
+				recipeType := string(recipe.TypeControl)
+				if vm.Type == VMTypeGateway {
+					recipeType = string(recipe.TypeNode)
+				}
+				fullName := recipeType + recipe.Separator + vm.Name
+
+				if out, err := client.RunContext(ctx, fmt.Sprintf("bash -c 'rm -rf %s*'", fullName+recipe.Separator)); err != nil {
+					return fmt.Errorf("removing previous installer: %w: %s", err, string(out))
 				}
 
-				installName := string(recipe.TypeControl) + recipe.Separator + vm.Name + recipe.Separator + recipe.InstallSuffix
-				installArchive := string(recipe.TypeControl) + recipe.Separator + vm.Name + recipe.Separator + recipe.InstallArchiveSuffix
+				installArchive := fullName + recipe.Separator + recipe.InstallArchiveSuffix
 				local := filepath.Join(c.WorkDir, ResultDir, installArchive)
 				remote := filepath.Join(flatcar.Home, installArchive)
 				if err := client.Upload(local, remote); err != nil {
-					return fmt.Errorf("uploading control install: %w", err)
+					return fmt.Errorf("uploading installer: %w", err)
 				}
 
 				if out, err := client.RunContext(ctx, fmt.Sprintf("bash -c 'tar xzf %s'", remote)); err != nil {
-					return fmt.Errorf("extracting control install: %w: %s", err, string(out))
+					return fmt.Errorf("extracting installer: %w: %s", err, string(out))
 				}
 
 				mode := "install"
-				if opts.ControlUpgrade {
+				if opts.AutoUpgrade {
 					mode = "upgrade"
 				}
 
-				slog.Info("Running control "+mode, "vm", vm.Name, "type", vm.Type)
-				installCmd := fmt.Sprintf("cd %s && sudo ./%s control "+mode, installName, recipe.RecipeBin)
+				slog.Info("Running node "+mode, "vm", vm.Name, "type", vm.Type)
+				installName := fullName + recipe.Separator + recipe.InstallSuffix
+				installCmd := fmt.Sprintf("cd %s && sudo ./%s "+mode, installName, recipe.RecipeBin)
 				if slog.Default().Enabled(ctx, slog.LevelDebug) {
 					installCmd += " -v"
 				}
-				if err := sshExec(ctx, vm, client, installCmd, "control-"+mode, slog.Info); err != nil {
-					return fmt.Errorf("running control %s: %w", mode, err)
+				if err := sshExec(ctx, vm, client, installCmd, mode+"("+vm.Name+")", slog.Info); err != nil {
+					return fmt.Errorf("running node %s: %w", mode, err)
 				}
-				slog.Info("Control "+mode+" completed", "vm", vm.Name, "type", vm.Type)
+				slog.Info("Node "+mode+" completed", "vm", vm.Name, "type", vm.Type)
 			}
 		} else {
-			slog.Debug("Waiting for control node to be auto installed (via USB)", "vm", vm.Name, "type", vm.Type)
+			slog.Debug("Waiting for node to be auto installed (via image)", "vm", vm.Name, "type", vm.Type)
 
 			ctx, cancel := context.WithCancel(ctx)
 			defer cancel()
 
 			if slog.Default().Enabled(ctx, slog.LevelInfo) {
 				go func() {
-					if err := sshExec(ctx, vm, client, "journalctl -n 100 -fu hhfab-install.service", "hhfab-install", slog.Info); err != nil {
-						slog.Info("Journalctl on control node failed", "vm", vm.Name, "type", vm.Type, "err", err)
+					if err := sshExec(ctx, vm, client, "journalctl -n 100 -fu hhfab-install.service", "hhfab-install("+vm.Name+")", slog.Info); err != nil {
+						if !errors.Is(err, context.Canceled) {
+							slog.Debug("Journalctl on control node failed", "vm", vm.Name, "type", vm.Type, "err", err)
+						}
 					}
 				}()
 			}
@@ -869,66 +885,66 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 			}
 		}
 
-		slog.Debug("Control node install marker is complete", "vm", vm.Name, "type", vm.Type)
+		slog.Debug("Node install marker is complete", "vm", vm.Name, "type", vm.Type)
 
-		kubeconfig := filepath.Join(c.WorkDir, VLABDir, VLABKubeConfig)
-		if err := client.Download(k3s.KubeConfigPath, kubeconfig); err != nil {
-			return fmt.Errorf("downloading kubeconfig: %w", err)
-		}
-		slog.Debug("Control node kubeconfig is downloaded", "path", kubeconfig, "vm", vm.Name, "type", vm.Type)
+		if vm.Type == VMTypeControl {
+			kubeconfig := filepath.Join(c.WorkDir, VLABDir, VLABKubeConfig)
+			if err := client.Download(k3s.KubeConfigPath, kubeconfig); err != nil {
+				return fmt.Errorf("downloading kubeconfig: %w", err)
+			}
+			slog.Debug("Control node kubeconfig is downloaded", "path", kubeconfig, "vm", vm.Name, "type", vm.Type)
 
-		slog.Info("Waiting for K8s API to be ready", "vm", vm.Name, "type", vm.Type)
-		api := false
-		var apiErr error
-		for !api {
-			if apiErr != nil {
-				select {
-				case <-ctx.Done():
-					slog.Error("Failed to wait for k8s api", "vm", vm.Name, "type", vm.Type, "err", apiErr)
+			slog.Info("Waiting for K8s API to be ready", "vm", vm.Name, "type", vm.Type)
+			api := false
+			var apiErr error
+			for !api {
+				if apiErr != nil {
+					select {
+					case <-ctx.Done():
+						slog.Error("Failed to wait for k8s api", "vm", vm.Name, "type", vm.Type, "err", apiErr)
 
-					return fmt.Errorf("cancelled while waiting for k8s api: %w", ctx.Err())
-				case <-time.After(5 * time.Second):
+						return fmt.Errorf("cancelled while waiting for k8s api: %w", ctx.Err())
+					case <-time.After(5 * time.Second):
+					}
 				}
+
+				kube, err := kubeutil.NewClient(ctx, kubeconfig, fabapi.SchemeBuilder)
+				if err != nil {
+					apiErr = err
+					slog.Debug("Failed to create kube client", "err", err)
+
+					continue
+				}
+
+				fabs := &fabapi.FabricatorList{}
+				if err := kube.List(ctx, fabs); err != nil {
+					apiErr = err
+					slog.Debug("Failed to list fabricator configs", "vm", vm.Name, "type", vm.Type, "err", err)
+
+					continue
+				}
+
+				if len(fabs.Items) == 0 {
+					apiErr = fmt.Errorf("no fabricator configs found") //nolint:goerr113
+					slog.Debug("No fabricator configs found", "vm", vm.Name, "type", vm.Type)
+
+					continue
+				}
+
+				if len(fabs.Items) > 1 {
+					return fmt.Errorf("multiple fabricator configs found") //nolint:goerr113
+				}
+
+				if fabs.Items[0].Name != comp.FabName || fabs.Items[0].Namespace != comp.FabNamespace {
+					return fmt.Errorf("fabricator config mismatch: got %s/%s, want %s/%s", fabs.Items[0].Namespace, fabs.Items[0].Name, comp.FabNamespace, comp.FabName) //nolint:goerr113
+				}
+
+				apiErr = nil
+				api = true
+
+				slog.Debug("K8s API on control node is ready", "vm", vm.Name, "type", vm.Type)
 			}
-
-			kube, err := kubeutil.NewClient(ctx, kubeconfig, fabapi.SchemeBuilder)
-			if err != nil {
-				apiErr = err
-				slog.Debug("Failed to create kube client", "err", err)
-
-				continue
-			}
-
-			fabs := &fabapi.FabricatorList{}
-			if err := kube.List(ctx, fabs); err != nil {
-				apiErr = err
-				slog.Debug("Failed to list fabricator configs", "vm", vm.Name, "type", vm.Type, "err", err)
-
-				continue
-			}
-
-			if len(fabs.Items) == 0 {
-				apiErr = fmt.Errorf("no fabricator configs found") //nolint:goerr113
-				slog.Debug("No fabricator configs found", "vm", vm.Name, "type", vm.Type)
-
-				continue
-			}
-
-			if len(fabs.Items) > 1 {
-				return fmt.Errorf("multiple fabricator configs found") //nolint:goerr113
-			}
-
-			if fabs.Items[0].Name != comp.FabName || fabs.Items[0].Namespace != comp.FabNamespace {
-				return fmt.Errorf("fabricator config mismatch: got %s/%s, want %s/%s", fabs.Items[0].Namespace, fabs.Items[0].Name, comp.FabNamespace, comp.FabName) //nolint:goerr113
-			}
-
-			apiErr = nil
-			api = true
-
-			slog.Debug("K8s API is ready", "vm", vm.Name, "type", vm.Type)
 		}
-
-		slog.Info("Control node is ready", "vm", vm.Name, "type", vm.Type)
 	}
 
 	slog.Debug("VM is ready", "vm", vm.Name, "type", vm.Type)

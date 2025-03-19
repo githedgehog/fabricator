@@ -337,7 +337,7 @@ func TestInitConfig(t *testing.T) {
 			l := apiutil.NewFabLoader()
 			require.NoError(t, l.LoadAdd(ctx, data))
 
-			f, controls, nodes, err := fab.GetFabAndNodes(ctx, l.GetClient(), true)
+			f, controls, nodes, err := fab.GetFabAndNodes(ctx, l.GetClient(), fab.GetFabAndNodesOpts{AllowNotHydrated: true})
 			if test.validErr {
 				require.Error(t, err)
 

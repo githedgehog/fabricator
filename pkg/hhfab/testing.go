@@ -1203,7 +1203,7 @@ func WaitSwitchesReady(ctx context.Context, kube client.Reader, appliedFor time.
 		defer cancel()
 	}
 
-	f, _, _, err := fab.GetFabAndNodes(ctx, kube, true)
+	f, _, _, err := fab.GetFabAndNodes(ctx, kube, fab.GetFabAndNodesOpts{AllowNotHydrated: true})
 	if err != nil {
 		return fmt.Errorf("getting fab: %w", err)
 	}
