@@ -32,9 +32,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-//go:embed control_butane.tmpl.yaml
-var controlButaneTmpl string
-
 type ControlInstallBuilder struct {
 	WorkDir    string
 	Fab        fabapi.Fabricator
@@ -73,7 +70,7 @@ func (b *ControlInstallBuilder) Build(ctx context.Context) error {
 		Mode:                  b.Mode,
 		Hash:                  hash,
 		AddPayload:            b.addPayload,
-		BuildIgnition:         b.controlIgnition,
+		BuildIgnition:         b.buildIgnition,
 		Downloader:            b.Downloader,
 		FlatcarUSBRootVersion: b.Fab.Status.Versions.Fabricator.ControlUSBRoot,
 	})
@@ -194,7 +191,10 @@ func (b *ControlInstallBuilder) addPayload(ctx context.Context, slog *slog.Logge
 	return nil
 }
 
-func (b *ControlInstallBuilder) controlIgnition() ([]byte, error) {
+//go:embed control_butane.tmpl.yaml
+var controlButaneTmpl string
+
+func (b *ControlInstallBuilder) buildIgnition() ([]byte, error) {
 	autoInstallPath := filepath.Join(OSTargetInstallDir, string(TypeControl)+Separator+b.Control.Name+Separator+InstallSuffix)
 	if b.Mode == BuildModeManual {
 		autoInstallPath = ""
@@ -208,7 +208,7 @@ func (b *ControlInstallBuilder) controlIgnition() ([]byte, error) {
 		return nil, fmt.Errorf("dummy IP must be a /31") //nolint:goerr113
 	}
 
-	but, err := tmplutil.FromTemplate("butane", controlButaneTmpl, map[string]any{
+	but, err := tmplutil.FromTemplate("control-butane", controlButaneTmpl, map[string]any{
 		"Hostname":       b.Control.Name,
 		"PasswordHash":   b.Fab.Spec.Config.Control.DefaultUser.PasswordHash,
 		"AuthorizedKeys": b.Fab.Spec.Config.Control.DefaultUser.AuthorizedKeys,
