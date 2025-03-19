@@ -28,7 +28,8 @@ type NodeInstall struct {
 func (c *NodeInstall) Run(ctx context.Context) error {
 	slog.Info("Running node installation", "name", c.Node.Name, "roles", c.Node.Spec.Roles)
 
-	slog.Info("Wait for registry to become available")
+	// TODO dedup
+	slog.Info("Wait for registry on control node(s)")
 
 	regURL, err := comp.RegistryURL(c.Fab)
 	if err != nil {
@@ -39,7 +40,12 @@ func (c *NodeInstall) Run(ctx context.Context) error {
 		return fmt.Errorf("waiting for zot endpoint: %w", err)
 	}
 
-	if err := setupTimesync(ctx, c.Fab.Spec.Config.Control.VIP); err != nil {
+	controlVIP, err := c.Fab.Spec.Config.Control.VIP.Parse()
+	if err != nil {
+		return fmt.Errorf("parsing control VIP: %w", err)
+	}
+
+	if err := setupTimesync(ctx, controlVIP.Addr().String()); err != nil {
 		return fmt.Errorf("setting up timesync: %w", err)
 	}
 
