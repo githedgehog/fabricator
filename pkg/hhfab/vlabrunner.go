@@ -869,7 +869,7 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 
 			if slog.Default().Enabled(ctx, slog.LevelInfo) {
 				go func() {
-					if err := ssh.StreamLog(ctx, "journalctl -n 100 -fu hhfab-install.service", "hhfab-install("+vm.Name+")", slog.Info, 30*time.Minute); err != nil {
+					if err := ssh.StreamLog(ctx, "journalctl -n 100 -fu hhfab-install.service", "install("+vm.Name+")", slog.Info, 30*time.Minute); err != nil {
 						if !errors.Is(err, context.Canceled) {
 							slog.Debug("Journalctl on control node exited", "vm", vm.Name, "type", vm.Type, "err", err)
 						}
