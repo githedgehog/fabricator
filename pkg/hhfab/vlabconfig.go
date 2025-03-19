@@ -248,6 +248,12 @@ func (c *Config) PrepareVLAB(ctx context.Context, opts VLABUpOpts) (*VLAB, error
 		}
 	}
 
+	for idx := range c.Nodes {
+		if !isHardware(&c.Nodes[idx]) {
+			c.Nodes[idx].Spec.Bootstrap.Disk = "/dev/vda"
+		}
+	}
+
 	if !createCfg {
 		slog.Info("VLAB config loaded", "file", filepath.Join(VLABDir, VLABConfigFile))
 	}
