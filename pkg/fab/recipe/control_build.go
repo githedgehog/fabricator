@@ -46,9 +46,8 @@ type ControlInstallBuilder struct {
 }
 
 const (
-	BuildTypeControl = "control"
-	FabName          = "fab.yaml"
-	WiringName       = "wiring.yaml"
+	FabName    = "fab.yaml"
+	WiringName = "wiring.yaml"
 )
 
 var AirgapArtifactLists = []comp.ListOCIArtifacts{
@@ -70,7 +69,7 @@ func (b *ControlInstallBuilder) Build(ctx context.Context) error {
 	return buildInstall(ctx, buildInstallOpts{
 		WorkDir:               b.WorkDir,
 		Name:                  b.Control.Name,
-		Type:                  BuildTypeControl,
+		Type:                  TypeControl,
 		Mode:                  b.Mode,
 		Hash:                  hash,
 		AddPayload:            b.addPayload,
@@ -196,7 +195,7 @@ func (b *ControlInstallBuilder) addPayload(ctx context.Context, slog *slog.Logge
 }
 
 func (b *ControlInstallBuilder) controlIgnition() ([]byte, error) {
-	autoInstallPath := filepath.Join(OSTargetInstallDir, BuildTypeControl+Separator+b.Control.Name+Separator+InstallSuffix)
+	autoInstallPath := filepath.Join(OSTargetInstallDir, string(TypeControl)+Separator+b.Control.Name+Separator+InstallSuffix)
 	if b.Mode == BuildModeManual {
 		autoInstallPath = ""
 	}
