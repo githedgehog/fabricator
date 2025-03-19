@@ -53,7 +53,7 @@ const (
 type buildInstallOpts struct {
 	WorkDir               string
 	Name                  string
-	Type                  string
+	Type                  Type
 	Mode                  BuildMode
 	Hash                  string
 	AddPayload            func(ctx context.Context, slog *slog.Logger, installDir string) error
@@ -69,7 +69,7 @@ func buildInstall(ctx context.Context, opts buildInstallOpts) error {
 
 	slog := slog.With("name", opts.Name, "type", opts.Type, "mode", opts.Mode)
 
-	fullName := opts.Type + Separator + opts.Name + Separator
+	fullName := string(opts.Type) + Separator + opts.Name + Separator
 	installDir := filepath.Join(opts.WorkDir, fullName+InstallSuffix)
 	installArchive := filepath.Join(opts.WorkDir, fullName+InstallArchiveSuffix)
 	installIgnition := filepath.Join(opts.WorkDir, fullName+InstallIgnitionSuffix)
@@ -122,13 +122,17 @@ func buildInstall(ctx context.Context, opts buildInstallOpts) error {
 
 	slog.Info("Building installer")
 
-	slog.Info("Adding recipe bin to installer")
+	slog.Info("Adding recipe bin and config to installer")
 	recipeBin, err := recipebin.Bytes()
 	if err != nil {
 		return fmt.Errorf("getting recipe bin: %w", err)
 	}
 	if err := os.WriteFile(filepath.Join(installDir, RecipeBin), recipeBin, 0o700); err != nil { //nolint:gosec
 		return fmt.Errorf("writing recipe bin: %w", err)
+	}
+
+	if err := (&Config{Type: opts.Type, Name: opts.Name}).Save(installDir); err != nil {
+		return fmt.Errorf("saving recipe config: %w", err)
 	}
 
 	if err := opts.AddPayload(ctx, slog, installDir); err != nil {
@@ -186,7 +190,7 @@ func buildUSBImage(ctx context.Context, opts buildInstallOpts) error {
 
 	slog.Info("Building installer image, may take up to 5-10 minutes")
 
-	fullName := opts.Type + Separator + opts.Name + Separator
+	fullName := string(opts.Type) + Separator + opts.Name + Separator
 	installUSBImage := filepath.Join(opts.WorkDir, fullName+InstallUSBImageSuffix)
 	installISOImage := filepath.Join(opts.WorkDir, fullName+InstallISOImageSuffix)
 

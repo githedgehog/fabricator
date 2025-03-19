@@ -11,7 +11,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/samber/lo"
 	"go.githedgehog.com/fabric/pkg/util/logutil"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab"
@@ -23,7 +25,7 @@ const (
 	MountDir = "/mnt/rootdir"
 )
 
-func DoControlOSInstall(ctx context.Context, workDir string) error {
+func DoOSInstall(ctx context.Context, workDir string) error {
 	dirEntries, err := os.ReadDir(workDir)
 	if err != nil {
 		return fmt.Errorf("reading workdir %q: %w", workDir, err)
@@ -37,20 +39,43 @@ func DoControlOSInstall(ctx context.Context, workDir string) error {
 			continue
 		}
 
-		fabPath := filepath.Join(workDir, dirEntry.Name(), recipe.FabName)
+		installDir := filepath.Join(workDir, dirEntry.Name())
+
+		slog.Debug("Found install dir", "path", installDir)
+
+		fabPath := filepath.Join(installDir, recipe.FabName)
 		if _, err := os.Stat(fabPath); err != nil {
 			if os.IsNotExist(err) {
+				slog.Debug("Fabricator config not found", "path", fabPath)
+
 				continue
 			}
 
-			return fmt.Errorf("stat %q: %w", fabPath, err)
+			return fmt.Errorf("stat fab config %q: %w", fabPath, err)
+		}
+
+		configPath := filepath.Join(installDir, recipe.ConfigName)
+		if _, err := os.Stat(configPath); err != nil {
+			if os.IsNotExist(err) {
+				slog.Debug("Recipe config not found", "path", configPath)
+
+				continue
+			}
+
+			return fmt.Errorf("stat recipe config %q: %w", configPath, err)
+		}
+
+		slog.Info("Loading recipe config", "path", configPath)
+
+		cfg, err := recipe.LoadConfig(installDir)
+		if err != nil {
+			return fmt.Errorf("loading recipe config: %w", err)
 		}
 
 		slog.Info("Loading Fabricator config", "path", fabPath)
-		installDir := filepath.Join(workDir, dirEntry.Name())
 
 		l := apiutil.NewFabLoader()
-		fabData, err := os.ReadFile(filepath.Join(installDir, recipe.FabName))
+		fabData, err := os.ReadFile(fabPath)
 		if err != nil {
 			return fmt.Errorf("reading fabricator config: %w", err)
 		}
@@ -58,39 +83,78 @@ func DoControlOSInstall(ctx context.Context, workDir string) error {
 			return fmt.Errorf("loading fabricator config: %w", err)
 		}
 
-		f, controls, _, err := fab.GetFabAndNodes(ctx, l.GetClient(), false)
+		_, controls, nodes, err := fab.GetFabAndNodes(ctx, l.GetClient(), false)
 		if err != nil {
-			return fmt.Errorf("getting fabricator and controls: %w", err)
+			return fmt.Errorf("getting fabricator, controls and nodes: %w", err)
 		}
-		if len(controls) != 1 {
-			return fmt.Errorf("expected exactly one control node, got %d", len(controls)) //nolint:goerr113
+		if len(controls) > 1 {
+			return fmt.Errorf("only one control node supported, got %d", len(controls)+len(nodes)) //nolint:goerr113
 		}
 
-		return (&ControlOSInstal{
+		found := false
+		targetDisk := ""
+		role := ""
+
+		if cfg.Type == recipe.TypeControl {
+			for _, control := range controls {
+				if control.Name != cfg.Name {
+					continue
+				}
+
+				found = true
+				targetDisk = control.Spec.Bootstrap.Disk
+				role = "control"
+			}
+		}
+
+		if cfg.Type == recipe.TypeNode {
+			for _, node := range nodes {
+				if node.Name != cfg.Name {
+					continue
+				}
+
+				found = true
+				targetDisk = node.Spec.Bootstrap.Disk
+				if len(node.Spec.Roles) > 0 {
+					role = strings.Join(lo.Map(node.Spec.Roles, func(role fabapi.NodeRole, _ int) string {
+						return string(role)
+					}), ",")
+				}
+			}
+		}
+
+		if !found {
+			return fmt.Errorf("no expected %s/%s node or control node found in fabricator config", cfg.Type, cfg.Name) //nolint:goerr113
+		}
+
+		slog.Info("Installing", "name", cfg.Name, "type", cfg.Type, "role", role, "disk", targetDisk)
+
+		return (&OSInstal{
 			WorkDir:    workDir,
 			InstallDir: installDir,
-			Fab:        f,
-			Control:    controls[0],
+			TargetDisk: targetDisk,
 		}).Run(ctx)
 	}
 
-	return nil
+	return fmt.Errorf("no install dirs found in %q", workDir) //nolint:goerr113
 }
 
-type ControlOSInstal struct {
+type OSInstal struct {
 	WorkDir    string
+	TargetDisk string
 	InstallDir string
-	Fab        fabapi.Fabricator
-	Control    fabapi.ControlNode
 }
 
-func (i *ControlOSInstal) Run(ctx context.Context) error {
+func (i *OSInstal) Run(ctx context.Context) error {
+	if i.TargetDisk == "" {
+		return fmt.Errorf("no target disk found in fabricator config") //nolint:goerr113
+	}
+
 	ignition := filepath.Join(i.WorkDir, recipe.IgnitionFile)
-	dev := i.Control.Spec.Bootstrap.Disk
 	img := filepath.Join(i.WorkDir, "flatcar_production_image.bin.bz2") // TODO const
 
-	if err := i.execCmd(ctx, true, "lsblk", dev); err != nil {
-		return fmt.Errorf("checking disk %q: %w", dev, err)
+	if err := i.execCmd(ctx, true, "lsblk", i.TargetDisk); err != nil {
+		return fmt.Errorf("checking disk %q: %w", i.TargetDisk, err)
 	}
 
 	// TODO find a better way to avoid flatcar-install hanging
@@ -111,22 +175,22 @@ func (i *ControlOSInstal) Run(ctx context.Context) error {
 		}
 	}
 
-	slog.Info("Installing Flatcar", "dev", dev)
-	if err := i.execCmd(ctx, true, "/tmp/flatcar-install", "-i", ignition, "-d", dev, "-f", img); err != nil {
+	slog.Info("Installing Flatcar", "dev", i.TargetDisk)
+	if err := i.execCmd(ctx, true, "/tmp/flatcar-install", "-i", ignition, "-d", i.TargetDisk, "-f", img); err != nil {
 		return fmt.Errorf("installing flatcar: %w", err)
 	}
 
-	if err := i.execCmd(ctx, true, "partprobe", dev); err != nil {
+	if err := i.execCmd(ctx, true, "partprobe", i.TargetDisk); err != nil {
 		return fmt.Errorf("partprobing: %w", err)
 	}
 
-	slog.Info("Expanding On-disk root parition", "dev", dev)
+	slog.Info("Expanding On-disk root parition", "dev", i.TargetDisk)
 	// have to delete existing partition
-	if err := i.execCmd(ctx, true, "sgdisk", "--delete=9", dev); err != nil {
+	if err := i.execCmd(ctx, true, "sgdisk", "--delete=9", i.TargetDisk); err != nil {
 		return fmt.Errorf("deleting partition 9 from existing block device: %w", err)
 	}
 
-	if err := i.execCmd(ctx, true, "partprobe", dev); err != nil {
+	if err := i.execCmd(ctx, true, "partprobe", i.TargetDisk); err != nil {
 		return fmt.Errorf("partprobing: %w", err)
 	}
 
@@ -134,30 +198,31 @@ func (i *ControlOSInstal) Run(ctx context.Context) error {
 	// not expected to change often, disk_layout is set by flatcar
 	// The typecode listed here is a UUID that flatcar uses - https://github.com/flatcar/init/blob/flatcar-master/scripts/extend-filesystems#L15
 	// Called COREOS_RESIZE, we are doing a small expand, then letting the installer exapand to the full disk size.
-	if err := i.execCmd(ctx, true, "sgdisk", "--new=9:4857856:+9G", "--typecode=9:3884dd41-8582-4404-b9a8-e9b84f2df50e", dev); err != nil {
+	if err := i.execCmd(ctx, true, "sgdisk", "--new=9:4857856:+9G", "--typecode=9:3884dd41-8582-4404-b9a8-e9b84f2df50e", i.TargetDisk); err != nil {
 		return fmt.Errorf("creating partition 9 on existing block device: %w", err)
 	}
 
-	if err := i.execCmd(ctx, true, "partprobe", dev); err != nil {
+	if err := i.execCmd(ctx, true, "partprobe", i.TargetDisk); err != nil {
 		return fmt.Errorf("partprobing: %w", err)
 	}
 
 	// The partition resize didn't wipe out the exisiting filesystem so we don't
 	// need to remake it, just expand the one that is on disk already. In our
 	// case we just moving the end of it, not the start
+	// 9 is the partition number for the root partition
 	partition := "9"
-	if strings.Contains(dev, "nvme") {
+	if strings.Contains(i.TargetDisk, "nvme") {
 		partition = "p9"
 	}
 	// "-f" in this case is force the check, even if the file system seems clean
-	if err := i.execCmd(ctx, true, "e2fsck", "-f", "-p", dev+partition); err != nil {
+	if err := i.execCmd(ctx, true, "e2fsck", "-f", "-p", i.TargetDisk+partition); err != nil {
 		return fmt.Errorf("e2fsck filesystem on partition 9 on existing block device: %w", err)
 	}
-	if err := i.execCmd(ctx, true, "resize2fs", dev+partition); err != nil {
+	if err := i.execCmd(ctx, true, "resize2fs", i.TargetDisk+partition); err != nil {
 		return fmt.Errorf("resizing filesystem on partition 9 on existing block device: %w", err)
 	}
 
-	if err := i.execCmd(ctx, true, "partprobe", dev); err != nil {
+	if err := i.execCmd(ctx, true, "partprobe", i.TargetDisk); err != nil {
 		return fmt.Errorf("partprobing: %w", err)
 	}
 
@@ -165,8 +230,7 @@ func (i *ControlOSInstal) Run(ctx context.Context) error {
 		return fmt.Errorf("creating mount dir: %w", err)
 	}
 
-	// 9 is the partition number for the root partition
-	if err := i.execCmd(ctx, true, "mount", "-t", "auto", dev+partition, MountDir); err != nil {
+	if err := i.execCmd(ctx, true, "mount", "-t", "auto", i.TargetDisk+partition, MountDir); err != nil {
 		return fmt.Errorf("mounting root: %w", err)
 	}
 
@@ -175,16 +239,19 @@ func (i *ControlOSInstal) Run(ctx context.Context) error {
 		return fmt.Errorf("creating target dir: %w", err)
 	}
 
-	slog.Info("Uploading control installer to installed Flatcar")
+	slog.Info("Uploading installer to installed Flatcar")
 	if err := i.execCmd(ctx, true, "rsync", "-azP", i.InstallDir, target); err != nil {
-		return fmt.Errorf("rsyncing control-install: %w", err)
+		return fmt.Errorf("rsyncing installer: %w", err)
 	}
 
 	if err := i.execCmd(ctx, true, "umount", MountDir); err != nil {
 		return fmt.Errorf("unmounting root: %w", err)
 	}
 
-	slog.Info("Rebooting to installed Flatcar, USB drive can be removed")
+	slog.Info("Rebooting to installed Flatcar in 5 seconds, USB drive can be removed")
+
+	time.Sleep(5 * time.Second)
+
 	if err := i.execCmd(ctx, true, "shutdown", "-r", "now", "Flatcar installed, rebooting to installed system"); err != nil {
 		return fmt.Errorf("rebooting: %w", err)
 	}
@@ -192,7 +259,7 @@ func (i *ControlOSInstal) Run(ctx context.Context) error {
 	return nil
 }
 
-func (i *ControlOSInstal) execCmd(ctx context.Context, sudo bool, cmdName string, args ...string) error { //nolint:unparam
+func (i *OSInstal) execCmd(ctx context.Context, sudo bool, cmdName string, args ...string) error { //nolint:unparam
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
