@@ -44,7 +44,7 @@ _hhfab_embed: _touch_embed _butane
   # Build flatcar oem.cpio.gz for embedding
   @mkdir -p {{oem_dir}}/usr/share/oem
   {{go_linux_build}} -o {{oem_dir}}/hhfab-flatcar-install ./cmd/hhfab-flatcar-install
-  {{butane}} --strict --output {{oem_dir}}/usr/share/oem/config.ign --files-dir {{oem_dir}} ./pkg/fab/recipe/control_build_usb_butane.yaml
+  {{butane}} --strict --output {{oem_dir}}/usr/share/oem/config.ign --files-dir {{oem_dir}} ./pkg/fab/recipe/flatcar/os_install_butane.yaml
   cd {{oem_dir}} && find usr | cpio -o -H newc | gzip -f > oem.cpio.gz
 
 _kube_gen: _controller_gen
