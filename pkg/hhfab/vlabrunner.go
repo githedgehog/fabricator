@@ -839,7 +839,7 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 
 			if slog.Default().Enabled(ctx, slog.LevelInfo) {
 				go func() {
-					if err := sshExec(ctx, vm, client, "journalctl -n 100 -fu fabric-install.service", "fabric-install", slog.Info); err != nil {
+					if err := sshExec(ctx, vm, client, "journalctl -n 100 -fu hhfab-install.service", "hhfab-install", slog.Info); err != nil {
 						slog.Info("Journalctl on control node failed", "vm", vm.Name, "type", vm.Type, "err", err)
 					}
 				}()
