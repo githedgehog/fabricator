@@ -39,13 +39,10 @@ func KubeVersion(f fabapi.Fabricator) string {
 	return strings.ReplaceAll(string(f.Status.Versions.Platform.K3s), "-", "+")
 }
 
-//go:embed config.tmpl.yaml
-var k3sConfigTmpl string
+//go:embed server_config.tmpl.yaml
+var k3sServerConfigTmpl string
 
-//go:embed registries.tmpl.yaml
-var registriesTmpl string
-
-func Config(f fabapi.Fabricator, control fabapi.ControlNode) (string, error) {
+func ServerConfig(f fabapi.Fabricator, control fabapi.ControlNode) (string, error) {
 	controlVIP, err := f.Spec.Config.Control.VIP.Parse()
 	if err != nil {
 		return "", fmt.Errorf("parsing control VIP: %w", err)
@@ -61,7 +58,7 @@ func Config(f fabapi.Fabricator, control fabapi.ControlNode) (string, error) {
 		return "", fmt.Errorf("parsing control node IP: %w", err)
 	}
 
-	cfg, err := tmplutil.FromTemplate("k3s-config", k3sConfigTmpl, map[string]any{
+	cfg, err := tmplutil.FromTemplate("k3s-server-config", k3sServerConfigTmpl, map[string]any{
 		"Name":          control.Name,
 		"NodeIP":        nodeIP.Addr(),
 		"FlannelIface":  control.Spec.Management.Interface,
@@ -76,6 +73,30 @@ func Config(f fabapi.Fabricator, control fabapi.ControlNode) (string, error) {
 
 	return cfg, nil
 }
+
+//go:embed agent_config.tmpl.yaml
+var k3sAgentConfigTmpl string
+
+func AgentConfig(_ fabapi.Fabricator, node fabapi.Node) (string, error) {
+	nodeIP, err := node.Spec.Management.IP.Parse()
+	if err != nil {
+		return "", fmt.Errorf("parsing control node IP: %w", err)
+	}
+
+	cfg, err := tmplutil.FromTemplate("k3s-agent-config", k3sAgentConfigTmpl, map[string]any{
+		"Name":         node.Name,
+		"NodeIP":       nodeIP.Addr(),
+		"FlannelIface": node.Spec.Management.Interface,
+	})
+	if err != nil {
+		return "", fmt.Errorf("k3s config: %w", err)
+	}
+
+	return cfg, nil
+}
+
+//go:embed registries.tmpl.yaml
+var registriesTmpl string
 
 func Registries(f fabapi.Fabricator, username, password string) (string, error) {
 	reg, err := comp.RegistryURL(f)

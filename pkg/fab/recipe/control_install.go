@@ -42,7 +42,7 @@ type ControlInstall struct {
 }
 
 func (c *ControlInstall) Run(ctx context.Context) error {
-	slog.Info("Running control node installation")
+	slog.Info("Running control node installation", "name", c.Control.Name)
 
 	kube, err := c.installK8s(ctx)
 	if err != nil {
@@ -153,7 +153,7 @@ func (c *ControlInstall) installK8s(ctx context.Context) (client.Client, error) 
 		return nil, fmt.Errorf("creating k3s config dir %q: %w", k3s.ConfigPath, err)
 	}
 
-	k3sCfg, err := k3s.Config(c.Fab, c.Control)
+	k3sCfg, err := k3s.ServerConfig(c.Fab, c.Control)
 	if err != nil {
 		return nil, fmt.Errorf("k3s config: %w", err)
 	}
@@ -179,6 +179,7 @@ func (c *ControlInstall) installK8s(ctx context.Context) (client.Client, error) 
 	cmd.Env = append(os.Environ(),
 		"INSTALL_K3S_SKIP_DOWNLOAD=true",
 		"INSTALL_K3S_BIN_DIR=/opt/bin",
+		"K3S_TOKEN=temp-testing-only", // TODO change with actually generated/confiuigured token
 	)
 	cmd.Dir = c.WorkDir
 	cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "k3s: ")
