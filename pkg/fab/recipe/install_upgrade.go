@@ -70,6 +70,10 @@ func DoInstall(ctx context.Context, workDir string, yes bool) error {
 		return fmt.Errorf("hostname mismatch: running on %q while installer expects %q", hostname, cfg.Name) //nolint:goerr113
 	}
 
+	if err := os.MkdirAll(HedgehogDir, 0o755); err != nil {
+		return fmt.Errorf("creating hedgehog dir %q: %w", HedgehogDir, err)
+	}
+
 	if cfg.Type == TypeControl {
 		l := apiutil.NewFabLoader()
 		fabCfg, err := os.ReadFile(filepath.Join(workDir, FabName))
@@ -98,10 +102,6 @@ func DoInstall(ctx context.Context, workDir string, yes bool) error {
 
 		if err := wL.LoadAdd(ctx, wiringCfg); err != nil {
 			return fmt.Errorf("loading wiring config: %w", err)
-		}
-
-		if err := os.MkdirAll(HedgehogDir, 0o755); err != nil {
-			return fmt.Errorf("creating hedgehog dir %q: %w", HedgehogDir, err)
 		}
 
 		regUsers, err := zot.NewUsers()
