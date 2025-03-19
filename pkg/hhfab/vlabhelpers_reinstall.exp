@@ -273,7 +273,7 @@ if {$WAIT_READY} {
 	set install_success 0
 	# Wait for confirmation of the Install OS option
 	log_message "EXP-DBG" "Service discovery started"
-	expect -timeout 60 -ex "Starting ONIE Service Discovery" {
+	expect -timeout 120 -ex "Starting ONIE Service Discovery" {
 		# Wait for successful NOS installation
 		expect -timeout 300 -ex "ONIE: NOS install successful" {
 			log_message "EXP-DBG" "NOS installed successfully"
