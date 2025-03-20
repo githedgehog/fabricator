@@ -36,7 +36,7 @@ type ControlInstallBuilder struct {
 	WorkDir    string
 	Fab        fabapi.Fabricator
 	Control    fabapi.ControlNode
-	Nodes      []fabapi.Node
+	Nodes      []fabapi.FabNode
 	Wiring     client.Reader
 	Mode       BuildMode
 	Downloader *artificer.Downloader

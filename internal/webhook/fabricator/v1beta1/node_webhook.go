@@ -22,7 +22,7 @@ var nodelog = logf.Log.WithName("node-resource")
 
 // SetupNodeWebhookWithManager registers the webhook for Node in the manager.
 func SetupNodeWebhookWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewWebhookManagedBy(mgr).For(&fabricatorv1beta1.Node{}).
+	return ctrl.NewWebhookManagedBy(mgr).For(&fabricatorv1beta1.FabNode{}).
 		WithValidator(&NodeCustomValidator{}).
 		WithDefaulter(&NodeCustomDefaulter{}).
 		Complete()
@@ -45,7 +45,7 @@ var _ webhook.CustomDefaulter = &NodeCustomDefaulter{}
 
 // Default implements webhook.CustomDefaulter so a webhook will be registered for the Kind Node.
 func (d *NodeCustomDefaulter) Default(ctx context.Context, obj runtime.Object) error {
-	node, ok := obj.(*fabricatorv1beta1.Node)
+	node, ok := obj.(*fabricatorv1beta1.FabNode)
 
 	if !ok {
 		return fmt.Errorf("expected an Node object but got %T", obj)
@@ -75,7 +75,7 @@ var _ webhook.CustomValidator = &NodeCustomValidator{}
 
 // ValidateCreate implements webhook.CustomValidator so a webhook will be registered for the type Node.
 func (v *NodeCustomValidator) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
-	node, ok := obj.(*fabricatorv1beta1.Node)
+	node, ok := obj.(*fabricatorv1beta1.FabNode)
 	if !ok {
 		return nil, fmt.Errorf("expected a Node object but got %T", obj)
 	}
@@ -88,7 +88,7 @@ func (v *NodeCustomValidator) ValidateCreate(ctx context.Context, obj runtime.Ob
 
 // ValidateUpdate implements webhook.CustomValidator so a webhook will be registered for the type Node.
 func (v *NodeCustomValidator) ValidateUpdate(ctx context.Context, oldObj, newObj runtime.Object) (admission.Warnings, error) {
-	node, ok := newObj.(*fabricatorv1beta1.Node)
+	node, ok := newObj.(*fabricatorv1beta1.FabNode)
 	if !ok {
 		return nil, fmt.Errorf("expected a Node object for the newObj but got %T", newObj)
 	}
@@ -101,7 +101,7 @@ func (v *NodeCustomValidator) ValidateUpdate(ctx context.Context, oldObj, newObj
 
 // ValidateDelete implements webhook.CustomValidator so a webhook will be registered for the type Node.
 func (v *NodeCustomValidator) ValidateDelete(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
-	node, ok := obj.(*fabricatorv1beta1.Node)
+	node, ok := obj.(*fabricatorv1beta1.FabNode)
 	if !ok {
 		return nil, fmt.Errorf("expected a Node object but got %T", obj)
 	}

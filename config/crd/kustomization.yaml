@@ -4,7 +4,7 @@
 resources:
 - bases/fabricator.githedgehog.com_fabricators.yaml
 - bases/fabricator.githedgehog.com_controlnodes.yaml
-- bases/fabricator.githedgehog.com_nodes.yaml
+- bases/fabricator.githedgehog.com_fabnodes.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

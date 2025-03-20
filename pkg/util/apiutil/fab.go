@@ -11,7 +11,7 @@ import (
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 )
 
-func PrintFab(f fabapi.Fabricator, controls []fabapi.ControlNode, nodes []fabapi.Node, w io.Writer) error {
+func PrintFab(f fabapi.Fabricator, controls []fabapi.ControlNode, nodes []fabapi.FabNode, w io.Writer) error {
 	if err := kubeutil.PrintObject(&f, w, true); err != nil {
 		return fmt.Errorf("printing fabricator: %w", err)
 	}

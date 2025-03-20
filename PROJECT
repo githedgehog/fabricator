@@ -40,7 +40,7 @@ resources:
     namespaced: true
   domain: githedgehog.com
   group: fabricator
-  kind: Node
+  kind: FabNode
   path: go.githedgehog.com/fabricator/api/fabricator/v1beta1
   version: v1beta1
   webhooks:
