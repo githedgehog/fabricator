@@ -4,20 +4,20 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.16.1
-  name: nodes.fabricator.githedgehog.com
+  name: fabnodes.fabricator.githedgehog.com
 spec:
   group: fabricator.githedgehog.com
   names:
-    kind: Node
-    listKind: NodeList
-    plural: nodes
-    singular: node
+    kind: FabNode
+    listKind: FabNodeList
+    plural: fabnodes
+    singular: fabnode
   scope: Namespaced
   versions:
   - name: v1beta1
     schema:
       openAPIV3Schema:
-        description: Node is the Schema for the nodes API.
+        description: FabNode is the Schema for the nodes API.
         properties:
           apiVersion:
             description: |-
@@ -37,7 +37,7 @@ spec:
           metadata:
             type: object
           spec:
-            description: NodeSpec defines the desired state of Node.
+            description: FabNodeSpec defines the desired state of FabNode.
             properties:
               bootstrap:
                 properties:
@@ -64,7 +64,7 @@ spec:
             - roles
             type: object
           status:
-            description: NodeStatus defines the observed state of Node.
+            description: FabNodeStatus defines the observed state of Node.
             type: object
         type: object
     served: true

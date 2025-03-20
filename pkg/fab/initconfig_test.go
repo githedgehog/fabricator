@@ -304,15 +304,15 @@ func TestInitConfig(t *testing.T) {
 				}
 			}
 
-			expectedNodes := []fabapi.Node{}
+			expectedNodes := []fabapi.FabNode{}
 			if test.in.Gateway {
-				expectedNodes = append(expectedNodes, fabapi.Node{
+				expectedNodes = append(expectedNodes, fabapi.FabNode{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "gateway-1",
 						Namespace: comp.FabNamespace,
 					},
-					Spec: fabapi.NodeSpec{
-						Roles: []fabapi.NodeRole{fabapi.NodeRoleGateway},
+					Spec: fabapi.FabNodeSpec{
+						Roles: []fabapi.FabNodeRole{fabapi.NodeRoleGateway},
 						Bootstrap: fabapi.ControlNodeBootstrap{
 							Disk: "/dev/sda",
 						},
@@ -364,7 +364,7 @@ func TestInitConfig(t *testing.T) {
 				nodes[i].APIVersion = ""
 				nodes[i].Kind = ""
 				nodes[i].ResourceVersion = ""
-				nodes[i].Status = fabapi.NodeStatus{}
+				nodes[i].Status = fabapi.FabNodeStatus{}
 			}
 
 			expectedFab := test.expectedFab

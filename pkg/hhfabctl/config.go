@@ -30,7 +30,7 @@ func ConfigExport(ctx context.Context) error {
 		return cmp.Compare(a.Name, b.Name)
 	})
 
-	slices.SortFunc(nodes, func(a, b fabapi.Node) int {
+	slices.SortFunc(nodes, func(a, b fabapi.FabNode) int {
 		return cmp.Compare(a.Name, b.Name)
 	})
 

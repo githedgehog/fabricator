@@ -839,7 +839,7 @@ func (c *Config) getNodeIP(ctx context.Context, name string) (string, error) {
 		return "", fmt.Errorf("creating kube client: %w", err)
 	}
 
-	node := &fabapi.Node{}
+	node := &fabapi.FabNode{}
 	if err := kube.Get(ctx, client.ObjectKey{Name: name, Namespace: comp.FabNamespace}, node); err != nil {
 		return "", fmt.Errorf("getting node object: %w", err) //nolint:goerr113
 	}

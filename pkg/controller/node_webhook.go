@@ -29,7 +29,7 @@ func SetupNodeWebhookWith(mgr ctrl.Manager) error {
 	}
 
 	if err := ctrl.NewWebhookManagedBy(mgr).
-		For(&fabapi.Node{}).
+		For(&fabapi.FabNode{}).
 		WithDefaulter(w).
 		WithValidator(w).
 		Complete(); err != nil {
@@ -40,7 +40,7 @@ func SetupNodeWebhookWith(mgr ctrl.Manager) error {
 }
 
 func (w *NodeWebhook) Default(_ context.Context, obj runtime.Object) error {
-	n, ok := obj.(*fabapi.Node)
+	n, ok := obj.(*fabapi.FabNode)
 	if !ok {
 		return fmt.Errorf("expected a Node object but got %T", obj) //nolint:goerr113
 	}
@@ -51,7 +51,7 @@ func (w *NodeWebhook) Default(_ context.Context, obj runtime.Object) error {
 }
 
 func (w *NodeWebhook) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
-	n, ok := obj.(*fabapi.Node)
+	n, ok := obj.(*fabapi.FabNode)
 	if !ok {
 		return nil, fmt.Errorf("expected a Node object but got %T", obj) //nolint:goerr113
 	}
@@ -65,12 +65,12 @@ func (w *NodeWebhook) ValidateCreate(ctx context.Context, obj runtime.Object) (a
 }
 
 func (w *NodeWebhook) ValidateUpdate(ctx context.Context, oldObj runtime.Object, newObj runtime.Object) (admission.Warnings, error) {
-	_, ok := oldObj.(*fabapi.Node)
+	_, ok := oldObj.(*fabapi.FabNode)
 	if !ok {
 		return nil, fmt.Errorf("expected a Node old object but got %T", oldObj) //nolint
 	}
 
-	c, ok := newObj.(*fabapi.Node)
+	c, ok := newObj.(*fabapi.FabNode)
 	if !ok {
 		return nil, fmt.Errorf("expected a Node new object but got %T", newObj) //nolint:goerr113
 	}

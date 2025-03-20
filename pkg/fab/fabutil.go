@@ -21,7 +21,7 @@ type GetFabAndNodesOpts struct {
 	AllowNoControls  bool
 }
 
-func GetFabAndNodes(ctx context.Context, kube client.Reader, optsSlice ...GetFabAndNodesOpts) (fabapi.Fabricator, []fabapi.ControlNode, []fabapi.Node, error) {
+func GetFabAndNodes(ctx context.Context, kube client.Reader, optsSlice ...GetFabAndNodesOpts) (fabapi.Fabricator, []fabapi.ControlNode, []fabapi.FabNode, error) {
 	opts := GetFabAndNodesOpts{}
 	for _, o := range optsSlice {
 		opts.AllowNotHydrated = opts.AllowNotHydrated || o.AllowNotHydrated
@@ -74,7 +74,7 @@ func GetFabAndNodes(ctx context.Context, kube client.Reader, optsSlice ...GetFab
 		return cmp.Compare(a.Name, b.Name)
 	})
 
-	nodes := &fabapi.NodeList{}
+	nodes := &fabapi.FabNodeList{}
 	// It's okay if node resources are not found, as we may be upgrading from the older versions
 	// TODO make it strict after we completely migrate to Node objects for everything
 	if err := kube.List(ctx, nodes); err != nil && !apimeta.IsNoMatchError(err) {
@@ -90,7 +90,7 @@ func GetFabAndNodes(ctx context.Context, kube client.Reader, optsSlice ...GetFab
 		}
 	}
 
-	slices.SortFunc(nodes.Items, func(a, b fabapi.Node) int {
+	slices.SortFunc(nodes.Items, func(a, b fabapi.FabNode) int {
 		return cmp.Compare(a.Name, b.Name)
 	})
 

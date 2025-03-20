@@ -11,17 +11,17 @@ metadata:
   labels:
     app.kubernetes.io/name: fabricator
     app.kubernetes.io/managed-by: kustomize
-  name: fabricator-node-admin-role
+  name: fabricator-fabnode-admin-role
 rules:
 - apiGroups:
   - fabricator.githedgehog.com
   resources:
-  - nodes
+  - fabnodes
   verbs:
   - '*'
 - apiGroups:
   - fabricator.githedgehog.com
   resources:
-  - nodes/status
+  - fabnodes/status
   verbs:
   - get
