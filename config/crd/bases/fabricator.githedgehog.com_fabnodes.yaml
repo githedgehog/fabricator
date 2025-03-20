@@ -8,13 +8,28 @@ metadata:
 spec:
   group: fabricator.githedgehog.com
   names:
+    categories:
+    - hedgehog
+    - fabricator
     kind: FabNode
     listKind: FabNodeList
     plural: fabnodes
+    shortNames:
+    - fn
     singular: fabnode
   scope: Namespaced
   versions:
-  - name: v1beta1
+  - additionalPrinterColumns:
+    - jsonPath: .spec.roles
+      name: Roles
+      type: string
+    - jsonPath: .spec.management.ip
+      name: MgmtIP
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1beta1
     schema:
       openAPIV3Schema:
         description: FabNode is the Schema for the nodes API.

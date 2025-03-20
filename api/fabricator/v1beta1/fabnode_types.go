@@ -36,7 +36,10 @@ type FabNodeStatus struct{}
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-
+// +kubebuilder:resource:categories=hedgehog;fabricator,shortName=fn
+// +kubebuilder:printcolumn:name="Roles",type=string,JSONPath=`.spec.roles`,priority=0
+// +kubebuilder:printcolumn:name="MgmtIP",type=string,JSONPath=`.spec.management.ip`,priority=0
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`,priority=0
 // FabNode is the Schema for the nodes API.
 type FabNode struct {
 	metav1.TypeMeta   `json:",inline"`
