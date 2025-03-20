@@ -106,7 +106,7 @@ spec:
 {{- if .Gateway }}
 ---
 apiVersion: fabricator.githedgehog.com/v1beta1
-kind: Node
+kind: FabNode
 metadata:
   name: gateway-1
   namespace: fab
