@@ -137,7 +137,16 @@ func Diagram(workDir, format string, styleType diagram.StyleType) error {
 		fmt.Printf("3. Convert to SVG: dot -Tsvg %s -o vlab-diagram.svg\n", fileName)
 		fmt.Printf("4. Convert to PDF: dot -Tpdf %s -o vlab-diagram.pdf\n", fileName)
 	case "mermaid":
-		return fmt.Errorf("mermaid format is not supported yet") //nolint:goerr113
+		slog.Debug("Generating Mermaid diagram")
+		if err := diagram.GenerateMermaid(workDir, jsonData); err != nil {
+			return fmt.Errorf("generating Mermaid diagram: %w", err)
+		}
+		fileName := "vlab-diagram.mmd"
+		slog.Info("Generated Mermaid diagram", "file", fileName)
+		fmt.Printf("To render this diagram with Mermaid:\n")
+		fmt.Printf("1. Visit https://mermaid.live/ or use a Markdown editor with Mermaid support\n")
+		fmt.Printf("2. Copy the contents of %s into the editor\n", fileName)
+		fmt.Printf("3. Export to PNG, SVG or other formats as needed\n")
 	default:
 		return fmt.Errorf("unsupported diagram format: %s", format) //nolint:goerr113
 	}
