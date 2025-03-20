@@ -38,7 +38,7 @@ require (
 	github.com/urfave/cli/v2 v2.27.6
 	github.com/vbauerster/mpb/v8 v8.9.3
 	github.com/vishvananda/netlink v1.3.0
-	go.githedgehog.com/fabric v0.69.0
+	go.githedgehog.com/fabric v0.70.0
 	golang.org/x/crypto v0.36.0
 	golang.org/x/mod v0.24.0
 	golang.org/x/sync v0.12.0
@@ -63,8 +63,8 @@ require (
 	cloud.google.com/go/iam v1.2.2 // indirect
 	cloud.google.com/go/monitoring v1.21.2 // indirect
 	cloud.google.com/go/storage v1.49.0 // indirect
-	github.com/0x5a17ed/itkit v0.6.0 // indirect
-	github.com/0x5a17ed/uefi v0.6.1 // indirect
+	github.com/0x5a17ed/itkit v0.7.0 // indirect
+	github.com/0x5a17ed/uefi v0.7.0 // indirect
 	github.com/BurntSushi/toml v1.4.0 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp v1.25.0 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric v0.48.1 // indirect
