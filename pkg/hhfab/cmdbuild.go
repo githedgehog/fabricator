@@ -38,7 +38,7 @@ func (c *Config) build(ctx context.Context, opts BuildOpts) error {
 	}
 
 	for _, node := range c.Nodes {
-		if !slices.Equal(node.Spec.Roles, []fabapi.NodeRole{fabapi.NodeRoleGateway}) {
+		if !slices.Equal(node.Spec.Roles, []fabapi.FabNodeRole{fabapi.NodeRoleGateway}) {
 			return fmt.Errorf("unsupported node roles %q (only gateway role is currently supported)", node.Spec.Roles) //nolint:goerr113
 		}
 	}

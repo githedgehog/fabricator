@@ -22,7 +22,7 @@ import (
 type NodeInstall struct {
 	WorkDir string
 	Fab     fabapi.Fabricator
-	Node    fabapi.Node
+	Node    fabapi.FabNode
 }
 
 func (c *NodeInstall) Run(ctx context.Context) error {

@@ -119,7 +119,7 @@ func DoOSInstall(ctx context.Context, workDir string) error {
 				found = true
 				targetDisk = node.Spec.Bootstrap.Disk
 				if len(node.Spec.Roles) > 0 {
-					role = strings.Join(lo.Map(node.Spec.Roles, func(role fabapi.NodeRole, _ int) string {
+					role = strings.Join(lo.Map(node.Spec.Roles, func(role fabapi.FabNodeRole, _ int) string {
 						return string(role)
 					}), ",")
 				}

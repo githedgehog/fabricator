@@ -39,7 +39,7 @@ type ControlUpgrade struct {
 	Yes     bool
 	Fab     fabapi.Fabricator
 	Control fabapi.ControlNode
-	Nodes   []fabapi.Node
+	Nodes   []fabapi.FabNode
 }
 
 func (c *ControlUpgrade) Run(ctx context.Context) error {

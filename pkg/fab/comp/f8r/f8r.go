@@ -74,9 +74,9 @@ func InstallFabAndControl(control fabapi.ControlNode) comp.KubeInstall {
 	}
 }
 
-func InstallNodes(nodes []fabapi.Node) comp.KubeInstall {
+func InstallNodes(nodes []fabapi.FabNode) comp.KubeInstall {
 	return func(_ fabapi.Fabricator) ([]client.Object, error) {
-		return lo.Map(nodes, func(item fabapi.Node, _ int) client.Object {
+		return lo.Map(nodes, func(item fabapi.FabNode, _ int) client.Object {
 			return &item
 		}), nil
 	}

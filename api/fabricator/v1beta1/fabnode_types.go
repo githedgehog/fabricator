@@ -13,56 +13,56 @@ import (
 
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
-// NodeSpec defines the desired state of Node.
-type NodeSpec struct {
-	Roles      []NodeRole            `json:"roles"`
+// FabNodeSpec defines the desired state of FabNode.
+type FabNodeSpec struct {
+	Roles      []FabNodeRole         `json:"roles"`
 	Bootstrap  ControlNodeBootstrap  `json:"bootstrap,omitempty"`
 	Management ControlNodeManagement `json:"management,omitempty"`
 	Dummy      ControlNodeDummy      `json:"dummy,omitempty"`
 }
 
-type NodeRole string
+type FabNodeRole string
 
 const (
-	NodeRoleGateway NodeRole = "gateway"
+	NodeRoleGateway FabNodeRole = "gateway"
 )
 
-var NodeRoles = []NodeRole{
+var NodeRoles = []FabNodeRole{
 	NodeRoleGateway,
 }
 
-// NodeStatus defines the observed state of Node.
-type NodeStatus struct{}
+// FabNodeStatus defines the observed state of Node.
+type FabNodeStatus struct{}
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 
-// Node is the Schema for the nodes API.
-type Node struct {
+// FabNode is the Schema for the nodes API.
+type FabNode struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   NodeSpec   `json:"spec,omitempty"`
-	Status NodeStatus `json:"status,omitempty"`
+	Spec   FabNodeSpec   `json:"spec,omitempty"`
+	Status FabNodeStatus `json:"status,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 
-// NodeList contains a list of Node.
-type NodeList struct {
+// FabNodeList contains a list of Node.
+type FabNodeList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []Node `json:"items"`
+	Items           []FabNode `json:"items"`
 }
 
 func init() {
-	SchemeBuilder.Register(&Node{}, &NodeList{})
+	SchemeBuilder.Register(&FabNode{}, &FabNodeList{})
 }
 
-func (n *Node) Default() {
+func (n *FabNode) Default() {
 }
 
-func (n *Node) Validate(_ context.Context, fabCfg *FabConfig, allowNotHydrated bool) error {
+func (n *FabNode) Validate(_ context.Context, fabCfg *FabConfig, allowNotHydrated bool) error {
 	if fabCfg == nil {
 		return fmt.Errorf("fabricator config must be non-nil") //nolint:goerr113
 	}

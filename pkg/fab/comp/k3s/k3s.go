@@ -77,7 +77,7 @@ func ServerConfig(f fabapi.Fabricator, control fabapi.ControlNode) (string, erro
 //go:embed agent_config.tmpl.yaml
 var k3sAgentConfigTmpl string
 
-func AgentConfig(_ fabapi.Fabricator, node fabapi.Node) (string, error) {
+func AgentConfig(_ fabapi.Fabricator, node fabapi.FabNode) (string, error) {
 	nodeIP, err := node.Spec.Management.IP.Parse()
 	if err != nil {
 		return "", fmt.Errorf("parsing control node IP: %w", err)

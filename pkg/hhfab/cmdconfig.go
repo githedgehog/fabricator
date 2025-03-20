@@ -42,7 +42,7 @@ type Config struct {
 	RegistryConfig
 	Fab      fabapi.Fabricator
 	Controls []fabapi.ControlNode
-	Nodes    []fabapi.Node
+	Nodes    []fabapi.FabNode
 	Wiring   client.Reader
 }
 

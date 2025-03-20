@@ -40,7 +40,7 @@ type VLABBuilder struct {
 	switchID     uint             // switch ID counter
 }
 
-func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode meta.FabricMode, nodes []fabapi.Node) error {
+func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode meta.FabricMode, nodes []fabapi.FabNode) error {
 	if l == nil {
 		return fmt.Errorf("loader is nil") //nolint:goerr113
 	}
@@ -96,7 +96,7 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 	}
 
 	isGw := false
-	gw := fabapi.Node{}
+	gw := fabapi.FabNode{}
 	for _, node := range nodes {
 		if slices.Contains(node.Spec.Roles, fabapi.NodeRoleGateway) {
 			if isGw {
