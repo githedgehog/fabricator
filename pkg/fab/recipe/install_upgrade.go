@@ -19,7 +19,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/beevik/ntp"
 	"github.com/mattn/go-isatty"
 	"go.githedgehog.com/fabric/pkg/util/logutil"
 	"go.githedgehog.com/fabricator/pkg/fab"
@@ -219,30 +218,7 @@ func DoUpgrade(ctx context.Context, workDir string, yes bool) error {
 	return nil
 }
 
-func waitNTP(ctx context.Context, controlVIP string) error {
-	slog.Info("Waiting for NTP server on control node(s)")
-
-	for {
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("waiting for NTP %s: %w", controlVIP, ctx.Err())
-		case <-time.After(15 * time.Second):
-			if _, err := ntp.Time(controlVIP); err != nil {
-				slog.Debug("Waiting for NTP (not an error)", "reason", err)
-
-				continue
-			}
-
-			return nil
-		}
-	}
-}
-
 func setupTimesync(ctx context.Context, controlVIP string) error {
-	if err := waitNTP(ctx, controlVIP); err != nil {
-		return fmt.Errorf("waiting for NTP: %w", err)
-	}
-
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 
