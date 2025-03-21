@@ -509,6 +509,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 			if !maps.Equal(expected, found) {
 				missing := []string{}
 				notReady := []string{}
+				ready := []string{}
 
 				for name := range expected {
 					foundReady, ok := found[name]
@@ -516,11 +517,13 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						missing = append(missing, name)
 					} else if !foundReady {
 						notReady = append(notReady, name)
+					} else {
+						ready = append(ready, name)
 					}
 				}
 
 				readyErr = fmt.Errorf("some k8s nodes are not ready") //nolint:goerr113
-				slog.Debug("Some K8s nodes are not ready", "expected", lo.Keys(expected), "missing", missing, "notReady", notReady)
+				slog.Debug("Some K8s nodes are not ready", "ready", ready, "missing", missing, "notReady", notReady)
 
 				continue
 			}
@@ -951,7 +954,7 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 				go func() {
 					if err := ssh.StreamLog(ctx, "journalctl -n 100 -fu hhfab-install.service", "install("+vm.Name+")", slog.Info, 30*time.Minute); err != nil {
 						if !errors.Is(err, context.Canceled) {
-							slog.Debug("Journalctl on control node exited", "vm", vm.Name, "type", vm.Type, "err", err)
+							slog.Debug("Journalctl for installer exited (not an error)", "vm", vm.Name, "type", vm.Type, "reason", err)
 						}
 					}
 				}()
