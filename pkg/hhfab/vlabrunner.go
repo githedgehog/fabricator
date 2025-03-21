@@ -132,6 +132,8 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 	ctx, cancel := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
+	start := time.Now()
+
 	for _, cmd := range opts.OnReady {
 		if !slices.Contains(AllOnReady, OnReady(cmd)) {
 			return fmt.Errorf("unsupported on-ready command %q", cmd) //nolint:goerr113
@@ -531,8 +533,10 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 			readyErr = nil
 			ready = true
 
-			slog.Info("All K8s nodes are ready", "expected", lo.Keys(expected))
+			slog.Info("All K8s nodes are ready")
 		}
+
+		slog.Info("VLAB is ready", "took", time.Since(start))
 
 		if err := func() error {
 			if len(opts.OnReady) > 0 {
