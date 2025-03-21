@@ -100,8 +100,8 @@ func (c *NodeInstall) joinK8s(ctx context.Context) error {
 	args := []string{}
 	for _, role := range c.Node.Spec.Roles {
 		args = append(args,
-			"--node-role", fabapi.RoleLabelKey(role)+"="+fabapi.RoleLabelValue,
-			"--node-taint", fabapi.RoleTaintKey(role)+"="+fabapi.RoleTaintValue+":"+string(coreapi.TaintEffectNoExecute),
+			"--node-label", fabapi.RoleLabelKey(role)+"="+fabapi.RoleLabelValue,
+			"--node-taint", fabapi.RoleTaintKey(role)+":"+string(coreapi.TaintEffectNoExecute),
 		)
 	}
 
