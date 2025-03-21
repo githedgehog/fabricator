@@ -1345,38 +1345,59 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphor
 	}
 
 	if err := iperfs.Acquire(ctx, 1); err != nil {
-		return fmt.Errorf("acquiring iperf semaphore: %w", err)
+		return fmt.Errorf("acquiring iperf3 semaphore: %w", err)
 	}
 	defer iperfs.Release(1)
 
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(opts.IPerfsSeconds+30)*time.Second)
 	defer cancel()
 
-	slog.Debug("Running iperf", "from", from, "to", to)
+	slog.Debug("Running iperf3", "from", from, "to", to)
 
 	g, ctx := errgroup.WithContext(ctx)
 
 	g.Go(func() error {
 		out, err := toSSH.RunContext(ctx, fmt.Sprintf("toolbox -q timeout -v %d iperf3 -s -1", opts.IPerfsSeconds+25))
 		if err != nil {
-			return fmt.Errorf("running iperf server: %w: %s", err, string(out))
+			return fmt.Errorf("running iperf3 server: %w: %s", err, string(out))
 		}
 
 		return nil
 	})
 
 	g.Go(func() error {
-		time.Sleep(1 * time.Second) // TODO think about more reliable way to wait for server to start
-
+		// We could netcat to check if the server is up, but that will make the server shut down if
+		// it was started with -1, and if we don't add -1 it will run until the timeout, so change approach
+		time.Sleep(1 * time.Second)
+		var err error
+		var out []byte
 		cmd := fmt.Sprintf("toolbox -q timeout -v %d iperf3 -P 4 -J -c %s -t %d", opts.IPerfsSeconds+25, toIP.String(), opts.IPerfsSeconds)
-		out, err := fromSSH.RunContext(ctx, cmd)
-		if err != nil {
-			return fmt.Errorf("running iperf client: %w: %s", err, string(out))
+		maxRetries := 3
+		for retries := 0; retries < maxRetries; retries++ {
+			// Run iperf3 client
+			out, err = fromSSH.RunContext(ctx, cmd)
+			if err == nil {
+				break
+			}
+			// it doesn't look like the goph client defines error types to check with errors.Is
+			if strings.Contains(err.Error(), "ssh:") {
+				slog.Debug("iperf3 server not ready", "server", to, "retry", retries+1, "error", err, "output", string(out))
+				if retries < maxRetries-1 {
+					slog.Debug("Retrying in 1 second...")
+					time.Sleep(1 * time.Second)
+
+					continue
+				} else {
+					return fmt.Errorf("running iperf3 client: failed after %d retries: %w: %s", maxRetries, err, string(out))
+				}
+			} else {
+				return fmt.Errorf("running iperf3 client: %w: %s", err, string(out))
+			}
 		}
 
 		report, err := parseIPerf3Report(out)
 		if err != nil {
-			return fmt.Errorf("parsing iperf report: %w", err)
+			return fmt.Errorf("parsing iperf3 report: %w", err)
 		}
 
 		slog.Debug("IPerf3 result", "from", from, "to", to,
@@ -1388,10 +1409,10 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphor
 
 		if opts.IPerfsMinSpeed > 0 {
 			if report.End.SumSent.BitsPerSecond < opts.IPerfsMinSpeed*1_000_000 {
-				return fmt.Errorf("iperf send speed too low: %s < %s", asMbps(report.End.SumSent.BitsPerSecond), asMbps(opts.IPerfsMinSpeed*1_000_000))
+				return fmt.Errorf("iperf3 send speed too low: %s < %s", asMbps(report.End.SumSent.BitsPerSecond), asMbps(opts.IPerfsMinSpeed*1_000_000))
 			}
 			if report.End.SumReceived.BitsPerSecond < opts.IPerfsMinSpeed*1_000_000 {
-				return fmt.Errorf("iperf receive speed too low: %s < %s", asMbps(report.End.SumReceived.BitsPerSecond), asMbps(opts.IPerfsMinSpeed*1_000_000))
+				return fmt.Errorf("iperf3 receive speed too low: %s < %s", asMbps(report.End.SumReceived.BitsPerSecond), asMbps(opts.IPerfsMinSpeed*1_000_000))
 			}
 		}
 
@@ -1399,7 +1420,7 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphor
 	})
 
 	if err := g.Wait(); err != nil {
-		return fmt.Errorf("running iperf: %w", err)
+		return fmt.Errorf("running iperf3: %w", err)
 	}
 
 	return nil
