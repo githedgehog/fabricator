@@ -221,7 +221,6 @@ jobs:
         fabricmode:
           - spine-leaf
         gateway:
-          - true
           - false
         includeonie:
           - false
@@ -241,6 +240,10 @@ jobs:
           - fabricmode: spine-leaf
             gateway: false
             includeonie: true
+            buildmode: iso
+          - fabricmode: spine-leaf
+            gateway: true
+            includeonie: false
             buildmode: iso
 
     env:
