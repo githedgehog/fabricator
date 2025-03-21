@@ -16,7 +16,18 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func GetFabAndNodes(ctx context.Context, kube client.Reader, allowNotHydrated bool) (fabapi.Fabricator, []fabapi.ControlNode, []fabapi.Node, error) {
+type GetFabAndNodesOpts struct {
+	AllowNotHydrated bool
+	AllowNoControls  bool
+}
+
+func GetFabAndNodes(ctx context.Context, kube client.Reader, optsSlice ...GetFabAndNodesOpts) (fabapi.Fabricator, []fabapi.ControlNode, []fabapi.FabNode, error) {
+	opts := GetFabAndNodesOpts{}
+	for _, o := range optsSlice {
+		opts.AllowNotHydrated = opts.AllowNotHydrated || o.AllowNotHydrated
+		opts.AllowNoControls = opts.AllowNoControls || o.AllowNoControls
+	}
+
 	f := &fabapi.Fabricator{}
 	if err := kube.Get(ctx, client.ObjectKey{Name: comp.FabName, Namespace: comp.FabNamespace}, f); err != nil {
 		return fabapi.Fabricator{}, nil, nil, fmt.Errorf("getting fabricator: %w", err)
@@ -46,7 +57,7 @@ func GetFabAndNodes(ctx context.Context, kube client.Reader, allowNotHydrated bo
 	if err := kube.List(ctx, controls); err != nil {
 		return fabapi.Fabricator{}, nil, nil, fmt.Errorf("listing control nodes: %w", err)
 	}
-	if len(controls.Items) == 0 {
+	if !opts.AllowNoControls && len(controls.Items) == 0 {
 		return fabapi.Fabricator{}, nil, nil, fmt.Errorf("no control nodes found") //nolint:goerr113
 	}
 	if len(controls.Items) > 1 {
@@ -54,7 +65,7 @@ func GetFabAndNodes(ctx context.Context, kube client.Reader, allowNotHydrated bo
 	}
 
 	for _, control := range controls.Items {
-		if err := control.Validate(ctx, &f.Spec.Config, allowNotHydrated); err != nil {
+		if err := control.Validate(ctx, &f.Spec.Config, opts.AllowNotHydrated); err != nil {
 			return fabapi.Fabricator{}, nil, nil, fmt.Errorf("validating control node %q: %w", control.GetName(), err)
 		}
 	}
@@ -63,7 +74,7 @@ func GetFabAndNodes(ctx context.Context, kube client.Reader, allowNotHydrated bo
 		return cmp.Compare(a.Name, b.Name)
 	})
 
-	nodes := &fabapi.NodeList{}
+	nodes := &fabapi.FabNodeList{}
 	// It's okay if node resources are not found, as we may be upgrading from the older versions
 	// TODO make it strict after we completely migrate to Node objects for everything
 	if err := kube.List(ctx, nodes); err != nil && !apimeta.IsNoMatchError(err) {
@@ -74,12 +85,12 @@ func GetFabAndNodes(ctx context.Context, kube client.Reader, allowNotHydrated bo
 	}
 
 	for _, node := range nodes.Items {
-		if err := node.Validate(ctx, &f.Spec.Config, allowNotHydrated); err != nil {
+		if err := node.Validate(ctx, &f.Spec.Config, opts.AllowNotHydrated); err != nil {
 			return fabapi.Fabricator{}, nil, nil, fmt.Errorf("validating node %q: %w", node.GetName(), err)
 		}
 	}
 
-	slices.SortFunc(nodes.Items, func(a, b fabapi.Node) int {
+	slices.SortFunc(nodes.Items, func(a, b fabapi.FabNode) int {
 		return cmp.Compare(a.Name, b.Name)
 	})
 

@@ -207,6 +207,8 @@ jobs:
           fi
 
   vlab:
+    if: ${{ !contains(github.event.pull_request.labels.*.name, 'skip-vlab') }}
+
     runs-on: vlab-h
     needs:
       - test
@@ -218,6 +220,8 @@ jobs:
       matrix:
         fabricmode:
           - spine-leaf
+        gateway:
+          - false
         includeonie:
           - false
         buildmode:
@@ -227,16 +231,23 @@ jobs:
         include:
           - fabricmode: collapsed-core
             includeonie: false
+            gateway: false
             buildmode: iso
           - fabricmode: spine-leaf
+            gateway: false
             includeonie: true
             buildmode: usb
           - fabricmode: spine-leaf
+            gateway: false
             includeonie: true
+            buildmode: iso
+          - fabricmode: spine-leaf
+            gateway: true
+            includeonie: false
             buildmode: iso
 
     env:
-      slug: "${{ matrix.fabricmode }}-${{ matrix.includeonie }}-${{ matrix.buildmode }}"
+      slug: "${{ matrix.fabricmode }}-${{ matrix.gateway }}-${{ matrix.includeonie }}-${{ matrix.buildmode }}"
 
       # TODO enable for scheduled (github.event_name == 'schedule'), master and release branches?
       run_release_test: ${{ inputs.run_release_test == 'true' || contains(github.event.pull_request.labels.*.name, 'release-test') }}
@@ -271,7 +282,7 @@ jobs:
           HHFAB_VLAB_COLLECT: true
         if: ${{ env.run_release_test == 'true' }}
         run: |
-          bin/hhfab init -v --dev -m ${{ matrix.fabricmode }} --include-onie=${{ matrix.includeonie }}
+          bin/hhfab init -v --dev -m ${{ matrix.fabricmode }} --include-onie=${{ matrix.includeonie }} --gateway=${{ matrix.gateway }}
           bin/hhfab vlab gen -v
           bin/hhfab vlab up -v --ready inspect --ready setup-vpcs --ready test-connectivity --ready release-test --ready exit --mode=${{ matrix.buildmode }}
           cat release-test.xml
@@ -289,7 +300,7 @@ jobs:
           HHFAB_VLAB_COLLECT: true
         if: ${{ env.run_release_test != 'true' }}
         run: |
-          bin/hhfab init -v --dev -m ${{ matrix.fabricmode }} --include-onie=${{ matrix.includeonie }}
+          bin/hhfab init -v --dev -m ${{ matrix.fabricmode }} --include-onie=${{ matrix.includeonie }} --gateway=${{ matrix.gateway }}
           bin/hhfab vlab gen -v
           bin/hhfab vlab up -v --ready inspect --ready setup-vpcs --ready test-connectivity --ready exit --mode=${{ matrix.buildmode }}
 
@@ -315,6 +326,8 @@ jobs:
           limit-access-to-actor: true
 
   vlab-upgrade:
+    if: ${{ !contains(github.event.pull_request.labels.*.name, 'skip-vlab') }}
+
     runs-on: vlab-h
     needs:
       - test
@@ -440,6 +453,8 @@ jobs:
           fi
 
   hlab:
+    if: ${{ !contains(github.event.pull_request.labels.*.name, 'skip-hlab') }}
+
     runs-on: hlab
     needs:
       - test

@@ -5,18 +5,12 @@ package recipe
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
-	"errors"
 	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"time"
 
 	"go.githedgehog.com/fabric/api/meta"
@@ -25,7 +19,6 @@ import (
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
 	"go.githedgehog.com/fabric/pkg/util/logutil"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
-	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/certmanager"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
@@ -39,88 +32,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-const (
-	InstallLog            = "/var/log/install.log"
-	HedgehogDir           = "/opt/hedgehog"
-	InstallMarkerFile     = HedgehogDir + "/.install"
-	InstallMarkerComplete = "complete"
-)
-
-func DoControlInstall(ctx context.Context, workDir string, yes bool) error {
-	ctx, cancel := context.WithTimeout(ctx, 40*time.Minute)
-	defer cancel()
-
-	rawMarker, err := os.ReadFile(InstallMarkerFile)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("reading install marker: %w", err)
-	}
-	if err == nil {
-		marker := strings.TrimSpace(string(rawMarker))
-		if marker == InstallMarkerComplete {
-			slog.Info("Control node seems to be already installed", "status", marker, "marker", InstallMarkerFile)
-
-			return nil
-		}
-
-		slog.Info("Control node seems to be partially installed, cleanup and re-run", "status", marker, "marker", InstallMarkerFile)
-
-		return fmt.Errorf("partially installed: %s", marker) //nolint:goerr113
-	}
-
-	l := apiutil.NewFabLoader()
-	fabCfg, err := os.ReadFile(filepath.Join(workDir, FabName))
-	if err != nil {
-		return fmt.Errorf("reading fab config: %w", err)
-	}
-
-	if err := l.LoadAdd(ctx, fabCfg); err != nil {
-		return fmt.Errorf("loading fab config: %w", err)
-	}
-
-	f, controls, nodes, err := fab.GetFabAndNodes(ctx, l.GetClient(), false)
-	if err != nil {
-		return fmt.Errorf("getting fabricator and controls nodes: %w", err)
-	}
-
-	if len(controls) != 1 {
-		return fmt.Errorf("expected exactly 1 control node, got %d", len(controls)) //nolint:goerr113
-	}
-
-	wL := apiutil.NewWiringLoader()
-	wiringCfg, err := os.ReadFile(filepath.Join(workDir, WiringName))
-	if err != nil {
-		return fmt.Errorf("reading wiring config: %w", err)
-	}
-
-	if err := wL.LoadAdd(ctx, wiringCfg); err != nil {
-		return fmt.Errorf("loading wiring config: %w", err)
-	}
-
-	if err := os.MkdirAll(HedgehogDir, 0o755); err != nil {
-		return fmt.Errorf("creating hedgehog dir %q: %w", HedgehogDir, err)
-	}
-
-	regUsers, err := zot.NewUsers()
-	if err != nil {
-		return fmt.Errorf("generating zot users: %w", err)
-	}
-
-	return (&ControlInstall{
-		ControlUpgrade: &ControlUpgrade{
-			WorkDir: workDir,
-			Yes:     yes,
-			Fab:     f,
-			Control: controls[0],
-			Nodes:   nodes,
-		},
-		WorkDir:  workDir,
-		Fab:      f,
-		Control:  controls[0],
-		Wiring:   wL,
-		RegUsers: regUsers,
-	}).Run(ctx)
-}
-
 type ControlInstall struct {
 	*ControlUpgrade
 	WorkDir  string
@@ -131,7 +42,7 @@ type ControlInstall struct {
 }
 
 func (c *ControlInstall) Run(ctx context.Context) error {
-	slog.Info("Running control node installation")
+	slog.Info("Running control node installation", "name", c.Control.Name)
 
 	kube, err := c.installK8s(ctx)
 	if err != nil {
@@ -183,7 +94,12 @@ func (c *ControlInstall) Run(ctx context.Context) error {
 		return fmt.Errorf("installing ntp: %w", err)
 	}
 
-	if err := c.setupTimesync(ctx); err != nil {
+	controlVIP, err := c.Fab.Spec.Config.Control.VIP.Parse()
+	if err != nil {
+		return fmt.Errorf("parsing control VIP: %w", err)
+	}
+
+	if err := setupTimesync(ctx, controlVIP.Addr().String()); err != nil {
 		return fmt.Errorf("setting up timesync: %w", err)
 	}
 
@@ -195,37 +111,7 @@ func (c *ControlInstall) Run(ctx context.Context) error {
 		return fmt.Errorf("installing included wiring: %w", err)
 	}
 
-	if err := os.WriteFile(InstallMarkerFile, []byte(InstallMarkerComplete), 0o644); err != nil { //nolint:gosec
-		return fmt.Errorf("writing install marker: %w", err)
-	}
-
 	slog.Info("Control node installation complete")
-
-	return nil
-}
-
-func copyFile(src, dst string, mode os.FileMode) error {
-	srcF, err := os.Open(src)
-	if err != nil {
-		return fmt.Errorf("opening %q: %w", src, err)
-	}
-	defer srcF.Close()
-
-	dstF, err := os.Create(dst)
-	if err != nil {
-		return fmt.Errorf("creating %q: %w", dst, err)
-	}
-	defer dstF.Close()
-
-	if _, err := io.Copy(dstF, srcF); err != nil {
-		return fmt.Errorf("copying file %q to %q: %w", src, dst, err)
-	}
-
-	if mode != 0 {
-		if err := os.Chmod(dst, mode); err != nil {
-			return fmt.Errorf("chmod %q: %w", dst, err)
-		}
-	}
 
 	return nil
 }
@@ -272,7 +158,7 @@ func (c *ControlInstall) installK8s(ctx context.Context) (client.Client, error) 
 		return nil, fmt.Errorf("creating k3s config dir %q: %w", k3s.ConfigPath, err)
 	}
 
-	k3sCfg, err := k3s.Config(c.Fab, c.Control)
+	k3sCfg, err := k3s.ServerConfig(c.Fab, c.Control)
 	if err != nil {
 		return nil, fmt.Errorf("k3s config: %w", err)
 	}
@@ -298,6 +184,7 @@ func (c *ControlInstall) installK8s(ctx context.Context) (client.Client, error) 
 	cmd.Env = append(os.Environ(),
 		"INSTALL_K3S_SKIP_DOWNLOAD=true",
 		"INSTALL_K3S_BIN_DIR=/opt/bin",
+		"K3S_TOKEN=temp-testing-only", // TODO change with actually generated/confiuigured token
 	)
 	cmd.Dir = c.WorkDir
 	cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "k3s: ")
@@ -381,7 +268,7 @@ func (c *ControlInstall) installFabCA(ctx context.Context, kube client.Client) (
 		return "", fmt.Errorf("enforcing fab-ca install: %w", err)
 	}
 
-	if err := os.WriteFile("/etc/ssl/certs/hh-fab-ca.crt", []byte(ca.Crt), 0o644); err != nil { //nolint:gosec
+	if err := os.WriteFile("/etc/ssl/certs/hh-fab-ca.pem", []byte(ca.Crt), 0o644); err != nil { //nolint:gosec
 		return "", fmt.Errorf("writing fab-ca cert: %w", err)
 	}
 
@@ -652,51 +539,6 @@ func waitKube[T client.Object](ctx context.Context, kube client.Reader, name, ns
 				continue
 			}
 			if ready {
-				return nil
-			}
-		}
-	}
-}
-
-func waitURL(ctx context.Context, url string, ca string) error {
-	rootCAs := x509.NewCertPool()
-	if !rootCAs.AppendCertsFromPEM([]byte(ca)) {
-		return errors.New("failed to append CA cert to rootCAs") //nolint:goerr113
-	}
-
-	baseTransport := http.DefaultTransport.(*http.Transport).Clone()
-	baseTransport.TLSClientConfig = &tls.Config{
-		MinVersion:         tls.VersionTLS12,
-		InsecureSkipVerify: false,
-		RootCAs:            rootCAs,
-	}
-
-	client := &http.Client{
-		Transport: baseTransport,
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return fmt.Errorf("creating request: %w", err)
-	}
-
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("waiting for URL: %w", ctx.Err())
-		case <-ticker.C:
-			resp, err := client.Do(req)
-			if err != nil {
-				slog.Debug("Waiting for URL", "url", url, "err", err)
-
-				continue
-			}
-			resp.Body.Close()
-
-			if resp.StatusCode == http.StatusOK {
 				return nil
 			}
 		}

@@ -11,12 +11,12 @@ metadata:
   labels:
     app.kubernetes.io/name: fabricator
     app.kubernetes.io/managed-by: kustomize
-  name: fabricator-node-viewer-role
+  name: fabricator-fabnode-viewer-role
 rules:
 - apiGroups:
   - fabricator.githedgehog.com
   resources:
-  - nodes
+  - fabnodes
   verbs:
   - get
   - list
@@ -24,6 +24,6 @@ rules:
 - apiGroups:
   - fabricator.githedgehog.com
   resources:
-  - nodes/status
+  - fabnodes/status
   verbs:
   - get

@@ -248,6 +248,12 @@ func (c *Config) PrepareVLAB(ctx context.Context, opts VLABUpOpts) (*VLAB, error
 		}
 	}
 
+	for idx := range c.Nodes {
+		if !isHardware(&c.Nodes[idx]) {
+			c.Nodes[idx].Spec.Bootstrap.Disk = "/dev/vda"
+		}
+	}
+
 	if !createCfg {
 		slog.Info("VLAB config loaded", "file", filepath.Join(VLABDir, VLABConfigFile))
 	}
@@ -260,7 +266,7 @@ func (c *Config) PrepareVLAB(ctx context.Context, opts VLABUpOpts) (*VLAB, error
 	return vlab, nil
 }
 
-func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes []fabapi.Node, wiring client.Reader) (*VLABConfig, error) {
+func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes []fabapi.FabNode, wiring client.Reader) (*VLABConfig, error) {
 	cfg := &VLABConfig{
 		Sizes: DefaultSizes,
 		VMs:   map[string]VMConfig{},

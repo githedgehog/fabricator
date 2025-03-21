@@ -20,7 +20,7 @@ systemd:
     - name: locksmithd.service
       mask: true
 {{ if .AutoInstall }}
-    - name: fabric-install.service
+    - name: hhfab-install.service
       enabled: true
       contents: |
         [Unit]
@@ -32,7 +32,7 @@ systemd:
         [Service]
         Type=simple
         ExecStartPre=chmod +x {{ .AutoInstall }}/hhfab-recipe
-        ExecStart={{ .AutoInstall }}/hhfab-recipe control install -v
+        ExecStart={{ .AutoInstall }}/hhfab-recipe install -v
         WorkingDirectory={{ .AutoInstall }}
         Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/bin" "HOME=/home/core"
         Restart=on-failure
@@ -67,7 +67,7 @@ storage:
       mode: 0644
       contents:
         inline: |
-          Hedgehog Control Node
+          Hedgehog Control Node managed by Fabricator
 
     - path: /etc/systemd/network/10-dummy.netdev
       mode: 0644

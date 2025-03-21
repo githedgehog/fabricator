@@ -68,7 +68,7 @@ type VLABUpOpts struct {
 }
 
 func VLABUp(ctx context.Context, workDir, cacheDir string, opts VLABUpOpts) error {
-	if opts.ControlUpgrade {
+	if opts.AutoUpgrade {
 		opts.BuildMode = recipe.BuildModeManual
 		opts.VLABRunOpts.BuildMode = recipe.BuildModeManual
 	}
@@ -83,9 +83,20 @@ func VLABUp(ctx context.Context, workDir, cacheDir string, opts VLABUpOpts) erro
 		return fmt.Errorf("preparing VLAB: %w", err)
 	}
 
+	buildGateways := false
+	for _, vm := range vlab.VMs {
+		if vm.Type == VMTypeGateway {
+			buildGateways = true
+
+			break
+		}
+	}
+
 	if err := c.build(ctx, BuildOpts{
-		HydrateMode: opts.HydrateMode,
-		BuildMode:   opts.BuildMode,
+		HydrateMode:   opts.HydrateMode,
+		BuildMode:     opts.BuildMode,
+		BuildControls: true,
+		BuildGateways: buildGateways,
 	}); err != nil {
 		return fmt.Errorf("building: %w", err)
 	}

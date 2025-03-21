@@ -38,4 +38,3 @@ systemd:
         [Install]
         WantedBy=local-fs.target
         RequiredBy=flatcar-install.service
-

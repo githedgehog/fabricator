@@ -406,8 +406,8 @@ func CreateOrUpdate(ctx context.Context, kube client.Client, obj client.Object) 
 
 			return nil
 		})
-	case *fabapi.Node:
-		tmp := &fabapi.Node{ObjectMeta: obj.ObjectMeta}
+	case *fabapi.FabNode:
+		tmp := &fabapi.FabNode{ObjectMeta: obj.ObjectMeta}
 		res, err = ctrlutil.CreateOrUpdate(ctx, kube, tmp, func() error {
 			tmp.Spec = obj.Spec
 

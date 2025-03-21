@@ -13,15 +13,15 @@ import (
 
 var _ = Describe("Node Webhook", func() {
 	var (
-		obj       *fabricatorv1beta1.Node
-		oldObj    *fabricatorv1beta1.Node
+		obj       *fabricatorv1beta1.FabNode
+		oldObj    *fabricatorv1beta1.FabNode
 		validator NodeCustomValidator
 		defaulter NodeCustomDefaulter
 	)
 
 	BeforeEach(func() {
-		obj = &fabricatorv1beta1.Node{}
-		oldObj = &fabricatorv1beta1.Node{}
+		obj = &fabricatorv1beta1.FabNode{}
+		oldObj = &fabricatorv1beta1.FabNode{}
 		validator = NodeCustomValidator{}
 		Expect(validator).NotTo(BeNil(), "Expected validator to be initialized")
 		defaulter = NodeCustomDefaulter{}
@@ -70,5 +70,4 @@ var _ = Describe("Node Webhook", func() {
 		//     Expect(validator.ValidateUpdate(ctx, oldObj, obj)).To(BeNil())
 		// })
 	})
-
 })

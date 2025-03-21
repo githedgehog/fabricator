@@ -149,36 +149,31 @@ func Run(ctx context.Context) error {
 		EnableBashCompletion:   true,
 		Commands: []*cli.Command{
 			{
-				Name: "control",
-				Subcommands: []*cli.Command{
-					{
-						Name:   "install",
-						Usage:  "install control node",
-						Flags:  defaultFlags,
-						Before: before(true),
-						Action: func(_ *cli.Context) error {
-							err := recipe.DoControlInstall(ctx, workDir, yes)
-							if err != nil {
-								return fmt.Errorf("control install: %w", err)
-							}
+				Name:   "install",
+				Usage:  "install node",
+				Flags:  defaultFlags,
+				Before: before(true),
+				Action: func(_ *cli.Context) error {
+					err := recipe.DoInstall(ctx, workDir, yes)
+					if err != nil {
+						return fmt.Errorf("installing: %w", err)
+					}
 
-							return nil
-						},
-					},
-					{
-						Name:   "upgrade",
-						Usage:  "upgrade control node",
-						Flags:  defaultFlags,
-						Before: before(true),
-						Action: func(_ *cli.Context) error {
-							err := recipe.DoControlUpgrade(ctx, workDir, yes)
-							if err != nil {
-								return fmt.Errorf("control upgrade: %w", err)
-							}
+					return nil
+				},
+			},
+			{
+				Name:   "upgrade",
+				Usage:  "upgrade node",
+				Flags:  defaultFlags,
+				Before: before(true),
+				Action: func(_ *cli.Context) error {
+					err := recipe.DoUpgrade(ctx, workDir, yes)
+					if err != nil {
+						return fmt.Errorf("upgrading: %w", err)
+					}
 
-							return nil
-						},
-					},
+					return nil
 				},
 			},
 		},
