@@ -228,7 +228,7 @@ func waitNTP(ctx context.Context, controlVIP string) error {
 			return fmt.Errorf("waiting for NTP %s: %w", controlVIP, ctx.Err())
 		case <-time.After(15 * time.Second):
 			if _, err := ntp.Time(controlVIP); err != nil {
-				slog.Debug("Waiting for NTP", "err", err)
+				slog.Debug("Waiting for NTP (not an error)", "reason", err)
 
 				continue
 			}
@@ -422,7 +422,7 @@ func waitURL(ctx context.Context, url string, ca string) error {
 		case <-time.After(15 * time.Second):
 			resp, err := client.Do(req)
 			if err != nil {
-				slog.Debug("Waiting for URL", "err", err)
+				slog.Debug("Waiting for URL (not an error)", "reason", err)
 
 				continue
 			}
