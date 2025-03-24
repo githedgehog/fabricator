@@ -19,6 +19,11 @@ import (
 func Diagram(workDir, format string, styleType diagram.StyleType) error {
 	includeDir := filepath.Join(workDir, IncludeDir)
 
+	resultDir := filepath.Join(workDir, "result")
+	if err := os.MkdirAll(resultDir, 0755); err != nil {
+		return fmt.Errorf("creating result directory: %w", err)
+	}
+
 	fabPath := filepath.Join(workDir, "fab.yaml")
 	var gatewayNodes []client.Object
 
@@ -116,36 +121,39 @@ func Diagram(workDir, format string, styleType diagram.StyleType) error {
 	switch format {
 	case "drawio":
 		slog.Debug("Generating draw.io diagram", "style", styleType)
-		if err := diagram.GenerateDrawio(workDir, jsonData, styleType); err != nil {
+		if err := diagram.GenerateDrawio(resultDir, jsonData, styleType); err != nil {
 			return fmt.Errorf("generating draw.io diagram: %w", err)
 		}
-		fileName := "vlab-diagram.drawio"
-		slog.Info("Generated draw.io diagram", "file", fileName, "style", styleType)
+		fileName := "diagram.drawio"
+		filePath := filepath.Join("result", fileName)
+		slog.Info("Generated draw.io diagram", "file", filePath, "style", styleType)
 		fmt.Printf("To use this diagram:\n")
 		fmt.Printf("1. Open with https://app.diagrams.net/ or the desktop Draw.io application\n")
 		fmt.Printf("2. You can edit the diagram and export to PNG, SVG, PDF or other formats\n")
 	case "dot":
 		slog.Debug("Generating DOT diagram")
-		if err := diagram.GenerateDOT(workDir, jsonData); err != nil {
+		if err := diagram.GenerateDOT(resultDir, jsonData); err != nil {
 			return fmt.Errorf("generating DOT diagram: %w", err)
 		}
-		fileName := "vlab-diagram.dot"
-		slog.Info("Generated graphviz diagram", "file", fileName)
+		fileName := "diagram.dot"
+		filePath := filepath.Join("result", fileName)
+		slog.Info("Generated graphviz diagram", "file", filePath)
 		fmt.Printf("To render this diagram with Graphviz:\n")
 		fmt.Printf("1. Install Graphviz: https://graphviz.org/download/\n")
-		fmt.Printf("2. Convert to PNG: dot -Tpng %s -o vlab-diagram.png\n", fileName)
-		fmt.Printf("3. Convert to SVG: dot -Tsvg %s -o vlab-diagram.svg\n", fileName)
-		fmt.Printf("4. Convert to PDF: dot -Tpdf %s -o vlab-diagram.pdf\n", fileName)
+		fmt.Printf("2. Convert to PNG: dot -Tpng %s -o diagram.png\n", filePath)
+		fmt.Printf("3. Convert to SVG: dot -Tsvg %s -o diagram.svg\n", filePath)
+		fmt.Printf("4. Convert to PDF: dot -Tpdf %s -o diagram.pdf\n", filePath)
 	case "mermaid":
 		slog.Debug("Generating Mermaid diagram")
-		if err := diagram.GenerateMermaid(workDir, jsonData); err != nil {
+		if err := diagram.GenerateMermaid(resultDir, jsonData); err != nil {
 			return fmt.Errorf("generating Mermaid diagram: %w", err)
 		}
-		fileName := "vlab-diagram.mmd"
-		slog.Info("Generated Mermaid diagram", "file", fileName)
+		fileName := "diagram.mmd"
+		filePath := filepath.Join("result", fileName)
+		slog.Info("Generated Mermaid diagram", "file", filePath)
 		fmt.Printf("To render this diagram with Mermaid:\n")
 		fmt.Printf("1. Visit https://mermaid.live/ or use a Markdown editor with Mermaid support\n")
-		fmt.Printf("2. Copy the contents of %s into the editor\n", fileName)
+		fmt.Printf("2. Copy the contents of %s into the editor\n", filePath)
 		fmt.Printf("3. Export to PNG, SVG or other formats as needed\n")
 	default:
 		return fmt.Errorf("unsupported diagram format: %s", format) //nolint:goerr113
