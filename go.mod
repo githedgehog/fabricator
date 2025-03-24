@@ -19,7 +19,7 @@ require (
 	github.com/diskfs/go-diskfs v1.4.2
 	github.com/go-logr/logr v1.4.2
 	github.com/go-playground/validator/v10 v10.25.0
-	github.com/k3s-io/helm-controller v0.16.6
+	github.com/k3s-io/helm-controller v0.16.8
 	github.com/lmittmann/tint v1.0.7
 	github.com/manifoldco/promptui v0.9.0
 	github.com/mattn/go-isatty v0.0.20
