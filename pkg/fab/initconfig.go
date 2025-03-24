@@ -7,6 +7,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"go.githedgehog.com/fabric/api/meta"
@@ -35,6 +36,9 @@ type InitConfigInput struct {
 	RegUpstream               *fabapi.ControlConfigRegistryUpstream
 	ControlNodeManagementLink string
 	Gateway                   bool
+	Preview                   bool
+	JoinToken                 string
+	SaveJoinToken             bool
 }
 
 func InitConfig(ctx context.Context, in InitConfigInput) ([]byte, error) {
@@ -49,6 +53,14 @@ func InitConfig(ctx context.Context, in InitConfigInput) ([]byte, error) {
 
 	if in.DefaultPasswordHash != "" && !strings.HasPrefix(in.DefaultPasswordHash, "$5$") {
 		return nil, fmt.Errorf("default password hash must start with $5$: %q", in.DefaultPasswordHash) //nolint:goerr113
+	}
+
+	if !in.SaveJoinToken {
+		if in.JoinToken != "" && in.Preview {
+			slog.Warn("Join token is specified by flag env var, but is not saved to the config, use --save-join-token flag to save it")
+		}
+
+		in.JoinToken = ""
 	}
 
 	data, err := tmplutil.FromTemplate("initconfig", initConfigTmpl, in)

@@ -21,7 +21,7 @@ const (
 )
 
 func VLABGenerate(ctx context.Context, workDir, cacheDir string, builder VLABBuilder, target string) error {
-	cfg, err := load(ctx, workDir, cacheDir, false, HydrateModeNever)
+	cfg, err := load(ctx, workDir, cacheDir, false, HydrateModeNever, "")
 	if err != nil {
 		return err
 	}
@@ -60,10 +60,11 @@ func VLABGenerate(ctx context.Context, workDir, cacheDir string, builder VLABBui
 }
 
 type VLABUpOpts struct {
-	HydrateMode HydrateMode
-	NoCreate    bool
-	ReCreate    bool
-	BuildMode   recipe.BuildMode
+	HydrateMode  HydrateMode
+	NoCreate     bool
+	ReCreate     bool
+	BuildMode    recipe.BuildMode
+	SetJoinToken string
 	VLABRunOpts
 }
 
@@ -73,7 +74,7 @@ func VLABUp(ctx context.Context, workDir, cacheDir string, opts VLABUpOpts) erro
 		opts.VLABRunOpts.BuildMode = recipe.BuildModeManual
 	}
 
-	c, err := load(ctx, workDir, cacheDir, true, opts.HydrateMode)
+	c, err := load(ctx, workDir, cacheDir, true, opts.HydrateMode, opts.SetJoinToken)
 	if err != nil {
 		return err
 	}
@@ -110,7 +111,7 @@ func loadVLABForHelpers(ctx context.Context, workDir, cacheDir string) (*Config,
 		NoCreate:    true,
 	}
 
-	c, err := load(ctx, workDir, cacheDir, true, opts.HydrateMode)
+	c, err := load(ctx, workDir, cacheDir, true, opts.HydrateMode, opts.SetJoinToken)
 	if err != nil {
 		return nil, nil, err
 	}

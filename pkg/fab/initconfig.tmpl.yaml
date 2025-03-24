@@ -30,6 +30,14 @@ spec:
       #tlsSAN: # IPs and DNS names that will be used to access API
       #  - "fabric.local"
       {{- end }}
+      {{- if .JoinToken }}
+      joinToken: "{{ .JoinToken }}"
+      {{- else if .Preview }}
+      # join token that will be used for the first control node installation and joining other nodes to the cluster
+      # if it wasn't set the random one will be generated, but if first control node is already installed, it could be
+      # retrieved from the control node file /var/lib/rancher/k3s/server/token
+      #joinToken: super-secret-join-token
+      {{- end }}
 
       defaultUser: # user 'core' on all control nodes
         {{- if .DefaultPasswordHash }}

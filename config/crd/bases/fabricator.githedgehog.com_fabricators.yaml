@@ -84,6 +84,8 @@ spec:
                         type: object
                       dummySubnet:
                         type: string
+                      joinToken:
+                        type: string
                       kubeClusterDNS:
                         type: string
                       kubeClusterSubnet:

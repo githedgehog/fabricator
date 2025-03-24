@@ -111,7 +111,7 @@ func (c *NodeInstall) joinK8s(ctx context.Context) error {
 		"INSTALL_K3S_SKIP_DOWNLOAD=true",
 		"INSTALL_K3S_BIN_DIR=/opt/bin",
 		fmt.Sprintf("K3S_URL=https://%s:%d", controlVIP.Addr().String(), k3s.APIPort),
-		"K3S_TOKEN=temp-testing-only", // TODO change with actually generated/confiuigured token
+		"K3S_TOKEN="+c.Fab.Spec.Config.Control.JoinToken,
 	)
 	cmd.Dir = c.WorkDir
 	cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "k3s: ")

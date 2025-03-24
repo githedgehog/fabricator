@@ -77,6 +77,7 @@ _Appears in:_
 | `managementSubnet` _[Prefix](#prefix)_ |  |  |  |
 | `controlVIP` _[Prefix](#prefix)_ |  |  |  |
 | `tlsSAN` _string array_ |  |  |  |
+| `joinToken` _string_ |  |  |  |
 | `kubeClusterSubnet` _[Prefix](#prefix)_ |  |  |  |
 | `kubeServiceSubnet` _[Prefix](#prefix)_ |  |  |  |
 | `kubeClusterDNS` _[Addr](#addr)_ |  |  |  |
