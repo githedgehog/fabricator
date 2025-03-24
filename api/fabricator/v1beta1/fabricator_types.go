@@ -123,6 +123,8 @@ type ControlConfig struct {
 	VIP              meta.Prefix `json:"controlVIP,omitempty"`
 	TLSSAN           []string    `json:"tlsSAN,omitempty"`
 
+	JoinToken string `json:"joinToken,omitempty"`
+
 	KubeClusterSubnet meta.Prefix `json:"kubeClusterSubnet,omitempty"`
 	KubeServiceSubnet meta.Prefix `json:"kubeServiceSubnet,omitempty"`
 	KubeClusterDNS    meta.Addr   `json:"kubeClusterDNS,omitempty"`

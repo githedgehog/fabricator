@@ -374,6 +374,31 @@ func Run(ctx context.Context) error {
 		},
 	}
 
+	var joinToken string
+	joinTokenFlags := []cli.Flag{
+		&cli.StringFlag{
+			Name:        "join-token",
+			Aliases:     []string{"j", "join"},
+			Usage:       "[PREVIEW] join token for the cluster",
+			Category:    FlagCatGenConfig,
+			Hidden:      !preview,
+			Destination: &joinToken,
+			EnvVars:     []string{hhfab.JoinTokenEnv},
+		},
+	}
+
+	var saveJoinToken bool
+	saveJoinTokenFlags := []cli.Flag{
+		&cli.BoolFlag{
+			Name:        "save-join-token",
+			Usage:       "[PREVIEW] save join token passed using flag or env var to the config",
+			Category:    FlagCatGenConfig,
+			Hidden:      !preview,
+			Destination: &saveJoinToken,
+			EnvVars:     []string{"HHFAB_SAVE_JOIN_TOKEN"},
+		},
+	}
+
 	cli.VersionFlag.(*cli.BoolFlag).Aliases = []string{"V"}
 	app := &cli.App{
 		Name:  "hhfab",
@@ -394,7 +419,7 @@ func Run(ctx context.Context) error {
 			{
 				Name:  "init",
 				Usage: "initializes working dir (current dir by default) with a new fab.yaml and other files",
-				Flags: flatten(defaultFlags, []cli.Flag{
+				Flags: flatten(defaultFlags, joinTokenFlags, saveJoinTokenFlags, []cli.Flag{
 					&cli.StringFlag{
 						Name:    FlagNameRegistryRepo,
 						Usage:   "download artifacts from `REPO`",
@@ -516,6 +541,9 @@ func Run(ctx context.Context) error {
 							IncludeONIE:               c.Bool(FlagIncludeONIE),
 							ControlNodeManagementLink: c.String(FlagControlNodeMgmtLink),
 							Gateway:                   c.Bool(FlagGateway),
+							Preview:                   preview,
+							JoinToken:                 joinToken,
+							SaveJoinToken:             saveJoinToken,
 						},
 					}); err != nil {
 						return fmt.Errorf("initializing: %w", err)
@@ -620,7 +648,7 @@ func Run(ctx context.Context) error {
 			{
 				Name:  "build",
 				Usage: "build installers",
-				Flags: flatten(defaultFlags, hModeFlags, buildModeFlags, []cli.Flag{
+				Flags: flatten(defaultFlags, hModeFlags, buildModeFlags, joinTokenFlags, []cli.Flag{
 					&cli.BoolFlag{
 						Name:    FlagNameBuildControls,
 						Aliases: []string{"controls"},
@@ -642,6 +670,7 @@ func Run(ctx context.Context) error {
 						BuildMode:     recipe.BuildMode(c.String(FlagNameBuildMode)),
 						BuildControls: c.Bool(FlagNameBuildControls),
 						BuildGateways: c.Bool(FlagNameBuildGateways),
+						SetJoinToken:  joinToken,
 					}); err != nil {
 						return fmt.Errorf("building: %w", err)
 					}
@@ -687,7 +716,7 @@ func Run(ctx context.Context) error {
 					{
 						Name:  "up",
 						Usage: "run VLAB",
-						Flags: flatten(defaultFlags, hModeFlags, buildModeFlags, []cli.Flag{
+						Flags: flatten(defaultFlags, hModeFlags, buildModeFlags, joinTokenFlags, []cli.Flag{
 							&cli.BoolFlag{
 								Name:    FlagNameReCreate,
 								Aliases: []string{"f"},
@@ -738,9 +767,10 @@ func Run(ctx context.Context) error {
 						Before: before(false),
 						Action: func(c *cli.Context) error {
 							if err := hhfab.VLABUp(ctx, workDir, cacheDir, hhfab.VLABUpOpts{
-								HydrateMode: hhfab.HydrateMode(hydrateMode),
-								ReCreate:    c.Bool(FlagNameReCreate),
-								BuildMode:   recipe.BuildMode(c.String(FlagNameBuildMode)),
+								HydrateMode:  hhfab.HydrateMode(hydrateMode),
+								ReCreate:     c.Bool(FlagNameReCreate),
+								BuildMode:    recipe.BuildMode(c.String(FlagNameBuildMode)),
+								SetJoinToken: joinToken,
 								VLABRunOpts: hhfab.VLABRunOpts{
 									KillStale:          c.Bool(FlagNameKillStale),
 									ControlsRestricted: c.Bool(FlagNameControlsRestricted),

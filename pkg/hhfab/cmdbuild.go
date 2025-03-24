@@ -20,11 +20,11 @@ type BuildOpts struct {
 	BuildMode     recipe.BuildMode
 	BuildControls bool
 	BuildGateways bool
-	// JoinToken   string // TODO to use specific k3s join token
+	SetJoinToken  string
 }
 
 func Build(ctx context.Context, workDir, cacheDir string, opts BuildOpts) error {
-	c, err := load(ctx, workDir, cacheDir, true, opts.HydrateMode)
+	c, err := load(ctx, workDir, cacheDir, true, opts.HydrateMode, opts.SetJoinToken)
 	if err != nil {
 		return err
 	}

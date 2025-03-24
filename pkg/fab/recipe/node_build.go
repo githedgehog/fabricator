@@ -37,6 +37,14 @@ func (b *NodeInstallBuilder) Build(ctx context.Context) error {
 		return fmt.Errorf("hashing build config: %w", err)
 	}
 
+	if b.Fab.Spec.Config.Control.JoinToken == "" {
+		slog.Warn("Explicit join token is required for building a node installer", "name", b.Node.Name)
+		slog.Warn("Set one in the fab.yaml file (.spec.config.control.joinToken) or by using environment variable HHFAB_JOIN_TOKEN")
+		slog.Warn("If you already have first control node deployed, you can get the token from it", "path", "/var/lib/rancher/k3s/server/token")
+
+		return fmt.Errorf("missing join token in fabricator config") //nolint:goerr113
+	}
+
 	return buildInstall(ctx, buildInstallOpts{
 		WorkDir:               b.WorkDir,
 		Name:                  b.Node.Name,

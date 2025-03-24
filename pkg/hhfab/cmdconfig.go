@@ -28,6 +28,7 @@ const (
 	DefaultRepo        = "ghcr.io"
 	DefaultPrefix      = "githedgehog"
 	YAMLExt            = ".yaml"
+	JoinTokenEnv       = "HHFAB_JOIN_TOKEN"
 )
 
 var (
@@ -257,7 +258,7 @@ func importWiring(c InitConfig) error {
 }
 
 func Validate(ctx context.Context, workDir, cacheDir string, hMode HydrateMode) error {
-	_, err := load(ctx, workDir, cacheDir, true, hMode)
+	_, err := load(ctx, workDir, cacheDir, true, hMode, "")
 	if err != nil {
 		return err
 	}
@@ -268,7 +269,7 @@ func Validate(ctx context.Context, workDir, cacheDir string, hMode HydrateMode) 
 }
 
 func Versions(ctx context.Context, workDir, cacheDir string, hMode HydrateMode) error {
-	cfg, err := load(ctx, workDir, cacheDir, true, hMode)
+	cfg, err := load(ctx, workDir, cacheDir, true, hMode, "")
 	if err != nil {
 		return err
 	}
@@ -285,7 +286,7 @@ func Versions(ctx context.Context, workDir, cacheDir string, hMode HydrateMode) 
 	return nil
 }
 
-func load(ctx context.Context, workDir, cacheDir string, wiringAndHydration bool, mode HydrateMode) (*Config, error) {
+func load(ctx context.Context, workDir, cacheDir string, wiringAndHydration bool, mode HydrateMode, setJoinToken string) (*Config, error) {
 	if err := checkWorkCacheDir(workDir, cacheDir); err != nil {
 		return nil, err
 	}
@@ -317,6 +318,14 @@ func load(ctx context.Context, workDir, cacheDir string, wiringAndHydration bool
 	f, controls, nodes, err := fab.GetFabAndNodes(ctx, l.GetClient(), fab.GetFabAndNodesOpts{AllowNotHydrated: true})
 	if err != nil {
 		return nil, fmt.Errorf("getting fabricator and controls nodes: %w", err)
+	}
+
+	if setJoinToken != "" {
+		if f.Spec.Config.Control.JoinToken != "" {
+			slog.Warn("Overriding join token as requested (from flag or env variable)")
+		}
+
+		f.Spec.Config.Control.JoinToken = setJoinToken
 	}
 
 	cfg := &Config{
