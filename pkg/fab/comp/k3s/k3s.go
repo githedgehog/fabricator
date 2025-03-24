@@ -21,9 +21,12 @@ const (
 	BinDir             = "/opt/bin"
 	InstallName        = "k3s-install.sh"
 	AirgapName         = "k3s-airgap-images-amd64.tar.gz"
+	AgentDir           = "/var/lib/rancher/k3s/agent"
 	ImagesDir          = "/var/lib/rancher/k3s/agent/images"
+	ServerDir          = "/var/lib/rancher/k3s/server"
 	ChartsDir          = "/var/lib/rancher/k3s/server/static/" + comp.BootstrapChartsPrefix
-	ServiceName        = "k3s.service"
+	ServerServiceName  = "k3s.service"
+	AgentServiceName   = "k3s-agent.service"
 	APIPort            = 6443
 	ConfigDir          = "/etc/rancher/k3s"
 	ConfigPath         = "/etc/rancher/k3s/config.yaml"
