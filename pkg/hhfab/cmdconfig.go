@@ -28,7 +28,7 @@ const (
 	DefaultRepo        = "ghcr.io"
 	DefaultPrefix      = "githedgehog"
 	YAMLExt            = ".yaml"
-	JoinTokenEnv       = "HHFAB_JOIN_TOKEN"
+	JoinTokenEnv       = "HHFAB_JOIN_TOKEN" //nolint:gosec
 )
 
 var (
