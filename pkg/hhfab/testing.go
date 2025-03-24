@@ -1292,6 +1292,37 @@ func WaitSwitchesReady(ctx context.Context, kube client.Reader, appliedFor time.
 	}
 }
 
+func retrySSHCmd(ctx context.Context, client *goph.Client, cmd string, target string) ([]byte, error) {
+	if client == nil {
+		return nil, fmt.Errorf("ssh client is nil")
+	}
+	maxRetries := 3
+	var out []byte
+	var err error
+	for retries := 0; retries < maxRetries; retries++ {
+		out, err = client.RunContext(ctx, cmd)
+		if err == nil {
+			break
+		}
+		// it doesn't look like the goph client defines error types to check with errors.Is
+		if strings.Contains(err.Error(), "ssh:") {
+			slog.Debug("cannot ssh to run remote command", "cmd", cmd, "remote target", target, "retry", retries+1, "error", err, "output", string(out))
+			if retries < maxRetries-1 {
+				slog.Debug("Retrying in 1 second...")
+				time.Sleep(1 * time.Second)
+
+				continue
+			} else {
+				return out, fmt.Errorf("ssh for remote command failed after %d retries: %w: %s", maxRetries, err, string(out))
+			}
+		} else {
+			return out, err
+		}
+	}
+
+	return out, nil
+}
+
 func checkPing(ctx context.Context, opts TestConnectivityOpts, pings *semaphore.Weighted, from, to string, fromSSH *goph.Client, toIP netip.Addr, expected bool) error {
 	if opts.PingsCount <= 0 {
 		return nil
@@ -1308,7 +1339,7 @@ func checkPing(ctx context.Context, opts TestConnectivityOpts, pings *semaphore.
 	slog.Debug("Running ping", "from", from, "to", toIP.String())
 
 	cmd := fmt.Sprintf("ping -c %d -W 1 %s", opts.PingsCount, toIP.String()) // TODO wrap with timeout?
-	outR, err := fromSSH.RunContext(ctx, cmd)
+	outR, err := retrySSHCmd(ctx, fromSSH, cmd, from)
 	out := strings.TrimSpace(string(outR))
 
 	pingOk := err == nil && strings.Contains(out, "0% packet loss")
@@ -1357,9 +1388,9 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphor
 	g, ctx := errgroup.WithContext(ctx)
 
 	g.Go(func() error {
-		out, err := toSSH.RunContext(ctx, fmt.Sprintf("toolbox -q timeout -v %d iperf3 -s -1", opts.IPerfsSeconds+25))
-		if err != nil {
-			return fmt.Errorf("running iperf3 server: %w: %s", err, string(out))
+		cmd := fmt.Sprintf("toolbox -q timeout -v %d iperf3 -s -1", opts.IPerfsSeconds+25)
+		if _, err := retrySSHCmd(ctx, toSSH, cmd, to); err != nil {
+			return fmt.Errorf("running iperf3 server: %w", err)
 		}
 
 		return nil
@@ -1367,35 +1398,15 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphor
 
 	g.Go(func() error {
 		// We could netcat to check if the server is up, but that will make the server shut down if
-		// it was started with -1, and if we don't add -1 it will run until the timeout, so change approach
+		// it was started with -1, and if we don't add -1 it will run until the timeout
 		time.Sleep(1 * time.Second)
-		var err error
-		var out []byte
 		cmd := fmt.Sprintf("toolbox -q timeout -v %d iperf3 -P 4 -J -c %s -t %d", opts.IPerfsSeconds+25, toIP.String(), opts.IPerfsSeconds)
-		maxRetries := 3
-		for retries := 0; retries < maxRetries; retries++ {
-			// Run iperf3 client
-			out, err = fromSSH.RunContext(ctx, cmd)
-			if err == nil {
-				break
-			}
-			// it doesn't look like the goph client defines error types to check with errors.Is
-			if strings.Contains(err.Error(), "ssh:") {
-				slog.Debug("iperf3 server not ready", "server", to, "retry", retries+1, "error", err, "output", string(out))
-				if retries < maxRetries-1 {
-					slog.Debug("Retrying in 1 second...")
-					time.Sleep(1 * time.Second)
-
-					continue
-				} else {
-					return fmt.Errorf("running iperf3 client: failed after %d retries: %w: %s", maxRetries, err, string(out))
-				}
-			} else {
-				return fmt.Errorf("running iperf3 client: %w: %s", err, string(out))
-			}
+		outR, err := retrySSHCmd(ctx, fromSSH, cmd, from)
+		if err != nil {
+			return fmt.Errorf("running iperf3 client: %w", err)
 		}
 
-		report, err := parseIPerf3Report(out)
+		report, err := parseIPerf3Report(outR)
 		if err != nil {
 			return fmt.Errorf("parsing iperf3 report: %w", err)
 		}
@@ -1442,7 +1453,8 @@ func checkCurl(ctx context.Context, opts TestConnectivityOpts, curls *semaphore.
 	slog.Debug("Running curls", "from", from, "to", toIP, "count", opts.CurlsCount)
 
 	for idx := 0; idx < opts.CurlsCount; idx++ {
-		outR, err := fromSSH.RunContext(ctx, "timeout -v 5 curl --insecure --connect-timeout 3 --silent https://"+toIP)
+		cmd := fmt.Sprintf("timeout -v 5 curl --insecure --connect-timeout 3 --silent https://%s", toIP)
+		outR, err := retrySSHCmd(ctx, fromSSH, cmd, from)
 		out := strings.TrimSpace(string(outR))
 
 		curlOk := err == nil && strings.Contains(out, "302 Moved")
