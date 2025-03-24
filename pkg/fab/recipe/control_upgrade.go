@@ -394,7 +394,7 @@ func (c *ControlUpgrade) upgradeK8s(ctx context.Context, kube client.Reader) err
 
 	slog.Debug("Restarting K3s")
 
-	cmd := exec.CommandContext(ctx, "systemctl", "restart", k3s.ServiceName) //nolint:gosec
+	cmd := exec.CommandContext(ctx, "systemctl", "restart", k3s.ServerServiceName) //nolint:gosec
 	cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "systemctl: ")
 	cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "systemctl: ")
 

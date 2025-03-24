@@ -79,8 +79,9 @@ _hhfabctl-build GOOS GOARCH: _license_headers _gotools _kube_gen
 build-multi: (_hhfab-build "linux" "amd64") (_hhfab-build "linux" "arm64") (_hhfab-build "darwin" "amd64") (_hhfab-build "darwin" "arm64") (_hhfabctl-build "linux" "amd64") (_hhfabctl-build "linux" "arm64") (_hhfabctl-build "darwin" "amd64") (_hhfabctl-build "darwin" "arm64") && version
 
 # Build all artifacts
-build: _license_headers _gotools hhfab-build hhfabctl-build && version
+build: _license_headers gen _gotools hhfab-build hhfabctl-build && version
   {{go_linux_build}} -o ./bin/fabricator ./cmd
+  {{go_linux_build}} -o ./bin/hhfab-node-config ./cmd/hhfab-node-config
   # Build complete
 
 # TODO rework by using existing recipes and installing with helm chart
@@ -105,11 +106,11 @@ _helm-fabricator: _kustomize _helm _helmify _kube_gen
   {{helm}} lint config/helm/fabricator-{{version}}.tgz
 
 # Build all K8s artifacts (images and charts)
-kube-build: build (_docker-build "fabricator") _helm-fabricator-api _helm-fabricator (_helm-build "ntp") && version
+kube-build: build (_docker-build "fabricator") (_docker-build "hhfab-node-config") _helm-fabricator-api _helm-fabricator (_helm-build "ntp") && version
   # Docker images and Helm charts built
 
 # Push all K8s artifacts (images and charts)
-kube-push: kube-build (_helm-push "fabricator-api") (_kube-push "fabricator") (_helm-push "ntp") && version
+kube-push: kube-build (_helm-push "fabricator-api") (_kube-push "fabricator") (_docker-push "hhfab-node-config") (_helm-push "ntp") && version
   # Docker images and Helm charts pushed
 
 _hhfab-push-main: _oras hhfab-build && version

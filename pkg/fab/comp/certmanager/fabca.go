@@ -24,6 +24,7 @@ import (
 const (
 	BlockTypeCert = "CERTIFICATE"
 	BlockTypeKey  = "EC PRIVATE KEY"
+	FabCAPath     = "/etc/ssl/certs/hh-fab-ca.pem"
 )
 
 func InstallFabCA(ca *CA) comp.KubeInstall {
