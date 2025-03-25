@@ -16,10 +16,12 @@ import (
 )
 
 const (
-	CtrlRef      = "fabricator/fabricator"
-	CtrlChartRef = "fabricator/charts/fabricator"
-	APIChartRef  = "fabricator/charts/fabricator-api"
-	CtlRef       = "fabricator/hhfabctl"
+	CtrlRef              = "fabricator/fabricator"
+	CtrlChartRef         = "fabricator/charts/fabricator"
+	APIChartRef          = "fabricator/charts/fabricator-api"
+	CtlRef               = "fabricator/hhfabctl"
+	NodeConfigRef        = "fabricator/hhfab-node-config"
+	NodeConfigAirgapName = "node-config-airgap-images-amd64.tar"
 
 	BinDir         = "/opt/bin"
 	CtlBinName     = "hhfabctl"
@@ -86,10 +88,11 @@ var _ comp.ListOCIArtifacts = Artifacts
 
 func Artifacts(cfg fabapi.Fabricator) (comp.OCIArtifacts, error) {
 	return comp.OCIArtifacts{
-		APIChartRef:  cfg.Status.Versions.Fabricator.API,
-		CtrlRef:      cfg.Status.Versions.Fabricator.Controller,
-		CtrlChartRef: cfg.Status.Versions.Fabricator.Controller,
-		CtlRef:       cfg.Status.Versions.Fabricator.Ctl,
+		APIChartRef:   cfg.Status.Versions.Fabricator.API,
+		CtrlRef:       cfg.Status.Versions.Fabricator.Controller,
+		CtrlChartRef:  cfg.Status.Versions.Fabricator.Controller,
+		CtlRef:        cfg.Status.Versions.Fabricator.Ctl,
+		NodeConfigRef: cfg.Status.Versions.Fabricator.NodeConfig,
 	}, nil
 }
 

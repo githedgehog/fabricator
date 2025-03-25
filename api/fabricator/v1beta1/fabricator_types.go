@@ -230,6 +230,7 @@ type FabricatorVersions struct {
 	Controller     meta.Version `json:"controller,omitempty"`
 	ControlUSBRoot meta.Version `json:"controlISORoot,omitempty"`
 	Ctl            meta.Version `json:"ctl,omitempty"`
+	NodeConfig     meta.Version `json:"nodeConfig,omitempty"`
 	Flatcar        meta.Version `json:"flatcar,omitempty"`
 }
 

@@ -15,12 +15,17 @@ import (
 
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/artificer"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/f8r"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/flatcar"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 	"go.githedgehog.com/fabricator/pkg/util/butaneutil"
 	"go.githedgehog.com/fabricator/pkg/util/tmplutil"
 	"go.githedgehog.com/fabricator/pkg/version"
+)
+
+const (
+	NodeConfigArchive = "node-config.tar"
 )
 
 type NodeInstallBuilder struct {
@@ -93,6 +98,11 @@ func (b *NodeInstallBuilder) addPayload(ctx context.Context, slog *slog.Logger, 
 
 	if err := apiutil.PrintFab(b.Fab, nil, []fabapi.FabNode{b.Node}, fabF); err != nil {
 		return fmt.Errorf("printing fab: %w", err)
+	}
+
+	slog.Info("Adding node config to installer")
+	if err := b.Downloader.GetOCI(ctx, f8r.NodeConfigRef, b.Fab.Status.Versions.Fabricator.NodeConfig, installDir); err != nil {
+		return fmt.Errorf("downloading node config: %w", err)
 	}
 
 	return nil

@@ -155,6 +155,7 @@ func (b *ControlInstallBuilder) addPayload(ctx context.Context, slog *slog.Logge
 		return fmt.Errorf("printing wiring: %w", err)
 	}
 
+	slog.Info("Adding CLIs to installer")
 	// TODO remove if it'll be managed by control agent?
 	if err := b.Downloader.FromORAS(ctx, installDir, fabric.CtlRef, b.Fab.Status.Versions.Fabric.Ctl, []artificer.ORASFile{
 		{

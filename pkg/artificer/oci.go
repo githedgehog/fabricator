@@ -33,6 +33,18 @@ func UploadOCIArchive(ctx context.Context, workDir, name string, version meta.Ve
 	return nil
 }
 
+func InstallOCIArchive(ctx context.Context, workDir, name string, version meta.Version, dstPath, ref string) error {
+	cacheName := ociCacheName(name, version)
+	srcRef := "oci:" + filepath.Join(workDir, cacheName)
+	dstRef := "docker-archive:" + dstPath + ":" + ref
+
+	if err := copyOCI(ctx, srcRef, dstRef, nil, nil); err != nil {
+		return fmt.Errorf("installing OCI archive %s to %s: %w", srcRef, dstRef, err)
+	}
+
+	return nil
+}
+
 func copyOCI(ctx context.Context, src, dst string, srcAuth, dstAuth *types.DockerAuthConfig) error {
 	srcRef, err := alltransports.ParseImageName(src)
 	if err != nil {
