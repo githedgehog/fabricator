@@ -284,6 +284,7 @@ jobs:
         run: |
           bin/hhfab init -v --dev -m ${{ matrix.fabricmode }} --include-onie=${{ matrix.includeonie }} --gateway=${{ matrix.gateway }}
           bin/hhfab vlab gen -v
+          export HHFAB_JOIN_TOKEN=$(openssl rand -base64 24)
           bin/hhfab vlab up -v --ready inspect --ready setup-vpcs --ready test-connectivity --ready release-test --ready exit --mode=${{ matrix.buildmode }}
           cat release-test.xml
 
@@ -302,6 +303,7 @@ jobs:
         run: |
           bin/hhfab init -v --dev -m ${{ matrix.fabricmode }} --include-onie=${{ matrix.includeonie }} --gateway=${{ matrix.gateway }}
           bin/hhfab vlab gen -v
+          export HHFAB_JOIN_TOKEN=$(openssl rand -base64 24)
           bin/hhfab vlab up -v --ready inspect --ready setup-vpcs --ready test-connectivity --ready exit --mode=${{ matrix.buildmode }}
 
       - name: Upload show-tech artifacts
