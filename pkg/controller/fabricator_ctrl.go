@@ -5,6 +5,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -20,10 +21,12 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab/comp/certmanager"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/f8r"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/fabric"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/ntp"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/reloader"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/zot"
 	"go.githedgehog.com/fabricator/pkg/version"
+	coreapi "k8s.io/api/core/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -122,6 +125,19 @@ func (r *FabricatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 		// TODO do the same for the nodes
 
+		regSecret := coreapi.Secret{}
+		if err := r.Get(ctx, client.ObjectKey{
+			Namespace: comp.FabNamespace,
+			Name:      comp.RegistryUserReaderSecret,
+		}, &regSecret); err != nil {
+			return ctrl.Result{}, fmt.Errorf("getting registry reader user secret: %w", err)
+		}
+
+		regPassword, ok := regSecret.Data[comp.BasicAuthPasswordKey]
+		if !ok || len(regPassword) == 0 {
+			return ctrl.Result{}, errors.New("registry reader user secret missing password") //nolint:goerr113
+		}
+
 		// doing the actual reconciliation
 
 		apimeta.SetStatusCondition(&f.Status.Conditions, metav1.Condition{
@@ -171,6 +187,12 @@ func (r *FabricatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 		if err := comp.EnforceKubeInstall(ctx, r.Client, *f, ntp.Install); err != nil {
 			return ctrl.Result{}, fmt.Errorf("enforcing ntp install: %w", err)
+		}
+
+		if err := comp.EnforceKubeInstall(ctx, r.Client, *f,
+			k3s.InstallNodeRegistries(comp.RegistryUserReader, string(regPassword)),
+		); err != nil {
+			return ctrl.Result{}, fmt.Errorf("enforcing k3s node registries install: %w", err)
 		}
 
 		// Should be probably always updated last
