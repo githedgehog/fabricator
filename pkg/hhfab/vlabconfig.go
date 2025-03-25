@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"slices"
@@ -18,6 +19,7 @@ import (
 	"dario.cat/mergo"
 	"github.com/charmbracelet/keygen"
 	fmeta "go.githedgehog.com/fabric/api/meta"
+	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -38,8 +40,12 @@ const (
 	HHFabCfgTypeHW     = "hw"
 	HHFabCfgLinkPrefix = "link" + HHFabCfgPrefix + "/"
 	HHFabCfgPCIPrefix  = "pci@"
+	HHFabCfgASNPrefix  = "asn"
 	// HHFabCfgSerial          = "serial" + HHFabCfgPrefix
 	// HHFabCfgSerialSchemeSSH = "ssh://"
+
+	ExternalVMName   = "external"
+	MaxExternalConns = 48
 )
 
 const (
@@ -60,6 +66,7 @@ type VLAB struct {
 	VMs          []VM
 	Taps         int
 	Passthroughs []string
+	Externals    ExternalsCfg
 }
 
 type VM struct {
@@ -71,17 +78,47 @@ type VM struct {
 	Size       VMSize
 }
 
+type ExternalAttachCfg struct {
+	Prefix     string // IP prefix to configure on the NIC
+	NeighborIP string // IP of the BGP neighbor
+	NeighborAS string // AS of the BGP neighbor
+	Vlan       uint16 // VLAN ID to configure on the NIC, 0 is untagged
+	VRF        string // VRF name to configure on the NIC (name of the external)
+}
+
+type ExternalNICCfg struct {
+	Attachments []ExternalAttachCfg // the external attachments for this NIC, one per VLAN
+	Untagged    bool                // whether there's an untagged attachment. Separate to simplify ignition template
+	UntaggedCfg ExternalAttachCfg   // if untagged, the configuration for the untagged attachment
+}
+
+type ExternalVRFCfg struct {
+	TableID      uint32
+	ASN          uint32
+	InCommunity  string
+	OutCommunity string
+}
+
+type ExternalsCfg struct {
+	NICs    map[string]ExternalNICCfg // the key is the external connection NIC name
+	VRFs    map[string]ExternalVRFCfg // a VRF associated with an external. The key is the external name
+	Invalid bool                      // if true, the external VRF configuration is invalid
+
+}
+
 type VLABConfig struct {
-	SSHKey string              `json:"-"`
-	Sizes  VMSizes             `json:"sizes"`
-	VMs    map[string]VMConfig `json:"vms"`
+	SSHKey    string              `json:"-"`
+	Sizes     VMSizes             `json:"sizes"`
+	VMs       map[string]VMConfig `json:"vms"`
+	Externals ExternalsCfg        `json:"externals"`
 }
 
 type VMSizes struct {
-	Control VMSize `json:"control"`
-	Switch  VMSize `json:"switch"`
-	Server  VMSize `json:"server"`
-	Gateway VMSize `json:"gateway"`
+	Control  VMSize `json:"control"`
+	Switch   VMSize `json:"switch"`
+	Server   VMSize `json:"server"`
+	Gateway  VMSize `json:"gateway"`
+	External VMSize `json:"external"`
 }
 
 type VMConfig struct {
@@ -92,10 +129,11 @@ type VMConfig struct {
 type VMType string
 
 const (
-	VMTypeControl VMType = "control"
-	VMTypeSwitch  VMType = "switch"
-	VMTypeServer  VMType = "server"
-	VMTypeGateway VMType = "gateway"
+	VMTypeControl  VMType = "control"
+	VMTypeSwitch   VMType = "switch"
+	VMTypeServer   VMType = "server"
+	VMTypeGateway  VMType = "gateway"
+	VMTypeExternal VMType = "external"
 )
 
 var VMTypes = []VMType{
@@ -103,6 +141,7 @@ var VMTypes = []VMType{
 	VMTypeSwitch,
 	VMTypeServer,
 	VMTypeGateway,
+	VMTypeExternal,
 }
 
 const (
@@ -129,10 +168,11 @@ type VMSize struct {
 }
 
 var DefaultSizes = VMSizes{
-	Control: VMSize{CPU: 6, RAM: 6144, Disk: 100}, // TODO 8GB RAM?
-	Switch:  VMSize{CPU: 4, RAM: 5120, Disk: 50},  // TODO 6GB RAM?
-	Server:  VMSize{CPU: 2, RAM: 768, Disk: 10},   // TODO 1GB RAM?
-	Gateway: VMSize{CPU: 8, RAM: 6144, Disk: 50},  // TODO proper min size
+	Control:  VMSize{CPU: 6, RAM: 6144, Disk: 100}, // TODO 8GB RAM?
+	Switch:   VMSize{CPU: 4, RAM: 5120, Disk: 50},  // TODO 6GB RAM?
+	Server:   VMSize{CPU: 2, RAM: 768, Disk: 10},   // TODO 1GB RAM?
+	Gateway:  VMSize{CPU: 8, RAM: 6144, Disk: 50},  // TODO proper min size
+	External: VMSize{CPU: 4, RAM: 5120, Disk: 50},  // TODO 6GB RAM?
 }
 
 func (c *Config) PrepareVLAB(ctx context.Context, opts VLABUpOpts) (*VLAB, error) {
@@ -228,6 +268,10 @@ func (c *Config) PrepareVLAB(ctx context.Context, opts VLABUpOpts) (*VLAB, error
 		}
 	}
 
+	if vlabCfg.Externals.Invalid && opts.SpawnExternal {
+		return nil, fmt.Errorf("could not derive external VRF configuration from wiring, disable external spawning or check wiring") //nolint:goerr113
+	}
+
 	sshKeyPath := filepath.Join(vlabDir, VLABSSHKeyFile)
 	pub, prv, err := getOrCreateSSHKey(sshKeyPath)
 	if err != nil {
@@ -264,6 +308,11 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 	cfg := &VLABConfig{
 		Sizes: DefaultSizes,
 		VMs:   map[string]VMConfig{},
+		Externals: ExternalsCfg{
+			NICs:    make(map[string]ExternalNICCfg),
+			VRFs:    make(map[string]ExternalVRFCfg),
+			Invalid: false,
+		},
 	}
 
 	hw := map[string]bool{}
@@ -392,6 +441,40 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 		}
 	}
 
+	externals := &vpcapi.ExternalList{}
+	if err := wiring.List(ctx, externals); err != nil {
+		return nil, fmt.Errorf("failed to list externals: %w", err)
+	}
+	if len(externals.Items) > 0 {
+		if _, exists := cfg.VMs[ExternalVMName]; exists {
+			return nil, fmt.Errorf("VM name %s is reserved for externals", ExternalVMName) //nolint:goerr113
+		}
+
+		cfg.VMs[ExternalVMName] = VMConfig{
+			Type: VMTypeExternal,
+			NICs: map[string]string{
+				"enp2s0": NICTypeUsernet,
+			},
+		}
+		tableID := uint32(1000)
+		for _, external := range externals.Items {
+			if _, exists := cfg.Externals.VRFs[external.Name]; exists {
+				return nil, fmt.Errorf("duplicate external VRF name: %q", external.Name) //nolint:goerr113
+			}
+			asn := getAsn(&external)
+			if asn == 0 {
+				slog.Debug("external has no ASN annotation, will attempt to fetch it from the external attachments", "name", external.Name)
+			}
+			cfg.Externals.VRFs[external.Name] = ExternalVRFCfg{
+				TableID: tableID,
+				ASN:     asn,
+				// Invert inbound and outbound communities
+				InCommunity:  external.Spec.OutboundCommunity,
+				OutCommunity: external.Spec.InboundCommunity,
+			}
+		}
+	}
+
 	switches := &wiringapi.SwitchList{}
 	if err := wiring.List(ctx, switches); err != nil {
 		return nil, fmt.Errorf("failed to list switches: %w", err)
@@ -500,6 +583,12 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 		return nil
 	}
 
+	externalID := 1
+	externalAttachs := &vpcapi.ExternalAttachmentList{}
+	if err := wiring.List(ctx, externalAttachs); err != nil {
+		return nil, fmt.Errorf("failed to list external attachments: %w", err)
+	}
+
 	for _, conn := range conns.Items {
 		if conn.Spec.Fabric != nil {
 			for _, link := range conn.Spec.Fabric.Links {
@@ -552,6 +641,108 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 					return nil, fmt.Errorf("failed to add peer link for MCLAG domain connection %s: %w", conn.Name, err)
 				}
 			}
+		} else if conn.Spec.External != nil && !cfg.Externals.Invalid {
+			if externalID > MaxExternalConns {
+				slog.Warn("too many external connections", "max-external-connections", MaxExternalConns)
+				cfg.Externals.Invalid = true
+
+				continue
+			}
+
+			switchName := conn.Spec.External.Link.Switch.DeviceName()
+			// add the link representing the external connection
+			nicName := fmt.Sprintf("enp2s%d", externalID)
+			externalID++
+			toStr := fmt.Sprintf("%s/%s", ExternalVMName, nicName)
+			if err := addLink(conn.Spec.External.Link.Switch.Port, toStr); err != nil {
+				slog.Warn("failed to add link for external connection", "connection", conn.Name, "error", err)
+				cfg.Externals.Invalid = true
+
+				continue
+			}
+			extNicCfg := ExternalNICCfg{
+				Attachments: make([]ExternalAttachCfg, 0),
+				Untagged:    false,
+			}
+
+			// check if there is any external attachment using this connection
+			for _, extAttach := range externalAttachs.Items {
+				if extAttach.Spec.Connection != conn.Name {
+					continue
+				}
+				extName := extAttach.Spec.External
+				extVrf, ok := cfg.Externals.VRFs[extName]
+				if !ok {
+					slog.Warn("external attachment has no associated VRF for the external", "attachment", extAttach.Name, "external", extName)
+					cfg.Externals.Invalid = true
+
+					break
+				}
+				if extVrf.ASN == 0 {
+					slog.Debug("Setting ASN for external", "external", extName, "attachment", extAttach.Name, "ASN", extAttach.Spec.Neighbor.ASN)
+					extVrf.ASN = extAttach.Spec.Neighbor.ASN
+					cfg.Externals.VRFs[extName] = extVrf
+				} else if extVrf.ASN != extAttach.Spec.Neighbor.ASN {
+					slog.Warn("external attachment reports inconsistent ASN", "external", extName, "attachment", extAttach.Name, "ASN", extAttach.Spec.Neighbor.ASN, "previously known ASN", extVrf.ASN)
+					cfg.Externals.Invalid = true
+
+					break
+				}
+				// Fetch the switch to retrieve its ASN
+				sw := &wiringapi.Switch{}
+				if err := wiring.Get(ctx, client.ObjectKey{Name: switchName, Namespace: conn.Namespace}, sw); err != nil {
+					slog.Warn("failed to get switch", "switch", switchName, "error", err)
+					cfg.Externals.Invalid = true
+
+					break
+				}
+
+				// We get the external IP as the "neighbor IP" in the wiring, but we need to
+				// convert it to a prefix. Conversely, the fabric "switch IP" is given as a prefix
+				// and we need to convert it to an address for the BGP neighbor commands.
+				// So we take the prefix length of the switch IP and apply it to the external IP.
+				fabSwitchPrefix := netip.MustParsePrefix(extAttach.Spec.Switch.IP)
+				extAddr := netip.MustParseAddr(extAttach.Spec.Neighbor.IP)
+				extPrefix := netip.PrefixFrom(extAddr, fabSwitchPrefix.Bits())
+				attachCfg := ExternalAttachCfg{
+					Prefix:     extPrefix.String(),
+					NeighborIP: fabSwitchPrefix.Addr().String(),
+					NeighborAS: strconv.FormatUint(uint64(sw.Spec.ASN), 10),
+					Vlan:       extAttach.Spec.Switch.VLAN,
+					VRF:        extName,
+				}
+				if extAttach.Spec.Switch.VLAN == 0 {
+					if extNicCfg.Untagged {
+						slog.Warn("multiple untagged attachments for the same external NIC", "attachment", extAttach.Name, "external", extName)
+						cfg.Externals.Invalid = true
+
+						break
+					}
+					extNicCfg.Untagged = true
+					extNicCfg.UntaggedCfg = attachCfg
+				} else {
+					extNicCfg.Attachments = append(extNicCfg.Attachments, attachCfg)
+				}
+				slog.Info("Added attachment to external",
+					"NIC name",
+					nicName,
+					"external",
+					extName,
+					"switch",
+					switchName,
+					"VLAN",
+					attachCfg.Vlan,
+					"switch IP",
+					attachCfg.NeighborIP,
+					"switch ASN",
+					attachCfg.NeighborAS,
+					"external Prefix",
+					attachCfg.Prefix,
+					"external ASN",
+					extVrf.ASN,
+				)
+			}
+			cfg.Externals.NICs[nicName] = extNicCfg
 		}
 	}
 
@@ -648,6 +839,8 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 
 					otherPort := getDirectNICPort(otherVMID, otherNICID)
 					netdev += fmt.Sprintf(",localaddr=127.0.0.1:%d", otherPort)
+				} else if nicType == NICTypeDirect {
+					return nil, fmt.Errorf("missing NIC config for direct NIC %d of VM %q, nicCfgRaw: %q", nicID, name, nicCfgRaw) //nolint:goerr113
 				}
 			} else if nicType == NICTypeUsernet {
 				if usernet > 0 {
@@ -715,6 +908,8 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 			size = cfg.Sizes.Control
 		} else if vm.Type == VMTypeGateway {
 			size = cfg.Sizes.Gateway
+		} else if vm.Type == VMTypeExternal {
+			size = cfg.Sizes.External
 		}
 
 		vms = append(vms, VM{
@@ -731,7 +926,25 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 		VMs:          vms,
 		Taps:         tapID,
 		Passthroughs: passthroughs,
+		Externals:    cfg.Externals,
 	}, nil
+}
+
+func getAsn(obj client.Object) uint32 {
+	if obj.GetAnnotations() != nil {
+		annotationLabel := HHFabCfgASNPrefix + HHFabCfgPrefix
+		t, exist := obj.GetAnnotations()[annotationLabel]
+		if exist {
+			asn, err := strconv.ParseUint(t, 10, 32)
+			if err == nil {
+				return uint32(asn)
+			}
+
+			slog.Warn("Invalid ASN annotation value", "kind", obj.GetObjectKind().GroupVersionKind().Kind, "name", obj.GetName(), annotationLabel, t)
+		}
+	}
+
+	return 0
 }
 
 func isHardware(obj client.Object) bool {

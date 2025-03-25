@@ -1163,7 +1163,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 					}
 					client := clientR.(*goph.Client)
 
-					if err := checkCurl(ctx, opts, curls, serverA, client, "8.8.8.8", reachable); err != nil {
+					if err := checkCurl(ctx, opts, curls, serverA, client, "1.0.0.1", reachable); err != nil {
 						return fmt.Errorf("checking curl from %q: %w", serverA, err)
 					}
 
@@ -1442,20 +1442,20 @@ func checkCurl(ctx context.Context, opts TestConnectivityOpts, curls *semaphore.
 	slog.Debug("Running curls", "from", from, "to", toIP, "count", opts.CurlsCount)
 
 	for idx := 0; idx < opts.CurlsCount; idx++ {
-		outR, err := fromSSH.RunContext(ctx, "timeout -v 5 curl --insecure --connect-timeout 3 --silent https://"+toIP)
+		outR, err := fromSSH.RunContext(ctx, "timeout -v 5 curl --insecure --connect-timeout 3 --silent http://"+toIP)
 		out := strings.TrimSpace(string(outR))
 
-		curlOk := err == nil && strings.Contains(out, "302 Moved")
-		curlFail := err != nil && !strings.Contains(out, "302 Moved")
+		curlOk := err == nil && strings.Contains(out, "301 Moved")
+		curlFail := err != nil && !strings.Contains(out, "301 Moved")
 
 		slog.Debug("Curl result", "from", from, "to", toIP, "expected", expected, "ok", curlOk, "fail", curlFail, "err", err, "out", out)
 
 		if curlOk == curlFail {
 			if err != nil {
-				return fmt.Errorf("running curl: %w: %s", err, out) // TODO replace with custom error?
+				return fmt.Errorf("running curl (expected %t): %w: %s", expected, err, out) // TODO replace with custom error?
 			}
 
-			return fmt.Errorf("unexpected curl result: %s", out)
+			return fmt.Errorf("unexpected curl result (expected %t): %s", expected, out)
 		}
 
 		if expected && !curlOk {
