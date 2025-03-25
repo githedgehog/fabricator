@@ -1655,7 +1655,7 @@ github.com/zealic/xignore
 # go.etcd.io/bbolt v1.3.11
 ## explicit; go 1.22
 go.etcd.io/bbolt
-# go.githedgehog.com/fabric v0.70.0
+# go.githedgehog.com/fabric v0.71.0
 ## explicit; go 1.24.0
 go.githedgehog.com/fabric/api/agent/v1beta1
 go.githedgehog.com/fabric/api/dhcp/v1beta1
@@ -1679,8 +1679,8 @@ go.githedgehog.com/fabric/pkg/util/kubeutil
 go.githedgehog.com/fabric/pkg/util/logutil
 go.githedgehog.com/fabric/pkg/util/pointer
 go.githedgehog.com/fabric/pkg/util/uefiutil
-# go.githedgehog.com/fabric-bcm-ygot v0.3.1-4.4.1
-## explicit; go 1.23.4
+# go.githedgehog.com/fabric-bcm-ygot v0.4.0-4.4.2
+## explicit; go 1.24.0
 go.githedgehog.com/fabric-bcm-ygot/pkg/oc
 # go.mongodb.org/mongo-driver v1.14.0
 ## explicit; go 1.18
