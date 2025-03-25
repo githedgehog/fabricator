@@ -94,3 +94,23 @@ storage:
                   echo 'lldp stop' > "$device/command"
               fi
           done
+
+    - path: /etc/systemd/network/10-rename-enp2s1.link
+      mode: 0644
+      contents:
+        inline: |
+          [Match]
+          OriginalName=enp2s1np*
+
+          [Link]
+          Name=enp2s1
+
+    - path: /etc/systemd/network/10-rename-enp2s2.link
+      mode: 0644
+      contents:
+        inline: |
+          [Match]
+          OriginalName=enp2s2np*
+
+          [Link]
+          Name=enp2s2
