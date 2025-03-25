@@ -542,6 +542,7 @@ _Appears in:_
 | `reloader` _[Version](#version)_ |  |  |  |
 | `ntp` _[Version](#version)_ |  |  |  |
 | `ntpChart` _[Version](#version)_ |  |  |  |
+| `bashCompletion` _[Version](#version)_ |  |  |  |
 
 
 #### RegistryConfig

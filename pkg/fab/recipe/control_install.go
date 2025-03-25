@@ -20,6 +20,7 @@ import (
 	"go.githedgehog.com/fabric/pkg/util/logutil"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/bashcompletion"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/certmanager"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k9s"
@@ -73,6 +74,10 @@ func (c *ControlInstall) Run(ctx context.Context) error {
 
 	if err := c.installZot(ctx, kube, ca); err != nil {
 		return fmt.Errorf("installing zot: %w", err)
+	}
+
+	if err := bashcompletion.Install(ctx, c.WorkDir, c.Fab); err != nil {
+		return fmt.Errorf("installing bash completion: %w", err)
 	}
 
 	// we should use in-cluster registry from now on
