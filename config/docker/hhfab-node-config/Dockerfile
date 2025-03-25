@@ -12,10 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM gcr.io/distroless/static:nonroot
+# TODO switch back to gcr.io/distroless/static with statically pre-built nsenter?
+FROM alpine
 WORKDIR /
 COPY --chown=0:0 ./hhfab-node-config /bin/
-
-USER 65532:65532
-
-ENTRYPOINT ["/bin/hhfab-node-config"]

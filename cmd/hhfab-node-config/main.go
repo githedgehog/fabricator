@@ -59,17 +59,11 @@ func Run(ctx context.Context) error {
 		"version", version.Version,
 	}
 
-	if len(os.Args) != 3 {
-		return fmt.Errorf("Usage: %s <workdir> <nodename>", os.Args[0]) //nolint:goerr113
+	if len(os.Args) != 1 {
+		return fmt.Errorf("Usage: %s", os.Args[0]) //nolint:goerr113
 	}
-
-	workDir := os.Args[1]
-	nodeName := os.Args[2]
-
-	args = append(args, "workdir", workDir)
-	args = append(args, "nodename", nodeName)
 
 	slog.Info("Hedgehog Fabricator Node Config", args...)
 
-	return node.DoConfig(ctx, workDir, nodeName) //nolint:wrapcheck
+	return node.DoConfig(ctx) //nolint:wrapcheck
 }

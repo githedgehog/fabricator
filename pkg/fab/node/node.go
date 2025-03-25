@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"time"
 
 	"go.githedgehog.com/fabric/pkg/util/logutil"
@@ -23,13 +22,10 @@ const (
 	RegistriesFileName = "registries.yaml"
 )
 
-func DoConfig(ctx context.Context, workDir, nodeName string) error {
-	if workDir == "" {
-		return fmt.Errorf("workdir is empty") //nolint:goerr113
-	}
-
+func DoConfig(ctx context.Context) error {
+	nodeName := os.Getenv("FAB_NODE_NAME")
 	if nodeName == "" {
-		return fmt.Errorf("nodename is empty") //nolint:goerr113
+		return fmt.Errorf("FAB_NODE_NAME not set") //nolint:goerr113
 	}
 
 	hostname, err := os.Hostname()
@@ -41,29 +37,29 @@ func DoConfig(ctx context.Context, workDir, nodeName string) error {
 		return fmt.Errorf("hostname mismatch: running on %q while installer expects %q", hostname, nodeName) //nolint:goerr113
 	}
 
-	slog.Info("Configuring node", "workdir", workDir, "nodename", nodeName)
+	slog.Info("Configuring node", "nodename", nodeName)
 
-	if err := enforceK3sConfigs(ctx, workDir); err != nil {
+	if err := enforceK3sConfigs(ctx); err != nil {
 		return fmt.Errorf("enforcing k3s configs: %w", err)
 	}
 
 	return nil
 }
 
-func enforceK3sConfigs(ctx context.Context, workDir string) error {
+func enforceK3sConfigs(ctx context.Context) error {
 	slog.Info("Enforcing k3s configs")
 
-	ca, err := os.ReadFile(filepath.Join(workDir, CAFileName))
-	if err != nil {
-		return fmt.Errorf("reading CA: %w", err)
+	ca := os.Getenv("FAB_CA")
+	if ca == "" {
+		return fmt.Errorf("FAB_CA not set") //nolint:goerr113
 	}
 
-	registries, err := os.ReadFile(filepath.Join(workDir, RegistriesFileName))
-	if err != nil {
-		return fmt.Errorf("reading registries.yaml: %w", err)
+	registries := os.Getenv("FAB_REGISTRIES")
+	if registries == "" {
+		return fmt.Errorf("FAB_REGISTRIES not set") //nolint:goerr113
 	}
 
-	changed, err := enforceFile(certmanager.FabCAPath, ca, 0o644)
+	changed, err := enforceFile(certmanager.FabCAPath, []byte(ca), 0o644)
 	if err != nil {
 		return fmt.Errorf("enforcing CA: %w", err)
 	}
@@ -103,6 +99,8 @@ func enforceK3sConfigs(ctx context.Context, workDir string) error {
 		} else {
 			return fmt.Errorf("not a k3s server or agent") //nolint:goerr113
 		}
+	} else {
+		slog.Info("No configs affecting k3s service were updated, skipping k3s service restart")
 	}
 
 	return nil
