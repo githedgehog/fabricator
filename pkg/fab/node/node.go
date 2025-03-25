@@ -4,11 +4,15 @@
 package node
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"go.githedgehog.com/fabric/pkg/util/logutil"
@@ -59,6 +63,8 @@ func enforceK3sConfigs(ctx context.Context) error {
 		return fmt.Errorf("FAB_REGISTRIES not set") //nolint:goerr113
 	}
 
+	restart := false
+
 	changed, err := enforceFile(certmanager.FabCAPath, []byte(ca), 0o644)
 	if err != nil {
 		return fmt.Errorf("enforcing CA: %w", err)
@@ -66,6 +72,13 @@ func enforceK3sConfigs(ctx context.Context) error {
 
 	if changed {
 		slog.Info("FabCA updated", "path", certmanager.FabCAPath)
+
+		if err := updateCACertificates(ctx); err != nil {
+			return fmt.Errorf("updating CA certificates: %w", err)
+		}
+
+		// no restart required
+		// TODO validate that in case of changing CA in-place k3s would still not require restart
 	} else {
 		slog.Info("FabCA is up to date", "path", certmanager.FabCAPath)
 	}
@@ -77,13 +90,24 @@ func enforceK3sConfigs(ctx context.Context) error {
 
 	if changed {
 		slog.Info("K3s registries.yaml updated", "path", k3s.KubeRegistriesPath)
+
+		restart = true
 	} else {
 		slog.Info("K3s registries.yaml is up to date", "path", k3s.KubeRegistriesPath)
 	}
 
-	if changed {
-		slog.Info("Configs affecting k3s service were updated, restarting k3s service")
+	if restart {
+		slog.Info("Configs affecting k3s service were updated, k3s service restart is required")
+	} else {
+		slog.Info("No configs requiring k3s service restart were updated")
 
+		restart, err = isK3sNeedsRestart(ctx)
+		if err != nil {
+			return fmt.Errorf("checking if k3s needs restart: %w", err)
+		}
+	}
+
+	if restart {
 		if isServer, err := isK3sServer(); err != nil {
 			return fmt.Errorf("checking if k3s server: %w", err)
 		} else if isServer {
@@ -99,8 +123,6 @@ func enforceK3sConfigs(ctx context.Context) error {
 		} else {
 			return fmt.Errorf("not a k3s server or agent") //nolint:goerr113
 		}
-	} else {
-		slog.Info("No configs affecting k3s service were updated, skipping k3s service restart")
 	}
 
 	return nil
@@ -139,7 +161,7 @@ func isK3sServer() (bool, error) {
 			return false, nil
 		}
 
-		return false, fmt.Errorf("stat %q: %w", k3s.ConfigPath, err)
+		return false, fmt.Errorf("stat %q: %w", k3s.ServerDir, err)
 	} else if !stat.IsDir() {
 		return false, fmt.Errorf("expected %q to be a directory", k3s.ServerDir) //nolint:goerr113
 	}
@@ -148,14 +170,14 @@ func isK3sServer() (bool, error) {
 }
 
 func isK3sAgent() (bool, error) {
-	if stat, err := os.Stat(k3s.KubeConfigPath); err != nil {
+	if stat, err := os.Stat(k3s.AgentDir); err != nil {
 		if os.IsNotExist(err) {
 			return false, nil
 		}
 
-		return false, fmt.Errorf("stat %q: %w", k3s.KubeConfigPath, err)
-	} else if stat.IsDir() {
-		return false, fmt.Errorf("expected %q to be a file", k3s.KubeConfigPath) //nolint:goerr113
+		return false, fmt.Errorf("stat %q: %w", k3s.AgentDir, err)
+	} else if !stat.IsDir() {
+		return false, fmt.Errorf("expected %q to be a directory", k3s.AgentDir) //nolint:goerr113
 	}
 
 	return true, nil
@@ -186,6 +208,72 @@ func systemctlRestart(ctx context.Context, serviceName string) error {
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("restarting %q: %w", serviceName, err)
+	}
+
+	return nil
+}
+
+func isK3sNeedsRestart(ctx context.Context) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
+	imageURL := os.Getenv("FAB_IMAGE")
+	if imageURL == "" {
+		return false, fmt.Errorf("FAB_IMAGE not set") //nolint:goerr113
+	}
+
+	slog.Info("Checking if k3s needs restart by pulling test image")
+
+	// TODO prevent k3s restart loop from happening
+
+	stdOut, stdErr := &bytes.Buffer{}, &bytes.Buffer{}
+
+	cmd := exec.CommandContext(ctx, filepath.Join(k3s.BinDir, k3s.BinName), "crictl", "pull", imageURL) //nolint:gosec
+	cmd.Stdout = io.MultiWriter(stdOut, logutil.NewSink(ctx, slog.Debug, "crictl-pull: "))
+	cmd.Stderr = io.MultiWriter(stdErr, logutil.NewSink(ctx, slog.Debug, "crictl-pull: "))
+
+	if err := cmd.Run(); err != nil {
+		stdErrStr := stdErr.String()
+
+		if strings.Contains(stdErrStr, "401 Unauthorized") {
+			slog.Info("Test image pull failed due to unauthorized error, assuming k3s service restart is required")
+
+			return true, nil
+		} else if strings.Contains(stdErrStr, "x509: certificate signed by unknown authority") {
+			slog.Info("Test image pull failed due to unknown authority error, assuming k3s service restart is required")
+
+			return true, nil
+		} else if strings.Contains(stdErrStr, "authorization failed: no basic auth credentials") {
+			slog.Info("Test image pull failed due to no basic auth credentials error, assuming k3s service restart is required")
+
+			return true, nil
+		}
+
+		return false, fmt.Errorf("pulling image %q: %w", imageURL, err)
+	}
+
+	stdOutStr := stdOut.String()
+	if strings.Contains(stdOutStr, "Image is up to date for") {
+		slog.Info("Test image is up to date, no k3s service restart is required")
+
+		return false, nil
+	}
+
+	return false, fmt.Errorf("unexpected output from crictl: %q", stdOutStr) //nolint:goerr113
+}
+
+func updateCACertificates(ctx context.Context) error {
+	slog.Info("Updating CA certificates")
+
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "update-ca-certificates")
+	cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "update-ca: ")
+	cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "update-ca: ")
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("running update-ca-certificates: %w", err)
 	}
 
 	return nil
