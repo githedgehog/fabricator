@@ -113,7 +113,7 @@ func (c *ControlUpgrade) Run(ctx context.Context) error {
 	regSecret := coreapi.Secret{}
 	if err := kube.Get(ctx, client.ObjectKey{
 		Namespace: comp.FabNamespace,
-		Name:      comp.RegistryUserSecretPrefix + comp.RegistryUserWriter,
+		Name:      comp.RegistryUserWriterSecret,
 	}, &regSecret); err != nil {
 		return fmt.Errorf("getting registry user secret: %w", err)
 	}

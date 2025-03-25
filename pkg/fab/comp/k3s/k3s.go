@@ -13,6 +13,7 @@ import (
 	"go.githedgehog.com/fabricator/api/meta"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/util/tmplutil"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
@@ -107,8 +108,12 @@ func Registries(f fabapi.Fabricator, username, password string) (string, error) 
 		return "", fmt.Errorf("getting registry URL: %w", err)
 	}
 
+	return RegistriesFor(reg, username, password)
+}
+
+func RegistriesFor(regURL string, username, password string) (string, error) {
 	cfg, err := tmplutil.FromTemplate("registries", registriesTmpl, map[string]any{
-		"Registry": reg,
+		"Registry": regURL,
 		"Username": username,
 		"Password": password,
 	})
@@ -117,4 +122,19 @@ func Registries(f fabapi.Fabricator, username, password string) (string, error) 
 	}
 
 	return cfg, nil
+}
+
+func InstallNodeRegistries(username, password string) comp.KubeInstall {
+	return func(f fabapi.Fabricator) ([]client.Object, error) {
+		regs, err := Registries(f, username, password)
+		if err != nil {
+			return nil, fmt.Errorf("getting registries: %w", err)
+		}
+
+		return []client.Object{
+			comp.NewSecret(comp.FabNodeRegistriesSecret, comp.SecretTypeOpaque, map[string]string{
+				comp.FabNodeRegistriesSecretKey: regs,
+			}),
+		}, nil
+	}
 }
