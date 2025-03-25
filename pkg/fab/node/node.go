@@ -74,7 +74,7 @@ func enforceK3sConfigs(ctx context.Context, workDir string) error {
 		slog.Info("FabCA is up to date", "path", certmanager.FabCAPath)
 	}
 
-	changed, err = enforceFile(k3s.KubeRegistriesPath, registries, 0o644)
+	changed, err = enforceFile(k3s.KubeRegistriesPath, []byte(registries), 0o600)
 	if err != nil {
 		return fmt.Errorf("enforcing registries.yaml: %w", err)
 	}
