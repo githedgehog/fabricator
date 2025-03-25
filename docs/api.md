@@ -486,6 +486,7 @@ _Appears in:_
 | `controller` _[Version](#version)_ |  |  |  |
 | `controlISORoot` _[Version](#version)_ |  |  |  |
 | `ctl` _[Version](#version)_ |  |  |  |
+| `nodeConfig` _[Version](#version)_ |  |  |  |
 | `flatcar` _[Version](#version)_ |  |  |  |
 
 

@@ -14,7 +14,9 @@ import (
 
 	"go.githedgehog.com/fabric/pkg/util/logutil"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
+	"go.githedgehog.com/fabricator/pkg/artificer"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/f8r"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
 	coreapi "k8s.io/api/core/v1"
 )
@@ -73,6 +75,19 @@ func (c *NodeInstall) joinK8s(ctx context.Context) error {
 
 	if err := copyFile(k3s.AirgapName, filepath.Join(k3s.ImagesDir, k3s.AirgapName), 0o644); err != nil {
 		return fmt.Errorf("copying k3s airgap: %w", err)
+	}
+
+	nodeConfigRef, err := comp.ImageURL(c.Fab, f8r.NodeConfigRef)
+	if err != nil {
+		return fmt.Errorf("getting node config image URL: %w", err)
+	}
+
+	if err := artificer.InstallOCIArchive(ctx, ".", f8r.NodeConfigRef,
+		c.Fab.Status.Versions.Fabricator.NodeConfig,
+		filepath.Join(k3s.ImagesDir, f8r.NodeConfigAirgapName),
+		nodeConfigRef+":"+string(c.Fab.Status.Versions.Fabricator.NodeConfig),
+	); err != nil {
+		return fmt.Errorf("installing node config airgap image: %w", err)
 	}
 
 	if err := os.MkdirAll(k3s.ConfigDir, 0o755); err != nil {
