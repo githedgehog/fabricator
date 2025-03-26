@@ -1670,8 +1670,7 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 	}
 
 	if out, err := inspect.BGP(ctx, kube, inspect.BGPIn{
-		Strict:              opts.Strict,
-		GatewayExpectActive: true,
+		Strict: opts.Strict,
 	}); err != nil {
 		slog.Error("Failed to inspect BGP", "err", err)
 		fail = true
