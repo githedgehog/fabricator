@@ -44,6 +44,12 @@ type ControlInstall struct {
 func (c *ControlInstall) Run(ctx context.Context) error {
 	slog.Info("Running control node installation", "name", c.Control.Name)
 
+	if err := checkIfaceAddresses(c.Control.Spec.Management.Interface,
+		string(c.Control.Spec.Management.IP), string(c.Fab.Spec.Config.Control.VIP),
+	); err != nil {
+		return fmt.Errorf("checking management addresses: %w", err)
+	}
+
 	kube, err := c.installK8s(ctx)
 	if err != nil {
 		return fmt.Errorf("installing k3s: %w", err)

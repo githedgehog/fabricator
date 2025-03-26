@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -20,6 +21,7 @@ import (
 	"time"
 
 	"github.com/mattn/go-isatty"
+	"github.com/samber/lo"
 	"go.githedgehog.com/fabric/pkg/util/logutil"
 	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/flatcar"
@@ -435,4 +437,47 @@ func copyFile(src, dst string, mode os.FileMode) error {
 	}
 
 	return nil
+}
+
+func checkIfaceAddresses(ifaceName string, expected ...string) error {
+	var res error
+
+	for attempt := range 6 {
+		if attempt > 0 {
+			slog.Debug("Retrying checking addresses in 30 seconds")
+			time.Sleep(30 * time.Second)
+		}
+
+		if res = func() error {
+			iface, err := net.InterfaceByName(ifaceName)
+			if err != nil {
+				return fmt.Errorf("getting interface %q: %w", ifaceName, err)
+			}
+
+			actual := map[string]bool{}
+			if addrs, err := iface.Addrs(); err != nil {
+				return fmt.Errorf("getting addresses for interface %q: %w", ifaceName, err)
+			} else {
+				for _, addr := range addrs {
+					actual[addr.String()] = true
+				}
+			}
+
+			slog.Info("Interface addresses", "iface", ifaceName, "expected", expected, "actual", lo.Keys(actual))
+
+			for _, exp := range expected {
+				if !actual[exp] {
+					return fmt.Errorf("expected address %q not found on interface %q", exp, ifaceName) //nolint:goerr113
+				}
+			}
+
+			return nil
+		}(); res != nil {
+			slog.Warn("Checking addresses failed", "iface", ifaceName, "err", res)
+		} else {
+			break
+		}
+	}
+
+	return res
 }

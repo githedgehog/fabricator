@@ -30,6 +30,12 @@ type NodeInstall struct {
 func (c *NodeInstall) Run(ctx context.Context) error {
 	slog.Info("Running node installation", "name", c.Node.Name, "roles", c.Node.Spec.Roles)
 
+	if err := checkIfaceAddresses(c.Node.Spec.Management.Interface,
+		string(c.Node.Spec.Management.IP),
+	); err != nil {
+		return fmt.Errorf("checking management addresses: %w", err)
+	}
+
 	// TODO dedup
 	slog.Info("Wait for registry on control node(s)")
 
