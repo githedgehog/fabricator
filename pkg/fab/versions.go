@@ -13,7 +13,7 @@ import (
 
 var (
 	FabricatorVersion = meta.Version(version.Version)
-	FabricVersion     = meta.Version("v0.71.1")
+	FabricVersion     = meta.Version("v0.71.2")
 )
 
 var Versions = fabapi.Versions{
