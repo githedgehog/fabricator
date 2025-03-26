@@ -1592,10 +1592,14 @@ func CollectN[E any](n int, seq iter.Seq[E]) []E {
 type InspectOpts struct {
 	WaitAppliedFor time.Duration
 	Strict         bool
+	Attempts       int
 }
 
 func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) error {
 	slog.Info("Inspecting fabric")
+
+	opts.Attempts = max(1, opts.Attempts)
+	opts.Attempts = min(10, opts.Attempts)
 
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
@@ -1629,7 +1633,7 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 	var lldpOut inspect.Out
 	var lldpErr error
 
-	for attempt := 0; attempt < 3; attempt++ {
+	for attempt := 0; attempt < opts.Attempts; attempt++ {
 		if attempt > 0 {
 			slog.Info("Retry attempt", "number", attempt+1)
 			select {
