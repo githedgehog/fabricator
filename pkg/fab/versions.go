@@ -32,6 +32,7 @@ var Versions = fabapi.Versions{
 		Controller:     FabricatorVersion,
 		Ctl:            FabricatorVersion,
 		NodeConfig:     FabricatorVersion,
+		Pause:          "3.6", // wait image from k3s // TODO embed wait into node-config image?
 		ControlUSBRoot: "v4152.2.0-hh1",
 		Flatcar:        "v4152.2.0",
 	},

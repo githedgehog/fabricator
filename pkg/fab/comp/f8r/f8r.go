@@ -16,12 +16,10 @@ import (
 )
 
 const (
-	CtrlRef              = "fabricator/fabricator"
-	CtrlChartRef         = "fabricator/charts/fabricator"
-	APIChartRef          = "fabricator/charts/fabricator-api"
-	CtlRef               = "fabricator/hhfabctl"
-	NodeConfigRef        = "fabricator/hhfab-node-config"
-	NodeConfigAirgapName = "node-config-airgap-images-amd64.tar"
+	CtrlRef      = "fabricator/fabricator"
+	CtrlChartRef = "fabricator/charts/fabricator"
+	APIChartRef  = "fabricator/charts/fabricator-api"
+	CtlRef       = "fabricator/hhfabctl"
 
 	BinDir         = "/opt/bin"
 	CtlBinName     = "hhfabctl"
@@ -64,8 +62,6 @@ func Install(cfg fabapi.Fabricator) ([]client.Object, error) {
 		ctrlChart,
 	}, nil
 }
-
-var _ comp.KubeInstall = Install
 
 func InstallFabAndControl(control fabapi.ControlNode) comp.KubeInstall {
 	return func(cfg fabapi.Fabricator) ([]client.Object, error) {

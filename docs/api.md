@@ -49,6 +49,7 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `fabricatorAPI` _[ComponentStatus](#componentstatus)_ |  |  |  |
 | `fabricatorCtrl` _[ComponentStatus](#componentstatus)_ |  |  |  |
+| `fabricatorNodeConfig` _[ComponentStatus](#componentstatus)_ |  |  |  |
 | `certManagerCtrl` _[ComponentStatus](#componentstatus)_ |  |  |  |
 | `certManagerWebhook` _[ComponentStatus](#componentstatus)_ |  |  |  |
 | `reloader` _[ComponentStatus](#componentstatus)_ |  |  |  |
@@ -487,6 +488,7 @@ _Appears in:_
 | `controlISORoot` _[Version](#version)_ |  |  |  |
 | `ctl` _[Version](#version)_ |  |  |  |
 | `nodeConfig` _[Version](#version)_ |  |  |  |
+| `pause` _[Version](#version)_ |  |  |  |
 | `flatcar` _[Version](#version)_ |  |  |  |
 
 

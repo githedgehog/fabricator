@@ -317,6 +317,8 @@ spec:
                             type: string
                           nodeConfig:
                             type: string
+                          pause:
+                            type: string
                         type: object
                       gateway:
                         type: object
@@ -372,6 +374,8 @@ spec:
                   fabricatorAPI:
                     type: string
                   fabricatorCtrl:
+                    type: string
+                  fabricatorNodeConfig:
                     type: string
                   ntp:
                     type: string
@@ -509,6 +513,8 @@ spec:
                       flatcar:
                         type: string
                       nodeConfig:
+                        type: string
+                      pause:
                         type: string
                     type: object
                   gateway:

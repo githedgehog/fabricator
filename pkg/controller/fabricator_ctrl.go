@@ -42,6 +42,7 @@ import (
 // +kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch;create;update;patch;delete
 
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch
+// +kubebuilder:rbac:groups=apps,resources=daemonsets,verbs=get;list;watch;create;update;patch;delete
 
 // +kubebuilder:rbac:groups=apiextensions.k8s.io,resources=customresourcedefinitions,verbs=get;list;watch
 
@@ -195,6 +196,9 @@ func (r *FabricatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			return ctrl.Result{}, fmt.Errorf("enforcing k3s node registries install: %w", err)
 		}
 
+		if err := comp.EnforceKubeInstall(ctx, r.Client, *f, f8r.InstallNodeConfig); err != nil {
+			return ctrl.Result{}, fmt.Errorf("enforcing node config install: %w", err)
+		}
 		// Should be probably always updated last
 		if err := comp.EnforceKubeInstall(ctx, r.Client, *f, f8r.Install); err != nil {
 			return ctrl.Result{}, fmt.Errorf("enforcing fabricactor install: %w", err)
@@ -243,6 +247,11 @@ func (r *FabricatorReconciler) statusCheck(ctx context.Context, l logr.Logger, f
 	f.Status.Components.FabricatorCtrl, err = f8r.StatusCtrl(ctx, r.Client, *f)
 	if err != nil {
 		return fmt.Errorf("getting fabricator ctrl status: %w", err)
+	}
+
+	f.Status.Components.FabricatorNodeConfig, err = f8r.StatusNodeConfig(ctx, r.Client, *f)
+	if err != nil {
+		return fmt.Errorf("getting fabricator node config status: %w", err)
 	}
 
 	f.Status.Components.CertManagerCtrl, err = certmanager.StatusCtrl(ctx, r.Client, *f)

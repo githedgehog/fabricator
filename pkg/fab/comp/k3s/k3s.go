@@ -33,6 +33,7 @@ const (
 	ConfigPath         = "/etc/rancher/k3s/config.yaml"
 	KubeConfigPath     = "/etc/rancher/k3s/k3s.yaml"
 	KubeRegistriesPath = "/etc/rancher/k3s/registries.yaml"
+	PauseImageURL      = "docker.io/rancher/mirrored-pause"
 )
 
 func Version(f fabapi.Fabricator) meta.Version {
