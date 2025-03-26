@@ -11,6 +11,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -305,12 +306,22 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 			return nil, fmt.Errorf("failed to add passthrough links for control %q: %w", control.Name, err)
 		}
 
+		mgmtIface := control.Spec.Management.Interface
+		if mgmtIface == "" {
+			return nil, fmt.Errorf("control VM %q has no management interface", control.Name) //nolint:goerr113
+		}
+
+		extIface := control.Spec.External.Interface
+		if extIface == "" {
+			return nil, fmt.Errorf("control VM %q has no external interface", control.Name) //nolint:goerr113
+		}
+
 		mgmt := NICTypeManagement
-		if pci := links[control.Name+"/enp2s1"]; pci != "" {
+		if pci := links[control.Name+"/"+mgmtIface]; pci != "" {
 			mgmt = NICTypePassthrough + NICTypeSep + pci
 		}
 
-		delete(links, control.Name+"/enp2s1")
+		delete(links, control.Name+"/"+mgmtIface)
 
 		if len(links) > 0 {
 			return nil, fmt.Errorf("unexpected passthrough links for control %q: %v", control.Name, links) //nolint:goerr113
@@ -323,8 +334,8 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 		cfg.VMs[control.Name] = VMConfig{
 			Type: VMTypeControl,
 			NICs: map[string]string{
-				"enp2s0": NICTypeUsernet,
-				"enp2s1": mgmt,
+				extIface:  NICTypeUsernet,
+				mgmtIface: mgmt,
 			},
 		}
 	}
@@ -344,12 +355,17 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 			return nil, fmt.Errorf("failed to add passthrough links for node %q: %w", node.Name, err)
 		}
 
+		mgmtIface := node.Spec.Management.Interface
+		if mgmtIface == "" {
+			return nil, fmt.Errorf("node VM %q has no management interface", node.Name) //nolint:goerr113
+		}
+
 		mgmt := NICTypeManagement
-		if pci := links[node.Name+"/enp2s0"]; pci != "" {
+		if pci := links[node.Name+"/"+mgmtIface]; pci != "" {
 			mgmt = NICTypePassthrough + NICTypeSep + pci
 		}
 
-		delete(links, node.Name+"/enp2s0")
+		delete(links, node.Name+"/"+mgmtIface)
 
 		if len(links) > 0 {
 			return nil, fmt.Errorf("unexpected passthrough links for node %q: %v", node.Name, links) //nolint:goerr113
@@ -362,7 +378,7 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 		cfg.VMs[node.Name] = VMConfig{
 			Type: VMTypeGateway,
 			NICs: map[string]string{
-				"enp2s0": mgmt,
+				mgmtIface: mgmt,
 			},
 		}
 	}
@@ -781,6 +797,8 @@ const (
 	swEPrefix = "E1/"
 )
 
+var devlinkPhysPort = regexp.MustCompile(`^` + srvPrefix + `\d+np\d+$`)
+
 func getNICID(nic string) (uint, error) {
 	if nic == swMPrefix {
 		return 0, nil
@@ -788,6 +806,14 @@ func getNICID(nic string) (uint, error) {
 
 	raw := ""
 	if strings.HasPrefix(nic, srvPrefix) {
+		if devlinkPhysPort.MatchString(nic) {
+			idx := strings.LastIndex(nic[len(srvPrefix):], "np")
+			if idx < 0 {
+				return 0, fmt.Errorf("invalid NIC ID %q: np not found", nic) //nolint:goerr113
+			}
+			nic = nic[:len(srvPrefix)+idx]
+		}
+
 		raw = nic[len(srvPrefix):]
 	} else if strings.HasPrefix(nic, swEPrefix) {
 		raw = nic[len(swEPrefix):]
