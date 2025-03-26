@@ -642,6 +642,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 					if err := c.Inspect(ctx, vlab, InspectOpts{
 						WaitAppliedFor: 2 * time.Minute,
 						Strict:         !opts.AutoUpgrade,
+						Attempts:       3,
 					}); err != nil {
 						slog.Warn("Failed to inspect", "err", err)
 
