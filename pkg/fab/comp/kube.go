@@ -333,6 +333,20 @@ func NewDHCPSubnet(name string, spec dhcpapi.DHCPSubnetSpec) client.Object {
 	}
 }
 
+func NewDaemonSet(name string, spec appsapi.DaemonSetSpec) client.Object {
+	return &appsapi.DaemonSet{
+		TypeMeta: metaapi.TypeMeta{
+			APIVersion: appsapi.SchemeGroupVersion.String(),
+			Kind:       "DaemonSet",
+		},
+		ObjectMeta: metaapi.ObjectMeta{
+			Name:      name,
+			Namespace: FabNamespace,
+		},
+		Spec: spec,
+	}
+}
+
 func CreateOrUpdate(ctx context.Context, kube client.Client, obj client.Object) (ctrlutil.OperationResult, error) {
 	var res ctrlutil.OperationResult
 	var err error
@@ -382,6 +396,13 @@ func CreateOrUpdate(ctx context.Context, kube client.Client, obj client.Object) 
 		})
 	case *coreapi.Service:
 		tmp := &coreapi.Service{ObjectMeta: obj.ObjectMeta}
+		res, err = ctrlutil.CreateOrUpdate(ctx, kube, tmp, func() error {
+			tmp.Spec = obj.Spec
+
+			return nil
+		})
+	case *appsapi.DaemonSet:
+		tmp := &appsapi.DaemonSet{ObjectMeta: obj.ObjectMeta}
 		res, err = ctrlutil.CreateOrUpdate(ctx, kube, tmp, func() error {
 			tmp.Spec = obj.Spec
 
@@ -454,6 +475,41 @@ func GetDeploymentStatus(name, container, image string) KubeStatus {
 					return fabapi.CompStatusReady, nil
 				}
 			}
+		}
+
+		return fabapi.CompStatusPending, nil
+	}
+}
+
+func GetDaemonSetStatus(name, container, image string) KubeStatus {
+	return func(ctx context.Context, kube client.Reader, _ fabapi.Fabricator) (fabapi.ComponentStatus, error) {
+		obj := &appsapi.DaemonSet{}
+		if err := kube.Get(ctx, client.ObjectKey{Name: name, Namespace: FabNamespace}, obj); err != nil {
+			if apierrors.IsNotFound(err) {
+				return fabapi.CompStatusNotFound, nil
+			}
+
+			return fabapi.CompStatusUnknown, fmt.Errorf("getting daemonset %q: %w", name, err)
+		}
+
+		upToDate := false
+		for _, cont := range obj.Spec.Template.Spec.InitContainers {
+			if cont.Name == container && cont.Image == image {
+				upToDate = true
+
+				break
+			}
+		}
+		for _, cont := range obj.Spec.Template.Spec.Containers {
+			if cont.Name == container && cont.Image == image {
+				upToDate = true
+
+				break
+			}
+		}
+
+		if upToDate && obj.Status.ObservedGeneration == obj.Generation && obj.Status.UpdatedNumberScheduled == obj.Status.DesiredNumberScheduled {
+			return fabapi.CompStatusReady, nil
 		}
 
 		return fabapi.CompStatusPending, nil

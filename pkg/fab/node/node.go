@@ -21,15 +21,17 @@ import (
 )
 
 const (
-	ConfigDir          = "/opt/hedgehog/node"
-	CAFileName         = "ca.pem"
-	RegistriesFileName = "registries.yaml"
+	EnvPrefix     = "FAB_"
+	EnvNodeName   = EnvPrefix + "NODE_NAME"
+	EnvCA         = EnvPrefix + "CA"
+	EnvRegistries = EnvPrefix + "REGISTRIES"
+	EnvImage      = EnvPrefix + "IMAGE"
 )
 
 func DoConfig(ctx context.Context) error {
-	nodeName := os.Getenv("FAB_NODE_NAME")
+	nodeName := os.Getenv(EnvNodeName)
 	if nodeName == "" {
-		return fmt.Errorf("FAB_NODE_NAME not set") //nolint:goerr113
+		return fmt.Errorf(EnvNodeName + " not set") //nolint:goerr113
 	}
 
 	hostname, err := os.Hostname()
@@ -53,14 +55,14 @@ func DoConfig(ctx context.Context) error {
 func enforceK3sConfigs(ctx context.Context) error {
 	slog.Info("Enforcing k3s configs")
 
-	ca := os.Getenv("FAB_CA")
+	ca := os.Getenv(EnvCA)
 	if ca == "" {
-		return fmt.Errorf("FAB_CA not set") //nolint:goerr113
+		return fmt.Errorf(EnvCA + " not set") //nolint:goerr113
 	}
 
-	registries := os.Getenv("FAB_REGISTRIES")
+	registries := os.Getenv(EnvRegistries)
 	if registries == "" {
-		return fmt.Errorf("FAB_REGISTRIES not set") //nolint:goerr113
+		return fmt.Errorf(EnvRegistries + " not set") //nolint:goerr113
 	}
 
 	restart := false
@@ -217,9 +219,9 @@ func isK3sNeedsRestart(ctx context.Context) (bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 
-	imageURL := os.Getenv("FAB_IMAGE")
+	imageURL := os.Getenv(EnvImage)
 	if imageURL == "" {
-		return false, fmt.Errorf("FAB_IMAGE not set") //nolint:goerr113
+		return false, fmt.Errorf(EnvImage + " not set") //nolint:goerr113
 	}
 
 	slog.Info("Checking if k3s needs restart by pulling test image")

@@ -79,23 +79,25 @@ var ComponentStatuses = []ComponentStatus{
 
 // ! WARNING: Make sure to update the IsReady method if you add or remove components
 type ComponentsStatus struct {
-	FabricatorAPI      ComponentStatus `json:"fabricatorAPI,omitempty"`
-	FabricatorCtrl     ComponentStatus `json:"fabricatorCtrl,omitempty"`
-	CertManagerCtrl    ComponentStatus `json:"certManagerCtrl,omitempty"`
-	CertManagerWebhook ComponentStatus `json:"certManagerWebhook,omitempty"`
-	Reloader           ComponentStatus `json:"reloader,omitempty"`
-	Zot                ComponentStatus `json:"zot,omitempty"`
-	NTP                ComponentStatus `json:"ntp,omitempty"`
-	FabricAPI          ComponentStatus `json:"fabricAPI,omitempty"`
-	FabricCtrl         ComponentStatus `json:"fabricCtrl,omitempty"`
-	FabricBoot         ComponentStatus `json:"fabricBoot,omitempty"`
-	FabricDHCP         ComponentStatus `json:"fabricDHCP,omitempty"`
-	FabricProxy        ComponentStatus `json:"fabricProxy,omitempty"`
+	FabricatorAPI        ComponentStatus `json:"fabricatorAPI,omitempty"`
+	FabricatorCtrl       ComponentStatus `json:"fabricatorCtrl,omitempty"`
+	FabricatorNodeConfig ComponentStatus `json:"fabricatorNodeConfig,omitempty"`
+	CertManagerCtrl      ComponentStatus `json:"certManagerCtrl,omitempty"`
+	CertManagerWebhook   ComponentStatus `json:"certManagerWebhook,omitempty"`
+	Reloader             ComponentStatus `json:"reloader,omitempty"`
+	Zot                  ComponentStatus `json:"zot,omitempty"`
+	NTP                  ComponentStatus `json:"ntp,omitempty"`
+	FabricAPI            ComponentStatus `json:"fabricAPI,omitempty"`
+	FabricCtrl           ComponentStatus `json:"fabricCtrl,omitempty"`
+	FabricBoot           ComponentStatus `json:"fabricBoot,omitempty"`
+	FabricDHCP           ComponentStatus `json:"fabricDHCP,omitempty"`
+	FabricProxy          ComponentStatus `json:"fabricProxy,omitempty"`
 }
 
 func (c *ComponentsStatus) IsReady() bool {
 	return c.FabricatorAPI == CompStatusReady &&
 		c.FabricatorCtrl == CompStatusReady &&
+		c.FabricatorNodeConfig == CompStatusReady &&
 		c.CertManagerCtrl == CompStatusReady &&
 		c.CertManagerWebhook == CompStatusReady &&
 		c.Reloader == CompStatusReady &&
@@ -232,6 +234,7 @@ type FabricatorVersions struct {
 	ControlUSBRoot meta.Version `json:"controlISORoot,omitempty"`
 	Ctl            meta.Version `json:"ctl,omitempty"`
 	NodeConfig     meta.Version `json:"nodeConfig,omitempty"`
+	Pause          meta.Version `json:"pause,omitempty"`
 	Flatcar        meta.Version `json:"flatcar,omitempty"`
 }
 
