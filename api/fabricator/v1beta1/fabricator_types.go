@@ -101,6 +101,7 @@ func (c *ComponentsStatus) IsReady() bool {
 		c.Reloader == CompStatusReady &&
 		c.Zot == CompStatusReady &&
 		c.NTP == CompStatusReady &&
+		c.FabricAPI == CompStatusReady &&
 		c.FabricCtrl == CompStatusReady &&
 		c.FabricBoot == CompStatusReady &&
 		c.FabricDHCP == CompStatusReady &&
