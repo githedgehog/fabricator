@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -1405,10 +1406,17 @@ type JUnitTestSuite struct {
 }
 
 type SkipFlags struct {
-	NoVirtualSwitch bool `xml:"-"` // skip if there's any virtual switch in the vlab
-	NoNamedExternal bool `xml:"-"` // skip if the named external is not present
-	NoExternals     bool `xml:"-"` // skip if there are no externals
-	ExtendedOnly    bool `xml:"-"` // skip if extended tests are not enabled
+	VirtualSwitch bool `xml:"-"` // skip if there's any virtual switch in the vlab
+	NamedExternal bool `xml:"-"` // skip if the named external is not present
+	NoExternals   bool `xml:"-"` // skip if there are no externals
+	ExtendedOnly  bool `xml:"-"` // skip if extended tests are not enabled
+	SubInterfaces bool `xml:"-"` // skip if subinterfaces are not supported by some of the switches
+
+	/* Note about subinterfaces; they are required in the following cases:
+	 * 1. when using VPC loopback workaround - it's applied when we have a pair of vpcs or vpc and external both attached on a switch with peering between them
+	 * 2. when attaching External on a VLAN - we'll create a subinterface for it, but if no VLAN specified we'll configure on the interface itself
+	 * 3. when using StaticExternal connection - same thing - if VLAN it'll be a subinterface, if no VLAN - just interface itself gets a config
+	 */
 }
 
 type JUnitTestCase struct {
@@ -1594,11 +1602,6 @@ func failAllTests(suite *JUnitTestSuite, err error) *JUnitTestSuite {
 
 func selectAndRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, suite *JUnitTestSuite, regexes []*regexp.Regexp, invertRegex bool, skipFlags SkipFlags) (*JUnitTestSuite, error) {
 	suite = regexpSelection(regexes, invertRegex, suite)
-	if suite.Skipped == suite.Tests {
-		slog.Info("All tests in suite skipped, skipping suite", "suite", suite.Name)
-
-		return suite, nil
-	}
 	for i, test := range suite.TestCases {
 		if test.Skipped != nil {
 			continue
@@ -1611,7 +1614,7 @@ func selectAndRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, suite *J
 
 			continue
 		}
-		if test.SkipFlags.NoVirtualSwitch && skipFlags.NoVirtualSwitch {
+		if test.SkipFlags.VirtualSwitch && skipFlags.VirtualSwitch {
 			suite.TestCases[i].Skipped = &Skipped{
 				Message: "There are virtual switches",
 			}
@@ -1619,7 +1622,7 @@ func selectAndRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, suite *J
 
 			continue
 		}
-		if test.SkipFlags.NoNamedExternal && skipFlags.NoNamedExternal {
+		if test.SkipFlags.NamedExternal && skipFlags.NamedExternal {
 			suite.TestCases[i].Skipped = &Skipped{
 				Message: fmt.Sprintf("The named external (%s) is not present", testCtx.extName),
 			}
@@ -1635,6 +1638,19 @@ func selectAndRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, suite *J
 
 			continue
 		}
+		if test.SkipFlags.SubInterfaces && skipFlags.SubInterfaces {
+			suite.TestCases[i].Skipped = &Skipped{
+				Message: "There are switches that do not support subinterfaces",
+			}
+			suite.Skipped++
+
+			continue
+		}
+	}
+	if suite.Skipped == suite.Tests {
+		slog.Info("All tests in suite skipped, skipping suite", "suite", suite.Name)
+
+		return suite, nil
 	}
 
 	suite, err := doRunTests(ctx, testCtx, suite)
@@ -1667,7 +1683,7 @@ func makeVpcPeeringsSingleVPCSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 			Name: "Single VPC with restrictions",
 			F:    testCtx.singleVPCWithRestrictionsTest,
 			SkipFlags: SkipFlags{
-				NoVirtualSwitch: true,
+				VirtualSwitch: true,
 			},
 		},
 		{
@@ -1678,35 +1694,35 @@ func makeVpcPeeringsSingleVPCSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 			Name: "StaticExternal",
 			F:    testCtx.staticExternalTest,
 			SkipFlags: SkipFlags{
-				NoVirtualSwitch: true,
+				VirtualSwitch: true,
 			},
 		},
 		{
 			Name: "MCLAG Failover",
 			F:    testCtx.mclagTest,
 			SkipFlags: SkipFlags{
-				NoVirtualSwitch: true,
+				VirtualSwitch: true,
 			},
 		},
 		{
 			Name: "ESLAG Failover",
 			F:    testCtx.eslagTest,
 			SkipFlags: SkipFlags{
-				NoVirtualSwitch: true,
+				VirtualSwitch: true,
 			},
 		},
 		{
 			Name: "Bundled Failover",
 			F:    testCtx.bundledFailoverTest,
 			SkipFlags: SkipFlags{
-				NoVirtualSwitch: true,
+				VirtualSwitch: true,
 			},
 		},
 		{
 			Name: "Spine Failover",
 			F:    testCtx.spineFailoverTest,
 			SkipFlags: SkipFlags{
-				NoVirtualSwitch: true,
+				VirtualSwitch: true,
 			},
 		},
 	}
@@ -1728,14 +1744,14 @@ func makeVpcPeeringsMultiVPCSuiteRun(testCtx *VPCPeeringTestCtx) *JUnitTestSuite
 			Name: "Multi-Subnets isolation",
 			F:    testCtx.multiSubnetsIsolationTest,
 			SkipFlags: SkipFlags{
-				NoVirtualSwitch: true,
+				VirtualSwitch: true,
 			},
 		},
 		{
 			Name: "Multi-Subnets with filtering",
 			F:    testCtx.multiSubnetsSubnetFilteringTest,
 			SkipFlags: SkipFlags{
-				NoVirtualSwitch: true,
+				VirtualSwitch: true,
 			},
 		},
 	}
@@ -1753,29 +1769,38 @@ func makeVpcPeeringsBasicSuiteRun(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 			Name: "Starter Test",
 			F:    testCtx.vpcPeeringsStarterTest,
 			SkipFlags: SkipFlags{
-				NoNamedExternal: true,
+				NamedExternal: true,
+				SubInterfaces: true,
 			},
 		},
 		{
 			Name: "Only Externals",
 			F:    testCtx.vpcPeeringsOnlyExternalsTest,
 			SkipFlags: SkipFlags{
-				NoExternals: true,
+				NoExternals:   true,
+				SubInterfaces: true,
 			},
 		},
 		{
 			Name: "Full Mesh All Externals",
 			F:    testCtx.vpcPeeringsFullMeshAllExternalsTest,
+			SkipFlags: SkipFlags{
+				SubInterfaces: true,
+			},
 		},
 		{
 			Name: "Full Loop All Externals",
 			F:    testCtx.vpcPeeringsFullLoopAllExternalsTest,
+			SkipFlags: SkipFlags{
+				SubInterfaces: true,
+			},
 		},
 		{
 			Name: "Sergei's Special Test",
 			F:    testCtx.vpcPeeringsSergeisSpecialTest,
 			SkipFlags: SkipFlags{
-				NoNamedExternal: true,
+				NamedExternal: true,
+				SubInterfaces: true,
 			},
 		},
 	}
@@ -1834,11 +1859,30 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 	if err := kube.List(ctx, swList, client.MatchingLabels{}); err != nil {
 		return fmt.Errorf("listing switches: %w", err)
 	}
+	profiles := make([]string, 0)
 	for _, sw := range swList.Items {
 		if sw.Spec.Profile == meta.SwitchProfileVS {
-			slog.Info("Virtual switch found", "switch", sw.Name)
-			skipFlags.NoVirtualSwitch = true
+			if !skipFlags.VirtualSwitch {
+				slog.Info("Virtual switch found", "switch", sw.Name)
+				skipFlags.VirtualSwitch = true
+			}
 
+			continue
+		}
+		if slices.Contains(profiles, sw.Spec.Profile) {
+			continue
+		}
+		profile := &wiringapi.SwitchProfile{}
+		if err := kube.Get(ctx, client.ObjectKey{Namespace: "default", Name: sw.Spec.Profile}, profile); err != nil {
+			return fmt.Errorf("getting switch profile %s: %w", sw.Spec.Profile, err)
+		}
+		profiles = append(profiles, sw.Spec.Profile)
+		if !profile.Spec.Features.Subinterfaces {
+			slog.Info("Subinterfaces not supported", "switch-profile", sw.Spec.Profile, "switch", sw.Name)
+			skipFlags.SubInterfaces = true
+		}
+		// currently only two flags require this loop, if they are both set we can stop
+		if skipFlags.VirtualSwitch && skipFlags.SubInterfaces {
 			break
 		}
 	}
@@ -1849,12 +1893,12 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 	if len(extList.Items) == 0 {
 		slog.Info("No externals found")
 		skipFlags.NoExternals = true
-		skipFlags.NoNamedExternal = true
+		skipFlags.NamedExternal = true
 	} else {
 		ext := &vpcapi.External{}
 		if err := kube.Get(ctx, client.ObjectKey{Namespace: "default", Name: extName}, ext); err != nil {
 			slog.Info("Named External not found", "external", extName)
-			skipFlags.NoNamedExternal = true
+			skipFlags.NamedExternal = true
 		}
 	}
 
