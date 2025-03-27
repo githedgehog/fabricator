@@ -1208,6 +1208,9 @@ func WaitSwitchesReady(ctx context.Context, kube client.Reader, appliedFor time.
 		return fmt.Errorf("getting fab: %w", err)
 	}
 
+	// controller will expect agent of it's own version by default
+	expectedVersion := string(f.Status.Versions.Fabric.Controller)
+
 	for {
 		switches := &wiringapi.SwitchList{}
 		if err := kube.List(ctx, switches); err != nil {
@@ -1232,14 +1235,22 @@ func WaitSwitchesReady(ctx context.Context, kube client.Reader, appliedFor time.
 			}
 
 			if err == nil {
-				ready = ag.Status.LastAppliedGen == ag.Generation && time.Since(ag.Status.LastHeartbeat.Time) < 1*time.Minute
+				// 1. make sure that desired agent version is the same as we expect (same as controller version)
+				// if it's not and we just finished the controller upgrade it means that controller didn't reconcile yet
+				ready = ag.Spec.Version.Default == expectedVersion
+
+				// 2. make sure last applied generation is the same as current generation
+				ready = ready && ag.Status.LastAppliedGen == ag.Generation
+
+				// 3. make sure last heartbeat is recent enough
+				ready = ready && time.Since(ag.Status.LastHeartbeat.Time) < 1*time.Minute
 
 				if appliedFor > 0 {
+					// 4. make sure agent config was applied for long enough
 					ready = ready && time.Since(ag.Status.LastAppliedTime.Time) >= appliedFor
 				}
 
-				// controller will expect agent of it's own version by default
-				updated = ag.Status.Version == string(f.Status.Versions.Fabric.Controller)
+				updated = ag.Status.Version == expectedVersion
 			}
 
 			allReady = allReady && ready
@@ -1252,11 +1263,11 @@ func WaitSwitchesReady(ctx context.Context, kube client.Reader, appliedFor time.
 			}
 
 			if ag.Status.Version != "" {
-				if ag.Status.LastAppliedGen != ag.Generation && !updated {
+				if (ag.Spec.Version.Default != expectedVersion || ag.Status.LastAppliedGen != ag.Generation) && !updated {
 					notUpdatedList = append(notUpdatedList, sw.Name)
 				}
 
-				if ag.Status.LastAppliedGen == ag.Generation && !updated {
+				if ag.Spec.Version.Default == expectedVersion && ag.Status.LastAppliedGen == ag.Generation && !updated {
 					updateFailedList = append(updateFailedList, sw.Name)
 				}
 			}
