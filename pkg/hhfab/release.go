@@ -362,7 +362,8 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsStarterTest(ctx context.Context) (b
 	return false, nil, nil
 }
 
-// Test connectivity between all VPCs in a full mesh configuration, including all externals.
+// Test connectivity between all VPCs in a full mesh configuration, including all externals
+// Then, remove one external peering and test connectivity again.
 func (testCtx *VPCPeeringTestCtx) vpcPeeringsFullMeshAllExternalsTest(ctx context.Context) (bool, []RevertFunc, error) {
 	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec, 15)
 	if err := populateFullMeshVpcPeerings(ctx, testCtx.kube, vpcPeerings); err != nil {
@@ -379,6 +380,24 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsFullMeshAllExternalsTest(ctx contex
 	}
 	if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
 		return false, nil, fmt.Errorf("testing connectivity: %w", err)
+	}
+
+	// bonus: remove one external to make sure we do not leek access to it, test again
+	if len(externalPeerings) < 2 {
+		slog.Warn("Not enough external peerings to remove one and check for leaks, skipping next step")
+	} else {
+		slog.Debug("Removing one external peering...")
+		for key := range externalPeerings {
+			delete(externalPeerings, key)
+
+			break
+		}
+		if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, true); err != nil {
+			return false, nil, fmt.Errorf("setting up peerings: %w", err)
+		}
+		if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
+			return false, nil, fmt.Errorf("testing connectivity: %w", err)
+		}
 	}
 
 	return false, nil, nil
