@@ -37,6 +37,7 @@ func TestDependenciesMatchVersions(t *testing.T) {
 	assert.True(t, len(modfile.Require) > 0, "No dependencies found in go.mod")
 
 	checkVersion(t, modfile, "go.githedgehog.com/fabric", string(FabricVersion))
+	checkVersion(t, modfile, "go.githedgehog.com/gateway", string(GatewayVersion))
 	checkVersion(t, modfile, "github.com/cert-manager/cert-manager", string(Versions.Platform.CertManager))
 }
 

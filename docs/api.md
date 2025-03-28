@@ -32,6 +32,7 @@ _Appears in:_
 | `NotFound` |  |
 | `Pending` |  |
 | `Ready` |  |
+| `Skipped` |  |
 
 
 #### ComponentsStatus
@@ -60,6 +61,8 @@ _Appears in:_
 | `fabricBoot` _[ComponentStatus](#componentstatus)_ |  |  |  |
 | `fabricDHCP` _[ComponentStatus](#componentstatus)_ |  |  |  |
 | `fabricProxy` _[ComponentStatus](#componentstatus)_ |  |  |  |
+| `gatewayAPI` _[ComponentStatus](#componentstatus)_ |  |  |  |
+| `gatewayCtrl` _[ComponentStatus](#componentstatus)_ |  |  |  |
 
 
 #### ControlConfig
@@ -505,6 +508,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
+| `enable` _boolean_ |  |  |  |
 | `asn` _integer_ |  |  |  |
 
 
@@ -519,6 +523,10 @@ _Appears in:_
 _Appears in:_
 - [Versions](#versions)
 
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `api` _[Version](#version)_ |  |  |  |
+| `controller` _[Version](#version)_ |  |  |  |
 
 
 #### PlatformVersions

@@ -68,6 +68,7 @@ const (
 	CompStatusNotFound ComponentStatus = "NotFound"
 	CompStatusPending  ComponentStatus = "Pending"
 	CompStatusReady    ComponentStatus = "Ready"
+	CompStatusSkipped  ComponentStatus = "Skipped"
 )
 
 var ComponentStatuses = []ComponentStatus{
@@ -75,6 +76,7 @@ var ComponentStatuses = []ComponentStatus{
 	CompStatusNotFound,
 	CompStatusPending,
 	CompStatusReady,
+	CompStatusSkipped,
 }
 
 // ! WARNING: Make sure to update the IsReady method if you add or remove components
@@ -92,10 +94,13 @@ type ComponentsStatus struct {
 	FabricBoot           ComponentStatus `json:"fabricBoot,omitempty"`
 	FabricDHCP           ComponentStatus `json:"fabricDHCP,omitempty"`
 	FabricProxy          ComponentStatus `json:"fabricProxy,omitempty"`
+	GatewayAPI           ComponentStatus `json:"gatewayAPI,omitempty"`
+	GatewayCtrl          ComponentStatus `json:"gatewayCtrl,omitempty"`
 }
 
-func (c *ComponentsStatus) IsReady() bool {
-	return c.FabricatorAPI == CompStatusReady &&
+// TODO simplify or generate it instead
+func (c *ComponentsStatus) IsReady(cfg Fabricator) bool {
+	res := c.FabricatorAPI == CompStatusReady &&
 		c.FabricatorCtrl == CompStatusReady &&
 		c.FabricatorNodeConfig == CompStatusReady &&
 		c.CertManagerCtrl == CompStatusReady &&
@@ -108,6 +113,18 @@ func (c *ComponentsStatus) IsReady() bool {
 		c.FabricBoot == CompStatusReady &&
 		c.FabricDHCP == CompStatusReady &&
 		c.FabricProxy == CompStatusReady
+
+	if cfg.Spec.Config.Gateway.Enable {
+		res = res &&
+			c.GatewayAPI == CompStatusReady &&
+			c.GatewayCtrl == CompStatusReady
+	} else {
+		res = res &&
+			c.GatewayAPI == CompStatusSkipped &&
+			c.GatewayCtrl == CompStatusSkipped
+	}
+
+	return res
 }
 
 type FabOverrides struct {
@@ -206,7 +223,8 @@ type SwitchUser struct {
 }
 
 type GatewayConfig struct {
-	ASN uint32 `json:"asn,omitempty"`
+	Enable bool   `json:"enable,omitempty"`
+	ASN    uint32 `json:"asn,omitempty"`
 }
 
 type Versions struct {
@@ -252,7 +270,10 @@ type FabricVersions struct {
 	ONIE       map[string]meta.Version `json:"onie,omitempty"`
 }
 
-type GatewayVersions struct{}
+type GatewayVersions struct {
+	API        meta.Version `json:"api,omitempty"`
+	Controller meta.Version `json:"controller,omitempty"`
+}
 
 type VLABVersions struct {
 	ONIE    meta.Version `json:"onie,omitempty"`

@@ -21,6 +21,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab/comp/certmanager"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/f8r"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/fabric"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/gateway"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/ntp"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/reloader"
@@ -199,6 +200,11 @@ func (r *FabricatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		if err := comp.EnforceKubeInstall(ctx, r.Client, *f, f8r.InstallNodeConfig); err != nil {
 			return ctrl.Result{}, fmt.Errorf("enforcing node config install: %w", err)
 		}
+
+		if err := comp.EnforceKubeInstall(ctx, r.Client, *f, gateway.Install); err != nil {
+			return ctrl.Result{}, fmt.Errorf("enforcing gateway install: %w", err)
+		}
+
 		// Should be probably always updated last
 		if err := comp.EnforceKubeInstall(ctx, r.Client, *f, f8r.Install); err != nil {
 			return ctrl.Result{}, fmt.Errorf("enforcing fabricactor install: %w", err)
@@ -304,7 +310,17 @@ func (r *FabricatorReconciler) statusCheck(ctx context.Context, l logr.Logger, f
 		return fmt.Errorf("getting fabric proxy status: %w", err)
 	}
 
-	if f.Status.Components.IsReady() {
+	f.Status.Components.GatewayAPI, err = gateway.StatusAPI(ctx, r.Client, *f)
+	if err != nil {
+		return fmt.Errorf("getting gateway api status: %w", err)
+	}
+
+	f.Status.Components.GatewayCtrl, err = gateway.StatusCtrl(ctx, r.Client, *f)
+	if err != nil {
+		return fmt.Errorf("getting gateway ctrl status: %w", err)
+	}
+
+	if f.Status.Components.IsReady(*f) {
 		if !apimeta.IsStatusConditionTrue(f.Status.Conditions, fabapi.ConditionReady) {
 			l.Info("All components are ready now")
 		}

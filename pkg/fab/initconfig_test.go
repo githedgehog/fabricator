@@ -272,6 +272,9 @@ func TestInitConfig(t *testing.T) {
 								},
 							},
 						},
+						Gateway: fabapi.GatewayConfig{
+							Enable: true,
+						},
 					},
 				},
 			},

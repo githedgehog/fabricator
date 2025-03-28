@@ -14,6 +14,7 @@ import (
 var (
 	FabricatorVersion = meta.Version(version.Version)
 	FabricVersion     = meta.Version("v0.71.3")
+	GatewayVersion    = meta.Version("v0.1.1")
 )
 
 var Versions = fabapi.Versions{
@@ -65,6 +66,10 @@ var Versions = fabapi.Versions{
 			switchprofile.SupermicroSSEC4632SB.Spec.Platform: "v0.1.0", // same as DS3000
 			switchprofile.VS.Spec.Platform:                   "v0.1.0",
 		},
+	},
+	Gateway: fabapi.GatewayVersions{
+		API:        GatewayVersion,
+		Controller: GatewayVersion,
 	},
 	VLAB: fabapi.VLABVersions{
 		ONIE:    "v0.2.0",
