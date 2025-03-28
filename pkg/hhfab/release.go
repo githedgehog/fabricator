@@ -1861,29 +1861,35 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 	}
 	profiles := make([]string, 0)
 	for _, sw := range swList.Items {
-		if sw.Spec.Profile == meta.SwitchProfileVS {
-			if !skipFlags.VirtualSwitch {
-				slog.Info("Virtual switch found", "switch", sw.Name)
-				skipFlags.VirtualSwitch = true
-			}
-
-			continue
-		}
-		if slices.Contains(profiles, sw.Spec.Profile) {
-			continue
-		}
-		profile := &wiringapi.SwitchProfile{}
-		if err := kube.Get(ctx, client.ObjectKey{Namespace: "default", Name: sw.Spec.Profile}, profile); err != nil {
-			return fmt.Errorf("getting switch profile %s: %w", sw.Spec.Profile, err)
-		}
-		profiles = append(profiles, sw.Spec.Profile)
-		if !profile.Spec.Features.Subinterfaces {
-			slog.Info("Subinterfaces not supported", "switch-profile", sw.Spec.Profile, "switch", sw.Name)
-			skipFlags.SubInterfaces = true
-		}
 		// currently only two flags require this loop, if they are both set we can stop
 		if skipFlags.VirtualSwitch && skipFlags.SubInterfaces {
 			break
+		}
+		// check for virtual switches
+		if !skipFlags.VirtualSwitch {
+			if sw.Spec.Profile == meta.SwitchProfileVS {
+				slog.Info("Virtual switch found", "switch", sw.Name)
+				skipFlags.VirtualSwitch = true
+			}
+		}
+		// check for leaf switches not supporting subinterfaces
+		if !skipFlags.SubInterfaces {
+			if !sw.Spec.Role.IsLeaf() {
+				continue
+			}
+			// did we already check this profile for another leaf?
+			if slices.Contains(profiles, sw.Spec.Profile) {
+				continue
+			}
+			profile := &wiringapi.SwitchProfile{}
+			if err := kube.Get(ctx, client.ObjectKey{Namespace: "default", Name: sw.Spec.Profile}, profile); err != nil {
+				return fmt.Errorf("getting switch profile %s: %w", sw.Spec.Profile, err)
+			}
+			if !profile.Spec.Features.Subinterfaces {
+				slog.Info("Subinterfaces not supported on leaf switch", "switch-profile", sw.Spec.Profile, "switch", sw.Name)
+				skipFlags.SubInterfaces = true
+			}
+			profiles = append(profiles, sw.Spec.Profile)
 		}
 	}
 	extList := &vpcapi.ExternalList{}
