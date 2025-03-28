@@ -91,6 +91,10 @@ spec:
           #authorizedKeys: # optional SSH authorized keys
           #  - "ssh-ed25519 AAAAC3Nza..."
           {{- end }}
+    {{ if .Gateway }}
+    gateway:
+      enable: true
+    {{- end }}
 
 ---
 apiVersion: fabricator.githedgehog.com/v1beta1
@@ -125,4 +129,4 @@ spec:
    disk: "/dev/sda" # disk to install OS on, e.g. "sda" or "nvme0n1"
   management:
     interface: enp2s0 # interface for management
-{{ end }}
+{{- end }}

@@ -101,6 +101,7 @@ func StatusAPI(ctx context.Context, kube client.Reader, cfg fabapi.Fabricator) (
 	return comp.MergeKubeStatuses(ctx, kube, cfg, //nolint:wrapcheck
 		comp.GetCRDStatus("fabricators.fabricator.githedgehog.com", "v1beta1"),
 		comp.GetCRDStatus("controlnodes.fabricator.githedgehog.com", "v1beta1"),
+		comp.GetCRDStatus("fabnodes.fabricator.githedgehog.com", "v1beta1"),
 	)
 }
 

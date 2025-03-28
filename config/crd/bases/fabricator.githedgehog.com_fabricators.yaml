@@ -250,6 +250,8 @@ spec:
                       asn:
                         format: int32
                         type: integer
+                      enable:
+                        type: boolean
                     type: object
                   registry:
                     properties:
@@ -321,6 +323,11 @@ spec:
                             type: string
                         type: object
                       gateway:
+                        properties:
+                          api:
+                            type: string
+                          controller:
+                            type: string
                         type: object
                       platform:
                         properties:
@@ -376,6 +383,10 @@ spec:
                   fabricatorCtrl:
                     type: string
                   fabricatorNodeConfig:
+                    type: string
+                  gatewayAPI:
+                    type: string
+                  gatewayCtrl:
                     type: string
                   ntp:
                     type: string
@@ -518,6 +529,11 @@ spec:
                         type: string
                     type: object
                   gateway:
+                    properties:
+                      api:
+                        type: string
+                      controller:
+                        type: string
                     type: object
                   platform:
                     properties:
