@@ -68,7 +68,7 @@ type Point struct {
 }
 
 func GenerateDrawio(workDir string, jsonData []byte, styleType StyleType) error {
-	outputFile := filepath.Join(workDir, "vlab-diagram.drawio")
+	outputFile := filepath.Join(workDir, DrawioFilename)
 	topo, err := ConvertJSONToTopology(jsonData)
 	if err != nil {
 		return fmt.Errorf("converting JSON to topology: %w", err)
