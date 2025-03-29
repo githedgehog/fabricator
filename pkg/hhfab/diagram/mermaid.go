@@ -13,7 +13,7 @@ import (
 )
 
 func GenerateMermaid(workDir string, jsonData []byte) error {
-	outputFile := filepath.Join(workDir, "vlab-diagram.mmd")
+	outputFile := filepath.Join(workDir, MermaidFilename)
 	topo, err := ConvertJSONToTopology(jsonData)
 	if err != nil {
 		return fmt.Errorf("converting JSON to topology: %w", err)

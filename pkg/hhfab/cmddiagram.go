@@ -124,8 +124,7 @@ func Diagram(workDir, format string, styleType diagram.StyleType) error {
 		if err := diagram.GenerateDrawio(resultDir, jsonData, styleType); err != nil {
 			return fmt.Errorf("generating draw.io diagram: %w", err)
 		}
-		fileName := "diagram.drawio"
-		filePath := filepath.Join("result", fileName)
+		filePath := filepath.Join("result", diagram.DrawioFilename)
 		slog.Info("Generated draw.io diagram", "file", filePath, "style", styleType)
 		fmt.Printf("To use this diagram:\n")
 		fmt.Printf("1. Open with https://app.diagrams.net/ or the desktop Draw.io application\n")
@@ -135,8 +134,7 @@ func Diagram(workDir, format string, styleType diagram.StyleType) error {
 		if err := diagram.GenerateDOT(resultDir, jsonData); err != nil {
 			return fmt.Errorf("generating DOT diagram: %w", err)
 		}
-		fileName := "diagram.dot"
-		filePath := filepath.Join("result", fileName)
+		filePath := filepath.Join("result", diagram.DotFilename)
 		slog.Info("Generated graphviz diagram", "file", filePath)
 		fmt.Printf("To render this diagram with Graphviz:\n")
 		fmt.Printf("1. Install Graphviz: https://graphviz.org/download/\n")
@@ -148,8 +146,7 @@ func Diagram(workDir, format string, styleType diagram.StyleType) error {
 		if err := diagram.GenerateMermaid(resultDir, jsonData); err != nil {
 			return fmt.Errorf("generating Mermaid diagram: %w", err)
 		}
-		fileName := "diagram.mmd"
-		filePath := filepath.Join("result", fileName)
+		filePath := filepath.Join("result", diagram.MermaidFilename)
 		slog.Info("Generated Mermaid diagram", "file", filePath)
 		fmt.Printf("To render this diagram with Mermaid:\n")
 		fmt.Printf("1. Visit https://mermaid.live/ or use a Markdown editor with Mermaid support\n")
