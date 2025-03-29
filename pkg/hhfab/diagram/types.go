@@ -45,3 +45,9 @@ const (
 	SwitchRoleSpine   = "spine"
 	SwitchRoleLeaf    = "leaf"
 )
+
+const (
+	DrawioFilename  = "diagram.drawio"
+	DotFilename     = "diagram.dot"
+	MermaidFilename = "diagram.mmd"
+)
