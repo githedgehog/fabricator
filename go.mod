@@ -2,6 +2,8 @@ module go.githedgehog.com/fabricator
 
 go 1.24.0
 
+toolchain go1.24.1
+
 replace gopkg.in/natefinch/lumberjack.v2 v2.2.1 => github.com/githedgehog/lumberjack/v2 v2.2.1-hh
 
 replace github.com/diskfs/go-diskfs => github.com/Frostman/go-diskfs v1.4.2-hh3
@@ -20,7 +22,7 @@ require (
 	github.com/coreos/butane v0.23.0
 	github.com/diskfs/go-diskfs v1.4.2
 	github.com/go-logr/logr v1.4.2
-	github.com/go-playground/validator/v10 v10.25.0
+	github.com/go-playground/validator/v10 v10.26.0
 	github.com/k3s-io/helm-controller v0.16.8
 	github.com/lmittmann/tint v1.0.7
 	github.com/manifoldco/promptui v0.9.0
