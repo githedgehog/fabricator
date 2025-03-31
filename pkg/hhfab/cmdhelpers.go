@@ -51,6 +51,18 @@ func PrepareTaps(_ context.Context, count int) error {
 		if err := netlink.LinkSetUp(br); err != nil {
 			return fmt.Errorf("setting up bridge %q: %w", VLABBridge, err)
 		}
+
+		if data, err := os.ReadFile("/proc/sys/net/bridge/bridge-nf-call-iptables"); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("reading bridge-nf-call-iptables: %w", err)
+		} else if err == nil && strings.TrimSpace(string(data)) != "0" {
+			slog.Error("The bridge-nf-call-iptables is set to not 0, this may cause issues with the VLAB management network")
+			slog.Info("To fix this, run the following commands:")
+			slog.Info("  sysctl -qw net.bridge.bridge-nf-call-iptables=0")
+			slog.Info("  ip link set dev " + VLABBridge + " type bridge nf_call_iptables 0")
+			slog.Warn("Doing this will disable iptables filtering on the bridge interface, which will disrupt Docker/K8s networking")
+
+			return fmt.Errorf("bridge-nf-call-iptables is set to not 0") //nolint:goerr113
+		}
 	}
 
 	links, err := netlink.LinkList()
