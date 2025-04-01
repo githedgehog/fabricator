@@ -22,20 +22,24 @@ import (
 )
 
 type VLABBuilder struct {
-	SpinesCount       uint8  // number of spines to generate
-	FabricLinksCount  uint8  // number of links for each spine <> leaf pair
-	MeshLinksCount    uint8  // number of mesh links for each leaf <> leaf pair
-	MCLAGLeafsCount   uint8  // number of MCLAG server-leafs to generate
-	ESLAGLeafGroups   string // eslag leaf groups - comma separated list of number of ESLAG switches in each group, should be 2-4 per group, e.g. 2,4,2 for 3 groups with 2, 4 and 2 switches
-	OrphanLeafsCount  uint8  // number of non-MCLAG server-leafs to generate
-	MCLAGSessionLinks uint8  // number of MCLAG session links to generate
-	MCLAGPeerLinks    uint8  // number of MCLAG peer links to generate
-	MCLAGServers      uint8  // number of MCLAG servers to generate for MCLAG switches
-	ESLAGServers      uint8  // number of ESLAG servers to generate for ESLAG switches
-	UnbundledServers  uint8  // number of unbundled servers to generate for switches (only for one of the first switch in the redundancy group or orphan switch)
-	BundledServers    uint8  // number of bundled servers to generate for switches (only for one of the second switch in the redundancy group or orphan switch)
-	NoSwitches        bool   // do not generate any switches
-	GatewayUplinks    uint8  // number of uplinks for gateway node to the spines
+	SpinesCount        uint8  // number of spines to generate
+	FabricLinksCount   uint8  // number of links for each spine <> leaf pair
+	MeshLinksCount     uint8  // number of mesh links for each leaf <> leaf pair
+	MCLAGLeafsCount    uint8  // number of MCLAG server-leafs to generate
+	ESLAGLeafGroups    string // eslag leaf groups - comma separated list of number of ESLAG switches in each group, should be 2-4 per group, e.g. 2,4,2 for 3 groups with 2, 4 and 2 switches
+	OrphanLeafsCount   uint8  // number of non-MCLAG server-leafs to generate
+	MCLAGSessionLinks  uint8  // number of MCLAG session links to generate
+	MCLAGPeerLinks     uint8  // number of MCLAG peer links to generate
+	MCLAGServers       uint8  // number of MCLAG servers to generate for MCLAG switches
+	ESLAGServers       uint8  // number of ESLAG servers to generate for ESLAG switches
+	UnbundledServers   uint8  // number of unbundled servers to generate for switches (only for one of the first switch in the redundancy group or orphan switch)
+	BundledServers     uint8  // number of bundled servers to generate for switches (only for one of the second switch in the redundancy group or orphan switch)
+	NoSwitches         bool   // do not generate any switches
+	GatewayUplinks     uint8  // number of uplinks for gateway node to the spines
+	ExtCount           uint8  // number of "externals" to generate
+	ExtMCLAGConnCount  uint8  // number of external connections to generate from MCLAG leaves
+	ExtESLAGConnCount  uint8  // number of external connections to generate from ESLAG leaves
+	ExtOrphanConnCount uint8  // number of external connections to generate from orphan leaves
 
 	data         *apiutil.Loader
 	ifaceTracker map[string]uint8 // next available interface ID for each switch
@@ -185,6 +189,25 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 		return fmt.Errorf("MCLAG peer links count must be greater than 0") //nolint:goerr113
 	}
 
+	if b.ExtESLAGConnCount > totalESLAGLeafs {
+		return fmt.Errorf("external ESLAG connections count must be less than or equal to total ESLAG leaves") //nolint:goerr113
+	}
+	if b.ExtMCLAGConnCount > b.MCLAGLeafsCount {
+		return fmt.Errorf("external MCLAG connections count must be less than or equal to MCLAG leaves") //nolint:goerr113
+	}
+	if b.ExtOrphanConnCount > b.OrphanLeafsCount {
+		return fmt.Errorf("external orphan connections count must be less than or equal to orphan leaves") //nolint:goerr113
+	}
+
+	// warn about https://github.com/githedgehog/internal/issues/145 if there are multiple external connections
+	if b.ExtMCLAGConnCount+b.ExtESLAGConnCount+b.ExtOrphanConnCount > 1 {
+		slog.Warn("Multiple external connections are not supported if using virtual switches",
+			"extMCLAGConnCount", b.ExtMCLAGConnCount,
+			"extESLAGConnCount", b.ExtESLAGConnCount,
+			"extOrphanConnCount", b.ExtOrphanConnCount,
+		)
+	}
+
 	slog.Info("Building VLAB wiring diagram", "fabricMode", fabricMode)
 	if fabricMode == meta.FabricModeSpineLeaf {
 		slog.Info(">>>", "spinesCount", b.SpinesCount, "fabricLinksCount", b.FabricLinksCount, "meshLinksCount", b.MeshLinksCount)
@@ -196,6 +219,7 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 	slog.Info(">>>", "mclagLeafsCount", b.MCLAGLeafsCount, "mclagSessionLinks", b.MCLAGSessionLinks, "mclagPeerLinks", b.MCLAGPeerLinks)
 	slog.Info(">>>", "orphanLeafsCount", b.OrphanLeafsCount)
 	slog.Info(">>>", "mclagServers", b.MCLAGServers, "eslagServers", b.ESLAGServers, "unbundledServers", b.UnbundledServers, "bundledServers", b.BundledServers)
+	slog.Info(">>>", "externalCount", b.ExtCount, "externalMclagConnCount", b.ExtMCLAGConnCount, "externalEslagConnCount", b.ExtESLAGConnCount, "externalOrphanConnCount", b.ExtOrphanConnCount)
 
 	if err := b.data.Add(ctx, &wiringapi.VLANNamespace{
 		TypeMeta: kmetav1.TypeMeta{
@@ -260,6 +284,10 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 
 	leafID := uint8(1)   // leaf ID counter
 	serverID := uint8(1) // server ID counter
+	externalConns := []wiringapi.Connection{}
+	extMCLAGConns := uint8(0)
+	extESLAGConns := uint8(0)
+	extOrphanConns := uint8(0)
 
 	for mclagID := uint8(1); mclagID <= b.MCLAGLeafsCount/2; mclagID++ {
 		leaf1Name := fmt.Sprintf("leaf-%02d", leafID)
@@ -319,6 +347,23 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 			},
 		}); err != nil {
 			return err
+		}
+		if b.ExtMCLAGConnCount > 0 {
+			var err error
+			if extMCLAGConns < b.ExtMCLAGConnCount {
+				externalConns, err = b.addExternalConnection(ctx, externalConns, leaf1Name)
+				if err != nil {
+					return err
+				}
+				extMCLAGConns++
+			}
+			if extMCLAGConns < b.ExtMCLAGConnCount {
+				externalConns, err = b.addExternalConnection(ctx, externalConns, leaf2Name)
+				if err != nil {
+					return err
+				}
+				extMCLAGConns++
+			}
 		}
 
 		for i := 0; i < int(b.MCLAGServers); i++ {
@@ -426,6 +471,14 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 			}); err != nil {
 				return err
 			}
+			if extESLAGConns < b.ExtESLAGConnCount {
+				var err error
+				externalConns, err = b.addExternalConnection(ctx, externalConns, leafName)
+				if err != nil {
+					return err
+				}
+				extESLAGConns++
+			}
 		}
 
 		switchID += leafs
@@ -523,6 +576,15 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 			Description: fmt.Sprintf("VS-%02d", switchID),
 		}); err != nil {
 			return err
+		}
+
+		if extOrphanConns < b.ExtOrphanConnCount {
+			var err error
+			externalConns, err = b.addExternalConnection(ctx, externalConns, leafName)
+			if err != nil {
+				return err
+			}
+			extOrphanConns++
 		}
 
 		switchID++
@@ -688,7 +750,71 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 		}
 	}
 
+	if b.ExtCount > 0 {
+		externals := []vpcapi.External{}
+		extAsn := 64102
+		inboundCommPrefix := 65102
+		communityRuleID := 1000
+
+		for i := uint8(1); i <= b.ExtCount; i++ {
+			externalName := fmt.Sprintf("external-%02d", i)
+			externalSpec := vpcapi.ExternalSpec{
+				IPv4Namespace:     "default",
+				InboundCommunity:  fmt.Sprintf("%d:%d", inboundCommPrefix, communityRuleID),
+				OutboundCommunity: fmt.Sprintf("%d:%d", extAsn, communityRuleID),
+			}
+			ext, err := b.createExternal(ctx, externalName, externalSpec)
+			if err != nil {
+				return err
+			}
+			externals = append(externals, *ext)
+			communityRuleID += 100
+		}
+
+		// create attachments per external and external connection
+		connOctet := uint8(0)
+		for _, conn := range externalConns {
+			connOctet++
+			vlanID := uint16(10)
+			for _, ext := range externals {
+				extAttachName := fmt.Sprintf("%s--%s", conn.Spec.External.Link.Switch.DeviceName(), ext.Name)
+				extAttachSpec := vpcapi.ExternalAttachmentSpec{
+					External:   ext.Name,
+					Connection: conn.Name,
+					Switch: vpcapi.ExternalAttachmentSwitch{
+						VLAN: vlanID,
+						IP:   fmt.Sprintf("100.%d.%d.1/24", connOctet, vlanID),
+					},
+					Neighbor: vpcapi.ExternalAttachmentNeighbor{
+						ASN: uint32(extAsn),
+						IP:  fmt.Sprintf("100.%d.%d.6", connOctet, vlanID),
+					},
+				}
+				vlanID += 10
+				if _, err := b.createExternalAttach(ctx, extAttachName, extAttachSpec); err != nil {
+					return err
+				}
+			}
+		}
+	}
+
 	return nil
+}
+
+func (b *VLABBuilder) addExternalConnection(ctx context.Context, extConnList []wiringapi.Connection, switchName string) ([]wiringapi.Connection, error) {
+	extConnSpec := wiringapi.ConnExternal{
+		Link: wiringapi.ConnExternalLink{
+			Switch: wiringapi.BasePortName{Port: b.nextSwitchPort(switchName)},
+		},
+	}
+	extConn, err := b.createConnection(ctx, wiringapi.ConnectionSpec{
+		External: &extConnSpec,
+	})
+	if err != nil {
+		return extConnList, err
+	}
+
+	return append(extConnList, *extConn), nil
 }
 
 func (b *VLABBuilder) nextSwitchPort(switchName string) string {
@@ -801,7 +927,7 @@ func (b *VLABBuilder) createGateway(ctx context.Context, name string, spec gwapi
 	return gw, nil
 }
 
-func (b *VLABBuilder) createConnection(ctx context.Context, spec wiringapi.ConnectionSpec) (*wiringapi.Connection, error) { //nolint:unparam
+func (b *VLABBuilder) createConnection(ctx context.Context, spec wiringapi.ConnectionSpec) (*wiringapi.Connection, error) {
 	name := spec.GenerateName()
 
 	conn := &wiringapi.Connection{
@@ -821,4 +947,42 @@ func (b *VLABBuilder) createConnection(ctx context.Context, spec wiringapi.Conne
 	}
 
 	return conn, nil
+}
+
+func (b *VLABBuilder) createExternal(ctx context.Context, name string, spec vpcapi.ExternalSpec) (*vpcapi.External, error) {
+	external := &vpcapi.External{
+		TypeMeta: kmetav1.TypeMeta{
+			Kind:       "External",
+			APIVersion: vpcapi.GroupVersion.String(),
+		},
+		ObjectMeta: kmetav1.ObjectMeta{
+			Name: name,
+		},
+		Spec: spec,
+	}
+
+	if err := b.data.Add(ctx, external); err != nil {
+		return nil, fmt.Errorf("creating external %s: %w", name, err) //nolint:goerr113
+	}
+
+	return external, nil
+}
+
+func (b *VLABBuilder) createExternalAttach(ctx context.Context, name string, spec vpcapi.ExternalAttachmentSpec) (*vpcapi.ExternalAttachment, error) {
+	externalAttach := &vpcapi.ExternalAttachment{
+		TypeMeta: kmetav1.TypeMeta{
+			Kind:       "ExternalAttachment",
+			APIVersion: vpcapi.GroupVersion.String(),
+		},
+		ObjectMeta: kmetav1.ObjectMeta{
+			Name: name,
+		},
+		Spec: spec,
+	}
+
+	if err := b.data.Add(ctx, externalAttach); err != nil {
+		return nil, fmt.Errorf("creating external attachment %s: %w", name, err) //nolint:goerr113
+	}
+
+	return externalAttach, nil
 }
