@@ -12,7 +12,7 @@ import (
 	"go.githedgehog.com/fabricator/api/meta"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/util/tmplutil"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
@@ -29,7 +29,7 @@ var valuesTmpl string
 
 var _ comp.KubeInstall = Install
 
-func Install(cfg fabapi.Fabricator) ([]client.Object, error) {
+func Install(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 	version := string(Version(cfg))
 
 	repo, err := comp.ImageURL(cfg, ImageRef)
@@ -50,7 +50,7 @@ func Install(cfg fabapi.Fabricator) ([]client.Object, error) {
 		return nil, fmt.Errorf("helm chart: %w", err)
 	}
 
-	return []client.Object{helmChart}, nil
+	return []kclient.Object{helmChart}, nil
 }
 
 var _ comp.ListOCIArtifacts = Artifacts
@@ -66,7 +66,7 @@ func Artifacts(cfg fabapi.Fabricator) (comp.OCIArtifacts, error) {
 
 var _ comp.KubeStatus = Status
 
-func Status(ctx context.Context, kube client.Reader, cfg fabapi.Fabricator) (fabapi.ComponentStatus, error) {
+func Status(ctx context.Context, kube kclient.Reader, cfg fabapi.Fabricator) (fabapi.ComponentStatus, error) {
 	ref, err := comp.ImageURL(cfg, ImageRef)
 	if err != nil {
 		return fabapi.CompStatusUnknown, fmt.Errorf("getting image URL for %q: %w", ImageRef, err)

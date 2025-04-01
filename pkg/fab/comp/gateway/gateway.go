@@ -14,7 +14,7 @@ import (
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/util/tmplutil"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
@@ -28,7 +28,7 @@ var valuesTmpl string
 
 var _ comp.KubeInstall = Install
 
-func Install(cfg fabapi.Fabricator) ([]client.Object, error) {
+func Install(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 	if !cfg.Spec.Config.Gateway.Enable {
 		return nil, nil
 	}
@@ -58,7 +58,7 @@ func Install(cfg fabapi.Fabricator) ([]client.Object, error) {
 		return nil, fmt.Errorf("api chart: %w", err)
 	}
 
-	return []client.Object{
+	return []kclient.Object{
 		apiChart,
 		ctrlChart,
 	}, nil
@@ -79,7 +79,7 @@ var (
 	_ comp.KubeStatus = StatusCtrl
 )
 
-func StatusAPI(ctx context.Context, kube client.Reader, cfg fabapi.Fabricator) (fabapi.ComponentStatus, error) {
+func StatusAPI(ctx context.Context, kube kclient.Reader, cfg fabapi.Fabricator) (fabapi.ComponentStatus, error) {
 	if !cfg.Spec.Config.Gateway.Enable {
 		return fabapi.CompStatusSkipped, nil
 	}
@@ -91,7 +91,7 @@ func StatusAPI(ctx context.Context, kube client.Reader, cfg fabapi.Fabricator) (
 	)
 }
 
-func StatusCtrl(ctx context.Context, kube client.Reader, cfg fabapi.Fabricator) (fabapi.ComponentStatus, error) {
+func StatusCtrl(ctx context.Context, kube kclient.Reader, cfg fabapi.Fabricator) (fabapi.ComponentStatus, error) {
 	if !cfg.Spec.Config.Gateway.Enable {
 		return fabapi.CompStatusSkipped, nil
 	}

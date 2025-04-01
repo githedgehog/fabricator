@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 
-	"sigs.k8s.io/yaml"
+	kyaml "sigs.k8s.io/yaml"
 )
 
 const (
@@ -37,7 +37,7 @@ func LoadConfig(dir string) (*Config, error) {
 	}
 
 	cfg := &Config{}
-	if err := yaml.UnmarshalStrict(data, cfg); err != nil {
+	if err := kyaml.UnmarshalStrict(data, cfg); err != nil {
 		return nil, fmt.Errorf("unmarshaling config: %w", err)
 	}
 
@@ -65,7 +65,7 @@ func (cfg *Config) Save(dir string) error {
 		return fmt.Errorf("validating config: %w", err)
 	}
 
-	data, err := yaml.Marshal(cfg)
+	data, err := kyaml.Marshal(cfg)
 	if err != nil {
 		return fmt.Errorf("marshaling config: %w", err)
 	}

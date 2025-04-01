@@ -18,11 +18,11 @@ import (
 	appsapi "k8s.io/api/apps/v1"
 	coreapi "k8s.io/api/core/v1"
 	apiext "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metaapi "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kapierrors "k8s.io/apimachinery/pkg/api/errors"
+	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlutil "sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/scheme"
 )
@@ -52,7 +52,7 @@ const (
 // TODO local test with the fake client incl components
 
 type (
-	KubeInstall func(cfg fabapi.Fabricator) ([]client.Object, error)
+	KubeInstall func(cfg fabapi.Fabricator) ([]kclient.Object, error)
 
 	LocalObjectReference  = coreapi.LocalObjectReference
 	CMObjectReference     = cmmeta.ObjectReference
@@ -127,7 +127,7 @@ var (
 
 var ErrUnsupportedKind = fmt.Errorf("unsupported kind")
 
-func EnforceKubeInstall(ctx context.Context, kube client.Client, cfg fabapi.Fabricator, depls ...KubeInstall) error {
+func EnforceKubeInstall(ctx context.Context, kube kclient.Client, cfg fabapi.Fabricator, depls ...KubeInstall) error {
 	for _, depl := range depls {
 		objs, err := depl(cfg)
 		if err != nil {
@@ -154,7 +154,7 @@ func EnforceKubeInstall(ctx context.Context, kube client.Client, cfg fabapi.Fabr
 
 			attempt := 0
 			if err := retry.OnError(backoff, func(error) bool {
-				return !apierrors.IsConflict(err)
+				return !kapierrors.IsConflict(err)
 			}, func() error {
 				if attempt > 0 {
 					slog.Debug("Retrying create or update", "kind", kind, "name", name, "attempt", attempt)
@@ -179,11 +179,11 @@ func EnforceKubeInstall(ctx context.Context, kube client.Client, cfg fabapi.Fabr
 	return nil
 }
 
-func Duration(d time.Duration) *metaapi.Duration {
-	return &metaapi.Duration{Duration: d}
+func Duration(d time.Duration) *kmetav1.Duration {
+	return &kmetav1.Duration{Duration: d}
 }
 
-func NewHelmChart(cfg fabapi.Fabricator, name, chart, version, bootstrapChart string, abortOnFail bool, values string) (client.Object, error) {
+func NewHelmChart(cfg fabapi.Fabricator, name, chart, version, bootstrapChart string, abortOnFail bool, values string) (kclient.Object, error) {
 	failurePolicy := ""
 	if abortOnFail {
 		failurePolicy = "abort"
@@ -205,11 +205,11 @@ func NewHelmChart(cfg fabapi.Fabricator, name, chart, version, bootstrapChart st
 	}
 
 	return &helmapi.HelmChart{
-		TypeMeta: metaapi.TypeMeta{
+		TypeMeta: kmetav1.TypeMeta{
 			APIVersion: helmapi.SchemeGroupVersion.String(),
 			Kind:       "HelmChart",
 		},
-		ObjectMeta: metaapi.ObjectMeta{
+		ObjectMeta: kmetav1.ObjectMeta{
 			Name:      name,
 			Namespace: FabNamespace,
 		},
@@ -226,13 +226,13 @@ func NewHelmChart(cfg fabapi.Fabricator, name, chart, version, bootstrapChart st
 	}, nil
 }
 
-func NewIssuer(name string, spec cmapi.IssuerSpec) client.Object {
+func NewIssuer(name string, spec cmapi.IssuerSpec) kclient.Object {
 	return &cmapi.Issuer{
-		TypeMeta: metaapi.TypeMeta{
+		TypeMeta: kmetav1.TypeMeta{
 			APIVersion: cmapi.SchemeGroupVersion.String(),
 			Kind:       "Issuer",
 		},
-		ObjectMeta: metaapi.ObjectMeta{
+		ObjectMeta: kmetav1.ObjectMeta{
 			Name:      name,
 			Namespace: FabNamespace,
 		},
@@ -240,13 +240,13 @@ func NewIssuer(name string, spec cmapi.IssuerSpec) client.Object {
 	}
 }
 
-func NewCertificate(name string, spec CertificateSpec) client.Object {
+func NewCertificate(name string, spec CertificateSpec) kclient.Object {
 	return &cmapi.Certificate{
-		TypeMeta: metaapi.TypeMeta{
+		TypeMeta: kmetav1.TypeMeta{
 			APIVersion: cmapi.SchemeGroupVersion.String(),
 			Kind:       "Certificate",
 		},
-		ObjectMeta: metaapi.ObjectMeta{
+		ObjectMeta: kmetav1.ObjectMeta{
 			Name:      name,
 			Namespace: FabNamespace,
 		},
@@ -262,27 +262,27 @@ func NewIssuerRef(name string) CMObjectReference {
 	}
 }
 
-func NewNamespace(name string) client.Object {
+func NewNamespace(name string) kclient.Object {
 	return &coreapi.Namespace{
-		TypeMeta: metaapi.TypeMeta{
+		TypeMeta: kmetav1.TypeMeta{
 			APIVersion: coreapi.SchemeGroupVersion.String(),
 			Kind:       "Namespace",
 		},
-		ObjectMeta: metaapi.ObjectMeta{
+		ObjectMeta: kmetav1.ObjectMeta{
 			Name: name,
 		},
 	}
 }
 
-func NewSecret(name string, t SecretType, data map[string]string) client.Object {
+func NewSecret(name string, t SecretType, data map[string]string) kclient.Object {
 	// TODO base64 encode data and Data instead of StringData so DeepEqual works correctly
 
 	return &coreapi.Secret{
-		TypeMeta: metaapi.TypeMeta{
+		TypeMeta: kmetav1.TypeMeta{
 			APIVersion: coreapi.SchemeGroupVersion.String(),
 			Kind:       "Secret",
 		},
-		ObjectMeta: metaapi.ObjectMeta{
+		ObjectMeta: kmetav1.ObjectMeta{
 			Name:      name,
 			Namespace: FabNamespace,
 		},
@@ -291,13 +291,13 @@ func NewSecret(name string, t SecretType, data map[string]string) client.Object 
 	}
 }
 
-func NewConfigMap(name string, data map[string]string) client.Object {
+func NewConfigMap(name string, data map[string]string) kclient.Object {
 	return &coreapi.ConfigMap{
-		TypeMeta: metaapi.TypeMeta{
+		TypeMeta: kmetav1.TypeMeta{
 			APIVersion: coreapi.SchemeGroupVersion.String(),
 			Kind:       "ConfigMap",
 		},
-		ObjectMeta: metaapi.ObjectMeta{
+		ObjectMeta: kmetav1.ObjectMeta{
 			Name:      name,
 			Namespace: FabNamespace,
 		},
@@ -305,13 +305,13 @@ func NewConfigMap(name string, data map[string]string) client.Object {
 	}
 }
 
-func NewService(name string, spec coreapi.ServiceSpec) client.Object {
+func NewService(name string, spec coreapi.ServiceSpec) kclient.Object {
 	return &coreapi.Service{
-		TypeMeta: metaapi.TypeMeta{
+		TypeMeta: kmetav1.TypeMeta{
 			APIVersion: coreapi.SchemeGroupVersion.String(),
 			Kind:       "Service",
 		},
-		ObjectMeta: metaapi.ObjectMeta{
+		ObjectMeta: kmetav1.ObjectMeta{
 			Name:      name,
 			Namespace: FabNamespace,
 		},
@@ -319,27 +319,27 @@ func NewService(name string, spec coreapi.ServiceSpec) client.Object {
 	}
 }
 
-func NewDHCPSubnet(name string, spec dhcpapi.DHCPSubnetSpec) client.Object {
+func NewDHCPSubnet(name string, spec dhcpapi.DHCPSubnetSpec) kclient.Object {
 	return &dhcpapi.DHCPSubnet{
-		TypeMeta: metaapi.TypeMeta{
+		TypeMeta: kmetav1.TypeMeta{
 			APIVersion: dhcpapi.GroupVersion.String(),
 			Kind:       "DHCPSubnet",
 		},
-		ObjectMeta: metaapi.ObjectMeta{
+		ObjectMeta: kmetav1.ObjectMeta{
 			Name:      name,
-			Namespace: metaapi.NamespaceDefault,
+			Namespace: kmetav1.NamespaceDefault,
 		},
 		Spec: spec,
 	}
 }
 
-func NewDaemonSet(name string, spec appsapi.DaemonSetSpec) client.Object {
+func NewDaemonSet(name string, spec appsapi.DaemonSetSpec) kclient.Object {
 	return &appsapi.DaemonSet{
-		TypeMeta: metaapi.TypeMeta{
+		TypeMeta: kmetav1.TypeMeta{
 			APIVersion: appsapi.SchemeGroupVersion.String(),
 			Kind:       "DaemonSet",
 		},
-		ObjectMeta: metaapi.ObjectMeta{
+		ObjectMeta: kmetav1.ObjectMeta{
 			Name:      name,
 			Namespace: FabNamespace,
 		},
@@ -347,7 +347,7 @@ func NewDaemonSet(name string, spec appsapi.DaemonSetSpec) client.Object {
 	}
 }
 
-func CreateOrUpdate(ctx context.Context, kube client.Client, obj client.Object) (ctrlutil.OperationResult, error) {
+func CreateOrUpdate(ctx context.Context, kube kclient.Client, obj kclient.Object) (ctrlutil.OperationResult, error) {
 	var res ctrlutil.OperationResult
 	var err error
 
@@ -447,13 +447,13 @@ func CreateOrUpdate(ctx context.Context, kube client.Client, obj client.Object) 
 	return res, nil
 }
 
-type KubeStatus func(ctx context.Context, kube client.Reader, cfg fabapi.Fabricator) (fabapi.ComponentStatus, error)
+type KubeStatus func(ctx context.Context, kube kclient.Reader, cfg fabapi.Fabricator) (fabapi.ComponentStatus, error)
 
 func GetDeploymentStatus(name, container, image string) KubeStatus {
-	return func(ctx context.Context, kube client.Reader, _ fabapi.Fabricator) (fabapi.ComponentStatus, error) {
+	return func(ctx context.Context, kube kclient.Reader, _ fabapi.Fabricator) (fabapi.ComponentStatus, error) {
 		obj := &Deployment{}
-		if err := kube.Get(ctx, client.ObjectKey{Name: name, Namespace: FabNamespace}, obj); err != nil {
-			if apierrors.IsNotFound(err) {
+		if err := kube.Get(ctx, kclient.ObjectKey{Name: name, Namespace: FabNamespace}, obj); err != nil {
+			if kapierrors.IsNotFound(err) {
 				return fabapi.CompStatusNotFound, nil
 			}
 
@@ -482,10 +482,10 @@ func GetDeploymentStatus(name, container, image string) KubeStatus {
 }
 
 func GetDaemonSetStatus(name, container, image string) KubeStatus {
-	return func(ctx context.Context, kube client.Reader, _ fabapi.Fabricator) (fabapi.ComponentStatus, error) {
+	return func(ctx context.Context, kube kclient.Reader, _ fabapi.Fabricator) (fabapi.ComponentStatus, error) {
 		obj := &appsapi.DaemonSet{}
-		if err := kube.Get(ctx, client.ObjectKey{Name: name, Namespace: FabNamespace}, obj); err != nil {
-			if apierrors.IsNotFound(err) {
+		if err := kube.Get(ctx, kclient.ObjectKey{Name: name, Namespace: FabNamespace}, obj); err != nil {
+			if kapierrors.IsNotFound(err) {
 				return fabapi.CompStatusNotFound, nil
 			}
 
@@ -517,10 +517,10 @@ func GetDaemonSetStatus(name, container, image string) KubeStatus {
 }
 
 func GetCRDStatus(name, version string) KubeStatus {
-	return func(ctx context.Context, kube client.Reader, _ fabapi.Fabricator) (fabapi.ComponentStatus, error) {
+	return func(ctx context.Context, kube kclient.Reader, _ fabapi.Fabricator) (fabapi.ComponentStatus, error) {
 		obj := &apiext.CustomResourceDefinition{}
-		if err := kube.Get(ctx, client.ObjectKey{Name: name, Namespace: metaapi.NamespaceDefault}, obj); err != nil {
-			if apierrors.IsNotFound(err) {
+		if err := kube.Get(ctx, kclient.ObjectKey{Name: name, Namespace: kmetav1.NamespaceDefault}, obj); err != nil {
+			if kapierrors.IsNotFound(err) {
 				return fabapi.CompStatusNotFound, nil
 			}
 
@@ -546,7 +546,7 @@ func GetCRDStatus(name, version string) KubeStatus {
 	}
 }
 
-func MergeKubeStatuses(ctx context.Context, kube client.Reader, cfg fabapi.Fabricator, kubeStatus ...KubeStatus) (fabapi.ComponentStatus, error) {
+func MergeKubeStatuses(ctx context.Context, kube kclient.Reader, cfg fabapi.Fabricator, kubeStatus ...KubeStatus) (fabapi.ComponentStatus, error) {
 	status := fabapi.CompStatusReady
 
 	for _, statusFunc := range kubeStatus {

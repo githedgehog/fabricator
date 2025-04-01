@@ -18,7 +18,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab/recipe"
 	"go.githedgehog.com/fabricator/pkg/version"
 	"gopkg.in/natefinch/lumberjack.v2"
-	ctrl "sigs.k8s.io/controller-runtime"
+	kctrl "sigs.k8s.io/controller-runtime"
 )
 
 const (
@@ -107,7 +107,7 @@ func Run(ctx context.Context) error {
 			handler := slogmulti.Fanout(handlers...)
 			logger := slog.New(handler)
 			slog.SetDefault(logger)
-			ctrl.SetLogger(logr.FromSlogHandler(handler))
+			kctrl.SetLogger(logr.FromSlogHandler(handler))
 
 			args := []any{
 				"version", version.Version,

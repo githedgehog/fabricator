@@ -219,7 +219,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 			}
 
 			resize := false
-			if (vm.Type == VMTypeControl || vm.Type == VMTypeGateway) && opts.BuildMode == recipe.BuildModeManual || vm.Type == VMTypeServer {
+			if (vm.Type == VMTypeControl || vm.Type == VMTypeGateway) && opts.BuildMode == recipe.BuildModeManual || vm.Type == VMTypeServer { //nolint:gocritic
 				resize = true
 
 				if err := d.FromORAS(ctx, vmDir, vlabcomp.FlatcarRef, vlabcomp.FlatcarVersion(c.Fab), []artificer.ORASFile{
@@ -515,7 +515,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 
 				for name := range expected {
 					foundReady, ok := found[name]
-					if !ok {
+					if !ok { //nolint:gocritic
 						missing = append(missing, name)
 					} else if !foundReady {
 						notReady = append(notReady, name)

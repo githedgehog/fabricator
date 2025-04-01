@@ -13,7 +13,7 @@ import (
 	"go.githedgehog.com/fabricator/api/meta"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/util/tmplutil"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
@@ -126,13 +126,13 @@ func RegistriesFor(regURL string, username, password string) (string, error) {
 }
 
 func InstallNodeRegistries(username, password string) comp.KubeInstall {
-	return func(f fabapi.Fabricator) ([]client.Object, error) {
+	return func(f fabapi.Fabricator) ([]kclient.Object, error) {
 		regs, err := Registries(f, username, password)
 		if err != nil {
 			return nil, fmt.Errorf("getting registries: %w", err)
 		}
 
-		return []client.Object{
+		return []kclient.Object{
 			comp.NewSecret(comp.FabNodeRegistriesSecret, comp.SecretTypeOpaque, map[string]string{
 				comp.FabNodeRegistriesSecretKey: regs,
 			}),

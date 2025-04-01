@@ -19,7 +19,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/hhfabctl"
 	"go.githedgehog.com/fabricator/pkg/version"
 	"k8s.io/klog/v2"
-	ctrl "sigs.k8s.io/controller-runtime"
+	kctrl "sigs.k8s.io/controller-runtime"
 )
 
 func setupLogger(verbose bool) error {
@@ -37,7 +37,7 @@ func setupLogger(verbose bool) error {
 
 	logger := slog.New(handler)
 	slog.SetDefault(logger)
-	ctrl.SetLogger(logr.FromSlogHandler(handler))
+	kctrl.SetLogger(logr.FromSlogHandler(handler))
 	klog.SetSlogLogger(logger)
 
 	return nil
@@ -108,6 +108,6 @@ func main() {
 
 	if err := app.Run(os.Args); err != nil {
 		slog.Error("Failed", "err", err.Error())
-		os.Exit(1)
+		os.Exit(1) //nolint:gocritic
 	}
 }

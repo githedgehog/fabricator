@@ -17,7 +17,7 @@ import (
 	"go.githedgehog.com/fabric/pkg/agent/alloy"
 	"go.githedgehog.com/fabric/pkg/agent/dozer/bcm"
 	"go.githedgehog.com/fabricator/api/meta"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
@@ -41,20 +41,20 @@ type FabricatorStatus struct {
 	Versions    Versions `json:"versions,omitempty"`
 
 	// Time of the last attempt to apply configuration
-	LastAttemptTime metav1.Time `json:"lastAttemptTime,omitempty"`
+	LastAttemptTime kmetav1.Time `json:"lastAttemptTime,omitempty"`
 	// Generation of the last attempt to apply configuration
 	LastAttemptGen int64 `json:"lastAttemptGen,omitempty"`
 	// Time of the last successful configuration application
-	LastAppliedTime metav1.Time `json:"lastAppliedTime,omitempty"`
+	LastAppliedTime kmetav1.Time `json:"lastAppliedTime,omitempty"`
 	// Generation of the last successful configuration application
 	LastAppliedGen int64 `json:"lastAppliedGen,omitempty"`
 	// Controller version that applied the last successful configuration
 	LastAppliedController string `json:"lastAppliedController,omitempty"`
 	// Time of the last status check
-	LastStatusCheck metav1.Time `json:"lastStatusCheck,omitempty"`
+	LastStatusCheck kmetav1.Time `json:"lastStatusCheck,omitempty"`
 
 	// Conditions of the fabricator, includes readiness marker for use with kubectl wait
-	Conditions []metav1.Condition `json:"conditions"`
+	Conditions []kmetav1.Condition `json:"conditions"`
 
 	Components ComponentsStatus `json:"components,omitempty"`
 
@@ -292,8 +292,8 @@ type VLABVersions struct {
 // +kubebuilder:printcolumn:name="Ctrl",type=string,JSONPath=`.status.components.fabricatorCtrl`,priority=1
 // Fabricator defines configuration for the Fabricator controller
 type Fabricator struct {
-	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
+	kmetav1.TypeMeta   `json:",inline"`
+	kmetav1.ObjectMeta `json:"metadata,omitempty"`
 
 	Spec   FabricatorSpec   `json:"spec,omitempty"`
 	Status FabricatorStatus `json:"status,omitempty"`
@@ -307,9 +307,9 @@ const (
 
 // FabricatorList contains a list of Fabricator
 type FabricatorList struct {
-	metav1.TypeMeta `json:",inline"`
-	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []Fabricator `json:"items"`
+	kmetav1.TypeMeta `json:",inline"`
+	kmetav1.ListMeta `json:"metadata,omitempty"`
+	Items            []Fabricator `json:"items"`
 }
 
 var fabricatorValidate *validator.Validate
@@ -616,11 +616,7 @@ func (f *Fabricator) Validate(ctx context.Context) error {
 		}
 	}
 
-	if err := f.CheckForKnownSwitchUsers(); err != nil {
-		return err
-	}
-
-	return nil
+	return f.CheckForKnownSwitchUsers()
 }
 
 func (f *Fabricator) CalculateVersions(def Versions) error {

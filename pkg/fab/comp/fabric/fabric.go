@@ -16,8 +16,8 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
 	"go.githedgehog.com/fabricator/pkg/util/tmplutil"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/yaml"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
+	kyaml "sigs.k8s.io/yaml"
 )
 
 const (
@@ -56,7 +56,7 @@ var dhcpValuesTmpl string
 var proxyValuesTmpl string
 
 func Install(control fabapi.ControlNode) comp.KubeInstall {
-	return func(cfg fabapi.Fabricator) ([]client.Object, error) {
+	return func(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 		controlVIP, err := cfg.Spec.Config.Control.VIP.Parse()
 		if err != nil {
 			return nil, fmt.Errorf("parsing control VIP: %w", err)
@@ -66,7 +66,7 @@ func Install(control fabapi.ControlNode) comp.KubeInstall {
 		if err != nil {
 			return nil, fmt.Errorf("getting fabric config: %w", err)
 		}
-		fabricCfgYaml, err := yaml.Marshal(fabricCfg)
+		fabricCfgYaml, err := kyaml.Marshal(fabricCfg)
 		if err != nil {
 			return nil, fmt.Errorf("marshalling fabric config: %w", err)
 		}
@@ -75,7 +75,7 @@ func Install(control fabapi.ControlNode) comp.KubeInstall {
 		if err != nil {
 			return nil, fmt.Errorf("getting fabric boot config: %w", err)
 		}
-		bootCfgYaml, err := yaml.Marshal(bootCfg)
+		bootCfgYaml, err := kyaml.Marshal(bootCfg)
 		if err != nil {
 			return nil, fmt.Errorf("marshalling fabric boot config: %w", err)
 		}
@@ -157,7 +157,7 @@ func Install(control fabapi.ControlNode) comp.KubeInstall {
 			return nil, fmt.Errorf("creating fabric proxy helm chart: %w", err)
 		}
 
-		return []client.Object{
+		return []kclient.Object{
 			apiHelm,
 			comp.NewConfigMap("fabric-ctrl-config", map[string]string{
 				"config.yaml": string(fabricCfgYaml),
@@ -173,7 +173,7 @@ func Install(control fabapi.ControlNode) comp.KubeInstall {
 	}
 }
 
-func InstallManagementDHCPSubnet(cfg fabapi.Fabricator) ([]client.Object, error) {
+func InstallManagementDHCPSubnet(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 	mgmt, err := cfg.Spec.Config.Control.ManagementSubnet.Parse()
 	if err != nil {
 		return nil, fmt.Errorf("parsing management subnet: %w", err)
@@ -184,7 +184,7 @@ func InstallManagementDHCPSubnet(cfg fabapi.Fabricator) ([]client.Object, error)
 		return nil, fmt.Errorf("parsing control VIP: %w", err)
 	}
 
-	return []client.Object{
+	return []kclient.Object{
 		comp.NewDHCPSubnet(dhcpapi.ManagementSubnet, dhcpapi.DHCPSubnetSpec{
 			Subnet:      dhcpapi.ManagementSubnet,
 			CIDRBlock:   mgmt.Masked().String(),
@@ -333,14 +333,14 @@ var (
 	_ comp.KubeStatus = StatusProxy
 )
 
-func StatusAPI(ctx context.Context, kube client.Reader, cfg fabapi.Fabricator) (fabapi.ComponentStatus, error) {
+func StatusAPI(ctx context.Context, kube kclient.Reader, cfg fabapi.Fabricator) (fabapi.ComponentStatus, error) {
 	return comp.MergeKubeStatuses(ctx, kube, cfg, //nolint:wrapcheck
 		comp.GetCRDStatus("switches.wiring.githedgehog.com", "v1beta1"),
 		comp.GetCRDStatus("connections.wiring.githedgehog.com", "v1beta1"),
 	)
 }
 
-func StatusCtrl(ctx context.Context, kube client.Reader, cfg fabapi.Fabricator) (fabapi.ComponentStatus, error) {
+func StatusCtrl(ctx context.Context, kube kclient.Reader, cfg fabapi.Fabricator) (fabapi.ComponentStatus, error) {
 	ref, err := comp.ImageURL(cfg, CtrlRef)
 	if err != nil {
 		return fabapi.CompStatusUnknown, fmt.Errorf("getting image URL for %q: %w", CtrlRef, err)
@@ -350,7 +350,7 @@ func StatusCtrl(ctx context.Context, kube client.Reader, cfg fabapi.Fabricator) 
 	return comp.GetDeploymentStatus("fabric-ctrl", "manager", image)(ctx, kube, cfg)
 }
 
-func StatusDHCP(ctx context.Context, kube client.Reader, cfg fabapi.Fabricator) (fabapi.ComponentStatus, error) {
+func StatusDHCP(ctx context.Context, kube kclient.Reader, cfg fabapi.Fabricator) (fabapi.ComponentStatus, error) {
 	ref, err := comp.ImageURL(cfg, DHCPRef)
 	if err != nil {
 		return fabapi.CompStatusUnknown, fmt.Errorf("getting image URL for %q: %w", DHCPRef, err)
@@ -360,7 +360,7 @@ func StatusDHCP(ctx context.Context, kube client.Reader, cfg fabapi.Fabricator) 
 	return comp.GetDeploymentStatus("fabric-dhcpd", "fabric-dhcpd", image)(ctx, kube, cfg)
 }
 
-func StatusBoot(ctx context.Context, kube client.Reader, cfg fabapi.Fabricator) (fabapi.ComponentStatus, error) {
+func StatusBoot(ctx context.Context, kube kclient.Reader, cfg fabapi.Fabricator) (fabapi.ComponentStatus, error) {
 	ref, err := comp.ImageURL(cfg, BootRef)
 	if err != nil {
 		return fabapi.CompStatusUnknown, fmt.Errorf("getting image URL for %q: %w", BootRef, err)
@@ -370,7 +370,7 @@ func StatusBoot(ctx context.Context, kube client.Reader, cfg fabapi.Fabricator) 
 	return comp.GetDeploymentStatus("fabric-boot", "fabric-boot", image)(ctx, kube, cfg)
 }
 
-func StatusProxy(ctx context.Context, kube client.Reader, cfg fabapi.Fabricator) (fabapi.ComponentStatus, error) {
+func StatusProxy(ctx context.Context, kube kclient.Reader, cfg fabapi.Fabricator) (fabapi.ComponentStatus, error) {
 	ref, err := comp.ImageURL(cfg, ProxyRef)
 	if err != nil {
 		return fabapi.CompStatusUnknown, fmt.Errorf("getting image URL for %q: %w", ProxyRef, err)

@@ -16,7 +16,7 @@ import (
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 type VLABBuilder struct {
@@ -46,7 +46,8 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 	}
 	b.data = l
 
-	if fabricMode == meta.FabricModeSpineLeaf {
+	switch fabricMode {
+	case meta.FabricModeSpineLeaf:
 		if !b.NoSwitches {
 			if b.SpinesCount == 0 {
 				b.SpinesCount = 2
@@ -60,7 +61,7 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 				b.OrphanLeafsCount = 1
 			}
 		}
-	} else if fabricMode == meta.FabricModeCollapsedCore {
+	case meta.FabricModeCollapsedCore:
 		if b.SpinesCount > 0 {
 			return fmt.Errorf("spines not supported for collapsed core fabric mode") //nolint:goerr113
 		}
@@ -81,7 +82,7 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 		if b.ESLAGLeafGroups != "" {
 			return fmt.Errorf("ESLAG not supported for collapsed core fabric mode") //nolint:goerr113
 		}
-	} else {
+	default:
 		return fmt.Errorf("unsupported fabric mode %s", fabricMode) //nolint:goerr113
 	}
 
@@ -166,11 +167,11 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 	slog.Info(">>>", "mclagServers", b.MCLAGServers, "eslagServers", b.ESLAGServers, "unbundledServers", b.UnbundledServers, "bundledServers", b.BundledServers)
 
 	if err := b.data.Add(ctx, &wiringapi.VLANNamespace{
-		TypeMeta: metav1.TypeMeta{
+		TypeMeta: kmetav1.TypeMeta{
 			Kind:       wiringapi.KindVLANNamespace,
 			APIVersion: wiringapi.GroupVersion.String(),
 		},
-		ObjectMeta: metav1.ObjectMeta{
+		ObjectMeta: kmetav1.ObjectMeta{
 			Name: "default",
 		},
 		Spec: wiringapi.VLANNamespaceSpec{
@@ -183,11 +184,11 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 	}
 
 	if err := b.data.Add(ctx, &vpcapi.IPv4Namespace{
-		TypeMeta: metav1.TypeMeta{
+		TypeMeta: kmetav1.TypeMeta{
 			Kind:       vpcapi.KindIPv4Namespace,
 			APIVersion: vpcapi.GroupVersion.String(),
 		},
-		ObjectMeta: metav1.ObjectMeta{
+		ObjectMeta: kmetav1.ObjectMeta{
 			Name: "default",
 		},
 		Spec: vpcapi.IPv4NamespaceSpec{
@@ -646,11 +647,11 @@ func (b *VLABBuilder) nextServerPort(serverName string) string {
 
 func (b *VLABBuilder) createSwitchGroup(ctx context.Context, name string) (*wiringapi.SwitchGroup, error) { //nolint:unparam
 	sg := &wiringapi.SwitchGroup{
-		TypeMeta: metav1.TypeMeta{
+		TypeMeta: kmetav1.TypeMeta{
 			Kind:       wiringapi.KindSwitchGroup,
 			APIVersion: wiringapi.GroupVersion.String(),
 		},
-		ObjectMeta: metav1.ObjectMeta{
+		ObjectMeta: kmetav1.ObjectMeta{
 			Name:   name,
 			Labels: map[string]string{},
 		},
@@ -670,11 +671,11 @@ func (b *VLABBuilder) createSwitch(ctx context.Context, name string, spec wiring
 	b.switchID++
 
 	sw := &wiringapi.Switch{
-		TypeMeta: metav1.TypeMeta{
+		TypeMeta: kmetav1.TypeMeta{
 			Kind:       wiringapi.KindSwitch,
 			APIVersion: wiringapi.GroupVersion.String(),
 		},
-		ObjectMeta: metav1.ObjectMeta{
+		ObjectMeta: kmetav1.ObjectMeta{
 			Name: name,
 		},
 		Spec: spec,
@@ -689,11 +690,11 @@ func (b *VLABBuilder) createSwitch(ctx context.Context, name string, spec wiring
 
 func (b *VLABBuilder) createServer(ctx context.Context, name string, spec wiringapi.ServerSpec) (*wiringapi.Server, error) { //nolint:unparam
 	server := &wiringapi.Server{
-		TypeMeta: metav1.TypeMeta{
+		TypeMeta: kmetav1.TypeMeta{
 			Kind:       wiringapi.KindServer,
 			APIVersion: wiringapi.GroupVersion.String(),
 		},
-		ObjectMeta: metav1.ObjectMeta{
+		ObjectMeta: kmetav1.ObjectMeta{
 			Name: name,
 		},
 		Spec: spec,
@@ -710,11 +711,11 @@ func (b *VLABBuilder) createConnection(ctx context.Context, spec wiringapi.Conne
 	name := spec.GenerateName()
 
 	conn := &wiringapi.Connection{
-		TypeMeta: metav1.TypeMeta{
+		TypeMeta: kmetav1.TypeMeta{
 			Kind:       wiringapi.KindConnection,
 			APIVersion: wiringapi.GroupVersion.String(),
 		},
-		ObjectMeta: metav1.ObjectMeta{
+		ObjectMeta: kmetav1.ObjectMeta{
 			Name:   name,
 			Labels: map[string]string{},
 		},

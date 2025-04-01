@@ -83,7 +83,9 @@ func copyOCI(ctx context.Context, src, dst string, srcAuth, dstAuth *types.Docke
 			name = "Copying " + name
 
 			digest := p.Artifact.Digest.String()
-			if p.Event == types.ProgressEventNewArtifact {
+
+			switch p.Event { //nolint:exhaustive
+			case types.ProgressEventNewArtifact:
 				bars[digest] = pb.AddBar(p.Artifact.Size, mpb.PrependDecorators(
 					decor.Name(name, decor.WCSyncSpaceR),
 					decor.Counters(decor.SizeB1024(0), "% .2f / % .2f", decor.WCSyncSpace),
@@ -94,9 +96,9 @@ func copyOCI(ctx context.Context, src, dst string, srcAuth, dstAuth *types.Docke
 							decor.EwmaETA(decor.ET_STYLE_GO, 30, decor.WCSyncSpace), "done",
 						),
 					))
-			} else if p.Event == types.ProgressEventSkipped { //nolint:revive
+			case types.ProgressEventSkipped:
 				// bars[digest].SetCurrent(p.Artifact.Size)
-			} else {
+			default:
 				bars[digest].EwmaIncrInt64(int64(p.OffsetUpdate), time.Since(barStart[digest])) //nolint:gosec
 			}
 

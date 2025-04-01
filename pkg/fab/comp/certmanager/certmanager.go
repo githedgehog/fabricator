@@ -12,7 +12,7 @@ import (
 	"go.githedgehog.com/fabricator/api/meta"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/util/tmplutil"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
@@ -36,7 +36,7 @@ var valuesTmpl string
 
 var _ comp.KubeInstall = Install
 
-func Install(cfg fabapi.Fabricator) ([]client.Object, error) {
+func Install(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 	version := string(Version(cfg))
 
 	controllerRepo, err := comp.ImageURL(cfg, ControllerImageRef)
@@ -85,7 +85,7 @@ func Install(cfg fabapi.Fabricator) ([]client.Object, error) {
 		return nil, fmt.Errorf("creating Helm chart: %w", err)
 	}
 
-	return []client.Object{helmChart}, nil
+	return []kclient.Object{helmChart}, nil
 }
 
 var _ comp.ListOCIArtifacts = Artifacts
@@ -106,7 +106,7 @@ var (
 	_ comp.KubeStatus = StatusWebhook
 )
 
-func StatusCtrl(ctx context.Context, kube client.Reader, cfg fabapi.Fabricator) (fabapi.ComponentStatus, error) {
+func StatusCtrl(ctx context.Context, kube kclient.Reader, cfg fabapi.Fabricator) (fabapi.ComponentStatus, error) {
 	ref, err := comp.ImageURL(cfg, ControllerImageRef)
 	if err != nil {
 		return fabapi.CompStatusUnknown, fmt.Errorf("getting image URL for %q: %w", ControllerImageRef, err)
@@ -116,7 +116,7 @@ func StatusCtrl(ctx context.Context, kube client.Reader, cfg fabapi.Fabricator) 
 	return comp.GetDeploymentStatus("cert-manager", "cert-manager-controller", image)(ctx, kube, cfg)
 }
 
-func StatusWebhook(ctx context.Context, kube client.Reader, cfg fabapi.Fabricator) (fabapi.ComponentStatus, error) {
+func StatusWebhook(ctx context.Context, kube kclient.Reader, cfg fabapi.Fabricator) (fabapi.ComponentStatus, error) {
 	ref, err := comp.ImageURL(cfg, WebhookImageRef)
 	if err != nil {
 		return fabapi.CompStatusUnknown, fmt.Errorf("getting image URL for %q: %w", WebhookImageRef, err)

@@ -30,7 +30,7 @@ import (
 	"golang.org/x/term"
 	"gopkg.in/natefinch/lumberjack.v2"
 	"k8s.io/klog/v2"
-	ctrl "sigs.k8s.io/controller-runtime"
+	kctrl "sigs.k8s.io/controller-runtime"
 )
 
 const (
@@ -294,7 +294,7 @@ func Run(ctx context.Context) error {
 
 			logger := slog.New(handler)
 			slog.SetDefault(logger)
-			ctrl.SetLogger(logr.FromSlogHandler(handler))
+			kctrl.SetLogger(logr.FromSlogHandler(handler))
 			klog.SetSlogLogger(logger)
 
 			if quiet {

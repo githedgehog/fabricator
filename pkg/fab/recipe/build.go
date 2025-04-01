@@ -139,7 +139,8 @@ func buildInstall(ctx context.Context, opts buildInstallOpts) error {
 		return fmt.Errorf("adding payload: %w", err)
 	}
 
-	if opts.Mode == BuildModeManual {
+	switch opts.Mode {
+	case BuildModeManual:
 		slog.Debug("Archiving installer", "path", installArchive)
 		if err := archiveTarGz(ctx, installDir, installArchive); err != nil {
 			return fmt.Errorf("archiving install: %w", err)
@@ -156,11 +157,11 @@ func buildInstall(ctx context.Context, opts buildInstallOpts) error {
 		}
 
 		slog.Info("Installer build completed", "ignition", installIgnition, "archive", installArchive)
-	} else if opts.Mode == BuildModeUSB || opts.Mode == BuildModeISO {
+	case BuildModeUSB, BuildModeISO:
 		if err := buildUSBImage(ctx, opts); err != nil {
 			return fmt.Errorf("building USB image: %w", err)
 		}
-	} else {
+	default:
 		return fmt.Errorf("unsupported build mode %q", opts.Mode) //nolint:goerr113
 	}
 
@@ -218,7 +219,8 @@ func buildUSBImage(ctx context.Context, opts buildInstallOpts) error {
 	var fs2 filesystem.FileSystem
 	diskImgPath := ""
 
-	if opts.Mode == BuildModeUSB {
+	switch opts.Mode {
+	case BuildModeUSB:
 		diskImgPath = installUSBImage
 		diskImg, err := diskfs.Create(diskImgPath, diskSize, diskfs.Raw, blkSize)
 		if err != nil {
@@ -274,7 +276,7 @@ func buildUSBImage(ctx context.Context, opts buildInstallOpts) error {
 
 		fs1 = espFS
 		fs2 = backpackFS
-	} else if opts.Mode == BuildModeISO {
+	case BuildModeISO:
 		diskImgPath = installISOImage
 		diskImg, err := diskfs.Create(diskImgPath, diskSize, diskfs.Raw, 2048)
 		if err != nil {
@@ -292,7 +294,9 @@ func buildUSBImage(ctx context.Context, opts buildInstallOpts) error {
 		}
 		fs1 = isoFS
 		fs2 = isoFS
-	} else {
+	case BuildModeManual:
+		return fmt.Errorf("manual build mode is not supported for USB images") //nolint:goerr113
+	default:
 		return fmt.Errorf("unsupported build mode %q", opts.Mode) //nolint:goerr113
 	}
 

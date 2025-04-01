@@ -21,7 +21,7 @@ import (
 	"go.githedgehog.com/fabricator/api/meta"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/fabric"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 type HydrateMode string
@@ -122,7 +122,7 @@ func (c *Config) loadWiring(ctx context.Context) (*apiutil.Loader, error) {
 	return l, nil
 }
 
-func (c *Config) ensureHydrated(ctx context.Context, kube client.Client, mode HydrateMode) error {
+func (c *Config) ensureHydrated(ctx context.Context, kube kclient.Client, mode HydrateMode) error {
 	h, err := c.getHydration(ctx, kube)
 	if err != nil {
 		return fmt.Errorf("checking if hydrated: %w", err)
@@ -164,7 +164,7 @@ func (c *Config) ensureHydrated(ctx context.Context, kube client.Client, mode Hy
 	return fmt.Errorf("unknown hydration mode %q or invalid hydration status", mode) //nolint:goerr113
 }
 
-func (c *Config) getHydration(ctx context.Context, kube client.Reader) (HydrationStatus, error) {
+func (c *Config) getHydration(ctx context.Context, kube kclient.Reader) (HydrationStatus, error) {
 	status := HydrationStatusPartial
 
 	total := 0
@@ -514,7 +514,7 @@ func (c *Config) getHydration(ctx context.Context, kube client.Reader) (Hydratio
 	return status, fmt.Errorf("invalid hydration status: total=%d, missing=%d", total, missing) //nolint:goerr113
 }
 
-func (c *Config) hydrate(ctx context.Context, kube client.Client) error {
+func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 	isCC := c.Fab.Spec.Config.Fabric.Mode == fmeta.FabricModeCollapsedCore
 
 	mgmtSubnet, err := c.Fab.Spec.Config.Control.ManagementSubnet.Parse()
@@ -669,7 +669,7 @@ func (c *Config) hydrate(ctx context.Context, kube client.Client) error {
 	})
 
 	for _, conn := range conns.Items {
-		if conn.Spec.Fabric != nil {
+		if conn.Spec.Fabric != nil { //nolint:gocritic
 			cf := conn.Spec.Fabric
 
 			for idx := range cf.Links {

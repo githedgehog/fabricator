@@ -8,7 +8,7 @@ import (
 	"fmt"
 
 	"github.com/samber/lo"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
@@ -42,8 +42,8 @@ type FabNodeStatus struct{}
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`,priority=0
 // FabNode is the Schema for the nodes API.
 type FabNode struct {
-	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
+	kmetav1.TypeMeta   `json:",inline"`
+	kmetav1.ObjectMeta `json:"metadata,omitempty"`
 
 	Spec   FabNodeSpec   `json:"spec,omitempty"`
 	Status FabNodeStatus `json:"status,omitempty"`
@@ -53,9 +53,9 @@ type FabNode struct {
 
 // FabNodeList contains a list of Node.
 type FabNodeList struct {
-	metav1.TypeMeta `json:",inline"`
-	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []FabNode `json:"items"`
+	kmetav1.TypeMeta `json:",inline"`
+	kmetav1.ListMeta `json:"metadata,omitempty"`
+	Items            []FabNode `json:"items"`
 }
 
 func init() {

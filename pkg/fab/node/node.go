@@ -237,7 +237,7 @@ func isK3sNeedsRestart(ctx context.Context) (bool, error) {
 	if err := cmd.Run(); err != nil {
 		stdErrStr := stdErr.String()
 
-		if strings.Contains(stdErrStr, "401 Unauthorized") {
+		if strings.Contains(stdErrStr, "401 Unauthorized") { //nolint:gocritic
 			slog.Info("Test image pull failed due to unauthorized error, assuming k3s service restart is required")
 
 			return true, nil

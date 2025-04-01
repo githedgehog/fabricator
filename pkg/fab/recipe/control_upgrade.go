@@ -28,10 +28,10 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k9s"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/zot"
 	coreapi "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 type ControlUpgrade struct {
@@ -111,7 +111,7 @@ func (c *ControlUpgrade) Run(ctx context.Context) error {
 	}
 
 	regSecret := coreapi.Secret{}
-	if err := kube.Get(ctx, client.ObjectKey{
+	if err := kube.Get(ctx, kclient.ObjectKey{
 		Namespace: comp.FabNamespace,
 		Name:      comp.RegistryUserWriterSecret,
 	}, &regSecret); err != nil {
@@ -251,7 +251,7 @@ func (c *ControlUpgrade) preCacheZot(ctx context.Context) error {
 	return nil
 }
 
-func (c *ControlUpgrade) installFabricator(ctx context.Context, kube client.Client, installConfig bool) error {
+func (c *ControlUpgrade) installFabricator(ctx context.Context, kube kclient.Client, installConfig bool) error {
 	slog.Info("Installing fabricator")
 
 	if err := comp.EnforceKubeInstall(ctx, kube, c.Fab, f8r.Install); err != nil {
@@ -314,7 +314,7 @@ func (c *ControlUpgrade) installFabricator(ctx context.Context, kube client.Clie
 				if obj.Status.LastAppliedController != version {
 					return false, nil
 				}
-				if cond.Type == fabapi.ConditionApplied && cond.Status == metav1.ConditionTrue {
+				if cond.Type == fabapi.ConditionApplied && cond.Status == kmetav1.ConditionTrue {
 					return true, nil
 				}
 			}
@@ -335,7 +335,7 @@ func (c *ControlUpgrade) installFabricator(ctx context.Context, kube client.Clie
 				if time.Since(obj.Status.LastStatusCheck.Time) > 2*time.Minute {
 					return false, nil
 				}
-				if cond.Type == fabapi.ConditionReady && cond.Status == metav1.ConditionTrue {
+				if cond.Type == fabapi.ConditionReady && cond.Status == kmetav1.ConditionTrue {
 					return true, nil
 				}
 			}
@@ -359,12 +359,12 @@ func (c *ControlUpgrade) installFabricCtl(_ context.Context) error {
 	return nil
 }
 
-func (c *ControlUpgrade) upgradeK8s(ctx context.Context, kube client.Reader) error {
+func (c *ControlUpgrade) upgradeK8s(ctx context.Context, kube kclient.Reader) error {
 	ctx, cancel := context.WithTimeout(ctx, 12*time.Minute)
 	defer cancel()
 
 	node := &comp.Node{}
-	if err := kube.Get(ctx, client.ObjectKey{
+	if err := kube.Get(ctx, kclient.ObjectKey{
 		Name: c.Control.Name,
 	}, node); err != nil {
 		return fmt.Errorf("getting control node: %w", err)
@@ -443,7 +443,7 @@ func (c *ControlUpgrade) upgradeK8s(ctx context.Context, kube client.Reader) err
 	return nil
 }
 
-func (c *ControlUpgrade) waitRegistry(ctx context.Context, kube client.Reader) error {
+func (c *ControlUpgrade) waitRegistry(ctx context.Context, kube kclient.Reader) error {
 	regURL, err := comp.RegistryURL(c.Fab)
 	if err != nil {
 		return fmt.Errorf("getting registry URL: %w", err)
@@ -463,7 +463,7 @@ func (c *ControlUpgrade) waitRegistry(ctx context.Context, kube client.Reader) e
 
 		attempt++
 
-		if err := kube.Get(ctx, client.ObjectKey{
+		if err := kube.Get(ctx, kclient.ObjectKey{
 			Namespace: comp.FabNamespace,
 			Name:      comp.FabCAConfigMap,
 		}, &caCM); err != nil {

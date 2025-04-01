@@ -8,8 +8,8 @@ import (
 	"fmt"
 
 	"k8s.io/apimachinery/pkg/runtime"
-	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	kctrl "sigs.k8s.io/controller-runtime"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
@@ -19,15 +19,15 @@ import (
 // +kubebuilder:webhook:path=/validate-fabricator-githedgehog-com-v1beta1-fabricator,mutating=false,failurePolicy=fail,sideEffects=None,groups=fabricator.githedgehog.com,resources=fabricators,verbs=create;update;delete,versions=v1beta1,name=vfabricator.kb.io,admissionReviewVersions=v1
 
 type FabricatorWebhook struct {
-	client.Reader
+	kclient.Reader
 }
 
-func SetupFabricatorWebhookWith(mgr ctrl.Manager) error {
+func SetupFabricatorWebhookWith(mgr kctrl.Manager) error {
 	w := &FabricatorWebhook{
 		Reader: mgr.GetClient(),
 	}
 
-	if err := ctrl.NewWebhookManagedBy(mgr).
+	if err := kctrl.NewWebhookManagedBy(mgr).
 		For(&fabapi.Fabricator{}).
 		WithDefaulter(w).
 		WithValidator(w).

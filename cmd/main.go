@@ -22,7 +22,7 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/klog/v2"
-	ctrl "sigs.k8s.io/controller-runtime"
+	kctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
@@ -63,7 +63,7 @@ func main() {
 
 	logger := slog.New(handler)
 	slog.SetDefault(logger)
-	ctrl.SetLogger(logr.FromSlogHandler(handler))
+	kctrl.SetLogger(logr.FromSlogHandler(handler))
 	klog.SetSlogLogger(logger)
 
 	if err := run(); err != nil {
@@ -84,7 +84,7 @@ func run() error {
 	// https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/metrics/filters#WithAuthenticationAndAuthorization
 	// metricsServerOptions.FilterProvider = filters.WithAuthenticationAndAuthorization
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+	mgr, err := kctrl.NewManager(kctrl.GetConfigOrDie(), kctrl.Options{
 		Scheme: scheme,
 		Metrics: metricsserver.Options{
 			BindAddress: ":8080",
@@ -137,7 +137,7 @@ func run() error {
 
 	slog.Info("Starting manager")
 
-	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
+	if err := mgr.Start(kctrl.SetupSignalHandler()); err != nil {
 		return fmt.Errorf("running manager: %w", err)
 	}
 

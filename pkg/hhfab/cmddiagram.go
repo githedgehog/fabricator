@@ -9,23 +9,24 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"go.githedgehog.com/fabricator/pkg/hhfab/diagram"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 func Diagram(workDir, format string, styleType diagram.StyleType) error {
 	includeDir := filepath.Join(workDir, IncludeDir)
 
 	resultDir := filepath.Join(workDir, "result")
-	if err := os.MkdirAll(resultDir, 0755); err != nil {
+	if err := os.MkdirAll(resultDir, 0o755); err != nil {
 		return fmt.Errorf("creating result directory: %w", err)
 	}
 
 	fabPath := filepath.Join(workDir, "fab.yaml")
-	var gatewayNodes []client.Object
+	var gatewayNodes []kclient.Object
 
 	if _, err := os.Stat(fabPath); !os.IsNotExist(err) {
 		slog.Debug("Found fab.yaml in workdir", "path", "fab.yaml")
@@ -110,7 +111,7 @@ func Diagram(workDir, format string, styleType diagram.StyleType) error {
 		return fmt.Errorf("loading wiring YAML: %w", err)
 	}
 
-	allObjs := append(wiringObjs, gatewayNodes...)
+	allObjs := append(slices.Clone(wiringObjs), gatewayNodes...)
 
 	jsonData, err := json.MarshalIndent(allObjs, "", "  ")
 	if err != nil {
