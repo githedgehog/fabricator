@@ -268,24 +268,6 @@ func Validate(ctx context.Context, workDir, cacheDir string, hMode HydrateMode) 
 	return nil
 }
 
-func Versions(ctx context.Context, workDir, cacheDir string, hMode HydrateMode) error {
-	cfg, err := load(ctx, workDir, cacheDir, true, hMode, "")
-	if err != nil {
-		return err
-	}
-
-	slog.Info("Printing versions of all components")
-
-	data, err := yaml.Marshal(cfg.Fab.Status.Versions)
-	if err != nil {
-		return fmt.Errorf("marshalling versions: %w", err)
-	}
-
-	fmt.Println(string(data))
-
-	return nil
-}
-
 func load(ctx context.Context, workDir, cacheDir string, wiringAndHydration bool, mode HydrateMode, setJoinToken string) (*Config, error) {
 	if err := checkWorkCacheDir(workDir, cacheDir); err != nil {
 		return nil, err

@@ -1622,9 +1622,15 @@ github.com/ulikunitz/xz
 github.com/ulikunitz/xz/internal/hash
 github.com/ulikunitz/xz/internal/xlog
 github.com/ulikunitz/xz/lzma
+# github.com/urfave/cli-docs/v3 v3.0.0-alpha6
+## explicit; go 1.18
+github.com/urfave/cli-docs/v3
 # github.com/urfave/cli/v2 v2.27.6
 ## explicit; go 1.18
 github.com/urfave/cli/v2
+# github.com/urfave/cli/v3 v3.0.0-beta1
+## explicit; go 1.18
+github.com/urfave/cli/v3
 # github.com/vbatts/tar-split v0.11.6
 ## explicit; go 1.17
 github.com/vbatts/tar-split/archive/tar

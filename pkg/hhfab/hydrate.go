@@ -117,6 +117,8 @@ func (c *Config) loadWiring(ctx context.Context) (*apiutil.Loader, error) {
 		if err := l.LoadAdd(ctx, data); err != nil {
 			return nil, fmt.Errorf("loading wiring %q: %w", relName, err)
 		}
+
+		slog.Info("Successfully loaded wiring file", "file", relName)
 	}
 
 	return l, nil
