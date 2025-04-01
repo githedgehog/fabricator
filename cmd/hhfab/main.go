@@ -416,6 +416,9 @@ func Run(ctx context.Context) error {
 		Suggest:                true,
 		UseShortOptionHandling: true,
 		EnableShellCompletion:  true,
+		// HideHelp:               true, // Uncomment to generate doc
+		HideHelpCommand: true,
+		HideVersion:     true,
 		Commands: []*cli.Command{
 			{
 				Name:  "init",
@@ -1278,7 +1281,7 @@ func Run(ctx context.Context) error {
 					&cli.StringFlag{
 						Name:  "output",
 						Usage: "output file path for documentation",
-						Value: "result/hhfab-doc.md",
+						Value: "docs/hhfab.md",
 					},
 				},
 				Before: before(false),
