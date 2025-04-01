@@ -173,6 +173,7 @@ func Run(ctx context.Context) error {
 	var wgMCLAGServers, wgESLAGServers, wgUnbundledServers, wgBundledServers uint
 	var wgNoSwitches bool
 	var wgGatewayUplinks uint
+	var wgExternals, wgExtMCLAGConns, wgExtESLAGConns, wgExtOrphanConns uint
 	vlabWiringGenFlags := []cli.Flag{
 		&cli.UintFlag{
 			Name:        "spines-count",
@@ -249,6 +250,26 @@ func Run(ctx context.Context) error {
 			Hidden:      !preview,
 			Destination: &wgGatewayUplinks,
 			Value:       2,
+		},
+		&cli.UintFlag{
+			Name:        "externals",
+			Usage:       "number of externals to generate",
+			Destination: &wgExternals,
+		},
+		&cli.UintFlag{
+			Name:        "external-mclag-connections",
+			Usage:       "number of external connections from MCLAG switches. NOTE: only 1 external connection in total is supported if using virtual switches",
+			Destination: &wgExtMCLAGConns,
+		},
+		&cli.UintFlag{
+			Name:        "external-eslag-connections",
+			Usage:       "number of external connections from ESLAG switches. NOTE: only 1 external connection in total is supported if using virtual switches",
+			Destination: &wgExtESLAGConns,
+		},
+		&cli.UintFlag{
+			Name:        "external-orphan-connections",
+			Usage:       "number of external connections from orphan switches. NOTE: only 1 external connection in total is supported if using virtual switches",
+			Destination: &wgExtOrphanConns,
 		},
 	}
 
@@ -704,20 +725,24 @@ func Run(ctx context.Context) error {
 						Before:  before(false),
 						Action: func(_ *cli.Context) error {
 							builder := hhfab.VLABBuilder{
-								SpinesCount:       uint8(wgSpinesCount),      //nolint:gosec
-								FabricLinksCount:  uint8(wgFabricLinksCount), //nolint:gosec
-								MeshLinksCount:    uint8(wgMeshLinksCount),   //nolint:gosec
-								MCLAGLeafsCount:   uint8(wgMCLAGLeafsCount),  //nolint:gosec
-								ESLAGLeafGroups:   wgESLAGLeafGroups,
-								OrphanLeafsCount:  uint8(wgOrphanLeafsCount),  //nolint:gosec
-								MCLAGSessionLinks: uint8(wgMCLAGSessionLinks), //nolint:gosec
-								MCLAGPeerLinks:    uint8(wgMCLAGPeerLinks),    //nolint:gosec
-								MCLAGServers:      uint8(wgMCLAGServers),      //nolint:gosec
-								ESLAGServers:      uint8(wgESLAGServers),      //nolint:gosec
-								UnbundledServers:  uint8(wgUnbundledServers),  //nolint:gosec
-								BundledServers:    uint8(wgBundledServers),    //nolint:gosec
-								NoSwitches:        wgNoSwitches,
-								GatewayUplinks:    uint8(wgGatewayUplinks), //nolint:gosec
+								SpinesCount:        uint8(wgSpinesCount),      //nolint:gosec
+								FabricLinksCount:   uint8(wgFabricLinksCount), //nolint:gosec
+								MeshLinksCount:     uint8(wgMeshLinksCount),   //nolint:gosec
+								MCLAGLeafsCount:    uint8(wgMCLAGLeafsCount),  //nolint:gosec
+								ESLAGLeafGroups:    wgESLAGLeafGroups,
+								OrphanLeafsCount:   uint8(wgOrphanLeafsCount),  //nolint:gosec
+								MCLAGSessionLinks:  uint8(wgMCLAGSessionLinks), //nolint:gosec
+								MCLAGPeerLinks:     uint8(wgMCLAGPeerLinks),    //nolint:gosec
+								MCLAGServers:       uint8(wgMCLAGServers),      //nolint:gosec
+								ESLAGServers:       uint8(wgESLAGServers),      //nolint:gosec
+								UnbundledServers:   uint8(wgUnbundledServers),  //nolint:gosec
+								BundledServers:     uint8(wgBundledServers),    //nolint:gosec
+								NoSwitches:         wgNoSwitches,
+								GatewayUplinks:     uint8(wgGatewayUplinks), //nolint:gosec
+								ExtCount:           uint8(wgExternals),      //nolint:gosec
+								ExtMCLAGConnCount:  uint8(wgExtMCLAGConns),  //nolint:gosec
+								ExtESLAGConnCount:  uint8(wgExtESLAGConns),  //nolint:gosec
+								ExtOrphanConnCount: uint8(wgExtOrphanConns), //nolint:gosec
 							}
 
 							if err := hhfab.VLABGenerate(ctx, workDir, cacheDir, builder, hhfab.DefaultVLABGeneratedFile); err != nil {
