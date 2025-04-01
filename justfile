@@ -165,3 +165,15 @@ zot := localbin / "zot" + "-" + zot_os + "-" + zot_arch + "-" + zot_version
 _localreg: _zot
   ./hack/localreg.sh
   {{zot}} serve .zot/config.json 2>&1 | tee .zot/log
+
+#
+# Setup bash completion
+#
+
+completion:
+  sudo cp completion/hhfab_completion_bash.sh /etc/bash_completion.d/hhfab
+  sudo chmod +r /etc/bash_completion.d/hhfab
+  @echo "Completion script installed."
+  @echo "To activate it immediately, run:"
+  @echo "  source /etc/bash_completion.d/hhfab"
+
