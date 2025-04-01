@@ -461,6 +461,13 @@ jobs:
           else
             exit 1
           fi
+      - run: |
+          result="${{ needs.vlab-upgrade.result }}"
+          if [[ $result == "success" || $result == "skipped" ]]; then
+            exit 0
+          else
+            exit 1
+          fi
 
   hlab:
     if: ${{ !contains(github.event.pull_request.labels.*.name, 'skip-hlab') }}
