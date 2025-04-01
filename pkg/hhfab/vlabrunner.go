@@ -39,11 +39,11 @@ import (
 	coreapi "k8s.io/api/core/v1"
 )
 
-//go:embed vlab_butane.tmpl.yaml
+//go:embed vlab_server_butane.tmpl.yaml
 var serverButaneTmpl string
 
-//go:embed vlab_frr_butane.tmpl.yaml
-var frrButaneTmpl string
+//go:embed vlab_external_butane.tmpl.yaml
+var externalButaneTmpl string
 
 //go:embed hhnet.sh
 var hhnet []byte
@@ -68,6 +68,7 @@ const (
 	VLABCmdLess       = "less"
 	VLABCmdExpect     = "expect"
 
+	VLABButane   = "butane.yaml"
 	VLABIgnition = "ignition.json"
 
 	VLABKubeConfig = "kubeconfig"
@@ -311,21 +312,30 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 			}
 
 			if vm.Type == VMTypeServer {
-				ign, err := serverIgnition(c.Fab, vm)
+				but, ign, err := serverIgnition(c.Fab, vm)
 				if err != nil {
-					return fmt.Errorf("generating ignition: %w", err)
+					return fmt.Errorf("generating server ignition: %w", err)
+				}
+
+				if but != "" {
+					if err := os.WriteFile(filepath.Join(vmDir, VLABButane), ign, 0o600); err != nil {
+						return fmt.Errorf("writing server butane: %w", err)
+					}
 				}
 
 				if err := os.WriteFile(filepath.Join(vmDir, VLABIgnition), ign, 0o600); err != nil {
-					return fmt.Errorf("writing ignition: %w", err)
+					return fmt.Errorf("writing server ignition: %w", err)
 				}
 			} else if vm.Type == VMTypeExternal {
 				but, ign, err := externalIgnition(c.Fab, vm, vlab.Externals)
 				if err != nil {
 					return fmt.Errorf("generating external ignition: %w", err)
 				}
-				if err := os.WriteFile(filepath.Join(vmDir, "butane.yaml"), []byte(but), 0o600); err != nil {
-					return fmt.Errorf("writing external butane: %w", err)
+
+				if but != "" {
+					if err := os.WriteFile(filepath.Join(vmDir, VLABButane), ign, 0o600); err != nil {
+						return fmt.Errorf("writing external butane: %w", err)
+					}
 				}
 
 				if err := os.WriteFile(filepath.Join(vmDir, VLABIgnition), ign, 0o600); err != nil {
@@ -771,7 +781,7 @@ func execHelper(ctx context.Context, baseDir string, args []string) error {
 }
 
 func externalIgnition(fab fabapi.Fabricator, vm VM, ext ExternalsCfg) (string, []byte, error) {
-	but, err := tmplutil.FromTemplate("butane", frrButaneTmpl, map[string]any{
+	but, err := tmplutil.FromTemplate("butane-external", externalButaneTmpl, map[string]any{
 		"Hostname":       vm.Name,
 		"PasswordHash":   fab.Spec.Config.Control.DefaultUser.PasswordHash,
 		"AuthorizedKeys": fab.Spec.Config.Control.DefaultUser.AuthorizedKeys,
@@ -779,7 +789,7 @@ func externalIgnition(fab fabapi.Fabricator, vm VM, ext ExternalsCfg) (string, [
 		"ExternalNICs":   ext.NICs,
 	})
 	if err != nil {
-		return "", nil, fmt.Errorf("butane: %w", err)
+		return but, nil, fmt.Errorf("butane: %w", err)
 	}
 
 	ign, err := butaneutil.Translate(but)
@@ -790,22 +800,22 @@ func externalIgnition(fab fabapi.Fabricator, vm VM, ext ExternalsCfg) (string, [
 	return but, ign, nil
 }
 
-func serverIgnition(fab fabapi.Fabricator, vm VM) ([]byte, error) {
-	but, err := tmplutil.FromTemplate("butane", serverButaneTmpl, map[string]any{
+func serverIgnition(fab fabapi.Fabricator, vm VM) (string, []byte, error) {
+	but, err := tmplutil.FromTemplate("butane-server", serverButaneTmpl, map[string]any{
 		"Hostname":       vm.Name,
 		"PasswordHash":   fab.Spec.Config.Control.DefaultUser.PasswordHash,
 		"AuthorizedKeys": fab.Spec.Config.Control.DefaultUser.AuthorizedKeys,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("butane: %w", err)
+		return but, nil, fmt.Errorf("butane: %w", err)
 	}
 
 	ign, err := butaneutil.Translate(but)
 	if err != nil {
-		return nil, fmt.Errorf("translating butane: %w", err)
+		return but, nil, fmt.Errorf("translating butane: %w", err)
 	}
 
-	return ign, nil
+	return but, ign, nil
 }
 
 func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Downloader, vm VM, opts VLABRunOpts) error {
