@@ -12,7 +12,7 @@ import (
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/util/tmplutil"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
@@ -31,7 +31,7 @@ var valuesTmpl string
 
 var _ comp.KubeInstall = Install
 
-func Install(cfg fabapi.Fabricator) ([]client.Object, error) {
+func Install(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 	repo, err := comp.ImageURL(cfg, CtrlRef)
 	if err != nil {
 		return nil, fmt.Errorf("getting image URL for %q: %w", CtrlRef, err)
@@ -57,15 +57,15 @@ func Install(cfg fabapi.Fabricator) ([]client.Object, error) {
 		return nil, fmt.Errorf("api chart: %w", err)
 	}
 
-	return []client.Object{
+	return []kclient.Object{
 		apiChart,
 		ctrlChart,
 	}, nil
 }
 
 func InstallFabAndControl(control fabapi.ControlNode) comp.KubeInstall {
-	return func(cfg fabapi.Fabricator) ([]client.Object, error) {
-		return []client.Object{
+	return func(cfg fabapi.Fabricator) ([]kclient.Object, error) {
+		return []kclient.Object{
 			&cfg,
 			&control,
 		}, nil
@@ -73,8 +73,8 @@ func InstallFabAndControl(control fabapi.ControlNode) comp.KubeInstall {
 }
 
 func InstallNodes(nodes []fabapi.FabNode) comp.KubeInstall {
-	return func(_ fabapi.Fabricator) ([]client.Object, error) {
-		return lo.Map(nodes, func(item fabapi.FabNode, _ int) client.Object {
+	return func(_ fabapi.Fabricator) ([]kclient.Object, error) {
+		return lo.Map(nodes, func(item fabapi.FabNode, _ int) kclient.Object {
 			return &item
 		}), nil
 	}
@@ -97,7 +97,7 @@ var (
 	_ comp.KubeStatus = StatusCtrl
 )
 
-func StatusAPI(ctx context.Context, kube client.Reader, cfg fabapi.Fabricator) (fabapi.ComponentStatus, error) {
+func StatusAPI(ctx context.Context, kube kclient.Reader, cfg fabapi.Fabricator) (fabapi.ComponentStatus, error) {
 	return comp.MergeKubeStatuses(ctx, kube, cfg, //nolint:wrapcheck
 		comp.GetCRDStatus("fabricators.fabricator.githedgehog.com", "v1beta1"),
 		comp.GetCRDStatus("controlnodes.fabricator.githedgehog.com", "v1beta1"),
@@ -105,7 +105,7 @@ func StatusAPI(ctx context.Context, kube client.Reader, cfg fabapi.Fabricator) (
 	)
 }
 
-func StatusCtrl(ctx context.Context, kube client.Reader, cfg fabapi.Fabricator) (fabapi.ComponentStatus, error) {
+func StatusCtrl(ctx context.Context, kube kclient.Reader, cfg fabapi.Fabricator) (fabapi.ComponentStatus, error) {
 	ref, err := comp.ImageURL(cfg, CtrlRef)
 	if err != nil {
 		return fabapi.CompStatusUnknown, fmt.Errorf("getting image URL for %q: %w", CtrlRef, err)

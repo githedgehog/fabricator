@@ -16,8 +16,8 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 	"oras.land/oras-go/v2/registry/remote/credentials"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/yaml"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
+	kyaml "sigs.k8s.io/yaml"
 )
 
 const (
@@ -44,7 +44,7 @@ type Config struct {
 	Fab      fabapi.Fabricator
 	Controls []fabapi.ControlNode
 	Nodes    []fabapi.FabNode
-	Wiring   client.Reader
+	Wiring   kclient.Reader
 }
 
 type RegistryConfig struct {
@@ -65,9 +65,8 @@ func checkWorkCacheDir(workDir, cacheDir string) error {
 		return fmt.Errorf("work dir %q: %w", workDir, ErrNotDir)
 	}
 
-	cacheDirPath := filepath.Join(cacheDir)
-	if err := os.MkdirAll(cacheDirPath, 0o700); err != nil {
-		return fmt.Errorf("creating cache dir %q: %w", cacheDirPath, err)
+	if err := os.MkdirAll(cacheDir, 0o700); err != nil {
+		return fmt.Errorf("creating cache dir %q: %w", cacheDir, err)
 	}
 
 	return nil
@@ -113,7 +112,7 @@ func Init(ctx context.Context, c InitConfig) error {
 		slog.Info("Using custom registry config", "repo", c.Repo, "prefix", c.Prefix)
 	}
 
-	regConfData, err := yaml.Marshal(regConf)
+	regConfData, err := kyaml.Marshal(regConf)
 	if err != nil {
 		return fmt.Errorf("marshalling registry config: %w", err)
 	}
@@ -276,7 +275,7 @@ func Versions(ctx context.Context, workDir, cacheDir string, hMode HydrateMode) 
 
 	slog.Info("Printing versions of all components")
 
-	data, err := yaml.Marshal(cfg.Fab.Status.Versions)
+	data, err := kyaml.Marshal(cfg.Fab.Status.Versions)
 	if err != nil {
 		return fmt.Errorf("marshalling versions: %w", err)
 	}
@@ -370,7 +369,7 @@ func loadRegConf(workDir string) (*RegistryConfig, error) {
 	}
 
 	if err == nil {
-		if err := yaml.UnmarshalStrict(regConfData, regConf); err != nil {
+		if err := kyaml.UnmarshalStrict(regConfData, regConf); err != nil {
 			return nil, fmt.Errorf("unmarshalling registry config: %w", err)
 		}
 	}

@@ -82,7 +82,7 @@ func GenerateDrawio(workDir string, jsonData []byte, styleType StyleType) error 
 		return fmt.Errorf("marshaling XML: %w", err)
 	}
 	xmlContent := []byte(xml.Header + string(outputXML))
-	if err := os.WriteFile(outputFile, xmlContent, 0600); err != nil {
+	if err := os.WriteFile(outputFile, xmlContent, 0o600); err != nil {
 		return fmt.Errorf("writing draw.io file: %w", err)
 	}
 
@@ -127,7 +127,7 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 
 	leafNodeWidth := 100
 	var leafSpacing float64
-	if len(layers.Leaf) <= 3 {
+	if len(layers.Leaf) <= 3 { //nolint:gocritic
 		leafSpacing = 200
 	} else if len(layers.Leaf) <= 5 {
 		leafSpacing = 160

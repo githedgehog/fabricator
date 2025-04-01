@@ -18,7 +18,7 @@ import (
 
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
@@ -28,8 +28,8 @@ const (
 )
 
 func InstallFabCA(ca *CA) comp.KubeInstall {
-	return func(_ fabapi.Fabricator) ([]client.Object, error) {
-		return []client.Object{
+	return func(_ fabapi.Fabricator) ([]kclient.Object, error) {
+		return []kclient.Object{
 			comp.NewSecret(comp.FabCASecret, comp.SecretTypeOpaque, map[string]string{
 				"tls.crt": ca.Crt,
 				"tls.key": ca.Key,

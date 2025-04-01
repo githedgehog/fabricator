@@ -21,8 +21,8 @@ import (
 	fmeta "go.githedgehog.com/fabric/api/meta"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/yaml"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
+	kyaml "sigs.k8s.io/yaml"
 )
 
 const (
@@ -182,7 +182,7 @@ func (c *Config) PrepareVLAB(ctx context.Context, opts VLABUpOpts) (*VLAB, error
 			return nil, fmt.Errorf("creating VLAB config: %w", err)
 		}
 
-		data, err := yaml.Marshal(vlabCfg)
+		data, err := kyaml.Marshal(vlabCfg)
 		if err != nil {
 			return nil, fmt.Errorf("marshaling VLAB config: %w", err)
 		}
@@ -202,7 +202,7 @@ func (c *Config) PrepareVLAB(ctx context.Context, opts VLABUpOpts) (*VLAB, error
 	}
 
 	vlabCfg := &VLABConfig{}
-	if err := yaml.UnmarshalStrict(data, vlabCfg); err != nil {
+	if err := kyaml.UnmarshalStrict(data, vlabCfg); err != nil {
 		return nil, fmt.Errorf("unmarshaling VLAB config: %w", err)
 	}
 
@@ -267,7 +267,7 @@ func (c *Config) PrepareVLAB(ctx context.Context, opts VLABUpOpts) (*VLAB, error
 	return vlab, nil
 }
 
-func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes []fabapi.FabNode, wiring client.Reader) (*VLABConfig, error) {
+func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes []fabapi.FabNode, wiring kclient.Reader) (*VLABConfig, error) {
 	cfg := &VLABConfig{
 		Sizes: DefaultSizes,
 		VMs:   map[string]VMConfig{},
@@ -277,7 +277,7 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 	passthrough := map[string]string{}
 	usedPassthroughs := map[string]bool{}
 
-	addPassthroughLinks := func(obj client.Object) (map[string]string, error) {
+	addPassthroughLinks := func(obj kclient.Object) (map[string]string, error) {
 		links := getPassthroughLinks(obj)
 
 		for k, v := range links {
@@ -493,7 +493,7 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 			return fmt.Errorf("control VMs can't have links from wiring") //nolint:goerr113
 		}
 
-		if !fromHW && !toHW {
+		if !fromHW && !toHW { //nolint:gocritic
 			if _, exist := fromVM.NICs[fromNIC]; exist {
 				return fmt.Errorf("NIC %s/%s is already in use", fromName, fromNIC) //nolint:goerr113
 			}
@@ -523,7 +523,7 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 	}
 
 	for _, conn := range conns.Items {
-		if conn.Spec.Fabric != nil {
+		if conn.Spec.Fabric != nil { //nolint:gocritic
 			for _, link := range conn.Spec.Fabric.Links {
 				if err := addLink(link.Spine.Port, link.Leaf.Port); err != nil {
 					return nil, fmt.Errorf("failed to add link for fabric connection %s: %w", conn.Name, err)
@@ -647,7 +647,7 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 			netdev := ""
 			device := ""
 			usernet := 0
-			if nicType == NICTypeNoop || nicType == NICTypeDirect {
+			if nicType == NICTypeNoop || nicType == NICTypeDirect { //nolint:gocritic
 				port := getDirectNICPort(vmID, uint(nicID)) //nolint:gosec
 				netdev = fmt.Sprintf("socket,udp=127.0.0.1:%d", port)
 
@@ -730,13 +730,16 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 			controlID++
 		}
 
-		size := cfg.Sizes.Server
-		if vm.Type == VMTypeSwitch {
+		size := VMSize{}
+		switch vm.Type {
+		case VMTypeSwitch:
 			size = cfg.Sizes.Switch
-		} else if vm.Type == VMTypeControl {
+		case VMTypeControl:
 			size = cfg.Sizes.Control
-		} else if vm.Type == VMTypeGateway {
+		case VMTypeGateway:
 			size = cfg.Sizes.Gateway
+		case VMTypeServer:
+			size = cfg.Sizes.Server
 		}
 
 		vms = append(vms, VM{
@@ -756,7 +759,7 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 	}, nil
 }
 
-func isHardware(obj client.Object) bool {
+func isHardware(obj kclient.Object) bool {
 	if obj.GetAnnotations() != nil {
 		t, exist := obj.GetAnnotations()[HHFabCfgType]
 		if exist {
@@ -771,7 +774,7 @@ func isHardware(obj client.Object) bool {
 	return false
 }
 
-func getPassthroughLinks(obj client.Object) map[string]string {
+func getPassthroughLinks(obj kclient.Object) map[string]string {
 	links := map[string]string{}
 
 	for k, v := range obj.GetAnnotations() {
@@ -805,7 +808,7 @@ func getNICID(nic string) (uint, error) {
 	}
 
 	raw := ""
-	if strings.HasPrefix(nic, srvPrefix) {
+	if strings.HasPrefix(nic, srvPrefix) { //nolint:gocritic
 		if devlinkPhysPort.MatchString(nic) {
 			idx := strings.LastIndex(nic[len(srvPrefix):], "np")
 			if idx < 0 {

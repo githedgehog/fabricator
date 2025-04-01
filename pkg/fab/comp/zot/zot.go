@@ -18,7 +18,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/util/tmplutil"
 	"golang.org/x/crypto/bcrypt"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
@@ -56,7 +56,7 @@ func ImageURL(cfg fabapi.Fabricator) (string, error) {
 	return repo, nil
 }
 
-func Install(cfg fabapi.Fabricator) ([]client.Object, error) {
+func Install(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 	version := string(Version(cfg))
 
 	upstream := !cfg.Spec.Config.Registry.IsAirgap() && cfg.Spec.Config.Registry.Upstream != nil
@@ -123,7 +123,7 @@ func Install(cfg fabapi.Fabricator) ([]client.Object, error) {
 		return nil, fmt.Errorf("marshaling upstream credentials: %w", err)
 	}
 
-	return []client.Object{
+	return []kclient.Object{
 		comp.NewCertificate("registry", comp.CertificateSpec{
 			DNSNames:    []string{fmt.Sprintf("%s.%s.svc.%s", ServiceName, comp.FabNamespace, comp.ClusterDomain)},
 			IPAddresses: []string{controlVIP.Addr().String()},
@@ -173,8 +173,8 @@ func NewUsers() (map[string]string, error) {
 }
 
 func InstallUsers(users map[string]string) comp.KubeInstall {
-	return func(cfg fabapi.Fabricator) ([]client.Object, error) {
-		objs := []client.Object{}
+	return func(cfg fabapi.Fabricator) ([]kclient.Object, error) {
+		objs := []kclient.Object{}
 		htpasswd := ""
 
 		regURL, err := comp.RegistryURL(cfg)
@@ -234,7 +234,7 @@ func Artifacts(cfg fabapi.Fabricator) (comp.OCIArtifacts, error) {
 
 var _ comp.KubeStatus = Status
 
-func Status(ctx context.Context, kube client.Reader, cfg fabapi.Fabricator) (fabapi.ComponentStatus, error) {
+func Status(ctx context.Context, kube kclient.Reader, cfg fabapi.Fabricator) (fabapi.ComponentStatus, error) {
 	ref, err := comp.ImageURL(cfg, ImageRef)
 	if err != nil {
 		return fabapi.CompStatusUnknown, fmt.Errorf("getting image URL for %q: %w", ImageRef, err)

@@ -8,8 +8,8 @@ import (
 	"fmt"
 
 	"k8s.io/apimachinery/pkg/runtime"
-	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	kctrl "sigs.k8s.io/controller-runtime"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
@@ -20,15 +20,15 @@ import (
 // +kubebuilder:webhook:path=/validate-fabricator-githedgehog-com-v1beta1-node,mutating=false,failurePolicy=fail,sideEffects=None,groups=fabricator.githedgehog.com,resources=nodes,verbs=create;update;delete,versions=v1beta1,name=vnode.kb.io,admissionReviewVersions=v1
 
 type NodeWebhook struct {
-	client.Reader
+	kclient.Reader
 }
 
-func SetupNodeWebhookWith(mgr ctrl.Manager) error {
+func SetupNodeWebhookWith(mgr kctrl.Manager) error {
 	w := &NodeWebhook{
 		Reader: mgr.GetClient(),
 	}
 
-	if err := ctrl.NewWebhookManagedBy(mgr).
+	if err := kctrl.NewWebhookManagedBy(mgr).
 		For(&fabapi.FabNode{}).
 		WithDefaulter(w).
 		WithValidator(w).
@@ -57,7 +57,7 @@ func (w *NodeWebhook) ValidateCreate(ctx context.Context, obj runtime.Object) (a
 	}
 
 	f := &fabapi.Fabricator{}
-	if err := w.Get(ctx, client.ObjectKey{Namespace: comp.FabNamespace, Name: comp.FabName}, f); err != nil {
+	if err := w.Get(ctx, kclient.ObjectKey{Namespace: comp.FabNamespace, Name: comp.FabName}, f); err != nil {
 		return nil, fmt.Errorf("failed to get Fabricator object: %w", err)
 	}
 
@@ -76,7 +76,7 @@ func (w *NodeWebhook) ValidateUpdate(ctx context.Context, oldObj runtime.Object,
 	}
 
 	f := &fabapi.Fabricator{}
-	if err := w.Get(ctx, client.ObjectKey{Namespace: comp.FabNamespace, Name: comp.FabName}, f); err != nil {
+	if err := w.Get(ctx, kclient.ObjectKey{Namespace: comp.FabNamespace, Name: comp.FabName}, f); err != nil {
 		return nil, fmt.Errorf("failed to get Fabricator object: %w", err)
 	}
 

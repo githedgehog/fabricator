@@ -130,15 +130,16 @@ func sortNodes(nodes []Node, links []Link) LayeredNodes {
 	leafOrder := make(map[string]int)
 
 	for _, node := range nodes {
-		if node.Type == NodeTypeSwitch {
+		switch node.Type {
+		case NodeTypeSwitch:
 			if role, ok := node.Properties["role"]; ok && role == SwitchRoleSpine {
 				result.Spine = append(result.Spine, node)
 			} else {
 				result.Leaf = append(result.Leaf, node)
 			}
-		} else if node.Type == NodeTypeServer {
+		case NodeTypeServer:
 			result.Server = append(result.Server, node)
-		} else if node.Type == NodeTypeGateway {
+		case NodeTypeGateway:
 			result.Gateway = append(result.Gateway, node)
 		}
 	}
@@ -148,7 +149,7 @@ func sortNodes(nodes []Node, links []Link) LayeredNodes {
 		descI, hasDescI := result.Spine[i].Properties["description"]
 		descJ, hasDescJ := result.Spine[j].Properties["description"]
 
-		if hasDescI && hasDescJ {
+		if hasDescI && hasDescJ { //nolint:gocritic
 			if descI != descJ {
 				return descI < descJ
 			}
@@ -166,7 +167,7 @@ func sortNodes(nodes []Node, links []Link) LayeredNodes {
 		descI, hasDescI := result.Leaf[i].Properties["description"]
 		descJ, hasDescJ := result.Leaf[j].Properties["description"]
 
-		if hasDescI && hasDescJ {
+		if hasDescI && hasDescJ { //nolint:gocritic
 			if descI != descJ {
 				return descI < descJ
 			}

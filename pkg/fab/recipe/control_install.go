@@ -25,11 +25,11 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k9s"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/zot"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kapierrors "k8s.io/apimachinery/pkg/api/errors"
+	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 type ControlInstall struct {
@@ -58,7 +58,7 @@ func (c *ControlInstall) Run(ctx context.Context) error {
 	c.Fab.Status.IsBootstrap = true
 	c.Fab.Status.IsInstall = true
 
-	if err := kube.Create(ctx, comp.NewNamespace(comp.FabNamespace)); err != nil && !apierrors.IsAlreadyExists(err) {
+	if err := kube.Create(ctx, comp.NewNamespace(comp.FabNamespace)); err != nil && !kapierrors.IsAlreadyExists(err) {
 		return fmt.Errorf("creating namespace %q: %w", comp.FabNamespace, err)
 	}
 
@@ -122,7 +122,7 @@ func (c *ControlInstall) Run(ctx context.Context) error {
 	return nil
 }
 
-func (c *ControlInstall) installK8s(ctx context.Context) (client.Client, error) {
+func (c *ControlInstall) installK8s(ctx context.Context) (kclient.Client, error) {
 	slog.Info("Installing k3s")
 
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
@@ -231,7 +231,7 @@ func (c *ControlInstall) installK8s(ctx context.Context) (client.Client, error) 
 	return kube, nil
 }
 
-func (c *ControlInstall) installCertManager(ctx context.Context, kube client.Client) error {
+func (c *ControlInstall) installCertManager(ctx context.Context, kube kclient.Client) error {
 	slog.Info("Installing cert-manager")
 
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
@@ -259,7 +259,7 @@ func (c *ControlInstall) installCertManager(ctx context.Context, kube client.Cli
 	return nil
 }
 
-func (c *ControlInstall) installFabCA(ctx context.Context, kube client.Client) (string, error) {
+func (c *ControlInstall) installFabCA(ctx context.Context, kube kclient.Client) (string, error) {
 	slog.Info("Installing fab-ca")
 
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
@@ -305,7 +305,7 @@ func (c *ControlInstall) installFabCA(ctx context.Context, kube client.Client) (
 	return ca.Crt, nil
 }
 
-func (c *ControlInstall) installZot(ctx context.Context, kube client.Client, ca string) error {
+func (c *ControlInstall) installZot(ctx context.Context, kube kclient.Client, ca string) error {
 	slog.Info("Installing zot")
 
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
@@ -346,7 +346,7 @@ func (c *ControlInstall) installZot(ctx context.Context, kube client.Client, ca 
 	return nil
 }
 
-func (c *ControlInstall) waitReloader(ctx context.Context, kube client.Client) error {
+func (c *ControlInstall) waitReloader(ctx context.Context, kube kclient.Client) error {
 	slog.Info("Waiting for reloader")
 
 	if err := waitKube(ctx, kube, "reloader-reloader", comp.FabNamespace,
@@ -365,7 +365,7 @@ func (c *ControlInstall) waitReloader(ctx context.Context, kube client.Client) e
 	return nil
 }
 
-func (c *ControlInstall) installWaitFabric(ctx context.Context, kube client.Client) error {
+func (c *ControlInstall) installWaitFabric(ctx context.Context, kube kclient.Client) error {
 	if err := c.installFabricCtl(ctx); err != nil {
 		return fmt.Errorf("installing kubectl-fabric: %w", err)
 	}
@@ -414,7 +414,7 @@ func (c *ControlInstall) installWaitFabric(ctx context.Context, kube client.Clie
 	return nil
 }
 
-func (c *ControlInstall) installWiring(ctx context.Context, kube client.Client) error {
+func (c *ControlInstall) installWiring(ctx context.Context, kube kclient.Client) error {
 	slog.Info("Waiting for all used switch profiles ready")
 
 	switches := &wiringapi.SwitchList{}
@@ -430,7 +430,7 @@ func (c *ControlInstall) installWiring(ctx context.Context, kube client.Client) 
 
 		slog.Debug("Waiting for switch profile ready", "name", sw.Spec.Profile)
 
-		if err := waitKube(ctx, kube, sw.Spec.Profile, metav1.NamespaceDefault,
+		if err := waitKube(ctx, kube, sw.Spec.Profile, kmetav1.NamespaceDefault,
 			&wiringapi.SwitchProfile{}, func(obj *wiringapi.SwitchProfile) (bool, error) {
 				return obj.GetName() == sw.Spec.Profile, nil
 			}); err != nil {
@@ -476,7 +476,7 @@ func (c *ControlInstall) installWiring(ctx context.Context, kube client.Client) 
 				Factor:   1.5,
 				Jitter:   0.1,
 			}, func(err error) bool {
-				return !apierrors.IsConflict(err)
+				return !kapierrors.IsConflict(err)
 			}, func() error {
 				if attempt > 0 {
 					slog.Debug("Retrying installing wiring", "kind", kind, "name", name, "attempt", attempt)
@@ -500,7 +500,7 @@ func (c *ControlInstall) installWiring(ctx context.Context, kube client.Client) 
 	return nil
 }
 
-func (c *ControlInstall) waitNTP(ctx context.Context, kube client.Client) error {
+func (c *ControlInstall) waitNTP(ctx context.Context, kube kclient.Client) error {
 	slog.Info("Waiting for NTP server")
 
 	if err := waitKube(ctx, kube, "ntp", comp.FabNamespace,
@@ -519,7 +519,7 @@ func (c *ControlInstall) waitNTP(ctx context.Context, kube client.Client) error 
 	return nil
 }
 
-func waitKube[T client.Object](ctx context.Context, kube client.Reader, name, ns string, obj T, check func(obj T) (bool, error)) error {
+func waitKube[T kclient.Object](ctx context.Context, kube kclient.Reader, name, ns string, obj T, check func(obj T) (bool, error)) error {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
@@ -532,7 +532,7 @@ func waitKube[T client.Object](ctx context.Context, kube client.Reader, name, ns
 		case <-ctx.Done():
 			return fmt.Errorf("waiting for ready: %w", ctx.Err())
 		case <-ticker.C:
-			if err := kube.Get(ctx, client.ObjectKey{Name: name, Namespace: ns}, obj); err != nil {
+			if err := kube.Get(ctx, kclient.ObjectKey{Name: name, Namespace: ns}, obj); err != nil {
 				slog.Debug("Waiting for ready", "kind", t, "name", name, "err", err)
 
 				continue

@@ -30,7 +30,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/util/butaneutil"
 	"go.githedgehog.com/fabricator/pkg/util/tmplutil"
 	"go.githedgehog.com/fabricator/pkg/version"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 type ControlInstallBuilder struct {
@@ -38,7 +38,7 @@ type ControlInstallBuilder struct {
 	Fab        fabapi.Fabricator
 	Control    fabapi.ControlNode
 	Nodes      []fabapi.FabNode
-	Wiring     client.Reader
+	Wiring     kclient.Reader
 	Mode       BuildMode
 	Downloader *artificer.Downloader
 }

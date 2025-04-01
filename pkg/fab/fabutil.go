@@ -12,8 +12,8 @@ import (
 	"dario.cat/mergo"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
-	apimeta "k8s.io/apimachinery/pkg/api/meta"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	kmeta "k8s.io/apimachinery/pkg/api/meta"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 type GetFabAndNodesOpts struct {
@@ -21,7 +21,7 @@ type GetFabAndNodesOpts struct {
 	AllowNoControls  bool
 }
 
-func GetFabAndNodes(ctx context.Context, kube client.Reader, optsSlice ...GetFabAndNodesOpts) (fabapi.Fabricator, []fabapi.ControlNode, []fabapi.FabNode, error) {
+func GetFabAndNodes(ctx context.Context, kube kclient.Reader, optsSlice ...GetFabAndNodesOpts) (fabapi.Fabricator, []fabapi.ControlNode, []fabapi.FabNode, error) {
 	opts := GetFabAndNodesOpts{}
 	for _, o := range optsSlice {
 		opts.AllowNotHydrated = opts.AllowNotHydrated || o.AllowNotHydrated
@@ -29,7 +29,7 @@ func GetFabAndNodes(ctx context.Context, kube client.Reader, optsSlice ...GetFab
 	}
 
 	f := &fabapi.Fabricator{}
-	if err := kube.Get(ctx, client.ObjectKey{Name: comp.FabName, Namespace: comp.FabNamespace}, f); err != nil {
+	if err := kube.Get(ctx, kclient.ObjectKey{Name: comp.FabName, Namespace: comp.FabNamespace}, f); err != nil {
 		return fabapi.Fabricator{}, nil, nil, fmt.Errorf("getting fabricator: %w", err)
 	}
 
@@ -77,7 +77,7 @@ func GetFabAndNodes(ctx context.Context, kube client.Reader, optsSlice ...GetFab
 	nodes := &fabapi.FabNodeList{}
 	// It's okay if node resources are not found, as we may be upgrading from the older versions
 	// TODO make it strict after we completely migrate to Node objects for everything
-	if err := kube.List(ctx, nodes); err != nil && !apimeta.IsNoMatchError(err) {
+	if err := kube.List(ctx, nodes); err != nil && !kmeta.IsNoMatchError(err) {
 		return fabapi.Fabricator{}, nil, nil, fmt.Errorf("listing nodes: %w", err)
 	}
 	if len(nodes.Items) > 1 {

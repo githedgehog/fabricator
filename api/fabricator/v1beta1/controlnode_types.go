@@ -8,7 +8,7 @@ import (
 	"fmt"
 
 	"go.githedgehog.com/fabricator/api/meta"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
@@ -48,8 +48,8 @@ type ControlNodeStatus struct{}
 // +kubebuilder:subresource:status
 
 type ControlNode struct {
-	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
+	kmetav1.TypeMeta   `json:",inline"`
+	kmetav1.ObjectMeta `json:"metadata,omitempty"`
 
 	Spec   ControlNodeSpec   `json:"spec,omitempty"`
 	Status ControlNodeStatus `json:"status,omitempty"`
@@ -59,9 +59,9 @@ type ControlNode struct {
 
 // ControlNodeList contains a list of ControlNode
 type ControlNodeList struct {
-	metav1.TypeMeta `json:",inline"`
-	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []ControlNode `json:"items"`
+	kmetav1.TypeMeta `json:",inline"`
+	kmetav1.ListMeta `json:"metadata,omitempty"`
+	Items            []ControlNode `json:"items"`
 }
 
 func init() {

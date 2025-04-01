@@ -23,23 +23,25 @@ import (
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/hhfctl"
 	"go.githedgehog.com/fabric/pkg/util/pointer"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-var errNoServers = errors.New("no servers found")
-var errNoExternals = errors.New("no external peers found")
-var errNoMclags = errors.New("no MCLAG connections found")
-var errNoEslags = errors.New("no ESLAG connections found")
-var errNoBundled = errors.New("no bundled connections found")
-var errNoUnbundled = errors.New("no unbundled connections found")
-var errNotEnoughSpines = errors.New("not enough spines found")
-var errInitalSetup = errors.New("initial setup failed")
+var (
+	errNoServers       = errors.New("no servers found")
+	errNoExternals     = errors.New("no external peers found")
+	errNoMclags        = errors.New("no MCLAG connections found")
+	errNoEslags        = errors.New("no ESLAG connections found")
+	errNoBundled       = errors.New("no bundled connections found")
+	errNoUnbundled     = errors.New("no unbundled connections found")
+	errNotEnoughSpines = errors.New("not enough spines found")
+	errInitalSetup     = errors.New("initial setup failed")
+)
 
 type VPCPeeringTestCtx struct {
 	workDir          string
 	cacheDir         string
-	kube             client.Client
+	kube             kclient.Client
 	wipeBetweenTests bool
 	opts             SetupVPCsOpts
 	tcOpts           TestConnectivityOpts
@@ -108,7 +110,7 @@ func appendExtPeeringSpec(extPeerings map[string]*vpcapi.ExternalPeeringSpec, vp
 }
 
 // populate the vpcPeerings map with all possible VPC peering combinations
-func populateFullMeshVpcPeerings(ctx context.Context, kube client.Client, vpcPeerings map[string]*vpcapi.VPCPeeringSpec) error {
+func populateFullMeshVpcPeerings(ctx context.Context, kube kclient.Client, vpcPeerings map[string]*vpcapi.VPCPeeringSpec) error {
 	vpcs := &vpcapi.VPCList{}
 	if err := kube.List(ctx, vpcs); err != nil {
 		return fmt.Errorf("listing VPCs: %w", err)
@@ -124,7 +126,7 @@ func populateFullMeshVpcPeerings(ctx context.Context, kube client.Client, vpcPee
 
 // populate the vpcPeerings map with a "full loop" of VPC peering connections, i.e.
 // each VPC is connected to the next one in the list, and the last one is connected to the first
-func populateFullLoopVpcPeerings(ctx context.Context, kube client.Client, vpcPeerings map[string]*vpcapi.VPCPeeringSpec) error {
+func populateFullLoopVpcPeerings(ctx context.Context, kube kclient.Client, vpcPeerings map[string]*vpcapi.VPCPeeringSpec) error {
 	vpcs := &vpcapi.VPCList{}
 	if err := kube.List(ctx, vpcs); err != nil {
 		return fmt.Errorf("listing VPCs: %w", err)
@@ -137,7 +139,7 @@ func populateFullLoopVpcPeerings(ctx context.Context, kube client.Client, vpcPee
 }
 
 // populate the externalPeerings map with all possible external VPC peering combinations
-func populateAllExternalVpcPeerings(ctx context.Context, kube client.Client, extPeerings map[string]*vpcapi.ExternalPeeringSpec) error {
+func populateAllExternalVpcPeerings(ctx context.Context, kube kclient.Client, extPeerings map[string]*vpcapi.ExternalPeeringSpec) error {
 	vpcs := &vpcapi.VPCList{}
 	if err := kube.List(ctx, vpcs); err != nil {
 		return fmt.Errorf("listing VPCs: %w", err)
@@ -156,9 +158,9 @@ func populateAllExternalVpcPeerings(ctx context.Context, kube client.Client, ext
 }
 
 // Get last applied generation of the hedgehog agent on switch swName
-func getAgentGen(ctx context.Context, kube client.Client, swName string) (int64, error) {
+func getAgentGen(ctx context.Context, kube kclient.Client, swName string) (int64, error) {
 	ag := &agentapi.Agent{}
-	err := kube.Get(ctx, client.ObjectKey{Name: swName, Namespace: "default"}, ag)
+	err := kube.Get(ctx, kclient.ObjectKey{Name: swName, Namespace: "default"}, ag)
 	if err != nil {
 		return -1, fmt.Errorf("getting agent %s: %w", swName, err)
 	}
@@ -167,13 +169,13 @@ func getAgentGen(ctx context.Context, kube client.Client, swName string) (int64,
 }
 
 // Wait until the hedgehog agent on switch swName has moved beyond the given generation
-func waitAgentGen(ctx context.Context, kube client.Client, swName string, lastGen int64) error {
+func waitAgentGen(ctx context.Context, kube kclient.Client, swName string, lastGen int64) error {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	ag := &agentapi.Agent{}
 
 	for {
-		err := kube.Get(ctx, client.ObjectKey{Name: swName, Namespace: "default"}, ag)
+		err := kube.Get(ctx, kclient.ObjectKey{Name: swName, Namespace: "default"}, ag)
 		if err != nil {
 			return fmt.Errorf("getting agent %s: %w", swName, err)
 		}
@@ -328,7 +330,7 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsStarterTest(ctx context.Context) (b
 	// check whether border switchgroup exists
 	remote := "border"
 	swGroup := &wiringapi.SwitchGroup{}
-	if err := testCtx.kube.Get(ctx, client.ObjectKey{Namespace: "default", Name: remote}, swGroup); err != nil {
+	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: remote}, swGroup); err != nil {
 		slog.Warn("Border switch group not found, not using remote", "error", err)
 		remote = ""
 	}
@@ -451,7 +453,7 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsSergeisSpecialTest(ctx context.Cont
 	// check whether border switchgroup exists
 	remote := "border"
 	swGroup := &wiringapi.SwitchGroup{}
-	if err := testCtx.kube.Get(ctx, client.ObjectKey{Namespace: "default", Name: remote}, swGroup); err != nil {
+	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: remote}, swGroup); err != nil {
 		slog.Warn("Border switch group not found, not using remote", "error", err)
 		remote = ""
 	}
@@ -480,11 +482,11 @@ func shutDownLinkAndTest(ctx context.Context, testCtx *VPCPeeringTestCtx, link w
 	// get switch profile to find the port name in sonic-cli
 	sw := &wiringapi.Switch{}
 	switchName := switchPort.DeviceName()
-	if err := testCtx.kube.Get(ctx, client.ObjectKey{Namespace: "default", Name: switchName}, sw); err != nil {
+	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: switchName}, sw); err != nil {
 		return fmt.Errorf("getting switch %s: %w", switchName, err)
 	}
 	profile := &wiringapi.SwitchProfile{}
-	if err := testCtx.kube.Get(ctx, client.ObjectKey{Namespace: "default", Name: sw.Spec.Profile}, profile); err != nil {
+	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: sw.Spec.Profile}, profile); err != nil {
 		return fmt.Errorf("getting switch profile %s: %w", sw.Spec.Profile, err)
 	}
 	portMap, err := profile.Spec.GetAPI2NOSPortsFor(&sw.Spec)
@@ -493,7 +495,7 @@ func shutDownLinkAndTest(ctx context.Context, testCtx *VPCPeeringTestCtx, link w
 	}
 	nosPortName, ok := portMap[switchPort.LocalPortName()]
 	if !ok {
-		return fmt.Errorf("Port %s not found in switch profile %s for switch %s", switchPort.LocalPortName(), profile.Name, deviceName) //nolint:goerr113
+		return fmt.Errorf("port %s not found in switch profile %s for switch %s", switchPort.LocalPortName(), profile.Name, deviceName) //nolint:goerr113
 	}
 	// disable agent
 	if err := changeAgentStatus(testCtx.hhfabBin, testCtx.workDir, deviceName, false); err != nil {
@@ -514,9 +516,9 @@ func shutDownLinkAndTest(ctx context.Context, testCtx *VPCPeeringTestCtx, link w
 			}
 		}
 		if returnErr != nil {
-			returnErr = errors.Join(returnErr, fmt.Errorf("Could not enable HH agent on switch %s after %d attempts", deviceName, maxRetries)) //nolint:goerr113
+			returnErr = errors.Join(returnErr, fmt.Errorf("could not enable HH agent on switch %s after %d attempts", deviceName, maxRetries)) //nolint:goerr113
 		} else {
-			returnErr = fmt.Errorf("Could not enable HH agent on switch %s after %d attempts", deviceName, maxRetries) //nolint:goerr113
+			returnErr = fmt.Errorf("could not enable HH agent on switch %s after %d attempts", deviceName, maxRetries) //nolint:goerr113
 		}
 	}()
 
@@ -552,7 +554,7 @@ func shutDownLinkAndTest(ctx context.Context, testCtx *VPCPeeringTestCtx, link w
 func (testCtx *VPCPeeringTestCtx) mclagTest(ctx context.Context) (bool, []RevertFunc, error) {
 	// list connections in the fabric, filter by MC-LAG connection type
 	conns := &wiringapi.ConnectionList{}
-	if err := testCtx.kube.List(ctx, conns, client.MatchingLabels{wiringapi.LabelConnectionType: wiringapi.ConnectionTypeMCLAG}); err != nil {
+	if err := testCtx.kube.List(ctx, conns, kclient.MatchingLabels{wiringapi.LabelConnectionType: wiringapi.ConnectionTypeMCLAG}); err != nil {
 		return false, nil, fmt.Errorf("listing connections: %w", err)
 	}
 	if len(conns.Items) == 0 {
@@ -587,7 +589,7 @@ func (testCtx *VPCPeeringTestCtx) mclagTest(ctx context.Context) (bool, []Revert
 func (testCtx *VPCPeeringTestCtx) eslagTest(ctx context.Context) (bool, []RevertFunc, error) {
 	// list connections in the fabric, filter by ES-LAG connection type
 	conns := &wiringapi.ConnectionList{}
-	if err := testCtx.kube.List(ctx, conns, client.MatchingLabels{wiringapi.LabelConnectionType: wiringapi.ConnectionTypeESLAG}); err != nil {
+	if err := testCtx.kube.List(ctx, conns, kclient.MatchingLabels{wiringapi.LabelConnectionType: wiringapi.ConnectionTypeESLAG}); err != nil {
 		return false, nil, fmt.Errorf("listing connections: %w", err)
 	}
 	if len(conns.Items) == 0 {
@@ -622,7 +624,7 @@ func (testCtx *VPCPeeringTestCtx) eslagTest(ctx context.Context) (bool, []Revert
 func (testCtx *VPCPeeringTestCtx) bundledFailoverTest(ctx context.Context) (bool, []RevertFunc, error) {
 	// list connections in the fabric, filter by bundled connection type
 	conns := &wiringapi.ConnectionList{}
-	if err := testCtx.kube.List(ctx, conns, client.MatchingLabels{wiringapi.LabelConnectionType: wiringapi.ConnectionTypeBundled}); err != nil {
+	if err := testCtx.kube.List(ctx, conns, kclient.MatchingLabels{wiringapi.LabelConnectionType: wiringapi.ConnectionTypeBundled}); err != nil {
 		return false, nil, fmt.Errorf("listing connections: %w", err)
 	}
 	if len(conns.Items) == 0 {
@@ -683,7 +685,7 @@ outer:
 		slog.Debug("Disabling links to spine", "spine", spine.Name)
 		// get switch profile to find the port name in sonic-cli
 		profile := &wiringapi.SwitchProfile{}
-		if err := testCtx.kube.Get(ctx, client.ObjectKey{Namespace: "default", Name: spine.Spec.Profile}, profile); err != nil {
+		if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: spine.Spec.Profile}, profile); err != nil {
 			return false, nil, fmt.Errorf("getting switch profile %s: %w", spine.Spec.Profile, err)
 		}
 		portMap, err := profile.Spec.GetAPI2NOSPortsFor(&spine.Spec)
@@ -697,7 +699,7 @@ outer:
 
 		// look for connections that have this spine as a switch
 		conns := &wiringapi.ConnectionList{}
-		if err := testCtx.kube.List(ctx, conns, client.MatchingLabels{wiringapi.ListLabelSwitch(spine.Name): "true", wiringapi.LabelConnectionType: wiringapi.ConnectionTypeFabric}); err != nil {
+		if err := testCtx.kube.List(ctx, conns, kclient.MatchingLabels{wiringapi.ListLabelSwitch(spine.Name): "true", wiringapi.LabelConnectionType: wiringapi.ConnectionTypeFabric}); err != nil {
 			returnErr = fmt.Errorf("listing connections: %w", err)
 
 			break
@@ -708,7 +710,7 @@ outer:
 				spinePort := link.Spine.LocalPortName()
 				nosPortName, ok := portMap[spinePort]
 				if !ok {
-					returnErr = fmt.Errorf("Port %s not found in switch profile %s for switch %s", spinePort, profile.Name, spine.Name) //nolint:goerr113
+					returnErr = fmt.Errorf("port %s not found in switch profile %s for switch %s", spinePort, profile.Name, spine.Name) //nolint:goerr113
 
 					break outer
 				}
@@ -757,9 +759,9 @@ outer:
 		}
 		// if we get here, we failed to enable the agent
 		if returnErr != nil {
-			returnErr = errors.Join(returnErr, fmt.Errorf("Could not enable HH agent on switch %s after %d attempts", spine.Name, maxRetries)) //nolint:goerr113
+			returnErr = errors.Join(returnErr, fmt.Errorf("could not enable HH agent on switch %s after %d attempts", spine.Name, maxRetries)) //nolint:goerr113
 		} else {
-			returnErr = fmt.Errorf("Could not enable HH agent on switch %s after %d attempts", spine.Name, maxRetries) //nolint:goerr113
+			returnErr = fmt.Errorf("could not enable HH agent on switch %s after %d attempts", spine.Name, maxRetries) //nolint:goerr113
 		}
 	}
 
@@ -786,7 +788,7 @@ func (testCtx *VPCPeeringTestCtx) multiSubnetsIsolationTest(ctx context.Context)
 
 	// modify vpc-01 to have isolated subnets
 	vpc := &vpcapi.VPC{}
-	if err := testCtx.kube.Get(ctx, client.ObjectKey{Namespace: "default", Name: "vpc-01"}, vpc); err != nil {
+	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: "vpc-01"}, vpc); err != nil {
 		return false, nil, fmt.Errorf("getting VPC vpc-01: %w", err)
 	}
 	if len(vpc.Spec.Subnets) != 3 {
@@ -795,7 +797,7 @@ func (testCtx *VPCPeeringTestCtx) multiSubnetsIsolationTest(ctx context.Context)
 
 	// this is going to be used later, let's get it out of the way
 	vpc2 := &vpcapi.VPC{}
-	if err := testCtx.kube.Get(ctx, client.ObjectKey{Namespace: "default", Name: "vpc-02"}, vpc2); err != nil {
+	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: "vpc-02"}, vpc2); err != nil {
 		return false, nil, fmt.Errorf("getting VPC vpc-02: %w", err)
 	}
 	if len(vpc2.Spec.Subnets) != 3 {
@@ -803,7 +805,7 @@ func (testCtx *VPCPeeringTestCtx) multiSubnetsIsolationTest(ctx context.Context)
 	}
 	subnet2, ok := vpc2.Spec.Subnets["subnet-02"]
 	if !ok {
-		return false, nil, fmt.Errorf("Subnet subnet-02 not found in VPC vpc-02") //nolint:goerr113
+		return false, nil, fmt.Errorf("subnet subnet-02 not found in VPC vpc-02") //nolint:goerr113
 	}
 
 	permitList := make([]string, 0)
@@ -922,7 +924,7 @@ func (testCtx *VPCPeeringTestCtx) singleVPCWithRestrictionsTest(ctx context.Cont
 
 	// isolate subnet-01
 	vpc := &vpcapi.VPC{}
-	if err := testCtx.kube.Get(ctx, client.ObjectKey{Namespace: "default", Name: "vpc-01"}, vpc); err != nil {
+	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: "vpc-01"}, vpc); err != nil {
 		return false, nil, fmt.Errorf("getting VPC vpc-01: %w", err)
 	}
 	if len(vpc.Spec.Subnets) != 3 {
@@ -930,15 +932,15 @@ func (testCtx *VPCPeeringTestCtx) singleVPCWithRestrictionsTest(ctx context.Cont
 	}
 	subnet1, ok := vpc.Spec.Subnets["subnet-01"]
 	if !ok {
-		return false, nil, errors.New("Subnet subnet-01 not found in VPC vpc-01") //nolint:goerr113
+		return false, nil, errors.New("subnet subnet-01 not found in VPC vpc-01") //nolint:goerr113
 	}
 	subnet2, ok := vpc.Spec.Subnets["subnet-02"]
 	if !ok {
-		return false, nil, errors.New("Subnet subnet-02 not found in VPC vpc-01") //nolint:goerr113
+		return false, nil, errors.New("subnet subnet-02 not found in VPC vpc-01") //nolint:goerr113
 	}
 	subnet3, ok := vpc.Spec.Subnets["subnet-03"]
 	if !ok {
-		return false, nil, errors.New("Subnet subnet-03 not found in VPC vpc-01") //nolint:goerr113
+		return false, nil, errors.New("subnet subnet-03 not found in VPC vpc-01") //nolint:goerr113
 	}
 	permitList := []string{"subnet-01", "subnet-02", "subnet-03"}
 
@@ -1048,7 +1050,7 @@ func (testCtx *VPCPeeringTestCtx) singleVPCWithRestrictionsTest(ctx context.Cont
 func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool, []RevertFunc, error) {
 	// find an unbundled connection
 	connList := &wiringapi.ConnectionList{}
-	if err := testCtx.kube.List(ctx, connList, client.MatchingLabels{wiringapi.LabelConnectionType: wiringapi.ConnectionTypeUnbundled}); err != nil {
+	if err := testCtx.kube.List(ctx, connList, kclient.MatchingLabels{wiringapi.LabelConnectionType: wiringapi.ConnectionTypeUnbundled}); err != nil {
 		return false, nil, fmt.Errorf("listing connections: %w", err)
 	}
 	if len(connList.Items) == 0 {
@@ -1071,11 +1073,11 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool,
 
 	// Get the corresponding VPCAttachment
 	vpcAttList := &vpcapi.VPCAttachmentList{}
-	if err := testCtx.kube.List(ctx, vpcAttList, client.MatchingLabels{wiringapi.LabelConnection: conn.Name}); err != nil {
+	if err := testCtx.kube.List(ctx, vpcAttList, kclient.MatchingLabels{wiringapi.LabelConnection: conn.Name}); err != nil {
 		return false, nil, fmt.Errorf("listing VPCAttachments: %w", err)
 	}
 	if len(vpcAttList.Items) != 1 {
-		return false, nil, fmt.Errorf("Expected 1 VPCAttachment for connection %s, got %d", conn.Name, len(vpcAttList.Items)) //nolint:goerr113
+		return false, nil, fmt.Errorf("expected 1 VPCAttachment for connection %s, got %d", conn.Name, len(vpcAttList.Items)) //nolint:goerr113
 	}
 	vpcAtt := vpcAttList.Items[0]
 	subnetName := vpcAtt.Spec.SubnetName()
@@ -1083,7 +1085,7 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool,
 	slog.Debug("Found VPCAttachment", "attachment", vpcAtt.Name, "subnet", subnetName, "vpc", vpcName)
 	// Get the VPCAttachment's VPC so we can extract the VLAN (for hhnet config)
 	vpc := &vpcapi.VPC{}
-	if err := testCtx.kube.Get(ctx, client.ObjectKey{Namespace: "default", Name: vpcName}, vpc); err != nil {
+	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: vpcName}, vpc); err != nil {
 		return false, nil, fmt.Errorf("getting VPC %s: %w", vpcName, err)
 	}
 	vlan := vpc.Spec.Subnets[subnetName].VLAN
@@ -1096,7 +1098,7 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool,
 	reverts := make([]RevertFunc, 0)
 	reverts = append(reverts, func(ctx context.Context) error {
 		newVpcAtt := &vpcapi.VPCAttachment{
-			ObjectMeta: metav1.ObjectMeta{
+			ObjectMeta: kmetav1.ObjectMeta{
 				Name:      vpcAtt.Name,
 				Namespace: vpcAtt.Namespace,
 			},
@@ -1140,7 +1142,7 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool,
 			return genErr
 		}
 		newConn := &wiringapi.Connection{
-			ObjectMeta: metav1.ObjectMeta{
+			ObjectMeta: kmetav1.ObjectMeta{
 				Name:      conn.Name,
 				Namespace: conn.Namespace,
 			},
@@ -1262,13 +1264,13 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool,
 }
 
 // helper to get server-1 (might be called differently depending on the env)
-func getServer1(ctx context.Context, kube client.Client) (string, error) {
+func getServer1(ctx context.Context, kube kclient.Client) (string, error) {
 	serverName := "server-1"
 	server := &wiringapi.Server{}
-	if err := kube.Get(ctx, client.ObjectKey{Namespace: "default", Name: serverName}, server); err != nil {
+	if err := kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: serverName}, server); err != nil {
 		slog.Warn("server-1 not found, attempting to fetch server-01")
 		serverName = "server-01"
-		if err := kube.Get(ctx, client.ObjectKey{Namespace: "default", Name: serverName}, server); err != nil {
+		if err := kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: serverName}, server); err != nil {
 			return "", fmt.Errorf("getting server %s: %w", serverName, err)
 		}
 	}
@@ -1288,7 +1290,7 @@ func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (bool, []Re
 	}
 	// Get the VPC
 	vpc := &vpcapi.VPC{}
-	if err := testCtx.kube.Get(ctx, client.ObjectKey{Namespace: "default", Name: "vpc-01"}, vpc); err != nil {
+	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: "vpc-01"}, vpc); err != nil {
 		return false, nil, fmt.Errorf("getting VPC vpc-01: %w", err)
 	}
 
@@ -1382,7 +1384,7 @@ func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (bool, []Re
 
 // Utilities and suite runners
 
-func makeTestCtx(kube client.Client, opts SetupVPCsOpts, workDir, cacheDir string, wipeBetweenTests bool, extName string, rtOpts ReleaseTestOpts) *VPCPeeringTestCtx {
+func makeTestCtx(kube kclient.Client, opts SetupVPCsOpts, workDir, cacheDir string, wipeBetweenTests bool, extName string, rtOpts ReleaseTestOpts) *VPCPeeringTestCtx {
 	testCtx := new(VPCPeeringTestCtx)
 	testCtx.kube = kube
 	testCtx.workDir = workDir
@@ -1464,7 +1466,7 @@ func printSuiteResults(ts *JUnitTestSuite) {
 	var numFailed, numSkipped, numPassed int
 	slog.Info("Test suite results", "suite", ts.Name)
 	for _, test := range ts.TestCases {
-		if test.Skipped != nil {
+		if test.Skipped != nil { //nolint:gocritic
 			slog.Warn("SKIP", "test", test.Name, "reason", test.Skipped.Message)
 			numSkipped++
 		} else if test.Failure != nil {
@@ -1875,7 +1877,7 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 		ExtendedOnly: rtOtps.Extended,
 	}
 	swList := &wiringapi.SwitchList{}
-	if err := kube.List(ctx, swList, client.MatchingLabels{}); err != nil {
+	if err := kube.List(ctx, swList, kclient.MatchingLabels{}); err != nil {
 		return fmt.Errorf("listing switches: %w", err)
 	}
 	profiles := make([]string, 0)
@@ -1901,7 +1903,7 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 				continue
 			}
 			profile := &wiringapi.SwitchProfile{}
-			if err := kube.Get(ctx, client.ObjectKey{Namespace: "default", Name: sw.Spec.Profile}, profile); err != nil {
+			if err := kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: sw.Spec.Profile}, profile); err != nil {
 				return fmt.Errorf("getting switch profile %s: %w", sw.Spec.Profile, err)
 			}
 			if !profile.Spec.Features.Subinterfaces {
@@ -1921,7 +1923,7 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 		skipFlags.NamedExternal = true
 	} else {
 		ext := &vpcapi.External{}
-		if err := kube.Get(ctx, client.ObjectKey{Namespace: "default", Name: extName}, ext); err != nil {
+		if err := kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: extName}, ext); err != nil {
 			slog.Info("Named External not found", "external", extName)
 			skipFlags.NamedExternal = true
 		}
@@ -1963,7 +1965,7 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 		if err != nil {
 			return fmt.Errorf("marshalling XML: %w", err)
 		}
-		if err := os.WriteFile(rtOtps.ResultsFile, output, 0600); err != nil {
+		if err := os.WriteFile(rtOtps.ResultsFile, output, 0o600); err != nil {
 			return fmt.Errorf("writing XML file: %w", err)
 		}
 	}

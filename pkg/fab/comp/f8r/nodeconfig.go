@@ -15,9 +15,9 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab/node"
 	appsapi "k8s.io/api/apps/v1"
 	coreapi "k8s.io/api/core/v1"
-	metaapi "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
@@ -29,7 +29,7 @@ const (
 
 var _ comp.KubeInstall = InstallNodeConfig
 
-func InstallNodeConfig(cfg fabapi.Fabricator) ([]client.Object, error) {
+func InstallNodeConfig(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 	repo, err := comp.ImageURL(cfg, NodeConfigRef)
 	if err != nil {
 		return nil, fmt.Errorf("getting image URL for %q: %w", NodeConfigRef, err)
@@ -43,13 +43,13 @@ func InstallNodeConfig(cfg fabapi.Fabricator) ([]client.Object, error) {
 		"app.kubernetes.io/name": NodeConfigDaemonSet,
 	}
 
-	return []client.Object{
+	return []kclient.Object{
 		comp.NewDaemonSet(NodeConfigDaemonSet, appsapi.DaemonSetSpec{
-			Selector: &metaapi.LabelSelector{
+			Selector: &kmetav1.LabelSelector{
 				MatchLabels: labels,
 			},
 			Template: coreapi.PodTemplateSpec{
-				ObjectMeta: metaapi.ObjectMeta{
+				ObjectMeta: kmetav1.ObjectMeta{
 					Labels: labels,
 				},
 				Spec: coreapi.PodSpec{
@@ -152,7 +152,7 @@ func InstallNodeConfig(cfg fabapi.Fabricator) ([]client.Object, error) {
 
 var _ comp.KubeStatus = StatusNodeConfig
 
-func StatusNodeConfig(ctx context.Context, kube client.Reader, cfg fabapi.Fabricator) (fabapi.ComponentStatus, error) {
+func StatusNodeConfig(ctx context.Context, kube kclient.Reader, cfg fabapi.Fabricator) (fabapi.ComponentStatus, error) {
 	name := NodeConfigDaemonSet
 	container := NodeConfigDaemonSetConfigContainer
 

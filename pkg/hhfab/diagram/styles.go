@@ -191,15 +191,16 @@ func GetLinkStyleFromTheme(link Link, style Style) string {
 }
 
 func GetNodeDimensions(node Node) (int, int) {
-	if node.Type == NodeTypeSwitch {
+	switch node.Type {
+	case NodeTypeSwitch:
 		return 100, 90
-	} else if node.Type == NodeTypeServer {
+	case NodeTypeServer:
 		return 100, 60
-	} else if node.Type == NodeTypeGateway {
+	case NodeTypeGateway:
 		return 100, 90
+	default:
+		return 100, 100
 	}
-
-	return 100, 100
 }
 
 func FormatNodeValue(node Node, style Style) string {

@@ -75,7 +75,8 @@ func DoInstall(ctx context.Context, workDir string, yes bool) error {
 		return fmt.Errorf("creating hedgehog dir %q: %w", HedgehogDir, err)
 	}
 
-	if cfg.Type == TypeControl {
+	switch cfg.Type {
+	case TypeControl:
 		l := apiutil.NewFabLoader()
 		fabCfg, err := os.ReadFile(filepath.Join(workDir, FabName))
 		if err != nil {
@@ -126,7 +127,7 @@ func DoInstall(ctx context.Context, workDir string, yes bool) error {
 		}).Run(ctx); err != nil {
 			return fmt.Errorf("running control install: %w", err)
 		}
-	} else if cfg.Type == TypeNode {
+	case TypeNode:
 		l := apiutil.NewFabLoader()
 		fabCfg, err := os.ReadFile(filepath.Join(workDir, FabName))
 		if err != nil {
@@ -153,7 +154,7 @@ func DoInstall(ctx context.Context, workDir string, yes bool) error {
 		}).Run(ctx); err != nil {
 			return fmt.Errorf("running node install: %w", err)
 		}
-	} else {
+	default:
 		return fmt.Errorf("unknown installer type %q", cfg.Type) //nolint:goerr113
 	}
 
@@ -199,17 +200,18 @@ func DoUpgrade(ctx context.Context, workDir string, yes bool) error {
 		return fmt.Errorf("hostname mismatch: running on %q while upgrader expects %q", hostname, cfg.Name) //nolint:goerr113
 	}
 
-	if cfg.Type == TypeControl {
+	switch cfg.Type {
+	case TypeControl:
 		if err := (&ControlUpgrade{
 			WorkDir: workDir,
 			Yes:     yes,
 		}).Run(ctx); err != nil {
 			return fmt.Errorf("running control upgrade: %w", err)
 		}
-	} else if cfg.Type == TypeNode {
+	case TypeNode:
 		slog.Warn("Node upgrade is not implemented yet")
 		// TODO implement node upgrade
-	} else {
+	default:
 		return fmt.Errorf("unknown upgrader type %q", cfg.Type) //nolint:goerr113
 	}
 

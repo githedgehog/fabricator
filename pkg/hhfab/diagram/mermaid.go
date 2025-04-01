@@ -20,7 +20,7 @@ func GenerateMermaid(workDir string, jsonData []byte) error {
 	}
 
 	mermaid := generateMermaid(topo)
-	if err := os.WriteFile(outputFile, []byte(mermaid), 0600); err != nil {
+	if err := os.WriteFile(outputFile, []byte(mermaid), 0o600); err != nil {
 		return fmt.Errorf("writing Mermaid file: %w", err)
 	}
 
@@ -168,7 +168,7 @@ func generateMermaid(topo Topology) string {
 		targetPort := extractPort(link.Properties["targetPort"])
 		portLabel := ""
 
-		if sourcePort != "" && targetPort != "" {
+		if sourcePort != "" && targetPort != "" { //nolint:gocritic
 			portLabel = targetPort + "↔" + sourcePort
 		} else if sourcePort != "" {
 			portLabel = "↔" + sourcePort

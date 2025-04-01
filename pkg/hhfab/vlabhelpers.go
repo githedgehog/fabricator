@@ -29,8 +29,8 @@ import (
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/hhfab/pdu"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 type VLABAccessType string
@@ -108,12 +108,13 @@ func (c *Config) VLABAccess(ctx context.Context, vlab *VLAB, t VLABAccessType, n
 	cmdName := ""
 	var args []string
 
-	if t == VLABAccessSSH {
-		if entry.SSHPort > 0 {
+	switch t {
+	case VLABAccessSSH:
+		if entry.SSHPort > 0 { //nolint:gocritic
 			slog.Info("SSH using local port", "name", name, "port", entry.SSHPort)
 
 			cmdName = VLABCmdSSH
-			args = append(SSHQuietFlags,
+			args = append(slices.Clone(SSHQuietFlags),
 				"-p", fmt.Sprintf("%d", entry.SSHPort),
 				"-i", filepath.Join(VLABDir, VLABSSHKeyFile),
 				"core@127.0.0.1",
@@ -133,7 +134,7 @@ func (c *Config) VLABAccess(ctx context.Context, vlab *VLAB, t VLABAccessType, n
 			)
 
 			cmdName = VLABCmdSSH
-			args = append(SSHQuietFlags,
+			args = append(slices.Clone(SSHQuietFlags),
 				"-i", filepath.Join(VLABDir, VLABSSHKeyFile),
 				"-o", "ProxyCommand="+proxyCmd,
 				"admin@"+swIP,
@@ -153,7 +154,7 @@ func (c *Config) VLABAccess(ctx context.Context, vlab *VLAB, t VLABAccessType, n
 			)
 
 			cmdName = VLABCmdSSH
-			args = append(SSHQuietFlags,
+			args = append(slices.Clone(SSHQuietFlags),
 				"-i", filepath.Join(VLABDir, VLABSSHKeyFile),
 				"-o", "ProxyCommand="+proxyCmd,
 				"core@"+nodeIP,
@@ -165,8 +166,8 @@ func (c *Config) VLABAccess(ctx context.Context, vlab *VLAB, t VLABAccessType, n
 		if len(inArgs) > 0 {
 			args = append(args, "PATH=$PATH:/opt/bin "+strings.Join(inArgs, " "))
 		}
-	} else if t == VLABAccessSerial {
-		if entry.SerialSock != "" {
+	case VLABAccessSerial:
+		if entry.SerialSock != "" { //nolint:gocritic
 			slog.Info("Serial using local socket", "name", name, "path", entry.SerialSock)
 
 			sudo = true
@@ -185,20 +186,20 @@ func (c *Config) VLABAccess(ctx context.Context, vlab *VLAB, t VLABAccessType, n
 			}
 
 			cmdName = VLABCmdSSH
-			args = append(SSHQuietFlags, "-p", parts[1], parts[0])
+			args = append(slices.Clone(SSHQuietFlags), "-p", parts[1], parts[0])
 		} else {
-			return fmt.Errorf("Serial not available: %s", name) //nolint:goerr113
+			return fmt.Errorf("serial not available: %s", name) //nolint:goerr113
 		}
-	} else if t == VLABAccessSerialLog {
+	case VLABAccessSerialLog:
 		if entry.SerialLog != "" {
 			slog.Info("Serial log", "name", name, "path", entry.SerialLog)
 
 			cmdName = VLABCmdLess
 			args = []string{"-r", entry.SerialLog}
 		} else {
-			return fmt.Errorf("Serial log not available: %s", name) //nolint:goerr113
+			return fmt.Errorf("serial log not available: %s", name) //nolint:goerr113
 		}
-	} else {
+	default:
 		return fmt.Errorf("unknown access type: %s", t) //nolint:goerr113
 	}
 
@@ -260,11 +261,11 @@ const (
 )
 
 var (
-	ErrConsole = errors.New("Connection to console failed")
-	ErrLogin   = errors.New("Login to switch failed")
-	ErrInstall = errors.New("OS Install failed")
+	ErrConsole = errors.New("connection to console failed")
+	ErrLogin   = errors.New("login to switch failed")
+	ErrInstall = errors.New("os install failed")
 	ErrHHFab   = errors.New("hhfab vlab serial failed")
-	ErrUnknown = errors.New("Unknown expect error")
+	ErrUnknown = errors.New("unknown expect error")
 )
 
 func wrapError(switchName string, exitCode int) error {
@@ -281,7 +282,7 @@ func wrapError(switchName string, exitCode int) error {
 	case errorUnknown:
 		baseErr = ErrUnknown
 	default:
-		return fmt.Errorf("%s: Unknown error (exit code: %d)", switchName, exitCode) //nolint:goerr113
+		return fmt.Errorf("%s: unknown error (exit code: %d)", switchName, exitCode) //nolint:goerr113
 	}
 
 	return fmt.Errorf("%s: %w (error code: %d)", switchName, baseErr, exitCode)
@@ -816,7 +817,7 @@ func (c *Config) getSwitchIP(ctx context.Context, entryName string) (string, err
 	}
 
 	sw := &wiringapi.Switch{}
-	if err := kube.Get(ctx, client.ObjectKey{Name: entryName, Namespace: metav1.NamespaceDefault}, sw); err != nil {
+	if err := kube.Get(ctx, kclient.ObjectKey{Name: entryName, Namespace: kmetav1.NamespaceDefault}, sw); err != nil {
 		return "", fmt.Errorf("getting switch object: %w", err) //nolint:goerr113
 	}
 
@@ -840,7 +841,7 @@ func (c *Config) getNodeIP(ctx context.Context, name string) (string, error) {
 	}
 
 	node := &fabapi.FabNode{}
-	if err := kube.Get(ctx, client.ObjectKey{Name: name, Namespace: comp.FabNamespace}, node); err != nil {
+	if err := kube.Get(ctx, kclient.ObjectKey{Name: name, Namespace: comp.FabNamespace}, node); err != nil {
 		return "", fmt.Errorf("getting node object: %w", err) //nolint:goerr113
 	}
 

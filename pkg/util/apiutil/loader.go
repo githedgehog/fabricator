@@ -15,11 +15,11 @@ import (
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
@@ -51,7 +51,7 @@ func init() {
 type Loader struct {
 	scheme  *runtime.Scheme
 	decoder runtime.Decoder
-	kube    client.Client
+	kube    kclient.Client
 }
 
 func NewWiringLoader() *Loader {
@@ -70,12 +70,12 @@ func NewFabLoader() *Loader {
 	}
 }
 
-func (l *Loader) GetClient() client.Client {
+func (l *Loader) GetClient() kclient.Client {
 	return l.kube
 }
 
-func (l *Loader) Load(data []byte) ([]client.Object, error) {
-	res := []client.Object{}
+func (l *Loader) Load(data []byte) ([]kclient.Object, error) {
+	res := []kclient.Object{}
 	multidocReader := utilyaml.NewYAMLReader(bufio.NewReader(bytes.NewReader(data)))
 
 	for idx := 1; ; idx++ {
@@ -95,13 +95,13 @@ func (l *Loader) Load(data []byte) ([]client.Object, error) {
 
 		kind := rObj.GetObjectKind().GroupVersionKind().Kind
 
-		obj, ok := rObj.(client.Object)
+		obj, ok := rObj.(kclient.Object)
 		if !ok {
 			return nil, fmt.Errorf("object %d: %s: not a client.Object", idx, kind) //nolint:goerr113
 		}
 
 		if obj.GetNamespace() == "" {
-			obj.SetNamespace(metav1.NamespaceDefault)
+			obj.SetNamespace(kmetav1.NamespaceDefault)
 		}
 
 		if err := validateObject(obj); err != nil {
@@ -114,7 +114,7 @@ func (l *Loader) Load(data []byte) ([]client.Object, error) {
 	return res, nil
 }
 
-func validateObject(obj client.Object) error {
+func validateObject(obj kclient.Object) error {
 	if len(obj.GetName()) > 253 {
 		return fmt.Errorf("maximum name length is 253 characters") //nolint:goerr113
 	}
@@ -134,7 +134,7 @@ func (l *Loader) LoadAdd(ctx context.Context, data []byte) error {
 	return l.Add(ctx, objs...)
 }
 
-func (l *Loader) Add(ctx context.Context, objs ...client.Object) error {
+func (l *Loader) Add(ctx context.Context, objs ...kclient.Object) error {
 	for _, obj := range objs {
 		obj.SetResourceVersion("")
 
@@ -146,7 +146,7 @@ func (l *Loader) Add(ctx context.Context, objs ...client.Object) error {
 	return nil
 }
 
-func (l *Loader) Update(ctx context.Context, objs ...client.Object) error {
+func (l *Loader) Update(ctx context.Context, objs ...kclient.Object) error {
 	for _, obj := range objs {
 		if err := l.kube.Update(ctx, obj); err != nil {
 			return fmt.Errorf("updating %T: %w", obj, err)
@@ -156,7 +156,7 @@ func (l *Loader) Update(ctx context.Context, objs ...client.Object) error {
 	return nil
 }
 
-func (l *Loader) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+func (l *Loader) List(ctx context.Context, list kclient.ObjectList, opts ...kclient.ListOption) error {
 	if err := l.kube.List(ctx, list, opts...); err != nil {
 		return fmt.Errorf("listing %T: %w", list, err)
 	}

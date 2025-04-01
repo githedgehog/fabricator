@@ -13,7 +13,7 @@ import (
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/ctrl/switchprofile"
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 func ValidateFabric(ctx context.Context, l *Loader, fabricCfg *meta.FabricConfig) error {
@@ -94,7 +94,7 @@ func ValidateFabric(ctx context.Context, l *Loader, fabricCfg *meta.FabricConfig
 	return nil
 }
 
-func defaultAndValidate(ctx context.Context, kube client.Reader, objList meta.ObjectList, cfg *meta.FabricConfig) error {
+func defaultAndValidate(ctx context.Context, kube kclient.Reader, objList meta.ObjectList, cfg *meta.FabricConfig) error {
 	if err := kube.List(ctx, objList); err != nil {
 		return fmt.Errorf("listing %T: %w", objList, err)
 	}
@@ -109,7 +109,7 @@ func defaultAndValidate(ctx context.Context, kube client.Reader, objList meta.Ob
 	return nil
 }
 
-func PrintWiring(ctx context.Context, kube client.Reader, w io.Writer) error {
+func PrintWiring(ctx context.Context, kube kclient.Reader, w io.Writer) error {
 	objs := 0
 
 	if err := kubeutil.PrintObjectList(ctx, kube, w, &wiringapi.VLANNamespaceList{}, &objs); err != nil {
