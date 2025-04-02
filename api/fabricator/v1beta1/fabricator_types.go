@@ -236,14 +236,15 @@ type Versions struct {
 }
 
 type PlatformVersions struct {
-	K3s         meta.Version `json:"k3s,omitempty"`
-	Zot         meta.Version `json:"zot,omitempty"`
-	CertManager meta.Version `json:"certManager,omitempty"`
-	K9s         meta.Version `json:"k9s,omitempty"`
-	Toolbox     meta.Version `json:"toolbox,omitempty"`
-	Reloader    meta.Version `json:"reloader,omitempty"`
-	NTP         meta.Version `json:"ntp,omitempty"`
-	NTPChart    meta.Version `json:"ntpChart,omitempty"`
+	K3s            meta.Version `json:"k3s,omitempty"`
+	Zot            meta.Version `json:"zot,omitempty"`
+	CertManager    meta.Version `json:"certManager,omitempty"`
+	K9s            meta.Version `json:"k9s,omitempty"`
+	Toolbox        meta.Version `json:"toolbox,omitempty"`
+	Reloader       meta.Version `json:"reloader,omitempty"`
+	NTP            meta.Version `json:"ntp,omitempty"`
+	NTPChart       meta.Version `json:"ntpChart,omitempty"`
+	BashCompletion meta.Version `json:"bashCompletion,omitempty"`
 }
 
 type FabricatorVersions struct {
