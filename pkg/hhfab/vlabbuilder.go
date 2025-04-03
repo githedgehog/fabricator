@@ -158,6 +158,21 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 		return fmt.Errorf("MCLAG peer links count must be greater than 0") //nolint:goerr113
 	}
 
+	// some implicit logic to figure out where to put external connections if not specified:
+	// prefer ESLAG, then orphan, then MCLAG
+	if b.ExtCount > 0 && b.ExtMCLAGConnCount == 0 && b.ExtESLAGConnCount == 0 && b.ExtOrphanConnCount == 0 {
+		switch {
+		case totalESLAGLeafs >= 2:
+			b.ExtESLAGConnCount = 2
+		case b.OrphanLeafsCount > 0:
+			b.ExtOrphanConnCount = min(b.OrphanLeafsCount, 2)
+		case b.MCLAGLeafsCount >= 2:
+			b.ExtMCLAGConnCount = 2
+		default:
+			return fmt.Errorf("no ESLAG, MCLAG or orphan leaves to attach the requested externals to") //nolint:goerr113
+		}
+	}
+
 	if b.ExtESLAGConnCount > totalESLAGLeafs {
 		return fmt.Errorf("external ESLAG connections count must be less than or equal to total ESLAG leaves") //nolint:goerr113
 	}
