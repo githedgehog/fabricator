@@ -250,6 +250,7 @@ func Run(ctx context.Context) error {
 			Name:        "externals",
 			Usage:       "number of externals to generate",
 			Destination: &wgExternals,
+			Value:       1,
 		},
 		&cli.UintFlag{
 			Name:        "external-mclag-connections",
@@ -260,6 +261,7 @@ func Run(ctx context.Context) error {
 			Name:        "external-eslag-connections",
 			Usage:       "number of external connections from ESLAG switches",
 			Destination: &wgExtESLAGConns,
+			Value:       1,
 		},
 		&cli.UintFlag{
 			Name:        "external-orphan-connections",
