@@ -619,7 +619,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 					// TODO make it configurable
 					if err := c.SetupPeerings(ctx, vlab, SetupPeeringsOpts{
 						WaitSwitchesReady: true,
-						Requests:          []string{"1+4", "3~external-01:s=subnet-01"},
+						Requests:          []string{"1~external-01:s=subnet-01"},
 					}); err != nil {
 						slog.Warn("Failed to setup peerings", "err", err)
 
