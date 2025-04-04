@@ -569,35 +569,31 @@ func Run(ctx context.Context) error {
 				Name:  "diagram",
 				Usage: "generate a diagram to visualze topology",
 				UsageText: strings.TrimSpace(`
-					Generate network topology diagrams in different formats from your wiring diagram.
-				
-					FORMATS:
-					   drawio (default) - Creates a diagram.io file that can be opened with https://app.diagrams.net/
-					                      You can edit the diagram and export to various formats including PNG, SVG, PDF.
-				
-					   dot             - Creates a Graphviz DOT file that can be rendered using Graphviz tools:
-					                      - Install Graphviz: https://graphviz.org/download/
-					                      - Convert to PNG: 'dot -Tpng vlab-diagram.dot -o vlab-diagram.png'
-					                      - Convert to SVG: 'dot -Tsvg vlab-diagram.dot -o vlab-diagram.svg'
-					                      - Convert to PDF: 'dot -Tpdf vlab-diagram.dot -o vlab-diagram.pdf'
-				
-					   mermaid         - Creates a Mermaid diagram compatible with mermaid.live or Markdown viewers:
-					                      - View online: https://mermaid.live/
-					                      - Or use a Markdown editor with Mermaid support
-				
-					EXAMPLES:
-					   # Generate default draw.io diagram
-					   hhfab diagram
-				
-					   # Generate dot diagram for graphviz
-					   hhfab diagram --format dot
-				
-					   # Generate Mermaid diagram
-					   hhfab diagram --format mermaid
-				
-					   # Generate draw.io diagram with custom style
-					   hhfab diagram --format drawio --style hedgehog
-				`),
+			Generate network topology diagrams in different formats from your wiring diagram.
+
+			FORMATS:
+			   drawio (default) - Creates a diagram.io file that can be opened with https://app.diagrams.net
+			                      You can edit the diagram and export to various formats including PNG, SVG, PDF.
+
+			   dot             - Creates a Graphviz DOT file that can be rendered using Graphviz tools:
+			                      - Install Graphviz: https://graphviz.org/download
+			                      - Convert to PNG: 'dot -Tpng vlab-diagram.dot -o vlab-diagram.png'
+			                      - Convert to SVG: 'dot -Tsvg vlab-diagram.dot -o vlab-diagram.svg'
+			                      - Convert to PDF: 'dot -Tpdf vlab-diagram.dot -o vlab-diagram.pdf'
+
+			   mermaid         - Creates a Mermaid diagram compatible with mermaid.live or Markdown viewers:
+			                      - View online: https://mermaid.live
+			                      - Or use a Markdown editor with Mermaid support
+
+			EXAMPLES:
+			   # Generate default draw.io diagram
+			   hhfab diagram
+
+			   # Generate dot diagram for graphviz
+			   hhfab diagram --format dot
+
+			   # Generate draw.io diagram with custom style
+			   hhfab diagram --format drawio --style hedgehog`),
 				Flags: flatten(defaultFlags, []cli.Flag{
 					&cli.StringFlag{
 						Name:    "format",
