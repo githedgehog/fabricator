@@ -51,3 +51,15 @@ const (
 	DotFilename     = "diagram.dot"
 	MermaidFilename = "diagram.mmd"
 )
+
+// Layer IDs for Draw.io diagrams
+const (
+	BaseLayerID        = "base_layer"
+	ConnectionsLayerID = "connections_layer"
+)
+
+// Layer names for Draw.io diagrams
+const (
+	BaseLayerName        = "Base (Nodes & Switches)"
+	ConnectionsLayerName = "Physical Connections & Legend"
+)
