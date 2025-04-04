@@ -152,7 +152,6 @@ func Diagram(workDir, format string, styleType diagram.StyleType) error {
 		fmt.Printf("To render this diagram with Mermaid:\n")
 		fmt.Printf("1. Visit https://mermaid.live/ or use a Markdown editor with Mermaid support\n")
 		fmt.Printf("2. Copy the contents of %s into the editor\n", filePath)
-		fmt.Printf("3. Export to PNG, SVG or other formats as needed\n")
 	default:
 		return fmt.Errorf("unsupported diagram format: %s", format) //nolint:goerr113
 	}
