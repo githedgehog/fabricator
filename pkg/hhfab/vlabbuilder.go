@@ -202,10 +202,6 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 
 	b.ifaceTracker = map[string]uint8{}
 
-	if _, err := b.createSwitchGroup(ctx, "empty"); err != nil {
-		return err
-	}
-
 	switchID := uint8(1) // switch ID counter
 
 	leafID := uint8(1)   // leaf ID counter
