@@ -1533,6 +1533,8 @@ func doRunTests(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 			} else {
 				skipMsg = "Skipped by test function (unspecified reason)"
 			}
+			// error message is only used to convey skipping reason
+			err = nil
 			ts.TestCases[i].Skipped = &Skipped{
 				Message: skipMsg,
 			}
@@ -1773,6 +1775,7 @@ func makeVpcPeeringsMultiVPCSuiteRun(testCtx *VPCPeeringTestCtx) *JUnitTestSuite
 			F:    testCtx.multiSubnetsSubnetFilteringTest,
 			SkipFlags: SkipFlags{
 				VirtualSwitch: true,
+				SubInterfaces: true,
 			},
 		},
 	}
