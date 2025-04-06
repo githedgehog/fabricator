@@ -188,6 +188,7 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 
 	gatewayStartX := float64(canvasWidth)/2 - (totalGatewayWidth / 2)
 
+	// Add gateway nodes
 	for i, node := range layers.Gateway {
 		width, height := GetNodeDimensions(node)
 
@@ -247,6 +248,7 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 		}
 	}
 
+	// Add spine nodes
 	for i, node := range layers.Spine {
 		width, height := GetNodeDimensions(node)
 		cell := MxCell{
@@ -267,6 +269,148 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 		model.Root.MxCell = append(model.Root.MxCell, cell)
 	}
 
+	// Add external nodes (position based on connections)
+	if len(layers.External) > 0 {
+		externalY := (spineY+leafY)/2 - 70       // Between spine and leaf
+		leftEdgeX := float64(-200)               // Left side position - CHANGED FROM -100
+		rightEdgeX := float64(canvasWidth) + 100 // Right side position - CHANGED FROM +100
+
+		// Group externals by side (left/right)
+		leftExternals := []Node{}
+		rightExternals := []Node{}
+
+		// Determine side placement for each external node
+		for _, node := range layers.External {
+			side := determineExternalSidePlacement(node.ID, topo.Links, layers.Leaf)
+			if side == "left" {
+				leftExternals = append(leftExternals, node)
+			} else {
+				rightExternals = append(rightExternals, node)
+			}
+		}
+
+		// Place left side externals
+		for i, node := range leftExternals {
+			width, height := GetNodeDimensions(node)
+			x := leftEdgeX - float64(i*150) // CHANGED FROM i*120
+			y := float64(externalY)
+
+			usingIconStyle := IsIconBasedStyle(style)
+
+			if usingIconStyle {
+				iconCell := MxCell{
+					ID:     node.ID,
+					Parent: BaseLayerID,
+					Style:  GetNodeStyle(node, style),
+					Vertex: "1",
+					Geometry: &Geometry{
+						X:      x,
+						Y:      y,
+						Width:  width,
+						Height: height,
+						As:     "geometry",
+					},
+				}
+
+				labelCell := MxCell{
+					ID:     fmt.Sprintf("%s_label", node.ID),
+					Parent: BaseLayerID,
+					Value:  node.Label,
+					Style:  GetExternalLabelStyle(),
+					Vertex: "1",
+					Geometry: &Geometry{
+						X:      x + 26,
+						Y:      y + 70,
+						Width:  48,
+						Height: 13,
+						As:     "geometry",
+					},
+				}
+
+				model.Root.MxCell = append(model.Root.MxCell, iconCell, labelCell)
+				cellMap[node.ID] = &iconCell
+			} else {
+				cell := MxCell{
+					ID:     node.ID,
+					Parent: BaseLayerID,
+					Value:  FormatNodeValue(node, style),
+					Style:  GetNodeStyle(node, style),
+					Vertex: "1",
+					Geometry: &Geometry{
+						X:      x,
+						Y:      y,
+						Width:  width,
+						Height: height,
+						As:     "geometry",
+					},
+				}
+				cellMap[node.ID] = &cell
+				model.Root.MxCell = append(model.Root.MxCell, cell)
+			}
+		}
+
+		// Place right side externals
+		for i, node := range rightExternals {
+			width, height := GetNodeDimensions(node)
+			x := rightEdgeX + float64(i*150) // CHANGED FROM i*120
+			y := float64(externalY)
+
+			usingIconStyle := IsIconBasedStyle(style)
+
+			if usingIconStyle {
+				iconCell := MxCell{
+					ID:     node.ID,
+					Parent: BaseLayerID,
+					Style:  GetNodeStyle(node, style),
+					Vertex: "1",
+					Geometry: &Geometry{
+						X:      x,
+						Y:      y,
+						Width:  width,
+						Height: height,
+						As:     "geometry",
+					},
+				}
+
+				labelCell := MxCell{
+					ID:     fmt.Sprintf("%s_label", node.ID),
+					Parent: BaseLayerID,
+					Value:  node.Label,
+					Style:  GetExternalLabelStyle(),
+					Vertex: "1",
+					Geometry: &Geometry{
+						X:      x + 26,
+						Y:      y + 70,
+						Width:  48,
+						Height: 13,
+						As:     "geometry",
+					},
+				}
+
+				model.Root.MxCell = append(model.Root.MxCell, iconCell, labelCell)
+				cellMap[node.ID] = &iconCell
+			} else {
+				cell := MxCell{
+					ID:     node.ID,
+					Parent: BaseLayerID,
+					Value:  FormatNodeValue(node, style),
+					Style:  GetNodeStyle(node, style),
+					Vertex: "1",
+					Geometry: &Geometry{
+						X:      x,
+						Y:      y,
+						Width:  width,
+						Height: height,
+						As:     "geometry",
+					},
+				}
+				cellMap[node.ID] = &cell
+				model.Root.MxCell = append(model.Root.MxCell, cell)
+			}
+		}
+	}
+
+	// Add leaf nodes
 	leafStartX := leafCenterX - (totalLeafWidth / 2)
 
 	for i, node := range layers.Leaf {
@@ -290,6 +434,7 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 		model.Root.MxCell = append(model.Root.MxCell, cell)
 	}
 
+	// Add server nodes
 	serverNodeWidth := 100
 	var serverSpacing float64 = 60
 
@@ -317,12 +462,56 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 		model.Root.MxCell = append(model.Root.MxCell, cell)
 	}
 
+	// Add connections
 	linkGroups := groupLinks(topo.Links)
 	for i, group := range linkGroups {
 		createParallelEdges(model, group, cellMap, i, style, ConnectionsLayerID)
 	}
 
 	return model
+}
+
+func determineExternalSidePlacement(nodeID string, links []Link, leaves []Node) string {
+	leafIndexMap := make(map[string]int)
+	for i, leaf := range leaves {
+		leafIndexMap[leaf.ID] = i
+	}
+
+	leftConnections := 0
+	rightConnections := 0
+	midpoint := len(leaves) / 2
+
+	// Count connections to leaves on left vs right side
+	for _, link := range links {
+		var leafID string
+		if link.Source == nodeID { //nolint:gocritic
+			leafID = link.Target
+		} else if link.Target == nodeID {
+			leafID = link.Source
+		} else {
+			continue
+		}
+
+		// Check if this is a leaf connection
+		idx, exists := leafIndexMap[leafID]
+		if !exists {
+			continue
+		}
+
+		// Count as left or right based on leaf position
+		if idx < midpoint {
+			leftConnections++
+		} else {
+			rightConnections++
+		}
+	}
+
+	// Position based on which side has more connections
+	if leftConnections > rightConnections {
+		return "left"
+	}
+
+	return "right"
 }
 
 func createHedgehogLogo(parentLayer string) []MxCell {
@@ -353,7 +542,7 @@ func createLegend(style Style, parentLayer string) []MxCell {
 			X:      -400,
 			Y:      10,
 			Width:  320,
-			Height: 280,
+			Height: 320, // Increased height for external connections
 			As:     "geometry",
 		},
 	}
@@ -364,7 +553,7 @@ func createLegend(style Style, parentLayer string) []MxCell {
 		Vertex: "1",
 		Geometry: &Geometry{
 			Width:  320,
-			Height: 280,
+			Height: 320, // Increased height for external connections
 			As:     "geometry",
 		},
 	}
@@ -396,6 +585,7 @@ func createLegend(style Style, parentLayer string) []MxCell {
 		{200, style.UnbundledStyle, "Unbundled Server Links"},
 		{230, style.ESLAGServerStyle, "ESLAG Server Links"},
 		{260, style.GatewayLinkStyle, "Gateway Links"},
+		{290, style.ExternalLinkStyle, "External Links"}, // Added entry for external connections
 	}
 
 	cells := make([]MxCell, 3+4*len(legendEntries))[:0]

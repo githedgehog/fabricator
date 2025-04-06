@@ -10,6 +10,8 @@ import (
 	"strings"
 )
 
+// extractNodeID extracts the node ID portion from a port identifier string
+// in the format "nodeid/portname"
 func extractNodeID(port string) string {
 	if idx := strings.Index(port, "/"); idx > 0 {
 		return port[:idx]
@@ -18,6 +20,8 @@ func extractNodeID(port string) string {
 	return port
 }
 
+// extractPort extracts the port name portion from a port identifier string
+// in the format "nodeid/portname"
 func extractPort(port string) string {
 	if idx := strings.Index(port, "/"); idx >= 0 && idx < len(port)-1 {
 		return port[idx+1:]
@@ -26,13 +30,18 @@ func extractPort(port string) string {
 	return port
 }
 
+// LayeredNodes organizes nodes into their respective network layers
+// for proper layout in the diagram
 type LayeredNodes struct {
-	Spine   []Node
-	Leaf    []Node
-	Server  []Node
-	Gateway []Node
+	Spine    []Node
+	Leaf     []Node
+	Server   []Node
+	Gateway  []Node
+	External []Node // External nodes connecting to the network
 }
 
+// serverConnection tracks the connectivity patterns for a server
+// including its primary and secondary leaf connections
 type serverConnection struct {
 	primaryLeaf   string
 	secondaryLeaf string
@@ -41,6 +50,19 @@ type serverConnection struct {
 	eslagPair     string
 }
 
+// hasConnections checks if a node has any connections in the provided links
+func hasConnections(nodeID string, links []Link) bool {
+	for _, link := range links {
+		if link.Source == nodeID || link.Target == nodeID {
+			return true
+		}
+	}
+
+	return false
+}
+
+// findConnectionTypes analyzes all links to determine server connection patterns
+// and identifies MCLAG and ESLAG server pairs
 func findConnectionTypes(links []Link) map[string]*serverConnection {
 	serverConns := make(map[string]*serverConnection)
 
@@ -125,10 +147,13 @@ func findConnectionTypes(links []Link) map[string]*serverConnection {
 	return serverConns
 }
 
+// sortNodes organizes nodes into their respective layers (spine, leaf, server, gateway, external)
+// and sorts them appropriately within each layer for optimal diagram layout
 func sortNodes(nodes []Node, links []Link) LayeredNodes {
 	var result LayeredNodes
 	leafOrder := make(map[string]int)
 
+	// First pass: categorize nodes by type
 	for _, node := range nodes {
 		switch node.Type {
 		case NodeTypeSwitch:
@@ -141,6 +166,11 @@ func sortNodes(nodes []Node, links []Link) LayeredNodes {
 			result.Server = append(result.Server, node)
 		case NodeTypeGateway:
 			result.Gateway = append(result.Gateway, node)
+		case NodeTypeExternal:
+			// Only include external nodes that have connections
+			if hasConnections(node.ID, links) {
+				result.External = append(result.External, node)
+			}
 		}
 	}
 
@@ -180,8 +210,14 @@ func sortNodes(nodes []Node, links []Link) LayeredNodes {
 		return result.Leaf[i].ID < result.Leaf[j].ID
 	})
 
+	// Sort gateway nodes by ID
 	sort.Slice(result.Gateway, func(i, j int) bool {
 		return result.Gateway[i].ID < result.Gateway[j].ID
+	})
+
+	// Sort external nodes by ID
+	sort.Slice(result.External, func(i, j int) bool {
+		return result.External[i].ID < result.External[j].ID
 	})
 
 	// Create leaf order map
@@ -343,6 +379,8 @@ func sortNodes(nodes []Node, links []Link) LayeredNodes {
 	return result
 }
 
+// ConvertJSONToTopology converts the JSON representation of the network
+// into a Topology structure with nodes and links for visualization
 func ConvertJSONToTopology(jsonData []byte) (Topology, error) {
 	var raw []struct {
 		Kind       string                 `json:"kind"`
@@ -357,7 +395,10 @@ func ConvertJSONToTopology(jsonData []byte) (Topology, error) {
 
 	var topo Topology
 	nodeSet := make(map[string]bool)
+	externalConnections := make(map[string]string) // Maps connection names to switch ports
+	externalNodeMap := make(map[string]string)     // Maps connection names to external node IDs
 
+	// First pass: Create all nodes and gather external connection information
 	for _, obj := range raw {
 		switch obj.Kind {
 		case "Switch":
@@ -436,7 +477,63 @@ func ConvertJSONToTopology(jsonData []byte) (Topology, error) {
 				}
 			}
 
+		case "External":
+			// Process External nodes - representing systems outside the primary network
+			name, ok := obj.Metadata["name"].(string)
+			if !ok {
+				continue
+			}
+			if !nodeSet[name] {
+				nodeSet[name] = true
+				node := Node{
+					ID:    name,
+					Type:  NodeTypeExternal,
+					Label: fmt.Sprintf("%s\n%s", name, SwitchRoleExternal),
+				}
+				if node.Properties == nil {
+					node.Properties = make(map[string]string)
+				}
+				node.Properties["role"] = SwitchRoleExternal
+				topo.Nodes = append(topo.Nodes, node)
+			}
+
 		case "Connection":
+			name, ok := obj.Metadata["name"].(string)
+			if !ok {
+				continue
+			}
+
+			// Store information about external connections for later processing
+			if strings.Contains(name, "--external--") {
+				if externalSpec, ok := obj.Spec["external"].(map[string]interface{}); ok {
+					if linkInfo, ok := externalSpec["link"].(map[string]interface{}); ok {
+						if switchInfo, ok := linkInfo["switch"].(map[string]interface{}); ok {
+							if port, ok := switchInfo["port"].(string); ok {
+								externalConnections[name] = port
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Second pass: Map external attachments to their connection names
+	for _, obj := range raw {
+		if obj.Kind == "ExternalAttachment" {
+			if attachment, ok := obj.Spec["external"].(string); ok {
+				if _, ok := obj.Metadata["name"].(string); ok {
+					if conn, ok := obj.Spec["connection"].(string); ok {
+						externalNodeMap[conn] = attachment
+					}
+				}
+			}
+		}
+	}
+
+	// Third pass: Process all connections and create links
+	for _, obj := range raw {
+		if obj.Kind == "Connection" {
 			for key, val := range obj.Spec {
 				switch key {
 				case "fabric", "mclag", "bundled", "eslag", "vpcLoopback":
@@ -607,6 +704,43 @@ func ConvertJSONToTopology(jsonData []byte) (Topology, error) {
 							}
 						}
 					}
+				}
+			}
+
+			// Process external connections to create links between External nodes and switches
+			name, ok := obj.Metadata["name"].(string)
+			if !ok {
+				continue
+			}
+
+			if port, exists := externalConnections[name]; exists {
+				var externalName string
+				// Determine which external node to use for this connection
+				if extName, exists := externalNodeMap[name]; exists {
+					externalName = extName
+				} else {
+					// If no explicit mapping, use the first available external node
+					for _, n := range topo.Nodes {
+						if n.Type == NodeTypeExternal {
+							externalName = n.ID
+
+							break
+						}
+					}
+				}
+
+				if externalName != "" {
+					switchID := extractNodeID(port)
+					props := make(map[string]string)
+					props["targetPort"] = port
+					props["connectionName"] = name
+
+					topo.Links = append(topo.Links, Link{
+						Source:     externalName,
+						Target:     switchID,
+						Type:       EdgeTypeExternal,
+						Properties: props,
+					})
 				}
 			}
 		}

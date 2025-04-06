@@ -27,6 +27,7 @@ type Style struct {
 	LeafNodeStyle      string
 	ServerNodeStyle    string
 	GatewayNodeStyle   string
+	ExternalNodeStyle  string
 	FabricLinkStyle    string
 	MCLAGPeerStyle     string
 	MCLAGSessionStyle  string
@@ -35,6 +36,7 @@ type Style struct {
 	UnbundledStyle     string
 	ESLAGServerStyle   string
 	GatewayLinkStyle   string
+	ExternalLinkStyle  string
 	BackgroundColor    string
 }
 
@@ -52,11 +54,13 @@ func GetStyle(styleType StyleType) Style {
 }
 
 func getDefaultStyle() Style {
+	// Changed external node color to orange (#ffb366 fill, #d79b00 stroke)
 	return Style{
 		SpineNodeStyle:     "shape=rectangle;rounded=1;whiteSpace=wrap;html=1;fontSize=11;fillColor=#f8cecc;strokeColor=#b85450;",
 		LeafNodeStyle:      "shape=rectangle;rounded=1;whiteSpace=wrap;html=1;fontSize=11;fillColor=#dae8fc;strokeColor=#6c8ebf;",
 		ServerNodeStyle:    "shape=rectangle;rounded=0;whiteSpace=wrap;html=1;fontSize=11;fillColor=#d5e8d4;strokeColor=#82b366;",
 		GatewayNodeStyle:   "shape=rectangle;rounded=1;whiteSpace=wrap;html=1;fontSize=11;fillColor=#fff2cc;strokeColor=#d6b656;",
+		ExternalNodeStyle:  "shape=rectangle;rounded=1;whiteSpace=wrap;html=1;fontSize=11;fillColor=#ffcc99;strokeColor=#d79b00;",
 		FabricLinkStyle:    "endArrow=none;html=1;strokeWidth=3;strokeColor=#b85450;",
 		MCLAGPeerStyle:     "endArrow=none;html=1;strokeWidth=2;strokeColor=#2f5597;dashed=1;",
 		MCLAGSessionStyle:  "endArrow=none;html=1;strokeWidth=2;strokeColor=#4472c4;dashed=1;",
@@ -65,6 +69,7 @@ func getDefaultStyle() Style {
 		UnbundledStyle:     "endArrow=none;html=1;strokeWidth=2;strokeColor=#666666;",
 		ESLAGServerStyle:   "endArrow=none;html=1;strokeWidth=2;strokeColor=#d79b00;dashed=1;",
 		GatewayLinkStyle:   "endArrow=none;html=1;strokeWidth=2;strokeColor=#d6b656;",
+		ExternalLinkStyle:  "endArrow=none;html=1;strokeWidth=2;strokeColor=#d79b00;dashPattern=1 4;", // Changed to match orange
 		BackgroundColor:    "",
 	}
 }
@@ -88,6 +93,11 @@ func getCiscoStyle() Style {
 			"fontColor=#000000;fontSize=11;" +
 			"align=center;verticalLabelPosition=middle;verticalAlign=middle;" +
 			"perimeter=hexagonPerimeter;",
+		ExternalNodeStyle: "shape=mxgraph.cisco19.rect;prIcon=router;html=1;" +
+			"fillColor=#ffffff;strokeColor=#999999;strokeWidth=2;" +
+			"fontColor=#000000;fontSize=11;" +
+			"align=center;verticalLabelPosition=middle;verticalAlign=middle;" +
+			"perimeter=ellipsePerimeter;",
 		FabricLinkStyle:    "endArrow=none;html=1;strokeWidth=3;strokeColor=#00589C;",
 		MCLAGPeerStyle:     "endArrow=none;html=1;strokeWidth=2;strokeColor=#2f5597;dashed=1;",
 		MCLAGSessionStyle:  "endArrow=none;html=1;strokeWidth=2;strokeColor=#4472c4;dashed=1;",
@@ -96,6 +106,7 @@ func getCiscoStyle() Style {
 		UnbundledStyle:     "endArrow=none;html=1;strokeWidth=2;strokeColor=#666666;",
 		ESLAGServerStyle:   "endArrow=none;html=1;strokeWidth=2;strokeColor=#d79b00;dashed=1;",
 		GatewayLinkStyle:   "endArrow=none;html=1;strokeWidth=2;strokeColor=#005073;",
+		ExternalLinkStyle:  "endArrow=none;html=1;strokeWidth=2;strokeColor=#999999;dashPattern=1 4;",
 		BackgroundColor:    "#ffffff",
 	}
 }
@@ -103,6 +114,7 @@ func getCiscoStyle() Style {
 func getHedgehogStyle() Style {
 	darkBrown := "#5D4037"
 	sandBrown := "#D7B98E"
+	grayExternal := "#999999"
 
 	return Style{
 		SpineNodeStyle: "shape=mxgraph.cisco19.rect;prIcon=nexus_9300;html=1;" +
@@ -122,6 +134,11 @@ func getHedgehogStyle() Style {
 			"fontColor=#000000;fontSize=11;" +
 			"align=center;verticalLabelPosition=middle;verticalAlign=middle;" +
 			"perimeter=hexagonPerimeter;",
+		ExternalNodeStyle: "shape=mxgraph.cisco19.rect;prIcon=router;html=1;" +
+			"fillColor=#FAFAFA;strokeColor=" + grayExternal + ";" +
+			"fontColor=#000000;fontSize=11;" +
+			"align=center;verticalLabelPosition=middle;verticalAlign=middle;" +
+			"perimeter=ellipsePerimeter;",
 		FabricLinkStyle:    "endArrow=none;html=1;strokeWidth=3;strokeColor=" + darkBrown + ";",
 		MCLAGPeerStyle:     "endArrow=none;html=1;strokeWidth=2;strokeColor=#8D6E63;dashed=1;",
 		MCLAGSessionStyle:  "endArrow=none;html=1;strokeWidth=2;strokeColor=#A1887F;dashed=1;",
@@ -130,6 +147,7 @@ func getHedgehogStyle() Style {
 		UnbundledStyle:     "endArrow=none;html=1;strokeWidth=2;strokeColor=#666666;",
 		ESLAGServerStyle:   "endArrow=none;html=1;strokeWidth=2;strokeColor=#d79b00;dashed=1;",
 		GatewayLinkStyle:   "endArrow=none;html=1;strokeWidth=2;strokeColor=" + darkBrown + ";dashed=1;",
+		ExternalLinkStyle:  "endArrow=none;html=1;strokeWidth=2;strokeColor=" + grayExternal + ";dashPattern=1 4;",
 		BackgroundColor:    "#FFFFFF",
 	}
 }
@@ -154,6 +172,8 @@ func GetNodeStyleFromTheme(node Node, style Style) string {
 		return style.ServerNodeStyle
 	case NodeTypeGateway:
 		return style.GatewayNodeStyle
+	case NodeTypeExternal:
+		return style.ExternalNodeStyle
 	default:
 		return style.LeafNodeStyle
 	}
@@ -185,6 +205,8 @@ func GetLinkStyleFromTheme(link Link, style Style) string {
 		return ExtractStyleParameters(style.ESLAGServerStyle)
 	case EdgeTypeGateway:
 		return ExtractStyleParameters(style.GatewayLinkStyle)
+	case EdgeTypeExternal:
+		return ExtractStyleParameters(style.ExternalLinkStyle)
 	default:
 		return baseStyle + "strokeColor=#000000;strokeWidth=2;"
 	}
@@ -198,13 +220,15 @@ func GetNodeDimensions(node Node) (int, int) {
 		return 100, 60
 	case NodeTypeGateway:
 		return 100, 90
+	case NodeTypeExternal:
+		return 100, 90
 	default:
 		return 100, 100
 	}
 }
 
 func FormatNodeValue(node Node, style Style) string {
-	if strings.Contains(style.SpineNodeStyle, "mxgraph.cisco19") && node.Type == NodeTypeSwitch {
+	if strings.Contains(style.SpineNodeStyle, "mxgraph.cisco19") && (node.Type == NodeTypeSwitch || node.Type == NodeTypeExternal) {
 		if strings.Contains(node.Label, "\n") {
 			parts := strings.SplitN(node.Label, "\n", 2)
 			nodeName := parts[0]
@@ -242,5 +266,9 @@ func IsIconBasedStyle(style Style) bool {
 }
 
 func GetGatewayLabelStyle() string {
+	return "rounded=0;whiteSpace=wrap;html=1;strokeColor=none;fontSize=9;"
+}
+
+func GetExternalLabelStyle() string {
 	return "rounded=0;whiteSpace=wrap;html=1;strokeColor=none;fontSize=9;"
 }

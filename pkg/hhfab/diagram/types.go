@@ -32,18 +32,21 @@ type Topology struct {
 }
 
 const (
-	EdgeTypeFabric    = "fabric"
-	EdgeTypeMCLAG     = "mclag"
-	EdgeTypeSpine     = "spine"
-	EdgeTypeBundled   = "bundled"
-	EdgeTypeUnbundled = "unbundled"
-	EdgeTypeESLAG     = "eslag"
-	EdgeTypeGateway   = "gateway"
-	NodeTypeSwitch    = "switch"
-	NodeTypeServer    = "server"
-	NodeTypeGateway   = "gateway"
-	SwitchRoleSpine   = "spine"
-	SwitchRoleLeaf    = "leaf"
+	EdgeTypeFabric     = "fabric"
+	EdgeTypeMCLAG      = "mclag"
+	EdgeTypeSpine      = "spine"
+	EdgeTypeBundled    = "bundled"
+	EdgeTypeUnbundled  = "unbundled"
+	EdgeTypeESLAG      = "eslag"
+	EdgeTypeGateway    = "gateway"
+	EdgeTypeExternal   = "external"
+	NodeTypeSwitch     = "switch"
+	NodeTypeServer     = "server"
+	NodeTypeGateway    = "gateway"
+	NodeTypeExternal   = "external"
+	SwitchRoleSpine    = "spine"
+	SwitchRoleLeaf     = "leaf"
+	SwitchRoleExternal = "external"
 )
 
 const (
@@ -52,14 +55,12 @@ const (
 	MermaidFilename = "diagram.mmd"
 )
 
-// Layer IDs for Draw.io diagrams
 const (
 	BaseLayerID        = "base_layer"
 	ConnectionsLayerID = "connections_layer"
 )
 
-// Layer names for Draw.io diagrams
 const (
 	BaseLayerName        = "Base (Nodes & Switches)"
-	ConnectionsLayerName = "Physical Connections & Legend"
+	ConnectionsLayerName = "Fabric Connections"
 )
