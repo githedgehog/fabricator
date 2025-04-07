@@ -662,17 +662,26 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 				}
 			}
 		} else if conn.Spec.External != nil {
+			// in hybrid environments we can have physical switches connected to
+			// both virtual and hardware externals. Since a connection is not associated
+			// with a specific external, we need to annotate the connection itself
+			if isHardware(&conn) {
+				slog.Debug("Skipping hardware external connection", "connection", conn.Name)
+
+				continue
+			}
 			if externalID > MaxExternalConns {
 				return nil, fmt.Errorf("too many external connections") //nolint:goerr113
 			}
 
 			switchName := conn.Spec.External.Link.Switch.DeviceName()
-			// add the link representing the external connection
+			// add the link representing the virtual external connection
+			// note that if the switch is hardware, we will require passthrough annotations
 			nicName := fmt.Sprintf("enp2s%d", externalID)
 			externalID++
 			toStr := fmt.Sprintf("%s/%s", ExternalVMName, nicName)
 			if err := addLink(conn.Spec.External.Link.Switch.Port, toStr); err != nil {
-				return nil, fmt.Errorf("failed to add link for external connection %q: %w", conn.Name, err)
+				return nil, fmt.Errorf("failed to add link for virtual external connection %q: %w", conn.Name, err)
 			}
 			extNicCfg := ExternalNICCfg{
 				Attachments: make([]ExternalAttachCfg, 0),
