@@ -395,10 +395,50 @@ func ConvertJSONToTopology(jsonData []byte) (Topology, error) {
 
 	var topo Topology
 	nodeSet := make(map[string]bool)
-	externalConnections := make(map[string]string) // Maps connection names to switch ports
-	externalNodeMap := make(map[string]string)     // Maps connection names to external node IDs
+	externalResourceMap := make(map[string]bool)       // Map to track external resources
+	externalConnections := make(map[string]string)     // Maps connection names to switch ports
+	connectionToExternals := make(map[string][]string) // Maps connection names to external resources
 
-	// First pass: Create all nodes and gather external connection information
+	// First pass: Collect all External resources and create nodes for them
+	for _, obj := range raw {
+		if obj.Kind == "External" {
+			name, ok := obj.Metadata["name"].(string)
+			if !ok {
+				continue
+			}
+
+			// Track external resource names
+			externalResourceMap[name] = true
+
+			// Create an external node for this resource
+			if !nodeSet[name] {
+				nodeSet[name] = true
+				node := Node{
+					ID:    name,
+					Type:  NodeTypeExternal,
+					Label: fmt.Sprintf("%s\n%s", name, SwitchRoleExternal),
+				}
+				if node.Properties == nil {
+					node.Properties = make(map[string]string)
+				}
+				node.Properties["role"] = SwitchRoleExternal
+				topo.Nodes = append(topo.Nodes, node)
+			}
+		}
+	}
+
+	// Second pass: Map external attachments to connection names
+	for _, obj := range raw {
+		if obj.Kind == "ExternalAttachment" {
+			if conn, ok := obj.Spec["connection"].(string); ok {
+				if ext, ok := obj.Spec["external"].(string); ok {
+					connectionToExternals[conn] = append(connectionToExternals[conn], ext)
+				}
+			}
+		}
+	}
+
+	// Third pass: Create all other nodes and gather external connection information
 	for _, obj := range raw {
 		switch obj.Kind {
 		case "Switch":
@@ -477,40 +517,18 @@ func ConvertJSONToTopology(jsonData []byte) (Topology, error) {
 				}
 			}
 
-		case "External":
-			// Process External nodes - representing systems outside the primary network
-			name, ok := obj.Metadata["name"].(string)
-			if !ok {
-				continue
-			}
-			if !nodeSet[name] {
-				nodeSet[name] = true
-				node := Node{
-					ID:    name,
-					Type:  NodeTypeExternal,
-					Label: fmt.Sprintf("%s\n%s", name, SwitchRoleExternal),
-				}
-				if node.Properties == nil {
-					node.Properties = make(map[string]string)
-				}
-				node.Properties["role"] = SwitchRoleExternal
-				topo.Nodes = append(topo.Nodes, node)
-			}
-
 		case "Connection":
 			name, ok := obj.Metadata["name"].(string)
 			if !ok {
 				continue
 			}
 
-			// Store information about external connections for later processing
-			if strings.Contains(name, "--external--") {
-				if externalSpec, ok := obj.Spec["external"].(map[string]interface{}); ok {
-					if linkInfo, ok := externalSpec["link"].(map[string]interface{}); ok {
-						if switchInfo, ok := linkInfo["switch"].(map[string]interface{}); ok {
-							if port, ok := switchInfo["port"].(string); ok {
-								externalConnections[name] = port
-							}
+			// Check if this is an external connection by looking for the 'external' field in spec
+			if externalSpec, ok := obj.Spec["external"].(map[string]interface{}); ok {
+				if linkInfo, ok := externalSpec["link"].(map[string]interface{}); ok {
+					if switchInfo, ok := linkInfo["switch"].(map[string]interface{}); ok {
+						if port, ok := switchInfo["port"].(string); ok {
+							externalConnections[name] = port
 						}
 					}
 				}
@@ -518,20 +536,7 @@ func ConvertJSONToTopology(jsonData []byte) (Topology, error) {
 		}
 	}
 
-	// Second pass: Map external attachments to their connection names
-	for _, obj := range raw {
-		if obj.Kind == "ExternalAttachment" {
-			if attachment, ok := obj.Spec["external"].(string); ok {
-				if _, ok := obj.Metadata["name"].(string); ok {
-					if conn, ok := obj.Spec["connection"].(string); ok {
-						externalNodeMap[conn] = attachment
-					}
-				}
-			}
-		}
-	}
-
-	// Third pass: Process all connections and create links
+	// Fourth pass: Process all connections and create links
 	for _, obj := range raw {
 		if obj.Kind == "Connection" {
 			for key, val := range obj.Spec {
@@ -713,27 +718,34 @@ func ConvertJSONToTopology(jsonData []byte) (Topology, error) {
 				continue
 			}
 
+			// Check if this is a connection with an external link
 			if port, exists := externalConnections[name]; exists {
-				var externalName string
-				// Determine which external node to use for this connection
-				if extName, exists := externalNodeMap[name]; exists {
-					externalName = extName
-				} else {
-					// If no explicit mapping, use the first available external node
-					for _, n := range topo.Nodes {
-						if n.Type == NodeTypeExternal {
-							externalName = n.ID
+				switchID := extractNodeID(port)
 
-							break
-						}
+				// Get the externals associated with this connection from ExternalAttachments
+				externalNames := connectionToExternals[name]
+
+				// If there are no explicit mappings, we still want to show the physical connection
+				// So pick just one external to represent it
+				if len(externalNames) == 0 {
+					// Find one external to represent the connection
+					for extName := range externalResourceMap {
+						externalNames = []string{extName}
+
+						break
 					}
+				} else {
+					// If there are multiple externals for this connection, just use the first one
+					// to represent the physical connection
+					externalNames = externalNames[:1]
 				}
 
-				if externalName != "" {
-					switchID := extractNodeID(port)
+				// Create one link to represent the physical connection
+				for _, externalName := range externalNames {
 					props := make(map[string]string)
 					props["targetPort"] = port
 					props["connectionName"] = name
+					props["externalName"] = externalName
 
 					topo.Links = append(topo.Links, Link{
 						Source:     externalName,
@@ -741,10 +753,105 @@ func ConvertJSONToTopology(jsonData []byte) (Topology, error) {
 						Type:       EdgeTypeExternal,
 						Properties: props,
 					})
+
+					// Only create one physical connection per port
+					break
 				}
 			}
 		}
 	}
 
+	// Ensure unique links by filtering duplicates
+	var uniqueLinks []Link
+	seen := make(map[string]bool)
+
+	for _, link := range topo.Links {
+		// Create a key for this link to detect duplicates
+		key := fmt.Sprintf("%s-%s-%s-%s", link.Source, link.Target, link.Type, link.Properties["targetPort"])
+		if !seen[key] {
+			seen[key] = true
+			uniqueLinks = append(uniqueLinks, link)
+		}
+	}
+
+	topo.Links = uniqueLinks
+
 	return topo, nil
+}
+
+// DetermineExternalSidePlacement decides whether an external node should be placed
+// on the left or right side of the diagram, based on its connectivity
+func DetermineExternalSidePlacement(nodeID string, links []Link, leaves []Node) string {
+	leafIndexMap := make(map[string]int)
+	for i, leaf := range leaves {
+		leafIndexMap[leaf.ID] = i
+	}
+
+	leftConnections := 0
+	rightConnections := 0
+	leftWeight := 0  // Weighted connections for left side (emphasizing far left)
+	rightWeight := 0 // Weighted connections for right side (emphasizing far right)
+	midpoint := len(leaves) / 2
+
+	// Count connections to leaves on left vs right side
+	for _, link := range links {
+		var leafID string
+
+		switch {
+		case link.Source == nodeID:
+			leafID = link.Target
+		case link.Target == nodeID:
+			leafID = link.Source
+		default:
+			continue
+		}
+
+		// Check if this is a leaf connection
+		idx, exists := leafIndexMap[leafID]
+		if !exists {
+			continue
+		}
+
+		// Calculate position weight based on distance from center
+		positionWeight := (midpoint - idx)
+		if positionWeight < 0 {
+			positionWeight = -positionWeight
+		}
+		positionWeight++ // Ensure at least weight 1
+
+		// Count as left or right based on leaf position
+		if idx < midpoint {
+			leftConnections++
+			leftWeight += positionWeight
+		} else {
+			rightConnections++
+			rightWeight += positionWeight
+		}
+	}
+
+	// Position based on weighted connections
+	if leftWeight > rightWeight {
+		return NodeSideLeft
+	} else if rightWeight > leftWeight {
+		return NodeSideRight
+	}
+
+	// If weights are equal, use connection count
+	if leftConnections > rightConnections {
+		return NodeSideLeft
+	} else if rightConnections > leftConnections {
+		return NodeSideRight
+	}
+
+	// If still equal, use node ID to ensure deterministic placement
+	// This helps balance when multiple externals have identical connection patterns
+	nodeIDSum := 0
+	for _, c := range nodeID {
+		nodeIDSum += int(c)
+	}
+	if nodeIDSum%2 == 0 {
+		return NodeSideLeft
+	}
+
+	return NodeSideRight
 }

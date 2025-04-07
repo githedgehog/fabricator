@@ -64,3 +64,8 @@ const (
 	BaseLayerName        = "Base (Nodes & Switches)"
 	ConnectionsLayerName = "Fabric Connections"
 )
+
+const (
+	NodeSideLeft  = "left"
+	NodeSideRight = "right"
+)

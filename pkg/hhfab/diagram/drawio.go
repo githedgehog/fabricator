@@ -272,8 +272,8 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 	// Add external nodes (position based on connections)
 	if len(layers.External) > 0 {
 		externalY := (spineY+leafY)/2 - 70       // Between spine and leaf
-		leftEdgeX := float64(-200)               // Left side position - CHANGED FROM -100
-		rightEdgeX := float64(canvasWidth) + 100 // Right side position - CHANGED FROM +100
+		leftEdgeX := float64(-200)               // Left side position
+		rightEdgeX := float64(canvasWidth) + 100 // Right side position
 
 		// Group externals by side (left/right)
 		leftExternals := []Node{}
@@ -281,7 +281,7 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 
 		// Determine side placement for each external node
 		for _, node := range layers.External {
-			side := determineExternalSidePlacement(node.ID, topo.Links, layers.Leaf)
+			side := DetermineExternalSidePlacement(node.ID, topo.Links, layers.Leaf)
 			if side == "left" {
 				leftExternals = append(leftExternals, node)
 			} else {
@@ -289,11 +289,36 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 			}
 		}
 
-		// Place left side externals
+		// Sort each side for consistent placement
+		sort.Slice(leftExternals, func(i, j int) bool {
+			return leftExternals[i].ID < leftExternals[j].ID
+		})
+
+		sort.Slice(rightExternals, func(i, j int) bool {
+			return rightExternals[i].ID < rightExternals[j].ID
+		})
+
+		// Calculate appropriate spacing based on number of nodes
+		leftSpacing := float64(180)
+		if len(leftExternals) > 1 {
+			leftSpacing = math.Min(200, math.Max(150, float64(400)/float64(len(leftExternals))))
+		}
+
+		rightSpacing := float64(180)
+		if len(rightExternals) > 1 {
+			rightSpacing = math.Min(200, math.Max(150, float64(400)/float64(len(rightExternals))))
+		}
+
+		// Place left side externals with more refined positioning
 		for i, node := range leftExternals {
 			width, height := GetNodeDimensions(node)
-			x := leftEdgeX - float64(i*150) // CHANGED FROM i*120
+			x := leftEdgeX - float64(i)*leftSpacing
 			y := float64(externalY)
+
+			// Small vertical offset for better visualization when multiple externals
+			if i > 0 {
+				y -= float64(i * 10)
+			}
 
 			usingIconStyle := IsIconBasedStyle(style)
 
@@ -349,11 +374,16 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 			}
 		}
 
-		// Place right side externals
+		// Place right side externals with more refined positioning
 		for i, node := range rightExternals {
 			width, height := GetNodeDimensions(node)
-			x := rightEdgeX + float64(i*150) // CHANGED FROM i*120
+			x := rightEdgeX + float64(i)*rightSpacing
 			y := float64(externalY)
+
+			// Small vertical offset for better visualization when multiple externals
+			if i > 0 {
+				y -= float64(i * 10)
+			}
 
 			usingIconStyle := IsIconBasedStyle(style)
 
@@ -469,49 +499,6 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 	}
 
 	return model
-}
-
-func determineExternalSidePlacement(nodeID string, links []Link, leaves []Node) string {
-	leafIndexMap := make(map[string]int)
-	for i, leaf := range leaves {
-		leafIndexMap[leaf.ID] = i
-	}
-
-	leftConnections := 0
-	rightConnections := 0
-	midpoint := len(leaves) / 2
-
-	// Count connections to leaves on left vs right side
-	for _, link := range links {
-		var leafID string
-		if link.Source == nodeID { //nolint:gocritic
-			leafID = link.Target
-		} else if link.Target == nodeID {
-			leafID = link.Source
-		} else {
-			continue
-		}
-
-		// Check if this is a leaf connection
-		idx, exists := leafIndexMap[leafID]
-		if !exists {
-			continue
-		}
-
-		// Count as left or right based on leaf position
-		if idx < midpoint {
-			leftConnections++
-		} else {
-			rightConnections++
-		}
-	}
-
-	// Position based on which side has more connections
-	if leftConnections > rightConnections {
-		return "left"
-	}
-
-	return "right"
 }
 
 func createHedgehogLogo(parentLayer string) []MxCell {
