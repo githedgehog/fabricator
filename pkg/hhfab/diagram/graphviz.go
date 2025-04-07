@@ -19,6 +19,7 @@ const (
 	ColorBundled   = "green"
 	ColorUnbundled = "gray"
 	ColorESLAG     = "orange"
+	ColorExternal  = "#d79b00" // Added external color to match Draw.io
 	ColorDefault   = "black"
 )
 
@@ -92,11 +93,39 @@ func generateDOT(topo Topology) string {
 	b.WriteString("\t\t\t<TD ALIGN=\"LEFT\" VALIGN=\"MIDDLE\"><FONT COLOR=\"purple\">- - - -</FONT></TD>\n")
 	b.WriteString("\t\t\t<TD ALIGN=\"LEFT\">Gateway Links</TD>\n")
 	b.WriteString("\t\t\t</TR>\n")
+	b.WriteString("\t\t\t<TR>\n")
+	b.WriteString("\t\t\t<TD ALIGN=\"LEFT\" VALIGN=\"MIDDLE\"><FONT COLOR=\"#d79b00\">- - - -</FONT></TD>\n")
+	b.WriteString("\t\t\t<TD ALIGN=\"LEFT\">External Links</TD>\n")
+	b.WriteString("\t\t\t</TR>\n")
 	b.WriteString("\t\t\t</TABLE>\n")
 	b.WriteString("\t\t>];\n")
 	b.WriteString("\t}\n")
 	b.WriteString("\t// Connect legend to anchor to position it at the top-left\n")
 	b.WriteString("\tlegend_anchor -> legend [style=invis];\n\n")
+
+	// External nodes handling - added similar to drawio.go
+	if len(layers.External) > 0 {
+		// Split external nodes into left and right side
+		leftExternals, rightExternals := splitExternalNodes(layers.External, topo.Links, layers.Leaf)
+
+		// Create a rank for left externals
+		if len(leftExternals) > 0 {
+			b.WriteString("\t{rank=same; ")
+			for _, node := range leftExternals {
+				b.WriteString(fmt.Sprintf("\"%s\"; ", node.ID))
+			}
+			b.WriteString("}\n")
+		}
+
+		// Create a rank for right externals
+		if len(rightExternals) > 0 {
+			b.WriteString("\t{rank=same; ")
+			for _, node := range rightExternals {
+				b.WriteString(fmt.Sprintf("\"%s\"; ", node.ID))
+			}
+			b.WriteString("}\n")
+		}
+	}
 
 	b.WriteString("\t{rank=same; ")
 	for _, node := range layers.Spine {
@@ -124,6 +153,7 @@ func generateDOT(topo Topology) string {
 	}
 	b.WriteString("}\n\n")
 
+	// Define node styles with node-specific formatting
 	for _, node := range layers.Gateway {
 		b.WriteString(fmt.Sprintf("\t\"%s\" [label=\"%s\", fillcolor=\"#fff2cc\", style=\"rounded,filled\", color=\"#d6b656\"];\n",
 			node.ID, node.Label))
@@ -138,6 +168,16 @@ func generateDOT(topo Topology) string {
 	}
 	for _, node := range layers.Server {
 		b.WriteString(fmt.Sprintf("\t\"%s\" [label=\"%s\", fillcolor=\"#d5e8d4\", style=\"filled\", color=\"#82b366\"];\n",
+			node.ID, node.Label))
+	}
+	// Add specific styling for external nodes
+	leftExternals, rightExternals := splitExternalNodes(layers.External, topo.Links, layers.Leaf)
+	for _, node := range leftExternals {
+		b.WriteString(fmt.Sprintf("\t\"%s\" [label=\"%s\", fillcolor=\"#ffcc99\", style=\"rounded,filled\", color=\"#d79b00\", pos=\"-4,2!\"];\n",
+			node.ID, node.Label))
+	}
+	for _, node := range rightExternals {
+		b.WriteString(fmt.Sprintf("\t\"%s\" [label=\"%s\", fillcolor=\"#ffcc99\", style=\"rounded,filled\", color=\"#d79b00\", pos=\"8,2!\"];\n",
 			node.ID, node.Label))
 	}
 	b.WriteString("\n")
@@ -172,6 +212,9 @@ func generateDOT(topo Topology) string {
 		case EdgeTypeGateway:
 			color = "#d6b656"
 			style = StyleDashed
+		case EdgeTypeExternal:
+			color = ColorExternal
+			style = StyleDashed
 		default:
 			color = ColorDefault
 			style = StyleSolid
@@ -185,6 +228,60 @@ func generateDOT(topo Topology) string {
 	b.WriteString("}\n")
 
 	return b.String()
+}
+
+// splitExternalNodes splits external nodes into left and right sides based on their connections
+// similar to determineExternalSidePlacement in drawio.go
+func splitExternalNodes(externals []Node, links []Link, leaves []Node) ([]Node, []Node) {
+	leftExternals := []Node{}
+	rightExternals := []Node{}
+
+	leafIndexMap := make(map[string]int)
+	for i, leaf := range leaves {
+		leafIndexMap[leaf.ID] = i
+	}
+
+	midpoint := len(leaves) / 2
+
+	for _, node := range externals {
+		leftConnections := 0
+		rightConnections := 0
+
+		// Count connections to leaves on left vs right side
+		for _, link := range links {
+			var leafID string
+			switch {
+			case link.Source == node.ID:
+				leafID = link.Target
+			case link.Target == node.ID:
+				leafID = link.Source
+			default:
+				continue
+			}
+
+			// Check if this is a leaf connection
+			idx, exists := leafIndexMap[leafID]
+			if !exists {
+				continue
+			}
+
+			// Count as left or right based on leaf position
+			if idx < midpoint {
+				leftConnections++
+			} else {
+				rightConnections++
+			}
+		}
+
+		// Position based on which side has more connections
+		if leftConnections > rightConnections {
+			leftExternals = append(leftExternals, node)
+		} else {
+			rightExternals = append(rightExternals, node)
+		}
+	}
+
+	return leftExternals, rightExternals
 }
 
 func writeChain(b *strings.Builder, nodes []Node) {
