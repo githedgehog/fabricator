@@ -20,14 +20,14 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
+	"time"
 
-	"github.com/dustin/go-humanize"
 	"github.com/pkg/errors"
 	agentapi "go.githedgehog.com/fabric/api/agent/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	kapierrors "k8s.io/apimachinery/pkg/api/errors"
+	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 type FabricIn struct {
@@ -49,7 +49,7 @@ type FabricOutSwitch struct {
 	Groups             []string    `json:"groups,omitempty"`
 }
 
-func (out *FabricOut) MarshalText() (string, error) {
+func (out *FabricOut) MarshalText(now time.Time) (string, error) {
 	str := &strings.Builder{}
 
 	str.WriteString("Switches:\n")
@@ -58,12 +58,12 @@ func (out *FabricOut) MarshalText() (string, error) {
 	for _, sw := range out.Switches {
 		applied := ""
 		if !sw.State.LastAppliedTime.IsZero() {
-			applied = humanize.Time(sw.State.LastAppliedTime.Time)
+			applied = HumanizeTime(now, sw.State.LastAppliedTime.Time)
 		}
 
 		heartbeat := ""
 		if !sw.State.LastHeartbeat.IsZero() {
-			heartbeat = humanize.Time(sw.State.LastHeartbeat.Time)
+			heartbeat = HumanizeTime(now, sw.State.LastHeartbeat.Time)
 		}
 
 		swData = append(swData, []string{
@@ -88,7 +88,7 @@ func (out *FabricOut) MarshalText() (string, error) {
 
 var _ Func[FabricIn, *FabricOut] = Fabric
 
-func Fabric(ctx context.Context, kube client.Reader, _ FabricIn) (*FabricOut, error) {
+func Fabric(ctx context.Context, kube kclient.Reader, _ FabricIn) (*FabricOut, error) {
 	out := &FabricOut{}
 
 	totalSwitches := 0
@@ -105,14 +105,14 @@ func Fabric(ctx context.Context, kube client.Reader, _ FabricIn) (*FabricOut, er
 		totalSwitches++
 
 		sp := &wiringapi.SwitchProfile{}
-		if err := kube.Get(ctx, client.ObjectKey{Name: sw.Spec.Profile, Namespace: metav1.NamespaceDefault}, sp); err != nil {
+		if err := kube.Get(ctx, kclient.ObjectKey{Name: sw.Spec.Profile, Namespace: kmetav1.NamespaceDefault}, sp); err != nil {
 			return nil, errors.Wrapf(err, "cannot get switch profile %s", sw.Spec.Profile)
 		}
 
 		skipActual := false
 		agent := &agentapi.Agent{}
-		if err := kube.Get(ctx, client.ObjectKey{Name: swName, Namespace: metav1.NamespaceDefault}, agent); err != nil {
-			if apierrors.IsNotFound(err) {
+		if err := kube.Get(ctx, kclient.ObjectKey{Name: swName, Namespace: kmetav1.NamespaceDefault}, agent); err != nil {
+			if kapierrors.IsNotFound(err) {
 				skipActual = true
 				slog.Warn("Agent object not found", "name", swName)
 			} else {

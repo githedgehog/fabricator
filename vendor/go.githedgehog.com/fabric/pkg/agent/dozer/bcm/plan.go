@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/netip"
 	"slices"
@@ -105,12 +106,6 @@ func (p *BroadcomProcessor) PlanDesiredState(_ context.Context, agent *agentapi.
 		}
 	}
 
-	for name, mode := range agent.Spec.Switch.PortBreakouts {
-		spec.PortBreakouts[name] = &dozer.SpecPortBreakout{
-			Mode: mode,
-		}
-	}
-
 	err := planControlLink(agent, spec)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to plan management interface")
@@ -136,75 +131,72 @@ func (p *BroadcomProcessor) PlanDesiredState(_ context.Context, agent *agentapi.
 		return nil, errors.Wrap(err, "failed to plan NTP")
 	}
 
+	if err := planBreakouts(agent, spec); err != nil {
+		return nil, errors.Wrap(err, "failed to plan breakouts")
+	}
+
 	err = planDefaultVRFWithBGP(agent, spec)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to plan basic BGP")
 	}
 
-	if !agent.Spec.Switch.Role.IsVirtualEdge() {
-		err = planFabricConnections(agent, spec)
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to plan fabric connections")
-		}
+	err = planFabricConnections(agent, spec)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to plan fabric connections")
+	}
 
-		err = planGatewayConnections(agent, spec)
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to plan gateway connections")
-		}
+	err = planGatewayConnections(agent, spec)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to plan gateway connections")
+	}
 
-		err = planVPCLoopbacks(agent, spec)
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to plan VPC loopbacks")
-		}
+	err = planVPCLoopbacks(agent, spec)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to plan VPC loopbacks")
+	}
 
-		err = planExternals(agent, spec)
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to plan external connections")
-		}
+	err = planExternals(agent, spec)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to plan external connections")
+	}
 
-		err = planServerConnections(agent, spec)
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to plan server connections")
-		}
+	err = planServerConnections(agent, spec)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to plan server connections")
+	}
 
-		if agent.Spec.Role.IsLeaf() {
-			err = planVXLAN(agent, spec)
-			if err != nil {
-				return nil, errors.Wrap(err, "failed to plan VXLAN")
-			}
-		}
-
-		if agent.Spec.Switch.Redundancy.Type == meta.RedundancyTypeMCLAG {
-			_ /* first */, err = planMCLAGDomain(agent, spec)
-			if err != nil {
-				return nil, errors.Wrap(err, "failed to plan mclag domain")
-			}
-		} else if agent.Spec.Switch.Redundancy.Type == meta.RedundancyTypeESLAG {
-			err = planESLAG(agent, spec)
-			if err != nil {
-				return nil, errors.Wrap(err, "failed to plan eslag")
-			}
-		}
-
-		err = planVPCs(agent, spec)
+	if agent.Spec.Role.IsLeaf() {
+		err = planVXLAN(agent, spec)
 		if err != nil {
-			return nil, errors.Wrap(err, "failed to plan VPCs")
+			return nil, errors.Wrap(err, "failed to plan VXLAN")
 		}
+	}
 
-		err = planExternalPeerings(agent, spec)
+	if agent.Spec.Switch.Redundancy.Type == meta.RedundancyTypeMCLAG {
+		_ /* first */, err = planMCLAGDomain(agent, spec)
 		if err != nil {
-			return nil, errors.Wrap(err, "failed to plan external peerings")
+			return nil, errors.Wrap(err, "failed to plan mclag domain")
 		}
+	} else if agent.Spec.Switch.Redundancy.Type == meta.RedundancyTypeESLAG {
+		err = planESLAG(agent, spec)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to plan eslag")
+		}
+	}
 
-		err = planStaticExternals(agent, spec)
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to plan static external connections")
-		}
-	} else {
-		err = planVirtualEdge(agent, spec)
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to plan virtual edge")
-		}
+	err = planVPCs(agent, spec)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to plan VPCs")
+	}
+
+	err = planExternalPeerings(agent, spec)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to plan external peerings")
+	}
+
+	err = planStaticExternals(agent, spec)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to plan static external connections")
 	}
 
 	err = planAllPortsUp(agent, spec)
@@ -277,6 +269,27 @@ func planNTP(agent *agentapi.Agent, spec *dozer.Spec) error {
 
 	spec.NTPServers[addr] = &dozer.SpecNTPServer{
 		Prefer: pointer.To(true),
+	}
+
+	return nil
+}
+
+func planBreakouts(agent *agentapi.Agent, spec *dozer.Spec) error {
+	def, err := agent.Spec.SwitchProfile.GetBreakoutDefaults(&agent.Spec.Switch)
+	if err != nil {
+		return errors.Wrap(err, "failed to get breakout defaults")
+	}
+
+	for name, mode := range def {
+		spec.PortBreakouts[name] = &dozer.SpecPortBreakout{
+			Mode: mode,
+		}
+	}
+
+	for name, mode := range agent.Spec.Switch.PortBreakouts {
+		spec.PortBreakouts[name] = &dozer.SpecPortBreakout{
+			Mode: mode,
+		}
 	}
 
 	return nil
@@ -372,7 +385,7 @@ func planFabricConnections(agent *agentapi.Agent, spec *dozer.Spec) error {
 			remote := ""
 			peer := ""
 			peerIP := ""
-			if link.Spine.DeviceName() == agent.Name {
+			if link.Spine.DeviceName() == agent.Name { //nolint:gocritic
 				port = link.Spine.LocalPortName()
 				ipStr = link.Spine.IP
 				remote = link.Leaf.Port
@@ -914,7 +927,7 @@ func planServerConnections(agent *agentapi.Agent, spec *dozer.Spec) error {
 		var links []wiringapi.ServerToSwitchLink
 		fallback := agent.IsFirstInRedundancyGroup()
 
-		if conn.MCLAG != nil {
+		if conn.MCLAG != nil { //nolint:gocritic
 			connType = "MCLAG"
 			if conn.MCLAG.MTU != 0 {
 				mtu = pointer.To(conn.MCLAG.MTU) //nolint:ineffassign,staticcheck
@@ -1367,7 +1380,7 @@ func planVPCs(agent *agentapi.Agent, spec *dozer.Spec) error {
 			if vni == 0 || !ok {
 				return errors.Errorf("VNI for VPC %s subnet %s not found", vpcName, subnetName)
 			}
-			vni = vni % 100
+			vni %= 100
 
 			spec.PrefixLists[vpcSubnetsPrefixListName(vpcName)].Prefixes[vni] = &dozer.SpecPrefixListEntry{
 				Prefix: dozer.SpecPrefixListPrefix{
@@ -1560,7 +1573,7 @@ func planVPCs(agent *agentapi.Agent, spec *dozer.Spec) error {
 		}
 
 		ifaces := []string{}
-		if conn.MCLAG != nil {
+		if conn.MCLAG != nil { //nolint:gocritic
 			for _, link := range conn.MCLAG.Links {
 				if link.Switch.DeviceName() != agent.Name {
 					continue
@@ -1813,6 +1826,15 @@ func planVPCs(agent *agentapi.Agent, spec *dozer.Spec) error {
 				}
 			}
 		} else if slices.Contains(agent.Spec.Switch.Groups, peering.Remote) {
+			if vpc1Attached || vpc2Attached {
+				slog.Warn("Skipping remote VPCPeering because one of the VPCs is locally attached",
+					"vpcPeering", peeringName,
+					"vpc1", vpc1Name, "vpc1Attached", vpc1Attached,
+					"vpc2", vpc2Name, "vpc2Attached", vpc2Attached)
+
+				continue
+			}
+
 			spec.VRFs[vrf1Name].BGP.IPv4Unicast.ImportVRFs[vrf2Name] = &dozer.SpecVRFBGPImportVRF{}
 			spec.VRFs[vrf2Name].BGP.IPv4Unicast.ImportVRFs[vrf1Name] = &dozer.SpecVRFBGPImportVRF{}
 

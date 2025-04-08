@@ -21,11 +21,14 @@ import (
 	slogmulti "github.com/samber/slog-multi"
 	"github.com/urfave/cli/v2"
 	"go.githedgehog.com/fabric/api/meta"
+	"go.githedgehog.com/fabric/pkg/hhfctl/inspect"
 	"go.githedgehog.com/fabricator/pkg/fab"
+	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/fab/recipe"
 	"go.githedgehog.com/fabricator/pkg/hhfab"
 	"go.githedgehog.com/fabricator/pkg/hhfab/diagram"
 	"go.githedgehog.com/fabricator/pkg/hhfab/pdu"
+	"go.githedgehog.com/fabricator/pkg/support"
 	"go.githedgehog.com/fabricator/pkg/version"
 	"golang.org/x/term"
 	"gopkg.in/natefinch/lumberjack.v2"
@@ -397,6 +400,39 @@ func Run(ctx context.Context) error {
 			Destination: &saveJoinToken,
 			EnvVars:     []string{"HHFAB_SAVE_JOIN_TOKEN"},
 		},
+	}
+
+	outputTypes := []string{}
+	for _, t := range inspect.OutputTypes {
+		outputTypes = append(outputTypes, string(t))
+	}
+
+	var output string
+	outputFlag := &cli.StringFlag{
+		Name:        "output",
+		Aliases:     []string{"o"},
+		Usage:       "output format, one of " + strings.Join(outputTypes, ", "),
+		Value:       "text",
+		Destination: &output,
+	}
+
+	var useNow bool
+	useNowFlag := &cli.BoolFlag{
+		Name:        "use-now",
+		Aliases:     []string{"now"},
+		Usage:       "use current time instead of the time from the dump",
+		Destination: &useNow,
+		Category:    "Support dump:",
+	}
+
+	dumpName := ""
+	dumpNameFlag := &cli.StringFlag{
+		Name:        "dump-file",
+		Aliases:     []string{"dump"},
+		Usage:       "name of the dump file to use, if not specified, the latest one (by name) will be used",
+		Destination: &dumpName,
+		EnvVars:     []string{"HHFAB_DUMP_FILE"},
+		Category:    "Support dump:",
 	}
 
 	cli.VersionFlag.(*cli.BoolFlag).Aliases = []string{"V"}
@@ -1325,6 +1361,482 @@ func Run(ctx context.Context) error {
 							}
 
 							return nil
+						},
+					},
+				},
+			},
+			{
+				Name:    "support",
+				Aliases: []string{"s"},
+				Usage:   "[PREVIEW] support dump commands",
+				Hidden:  !preview,
+				Subcommands: []*cli.Command{
+					{
+						Name:   "info",
+						Usage:  "get support dump info",
+						Flags:  flatten(defaultFlags, []cli.Flag{dumpNameFlag}),
+						Before: before(false),
+						Action: func(c *cli.Context) error {
+							h, err := support.LoadSupportDump(workDir, dumpName)
+							if err != nil {
+								return fmt.Errorf("loading support dump: %w", err)
+							}
+
+							return h.Info(ctx)
+						},
+					},
+					{
+						Name:   "config",
+						Usage:  "get Fabricator config from the support dump",
+						Flags:  flatten(defaultFlags, []cli.Flag{dumpNameFlag}),
+						Before: before(false),
+						Action: func(c *cli.Context) error {
+							h, err := support.LoadSupportDump(workDir, dumpName)
+							if err != nil {
+								return fmt.Errorf("loading support dump: %w", err)
+							}
+
+							return h.Config(ctx)
+						},
+					},
+					{
+						Name:   "versions",
+						Usage:  "print versions of all components",
+						Flags:  flatten(defaultFlags, []cli.Flag{dumpNameFlag}),
+						Before: before(false),
+						Action: func(_ *cli.Context) error {
+							h, err := support.LoadSupportDump(workDir, dumpName)
+							if err != nil {
+								return fmt.Errorf("loading support dump: %w", err)
+							}
+
+							if err := h.Versions(ctx); err != nil {
+								return fmt.Errorf("printing versions: %w", err)
+							}
+
+							return nil
+						},
+					},
+					{
+						Name:   "status",
+						Usage:  "print status of the fabricator",
+						Flags:  flatten(defaultFlags, []cli.Flag{dumpNameFlag}),
+						Before: before(false),
+						Action: func(_ *cli.Context) error {
+							h, err := support.LoadSupportDump(workDir, dumpName)
+							if err != nil {
+								return fmt.Errorf("loading support dump: %w", err)
+							}
+
+							if err := h.Status(ctx); err != nil {
+								return fmt.Errorf("printing status: %w", err)
+							}
+
+							return nil
+						},
+					},
+					{
+						Name:    "podlogs",
+						Aliases: []string{"logs"},
+						Usage:   "get pod logs from the support dump",
+						Flags: flatten(defaultFlags, []cli.Flag{
+							dumpNameFlag,
+							&cli.StringFlag{
+								Name:    "namespace",
+								Aliases: []string{"n"},
+								Usage:   "pod namespace, if not specified pods for all namespaces will be listed",
+								Value:   comp.FabNamespace,
+							},
+							&cli.StringFlag{
+								Name:    "pod",
+								Aliases: []string{"p"},
+								Usage:   "pod name, if not specified list of available logs for the specified namespace will be listed",
+							},
+							&cli.StringFlag{
+								Name:    "container",
+								Aliases: []string{"c"},
+								Usage:   "container name, if not specified first container will be used",
+							},
+						}),
+						Before: before(false),
+						Action: func(c *cli.Context) error {
+							h, err := support.LoadSupportDump(workDir, dumpName)
+							if err != nil {
+								return fmt.Errorf("loading support dump: %w", err)
+							}
+
+							return h.PodLogs(ctx, c.String("namespace"), c.String("pod"), c.String("container"))
+						},
+					},
+					{
+						Name:    "fabric",
+						Aliases: []string{"f"},
+						Usage:   "run fabric ctl commands",
+						Subcommands: []*cli.Command{
+							{
+								Name:    "inspect",
+								Aliases: []string{"i"},
+								Usage:   "Inspect Fabric API Objects and Primitives",
+								Flags: []cli.Flag{
+									verboseFlag,
+									dumpNameFlag,
+								},
+								Subcommands: []*cli.Command{
+									{
+										Name:  "fabric",
+										Usage: "Inspect Fabric (overall control nodes and switches overview incl. status, serials, etc.)",
+										Flags: flatten(defaultFlags, []cli.Flag{
+											outputFlag,
+											useNowFlag,
+											dumpNameFlag,
+										}),
+										Before: before(false),
+										Action: func(_ *cli.Context) error {
+											h, err := support.LoadSupportDump(workDir, dumpName)
+											if err != nil {
+												return fmt.Errorf("loading support dump: %w", err)
+											}
+
+											return support.InspectRun(ctx, h, useNow, inspect.Fabric, inspect.Args{
+												Verbose: verbose,
+												Output:  inspect.OutputType(output),
+											}, inspect.FabricIn{}, os.Stdout)
+										},
+									},
+									{
+										Name:  "switch",
+										Usage: "Inspect Switch (status, used ports, counters, etc.)",
+										Flags: flatten(defaultFlags, []cli.Flag{
+											outputFlag,
+											useNowFlag,
+											dumpNameFlag,
+											&cli.StringFlag{
+												Name:     "name",
+												Aliases:  []string{"n"},
+												Usage:    "switch name",
+												Required: true,
+											},
+										}),
+										Before: before(false),
+										Action: func(cCtx *cli.Context) error {
+											h, err := support.LoadSupportDump(workDir, dumpName)
+											if err != nil {
+												return fmt.Errorf("loading support dump: %w", err)
+											}
+
+											return support.InspectRun(ctx, h, useNow, inspect.Switch, inspect.Args{
+												Verbose: verbose,
+												Output:  inspect.OutputType(output),
+											}, inspect.SwitchIn{
+												Name: cCtx.String("name"),
+											}, os.Stdout)
+										},
+									},
+									{
+										Name:    "port",
+										Aliases: []string{"switchport"},
+										Usage:   "Inspect Switch Port (connection if used in one, counters, VPC and External attachments, etc.)",
+										Flags: flatten(defaultFlags, []cli.Flag{
+											outputFlag,
+											useNowFlag,
+											dumpNameFlag,
+											&cli.StringFlag{
+												Name:     "name",
+												Aliases:  []string{"n"},
+												Usage:    "full switch port name (<switch-name>/<port-name>, e.g. 's5248-02/E1/2')",
+												Required: true,
+											},
+										}),
+										Before: before(false),
+										Action: func(cCtx *cli.Context) error {
+											h, err := support.LoadSupportDump(workDir, dumpName)
+											if err != nil {
+												return fmt.Errorf("loading support dump: %w", err)
+											}
+
+											return support.InspectRun(ctx, h, useNow, inspect.Port, inspect.Args{
+												Verbose: verbose,
+												Output:  inspect.OutputType(output),
+											}, inspect.PortIn{
+												Port: cCtx.String("name"),
+											}, os.Stdout)
+										},
+									},
+									{
+										Name:  "server",
+										Usage: "Inspect Server (connection if used in one, VPC attachments, etc.)",
+										Flags: flatten(defaultFlags, []cli.Flag{
+											outputFlag,
+											useNowFlag,
+											dumpNameFlag,
+											&cli.StringFlag{
+												Name:     "name",
+												Aliases:  []string{"n"},
+												Usage:    "server name",
+												Required: true,
+											},
+										}),
+										Before: before(false),
+										Action: func(cCtx *cli.Context) error {
+											h, err := support.LoadSupportDump(workDir, dumpName)
+											if err != nil {
+												return fmt.Errorf("loading support dump: %w", err)
+											}
+
+											return support.InspectRun(ctx, h, useNow, inspect.Server, inspect.Args{
+												Verbose: verbose,
+												Output:  inspect.OutputType(output),
+											}, inspect.ServerIn{
+												Name: cCtx.String("name"),
+											}, os.Stdout)
+										},
+									},
+									{
+										Name:    "connection",
+										Aliases: []string{"conn"},
+										Usage:   "Inspect Connection (incl. VPC and External attachments, Loobpback Workaround usage, etc.)",
+										Flags: flatten(defaultFlags, []cli.Flag{
+											outputFlag,
+											useNowFlag,
+											dumpNameFlag,
+											&cli.StringFlag{
+												Name:     "name",
+												Aliases:  []string{"n"},
+												Usage:    "connection name",
+												Required: true,
+											},
+										}),
+										Before: before(false),
+										Action: func(cCtx *cli.Context) error {
+											h, err := support.LoadSupportDump(workDir, dumpName)
+											if err != nil {
+												return fmt.Errorf("loading support dump: %w", err)
+											}
+
+											return support.InspectRun(ctx, h, useNow, inspect.Connection, inspect.Args{
+												Verbose: verbose,
+												Output:  inspect.OutputType(output),
+											}, inspect.ConnectionIn{
+												Name: cCtx.String("name"),
+											}, os.Stdout)
+										},
+									},
+									{
+										Name:    "vpc",
+										Aliases: []string{"subnet", "vpcsubnet"},
+										Usage:   "Inspect VPC/VPCSubnet (incl. where is it attached and what's reachable from it)",
+										Flags: flatten(defaultFlags, []cli.Flag{
+											outputFlag,
+											useNowFlag,
+											dumpNameFlag,
+											&cli.StringFlag{
+												Name:     "name",
+												Aliases:  []string{"n"},
+												Usage:    "VPC name (if no subnet specified, will inspect all subnets)",
+												Required: true,
+											},
+											&cli.StringFlag{
+												Name:    "subnet",
+												Aliases: []string{"s"},
+												Usage:   "Subnet name (without VPC) to only inspect this subnet",
+											},
+										}),
+										Before: before(false),
+										Action: func(cCtx *cli.Context) error {
+											h, err := support.LoadSupportDump(workDir, dumpName)
+											if err != nil {
+												return fmt.Errorf("loading support dump: %w", err)
+											}
+
+											return support.InspectRun(ctx, h, useNow, inspect.VPC, inspect.Args{
+												Verbose: verbose,
+												Output:  inspect.OutputType(output),
+											}, inspect.VPCIn{
+												Name:   cCtx.String("name"),
+												Subnet: cCtx.String("subnet"),
+											}, os.Stdout)
+										},
+									},
+									{
+										Name:  "bgp",
+										Usage: "Inspect BGP neighbors",
+										Flags: flatten(defaultFlags, []cli.Flag{
+											outputFlag,
+											useNowFlag,
+											dumpNameFlag,
+											&cli.StringSliceFlag{
+												Name:    "switch-name",
+												Aliases: []string{"name", "n"},
+												Usage:   "Switch names to inspect BGP neighbors for (if not specified, will inspect all switches)",
+											},
+											&cli.BoolFlag{
+												Name:  "strict",
+												Usage: "strict BGP check (will fail if any neighbor is missing, not expected or not established)",
+											},
+										}),
+										Before: before(false),
+										Action: func(cCtx *cli.Context) error {
+											h, err := support.LoadSupportDump(workDir, dumpName)
+											if err != nil {
+												return fmt.Errorf("loading support dump: %w", err)
+											}
+
+											return support.InspectRun(ctx, h, useNow, inspect.BGP, inspect.Args{
+												Verbose: verbose,
+												Output:  inspect.OutputType(output),
+											}, inspect.BGPIn{
+												Switches: cCtx.StringSlice("switch-name"),
+												Strict:   cCtx.Bool("strict"),
+											}, os.Stdout)
+										},
+									},
+									{
+										Name:  "lldp",
+										Usage: "Inspect LLDP neighbors",
+										Flags: flatten(defaultFlags, []cli.Flag{
+											outputFlag,
+											useNowFlag,
+											dumpNameFlag,
+											&cli.StringSliceFlag{
+												Name:    "switch-name",
+												Aliases: []string{"name", "n"},
+												Usage:   "Switch names to inspect LLDP neighbors for (if not specified, will inspect all switches)",
+											},
+											&cli.BoolFlag{
+												Name:  "strict",
+												Usage: "strict LLDP check (will fail if any neighbor is missing or not as expected ignoring external ones)",
+											},
+											&cli.BoolFlag{
+												Name:  "fabric",
+												Usage: "include fabric neighbors (fabric, mclag-domain and vpcloopback connections)",
+												Value: true,
+											},
+											&cli.BoolFlag{
+												Name:  "external",
+												Usage: "include external neighbors (external and staticexternal connections)",
+												Value: true,
+											},
+											&cli.BoolFlag{
+												Name:  "server",
+												Usage: "include server neighbors (unbundled, bundled, eslag and mclag connections)",
+												Value: true,
+											},
+										}),
+										Before: before(false),
+										Action: func(cCtx *cli.Context) error {
+											h, err := support.LoadSupportDump(workDir, dumpName)
+											if err != nil {
+												return fmt.Errorf("loading support dump: %w", err)
+											}
+
+											return support.InspectRun(ctx, h, useNow, inspect.LLDP, inspect.Args{
+												Verbose: verbose,
+												Output:  inspect.OutputType(output),
+											}, inspect.LLDPIn{
+												Switches: cCtx.StringSlice("switch-name"),
+												Strict:   cCtx.Bool("strict"),
+												Fabric:   cCtx.Bool("fabric"),
+												External: cCtx.Bool("external"),
+												Server:   cCtx.Bool("server"),
+											}, os.Stdout)
+										},
+									},
+									{
+										Name:  "ip",
+										Usage: "Inspect IP Address (incl. IPv4Namespace, VPCSubnet and DHCPLease or External/StaticExternal usage)",
+										Flags: flatten(defaultFlags, []cli.Flag{
+											outputFlag,
+											useNowFlag,
+											dumpNameFlag,
+											&cli.StringFlag{
+												Name:     "address",
+												Aliases:  []string{"a", "addr"},
+												Usage:    "IP address to inspect",
+												Required: true,
+											},
+										}),
+										Before: before(false),
+										Action: func(cCtx *cli.Context) error {
+											h, err := support.LoadSupportDump(workDir, dumpName)
+											if err != nil {
+												return fmt.Errorf("loading support dump: %w", err)
+											}
+
+											return support.InspectRun(ctx, h, useNow, inspect.IP, inspect.Args{
+												Verbose: verbose,
+												Output:  inspect.OutputType(output),
+											}, inspect.IPIn{
+												IP: cCtx.String("address"),
+											}, os.Stdout)
+										},
+									},
+									{
+										Name:  "mac",
+										Usage: "Inspect MAC Address (incl. switch ports and DHCP leases)",
+										Flags: flatten(defaultFlags, []cli.Flag{
+											outputFlag,
+											useNowFlag,
+											dumpNameFlag,
+											&cli.StringFlag{
+												Name:     "address",
+												Aliases:  []string{"a", "addr"},
+												Usage:    "MAC address",
+												Required: true,
+											},
+										}),
+										Before: before(false),
+										Action: func(cCtx *cli.Context) error {
+											h, err := support.LoadSupportDump(workDir, dumpName)
+											if err != nil {
+												return fmt.Errorf("loading support dump: %w", err)
+											}
+
+											return support.InspectRun(ctx, h, useNow, inspect.MAC, inspect.Args{
+												Verbose: verbose,
+												Output:  inspect.OutputType(output),
+											}, inspect.MACIn{
+												Value: cCtx.String("address"),
+											}, os.Stdout)
+										},
+									},
+									{
+										Name:  "access",
+										Usage: "Inspect access between pair of IPs, Server names or VPCSubnets (everything except external IPs will be translated to VPCSubnets)",
+										Flags: flatten(defaultFlags, []cli.Flag{
+											outputFlag,
+											useNowFlag,
+											dumpNameFlag,
+											&cli.StringFlag{
+												Name:     "source",
+												Aliases:  []string{"s", "src"},
+												Usage:    "Source IP (only from VPC subnets), full VPC subnet name (<vpc-name>/<subnet-name>) or Server Name",
+												Required: true,
+											},
+											&cli.StringFlag{
+												Name:     "destination",
+												Aliases:  []string{"d", "dest"},
+												Usage:    "Destination IP (from VPC subnets, Externals or StaticExternals), full VPC subnet name (<vpc-name>/<subnet-name>) or Server Name",
+												Required: true,
+											},
+										}),
+										Before: before(false),
+										Action: func(cCtx *cli.Context) error {
+											h, err := support.LoadSupportDump(workDir, dumpName)
+											if err != nil {
+												return fmt.Errorf("loading support dump: %w", err)
+											}
+
+											return support.InspectRun(ctx, h, useNow, inspect.Access, inspect.Args{
+												Verbose: verbose,
+												Output:  inspect.OutputType(output),
+											}, inspect.AccessIn{
+												Source:      cCtx.String("source"),
+												Destination: cCtx.String("destination"),
+											}, os.Stdout)
+										},
+									},
+								},
+							},
 						},
 					},
 				},

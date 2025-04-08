@@ -22,54 +22,46 @@ import (
 
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	kapierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	clientcache "k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
-	ctrl "sigs.k8s.io/controller-runtime"
+	kctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/scheme"
 )
 
-func NewClient(ctx context.Context, kubeconfigPath string, schemeBuilders ...*scheme.Builder) (client.WithWatch, error) {
+func NewClient(ctx context.Context, kubeconfigPath string, schemeBuilders ...*scheme.Builder) (kclient.WithWatch, error) {
 	_, kube, err := newClient(ctx, kubeconfigPath, false, false, schemeBuilders...)
 
 	return kube, err
 }
 
-func NewClientWithCore(ctx context.Context, kubeconfigPath string, schemeBuilders ...*scheme.Builder) (client.WithWatch, error) {
+func NewClientWithCore(ctx context.Context, kubeconfigPath string, schemeBuilders ...*scheme.Builder) (kclient.WithWatch, error) {
 	_, kube, err := newClient(ctx, kubeconfigPath, true, false, schemeBuilders...)
 
 	return kube, err
 }
 
-func NewClientWithCache(ctx context.Context, kubeconfigPath string, schemeBuilders ...*scheme.Builder) (context.CancelFunc, client.WithWatch, error) {
+func NewClientWithCache(ctx context.Context, kubeconfigPath string, schemeBuilders ...*scheme.Builder) (context.CancelFunc, kclient.WithWatch, error) {
 	return newClient(ctx, kubeconfigPath, false, true, schemeBuilders...)
 }
 
 // TODO cached version is minimal naive implementation with hanging go routine, need to be improved
-func newClient(ctx context.Context, kubeconfigPath string, core, cached bool, schemeBuilders ...*scheme.Builder) (context.CancelFunc, client.WithWatch, error) { //nolint:contextcheck
-	var cfg *rest.Config
-	var err error
-
+func newClient(ctx context.Context, kubeconfigPath string, core, cached bool, schemeBuilders ...*scheme.Builder) (context.CancelFunc, kclient.WithWatch, error) { //nolint:contextcheck
 	cancel := func() {}
-
-	if kubeconfigPath == "" {
-		if cfg, err = ctrl.GetConfig(); err != nil {
-			return cancel, nil, errors.Wrapf(err, "failed to get kubeconfig using default path or in-cluster config")
-		}
-	} else {
-		if cfg, err = clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
-			&clientcmd.ClientConfigLoadingRules{ExplicitPath: kubeconfigPath},
-			nil,
-		).ClientConfig(); err != nil {
-			return cancel, nil, errors.Wrapf(err, "failed to load kubeconfig from %s", kubeconfigPath)
-		}
+	cfg, err := NewClientConfig(ctx, kubeconfigPath)
+	if err != nil {
+		return cancel, nil, errors.Wrapf(err, "failed to create kube config")
 	}
 
-	scheme := runtime.NewScheme()
+	scheme, err := NewScheme(schemeBuilders...)
+	if err != nil {
+		return cancel, nil, errors.Wrapf(err, "failed to create scheme")
+	}
 
 	if core {
 		if err := corev1.AddToScheme(scheme); err != nil {
@@ -77,13 +69,7 @@ func newClient(ctx context.Context, kubeconfigPath string, core, cached bool, sc
 		}
 	}
 
-	for _, schemeBuilder := range schemeBuilders {
-		if err := schemeBuilder.AddToScheme(scheme); err != nil {
-			return cancel, nil, errors.Wrapf(err, "failed to add scheme %s to runtime", schemeBuilder.GroupVersion.String())
-		}
-	}
-
-	var cacheOpts *client.CacheOptions
+	var cacheOpts *kclient.CacheOptions
 	if cached {
 		clientCache, err := cache.New(cfg, cache.Options{
 			Scheme:                   scheme,
@@ -108,12 +94,12 @@ func newClient(ctx context.Context, kubeconfigPath string, core, cached bool, sc
 			return cancel, nil, errors.New("failed to sync kube controller runtime cache")
 		}
 
-		cacheOpts = &client.CacheOptions{
+		cacheOpts = &kclient.CacheOptions{
 			Reader: clientCache,
 		}
 	}
 
-	kubeClient, err := client.NewWithWatch(cfg, client.Options{
+	kubeClient, err := kclient.NewWithWatch(cfg, kclient.Options{
 		Scheme: scheme,
 		Cache:  cacheOpts,
 	})
@@ -126,7 +112,7 @@ func newClient(ctx context.Context, kubeconfigPath string, core, cached bool, sc
 
 func cacheWatchErrorHandler(r *clientcache.Reflector, err error) {
 	switch {
-	case apierrors.IsResourceExpired(err) || apierrors.IsGone(err):
+	case kapierrors.IsResourceExpired(err) || kapierrors.IsGone(err):
 		clientcache.DefaultWatchErrorHandler(r, err)
 	case errors.Is(err, io.EOF):
 		// watch closed normally
@@ -137,4 +123,50 @@ func cacheWatchErrorHandler(r *clientcache.Reflector, err error) {
 		clientcache.DefaultWatchErrorHandler(r, err)
 		panic(fmt.Errorf("kube controller runtime cache: failed to watch: %w", err))
 	}
+}
+
+func NewClientConfig(ctx context.Context, kubeconfigPath string) (*rest.Config, error) {
+	var cfg *rest.Config
+	var err error
+
+	if kubeconfigPath == "" {
+		if cfg, err = kctrl.GetConfig(); err != nil {
+			return nil, fmt.Errorf("getting kubeconfig using default path or in-cluster config: %w", err)
+		}
+	} else {
+		if cfg, err = clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
+			&clientcmd.ClientConfigLoadingRules{ExplicitPath: kubeconfigPath},
+			nil,
+		).ClientConfig(); err != nil {
+			return nil, fmt.Errorf("loading kubeconfig from %s: %w", kubeconfigPath, err)
+		}
+	}
+
+	return cfg, nil
+}
+
+func NewScheme(schemeBuilders ...*scheme.Builder) (*runtime.Scheme, error) {
+	scheme := runtime.NewScheme()
+
+	for _, schemeBuilder := range schemeBuilders {
+		if err := schemeBuilder.AddToScheme(scheme); err != nil {
+			return nil, fmt.Errorf("adding scheme %s to runtime: %w", schemeBuilder.GroupVersion.String(), err)
+		}
+	}
+
+	return scheme, nil
+}
+
+func NewClientset(ctx context.Context, kubeconfigPath string) (*kubernetes.Clientset, error) {
+	cfg, err := NewClientConfig(ctx, kubeconfigPath)
+	if err != nil {
+		return nil, fmt.Errorf("creating kube config: %w", err)
+	}
+
+	clientset, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("creating kubernetes client: %w", err)
+	}
+
+	return clientset, nil
 }

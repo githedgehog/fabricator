@@ -23,10 +23,10 @@ import (
 
 	"github.com/maruel/natural"
 	"github.com/pkg/errors"
+	"github.com/samber/lo"
 	"go.githedgehog.com/fabric/api/meta"
-	"golang.org/x/exp/maps"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
@@ -39,6 +39,9 @@ const (
 	DataPortNOSNamePrefix       = "Ethernet"
 	BreakoutNOSNamePrefix       = "1/"
 	ONIEPortNamePrefix          = "eth"
+
+	// it's used to mark ports that are supposed to be breakout but not like last port of the 32 port switch being non-breakout
+	NonBreakoutPortExceptionSuffix = "-nb"
 )
 
 // Defines features supported by a specific switch which is later used for roles and Fabric API features usage validation
@@ -124,6 +127,8 @@ type SwitchProfileSpec struct {
 	DisplayName string `json:"displayName,omitempty"`
 	// OtherNames defines alternative names for the switch
 	OtherNames []string `json:"otherNames,omitempty"`
+	// SwitchSilicon defines the switch silicon name
+	SwitchSilicon string `json:"switchSilicon,omitempty"`
 	// Features defines the features supported by the switch
 	Features SwitchProfileFeatures `json:"features,omitempty"`
 	// Config defines the switch-specific configuration options
@@ -152,8 +157,8 @@ type SwitchProfileStatus struct{}
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`,priority=0
 // SwitchProfile represents switch capabilities and configuration
 type SwitchProfile struct {
-	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
+	kmetav1.TypeMeta   `json:",inline"`
+	kmetav1.ObjectMeta `json:"metadata,omitempty"`
 
 	Spec   SwitchProfileSpec   `json:"spec,omitempty"`
 	Status SwitchProfileStatus `json:"status,omitempty"`
@@ -165,9 +170,9 @@ const KindSwitchProfile = "SwitchProfile"
 
 // SwitchProfileList contains a list of SwitchProfile
 type SwitchProfileList struct {
-	metav1.TypeMeta `json:",inline"`
-	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []SwitchProfile `json:"items"`
+	kmetav1.TypeMeta `json:",inline"`
+	kmetav1.ListMeta `json:"metadata,omitempty"`
+	Items            []SwitchProfile `json:"items"`
 }
 
 func init() {
@@ -195,50 +200,13 @@ func (sp *SwitchProfile) Default() {
 		sp.Annotations = map[string]string{}
 	}
 
-	ports := map[string]int{}
-
-	for _, port := range sp.Spec.Ports {
-		if port.Management {
-			continue
-		}
-
-		profile := ""
-		if port.Profile != "" {
-			profile = port.Profile
-		}
-
-		if port.Group != "" {
-			group, exists := sp.Spec.PortGroups[port.Group]
-			if !exists {
-				continue
-			}
-
-			profile = group.Profile
-		}
-
-		if profile == "" {
-			continue
-		}
-
-		ports[strings.TrimSuffix(profile, "-nb")]++
+	portsStr, err := sp.Spec.GetPortsShortSummary()
+	if err == nil {
+		sp.Annotations[AnnotationPorts] = portsStr
 	}
-
-	portsStr := ""
-	profiles := maps.Keys(ports)
-	slices.Sort(profiles)
-	for _, profile := range profiles {
-		count := ports[profile]
-		if portsStr != "" {
-			portsStr += ", "
-		}
-
-		portsStr += fmt.Sprintf("%dx%s", count, profile)
-	}
-
-	sp.Annotations[AnnotationPorts] = portsStr
 }
 
-func (sp *SwitchProfile) Validate(_ context.Context, _ client.Reader, _ *meta.FabricConfig) (admission.Warnings, error) {
+func (sp *SwitchProfile) Validate(_ context.Context, _ kclient.Reader, _ *meta.FabricConfig) (admission.Warnings, error) {
 	if err := meta.ValidateObjectMetadata(sp); err != nil {
 		return nil, errors.Wrapf(err, "failed to validate metadata")
 	}
@@ -258,6 +226,10 @@ func (sp *SwitchProfile) Validate(_ context.Context, _ client.Reader, _ *meta.Fa
 		if idx := slices.Index(sp.Spec.OtherNames, name); idx != curr {
 			return nil, errors.Errorf("otherNames must not contain duplicates")
 		}
+	}
+
+	if sp.Spec.SwitchSilicon == "" {
+		return nil, errors.Errorf("switchSilicon is required")
 	}
 
 	if sp.Spec.NOSType == "" {
@@ -505,10 +477,6 @@ func (sp *SwitchProfile) Validate(_ context.Context, _ client.Reader, _ *meta.Fa
 		}
 
 		if profile.Breakout != nil {
-			if profile.AutoNegAllowed {
-				return nil, errors.Errorf("profile %q must not have auto-negotiation allowed with breakout", name)
-			}
-
 			if profile.Breakout.Default == "" {
 				return nil, errors.Errorf("profile %q must have a default breakout", name)
 			}
@@ -552,6 +520,7 @@ var allowedPortSpeeds = map[string]bool{
 	"100G": true,
 	"200G": true,
 	"400G": true,
+	"800G": true,
 }
 
 func ValidatePortSpeed(speed string) error {
@@ -811,7 +780,7 @@ func (sp *SwitchProfileSpec) GetPortsSummary() ([]SwitchProfilePortSummary, erro
 
 	res := []SwitchProfilePortSummary{}
 
-	portNames := maps.Keys(sp.Ports)
+	portNames := lo.Keys(sp.Ports)
 	SortPortNames(portNames)
 
 	for _, portName := range portNames {
@@ -821,7 +790,7 @@ func (sp *SwitchProfileSpec) GetPortsSummary() ([]SwitchProfilePortSummary, erro
 		def := ""
 		supported := ""
 
-		if port.Management {
+		if port.Management { //nolint:gocritic
 			t = "Management"
 		} else if port.Group != "" {
 			t = "Port Group"
@@ -857,7 +826,7 @@ func (sp *SwitchProfileSpec) GetPortsSummary() ([]SwitchProfilePortSummary, erro
 
 				if profile.Breakout != nil {
 					def = profile.Breakout.Default
-					modes := maps.Keys(profile.Breakout.Supported)
+					modes := lo.Keys(profile.Breakout.Supported)
 					slices.Sort(modes)
 					supported = strings.Join(modes, ", ")
 				}
@@ -913,22 +882,73 @@ func (sp *SwitchProfileSpec) GetAutoNegsDefaultsFor(sw *SwitchSpec) (map[string]
 	allowed, def := map[string]bool{}, map[string]bool{}
 
 	for portName, port := range sp.Ports {
+		if port.Management {
+			continue
+		}
+
+		if port.Profile != "" { //nolint:gocritic
+			profile, exists := sp.PortProfiles[port.Profile]
+			if !exists {
+				return nil, nil, errors.Errorf("port %q references non-existent profile %q", port.NOSName, port.Profile)
+			}
+
+			if profile.Speed != nil { //nolint:gocritic
+				allowed[portName] = profile.AutoNegAllowed
+				def[portName] = profile.AutoNegDefault
+			} else if profile.Breakout != nil {
+				breakout := profile.Breakout.Default
+				if swBreakout, ok := sw.PortBreakouts[portName]; ok {
+					breakout = swBreakout
+				}
+
+				breakoutProfile, ok := profile.Breakout.Supported[breakout]
+				if !ok {
+					return nil, nil, errors.Errorf("port %q has a breakout %q not supported by profile %q", portName, breakout, port.Profile)
+				}
+
+				for idx := range breakoutProfile.Offsets {
+					allowed[fmt.Sprintf("%s/%d", portName, idx+1)] = profile.AutoNegAllowed
+					def[fmt.Sprintf("%s/%d", portName, idx+1)] = profile.AutoNegDefault
+				}
+			} else {
+				return nil, nil, errors.Errorf("port %q profile %q has no speed or breakout", portName, port.Profile)
+			}
+		} else if port.Group != "" {
+			return nil, nil, errors.Errorf("autoneg isn't supported for port groups: %q", portName)
+		} else {
+			return nil, nil, errors.Errorf("port %q must have a profile or group", portName)
+		}
+	}
+
+	return allowed, def, nil
+}
+
+func (sp *SwitchProfileSpec) GetBreakoutDefaults(sw *SwitchSpec) (map[string]string, error) {
+	def := map[string]string{}
+
+	for portName, port := range sp.Ports {
 		if port.Management || port.Profile == "" {
 			continue
 		}
 
 		profile, exists := sp.PortProfiles[port.Profile]
 		if !exists {
-			return nil, nil, errors.Errorf("port %q references non-existent profile %q", port.NOSName, port.Profile)
+			return nil, errors.Errorf("port %q references non-existent profile %q", port.NOSName, port.Profile)
 		}
 
-		allowed[portName] = profile.AutoNegAllowed
-		def[portName] = profile.AutoNegDefault
+		if profile.Breakout == nil {
+			continue
+		}
 
-		// TODO impl for port groups and breakouts when allowed
+		breakout := profile.Breakout.Default
+		if swBreakout, ok := sw.PortBreakouts[portName]; ok {
+			breakout = swBreakout
+		}
+
+		def[portName] = breakout
 	}
 
-	return allowed, def, nil
+	return def, nil
 }
 
 func (sp *SwitchProfileSpec) GetAvailableAPIPorts(sw *SwitchSpec) (map[string]bool, error) {
@@ -946,13 +966,13 @@ func (sp *SwitchProfileSpec) GetAvailableAPIPorts(sw *SwitchSpec) (map[string]bo
 			continue
 		}
 
-		if port.Profile != "" {
+		if port.Profile != "" { //nolint:gocritic
 			profile, exists := sp.PortProfiles[port.Profile]
 			if !exists {
 				return nil, errors.Errorf("port %q references non-existent profile %q", port.NOSName, port.Profile)
 			}
 
-			if profile.Breakout != nil {
+			if profile.Breakout != nil { //nolint:gocritic
 				b := profile.Breakout.Default
 				if swB, ok := sw.PortBreakouts[portName]; ok {
 					b = swB
@@ -978,4 +998,75 @@ func (sp *SwitchProfileSpec) GetAvailableAPIPorts(sw *SwitchSpec) (map[string]bo
 	}
 
 	return ports, nil
+}
+
+func (sp *SwitchProfileSpec) GetPortsShortSummary() (string, error) {
+	portCount := map[string]int{}
+	for _, port := range sp.Ports {
+		if port.Management {
+			continue
+		}
+
+		profile := ""
+		if port.Profile != "" {
+			profile = port.Profile
+		}
+
+		if port.Group != "" {
+			group, exists := sp.PortGroups[port.Group]
+			if !exists {
+				return "", errors.Errorf("port %q references non-existent group %q", port.NOSName, port.Group)
+			}
+
+			profile = group.Profile
+		}
+
+		if profile == "" {
+			return "", errors.Errorf("port %q must have a profile or group", port.NOSName)
+		}
+
+		portCount[strings.TrimSuffix(profile, NonBreakoutPortExceptionSuffix)]++
+	}
+
+	portTypes := lo.Keys(portCount)
+	slices.SortFunc(portTypes, func(a, b string) int {
+		return portCount[b] - portCount[a]
+	})
+
+	portsStr := ""
+	for _, profile := range portTypes {
+		count := portCount[profile]
+		if portsStr != "" {
+			portsStr += ", "
+		}
+
+		portsStr += fmt.Sprintf("%dx%s", count, profile)
+	}
+
+	return portsStr, nil
+}
+
+func (sp *SwitchProfileSpec) GetNameSummary() string {
+	summary := sp.DisplayName
+	otherNames := []string{}
+
+	nameParts := strings.Split(sp.DisplayName, " ")
+	if len(sp.OtherNames) > 0 {
+		for _, otherName := range sp.OtherNames {
+			for _, part := range nameParts {
+				otherName = strings.TrimPrefix(otherName, part+"")
+			}
+
+			otherName = strings.TrimSpace(otherName)
+			if otherName != "" {
+				otherNames = append(otherNames, otherName)
+			}
+		}
+	}
+
+	if len(otherNames) > 0 {
+		summary += " (" + strings.Join(otherNames, ", ") + ")"
+	}
+
+	return summary
 }
