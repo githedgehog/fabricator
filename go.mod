@@ -45,7 +45,7 @@ require (
 	go.githedgehog.com/gateway v0.1.2
 	golang.org/x/crypto v0.36.0
 	golang.org/x/mod v0.24.0
-	golang.org/x/sync v0.12.0
+	golang.org/x/sync v0.13.0
 	golang.org/x/term v0.30.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	k8s.io/api v0.32.3
