@@ -1395,10 +1395,11 @@ func makeTestCtx(kube kclient.Client, opts SetupVPCsOpts, workDir, cacheDir stri
 		PingsCount:        3,
 		IPerfsSeconds:     3,
 		IPerfsMinSpeed:    8200,
+		CurlsCount:        1,
 	}
 	if rtOpts.Extended {
-		testCtx.tcOpts.CurlsCount = 1
 		testCtx.tcOpts.IPerfsSeconds = 10
+		testCtx.tcOpts.CurlsCount = 3
 	}
 	testCtx.wipeBetweenTests = wipeBetweenTests
 	testCtx.extName = extName
