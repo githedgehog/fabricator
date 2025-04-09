@@ -221,7 +221,7 @@ jobs:
     needs:
       - test
       - builds
-    timeout-minutes: 120
+    timeout-minutes: 150
 
     strategy:
       fail-fast: false
@@ -479,7 +479,7 @@ jobs:
     needs:
       - test
       - builds
-    timeout-minutes: 210
+    timeout-minutes: 250
 
     strategy:
       fail-fast: false
@@ -572,7 +572,7 @@ jobs:
       - name: Setup tmate session for debug
         if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
         uses: mxschmitt/action-tmate@v3
-        timeout-minutes: 120
+        timeout-minutes: 150
         with:
           limit-access-to-actor: true
 
