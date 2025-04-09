@@ -52,6 +52,8 @@ type VPCPeeringTestCtx struct {
 	pauseOnFail      bool
 }
 
+var AllZeroPrefix = []string{"0.0.0.0/0"}
+
 // prepare for a test: wipe the fabric and then create the VPCs according to the
 // options in the test context
 func (testCtx *VPCPeeringTestCtx) setupTest(ctx context.Context) error {
@@ -150,7 +152,7 @@ func populateAllExternalVpcPeerings(ctx context.Context, kube kclient.Client, ex
 	}
 	for i := 0; i < len(vpcs.Items); i++ {
 		for j := 0; j < len(exts.Items); j++ {
-			appendExtPeeringSpec(extPeerings, i+1, exts.Items[j].Name, []string{"subnet-01"}, []string{})
+			appendExtPeeringSpec(extPeerings, i+1, exts.Items[j].Name, []string{"subnet-01"}, AllZeroPrefix)
 		}
 	}
 
@@ -347,12 +349,12 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsStarterTest(ctx context.Context) (b
 	appendVpcPeeringSpec(vpcPeerings, 8, 9, "", []string{}, []string{})
 
 	externalPeerings := make(map[string]*vpcapi.ExternalPeeringSpec, 6)
-	appendExtPeeringSpec(externalPeerings, 5, testCtx.extName, []string{"subnet-01"}, []string{})
-	appendExtPeeringSpec(externalPeerings, 6, testCtx.extName, []string{"subnet-01"}, []string{})
-	appendExtPeeringSpec(externalPeerings, 1, testCtx.extName, []string{"subnet-01"}, []string{})
-	appendExtPeeringSpec(externalPeerings, 2, testCtx.extName, []string{"subnet-01"}, []string{})
-	appendExtPeeringSpec(externalPeerings, 9, testCtx.extName, []string{"subnet-01"}, []string{})
-	appendExtPeeringSpec(externalPeerings, 7, testCtx.extName, []string{"subnet-01"}, []string{})
+	appendExtPeeringSpec(externalPeerings, 5, testCtx.extName, []string{"subnet-01"}, AllZeroPrefix)
+	appendExtPeeringSpec(externalPeerings, 6, testCtx.extName, []string{"subnet-01"}, AllZeroPrefix)
+	appendExtPeeringSpec(externalPeerings, 1, testCtx.extName, []string{"subnet-01"}, AllZeroPrefix)
+	appendExtPeeringSpec(externalPeerings, 2, testCtx.extName, []string{"subnet-01"}, AllZeroPrefix)
+	appendExtPeeringSpec(externalPeerings, 9, testCtx.extName, []string{"subnet-01"}, AllZeroPrefix)
+	appendExtPeeringSpec(externalPeerings, 7, testCtx.extName, []string{"subnet-01"}, AllZeroPrefix)
 
 	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, true); err != nil {
 		return false, nil, fmt.Errorf("setting up peerings: %w", err)
@@ -464,7 +466,7 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsSergeisSpecialTest(ctx context.Cont
 	appendVpcPeeringSpec(vpcPeerings, 2, 4, remote, []string{}, []string{})
 	appendVpcPeeringSpec(vpcPeerings, 6, 5, "", []string{}, []string{})
 	externalPeerings := make(map[string]*vpcapi.ExternalPeeringSpec, 6)
-	appendExtPeeringSpec(externalPeerings, 1, testCtx.extName, []string{"subnet-01"}, []string{})
+	appendExtPeeringSpec(externalPeerings, 1, testCtx.extName, []string{"subnet-01"}, AllZeroPrefix)
 	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, true); err != nil {
 		return false, nil, fmt.Errorf("setting up peerings: %w", err)
 	}
