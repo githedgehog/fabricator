@@ -102,6 +102,7 @@ type OnReady string
 const (
 	OnReadyExit             OnReady = "exit"
 	OnReadySetupVPCs        OnReady = "setup-vpcs"
+	OnReadySetupPeerings    OnReady = "setup-peerings"
 	OnReadySwitchReinstall  OnReady = "switch-reinstall"
 	OnReadyTestConnectivity OnReady = "test-connectivity"
 	OnReadyWait             OnReady = "wait"
@@ -112,6 +113,7 @@ const (
 var AllOnReady = []OnReady{
 	OnReadyExit,
 	OnReadySetupVPCs,
+	OnReadySetupPeerings,
 	OnReadySwitchReinstall,
 	OnReadyTestConnectivity,
 	OnReadyWait,
@@ -612,6 +614,24 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						}
 
 						return fmt.Errorf("setting up VPCs: %w", err)
+					}
+				case OnReadySetupPeerings:
+					// TODO make it configurable
+					if err := c.SetupPeerings(ctx, vlab, SetupPeeringsOpts{
+						WaitSwitchesReady: true,
+						Requests:          []string{"1~external-01:s=subnet-01"},
+					}); err != nil {
+						slog.Warn("Failed to setup peerings", "err", err)
+
+						if opts.CollectShowTech {
+							if err := c.VLABShowTech(ctx, vlab); err != nil {
+								slog.Warn("Failed to collect show-tech diagnostics", "err", err)
+
+								return fmt.Errorf("getting show-tech: %w", err)
+							}
+						}
+
+						return fmt.Errorf("setting up peerings: %w", err)
 					}
 				case OnReadyTestConnectivity:
 					// TODO make it configurable

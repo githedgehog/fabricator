@@ -52,6 +52,8 @@ type VPCPeeringTestCtx struct {
 	pauseOnFail      bool
 }
 
+var AllZeroPrefix = []string{"0.0.0.0/0"}
+
 // prepare for a test: wipe the fabric and then create the VPCs according to the
 // options in the test context
 func (testCtx *VPCPeeringTestCtx) setupTest(ctx context.Context) error {
@@ -150,7 +152,7 @@ func populateAllExternalVpcPeerings(ctx context.Context, kube kclient.Client, ex
 	}
 	for i := 0; i < len(vpcs.Items); i++ {
 		for j := 0; j < len(exts.Items); j++ {
-			appendExtPeeringSpec(extPeerings, i+1, exts.Items[j].Name, []string{"subnet-01"}, []string{})
+			appendExtPeeringSpec(extPeerings, i+1, exts.Items[j].Name, []string{"subnet-01"}, AllZeroPrefix)
 		}
 	}
 
@@ -347,12 +349,12 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsStarterTest(ctx context.Context) (b
 	appendVpcPeeringSpec(vpcPeerings, 8, 9, "", []string{}, []string{})
 
 	externalPeerings := make(map[string]*vpcapi.ExternalPeeringSpec, 6)
-	appendExtPeeringSpec(externalPeerings, 5, testCtx.extName, []string{"subnet-01"}, []string{})
-	appendExtPeeringSpec(externalPeerings, 6, testCtx.extName, []string{"subnet-01"}, []string{})
-	appendExtPeeringSpec(externalPeerings, 1, testCtx.extName, []string{"subnet-01"}, []string{})
-	appendExtPeeringSpec(externalPeerings, 2, testCtx.extName, []string{"subnet-01"}, []string{})
-	appendExtPeeringSpec(externalPeerings, 9, testCtx.extName, []string{"subnet-01"}, []string{})
-	appendExtPeeringSpec(externalPeerings, 7, testCtx.extName, []string{"subnet-01"}, []string{})
+	appendExtPeeringSpec(externalPeerings, 5, testCtx.extName, []string{"subnet-01"}, AllZeroPrefix)
+	appendExtPeeringSpec(externalPeerings, 6, testCtx.extName, []string{"subnet-01"}, AllZeroPrefix)
+	appendExtPeeringSpec(externalPeerings, 1, testCtx.extName, []string{"subnet-01"}, AllZeroPrefix)
+	appendExtPeeringSpec(externalPeerings, 2, testCtx.extName, []string{"subnet-01"}, AllZeroPrefix)
+	appendExtPeeringSpec(externalPeerings, 9, testCtx.extName, []string{"subnet-01"}, AllZeroPrefix)
+	appendExtPeeringSpec(externalPeerings, 7, testCtx.extName, []string{"subnet-01"}, AllZeroPrefix)
 
 	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, true); err != nil {
 		return false, nil, fmt.Errorf("setting up peerings: %w", err)
@@ -464,7 +466,7 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsSergeisSpecialTest(ctx context.Cont
 	appendVpcPeeringSpec(vpcPeerings, 2, 4, remote, []string{}, []string{})
 	appendVpcPeeringSpec(vpcPeerings, 6, 5, "", []string{}, []string{})
 	externalPeerings := make(map[string]*vpcapi.ExternalPeeringSpec, 6)
-	appendExtPeeringSpec(externalPeerings, 1, testCtx.extName, []string{"subnet-01"}, []string{})
+	appendExtPeeringSpec(externalPeerings, 1, testCtx.extName, []string{"subnet-01"}, AllZeroPrefix)
 	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, true); err != nil {
 		return false, nil, fmt.Errorf("setting up peerings: %w", err)
 	}
@@ -1395,10 +1397,11 @@ func makeTestCtx(kube kclient.Client, opts SetupVPCsOpts, workDir, cacheDir stri
 		PingsCount:        3,
 		IPerfsSeconds:     3,
 		IPerfsMinSpeed:    8200,
+		CurlsCount:        1,
 	}
 	if rtOpts.Extended {
-		testCtx.tcOpts.CurlsCount = 1
 		testCtx.tcOpts.IPerfsSeconds = 10
+		testCtx.tcOpts.CurlsCount = 3
 	}
 	testCtx.wipeBetweenTests = wipeBetweenTests
 	testCtx.extName = extName
@@ -1428,7 +1431,6 @@ type JUnitTestSuite struct {
 
 type SkipFlags struct {
 	VirtualSwitch bool `xml:"-"` // skip if there's any virtual switch in the vlab
-	NamedExternal bool `xml:"-"` // skip if the named external is not present
 	NoExternals   bool `xml:"-"` // skip if there are no externals
 	ExtendedOnly  bool `xml:"-"` // skip if extended tests are not enabled
 	SubInterfaces bool `xml:"-"` // skip if subinterfaces are not supported by some of the switches
@@ -1643,14 +1645,6 @@ func selectAndRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, suite *J
 
 			continue
 		}
-		if test.SkipFlags.NamedExternal && skipFlags.NamedExternal {
-			suite.TestCases[i].Skipped = &Skipped{
-				Message: fmt.Sprintf("The named external (%s) is not present", testCtx.extName),
-			}
-			suite.Skipped++
-
-			continue
-		}
 		if test.SkipFlags.NoExternals && skipFlags.NoExternals {
 			suite.TestCases[i].Skipped = &Skipped{
 				Message: "There are no externals",
@@ -1790,7 +1784,7 @@ func makeVpcPeeringsBasicSuiteRun(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 			Name: "Starter Test",
 			F:    testCtx.vpcPeeringsStarterTest,
 			SkipFlags: SkipFlags{
-				NamedExternal: true,
+				NoExternals:   true,
 				SubInterfaces: true,
 			},
 		},
@@ -1820,7 +1814,7 @@ func makeVpcPeeringsBasicSuiteRun(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 			Name: "Sergei's Special Test",
 			F:    testCtx.vpcPeeringsSergeisSpecialTest,
 			SkipFlags: SkipFlags{
-				NamedExternal: true,
+				NoExternals:   true,
 				SubInterfaces: true,
 			},
 		},
@@ -1832,8 +1826,6 @@ func makeVpcPeeringsBasicSuiteRun(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 
 func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps ReleaseTestOpts) error {
 	testStart := time.Now()
-	// TODO: make this configurable
-	extName := "default"
 
 	cacheCancel, kube, err := GetKubeClientWithCache(ctx, workDir)
 	if err != nil {
@@ -1889,7 +1881,7 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 		// check for virtual switches
 		if !skipFlags.VirtualSwitch {
 			if sw.Spec.Profile == meta.SwitchProfileVS {
-				slog.Info("Virtual switch found", "switch", sw.Name)
+				slog.Warn("Virtual switch found, some tests will be skipped", "switch", sw.Name)
 				skipFlags.VirtualSwitch = true
 			}
 		}
@@ -1907,26 +1899,23 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 				return fmt.Errorf("getting switch profile %s: %w", sw.Spec.Profile, err)
 			}
 			if !profile.Spec.Features.Subinterfaces {
-				slog.Info("Subinterfaces not supported on leaf switch", "switch-profile", sw.Spec.Profile, "switch", sw.Name)
+				slog.Warn("Subinterfaces not supported on leaf switch, some tests will be skipped", "switch-profile", sw.Spec.Profile, "switch", sw.Name)
 				skipFlags.SubInterfaces = true
 			}
 			profiles = append(profiles, sw.Spec.Profile)
 		}
 	}
 	extList := &vpcapi.ExternalList{}
+	var extName string
 	if err := kube.List(ctx, extList); err != nil {
 		return fmt.Errorf("listing externals: %w", err)
 	}
 	if len(extList.Items) == 0 {
-		slog.Info("No externals found")
+		slog.Warn("No externals found, some tests will be skipped")
 		skipFlags.NoExternals = true
-		skipFlags.NamedExternal = true
 	} else {
-		ext := &vpcapi.External{}
-		if err := kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: extName}, ext); err != nil {
-			slog.Info("Named External not found", "external", extName)
-			skipFlags.NamedExternal = true
-		}
+		extName = extList.Items[0].Name
+		slog.Debug("External(s) found, using the first as the \"default\" one", "external", extName)
 	}
 
 	singleVpcTestCtx := makeTestCtx(kube, opts, workDir, cacheDir, false, extName, rtOtps)
