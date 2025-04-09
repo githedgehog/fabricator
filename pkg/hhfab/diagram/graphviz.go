@@ -22,15 +22,11 @@ const (
 	ColorDefault   = "black"
 )
 
-func GenerateDOT(workDir string, jsonData []byte) error {
+func GenerateDOT(workDir string, topo Topology) error {
 	outputFile := filepath.Join(workDir, DotFilename)
-	topo, err := ConvertJSONToTopology(jsonData)
-	if err != nil {
-		return fmt.Errorf("converting JSON to topology: %w", err)
-	}
 
 	dot := generateDOT(topo)
-	if err := os.WriteFile(outputFile, []byte(dot), 0600); err != nil {
+	if err := os.WriteFile(outputFile, []byte(dot), 0o600); err != nil {
 		return fmt.Errorf("writing DOT file: %w", err)
 	}
 

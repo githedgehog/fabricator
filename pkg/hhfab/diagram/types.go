@@ -3,6 +3,10 @@
 
 package diagram
 
+import (
+	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
+)
+
 type Node struct {
 	ID          string
 	Type        string
@@ -32,13 +36,13 @@ type Topology struct {
 }
 
 const (
-	EdgeTypeFabric    = "fabric"
-	EdgeTypeMCLAG     = "mclag"
-	EdgeTypeSpine     = "spine"
-	EdgeTypeBundled   = "bundled"
-	EdgeTypeUnbundled = "unbundled"
-	EdgeTypeESLAG     = "eslag"
-	EdgeTypeGateway   = "gateway"
+	EdgeTypeFabric    = wiringapi.ConnectionTypeFabric
+	EdgeTypeMCLAG     = wiringapi.ConnectionTypeMCLAG
+	EdgeTypeSpine     = "spine" // TODO
+	EdgeTypeBundled   = wiringapi.ConnectionTypeBundled
+	EdgeTypeUnbundled = wiringapi.ConnectionTypeUnbundled
+	EdgeTypeESLAG     = wiringapi.ConnectionTypeESLAG
+	EdgeTypeGateway   = wiringapi.ConnectionTypeGateway
 	NodeTypeSwitch    = "switch"
 	NodeTypeServer    = "server"
 	NodeTypeGateway   = "gateway"

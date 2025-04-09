@@ -44,7 +44,8 @@ type Config struct {
 	Fab      fabapi.Fabricator
 	Controls []fabapi.ControlNode
 	Nodes    []fabapi.FabNode
-	Wiring   kclient.Reader
+	Wiring   kclient.Reader // only fabric wiring
+	Client   kclient.Reader // all resources (fab and fabric wiring)
 }
 
 type RegistryConfig struct {
@@ -304,12 +305,17 @@ func load(ctx context.Context, workDir, cacheDir string, wiringAndHydration bool
 		return nil, err
 	}
 
-	l := apiutil.NewFabLoader()
 	fabCfg, err := os.ReadFile(filepath.Join(workDir, FabConfigFile))
 	if err != nil {
 		return nil, fmt.Errorf("reading fab config: %w", err)
 	}
 
+	allL := apiutil.NewAllLoader()
+	if err := allL.LoadAdd(ctx, fabCfg); err != nil {
+		return nil, fmt.Errorf("loading fab config to all loader: %w", err)
+	}
+
+	l := apiutil.NewFabLoader()
 	if err := l.LoadAdd(ctx, fabCfg); err != nil {
 		return nil, fmt.Errorf("loading fab config: %w", err)
 	}
@@ -337,7 +343,7 @@ func load(ctx context.Context, workDir, cacheDir string, wiringAndHydration bool
 	}
 
 	if wiringAndHydration {
-		if err := cfg.loadHydrateValidate(ctx, mode); err != nil {
+		if err := cfg.loadHydrateValidate(ctx, mode, allL); err != nil {
 			return nil, fmt.Errorf("loading wiring and hydrating: %w", err)
 		}
 
@@ -353,6 +359,8 @@ func load(ctx context.Context, workDir, cacheDir string, wiringAndHydration bool
 			}
 		}
 	}
+
+	cfg.Client = allL.GetClient()
 
 	return cfg, nil
 }
