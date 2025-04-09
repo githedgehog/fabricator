@@ -60,8 +60,6 @@ const (
 	StaticExternalDummyIface = "10.199.0.100"
 )
 
-const extName = "default"
-
 type VPCPeeringTestCtx struct {
 	workDir          string
 	cacheDir         string
@@ -2559,7 +2557,6 @@ func makeTestCtx(kube kclient.Client, setupOpts SetupVPCsOpts, workDir, cacheDir
 		testCtx.tcOpts.CurlsCount = 3
 	}
 	testCtx.wipeBetweenTests = wipeBetweenTests
-	testCtx.extName = extName
 	testCtx.hhfabBin = rtOpts.HhfabBin
 	testCtx.extended = rtOpts.Extended
 	testCtx.failFast = rtOpts.FailFast
@@ -2586,7 +2583,6 @@ type JUnitTestSuite struct {
 
 type SkipFlags struct {
 	VirtualSwitch bool `xml:"-"` // skip if there's any virtual switch in the vlab
-	NamedExternal bool `xml:"-"` // skip if the named external is not present
 	NoExternals   bool `xml:"-"` // skip if there are no externals
 	ExtendedOnly  bool `xml:"-"` // skip if extended tests are not enabled
 	RoCE          bool `xml:"-"` // skip if RoCE is not supported by any of the leaf switches
@@ -2606,9 +2602,6 @@ func (sf *SkipFlags) PrettyPrint() string {
 	var parts []string
 	if sf.VirtualSwitch {
 		parts = append(parts, "VS")
-	}
-	if sf.NamedExternal {
-		parts = append(parts, "NamedExt")
 	}
 	if sf.NoExternals {
 		parts = append(parts, "NoExt")
@@ -2871,14 +2864,6 @@ func selectAndRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, suite *J
 
 			continue
 		}
-		if test.SkipFlags.NamedExternal && skipFlags.NamedExternal {
-			suite.TestCases[i].Skipped = &Skipped{
-				Message: fmt.Sprintf("The named external (%s) is not present", testCtx.extName),
-			}
-			suite.Skipped++
-
-			continue
-		}
 		if test.SkipFlags.NoExternals && skipFlags.NoExternals {
 			suite.TestCases[i].Skipped = &Skipped{
 				Message: "There are no externals",
@@ -3085,7 +3070,7 @@ func makeVpcPeeringsBasicSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 			Name: "Starter Test",
 			F:    testCtx.vpcPeeringsStarterTest,
 			SkipFlags: SkipFlags{
-				NamedExternal: true,
+				NoExternals:   true,
 				SubInterfaces: true,
 			},
 		},
@@ -3115,7 +3100,7 @@ func makeVpcPeeringsBasicSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 			Name: "Sergei's Special Test",
 			F:    testCtx.vpcPeeringsSergeisSpecialTest,
 			SkipFlags: SkipFlags{
-				NamedExternal: true,
+				NoExternals:   true,
 				SubInterfaces: true,
 			},
 		},
@@ -3296,25 +3281,67 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 	if len(extList.Items) == 0 || len(extAttachList.Items) == 0 {
 		slog.Warn("No externals found, some tests will be skipped")
 		skipFlags.NoExternals = true
-		skipFlags.NamedExternal = true
 	} else {
-		ext := &vpcapi.External{}
-		if err := kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: extName}, ext); err != nil {
-			slog.Warn("Named External not found, some tests will be skipped", "external", extName)
-			skipFlags.NamedExternal = true
-		}
-		found := false
-		for _, extAttach := range extAttachList.Items {
-			if extAttach.Spec.External != extName {
+		testCtx.extName = ""
+		// look first for hardware externals with at least one attachment
+		for _, ext := range extList.Items {
+			if !isHardware(&ext) {
+				slog.Debug("Skipping non-hardware external", "external", ext.Name)
+
 				continue
 			}
-			found = true
+			for _, extAttach := range extAttachList.Items {
+				if extAttach.Spec.External != ext.Name {
+					continue
+				}
+				testCtx.extName = ext.Name
+
+				break
+			}
+			if testCtx.extName == "" {
+				slog.Debug("No external attachments found for hardware external, skipping it", "external", ext.Name)
+
+				continue
+			}
+			slog.Info("Using hardware external as the \"default\"", "external", testCtx.extName)
 
 			break
 		}
-		if !found {
-			slog.Warn("No external attachments found for named external, some tests will be skipped", "external", extName)
-			skipFlags.NamedExternal = true
+		if testCtx.extName == "" {
+			slog.Debug("No viable hardware externals found, checking for virtual externals attached to hw switches")
+			for _, ext := range extList.Items {
+				extAttach := &vpcapi.ExternalAttachmentList{}
+				if err := kube.List(ctx, extAttach, kclient.MatchingLabels{wiringapi.LabelName("external"): ext.Name}); err != nil {
+					return fmt.Errorf("listing external attachments for %s: %w", ext.Name, err)
+				}
+				if len(extAttach.Items) == 0 {
+					continue
+				}
+				// check if all of the attachments are via hardware connections
+				someNotHW := false
+				for _, attach := range extAttach.Items {
+					conn := &wiringapi.Connection{}
+					if err := kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: attach.Spec.Connection}, conn); err != nil {
+						return fmt.Errorf("getting connection %s: %w", attach.Spec.Connection, err)
+					}
+					if !isHardware(conn) {
+						slog.Debug("Skipping virtual external due to non-hardware attachment", "external", ext.Name, "connection", conn.Name)
+						someNotHW = true
+
+						break
+					}
+				}
+				if !someNotHW {
+					testCtx.extName = ext.Name
+					slog.Info("Using virtual external as the \"default\"", "external", testCtx.extName)
+
+					break
+				}
+			}
+			if testCtx.extName == "" {
+				slog.Warn("No viable external found, some tests will be skipped")
+				skipFlags.NoExternals = true
+			}
 		}
 	}
 
