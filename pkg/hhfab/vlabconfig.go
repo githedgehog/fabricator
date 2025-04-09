@@ -282,13 +282,13 @@ func (c *Config) PrepareVLAB(ctx context.Context, opts VLABUpOpts) (*VLAB, error
 	}
 
 	for idx := range c.Controls {
-		if !isHardware(&c.Controls[idx]) {
+		if !IsHardware(&c.Controls[idx]) {
 			c.Controls[idx].Spec.Bootstrap.Disk = "/dev/vda"
 		}
 	}
 
 	for idx := range c.Nodes {
-		if !isHardware(&c.Nodes[idx]) {
+		if !IsHardware(&c.Nodes[idx]) {
 			c.Nodes[idx].Spec.Bootstrap.Disk = "/dev/vda"
 		}
 	}
@@ -369,7 +369,7 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 			return nil, fmt.Errorf("unexpected passthrough links for control %q: %v", control.Name, links) //nolint:goerr113
 		}
 
-		if isHardware(&control) {
+		if IsHardware(&control) {
 			return nil, fmt.Errorf("control VM %q can't be hardware", control.Name) //nolint:goerr113
 		}
 
@@ -413,7 +413,7 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 			return nil, fmt.Errorf("unexpected passthrough links for node %q: %v", node.Name, links) //nolint:goerr113
 		}
 
-		if isHardware(&node) {
+		if IsHardware(&node) {
 			return nil, fmt.Errorf("node VM %q can't be hardware", node.Name) //nolint:goerr113
 		}
 
@@ -442,7 +442,7 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 			return nil, fmt.Errorf("failed to add passthrough links for server %q: %w", server.Name, err)
 		}
 
-		if isHardware(&server) {
+		if IsHardware(&server) {
 			hw[server.Name] = true
 
 			continue
@@ -473,7 +473,7 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 	}
 	tableID := uint32(1000)
 	for _, external := range externals.Items {
-		if isHardware(&external) {
+		if IsHardware(&external) {
 			hwExternals[external.Name] = true
 
 			continue
@@ -513,7 +513,7 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 			return nil, fmt.Errorf("failed to add passthrough links for switch %q: %w", sw.Name, err)
 		}
 
-		if isHardware(&sw) {
+		if IsHardware(&sw) {
 			hw[sw.Name] = true
 
 			continue
@@ -665,7 +665,7 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 			// in hybrid environments we can have physical switches connected to
 			// both virtual and hardware externals. Since a connection is not associated
 			// with a specific external, we need to annotate the connection itself
-			if isHardware(&conn) {
+			if IsHardware(&conn) {
 				slog.Debug("Skipping hardware external connection", "connection", conn.Name)
 
 				continue
@@ -984,7 +984,8 @@ func getAsn(obj kclient.Object) uint32 {
 	return 0
 }
 
-func isHardware(obj kclient.Object) bool {
+// exported as it's used in release-tests
+func IsHardware(obj kclient.Object) bool {
 	if obj.GetAnnotations() != nil {
 		t, exist := obj.GetAnnotations()[HHFabCfgType]
 		if exist {
