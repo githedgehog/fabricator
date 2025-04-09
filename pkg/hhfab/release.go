@@ -1431,7 +1431,6 @@ type JUnitTestSuite struct {
 
 type SkipFlags struct {
 	VirtualSwitch bool `xml:"-"` // skip if there's any virtual switch in the vlab
-	NamedExternal bool `xml:"-"` // skip if the named external is not present
 	NoExternals   bool `xml:"-"` // skip if there are no externals
 	ExtendedOnly  bool `xml:"-"` // skip if extended tests are not enabled
 	SubInterfaces bool `xml:"-"` // skip if subinterfaces are not supported by some of the switches
@@ -1648,14 +1647,6 @@ func selectAndRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, suite *J
 
 			continue
 		}
-		if test.SkipFlags.NamedExternal && skipFlags.NamedExternal {
-			suite.TestCases[i].Skipped = &Skipped{
-				Message: fmt.Sprintf("The named external (%s) is not present", testCtx.extName),
-			}
-			suite.Skipped++
-
-			continue
-		}
 		if test.SkipFlags.NoExternals && skipFlags.NoExternals {
 			suite.TestCases[i].Skipped = &Skipped{
 				Message: "There are no externals",
@@ -1796,7 +1787,7 @@ func makeVpcPeeringsBasicSuiteRun(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 			Name: "Starter Test",
 			F:    testCtx.vpcPeeringsStarterTest,
 			SkipFlags: SkipFlags{
-				NamedExternal: true,
+				NoExternals:   true,
 				SubInterfaces: true,
 			},
 		},
@@ -1826,7 +1817,7 @@ func makeVpcPeeringsBasicSuiteRun(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 			Name: "Sergei's Special Test",
 			F:    testCtx.vpcPeeringsSergeisSpecialTest,
 			SkipFlags: SkipFlags{
-				NamedExternal: true,
+				NoExternals:   true,
 				SubInterfaces: true,
 			},
 		},
@@ -1838,8 +1829,6 @@ func makeVpcPeeringsBasicSuiteRun(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 
 func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps ReleaseTestOpts) error {
 	testStart := time.Now()
-	// TODO: make this configurable
-	extName := "default"
 
 	cacheCancel, kube, err := GetKubeClientWithCache(ctx, workDir)
 	if err != nil {
@@ -1895,7 +1884,7 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 		// check for virtual switches
 		if !skipFlags.VirtualSwitch {
 			if sw.Spec.Profile == meta.SwitchProfileVS {
-				slog.Info("Virtual switch found", "switch", sw.Name)
+				slog.Warn("Virtual switch found, some tests will be skipped", "switch", sw.Name)
 				skipFlags.VirtualSwitch = true
 			}
 		}
@@ -1913,26 +1902,29 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 				return fmt.Errorf("getting switch profile %s: %w", sw.Spec.Profile, err)
 			}
 			if !profile.Spec.Features.Subinterfaces {
-				slog.Info("Subinterfaces not supported on leaf switch", "switch-profile", sw.Spec.Profile, "switch", sw.Name)
+				slog.Warn("Subinterfaces not supported on leaf switch, some tests will be skipped", "switch-profile", sw.Spec.Profile, "switch", sw.Name)
 				skipFlags.SubInterfaces = true
 			}
 			profiles = append(profiles, sw.Spec.Profile)
 		}
 	}
 	extList := &vpcapi.ExternalList{}
+	var extName string
 	if err := kube.List(ctx, extList); err != nil {
 		return fmt.Errorf("listing externals: %w", err)
 	}
-	if len(extList.Items) == 0 {
-		slog.Info("No externals found")
-		skipFlags.NoExternals = true
-		skipFlags.NamedExternal = true
-	} else {
-		ext := &vpcapi.External{}
-		if err := kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: extName}, ext); err != nil {
-			slog.Info("Named External not found", "external", extName)
-			skipFlags.NamedExternal = true
+	for _, ext := range extList.Items {
+		if IsHardware(&ext) {
+			extName = ext.Name
+			slog.Debug("Using hardware external as the \"default\"", "external", extName)
+
+			break
 		}
+		slog.Debug("Skipping non-hardware external", "external", ext.Name)
+	}
+	if extName == "" {
+		slog.Warn("No hardware externals found, some tests will be skipped")
+		skipFlags.NoExternals = true
 	}
 
 	singleVpcTestCtx := makeTestCtx(kube, opts, workDir, cacheDir, false, extName, rtOtps)
