@@ -11,15 +11,15 @@ import (
 type StyleType string
 
 const (
-	StyleDefault  StyleType = "default"
-	StyleCisco    StyleType = "cisco"
-	StyleHedgehog StyleType = "hedgehog"
+	StyleTypeDefault  StyleType = "default"
+	StyleTypeCisco    StyleType = "cisco"
+	StyleTypeHedgehog StyleType = "hedgehog"
 )
 
 var StyleTypes = []StyleType{
-	StyleDefault,
-	StyleCisco,
-	StyleHedgehog,
+	StyleTypeDefault,
+	StyleTypeCisco,
+	StyleTypeHedgehog,
 }
 
 type Style struct {
@@ -40,11 +40,11 @@ type Style struct {
 
 func GetStyle(styleType StyleType) Style {
 	switch styleType {
-	case StyleCisco:
+	case StyleTypeCisco:
 		return getCiscoStyle()
-	case StyleHedgehog:
+	case StyleTypeHedgehog:
 		return getHedgehogStyle()
-	case StyleDefault:
+	case StyleTypeDefault:
 		fallthrough
 	default:
 		return getDefaultStyle()

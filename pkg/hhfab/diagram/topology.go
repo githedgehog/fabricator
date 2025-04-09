@@ -4,19 +4,16 @@
 package diagram
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
+
+	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
+	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
-
-func extractNodeID(port string) string {
-	if idx := strings.Index(port, "/"); idx > 0 {
-		return port[:idx]
-	}
-
-	return port
-}
 
 func extractPort(port string) string {
 	if idx := strings.Index(port, "/"); idx >= 0 && idx < len(port)-1 {
@@ -343,271 +340,129 @@ func sortNodes(nodes []Node, links []Link) LayeredNodes {
 	return result
 }
 
-func ConvertJSONToTopology(jsonData []byte) (Topology, error) {
-	var raw []struct {
-		Kind       string                 `json:"kind"`
-		APIVersion string                 `json:"apiVersion"`
-		Metadata   map[string]interface{} `json:"metadata"`
-		Spec       map[string]interface{} `json:"spec"`
-	}
-
-	if err := json.Unmarshal(jsonData, &raw); err != nil {
-		return Topology{}, fmt.Errorf("parsing JSON: %w", err)
-	}
-
-	var topo Topology
+func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error) {
+	topo := Topology{}
 	nodeSet := make(map[string]bool)
 
-	for _, obj := range raw {
-		switch obj.Kind {
-		case "Switch":
-			name, ok := obj.Metadata["name"].(string)
-			if !ok {
-				continue
-			}
-			if !nodeSet[name] {
-				nodeSet[name] = true
-				node := Node{
-					ID:    name,
-					Type:  "switch",
-					Label: name,
+	nodes := &fabapi.FabNodeList{}
+	if err := client.List(ctx, nodes); err != nil {
+		return topo, fmt.Errorf("listing nodes: %w", err)
+	}
+	for _, node := range nodes.Items {
+		if nodeSet[node.Name] {
+			slog.Warn("Duplicate node name, skipping", "kind", node.Kind, "name", node.Name)
+
+			continue
+		}
+
+		// skip non-gateway nodes
+		if len(node.Spec.Roles) != 1 || node.Spec.Roles[0] != fabapi.NodeRoleGateway {
+			slog.Warn("Node is not a gateway, skipping", "kind", node.Kind, "name", node.Name)
+
+			continue
+		}
+
+		nodeSet[node.Name] = true
+		node := Node{
+			ID:    node.Name,
+			Type:  NodeTypeGateway,
+			Label: node.Name,
+		}
+		topo.Nodes = append(topo.Nodes, node)
+	}
+
+	switches := &wiringapi.SwitchList{}
+	if err := client.List(ctx, switches); err != nil {
+		return topo, fmt.Errorf("listing switches: %w", err)
+	}
+	for _, sw := range switches.Items {
+		if nodeSet[sw.Name] {
+			slog.Warn("Duplicate node name, skipping", "kind", sw.Kind, "name", sw.Name)
+
+			continue
+		}
+
+		nodeSet[sw.Name] = true
+		node := Node{
+			ID:         sw.Name,
+			Type:       NodeTypeSwitch,
+			Label:      sw.Name,
+			Properties: map[string]string{},
+		}
+
+		role := string(sw.Spec.Role)
+		node.Properties["role"] = role
+		node.Label = fmt.Sprintf("%s\n%s", sw.Name, role)
+
+		node.Properties["description"] = sw.Spec.Description
+
+		topo.Nodes = append(topo.Nodes, node)
+	}
+
+	servers := &wiringapi.ServerList{}
+	if err := client.List(ctx, servers); err != nil {
+		return topo, fmt.Errorf("listing servers: %w", err)
+	}
+	for _, server := range servers.Items {
+		if nodeSet[server.Name] {
+			slog.Warn("Duplicate node name, skipping", "kind", server.Kind, "name", server.Name)
+
+			continue
+		}
+
+		nodeSet[server.Name] = true
+		node := Node{
+			ID:         server.Name,
+			Type:       NodeTypeServer,
+			Label:      server.Name,
+			Properties: map[string]string{},
+		}
+
+		topo.Nodes = append(topo.Nodes, node)
+	}
+
+	conns := &wiringapi.ConnectionList{}
+	if err := client.List(ctx, conns); err != nil {
+		return topo, fmt.Errorf("listing connections: %w", err)
+	}
+	for _, conn := range conns.Items {
+		_, _, _, links, err := conn.Spec.Endpoints()
+		if err != nil {
+			slog.Warn("Invalid connection endpoints, skipping", "kind", conn.Kind, "name", conn.Name)
+
+			continue
+		}
+
+		// TODO: add conn.Spec.VPCLoopback to the list when we're ready to draw it
+		if conn.Spec.Fabric != nil || conn.Spec.Gateway != nil || conn.Spec.MCLAGDomain != nil ||
+			conn.Spec.Unbundled != nil || conn.Spec.MCLAG != nil || conn.Spec.Bundled != nil || conn.Spec.ESLAG != nil {
+			for source, target := range links {
+				link := Link{
+					Source: wiringapi.SplitPortName(source)[0],
+					Target: wiringapi.SplitPortName(target)[0],
+					Type:   conn.Spec.Type(),
+					Properties: map[string]string{
+						"sourcePort": source,
+						"targetPort": target,
+					},
 				}
 
-				// Initialize properties map if needed
-				if node.Properties == nil {
-					node.Properties = make(map[string]string)
-				}
+				if conn.Spec.MCLAGDomain != nil {
+					link.Type = EdgeTypeMCLAG // just to keep compat with current diagram impl
 
-				// Extract role from spec
-				if role, ok := obj.Spec["role"].(string); ok {
-					node.Properties["role"] = role
-					node.Label = fmt.Sprintf("%s\n%s", name, role)
-				}
-
-				// Extract description from spec
-				if description, ok := obj.Spec["description"].(string); ok {
-					node.Properties["description"] = description
-				}
-
-				topo.Nodes = append(topo.Nodes, node)
-			}
-
-		case "Server":
-			name, ok := obj.Metadata["name"].(string)
-			if !ok {
-				continue
-			}
-			if !nodeSet[name] {
-				nodeSet[name] = true
-				node := Node{
-					ID:    name,
-					Type:  "server",
-					Label: name,
-				}
-				topo.Nodes = append(topo.Nodes, node)
-			}
-
-		case "Node":
-			name, ok := obj.Metadata["name"].(string)
-			if !ok {
-				continue
-			}
-			if !nodeSet[name] {
-				nodeSet[name] = true
-
-				isGateway := false
-				if roles, ok := obj.Spec["roles"].([]interface{}); ok {
-					for _, role := range roles {
-						if r, ok := role.(string); ok && r == "gateway" {
-							isGateway = true
-
-							break
+					for _, connLink := range conn.Spec.MCLAGDomain.PeerLinks {
+						if connLink.Switch1.Port == source && connLink.Switch2.Port == target {
+							link.Properties["mclagType"] = "peer"
+						}
+					}
+					for _, connLink := range conn.Spec.MCLAGDomain.SessionLinks {
+						if connLink.Switch1.Port == source && connLink.Switch2.Port == target {
+							link.Properties["mclagType"] = "session"
 						}
 					}
 				}
 
-				if isGateway {
-					node := Node{
-						ID:    name,
-						Type:  "gateway",
-						Label: name,
-					}
-					topo.Nodes = append(topo.Nodes, node)
-				}
-			}
-
-		case "Connection":
-			for key, val := range obj.Spec {
-				switch key {
-				case "fabric", "mclag", "bundled", "eslag", "vpcLoopback":
-					if m, ok := val.(map[string]interface{}); ok {
-						if arr, ok := m["links"].([]interface{}); ok {
-							for _, linkObj := range arr {
-								if linkMap, ok := linkObj.(map[string]interface{}); ok {
-									props := make(map[string]string)
-									var source, target string
-									if key == "fabric" {
-										if spine, ok := linkMap["spine"].(map[string]interface{}); ok {
-											if port, ok := spine["port"].(string); ok {
-												source = extractNodeID(port)
-												props["sourcePort"] = port
-											}
-										}
-										if leaf, ok := linkMap["leaf"].(map[string]interface{}); ok {
-											if port, ok := leaf["port"].(string); ok {
-												target = extractNodeID(port)
-												props["targetPort"] = port
-											}
-										}
-									} else {
-										if server, ok := linkMap["server"].(map[string]interface{}); ok {
-											if port, ok := server["port"].(string); ok {
-												source = extractNodeID(port)
-												props["sourcePort"] = port
-											}
-										}
-										if sw, ok := linkMap["switch"].(map[string]interface{}); ok {
-											if port, ok := sw["port"].(string); ok {
-												target = extractNodeID(port)
-												props["targetPort"] = port
-											}
-										}
-									}
-									if source != "" && target != "" {
-										topo.Links = append(topo.Links, Link{
-											Source:     source,
-											Target:     target,
-											Type:       key,
-											Properties: props,
-										})
-									}
-								}
-							}
-						}
-					}
-
-				case "unbundled":
-					if m, ok := val.(map[string]interface{}); ok {
-						if linkVal, ok := m["link"].(map[string]interface{}); ok {
-							m = linkVal
-						}
-						props := make(map[string]string)
-						var source, target string
-						if server, ok := m["server"].(map[string]interface{}); ok {
-							if port, ok := server["port"].(string); ok {
-								source = extractNodeID(port)
-								props["sourcePort"] = port
-							}
-						}
-						if sw, ok := m["switch"].(map[string]interface{}); ok {
-							if port, ok := sw["port"].(string); ok {
-								target = extractNodeID(port)
-								props["targetPort"] = port
-							}
-						}
-						if source != "" && target != "" {
-							topo.Links = append(topo.Links, Link{
-								Source:     source,
-								Target:     target,
-								Type:       key,
-								Properties: props,
-							})
-						}
-					}
-
-				case "mclagDomain":
-					if m, ok := val.(map[string]interface{}); ok {
-						if arr, ok := m["peerLinks"].([]interface{}); ok {
-							for _, linkObj := range arr {
-								if linkMap, ok := linkObj.(map[string]interface{}); ok {
-									props := make(map[string]string)
-									var source, target string
-									if sw1, ok := linkMap["switch1"].(map[string]interface{}); ok {
-										if port, ok := sw1["port"].(string); ok {
-											source = extractNodeID(port)
-											props["sourcePort"] = port
-										}
-									}
-									if sw2, ok := linkMap["switch2"].(map[string]interface{}); ok {
-										if port, ok := sw2["port"].(string); ok {
-											target = extractNodeID(port)
-											props["targetPort"] = port
-										}
-									}
-									props["mclagType"] = "peer"
-									if source != "" && target != "" {
-										topo.Links = append(topo.Links, Link{
-											Source:     source,
-											Target:     target,
-											Type:       "mclag",
-											Properties: props,
-										})
-									}
-								}
-							}
-						}
-						if arr, ok := m["sessionLinks"].([]interface{}); ok {
-							for _, linkObj := range arr {
-								if linkMap, ok := linkObj.(map[string]interface{}); ok {
-									props := make(map[string]string)
-									var source, target string
-									if sw1, ok := linkMap["switch1"].(map[string]interface{}); ok {
-										if port, ok := sw1["port"].(string); ok {
-											source = extractNodeID(port)
-											props["sourcePort"] = port
-										}
-									}
-									if sw2, ok := linkMap["switch2"].(map[string]interface{}); ok {
-										if port, ok := sw2["port"].(string); ok {
-											target = extractNodeID(port)
-											props["targetPort"] = port
-										}
-									}
-									props["mclagType"] = "session"
-									if source != "" && target != "" {
-										topo.Links = append(topo.Links, Link{
-											Source:     source,
-											Target:     target,
-											Type:       "mclag",
-											Properties: props,
-										})
-									}
-								}
-							}
-						}
-					}
-				case "gateway":
-					if m, ok := val.(map[string]interface{}); ok {
-						if arr, ok := m["links"].([]interface{}); ok {
-							for _, linkObj := range arr {
-								if linkMap, ok := linkObj.(map[string]interface{}); ok {
-									props := make(map[string]string)
-									var source, target string
-									if gateway, ok := linkMap["gateway"].(map[string]interface{}); ok {
-										if port, ok := gateway["port"].(string); ok {
-											source = extractNodeID(port)
-											props["sourcePort"] = port
-										}
-									}
-									if spine, ok := linkMap["spine"].(map[string]interface{}); ok {
-										if port, ok := spine["port"].(string); ok {
-											target = extractNodeID(port)
-											props["targetPort"] = port
-										}
-									}
-									if source != "" && target != "" {
-										topo.Links = append(topo.Links, Link{
-											Source:     source,
-											Target:     target,
-											Type:       "gateway",
-											Properties: props,
-										})
-									}
-								}
-							}
-						}
-					}
-				}
+				topo.Links = append(topo.Links, link)
 			}
 		}
 	}

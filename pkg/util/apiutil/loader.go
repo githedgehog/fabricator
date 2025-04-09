@@ -30,6 +30,9 @@ var (
 	fabScheme  = runtime.NewScheme()
 	fabDecoder runtime.Decoder
 
+	allScheme  = runtime.NewScheme()
+	allDecoder runtime.Decoder
+
 	nameChecker = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`)
 )
 
@@ -46,6 +49,17 @@ func init() {
 		panic(fmt.Errorf("adding fabapi to the fab scheme: %w", err))
 	}
 	fabDecoder = serializer.NewCodecFactory(fabScheme, serializer.EnableStrict).UniversalDeserializer()
+
+	if err := wiringapi.AddToScheme(allScheme); err != nil {
+		panic(fmt.Errorf("adding wiringapi to the all scheme: %w", err))
+	}
+	if err := vpcapi.AddToScheme(allScheme); err != nil {
+		panic(fmt.Errorf("adding vpcapi to the all scheme: %w", err))
+	}
+	if err := fabapi.AddToScheme(allScheme); err != nil {
+		panic(fmt.Errorf("adding fabapi to the all scheme: %w", err))
+	}
+	allDecoder = serializer.NewCodecFactory(allScheme, serializer.EnableStrict).UniversalDeserializer()
 }
 
 type Loader struct {
@@ -67,6 +81,14 @@ func NewFabLoader() *Loader {
 		scheme:  fabScheme,
 		decoder: fabDecoder,
 		kube:    fake.NewClientBuilder().WithScheme(fabScheme).Build(),
+	}
+}
+
+func NewAllLoader() *Loader {
+	return &Loader{
+		scheme:  allScheme,
+		decoder: allDecoder,
+		kube:    fake.NewClientBuilder().WithScheme(allScheme).Build(),
 	}
 }
 

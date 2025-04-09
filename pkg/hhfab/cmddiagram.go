@@ -4,156 +4,48 @@
 package hhfab
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
-	"slices"
-	"strings"
 
+	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
+	"go.githedgehog.com/fabric/pkg/util/kubeutil"
+	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/hhfab/diagram"
-	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func Diagram(workDir, format string, styleType diagram.StyleType) error {
-	includeDir := filepath.Join(workDir, IncludeDir)
-
-	resultDir := filepath.Join(workDir, "result")
+func Diagram(ctx context.Context, workDir, cacheDir string, live bool, format diagram.Format, style diagram.StyleType) error {
+	resultDir := filepath.Join(workDir, ResultDir)
 	if err := os.MkdirAll(resultDir, 0o755); err != nil {
 		return fmt.Errorf("creating result directory: %w", err)
 	}
 
-	fabPath := filepath.Join(workDir, "fab.yaml")
-	var gatewayNodes []kclient.Object
+	var client kclient.Reader
 
-	if _, err := os.Stat(fabPath); !os.IsNotExist(err) {
-		slog.Debug("Found fab.yaml in workdir", "path", "fab.yaml")
-		fabData, err := os.ReadFile(fabPath)
+	if !live {
+		c, err := load(ctx, workDir, cacheDir, true, HydrateModeIfNotPresent, "")
 		if err != nil {
-			return fmt.Errorf("reading fab.yaml: %w", err)
+			return err
 		}
 
-		fabLoader := apiutil.NewFabLoader()
-		fabObjs, err := fabLoader.Load(fabData)
+		client = c.Client
+	} else {
+		kubeconfig := filepath.Join(workDir, VLABDir, VLABKubeConfig)
+		cacheCancel, kube, err := kubeutil.NewClientWithCache(ctx, kubeconfig,
+			wiringapi.SchemeBuilder,
+			fabapi.SchemeBuilder,
+		)
 		if err != nil {
-			slog.Warn("Error parsing fab.yaml, proceeding without gateway nodes", "error", err)
-		} else {
-			for _, obj := range fabObjs {
-				if obj.GetObjectKind().GroupVersionKind().Kind == "Node" {
-					nodeObj := obj.DeepCopyObject()
-
-					specMap := make(map[string]interface{})
-					nodeBytes, err := json.Marshal(nodeObj)
-					if err != nil {
-						continue
-					}
-
-					if err := json.Unmarshal(nodeBytes, &specMap); err != nil {
-						continue
-					}
-
-					if spec, ok := specMap["spec"].(map[string]interface{}); ok {
-						if roles, ok := spec["roles"].([]interface{}); ok {
-							for _, role := range roles {
-								if roleStr, ok := role.(string); ok && roleStr == "gateway" {
-									gatewayNodes = append(gatewayNodes, obj)
-									slog.Debug("Found gateway node in fab.yaml", "name", obj.GetName())
-
-									break
-								}
-							}
-						}
-					}
-				}
-			}
+			return fmt.Errorf("creating kube client: %w", err)
 		}
+		defer cacheCancel()
+		client = kube
 	}
 
-	files, err := os.ReadDir(includeDir)
-	if err != nil {
-		return fmt.Errorf("reading include directory: %w", err)
-	}
-
-	var yamlFiles []string
-	for _, file := range files {
-		if !file.IsDir() && strings.HasSuffix(file.Name(), YAMLExt) {
-			yamlPath := filepath.Join(includeDir, file.Name())
-			relPath := filepath.Join(IncludeDir, file.Name())
-			yamlFiles = append(yamlFiles, yamlPath)
-			slog.Debug("Found YAML file", "path", relPath)
-		}
-	}
-
-	if len(yamlFiles) == 0 {
-		return fmt.Errorf("no YAML files found in include directory") //nolint:goerr113
-	}
-
-	var content []byte
-	for _, file := range yamlFiles {
-		fileContent, err := os.ReadFile(file)
-		if err != nil {
-			// Extract just the filename for error messages
-			fileName := filepath.Base(file)
-
-			return fmt.Errorf("reading file %s: %w", fileName, err)
-		}
-		if len(content) > 0 {
-			content = append(content, []byte("\n---\n")...)
-		}
-		content = append(content, fileContent...)
-	}
-
-	loader := apiutil.NewWiringLoader()
-	wiringObjs, err := loader.Load(content)
-	if err != nil {
-		return fmt.Errorf("loading wiring YAML: %w", err)
-	}
-
-	allObjs := append(slices.Clone(wiringObjs), gatewayNodes...)
-
-	jsonData, err := json.MarshalIndent(allObjs, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshaling JSON: %w", err)
-	}
-
-	format = strings.ToLower(format)
-	switch format {
-	case "drawio":
-		slog.Debug("Generating draw.io diagram", "style", styleType)
-		if err := diagram.GenerateDrawio(resultDir, jsonData, styleType); err != nil {
-			return fmt.Errorf("generating draw.io diagram: %w", err)
-		}
-		filePath := filepath.Join("result", diagram.DrawioFilename)
-		slog.Info("Generated draw.io diagram", "file", filePath, "style", styleType)
-		fmt.Printf("To use this diagram:\n")
-		fmt.Printf("1. Open with https://app.diagrams.net/ or the desktop Draw.io application\n")
-		fmt.Printf("2. You can edit the diagram and export to PNG, SVG, PDF or other formats\n")
-	case "dot":
-		slog.Debug("Generating DOT diagram")
-		if err := diagram.GenerateDOT(resultDir, jsonData); err != nil {
-			return fmt.Errorf("generating DOT diagram: %w", err)
-		}
-		filePath := filepath.Join("result", diagram.DotFilename)
-		slog.Info("Generated graphviz diagram", "file", filePath)
-		fmt.Printf("To render this diagram with Graphviz:\n")
-		fmt.Printf("1. Install Graphviz: https://graphviz.org/download/\n")
-		fmt.Printf("2. Convert to PNG: dot -Tpng %s -o diagram.png\n", filePath)
-		fmt.Printf("3. Convert to SVG: dot -Tsvg %s -o diagram.svg\n", filePath)
-		fmt.Printf("4. Convert to PDF: dot -Tpdf %s -o diagram.pdf\n", filePath)
-	case "mermaid":
-		slog.Debug("Generating Mermaid diagram")
-		if err := diagram.GenerateMermaid(resultDir, jsonData); err != nil {
-			return fmt.Errorf("generating Mermaid diagram: %w", err)
-		}
-		filePath := filepath.Join("result", diagram.MermaidFilename)
-		slog.Info("Generated Mermaid diagram", "file", filePath)
-		fmt.Printf("To render this diagram with Mermaid:\n")
-		fmt.Printf("1. Visit https://mermaid.live/ or use a Markdown editor with Mermaid support\n")
-		fmt.Printf("2. Copy the contents of %s into the editor\n", filePath)
-	default:
-		return fmt.Errorf("unsupported diagram format: %s", format) //nolint:goerr113
+	if err := diagram.Generate(ctx, resultDir, client, format, style); err != nil {
+		return fmt.Errorf("generating diagram: %w", err)
 	}
 
 	return nil

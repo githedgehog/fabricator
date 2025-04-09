@@ -359,11 +359,6 @@ func Run(ctx context.Context) error {
 		},
 	}
 
-	diagramStyleTypes := []string{}
-	for _, s := range diagram.StyleTypes {
-		diagramStyleTypes = append(diagramStyleTypes, string(s))
-	}
-
 	buildModeFlags := []cli.Flag{
 		&cli.StringFlag{
 			Name:    FlagNameBuildMode,
@@ -598,36 +593,27 @@ func Run(ctx context.Context) error {
 					&cli.StringFlag{
 						Name:    "format",
 						Aliases: []string{"f"},
-						Usage:   "diagram format: drawio (default), dot (graphviz), mermaid (unsupported)",
-						Value:   "drawio",
-						Action: func(_ *cli.Context, format string) error {
-							supportedFormats := []string{"drawio", "dot", "mermaid"}
-							if !slices.Contains(supportedFormats, strings.ToLower(format)) {
-								return fmt.Errorf("invalid format: %s (available: %s)", format, strings.Join(supportedFormats, ", ")) //nolint:goerr113
-							}
-
-							return nil
-						},
+						Usage: "diagram format: " + strings.Join(lo.Map(diagram.Formats,
+							func(item diagram.Format, _ int) string { return string(item) }), ", "),
+						Value: string(diagram.FormatDrawio),
 					},
 					&cli.StringFlag{
 						Name:    "style",
 						Aliases: []string{"s"},
-						Usage:   "diagram style (only applies to drawio format): " + strings.Join(diagramStyleTypes, ", "),
-						Value:   string(diagram.StyleDefault),
-						Action: func(_ *cli.Context, style string) error {
-							if !slices.Contains(diagramStyleTypes, style) {
-								return fmt.Errorf("invalid style: %s (available: %s)", style, strings.Join(diagramStyleTypes, ", ")) //nolint:goerr113
-							}
-
-							return nil
-						},
+						Usage: "diagram style (only applies to drawio format): " + strings.Join(lo.Map(diagram.StyleTypes,
+							func(item diagram.StyleType, _ int) string { return string(item) }), ", "),
+						Value: string(diagram.StyleTypeDefault),
+					},
+					&cli.BoolFlag{
+						Name:  "live",
+						Usage: "load resources from actually running API instead of the config file (fab.yaml and include/*)",
 					},
 				}),
 				Before: before(false),
 				Action: func(c *cli.Context) error {
-					format := strings.ToLower(c.String("format"))
+					format := diagram.Format(strings.ToLower(c.String("format")))
 					styleType := diagram.StyleType(c.String("style"))
-					if err := hhfab.Diagram(workDir, format, styleType); err != nil {
+					if err := hhfab.Diagram(ctx, workDir, cacheDir, c.Bool("live"), format, styleType); err != nil {
 						return fmt.Errorf("failed to generate %s diagram: %w", format, err)
 					}
 

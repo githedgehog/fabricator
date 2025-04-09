@@ -47,8 +47,8 @@ const (
 	HydrationStatusFull    HydrationStatus = "full"
 )
 
-func (c *Config) loadHydrateValidate(ctx context.Context, mode HydrateMode) error {
-	l, err := c.loadWiring(ctx)
+func (c *Config) loadHydrateValidate(ctx context.Context, mode HydrateMode, extraLoaders ...*apiutil.Loader) error {
+	l, err := c.loadWiring(ctx, extraLoaders...)
 	if err != nil {
 		return fmt.Errorf("loading wiring: %w", err)
 	}
@@ -58,6 +58,8 @@ func (c *Config) loadHydrateValidate(ctx context.Context, mode HydrateMode) erro
 	if err := c.ensureHydrated(ctx, kube, mode); err != nil {
 		return fmt.Errorf("ensuring hydrated: %w", err)
 	}
+
+	// TODO do we need to make sure that wiring in extraLoaders is also hydrated?
 
 	fabricCfg, err := fabric.GetFabricConfig(c.Fab)
 	if err != nil {
@@ -76,7 +78,7 @@ func (c *Config) loadHydrateValidate(ctx context.Context, mode HydrateMode) erro
 	return nil
 }
 
-func (c *Config) loadWiring(ctx context.Context) (*apiutil.Loader, error) {
+func (c *Config) loadWiring(ctx context.Context, extraLoaders ...*apiutil.Loader) (*apiutil.Loader, error) {
 	includeDir := filepath.Join(c.WorkDir, IncludeDir)
 	stat, err := os.Stat(includeDir)
 	if err != nil {
@@ -116,6 +118,12 @@ func (c *Config) loadWiring(ctx context.Context) (*apiutil.Loader, error) {
 
 		if err := l.LoadAdd(ctx, data); err != nil {
 			return nil, fmt.Errorf("loading wiring %q: %w", relName, err)
+		}
+
+		for _, loader := range extraLoaders {
+			if err := loader.LoadAdd(ctx, data); err != nil {
+				return nil, fmt.Errorf("loading wiring %q to extra loader: %w", relName, err)
+			}
 		}
 	}
 

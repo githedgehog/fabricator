@@ -12,13 +12,8 @@ import (
 	"strings"
 )
 
-func GenerateMermaid(workDir string, jsonData []byte) error {
+func GenerateMermaid(workDir string, topo Topology) error {
 	outputFile := filepath.Join(workDir, MermaidFilename)
-	topo, err := ConvertJSONToTopology(jsonData)
-	if err != nil {
-		return fmt.Errorf("converting JSON to topology: %w", err)
-	}
-
 	mermaid := generateMermaid(topo)
 	if err := os.WriteFile(outputFile, []byte(mermaid), 0o600); err != nil {
 		return fmt.Errorf("writing Mermaid file: %w", err)

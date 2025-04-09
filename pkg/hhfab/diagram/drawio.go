@@ -67,12 +67,8 @@ type Point struct {
 	As string  `xml:"as,attr,omitempty"`
 }
 
-func GenerateDrawio(workDir string, jsonData []byte, styleType StyleType) error {
+func GenerateDrawio(workDir string, topo Topology, styleType StyleType) error {
 	outputFile := filepath.Join(workDir, DrawioFilename)
-	topo, err := ConvertJSONToTopology(jsonData)
-	if err != nil {
-		return fmt.Errorf("converting JSON to topology: %w", err)
-	}
 
 	style := GetStyle(styleType)
 
