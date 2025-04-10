@@ -10,12 +10,13 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/fatih/color"
 	"github.com/mattn/go-isatty"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/util/apiutil"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 type LLDPIn struct {
@@ -32,13 +33,13 @@ type LLDPOut struct {
 	Errs      []error                                          `json:"errors"`
 }
 
-func (out *LLDPOut) MarshalText() (string, error) {
+func (out *LLDPOut) MarshalText(now time.Time) (string, error) {
 	// TODO pass to a marshal func?
 	noColor := !isatty.IsTerminal(os.Stdout.Fd())
 
 	red := color.New(color.FgRed).SprintFunc()
 	if noColor {
-		red = func(a ...interface{}) string { return fmt.Sprint(a...) }
+		red = fmt.Sprint
 	}
 
 	str := &strings.Builder{}
@@ -103,7 +104,7 @@ var (
 	_ WithErrors             = (*LLDPOut)(nil)
 )
 
-func LLDP(ctx context.Context, kube client.Reader, in LLDPIn) (*LLDPOut, error) {
+func LLDP(ctx context.Context, kube kclient.Reader, in LLDPIn) (*LLDPOut, error) {
 	out := &LLDPOut{
 		Neighbors: map[string]map[string]apiutil.LLDPNeighborStatus{},
 	}

@@ -17,15 +17,17 @@ package switchprofile
 import (
 	"go.githedgehog.com/fabric/api/meta"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 var CelesticaDS3000 = wiringapi.SwitchProfile{
-	ObjectMeta: metav1.ObjectMeta{
+	ObjectMeta: kmetav1.ObjectMeta{
 		Name: "celestica-ds3000",
 	},
 	Spec: wiringapi.SwitchProfileSpec{
-		DisplayName: "Celestica DS3000",
+		DisplayName:   "Celestica DS3000",
+		OtherNames:    []string{"Celestica Seastone2"},
+		SwitchSilicon: SiliconBroadcomTD3_X7_3_2T,
 		Features: wiringapi.SwitchProfileFeatures{
 			Subinterfaces: true,
 			VXLAN:         true,

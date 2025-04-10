@@ -17,15 +17,16 @@ package inspect
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
+	"time"
 
 	"github.com/pkg/errors"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	"go.githedgehog.com/fabric/pkg/util/apiutil"
 	"go.githedgehog.com/fabric/pkg/util/pointer"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/strings/slices"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 type VPCIn struct {
@@ -43,7 +44,7 @@ type VPCOut struct {
 	Access           map[string]*apiutil.ReachableFromSubnet `json:"access,omitempty"`
 }
 
-func (out *VPCOut) MarshalText() (string, error) {
+func (out *VPCOut) MarshalText(now time.Time) (string, error) {
 	str := strings.Builder{}
 
 	// TODO helper func
@@ -129,7 +130,7 @@ func (out *VPCOut) MarshalText() (string, error) {
 
 var _ Func[VPCIn, *VPCOut] = VPC
 
-func VPC(ctx context.Context, kube client.Reader, in VPCIn) (*VPCOut, error) {
+func VPC(ctx context.Context, kube kclient.Reader, in VPCIn) (*VPCOut, error) {
 	if in.Name == "" {
 		return nil, errors.New("name is required")
 	}
@@ -147,7 +148,7 @@ func VPC(ctx context.Context, kube client.Reader, in VPCIn) (*VPCOut, error) {
 	}
 
 	vpc := &vpcapi.VPC{}
-	if err := kube.Get(ctx, client.ObjectKey{Name: name, Namespace: metav1.NamespaceDefault}, vpc); err != nil {
+	if err := kube.Get(ctx, kclient.ObjectKey{Name: name, Namespace: kmetav1.NamespaceDefault}, vpc); err != nil {
 		return nil, errors.Wrap(err, "failed to get VPC")
 	}
 
@@ -160,7 +161,7 @@ func VPC(ctx context.Context, kube client.Reader, in VPCIn) (*VPCOut, error) {
 	out.Spec = vpc.Spec
 
 	vpcAttaches := &vpcapi.VPCAttachmentList{}
-	if err := kube.List(ctx, vpcAttaches, client.MatchingLabels{
+	if err := kube.List(ctx, vpcAttaches, kclient.MatchingLabels{
 		vpcapi.LabelVPC: name,
 	}); err != nil {
 		return nil, errors.Wrap(err, "failed to list VPC attachments")
@@ -177,7 +178,7 @@ func VPC(ctx context.Context, kube client.Reader, in VPCIn) (*VPCOut, error) {
 	}
 
 	vpcPeerings := &vpcapi.VPCPeeringList{}
-	if err := kube.List(ctx, vpcPeerings, client.MatchingLabels{
+	if err := kube.List(ctx, vpcPeerings, kclient.MatchingLabels{
 		vpcapi.ListLabelVPC(name): vpcapi.ListLabelValue,
 	}); err != nil {
 		return nil, errors.Wrap(err, "failed to list VPC peerings")
@@ -203,7 +204,7 @@ func VPC(ctx context.Context, kube client.Reader, in VPCIn) (*VPCOut, error) {
 	}
 
 	extPeerings := &vpcapi.ExternalPeeringList{}
-	if err := kube.List(ctx, extPeerings, client.MatchingLabels{
+	if err := kube.List(ctx, extPeerings, kclient.MatchingLabels{
 		vpcapi.LabelVPC: name,
 	}); err != nil {
 		return nil, errors.Wrap(err, "failed to list external peerings")

@@ -20,13 +20,13 @@ import (
 	"net"
 	"slices"
 	"strings"
+	"time"
 
-	"github.com/dustin/go-humanize"
 	"github.com/pkg/errors"
 	agentapi "go.githedgehog.com/fabric/api/agent/v1beta1"
 	dhcpapi "go.githedgehog.com/fabric/api/dhcp/v1beta1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 type MACIn struct {
@@ -39,12 +39,12 @@ type MACOut struct {
 }
 
 type MACOutDHCPLease struct {
-	Subnet   string      `json:"subnet,omitempty"`
-	Expiry   metav1.Time `json:"expiry,omitempty"`
-	Hostname string      `json:"hostname,omitempty"`
+	Subnet   string       `json:"subnet,omitempty"`
+	Expiry   kmetav1.Time `json:"expiry,omitempty"`
+	Hostname string       `json:"hostname,omitempty"`
 }
 
-func (out *MACOut) MarshalText() (string, error) {
+func (out *MACOut) MarshalText(now time.Time) (string, error) {
 	str := strings.Builder{}
 
 	if len(out.Ports) > 0 {
@@ -57,7 +57,7 @@ func (out *MACOut) MarshalText() (string, error) {
 
 	if len(out.DHCPLeases) > 0 {
 		for _, lease := range out.DHCPLeases {
-			str.WriteString(fmt.Sprintf("DHCP Lease for VPC Subnet %s:\n  Hostname: %s\n  Expiry: %s (%s)\n", lease.Subnet, lease.Hostname, lease.Expiry, humanize.Time(lease.Expiry.Time)))
+			str.WriteString(fmt.Sprintf("DHCP Lease for VPC Subnet %s:\n  Hostname: %s\n  Expiry: %s (%s)\n", lease.Subnet, lease.Hostname, lease.Expiry, HumanizeTime(now, lease.Expiry.Time)))
 		}
 	}
 
@@ -66,7 +66,7 @@ func (out *MACOut) MarshalText() (string, error) {
 
 var _ Func[MACIn, *MACOut] = MAC
 
-func MAC(ctx context.Context, kube client.Reader, in MACIn) (*MACOut, error) {
+func MAC(ctx context.Context, kube kclient.Reader, in MACIn) (*MACOut, error) {
 	out := &MACOut{}
 
 	mac := strings.ToLower(in.Value)

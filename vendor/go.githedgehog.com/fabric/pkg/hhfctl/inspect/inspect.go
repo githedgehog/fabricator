@@ -21,7 +21,9 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
+	"time"
 
+	"github.com/dustin/go-humanize"
 	"github.com/olekukonko/tablewriter"
 	"github.com/pkg/errors"
 	agentapi "go.githedgehog.com/fabric/api/agent/v1beta1"
@@ -30,9 +32,9 @@ import (
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
 	coreapi "k8s.io/api/core/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/scheme"
-	"sigs.k8s.io/yaml"
+	kyaml "sigs.k8s.io/yaml"
 )
 
 type Args struct {
@@ -54,14 +56,14 @@ var OutputTypes = []OutputType{OutputTypeText, OutputTypeJSON, OutputTypeYAML}
 type In interface{}
 
 type Out interface {
-	MarshalText() (string, error)
+	MarshalText(now time.Time) (string, error)
 }
 
 type WithErrors interface {
 	Errors() []error
 }
 
-type Func[TIn In, TOut Out] func(ctx context.Context, kube client.Reader, in TIn) (TOut, error)
+type Func[TIn In, TOut Out] func(ctx context.Context, kube kclient.Reader, in TIn) (TOut, error)
 
 func Run[TIn In, TOut Out](ctx context.Context, f Func[TIn, TOut], args Args, in TIn, w io.Writer) error {
 	outType := OutputTypeText
@@ -91,30 +93,33 @@ func Run[TIn In, TOut Out](ctx context.Context, f Func[TIn, TOut], args Args, in
 		return errors.Wrapf(err, "failed to run inspect function")
 	}
 
-	return Render(args.Output, w, out)
+	return Render(time.Now(), args.Output, w, out)
 }
 
-func Render[TOut Out](output OutputType, w io.Writer, out TOut) error {
+func Render[TOut Out](now time.Time, output OutputType, w io.Writer, out TOut) error {
 	var data []byte
 	var err error
-	if output == OutputTypeText {
-		dataS, err := out.MarshalText()
+	switch output {
+	case OutputTypeText:
+		dataS, err := out.MarshalText(now)
 		if err != nil {
 			return errors.Wrapf(err, "failed to get marshal output as text")
 		}
 
 		data = []byte(dataS)
-	} else if output == OutputTypeYAML {
-		data, err = yaml.Marshal(out)
+	case OutputTypeYAML:
+		data, err = kyaml.Marshal(out)
 		if err != nil {
 			return errors.Wrapf(err, "failed to marshal inspect output as yaml")
 		}
-	} else if output == OutputTypeJSON {
+	case OutputTypeJSON:
 		data, err = json.MarshalIndent(out, "", "  ")
 		if err != nil {
 			return errors.Wrapf(err, "failed to marshal inspect output as json")
 		}
-	} else {
+	case OutputTypeUndefined:
+		return errors.Errorf("output type %s is not defined", output)
+	default:
 		return errors.Errorf("output type %s is not implemented", output)
 	}
 
@@ -162,4 +167,8 @@ func RenderTable(headers []string, data [][]string) string {
 	table.Render()
 
 	return str.String()
+}
+
+func HumanizeTime(now, then time.Time) string {
+	return humanize.RelTime(then, now, "ago", "from now")
 }
