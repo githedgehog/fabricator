@@ -1677,7 +1677,7 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 	if lldpErr != nil {
 		slog.Error("Failed to inspect LLDP", "err", lldpErr)
 		fail = true
-	} else if renderErr := inspect.Render(inspect.OutputTypeText, os.Stdout, lldpOut); renderErr != nil {
+	} else if renderErr := inspect.Render(time.Now(), inspect.OutputTypeText, os.Stdout, lldpOut); renderErr != nil {
 		slog.Error("Inspecting LLDP reveals some errors", "err", renderErr)
 		fail = true
 	}
@@ -1687,7 +1687,7 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 	}); err != nil {
 		slog.Error("Failed to inspect BGP", "err", err)
 		fail = true
-	} else if renderErr := inspect.Render(inspect.OutputTypeText, os.Stdout, out); renderErr != nil {
+	} else if renderErr := inspect.Render(time.Now(), inspect.OutputTypeText, os.Stdout, out); renderErr != nil {
 		slog.Error("Inspecting BGP reveals some errors", "err", renderErr)
 		fail = true
 	}
