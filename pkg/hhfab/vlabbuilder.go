@@ -178,6 +178,14 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 			eslagLeafGroups = append(eslagLeafGroups, uint8(leafs))
 		}
 	}
+	// this has no effect but the log output can be confusing, so if there
+	// is no **LAG leaf set the corresponding **LAG servers to 0
+	if totalESLAGLeafs == 0 {
+		b.ESLAGServers = 0
+	}
+	if b.MCLAGLeafsCount == 0 {
+		b.MCLAGServers = 0
+	}
 
 	if b.MCLAGLeafsCount%2 != 0 {
 		return fmt.Errorf("MCLAG leafs count must be even") //nolint:goerr113
