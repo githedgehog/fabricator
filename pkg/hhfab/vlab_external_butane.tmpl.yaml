@@ -143,6 +143,7 @@ storage:
           !{{end}}{{range $vrfkey, $vrf := .ExternalVRFs}}
           router bgp {{$vrf.ASN}} vrf {{$vrfkey}}
            bgp log-neighbor-changes
+           bgp bestpath as-path multipath-relax
            no bgp ebgp-requires-policy
            no bgp network import-check {{range $connNicKey, $connNic := $.ExternalNICs}}{{range $attach := $connNic.Attachments}}{{if eq $attach.VRF $vrfkey}}
            neighbor {{$attach.NeighborIP}} remote-as {{$attach.NeighborASN}}
@@ -154,23 +155,19 @@ storage:
            address-family ipv4 unicast {{range $attach := $connNic.Attachments}}{{if eq $attach.VRF $vrfkey}}
             neighbor {{$attach.NeighborIP}} activate
             no neighbor {{$attach.NeighborIP}} send-community large
+            neighbor {{$attach.NeighborIP}} soft-reconfiguration inbound
             neighbor {{$attach.NeighborIP}} route-map {{$vrfkey}}In in
             neighbor {{$attach.NeighborIP}} route-map {{$vrfkey}}Out out {{end}}{{end}}{{if and ($connNic.Untagged) (eq $connNic.UntaggedCfg.VRF $vrfkey)}}
             neighbor {{$connNic.UntaggedCfg.NeighborIP}} activate
             no neighbor {{$connNic.UntaggedCfg.NeighborIP}} send-community large
             neighbor {{$connNic.UntaggedCfg.NeighborIP}} route-map {{$vrfkey}}In in
             neighbor {{$connNic.UntaggedCfg.NeighborIP}} route-map {{$vrfkey}}Out out{{end}}
-            maximum-paths 1
-            maximum-paths ibgp 1
             redistribute static
             import vrf default
            !
-           address-family ipv6 unicast
-            maximum-paths 1
-            maximum-paths ibgp 1
-           !
           !{{end}}{{end}}
           router bgp 1
+           bgp bestpath as-path multipath-relax
            address-family ipv4 unicast
             redistribute static{{range $vrfkey, $vrf := .ExternalVRFs}}
             import vrf {{$vrfkey}}{{end}}
