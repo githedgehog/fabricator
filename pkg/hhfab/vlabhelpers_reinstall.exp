@@ -53,7 +53,6 @@ set KEY_DOWN "\033\[B"
 set KEY_HOME "\033\[H"
 set KEY_PGUP "\033\[5~"
 set ONIE_HIGHLIGHT "*ONIE"
-set ONIE_CHAIN_INSTALL "*ONIE: Install OS"
 
 set ERROR_CONSOLE 1
 set ERROR_LOGIN 2
@@ -188,77 +187,84 @@ if { ! $POWER_RESET} {
 expect -timeout 300 -ex "GNU GRUB" {
 	log_message "EXP-DBG" "GRUB Menu detected"
 	# Select the ONIE option, and finally the Install OS option
-	sleep 1
 	
-	# Check if spawn ID is still valid
-	if {[catch {send -- "$KEY_HOME"} err]} {
-		log_message "EXP-ERR" "Lost connection while sending KEY_HOME: $err"
-		exit $ERROR_CONSOLE
-	}
-	
-	set timeout 1
-	expect {
-		-ex $ONIE_HIGHLIGHT {
-			log_message "EXP-DBG" "ONIE option found"
-			set timeout -1
-			
-			# Check connection before sending return
-			if {[catch {send "\r"} err]} {
-				log_message "EXP-ERR" "Lost connection while sending return: $err"
-				exit $ERROR_CONSOLE
-			}
-			
-			expect {
-				-ex "GNU GRUB" {
+	# Wait for menu to be fully rendered
+	expect -timeout 10 -ex "Press enter to boot the selected OS" {
+		log_message "EXP-DBG" "GRUB menu fully rendered"
+		sleep 1
+
+		# Check if spawn ID is still valid
+		if {[catch {send -- "$KEY_HOME"} err]} {
+			log_message "EXP-ERR" "Lost connection while sending KEY_HOME: $err"
+			exit $ERROR_CONSOLE
+		}
+
+		set timeout 1
+		expect {
+			-ex $ONIE_HIGHLIGHT {
+				log_message "EXP-DBG" "ONIE option found"
+				set timeout -1
+
+				# Check connection before sending return
+				if {[catch {send "\r"} err]} {
+					log_message "EXP-ERR" "Lost connection while sending return: $err"
+					exit $ERROR_CONSOLE
+				}
+
+				# Second GRUB menu: ONIE selection
+				expect -timeout 10 -ex "Press enter to boot the selected OS" {
+					log_message "EXP-DBG" "Second GRUB menu fully rendered"
+					sleep 1
+
+					# Select "ONIE: Install OS" which is the top option
 					if {[catch {send -- "$KEY_HOME"} err]} {
 						log_message "EXP-ERR" "Lost connection while sending second KEY_HOME: $err"
 						exit $ERROR_CONSOLE
 					}
 					sleep 1
+
 					if {[catch {send "\r"} err]} {
 						log_message "EXP-ERR" "Lost connection while sending final return: $err"
 						exit $ERROR_CONSOLE
 					}
-				}
-				timeout {
-					log_message "EXP-ERR" "Timeout waiting for second GRUB menu"
+				} timeout {
+					log_message "EXP-ERR" "Timeout waiting for second GRUB menu to be ready"
 					exit $ERROR_CONSOLE
 				}
-				eof {
-					log_message "EXP-ERR" "Connection lost waiting for second GRUB menu"
-					exit $ERROR_CONSOLE
-				}
-			}
-			
-			expect {
-				"ONIE: OS Install Mode ..." {
-					log_message "EXP-DBG" "Entering OS Install Mode"
-				}
-				eof {
-					log_message "EXP-ERR" "Connection lost before confirming ONIE install mode"
-					exit $ERROR_CONSOLE
-				}
-				timeout {
-					log_message "EXP-DBG" "Sending extra return"
-					if {[catch {send "\r"} err]} {
-						log_message "EXP-ERR" "Lost connection while sending extra return: $err"
+
+				expect {
+					"ONIE: OS Install Mode ..." {
+						log_message "EXP-DBG" "Entering OS Install Mode"
+					}
+					eof {
+						log_message "EXP-ERR" "Connection lost before confirming ONIE install mode"
 						exit $ERROR_CONSOLE
+					}
+					timeout {
+						log_message "EXP-DBG" "Sending extra return"
+						if {[catch {send "\r"} err]} {
+							log_message "EXP-ERR" "Lost connection while sending extra return: $err"
+							exit $ERROR_CONSOLE
+						}
 					}
 				}
 			}
-		}
-		timeout {
-			log_message "EXP-DBG" "ONIE not found, moving down menu"
-			if {[catch {send -- "$KEY_DOWN"} err]} {
-				log_message "EXP-ERR" "Lost connection while sending KEY_DOWN: $err"
+			timeout {
+				log_message "EXP-DBG" "ONIE not found, moving down menu"
+				if {[catch {send -- "$KEY_DOWN"} err]} {
+					log_message "EXP-ERR" "Lost connection while sending KEY_DOWN: $err"
+					exit $ERROR_CONSOLE
+				}
+				exp_continue
+			}
+			eof {
+				log_message "EXP-ERR" "Connection lost after seeing the GRUB menu"
 				exit $ERROR_CONSOLE
 			}
-			exp_continue
 		}
-		eof {
-			log_message "EXP-ERR" "Connection lost after seeing the GRUB menu"
-			exit $ERROR_CONSOLE
-		}
+	} timeout {
+		log_message "EXP-ERR" "Timeout waiting for GRUB menu to be ready"
+		exit $ERROR_CONSOLE
 	}
 } eof {
 	log_message "EXP-ERR" "Connection lost during GRUB menu expect"
@@ -273,7 +279,7 @@ if {$WAIT_READY} {
 	set install_success 0
 	# Wait for confirmation of the Install OS option
 	log_message "EXP-DBG" "Service discovery started"
-	expect -timeout 120 -ex "Starting ONIE Service Discovery" {
+	expect -timeout 180 -ex "Starting ONIE Service Discovery" {
 		# Wait for successful NOS installation
 		expect -timeout 300 -ex "ONIE: NOS install successful" {
 			log_message "EXP-DBG" "NOS installed successfully"
