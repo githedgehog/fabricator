@@ -53,6 +53,7 @@ set KEY_DOWN "\033\[B"
 set KEY_HOME "\033\[H"
 set KEY_PGUP "\033\[5~"
 set ONIE_HIGHLIGHT "*ONIE"
+set ONIE_CHAIN_INSTALL "*ONIE: Install OS"
 
 set ERROR_CONSOLE 1
 set ERROR_LOGIN 2
@@ -230,6 +231,9 @@ expect -timeout 300 -ex "GNU GRUB" {
 				} timeout {
 					log_message "EXP-ERR" "Timeout waiting for second GRUB menu to be ready"
 					exit $ERROR_CONSOLE
+				} eof {
+					log_message "EXP-ERR" "Connection lost waiting for second GRUB menu"
+					exit $ERROR_CONSOLE
 				}
 
 				expect {
@@ -265,6 +269,9 @@ expect -timeout 300 -ex "GNU GRUB" {
 	} timeout {
 		log_message "EXP-ERR" "Timeout waiting for GRUB menu to be ready"
 		exit $ERROR_CONSOLE
+	} eof {
+		log_message "EXP-ERR" "Connection lost waiting for GRUB menu to be fully rendered"
+		exit $ERROR_CONSOLE
 	}
 } eof {
 	log_message "EXP-ERR" "Connection lost during GRUB menu expect"
@@ -286,9 +293,15 @@ if {$WAIT_READY} {
 			set install_success 1
 		} timeout {
 			log_message "EXP-ERR" "Failed to install NOS within 5 minutes from service discovery"
+		} eof {
+			log_message "EXP-ERR" "Connection lost while waiting for NOS installation"
+			exit $ERROR_CONSOLE
 		}
 	} timeout {
 		log_message "EXP-ERR" "Failed to select install mode"
+	} eof {
+		log_message "EXP-ERR" "Connection lost while waiting for service discovery"
+		exit $ERROR_CONSOLE
 	}
 
 	# Exit if install failed
@@ -304,6 +317,9 @@ if {$WAIT_READY} {
 	} timeout {
 		log_message "EXP-ERR" "Login prompt not detected within 5 minutes"
 		exit $ERROR_INSTALL
+	} eof {
+		log_message "EXP-ERR" "Connection lost while waiting for login prompt"
+		exit $ERROR_CONSOLE
 	}
 
 	# Wait for the "System is ready" message
@@ -313,6 +329,9 @@ if {$WAIT_READY} {
 	} timeout {
 		log_message "EXP-ERR" "System did not become ready within 5 minutes"
 		exit $ERROR_INSTALL
+	} eof {
+		log_message "EXP-ERR" "Connection lost while waiting for system to be ready"
+		exit $ERROR_CONSOLE
 	}
 } else {
 	log_message "EXP-DBG" "Skipping readiness check"
