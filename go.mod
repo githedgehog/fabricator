@@ -41,7 +41,7 @@ require (
 	github.com/urfave/cli/v2 v2.27.6
 	github.com/vbauerster/mpb/v8 v8.9.3
 	github.com/vishvananda/netlink v1.3.0
-	go.githedgehog.com/fabric v0.72.1
+	go.githedgehog.com/fabric v0.72.5
 	go.githedgehog.com/gateway v0.1.2
 	golang.org/x/crypto v0.37.0
 	golang.org/x/mod v0.24.0
@@ -229,7 +229,7 @@ require (
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/kevinburke/ssh_config v1.2.0 // indirect
-	github.com/klauspost/compress v1.17.11 // indirect
+	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/klauspost/pgzip v1.2.6 // indirect
 	github.com/kr/fs v0.1.0 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
@@ -275,7 +275,7 @@ require (
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/power-devops/perfstat v0.0.0-20210106213030-5aafc221ea8c // indirect
 	github.com/proglottis/gpgme v0.1.3 // indirect
-	github.com/prometheus/client_golang v1.21.1 // indirect
+	github.com/prometheus/client_golang v1.22.0 // indirect
 	github.com/prometheus/client_model v0.6.1 // indirect
 	github.com/prometheus/common v0.62.0 // indirect
 	github.com/prometheus/procfs v0.15.1 // indirect
