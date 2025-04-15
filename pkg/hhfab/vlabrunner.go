@@ -364,8 +364,6 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 				"-device", "virtio-rng-pci,rng=rng0",
 				"-drive", "if=none,file=os.img,id=disk1",
 				"-device", "virtio-blk-pci,drive=disk1,bootindex=1",
-				"-drive", "if=pflash,file=efi_code.fd,format=raw,readonly=on",
-				"-drive", "if=pflash,file=efi_vars.fd,format=raw",
 				"-display", "none",
 				"-vga", "none",
 				"-chardev", fmt.Sprintf("socket,id=serial,path=%s,server=on,wait=off,signal=off,logfile=%s", VLABSerialSock, VLABSerialLog),
@@ -374,6 +372,15 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 				"-qmp", fmt.Sprintf("unix:%s,server,nowait", VLABQMPSock),
 				"-global", "ICH9-LPC.disable_s3=1",
 			}
+
+			efiFormat := "qcow2"
+			if vm.Type == VMTypeSwitch {
+				efiFormat = "raw"
+			}
+			args = append(args,
+				"-drive", "if=pflash,file="+VLABEFICodeFile+",format="+efiFormat+",readonly=on",
+				"-drive", "if=pflash,file="+VLABEFIVarsFile+",format="+efiFormat,
+			)
 
 			// for detached:
 			// -daemonize

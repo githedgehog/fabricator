@@ -9,12 +9,12 @@ export FLATCAR_VERSION="v4152.2.2"
 export FLATCAR_VERSION_UPSTREAM="${FLATCAR_VERSION:1}"
 
 wget "https://stable.release.flatcar-linux.net/amd64-usr/${FLATCAR_VERSION_UPSTREAM}/flatcar_production_qemu_image.img"
-wget "https://stable.release.flatcar-linux.net/amd64-usr/${FLATCAR_VERSION_UPSTREAM}/flatcar_production_qemu_uefi_efi_code.fd"
-wget "https://stable.release.flatcar-linux.net/amd64-usr/${FLATCAR_VERSION_UPSTREAM}/flatcar_production_qemu_uefi_efi_vars.fd"
+wget "https://stable.release.flatcar-linux.net/amd64-usr/${FLATCAR_VERSION_UPSTREAM}/flatcar_production_qemu_uefi_efi_code.qcow2"
+wget "https://stable.release.flatcar-linux.net/amd64-usr/${FLATCAR_VERSION_UPSTREAM}/flatcar_production_qemu_uefi_efi_vars.qcow2"
 
 mv flatcar_production_qemu_image.img flatcar.img
-mv flatcar_production_qemu_uefi_efi_code.fd flatcar_efi_code.fd
-mv flatcar_production_qemu_uefi_efi_vars.fd flatcar_efi_vars.fd
+mv flatcar_production_qemu_uefi_efi_code.qcow2 flatcar_efi_code.fd
+mv flatcar_production_qemu_uefi_efi_vars.qcow2 flatcar_efi_vars.fd
 
 wget "https://update.release.flatcar-linux.net/amd64-usr/${FLATCAR_VERSION_UPSTREAM}/flatcar_production_update.gz"
 
