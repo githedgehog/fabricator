@@ -373,10 +373,11 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 				"-global", "ICH9-LPC.disable_s3=1",
 			}
 
-			efiFormat := "qcow2"
-			if vm.Type == VMTypeSwitch {
-				efiFormat = "raw"
+			efiFormat, err := getImageFormat(filepath.Join(vmDir, VLABEFICodeFile))
+			if err != nil {
+				return fmt.Errorf("getting EFI image type for VM %s: %w", vm.Name, err)
 			}
+
 			args = append(args,
 				"-drive", "if=pflash,file="+VLABEFICodeFile+",format="+efiFormat+",readonly=on",
 				"-drive", "if=pflash,file="+VLABEFIVarsFile+",format="+efiFormat,
@@ -1120,4 +1121,25 @@ func sshReadMarker(sftp *sftp.Client) (string, error) {
 	}
 
 	return strings.TrimSpace(string(rawMarker)), nil
+}
+
+func getImageFormat(filePath string) (string, error) {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return "", fmt.Errorf("opening file: %w", err)
+	}
+	defer f.Close()
+
+	header := make([]byte, 4)
+	_, err = f.Read(header)
+	if err != nil {
+		return "", fmt.Errorf("reading file: %w", err)
+	}
+
+	// qcow2 magic string: https://github.com/qemu/qemu/blob/master/docs/interop/qcow2.txt
+	if string(header) == "QFI\xfb" {
+		return "qcow2", nil
+	}
+
+	return "raw", nil
 }
