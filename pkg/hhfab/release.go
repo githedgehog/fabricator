@@ -1337,7 +1337,8 @@ func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (bool, []Re
 			return fmt.Errorf("cleaning up interfaces on %s: %w", serverName, err)
 		}
 		// TODO: ideally this would be derived rather than hardcoded (extract the code from testing.go)
-		if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, serverName, "/opt/bin/hhnet bond 1001 layer2+3 enp2s1 enp2s2"); err != nil {
+		cmd := fmt.Sprintf("/opt/bin/hhnet bond 1001 %s enp2s1 enp2s2", testCtx.opts.HashPolicy)
+		if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, serverName, cmd); err != nil {
 			return fmt.Errorf("bonding interfaces on %s: %w", serverName, err)
 		}
 
@@ -1355,7 +1356,8 @@ func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (bool, []Re
 	if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, serverName, "/opt/bin/hhnet cleanup"); err != nil {
 		return false, reverts, fmt.Errorf("cleaning up interfaces on %s: %w", serverName, err)
 	}
-	if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, serverName, "/opt/bin/hhnet bond 1001 layer2+3 enp2s1 enp2s2"); err != nil {
+	cmd := fmt.Sprintf("/opt/bin/hhnet bond 1001 %s enp2s1 enp2s2", testCtx.opts.HashPolicy)
+	if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, serverName, cmd); err != nil {
 		return false, reverts, fmt.Errorf("bonding interfaces on %s: %w", serverName, err)
 	}
 
@@ -1867,6 +1869,7 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 		SubnetsPerVPC:     subnetsPerVpc,
 		VLANNamespace:     "default",
 		IPv4Namespace:     "default",
+		HashPolicy:        rtOtps.HashPolicy,
 	}
 
 	regexesCompiled := make([]*regexp.Regexp, 0)

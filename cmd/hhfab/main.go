@@ -67,6 +67,7 @@ const (
 	FlagResultsFile               = "results-file"
 	FlagExtended                  = "extended"
 	FlagPauseOnFail               = "pause-on-fail"
+	FlagHashPolicy                = "hash-policy"
 )
 
 func main() {
@@ -881,6 +882,12 @@ func Run(ctx context.Context) error {
 								Aliases: []string{"mtu"},
 								Usage:   "interface MTU for VPCs advertised by DHCP",
 							},
+							&cli.StringFlag{
+								Name:    FlagHashPolicy,
+								Aliases: []string{"hash"},
+								Usage:   "xmit_hash_policy for bond interfaces on servers [layer2|layer2+3|layer3+4|encap2+3|encap3+4|vlan+srcmac]",
+								Value:   hhfab.HashPolicyL2And3,
+							},
 						}),
 						Before: before(false),
 						Action: func(c *cli.Context) error {
@@ -894,6 +901,7 @@ func Run(ctx context.Context) error {
 								DNSServers:        c.StringSlice("dns-servers"),
 								TimeServers:       c.StringSlice("time-servers"),
 								InterfaceMTU:      uint16(c.Uint("interface-mtu")), //nolint:gosec
+								HashPolicy:        c.String(FlagHashPolicy),
 							}); err != nil {
 								return fmt.Errorf("setup-vpcs: %w", err)
 							}
@@ -1092,6 +1100,12 @@ func Run(ctx context.Context) error {
 								Aliases: []string{"p"},
 								Usage:   "pause testing on each scenario failure (for troubleshooting)",
 							},
+							&cli.StringFlag{
+								Name:    FlagHashPolicy,
+								Aliases: []string{"hash"},
+								Usage:   "xmit_hash_policy for bond interfaces on servers [layer2|layer2+3|layer3+4|encap2+3|encap3+4|vlan+srcmac]",
+								Value:   hhfab.HashPolicyL2And3,
+							},
 						}),
 						Before: before(false),
 						Action: func(c *cli.Context) error {
@@ -1102,6 +1116,7 @@ func Run(ctx context.Context) error {
 								Extended:    c.Bool(FlagExtended),
 								FailFast:    c.Bool(FlagNameFailFast),
 								PauseOnFail: c.Bool(FlagPauseOnFail),
+								HashPolicy:  c.String(FlagHashPolicy),
 							}
 							if err := hhfab.DoVLABReleaseTest(ctx, workDir, cacheDir, opts); err != nil {
 								return fmt.Errorf("release-test: %w", err)
