@@ -608,6 +608,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						SubnetsPerVPC:     2, // it makes it possible for some servers to have connectivity
 						DNSServers:        []string{"1.1.1.1", "1.0.0.1"},
 						TimeServers:       []string{"219.239.35.0"},
+						HashPolicy:        HashPolicyL2And3,
 					}); err != nil {
 						slog.Warn("Failed to setup VPCs", "err", err)
 
@@ -690,7 +691,10 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						return fmt.Errorf("inspecting: %w", err)
 					}
 				case OnReadyReleaseTest:
-					if err := c.ReleaseTest(ctx, ReleaseTestOpts{ResultsFile: "release-test.xml"}); err != nil {
+					if err := c.ReleaseTest(ctx, ReleaseTestOpts{
+						ResultsFile: "release-test.xml",
+						HashPolicy:  HashPolicyL2And3,
+					}); err != nil {
 						slog.Warn("Failed to run release test", "err", err)
 
 						return fmt.Errorf("release test: %w", err)

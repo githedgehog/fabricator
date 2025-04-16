@@ -42,11 +42,24 @@ import (
 )
 
 const (
-	ServerNamePrefix = "server-"
-	VSIPerfSpeed     = 1
-	HashPolicyL2     = "layer2"
-	HashPolicyL2And3 = "layer2+3"
+	ServerNamePrefix        = "server-"
+	VSIPerfSpeed            = 1
+	HashPolicyL2            = "layer2"
+	HashPolicyL2And3        = "layer2+3"
+	HashPolicyL3And4        = "layer3+4"
+	HashPolicyEncap2And3    = "encap2+3"
+	HashPolicyEncap3And4    = "encap3+4"
+	HashPolicyVLANAndSrcMAC = "vlan+srcmac"
 )
+
+var HashPolicies = []string{
+	HashPolicyL2,
+	HashPolicyL2And3,
+	HashPolicyL3And4,
+	HashPolicyEncap2And3,
+	HashPolicyEncap3And4,
+	HashPolicyVLANAndSrcMAC,
+}
 
 func (c *Config) Wait(ctx context.Context, vlab *VLAB) error {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
@@ -86,6 +99,7 @@ type SetupVPCsOpts struct {
 	DNSServers        []string
 	TimeServers       []string
 	InterfaceMTU      uint16
+	HashPolicy        string
 }
 
 func CreateOrUpdateVpc(ctx context.Context, kube client.Client, vpc *vpcapi.VPC) (bool, error) {
@@ -134,6 +148,11 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	}
 	if opts.SubnetsPerVPC <= 0 {
 		return fmt.Errorf("subnets per VPC must be positive")
+	}
+	if !slices.Contains(HashPolicies, opts.HashPolicy) {
+		return fmt.Errorf("invalid hash policy %q, must be one of %v", opts.HashPolicy, HashPolicies)
+	} else if opts.HashPolicy != HashPolicyL2 && opts.HashPolicy != HashPolicyL2And3 {
+		slog.Warn("The selected hash policy is not fully 802.3ad compliant, use layer2 or layer2+3 for full compliance", "hashPolicy", opts.HashPolicy)
 	}
 
 	slog.Info("Setting up VPCs and VPCAttachments",
@@ -329,7 +348,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		if conn.Spec.Unbundled != nil {
 			netconfCmd = fmt.Sprintf("vlan %d %s", vlan, conn.Spec.Unbundled.Link.Server.LocalPortName())
 		} else {
-			netconfCmd = fmt.Sprintf("bond %d %s", vlan, HashPolicyL2And3)
+			netconfCmd = fmt.Sprintf("bond %d %s", vlan, opts.HashPolicy)
 
 			if conn.Spec.Bundled != nil {
 				for _, link := range conn.Spec.Bundled.Links {
@@ -1713,6 +1732,7 @@ type ReleaseTestOpts struct {
 	Extended    bool
 	FailFast    bool
 	PauseOnFail bool
+	HashPolicy  string
 }
 
 func (c *Config) ReleaseTest(ctx context.Context, opts ReleaseTestOpts) error {
@@ -1721,6 +1741,12 @@ func (c *Config) ReleaseTest(ctx context.Context, opts ReleaseTestOpts) error {
 		return fmt.Errorf("getting executable path: %w", err)
 	}
 	opts.HhfabBin = self
+
+	if !slices.Contains(HashPolicies, opts.HashPolicy) {
+		return fmt.Errorf("invalid hash policy %q, must be one of %v", opts.HashPolicy, HashPolicies)
+	} else if opts.HashPolicy != HashPolicyL2 && opts.HashPolicy != HashPolicyL2And3 {
+		slog.Warn("The selected hash policy is not fully 802.3ad compliant, use layer2 or layer2+3 for full compliance", "hashPolicy", opts.HashPolicy)
+	}
 
 	return RunReleaseTestSuites(ctx, c.WorkDir, c.CacheDir, opts)
 }
