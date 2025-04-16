@@ -6,8 +6,8 @@ package v1alpha1
 import (
 	"context"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	client "sigs.k8s.io/controller-runtime/pkg/client"
+	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
@@ -18,9 +18,13 @@ type PeeringSpec struct {
 	Peering map[string]*PeeringEntry `json:"peering,omitempty"`
 }
 
+type PeeringEntryExpose struct {
+	IPs []PeeringEntryIP `json:"ips,omitempty"`
+	As  []PeeringEntryAs `json:"as,omitempty"`
+}
+
 type PeeringEntry struct {
-	IPs     []PeeringEntryIP      `json:"ips,omitempty"`
-	As      []PeeringEntryAs      `json:"as,omitempty"`
+	Expose  []PeeringEntryExpose  `json:"expose,omitempty"`
 	Ingress []PeeringEntryIngress `json:"ingress,omitempty"`
 	// TODO add natType: stateful # as there are not enough IPs in the "as" pool
 	// TODO add metric: 0 # add 0 to the advertised route metrics
@@ -57,8 +61,8 @@ type PeeringStatus struct{}
 
 // Peering is the Schema for the peerings API.
 type Peering struct {
-	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
+	kmetav1.TypeMeta   `json:",inline"`
+	kmetav1.ObjectMeta `json:"metadata,omitempty"`
 
 	Spec   PeeringSpec   `json:"spec,omitempty"`
 	Status PeeringStatus `json:"status,omitempty"`
@@ -68,9 +72,9 @@ type Peering struct {
 
 // PeeringList contains a list of Peering.
 type PeeringList struct {
-	metav1.TypeMeta `json:",inline"`
-	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []Peering `json:"items"`
+	kmetav1.TypeMeta `json:",inline"`
+	kmetav1.ListMeta `json:"metadata,omitempty"`
+	Items            []Peering `json:"items"`
 }
 
 func init() {
@@ -81,7 +85,7 @@ func (p *Peering) Default() {
 	// TODO add defaulting logic
 }
 
-func (p *Peering) Validate(_ context.Context, _ client.Reader) error {
+func (p *Peering) Validate(_ context.Context, _ kclient.Reader) error {
 	// TODO add validation logic
 	return nil
 }
