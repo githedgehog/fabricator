@@ -1337,7 +1337,7 @@ func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (bool, []Re
 			return fmt.Errorf("cleaning up interfaces on %s: %w", serverName, err)
 		}
 		// TODO: ideally this would be derived rather than hardcoded (extract the code from testing.go)
-		if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, serverName, "/opt/bin/hhnet bond 1001 enp2s1 enp2s2"); err != nil {
+		if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, serverName, "/opt/bin/hhnet bond 1001 layer2+3 enp2s1 enp2s2"); err != nil {
 			return fmt.Errorf("bonding interfaces on %s: %w", serverName, err)
 		}
 
@@ -1355,7 +1355,7 @@ func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (bool, []Re
 	if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, serverName, "/opt/bin/hhnet cleanup"); err != nil {
 		return false, reverts, fmt.Errorf("cleaning up interfaces on %s: %w", serverName, err)
 	}
-	if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, serverName, "/opt/bin/hhnet bond 1001 enp2s1 enp2s2"); err != nil {
+	if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, serverName, "/opt/bin/hhnet bond 1001 layer2+3 enp2s1 enp2s2"); err != nil {
 		return false, reverts, fmt.Errorf("bonding interfaces on %s: %w", serverName, err)
 	}
 
