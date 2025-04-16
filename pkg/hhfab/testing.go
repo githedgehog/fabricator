@@ -44,6 +44,8 @@ import (
 const (
 	ServerNamePrefix = "server-"
 	VSIPerfSpeed     = 1
+	HashPolicyL2     = "layer2"
+	HashPolicyL2And3 = "layer2+3"
 )
 
 func (c *Config) Wait(ctx context.Context, vlab *VLAB) error {
@@ -327,7 +329,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		if conn.Spec.Unbundled != nil {
 			netconfCmd = fmt.Sprintf("vlan %d %s", vlan, conn.Spec.Unbundled.Link.Server.LocalPortName())
 		} else {
-			netconfCmd = fmt.Sprintf("bond %d", vlan)
+			netconfCmd = fmt.Sprintf("bond %d %s", vlan, HashPolicyL2And3)
 
 			if conn.Spec.Bundled != nil {
 				for _, link := range conn.Spec.Bundled.Links {
