@@ -258,7 +258,7 @@ jobs:
       slug: "${{ matrix.fabricmode }}-${{ matrix.gateway }}-${{ matrix.includeonie }}-${{ matrix.buildmode }}"
 
       # TODO enable for scheduled (github.event_name == 'schedule'), master and release branches?
-      run_release_test: ${{ inputs.run_release_test == 'true' || contains(github.event.pull_request.labels.*.name, 'release-test') }}
+      run_release_test: ${{ inputs.run_release_test == true || contains(github.event.pull_request.labels.*.name, 'release-test') }}
 
     steps:
       - name: Runner host
@@ -493,7 +493,7 @@ jobs:
       slug: "${{ matrix.fabricmode }}-${{ matrix.includeonie }}-${{ matrix.buildmode }}"
 
       # TODO enable for scheduled (github.event_name == 'schedule'), master and release branches?
-      run_release_test: ${{ inputs.run_release_test == 'true' || contains(github.event.pull_request.labels.*.name, 'release-test') }}
+      run_release_test: ${{ inputs.run_release_test == true || contains(github.event.pull_request.labels.*.name, 'release-test') }}
 
     steps:
       - name: Runner host
@@ -592,7 +592,7 @@ jobs:
           fi
 
   publish-test-results:
-    if: inputs.run_release_test == 'true' || contains(github.event.pull_request.labels.*.name, 'release-test')
+    if: inputs.run_release_test == true || contains(github.event.pull_request.labels.*.name, 'release-test')
     runs-on: lab
     needs:
       - vlab
