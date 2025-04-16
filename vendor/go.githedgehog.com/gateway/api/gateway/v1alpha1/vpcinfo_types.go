@@ -6,8 +6,8 @@ package v1alpha1
 import (
 	"context"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	client "sigs.k8s.io/controller-runtime/pkg/client"
+	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
@@ -39,8 +39,8 @@ type VPCInfoStatus struct{}
 
 // VPCInfo is the Schema for the vpcinfoes API.
 type VPCInfo struct {
-	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
+	kmetav1.TypeMeta   `json:",inline"`
+	kmetav1.ObjectMeta `json:"metadata,omitempty"`
 
 	Spec   VPCInfoSpec   `json:"spec,omitempty"`
 	Status VPCInfoStatus `json:"status,omitempty"`
@@ -50,9 +50,9 @@ type VPCInfo struct {
 
 // VPCInfoList contains a list of VPCInfo.
 type VPCInfoList struct {
-	metav1.TypeMeta `json:",inline"`
-	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []VPCInfo `json:"items"`
+	kmetav1.TypeMeta `json:",inline"`
+	kmetav1.ListMeta `json:"metadata,omitempty"`
+	Items            []VPCInfo `json:"items"`
 }
 
 func init() {
@@ -63,7 +63,7 @@ func (vpc *VPCInfo) Default() {
 	// TODO add defaulting logic
 }
 
-func (vpc *VPCInfo) Validate(_ context.Context, _ client.Reader) error {
+func (vpc *VPCInfo) Validate(_ context.Context, _ kclient.Reader) error {
 	// TODO add validation logic
 	return nil
 }
