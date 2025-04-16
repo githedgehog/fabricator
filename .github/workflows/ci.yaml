@@ -655,6 +655,45 @@ jobs:
             bin/hhfab-*.tar.gz
             bin/hhfabctl-*.tar.gz
 
+      # Bump fabricator docs in the docs repository
+
+      - name: Checkout docs repository
+        uses: actions/checkout@v4
+        with:
+          repository: githedgehog/docs
+          path: docs-repo
+          persist-credentials: false
+
+      - name: Copy docs from fabricator to docs
+        run: |
+          cp docs/api.md docs-repo/docs/reference/fab-api.md.gen
+
+      - name: Generate token for the docs repository
+        uses: actions/create-github-app-token@v2
+        id: docs-app-token
+        with:
+          app-id: ${{ secrets.DOCS_APP_ID }}
+          private-key: ${{ secrets.DOCS_PRIVATE_KEY }}
+          repositories: |
+            docs
+
+      - name: Create Pull Request for docs
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ steps.docs-app-token.outputs.token }}
+          path: docs-repo
+          branch: pr/auto/fabricator-bump
+          commit-message: |
+            Update docs from fabricator@${{ github.ref_name }}
+
+            This is an automated commit created by GitHub Actions workflow,
+            in the fabricator repository.
+          signoff: true
+          title: "Update docs from fabricator@${{ github.ref_name }}"
+          body: |
+            This is an automated Pull Request created by GitHub Actions workflow,
+            in the fabricator repository.
+
       - name: Setup tmate session for debug
         if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
         uses: mxschmitt/action-tmate@v3
