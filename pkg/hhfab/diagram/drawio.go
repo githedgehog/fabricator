@@ -558,78 +558,144 @@ func createParallelEdges(model *MxGraphModel, group LinkGroup, cellMap map[strin
 	}
 }
 
-func generateEdgeLabels(model *MxGraphModel, edgeID string, link Link, srcX, srcY, tgtX, tgtY, ux, _ float64) {
-	const labelOffset = 10.0
-	labelStyle := fmt.Sprintf("edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;rotation=%.2f;", calculateLabelRotation(srcX, srcY, tgtX, tgtY))
-	swapLabels := (tgtX < srcX)
+func generateEdgeLabels(model *MxGraphModel, edgeID string, link Link, srcX, srcY, tgtX, tgtY, ux, uy float64) {
+	// Calculate vector properties
+	dx := tgtX - srcX
+	dy := tgtY - srcY
+	edgeLength := math.Sqrt(dx*dx + dy*dy)
 
-	var label1X, label2X float64
-	var label1Value, label2Value string
+	// Skip if edge is too short
+	if edgeLength < 10 {
+		return
+	}
 
-	if !swapLabels {
-		label1X = srcX + labelOffset*ux
-		label2X = tgtX - labelOffset*ux
-		label1Value = extractPort(link.Properties["sourcePort"])
-		label2Value = extractPort(link.Properties["targetPort"])
+	// Retrieve port labels from link properties
+	srcPort := extractPort(link.Properties["sourcePort"])
+	tgtPort := extractPort(link.Properties["targetPort"])
+
+	// Format the label values with proper font size
+	srcText := fmt.Sprintf("<span style=\"font-size:10px;\">%s</span>", srcPort)
+	tgtText := fmt.Sprintf("<span style=\"font-size:10px;\">%s</span>", tgtPort)
+
+	// Calculate rotation angle for label readability using the utility function
+	angle := calculateLabelRotation(srcX, srcY, tgtX, tgtY)
+
+	// Calculate dynamic vertical offset based on the edge angle
+	verticalOffset := calculateVerticalOffset(angle)
+
+	// Fixed distance from node (in pixels)
+	const fixedDistance = 30.0
+
+	// Use the provided ux and uy as unit vectors if they're valid
+	// Otherwise calculate them from the edge
+	var unitX, unitY float64
+	if ux != 0 || uy != 0 {
+		unitX = ux
+		unitY = uy
 	} else {
-		label1X = srcX - labelOffset*ux
-		label2X = tgtX + labelOffset*ux
-		label1Value = extractPort(link.Properties["targetPort"])
-		label2Value = extractPort(link.Properties["sourcePort"])
+		unitX = dx / edgeLength
+		unitY = dy / edgeLength
 	}
 
-	minXBB := math.Min(srcX, tgtX)
-	maxXBB := math.Max(srcX, tgtX)
-	widthBB := maxXBB - minXBB
-	if widthBB == 0 {
-		widthBB = 1
-	}
-	midBBX := (minXBB + maxXBB) / 2.0
+	// Calculate perpendicular vector (for vertical adjustment)
+	perpX := -unitY
+	perpY := unitX
 
-	label1RelX := (label1X - midBBX) / widthBB
-	label2RelX := (label2X - midBBX) / widthBB
+	// Calculate label positions with both distance from node and vertical offset
+	srcLabelX := srcX + (unitX * fixedDistance) + (perpX * verticalOffset)
+	srcLabelY := srcY + (unitY * fixedDistance) + (perpY * verticalOffset)
+	tgtLabelX := tgtX - (unitX * fixedDistance) + (perpX * verticalOffset)
+	tgtLabelY := tgtY - (unitY * fixedDistance) + (perpY * verticalOffset)
 
-	label1Value = fmt.Sprintf("<span style=\"font-size:10px;\">%s</span>", label1Value)
-	label2Value = fmt.Sprintf("<span style=\"font-size:10px;\">%s</span>", label2Value)
+	// Calculate widths with better padding
+	srcWidth := len(srcPort)*4 + 8 // More padding around text
+	tgtWidth := len(tgtPort)*4 + 8 // More padding around text
 
-	label1 := MxCell{
-		ID:          edgeID + "_1",
-		Parent:      edgeID,
-		Value:       label1Value,
-		Style:       labelStyle,
-		Vertex:      "1",
-		Connectable: "0",
+	// Slightly taller height to better center the text
+	const labelHeight = 10
+
+	// Style with improved alignment settings
+	textStyle := fmt.Sprintf("text;html=1;strokeColor=#888888;strokeWidth=0.5;"+
+		"fillColor=#FFFFFF;fillOpacity=80;align=center;verticalAlign=middle;"+
+		"whiteSpace=wrap;rounded=1;fontSize=10;rotation=%.1f;",
+		angle)
+
+	// Create unique IDs for the text elements
+	srcLabelID := fmt.Sprintf("%s_src_label", edgeID)
+	tgtLabelID := fmt.Sprintf("%s_tgt_label", edgeID)
+
+	// Create source port label as a separate text element
+	srcLabelCell := MxCell{
+		ID:     srcLabelID,
+		Parent: "1", // Attach directly to the root, not to the edge
+		Value:  srcText,
+		Style:  textStyle,
+		Vertex: "1",
 		Geometry: &Geometry{
-			Relative: "1",
-			Fixed:    "1",
-			As:       "geometry",
-			X:        label1RelX,
+			X:      srcLabelX - float64(srcWidth)/2,    // Center the text horizontally
+			Y:      srcLabelY - float64(labelHeight)/2, // Center the text vertically
+			Width:  srcWidth,
+			Height: labelHeight,
+			As:     "geometry",
 		},
 	}
 
-	label2 := MxCell{
-		ID:          edgeID + "_2",
-		Parent:      edgeID,
-		Value:       label2Value,
-		Style:       labelStyle,
-		Vertex:      "1",
-		Connectable: "0",
+	// Create target port label as a separate text element
+	tgtLabelCell := MxCell{
+		ID:     tgtLabelID,
+		Parent: "1", // Attach directly to the root, not to the edge
+		Value:  tgtText,
+		Style:  textStyle,
+		Vertex: "1",
 		Geometry: &Geometry{
-			Relative: "1",
-			Fixed:    "1",
-			As:       "geometry",
-			X:        label2RelX,
+			X:      tgtLabelX - float64(tgtWidth)/2,    // Center the text horizontally
+			Y:      tgtLabelY - float64(labelHeight)/2, // Center the text vertically
+			Width:  tgtWidth,
+			Height: labelHeight,
+			As:     "geometry",
 		},
 	}
 
-	model.Root.MxCell = append(model.Root.MxCell, label1, label2)
+	// Add the label cells to the model
+	model.Root.MxCell = append(model.Root.MxCell, srcLabelCell, tgtLabelCell)
 }
 
+// calculateLabelRotation returns the appropriate angle for text labels along an edge
+// with improved alignment for better readability.
 func calculateLabelRotation(srcX, srcY, tgtX, tgtY float64) float64 {
+	// Calculate basic angle using arctangent
 	angle := math.Atan2(tgtY-srcY, tgtX-srcX) * (180 / math.Pi)
+
+	// If the angle would result in upside-down text, flip it
 	if angle > 90 || angle < -90 {
 		angle += 180
 	}
 
 	return angle
+}
+
+// calculateVerticalOffset returns the appropriate vertical offset for a given angle
+// to ensure consistent alignment across different edge angles
+func calculateVerticalOffset(angleDegrees float64) float64 {
+	// Normalize angle to 0-180 range for calculation
+	normalizedAngle := math.Abs(math.Mod(angleDegrees, 180))
+
+	// Use switch statement for clearer code structure
+	switch {
+	case normalizedAngle < 30:
+		// Near horizontal (0-30 degrees)
+		return 0.8
+	case normalizedAngle < 60:
+		// Diagonal (30-60 degrees)
+		return 0.5
+	case normalizedAngle < 120:
+		// Near vertical (60-120 degrees)
+		return 0.3
+	case normalizedAngle < 150:
+		// Diagonal (120-150 degrees)
+		return 0.5
+	default:
+		// Near horizontal (150-180 degrees)
+		return 0.8
+	}
 }
