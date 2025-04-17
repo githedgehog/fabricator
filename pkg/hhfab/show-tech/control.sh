@@ -7,7 +7,9 @@ set +e
 
 OUTPUT_FILE="/tmp/show-tech.log"
 KUBECTL="/opt/bin/kubectl"
+FABRIC="/opt/bin/kubectl-fabric"
 
+# Create a clean log file
 : > "$OUTPUT_FILE"
 
 # ---------------------------
@@ -49,6 +51,53 @@ KUBECTL="/opt/bin/kubectl"
 
     echo -e "\n=== Kubernetes Events ==="
     $KUBECTL get events -A
+} >> "$OUTPUT_FILE" 2>&1
+
+# ---------------------------
+# Fabric Inspection
+# ---------------------------
+{
+    echo -e "\n=== Fabric Overview Inspection ==="
+    $FABRIC inspect fabric
+
+    echo -e "\n=== BGP Neighbors Inspection ==="
+    $FABRIC inspect bgp
+
+    echo -e "\n=== LLDP Neighbors Inspection ==="
+    $FABRIC inspect lldp
+
+    echo -e "\n=== Gathering Switch Information ==="
+    for switch in $($KUBECTL get switches.wiring.githedgehog.com -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
+        echo -e "\n=== Switch Inspection: $switch ==="
+        PATH="/opt/bin:$PATH" $FABRIC inspect switch --name=$switch
+    done
+
+    echo -e "\n=== Gathering VPC Information ==="
+    for vpc in $($KUBECTL get vpcs.vpc.githedgehog.com -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
+        echo -e "\n=== VPC Inspection: $vpc ==="
+        PATH="/opt/bin:$PATH" $FABRIC inspect vpc --name=$vpc
+    done
+
+    echo -e "\n=== Gathering Connection Information ==="
+    for conn in $($KUBECTL get connections.wiring.githedgehog.com -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
+        echo -e "\n=== Connection Inspection: $conn ==="
+        PATH="/opt/bin:$PATH" $FABRIC inspect connection --name=$conn
+    done
+
+    echo -e "\n=== Listing Management Connections ==="
+    PATH="/opt/bin:$PATH" $FABRIC connection get management
+
+    echo -e "\n=== Listing Fabric Connections ==="
+    PATH="/opt/bin:$PATH" $FABRIC connection get fabric
+
+    echo -e "\n=== Listing VPC Loopback Connections ==="
+    PATH="/opt/bin:$PATH" $FABRIC connection get vpc-loopback
+
+    echo -e "\n=== Gathering Server Information ==="
+    for server in $($KUBECTL get servers.wiring.githedgehog.com -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
+        echo -e "\n=== Server Inspection: $server ==="
+        PATH="/opt/bin:$PATH" $FABRIC inspect server --name=$server
+    done
 } >> "$OUTPUT_FILE" 2>&1
 
 # ---------------------------
