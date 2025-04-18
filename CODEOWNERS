@@ -1,1 +1,34 @@
-* @Frostman
+* @githedgehog/fab-core
+
+# GitHub config and workflows
+.github @githedgehog/fab-ci
+
+# Just and helpers
+/justfile @githedgehog/fab-tools
+/hack/ @githedgehog/fab-tools
+
+# Go modules & dependencies
+/go.* @githedgehog/fab-tools
+/vendor/ @githedgehog/fab-tools
+
+# Docs and tools to generate them
+/README.md @githedgehog/fab-tools
+/docs/ @githedgehog/fab-tools
+# /cmd/fab-gen/ @githedgehog/fab-tools
+# /pkg/gen/ @githedgehog/fab-tools
+
+# Testing framework and tools
+/pkg/hhfab/testing*.go @githedgehog/fab-testing
+/pkg/hhfab/release*.go @githedgehog/fab-testing
+/pkg/hhfab/pdu/ @githedgehog/fab-testing
+/pkg/hhfab/show-tech/ @githedgehog/fab-testing
+/pkg/hhfab/vlabhelpers* @githedgehog/fab-testing
+
+# Flatcar install
+/pkg/fab/recipe/flatcar @githedgehog/fab-recipe
+
+# Diagram tool
+/pkg/hhfab/cmddiagram.go @githedgehog/fab-diagram
+/pkg/hhfab/diagram/ @githedgehog/fab-diagram
+
+CODEOWNERS @githedgehog/fab-core
