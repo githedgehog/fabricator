@@ -1670,7 +1670,7 @@ github.com/zealic/xignore
 # go.etcd.io/bbolt v1.3.11
 ## explicit; go 1.22
 go.etcd.io/bbolt
-# go.githedgehog.com/fabric v0.72.5
+# go.githedgehog.com/fabric v0.72.5 => /Users/frostman/workspace/hedgehog/fabric
 ## explicit; go 1.24.0
 go.githedgehog.com/fabric/api/agent/v1beta1
 go.githedgehog.com/fabric/api/dhcp/v1beta1
@@ -2778,3 +2778,4 @@ sigs.k8s.io/structured-merge-diff/v4/value
 sigs.k8s.io/yaml
 sigs.k8s.io/yaml/goyaml.v2
 # github.com/diskfs/go-diskfs => github.com/Frostman/go-diskfs v1.4.2-hh3
+# go.githedgehog.com/fabric => /Users/frostman/workspace/hedgehog/fabric

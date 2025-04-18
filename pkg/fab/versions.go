@@ -13,7 +13,7 @@ import (
 
 var (
 	FabricatorVersion = meta.Version(version.Version)
-	FabricVersion     = meta.Version("v0.72.5")
+	FabricVersion     = meta.Version("v0.72.5-4-gd8ea2608-UR1648-cls")
 	GatewayVersion    = meta.Version("v0.2.0")
 )
 
@@ -48,9 +48,10 @@ var Versions = fabapi.Versions{
 		ProxyChart: FabricVersion, // TODO switch to a better proxy
 		Proxy:      "1.9.1",       // TODO use version starting with "v"
 		NOS: map[string]meta.Version{
-			string(fmeta.NOSTypeSONiCBCMVS):     "v4.4.2",
-			string(fmeta.NOSTypeSONiCBCMBase):   "v4.4.2",
-			string(fmeta.NOSTypeSONiCBCMCampus): "v4.4.2",
+			string(fmeta.NOSTypeSONiCBCMVS):       "v4.4.2",
+			string(fmeta.NOSTypeSONiCBCMBase):     "v4.4.2",
+			string(fmeta.NOSTypeSONiCBCMCampus):   "v4.4.2",
+			string(fmeta.NOSTypeSONiCCLSBroadcom): "v4.0.0",
 		},
 		ONIE: map[string]meta.Version{
 			switchprofile.DellS5232FON.Spec.Platform:         "v0.1.0",

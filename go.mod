@@ -8,6 +8,8 @@ replace gopkg.in/natefinch/lumberjack.v2 v2.2.1 => github.com/githedgehog/lumber
 
 replace github.com/diskfs/go-diskfs => github.com/Frostman/go-diskfs v1.4.2-hh3
 
+replace go.githedgehog.com/fabric => /Users/frostman/workspace/hedgehog/fabric
+
 tool sigs.k8s.io/controller-tools/cmd/controller-gen
 
 require (

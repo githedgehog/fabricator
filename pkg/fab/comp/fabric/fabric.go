@@ -11,6 +11,7 @@ import (
 
 	dhcpapi "go.githedgehog.com/fabric/api/dhcp/v1beta1"
 	"go.githedgehog.com/fabric/api/meta"
+	fmeta "go.githedgehog.com/fabric/api/meta"
 	"go.githedgehog.com/fabric/pkg/boot"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
@@ -21,20 +22,21 @@ import (
 )
 
 const (
-	APIChartRef   = "fabric/charts/fabric-api"
-	CtrlChartRef  = "fabric/charts/fabric"
-	CtrlRef       = "fabric/fabric"
-	DHCPChartRef  = "fabric/charts/fabric-dhcpd"
-	DHCPRef       = "fabric/fabric-dhcpd"
-	BootChartRef  = "fabric/charts/fabric-boot"
-	BootRef       = "fabric/fabric-boot"
-	AgentRef      = "fabric/agent"
-	CtlRef        = "fabric/hhfctl"
-	AlloyRef      = "fabric/alloy"
-	ProxyChartRef = "fabric/charts/fabric-proxy"
-	ProxyRef      = "fabric/fabric-proxy"
-	SonicRefBase  = "sonic-bcm-private"
-	OnieRefBase   = "onie-updater-private"
+	APIChartRef           = "fabric/charts/fabric-api"
+	CtrlChartRef          = "fabric/charts/fabric"
+	CtrlRef               = "fabric/fabric"
+	DHCPChartRef          = "fabric/charts/fabric-dhcpd"
+	DHCPRef               = "fabric/fabric-dhcpd"
+	BootChartRef          = "fabric/charts/fabric-boot"
+	BootRef               = "fabric/fabric-boot"
+	AgentRef              = "fabric/agent"
+	CtlRef                = "fabric/hhfctl"
+	AlloyRef              = "fabric/alloy"
+	ProxyChartRef         = "fabric/charts/fabric-proxy"
+	ProxyRef              = "fabric/fabric-proxy"
+	BroadcomSonicRefBase  = "sonic-bcm-private"
+	CelesticaSonicRefBase = "sonic-cls-private"
+	OnieRefBase           = "onie-updater-private"
 
 	ProxyNodePort = 31028
 
@@ -261,7 +263,12 @@ func GetFabricBootConfig(f fabapi.Fabricator) (*boot.ServerConfig, error) {
 
 	nosRepos := map[meta.NOSType]string{}
 	for nosType := range f.Status.Versions.Fabric.NOS {
-		nosRepos[meta.NOSType(nosType)] = comp.JoinURLParts(regURL, comp.RegistryPrefix, SonicRefBase, nosType)
+		refBase := BroadcomSonicRefBase
+		if nosType == string(fmeta.NOSTypeSONiCCLSBroadcom) {
+			refBase = CelesticaSonicRefBase
+		}
+
+		nosRepos[meta.NOSType(nosType)] = comp.JoinURLParts(regURL, comp.RegistryPrefix, refBase, nosType)
 	}
 
 	nosVersions := map[meta.NOSType]string{}
@@ -311,7 +318,12 @@ func Artifacts(cfg fabapi.Fabricator) (comp.OCIArtifacts, error) {
 			return nil, fmt.Errorf("empty NOS type or version") //nolint:goerr113
 		}
 
-		arts[comp.JoinURLParts(SonicRefBase, nos)] = version
+		refBase := BroadcomSonicRefBase
+		if nos == string(fmeta.NOSTypeSONiCCLSBroadcom) {
+			refBase = CelesticaSonicRefBase
+		}
+
+		arts[comp.JoinURLParts(refBase, nos)] = version
 	}
 
 	for platform, version := range cfg.Status.Versions.Fabric.ONIE {
