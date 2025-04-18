@@ -469,3 +469,23 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 
 	return topo, nil
 }
+
+func findNode(nodes []Node, id string) Node {
+	for _, node := range nodes {
+		if node.ID == id {
+			return node
+		}
+	}
+
+	return Node{}
+}
+
+func getNodeTypeInfo(node Node) (string, string) {
+	var nodeType, nodeRole string
+	nodeType = node.Type
+	if nodeType == NodeTypeSwitch && node.Properties != nil {
+		nodeRole = node.Properties["role"]
+	}
+
+	return nodeType, nodeRole
+}
