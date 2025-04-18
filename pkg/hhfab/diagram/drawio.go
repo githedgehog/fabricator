@@ -6,6 +6,7 @@ package diagram
 import (
 	"encoding/xml"
 	"fmt"
+	"log/slog"
 	"math"
 	"os"
 	"path/filepath"
@@ -67,10 +68,17 @@ type Point struct {
 	As string  `xml:"as,attr,omitempty"`
 }
 
+var nodeConnectionsMap map[string][]float64
+
+var nodes []Node
+
 func GenerateDrawio(workDir string, topo Topology, styleType StyleType) error {
+	slog.Debug("Initializing new diagram generation")
 	outputFile := filepath.Join(workDir, DrawioFilename)
 
 	style := GetStyle(styleType)
+
+	nodeConnectionsMap = make(map[string][]float64)
 
 	model := createDrawioModel(topo, style)
 	outputXML, err := xml.MarshalIndent(model, "", "  ")
@@ -86,6 +94,8 @@ func GenerateDrawio(workDir string, topo Topology, styleType StyleType) error {
 }
 
 func createDrawioModel(topo Topology, style Style) *MxGraphModel {
+	nodes = topo.Nodes
+
 	model := &MxGraphModel{
 		Dx:         600,
 		Dy:         700,
@@ -108,7 +118,11 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 		},
 	}
 
-	model.Root.MxCell = append(model.Root.MxCell, createLegend(style)...)
+	layers := sortNodes(topo.Nodes, topo.Links)
+	linkGroups := groupLinks(topo.Links)
+
+	// Create dynamic legend that only shows link types present in the topology
+	model.Root.MxCell = append(model.Root.MxCell, createLegend(topo.Links, style)...)
 	model.Root.MxCell = append(model.Root.MxCell, createHedgehogLogo()...)
 
 	gatewayY := 50
@@ -116,7 +130,12 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 	leafY := spineY + 250
 	serverY := leafY + 250
 
-	layers := sortNodes(topo.Nodes, topo.Links)
+	// If no spine layer exists, move leaf and server layers up
+	if len(layers.Spine) == 0 {
+		leafY = spineY
+		serverY = leafY + 250
+	}
+
 	cellMap := make(map[string]*MxCell)
 
 	canvasWidth := 600
@@ -297,7 +316,8 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 		model.Root.MxCell = append(model.Root.MxCell, cell)
 	}
 
-	linkGroups := groupLinks(topo.Links)
+	nodeConnectionsMap = make(map[string][]float64)
+
 	for i, group := range linkGroups {
 		createParallelEdges(model, group, cellMap, i, style)
 	}
@@ -323,7 +343,13 @@ func createHedgehogLogo() []MxCell {
 	return []MxCell{logoContainer}
 }
 
-func createLegend(style Style) []MxCell {
+func createLegend(links []Link, style Style) []MxCell {
+	// Constants for MCLAG types
+	const (
+		mclagTypePeer    = "peer"
+		mclagTypeSession = "session"
+	)
+
 	container := MxCell{
 		ID:     "legend_container",
 		Parent: "1",
@@ -363,78 +389,164 @@ func createLegend(style Style) []MxCell {
 		},
 	}
 
-	legendEntries := []struct {
-		y     int
-		style string
-		text  string
-	}{
-		{50, style.FabricLinkStyle, "Fabric Links"},
-		{80, style.MCLAGPeerStyle, "MCLAG Peer Links"},
-		{110, style.MCLAGSessionStyle, "MCLAG Session Links"},
-		{140, style.MCLAGServerStyle, "MCLAG Server Links"},
-		{170, style.BundledServerStyle, "Bundled Server Links"},
-		{200, style.UnbundledStyle, "Unbundled Server Links"},
-		{230, style.ESLAGServerStyle, "ESLAG Server Links"},
-		{260, style.GatewayLinkStyle, "Gateway Links"},
+	// Collect unique link types present in the topology
+	linkTypesMap := make(map[string]bool)
+
+	for _, link := range links {
+		// First check for MCLAG links which use "mclagType" property
+		if mclagType, ok := link.Properties["mclagType"]; ok {
+			if mclagType == mclagTypePeer {
+				linkTypesMap["mclag_peer"] = true
+			} else if mclagType == mclagTypeSession {
+				linkTypesMap["mclag_session"] = true
+			}
+		} else if link.Type == EdgeTypeMCLAG {
+			// If it's an MCLAG link without a specific type, it's a server link
+			linkTypesMap["mclag_server"] = true
+		} else if link.Type == EdgeTypeBundled {
+			linkTypesMap["bundled"] = true
+		} else if _, ok := link.Properties["bundled"]; ok {
+			linkTypesMap["bundled"] = true
+		} else if link.Type == EdgeTypeESLAG {
+			linkTypesMap["eslag_server"] = true
+		} else if _, ok := link.Properties["eslag_server"]; ok {
+			linkTypesMap["eslag_server"] = true
+		} else if link.Type == EdgeTypeGateway {
+			linkTypesMap["gateway"] = true
+		} else if _, ok := link.Properties["gateway"]; ok {
+			linkTypesMap["gateway"] = true
+		} else {
+			// For other links, determine type based on node roles
+			sourceNodeFound := false
+			targetNodeFound := false
+			var sourceNode, targetNode Node
+
+			// Find source node
+			for _, n := range nodes {
+				if n.ID == link.Source {
+					sourceNode = n
+					sourceNodeFound = true
+
+					break
+				}
+			}
+
+			// Find target node
+			for _, n := range nodes {
+				if n.ID == link.Target {
+					targetNode = n
+					targetNodeFound = true
+
+					break
+				}
+			}
+
+			// If both nodes found, determine link type
+			if sourceNodeFound && targetNodeFound {
+				sourceType, sourceRole := getNodeTypeInfo(sourceNode)
+				targetType, targetRole := getNodeTypeInfo(targetNode)
+
+				if sourceType == NodeTypeSwitch && targetType == NodeTypeSwitch {
+					if (sourceRole == SwitchRoleSpine && targetRole == SwitchRoleLeaf) ||
+						(sourceRole == SwitchRoleLeaf && targetRole == SwitchRoleSpine) {
+						linkTypesMap["fabric"] = true
+					} else if sourceRole == SwitchRoleLeaf && targetRole == SwitchRoleLeaf {
+						linkTypesMap["fabric"] = true
+					}
+				} else if (sourceType == NodeTypeSwitch && targetType == NodeTypeServer) ||
+					(sourceType == NodeTypeServer && targetType == NodeTypeSwitch) {
+					linkTypesMap["unbundled"] = true
+				}
+			}
+		}
 	}
 
-	cells := make([]MxCell, 3+4*len(legendEntries))[:0]
-	cells = append(cells, container, background, title)
-	for i, entry := range legendEntries {
-		startPoint := MxCell{
-			ID:     fmt.Sprintf("legend_line_%d_start", i),
-			Parent: "legend_container",
-			Style:  "point;",
-			Vertex: "1",
-			Geometry: &Geometry{
-				X:      20,
-				Y:      float64(entry.y),
-				Width:  1,
-				Height: 1,
-				As:     "geometry",
-			},
-		}
-		endPoint := MxCell{
-			ID:     fmt.Sprintf("legend_line_%d_end", i),
-			Parent: "legend_container",
-			Style:  "point;",
-			Vertex: "1",
-			Geometry: &Geometry{
-				X:      60,
-				Y:      float64(entry.y),
-				Width:  1,
-				Height: 1,
-				As:     "geometry",
-			},
-		}
+	// Only force Unbundled when MCLAG is detected - don't force Fabric
+	if linkTypesMap["mclag_peer"] || linkTypesMap["mclag_session"] || linkTypesMap["mclag_server"] {
+		linkTypesMap["unbundled"] = true
+	}
 
-		lineSample := MxCell{
-			ID:     fmt.Sprintf("legend_line_%d", i),
-			Parent: "legend_container",
-			Style:  entry.style,
-			Edge:   "1",
-			Source: startPoint.ID,
-			Target: endPoint.ID,
-			Geometry: &Geometry{
-				Relative: "1",
-				As:       "geometry",
-			},
+	// Create legend entries based on detected link types
+	legendEntries := []struct {
+		linkType string
+		style    string
+		text     string
+	}{
+		{"fabric", style.FabricLinkStyle, "Fabric Links"},
+		{"mclag_peer", style.MCLAGPeerStyle, "MCLAG Peer Links"},
+		{"mclag_session", style.MCLAGSessionStyle, "MCLAG Session Links"},
+		{"mclag_server", style.MCLAGServerStyle, "MCLAG Server Links"},
+		{"bundled", style.BundledServerStyle, "Bundled Server Links"},
+		{"unbundled", style.UnbundledStyle, "Unbundled Server Links"},
+		{"eslag_server", style.ESLAGServerStyle, "ESLAG Server Links"},
+		{"gateway", style.GatewayLinkStyle, "Gateway Links"},
+	}
+
+	cells := make([]MxCell, 0, 3+4*len(legendEntries))
+	cells = append(cells, container, background, title)
+
+	// Only include legend entries for link types present in the topology
+	y := 50
+	for i, entry := range legendEntries {
+		if linkTypesMap[entry.linkType] {
+			startPoint := MxCell{
+				ID:     fmt.Sprintf("legend_line_%d_start", i),
+				Parent: "legend_container",
+				Style:  "point;",
+				Vertex: "1",
+				Geometry: &Geometry{
+					X:      20,
+					Y:      float64(y),
+					Width:  1,
+					Height: 1,
+					As:     "geometry",
+				},
+			}
+			endPoint := MxCell{
+				ID:     fmt.Sprintf("legend_line_%d_end", i),
+				Parent: "legend_container",
+				Style:  "point;",
+				Vertex: "1",
+				Geometry: &Geometry{
+					X:      60,
+					Y:      float64(y),
+					Width:  1,
+					Height: 1,
+					As:     "geometry",
+				},
+			}
+
+			lineSample := MxCell{
+				ID:     fmt.Sprintf("legend_line_%d", i),
+				Parent: "legend_container",
+				Style:  entry.style,
+				Edge:   "1",
+				Source: startPoint.ID,
+				Target: endPoint.ID,
+				Geometry: &Geometry{
+					Relative: "1",
+					As:       "geometry",
+				},
+			}
+			text := MxCell{
+				ID:     fmt.Sprintf("legend_text_%d", i),
+				Parent: "legend_container",
+				Value:  entry.text,
+				Style:  "text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;",
+				Vertex: "1",
+				Geometry: &Geometry{
+					X:      70,
+					Y:      float64(y - 10),
+					Width:  230,
+					Height: 20,
+					As:     "geometry",
+				},
+			}
+			cells = append(cells, startPoint, endPoint, lineSample, text)
+
+			// Only increment y for legend entries that are actually added
+			y += 30
 		}
-		text := MxCell{
-			ID:     fmt.Sprintf("legend_text_%d", i),
-			Parent: "legend_container",
-			Value:  entry.text,
-			Style:  "text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;",
-			Vertex: "1",
-			Geometry: &Geometry{
-				X:      70,
-				Y:      float64(entry.y - 10),
-				Width:  230,
-				Height: 20,
-				As:     "geometry",
-			},
-		}
-		cells = append(cells, startPoint, endPoint, lineSample, text)
 	}
 
 	return cells
@@ -470,76 +582,160 @@ func groupLinks(links []Link) []LinkGroup {
 	return result
 }
 
-func fixedConnectionPoint(cell *MxCell, targetX, targetY float64) (float64, float64) {
-	if cell.Geometry == nil || cell.Geometry.Width == 0 || cell.Geometry.Height == 0 {
-		return 0.5, 0.5
-	}
-	cx := cell.Geometry.X + float64(cell.Geometry.Width)/2
-	cy := cell.Geometry.Y + float64(cell.Geometry.Height)/2
-	dx := targetX - cx
-	dy := targetY - cy
-	if dx == 0 && dy == 0 {
-		return 0.5, 0.5
-	}
-	halfWidth := float64(cell.Geometry.Width) / 2
-	halfHeight := float64(cell.Geometry.Height) / 2
-	scaleX := halfWidth / math.Abs(dx)
-	scaleY := halfHeight / math.Abs(dy)
-	scale := math.Min(scaleX, scaleY)
-	ix := cx + dx*scale
-	iy := cy + dy*scale
-	rx := (ix - cell.Geometry.X) / float64(cell.Geometry.Width)
-	ry := (iy - cell.Geometry.Y) / float64(cell.Geometry.Height)
-
-	return rx, ry
-}
-
 func createParallelEdges(model *MxGraphModel, group LinkGroup, cellMap map[string]*MxCell, edgeGroupID int, style Style) {
 	sourceCell, ok := cellMap[group.Source]
 	if !ok || sourceCell.Geometry == nil {
+		slog.Debug("Source cell not found or has no geometry", "source", group.Source)
+
 		return
 	}
+
 	targetCell, ok := cellMap[group.Target]
 	if !ok || targetCell.Geometry == nil {
+		slog.Debug("Target cell not found or has no geometry", "target", group.Target)
+
 		return
 	}
+
+	connectionType := getConnectionType(group.Source, group.Target)
+
+	slog.Debug("Processing edge group",
+		"edgeGroupID", edgeGroupID,
+		"source", group.Source,
+		"target", group.Target,
+		"type", connectionType,
+		"linkCount", len(group.Links))
+
+	if nodeConnectionsMap == nil {
+		nodeConnectionsMap = make(map[string][]float64)
+	}
+
+	// Calculate center points
 	srcCenterX := sourceCell.Geometry.X + float64(sourceCell.Geometry.Width)/2
 	srcCenterY := sourceCell.Geometry.Y + float64(sourceCell.Geometry.Height)/2
 	tgtCenterX := targetCell.Geometry.X + float64(targetCell.Geometry.Width)/2
 	tgtCenterY := targetCell.Geometry.Y + float64(targetCell.Geometry.Height)/2
-	sx, sy := fixedConnectionPoint(sourceCell, tgtCenterX, tgtCenterY)
-	tx, ty := fixedConnectionPoint(targetCell, srcCenterX, srcCenterY)
+
+	slog.Debug("Connection centers",
+		"sourceCenterX", srcCenterX,
+		"sourceCenterY", srcCenterY,
+		"targetCenterX", tgtCenterX,
+		"targetCenterY", tgtCenterY)
+
+	// Calculate connection points
+	slog.Debug("Calculating optimal connection point for source", "source", group.Source)
+	sx, sy := calculateOptimalConnectionPoint(sourceCell, tgtCenterX, tgtCenterY, nodeConnectionsMap)
+
+	slog.Debug("Calculating optimal connection point for target", "target", group.Target)
+	tx, ty := calculateOptimalConnectionPoint(targetCell, srcCenterX, srcCenterY, nodeConnectionsMap)
+
+	// Calculate absolute coordinates of connection points
 	srcDefaultX := sourceCell.Geometry.X + sx*float64(sourceCell.Geometry.Width)
 	srcDefaultY := sourceCell.Geometry.Y + sy*float64(sourceCell.Geometry.Height)
 	tgtDefaultX := targetCell.Geometry.X + tx*float64(targetCell.Geometry.Width)
 	tgtDefaultY := targetCell.Geometry.Y + ty*float64(targetCell.Geometry.Height)
+
+	slog.Debug("Base connection line",
+		"srcX", srcDefaultX,
+		"srcY", srcDefaultY,
+		"tgtX", tgtDefaultX,
+		"tgtY", tgtDefaultY)
+
+	// Calculate edge vector and normalize
 	vx := tgtDefaultX - srcDefaultX
 	vy := tgtDefaultY - srcDefaultY
 	baseLength := math.Sqrt(vx*vx + vy*vy)
 	if baseLength == 0 {
 		baseLength = 1
+		slog.Warn("Zero length edge, using default length of 1")
 	}
 	ux := vx / baseLength
 	uy := vy / baseLength
+
+	// Calculate perpendicular vector for offset
 	px := -uy
 	py := ux
+
+	slog.Debug("Edge vectors",
+		"unitX", ux,
+		"unitY", uy,
+		"perpX", px,
+		"perpY", py)
+
+	// Check for leaf-to-leaf connection using the connection type
+	isLeafToLeaf := connectionType == "leaf-to-leaf"
+
+	// Set vertical offset for leaf-to-leaf connections
+	var verticalOffset float64
+	if isLeafToLeaf {
+		verticalOffset = 12.0
+		slog.Debug("Leaf-to-leaf connection detected", "verticalOffset", verticalOffset)
+	}
+
+	// Check for spine-to-distant-leaf connection that needs special handling
+	isSpineToDistantLeaf, spineLeafOffset := calculateSpineToLeafOffset(group.Source, group.Target, cellMap)
+	if isSpineToDistantLeaf {
+		slog.Debug("Spine-to-distant-leaf connection detected", "verticalOffset", spineLeafOffset)
+	}
+
+	// Process each link in the group
 	numLinks := len(group.Links)
+	baseSpacing := 10.0
+
 	for i, link := range group.Links {
-		offset := (float64(i) - float64(numLinks-1)/2) * 10.0
+		// Calculate offset
+		offset := (float64(i) - float64(numLinks-1)/2) * baseSpacing
+
+		slog.Debug("Processing link", "index", i, "offset", offset)
+
+		// Apply the perpendicular offset
 		srcX := srcDefaultX + px*offset
 		srcY := srcDefaultY + py*offset
 		tgtX := tgtDefaultX + px*offset
 		tgtY := tgtDefaultY + py*offset
+
+		// Apply vertical offset for leaf-to-leaf connections
+		if isLeafToLeaf {
+			srcY += verticalOffset
+			tgtY += verticalOffset
+			slog.Debug("Applied vertical offset for leaf-to-leaf", "linkIndex", i)
+		}
+
+		// Apply additional vertical adjustment for spine-to-distant-leaf connections
+		if isSpineToDistantLeaf {
+			srcY += spineLeafOffset
+			slog.Debug("Applied spine-to-leaf vertical offset", "linkIndex", i, "offset", spineLeafOffset)
+		}
+
+		slog.Debug("Link coordinates",
+			"linkIndex", i,
+			"srcX", srcX,
+			"srcY", srcY,
+			"tgtX", tgtX,
+			"tgtY", tgtY)
+
+		// Calculate relative positions for connection points
 		relSrcX := (srcX - sourceCell.Geometry.X) / float64(sourceCell.Geometry.Width)
 		relSrcY := (srcY - sourceCell.Geometry.Y) / float64(sourceCell.Geometry.Height)
 		relTgtX := (tgtX - targetCell.Geometry.X) / float64(targetCell.Geometry.Width)
 		relTgtY := (tgtY - targetCell.Geometry.Y) / float64(targetCell.Geometry.Height)
+
+		slog.Debug("Relative link coordinates",
+			"linkIndex", i,
+			"relSrcX", relSrcX,
+			"relSrcY", relSrcY,
+			"relTgtX", relTgtX,
+			"relTgtY", relTgtY)
+
+		// Create edge ID
 		edgeID := fmt.Sprintf("e%d_%d", edgeGroupID, i)
 
+		// Create edge style
 		edgeStyle := GetLinkStyleFromTheme(link, style) +
 			fmt.Sprintf("exitX=%.3f;exitY=%.3f;exitDx=0;exitDy=0;entryX=%.3f;entryY=%.3f;entryDx=0;entryDy=0;",
 				relSrcX, relSrcY, relTgtX, relTgtY)
 
+		// Create the edge cell
 		edgeCell := MxCell{
 			ID:     edgeID,
 			Parent: "1",
@@ -553,9 +749,132 @@ func createParallelEdges(model *MxGraphModel, group LinkGroup, cellMap map[strin
 				As:       "geometry",
 			},
 		}
+
+		// Add the edge to the model
 		model.Root.MxCell = append(model.Root.MxCell, edgeCell)
+
+		// Generate labels with fixed call
+		ux, uy := calculateUnitVector(srcX, srcY, tgtX, tgtY)
 		generateEdgeLabels(model, edgeID, link, srcX, srcY, tgtX, tgtY, ux, uy)
+
+		slog.Debug("Created edge", "linkIndex", i, "edgeID", edgeID)
 	}
+
+	slog.Debug("Finished processing edge group", "edgeGroupID", edgeGroupID)
+}
+
+func calculateSpineToLeafOffset(source, target string, cellMap map[string]*MxCell) (bool, float64) {
+	sourceNode := findNode(nodes, source)
+	targetNode := findNode(nodes, target)
+
+	sourceType, sourceRole := getNodeTypeInfo(sourceNode)
+	targetType, targetRole := getNodeTypeInfo(targetNode)
+
+	isSpineToLeaf := (sourceType == NodeTypeSwitch && sourceRole == SwitchRoleSpine &&
+		targetType == NodeTypeSwitch && targetRole == SwitchRoleLeaf) ||
+		(targetType == NodeTypeSwitch && targetRole == SwitchRoleSpine &&
+			sourceType == NodeTypeSwitch && sourceRole == SwitchRoleLeaf)
+
+	if !isSpineToLeaf {
+		return false, 0
+	}
+
+	var spineNode, leafNode Node
+	if sourceType == NodeTypeSwitch && sourceRole == SwitchRoleSpine {
+		spineNode = sourceNode
+		leafNode = targetNode
+	} else {
+		spineNode = targetNode
+		leafNode = sourceNode
+	}
+
+	spinePositions := make(map[string]float64)
+	leafPositions := make(map[string]float64)
+	spineIDs := []string{}
+	leafIDs := []string{}
+
+	for _, node := range nodes {
+		nodeType, nodeRole := getNodeTypeInfo(node)
+		if nodeType != NodeTypeSwitch {
+			continue
+		}
+
+		cell, ok := cellMap[node.ID]
+		if !ok || cell.Geometry == nil {
+			continue
+		}
+
+		centerX := cell.Geometry.X + float64(cell.Geometry.Width)/2
+
+		if nodeRole == SwitchRoleSpine {
+			spinePositions[node.ID] = centerX
+			spineIDs = append(spineIDs, node.ID)
+		} else if nodeRole == SwitchRoleLeaf {
+			leafPositions[node.ID] = centerX
+			leafIDs = append(leafIDs, node.ID)
+		}
+	}
+
+	// Rule 1: If 2 spines and 5 or fewer leaves, no offset
+	if len(spineIDs) <= 2 && len(leafIDs) <= 5 {
+		return false, 0
+	}
+
+	sort.Slice(spineIDs, func(i, j int) bool {
+		return spinePositions[spineIDs[i]] < spinePositions[spineIDs[j]]
+	})
+
+	sort.Slice(leafIDs, func(i, j int) bool {
+		return leafPositions[leafIDs[i]] < leafPositions[leafIDs[j]]
+	})
+
+	// Find the leaf's position in the sorted array
+	leafIndex := -1
+	for i, id := range leafIDs {
+		if id == leafNode.ID {
+			leafIndex = i
+
+			break
+		}
+	}
+
+	// Get positions for calculations
+	leftmostSpineID := spineIDs[0]
+	rightmostSpineID := spineIDs[len(spineIDs)-1]
+
+	// Handle special case: 3 spines and 5 leaves
+	if len(spineIDs) == 3 && len(leafIDs) == 5 {
+		// Only offset the outermost leaves (first and last)
+		if leafIndex == 0 || leafIndex == len(leafIDs)-1 {
+			spineX := spinePositions[spineNode.ID]
+			leafX := leafPositions[leafNode.ID]
+			spineCenterX := (spinePositions[leftmostSpineID] + spinePositions[rightmostSpineID]) / 2
+			leafCenterX := (leafPositions[leafIDs[0]] + leafPositions[leafIDs[len(leafIDs)-1]]) / 2
+
+			// Only apply if spine and leaf are on opposite sides of center
+			if (spineX < spineCenterX && leafX > leafCenterX) ||
+				(spineX > spineCenterX && leafX < leafCenterX) {
+				return true, -15.0
+			}
+		}
+	} else if (len(spineIDs) == 2 && len(leafIDs) >= 6) || (len(spineIDs) >= 3 && len(leafIDs) >= 6) {
+		// For 2 spines and 6+ leaves OR 3+ spines and 6+ leaves
+		// Apply offset for the 2 leftmost and 2 rightmost leaves
+		if leafIndex < 2 || leafIndex >= len(leafIDs)-2 {
+			spineX := spinePositions[spineNode.ID]
+			leafX := leafPositions[leafNode.ID]
+			spineCenterX := (spinePositions[leftmostSpineID] + spinePositions[rightmostSpineID]) / 2
+			leafCenterX := (leafPositions[leafIDs[0]] + leafPositions[leafIDs[len(leafIDs)-1]]) / 2
+
+			// Only apply if spine and leaf are on opposite sides of center
+			if (spineX < spineCenterX && leafX > leafCenterX) ||
+				(spineX > spineCenterX && leafX < leafCenterX) {
+				return true, -15.0
+			}
+		}
+	}
+
+	return false, 0
 }
 
 func generateEdgeLabels(model *MxGraphModel, edgeID string, link Link, srcX, srcY, tgtX, tgtY, ux, uy float64) {
@@ -698,4 +1017,184 @@ func calculateVerticalOffset(angleDegrees float64) float64 {
 		// Near horizontal (150-180 degrees)
 		return 0.8
 	}
+}
+
+func calculateOptimalConnectionPoint(cell *MxCell, targetX, targetY float64, nodeConnectionsMap map[string][]float64) (float64, float64) {
+	if cell.Geometry == nil || cell.Geometry.Width == 0 || cell.Geometry.Height == 0 {
+		slog.Debug("No geometry for cell, using default center point (0.5, 0.5)", "cellID", cell.ID)
+
+		return 0.5, 0.5 // Default to center if no geometry
+	}
+
+	// Calculate center of the cell
+	cx := cell.Geometry.X + float64(cell.Geometry.Width)/2
+	cy := cell.Geometry.Y + float64(cell.Geometry.Height)/2
+
+	// Calculate vector from center to target
+	dx := targetX - cx
+	dy := targetY - cy
+
+	// Handle the case where target is at the same position as cell center
+	if dx == 0 && dy == 0 {
+		slog.Debug("Target at same position as cell center, using default (0.5, 0.5)", "cellID", cell.ID)
+
+		return 0.5, 0.5
+	}
+
+	// Calculate angle of approach (in radians)
+	angle := math.Atan2(dy, dx)
+
+	// Convert to degrees for easier debugging and comparison
+	angleDeg := angle * 180 / math.Pi
+
+	slog.Debug("Calculating connection point",
+		"cellID", cell.ID,
+		"targetX", targetX,
+		"targetY", targetY,
+		"originalAngle", angleDeg)
+
+	// Round angle to nearest sector (to group similar approaches)
+	// Using 15-degree sectors as in the original version
+	sectorSize := 15.0
+	sectorAngle := math.Round(angleDeg/sectorSize) * sectorSize
+
+	slog.Debug("Sector angle", "cellID", cell.ID, "sectorAngle", sectorAngle)
+
+	// Store this angle in the node connections map to track distribution
+	// Using the node ID as key ensures we track per-node
+	connections := nodeConnectionsMap[cell.ID]
+
+	// If this is the first connection at this angle, initialize
+	if connections == nil {
+		connections = make([]float64, 0)
+		slog.Debug("First connection to this node", "cellID", cell.ID)
+	}
+
+	// Check if we already have connections at this exact sector angle
+	// We only care about exact matches to maintain symmetry
+	connectionCount := 0
+	for _, existingAngle := range connections {
+		if math.Abs(existingAngle-sectorAngle) < 0.001 { // Almost exact match
+			connectionCount++
+		}
+	}
+
+	// Check for opposing angle - connections from opposite sides need special handling
+	// This is important for symmetry between opposing sides
+	opposingAngle := sectorAngle + 180
+	if opposingAngle > 180 {
+		opposingAngle -= 360
+	}
+	opposingCount := 0
+	for _, existingAngle := range connections {
+		if math.Abs(existingAngle-opposingAngle) < 0.001 {
+			opposingCount++
+		}
+	}
+
+	slog.Debug("Connection analysis",
+		"cellID", cell.ID,
+		"connectionCount", connectionCount,
+		"sectorAngle", sectorAngle,
+		"opposingCount", opposingCount)
+
+	// Add this angle to the connections
+	nodeConnectionsMap[cell.ID] = append(connections, sectorAngle)
+
+	// Apply minimal adjustment only when we have exact overlaps
+	var adjustmentFactor float64
+
+	// Only adjust if we have multiple connections at the exact same angle
+	if connectionCount > 0 {
+		// Apply a small fixed offset per connection, symmetrically
+		adjustmentFactor = float64(connectionCount) * 0.2
+
+		// Use node metadata for spine-specific adjustment
+		node := findNode(nodes, cell.ID)
+		nodeType, nodeRole := getNodeTypeInfo(node)
+
+		// For spine nodes, which have many connections, apply slightly larger offset
+		if nodeType == NodeTypeSwitch && nodeRole == SwitchRoleSpine && connectionCount > 1 {
+			adjustmentFactor *= 1.1
+		}
+	}
+
+	slog.Debug("Applying adjustment", "cellID", cell.ID, "adjustmentFactor", adjustmentFactor)
+
+	// Convert back to radians with adjustment
+	adjustedAngle := (sectorAngle + adjustmentFactor) * math.Pi / 180
+
+	slog.Debug("Adjusted angle",
+		"cellID", cell.ID,
+		"adjustedAngleDegrees", sectorAngle+adjustmentFactor,
+		"adjustedAngleRadians", adjustedAngle)
+
+	// Re-calculate dx, dy with adjusted angle
+	dx = math.Cos(adjustedAngle)
+	dy = math.Sin(adjustedAngle)
+
+	// Find intersection with rectangle sides
+	halfWidth := float64(cell.Geometry.Width) / 2
+	halfHeight := float64(cell.Geometry.Height) / 2
+
+	scaleX := halfWidth / math.Abs(dx)
+	scaleY := halfHeight / math.Abs(dy)
+	scale := math.Min(scaleX, scaleY)
+
+	ix := cx + dx*scale
+	iy := cy + dy*scale
+
+	// Convert to relative coordinates (0-1 range)
+	rx := (ix - cell.Geometry.X) / float64(cell.Geometry.Width)
+	ry := (iy - cell.Geometry.Y) / float64(cell.Geometry.Height)
+
+	slog.Debug("Final connection point",
+		"cellID", cell.ID,
+		"relativeX", rx,
+		"relativeY", ry,
+		"absoluteX", ix,
+		"absoluteY", iy)
+
+	return rx, ry
+}
+
+func calculateUnitVector(x1, y1, x2, y2 float64) (float64, float64) {
+	dx := x2 - x1
+	dy := y2 - y1
+	length := math.Sqrt(dx*dx + dy*dy)
+
+	if length < 1e-6 {
+		return 0, 0
+	}
+
+	return dx / length, dy / length
+}
+
+func getConnectionType(source, target string) string {
+	sourceNode := findNode(nodes, source)
+	targetNode := findNode(nodes, target)
+
+	sourceType, sourceRole := getNodeTypeInfo(sourceNode)
+	targetType, targetRole := getNodeTypeInfo(targetNode)
+
+	switch {
+	case sourceType == NodeTypeSwitch && targetType == NodeTypeSwitch:
+		switch {
+		case sourceRole == SwitchRoleLeaf && targetRole == SwitchRoleLeaf:
+			return "leaf-to-leaf"
+		case sourceRole == SwitchRoleSpine && targetRole == SwitchRoleLeaf:
+			return "spine-to-leaf"
+		case sourceRole == SwitchRoleLeaf && targetRole == SwitchRoleSpine:
+			return "leaf-to-spine"
+		default:
+			return "switch-to-switch"
+		}
+	case (sourceType == NodeTypeSwitch && targetType == NodeTypeServer) ||
+		(sourceType == NodeTypeServer && targetType == NodeTypeSwitch):
+		return "server-connection"
+	case sourceType == NodeTypeGateway || targetType == NodeTypeGateway:
+		return "gateway-connection"
+	}
+
+	return "unknown"
 }
