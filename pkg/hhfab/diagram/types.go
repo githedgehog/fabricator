@@ -47,7 +47,7 @@ const (
 	NodeTypeServer    = "server"
 	NodeTypeGateway   = "gateway"
 	SwitchRoleSpine   = "spine"
-	SwitchRoleLeaf    = "leaf"
+	SwitchRoleLeaf    = "server-leaf"
 )
 
 const (
@@ -55,3 +55,17 @@ const (
 	DotFilename     = "diagram.dot"
 	MermaidFilename = "diagram.mmd"
 )
+
+type TieredNodes struct {
+	Spine   []Node
+	Leaf    []Node
+	Server  []Node
+	Gateway []Node
+}
+
+type NodeMetrics struct {
+	ConnectionCount   int
+	AngleDistribution map[int]int
+	ParentConnections []string
+	ChildConnections  []string
+}
