@@ -678,7 +678,7 @@ jobs:
             docs
 
       - name: Create Pull Request for docs
-        uses: peter-evans/create-pull-request@v5
+        uses: peter-evans/create-pull-request@v7
         with:
           token: ${{ steps.docs-app-token.outputs.token }}
           path: docs-repo
