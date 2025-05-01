@@ -14,7 +14,7 @@ import (
 var (
 	FabricatorVersion = meta.Version(version.Version)
 	FabricVersion     = meta.Version("v0.72.6")
-	GatewayVersion    = meta.Version("v0.2.0")
+	GatewayVersion    = meta.Version("v0.3.0")
 )
 
 var Versions = fabapi.Versions{
@@ -70,6 +70,9 @@ var Versions = fabapi.Versions{
 	Gateway: fabapi.GatewayVersions{
 		API:        GatewayVersion,
 		Controller: GatewayVersion,
+		Agent:      GatewayVersion,
+		Dataplane:  "v0.5.1", // TODO set actual version
+		FRR:        "latest", // TODO set actual version
 	},
 	VLAB: fabapi.VLABVersions{
 		ONIE:    "v0.2.0",

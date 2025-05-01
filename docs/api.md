@@ -527,6 +527,9 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `api` _[Version](#version)_ |  |  |  |
 | `controller` _[Version](#version)_ |  |  |  |
+| `agent` _[Version](#version)_ |  |  |  |
+| `dataplane` _[Version](#version)_ |  |  |  |
+| `frr` _[Version](#version)_ |  |  |  |
 
 
 #### PlatformVersions
