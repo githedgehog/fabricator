@@ -20,7 +20,7 @@ type GatewayStatus struct{}
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-
+// +kubebuilder:resource:categories=hedgehog;hedgehog-gateway,shortName=gw
 // Gateway is the Schema for the gateways API.
 type Gateway struct {
 	kmetav1.TypeMeta   `json:",inline"`

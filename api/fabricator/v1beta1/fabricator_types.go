@@ -273,6 +273,9 @@ type FabricVersions struct {
 type GatewayVersions struct {
 	API        meta.Version `json:"api,omitempty"`
 	Controller meta.Version `json:"controller,omitempty"`
+	Agent      meta.Version `json:"agent,omitempty"`
+	Dataplane  meta.Version `json:"dataplane,omitempty"`
+	FRR        meta.Version `json:"frr,omitempty"`
 }
 
 type VLABVersions struct {

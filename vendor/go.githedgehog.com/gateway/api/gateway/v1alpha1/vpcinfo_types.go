@@ -32,11 +32,15 @@ type VPCInfoSubnet struct {
 }
 
 // VPCInfoStatus defines the observed state of VPCInfo.
-type VPCInfoStatus struct{}
+type VPCInfoStatus struct {
+	InternalID string `json:"internalID,omitempty"`
+}
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-
+// +kubebuilder:resource:categories=hedgehog;hedgehog-gateway,shortName=gwvpc
+// +kubebuilder:printcolumn:name="InternalID",type=string,JSONPath=`.status.internalID`,priority=0
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`,priority=0
 // VPCInfo is the Schema for the vpcinfoes API.
 type VPCInfo struct {
 	kmetav1.TypeMeta   `json:",inline"`
@@ -57,6 +61,10 @@ type VPCInfoList struct {
 
 func init() {
 	SchemeBuilder.Register(&VPCInfo{}, &VPCInfoList{})
+}
+
+func (vpc *VPCInfo) IsReady() bool {
+	return vpc.Status.InternalID != ""
 }
 
 func (vpc *VPCInfo) Default() {

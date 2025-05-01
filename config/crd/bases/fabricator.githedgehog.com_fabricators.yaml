@@ -324,9 +324,15 @@ spec:
                         type: object
                       gateway:
                         properties:
+                          agent:
+                            type: string
                           api:
                             type: string
                           controller:
+                            type: string
+                          dataplane:
+                            type: string
+                          frr:
                             type: string
                         type: object
                       platform:
@@ -530,9 +536,15 @@ spec:
                     type: object
                   gateway:
                     properties:
+                      agent:
+                        type: string
                       api:
                         type: string
                       controller:
+                        type: string
+                      dataplane:
+                        type: string
+                      frr:
                         type: string
                     type: object
                   platform:

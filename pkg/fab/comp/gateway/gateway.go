@@ -14,13 +14,19 @@ import (
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/util/tmplutil"
+	"go.githedgehog.com/gateway/api/meta"
+	corev1 "k8s.io/api/core/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
+	kyaml "sigs.k8s.io/yaml"
 )
 
 const (
 	CtrlRef      = "gateway/gateway"
 	CtrlChartRef = "gateway/charts/gateway"
 	APIChartRef  = "gateway/charts/gateway-api"
+	AgentRef     = "gateway/gateway-agent"
+	DataplaneRef = "gateway-proto/gwtestctl" // TODO set actual dataplane image
+	FRRRef       = "toolbox"                 // TODO set actual frr image and update airgap artifacts
 )
 
 //go:embed values.tmpl.yaml
@@ -33,13 +39,13 @@ func Install(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 		return nil, nil
 	}
 
-	repo, err := comp.ImageURL(cfg, CtrlRef)
+	ctrlRepo, err := comp.ImageURL(cfg, CtrlRef)
 	if err != nil {
 		return nil, fmt.Errorf("getting image URL for %q: %w", CtrlRef, err)
 	}
 
 	values, err := tmplutil.FromTemplate("values", valuesTmpl, map[string]any{
-		"Repo": repo,
+		"Repo": ctrlRepo,
 		"Tag":  string(cfg.Status.Versions.Gateway.Controller),
 	})
 	if err != nil {
@@ -58,9 +64,44 @@ func Install(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 		return nil, fmt.Errorf("api chart: %w", err)
 	}
 
+	agentRepo, err := comp.ImageURL(cfg, AgentRef)
+	if err != nil {
+		return nil, fmt.Errorf("getting image URL for %q: %w", AgentRef, err)
+	}
+
+	dataplaneRepo, err := comp.ImageURL(cfg, DataplaneRef)
+	if err != nil {
+		return nil, fmt.Errorf("getting image URL for %q: %w", DataplaneRef, err)
+	}
+
+	frrRepo, err := comp.ImageURL(cfg, FRRRef)
+	if err != nil {
+		return nil, fmt.Errorf("getting image URL for %q: %w", FRRRef, err)
+	}
+
+	ctrlCfgData, err := kyaml.Marshal(&meta.GatewayCtrlConfig{
+		Namespace: comp.FabNamespace,
+		Tolerations: []corev1.Toleration{
+			{
+				Key:      fabapi.RoleTaintKey(fabapi.NodeRoleGateway),
+				Operator: corev1.TolerationOpExists,
+				Effect:   corev1.TaintEffectNoExecute,
+			},
+		},
+		AgentRef:     agentRepo + ":" + string(cfg.Status.Versions.Gateway.Agent),
+		DataplaneRef: dataplaneRepo + ":" + string(cfg.Status.Versions.Gateway.Dataplane),
+		FRRRef:       frrRepo + ":" + string(cfg.Status.Versions.Gateway.FRR),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("marshalling ctrl config: %w", err)
+	}
+
 	return []kclient.Object{
 		apiChart,
 		ctrlChart,
+		comp.NewConfigMap("gateway-ctrl-config", map[string]string{
+			"config.yaml": string(ctrlCfgData),
+		}),
 	}, nil
 }
 
@@ -71,6 +112,9 @@ func Artifacts(cfg fabapi.Fabricator) (comp.OCIArtifacts, error) {
 		APIChartRef:  cfg.Status.Versions.Gateway.API,
 		CtrlRef:      cfg.Status.Versions.Gateway.Controller,
 		CtrlChartRef: cfg.Status.Versions.Gateway.Controller,
+		AgentRef:     cfg.Status.Versions.Gateway.Agent,
+		DataplaneRef: cfg.Status.Versions.Gateway.Dataplane,
+		// FRRRef:       cfg.Status.Versions.Gateway.FRR, // TODO enable after switching to actual frr image
 	}, nil
 }
 
