@@ -94,19 +94,20 @@ func generateDOT(topo Topology) string {
 	b.WriteString("\t// Connect legend to anchor to position it at the top-left\n")
 	b.WriteString("\tlegend_anchor -> legend [style=invis];\n\n")
 
-	b.WriteString("\t{rank=same; ")
-	for _, node := range layers.Spine {
-		b.WriteString(fmt.Sprintf("\"%s\"; ", node.ID))
-	}
-	b.WriteString("}\n")
-
+	// Place gateway at source rank (top in TB layout)
 	if len(layers.Gateway) > 0 {
-		b.WriteString("\t{rank=same; ")
+		b.WriteString("\t{rank=source; ")
 		for _, node := range layers.Gateway {
 			b.WriteString(fmt.Sprintf("\"%s\"; ", node.ID))
 		}
 		b.WriteString("}\n")
 	}
+
+	b.WriteString("\t{rank=same; ")
+	for _, node := range layers.Spine {
+		b.WriteString(fmt.Sprintf("\"%s\"; ", node.ID))
+	}
+	b.WriteString("}\n")
 
 	b.WriteString("\t{rank=same; ")
 	for _, node := range layers.Leaf {
@@ -138,6 +139,31 @@ func generateDOT(topo Topology) string {
 	}
 	b.WriteString("\n")
 
+	// Add invisible edges to center the gateway over spines
+	if len(layers.Gateway) > 0 && len(layers.Spine) > 0 {
+		// For even number of spines, connect to both middle spines
+		if len(layers.Spine)%2 == 0 {
+			// Find the middle spines
+			middleIndex1 := len(layers.Spine)/2 - 1
+			middleIndex2 := len(layers.Spine) / 2
+
+			// Add equal weight invisible edges to both middle spines
+			for _, gateway := range layers.Gateway {
+				b.WriteString(fmt.Sprintf("\t\"%s\" -> \"%s\" [style=invis, weight=200];\n",
+					gateway.ID, layers.Spine[middleIndex1].ID))
+				b.WriteString(fmt.Sprintf("\t\"%s\" -> \"%s\" [style=invis, weight=200];\n",
+					gateway.ID, layers.Spine[middleIndex2].ID))
+			}
+		} else {
+			// For odd number of spines, connect to middle spine
+			middleIndex := len(layers.Spine) / 2
+			for _, gateway := range layers.Gateway {
+				b.WriteString(fmt.Sprintf("\t\"%s\" -> \"%s\" [style=invis, weight=200];\n",
+					gateway.ID, layers.Spine[middleIndex].ID))
+			}
+		}
+	}
+
 	if len(layers.Gateway) > 1 {
 		writeChain(&b, layers.Gateway)
 	}
@@ -147,7 +173,66 @@ func generateDOT(topo Topology) string {
 	b.WriteString("\n")
 
 	b.WriteString("\tedge [style=solid, weight=1];\n")
+
+	// Track fabric links between spine and leaf to collapse parallel connections
+	spineLeafConnections := make(map[string]map[string][]map[string]string)
 	for _, link := range topo.Links {
+		// For Fabric links between spine and leaf nodes
+		if link.Type == EdgeTypeFabric {
+			var spineNode, leafNode string
+			var spinePort, leafPort string
+
+			// Determine which is spine and which is leaf
+			for _, node := range layers.Spine {
+				if link.Source == node.ID {
+					spineNode = link.Source
+					spinePort = link.Properties["sourcePort"]
+					leafNode = link.Target
+					leafPort = link.Properties["targetPort"]
+
+					break
+				} else if link.Target == node.ID {
+					spineNode = link.Target
+					spinePort = link.Properties["targetPort"]
+					leafNode = link.Source
+					leafPort = link.Properties["sourcePort"]
+
+					break
+				}
+			}
+
+			// If both are spine-leaf connection
+			if spineNode != "" && leafNode != "" {
+				isLeaf := false
+				for _, node := range layers.Leaf {
+					if leafNode == node.ID {
+						isLeaf = true
+
+						break
+					}
+				}
+
+				if isLeaf {
+					// Initialize map for spine if not exists
+					if spineLeafConnections[spineNode] == nil {
+						spineLeafConnections[spineNode] = make(map[string][]map[string]string)
+					}
+
+					// Add port pair to connection list
+					portInfo := map[string]string{
+						"spinePort": spinePort,
+						"leafPort":  leafPort,
+					}
+					spineLeafConnections[spineNode][leafNode] = append(
+						spineLeafConnections[spineNode][leafNode], portInfo)
+
+					// Skip this link as we'll render it later
+					continue
+				}
+			}
+		}
+
+		// Process all other links normally
 		var color, style string
 		switch link.Type {
 		case EdgeTypeFabric:
@@ -176,6 +261,32 @@ func generateDOT(topo Topology) string {
 			link.Source, link.Target, color, style,
 			extractPort(link.Properties["targetPort"]),
 			extractPort(link.Properties["sourcePort"])))
+	}
+
+	// Render collapsed spine-leaf connections
+	for spineNode, leafConnections := range spineLeafConnections {
+		for leafNode, portPairs := range leafConnections {
+			// Only draw one connection per spine-leaf pair
+			if len(portPairs) > 0 {
+				// Combine port labels
+				var spinePorts, leafPorts []string
+				for _, pair := range portPairs {
+					spinePorts = append(spinePorts, extractPort(pair["spinePort"]))
+					leafPorts = append(leafPorts, extractPort(pair["leafPort"]))
+				}
+
+				spinePortsLabel := strings.Join(spinePorts, ",")
+				leafPortsLabel := strings.Join(leafPorts, ",")
+
+				// Set penwidth proportional to the number of links
+				penwidth := 1 + len(portPairs)
+
+				// For thick lines, make them stand out more
+				b.WriteString(fmt.Sprintf("\t\"%s\" -> \"%s\" [color=\"%s\", style=\"%s\", headlabel=\"%s\", taillabel=\"%s\", labeldistance=2, labelangle=0, penwidth=%d];\n",
+					spineNode, leafNode, ColorFabric, StyleSolid,
+					leafPortsLabel, spinePortsLabel, penwidth))
+			}
+		}
 	}
 
 	b.WriteString("}\n")
