@@ -27,7 +27,7 @@ var Formats = []Format{
 	FormatMermaid,
 }
 
-func Generate(ctx context.Context, resultDir string, client kclient.Reader, format Format, style StyleType) error {
+func Generate(ctx context.Context, resultDir string, client kclient.Reader, format Format, style StyleType, outputPath string) error {
 	if !slices.Contains(Formats, format) {
 		return fmt.Errorf("unsupported diagram format: %s", format) //nolint:goerr113
 	}
@@ -40,39 +40,84 @@ func Generate(ctx context.Context, resultDir string, client kclient.Reader, form
 		return fmt.Errorf("getting topology: %w", err)
 	}
 
+	var filePath string
+	var displayPath string
+
 	switch format {
 	case FormatDrawio:
 		slog.Debug("Generating draw.io diagram", "style", style)
-		if err := GenerateDrawio(resultDir, topo, style); err != nil {
+		if err := GenerateDrawio(resultDir, topo, style, outputPath); err != nil {
 			return fmt.Errorf("generating draw.io diagram: %w", err)
 		}
-		filePath := filepath.Join("result", DrawioFilename)
-		slog.Info("Generated draw.io diagram", "file", filePath, "style", style)
+		if outputPath != "" {
+			filePath = outputPath
+		} else {
+			filePath = filepath.Join(resultDir, DrawioFilename)
+		}
+
+		displayPath = filePath
+		workDir, err := filepath.Abs(".")
+		if err == nil {
+			rel, err := filepath.Rel(workDir, filePath)
+			if err == nil {
+				displayPath = rel
+			}
+		}
+
+		slog.Info("Generated draw.io diagram", "file", displayPath, "style", style)
 		fmt.Printf("To use this diagram:\n")
 		fmt.Printf("1. Open with https://app.diagrams.net/ or the desktop Draw.io application\n")
 		fmt.Printf("2. You can edit the diagram and export to PNG, SVG, PDF or other formats\n")
 	case FormatDot:
 		slog.Debug("Generating DOT diagram")
-		if err := GenerateDOT(resultDir, topo); err != nil {
+		if err := GenerateDOT(resultDir, topo, outputPath); err != nil {
 			return fmt.Errorf("generating DOT diagram: %w", err)
 		}
-		filePath := filepath.Join("result", DotFilename)
-		slog.Info("Generated graphviz diagram", "file", filePath)
+		if outputPath != "" {
+			filePath = outputPath
+		} else {
+			filePath = filepath.Join(resultDir, DotFilename)
+		}
+
+		displayPath = filePath
+		workDir, err := filepath.Abs(".")
+		if err == nil {
+			rel, err := filepath.Rel(workDir, filePath)
+			if err == nil {
+				displayPath = rel
+			}
+		}
+
+		slog.Info("Generated graphviz diagram", "file", displayPath)
 		fmt.Printf("To render this diagram with Graphviz:\n")
 		fmt.Printf("1. Install Graphviz: https://graphviz.org/download/\n")
-		fmt.Printf("2. Convert to PNG: dot -Tpng %s -o diagram.png\n", filePath)
-		fmt.Printf("3. Convert to SVG: dot -Tsvg %s -o diagram.svg\n", filePath)
-		fmt.Printf("4. Convert to PDF: dot -Tpdf %s -o diagram.pdf\n", filePath)
+		fmt.Printf("2. Convert to PNG: dot -Tpng %s -o diagram.png\n", displayPath)
+		fmt.Printf("3. Convert to SVG: dot -Tsvg %s -o diagram.svg\n", displayPath)
+		fmt.Printf("4. Convert to PDF: dot -Tpdf %s -o diagram.pdf\n", displayPath)
 	case FormatMermaid:
 		slog.Debug("Generating Mermaid diagram")
-		if err := GenerateMermaid(resultDir, topo); err != nil {
+		if err := GenerateMermaid(resultDir, topo, outputPath); err != nil {
 			return fmt.Errorf("generating Mermaid diagram: %w", err)
 		}
-		filePath := filepath.Join("result", MermaidFilename)
-		slog.Info("Generated Mermaid diagram", "file", filePath)
+		if outputPath != "" {
+			filePath = outputPath
+		} else {
+			filePath = filepath.Join(resultDir, MermaidFilename)
+		}
+
+		displayPath = filePath
+		workDir, err := filepath.Abs(".")
+		if err == nil {
+			rel, err := filepath.Rel(workDir, filePath)
+			if err == nil {
+				displayPath = rel
+			}
+		}
+
+		slog.Info("Generated Mermaid diagram", "file", displayPath)
 		fmt.Printf("To render this diagram with Mermaid:\n")
 		fmt.Printf("1. Visit https://mermaid.live/ or use a Markdown editor with Mermaid support\n")
-		fmt.Printf("2. Copy the contents of %s into the editor\n", filePath)
+		fmt.Printf("2. Copy the contents of %s into the editor\n", displayPath)
 	default:
 		return fmt.Errorf("unsupported diagram format: %s", format) //nolint:goerr113
 	}

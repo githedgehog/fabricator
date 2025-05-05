@@ -72,9 +72,15 @@ var nodeConnectionsMap map[string][]float64
 
 var nodes []Node
 
-func GenerateDrawio(workDir string, topo Topology, styleType StyleType) error {
+func GenerateDrawio(workDir string, topo Topology, styleType StyleType, outputPath string) error {
 	slog.Debug("Initializing new diagram generation")
-	outputFile := filepath.Join(workDir, DrawioFilename)
+
+	var finalOutputPath string
+	if outputPath != "" {
+		finalOutputPath = outputPath
+	} else {
+		finalOutputPath = filepath.Join(workDir, DrawioFilename)
+	}
 
 	style := GetStyle(styleType)
 
@@ -86,7 +92,12 @@ func GenerateDrawio(workDir string, topo Topology, styleType StyleType) error {
 		return fmt.Errorf("marshaling XML: %w", err)
 	}
 	xmlContent := []byte(xml.Header + string(outputXML))
-	if err := os.WriteFile(outputFile, xmlContent, 0o600); err != nil {
+
+	if err := os.MkdirAll(filepath.Dir(finalOutputPath), 0o755); err != nil {
+		return fmt.Errorf("creating output directory: %w", err)
+	}
+
+	if err := os.WriteFile(finalOutputPath, xmlContent, 0o600); err != nil {
 		return fmt.Errorf("writing draw.io file: %w", err)
 	}
 
