@@ -16,7 +16,7 @@ import (
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func Diagram(ctx context.Context, workDir, cacheDir string, live bool, format diagram.Format, style diagram.StyleType) error {
+func Diagram(ctx context.Context, workDir, cacheDir string, live bool, format diagram.Format, style diagram.StyleType, outputPath string) error {
 	resultDir := filepath.Join(workDir, ResultDir)
 	if err := os.MkdirAll(resultDir, 0o755); err != nil {
 		return fmt.Errorf("creating result directory: %w", err)
@@ -44,7 +44,7 @@ func Diagram(ctx context.Context, workDir, cacheDir string, live bool, format di
 		client = kube
 	}
 
-	if err := diagram.Generate(ctx, resultDir, client, format, style); err != nil {
+	if err := diagram.Generate(ctx, resultDir, client, format, style, outputPath); err != nil {
 		return fmt.Errorf("generating diagram: %w", err)
 	}
 

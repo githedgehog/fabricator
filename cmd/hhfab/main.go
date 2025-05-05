@@ -607,6 +607,11 @@ func Run(ctx context.Context) error {
 							func(item diagram.StyleType, _ int) string { return string(item) }), ", "),
 						Value: string(diagram.StyleTypeDefault),
 					},
+					&cli.StringFlag{
+						Name:    "output",
+						Aliases: []string{"o"},
+						Usage:   "output file path for the generated diagram (default: result/diagram.{format})",
+					},
 					&cli.BoolFlag{
 						Name:  "live",
 						Usage: "load resources from actually running API instead of the config file (fab.yaml and include/*)",
@@ -616,7 +621,7 @@ func Run(ctx context.Context) error {
 				Action: func(c *cli.Context) error {
 					format := diagram.Format(strings.ToLower(c.String("format")))
 					styleType := diagram.StyleType(c.String("style"))
-					if err := hhfab.Diagram(ctx, workDir, cacheDir, c.Bool("live"), format, styleType); err != nil {
+					if err := hhfab.Diagram(ctx, workDir, cacheDir, c.Bool("live"), format, styleType, c.String("output")); err != nil {
 						return fmt.Errorf("failed to generate %s diagram: %w", format, err)
 					}
 

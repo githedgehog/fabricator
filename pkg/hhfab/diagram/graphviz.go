@@ -22,11 +22,21 @@ const (
 	ColorDefault   = "black"
 )
 
-func GenerateDOT(workDir string, topo Topology) error {
-	outputFile := filepath.Join(workDir, DotFilename)
+func GenerateDOT(workDir string, topo Topology, outputPath string) error {
+	var finalOutputPath string
+	if outputPath != "" {
+		finalOutputPath = outputPath
+	} else {
+		finalOutputPath = filepath.Join(workDir, DotFilename)
+	}
 
 	dot := generateDOT(topo)
-	if err := os.WriteFile(outputFile, []byte(dot), 0o600); err != nil {
+
+	if err := os.MkdirAll(filepath.Dir(finalOutputPath), 0o755); err != nil {
+		return fmt.Errorf("creating output directory: %w", err)
+	}
+
+	if err := os.WriteFile(finalOutputPath, []byte(dot), 0o600); err != nil {
 		return fmt.Errorf("writing DOT file: %w", err)
 	}
 

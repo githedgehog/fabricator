@@ -12,10 +12,21 @@ import (
 	"strings"
 )
 
-func GenerateMermaid(workDir string, topo Topology) error {
-	outputFile := filepath.Join(workDir, MermaidFilename)
+func GenerateMermaid(workDir string, topo Topology, outputPath string) error {
+	var finalOutputPath string
+	if outputPath != "" {
+		finalOutputPath = outputPath
+	} else {
+		finalOutputPath = filepath.Join(workDir, MermaidFilename)
+	}
+
 	mermaid := generateMermaid(topo)
-	if err := os.WriteFile(outputFile, []byte(mermaid), 0o600); err != nil {
+
+	if err := os.MkdirAll(filepath.Dir(finalOutputPath), 0o755); err != nil {
+		return fmt.Errorf("creating output directory: %w", err)
+	}
+
+	if err := os.WriteFile(finalOutputPath, []byte(mermaid), 0o600); err != nil {
 		return fmt.Errorf("writing Mermaid file: %w", err)
 	}
 
