@@ -250,6 +250,7 @@ func GetFabricConfig(f fabapi.Fabricator) (*meta.FabricConfig, error) {
 		AllowExtraSwitchProfiles: false,
 		MCLAGSessionSubnet:       string(f.Spec.Config.Fabric.MCLAGSessionSubnet),
 		GatewayASN:               f.Spec.Config.Gateway.ASN,
+		GatewayAPISync:           f.Spec.Config.Gateway.Enable,
 	}, nil
 }
 

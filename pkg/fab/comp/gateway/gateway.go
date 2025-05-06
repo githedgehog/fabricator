@@ -131,7 +131,7 @@ func StatusAPI(ctx context.Context, kube kclient.Reader, cfg fabapi.Fabricator) 
 	return comp.MergeKubeStatuses(ctx, kube, cfg, //nolint:wrapcheck
 		comp.GetCRDStatus("gateways.gateway.githedgehog.com", "v1alpha1"),
 		comp.GetCRDStatus("peerings.gateway.githedgehog.com", "v1alpha1"),
-		comp.GetCRDStatus("vpcinfoes.gateway.githedgehog.com", "v1alpha1"),
+		comp.GetCRDStatus("vpcinfos.gateway.githedgehog.com", "v1alpha1"),
 	)
 }
 
