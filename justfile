@@ -27,7 +27,8 @@ lint-fix: _lint _golangci_lint
   {{golangci_lint}} run --show-stats --fix ./...
 
 oem_dir := "./pkg/embed/flatcaroem"
-go_flags := "--tags containers_image_openpgp,containers_image_storage_stub -ldflags=\"-w -s -X go.githedgehog.com/fabricator/pkg/version.Version=" + version + "\""
+go_base_flags := "--tags containers_image_openpgp,containers_image_storage_stub"
+go_flags := go_base_flags + " -ldflags=\"-w -s -X go.githedgehog.com/fabricator/pkg/version.Version=" + version + "\""
 go_build := "go build " + go_flags
 go_linux_build := "GOOS=linux GOARCH=amd64 " + go_build
 
@@ -164,3 +165,8 @@ zot := localbin / "zot" + "-" + zot_os + "-" + zot_arch + "-" + zot_version
 _localreg: _zot
   ./hack/localreg.sh
   {{zot}} serve .zot/config.json 2>&1 | tee .zot/log
+
+# Run specified command with args with minimal Go flags (no version provided)
+run cmd *args:
+  @echo "Running: {{cmd}} {{args}} (run gen manually if needed)"
+  @go run {{go_base_flags}} ./cmd/{{cmd}} {{args}}
