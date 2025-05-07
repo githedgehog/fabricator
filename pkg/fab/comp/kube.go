@@ -18,15 +18,15 @@ import (
 	appsapi "k8s.io/api/apps/v1"
 	coreapi "k8s.io/api/core/v1"
 	rbacapi "k8s.io/api/rbac/v1"
-	apiext "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	apiextapi "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	kapierrors "k8s.io/apimachinery/pkg/api/errors"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
+	metricsapi "k8s.io/metrics/pkg/apis/metrics/v1beta1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlutil "sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/scheme"
-	metricsapi "k8s.io/metrics/pkg/apis/metrics/v1beta1"
 )
 
 const (
@@ -120,6 +120,10 @@ var (
 	MetricsSchemeBuilder = &scheme.Builder{
 		GroupVersion:  metricsapi.SchemeGroupVersion,
 		SchemeBuilder: metricsapi.SchemeBuilder,
+	}
+	APIExtSchemeBuilder = &scheme.Builder{
+		GroupVersion:  apiextapi.SchemeGroupVersion,
+		SchemeBuilder: apiextapi.SchemeBuilder,
 	}
 	HelmAPISchemeBuilder = &scheme.Builder{
 		GroupVersion:  helmapi.SchemeGroupVersion,
@@ -528,7 +532,7 @@ func GetDaemonSetStatus(name, container, image string) KubeStatus {
 
 func GetCRDStatus(name, version string) KubeStatus {
 	return func(ctx context.Context, kube kclient.Reader, _ fabapi.Fabricator) (fabapi.ComponentStatus, error) {
-		obj := &apiext.CustomResourceDefinition{}
+		obj := &apiextapi.CustomResourceDefinition{}
 		if err := kube.Get(ctx, kclient.ObjectKey{Name: name, Namespace: kmetav1.NamespaceDefault}, obj); err != nil {
 			if kapierrors.IsNotFound(err) {
 				return fabapi.CompStatusNotFound, nil
@@ -546,7 +550,7 @@ func GetCRDStatus(name, version string) KubeStatus {
 
 		if versionOk {
 			for _, cond := range obj.Status.Conditions {
-				if cond.Type == apiext.Established && cond.Status == apiext.ConditionTrue {
+				if cond.Type == apiextapi.Established && cond.Status == apiextapi.ConditionTrue {
 					return fabapi.CompStatusReady, nil
 				}
 			}
