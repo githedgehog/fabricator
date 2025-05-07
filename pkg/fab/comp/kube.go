@@ -26,6 +26,7 @@ import (
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlutil "sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/scheme"
+	metricsapi "k8s.io/metrics/pkg/apis/metrics/v1beta1"
 )
 
 const (
@@ -115,6 +116,10 @@ var (
 	RBACAPISchemeBuilder = &scheme.Builder{
 		GroupVersion:  rbacapi.SchemeGroupVersion,
 		SchemeBuilder: rbacapi.SchemeBuilder,
+	}
+	MetricsSchemeBuilder = &scheme.Builder{
+		GroupVersion:  metricsapi.SchemeGroupVersion,
+		SchemeBuilder: metricsapi.SchemeBuilder,
 	}
 	HelmAPISchemeBuilder = &scheme.Builder{
 		GroupVersion:  helmapi.SchemeGroupVersion,
