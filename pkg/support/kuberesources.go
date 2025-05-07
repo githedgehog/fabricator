@@ -28,6 +28,7 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	metricsapi "k8s.io/metrics/pkg/apis/metrics/v1beta1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/scheme"
 	kyaml "sigs.k8s.io/yaml"
@@ -38,7 +39,7 @@ const (
 )
 
 var schemeBuilders = []*scheme.Builder{
-	comp.CoreAPISchemeBuilder, comp.AppsAPISchemeBuilder, comp.RBACAPISchemeBuilder,
+	comp.CoreAPISchemeBuilder, comp.AppsAPISchemeBuilder, comp.RBACAPISchemeBuilder, comp.MetricsSchemeBuilder,
 	comp.HelmAPISchemeBuilder,
 	comp.CMApiSchemeBuilder, comp.CMMetaSchemeBuilder,
 	wiringapi.SchemeBuilder, vpcapi.SchemeBuilder, dhcpapi.SchemeBuilder, agentapi.SchemeBuilder,
@@ -60,6 +61,7 @@ var kubeResourceGVKs = []schema.GroupVersionKind{
 	corev1.SchemeGroupVersion.WithKind("PersistentVolume"),
 	corev1.SchemeGroupVersion.WithKind("PersistentVolumeClaim"),
 	appsv1.SchemeGroupVersion.WithKind(""),
+	metricsapi.SchemeGroupVersion.WithKind(""),
 	fabapi.GroupVersion.WithKind(""),
 	wiringapi.GroupVersion.WithKind(""),
 	vpcapi.GroupVersion.WithKind(""),
