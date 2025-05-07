@@ -17,6 +17,7 @@ import (
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	appsapi "k8s.io/api/apps/v1"
 	coreapi "k8s.io/api/core/v1"
+	rbacapi "k8s.io/api/rbac/v1"
 	apiext "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	kapierrors "k8s.io/apimachinery/pkg/api/errors"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -110,6 +111,10 @@ var (
 	AppsAPISchemeBuilder = &scheme.Builder{
 		GroupVersion:  appsapi.SchemeGroupVersion,
 		SchemeBuilder: appsapi.SchemeBuilder,
+	}
+	RBACAPISchemeBuilder = &scheme.Builder{
+		GroupVersion:  rbacapi.SchemeGroupVersion,
+		SchemeBuilder: rbacapi.SchemeBuilder,
 	}
 	HelmAPISchemeBuilder = &scheme.Builder{
 		GroupVersion:  helmapi.SchemeGroupVersion,
