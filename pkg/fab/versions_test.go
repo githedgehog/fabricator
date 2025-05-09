@@ -8,8 +8,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Masterminds/semver/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.githedgehog.com/fabricator/pkg/version"
 	"golang.org/x/mod/modfile"
 )
 
@@ -55,4 +57,27 @@ func checkVersion(t *testing.T, modfile *modfile.File, path, version string) {
 	}
 
 	assert.Truef(t, found, "Require path %s not found in go.mod", path)
+}
+
+func TestUpgradeConstraint(t *testing.T) {
+	c, err := semver.NewConstraint(string(UpgradeConstraint))
+	require.NoError(t, err, "Error parsing upgrade constraint")
+
+	for _, test := range []struct {
+		name     string
+		version  string
+		expected bool
+	}{
+		{"current", version.Version, true},
+		{"25.01", "v0.36.1", true},
+		{"24.09", "v0.32.1", true},
+		{"beta-1", "v0.30.3", false},
+	} {
+		t.Run(string(test.version), func(t *testing.T) {
+			v, err := semver.NewVersion(string(test.version))
+			require.NoError(t, err, "Error parsing version %q", test.version)
+
+			require.Equal(t, test.expected, c.Check(v), "Upgrade from version %q should be %v", test.version, test.expected)
+		})
+	}
 }

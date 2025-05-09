@@ -623,7 +623,9 @@ func (f *Fabricator) Validate(ctx context.Context) error {
 }
 
 func (f *Fabricator) CalculateVersions(def Versions) error {
-	f.Status.Versions = *f.Spec.Overrides.Versions.DeepCopy()
+	if f.Status.Versions.Fabricator.Controller == "" {
+		f.Status.Versions = *f.Spec.Overrides.Versions.DeepCopy()
+	}
 
 	if err := mergo.Merge(&f.Status.Versions, def); err != nil {
 		return fmt.Errorf("merging versions: %w", err)
