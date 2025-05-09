@@ -1,0 +1,98 @@
+plugins:
+  fabricswitchssh:
+    shortCut: s
+    description: SSH
+    scopes:
+      - switch
+      - agent
+    background: false
+    command: kubectl
+    args:
+      - fabric
+      - switch
+      - ssh
+      - --name
+      - $NAME
+
+  fabricswitchserial:
+    shortCut: Shift-S
+    description: Serial
+    scopes:
+      - switch
+      - agent
+    background: false
+    command: kubectl
+    args:
+      - fabric
+      - switch
+      - serial
+      - --name
+      - $NAME
+
+  fabricswitchlogs:
+    shortCut: l
+    description: Logs (Agent)
+    scopes:
+      - switch
+      - agent
+    background: false
+    command: kubectl
+    args:
+      - fabric
+      - switch
+      - ssh
+      - --name
+      - $NAME
+      - --run
+      - tail -n 100 -f /var/log/agent.log
+
+  fabricswitchreboot:
+    shortCut: r
+    description: Reboot
+    scopes:
+      - switch
+      - agent
+    confirm: true
+    background: false
+    command: kubectl
+    args:
+      - fabric
+      - switch
+      - reboot
+      - --name
+      - $NAME
+      - --yes
+
+  fabricswitchpowerreset:
+    shortCut: Shift-K
+    description: Power Reset
+    scopes:
+      - switch
+      - agent
+    confirm: true
+    background: false
+    command: kubectl
+    args:
+      - fabric
+      - switch
+      - power-reset
+      - --name
+      - $NAME
+      - --yes
+
+  fabricswitchreinstall:
+    shortCut: Shift-R
+    description: Reinstall
+    scopes:
+      - switch
+      - agent
+    confirm: true
+    background: false
+    command: kubectl
+    args:
+      - fabric
+      - switch
+      - reinstall
+      - --name
+      - $NAME
+      - --yes
