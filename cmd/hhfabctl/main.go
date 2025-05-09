@@ -56,8 +56,6 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	preview := os.Getenv("HHFAB_PREVIEW") == "true"
-
 	workdirDefault, err := os.Getwd()
 	if err != nil { // TODO handle this error
 		slog.Error("Failed to get working directory", "err", err.Error())
@@ -121,9 +119,8 @@ func main() {
 				},
 			},
 			{
-				Name:   "support",
-				Usage:  "[PREVIEW] Support dump helpers",
-				Hidden: !preview,
+				Name:  "support",
+				Usage: "Support dump helpers",
 				Flags: []cli.Flag{
 					verboseFlag,
 				},
