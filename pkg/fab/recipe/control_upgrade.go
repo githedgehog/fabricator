@@ -149,10 +149,6 @@ func (c *ControlUpgrade) Run(ctx context.Context) error {
 		return fmt.Errorf("copying k9s bin: %w", err)
 	}
 
-	if err := c.upgradeK8s(ctx, kube); err != nil {
-		return fmt.Errorf("upgrading K8s: %w", err)
-	}
-
 	if err := upgradeFlatcar(ctx, string(flatcar.Version(c.Fab)), c.Yes); err != nil {
 		return fmt.Errorf("upgrading Flatcar: %w", err)
 	}
