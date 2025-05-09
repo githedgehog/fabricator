@@ -351,9 +351,6 @@ jobs:
       matrix:
         include:
           - fabricmode: spine-leaf
-            fromversion: "beta-1"
-            fromflags: "--usb"
-          - fabricmode: spine-leaf
             fromversion: "24.09"
             fromflags: "-m=iso"
           - fabricmode: spine-leaf
