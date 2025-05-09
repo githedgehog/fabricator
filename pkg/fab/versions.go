@@ -12,6 +12,7 @@ import (
 )
 
 var (
+	UpgradeConstraint = meta.Version(">=0.32.1-0") // 24.09 release; -0 is added to allow pre-release versions
 	FabricatorVersion = meta.Version(version.Version)
 	FabricVersion     = meta.Version("v0.75.0")
 	GatewayVersion    = meta.Version("v0.5.0")

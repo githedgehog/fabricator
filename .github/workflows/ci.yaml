@@ -43,6 +43,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -348,9 +350,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - fabricmode: spine-leaf
-            fromversion: "beta-1"
-            fromflags: "--usb"
           - fabricmode: spine-leaf
             fromversion: "24.09"
             fromflags: "-m=iso"

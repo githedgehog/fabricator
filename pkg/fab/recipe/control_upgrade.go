@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/Masterminds/semver/v3"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
@@ -79,6 +80,25 @@ func (c *ControlUpgrade) Run(ctx context.Context) error {
 		return nil
 	}); err != nil {
 		return fmt.Errorf("retrying getting fabricator and control nodes: %w", err)
+	}
+
+	constraint, err := semver.NewConstraint(string(fab.UpgradeConstraint))
+	if err != nil {
+		return fmt.Errorf("parsing upgrade constraint: %w", err)
+	}
+
+	slog.Info("Currently running fabricator", "version", c.Fab.Status.Versions.Fabricator.Controller)
+
+	// TODO should we add some other markers on the host to make it more reliable?
+	version, err := semver.NewVersion(string(c.Fab.Status.Versions.Fabricator.Controller))
+	if err != nil {
+		return fmt.Errorf("parsing fabricator version: %w", err)
+	}
+
+	if !constraint.Check(version) {
+		slog.Error("Upgrading from the current version not supported, please upgrade to the older versions first")
+
+		return fmt.Errorf("fabricator version %q does not match upgrade constraint %q", version, constraint) //nolint:goerr113
 	}
 
 	if err := waitKube(ctx, kube, c.Control.Name, "",
