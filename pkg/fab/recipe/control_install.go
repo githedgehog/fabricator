@@ -22,7 +22,6 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/certmanager"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
-	"go.githedgehog.com/fabricator/pkg/fab/comp/k9s"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/zot"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 	kapierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -200,8 +199,8 @@ func (c *ControlInstall) installK8s(ctx context.Context) (kclient.Client, error)
 		return nil, fmt.Errorf("running k3s install: %w", err)
 	}
 
-	if err := copyFile(k9s.BinName, filepath.Join(k3s.BinDir, k9s.BinName), 0o755); err != nil {
-		return nil, fmt.Errorf("copying k9s bin: %w", err)
+	if err := c.installK9s(); err != nil {
+		return nil, fmt.Errorf("installing k9s: %w", err)
 	}
 
 	slog.Debug("Waiting for k8s node ready")

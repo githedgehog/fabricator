@@ -137,6 +137,10 @@ func (c *ControlUpgrade) Run(ctx context.Context) error {
 		return fmt.Errorf("upgrading K8s: %w", err)
 	}
 
+	if err := c.installK9s(); err != nil {
+		return fmt.Errorf("installing k9s: %w", err)
+	}
+
 	if err := c.installFabricator(ctx, kube, false); err != nil {
 		return fmt.Errorf("installing fabricator and config: %w", err)
 	}
@@ -439,6 +443,34 @@ func (c *ControlUpgrade) upgradeK8s(ctx context.Context, kube kclient.Reader) er
 	}
 
 	slog.Debug("Registry ready after K8s upgrade")
+
+	return nil
+}
+
+func (c *ControlUpgrade) installK9s() error {
+	configDirPath := filepath.Join(k9s.HomeConfigDir, k9s.ConfigDir)
+	if err := os.MkdirAll(configDirPath, 0o755); err != nil {
+		return fmt.Errorf("creating k9s config dir %q: %w", configDirPath, err)
+	}
+
+	configPath := filepath.Join(configDirPath, k9s.PluginsFile)
+	if err := os.WriteFile(configPath, k9s.Plugins, 0o644); err != nil { //nolint:gosec
+		return fmt.Errorf("writing k9s config file %q: %w", k9s.PluginsFile, err)
+	}
+
+	for _, path := range []string{
+		k9s.HomeConfigDir,
+		configDirPath,
+		configPath,
+	} {
+		if err := os.Chown(path, k9s.UserID, k9s.GroupID); err != nil {
+			return fmt.Errorf("chown path %q: %w", path, err)
+		}
+	}
+
+	if err := copyFile(k9s.BinName, filepath.Join(k3s.BinDir, k9s.BinName), 0o755); err != nil {
+		return fmt.Errorf("copying k9s bin: %w", err)
+	}
 
 	return nil
 }
