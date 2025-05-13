@@ -15,7 +15,9 @@ import (
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
+	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
+	gwapi "go.githedgehog.com/gateway/api/gateway/v1alpha1"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -201,6 +203,25 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 	}
 
 	b.ifaceTracker = map[string]uint8{}
+
+	for _, node := range nodes {
+		if slices.Contains(node.Spec.Roles, fabapi.NodeRoleGateway) {
+			gwName := node.Name
+
+			ifaces := map[string]gwapi.GatewayInterface{}
+			for i := uint8(1); i <= b.GatewayUplinks; i++ {
+				ifaceName := fmt.Sprintf("enp2s%d", i)
+				ifaces[ifaceName] = gwapi.GatewayInterface{}
+			}
+
+			if _, err := b.createGateway(ctx, gwName, gwapi.GatewaySpec{
+				Interfaces: ifaces,
+				// Neighbors will be later hydrated in based on the gateway connections
+			}); err != nil {
+				return err
+			}
+		}
+	}
 
 	if _, err := b.createSwitchGroup(ctx, "empty"); err != nil {
 		return err
@@ -705,6 +726,26 @@ func (b *VLABBuilder) createServer(ctx context.Context, name string, spec wiring
 	}
 
 	return server, nil
+}
+
+func (b *VLABBuilder) createGateway(ctx context.Context, name string, spec gwapi.GatewaySpec) (*gwapi.Gateway, error) {
+	gw := &gwapi.Gateway{
+		TypeMeta: kmetav1.TypeMeta{
+			Kind:       "Gateway",
+			APIVersion: gwapi.GroupVersion.String(),
+		},
+		ObjectMeta: kmetav1.ObjectMeta{
+			Name:      name,
+			Namespace: comp.FabNamespace,
+		},
+		Spec: spec,
+	}
+
+	if err := b.data.Add(ctx, gw); err != nil {
+		return nil, fmt.Errorf("creating gateway %s: %w", name, err) //nolint:goerr113
+	}
+
+	return gw, nil
 }
 
 func (b *VLABBuilder) createConnection(ctx context.Context, spec wiringapi.ConnectionSpec) (*wiringapi.Connection, error) { //nolint:unparam
