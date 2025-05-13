@@ -23,7 +23,6 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab/comp/certmanager"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/zot"
-	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 	kapierrors "k8s.io/apimachinery/pkg/api/errors"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -36,7 +35,7 @@ type ControlInstall struct {
 	WorkDir  string
 	Fab      fabapi.Fabricator
 	Control  fabapi.ControlNode
-	Wiring   *apiutil.Loader
+	Include  kclient.Reader
 	RegUsers map[string]string
 }
 
@@ -112,7 +111,7 @@ func (c *ControlInstall) Run(ctx context.Context) error {
 		return fmt.Errorf("installing fabric: %w", err)
 	}
 
-	if err := c.installWiring(ctx, kube); err != nil {
+	if err := c.installInclude(ctx, kube); err != nil {
 		return fmt.Errorf("installing included wiring: %w", err)
 	}
 
@@ -413,11 +412,11 @@ func (c *ControlInstall) installWaitFabric(ctx context.Context, kube kclient.Cli
 	return nil
 }
 
-func (c *ControlInstall) installWiring(ctx context.Context, kube kclient.Client) error {
+func (c *ControlInstall) installInclude(ctx context.Context, kube kclient.Client) error {
 	slog.Info("Waiting for all used switch profiles ready")
 
 	switches := &wiringapi.SwitchList{}
-	if err := c.Wiring.List(ctx, switches); err != nil {
+	if err := c.Include.List(ctx, switches); err != nil {
 		return fmt.Errorf("listing included switches: %w", err)
 	}
 
@@ -456,7 +455,7 @@ func (c *ControlInstall) installWiring(ctx context.Context, kube kclient.Client)
 		&vpcapi.ExternalPeeringList{},
 		// switch/server profiles are intentionally skipped
 	} {
-		if err := c.Wiring.List(ctx, objList); err != nil {
+		if err := c.Include.List(ctx, objList); err != nil {
 			return fmt.Errorf("listing %T: %w", objList, err)
 		}
 

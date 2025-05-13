@@ -47,8 +47,8 @@ const (
 	HydrationStatusFull    HydrationStatus = "full"
 )
 
-func (c *Config) loadHydrateValidate(ctx context.Context, mode HydrateMode, extraLoaders ...*apiutil.Loader) error {
-	l, err := c.loadWiring(ctx, extraLoaders...)
+func (c *Config) loadHydrateValidate(ctx context.Context, mode HydrateMode) error {
+	l, err := c.loadWiring(ctx)
 	if err != nil {
 		return fmt.Errorf("loading wiring: %w", err)
 	}
@@ -59,8 +59,6 @@ func (c *Config) loadHydrateValidate(ctx context.Context, mode HydrateMode, extr
 		return fmt.Errorf("ensuring hydrated: %w", err)
 	}
 
-	// TODO do we need to make sure that wiring in extraLoaders is also hydrated?
-
 	fabricCfg, err := fabric.GetFabricConfig(c.Fab)
 	if err != nil {
 		return fmt.Errorf("getting fabric config: %w", err)
@@ -69,16 +67,16 @@ func (c *Config) loadHydrateValidate(ctx context.Context, mode HydrateMode, extr
 		return fmt.Errorf("initializing fabric config: %w", err)
 	}
 
-	if err := apiutil.ValidateFabric(ctx, l, fabricCfg); err != nil {
+	if err := apiutil.ValidateFabricGateway(ctx, l, fabricCfg); err != nil {
 		return fmt.Errorf("validating wiring: %w", err)
 	}
 
-	c.Wiring = kube
+	c.Client = kube
 
 	return nil
 }
 
-func (c *Config) loadWiring(ctx context.Context, extraLoaders ...*apiutil.Loader) (*apiutil.Loader, error) {
+func (c *Config) loadWiring(ctx context.Context) (*apiutil.Loader, error) {
 	includeDir := filepath.Join(c.WorkDir, IncludeDir)
 	stat, err := os.Stat(includeDir)
 	if err != nil {
@@ -92,7 +90,7 @@ func (c *Config) loadWiring(ctx context.Context, extraLoaders ...*apiutil.Loader
 		return nil, fmt.Errorf("include dir %q: %w", includeDir, ErrNotDir)
 	}
 
-	l := apiutil.NewWiringLoader()
+	l := apiutil.NewLoader()
 	files, err := os.ReadDir(includeDir)
 	if err != nil {
 		return nil, fmt.Errorf("reading include dir %q: %w", includeDir, err)
@@ -116,14 +114,8 @@ func (c *Config) loadWiring(ctx context.Context, extraLoaders ...*apiutil.Loader
 			return nil, fmt.Errorf("reading wiring %q: %w", relName, err)
 		}
 
-		if err := l.LoadAdd(ctx, data); err != nil {
-			return nil, fmt.Errorf("loading wiring %q: %w", relName, err)
-		}
-
-		for _, loader := range extraLoaders {
-			if err := loader.LoadAdd(ctx, data); err != nil {
-				return nil, fmt.Errorf("loading wiring %q to extra loader: %w", relName, err)
-			}
+		if err := l.LoadAdd(ctx, apiutil.FabricGatewayGVKs, data); err != nil {
+			return nil, fmt.Errorf("loading include %q: %w", relName, err)
 		}
 	}
 

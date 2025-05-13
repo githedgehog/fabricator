@@ -77,14 +77,14 @@ func DoInstall(ctx context.Context, workDir string, yes bool) error {
 
 	switch cfg.Type {
 	case TypeControl:
-		l := apiutil.NewFabLoader()
-		fabCfg, err := os.ReadFile(filepath.Join(workDir, FabName))
+		l := apiutil.NewLoader()
+		fabData, err := os.ReadFile(filepath.Join(workDir, FabName))
 		if err != nil {
-			return fmt.Errorf("reading fab config: %w", err)
+			return fmt.Errorf("reading fab: %w", err)
 		}
 
-		if err := l.LoadAdd(ctx, fabCfg); err != nil {
-			return fmt.Errorf("loading fab config: %w", err)
+		if err := l.LoadAdd(ctx, apiutil.FabricatorGVKs, fabData); err != nil {
+			return fmt.Errorf("loading fab: %w", err)
 		}
 
 		f, controls, nodes, err := fab.GetFabAndNodes(ctx, l.GetClient())
@@ -96,14 +96,13 @@ func DoInstall(ctx context.Context, workDir string, yes bool) error {
 			return fmt.Errorf("expected exactly 1 control node, got %d", len(controls)) //nolint:goerr113
 		}
 
-		wL := apiutil.NewWiringLoader()
-		wiringCfg, err := os.ReadFile(filepath.Join(workDir, WiringName))
+		includeData, err := os.ReadFile(filepath.Join(workDir, IncludeName))
 		if err != nil {
-			return fmt.Errorf("reading wiring config: %w", err)
+			return fmt.Errorf("reading include: %w", err)
 		}
 
-		if err := wL.LoadAdd(ctx, wiringCfg); err != nil {
-			return fmt.Errorf("loading wiring config: %w", err)
+		if err := l.LoadAdd(ctx, apiutil.FabricGatewayGVKs, includeData); err != nil {
+			return fmt.Errorf("loading include: %w", err)
 		}
 
 		regUsers, err := zot.NewUsers()
@@ -122,19 +121,19 @@ func DoInstall(ctx context.Context, workDir string, yes bool) error {
 			WorkDir:  workDir,
 			Fab:      f,
 			Control:  controls[0],
-			Wiring:   wL,
+			Include:  l.GetClient(),
 			RegUsers: regUsers,
 		}).Run(ctx); err != nil {
 			return fmt.Errorf("running control install: %w", err)
 		}
 	case TypeNode:
-		l := apiutil.NewFabLoader()
+		l := apiutil.NewLoader()
 		fabCfg, err := os.ReadFile(filepath.Join(workDir, FabName))
 		if err != nil {
 			return fmt.Errorf("reading fab config: %w", err)
 		}
 
-		if err := l.LoadAdd(ctx, fabCfg); err != nil {
+		if err := l.LoadAdd(ctx, apiutil.FabricatorGVKs, fabCfg); err != nil {
 			return fmt.Errorf("loading fab config: %w", err)
 		}
 

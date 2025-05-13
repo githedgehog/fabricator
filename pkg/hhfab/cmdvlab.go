@@ -26,8 +26,8 @@ func VLABGenerate(ctx context.Context, workDir, cacheDir string, builder VLABBui
 		return err
 	}
 
-	wL := apiutil.NewWiringLoader()
-	if err := builder.Build(ctx, wL, cfg.Fab.Spec.Config.Fabric.Mode, cfg.Nodes); err != nil {
+	includeL := apiutil.NewLoader()
+	if err := builder.Build(ctx, includeL, cfg.Fab.Spec.Config.Fabric.Mode, cfg.Nodes); err != nil {
 		return err
 	}
 
@@ -38,7 +38,7 @@ func VLABGenerate(ctx context.Context, workDir, cacheDir string, builder VLABBui
 	}
 	defer wiringFile.Close()
 
-	if err := apiutil.PrintWiring(ctx, wL.GetClient(), wiringFile); err != nil {
+	if err := apiutil.PrintInclude(ctx, includeL.GetClient(), wiringFile); err != nil {
 		return fmt.Errorf("writing wiring file: %w", err)
 	}
 

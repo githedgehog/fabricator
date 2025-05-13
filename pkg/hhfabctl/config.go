@@ -13,6 +13,7 @@ import (
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab"
+	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 )
 
 func ConfigExport(ctx context.Context) error {
@@ -36,7 +37,7 @@ func ConfigExport(ctx context.Context) error {
 
 	out := os.Stdout
 
-	if err := kubeutil.PrintObject(&f, out, false); err != nil {
+	if err := apiutil.PrintKubeObject(&f, out, false); err != nil {
 		return fmt.Errorf("printing fabricator: %w", err)
 	}
 
@@ -46,7 +47,7 @@ func ConfigExport(ctx context.Context) error {
 			return fmt.Errorf("writing separator: %w", err)
 		}
 
-		if err := kubeutil.PrintObject(&c, out, false); err != nil {
+		if err := apiutil.PrintKubeObject(&c, out, false); err != nil {
 			return fmt.Errorf("printing control node: %w", err)
 		}
 	}
@@ -57,7 +58,7 @@ func ConfigExport(ctx context.Context) error {
 			return fmt.Errorf("writing separator: %w", err)
 		}
 
-		if err := kubeutil.PrintObject(&n, out, false); err != nil {
+		if err := apiutil.PrintKubeObject(&n, out, false); err != nil {
 			return fmt.Errorf("printing node: %w", err)
 		}
 	}

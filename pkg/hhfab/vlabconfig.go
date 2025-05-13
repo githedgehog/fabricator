@@ -215,7 +215,7 @@ func (c *Config) PrepareVLAB(ctx context.Context, opts VLABUpOpts) (*VLAB, error
 			return nil, fmt.Errorf("creating VLAB directories: %w", err)
 		}
 
-		vlabCfg, err := createVLABConfig(ctx, c.Controls, c.Nodes, c.Wiring)
+		vlabCfg, err := createVLABConfig(ctx, c.Controls, c.Nodes, c.Client)
 		if err != nil {
 			return nil, fmt.Errorf("creating VLAB config: %w", err)
 		}
