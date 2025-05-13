@@ -322,6 +322,7 @@ jobs:
         run: |
           bin/hhfab init -v --dev -m ${{ matrix.fabricmode }} --include-onie=${{ matrix.includeonie }} --gateway=${{ matrix.gateway }}
           bin/hhfab vlab gen -v
+          bin/hhfab diagram -f mermaid
           export HHFAB_JOIN_TOKEN=$(openssl rand -base64 24)
           bin/hhfab vlab up -v --ready inspect --ready setup-vpcs --ready test-connectivity --ready exit --mode=${{ matrix.buildmode }} --vpc-mode="${{ matrix.vpcmode }}"
 
@@ -338,6 +339,13 @@ jobs:
         with:
           name: vlab--${{ env.slug }}--registry
           path: .zot/log
+
+      - name: Upload mermaid diagram
+        uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: vlab--${{ env.slug }}--mermaid
+          path: result/diagram.mmd
 
       - name: Setup tmate session for debug
         if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
@@ -570,6 +578,7 @@ jobs:
         run: |
           source "./lab-ci/envs/$KUBE_NODE/source.sh"
           bin/hhfab init -v --dev --include-onie=${{ matrix.includeonie }} -w "./lab-ci/envs/$KUBE_NODE/wiring.yaml"
+          bin/hhfab diagram -f mermaid
 
           # TODO: make controls restricted again when we figure out how to get NTP upstream working for isolated VMs
           bin/hhfab vlab up -v --ready switch-reinstall --ready inspect --ready setup-vpcs --ready test-connectivity --ready exit --mode=${{ matrix.buildmode }} --controls-restricted=false
@@ -587,6 +596,13 @@ jobs:
         with:
           name: hlab--${{ env.slug }}--registry
           path: .zot/log
+
+      - name: Upload mermaid diagram
+        uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: hlab--${{ env.slug }}--mermaid
+          path: result/diagram.mmd
 
       - name: Setup tmate session for debug
         if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
