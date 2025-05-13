@@ -12,11 +12,11 @@ import (
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/ctrl/switchprofile"
-	"go.githedgehog.com/fabric/pkg/util/kubeutil"
+	gwapi "go.githedgehog.com/gateway/api/gateway/v1alpha1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func ValidateFabric(ctx context.Context, l *Loader, fabricCfg *meta.FabricConfig) error {
+func ValidateFabricGateway(ctx context.Context, l *Loader, fabricCfg *meta.FabricConfig) error {
 	if l == nil {
 		return fmt.Errorf("loader is nil") //nolint:goerr113
 	}
@@ -25,6 +25,8 @@ func ValidateFabric(ctx context.Context, l *Loader, fabricCfg *meta.FabricConfig
 	}
 
 	kube := l.kube
+
+	// TODO refactor to make it a bit more generic and less repetitive
 
 	profiles := switchprofile.NewDefaultSwitchProfiles()
 	if err := profiles.RegisterAll(ctx, kube, fabricCfg); err != nil {
@@ -91,6 +93,39 @@ func ValidateFabric(ctx context.Context, l *Loader, fabricCfg *meta.FabricConfig
 		return fmt.Errorf("validating external peerings: %w", err)
 	}
 
+	gateways := &gwapi.GatewayList{}
+	if err := kube.List(ctx, gateways); err != nil {
+		return fmt.Errorf("listing gateways: %w", err)
+	}
+	for _, gw := range gateways.Items {
+		gw.Default()
+		if err := gw.Validate(ctx, kube); err != nil {
+			return fmt.Errorf("validating gateway %q: %w", gw.GetName(), err)
+		}
+	}
+
+	vpcInfos := &gwapi.VPCInfoList{}
+	if err := kube.List(ctx, vpcInfos); err != nil {
+		return fmt.Errorf("listing vpc infos: %w", err)
+	}
+	for _, vpcInfo := range vpcInfos.Items {
+		vpcInfo.Default()
+		if err := vpcInfo.Validate(ctx, kube); err != nil {
+			return fmt.Errorf("validating vpc info %q: %w", vpcInfo.GetName(), err)
+		}
+	}
+
+	peerings := &gwapi.PeeringList{}
+	if err := kube.List(ctx, peerings); err != nil {
+		return fmt.Errorf("listing peerings: %w", err)
+	}
+	for _, peering := range peerings.Items {
+		peering.Default()
+		if err := peering.Validate(ctx, kube); err != nil {
+			return fmt.Errorf("validating peering %q: %w", peering.GetName(), err)
+		}
+	}
+
 	return nil
 }
 
@@ -109,55 +144,27 @@ func defaultAndValidate(ctx context.Context, kube kclient.Reader, objList meta.O
 	return nil
 }
 
-func PrintWiring(ctx context.Context, kube kclient.Reader, w io.Writer) error {
-	objs := 0
+var printIncludeLists = []kclient.ObjectList{
+	&wiringapi.VLANNamespaceList{},
+	&vpcapi.IPv4NamespaceList{},
+	&wiringapi.SwitchGroupList{},
+	&wiringapi.SwitchList{},
+	&wiringapi.ServerList{},
+	&wiringapi.ConnectionList{},
+	&vpcapi.ExternalList{},
+	&vpcapi.ExternalAttachmentList{},
+	&vpcapi.VPCList{},
+	&vpcapi.VPCAttachmentList{},
+	&vpcapi.VPCPeeringList{},
+	&vpcapi.ExternalPeeringList{},
+	&gwapi.GatewayList{},
+	&gwapi.VPCInfoList{},
+	&gwapi.PeeringList{},
+}
 
-	if err := kubeutil.PrintObjectList(ctx, kube, w, &wiringapi.VLANNamespaceList{}, &objs); err != nil {
-		return fmt.Errorf("printing vlan namespaces: %w", err)
-	}
-
-	if err := kubeutil.PrintObjectList(ctx, kube, w, &vpcapi.IPv4NamespaceList{}, &objs); err != nil {
-		return fmt.Errorf("printing ipv4 namespaces: %w", err)
-	}
-
-	if err := kubeutil.PrintObjectList(ctx, kube, w, &wiringapi.SwitchGroupList{}, &objs); err != nil {
-		return fmt.Errorf("printing switch groups: %w", err)
-	}
-
-	if err := kubeutil.PrintObjectList(ctx, kube, w, &wiringapi.SwitchList{}, &objs); err != nil {
-		return fmt.Errorf("printing switches: %w", err)
-	}
-
-	if err := kubeutil.PrintObjectList(ctx, kube, w, &wiringapi.ServerList{}, &objs); err != nil {
-		return fmt.Errorf("printing servers: %w", err)
-	}
-
-	if err := kubeutil.PrintObjectList(ctx, kube, w, &wiringapi.ConnectionList{}, &objs); err != nil {
-		return fmt.Errorf("printing connections: %w", err)
-	}
-
-	if err := kubeutil.PrintObjectList(ctx, kube, w, &vpcapi.ExternalList{}, &objs); err != nil {
-		return fmt.Errorf("printing externals: %w", err)
-	}
-
-	if err := kubeutil.PrintObjectList(ctx, kube, w, &vpcapi.ExternalAttachmentList{}, &objs); err != nil {
-		return fmt.Errorf("printing external attachments: %w", err)
-	}
-
-	if err := kubeutil.PrintObjectList(ctx, kube, w, &vpcapi.VPCList{}, &objs); err != nil {
-		return fmt.Errorf("printing vpcs: %w", err)
-	}
-
-	if err := kubeutil.PrintObjectList(ctx, kube, w, &vpcapi.VPCAttachmentList{}, &objs); err != nil {
-		return fmt.Errorf("printing vpc attachments: %w", err)
-	}
-
-	if err := kubeutil.PrintObjectList(ctx, kube, w, &vpcapi.VPCPeeringList{}, &objs); err != nil {
-		return fmt.Errorf("printing vpc peerings: %w", err)
-	}
-
-	if err := kubeutil.PrintObjectList(ctx, kube, w, &vpcapi.ExternalPeeringList{}, &objs); err != nil {
-		return fmt.Errorf("printing external peerings: %w", err)
+func PrintInclude(ctx context.Context, kube kclient.Reader, w io.Writer) error {
+	if err := printKubeObjects(ctx, kube, w, printIncludeLists...); err != nil {
+		return fmt.Errorf("printing kube objects: %w", err)
 	}
 
 	return nil

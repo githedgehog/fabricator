@@ -38,14 +38,14 @@ type ControlInstallBuilder struct {
 	Fab        fabapi.Fabricator
 	Control    fabapi.ControlNode
 	Nodes      []fabapi.FabNode
-	Wiring     kclient.Reader
+	Client     kclient.Reader
 	Mode       BuildMode
 	Downloader *artificer.Downloader
 }
 
 const (
-	FabName    = "fab.yaml"
-	WiringName = "wiring.yaml"
+	FabName     = "fab.yaml"
+	IncludeName = "include.yaml"
 )
 
 var AirgapArtifactLists = []comp.ListOCIArtifacts{
@@ -147,14 +147,14 @@ func (b *ControlInstallBuilder) addPayload(ctx context.Context, slog *slog.Logge
 		return fmt.Errorf("printing fab: %w", err)
 	}
 
-	wiringF, err := os.Create(filepath.Join(installDir, WiringName))
+	includeF, err := os.Create(filepath.Join(installDir, IncludeName))
 	if err != nil {
-		return fmt.Errorf("creating wiring file: %w", err)
+		return fmt.Errorf("creating include file: %w", err)
 	}
-	defer wiringF.Close()
+	defer includeF.Close()
 
-	if err := apiutil.PrintWiring(ctx, b.Wiring, wiringF); err != nil {
-		return fmt.Errorf("printing wiring: %w", err)
+	if err := apiutil.PrintInclude(ctx, b.Client, includeF); err != nil {
+		return fmt.Errorf("printing include: %w", err)
 	}
 
 	slog.Info("Adding CLIs to installer")
@@ -249,8 +249,8 @@ func (b *ControlInstallBuilder) hash(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("hashing fab: %w", err)
 	}
 
-	if err := apiutil.PrintWiring(ctx, b.Wiring, h); err != nil {
-		return "", fmt.Errorf("hashing wiring: %w", err)
+	if err := apiutil.PrintInclude(ctx, b.Client, h); err != nil {
+		return "", fmt.Errorf("hashing include: %w", err)
 	}
 
 	if _, err := fmt.Fprintf(h, "%s", b.Mode); err != nil {

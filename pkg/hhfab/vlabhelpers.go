@@ -302,7 +302,7 @@ func (c *Config) VLABSwitchReinstall(ctx context.Context, opts SwitchReinstallOp
 	defer cancel()
 
 	switches := wiringapi.SwitchList{}
-	if err := c.Wiring.List(ctx, &switches); err != nil {
+	if err := c.Client.List(ctx, &switches); err != nil {
 		return fmt.Errorf("failed to list switches: %w", err)
 	}
 
@@ -494,7 +494,7 @@ func (c *Config) getVLABEntries(ctx context.Context, vlab *VLAB) (map[string]VLA
 
 	// Gather switch entries
 	switches := wiringapi.SwitchList{}
-	if err := c.Wiring.List(ctx, &switches); err != nil {
+	if err := c.Client.List(ctx, &switches); err != nil {
 		return nil, fmt.Errorf("failed to list switches: %w", err)
 	}
 
@@ -608,7 +608,7 @@ func (c *Config) VLABSwitchPower(ctx context.Context, opts SwitchPowerOpts) erro
 	}
 
 	switches := wiringapi.SwitchList{}
-	if err := c.Wiring.List(ctx, &switches); err != nil {
+	if err := c.Client.List(ctx, &switches); err != nil {
 		return fmt.Errorf("failed to list switches: %w", err)
 	}
 

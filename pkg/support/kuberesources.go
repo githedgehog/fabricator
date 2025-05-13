@@ -234,8 +234,10 @@ func collectKubeObjects(ctx context.Context, kube kclient.Reader, scheme *runtim
 
 			itemValue.GetObjectKind().SetGroupVersionKind(gvk)
 
-			if redactor, ok := redactors[gvk]; ok {
-				redactor(itemValue)
+			if redactors != nil {
+				if redactor, ok := redactors[gvk]; ok {
+					redactor(itemValue)
+				}
 			}
 
 			if objs > 0 {

@@ -74,12 +74,12 @@ func DoOSInstall(ctx context.Context, workDir string) error {
 
 		slog.Info("Loading Fabricator config", "path", fabPath)
 
-		l := apiutil.NewFabLoader()
+		l := apiutil.NewLoader()
 		fabData, err := os.ReadFile(fabPath)
 		if err != nil {
 			return fmt.Errorf("reading fabricator config: %w", err)
 		}
-		if err := l.LoadAdd(ctx, fabData); err != nil {
+		if err := l.LoadAdd(ctx, apiutil.FabricatorGVKs, fabData); err != nil {
 			return fmt.Errorf("loading fabricator config: %w", err)
 		}
 

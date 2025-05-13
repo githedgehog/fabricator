@@ -44,8 +44,7 @@ type Config struct {
 	Fab      fabapi.Fabricator
 	Controls []fabapi.ControlNode
 	Nodes    []fabapi.FabNode
-	Wiring   kclient.Reader // only fabric wiring
-	Client   kclient.Reader // all resources (fab and fabric wiring)
+	Client   kclient.Reader // all resources (fab, fabric and gateway)
 }
 
 type RegistryConfig struct {
@@ -133,8 +132,8 @@ func Init(ctx context.Context, c InitConfig) error {
 			return fmt.Errorf("reading config %q to import: %w", c.ImportConfig, err)
 		}
 
-		l := apiutil.NewFabLoader()
-		if err := l.LoadAdd(ctx, fabCfgData); err != nil {
+		l := apiutil.NewLoader()
+		if err := l.LoadAdd(ctx, apiutil.FabricatorGVKs, fabCfgData); err != nil {
 			return fmt.Errorf("loading config to import %q: loading: %w", c.ImportConfig, err)
 		}
 
@@ -190,17 +189,17 @@ func Init(ctx context.Context, c InitConfig) error {
 		return fmt.Errorf("removing VLAB dir: %w", err)
 	}
 
-	if err := importWiring(c); err != nil {
+	if err := importFabricGateway(c); err != nil {
 		return err
 	}
 
 	slog.Info("Adjust configs (incl. credentials, modes, subnets, etc.)", "file", FabConfigFile)
-	slog.Info("Include wiring files (.yaml) or adjust imported ones", "dir", IncludeDir)
+	slog.Info("Include wiring (fabric/gateway) files (.yaml) or adjust imported ones", "dir", IncludeDir)
 
 	return nil
 }
 
-func importWiring(c InitConfig) error {
+func importFabricGateway(c InitConfig) error {
 	for _, wiringFile := range c.Wiring {
 		name := ""
 		source := ""
@@ -243,7 +242,7 @@ func importWiring(c InitConfig) error {
 			return fmt.Errorf("importing %q: target %q: %w", source, relName, ErrExist)
 		}
 
-		if _, err := apiutil.NewWiringLoader().Load(data); err != nil {
+		if _, err := apiutil.NewLoader().Load(apiutil.FabricGatewayGVKs, data); err != nil {
 			return fmt.Errorf("importing %q: loading: %w", source, err)
 		}
 
@@ -310,13 +309,8 @@ func load(ctx context.Context, workDir, cacheDir string, wiringAndHydration bool
 		return nil, fmt.Errorf("reading fab config: %w", err)
 	}
 
-	allL := apiutil.NewAllLoader()
-	if err := allL.LoadAdd(ctx, fabCfg); err != nil {
-		return nil, fmt.Errorf("loading fab config to all loader: %w", err)
-	}
-
-	l := apiutil.NewFabLoader()
-	if err := l.LoadAdd(ctx, fabCfg); err != nil {
+	l := apiutil.NewLoader()
+	if err := l.LoadAdd(ctx, apiutil.FabricatorGVKs, fabCfg); err != nil {
 		return nil, fmt.Errorf("loading fab config: %w", err)
 	}
 
@@ -340,10 +334,11 @@ func load(ctx context.Context, workDir, cacheDir string, wiringAndHydration bool
 		Fab:            f,
 		Controls:       controls,
 		Nodes:          nodes,
+		Client:         l.GetClient(),
 	}
 
 	if wiringAndHydration {
-		if err := cfg.loadHydrateValidate(ctx, mode, allL); err != nil {
+		if err := cfg.loadHydrateValidate(ctx, mode); err != nil {
 			return nil, fmt.Errorf("loading wiring and hydrating: %w", err)
 		}
 
@@ -359,8 +354,6 @@ func load(ctx context.Context, workDir, cacheDir string, wiringAndHydration bool
 			}
 		}
 	}
-
-	cfg.Client = allL.GetClient()
 
 	return cfg, nil
 }

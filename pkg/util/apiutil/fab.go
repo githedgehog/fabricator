@@ -7,12 +7,11 @@ import (
 	"fmt"
 	"io"
 
-	"go.githedgehog.com/fabric/pkg/util/kubeutil"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 )
 
 func PrintFab(f fabapi.Fabricator, controls []fabapi.ControlNode, nodes []fabapi.FabNode, w io.Writer) error {
-	if err := kubeutil.PrintObject(&f, w, true); err != nil {
+	if err := PrintKubeObject(&f, w, true); err != nil {
 		return fmt.Errorf("printing fabricator: %w", err)
 	}
 
@@ -22,7 +21,7 @@ func PrintFab(f fabapi.Fabricator, controls []fabapi.ControlNode, nodes []fabapi
 			return fmt.Errorf("writing separator: %w", err)
 		}
 
-		if err := kubeutil.PrintObject(&control, w, false); err != nil {
+		if err := PrintKubeObject(&control, w, false); err != nil {
 			return fmt.Errorf("printing control node %s: %w", control.Name, err)
 		}
 	}
@@ -33,7 +32,7 @@ func PrintFab(f fabapi.Fabricator, controls []fabapi.ControlNode, nodes []fabapi
 			return fmt.Errorf("writing separator: %w", err)
 		}
 
-		if err := kubeutil.PrintObject(&node, w, false); err != nil {
+		if err := PrintKubeObject(&node, w, false); err != nil {
 			return fmt.Errorf("printing node %s: %w", node.Name, err)
 		}
 	}

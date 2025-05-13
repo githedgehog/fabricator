@@ -59,7 +59,7 @@ func (c *Config) build(ctx context.Context, opts BuildOpts) error {
 				Fab:        c.Fab,
 				Control:    control,
 				Nodes:      c.Nodes,
-				Wiring:     c.Wiring,
+				Client:     c.Client,
 				Mode:       opts.BuildMode,
 				Downloader: d,
 			}).Build(ctx); err != nil {

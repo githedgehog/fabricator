@@ -68,8 +68,8 @@ func InitConfig(ctx context.Context, in InitConfigInput) ([]byte, error) {
 		return nil, fmt.Errorf("template: %w", err)
 	}
 
-	l := apiutil.NewFabLoader()
-	if err := l.LoadAdd(ctx, []byte(data)); err != nil {
+	l := apiutil.NewLoader()
+	if err := l.LoadAdd(ctx, apiutil.FabricatorGVKs, []byte(data)); err != nil {
 		return nil, fmt.Errorf("loading generated: %w", err)
 	}
 
