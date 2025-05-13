@@ -19,8 +19,10 @@ import (
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/api/meta"
+	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/fabric"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
+	gwapi "go.githedgehog.com/gateway/api/gateway/v1alpha1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -68,7 +70,7 @@ func (c *Config) loadHydrateValidate(ctx context.Context, mode HydrateMode) erro
 	}
 
 	if err := apiutil.ValidateFabricGateway(ctx, l, fabricCfg); err != nil {
-		return fmt.Errorf("validating wiring: %w", err)
+		return fmt.Errorf("validating wiring after hydrate: %w", err)
 	}
 
 	c.Client = kube
@@ -444,62 +446,153 @@ func (c *Config) getHydration(ctx context.Context, kube kclient.Reader) (Hydrati
 	}
 
 	for _, conn := range conns.Items {
-		if conn.Spec.Fabric == nil {
-			continue
+		if conn.Spec.Fabric != nil {
+			cf := conn.Spec.Fabric
+
+			for idx, link := range cf.Links {
+				total += 2
+				if link.Spine.IP == "" {
+					missing++
+				}
+				if link.Leaf.IP == "" {
+					missing++
+				}
+				if link.Spine.IP == "" || link.Leaf.IP == "" {
+					continue
+				}
+
+				spinePrefix, err := netip.ParsePrefix(link.Spine.IP)
+				if err != nil {
+					return status, fmt.Errorf("parsing fabric connection %s link %d spine IP %s: %w", conn.Name, idx, link.Spine.IP, err)
+				}
+				if spinePrefix.Bits() != 31 {
+					return status, fmt.Errorf("fabric connection %s link %d spine IP %s is not a /31", conn.Name, idx, spinePrefix) //nolint:goerr113
+				}
+
+				spineIP := spinePrefix.Addr()
+				if !fabricSubnet.Contains(spineIP) {
+					return status, fmt.Errorf("fabric connection %s link %d spine IP %s is not in the fabric subnet %s", conn.Name, idx, spineIP, fabricSubnet) //nolint:goerr113
+				}
+				if _, exist := fabricIPs[spineIP]; exist {
+					return status, fmt.Errorf("fabric connection %s link %d spine IP %s is already in use", conn.Name, idx, spineIP) //nolint:goerr113
+				}
+				fabricIPs[spineIP] = true
+
+				leafPrefix, err := netip.ParsePrefix(link.Leaf.IP)
+				if err != nil {
+					return status, fmt.Errorf("parsing fabric connection %s link %d leaf IP %s: %w", conn.Name, idx, link.Leaf.IP, err)
+				}
+				if leafPrefix.Bits() != 31 {
+					return status, fmt.Errorf("fabric connection %s link %d leaf IP %s is not a /31", conn.Name, idx, leafPrefix) //nolint:goerr113
+				}
+
+				leafIP := leafPrefix.Addr()
+				if !fabricSubnet.Contains(leafIP) {
+					return status, fmt.Errorf("fabric connection %s link %d leaf IP %s is not in the fabric subnet %s", conn.Name, idx, leafIP, fabricSubnet) //nolint:goerr113
+				}
+				if _, exist := fabricIPs[leafIP]; exist {
+					return status, fmt.Errorf("fabric connection %s link %d leaf IP %s is already in use", conn.Name, idx, leafIP) //nolint:goerr113
+				}
+				fabricIPs[leafIP] = true
+
+				if spinePrefix.Masked() != leafPrefix.Masked() {
+					return status, fmt.Errorf("fabric connection %s link %d spine IP %s and leaf IP %s are not in the same subnet", conn.Name, idx, spineIP, leafIP) //nolint:goerr113
+				}
+			}
+		} else if conn.Spec.Gateway != nil {
+			cg := conn.Spec.Gateway
+
+			for idx, link := range cg.Links {
+				total += 2
+				if link.Spine.IP == "" {
+					missing++
+				}
+				if link.Gateway.IP == "" {
+					missing++
+				}
+				if link.Spine.IP == "" || link.Gateway.IP == "" {
+					continue
+				}
+
+				spinePrefix, err := netip.ParsePrefix(link.Spine.IP)
+				if err != nil {
+					return status, fmt.Errorf("parsing gateway connection %s link %d spine IP %s: %w", conn.Name, idx, link.Spine.IP, err)
+				}
+				if spinePrefix.Bits() != 31 {
+					return status, fmt.Errorf("gateway connection %s link %d spine IP %s is not a /31", conn.Name, idx, spinePrefix) //nolint:goerr113
+				}
+
+				spineIP := spinePrefix.Addr()
+				if !fabricSubnet.Contains(spineIP) {
+					return status, fmt.Errorf("gateway connection %s link %d spine IP %s is not in the fabric subnet %s", conn.Name, idx, spineIP, fabricSubnet) //nolint:goerr113
+				}
+				if _, exist := fabricIPs[spineIP]; exist {
+					return status, fmt.Errorf("gateway connection %s link %d spine IP %s is already in use", conn.Name, idx, spineIP) //nolint:goerr113
+				}
+				fabricIPs[spineIP] = true
+
+				gwPrefix, err := netip.ParsePrefix(link.Gateway.IP)
+				if err != nil {
+					return status, fmt.Errorf("parsing gateway connection %s link %d gateway IP %s: %w", conn.Name, idx, link.Gateway.IP, err)
+				}
+				if gwPrefix.Bits() != 31 {
+					return status, fmt.Errorf("gateway connection %s link %d gateway IP %s is not a /31", conn.Name, idx, gwPrefix) //nolint:goerr113
+				}
+
+				gwIP := gwPrefix.Addr()
+				if !fabricSubnet.Contains(gwIP) {
+					return status, fmt.Errorf("gateway connection %s link %d gateway IP %s is not in the fabric subnet %s", conn.Name, idx, gwIP, fabricSubnet) //nolint:goerr113
+				}
+				if _, exist := fabricIPs[gwIP]; exist {
+					return status, fmt.Errorf("gateway connection %s link %d gateway IP %s is already in use", conn.Name, idx, gwIP) //nolint:goerr113
+				}
+				fabricIPs[gwIP] = true
+
+				if spinePrefix.Masked() != gwPrefix.Masked() {
+					return status, fmt.Errorf("gateway connection %s link %d spine IP %s and gateway IP %s are not in the same subnet", conn.Name, idx, spineIP, gwIP) //nolint:goerr113
+				}
+			}
+		}
+	}
+
+	gateways := &gwapi.GatewayList{}
+	if err := kube.List(ctx, gateways); err != nil {
+		return status, fmt.Errorf("listing gateways: %w", err)
+	}
+	for _, gw := range gateways.Items {
+		total++
+		if gw.Spec.ASN != 0 {
+			if gw.Spec.ASN != c.Fab.Spec.Config.Gateway.ASN {
+				return status, fmt.Errorf("gateway %s ASN %d is not %d", gw.Name, gw.Spec.ASN, c.Fab.Spec.Config.Gateway.ASN) //nolint:goerr113
+			}
+		} else {
+			missing++
 		}
 
-		cf := conn.Spec.Fabric
-
-		for idx, link := range cf.Links {
-			total += 2
-			if link.Spine.IP == "" {
-				missing++
-			}
-			if link.Leaf.IP == "" {
-				missing++
-			}
-			if link.Spine.IP == "" || link.Leaf.IP == "" {
-				continue
-			}
-
-			spinePrefix, err := netip.ParsePrefix(link.Spine.IP)
+		// TODO should it be a separate subnet from the fabric?
+		total++
+		if gw.Spec.ProtocolIP != "" {
+			gwProtoIP, err := netip.ParsePrefix(gw.Spec.ProtocolIP)
 			if err != nil {
-				return status, fmt.Errorf("parsing fabric connection %s link %d spine IP %s: %w", conn.Name, idx, link.Spine.IP, err)
+				return status, fmt.Errorf("parsing gateway %s protocol IP %s: %w", gw.Name, gw.Spec.ProtocolIP, err)
 			}
-			if spinePrefix.Bits() != 31 {
-				return status, fmt.Errorf("fabric connection %s link %d spine IP %s is not a /31", conn.Name, idx, spinePrefix) //nolint:goerr113
-			}
-
-			spineIP := spinePrefix.Addr()
-			if !fabricSubnet.Contains(spineIP) {
-				return status, fmt.Errorf("fabric connection %s link %d spine IP %s is not in the fabric subnet %s", conn.Name, idx, spineIP, fabricSubnet) //nolint:goerr113
-			}
-			if _, exist := fabricIPs[spineIP]; exist {
-				return status, fmt.Errorf("fabric connection %s link %d spine IP %s is already in use", conn.Name, idx, spineIP) //nolint:goerr113
-			}
-			fabricIPs[spineIP] = true
-
-			leafPrefix, err := netip.ParsePrefix(link.Leaf.IP)
-			if err != nil {
-				return status, fmt.Errorf("parsing fabric connection %s link %d leaf IP %s: %w", conn.Name, idx, link.Leaf.IP, err)
-			}
-			if leafPrefix.Bits() != 31 {
-				return status, fmt.Errorf("fabric connection %s link %d leaf IP %s is not a /31", conn.Name, idx, leafPrefix) //nolint:goerr113
+			if gwProtoIP.Bits() != 32 {
+				return status, fmt.Errorf("gateway %s protocol IP %s must be a /32", gw.Name, gwProtoIP) //nolint:goerr113
 			}
 
-			leafIP := leafPrefix.Addr()
-			if !fabricSubnet.Contains(leafIP) {
-				return status, fmt.Errorf("fabric connection %s link %d leaf IP %s is not in the fabric subnet %s", conn.Name, idx, leafIP, fabricSubnet) //nolint:goerr113
+			if !protocolSubnet.Contains(gwProtoIP.Addr()) {
+				return status, fmt.Errorf("gateway %s protocol IP %s is not in the protocol subnet %s", gw.Name, gwProtoIP, protocolSubnet) //nolint:goerr113
 			}
-			if _, exist := fabricIPs[leafIP]; exist {
-				return status, fmt.Errorf("fabric connection %s link %d leaf IP %s is already in use", conn.Name, idx, leafIP) //nolint:goerr113
-			}
-			fabricIPs[leafIP] = true
 
-			if spinePrefix.Masked() != leafPrefix.Masked() {
-				return status, fmt.Errorf("fabric connection %s link %d spine IP %s and leaf IP %s are not in the same subnet", conn.Name, idx, spineIP, leafIP) //nolint:goerr113
+			if _, exist := protocolIPs[gwProtoIP.Addr()]; exist {
+				return status, fmt.Errorf("gateway %s protocol IP %s is already in use", gw.Name, gwProtoIP) //nolint:goerr113
 			}
+			protocolIPs[gwProtoIP.Addr()] = true
+		} else {
+			missing++
 		}
+
+		// TODO do some basic validation of the interfaces and neighbors
 	}
 
 	switch {
@@ -690,6 +783,37 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 
 				link.Gateway.IP = nextFabricIP.String() + "/31"
 				nextFabricIP = nextFabricIP.Next()
+
+				gwName := link.Gateway.DeviceName()
+				gw := &gwapi.Gateway{}
+				if err := kube.Get(ctx, kclient.ObjectKey{Namespace: comp.FabNamespace, Name: gwName}, gw); err != nil {
+					return fmt.Errorf("getting gateway %s: %w", gwName, err)
+				}
+				if gw.Spec.Interfaces == nil {
+					gw.Spec.Interfaces = map[string]gwapi.GatewayInterface{}
+				}
+
+				if _, exist := gw.Spec.Interfaces[link.Gateway.LocalPortName()]; !exist {
+					return fmt.Errorf("gateway %s does not have interface %s", gwName, link.Gateway.LocalPortName()) //nolint:goerr113
+				}
+				gw.Spec.Interfaces[link.Gateway.LocalPortName()] = gwapi.GatewayInterface{
+					IP: link.Gateway.IP,
+				}
+
+				spineIP, err := netip.ParsePrefix(link.Spine.IP)
+				if err != nil {
+					return fmt.Errorf("parsing gateway %s link %d spine IP %s: %w", gwName, idx, link.Spine.IP, err)
+				}
+
+				// TODO check that it's not already set?
+				gw.Spec.Neighbors = append(gw.Spec.Neighbors, gwapi.GatewayBGPNeighbor{
+					IP:  spineIP.Addr().String(),
+					ASN: c.Fab.Spec.Config.Fabric.SpineASN,
+				})
+
+				if err := kube.Update(ctx, gw); err != nil {
+					return fmt.Errorf("updating gateway %s: %w", gw.Name, err)
+				}
 			}
 		} else {
 			continue
@@ -697,6 +821,22 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 
 		if err := kube.Update(ctx, &conn); err != nil {
 			return fmt.Errorf("updating connection %s: %w", conn.Name, err)
+		}
+	}
+
+	gateways := &gwapi.GatewayList{}
+	if err := kube.List(ctx, gateways); err != nil {
+		return fmt.Errorf("listing gateways: %w", err)
+	}
+
+	for _, gw := range gateways.Items {
+		gw.Spec.ASN = c.Fab.Spec.Config.Gateway.ASN
+
+		gw.Spec.ProtocolIP = netip.PrefixFrom(nextProtoIP, 32).String()
+		nextProtoIP = nextProtoIP.Next()
+
+		if err := kube.Update(ctx, &gw); err != nil {
+			return fmt.Errorf("updating gateway %s: %w", gw.Name, err)
 		}
 	}
 
