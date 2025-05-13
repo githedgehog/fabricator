@@ -79,7 +79,7 @@ func (gw *Gateway) Validate(_ context.Context, _ kclient.Reader) error {
 	if protoIP.Bits() != 32 {
 		return fmt.Errorf("ProtocolIP %s must be a /32 prefix", gw.Spec.ProtocolIP) //nolint:goerr113
 	}
-	if protoIP.Addr().Is4() {
+	if !protoIP.Addr().Is4() {
 		return fmt.Errorf("ProtocolIP %s must be an IPv4 address", gw.Spec.ProtocolIP) //nolint:goerr113
 	}
 
