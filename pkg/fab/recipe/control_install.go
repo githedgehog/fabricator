@@ -13,7 +13,6 @@ import (
 	"reflect"
 	"time"
 
-	"go.githedgehog.com/fabric/api/meta"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
@@ -23,6 +22,8 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab/comp/certmanager"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/zot"
+	"go.githedgehog.com/fabricator/pkg/util/apiutil"
+	gwapi "go.githedgehog.com/gateway/api/gateway/v1alpha1"
 	kapierrors "k8s.io/apimachinery/pkg/api/errors"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -207,7 +208,7 @@ func (c *ControlInstall) installK8s(ctx context.Context) (kclient.Client, error)
 	kube, err := kubeutil.NewClient(ctx, k3s.KubeConfigPath,
 		comp.CoreAPISchemeBuilder, comp.AppsAPISchemeBuilder,
 		comp.HelmAPISchemeBuilder, comp.CMApiSchemeBuilder, comp.CMMetaSchemeBuilder,
-		wiringapi.SchemeBuilder, vpcapi.SchemeBuilder, fabapi.SchemeBuilder,
+		wiringapi.SchemeBuilder, vpcapi.SchemeBuilder, fabapi.SchemeBuilder, gwapi.SchemeBuilder,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("creating kube client: %w", err)
@@ -440,7 +441,7 @@ func (c *ControlInstall) installInclude(ctx context.Context, kube kclient.Client
 
 	slog.Info("Installing included wiring")
 
-	for _, objList := range []meta.ObjectList{
+	for _, objList := range []kclient.ObjectList{
 		&wiringapi.VLANNamespaceList{},
 		&vpcapi.IPv4NamespaceList{},
 		&wiringapi.SwitchGroupList{},
@@ -454,12 +455,15 @@ func (c *ControlInstall) installInclude(ctx context.Context, kube kclient.Client
 		&vpcapi.ExternalAttachmentList{},
 		&vpcapi.ExternalPeeringList{},
 		// switch/server profiles are intentionally skipped
+		&gwapi.GatewayList{},
+		&gwapi.VPCInfoList{},
+		&gwapi.PeeringList{},
 	} {
 		if err := c.Include.List(ctx, objList); err != nil {
 			return fmt.Errorf("listing %T: %w", objList, err)
 		}
 
-		for _, obj := range objList.GetItems() {
+		for _, obj := range apiutil.KubeListItems(objList) {
 			kind := obj.GetObjectKind().GroupVersionKind().Kind
 			name := obj.GetName()
 
