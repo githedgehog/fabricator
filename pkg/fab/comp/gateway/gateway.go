@@ -25,8 +25,8 @@ const (
 	CtrlChartRef = "gateway/charts/gateway"
 	APIChartRef  = "gateway/charts/gateway-api"
 	AgentRef     = "gateway/gateway-agent"
-	DataplaneRef = "gateway-proto/gwtestctl" // TODO set actual dataplane image
-	FRRRef       = "toolbox"                 // TODO set actual frr image and update airgap artifacts
+	DataplaneRef = "dataplane"
+	FRRRef       = "dataplane/frr"
 )
 
 //go:embed values.tmpl.yaml
