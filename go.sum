@@ -899,8 +899,8 @@ go.githedgehog.com/fabric v0.75.3 h1:qYmA1x58T5cDFmZNEI6aa8JczIELyMCrZo7vMqCOLcA
 go.githedgehog.com/fabric v0.75.3/go.mod h1:n43z9LyXN/ZX9zCa8ogQuU0RvmzNnlf3EoUhtEms3ow=
 go.githedgehog.com/fabric-bcm-ygot v0.4.0-4.4.2 h1:tJPhb415JUafEZKdDAxjGqvHdTdhGGmHUIdA5KDlhP0=
 go.githedgehog.com/fabric-bcm-ygot v0.4.0-4.4.2/go.mod h1:o1ek4WK+BKUXfqNUQ0ru3joO/17yXEHU8eJdS5Uf6g4=
-go.githedgehog.com/gateway v0.6.0 h1:32XaRlH4NTADs27Asj9WdeBu82EmUgOfqtOmzwXvF40=
-go.githedgehog.com/gateway v0.6.0/go.mod h1:2ocSrX5wD8ObXUlBoQBgH+EaHuUOT9J+TC9ZhIfctuE=
+go.githedgehog.com/gateway v0.6.1 h1:7Ba5EH+n7wbGVtbvHbR3U3YoW1fipA6O3I0XyWJaQY0=
+go.githedgehog.com/gateway v0.6.1/go.mod h1:2ocSrX5wD8ObXUlBoQBgH+EaHuUOT9J+TC9ZhIfctuE=
 go.mongodb.org/mongo-driver v1.14.0 h1:P98w8egYRjYe3XDjxhYJagTokP/H6HzlsnojRgZRd80=
 go.mongodb.org/mongo-driver v1.14.0/go.mod h1:Vzb0Mk/pa7e6cWw85R4F/endUC3u0U9jGcNU603k65c=
 go.mozilla.org/pkcs7 v0.0.0-20210826202110-33d05740a352 h1:CCriYyAfq1Br1aIYettdHZTy8mBTIPo7We18TuO/bak=
