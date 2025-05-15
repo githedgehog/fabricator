@@ -1495,6 +1495,7 @@ func pauseOnFail() {
 
 func doRunTests(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSuite) (*JUnitTestSuite, error) {
 	suiteStart := time.Now()
+	ranSomeTests := false
 	slog.Info("** Running test suite", "suite", ts.Name, "tests", len(ts.TestCases), "start-time", suiteStart.Format(time.RFC3339))
 
 	// initial setup
@@ -1510,7 +1511,7 @@ func doRunTests(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 			continue
 		}
 		slog.Info("* Running test", "test", test.Name)
-		if (i > 0 && testCtx.wipeBetweenTests) || prevRevertsFailed {
+		if (ranSomeTests && testCtx.wipeBetweenTests) || prevRevertsFailed {
 			if err := testCtx.setupTest(ctx); err != nil {
 				ts.TestCases[i].Failure = &Failure{
 					Message: fmt.Sprintf("Failed to run setupTest between tests: %s", err.Error()),
@@ -1531,6 +1532,7 @@ func doRunTests(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 		testStart := time.Now()
 		skip, reverts, err := test.F(ctx)
 		ts.TestCases[i].Time = time.Since(testStart).Seconds()
+		ranSomeTests = true
 		if skip {
 			var skipMsg string
 			if err != nil {
