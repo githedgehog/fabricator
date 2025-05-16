@@ -114,7 +114,7 @@ func Artifacts(cfg fabapi.Fabricator) (comp.OCIArtifacts, error) {
 		CtrlChartRef: cfg.Status.Versions.Gateway.Controller,
 		AgentRef:     cfg.Status.Versions.Gateway.Agent,
 		DataplaneRef: cfg.Status.Versions.Gateway.Dataplane,
-		// FRRRef:       cfg.Status.Versions.Gateway.FRR, // TODO enable after switching to actual frr image
+		FRRRef:       cfg.Status.Versions.Gateway.FRR,
 	}, nil
 }
 
