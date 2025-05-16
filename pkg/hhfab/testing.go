@@ -30,13 +30,16 @@ import (
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab"
+	gwapi "go.githedgehog.com/gateway/api/gateway/v1alpha1"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 	coreapi "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlutil "sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/scheme"
 )
@@ -936,6 +939,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 		vpcapi.SchemeBuilder,
 		agentapi.SchemeBuilder,
 		fabapi.SchemeBuilder,
+		gwapi.SchemeBuilder,
 	)
 	if err != nil {
 		return fmt.Errorf("creating kube client: %w", err)
@@ -1123,7 +1127,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 			if opts.PingsCount > 0 || opts.IPerfsSeconds > 0 {
 				g.Go(func() error {
 					if err := func() error {
-						expectedReachable, err := apiutil.IsServerReachable(ctx, kube, serverA, serverB)
+						expectedReachable, err := IsServerReachable(ctx, kube, serverA, serverB, c.Fab.Spec.Config.Gateway.Enable)
 						if err != nil {
 							return fmt.Errorf("checking if should be reachable: %w", err)
 						}
@@ -1217,6 +1221,177 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 	slog.Info("All connectivity tested successfully", "took", time.Since(start))
 
 	return nil
+}
+
+func IsServerReachable(ctx context.Context, kube kclient.Reader, sourceServer, destServer string, checkGateway bool) (bool, error) {
+	sourceSubnets, err := apiutil.GetAttachedSubnets(ctx, kube, sourceServer)
+	if err != nil {
+		return false, fmt.Errorf("getting attached subnets for source server %s: %w", sourceServer, err)
+	}
+
+	destSubnets, err := apiutil.GetAttachedSubnets(ctx, kube, destServer)
+	if err != nil {
+		return false, fmt.Errorf("getting attached subnets for dest server %s: %w", destServer, err)
+	}
+
+	for sourceSubnetName := range sourceSubnets {
+		for destSubnetName := range destSubnets {
+			if reachable, err := IsSubnetReachable(ctx, kube, sourceSubnetName, destSubnetName, checkGateway); err != nil {
+				return false, err
+			} else if reachable {
+				return true, nil
+			}
+		}
+	}
+
+	return false, nil
+}
+
+func IsSubnetReachable(ctx context.Context, kube kclient.Reader, source, dest string, checkGateway bool) (bool, error) {
+	if !strings.Contains(source, "/") {
+		return false, fmt.Errorf("source must be full VPC subnet name (<vpc-name>/<subnet-name>)")
+	}
+
+	if !strings.Contains(dest, "/") {
+		return false, fmt.Errorf("dest must be full VPC subnet name (<vpc-name>/<subnet-name>)")
+	}
+
+	sourceParts := strings.SplitN(source, "/", 2)
+	destParts := strings.SplitN(dest, "/", 2)
+
+	sourceVPC, sourceSubnet := sourceParts[0], sourceParts[1]
+	destVPC, destSubnet := destParts[0], destParts[1]
+
+	if sourceVPC == destVPC {
+		return apiutil.IsSubnetReachableWithinVPC(ctx, kube, sourceVPC, sourceSubnet, destSubnet)
+	}
+
+	ok, err := apiutil.IsSubnetReachableBetweenVPCs(ctx, kube, sourceVPC, sourceSubnet, destVPC, destSubnet)
+	if err != nil {
+		return false, fmt.Errorf("checking if subnets %s and %s are reachable through fabric: %w", source, dest, err)
+	}
+
+	if ok {
+		return true, nil
+	}
+
+	if checkGateway {
+		ok, err = IsSubnetReachableWithGateway(ctx, kube, sourceVPC, sourceSubnet, destVPC, destSubnet)
+		if err != nil {
+			return false, fmt.Errorf("checking if subnets %s and %s are reachable through gateway: %w", source, dest, err)
+		}
+
+		if ok {
+			slog.Debug("Subnets are reachable through gateway", "source", sourceVPC+"/"+source, "dest", destVPC+"/"+dest)
+
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+// It's just a temporary function for simple check only supporting whole VPC subnet CIDRs
+func IsSubnetReachableWithGateway(ctx context.Context, kube kclient.Reader, vpc1Name, vpc1Subnet, vpc2Name, vpc2Subnet string) (bool, error) {
+	if vpc1Name == vpc2Name {
+		return false, fmt.Errorf("VPCs %s and %s are the same", vpc1Name, vpc2Name)
+	}
+
+	vpc1 := gwapi.VPCInfo{}
+	if err := kube.Get(ctx, kclient.ObjectKey{
+		Namespace: kmetav1.NamespaceDefault,
+		Name:      vpc1Name,
+	}, &vpc1); err != nil {
+		return false, fmt.Errorf("failed to get VPC %s: %w", vpc1Name, err)
+	}
+
+	vpc2 := gwapi.VPCInfo{}
+	if err := kube.Get(ctx, kclient.ObjectKey{
+		Namespace: kmetav1.NamespaceDefault,
+		Name:      vpc2Name,
+	}, &vpc2); err != nil {
+		return false, fmt.Errorf("failed to get VPC %s: %w", vpc2Name, err)
+	}
+
+	if vpc1.Spec.Subnets[vpc1Subnet] == nil {
+		return false, fmt.Errorf("source subnet %s not found in VPC %s", vpc1Subnet, vpc1Name)
+	}
+	if vpc2.Spec.Subnets[vpc2Subnet] == nil {
+		return false, fmt.Errorf("destination subnet %s not found in VPC %s", vpc2Subnet, vpc2Name)
+	}
+
+	peerings := gwapi.PeeringList{}
+	if err := kube.List(ctx, &peerings,
+		kclient.InNamespace(kmetav1.NamespaceDefault),
+		kclient.MatchingLabels{
+			// TODO use it instead when GW is released
+			// gwapi.ListLabelVPC(vpc1Name): gwapi.ListLabelValue,
+			// gwapi.ListLabelVPC(vpc2Name): gwapi.ListLabelValue,
+			"vpc.gateway.githedgehog.com/" + vpc1Name: "true",
+			"vpc.gateway.githedgehog.com/" + vpc2Name: "true",
+		},
+	); err != nil {
+		return false, fmt.Errorf("listing peerings between VPCs %s and %s: %w", vpc1Name, vpc2Name, err)
+	}
+
+	for _, peering := range peerings.Items {
+		vpc1Peering, ok := peering.Spec.Peering[vpc1Name]
+		if !ok {
+			continue
+		}
+
+		vpc2Peering, ok := peering.Spec.Peering[vpc2Name]
+		if !ok {
+			continue
+		}
+
+		vpc1Found, err := isVPCSubnetPresentInPeering(vpc1Peering, vpc1, vpc1Name, vpc1Subnet)
+		if err != nil {
+			return false, fmt.Errorf("checking if VPC %s subnet %s is present in peering %s: %w", vpc1Name, vpc1Subnet, peering.Name, err)
+		}
+
+		vpc2Found, err := isVPCSubnetPresentInPeering(vpc2Peering, vpc2, vpc2Name, vpc2Subnet)
+		if err != nil {
+			return false, fmt.Errorf("checking if VPC %s subnet %s is present in peering %s: %w", vpc2Name, vpc2Subnet, peering.Name, err)
+		}
+
+		return vpc1Found && vpc2Found, nil
+	}
+
+	return false, nil
+}
+
+func isVPCSubnetPresentInPeering(peering *gwapi.PeeringEntry, vpc gwapi.VPCInfo, vpcName string, vpcSubnet string) (bool, error) {
+	for _, expose := range peering.Expose {
+		if len(expose.As) > 0 {
+			return false, fmt.Errorf("expose as %s is not supported yet", expose.As)
+		}
+
+		for _, exposeEntry := range expose.IPs {
+			// TODO make some helper in the gateway project
+			exposeSubnetName := ""
+			if exposeEntry.VPCSubnet != "" {
+				if _, ok := vpc.Spec.Subnets[exposeEntry.VPCSubnet]; ok {
+					exposeSubnetName = exposeEntry.VPCSubnet
+				} else {
+					return false, fmt.Errorf("subnet %s not found in VPC %s", exposeEntry.VPCSubnet, vpcName)
+				}
+			} else if exposeEntry.CIDR != "" {
+				for subnetName, subnet := range vpc.Spec.Subnets {
+					if subnet.CIDR == exposeEntry.CIDR {
+						exposeSubnetName = subnetName
+					}
+				}
+			} else {
+				return false, fmt.Errorf("only cidr and vpcSubnet are supported as expose entries: %s", exposeEntry)
+			}
+
+			if exposeSubnetName == vpcSubnet {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 func WaitSwitchesReady(ctx context.Context, kube client.Reader, appliedFor time.Duration, timeout time.Duration) error {
