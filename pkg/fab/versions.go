@@ -14,7 +14,7 @@ import (
 var (
 	FabricatorVersion = meta.Version(version.Version)
 	FabricVersion     = meta.Version("v0.75.3")
-	GatewayVersion    = meta.Version("v0.6.1")
+	GatewayVersion    = meta.Version("v0.7.0")
 )
 
 var Versions = fabapi.Versions{
@@ -71,7 +71,7 @@ var Versions = fabapi.Versions{
 		API:        GatewayVersion,
 		Controller: GatewayVersion,
 		Agent:      GatewayVersion,
-		Dataplane:  "2025-05-15.pr-daniel-noland-vpc-manager-integration-rebase.x86_64-unknown-linux-gnu.debug.35261e0785a90c53b0c28317939f03142960ab", // TODO set actual version
+		Dataplane:  "2025-05-16.dirty.pr-daniel-noland-vpc-manager-integration2-rebased.x86_64-unknown-linux-gnu.debug.3027d5948e7ba4134a7cd32ccbeff5", // TODO set actual version
 		FRR:        "13",                                                                                                                               // TODO set actual version
 	},
 	VLAB: fabapi.VLABVersions{
