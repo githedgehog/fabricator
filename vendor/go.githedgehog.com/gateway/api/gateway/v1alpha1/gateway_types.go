@@ -18,6 +18,8 @@ import (
 type GatewaySpec struct {
 	// ProtocolIP is used as a loopback IP and BGP Router ID
 	ProtocolIP string `json:"protocolIP,omitempty"`
+	// VTEP IP to be used by the gateway
+	VTEPIP string `json:"vtepIP,omitempty"`
 	// ASN is the ASN of the gateway
 	ASN uint32 `json:"asn,omitempty"`
 	// Interfaces is a map of interface names to their configurations
