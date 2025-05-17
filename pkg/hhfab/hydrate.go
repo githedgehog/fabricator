@@ -592,6 +592,29 @@ func (c *Config) getHydration(ctx context.Context, kube kclient.Reader) (Hydrati
 			missing++
 		}
 
+		// TODO should it be a separate subnet from the fabric?
+		total++
+		if gw.Spec.VTEPIP != "" {
+			gwVTEPIP, err := netip.ParsePrefix(gw.Spec.VTEPIP)
+			if err != nil {
+				return status, fmt.Errorf("parsing gateway %s vtep IP %s: %w", gw.Name, gw.Spec.VTEPIP, err)
+			}
+			if gwVTEPIP.Bits() != 32 {
+				return status, fmt.Errorf("gateway %s vtep IP %s must be a /32", gw.Name, gwVTEPIP) //nolint:goerr113
+			}
+
+			if !vtepSubnet.Contains(gwVTEPIP.Addr()) {
+				return status, fmt.Errorf("gateway %s vtep IP %s is not in the vtep subnet %s", gw.Name, gwVTEPIP, vtepSubnet) //nolint:goerr113
+			}
+
+			if _, exist := vtepIPs[gwVTEPIP.Addr()]; exist {
+				return status, fmt.Errorf("gateway %s vtep IP %s is already in use", gw.Name, gwVTEPIP) //nolint:goerr113
+			}
+			vtepIPs[gwVTEPIP.Addr()] = true
+		} else {
+			missing++
+		}
+
 		// TODO do some basic validation of the interfaces and neighbors
 	}
 
@@ -834,6 +857,9 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 
 		gw.Spec.ProtocolIP = netip.PrefixFrom(nextProtoIP, 32).String()
 		nextProtoIP = nextProtoIP.Next()
+
+		gw.Spec.VTEPIP = netip.PrefixFrom(nextVTEPIP, 32).String()
+		nextVTEPIP = nextVTEPIP.Next()
 
 		if err := kube.Update(ctx, &gw); err != nil {
 			return fmt.Errorf("updating gateway %s: %w", gw.Name, err)

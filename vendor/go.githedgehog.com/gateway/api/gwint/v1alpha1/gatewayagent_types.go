@@ -17,9 +17,11 @@ type VPCInfoData struct {
 
 // GatewayAgentSpec defines the desired state of GatewayAgent.
 type GatewayAgentSpec struct {
-	Gateway  gwapi.GatewaySpec            `json:"gateway,omitempty"`
-	VPCs     map[string]VPCInfoData       `json:"vpcs,omitempty"`
-	Peerings map[string]gwapi.PeeringSpec `json:"peerings,omitempty"`
+	// CtrlVersion is the version of the gateway controller to trigger generation changes on controler upgrade
+	CtrlVersion string                       `json:"ctrlVersion,omitempty"`
+	Gateway     gwapi.GatewaySpec            `json:"gateway,omitempty"`
+	VPCs        map[string]VPCInfoData       `json:"vpcs,omitempty"`
+	Peerings    map[string]gwapi.PeeringSpec `json:"peerings,omitempty"`
 }
 
 // GatewayAgentStatus defines the observed state of GatewayAgent.
