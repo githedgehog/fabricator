@@ -71,8 +71,8 @@ var Versions = fabapi.Versions{
 		API:        GatewayVersion,
 		Controller: GatewayVersion,
 		Agent:      GatewayVersion,
-		Dataplane:  "2025-05-16.dirty.pr-daniel-noland-vpc-manager-integration2-rebased.x86_64-unknown-linux-gnu.debug.3027d5948e7ba4134a7cd32ccbeff5", // TODO set actual version
-		FRR:        "13",                                                                                                                               // TODO set actual version
+		Dataplane:  "16", // TODO set actual version
+		FRR:        "13", // TODO set actual version
 	},
 	VLAB: fabapi.VLABVersions{
 		ONIE:    "v0.2.0",
