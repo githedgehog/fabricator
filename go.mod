@@ -46,9 +46,9 @@ require (
 	golang.org/x/sync v0.14.0
 	golang.org/x/term v0.32.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
-	k8s.io/api v0.32.4
+	k8s.io/api v0.32.5
 	k8s.io/apiextensions-apiserver v0.32.4
-	k8s.io/apimachinery v0.32.4
+	k8s.io/apimachinery v0.32.5
 	k8s.io/client-go v0.32.4
 	k8s.io/klog/v2 v2.130.1
 	k8s.io/metrics v0.32.4
