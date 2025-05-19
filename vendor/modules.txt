@@ -1646,7 +1646,7 @@ github.com/urfave/cli/v2
 github.com/vbatts/tar-split/archive/tar
 github.com/vbatts/tar-split/tar/asm
 github.com/vbatts/tar-split/tar/storage
-# github.com/vbauerster/mpb/v8 v8.10.0
+# github.com/vbauerster/mpb/v8 v8.10.1
 ## explicit; go 1.23.0
 github.com/vbauerster/mpb/v8
 github.com/vbauerster/mpb/v8/cwriter
