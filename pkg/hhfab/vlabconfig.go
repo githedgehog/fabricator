@@ -282,13 +282,13 @@ func (c *Config) PrepareVLAB(ctx context.Context, opts VLABUpOpts) (*VLAB, error
 	}
 
 	for idx := range c.Controls {
-		if !isHardware(&c.Controls[idx]) {
+		if !IsHardware(&c.Controls[idx]) {
 			c.Controls[idx].Spec.Bootstrap.Disk = "/dev/vda"
 		}
 	}
 
 	for idx := range c.Nodes {
-		if !isHardware(&c.Nodes[idx]) {
+		if !IsHardware(&c.Nodes[idx]) {
 			c.Nodes[idx].Spec.Bootstrap.Disk = "/dev/vda"
 		}
 	}
@@ -369,7 +369,7 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 			return nil, fmt.Errorf("unexpected passthrough links for control %q: %v", control.Name, links) //nolint:goerr113
 		}
 
-		if isHardware(&control) {
+		if IsHardware(&control) {
 			return nil, fmt.Errorf("control VM %q can't be hardware", control.Name) //nolint:goerr113
 		}
 
@@ -413,7 +413,7 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 			return nil, fmt.Errorf("unexpected passthrough links for node %q: %v", node.Name, links) //nolint:goerr113
 		}
 
-		if isHardware(&node) {
+		if IsHardware(&node) {
 			return nil, fmt.Errorf("node VM %q can't be hardware", node.Name) //nolint:goerr113
 		}
 
@@ -442,7 +442,7 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 			return nil, fmt.Errorf("failed to add passthrough links for server %q: %w", server.Name, err)
 		}
 
-		if isHardware(&server) {
+		if IsHardware(&server) {
 			hw[server.Name] = true
 
 			continue
@@ -473,7 +473,7 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 	}
 	tableID := uint32(1000)
 	for _, external := range externals.Items {
-		if isHardware(&external) {
+		if IsHardware(&external) {
 			hwExternals[external.Name] = true
 
 			continue
@@ -513,7 +513,7 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 			return nil, fmt.Errorf("failed to add passthrough links for switch %q: %w", sw.Name, err)
 		}
 
-		if isHardware(&sw) {
+		if IsHardware(&sw) {
 			hw[sw.Name] = true
 
 			continue
@@ -662,21 +662,39 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 				}
 			}
 		} else if conn.Spec.External != nil {
-			// in hybrid environments we can have physical switches connected to
-			// both virtual and hardware externals. Since a connection is not associated
-			// with a specific external, we need to annotate the connection itself
-			if isHardware(&conn) {
-				slog.Debug("Skipping hardware external connection", "connection", conn.Name)
+			// check if the connection is for hardware or virtual externals
+			// (it cannot be both, complain if that is the case)
+			var hwExt, virtExt bool
+			for _, extAttach := range externalAttachs.Items {
+				if extAttach.Spec.Connection != conn.Name {
+					continue
+				}
+				extName := extAttach.Spec.External
+				if hwExternals[extName] {
+					hwExt = true
+				} else {
+					virtExt = true
+				}
+			}
+			// here we want to do a bunch of stuff only if there are virtual externals attached on this connection
+			switch {
+			case hwExt && virtExt:
+				return nil, fmt.Errorf("external connection %q has both hardware and virtual external attachments", conn.Name) //nolint:goerr113
+			case !hwExt && !virtExt:
+				slog.Debug("Skipping external connection as it has no attachments", "connection", conn.Name)
+
+				continue
+			case hwExt:
+				slog.Debug("Skipping external connection as it is for hardware externals", "connection", conn.Name)
 
 				continue
 			}
+			// now that we know that the connection is for virtual externals, we can add a link towards them,
+			// which could be using a passthrough if the source is a hardware switch
 			if externalID > MaxExternalConns {
 				return nil, fmt.Errorf("too many external connections") //nolint:goerr113
 			}
-
 			switchName := conn.Spec.External.Link.Switch.DeviceName()
-			// add the link representing the virtual external connection
-			// note that if the switch is hardware, we will require passthrough annotations
 			nicName := fmt.Sprintf("enp2s%d", externalID)
 			externalID++
 			toStr := fmt.Sprintf("%s/%s", ExternalVMName, nicName)
@@ -688,7 +706,7 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 				Untagged:    false,
 			}
 
-			// check if there is any external attachment using this connection
+			// iterate over the external attachments using this connection
 			// note that we have a limitation where we cannot support both untagged and tagged
 			// on the same connection, so complain if we notice that's the case
 			var tagged, untagged bool
@@ -697,9 +715,9 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 					continue
 				}
 				extName := extAttach.Spec.External
-				// nothing to do if the external is hardware
+				// just a paranoid extra safety (unreachable, we already checked)
 				if hwExternals[extName] {
-					continue
+					return nil, fmt.Errorf("external attachment %q is for hardware external %q", extAttach.Name, extName) //nolint:goerr113
 				}
 				extVrf, ok := cfg.Externals.VRFs[extName]
 				if !ok {
@@ -984,7 +1002,8 @@ func getAsn(obj kclient.Object) uint32 {
 	return 0
 }
 
-func isHardware(obj kclient.Object) bool {
+// exported as it's used in release-tests
+func IsHardware(obj kclient.Object) bool {
 	if obj.GetAnnotations() != nil {
 		t, exist := obj.GetAnnotations()[HHFabCfgType]
 		if exist {
