@@ -1248,7 +1248,7 @@ func planMCLAGDomain(agent *agentapi.Agent, spec *dozer.Spec) (bool, error) {
 	spec.LSTGroups[LSTGroupSpineLink] = &dozer.SpecLSTGroup{
 		AllEVPNESDownstream: nil,
 		AllMCLAGDownstream:  pointer.To(true),
-		Timeout:             pointer.To(uint16(180)),
+		Timeout:             pointer.To(uint16(5)),
 	}
 
 	spineLinkTracking(agent, spec)
@@ -1269,7 +1269,7 @@ func planESLAG(agent *agentapi.Agent, spec *dozer.Spec) error { //nolint:unparam
 	spec.LSTGroups[LSTGroupSpineLink] = &dozer.SpecLSTGroup{
 		AllEVPNESDownstream: pointer.To(true),
 		AllMCLAGDownstream:  nil,
-		Timeout:             pointer.To(uint16(180)),
+		Timeout:             pointer.To(uint16(60)),
 	}
 
 	spineLinkTracking(agent, spec)
@@ -1304,6 +1304,27 @@ func vpcVrfName(vpcName string) string {
 
 func ipnsVrfName(ipnsName string) string {
 	return vrfName("I" + ipnsName)
+}
+
+// normalize nexthops as we get them in an inconsistent order, and otherwise
+// this can cause a diff when there is none
+func NextHopCompare(a, b dozer.SpecVRFStaticRouteNextHop) int {
+	if a.IP < b.IP {
+		return -1
+	} else if a.IP > b.IP {
+		return 1
+	}
+	if a.Interface == nil && b.Interface != nil {
+		return -1
+	}
+	if a.Interface != nil && b.Interface == nil {
+		return 1
+	}
+	if a.Interface != nil && b.Interface != nil {
+		return strings.Compare(*a.Interface, *b.Interface)
+	}
+
+	return 0
 }
 
 func planVPCs(agent *agentapi.Agent, spec *dozer.Spec) error {
@@ -1554,6 +1575,7 @@ func planVPCs(agent *agentapi.Agent, spec *dozer.Spec) error {
 				for _, nextHop := range route.NextHops {
 					nextHops = append(nextHops, dozer.SpecVRFStaticRouteNextHop{IP: nextHop})
 				}
+				slices.SortStableFunc(nextHops, NextHopCompare)
 
 				spec.VRFs[vrfName].StaticRoutes[route.Prefix] = &dozer.SpecVRFStaticRoute{
 					NextHops: nextHops,
