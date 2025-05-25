@@ -93,6 +93,15 @@ func (c *Config) loadWiring(ctx context.Context) (*apiutil.Loader, error) {
 	}
 
 	l := apiutil.NewLoader()
+
+	fabCfg, err := os.ReadFile(filepath.Join(c.WorkDir, FabConfigFile))
+	if err != nil {
+		return nil, fmt.Errorf("reading fab config: %w", err)
+	}
+	if err := l.LoadAdd(ctx, apiutil.FabricatorGVKs, fabCfg); err != nil {
+		return nil, fmt.Errorf("loading fab config: %w", err)
+	}
+
 	files, err := os.ReadDir(includeDir)
 	if err != nil {
 		return nil, fmt.Errorf("reading include dir %q: %w", includeDir, err)
