@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -231,6 +232,7 @@ func execNodeCmd(hhfabBin, workDir, nodeName string, command string) error {
 		"ssh",
 		"-n",
 		nodeName,
+		"-b",
 		command,
 	)
 	cmd.Dir = workDir
@@ -242,6 +244,27 @@ func execNodeCmd(hhfabBin, workDir, nodeName string, command string) error {
 	}
 
 	return nil
+}
+
+// Like the above, but return the output.
+func execNodeCmdWOutput(hhfabBin, workDir, nodeName string, command string) (string, error) {
+	cmd := exec.Command(
+		hhfabBin,
+		"vlab",
+		"ssh",
+		"-n",
+		nodeName,
+		"-b",
+		command,
+	)
+	cmd.Dir = workDir
+	bytes, err := cmd.CombinedOutput()
+	out := string(bytes)
+	if err != nil {
+		return out, fmt.Errorf("running command %s on node %s: %w", command, nodeName, err)
+	}
+
+	return out, nil
 }
 
 // Enable or disable the hedgehog agent on switch swName.
@@ -1280,10 +1303,39 @@ func getServer1(ctx context.Context, kube kclient.Client) (string, error) {
 	return serverName, nil
 }
 
-// Test that DNS, NTP and MTU settings for a VPC are correctly propagated to the servers.
+// check that the DHPC lease is within the expected range.
+// note: tried to awk but for some reason it is not working if the pipe is passed as part of
+// the ssh command string, so tokenize here. string will be in the format:
+// valid_lft 3098sec preferred_lft 3098sec
+func checkDHCPLease(grepString string, expectedLease int, tolerance int) error {
+	tokens := strings.Split(strings.TrimLeft(grepString, " \t"), " ")
+	if len(tokens) < 4 {
+		return fmt.Errorf("DHCP lease string %s is too short, expected at least 4 tokens", grepString) //nolint:goerr113
+	}
+	stripped, found := strings.CutSuffix(tokens[1], "sec")
+	if !found {
+		return fmt.Errorf("DHCP lease %s does not end with 'sec'", tokens[1]) //nolint:goerr113
+	}
+	lease, err := strconv.Atoi(stripped)
+	if err != nil {
+		return fmt.Errorf("parsing DHCP lease %s: %w", stripped, err) //nolint:goerr113
+	}
+	if lease > expectedLease {
+		return fmt.Errorf("DHCP lease %d is greater than expected %d", lease, expectedLease) //nolint:goerr113
+	}
+	if lease < expectedLease-tolerance {
+		return fmt.Errorf("DHCP lease %d is less than expected %d (tolerance %d)", lease, expectedLease, tolerance) //nolint:goerr113
+	}
+	slog.Debug("DHCP lease check passed", "lease", lease, "expected", expectedLease, "tolerance", tolerance)
+
+	return nil
+}
+
+// Test that DNS, NTP, MTU and DHCP Lease settings for a VPC are correctly propagated to the servers.
 // For DNS, we check the content of /etc/resolv.conf;
 // for NTP, we check the output of timedatectl show-timesync;
-// for MTU, we check the output of "ip link" on the vlan interface.
+// for MTU, we check the output of "ip link" on the vlan interface;
+// for DHCP Lease, we check the output of "ip addr" on the server.
 func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (bool, []RevertFunc, error) {
 	// TODO: pick any server, derive other elements (i.e. vpc, hhnet params etc) from it
 	serverName, err := getServer1(ctx, testCtx.kube)
@@ -1297,11 +1349,12 @@ func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (bool, []Re
 	}
 
 	// Set DNS, NTP and MTU
-	slog.Debug("Setting DNS, NTP and MTU")
+	slog.Debug("Setting DNS, NTP, MTU and DHCP lease time")
 	dhcpOpts := &vpcapi.VPCDHCPOptions{
-		DNSServers:   []string{"1.1.1.1"},
-		TimeServers:  []string{"1.1.1.1"},
-		InterfaceMTU: 1400,
+		DNSServers:       []string{"1.1.1.1"},
+		TimeServers:      []string{"1.1.1.1"},
+		InterfaceMTU:     1400,
+		LeaseTimeSeconds: 1800,
 	}
 
 	for _, sub := range vpc.Spec.Subnets {
@@ -1361,9 +1414,9 @@ func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (bool, []Re
 		return false, reverts, fmt.Errorf("bonding interfaces on %s: %w", serverName, err)
 	}
 
-	// Check DNS, NTP and MTU
-	slog.Debug("Checking DNS, NTP and MTU")
-	var dnsFound, ntpFound, mtuFound bool
+	// Check DNS, NTP, MTU and DHCP lease
+	slog.Debug("Checking DNS, NTP, MTU and DHCP lease")
+	var dnsFound, ntpFound, mtuFound, leaseCheck bool
 	if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, serverName, "grep \"nameserver 1.1.1.1\" /etc/resolv.conf"); err != nil {
 		slog.Error("1.1.1.1 not found in resolv.conf", "error", err)
 	} else {
@@ -1379,8 +1432,17 @@ func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (bool, []Re
 	} else {
 		mtuFound = true
 	}
-	if !dnsFound || !ntpFound || !mtuFound {
-		return false, reverts, fmt.Errorf("DNS: %v, NTP: %v, MTU: %v", dnsFound, ntpFound, mtuFound) //nolint:goerr113
+	out, leaseErr := execNodeCmdWOutput(testCtx.hhfabBin, testCtx.workDir, serverName, "ip addr show dev bond0.1001 proto 4 | grep valid_lft")
+	if leaseErr != nil {
+		slog.Error("failed to get lease time", "error", leaseErr)
+	} else if err := checkDHCPLease(out, 1800, 120); err != nil {
+		slog.Error("DHCP lease time check failed", "error", err)
+	} else {
+		leaseCheck = true
+	}
+
+	if !dnsFound || !ntpFound || !mtuFound || !leaseCheck {
+		return false, reverts, fmt.Errorf("DNS: %v, NTP: %v, MTU: %v, DHCP lease: %v", dnsFound, ntpFound, mtuFound, leaseCheck) //nolint:goerr113
 	}
 
 	return false, reverts, nil
@@ -1717,7 +1779,7 @@ func makeVpcPeeringsSingleVPCSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 			},
 		},
 		{
-			Name: "DNS/NTP/MTU",
+			Name: "DNS/NTP/MTU/DHCP lease",
 			F:    testCtx.dnsNtpMtuTest,
 		},
 		{
