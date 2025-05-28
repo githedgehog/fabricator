@@ -147,6 +147,20 @@ test-api: _helm-fabricator-api
     kubectl get crd | grep fabricator
     kind delete cluster --name kind
 
+# Run VLAB Trivy security scan with configurable options
+security-scan *args="": && version
+  @echo "Checking prerequisites for VLAB security scan..."
+  @if [ ! -f "bin/hhfab" ]; then echo "ERROR: hhfab binary not found. Run 'just push' first."; exit 1; fi
+  @echo "Running VLAB Trivy security scan..."
+  @echo "Available options:"
+  @echo "  --control-only     Run only control VM setup and scanning"
+  @echo "  --gateway-only     Run only gateway VM setup and scanning"
+  @echo "  --skip-vlab        Skip launching VLAB (assumes VLAB is already running)"
+  @echo "  --strict           Require all scans to succeed (no partial successes)"
+  @echo "  --help, -h         Show help message"
+  @echo ""
+  ./hack/vlab-trivy-runner.sh {{args}}
+
 # Patch deployment using the default kubeconfig (KUBECONFIG env or ~/.kube/config)
 patch: && version
   kubectl -n fab patch fab/default --type=merge -p '{"spec":{"overrides":{"versions":{"fabricator":{"api":"{{version}}","controller":"{{version}}","ctl":"{{version}}","nodeConfig":"{{version}}"}}}}}'

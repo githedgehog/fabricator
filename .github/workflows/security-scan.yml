@@ -1,0 +1,87 @@
+name: Security Scan
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+on:
+  # Runs nightly at 2 AM UTC
+  schedule:
+    - cron: '0 2 * * *'
+
+  # Only trigger on changes to security scan scripts
+  push:
+    paths:
+      - '.github/workflows/security-scan.yml'
+      - 'hack/vlab-trivy-runner.sh'
+      - 'hack/trivy-setup-airgapped.sh'
+      - 'hack/trivy-setup.sh'
+      - 'justfile'
+
+  workflow_dispatch:
+    inputs:
+      debug_enabled:
+        type: boolean
+        description: "Enable debug output"
+        required: false
+        default: false
+
+# Only run one security scan at a time
+concurrency:
+  group: security-scan
+  cancel-in-progress: false
+
+jobs:
+  trivy-security-scan:
+    runs-on: vlab
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+
+      - name: Setup local registry
+        run: just --timestamp _localreg &
+
+      - name: Build and push hhfab artifacts
+        run: just --timestamp oci_repo=127.0.0.1:30000 oci=http push
+
+      - name: Run VLAB Trivy Security Scan
+        env:
+          HHFAB_REG_REPO: 127.0.0.1:30000
+        run: just security-scan --strict
+
+      - name: Upload SARIF file
+        if: always() && env.UPLOAD_SARIF == 'true'
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: ${{ env.SARIF_FILE }}
+          category: trivy-container-scan
+        continue-on-error: true
+
+      - name: Upload scan artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-scan-${{ github.run_number }}
+          path: |
+            trivy-reports/
+            sarif-reports/
+            vlab.log
+          retention-days: 30
+
+      - name: Setup tmate session for debug
+        if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
+        uses: mxschmitt/action-tmate@v3
+        timeout-minutes: 30
+        with:
+          limit-access-to-actor: true
