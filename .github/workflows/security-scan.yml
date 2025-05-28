@@ -1,0 +1,139 @@
+name: Security Scan
+
+on:
+  # Runs nightly at 2 AM UTC
+  schedule:
+    - cron: '0 2 * * *'
+
+  # TEMPORARY: For testing workflow changes
+  push:
+    branches:
+      - pau/trivy_scan
+    paths:
+      - '.github/workflows/security-scan.yml'
+      - 'security/scripts/**'
+
+  # Allow manual triggering for testing
+  workflow_dispatch:
+    inputs:
+      debug_enabled:
+        type: boolean
+        description: "Enable debug output"
+        required: false
+        default: false
+
+# Only run one security scan at a time
+concurrency:
+  group: security-scan
+  cancel-in-progress: false
+
+jobs:
+  trivy-security-scan:
+    runs-on: vlab-h
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+
+      - name: Setup local registry
+        run: |
+          just --timestamp _localreg &
+
+      - name: Build hhfab
+        run: |
+          just --timestamp oci_repo=127.0.0.1:30000 oci=http push
+
+      - name: Run VLAB Trivy Security Scan
+        env:
+          HHFAB_REG_REPO: 127.0.0.1:30000
+        run: |
+          echo "Starting security scan..."
+          ./security/scripts/vlab-trivy-runner.sh
+
+      - name: Security scan summary
+        if: always()
+        run: |
+          echo "## Security Scan Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Count SARIF files generated during scan (exclude fallback files)
+          sarif_count=$(find sarif-reports -name "*.sarif" ! -name "fallback.sarif" -type f 2>/dev/null | wc -l)
+          echo "- **SARIF files generated:** $sarif_count" >> $GITHUB_STEP_SUMMARY
+
+          # Count scan results from VMs
+          if [ -d "trivy-reports" ]; then
+            control_scans=$(find trivy-reports/control-1 -name "*_critical.txt" -type f 2>/dev/null | wc -l)
+            gateway_scans=$(find trivy-reports/gateway-1 -name "*_critical.txt" -type f 2>/dev/null | wc -l)
+            total_scans=$((control_scans + gateway_scans))
+
+            echo "- **Control VM container images scanned:** $control_scans" >> $GITHUB_STEP_SUMMARY
+            echo "- **Gateway VM container images scanned:** $gateway_scans" >> $GITHUB_STEP_SUMMARY
+            echo "- **Total images scanned:** $total_scans" >> $GITHUB_STEP_SUMMARY
+
+            # Quick vulnerability count from text files
+            critical_vulns=0
+            for vm_dir in trivy-reports/*/; do
+              if [ -d "$vm_dir" ]; then
+                for file in "$vm_dir"*_critical.txt; do
+                  if [ -f "$file" ]; then
+                    count=$(grep -c "^│" "$file" 2>/dev/null || echo "0")
+                    critical_vulns=$((critical_vulns + count))
+                  fi
+                done
+              fi
+            done
+            echo "- **Critical/High vulnerabilities:** $critical_vulns" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **No scan results found**" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Check the [Security tab](https://github.com/${{ github.repository }}/security) for detailed vulnerability reports and [artifacts](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) for raw scan data." >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload SARIF to GitHub Security
+        if: always()
+        run: |
+          # Check if we have valid SARIF files (not just fallback)
+          sarif_count=$(find sarif-reports -name "*.sarif" ! -name "fallback.sarif" -type f 2>/dev/null | wc -l)
+          if [ "$sarif_count" -gt 0 ]; then
+            echo "Found $sarif_count valid SARIF files, uploading to GitHub Security..."
+            echo "UPLOAD_SARIF=true" >> $GITHUB_ENV
+          else
+            echo "No valid SARIF files found, skipping upload"
+            echo "UPLOAD_SARIF=false" >> $GITHUB_ENV
+          fi
+
+      - name: Upload SARIF files
+        if: always() && env.UPLOAD_SARIF == 'true'
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: sarif-reports/
+          category: trivy-container-scan
+        continue-on-error: true
+
+      - name: Upload scan artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-scan-${{ github.run_number }}
+          path: |
+            trivy-reports/
+            sarif-reports/
+            vlab.log
+          retention-days: 30
+
+      - name: Setup tmate session for debug
+        if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
+        uses: mxschmitt/action-tmate@v3
+        timeout-minutes: 30
+        with:
+          limit-access-to-actor: true
