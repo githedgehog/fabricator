@@ -536,7 +536,9 @@ jobs:
         run: |
           source "./lab-ci/envs/$KUBE_NODE/source.sh"
           bin/hhfab init -v --dev --include-onie=${{ matrix.includeonie }} -w "./lab-ci/envs/$KUBE_NODE/wiring.yaml"
-          bin/hhfab vlab up -v --ready switch-reinstall --ready inspect --ready setup-vpcs --ready test-connectivity --ready release-test --ready exit --mode=${{ matrix.buildmode }}
+
+          # TODO: make controls restricted again when we figure out how to get NTP upstream working for isolated VMs
+          bin/hhfab vlab up -v --ready switch-reinstall --ready inspect --ready setup-vpcs --ready test-connectivity --ready release-test --ready exit --mode=${{ matrix.buildmode }} --controls-restricted=false
           cat release-test.xml
 
       - name: Upload Test Results
