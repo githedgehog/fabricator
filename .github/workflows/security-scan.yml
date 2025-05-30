@@ -1,0 +1,150 @@
+name: Security Vulnerability Assessment
+on:
+  schedule:
+    - cron: '0 6 * * 1'
+  push:
+    branches: [ pau/trivy_scan ]
+    paths:
+      - '.github/workflows/security-scan.yml'
+      - 'security/scripts/**'
+      - 'security/**'
+  workflow_dispatch:
+    inputs:
+      severity_filter:
+        description: 'Vulnerability severity to scan'
+        required: false
+        default: 'CRITICAL,HIGH'
+        type: choice
+        options:
+        - 'CRITICAL'
+        - 'CRITICAL,HIGH'
+        - 'CRITICAL,HIGH,MEDIUM'
+      debug_enabled:
+        type: boolean
+        description: "Enable debug output"
+        required: false
+        default: false
+
+concurrency:
+  group: security-scan
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+  actions: read
+
+jobs:
+  security-scan:
+    runs-on: vlab-h
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
+
+      - name: Setup local registry
+        run: |
+          just --timestamp _localreg &
+
+      - name: Build hhfab
+        run: |
+          just --timestamp oci_repo=127.0.0.1:30000 oci=http push
+
+      - name: Run VLAB security scan
+        env:
+          HHFAB_REG_REPO: 127.0.0.1:30000
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VLAB_TIMEOUT: 30
+        run: |
+          echo "Starting VLAB security scan..."
+          ./security/scripts/vlab-trivy-runner.sh
+
+      - name: Generate vulnerability report
+        run: |
+          ./security/scripts/generate-vulnerability-report.sh \
+            --results-dir "trivy-reports" \
+            --output "security-vulnerability-report.md" \
+            --verbose
+
+      - name: Security scan summary
+        if: always()
+        run: |
+          echo "## Security Vulnerability Assessment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Enhanced summary with vulnerability counts
+          echo "| Metric | Count | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Total Vulnerabilities** | **${TOTAL_VULNERABILITIES:-0}** | Assessed |" >> $GITHUB_STEP_SUMMARY
+          echo "| Critical Severity | **${CRITICAL_VULNERABILITIES:-0}** | $([ "${CRITICAL_VULNERABILITIES:-0}" -gt 0 ] && echo "Immediate Action Required" || echo "None Found") |" >> $GITHUB_STEP_SUMMARY
+          echo "| High Severity | **${HIGH_VULNERABILITIES:-0}** | $([ "${HIGH_VULNERABILITIES:-0}" -gt 0 ] && echo "Address within 30 days" || echo "None Found") |" >> $GITHUB_STEP_SUMMARY
+          echo "| Medium Severity | **${MEDIUM_VULNERABILITIES:-0}** | Monitor |" >> $GITHUB_STEP_SUMMARY
+          echo "| Unique CVEs | **${UNIQUE_CVES:-0}** | Identified |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Count scan results from VMs
+          if [ -d "trivy-reports" ]; then
+            control_scans=$(find trivy-reports/control-1 -name "*_critical.txt" -type f 2>/dev/null | wc -l)
+            gateway_scans=$(find trivy-reports/gateway-1 -name "*_critical.txt" -type f 2>/dev/null | wc -l)
+            total_scans=$((control_scans + gateway_scans))
+
+            echo "### VM Scan Results" >> $GITHUB_STEP_SUMMARY
+            echo "- **Control VM container images scanned:** $control_scans" >> $GITHUB_STEP_SUMMARY
+            echo "- **Gateway VM container images scanned:** $gateway_scans" >> $GITHUB_STEP_SUMMARY
+            echo "- **Total images scanned:** $total_scans" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **No scan results found**" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Risk assessment
+          echo "### Risk Assessment" >> $GITHUB_STEP_SUMMARY
+          if [ "${CRITICAL_VULNERABILITIES:-0}" -gt 0 ]; then
+            echo "**CRITICAL RISK**: ${CRITICAL_VULNERABILITIES} vulnerabilities require immediate attention" >> $GITHUB_STEP_SUMMARY
+          elif [ "${HIGH_VULNERABILITIES:-0}" -gt 10 ]; then
+            echo "**HIGH RISK**: ${HIGH_VULNERABILITIES} high-severity vulnerabilities detected" >> $GITHUB_STEP_SUMMARY
+          elif [ "${HIGH_VULNERABILITIES:-0}" -gt 0 ]; then
+            echo "**MODERATE RISK**: ${HIGH_VULNERABILITIES} high-severity vulnerabilities detected" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "**LOW RISK**: No critical vulnerabilities detected" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Download the detailed vulnerability report from workflow artifacts for complete analysis." >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-scan-results-${{ github.run_number }}
+          path: |
+            security-vulnerability-report.md
+            trivy-reports/
+            vlab.log
+          retention-days: 30
+
+      - name: Security alert
+        if: env.CRITICAL_VULNERABILITIES > 0
+        run: |
+          echo "::warning::Found ${CRITICAL_VULNERABILITIES} critical vulnerabilities requiring immediate attention"
+
+      - name: Setup tmate session for debug
+        if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
+        uses: mxschmitt/action-tmate@v3
+        timeout-minutes: 30
+        with:
+          limit-access-to-actor: true
