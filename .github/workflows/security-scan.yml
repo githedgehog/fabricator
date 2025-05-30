@@ -1,37 +1,43 @@
-name: Security Scan
-
+name: Security Vulnerability Assessment
 on:
-  # Runs nightly at 2 AM UTC
   schedule:
-    - cron: '0 2 * * *'
-
-  # TEMPORARY: For testing workflow changes
+    - cron: '0 6 * * 1'
   push:
-    branches:
-      - pau/trivy_scan
+    branches: [ pau/trivy_scan ]
     paths:
       - '.github/workflows/security-scan.yml'
       - 'security/scripts/**'
-
-  # Allow manual triggering for testing
+      - 'security/**'
   workflow_dispatch:
     inputs:
+      severity_filter:
+        description: 'Vulnerability severity to scan'
+        required: false
+        default: 'CRITICAL,HIGH'
+        type: choice
+        options:
+        - 'CRITICAL'
+        - 'CRITICAL,HIGH'
+        - 'CRITICAL,HIGH,MEDIUM'
       debug_enabled:
         type: boolean
         description: "Enable debug output"
         required: false
         default: false
 
-# Only run one security scan at a time
 concurrency:
   group: security-scan
   cancel-in-progress: false
 
+permissions:
+  contents: read
+  issues: write
+  actions: read
+
 jobs:
-  trivy-security-scan:
+  security-scan:
     runs-on: vlab-h
     timeout-minutes: 60
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -44,6 +50,11 @@ jobs:
           go-version: stable
           cache: true
 
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
+
       - name: Setup local registry
         run: |
           just --timestamp _localreg &
@@ -52,17 +63,120 @@ jobs:
         run: |
           just --timestamp oci_repo=127.0.0.1:30000 oci=http push
 
-      - name: Run VLAB Trivy Security Scan
+      - name: Run VLAB security scan
         env:
           HHFAB_REG_REPO: 127.0.0.1:30000
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VLAB_TIMEOUT: 30
         run: |
-          echo "Starting security scan..."
+          echo "Starting VLAB security scan..."
           ./security/scripts/vlab-trivy-runner.sh
+
+      - name: Generate vulnerability report
+        run: |
+          echo "Generating vulnerability report..."
+          
+          RESULTS_DIR="trivy-reports"
+          REPORT_FILE="security-vulnerability-report.md"
+          
+          total_critical=0
+          total_high=0
+          total_medium=0
+          total_low=0
+          total_images=0
+          
+          # Process results from each VM
+          for vm in control-1 gateway-1; do
+            vm_dir="$RESULTS_DIR/$vm"
+            if [ -d "$vm_dir" ]; then
+              echo "Processing $vm results..."
+              find "$vm_dir" -name "*_all.json" | while read -r json_file; do
+                if [ -f "$json_file" ]; then
+                  critical=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL")] | length' "$json_file" 2>/dev/null || echo 0)
+                  high=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "HIGH")] | length' "$json_file" 2>/dev/null || echo 0)
+                  medium=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "MEDIUM")] | length' "$json_file" 2>/dev/null || echo 0)
+                  low=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "LOW")] | length' "$json_file" 2>/dev/null || echo 0)
+                  images=$(jq '[.Results[]] | length' "$json_file" 2>/dev/null || echo 0)
+                  
+                  echo "$critical" >> "/tmp/${vm}_critical"
+                  echo "$high" >> "/tmp/${vm}_high"
+                  echo "$medium" >> "/tmp/${vm}_medium"
+                  echo "$low" >> "/tmp/${vm}_low"
+                  echo "$images" >> "/tmp/${vm}_images"
+                fi
+              done
+            fi
+          done
+          
+          # Aggregate totals
+          for vm in control-1 gateway-1; do
+            if [ -f "/tmp/${vm}_critical" ]; then
+              vm_crit=$(awk '{sum+=$1} END {print sum+0}' "/tmp/${vm}_critical")
+              vm_high=$(awk '{sum+=$1} END {print sum+0}' "/tmp/${vm}_high")
+              vm_med=$(awk '{sum+=$1} END {print sum+0}' "/tmp/${vm}_medium")
+              vm_low=$(awk '{sum+=$1} END {print sum+0}' "/tmp/${vm}_low")
+              vm_imgs=$(awk '{sum+=$1} END {print sum+0}' "/tmp/${vm}_images")
+              
+              total_critical=$((total_critical + vm_crit))
+              total_high=$((total_high + vm_high))
+              total_medium=$((total_medium + vm_med))
+              total_low=$((total_low + vm_low))
+              total_images=$((total_images + vm_imgs))
+            fi
+          done
+          
+          # Generate report
+          cat > "$REPORT_FILE" << EOF
+          # Security Vulnerability Assessment Report
+          
+          **Generated**: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          **Environment**: VLAB Container Infrastructure
+          **Scanner**: Trivy
+          
+          ## Summary
+          
+          | Severity | Count |
+          |----------|-------|
+          | Critical | $total_critical |
+          | High | $total_high |
+          | Medium | $total_medium |
+          | Low | $total_low |
+          | **Total** | **$((total_critical + total_high + total_medium + total_low))** |
+          | Images Scanned | $total_images |
+          
+          ## Risk Assessment
+          
+          EOF
+          
+          if [ "$total_critical" -gt 0 ]; then
+            echo "**CRITICAL**: $total_critical vulnerabilities require immediate remediation" >> "$REPORT_FILE"
+          fi
+          if [ "$total_high" -gt 0 ]; then
+            echo "**HIGH**: $total_high vulnerabilities should be addressed within 30 days" >> "$REPORT_FILE"
+          fi
+          if [ "$total_critical" -eq 0 ] && [ "$total_high" -eq 0 ]; then
+            echo "**LOW RISK**: No critical or high-severity vulnerabilities detected" >> "$REPORT_FILE"
+          fi
+          
+          echo "Report generated: $REPORT_FILE"
+          
+          # Set environment variables for job summary
+          echo "TOTAL_VULNERABILITIES=$((total_critical + total_high + total_medium + total_low))" >> $GITHUB_ENV
+          echo "CRITICAL_VULNERABILITIES=$total_critical" >> $GITHUB_ENV
+          echo "HIGH_VULNERABILITIES=$total_high" >> $GITHUB_ENV
 
       - name: Security scan summary
         if: always()
         run: |
           echo "## Security Scan Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Enhanced summary with vulnerability counts
+          echo "| Metric | Count |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Total Vulnerabilities | ${TOTAL_VULNERABILITIES:-0} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Critical | ${CRITICAL_VULNERABILITIES:-0} |" >> $GITHUB_STEP_SUMMARY
+          echo "| High | ${HIGH_VULNERABILITIES:-0} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
           # Count SARIF files generated during scan (exclude fallback files)
@@ -78,26 +192,20 @@ jobs:
             echo "- **Control VM container images scanned:** $control_scans" >> $GITHUB_STEP_SUMMARY
             echo "- **Gateway VM container images scanned:** $gateway_scans" >> $GITHUB_STEP_SUMMARY
             echo "- **Total images scanned:** $total_scans" >> $GITHUB_STEP_SUMMARY
-
-            # Quick vulnerability count from text files
-            critical_vulns=0
-            for vm_dir in trivy-reports/*/; do
-              if [ -d "$vm_dir" ]; then
-                for file in "$vm_dir"*_critical.txt; do
-                  if [ -f "$file" ]; then
-                    count=$(grep -c "^│" "$file" 2>/dev/null || echo "0")
-                    critical_vulns=$((critical_vulns + count))
-                  fi
-                done
-              fi
-            done
-            echo "- **Critical/High vulnerabilities:** $critical_vulns" >> $GITHUB_STEP_SUMMARY
           else
             echo "- **No scan results found**" >> $GITHUB_STEP_SUMMARY
           fi
 
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Check the [Security tab](https://github.com/${{ github.repository }}/security) for detailed vulnerability reports and [artifacts](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) for raw scan data." >> $GITHUB_STEP_SUMMARY
+          
+          # Risk assessment
+          if [ "${CRITICAL_VULNERABILITIES:-0}" -gt 0 ]; then
+            echo "**CRITICAL RISK**: ${CRITICAL_VULNERABILITIES} vulnerabilities require immediate attention" >> $GITHUB_STEP_SUMMARY
+          elif [ "${HIGH_VULNERABILITIES:-0}" -gt 0 ]; then
+            echo "**MODERATE RISK**: ${HIGH_VULNERABILITIES} high-severity vulnerabilities detected" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "**LOW RISK**: No critical vulnerabilities detected" >> $GITHUB_STEP_SUMMARY
+          fi
 
       - name: Upload SARIF to GitHub Security
         if: always()
@@ -120,16 +228,22 @@ jobs:
           category: trivy-container-scan
         continue-on-error: true
 
-      - name: Upload scan artifacts
+      - name: Upload results
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: security-scan-${{ github.run_number }}
+          name: security-scan-results-${{ github.run_number }}
           path: |
+            security-vulnerability-report.md
             trivy-reports/
             sarif-reports/
             vlab.log
           retention-days: 30
+
+      - name: Security alert
+        if: env.CRITICAL_VULNERABILITIES > 0
+        run: |
+          echo "::warning::Found ${CRITICAL_VULNERABILITIES} critical vulnerabilities"
 
       - name: Setup tmate session for debug
         if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
