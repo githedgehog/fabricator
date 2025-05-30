@@ -270,108 +270,28 @@ scan_vm() {
         return 1
     fi
 
-    echo "Generating consolidated SARIF file for GitHub Security on $vm_name..."
-    echo "Creating single SARIF run with all images (GitHub's new requirement)"
-    # Create sarif-reports directory if it doesn't exist
-    mkdir -p sarif-reports
-    
-    # Get list of images
-    echo "Getting image list for SARIF generation..."
+    # Get list of unique images and store for GitHub Actions
+    echo "Getting image list from $vm_name..."
     IMAGES=$($HHFAB_BIN vlab ssh -n "$vm_name" -- 'sudo crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock images | grep -v IMAGE | grep -v pause | awk "{print \$1\":\"\$2}"' | sort -u || echo "")
     
     if [ ! -z "$IMAGES" ]; then
         # Convert to array
         readarray -t image_array <<< "$IMAGES"
         
-        echo "=== Images found for consolidated SARIF ==="
+        echo "=== Images found on $vm_name ==="
         printf '%s\n' "${image_array[@]}"
-        echo "============================================"
+        echo "================================"
         
         image_count=${#image_array[@]}
-        echo "Total images to include in single SARIF: $image_count"
+        echo "Total images on $vm_name: $image_count"
         
-        # Create consolidated SARIF by merging individual scans
-        echo "Generating individual SARIF files for merging..."
-        temp_sarifs=()
-        success_count=0
-        
-        for i in "${!image_array[@]}"; do
-            image="${image_array[$i]}"
-            if [ ! -z "$image" ] && [ "$image" != ":" ]; then
-                current=$((i + 1))
-                safe_name=$(echo "${image}" | tr '/:' '_')
-                echo "[$current/$image_count] Scanning: $image"
-                
-                # Generate individual SARIF
-                if $HHFAB_BIN vlab ssh -n "$vm_name" -- "
-                    sudo DOCKER_CONFIG=/var/lib/trivy/.docker /var/lib/trivy/trivy image \\
-                        --insecure \\
-                        --severity HIGH,CRITICAL \\
-                        --format sarif \\
-                        --output '/tmp/sarif_${safe_name}.sarif' \\
-                        '$image'
-                "; then
-                    # Download individual SARIF
-                    if $HHFAB_BIN vlab ssh -n "$vm_name" -- "cat '/tmp/sarif_${safe_name}.sarif'" > "/tmp/sarif_${safe_name}.sarif"; then
-                        temp_sarifs+=("/tmp/sarif_${safe_name}.sarif")
-                        success_count=$((success_count + 1))
-                        echo "  ✓ SARIF generated for $image"
-                    else
-                        echo "  ✗ Failed to download SARIF for $image"
-                    fi
-                else
-                    echo "  ✗ Failed to generate SARIF for $image"
-                fi
-            fi
-        done
-        
-        # Merge all SARIF files into one consolidated file
-        if [ $success_count -gt 0 ]; then
-            echo "Merging $success_count SARIF files into consolidated report..."
-            
-            consolidated_sarif="sarif-reports/trivy-consolidated-${vm_name}.sarif"
-            
-            # Start with first SARIF as base
-            if [ ${#temp_sarifs[@]} -gt 0 ]; then
-                cp "${temp_sarifs[0]}" "$consolidated_sarif"
-                
-                # Merge remaining SARIF files if we have more than one
-                if [ ${#temp_sarifs[@]} -gt 1 ]; then
-                    echo "Merging multiple SARIF files using jq..."
-                    
-                    for ((i=1; i<${#temp_sarifs[@]}; i++)); do
-                        merge_file="${temp_sarifs[$i]}"
-                        if [ -f "$merge_file" ]; then
-                            # Merge results and rules arrays using jq with deduplication
-                            jq -s '
-                                .[0].runs[0].results += .[1].runs[0].results |
-                                .[0].runs[0].tool.driver.rules += (.[1].runs[0].tool.driver.rules // []) |
-                                .[0].runs[0].tool.driver.rules |= unique_by(.id) |
-                                .[0]
-                            ' "$consolidated_sarif" "$merge_file" > "${consolidated_sarif}.tmp" && \
-                            mv "${consolidated_sarif}.tmp" "$consolidated_sarif"
-                            echo "  ✓ Merged: $(basename "$merge_file")"
-                        fi
-                    done
-                fi
-                
-                echo "✓ Consolidated SARIF created: trivy-consolidated-${vm_name}.sarif"
-                echo "✓ Contains vulnerabilities from $success_count/$image_count images"
-            else
-                echo "✗ No valid SARIF files to consolidate"
-            fi
-            
-            # Clean up temporary files
-            for temp_file in "${temp_sarifs[@]}"; do
-                rm -f "$temp_file"
-            done
-        else
-            echo "✗ No SARIF files generated successfully"
-        fi
-        
-        echo "SARIF generation complete: 1 consolidated file with $success_count images"
+        # Store image list and count for GitHub Actions
+        printf '%s\n' "${image_array[@]}" > "$RESULTS_DIR/${vm_name}_images.txt"
+        echo "$image_count" > "$RESULTS_DIR/${vm_name}_image_count.txt"
     else
-        echo "No images found for SARIF generation on $vm_name"
+        echo "No images found on $vm_name"
+        echo "0" > "$RESULTS_DIR/${vm_name}_image_count.txt"
+        touch "$RESULTS_DIR/${vm_name}_images.txt"  # Create empty file
     fi
 
     echo "Collecting scan results from $vm_name..."
@@ -420,189 +340,109 @@ else
     GATEWAY_RESULT=1
 fi
 
-# Ensure SARIF directory exists and create fallback only if no consolidated SARIF generated
-mkdir -p sarif-reports
-sarif_count=$(find sarif-reports -name "*.sarif" -type f 2>/dev/null | wc -l)
-if [ "$sarif_count" -eq 0 ]; then
-    echo "No consolidated SARIF file generated - creating fallback"
-    echo "Creating minimal valid SARIF report for GitHub Security"
-    cat > sarif-reports/fallback.sarif << 'EOF'
-{
-  "version": "2.1.0",
-  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
-  "runs": [
-    {
-      "tool": {
-        "driver": {
-          "name": "Trivy",
-          "version": "unknown",
-          "informationUri": "https://trivy.dev/"
-        }
-      },
-      "results": [],
-      "columnKind": "utf16CodeUnits"
-    }
-  ]
-}
-EOF
-else
-    echo "Generated consolidated SARIF file(s) successfully (contains vulnerabilities from ALL container images)"
+# Calculate final statistics for GitHub Actions
+total_control_images=0
+total_gateway_images=0
+total_critical=0
+total_high=0
+total_medium=0
+total_low=0
+
+if [ -f "$RESULTS_DIR/control-1_image_count.txt" ]; then
+    total_control_images=$(cat "$RESULTS_DIR/control-1_image_count.txt")
 fi
 
-echo ""
-echo -e "${GREEN}=== Security Scan Summary ===${NC}"
+if [ -f "$RESULTS_DIR/gateway-1_image_count.txt" ]; then
+    total_gateway_images=$(cat "$RESULTS_DIR/gateway-1_image_count.txt")
+fi
 
-# Create summary file for GitHub Actions
-SCAN_SUMMARY="scan-summary.txt"
-cat > "$SCAN_SUMMARY" << EOF
-# 🔒 Security Scan Results Summary
+total_images=$((total_control_images + total_gateway_images))
 
-## 🎯 Scan Overview
-- **Control VM**: $CONTROL_VM ($(if [ $CONTROL_RESULT -eq 0 ]; then echo "✅ Success"; else echo "❌ Failed"; fi))
-- **Gateway VM**: $GATEWAY_VM $(if [ "$GATEWAY_SKIP" = false ]; then if [ $GATEWAY_RESULT -eq 0 ]; then echo "(✅ Success)"; else echo "(❌ Failed)"; fi; else echo "(⚠️ Skipped - Network config failed)"; fi)
-- **Scan Date**: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
-- **Environment**: VLAB Container Infrastructure
-
-## 📊 Quick Statistics
-EOF
-
-# Calculate vulnerability statistics for summary
+# Calculate vulnerability statistics if jq is available
 if command -v jq >/dev/null 2>&1; then
-    total_critical=0
-    total_high=0
-    total_medium=0
-    total_images=0
-    
     for json_file in "$RESULTS_DIR"/*/20*_*_all.json; do
         if [ -f "$json_file" ]; then
             crit=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL")] | length' "$json_file" 2>/dev/null || echo 0)
             high=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "HIGH")] | length' "$json_file" 2>/dev/null || echo 0)
             medium=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "MEDIUM")] | length' "$json_file" 2>/dev/null || echo 0)
-            images=$(jq '[.Results[]] | length' "$json_file" 2>/dev/null || echo 0)
+            low=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "LOW")] | length' "$json_file" 2>/dev/null || echo 0)
             
             total_critical=$((total_critical + crit))
             total_high=$((total_high + high))
             total_medium=$((total_medium + medium))
-            total_images=$((total_images + images))
+            total_low=$((total_low + low))
         fi
     done
     
-    cat >> "$SCAN_SUMMARY" << EOF
-- **🔴 Critical Vulnerabilities**: $total_critical
-- **🟠 High Vulnerabilities**: $total_high  
-- **🟡 Medium Vulnerabilities**: $total_medium
-- **📦 Container Images Scanned**: $total_images
-
-## ⚡ Risk Level
-EOF
-
-    if [ "$total_critical" -gt 0 ]; then
-        echo "🚨 **HIGH RISK** - $total_critical critical vulnerabilities require immediate action" >> "$SCAN_SUMMARY"
-    elif [ "$total_high" -gt 10 ]; then
-        echo "⚠️ **MEDIUM-HIGH RISK** - $total_high high-severity vulnerabilities detected" >> "$SCAN_SUMMARY"
-    elif [ "$total_high" -gt 0 ]; then
-        echo "🟡 **MEDIUM RISK** - $total_high high-severity vulnerabilities to address" >> "$SCAN_SUMMARY"
-    else
-        echo "✅ **LOW RISK** - No critical vulnerabilities detected" >> "$SCAN_SUMMARY"
-    fi
+    total_vulnerabilities=$((total_critical + total_high + total_medium + total_low))
     
-    # Output for GitHub Actions environment variables
-    if [ ! -z "${GITHUB_ENV:-}" ]; then
-        echo "SCAN_TOTAL_CRITICAL=$total_critical" >> "$GITHUB_ENV"
-        echo "SCAN_TOTAL_HIGH=$total_high" >> "$GITHUB_ENV"
-        echo "SCAN_TOTAL_MEDIUM=$total_medium" >> "$GITHUB_ENV"
-        echo "SCAN_TOTAL_IMAGES=$total_images" >> "$GITHUB_ENV"
+    # Calculate unique CVEs
+    unique_cves=0
+    temp_cve_file=$(mktemp)
+    for json_file in "$RESULTS_DIR"/*/20*_*_all.json; do
+        if [ -f "$json_file" ]; then
+            jq -r '.Results[]?.Vulnerabilities[]?.VulnerabilityID // "N/A"' "$json_file" 2>/dev/null | grep -v "^N/A$" >> "$temp_cve_file" || true
+        fi
+    done
+    if [ -f "$temp_cve_file" ]; then
+        unique_cves=$(sort -u "$temp_cve_file" | wc -l)
+        rm -f "$temp_cve_file"
     fi
+else
+    total_vulnerabilities=0
+    unique_cves=0
 fi
 
-cat >> "$SCAN_SUMMARY" << EOF
-
-## 📋 Generated Artifacts
-- **Detailed Reports**: $RESULTS_DIR/
-- **SARIF Files**: sarif-reports/ ($sarif_count files)
-- **Workflow Log**: $VLAB_LOG
-
-## 🔗 Quick Links  
-- [View all scan results](.)
-- [Download SARIF reports](sarif-reports/)
-- [Review vulnerability details]($RESULTS_DIR/)
-
----
-*Generated by VLAB Trivy Scanner at $(date -u +"%Y-%m-%d %H:%M:%S UTC")*
-EOF
+# Export for GitHub Actions
+if [ ! -z "${GITHUB_ENV:-}" ]; then
+    echo "SCAN_CONTROL_IMAGES=$total_control_images" >> "$GITHUB_ENV"
+    echo "SCAN_GATEWAY_IMAGES=$total_gateway_images" >> "$GITHUB_ENV"
+    echo "SCAN_TOTAL_IMAGES=$total_images" >> "$GITHUB_ENV"
+    echo "SCAN_CONTROL_SUCCESS=$([ $CONTROL_RESULT -eq 0 ] && echo "true" || echo "false")" >> "$GITHUB_ENV"
+    echo "SCAN_GATEWAY_SUCCESS=$([ "$GATEWAY_SKIP" = false ] && [ $GATEWAY_RESULT -eq 0 ] && echo "true" || echo "false")" >> "$GITHUB_ENV"
+    echo "SCAN_GATEWAY_SKIPPED=$([ "$GATEWAY_SKIP" = true ] && echo "true" || echo "false")" >> "$GITHUB_ENV"
+    echo "TOTAL_VULNERABILITIES=$total_vulnerabilities" >> "$GITHUB_ENV"
+    echo "CRITICAL_VULNERABILITIES=$total_critical" >> "$GITHUB_ENV"
+    echo "HIGH_VULNERABILITIES=$total_high" >> "$GITHUB_ENV"
+    echo "MEDIUM_VULNERABILITIES=$total_medium" >> "$GITHUB_ENV"
+    echo "LOW_VULNERABILITIES=$total_low" >> "$GITHUB_ENV"
+    echo "UNIQUE_CVES=$unique_cves" >> "$GITHUB_ENV"
+fi
 
 echo ""
 echo -e "${GREEN}=== Security Scan Summary ===${NC}"
 
 if [ $CONTROL_RESULT -eq 0 ]; then
-    echo -e "${GREEN}✅ Control VM ($CONTROL_VM): SUCCESS${NC}"
+    echo -e "${GREEN}Control VM ($CONTROL_VM): SUCCESS ($total_control_images images)${NC}"
 else
-    echo -e "${RED}❌ Control VM ($CONTROL_VM): FAILED${NC}"
+    echo -e "${RED}Control VM ($CONTROL_VM): FAILED${NC}"
 fi
 
 if [ "$GATEWAY_SKIP" = false ]; then
     if [ $GATEWAY_RESULT -eq 0 ]; then
-        echo -e "${GREEN}✅ Gateway VM ($GATEWAY_VM): SUCCESS${NC}"
+        echo -e "${GREEN}Gateway VM ($GATEWAY_VM): SUCCESS ($total_gateway_images images)${NC}"
     else
-        echo -e "${RED}❌ Gateway VM ($GATEWAY_VM): FAILED${NC}"
+        echo -e "${RED}Gateway VM ($GATEWAY_VM): FAILED${NC}"
     fi
 else
-    echo -e "${YELLOW}⚠️ Gateway VM ($GATEWAY_VM): SKIPPED (network config failed)${NC}"
+    echo -e "${YELLOW}Gateway VM ($GATEWAY_VM): SKIPPED (network config failed)${NC}"
 fi
 
 echo ""
-echo -e "${BLUE}📊 Scan Results:${NC}"
-echo "  📁 Results directory: $RESULTS_DIR"
-echo "  📋 SARIF reports: sarif-reports/ ($sarif_count files)"
-echo "  📝 Summary: $SCAN_SUMMARY"
-echo "  📄 VLAB log: $VLAB_LOG"
+echo -e "${GREEN}Scan Results Directory: $RESULTS_DIR${NC}"
+echo "VLAB log: $VLAB_LOG"
+echo "Total images scanned: $total_images"
 
-# Display quick stats if available
-if command -v jq >/dev/null 2>&1 && [ ! -z "${total_critical:-}" ]; then
+# Display vulnerability summary
+if command -v jq >/dev/null 2>&1 && [ "$total_vulnerabilities" -gt 0 ]; then
     echo ""
-    echo -e "${YELLOW}🔍 Vulnerability Summary:${NC}"
-    echo "  🔴 Critical: $total_critical"
-    echo "  🟠 High: $total_high"
-    echo "  🟡 Medium: $total_medium"
-    echo "  📦 Images: $total_images"
-fi
-
-# Add GitHub Actions step summary if running in GitHub Actions
-if [ ! -z "${GITHUB_STEP_SUMMARY:-}" ]; then
-    echo ""
-    echo -e "${BLUE}📋 Adding results to GitHub Actions summary...${NC}"
-    
-    cat >> "$GITHUB_STEP_SUMMARY" << EOF
-
-## 🔍 VLAB Security Scan Results
-
-### ✅ Scan Completion Status
-- **Control VM**: $(if [ $CONTROL_RESULT -eq 0 ]; then echo "✅ Success"; else echo "❌ Failed"; fi)
-- **Gateway VM**: $(if [ "$GATEWAY_SKIP" = false ]; then if [ $GATEWAY_RESULT -eq 0 ]; then echo "✅ Success"; else echo "❌ Failed"; fi; else echo "⚠️ Skipped"; fi)
-
-### 📊 Quick Statistics
-EOF
-
-    if command -v jq >/dev/null 2>&1 && [ ! -z "${total_critical:-}" ]; then
-        cat >> "$GITHUB_STEP_SUMMARY" << EOF
-- 🔴 **Critical**: $total_critical vulnerabilities
-- 🟠 **High**: $total_high vulnerabilities
-- 🟡 **Medium**: $total_medium vulnerabilities
-- 📦 **Images Scanned**: $total_images
-
-### ⚡ Risk Assessment
-$(if [ "$total_critical" -gt 0 ]; then echo "🚨 **HIGH RISK** - Immediate action required"; elif [ "$total_high" -gt 5 ]; then echo "⚠️ **MEDIUM RISK** - Review recommended"; else echo "✅ **LOW RISK** - No critical issues"; fi)
-EOF
-    fi
-
-    cat >> "$GITHUB_STEP_SUMMARY" << EOF
-
-### 📁 Generated Artifacts
-- **SARIF Reports**: $sarif_count files for GitHub Security integration
-- **Detailed Reports**: Complete vulnerability analysis
-- **Raw Scan Data**: Individual VM scan results
-
-EOF
+    echo -e "${YELLOW}Vulnerability Summary:${NC}"
+    echo "  Critical: $total_critical"
+    echo "  High: $total_high"
+    echo "  Medium: $total_medium" 
+    echo "  Low: $total_low"
+    echo "  Total: $total_vulnerabilities"
+    echo "  Unique CVEs: $unique_cves"
 fi
 
 echo ""

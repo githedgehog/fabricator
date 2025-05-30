@@ -72,161 +72,125 @@ jobs:
           echo "Starting VLAB security scan..."
           ./security/scripts/vlab-trivy-runner.sh
 
-      - name: Generate vulnerability report
-        run: |
-          echo "Generating vulnerability report..."
-          
-          RESULTS_DIR="trivy-reports"
-          REPORT_FILE="security-vulnerability-report.md"
-          
-          total_critical=0
-          total_high=0
-          total_medium=0
-          total_low=0
-          total_images=0
-          
-          # Process results from each VM
-          for vm in control-1 gateway-1; do
-            vm_dir="$RESULTS_DIR/$vm"
-            if [ -d "$vm_dir" ]; then
-              echo "Processing $vm results..."
-              find "$vm_dir" -name "*_all.json" | while read -r json_file; do
-                if [ -f "$json_file" ]; then
-                  critical=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL")] | length' "$json_file" 2>/dev/null || echo 0)
-                  high=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "HIGH")] | length' "$json_file" 2>/dev/null || echo 0)
-                  medium=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "MEDIUM")] | length' "$json_file" 2>/dev/null || echo 0)
-                  low=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "LOW")] | length' "$json_file" 2>/dev/null || echo 0)
-                  images=$(jq '[.Results[]] | length' "$json_file" 2>/dev/null || echo 0)
-                  
-                  echo "$critical" >> "/tmp/${vm}_critical"
-                  echo "$high" >> "/tmp/${vm}_high"
-                  echo "$medium" >> "/tmp/${vm}_medium"
-                  echo "$low" >> "/tmp/${vm}_low"
-                  echo "$images" >> "/tmp/${vm}_images"
-                fi
-              done
-            fi
-          done
-          
-          # Aggregate totals
-          for vm in control-1 gateway-1; do
-            if [ -f "/tmp/${vm}_critical" ]; then
-              vm_crit=$(awk '{sum+=$1} END {print sum+0}' "/tmp/${vm}_critical")
-              vm_high=$(awk '{sum+=$1} END {print sum+0}' "/tmp/${vm}_high")
-              vm_med=$(awk '{sum+=$1} END {print sum+0}' "/tmp/${vm}_medium")
-              vm_low=$(awk '{sum+=$1} END {print sum+0}' "/tmp/${vm}_low")
-              vm_imgs=$(awk '{sum+=$1} END {print sum+0}' "/tmp/${vm}_images")
-              
-              total_critical=$((total_critical + vm_crit))
-              total_high=$((total_high + vm_high))
-              total_medium=$((total_medium + vm_med))
-              total_low=$((total_low + vm_low))
-              total_images=$((total_images + vm_imgs))
-            fi
-          done
-          
-          # Generate report
-          cat > "$REPORT_FILE" << EOF
-          # Security Vulnerability Assessment Report
-          
-          **Generated**: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
-          **Environment**: VLAB Container Infrastructure
-          **Scanner**: Trivy
-          
-          ## Summary
-          
-          | Severity | Count |
-          |----------|-------|
-          | Critical | $total_critical |
-          | High | $total_high |
-          | Medium | $total_medium |
-          | Low | $total_low |
-          | **Total** | **$((total_critical + total_high + total_medium + total_low))** |
-          | Images Scanned | $total_images |
-          
-          ## Risk Assessment
-          
-          EOF
-          
-          if [ "$total_critical" -gt 0 ]; then
-            echo "**CRITICAL**: $total_critical vulnerabilities require immediate remediation" >> "$REPORT_FILE"
-          fi
-          if [ "$total_high" -gt 0 ]; then
-            echo "**HIGH**: $total_high vulnerabilities should be addressed within 30 days" >> "$REPORT_FILE"
-          fi
-          if [ "$total_critical" -eq 0 ] && [ "$total_high" -eq 0 ]; then
-            echo "**LOW RISK**: No critical or high-severity vulnerabilities detected" >> "$REPORT_FILE"
-          fi
-          
-          echo "Report generated: $REPORT_FILE"
-          
-          # Set environment variables for job summary
-          echo "TOTAL_VULNERABILITIES=$((total_critical + total_high + total_medium + total_low))" >> $GITHUB_ENV
-          echo "CRITICAL_VULNERABILITIES=$total_critical" >> $GITHUB_ENV
-          echo "HIGH_VULNERABILITIES=$total_high" >> $GITHUB_ENV
-
-      - name: Security scan summary
+      - name: Collect Trivy scan outputs
         if: always()
         run: |
-          echo "## Security Scan Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          # Enhanced summary with vulnerability counts
-          echo "| Metric | Count |" >> $GITHUB_STEP_SUMMARY
-          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Total Vulnerabilities | ${TOTAL_VULNERABILITIES:-0} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Critical | ${CRITICAL_VULNERABILITIES:-0} |" >> $GITHUB_STEP_SUMMARY
-          echo "| High | ${HIGH_VULNERABILITIES:-0} |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          # Count SARIF files generated during scan (exclude fallback files)
-          sarif_count=$(find sarif-reports -name "*.sarif" ! -name "fallback.sarif" -type f 2>/dev/null | wc -l)
-          echo "- **SARIF files generated:** $sarif_count" >> $GITHUB_STEP_SUMMARY
-
-          # Count scan results from VMs
-          if [ -d "trivy-reports" ]; then
-            control_scans=$(find trivy-reports/control-1 -name "*_critical.txt" -type f 2>/dev/null | wc -l)
-            gateway_scans=$(find trivy-reports/gateway-1 -name "*_critical.txt" -type f 2>/dev/null | wc -l)
-            total_scans=$((control_scans + gateway_scans))
-
-            echo "- **Control VM container images scanned:** $control_scans" >> $GITHUB_STEP_SUMMARY
-            echo "- **Gateway VM container images scanned:** $gateway_scans" >> $GITHUB_STEP_SUMMARY
-            echo "- **Total images scanned:** $total_scans" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "- **No scan results found**" >> $GITHUB_STEP_SUMMARY
-          fi
-
+          echo "## VLAB Security Scan Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
+          # Scan completion status
+          echo "### Scan Completion Status" >> $GITHUB_STEP_SUMMARY
+          echo "| VM | Status | Images Scanned |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|----------------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Control VM | $([ "${SCAN_CONTROL_SUCCESS:-false}" = "true" ] && echo "SUCCESS" || echo "FAILED") | ${SCAN_CONTROL_IMAGES:-0} |" >> $GITHUB_STEP_SUMMARY
+          if [ "${SCAN_GATEWAY_SKIPPED:-false}" = "true" ]; then
+            echo "| Gateway VM | SKIPPED | 0 |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Gateway VM | $([ "${SCAN_GATEWAY_SUCCESS:-false}" = "true" ] && echo "SUCCESS" || echo "FAILED") | ${SCAN_GATEWAY_IMAGES:-0} |" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "| **Total** | **$([ "${SCAN_CONTROL_SUCCESS:-false}" = "true" ] && ([ "${SCAN_GATEWAY_SKIPPED:-false}" = "true" ] || [ "${SCAN_GATEWAY_SUCCESS:-false}" = "true" ]) && echo "SUCCESS" || echo "FAILED")** | **${SCAN_TOTAL_IMAGES:-0}** |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Vulnerability statistics
+          echo "### Vulnerability Summary" >> $GITHUB_STEP_SUMMARY
+          echo "| Severity | Count | Action Required |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|-----------------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Critical** | **${CRITICAL_VULNERABILITIES:-0}** | $([ "${CRITICAL_VULNERABILITIES:-0}" -gt 0 ] && echo "Immediate" || echo "None") |" >> $GITHUB_STEP_SUMMARY
+          echo "| **High** | **${HIGH_VULNERABILITIES:-0}** | $([ "${HIGH_VULNERABILITIES:-0}" -gt 0 ] && echo "Within 30 days" || echo "None") |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Medium** | **${MEDIUM_VULNERABILITIES:-0}** | Monitor |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Total** | **${TOTAL_VULNERABILITIES:-0}** | Assessed |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Unique CVEs** | **${UNIQUE_CVES:-0}** | Identified |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
           # Risk assessment
+          echo "### Risk Assessment" >> $GITHUB_STEP_SUMMARY
           if [ "${CRITICAL_VULNERABILITIES:-0}" -gt 0 ]; then
-            echo "**CRITICAL RISK**: ${CRITICAL_VULNERABILITIES} vulnerabilities require immediate attention" >> $GITHUB_STEP_SUMMARY
+            echo "**CRITICAL RISK** - ${CRITICAL_VULNERABILITIES} vulnerabilities require immediate attention" >> $GITHUB_STEP_SUMMARY
+          elif [ "${HIGH_VULNERABILITIES:-0}" -gt 10 ]; then
+            echo "**HIGH RISK** - ${HIGH_VULNERABILITIES} high-severity vulnerabilities detected" >> $GITHUB_STEP_SUMMARY
           elif [ "${HIGH_VULNERABILITIES:-0}" -gt 0 ]; then
-            echo "**MODERATE RISK**: ${HIGH_VULNERABILITIES} high-severity vulnerabilities detected" >> $GITHUB_STEP_SUMMARY
+            echo "**MODERATE RISK** - ${HIGH_VULNERABILITIES} high-severity vulnerabilities detected" >> $GITHUB_STEP_SUMMARY
           else
-            echo "**LOW RISK**: No critical vulnerabilities detected" >> $GITHUB_STEP_SUMMARY
+            echo "**LOW RISK** - No critical vulnerabilities detected" >> $GITHUB_STEP_SUMMARY
           fi
+          echo "" >> $GITHUB_STEP_SUMMARY
 
-      - name: Upload SARIF to GitHub Security
+      - name: Display Trivy scan outputs for each VM
         if: always()
         run: |
-          # Check if we have valid SARIF files (not just fallback)
-          sarif_count=$(find sarif-reports -name "*.sarif" ! -name "fallback.sarif" -type f 2>/dev/null | wc -l)
-          if [ "$sarif_count" -gt 0 ]; then
-            echo "Found $sarif_count valid SARIF files, uploading to GitHub Security..."
-            echo "UPLOAD_SARIF=true" >> $GITHUB_ENV
-          else
-            echo "No valid SARIF files found, skipping upload"
-            echo "UPLOAD_SARIF=false" >> $GITHUB_ENV
+          echo "### Detailed Scan Results by VM" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Control VM results
+          if [ -d "trivy-reports/control-1" ]; then
+            echo "#### Control VM (control-1)" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            
+            # Show full list of images scanned
+            echo "**Container Images Scanned (${SCAN_CONTROL_IMAGES:-0} total):**" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            if [ -f "trivy-reports/control-1_images.txt" ]; then
+              cat "trivy-reports/control-1_images.txt" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "No images list found" >> $GITHUB_STEP_SUMMARY
+            fi
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            
+            # Show critical vulnerabilities output
+            echo "**Critical and High Vulnerabilities:**" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            find trivy-reports/control-1 -name "*_critical.txt" -type f | while read -r file; do
+              echo "=== $(basename "$file" | sed 's/_critical\.txt$//' | sed 's/^[0-9]*-[0-9]*_//') ==="
+              if [ -s "$file" ]; then
+                head -50 "$file" | tail -n +1
+              else
+                echo "No critical/high vulnerabilities found"
+              fi
+              echo ""
+            done >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
           fi
 
-      - name: Upload SARIF files
-        if: always() && env.UPLOAD_SARIF == 'true'
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: sarif-reports/
-          category: trivy-container-scan
-        continue-on-error: true
+          # Gateway VM results
+          if [ -d "trivy-reports/gateway-1" ] && [ "${SCAN_GATEWAY_SKIPPED:-false}" != "true" ]; then
+            echo "#### Gateway VM (gateway-1)" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            
+            # Show full list of images scanned
+            echo "**Container Images Scanned (${SCAN_GATEWAY_IMAGES:-0} total):**" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            if [ -f "trivy-reports/gateway-1_images.txt" ]; then
+              cat "trivy-reports/gateway-1_images.txt" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "No images list found" >> $GITHUB_STEP_SUMMARY
+            fi
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            
+            # Show critical vulnerabilities output
+            echo "**Critical and High Vulnerabilities:**" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            find trivy-reports/gateway-1 -name "*_critical.txt" -type f | while read -r file; do
+              echo "=== $(basename "$file" | sed 's/_critical\.txt$//' | sed 's/^[0-9]*-[0-9]*_//') ==="
+              if [ -s "$file" ]; then
+                head -50 "$file" | tail -n +1
+              else
+                echo "No critical/high vulnerabilities found"
+              fi
+              echo ""
+            done >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          elif [ "${SCAN_GATEWAY_SKIPPED:-false}" = "true" ]; then
+            echo "#### Gateway VM (gateway-1)" >> $GITHUB_STEP_SUMMARY
+            echo "Gateway VM scan was skipped due to network configuration failure" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "### Generated Artifacts" >> $GITHUB_STEP_SUMMARY
+          echo "- **Raw scan results**: trivy-reports/ (by VM)" >> $GITHUB_STEP_SUMMARY
 
       - name: Upload results
         uses: actions/upload-artifact@v4
@@ -234,16 +198,14 @@ jobs:
         with:
           name: security-scan-results-${{ github.run_number }}
           path: |
-            security-vulnerability-report.md
             trivy-reports/
-            sarif-reports/
             vlab.log
           retention-days: 30
 
       - name: Security alert
         if: env.CRITICAL_VULNERABILITIES > 0
         run: |
-          echo "::warning::Found ${CRITICAL_VULNERABILITIES} critical vulnerabilities"
+          echo "::warning::Found ${CRITICAL_VULNERABILITIES} critical vulnerabilities requiring immediate attention"
 
       - name: Setup tmate session for debug
         if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
@@ -251,3 +213,4 @@ jobs:
         timeout-minutes: 30
         with:
           limit-access-to-actor: true
+
