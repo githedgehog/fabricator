@@ -8,7 +8,7 @@ CONTROL_VM="control-1"
 GATEWAY_VM="gateway-1"
 VLAB_LOG="vlab.log"
 RESULTS_DIR="trivy-reports"
-SCRIPT_PATH="${SCRIPT_PATH:-./security/scripts/trivy-setup.sh}"
+SCRIPT_PATH="${SCRIPT_PATH:-./hack/trivy-setup.sh}"
 VLAB_TIMEOUT=${VLAB_TIMEOUT:-25}
 
 # Find hhfab binary relative to project root
