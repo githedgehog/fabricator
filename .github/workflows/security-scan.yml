@@ -104,24 +104,66 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Check the [Security tab](https://github.com/${{ github.repository }}/security) for detailed vulnerability reports and [artifacts](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) for raw scan data." >> $GITHUB_STEP_SUMMARY
 
-      - name: Upload SARIF to GitHub Security
+      - name: Consolidate SARIF files for GitHub Security
         if: always()
         run: |
           # Check if we have valid SARIF files (not just fallback)
           sarif_count=$(find sarif-reports -name "*.sarif" ! -name "fallback.sarif" -type f 2>/dev/null | wc -l)
           if [ "$sarif_count" -gt 0 ]; then
-            echo "Found $sarif_count valid SARIF files, uploading to GitHub Security..."
+            echo "Found $sarif_count valid SARIF files, consolidating..."
+
+            # Create final consolidated SARIF file
+            consolidated_file="sarif-reports/trivy-security-scan.sarif"
+
+            # Get all SARIF files except fallback
+            sarif_files=($(find sarif-reports -name "*.sarif" ! -name "fallback.sarif" -type f))
+
+            if [ ${#sarif_files[@]} -eq 1 ]; then
+              # Only one SARIF file, just rename it
+              mv "${sarif_files[0]}" "$consolidated_file"
+              echo "Single SARIF file renamed to trivy-security-scan.sarif"
+            elif [ ${#sarif_files[@]} -gt 1 ]; then
+              # Multiple SARIF files, merge them
+              echo "Merging ${#sarif_files[@]} SARIF files into single consolidated file..."
+
+              # Start with first file as base
+              cp "${sarif_files[0]}" "$consolidated_file"
+
+              # Merge remaining files
+              for ((i=1; i<${#sarif_files[@]}; i++)); do
+                merge_file="${sarif_files[$i]}"
+                echo "Merging: $(basename "$merge_file")"
+
+                # Use jq to merge SARIF files
+                jq -s '
+                  .[0].runs[0].results += .[1].runs[0].results |
+                  .[0].runs[0].tool.driver.rules += (.[1].runs[0].tool.driver.rules // []) |
+                  .[0].runs[0].tool.driver.rules |= unique_by(.id) |
+                  .[0]
+                ' "$consolidated_file" "$merge_file" > "${consolidated_file}.tmp" && \
+                mv "${consolidated_file}.tmp" "$consolidated_file"
+              done
+
+              # Remove individual VM SARIF files to avoid confusion
+              for file in "${sarif_files[@]}"; do
+                rm -f "$file"
+              done
+
+              echo "✓ All SARIF files merged into single consolidated report"
+            fi
+
             echo "UPLOAD_SARIF=true" >> $GITHUB_ENV
+            echo "SARIF_FILE=$consolidated_file" >> $GITHUB_ENV
           else
             echo "No valid SARIF files found, skipping upload"
             echo "UPLOAD_SARIF=false" >> $GITHUB_ENV
           fi
 
-      - name: Upload SARIF files
+      - name: Upload SARIF file
         if: always() && env.UPLOAD_SARIF == 'true'
         uses: github/codeql-action/upload-sarif@v3
         with:
-          sarif_file: sarif-reports/
+          sarif_file: ${{ env.SARIF_FILE }}
           category: trivy-container-scan
         continue-on-error: true
 
