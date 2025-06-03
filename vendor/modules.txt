@@ -1284,7 +1284,7 @@ github.com/letsencrypt/boulder/identifier
 github.com/letsencrypt/boulder/probs
 github.com/letsencrypt/boulder/revocation
 github.com/letsencrypt/boulder/strictyaml
-# github.com/lmittmann/tint v1.1.0
+# github.com/lmittmann/tint v1.1.1
 ## explicit; go 1.21
 github.com/lmittmann/tint
 # github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0
@@ -1723,7 +1723,7 @@ go.githedgehog.com/fabric/pkg/util/uefiutil
 # go.githedgehog.com/fabric-bcm-ygot v0.4.0-4.4.2
 ## explicit; go 1.24.0
 go.githedgehog.com/fabric-bcm-ygot/pkg/oc
-# go.githedgehog.com/gateway v0.7.1
+# go.githedgehog.com/gateway v0.7.1 => /Users/frostman/workspace/hedgehog/gateway
 ## explicit; go 1.24.2
 go.githedgehog.com/gateway/api/gateway/v1alpha1
 go.githedgehog.com/gateway/api/gwint/v1alpha1
@@ -2036,7 +2036,7 @@ google.golang.org/genproto/googleapis/api/monitoredres
 google.golang.org/genproto/googleapis/rpc/code
 google.golang.org/genproto/googleapis/rpc/errdetails
 google.golang.org/genproto/googleapis/rpc/status
-# google.golang.org/grpc v1.72.0
+# google.golang.org/grpc v1.72.2
 ## explicit; go 1.23
 google.golang.org/grpc
 google.golang.org/grpc/attributes
@@ -2813,3 +2813,4 @@ sigs.k8s.io/structured-merge-diff/v4/value
 sigs.k8s.io/yaml
 sigs.k8s.io/yaml/goyaml.v2
 # github.com/diskfs/go-diskfs => github.com/Frostman/go-diskfs v1.4.2-hh3
+# go.githedgehog.com/gateway => /Users/frostman/workspace/hedgehog/gateway
