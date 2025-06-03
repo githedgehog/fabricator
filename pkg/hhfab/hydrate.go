@@ -820,7 +820,7 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 					return fmt.Errorf("gateway %s does not have interface %s", gwName, link.Gateway.LocalPortName()) //nolint:goerr113
 				}
 				gw.Spec.Interfaces[link.Gateway.LocalPortName()] = gwapi.GatewayInterface{
-					IP: link.Gateway.IP,
+					IPs: []string{link.Gateway.IP},
 				}
 
 				spineIP, err := netip.ParsePrefix(link.Spine.IP)
@@ -830,8 +830,9 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 
 				// TODO check that it's not already set?
 				gw.Spec.Neighbors = append(gw.Spec.Neighbors, gwapi.GatewayBGPNeighbor{
-					IP:  spineIP.Addr().String(),
-					ASN: c.Fab.Spec.Config.Fabric.SpineASN,
+					Source: link.Gateway.LocalPortName(),
+					IP:     spineIP.Addr().String(),
+					ASN:    c.Fab.Spec.Config.Fabric.SpineASN,
 				})
 
 				if err := kube.Update(ctx, gw); err != nil {
