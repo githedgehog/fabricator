@@ -8,6 +8,8 @@ replace github.com/diskfs/go-diskfs => github.com/Frostman/go-diskfs v1.4.2-hh3
 
 tool sigs.k8s.io/controller-tools/cmd/controller-gen
 
+replace go.githedgehog.com/gateway => /Users/frostman/workspace/hedgehog/gateway
+
 require (
 	dario.cat/mergo v1.0.2
 	github.com/AlekSi/pointer v1.2.0
@@ -22,7 +24,7 @@ require (
 	github.com/go-logr/logr v1.4.3
 	github.com/go-playground/validator/v10 v10.26.0
 	github.com/k3s-io/helm-controller v0.16.8
-	github.com/lmittmann/tint v1.1.0
+	github.com/lmittmann/tint v1.1.1
 	github.com/manifoldco/promptui v0.9.0
 	github.com/mattn/go-isatty v0.0.20
 	github.com/melbahja/goph v1.4.0
@@ -351,7 +353,7 @@ require (
 	google.golang.org/genproto v0.0.0-20241118233622-e639e219e697 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20250218202821-56aae31c358a // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250414145226-207652e42e2e // indirect
-	google.golang.org/grpc v1.72.0 // indirect
+	google.golang.org/grpc v1.72.2 // indirect
 	google.golang.org/protobuf v1.36.6 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.12.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
