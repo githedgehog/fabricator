@@ -202,8 +202,9 @@ type FabricConfig struct {
 	BaseVPCCommunity string            `json:"baseVPCCommunity,omitempty"`
 	VPCIRBVLANs      []fmeta.VLANRange `json:"vpcIRBVLANs,omitempty"`
 
-	VPCWorkaroundVLANs  []fmeta.VLANRange `json:"vpcWorkaroundVLANs,omitempty"`
-	VPCWorkaroundSubnet meta.Prefix       `json:"vpcWorkaroundSubnet,omitempty"`
+	LoopbackWorkaroundDisable bool              `json:"loopbackWorkaroundDisable,omitempty"`
+	VPCWorkaroundVLANs        []fmeta.VLANRange `json:"vpcWorkaroundVLANs,omitempty"`
+	VPCWorkaroundSubnet       meta.Prefix       `json:"vpcWorkaroundSubnet,omitempty"`
 
 	ESLAGMACBase   string `json:"eslagMACBase,omitempty"`
 	ESLAGESIPrefix string `json:"eslagESIPrefix,omitempty"`
