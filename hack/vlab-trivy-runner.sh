@@ -354,6 +354,118 @@ scan_vm() {
                 
                 echo "✓ Consolidated SARIF created: trivy-consolidated-${vm_name}.sarif"
                 echo "✓ Contains vulnerabilities from $success_count/$image_count images"
+                
+                # === ENHANCED SARIF CONTEXT INTEGRATION WITH VM VISIBILITY ===
+                echo "Enhancing SARIF with VM and container context..."
+                
+                # Get aggregated vulnerability counts from JSON reports
+                total_critical=0
+                total_high=0
+                total_medium=0
+                total_low=0
+                
+                if [ -d "$vm_results_dir" ]; then
+                    for json_file in "$vm_results_dir"/*.json; do
+                        if [ -f "$json_file" ]; then
+                            critical=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL")] | length' "$json_file" 2>/dev/null || echo 0)
+                            high=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "HIGH")] | length' "$json_file" 2>/dev/null || echo 0)
+                            medium=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "MEDIUM")] | length' "$json_file" 2>/dev/null || echo 0)
+                            low=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "LOW")] | length' "$json_file" 2>/dev/null || echo 0)
+                            
+                            total_critical=$((total_critical + critical))
+                            total_high=$((total_high + high))
+                            total_medium=$((total_medium + medium))
+                            total_low=$((total_low + low))
+                        fi
+                    done
+                fi
+                
+                # Build container images array for JSON
+                containers_json="[]"
+                if [ ${#image_array[@]} -gt 0 ]; then
+                    containers_json=$(printf '%s\n' "${image_array[@]}" | jq -R . | jq -s .)
+                fi
+                
+                # Get deployment context from environment
+                deployment_id="${GITHUB_RUN_ID:-unknown}"
+                commit_sha="${GITHUB_SHA:-unknown}"
+                repo="${GITHUB_REPOSITORY:-unknown}"
+                actor="${GITHUB_ACTOR:-unknown}"
+                registry_repo="${HHFAB_REG_REPO:-127.0.0.1:30000}"
+                
+                # Enhance the consolidated SARIF with full context + VM visibility
+                jq --arg vm_name "$vm_name" \
+                   --arg scan_time "$(date -Iseconds)" \
+                   --arg deployment_id "$deployment_id" \
+                   --arg commit_sha "$commit_sha" \
+                   --arg repo "$repo" \
+                   --arg actor "$actor" \
+                   --arg registry_repo "$registry_repo" \
+                   --arg total_critical "$total_critical" \
+                   --arg total_high "$total_high" \
+                   --arg total_medium "$total_medium" \
+                   --arg total_low "$total_low" \
+                   --argjson container_images "$containers_json" \
+                   '.runs[0].properties = {
+                     vmContext: {
+                       name: $vm_name,
+                       type: (if ($vm_name | startswith("control")) then "control" elif ($vm_name | startswith("gateway")) then "gateway" else "unknown" end),
+                       scanTimestamp: $scan_time,
+                       environment: "vlab",
+                       totalContainerImages: ($container_images | length)
+                     },
+                     containerContext: {
+                       scannedImages: $container_images,
+                       registry: $registry_repo,
+                       aggregatedVulnerabilities: {
+                         critical: ($total_critical | tonumber),
+                         high: ($total_high | tonumber),
+                         medium: ($total_medium | tonumber),
+                         low: ($total_low | tonumber),
+                         total: (($total_critical | tonumber) + ($total_high | tonumber) + ($total_medium | tonumber) + ($total_low | tonumber))
+                       }
+                     },
+                     deploymentContext: {
+                       deploymentId: $deployment_id,
+                       commitSha: $commit_sha,
+                       repository: $repo,
+                       triggeredBy: $actor,
+                       workflowRun: ("https://github.com/" + $repo + "/actions/runs/" + $deployment_id)
+                     },
+                     scanMetadata: {
+                       tool: "trivy",
+                       category: "vm-container-runtime-scan",
+                       scanScope: "production-deployment",
+                       consolidatedReport: true,
+                       imageCount: ($container_images | length)
+                     }
+                   } |
+                   .runs[0].tool.driver.informationUri = ("https://github.com/" + $repo + "/security") |
+                   # ENHANCED: Add VM context to artifact URIs for GitHub UI visibility
+                   .runs[0].results[].locations[].physicalLocation.artifactLocation.uri |= 
+                     ($vm_name + "/" + .) |
+                   # ENHANCED: Add VM context to location messages for GitHub UI visibility  
+                   .runs[0].results[].locations[].message.text |= 
+                     ("[" + $vm_name + "] " + .) |
+                   # Add VM context to each vulnerability result (existing functionality)
+                   .runs[0].results[] |= . + {
+                     properties: {
+                       vmName: $vm_name,
+                       vmType: (if ($vm_name | startswith("control")) then "control" elif ($vm_name | startswith("gateway")) then "gateway" else "unknown" end),
+                       scanContext: "runtime-deployment-consolidated"
+                     }
+                   }' "$consolidated_sarif" > "${consolidated_sarif}.enhanced"
+                
+                # Replace original with enhanced version
+                mv "${consolidated_sarif}.enhanced" "$consolidated_sarif"
+                echo "✓ Enhanced SARIF with VM and container context"
+                echo "✓ Added VM visibility to artifact URIs and messages"
+                echo "  - VM: $vm_name"
+                echo "  - Container images: ${#image_array[@]}"
+                echo "  - Total vulnerabilities: $((total_critical + total_high + total_medium + total_low))"
+                echo "  - Critical/High: $((total_critical + total_high))"
+                # === END ENHANCED SARIF CONTEXT INTEGRATION ===
+                
             else
                 echo "✗ No valid SARIF files to consolidate"
             fi
@@ -417,34 +529,8 @@ else
     GATEWAY_RESULT=1
 fi
 
-# Ensure SARIF directory exists and create fallback only if no consolidated SARIF generated
+# Create SARIF directory (simplified - no fallback)
 mkdir -p sarif-reports
-sarif_count=$(find sarif-reports -name "*.sarif" -type f 2>/dev/null | wc -l)
-if [ "$sarif_count" -eq 0 ]; then
-    echo "No consolidated SARIF file generated - creating fallback"
-    echo "Creating minimal valid SARIF report for GitHub Security"
-    cat > sarif-reports/fallback.sarif << 'EOF'
-{
-  "version": "2.1.0",
-  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
-  "runs": [
-    {
-      "tool": {
-        "driver": {
-          "name": "Trivy",
-          "version": "unknown",
-          "informationUri": "https://trivy.dev/"
-        }
-      },
-      "results": [],
-      "columnKind": "utf16CodeUnits"
-    }
-  ]
-}
-EOF
-else
-    echo "Generated consolidated SARIF file(s) successfully (contains vulnerabilities from ALL container images)"
-fi
 
 echo ""
 echo -e "${GREEN}=== Security Scan Summary ===${NC}"
@@ -464,8 +550,11 @@ else
     echo -e "${YELLOW}Gateway VM ($GATEWAY_VM): SKIPPED (network config failed)${NC}"
 fi
 
+# Show SARIF generation results
+sarif_count=$(find sarif-reports -name "*.sarif" -type f 2>/dev/null | wc -l)
 echo ""
 echo "Results directory: $RESULTS_DIR"
+echo "SARIF files generated: $sarif_count"
 echo "VLAB log: $VLAB_LOG"
 echo ""
 
