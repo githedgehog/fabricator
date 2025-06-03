@@ -354,14 +354,16 @@ scan_vm() {
                 
                 echo "✓ Consolidated SARIF created: trivy-consolidated-${vm_name}.sarif"
                 echo "✓ Contains vulnerabilities from $success_count/$image_count images"
-
+                
+                # === ENHANCED SARIF CONTEXT INTEGRATION WITH VM VISIBILITY ===
                 echo "Enhancing SARIF with VM and container context..."
-
+                
+                # Get aggregated vulnerability counts from JSON reports
                 total_critical=0
                 total_high=0
                 total_medium=0
                 total_low=0
-
+                
                 if [ -d "$vm_results_dir" ]; then
                     for json_file in "$vm_results_dir"/*.json; do
                         if [ -f "$json_file" ]; then
@@ -369,7 +371,7 @@ scan_vm() {
                             high=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "HIGH")] | length' "$json_file" 2>/dev/null || echo 0)
                             medium=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "MEDIUM")] | length' "$json_file" 2>/dev/null || echo 0)
                             low=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "LOW")] | length' "$json_file" 2>/dev/null || echo 0)
-
+                            
                             total_critical=$((total_critical + critical))
                             total_high=$((total_high + high))
                             total_medium=$((total_medium + medium))
@@ -377,19 +379,21 @@ scan_vm() {
                         fi
                     done
                 fi
-
+                
+                # Build container images array for JSON
                 containers_json="[]"
                 if [ ${#image_array[@]} -gt 0 ]; then
                     containers_json=$(printf '%s\n' "${image_array[@]}" | jq -R . | jq -s .)
                 fi
-
+                
+                # Get deployment context from environment
                 deployment_id="${GITHUB_RUN_ID:-unknown}"
                 commit_sha="${GITHUB_SHA:-unknown}"
                 repo="${GITHUB_REPOSITORY:-unknown}"
                 actor="${GITHUB_ACTOR:-unknown}"
                 registry_repo="${HHFAB_REG_REPO:-127.0.0.1:30000}"
-
-                # Enhance the consolidated SARIF with full context
+                
+                # Enhance the consolidated SARIF with full context + VM visibility
                 jq --arg vm_name "$vm_name" \
                    --arg scan_time "$(date -Iseconds)" \
                    --arg deployment_id "$deployment_id" \
@@ -437,7 +441,13 @@ scan_vm() {
                      }
                    } |
                    .runs[0].tool.driver.informationUri = ("https://github.com/" + $repo + "/security") |
-                   # Add VM context to each vulnerability result
+                   # ENHANCED: Add VM context to artifact URIs for GitHub UI visibility
+                   .runs[0].results[].locations[].physicalLocation.artifactLocation.uri |= 
+                     ($vm_name + "/" + .) |
+                   # ENHANCED: Add VM context to location messages for GitHub UI visibility  
+                   .runs[0].results[].locations[].message.text |= 
+                     ("[" + $vm_name + "] " + .) |
+                   # Add VM context to each vulnerability result (existing functionality)
                    .runs[0].results[] |= . + {
                      properties: {
                        vmName: $vm_name,
@@ -445,18 +455,22 @@ scan_vm() {
                        scanContext: "runtime-deployment-consolidated"
                      }
                    }' "$consolidated_sarif" > "${consolidated_sarif}.enhanced"
-
+                
+                # Replace original with enhanced version
                 mv "${consolidated_sarif}.enhanced" "$consolidated_sarif"
                 echo "✓ Enhanced SARIF with VM and container context"
+                echo "✓ Added VM visibility to artifact URIs and messages"
                 echo "  - VM: $vm_name"
                 echo "  - Container images: ${#image_array[@]}"
                 echo "  - Total vulnerabilities: $((total_critical + total_high + total_medium + total_low))"
                 echo "  - Critical/High: $((total_critical + total_high))"
-
+                # === END ENHANCED SARIF CONTEXT INTEGRATION ===
+                
             else
                 echo "✗ No valid SARIF files to consolidate"
             fi
-
+            
+            # Clean up temporary files
             for temp_file in "${temp_sarifs[@]}"; do
                 rm -f "$temp_file"
             done
