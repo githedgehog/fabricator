@@ -10,7 +10,7 @@ on:
   schedule:
     - cron: '0 2 * * *'
 
-  # TEMPORARY: For testing workflow changes
+  # FIXME: TEMPORARY: For testing workflow changes
   push:
     branches:
       - pau/fabricator_sec_scan
@@ -19,7 +19,6 @@ on:
       - 'hack/vlab-trivy-runner.sh'
       - 'hack/trivy-setup.sh'
 
-  # FIXME: Allow manual triggering for testing
   workflow_dispatch:
     inputs:
       debug_enabled:
@@ -71,7 +70,7 @@ jobs:
           echo "## Security Scan Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          sarif_count=$(find sarif-reports -name "*.sarif" ! -name "fallback.sarif" -type f 2>/dev/null | wc -l)
+          sarif_count=$(find sarif-reports -name "*.sarif" -type f 2>/dev/null | wc -l)
           echo "- **SARIF files generated:** $sarif_count" >> $GITHUB_STEP_SUMMARY
 
           if [ -d "trivy-reports" ]; then
@@ -105,26 +104,24 @@ jobs:
       - name: Consolidate SARIF files for GitHub Security
         if: always()
         run: |
-          sarif_count=$(find sarif-reports -name "*.sarif" ! -name "fallback.sarif" -type f 2>/dev/null | wc -l)
+          sarif_count=$(find sarif-reports -name "*.sarif" -type f 2>/dev/null | wc -l)
+
           if [ "$sarif_count" -gt 0 ]; then
-            echo "Found $sarif_count valid SARIF files, consolidating..."
+            echo "Found $sarif_count SARIF files, consolidating..."
 
             consolidated_file="sarif-reports/trivy-security-scan.sarif"
-
-            sarif_files=($(find sarif-reports -name "*.sarif" ! -name "fallback.sarif" -type f))
+            sarif_files=($(find sarif-reports -name "*.sarif" -type f))
 
             if [ ${#sarif_files[@]} -eq 1 ]; then
               mv "${sarif_files[0]}" "$consolidated_file"
               echo "Single SARIF file renamed to trivy-security-scan.sarif"
             elif [ ${#sarif_files[@]} -gt 1 ]; then
               echo "Merging ${#sarif_files[@]} SARIF files into single consolidated file..."
-
               cp "${sarif_files[0]}" "$consolidated_file"
 
               for ((i=1; i<${#sarif_files[@]}; i++)); do
                 merge_file="${sarif_files[$i]}"
                 echo "Merging: $(basename "$merge_file")"
-
                 jq -s '
                   .[0].runs[0].results += .[1].runs[0].results |
                   .[0].runs[0].tool.driver.rules += (.[1].runs[0].tool.driver.rules // []) |
@@ -137,14 +134,13 @@ jobs:
               for file in "${sarif_files[@]}"; do
                 rm -f "$file"
               done
-
               echo "✓ All SARIF files merged into single consolidated report"
             fi
 
             echo "UPLOAD_SARIF=true" >> $GITHUB_ENV
             echo "SARIF_FILE=$consolidated_file" >> $GITHUB_ENV
           else
-            echo "No valid SARIF files found, skipping upload"
+            echo "No SARIF files found - skipping upload (GitHub will preserve previous state)"
             echo "UPLOAD_SARIF=false" >> $GITHUB_ENV
           fi
 
