@@ -674,7 +674,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 					}
 				case OnReadyInspect:
 					if err := c.Inspect(ctx, vlab, InspectOpts{
-						WaitAppliedFor: 2 * time.Minute,
+						WaitAppliedFor: 3 * time.Minute,
 						Strict:         !opts.AutoUpgrade,
 						Attempts:       3,
 					}); err != nil {
