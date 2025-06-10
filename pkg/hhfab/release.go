@@ -1562,6 +1562,11 @@ func doRunTests(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 
 	// initial setup
 	if err := testCtx.setupTest(ctx); err != nil {
+		slog.Error("Initial test suite setup failed", "suite", ts.Name, "error", err.Error())
+		if testCtx.pauseOnFail {
+			pauseOnFail()
+		}
+
 		return ts, fmt.Errorf("%w: %w", errInitalSetup, err)
 	}
 
