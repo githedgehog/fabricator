@@ -231,6 +231,8 @@ spec:
                               type: integer
                           type: object
                         type: array
+                      vpcWorkaroundDisable:
+                        type: boolean
                       vpcWorkaroundSubnet:
                         type: string
                       vpcWorkaroundVLANs:
