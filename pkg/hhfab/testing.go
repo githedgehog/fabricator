@@ -46,7 +46,6 @@ import (
 
 const (
 	ServerNamePrefix        = "server-"
-	VSIPerfSpeed            = 1
 	HashPolicyL2            = "layer2"
 	HashPolicyL2And3        = "layer2+3"
 	HashPolicyL3And4        = "layer3+4"
@@ -958,12 +957,8 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 		}
 	}
 	if allVS {
-		if opts.IPerfsMinSpeed > 10*VSIPerfSpeed {
-			slog.Warn("Lowering IPerf min speed as all switches are virtual", "speed", VSIPerfSpeed)
-			opts.IPerfsMinSpeed = VSIPerfSpeed
-		} else if opts.IPerfsMinSpeed > VSIPerfSpeed {
-			slog.Warn("IPerf min speed is higher than default virtual switch speed", "speed", VSIPerfSpeed)
-		}
+		slog.Warn("All switches are virtual, ignoring IPerf min speed")
+		opts.IPerfsMinSpeed = 0
 	}
 
 	if opts.WaitSwitchesReady {
