@@ -280,6 +280,19 @@ jobs:
         run: |
           just --timestamp _localreg &
 
+      - name: Wait for registry to be ready
+        continue-on-error: true
+        run: timeout 90 bash -c 'until curl -f http://127.0.0.1:30000/v2/ >/dev/null 2>&1; do sleep 1; done'
+
+      - name: Debug registry files before build
+        run: |
+          echo "=== Contents of .zot directory ==="
+          ls -la .zot/ || echo ".zot directory does not exist"
+          echo "=== Registry log content ==="
+          cat .zot/log || echo ".zot/log does not exist"
+          echo "=== All processes ==="
+          ps aux | grep zot || echo "No zot processes found"
+
       - name: Build hhfab
         run: |
           just --timestamp oci_repo=127.0.0.1:30000 oci=http push
