@@ -156,4 +156,7 @@ oras push ghcr.io/githedgehog/sonic-cls-private/sonic-cls-broadcom:${CLS_SONIC_V
 oras push ghcr.io/githedgehog/sonic-cls-private/sonic-cls-innovium:${CLS_SONIC_VERSION} sonic-innovium.bin
 oras push ghcr.io/githedgehog/sonic-cls-private/sonic-cls-marvell:${CLS_SONIC_VERSION} sonic-marvell.bin
 oras push ghcr.io/githedgehog/sonic-cls-private/sonic-cls-marvell-arm64:${CLS_SONIC_VERSION} sonic-marvell-arm64.bin
+
+oras push ghcr.io/githedgehog/sonic-cls-private/sonic-cls-plus-broadcom:${CLS_SONIC_VERSION} sonicPlus4.0-broadcom.bin
+oras push ghcr.io/githedgehog/sonic-cls-private/sonic-cls-plus-marvell:${CLS_SONIC_VERSION} sonicPlus4.0-marvell.bin
 ```
