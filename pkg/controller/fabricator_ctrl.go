@@ -15,6 +15,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/certmanager"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/controlproxy"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/f8r"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/fabric"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/gateway"
@@ -190,6 +191,10 @@ func (r *FabricatorReconciler) Reconcile(ctx context.Context, req kctrl.Request)
 			return kctrl.Result{}, fmt.Errorf("enforcing ntp install: %w", err)
 		}
 
+		if err := comp.EnforceKubeInstall(ctx, r.Client, *f, controlproxy.Install); err != nil {
+			return kctrl.Result{}, fmt.Errorf("enforcing controlproxy install: %w", err)
+		}
+
 		if err := comp.EnforceKubeInstall(ctx, r.Client, *f,
 			k3s.InstallNodeRegistries(comp.RegistryUserReader, string(regPassword)),
 		); err != nil {
@@ -304,9 +309,9 @@ func (r *FabricatorReconciler) statusCheck(ctx context.Context, l logr.Logger, f
 		return fmt.Errorf("getting fabric dhcp status: %w", err)
 	}
 
-	f.Status.Components.FabricProxy, err = fabric.StatusProxy(ctx, r.Client, *f)
+	f.Status.Components.ControlProxy, err = controlproxy.Status(ctx, r.Client, *f)
 	if err != nil {
-		return fmt.Errorf("getting fabric proxy status: %w", err)
+		return fmt.Errorf("getting controlproxy status: %w", err)
 	}
 
 	f.Status.Components.GatewayAPI, err = gateway.StatusAPI(ctx, r.Client, *f)

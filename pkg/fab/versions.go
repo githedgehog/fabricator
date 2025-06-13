@@ -30,15 +30,17 @@ var (
 
 var Versions = fabapi.Versions{
 	Platform: fabapi.PlatformVersions{
-		K3s:         "v1.33.3-k3s1",
-		Zot:         "v2.1.1",
-		CertManager: "v1.18.2",
-		K9s:         "v0.50.7",
-		Toolbox:     "v0.6.0",
-		Reloader:    "v1.0.40", // TODO upgrade or get rid of?
-		NTP:         "v0.0.2",
-		NTPChart:    FabricatorVersion,
-		Alloy:       "v1.9.2",
+		K3s:               "v1.33.2-k3s1",
+		Zot:               "v2.1.1",
+		CertManager:       "v1.18.2",
+		K9s:               "v0.50.7",
+		Toolbox:           "v0.6.0",
+		Reloader:          "v1.0.40", // TODO upgrade or get rid of?
+		NTP:               "v0.0.2",
+		NTPChart:          FabricatorVersion,
+		Alloy:             "v1.9.2",
+		ControlProxy:      "v1.11.2-hh2",
+		ControlProxyChart: FabricatorVersion,
 	},
 	Fabricator: fabapi.FabricatorVersions{
 		API:            FabricatorVersion,
@@ -56,8 +58,6 @@ var Versions = fabapi.Versions{
 		Boot:       FabricVersion,
 		Agent:      FabricVersion,
 		Ctl:        FabricVersion,
-		ProxyChart: FabricVersion, // TODO switch to a better proxy
-		Proxy:      "1.9.1",       // TODO use version starting with "v"
 		NOS: map[fmeta.NOSType]meta.Version{
 			fmeta.NOSTypeSONiCBCMVS:           BCMSONiCVersion,
 			fmeta.NOSTypeSONiCBCMBase:         BCMSONiCVersion,

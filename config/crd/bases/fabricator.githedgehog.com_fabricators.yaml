@@ -306,10 +306,6 @@ spec:
                             additionalProperties:
                               type: string
                             type: object
-                          proxy:
-                            type: string
-                          proxyChart:
-                            type: string
                         type: object
                       fabricator:
                         properties:
@@ -347,6 +343,10 @@ spec:
                             type: string
                           certManager:
                             type: string
+                          controlProxy:
+                            type: string
+                          controlProxyChart:
+                            type: string
                           k3s:
                             type: string
                           k9s:
@@ -382,6 +382,8 @@ spec:
                     type: string
                   certManagerWebhook:
                     type: string
+                  controlProxy:
+                    type: string
                   fabricAPI:
                     type: string
                   fabricBoot:
@@ -389,8 +391,6 @@ spec:
                   fabricCtrl:
                     type: string
                   fabricDHCP:
-                    type: string
-                  fabricProxy:
                     type: string
                   fabricatorAPI:
                     type: string
@@ -518,10 +518,6 @@ spec:
                         additionalProperties:
                           type: string
                         type: object
-                      proxy:
-                        type: string
-                      proxyChart:
-                        type: string
                     type: object
                   fabricator:
                     properties:
@@ -558,6 +554,10 @@ spec:
                       alloy:
                         type: string
                       certManager:
+                        type: string
+                      controlProxy:
+                        type: string
+                      controlProxyChart:
                         type: string
                       k3s:
                         type: string
