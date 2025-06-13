@@ -125,32 +125,56 @@ mkdir -p ${REPORTS_DIR}
 scan_image() {
     local image="$1"
     local output_base="${REPORTS_DIR}/${TIMESTAMP}_$(echo $image | tr '/:' '_')"
-    
+
     echo "Scanning $image..."
-    
+
     # Text report (severity HIGH,CRITICAL) - Table format
-    sudo DOCKER_CONFIG=${DOCKER_CONFIG} ${TRIVY_DIR}/trivy image \
+    if sudo DOCKER_CONFIG=${DOCKER_CONFIG} ${TRIVY_DIR}/trivy image \
         --insecure \
         --severity HIGH,CRITICAL \
         --output "${output_base}_critical.txt" \
-        "$image"
-    
+        "$image"; then
+        echo "✓ Critical vulnerabilities report saved"
+    else
+        echo "WARNING: Critical vulnerabilities scan failed for $image"
+        echo "Image: $image - Scan failed at $(date)" > "${output_base}_critical.txt"
+    fi
+
     # JSON report for all severities
-    sudo DOCKER_CONFIG=${DOCKER_CONFIG} ${TRIVY_DIR}/trivy image \
+    if sudo DOCKER_CONFIG=${DOCKER_CONFIG} ${TRIVY_DIR}/trivy image \
         --insecure \
         --format json \
         --output "${output_base}_all.json" \
-        "$image"
-        
+        "$image"; then
+        echo "✓ JSON report saved"
+    else
+        echo "WARNING: JSON vulnerability scan failed for $image"
+        echo "{\"Results\":[]}" > "${output_base}_all.json"
+    fi
+
+    # SARIF report for HIGH,CRITICAL (for GitHub integration)
+    if sudo DOCKER_CONFIG=${DOCKER_CONFIG} ${TRIVY_DIR}/trivy image \
+        --insecure \
+        --severity HIGH,CRITICAL \
+        --format sarif \
+        --output "${output_base}_critical.sarif" \
+        "$image"; then
+        echo "✓ SARIF report saved"
+    else
+        echo "WARNING: SARIF vulnerability scan failed for $image"
+        echo "{\"$schema\":\"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json\",\"version\":\"2.1.0\",\"runs\":[{\"tool\":{\"driver\":{\"name\":\"Trivy\",\"informationUri\":\"https://github.com/aquasecurity/trivy\",\"rules\":[],\"version\":\"0.63.0\"}},\"results\":[]}]}" > "${output_base}_critical.sarif"
+    fi
+
     echo "Reports saved to:"
     echo "  - ${output_base}_critical.txt (Human readable)"
     echo "  - ${output_base}_all.json (Complete JSON data)"
+    echo "  - ${output_base}_critical.sarif (GitHub Security)"
 }
 
 # Check if an image should be excluded (Trivy itself)
 should_exclude() {
     local image="$1"
-    if [[ "$image" == *"aquasec/trivy"* || "$image" == *"trivy-operator"* || "$image" == *"aquasecurity/trivy"* ]]; then
+    if [[ "$image" == *"aquasec/trivy"* || "$image" == *"trivy-operator"* || "$image" == *"aquasecurity/trivy"* || "$image" == *"pause"* ]]; then
         return 0  # True, should exclude
     else
         return 1  # False, should not exclude
@@ -180,7 +204,7 @@ echo "Identifying container images in K3s..."
 if command -v crictl >/dev/null && [ -S "$CONTAINERD_ADDRESS" ]; then
     # Get list of images, excluding the 'pause' image
     IMAGES=$(sudo crictl --runtime-endpoint unix://${CONTAINERD_ADDRESS} images | grep -v IMAGE | grep -v pause | awk '{print $1":"$2}' || echo "")
-    
+
     # Scan each image, excluding Trivy images
     for IMAGE in $IMAGES; do
         if [ "$IMAGE" != ":" ] && [ ! -z "$IMAGE" ]; then

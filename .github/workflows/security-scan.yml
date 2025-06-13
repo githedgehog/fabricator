@@ -17,6 +17,7 @@ on:
     paths:
       - '.github/workflows/security-scan.yml'
       - 'hack/vlab-trivy-runner.sh'
+      - 'hack/trivy-setup-airgapped.sh'
       - 'hack/trivy-setup.sh'
 
   workflow_dispatch:
@@ -63,43 +64,6 @@ jobs:
         run: |
           echo "Starting security scan..."
           just security-scan
-
-      - name: Security scan summary
-        if: always()
-        run: |
-          echo "## Security Scan Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          sarif_count=$(find sarif-reports -name "*.sarif" -type f 2>/dev/null | wc -l)
-          echo "- **SARIF files generated:** $sarif_count" >> $GITHUB_STEP_SUMMARY
-
-          if [ -d "trivy-reports" ]; then
-            control_scans=$(find trivy-reports/control-1 -name "*_critical.txt" -type f 2>/dev/null | wc -l)
-            gateway_scans=$(find trivy-reports/gateway-1 -name "*_critical.txt" -type f 2>/dev/null | wc -l)
-            total_scans=$((control_scans + gateway_scans))
-
-            echo "- **Control VM container images scanned:** $control_scans" >> $GITHUB_STEP_SUMMARY
-            echo "- **Gateway VM container images scanned:** $gateway_scans" >> $GITHUB_STEP_SUMMARY
-            echo "- **Total images scanned:** $total_scans" >> $GITHUB_STEP_SUMMARY
-
-            critical_vulns=0
-            for vm_dir in trivy-reports/*/; do
-              if [ -d "$vm_dir" ]; then
-                for json_file in "$vm_dir"*_all.json; do
-                  if [ -f "$json_file" ]; then
-                    count=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "HIGH" or .Severity == "CRITICAL")] | length' "$json_file" 2>/dev/null || echo 0)
-                    critical_vulns=$((critical_vulns + count))
-                  fi
-                done
-              fi
-            done
-            echo "- **Critical/High vulnerabilities:** $critical_vulns" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "- **No scan results found**" >> $GITHUB_STEP_SUMMARY
-          fi
-
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Check the [Security tab](https://github.com/${{ github.repository }}/security) for detailed vulnerability reports and [artifacts](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) for raw scan data." >> $GITHUB_STEP_SUMMARY
 
       - name: Consolidate SARIF files for GitHub Security
         if: always()
