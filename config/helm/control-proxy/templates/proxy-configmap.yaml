@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tinyproxy-config
+data:
+  tinyproxy.conf: |-
+{{.Values.config | indent 4 }}
+  filters.conf: |-
+{{- range .Values.urls }}
+{{ . | indent 4 }}
+{{- end }}

@@ -93,7 +93,7 @@ type ComponentsStatus struct {
 	FabricCtrl           ComponentStatus `json:"fabricCtrl,omitempty"`
 	FabricBoot           ComponentStatus `json:"fabricBoot,omitempty"`
 	FabricDHCP           ComponentStatus `json:"fabricDHCP,omitempty"`
-	FabricProxy          ComponentStatus `json:"fabricProxy,omitempty"`
+	ControlProxy         ComponentStatus `json:"controlProxy,omitempty"`
 	GatewayAPI           ComponentStatus `json:"gatewayAPI,omitempty"`
 	GatewayCtrl          ComponentStatus `json:"gatewayCtrl,omitempty"`
 }
@@ -112,7 +112,7 @@ func (c *ComponentsStatus) IsReady(cfg Fabricator) bool {
 		c.FabricCtrl == CompStatusReady &&
 		c.FabricBoot == CompStatusReady &&
 		c.FabricDHCP == CompStatusReady &&
-		c.FabricProxy == CompStatusReady
+		c.ControlProxy == CompStatusReady
 
 	if cfg.Spec.Config.Gateway.Enable {
 		res = res &&
@@ -241,15 +241,17 @@ type Versions struct {
 }
 
 type PlatformVersions struct {
-	K3s         meta.Version `json:"k3s,omitempty"`
-	Zot         meta.Version `json:"zot,omitempty"`
-	CertManager meta.Version `json:"certManager,omitempty"`
-	K9s         meta.Version `json:"k9s,omitempty"`
-	Toolbox     meta.Version `json:"toolbox,omitempty"`
-	Reloader    meta.Version `json:"reloader,omitempty"`
-	NTP         meta.Version `json:"ntp,omitempty"`
-	NTPChart    meta.Version `json:"ntpChart,omitempty"`
-	Alloy       meta.Version `json:"alloy,omitempty"`
+	K3s               meta.Version `json:"k3s,omitempty"`
+	Zot               meta.Version `json:"zot,omitempty"`
+	CertManager       meta.Version `json:"certManager,omitempty"`
+	K9s               meta.Version `json:"k9s,omitempty"`
+	Toolbox           meta.Version `json:"toolbox,omitempty"`
+	Reloader          meta.Version `json:"reloader,omitempty"`
+	NTP               meta.Version `json:"ntp,omitempty"`
+	NTPChart          meta.Version `json:"ntpChart,omitempty"`
+	Alloy             meta.Version `json:"alloy,omitempty"`
+	ControlProxy      meta.Version `json:"controlProxy,omitempty"`
+	ControlProxyChart meta.Version `json:"controlProxyChart,omitempty"`
 }
 
 type FabricatorVersions struct {
@@ -269,8 +271,6 @@ type FabricVersions struct {
 	Boot       meta.Version                   `json:"boot,omitempty"`
 	Agent      meta.Version                   `json:"agent,omitempty"`
 	Ctl        meta.Version                   `json:"ctl,omitempty"`
-	ProxyChart meta.Version                   `json:"proxyChart,omitempty"`
-	Proxy      meta.Version                   `json:"proxy,omitempty"`
 	NOS        map[fmeta.NOSType]meta.Version `json:"nos,omitempty"`
 	ONIE       map[string]meta.Version        `json:"onie,omitempty"`
 }

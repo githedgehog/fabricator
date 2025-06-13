@@ -1,0 +1,10 @@
+image:
+  repository: {{ .Repo }}
+  tag: {{ .Tag }}
+service:
+  nodePort: {{ .NodePort }}
+urls:
+{{- range .TinyproxyURLs }}
+  - {{ . }}
+{{- end }}
+
