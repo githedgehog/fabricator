@@ -3,7 +3,5 @@ self-hosted-runner:
     - lab
     - vlab
     - hlab
-    - lab-h
-    - vlab-h
     - ubuntu-latest-x86-4-cores
     - ubuntu-24.04-arm64-4-core
