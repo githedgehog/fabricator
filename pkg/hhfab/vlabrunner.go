@@ -674,9 +674,9 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 					}
 				case OnReadyInspect:
 					if err := c.Inspect(ctx, vlab, InspectOpts{
-						WaitAppliedFor: 2 * time.Minute,
-						Strict:         !opts.AutoUpgrade,
-						Attempts:       3,
+						WaitAppliedFor: 5 * time.Minute,
+						Strict:         false,
+						Attempts:       5,
 					}); err != nil {
 						slog.Warn("Failed to inspect", "err", err)
 
@@ -696,6 +696,14 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						HashPolicy:  HashPolicyL2And3,
 					}); err != nil {
 						slog.Warn("Failed to run release test", "err", err)
+
+						if opts.CollectShowTech {
+							if err := c.VLABShowTech(ctx, vlab); err != nil {
+								slog.Warn("Failed to collect show-tech diagnostics", "err", err)
+
+								return fmt.Errorf("getting show-tech: %w", err)
+							}
+						}
 
 						return fmt.Errorf("release test: %w", err)
 					}

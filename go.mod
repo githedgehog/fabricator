@@ -39,7 +39,7 @@ require (
 	github.com/urfave/cli/v2 v2.27.6
 	github.com/vbauerster/mpb/v8 v8.10.1
 	github.com/vishvananda/netlink v1.3.1
-	go.githedgehog.com/fabric v0.76.0
+	go.githedgehog.com/fabric v0.77.1
 	go.githedgehog.com/gateway v0.7.1
 	golang.org/x/crypto v0.38.0
 	golang.org/x/mod v0.24.0
@@ -263,7 +263,7 @@ require (
 	github.com/openconfig/gnmic v0.32.0 // indirect
 	github.com/openconfig/goyang v1.6.2 // indirect
 	github.com/openconfig/grpctunnel v0.1.0 // indirect
-	github.com/openconfig/ygot v0.29.22 // indirect
+	github.com/openconfig/ygot v0.32.0 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/runtime-spec v1.2.0 // indirect
 	github.com/opencontainers/selinux v1.11.1 // indirect
@@ -318,7 +318,7 @@ require (
 	github.com/zealic/xignore v0.3.3 // indirect
 	github.com/zeebo/errs v1.4.0 // indirect
 	go.etcd.io/bbolt v1.3.11 // indirect
-	go.githedgehog.com/fabric-bcm-ygot v0.4.0-4.4.2 // indirect
+	go.githedgehog.com/fabric-bcm-ygot v0.5.2-4.5.0 // indirect
 	go.mongodb.org/mongo-driver v1.14.0 // indirect
 	go.mozilla.org/pkcs7 v0.0.0-20210826202110-33d05740a352 // indirect
 	go.opencensus.io v0.24.0 // indirect
