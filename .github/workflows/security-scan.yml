@@ -35,7 +35,7 @@ concurrency:
 
 jobs:
   trivy-security-scan:
-    runs-on: vlab-h
+    runs-on: vlab
     timeout-minutes: 60
 
     steps:
