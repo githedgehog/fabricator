@@ -19,14 +19,16 @@ var (
 
 var Versions = fabapi.Versions{
 	Platform: fabapi.PlatformVersions{
-		K3s:         "v1.32.4-k3s1",
-		Zot:         "v2.1.1",
-		CertManager: "v1.17.1",
-		K9s:         "v0.50.5",
-		Toolbox:     "latest",  // TODO use specific version, move to fabricator repo
-		Reloader:    "v1.0.40", // TODO upgrade or get rid of?
-		NTP:         "v0.0.2",
-		NTPChart:    FabricatorVersion,
+		K3s:                  "v1.32.4-k3s1",
+		Zot:                  "v2.1.1",
+		CertManager:          "v1.17.1",
+		K9s:                  "v0.50.5",
+		Toolbox:              "latest",  // TODO use specific version, move to fabricator repo
+		Reloader:             "v1.0.40", // TODO upgrade or get rid of?
+		NTP:                  "v0.0.2",
+		NTPChart:             FabricatorVersion,
+		ControllerProxy:      "v.1.11.2-hh2",
+		ControllerProxyChart: FabricatorVersion,
 	},
 	Fabricator: fabapi.FabricatorVersions{
 		API:            FabricatorVersion,
