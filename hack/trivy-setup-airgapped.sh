@@ -117,6 +117,12 @@ TEMP_DIR="/tmp/trivy-export-$"
 mkdir -p ${REPORTS_DIR}
 mkdir -p ${TEMP_DIR}
 
+# Clean up old scan reports to prevent accumulation
+echo "Cleaning up old scan reports..."
+# Remove all previous scan reports to avoid accumulation
+sudo find ${REPORTS_DIR} -type f -name "*.txt" -o -name "*.json" -o -name "*.sarif" | xargs rm -f 2>/dev/null || true
+echo "Previous scan reports cleaned up"
+
 # Cleanup function
 cleanup() {
     rm -rf ${TEMP_DIR}
@@ -523,4 +529,3 @@ echo
 echo -e "Reports will be saved to: /var/lib/trivy/reports/"
 echo -e "- *_critical.txt (Human readable HIGH/CRITICAL vulnerabilities)"
 echo -e "- *_all.json (Complete JSON data)"
-

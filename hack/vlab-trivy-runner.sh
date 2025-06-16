@@ -337,224 +337,38 @@ scan_vm() {
         scan_mode="airgapped"
     fi
 
-    echo "Generating SARIF files for each image..."
-    temp_sarifs=()
-    success_count=0
+    echo "Collecting all SARIF files from VM..."
+    mkdir -p "/tmp/sarif-collection-${vm_name}"
+    if ! $HHFAB_BIN vlab ssh -b -n "$vm_name" -- "sudo find /var/lib/trivy/reports -name '*_critical.sarif' -type f | xargs sudo tar czf /tmp/sarif-files.tar.gz -C / 2>/dev/null"; then
+        echo -e "${YELLOW}Failed to create SARIF archive on $vm_name, attempting fallback...${NC}"
+        # Fallback: Try to create an empty tar if no SARIF files exist
+        $HHFAB_BIN vlab ssh -b -n "$vm_name" -- "touch /tmp/empty.txt && sudo tar czf /tmp/sarif-files.tar.gz -C /tmp empty.txt && rm /tmp/empty.txt" || true
+    fi
 
-    for i in "${!image_array[@]}"; do
-        image="${image_array[$i]}"
-        if [ ! -z "$image" ] && [ "$image" != ":" ]; then
-            current=$((i + 1))
-            safe_name=$(echo "${image}" | tr '/:' '_')
-            echo "[$current/$image_count] Processing: $image"
+    if $HHFAB_BIN vlab ssh -b -n "$vm_name" -- "test -s /tmp/sarif-files.tar.gz" && $HHFAB_BIN vlab ssh -b -n "$vm_name" -- "cat /tmp/sarif-files.tar.gz" > "/tmp/sarif-files-${vm_name}.tar.gz"; then
+        mkdir -p "/tmp/sarif-collection-${vm_name}"
+        tar -xzf "/tmp/sarif-files-${vm_name}.tar.gz" -C "/tmp/sarif-collection-${vm_name}" || true
+        echo "Extracted SARIF files from VM"
 
-            if [ "$vm_name" = "$GATEWAY_VM" ]; then
-                echo "Generating SARIF from existing JSON scan results..."
+        # Find all SARIF files
+        sarif_files=()
+        while IFS= read -r -d '' file; do
+            sarif_files+=("$file")
+        done < <(find "/tmp/sarif-collection-${vm_name}" -name '*_critical.sarif' -type f -print0 2>/dev/null)
 
-                if $HHFAB_BIN vlab ssh -b -n "$vm_name" -- "
-                    # Find existing JSON result for this image
-                    JSON_FILE=\$(find /var/lib/trivy/reports -name \"*_$(echo $image | tr '/:' '_')_all.json\" | head -1) && \\
-                    if [ -f \"\$JSON_FILE\" ]; then \\
-                        echo \"Found existing scan result: \$JSON_FILE\" && \\
-                        # Export JSON to tarball
-                        sudo cat \"\$JSON_FILE\" > /tmp/scan_result.json && \\
-                        # Use jq to convert JSON to SARIF
-                        sudo jq --arg image_name \"$image\" '{
-                            \"\$schema\": \"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json\",
-                            \"version\": \"2.1.0\",
-                            \"runs\": [{
-                                \"tool\": {
-                                    \"driver\": {
-                                        \"name\": \"Trivy\",
-                                        \"informationUri\": \"https://github.com/aquasecurity/trivy\",
-                                        \"rules\": [
-                                            (.Results[]?.Vulnerabilities[]? // empty) |
-                                            {
-                                                \"id\": .VulnerabilityID,
-                                                \"name\": .VulnerabilityID,
-                                                \"shortDescription\": {
-                                                    \"text\": \"Vulnerability \\(.VulnerabilityID) in \\(.PkgName)\"
-                                                },
-                                                \"fullDescription\": {
-                                                    \"text\": \"\\(.Title) - \\(.VulnerabilityID) (\\(.Severity))\"
-                                                },
-                                                \"help\": {
-                                                    \"text\": \"\\(.Description)\",
-                                                    \"markdown\": \"\\(.Description)\"
-                                                },
-                                                \"properties\": {
-                                                    \"tags\": [
-                                                        \"security\",
-                                                        \"vulnerability\",
-                                                        .PkgName,
-                                                        .VulnerabilityID,
-                                                        .Severity | ascii_downcase
-                                                    ],
-                                                    \"security-severity\": (
-                                                        if .CVSS.score then
-                                                            .CVSS.score | tostring
-                                                        else
-                                                            if .Severity == \"CRITICAL\" then \"9.5\"
-                                                            elif .Severity == \"HIGH\" then \"8.0\"
-                                                            elif .Severity == \"MEDIUM\" then \"5.5\"
-                                                            elif .Severity == \"LOW\" then \"2.0\"
-                                                            else \"0.0\"
-                                                            end
-                                                        end
-                                                    )
-                                                },
-                                                \"defaultConfiguration\": {
-                                                    \"level\": (
-                                                        if .Severity == \"CRITICAL\" or .Severity == \"HIGH\" then \"error\"
-                                                        elif .Severity == \"MEDIUM\" then \"warning\"
-                                                        else \"note\"
-                                                        end
-                                                    )
-                                                }
-                                            }
-                                        ] | unique_by(.id),
-                                        \"version\": \"1.0.0\"
-                                    }
-                                },
-                                \"results\": [
-                                    (.Results[]?.Vulnerabilities[]? // empty) |
-                                    {
-                                        \"ruleId\": .VulnerabilityID,
-                                        \"level\": (
-                                            if .Severity == \"CRITICAL\" or .Severity == \"HIGH\" then \"error\"
-                                            elif .Severity == \"MEDIUM\" then \"warning\"
-                                            else \"note\"
-                                            end
-                                        ),
-                                        \"message\": {
-                                            \"text\": \"Vulnerability \\(.VulnerabilityID) in \\(.PkgName) - Severity: \\(.Severity)\"
-                                        },
-                                        \"locations\": [{
-                                            \"physicalLocation\": {
-                                                \"artifactLocation\": {
-                                                    \"uri\": (\$image_name + \"/\" + .PkgName)
-                                                },
-                                                \"region\": {
-                                                    \"startLine\": 1,
-                                                    \"endLine\": 1,
-                                                    \"startColumn\": 1,
-                                                    \"endColumn\": 1
-                                                }
-                                            },
-                                            \"message\": {
-                                                \"text\": \"Package: \\(.PkgName) - Version: \\(.InstalledVersion)\"
-                                            }
-                                        }]
-                                    }
-                                ],
-                                \"properties\": {
-                                    \"imageScanned\": \$image_name,
-                                    \"vulnerabilitiesFound\": ([.Results[]?.Vulnerabilities[]? // empty] | length),
-                                    \"scanTimestamp\": (.CreatedAt // \"unknown\"),
-                                    \"trivySchemaVersion\": (.SchemaVersion // 0),
-                                    \"scanSource\": \"json-converted\"
-                                }
-                            }]
-                        }' /tmp/scan_result.json > '/tmp/sarif_${safe_name}.sarif' && \\
-                        echo \"SARIF file generated successfully from JSON\"; \\
-                    else \\
-                        echo \"No existing scan result found for ${image}\" && exit 1; \\
-                    fi
-                "; then
-                    if $HHFAB_BIN vlab ssh -b -n "$vm_name" -- "test -f '/tmp/sarif_${safe_name}.sarif' && cat '/tmp/sarif_${safe_name}.sarif'" > "/tmp/sarif_${safe_name}.sarif"; then
-                        temp_sarifs+=("/tmp/sarif_${safe_name}.sarif")
-                        success_count=$((success_count + 1))
-                        echo "  ✓ SARIF generated for $image"
-                    else
-                        echo "  ✗ Failed to download SARIF for $image"
+        echo "Found ${#sarif_files[@]} SARIF files"
 
-                        echo "  Attempting fallback direct scan..."
-                        if $HHFAB_BIN vlab ssh -b -n "$vm_name" -- "
-                            if [[ \"$image\" == *\"$registry\"* ]]; then \\
-                                sudo DOCKER_CONFIG=/var/lib/trivy/.docker /var/lib/trivy/trivy image \\
-                                    --skip-db-update \\
-                                    --cache-dir /var/lib/trivy/cache \\
-                                    --severity HIGH,CRITICAL \\
-                                    --format sarif \\
-                                    --output '/tmp/sarif_${safe_name}.sarif' \\
-                                    --insecure \\
-                                    '$image'; \\
-                            else \\
-                                echo \"Skipping fallback for non-private image\" && exit 1; \\
-                            fi
-                        " && $HHFAB_BIN vlab ssh -b -n "$vm_name" -- "test -f '/tmp/sarif_${safe_name}.sarif' && cat '/tmp/sarif_${safe_name}.sarif'" > "/tmp/sarif_${safe_name}.sarif"; then
-                            temp_sarifs+=("/tmp/sarif_${safe_name}.sarif")
-                            success_count=$((success_count + 1))
-                            echo "  ✓ SARIF generated using fallback method"
-                        else
-                            echo "  ✗ Fallback method also failed"
-                            scan_errors=$((scan_errors + 1))
-                        fi
-                    fi
-                else
-                    echo "  ✗ Failed to generate SARIF for $image"
-                    scan_errors=$((scan_errors + 1))
+        if [ ${#sarif_files[@]} -gt 0 ]; then
+            echo "Consolidating ${#sarif_files[@]} SARIF files..."
+            consolidated_sarif="sarif-reports/trivy-consolidated-${vm_name}.sarif"
 
-                    if [[ "$image" == *"$registry"* ]]; then
-                        echo "  Attempting fallback direct scan..."
-                        if $HHFAB_BIN vlab ssh -b -n "$vm_name" -- "
-                            sudo DOCKER_CONFIG=/var/lib/trivy/.docker /var/lib/trivy/trivy image \\
-                                --skip-db-update \\
-                                --cache-dir /var/lib/trivy/cache \\
-                                --severity HIGH,CRITICAL \\
-                                --format sarif \\
-                                --output '/tmp/sarif_${safe_name}.sarif' \\
-                                --insecure \\
-                                '$image'
-                        " && $HHFAB_BIN vlab ssh -b -n "$vm_name" -- "test -f '/tmp/sarif_${safe_name}.sarif' && cat '/tmp/sarif_${safe_name}.sarif'" > "/tmp/sarif_${safe_name}.sarif"; then
-                            temp_sarifs+=("/tmp/sarif_${safe_name}.sarif")
-                            success_count=$((success_count + 1))
-                            echo "  ✓ SARIF generated using fallback method"
-                        else
-                            echo "  ✗ Fallback method also failed"
-                            scan_errors=$((scan_errors + 1))
-                        fi
-                    fi
-                fi
-            else
-                echo "Generating SARIF for image on $vm_name (online mode)..."
-                if $HHFAB_BIN vlab ssh -b -n "$vm_name" -- "
-                    sudo DOCKER_CONFIG=/var/lib/trivy/.docker /var/lib/trivy/trivy image \\
-                        --insecure \\
-                        --severity HIGH,CRITICAL \\
-                        --format sarif \\
-                        --output '/tmp/sarif_${safe_name}.sarif' \\
-                        '$image'
-                "; then
-                    if $HHFAB_BIN vlab ssh -n "$vm_name" -- "test -f '/tmp/sarif_${safe_name}.sarif' && cat '/tmp/sarif_${safe_name}.sarif'" > "/tmp/sarif_${safe_name}.sarif"; then
-                        temp_sarifs+=("/tmp/sarif_${safe_name}.sarif")
-                        success_count=$((success_count + 1))
-                        echo "  ✓ SARIF generated for $image"
-                    else
-                        echo "  ✗ Failed to download SARIF for $image"
-                        scan_errors=$((scan_errors + 1))
-                    fi
-                else
-                    echo "  ✗ Failed to generate SARIF for $image"
-                    scan_errors=$((scan_errors + 1))
-                fi
-            fi
-        fi
-    done
+            # Copy first file as base
+            cp "${sarif_files[0]}" "$consolidated_sarif"
 
-    if [ $success_count -gt 0 ]; then
-        echo "Merging $success_count SARIF files into consolidated report..."
-
-        consolidated_sarif="sarif-reports/trivy-consolidated-${vm_name}.sarif"
-
-        if [ ${#temp_sarifs[@]} -gt 0 ]; then
-            cp "${temp_sarifs[0]}" "$consolidated_sarif"
-
-            if [ ${#temp_sarifs[@]} -gt 1 ]; then
-                echo "Merging multiple SARIF files using jq..."
-
-                for ((i=1; i<${#temp_sarifs[@]}; i++)); do
-                    merge_file="${temp_sarifs[$i]}"
+            # Merge additional files if any
+            if [ ${#sarif_files[@]} -gt 1 ]; then
+                for ((i=1; i<${#sarif_files[@]}; i++)); do
+                    merge_file="${sarif_files[$i]}"
                     if [ -f "$merge_file" ]; then
                         jq -s '
                             .[0].runs[0].results += .[1].runs[0].results |
@@ -568,9 +382,7 @@ scan_vm() {
                 done
             fi
 
-            echo "✓ Consolidated SARIF created: trivy-consolidated-${vm_name}.sarif"
-            echo "✓ Contains vulnerabilities from $success_count/$image_count images"
-
+            # Add VM context information to consolidated SARIF
             echo "Adding VM context information..."
 
             total_critical=$(jq '[.runs[0].results[]? | select(.level == "error" and (.message.text | contains("CRITICAL")))? | select(. != null)] | length' "$consolidated_sarif" 2>/dev/null || echo 0)
@@ -660,17 +472,19 @@ scan_vm() {
             echo "  - Container images: $image_count"
             echo "  - Total vulnerabilities: $((total_critical + total_high + total_medium + total_low))"
             echo "  - Critical/High: $((total_critical + total_high))"
-        else
-            echo "✗ No valid SARIF files to consolidate"
-        fi
 
-        for temp_file in "${temp_sarifs[@]}"; do
-            rm -f "$temp_file"
-        done
+            echo "✓ Consolidated SARIF created: trivy-consolidated-${vm_name}.sarif"
+        else
+            echo "✗ No SARIF files found to consolidate"
+            scan_errors=$((scan_errors + 1))
+        fi
     else
-        echo "✗ No SARIF files generated successfully"
+        echo "✗ Failed to collect SARIF files from VM"
         scan_errors=$((scan_errors + 1))
     fi
+
+    # Clean up temp files
+    rm -rf "/tmp/sarif-collection-${vm_name}" "/tmp/sarif-files-${vm_name}.tar.gz"
 
     echo "Collecting scan results from $vm_name..."
     mkdir -p "$vm_results_dir"
@@ -705,15 +519,15 @@ scan_vm() {
         CONTROL_IMAGES_SCANNED=$local_images_scanned
     fi
 
-    if [ $success_count -gt 0 ]; then
+    if [ -f "sarif-reports/trivy-consolidated-${vm_name}.sarif" ]; then
         if [ $scan_errors -eq 0 ]; then
             echo -e "${GREEN}All scans for $vm_name completed successfully${NC}"
         else
-            echo -e "${YELLOW}$vm_name scans completed with $scan_errors errors, but $success_count successful scans were processed${NC}"
+            echo -e "${YELLOW}$vm_name scans completed with $scan_errors errors, but consolidated SARIF file was generated${NC}"
         fi
         return 0
     else
-        echo -e "${RED}$vm_name scans failed completely with $scan_errors errors${NC}"
+        echo -e "${RED}$vm_name scans failed - no consolidated SARIF file was generated${NC}"
         return 1
     fi
 }
@@ -738,10 +552,25 @@ else
     GATEWAY_RESULT=0
 fi
 
+# Merge SARIF files from both VMs if both were scanned
+if [ "$RUN_CONTROL" = true ] && [ "$RUN_GATEWAY" = true ]; then
+    if [ -f "sarif-reports/trivy-consolidated-${CONTROL_VM}.sarif" ] && [ -f "sarif-reports/trivy-consolidated-${GATEWAY_VM}.sarif" ]; then
+        echo -e "${YELLOW}Merging SARIF files from both VMs into a single report...${NC}"
+        
+        jq -s '
+            .[0].runs[0].results += .[1].runs[0].results |
+            .[0].runs[0].tool.driver.rules += (.[1].runs[0].tool.driver.rules // []) |
+            .[0].runs[0].tool.driver.rules |= unique_by(.id) |
+            .[0]
+        ' "sarif-reports/trivy-consolidated-${CONTROL_VM}.sarif" "sarif-reports/trivy-consolidated-${GATEWAY_VM}.sarif" > "sarif-reports/trivy-consolidated-all-vms.sarif"
+        
+        echo -e "${GREEN}Generated combined SARIF report: sarif-reports/trivy-consolidated-all-vms.sarif${NC}"
+    fi
+fi
+
 TOTAL_IMAGES_SCANNED=$((CONTROL_IMAGES_SCANNED + GATEWAY_IMAGES_SCANNED))
 TOTAL_CRITICAL_VULNS=$((CONTROL_CRITICAL_VULNS + GATEWAY_CRITICAL_VULNS))
 TOTAL_HIGH_VULNS=$((CONTROL_HIGH_VULNS + GATEWAY_HIGH_VULNS))
-TOTAL_CRITICAL_HIGH=$((TOTAL_CRITICAL_VULNS + TOTAL_HIGH_VULNS))
 
 echo ""
 echo -e "${GREEN}=== Security Scan Summary ===${NC}"
@@ -777,18 +606,14 @@ echo -e "${GREEN}=== Aggregated Scan Results ===${NC}"
 echo -e "Total container images scanned: $TOTAL_IMAGES_SCANNED"
 echo -e "Total Critical vulnerabilities: $TOTAL_CRITICAL_VULNS"
 echo -e "Total High vulnerabilities: $TOTAL_HIGH_VULNS"
-echo -e "Total Critical+High vulnerabilities: $TOTAL_CRITICAL_HIGH"
 
-sarif_count=$(find sarif-reports -name "*.sarif" -type f 2>/dev/null | wc -l)
 echo ""
 echo "Results directory: $RESULTS_DIR"
-echo "SARIF files generated: $sarif_count"
 echo "VLAB log: $VLAB_LOG"
 
 if [ ! -z "$GITHUB_STEP_SUMMARY" ] && [ -f "$GITHUB_STEP_SUMMARY" ]; then
     echo "## Security Scan Summary" >> $GITHUB_STEP_SUMMARY
     echo "" >> $GITHUB_STEP_SUMMARY
-    echo "- **SARIF files generated:** $sarif_count" >> $GITHUB_STEP_SUMMARY
 
     if [ "$RUN_CONTROL" = true ]; then
         echo "- **Control VM container images scanned:** $CONTROL_IMAGES_SCANNED" >> $GITHUB_STEP_SUMMARY
@@ -803,15 +628,19 @@ if [ ! -z "$GITHUB_STEP_SUMMARY" ] && [ -f "$GITHUB_STEP_SUMMARY" ]; then
     fi
 
     echo "- **Total images scanned:** $TOTAL_IMAGES_SCANNED" >> $GITHUB_STEP_SUMMARY
-    echo "- **Total Critical+High vulnerabilities:** $TOTAL_CRITICAL_HIGH" >> $GITHUB_STEP_SUMMARY
+    echo "- **Total Critical vulnerabilities:** $TOTAL_CRITICAL_VULNS" >> $GITHUB_STEP_SUMMARY
+    echo "- **Total High vulnerabilities:** $TOTAL_HIGH_VULNS" >> $GITHUB_STEP_SUMMARY
 
     echo "" >> $GITHUB_STEP_SUMMARY
     echo "Check the [Security tab](https://github.com/$GITHUB_REPOSITORY/security) for detailed vulnerability reports and [artifacts](https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID) for raw scan data." >> $GITHUB_STEP_SUMMARY
 fi
 
+# Count unique SARIF files - removed from output display
+VM_SARIF_COUNT=$(find sarif-reports -name "trivy-consolidated-*.sarif" -type f 2>/dev/null | wc -l)
+
 SUCCESS=true
 if [ "$ALLOW_PARTIAL_SUCCESS" = "true" ]; then
-    if [ $sarif_count -eq 0 ]; then
+    if [ $VM_SARIF_COUNT -eq 0 ]; then
         SUCCESS=false
     fi
 else
@@ -826,7 +655,6 @@ fi
 if [ "$SUCCESS" = true ]; then
     if [ "$RUN_CONTROL" = true ] && [ $CONTROL_RESULT -ne 0 ] || [ "$RUN_GATEWAY" = true ] && [ $GATEWAY_RESULT -ne 0 ]; then
         echo -e "${YELLOW}Security scan completed with some errors, but generated usable results${NC}"
-        echo -e "${YELLOW}Found $sarif_count SARIF files with vulnerability data${NC}"
     else
         echo -e "${GREEN}Security scan completed successfully${NC}"
     fi

@@ -121,6 +121,12 @@ CONTAINERD_ADDRESS="/run/k3s/containerd/containerd.sock"
 # Ensure reports directory exists
 mkdir -p ${REPORTS_DIR}
 
+# Clean up old scan reports to prevent accumulation
+echo "Cleaning up old scan reports..."
+# Remove all previous scan reports to avoid accumulation
+sudo find ${REPORTS_DIR} -type f -name "*.txt" -o -name "*.json" -o -name "*.sarif" | xargs rm -f 2>/dev/null || true
+echo "Previous scan reports cleaned up"
+
 # Function to scan a specific image and save results
 scan_image() {
     local image="$1"
