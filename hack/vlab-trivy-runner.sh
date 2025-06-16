@@ -358,7 +358,7 @@ scan_vm() {
                         echo \"Found existing scan result: \$JSON_FILE\" && \\
                         # Export JSON to tarball
                         sudo cat \"\$JSON_FILE\" > /tmp/scan_result.json && \\
-                        # Use jq to convert JSON to SARIF - ORIGINAL with minimal fixes
+                        # Use jq to convert JSON to SARIF
                         sudo jq --arg image_name \"$image\" '{
                             \"\$schema\": \"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json\",
                             \"version\": \"2.1.0\",
@@ -368,7 +368,7 @@ scan_vm() {
                                         \"name\": \"Trivy\",
                                         \"informationUri\": \"https://github.com/aquasecurity/trivy\",
                                         \"rules\": [
-                                            (if has(\"Results\") and (.Results | length > 0) then (.Results[]?.Vulnerabilities[]? // []) else [] end) | 
+                                            (.Results[]?.Vulnerabilities[]? // empty) |
                                             {
                                                 \"id\": .VulnerabilityID,
                                                 \"name\": .VulnerabilityID,
@@ -417,7 +417,7 @@ scan_vm() {
                                     }
                                 },
                                 \"results\": [
-                                    (if has(\"Results\") and (.Results | length > 0) then (.Results[]?.Vulnerabilities[]? // []) else [] end) | 
+                                    (.Results[]?.Vulnerabilities[]? // empty) |
                                     {
                                         \"ruleId\": .VulnerabilityID,
                                         \"level\": (
@@ -449,7 +449,7 @@ scan_vm() {
                                 ],
                                 \"properties\": {
                                     \"imageScanned\": \$image_name,
-                                    \"vulnerabilitiesFound\": ((if has(\"Results\") and (.Results | length > 0) then .Results[0].Vulnerabilities else [] end) | length),
+                                    \"vulnerabilitiesFound\": ([.Results[]?.Vulnerabilities[]? // empty] | length),
                                     \"scanTimestamp\": (.CreatedAt // \"unknown\"),
                                     \"trivySchemaVersion\": (.SchemaVersion // 0),
                                     \"scanSource\": \"json-converted\"
