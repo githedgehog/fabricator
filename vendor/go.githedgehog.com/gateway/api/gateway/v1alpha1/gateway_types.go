@@ -6,6 +6,7 @@ package v1alpha1
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/netip"
 
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -20,6 +21,8 @@ type GatewaySpec struct {
 	ProtocolIP string `json:"protocolIP,omitempty"`
 	// VTEP IP to be used by the gateway
 	VTEPIP string `json:"vtepIP,omitempty"`
+	// VTEP MAC address to be used by the gateway
+	VTEPMAC string `json:"vtepMAC,omitempty"`
 	// ASN is the ASN of the gateway
 	ASN uint32 `json:"asn,omitempty"`
 	// Interfaces is a map of interface names to their configurations
@@ -96,6 +99,13 @@ func (gw *Gateway) Validate(_ context.Context, _ kclient.Reader) error {
 	}
 	if !vtepIP.Addr().Is4() {
 		return fmt.Errorf("VTEPIP %s must be an IPv4 address", gw.Spec.VTEPIP) //nolint:goerr113
+	}
+
+	if gw.Spec.VTEPMAC == "" {
+		return fmt.Errorf("VTEPMAC must be set") //nolint:goerr113
+	}
+	if _, err := net.ParseMAC(gw.Spec.VTEPMAC); err != nil {
+		return fmt.Errorf("invalid VTEPMAC %s: %w", gw.Spec.VTEPMAC, err)
 	}
 
 	if gw.Spec.ASN == 0 {

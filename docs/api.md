@@ -510,6 +510,7 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `enable` _boolean_ |  |  |  |
 | `asn` _integer_ |  |  |  |
+| `mac` _string_ |  |  |  |
 
 
 #### GatewayVersions
