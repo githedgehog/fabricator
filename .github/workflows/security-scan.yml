@@ -65,49 +65,6 @@ jobs:
           echo "Starting security scan..."
           just security-scan
 
-      - name: Consolidate SARIF files for GitHub Security
-        if: always()
-        run: |
-          sarif_count=$(find sarif-reports -name "*.sarif" -type f 2>/dev/null | wc -l)
-
-          if [ "$sarif_count" -gt 0 ]; then
-            echo "Found $sarif_count SARIF files, consolidating..."
-
-            consolidated_file="sarif-reports/trivy-security-scan.sarif"
-            sarif_files=($(find sarif-reports -name "*.sarif" -type f))
-
-            if [ ${#sarif_files[@]} -eq 1 ]; then
-              mv "${sarif_files[0]}" "$consolidated_file"
-              echo "Single SARIF file renamed to trivy-security-scan.sarif"
-            elif [ ${#sarif_files[@]} -gt 1 ]; then
-              echo "Merging ${#sarif_files[@]} SARIF files into single consolidated file..."
-              cp "${sarif_files[0]}" "$consolidated_file"
-
-              for ((i=1; i<${#sarif_files[@]}; i++)); do
-                merge_file="${sarif_files[$i]}"
-                echo "Merging: $(basename "$merge_file")"
-                jq -s '
-                  .[0].runs[0].results += .[1].runs[0].results |
-                  .[0].runs[0].tool.driver.rules += (.[1].runs[0].tool.driver.rules // []) |
-                  .[0].runs[0].tool.driver.rules |= unique_by(.id) |
-                  .[0]
-                ' "$consolidated_file" "$merge_file" > "${consolidated_file}.tmp" && \
-                mv "${consolidated_file}.tmp" "$consolidated_file"
-              done
-
-              for file in "${sarif_files[@]}"; do
-                rm -f "$file"
-              done
-              echo "✓ All SARIF files merged into single consolidated report"
-            fi
-
-            echo "UPLOAD_SARIF=true" >> $GITHUB_ENV
-            echo "SARIF_FILE=$consolidated_file" >> $GITHUB_ENV
-          else
-            echo "No SARIF files found - skipping upload (GitHub will preserve previous state)"
-            echo "UPLOAD_SARIF=false" >> $GITHUB_ENV
-          fi
-
       - name: Upload SARIF file
         if: always() && env.UPLOAD_SARIF == 'true'
         uses: github/codeql-action/upload-sarif@v3
