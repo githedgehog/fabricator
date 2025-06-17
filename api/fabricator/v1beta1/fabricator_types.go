@@ -225,6 +225,7 @@ type SwitchUser struct {
 type GatewayConfig struct {
 	Enable bool   `json:"enable,omitempty"`
 	ASN    uint32 `json:"asn,omitempty"`
+	MAC    string `json:"mac,omitempty"`
 }
 
 type Versions struct {

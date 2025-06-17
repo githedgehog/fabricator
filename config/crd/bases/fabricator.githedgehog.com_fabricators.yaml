@@ -252,6 +252,8 @@ spec:
                         type: integer
                       enable:
                         type: boolean
+                      mac:
+                        type: string
                     type: object
                   registry:
                     properties:
