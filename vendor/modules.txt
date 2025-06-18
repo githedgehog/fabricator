@@ -1723,7 +1723,7 @@ go.githedgehog.com/fabric/pkg/util/uefiutil
 # go.githedgehog.com/fabric-bcm-ygot v0.4.0-4.4.2
 ## explicit; go 1.24.0
 go.githedgehog.com/fabric-bcm-ygot/pkg/oc
-# go.githedgehog.com/gateway v0.8.0 => /Users/frostman/workspace/hedgehog/gateway
+# go.githedgehog.com/gateway v0.9.0
 ## explicit; go 1.24.2
 go.githedgehog.com/gateway/api/gateway/v1alpha1
 go.githedgehog.com/gateway/api/gwint/v1alpha1
@@ -2815,4 +2815,3 @@ sigs.k8s.io/structured-merge-diff/v4/value
 sigs.k8s.io/yaml
 sigs.k8s.io/yaml/goyaml.v2
 # github.com/diskfs/go-diskfs => github.com/Frostman/go-diskfs v1.4.2-hh3
-# go.githedgehog.com/gateway => /Users/frostman/workspace/hedgehog/gateway
