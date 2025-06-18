@@ -1105,6 +1105,13 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 
 				slog.Debug("K8s API on control node is ready", "vm", vm.Name, "type", vm.Type)
 			}
+
+			cmd := "PATH=/opt/bin kubectl hhfab support dump -yv"
+			if err := ssh.StreamLog(ctx, cmd, "sdump", slog.Debug, 1*time.Minute); err != nil {
+				slog.Warn("Failed to support dump", "vm", vm.Name, "type", vm.Type, "err", err)
+
+				return fmt.Errorf("dumping support info: %w", err)
+			}
 		}
 	}
 
