@@ -8,8 +8,6 @@ replace github.com/diskfs/go-diskfs => github.com/Frostman/go-diskfs v1.4.2-hh3
 
 tool sigs.k8s.io/controller-tools/cmd/controller-gen
 
-replace go.githedgehog.com/gateway => /Users/frostman/workspace/hedgehog/gateway
-
 require (
 	dario.cat/mergo v1.0.2
 	github.com/AlekSi/pointer v1.2.0
@@ -42,7 +40,7 @@ require (
 	github.com/vbauerster/mpb/v8 v8.10.2
 	github.com/vishvananda/netlink v1.3.1
 	go.githedgehog.com/fabric v0.76.0
-	go.githedgehog.com/gateway v0.8.0
+	go.githedgehog.com/gateway v0.9.0
 	golang.org/x/crypto v0.38.0
 	golang.org/x/mod v0.24.0
 	golang.org/x/sync v0.15.0
