@@ -27,6 +27,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apiextv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	kmeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	metricsapi "k8s.io/metrics/pkg/apis/metrics/v1beta1"
@@ -217,6 +218,12 @@ func collectKubeObjects(ctx context.Context, kube kclient.Reader, scheme *runtim
 		objListValue := reflect.New(objListType)
 		objList := objListValue.Interface().(kclient.ObjectList)
 		if err := kube.List(ctx, objList); err != nil {
+			if kmeta.IsNoMatchError(err) {
+				slog.Debug("Skipping Kube resource, no match", "gvk", gvk.String(), "err", err)
+
+				continue
+			}
+
 			return fmt.Errorf("listing %s: %w", gvk.String(), err)
 		}
 
