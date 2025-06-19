@@ -89,10 +89,6 @@ var specInterfaceEnforcer = &DefaultValueEnforcer[string, *dozer.SpecInterface]{
 			return errors.Wrap(err, "failed to handle interface switched trunk")
 		}
 
-		if err := specInterfaceNATZoneEnforcer.Handle(basePath, name, actual, desired, actions); err != nil {
-			return errors.Wrap(err, "failed to handle interface NAT zone")
-		}
-
 		if err := specInterfacesPortChannelSwitchedAccessEnforcer.Handle(basePath, name, actual, desired, actions); err != nil {
 			return errors.Wrap(err, "failed to handle port channel switched access")
 		}
@@ -183,9 +179,7 @@ var marshalSpecInterfaceBaseEnforcer = func(name string, value *dozer.SpecInterf
 	if isVLAN(name) {
 		val.RoutedVlan = &oc.OpenconfigInterfaces_Interfaces_Interface_RoutedVlan{
 			Ipv4: &oc.OpenconfigInterfaces_Interfaces_Interface_RoutedVlan_Ipv4{
-				Config: &oc.OpenconfigInterfaces_Interfaces_Interface_RoutedVlan_Ipv4_Config{
-					Enabled: pointer.To(true),
-				},
+				Config: &oc.OpenconfigInterfaces_Interfaces_Interface_RoutedVlan_Ipv4_Config{},
 			},
 		}
 	}
@@ -417,24 +411,6 @@ var specInterfaceEthernetSwitchedTrunkEnforcer = &DefaultValueEnforcer[string, *
 	},
 }
 
-var specInterfaceNATZoneEnforcer = &DefaultValueEnforcer[string, *dozer.SpecInterface]{
-	Summary:      "Interface %s NAT zone",
-	Getter:       func(_ string, value *dozer.SpecInterface) any { return value.NATZone },
-	Path:         "/nat-zone",
-	NoReplace:    true,
-	UpdateWeight: ActionWeightInterfaceNATZoneUpdate,
-	DeleteWeight: ActionWeightInterfaceNATZoneDelete,
-	Marshal: func(_ string, value *dozer.SpecInterface) (ygot.ValidatedGoStruct, error) {
-		return &oc.OpenconfigInterfaces_Interfaces_Interface{
-			NatZone: &oc.OpenconfigInterfaces_Interfaces_Interface_NatZone{
-				Config: &oc.OpenconfigInterfaces_Interfaces_Interface_NatZone_Config{
-					NatZone: value.NATZone,
-				},
-			},
-		}, nil
-	},
-}
-
 var specInterfacesPortChannelSwitchedAccessEnforcer = &DefaultValueEnforcer[string, *dozer.SpecInterface]{
 	Summary: "PortChannel %s Switched Access VLAN",
 	Skip:    func(name string, _, _ *dozer.SpecInterface) bool { return !isPortChannel(name) },
@@ -651,7 +627,7 @@ func unmarshalOCInterfaces(agent *agentapi.Agent, ocVal *oc.OpenconfigInterfaces
 					}
 
 					if ocIface.RoutedVlan.Ipv4.Config != nil {
-						iface.Enabled = ocIface.RoutedVlan.Ipv4.Config.Enabled
+						iface.Enabled = pointer.To(true) // just to keep track of the fact that there is a config for it
 					}
 				}
 				if ocIface.RoutedVlan.Ipv4.SagIpv4 != nil && ocIface.RoutedVlan.Ipv4.SagIpv4.Config != nil {
@@ -694,12 +670,6 @@ func unmarshalOCInterfaces(agent *agentapi.Agent, ocVal *oc.OpenconfigInterfaces
 				return nil, errors.Wrapf(err, "failed to unmarshal trunk VLANs")
 			}
 			iface.AccessVLAN = ocIface.Aggregation.SwitchedVlan.Config.AccessVlan
-		}
-
-		if ocIface.NatZone != nil && ocIface.NatZone.Config != nil {
-			if ocIface.NatZone.Config.NatZone != nil && *ocIface.NatZone.Config.NatZone != 0 {
-				iface.NATZone = ocIface.NatZone.Config.NatZone
-			}
 		}
 
 		if isPhysical(name) && iface.Enabled != nil && !*iface.Enabled && (iface.Description == nil || *iface.Description == "") {

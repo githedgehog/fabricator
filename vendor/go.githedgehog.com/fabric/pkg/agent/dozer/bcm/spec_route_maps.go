@@ -53,7 +53,11 @@ var specRouteMapEnforcer = &DefaultValueEnforcer[string, *dozer.SpecRouteMap]{
 }
 
 var specRouteMapBaseEnforcer = &DefaultValueEnforcer[string, *dozer.SpecRouteMap]{
-	Summary:      "Route Maps Base %s",
+	Summary:   "Route Maps Base %s",
+	NoReplace: true, // we don't want to replace the whole route map, just update the statements
+	Getter: func(name string, value *dozer.SpecRouteMap) any {
+		return name // we do only care about the name of the route map
+	},
 	UpdateWeight: ActionWeightRouteMapUpdate,
 	DeleteWeight: ActionWeightRouteMapDelete,
 	Marshal: func(name string, _ *dozer.SpecRouteMap) (ygot.ValidatedGoStruct, error) {
@@ -89,6 +93,13 @@ var specRouteMapStatementEnforcer = &DefaultValueEnforcer[string, *dozer.SpecRou
 			}
 
 			conditions.Config.InstallProtocolEq = oc.OpenconfigPolicyTypes_INSTALL_PROTOCOL_TYPE_DIRECTLY_CONNECTED
+		}
+		if statement.Conditions.AttachedHost != nil && *statement.Conditions.AttachedHost {
+			if conditions.Config == nil {
+				conditions.Config = &oc.OpenconfigRoutingPolicy_RoutingPolicy_PolicyDefinitions_PolicyDefinition_Statements_Statement_Conditions_Config{}
+			}
+
+			conditions.Config.InstallProtocolEq = oc.OpenconfigPolicyTypes_INSTALL_PROTOCOL_TYPE_ATTACHED_HOST
 		}
 		if statement.Conditions.MatchPrefixList != nil {
 			if conditions.MatchPrefixSet == nil {
@@ -256,8 +267,16 @@ func unmarshalOCRouteMaps(ocVal *oc.OpenconfigRoutingPolicy_RoutingPolicy) (map[
 		for _, statement := range ocRouteMap.Statements.Statement.Values() {
 			conditions := dozer.SpecRouteMapConditions{}
 			if statement.Conditions != nil {
-				if statement.Conditions.Config != nil && statement.Conditions.Config.InstallProtocolEq == oc.OpenconfigPolicyTypes_INSTALL_PROTOCOL_TYPE_DIRECTLY_CONNECTED {
-					conditions.DirectlyConnected = pointer.To(true)
+				if statement.Conditions.Config != nil {
+					if statement.Conditions.Config.InstallProtocolEq == oc.OpenconfigPolicyTypes_INSTALL_PROTOCOL_TYPE_DIRECTLY_CONNECTED {
+						conditions.DirectlyConnected = pointer.To(true)
+					} else if statement.Conditions.Config.InstallProtocolEq == oc.OpenconfigPolicyTypes_INSTALL_PROTOCOL_TYPE_ATTACHED_HOST {
+						conditions.AttachedHost = pointer.To(true)
+					}
+
+					if statement.Conditions.Config.CallPolicy != nil {
+						conditions.Call = statement.Conditions.Config.CallPolicy
+					}
 				}
 				if statement.Conditions.MatchPrefixSet != nil && statement.Conditions.MatchPrefixSet.Config != nil && statement.Conditions.MatchPrefixSet.Config.PrefixSet != nil {
 					conditions.MatchPrefixList = statement.Conditions.MatchPrefixSet.Config.PrefixSet
@@ -272,9 +291,6 @@ func unmarshalOCRouteMaps(ocVal *oc.OpenconfigRoutingPolicy_RoutingPolicy) (map[
 						conditions.MatchCommunityList = statement.Conditions.BgpConditions.Config.CommunitySet
 						conditions.MatchNextHopPrefixList = statement.Conditions.BgpConditions.Config.NextHopSet
 					}
-				}
-				if statement.Conditions.Config != nil && statement.Conditions.Config.CallPolicy != nil {
-					conditions.Call = statement.Conditions.Config.CallPolicy
 				}
 				if statement.Conditions.MatchSrcNetworkInstance != nil && statement.Conditions.MatchSrcNetworkInstance.Config != nil {
 					conditions.MatchSourceVRF = statement.Conditions.MatchSrcNetworkInstance.Config.Name

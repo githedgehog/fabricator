@@ -16,6 +16,7 @@ package dozer
 
 import (
 	"context"
+	"slices"
 	"sort"
 	"strings"
 
@@ -61,7 +62,6 @@ type Spec struct {
 	PrefixLists        map[string]*SpecPrefixList        `json:"prefixLists,omitempty"`
 	CommunityLists     map[string]*SpecCommunityList     `json:"communityLists,omitempty"`
 	DHCPRelays         map[string]*SpecDHCPRelay         `json:"dhcpRelays,omitempty"`
-	NATs               map[uint32]*SpecNAT               `json:"nats,omitempty"`
 	ACLs               map[string]*SpecACL               `json:"acls,omitempty"`
 	ACLInterfaces      map[string]*SpecACLInterface      `json:"aclInterfaces,omitempty"`
 	VXLANTunnels       map[string]*SpecVXLANTunnel       `json:"vxlanTunnels,omitempty"`
@@ -112,7 +112,6 @@ type SpecInterface struct {
 	Description        *string                      `json:"description,omitempty"`
 	Enabled            *bool                        `json:"enabled,omitempty"`
 	PortChannel        *string                      `json:"portChannel,omitempty"`
-	NATZone            *uint8                       `json:"natZone,omitempty"`
 	AccessVLAN         *uint16                      `json:"accessVLAN,omitempty"`
 	TrunkVLANs         []string                     `json:"trunkVLANs,omitempty"`
 	MTU                *uint16                      `json:"mtu,omitempty"`
@@ -154,6 +153,7 @@ type SpecVRF struct {
 	StaticRoutes     map[string]*SpecVRFStaticRoute     `json:"staticRoutes,omitempty"`
 	EthernetSegments map[string]*SpecVRFEthernetSegment `json:"ethernetSegments,omitempty"`
 	EVPNMH           SpecVRFEVPNMH                      `json:"evpnMH,omitempty"`
+	AttachedHosts    map[string]*SpecVRFAttachedHost    `json:"attachedHosts,omitempty"`
 }
 
 type SpecVRFInterface struct{}
@@ -227,6 +227,8 @@ type SpecVRFEVPNMH struct {
 	StartupDelay *uint32 `json:"startupDelay,omitempty"`
 }
 
+type SpecVRFAttachedHost struct{}
+
 type SpecRouteMap struct {
 	Statements map[string]*SpecRouteMapStatement `json:"statements,omitempty"`
 }
@@ -239,6 +241,7 @@ type SpecRouteMapStatement struct {
 }
 
 type SpecRouteMapConditions struct {
+	AttachedHost           *bool   `json:"attachedHost,omitempty"`
 	DirectlyConnected      *bool   `json:"directlyConnected,omitempty"`
 	MatchEVPNDefaultRoute  *bool   `json:"matchEvpnDefaultRoute,omitempty"`
 	MatchEVPNVNI           *uint32 `json:"matchEvpnVni,omitempty"`
@@ -284,8 +287,9 @@ const (
 )
 
 const (
-	SpecVRFBGPTableConnectionConnected = "connected"
-	SpecVRFBGPTableConnectionStatic    = "static"
+	SpecVRFBGPTableConnectionConnected    = "connected"
+	SpecVRFBGPTableConnectionStatic       = "static"
+	SpecVRFBGPTableConnectionAttachedHost = "attachedhost"
 )
 
 type SpecVRFBGPImportVRF struct{}
@@ -296,35 +300,6 @@ type SpecDHCPRelay struct {
 	LinkSelect      bool     `json:"linkSelect,omitempty"`
 	VRFSelect       bool     `json:"vrfSelect,omitempty"`
 }
-
-type SpecNAT struct {
-	Enable   *bool                      `json:"enable,omitempty"`
-	Pools    map[string]*SpecNATPool    `json:"pools,omitempty"`
-	Bindings map[string]*SpecNATBinding `json:"bindings,omitempty"`
-	Static   map[string]*SpecNATEntry   `json:"static,omitempty"` // external -> internal
-}
-
-type SpecNATPool struct {
-	Range *string `json:"range,omitempty"`
-}
-
-type SpecNATBinding struct {
-	Pool *string     `json:"pool,omitempty"`
-	Type SpecNATType `json:"type,omitempty"`
-}
-
-type SpecNATEntry struct {
-	InternalAddress *string     `json:"internalAddress,omitempty"`
-	Type            SpecNATType `json:"type,omitempty"`
-}
-
-type SpecNATType string
-
-const (
-	SpecNATTypeUnset SpecNATType = ""
-	SpecNATTypeDNAT  SpecNATType = "DNAT"
-	SpecNATTypeSNAT  SpecNATType = "SNAT"
-)
 
 type SpecACL struct {
 	Description *string                  `json:"description,omitempty"`
@@ -425,6 +400,10 @@ func (s *Spec) Normalize() {
 			}
 		}
 	}
+
+	for _, comm := range s.CommunityLists {
+		slices.Sort(comm.Members)
+	}
 }
 
 func (s *Spec) CleanupSensetive() {
@@ -492,16 +471,13 @@ var (
 	_ SpecPart = (*SpecVRFTableConnection)(nil)
 	_ SpecPart = (*SpecVRFStaticRoute)(nil)
 	_ SpecPart = (*SpecVRFEthernetSegment)(nil)
+	_ SpecPart = (*SpecVRFAttachedHost)(nil)
 	_ SpecPart = (*SpecRouteMap)(nil)
 	_ SpecPart = (*SpecRouteMapStatement)(nil)
 	_ SpecPart = (*SpecPrefixList)(nil)
 	_ SpecPart = (*SpecPrefixListEntry)(nil)
 	_ SpecPart = (*SpecCommunityList)(nil)
 	_ SpecPart = (*SpecDHCPRelay)(nil)
-	_ SpecPart = (*SpecNAT)(nil)
-	_ SpecPart = (*SpecNATPool)(nil)
-	_ SpecPart = (*SpecNATBinding)(nil)
-	_ SpecPart = (*SpecNATEntry)(nil)
 	_ SpecPart = (*SpecACL)(nil)
 	_ SpecPart = (*SpecACLEntry)(nil)
 	_ SpecPart = (*SpecACLInterface)(nil)
@@ -603,6 +579,10 @@ func (s *SpecVRFEthernetSegment) IsNil() bool {
 	return s == nil
 }
 
+func (s *SpecVRFAttachedHost) IsNil() bool {
+	return s == nil
+}
+
 func (s *SpecRouteMap) IsNil() bool {
 	return s == nil
 }
@@ -624,22 +604,6 @@ func (s *SpecCommunityList) IsNil() bool {
 }
 
 func (s *SpecDHCPRelay) IsNil() bool {
-	return s == nil
-}
-
-func (s *SpecNAT) IsNil() bool {
-	return s == nil
-}
-
-func (s *SpecNATPool) IsNil() bool {
-	return s == nil
-}
-
-func (s *SpecNATBinding) IsNil() bool {
-	return s == nil
-}
-
-func (s *SpecNATEntry) IsNil() bool {
 	return s == nil
 }
 
