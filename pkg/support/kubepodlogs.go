@@ -37,7 +37,9 @@ func collectPodLogs(ctx context.Context, dump *Dump) error {
 			func(c corev1.Container, _ int) string { return c.Name }) {
 			current, err := getPodContainerLogs(ctx, clientset, pod.Namespace, pod.Name, container)
 			if err != nil {
-				return fmt.Errorf("getting current pod %s container %s logs: %w", pod.Name, container, err)
+				slog.Warn("Error getting current pod container logs, skipping", "pod", pod.Name, "container", container, "namespace", pod.Namespace, "err", err)
+
+				continue
 			}
 
 			if _, ok := logs[pod.Namespace]; !ok {
