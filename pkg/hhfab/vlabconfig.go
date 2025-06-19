@@ -893,7 +893,7 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 					// TODO use consts and enable for other control VMs
 					netdev += ",hostfwd=tcp:0.0.0.0:6443-:6443,hostfwd=tcp:0.0.0.0:31000-:31000"
 				}
-				if vm.Type == VMTypeControl && opts.ControlsRestricted || vm.Type == VMTypeServer && opts.ServersRestricted {
+				if vm.Type == VMTypeControl && opts.ControlsRestricted {
 					netdev += ",restrict=yes"
 				}
 			} else if nicType == NICTypeManagement {
