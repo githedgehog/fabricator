@@ -34,6 +34,38 @@ systemd:
         [Install]
         WantedBy=multi-user.target
 
+    - name: frr.service
+      enabled: true
+      contents: |
+        [Unit]
+        Description=FRRouting Container
+        After=docker.service network-online.target
+        Requires=docker.service
+
+        [Service]
+        Type=simple
+        ExecStartPre=/usr/bin/mkdir -p /etc/frr /var/run/frr /var/tmp/frr
+        ExecStartPre=/usr/bin/chown -R 100:100 /etc/frr /var/run/frr /var/tmp/frr
+        ExecStart=/usr/bin/docker run --name=frr --rm --network=host --privileged -v /etc/frr:/etc/frr:rw -v /var/run/frr:/var/run/frr:rw -v /var/tmp/frr:/var/tmp/frr:rw quay.io/frrouting/frr:10.3.1
+        ExecStop=/usr/bin/docker stop frr
+        Restart=on-failure
+        RestartSec=5
+
+        [Install]
+        WantedBy=multi-user.target
+
+    - name: frr-reload.service
+      enabled: false
+      contents: |
+        [Unit]
+        Description=Reload FRRouting configuration
+        Requisite=frr.service
+        After=frr.service
+        Type=oneshot
+
+        [Service]
+        ExecStart=/usr/bin/docker exec frr /usr/lib/frr/frr-reload
+
 storage:
   files:
     - path: /etc/flatcar/update.conf
@@ -114,3 +146,90 @@ storage:
 
           [Link]
           Name=enp2s2
+
+    - path: /etc/frr/frr.conf
+      mode: 0644
+      user:
+        id: 100
+      group:
+        id: 100
+      contents:
+        inline: |
+          hostname {{ .Hostname}}
+          log syslog informational
+          log file /var/run/frr/frr.log debug
+          !
+          line vty
+
+    - path: /etc/frr/vtysh.conf
+      mode: 0644
+      user:
+        id: 100
+      group:
+        id: 100
+      contents:
+        inline: |
+          service integrated-vtysh-config
+
+    - path: /etc/frr/daemons
+      mode: 0644
+      user:
+        id: 100
+      group:
+        id: 100
+      contents:
+        inline: |
+          zebra=yes
+          bgpd=yes
+          mgmtd=yes
+          staticd=yes
+          ospfd=no
+          ospf6d=no
+          ripd=no
+          ripngd=no
+          isisd=no
+          pimd=no
+          ldpd=no
+          nhrpd=no
+          eigrpd=no
+          babeld=no
+          sharpd=no
+          pbrd=no
+          bfdd=no
+          fabricd=no
+          #
+          vtysh_enable=yes
+          zebra_options="   -A 127.0.0.1 -s 90000000"
+          bgpd_options="    -A 127.0.0.1"
+          ospfd_options="   -A 127.0.0.1"
+          ospf6d_options="  -A ::1"
+          ripd_options="    -A 127.0.0.1"
+          ripngd_options="  -A ::1"
+          isisd_options="   -A 127.0.0.1"
+          pimd_options="    -A 127.0.0.1"
+          ldpd_options="    -A 127.0.0.1"
+          mgmtd_options="   -A 127.0.0.1"
+          nhrpd_options="   -A 127.0.0.1"
+          eigrpd_options="  -A 127.0.0.1"
+          babeld_options="  -A 127.0.0.1"
+          sharpd_options="  -A 127.0.0.1"
+          staticd_options=" -A 127.0.0.1"
+          pbrd_options="    -A 127.0.0.1"
+          bfdd_options="    -A 127.0.0.1"
+          fabricd_options=" -A 127.0.0.1"
+          #
+          frr_global_options="--limit-fds 100000"
+
+    - path: /opt/hedgehog/vtysh
+      mode: 0755
+      contents:
+        inline: |
+          #!/bin/bash
+          exec /usr/bin/docker exec -it frr vtysh "$@"
+
+    - path: /etc/profile.d/hedgehog-path.sh
+      mode: 0755
+      contents:
+        inline: |
+          #!/bin/bash
+          export PATH=/opt/hedgehog:$PATH
