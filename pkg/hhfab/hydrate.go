@@ -821,6 +821,7 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 				}
 				gw.Spec.Interfaces[link.Gateway.LocalPortName()] = gwapi.GatewayInterface{
 					IPs: []string{link.Gateway.IP},
+					MTU: fabric.MTU,
 				}
 
 				spineIP, err := netip.ParsePrefix(link.Spine.IP)
