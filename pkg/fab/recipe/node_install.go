@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"go.githedgehog.com/fabric/pkg/util/logutil"
@@ -59,6 +60,13 @@ func (c *NodeInstall) Run(ctx context.Context) error {
 
 	if err := c.joinK8s(ctx); err != nil {
 		return fmt.Errorf("joining k8s cluster: %w", err)
+	}
+
+	// TODO remove after dataplane takes care of it
+	if slices.Contains(c.Node.Spec.Roles, fabapi.NodeRoleGateway) {
+		if err := c.prepForDataplane(ctx); err != nil {
+			return fmt.Errorf("preparing node for dataplane: %w", err)
+		}
 	}
 
 	return nil
@@ -140,6 +148,24 @@ func (c *NodeInstall) joinK8s(ctx context.Context) error {
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("running k3s install: %w", err)
+	}
+
+	return nil
+}
+
+func (c *NodeInstall) prepForDataplane(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, 1*time.Minute)
+	defer cancel()
+
+	slog.Debug("Preparing node for dataplane (iptables drop udp)")
+
+	cmd := exec.CommandContext(ctx, "iptables", "-I", "INPUT", "1", "-p", "udp", "-j", "DROP")
+	cmd.Dir = c.WorkDir
+	cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "iptables: ")
+	cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "iptables: ")
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("running iptables drop udp: %w", err)
 	}
 
 	return nil
