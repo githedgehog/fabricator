@@ -482,7 +482,7 @@ jobs:
     needs:
       - test
       - builds
-    timeout-minutes: 250
+    timeout-minutes: 360
 
     strategy:
       fail-fast: false
