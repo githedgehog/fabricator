@@ -21,6 +21,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/openconfig/gnmic/api"
 	"github.com/openconfig/ygot/ygot"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
@@ -655,7 +656,7 @@ var specVRFAttachedHostEnforcer = &DefaultValueEnforcer[string, *dozer.SpecVRFAt
 
 func loadActualVRFs(ctx context.Context, client *gnmi.Client, spec *dozer.Spec) error {
 	ocVal := &oc.OpenconfigNetworkInstance_NetworkInstances{}
-	err := client.Get(ctx, "/network-instances/network-instance", ocVal)
+	err := client.Get(ctx, "/network-instances/network-instance", ocVal, api.DataTypeCONFIG())
 	if err != nil {
 		return errors.Wrapf(err, "failed to read vrfs")
 	}
@@ -680,7 +681,7 @@ func unmarshalOCVRFs(ocVal *oc.OpenconfigNetworkInstance_NetworkInstances) (map[
 		}
 
 		interfaces := map[string]*dozer.SpecVRFInterface{}
-		if ocVRF.Interfaces != nil && name != "default" { // all interfaces are in the default VRF implicitly
+		if ocVRF.Interfaces != nil && name != VRFDefault { // all interfaces are in the default VRF implicitly
 			for ifaceName := range ocVRF.Interfaces.Interface {
 				interfaces[ifaceName] = &dozer.SpecVRFInterface{}
 			}
@@ -933,7 +934,7 @@ func unmarshalOCVRFs(ocVal *oc.OpenconfigNetworkInstance_NetworkInstances) (map[
 			}
 
 			// only get ethernet segments from the default VRF
-			if name == "default" && ocVRF.Evpn.EthernetSegments != nil {
+			if name == VRFDefault && ocVRF.Evpn.EthernetSegments != nil {
 				for name, ocES := range ocVRF.Evpn.EthernetSegments.EthernetSegment {
 					if ocES.Config == nil {
 						continue
