@@ -36,10 +36,10 @@ require (
 	github.com/sethvargo/go-password v0.3.1
 	github.com/shirou/gopsutil/v3 v3.24.5
 	github.com/stretchr/testify v1.10.0
-	github.com/urfave/cli/v2 v2.27.6
+	github.com/urfave/cli/v2 v2.27.7
 	github.com/vbauerster/mpb/v8 v8.10.2
 	github.com/vishvananda/netlink v1.3.1
-	go.githedgehog.com/fabric v0.77.1
+	go.githedgehog.com/fabric v0.78.0
 	go.githedgehog.com/gateway v0.10.0
 	golang.org/x/crypto v0.38.0
 	golang.org/x/mod v0.24.0
@@ -69,7 +69,7 @@ require (
 	cloud.google.com/go/storage v1.50.0 // indirect
 	github.com/0x5a17ed/itkit v0.7.0 // indirect
 	github.com/0x5a17ed/uefi v0.7.0 // indirect
-	github.com/BurntSushi/toml v1.4.0 // indirect
+	github.com/BurntSushi/toml v1.5.0 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp v1.27.0 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric v0.48.1 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/resourcemapping v0.48.1 // indirect
@@ -130,7 +130,7 @@ require (
 	github.com/coreos/go-systemd/v22 v22.5.0 // indirect
 	github.com/coreos/ignition/v2 v2.21.0 // indirect
 	github.com/coreos/vcontext v0.0.0-20230201181013-d72178a18687 // indirect
-	github.com/cpuguy83/go-md2man/v2 v2.0.6 // indirect
+	github.com/cpuguy83/go-md2man/v2 v2.0.7 // indirect
 	github.com/cyberphone/json-canonicalization v0.0.0-20231217050601-ba74d44ecf5f // indirect
 	github.com/cyphar/filepath-securejoin v0.3.4 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
@@ -257,8 +257,8 @@ require (
 	github.com/nwaples/rardecode/v2 v2.1.0 // indirect
 	github.com/oklog/ulid v1.3.1 // indirect
 	github.com/olekukonko/errors v0.0.0-20250405072817-4e6d85265da6 // indirect
-	github.com/olekukonko/ll v0.0.8-0.20250516010636-22ea57d81985 // indirect
-	github.com/olekukonko/tablewriter v1.0.6 // indirect
+	github.com/olekukonko/ll v0.0.8 // indirect
+	github.com/olekukonko/tablewriter v1.0.7 // indirect
 	github.com/openconfig/gnmi v0.14.0 // indirect
 	github.com/openconfig/gnmic v0.32.0 // indirect
 	github.com/openconfig/goyang v1.6.2 // indirect
