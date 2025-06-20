@@ -42,7 +42,9 @@ const (
 	CtlBinName     = "hhfctl"
 	CtlDestBinName = "kubectl-fabric"
 
-	MTU = 9100 // TODO actually use in in the fabric, make configurable
+	MTU                   = 9100 // TODO actually use in in the fabric, make configurable
+	ServerFacingMTUOffset = 64   // TODO use in the fabric, make configurable
+	ServerFacingMTU       = MTU - ServerFacingMTUOffset
 )
 
 //go:embed ctrl_values.tmpl.yaml
@@ -241,8 +243,8 @@ func GetFabricConfig(f fabapi.Fabricator) (*meta.FabricConfig, error) {
 		FabricMode:               f.Spec.Config.Fabric.Mode,
 		BaseVPCCommunity:         f.Spec.Config.Fabric.BaseVPCCommunity,
 		VPCLoopbackSubnet:        string(f.Spec.Config.Fabric.VPCWorkaroundSubnet),
-		FabricMTU:                MTU, // TODO use
-		ServerFacingMTUOffset:    64,  // TODO use
+		FabricMTU:                MTU,                   // TODO use
+		ServerFacingMTUOffset:    ServerFacingMTUOffset, // TODO use
 		ESLAGMACBase:             f.Spec.Config.Fabric.ESLAGMACBase,
 		ESLAGESIPrefix:           f.Spec.Config.Fabric.ESLAGESIPrefix,
 		AlloyRepo:                comp.JoinURLParts(registry, comp.RegistryPrefix, AlloyRef),
