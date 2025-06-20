@@ -864,6 +864,7 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 		nextVTEPIP = nextVTEPIP.Next()
 
 		gw.Spec.VTEPMAC = "CA:FE:BA:BE:01:02" // TODO replace with properly generated or configured MAC address
+		gw.Spec.VTEPMTU = fabric.ServerFacingMTU
 
 		if err := kube.Update(ctx, &gw); err != nil {
 			return fmt.Errorf("updating gateway %s: %w", gw.Name, err)
