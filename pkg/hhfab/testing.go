@@ -1277,7 +1277,7 @@ func IsSubnetReachable(ctx context.Context, kube kclient.Reader, source, dest st
 		}
 
 		if ok {
-			slog.Debug("Subnets are reachable through gateway", "source", sourceVPC+"/"+source, "dest", destVPC+"/"+dest)
+			slog.Debug("Subnets are reachable through gateway", "source", source, "dest", dest)
 
 			return true, nil
 		}
@@ -1319,11 +1319,8 @@ func IsSubnetReachableWithGateway(ctx context.Context, kube kclient.Reader, vpc1
 	if err := kube.List(ctx, &peerings,
 		kclient.InNamespace(kmetav1.NamespaceDefault),
 		kclient.MatchingLabels{
-			// TODO use it instead when GW is released
-			// gwapi.ListLabelVPC(vpc1Name): gwapi.ListLabelValue,
-			// gwapi.ListLabelVPC(vpc2Name): gwapi.ListLabelValue,
-			"vpc.gateway.githedgehog.com/" + vpc1Name: "true",
-			"vpc.gateway.githedgehog.com/" + vpc2Name: "true",
+			gwapi.ListLabelVPC(vpc1Name): gwapi.ListLabelValue,
+			gwapi.ListLabelVPC(vpc2Name): gwapi.ListLabelValue,
 		},
 	); err != nil {
 		return false, fmt.Errorf("listing peerings between VPCs %s and %s: %w", vpc1Name, vpc2Name, err)
