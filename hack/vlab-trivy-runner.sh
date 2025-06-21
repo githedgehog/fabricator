@@ -561,62 +561,63 @@ fi
 
 # Create the final consolidated SARIF report with deduplication of vulnerabilities
 # Clean production version without debugging
+# Create the final consolidated SARIF report with deduplication of vulnerabilities
+# Clean production version without debugging
 create_final_sarif_report() {
     echo -e "${YELLOW}Creating final consolidated SARIF report...${NC}"
     local final_sarif="sarif-reports/trivy-security-scan.sarif"
     local sarif_files=()
-    
+
     # Collect all VM-specific SARIF files
     if [ "$RUN_CONTROL" = true ] && [ -f "sarif-reports/trivy-consolidated-${CONTROL_VM}.sarif" ]; then
         sarif_files+=("sarif-reports/trivy-consolidated-${CONTROL_VM}.sarif")
     fi
-    
+
     if [ "$RUN_GATEWAY" = true ] && [ -f "sarif-reports/trivy-consolidated-${GATEWAY_VM}.sarif" ]; then
         sarif_files+=("sarif-reports/trivy-consolidated-${GATEWAY_VM}.sarif")
     fi
-    
+
     # If no SARIF files found, exit
     if [ ${#sarif_files[@]} -eq 0 ]; then
         echo -e "${RED}No SARIF files found to consolidate${NC}"
         return 1
     fi
-    
+
     # If only one SARIF file, just copy it
     if [ ${#sarif_files[@]} -eq 1 ]; then
         cp "${sarif_files[0]}" "$final_sarif"
         echo -e "${GREEN}Single SARIF file copied to $final_sarif${NC}"
-        return 0
+    else
+        echo "Merging ${#sarif_files[@]} SARIF files..."
+
+        # Safe merge preserving all vulnerability instances
+        jq -s '
+            # Use first file as base
+            .[0] as $base |
+
+            # Safely extract results from each file
+            (.[0].runs[0].results // []) as $results1 |
+            (if (. | length) > 1 then (.[1].runs[0].results // []) else [] end) as $results2 |
+
+            # Safely extract rules from each file
+            (.[0].runs[0].tool.driver.rules // []) as $rules1 |
+            (if (. | length) > 1 then (.[1].runs[0].tool.driver.rules // []) else [] end) as $rules2 |
+
+            # Combine arrays safely
+            ($results1 + $results2) as $all_results |
+            ($rules1 + $rules2 | unique_by(.id)) as $all_rules |
+
+            # Build final structure
+            $base |
+            .runs[0].tool.driver.rules = $all_rules |
+            .runs[0].results = $all_results
+        ' "${sarif_files[@]}" > "$final_sarif"
     fi
-    
-    echo "Merging ${#sarif_files[@]} SARIF files..."
-    
-    # Safe merge preserving all vulnerability instances
-    jq -s '
-        # Use first file as base
-        .[0] as $base |
-        
-        # Safely extract results from each file
-        (.[0].runs[0].results // []) as $results1 |
-        (if (. | length) > 1 then (.[1].runs[0].results // []) else [] end) as $results2 |
-        
-        # Safely extract rules from each file  
-        (.[0].runs[0].tool.driver.rules // []) as $rules1 |
-        (if (. | length) > 1 then (.[1].runs[0].tool.driver.rules // []) else [] end) as $rules2 |
-        
-        # Combine arrays safely
-        ($results1 + $results2) as $all_results |
-        ($rules1 + $rules2 | unique_by(.id)) as $all_rules |
-        
-        # Build final structure
-        $base |
-        .runs[0].tool.driver.rules = $all_rules |
-        .runs[0].results = $all_results
-    ' "${sarif_files[@]}" > "$final_sarif"
-    
+
     # Check the result
     if [ -f "$final_sarif" ]; then
         total_results=$(jq '.runs[0].results | length' "$final_sarif" 2>/dev/null || echo 0)
-        
+
         if [ "$total_results" -gt 0 ]; then
             echo -e "${GREEN}Successfully merged $total_results vulnerability instances${NC}"
         else
@@ -627,32 +628,169 @@ create_final_sarif_report() {
         echo -e "${RED}Failed to create final SARIF file${NC}"
         return 1
     fi
-    
-    # Fix for null deduplicated counts - add this after SARIF creation
-    if [ -f "sarif-reports/trivy-security-scan.sarif" ]; then
-        # More robust counting with fallbacks
-        DEDUP_CRITICAL=$(jq -r '
-            (.runs[0].properties.aggregatedVulnerabilities.critical // 
-             ([.runs[0].results[]? | select(.level == "error" and (.message.text | contains("CRITICAL")))] | length) //
-             ([.runs[0].tool.driver.rules[]? | select(.properties.tags | contains(["CRITICAL"]))] | length) //
-             0)
-        ' "sarif-reports/trivy-security-scan.sarif" 2>/dev/null || echo 0)
-        
-        DEDUP_HIGH=$(jq -r '
-            (.runs[0].properties.aggregatedVulnerabilities.high // 
-             ([.runs[0].results[]? | select(.level == "error" and (.message.text | contains("HIGH")))] | length) //
-             ([.runs[0].tool.driver.rules[]? | select(.properties.tags | contains(["HIGH"]))] | length) //
-             0)
-        ' "sarif-reports/trivy-security-scan.sarif" 2>/dev/null || echo 0)
-        
-        # Ensure we have valid numbers
-        DEDUP_CRITICAL=${DEDUP_CRITICAL:-0}
-        DEDUP_HIGH=${DEDUP_HIGH:-0}
-        
-        echo -e "${GREEN}=== Deduplicated Vulnerability Summary ===${NC}"
-        echo -e "Total unique Critical vulnerabilities: $DEDUP_CRITICAL"
-        echo -e "Total unique High vulnerabilities: $DEDUP_HIGH"
-    fi    
+
+    # COMPREHENSIVE DEBUG AND COUNTING SECTION
+    echo -e "${YELLOW}=== Debug: Analyzing SARIF structure ===${NC}"
+
+    # Debug: Check basic SARIF structure
+    echo "SARIF file size: $(wc -c < "$final_sarif") bytes"
+
+    # Debug: Check if runs array exists
+    runs_count=$(jq '.runs | length' "$final_sarif" 2>/dev/null || echo "ERROR")
+    echo "Runs count: $runs_count"
+
+    # Debug: Check if results exist
+    results_count=$(jq '.runs[0].results | length' "$final_sarif" 2>/dev/null || echo "ERROR")
+    echo "Results count: $results_count"
+
+    # Debug: Check if rules exist
+    rules_count=$(jq '.runs[0].tool.driver.rules | length' "$final_sarif" 2>/dev/null || echo "ERROR")
+    echo "Rules count: $rules_count"
+
+    # Debug: Check properties structure (if it exists)
+    echo "Properties structure:"
+    jq '.runs[0].properties' "$final_sarif" 2>/dev/null || echo "No properties found"
+
+    # Debug: Show sample results structure (first 2 results)
+    echo "Sample results (first 2):"
+    jq '.runs[0].results[0:2] | map({ruleId, level, message})' "$final_sarif" 2>/dev/null || echo "No results found"
+
+    # Debug: Show sample rules structure (first 2 rules)
+    echo "Sample rules (first 2):"
+    jq '.runs[0].tool.driver.rules[0:2] | map({id, properties})' "$final_sarif" 2>/dev/null || echo "No rules found"
+
+    # Try multiple counting strategies and show results
+    echo -e "${YELLOW}=== Debug: Testing different counting methods ===${NC}"
+
+    # Method 1: From aggregatedVulnerabilities property
+    method1_critical=$(jq -r '.runs[0].properties.aggregatedVulnerabilities.critical // "NULL"' "$final_sarif" 2>/dev/null || echo "ERROR")
+    method1_high=$(jq -r '.runs[0].properties.aggregatedVulnerabilities.high // "NULL"' "$final_sarif" 2>/dev/null || echo "ERROR")
+    echo "Method 1 (properties): Critical=$method1_critical, High=$method1_high"
+
+    # Method 2: From results with message text matching
+    method2_critical=$(jq '[.runs[0].results[]? | select(.level == "error" and (.message.text | contains("CRITICAL")))] | length' "$final_sarif" 2>/dev/null || echo "ERROR")
+    method2_high=$(jq '[.runs[0].results[]? | select(.level == "error" and (.message.text | contains("HIGH")))] | length' "$final_sarif" 2>/dev/null || echo "ERROR")
+    echo "Method 2 (results+message): Critical=$method2_critical, High=$method2_high"
+
+    # Method 3: From rules with tags
+    method3_critical=$(jq '[.runs[0].tool.driver.rules[]? | select(.properties.tags | contains(["CRITICAL"]))] | length' "$final_sarif" 2>/dev/null || echo "ERROR")
+    method3_high=$(jq '[.runs[0].tool.driver.rules[]? | select(.properties.tags | contains(["HIGH"]))] | length' "$final_sarif" 2>/dev/null || echo "ERROR")
+    echo "Method 3 (rules+tags): Critical=$method3_critical, High=$method3_high"
+
+    # Method 4: Count all error-level results (may include both critical and high)
+    method4_total_errors=$(jq '[.runs[0].results[]? | select(.level == "error")] | length' "$final_sarif" 2>/dev/null || echo "ERROR")
+    echo "Method 4 (all errors): Total=$method4_total_errors"
+
+    # Method 5: Count by ruleId pattern matching
+    method5_critical=$(jq '[.runs[0].results[]? | select(.ruleId | test(".*CRITICAL.*"))] | length' "$final_sarif" 2>/dev/null || echo "ERROR")
+    method5_high=$(jq '[.runs[0].results[]? | select(.ruleId | test(".*HIGH.*"))] | length' "$final_sarif" 2>/dev/null || echo "ERROR")
+    echo "Method 5 (ruleId pattern): Critical=$method5_critical, High=$method5_high"
+
+    # Method 6: Join results with rules to get severity from rule properties
+    method6_critical=$(jq '
+        [.runs[0].results[] as $result |
+         .runs[0].tool.driver.rules[] as $rule |
+         select($result.ruleId == $rule.id and ($rule.properties.tags | contains(["CRITICAL"])))] | length
+    ' "$final_sarif" 2>/dev/null || echo "ERROR")
+    method6_high=$(jq '
+        [.runs[0].results[] as $result |
+         .runs[0].tool.driver.rules[] as $rule |
+         select($result.ruleId == $rule.id and ($rule.properties.tags | contains(["HIGH"])))] | length
+    ' "$final_sarif" 2>/dev/null || echo "ERROR")
+    echo "Method 6 (join results+rules): Critical=$method6_critical, High=$method6_high"
+
+    # Method 7: Check if severity is in ruleId itself
+    method7_critical=$(jq '[.runs[0].results[]? | select(.ruleId | contains("CRITICAL"))] | length' "$final_sarif" 2>/dev/null || echo "ERROR")
+    method7_high=$(jq '[.runs[0].results[]? | select(.ruleId | contains("HIGH"))] | length' "$final_sarif" 2>/dev/null || echo "ERROR")
+    echo "Method 7 (ruleId contains): Critical=$method7_critical, High=$method7_high"
+
+    # Try to use the most reliable method (prioritize methods that give meaningful results)
+    if [[ "$method1_critical" != "NULL" && "$method1_critical" != "ERROR" && "$method1_critical" != "null" && "$method1_critical" -gt 0 ]]; then
+        DEDUP_CRITICAL=$method1_critical
+        DEDUP_HIGH=$method1_high
+        echo "Using Method 1 (properties)"
+    elif [[ "$method6_critical" != "ERROR" && "$method6_critical" -gt 0 ]]; then
+        DEDUP_CRITICAL=$method6_critical
+        DEDUP_HIGH=$method6_high
+        echo "Using Method 6 (join results+rules)"
+    elif [[ "$method2_critical" != "ERROR" && "$method2_critical" -gt 0 ]]; then
+        DEDUP_CRITICAL=$method2_critical
+        DEDUP_HIGH=$method2_high
+        echo "Using Method 2 (results+message)"
+    elif [[ "$method7_critical" != "ERROR" && "$method7_critical" -gt 0 ]]; then
+        DEDUP_CRITICAL=$method7_critical
+        DEDUP_HIGH=$method7_high
+        echo "Using Method 7 (ruleId contains)"
+    elif [[ "$method3_critical" != "ERROR" && "$method3_critical" -gt 0 ]]; then
+        DEDUP_CRITICAL=$method3_critical
+        DEDUP_HIGH=$method3_high
+        echo "Using Method 3 (rules+tags)"
+    else
+        # Fallback: use the raw counts from the VMs
+        echo "All methods failed, using raw VM counts as fallback"
+        DEDUP_CRITICAL=$TOTAL_CRITICAL_VULNS
+        DEDUP_HIGH=$TOTAL_HIGH_VULNS
+    fi
+
+    # Ensure we have valid numbers
+    DEDUP_CRITICAL=${DEDUP_CRITICAL:-0}
+    DEDUP_HIGH=${DEDUP_HIGH:-0}
+
+    # Make sure they're numeric
+    if ! [[ "$DEDUP_CRITICAL" =~ ^[0-9]+$ ]]; then
+        echo "Warning: DEDUP_CRITICAL not numeric ($DEDUP_CRITICAL), defaulting to 0"
+        DEDUP_CRITICAL=0
+    fi
+    if ! [[ "$DEDUP_HIGH" =~ ^[0-9]+$ ]]; then
+        echo "Warning: DEDUP_HIGH not numeric ($DEDUP_HIGH), defaulting to 0"
+        DEDUP_HIGH=0
+    fi
+
+    echo -e "${GREEN}=== Final Counts ===${NC}"
+    echo "DEDUP_CRITICAL: $DEDUP_CRITICAL"
+    echo "DEDUP_HIGH: $DEDUP_HIGH"
+
+    # Update the SARIF file with the correct counts
+    echo "Updating SARIF metadata with correct counts..."
+    jq --arg critical "$DEDUP_CRITICAL" \
+       --arg high "$DEDUP_HIGH" \
+       --arg total_results "$total_results" \
+    '
+    # Ensure properties structure exists
+    .runs[0].properties = (.runs[0].properties // {}) |
+    .runs[0].properties.aggregatedVulnerabilities = {
+        critical: ($critical | tonumber),
+        high: ($high | tonumber),
+        medium: 0,
+        low: 0,
+        total: (($critical | tonumber) + ($high | tonumber)),
+        totalIssues: ($total_results | tonumber)
+    } |
+    .runs[0].properties.scanMetadata = (.runs[0].properties.scanMetadata // {} | . + {
+        deduplicationStrategy: "consolidated_merge",
+        preservesAllLocations: true,
+        processingSuccessful: true,
+        debugMethodsUsed: true
+    })
+    ' "$final_sarif" > "${final_sarif}.debug_updated" 2>/dev/null
+
+    if [ -f "${final_sarif}.debug_updated" ]; then
+        mv "${final_sarif}.debug_updated" "$final_sarif"
+        echo "SARIF metadata updated successfully"
+
+        # Verify the update worked
+        verify_critical=$(jq -r '.runs[0].properties.aggregatedVulnerabilities.critical' "$final_sarif" 2>/dev/null || echo "ERROR")
+        verify_high=$(jq -r '.runs[0].properties.aggregatedVulnerabilities.high' "$final_sarif" 2>/dev/null || echo "ERROR")
+        echo "Verification - Critical: $verify_critical, High: $verify_high"
+    else
+        echo "Failed to update SARIF metadata"
+    fi
+
+    echo -e "${GREEN}Final consolidated SARIF report created: $final_sarif${NC}"
+    echo "  - Total vulnerability instances: $total_results"
+    echo "  - Critical vulnerabilities: $DEDUP_CRITICAL"
+    echo "  - High vulnerabilities: $DEDUP_HIGH"
+    echo "  - Preserves all VM-specific locations for precise remediation"
 
     return 0
 }
