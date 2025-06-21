@@ -628,33 +628,32 @@ create_final_sarif_report() {
         return 1
     fi
     
-    # Update metadata with critical/high counts
-    if jq -e '.runs[0]' "$final_sarif" >/dev/null 2>&1; then
-        jq --arg total_results "$total_results" \
-        '
-         # Count critical and high vulnerabilities from the actual results
-         ([.runs[0].results[]? | select(.level == "error" and (.ruleId | in(.runs[0].tool.driver.rules | map(select(.properties.tags | contains(["CRITICAL"]))) | map(.id))))] | length) as $critical_count |
-         ([.runs[0].results[]? | select(.level == "error" and (.ruleId | in(.runs[0].tool.driver.rules | map(select(.properties.tags | contains(["HIGH"]))) | map(.id))))] | length) as $high_count |
-         
-         .runs[0].properties.aggregatedVulnerabilities = {
-            totalIssues: ($total_results | tonumber),
-            critical: $critical_count,
-            high: $high_count,
-            total: ($critical_count + $high_count)
-         } |
-         .runs[0].properties.scanMetadata = (.runs[0].properties.scanMetadata // {} | . + {
-            deduplicationStrategy: "simple_concatenation",
-            preservesAllLocations: true,
-            processingSuccessful: ($total_results | tonumber > 0)
-         })' "$final_sarif" > "${final_sarif}.tmp" && mv "${final_sarif}.tmp" "$final_sarif"
-    else
-        echo -e "${YELLOW}Warning: Could not update metadata - SARIF structure unexpected${NC}"
-    fi
-    
-    echo -e "${GREEN}Final consolidated SARIF report created: $final_sarif${NC}"
-    echo "  - Total vulnerability instances: $total_results"
-    echo "  - Preserves all VM-specific locations for precise remediation"
-    
+    # Fix for null deduplicated counts - add this after SARIF creation
+    if [ -f "sarif-reports/trivy-security-scan.sarif" ]; then
+        # More robust counting with fallbacks
+        DEDUP_CRITICAL=$(jq -r '
+            (.runs[0].properties.aggregatedVulnerabilities.critical // 
+             ([.runs[0].results[]? | select(.level == "error" and (.message.text | contains("CRITICAL")))] | length) //
+             ([.runs[0].tool.driver.rules[]? | select(.properties.tags | contains(["CRITICAL"]))] | length) //
+             0)
+        ' "sarif-reports/trivy-security-scan.sarif" 2>/dev/null || echo 0)
+        
+        DEDUP_HIGH=$(jq -r '
+            (.runs[0].properties.aggregatedVulnerabilities.high // 
+             ([.runs[0].results[]? | select(.level == "error" and (.message.text | contains("HIGH")))] | length) //
+             ([.runs[0].tool.driver.rules[]? | select(.properties.tags | contains(["HIGH"]))] | length) //
+             0)
+        ' "sarif-reports/trivy-security-scan.sarif" 2>/dev/null || echo 0)
+        
+        # Ensure we have valid numbers
+        DEDUP_CRITICAL=${DEDUP_CRITICAL:-0}
+        DEDUP_HIGH=${DEDUP_HIGH:-0}
+        
+        echo -e "${GREEN}=== Deduplicated Vulnerability Summary ===${NC}"
+        echo -e "Total unique Critical vulnerabilities: $DEDUP_CRITICAL"
+        echo -e "Total unique High vulnerabilities: $DEDUP_HIGH"
+    fi    
+
     return 0
 }
 
