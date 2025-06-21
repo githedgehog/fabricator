@@ -26,7 +26,7 @@ const (
 	APIChartRef  = "gateway/charts/gateway-api"
 	AgentRef     = "gateway/gateway-agent"
 	DataplaneRef = "dataplane"
-	FRRRef       = "dataplane/frr"
+	FRRRef       = "dpdk-sys/frr"
 )
 
 //go:embed values.tmpl.yaml
