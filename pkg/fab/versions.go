@@ -71,8 +71,8 @@ var Versions = fabapi.Versions{
 		API:        GatewayVersion,
 		Controller: GatewayVersion,
 		Agent:      GatewayVersion,
-		Dataplane:  "2",  // TODO set actual version
-		FRR:        "35", // TODO set actual version
+		Dataplane:  "HEAD.x86_64-unknown-linux-gnu.release.27f31b52de13a08246650fea8d13d9493af475df", // TODO set actual version
+		FRR:        "aa9a5e276dca3b5ea130b33a27da3e2a807bfc30.debug",                                 // TODO set actual version
 	},
 	VLAB: fabapi.VLABVersions{
 		ONIE:    "v0.2.0",
