@@ -435,8 +435,6 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 				if opts.CollectShowTech {
 					if err := c.VLABShowTech(ctx, vlab); err != nil {
 						slog.Warn("Failed to collect show-tech diagnostics", "err", err)
-
-						return fmt.Errorf("getting show-tech: %w", err)
 					}
 				}
 
@@ -457,8 +455,6 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 					if opts.CollectShowTech {
 						if err := c.VLABShowTech(ctx, vlab); err != nil {
 							slog.Warn("Failed to collect show-tech diagnostics", "err", err)
-
-							return fmt.Errorf("getting show-tech: %w", err)
 						}
 					}
 
@@ -593,8 +589,6 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						if opts.CollectShowTech {
 							if err := c.VLABShowTech(ctx, vlab); err != nil {
 								slog.Warn("Failed to collect show-tech diagnostics", "err", err)
-
-								return fmt.Errorf("getting show-tech: %w", err)
 							}
 						}
 
@@ -618,8 +612,6 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						if opts.CollectShowTech {
 							if err := c.VLABShowTech(ctx, vlab); err != nil {
 								slog.Warn("Failed to collect show-tech diagnostics", "err", err)
-
-								return fmt.Errorf("getting show-tech: %w", err)
 							}
 						}
 
@@ -638,8 +630,6 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						if opts.CollectShowTech {
 							if err := c.VLABShowTech(ctx, vlab); err != nil {
 								slog.Warn("Failed to collect show-tech diagnostics", "err", err)
-
-								return fmt.Errorf("getting show-tech: %w", err)
 							}
 						}
 
@@ -649,8 +639,6 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 					if opts.CollectShowTech {
 						if err := c.VLABShowTech(ctx, vlab); err != nil {
 							slog.Warn("Failed to collect show-tech diagnostics", "err", err)
-
-							return fmt.Errorf("getting show-tech: %w", err)
 						}
 					}
 
@@ -668,8 +656,6 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						if opts.CollectShowTech {
 							if err := c.VLABShowTech(ctx, vlab); err != nil {
 								slog.Warn("Failed to collect show-tech diagnostics", "err", err)
-
-								return fmt.Errorf("getting show-tech: %w", err)
 							}
 						}
 
@@ -686,8 +672,6 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						if opts.CollectShowTech {
 							if err := c.VLABShowTech(ctx, vlab); err != nil {
 								slog.Warn("Failed to collect show-tech diagnostics", "err", err)
-
-								return fmt.Errorf("getting show-tech: %w", err)
 							}
 						}
 
@@ -704,8 +688,6 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						if opts.CollectShowTech {
 							if err := c.VLABShowTech(ctx, vlab); err != nil {
 								slog.Warn("Failed to collect show-tech diagnostics", "err", err)
-
-								return fmt.Errorf("getting show-tech: %w", err)
 							}
 						}
 
