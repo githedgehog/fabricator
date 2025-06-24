@@ -518,7 +518,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 				expectedSubnet := expectedSubnets[server.Name]
 				expectedBits := 0
 				switch opts.VPCMode {
-				case vpcapi.VPCModeDefault:
+				case vpcapi.VPCModeL2VNI:
 					expectedBits = expectedSubnet.Bits()
 				case vpcapi.VPCModeL3Flat, vpcapi.VPCModeL3VNI:
 					expectedBits = 32 // L3 modes always uses /32 for server addresses
