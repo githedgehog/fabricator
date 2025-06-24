@@ -697,6 +697,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 					if err := c.ReleaseTest(ctx, ReleaseTestOpts{
 						ResultsFile: "release-test.xml",
 						HashPolicy:  HashPolicyL2And3,
+						VPCMode:     opts.VPCMode,
 					}); err != nil {
 						slog.Warn("Failed to run release test", "err", err)
 

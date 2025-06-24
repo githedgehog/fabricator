@@ -1913,6 +1913,7 @@ type ReleaseTestOpts struct {
 	FailFast    bool
 	PauseOnFail bool
 	HashPolicy  string
+	VPCMode     vpcapi.VPCMode
 }
 
 func (c *Config) ReleaseTest(ctx context.Context, opts ReleaseTestOpts) error {
@@ -1926,6 +1927,9 @@ func (c *Config) ReleaseTest(ctx context.Context, opts ReleaseTestOpts) error {
 		return fmt.Errorf("invalid hash policy %q, must be one of %v", opts.HashPolicy, HashPolicies)
 	} else if opts.HashPolicy != HashPolicyL2 && opts.HashPolicy != HashPolicyL2And3 {
 		slog.Warn("The selected hash policy is not fully 802.3ad compliant, use layer2 or layer2+3 for full compliance", "hashPolicy", opts.HashPolicy)
+	}
+	if !slices.Contains(vpcapi.VPCModes, opts.VPCMode) {
+		return fmt.Errorf("invalid VPC mode %q, must be one of %v", opts.VPCMode, vpcapi.VPCModes)
 	}
 
 	return RunReleaseTestSuites(ctx, c.WorkDir, c.CacheDir, opts)

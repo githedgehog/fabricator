@@ -1119,6 +1119,11 @@ func Run(ctx context.Context) error {
 								Usage:   "xmit_hash_policy for bond interfaces on servers [layer2|layer2+3|layer3+4|encap2+3|encap3+4|vlan+srcmac]",
 								Value:   hhfab.HashPolicyL2And3,
 							},
+							&cli.StringFlag{
+								Name:    FlagNameVPCMode,
+								Aliases: []string{"mode"},
+								Usage:   "VPC mode: empty (l2vni) by default or l3vni, etc",
+							},
 						}),
 						Before: before(false),
 						Action: func(c *cli.Context) error {
@@ -1130,6 +1135,7 @@ func Run(ctx context.Context) error {
 								FailFast:    c.Bool(FlagNameFailFast),
 								PauseOnFail: c.Bool(FlagPauseOnFail),
 								HashPolicy:  c.String(FlagHashPolicy),
+								VPCMode:     vpcapi.VPCMode(c.String(FlagNameVPCMode)),
 							}
 							if err := hhfab.DoVLABReleaseTest(ctx, workDir, cacheDir, opts); err != nil {
 								return fmt.Errorf("release-test: %w", err)

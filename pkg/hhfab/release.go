@@ -1939,6 +1939,7 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 		VLANNamespace:     "default",
 		IPv4Namespace:     "default",
 		HashPolicy:        rtOtps.HashPolicy,
+		VPCMode:           rtOtps.VPCMode,
 	}
 
 	regexesCompiled := make([]*regexp.Regexp, 0)
