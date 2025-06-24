@@ -1,14 +1,14 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "controllerproxy.fullname" . }}
+  name: {{ include "controller-proxy.fullname" . }}
   labels:
-    {{- include "controllerproxy.labels" . | nindent 4 }}
+    {{- include "controller-proxy.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicaCount }}
   selector:
     matchLabels:
-      {{- include "controllerproxy.selectorLabels" . | nindent 6 }}
+      {{- include "controller-proxy.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       {{- with .Values.podAnnotations }}
@@ -16,7 +16,7 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       labels:
-        {{- include "controllerproxy.labels" . | nindent 8 }}
+        {{- include "controller-proxy.labels" . | nindent 8 }}
         {{- with .Values.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -25,7 +25,7 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      serviceAccountName: {{ include "controllerproxy.serviceAccountName" . }}
+      serviceAccountName: {{ include "controller-proxy.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:

@@ -1,0 +1,7 @@
+image:
+  repository: {{ .Repo }}
+  tag: {{ .Tag }}
+service:
+  nodePort: {{ .NodePort }}
+TinyproxyURLs:
+  - "*.grafana.net"

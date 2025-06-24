@@ -25,7 +25,7 @@ serviceAccount:
   annotations: {}
   # The name of the service account to use.
   # If not set and create is true, a name is generated using the fullname template
-  name: ""
+  name: "controller-proxy"
 
 # This is for setting Kubernetes Annotations to a Pod.
 # For more information checkout: https://kubernetes.io/docs/concepts/overview/working-with-objects/annotations/ 
@@ -44,6 +44,18 @@ securityContext: {}
   # readOnlyRootFilesystem: true
   # runAsNonRoot: true
   # runAsUser: 1000
+
+TinyproxyConfig:
+  - User 65532
+  - Group 65532
+  - Port 3128
+  - LogLevel Connect
+  - MaxClients 1024
+  - Filter "/conf/filters.conf"
+  - FilterDefaultDeny Yes
+  - FilterType fnmatch
+TinyproxyURLs:
+    - "*.grafana.net"
 
 # This is for setting up a service more information can be found here: https://kubernetes.io/docs/concepts/services-networking/service/
 service:
