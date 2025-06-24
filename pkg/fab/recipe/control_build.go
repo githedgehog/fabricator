@@ -18,6 +18,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/artificer"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/certmanager"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/controllerproxy"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/f8r"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/fabric"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/flatcar"
@@ -56,6 +57,7 @@ var AirgapArtifactsBase = []comp.ListOCIArtifacts{
 	reloader.Artifacts,
 	fabric.Artifacts,
 	ntp.Artifacts,
+	controllerproxy.Artifacts,
 	f8r.Artifacts,
 }
 
