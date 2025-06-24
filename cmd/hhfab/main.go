@@ -21,6 +21,7 @@ import (
 	slogmulti "github.com/samber/slog-multi"
 	"github.com/urfave/cli/v2"
 	"go.githedgehog.com/fabric/api/meta"
+	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/fab/recipe"
 	"go.githedgehog.com/fabricator/pkg/hhfab"
@@ -888,6 +889,11 @@ func Run(ctx context.Context) error {
 								Usage:   "xmit_hash_policy for bond interfaces on servers [layer2|layer2+3|layer3+4|encap2+3|encap3+4|vlan+srcmac]",
 								Value:   hhfab.HashPolicyL2And3,
 							},
+							&cli.StringFlag{
+								Name:    "vpc-mode",
+								Aliases: []string{"mode"},
+								Usage:   "VPC mode: empty (l2vni) by default or l3vni, etc",
+							},
 						}),
 						Before: before(false),
 						Action: func(c *cli.Context) error {
@@ -902,6 +908,7 @@ func Run(ctx context.Context) error {
 								TimeServers:       c.StringSlice("time-servers"),
 								InterfaceMTU:      uint16(c.Uint("interface-mtu")), //nolint:gosec
 								HashPolicy:        c.String(FlagHashPolicy),
+								VPCMode:           vpcapi.VPCMode(c.String("vpc-mode")),
 							}); err != nil {
 								return fmt.Errorf("setup-vpcs: %w", err)
 							}
