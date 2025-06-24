@@ -102,6 +102,7 @@ type SetupVPCsOpts struct {
 	TimeServers       []string
 	InterfaceMTU      uint16
 	HashPolicy        string
+	VPCMode           vpcapi.VPCMode
 }
 
 func CreateOrUpdateVpc(ctx context.Context, kube client.Client, vpc *vpcapi.VPC) (bool, error) {
@@ -156,8 +157,12 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	} else if opts.HashPolicy != HashPolicyL2 && opts.HashPolicy != HashPolicyL2And3 {
 		slog.Warn("The selected hash policy is not fully 802.3ad compliant, use layer2 or layer2+3 for full compliance", "hashPolicy", opts.HashPolicy)
 	}
+	if !slices.Contains(vpcapi.VPCModes, opts.VPCMode) {
+		return fmt.Errorf("invalid VPC mode %q, must be one of %v", opts.VPCMode, vpcapi.VPCModes)
+	}
 
 	slog.Info("Setting up VPCs and VPCAttachments",
+		"mode", opts.VPCMode,
 		"perSubnet", opts.ServersPerSubnet,
 		"perVPC", opts.SubnetsPerVPC,
 		"wait", opts.WaitSwitchesReady,
@@ -271,6 +276,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 					Namespace: metav1.NamespaceDefault,
 				},
 				Spec: vpcapi.VPCSpec{
+					Mode:    opts.VPCMode,
 					Subnets: map[string]*vpcapi.VPCSubnet{},
 				},
 			}
@@ -510,7 +516,14 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 				}
 
 				expectedSubnet := expectedSubnets[server.Name]
-				if !expectedSubnet.Contains(prefix.Addr()) || expectedSubnet.Bits() != prefix.Bits() {
+				expectedBits := 0
+				switch opts.VPCMode {
+				case vpcapi.VPCModeDefault:
+					expectedBits = expectedSubnet.Bits()
+				case vpcapi.VPCModeL3Flat, vpcapi.VPCModeL3VNI:
+					expectedBits = 32 // L3 modes always uses /32 for server addresses
+				}
+				if !expectedSubnet.Contains(prefix.Addr()) || prefix.Bits() != expectedBits {
 					return fmt.Errorf("unexpected acquired address %q, expected from %v", prefix.String(), expectedSubnet.String())
 				}
 
