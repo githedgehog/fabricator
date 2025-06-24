@@ -159,7 +159,7 @@ func (c *NodeInstall) prepForDataplane(ctx context.Context) error {
 
 	slog.Debug("Preparing node for dataplane (iptables drop udp)")
 
-	cmd := exec.CommandContext(ctx, "iptables", "-I", "INPUT", "1", "-p", "udp", "-j", "DROP")
+	cmd := exec.CommandContext(ctx, "iptables", "-I", "INPUT", "1", "-p", "udp", "--dport", "4789", "-j", "DROP")
 	cmd.Dir = c.WorkDir
 	cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "iptables: ")
 	cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "iptables: ")
