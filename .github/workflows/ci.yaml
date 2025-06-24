@@ -236,26 +236,37 @@ jobs:
           - usb
           - iso
           - manual
+        vpcmode:
+          - ""
         include:
           - fabricmode: collapsed-core
             includeonie: false
             gateway: false
             buildmode: iso
+            vpcmode: ""
           - fabricmode: spine-leaf
             gateway: false
             includeonie: true
             buildmode: usb
+            vpcmode: ""
           - fabricmode: spine-leaf
             gateway: false
             includeonie: true
             buildmode: iso
+            vpcmode: ""
+          - fabricmode: spine-leaf
+            gateway: false
+            includeonie: false
+            buildmode: iso
+            vpcmode: l3vni
           - fabricmode: spine-leaf
             gateway: true
             includeonie: false
             buildmode: iso
+            vpcmode: ""
 
     env:
-      slug: "${{ matrix.fabricmode }}-${{ matrix.gateway }}-${{ matrix.includeonie }}-${{ matrix.buildmode }}"
+      slug: "${{ matrix.fabricmode }}-${{ matrix.gateway }}-${{ matrix.includeonie }}-${{ matrix.buildmode }}-${{ matrix.vpcmode }}"
 
       # TODO enable for scheduled (github.event_name == 'schedule'), master and release branches?
       run_release_test: ${{ inputs.run_release_test == true || contains(github.event.pull_request.labels.*.name, 'release-test') }}
@@ -293,7 +304,7 @@ jobs:
           bin/hhfab init -v --dev -m ${{ matrix.fabricmode }} --include-onie=${{ matrix.includeonie }} --gateway=${{ matrix.gateway }}
           bin/hhfab vlab gen -v
           export HHFAB_JOIN_TOKEN=$(openssl rand -base64 24)
-          bin/hhfab vlab up -v --ready inspect --ready setup-vpcs --ready test-connectivity --ready release-test --ready exit --mode=${{ matrix.buildmode }}
+          bin/hhfab vlab up -v --ready inspect --ready setup-vpcs --ready test-connectivity --ready release-test --ready exit --mode=${{ matrix.buildmode }} --vpc-mode="${{ matrix.vpcmode }}"
           cat release-test.xml
 
       - name: Upload Test Results
@@ -312,7 +323,7 @@ jobs:
           bin/hhfab init -v --dev -m ${{ matrix.fabricmode }} --include-onie=${{ matrix.includeonie }} --gateway=${{ matrix.gateway }}
           bin/hhfab vlab gen -v
           export HHFAB_JOIN_TOKEN=$(openssl rand -base64 24)
-          bin/hhfab vlab up -v --ready inspect --ready setup-vpcs --ready test-connectivity --ready exit --mode=${{ matrix.buildmode }}
+          bin/hhfab vlab up -v --ready inspect --ready setup-vpcs --ready test-connectivity --ready exit --mode=${{ matrix.buildmode }} --vpc-mode="${{ matrix.vpcmode }}"
 
       - name: Upload show-tech artifacts
         uses: actions/upload-artifact@v4

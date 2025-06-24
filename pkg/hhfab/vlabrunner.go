@@ -23,6 +23,7 @@ import (
 
 	"github.com/pkg/sftp"
 	"github.com/samber/lo"
+	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
 	"go.githedgehog.com/fabric/pkg/util/logutil"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
@@ -95,6 +96,7 @@ type VLABRunOpts struct {
 	FailFast           bool
 	OnReady            []string
 	CollectShowTech    bool
+	VPCMode            vpcapi.VPCMode
 }
 
 type OnReady string
@@ -609,6 +611,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						DNSServers:        []string{"1.1.1.1", "1.0.0.1"},
 						TimeServers:       []string{"219.239.35.0"},
 						HashPolicy:        HashPolicyL2And3,
+						VPCMode:           opts.VPCMode,
 					}); err != nil {
 						slog.Warn("Failed to setup VPCs", "err", err)
 

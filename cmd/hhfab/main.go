@@ -63,6 +63,7 @@ const (
 	FlagNameFailFast              = "fail-fast"
 	FlagNameReady                 = "ready"
 	FlagNameCollectShowTech       = "collect-show-tech"
+	FlagNameVPCMode               = "vpc-mode"
 	FlagRegEx                     = "regex"
 	FlagInvertRegex               = "invert-regex"
 	FlagResultsFile               = "results-file"
@@ -753,6 +754,10 @@ func Run(ctx context.Context) error {
 								Usage:   "collect show-tech from all devices at exit or error",
 								EnvVars: []string{"HHFAB_VLAB_COLLECT"},
 							},
+							&cli.StringFlag{
+								Name:  FlagNameVPCMode,
+								Usage: "VPC mode to be used for on-ready commands: empty is default (l2vni), l3vni, etc.",
+							},
 						}),
 						Before: before(false),
 						Action: func(c *cli.Context) error {
@@ -770,6 +775,7 @@ func Run(ctx context.Context) error {
 									FailFast:           c.Bool(FlagNameFailFast),
 									OnReady:            c.StringSlice(FlagNameReady),
 									CollectShowTech:    c.Bool(FlagNameCollectShowTech),
+									VPCMode:            vpcapi.VPCMode(c.String(FlagNameVPCMode)),
 								},
 							}); err != nil {
 								return fmt.Errorf("running VLAB: %w", err)
