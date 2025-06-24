@@ -27,7 +27,7 @@ var Versions = fabapi.Versions{
 		Reloader:             "v1.0.40", // TODO upgrade or get rid of?
 		NTP:                  "v0.0.2",
 		NTPChart:             FabricatorVersion,
-		ControllerProxy:      "v.1.11.2-hh2",
+		ControllerProxy:      "v1.11.2-hh7",
 		ControllerProxyChart: FabricatorVersion,
 	},
 	Fabricator: fabapi.FabricatorVersions{

@@ -94,6 +94,7 @@ type ComponentsStatus struct {
 	FabricBoot           ComponentStatus `json:"fabricBoot,omitempty"`
 	FabricDHCP           ComponentStatus `json:"fabricDHCP,omitempty"`
 	FabricProxy          ComponentStatus `json:"fabricProxy,omitempty"`
+	ControllerProxy      ComponentStatus `json:"controllerProxy,omitempty"`
 	GatewayAPI           ComponentStatus `json:"gatewayAPI,omitempty"`
 	GatewayCtrl          ComponentStatus `json:"gatewayCtrl,omitempty"`
 }
@@ -112,7 +113,8 @@ func (c *ComponentsStatus) IsReady(cfg Fabricator) bool {
 		c.FabricCtrl == CompStatusReady &&
 		c.FabricBoot == CompStatusReady &&
 		c.FabricDHCP == CompStatusReady &&
-		c.FabricProxy == CompStatusReady
+		c.FabricProxy == CompStatusReady &&
+		c.ControllerProxy == CompStatusReady
 
 	if cfg.Spec.Config.Gateway.Enable {
 		res = res &&
@@ -238,14 +240,16 @@ type Versions struct {
 }
 
 type PlatformVersions struct {
-	K3s         meta.Version `json:"k3s,omitempty"`
-	Zot         meta.Version `json:"zot,omitempty"`
-	CertManager meta.Version `json:"certManager,omitempty"`
-	K9s         meta.Version `json:"k9s,omitempty"`
-	Toolbox     meta.Version `json:"toolbox,omitempty"`
-	Reloader    meta.Version `json:"reloader,omitempty"`
-	NTP         meta.Version `json:"ntp,omitempty"`
-	NTPChart    meta.Version `json:"ntpChart,omitempty"`
+	K3s                  meta.Version `json:"k3s,omitempty"`
+	Zot                  meta.Version `json:"zot,omitempty"`
+	CertManager          meta.Version `json:"certManager,omitempty"`
+	K9s                  meta.Version `json:"k9s,omitempty"`
+	Toolbox              meta.Version `json:"toolbox,omitempty"`
+	Reloader             meta.Version `json:"reloader,omitempty"`
+	NTP                  meta.Version `json:"ntp,omitempty"`
+	NTPChart             meta.Version `json:"ntpChart,omitempty"`
+	ControllerProxy      meta.Version `json:"controllerProxy,omitempty"`
+	ControllerProxyChart meta.Version `json:"controllerProxyChart,omitempty"`
 }
 
 type FabricatorVersions struct {

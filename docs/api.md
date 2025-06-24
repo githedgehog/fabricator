@@ -61,6 +61,7 @@ _Appears in:_
 | `fabricBoot` _[ComponentStatus](#componentstatus)_ |  |  |  |
 | `fabricDHCP` _[ComponentStatus](#componentstatus)_ |  |  |  |
 | `fabricProxy` _[ComponentStatus](#componentstatus)_ |  |  |  |
+| `controllerProxy` _[ComponentStatus](#componentstatus)_ |  |  |  |
 | `gatewayAPI` _[ComponentStatus](#componentstatus)_ |  |  |  |
 | `gatewayCtrl` _[ComponentStatus](#componentstatus)_ |  |  |  |
 
@@ -555,6 +556,8 @@ _Appears in:_
 | `reloader` _[Version](#version)_ |  |  |  |
 | `ntp` _[Version](#version)_ |  |  |  |
 | `ntpChart` _[Version](#version)_ |  |  |  |
+| `controllerProxy` _[Version](#version)_ |  |  |  |
+| `controllerProxyChart` _[Version](#version)_ |  |  |  |
 
 
 #### RegistryConfig

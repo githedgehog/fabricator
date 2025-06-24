@@ -343,6 +343,10 @@ spec:
                         properties:
                           certManager:
                             type: string
+                          controllerProxy:
+                            type: string
+                          controllerProxyChart:
+                            type: string
                           k3s:
                             type: string
                           k9s:
@@ -377,6 +381,8 @@ spec:
                   certManagerCtrl:
                     type: string
                   certManagerWebhook:
+                    type: string
+                  controllerProxy:
                     type: string
                   fabricAPI:
                     type: string
@@ -554,6 +560,10 @@ spec:
                   platform:
                     properties:
                       certManager:
+                        type: string
+                      controllerProxy:
+                        type: string
+                      controllerProxyChart:
                         type: string
                       k3s:
                         type: string
