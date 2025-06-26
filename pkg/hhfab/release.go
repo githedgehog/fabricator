@@ -1340,6 +1340,33 @@ func checkDHCPLease(grepString string, expectedLease int, tolerance int) error {
 	return nil
 }
 
+func checkDHCPAdvRoutes(grepString, expectedPrefix, expectedGw string, disableDefaultRoute bool, l3mode bool, subnet string) error {
+	// check default route
+	defaultRoutePresent := strings.Contains(grepString, "default via")
+	if disableDefaultRoute && defaultRoutePresent {
+		return fmt.Errorf("DHCP advertised routes contain default route: %s", grepString) //nolint:goerr113
+	} else if !disableDefaultRoute && !defaultRoutePresent {
+		return fmt.Errorf("DHCP advertised routes do not contain default route, expected it to be present: %s", grepString) //nolint:goerr113
+	}
+	slog.Debug("DHCP default route check passed", "present", defaultRoutePresent, "disabled", disableDefaultRoute)
+	// in l3mode, if default route is disabled, we expect the subnet to be present
+	if l3mode && disableDefaultRoute {
+		if !strings.Contains(grepString, fmt.Sprintf("%s via", subnet)) {
+			return fmt.Errorf("DHCP advertised routes do not contain expected subnet %s in l3mode: %s", subnet, grepString) //nolint:goerr113
+		}
+		slog.Debug("DHCP advertised subnet check passed in l3mode", "subnet", subnet)
+	}
+
+	// check that the expected advertised route is present
+	if !strings.Contains(grepString, fmt.Sprintf("%s via %s", expectedPrefix, expectedGw)) {
+		return fmt.Errorf("DHCP advertised routes do not contain expected route %s via %s: %s", expectedPrefix, expectedGw, grepString) //nolint:goerr113
+	}
+	slog.Debug("DHCP advertised route check passed", "route", expectedPrefix, "gateway", expectedGw)
+	slog.Debug("All DHCP advertised routes checks passed")
+
+	return nil
+}
+
 // Test that DNS, NTP, MTU and DHCP Lease settings for a VPC are correctly propagated to the servers.
 // For DNS, we check the content of /etc/resolv.conf;
 // for NTP, we check the output of timedatectl show-timesync;
@@ -1356,21 +1383,33 @@ func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (bool, []Re
 	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: "vpc-01"}, vpc); err != nil {
 		return false, nil, fmt.Errorf("getting VPC vpc-01: %w", err)
 	}
+	// Get the first subnet, where the target server is connected
+	subnet, ok := vpc.Spec.Subnets["subnet-01"]
+	if !ok {
+		return false, nil, errors.New("subnet subnet-01 not found in VPC vpc-01") //nolint:goerr113
+	}
 
 	// Set DNS, NTP and MTU
 	slog.Debug("Setting DNS, NTP, MTU and DHCP lease time")
+	l3mode := testCtx.opts.VPCMode == vpcapi.VPCModeL3VNI || testCtx.opts.VPCMode == vpcapi.VPCModeL3Flat
 	dhcpOpts := &vpcapi.VPCDHCPOptions{
 		DNSServers:       []string{"1.1.1.1"},
 		TimeServers:      []string{"1.1.1.1"},
 		InterfaceMTU:     1400,
 		LeaseTimeSeconds: 1800,
+		AdvertisedRoutes: []vpcapi.VPCDHCPRoute{
+			{
+				Destination: "9.9.9.9/32",
+				Gateway:     subnet.Gateway,
+			},
+		},
+		// disable default route for L3 VPC mode to test the advertisement of the subnet route
+		DisableDefaultRoute: l3mode,
 	}
 
-	for _, sub := range vpc.Spec.Subnets {
-		sub.DHCP = vpcapi.VPCDHCP{
-			Enable:  true,
-			Options: dhcpOpts,
-		}
+	subnet.DHCP = vpcapi.VPCDHCP{
+		Enable:  true,
+		Options: dhcpOpts,
 	}
 	change, err := CreateOrUpdateVpc(ctx, testCtx.kube, vpc)
 	if err != nil || !change {
@@ -1429,7 +1468,7 @@ func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (bool, []Re
 
 	// Check DNS, NTP, MTU and DHCP lease
 	slog.Debug("Checking DNS, NTP, MTU and DHCP lease")
-	var dnsFound, ntpFound, mtuFound, leaseCheck bool
+	var dnsFound, ntpFound, mtuFound, leaseCheck, advRoutes bool
 	if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, serverName, "grep \"nameserver 1.1.1.1\" /etc/resolv.conf"); err != nil {
 		slog.Error("1.1.1.1 not found in resolv.conf", "error", err)
 	} else {
@@ -1447,7 +1486,7 @@ func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (bool, []Re
 	}
 
 	// make sure to check the DHCP lease time after initial short lease time for L3 VPC modes
-	if testCtx.opts.VPCMode == vpcapi.VPCModeL3VNI || testCtx.opts.VPCMode == vpcapi.VPCModeL3Flat {
+	if l3mode {
 		time.Sleep(10 * time.Second)
 	}
 
@@ -1459,9 +1498,17 @@ func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (bool, []Re
 	} else {
 		leaseCheck = true
 	}
+	out, advRoutesErr := execNodeCmdWOutput(testCtx.hhfabBin, testCtx.workDir, serverName, "ip route show")
+	if advRoutesErr != nil {
+		slog.Error("failed to get IP routes from server", "error", advRoutesErr)
+	} else if err := checkDHCPAdvRoutes(out, "9.9.9.9", subnet.Gateway, dhcpOpts.DisableDefaultRoute, l3mode, subnet.Subnet); err != nil {
+		slog.Error("DHCP advertised routes check failed", "error", err)
+	} else {
+		advRoutes = true
+	}
 
-	if !dnsFound || !ntpFound || !mtuFound || !leaseCheck {
-		return false, reverts, fmt.Errorf("DNS: %v, NTP: %v, MTU: %v, DHCP lease: %v", dnsFound, ntpFound, mtuFound, leaseCheck) //nolint:goerr113
+	if !dnsFound || !ntpFound || !mtuFound || !leaseCheck || !advRoutes {
+		return false, reverts, fmt.Errorf("DNS: %v, NTP: %v, MTU: %v, DHCP lease: %v, Advertised Routes: %v", dnsFound, ntpFound, mtuFound, leaseCheck, advRoutes) //nolint:goerr113
 	}
 
 	return false, reverts, nil
