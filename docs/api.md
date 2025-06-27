@@ -60,7 +60,6 @@ _Appears in:_
 | `fabricCtrl` _[ComponentStatus](#componentstatus)_ |  |  |  |
 | `fabricBoot` _[ComponentStatus](#componentstatus)_ |  |  |  |
 | `fabricDHCP` _[ComponentStatus](#componentstatus)_ |  |  |  |
-| `fabricProxy` _[ComponentStatus](#componentstatus)_ |  |  |  |
 | `controllerProxy` _[ComponentStatus](#componentstatus)_ |  |  |  |
 | `gatewayAPI` _[ComponentStatus](#componentstatus)_ |  |  |  |
 | `gatewayCtrl` _[ComponentStatus](#componentstatus)_ |  |  |  |
@@ -407,8 +406,6 @@ _Appears in:_
 | `agent` _[Version](#version)_ |  |  |  |
 | `ctl` _[Version](#version)_ |  |  |  |
 | `alloy` _[Version](#version)_ |  |  |  |
-| `proxyChart` _[Version](#version)_ |  |  |  |
-| `proxy` _[Version](#version)_ |  |  |  |
 | `nos` _object (keys:string, values:[Version](#version))_ |  |  |  |
 | `onie` _object (keys:string, values:[Version](#version))_ |  |  |  |
 

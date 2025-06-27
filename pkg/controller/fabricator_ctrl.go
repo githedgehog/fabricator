@@ -309,14 +309,9 @@ func (r *FabricatorReconciler) statusCheck(ctx context.Context, l logr.Logger, f
 		return fmt.Errorf("getting fabric dhcp status: %w", err)
 	}
 
-	f.Status.Components.ControllerProxy, err = fabric.StatusProxy(ctx, r.Client, *f)
+	f.Status.Components.ControllerProxy, err = controllerproxy.Status(ctx, r.Client, *f)
 	if err != nil {
-		return fmt.Errorf("getting controller proxy status: %w", err)
-	}
-
-	f.Status.Components.FabricProxy, err = fabric.StatusProxy(ctx, r.Client, *f)
-	if err != nil {
-		return fmt.Errorf("getting fabric proxy status: %w", err)
+		return fmt.Errorf("getting controllerproxy status: %w", err)
 	}
 
 	f.Status.Components.GatewayAPI, err = gateway.StatusAPI(ctx, r.Client, *f)
