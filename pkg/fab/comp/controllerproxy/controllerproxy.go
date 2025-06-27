@@ -7,6 +7,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"net/url"
 
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
@@ -31,8 +32,23 @@ func Install(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 		return nil, fmt.Errorf("getting image URL for %q: %w", ImageRef, err)
 	}
 
-	//TODO pull correct urls from the alloy configuration
-	urls := []string{"*.grafana.net"}
+	urls := []string{}
+	for _, val := range cfg.Spec.Config.Fabric.DefaultAlloyConfig.PrometheusTargets {
+		u, err := url.Parse(val.URL)
+		if err != nil {
+			return nil, fmt.Errorf("Url parsing Prometheus Target failed: %w", err)
+		}
+		urls = append(urls, u.Hostname())
+
+	}
+	for _, val := range cfg.Spec.Config.Fabric.DefaultAlloyConfig.LokiTargets {
+		u, err := url.Parse(val.URL)
+		if err != nil {
+			return nil, fmt.Errorf("Url parsing Loki Target failed: %w", err)
+		}
+		urls = append(urls, u.Hostname())
+
+	}
 	values, err := tmplutil.FromTemplate("values", valuesTmpl, map[string]any{
 		"Repo":         repo,
 		"Tag":          string(cfg.Status.Versions.Platform.ControllerProxy),
