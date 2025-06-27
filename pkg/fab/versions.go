@@ -49,8 +49,7 @@ var Versions = fabapi.Versions{
 		Boot:       FabricVersion,
 		Agent:      FabricVersion,
 		Ctl:        FabricVersion,
-		ProxyChart: FabricVersion, // TODO switch to a better proxy
-		Proxy:      "1.9.1",       // TODO use version starting with "v"
+		Alloy:      "v1.1.1", // TODO upgrade to v1.4.x or newer
 		NOS: map[string]meta.Version{
 			string(fmeta.NOSTypeSONiCBCMVS):     "v4.5.0",
 			string(fmeta.NOSTypeSONiCBCMBase):   "v4.5.0",

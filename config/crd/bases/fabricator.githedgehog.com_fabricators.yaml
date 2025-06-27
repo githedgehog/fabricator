@@ -302,10 +302,6 @@ spec:
                             additionalProperties:
                               type: string
                             type: object
-                          proxy:
-                            type: string
-                          proxyChart:
-                            type: string
                         type: object
                       fabricator:
                         properties:
@@ -391,8 +387,6 @@ spec:
                   fabricCtrl:
                     type: string
                   fabricDHCP:
-                    type: string
-                  fabricProxy:
                     type: string
                   fabricatorAPI:
                     type: string
@@ -520,10 +514,6 @@ spec:
                         additionalProperties:
                           type: string
                         type: object
-                      proxy:
-                        type: string
-                      proxyChart:
-                        type: string
                     type: object
                   fabricator:
                     properties:

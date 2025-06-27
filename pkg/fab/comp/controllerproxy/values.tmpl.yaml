@@ -3,5 +3,3 @@ image:
   tag: {{ .Tag }}
 service:
   nodePort: {{ .NodePort }}
-TinyproxyURLs:
-  - "*.grafana.net"

@@ -93,7 +93,6 @@ type ComponentsStatus struct {
 	FabricCtrl           ComponentStatus `json:"fabricCtrl,omitempty"`
 	FabricBoot           ComponentStatus `json:"fabricBoot,omitempty"`
 	FabricDHCP           ComponentStatus `json:"fabricDHCP,omitempty"`
-	FabricProxy          ComponentStatus `json:"fabricProxy,omitempty"`
 	ControllerProxy      ComponentStatus `json:"controllerProxy,omitempty"`
 	GatewayAPI           ComponentStatus `json:"gatewayAPI,omitempty"`
 	GatewayCtrl          ComponentStatus `json:"gatewayCtrl,omitempty"`
@@ -113,7 +112,6 @@ func (c *ComponentsStatus) IsReady(cfg Fabricator) bool {
 		c.FabricCtrl == CompStatusReady &&
 		c.FabricBoot == CompStatusReady &&
 		c.FabricDHCP == CompStatusReady &&
-		c.FabricProxy == CompStatusReady &&
 		c.ControllerProxy == CompStatusReady
 
 	if cfg.Spec.Config.Gateway.Enable {
@@ -270,8 +268,7 @@ type FabricVersions struct {
 	Boot       meta.Version            `json:"boot,omitempty"`
 	Agent      meta.Version            `json:"agent,omitempty"`
 	Ctl        meta.Version            `json:"ctl,omitempty"`
-	ProxyChart meta.Version            `json:"proxyChart,omitempty"`
-	Proxy      meta.Version            `json:"proxy,omitempty"`
+	Alloy      meta.Version            `json:"alloy,omitempty"`
 	NOS        map[string]meta.Version `json:"nos,omitempty"`
 	ONIE       map[string]meta.Version `json:"onie,omitempty"`
 }
