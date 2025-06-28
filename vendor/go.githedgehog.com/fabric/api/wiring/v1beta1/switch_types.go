@@ -111,6 +111,8 @@ type SwitchSpec struct {
 	Boot SwitchBoot `json:"boot,omitempty"`
 	// EnableAllPorts is a flag to enable all ports on the switch regardless of them being used or not
 	EnableAllPorts bool `json:"enableAllPorts,omitempty"`
+	// RoCE is a flag to enable RoCEv2 support on the switch which includes lossless queues and QoS configuration
+	RoCE bool `json:"roce,omitempty"`
 }
 
 // SwitchStatus defines the observed state of Switch
@@ -126,9 +128,8 @@ type SwitchStatus struct {
 // +kubebuilder:printcolumn:name="Role",type=string,JSONPath=`.spec.role`,priority=0
 // +kubebuilder:printcolumn:name="Descr",type=string,JSONPath=`.spec.description`,priority=0
 // +kubebuilder:printcolumn:name="Groups",type=string,JSONPath=`.spec.groups`,priority=0
-// +kubebuilder:printcolumn:name="LocationUUID",type=string,JSONPath=`.metadata.labels.fabric\.githedgehog\.com/location`,priority=0
-// +kubebuilder:printcolumn:name="PortGroups",type=string,JSONPath=`.spec.portGroupSpeeds`,priority=1
-// +kubebuilder:printcolumn:name="Breakouts",type=string,JSONPath=`.spec.portBreakouts`,priority=1
+// +kubebuilder:printcolumn:name="Redundancy",type=string,JSONPath=`.spec.redundancy`,priority=1
+// +kubebuilder:printcolumn:name="Boot",type=string,JSONPath=`.spec.boot`,priority=1
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`,priority=0
 // Switch is the Schema for the switches API
 type Switch struct {
@@ -369,6 +370,23 @@ func (sw *Switch) Validate(ctx context.Context, kube kclient.Reader, fabricCfg *
 		for name := range sw.Spec.PortAutoNegs {
 			if !autoNegAllowed[name] {
 				return nil, errors.Errorf("port %s does not support configuring auto negotiation", name)
+			}
+		}
+
+		if sw.Spec.RoCE && !sp.Spec.Features.RoCE {
+			return nil, errors.Errorf("RoCEv2 is not supported on switch profile %s", sw.Spec.Profile)
+		}
+
+		switch sw.Spec.Redundancy.Type {
+		case meta.RedundancyTypeNone:
+			// No redundancy, nothing to check
+		case meta.RedundancyTypeMCLAG:
+			if !sp.Spec.Features.MCLAG {
+				return nil, errors.Errorf("MCLAG is not supported on switch profile %s", sw.Spec.Profile)
+			}
+		case meta.RedundancyTypeESLAG:
+			if !sp.Spec.Features.ESLAG {
+				return nil, errors.Errorf("ESLAG is not supported on switch profile %s", sw.Spec.Profile)
 			}
 		}
 	}
