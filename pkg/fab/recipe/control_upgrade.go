@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"time"
 
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
@@ -170,7 +171,11 @@ func (c *ControlUpgrade) uploadAirgap(ctx context.Context, username, password st
 		return fmt.Errorf("getting registry URL: %w", err)
 	}
 
-	airgapArts, err := comp.CollectArtifacts(c.Fab, AirgapArtifactLists...)
+	arts := slices.Clone(AirgapArtifactsBase)
+	if c.Fab.Spec.Config.Gateway.Enable {
+		arts = append(arts, AirgapArtifactsGateway...)
+	}
+	airgapArts, err := comp.CollectArtifacts(c.Fab, arts...)
 	if err != nil {
 		return fmt.Errorf("collecting airgap artifacts: %w", err)
 	}
