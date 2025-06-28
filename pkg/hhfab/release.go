@@ -1432,6 +1432,12 @@ func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (bool, []Re
 	} else {
 		mtuFound = true
 	}
+
+	// make sure to check the DHCP lease time after initial short lease time for L3 VPC modes
+	if testCtx.opts.VPCMode == vpcapi.VPCModeL3VNI || testCtx.opts.VPCMode == vpcapi.VPCModeL3Flat {
+		time.Sleep(10 * time.Second)
+	}
+
 	out, leaseErr := execNodeCmdWOutput(testCtx.hhfabBin, testCtx.workDir, serverName, "ip addr show dev bond0.1001 proto 4 | grep valid_lft")
 	if leaseErr != nil {
 		slog.Error("failed to get lease time", "error", leaseErr)
