@@ -96,3 +96,20 @@ plugins:
       - --name
       - $NAME
       - --yes
+
+  fabricswitchroce:
+    shortCut: Shift-X
+    description: Toggle RoCE (reboot)
+    scopes:
+      - switch
+      - agent
+    confirm: true
+    background: false
+    command: kubectl
+    args:
+      - fabric
+      - switch
+      - roce
+      - --name
+      - $NAME
+      - --yes
