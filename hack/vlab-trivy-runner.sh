@@ -7,6 +7,7 @@ set -e
 # Parse command line arguments
 RUN_CONTROL=true
 RUN_GATEWAY=true
+RUN_SWITCH=false  # Switch scanning disabled by default
 SKIP_VLAB_LAUNCH=false
 ALLOW_PARTIAL_SUCCESS=true
 
@@ -15,11 +16,25 @@ while [[ $# -gt 0 ]]; do
         --control-only)
             RUN_CONTROL=true
             RUN_GATEWAY=false
+            RUN_SWITCH=false
             shift
             ;;
         --gateway-only)
             RUN_CONTROL=false
             RUN_GATEWAY=true
+            RUN_SWITCH=false
+            shift
+            ;;
+        --switch-only)
+            RUN_CONTROL=false
+            RUN_GATEWAY=false
+            RUN_SWITCH=true
+            shift
+            ;;
+        --all)
+            RUN_CONTROL=true
+            RUN_GATEWAY=true
+            RUN_SWITCH=true
             shift
             ;;
         --skip-vlab)
@@ -36,11 +51,13 @@ while [[ $# -gt 0 ]]; do
             echo "Options:"
             echo "  --control-only     Run only control VM setup and scanning"
             echo "  --gateway-only     Run only gateway VM setup and scanning"
+            echo "  --switch-only      Run only SONiC switch setup and scanning"
+            echo "  --all              Run scanning on all VMs (control, gateway, and switch)"
             echo "  --skip-vlab        Skip launching VLAB (assumes VLAB is already running)"
             echo "  --strict           Require all scans to succeed (no partial successes)"
             echo "  --help, -h         Show this help message"
             echo ""
-            echo "Default: Run both control and gateway VMs with VLAB launch"
+            echo "Default: Run both control and gateway VMs with VLAB launch (switch disabled)"
             exit 0
             ;;
         *)
@@ -52,17 +69,19 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Validate that at least one VM is enabled
-if [ "$RUN_CONTROL" = false ] && [ "$RUN_GATEWAY" = false ]; then
+if [ "$RUN_CONTROL" = false ] && [ "$RUN_GATEWAY" = false ] && [ "$RUN_SWITCH" = false ]; then
     echo -e "${RED}ERROR: No VMs enabled. Use --help for usage information.${NC}"
     exit 1
 fi
 
 CONTROL_VM="control-1"
 GATEWAY_VM="gateway-1"
+SWITCH_VM="leaf-01"  # Default SONiC switch name
 VLAB_LOG="vlab.log"
 RESULTS_DIR="trivy-reports"
 SCRIPT_PATH="${SCRIPT_PATH:-./hack/trivy-setup.sh}"
 AIRGAPPED_SCRIPT_PATH="${AIRGAPPED_SCRIPT_PATH:-./hack/trivy-setup-airgapped.sh}"
+SONIC_AIRGAPPED_SCRIPT_PATH="${SONIC_AIRGAPPED_SCRIPT_PATH:-./hack/trivy-setup-sonic-airgapped.sh}"
 VLAB_TIMEOUT=${VLAB_TIMEOUT:-30}
 
 # Variables to track vulnerability counts
@@ -70,8 +89,15 @@ CONTROL_HIGH_VULNS=0
 CONTROL_CRITICAL_VULNS=0
 GATEWAY_HIGH_VULNS=0
 GATEWAY_CRITICAL_VULNS=0
+SWITCH_HIGH_VULNS=0
+SWITCH_CRITICAL_VULNS=0
 CONTROL_IMAGES_SCANNED=0
 GATEWAY_IMAGES_SCANNED=0
+SWITCH_IMAGES_SCANNED=0
+
+# Variables for deduplicated vulnerability counts
+DEDUP_CRITICAL=0
+DEDUP_HIGH=0
 
 # Find hhfab binary relative to project root
 if [ -f "./hhfab" ] && [ -x "./hhfab" ]; then
@@ -120,14 +146,22 @@ if [ "$RUN_GATEWAY" = true ] && [ ! -f "$AIRGAPPED_SCRIPT_PATH" ]; then
     exit 1
 fi
 
+if [ "$RUN_SWITCH" = true ] && [ ! -f "$SONIC_AIRGAPPED_SCRIPT_PATH" ]; then
+    echo -e "${RED}ERROR: SONiC airgapped setup script not found at: $SONIC_AIRGAPPED_SCRIPT_PATH${NC}"
+    echo "Please ensure trivy-setup-sonic-airgapped.sh exists or set SONIC_AIRGAPPED_SCRIPT_PATH correctly"
+    exit 1
+fi
+
 echo -e "${GREEN}Starting VLAB Trivy Scanner${NC}"
 echo "Control VM: $CONTROL_VM $([ "$RUN_CONTROL" = true ] && echo "(enabled)" || echo "(disabled)")"
 echo "Gateway VM: $GATEWAY_VM $([ "$RUN_GATEWAY" = true ] && echo "(enabled)" || echo "(disabled)")"
+echo "Switch VM: $SWITCH_VM $([ "$RUN_SWITCH" = true ] && echo "(enabled)" || echo "(disabled)")"
 echo "Skip VLAB launch: $([ "$SKIP_VLAB_LAUNCH" = true ] && echo "Yes (using external VLAB)" || echo "No")"
 echo "Allow partial success: $([ "$ALLOW_PARTIAL_SUCCESS" = true ] && echo "Yes" || echo "No (strict mode)")"
 echo "hhfab binary: $HHFAB_BIN"
 echo "Control script: $SCRIPT_PATH"
 echo "Gateway script: $AIRGAPPED_SCRIPT_PATH (airgapped mode)"
+echo "Switch script: $SONIC_AIRGAPPED_SCRIPT_PATH (sonic airgapped mode)"
 echo "Results: $RESULTS_DIR"
 echo "Log: $VLAB_LOG"
 if [ "$SKIP_VLAB_LAUNCH" = false ]; then
@@ -137,9 +171,16 @@ echo ""
 
 # Launch VLAB if not skipped
 if [ "$SKIP_VLAB_LAUNCH" = false ]; then
+    # Determine if we need leaf nodes for the topology
+    VLAB_EXTRA_ARGS=""
+    if [ "$RUN_SWITCH" = true ]; then
+        VLAB_EXTRA_ARGS="--leaf"
+        echo -e "${YELLOW}Adding leaf nodes to VLAB topology for switch scanning${NC}"
+    fi
+
     if [ ! -f "fab.yaml" ]; then
         echo -e "${YELLOW}Initializing VLAB (control + gateway)...${NC}"
-        $HHFAB_BIN init -v --dev --gateway
+        $HHFAB_BIN init -v --dev --gateway $VLAB_EXTRA_ARGS
     fi
 
     echo -e "${YELLOW}Generating join token for gateway node...${NC}"
@@ -207,6 +248,18 @@ if [ "$RUN_GATEWAY" = true ]; then
     fi
 fi
 
+    if [ "$RUN_SWITCH" = true ]; then
+    echo "Testing SSH to $SWITCH_VM..."
+    if $HHFAB_BIN vlab ssh -b -n "$SWITCH_VM" -- 'echo "SSH works"' >/dev/null 2>&1; then
+        echo -e "${GREEN}SSH to $SWITCH_VM: SUCCESS${NC}"
+    else
+        echo -e "${RED}SSH to $SWITCH_VM: FAILED${NC}"
+        echo "Debug: Checking VLAB status..."
+        $HHFAB_BIN vlab status || true
+        exit 1
+    fi
+fi
+
 echo -e "${GREEN}All enabled VMs accessible via SSH${NC}"
 
 # Function to setup Trivy on Control VM (online setup)
@@ -243,6 +296,20 @@ setup_gateway_vm() {
     return 0
 }
 
+# Function to setup SONiC Switch (airgapped)
+setup_switch_vm() {
+    echo -e "${YELLOW}=== Setting up SONiC Switch (airgap) ===${NC}"
+
+    echo "Running SONiC airgapped setup script..."
+    if ! HHFAB_BIN="$HHFAB_BIN" "$SONIC_AIRGAPPED_SCRIPT_PATH" --leaf-node "$SWITCH_VM"; then
+        echo -e "${RED}Failed to setup Trivy on SONiC Switch in airgapped mode${NC}"
+        return 1
+    fi
+
+    echo -e "${GREEN}SONiC Switch setup complete (airgap)${NC}"
+    return 0
+}
+
 echo -e "${YELLOW}Setting up VMs...${NC}"
 
 # Setup Control VM (online mode)
@@ -263,7 +330,16 @@ else
     GATEWAY_SETUP=0
 fi
 
-if [ $CONTROL_SETUP -ne 0 ] || [ $GATEWAY_SETUP -ne 0 ]; then
+# Setup SONiC Switch (airgapped mode)
+if [ "$RUN_SWITCH" = true ]; then
+    setup_switch_vm
+    SWITCH_SETUP=$?
+else
+    echo "Skipping SONiC Switch setup (disabled)"
+    SWITCH_SETUP=0
+fi
+
+if [ $CONTROL_SETUP -ne 0 ] || [ $GATEWAY_SETUP -ne 0 ] || [ $SWITCH_SETUP -ne 0 ]; then
     echo -e "${RED}Failed to setup Trivy on one or more VMs${NC}"
     exit 1
 fi
@@ -278,13 +354,28 @@ scan_vm() {
     local local_high_vulns=0
     local local_critical_vulns=0
     local local_images_scanned=0
+    local vm_type="control"  # Default VM type
 
-    echo -e "${YELLOW}=== Scanning $vm_name ===${NC}"
+    # Determine VM type
+    if [[ "$vm_name" == "$GATEWAY_VM" ]]; then
+        vm_type="gateway"
+    elif [[ "$vm_name" == "$SWITCH_VM" ]]; then
+        vm_type="switch"
+    fi
+
+    echo -e "${YELLOW}=== Scanning $vm_name ($vm_type) ===${NC}"
 
     mkdir -p sarif-reports
     local scan_errors=0
 
-    if [ "$vm_name" = "$GATEWAY_VM" ]; then
+    # Run the appropriate scan script based on VM type
+    if [ "$vm_type" = "switch" ]; then
+        echo "Running airgapped security scan on SONiC $vm_name..."
+        if ! $HHFAB_BIN vlab ssh -b -n "$vm_name" -- 'sudo /var/lib/trivy/scan-sonic-airgapped.sh'; then
+            echo -e "${RED}Failed to run airgapped scan on $vm_name${NC}"
+            return 1
+        fi
+    elif [ "$vm_type" = "gateway" ]; then
         echo "Running airgapped security scan on $vm_name..."
         if ! $HHFAB_BIN vlab ssh -b -n "$vm_name" -- 'sudo /var/lib/trivy/scan-airgapped.sh'; then
             echo -e "${RED}Failed to run airgapped scan on $vm_name${NC}"
@@ -298,8 +389,14 @@ scan_vm() {
         fi
     fi
 
-    echo "Getting image list for SARIF generation..."
-    IMAGES=$($HHFAB_BIN vlab ssh -b -n "$vm_name" -- 'sudo crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock images | grep -v IMAGE | grep -v pause | awk "{print \$1\":\"\$2}"' | sort -u || echo "")
+    # Get image list for SARIF generation - different approach based on VM type
+    if [ "$vm_type" = "switch" ]; then
+        echo "Getting container list from SONiC switch for SARIF generation..."
+        IMAGES=$($HHFAB_BIN vlab ssh -b -n "$vm_name" -- 'sudo docker ps --format "{{.Image}}" | grep -v "trivy" | sort -u' || echo "")
+    else
+        echo "Getting image list for SARIF generation..."
+        IMAGES=$($HHFAB_BIN vlab ssh -b -n "$vm_name" -- 'sudo crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock images | grep -v IMAGE | grep -v pause | awk "{print \$1\":\"\$2}"' | sort -u || echo "")
+    fi
 
     readarray -t image_array <<< "$IMAGES"
     local image_count=${#image_array[@]}
@@ -316,8 +413,10 @@ scan_vm() {
 
     local scan_mode="online"
     local registry="172.30.0.1:31000"
-    if [ "$vm_name" = "$GATEWAY_VM" ]; then
+    if [ "$vm_type" = "gateway" ]; then
         scan_mode="airgapped"
+    elif [ "$vm_type" = "switch" ]; then
+        scan_mode="sonic-airgapped"
     fi
 
     echo "Collecting all SARIF files from VM..."
@@ -410,7 +509,7 @@ scan_vm() {
                '.runs[0].properties = {
                  vmContext: {
                    name: $vm_name,
-                   type: (if ($vm_name | startswith("control")) then "control" elif ($vm_name | startswith("gateway")) then "gateway" else "unknown" end),
+                   type: (if ($vm_name | startswith("control")) then "control" elif ($vm_name | startswith("gateway")) then "gateway" elif ($vm_name | startswith("leaf")) then "switch" else "unknown" end),
                    scanTimestamp: $scan_time,
                    environment: "vlab",
                    scanMode: $scan_mode,
@@ -450,7 +549,7 @@ scan_vm() {
                .runs[0].results[] |= . + {
                  properties: {
                    vmName: $vm_name,
-                   vmType: (if ($vm_name | startswith("control")) then "control" elif ($vm_name | startswith("gateway")) then "gateway" else "unknown" end),
+                   vmType: (if ($vm_name | startswith("control")) then "control" elif ($vm_name | startswith("gateway")) then "gateway" elif ($vm_name | startswith("leaf")) then "switch" else "unknown" end),
                    scanContext: ("runtime-deployment-" + $scan_mode)
                  }
                }' "$consolidated_sarif" > "${consolidated_sarif}.enhanced"
@@ -499,7 +598,12 @@ scan_vm() {
         return 1
     fi
 
-    if [ "$vm_name" = "$GATEWAY_VM" ]; then
+    # Update the appropriate counters based on VM type
+    if [ "$vm_name" = "$SWITCH_VM" ]; then
+        SWITCH_HIGH_VULNS=$local_high_vulns
+        SWITCH_CRITICAL_VULNS=$local_critical_vulns
+        SWITCH_IMAGES_SCANNED=$local_images_scanned
+    elif [ "$vm_name" = "$GATEWAY_VM" ]; then
         GATEWAY_HIGH_VULNS=$local_high_vulns
         GATEWAY_CRITICAL_VULNS=$local_critical_vulns
         GATEWAY_IMAGES_SCANNED=$local_images_scanned
@@ -542,6 +646,14 @@ else
     GATEWAY_RESULT=0
 fi
 
+if [ "$RUN_SWITCH" = true ]; then
+    scan_vm "$SWITCH_VM"
+    SWITCH_RESULT=$?
+else
+    echo "Skipping Switch VM scan (disabled)"
+    SWITCH_RESULT=0
+fi
+
 # Create the final consolidated SARIF report with deduplication of vulnerabilities
 create_final_sarif_report() {
     echo -e "${YELLOW}Creating final consolidated SARIF report...${NC}"
@@ -555,6 +667,10 @@ create_final_sarif_report() {
 
     if [ "$RUN_GATEWAY" = true ] && [ -f "sarif-reports/trivy-consolidated-${GATEWAY_VM}.sarif" ]; then
         sarif_files+=("sarif-reports/trivy-consolidated-${GATEWAY_VM}.sarif")
+    fi
+
+    if [ "$RUN_SWITCH" = true ] && [ -f "sarif-reports/trivy-consolidated-${SWITCH_VM}.sarif" ]; then
+        sarif_files+=("sarif-reports/trivy-consolidated-${SWITCH_VM}.sarif")
     fi
 
     # If no SARIF files found, exit
@@ -578,14 +694,16 @@ create_final_sarif_report() {
             # Safely extract results from each file
             (.[0].runs[0].results // []) as $results1 |
             (if (. | length) > 1 then (.[1].runs[0].results // []) else [] end) as $results2 |
+            (if (. | length) > 2 then (.[2].runs[0].results // []) else [] end) as $results3 |
 
             # Safely extract rules from each file
             (.[0].runs[0].tool.driver.rules // []) as $rules1 |
             (if (. | length) > 1 then (.[1].runs[0].tool.driver.rules // []) else [] end) as $rules2 |
+            (if (. | length) > 2 then (.[2].runs[0].tool.driver.rules // []) else [] end) as $rules3 |
 
             # Combine arrays safely
-            ($results1 + $results2) as $all_results |
-            ($rules1 + $rules2 | unique_by(.id)) as $all_rules |
+            ($results1 + $results2 + $results3) as $all_results |
+            ($rules1 + $rules2 + $rules3 | unique_by(.id)) as $all_rules |
 
             # Build final structure
             $base |
@@ -661,9 +779,9 @@ create_final_sarif_report() {
 }
 
 # Create the final deduplicated SARIF report for GitHub Security
-TOTAL_IMAGES_SCANNED=$((CONTROL_IMAGES_SCANNED + GATEWAY_IMAGES_SCANNED))
-TOTAL_CRITICAL_VULNS=$((CONTROL_CRITICAL_VULNS + GATEWAY_CRITICAL_VULNS))
-TOTAL_HIGH_VULNS=$((CONTROL_HIGH_VULNS + GATEWAY_HIGH_VULNS))
+TOTAL_IMAGES_SCANNED=$((CONTROL_IMAGES_SCANNED + GATEWAY_IMAGES_SCANNED + SWITCH_IMAGES_SCANNED))
+TOTAL_CRITICAL_VULNS=$((CONTROL_CRITICAL_VULNS + GATEWAY_CRITICAL_VULNS + SWITCH_CRITICAL_VULNS))
+TOTAL_HIGH_VULNS=$((CONTROL_HIGH_VULNS + GATEWAY_HIGH_VULNS + SWITCH_HIGH_VULNS))
 
 # Create the final deduplicated SARIF report
 create_final_sarif_report
@@ -698,13 +816,61 @@ else
     echo -e "${YELLOW}Gateway VM ($GATEWAY_VM): SKIPPED${NC}"
 fi
 
+if [ "$RUN_SWITCH" = true ]; then
+    if [ $SWITCH_RESULT -eq 0 ]; then
+        echo -e "${GREEN}SONiC Switch ($SWITCH_VM): SUCCESS (sonic-airgap)${NC}"
+        echo -e "  - Images scanned: $SWITCH_IMAGES_SCANNED"
+        echo -e "  - Critical vulnerabilities: $SWITCH_CRITICAL_VULNS"
+        echo -e "  - High vulnerabilities: $SWITCH_HIGH_VULNS"
+    else
+        echo -e "${RED}SONiC Switch ($SWITCH_VM): FAILED${NC}"
+    fi
+else
+    echo -e "${YELLOW}SONiC Switch ($SWITCH_VM): SKIPPED${NC}"
+fi
+
+# Add deduplicated vulnerability counts to the summary
+if [ $FINAL_SARIF_RESULT -eq 0 ] && [ -f "sarif-reports/trivy-security-scan.sarif" ]; then
+    echo ""
+    echo -e "${GREEN}=== Deduplicated Vulnerability Summary ===${NC}"
+    echo -e "  - Unique Critical vulnerabilities: $DEDUP_CRITICAL"
+    echo -e "  - Unique High vulnerabilities: $DEDUP_HIGH"
+    echo -e "  - Total unique vulnerabilities: $((DEDUP_CRITICAL + DEDUP_HIGH))"
+    echo -e "  - Total instances across all images: $((TOTAL_CRITICAL_VULNS + TOTAL_HIGH_VULNS))"
+    
+    # Add VM-specific unique vulnerability counts
+    echo ""
+    echo -e "${GREEN}=== VM-Specific Unique Vulnerabilities ===${NC}"
+
+    # For Control VM
+    if [ "$RUN_CONTROL" = true ] && [ -f "sarif-reports/trivy-consolidated-${CONTROL_VM}.sarif" ]; then
+        CONTROL_UNIQUE_CRITICAL=$(jq "[.runs[0].tool.driver.rules[]? | select(.properties.tags | contains([\"CRITICAL\"]))] | length" "sarif-reports/trivy-consolidated-${CONTROL_VM}.sarif" 2>/dev/null || echo 0)
+        CONTROL_UNIQUE_HIGH=$(jq "[.runs[0].tool.driver.rules[]? | select(.properties.tags | contains([\"HIGH\"]))] | length" "sarif-reports/trivy-consolidated-${CONTROL_VM}.sarif" 2>/dev/null || echo 0)
+        echo -e "  - Control VM: $CONTROL_UNIQUE_CRITICAL critical, $CONTROL_UNIQUE_HIGH high (total: $((CONTROL_UNIQUE_CRITICAL + CONTROL_UNIQUE_HIGH)))"
+    fi
+
+    # For Gateway VM 
+    if [ "$RUN_GATEWAY" = true ] && [ -f "sarif-reports/trivy-consolidated-${GATEWAY_VM}.sarif" ]; then
+        GATEWAY_UNIQUE_CRITICAL=$(jq "[.runs[0].tool.driver.rules[]? | select(.properties.tags | contains([\"CRITICAL\"]))] | length" "sarif-reports/trivy-consolidated-${GATEWAY_VM}.sarif" 2>/dev/null || echo 0)
+        GATEWAY_UNIQUE_HIGH=$(jq "[.runs[0].tool.driver.rules[]? | select(.properties.tags | contains([\"HIGH\"]))] | length" "sarif-reports/trivy-consolidated-${GATEWAY_VM}.sarif" 2>/dev/null || echo 0)
+        echo -e "  - Gateway VM: $GATEWAY_UNIQUE_CRITICAL critical, $GATEWAY_UNIQUE_HIGH high (total: $((GATEWAY_UNIQUE_CRITICAL + GATEWAY_UNIQUE_HIGH)))"
+    fi
+
+    # For Switch VM
+    if [ "$RUN_SWITCH" = true ] && [ -f "sarif-reports/trivy-consolidated-${SWITCH_VM}.sarif" ]; then
+        SWITCH_UNIQUE_CRITICAL=$(jq "[.runs[0].tool.driver.rules[]? | select(.properties.tags | contains([\"CRITICAL\"]))] | length" "sarif-reports/trivy-consolidated-${SWITCH_VM}.sarif" 2>/dev/null || echo 0)
+        SWITCH_UNIQUE_HIGH=$(jq "[.runs[0].tool.driver.rules[]? | select(.properties.tags | contains([\"HIGH\"]))] | length" "sarif-reports/trivy-consolidated-${SWITCH_VM}.sarif" 2>/dev/null || echo 0)
+        echo -e "  - SONiC Switch: $SWITCH_UNIQUE_CRITICAL critical, $SWITCH_UNIQUE_HIGH high (total: $((SWITCH_UNIQUE_CRITICAL + SWITCH_UNIQUE_HIGH)))"
+    fi
+fi
+
 echo ""
 echo "Results directory: $RESULTS_DIR"
 echo "SARIF directory: sarif-reports"
 echo "Final SARIF report: sarif-reports/trivy-security-scan.sarif"
 echo "VLAB log: $VLAB_LOG"
 
-if [ ! -z "$GITHUB_STEP_SUMMARY" ] && [ -f "$GITHUB_STEP_SUMMARY" ]; then
+    if [ ! -z "$GITHUB_STEP_SUMMARY" ] && [ -f "$GITHUB_STEP_SUMMARY" ]; then
     echo "## Security Scan Summary" >> $GITHUB_STEP_SUMMARY
     echo "- **Total images scanned:** $TOTAL_IMAGES_SCANNED" >> $GITHUB_STEP_SUMMARY
 
@@ -729,6 +895,12 @@ if [ ! -z "$GITHUB_STEP_SUMMARY" ] && [ -f "$GITHUB_STEP_SUMMARY" ]; then
         echo "- **Gateway VM container images scanned:** $GATEWAY_IMAGES_SCANNED" >> $GITHUB_STEP_SUMMARY
         echo "  - Critical vulnerabilities: $GATEWAY_CRITICAL_VULNS" >> $GITHUB_STEP_SUMMARY
         echo "  - High vulnerabilities: $GATEWAY_HIGH_VULNS" >> $GITHUB_STEP_SUMMARY
+    fi
+
+    if [ "$RUN_SWITCH" = true ]; then
+        echo "- **SONiC Switch container images scanned:** $SWITCH_IMAGES_SCANNED" >> $GITHUB_STEP_SUMMARY
+        echo "  - Critical vulnerabilities: $SWITCH_CRITICAL_VULNS" >> $GITHUB_STEP_SUMMARY
+        echo "  - High vulnerabilities: $SWITCH_HIGH_VULNS" >> $GITHUB_STEP_SUMMARY
     fi
 
     echo "" >> $GITHUB_STEP_SUMMARY
@@ -758,10 +930,15 @@ else
     if [ "$RUN_GATEWAY" = true ] && [ $GATEWAY_RESULT -ne 0 ]; then
         SUCCESS=false
     fi
+    if [ "$RUN_SWITCH" = true ] && [ $SWITCH_RESULT -ne 0 ]; then
+        SUCCESS=false
+    fi
 fi
 
 if [ "$SUCCESS" = true ]; then
-    if [ "$RUN_CONTROL" = true ] && [ $CONTROL_RESULT -ne 0 ] || [ "$RUN_GATEWAY" = true ] && [ $GATEWAY_RESULT -ne 0 ]; then
+    if [ "$RUN_CONTROL" = true ] && [ $CONTROL_RESULT -ne 0 ] || \
+       [ "$RUN_GATEWAY" = true ] && [ $GATEWAY_RESULT -ne 0 ] || \
+       [ "$RUN_SWITCH" = true ] && [ $SWITCH_RESULT -ne 0 ]; then
         echo -e "${YELLOW}Security scan completed with some errors, but generated usable results${NC}"
     else
         echo -e "${GREEN}Security scan completed successfully${NC}"
@@ -774,6 +951,9 @@ if [ "$SUCCESS" = true ]; then
     fi
     if [ "$RUN_GATEWAY" = true ]; then
         echo -e "${YELLOW}To manually update Gateway VM: Upload and run trivy-setup-airgapped.sh${NC}"
+    fi
+    if [ "$RUN_SWITCH" = true ]; then
+        echo -e "${YELLOW}To manually update SONiC Switch: Upload and run trivy-setup-sonic-airgapped.sh${NC}"
     fi
     exit 0
 else
