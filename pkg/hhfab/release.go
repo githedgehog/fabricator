@@ -64,6 +64,10 @@ func (testCtx *VPCPeeringTestCtx) setupTest(ctx context.Context) error {
 	if err := DoVLABSetupVPCs(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.opts); err != nil {
 		return fmt.Errorf("setting up VPCs: %w", err)
 	}
+	// in case of L3 VPC mode, we need to give it time to switch to the longer lease time and switches to learn the routes
+	if testCtx.opts.VPCMode == vpcapi.VPCModeL3VNI || testCtx.opts.VPCMode == vpcapi.VPCModeL3Flat {
+		time.Sleep(10 * time.Second)
+	}
 
 	return nil
 }
@@ -1151,6 +1155,11 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool,
 		if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, server, fmt.Sprintf("/opt/bin/hhnet vlan %d %s", vlan, serverPortName)); err != nil {
 			return fmt.Errorf("configuring VLAN on %s: %w", server, err)
 		}
+		// in case of L3 VPC mode, we need to give it time to switch to the longer lease time and switches to learn the routes
+		if testCtx.opts.VPCMode == vpcapi.VPCModeL3VNI || testCtx.opts.VPCMode == vpcapi.VPCModeL3Flat {
+			time.Sleep(10 * time.Second)
+		}
+
 		slog.Debug("All state restored")
 
 		return nil
@@ -1393,6 +1402,10 @@ func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (bool, []Re
 		cmd := fmt.Sprintf("/opt/bin/hhnet bond 1001 %s enp2s1 enp2s2", testCtx.opts.HashPolicy)
 		if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, serverName, cmd); err != nil {
 			return fmt.Errorf("bonding interfaces on %s: %w", serverName, err)
+		}
+		// in case of L3 VPC mode, we need to give it time to switch to the longer lease time and switches to learn the routes
+		if testCtx.opts.VPCMode == vpcapi.VPCModeL3VNI || testCtx.opts.VPCMode == vpcapi.VPCModeL3Flat {
+			time.Sleep(10 * time.Second)
 		}
 
 		return nil
