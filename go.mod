@@ -41,8 +41,8 @@ require (
 	github.com/vishvananda/netlink v1.3.1
 	go.githedgehog.com/fabric v0.79.0
 	go.githedgehog.com/gateway v0.10.0
-	golang.org/x/crypto v0.38.0
-	golang.org/x/mod v0.24.0
+	golang.org/x/crypto v0.39.0
+	golang.org/x/mod v0.25.0
 	golang.org/x/sync v0.15.0
 	golang.org/x/term v0.32.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
@@ -344,7 +344,7 @@ require (
 	golang.org/x/net v0.40.0 // indirect
 	golang.org/x/oauth2 v0.30.0 // indirect
 	golang.org/x/sys v0.33.0 // indirect
-	golang.org/x/text v0.25.0 // indirect
+	golang.org/x/text v0.26.0 // indirect
 	golang.org/x/time v0.11.0 // indirect
 	golang.org/x/tools v0.33.0 // indirect
 	golang.org/x/xerrors v0.0.0-20231012003039-104605ab7028 // indirect
