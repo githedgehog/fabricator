@@ -113,3 +113,20 @@ plugins:
       - --name
       - $NAME
       - --yes
+
+  fabricswitchecmproceqpn:
+    shortCut: Shift-Q
+    description: Toggle RoCE QPN
+    scopes:
+      - switch
+      - agent
+    confirm: true
+    background: false
+    command: kubectl
+    args:
+      - fabric
+      - switch
+      - ecmp-roce-qpn
+      - --name
+      - $NAME
+      - --yes
