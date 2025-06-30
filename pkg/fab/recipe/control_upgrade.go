@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"time"
 
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
@@ -170,7 +171,11 @@ func (c *ControlUpgrade) uploadAirgap(ctx context.Context, username, password st
 		return fmt.Errorf("getting registry URL: %w", err)
 	}
 
-	airgapArts, err := comp.CollectArtifacts(c.Fab, AirgapArtifactLists...)
+	arts := slices.Clone(AirgapArtifactsBase)
+	if c.Fab.Spec.Config.Gateway.Enable {
+		arts = append(arts, AirgapArtifactsGateway...)
+	}
+	airgapArts, err := comp.CollectArtifacts(c.Fab, arts...)
 	if err != nil {
 		return fmt.Errorf("collecting airgap artifacts: %w", err)
 	}
@@ -449,15 +454,21 @@ func (c *ControlUpgrade) installK9s() error {
 		return fmt.Errorf("creating k9s config dir %q: %w", configDirPath, err)
 	}
 
-	configPath := filepath.Join(configDirPath, k9s.PluginsFile)
-	if err := os.WriteFile(configPath, k9s.Plugins, 0o644); err != nil { //nolint:gosec
-		return fmt.Errorf("writing k9s config file %q: %w", k9s.PluginsFile, err)
+	configPath := filepath.Join(configDirPath, k9s.ConfigFile)
+	if err := os.WriteFile(configPath, k9s.Config, 0o644); err != nil { //nolint:gosec
+		return fmt.Errorf("writing k9s config file %q: %w", k9s.ConfigFile, err)
+	}
+
+	pluginsPath := filepath.Join(configDirPath, k9s.PluginsFile)
+	if err := os.WriteFile(pluginsPath, k9s.Plugins, 0o644); err != nil { //nolint:gosec
+		return fmt.Errorf("writing k9s plugins file %q: %w", k9s.PluginsFile, err)
 	}
 
 	for _, path := range []string{
 		k9s.HomeConfigDir,
 		configDirPath,
 		configPath,
+		pluginsPath,
 	} {
 		if err := os.Chown(path, k9s.UserID, k9s.GroupID); err != nil {
 			return fmt.Errorf("chown path %q: %w", path, err)

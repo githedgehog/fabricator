@@ -64,6 +64,10 @@ func (testCtx *VPCPeeringTestCtx) setupTest(ctx context.Context) error {
 	if err := DoVLABSetupVPCs(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.opts); err != nil {
 		return fmt.Errorf("setting up VPCs: %w", err)
 	}
+	// in case of L3 VPC mode, we need to give it time to switch to the longer lease time and switches to learn the routes
+	if testCtx.opts.VPCMode == vpcapi.VPCModeL3VNI || testCtx.opts.VPCMode == vpcapi.VPCModeL3Flat {
+		time.Sleep(10 * time.Second)
+	}
 
 	return nil
 }
@@ -1151,6 +1155,11 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool,
 		if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, server, fmt.Sprintf("/opt/bin/hhnet vlan %d %s", vlan, serverPortName)); err != nil {
 			return fmt.Errorf("configuring VLAN on %s: %w", server, err)
 		}
+		// in case of L3 VPC mode, we need to give it time to switch to the longer lease time and switches to learn the routes
+		if testCtx.opts.VPCMode == vpcapi.VPCModeL3VNI || testCtx.opts.VPCMode == vpcapi.VPCModeL3Flat {
+			time.Sleep(10 * time.Second)
+		}
+
 		slog.Debug("All state restored")
 
 		return nil
@@ -1394,6 +1403,10 @@ func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (bool, []Re
 		if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, serverName, cmd); err != nil {
 			return fmt.Errorf("bonding interfaces on %s: %w", serverName, err)
 		}
+		// in case of L3 VPC mode, we need to give it time to switch to the longer lease time and switches to learn the routes
+		if testCtx.opts.VPCMode == vpcapi.VPCModeL3VNI || testCtx.opts.VPCMode == vpcapi.VPCModeL3Flat {
+			time.Sleep(10 * time.Second)
+		}
 
 		return nil
 	})
@@ -1432,6 +1445,12 @@ func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (bool, []Re
 	} else {
 		mtuFound = true
 	}
+
+	// make sure to check the DHCP lease time after initial short lease time for L3 VPC modes
+	if testCtx.opts.VPCMode == vpcapi.VPCModeL3VNI || testCtx.opts.VPCMode == vpcapi.VPCModeL3Flat {
+		time.Sleep(10 * time.Second)
+	}
+
 	out, leaseErr := execNodeCmdWOutput(testCtx.hhfabBin, testCtx.workDir, serverName, "ip addr show dev bond0.1001 proto 4 | grep valid_lft")
 	if leaseErr != nil {
 		slog.Error("failed to get lease time", "error", leaseErr)

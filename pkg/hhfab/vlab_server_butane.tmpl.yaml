@@ -114,3 +114,10 @@ storage:
 
           [Link]
           Name=enp2s2
+
+    - path: /etc/sysctl.d/arp.conf
+      mode: 0644
+      contents:
+        inline: |
+          net.ipv4.conf.all.arp_notify = 1
+          net.ipv4.conf.all.arp_announce = 2

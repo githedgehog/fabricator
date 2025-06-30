@@ -936,8 +936,9 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 			return fmt.Errorf("installing hhnet: %w", err)
 		}
 
+		toolboxPath := filepath.Join(flatcar.Home, "toolbox")
 		if err := d.WithORAS(ctx, flatcar.ToolboxRef, flatcar.ToolboxVersion(c.Fab), func(cachePath string) error {
-			if err := sshutil.UploadPathWith(ftp, filepath.Join(cachePath, "toolbox.tar"), "/tmp/toolbox"); err != nil {
+			if err := sshutil.UploadPathWith(ftp, filepath.Join(cachePath, "toolbox.tar"), toolboxPath); err != nil {
 				return fmt.Errorf("uploading: %w", err)
 			}
 
@@ -946,11 +947,15 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 			return fmt.Errorf("uploading toolbox image: %w", err)
 		}
 
-		if _, _, err := ssh.Run("bash -c 'sudo ctr image import /tmp/toolbox'", 3*time.Minute); err != nil {
-			return fmt.Errorf("installing toolbox: %w", err)
+		if _, _, err := ssh.Run(fmt.Sprintf("bash -c 'sudo ctr image import %s'", toolboxPath), 3*time.Minute); err != nil {
+			return fmt.Errorf("loading toolbox into containerd: %w", err)
 		}
 
-		if err := ftp.Remove("/tmp/toolbox"); err != nil {
+		if _, _, err := ssh.Run(fmt.Sprintf("bash -c 'sudo docker load -i %s'", toolboxPath), 3*time.Minute); err != nil {
+			return fmt.Errorf("loading toolbox into docker: %w", err)
+		}
+
+		if err := ftp.Remove(toolboxPath); err != nil {
 			return fmt.Errorf("removing toolbox image: %w", err)
 		}
 

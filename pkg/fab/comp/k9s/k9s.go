@@ -16,9 +16,13 @@ const (
 	HomeConfigDir = "/home/core/.config"
 	ConfigDir     = "k9s"
 	PluginsFile   = "plugins.yaml"
+	ConfigFile    = "config.yaml"
 	UserID        = 500 // "core" user
 	GroupID       = 500 // "core" group
 )
+
+//go:embed k9s_config.yaml
+var Config []byte
 
 //go:embed k9s_plugins.yaml
 var Plugins []byte

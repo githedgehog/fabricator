@@ -13,7 +13,7 @@ import (
 
 var (
 	FabricatorVersion = meta.Version(version.Version)
-	FabricVersion     = meta.Version("v0.79.0")
+	FabricVersion     = meta.Version("v0.80.0")
 	GatewayVersion    = meta.Version("v0.10.0")
 )
 
@@ -23,7 +23,7 @@ var Versions = fabapi.Versions{
 		Zot:         "v2.1.1",
 		CertManager: "v1.17.1",
 		K9s:         "v0.50.5",
-		Toolbox:     "latest",  // TODO use specific version, move to fabricator repo
+		Toolbox:     "v0.2.0",  // TODO move to fabricator repo?
 		Reloader:    "v1.0.40", // TODO upgrade or get rid of?
 		NTP:         "v0.0.2",
 		NTPChart:    FabricatorVersion,

@@ -61,8 +61,6 @@ function get_ip() {
         exit 1
     fi
     echo "$ip"
-
-    arping -A -c 2 -I "$iface_name" "$(echo $ip | cut -d'/' -f1)" 1> /dev/null
 }
 
 # Usage:

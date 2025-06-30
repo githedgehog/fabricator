@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/artificer"
@@ -48,7 +49,7 @@ const (
 	IncludeName = "include.yaml"
 )
 
-var AirgapArtifactLists = []comp.ListOCIArtifacts{
+var AirgapArtifactsBase = []comp.ListOCIArtifacts{
 	flatcar.Artifacts,
 	certmanager.Artifacts,
 	zot.Artifacts,
@@ -56,6 +57,9 @@ var AirgapArtifactLists = []comp.ListOCIArtifacts{
 	fabric.Artifacts,
 	ntp.Artifacts,
 	f8r.Artifacts,
+}
+
+var AirgapArtifactsGateway = []comp.ListOCIArtifacts{
 	gateway.Artifacts,
 }
 
@@ -179,7 +183,11 @@ func (b *ControlInstallBuilder) addPayload(ctx context.Context, slog *slog.Logge
 	if b.Fab.Spec.Config.Registry.IsAirgap() {
 		slog.Info("Adding airgap artifacts to installer")
 
-		airgapArts, err := comp.CollectArtifacts(b.Fab, AirgapArtifactLists...)
+		arts := slices.Clone(AirgapArtifactsBase)
+		if b.Fab.Spec.Config.Gateway.Enable {
+			arts = append(arts, AirgapArtifactsGateway...)
+		}
+		airgapArts, err := comp.CollectArtifacts(b.Fab, arts...)
 		if err != nil {
 			return fmt.Errorf("collecting airgap artifacts: %w", err)
 		}

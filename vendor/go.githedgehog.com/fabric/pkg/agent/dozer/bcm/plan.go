@@ -71,6 +71,7 @@ func (p *BroadcomProcessor) PlanDesiredState(_ context.Context, agent *agentapi.
 	spec := &dozer.Spec{
 		ZTP:             pointer.To(false),
 		Hostname:        pointer.To(agent.Name),
+		ECMPRoCEQPN:     pointer.To(agent.Spec.Switch.ECMP.RoCEQPN),
 		LLDP:            &dozer.SpecLLDP{},
 		LLDPInterfaces:  map[string]*dozer.SpecLLDPInterface{},
 		NTP:             &dozer.SpecNTP{},
@@ -282,6 +283,10 @@ func planNTP(agent *agentapi.Agent, spec *dozer.Spec) error {
 }
 
 func planBreakouts(agent *agentapi.Agent, spec *dozer.Spec) error {
+	if agent.Spec.Switch.RoCE {
+		return nil // no breakouts config when RoCE is enabled
+	}
+
 	def, err := agent.Spec.SwitchProfile.GetBreakoutDefaults(&agent.Spec.Switch)
 	if err != nil {
 		return errors.Wrap(err, "failed to get breakout defaults")
@@ -1119,6 +1124,7 @@ func planVXLAN(agent *agentapi.Agent, spec *dozer.Spec) error {
 		VTEPFabric: {
 			SourceIP:        pointer.To(ip.String()),
 			SourceInterface: pointer.To(LoopbackVTEP),
+			QoSUniform:      pointer.To(agent.Spec.Switch.RoCE),
 		},
 	}
 
