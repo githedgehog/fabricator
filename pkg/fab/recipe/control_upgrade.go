@@ -454,15 +454,21 @@ func (c *ControlUpgrade) installK9s() error {
 		return fmt.Errorf("creating k9s config dir %q: %w", configDirPath, err)
 	}
 
-	configPath := filepath.Join(configDirPath, k9s.PluginsFile)
-	if err := os.WriteFile(configPath, k9s.Plugins, 0o644); err != nil { //nolint:gosec
-		return fmt.Errorf("writing k9s config file %q: %w", k9s.PluginsFile, err)
+	configPath := filepath.Join(configDirPath, k9s.ConfigFile)
+	if err := os.WriteFile(configPath, k9s.Config, 0o644); err != nil { //nolint:gosec
+		return fmt.Errorf("writing k9s config file %q: %w", k9s.ConfigFile, err)
+	}
+
+	pluginsPath := filepath.Join(configDirPath, k9s.PluginsFile)
+	if err := os.WriteFile(pluginsPath, k9s.Plugins, 0o644); err != nil { //nolint:gosec
+		return fmt.Errorf("writing k9s plugins file %q: %w", k9s.PluginsFile, err)
 	}
 
 	for _, path := range []string{
 		k9s.HomeConfigDir,
 		configDirPath,
 		configPath,
+		pluginsPath,
 	} {
 		if err := os.Chown(path, k9s.UserID, k9s.GroupID); err != nil {
 			return fmt.Errorf("chown path %q: %w", path, err)
