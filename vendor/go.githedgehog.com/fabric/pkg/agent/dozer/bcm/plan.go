@@ -71,6 +71,7 @@ func (p *BroadcomProcessor) PlanDesiredState(_ context.Context, agent *agentapi.
 	spec := &dozer.Spec{
 		ZTP:             pointer.To(false),
 		Hostname:        pointer.To(agent.Name),
+		ECMPRoCEQPN:     pointer.To(agent.Spec.Switch.ECMP.RoCEQPN),
 		LLDP:            &dozer.SpecLLDP{},
 		LLDPInterfaces:  map[string]*dozer.SpecLLDPInterface{},
 		NTP:             &dozer.SpecNTP{},
@@ -1119,6 +1120,7 @@ func planVXLAN(agent *agentapi.Agent, spec *dozer.Spec) error {
 		VTEPFabric: {
 			SourceIP:        pointer.To(ip.String()),
 			SourceInterface: pointer.To(LoopbackVTEP),
+			QoSUniform:      pointer.To(agent.Spec.Switch.RoCE),
 		},
 	}
 
