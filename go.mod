@@ -55,7 +55,7 @@ require (
 	k8s.io/utils v0.0.0-20250321185631-1f6e0b77f77e
 	oras.land/oras-go/v2 v2.6.0
 	sigs.k8s.io/controller-runtime v0.20.4
-	sigs.k8s.io/yaml v1.4.0
+	sigs.k8s.io/yaml v1.5.0
 )
 
 require (
@@ -335,6 +335,7 @@ require (
 	go.uber.org/automaxprocs v1.6.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.0 // indirect
+	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	go4.org v0.0.0-20230225012048-214862532bf5 // indirect
 	go4.org/intern v0.0.0-20230205224052-192e9f60865c // indirect
 	go4.org/unsafe/assume-no-moving-gc v0.0.0-20230525183740-e7c30c78aeb2 // indirect
