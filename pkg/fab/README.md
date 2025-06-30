@@ -5,7 +5,7 @@
 Stable version is listed on the [Flatcar releases page](https://www.flatcar.org/releases).
 
 ```bash
-export FLATCAR_VERSION="v4152.2.3"
+export FLATCAR_VERSION="v4230.2.0"
 export FLATCAR_VERSION_UPSTREAM="${FLATCAR_VERSION:1}"
 
 wget "https://stable.release.flatcar-linux.net/amd64-usr/${FLATCAR_VERSION_UPSTREAM}/flatcar_production_qemu_image.img"
