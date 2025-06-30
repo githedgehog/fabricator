@@ -17,6 +17,7 @@ package hhfctl
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/netip"
 	"os"
 	"os/exec"
@@ -250,4 +251,58 @@ func GetPowerInfo(sw *wiringapi.Switch) map[string]string {
 	}
 
 	return powerInfo
+}
+
+func SwitchRoCE(ctx context.Context, name string, value *bool) error {
+	kube, err := kubeutil.NewClient(ctx, "", wiringapi.SchemeBuilder)
+	if err != nil {
+		return fmt.Errorf("creating kube client: %w", err)
+	}
+
+	sw := &wiringapi.Switch{}
+	if err := kube.Get(ctx, kclient.ObjectKey{Name: name, Namespace: kmetav1.NamespaceDefault}, sw); err != nil {
+		return fmt.Errorf("getting switch %q: %w", name, err)
+	}
+
+	if value == nil {
+		sw.Spec.RoCE = !sw.Spec.RoCE
+	} else {
+		sw.Spec.RoCE = *value
+	}
+
+	slog.Info("Setting RoCE mode", "switch", name, "roce", sw.Spec.RoCE)
+
+	err = kube.Update(ctx, sw)
+	if err != nil {
+		return fmt.Errorf("updating switch object: %w", err)
+	}
+
+	return nil
+}
+
+func SwitchECMPRoCEQPN(ctx context.Context, name string, value *bool) error {
+	kube, err := kubeutil.NewClient(ctx, "", wiringapi.SchemeBuilder)
+	if err != nil {
+		return fmt.Errorf("creating kube client: %w", err)
+	}
+
+	sw := &wiringapi.Switch{}
+	if err := kube.Get(ctx, kclient.ObjectKey{Name: name, Namespace: kmetav1.NamespaceDefault}, sw); err != nil {
+		return fmt.Errorf("getting switch %q: %w", name, err)
+	}
+
+	if value == nil {
+		sw.Spec.ECMP.RoCEQPN = !sw.Spec.ECMP.RoCEQPN
+	} else {
+		sw.Spec.ECMP.RoCEQPN = *value
+	}
+
+	slog.Info("Setting ECMP RoCE QPN", "switch", name, "qpn", sw.Spec.RoCE)
+
+	err = kube.Update(ctx, sw)
+	if err != nil {
+		return fmt.Errorf("updating switch object: %w", err)
+	}
+
+	return nil
 }
