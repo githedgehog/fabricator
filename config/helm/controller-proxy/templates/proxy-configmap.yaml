@@ -8,6 +8,6 @@ data:
 {{ . | indent 4 }}
 {{- end }}
   filters.conf: |-
-{{- range .Values.TinyproxyURLs }}
+{{- range .Values.tinyproxyURLs }}
 {{ . | indent 4 }}
 {{- end }}
