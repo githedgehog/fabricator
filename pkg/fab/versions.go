@@ -13,7 +13,7 @@ import (
 
 var (
 	FabricatorVersion = meta.Version(version.Version)
-	FabricVersion     = meta.Version("v0.81.0")
+	FabricVersion     = meta.Version("v0.81.1")
 	GatewayVersion    = meta.Version("v0.10.0")
 )
 
