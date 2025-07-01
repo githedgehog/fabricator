@@ -50,10 +50,10 @@ func Install(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 
 	}
 	values, err := tmplutil.FromTemplate("values", valuesTmpl, map[string]any{
-		"Repo":         repo,
-		"Tag":          string(cfg.Status.Versions.Platform.ControllerProxy),
-		"NodePort":     NodePort,
-		"TinproxyURLs": urls,
+		"Repo":          repo,
+		"Tag":           string(cfg.Status.Versions.Platform.ControllerProxy),
+		"NodePort":      NodePort,
+		"TinyproxyURLs": urls,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("values: %w", err)

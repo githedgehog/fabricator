@@ -3,3 +3,8 @@ image:
   tag: {{ .Tag }}
 service:
   nodePort: {{ .NodePort }}
+tinyproxyURLs:
+{{- range .TinyproxyURLs }}
+  - {{ . }}
+{{- end }}
+
