@@ -1388,6 +1388,19 @@ func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (bool, []Re
 	if !ok {
 		return false, nil, errors.New("subnet subnet-01 not found in VPC vpc-01") //nolint:goerr113
 	}
+	// Get the connection used to attach the server to the VPC
+	conns := &wiringapi.ConnectionList{}
+	if err := testCtx.kube.List(ctx, conns, wiringapi.MatchingLabelsForListLabelServer(serverName)); err != nil {
+		return false, nil, fmt.Errorf("listing connections for server %q: %w", serverName, err)
+	}
+
+	if len(conns.Items) == 0 {
+		return false, nil, fmt.Errorf("no connections for server %q", serverName) //nolint:goerr113
+	}
+	if len(conns.Items) > 1 {
+		return false, nil, fmt.Errorf("multiple connections for server %q", serverName) //nolint:goerr113
+	}
+	conn := conns.Items[0]
 
 	// Set DNS, NTP and MTU
 	slog.Debug("Setting DNS, NTP, MTU and DHCP lease time")
@@ -1437,8 +1450,11 @@ func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (bool, []Re
 		if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, serverName, "/opt/bin/hhnet cleanup"); err != nil {
 			return fmt.Errorf("cleaning up interfaces on %s: %w", serverName, err)
 		}
-		// TODO: ideally this would be derived rather than hardcoded (extract the code from testing.go)
-		cmd := fmt.Sprintf("/opt/bin/hhnet bond 1001 %s enp2s1 enp2s2", testCtx.opts.HashPolicy)
+		netconfCmd, netconfErr := GetServerNetconfCmd(&conn, subnet.VLAN, testCtx.opts.HashPolicy)
+		if netconfErr != nil {
+			return fmt.Errorf("getting netconf command for server %s: %w", serverName, netconfErr)
+		}
+		cmd := fmt.Sprintf("/opt/bin/hhnet %s", netconfCmd)
 		if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, serverName, cmd); err != nil {
 			return fmt.Errorf("bonding interfaces on %s: %w", serverName, err)
 		}

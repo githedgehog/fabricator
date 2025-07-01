@@ -140,6 +140,38 @@ func GetKubeClientWithCache(ctx context.Context, workDir string) (context.Cancel
 	)
 }
 
+func GetServerNetconfCmd(conn *wiringapi.Connection, vlan uint16, hashPolicy string) (string, error) {
+	if conn == nil {
+		return "", fmt.Errorf("connection is nil")
+	}
+
+	var netconfCmd string
+
+	if conn.Spec.Unbundled != nil {
+		netconfCmd = fmt.Sprintf("vlan %d %s", vlan, conn.Spec.Unbundled.Link.Server.LocalPortName())
+	} else {
+		netconfCmd = fmt.Sprintf("bond %d %s", vlan, hashPolicy)
+
+		if conn.Spec.Bundled != nil {
+			for _, link := range conn.Spec.Bundled.Links {
+				netconfCmd += " " + link.Server.LocalPortName()
+			}
+		} else if conn.Spec.MCLAG != nil {
+			for _, link := range conn.Spec.MCLAG.Links {
+				netconfCmd += " " + link.Server.LocalPortName()
+			}
+		} else if conn.Spec.ESLAG != nil {
+			for _, link := range conn.Spec.ESLAG.Links {
+				netconfCmd += " " + link.Server.LocalPortName()
+			}
+		} else {
+			return "", fmt.Errorf("unexpected connection type for conn %q", conn.Name)
+		}
+	}
+
+	return netconfCmd, nil
+}
+
 func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) error {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
@@ -352,27 +384,9 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 			vlan = vpc.Spec.Subnets[subnetName].VLAN
 		}
 
-		netconfCmd := ""
-		if conn.Spec.Unbundled != nil {
-			netconfCmd = fmt.Sprintf("vlan %d %s", vlan, conn.Spec.Unbundled.Link.Server.LocalPortName())
-		} else {
-			netconfCmd = fmt.Sprintf("bond %d %s", vlan, opts.HashPolicy)
-
-			if conn.Spec.Bundled != nil {
-				for _, link := range conn.Spec.Bundled.Links {
-					netconfCmd += " " + link.Server.LocalPortName()
-				}
-			} else if conn.Spec.MCLAG != nil {
-				for _, link := range conn.Spec.MCLAG.Links {
-					netconfCmd += " " + link.Server.LocalPortName()
-				}
-			} else if conn.Spec.ESLAG != nil {
-				for _, link := range conn.Spec.ESLAG.Links {
-					netconfCmd += " " + link.Server.LocalPortName()
-				}
-			} else {
-				return fmt.Errorf("unexpected connection type for server %s conn %q", server.Name, conn.Name)
-			}
+		netconfCmd, netconfErr := GetServerNetconfCmd(&conn, vlan, opts.HashPolicy)
+		if netconfErr != nil {
+			return fmt.Errorf("getting netconf cmd for server %q: %w", server.Name, netconfErr)
 		}
 
 		netconfs[server.Name] = netconfCmd
