@@ -46,6 +46,7 @@ func Install(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 		if err != nil {
 			return nil, fmt.Errorf("Url parsing Loki Target failed: %w", err)
 		}
+		// TODO dedupe this array
 		urls = append(urls, u.Hostname())
 
 	}
