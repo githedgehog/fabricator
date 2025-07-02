@@ -988,6 +988,8 @@ type TestConnectivityOpts struct {
 	IPerfsSeconds     int
 	IPerfsMinSpeed    float64
 	IPerfsParallel    int64
+	IPerfsDSCP        uint8
+	IPerfsTOS         uint8
 	CurlsCount        int
 	CurlsParallel     int64
 	Sources           []string
@@ -1701,6 +1703,12 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphor
 		// it was started with -1, and if we don't add -1 it will run until the timeout
 		time.Sleep(1 * time.Second)
 		cmd := fmt.Sprintf("toolbox -q timeout -v %d iperf3 -P 4 -J -c %s -t %d", opts.IPerfsSeconds+25, toIP.String(), opts.IPerfsSeconds)
+		if opts.IPerfsDSCP > 0 {
+			cmd += fmt.Sprintf(" --dscp %d", opts.IPerfsDSCP)
+		}
+		if opts.IPerfsTOS > 0 {
+			cmd += fmt.Sprintf(" --tos %d", opts.IPerfsTOS)
+		}
 		outR, err := retrySSHCmd(ctx, fromSSH, cmd, from)
 		if err != nil {
 			return fmt.Errorf("running iperf3 client: %w", err)
