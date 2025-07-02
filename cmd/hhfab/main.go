@@ -1019,9 +1019,27 @@ func Run(ctx context.Context) error {
 								Aliases: []string{"dst"},
 								Usage:   "server to use as destination for connectivity tests (default: all servers)",
 							},
+							&cli.UintFlag{
+								Name:  "dscp",
+								Usage: "DSCP value to use for iperf3 tests (0 to disable DSCP)",
+								Value: 0,
+							},
+							&cli.UintFlag{
+								Name:  "tos",
+								Usage: "TOS value to use for iperf3 tests (0 to disable TOS)",
+								Value: 0,
+							},
 						}),
 						Before: before(false),
 						Action: func(c *cli.Context) error {
+							cliDSCP := c.Uint("dscp")
+							if cliDSCP > 63 {
+								return fmt.Errorf("dscp value must be between 0 and 63, got %d", cliDSCP) //nolint:goerr113
+							}
+							cliTOS := c.Uint("tos")
+							if cliTOS > 255 {
+								return fmt.Errorf("tos value must be between 0 and 255, got %d", cliTOS) //nolint:goerr113
+							}
 							if err := hhfab.DoVLABTestConnectivity(ctx, workDir, cacheDir, hhfab.TestConnectivityOpts{
 								WaitSwitchesReady: c.Bool("wait-switches-ready"),
 								PingsCount:        c.Int("pings"),
@@ -1030,6 +1048,8 @@ func Run(ctx context.Context) error {
 								CurlsCount:        c.Int("curls"),
 								Sources:           c.StringSlice("source"),
 								Destinations:      c.StringSlice("destination"),
+								IPerfsDSCP:        uint8(cliDSCP),
+								IPerfsTOS:         uint8(cliTOS),
 							}); err != nil {
 								return fmt.Errorf("test-connectivity: %w", err)
 							}
