@@ -13,7 +13,6 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -36,6 +35,7 @@ var (
 	errNoBundled       = errors.New("no bundled connections found")
 	errNoUnbundled     = errors.New("no unbundled connections found")
 	errNotEnoughSpines = errors.New("not enough spines found")
+	errNoRoceLeaves    = errors.New("no leaves supporting RoCE found")
 	errInitalSetup     = errors.New("initial setup failed")
 )
 
@@ -51,6 +51,7 @@ type VPCPeeringTestCtx struct {
 	extended         bool
 	failFast         bool
 	pauseOnFail      bool
+	roceLeaves       []string
 }
 
 var AllZeroPrefix = []string{"0.0.0.0/0"}
@@ -210,6 +211,7 @@ func execConfigCmd(hhfabBin, workDir, swName string, cmds ...string) error {
 		"ssh",
 		"-n",
 		swName,
+		"-b",
 		"sonic-cli",
 		"-c", "configure",
 	)
@@ -1530,9 +1532,73 @@ func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (bool, []Re
 	return false, reverts, nil
 }
 
+func (testCtx *VPCPeeringTestCtx) roceBasicTest(ctx context.Context) (bool, []RevertFunc, error) {
+	// this should never fail
+	if len(testCtx.roceLeaves) == 0 {
+		slog.Error("RoCE leaves not specified, skipping RoCE basic test")
+
+		return true, nil, errNoRoceLeaves
+	}
+	swName := testCtx.roceLeaves[0]
+	sw := &wiringapi.Switch{}
+	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: swName}, sw); err != nil {
+		return false, nil, fmt.Errorf("getting switch %s: %w", swName, err)
+	}
+	// enable RoCE on the switch if not already enabled
+	if !sw.Spec.RoCE {
+		slog.Debug("Enabling RoCE on switch", "switch", swName)
+		currGen, getGenErr := getAgentGen(ctx, testCtx.kube, swName)
+		if getGenErr != nil {
+			return false, nil, getGenErr
+		}
+		sw.Spec.RoCE = true
+		if err := testCtx.kube.Update(ctx, sw); err != nil {
+			return false, nil, fmt.Errorf("updating switch %s to enable RoCE: %w", swName, err)
+		}
+		// do we need to revert? for now I won't
+		slog.Debug("Waiting for switch to reboot after enabling RoCE", "switch", swName)
+		time.Sleep(6 * time.Minute) // wait for the switch to reboot and apply the changes
+		if err := waitAgentGen(ctx, testCtx.kube, swName, currGen); err != nil {
+			return false, nil, fmt.Errorf("waiting for agent generation after enabling RoCE: %w", err)
+		}
+		slog.Debug("Switch rebooted and RoCE enabled", "switch", swName)
+	} else {
+		slog.Debug("RoCE already enabled on switch", "switch", swName)
+	}
+
+	dscpOpts := testCtx.tcOpts
+	dscpOpts.IPerfsDSCP = 24 // Mapped to traffic class 3
+
+	slog.Debug("Clearing queue counters on switch", "switch", swName)
+	if err := execConfigCmd(testCtx.hhfabBin, testCtx.workDir, swName, "clear queue counters"); err != nil {
+		return false, nil, fmt.Errorf("clearing queue counters on switch %s: %w", swName, err)
+	}
+
+	slog.Debug("Testing connectivity with DSCP options", "dscpOpts", dscpOpts)
+	if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, dscpOpts); err != nil {
+		return false, nil, fmt.Errorf("testing connectivity with DSCP opts: %w", err)
+	}
+
+	// check counters on the RoCE enabled switch for UC3 traffic
+	slog.Debug("Checking queue counters on switch", "switch", swName)
+	// NOTE: cannot use the sonic-cli grep/except here while going trhough hhfab ssh, output gets lost somewhere
+	out, queueErr := execNodeCmdWOutput(testCtx.hhfabBin, testCtx.workDir, swName, "sonic-cli -c \"show queue counters | no-more\" | grep UC3 | grep -v \"UC3  0\"")
+	if queueErr != nil {
+		slog.Error("Failed to get queue counters", "error", queueErr)
+
+		return false, nil, fmt.Errorf("getting queue counters on switch %s: %w", swName, queueErr)
+	}
+	if out == "" {
+		return false, nil, fmt.Errorf("no non-zero queue counters found for UC3 traffic on switch %s", swName) //nolint:goerr113
+	}
+	slog.Debug("Queue counters for UC3 traffic on switch", "switch", swName, "counters", out)
+
+	return false, nil, nil
+}
+
 // Utilities and suite runners
 
-func makeTestCtx(kube kclient.Client, opts SetupVPCsOpts, workDir, cacheDir string, wipeBetweenTests bool, extName string, rtOpts ReleaseTestOpts) *VPCPeeringTestCtx {
+func makeTestCtx(kube kclient.Client, opts SetupVPCsOpts, workDir, cacheDir string, wipeBetweenTests bool, extName string, rtOpts ReleaseTestOpts, roceLeaves []string) *VPCPeeringTestCtx {
 	testCtx := new(VPCPeeringTestCtx)
 	testCtx.kube = kube
 	testCtx.workDir = workDir
@@ -1555,6 +1621,7 @@ func makeTestCtx(kube kclient.Client, opts SetupVPCsOpts, workDir, cacheDir stri
 	testCtx.extended = rtOpts.Extended
 	testCtx.failFast = rtOpts.FailFast
 	testCtx.pauseOnFail = rtOpts.PauseOnFail
+	testCtx.roceLeaves = roceLeaves
 
 	return testCtx
 }
@@ -1580,6 +1647,7 @@ type SkipFlags struct {
 	NamedExternal bool `xml:"-"` // skip if the named external is not present
 	NoExternals   bool `xml:"-"` // skip if there are no externals
 	ExtendedOnly  bool `xml:"-"` // skip if extended tests are not enabled
+	RoCE          bool `xml:"-"` // skip if RoCE is not supported by any of the leaf switches
 	SubInterfaces bool `xml:"-"` // skip if subinterfaces are not supported by some of the switches
 
 	/* Note about subinterfaces; they are required in the following cases:
@@ -1825,6 +1893,14 @@ func selectAndRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, suite *J
 
 			continue
 		}
+		if test.SkipFlags.RoCE && skipFlags.RoCE {
+			suite.TestCases[i].Skipped = &Skipped{
+				Message: "There are no switches that support RoCE",
+			}
+			suite.Skipped++
+
+			continue
+		}
 	}
 	if suite.Skipped == suite.Tests {
 		slog.Info("All tests in suite skipped, skipping suite", "suite", suite.Name)
@@ -1902,6 +1978,13 @@ func makeVpcPeeringsSingleVPCSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 			F:    testCtx.spineFailoverTest,
 			SkipFlags: SkipFlags{
 				VirtualSwitch: true,
+			},
+		},
+		{
+			Name: "RoCE flag and basic traffic marking",
+			F:    testCtx.roceBasicTest,
+			SkipFlags: SkipFlags{
+				RoCE: true,
 			},
 		},
 	}
@@ -2041,12 +2124,9 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 	if err := kube.List(ctx, swList, kclient.MatchingLabels{}); err != nil {
 		return fmt.Errorf("listing switches: %w", err)
 	}
-	profiles := make([]string, 0)
+	profileMap := make(map[string]wiringapi.SwitchProfile, 0)
+	roceLeaves := make([]string, 0)
 	for _, sw := range swList.Items {
-		// currently only two flags require this loop, if they are both set we can stop
-		if skipFlags.VirtualSwitch && skipFlags.SubInterfaces {
-			break
-		}
 		// check for virtual switches
 		if !skipFlags.VirtualSwitch {
 			if sw.Spec.Profile == meta.SwitchProfileVS {
@@ -2054,25 +2134,32 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 				skipFlags.VirtualSwitch = true
 			}
 		}
-		// check for leaf switches not supporting subinterfaces
-		if !skipFlags.SubInterfaces {
-			if !sw.Spec.Role.IsLeaf() {
-				continue
-			}
-			// did we already check this profile for another leaf?
-			if slices.Contains(profiles, sw.Spec.Profile) {
-				continue
-			}
-			profile := &wiringapi.SwitchProfile{}
+		// check for leaf switches supporting subinterfaces and/or RoCE
+		if !sw.Spec.Role.IsLeaf() {
+			continue
+		}
+		profile := &wiringapi.SwitchProfile{}
+		// did we already check this profile for another leaf?
+		if p, ok := profileMap[sw.Spec.Profile]; ok {
+			profile = &p
+		} else {
 			if err := kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: sw.Spec.Profile}, profile); err != nil {
 				return fmt.Errorf("getting switch profile %s: %w", sw.Spec.Profile, err)
 			}
-			if !profile.Spec.Features.Subinterfaces {
-				slog.Info("Subinterfaces not supported on leaf switch", "switch-profile", sw.Spec.Profile, "switch", sw.Name)
-				skipFlags.SubInterfaces = true
-			}
-			profiles = append(profiles, sw.Spec.Profile)
+			profileMap[sw.Spec.Profile] = *profile
 		}
+		if !profile.Spec.Features.Subinterfaces && !skipFlags.SubInterfaces {
+			slog.Info("Subinterfaces not supported on leaf switch", "switch-profile", sw.Spec.Profile, "switch", sw.Name)
+			skipFlags.SubInterfaces = true
+		}
+		// exclude virtual switches from RoCE check, they do not implement counters
+		if profile.Spec.Features.RoCE && sw.Spec.Profile != meta.SwitchProfileVS {
+			roceLeaves = append(roceLeaves, sw.Name)
+		}
+	}
+	if len(roceLeaves) == 0 {
+		slog.Info("No RoCE capable leaves found")
+		skipFlags.RoCE = true
 	}
 	extList := &vpcapi.ExternalList{}
 	if err := kube.List(ctx, extList); err != nil {
@@ -2090,7 +2177,7 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 		}
 	}
 
-	singleVpcTestCtx := makeTestCtx(kube, opts, workDir, cacheDir, false, extName, rtOtps)
+	singleVpcTestCtx := makeTestCtx(kube, opts, workDir, cacheDir, false, extName, rtOtps, roceLeaves)
 	singleVpcSuite := makeVpcPeeringsSingleVPCSuite(singleVpcTestCtx)
 	singleVpcResults, err := selectAndRunSuite(ctx, singleVpcTestCtx, singleVpcSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
 	if err != nil && rtOtps.FailFast {
@@ -2098,7 +2185,7 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 	}
 
 	opts.ServersPerSubnet = 1
-	multiVpcTestCtx := makeTestCtx(kube, opts, workDir, cacheDir, false, extName, rtOtps)
+	multiVpcTestCtx := makeTestCtx(kube, opts, workDir, cacheDir, false, extName, rtOtps, roceLeaves)
 	multiVpcSuite := makeVpcPeeringsMultiVPCSuiteRun(multiVpcTestCtx)
 	multiVpcResults, err := selectAndRunSuite(ctx, multiVpcTestCtx, multiVpcSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
 	if err != nil && rtOtps.FailFast {
@@ -2106,7 +2193,7 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 	}
 
 	opts.SubnetsPerVPC = 1
-	basicTestCtx := makeTestCtx(kube, opts, workDir, cacheDir, true, extName, rtOtps)
+	basicTestCtx := makeTestCtx(kube, opts, workDir, cacheDir, true, extName, rtOtps, roceLeaves)
 	basicVpcSuite := makeVpcPeeringsBasicSuiteRun(basicTestCtx)
 	basicResults, err := selectAndRunSuite(ctx, basicTestCtx, basicVpcSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
 	if err != nil && rtOtps.FailFast {
