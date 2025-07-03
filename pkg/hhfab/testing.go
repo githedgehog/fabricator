@@ -172,6 +172,55 @@ func GetServerNetconfCmd(conn *wiringapi.Connection, vlan uint16, hashPolicy str
 	return netconfCmd, nil
 }
 
+// check if the server is attached via an eslag connection. if the option checkVPCMode is true,
+// we will only return true if the server is also attached to a VPC in L3 mode
+func isServerESLAG(ctx context.Context, kube client.Client, server *wiringapi.Server, checkVPCMode bool) (bool, error) {
+	if server == nil {
+		return false, fmt.Errorf("server is nil")
+	}
+
+	conns := &wiringapi.ConnectionList{}
+	if err := kube.List(ctx, conns, wiringapi.MatchingLabelsForListLabelServer(server.Name)); err != nil {
+		return false, fmt.Errorf("listing connections for server %q: %w", server.Name, err)
+	}
+
+	if len(conns.Items) == 0 {
+		return false, fmt.Errorf("no connections for server %q", server.Name)
+	}
+
+	for _, conn := range conns.Items {
+		if conn.Spec.ESLAG != nil {
+			if checkVPCMode {
+				// get the VPC this server is attached to
+				attaches := &vpcapi.VPCAttachmentList{}
+				if err := kube.List(ctx, attaches, kclient.MatchingLabels{wiringapi.LabelConnection: conn.Name}); err != nil {
+					return false, fmt.Errorf("listing VPC attachments for connection %q: %w", conn.Name, err)
+				}
+				numAttaches := len(attaches.Items)
+				if numAttaches == 0 {
+					// no VPC attachments, so we can't determine the VPC mode, but this could have
+					// been skipped by setup-vpcs if the server is ESLAG-attached, so skip it
+					return true, nil
+				} else if numAttaches > 1 {
+					return false, fmt.Errorf("expected at most one VPC attachment for connection %q, got %d", conn.Name, numAttaches)
+				}
+				attach := attaches.Items[0]
+				vpcName := attach.Spec.VPCName()
+				vpc := &vpcapi.VPC{}
+				if err := kube.Get(ctx, client.ObjectKey{Name: vpcName, Namespace: metav1.NamespaceDefault}, vpc); err != nil {
+					return false, fmt.Errorf("getting VPC %q: %w", vpcName, err)
+				}
+				if vpc.Spec.Mode == vpcapi.VPCModeL2VNI {
+					return false, nil
+				}
+			}
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
 func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) error {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
@@ -282,7 +331,18 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	attaches := []*vpcapi.VPCAttachment{}
 	netconfs := map[string]string{}
 	expectedSubnets := map[string]netip.Prefix{}
+	eslagServers := make([]string, 0)
 	for _, server := range servers.Items {
+		if opts.VPCMode != vpcapi.VPCModeL2VNI {
+			if isESLAG, err := isServerESLAG(ctx, kube, &server, false); err != nil {
+				return fmt.Errorf("checking if server %q is ESLAG: %w", server.Name, err)
+			} else if isESLAG {
+				eslagServers = append(eslagServers, server.Name)
+				slog.Warn("Skipping ESLAG-attached server", "server", server.Name)
+
+				continue
+			}
+		}
 		if serverInSubnet >= opts.ServersPerSubnet {
 			serverInSubnet = 0
 			subnetInVPC++
@@ -480,6 +540,9 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 
 	g := &errgroup.Group{}
 	for _, server := range servers.Items {
+		if slices.Contains(eslagServers, server.Name) {
+			continue
+		}
 		g.Go(func() error {
 			ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 			defer cancel()
@@ -1009,6 +1072,15 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 				continue
 			}
 		}
+		// skip ESLAG-attached servers if VPC mode is not L2VNI
+		if isEslag, err := isServerESLAG(ctx, kube, &server, true); err != nil {
+			return fmt.Errorf("checking if server %q is ESLAG: %w", server.Name, err)
+		} else if isEslag {
+			slog.Warn("Skipping ESLAG-attached server", "server", server.Name)
+
+			continue
+		}
+
 		if !strings.HasPrefix(server.Name, ServerNamePrefix) {
 			return fmt.Errorf("unexpected server name %q, should be %s<number>", server.Name, ServerNamePrefix)
 		}
