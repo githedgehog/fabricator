@@ -23,7 +23,7 @@ var Versions = fabapi.Versions{
 		Zot:         "v2.1.1",
 		CertManager: "v1.17.1",
 		K9s:         "v0.50.5",
-		Toolbox:     "v0.2.0",  // TODO move to fabricator repo?
+		Toolbox:     "v0.5.0",
 		Reloader:    "v1.0.40", // TODO upgrade or get rid of?
 		NTP:         "v0.0.2",
 		NTPChart:    FabricatorVersion,
