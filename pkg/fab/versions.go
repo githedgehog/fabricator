@@ -71,8 +71,8 @@ var Versions = fabapi.Versions{
 		API:        GatewayVersion,
 		Controller: GatewayVersion,
 		Agent:      GatewayVersion,
-		Dataplane:  "main.x86_64-unknown-linux-gnu.debug.c3ad0cef4711390d8ce6a951386b90db0352207b", // TODO set actual version
-		FRR:        "314269846f9b33fb0efe60b32fafc37d36bc61d5.debug",                               // TODO set actual version
+		Dataplane:  "2025-07-03.dirty.pr-fredi-nat-integration-with-routing.x86_64-unknown-linux-gnu.debug.414f43bd5927ae2b8fd16f9bd57e88b54a2d9f61", // TODO set actual version
+		FRR:        "e04d777f4b8836eade82072ac4732e1cf386ac9d.debug",                                                                                 // TODO set actual version
 	},
 	VLAB: fabapi.VLABVersions{
 		ONIE:    "v0.2.0",
