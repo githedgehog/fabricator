@@ -1,0 +1,260 @@
+name: Reusable VLAB Integration Test
+
+on:
+  workflow_call:
+    inputs:
+      component:
+        required: true
+        type: string
+        description: "Component being tested (fabric, gateway, dataplane, frr)"
+      go_module_ref:
+        required: false
+        type: string
+        description: "Go module commit SHA for override"
+      image_overrides:
+        required: false
+        type: string
+        description: "JSON object with container image tag overrides"
+      test_scenarios:
+        required: false
+        type: string
+        default: |
+          [
+            {"fabricmode": "spine-leaf", "gateway": false, "buildmode": "iso", "includeonie": false, "vpcmode": ""},
+            {"fabricmode": "collapsed-core", "gateway": false, "buildmode": "iso", "includeonie": false, "vpcmode": ""}
+          ]
+        description: "JSON array of test scenarios"
+      run_release_test:
+        required: false
+        type: boolean
+        default: false
+        description: "Run comprehensive release tests"
+      source_repo:
+        required: true
+        type: string
+        description: "Source repository triggering the test"
+      source_pr:
+        required: false
+        type: string
+        description: "Source PR number"
+      source_sha:
+        required: true
+        type: string
+        description: "Source commit SHA"
+
+    outputs:
+      vlab_status:
+        description: "Overall VLAB test status"
+        value: ${{ jobs.vlab-summary.outputs.status }}
+
+jobs:
+  vlab:
+    runs-on: vlab
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: ${{ fromJSON(inputs.test_scenarios) }}
+    
+    env:
+      slug: "${{ inputs.component }}-${{ matrix.scenario.fabricmode }}-${{ matrix.scenario.gateway }}-${{ matrix.scenario.includeonie }}-${{ matrix.scenario.buildmode }}-${{ matrix.scenario.vpcmode }}"
+      run_release_test: ${{ inputs.run_release_test }}
+
+    steps:
+      - name: Runner host
+        run: |
+          echo "$KUBE_NODE"
+
+      - name: Checkout fabricator
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+
+      - name: Override component Go module
+        if: inputs.go_module_ref
+        run: |
+          echo "Overriding ${{ inputs.component }} to commit ${{ inputs.go_module_ref }}"
+          go mod edit -replace=go.githedgehog.com/${{ inputs.component }}=go.githedgehog.com/${{ inputs.component }}@${{ inputs.go_module_ref }}
+          go mod download && go mod vendor
+
+      - name: Override container images
+        if: inputs.image_overrides
+        run: |
+          echo "Applying image overrides: ${{ inputs.image_overrides }}"
+          echo '${{ inputs.image_overrides }}' | jq -r 'to_entries[] | "\(.key):\(.value)"' | while IFS=: read -r image tag; do
+            echo "Overriding $image to $tag"
+            find ./config -name "*.yaml" -exec sed -i "s|${image}:.*|${image}:${tag}|g" {} \;
+          done
+
+      - name: Report test start
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const context_name = `vlab-test / ${{ env.slug }}`;
+            
+            await github.rest.repos.createCommitStatus({
+              owner: '${{ inputs.source_repo }}'.split('/')[0],
+              repo: '${{ inputs.source_repo }}'.split('/')[1],
+              sha: '${{ inputs.source_sha }}',
+              state: 'pending',
+              context: context_name,
+              description: 'VLAB integration test running...',
+              target_url: `${context.payload.repository.html_url}/actions/runs/${context.runId}`
+            });
+
+      - name: Setup local registry
+        run: |
+          just --timestamp _localreg &
+
+      - name: Build hhfab
+        run: |
+          just --timestamp oci_repo=127.0.0.1:30000 oci=http push
+
+      - name: Run VLAB release test
+        env:
+          HHFAB_REG_REPO: 127.0.0.1:30000
+          HHFAB_VLAB_COLLECT: true
+        if: ${{ env.run_release_test == 'true' }}
+        run: |
+          bin/hhfab init -v --dev \
+            -m ${{ matrix.scenario.fabricmode }} \
+            --include-onie=${{ matrix.scenario.includeonie }} \
+            --gateway=${{ matrix.scenario.gateway }}
+          
+          bin/hhfab vlab gen -v
+          export HHFAB_JOIN_TOKEN=$(openssl rand -base64 24)
+          
+          bin/hhfab vlab up -v \
+            --ready inspect \
+            --ready setup-vpcs \
+            --ready test-connectivity \
+            --ready release-test \
+            --ready exit \
+            --mode=${{ matrix.scenario.buildmode }} \
+            --vpc-mode="${{ matrix.scenario.vpcmode }}"
+          cat release-test.xml
+
+      - name: Run VLAB standard test
+        env:
+          HHFAB_REG_REPO: 127.0.0.1:30000
+          HHFAB_VLAB_COLLECT: true
+        if: ${{ env.run_release_test != 'true' }}
+        run: |
+          bin/hhfab init -v --dev \
+            -m ${{ matrix.scenario.fabricmode }} \
+            --include-onie=${{ matrix.scenario.includeonie }} \
+            --gateway=${{ matrix.scenario.gateway }}
+          
+          bin/hhfab vlab gen -v
+          export HHFAB_JOIN_TOKEN=$(openssl rand -base64 24)
+          
+          bin/hhfab vlab up -v \
+            --ready inspect \
+            --ready setup-vpcs \
+            --ready test-connectivity \
+            --ready exit \
+            --mode=${{ matrix.scenario.buildmode }} \
+            --vpc-mode="${{ matrix.scenario.vpcmode }}"
+
+      - name: Upload Test Results
+        uses: actions/upload-artifact@v4
+        if: ${{ env.run_release_test == 'true' && !cancelled() }}
+        with:
+          name: Test Results for ${{ inputs.component }}--vlab--${{ env.slug }}
+          path: release-test.xml
+
+      - name: Upload show-tech artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ${{ inputs.component }}--vlab--${{ env.slug }}--show-tech
+          path: show-tech-output
+
+      - name: Upload local registry logs
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ${{ inputs.component }}--vlab--${{ env.slug }}--registry
+          path: .zot/log
+
+      - name: Report test result
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const context_name = `vlab-test / ${{ env.slug }}`;
+            const state = '${{ job.status }}' === 'success' ? 'success' : 'failure';
+            const description = state === 'success' ? 'VLAB test passed' : 'VLAB test failed';
+            
+            await github.rest.repos.createCommitStatus({
+              owner: '${{ inputs.source_repo }}'.split('/')[0],
+              repo: '${{ inputs.source_repo }}'.split('/')[1],
+              sha: '${{ inputs.source_sha }}',
+              state: state,
+              context: context_name,
+              description: description,
+              target_url: `${context.payload.repository.html_url}/actions/runs/${context.runId}`
+            });
+
+  vlab-summary:
+    runs-on: ubuntu-latest
+    needs: [vlab]
+    if: always()
+    outputs:
+      status: ${{ steps.result.outputs.status }}
+    
+    steps:
+      - name: Check overall results
+        id: result
+        run: |
+          if [[ "${{ needs.vlab.result }}" == "success" ]]; then
+            echo "status=success" >> $GITHUB_OUTPUT
+          else
+            echo "status=failure" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Report overall result
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const state = '${{ steps.result.outputs.status }}' === 'success' ? 'success' : 'failure';
+            const description = state === 'success' ? 
+              'All VLAB tests passed' : 
+              'One or more VLAB tests failed';
+            
+            await github.rest.repos.createCommitStatus({
+              owner: '${{ inputs.source_repo }}'.split('/')[0],
+              repo: '${{ inputs.source_repo }}'.split('/')[1],
+              sha: '${{ inputs.source_sha }}',
+              state: state,
+              context: 'vlab-integration',
+              description: description,
+              target_url: `${context.payload.repository.html_url}/actions/runs/${context.runId}`
+            });
+            
+            // Post PR comment if this is from a PR
+            if ('${{ inputs.source_pr }}' !== '' && '${{ inputs.source_pr }}' !== 'main') {
+              const message = `**VLAB Integration Test ${state === 'success' ? 'Passed' : 'Failed'}**
+              
+**Component:** \`${{ inputs.component }}\`
+**Commit:** \`${{ inputs.source_sha }}\`
+**Release Test:** ${{ inputs.run_release_test && 'Yes' || 'No' }}
+
+[View detailed results](${context.payload.repository.html_url}/actions/runs/${context.runId})`;
+
+              await github.rest.issues.createComment({
+                owner: '${{ inputs.source_repo }}'.split('/')[0],
+                repo: '${{ inputs.source_repo }}'.split('/')[1],
+                issue_number: '${{ inputs.source_pr }}',
+                body: message
+              });
+            }
