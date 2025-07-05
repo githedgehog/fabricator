@@ -214,399 +214,158 @@ jobs:
             exit 1
           fi
 
+  # Using reusable VLAB workflow
   vlab:
     if: ${{ !contains(github.event.pull_request.labels.*.name, 'skip-vlab') }}
-
-    runs-on: vlab
     needs:
       - test
       - builds
-    timeout-minutes: 150
-
     strategy:
       fail-fast: false
       matrix:
-        fabricmode:
-          - spine-leaf
-        gateway:
-          - false
-        includeonie:
-          - false
-        buildmode:
-          - usb
-          - iso
-          - manual
-        vpcmode:
-          - ""
         include:
-          - fabricmode: collapsed-core
-            includeonie: false
+          - fabric_mode: spine-leaf
+            include_onie: false
             gateway: false
-            buildmode: iso
-            vpcmode: ""
-          - fabricmode: spine-leaf
+            build_mode: usb
+            vpc_mode: ""
+          - fabric_mode: spine-leaf
+            include_onie: false
             gateway: false
-            includeonie: true
-            buildmode: usb
-            vpcmode: ""
-          - fabricmode: spine-leaf
+            build_mode: iso
+            vpc_mode: ""
+          - fabric_mode: spine-leaf
+            include_onie: false
             gateway: false
-            includeonie: true
-            buildmode: iso
-            vpcmode: ""
-          - fabricmode: spine-leaf
+            build_mode: manual
+            vpc_mode: ""
+          - fabric_mode: collapsed-core
+            include_onie: false
             gateway: false
-            includeonie: false
-            buildmode: iso
-            vpcmode: l3vni
-          - fabricmode: spine-leaf
+            build_mode: iso
+            vpc_mode: ""
+          - fabric_mode: spine-leaf
+            include_onie: true
+            gateway: false
+            build_mode: usb
+            vpc_mode: ""
+          - fabric_mode: spine-leaf
+            include_onie: true
+            gateway: false
+            build_mode: iso
+            vpc_mode: ""
+          - fabric_mode: spine-leaf
+            include_onie: false
+            gateway: false
+            build_mode: iso
+            vpc_mode: l3vni
+          - fabric_mode: spine-leaf
+            include_onie: false
             gateway: true
-            includeonie: false
-            buildmode: iso
-            vpcmode: ""
-
-    env:
-      slug: "${{ matrix.fabricmode }}-${{ matrix.gateway }}-${{ matrix.includeonie }}-${{ matrix.buildmode }}-${{ matrix.vpcmode }}"
-
-      # TODO enable for scheduled (github.event_name == 'schedule'), master and release branches?
+            build_mode: iso
+            vpc_mode: ""
+    
+    uses: ./.github/workflows/run-vlab.yaml
+    with:
+      component_name: "fabricator"
+      commit_sha: ${{ github.sha }}
+      go_module_path: ""  # Empty indicates no module replacement (testing fabricator itself)
+      fabric_mode: ${{ matrix.fabric_mode }}
+      include_onie: ${{ matrix.include_onie }}
+      gateway: ${{ matrix.gateway }}
+      build_mode: ${{ matrix.build_mode }}
+      vpc_mode: ${{ matrix.vpc_mode }}
       run_release_test: ${{ inputs.run_release_test == true || contains(github.event.pull_request.labels.*.name, 'release-test') }}
+      debug_enabled: ${{ inputs.debug_enabled }}
 
-    steps:
-      - name: Runner host
-        run: |
-          echo "$KUBE_NODE"
-
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: stable
-          cache: true
-
-      - name: Setup local registry
-        run: |
-          just --timestamp _localreg &
-
-      - name: Build hhfab
-        run: |
-          just --timestamp oci_repo=127.0.0.1:30000 oci=http push
-
-      - name: hhfab release test
-        env:
-          HHFAB_REG_REPO: 127.0.0.1:30000
-          HHFAB_VLAB_COLLECT: true
-        if: ${{ env.run_release_test == 'true' }}
-        run: |
-          bin/hhfab init -v --dev -m ${{ matrix.fabricmode }} --include-onie=${{ matrix.includeonie }} --gateway=${{ matrix.gateway }}
-          bin/hhfab vlab gen -v
-          export HHFAB_JOIN_TOKEN=$(openssl rand -base64 24)
-          bin/hhfab vlab up -v --ready inspect --ready setup-vpcs --ready test-connectivity --ready release-test --ready exit --mode=${{ matrix.buildmode }} --vpc-mode="${{ matrix.vpcmode }}"
-          cat release-test.xml
-
-      - name: Upload Test Results
-        uses: actions/upload-artifact@v4
-        if: ${{ env.run_release_test == 'true' && !cancelled()}}
-        with:
-          name: Test Results for vlab--${{ env.slug }}
-          path: release-test.xml
-
-      - name: hhfab init and vlab up
-        env:
-          HHFAB_REG_REPO: 127.0.0.1:30000
-          HHFAB_VLAB_COLLECT: true
-        if: ${{ env.run_release_test != 'true' }}
-        run: |
-          bin/hhfab init -v --dev -m ${{ matrix.fabricmode }} --include-onie=${{ matrix.includeonie }} --gateway=${{ matrix.gateway }}
-          bin/hhfab vlab gen -v
-          export HHFAB_JOIN_TOKEN=$(openssl rand -base64 24)
-          bin/hhfab vlab up -v --ready inspect --ready setup-vpcs --ready test-connectivity --ready exit --mode=${{ matrix.buildmode }} --vpc-mode="${{ matrix.vpcmode }}"
-
-      - name: Upload show-tech artifacts
-        uses: actions/upload-artifact@v4
-        if: ${{ always() }}
-        with:
-          name: vlab--${{ env.slug }}--show-tech
-          path: show-tech-output
-
-      - name: Upload local registry logs
-        uses: actions/upload-artifact@v4
-        if: ${{ always() }}
-        with:
-          name: vlab--${{ env.slug }}--registry
-          path: .zot/log
-
-      - name: Setup tmate session for debug
-        if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
-        uses: mxschmitt/action-tmate@v3
-        timeout-minutes: 30
-        with:
-          limit-access-to-actor: true
-
+  # Using reusable VLAB upgrade workflow
   vlab-upgrade:
     if: ${{ !contains(github.event.pull_request.labels.*.name, 'skip-vlab') }}
-
-    runs-on: vlab
     needs:
       - test
       - builds
-    timeout-minutes: 90
-
     strategy:
       fail-fast: false
       matrix:
         include:
-          - fabricmode: spine-leaf
-            fromversion: "beta-1"
-            fromflags: "--usb"
-          - fabricmode: spine-leaf
-            fromversion: "24.09"
-            fromflags: "-m=iso"
-          - fabricmode: spine-leaf
-            fromversion: "25.01"
-            fromflags: "-m=iso"
-          - fabricmode: spine-leaf
-            fromversion: "25.02"
-            fromflags: "-m=iso"
-          - fabricmode: spine-leaf
-            fromversion: "25.03"
-            fromflags: "-m=iso"
-          - fabricmode: spine-leaf
-            fromversion: "dev"
-            fromflags: "-m=iso"
+          - fabric_mode: spine-leaf
+            from_version: "beta-1"
+            from_flags: "--usb"
+          - fabric_mode: spine-leaf
+            from_version: "24.09"
+            from_flags: "-m=iso"
+          - fabric_mode: spine-leaf
+            from_version: "25.01"
+            from_flags: "-m=iso"
+          - fabric_mode: spine-leaf
+            from_version: "25.02"
+            from_flags: "-m=iso"
+          - fabric_mode: spine-leaf
+            from_version: "25.03"
+            from_flags: "-m=iso"
+          - fabric_mode: spine-leaf
+            from_version: "dev"
+            from_flags: "-m=iso"
+    
+    uses: ./.github/workflows/run-vlab-upgrade.yaml
+    with:
+      component_name: "fabricator"
+      commit_sha: ${{ github.sha }}
+      go_module_path: ""
+      fabric_mode: ${{ matrix.fabric_mode }}
+      from_version: ${{ matrix.from_version }}
+      from_flags: ${{ matrix.from_flags }}
+      debug_enabled: ${{ inputs.debug_enabled }}
 
-    env:
-      slug: "${{ matrix.fabricmode }}-${{ matrix.fromversion }}-${{ matrix.fromflags == '--usb' && 'usb' || matrix.fromflags == '-m=iso' && 'iso' }}"
-
-    steps:
-      - name: Runner host
-        run: |
-          echo "$KUBE_NODE"
-
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: stable
-          cache: true
-
-      - name: Setup local registry
-        run: |
-          just --timestamp _localreg &
-
-      - name: Initial VLAB with old version
-        env:
-          HHFAB_REG_REPO: 127.0.0.1:30000
-          HHFAB_VLAB_COLLECT: true
-        run: |
-          mkdir old
-          curl -fsSL https://i.hhdev.io/hhfab | USE_SUDO=false INSTALL_DIR=./old VERSION="${{ matrix.fromversion }}" bash
-
-          old/hhfab init -v --dev -m ${{ matrix.fabricmode }} --include-onie=true
-          old/hhfab vlab gen -v
-          old/hhfab vlab up -v --ready setup-vpcs --ready test-connectivity --ready exit ${{ matrix.fromflags }}
-
-      - name: Upload show-tech artifacts
-        uses: actions/upload-artifact@v4
-        if: ${{ always() }}
-        with:
-          name: vlab-upgrade--${{ env.slug }}--0-before--show-tech
-          path: show-tech-output
-
-      - name: Build current hhfab
-        run: |
-          just --timestamp oci_repo=127.0.0.1:30000 oci=http push
-
-      - name: hhfab vlab up --upgrade
-        env:
-          HHFAB_REG_REPO: 127.0.0.1:30000
-          HHFAB_VLAB_COLLECT: true
-        run: |
-          bin/hhfab vlab up -v --ready inspect --ready setup-vpcs --ready test-connectivity --ready exit --upgrade
-
-      - name: Upload show-tech artifacts
-        uses: actions/upload-artifact@v4
-        if: ${{ always() }}
-        with:
-          name: vlab-upgrade--${{ env.slug }}--1-curr--show-tech
-          path: show-tech-output
-
-      - name: hhfab vlab up after upgrade
-        env:
-          HHFAB_REG_REPO: 127.0.0.1:30000
-          HHFAB_VLAB_COLLECT: true
-        run: |
-          bin/hhfab vlab up -v --ready wait --ready exit -m=manual
-
-      - name: Upload show-tech artifacts
-        uses: actions/upload-artifact@v4
-        if: ${{ always() }}
-        with:
-          name: vlab-upgrade--${{ env.slug }}--2-after--show-tech
-          path: show-tech-output
-
-      - name: Upload local registry logs
-        uses: actions/upload-artifact@v4
-        if: ${{ always() }}
-        with:
-          name: vlab-upgrade--${{ env.slug }}--registry
-          path: .zot/log
-
-      - name: Setup tmate session for debug
-        if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
-        uses: mxschmitt/action-tmate@v3
-        timeout-minutes: 30
-        with:
-          limit-access-to-actor: true
-
+  # Simplified check for matrix job results
   vlabs:
     runs-on: ubuntu-latest
     needs:
       - vlab
       - vlab-upgrade
     if: ${{ always() }}
-
     steps:
       - run: |
-          result="${{ needs.vlab.result }}"
-          if [[ $result == "success" || $result == "skipped" ]]; then
-            exit 0
-          else
+          # Check if any of the needed jobs failed
+          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" ]]; then
+            echo "One or more vlab jobs failed"
             exit 1
-          fi
-      - run: |
-          result="${{ needs.vlab-upgrade.result }}"
-          if [[ $result == "success" || $result == "skipped" ]]; then
-            exit 0
           else
-            exit 1
+            echo "All vlab jobs succeeded or were skipped"
+            exit 0
           fi
 
+  # Using reusable HLAB workflow
   hlab:
     if: ${{ !contains(github.event.pull_request.labels.*.name, 'skip-hlab') }}
-
-    runs-on: hlab
     needs:
       - test
       - builds
-    timeout-minutes: 250
-
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - fabricmode: spine-leaf
-            includeonie: true
-            buildmode: iso
-
-    env:
-      slug: "${{ matrix.fabricmode }}-${{ matrix.includeonie }}-${{ matrix.buildmode }}"
-
-      # TODO enable for scheduled (github.event_name == 'schedule'), master and release branches?
+    
+    uses: ./.github/workflows/run-hlab.yaml
+    with:
+      component_name: "fabricator"
+      commit_sha: ${{ github.sha }}
+      go_module_path: ""
+      fabric_mode: "spine-leaf"
+      include_onie: true
+      build_mode: "iso"
       run_release_test: ${{ inputs.run_release_test == true || contains(github.event.pull_request.labels.*.name, 'release-test') }}
+      debug_enabled: ${{ inputs.debug_enabled }}
 
-    steps:
-      - name: Runner host
-        run: |
-          echo "$KUBE_NODE"
-
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Checkout lab-ci repository
-        uses: actions/checkout@v4
-        with:
-          repository: githedgehog/lab-ci
-          path: './lab-ci'
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: stable
-          cache: true
-
-      - name: Setup local registry
-        run: |
-          just --timestamp _localreg &
-
-      - name: Build hhfab
-        run: |
-          just --timestamp oci_repo=127.0.0.1:30000 oci=http push
-
-      - name: hhfab release test
-        env:
-          HHFAB_REG_REPO: 127.0.0.1:30000
-          HHFAB_VLAB_COLLECT: true
-        if: ${{ env.run_release_test == 'true' }}
-        run: |
-          source "./lab-ci/envs/$KUBE_NODE/source.sh"
-          bin/hhfab init -v --dev --include-onie=${{ matrix.includeonie }} -w "./lab-ci/envs/$KUBE_NODE/wiring.yaml"
-
-          # TODO: make controls restricted again when we figure out how to get NTP upstream working for isolated VMs
-          bin/hhfab vlab up -v --ready switch-reinstall --ready inspect --ready setup-vpcs --ready test-connectivity --ready release-test --ready exit --mode=${{ matrix.buildmode }} --controls-restricted=false
-          cat release-test.xml
-
-      - name: Upload Test Results
-        uses: actions/upload-artifact@v4
-        if: ${{ env.run_release_test == 'true' && !cancelled()}}
-        with:
-          name: Test Results for hlab--${{ env.slug }}
-          path: release-test.xml
-
-      - name: hhfab basic test-connectivity
-        env:
-          HHFAB_REG_REPO: 127.0.0.1:30000
-          HHFAB_VLAB_COLLECT: true
-        if: ${{ env.run_release_test != 'true' }}
-        run: |
-          source "./lab-ci/envs/$KUBE_NODE/source.sh"
-          bin/hhfab init -v --dev --include-onie=${{ matrix.includeonie }} -w "./lab-ci/envs/$KUBE_NODE/wiring.yaml"
-
-          # TODO: make controls restricted again when we figure out how to get NTP upstream working for isolated VMs
-          bin/hhfab vlab up -v --ready switch-reinstall --ready inspect --ready setup-vpcs --ready test-connectivity --ready exit --mode=${{ matrix.buildmode }} --controls-restricted=false
-
-      - name: Upload show-tech artifacts
-        uses: actions/upload-artifact@v4
-        if: ${{ always() }}
-        with:
-          name: hlab--${{ env.slug }}--show-tech
-          path: show-tech-output
-
-      - name: Upload local registry logs
-        uses: actions/upload-artifact@v4
-        if: ${{ always() }}
-        with:
-          name: hlab--${{ env.slug }}--registry
-          path: .zot/log
-
-      - name: Setup tmate session for debug
-        if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
-        uses: mxschmitt/action-tmate@v3
-        timeout-minutes: 150
-        with:
-          limit-access-to-actor: true
-
+  # Simplified check for job results
   hlabs:
     runs-on: ubuntu-latest
     needs:
       - hlab
     if: ${{ always() }}
-
     steps:
       - run: |
-          result="${{ needs.hlab.result }}"
-          if [[ $result == "success" || $result == "skipped" ]]; then
+          if [[ "${{ needs.hlab.result }}" == "success" || "${{ needs.hlab.result }}" == "skipped" ]]; then
+            echo "HLAB job succeeded or was skipped"
             exit 0
           else
+            echo "HLAB job failed"
             exit 1
           fi
 
@@ -648,12 +407,6 @@ jobs:
         with:
           go-version: stable
           cache: true
-
-      # - name: Cache dev tools
-      #   uses: actions/cache@v3
-      #   with:
-      #     path: bin
-      #     key: bin-${{ hashFiles('hack/tools.mk') }}
 
       - name: Login to ghcr.io
         uses: docker/login-action@v3
@@ -740,12 +493,6 @@ jobs:
         with:
           go-version: stable
           cache: true
-
-      # - name: Cache dev tools
-      #   uses: actions/cache@v3
-      #   with:
-      #     path: bin
-      #     key: bin-${{ hashFiles('hack/tools.mk') }}
 
       - name: Login to ghcr.io
         uses: docker/login-action@v3
