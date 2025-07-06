@@ -146,3 +146,26 @@ oras push ghcr.io/githedgehog/sonic-bcm-private/sonic-bcm-campus:${SONIC_VERSION
 oras push ghcr.io/githedgehog/sonic-bcm-private/sonic-bcm-base:${SONIC_VERSION} sonic-broadcom-enterprise-base.bin
 oras push ghcr.io/githedgehog/sonic-bcm-private/sonic-bcm-vs:${SONIC_VERSION} sonic-vs.bin
 ```
+
+## Grafana Alloy
+
+```bash
+export ALLOY_VERSION="v1.9.2"
+export ALLOY_CHART_VERSION="1.1.2"
+
+helm repo add grafana https://grafana.github.io/helm-charts
+helm repo update
+
+helm pull grafana/alloy --version "${ALLOY_CHART_VERSION}"
+tar xzf "alloy-${ALLOY_CHART_VERSION}.tgz"
+helm package alloy --version "${ALLOY_VERSION}"
+helm push "alloy-${ALLOY_VERSION}.tgz" oci://ghcr.io/githedgehog/fabricator/charts
+rm -rf alloy*
+
+skopeo copy --all "docker://docker.io/grafana/alloy:${ALLOY_VERSION}" "docker://ghcr.io/githedgehog/fabricator/alloy:${ALLOY_VERSION}"
+
+wget "https://github.com/grafana/alloy/releases/download/${ALLOY_VERSION}/alloy-linux-amd64.zip"
+unzip alloy-linux-amd64.zip
+mv alloy-linux-amd64 alloy
+oras push "ghcr.io/githedgehog/fabricator/alloy-bin:${ALLOY_VERSION}" alloy
+```
