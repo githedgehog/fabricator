@@ -1,0 +1,114 @@
+name: Reusable VLAB for External Components
+
+on:
+  workflow_call:
+    inputs:
+      component_name:
+        description: 'Component repository name (e.g., fabric)'
+        type: string
+        required: true
+      commit_sha:
+        description: 'Commit SHA to test against'
+        type: string
+        required: true
+      go_module_path:
+        description: 'Go module path to replace'
+        type: string
+        required: true
+      fabric_version:
+        description: 'Fabric version to use (image tag)'
+        type: string
+        required: false
+        default: ''
+      test_type:
+        description: 'Which test to run'
+        type: string
+        required: false
+        default: 'vlab'
+      debug_enabled:
+        description: 'Enable tmate debugging'
+        type: boolean
+        required: false
+        default: false
+    secrets:
+      token:
+        description: 'GitHub token for status reporting'
+        required: true
+
+jobs:
+  vlab:
+    if: ${{ inputs.test_type == 'vlab' || inputs.test_type == 'all' }}
+    uses: githedgehog/fabricator/.github/workflows/run-vlab.yaml@pau/ci_refactor
+    with:
+      component_name: ${{ inputs.component_name }}
+      commit_sha: ${{ inputs.commit_sha }}
+      go_module_path: ${{ inputs.go_module_path }}
+      fabric_version: ${{ inputs.fabric_version }}
+      run_release_test: false
+      debug_enabled: ${{ inputs.debug_enabled }}
+      # Single test case - different from matrix to avoid artifact conflicts
+      matrix_config: |
+        [
+          {"fabric_mode": "spine-leaf", "include_onie": false, "gateway": false, "build_mode": "usb", "vpc_mode": ""}
+        ]
+    secrets:
+      token: ${{ secrets.token }}
+
+  # TODO: Enable when access to hlab runner is granted
+  hlab:
+    if: false # ${{ inputs.test_type == 'hlab' || inputs.test_type == 'all' }}
+    uses: githedgehog/fabricator/.github/workflows/run-hlab.yaml@pau/ci_refactor
+    with:
+      component_name: ${{ inputs.component_name }}
+      commit_sha: ${{ inputs.commit_sha }}
+      go_module_path: ${{ inputs.go_module_path }}
+      fabric_mode: spine-leaf
+      include_onie: true
+      build_mode: iso
+      run_release_test: false
+      debug_enabled: ${{ inputs.debug_enabled }}
+    secrets:
+      token: ${{ secrets.token }}
+
+  matrix:
+    if: ${{ inputs.test_type == 'matrix' || inputs.test_type == 'all' }}
+    uses: githedgehog/fabricator/.github/workflows/run-vlab.yaml@pau/ci_refactor
+    with:
+      component_name: ${{ inputs.component_name }}
+      commit_sha: ${{ inputs.commit_sha }}
+      go_module_path: ${{ inputs.go_module_path }}
+      fabric_version: ${{ inputs.fabric_version }}
+      run_release_test: false
+      debug_enabled: ${{ inputs.debug_enabled }}
+      # Full matrix from original CI (excluding spine-leaf-false-false-usb to avoid conflict with single vlab)
+      matrix_config: |
+        [
+          {"fabric_mode": "spine-leaf", "include_onie": false, "gateway": false, "build_mode": "iso", "vpc_mode": ""},
+          {"fabric_mode": "spine-leaf", "include_onie": false, "gateway": false, "build_mode": "manual", "vpc_mode": ""},
+          {"fabric_mode": "collapsed-core", "include_onie": false, "gateway": false, "build_mode": "iso", "vpc_mode": ""},
+          {"fabric_mode": "spine-leaf", "include_onie": true, "gateway": false, "build_mode": "usb", "vpc_mode": ""},
+          {"fabric_mode": "spine-leaf", "include_onie": true, "gateway": false, "build_mode": "iso", "vpc_mode": ""},
+          {"fabric_mode": "spine-leaf", "include_onie": false, "gateway": false, "build_mode": "iso", "vpc_mode": "l3vni"},
+          {"fabric_mode": "spine-leaf", "include_onie": false, "gateway": true, "build_mode": "iso", "vpc_mode": ""}
+        ]
+    secrets:
+      token: ${{ secrets.token }}
+
+  vlab-upgrade:
+    if: ${{ inputs.test_type == 'vlab-upgrade' || inputs.test_type == 'all' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        from_version: ["25.01", "25.02", "25.03"]
+    uses: githedgehog/fabricator/.github/workflows/run-vlab-upgrade.yaml@pau/ci_refactor
+    with:
+      component_name: ${{ inputs.component_name }}
+      commit_sha: ${{ inputs.commit_sha }}
+      go_module_path: ${{ inputs.go_module_path }}
+      fabric_version: ${{ inputs.fabric_version }}
+      fabric_mode: "spine-leaf"
+      from_version: ${{ matrix.from_version }}
+      from_flags: "-m=iso"
+      debug_enabled: ${{ inputs.debug_enabled }}
+    secrets:
+      token: ${{ secrets.token }}

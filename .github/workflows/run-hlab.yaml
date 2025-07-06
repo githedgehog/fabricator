@@ -1,0 +1,169 @@
+name: Run HLAB Tests
+
+on:
+  workflow_call:
+    inputs:
+      component_name:
+        description: 'Component repository name (e.g., fabric, fabricator)'
+        type: string
+        required: true
+      commit_sha:
+        description: 'Commit SHA to test against'
+        type: string
+        required: true
+      go_module_path:
+        description: 'Go module path to replace (empty for fabricator itself)'
+        type: string
+        required: false
+        default: ''
+      fabric_mode:
+        description: 'Fabric mode'
+        type: string
+        required: true
+      include_onie:
+        description: 'Include ONIE testing'
+        type: boolean
+        required: true
+      build_mode:
+        description: 'Build mode'
+        type: string
+        required: true
+      run_release_test:
+        description: 'Run release tests'
+        type: boolean
+        required: false
+        default: false
+      debug_enabled:
+        description: 'Enable tmate debugging'
+        type: boolean
+        required: false
+        default: false
+    secrets:
+      token:
+        description: 'GitHub token for status reporting'
+        required: false
+
+jobs:
+  hlab-test:
+    runs-on: hlab
+    timeout-minutes: 250
+
+    env:
+      slug: "${{ inputs.fabric_mode }}-${{ inputs.include_onie }}-${{ inputs.build_mode }}"
+      unique_id: "${{ github.run_id }}-${{ github.run_number }}"
+      run_release_test: ${{ inputs.run_release_test }}
+
+    steps:
+      - name: Runner host
+        run: |
+          echo "$KUBE_NODE"
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout lab-ci repository
+        uses: actions/checkout@v4
+        with:
+          repository: githedgehog/lab-ci
+          path: './lab-ci'
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+
+      - name: Override component
+        if: inputs.go_module_path != ''
+        run: |
+          go mod edit -replace=${{ inputs.go_module_path }}=github.com/githedgehog/${{ inputs.component_name }}@${{ inputs.commit_sha }}
+          go mod tidy
+          go mod vendor
+          # Verify replacement
+          grep -A 3 "replace ${{ inputs.go_module_path }}" go.mod || echo "Module replacement not found in go.mod"
+
+      - name: Setup local registry
+        run: |
+          just --timestamp _localreg &
+
+      - name: Build hhfab
+        run: |
+          just --timestamp oci_repo=127.0.0.1:30000 oci=http push
+
+      - name: hhfab release test
+        env:
+          HHFAB_REG_REPO: 127.0.0.1:30000
+          HHFAB_VLAB_COLLECT: true
+        if: env.run_release_test == 'true'
+        run: |
+          source "./lab-ci/envs/$KUBE_NODE/source.sh"
+          bin/hhfab init -v --dev --include-onie=${{ inputs.include_onie }} -w "./lab-ci/envs/$KUBE_NODE/wiring.yaml"
+
+          # TODO: make controls restricted again when we figure out how to get NTP upstream working for isolated VMs
+          bin/hhfab vlab up -v --ready switch-reinstall --ready inspect --ready setup-vpcs --ready test-connectivity --ready release-test --ready exit --mode=${{ inputs.build_mode }} --controls-restricted=false
+          cat release-test.xml
+
+      - name: Upload Test Results
+        uses: actions/upload-artifact@v4
+        if: env.run_release_test == 'true' && !cancelled()
+        with:
+          name: Test Results for hlab--${{ env.slug }}--${{ env.unique_id }}
+          path: release-test.xml
+
+      - name: hhfab basic test-connectivity
+        env:
+          HHFAB_REG_REPO: 127.0.0.1:30000
+          HHFAB_VLAB_COLLECT: true
+        if: env.run_release_test != 'true'
+        run: |
+          source "./lab-ci/envs/$KUBE_NODE/source.sh"
+          bin/hhfab init -v --dev --include-onie=${{ inputs.include_onie }} -w "./lab-ci/envs/$KUBE_NODE/wiring.yaml"
+
+          # TODO: make controls restricted again when we figure out how to get NTP upstream working for isolated VMs
+          bin/hhfab vlab up -v --ready switch-reinstall --ready inspect --ready setup-vpcs --ready test-connectivity --ready exit --mode=${{ inputs.build_mode }} --controls-restricted=false
+
+      - name: Upload show-tech artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hlab--${{ env.slug }}--show-tech--${{ env.unique_id }}
+          path: show-tech-output
+
+      - name: Upload local registry logs
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hlab--${{ env.slug }}--registry--${{ env.unique_id }}
+          path: .zot/log
+
+      - name: Report status
+        if: inputs.go_module_path != ''
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.token }}
+          script: |
+            const { owner, repo } = context.repo;
+            const componentOwner = 'githedgehog';
+            const componentRepo = '${{ inputs.component_name }}';
+            const sha = '${{ inputs.commit_sha }}';
+            const scenario = 'hlab-${{ env.slug }}';
+            const conclusion = '${{ job.status }}';
+
+            await github.rest.repos.createCommitStatus({
+              owner: componentOwner,
+              repo: componentRepo,
+              sha: sha,
+              state: conclusion.toLowerCase() === 'success' ? 'success' : 'failure',
+              context: `HLAB: ${scenario}`,
+              description: `HLAB ${scenario} test ${conclusion.toLowerCase()}`,
+              target_url: `https://github.com/${owner}/${repo}/actions/runs/${context.runId}`
+            });
+
+      - name: Setup tmate session for debug
+        if: failure() && inputs.debug_enabled
+        uses: mxschmitt/action-tmate@v3
+        timeout-minutes: 150
+        with:
+          limit-access-to-actor: true
