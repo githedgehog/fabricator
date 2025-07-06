@@ -102,10 +102,10 @@ func (c *Config) Run(cmd string, timeout ...time.Duration) (string, string, erro
 	outStr, errStr, isTimeout, err := c.ssh.Run(cmd, timeout...)
 	if err != nil {
 		if isTimeout {
-			return "", "", fmt.Errorf("timeout running command: %w", ErrTimeout)
+			return outStr, errStr, fmt.Errorf("timeout running command: %w", ErrTimeout)
 		}
 
-		return "", "", fmt.Errorf("running command: %w", err)
+		return outStr, errStr, fmt.Errorf("running command: %w", err)
 	}
 
 	return outStr, errStr, nil
