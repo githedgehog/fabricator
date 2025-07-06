@@ -139,7 +139,7 @@ docker push ghcr.io/githedgehog/fabricator/ntp:${NTP_VERSION}
 ## Broadcom SONiC
 
 ```bash
-export SONIC_VERSION="v4.4.2"
+export SONIC_VERSION="v4.5.0"
 
 oras push ghcr.io/githedgehog/sonic-bcm-private/sonic-bcm-advanced:${SONIC_VERSION} sonic-broadcom-enterprise-advanced.bin
 oras push ghcr.io/githedgehog/sonic-bcm-private/sonic-bcm-campus:${SONIC_VERSION} sonic-broadcom-campus.bin
