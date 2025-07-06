@@ -21,12 +21,14 @@ import (
 )
 
 const (
-	CtrlRef      = "gateway/gateway"
-	CtrlChartRef = "gateway/charts/gateway"
-	APIChartRef  = "gateway/charts/gateway-api"
-	AgentRef     = "gateway/gateway-agent"
-	DataplaneRef = "dataplane"
-	FRRRef       = "dpdk-sys/frr"
+	CtrlRef              = "gateway/gateway"
+	CtrlChartRef         = "gateway/charts/gateway"
+	APIChartRef          = "gateway/charts/gateway-api"
+	AgentRef             = "gateway/gateway-agent"
+	DataplaneRef         = "dataplane"
+	FRRRef               = "dpdk-sys/frr"
+	DataplaneMetricsPort = 9442
+	FRRMetricsPort       = 9342
 )
 
 //go:embed values.tmpl.yaml
@@ -88,9 +90,11 @@ func Install(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 				Effect:   corev1.TaintEffectNoExecute,
 			},
 		},
-		AgentRef:     agentRepo + ":" + string(cfg.Status.Versions.Gateway.Agent),
-		DataplaneRef: dataplaneRepo + ":" + string(cfg.Status.Versions.Gateway.Dataplane),
-		FRRRef:       frrRepo + ":" + string(cfg.Status.Versions.Gateway.FRR),
+		AgentRef:             agentRepo + ":" + string(cfg.Status.Versions.Gateway.Agent),
+		DataplaneRef:         dataplaneRepo + ":" + string(cfg.Status.Versions.Gateway.Dataplane),
+		FRRRef:               frrRepo + ":" + string(cfg.Status.Versions.Gateway.FRR),
+		DataplaneMetricsPort: DataplaneMetricsPort,
+		FRRMetricsPort:       FRRMetricsPort,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("marshalling ctrl config: %w", err)
