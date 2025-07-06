@@ -8,11 +8,13 @@ import (
 )
 
 type GatewayCtrlConfig struct {
-	Namespace    string              `json:"namespace,omitempty"`
-	Tolerations  []corev1.Toleration `json:"tolerations,omitempty"`
-	AgentRef     string              `json:"agentRef,omitempty"`
-	DataplaneRef string              `json:"dataplaneRef,omitempty"`
-	FRRRef       string              `json:"frrRef,omitempty"`
+	Namespace            string              `json:"namespace,omitempty"`
+	Tolerations          []corev1.Toleration `json:"tolerations,omitempty"`
+	AgentRef             string              `json:"agentRef,omitempty"`
+	DataplaneRef         string              `json:"dataplaneRef,omitempty"`
+	FRRRef               string              `json:"frrRef,omitempty"`
+	DataplaneMetricsPort uint16              `json:"dataplaneMetricsPort,omitempty"`
+	FRRMetricsPort       uint16              `json:"frrMetricsPort,omitempty"`
 }
 
 type AgentConfig struct {
