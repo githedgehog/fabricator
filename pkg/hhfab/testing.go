@@ -331,13 +331,13 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	attaches := []*vpcapi.VPCAttachment{}
 	netconfs := map[string]string{}
 	expectedSubnets := map[string]netip.Prefix{}
-	eslagServers := make([]string, 0)
+	eslagServers := make(map[string]bool, 0)
 	for _, server := range servers.Items {
 		if opts.VPCMode != vpcapi.VPCModeL2VNI {
 			if isESLAG, err := isServerESLAG(ctx, kube, &server, false); err != nil {
 				return fmt.Errorf("checking if server %q is ESLAG: %w", server.Name, err)
 			} else if isESLAG {
-				eslagServers = append(eslagServers, server.Name)
+				eslagServers[server.Name] = true
 				slog.Warn("Skipping ESLAG-attached server", "server", server.Name)
 
 				continue
@@ -540,7 +540,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 
 	g := &errgroup.Group{}
 	for _, server := range servers.Items {
-		if slices.Contains(eslagServers, server.Name) {
+		if _, ok := eslagServers[server.Name]; ok {
 			continue
 		}
 		g.Go(func() error {
