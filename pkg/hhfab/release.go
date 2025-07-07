@@ -1579,19 +1579,37 @@ func (testCtx *VPCPeeringTestCtx) roceBasicTest(ctx context.Context) (bool, []Re
 		return false, nil, fmt.Errorf("testing connectivity with DSCP opts: %w", err)
 	}
 
-	// check counters on the RoCE enabled switch for UC3 traffic
-	slog.Debug("Checking queue counters on switch", "switch", swName)
-	// NOTE: cannot use the sonic-cli grep/except here while going trhough hhfab ssh, output gets lost somewhere
-	out, queueErr := execNodeCmdWOutput(testCtx.hhfabBin, testCtx.workDir, swName, "sonic-cli -c \"show queue counters | no-more\" | grep UC3 | grep -v \"UC3  0\"")
-	if queueErr != nil {
-		slog.Error("Failed to get queue counters", "error", queueErr)
+	// check counters on the RoCE enabled switch for UC3 traffic. they are stored as part of the switch agent status
+	uc3Map := make(map[string]uint64) // map of interface name to UC3 transmit bits
+	agent := &agentapi.Agent{}
+	err := testCtx.kube.Get(ctx, kclient.ObjectKey{Name: swName, Namespace: "default"}, agent)
+	if err != nil {
+		return false, nil, fmt.Errorf("getting agent %s: %w", swName, err)
+	}
+	for iface, ifaceStats := range agent.Status.State.Interfaces {
+		if ifaceStats.OperStatus != agentapi.OperStatusUp {
+			continue
+		}
+		if ifaceStats.Counters == nil {
+			slog.Debug("No counters for operUp interface", "switch", swName, "interface", iface)
 
-		return false, nil, fmt.Errorf("getting queue counters on switch %s: %w", swName, queueErr)
+			continue
+		}
+		uc3, ok := ifaceStats.Counters.Queues["UC3"]
+		if !ok {
+			slog.Debug("No UC3 queue counters for operUP interface", "switch", swName, "interface", iface)
+
+			continue
+		}
+		if uc3.TransmitBits > 0 {
+			uc3Map[iface] = uc3.TransmitBits
+		}
 	}
-	if out == "" {
-		return false, nil, fmt.Errorf("no non-zero queue counters found for UC3 traffic on switch %s", swName) //nolint:goerr113
+
+	if len(uc3Map) == 0 {
+		return false, nil, fmt.Errorf("no UC3 transmit bits found on switch %s", swName) //nolint:goerr113
 	}
-	slog.Debug("Queue counters for UC3 traffic on switch", "switch", swName, "counters", out)
+	slog.Debug("UC3 transmit bits found on switch", "switch", swName, "uc3Map", uc3Map)
 
 	return false, nil, nil
 }
