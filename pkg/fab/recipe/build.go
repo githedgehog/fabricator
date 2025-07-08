@@ -173,17 +173,22 @@ func buildInstall(ctx context.Context, opts buildInstallOpts) error {
 }
 
 const (
-	espSize             uint64 = 500 * 1024 * 1024
-	oemSize             uint64 = (6 * 1024 * 1024 * 1024) + (500 * 1024 * 1024)
-	dataSize                   = espSize + oemSize
-	blkSize                    = diskfs.SectorSize512
-	diskSize                   = int64(dataSize + 2*16896 + (1024 * 1024))
-	espPartitionStart   uint64 = 2048
-	espPartitionSectors        = espSize / uint64(blkSize)
-	espPartitionEnd            = espPartitionSectors + (espPartitionStart - 1)
-	oemPartitionStart          = espPartitionEnd + 1
-	oemPartitionSectors        = oemSize / uint64(blkSize)
-	oemPartitionEnd            = oemPartitionSectors + (oemPartitionStart - 1)
+	isoLogicalBlockSize diskfs.SectorSize = 2048
+	MiB                 uint64            = 1024 * 1024
+	GiB                 uint64            = 1024 * 1024 * 1024
+	espSize             uint64            = 500 * MiB
+	oemSize             uint64            = (7 * GiB)
+	dataSize                              = espSize + oemSize
+	blkSize                               = diskfs.SectorSize512
+	bytesPerBlock                         = 512
+	GPTSize                               = 33 * bytesPerBlock
+	diskSize                              = int64(dataSize + (2 * GPTSize) + MiB)
+	espPartitionStart   uint64            = 2048
+	espPartitionSectors                   = espSize / uint64(blkSize)
+	espPartitionEnd                       = espPartitionSectors + (espPartitionStart - 1)
+	oemPartitionStart                     = espPartitionEnd + 1
+	oemPartitionSectors                   = oemSize / uint64(blkSize)
+	oemPartitionEnd                       = oemPartitionSectors + (oemPartitionStart - 1)
 )
 
 func buildUSBImage(ctx context.Context, opts buildInstallOpts) error {
@@ -278,7 +283,7 @@ func buildUSBImage(ctx context.Context, opts buildInstallOpts) error {
 		fs2 = backpackFS
 	case BuildModeISO:
 		diskImgPath = installISOImage
-		diskImg, err := diskfs.Create(diskImgPath, diskSize, diskfs.Raw, 2048)
+		diskImg, err := diskfs.Create(diskImgPath, diskSize, diskfs.Raw, isoLogicalBlockSize)
 		if err != nil {
 			return fmt.Errorf("creating disk image: %w", err)
 		}
