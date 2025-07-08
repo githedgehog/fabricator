@@ -45,7 +45,6 @@ func Generate(ctx context.Context, resultDir string, client kclient.Reader, form
 
 	switch format {
 	case FormatDrawio:
-		slog.Debug("Generating draw.io diagram", "style", style)
 		if err := GenerateDrawio(resultDir, topo, style, outputPath); err != nil {
 			return fmt.Errorf("generating draw.io diagram: %w", err)
 		}
@@ -69,7 +68,6 @@ func Generate(ctx context.Context, resultDir string, client kclient.Reader, form
 		fmt.Printf("1. Open with https://app.diagrams.net/ or the desktop Draw.io application\n")
 		fmt.Printf("2. You can edit the diagram and export to PNG, SVG, PDF or other formats\n")
 	case FormatDot:
-		slog.Debug("Generating DOT diagram")
 		if err := GenerateDOT(resultDir, topo, outputPath); err != nil {
 			return fmt.Errorf("generating DOT diagram: %w", err)
 		}
@@ -95,7 +93,6 @@ func Generate(ctx context.Context, resultDir string, client kclient.Reader, form
 		fmt.Printf("3. Convert to SVG: dot -Tsvg %s -o diagram.svg\n", displayPath)
 		fmt.Printf("4. Convert to PDF: dot -Tpdf %s -o diagram.pdf\n", displayPath)
 	case FormatMermaid:
-		slog.Debug("Generating Mermaid diagram")
 		if err := GenerateMermaid(resultDir, topo, outputPath); err != nil {
 			return fmt.Errorf("generating Mermaid diagram: %w", err)
 		}

@@ -6,7 +6,6 @@ package diagram
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"sort"
 	"strings"
 
@@ -350,15 +349,11 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 	}
 	for _, node := range nodes.Items {
 		if nodeSet[node.Name] {
-			slog.Warn("Duplicate node name, skipping", "kind", node.Kind, "name", node.Name)
-
 			continue
 		}
 
 		// skip non-gateway nodes
 		if len(node.Spec.Roles) != 1 || node.Spec.Roles[0] != fabapi.NodeRoleGateway {
-			slog.Warn("Node is not a gateway, skipping", "kind", node.Kind, "name", node.Name)
-
 			continue
 		}
 
@@ -377,8 +372,6 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 	}
 	for _, sw := range switches.Items {
 		if nodeSet[sw.Name] {
-			slog.Warn("Duplicate node name, skipping", "kind", sw.Kind, "name", sw.Name)
-
 			continue
 		}
 
@@ -391,10 +384,10 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 		}
 
 		role := string(sw.Spec.Role)
-		node.Properties["role"] = role
+		node.Properties[PropRole] = role
 		node.Label = fmt.Sprintf("%s\n%s", sw.Name, role)
 
-		node.Properties["description"] = sw.Spec.Description
+		node.Properties[PropDescription] = sw.Spec.Description
 
 		topo.Nodes = append(topo.Nodes, node)
 	}
@@ -405,8 +398,6 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 	}
 	for _, server := range servers.Items {
 		if nodeSet[server.Name] {
-			slog.Warn("Duplicate node name, skipping", "kind", server.Kind, "name", server.Name)
-
 			continue
 		}
 
@@ -428,8 +419,6 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 	for _, conn := range conns.Items {
 		_, _, _, links, err := conn.Spec.Endpoints()
 		if err != nil {
-			slog.Warn("Invalid connection endpoints, skipping", "kind", conn.Kind, "name", conn.Name)
-
 			continue
 		}
 
@@ -442,8 +431,8 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 					Target: wiringapi.SplitPortName(target)[0],
 					Type:   conn.Spec.Type(),
 					Properties: map[string]string{
-						"sourcePort": source,
-						"targetPort": target,
+						PropSourcePort: source,
+						PropTargetPort: target,
 					},
 				}
 
@@ -452,12 +441,12 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 
 					for _, connLink := range conn.Spec.MCLAGDomain.PeerLinks {
 						if connLink.Switch1.Port == source && connLink.Switch2.Port == target {
-							link.Properties["mclagType"] = "peer"
+							link.Properties[PropMCLAGType] = MCLAGTypePeer
 						}
 					}
 					for _, connLink := range conn.Spec.MCLAGDomain.SessionLinks {
 						if connLink.Switch1.Port == source && connLink.Switch2.Port == target {
-							link.Properties["mclagType"] = "session"
+							link.Properties[PropMCLAGType] = MCLAGTypeSession
 						}
 					}
 				}
@@ -484,7 +473,7 @@ func getNodeTypeInfo(node Node) (string, string) {
 	var nodeType, nodeRole string
 	nodeType = node.Type
 	if nodeType == NodeTypeSwitch && node.Properties != nil {
-		nodeRole = node.Properties["role"]
+		nodeRole = node.Properties[PropRole]
 	}
 
 	return nodeType, nodeRole

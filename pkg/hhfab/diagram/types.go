@@ -69,3 +69,40 @@ type NodeMetrics struct {
 	ParentConnections []string
 	ChildConnections  []string
 }
+
+const (
+	PropMCLAGType   = "mclagType"
+	PropSourcePort  = "sourcePort"
+	PropTargetPort  = "targetPort"
+	PropBundled     = "bundled"
+	PropESLAGServer = "eslag_server"
+	PropGateway     = "gateway"
+	PropDescription = "description"
+	PropRole        = "role"
+)
+
+const (
+	MCLAGTypePeer    = "peer"
+	MCLAGTypeSession = "session"
+)
+
+const (
+	LegendKeyFabric       = "fabric"
+	LegendKeyMCLAGPeer    = "mclag_peer"
+	LegendKeyMCLAGSession = "mclag_session"
+	LegendKeyMCLAGServer  = "mclag_server"
+	LegendKeyBundled      = "bundled"
+	LegendKeyUnbundled    = "unbundled"
+	LegendKeyESLAGServer  = "eslag_server"
+	LegendKeyGateway      = "gateway"
+)
+
+const (
+	ConnTypeLeafToLeaf        = "leaf-to-leaf"
+	ConnTypeSpineToLeaf       = "spine-to-leaf"
+	ConnTypeLeafToSpine       = "leaf-to-spine"
+	ConnTypeSwitchToSwitch    = "switch-to-switch"
+	ConnTypeServerConnection  = "server-connection"
+	ConnTypeGatewayConnection = "gateway-connection"
+	ConnTypeUnknown           = "unknown"
+)
