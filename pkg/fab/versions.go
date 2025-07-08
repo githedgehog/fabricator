@@ -22,7 +22,7 @@ var Versions = fabapi.Versions{
 		K3s:         "v1.32.4-k3s1",
 		Zot:         "v2.1.1",
 		CertManager: "v1.17.1",
-		K9s:         "v0.50.5",
+		K9s:         "v0.50.7",
 		Toolbox:     "v0.6.0",
 		Reloader:    "v1.0.40", // TODO upgrade or get rid of?
 		NTP:         "v0.0.2",
