@@ -284,8 +284,6 @@ spec:
                         properties:
                           agent:
                             type: string
-                          alloy:
-                            type: string
                           api:
                             type: string
                           boot:
@@ -341,6 +339,8 @@ spec:
                         type: object
                       platform:
                         properties:
+                          alloy:
+                            type: string
                           certManager:
                             type: string
                           k3s:
@@ -496,8 +496,6 @@ spec:
                     properties:
                       agent:
                         type: string
-                      alloy:
-                        type: string
                       api:
                         type: string
                       boot:
@@ -553,6 +551,8 @@ spec:
                     type: object
                   platform:
                     properties:
+                      alloy:
+                        type: string
                       certManager:
                         type: string
                       k3s:

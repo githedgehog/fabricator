@@ -27,6 +27,7 @@ var Versions = fabapi.Versions{
 		Reloader:    "v1.0.40", // TODO upgrade or get rid of?
 		NTP:         "v0.0.2",
 		NTPChart:    FabricatorVersion,
+		Alloy:       "v1.9.2",
 	},
 	Fabricator: fabapi.FabricatorVersions{
 		API:            FabricatorVersion,
@@ -44,7 +45,6 @@ var Versions = fabapi.Versions{
 		Boot:       FabricVersion,
 		Agent:      FabricVersion,
 		Ctl:        FabricVersion,
-		Alloy:      "v1.1.1",      // TODO upgrade to v1.4.x or newer
 		ProxyChart: FabricVersion, // TODO switch to a better proxy
 		Proxy:      "1.9.1",       // TODO use version starting with "v"
 		NOS: map[string]meta.Version{

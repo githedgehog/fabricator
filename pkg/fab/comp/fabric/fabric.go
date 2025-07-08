@@ -30,7 +30,7 @@ const (
 	BootRef       = "fabric/fabric-boot"
 	AgentRef      = "fabric/agent"
 	CtlRef        = "fabric/hhfctl"
-	AlloyRef      = "fabric/alloy"
+	AlloyRef      = "fabricator/alloy-bin"
 	ProxyChartRef = "fabric/charts/fabric-proxy"
 	ProxyRef      = "fabric/fabric-proxy"
 	SonicRefBase  = "sonic-bcm-private"
@@ -248,7 +248,7 @@ func GetFabricConfig(f fabapi.Fabricator) (*meta.FabricConfig, error) {
 		ESLAGMACBase:             f.Spec.Config.Fabric.ESLAGMACBase,
 		ESLAGESIPrefix:           f.Spec.Config.Fabric.ESLAGESIPrefix,
 		AlloyRepo:                comp.JoinURLParts(registry, comp.RegistryPrefix, AlloyRef),
-		AlloyVersion:             string(f.Status.Versions.Fabric.Alloy),
+		AlloyVersion:             string(f.Status.Versions.Platform.Alloy),
 		Alloy:                    f.Spec.Config.Fabric.DefaultAlloyConfig,
 		DefaultMaxPathsEBGP:      64,
 		AllowExtraSwitchProfiles: false,
@@ -307,7 +307,7 @@ func Artifacts(cfg fabapi.Fabricator) (comp.OCIArtifacts, error) {
 		BootRef:       cfg.Status.Versions.Fabric.Boot,
 		AgentRef:      cfg.Status.Versions.Fabric.Agent,
 		CtlRef:        cfg.Status.Versions.Fabric.Ctl,
-		AlloyRef:      cfg.Status.Versions.Fabric.Alloy,
+		AlloyRef:      cfg.Status.Versions.Platform.Alloy,
 		ProxyChartRef: cfg.Status.Versions.Fabric.ProxyChart,
 		ProxyRef:      cfg.Status.Versions.Fabric.Proxy,
 	}

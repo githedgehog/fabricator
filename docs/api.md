@@ -405,7 +405,6 @@ _Appears in:_
 | `boot` _[Version](#version)_ |  |  |  |
 | `agent` _[Version](#version)_ |  |  |  |
 | `ctl` _[Version](#version)_ |  |  |  |
-| `alloy` _[Version](#version)_ |  |  |  |
 | `proxyChart` _[Version](#version)_ |  |  |  |
 | `proxy` _[Version](#version)_ |  |  |  |
 | `nos` _object (keys:string, values:[Version](#version))_ |  |  |  |
@@ -555,6 +554,7 @@ _Appears in:_
 | `reloader` _[Version](#version)_ |  |  |  |
 | `ntp` _[Version](#version)_ |  |  |  |
 | `ntpChart` _[Version](#version)_ |  |  |  |
+| `alloy` _[Version](#version)_ |  |  |  |
 
 
 #### RegistryConfig
