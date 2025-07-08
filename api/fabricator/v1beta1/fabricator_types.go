@@ -246,6 +246,7 @@ type PlatformVersions struct {
 	Reloader    meta.Version `json:"reloader,omitempty"`
 	NTP         meta.Version `json:"ntp,omitempty"`
 	NTPChart    meta.Version `json:"ntpChart,omitempty"`
+	Alloy       meta.Version `json:"alloy,omitempty"`
 }
 
 type FabricatorVersions struct {
@@ -265,7 +266,6 @@ type FabricVersions struct {
 	Boot       meta.Version            `json:"boot,omitempty"`
 	Agent      meta.Version            `json:"agent,omitempty"`
 	Ctl        meta.Version            `json:"ctl,omitempty"`
-	Alloy      meta.Version            `json:"alloy,omitempty"`
 	ProxyChart meta.Version            `json:"proxyChart,omitempty"`
 	Proxy      meta.Version            `json:"proxy,omitempty"`
 	NOS        map[string]meta.Version `json:"nos,omitempty"`
