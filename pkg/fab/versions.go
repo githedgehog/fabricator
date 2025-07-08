@@ -21,7 +21,7 @@ var Versions = fabapi.Versions{
 	Platform: fabapi.PlatformVersions{
 		K3s:         "v1.32.6-k3s1",
 		Zot:         "v2.1.1",
-		CertManager: "v1.17.1",
+		CertManager: "v1.18.2",
 		K9s:         "v0.50.7",
 		Toolbox:     "v0.6.0",
 		Reloader:    "v1.0.40", // TODO upgrade or get rid of?
