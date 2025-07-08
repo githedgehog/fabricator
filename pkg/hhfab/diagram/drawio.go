@@ -220,7 +220,7 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 			labelCell := MxCell{
 				ID:     fmt.Sprintf("%s_label", node.ID),
 				Parent: "1",
-				Value:  node.Label,
+				Value:  FormatNodeValue(node, style), // Use FormatNodeValue here
 				Style:  GetGatewayLabelStyle(),
 				Vertex: "1",
 				Geometry: &Geometry{
@@ -238,7 +238,7 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 			cell := MxCell{
 				ID:     node.ID,
 				Parent: "1",
-				Value:  node.Label,
+				Value:  FormatNodeValue(node, style), // Use FormatNodeValue here
 				Style:  GetNodeStyle(node, style),
 				Vertex: "1",
 				Geometry: &Geometry{

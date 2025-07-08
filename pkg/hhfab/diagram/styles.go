@@ -88,7 +88,7 @@ func getCiscoStyle() Style {
 			"fontColor=#000000;fontSize=11;" +
 			"align=center;verticalLabelPosition=middle;verticalAlign=middle;" +
 			"perimeter=hexagonPerimeter;",
-		FabricLinkStyle:    "endArrow=none;html=1;strokeWidth=3;strokeColor=#00589C;",
+		FabricLinkStyle:    "endArrow=none;html=1;strokeWidth=3;strokeColor=#4F95D0;",
 		MCLAGPeerStyle:     "endArrow=none;html=1;strokeWidth=2;strokeColor=#2f5597;dashed=1;",
 		MCLAGSessionStyle:  "endArrow=none;html=1;strokeWidth=2;strokeColor=#4472c4;dashed=1;",
 		MCLAGServerStyle:   "endArrow=none;html=1;strokeWidth=2;strokeColor=#9cc1f7;dashed=1;",
@@ -101,16 +101,13 @@ func getCiscoStyle() Style {
 }
 
 func getHedgehogStyle() Style {
-	darkBrown := "#5D4037"
-	sandBrown := "#D7B98E"
-
 	return Style{
 		SpineNodeStyle: "shape=mxgraph.cisco19.rect;prIcon=nexus_9300;html=1;" +
-			"fillColor=#FFFFFF;strokeColor=" + sandBrown + ";strokeWidth=2;" +
+			"fillColor=#FFFFFF;strokeColor=#D7B98E;strokeWidth=2;" +
 			"fontColor=#000000;fontSize=11;" +
 			"align=center;verticalLabelPosition=middle;verticalAlign=middle;",
 		LeafNodeStyle: "shape=mxgraph.cisco19.rect;prIcon=nexus_9300;html=1;" +
-			"fillColor=#FFFFFF;strokeColor=" + sandBrown + ";strokeWidth=2;" +
+			"fillColor=#FFFFFF;strokeColor=#D7B98E;strokeWidth=2;" +
 			"fontColor=#000000;fontSize=11;" +
 			"align=center;verticalLabelPosition=middle;verticalAlign=middle;",
 		ServerNodeStyle: "shape=mxgraph.cisco19.rect;prIcon=ucs_c_series_server;html=1;" +
@@ -118,18 +115,18 @@ func getHedgehogStyle() Style {
 			"fontColor=#000000;fontSize=11;" +
 			"align=right;verticalAlign=bottom;spacingRight=8;spacingBottom=8;",
 		GatewayNodeStyle: "shape=mxgraph.cisco19.rect;prIcon=asr_1000;html=1;" +
-			"fillColor=#FAFAFA;strokeColor=" + sandBrown + ";" +
+			"fillColor=#FAFAFA;strokeColor=#D7B98E;" +
 			"fontColor=#000000;fontSize=11;" +
 			"align=center;verticalLabelPosition=middle;verticalAlign=middle;" +
 			"perimeter=hexagonPerimeter;",
-		FabricLinkStyle:    "endArrow=none;html=1;strokeWidth=3;strokeColor=" + darkBrown + ";",
+		FabricLinkStyle:    "endArrow=none;html=1;strokeWidth=3;strokeColor=#8D6E4F;",
 		MCLAGPeerStyle:     "endArrow=none;html=1;strokeWidth=2;strokeColor=#8D6E63;dashed=1;",
 		MCLAGSessionStyle:  "endArrow=none;html=1;strokeWidth=2;strokeColor=#A1887F;dashed=1;",
 		MCLAGServerStyle:   "endArrow=none;html=1;strokeWidth=2;strokeColor=#BCAAA4;dashed=1;",
 		BundledServerStyle: "endArrow=none;html=1;strokeWidth=2;strokeColor=#82b366;",
 		UnbundledStyle:     "endArrow=none;html=1;strokeWidth=2;strokeColor=#666666;",
 		ESLAGServerStyle:   "endArrow=none;html=1;strokeWidth=2;strokeColor=#d79b00;dashed=1;",
-		GatewayLinkStyle:   "endArrow=none;html=1;strokeWidth=2;strokeColor=" + darkBrown + ";dashed=1;",
+		GatewayLinkStyle:   "endArrow=none;html=1;strokeWidth=2;strokeColor=#D7B98E;dashed=1;",
 		BackgroundColor:    "#FFFFFF",
 	}
 }
@@ -204,6 +201,10 @@ func GetNodeDimensions(node Node) (int, int) {
 }
 
 func FormatNodeValue(node Node, style Style) string {
+	if node.Type == NodeTypeGateway {
+		return fmt.Sprintf("<b>%s</b>", node.Label)
+	}
+
 	if strings.Contains(style.SpineNodeStyle, "mxgraph.cisco19") && node.Type == NodeTypeSwitch {
 		if strings.Contains(node.Label, "\n") {
 			parts := strings.SplitN(node.Label, "\n", 2)
@@ -211,18 +212,18 @@ func FormatNodeValue(node Node, style Style) string {
 			nodeRole := parts[1]
 
 			return fmt.Sprintf(
-				"<font style=\"color: rgb(0, 0, 0);\">%s</font>"+
+				"<font style=\"color: rgb(0, 0, 0);\"><b>%s</b></font>"+
 					"<br><br><br><br><br>"+
 					"<font style=\"color: rgb(0, 0, 0);\">%s</font>",
 				nodeName, nodeRole,
 			)
-		} else if role, ok := node.Properties["role"]; ok && role != "" {
+		} else if role, ok := node.Properties[PropRole]; ok && role != "" {
 			exactMatch := node.Label == role
 			endsWithRoleWord := strings.HasSuffix(node.Label, " "+role)
 
 			if !exactMatch && !endsWithRoleWord {
 				return fmt.Sprintf(
-					"<font style=\"color: rgb(0, 0, 0);\">%s</font>"+
+					"<font style=\"color: rgb(0, 0, 0);\"><b>%s</b></font>"+
 						"<br><br><br><br><br>"+
 						"<font style=\"color: rgb(0, 0, 0);\">%s</font>",
 					node.Label, role,
@@ -230,10 +231,16 @@ func FormatNodeValue(node Node, style Style) string {
 			}
 		}
 
-		return fmt.Sprintf("<font style=\"color: rgb(0, 0, 0);\">%s</font>", node.Label)
+		return fmt.Sprintf("<font style=\"color: rgb(0, 0, 0);\"><b>%s</b></font>", node.Label)
 	}
 
-	return node.Label
+	if strings.Contains(node.Label, "\n") {
+		parts := strings.SplitN(node.Label, "\n", 2)
+
+		return fmt.Sprintf("<b>%s</b>\n%s", parts[0], parts[1])
+	}
+
+	return fmt.Sprintf("<b>%s</b>", node.Label)
 }
 
 func IsIconBasedStyle(style Style) bool {
@@ -242,5 +249,5 @@ func IsIconBasedStyle(style Style) bool {
 }
 
 func GetGatewayLabelStyle() string {
-	return "rounded=0;whiteSpace=wrap;html=1;strokeColor=none;fontSize=9;"
+	return "rounded=0;whiteSpace=wrap;html=1;strokeColor=none;fontSize=9;fontStyle=1;"
 }
