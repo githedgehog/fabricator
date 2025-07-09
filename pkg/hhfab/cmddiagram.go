@@ -44,7 +44,7 @@ func Diagram(ctx context.Context, workDir, cacheDir string, live bool, format di
 		client = kube
 	}
 
-	if err := diagram.Generate(ctx, resultDir, client, format, style, outputPath); err != nil {
+	if err := diagram.Generate(ctx, workDir, resultDir, client, format, style, outputPath); err != nil {
 		return fmt.Errorf("generating diagram: %w", err)
 	}
 

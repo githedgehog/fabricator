@@ -27,7 +27,17 @@ var Formats = []Format{
 	FormatMermaid,
 }
 
-func Generate(ctx context.Context, resultDir string, client kclient.Reader, format Format, style StyleType, outputPath string) error {
+func getDisplayPath(workDir, filePath string) string {
+	displayPath := filePath
+	rel, err := filepath.Rel(workDir, filePath)
+	if err == nil {
+		displayPath = rel
+	}
+
+	return displayPath
+}
+
+func Generate(ctx context.Context, workDir, resultDir string, client kclient.Reader, format Format, style StyleType, outputPath string) error {
 	if !slices.Contains(Formats, format) {
 		return fmt.Errorf("unsupported diagram format: %s", format) //nolint:goerr113
 	}
@@ -41,7 +51,6 @@ func Generate(ctx context.Context, resultDir string, client kclient.Reader, form
 	}
 
 	var filePath string
-	var displayPath string
 
 	switch format {
 	case FormatDrawio:
@@ -54,14 +63,7 @@ func Generate(ctx context.Context, resultDir string, client kclient.Reader, form
 			filePath = filepath.Join(resultDir, DrawioFilename)
 		}
 
-		displayPath = filePath
-		workDir, err := filepath.Abs(".")
-		if err == nil {
-			rel, err := filepath.Rel(workDir, filePath)
-			if err == nil {
-				displayPath = rel
-			}
-		}
+		displayPath := getDisplayPath(workDir, filePath)
 
 		slog.Info("Generated draw.io diagram", "file", displayPath, "style", style)
 		fmt.Printf("To use this diagram:\n")
@@ -77,14 +79,7 @@ func Generate(ctx context.Context, resultDir string, client kclient.Reader, form
 			filePath = filepath.Join(resultDir, DotFilename)
 		}
 
-		displayPath = filePath
-		workDir, err := filepath.Abs(".")
-		if err == nil {
-			rel, err := filepath.Rel(workDir, filePath)
-			if err == nil {
-				displayPath = rel
-			}
-		}
+		displayPath := getDisplayPath(workDir, filePath)
 
 		slog.Info("Generated graphviz diagram", "file", displayPath)
 		fmt.Printf("To render this diagram with Graphviz:\n")
@@ -102,14 +97,7 @@ func Generate(ctx context.Context, resultDir string, client kclient.Reader, form
 			filePath = filepath.Join(resultDir, MermaidFilename)
 		}
 
-		displayPath = filePath
-		workDir, err := filepath.Abs(".")
-		if err == nil {
-			rel, err := filepath.Rel(workDir, filePath)
-			if err == nil {
-				displayPath = rel
-			}
-		}
+		displayPath := getDisplayPath(workDir, filePath)
 
 		slog.Info("Generated Mermaid diagram", "file", displayPath)
 		fmt.Printf("To render this diagram with Mermaid:\n")
