@@ -53,50 +53,13 @@ func Versions(ctx context.Context, workDir, cacheDir string, hMode HydrateMode, 
 	if err := freshFab.CalculateVersions(fab.Versions); err != nil {
 		return fmt.Errorf("calculating default versions: %w", err)
 	}
-	releaseData, err := kyaml.Marshal(freshFab.Status.Versions)
+
+	versionsData, err := formatVersions(freshFab.Status.Versions, cfg.Fab.Status.Versions)
 	if err != nil {
-		return fmt.Errorf("marshalling release versions: %w", err)
-	}
-	var release map[string]interface{}
-	if err := kyaml.Unmarshal(releaseData, &release); err != nil {
-		return fmt.Errorf("unmarshalling release versions: %w", err)
+		return fmt.Errorf("formatting versions: %w", err)
 	}
 
-	overridesRaw, err := kyaml.Marshal(cfg.Fab.Spec.Overrides.Versions)
-	if err != nil {
-		slog.Warn("Failed to marshal overrides", "error", err)
-		fmt.Println(string(releaseData))
-
-		return nil
-	}
-
-	var overrides map[string]interface{}
-	if err := kyaml.Unmarshal(overridesRaw, &overrides); err != nil {
-		slog.Warn("Failed to unmarshal overrides", "error", err)
-		fmt.Println(string(releaseData))
-
-		return nil
-	}
-
-	if len(overrides) == 0 {
-		slog.Info("Printing versions of all components")
-		fmt.Println(string(releaseData))
-
-		return nil
-	}
-
-	slog.Info("Printing versions of all components (release → override)")
-	merged := make(map[string]interface{})
-
-	for category, value := range release {
-		merged[category] = processVersionCategory(category, value, overrides)
-	}
-
-	mergedData, err := kyaml.Marshal(merged)
-	if err != nil {
-		return fmt.Errorf("marshalling merged versions: %w", err)
-	}
-	fmt.Println(string(mergedData))
+	fmt.Println(versionsData)
 
 	return nil
 }
@@ -108,101 +71,99 @@ func getVersionsFromCluster(ctx context.Context, c *Config) error {
 		return fmt.Errorf("creating kube client: %w", err)
 	}
 
-	fab := &fabapi.Fabricator{}
-	if err := kube.Get(ctx, kclient.ObjectKey{Name: "default", Namespace: "fab"}, fab); err != nil {
+	fabObj := &fabapi.Fabricator{}
+	if err := kube.Get(ctx, kclient.ObjectKey{Name: "default", Namespace: "fab"}, fabObj); err != nil {
 		return fmt.Errorf("getting fabricator object: %w", err)
 	}
 
 	slog.Info("Printing versions from live cluster")
 
-	releaseData, err := kyaml.Marshal(fab.Status.Versions)
+	freshFab := fabapi.Fabricator{}
+	if err := freshFab.CalculateVersions(fab.Versions); err != nil {
+		return fmt.Errorf("calculating default versions: %w", err)
+	}
+
+	versionsData, err := formatVersions(freshFab.Status.Versions, fabObj.Status.Versions)
 	if err != nil {
-		return fmt.Errorf("marshalling versions: %w", err)
+		return fmt.Errorf("formatting versions: %w", err)
 	}
 
-	overridesRaw, err := kyaml.Marshal(fab.Spec.Overrides.Versions)
-	if err != nil {
-		slog.Warn("Failed to marshal overrides", "error", err)
-		fmt.Println(string(releaseData))
-
-		return nil
-	}
-
-	var overrides map[string]interface{}
-	if err := kyaml.Unmarshal(overridesRaw, &overrides); err != nil {
-		slog.Warn("Failed to unmarshal overrides", "error", err)
-		fmt.Println(string(releaseData))
-
-		return nil
-	}
-
-	if len(overrides) == 0 {
-		slog.Info("Printing versions of all components")
-		fmt.Println(string(releaseData))
-
-		return nil
-	}
-
-	var release map[string]interface{}
-	if err := kyaml.Unmarshal(releaseData, &release); err != nil {
-		slog.Warn("Failed to unmarshal release versions", "error", err)
-		fmt.Println(string(releaseData))
-
-		return nil
-	}
-
-	slog.Info("Printing versions of all components (release → override)")
-	merged := make(map[string]interface{})
-
-	for category, value := range release {
-		merged[category] = processVersionCategory(category, value, overrides)
-	}
-
-	mergedData, err := kyaml.Marshal(merged)
-	if err != nil {
-		return fmt.Errorf("marshalling merged versions: %w", err)
-	}
-	fmt.Println(string(mergedData))
+	fmt.Println(versionsData)
 
 	return nil
 }
 
-func processVersionCategory(category string, releaseValue interface{}, overrides map[string]interface{}) interface{} {
-	releaseCat, isMapRelease := releaseValue.(map[string]interface{})
-	if !isMapRelease {
-		return releaseValue
+func formatVersions(releaseVersions, overriddenVersions fabapi.Versions) (string, error) {
+	releaseMap, err := convertToMap(releaseVersions)
+	if err != nil {
+		return "", fmt.Errorf("converting release versions to map: %w", err)
 	}
 
+	overriddenMap, err := convertToMap(overriddenVersions)
+	if err != nil {
+		slog.Warn("Failed to convert overridden versions", "error", err)
+		data, _ := kyaml.Marshal(releaseVersions)
+
+		return string(data), nil
+	}
+
+	slog.Info("Printing versions of all components (release → override)")
+
+	result := compareVersionMaps(releaseMap, overriddenMap)
+
+	resultData, err := kyaml.Marshal(result)
+	if err != nil {
+		return "", fmt.Errorf("marshalling result: %w", err)
+	}
+
+	return string(resultData), nil
+}
+
+func convertToMap(v interface{}) (map[string]interface{}, error) {
+	data, err := kyaml.Marshal(v)
+	if err != nil {
+		return nil, fmt.Errorf("marshalling: %w", err)
+	}
+
+	var result map[string]interface{}
+	if err := kyaml.Unmarshal(data, &result); err != nil {
+		return nil, fmt.Errorf("unmarshalling: %w", err)
+	}
+
+	return result, nil
+}
+
+func compareVersionMaps(releases, overridden map[string]interface{}) map[string]interface{} {
 	result := make(map[string]interface{})
 
-	overrideCat, overrideExists := overrides[category]
-	if !overrideExists {
-		return releaseCat
-	}
-
-	overrideMap, isMapOverride := overrideCat.(map[string]interface{})
-	if !isMapOverride {
-		return releaseCat
-	}
-
-	for compName, releaseVer := range releaseCat {
-		releaseVerStr, isString := releaseVer.(string)
-		if !isString {
-			nestedResult := processVersionCategory(compName, releaseVer, overrideMap)
-			result[compName] = nestedResult
-
-			continue
-		}
-
-		if overrideComp, exists := overrideMap[compName]; exists {
-			overrideVerStr, isOverrideString := overrideComp.(string)
-			if isOverrideString {
-				result[compName] = fmt.Sprintf("%s → %s", releaseVerStr, overrideVerStr)
+	for key, releaseValue := range releases {
+		releaseMap, isMap := releaseValue.(map[string]interface{})
+		if isMap {
+			overriddenMap, hasOverridden := overridden[key].(map[string]interface{})
+			if hasOverridden {
+				result[key] = compareVersionMaps(releaseMap, overriddenMap)
 			} else {
-				result[compName] = releaseVer
+				result[key] = releaseMap
 			}
 		} else {
-			result[compName] = releaseVer
+			releaseStr, isString := releaseValue.(string)
+			if !isString {
+				result[key] = releaseValue
+
+				continue
+			}
+
+			overriddenValue, hasOverridden := overridden[key]
+			if hasOverridden {
+				overriddenStr, isString := overriddenValue.(string)
+				if isString && overriddenStr != "" && overriddenStr != releaseStr {
+					result[key] = fmt.Sprintf("%s → %s", releaseStr, overriddenStr)
+				} else {
+					result[key] = releaseValue
+				}
+			} else {
+				result[key] = releaseValue
+			}
 		}
 	}
 
