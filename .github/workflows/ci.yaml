@@ -67,6 +67,23 @@ jobs:
         run: |
           just --timestamp test
 
+      - name: Test diagram generation
+        run: |
+          mkdir -p test-diagrams
+          just run hhfab init -f --dev --gw
+          just run hhfab vlab gen
+
+          # Generate diagrams in all formats and save to test-diagrams directory
+          just run hhfab diagram -f mermaid -o test-diagrams/default-vlab-diagram.mmd -v
+          just run hhfab diagram -f drawio -o test-diagrams/default-vlab-diagram.drawio -v
+          just run hhfab diagram -f dot -o test-diagrams/default-vlab-diagram.dot -v
+
+      - name: Upload diagram artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: vlab-diagrams
+          path: test-diagrams
+
       - name: Go mod tidy
         run: |
           go mod tidy
