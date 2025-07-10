@@ -555,6 +555,7 @@ _Appears in:_
 | `ntp` _[Version](#version)_ |  |  |  |
 | `ntpChart` _[Version](#version)_ |  |  |  |
 | `alloy` _[Version](#version)_ |  |  |  |
+| `bashCompletion` _[Version](#version)_ |  |  |  |
 
 
 #### RegistryConfig
