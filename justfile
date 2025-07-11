@@ -168,7 +168,7 @@ patch: && version
 #
 # Setup local registry
 #
-zot_version := "v2.1.1"
+zot_version := "v2.1.5"
 zot_os := `hack/os.sh`
 zot_arch := `hack/arch.sh`
 zot := localbin / "zot" + "-" + zot_os + "-" + zot_arch + "-" + zot_version
@@ -193,7 +193,7 @@ test-diagram y="":
   @echo "==============================================="
   @echo "Diagram generation test - various topologies, formats, and styles"
   @echo "==============================================="
-  
+
   # Check if a VLAB is actually running
   @echo "=== Checking for running VLAB ==="
   @VLAB_PIDS=$(pgrep -f "[h]hfab vlab up" 2>/dev/null || echo ""); \
@@ -223,49 +223,49 @@ test-diagram y="":
   else \
     echo -n "This will generate diagrams from multiple environments. Continue? [y/N] " && read ans && [ "$ans" = "y" -o "$ans" = "Y" ]; \
   fi
-  
+
   @echo "=== Generating diagrams for default VLAB topology ==="
   bin/hhfab init -f --dev --gw
   bin/hhfab vlab gen
-  
+
   # Generate all formats and styles for default topology
   bin/hhfab diagram --format drawio --style default --output test-diagram/default-drawio-default.drawio
   bin/hhfab diagram --format drawio --style cisco --output test-diagram/default-drawio-cisco.drawio
   bin/hhfab diagram --format drawio --style hedgehog --output test-diagram/default-drawio-hedgehog.drawio
   bin/hhfab diagram --format dot --output test-diagram/default-dot.dot
   bin/hhfab diagram --format mermaid --output test-diagram/default-mermaid.mermaid
-  
+
   @echo "=== Generating diagrams for variant 3-spine topology ==="
   bin/hhfab vlab gen --spines-count 3 --mclag-leafs-count 2 --orphan-leafs-count 1 --eslag-leaf-groups 2
-  
+
   # Generate all formats and styles for 3-spine topology
   bin/hhfab diagram --format drawio --style default --output test-diagram/3spine-drawio-default.drawio
   bin/hhfab diagram --format drawio --style cisco --output test-diagram/3spine-drawio-cisco.drawio
   bin/hhfab diagram --format drawio --style hedgehog --output test-diagram/3spine-drawio-hedgehog.drawio
   bin/hhfab diagram --format dot --output test-diagram/3spine-dot.dot
   bin/hhfab diagram --format mermaid --output test-diagram/3spine-mermaid.mermaid
-  
+
   @echo "=== Generating diagrams for 4-mclag-2-orphan topology ==="
   bin/hhfab vlab gen --mclag-leafs-count 4 --orphan-leafs-count 2
-  
+
   # Generate all formats and styles for 4-mclag-2-orphan topology
   bin/hhfab diagram --format drawio --style default --output test-diagram/4mclag2orphan-drawio-default.drawio
   bin/hhfab diagram --format drawio --style cisco --output test-diagram/4mclag2orphan-drawio-cisco.drawio
   bin/hhfab diagram --format drawio --style hedgehog --output test-diagram/4mclag2orphan-drawio-hedgehog.drawio
   bin/hhfab diagram --format dot --output test-diagram/4mclag2orphan-dot.dot
   bin/hhfab diagram --format mermaid --output test-diagram/4mclag2orphan-mermaid.mermaid
-  
+
   @echo "=== Generating diagrams for collapsed core topology ==="
   bin/hhfab init -f --dev --registry-repo localhost:30000 --fabric-mode collapsed-core
   bin/hhfab vlab gen
-  
+
   # Generate all formats and styles for collapsed core topology
   bin/hhfab diagram --format drawio --style default --output test-diagram/collapsed-core-drawio-default.drawio
   bin/hhfab diagram --format drawio --style cisco --output test-diagram/collapsed-core-drawio-cisco.drawio
   bin/hhfab diagram --format drawio --style hedgehog --output test-diagram/collapsed-core-drawio-hedgehog.drawio
   bin/hhfab diagram --format dot --output test-diagram/collapsed-core-dot.dot
   bin/hhfab diagram --format mermaid --output test-diagram/collapsed-core-mermaid.mermaid
-  
+
   # Convert DOT files to PNG if GraphViz is installed
   @echo "=== Converting DOT files to PNG if GraphViz is installed ==="
   @if command -v dot >/dev/null 2>&1; then \
@@ -277,7 +277,7 @@ test-diagram y="":
   else \
     echo "GraphViz dot not installed, skipping PNG conversion"; \
   fi
-  
+
   # Create markdown files with embedded mermaid diagrams
   @echo "=== Creating Markdown files with embedded Mermaid diagrams ==="
   @for MERMAID_FILE in test-diagram/*-mermaid.mermaid; do \
@@ -289,7 +289,7 @@ test-diagram y="":
     cat "$MERMAID_FILE" >> "$MD_FILE"; \
     echo '```' >> "$MD_FILE"; \
   done
-  
+
   @echo ""
   @echo "All diagrams generated in test-diagram/ directory"
   @ls -la test-diagram/

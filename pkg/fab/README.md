@@ -44,8 +44,8 @@ oras push "ghcr.io/githedgehog/fabricator/k3s-airgap:${K3S_VERSION}" k3s k3s-air
 ## Zot
 
 ```bash
-export ZOT_VERSION="v2.1.1"
-export ZOT_CHART_VERSION="0.1.60"
+export ZOT_VERSION="v2.1.5"
+export ZOT_CHART_VERSION="0.1.75"
 
 helm repo add project-zot http://zotregistry.dev/helm-charts
 helm repo update project-zot
@@ -57,7 +57,7 @@ helm push "zot-${ZOT_VERSION}.tgz" oci://ghcr.io/githedgehog/fabricator/charts
 
 skopeo copy "docker://ghcr.io/project-zot/zot-linux-amd64:${ZOT_VERSION}" "docker://ghcr.io/githedgehog/fabricator/zot:${ZOT_VERSION}"
 
-docker image rm "ghcr.io/githedgehog/fabricator/zot:${ZOT_VERSION}"
+docker image rm "ghcr.io/githedgehog/fabricator/zot:${ZOT_VERSION}" || true
 docker pull --platform linux/amd64 "ghcr.io/githedgehog/fabricator/zot:${ZOT_VERSION}"
 docker save -o zot-airgap-images-amd64.tar "ghcr.io/githedgehog/fabricator/zot:${ZOT_VERSION}"
 pigz -v -c zot-airgap-images-amd64.tar > zot-airgap-images-amd64.tar.gz
