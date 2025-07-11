@@ -14,6 +14,7 @@ import (
 	"go.githedgehog.com/fabric/pkg/boot"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/alloy"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
 	"go.githedgehog.com/fabricator/pkg/util/tmplutil"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -30,7 +31,6 @@ const (
 	BootRef       = "fabric/fabric-boot"
 	AgentRef      = "fabric/agent"
 	CtlRef        = "fabric/hhfctl"
-	AlloyRef      = "fabricator/alloy-bin"
 	ProxyChartRef = "fabric/charts/fabric-proxy"
 	ProxyRef      = "fabric/fabric-proxy"
 	SonicRefBase  = "sonic-bcm-private"
@@ -247,8 +247,8 @@ func GetFabricConfig(f fabapi.Fabricator) (*meta.FabricConfig, error) {
 		ServerFacingMTUOffset:    ServerFacingMTUOffset, // TODO use
 		ESLAGMACBase:             f.Spec.Config.Fabric.ESLAGMACBase,
 		ESLAGESIPrefix:           f.Spec.Config.Fabric.ESLAGESIPrefix,
-		AlloyRepo:                comp.JoinURLParts(registry, comp.RegistryPrefix, AlloyRef),
-		AlloyVersion:             string(f.Status.Versions.Platform.Alloy),
+		AlloyRepo:                comp.JoinURLParts(registry, comp.RegistryPrefix, alloy.BinRef),
+		AlloyVersion:             string(alloy.Version(f)),
 		Alloy:                    f.Spec.Config.Fabric.DefaultAlloyConfig,
 		DefaultMaxPathsEBGP:      64,
 		AllowExtraSwitchProfiles: false,
@@ -307,7 +307,7 @@ func Artifacts(cfg fabapi.Fabricator) (comp.OCIArtifacts, error) {
 		BootRef:       cfg.Status.Versions.Fabric.Boot,
 		AgentRef:      cfg.Status.Versions.Fabric.Agent,
 		CtlRef:        cfg.Status.Versions.Fabric.Ctl,
-		AlloyRef:      cfg.Status.Versions.Platform.Alloy,
+		alloy.BinRef:  alloy.Version(cfg),
 		ProxyChartRef: cfg.Status.Versions.Fabric.ProxyChart,
 		ProxyRef:      cfg.Status.Versions.Fabric.Proxy,
 	}
