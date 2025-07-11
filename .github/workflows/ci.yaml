@@ -39,6 +39,9 @@ on:
 jobs:
   test:
     runs-on: lab
+    permissions:
+      contents: read
+      actions: read
 
     steps:
       - name: Checkout repository
@@ -109,6 +112,9 @@ jobs:
   build:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
 
     strategy:
       matrix:
@@ -188,6 +194,9 @@ jobs:
   build-multi:
     runs-on: lab
     timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
 
     steps:
       - name: Checkout repository
@@ -221,6 +230,8 @@ jobs:
       - build
       - build-multi
     if: ${{ always() }}
+    permissions:
+      contents: read
 
     steps:
       - run: |
@@ -239,6 +250,9 @@ jobs:
       - test
       - builds
     timeout-minutes: 150
+    permissions:
+      contents: read
+      actions: read
 
     strategy:
       fail-fast: false
@@ -379,6 +393,9 @@ jobs:
       - test
       - builds
     timeout-minutes: 90
+    permissions:
+      contents: read
+      actions: read
 
     strategy:
       fail-fast: false
@@ -497,6 +514,8 @@ jobs:
       - vlab
       - vlab-upgrade
     if: ${{ always() }}
+    permissions:
+      contents: read
 
     steps:
       - run: |
@@ -522,6 +541,9 @@ jobs:
       - test
       - builds
     timeout-minutes: 250
+    permissions:
+      contents: read
+      actions: read
 
     strategy:
       fail-fast: false
@@ -633,6 +655,8 @@ jobs:
     needs:
       - hlab
     if: ${{ always() }}
+    permissions:
+      contents: read
 
     steps:
       - run: |
@@ -649,6 +673,9 @@ jobs:
     needs:
       - vlab
       - hlab
+    permissions:
+      contents: read
+      actions: read
 
     steps:
       - name: Download Artifacts
@@ -669,6 +696,11 @@ jobs:
       - build-multi
       - vlab
       - vlab-upgrade
+    permissions:
+      contents: write
+      packages: write
+      actions: read
+      pull-requests: write
 
     steps:
       - name: Checkout repository
@@ -761,6 +793,10 @@ jobs:
       - build-multi
       - vlab
       - vlab-upgrade
+    permissions:
+      contents: read
+      packages: write
+      actions: read
 
     steps:
       - name: Checkout repository
