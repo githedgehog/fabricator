@@ -29,7 +29,7 @@ oras push "ghcr.io/githedgehog/fabricator/flatcar-update:${FLATCAR_VERSION}" fla
 When bumping k3s version you may need to update the Fabricator's pause version as well as we're using the one from k3s.
 
 ```bash
-export K3S_VERSION="v1.32.6-k3s1"
+export K3S_VERSION="v1.33.2-k3s1"
 export K3S_VERSION_UPSTREAM="${K3S_VERSION//-/+}"
 
 wget "https://github.com/k3s-io/k3s/releases/download/${K3S_VERSION_UPSTREAM}/k3s"
