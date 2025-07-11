@@ -169,3 +169,21 @@ unzip alloy-linux-amd64.zip
 mv alloy-linux-amd64 alloy
 oras push "ghcr.io/githedgehog/fabricator/alloy-bin:${ALLOY_VERSION}" alloy
 ```
+
+## Reloader
+
+```bash
+export RELOADER_VERSION="v1.4.5"
+export RELOADER_CHART_VERSION="2.1.5"
+
+helm repo add stakater https://stakater.github.io/stakater-charts
+helm repo update
+
+helm pull stakater/reloader --version "${RELOADER_CHART_VERSION}"
+tar xzf "reloader-${RELOADER_CHART_VERSION}.tgz"
+helm package reloader --version "${RELOADER_VERSION}"
+helm push "reloader-${RELOADER_VERSION}.tgz" oci://ghcr.io/githedgehog/fabricator/charts
+rm -rf reloader*
+
+skopeo copy --all "docker://ghcr.io/stakater/reloader:${RELOADER_VERSION}" "docker://ghcr.io/githedgehog/fabricator/reloader:${RELOADER_VERSION}"
+```
