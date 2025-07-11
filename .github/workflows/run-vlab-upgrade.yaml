@@ -1,0 +1,185 @@
+name: Run VLAB Upgrade Tests
+
+on:
+  workflow_call:
+    inputs:
+      component_name:
+        description: 'Component repository name (e.g., fabric, fabricator)'
+        type: string
+        required: true
+      commit_sha:
+        description: 'Commit SHA to test against'
+        type: string
+        required: true
+      go_module_path:
+        description: 'Go module path to replace (empty for fabricator itself)'
+        type: string
+        required: false
+        default: ''
+      fabric_version:
+        description: 'Fabric version to use (image tag)'
+        type: string
+        required: false
+        default: ''
+      fabric_mode:
+        description: 'Fabric mode'
+        type: string
+        required: true
+      from_version:
+        description: 'Version to upgrade from'
+        type: string
+        required: true
+      from_flags:
+        description: 'Flags for initial setup'
+        type: string
+        required: true
+      debug_enabled:
+        description: 'Enable tmate debugging'
+        type: boolean
+        required: false
+        default: false
+    secrets:
+      token:
+        description: 'GitHub token for status reporting'
+        required: false
+
+jobs:
+  vlab-upgrade-test:
+    runs-on: vlab
+    timeout-minutes: 90
+
+    env:
+      slug: "${{ inputs.fabric_mode }}-${{ inputs.from_version }}-${{ inputs.from_flags == '--usb' && 'usb' || inputs.from_flags == '-m=iso' && 'iso' }}"
+      unique_id: "${{ github.run_id }}-${{ github.run_number }}"
+
+    steps:
+      - name: Runner host
+        run: |
+          echo "$KUBE_NODE"
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          repository: githedgehog/fabricator
+          ref: pau/ci_refactor
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+
+      # Only for external components - override Go module
+      - name: Override component
+        if: inputs.go_module_path != ''
+        run: |
+          echo "Overriding Go module ${{ inputs.go_module_path }} with github.com/githedgehog/${{ inputs.component_name }}@${{ inputs.commit_sha }}"
+          go mod edit -replace=${{ inputs.go_module_path }}=github.com/githedgehog/${{ inputs.component_name }}@${{ inputs.commit_sha }}
+          go mod tidy
+          go mod vendor
+          # Verify replacement
+          grep -A 3 "replace ${{ inputs.go_module_path }}" go.mod || echo "Module replacement not found in go.mod"
+
+      # Override fabric version for custom builds (upgrade TO this version)
+      - name: Override Fabric version in versions.go
+        if: inputs.fabric_version != ''
+        run: |
+          echo "Overriding Fabric version in versions.go for upgrade target"
+          # Replace FabricVersion in versions.go with our custom tag
+          sed -i 's/FabricVersion\s*=\s*meta.Version.*/FabricVersion = meta.Version("${{ inputs.fabric_version }}")/' pkg/fab/versions.go
+          cat pkg/fab/versions.go
+
+      - name: Setup local registry
+        run: |
+          just --timestamp _localreg &
+
+      - name: Initial VLAB with old version
+        env:
+          HHFAB_REG_REPO: 127.0.0.1:30000
+          HHFAB_VLAB_COLLECT: true
+        run: |
+          mkdir old
+          curl -fsSL https://i.hhdev.io/hhfab | USE_SUDO=false INSTALL_DIR=./old VERSION="${{ inputs.from_version }}" bash
+
+          old/hhfab init -v --dev -m ${{ inputs.fabric_mode }} --include-onie=true
+          old/hhfab vlab gen -v
+          old/hhfab vlab up -v --ready setup-vpcs --ready test-connectivity --ready exit ${{ inputs.from_flags }}
+
+      - name: Upload show-tech artifacts (before)
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vlab-upgrade--${{ env.slug }}--0-before--show-tech--${{ env.unique_id }}
+          path: show-tech-output
+
+      - name: Build current hhfab (with custom fabric version)
+        run: |
+          echo "Building hhfab with fabric version: ${{ inputs.fabric_version || 'default' }}"
+          just --timestamp oci_repo=127.0.0.1:30000 oci=http push
+
+      - name: hhfab vlab up --upgrade
+        env:
+          HHFAB_REG_REPO: 127.0.0.1:30000
+          HHFAB_VLAB_COLLECT: true
+        run: |
+          echo "Upgrading from ${{ inputs.from_version }} to fabric version: ${{ inputs.fabric_version || 'current' }}"
+          bin/hhfab vlab up -v --ready inspect --ready setup-vpcs --ready test-connectivity --ready exit --upgrade
+
+      - name: Upload show-tech artifacts (current)
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vlab-upgrade--${{ env.slug }}--1-curr--show-tech--${{ env.unique_id }}
+          path: show-tech-output
+
+      - name: hhfab vlab up after upgrade
+        env:
+          HHFAB_REG_REPO: 127.0.0.1:30000
+          HHFAB_VLAB_COLLECT: true
+        run: |
+          bin/hhfab vlab up -v --ready wait --ready exit -m=manual
+
+      - name: Upload show-tech artifacts (after)
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vlab-upgrade--${{ env.slug }}--2-after--show-tech--${{ env.unique_id }}
+          path: show-tech-output
+
+      - name: Upload local registry logs
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vlab-upgrade--${{ env.slug }}--registry--${{ env.unique_id }}
+          path: .zot/log
+
+      - name: Report status
+        if: inputs.go_module_path != ''
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.token }}
+          script: |
+            const { owner, repo } = context.repo;
+            const componentOwner = 'githedgehog';
+            const componentRepo = '${{ inputs.component_name }}';
+            const sha = '${{ inputs.commit_sha }}';
+            const scenario = 'upgrade-${{ env.slug }}';
+            const conclusion = '${{ job.status }}';
+
+            await github.rest.repos.createCommitStatus({
+              owner: componentOwner,
+              repo: componentRepo,
+              sha: sha,
+              state: conclusion.toLowerCase() === 'success' ? 'success' : 'failure',
+              context: `VLAB Upgrade: ${scenario}`,
+              description: `VLAB upgrade ${scenario} test ${conclusion.toLowerCase()}`,
+              target_url: `https://github.com/${owner}/${repo}/actions/runs/${context.runId}`
+            });
+
+      - name: Setup tmate session for debug
+        if: failure() && inputs.debug_enabled
+        uses: mxschmitt/action-tmate@v3
+        timeout-minutes: 30
+        with:
+          limit-access-to-actor: true

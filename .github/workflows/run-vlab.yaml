@@ -1,0 +1,179 @@
+name: Run VLAB Standalone Tests
+
+on:
+  workflow_call:
+    inputs:
+      component_name:
+        description: 'Component repository name (e.g., fabric, fabricator)'
+        type: string
+        required: true
+      commit_sha:
+        description: 'Commit SHA to test against'
+        type: string
+        required: true
+      go_module_path:
+        description: 'Go module path to replace (empty for fabricator itself)'
+        type: string
+        required: false
+        default: ''
+      fabric_version:
+        description: 'Fabric version to use (image tag)'
+        type: string
+        required: false
+        default: ''
+      run_release_test:
+        description: 'Run release tests'
+        type: boolean
+        required: false
+        default: false
+      debug_enabled:
+        description: 'Enable tmate debugging'
+        type: boolean
+        required: false
+        default: false
+      matrix_config:
+        description: 'JSON array of test matrix configurations'
+        type: string
+        required: false
+        default: |
+          [
+            {"fabric_mode": "spine-leaf", "include_onie": false, "gateway": false, "build_mode": "iso", "vpc_mode": ""}
+          ]
+    secrets:
+      token:
+        description: 'GitHub token for status reporting'
+        required: false
+
+jobs:
+  vlab-test:
+    runs-on: vlab
+    timeout-minutes: 150
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(inputs.matrix_config) }}
+
+    env:
+      slug: "${{ matrix.fabric_mode }}-${{ matrix.gateway }}-${{ matrix.include_onie }}-${{ matrix.build_mode }}-${{ matrix.vpc_mode }}"
+      run_release_test: ${{ inputs.run_release_test }}
+
+    steps:
+      - name: Runner host
+        run: |
+          echo "Running on KUBE_NODE: $KUBE_NODE"
+          echo "Current directory: $(pwd)"
+          hostname
+
+      - name: Checkout fabricator repository
+        uses: actions/checkout@v4
+        with:
+          repository: githedgehog/fabricator
+          ref: pau/ci_refactor
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+
+      - name: Override component
+        if: inputs.go_module_path != ''
+        run: |
+          echo "Overriding Go module ${{ inputs.go_module_path }} with github.com/githedgehog/${{ inputs.component_name }}@${{ inputs.commit_sha }}"
+          go mod edit -replace=${{ inputs.go_module_path }}=github.com/githedgehog/${{ inputs.component_name }}@${{ inputs.commit_sha }}
+          go mod tidy
+          go mod vendor
+          # Verify replacement
+          grep -A 3 "replace ${{ inputs.go_module_path }}" go.mod || echo "Module replacement not found in go.mod"
+
+      - name: Override Fabric version in versions.go
+        if: inputs.fabric_version != ''
+        run: |
+          echo "Overriding Fabric version in versions.go"
+          # Replace FabricVersion in versions.go with our custom tag
+          sed -i 's/FabricVersion\s*=\s*meta.Version.*/FabricVersion = meta.Version("${{ inputs.fabric_version }}")/' pkg/fab/versions.go
+          cat pkg/fab/versions.go
+
+      - name: Setup local registry
+        run: |
+          just --timestamp _localreg &
+
+      - name: Build hhfab
+        run: |
+          just --timestamp oci_repo=127.0.0.1:30000 oci=http push
+
+      - name: hhfab release test
+        env:
+          HHFAB_REG_REPO: 127.0.0.1:30000
+          HHFAB_VLAB_COLLECT: true
+        if: env.run_release_test == 'true'
+        run: |
+          bin/hhfab init -v --dev -m ${{ matrix.fabric_mode }} --include-onie=${{ matrix.include_onie }} --gateway=${{ matrix.gateway }}
+          bin/hhfab vlab gen -v
+          export HHFAB_JOIN_TOKEN=$(openssl rand -base64 24)
+          bin/hhfab vlab up -v --ready inspect --ready setup-vpcs --ready test-connectivity --ready release-test --ready exit --mode=${{ matrix.build_mode }} --vpc-mode="${{ matrix.vpc_mode }}"
+          cat release-test.xml
+
+      - name: Upload Test Results
+        uses: actions/upload-artifact@v4
+        if: env.run_release_test == 'true' && !cancelled()
+        with:
+          name: Test Results for vlab--${{ env.slug }}
+          path: release-test.xml
+
+      - name: hhfab init and vlab up
+        env:
+          HHFAB_REG_REPO: 127.0.0.1:30000
+          HHFAB_VLAB_COLLECT: true
+        if: env.run_release_test != 'true'
+        run: |
+          bin/hhfab init -v --dev -m ${{ matrix.fabric_mode }} --include-onie=${{ matrix.include_onie }} --gateway=${{ matrix.gateway }}
+          bin/hhfab vlab gen -v
+          export HHFAB_JOIN_TOKEN=$(openssl rand -base64 24)
+          bin/hhfab vlab up -v --ready inspect --ready setup-vpcs --ready test-connectivity --ready exit --mode=${{ matrix.build_mode }} --vpc-mode="${{ matrix.vpc_mode }}"
+
+      - name: Upload show-tech artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vlab--${{ env.slug }}--show-tech
+          path: show-tech-output
+
+      - name: Upload local registry logs
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vlab--${{ env.slug }}--registry
+          path: .zot/log
+
+      - name: Report status
+        if: inputs.go_module_path != ''
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.token }}
+          script: |
+            const { owner, repo } = context.repo;
+            const componentOwner = 'githedgehog';
+            const componentRepo = '${{ inputs.component_name }}';
+            const sha = '${{ inputs.commit_sha }}';
+            const scenario = '${{ env.slug }}';
+            const conclusion = '${{ job.status }}';
+
+            await github.rest.repos.createCommitStatus({
+              owner: componentOwner,
+              repo: componentRepo,
+              sha: sha,
+              state: conclusion.toLowerCase() === 'success' ? 'success' : 'failure',
+              context: `VLAB Integration: ${scenario}`,
+              description: `VLAB ${scenario} test ${conclusion.toLowerCase()}`,
+              target_url: `https://github.com/${owner}/${repo}/actions/runs/${context.runId}`
+            });
+
+      - name: Setup tmate session for debug
+        if: failure() && inputs.debug_enabled
+        uses: mxschmitt/action-tmate@v3
+        timeout-minutes: 30
+        with:
+          limit-access-to-actor: true
