@@ -588,14 +588,14 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 		}
 
 		if isGw && spineID <= b.GatewayUplinks {
-			spinePort := b.nextSwitchPort(spineName)
+			switchPort := b.nextSwitchPort(spineName)
 			gwPort := fmt.Sprintf("%s/enp2s%d", gw.Name, spineID)
 
 			if _, err := b.createConnection(ctx, wiringapi.ConnectionSpec{
 				Gateway: &wiringapi.ConnGateway{
 					Links: []wiringapi.GatewayLink{
 						{
-							Spine:   wiringapi.ConnFabricLinkSwitch{BasePortName: wiringapi.BasePortName{Port: spinePort}},
+							Switch:  wiringapi.ConnFabricLinkSwitch{BasePortName: wiringapi.BasePortName{Port: switchPort}},
 							Gateway: wiringapi.ConnGatewayLinkGateway{BasePortName: wiringapi.BasePortName{Port: gwPort}},
 						},
 					},

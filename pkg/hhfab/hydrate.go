@@ -513,32 +513,32 @@ func (c *Config) getHydration(ctx context.Context, kube kclient.Reader) (Hydrati
 
 			for idx, link := range cg.Links {
 				total += 2
-				if link.Spine.IP == "" {
+				if link.Switch.IP == "" {
 					missing++
 				}
 				if link.Gateway.IP == "" {
 					missing++
 				}
-				if link.Spine.IP == "" || link.Gateway.IP == "" {
+				if link.Switch.IP == "" || link.Gateway.IP == "" {
 					continue
 				}
 
-				spinePrefix, err := netip.ParsePrefix(link.Spine.IP)
+				switchPrefix, err := netip.ParsePrefix(link.Switch.IP)
 				if err != nil {
-					return status, fmt.Errorf("parsing gateway connection %s link %d spine IP %s: %w", conn.Name, idx, link.Spine.IP, err)
+					return status, fmt.Errorf("parsing gateway connection %s link %d switch IP %s: %w", conn.Name, idx, link.Switch.IP, err)
 				}
-				if spinePrefix.Bits() != 31 {
-					return status, fmt.Errorf("gateway connection %s link %d spine IP %s is not a /31", conn.Name, idx, spinePrefix) //nolint:goerr113
+				if switchPrefix.Bits() != 31 {
+					return status, fmt.Errorf("gateway connection %s link %d switch IP %s is not a /31", conn.Name, idx, switchPrefix) //nolint:goerr113
 				}
 
-				spineIP := spinePrefix.Addr()
-				if !fabricSubnet.Contains(spineIP) {
-					return status, fmt.Errorf("gateway connection %s link %d spine IP %s is not in the fabric subnet %s", conn.Name, idx, spineIP, fabricSubnet) //nolint:goerr113
+				switchIP := switchPrefix.Addr()
+				if !fabricSubnet.Contains(switchIP) {
+					return status, fmt.Errorf("gateway connection %s link %d switch IP %s is not in the fabric subnet %s", conn.Name, idx, switchIP, fabricSubnet) //nolint:goerr113
 				}
-				if _, exist := fabricIPs[spineIP]; exist {
-					return status, fmt.Errorf("gateway connection %s link %d spine IP %s is already in use", conn.Name, idx, spineIP) //nolint:goerr113
+				if _, exist := fabricIPs[switchIP]; exist {
+					return status, fmt.Errorf("gateway connection %s link %d switch IP %s is already in use", conn.Name, idx, switchIP) //nolint:goerr113
 				}
-				fabricIPs[spineIP] = true
+				fabricIPs[switchIP] = true
 
 				gwPrefix, err := netip.ParsePrefix(link.Gateway.IP)
 				if err != nil {
@@ -557,8 +557,8 @@ func (c *Config) getHydration(ctx context.Context, kube kclient.Reader) (Hydrati
 				}
 				fabricIPs[gwIP] = true
 
-				if spinePrefix.Masked() != gwPrefix.Masked() {
-					return status, fmt.Errorf("gateway connection %s link %d spine IP %s and gateway IP %s are not in the same subnet", conn.Name, idx, spineIP, gwIP) //nolint:goerr113
+				if switchPrefix.Masked() != gwPrefix.Masked() {
+					return status, fmt.Errorf("gateway connection %s link %d spine IP %s and gateway IP %s are not in the same subnet", conn.Name, idx, switchIP, gwIP) //nolint:goerr113
 				}
 			}
 		}
@@ -810,7 +810,7 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 
 			for idx := range cg.Links {
 				link := &cg.Links[idx]
-				link.Spine.IP = nextFabricIP.String() + "/31"
+				link.Switch.IP = nextFabricIP.String() + "/31"
 				nextFabricIP = nextFabricIP.Next()
 
 				link.Gateway.IP = nextFabricIP.String() + "/31"
@@ -833,15 +833,15 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 					MTU: fabric.MTU,
 				}
 
-				spineIP, err := netip.ParsePrefix(link.Spine.IP)
+				switchIP, err := netip.ParsePrefix(link.Switch.IP)
 				if err != nil {
-					return fmt.Errorf("parsing gateway %s link %d spine IP %s: %w", gwName, idx, link.Spine.IP, err)
+					return fmt.Errorf("parsing gateway %s link %d switch IP %s: %w", gwName, idx, link.Switch.IP, err)
 				}
 
 				// TODO check that it's not already set?
 				gw.Spec.Neighbors = append(gw.Spec.Neighbors, gwapi.GatewayBGPNeighbor{
 					Source: link.Gateway.LocalPortName(),
-					IP:     spineIP.Addr().String(),
+					IP:     switchIP.Addr().String(),
 					ASN:    c.Fab.Spec.Config.Fabric.SpineASN,
 				})
 

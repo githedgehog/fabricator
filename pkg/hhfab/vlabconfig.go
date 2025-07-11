@@ -618,7 +618,7 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 			}
 		} else if conn.Spec.Gateway != nil {
 			for _, link := range conn.Spec.Gateway.Links {
-				if err := addLink(link.Spine.Port, link.Gateway.Port); err != nil {
+				if err := addLink(link.Switch.Port, link.Gateway.Port); err != nil {
 					return nil, fmt.Errorf("failed to add link for gateway connection %s: %w", conn.Name, err)
 				}
 			}
