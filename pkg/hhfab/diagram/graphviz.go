@@ -19,6 +19,8 @@ const (
 	ColorBundled   = "green"
 	ColorUnbundled = "gray"
 	ColorESLAG     = "orange"
+	ColorGateway   = "khaki"
+	ColorExternal  = "goldenrod"
 	ColorDefault   = "black"
 )
 
@@ -98,6 +100,10 @@ func generateDOT(topo Topology) string {
 	b.WriteString("\t\t\t<TD ALIGN=\"LEFT\" VALIGN=\"MIDDLE\"><FONT COLOR=\"purple\">- - - -</FONT></TD>\n")
 	b.WriteString("\t\t\t<TD ALIGN=\"LEFT\">Gateway Links</TD>\n")
 	b.WriteString("\t\t\t</TR>\n")
+	b.WriteString("\t\t\t<TR>\n")
+	b.WriteString("\t\t\t<TD ALIGN=\"LEFT\" VALIGN=\"MIDDLE\"><FONT COLOR=\"goldenrod\">────</FONT></TD>\n")
+	b.WriteString("\t\t\t<TD ALIGN=\"LEFT\">External Links</TD>\n")
+	b.WriteString("\t\t\t</TR>\n")
 	b.WriteString("\t\t\t</TABLE>\n")
 	b.WriteString("\t\t>];\n")
 	b.WriteString("\t}\n")
@@ -113,24 +119,39 @@ func generateDOT(topo Topology) string {
 		b.WriteString("}\n")
 	}
 
+	// Put spines and externals at the same rank
 	b.WriteString("\t{rank=same; ")
 	for _, node := range layers.Spine {
 		b.WriteString(fmt.Sprintf("\"%s\"; ", node.ID))
 	}
+
+	// Add externals to the spine rank
+	if len(layers.External) > 0 {
+		leftExternals, rightExternals := splitExternalNodes(layers.External, topo.Links, layers.Leaf)
+		for _, node := range leftExternals {
+			b.WriteString(fmt.Sprintf("\"%s\"; ", node.ID))
+		}
+		for _, node := range rightExternals {
+			b.WriteString(fmt.Sprintf("\"%s\"; ", node.ID))
+		}
+	}
 	b.WriteString("}\n")
 
+	// Leaves below spines and externals
 	b.WriteString("\t{rank=same; ")
 	for _, node := range layers.Leaf {
 		b.WriteString(fmt.Sprintf("\"%s\"; ", node.ID))
 	}
 	b.WriteString("}\n")
 
+	// Servers at bottom
 	b.WriteString("\t{rank=max; ")
 	for _, node := range layers.Server {
 		b.WriteString(fmt.Sprintf("\"%s\"; ", node.ID))
 	}
 	b.WriteString("}\n\n")
 
+	// Node styling
 	for _, node := range layers.Gateway {
 		b.WriteString(fmt.Sprintf("\t\"%s\" [label=\"%s\", fillcolor=\"#fff2cc\", style=\"rounded,filled\", color=\"#d6b656\"];\n",
 			node.ID, node.Label))
@@ -147,6 +168,20 @@ func generateDOT(topo Topology) string {
 		b.WriteString(fmt.Sprintf("\t\"%s\" [label=\"%s\", fillcolor=\"#d5e8d4\", style=\"filled\", color=\"#82b366\"];\n",
 			node.ID, node.Label))
 	}
+
+	// Add styling for external nodes
+	if len(layers.External) > 0 {
+		leftExternals, rightExternals := splitExternalNodes(layers.External, topo.Links, layers.Leaf)
+		for _, node := range leftExternals {
+			b.WriteString(fmt.Sprintf("\t\"%s\" [label=\"%s\", fillcolor=\"#ffcc99\", style=\"rounded,filled\", color=\"#d79b00\"];\n",
+				node.ID, node.Label))
+		}
+		for _, node := range rightExternals {
+			b.WriteString(fmt.Sprintf("\t\"%s\" [label=\"%s\", fillcolor=\"#ffcc99\", style=\"rounded,filled\", color=\"#d79b00\"];\n",
+				node.ID, node.Label))
+		}
+	}
+
 	b.WriteString("\n")
 
 	// Add invisible edges to center the gateway over spines
@@ -174,14 +209,22 @@ func generateDOT(topo Topology) string {
 		}
 	}
 
+	// Chain nodes within same rank
 	if len(layers.Gateway) > 1 {
 		writeChain(&b, layers.Gateway)
 	}
 	writeChain(&b, layers.Spine)
 	writeChain(&b, layers.Leaf)
 	writeChain(&b, layers.Server)
+
+	// Chain externals if needed
+	if len(layers.External) > 1 {
+		writeChain(&b, layers.External)
+	}
+
 	b.WriteString("\n")
 
+	// Draw the edges with grouping
 	b.WriteString("\tedge [style=solid, weight=1];\n")
 
 	// Track fabric links between spine and leaf to collapse parallel connections
@@ -261,8 +304,11 @@ func generateDOT(topo Topology) string {
 			color = ColorESLAG
 			style = StyleDashed
 		case EdgeTypeGateway:
-			color = "#d6b656"
+			color = ColorGateway
 			style = StyleDashed
+		case EdgeTypeExternal:
+			color = ColorExternal
+			style = StyleSolid
 		default:
 			color = ColorDefault
 			style = StyleSolid
