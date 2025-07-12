@@ -318,6 +318,7 @@ jobs:
           HHFAB_VLAB_COLLECT: true
         if: ${{ env.run_release_test == 'true' }}
         run: |
+          bin/hhfab versions
           bin/hhfab init -v --dev -m ${{ matrix.fabricmode }} --include-onie=${{ matrix.includeonie }} --gateway=${{ matrix.gateway }}
           bin/hhfab vlab gen -v
           export HHFAB_JOIN_TOKEN=$(openssl rand -base64 24)
@@ -337,6 +338,7 @@ jobs:
           HHFAB_VLAB_COLLECT: true
         if: ${{ env.run_release_test != 'true' }}
         run: |
+          bin/hhfab versions
           bin/hhfab init -v --dev -m ${{ matrix.fabricmode }} --include-onie=${{ matrix.includeonie }} --gateway=${{ matrix.gateway }}
           bin/hhfab vlab gen -v
           bin/hhfab diagram -f mermaid
@@ -435,6 +437,7 @@ jobs:
           curl -fsSL https://i.hhdev.io/hhfab | USE_SUDO=false INSTALL_DIR=./old VERSION="${{ matrix.fromversion }}" bash
 
           old/hhfab init -v --dev -m ${{ matrix.fabricmode }} --include-onie=true
+          old/hhfab versions
           old/hhfab vlab gen -v
           old/hhfab vlab up -v --ready setup-vpcs --ready test-connectivity --ready exit ${{ matrix.fromflags }}
 
@@ -454,6 +457,7 @@ jobs:
           HHFAB_REG_REPO: 127.0.0.1:30000
           HHFAB_VLAB_COLLECT: true
         run: |
+          bin/hhfab versions
           bin/hhfab vlab up -v --ready inspect --ready setup-vpcs --ready test-connectivity --ready exit --upgrade
 
       - name: Upload show-tech artifacts
@@ -468,6 +472,7 @@ jobs:
           HHFAB_REG_REPO: 127.0.0.1:30000
           HHFAB_VLAB_COLLECT: true
         run: |
+          bin/hhfab versions
           bin/hhfab vlab up -v --ready wait --ready exit -m=manual
 
       - name: Upload show-tech artifacts
@@ -574,6 +579,7 @@ jobs:
         if: ${{ env.run_release_test == 'true' }}
         run: |
           source "./lab-ci/envs/$KUBE_NODE/source.sh"
+          bin/hhfab versions
           bin/hhfab init -v --dev --include-onie=${{ matrix.includeonie }} -w "./lab-ci/envs/$KUBE_NODE/wiring.yaml"
 
           # TODO: make controls restricted again when we figure out how to get NTP upstream working for isolated VMs
@@ -594,6 +600,7 @@ jobs:
         if: ${{ env.run_release_test != 'true' }}
         run: |
           source "./lab-ci/envs/$KUBE_NODE/source.sh"
+          bin/hhfab versions
           bin/hhfab init -v --dev --include-onie=${{ matrix.includeonie }} -w "./lab-ci/envs/$KUBE_NODE/wiring.yaml"
           bin/hhfab diagram -f mermaid
 
