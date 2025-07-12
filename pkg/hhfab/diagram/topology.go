@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -20,21 +21,6 @@ func extractPort(port string) string {
 	}
 
 	return port
-}
-
-type LayeredNodes struct {
-	Spine   []Node
-	Leaf    []Node
-	Server  []Node
-	Gateway []Node
-}
-
-type serverConnection struct {
-	primaryLeaf   string
-	secondaryLeaf string
-	connTypes     map[string][]string // leaf -> connection types
-	mclagPair     string
-	eslagPair     string
 }
 
 func findConnectionTypes(links []Link) map[string]*serverConnection {
@@ -121,8 +107,8 @@ func findConnectionTypes(links []Link) map[string]*serverConnection {
 	return serverConns
 }
 
-func sortNodes(nodes []Node, links []Link) LayeredNodes {
-	var result LayeredNodes
+func sortNodes(nodes []Node, links []Link) TieredNodes {
+	var result TieredNodes
 	leafOrder := make(map[string]int)
 
 	for _, node := range nodes {
@@ -137,6 +123,11 @@ func sortNodes(nodes []Node, links []Link) LayeredNodes {
 			result.Server = append(result.Server, node)
 		case NodeTypeGateway:
 			result.Gateway = append(result.Gateway, node)
+		case NodeTypeExternal:
+			// Only include external nodes that have connections
+			if hasConnections(node.ID, links) {
+				result.External = append(result.External, node)
+			}
 		}
 	}
 
@@ -178,6 +169,11 @@ func sortNodes(nodes []Node, links []Link) LayeredNodes {
 
 	sort.Slice(result.Gateway, func(i, j int) bool {
 		return result.Gateway[i].ID < result.Gateway[j].ID
+	})
+
+	// Sort external nodes by ID
+	sort.Slice(result.External, func(i, j int) bool {
+		return result.External[i].ID < result.External[j].ID
 	})
 
 	// Create leaf order map
@@ -342,6 +338,44 @@ func sortNodes(nodes []Node, links []Link) LayeredNodes {
 func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error) {
 	topo := Topology{}
 	nodeSet := make(map[string]bool)
+	// Maps connection names to external names
+	connectionToExternalMap := make(map[string][]string)
+
+	// First load all ExternalAttachment resources to map connections to externals
+	externalAttachments := &vpcapi.ExternalAttachmentList{}
+	if err := client.List(ctx, externalAttachments); err != nil {
+		return topo, fmt.Errorf("listing external attachments: %w", err)
+	}
+
+	// Build a map of connection name to external resources
+	for _, attachment := range externalAttachments.Items {
+		connectionToExternalMap[attachment.Spec.Connection] = append(
+			connectionToExternalMap[attachment.Spec.Connection],
+			attachment.Spec.External,
+		)
+	}
+
+	// Load external resources as nodes
+	externals := &vpcapi.ExternalList{}
+	if err := client.List(ctx, externals); err != nil {
+		return topo, fmt.Errorf("listing externals: %w", err)
+	}
+	for _, external := range externals.Items {
+		if nodeSet[external.Name] {
+			continue
+		}
+
+		nodeSet[external.Name] = true
+		node := Node{
+			ID:    external.Name,
+			Type:  NodeTypeExternal,
+			Label: external.Name,
+			Properties: map[string]string{
+				PropRole: SwitchRoleExternal,
+			},
+		}
+		topo.Nodes = append(topo.Nodes, node)
+	}
 
 	nodes := &fabapi.FabNodeList{}
 	if err := client.List(ctx, nodes); err != nil {
@@ -412,19 +446,31 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 		topo.Nodes = append(topo.Nodes, node)
 	}
 
+	// Process all connections
 	conns := &wiringapi.ConnectionList{}
 	if err := client.List(ctx, conns); err != nil {
 		return topo, fmt.Errorf("listing connections: %w", err)
 	}
+
+	// First pass: collect all external connections
+	externalConnections := make(map[string]string) // Maps connection name to switch port
+	for _, conn := range conns.Items {
+		if conn.Spec.External != nil && conn.Spec.External.Link.Switch.Port != "" {
+			externalConnections[conn.Name] = conn.Spec.External.Link.Switch.Port
+		}
+	}
+
+	// Second pass: process all non-external connections
 	for _, conn := range conns.Items {
 		_, _, _, links, err := conn.Spec.Endpoints()
 		if err != nil {
 			continue
 		}
 
-		// TODO: add conn.Spec.VPCLoopback to the list when we're ready to draw it
+		// Handle standard (non-external) connections
 		if conn.Spec.Fabric != nil || conn.Spec.Gateway != nil || conn.Spec.MCLAGDomain != nil ||
-			conn.Spec.Unbundled != nil || conn.Spec.MCLAG != nil || conn.Spec.Bundled != nil || conn.Spec.ESLAG != nil {
+			conn.Spec.Unbundled != nil || conn.Spec.MCLAG != nil || conn.Spec.Bundled != nil ||
+			conn.Spec.ESLAG != nil {
 			for source, target := range links {
 				link := Link{
 					Source: wiringapi.SplitPortName(source)[0],
@@ -456,7 +502,138 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 		}
 	}
 
+	// Third pass: handle external connections
+	for connName, switchPort := range externalConnections {
+		switchID := wiringapi.SplitPortName(switchPort)[0]
+
+		// Get the external names linked to this connection
+		externalNames, ok := connectionToExternalMap[connName]
+		if !ok || len(externalNames) == 0 {
+			// If no mapping found, try to use any available external
+			for _, node := range topo.Nodes {
+				if node.Type == NodeTypeExternal {
+					externalNames = []string{node.ID}
+
+					break
+				}
+			}
+
+			// If still no externals, skip this connection
+			if len(externalNames) == 0 {
+				continue
+			}
+		}
+
+		// Create links from switch to each external
+		for _, externalName := range externalNames {
+			link := Link{
+				Source: switchID,
+				Target: externalName,
+				Type:   EdgeTypeExternal,
+				Properties: map[string]string{
+					PropSourcePort:   switchPort,
+					"connectionName": connName,
+				},
+			}
+			topo.Links = append(topo.Links, link)
+		}
+	}
+
 	return topo, nil
+}
+
+func getNodeTypeInfo(node Node) (string, string) {
+	var nodeType, nodeRole string
+	nodeType = node.Type
+	if nodeType == NodeTypeSwitch && node.Properties != nil {
+		nodeRole = node.Properties[PropRole]
+	}
+
+	return nodeType, nodeRole
+}
+
+func DetermineExternalSidePlacement(nodeID string, links []Link, leaves []Node) string {
+	leafIndexMap := make(map[string]int)
+	for i, leaf := range leaves {
+		leafIndexMap[leaf.ID] = i
+	}
+
+	leftConnections := 0
+	rightConnections := 0
+	leftWeight := 0  // Weighted connections for left side
+	rightWeight := 0 // Weighted connections for right side
+	midpoint := len(leaves) / 2
+
+	// Count connections to leaves on left vs right side
+	for _, link := range links {
+		var leafID string
+
+		switch {
+		case link.Source == nodeID:
+			leafID = link.Target
+		case link.Target == nodeID:
+			leafID = link.Source
+		default:
+			continue
+		}
+
+		// Check if this is a leaf connection
+		idx, exists := leafIndexMap[leafID]
+		if !exists {
+			continue
+		}
+
+		// Calculate position weight based on distance from center
+		positionWeight := (midpoint - idx)
+		if positionWeight < 0 {
+			positionWeight = -positionWeight
+		}
+		positionWeight++ // Ensure at least weight 1
+
+		// Count as left or right based on leaf position
+		if idx < midpoint {
+			leftConnections++
+			leftWeight += positionWeight
+		} else {
+			rightConnections++
+			rightWeight += positionWeight
+		}
+	}
+
+	// Position based on weighted connections
+	if leftWeight > rightWeight {
+		return NodeSideLeft
+	} else if rightWeight > leftWeight {
+		return NodeSideRight
+	}
+
+	// If weights are equal, use connection count
+	if leftConnections > rightConnections {
+		return NodeSideLeft
+	} else if rightConnections > leftConnections {
+		return NodeSideRight
+	}
+
+	// If still equal, use node ID to ensure deterministic placement
+	nodeIDSum := 0
+	for _, c := range nodeID {
+		nodeIDSum += int(c)
+	}
+	if nodeIDSum%2 == 0 {
+		return NodeSideLeft
+	}
+
+	return NodeSideRight
+}
+
+func hasConnections(nodeID string, links []Link) bool {
+	for _, link := range links {
+		if link.Source == nodeID || link.Target == nodeID {
+			return true
+		}
+	}
+
+	return false
 }
 
 func findNode(nodes []Node, id string) Node {
@@ -469,12 +646,117 @@ func findNode(nodes []Node, id string) Node {
 	return Node{}
 }
 
-func getNodeTypeInfo(node Node) (string, string) {
-	var nodeType, nodeRole string
-	nodeType = node.Type
-	if nodeType == NodeTypeSwitch && node.Properties != nil {
-		nodeRole = node.Properties[PropRole]
+// splitExternalNodes assigns external nodes to left or right side of the diagram
+// based on their connections to leaf switches
+func splitExternalNodes(externals []Node, links []Link, leaves []Node) ([]Node, []Node) {
+	leftExternals := []Node{}
+	rightExternals := []Node{}
+
+	// If only one external, default to right side unless it clearly connects to the left
+	if len(externals) == 1 {
+		leftCount, rightCount := 0, 0
+		for _, link := range links {
+			var leafID string
+
+			switch {
+			case link.Source == externals[0].ID:
+				leafID = link.Target
+			case link.Target == externals[0].ID:
+				leafID = link.Source
+			default:
+				continue
+			}
+
+			// Check if connected to a leaf
+			for i, leaf := range leaves {
+				if leaf.ID == leafID {
+					if i < len(leaves)/2 {
+						leftCount++
+					} else {
+						rightCount++
+					}
+
+					break
+				}
+			}
+		}
+
+		if leftCount > rightCount {
+			leftExternals = append(leftExternals, externals[0])
+		} else {
+			rightExternals = append(rightExternals, externals[0])
+		}
+
+		return leftExternals, rightExternals
 	}
 
-	return nodeType, nodeRole
+	// For 2 or more externals, distribute them more carefully
+	leafIndexMap := make(map[string]int)
+	for i, leaf := range leaves {
+		leafIndexMap[leaf.ID] = i
+	}
+
+	midpoint := len(leaves) / 2
+
+	// First, calculate connection weights for each external
+	nodeWeights := make(map[string]struct{ left, right int })
+	for _, node := range externals {
+		var weights struct{ left, right int }
+
+		for _, link := range links {
+			var leafID string
+
+			switch {
+			case link.Source == node.ID:
+				leafID = link.Target
+			case link.Target == node.ID:
+				leafID = link.Source
+			default:
+				continue
+			}
+
+			// Check if this is a leaf connection
+			idx, exists := leafIndexMap[leafID]
+			if !exists {
+				continue
+			}
+
+			// Count as left or right based on leaf position
+			if idx < midpoint {
+				weights.left++
+			} else {
+				weights.right++
+			}
+		}
+
+		nodeWeights[node.ID] = weights
+	}
+
+	// Sort externals by ID to ensure deterministic output
+	sortedExternals := make([]Node, len(externals))
+	copy(sortedExternals, externals)
+	sort.Slice(sortedExternals, func(i, j int) bool {
+		return sortedExternals[i].ID < sortedExternals[j].ID
+	})
+
+	// Assign nodes to left or right based on connection weights
+	for _, node := range sortedExternals {
+		weights := nodeWeights[node.ID]
+
+		switch {
+		case weights.left > weights.right:
+			leftExternals = append(leftExternals, node)
+		case weights.right > weights.left:
+			rightExternals = append(rightExternals, node)
+		default:
+			// If weights are equal, try to balance the sides
+			if len(leftExternals) <= len(rightExternals) {
+				leftExternals = append(leftExternals, node)
+			} else {
+				rightExternals = append(rightExternals, node)
+			}
+		}
+	}
+
+	return leftExternals, rightExternals
 }
