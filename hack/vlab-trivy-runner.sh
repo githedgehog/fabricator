@@ -346,6 +346,16 @@ fi
 
 echo -e "${GREEN}All enabled VMs setup complete${NC}"
 
+# Function to extract container name from image name
+extract_container_name() {
+    local image_name="$1"
+    # Extract from patterns like:
+    # "172.30.0.1:31000/githedgehog/fabricator/reloader:v1.0.40" -> "reloader"
+    # "registry/org/repo/service:tag" -> "service"
+    # "service:tag" -> "service"
+    echo "$image_name" | sed -E 's|.*/([^/]+):.*|\1|' | sed -E 's|:.*||'
+}
+
 # Function to scan VM with native SARIF output
 scan_vm() {
     local vm_name="$1"
@@ -465,7 +475,7 @@ scan_vm() {
             fi
 
             # Add VM context information to consolidated SARIF
-            echo "Adding VM context information..."
+            echo "Adding VM context information and fixing artifact paths..."
 
             total_critical=$(jq '[.runs[0].results[]? | select(.level == "error" and (.message.text | contains("CRITICAL")))? | select(. != null)] | length' "$consolidated_sarif" 2>/dev/null || echo 0)
             total_high=$(jq '[.runs[0].results[]? | select(.level == "error" and (.message.text | contains("HIGH")))? | select(. != null)] | length' "$consolidated_sarif" 2>/dev/null || echo 0)
@@ -493,7 +503,17 @@ scan_vm() {
             actor="${GITHUB_ACTOR:-unknown}"
             registry_repo="${HHFAB_REG_REPO:-127.0.0.1:30000}"
 
+            # Extract the dominant container name for simpler fallback
+            dominant_container="unknown"
+            if [ ${#image_array[@]} -gt 0 ]; then
+                # Get the most common container name
+                dominant_image="${image_array[0]}"
+                dominant_container=$(extract_container_name "$dominant_image")
+            fi
+
+            # Enhanced jq processing with container name extraction and path fixing
             jq --arg vm_name "$vm_name" \
+               --arg container_name "$dominant_container" \
                --arg scan_time "$(date -Iseconds)" \
                --arg deployment_id "$deployment_id" \
                --arg commit_sha "$commit_sha" \
@@ -506,7 +526,15 @@ scan_vm() {
                --arg total_low "$total_low" \
                --arg scan_mode "$scan_mode" \
                --argjson container_images "$containers_json" \
-               '.runs[0].properties = {
+               '
+               # Function to extract container name from image name
+               def extract_container_name(image_name):
+                 image_name | gsub(".*/([^/]+):.*"; "\\1") | gsub(":.*"; "");
+
+               # Create image to container name mapping for multiple containers
+               ($container_images | map({key: ., value: extract_container_name(.)}) | from_entries) as $image_to_container |
+
+               .runs[0].properties = {
                  vmContext: {
                    name: $vm_name,
                    type: (if ($vm_name | startswith("control")) then "control" elif ($vm_name | startswith("gateway")) then "gateway" elif ($vm_name | startswith("leaf")) then "switch" else "unknown" end),
@@ -518,6 +546,8 @@ scan_vm() {
                  containerContext: {
                    scannedImages: $container_images,
                    registry: $registry_repo,
+                   primaryContainer: $container_name,
+                   containerMapping: $image_to_container,
                    aggregatedVulnerabilities: {
                      critical: ($total_critical | tonumber),
                      high: ($total_high | tonumber),
@@ -542,25 +572,45 @@ scan_vm() {
                  }
                } |
                .runs[0].tool.driver.informationUri = ("https://github.com/" + $repo + "/security") |
-               .runs[0].results[].locations[].physicalLocation.artifactLocation.uri |=
-                 ($vm_name + "/" + .) |
-               .runs[0].results[].locations[].message.text |=
-                 ("[" + $vm_name + "] " + .) |
-               .runs[0].results[] |= . + {
-                 properties: {
+
+               # Fix artifact location paths and remove line/column references
+               .runs[0].results[] |= (
+                 .locations[] |= (
+                   # Get original artifact URI (binary name)
+                   .physicalLocation.artifactLocation.uri as $original_uri |
+
+                   # Update the artifact location to include VM and container name
+                   .physicalLocation.artifactLocation.uri = ($vm_name + "/" + $container_name + "/" + $original_uri) |
+
+                   # Update message text to include full context
+                   .message.text = ("[" + $vm_name + "/" + $container_name + "] " + .message.text)
+                 ) |
+
+                 # Add container properties to each result
+                 .properties = (.properties // {}) + {
                    vmName: $vm_name,
+                   containerName: $container_name,
                    vmType: (if ($vm_name | startswith("control")) then "control" elif ($vm_name | startswith("gateway")) then "gateway" elif ($vm_name | startswith("leaf")) then "switch" else "unknown" end),
-                   scanContext: ("runtime-deployment-" + $scan_mode)
+                   scanContext: ("runtime-deployment-" + $scan_mode),
+                   artifactPath: ($vm_name + "/" + $container_name)
                  }
-               }' "$consolidated_sarif" > "${consolidated_sarif}.enhanced"
+               )
+               ' "$consolidated_sarif" > "${consolidated_sarif}.enhanced"
 
-            mv "${consolidated_sarif}.enhanced" "$consolidated_sarif"
-
-            echo "Enhanced SARIF with VM context"
-            echo "  - VM: $vm_name ($scan_mode mode)"
-            echo "  - Container images: $image_count"
-            echo "  - Total vulnerabilities: $((total_critical + total_high + total_medium + total_low))"
-            echo "  - Critical/High: $((total_critical + total_high))"
+            # Check if enhancement succeeded
+            if [ -s "${consolidated_sarif}.enhanced" ] && jq empty "${consolidated_sarif}.enhanced" 2>/dev/null; then
+                mv "${consolidated_sarif}.enhanced" "$consolidated_sarif"
+                echo "Enhanced SARIF with container-aware paths"
+                echo "  - VM: $vm_name ($scan_mode mode)"
+                echo "  - Primary container: $dominant_container"
+                echo "  - Container images: $image_count"
+                echo "  - Total vulnerabilities: $((total_critical + total_high + total_medium + total_low))"
+                echo "  - Critical/High: $((total_critical + total_high))"
+                echo "  - Artifact paths: $vm_name/$dominant_container/binary"
+            else
+                echo "Enhancement failed, keeping original SARIF"
+                rm -f "${consolidated_sarif}.enhanced"
+            fi
 
             echo "✓ Consolidated SARIF created: trivy-consolidated-${vm_name}.sarif"
         else
