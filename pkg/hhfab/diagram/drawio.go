@@ -129,16 +129,15 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 	layers := sortNodes(topo.Nodes, topo.Links)
 	linkGroups := groupLinks(topo.Links)
 
-	// Create dynamic legend that only shows link types present in the topology
 	model.Root.MxCell = append(model.Root.MxCell, createLegend(topo.Links, style)...)
 	model.Root.MxCell = append(model.Root.MxCell, createHedgehogLogo()...)
 
 	gatewayY := 50
 	spineY := gatewayY + 250
 	leafY := spineY + 250
+	externalY := spineY + 100
 	serverY := leafY + 250
 
-	// If no spine layer exists, move leaf and server layers up
 	if len(layers.Spine) == 0 {
 		leafY = spineY
 		serverY = leafY + 250
@@ -150,11 +149,12 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 
 	leafNodeWidth := 100
 	var leafSpacing float64
-	if len(layers.Leaf) <= 3 { //nolint:gocritic
+	switch {
+	case len(layers.Leaf) <= 3:
 		leafSpacing = 200
-	} else if len(layers.Leaf) <= 5 {
+	case len(layers.Leaf) <= 5:
 		leafSpacing = 160
-	} else {
+	default:
 		leafSpacing = 120
 	}
 
@@ -168,7 +168,7 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 		if len(layers.Spine) >= len(layers.Leaf) {
 			spineSpacing = math.Max(120, (totalLeafWidth-float64(len(layers.Spine)*spineNodeWidth))/float64(len(layers.Spine)-1))
 		} else {
-			maxSpineWidth := totalLeafWidth * 0.8 // Make spine layer about 80% of leaf layer width
+			maxSpineWidth := totalLeafWidth * 0.8
 			spineSpacing = math.Min(350, math.Max(150, (maxSpineWidth-float64(len(layers.Spine)*spineNodeWidth))/float64(len(layers.Spine)-1)))
 		}
 	} else {
@@ -220,7 +220,7 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 			labelCell := MxCell{
 				ID:     fmt.Sprintf("%s_label", node.ID),
 				Parent: "1",
-				Value:  FormatNodeValue(node, style), // Use FormatNodeValue here
+				Value:  FormatNodeValue(node, style),
 				Style:  GetGatewayLabelStyle(),
 				Vertex: "1",
 				Geometry: &Geometry{
@@ -238,7 +238,7 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 			cell := MxCell{
 				ID:     node.ID,
 				Parent: "1",
-				Value:  FormatNodeValue(node, style), // Use FormatNodeValue here
+				Value:  FormatNodeValue(node, style),
 				Style:  GetNodeStyle(node, style),
 				Vertex: "1",
 				Geometry: &Geometry{
@@ -297,6 +297,79 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 		model.Root.MxCell = append(model.Root.MxCell, cell)
 	}
 
+	if len(layers.External) > 0 {
+		leftExternals, rightExternals := splitExternalNodes(layers.External, topo.Links, layers.Leaf)
+
+		externalCenterY := float64(externalY)
+		externalDistance := 120.0
+		leftmostLeafX := leafStartX
+		rightmostLeafX := leafStartX + totalLeafWidth - 100
+		leftExternalX := leftmostLeafX - externalDistance
+		rightExternalX := rightmostLeafX + externalDistance
+
+		for i, node := range leftExternals {
+			width, height := GetNodeDimensions(node)
+
+			var y float64
+			if len(leftExternals) == 1 {
+				y = externalCenterY
+			} else {
+				nodeSpacing := float64(height) + 30
+				totalHeight := float64(len(leftExternals)-1) * nodeSpacing
+				startY := externalCenterY - totalHeight/2
+				y = startY + float64(i)*nodeSpacing
+			}
+
+			cell := MxCell{
+				ID:     node.ID,
+				Parent: "1",
+				Value:  FormatNodeValue(node, style),
+				Style:  GetNodeStyle(node, style),
+				Vertex: "1",
+				Geometry: &Geometry{
+					X:      leftExternalX,
+					Y:      y,
+					Width:  width,
+					Height: height,
+					As:     "geometry",
+				},
+			}
+			cellMap[node.ID] = &cell
+			model.Root.MxCell = append(model.Root.MxCell, cell)
+		}
+
+		for i, node := range rightExternals {
+			width, height := GetNodeDimensions(node)
+
+			var y float64
+			if len(rightExternals) == 1 {
+				y = externalCenterY
+			} else {
+				nodeSpacing := float64(height) + 30
+				totalHeight := float64(len(rightExternals)-1) * nodeSpacing
+				startY := externalCenterY - totalHeight/2
+				y = startY + float64(i)*nodeSpacing
+			}
+
+			cell := MxCell{
+				ID:     node.ID,
+				Parent: "1",
+				Value:  FormatNodeValue(node, style),
+				Style:  GetNodeStyle(node, style),
+				Vertex: "1",
+				Geometry: &Geometry{
+					X:      rightExternalX,
+					Y:      y,
+					Width:  width,
+					Height: height,
+					As:     "geometry",
+				},
+			}
+			cellMap[node.ID] = &cell
+			model.Root.MxCell = append(model.Root.MxCell, cell)
+		}
+	}
+
 	serverNodeWidth := 100
 	var serverSpacing float64 = 60
 
@@ -337,7 +410,7 @@ func createHedgehogLogo() []MxCell {
 	logoContainer := MxCell{
 		ID:     "hedgehog_logo",
 		Parent: "1",
-		Style:  "shape=image;aspect=fixed;image=data:image/svg+xml,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0idXRmLTgiPz4KPCEtLSBHZW5lcmF0b3I6IEFkb2JlIElsbHVzdHJhdG9yIDI4LjMuMCwgU1ZHIEV4cG9ydCBQbHVnLUluIC4gU1ZHIFZlcnNpb246IDYuMDAgQnVpbGQgMCkgIC0tPgo8c3ZnIHZlcnNpb249IjEuMSIgaWQ9IkxheWVyXzEiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgeG1sbnM6eGxpbms9Imh0dHA6Ly93d3cudzMub3JnLzE5OTkveGxpbmsiIHg9IjBweCIgeT0iMHB4IgoJIHdpZHRoPSI5MTdweCIgaGVpZ2h0PSIxOTVweCIgdmlld0JveD0iMCAwIDkxNyAxOTUiIHN0eWxlPSJlbmFibGUtYmFja2dyb3VuZDpuZXcgMCAwIDkxNyAxOTU7IiB4bWw6c3BhY2U9InByZXNlcnZlIj4KPHN0eWxlIHR5cGU9InRleHQvY3NzIj4KCS5zdDB7ZmlsbDojMzMzMzMzO30KCS5zdDF7ZmlsbDojRTJDNDc5O30KCS5zdDJ7ZmlsbDp1cmwoI1BhdGhfNF8wMDAwMDE1NzMwNzk4MDIwNDEwMDc5NzkyMDAwMDAxNTM5NDc3MTEzODU5MDQxMzIzOF8pO30KCS5zdDN7ZmlsbDojODA4MDgwO30KCS5zdDR7ZmlsbDojNkY0RTJDO30KPC9zdHlsZT4KPGcgaWQ9Ikdyb3VwXzUwIiB0cmFuc2Zvcm09InRyYW5zbGF0ZSgwIDApIj4KCTxwYXRoIGlkPSJQYXRoXzEwMyIgY2xhc3M9InN0MCIgZD0iTTg4Mi4xLDE0NS4yYy0yMS43LDEzLTQyLDEwLjktNTUuNy01LjFjLTE1LjYtMTkuNC0xNS42LTQ3LTAuMS02Ni40CgkJYzE0LTE2LjMsMzQuMS0xOC41LDUyLjQtNy4yYzMuNS0xLjgsNy4xLTMuMiwxMS00YzguOC0wLjUsMTcuNi0wLjIsMjYuNS0wLjJjMC40LDEuMSwwLjYsMi4yLDAuOCwzLjRjMCwyOS43LDAuNCw1OS40LTAuMSw4OS4xCgkJYzAuNiwxNi4zLTkuNiwzMS4yLTI1LjEsMzYuNGMtMTguNyw3LjYtMzkuOSw2LjEtNTcuMy00LjFjLTUuNS0zLjktMTAuNi04LjQtMTUuMi0xMy4ybDI4LjQtMTYuNmM4LjIsOC4zLDE3LjcsMTEuNiwyOC42LDYuMwoJCUM4ODMuOCwxNTkuNyw4ODIuMywxNTIuNiw4ODIuMSwxNDUuMiBNODY1LjksOTAuMmMtOC42LTAuNi0xNiw2LTE2LjUsMTQuNmMwLDAuNywwLDEuMywwLDJjMCw5LjEsNy4zLDE2LjUsMTYuNCwxNi41CgkJYzkuMSwwLDE2LjUtNy4zLDE2LjUtMTYuNGMwLjctOC41LTUuNS0xNS45LTE0LTE2LjZDODY3LjUsOTAuMSw4NjYuNyw5MC4xLDg2NS45LDkwLjIiLz4KCTxwYXRoIGlkPSJQYXRoXzEwNCIgY2xhc3M9InN0MCIgZD0iTTM4Ny42LDY2LjhjMy4yLTIsNi42LTMuNiwxMC4yLTQuNmM4LjctMC41LDE3LjUtMC4yLDI2LjktMC4yYzAuMiwzLjEsMC40LDUuNSwwLjQsNy45CgkJYzAsMjYuOCwwLDUzLjUsMCw4MC4zYzAsMjQuNS0xMC45LDM4LjYtMzQuOSw0My43Yy0xNS45LDQtMzIuOCwxLjYtNDYuOS02LjhjLTUuNi00LjEtMTEtOC42LTE1LjktMTMuNWwyOC41LTE2LjcKCQljOC4zLDguNiwxOC4xLDEyLDI5LjEsNmM3LTMuOCw2LjQtMTAuNyw1LjUtMTguOGMtMTAuNywxMC4xLTIyLjksMTEuMi0zNS41LDguNmMtOS43LTIuMy0xOC4xLTguMy0yMy40LTE2LjcKCQljLTEzLjMtMTkuMi0xMC44LTQ5LDUuNS02NS4yQzM1MC41LDU3LDM3Mi4xLDU1LjMsMzg3LjYsNjYuOCBNMzczLjgsOTAuMWMtOS4yLDAtMTYuNiw3LjUtMTYuNiwxNi42YzAsOS4yLDcuNSwxNi42LDE2LjYsMTYuNgoJCWMwLjIsMCwwLjUsMCwwLjcsMGM5LjItMC4yLDE2LjQtNy44LDE2LjItMTdDMzkwLjYsOTcuMiwzODMsODkuOSwzNzMuOCw5MC4xIi8+Cgk8cGF0aCBpZD0iUGF0aF8xMDUiIGNsYXNzPSJzdDAiIGQ9Ik0yNzYuNyw2OC43VjI1aDMzLjl2MTMwLjFjLTEwLjMsMC0yMSwwLjItMzEuNi0wLjJjLTEuMywwLTIuNC0zLjQtMy40LTQuOQoJCWMtNS4yLDIuOC0xMC43LDUuMS0xNi40LDYuOWMtMTQuMiwzLjQtMjkuMS0xLjgtMzguMy0xMy4yYy0xNi43LTE5LjEtMTYtNTMuMSwxLjQtNzEuN2MxMy0xNC40LDM0LjgtMTYuOCw1MC42LTUuNAoJCUMyNzMuNiw2Ny4xLDI3NC41LDY3LjUsMjc2LjcsNjguNyBNMjQzLjYsMTA4Yy0wLjIsMTAuNiw2LjIsMTcuOCwxNi4xLDE4YzguOSwwLjQsMTYuNC02LjUsMTYuOC0xNS40YzAtMC40LDAtMC44LDAtMS4xCgkJYzEtOS4yLTUuNi0xNy41LTE0LjgtMTguNWMtMC42LTAuMS0xLjEtMC4xLTEuNy0wLjFjLTksMC0xNi40LDcuMy0xNi40LDE2LjRDMjQzLjYsMTA3LjUsMjQzLjYsMTA3LjgsMjQzLjYsMTA4Ii8+Cgk8cGF0aCBpZD0iUGF0aF8xMDYiIGNsYXNzPSJzdDAiIGQ9Ik05NC40LDE1NC44SDYwYzAtMTMuOSwwLTI3LjYsMC00MS4yYzAtMi45LDAuMS01LjksMC04LjhjLTAuMy04LjEtNC4zLTEyLjMtMTEuNC0xMi40CgkJYy02LjctMC4zLTEyLjQsNC45LTEyLjcsMTEuNmMwLDAuMywwLDAuNiwwLDAuOWMtMC40LDEyLjUtMC4xLDI1LjEtMC4yLDM3LjZjMCwzLjksMCw3LjgsMCwxMi4ySDEuOVYyNC45aDMzLjZ2NDIuMgoJCWM4LjQtMi42LDE2LjMtNi43LDI0LjUtNy4zYzE2LjYtMS4yLDI4LDguMSwzMi4xLDI0LjJjMS4zLDQuNywyLjEsOS42LDIuMywxNC41Qzk0LjYsMTE3LjEsOTQuNCwxMzUuNyw5NC40LDE1NC44Ii8+Cgk8cGF0aCBpZD0iUGF0aF8xMDciIGNsYXNzPSJzdDAiIGQ9Ik02MDMuNCwxNTQuN2MwLTE0LDAtMjcuNywwLTQxLjNjMC0zLjQsMC02LjktMC4yLTEwLjNjMC4xLTUuOC00LjQtMTAuNi0xMC4yLTEwLjcKCQljLTAuMiwwLTAuNCwwLTAuNiwwYy02LjItMC44LTExLjksMy42LTEyLjgsOS44YzAsMC4yLDAsMC40LTAuMSwwLjZjLTAuOCw4LjUtMC42LDE3LjItMC43LDI1LjdjLTAuMSw4LjYsMCwxNy4xLDAsMjYuMmgtMzMuOAoJCVYyNC44aDMzLjZ2NDIuNWM4LjItMi44LDE1LjUtNi44LDIzLTcuNGMxOC4xLTEuNywzMS45LDguMiwzMy45LDI2LjJjMi41LDIyLjUsMi4xLDQ1LjQsMyw2OC43TDYwMy40LDE1NC43eiIvPgoJPHBhdGggaWQ9IlBhdGhfMTA4IiBjbGFzcz0ic3QwIiBkPSJNMTM5LjcsMTIwLjRjNywxMC45LDE4LjUsMTEuOSwzNC43LDRsMjEuNiwxOC4xYy0xLjMsMS41LTIuNiwzLTQuMSw0LjMKCQljLTIzLjQsMTktNjQuNiwxMy4xLTgwLjQtMTEuNWMtMTQuNi0yMy43LTcuMy01NC43LDE2LjQtNjkuM2MwLjMtMC4yLDAuNi0wLjMsMC44LTAuNWMyNS4yLTE0LDU3LjQtNC4zLDY5LDIxLjIKCQljMi40LDUuNCwzLjksMTEuMSw0LjYsMTYuOWMxLjcsMTQuOS0wLjIsMTYuOC0xNSwxNi44SDEzOS43IE0xNjguOCw5Ny44Yy0yLjgtOC40LTcuMi0xMS40LTE1LjctMTAuN2MtNi42LTAuMS0xMi40LDQuMy0xNC4xLDEwLjcKCQlIMTY4Ljh6Ii8+Cgk8cGF0aCBpZD0iUGF0aF8xMDkiIGNsYXNzPSJzdDAiIGQ9Ik01MDYsMTI0LjNsMjEuOCwxOC41Yy0xMi4zLDEyLjctMjcuMywxNS45LTQzLjQsMTQuOWMtMjEtMS4zLTM3LjYtMTAuMi00NS4zLTMwLjcKCQljLTcuOS0xOC43LTMuMy00MC40LDExLjYtNTQuMmMxNS42LTE0LjQsMzguNS0xNy43LDU3LjUtOC4zYzE4LjEsOS43LDI4LjIsMjkuNiwyNS41LDQ5LjljLTAuNiw0LjctMi43LDYuMS03LjIsNi4xCgkJYy0xNS41LTAuMi0zMC45LTAuMS00Ni40LDBjLTIuNiwwLTUuMiwwLjItOC4yLDAuNEM0NzcuOCwxMzEuMyw0OTAuMiwxMzIuNCw1MDYsMTI0LjMgTTUwMC43LDk3LjZjLTEuMS02LjYtNy4xLTExLjItMTMuOC0xMC42CgkJYy03LjItMS4xLTE0LDMuNi0xNS42LDEwLjZINTAwLjd6Ii8+Cgk8ZyBpZD0iR3JvdXBfNDUiIHRyYW5zZm9ybT0idHJhbnNsYXRlKDE1Ni44MjMgMCkiPgoJCTxwYXRoIGlkPSJTdWJ0cmFjdGlvbl8xNSIgY2xhc3M9InN0MSIgZD0iTTU5Ni42LDE1MS40Yy0wLjcsMC0xLjQtMC4xLTIuMS0wLjJjLTQuOS0yLTkuNC00LjktMTMuMy04LjdjLTMuNC0zLjEtNi4zLTYuNy04LjUtMTAuOAoJCQljLTIuNi00LjctNC4yLTEwLTQuNi0xNS40Yy0wLjYtNi44LDAuMi0xMy43LDIuMi0yMC4zYzEuMy00LjMsMy41LTguMiw2LjUtMTEuNmMxLjItMS42LDMtMi43LDQuOS0zLjJoMC4xYzIuNiwwLjEsMy43LDIsNS4yLDQuNgoJCQljMi4zLDQuNSw1LjksOC4yLDEwLjIsMTAuN2M2LjMsMy44LDIwLjcsNC43LDIwLjgsNC43YzAuNCw0LjEsMS42LDgsMy42LDExLjZjMi41LDMuMiw1LjQsNS45LDguNyw4LjJ2MAoJCQljLTAuNywxLjktMS42LDMuNy0yLjcsNS40Yy0zLjYsNS40LTcuOCwxMC4yLTEyLjcsMTQuNEM2MDcuMSwxNDgsNjAxLjIsMTUxLjQsNTk2LjYsMTUxLjR6IE01ODMsOTkuMWMtMi40LDAuMS00LjIsMi4xLTQuMSw0LjQKCQkJYzAsMCwwLDAuMSwwLDAuMWMtMC4xLDIuMiwxLjYsNC4yLDMuOCw0LjNjMC4yLDAsMC40LDAsMC42LDBjMS4yLDAuMSwyLjMtMC40LDMuMi0xLjJjMC44LTAuOSwxLjItMi4xLDEuMS0zLjMKCQkJYzAuMS0yLjMtMS43LTQuMy00LTQuNEM1ODMuNCw5OS4xLDU4My4yLDk5LjEsNTgzLDk5LjFMNTgzLDk5LjF6Ii8+CgkJCgkJCTxsaW5lYXJHcmFkaWVudCBpZD0iUGF0aF80XzAwMDAwMTUyMjIyOTQwODkyOTcwMDM3ODUwMDAwMDA2MjE4MzU3ODI3NTc5MTM0MDgxXyIgZ3JhZGllbnRVbml0cz0idXNlclNwYWNlT25Vc2UiIHgxPSI0OTEuODcyNSIgeTE9IjEyMy43MTYiIHgyPSI2MjkuMjY0IiB5Mj0iNDkuMDM4OCI+CgkJCTxzdG9wICBvZmZzZXQ9IjAuMTA1NCIgc3R5bGU9InN0b3AtY29sb3I6IzhENkU0RiIvPgoJCQk8c3RvcCAgb2Zmc2V0PSIwLjk5OTYiIHN0eWxlPSJzdG9wLWNvbG9yOiM3MDQ5MjQiLz4KCQk8L2xpbmVhckdyYWRpZW50PgoJCTxwYXRoIGlkPSJQYXRoXzQiIHN0eWxlPSJmaWxsOnVybCgjUGF0aF80XzAwMDAwMTUyMjIyOTQwODkyOTcwMDM3ODUwMDAwMDA2MjE4MzU3ODI3NTc5MTM0MDgxXyk7IiBkPSJNNjQzLDI5LjcKCQkJYy0xMS0yLjItMjAuMi0yLjYtMzAsMi42YzIwLDcuNCwzNC4zLDI1LjEsMzcuMyw0Ni4yYy0xNC4xLTE0LjQtMjkuOC0yMC4yLTQ4LTE2LjFjLTEyLjcsMi44LTIzLjcsMTAuNC0zMC45LDIxLjIKCQkJYy0xNSwyMi43LTguNyw1My4zLDE0LDY4LjNjMSwwLjcsMiwxLjMsMy4xLDEuOWMtNDMuNywxNS45LTk3LjMtMTkuOS05NC40LTczYzQuNCwyLjYsNy4xLDcuNCwxMi45LDguNgoJCQljLTguNS0yNS0zLjYtNDYuMiwxNi42LTYzLjNjLTEuNiw5LjEtMC4zLDE4LjQsMy43LDI2LjdjMy42LTI1LjUsMTUuNy00Mi43LDQwLTUyYy0zLDkuMi01LjgsMTcuNS0yLjcsMjcuMgoJCQljMTQtMTMuMywzMy45LTE4LjQsNTIuNi0xMy43QzYyNy4xLDE2LjcsNjM2LjIsMjIuMSw2NDMsMjkuNyIvPgoJCTxwYXRoIGlkPSJQYXRoXzUiIGNsYXNzPSJzdDMiIGQ9Ik02MzQuMiw5NC43YzQsMC4xLDUuOCwxLjYsNS40LDUuMWMtMC44LDUuMi0yLjMsMTAuMi00LjYsMTQuOWMtMC45LDItMi4zLDEuOC0zLjcsMC42CgkJCWMtMS43LTEuMy0zLjItMi44LTQuNi00LjRjLTIuNC0zLjUtNS42LTcuOC0zLjMtMTEuN0M2MjUuNSw5NS42LDYzMC44LDk2LDYzNC4yLDk0LjciLz4KCQk8cGF0aCBpZD0iUGF0aF8yODEiIGNsYXNzPSJzdDQiIGQ9Ik01ODMsOTkuMmMyLjMtMC4yLDQuMywxLjUsNC41LDMuOGMwLDAuMiwwLDAuNCwwLDAuNmMwLjMsMi4yLTEuMyw0LjEtMy40LDQuNAoJCQljLTAuMywwLTAuNSwwLTAuOCwwYy0yLjIsMC4yLTQuMi0xLjQtNC41LTMuN2MwLTAuMiwwLTAuNCwwLTAuNkM1NzguNywxMDEuMyw1ODAuNSw5OS4zLDU4Myw5OS4yQzU4Mi45LDk5LjIsNTgyLjksOTkuMiw1ODMsOTkuMgoJCQkiLz4KCTwvZz4KPC9nPgo8L3N2Zz4K;",
+		Style:  "shape=image;aspect=fixed;image=" + HedgehogLogoSVG,
 		Vertex: "1",
 		Geometry: &Geometry{
 			X:      820,
@@ -417,6 +490,8 @@ func createLegend(links []Link, style Style) []MxCell {
 			linkTypesMap[LegendKeyGateway] = true
 		} else if _, ok := link.Properties[PropGateway]; ok {
 			linkTypesMap[LegendKeyGateway] = true
+		} else if link.Type == EdgeTypeExternal {
+			linkTypesMap[LegendKeyExternal] = true
 		} else {
 			// For other links, determine type based on node roles
 			sourceNodeFound := false
@@ -477,6 +552,7 @@ func createLegend(links []Link, style Style) []MxCell {
 		{LegendKeyUnbundled, style.UnbundledStyle, "Unbundled Server Links"},
 		{LegendKeyESLAGServer, style.ESLAGServerStyle, "ESLAG Server Links"},
 		{LegendKeyGateway, style.GatewayLinkStyle, "Gateway Links"},
+		{LegendKeyExternal, style.ExternalLinkStyle, "External Links"},
 	}
 
 	cells := make([]MxCell, 0, 3+4*len(legendEntries))
@@ -913,8 +989,14 @@ func generateEdgeLabels(model *MxGraphModel, edgeID string, link Link, srcX, src
 		},
 	}
 
-	// Add the label cells to the model
-	model.Root.MxCell = append(model.Root.MxCell, srcLabelCell, tgtLabelCell)
+	// Add the label cells to the model only if they have text
+	if srcPort != "" {
+		model.Root.MxCell = append(model.Root.MxCell, srcLabelCell)
+	}
+
+	if tgtPort != "" {
+		model.Root.MxCell = append(model.Root.MxCell, tgtLabelCell)
+	}
 }
 
 // calculateLabelRotation returns the appropriate angle for text labels along an edge

@@ -45,12 +45,14 @@ func generateMermaid(topo Topology) string {
 	b.WriteString("classDef server  fill:#D5E8D4,stroke:#82B366,stroke-width:1px,color:#000\n")
 	b.WriteString("classDef mclag   fill:#F0F8FF,stroke:#6C8EBF,stroke-width:1px,color:#000\n")
 	b.WriteString("classDef eslag   fill:#FFF8E8,stroke:#CC9900,stroke-width:1px,color:#000\n")
+	b.WriteString("classDef external fill:#FFCC99,stroke:#D79B00,stroke-width:1px,color:#000\n")
 	b.WriteString("classDef hidden fill:none,stroke:none\n")
 	b.WriteString("classDef legendBox fill:white,stroke:#999,stroke-width:1px,color:#000\n\n")
 
 	b.WriteString("%% Network diagram\n")
 
 	layers := sortNodes(topo.Nodes, topo.Links)
+	leftExternals, rightExternals := splitMermaidExternalNodes(layers.External, topo.Links, layers.Leaf)
 
 	// Sort gateways explicitly by ID
 	sort.Slice(layers.Gateway, func(i, j int) bool {
@@ -72,7 +74,7 @@ func generateMermaid(topo Topology) string {
 
 	// Only add gateway subgraph if gateways are present
 	if len(layers.Gateway) > 0 {
-		b.WriteString("subgraph Gateways[ ]\n")
+		b.WriteString("subgraph Gateways[\" \"]\n")
 		b.WriteString("\tdirection LR\n")
 		for _, node := range layers.Gateway {
 			nodeID := cleanID(node.ID)
@@ -82,14 +84,25 @@ func generateMermaid(topo Topology) string {
 		b.WriteString("end\n\n")
 	}
 
+	if len(leftExternals) > 0 {
+		b.WriteString("subgraph ExternalsLeft[\" \"]\n")
+		b.WriteString("\tdirection TB\n")
+		for _, node := range leftExternals {
+			nodeID := cleanID(node.ID)
+			label := formatLabel(node.Label)
+			b.WriteString(fmt.Sprintf("\t%s[\"%s\"]\n", nodeID, label))
+		}
+		b.WriteString("end\n\n")
+	}
+
 	if len(layers.Spine) > 0 {
-		b.WriteString("subgraph Spines[ ]\n")
+		b.WriteString("subgraph Spines[\" \"]\n")
 		b.WriteString("\tdirection LR\n")
 
 		for _, node := range layers.Spine {
 			nodeID := cleanID(node.ID)
 			label := formatLabel(node.Label)
-			b.WriteString(fmt.Sprintf("\tsubgraph %s_Group [ ]\n", nodeID))
+			b.WriteString(fmt.Sprintf("\tsubgraph %s_Group [\" \"]\n", nodeID))
 			b.WriteString("\t\tdirection TB\n")
 			b.WriteString(fmt.Sprintf("\t\t%s[\"%s\"]\n", nodeID, label))
 			b.WriteString("\tend\n")
@@ -97,8 +110,19 @@ func generateMermaid(topo Topology) string {
 		b.WriteString("end\n\n")
 	}
 
+	if len(rightExternals) > 0 {
+		b.WriteString("subgraph ExternalsRight[\" \"]\n")
+		b.WriteString("\tdirection TB\n")
+		for _, node := range rightExternals {
+			nodeID := cleanID(node.ID)
+			label := formatLabel(node.Label)
+			b.WriteString(fmt.Sprintf("\t%s[\"%s\"]\n", nodeID, label))
+		}
+		b.WriteString("end\n\n")
+	}
+
 	if len(layers.Leaf) > 0 {
-		b.WriteString("subgraph Leaves[ ]\n")
+		b.WriteString("subgraph Leaves[\" \"]\n")
 		b.WriteString("\tdirection LR\n")
 
 		// Group MCLAG leaf pairs into separate subgraphs
@@ -195,7 +219,7 @@ func generateMermaid(topo Topology) string {
 	}
 
 	if len(layers.Server) > 0 {
-		b.WriteString("subgraph Servers[ ]\n")
+		b.WriteString("subgraph Servers[\" \"]\n")
 		b.WriteString("\tdirection TB\n")
 
 		for _, node := range layers.Server {
@@ -239,7 +263,6 @@ func generateMermaid(topo Topology) string {
 		targetPort := extractPort(link.Properties["targetPort"])
 		portLabel := ""
 
-		// Fix ifElseChain: rewrite to switch statement
 		switch {
 		case sourcePort != "" && targetPort != "":
 			portLabel = targetPort + "↔" + sourcePort
@@ -268,6 +291,8 @@ func generateMermaid(topo Topology) string {
 				connType = EdgeTypeESLAG
 			case EdgeTypeGateway:
 				connType = EdgeTypeGateway
+			case EdgeTypeExternal:
+				connType = EdgeTypeExternal
 			default:
 				connType = "other"
 			}
@@ -283,6 +308,7 @@ func generateMermaid(topo Topology) string {
 	bundledLinks := []int{}
 	eslagLinks := []int{}
 	unbundledLinks := []int{}
+	externalLinks := []int{}
 
 	linkIndex := 0
 
@@ -517,6 +543,34 @@ func generateMermaid(topo Topology) string {
 		b.WriteString("\n")
 	}
 
+	// External connections
+	b.WriteString("%% External connections\n")
+	for key, connTypes := range connectionMap {
+		parts := strings.Split(key, "->")
+		sourceID := parts[0]
+		targetID := parts[1]
+
+		isExternalConnection := false
+		for _, node := range layers.External {
+			if cleanID(node.ID) == sourceID || cleanID(node.ID) == targetID {
+				isExternalConnection = true
+
+				break
+			}
+		}
+
+		if isExternalConnection {
+			for _, ports := range connTypes {
+				portLabel := strings.Join(ports, "<br>")
+				connection := fmt.Sprintf("%s ---|%q| %s", sourceID, portLabel, targetID)
+				b.WriteString(connection + "\n")
+				externalLinks = append(externalLinks, linkIndex)
+				linkIndex++
+			}
+		}
+	}
+	b.WriteString("\n")
+
 	// Create the legend subgraph
 	b.WriteString("subgraph Legend[\"Network Connection Types\"]\n")
 	b.WriteString("\tdirection LR\n")
@@ -545,6 +599,10 @@ func generateMermaid(topo Topology) string {
 
 	if len(gatewayLinks) > 0 {
 		b.WriteString("\tL11(( )) --- |\"Gateway Links\"| L12(( ))\n")
+	}
+
+	if len(externalLinks) > 0 {
+		b.WriteString("\tL13(( )) --- |\"External Links\"| L14(( ))\n")
 	}
 
 	b.WriteString("\tP1(( )) --- |\"Label Notation: Downstream ↔ Upstream\"| P2(( ))\n")
@@ -583,6 +641,14 @@ func generateMermaid(topo Topology) string {
 		b.WriteString(fmt.Sprintf("class %s server\n", strings.Join(serverIDs, ",")))
 	}
 
+	if len(layers.External) > 0 {
+		externalIDs := []string{}
+		for _, node := range layers.External {
+			externalIDs = append(externalIDs, cleanID(node.ID))
+		}
+		b.WriteString(fmt.Sprintf("class %s external\n", strings.Join(externalIDs, ",")))
+	}
+
 	// Add class for each MCLAG subgraph
 	for i := 0; i < mclagGroupCount; i++ {
 		groupName := fmt.Sprintf("MCLAG_%d", i)
@@ -593,6 +659,9 @@ func generateMermaid(topo Topology) string {
 
 	// Update hidden class to include P1,P2
 	hiddenNodes := []string{"L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8", "L9", "L10", "L11", "L12", "P1", "P2"}
+	if len(externalLinks) > 0 {
+		hiddenNodes = append(hiddenNodes, "L13", "L14")
+	}
 	b.WriteString(fmt.Sprintf("class %s hidden\n", strings.Join(hiddenNodes, ",")))
 
 	b.WriteString("class Legend legendBox\n")
@@ -636,6 +705,10 @@ func generateMermaid(topo Topology) string {
 		b.WriteString(fmt.Sprintf("linkStyle %s stroke:#999999,stroke-width:2px\n", formatIndices(unbundledLinks)))
 	}
 
+	if len(externalLinks) > 0 {
+		b.WriteString(fmt.Sprintf("linkStyle %s stroke:#D79B00,stroke-width:2px\n", formatIndices(externalLinks)))
+	}
+
 	// Calculate legend link indices
 	legendLinkStart := linkIndex
 	legendLinkIndex := 0
@@ -671,6 +744,11 @@ func generateMermaid(topo Topology) string {
 		legendLinkIndex++
 	}
 
+	if len(externalLinks) > 0 {
+		b.WriteString(fmt.Sprintf("linkStyle %d stroke:#D79B00,stroke-width:2px\n", legendLinkStart+legendLinkIndex))
+		legendLinkIndex++
+	}
+
 	// Style the label notation line - just use a single white stroke
 	b.WriteString(fmt.Sprintf("linkStyle %d stroke:#FFFFFF\n", legendLinkStart+legendLinkIndex))
 
@@ -678,8 +756,14 @@ func generateMermaid(topo Topology) string {
 	if len(layers.Gateway) > 0 {
 		b.WriteString("style Gateways fill:none,stroke:none\n")
 	}
+	if len(leftExternals) > 0 {
+		b.WriteString("style ExternalsLeft fill:none,stroke:none\n")
+	}
 	if len(layers.Spine) > 0 {
 		b.WriteString("style Spines fill:none,stroke:none\n")
+	}
+	if len(rightExternals) > 0 {
+		b.WriteString("style ExternalsRight fill:none,stroke:none\n")
 	}
 	b.WriteString("style Leaves fill:none,stroke:none\n")
 	b.WriteString("style Servers fill:none,stroke:none\n")
@@ -692,6 +776,54 @@ func generateMermaid(topo Topology) string {
 	}
 
 	return b.String()
+}
+
+func splitMermaidExternalNodes(externals []Node, links []Link, leaves []Node) ([]Node, []Node) {
+	leftExternals := []Node{}
+	rightExternals := []Node{}
+
+	leafIndexMap := make(map[string]int)
+	for i, leaf := range leaves {
+		leafIndexMap[leaf.ID] = i
+	}
+
+	midpoint := len(leaves) / 2
+
+	for _, node := range externals {
+		leftConnections := 0
+		rightConnections := 0
+
+		for _, link := range links {
+			var leafID string
+			switch {
+			case link.Source == node.ID:
+				leafID = link.Target
+			case link.Target == node.ID:
+				leafID = link.Source
+			default:
+				continue
+			}
+
+			idx, exists := leafIndexMap[leafID]
+			if !exists {
+				continue
+			}
+
+			if idx < midpoint {
+				leftConnections++
+			} else {
+				rightConnections++
+			}
+		}
+
+		if leftConnections > rightConnections {
+			leftExternals = append(leftExternals, node)
+		} else {
+			rightExternals = append(rightExternals, node)
+		}
+	}
+
+	return leftExternals, rightExternals
 }
 
 func findLeafPairs(topo Topology) (map[string]string, map[string]string) {
