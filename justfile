@@ -305,3 +305,36 @@ test-diagram y="":
   @echo "- DrawIO: *-drawio-{default,cisco,hedgehog}.drawio"
   @echo "- DOT: *-dot.dot (and PNG if GraphViz was installed)"
   @echo "- Mermaid: *-mermaid.mermaid (and embedded in markdown *.md)"
+
+bump component version ref="":
+  #!/usr/bin/env bash
+  set -euo pipefail
+
+  tidy=false
+  if [ "{{component}}" == "fabric" ]; then
+    echo "Bumping fabric version to {{version}} ref {{ref}}"
+    sed -i.bak "s/^\tFabricVersion.*/\tFabricVersion=meta.Version(\"{{ version }}\")/" pkg/fab/versions.go
+    go get go.githedgehog.com/fabric@{{ ref }}
+    tidy=true
+  elif [ "{{component}}" == "gateway" ]; then
+    echo "Bumping gateway version to {{version}} ref {{ref}}"
+    sed -i.bak "s/^\tGatewayVersion.*/\tGatewayVersion=meta.Version(\"{{ version }}\")/" pkg/fab/versions.go
+    go get go.githedgehog.com/gateway@{{ ref }}
+    tidy=true
+  elif [ "{{component}}" == "dataplane" ]; then
+    echo "Bumping dataplane version to {{version}}"
+    sed -i.bak "s/^\tDataplaneVersion.*/\tDataplaneVersion=meta.Version(\"{{ version }}\")/" pkg/fab/versions.go
+  elif [ "{{component}}" == "frr" ]; then
+    echo "Bumping frr version to {{version}}"
+    sed -i.bak "s/^\tFRRVersion.*/\tFRRVersion=meta.Version(\"{{ version }}\")/" pkg/fab/versions.go
+  else
+    echo "Unknown component: {{component}}"
+    exit 1
+  fi
+
+  if [ "$tidy" == "true" ]; then
+    go mod tidy && go mod vendor && git add vendor
+  fi
+
+  rm pkg/fab/versions.go.bak
+  go fmt pkg/fab/versions.go 1>/dev/null
