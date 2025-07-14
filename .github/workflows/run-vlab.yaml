@@ -1,0 +1,164 @@
+name: Run VLAB
+
+on:
+  workflow_call:
+    inputs:
+      fabricatorref:
+        description: "Fabricator reference to use"
+        type: string
+        required: true
+      prebuild:
+        description: "Pre-build script (e.g. 'just bump fabric v0.42.0')"
+        type: string
+        required: false
+        default: "echo 'Noop pre-build'"
+      fabricmode:
+        description: "Fabric mode (e.g. spine-leaf, collapsed-core)"
+        type: string
+        required: false
+        default: "spine-leaf"
+      gateway:
+        description: "Enable gateway"
+        type: boolean
+        required: false
+        default: false
+      includeonie:
+        description: "Include ONIE into installer"
+        type: boolean
+        required: false
+        default: false
+      buildmode:
+        description: "Build mode (e.g. iso, usb, manual)"
+        type: string
+        required: false
+        default: "iso"
+      vpcmode:
+        description: "VPC mode (e.g. l2vni, l3vni)"
+        type: string
+        required: false
+        default: "l2vni"
+      releasetest:
+        description: "Run Release tests"
+        type: boolean
+        required: false
+        default: false
+      debug:
+        description: "Enable tmate debugging"
+        type: boolean
+        required: false
+        default: false
+
+env:
+  # global workflow configs
+  slug: "vlab-${{ inputs.fabricmode == 'spine-leaf' && 'sl' || 'cc' }}-${{ inputs.gateway && 'gw-' || '' }}${{ inputs.includeonie && 'onie-' || '' }}${{ inputs.buildmode }}-${{ inputs.vpcmode }}"
+  # env vars to configure hhfab
+  HHFAB_REG_REPO: 127.0.0.1:30000
+  HHFAB_VLAB_COLLECT: true
+
+jobs:
+  vlab:
+    runs-on: vlab
+    timeout-minutes: "${{ inputs.releasetest && 150 || 60 }}"
+
+    steps:
+      - name: Runner host
+        run: |
+          echo "$KUBE_NODE"
+
+      - name: Inputs summary
+        run: |
+          echo "Inputs:"
+          echo "  Fabricator reference: ${{ inputs.fabricatorref }}"
+          echo "  Pre-build script: ${{ inputs.prebuild }}"
+          echo "  Fabric mode: ${{ inputs.fabricmode }}"
+          echo "  Gateway: ${{ inputs.gateway }}"
+          echo "  Include ONIE: ${{ inputs.includeonie }}"
+          echo "  Build mode: ${{ inputs.buildmode }}"
+          echo "  VPC mode: ${{ inputs.vpcmode }}"
+          echo "  Release test: ${{ inputs.releasetest }}"
+          echo "  Debug: ${{ inputs.debug }}"
+          echo "Calculated:"
+          echo "  Slug: ${{ env.slug }}"
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          repository: githedgehog/fabricator
+          ref: ${{ inputs.fabricatorref }}
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+
+      - name: Setup local registry
+        run: |
+          just --timestamp _localreg &
+
+      - name: Pre-build script
+        run: |
+          echo "Running pre-build script"
+          ${{ inputs.prebuild }}
+
+      - name: Build hhfab
+        run: |
+          just --timestamp oci_repo=127.0.0.1:30000 oci=http push
+
+      - name: Init hhfab
+        run: |
+          bin/hhfab init -v --dev --fabric-mode=${{ inputs.fabricmode }} --include-onie=${{ inputs.includeonie }} --gateway=${{ inputs.gateway }}
+
+      - name: Generate VLAB wiring
+        run: |
+          bin/hhfab vlab gen -v
+
+      - name: Generate VLAB diagram
+        run: |
+          bin/hhfab diagram --format=mermaid
+
+      - name: Run VLAB
+        run: |
+          export HHFAB_JOIN_TOKEN=$(openssl rand -base64 24)
+          bin/hhfab vlab up -v --build-mode="${{ inputs.buildmode }}" --vpc-mode="${{ inputs.vpcmode }}" \
+            --ready=inspect \
+            --ready=setup-vpcs \
+            --ready=test-connectivity \
+            ${{ inputs.releasetest && '--ready=test-connectivity' || '' }} \
+            --ready=exit
+
+      - name: Upload Release Test Results
+        uses: actions/upload-artifact@v4
+        if: ${{ inputs.releasetest && !cancelled()}}
+        with:
+          name: Test Results for ${{ env.slug }}
+          path: release-test.xml
+
+      - name: Upload show-tech artifacts
+        uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: ${{ env.slug }}--show-tech
+          path: show-tech-output
+
+      - name: Upload local registry logs
+        uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: ${{ env.slug }}--registry
+          path: .zot/log
+
+      - name: Upload mermaid diagram
+        uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: ${{ env.slug }}--mermaid
+          path: result/diagram.mmd
+
+      - name: Setup tmate session for debug
+        if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug }}
+        uses: mxschmitt/action-tmate@v3
+        timeout-minutes: 30
+        with:
+          limit-access-to-actor: true

@@ -1,7 +1,7 @@
 name: CI
 
 concurrency:
-  group: ci-${{ github.head_ref || github.run_id }}
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
 
 on:
@@ -12,8 +12,8 @@ on:
     tags:
       - "v*"
     paths-ignore:
-      - 'docs/**'
-      - 'README.md'
+      - "docs/**"
+      - "README.md"
   pull_request:
     types:
       - opened
@@ -234,11 +234,22 @@ jobs:
   vlab:
     if: ${{ !contains(github.event.pull_request.labels.*.name, 'skip-vlab') }}
 
-    runs-on: vlab
     needs:
       - test
       - builds
-    timeout-minutes: 150
+
+    name: "vlab-${{ matrix.fabricmode == 'spine-leaf' && 'sl' || 'cc' }}-${{ matrix.gateway && 'gw-' || '' }}${{ matrix.includeonie && 'onie-' || '' }}${{ matrix.buildmode }}-${{ matrix.vpcmode }}"
+
+    # uses: githedgehog/fabricator/.github/workflows/run-vlab.yaml@dev/frostman/reusable-vlab
+    uses: ./.github/workflows/run-vlab.yaml
+    with:
+      fabricatorref: ${{ github.ref }}
+      fabricmode: ${{ matrix.fabricmode }}
+      gateway: ${{ matrix.gateway }}
+      includeonie: ${{ matrix.includeonie }}
+      buildmode: ${{ matrix.buildmode }}
+      vpcmode: ${{ matrix.vpcmode }}
+      releasetest: ${{ inputs.run_release_test == true || contains(github.event.pull_request.labels.*.name, 'release-test') }}
 
     strategy:
       fail-fast: false
@@ -254,23 +265,23 @@ jobs:
           - iso
           - manual
         vpcmode:
-          - ""
+          - l2vni
         include:
           - fabricmode: collapsed-core
             includeonie: false
             gateway: false
             buildmode: iso
-            vpcmode: ""
+            vpcmode: l2vni
           - fabricmode: spine-leaf
             gateway: false
             includeonie: true
             buildmode: usb
-            vpcmode: ""
+            vpcmode: l2vni
           - fabricmode: spine-leaf
             gateway: false
             includeonie: true
             buildmode: iso
-            vpcmode: ""
+            vpcmode: l2vni
           - fabricmode: spine-leaf
             gateway: false
             includeonie: false
@@ -280,96 +291,7 @@ jobs:
             gateway: true
             includeonie: false
             buildmode: iso
-            vpcmode: ""
-
-    env:
-      slug: "${{ matrix.fabricmode }}-${{ matrix.gateway }}-${{ matrix.includeonie }}-${{ matrix.buildmode }}-${{ matrix.vpcmode }}"
-
-      # TODO enable for scheduled (github.event_name == 'schedule'), master and release branches?
-      run_release_test: ${{ inputs.run_release_test == true || contains(github.event.pull_request.labels.*.name, 'release-test') }}
-
-    steps:
-      - name: Runner host
-        run: |
-          echo "$KUBE_NODE"
-
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: stable
-          cache: true
-
-      - name: Setup local registry
-        run: |
-          just --timestamp _localreg &
-
-      - name: Build hhfab
-        run: |
-          just --timestamp oci_repo=127.0.0.1:30000 oci=http push
-
-      - name: hhfab release test
-        env:
-          HHFAB_REG_REPO: 127.0.0.1:30000
-          HHFAB_VLAB_COLLECT: true
-        if: ${{ env.run_release_test == 'true' }}
-        run: |
-          bin/hhfab init -v --dev -m ${{ matrix.fabricmode }} --include-onie=${{ matrix.includeonie }} --gateway=${{ matrix.gateway }}
-          bin/hhfab vlab gen -v
-          export HHFAB_JOIN_TOKEN=$(openssl rand -base64 24)
-          bin/hhfab vlab up -v --ready inspect --ready setup-vpcs --ready test-connectivity --ready release-test --ready exit --mode=${{ matrix.buildmode }} --vpc-mode="${{ matrix.vpcmode }}"
-          cat release-test.xml
-
-      - name: Upload Test Results
-        uses: actions/upload-artifact@v4
-        if: ${{ env.run_release_test == 'true' && !cancelled()}}
-        with:
-          name: Test Results for vlab--${{ env.slug }}
-          path: release-test.xml
-
-      - name: hhfab init and vlab up
-        env:
-          HHFAB_REG_REPO: 127.0.0.1:30000
-          HHFAB_VLAB_COLLECT: true
-        if: ${{ env.run_release_test != 'true' }}
-        run: |
-          bin/hhfab init -v --dev -m ${{ matrix.fabricmode }} --include-onie=${{ matrix.includeonie }} --gateway=${{ matrix.gateway }}
-          bin/hhfab vlab gen -v
-          bin/hhfab diagram -f mermaid
-          export HHFAB_JOIN_TOKEN=$(openssl rand -base64 24)
-          bin/hhfab vlab up -v --ready inspect --ready setup-vpcs --ready test-connectivity --ready exit --mode=${{ matrix.buildmode }} --vpc-mode="${{ matrix.vpcmode }}"
-
-      - name: Upload show-tech artifacts
-        uses: actions/upload-artifact@v4
-        if: ${{ always() }}
-        with:
-          name: vlab--${{ env.slug }}--show-tech
-          path: show-tech-output
-
-      - name: Upload local registry logs
-        uses: actions/upload-artifact@v4
-        if: ${{ always() }}
-        with:
-          name: vlab--${{ env.slug }}--registry
-          path: .zot/log
-
-      - name: Upload mermaid diagram
-        uses: actions/upload-artifact@v4
-        if: ${{ always() }}
-        with:
-          name: vlab--${{ env.slug }}--mermaid
-          path: result/diagram.mmd
-
-      - name: Setup tmate session for debug
-        if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
-        uses: mxschmitt/action-tmate@v3
-        timeout-minutes: 30
-        with:
-          limit-access-to-actor: true
+            vpcmode: l2vni
 
   vlab-upgrade:
     if: ${{ !contains(github.event.pull_request.labels.*.name, 'skip-vlab') }}
@@ -551,7 +473,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: githedgehog/lab-ci
-          path: './lab-ci'
+          path: "./lab-ci"
 
       - name: Setup Go
         uses: actions/setup-go@v5
