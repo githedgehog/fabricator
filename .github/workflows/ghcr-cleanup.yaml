@@ -20,6 +20,7 @@ jobs:
           - fabricator/hhfabctl-linux-arm64
           - fabricator/hhfabctl-linux-amd64
           - fabricator/fabricator
+          - fabricator/hhfab-node-config
           - fabricator/charts/fabricator
           - fabricator/charts/fabricator-api
           - fabricator/charts/ntp
@@ -32,12 +33,11 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           organization: githedgehog
           container: ${{ matrix.package }}
-          keep-younger-than: 14 # days
+          keep-younger-than: 30 # days
           prune-tags-regexes: |
+            ^v0-
             ^master-
             ^pr-
-            -master$
-            -pr$
-            -master-
-            -pr-
-            -dirty-
+            -master
+            -pr
+            -dirty
