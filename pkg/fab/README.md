@@ -45,7 +45,7 @@ oras push "ghcr.io/githedgehog/fabricator/k3s-airgap:${K3S_VERSION}" k3s k3s-air
 
 ```bash
 export ZOT_VERSION="v2.1.5"
-export ZOT_CHART_VERSION="0.1.75"
+export ZOT_CHART_VERSION="0.1.67" # newer versions are switching to the StatefulSet which would cause backward compatibility issues
 
 helm repo add project-zot http://zotregistry.dev/helm-charts
 helm repo update project-zot
