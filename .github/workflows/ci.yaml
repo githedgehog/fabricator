@@ -36,6 +36,9 @@ on:
         required: false
         default: false
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: lab
@@ -592,6 +595,10 @@ jobs:
       - vlab
       - vlab-upgrade
 
+    permissions:
+      contents: read
+      packages: write
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -683,6 +690,10 @@ jobs:
       - build-multi
       - vlab
       - vlab-upgrade
+
+    permissions:
+      contents: read
+      packages: write
 
     steps:
       - name: Checkout repository

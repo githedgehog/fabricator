@@ -48,6 +48,9 @@ on:
         required: false
         default: false
 
+permissions:
+  contents: read
+
 env:
   # global workflow configs
   slug: "vlab-${{ inputs.fabricmode == 'spine-leaf' && 'sl' || 'cc' }}-${{ inputs.gateway && 'gw-' || '' }}${{ inputs.includeonie && 'onie-' || '' }}${{ inputs.buildmode }}-${{ inputs.vpcmode }}"

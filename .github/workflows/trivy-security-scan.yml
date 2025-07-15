@@ -1,23 +1,22 @@
 name: Trivy Security Scan
 
-permissions:
-  contents: read
-  security-events: write
-  actions: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: false
 
 on:
   # Runs nightly at 2 AM UTC
   schedule:
-    - cron: '0 2 * * *'
+    - cron: "0 2 * * *"
 
   # Only trigger on changes to security scan scripts
   push:
     paths:
-      - '.github/workflows/security-scan.yml'
-      - 'hack/vlab-trivy-runner.sh'
-      - 'hack/trivy-setup-airgapped.sh'
-      - 'hack/trivy-setup.sh'
-      - 'justfile'
+      - ".github/workflows/security-scan.yml"
+      - "hack/vlab-trivy-runner.sh"
+      - "hack/trivy-setup-airgapped.sh"
+      - "hack/trivy-setup.sh"
+      - "justfile"
 
   workflow_dispatch:
     inputs:
@@ -27,10 +26,9 @@ on:
         required: false
         default: false
 
-# Only run one security scan at a time
-concurrency:
-  group: security-scan
-  cancel-in-progress: false
+permissions:
+  contents: read
+  security-events: write
 
 jobs:
   trivy-security-scan:
