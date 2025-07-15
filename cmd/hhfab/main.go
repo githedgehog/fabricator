@@ -780,7 +780,7 @@ func Run(ctx context.Context) error {
 									FailFast:           c.Bool(FlagNameFailFast),
 									OnReady:            c.StringSlice(FlagNameReady),
 									CollectShowTech:    c.Bool(FlagNameCollectShowTech),
-									VPCMode:            vpcapi.VPCMode(c.String(FlagNameVPCMode)),
+									VPCMode:            vpcapi.VPCMode(handleL2VNI(c.String(FlagNameVPCMode))),
 								},
 							}); err != nil {
 								return fmt.Errorf("running VLAB: %w", err)
@@ -901,7 +901,7 @@ func Run(ctx context.Context) error {
 								Value:   hhfab.HashPolicyL2And3,
 							},
 							&cli.StringFlag{
-								Name:    "vpc-mode",
+								Name:    FlagNameVPCMode,
 								Aliases: []string{"mode"},
 								Usage:   "VPC mode: empty (l2vni) by default or l3vni, etc",
 							},
@@ -919,7 +919,7 @@ func Run(ctx context.Context) error {
 								TimeServers:       c.StringSlice("time-servers"),
 								InterfaceMTU:      uint16(c.Uint("interface-mtu")), //nolint:gosec
 								HashPolicy:        c.String(FlagHashPolicy),
-								VPCMode:           vpcapi.VPCMode(c.String("vpc-mode")),
+								VPCMode:           vpcapi.VPCMode(handleL2VNI(c.String(FlagNameVPCMode))),
 							}); err != nil {
 								return fmt.Errorf("setup-vpcs: %w", err)
 							}
@@ -1160,7 +1160,7 @@ func Run(ctx context.Context) error {
 								FailFast:    c.Bool(FlagNameFailFast),
 								PauseOnFail: c.Bool(FlagPauseOnFail),
 								HashPolicy:  c.String(FlagHashPolicy),
-								VPCMode:     vpcapi.VPCMode(c.String(FlagNameVPCMode)),
+								VPCMode:     vpcapi.VPCMode(handleL2VNI(c.String(FlagNameVPCMode))),
 							}
 							if err := hhfab.DoVLABReleaseTest(ctx, workDir, cacheDir, opts); err != nil {
 								return fmt.Errorf("release-test: %w", err)
@@ -1382,4 +1382,12 @@ func Run(ctx context.Context) error {
 
 func flatten[T any, Slice ~[]T](collection ...Slice) Slice {
 	return lo.Flatten(collection)
+}
+
+func handleL2VNI(in string) string {
+	if in == "l2vni" {
+		return ""
+	}
+
+	return in
 }
