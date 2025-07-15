@@ -128,7 +128,7 @@ jobs:
             --ready=inspect \
             --ready=setup-vpcs \
             --ready=test-connectivity \
-            ${{ inputs.releasetest && '--ready=test-connectivity' || '' }} \
+            ${{ inputs.releasetest && '--ready=release-test' || '' }} \
             --ready=exit
 
       - name: Upload Release Test Results
