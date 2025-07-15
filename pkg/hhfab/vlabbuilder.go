@@ -24,6 +24,7 @@ import (
 type VLABBuilder struct {
 	SpinesCount       uint8  // number of spines to generate
 	FabricLinksCount  uint8  // number of links for each spine <> leaf pair
+	MeshLinksCount    uint8  // number of mesh links for each leaf <> leaf pair
 	MCLAGLeafsCount   uint8  // number of MCLAG server-leafs to generate
 	ESLAGLeafGroups   string // eslag leaf groups - comma separated list of number of ESLAG switches in each group, should be 2-4 per group, e.g. 2,4,2 for 3 groups with 2, 4 and 2 switches
 	OrphanLeafsCount  uint8  // number of non-MCLAG server-leafs to generate
@@ -50,17 +51,32 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 
 	switch fabricMode {
 	case meta.FabricModeSpineLeaf:
+		if b.MeshLinksCount > 0 && b.FabricLinksCount > 0 {
+			return fmt.Errorf("cannot use both mesh and fabric links at the same time") //nolint:goerr113
+		}
 		if !b.NoSwitches {
-			if b.SpinesCount == 0 {
-				b.SpinesCount = 2
-			}
-			if b.FabricLinksCount == 0 {
-				b.FabricLinksCount = 2
-			}
-			if b.MCLAGLeafsCount == 0 && b.OrphanLeafsCount == 0 && b.ESLAGLeafGroups == "" {
-				b.MCLAGLeafsCount = 2
-				b.ESLAGLeafGroups = "2"
-				b.OrphanLeafsCount = 1
+			if b.MeshLinksCount == 0 {
+				// existing defaults for spine-link
+				if b.SpinesCount == 0 && b.MeshLinksCount == 0 {
+					b.SpinesCount = 2
+				}
+				if b.FabricLinksCount == 0 && b.MeshLinksCount == 0 {
+					b.FabricLinksCount = 2
+				}
+				if b.MCLAGLeafsCount == 0 && b.OrphanLeafsCount == 0 && b.ESLAGLeafGroups == "" {
+					b.MCLAGLeafsCount = 2
+					b.ESLAGLeafGroups = "2"
+					b.OrphanLeafsCount = 1
+				}
+			} else {
+				// new defaults for mesh
+				if b.SpinesCount != 0 {
+					return fmt.Errorf("spines not supported for when using mesh connections") //nolint:goerr113
+				}
+				if b.MCLAGLeafsCount == 0 && b.OrphanLeafsCount == 0 && b.ESLAGLeafGroups == "" {
+					b.ESLAGLeafGroups = "2"
+					b.OrphanLeafsCount = 1
+				}
 			}
 		}
 	case meta.FabricModeCollapsedCore:
@@ -88,11 +104,13 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 		return fmt.Errorf("unsupported fabric mode %s", fabricMode) //nolint:goerr113
 	}
 
-	if b.MCLAGSessionLinks == 0 {
-		b.MCLAGSessionLinks = 2
-	}
-	if b.MCLAGPeerLinks == 0 {
-		b.MCLAGPeerLinks = 2
+	if b.MCLAGLeafsCount > 0 {
+		if b.MCLAGSessionLinks == 0 {
+			b.MCLAGSessionLinks = 2
+		}
+		if b.MCLAGPeerLinks == 0 {
+			b.MCLAGPeerLinks = 2
+		}
 	}
 	if b.VPCLoopbacks == 0 {
 		b.VPCLoopbacks = 2
@@ -158,7 +176,7 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 
 	slog.Info("Building VLAB wiring diagram", "fabricMode", fabricMode)
 	if fabricMode == meta.FabricModeSpineLeaf {
-		slog.Info(">>>", "spinesCount", b.SpinesCount, "fabricLinksCount", b.FabricLinksCount)
+		slog.Info(">>>", "spinesCount", b.SpinesCount, "fabricLinksCount", b.FabricLinksCount, "meshLinksCount", b.MeshLinksCount)
 		slog.Info(">>>", "eslagLeafGroups", b.ESLAGLeafGroups)
 		if isGw {
 			slog.Info(">>>", "gatewayUplinks", b.GatewayUplinks)
@@ -602,6 +620,35 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 				},
 			}); err != nil {
 				return err
+			}
+		}
+	}
+
+	if b.MeshLinksCount > 0 {
+		for leaf1ID := uint8(1); leaf1ID <= b.MCLAGLeafsCount+b.OrphanLeafsCount+totalESLAGLeafs; leaf1ID++ {
+			leaf1Name := fmt.Sprintf("leaf-%02d", leaf1ID)
+
+			for leaf2ID := leaf1ID + 1; leaf2ID <= b.MCLAGLeafsCount+b.OrphanLeafsCount+totalESLAGLeafs; leaf2ID++ {
+				leaf2Name := fmt.Sprintf("leaf-%02d", leaf2ID)
+
+				links := []wiringapi.MeshLink{}
+				for leaf1PortID := uint8(0); leaf1PortID < b.MeshLinksCount; leaf1PortID++ {
+					leaf1Port := b.nextSwitchPort(leaf1Name)
+					leaf2Port := b.nextSwitchPort(leaf2Name)
+
+					links = append(links, wiringapi.MeshLink{
+						Leaf1: wiringapi.ConnFabricLinkSwitch{BasePortName: wiringapi.BasePortName{Port: leaf1Port}},
+						Leaf2: wiringapi.ConnFabricLinkSwitch{BasePortName: wiringapi.BasePortName{Port: leaf2Port}},
+					})
+				}
+
+				if _, err := b.createConnection(ctx, wiringapi.ConnectionSpec{
+					Mesh: &wiringapi.ConnMesh{
+						Links: links,
+					},
+				}); err != nil {
+					return err
+				}
 			}
 		}
 	}

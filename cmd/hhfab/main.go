@@ -166,7 +166,7 @@ func Run(ctx context.Context) error {
 		},
 	}
 
-	var wgSpinesCount, wgFabricLinksCount, wgMCLAGLeafsCount, wgOrphanLeafsCount, wgMCLAGSessionLinks, wgMCLAGPeerLinks, wgVPCLoopbacks uint
+	var wgSpinesCount, wgFabricLinksCount, wgMeshLinksCount, wgMCLAGLeafsCount, wgOrphanLeafsCount, wgMCLAGSessionLinks, wgMCLAGPeerLinks, wgVPCLoopbacks uint
 	var wgESLAGLeafGroups string
 	var wgMCLAGServers, wgESLAGServers, wgUnbundledServers, wgBundledServers uint
 	var wgNoSwitches bool
@@ -181,6 +181,11 @@ func Run(ctx context.Context) error {
 			Name:        "fabric-links-count",
 			Usage:       "number of fabric links if fabric mode is spine-leaf",
 			Destination: &wgFabricLinksCount,
+		},
+		&cli.UintFlag{
+			Name:        "mesh-links-count",
+			Usage:       "number of mesh links",
+			Destination: &wgMeshLinksCount,
 		},
 		&cli.UintFlag{
 			Name:        "mclag-leafs-count",
@@ -696,6 +701,7 @@ func Run(ctx context.Context) error {
 							builder := hhfab.VLABBuilder{
 								SpinesCount:       uint8(wgSpinesCount),      //nolint:gosec
 								FabricLinksCount:  uint8(wgFabricLinksCount), //nolint:gosec
+								MeshLinksCount:    uint8(wgMeshLinksCount),   //nolint:gosec
 								MCLAGLeafsCount:   uint8(wgMCLAGLeafsCount),  //nolint:gosec
 								ESLAGLeafGroups:   wgESLAGLeafGroups,
 								OrphanLeafsCount:  uint8(wgOrphanLeafsCount),  //nolint:gosec
