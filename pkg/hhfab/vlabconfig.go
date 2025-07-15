@@ -616,6 +616,12 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 					return nil, fmt.Errorf("failed to add link for fabric connection %s: %w", conn.Name, err)
 				}
 			}
+		} else if conn.Spec.Mesh != nil {
+			for _, link := range conn.Spec.Mesh.Links {
+				if err := addLink(link.Leaf1.Port, link.Leaf2.Port); err != nil {
+					return nil, fmt.Errorf("failed to add link for mesh connection %s: %w", conn.Name, err)
+				}
+			}
 		} else if conn.Spec.Gateway != nil {
 			for _, link := range conn.Spec.Gateway.Links {
 				if err := addLink(link.Switch.Port, link.Gateway.Port); err != nil {
