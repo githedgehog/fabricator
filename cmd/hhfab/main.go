@@ -629,12 +629,17 @@ func Run(ctx context.Context) error {
 				},
 			},
 			{
-				Name:   "versions",
-				Usage:  "print versions of all components",
-				Flags:  flatten(defaultFlags, hModeFlags),
+				Name:  "versions",
+				Usage: "print versions of all components",
+				Flags: flatten(defaultFlags, hModeFlags, []cli.Flag{
+					&cli.BoolFlag{
+						Name:  "live",
+						Usage: "load versions from running API instead of the config file (fab.yaml)",
+					},
+				}),
 				Before: before(false),
-				Action: func(_ *cli.Context) error {
-					if err := hhfab.Versions(ctx, workDir, cacheDir, hhfab.HydrateMode(hydrateMode)); err != nil {
+				Action: func(c *cli.Context) error {
+					if err := hhfab.Versions(ctx, workDir, cacheDir, hhfab.HydrateMode(hydrateMode), c.Bool("live")); err != nil {
 						return fmt.Errorf("printing versions: %w", err)
 					}
 
