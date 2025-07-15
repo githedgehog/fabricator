@@ -455,7 +455,7 @@ func (c *Config) getHydration(ctx context.Context, kube kclient.Reader) (Hydrati
 	}
 
 	for _, conn := range conns.Items {
-		if conn.Spec.Fabric != nil {
+		if conn.Spec.Fabric != nil { //nolint:gocritic
 			cf := conn.Spec.Fabric
 
 			for idx, link := range cf.Links {
@@ -506,6 +506,59 @@ func (c *Config) getHydration(ctx context.Context, kube kclient.Reader) (Hydrati
 
 				if spinePrefix.Masked() != leafPrefix.Masked() {
 					return status, fmt.Errorf("fabric connection %s link %d spine IP %s and leaf IP %s are not in the same subnet", conn.Name, idx, spineIP, leafIP) //nolint:goerr113
+				}
+			}
+		} else if conn.Spec.Mesh != nil {
+			cm := conn.Spec.Mesh
+
+			for idx, link := range cm.Links {
+				total += 2
+				if link.Leaf1.IP == "" {
+					missing++
+				}
+				if link.Leaf2.IP == "" {
+					missing++
+				}
+				if link.Leaf1.IP == "" || link.Leaf2.IP == "" {
+					continue
+				}
+
+				leaf1Prefix, err := netip.ParsePrefix(link.Leaf1.IP)
+				if err != nil {
+					return status, fmt.Errorf("parsing mesh connection %s link %d leaf1 IP %s: %w", conn.Name, idx, link.Leaf1.IP, err)
+				}
+				if leaf1Prefix.Bits() != 31 {
+					return status, fmt.Errorf("mesh connection %s link %d leaf1 IP %s is not a /31", conn.Name, idx, leaf1Prefix) //nolint:goerr113
+				}
+
+				leaf1IP := leaf1Prefix.Addr()
+				if !fabricSubnet.Contains(leaf1IP) {
+					return status, fmt.Errorf("mesh connection %s link %d leaf1 IP %s is not in the fabric subnet %s", conn.Name, idx, leaf1IP, fabricSubnet) //nolint:goerr113
+				}
+				if _, exist := fabricIPs[leaf1IP]; exist {
+					return status, fmt.Errorf("mesh connection %s link %d leaf1 IP %s is already in use", conn.Name, idx, leaf1IP) //nolint:goerr113
+				}
+				fabricIPs[leaf1IP] = true
+
+				leaf2Prefix, err := netip.ParsePrefix(link.Leaf2.IP)
+				if err != nil {
+					return status, fmt.Errorf("parsing mesh connection %s link %d leaf2 IP %s: %w", conn.Name, idx, link.Leaf2.IP, err)
+				}
+				if leaf2Prefix.Bits() != 31 {
+					return status, fmt.Errorf("mesh connection %s link %d leaf2 IP %s is not a /31", conn.Name, idx, leaf2Prefix) //nolint:goerr113
+				}
+
+				leaf2IP := leaf2Prefix.Addr()
+				if !fabricSubnet.Contains(leaf2IP) {
+					return status, fmt.Errorf("mesh connection %s link %d leaf2 IP %s is not in the fabric subnet %s", conn.Name, idx, leaf2IP, fabricSubnet) //nolint:goerr113
+				}
+				if _, exist := fabricIPs[leaf2IP]; exist {
+					return status, fmt.Errorf("mesh connection %s link %d leaf2 IP %s is already in use", conn.Name, idx, leaf2IP) //nolint:goerr113
+				}
+				fabricIPs[leaf2IP] = true
+
+				if leaf1Prefix.Masked() != leaf2Prefix.Masked() {
+					return status, fmt.Errorf("mesh connection %s link %d spine IP %s and leaf IP %s are not in the same subnet", conn.Name, idx, leaf1IP, leaf2IP) //nolint:goerr113
 				}
 			}
 		} else if conn.Spec.Gateway != nil {
@@ -803,6 +856,17 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 				nextFabricIP = nextFabricIP.Next()
 
 				link.Leaf.IP = nextFabricIP.String() + "/31"
+				nextFabricIP = nextFabricIP.Next()
+			}
+		} else if conn.Spec.Mesh != nil {
+			cm := conn.Spec.Mesh
+
+			for idx := range cm.Links {
+				link := &cm.Links[idx]
+				link.Leaf1.IP = nextFabricIP.String() + "/31"
+				nextFabricIP = nextFabricIP.Next()
+
+				link.Leaf2.IP = nextFabricIP.String() + "/31"
 				nextFabricIP = nextFabricIP.Next()
 			}
 		} else if conn.Spec.Gateway != nil {
