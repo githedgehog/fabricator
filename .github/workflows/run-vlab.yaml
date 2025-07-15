@@ -3,6 +3,11 @@ name: Run VLAB
 on:
   workflow_call:
     inputs:
+      skip:
+        description: "Skip"
+        type: boolean
+        required: false
+        default: false
       fabricatorref:
         description: "Fabricator reference to use"
         type: string
@@ -42,6 +47,11 @@ on:
         type: boolean
         required: false
         default: false
+      hybrid:
+        description: "Enable hybrid mode (use env with physical switches)"
+        type: boolean
+        required: false
+        default: false
       debug:
         description: "Enable tmate debugging"
         type: boolean
@@ -53,15 +63,16 @@ permissions:
 
 env:
   # global workflow configs
-  slug: "vlab-${{ inputs.fabricmode == 'spine-leaf' && 'sl' || 'cc' }}-${{ inputs.gateway && 'gw-' || '' }}${{ inputs.includeonie && 'onie-' || '' }}${{ inputs.buildmode }}-${{ inputs.vpcmode }}"
+  slug: "${{ inputs.hybrid && 'hlab' || 'vlab' }}-${{ inputs.fabricmode == 'spine-leaf' && 'sl' || 'cc' }}-${{ inputs.gateway && 'gw-' || '' }}${{ inputs.includeonie && 'onie-' || '' }}${{ inputs.buildmode }}-${{ inputs.vpcmode }}"
   # env vars to configure hhfab
   HHFAB_REG_REPO: 127.0.0.1:30000
   HHFAB_VLAB_COLLECT: true
 
 jobs:
-  vlab:
-    runs-on: vlab
-    timeout-minutes: "${{ inputs.releasetest && 150 || 60 }}"
+  run:
+    if: ${{ !inputs.skip }}
+    runs-on: ${{ inputs.hybrid && 'hlab' || 'vlab' }}
+    timeout-minutes: "${{ inputs.releasetest && (inputs.hybrid && 250 || 150) || 60 }}"
 
     steps:
       - name: Runner host
@@ -79,6 +90,7 @@ jobs:
           echo "  Build mode: ${{ inputs.buildmode }}"
           echo "  VPC mode: ${{ inputs.vpcmode }}"
           echo "  Release test: ${{ inputs.releasetest }}"
+          echo "  Hybrid: ${{ inputs.hybrid }}"
           echo "  Debug: ${{ inputs.debug }}"
           echo "Calculated:"
           echo "  Slug: ${{ env.slug }}"
@@ -89,6 +101,13 @@ jobs:
           repository: githedgehog/fabricator
           ref: ${{ inputs.fabricatorref }}
           fetch-depth: 0
+
+      - name: Checkout lab-ci repository
+        uses: actions/checkout@v4
+        if: ${{ inputs.hybrid }}
+        with:
+          repository: githedgehog/lab-ci
+          path: "./lab-ci"
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -109,22 +128,51 @@ jobs:
         run: |
           just --timestamp oci_repo=127.0.0.1:30000 oci=http push
 
-      - name: Init hhfab
+      - name: Init hhfab for virtual mode
+        if: ${{ !inputs.hybrid }}
         run: |
-          bin/hhfab init -v --dev --fabric-mode=${{ inputs.fabricmode }} --include-onie=${{ inputs.includeonie }} --gateway=${{ inputs.gateway }}
+          bin/hhfab init -v --dev \
+            --fabric-mode=${{ inputs.fabricmode }} \
+            --include-onie=${{ inputs.includeonie }} \
+            --gateway=${{ inputs.gateway }}
 
       - name: Generate VLAB wiring
+        if: ${{ !inputs.hybrid }}
         run: |
           bin/hhfab vlab gen -v
 
-      - name: Generate VLAB diagram
+      - name: Init hhfab for hybrid mode
+        if: ${{ inputs.hybrid }}
         run: |
+          source "./lab-ci/envs/$KUBE_NODE/source.sh"
+          bin/hhfab init -v --dev \
+            --fabric-mode=${{ inputs.fabricmode }} \
+            --include-onie=${{ inputs.includeonie }} \
+            --gateway=${{ inputs.gateway }} \
+            -w "./lab-ci/envs/$KUBE_NODE/wiring.yaml"
+
+      - name: Generate VLAB diagrams
+        run: |
+          bin/hhfab diagram --format=drawio
+          bin/hhfab diagram --format=dot
           bin/hhfab diagram --format=mermaid
 
-      - name: Run VLAB
+      - name: Upload VLAB diagrams
+        uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: ${{ env.slug }}--diagrams
+          path: result/diagram.*
+
+      # TODO: make controls restricted again when we figure out how to get NTP upstream working for isolated VMs
+      - name: Run and test ${{ inputs.hybrid && 'hybrid ' || '' }}VLAB
         run: |
           export HHFAB_JOIN_TOKEN=$(openssl rand -base64 24)
-          bin/hhfab vlab up -v --build-mode="${{ inputs.buildmode }}" --vpc-mode="${{ inputs.vpcmode }}" \
+          bin/hhfab vlab up -v \
+            --build-mode="${{ inputs.buildmode }}" \
+            --vpc-mode="${{ inputs.vpcmode }}" \
+            ${{ inputs.hybrid && '--controls-restricted=false' || '' }} \
+            ${{ inputs.hybrid && '--ready switch-reinstall' || '' }} \
             --ready=inspect \
             --ready=setup-vpcs \
             --ready=test-connectivity \
@@ -135,7 +183,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: ${{ inputs.releasetest && !cancelled()}}
         with:
-          name: Test Results for ${{ env.slug }}
+          name: ${{ env.slug }}--test-results
           path: release-test.xml
 
       - name: Upload show-tech artifacts
@@ -151,13 +199,6 @@ jobs:
         with:
           name: ${{ env.slug }}--registry
           path: .zot/log
-
-      - name: Upload mermaid diagram
-        uses: actions/upload-artifact@v4
-        if: ${{ always() }}
-        with:
-          name: ${{ env.slug }}--mermaid
-          path: result/diagram.mmd
 
       - name: Setup tmate session for debug
         if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug }}
