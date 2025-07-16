@@ -151,6 +151,10 @@ jobs:
             --gateway=${{ inputs.gateway }} \
             -w "./lab-ci/envs/$KUBE_NODE/wiring.yaml"
 
+      - name: Print hhfab versions
+        run: |
+          bin/hhfab versions
+
       - name: Generate VLAB diagrams
         run: |
           bin/hhfab diagram --format=drawio
