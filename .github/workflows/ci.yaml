@@ -25,7 +25,7 @@ on:
     - cron: "0 10 * * *" # ~2am PST
   workflow_dispatch:
     inputs:
-      run_release_test:
+      releasetest:
         type: boolean
         description: "Run release tests in vlab/hlab"
         required: false
@@ -218,14 +218,15 @@ jobs:
 
     uses: ./.github/workflows/run-vlab.yaml
     with:
-      skip: ${{ matrix.hybrid && contains(github.event.pull_request.labels.*.name, 'skip-hlab') || !matrix.hybrid && contains(github.event.pull_request.labels.*.name, 'skip-vlab') }}
+      # if pull_request: skip hlab if not ci:+hlab and skip vlab if ci:-vlab
+      skip: ${{ github.event_name == 'pull_request' && (matrix.hybrid && !contains(github.event.pull_request.labels.*.name, 'ci:+hlab') || !matrix.hybrid && contains(github.event.pull_request.labels.*.name, 'ci:-vlab')) }}
       fabricatorref: ${{ github.ref }}
       fabricmode: ${{ matrix.fabricmode }}
       gateway: ${{ matrix.gateway }}
       includeonie: ${{ matrix.includeonie }}
       buildmode: ${{ matrix.buildmode }}
       vpcmode: ${{ matrix.vpcmode }}
-      releasetest: ${{ inputs.run_release_test == true || contains(github.event.pull_request.labels.*.name, 'release-test') }}
+      releasetest: ${{ inputs.releasetest == true || contains(github.event.pull_request.labels.*.name, 'ci:+release') }}
       hybrid: ${{ matrix.hybrid }}
 
     strategy:
@@ -284,7 +285,7 @@ jobs:
             hybrid: true
 
   vlab-upgrade:
-    if: ${{ !contains(github.event.pull_request.labels.*.name, 'skip-vlab') }}
+    if: ${{ !contains(github.event.pull_request.labels.*.name, 'ci:-upgrade') && !contains(github.event.pull_request.labels.*.name, 'ci:-vlab') }}
 
     runs-on: vlab
     needs:
@@ -426,7 +427,7 @@ jobs:
           fi
 
   publish-test-results:
-    if: inputs.run_release_test == true || contains(github.event.pull_request.labels.*.name, 'release-test')
+    if: ${{ inputs.releasetest == true || contains(github.event.pull_request.labels.*.name, 'ci:+release') }}
     runs-on: lab
     needs:
       - vlabs
@@ -444,7 +445,7 @@ jobs:
 
   publish-release:
     runs-on: lab
-    if: startsWith(github.event.ref, 'refs/tags/v') && github.event_name == 'push'
+    if: ${{ startsWith(github.event.ref, 'refs/tags/v') && github.event_name == 'push' }}
     needs:
       - test-build
       - bundle
