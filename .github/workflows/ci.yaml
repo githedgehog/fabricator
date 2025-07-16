@@ -46,6 +46,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -66,13 +68,13 @@ jobs:
           # keep in sync with hack/tools.just
           version: v1.64.8
 
+      - name: Build all
+        run: |
+          just --timestamp build kube-build build-multi
+
       - name: Run tests
         run: |
           just --timestamp test
-
-      - name: Build all
-        run: |
-          just --timestamp build build-multi
 
       - name: Go mod tidy
         run: |
