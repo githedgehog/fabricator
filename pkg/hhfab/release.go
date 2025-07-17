@@ -23,6 +23,7 @@ import (
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/hhfctl"
 	"go.githedgehog.com/fabric/pkg/util/pointer"
+	"golang.org/x/sync/errgroup"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -44,6 +45,8 @@ var (
 	errInitalSetup     = errors.New("initial setup failed")
 )
 
+const extName = "default"
+
 type VPCPeeringTestCtx struct {
 	workDir          string
 	cacheDir         string
@@ -57,6 +60,7 @@ type VPCPeeringTestCtx struct {
 	failFast         bool
 	pauseOnFail      bool
 	roceLeaves       []string
+	noSetup          bool
 }
 
 var AllZeroPrefix = []string{"0.0.0.0/0"}
@@ -64,6 +68,14 @@ var AllZeroPrefix = []string{"0.0.0.0/0"}
 // prepare for a test: wipe the fabric and then create the VPCs according to the
 // options in the test context
 func (testCtx *VPCPeeringTestCtx) setupTest(ctx context.Context) error {
+	if testCtx.noSetup {
+		// nothing to setup, but we still want to wait for the switches to be ready
+		if err := WaitReady(ctx, testCtx.kube, WaitReadyOpts{AppliedFor: waitAppliedFor, Timeout: waitTimeout}); err != nil {
+			return fmt.Errorf("waiting for switches to be ready: %w", err)
+		}
+
+		return nil
+	}
 	if err := hhfctl.VPCWipeWithClient(ctx, testCtx.kube); err != nil {
 		return fmt.Errorf("wiping fabric: %w", err)
 	}
@@ -1537,6 +1549,35 @@ func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (bool, []Re
 	return false, reverts, nil
 }
 
+func setRoCE(ctx context.Context, kube kclient.Client, swName string, roce bool) error {
+	sw := &wiringapi.Switch{}
+	if err := kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: swName}, sw); err != nil {
+		return fmt.Errorf("getting switch %s: %w", swName, err)
+	}
+	if sw.Spec.RoCE == roce {
+		slog.Debug("RoCE already in the desired state", "switch", swName, "desiredState", roce)
+
+		return nil
+	}
+	slog.Debug("Changing RoCE state on switch", "switch", swName, "desiredState", roce)
+	currGen, getGenErr := getAgentGen(ctx, kube, swName)
+	if getGenErr != nil {
+		return getGenErr
+	}
+	sw.Spec.RoCE = roce
+	if err := kube.Update(ctx, sw); err != nil {
+		return fmt.Errorf("updating switch %s to set RoCE state: %w", swName, err)
+	}
+	slog.Debug("Waiting for switch to reboot after changing desired RoCE state", "switch", swName, "desiredState", roce)
+	time.Sleep(6 * time.Minute) // wait for the switch to reboot and apply the changes
+	if err := waitAgentGen(ctx, kube, swName, currGen); err != nil {
+		return fmt.Errorf("waiting for agent generation after changing desired RoCE state: %w", err)
+	}
+	slog.Debug("Switch rebooted and RoCE state changed", "switch", swName, "desiredState", roce)
+
+	return nil
+}
+
 func (testCtx *VPCPeeringTestCtx) roceBasicTest(ctx context.Context) (bool, []RevertFunc, error) {
 	// this should never fail
 	if len(testCtx.roceLeaves) == 0 {
@@ -1550,25 +1591,8 @@ func (testCtx *VPCPeeringTestCtx) roceBasicTest(ctx context.Context) (bool, []Re
 		return false, nil, fmt.Errorf("getting switch %s: %w", swName, err)
 	}
 	// enable RoCE on the switch if not already enabled
-	if !sw.Spec.RoCE {
-		slog.Debug("Enabling RoCE on switch", "switch", swName)
-		currGen, getGenErr := getAgentGen(ctx, testCtx.kube, swName)
-		if getGenErr != nil {
-			return false, nil, getGenErr
-		}
-		sw.Spec.RoCE = true
-		if err := testCtx.kube.Update(ctx, sw); err != nil {
-			return false, nil, fmt.Errorf("updating switch %s to enable RoCE: %w", swName, err)
-		}
-		// do we need to revert? for now I won't
-		slog.Debug("Waiting for switch to reboot after enabling RoCE", "switch", swName)
-		time.Sleep(6 * time.Minute) // wait for the switch to reboot and apply the changes
-		if err := waitAgentGen(ctx, testCtx.kube, swName, currGen); err != nil {
-			return false, nil, fmt.Errorf("waiting for agent generation after enabling RoCE: %w", err)
-		}
-		slog.Debug("Switch rebooted and RoCE enabled", "switch", swName)
-	} else {
-		slog.Debug("RoCE already enabled on switch", "switch", swName)
+	if err := setRoCE(ctx, testCtx.kube, swName, true); err != nil {
+		return false, nil, fmt.Errorf("enabling RoCE on switch %s: %w", swName, err)
 	}
 
 	dscpOpts := testCtx.tcOpts
@@ -1619,9 +1643,244 @@ func (testCtx *VPCPeeringTestCtx) roceBasicTest(ctx context.Context) (bool, []Re
 	return false, nil, nil
 }
 
+// single-switch, dumbed down (no update as we don't need it here) version of WaitSwitchesReady
+func waitSwitchReady(ctx context.Context, kube kclient.Client, swName string, appliedFor time.Duration, timeout time.Duration) error {
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+
+	for {
+		ag := &agentapi.Agent{}
+		ready := false
+		err := kube.Get(ctx, kclient.ObjectKey{Name: swName, Namespace: "default"}, ag)
+		if err != nil {
+			return fmt.Errorf("getting agent %q: %w", swName, err)
+		}
+		ready = ag.Status.LastAppliedGen == ag.Generation
+		ready = ready && time.Since(ag.Status.LastHeartbeat.Time) < 1*time.Minute
+		if appliedFor > 0 {
+			ready = ready && time.Since(ag.Status.LastAppliedTime.Time) >= appliedFor
+		}
+
+		if ready {
+			slog.Debug("Switch is ready", "switch", swName, "appliedFor", appliedFor)
+
+			return nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("waiting for switch %s to be ready: %w", swName, ctx.Err())
+		case <-time.After(15 * time.Second):
+		}
+	}
+}
+
+func setPortBreakout(ctx context.Context, kube kclient.Client, swName string, port string, targetMode string, waitCompleted bool) error {
+	slog.Debug("Setting breakout mode", "switch", swName, "port", port, "mode", targetMode)
+	sw := &wiringapi.Switch{}
+	if err := kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: swName}, sw); err != nil {
+		return fmt.Errorf("getting switch %s: %w", swName, err)
+	}
+	if sw.Spec.PortBreakouts == nil {
+		sw.Spec.PortBreakouts = make(map[string]string)
+	}
+	if currMode, ok := sw.Spec.PortBreakouts[port]; ok && currMode == targetMode {
+		slog.Debug("Port already in target breakout mode, skipping", "switch", swName, "port", port, "mode", targetMode)
+
+		return nil
+	}
+	currGen, genErr := getAgentGen(ctx, kube, swName)
+	if genErr != nil {
+		return fmt.Errorf("getting agent %s generation: %w", swName, genErr)
+	}
+
+	sw.Spec.PortBreakouts[port] = targetMode
+	if err := kube.Update(ctx, sw); err != nil {
+		return fmt.Errorf("updating switch %s to set breakout mode %s for port %s: %w", swName, targetMode, port, err)
+	}
+	slog.Debug("Waiting for switch to apply breakout mode", "switch", swName, "port", port, "mode", targetMode)
+	time.Sleep(5 * time.Second)
+	if err := waitAgentGen(ctx, kube, swName, currGen); err != nil {
+		return fmt.Errorf("waiting for switch %s to apply breakout mode %s for port %s: %w", swName, targetMode, port, err)
+	}
+	slog.Debug("Waiting for this switch to be ready after breakout mode change", "switch", swName, "port", port, "mode", targetMode)
+	// note: cannot use WaitSwitchesReady here because it waits for all switches and we are modifying them in parallel
+	if err := waitSwitchReady(ctx, kube, swName, 1*time.Minute, 5*time.Minute); err != nil {
+		return fmt.Errorf("waiting for switch %s to be ready after breakout mode change: %w", swName, err)
+	}
+
+	if waitCompleted {
+		maxRetries := 10
+		agent := &agentapi.Agent{}
+		for i := range maxRetries {
+			if err := kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: swName}, agent); err != nil {
+				return fmt.Errorf("getting agent %s after breakout mode change: %w", swName, err)
+			}
+			bkStatus, ok := agent.Status.State.Breakouts[port]
+			if !ok {
+				return fmt.Errorf("breakout mode %s for port %s on switch %s not found in agent status after applying breakout mode", targetMode, port, swName) //nolint:goerr113
+			}
+			if bkStatus.Mode != targetMode {
+				return fmt.Errorf("breakout mode %s for port %s on switch %s not applied, expected %s but got %s", targetMode, port, swName, targetMode, bkStatus.Mode) //nolint:goerr113
+			}
+			if bkStatus.Status == "Completed" {
+				slog.Debug("Breakout mode applied successfully", "switch", swName, "port", port, "mode", targetMode)
+
+				return nil
+			}
+			if i < maxRetries-1 {
+				slog.Debug("Breakout mode not yet completed, retrying", "switch", swName, "port", port, "mode", targetMode, "retry", i+1)
+				time.Sleep(10 * time.Second)
+			}
+		}
+
+		return fmt.Errorf("breakout mode %s for port %s on switch %s not completed after %d retries", targetMode, port, swName, maxRetries) //nolint:goerr113
+	}
+
+	return nil
+}
+
+// test breakout ports. for each switch in the fabric:
+// 1. take the first unused breakout port (to avoiid conflicts)
+// 2. change breakout to some non default mode
+// 3. wait for all switches to be ready for 1 minute
+// 4. check that all agents report the breakout to be completed and that the port is in the expected mode
+func (testCtx *VPCPeeringTestCtx) breakoutTest(ctx context.Context) (bool, []RevertFunc, error) {
+	// get all agents in the fabric
+	agents := &agentapi.AgentList{}
+	if err := testCtx.kube.List(ctx, agents); err != nil {
+		return false, nil, fmt.Errorf("listing agents: %w", err)
+	}
+	g := &errgroup.Group{}
+	for _, agent := range agents.Items {
+		g.Go(func() error {
+			// first of all, disable RoCE if it is enabled, as breakout operations are forbidden while RoCE is enabled
+			if err := setRoCE(ctx, testCtx.kube, agent.Name, false); err != nil {
+				return fmt.Errorf("disabling RoCE on switch %s: %w", agent.Name, err)
+			}
+			// get which ports are used on this switch
+			conns := &wiringapi.ConnectionList{}
+			if err := testCtx.kube.List(ctx, conns, kclient.MatchingLabels{
+				wiringapi.ListLabelSwitch(agent.Name): wiringapi.ListLabelValue,
+			}); err != nil {
+				return fmt.Errorf("listing connections for switch %s: %w", agent.Name, err)
+			}
+
+			usedPorts := make(map[string]bool, len(conns.Items))
+			for _, conn := range conns.Items {
+				_, _, connPorts, _, err := conn.Spec.Endpoints()
+				if err != nil {
+					return fmt.Errorf("getting endpoints for connection %s: %w", conn.Name, err)
+				}
+				for _, connPort := range connPorts {
+					if !strings.HasPrefix(connPort, agent.Name+"/") {
+						continue
+					}
+
+					portName := strings.SplitN(connPort, "/", 2)[1]
+					if strings.Count(portName, "/") == 2 {
+						breakoutName := portName[:strings.LastIndex(portName, "/")]
+						usedPorts[breakoutName] = true
+					}
+					usedPorts[portName] = true
+				}
+			}
+
+			// get default breakout modes for each port
+			defaultBreakouts, err := agent.Spec.SwitchProfile.GetBreakoutDefaults(&agent.Spec.Switch)
+			if err != nil {
+				return fmt.Errorf("getting default breakouts for switch %s: %w", agent.Name, err)
+			}
+
+			// now go over all the ports in the switch profile and find the first unused port
+			swProfile := &wiringapi.SwitchProfile{}
+			if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: agent.Spec.Switch.Profile}, swProfile); err != nil {
+				return fmt.Errorf("getting switch profile %s for switch %s: %w", agent.Spec.Switch.Profile, agent.Name, err)
+			}
+			var unusedPort string
+			var breakoutProfile *wiringapi.SwitchProfilePortProfileBreakout
+			for portName, port := range swProfile.Spec.Ports {
+				if _, ok := usedPorts[portName]; !ok {
+					// this port is not used, but can it be used for breakout?
+					if port.Profile == "" {
+						continue
+					}
+					portProfile, ok := swProfile.Spec.PortProfiles[port.Profile]
+					if !ok {
+						return fmt.Errorf("port profile %s of port %s not found in switch profile %s for switch %s: %w", port.Profile, portName, swProfile.Name, agent.Name, err)
+					}
+					if portProfile.Breakout == nil {
+						continue
+					}
+					unusedPort = portName
+					breakoutProfile = portProfile.Breakout
+					slog.Debug("Found unused port for breakout", "port", unusedPort, "switch", agent.Name, "switchProfile", swProfile.Name)
+
+					break
+				}
+			}
+			if unusedPort == "" || breakoutProfile == nil {
+				slog.Warn("No unused ports found on switch", "switch", agent.Name)
+
+				return nil
+			}
+
+			// pick a random non-default supported breakout mode
+			targetMode := ""
+			for mode := range breakoutProfile.Supported {
+				if mode != defaultBreakouts[unusedPort] {
+					targetMode = mode
+
+					break
+				}
+			}
+			if targetMode == "" {
+				slog.Warn("No non-default breakout modes found for port", "port", unusedPort, "switch", agent.Name)
+
+				return nil
+			}
+			currState, exists := agent.Status.State.Breakouts[unusedPort]
+			currMode := ""
+			if exists {
+				currMode = currState.Mode
+			} else {
+				currMode = defaultBreakouts[unusedPort]
+			}
+			// we had a bug where the breakout mode could only be set the first time, so we need to check if the current mode is different from the default
+			if currMode == defaultBreakouts[unusedPort] {
+				slog.Debug("Unused port is in default breakout mode, setting it to target mode", "port", unusedPort, "switch", agent.Name, "defaultMode", defaultBreakouts[unusedPort], "targetMode", targetMode)
+				if err := setPortBreakout(ctx, testCtx.kube, agent.Name, unusedPort, targetMode, true); err != nil {
+					// revert change anyway
+					slog.Debug("Setting breakout mode failed, reverting to default", "port", unusedPort, "switch", agent.Name, "defaultMode", defaultBreakouts[unusedPort])
+					_ = setPortBreakout(ctx, testCtx.kube, agent.Name, unusedPort, defaultBreakouts[unusedPort], false)
+
+					return fmt.Errorf("setting breakout mode for port %s on switch %s: %w", unusedPort, agent.Name, err)
+				}
+				currMode = targetMode
+			}
+			// now set it to default mode again
+			slog.Debug("Setting breakout mode back to default", "port", unusedPort, "switch", agent.Name, "defaultMode", defaultBreakouts[unusedPort], "currentMode", currMode)
+			if err := setPortBreakout(ctx, testCtx.kube, agent.Name, unusedPort, defaultBreakouts[unusedPort], true); err != nil {
+				return fmt.Errorf("setting breakout mode back to default for port %s on switch %s: %w", unusedPort, agent.Name, err)
+			}
+			slog.Debug("Breakout test passed for switch", "switch", agent.Name, "port", unusedPort, "mode", targetMode)
+
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return false, nil, fmt.Errorf("running breakout test for switches: %w", err)
+	}
+
+	return false, nil, nil
+}
+
 // Utilities and suite runners
 
-func makeTestCtx(kube kclient.Client, opts SetupVPCsOpts, workDir, cacheDir string, wipeBetweenTests bool, extName string, rtOpts ReleaseTestOpts, roceLeaves []string) *VPCPeeringTestCtx {
+func makeTestCtx(kube kclient.Client, opts SetupVPCsOpts, workDir, cacheDir string, wipeBetweenTests bool, rtOpts ReleaseTestOpts, roceLeaves []string) *VPCPeeringTestCtx {
 	testCtx := new(VPCPeeringTestCtx)
 	testCtx.kube = kube
 	testCtx.workDir = workDir
@@ -2046,6 +2305,24 @@ func makeVpcPeeringsMultiVPCSuiteRun(testCtx *VPCPeeringTestCtx) *JUnitTestSuite
 	return suite
 }
 
+func makeNoVpcsSuiteRun(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
+	suite := &JUnitTestSuite{
+		Name: "No VPCs Suite",
+	}
+	suite.TestCases = []JUnitTestCase{
+		{
+			Name: "Breakout ports",
+			F:    testCtx.breakoutTest,
+			SkipFlags: SkipFlags{
+				VirtualSwitch: true,
+			},
+		},
+	}
+	suite.Tests = len(suite.TestCases)
+
+	return suite
+}
+
 func makeVpcPeeringsBasicSuiteRun(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 	suite := &JUnitTestSuite{
 		Name: "Basic VPC Peering Suite",
@@ -2097,8 +2374,6 @@ func makeVpcPeeringsBasicSuiteRun(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 
 func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps ReleaseTestOpts) error {
 	testStart := time.Now()
-	// TODO: make this configurable
-	extName := "default"
 
 	cacheCancel, kube, err := getKubeClientWithCache(ctx, workDir)
 	if err != nil {
@@ -2200,7 +2475,15 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 		}
 	}
 
-	singleVpcTestCtx := makeTestCtx(kube, opts, workDir, cacheDir, false, extName, rtOtps, roceLeaves)
+	noVpcTestCtx := makeTestCtx(kube, opts, workDir, cacheDir, true, rtOtps, roceLeaves)
+	noVpcTestCtx.noSetup = true
+	noVpcSuite := makeNoVpcsSuiteRun(noVpcTestCtx)
+	noVpcResults, err := selectAndRunSuite(ctx, noVpcTestCtx, noVpcSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
+	if err != nil && rtOtps.FailFast {
+		return fmt.Errorf("running no VPC suite: %w", err)
+	}
+
+	singleVpcTestCtx := makeTestCtx(kube, opts, workDir, cacheDir, false, rtOtps, roceLeaves)
 	singleVpcSuite := makeVpcPeeringsSingleVPCSuite(singleVpcTestCtx)
 	singleVpcResults, err := selectAndRunSuite(ctx, singleVpcTestCtx, singleVpcSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
 	if err != nil && rtOtps.FailFast {
@@ -2208,7 +2491,7 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 	}
 
 	opts.ServersPerSubnet = 1
-	multiVpcTestCtx := makeTestCtx(kube, opts, workDir, cacheDir, false, extName, rtOtps, roceLeaves)
+	multiVpcTestCtx := makeTestCtx(kube, opts, workDir, cacheDir, false, rtOtps, roceLeaves)
 	multiVpcSuite := makeVpcPeeringsMultiVPCSuiteRun(multiVpcTestCtx)
 	multiVpcResults, err := selectAndRunSuite(ctx, multiVpcTestCtx, multiVpcSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
 	if err != nil && rtOtps.FailFast {
@@ -2216,7 +2499,7 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 	}
 
 	opts.SubnetsPerVPC = 1
-	basicTestCtx := makeTestCtx(kube, opts, workDir, cacheDir, true, extName, rtOtps, roceLeaves)
+	basicTestCtx := makeTestCtx(kube, opts, workDir, cacheDir, true, rtOtps, roceLeaves)
 	basicVpcSuite := makeVpcPeeringsBasicSuiteRun(basicTestCtx)
 	basicResults, err := selectAndRunSuite(ctx, basicTestCtx, basicVpcSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
 	if err != nil && rtOtps.FailFast {
@@ -2224,13 +2507,14 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 	}
 
 	slog.Info("*** Recap of the test results ***")
+	printSuiteResults(noVpcResults)
 	printSuiteResults(singleVpcResults)
 	printSuiteResults(multiVpcResults)
 	printSuiteResults(basicResults)
 
 	if rtOtps.ResultsFile != "" {
 		report := JUnitReport{
-			Suites: []JUnitTestSuite{*singleVpcResults, *multiVpcResults, *basicResults},
+			Suites: []JUnitTestSuite{*singleVpcResults, *multiVpcResults, *basicResults, *noVpcResults},
 		}
 		output, err := xml.MarshalIndent(report, "", "  ")
 		if err != nil {
@@ -2242,8 +2526,8 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 	}
 
 	slog.Info("All tests completed", "duration", time.Since(testStart).String())
-	if singleVpcResults.Failures > 0 || multiVpcResults.Failures > 0 || basicResults.Failures > 0 {
-		return fmt.Errorf("some tests failed: singleVpc=%d, multiVpc=%d, basic=%d", singleVpcResults.Failures, multiVpcResults.Failures, basicResults.Failures) //nolint:goerr113
+	if singleVpcResults.Failures > 0 || multiVpcResults.Failures > 0 || basicResults.Failures > 0 || noVpcResults.Failures > 0 {
+		return fmt.Errorf("some tests failed: singleVpc=%d, multiVpc=%d, basic=%d, noVpc=%d", singleVpcResults.Failures, multiVpcResults.Failures, basicResults.Failures, noVpcResults.Failures) //nolint:goerr113
 	}
 
 	return nil
