@@ -232,7 +232,7 @@ func NewHelmChart(cfg fabapi.Fabricator, name, chart, version, bootstrapChart st
 			Version:              version,
 			TargetNamespace:      FabNamespace,
 			CreateNamespace:      true,
-			FailurePolicy:        failurePolicy,
+			FailurePolicy:        helmapi.FailurePolicy(failurePolicy),
 			DockerRegistrySecret: auth,
 			RepoCAConfigMap:      ca,
 			ValuesContent:        values,
