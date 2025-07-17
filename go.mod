@@ -39,22 +39,22 @@ require (
 	github.com/urfave/cli/v2 v2.27.7
 	github.com/vbauerster/mpb/v8 v8.10.2
 	github.com/vishvananda/netlink v1.3.1
-	go.githedgehog.com/fabric v0.83.0
+	go.githedgehog.com/fabric v0.84.1
 	go.githedgehog.com/gateway v0.14.0
 	golang.org/x/crypto v0.40.0
 	golang.org/x/mod v0.25.0
 	golang.org/x/sync v0.16.0
 	golang.org/x/term v0.33.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
-	k8s.io/api v0.32.6
-	k8s.io/apiextensions-apiserver v0.32.6
-	k8s.io/apimachinery v0.32.6
-	k8s.io/client-go v0.32.6
+	k8s.io/api v0.33.0
+	k8s.io/apiextensions-apiserver v0.33.0
+	k8s.io/apimachinery v0.33.0
+	k8s.io/client-go v0.33.0
 	k8s.io/klog/v2 v2.130.1
 	k8s.io/metrics v0.32.4
 	k8s.io/utils v0.0.0-20250321185631-1f6e0b77f77e
 	oras.land/oras-go/v2 v2.6.0
-	sigs.k8s.io/controller-runtime v0.20.4
+	sigs.k8s.io/controller-runtime v0.21.0
 	sigs.k8s.io/yaml v1.5.0
 )
 
@@ -107,6 +107,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sts v1.31.0 // indirect
 	github.com/aws/smithy-go v1.21.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
+	github.com/blang/semver/v4 v4.0.0 // indirect
 	github.com/bodgit/plumbing v1.3.0 // indirect
 	github.com/bodgit/sevenzip v1.6.0 // indirect
 	github.com/bodgit/windows v1.0.1 // indirect
@@ -188,7 +189,6 @@ require (
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/go-containerregistry v0.20.2 // indirect
 	github.com/google/go-intervals v0.0.2 // indirect
-	github.com/google/gofuzz v1.2.0 // indirect
 	github.com/google/pprof v0.0.0-20250403155104-27863c87afa6 // indirect
 	github.com/google/s2a-go v0.1.9 // indirect
 	github.com/google/uuid v1.6.0 // indirect
@@ -260,7 +260,7 @@ require (
 	github.com/olekukonko/errors v0.0.0-20250405072817-4e6d85265da6 // indirect
 	github.com/olekukonko/ll v0.0.8 // indirect
 	github.com/olekukonko/tablewriter v1.0.8 // indirect
-	github.com/openconfig/gnmi v0.14.0 // indirect
+	github.com/openconfig/gnmi v0.14.1 // indirect
 	github.com/openconfig/gnmic v0.32.0 // indirect
 	github.com/openconfig/goyang v1.6.2 // indirect
 	github.com/openconfig/grpctunnel v0.1.0 // indirect
@@ -361,9 +361,10 @@ require (
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	inet.af/netaddr v0.0.0-20220811202034-502d2d690317 // indirect
-	k8s.io/kube-openapi v0.0.0-20241212222426-2c72e554b1e7 // indirect
+	k8s.io/kube-openapi v0.0.0-20250318190949-c8a335a9a2ff // indirect
 	sigs.k8s.io/controller-tools v0.17.2 // indirect
 	sigs.k8s.io/gateway-api v1.1.0 // indirect
 	sigs.k8s.io/json v0.0.0-20241014173422-cfa47c3a1cc8 // indirect
-	sigs.k8s.io/structured-merge-diff/v4 v4.5.0 // indirect
+	sigs.k8s.io/randfill v1.0.0 // indirect
+	sigs.k8s.io/structured-merge-diff/v4 v4.6.0 // indirect
 )
