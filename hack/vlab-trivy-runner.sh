@@ -503,17 +503,11 @@ scan_vm() {
             actor="${GITHUB_ACTOR:-unknown}"
             registry_repo="${HHFAB_REG_REPO:-127.0.0.1:30000}"
 
-            # Extract the dominant container name for simpler fallback
-            dominant_container="unknown"
-            if [ ${#image_array[@]} -gt 0 ]; then
-                # Get the most common container name
-                dominant_image="${image_array[0]}"
-                dominant_container=$(extract_container_name "$dominant_image")
-            fi
+            # Create image to container mapping
+            image_to_container_json=$(printf '%s\n' "${image_array[@]}" | jq -R . | jq -s 'map({key: ., value: (. | gsub(".*/([^/]+):.*"; "\\1") | gsub(":.*"; ""))}) | from_entries')
 
-            # Enhanced jq processing with container name extraction and path fixing
+            # Enhanced jq processing with proper per-vulnerability container mapping
             jq --arg vm_name "$vm_name" \
-               --arg container_name "$dominant_container" \
                --arg scan_time "$(date -Iseconds)" \
                --arg deployment_id "$deployment_id" \
                --arg commit_sha "$commit_sha" \
@@ -526,13 +520,40 @@ scan_vm() {
                --arg total_low "$total_low" \
                --arg scan_mode "$scan_mode" \
                --argjson container_images "$containers_json" \
+               --argjson image_to_container "$image_to_container_json" \
                '
                # Function to extract container name from image name
                def extract_container_name(image_name):
                  image_name | gsub(".*/([^/]+):.*"; "\\1") | gsub(":.*"; "");
 
-               # Create image to container name mapping for multiple containers
-               ($container_images | map({key: ., value: extract_container_name(.)}) | from_entries) as $image_to_container |
+               # Function to find container name from artifact URI
+               def find_container_from_artifact(artifact_uri; image_mapping):
+                 # Try to find matching image from the artifact path or filename
+                 artifact_uri as $uri |
+                 (image_mapping | keys[]) as $image |
+                 if ($uri | contains(extract_container_name($image))) then
+                   image_mapping[$image]
+                 else
+                   null
+                 end // "unknown";
+
+               # Function to extract image name from SARIF result properties or artifact location
+               def extract_image_from_result(result; image_mapping):
+                 # Try to get image from result properties first
+                 if result.properties.image then
+                   result.properties.image
+                 # Try to infer from artifact location
+                 elif result.locations[0].physicalLocation.artifactLocation.uri then
+                   result.locations[0].physicalLocation.artifactLocation.uri as $uri |
+                   (image_mapping | keys[]) as $image |
+                   if ($uri | contains(extract_container_name($image))) then
+                     $image
+                   else
+                     null
+                   end
+                 else
+                   null
+                 end;
 
                .runs[0].properties = {
                  vmContext: {
@@ -546,7 +567,6 @@ scan_vm() {
                  containerContext: {
                    scannedImages: $container_images,
                    registry: $registry_repo,
-                   primaryContainer: $container_name,
                    containerMapping: $image_to_container,
                    aggregatedVulnerabilities: {
                      critical: ($total_critical | tonumber),
@@ -573,23 +593,29 @@ scan_vm() {
                } |
                .runs[0].tool.driver.informationUri = ("https://github.com/" + $repo + "/security") |
 
-               # Fix artifact location paths and remove line/column references
+               # Fix artifact location paths and map to correct containers per vulnerability
                .runs[0].results[] |= (
+                 # Extract the source image for this specific vulnerability
+                 . as $result |
+                 (extract_image_from_result($result; $image_to_container) // ($container_images[0] // "unknown")) as $source_image |
+                 ($image_to_container[$source_image] // extract_container_name($source_image)) as $container_name |
+
                  .locations[] |= (
                    # Get original artifact URI (binary name)
                    .physicalLocation.artifactLocation.uri as $original_uri |
 
-                   # Update the artifact location to include VM and container name
-                   .physicalLocation.artifactLocation.uri = ($vm_name + "/" + $container_name + "/" + $original_uri) |
-
-                   # Update message text to include full context
-                   .message.text = ("[" + $vm_name + "/" + $container_name + "] " + .message.text)
+                   # Update the artifact location to include VM and correct container name
+                   .physicalLocation.artifactLocation.uri = ($vm_name + "/" + $container_name + "/" + $original_uri)
                  ) |
 
-                 # Add container properties to each result
+                 # Update message text to include correct container context
+                 .message.text = ("[" + $vm_name + "/" + $container_name + "] " + .message.text) |
+
+                 # Add container properties to each result with correct container name
                  .properties = (.properties // {}) + {
                    vmName: $vm_name,
                    containerName: $container_name,
+                   sourceImage: $source_image,
                    vmType: (if ($vm_name | startswith("control")) then "control" elif ($vm_name | startswith("gateway")) then "gateway" elif ($vm_name | startswith("leaf")) then "switch" else "unknown" end),
                    scanContext: ("runtime-deployment-" + $scan_mode),
                    artifactPath: ($vm_name + "/" + $container_name)
@@ -602,11 +628,10 @@ scan_vm() {
                 mv "${consolidated_sarif}.enhanced" "$consolidated_sarif"
                 echo "Enhanced SARIF with container-aware paths"
                 echo "  - VM: $vm_name ($scan_mode mode)"
-                echo "  - Primary container: $dominant_container"
                 echo "  - Container images: $image_count"
                 echo "  - Total vulnerabilities: $((total_critical + total_high + total_medium + total_low))"
                 echo "  - Critical/High: $((total_critical + total_high))"
-                echo "  - Artifact paths: $vm_name/$dominant_container/binary"
+                echo "  - Per-vulnerability container mapping applied"
             else
                 echo "Enhancement failed, keeping original SARIF"
                 rm -f "${consolidated_sarif}.enhanced"
