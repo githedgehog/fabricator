@@ -138,8 +138,8 @@ AUTH_CONFIGURED=false
 if [ -f /etc/rancher/k3s/registries.yaml ]; then
     echo "Found K3s registry configuration, extracting credentials..."
 
-    USERNAME=$(grep -A5 "$REGISTRY" /etc/rancher/k3s/registries.yaml | grep "username" | head -1 | sed 's/.*username: *//' | tr -d '"' || echo "")
-    PASSWORD=$(grep -A5 "$REGISTRY" /etc/rancher/k3s/registries.yaml | grep "password" | head -1 | sed 's/.*password: *//' | tr -d '"' || echo "")
+    USERNAME=$(sudo grep -A5 "$REGISTRY" /etc/rancher/k3s/registries.yaml | grep "username" | head -1 | sed 's/.*username: *//' | tr -d '"' || echo "")
+    PASSWORD=$(sudo grep -A5 "$REGISTRY" /etc/rancher/k3s/registries.yaml | grep "password" | head -1 | sed 's/.*password: *//' | tr -d '"' || echo "")
 
     if [ ! -z "$USERNAME" ] && [ ! -z "$PASSWORD" ]; then
         echo "Successfully extracted registry credentials"
@@ -445,8 +445,8 @@ REGISTRY="172.30.0.1:31000"
 if [ -f /etc/rancher/k3s/registries.yaml ]; then
     echo "Found K3s registry configuration, attempting to extract credentials..."
 
-    USERNAME=$(grep -A5 "$REGISTRY" /etc/rancher/k3s/registries.yaml | grep "username" | head -1 | sed "s/.*username: *//" | tr -d "\"" || echo "")
-    PASSWORD=$(grep -A5 "$REGISTRY" /etc/rancher/k3s/registries.yaml | grep "password" | head -1 | sed "s/.*password: *//" | tr -d "\"" || echo "")
+    USERNAME=$(sudo grep -A5 "$REGISTRY" /etc/rancher/k3s/registries.yaml | grep "username" | head -1 | sed "s/.*username: *//" | tr -d "\"" || echo "")
+    PASSWORD=$(sudo grep -A5 "$REGISTRY" /etc/rancher/k3s/registries.yaml | grep "password" | head -1 | sed "s/.*password: *//" | tr -d "\"" || echo "")
 
     if [ ! -z "$USERNAME" ] && [ ! -z "$PASSWORD" ]; then
         echo "Successfully extracted registry credentials"
