@@ -7,7 +7,7 @@ set -e
 # Parse command line arguments
 RUN_CONTROL=true
 RUN_GATEWAY=true
-RUN_SWITCH=false  # Switch scanning disabled by default
+RUN_SWITCH=false
 SKIP_VLAB_LAUNCH=false
 ALLOW_PARTIAL_SUCCESS=true
 
@@ -76,28 +76,14 @@ fi
 
 CONTROL_VM="control-1"
 GATEWAY_VM="gateway-1"
-SWITCH_VM="leaf-01"  # Default SONiC switch name
+SWITCH_VM="leaf-01"
 VLAB_LOG="vlab.log"
+RAW_SARIF_DIR="raw-sarif-reports"
 RESULTS_DIR="trivy-reports"
 SCRIPT_PATH="${SCRIPT_PATH:-./hack/trivy-setup.sh}"
 AIRGAPPED_SCRIPT_PATH="${AIRGAPPED_SCRIPT_PATH:-./hack/trivy-setup-airgapped.sh}"
 SONIC_AIRGAPPED_SCRIPT_PATH="${SONIC_AIRGAPPED_SCRIPT_PATH:-./hack/trivy-setup-sonic-airgapped.sh}"
 VLAB_TIMEOUT=${VLAB_TIMEOUT:-30}
-
-# Variables to track vulnerability counts
-CONTROL_HIGH_VULNS=0
-CONTROL_CRITICAL_VULNS=0
-GATEWAY_HIGH_VULNS=0
-GATEWAY_CRITICAL_VULNS=0
-SWITCH_HIGH_VULNS=0
-SWITCH_CRITICAL_VULNS=0
-CONTROL_IMAGES_SCANNED=0
-GATEWAY_IMAGES_SCANNED=0
-SWITCH_IMAGES_SCANNED=0
-
-# Variables for deduplicated vulnerability counts
-DEDUP_CRITICAL=0
-DEDUP_HIGH=0
 
 # Find hhfab binary relative to project root
 if [ -f "./hhfab" ] && [ -x "./hhfab" ]; then
@@ -118,7 +104,7 @@ fi
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
 cleanup() {
     echo -e "${YELLOW}Cleaning up...${NC}"
@@ -163,6 +149,7 @@ echo "Control script: $SCRIPT_PATH"
 echo "Gateway script: $AIRGAPPED_SCRIPT_PATH (airgapped mode)"
 echo "Switch script: $SONIC_AIRGAPPED_SCRIPT_PATH (sonic airgapped mode)"
 echo "Results: $RESULTS_DIR"
+echo "Raw SARIF: $RAW_SARIF_DIR"
 echo "Log: $VLAB_LOG"
 if [ "$SKIP_VLAB_LAUNCH" = false ]; then
     echo "Timeouts: VLAB=${VLAB_TIMEOUT}m"
@@ -171,7 +158,6 @@ echo ""
 
 # Launch VLAB if not skipped
 if [ "$SKIP_VLAB_LAUNCH" = false ]; then
-    # Determine if we need leaf nodes for the topology
     VLAB_EXTRA_ARGS=""
     if [ "$RUN_SWITCH" = true ]; then
         VLAB_EXTRA_ARGS="--leaf"
@@ -230,8 +216,6 @@ if [ "$RUN_CONTROL" = true ]; then
         echo -e "${GREEN}SSH to $CONTROL_VM: SUCCESS${NC}"
     else
         echo -e "${RED}SSH to $CONTROL_VM: FAILED${NC}"
-        echo "Debug: Checking VLAB status..."
-        $HHFAB_BIN vlab status || true
         exit 1
     fi
 fi
@@ -242,20 +226,16 @@ if [ "$RUN_GATEWAY" = true ]; then
         echo -e "${GREEN}SSH to $GATEWAY_VM: SUCCESS${NC}"
     else
         echo -e "${RED}SSH to $GATEWAY_VM: FAILED${NC}"
-        echo "Debug: Checking VLAB status..."
-        $HHFAB_BIN vlab status || true
         exit 1
     fi
 fi
 
-    if [ "$RUN_SWITCH" = true ]; then
+if [ "$RUN_SWITCH" = true ]; then
     echo "Testing SSH to $SWITCH_VM..."
     if $HHFAB_BIN vlab ssh -b -n "$SWITCH_VM" -- 'echo "SSH works"' >/dev/null 2>&1; then
         echo -e "${GREEN}SSH to $SWITCH_VM: SUCCESS${NC}"
     else
         echo -e "${RED}SSH to $SWITCH_VM: FAILED${NC}"
-        echo "Debug: Checking VLAB status..."
-        $HHFAB_BIN vlab status || true
         exit 1
     fi
 fi
@@ -346,25 +326,11 @@ fi
 
 echo -e "${GREEN}All enabled VMs setup complete${NC}"
 
-# Function to extract container name from image name
-extract_container_name() {
-    local image_name="$1"
-    # Extract from patterns like:
-    # "172.30.0.1:31000/githedgehog/fabricator/reloader:v1.0.40" -> "reloader"
-    # "registry/org/repo/service:tag" -> "service"
-    # "service:tag" -> "service"
-    echo "$image_name" | sed -E 's|.*/([^/]+):.*|\1|' | sed -E 's|:.*||'
-}
-
-# Function to scan VM with native SARIF output
+# Function to scan VM and collect raw SARIF files
 scan_vm() {
     local vm_name="$1"
     local vm_results_dir="$RESULTS_DIR/$vm_name"
-    local scan_errors=0
-    local local_high_vulns=0
-    local local_critical_vulns=0
-    local local_images_scanned=0
-    local vm_type="control"  # Default VM type
+    local vm_type="control"
 
     # Determine VM type
     if [[ "$vm_name" == "$GATEWAY_VM" ]]; then
@@ -375,8 +341,7 @@ scan_vm() {
 
     echo -e "${YELLOW}=== Scanning $vm_name ($vm_type) ===${NC}"
 
-    mkdir -p sarif-reports
-    local scan_errors=0
+    mkdir -p "$vm_results_dir"
 
     # Run the appropriate scan script based on VM type
     if [ "$vm_type" = "switch" ]; then
@@ -399,18 +364,21 @@ scan_vm() {
         fi
     fi
 
-    # Get image list for SARIF generation - different approach based on VM type
+    # Get container list for metadata
     if [ "$vm_type" = "switch" ]; then
-        echo "Getting container list from SONiC switch for SARIF generation..."
+        echo "Getting container list from SONiC switch..."
         IMAGES=$($HHFAB_BIN vlab ssh -b -n "$vm_name" -- 'sudo docker ps --format "{{.Image}}" | grep -v "trivy" | sort -u' || echo "")
     else
-        echo "Getting image list for SARIF generation..."
+        echo "Getting image list..."
         IMAGES=$($HHFAB_BIN vlab ssh -b -n "$vm_name" -- 'sudo crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock images | grep -v IMAGE | grep -v pause | awk "{print \$1\":\"\$2}"' | sort -u || echo "")
     fi
 
+    # Save container images list for later processing
+    echo "$IMAGES" > "$vm_results_dir/container_images.txt"
+
+    # Display images found for scanning (from master version)
     readarray -t image_array <<< "$IMAGES"
     local image_count=${#image_array[@]}
-    local_images_scanned=$image_count
 
     if [ $image_count -eq 0 ]; then
         echo "No images found for scanning on $vm_name"
@@ -421,213 +389,40 @@ scan_vm() {
     printf '%s\n' "${image_array[@]}"
     echo "==============================="
 
-    local scan_mode="online"
-    local registry="172.30.0.1:31000"
-    if [ "$vm_type" = "gateway" ]; then
-        scan_mode="airgapped"
-    elif [ "$vm_type" = "switch" ]; then
-        scan_mode="sonic-airgapped"
+    # Collect raw SARIF files
+    echo "Collecting raw SARIF files from VM..."
+    mkdir -p "$RAW_SARIF_DIR/$vm_name"
+
+    # Check if SARIF files exist first
+    sarif_count=$($HHFAB_BIN vlab ssh -b -n "$vm_name" -- 'sudo find /var/lib/trivy/reports -name "*_critical.sarif" -type f | wc -l' 2>/dev/null || echo 0)
+    echo "Found $sarif_count SARIF files on $vm_name"
+
+    if [ "$sarif_count" -eq 0 ]; then
+        echo -e "${YELLOW}No SARIF files found on $vm_name${NC}"
+        return 1
     fi
 
-    echo "Collecting all SARIF files from VM..."
-    mkdir -p "/tmp/sarif-collection-${vm_name}"
-    if ! $HHFAB_BIN vlab ssh -b -n "$vm_name" -- "sudo find /var/lib/trivy/reports -name '*_critical.sarif' -type f | xargs sudo tar czf /tmp/sarif-files.tar.gz -C / 2>/dev/null"; then
-        echo -e "${YELLOW}Failed to create SARIF archive on $vm_name, attempting fallback...${NC}"
-        # Fallback: Try to create an empty tar if no SARIF files exist
-        $HHFAB_BIN vlab ssh -b -n "$vm_name" -- "touch /tmp/empty.txt && sudo tar czf /tmp/sarif-files.tar.gz -C /tmp empty.txt && rm /tmp/empty.txt" || true
-    fi
-
-    if $HHFAB_BIN vlab ssh -b -n "$vm_name" -- "test -s /tmp/sarif-files.tar.gz" && $HHFAB_BIN vlab ssh -b -n "$vm_name" -- "cat /tmp/sarif-files.tar.gz" > "/tmp/sarif-files-${vm_name}.tar.gz"; then
-        mkdir -p "/tmp/sarif-collection-${vm_name}"
-        tar -xzf "/tmp/sarif-files-${vm_name}.tar.gz" -C "/tmp/sarif-collection-${vm_name}" || true
-        echo "Extracted SARIF files from VM"
-
-        # Find all SARIF files
-        sarif_files=()
-        while IFS= read -r -d '' file; do
-            sarif_files+=("$file")
-        done < <(find "/tmp/sarif-collection-${vm_name}" -name '*_critical.sarif' -type f -print0 2>/dev/null)
-
-        echo "Found ${#sarif_files[@]} SARIF files"
-
-        if [ ${#sarif_files[@]} -gt 0 ]; then
-            echo "Consolidating ${#sarif_files[@]} SARIF files..."
-            consolidated_sarif="sarif-reports/trivy-consolidated-${vm_name}.sarif"
-
-            # Copy first file as base
-            cp "${sarif_files[0]}" "$consolidated_sarif"
-
-            # Merge additional files if any
-            if [ ${#sarif_files[@]} -gt 1 ]; then
-                for ((i=1; i<${#sarif_files[@]}; i++)); do
-                    merge_file="${sarif_files[$i]}"
-                    if [ -f "$merge_file" ]; then
-                        jq -s '
-                            .[0].runs[0].results += .[1].runs[0].results |
-                            .[0].runs[0].tool.driver.rules += (.[1].runs[0].tool.driver.rules // []) |
-                            .[0].runs[0].tool.driver.rules |= unique_by(.id) |
-                            .[0]
-                        ' "$consolidated_sarif" "$merge_file" > "${consolidated_sarif}.tmp" && \
-                        mv "${consolidated_sarif}.tmp" "$consolidated_sarif"
-                        echo "  ✓ Merged: $(basename "$merge_file")"
-                    fi
-                done
-            fi
-
-            # Add VM context information to consolidated SARIF
-            echo "Adding VM context information and fixing artifact paths..."
-
-            total_critical=$(jq '[.runs[0].results[]? | select(.level == "error" and (.message.text | contains("CRITICAL")))? | select(. != null)] | length' "$consolidated_sarif" 2>/dev/null || echo 0)
-            total_high=$(jq '[.runs[0].results[]? | select(.level == "error" and (.message.text | contains("HIGH")))? | select(. != null)] | length' "$consolidated_sarif" 2>/dev/null || echo 0)
-            total_medium=$(jq '[.runs[0].results[]? | select(.level == "warning")? | select(. != null)] | length' "$consolidated_sarif" 2>/dev/null || echo 0)
-            total_low=$(jq '[.runs[0].results[]? | select(.level == "note")? | select(. != null)] | length' "$consolidated_sarif" 2>/dev/null || echo 0)
-
-            # If counts are zero, try checking rules directly
-            if [ "$total_critical" -eq 0 ] && [ "$total_high" -eq 0 ]; then
-                echo "Attempting to count vulnerabilities from rules..."
-                total_critical=$(jq '[.runs[0].tool.driver.rules[]? | select(.properties.tags | contains(["CRITICAL"])) | select(. != null)] | length' "$consolidated_sarif" 2>/dev/null || echo 0)
-                total_high=$(jq '[.runs[0].tool.driver.rules[]? | select(.properties.tags | contains(["HIGH"])) | select(. != null)] | length' "$consolidated_sarif" 2>/dev/null || echo 0)
-            fi
-
-            local_critical_vulns=$total_critical
-            local_high_vulns=$total_high
-
-            containers_json="[]"
-            if [ $image_count -gt 0 ]; then
-                containers_json=$(printf '%s\n' "${image_array[@]}" | jq -R . | jq -s .)
-            fi
-
-            deployment_id="${GITHUB_RUN_ID:-unknown}"
-            commit_sha="${GITHUB_SHA:-unknown}"
-            repo="${GITHUB_REPOSITORY:-unknown}"
-            actor="${GITHUB_ACTOR:-unknown}"
-            registry_repo="${HHFAB_REG_REPO:-127.0.0.1:30000}"
-
-            # Extract the dominant container name for simpler fallback
-            dominant_container="unknown"
-            if [ ${#image_array[@]} -gt 0 ]; then
-                # Get the most common container name
-                dominant_image="${image_array[0]}"
-                dominant_container=$(extract_container_name "$dominant_image")
-            fi
-
-            # Enhanced jq processing with container name extraction and path fixing
-            jq --arg vm_name "$vm_name" \
-               --arg container_name "$dominant_container" \
-               --arg scan_time "$(date -Iseconds)" \
-               --arg deployment_id "$deployment_id" \
-               --arg commit_sha "$commit_sha" \
-               --arg repo "$repo" \
-               --arg actor "$actor" \
-               --arg registry_repo "$registry_repo" \
-               --arg total_critical "$total_critical" \
-               --arg total_high "$total_high" \
-               --arg total_medium "$total_medium" \
-               --arg total_low "$total_low" \
-               --arg scan_mode "$scan_mode" \
-               --argjson container_images "$containers_json" \
-               '
-               # Function to extract container name from image name
-               def extract_container_name(image_name):
-                 image_name | gsub(".*/([^/]+):.*"; "\\1") | gsub(":.*"; "");
-
-               # Create image to container name mapping for multiple containers
-               ($container_images | map({key: ., value: extract_container_name(.)}) | from_entries) as $image_to_container |
-
-               .runs[0].properties = {
-                 vmContext: {
-                   name: $vm_name,
-                   type: (if ($vm_name | startswith("control")) then "control" elif ($vm_name | startswith("gateway")) then "gateway" elif ($vm_name | startswith("leaf")) then "switch" else "unknown" end),
-                   scanTimestamp: $scan_time,
-                   environment: "vlab",
-                   scanMode: $scan_mode,
-                   totalContainerImages: ($container_images | length)
-                 },
-                 containerContext: {
-                   scannedImages: $container_images,
-                   registry: $registry_repo,
-                   primaryContainer: $container_name,
-                   containerMapping: $image_to_container,
-                   aggregatedVulnerabilities: {
-                     critical: ($total_critical | tonumber),
-                     high: ($total_high | tonumber),
-                     medium: ($total_medium | tonumber),
-                     low: ($total_low | tonumber),
-                     total: (($total_critical | tonumber) + ($total_high | tonumber) + ($total_medium | tonumber) + ($total_low | tonumber))
-                   }
-                 },
-                 deploymentContext: {
-                   deploymentId: $deployment_id,
-                   commitSha: $commit_sha,
-                   repository: $repo,
-                   triggeredBy: $actor,
-                   workflowRun: ("https://github.com/" + $repo + "/actions/runs/" + $deployment_id)
-                 },
-                 scanMetadata: {
-                   tool: "trivy",
-                   category: ("vm-container-runtime-scan-" + $scan_mode),
-                   scanScope: "production-deployment",
-                   consolidatedReport: true,
-                   imageCount: ($container_images | length)
-                 }
-               } |
-               .runs[0].tool.driver.informationUri = ("https://github.com/" + $repo + "/security") |
-
-               # Fix artifact location paths and remove line/column references
-               .runs[0].results[] |= (
-                 .locations[] |= (
-                   # Get original artifact URI (binary name)
-                   .physicalLocation.artifactLocation.uri as $original_uri |
-
-                   # Update the artifact location to include VM and container name
-                   .physicalLocation.artifactLocation.uri = ($vm_name + "/" + $container_name + "/" + $original_uri) |
-
-                   # Update message text to include full context
-                   .message.text = ("[" + $vm_name + "/" + $container_name + "] " + .message.text)
-                 ) |
-
-                 # Add container properties to each result
-                 .properties = (.properties // {}) + {
-                   vmName: $vm_name,
-                   containerName: $container_name,
-                   vmType: (if ($vm_name | startswith("control")) then "control" elif ($vm_name | startswith("gateway")) then "gateway" elif ($vm_name | startswith("leaf")) then "switch" else "unknown" end),
-                   scanContext: ("runtime-deployment-" + $scan_mode),
-                   artifactPath: ($vm_name + "/" + $container_name)
-                 }
-               )
-               ' "$consolidated_sarif" > "${consolidated_sarif}.enhanced"
-
-            # Check if enhancement succeeded
-            if [ -s "${consolidated_sarif}.enhanced" ] && jq empty "${consolidated_sarif}.enhanced" 2>/dev/null; then
-                mv "${consolidated_sarif}.enhanced" "$consolidated_sarif"
-                echo "Enhanced SARIF with container-aware paths"
-                echo "  - VM: $vm_name ($scan_mode mode)"
-                echo "  - Primary container: $dominant_container"
-                echo "  - Container images: $image_count"
-                echo "  - Total vulnerabilities: $((total_critical + total_high + total_medium + total_low))"
-                echo "  - Critical/High: $((total_critical + total_high))"
-                echo "  - Artifact paths: $vm_name/$dominant_container/binary"
+    # Create and download SARIF archive
+    if $HHFAB_BIN vlab ssh -b -n "$vm_name" -- "cd /var/lib/trivy/reports && sudo find . -name '*_critical.sarif' -type f -exec sudo tar rf /tmp/sarif-files.tar {} \\; && sudo gzip /tmp/sarif-files.tar" 2>/dev/null; then
+        if $HHFAB_BIN vlab ssh -b -n "$vm_name" -- "cat /tmp/sarif-files.tar.gz" > "/tmp/sarif-files-${vm_name}.tar.gz"; then
+            if tar -xzf "/tmp/sarif-files-${vm_name}.tar.gz" -C "$RAW_SARIF_DIR/$vm_name" 2>/dev/null; then
+                echo "✓ Extracted raw SARIF files to $RAW_SARIF_DIR/$vm_name"
+                rm -f "/tmp/sarif-files-${vm_name}.tar.gz"
             else
-                echo "Enhancement failed, keeping original SARIF"
-                rm -f "${consolidated_sarif}.enhanced"
+                echo -e "${RED}Failed to extract SARIF files for $vm_name${NC}"
+                return 1
             fi
-
-            echo "✓ Consolidated SARIF created: trivy-consolidated-${vm_name}.sarif"
         else
-            echo "✗ No SARIF files found to consolidate"
-            scan_errors=$((scan_errors + 1))
+            echo -e "${RED}Failed to download SARIF archive from $vm_name${NC}"
+            return 1
         fi
     else
-        echo "✗ Failed to collect SARIF files from VM"
-        scan_errors=$((scan_errors + 1))
+        echo -e "${RED}Failed to create SARIF archive on $vm_name${NC}"
+        return 1
     fi
 
-    # Clean up temp files
-    rm -rf "/tmp/sarif-collection-${vm_name}" "/tmp/sarif-files-${vm_name}.tar.gz"
-
+    # Collect regular scan results
     echo "Collecting scan results from $vm_name..."
-    mkdir -p "$vm_results_dir"
-
     if ! $HHFAB_BIN vlab ssh -b -n "$vm_name" -- 'sudo find /var/lib/trivy/reports -name "*.txt" -o -name "*.json" | head -1' >/dev/null 2>&1; then
         echo -e "${YELLOW}No scan results found on $vm_name${NC}"
         return 1
@@ -644,39 +439,18 @@ scan_vm() {
         echo -e "${GREEN}Results from $vm_name saved to: $vm_results_dir${NC}"
     else
         echo -e "${YELLOW}Results archive is empty on $vm_name${NC}"
-        scan_errors=$((scan_errors + 1))
         return 1
     fi
 
-    # Update the appropriate counters based on VM type
-    if [ "$vm_name" = "$SWITCH_VM" ]; then
-        SWITCH_HIGH_VULNS=$local_high_vulns
-        SWITCH_CRITICAL_VULNS=$local_critical_vulns
-        SWITCH_IMAGES_SCANNED=$local_images_scanned
-    elif [ "$vm_name" = "$GATEWAY_VM" ]; then
-        GATEWAY_HIGH_VULNS=$local_high_vulns
-        GATEWAY_CRITICAL_VULNS=$local_critical_vulns
-        GATEWAY_IMAGES_SCANNED=$local_images_scanned
-    else
-        CONTROL_HIGH_VULNS=$local_high_vulns
-        CONTROL_CRITICAL_VULNS=$local_critical_vulns
-        CONTROL_IMAGES_SCANNED=$local_images_scanned
-    fi
+    # Clean up remote temp files
+    $HHFAB_BIN vlab ssh -b -n "$vm_name" -- "sudo rm -f /tmp/sarif-files.tar.gz" || true
 
-    if [ -f "sarif-reports/trivy-consolidated-${vm_name}.sarif" ]; then
-        if [ $scan_errors -eq 0 ]; then
-            echo -e "${GREEN}All scans for $vm_name completed successfully${NC}"
-        else
-            echo -e "${YELLOW}$vm_name scans completed with $scan_errors errors, but consolidated SARIF file was generated${NC}"
-        fi
-        return 0
-    else
-        echo -e "${RED}$vm_name scans failed - no consolidated SARIF file was generated${NC}"
-        return 1
-    fi
+    echo -e "${GREEN}Raw data collection for $vm_name completed${NC}"
+    return 0
 }
 
 mkdir -p "$RESULTS_DIR"
+mkdir -p "$RAW_SARIF_DIR"
 
 echo -e "${YELLOW}Starting security scans...${NC}"
 
@@ -704,148 +478,12 @@ else
     SWITCH_RESULT=0
 fi
 
-# Create the final consolidated SARIF report with deduplication of vulnerabilities
-create_final_sarif_report() {
-    echo -e "${YELLOW}Creating final consolidated SARIF report...${NC}"
-    local final_sarif="sarif-reports/trivy-security-scan.sarif"
-    local sarif_files=()
-
-    # Collect all VM-specific SARIF files
-    if [ "$RUN_CONTROL" = true ] && [ -f "sarif-reports/trivy-consolidated-${CONTROL_VM}.sarif" ]; then
-        sarif_files+=("sarif-reports/trivy-consolidated-${CONTROL_VM}.sarif")
-    fi
-
-    if [ "$RUN_GATEWAY" = true ] && [ -f "sarif-reports/trivy-consolidated-${GATEWAY_VM}.sarif" ]; then
-        sarif_files+=("sarif-reports/trivy-consolidated-${GATEWAY_VM}.sarif")
-    fi
-
-    if [ "$RUN_SWITCH" = true ] && [ -f "sarif-reports/trivy-consolidated-${SWITCH_VM}.sarif" ]; then
-        sarif_files+=("sarif-reports/trivy-consolidated-${SWITCH_VM}.sarif")
-    fi
-
-    # If no SARIF files found, exit
-    if [ ${#sarif_files[@]} -eq 0 ]; then
-        echo -e "${RED}No SARIF files found to consolidate${NC}"
-        return 1
-    fi
-
-    # If only one SARIF file, just copy it
-    if [ ${#sarif_files[@]} -eq 1 ]; then
-        cp "${sarif_files[0]}" "$final_sarif"
-        echo -e "${GREEN}Single SARIF file copied to $final_sarif${NC}"
-    else
-        echo "Merging ${#sarif_files[@]} SARIF files..."
-
-        # Safe merge preserving all vulnerability instances
-        jq -s '
-            # Use first file as base
-            .[0] as $base |
-
-            # Safely extract results from each file
-            (.[0].runs[0].results // []) as $results1 |
-            (if (. | length) > 1 then (.[1].runs[0].results // []) else [] end) as $results2 |
-            (if (. | length) > 2 then (.[2].runs[0].results // []) else [] end) as $results3 |
-
-            # Safely extract rules from each file
-            (.[0].runs[0].tool.driver.rules // []) as $rules1 |
-            (if (. | length) > 1 then (.[1].runs[0].tool.driver.rules // []) else [] end) as $rules2 |
-            (if (. | length) > 2 then (.[2].runs[0].tool.driver.rules // []) else [] end) as $rules3 |
-
-            # Combine arrays safely
-            ($results1 + $results2 + $results3) as $all_results |
-            ($rules1 + $rules2 + $rules3 | unique_by(.id)) as $all_rules |
-
-            # Build final structure
-            $base |
-            .runs[0].tool.driver.rules = $all_rules |
-            .runs[0].results = $all_results
-        ' "${sarif_files[@]}" > "$final_sarif"
-    fi
-
-    # Check the result
-    if [ -f "$final_sarif" ]; then
-        total_results=$(jq '.runs[0].results | length' "$final_sarif" 2>/dev/null || echo 0)
-
-        if [ "$total_results" -gt 0 ]; then
-            echo -e "${GREEN}Successfully merged $total_results vulnerability instances${NC}"
-        else
-            echo -e "${RED}Merge failed - no results produced${NC}"
-            return 1
-        fi
-    else
-        echo -e "${RED}Failed to create final SARIF file${NC}"
-        return 1
-    fi
-
-    # Count unique vulnerabilities by rules (correct deduplication method)
-    DEDUP_CRITICAL=$(jq '[.runs[0].tool.driver.rules[]? | select(.properties.tags | contains(["CRITICAL"]))] | length' "$final_sarif" 2>/dev/null || echo 0)
-    DEDUP_HIGH=$(jq '[.runs[0].tool.driver.rules[]? | select(.properties.tags | contains(["HIGH"]))] | length' "$final_sarif" 2>/dev/null || echo 0)
-
-    # Ensure we have valid numbers
-    DEDUP_CRITICAL=${DEDUP_CRITICAL:-0}
-    DEDUP_HIGH=${DEDUP_HIGH:-0}
-
-    # Make sure they're numeric
-    if ! [[ "$DEDUP_CRITICAL" =~ ^[0-9]+$ ]]; then
-        DEDUP_CRITICAL=0
-    fi
-    if ! [[ "$DEDUP_HIGH" =~ ^[0-9]+$ ]]; then
-        DEDUP_HIGH=0
-    fi
-
-    # Update the SARIF file with the correct counts
-    jq --arg critical "$DEDUP_CRITICAL" \
-       --arg high "$DEDUP_HIGH" \
-       --arg total_results "$total_results" \
-    '
-    # Ensure properties structure exists
-    .runs[0].properties = (.runs[0].properties // {}) |
-    .runs[0].properties.aggregatedVulnerabilities = {
-        critical: ($critical | tonumber),
-        high: ($high | tonumber),
-        medium: 0,
-        low: 0,
-        total: (($critical | tonumber) + ($high | tonumber)),
-        totalIssues: ($total_results | tonumber)
-    } |
-    .runs[0].properties.scanMetadata = (.runs[0].properties.scanMetadata // {} | . + {
-        deduplicationStrategy: "unique_by_rule_id",
-        preservesAllLocations: true,
-        processingSuccessful: true
-    })
-    ' "$final_sarif" > "${final_sarif}.updated" 2>/dev/null
-
-    if [ -f "${final_sarif}.updated" ]; then
-        mv "${final_sarif}.updated" "$final_sarif"
-        echo "SARIF metadata updated with deduplicated counts"
-    else
-        echo "Failed to update SARIF metadata"
-    fi
-
-    echo -e "${GREEN}Final consolidated SARIF report created: $final_sarif${NC}"
-    echo "  - Total vulnerability instances: $total_results"
-
-    return 0
-}
-
-# Create the final deduplicated SARIF report for GitHub Security
-TOTAL_IMAGES_SCANNED=$((CONTROL_IMAGES_SCANNED + GATEWAY_IMAGES_SCANNED + SWITCH_IMAGES_SCANNED))
-TOTAL_CRITICAL_VULNS=$((CONTROL_CRITICAL_VULNS + GATEWAY_CRITICAL_VULNS + SWITCH_CRITICAL_VULNS))
-TOTAL_HIGH_VULNS=$((CONTROL_HIGH_VULNS + GATEWAY_HIGH_VULNS + SWITCH_HIGH_VULNS))
-
-# Create the final deduplicated SARIF report
-create_final_sarif_report
-FINAL_SARIF_RESULT=$?
-
 echo ""
-echo -e "${GREEN}=== Security Scan Summary ===${NC}"
+echo -e "${GREEN}=== Raw Data Collection Summary ===${NC}"
 
 if [ "$RUN_CONTROL" = true ]; then
     if [ $CONTROL_RESULT -eq 0 ]; then
-        echo -e "${GREEN}Control VM ($CONTROL_VM): SUCCESS (online)${NC}"
-        echo -e "  - Images scanned: $CONTROL_IMAGES_SCANNED"
-        echo -e "  - Critical vulnerabilities: $CONTROL_CRITICAL_VULNS"
-        echo -e "  - High vulnerabilities: $CONTROL_HIGH_VULNS"
+        echo -e "${GREEN}Control VM ($CONTROL_VM): SUCCESS${NC}"
     else
         echo -e "${RED}Control VM ($CONTROL_VM): FAILED${NC}"
     fi
@@ -855,10 +493,7 @@ fi
 
 if [ "$RUN_GATEWAY" = true ]; then
     if [ $GATEWAY_RESULT -eq 0 ]; then
-        echo -e "${GREEN}Gateway VM ($GATEWAY_VM): SUCCESS (airgap)${NC}"
-        echo -e "  - Images scanned: $GATEWAY_IMAGES_SCANNED"
-        echo -e "  - Critical vulnerabilities: $GATEWAY_CRITICAL_VULNS"
-        echo -e "  - High vulnerabilities: $GATEWAY_HIGH_VULNS"
+        echo -e "${GREEN}Gateway VM ($GATEWAY_VM): SUCCESS${NC}"
     else
         echo -e "${RED}Gateway VM ($GATEWAY_VM): FAILED${NC}"
     fi
@@ -868,10 +503,7 @@ fi
 
 if [ "$RUN_SWITCH" = true ]; then
     if [ $SWITCH_RESULT -eq 0 ]; then
-        echo -e "${GREEN}SONiC Switch ($SWITCH_VM): SUCCESS (sonic-airgap)${NC}"
-        echo -e "  - Images scanned: $SWITCH_IMAGES_SCANNED"
-        echo -e "  - Critical vulnerabilities: $SWITCH_CRITICAL_VULNS"
-        echo -e "  - High vulnerabilities: $SWITCH_HIGH_VULNS"
+        echo -e "${GREEN}SONiC Switch ($SWITCH_VM): SUCCESS${NC}"
     else
         echo -e "${RED}SONiC Switch ($SWITCH_VM): FAILED${NC}"
     fi
@@ -879,98 +511,9 @@ else
     echo -e "${YELLOW}SONiC Switch ($SWITCH_VM): SKIPPED${NC}"
 fi
 
-# Add deduplicated vulnerability counts to the summary
-if [ $FINAL_SARIF_RESULT -eq 0 ] && [ -f "sarif-reports/trivy-security-scan.sarif" ]; then
-    echo ""
-    echo -e "${GREEN}=== Deduplicated Vulnerability Summary ===${NC}"
-    echo -e "  - Unique Critical vulnerabilities: $DEDUP_CRITICAL"
-    echo -e "  - Unique High vulnerabilities: $DEDUP_HIGH"
-    echo -e "  - Total unique vulnerabilities: $((DEDUP_CRITICAL + DEDUP_HIGH))"
-    echo -e "  - Total instances across all images: $((TOTAL_CRITICAL_VULNS + TOTAL_HIGH_VULNS))"
-    
-    # Add VM-specific unique vulnerability counts
-    echo ""
-    echo -e "${GREEN}=== VM-Specific Unique Vulnerabilities ===${NC}"
-
-    # For Control VM
-    if [ "$RUN_CONTROL" = true ] && [ -f "sarif-reports/trivy-consolidated-${CONTROL_VM}.sarif" ]; then
-        CONTROL_UNIQUE_CRITICAL=$(jq "[.runs[0].tool.driver.rules[]? | select(.properties.tags | contains([\"CRITICAL\"]))] | length" "sarif-reports/trivy-consolidated-${CONTROL_VM}.sarif" 2>/dev/null || echo 0)
-        CONTROL_UNIQUE_HIGH=$(jq "[.runs[0].tool.driver.rules[]? | select(.properties.tags | contains([\"HIGH\"]))] | length" "sarif-reports/trivy-consolidated-${CONTROL_VM}.sarif" 2>/dev/null || echo 0)
-        echo -e "  - Control VM: $CONTROL_UNIQUE_CRITICAL critical, $CONTROL_UNIQUE_HIGH high (total: $((CONTROL_UNIQUE_CRITICAL + CONTROL_UNIQUE_HIGH)))"
-    fi
-
-    # For Gateway VM 
-    if [ "$RUN_GATEWAY" = true ] && [ -f "sarif-reports/trivy-consolidated-${GATEWAY_VM}.sarif" ]; then
-        GATEWAY_UNIQUE_CRITICAL=$(jq "[.runs[0].tool.driver.rules[]? | select(.properties.tags | contains([\"CRITICAL\"]))] | length" "sarif-reports/trivy-consolidated-${GATEWAY_VM}.sarif" 2>/dev/null || echo 0)
-        GATEWAY_UNIQUE_HIGH=$(jq "[.runs[0].tool.driver.rules[]? | select(.properties.tags | contains([\"HIGH\"]))] | length" "sarif-reports/trivy-consolidated-${GATEWAY_VM}.sarif" 2>/dev/null || echo 0)
-        echo -e "  - Gateway VM: $GATEWAY_UNIQUE_CRITICAL critical, $GATEWAY_UNIQUE_HIGH high (total: $((GATEWAY_UNIQUE_CRITICAL + GATEWAY_UNIQUE_HIGH)))"
-    fi
-
-    # For Switch VM
-    if [ "$RUN_SWITCH" = true ] && [ -f "sarif-reports/trivy-consolidated-${SWITCH_VM}.sarif" ]; then
-        SWITCH_UNIQUE_CRITICAL=$(jq "[.runs[0].tool.driver.rules[]? | select(.properties.tags | contains([\"CRITICAL\"]))] | length" "sarif-reports/trivy-consolidated-${SWITCH_VM}.sarif" 2>/dev/null || echo 0)
-        SWITCH_UNIQUE_HIGH=$(jq "[.runs[0].tool.driver.rules[]? | select(.properties.tags | contains([\"HIGH\"]))] | length" "sarif-reports/trivy-consolidated-${SWITCH_VM}.sarif" 2>/dev/null || echo 0)
-        echo -e "  - SONiC Switch: $SWITCH_UNIQUE_CRITICAL critical, $SWITCH_UNIQUE_HIGH high (total: $((SWITCH_UNIQUE_CRITICAL + SWITCH_UNIQUE_HIGH)))"
-    fi
-fi
-
-echo ""
-echo "Results directory: $RESULTS_DIR"
-echo "SARIF directory: sarif-reports"
-echo "Final SARIF report: sarif-reports/trivy-security-scan.sarif"
-echo "VLAB log: $VLAB_LOG"
-
-    if [ ! -z "$GITHUB_STEP_SUMMARY" ] && [ -f "$GITHUB_STEP_SUMMARY" ]; then
-    echo "## Security Scan Summary" >> $GITHUB_STEP_SUMMARY
-    echo "- **Total images scanned:** $TOTAL_IMAGES_SCANNED" >> $GITHUB_STEP_SUMMARY
-
-    if [ $FINAL_SARIF_RESULT -eq 0 ] && [ -f "sarif-reports/trivy-security-scan.sarif" ]; then
-        echo "- **Unique Critical vulnerabilities:** $DEDUP_CRITICAL" >> $GITHUB_STEP_SUMMARY
-        echo "- **Unique High vulnerabilities:** $DEDUP_HIGH" >> $GITHUB_STEP_SUMMARY
-    else
-        echo "- **Total Critical vulnerabilities (raw):** $TOTAL_CRITICAL_VULNS" >> $GITHUB_STEP_SUMMARY
-        echo "- **Total High vulnerabilities (raw):** $TOTAL_HIGH_VULNS" >> $GITHUB_STEP_SUMMARY
-    fi
-
-    echo "" >> $GITHUB_STEP_SUMMARY
-    echo "### VM-Specific Breakdown" >> $GITHUB_STEP_SUMMARY
-
-    if [ "$RUN_CONTROL" = true ]; then
-        echo "- **Control VM container images scanned:** $CONTROL_IMAGES_SCANNED" >> $GITHUB_STEP_SUMMARY
-        echo "  - Critical vulnerabilities: $CONTROL_CRITICAL_VULNS" >> $GITHUB_STEP_SUMMARY
-        echo "  - High vulnerabilities: $CONTROL_HIGH_VULNS" >> $GITHUB_STEP_SUMMARY
-    fi
-
-    if [ "$RUN_GATEWAY" = true ]; then
-        echo "- **Gateway VM container images scanned:** $GATEWAY_IMAGES_SCANNED" >> $GITHUB_STEP_SUMMARY
-        echo "  - Critical vulnerabilities: $GATEWAY_CRITICAL_VULNS" >> $GITHUB_STEP_SUMMARY
-        echo "  - High vulnerabilities: $GATEWAY_HIGH_VULNS" >> $GITHUB_STEP_SUMMARY
-    fi
-
-    if [ "$RUN_SWITCH" = true ]; then
-        echo "- **SONiC Switch container images scanned:** $SWITCH_IMAGES_SCANNED" >> $GITHUB_STEP_SUMMARY
-        echo "  - Critical vulnerabilities: $SWITCH_CRITICAL_VULNS" >> $GITHUB_STEP_SUMMARY
-        echo "  - High vulnerabilities: $SWITCH_HIGH_VULNS" >> $GITHUB_STEP_SUMMARY
-    fi
-
-    echo "" >> $GITHUB_STEP_SUMMARY
-    echo "Check the [Security tab](https://github.com/$GITHUB_REPOSITORY/security) for detailed vulnerability reports." >> $GITHUB_STEP_SUMMARY
-fi
-
-# Set GITHUB_ENV variable for workflow to know where to find the SARIF file
-if [ -f "sarif-reports/trivy-security-scan.sarif" ]; then
-    if [ ! -z "$GITHUB_ENV" ]; then
-        echo "SARIF_FILE=sarif-reports/trivy-security-scan.sarif" >> $GITHUB_ENV
-        echo "UPLOAD_SARIF=true" >> $GITHUB_ENV
-    fi
-fi
-
-# Count unique SARIF files
-VM_SARIF_COUNT=$(find sarif-reports -name "trivy-consolidated-*.sarif" -type f 2>/dev/null | wc -l)
-
 SUCCESS=true
 if [ "$ALLOW_PARTIAL_SUCCESS" = "true" ]; then
-    if [ $VM_SARIF_COUNT -eq 0 ]; then
+    if [ ! -d "$RAW_SARIF_DIR" ] || [ -z "$(find "$RAW_SARIF_DIR" -name "*.sarif" -type f 2>/dev/null)" ]; then
         SUCCESS=false
     fi
 else
@@ -986,12 +529,122 @@ else
 fi
 
 if [ "$SUCCESS" = true ]; then
-    if [ "$RUN_CONTROL" = true ] && [ $CONTROL_RESULT -ne 0 ] || \
-       [ "$RUN_GATEWAY" = true ] && [ $GATEWAY_RESULT -ne 0 ] || \
-       [ "$RUN_SWITCH" = true ] && [ $SWITCH_RESULT -ne 0 ]; then
-        echo -e "${YELLOW}Security scan completed with some errors, but generated usable results${NC}"
+    echo -e "${GREEN}Raw data collection completed successfully${NC}"
+
+    CONSOLIDATOR_SCRIPT="${BASH_SOURCE%/*}/sarif-consolidator.sh"
+    if [ ! -f "$CONSOLIDATOR_SCRIPT" ]; then
+        CONSOLIDATOR_SCRIPT="./sarif-consolidator.sh"
+    fi
+
+    if [ -f "$CONSOLIDATOR_SCRIPT" ]; then
+        echo -e "${YELLOW}Processing and consolidating SARIF files...${NC}"
+        if "$CONSOLIDATOR_SCRIPT" "$RAW_SARIF_DIR" "$RESULTS_DIR"; then
+            echo -e "${GREEN}SARIF processing completed successfully${NC}"
+
+            if [ -f "sarif-reports/trivy-security-scan.sarif" ]; then
+                # Extract vulnerability counts from final SARIF for summary
+                DEDUP_CRITICAL=$(jq '[.runs[0].tool.driver.rules[]? | select(.properties.tags | contains(["CRITICAL"]))] | length' "sarif-reports/trivy-security-scan.sarif" 2>/dev/null || echo 0)
+                DEDUP_HIGH=$(jq '[.runs[0].tool.driver.rules[]? | select(.properties.tags | contains(["HIGH"]))] | length' "sarif-reports/trivy-security-scan.sarif" 2>/dev/null || echo 0)
+
+                # Count raw instances for backwards compatibility
+                TOTAL_CRITICAL_VULNS=$(jq '[.runs[0].results[]? | select(.level == "error" and (.message.text | contains("CRITICAL")))] | length' "sarif-reports/trivy-security-scan.sarif" 2>/dev/null || echo 0)
+                TOTAL_HIGH_VULNS=$(jq '[.runs[0].results[]? | select(.level == "error" and (.message.text | contains("HIGH")))] | length' "sarif-reports/trivy-security-scan.sarif" 2>/dev/null || echo 0)
+
+                # Count images scanned across all VMs and get VM-specific counts
+                TOTAL_IMAGES_SCANNED=0
+                declare -A VM_IMAGES_SCANNED VM_CRITICAL_VULNS VM_HIGH_VULNS
+
+                for results_subdir in "$RESULTS_DIR"/*; do
+                    if [ -f "$results_subdir/container_images.txt" ]; then
+                        vm_name=$(basename "$results_subdir")
+                        vm_image_count=$(wc -l < "$results_subdir/container_images.txt" 2>/dev/null || echo 0)
+                        TOTAL_IMAGES_SCANNED=$((TOTAL_IMAGES_SCANNED + vm_image_count))
+                        VM_IMAGES_SCANNED["$vm_name"]=$vm_image_count
+
+                        # Extract VM-specific vulnerability counts from consolidated SARIF
+                        vm_sarif="sarif-reports/trivy-consolidated-${vm_name}.sarif"
+                        if [ -f "$vm_sarif" ]; then
+                            VM_CRITICAL_VULNS["$vm_name"]=$(jq '[.runs[0].results[]? | select(.level == "error" and (.message.text | contains("CRITICAL")))] | length' "$vm_sarif" 2>/dev/null || echo 0)
+                            VM_HIGH_VULNS["$vm_name"]=$(jq '[.runs[0].results[]? | select(.level == "error" and (.message.text | contains("HIGH")))] | length' "$vm_sarif" 2>/dev/null || echo 0)
+                        else
+                            VM_CRITICAL_VULNS["$vm_name"]=0
+                            VM_HIGH_VULNS["$vm_name"]=0
+                        fi
+                    fi
+                done
+
+                echo ""
+                echo -e "${GREEN}=== Security Scan Summary ===${NC}"
+                echo "Total images scanned: $TOTAL_IMAGES_SCANNED"
+                echo "Unique Critical vulnerabilities: $DEDUP_CRITICAL"
+                echo "Unique High vulnerabilities: $DEDUP_HIGH"
+                echo "Total vulnerability instances: $((TOTAL_CRITICAL_VULNS + TOTAL_HIGH_VULNS))"
+                echo ""
+                echo -e "${GREEN}=== VM-Specific Breakdown ===${NC}"
+
+                # Add VM-specific details to console output
+                for vm_name in "${!VM_IMAGES_SCANNED[@]}"; do
+                    vm_display_name=""
+                    case "$vm_name" in
+                        control-*) vm_display_name="Control VM" ;;
+                        gateway-*) vm_display_name="Gateway VM" ;;
+                        leaf-*|*switch*) vm_display_name="SONiC Switch" ;;
+                        *) vm_display_name="$vm_name" ;;
+                    esac
+
+                    echo "${vm_display_name} container images scanned: ${VM_IMAGES_SCANNED[$vm_name]}"
+                    echo "  - Critical vulnerabilities: ${VM_CRITICAL_VULNS[$vm_name]}"
+                    echo "  - High vulnerabilities: ${VM_HIGH_VULNS[$vm_name]}"
+                done
+
+                # GitHub Actions integration
+                if [ ! -z "$GITHUB_STEP_SUMMARY" ] && [ -f "$GITHUB_STEP_SUMMARY" ]; then
+                    echo "## Security Scan Summary" >> "$GITHUB_STEP_SUMMARY"
+                    echo "- **Total images scanned:** $TOTAL_IMAGES_SCANNED" >> "$GITHUB_STEP_SUMMARY"
+                    echo "- **Unique Critical vulnerabilities:** $DEDUP_CRITICAL" >> "$GITHUB_STEP_SUMMARY"
+                    echo "- **Unique High vulnerabilities:** $DEDUP_HIGH" >> "$GITHUB_STEP_SUMMARY"
+                    echo "- **Total vulnerability instances:** $((TOTAL_CRITICAL_VULNS + TOTAL_HIGH_VULNS))" >> "$GITHUB_STEP_SUMMARY"
+                    echo "" >> "$GITHUB_STEP_SUMMARY"
+                    echo "### VM-Specific Breakdown" >> "$GITHUB_STEP_SUMMARY"
+
+                    # Add VM-specific details
+                    for vm_name in "${!VM_IMAGES_SCANNED[@]}"; do
+                        vm_display_name=""
+                        case "$vm_name" in
+                            control-*) vm_display_name="Control VM" ;;
+                            gateway-*) vm_display_name="Gateway VM" ;;
+                            leaf-*|*switch*) vm_display_name="SONiC Switch" ;;
+                            *) vm_display_name="$vm_name" ;;
+                        esac
+
+                        echo "- **${vm_display_name} container images scanned:** ${VM_IMAGES_SCANNED[$vm_name]}" >> "$GITHUB_STEP_SUMMARY"
+                        echo "  - Critical vulnerabilities: ${VM_CRITICAL_VULNS[$vm_name]}" >> "$GITHUB_STEP_SUMMARY"
+                        echo "  - High vulnerabilities: ${VM_HIGH_VULNS[$vm_name]}" >> "$GITHUB_STEP_SUMMARY"
+                    done
+
+                    echo "" >> "$GITHUB_STEP_SUMMARY"
+                    echo "Check the [Security tab](https://github.com/$GITHUB_REPOSITORY/security) for detailed vulnerability reports." >> "$GITHUB_STEP_SUMMARY"
+                fi
+
+                if [ ! -z "$GITHUB_ENV" ]; then
+                    echo "SARIF_FILE=sarif-reports/trivy-security-scan.sarif" >> "$GITHUB_ENV"
+                    echo "UPLOAD_SARIF=true" >> "$GITHUB_ENV"
+                fi
+            fi
+
+            echo ""
+            echo "Results directory: $RESULTS_DIR"
+            echo "SARIF directory: sarif-reports"
+            echo "Final SARIF report: sarif-reports/trivy-security-scan.sarif"
+            echo "VLAB log: $VLAB_LOG"
+
+        else
+            echo -e "${RED}SARIF processing failed${NC}"
+            exit 1
+        fi
     else
-        echo -e "${GREEN}Security scan completed successfully${NC}"
+        echo -e "${YELLOW}SARIF consolidator not found at $CONSOLIDATOR_SCRIPT${NC}"
+        echo -e "${YELLOW}Run sarif-consolidator.sh manually to process SARIF files${NC}"
     fi
 
     if [ "$SKIP_VLAB_LAUNCH" = false ]; then
@@ -999,14 +652,8 @@ if [ "$SUCCESS" = true ]; then
     else
         echo -e "${YELLOW}External VLAB will remain running (not managed by this script)${NC}"
     fi
-    if [ "$RUN_GATEWAY" = true ]; then
-        echo -e "${YELLOW}To manually update Gateway VM: Upload and run trivy-setup-airgapped.sh${NC}"
-    fi
-    if [ "$RUN_SWITCH" = true ]; then
-        echo -e "${YELLOW}To manually update SONiC Switch: Upload and run trivy-setup-sonic-airgapped.sh${NC}"
-    fi
     exit 0
 else
-    echo -e "${RED}Security scan failed completely - no usable results generated${NC}"
+    echo -e "${RED}Raw data collection failed${NC}"
     exit 1
 fi
