@@ -58,6 +58,7 @@ var Versions = fabapi.Versions{
 			switchprofile.DellS5232FON.Spec.Platform:         "v0.1.0",
 			switchprofile.DellS5248FON.Spec.Platform:         "v0.1.0",
 			switchprofile.DellZ9332FON.Spec.Platform:         "v0.1.0",
+			switchprofile.CelesticaDS2000.Spec.Platform:      "v0.4.0",
 			switchprofile.CelesticaDS3000.Spec.Platform:      "v0.1.0",
 			switchprofile.CelesticaDS4000.Spec.Platform:      "v0.1.0",
 			switchprofile.CelesticaDS4101.Spec.Platform:      "v0.2.0",
