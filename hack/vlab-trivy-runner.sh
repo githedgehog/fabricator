@@ -248,7 +248,7 @@ if [ "$RUN_GATEWAY" = true ]; then
     fi
 fi
 
-    if [ "$RUN_SWITCH" = true ]; then
+if [ "$RUN_SWITCH" = true ]; then
     echo "Testing SSH to $SWITCH_VM..."
     if $HHFAB_BIN vlab ssh -b -n "$SWITCH_VM" -- 'echo "SSH works"' >/dev/null 2>&1; then
         echo -e "${GREEN}SSH to $SWITCH_VM: SUCCESS${NC}"
@@ -353,7 +353,19 @@ extract_container_name() {
     # "172.30.0.1:31000/githedgehog/fabricator/reloader:v1.0.40" -> "reloader"
     # "registry/org/repo/service:tag" -> "service"
     # "service:tag" -> "service"
-    echo "$image_name" | sed -E 's|.*/([^/]+):.*|\1|' | sed -E 's|:.*||'
+    # Also handle airgapped export file patterns
+
+    if [[ "$image_name" == *"/tmp/trivy-export-$/"* ]]; then
+        local filename=$(basename "$image_name" .tar)
+        local parts=(${filename//_/ })
+        if [ ${#parts[@]} -gt 2 ]; then
+            echo "${parts[2]}"
+        else
+            echo "${parts[1]}"
+        fi
+    else
+        echo "$image_name" | sed -E 's|.*/([^/]+):.*|\1|' | sed -E 's|:.*||'
+    fi
 }
 
 # Function to scan VM with native SARIF output
@@ -406,6 +418,14 @@ scan_vm() {
     else
         echo "Getting image list for SARIF generation..."
         IMAGES=$($HHFAB_BIN vlab ssh -b -n "$vm_name" -- 'sudo crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock images | grep -v IMAGE | grep -v pause | awk "{print \$1\":\"\$2}"' | sort -u || echo "")
+    fi
+
+    if [ "$vm_type" = "gateway" ] || [ "$vm_type" = "switch" ]; then
+        IMAGE_MAPPING=$($HHFAB_BIN vlab ssh -b -n "$vm_name" -- 'cat /var/lib/trivy/image-mapping.json 2>/dev/null' || echo "{}")
+        if [ "$IMAGE_MAPPING" != "{}" ]; then
+            echo "Using original image names from mapping file"
+            IMAGES=$(echo "$IMAGE_MAPPING" | jq -r 'keys[]' 2>/dev/null || echo "$IMAGES")
+        fi
     fi
 
     readarray -t image_array <<< "$IMAGES"
@@ -504,9 +524,129 @@ scan_vm() {
             registry_repo="${HHFAB_REG_REPO:-127.0.0.1:30000}"
 
             # Create image to container mapping
-            image_to_container_json=$(printf '%s\n' "${image_array[@]}" | jq -R . | jq -s 'map({key: ., value: (. | gsub(".*/([^/]+):.*"; "\\1") | gsub(":.*"; ""))}) | from_entries')
+            image_to_container_json=$(printf '%s\n' "${image_array[@]}" | jq -R . | jq -s '
+            map(
+              . as $image |
+              {
+                key: $image,
+                value: (
+                  $image | split("/") | last | split(":") | .[0]
+                )
+              }
+            ) | from_entries')
 
-            # Enhanced jq processing with proper per-vulnerability container mapping
+            # Create a simplified JQ processing script as a separate file
+            JQ_SCRIPT=$(mktemp)
+            cat <<EOT > "$JQ_SCRIPT"
+# Function to extract container name from image name
+def extract_container_name(image_name):
+  image_name | split("/") | last | split(":") | .[0];
+
+# Function to find container name from artifact URI
+def find_container_from_artifact(artifact_uri; image_mapping):
+  artifact_uri as \$uri |
+  (image_mapping | keys[]) as \$image |
+  if (\$uri | contains(extract_container_name(\$image))) then
+    image_mapping[\$image]
+  else
+    null
+  end // "unknown";
+
+# Function to extract image name from SARIF result properties or artifact location
+def extract_image_from_result(result; image_mapping):
+  if result.properties.imageName then
+    result.properties.imageName
+  elif result.properties.image then
+    result.properties.image
+  elif result.locations[0].physicalLocation.artifactLocation.uri then
+    result.locations[0].physicalLocation.artifactLocation.uri as \$uri |
+    (image_mapping | keys[]) as \$image |
+    if (\$uri | contains(extract_container_name(\$image))) then
+      \$image
+    else
+      null
+    end
+  else
+    null
+  end;
+
+# Add metadata to SARIF file
+.runs[0].properties = {
+  vmContext: {
+    name: \$vm_name,
+    type: (if (\$vm_name | startswith("control")) then "control" elif (\$vm_name | startswith("gateway")) then "gateway" elif (\$vm_name | startswith("leaf")) then "switch" else "unknown" end),
+    scanTimestamp: \$scan_time,
+    environment: "vlab",
+    scanMode: \$scan_mode,
+    totalContainerImages: (\$container_images | length)
+  },
+  containerContext: {
+    scannedImages: \$container_images,
+    registry: \$registry_repo,
+    containerMapping: \$image_to_container,
+    aggregatedVulnerabilities: {
+      critical: (\$total_critical | tonumber),
+      high: (\$total_high | tonumber),
+      medium: (\$total_medium | tonumber),
+      low: (\$total_low | tonumber),
+      total: ((\$total_critical | tonumber) + (\$total_high | tonumber) + (\$total_medium | tonumber) + (\$total_low | tonumber))
+    }
+  },
+  deploymentContext: {
+    deploymentId: \$deployment_id,
+    commitSha: \$commit_sha,
+    repository: \$repo,
+    triggeredBy: \$actor,
+    workflowRun: ("https://github.com/" + \$repo + "/actions/runs/" + \$deployment_id)
+  },
+  scanMetadata: {
+    tool: "trivy",
+    category: ("vm-container-runtime-scan-" + \$scan_mode),
+    scanScope: "production-deployment",
+    consolidatedReport: true,
+    imageCount: (\$container_images | length)
+  }
+} |
+.runs[0].tool.driver.informationUri = ("https://github.com/" + \$repo + "/security") |
+
+# Process each result
+.runs[0].results[] |= (
+  . as \$result |
+  (extract_image_from_result(\$result; \$image_to_container) // (\$container_images[0] // "unknown")) as \$source_image |
+  (\$image_to_container[\$source_image] // extract_container_name(\$source_image)) as \$container_name |
+
+  # Process locations - preserve binary info unless it duplicates container name
+  .locations[] |= (
+    .physicalLocation.artifactLocation.uri as \$original_uri |
+
+    if (\$original_uri == null or \$original_uri == "" or \$original_uri == "file:///" or
+        \$original_uri | test("/tmp/trivy") or
+        \$original_uri | endswith(".tar") or
+        (\$original_uri | split("/") | last) == \$container_name) then
+      # Use 2-level path if no binary info or binary duplicates container name
+      .physicalLocation.artifactLocation.uri = (\$vm_name + "/" + \$container_name)
+    else
+      # Use 3-level path with binary name otherwise
+      .physicalLocation.artifactLocation.uri = (\$vm_name + "/" + \$container_name + "/" + (\$original_uri | split("/") | last))
+    end
+  ) |
+
+  # Update message text
+  .message.text = ("[" + \$vm_name + "/" + \$container_name + "] " + .message.text) |
+
+  # Add properties
+  .properties = (.properties // {}) + {
+    vmName: \$vm_name,
+    containerName: \$container_name,
+    sourceImage: \$source_image,
+    vmType: (if (\$vm_name | startswith("control")) then "control" elif (\$vm_name | startswith("gateway")) then "gateway" elif (\$vm_name | startswith("leaf")) then "switch" else "unknown" end),
+    scanContext: ("runtime-deployment-" + \$scan_mode),
+    artifactPath: (\$vm_name + "/" + \$container_name)
+  }
+)
+EOT
+
+            # Run the JQ script from the file instead of inline
             jq --arg vm_name "$vm_name" \
                --arg scan_time "$(date -Iseconds)" \
                --arg deployment_id "$deployment_id" \
@@ -521,107 +661,10 @@ scan_vm() {
                --arg scan_mode "$scan_mode" \
                --argjson container_images "$containers_json" \
                --argjson image_to_container "$image_to_container_json" \
-               '
-               # Function to extract container name from image name
-               def extract_container_name(image_name):
-                 image_name | gsub(".*/([^/]+):.*"; "\\1") | gsub(":.*"; "");
+               -f "$JQ_SCRIPT" "$consolidated_sarif" > "${consolidated_sarif}.enhanced"
 
-               # Function to find container name from artifact URI
-               def find_container_from_artifact(artifact_uri; image_mapping):
-                 # Try to find matching image from the artifact path or filename
-                 artifact_uri as $uri |
-                 (image_mapping | keys[]) as $image |
-                 if ($uri | contains(extract_container_name($image))) then
-                   image_mapping[$image]
-                 else
-                   null
-                 end // "unknown";
-
-               # Function to extract image name from SARIF result properties or artifact location
-               def extract_image_from_result(result; image_mapping):
-                 # Try to get image from result properties first
-                 if result.properties.image then
-                   result.properties.image
-                 # Try to infer from artifact location
-                 elif result.locations[0].physicalLocation.artifactLocation.uri then
-                   result.locations[0].physicalLocation.artifactLocation.uri as $uri |
-                   (image_mapping | keys[]) as $image |
-                   if ($uri | contains(extract_container_name($image))) then
-                     $image
-                   else
-                     null
-                   end
-                 else
-                   null
-                 end;
-
-               .runs[0].properties = {
-                 vmContext: {
-                   name: $vm_name,
-                   type: (if ($vm_name | startswith("control")) then "control" elif ($vm_name | startswith("gateway")) then "gateway" elif ($vm_name | startswith("leaf")) then "switch" else "unknown" end),
-                   scanTimestamp: $scan_time,
-                   environment: "vlab",
-                   scanMode: $scan_mode,
-                   totalContainerImages: ($container_images | length)
-                 },
-                 containerContext: {
-                   scannedImages: $container_images,
-                   registry: $registry_repo,
-                   containerMapping: $image_to_container,
-                   aggregatedVulnerabilities: {
-                     critical: ($total_critical | tonumber),
-                     high: ($total_high | tonumber),
-                     medium: ($total_medium | tonumber),
-                     low: ($total_low | tonumber),
-                     total: (($total_critical | tonumber) + ($total_high | tonumber) + ($total_medium | tonumber) + ($total_low | tonumber))
-                   }
-                 },
-                 deploymentContext: {
-                   deploymentId: $deployment_id,
-                   commitSha: $commit_sha,
-                   repository: $repo,
-                   triggeredBy: $actor,
-                   workflowRun: ("https://github.com/" + $repo + "/actions/runs/" + $deployment_id)
-                 },
-                 scanMetadata: {
-                   tool: "trivy",
-                   category: ("vm-container-runtime-scan-" + $scan_mode),
-                   scanScope: "production-deployment",
-                   consolidatedReport: true,
-                   imageCount: ($container_images | length)
-                 }
-               } |
-               .runs[0].tool.driver.informationUri = ("https://github.com/" + $repo + "/security") |
-
-               # Fix artifact location paths and map to correct containers per vulnerability
-               .runs[0].results[] |= (
-                 # Extract the source image for this specific vulnerability
-                 . as $result |
-                 (extract_image_from_result($result; $image_to_container) // ($container_images[0] // "unknown")) as $source_image |
-                 ($image_to_container[$source_image] // extract_container_name($source_image)) as $container_name |
-
-                 .locations[] |= (
-                   # Get original artifact URI (binary name)
-                   .physicalLocation.artifactLocation.uri as $original_uri |
-
-                   # Update the artifact location to include VM and correct container name
-                   .physicalLocation.artifactLocation.uri = ($vm_name + "/" + $container_name + "/" + $original_uri)
-                 ) |
-
-                 # Update message text to include correct container context
-                 .message.text = ("[" + $vm_name + "/" + $container_name + "] " + .message.text) |
-
-                 # Add container properties to each result with correct container name
-                 .properties = (.properties // {}) + {
-                   vmName: $vm_name,
-                   containerName: $container_name,
-                   sourceImage: $source_image,
-                   vmType: (if ($vm_name | startswith("control")) then "control" elif ($vm_name | startswith("gateway")) then "gateway" elif ($vm_name | startswith("leaf")) then "switch" else "unknown" end),
-                   scanContext: ("runtime-deployment-" + $scan_mode),
-                   artifactPath: ($vm_name + "/" + $container_name)
-                 }
-               )
-               ' "$consolidated_sarif" > "${consolidated_sarif}.enhanced"
+            # Remove the temporary JQ script
+            rm -f "$JQ_SCRIPT"
 
             # Check if enhancement succeeded
             if [ -s "${consolidated_sarif}.enhanced" ] && jq empty "${consolidated_sarif}.enhanced" 2>/dev/null; then
@@ -761,30 +804,37 @@ create_final_sarif_report() {
     else
         echo "Merging ${#sarif_files[@]} SARIF files..."
 
-        # Safe merge preserving all vulnerability instances
-        jq -s '
-            # Use first file as base
-            .[0] as $base |
+        # Create a simplified JQ script for merging as a separate file
+        JQ_MERGE_SCRIPT=$(mktemp)
+        cat <<EOT > "$JQ_MERGE_SCRIPT"
+# Use first file as base
+.[0] as \$base |
 
-            # Safely extract results from each file
-            (.[0].runs[0].results // []) as $results1 |
-            (if (. | length) > 1 then (.[1].runs[0].results // []) else [] end) as $results2 |
-            (if (. | length) > 2 then (.[2].runs[0].results // []) else [] end) as $results3 |
+# Safely extract results from each file
+(.[0].runs[0].results // []) as \$results1 |
+(if (. | length) > 1 then (.[1].runs[0].results // []) else [] end) as \$results2 |
+(if (. | length) > 2 then (.[2].runs[0].results // []) else [] end) as \$results3 |
 
-            # Safely extract rules from each file
-            (.[0].runs[0].tool.driver.rules // []) as $rules1 |
-            (if (. | length) > 1 then (.[1].runs[0].tool.driver.rules // []) else [] end) as $rules2 |
-            (if (. | length) > 2 then (.[2].runs[0].tool.driver.rules // []) else [] end) as $rules3 |
+# Safely extract rules from each file
+(.[0].runs[0].tool.driver.rules // []) as \$rules1 |
+(if (. | length) > 1 then (.[1].runs[0].tool.driver.rules // []) else [] end) as \$rules2 |
+(if (. | length) > 2 then (.[2].runs[0].tool.driver.rules // []) else [] end) as \$rules3 |
 
-            # Combine arrays safely
-            ($results1 + $results2 + $results3) as $all_results |
-            ($rules1 + $rules2 + $rules3 | unique_by(.id)) as $all_rules |
+# Combine arrays safely
+(\$results1 + \$results2 + \$results3) as \$all_results |
+(\$rules1 + \$rules2 + \$rules3 | unique_by(.id)) as \$all_rules |
 
-            # Build final structure
-            $base |
-            .runs[0].tool.driver.rules = $all_rules |
-            .runs[0].results = $all_results
-        ' "${sarif_files[@]}" > "$final_sarif"
+# Build final structure
+\$base |
+.runs[0].tool.driver.rules = \$all_rules |
+.runs[0].results = \$all_results
+EOT
+
+        # Run the JQ merge script from the file
+        jq -s -f "$JQ_MERGE_SCRIPT" "${sarif_files[@]}" > "$final_sarif"
+
+        # Remove the temporary JQ script
+        rm -f "$JQ_MERGE_SCRIPT"
     fi
 
     # Check the result
@@ -818,27 +868,34 @@ create_final_sarif_report() {
         DEDUP_HIGH=0
     fi
 
+    # Create a JQ script for updating metadata
+    JQ_UPDATE_SCRIPT=$(mktemp)
+    cat <<EOT > "$JQ_UPDATE_SCRIPT"
+# Ensure properties structure exists
+.runs[0].properties = (.runs[0].properties // {}) |
+.runs[0].properties.aggregatedVulnerabilities = {
+    critical: (\$critical | tonumber),
+    high: (\$high | tonumber),
+    medium: 0,
+    low: 0,
+    total: ((\$critical | tonumber) + (\$high | tonumber)),
+    totalIssues: (\$total_results | tonumber)
+} |
+.runs[0].properties.scanMetadata = (.runs[0].properties.scanMetadata // {} | . + {
+    deduplicationStrategy: "unique_by_rule_id",
+    preservesAllLocations: true,
+    processingSuccessful: true
+})
+EOT
+
     # Update the SARIF file with the correct counts
     jq --arg critical "$DEDUP_CRITICAL" \
        --arg high "$DEDUP_HIGH" \
        --arg total_results "$total_results" \
-    '
-    # Ensure properties structure exists
-    .runs[0].properties = (.runs[0].properties // {}) |
-    .runs[0].properties.aggregatedVulnerabilities = {
-        critical: ($critical | tonumber),
-        high: ($high | tonumber),
-        medium: 0,
-        low: 0,
-        total: (($critical | tonumber) + ($high | tonumber)),
-        totalIssues: ($total_results | tonumber)
-    } |
-    .runs[0].properties.scanMetadata = (.runs[0].properties.scanMetadata // {} | . + {
-        deduplicationStrategy: "unique_by_rule_id",
-        preservesAllLocations: true,
-        processingSuccessful: true
-    })
-    ' "$final_sarif" > "${final_sarif}.updated" 2>/dev/null
+       -f "$JQ_UPDATE_SCRIPT" "$final_sarif" > "${final_sarif}.updated"
+
+    # Remove the temporary JQ script
+    rm -f "$JQ_UPDATE_SCRIPT"
 
     if [ -f "${final_sarif}.updated" ]; then
         mv "${final_sarif}.updated" "$final_sarif"
@@ -912,7 +969,7 @@ if [ $FINAL_SARIF_RESULT -eq 0 ] && [ -f "sarif-reports/trivy-security-scan.sari
     echo -e "  - Unique High vulnerabilities: $DEDUP_HIGH"
     echo -e "  - Total unique vulnerabilities: $((DEDUP_CRITICAL + DEDUP_HIGH))"
     echo -e "  - Total instances across all images: $((TOTAL_CRITICAL_VULNS + TOTAL_HIGH_VULNS))"
-    
+
     # Add VM-specific unique vulnerability counts
     echo ""
     echo -e "${GREEN}=== VM-Specific Unique Vulnerabilities ===${NC}"
@@ -924,7 +981,7 @@ if [ $FINAL_SARIF_RESULT -eq 0 ] && [ -f "sarif-reports/trivy-security-scan.sari
         echo -e "  - Control VM: $CONTROL_UNIQUE_CRITICAL critical, $CONTROL_UNIQUE_HIGH high (total: $((CONTROL_UNIQUE_CRITICAL + CONTROL_UNIQUE_HIGH)))"
     fi
 
-    # For Gateway VM 
+    # For Gateway VM
     if [ "$RUN_GATEWAY" = true ] && [ -f "sarif-reports/trivy-consolidated-${GATEWAY_VM}.sarif" ]; then
         GATEWAY_UNIQUE_CRITICAL=$(jq "[.runs[0].tool.driver.rules[]? | select(.properties.tags | contains([\"CRITICAL\"]))] | length" "sarif-reports/trivy-consolidated-${GATEWAY_VM}.sarif" 2>/dev/null || echo 0)
         GATEWAY_UNIQUE_HIGH=$(jq "[.runs[0].tool.driver.rules[]? | select(.properties.tags | contains([\"HIGH\"]))] | length" "sarif-reports/trivy-consolidated-${GATEWAY_VM}.sarif" 2>/dev/null || echo 0)
@@ -945,7 +1002,7 @@ echo "SARIF directory: sarif-reports"
 echo "Final SARIF report: sarif-reports/trivy-security-scan.sarif"
 echo "VLAB log: $VLAB_LOG"
 
-    if [ ! -z "$GITHUB_STEP_SUMMARY" ] && [ -f "$GITHUB_STEP_SUMMARY" ]; then
+if [ ! -z "$GITHUB_STEP_SUMMARY" ] && [ -f "$GITHUB_STEP_SUMMARY" ]; then
     echo "## Security Scan Summary" >> $GITHUB_STEP_SUMMARY
     echo "- **Total images scanned:** $TOTAL_IMAGES_SCANNED" >> $GITHUB_STEP_SUMMARY
 
