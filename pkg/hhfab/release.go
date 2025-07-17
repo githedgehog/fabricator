@@ -64,6 +64,11 @@ var AllZeroPrefix = []string{"0.0.0.0/0"}
 // options in the test context
 func (testCtx *VPCPeeringTestCtx) setupTest(ctx context.Context) error {
 	if testCtx.noSetup {
+		// nothing to setup, but we still want to wait for the switches to be ready
+		if err := WaitSwitchesReady(ctx, testCtx.kube, 0, 5*time.Minute); err != nil {
+			return fmt.Errorf("waiting for switches to be ready: %w", err)
+		}
+
 		return nil
 	}
 	if err := hhfctl.VPCWipeWithClient(ctx, testCtx.kube); err != nil {
@@ -1539,6 +1544,35 @@ func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (bool, []Re
 	return false, reverts, nil
 }
 
+func setRoCE(ctx context.Context, kube kclient.Client, swName string, roce bool) error {
+	sw := &wiringapi.Switch{}
+	if err := kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: swName}, sw); err != nil {
+		return fmt.Errorf("getting switch %s: %w", swName, err)
+	}
+	if sw.Spec.RoCE == roce {
+		slog.Debug("RoCE already in the desired state", "switch", swName, "desiredState", roce)
+
+		return nil
+	}
+	slog.Debug("Changing RoCE state on switch", "switch", swName, "desiredState", roce)
+	currGen, getGenErr := getAgentGen(ctx, kube, swName)
+	if getGenErr != nil {
+		return getGenErr
+	}
+	sw.Spec.RoCE = roce
+	if err := kube.Update(ctx, sw); err != nil {
+		return fmt.Errorf("updating switch %s to set RoCE state: %w", swName, err)
+	}
+	slog.Debug("Waiting for switch to reboot after changing desired RoCE state", "switch", swName, "desiredState", roce)
+	time.Sleep(6 * time.Minute) // wait for the switch to reboot and apply the changes
+	if err := waitAgentGen(ctx, kube, swName, currGen); err != nil {
+		return fmt.Errorf("waiting for agent generation after changing desired RoCE state: %w", err)
+	}
+	slog.Debug("Switch rebooted and RoCE state changed", "switch", swName, "desiredState", roce)
+
+	return nil
+}
+
 func (testCtx *VPCPeeringTestCtx) roceBasicTest(ctx context.Context) (bool, []RevertFunc, error) {
 	// this should never fail
 	if len(testCtx.roceLeaves) == 0 {
@@ -1552,25 +1586,8 @@ func (testCtx *VPCPeeringTestCtx) roceBasicTest(ctx context.Context) (bool, []Re
 		return false, nil, fmt.Errorf("getting switch %s: %w", swName, err)
 	}
 	// enable RoCE on the switch if not already enabled
-	if !sw.Spec.RoCE {
-		slog.Debug("Enabling RoCE on switch", "switch", swName)
-		currGen, getGenErr := getAgentGen(ctx, testCtx.kube, swName)
-		if getGenErr != nil {
-			return false, nil, getGenErr
-		}
-		sw.Spec.RoCE = true
-		if err := testCtx.kube.Update(ctx, sw); err != nil {
-			return false, nil, fmt.Errorf("updating switch %s to enable RoCE: %w", swName, err)
-		}
-		// do we need to revert? for now I won't
-		slog.Debug("Waiting for switch to reboot after enabling RoCE", "switch", swName)
-		time.Sleep(6 * time.Minute) // wait for the switch to reboot and apply the changes
-		if err := waitAgentGen(ctx, testCtx.kube, swName, currGen); err != nil {
-			return false, nil, fmt.Errorf("waiting for agent generation after enabling RoCE: %w", err)
-		}
-		slog.Debug("Switch rebooted and RoCE enabled", "switch", swName)
-	} else {
-		slog.Debug("RoCE already enabled on switch", "switch", swName)
+	if err := setRoCE(ctx, testCtx.kube, swName, true); err != nil {
+		return false, nil, fmt.Errorf("enabling RoCE on switch %s: %w", swName, err)
 	}
 
 	dscpOpts := testCtx.tcOpts
@@ -1735,7 +1752,11 @@ func (testCtx *VPCPeeringTestCtx) breakoutTest(ctx context.Context) (bool, []Rev
 	g := &errgroup.Group{}
 	for _, agent := range agents.Items {
 		g.Go(func() error {
-			// for each switch, get which ports are used
+			// first of all, disable RoCE if it is enabled, as breakout operations are forbidden while RoCE is enabled
+			if err := setRoCE(ctx, testCtx.kube, agent.Name, false); err != nil {
+				return fmt.Errorf("disabling RoCE on switch %s: %w", agent.Name, err)
+			}
+			// get which ports are used on this switch
 			conns := &wiringapi.ConnectionList{}
 			if err := testCtx.kube.List(ctx, conns, kclient.MatchingLabels{
 				wiringapi.ListLabelSwitch(agent.Name): wiringapi.ListLabelValue,
@@ -1743,7 +1764,7 @@ func (testCtx *VPCPeeringTestCtx) breakoutTest(ctx context.Context) (bool, []Rev
 				return fmt.Errorf("listing connections for switch %s: %w", agent.Name, err)
 			}
 
-			usedPorts := make(map[string]bool, 0)
+			usedPorts := make(map[string]bool, len(conns.Items))
 			for _, conn := range conns.Items {
 				_, _, connPorts, _, err := conn.Spec.Endpoints()
 				if err != nil {
@@ -1755,6 +1776,10 @@ func (testCtx *VPCPeeringTestCtx) breakoutTest(ctx context.Context) (bool, []Rev
 					}
 
 					portName := strings.SplitN(connPort, "/", 2)[1]
+					if strings.Count(portName, "/") == 2 {
+						breakoutName := portName[:strings.LastIndex(portName, "/")]
+						usedPorts[breakoutName] = true
+					}
 					usedPorts[portName] = true
 				}
 			}
@@ -1823,6 +1848,10 @@ func (testCtx *VPCPeeringTestCtx) breakoutTest(ctx context.Context) (bool, []Rev
 			if currMode == defaultBreakouts[unusedPort] {
 				slog.Debug("Unused port is in default breakout mode, setting it to target mode", "port", unusedPort, "switch", agent.Name, "defaultMode", defaultBreakouts[unusedPort], "targetMode", targetMode)
 				if err := setPortBreakout(ctx, testCtx.kube, agent.Name, unusedPort, targetMode, true); err != nil {
+					// revert change anyway
+					slog.Debug("Setting breakout mode failed, reverting to default", "port", unusedPort, "switch", agent.Name, "defaultMode", defaultBreakouts[unusedPort])
+					_ = setPortBreakout(ctx, testCtx.kube, agent.Name, unusedPort, defaultBreakouts[unusedPort], false)
+
 					return fmt.Errorf("setting breakout mode for port %s on switch %s: %w", unusedPort, agent.Name, err)
 				}
 				currMode = targetMode
@@ -2441,6 +2470,14 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 		}
 	}
 
+	noVpcTestCtx := makeTestCtx(kube, opts, workDir, cacheDir, true, rtOtps, roceLeaves)
+	noVpcTestCtx.noSetup = true
+	noVpcSuite := makeNoVpcsSuiteRun(noVpcTestCtx)
+	noVpcResults, err := selectAndRunSuite(ctx, noVpcTestCtx, noVpcSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
+	if err != nil && rtOtps.FailFast {
+		return fmt.Errorf("running no VPC suite: %w", err)
+	}
+
 	singleVpcTestCtx := makeTestCtx(kube, opts, workDir, cacheDir, false, rtOtps, roceLeaves)
 	singleVpcSuite := makeVpcPeeringsSingleVPCSuite(singleVpcTestCtx)
 	singleVpcResults, err := selectAndRunSuite(ctx, singleVpcTestCtx, singleVpcSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
@@ -2464,19 +2501,11 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 		return fmt.Errorf("running basic VPC suite: %w", err)
 	}
 
-	noVpcTestCtx := makeTestCtx(kube, opts, workDir, cacheDir, true, rtOtps, roceLeaves)
-	noVpcTestCtx.noSetup = true
-	noVpcSuite := makeNoVpcsSuiteRun(noVpcTestCtx)
-	noVpcResults, err := selectAndRunSuite(ctx, noVpcTestCtx, noVpcSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
-	if err != nil && rtOtps.FailFast {
-		return fmt.Errorf("running no VPC suite: %w", err)
-	}
-
 	slog.Info("*** Recap of the test results ***")
+	printSuiteResults(noVpcResults)
 	printSuiteResults(singleVpcResults)
 	printSuiteResults(multiVpcResults)
 	printSuiteResults(basicResults)
-	printSuiteResults(noVpcResults)
 
 	if rtOtps.ResultsFile != "" {
 		report := JUnitReport{
