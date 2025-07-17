@@ -23,6 +23,7 @@ import (
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/hhfctl"
 	"go.githedgehog.com/fabric/pkg/util/pointer"
+	"golang.org/x/sync/errgroup"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -1620,6 +1621,41 @@ func (testCtx *VPCPeeringTestCtx) roceBasicTest(ctx context.Context) (bool, []Re
 	return false, nil, nil
 }
 
+// single-switch, dumbed down (no update as we don't need it here) version of WaitSwitchesReady
+func waitSwitchReady(ctx context.Context, kube kclient.Client, swName string, appliedFor time.Duration, timeout time.Duration) error {
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+
+	for {
+		ag := &agentapi.Agent{}
+		ready := false
+		err := kube.Get(ctx, kclient.ObjectKey{Name: swName, Namespace: "default"}, ag)
+		if err != nil {
+			return fmt.Errorf("getting agent %q: %w", swName, err)
+		}
+		ready = ag.Status.LastAppliedGen == ag.Generation
+		ready = ready && time.Since(ag.Status.LastHeartbeat.Time) < 1*time.Minute
+		if appliedFor > 0 {
+			ready = ready && time.Since(ag.Status.LastAppliedTime.Time) >= appliedFor
+		}
+
+		if ready {
+			slog.Debug("Switch is ready", "switch", swName, "appliedFor", appliedFor)
+
+			return nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("waiting for switch %s to be ready: %w", swName, ctx.Err())
+		case <-time.After(15 * time.Second):
+		}
+	}
+}
+
 func setPortBreakout(ctx context.Context, kube kclient.Client, swName string, port string, targetMode string, waitCompleted bool) error {
 	slog.Debug("Setting breakout mode", "switch", swName, "port", port, "mode", targetMode)
 	sw := &wiringapi.Switch{}
@@ -1648,9 +1684,10 @@ func setPortBreakout(ctx context.Context, kube kclient.Client, swName string, po
 	if err := waitAgentGen(ctx, kube, swName, currGen); err != nil {
 		return fmt.Errorf("waiting for switch %s to apply breakout mode %s for port %s: %w", swName, targetMode, port, err)
 	}
-	slog.Debug("Waiting for switches to be ready after breakout mode change", "switch", swName, "port", port, "mode", targetMode)
-	if err := WaitSwitchesReady(ctx, kube, 1*time.Minute, 5*time.Minute); err != nil {
-		return fmt.Errorf("waiting for switches to be ready after breakout mode change: %w", err)
+	slog.Debug("Waiting for this switch to be ready after breakout mode change", "switch", swName, "port", port, "mode", targetMode)
+	// note: cannot use WaitSwitchesReady here because it waits for all switches and we are modifying them in parallel
+	if err := waitSwitchReady(ctx, kube, swName, 1*time.Minute, 5*time.Minute); err != nil {
+		return fmt.Errorf("waiting for switch %s to be ready after breakout mode change: %w", swName, err)
 	}
 
 	if waitCompleted {
@@ -1695,111 +1732,113 @@ func (testCtx *VPCPeeringTestCtx) breakoutTest(ctx context.Context) (bool, []Rev
 	if err := testCtx.kube.List(ctx, agents); err != nil {
 		return false, nil, fmt.Errorf("listing agents: %w", err)
 	}
-	// TODO: use wait groups and parallelize this
+	g := &errgroup.Group{}
 	for _, agent := range agents.Items {
-		// for each switch, get which ports are used
-		conns := &wiringapi.ConnectionList{}
-		if err := testCtx.kube.List(ctx, conns, kclient.MatchingLabels{
-			wiringapi.ListLabelSwitch(agent.Name): wiringapi.ListLabelValue,
-		}); err != nil {
-			return false, nil, fmt.Errorf("listing connections for switch %s: %w", agent.Name, err)
-		}
+		g.Go(func() error {
+			// for each switch, get which ports are used
+			conns := &wiringapi.ConnectionList{}
+			if err := testCtx.kube.List(ctx, conns, kclient.MatchingLabels{
+				wiringapi.ListLabelSwitch(agent.Name): wiringapi.ListLabelValue,
+			}); err != nil {
+				return fmt.Errorf("listing connections for switch %s: %w", agent.Name, err)
+			}
 
-		usedPorts := make(map[string]bool, 0)
-		for _, conn := range conns.Items {
-			_, _, connPorts, _, err := conn.Spec.Endpoints()
+			usedPorts := make(map[string]bool, 0)
+			for _, conn := range conns.Items {
+				_, _, connPorts, _, err := conn.Spec.Endpoints()
+				if err != nil {
+					return fmt.Errorf("getting endpoints for connection %s: %w", conn.Name, err)
+				}
+				for _, connPort := range connPorts {
+					if !strings.HasPrefix(connPort, agent.Name+"/") {
+						continue
+					}
+
+					portName := strings.SplitN(connPort, "/", 2)[1]
+					usedPorts[portName] = true
+				}
+			}
+
+			// get default breakout modes for each port
+			defaultBreakouts, err := agent.Spec.SwitchProfile.GetBreakoutDefaults(&agent.Spec.Switch)
 			if err != nil {
-				return false, nil, fmt.Errorf("getting endpoints for connection %s: %w", conn.Name, err)
+				return fmt.Errorf("getting default breakouts for switch %s: %w", agent.Name, err)
 			}
-			for _, connPort := range connPorts {
-				if !strings.HasPrefix(connPort, agent.Name+"/") {
-					continue
+
+			// now go over all the ports in the switch profile and find the first unused port
+			swProfile := &wiringapi.SwitchProfile{}
+			if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: agent.Spec.Switch.Profile}, swProfile); err != nil {
+				return fmt.Errorf("getting switch profile %s for switch %s: %w", agent.Spec.Switch.Profile, agent.Name, err)
+			}
+			var unusedPort string
+			var breakoutProfile *wiringapi.SwitchProfilePortProfileBreakout
+			for portName, port := range swProfile.Spec.Ports {
+				if _, ok := usedPorts[portName]; !ok {
+					// this port is not used, but can it be used for breakout?
+					if port.Profile == "" {
+						continue
+					}
+					portProfile, ok := swProfile.Spec.PortProfiles[port.Profile]
+					if !ok {
+						return fmt.Errorf("port profile %s of port %s not found in switch profile %s for switch %s: %w", port.Profile, portName, swProfile.Name, agent.Name, err)
+					}
+					if portProfile.Breakout == nil {
+						continue
+					}
+					unusedPort = portName
+					breakoutProfile = portProfile.Breakout
+					slog.Debug("Found unused port for breakout", "port", unusedPort, "switch", agent.Name, "switchProfile", swProfile.Name)
+
+					break
 				}
-
-				portName := strings.SplitN(connPort, "/", 2)[1]
-				usedPorts[portName] = true
 			}
-		}
+			if unusedPort == "" || breakoutProfile == nil {
+				slog.Warn("No unused ports found on switch", "switch", agent.Name)
 
-		// get default breakout modes for each port
-		defaultBreakouts, err := agent.Spec.SwitchProfile.GetBreakoutDefaults(&agent.Spec.Switch)
-		if err != nil {
-			return false, nil, fmt.Errorf("getting default breakouts for switch %s: %w", agent.Name, err)
-		}
+				return nil
+			}
 
-		// now go over all the ports in the switch profile and find the first unused port
-		swProfile := &wiringapi.SwitchProfile{}
-		if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: agent.Spec.Switch.Profile}, swProfile); err != nil {
-			return false, nil, fmt.Errorf("getting switch profile %s for switch %s: %w", agent.Spec.Switch.Profile, agent.Name, err)
-		}
-		var unusedPort string
-		var breakoutProfile *wiringapi.SwitchProfilePortProfileBreakout
-		for portName, port := range swProfile.Spec.Ports {
-			if _, ok := usedPorts[portName]; !ok {
-				// this port is not used, but can it be used for breakout?
-				if port.Profile == "" {
-					slog.Debug("Port is not used but has no profile, skipping", "port", portName, "switch", agent.Name, "switchProfile", swProfile.Name)
+			// pick a random non-default supported breakout mode
+			targetMode := ""
+			for mode := range breakoutProfile.Supported {
+				if mode != defaultBreakouts[unusedPort] {
+					targetMode = mode
 
-					continue
+					break
 				}
-				portProfile, ok := swProfile.Spec.PortProfiles[port.Profile]
-				if !ok {
-					return false, nil, fmt.Errorf("port profile %s of port %s not found in switch profile %s for switch %s", port.Profile, portName, swProfile.Name, agent.Name) //nolint:goerr113
+			}
+			if targetMode == "" {
+				slog.Warn("No non-default breakout modes found for port", "port", unusedPort, "switch", agent.Name)
+
+				return nil
+			}
+			currState, exists := agent.Status.State.Breakouts[unusedPort]
+			currMode := ""
+			if exists {
+				currMode = currState.Mode
+			} else {
+				currMode = defaultBreakouts[unusedPort]
+			}
+			// we had a bug where the breakout mode could only be set the first time, so we need to check if the current mode is different from the default
+			if currMode == defaultBreakouts[unusedPort] {
+				slog.Debug("Unused port is in default breakout mode, setting it to target mode", "port", unusedPort, "switch", agent.Name, "defaultMode", defaultBreakouts[unusedPort], "targetMode", targetMode)
+				if err := setPortBreakout(ctx, testCtx.kube, agent.Name, unusedPort, targetMode, true); err != nil {
+					return fmt.Errorf("setting breakout mode for port %s on switch %s: %w", unusedPort, agent.Name, err)
 				}
-				if portProfile.Breakout == nil {
-					slog.Debug("No breakout profile for port", "port", portName, "switch", agent.Name, "switchProfile", swProfile.Name)
-
-					continue
-				}
-				unusedPort = portName
-				breakoutProfile = portProfile.Breakout
-				slog.Debug("Found unused port for breakout", "port", unusedPort, "switch", agent.Name, "switchProfile", swProfile.Name)
-
-				break
+				currMode = targetMode
 			}
-		}
-		if unusedPort == "" || breakoutProfile == nil {
-			slog.Warn("No unused ports found on switch", "switch", agent.Name)
-
-			continue // skip this switch, no unused ports
-		}
-
-		// pick a random non-default supported breakout mode
-		targetMode := ""
-		for mode := range breakoutProfile.Supported {
-			if mode != defaultBreakouts[unusedPort] {
-				targetMode = mode
-
-				break
+			// now set it to default mode again
+			slog.Debug("Setting breakout mode back to default", "port", unusedPort, "switch", agent.Name, "defaultMode", defaultBreakouts[unusedPort], "currentMode", currMode)
+			if err := setPortBreakout(ctx, testCtx.kube, agent.Name, unusedPort, defaultBreakouts[unusedPort], true); err != nil {
+				return fmt.Errorf("setting breakout mode back to default for port %s on switch %s: %w", unusedPort, agent.Name, err)
 			}
-		}
-		if targetMode == "" {
-			slog.Warn("No non-default breakout modes found for port", "port", unusedPort, "switch", agent.Name)
+			slog.Debug("Breakout test passed for switch", "switch", agent.Name, "port", unusedPort, "mode", targetMode)
 
-			continue
-		}
-		currState, exists := agent.Status.State.Breakouts[unusedPort]
-		currMode := ""
-		if exists {
-			currMode = currState.Mode
-		} else {
-			currMode = defaultBreakouts[unusedPort]
-		}
-		// we had a bug where the breakout mode could only be set the first time, so we need to check if the current mode is different from the default
-		if currMode == defaultBreakouts[unusedPort] {
-			slog.Debug("Unused port is in default breakout mode, setting it to target mode", "port", unusedPort, "switch", agent.Name, "defaultMode", defaultBreakouts[unusedPort], "targetMode", targetMode)
-			if err := setPortBreakout(ctx, testCtx.kube, agent.Name, unusedPort, targetMode, true); err != nil {
-				return false, nil, fmt.Errorf("setting breakout mode for port %s on switch %s: %w", unusedPort, agent.Name, err)
-			}
-			currMode = targetMode
-		}
-		// now set it to default mode again
-		slog.Debug("Setting breakout mode back to default", "port", unusedPort, "switch", agent.Name, "defaultMode", defaultBreakouts[unusedPort], "currentMode", currMode)
-		if err := setPortBreakout(ctx, testCtx.kube, agent.Name, unusedPort, defaultBreakouts[unusedPort], true); err != nil {
-			return false, nil, fmt.Errorf("setting breakout mode back to default for port %s on switch %s: %w", unusedPort, agent.Name, err)
-		}
-
-		slog.Debug("Breakout test passed for switch", "switch", agent.Name, "port", unusedPort, "mode", targetMode)
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return false, nil, fmt.Errorf("running breakout test for switches: %w", err)
 	}
 
 	return false, nil, nil
