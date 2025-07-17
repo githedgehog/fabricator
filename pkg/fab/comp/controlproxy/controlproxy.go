@@ -1,7 +1,7 @@
 // Copyright 2024 Hedgehog
 // SPDX-License-Identifier: Apache-2.0
 
-package controllerproxy
+package controlproxy
 
 import (
 	"context"
@@ -16,8 +16,8 @@ import (
 )
 
 const (
-	ChartRef = "fabricator/charts/controller-proxy"
-	ImageRef = "fabricator/controller-proxy"
+	ChartRef = "fabricator/charts/control-proxy"
+	ImageRef = "fabricator/control-proxy"
 	NodePort = 31028
 )
 
@@ -52,7 +52,7 @@ func Install(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 	}
 	values, err := tmplutil.FromTemplate("values", valuesTmpl, map[string]any{
 		"Repo":          repo,
-		"Tag":           string(cfg.Status.Versions.Platform.ControllerProxy),
+		"Tag":           string(cfg.Status.Versions.Platform.ControlProxy),
 		"NodePort":      NodePort,
 		"TinyproxyURLs": urls,
 	})
@@ -60,8 +60,8 @@ func Install(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 		return nil, fmt.Errorf("values: %w", err)
 	}
 
-	chartVersion := string(cfg.Status.Versions.Platform.ControllerProxyChart)
-	chart, err := comp.NewHelmChart(cfg, "controller-proxy", ChartRef, chartVersion, "", false, values)
+	chartVersion := string(cfg.Status.Versions.Platform.ControlProxyChart)
+	chart, err := comp.NewHelmChart(cfg, "control-proxy", ChartRef, chartVersion, "", false, values)
 	if err != nil {
 		return nil, fmt.Errorf("chart: %w", err)
 	}
@@ -73,8 +73,8 @@ var _ comp.ListOCIArtifacts = Artifacts
 
 func Artifacts(cfg fabapi.Fabricator) (comp.OCIArtifacts, error) {
 	return comp.OCIArtifacts{
-		ChartRef: cfg.Status.Versions.Platform.ControllerProxyChart,
-		ImageRef: cfg.Status.Versions.Platform.ControllerProxy,
+		ChartRef: cfg.Status.Versions.Platform.ControlProxyChart,
+		ImageRef: cfg.Status.Versions.Platform.ControlProxy,
 	}, nil
 }
 
@@ -85,7 +85,7 @@ func Status(ctx context.Context, kube kclient.Reader, cfg fabapi.Fabricator) (fa
 	if err != nil {
 		return fabapi.CompStatusUnknown, fmt.Errorf("getting image URL for %q: %w", ImageRef, err)
 	}
-	image := ref + ":" + string(cfg.Status.Versions.Platform.ControllerProxy)
+	image := ref + ":" + string(cfg.Status.Versions.Platform.ControlProxy)
 
-	return comp.GetDeploymentStatus("controller-proxy", "controller-proxy", image)(ctx, kube, cfg)
+	return comp.GetDeploymentStatus("control-proxy", "control-proxy", image)(ctx, kube, cfg)
 }

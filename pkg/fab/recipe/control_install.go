@@ -99,8 +99,8 @@ func (c *ControlInstall) Run(ctx context.Context) error {
 		return fmt.Errorf("installing ntp: %w", err)
 	}
 
-	if err := c.waitControllerProxy(ctx, kube); err != nil {
-		return fmt.Errorf("installing controller-proxy: %w", err)
+	if err := c.waitControlProxy(ctx, kube); err != nil {
+		return fmt.Errorf("installing control-proxy: %w", err)
 	}
 
 	controlVIP, err := c.Fab.Spec.Config.Control.VIP.Parse()
@@ -525,10 +525,10 @@ func (c *ControlInstall) waitNTP(ctx context.Context, kube kclient.Client) error
 	return nil
 }
 
-func (c *ControlInstall) waitControllerProxy(ctx context.Context, kube kclient.Client) error {
+func (c *ControlInstall) waitControlProxy(ctx context.Context, kube kclient.Client) error {
 	slog.Info("Waiting for Controller Proxy")
 
-	if err := waitKube(ctx, kube, "controller-proxy", comp.FabNamespace,
+	if err := waitKube(ctx, kube, "control-proxy", comp.FabNamespace,
 		&comp.Deployment{}, func(obj *comp.Deployment) (bool, error) {
 			for _, cond := range obj.Status.Conditions {
 				if cond.Type == comp.DeploymentAvailable && cond.Status == comp.ConditionTrue {
@@ -538,7 +538,7 @@ func (c *ControlInstall) waitControllerProxy(ctx context.Context, kube kclient.C
 
 			return false, nil
 		}); err != nil {
-		return fmt.Errorf("waiting for controller-proxy ready: %w", err)
+		return fmt.Errorf("waiting for control-proxy ready: %w", err)
 	}
 
 	return nil

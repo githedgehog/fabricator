@@ -29,17 +29,17 @@ var (
 
 var Versions = fabapi.Versions{
 	Platform: fabapi.PlatformVersions{
-		K3s:                  "v1.33.2-k3s1",
-		Zot:                  "v2.1.1",
-		CertManager:          "v1.18.2",
-		K9s:                  "v0.50.7",
-		Toolbox:              "v0.6.0",
-		Reloader:             "v1.0.40", // TODO upgrade or get rid of?
-		NTP:                  "v0.0.2",
-		NTPChart:             FabricatorVersion,
-		Alloy:                "v1.9.2",
-		ControllerProxy:      "v.1.11.2-hh1",
-		ControllerProxyChart: FabricatorVersion,
+		K3s:               "v1.33.2-k3s1",
+		Zot:               "v2.1.1",
+		CertManager:       "v1.18.2",
+		K9s:               "v0.50.7",
+		Toolbox:           "v0.6.0",
+		Reloader:          "v1.0.40", // TODO upgrade or get rid of?
+		NTP:               "v0.0.2",
+		NTPChart:          FabricatorVersion,
+		Alloy:             "v1.9.2",
+		ControlProxy:      "v.1.11.2-hh1",
+		ControlProxyChart: FabricatorVersion,
 	},
 	Fabricator: fabapi.FabricatorVersions{
 		API:            FabricatorVersion,
