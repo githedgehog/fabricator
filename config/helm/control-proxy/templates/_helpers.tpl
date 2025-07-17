@@ -1,7 +1,7 @@
 {{/*
 Expand the name of the chart.
 */}}
-{{- define "controller-proxy.name" -}}
+{{- define "control-proxy.name" -}}
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
@@ -10,7 +10,7 @@ Create a default fully qualified app name.
 We truncate at 63 chars because some Kubernetes name fields are limited to this (by the DNS naming spec).
 If release name contains chart name it will be used as a full name.
 */}}
-{{- define "controller-proxy.fullname" -}}
+{{- define "control-proxy.fullname" -}}
 {{- if .Values.fullnameOverride }}
 {{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
 {{- else }}
@@ -26,16 +26,16 @@ If release name contains chart name it will be used as a full name.
 {{/*
 Create chart name and version as used by the chart label.
 */}}
-{{- define "controller-proxy.chart" -}}
+{{- define "control-proxy.chart" -}}
 {{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
 {{/*
 Common labels
 */}}
-{{- define "controller-proxy.labels" -}}
-helm.sh/chart: {{ include "controller-proxy.chart" . }}
-{{ include "controller-proxy.selectorLabels" . }}
+{{- define "control-proxy.labels" -}}
+helm.sh/chart: {{ include "control-proxy.chart" . }}
+{{ include "control-proxy.selectorLabels" . }}
 {{- if .Chart.AppVersion }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{- end }}
@@ -45,17 +45,17 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{/*
 Selector labels
 */}}
-{{- define "controller-proxy.selectorLabels" -}}
-app.kubernetes.io/name: {{ include "controller-proxy.name" . }}
+{{- define "control-proxy.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "control-proxy.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
 Create the name of the service account to use
 */}}
-{{- define "controller-proxy.serviceAccountName" -}}
+{{- define "control-proxy.serviceAccountName" -}}
 {{- if .Values.serviceAccount.create }}
-{{- default (include "controller-proxy.fullname" .) .Values.serviceAccount.name }}
+{{- default (include "control-proxy.fullname" .) .Values.serviceAccount.name }}
 {{- else }}
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}

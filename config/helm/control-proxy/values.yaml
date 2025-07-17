@@ -1,15 +1,15 @@
-# Default values for controllerproxy.
+# Default values for control-proxy.
 # This is a YAML-formatted file.
 # Declare variables to be passed into your templates.
 
 # This will set the replicaset count more information can be found here: https://kubernetes.io/docs/concepts/workloads/controllers/replicaset/
 replicaCount: 1
 
-fullNameOverride: "controller-proxy"
+fullNameOverride: "control-proxy"
 
 # This sets the container image more information can be found here: https://kubernetes.io/docs/concepts/containers/images/
 image:
-  repository: ghcr.io/githedgehog/fabricator/controller-proxy
+  repository: ghcr.io/githedgehog/fabricator/control-proxy
   # This sets the pull policy for images.
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
@@ -25,7 +25,7 @@ serviceAccount:
   annotations: {}
   # The name of the service account to use.
   # If not set and create is true, a name is generated using the fullname template
-  name: "controller-proxy"
+  name: "control-proxy"
 
 # This is for setting Kubernetes Annotations to a Pod.
 # For more information checkout: https://kubernetes.io/docs/concepts/overview/working-with-objects/annotations/ 

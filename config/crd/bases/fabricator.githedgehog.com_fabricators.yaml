@@ -284,6 +284,8 @@ spec:
                         properties:
                           agent:
                             type: string
+                          alloy:
+                            type: string
                           api:
                             type: string
                           boot:
@@ -339,9 +341,9 @@ spec:
                             type: string
                           certManager:
                             type: string
-                          controllerProxy:
+                          controlProxy:
                             type: string
-                          controllerProxyChart:
+                          controlProxyChart:
                             type: string
                           k3s:
                             type: string
@@ -378,7 +380,7 @@ spec:
                     type: string
                   certManagerWebhook:
                     type: string
-                  controllerProxy:
+                  controlProxy:
                     type: string
                   fabricAPI:
                     type: string
@@ -496,6 +498,8 @@ spec:
                     properties:
                       agent:
                         type: string
+                      alloy:
+                        type: string
                       api:
                         type: string
                       boot:
@@ -551,9 +555,9 @@ spec:
                         type: string
                       certManager:
                         type: string
-                      controllerProxy:
+                      controlProxy:
                         type: string
-                      controllerProxyChart:
+                      controlProxyChart:
                         type: string
                       k3s:
                         type: string
