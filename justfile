@@ -50,9 +50,9 @@ _hhfab_embed: _touch_embed _butane
 
 _kube_gen:
   # Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject implementations
-  {{controller_gen}} object:headerFile="hack/boilerplate.go.txt" paths="./..."
+  {{controller_gen}} object:headerFile="hack/boilerplate.go.txt" paths="./api/..."
   # Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects
-  {{controller_gen}} rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
+  CGO_ENABLED=1 {{controller_gen}} rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
 
 # Generate docs, code/manifests, things to embed, etc
 gen: _kube_gen _hhfab_embed _crd_ref_docs
