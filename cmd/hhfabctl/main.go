@@ -39,13 +39,13 @@ func setupLogger(verbose bool) error {
 
 	slog.SetDefault(slog.New(tint.NewHandler(logW, &tint.Options{
 		Level:      logLevel,
-		TimeFormat: time.StampMilli,
+		TimeFormat: time.TimeOnly,
 		NoColor:    !isatty.IsTerminal(logW.Fd()),
 	})))
 
 	kubeHandler := tint.NewHandler(logW, &tint.Options{
 		Level:      slog.LevelInfo,
-		TimeFormat: time.StampMilli,
+		TimeFormat: time.TimeOnly,
 		NoColor:    !isatty.IsTerminal(logW.Fd()),
 	})
 	kctrl.SetLogger(logr.FromSlogHandler(kubeHandler))
