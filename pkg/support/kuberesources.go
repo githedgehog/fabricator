@@ -171,6 +171,11 @@ func collectKubeObjects(ctx context.Context, kube kclient.Reader, scheme *runtim
 	objs := 0
 
 	for gvk, objType := range scheme.AllKnownTypes() {
+		// skip deprecated resources
+		if gvk.Kind == "Endpoints" {
+			continue
+		}
+
 		// skip list types
 		if reflect.PointerTo(objType).Implements(kubeObjListType) {
 			continue
