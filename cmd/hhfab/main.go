@@ -284,21 +284,29 @@ func Run(ctx context.Context) error {
 				FileMode:   0o644,
 			}
 
-			handler := slogmulti.Fanout(
+			fileHandler := slog.NewTextHandler(logFile, &slog.HandlerOptions{
+				Level: slog.LevelDebug,
+			})
+
+			slog.SetDefault(slog.New(slogmulti.Fanout(
 				tint.NewHandler(logW, &tint.Options{
 					Level:      logLevel,
 					TimeFormat: time.TimeOnly,
 					NoColor:    !isatty.IsTerminal(logW.Fd()),
 				}),
-				slog.NewTextHandler(logFile, &slog.HandlerOptions{
-					Level: slog.LevelDebug,
-				}),
-			)
+				fileHandler,
+			)))
 
-			logger := slog.New(handler)
-			slog.SetDefault(logger)
-			kctrl.SetLogger(logr.FromSlogHandler(handler))
-			klog.SetSlogLogger(logger)
+			kubeHandler := slogmulti.Fanout(
+				tint.NewHandler(logW, &tint.Options{
+					Level:      slog.LevelInfo,
+					TimeFormat: time.TimeOnly,
+					NoColor:    !isatty.IsTerminal(logW.Fd()),
+				}),
+				fileHandler,
+			)
+			kctrl.SetLogger(logr.FromSlogHandler(kubeHandler))
+			klog.SetSlogLogger(slog.New(kubeHandler))
 
 			if quiet {
 				return nil
