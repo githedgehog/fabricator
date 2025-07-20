@@ -84,7 +84,7 @@ func Run(ctx context.Context) error {
 			handlers := []slog.Handler{
 				tint.NewHandler(logW, &tint.Options{
 					Level:      logLevel,
-					TimeFormat: time.TimeOnly,
+					TimeFormat: time.StampMilli,
 					NoColor:    !isatty.IsTerminal(logW.Fd()),
 				}),
 			}
