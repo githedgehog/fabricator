@@ -25,7 +25,12 @@ type GatewayAgentSpec struct {
 }
 
 // GatewayAgentStatus defines the observed state of GatewayAgent.
-type GatewayAgentStatus struct{}
+type GatewayAgentStatus struct {
+	// Time of the last successful configuration application
+	LastAppliedTime kmetav1.Time `json:"lastAppliedTime,omitempty"`
+	// Generation of the last successful configuration application
+	LastAppliedGen int64 `json:"lastAppliedGen,omitempty"`
+}
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
