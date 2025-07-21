@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/melbahja/goph"
+	"github.com/samber/lo"
 	agentapi "go.githedgehog.com/fabric/api/agent/v1beta1"
 	"go.githedgehog.com/fabric/api/meta"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
@@ -27,7 +28,6 @@ import (
 	"go.githedgehog.com/fabric/pkg/hhfctl/inspect"
 	"go.githedgehog.com/fabric/pkg/util/apiutil"
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
-	"go.githedgehog.com/fabric/pkg/util/pointer"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab"
 	gwapi "go.githedgehog.com/gateway/api/gateway/v1alpha1"
@@ -145,6 +145,7 @@ func GetKubeClientWithCache(ctx context.Context, workDir string) (context.Cancel
 		vpcapi.SchemeBuilder,
 		agentapi.SchemeBuilder,
 		fabapi.SchemeBuilder,
+		gwapi.SchemeBuilder,
 	)
 }
 
@@ -651,6 +652,7 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 		vpcapi.SchemeBuilder,
 		agentapi.SchemeBuilder,
 		fabapi.SchemeBuilder,
+		gwapi.SchemeBuilder,
 	)
 	if err != nil {
 		return fmt.Errorf("creating kube client: %w", err)
@@ -662,6 +664,16 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 		if err := WaitSwitchesReady(ctx, kube, 1*time.Minute, 30*time.Minute); err != nil {
 			return fmt.Errorf("waiting for switches ready: %w", err)
 		}
+	}
+
+	vpcsList := &vpcapi.VPCList{}
+	if err := kube.List(ctx, vpcsList); err != nil {
+		return fmt.Errorf("listing VPCs: %w", err)
+	}
+
+	vpcs := map[string]*vpcapi.VPC{}
+	for _, vpc := range vpcsList.Items {
+		vpcs[vpc.Name] = &vpc
 	}
 
 	externalList := &vpcapi.ExternalList{}
@@ -676,6 +688,7 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 
 	vpcPeerings := map[string]*vpcapi.VPCPeeringSpec{}
 	externalPeerings := map[string]*vpcapi.ExternalPeeringSpec{}
+	gwPeerings := map[string]*gwapi.PeeringSpec{}
 
 	reqNames := map[string]bool{}
 	for _, req := range opts.Requests {
@@ -725,15 +738,8 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 				vpc2 = "vpc-" + vpc2
 			}
 
-			vpcPeering := &vpcapi.VPCPeeringSpec{
-				Permit: []map[string]vpcapi.VPCPeer{
-					{
-						vpc1: {},
-						vpc2: {},
-					},
-				},
-			}
-
+			remote := ""
+			gw := false
 			for idx, option := range parts[1:] {
 				parts := strings.Split(option, "=")
 				if len(parts) > 2 {
@@ -752,16 +758,57 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 							return fmt.Errorf("invalid VPC peering option #%d %s, auto switch group only supported when it's exactly one switch group", idx, option)
 						}
 
-						vpcPeering.Remote = switchGroupList.Items[0].Name
+						remote = switchGroupList.Items[0].Name
+					} else {
+						remote = optValue
 					}
-
-					vpcPeering.Remote = optValue
+				} else if optName == "gw" || optName == "gateway" {
+					gw = true
 				} else {
-					return fmt.Errorf("invalid VPC peering option #%d %s", idx, option)
+					return fmt.Errorf("invalid peering option #%d %s", idx, option)
 				}
 			}
 
-			vpcPeerings[fmt.Sprintf("%s--%s", vpc1, vpc2)] = vpcPeering
+			if !gw {
+				vpcPeerings[fmt.Sprintf("%s--%s", vpc1, vpc2)] = &vpcapi.VPCPeeringSpec{
+					Permit: []map[string]vpcapi.VPCPeer{
+						{
+							vpc1: {},
+							vpc2: {},
+						},
+					},
+					Remote: remote,
+				}
+			} else {
+				if remote != "" {
+					return fmt.Errorf("gateway peering connot be remote")
+				}
+
+				vpc1Expose := gwapi.PeeringEntryExpose{}
+				if vpc, ok := vpcs[vpc1]; ok {
+					for _, subnet := range vpc.Spec.Subnets {
+						vpc1Expose.IPs = append(vpc1Expose.IPs, gwapi.PeeringEntryIP{CIDR: subnet.Subnet})
+					}
+				}
+
+				vpc2Expose := gwapi.PeeringEntryExpose{}
+				if vpc, ok := vpcs[vpc2]; ok {
+					for _, subnet := range vpc.Spec.Subnets {
+						vpc2Expose.IPs = append(vpc2Expose.IPs, gwapi.PeeringEntryIP{CIDR: subnet.Subnet})
+					}
+				}
+
+				gwPeerings[fmt.Sprintf("%s--%s", vpc1, vpc2)] = &gwapi.PeeringSpec{
+					Peering: map[string]*gwapi.PeeringEntry{
+						vpc1: {
+							Expose: []gwapi.PeeringEntryExpose{vpc1Expose},
+						},
+						vpc2: {
+							Expose: []gwapi.PeeringEntryExpose{vpc2Expose},
+						},
+					},
+				}
+			}
 		} else if !vpMark && epMark {
 			reqNameParts := strings.Split(reqName, "~")
 			if len(reqNameParts) != 2 {
@@ -864,7 +911,7 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 		}
 	}
 
-	if err := DoSetupPeerings(ctx, kube, vpcPeerings, externalPeerings, opts.WaitSwitchesReady); err != nil {
+	if err := DoSetupPeerings(ctx, kube, vpcPeerings, externalPeerings, gwPeerings, opts.WaitSwitchesReady); err != nil {
 		return err
 	}
 	slog.Info("VPC and External Peerings setup complete", "took", time.Since(start))
@@ -872,7 +919,7 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 	return nil
 }
 
-func DoSetupPeerings(ctx context.Context, kube client.Client, vpcPeerings map[string]*vpcapi.VPCPeeringSpec, externalPeerings map[string]*vpcapi.ExternalPeeringSpec, waitReady bool) error {
+func DoSetupPeerings(ctx context.Context, kube client.Client, vpcPeerings map[string]*vpcapi.VPCPeeringSpec, externalPeerings map[string]*vpcapi.ExternalPeeringSpec, gwPeerings map[string]*gwapi.PeeringSpec, waitReady bool) error {
 	var changed bool
 
 	vpcPeeringList := &vpcapi.VPCPeeringList{}
@@ -887,7 +934,7 @@ func DoSetupPeerings(ctx context.Context, kube client.Client, vpcPeerings map[st
 		slog.Info("Deleting VPCPeering", "name", peering.Name)
 		changed = true
 
-		if err := client.IgnoreNotFound(kube.Delete(ctx, pointer.To(peering))); err != nil {
+		if err := client.IgnoreNotFound(kube.Delete(ctx, &peering)); err != nil {
 			return fmt.Errorf("deleting VPC peering %s: %w", peering.Name, err)
 		}
 	}
@@ -904,8 +951,25 @@ func DoSetupPeerings(ctx context.Context, kube client.Client, vpcPeerings map[st
 		slog.Info("Deleting ExternalPeering", "name", peering.Name)
 		changed = true
 
-		if err := client.IgnoreNotFound(kube.Delete(ctx, pointer.To(peering))); err != nil {
+		if err := client.IgnoreNotFound(kube.Delete(ctx, &peering)); err != nil {
 			return fmt.Errorf("deleting external peering %s: %w", peering.Name, err)
+		}
+	}
+
+	gwPeeringList := &gwapi.PeeringList{}
+	if err := kube.List(ctx, gwPeeringList); err != nil {
+		return fmt.Errorf("listing gateway peerings: %w", err)
+	}
+	for _, peering := range gwPeeringList.Items {
+		if gwPeerings[peering.Name] != nil {
+			continue
+		}
+
+		slog.Info("Deleting GatewayPeering", "name", peering.Name)
+		changed = true
+
+		if err := client.IgnoreNotFound(kube.Delete(ctx, &peering)); err != nil {
+			return fmt.Errorf("deleting gateway peering %s: %w", peering.Name, err)
 		}
 	}
 
@@ -967,6 +1031,38 @@ func DoSetupPeerings(ctx context.Context, kube client.Client, vpcPeerings map[st
 			changed = true
 		} else if res == ctrlutil.OperationResultUpdated {
 			slog.Info("Updated", "externalpeering", name)
+			changed = true
+		}
+	}
+
+	for name, gwPeeringSpec := range gwPeerings {
+		vpcs := lo.Keys(gwPeeringSpec.Peering)
+		if len(vpcs) != 2 {
+			return fmt.Errorf("invalid GatewayPeering %s: expected 2 VPCs, got %d", name, len(vpcs))
+		}
+
+		slog.Info("Enforcing GatewayPeering", "name", name, "vpc1", vpcs[0], "vpc2", vpcs[1])
+
+		gwPeering := &gwapi.Peering{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: metav1.NamespaceDefault,
+			},
+		}
+		res, err := ctrlutil.CreateOrUpdate(ctx, kube, gwPeering, func() error {
+			gwPeering.Spec = *gwPeeringSpec
+
+			return nil
+		})
+		if err != nil {
+			return fmt.Errorf("error updating gateway peering %s: %w", name, err)
+		}
+
+		if res == ctrlutil.OperationResultCreated {
+			slog.Info("Created", "gwpeering", name)
+			changed = true
+		} else if res == ctrlutil.OperationResultUpdated {
+			slog.Info("Updated", "gwpeering", name)
 			changed = true
 		}
 	}
@@ -2136,6 +2232,7 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 		vpcapi.SchemeBuilder,
 		agentapi.SchemeBuilder,
 		fabapi.SchemeBuilder,
+		gwapi.SchemeBuilder,
 		&scheme.Builder{
 			GroupVersion:  coreapi.SchemeGroupVersion,
 			SchemeBuilder: coreapi.SchemeBuilder,
