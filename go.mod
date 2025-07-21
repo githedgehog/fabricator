@@ -10,7 +10,6 @@ tool sigs.k8s.io/controller-tools/cmd/controller-gen
 
 require (
 	dario.cat/mergo v1.0.2
-	github.com/AlekSi/pointer v1.2.0
 	github.com/Masterminds/semver/v3 v3.4.0
 	github.com/Masterminds/sprig/v3 v3.3.0
 	github.com/appleboy/easyssh-proxy v1.5.0
@@ -69,6 +68,7 @@ require (
 	cloud.google.com/go/storage v1.50.0 // indirect
 	github.com/0x5a17ed/itkit v0.7.0 // indirect
 	github.com/0x5a17ed/uefi v0.7.0 // indirect
+	github.com/AlekSi/pointer v1.2.0 // indirect
 	github.com/BurntSushi/toml v1.5.0 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp v1.27.0 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric v0.48.1 // indirect

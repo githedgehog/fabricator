@@ -385,7 +385,7 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsStarterTest(ctx context.Context) (b
 	appendExtPeeringSpec(externalPeerings, 9, testCtx.extName, []string{"subnet-01"}, AllZeroPrefix)
 	appendExtPeeringSpec(externalPeerings, 7, testCtx.extName, []string{"subnet-01"}, AllZeroPrefix)
 
-	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, true); err != nil {
+	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, nil, true); err != nil {
 		return false, nil, fmt.Errorf("setting up peerings: %w", err)
 	}
 	if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
@@ -408,7 +408,7 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsFullMeshAllExternalsTest(ctx contex
 		return false, nil, fmt.Errorf("populating all external VPC peerings: %w", err)
 	}
 
-	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, true); err != nil {
+	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, nil, true); err != nil {
 		return false, nil, fmt.Errorf("setting up peerings: %w", err)
 	}
 	if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
@@ -425,7 +425,7 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsFullMeshAllExternalsTest(ctx contex
 
 			break
 		}
-		if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, true); err != nil {
+		if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, nil, true); err != nil {
 			return false, nil, fmt.Errorf("setting up peerings: %w", err)
 		}
 		if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
@@ -448,7 +448,7 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsOnlyExternalsTest(ctx context.Conte
 
 		return true, nil, errNoExternals
 	}
-	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, true); err != nil {
+	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, nil, true); err != nil {
 		return false, nil, fmt.Errorf("setting up peerings: %w", err)
 	}
 	if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
@@ -468,7 +468,7 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsFullLoopAllExternalsTest(ctx contex
 	if err := populateAllExternalVpcPeerings(ctx, testCtx.kube, externalPeerings); err != nil {
 		return false, nil, fmt.Errorf("populating all external VPC peerings: %w", err)
 	}
-	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, true); err != nil {
+	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, nil, true); err != nil {
 		return false, nil, fmt.Errorf("setting up peerings: %w", err)
 	}
 	if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
@@ -496,7 +496,7 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsSergeisSpecialTest(ctx context.Cont
 	appendVpcPeeringSpec(vpcPeerings, 6, 5, "", []string{}, []string{})
 	externalPeerings := make(map[string]*vpcapi.ExternalPeeringSpec, 6)
 	appendExtPeeringSpec(externalPeerings, 1, testCtx.extName, []string{"subnet-01"}, AllZeroPrefix)
-	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, true); err != nil {
+	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, nil, true); err != nil {
 		return false, nil, fmt.Errorf("setting up peerings: %w", err)
 	}
 	if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
@@ -932,7 +932,7 @@ func (testCtx *VPCPeeringTestCtx) multiSubnetsSubnetFilteringTest(ctx context.Co
 	appendVpcPeeringSpec(vpcPeerings, 1, 3, "", []string{}, []string{"subnet-01"})
 	appendVpcPeeringSpec(vpcPeerings, 2, 3, "", []string{}, []string{"subnet-02"})
 	externalPeerings := make(map[string]*vpcapi.ExternalPeeringSpec, 0)
-	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, true); err != nil {
+	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, nil, true); err != nil {
 		return false, nil, fmt.Errorf("setting up peerings: %w", err)
 	}
 
