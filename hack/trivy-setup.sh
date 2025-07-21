@@ -7,20 +7,17 @@
 
 set -e
 
-# Define colors for better readability
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
 
-# Create base directory
 TRIVY_DIR="/var/lib/trivy"
 sudo mkdir -p $TRIVY_DIR
 sudo mkdir -p $TRIVY_DIR/.docker
 sudo mkdir -p $TRIVY_DIR/reports
 
 echo -e "${GREEN}Installing Trivy to Flatcar Linux...${NC}"
-# Install Trivy in a writable location with proper error checking
 echo "Downloading Trivy installer..."
 if ! sudo curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh -o /tmp/trivy-install.sh; then
     echo -e "${RED}Failed to download Trivy installer${NC}"
@@ -48,7 +45,6 @@ if ! sudo test -f /var/lib/trivy/trivy; then
     exit 1
 fi
 
-# Ensure trivy binary is executable and verify installation
 sudo chmod +x /var/lib/trivy/trivy
 
 # Verify installation works
@@ -63,19 +59,17 @@ else
     exit 1
 fi
 
-# Add to path for convenience
 sudo bash -c 'echo "export PATH=\$PATH:/var/lib/trivy" > /etc/profile.d/trivy.sh'
 sudo chmod +x /etc/profile.d/trivy.sh
 export PATH=$PATH:/var/lib/trivy
 
-# Try to extract registry credentials from K3s
+# Extract registry credentials from K3s
 echo -e "${YELLOW}Attempting to configure registry credentials automatically...${NC}"
 REGISTRY="172.30.0.1:31000"
 USERNAME=""
 PASSWORD=""
 AUTH_CONFIGURED=false
 
-# Check if k3s registries.yaml exists and extract credentials
 if sudo test -f /etc/rancher/k3s/registries.yaml; then
     echo "Found K3s registry configuration, attempting to extract credentials..."
 
@@ -111,23 +105,18 @@ sudo tee $TRIVY_DIR/scan.sh > /dev/null << 'EOF'
 
 set -e
 
-# Configuration
 TRIVY_DIR="/var/lib/trivy"
 REPORTS_DIR="${TRIVY_DIR}/reports"
 DOCKER_CONFIG="${TRIVY_DIR}/.docker"
 TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
 CONTAINERD_ADDRESS="/run/k3s/containerd/containerd.sock"
 
-# Ensure reports directory exists
 mkdir -p ${REPORTS_DIR}
 
-# Clean up old scan reports to prevent accumulation
 echo "Cleaning up old scan reports..."
-# Remove all previous scan reports to avoid accumulation
 sudo find ${REPORTS_DIR} -type f -name "*.txt" -o -name "*.json" -o -name "*.sarif" | xargs rm -f 2>/dev/null || true
 echo "Previous scan reports cleaned up"
 
-# Function to scan a specific image and save results
 scan_image() {
     local image="$1"
     local output_base="${REPORTS_DIR}/${TIMESTAMP}_$(echo $image | tr '/:' '_')"
@@ -211,7 +200,6 @@ if command -v crictl >/dev/null && [ -S "$CONTAINERD_ADDRESS" ]; then
     # Get list of images, excluding the 'pause' image
     IMAGES=$(sudo crictl --runtime-endpoint unix://${CONTAINERD_ADDRESS} images | grep -v IMAGE | grep -v pause | awk '{print $1":"$2}' || echo "")
 
-    # Scan each image, excluding Trivy images
     for IMAGE in $IMAGES; do
         if [ "$IMAGE" != ":" ] && [ ! -z "$IMAGE" ]; then
             if should_exclude "$IMAGE"; then
