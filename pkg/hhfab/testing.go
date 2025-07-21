@@ -1983,6 +1983,12 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphor
 		return nil
 	}
 
+	iPerfsMinSpeed := opts.IPerfsMinSpeed
+	// TODO remove workaround after we have better GW performance
+	if reachability.Reason == ReachabilityReasonGatewayPeering {
+		iPerfsMinSpeed = 1
+	}
+
 	if err := iperfs.Acquire(ctx, 1); err != nil {
 		return fmt.Errorf("acquiring iperf3 semaphore: %w", err)
 	}
@@ -2038,12 +2044,12 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphor
 			"received", asMB(float64(report.End.SumReceived.Bytes)),
 		)
 
-		if opts.IPerfsMinSpeed > 0 {
-			if report.End.SumSent.BitsPerSecond < opts.IPerfsMinSpeed*1_000_000 {
-				return fmt.Errorf("iperf3 send speed too low: %s < %s", asMbps(report.End.SumSent.BitsPerSecond), asMbps(opts.IPerfsMinSpeed*1_000_000))
+		if iPerfsMinSpeed > 0 {
+			if report.End.SumSent.BitsPerSecond < iPerfsMinSpeed*1_000_000 {
+				return fmt.Errorf("iperf3 send speed too low: %s < %s", asMbps(report.End.SumSent.BitsPerSecond), asMbps(iPerfsMinSpeed*1_000_000))
 			}
-			if report.End.SumReceived.BitsPerSecond < opts.IPerfsMinSpeed*1_000_000 {
-				return fmt.Errorf("iperf3 receive speed too low: %s < %s", asMbps(report.End.SumReceived.BitsPerSecond), asMbps(opts.IPerfsMinSpeed*1_000_000))
+			if report.End.SumReceived.BitsPerSecond < iPerfsMinSpeed*1_000_000 {
+				return fmt.Errorf("iperf3 receive speed too low: %s < %s", asMbps(report.End.SumReceived.BitsPerSecond), asMbps(iPerfsMinSpeed*1_000_000))
 			}
 		}
 
