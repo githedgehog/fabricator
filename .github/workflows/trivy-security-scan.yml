@@ -20,6 +20,17 @@ on:
 
   workflow_dispatch:
     inputs:
+      vm_selection:
+        type: choice
+        description: "Select VMs to scan"
+        required: false
+        default: "control-gateway"
+        options:
+          - "control-gateway"
+          - "control-only"
+          - "gateway-only"
+          - "switch-only"
+          - "all"
       debug_enabled:
         type: boolean
         description: "Enable debug output"
@@ -53,10 +64,40 @@ jobs:
       - name: Build and push hhfab artifacts
         run: just --timestamp oci_repo=127.0.0.1:30000 oci=http push
 
+      - name: Set VM scan arguments
+        id: vm_args
+        run: |
+          case "${{ github.event.inputs.vm_selection || 'control-gateway' }}" in
+            "control-only")
+              echo "args=--control-only" >> $GITHUB_OUTPUT
+              ;;
+            "gateway-only")
+              echo "args=--gateway-only" >> $GITHUB_OUTPUT
+              ;;
+            "switch-only")
+              echo "args=--switch-only" >> $GITHUB_OUTPUT
+              ;;
+            "all")
+              echo "args=--all" >> $GITHUB_OUTPUT
+              ;;
+            "control-gateway"|*)
+              echo "args=" >> $GITHUB_OUTPUT
+              ;;
+          esac
+
       - name: Run VLAB Trivy Security Scan
         env:
           HHFAB_REG_REPO: 127.0.0.1:30000
-        run: just security-scan --strict
+        run: |
+          SCAN_ARGS="${{ steps.vm_args.outputs.args }}"
+
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            # For scheduled runs, always use strict mode
+            just security-scan --strict $SCAN_ARGS
+          else
+            # For manual runs, allow partial success by default
+            just security-scan $SCAN_ARGS
+          fi
 
       - name: Upload SARIF file
         if: always() && env.UPLOAD_SARIF == 'true'
@@ -74,6 +115,7 @@ jobs:
           path: |
             trivy-reports/
             sarif-reports/
+            raw-sarif-reports/
             vlab.log
           retention-days: 30
 
