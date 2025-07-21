@@ -1726,7 +1726,7 @@ go.githedgehog.com/fabric/pkg/util/uefiutil
 # go.githedgehog.com/fabric-bcm-ygot v0.5.2-4.5.0
 ## explicit; go 1.24.0
 go.githedgehog.com/fabric-bcm-ygot/pkg/oc
-# go.githedgehog.com/gateway v0.14.0
+# go.githedgehog.com/gateway v0.15.0
 ## explicit; go 1.24.2
 go.githedgehog.com/gateway/api/gateway/v1alpha1
 go.githedgehog.com/gateway/api/gwint/v1alpha1
