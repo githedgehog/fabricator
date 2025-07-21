@@ -30,6 +30,7 @@ import (
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab"
+	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	gwapi "go.githedgehog.com/gateway/api/gateway/v1alpha1"
 	gwintapi "go.githedgehog.com/gateway/api/gwint/v1alpha1"
 	"golang.org/x/crypto/ssh"
@@ -68,8 +69,6 @@ func (c *Config) Wait(ctx context.Context, vlab *VLAB) error {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
 
-	start := time.Now()
-
 	kubeconfig := filepath.Join(c.WorkDir, VLABDir, VLABKubeConfig)
 	cacheCancel, kube, err := kubeutil.NewClientWithCache(ctx, kubeconfig,
 		wiringapi.SchemeBuilder,
@@ -84,19 +83,188 @@ func (c *Config) Wait(ctx context.Context, vlab *VLAB) error {
 	}
 	defer cacheCancel()
 
-	slog.Info("Waiting for all switches ready")
-	if err := WaitSwitchesReady(ctx, kube, 1*time.Minute, 30*time.Minute); err != nil {
-		return fmt.Errorf("waiting for switches ready: %w", err)
+	if err := WaitReady(ctx, kube, WaitReadyOpts{}); err != nil {
+		return fmt.Errorf("waiting for ready: %w", err)
 	}
-	slog.Info("All switches are ready", "took", time.Since(start))
-
-	slog.Info("Waiting for all gateways ready")
-	if err := WaitGatewaysReady(ctx, kube, 15*time.Second, 30*time.Minute); err != nil {
-		return fmt.Errorf("waiting for gateways ready: %w", err)
-	}
-	slog.Info("All gateways are ready", "took", time.Since(start))
 
 	return nil
+}
+
+type WaitReadyOpts struct {
+	AppliedFor   time.Duration
+	Timeout      time.Duration
+	PollInterval time.Duration
+	PrintEvery   int
+}
+
+func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) error {
+	if opts.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, opts.Timeout)
+		defer cancel()
+	}
+
+	if opts.PollInterval == 0 {
+		opts.PollInterval = 5 * time.Second
+	}
+	if opts.PrintEvery == 0 {
+		opts.PrintEvery = 6 // every ~30 seconds
+	}
+
+	start := time.Now()
+
+	slog.Info("Waiting for switches and gateways ready", "appliedFor", opts.AppliedFor, "timeout", opts.Timeout)
+
+	f, _, _, err := fab.GetFabAndNodes(ctx, kube, fab.GetFabAndNodesOpts{AllowNotHydrated: true})
+	if err != nil {
+		return fmt.Errorf("getting fab: %w", err)
+	}
+
+	// fabric controller will set agent version to it's own version by default
+	expectedSwAgentV := string(f.Status.Versions.Fabric.Controller)
+	expectedSwitches := []string{}
+	{
+		switches := &wiringapi.SwitchList{}
+		if err := kube.List(ctx, switches); err != nil {
+			return fmt.Errorf("listing switches: %w", err)
+		}
+		for _, sw := range switches.Items {
+			expectedSwitches = append(expectedSwitches, sw.Name)
+		}
+	}
+	if len(expectedSwitches) > 0 {
+		slog.Info("Expected switches", "agent", expectedSwAgentV, "switches", expectedSwitches)
+	}
+
+	// gateway controller will set agent version to it's own version by default
+	expectedGwAgentV := string(f.Status.Versions.Gateway.Controller)
+	expectedGateways := []string{}
+	if f.Spec.Config.Gateway.Enable {
+		gateways := &gwapi.GatewayList{}
+		if err := kube.List(ctx, gateways); err != nil {
+			return fmt.Errorf("listing gateways: %w", err)
+		}
+		for _, gw := range gateways.Items {
+			expectedGateways = append(expectedGateways, gw.Name)
+		}
+	}
+	if len(expectedGateways) > 0 {
+		slog.Info("Expected gateways", "agent", expectedGwAgentV, "gateways", expectedGateways)
+	}
+
+	swNotReady := []string{}
+	gwNotReady := []string{}
+	swNotUpdated := []string{}
+	gwNotUpdated := []string{}
+
+	for idx := 0; ; idx++ {
+		swNotReady = []string{}
+		gwNotReady = []string{}
+		swNotUpdated = []string{}
+		gwNotUpdated = []string{}
+
+		for _, swName := range expectedSwitches {
+			ag := &agentapi.Agent{}
+			if err := kube.Get(ctx, client.ObjectKey{Name: swName, Namespace: metav1.NamespaceDefault}, ag); err != nil {
+				if !apierrors.IsNotFound(err) {
+					continue
+				}
+
+				return fmt.Errorf("getting switch agent %q: %w", swName, err)
+			}
+
+			// make sure that desired agent version is the same as we expect (same as controller version, may be different if not reconciled)
+			ready := ag.Spec.Version.Default == expectedSwAgentV
+
+			// make sure last applied generation is the same as current generation
+			ready = ready && ag.Status.LastAppliedGen == ag.Generation
+
+			// make sure last heartbeat is recent enough
+			ready = ready && time.Since(ag.Status.LastHeartbeat.Time) < 1*time.Minute
+
+			if opts.AppliedFor > 0 {
+				// make sure agent config was applied for long enough
+				ready = ready && time.Since(ag.Status.LastAppliedTime.Time) >= opts.AppliedFor
+			}
+
+			if ready {
+				if ag.Status.Version == expectedSwAgentV {
+					continue
+				}
+
+				swNotUpdated = append(swNotUpdated, swName)
+			} else {
+				swNotReady = append(swNotReady, swName)
+			}
+		}
+
+		if len(swNotReady) == 0 && len(swNotUpdated) > 0 {
+			slices.Sort(swNotUpdated)
+			slog.Warn("All switches ready, but some not updated", "notUpdated", swNotUpdated)
+
+			return fmt.Errorf("all switches ready but some not updated")
+		} else if idx%opts.PrintEvery == 0 && (len(swNotReady) > 0 || len(swNotUpdated) > 0) {
+			slog.Info("Switches status", "notReady", swNotReady, "notUpdated", swNotUpdated)
+		}
+
+		for _, gwName := range expectedGateways {
+			gwag := &gwintapi.GatewayAgent{}
+			if err := kube.Get(ctx, client.ObjectKey{Name: gwName, Namespace: comp.FabNamespace}, gwag); err != nil {
+				if !apierrors.IsNotFound(err) {
+					continue
+				}
+
+				return fmt.Errorf("getting gateway agent %s: %w", gwName, err)
+			}
+
+			// TODO replace with agent version
+			// make sure that desired agent version is the same as we expect (same as controller version, may be different if not reconciled)
+			ready := gwag.Spec.CtrlVersion == expectedGwAgentV
+
+			// make sure last applied generation is the same as current generation
+			ready = ready && gwag.Status.LastAppliedGen == gwag.Generation
+
+			// TODO consider adding heartbeats
+			// make sure last heartbeat is recent enough
+			// ready = ready && time.Since(gwag.Status.LastHeartbeat.Time) < 1*time.Minute
+
+			if opts.AppliedFor > 0 {
+				// make sure agent config was applied for long enough
+				ready = ready && time.Since(gwag.Status.LastAppliedTime.Time) >= opts.AppliedFor
+			}
+
+			if ready {
+				// TODO add reporting agent version to gwag
+				// if gwag.Status.Version == expectedGwAgentV {
+				// 	continue
+				// }
+
+				// gwNotUpdated = append(gwNotUpdated, gwName)
+			} else {
+				gwNotReady = append(gwNotReady, gwName)
+			}
+		}
+		if len(gwNotReady) == 0 && len(gwNotUpdated) > 0 {
+			slices.Sort(gwNotUpdated)
+			slog.Warn("All gateways ready, but some not updated", "notUpdated", gwNotUpdated)
+
+			return fmt.Errorf("all gateways ready but some not updated")
+		} else if idx%opts.PrintEvery == 0 && (len(gwNotReady) > 0 || len(gwNotUpdated) > 0) {
+			slog.Info("Gateways status", "notReady", gwNotReady, "notUpdated", gwNotUpdated)
+		}
+
+		if len(swNotReady) == 0 && len(gwNotReady) == 0 {
+			slog.Info("All switches and gateways are ready", "took", time.Since(start))
+
+			return nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("waiting for ready: %w", ctx.Err())
+		case <-time.After(opts.PollInterval):
+		}
+	}
 }
 
 type SetupVPCsOpts struct {
@@ -462,9 +630,8 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	}
 
 	if opts.WaitSwitchesReady {
-		slog.Info("Waiting for switches ready before configuring VPCs and VPCAttachments")
-		if err := WaitSwitchesReady(ctx, kube, 1*time.Minute, 30*time.Minute); err != nil {
-			return fmt.Errorf("waiting for switches ready: %w", err)
+		if err := WaitReady(ctx, kube, WaitReadyOpts{AppliedFor: 1 * time.Minute, Timeout: 30 * time.Minute}); err != nil {
+			return fmt.Errorf("waiting for ready: %w", err)
 		}
 	}
 
@@ -531,17 +698,15 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	}
 
 	if changed && opts.WaitSwitchesReady {
-		slog.Info("Waiting for switches ready after configuring VPCs and VPCAttachments")
-
 		// TODO remove it when we can actually know that changes to VPC/VPCAttachment are reflected in agents
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("sleeping before waiting for switches ready: %w", ctx.Err())
+			return fmt.Errorf("sleeping before waiting for ready: %w", ctx.Err())
 		case <-time.After(15 * time.Second):
 		}
 
-		if err := WaitSwitchesReady(ctx, kube, 1*time.Minute, 30*time.Minute); err != nil {
-			return fmt.Errorf("waiting for switches ready: %w", err)
+		if err := WaitReady(ctx, kube, WaitReadyOpts{AppliedFor: 1 * time.Minute, Timeout: 30 * time.Minute}); err != nil {
+			return fmt.Errorf("waiting for ready: %w", err)
 		}
 	}
 
@@ -660,9 +825,8 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 	defer cacheCancel()
 
 	if opts.WaitSwitchesReady {
-		slog.Info("Waiting for switches ready before configuring VPC and External Peerings")
-		if err := WaitSwitchesReady(ctx, kube, 1*time.Minute, 30*time.Minute); err != nil {
-			return fmt.Errorf("waiting for switches ready: %w", err)
+		if err := WaitReady(ctx, kube, WaitReadyOpts{AppliedFor: 1 * time.Minute, Timeout: 30 * time.Minute}); err != nil {
+			return fmt.Errorf("waiting for ready: %w", err)
 		}
 	}
 
@@ -1068,17 +1232,15 @@ func DoSetupPeerings(ctx context.Context, kube client.Client, vpcPeerings map[st
 	}
 
 	if changed && waitReady {
-		slog.Info("Waiting for switches ready after configuring VPC and External Peerings")
-
 		// TODO remove it when we can actually know that changes to VPC/VPCAttachment are reflected in agents
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("sleeping before waiting for switches ready: %w", ctx.Err())
+			return fmt.Errorf("sleeping before waiting for ready: %w", ctx.Err())
 		case <-time.After(15 * time.Second):
 		}
 
-		if err := WaitSwitchesReady(ctx, kube, 1*time.Minute, 30*time.Minute); err != nil {
-			return fmt.Errorf("waiting for switches ready: %w", err)
+		if err := WaitReady(ctx, kube, WaitReadyOpts{AppliedFor: 1 * time.Minute, Timeout: 30 * time.Minute}); err != nil {
+			return fmt.Errorf("waiting for ready: %w", err)
 		}
 	}
 
@@ -1158,10 +1320,8 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 	}
 
 	if opts.WaitSwitchesReady {
-		slog.Info("Waiting for switches ready before testing connectivity")
-
-		if err := WaitSwitchesReady(ctx, kube, 1*time.Minute, 30*time.Minute); err != nil {
-			return fmt.Errorf("waiting for switches ready: %w", err)
+		if err := WaitReady(ctx, kube, WaitReadyOpts{AppliedFor: 1 * time.Minute, Timeout: 30 * time.Minute}); err != nil {
+			return fmt.Errorf("waiting for ready: %w", err)
 		}
 	}
 
@@ -1705,201 +1865,6 @@ func isVPCSubnetPresentInPeering(peering *gwapi.PeeringEntry, vpc gwapi.VPCInfo,
 	return false, nil
 }
 
-func WaitSwitchesReady(ctx context.Context, kube client.Reader, appliedFor time.Duration, timeout time.Duration) error {
-	if timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, timeout)
-		defer cancel()
-	}
-
-	f, _, _, err := fab.GetFabAndNodes(ctx, kube, fab.GetFabAndNodesOpts{AllowNotHydrated: true})
-	if err != nil {
-		return fmt.Errorf("getting fab: %w", err)
-	}
-
-	// controller will expect agent of it's own version by default
-	expectedVersion := string(f.Status.Versions.Fabric.Controller)
-
-	for {
-		switches := &wiringapi.SwitchList{}
-		if err := kube.List(ctx, switches); err != nil {
-			return fmt.Errorf("listing switches: %w", err)
-		}
-
-		readyList := []string{}
-		notReadyList := []string{}
-		notUpdatedList := []string{}
-		updateFailedList := []string{}
-
-		allReady := true
-		allUpdated := true
-		for _, sw := range switches.Items {
-			ready := false
-			updated := false
-
-			ag := &agentapi.Agent{}
-			err := kube.Get(ctx, client.ObjectKey{Name: sw.Name, Namespace: sw.Namespace}, ag)
-			if err != nil && !apierrors.IsNotFound(err) {
-				return fmt.Errorf("getting agent %q: %w", sw.Name, err)
-			}
-
-			if err == nil {
-				// 1. make sure that desired agent version is the same as we expect (same as controller version)
-				// if it's not and we just finished the controller upgrade it means that controller didn't reconcile yet
-				ready = ag.Spec.Version.Default == expectedVersion
-
-				// 2. make sure last applied generation is the same as current generation
-				ready = ready && ag.Status.LastAppliedGen == ag.Generation
-
-				// 3. make sure last heartbeat is recent enough
-				ready = ready && time.Since(ag.Status.LastHeartbeat.Time) < 1*time.Minute
-
-				if appliedFor > 0 {
-					// 4. make sure agent config was applied for long enough
-					ready = ready && time.Since(ag.Status.LastAppliedTime.Time) >= appliedFor
-				}
-
-				updated = ag.Status.Version == expectedVersion
-			}
-
-			allReady = allReady && ready
-			allUpdated = allUpdated && updated
-
-			if ready {
-				readyList = append(readyList, sw.Name)
-			} else {
-				notReadyList = append(notReadyList, sw.Name)
-			}
-
-			if ag.Status.Version != "" {
-				if (ag.Spec.Version.Default != expectedVersion || ag.Status.LastAppliedGen != ag.Generation) && !updated {
-					notUpdatedList = append(notUpdatedList, sw.Name)
-				}
-
-				if ag.Spec.Version.Default == expectedVersion && ag.Status.LastAppliedGen == ag.Generation && !updated {
-					updateFailedList = append(updateFailedList, sw.Name)
-				}
-			}
-		}
-
-		slices.Sort(readyList)
-		slices.Sort(notReadyList)
-		slices.Sort(notUpdatedList)
-		slices.Sort(updateFailedList)
-
-		if appliedFor == 0 {
-			slog.Info("Switches status", "ready", readyList, "notReady", notReadyList)
-		} else {
-			slog.Info("Switches status (applied for "+fmt.Sprintf("%.1f minutes", appliedFor.Minutes())+")", "ready", readyList, "notReady", notReadyList)
-		}
-		if len(notUpdatedList) > 0 || len(updateFailedList) > 0 {
-			slog.Info("Switch agents", "notUpdated", notUpdatedList, "updateFailed", updateFailedList)
-		}
-
-		if allReady && allUpdated {
-			return nil
-		}
-
-		if allReady && !allUpdated {
-			return fmt.Errorf("all switches ready but some are not up-to-date")
-		}
-
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("waiting for switches ready: %w", ctx.Err())
-		case <-time.After(15 * time.Second):
-		}
-	}
-}
-
-func WaitGatewaysReady(ctx context.Context, kube client.Reader, appliedFor time.Duration, timeout time.Duration) error {
-	if timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, timeout)
-		defer cancel()
-	}
-
-	f, _, _, err := fab.GetFabAndNodes(ctx, kube, fab.GetFabAndNodesOpts{AllowNotHydrated: true})
-	if err != nil {
-		return fmt.Errorf("getting fab: %w", err)
-	}
-
-	// controller will expect agent of it's own version by default
-	expectedGWVersion := string(f.Status.Versions.Gateway.Controller)
-	// TODO check agent, dp and frr pods image versions
-	// expectedDPVersion := string(f.Status.Versions.Gateway.Dataplane)
-	// expectedFRRVersion := string(f.Status.Versions.Gateway.FRR)
-
-	for {
-		gws := &gwapi.GatewayList{}
-		if err := kube.List(ctx, gws); err != nil {
-			return fmt.Errorf("listing gateways: %w", err)
-		}
-
-		readyList := []string{}
-		notReadyList := []string{}
-		notUpdatedList := []string{}
-		updateFailedList := []string{}
-
-		allReady := true
-		allUpdated := true
-		for _, gw := range gws.Items {
-			ready := false
-			updated := false
-
-			gwag := &gwintapi.GatewayAgent{}
-			if err := kube.Get(ctx, client.ObjectKey{Name: gw.Name, Namespace: gw.Namespace}, gwag); err != nil {
-				return fmt.Errorf("getting gateway agent %s: %w", gw.Name, err)
-			}
-
-			ready = gwag.Status.LastAppliedGen == gwag.Generation
-
-			if appliedFor > 0 {
-				ready = ready && time.Since(gwag.Status.LastAppliedTime.Time) >= appliedFor
-			}
-
-			updated = gwag.Spec.CtrlVersion == expectedGWVersion
-
-			allReady = allReady && ready
-			allUpdated = allUpdated && updated
-
-			if ready {
-				readyList = append(readyList, gwag.Name)
-			} else {
-				notReadyList = append(notReadyList, gwag.Name)
-			}
-		}
-
-		slices.Sort(readyList)
-		slices.Sort(notReadyList)
-		slices.Sort(notUpdatedList)
-		slices.Sort(updateFailedList)
-
-		if appliedFor == 0 {
-			slog.Info("Gateways status", "ready", readyList, "notReady", notReadyList)
-		} else {
-			slog.Info("Gateways status (applied for "+fmt.Sprintf("%.1f minutes", appliedFor.Minutes())+")", "ready", readyList, "notReady", notReadyList)
-		}
-		if len(notUpdatedList) > 0 || len(updateFailedList) > 0 {
-			slog.Info("Gateway agents", "notUpdated", notUpdatedList, "updateFailed", updateFailedList)
-		}
-
-		if allReady && allUpdated {
-			return nil
-		}
-
-		if allReady && !allUpdated {
-			return fmt.Errorf("all gateways ready but some are not up-to-date")
-		}
-
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("waiting for gateways ready: %w", ctx.Err())
-		case <-time.After(15 * time.Second):
-		}
-	}
-}
-
 func retrySSHCmd(ctx context.Context, client *goph.Client, cmd string, target string) ([]byte, error) {
 	if client == nil {
 		return nil, fmt.Errorf("ssh client is nil")
@@ -2251,9 +2216,8 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 
 	fail := false
 
-	slog.Info("Waiting for switches ready before inspecting")
-	if err := WaitSwitchesReady(ctx, kube, opts.WaitAppliedFor, 30*time.Minute); err != nil {
-		slog.Error("Failed to wait for switches ready", "err", err)
+	if err := WaitReady(ctx, kube, WaitReadyOpts{AppliedFor: opts.WaitAppliedFor, Timeout: 30 * time.Minute}); err != nil {
+		slog.Error("Failed to wait for ready", "err", err)
 		fail = true
 	}
 

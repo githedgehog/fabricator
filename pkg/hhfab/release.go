@@ -27,6 +27,11 @@ import (
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+const (
+	waitAppliedFor = 1 * time.Minute
+	waitTimeout    = 5 * time.Minute
+)
+
 var (
 	errNoServers       = errors.New("no servers found")
 	errNoExternals     = errors.New("no external peers found")
@@ -867,8 +872,8 @@ func (testCtx *VPCPeeringTestCtx) multiSubnetsIsolationTest(ctx context.Context)
 			return errors.Join(err1, err2)
 		}
 		time.Sleep(5 * time.Second)
-		if err := WaitSwitchesReady(ctx, testCtx.kube, 1*time.Minute, 5*time.Minute); err != nil {
-			return fmt.Errorf("waiting for switches to be ready: %w", err)
+		if err := WaitReady(ctx, testCtx.kube, WaitReadyOpts{AppliedFor: waitAppliedFor, Timeout: waitTimeout}); err != nil {
+			return fmt.Errorf("waiting for ready: %w", err)
 		}
 
 		return nil
@@ -877,8 +882,8 @@ func (testCtx *VPCPeeringTestCtx) multiSubnetsIsolationTest(ctx context.Context)
 	// TODO: agent generation check to ensure that the change was picked up
 	// (tricky as we need to derive switch name from vpc, which involves quite a few steps)
 	time.Sleep(5 * time.Second)
-	if err := WaitSwitchesReady(ctx, testCtx.kube, 1*time.Minute, 5*time.Minute); err != nil {
-		returnErr = fmt.Errorf("waiting for switches to be ready: %w", err)
+	if err := WaitReady(ctx, testCtx.kube, WaitReadyOpts{AppliedFor: waitAppliedFor, Timeout: waitTimeout}); err != nil {
+		returnErr = fmt.Errorf("waiting for ready: %w", err)
 	} else if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
 		returnErr = fmt.Errorf("testing connectivity with isolated subnet-01: %w", err)
 	}
@@ -894,8 +899,8 @@ func (testCtx *VPCPeeringTestCtx) multiSubnetsIsolationTest(ctx context.Context)
 			returnErr = fmt.Errorf("updating VPC vpc-01: %w", err)
 		} else {
 			time.Sleep(5 * time.Second)
-			if err := WaitSwitchesReady(ctx, testCtx.kube, 1*time.Minute, 5*time.Minute); err != nil {
-				returnErr = fmt.Errorf("waiting for switches to be ready: %w", err)
+			if err := WaitReady(ctx, testCtx.kube, WaitReadyOpts{AppliedFor: waitAppliedFor, Timeout: waitTimeout}); err != nil {
+				returnErr = fmt.Errorf("waiting for ready: %w", err)
 			} else if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
 				returnErr = fmt.Errorf("testing connectivity with permit-list override: %w", err)
 			}
@@ -911,8 +916,8 @@ func (testCtx *VPCPeeringTestCtx) multiSubnetsIsolationTest(ctx context.Context)
 			returnErr = fmt.Errorf("updating VPC vpc-02: %w", err)
 		} else {
 			time.Sleep(5 * time.Second)
-			if err := WaitSwitchesReady(ctx, testCtx.kube, 1*time.Minute, 5*time.Minute); err != nil {
-				returnErr = fmt.Errorf("waiting for switches to be ready: %w", err)
+			if err := WaitReady(ctx, testCtx.kube, WaitReadyOpts{AppliedFor: waitAppliedFor, Timeout: waitTimeout}); err != nil {
+				returnErr = fmt.Errorf("waiting for ready: %w", err)
 			} else if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
 				returnErr = fmt.Errorf("testing connectivity with restricted subnet-02: %w", err)
 			}
@@ -995,16 +1000,16 @@ func (testCtx *VPCPeeringTestCtx) singleVPCWithRestrictionsTest(ctx context.Cont
 			return fmt.Errorf("updating VPC vpc-01: %w", err)
 		}
 		time.Sleep(5 * time.Second)
-		if err := WaitSwitchesReady(ctx, testCtx.kube, 1*time.Minute, 5*time.Minute); err != nil {
-			return fmt.Errorf("waiting for switches to be ready: %w", err)
+		if err := WaitReady(ctx, testCtx.kube, WaitReadyOpts{AppliedFor: waitAppliedFor, Timeout: waitTimeout}); err != nil {
+			return fmt.Errorf("waiting for ready: %w", err)
 		}
 
 		return nil
 	})
 
 	time.Sleep(5 * time.Second)
-	if err := WaitSwitchesReady(ctx, testCtx.kube, 1*time.Minute, 5*time.Minute); err != nil {
-		returnErr = fmt.Errorf("waiting for switches to be ready: %w", err)
+	if err := WaitReady(ctx, testCtx.kube, WaitReadyOpts{AppliedFor: waitAppliedFor, Timeout: waitTimeout}); err != nil {
+		returnErr = fmt.Errorf("waiting for ready: %w", err)
 	} else if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
 		returnErr = fmt.Errorf("testing connectivity with subnet-01 isolated: %w", err)
 	}
@@ -1018,8 +1023,8 @@ func (testCtx *VPCPeeringTestCtx) singleVPCWithRestrictionsTest(ctx context.Cont
 			returnErr = fmt.Errorf("updating VPC vpc-01: %w", err)
 		} else {
 			time.Sleep(5 * time.Second)
-			if err := WaitSwitchesReady(ctx, testCtx.kube, 1*time.Minute, 5*time.Minute); err != nil {
-				returnErr = fmt.Errorf("waiting for switches to be ready: %w", err)
+			if err := WaitReady(ctx, testCtx.kube, WaitReadyOpts{AppliedFor: waitAppliedFor, Timeout: waitTimeout}); err != nil {
+				returnErr = fmt.Errorf("waiting for ready: %w", err)
 			} else if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
 				returnErr = fmt.Errorf("testing connectivity: %w", err)
 			}
@@ -1036,8 +1041,8 @@ func (testCtx *VPCPeeringTestCtx) singleVPCWithRestrictionsTest(ctx context.Cont
 			returnErr = fmt.Errorf("updating VPC vpc-01: %w", err)
 		} else {
 			time.Sleep(5 * time.Second)
-			if err := WaitSwitchesReady(ctx, testCtx.kube, 1*time.Minute, 5*time.Minute); err != nil {
-				returnErr = fmt.Errorf("waiting for switches to be ready: %w", err)
+			if err := WaitReady(ctx, testCtx.kube, WaitReadyOpts{AppliedFor: waitAppliedFor, Timeout: waitTimeout}); err != nil {
+				returnErr = fmt.Errorf("waiting for ready: %w", err)
 			} else if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
 				returnErr = fmt.Errorf("testing connectivity: %w", err)
 			}
@@ -1055,8 +1060,8 @@ func (testCtx *VPCPeeringTestCtx) singleVPCWithRestrictionsTest(ctx context.Cont
 			returnErr = fmt.Errorf("updating VPC vpc-01: %w", err)
 		} else {
 			time.Sleep(5 * time.Second)
-			if err := WaitSwitchesReady(ctx, testCtx.kube, 1*time.Minute, 5*time.Minute); err != nil {
-				returnErr = fmt.Errorf("waiting for switches to be ready: %w", err)
+			if err := WaitReady(ctx, testCtx.kube, WaitReadyOpts{AppliedFor: waitAppliedFor, Timeout: waitTimeout}); err != nil {
+				returnErr = fmt.Errorf("waiting for ready: %w", err)
 			} else if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
 				returnErr = fmt.Errorf("testing connectivity: %w", err)
 			}
@@ -1146,8 +1151,8 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool,
 		if err := waitAgentGen(ctx, testCtx.kube, switchName, gen); err != nil {
 			return fmt.Errorf("waiting for agent generation: %w", err)
 		}
-		if err := WaitSwitchesReady(ctx, testCtx.kube, 1*time.Minute, 5*time.Minute); err != nil {
-			return fmt.Errorf("waiting for switches to be ready: %w", err)
+		if err := WaitReady(ctx, testCtx.kube, WaitReadyOpts{AppliedFor: waitAppliedFor, Timeout: waitTimeout}); err != nil {
+			return fmt.Errorf("waiting for ready: %w", err)
 		}
 		slog.Debug("Invoking hhnet cleanup on server", "server", server)
 		if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, server, "/opt/bin/hhnet cleanup"); err != nil {
@@ -1191,8 +1196,8 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool,
 		if err := waitAgentGen(ctx, testCtx.kube, switchName, gen); err != nil {
 			return fmt.Errorf("waiting for agent generation: %w", err)
 		}
-		if err := WaitSwitchesReady(ctx, testCtx.kube, 1*time.Minute, 5*time.Minute); err != nil {
-			return fmt.Errorf("waiting for switches to be ready: %w", err)
+		if err := WaitReady(ctx, testCtx.kube, WaitReadyOpts{AppliedFor: waitAppliedFor, Timeout: waitTimeout}); err != nil {
+			return fmt.Errorf("waiting for ready: %w", err)
 		}
 
 		return nil
@@ -1201,8 +1206,8 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool,
 	if err := waitAgentGen(ctx, testCtx.kube, switchName, gen); err != nil {
 		return false, reverts, err
 	}
-	if err := WaitSwitchesReady(ctx, testCtx.kube, 1, 5*time.Minute); err != nil {
-		return false, reverts, fmt.Errorf("waiting for switches to be ready: %w", err)
+	if err := WaitReady(ctx, testCtx.kube, WaitReadyOpts{AppliedFor: waitAppliedFor, Timeout: waitTimeout}); err != nil {
+		return false, reverts, fmt.Errorf("waiting for ready: %w", err)
 	}
 	gen, genErr = getAgentGen(ctx, testCtx.kube, switchName)
 	if genErr != nil {
@@ -1240,8 +1245,8 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool,
 	if err := waitAgentGen(ctx, testCtx.kube, switchName, gen); err != nil {
 		return false, reverts, err
 	}
-	if err := WaitSwitchesReady(ctx, testCtx.kube, 1*time.Minute, 5*time.Minute); err != nil {
-		return false, reverts, fmt.Errorf("waiting for switches to be ready: %w", err)
+	if err := WaitReady(ctx, testCtx.kube, WaitReadyOpts{AppliedFor: waitAppliedFor, Timeout: waitTimeout}); err != nil {
+		return false, reverts, fmt.Errorf("waiting for ready: %w", err)
 	}
 
 	// Add address and default route to en2ps1 on the server
@@ -1446,8 +1451,8 @@ func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (bool, []Re
 
 		// Wait for convergence
 		time.Sleep(5 * time.Second)
-		if err := WaitSwitchesReady(ctx, testCtx.kube, 1*time.Minute, 5*time.Minute); err != nil {
-			return fmt.Errorf("waiting for switches to be ready: %w", err)
+		if err := WaitReady(ctx, testCtx.kube, WaitReadyOpts{AppliedFor: waitAppliedFor, Timeout: waitTimeout}); err != nil {
+			return fmt.Errorf("waiting for ready: %w", err)
 		}
 		if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, serverName, "/opt/bin/hhnet cleanup"); err != nil {
 			return fmt.Errorf("cleaning up interfaces on %s: %w", serverName, err)
@@ -1470,8 +1475,8 @@ func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (bool, []Re
 
 	// Wait for convergence
 	time.Sleep(5 * time.Second)
-	if err := WaitSwitchesReady(ctx, testCtx.kube, 1*time.Minute, 5*time.Minute); err != nil {
-		return false, reverts, fmt.Errorf("waiting for switches to be ready: %w", err)
+	if err := WaitReady(ctx, testCtx.kube, WaitReadyOpts{AppliedFor: waitAppliedFor, Timeout: waitTimeout}); err != nil {
+		return false, reverts, fmt.Errorf("waiting for ready: %w", err)
 	}
 
 	// Configure network interfaces on target server
