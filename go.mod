@@ -42,7 +42,7 @@ require (
 	go.githedgehog.com/fabric v0.84.3
 	go.githedgehog.com/gateway v0.14.0
 	golang.org/x/crypto v0.40.0
-	golang.org/x/mod v0.25.0
+	golang.org/x/mod v0.26.0
 	golang.org/x/sync v0.16.0
 	golang.org/x/term v0.33.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
