@@ -4,19 +4,14 @@
 
 # Trivy airgapped installation script for gateway VM
 # Downloads on HOST, transfers to gateway VM for offline operation
-#
-# UPDATED: Uses hybrid approach - direct scanning for private registry images and export method for public images
-# This approach works reliably in airgapped K3s environments for all types of images
 
 set -e
 
-# Define colors for better readability
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
 
-# Configuration
 TRIVY_VERSION="0.63.0"  # Updated to latest version
 HOST_DOWNLOAD_DIR="/tmp/trivy-airgapped-$(date +%s)"
 
