@@ -76,7 +76,7 @@ fi
 
 CONTROL_VM="control-1"
 GATEWAY_VM="gateway-1"
-SWITCH_VM="leaf-01"
+SWITCH_VMS=("leaf-01" "spine-01" "spine-02")
 VLAB_LOG="vlab.log"
 RAW_SARIF_DIR="raw-sarif-reports"
 RESULTS_DIR="trivy-reports"
@@ -141,7 +141,7 @@ fi
 echo -e "${GREEN}Starting VLAB Trivy Scanner${NC}"
 echo "Control VM: $CONTROL_VM $([ "$RUN_CONTROL" = true ] && echo "(enabled)" || echo "(disabled)")"
 echo "Gateway VM: $GATEWAY_VM $([ "$RUN_GATEWAY" = true ] && echo "(enabled)" || echo "(disabled)")"
-echo "Switch VM: $SWITCH_VM $([ "$RUN_SWITCH" = true ] && echo "(enabled)" || echo "(disabled)")"
+echo "Switch VMs: ${SWITCH_VMS[*]} $([ "$RUN_SWITCH" = true ] && echo "(enabled)" || echo "(disabled)")"
 echo "Skip VLAB launch: $([ "$SKIP_VLAB_LAUNCH" = true ] && echo "Yes (using external VLAB)" || echo "No")"
 echo "Allow partial success: $([ "$ALLOW_PARTIAL_SUCCESS" = true ] && echo "Yes" || echo "No (strict mode)")"
 echo "hhfab binary: $HHFAB_BIN"
@@ -159,14 +159,21 @@ echo ""
 # Launch VLAB if not skipped
 if [ "$SKIP_VLAB_LAUNCH" = false ]; then
     VLAB_EXTRA_ARGS=""
-    if [ "$RUN_SWITCH" = true ]; then
-        VLAB_EXTRA_ARGS="--leaf"
-        echo -e "${YELLOW}Adding leaf nodes to VLAB topology for switch scanning${NC}"
+
+    # Add gateway flag if gateway scanning is enabled
+    if [ "$RUN_GATEWAY" = true ]; then
+        VLAB_EXTRA_ARGS="$VLAB_EXTRA_ARGS --gateway"
     fi
 
     if [ ! -f "fab.yaml" ]; then
-        echo -e "${YELLOW}Initializing VLAB (control + gateway)...${NC}"
-        $HHFAB_BIN init -v --dev --gateway $VLAB_EXTRA_ARGS
+        echo -e "${YELLOW}Initializing VLAB...${NC}"
+        $HHFAB_BIN init -v --dev $VLAB_EXTRA_ARGS
+
+        # Generate topology if switch scanning is enabled
+        if [ "$RUN_SWITCH" = true ]; then
+            echo -e "${YELLOW}Generating VLAB topology for switch scanning...${NC}"
+            $HHFAB_BIN vlab gen --spines-count 2 --fabric-links-count 1 --orphan-leafs-count 1 --mclag-leafs-count 0 --unbundled-servers 1 --bundled-servers 0 --mclag-servers 0 --eslag-servers 0 --vpc-loopbacks 0
+        fi
     fi
 
     echo -e "${YELLOW}Generating join token for gateway node...${NC}"
@@ -207,6 +214,67 @@ else
     echo -e "${YELLOW}Skipping VLAB launch (assuming VLAB is already running)${NC}"
 fi
 
+# Function to test SSH with retry for SONiC switches
+test_sonic_ssh() {
+    local vm_name="$1"
+    local max_retries=10
+    local retry_delay=90
+
+    echo "Testing SSH to $vm_name (SONiC switch with retries)..."
+    for ((i=1; i<=max_retries; i++)); do
+        if $HHFAB_BIN vlab ssh -b -n "$vm_name" -- 'echo "SSH works"' >/dev/null 2>&1; then
+            echo -e "${GREEN}SSH to $vm_name: SUCCESS (attempt $i)${NC}"
+            return 0
+        fi
+        if [ $i -lt $max_retries ]; then
+            echo "SSH retry $i/$max_retries for $vm_name (waiting ${retry_delay}s)..."
+            sleep $retry_delay
+        fi
+    done
+    echo -e "${RED}SSH to $vm_name: FAILED (all retries exhausted)${NC}"
+    return 1
+}
+
+# Function to verify switch images are consistent
+verify_switch_images() {
+    echo -e "${YELLOW}Verifying Docker images consistency across switches...${NC}"
+    local temp_images_dir="/tmp/switch-images-$$"
+    mkdir -p "$temp_images_dir"
+
+    for switch in "${SWITCH_VMS[@]}"; do
+        echo "Getting image list from $switch..."
+        $HHFAB_BIN vlab ssh -b -n "$switch" -- 'sudo docker images --format "{{.Repository}}:{{.Tag}}" | grep -v "^<none>" | sort' > "$temp_images_dir/$switch.txt" || {
+            echo -e "${RED}Failed to get images from $switch${NC}"
+            rm -rf "$temp_images_dir"
+            return 1
+        }
+    done
+
+    local reference_switch="${SWITCH_VMS[0]}"
+    local all_consistent=true
+
+    for switch in "${SWITCH_VMS[@]:1}"; do
+        if ! diff -q "$temp_images_dir/$reference_switch.txt" "$temp_images_dir/$switch.txt" >/dev/null; then
+            echo -e "${RED}Image mismatch between $reference_switch and $switch${NC}"
+            echo "Differences:"
+            diff "$temp_images_dir/$reference_switch.txt" "$temp_images_dir/$switch.txt" || true
+            all_consistent=false
+        fi
+    done
+
+    if [ "$all_consistent" = true ]; then
+        local image_count=$(wc -l < "$temp_images_dir/$reference_switch.txt")
+        echo -e "${GREEN}All switches have consistent Docker images ($image_count images)${NC}"
+    else
+        echo -e "${RED}Docker images are not consistent across switches${NC}"
+        rm -rf "$temp_images_dir"
+        return 1
+    fi
+
+    rm -rf "$temp_images_dir"
+    return 0
+}
+
 # SSH connectivity check
 echo -e "${YELLOW}Testing SSH connectivity...${NC}"
 
@@ -231,11 +299,13 @@ if [ "$RUN_GATEWAY" = true ]; then
 fi
 
 if [ "$RUN_SWITCH" = true ]; then
-    echo "Testing SSH to $SWITCH_VM..."
-    if $HHFAB_BIN vlab ssh -b -n "$SWITCH_VM" -- 'echo "SSH works"' >/dev/null 2>&1; then
-        echo -e "${GREEN}SSH to $SWITCH_VM: SUCCESS${NC}"
-    else
-        echo -e "${RED}SSH to $SWITCH_VM: FAILED${NC}"
+    for switch in "${SWITCH_VMS[@]}"; do
+        if ! test_sonic_ssh "$switch"; then
+            exit 1
+        fi
+    done
+
+    if ! verify_switch_images; then
         exit 1
     fi
 fi
@@ -276,17 +346,20 @@ setup_gateway_vm() {
     return 0
 }
 
-# Function to setup SONiC Switch (airgapped)
+# Function to setup SONiC Switches (airgapped)
 setup_switch_vm() {
-    echo -e "${YELLOW}=== Setting up SONiC Switch (airgap) ===${NC}"
+    echo -e "${YELLOW}=== Setting up SONiC Switches (airgap) ===${NC}"
 
-    echo "Running SONiC airgapped setup script..."
-    if ! HHFAB_BIN="$HHFAB_BIN" "$SONIC_AIRGAPPED_SCRIPT_PATH" --leaf-node "$SWITCH_VM"; then
-        echo -e "${RED}Failed to setup Trivy on SONiC Switch in airgapped mode${NC}"
-        return 1
-    fi
+    # Setup Trivy on all switches for load balancing
+    for switch in "${SWITCH_VMS[@]}"; do
+        echo "Setting up $switch..."
+        if ! HHFAB_BIN="$HHFAB_BIN" "$SONIC_AIRGAPPED_SCRIPT_PATH" --leaf-node "$switch"; then
+            echo -e "${RED}Failed to setup Trivy on $switch${NC}"
+            return 1
+        fi
+    done
 
-    echo -e "${GREEN}SONiC Switch setup complete (airgap)${NC}"
+    echo -e "${GREEN}All SONiC Switches setup complete (airgap)${NC}"
     return 0
 }
 
@@ -310,12 +383,12 @@ else
     GATEWAY_SETUP=0
 fi
 
-# Setup SONiC Switch (airgapped mode)
+# Setup SONiC Switches (airgapped mode)
 if [ "$RUN_SWITCH" = true ]; then
     setup_switch_vm
     SWITCH_SETUP=$?
 else
-    echo "Skipping SONiC Switch setup (disabled)"
+    echo "Skipping SONiC Switches setup (disabled)"
     SWITCH_SETUP=0
 fi
 
@@ -335,7 +408,7 @@ scan_vm() {
     # Determine VM type
     if [[ "$vm_name" == "$GATEWAY_VM" ]]; then
         vm_type="gateway"
-    elif [[ "$vm_name" == "$SWITCH_VM" ]]; then
+    elif [[ " ${SWITCH_VMS[*]} " =~ " $vm_name " ]]; then
         vm_type="switch"
     fi
 
@@ -376,7 +449,7 @@ scan_vm() {
     # Save container images list for later processing
     echo "$IMAGES" > "$vm_results_dir/container_images.txt"
 
-    # Display images found for scanning (from master version)
+    # Display images
     readarray -t image_array <<< "$IMAGES"
     local image_count=${#image_array[@]}
 
@@ -389,11 +462,9 @@ scan_vm() {
     printf '%s\n' "${image_array[@]}"
     echo "==============================="
 
-    # Collect raw SARIF files
     echo "Collecting raw SARIF files from VM..."
     mkdir -p "$RAW_SARIF_DIR/$vm_name"
 
-    # Check if SARIF files exist first
     sarif_count=$($HHFAB_BIN vlab ssh -b -n "$vm_name" -- 'sudo find /var/lib/trivy/reports -name "*_critical.sarif" -type f | wc -l' 2>/dev/null || echo 0)
     echo "Found $sarif_count SARIF files on $vm_name"
 
@@ -471,10 +542,106 @@ else
 fi
 
 if [ "$RUN_SWITCH" = true ]; then
-    scan_vm "$SWITCH_VM"
-    SWITCH_RESULT=$?
+    # Load balance scanning across all switches
+    echo -e "${YELLOW}Load balancing switch scanning across ${#SWITCH_VMS[@]} switches...${NC}"
+
+    primary_switch="${SWITCH_VMS[0]}"
+    echo "Getting container list from $primary_switch..."
+    ALL_IMAGES=$($HHFAB_BIN vlab ssh -b -n "$primary_switch" -- 'sudo docker ps --format "{{.Image}}" | grep -v "trivy" | sort -u' || echo "")
+
+    if [ -z "$ALL_IMAGES" ]; then
+        echo "No containers found for scanning"
+        SWITCH_RESULT=1
+    else
+        readarray -t image_array <<< "$ALL_IMAGES"
+        total_images=${#image_array[@]}
+        echo "Found $total_images unique images to scan across ${#SWITCH_VMS[@]} switches"
+
+        switch_results_dir="$RESULTS_DIR/sonic-switches"
+        mkdir -p "$switch_results_dir"
+        echo "$ALL_IMAGES" > "$switch_results_dir/container_images.txt"
+
+        # Distribute images across switches
+        SWITCH_PIDS=()
+
+        for i in "${!SWITCH_VMS[@]}"; do
+            switch="${SWITCH_VMS[$i]}"
+
+            # Calculate which images this switch should scan
+            images_for_switch=()
+            for ((j=i; j<total_images; j+=$((${#SWITCH_VMS[@]})))); do
+                images_for_switch+=("${image_array[$j]}")
+            done
+
+            if [ ${#images_for_switch[@]} -gt 0 ]; then
+                echo "Assigning ${#images_for_switch[@]} images to $switch: ${images_for_switch[*]}"
+
+                (
+                    echo "Starting load-balanced scan on $switch..."
+                    scan_success=true
+
+                    for image in "${images_for_switch[@]}"; do
+                        echo "Scanning $image on $switch..."
+                        if ! $HHFAB_BIN vlab ssh -b -n "$switch" -- "sudo /var/lib/trivy/scan-sonic-airgapped.sh '$image'"; then
+                            echo "Failed to scan $image on $switch"
+                            scan_success=false
+                        fi
+                    done
+
+                    if [ "$scan_success" = true ]; then
+                        echo "0" > "/tmp/switch-result-$switch"
+                    else
+                        echo "1" > "/tmp/switch-result-$switch"
+                    fi
+                ) &
+                SWITCH_PIDS+=($!)
+            fi
+        done
+
+        # Wait for all switch scans to complete
+        for i in "${!SWITCH_PIDS[@]}"; do
+            wait "${SWITCH_PIDS[$i]}"
+        done
+
+        echo "Collecting scan results from all switches..."
+        SWITCH_RESULT=0
+
+        for switch in "${SWITCH_VMS[@]}"; do
+            if [ -f "/tmp/switch-result-$switch" ]; then
+                result=$(cat "/tmp/switch-result-$switch")
+                if [ $result -ne 0 ]; then
+                    SWITCH_RESULT=1
+                fi
+                rm -f "/tmp/switch-result-$switch"
+            fi
+
+            echo "Collecting results from $switch..."
+            mkdir -p "$RAW_SARIF_DIR/sonic-switches"
+
+            sarif_count=$($HHFAB_BIN vlab ssh -b -n "$switch" -- 'sudo find /var/lib/trivy/reports -name "*_critical.sarif" -type f | wc -l' 2>/dev/null || echo 0)
+            if [ "$sarif_count" -gt 0 ]; then
+                $HHFAB_BIN vlab ssh -b -n "$switch" -- "cd /var/lib/trivy/reports && sudo find . -name '*_critical.sarif' -type f -exec sudo tar rf /tmp/sarif-files.tar {} \\; && sudo gzip /tmp/sarif-files.tar" 2>/dev/null || true
+                $HHFAB_BIN vlab ssh -b -n "$switch" -- "cat /tmp/sarif-files.tar.gz" > "/tmp/sarif-files-${switch}.tar.gz" 2>/dev/null || true
+                tar -xzf "/tmp/sarif-files-${switch}.tar.gz" -C "$RAW_SARIF_DIR/sonic-switches" 2>/dev/null || true
+                rm -f "/tmp/sarif-files-${switch}.tar.gz"
+            fi
+
+            $HHFAB_BIN vlab ssh -b -n "$switch" -- 'sudo find /var/lib/trivy/reports -name "*.txt" -o -name "*.json" | head -1' >/dev/null 2>&1 && {
+                $HHFAB_BIN vlab ssh -b -n "$switch" -- 'sudo tar czf /tmp/trivy-reports.tar.gz -C /var/lib/trivy/reports . 2>/dev/null' || true
+                $HHFAB_BIN vlab ssh -b -n "$switch" -- 'test -s /tmp/trivy-reports.tar.gz' && {
+                    $HHFAB_BIN vlab ssh -b -n "$switch" -- 'cat /tmp/trivy-reports.tar.gz' > "$switch_results_dir/trivy-reports-${switch}.tar.gz"
+                    (cd "$switch_results_dir" && tar xzf "trivy-reports-${switch}.tar.gz" && rm "trivy-reports-${switch}.tar.gz") || true
+                }
+            }
+
+            # Clean up remote temp files
+            $HHFAB_BIN vlab ssh -b -n "$switch" -- "sudo rm -f /tmp/sarif-files.tar.gz /tmp/trivy-reports.tar.gz" || true
+        done
+
+        echo -e "${GREEN}Load-balanced scanning across switches completed${NC}"
+    fi
 else
-    echo "Skipping Switch VM scan (disabled)"
+    echo "Skipping Switch VMs scan (disabled)"
     SWITCH_RESULT=0
 fi
 
@@ -503,12 +670,12 @@ fi
 
 if [ "$RUN_SWITCH" = true ]; then
     if [ $SWITCH_RESULT -eq 0 ]; then
-        echo -e "${GREEN}SONiC Switch ($SWITCH_VM): SUCCESS${NC}"
+        echo -e "${GREEN}SONiC Switches: SUCCESS${NC}"
     else
-        echo -e "${RED}SONiC Switch ($SWITCH_VM): FAILED${NC}"
+        echo -e "${RED}SONiC Switches: FAILED${NC}"
     fi
 else
-    echo -e "${YELLOW}SONiC Switch ($SWITCH_VM): SKIPPED${NC}"
+    echo -e "${YELLOW}SONiC Switches: SKIPPED${NC}"
 fi
 
 SUCCESS=true
@@ -588,7 +755,8 @@ if [ "$SUCCESS" = true ]; then
                     case "$vm_name" in
                         control-*) vm_display_name="Control VM" ;;
                         gateway-*) vm_display_name="Gateway VM" ;;
-                        leaf-*|*switch*) vm_display_name="SONiC Switch" ;;
+                        sonic-switches) vm_display_name="SONiC Switches" ;;
+                        leaf-*|spine-*|*switch*) vm_display_name="SONiC Switch ($vm_name)" ;;
                         *) vm_display_name="$vm_name" ;;
                     esac
 
@@ -613,7 +781,8 @@ if [ "$SUCCESS" = true ]; then
                         case "$vm_name" in
                             control-*) vm_display_name="Control VM" ;;
                             gateway-*) vm_display_name="Gateway VM" ;;
-                            leaf-*|*switch*) vm_display_name="SONiC Switch" ;;
+                            sonic-switches) vm_display_name="SONiC Switches" ;;
+                            leaf-*|spine-*|*switch*) vm_display_name="SONiC Switch ($vm_name)" ;;
                             *) vm_display_name="$vm_name" ;;
                         esac
 
