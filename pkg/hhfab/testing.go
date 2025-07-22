@@ -884,6 +884,8 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 
 			remote := ""
 			gw := false
+			vpc1Subnets := []string{}
+			vpc2Subnets := []string{}
 			for idx, option := range parts[1:] {
 				parts := strings.Split(option, "=")
 				if len(parts) > 2 {
@@ -908,6 +910,10 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 					}
 				} else if optName == "gw" || optName == "gateway" {
 					gw = true
+				} else if optName == "vpc1" || optName == "vpc1-subnets" {
+					vpc1Subnets = strings.Split(optValue, ",")
+				} else if optName == "vpc2" || optName == "vpc2-subnets" {
+					vpc2Subnets = strings.Split(optValue, ",")
 				} else {
 					return fmt.Errorf("invalid peering option #%d %s", idx, option)
 				}
@@ -917,8 +923,12 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 				vpcPeerings[fmt.Sprintf("%s--%s", vpc1, vpc2)] = &vpcapi.VPCPeeringSpec{
 					Permit: []map[string]vpcapi.VPCPeer{
 						{
-							vpc1: {},
-							vpc2: {},
+							vpc1: {
+								Subnets: vpc1Subnets,
+							},
+							vpc2: {
+								Subnets: vpc2Subnets,
+							},
 						},
 					},
 					Remote: remote,
@@ -930,14 +940,22 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 
 				vpc1Expose := gwapi.PeeringEntryExpose{}
 				if vpc, ok := vpcs[vpc1]; ok {
-					for _, subnet := range vpc.Spec.Subnets {
+					for subnetName, subnet := range vpc.Spec.Subnets {
+						if len(vpc1Subnets) > 0 && !slices.Contains(vpc1Subnets, subnetName) {
+							continue
+						}
+
 						vpc1Expose.IPs = append(vpc1Expose.IPs, gwapi.PeeringEntryIP{CIDR: subnet.Subnet})
 					}
 				}
 
 				vpc2Expose := gwapi.PeeringEntryExpose{}
 				if vpc, ok := vpcs[vpc2]; ok {
-					for _, subnet := range vpc.Spec.Subnets {
+					for subnetName, subnet := range vpc.Spec.Subnets {
+						if len(vpc2Subnets) > 0 && !slices.Contains(vpc2Subnets, subnetName) {
+							continue
+						}
+
 						vpc2Expose.IPs = append(vpc2Expose.IPs, gwapi.PeeringEntryIP{CIDR: subnet.Subnet})
 					}
 				}
