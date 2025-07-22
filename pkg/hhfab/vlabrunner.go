@@ -624,7 +624,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 					// TODO make it configurable
 					peerings := []string{}
 					if c.Fab.Spec.Config.Fabric.Mode != meta.FabricModeCollapsedCore {
-						peerings = append(peerings, "1+2:vpc1=subnet-01:vpc2=subnet-01")
+						peerings = append(peerings, "1+2") // subnet filtering not going to work on a vlab
 						if c.Fab.Spec.Config.Gateway.Enable {
 							peerings = append(peerings, "2+3:gw:vpc1=subnet-01:vpc2=subnet-01")
 						}
