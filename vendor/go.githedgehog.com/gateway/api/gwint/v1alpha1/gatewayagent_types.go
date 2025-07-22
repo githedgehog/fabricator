@@ -17,15 +17,17 @@ type VPCInfoData struct {
 
 // GatewayAgentSpec defines the desired state of GatewayAgent.
 type GatewayAgentSpec struct {
-	// CtrlVersion is the version of the gateway controller to trigger generation changes on controler upgrade
-	CtrlVersion string                       `json:"ctrlVersion,omitempty"`
-	Gateway     gwapi.GatewaySpec            `json:"gateway,omitempty"`
-	VPCs        map[string]VPCInfoData       `json:"vpcs,omitempty"`
-	Peerings    map[string]gwapi.PeeringSpec `json:"peerings,omitempty"`
+	// AgentVersion is the desired version of the gateway agent to trigger generation changes on controller upgrades
+	AgentVersion string                       `json:"agentVersion,omitempty"`
+	Gateway      gwapi.GatewaySpec            `json:"gateway,omitempty"`
+	VPCs         map[string]VPCInfoData       `json:"vpcs,omitempty"`
+	Peerings     map[string]gwapi.PeeringSpec `json:"peerings,omitempty"`
 }
 
 // GatewayAgentStatus defines the observed state of GatewayAgent.
 type GatewayAgentStatus struct {
+	// AgentVersion is the version of the gateway agent
+	AgentVersion string `json:"agentVersion,omitempty"`
 	// Time of the last successful configuration application
 	LastAppliedTime kmetav1.Time `json:"lastAppliedTime,omitempty"`
 	// Generation of the last successful configuration application
