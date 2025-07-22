@@ -1087,6 +1087,15 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 }
 
 func DoSetupPeerings(ctx context.Context, kube client.Client, vpcPeerings map[string]*vpcapi.VPCPeeringSpec, externalPeerings map[string]*vpcapi.ExternalPeeringSpec, gwPeerings map[string]*gwapi.PeeringSpec, waitReady bool) error {
+	f, _, _, err := fab.GetFabAndNodes(ctx, kube, fab.GetFabAndNodesOpts{AllowNotHydrated: true})
+	if err != nil {
+		return fmt.Errorf("getting fab: %w", err)
+	}
+
+	if !f.Spec.Config.Gateway.Enable && len(gwPeerings) > 0 {
+		return fmt.Errorf("gateway peerings are not supported when gateway is not enabled")
+	}
+
 	var changed bool
 
 	vpcPeeringList := &vpcapi.VPCPeeringList{}
@@ -1124,19 +1133,21 @@ func DoSetupPeerings(ctx context.Context, kube client.Client, vpcPeerings map[st
 	}
 
 	gwPeeringList := &gwapi.PeeringList{}
-	if err := kube.List(ctx, gwPeeringList); err != nil {
-		return fmt.Errorf("listing gateway peerings: %w", err)
-	}
-	for _, peering := range gwPeeringList.Items {
-		if gwPeerings[peering.Name] != nil {
-			continue
+	if f.Spec.Config.Gateway.Enable {
+		if err := kube.List(ctx, gwPeeringList); err != nil {
+			return fmt.Errorf("listing gateway peerings: %w", err)
 		}
+		for _, peering := range gwPeeringList.Items {
+			if gwPeerings[peering.Name] != nil {
+				continue
+			}
 
-		slog.Info("Deleting GatewayPeering", "name", peering.Name)
-		changed = true
+			slog.Info("Deleting GatewayPeering", "name", peering.Name)
+			changed = true
 
-		if err := client.IgnoreNotFound(kube.Delete(ctx, &peering)); err != nil {
-			return fmt.Errorf("deleting gateway peering %s: %w", peering.Name, err)
+			if err := client.IgnoreNotFound(kube.Delete(ctx, &peering)); err != nil {
+				return fmt.Errorf("deleting gateway peering %s: %w", peering.Name, err)
+			}
 		}
 	}
 
