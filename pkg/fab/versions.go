@@ -15,8 +15,8 @@ var (
 	FabricatorVersion = meta.Version(version.Version)
 	FabricVersion     = meta.Version("v0.84.3")
 	GatewayVersion    = meta.Version("v0.16.0")
-	DataplaneVersion  = meta.Version("main.x86_64-unknown-linux-gnu.debug.de959277851ab3afc638e69082303c919a2c3118")
-	FRRVersion        = meta.Version("563dd43c50e7509eabc834d818b9744184e14fb5.debug")
+	DataplaneVersion  = meta.Version("main.x86_64-unknown-linux-gnu.debug.f27f76cd91213cf4dc85d0dab95e7c70ede30efc")
+	FRRVersion        = meta.Version("0ba323e489ea2baf3f85fc42ff23aff674a25690.debug")
 )
 
 var Versions = fabapi.Versions{
