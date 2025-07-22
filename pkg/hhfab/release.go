@@ -41,8 +41,16 @@ var (
 	errNoBundled       = errors.New("no bundled connections found")
 	errNoUnbundled     = errors.New("no unbundled connections found")
 	errNotEnoughSpines = errors.New("not enough spines found")
+	errNotEnoughVPCs   = errors.New("not enough VPCs found")
 	errNoRoceLeaves    = errors.New("no leaves supporting RoCE found")
-	errInitalSetup     = errors.New("initial setup failed")
+	errInitialSetup    = errors.New("initial setup failed")
+)
+
+const (
+	StaticExternalNH         = "172.31.255.1"
+	StaticExternalIP         = "172.31.255.5"
+	StaticExternalPL         = "24"
+	StaticExternalDummyIface = "10.199.0.100"
 )
 
 const extName = "default"
@@ -185,7 +193,7 @@ func populateAllExternalVpcPeerings(ctx context.Context, kube kclient.Client, ex
 // Get last applied generation of the hedgehog agent on switch swName
 func getAgentGen(ctx context.Context, kube kclient.Client, swName string) (int64, error) {
 	ag := &agentapi.Agent{}
-	err := kube.Get(ctx, kclient.ObjectKey{Name: swName, Namespace: "default"}, ag)
+	err := kube.Get(ctx, kclient.ObjectKey{Name: swName, Namespace: kmetav1.NamespaceDefault}, ag)
 	if err != nil {
 		return -1, fmt.Errorf("getting agent %s: %w", swName, err)
 	}
@@ -200,7 +208,7 @@ func waitAgentGen(ctx context.Context, kube kclient.Client, swName string, lastG
 	ag := &agentapi.Agent{}
 
 	for {
-		err := kube.Get(ctx, kclient.ObjectKey{Name: swName, Namespace: "default"}, ag)
+		err := kube.Get(ctx, kclient.ObjectKey{Name: swName, Namespace: kmetav1.NamespaceDefault}, ag)
 		if err != nil {
 			return fmt.Errorf("getting agent %s: %w", swName, err)
 		}
@@ -324,7 +332,7 @@ func changeSwitchPortStatus(hhfabBin, workDir, deviceName, nosPortName string, u
 }
 
 // ping the IP address ip from node nodeName, expectSuccess determines whether the ping should succeed or fail.
-func pingFromServer(hhfabBin, workDir, nodeName, ip string, expectSuccess bool) error {
+func pingFromFabricNode(hhfabBin, workDir, nodeName, ip string, sourceIP string, expectSuccess bool) error {
 	cmd := exec.Command(
 		hhfabBin,
 		"vlab",
@@ -334,8 +342,11 @@ func pingFromServer(hhfabBin, workDir, nodeName, ip string, expectSuccess bool) 
 		"ping",
 		"-c", "3",
 		"-W", "1",
-		ip,
 	)
+	if sourceIP != "" {
+		cmd.Args = append(cmd.Args, "-I", sourceIP)
+	}
+	cmd.Args = append(cmd.Args, ip)
 	cmd.Dir = workDir
 	out, err := cmd.CombinedOutput()
 	// NOTE: there's no real need to check the output as, when both -c and -W are specified,
@@ -378,7 +389,7 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsStarterTest(ctx context.Context) (b
 	// check whether border switchgroup exists
 	remote := "border"
 	swGroup := &wiringapi.SwitchGroup{}
-	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: remote}, swGroup); err != nil {
+	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: remote}, swGroup); err != nil {
 		slog.Warn("Border switch group not found, not using remote", "error", err)
 		remote = ""
 	}
@@ -501,7 +512,7 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsSergeisSpecialTest(ctx context.Cont
 	// check whether border switchgroup exists
 	remote := "border"
 	swGroup := &wiringapi.SwitchGroup{}
-	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: remote}, swGroup); err != nil {
+	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: remote}, swGroup); err != nil {
 		slog.Warn("Border switch group not found, not using remote", "error", err)
 		remote = ""
 	}
@@ -530,11 +541,11 @@ func shutDownLinkAndTest(ctx context.Context, testCtx *VPCPeeringTestCtx, link w
 	// get switch profile to find the port name in sonic-cli
 	sw := &wiringapi.Switch{}
 	switchName := switchPort.DeviceName()
-	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: switchName}, sw); err != nil {
+	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: switchName}, sw); err != nil {
 		return fmt.Errorf("getting switch %s: %w", switchName, err)
 	}
 	profile := &wiringapi.SwitchProfile{}
-	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: sw.Spec.Profile}, profile); err != nil {
+	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: sw.Spec.Profile}, profile); err != nil {
 		return fmt.Errorf("getting switch profile %s: %w", sw.Spec.Profile, err)
 	}
 	portMap, err := profile.Spec.GetAPI2NOSPortsFor(&sw.Spec)
@@ -733,7 +744,7 @@ outer:
 		slog.Debug("Disabling links to spine", "spine", spine.Name)
 		// get switch profile to find the port name in sonic-cli
 		profile := &wiringapi.SwitchProfile{}
-		if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: spine.Spec.Profile}, profile); err != nil {
+		if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: spine.Spec.Profile}, profile); err != nil {
 			return false, nil, fmt.Errorf("getting switch profile %s: %w", spine.Spec.Profile, err)
 		}
 		portMap, err := profile.Spec.GetAPI2NOSPortsFor(&spine.Spec)
@@ -836,7 +847,7 @@ func (testCtx *VPCPeeringTestCtx) multiSubnetsIsolationTest(ctx context.Context)
 
 	// modify vpc-01 to have isolated subnets
 	vpc := &vpcapi.VPC{}
-	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: "vpc-01"}, vpc); err != nil {
+	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: "vpc-01"}, vpc); err != nil {
 		return false, nil, fmt.Errorf("getting VPC vpc-01: %w", err)
 	}
 	if len(vpc.Spec.Subnets) != 3 {
@@ -845,7 +856,7 @@ func (testCtx *VPCPeeringTestCtx) multiSubnetsIsolationTest(ctx context.Context)
 
 	// this is going to be used later, let's get it out of the way
 	vpc2 := &vpcapi.VPC{}
-	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: "vpc-02"}, vpc2); err != nil {
+	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: "vpc-02"}, vpc2); err != nil {
 		return false, nil, fmt.Errorf("getting VPC vpc-02: %w", err)
 	}
 	if len(vpc2.Spec.Subnets) != 3 {
@@ -972,7 +983,7 @@ func (testCtx *VPCPeeringTestCtx) singleVPCWithRestrictionsTest(ctx context.Cont
 
 	// isolate subnet-01
 	vpc := &vpcapi.VPC{}
-	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: "vpc-01"}, vpc); err != nil {
+	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: "vpc-01"}, vpc); err != nil {
 		return false, nil, fmt.Errorf("getting VPC vpc-01: %w", err)
 	}
 	if len(vpc.Spec.Subnets) != 3 {
@@ -1083,20 +1094,40 @@ func (testCtx *VPCPeeringTestCtx) singleVPCWithRestrictionsTest(ctx context.Cont
 	return false, reverts, returnErr
 }
 
-/* test following the manual steps to test static external attachments:
- * 1. find an unbundled connection, take note of params (server, switch, switch port, server port)
- * 2. delete the existing VPC attachement associated with the connection
- * 3. delete the connection
- * 4. create a new connection with the static external specified, using the port which is connected to the server
- * 4a. specify that the static external is within an existing vpc, i.e. vpc-01
- * 5. ssh into server, cleanup with hhfctl, then add the address specified in the static external, i.e. 172.31.255.1/24, to en2ps1 + set it up
- * 6. ssh into server and add a default route via the nexthop specified in the static external, i.e. 172.31.255.5
- * 7. ssh into a server in the specified vpc, and ping the address specified in the static external, i.e. 172.31.255.1
- * 8. add dummy interfaces within the subnets specified in the static external and ping them from the source server
- * 9. cleanup everything and restore the original state
+func (testCtx *VPCPeeringTestCtx) pingStaticExternal(sourceNode string, sourceIP string, expected bool) error {
+	slog.Debug("Pinging static external next hop", "sourceNode", sourceNode, "next-hop", StaticExternalNH, "expected", expected)
+	if err := pingFromFabricNode(testCtx.hhfabBin, testCtx.workDir, sourceNode, StaticExternalNH, sourceIP, expected); err != nil {
+		return fmt.Errorf("ping from %s to %s: %w", sourceNode, StaticExternalNH, err)
+	}
+	slog.Debug("Pinging static external dummy interface", "sourceNode", sourceNode, "dummy-interface", StaticExternalDummyIface, "expected", expected)
+	if err := pingFromFabricNode(testCtx.hhfabBin, testCtx.workDir, sourceNode, StaticExternalDummyIface, sourceIP, expected); err != nil {
+		return fmt.Errorf("ping from %s to %s: %w", sourceNode, StaticExternalDummyIface, err)
+	}
+
+	return nil
+}
+
+/* This test replaces a server with a "static external" node, Here are the test steps:
+ * 0. find an unbundled connection THAT IS NOT ATTACHED TO AN MCLAG SWITCH, take note of params (target server, switch, switch port, server port)
+ * 1. find two VPCs with at least one server attached to each, i.e. vpc1 and vpc2
+ * 2. delete the existing VPC attachement associated with the unbundled connection
+ * 3. delete the unbundled connection
+ * 4. create a new static external connection, using the port which is connected to the target server
+ * 5. specify that the static external is within an existing vpc, i.e. vpc1
+ * 6. ssh into target server, cleanup with hhfctl, then add the address specified in the static external, i.e. 172.31.255.1/24, to en2ps1 + set it up
+ * 6a. add a default route via the nexthop specified in the static external, i.e. 172.31.255.5
+ * 6b. add dummy interfaces within the subnets specified in the static external, e.g. 10.199.0.100/32
+ * 7. select a server in vpc1, ssh into it and perform the following tests (should succeed):
+ * 7a. ping the address specified in the static external, i.e. 172.31.255.1
+ * 7b. ping the dummy interface, i.e. 10.199.0.100
+ * 8. repeat tests 7a and 7b from a server in a different VPC, i.e. vpc2 (should fail)
+ * 9. change the static External to not be attached to a VPC, i.e. set `withinVpc` to an empty string (NOTE: this requires delete + recreate)
+ * 10. repeat tests 7a and 7b from a server in vpc1 (should fail)
+ * 10a. repeat tests 7a and 7b from a switch that's not the one the static external is attached to (should succeed)
+ * 11. cleanup everything and restore the original state
  */
 func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool, []RevertFunc, error) {
-	// find an unbundled connection
+	// find an unbundled connection not attached to an MCLAG switch (see https://github.com/githedgehog/fabricator/issues/673#issuecomment-3028423762)
 	connList := &wiringapi.ConnectionList{}
 	if err := testCtx.kube.List(ctx, connList, kclient.MatchingLabels{wiringapi.LabelConnectionType: wiringapi.ConnectionTypeUnbundled}); err != nil {
 		return false, nil, fmt.Errorf("listing connections: %w", err)
@@ -1106,12 +1137,85 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool,
 
 		return true, nil, errNoUnbundled
 	}
-	conn := connList.Items[0]
-	server := conn.Spec.Unbundled.Link.Server.DeviceName()
+	swList := &wiringapi.SwitchList{}
+	if err := testCtx.kube.List(ctx, swList); err != nil {
+		return false, nil, fmt.Errorf("listing switches: %w", err)
+	}
+	mclagSwitches := make(map[string]bool, 0)
+	for _, sw := range swList.Items {
+		if sw.Spec.Redundancy.Type == meta.RedundancyTypeMCLAG {
+			mclagSwitches[sw.Name] = true
+		}
+	}
+	var conn *wiringapi.Connection
+	for _, c := range connList.Items {
+		swName := c.Spec.Unbundled.Link.Switch.DeviceName()
+		if _, ok := mclagSwitches[swName]; !ok {
+			conn = &c
+
+			break
+		}
+	}
+	if conn == nil {
+		slog.Info("No unbundled connections found that are not attached to an MCLAG switch, skipping test")
+
+		return true, nil, errNoUnbundled
+	}
+	targetServer := conn.Spec.Unbundled.Link.Server.DeviceName()
 	switchName := conn.Spec.Unbundled.Link.Switch.DeviceName()
 	switchPortName := conn.Spec.Unbundled.Link.Switch.PortName()
 	serverPortName := conn.Spec.Unbundled.Link.Server.LocalPortName()
-	slog.Debug("Found unbundled connection", "connection", conn.Name, "server", server, "switch", switchName, "port", switchPortName)
+	slog.Debug("Found unbundled connection", "connection", conn.Name, "server", targetServer, "switch", switchName, "port", switchPortName)
+
+	// find two VPCs with at least a server attached to each, we'll need them later for testing
+	vpcList := &vpcapi.VPCList{}
+	if err := testCtx.kube.List(ctx, vpcList); err != nil {
+		return false, nil, fmt.Errorf("listing VPCs: %w", err)
+	}
+	if len(vpcList.Items) < 2 {
+		slog.Info("Not enough VPCs found, skipping test")
+
+		return true, nil, errNotEnoughVPCs
+	}
+	var vpc1, vpc2 *vpcapi.VPC
+	var server1, server2 string
+	vpcAttachList := &vpcapi.VPCAttachmentList{}
+	for _, vpc := range vpcList.Items {
+		if err := testCtx.kube.List(ctx, vpcAttachList, kclient.MatchingLabels{wiringapi.LabelVPC: vpc.Name}); err != nil {
+			return false, nil, fmt.Errorf("listing VPCAttachments for VPC %s: %w", vpc.Name, err)
+		}
+		for _, vpcAttach := range vpcAttachList.Items {
+			conn := &wiringapi.Connection{}
+			connName := vpcAttach.Spec.Connection
+			if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: connName}, conn); err != nil {
+				return false, nil, fmt.Errorf("getting connection %s for VPC Attach %s: %w", connName, vpcAttach.Name, err)
+			}
+			_, servers, _, _, _ := conn.Spec.Endpoints()
+			if len(servers) != 1 {
+				return false, nil, fmt.Errorf("expected 1 server for connection %s, got %d", conn.Name, len(servers)) //nolint:goerr113
+			}
+			if servers[0] == targetServer {
+				slog.Debug("Skipping target server", "vpc", vpc.Name, "server", targetServer)
+
+				continue
+			}
+			if vpc1 == nil {
+				vpc1 = &vpc
+				server1 = servers[0]
+			} else {
+				vpc2 = &vpc
+				server2 = servers[0]
+
+				break
+			}
+		}
+	}
+	if vpc1 == nil || vpc2 == nil || server1 == "" || server2 == "" {
+		slog.Info("Not enough VPCs with attached servers found, skipping test")
+
+		return true, nil, errNotEnoughVPCs
+	}
+	slog.Debug("Found VPCs and servers", "vpc1", vpc1.Name, "server1", server1, "vpc2", vpc2.Name, "server2", server2)
 
 	// get agent generation for the switch
 	gen, genErr := getAgentGen(ctx, testCtx.kube, switchName)
@@ -1133,7 +1237,7 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool,
 	slog.Debug("Found VPCAttachment", "attachment", vpcAtt.Name, "subnet", subnetName, "vpc", vpcName)
 	// Get the VPCAttachment's VPC so we can extract the VLAN (for hhnet config)
 	vpc := &vpcapi.VPC{}
-	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: vpcName}, vpc); err != nil {
+	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: vpcName}, vpc); err != nil {
 		return false, nil, fmt.Errorf("getting VPC %s: %w", vpcName, err)
 	}
 	vlan := vpc.Spec.Subnets[subnetName].VLAN
@@ -1166,13 +1270,13 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool,
 		if err := WaitReady(ctx, testCtx.kube, WaitReadyOpts{AppliedFor: waitAppliedFor, Timeout: waitTimeout}); err != nil {
 			return fmt.Errorf("waiting for ready: %w", err)
 		}
-		slog.Debug("Invoking hhnet cleanup on server", "server", server)
-		if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, server, "/opt/bin/hhnet cleanup"); err != nil {
-			return fmt.Errorf("cleaning up %s via hhnet: %w", server, err)
+		slog.Debug("Invoking hhnet cleanup on server", "server", targetServer)
+		if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, targetServer, "/opt/bin/hhnet cleanup"); err != nil {
+			return fmt.Errorf("cleaning up %s via hhnet: %w", targetServer, err)
 		}
-		slog.Debug("Configuring VLAN on server", "server", server, "vlan", vlan, "port", serverPortName)
-		if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, server, fmt.Sprintf("/opt/bin/hhnet vlan %d %s", vlan, serverPortName)); err != nil {
-			return fmt.Errorf("configuring VLAN on %s: %w", server, err)
+		slog.Debug("Configuring VLAN on server", "server", targetServer, "vlan", vlan, "port", serverPortName)
+		if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, targetServer, fmt.Sprintf("/opt/bin/hhnet vlan %d %s", vlan, serverPortName)); err != nil {
+			return fmt.Errorf("configuring VLAN on %s: %w", targetServer, err)
 		}
 		// in case of L3 VPC mode, we need to give it time to switch to the longer lease time and switches to learn the routes
 		if testCtx.opts.VPCMode == vpcapi.VPCModeL3VNI || testCtx.opts.VPCMode == vpcapi.VPCModeL3Flat {
@@ -1185,7 +1289,7 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool,
 	})
 
 	slog.Debug("Deleting connection", "connection", conn.Name)
-	if err := testCtx.kube.Delete(ctx, &conn); err != nil {
+	if err := testCtx.kube.Delete(ctx, conn); err != nil {
 		return false, reverts, fmt.Errorf("deleting connection %s: %w", conn.Name, err)
 	}
 
@@ -1229,15 +1333,15 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool,
 	// Create new connection with static external
 	staticExtConn := &wiringapi.Connection{}
 	staticExtConn.Name = fmt.Sprintf("release-test--static-external--%s", switchName)
-	staticExtConn.Namespace = "default"
+	staticExtConn.Namespace = kmetav1.NamespaceDefault
 	staticExtConn.Spec.StaticExternal = &wiringapi.ConnStaticExternal{
-		WithinVPC: "vpc-01",
+		WithinVPC: vpc1.Name,
 		Link: wiringapi.ConnStaticExternalLink{
 			Switch: wiringapi.ConnStaticExternalLinkSwitch{
 				BasePortName: wiringapi.NewBasePortName(switchPortName),
-				IP:           "172.31.255.5/24",
-				Subnets:      []string{"10.99.0.0/24", "10.199.0.100/32"},
-				NextHop:      "172.31.255.1",
+				IP:           fmt.Sprintf("%s/%s", StaticExternalIP, StaticExternalPL),
+				Subnets:      []string{fmt.Sprintf("%s/32", StaticExternalDummyIface)},
+				NextHop:      StaticExternalNH,
 			},
 		},
 	}
@@ -1262,55 +1366,118 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool,
 	}
 
 	// Add address and default route to en2ps1 on the server
-	slog.Debug("Adding address and default route to en2ps1 on the server", "server", server)
-	if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, server, "hhnet cleanup"); err != nil {
+	slog.Debug("Adding address and default route to en2ps1 on the server", "server", targetServer)
+	if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, targetServer, "hhnet cleanup"); err != nil {
 		return false, reverts, fmt.Errorf("cleaning up server via hhnet: %w", err)
 	}
-	if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, server, "sudo ip addr add 172.31.255.1/24 dev enp2s1"); err != nil {
+	if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, targetServer, fmt.Sprintf("sudo ip addr add %s/%s dev enp2s1", StaticExternalNH, StaticExternalPL)); err != nil {
 		return false, reverts, fmt.Errorf("adding address to server: %w", err)
 	}
-	if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, server, "sudo ip link set dev enp2s1 up"); err != nil {
+	if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, targetServer, "sudo ip link set dev enp2s1 up"); err != nil {
 		return false, reverts, fmt.Errorf("setting up server interface: %w", err)
 	}
-	if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, server, "sudo ip route add default via 172.31.255.5"); err != nil {
+	if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, targetServer, fmt.Sprintf("sudo ip route add default via %s", StaticExternalIP)); err != nil {
 		return false, reverts, fmt.Errorf("adding default route to server: %w", err)
 	}
-	slog.Debug("Adding dummy inteface with address 10.199.0.100/32 to the server", "server", server)
-	if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, server, "sudo ip link add dummy0 type dummy"); err != nil {
+	slog.Debug("Adding dummy inteface to the server", "server", targetServer, "address", fmt.Sprintf("%s/32", StaticExternalDummyIface))
+	if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, targetServer, "sudo ip link add dummy0 type dummy"); err != nil {
 		return false, reverts, fmt.Errorf("adding dummy interface to server: %w", err)
 	}
-	if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, server, "sudo ip addr add 10.199.0.100/32 dev dummy0"); err != nil {
+	if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, targetServer, fmt.Sprintf("sudo ip addr add %s/32 dev dummy0", StaticExternalDummyIface)); err != nil {
 		return false, reverts, fmt.Errorf("adding address to dummy interface on server: %w", err)
 	}
 	reverts = append(reverts, func(_ context.Context) error {
-		slog.Debug("Removing address and default route from en2ps1 on the server", "server", server)
-		if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, server, "sudo ip addr del 172.31.255.1/24 dev enp2s1"); err != nil {
-			return fmt.Errorf("removing address from %s: %w", server, err)
+		slog.Debug("Removing address and default route from en2ps1 on the server", "server", targetServer)
+		if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, targetServer, fmt.Sprintf("sudo ip addr del %s/%s dev enp2s1", StaticExternalNH, StaticExternalPL)); err != nil {
+			return fmt.Errorf("removing address from %s: %w", targetServer, err)
 		}
-		if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, server, "sudo ip link del dev dummy0"); err != nil {
-			return fmt.Errorf("removing dummy interface from %s: %w", server, err)
+		if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, targetServer, "sudo ip link del dev dummy0"); err != nil {
+			return fmt.Errorf("removing dummy interface from %s: %w", targetServer, err)
 		}
-		if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, server, "hhnet cleanup"); err != nil {
-			return fmt.Errorf("cleaning up %s via hhnet: %w", server, err)
+		if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, targetServer, "hhnet cleanup"); err != nil {
+			return fmt.Errorf("cleaning up %s via hhnet: %w", targetServer, err)
 		}
 
 		return nil
 	})
+	time.Sleep(5 * time.Second)
 
-	srcServer, err := getServer1(ctx, testCtx.kube)
-	if err != nil {
-		return false, reverts, err
+	// Ping the addresses from server1 which is in the static external VPC, expect success
+	if err := testCtx.pingStaticExternal(server1, "", true); err != nil {
+		return false, reverts, fmt.Errorf("pinging static external from %s in the SE VPC: %w", server1, err)
+	}
+	// Ping the addresses from server2 which is in a different VPC, expect failure
+	if err := testCtx.pingStaticExternal(server2, "", false); err != nil {
+		return false, reverts, fmt.Errorf("pinging static external from %s in a different VPC: %w", server2, err)
 	}
 
-	// Ping the addresses from the source server
-	slog.Debug("Pinging 172.31.255.1", "source-server", srcServer)
-	if err := pingFromServer(testCtx.hhfabBin, testCtx.workDir, srcServer, "172.31.255.1", true); err != nil {
-		return false, reverts, fmt.Errorf("ping from %s to 172.31.255.1: %w", srcServer, err)
+	slog.Debug("Deleting static external")
+	// NOTE: just changing the WithinVPC field to an empty string causes this error in the agent:
+	// "failed to run agent: failed to process agent config from k8s: failed to process agent config loaded from k8s: failed to apply actions: GNMI set request failed: gnmi set request failed: rpc error: code = InvalidArgument desc = L3 Configuration exists for Interface: Ethernet0"
+	// so we need to remove the whole StaticExternal config and then update it again
+	if err := testCtx.kube.Delete(ctx, staticExtConn); err != nil {
+		return false, reverts, fmt.Errorf("deleting static external connection %s: %w", staticExtConn.Name, err)
 	}
-	slog.Debug("Pinging 10.199.0.100", "source-server", srcServer)
-	if err := pingFromServer(testCtx.hhfabBin, testCtx.workDir, srcServer, "10.199.0.100", true); err != nil {
-		return false, reverts, fmt.Errorf("ping from %s to 10.199.0.100: %w", srcServer, err)
+	time.Sleep(5 * time.Second)
+	if err := WaitReady(ctx, testCtx.kube, WaitReadyOpts{AppliedFor: waitAppliedFor, Timeout: waitTimeout}); err != nil {
+		return false, reverts, fmt.Errorf("waiting for switches to be ready: %w", err)
 	}
+
+	// Now update the static external connection to not be within a VPC
+	staticExtConn = &wiringapi.Connection{}
+	staticExtConn.Name = fmt.Sprintf("release-test--static-external--%s", switchName)
+	staticExtConn.Namespace = kmetav1.NamespaceDefault
+	staticExtConn.Spec.StaticExternal = &wiringapi.ConnStaticExternal{
+		WithinVPC: "",
+		Link: wiringapi.ConnStaticExternalLink{
+			Switch: wiringapi.ConnStaticExternalLinkSwitch{
+				BasePortName: wiringapi.NewBasePortName(switchPortName),
+				IP:           fmt.Sprintf("%s/%s", StaticExternalIP, StaticExternalPL),
+				Subnets:      []string{fmt.Sprintf("%s/32", StaticExternalDummyIface)},
+				NextHop:      StaticExternalNH,
+			},
+		},
+	}
+	slog.Debug("Re-creating the StaticExternal without the VPC constraint", "connection", staticExtConn.Name)
+	if err := testCtx.kube.Create(ctx, staticExtConn); err != nil {
+		return false, reverts, fmt.Errorf("creating connection %s: %w", staticExtConn.Name, err)
+	}
+	time.Sleep(5 * time.Second)
+	if err := WaitReady(ctx, testCtx.kube, WaitReadyOpts{AppliedFor: waitAppliedFor, Timeout: waitTimeout}); err != nil {
+		return false, reverts, fmt.Errorf("waiting for switches to be ready: %w", err)
+	}
+
+	// Ping the addresses from server1, this should now fail
+	if err := testCtx.pingStaticExternal(server1, "", false); err != nil {
+		return false, reverts, fmt.Errorf("pinging static external from %s after removing VPC: %w", server1, err)
+	}
+	// Ping the addresses from a leaf switch that's not the one the static external is attached to, this should succeed
+	success := false
+	for _, sw := range swList.Items {
+		if sw.Name == switchName || sw.Spec.Role.IsSpine() {
+			continue
+		}
+		// avoid pinging from MCLAG switches, as I'm seeing failures (probably due to asymmetric routing, since they share same VTEP IP)
+		if sw.Spec.Redundancy.Type == meta.RedundancyTypeMCLAG {
+			continue
+		}
+		if sw.Spec.VTEPIP == "" {
+			slog.Warn("Leaf switch with no VTEP IP, skipping it", "switch", sw.Name)
+
+			continue
+		}
+		sourceIP := strings.SplitN(sw.Spec.VTEPIP, "/", 2)[0]
+		if err := testCtx.pingStaticExternal(sw.Name, sourceIP, true); err != nil {
+			return false, reverts, fmt.Errorf("pinging static external from %s: %w", sw.Name, err)
+		}
+		success = true
+
+		break
+	}
+	if !success {
+		return false, reverts, fmt.Errorf("could not find a leaf switch to ping from after removing VPC constraint") //nolint:goerr113
+	}
+
 	slog.Debug("All good, cleaning up")
 
 	return false, reverts, nil
@@ -1320,10 +1487,10 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool,
 func getServer1(ctx context.Context, kube kclient.Client) (string, error) {
 	serverName := "server-1"
 	server := &wiringapi.Server{}
-	if err := kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: serverName}, server); err != nil {
+	if err := kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: serverName}, server); err != nil {
 		slog.Warn("server-1 not found, attempting to fetch server-01")
 		serverName = "server-01"
-		if err := kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: serverName}, server); err != nil {
+		if err := kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: serverName}, server); err != nil {
 			return "", fmt.Errorf("getting server %s: %w", serverName, err)
 		}
 	}
@@ -1399,7 +1566,7 @@ func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (bool, []Re
 	}
 	// Get the VPC
 	vpc := &vpcapi.VPC{}
-	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: "vpc-01"}, vpc); err != nil {
+	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: "vpc-01"}, vpc); err != nil {
 		return false, nil, fmt.Errorf("getting VPC vpc-01: %w", err)
 	}
 	// Get the first subnet, where the target server is connected
@@ -1587,7 +1754,7 @@ func (testCtx *VPCPeeringTestCtx) roceBasicTest(ctx context.Context) (bool, []Re
 	}
 	swName := testCtx.roceLeaves[0]
 	sw := &wiringapi.Switch{}
-	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: swName}, sw); err != nil {
+	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: swName}, sw); err != nil {
 		return false, nil, fmt.Errorf("getting switch %s: %w", swName, err)
 	}
 	// enable RoCE on the switch if not already enabled
@@ -1611,7 +1778,7 @@ func (testCtx *VPCPeeringTestCtx) roceBasicTest(ctx context.Context) (bool, []Re
 	// check counters on the RoCE enabled switch for UC3 traffic. they are stored as part of the switch agent status
 	uc3Map := make(map[string]uint64) // map of interface name to UC3 transmit bits
 	agent := &agentapi.Agent{}
-	err := testCtx.kube.Get(ctx, kclient.ObjectKey{Name: swName, Namespace: "default"}, agent)
+	err := testCtx.kube.Get(ctx, kclient.ObjectKey{Name: swName, Namespace: kmetav1.NamespaceDefault}, agent)
 	if err != nil {
 		return false, nil, fmt.Errorf("getting agent %s: %w", swName, err)
 	}
@@ -1999,7 +2166,7 @@ func doRunTests(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 			pauseOnFail()
 		}
 
-		return ts, fmt.Errorf("%w: %w", errInitalSetup, err)
+		return ts, fmt.Errorf("%w: %w", errInitialSetup, err)
 	}
 
 	prevRevertsFailed := false
@@ -2196,7 +2363,7 @@ func selectAndRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, suite *J
 		// 1) the initial test setup has failed and we didn't run any tests (regardless of failFast)
 		// 2) one of the tests has failed and failFast is set
 		// we only return the error if we are in failFast mode
-		if errors.Is(err, errInitalSetup) {
+		if errors.Is(err, errInitialSetup) {
 			suite = failAllTests(suite, err)
 		}
 		if testCtx.failFast {
@@ -2226,13 +2393,6 @@ func makeVpcPeeringsSingleVPCSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 		{
 			Name: "DNS/NTP/MTU/DHCP lease",
 			F:    testCtx.dnsNtpMtuTest,
-		},
-		{
-			Name: "StaticExternal",
-			F:    testCtx.staticExternalTest,
-			SkipFlags: SkipFlags{
-				VirtualSwitch: true,
-			},
 		},
 		{
 			Name: "MCLAG Failover",
@@ -2297,6 +2457,13 @@ func makeVpcPeeringsMultiVPCSuiteRun(testCtx *VPCPeeringTestCtx) *JUnitTestSuite
 			SkipFlags: SkipFlags{
 				VirtualSwitch: true,
 				SubInterfaces: true,
+			},
+		},
+		{
+			Name: "StaticExternal",
+			F:    testCtx.staticExternalTest,
+			SkipFlags: SkipFlags{
+				VirtualSwitch: true,
 			},
 		},
 	}
@@ -2441,7 +2608,7 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 		if p, ok := profileMap[sw.Spec.Profile]; ok {
 			profile = &p
 		} else {
-			if err := kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: sw.Spec.Profile}, profile); err != nil {
+			if err := kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: sw.Spec.Profile}, profile); err != nil {
 				return fmt.Errorf("getting switch profile %s: %w", sw.Spec.Profile, err)
 			}
 			profileMap[sw.Spec.Profile] = *profile
@@ -2469,7 +2636,7 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 		skipFlags.NamedExternal = true
 	} else {
 		ext := &vpcapi.External{}
-		if err := kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: extName}, ext); err != nil {
+		if err := kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: extName}, ext); err != nil {
 			slog.Info("Named External not found", "external", extName)
 			skipFlags.NamedExternal = true
 		}
