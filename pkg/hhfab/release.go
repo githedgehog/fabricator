@@ -2100,7 +2100,7 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 	// TODO: make this configurable
 	extName := "default"
 
-	cacheCancel, kube, err := GetKubeClientWithCache(ctx, workDir)
+	cacheCancel, kube, err := getKubeClientWithCache(ctx, workDir)
 	if err != nil {
 		return err
 	}
