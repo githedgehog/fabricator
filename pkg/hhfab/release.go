@@ -2148,6 +2148,7 @@ func printSuiteResults(ts *JUnitTestSuite) {
 
 func pauseOnFail() {
 	// pause until the user presses enter
+	slog.Warn("Test failed, pausing execution. Note that reverts might still need to apply, so if you intend to continue, please make sure to leave the environment in the same state as you found it")
 	slog.Info("Press enter to continue...")
 	var input string
 	_, _ = fmt.Scanln(&input)
@@ -2199,6 +2200,12 @@ func doRunTests(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 		skip, reverts, err := test.F(ctx)
 		ts.TestCases[i].Time = time.Since(testStart).Seconds()
 		ranSomeTests = true
+		// logic is getting complex, so let's make a recap:
+		// - if skip is true, we mark the test as skipped, use the error as the skip message, and nullify it
+		// - if err is not nil, we mark the test as failed, use the error message as the failure message, and pause if configured to do so
+		// - we then apply reverts in reverse order, and if any of them fails, we mark the test as failed, and pause (potentially a second time) if configured to do so.
+		//   we also stop applying reverts at the first failure
+		// - finally, if we get to the end without any errors, we log the test as passed
 		if skip {
 			var skipMsg string
 			if err != nil {
@@ -2214,21 +2221,6 @@ func doRunTests(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 			ts.Skipped++
 			slog.Warn("SKIP", "test", test.Name, "reason", skipMsg)
 		}
-		var revertErr error
-		for i := len(reverts) - 1; i >= 0; i-- {
-			revertErr = reverts[i](ctx)
-			if revertErr != nil {
-				slog.Error("Revert failed", "test", test.Name, "error", revertErr.Error())
-				if err == nil {
-					err = revertErr
-				} else {
-					err = errors.Join(err, revertErr)
-				}
-				prevRevertsFailed = true
-
-				break
-			}
-		}
 		if err != nil {
 			ts.TestCases[i].Failure = &Failure{
 				Message: err.Error(),
@@ -2238,10 +2230,32 @@ func doRunTests(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 			if testCtx.pauseOnFail {
 				pauseOnFail()
 			}
-			if testCtx.failFast {
-				return ts, fmt.Errorf("test %s failed: %w", test.Name, err)
+		}
+		var revertErr error
+		for i := len(reverts) - 1; i >= 0; i-- {
+			revertErr = reverts[i](ctx)
+			if revertErr != nil {
+				slog.Error("REVERT FAIL", "test", test.Name, "error", revertErr.Error())
+				if err == nil {
+					// the test had passed, but now we must mark it as failed
+					err = revertErr
+					ts.Failures++
+				} else {
+					// the test had failed, let's keep track of both errors in the message
+					err = errors.Join(err, revertErr)
+				}
+				ts.TestCases[i].Failure = &Failure{
+					Message: err.Error(),
+				}
+				prevRevertsFailed = true
+				if testCtx.pauseOnFail {
+					pauseOnFail()
+				}
+
+				break
 			}
-		} else {
+		}
+		if err == nil && revertErr == nil {
 			slog.Info("PASS", "test", test.Name)
 		}
 	}
