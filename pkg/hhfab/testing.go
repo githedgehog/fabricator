@@ -131,7 +131,7 @@ func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) erro
 		return fmt.Errorf("getting fab: %w", err)
 	}
 
-	// fabric controller will set agent version to it's own version by default
+	// fabric controller will set agent version to its own version by default
 	expectedSwAgentV := string(f.Status.Versions.Fabric.Controller)
 	expectedSwitches := []string{}
 	{
@@ -147,7 +147,7 @@ func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) erro
 		slog.Info("Expected switches", "agent", expectedSwAgentV, "switches", expectedSwitches)
 	}
 
-	// gateway controller will set agent version to it's own version by default
+	// gateway controller will set agent version to its own version by default
 	expectedGwAgentV := string(f.Status.Versions.Gateway.Controller)
 	expectedGateways := []string{}
 	if f.Spec.Config.Gateway.Enable {
