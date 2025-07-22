@@ -36,6 +36,7 @@ import (
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
+	coreapi "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -71,6 +72,10 @@ var schemeBuilders = []*scheme.Builder{
 	fabapi.SchemeBuilder,
 	gwapi.SchemeBuilder,
 	gwintapi.SchemeBuilder,
+	{
+		GroupVersion:  coreapi.SchemeGroupVersion,
+		SchemeBuilder: coreapi.SchemeBuilder,
+	},
 }
 
 func getKubeClientWithCache(ctx context.Context, workDir string) (context.CancelFunc, client.Client, error) {
