@@ -36,7 +36,6 @@ import (
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
-	coreapi "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -65,19 +64,26 @@ var HashPolicies = []string{
 	HashPolicyVLANAndSrcMAC,
 }
 
+var schemeBuilders = []*scheme.Builder{
+	wiringapi.SchemeBuilder,
+	vpcapi.SchemeBuilder,
+	agentapi.SchemeBuilder,
+	fabapi.SchemeBuilder,
+	gwapi.SchemeBuilder,
+	gwintapi.SchemeBuilder,
+}
+
+func getKubeClientWithCache(ctx context.Context, workDir string) (context.CancelFunc, client.Client, error) {
+	kubeconfig := filepath.Join(workDir, VLABDir, VLABKubeConfig)
+
+	return kubeutil.NewClientWithCache(ctx, kubeconfig, schemeBuilders...)
+}
+
 func (c *Config) Wait(ctx context.Context, vlab *VLAB) error {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
 
-	kubeconfig := filepath.Join(c.WorkDir, VLABDir, VLABKubeConfig)
-	cacheCancel, kube, err := kubeutil.NewClientWithCache(ctx, kubeconfig,
-		wiringapi.SchemeBuilder,
-		vpcapi.SchemeBuilder,
-		agentapi.SchemeBuilder,
-		fabapi.SchemeBuilder,
-		gwapi.SchemeBuilder,
-		gwintapi.SchemeBuilder,
-	)
+	cacheCancel, kube, err := getKubeClientWithCache(ctx, c.WorkDir)
 	if err != nil {
 		return fmt.Errorf("creating kube client: %w", err)
 	}
@@ -304,17 +310,6 @@ func CreateOrUpdateVpc(ctx context.Context, kube client.Client, vpc *vpcapi.VPC)
 	return changed, nil
 }
 
-func GetKubeClientWithCache(ctx context.Context, workDir string) (context.CancelFunc, client.Client, error) {
-	kubeconfig := filepath.Join(workDir, VLABDir, VLABKubeConfig)
-	return kubeutil.NewClientWithCache(ctx, kubeconfig,
-		wiringapi.SchemeBuilder,
-		vpcapi.SchemeBuilder,
-		agentapi.SchemeBuilder,
-		fabapi.SchemeBuilder,
-		gwapi.SchemeBuilder,
-	)
-}
-
 func GetServerNetconfCmd(conn *wiringapi.Connection, vlan uint16, hashPolicy string) (string, error) {
 	if conn == nil {
 		return "", fmt.Errorf("connection is nil")
@@ -435,13 +430,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		return fmt.Errorf("getting ssh auth: %w", err)
 	}
 
-	kubeconfig := filepath.Join(c.WorkDir, VLABDir, VLABKubeConfig)
-	cacheCancel, kube, err := kubeutil.NewClientWithCache(ctx, kubeconfig,
-		wiringapi.SchemeBuilder,
-		vpcapi.SchemeBuilder,
-		agentapi.SchemeBuilder,
-		fabapi.SchemeBuilder,
-	)
+	cacheCancel, kube, err := getKubeClientWithCache(ctx, c.WorkDir)
 	if err != nil {
 		return fmt.Errorf("creating kube client: %w", err)
 	}
@@ -809,14 +798,7 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 
 	slog.Info("Setting up VPC and External Peerings", "numRequests", len(opts.Requests))
 
-	kubeconfig := filepath.Join(c.WorkDir, VLABDir, VLABKubeConfig)
-	cacheCancel, kube, err := kubeutil.NewClientWithCache(ctx, kubeconfig,
-		wiringapi.SchemeBuilder,
-		vpcapi.SchemeBuilder,
-		agentapi.SchemeBuilder,
-		fabapi.SchemeBuilder,
-		gwapi.SchemeBuilder,
-	)
+	cacheCancel, kube, err := getKubeClientWithCache(ctx, c.WorkDir)
 	if err != nil {
 		return fmt.Errorf("creating kube client: %w", err)
 	}
@@ -1288,14 +1270,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 		return fmt.Errorf("getting ssh auth: %w", err)
 	}
 
-	kubeconfig := filepath.Join(c.WorkDir, VLABDir, VLABKubeConfig)
-	cacheCancel, kube, err := kubeutil.NewClientWithCache(ctx, kubeconfig,
-		wiringapi.SchemeBuilder,
-		vpcapi.SchemeBuilder,
-		agentapi.SchemeBuilder,
-		fabapi.SchemeBuilder,
-		gwapi.SchemeBuilder,
-	)
+	cacheCancel, kube, err := getKubeClientWithCache(ctx, c.WorkDir)
 	if err != nil {
 		return fmt.Errorf("creating kube client: %w", err)
 	}
@@ -2195,18 +2170,7 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 
 	start := time.Now()
 
-	kubeconfig := filepath.Join(c.WorkDir, VLABDir, VLABKubeConfig)
-	cacheCancel, kube, err := kubeutil.NewClientWithCache(ctx, kubeconfig,
-		wiringapi.SchemeBuilder,
-		vpcapi.SchemeBuilder,
-		agentapi.SchemeBuilder,
-		fabapi.SchemeBuilder,
-		gwapi.SchemeBuilder,
-		&scheme.Builder{
-			GroupVersion:  coreapi.SchemeGroupVersion,
-			SchemeBuilder: coreapi.SchemeBuilder,
-		},
-	)
+	cacheCancel, kube, err := getKubeClientWithCache(ctx, c.WorkDir)
 	if err != nil {
 		return fmt.Errorf("creating kube client: %w", err)
 	}
