@@ -217,9 +217,8 @@ func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) erro
 				return fmt.Errorf("getting gateway agent %s: %w", gwName, err)
 			}
 
-			// TODO replace with agent version
 			// make sure that desired agent version is the same as we expect (same as controller version, may be different if not reconciled)
-			ready := gwag.Spec.CtrlVersion == expectedGwAgentV
+			ready := gwag.Spec.AgentVersion == expectedGwAgentV
 
 			// make sure last applied generation is the same as current generation
 			ready = ready && gwag.Status.LastAppliedGen == gwag.Generation
@@ -234,12 +233,11 @@ func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) erro
 			}
 
 			if ready {
-				// TODO add reporting agent version to gwag
-				// if gwag.Status.Version == expectedGwAgentV {
-				// 	continue
-				// }
+				if gwag.Status.AgentVersion == expectedGwAgentV {
+					continue
+				}
 
-				// gwNotUpdated = append(gwNotUpdated, gwName)
+				gwNotUpdated = append(gwNotUpdated, gwName)
 			} else {
 				gwNotReady = append(gwNotReady, gwName)
 			}
