@@ -39,7 +39,7 @@ require (
 	github.com/vbauerster/mpb/v8 v8.10.2
 	github.com/vishvananda/netlink v1.3.1
 	go.githedgehog.com/fabric v0.84.3
-	go.githedgehog.com/gateway v0.16.0
+	go.githedgehog.com/gateway v0.17.0
 	golang.org/x/crypto v0.40.0
 	golang.org/x/mod v0.26.0
 	golang.org/x/sync v0.16.0
