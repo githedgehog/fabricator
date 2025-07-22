@@ -1308,8 +1308,8 @@ inet.af/netaddr v0.0.0-20220811202034-502d2d690317 h1:U2fwK6P2EqmopP/hFLTOAjWTki
 inet.af/netaddr v0.0.0-20220811202034-502d2d690317/go.mod h1:OIezDfdzOgFhuw4HuWapWq2e9l0H9tK4F1j+ETRtF3k=
 k8s.io/api v0.33.3 h1:SRd5t//hhkI1buzxb288fy2xvjubstenEKL9K51KBI8=
 k8s.io/api v0.33.3/go.mod h1:01Y/iLUjNBM3TAvypct7DIj0M0NIZc+PzAHCIo0CYGE=
-k8s.io/apiextensions-apiserver v0.33.0 h1:d2qpYL7Mngbsc1taA4IjJPRJ9ilnsXIrndH+r9IimOs=
-k8s.io/apiextensions-apiserver v0.33.0/go.mod h1:VeJ8u9dEEN+tbETo+lFkwaaZPg6uFKLGj5vyNEwwSzc=
+k8s.io/apiextensions-apiserver v0.33.3 h1:qmOcAHN6DjfD0v9kxL5udB27SRP6SG/MTopmge3MwEs=
+k8s.io/apiextensions-apiserver v0.33.3/go.mod h1:oROuctgo27mUsyp9+Obahos6CWcMISSAPzQ77CAQGz8=
 k8s.io/apimachinery v0.33.3 h1:4ZSrmNa0c/ZpZJhAgRdcsFcZOw1PQU1bALVQ0B3I5LA=
 k8s.io/apimachinery v0.33.3/go.mod h1:BHW0YOu7n22fFv/JkYOEfkUYNRN0fj0BlvMFWA7b+SM=
 k8s.io/client-go v0.33.3 h1:M5AfDnKfYmVJif92ngN532gFqakcGi6RvaOF16efrpA=
@@ -1320,8 +1320,8 @@ k8s.io/kube-openapi v0.0.0-20250318190949-c8a335a9a2ff h1:/usPimJzUKKu+m+TE36gUy
 k8s.io/kube-openapi v0.0.0-20250318190949-c8a335a9a2ff/go.mod h1:5jIi+8yX4RIb8wk3XwBo5Pq2ccx4FP10ohkbSKCZoK8=
 k8s.io/metrics v0.33.3 h1:9CcqBz15JZfISqwca33gdHS8I6XfsK1vA8WUdEnG70g=
 k8s.io/metrics v0.33.3/go.mod h1:Aw+cdg4AYHw0HvUY+lCyq40FOO84awrqvJRTw0cmXDs=
-k8s.io/utils v0.0.0-20250321185631-1f6e0b77f77e h1:KqK5c/ghOm8xkHYhlodbp6i6+r+ChV2vuAuVRdFbLro=
-k8s.io/utils v0.0.0-20250321185631-1f6e0b77f77e/go.mod h1:OLgZIPagt7ERELqWJFomSt595RzquPNLL48iOWgYOg0=
+k8s.io/utils v0.0.0-20250604170112-4c0f3b243397 h1:hwvWFiBzdWw1FhfY1FooPn3kzWuJ8tmbZBHi4zVsl1Y=
+k8s.io/utils v0.0.0-20250604170112-4c0f3b243397/go.mod h1:OLgZIPagt7ERELqWJFomSt595RzquPNLL48iOWgYOg0=
 oras.land/oras-go/v2 v2.6.0 h1:X4ELRsiGkrbeox69+9tzTu492FMUu7zJQW6eJU+I2oc=
 oras.land/oras-go/v2 v2.6.0/go.mod h1:magiQDfG6H1O9APp+rOsvCPcW1GD2MM7vgnKY0Y+u1o=
 rsc.io/binaryregexp v0.2.0/go.mod h1:qTv7/COck+e2FymRvadv62gMdZztPaShugOCi3I+8D8=
