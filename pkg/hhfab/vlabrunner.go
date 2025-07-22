@@ -23,6 +23,7 @@ import (
 
 	"github.com/pkg/sftp"
 	"github.com/samber/lo"
+	"go.githedgehog.com/fabric/api/meta"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
 	"go.githedgehog.com/fabric/pkg/util/logutil"
@@ -104,6 +105,7 @@ type OnReady string
 const (
 	OnReadyExit             OnReady = "exit"
 	OnReadySetupVPCs        OnReady = "setup-vpcs"
+	OnReadySetupPeerings    OnReady = "setup-peerings"
 	OnReadySwitchReinstall  OnReady = "switch-reinstall"
 	OnReadyTestConnectivity OnReady = "test-connectivity"
 	OnReadyWait             OnReady = "wait"
@@ -114,6 +116,7 @@ const (
 var AllOnReady = []OnReady{
 	OnReadyExit,
 	OnReadySetupVPCs,
+	OnReadySetupPeerings,
 	OnReadySwitchReinstall,
 	OnReadyTestConnectivity,
 	OnReadyWait,
@@ -616,6 +619,30 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						}
 
 						return fmt.Errorf("setting up VPCs: %w", err)
+					}
+				case OnReadySetupPeerings:
+					// TODO make it configurable
+					peerings := []string{}
+					if c.Fab.Spec.Config.Fabric.Mode != meta.FabricModeCollapsedCore {
+						peerings = append(peerings, "1+2")
+						if c.Fab.Spec.Config.Gateway.Enable {
+							peerings = append(peerings, "2+3:gw")
+						}
+					}
+
+					if err := c.SetupPeerings(ctx, vlab, SetupPeeringsOpts{
+						WaitSwitchesReady: true,
+						Requests:          peerings,
+					}); err != nil {
+						slog.Warn("Failed to setup peerings", "err", err)
+
+						if opts.CollectShowTech {
+							if err := c.VLABShowTech(ctx, vlab); err != nil {
+								slog.Warn("Failed to collect show-tech diagnostics", "err", err)
+							}
+						}
+
+						return fmt.Errorf("setting up peerings: %w", err)
 					}
 				case OnReadyTestConnectivity:
 					// TODO make it configurable
