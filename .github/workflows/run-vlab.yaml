@@ -22,6 +22,11 @@ on:
         type: string
         required: false
         default: "spine-leaf"
+      mesh:
+        description: "Use spine-leaf with mesh-only connections"
+        type: boolean
+        required: false
+        default: false
       gateway:
         description: "Enable gateway"
         type: boolean
@@ -63,7 +68,7 @@ permissions:
 
 env:
   # global workflow configs
-  slug: "${{ inputs.hybrid && 'hlab' || 'vlab' }}-${{ inputs.fabricmode == 'spine-leaf' && 'sl' || 'cc' }}-${{ inputs.gateway && 'gw-' || '' }}${{ inputs.includeonie && 'onie-' || '' }}${{ inputs.buildmode }}-${{ inputs.vpcmode }}"
+  slug: "${{ inputs.hybrid && 'hlab' || 'vlab' }}-${{ inputs.fabricmode == 'spine-leaf' && 'sl' || 'cc' }}-${{ inputs.mesh && 'mesh-' || '' }}${{ inputs.gateway && 'gw-' || '' }}${{ inputs.includeonie && 'onie-' || '' }}${{ inputs.buildmode }}-${{ inputs.vpcmode }}"
   # env vars to configure hhfab
   HHFAB_REG_REPO: 127.0.0.1:30000
   HHFAB_VLAB_COLLECT: true
@@ -85,6 +90,7 @@ jobs:
           echo "  Fabricator reference: ${{ inputs.fabricatorref }}"
           echo "  Pre-build script: ${{ inputs.prebuild }}"
           echo "  Fabric mode: ${{ inputs.fabricmode }}"
+          echo "  Mesh: ${{ inputs.mesh }}"
           echo "  Gateway: ${{ inputs.gateway }}"
           echo "  Include ONIE: ${{ inputs.includeonie }}"
           echo "  Build mode: ${{ inputs.buildmode }}"
@@ -139,7 +145,7 @@ jobs:
       - name: Generate VLAB wiring
         if: ${{ !inputs.hybrid }}
         run: |
-          bin/hhfab vlab gen -v
+          bin/hhfab vlab gen -v ${{ inputs.mesh && '--mesh-links-count=3' || '' }}
 
       - name: Init hhfab for hybrid mode
         if: ${{ inputs.hybrid }}
