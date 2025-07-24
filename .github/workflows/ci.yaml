@@ -216,7 +216,7 @@ jobs:
     needs:
       - test-build
 
-    name: "${{ matrix.hybrid && 'hlab' || 'vlab' }}-${{ matrix.fabricmode == 'spine-leaf' && 'sl' || 'cc' }}-${{ matrix.gateway && 'gw-' || '' }}${{ matrix.includeonie && 'onie-' || '' }}${{ matrix.buildmode }}-${{ matrix.vpcmode }}"
+    name: "${{ matrix.hybrid && 'hlab' || 'vlab' }}-${{ matrix.fabricmode == 'spine-leaf' && 'sl' || 'cc' }}-${{ matrix.mesh && 'mesh-' || '' }}${{ matrix.gateway && 'gw-' || '' }}${{ matrix.includeonie && 'onie-' || '' }}${{ matrix.buildmode }}-${{ matrix.vpcmode }}"
 
     uses: ./.github/workflows/run-vlab.yaml
     with:
@@ -224,6 +224,7 @@ jobs:
       skip: ${{ github.event_name == 'pull_request' && (matrix.hybrid && !contains(github.event.pull_request.labels.*.name, 'ci:+hlab') || !matrix.hybrid && contains(github.event.pull_request.labels.*.name, 'ci:-vlab')) }}
       fabricatorref: ${{ github.ref }}
       fabricmode: ${{ matrix.fabricmode }}
+      mesh: ${{ matrix.mesh }}
       gateway: ${{ matrix.gateway }}
       includeonie: ${{ matrix.includeonie }}
       buildmode: ${{ matrix.buildmode }}
@@ -236,6 +237,8 @@ jobs:
       matrix:
         fabricmode:
           - spine-leaf
+        mesh:
+          - false
         gateway:
           - false
         includeonie:
@@ -250,36 +253,42 @@ jobs:
           - false
         include:
           - fabricmode: collapsed-core
+            mesh: false
             includeonie: false
             gateway: false
             buildmode: iso
             vpcmode: l2vni
             hybrid: false
           - fabricmode: spine-leaf
+            mesh: false
             gateway: false
             includeonie: true
             buildmode: usb
             vpcmode: l2vni
             hybrid: false
           - fabricmode: spine-leaf
+            mesh: false
             gateway: false
             includeonie: true
             buildmode: iso
             vpcmode: l2vni
             hybrid: false
           - fabricmode: spine-leaf
+            mesh: false
             gateway: false
             includeonie: false
             buildmode: iso
             vpcmode: l3vni
             hybrid: false
           - fabricmode: spine-leaf
+            mesh: false
             gateway: true
             includeonie: false
             buildmode: iso
             vpcmode: l2vni
             hybrid: false
           - fabricmode: spine-leaf
+            mesh: false
             gateway: false
             includeonie: false
             buildmode: iso
