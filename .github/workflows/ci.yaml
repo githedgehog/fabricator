@@ -236,6 +236,8 @@ jobs:
       matrix:
         fabricmode:
           - spine-leaf
+        mesh:
+          - false
         gateway:
           - false
         includeonie:
@@ -250,41 +252,61 @@ jobs:
           - false
         include:
           - fabricmode: collapsed-core
+            mesh: false
             includeonie: false
             gateway: false
             buildmode: iso
             vpcmode: l2vni
             hybrid: false
           - fabricmode: spine-leaf
+            mesh: false
             gateway: false
             includeonie: true
             buildmode: usb
             vpcmode: l2vni
             hybrid: false
           - fabricmode: spine-leaf
+            mesh: false
             gateway: false
             includeonie: true
             buildmode: iso
             vpcmode: l2vni
             hybrid: false
           - fabricmode: spine-leaf
+            mesh: false
             gateway: false
             includeonie: false
             buildmode: iso
             vpcmode: l3vni
             hybrid: false
           - fabricmode: spine-leaf
+            mesh: false
             gateway: true
             includeonie: false
             buildmode: iso
             vpcmode: l2vni
             hybrid: false
           - fabricmode: spine-leaf
+            mesh: false
             gateway: false
             includeonie: false
             buildmode: iso
             vpcmode: l2vni
             hybrid: true
+          - fabricmode: spine-leaf
+            mesh: true
+            gateway: false
+            includeonie: false
+            buildmode: iso
+            vpcmode: l2vni
+            hybrid: false
+          - fabricmode: spine-leaf
+            mesh: true
+            gateway: false
+            includeonie: false
+            buildmode: iso
+            vpcmode: l3vni
+            hybrid: false
 
   vlab-upgrade:
     if: ${{ !contains(github.event.pull_request.labels.*.name, 'ci:-upgrade') && !contains(github.event.pull_request.labels.*.name, 'ci:-vlab') }}
