@@ -2287,6 +2287,7 @@ func makeTestCtx(kube kclient.Client, opts SetupVPCsOpts, workDir, cacheDir stri
 		IPerfsSeconds:     3,
 		IPerfsMinSpeed:    8200,
 		CurlsCount:        1,
+		RequireAllServers: opts.VPCMode == vpcapi.VPCModeL2VNI, // L3VNI will skip eslag servers
 	}
 	if rtOpts.Extended {
 		testCtx.tcOpts.IPerfsSeconds = 10
