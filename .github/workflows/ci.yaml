@@ -443,6 +443,10 @@ jobs:
     needs:
       - vlabs
 
+    permissions:
+      checks: write
+      pull-requests: write
+
     steps:
       - name: Download Artifacts
         uses: actions/download-artifact@v4
