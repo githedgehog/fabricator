@@ -164,7 +164,7 @@ func DoInstall(ctx context.Context, workDir string, yes bool) error {
 	return nil
 }
 
-func DoUpgrade(ctx context.Context, workDir string, yes bool) error {
+func DoUpgrade(ctx context.Context, workDir string, yes, skipChecks bool) error {
 	ctx, cancel := context.WithTimeout(ctx, 40*time.Minute)
 	defer cancel()
 
@@ -202,8 +202,9 @@ func DoUpgrade(ctx context.Context, workDir string, yes bool) error {
 	switch cfg.Type {
 	case TypeControl:
 		if err := (&ControlUpgrade{
-			WorkDir: workDir,
-			Yes:     yes,
+			WorkDir:    workDir,
+			Yes:        yes,
+			SkipChecks: skipChecks,
 		}).Run(ctx); err != nil {
 			return fmt.Errorf("running control upgrade: %w", err)
 		}

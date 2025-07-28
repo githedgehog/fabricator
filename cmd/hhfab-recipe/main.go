@@ -13,6 +13,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/lmittmann/tint"
 	"github.com/mattn/go-isatty"
+	"github.com/samber/lo"
 	slogmulti "github.com/samber/slog-multi"
 	"github.com/urfave/cli/v2"
 	"go.githedgehog.com/fabricator/pkg/fab/recipe"
@@ -132,6 +133,15 @@ func Run(ctx context.Context) error {
 		Destination: &yes,
 	}
 
+	skipChecks := false
+	skipChecksFlag := &cli.BoolFlag{
+		Name:        "skip-checks",
+		Aliases:     []string{"f"},
+		Usage:       "skip upgrade constraints checks (could lead to unexpected behavior or broken state)",
+		EnvVars:     []string{"HHFAB_SKIP_CHECKS"},
+		Destination: &skipChecks,
+	}
+
 	defaultFlags := []cli.Flag{
 		yesFlag,
 		workDirFlag,
@@ -165,10 +175,10 @@ func Run(ctx context.Context) error {
 			{
 				Name:   "upgrade",
 				Usage:  "upgrade node",
-				Flags:  defaultFlags,
+				Flags:  flatten(defaultFlags, []cli.Flag{skipChecksFlag}),
 				Before: before(true),
 				Action: func(_ *cli.Context) error {
-					err := recipe.DoUpgrade(ctx, workDir, yes)
+					err := recipe.DoUpgrade(ctx, workDir, yes, skipChecks)
 					if err != nil {
 						return fmt.Errorf("upgrading: %w", err)
 					}
@@ -180,4 +190,8 @@ func Run(ctx context.Context) error {
 	}
 
 	return app.Run(os.Args) //nolint:wrapcheck
+}
+
+func flatten[T any, Slice ~[]T](collection ...Slice) Slice {
+	return lo.Flatten(collection)
 }
