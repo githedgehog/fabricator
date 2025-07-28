@@ -79,7 +79,7 @@ func TestFabricatorCtrlUpgradeConstraint(t *testing.T) {
 		{"25.01.0", "v0.36.1", false},
 		{"24.09", "v0.32.1", false},
 	} {
-		t.Run(string(test.version), func(t *testing.T) {
+		t.Run(test.name, func(t *testing.T) {
 			v, err := semver.NewVersion(test.version)
 			require.NoError(t, err, "Error parsing test version")
 			require.NotNil(t, v, "Test version should not be nil")
@@ -110,7 +110,7 @@ func TestFabricAgentUpgradeConstraint(t *testing.T) {
 		{"25.01.0", "v0.71.6", false},
 		{"24.09", "v0.58.0", false},
 	} {
-		t.Run(string(test.version), func(t *testing.T) {
+		t.Run(test.name, func(t *testing.T) {
 			v, err := semver.NewVersion(test.version)
 			require.NoError(t, err, "Error parsing test version")
 			require.NotNil(t, v, "Test version should not be nil")
@@ -149,7 +149,7 @@ func TestFabricNOSUpgradeConstraint(t *testing.T) {
 		{"25.01.0-agent", CleanupFabricNOSVersion("4.4.2-Enterprise_Base"), false},
 		{"24.09-agent", CleanupFabricNOSVersion("4.4.0-Enterprise_Base"), false},
 	} {
-		t.Run(string(test.version), func(t *testing.T) {
+		t.Run(test.name, func(t *testing.T) {
 			v, err := semver.NewVersion(test.version)
 			require.NoError(t, err, "Error parsing test version")
 			require.NotNil(t, v, "Test version should not be nil")
