@@ -166,7 +166,7 @@ func Run(ctx context.Context) error {
 		},
 	}
 
-	var wgSpinesCount, wgFabricLinksCount, wgMeshLinksCount, wgMCLAGLeafsCount, wgOrphanLeafsCount, wgMCLAGSessionLinks, wgMCLAGPeerLinks, wgVPCLoopbacks uint
+	var wgSpinesCount, wgFabricLinksCount, wgMeshLinksCount, wgMCLAGLeafsCount, wgOrphanLeafsCount, wgMCLAGSessionLinks, wgMCLAGPeerLinks uint
 	var wgESLAGLeafGroups string
 	var wgMCLAGServers, wgESLAGServers, wgUnbundledServers, wgBundledServers uint
 	var wgNoSwitches bool
@@ -211,11 +211,6 @@ func Run(ctx context.Context) error {
 			Name:        "mclag-peer-links",
 			Usage:       "number of mclag peer links for each mclag leaf",
 			Destination: &wgMCLAGPeerLinks,
-		},
-		&cli.UintFlag{
-			Name:        "vpc-loopbacks",
-			Usage:       "number of vpc loopbacks for each switch",
-			Destination: &wgVPCLoopbacks,
 		},
 		&cli.UintFlag{
 			Name:        "mclag-servers",
@@ -707,7 +702,6 @@ func Run(ctx context.Context) error {
 								OrphanLeafsCount:  uint8(wgOrphanLeafsCount),  //nolint:gosec
 								MCLAGSessionLinks: uint8(wgMCLAGSessionLinks), //nolint:gosec
 								MCLAGPeerLinks:    uint8(wgMCLAGPeerLinks),    //nolint:gosec
-								VPCLoopbacks:      uint8(wgVPCLoopbacks),      //nolint:gosec
 								MCLAGServers:      uint8(wgMCLAGServers),      //nolint:gosec
 								ESLAGServers:      uint8(wgESLAGServers),      //nolint:gosec
 								UnbundledServers:  uint8(wgUnbundledServers),  //nolint:gosec

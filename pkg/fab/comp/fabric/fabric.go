@@ -255,7 +255,7 @@ func GetFabricConfig(f fabapi.Fabricator) (*meta.FabricConfig, error) {
 		MCLAGSessionSubnet:       string(f.Spec.Config.Fabric.MCLAGSessionSubnet),
 		GatewayASN:               f.Spec.Config.Gateway.ASN,
 		GatewayAPISync:           f.Spec.Config.Gateway.Enable,
-		LoopbackWorkaround:       !f.Spec.Config.Fabric.LoopbackWorkaroundDisable,
+		LoopbackWorkaround:       false,
 		ProtocolSubnet:           string(f.Spec.Config.Fabric.ProtocolSubnet),
 		VTEPSubnet:               string(f.Spec.Config.Fabric.VTEPSubnet),
 		FabricSubnet:             string(f.Spec.Config.Fabric.FabricSubnet),
