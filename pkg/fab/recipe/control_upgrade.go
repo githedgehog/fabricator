@@ -14,6 +14,8 @@ import (
 	"slices"
 	"time"
 
+	"github.com/Masterminds/semver/v3"
+	agentapi "go.githedgehog.com/fabric/api/agent/v1beta1"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
@@ -36,11 +38,12 @@ import (
 )
 
 type ControlUpgrade struct {
-	WorkDir string
-	Yes     bool
-	Fab     fabapi.Fabricator
-	Control fabapi.ControlNode
-	Nodes   []fabapi.FabNode
+	WorkDir    string
+	Yes        bool
+	SkipChecks bool
+	Fab        fabapi.Fabricator
+	Control    fabapi.ControlNode
+	Nodes      []fabapi.FabNode
 }
 
 func (c *ControlUpgrade) Run(ctx context.Context) error {
@@ -49,7 +52,7 @@ func (c *ControlUpgrade) Run(ctx context.Context) error {
 	kube, err := kubeutil.NewClient(ctx, k3s.KubeConfigPath,
 		comp.CoreAPISchemeBuilder, comp.AppsAPISchemeBuilder,
 		comp.HelmAPISchemeBuilder, comp.CMApiSchemeBuilder, comp.CMMetaSchemeBuilder,
-		wiringapi.SchemeBuilder, vpcapi.SchemeBuilder, fabapi.SchemeBuilder,
+		wiringapi.SchemeBuilder, vpcapi.SchemeBuilder, agentapi.SchemeBuilder, fabapi.SchemeBuilder,
 	)
 	if err != nil {
 		return fmt.Errorf("creating kube client: %w", err)
@@ -93,6 +96,12 @@ func (c *ControlUpgrade) Run(ctx context.Context) error {
 			return false, nil
 		}); err != nil {
 		return fmt.Errorf("waiting for k8s node ready: %w", err)
+	}
+
+	if !c.SkipChecks {
+		if err := c.checkUpgradeConstraints(ctx, kube); err != nil {
+			return fmt.Errorf("checking upgrade constraints: %w", err)
+		}
 	}
 
 	c.Fab.Status.IsBootstrap = false
@@ -159,6 +168,78 @@ func (c *ControlUpgrade) Run(ctx context.Context) error {
 	}
 
 	slog.Info("Control node upgrade complete")
+
+	return nil
+}
+
+func (c *ControlUpgrade) checkUpgradeConstraints(ctx context.Context, kube kclient.Reader) error {
+	f := &fabapi.Fabricator{}
+	if err := kube.Get(ctx, kclient.ObjectKey{Name: comp.FabName, Namespace: comp.FabNamespace}, f); err != nil {
+		return fmt.Errorf("getting fabricator: %w", err)
+	}
+
+	{
+		fabCtrlConstr, err := semver.NewConstraint(fab.FabricatorCtrlConstraint)
+		if err != nil {
+			return fmt.Errorf("parsing fabricator control constraint: %w", err)
+		}
+
+		if f.Status.Components.FabricatorCtrl != fabapi.CompStatusReady {
+			return fmt.Errorf("fabricator ctrl is not ready") //nolint:err113
+		}
+
+		fabCtrlVersion, err := semver.NewVersion(string(f.Status.Versions.Fabricator.Controller))
+		if err != nil {
+			return fmt.Errorf("parsing fabricator ctrl version: %w", err)
+		}
+
+		if !fabCtrlConstr.Check(fabCtrlVersion) {
+			return fmt.Errorf("fabricator ctrl version %s does not satisfy constraint %s", fabCtrlVersion, fabCtrlConstr) //nolint:err113
+		}
+	}
+
+	{
+		fabAgentConstr, err := semver.NewConstraint(fab.FabricAgentConstraint)
+		if err != nil {
+			return fmt.Errorf("parsing fabricator agent constraint: %w", err)
+		}
+		fabNOSConstr, err := semver.NewConstraint(fab.FabricNOSConstraint)
+		if err != nil {
+			return fmt.Errorf("parsing fabricator NOS constraint: %w", err)
+		}
+
+		if f.Status.Components.FabricCtrl != fabapi.CompStatusReady {
+			return fmt.Errorf("fabric ctrl is not ready") //nolint:err113
+		}
+
+		ags := &agentapi.AgentList{}
+		if err := kube.List(ctx, ags); err != nil {
+			return fmt.Errorf("listing switch agents: %w", err)
+		}
+		for _, ag := range ags.Items {
+			if ag.Status.LastAppliedGen != ag.Generation {
+				return fmt.Errorf("agent %s is not ready", ag.Name) //nolint:err113
+			}
+
+			agVersion, err := semver.NewVersion(ag.Status.Version)
+			if err != nil {
+				return fmt.Errorf("parsing agent %s version: %w", ag.Name, err)
+			}
+
+			if !fabAgentConstr.Check(agVersion) {
+				return fmt.Errorf("agent %s version %s does not satisfy constraint %s", ag.Name, agVersion, fabAgentConstr) //nolint:err113
+			}
+
+			nosVersion, err := semver.NewVersion(fab.CleanupFabricNOSVersion(ag.Status.State.NOS.SoftwareVersion))
+			if err != nil {
+				return fmt.Errorf("parsing agent %s NOS version: %w", ag.Name, err)
+			}
+
+			if !fabNOSConstr.Check(nosVersion) {
+				return fmt.Errorf("agent %s NOS version %s does not satisfy constraint %s", ag.Name, nosVersion, fabNOSConstr) //nolint:err113
+			}
+		}
+	}
 
 	return nil
 }

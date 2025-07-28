@@ -4,6 +4,8 @@
 package fab
 
 import (
+	"strings"
+
 	fmeta "go.githedgehog.com/fabric/api/meta"
 	"go.githedgehog.com/fabric/pkg/ctrl/switchprofile"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
@@ -17,6 +19,12 @@ var (
 	GatewayVersion    = meta.Version("v0.17.0")
 	DataplaneVersion  = meta.Version("main.x86_64-unknown-linux-gnu.debug.f27f76cd91213cf4dc85d0dab95e7c70ede30efc")
 	FRRVersion        = meta.Version("0ba323e489ea2baf3f85fc42ff23aff674a25690.debug")
+	BCMSONiCVersion   = meta.Version("v4.5.0")
+
+	// Upgrade constraints, "-0" to include pre-releases
+	FabricatorCtrlConstraint = ">=0.40.0-0"
+	FabricAgentConstraint    = ">=0.81.1-0"
+	FabricNOSConstraint      = ">=4.5.0-0" // -0 is to allow -Enterprise_Base suffix
 )
 
 var Versions = fabapi.Versions{
@@ -50,9 +58,9 @@ var Versions = fabapi.Versions{
 		ProxyChart: FabricVersion, // TODO switch to a better proxy
 		Proxy:      "1.9.1",       // TODO use version starting with "v"
 		NOS: map[string]meta.Version{
-			string(fmeta.NOSTypeSONiCBCMVS):     "v4.5.0",
-			string(fmeta.NOSTypeSONiCBCMBase):   "v4.5.0",
-			string(fmeta.NOSTypeSONiCBCMCampus): "v4.5.0",
+			string(fmeta.NOSTypeSONiCBCMVS):     BCMSONiCVersion,
+			string(fmeta.NOSTypeSONiCBCMBase):   BCMSONiCVersion,
+			string(fmeta.NOSTypeSONiCBCMCampus): BCMSONiCVersion,
 		},
 		ONIE: map[string]meta.Version{
 			switchprofile.DellS5232FON.Spec.Platform:         "v0.1.0",
@@ -81,4 +89,8 @@ var Versions = fabapi.Versions{
 		ONIE:    "v0.2.0",
 		Flatcar: "v4152.2.3",
 	},
+}
+
+func CleanupFabricNOSVersion(version string) string {
+	return strings.ReplaceAll(version, "_", "-")
 }
