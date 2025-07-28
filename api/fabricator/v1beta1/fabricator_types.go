@@ -202,7 +202,7 @@ type FabricConfig struct {
 	BaseVPCCommunity string            `json:"baseVPCCommunity,omitempty"`
 	VPCIRBVLANs      []fmeta.VLANRange `json:"vpcIRBVLANs,omitempty"`
 
-	LoopbackWorkaroundDisable bool              `json:"loopbackWorkaroundDisable,omitempty"`
+	LoopbackWorkaroundDisable bool              `json:"loopbackWorkaroundDisable,omitempty"` // TODO remove, kept for backward compat, ignored
 	VPCWorkaroundVLANs        []fmeta.VLANRange `json:"vpcWorkaroundVLANs,omitempty"`
 	VPCWorkaroundSubnet       meta.Prefix       `json:"vpcWorkaroundSubnet,omitempty"`
 
@@ -375,6 +375,8 @@ func (f *Fabricator) Default() {
 			f.Spec.Config.Gateway.ASN = 65534
 		}
 	}
+
+	f.Spec.Config.Fabric.LoopbackWorkaroundDisable = false // it's ignored now
 }
 
 func (f *Fabricator) Validate(ctx context.Context) error {

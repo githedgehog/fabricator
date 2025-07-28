@@ -375,7 +375,6 @@ _Appears in:_
 | `fabricSubnet` _[Prefix](#prefix)_ |  |  |  |
 | `baseVPCCommunity` _string_ |  |  |  |
 | `vpcIRBVLANs` _VLANRange array_ |  |  |  |
-| `loopbackWorkaroundDisable` _boolean_ |  |  |  |
 | `vpcWorkaroundVLANs` _VLANRange array_ |  |  |  |
 | `vpcWorkaroundSubnet` _[Prefix](#prefix)_ |  |  |  |
 | `eslagMACBase` _string_ |  |  |  |
