@@ -30,7 +30,6 @@ type VLABBuilder struct {
 	OrphanLeafsCount  uint8  // number of non-MCLAG server-leafs to generate
 	MCLAGSessionLinks uint8  // number of MCLAG session links to generate
 	MCLAGPeerLinks    uint8  // number of MCLAG peer links to generate
-	VPCLoopbacks      uint8  // number of VPC loopbacks to generate per leaf switch
 	MCLAGServers      uint8  // number of MCLAG servers to generate for MCLAG switches
 	ESLAGServers      uint8  // number of ESLAG servers to generate for ESLAG switches
 	UnbundledServers  uint8  // number of unbundled servers to generate for switches (only for one of the first switch in the redundancy group or orphan switch)
@@ -112,9 +111,6 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 			b.MCLAGPeerLinks = 2
 		}
 	}
-	if b.VPCLoopbacks == 0 {
-		b.VPCLoopbacks = 2
-	}
 
 	isGw := false
 	gw := fabapi.FabNode{}
@@ -183,7 +179,7 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 		}
 	}
 	slog.Info(">>>", "mclagLeafsCount", b.MCLAGLeafsCount, "mclagSessionLinks", b.MCLAGSessionLinks, "mclagPeerLinks", b.MCLAGPeerLinks)
-	slog.Info(">>>", "orphanLeafsCount", b.OrphanLeafsCount, "vpcLoopbacks", b.VPCLoopbacks)
+	slog.Info(">>>", "orphanLeafsCount", b.OrphanLeafsCount)
 	slog.Info(">>>", "mclagServers", b.MCLAGServers, "eslagServers", b.ESLAGServers, "unbundledServers", b.UnbundledServers, "bundledServers", b.BundledServers)
 
 	if err := b.data.Add(ctx, &wiringapi.VLANNamespace{
@@ -649,35 +645,6 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 				}); err != nil {
 					return err
 				}
-			}
-		}
-	}
-
-	if b.VPCLoopbacks > 0 {
-		switches := &wiringapi.SwitchList{}
-		if err := b.data.List(ctx, switches); err != nil {
-			return fmt.Errorf("listing switches: %w", err) //nolint:goerr113
-		}
-
-		for _, sw := range switches.Items {
-			if !sw.Spec.Role.IsLeaf() {
-				continue
-			}
-
-			loops := []wiringapi.SwitchToSwitchLink{}
-			for i := uint8(0); i < b.VPCLoopbacks; i++ {
-				loops = append(loops, wiringapi.SwitchToSwitchLink{
-					Switch1: wiringapi.BasePortName{Port: b.nextSwitchPort(sw.Name)},
-					Switch2: wiringapi.BasePortName{Port: b.nextSwitchPort(sw.Name)},
-				})
-			}
-
-			if _, err := b.createConnection(ctx, wiringapi.ConnectionSpec{
-				VPCLoopback: &wiringapi.ConnVPCLoopback{
-					Links: loops,
-				},
-			}); err != nil {
-				return err
 			}
 		}
 	}

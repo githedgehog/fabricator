@@ -209,8 +209,6 @@ spec:
                       leafASNStart:
                         format: int32
                         type: integer
-                      loopbackWorkaroundDisable:
-                        type: boolean
                       managementDHCPEnd:
                         type: string
                       managementDHCPStart:

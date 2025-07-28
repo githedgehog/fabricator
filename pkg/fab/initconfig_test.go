@@ -327,7 +327,6 @@ func TestInitConfig(t *testing.T) {
 			}
 
 			test.expectedFab.Default()
-			test.expectedFab.Spec.Config.Fabric.LoopbackWorkaroundDisable = true
 
 			data, err := fab.InitConfig(ctx, test.in)
 			if test.initErr {
