@@ -125,7 +125,7 @@ process_vm_sarif() {
         echo "Merging ${#sarif_files[@]} SARIF files for $vm_name..."
         jq -s '
             .[0] as $base |
-            (map(.runs[0].results // []) | add) as $all_results |
+            (map(.runs[0].results // []) | add | unique_by(.ruleId + .locations[0].physicalLocation.artifactLocation.uri)) as $all_results |
             (map(.runs[0].tool.driver.rules // []) | add | unique_by(.id)) as $all_rules |
             {
               "version": ($base.version // "2.1.0"),
@@ -161,9 +161,10 @@ process_vm_sarif() {
     local actor="${GITHUB_ACTOR:-unknown}"
     local registry_repo="${HHFAB_REG_REPO:-127.0.0.1:30000}"
 
-    # Create image mapping by reading imageName directly from SARIF files
+    # Create image mapping by reading imageName and imageID from SARIF files
     echo "Mapping SARIF files to container images..."
     declare -A sarif_to_image_map
+    declare -A imageID_to_representative
     local mapped_count=0
     local total_files=${#sarif_files[@]}
 
@@ -171,8 +172,9 @@ process_vm_sarif() {
         filename=$(basename "$file")
         echo "  Processing file: $filename"
 
-        # Extract imageName directly from the SARIF file
+        # Extract imageName and imageID from SARIF file
         image_name=$(jq -r '.runs[0].properties.imageName // empty' "$file" 2>/dev/null)
+        image_id=$(jq -r '.runs[0].properties.imageID // empty' "$file" 2>/dev/null)
 
         if [ -z "$image_name" ] || [ "$image_name" = "null" ]; then
             echo "    ✗ No imageName found in SARIF file"
@@ -183,11 +185,7 @@ process_vm_sarif() {
 
         # Handle airgapped mode where imageName is a tar file path
         if [[ "$image_name" == "/tmp/trivy-export-"* ]]; then
-            # Extract real image name from tar file path
-            # /tmp/trivy-export-$/docker.io_rancher_klipper-helm_v0.9.7-build20250616.tar
-            # → docker.io/rancher/klipper-helm:v0.9.7-build20250616
             tar_basename=$(basename "$image_name" .tar)
-            # Remove the trivy-export prefix pattern
             if [[ "$tar_basename" =~ ^.*\$\/(.+)$ ]]; then
                 image_part="${BASH_REMATCH[1]}"
             else
@@ -204,14 +202,13 @@ process_vm_sarif() {
                 path_part="${BASH_REMATCH[1]}"
                 version="${BASH_REMATCH[2]}"
                 image_path_fixed=$(echo "$path_part" | sed 's/_/\//g')
-                reconstructed_image="docker.io/${image_path_fixed}:${version}"
+                reconstructed_image="docker.io/${image_path_fixed}:${version}"  
             elif [[ "$image_part" =~ ^172\.30\.0\.1_31000_(.+)_v([0-9].*)$ ]]; then
                 path_part="${BASH_REMATCH[1]}"
                 version="v${BASH_REMATCH[2]}"
                 image_path_fixed=$(echo "$path_part" | sed 's/_/\//g')
                 reconstructed_image="172.30.0.1:31000/${image_path_fixed}:${version}"
             else
-                # Fallback: simple underscore to slash conversion
                 reconstructed_image=$(echo "$image_part" | sed 's/_/\//g' | sed 's|\([^/]*\)$|:\1|')
             fi
 
@@ -223,15 +220,28 @@ process_vm_sarif() {
         local found_match=false
         for container_image in "${container_images[@]}"; do
             if [[ "$image_name" == "$container_image" ]]; then
-                sarif_to_image_map["$file"]="$container_image"
-                echo "    ✓ MATCHED: $filename -> $container_image"
-                mapped_count=$((mapped_count + 1))
                 found_match=true
                 break
             fi
         done
 
-        if [ "$found_match" = false ]; then
+        if [ "$found_match" = true ]; then
+            # Use imageID for deduplication within this VM
+            if [ -n "$image_id" ] && [ "$image_id" != "null" ] && [ "$image_id" != "empty" ]; then
+                if [[ -z "${imageID_to_representative[$image_id]}" ]]; then
+                    imageID_to_representative[$image_id]="$image_name"
+                    echo "    ✓ NEW IMAGE: $filename -> $image_name (imageID: $image_id)"
+                else
+                    echo "    ✓ DUPLICATE IMAGE: $filename -> ${imageID_to_representative[$image_id]} (same imageID: $image_id)"
+                fi
+                sarif_to_image_map["$file"]="${imageID_to_representative[$image_id]}"
+            else
+                # No imageID, treat as unique
+                sarif_to_image_map["$file"]="$image_name"
+                echo "    ✓ MATCHED: $filename -> $image_name (no imageID)"
+            fi
+            mapped_count=$((mapped_count + 1))
+        else
             echo "    ✗ NO MATCH FOUND in container list for: $image_name"
         fi
         echo ""
@@ -256,32 +266,78 @@ process_vm_sarif() {
       }]
     }' > "$temp_consolidated"
 
+    # Group SARIF files by representative image for processing
+    echo "Processing SARIF files grouped by logical image..."
+    declare -A image_to_sarif_files
+
+    for file in "${sarif_files[@]}"; do
+        mapped_image="${sarif_to_image_map[$file]}"
+        if [ -n "$mapped_image" ]; then
+            if [[ -z "${image_to_sarif_files[$mapped_image]}" ]]; then
+                image_to_sarif_files[$mapped_image]="$file"
+            else
+                image_to_sarif_files[$mapped_image]="${image_to_sarif_files[$mapped_image]} $file"
+            fi
+        fi
+    done
+
     local processed_count=0
     local skipped_count=0
 
-    echo "Processing individual SARIF files..."
-    for file in "${sarif_files[@]}"; do
-        filename=$(basename "$file")
+    for representative_image in "${!image_to_sarif_files[@]}"; do
+        sarif_files_for_image="${image_to_sarif_files[$representative_image]}"
+        sarif_files_array=($sarif_files_for_image)
+        file_count=${#sarif_files_array[@]}
 
-        # Skip SARIF files with no vulnerability results
-        result_count=$(jq '.runs[0].results | length' "$file" 2>/dev/null || echo 0)
-        if [ "$result_count" -eq 0 ]; then
-            echo "  Skipping $filename - no vulnerability results"
+        container_with_version=$(extract_container_info "$representative_image")
+        logical_image=$(normalize_image_name "$representative_image")
+
+        echo "  Processing logical image: $logical_image"
+        echo "    Representative: $representative_image -> $container_with_version"
+        echo "    Merging $file_count SARIF file(s): $(echo $sarif_files_for_image | tr ' ' '\n' | xargs -I {} basename {})"
+
+        # Check if any of the SARIF files have vulnerabilities
+        total_vulnerabilities=0
+        for file in $sarif_files_for_image; do
+            result_count=$(jq '.runs[0].results | length' "$file" 2>/dev/null || echo 0)
+            total_vulnerabilities=$((total_vulnerabilities + result_count))
+        done
+
+        if [ $total_vulnerabilities -eq 0 ]; then
+            echo "    Skipping - no vulnerabilities found across all files"
             skipped_count=$((skipped_count + 1))
             continue
         fi
 
-        mapped_image="${sarif_to_image_map[$file]}"
-        if [ -z "$mapped_image" ]; then
-            echo "  Warning: No image mapping found for $filename, skipping"
-            skipped_count=$((skipped_count + 1))
-            continue
+        echo "    Total vulnerabilities across files: $total_vulnerabilities"
+
+        # Create a merged SARIF file for this logical image
+        merged_sarif_temp="/tmp/merged-${logical_image//\//_}-$.sarif"
+
+        if [ $file_count -eq 1 ]; then
+            # Single file - use directly
+            cp "${sarif_files_array[0]}" "$merged_sarif_temp"
+        else
+            # Multiple files - merge them
+            echo "    Merging vulnerabilities from $file_count files..."
+            jq -s '
+                .[0] as $base |
+                (map(.runs[0].results // []) | add | unique_by(.ruleId + .locations[0].physicalLocation.artifactLocation.uri)) as $all_results |
+                (map(.runs[0].tool.driver.rules // []) | add | unique_by(.id)) as $all_rules |
+                {
+                  "version": ($base.version // "2.1.0"),
+                  "$schema": ($base."$schema" // "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json"),
+                  "runs": [
+                    ($base.runs[0] |
+                      .tool.driver.rules = $all_rules |
+                      .results = $all_results
+                    )
+                  ]
+                }
+            ' $sarif_files_for_image > "$merged_sarif_temp"
         fi
 
-        container_with_version=$(extract_container_info "$mapped_image")
-        echo "  Processing $filename -> $container_with_version ($result_count vulnerabilities)"
-        processed_count=$((processed_count + 1))
-
+        # Process the merged SARIF file
         jq --arg vm_name "$vm_name" \
            --arg vm_type "$vm_type" \
            --arg scan_time "$(date -Iseconds)" \
@@ -291,8 +347,9 @@ process_vm_sarif() {
            --arg actor "$actor" \
            --arg registry_repo "$registry_repo" \
            --arg scan_mode "$scan_mode" \
-           --arg source_image "$mapped_image" \
+           --arg source_image "$representative_image" \
            --arg container_with_version "$container_with_version" \
+           --arg logical_image "$logical_image" \
            --argjson container_images "$containers_json" \
            '
            # Extract container details
@@ -332,7 +389,7 @@ process_vm_sarif() {
                  .message.text = ("[" + $vm_name + "/" + $container_with_version + "] " + .message.text)
                )) |
 
-               # Add container-specific properties
+               # Add container-specific properties with logical image info
                .properties = (.properties // {}) + {
                  vmName: $vm_name,
                  vmType: $vm_type,
@@ -340,16 +397,18 @@ process_vm_sarif() {
                  containerVersion: $container_version,
                  containerWithVersion: $container_with_version,
                  sourceImage: $source_image,
+                 logicalImage: $logical_image,
                  originalArtifactUri: $original_uri,
                  binaryName: $binary_name,
                  scanContext: ("runtime-deployment-" + $scan_mode),
-                 artifactPath: ($vm_name + "/" + $container_with_version)
+                 artifactPath: ($vm_name + "/" + $container_with_version),
+                 deduplicated: true
                }
              end
            ))
-           ' "$file" > "${file}.processed"
+           ' "$merged_sarif_temp" > "${merged_sarif_temp}.processed"
 
-        # Merge this file's results into the consolidated file
+        # Merge this logical image's results into the consolidated file
         jq -s '
             .[0] as $consolidated |
             .[1] as $new_file |
@@ -358,10 +417,15 @@ process_vm_sarif() {
             .runs[0].results += ($new_file.runs[0].results // []) |
             .runs[0].tool.driver.rules += ($new_file.runs[0].tool.driver.rules // []) |
             .runs[0].tool.driver.rules |= unique_by(.id)
-        ' "$temp_consolidated" "${file}.processed" > "${temp_consolidated}.tmp" && \
+        ' "$temp_consolidated" "${merged_sarif_temp}.processed" > "${temp_consolidated}.tmp" && \
         mv "${temp_consolidated}.tmp" "$temp_consolidated"
 
-        rm -f "${file}.processed"
+        # Clean up temporary files
+        rm -f "$merged_sarif_temp" "${merged_sarif_temp}.processed"
+
+        processed_count=$((processed_count + 1))
+        echo "    ✓ Processed logical image: $logical_image"
+        echo ""
     done
 
     echo ""
@@ -517,7 +581,7 @@ else
 
     jq -s '
         .[0] as $base |
-        (map(.runs[0].results // []) | add) as $all_results |
+        (map(.runs[0].results // []) | add | unique_by(.ruleId + .locations[0].physicalLocation.artifactLocation.uri)) as $all_results |
         (map(.runs[0].tool.driver.rules // []) | add | unique_by(.id)) as $all_rules |
 
         {
