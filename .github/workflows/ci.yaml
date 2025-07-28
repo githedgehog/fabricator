@@ -216,7 +216,7 @@ jobs:
     needs:
       - test-build
 
-    name: "${{ matrix.hybrid && 'hlab' || 'vlab' }}-${{ matrix.fabricmode == 'spine-leaf' && 'sl' || 'cc' }}-${{ matrix.mesh && 'mesh-' || '' }}${{ matrix.gateway && 'gw-' || '' }}${{ matrix.includeonie && 'onie-' || '' }}${{ matrix.buildmode }}-${{ matrix.vpcmode }}"
+    name: "${{ matrix.hybrid && 'hlab' || 'vlab' }}-${{ matrix.fabricmode == 'spine-leaf' && 'sl' || 'cc' }}-${{ matrix.mesh && 'mesh-' || '' }}${{ matrix.gateway && 'gw-' || '' }}${{ matrix.includeonie && 'onie-' || '' }}${{ matrix.buildmode }}-${{ matrix.vpcmode }}-${{ matrix.extra }}"
 
     uses: ./.github/workflows/run-vlab.yaml
     with:
@@ -231,6 +231,7 @@ jobs:
       vpcmode: ${{ matrix.vpcmode }}
       releasetest: ${{ inputs.releasetest == true || contains(github.event.pull_request.labels.*.name, 'ci:+release') }}
       hybrid: ${{ matrix.hybrid }}
+      extra: ${{ matrix.extra }}
 
     strategy:
       fail-fast: false
@@ -240,7 +241,7 @@ jobs:
         mesh:
           - false
         gateway:
-          - false
+          - true
         includeonie:
           - false
         buildmode:
@@ -251,49 +252,18 @@ jobs:
           - l2vni
         hybrid:
           - false
-        include:
-          - fabricmode: collapsed-core
-            mesh: false
-            includeonie: false
-            gateway: false
-            buildmode: iso
-            vpcmode: l2vni
-            hybrid: false
-          - fabricmode: spine-leaf
-            mesh: false
-            gateway: true
-            includeonie: true
-            buildmode: usb
-            vpcmode: l2vni
-            hybrid: false
-          - fabricmode: spine-leaf
-            mesh: false
-            gateway: true
-            includeonie: true
-            buildmode: iso
-            vpcmode: l2vni
-            hybrid: false
-          - fabricmode: spine-leaf
-            mesh: false
-            gateway: false
-            includeonie: false
-            buildmode: iso
-            vpcmode: l3vni
-            hybrid: false
-          - fabricmode: spine-leaf
-            mesh: false
-            gateway: true
-            includeonie: false
-            buildmode: iso
-            vpcmode: l2vni
-            hybrid: false
-          - fabricmode: spine-leaf
-            mesh: false
-            gateway: false
-            includeonie: false
-            buildmode: iso
-            vpcmode: l2vni
-            hybrid: true
+        extra:
+          - "01"
+          - "02"
+          - "03"
+          - "04"
+          - "05"
+          - "06"
+          - "07"
+          - "08"
+          - "09"
+          - "10"
+
 
   vlab-upgrade:
     if: ${{ !contains(github.event.pull_request.labels.*.name, 'ci:-upgrade') && !contains(github.event.pull_request.labels.*.name, 'ci:-vlab') }}
