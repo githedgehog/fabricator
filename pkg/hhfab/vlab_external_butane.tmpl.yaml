@@ -293,6 +293,8 @@ systemd:
         ExecStart=/usr/bin/iptables -t nat -A POSTROUTING -o enp2s0 -j MASQUERADE
 
         # Forward rules in DOCKER-USER chain
+        # Drop all traffic with both source and destination in the fabric IP range, that is, 10.0.0.0/8. TODO: make this configurable
+        ExecStart=/usr/bin/iptables -I DOCKER-USER -s 10.0.0.0/8 -d 10.0.0.0/8 -j DROP
         {{range $vrfkey, $vrf := .ExternalVRFs}}
         ExecStart=/usr/bin/iptables -I DOCKER-USER -i {{$vrfkey}} -o enp2s0 -j ACCEPT
         {{range $connNicKey, $connNic := $.ExternalNICs}}{{range $attach := $connNic.Attachments}}{{if eq $attach.VRF $vrfkey}}
