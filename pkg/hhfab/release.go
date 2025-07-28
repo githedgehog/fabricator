@@ -41,6 +41,7 @@ var (
 	errNoBundled       = errors.New("no bundled connections found")
 	errNoUnbundled     = errors.New("no unbundled connections found")
 	errNotEnoughSpines = errors.New("not enough spines found")
+	errNotEnoughLeaves = errors.New("not enough leaves found")
 	errNotEnoughVPCs   = errors.New("not enough VPCs found")
 	errNoRoceLeaves    = errors.New("no leaves supporting RoCE found")
 	errInitialSetup    = errors.New("initial setup failed")
@@ -825,6 +826,128 @@ outer:
 	}
 
 	return false, nil, returnErr
+}
+
+// Basic test for mesh failover.
+// Iterate over leaf switches, shutdown all mesh links except for one, test connectivity
+// as soon as we manage to test this on a leaf, return and renable all agents as part of the revert
+func (testCtx *VPCPeeringTestCtx) meshFailoverTest(ctx context.Context) (bool, []RevertFunc, error) {
+	// list leaves, unfortunately we cannot filter by role
+	switches := &wiringapi.SwitchList{}
+	if err := testCtx.kube.List(ctx, switches); err != nil {
+		return false, nil, fmt.Errorf("listing switches: %w", err)
+	}
+	leaves := make([]wiringapi.Switch, 0)
+	for _, sw := range switches.Items {
+		if sw.Spec.Role != wiringapi.SwitchRoleSpine {
+			leaves = append(leaves, sw)
+		}
+	}
+
+	if len(leaves) < 2 {
+		slog.Info("Not enough leaves found, skipping test")
+
+		return true, nil, errNotEnoughLeaves
+	}
+	var someLeafTested bool
+
+	reverts := make([]RevertFunc, 0)
+	reverts = append(reverts, func(ctx context.Context) error {
+		for _, leaf := range leaves {
+			maxRetries := 5
+			sleepTime := time.Second * 5
+			enabled := false
+			for i := 0; i < maxRetries; i++ {
+				if err := changeAgentStatus(testCtx.hhfabBin, testCtx.workDir, leaf.Name, true); err != nil {
+					slog.Error("Enabling HH agent", "switch", leaf.Name, "error", err)
+					if i < maxRetries-1 {
+						slog.Warn("Retrying in 5 seconds")
+						time.Sleep(sleepTime)
+					}
+				} else {
+					enabled = true
+
+					break
+				}
+			}
+			if enabled {
+				continue
+			}
+			// if we get here, we failed to enable the agent
+			return fmt.Errorf("could not enable HH agent on switch %s after %d attempts", leaf.Name, maxRetries) //nolint:goerr113
+		}
+
+		return nil
+	})
+
+	for _, leaf := range leaves {
+		// get mesh links for this leaf
+		meshConns := &wiringapi.ConnectionList{}
+		if err := testCtx.kube.List(ctx, meshConns, kclient.MatchingLabels{wiringapi.ListLabelSwitch(leaf.Name): "true", wiringapi.LabelConnectionType: wiringapi.ConnectionTypeMesh}); err != nil {
+			return false, nil, fmt.Errorf("listing mesh connections for leaf %s: %w", leaf.Name, err)
+		}
+		if len(meshConns.Items) < 2 {
+			slog.Debug("Not enough mesh connections for leaf", "leaf", leaf.Name, "connections", len(meshConns.Items))
+
+			continue
+		}
+		// get switch profile to find the port name in sonic-cli
+		profile := &wiringapi.SwitchProfile{}
+		if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: leaf.Spec.Profile}, profile); err != nil {
+			return false, nil, fmt.Errorf("getting switch profile %s: %w", leaf.Spec.Profile, err)
+		}
+		portMap, err := profile.Spec.GetAPI2NOSPortsFor(&leaf.Spec)
+		if err != nil {
+			return false, nil, fmt.Errorf("getting API2NOS ports for switch %s: %w", leaf.Name, err)
+		}
+		// disable agent on leaf
+		if err := changeAgentStatus(testCtx.hhfabBin, testCtx.workDir, leaf.Name, false); err != nil {
+			return false, nil, fmt.Errorf("disabling HH agent: %w", err)
+		}
+
+		for i, conn := range meshConns.Items {
+			// skip one connection so we don't end up isolated
+			if i == 0 {
+				continue
+			}
+			for _, link := range conn.Spec.Mesh.Links {
+				var linkSwitch *wiringapi.ConnFabricLinkSwitch
+				switch {
+				case link.Leaf1.DeviceName() == leaf.Name:
+					linkSwitch = &link.Leaf1
+				case link.Leaf2.DeviceName() == leaf.Name:
+					linkSwitch = &link.Leaf2
+				default:
+					return false, reverts, fmt.Errorf("leaf %s not found in mesh link of connection %s", leaf.Name, conn.Name) //nolint:goerr113
+				}
+
+				swPort := linkSwitch.LocalPortName()
+				nosPortName, ok := portMap[swPort]
+				if !ok {
+					return false, reverts, fmt.Errorf("port %s not found in switch profile %s for switch %s", swPort, profile.Name, leaf.Name) //nolint:goerr113
+				}
+				if err := changeSwitchPortStatus(testCtx.hhfabBin, testCtx.workDir, leaf.Name, nosPortName, false); err != nil {
+					return false, reverts, fmt.Errorf("setting switch port down: %w", err)
+				}
+			}
+		}
+
+		// wait a bit to make sure that the fabric has converged; can't rely on agents as we disabled them
+		slog.Debug("Waiting 30 seconds for fabric to converge")
+		time.Sleep(30 * time.Second)
+		if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
+			return false, reverts, fmt.Errorf("testing connectivity: %w", err)
+		}
+		someLeafTested = true
+
+		break
+	}
+
+	if !someLeafTested {
+		return true, reverts, errors.New("no mesh leaves could be tested") //nolint:goerr113
+	}
+
+	return false, reverts, nil
 }
 
 // Vanilla test for VPC peering, just test connectivity without any further restriction
@@ -2095,6 +2218,8 @@ type SkipFlags struct {
 	ExtendedOnly  bool `xml:"-"` // skip if extended tests are not enabled
 	RoCE          bool `xml:"-"` // skip if RoCE is not supported by any of the leaf switches
 	SubInterfaces bool `xml:"-"` // skip if subinterfaces are not supported by some of the switches
+	NoFabricLink  bool `xml:"-"` // skip if there's no fabric (i.e. spine-leaf) link between the switches
+	NoMeshLink    bool `xml:"-"` // skip if there's no mesh (i.e. leaf-leaf) link between the switches
 
 	/* Note about subinterfaces; they are required in the following cases:
 	 * 1. when using VPC loopback workaround - it's applied when we have a pair of vpcs or vpc and external both attached on a switch with peering between them
@@ -2361,6 +2486,22 @@ func selectAndRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, suite *J
 
 			continue
 		}
+		if test.SkipFlags.NoFabricLink && skipFlags.NoFabricLink {
+			suite.TestCases[i].Skipped = &Skipped{
+				Message: "There are no fabric (i.e. spine-leaf) links between the switches",
+			}
+			suite.Skipped++
+
+			continue
+		}
+		if test.SkipFlags.NoMeshLink && skipFlags.NoMeshLink {
+			suite.TestCases[i].Skipped = &Skipped{
+				Message: "There are no mesh (i.e. leaf-leaf) links between the switches",
+			}
+			suite.Skipped++
+
+			continue
+		}
 	}
 	if suite.Skipped == suite.Tests {
 		slog.Info("All tests in suite skipped, skipping suite", "suite", suite.Name)
@@ -2431,6 +2572,15 @@ func makeVpcPeeringsSingleVPCSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 			F:    testCtx.spineFailoverTest,
 			SkipFlags: SkipFlags{
 				VirtualSwitch: true,
+				NoFabricLink:  true,
+			},
+		},
+		{
+			Name: "Mesh Failover",
+			F:    testCtx.meshFailoverTest,
+			SkipFlags: SkipFlags{
+				VirtualSwitch: true,
+				NoMeshLink:    true,
 			},
 		},
 		{
@@ -2596,6 +2746,23 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 	skipFlags := SkipFlags{
 		ExtendedOnly: rtOtps.Extended,
 	}
+	connList := &wiringapi.ConnectionList{}
+	if err := kube.List(ctx, connList, kclient.MatchingLabels{wiringapi.LabelConnectionType: wiringapi.ConnectionTypeMesh}); err != nil {
+		return fmt.Errorf("listing mesh connections: %w", err)
+	}
+	if len(connList.Items) == 0 {
+		slog.Info("No mesh connections found")
+		skipFlags.NoMeshLink = true
+	}
+	connList = &wiringapi.ConnectionList{}
+	if err := kube.List(ctx, connList, kclient.MatchingLabels{wiringapi.LabelConnectionType: wiringapi.ConnectionTypeFabric}); err != nil {
+		return fmt.Errorf("listing fabric connections: %w", err)
+	}
+	if len(connList.Items) == 0 {
+		slog.Info("No fabric connections found")
+		skipFlags.NoFabricLink = true
+	}
+
 	swList := &wiringapi.SwitchList{}
 	if err := kube.List(ctx, swList, kclient.MatchingLabels{}); err != nil {
 		return fmt.Errorf("listing switches: %w", err)
