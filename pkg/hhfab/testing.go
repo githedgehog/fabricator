@@ -2217,7 +2217,13 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 		fail = true
 	}
 
-	var lldpOut inspect.Out
+	lldpIn := inspect.LLDPIn{
+		Strict:   opts.Strict,
+		Fabric:   true,
+		External: true,
+		Server:   true,
+	}
+	var lldpOut inspect.Out[inspect.LLDPIn]
 	var lldpErr error
 
 	for attempt := 0; attempt < opts.Attempts; attempt++ {
@@ -2230,12 +2236,7 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 			}
 		}
 
-		lldpOut, lldpErr = inspect.LLDP(ctx, kube, inspect.LLDPIn{
-			Strict:   opts.Strict,
-			Fabric:   true,
-			External: true,
-			Server:   true,
-		})
+		lldpOut, lldpErr = inspect.LLDP(ctx, kube, lldpIn)
 
 		if lldpErr == nil {
 			if withErrors, ok := lldpOut.(inspect.WithErrors); ok {
@@ -2251,17 +2252,19 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 	if lldpErr != nil {
 		slog.Error("Failed to inspect LLDP", "err", lldpErr)
 		fail = true
-	} else if renderErr := inspect.Render(time.Now(), inspect.OutputTypeText, os.Stdout, lldpOut); renderErr != nil {
+	} else if renderErr := inspect.Render(time.Now(), inspect.OutputTypeText, os.Stdout, lldpIn, lldpOut); renderErr != nil {
 		slog.Error("Inspecting LLDP reveals some errors", "err", renderErr)
 		fail = true
 	}
 
-	if out, err := inspect.BGP(ctx, kube, inspect.BGPIn{
+	bgpIn := inspect.BGPIn{
 		Strict: opts.Strict,
-	}); err != nil {
+	}
+
+	if bgpOut, err := inspect.BGP(ctx, kube, bgpIn); err != nil {
 		slog.Error("Failed to inspect BGP", "err", err)
 		fail = true
-	} else if renderErr := inspect.Render(time.Now(), inspect.OutputTypeText, os.Stdout, out); renderErr != nil {
+	} else if renderErr := inspect.Render(time.Now(), inspect.OutputTypeText, os.Stdout, bgpIn, bgpOut); renderErr != nil {
 		slog.Error("Inspecting BGP reveals some errors", "err", renderErr)
 		fail = true
 	}
