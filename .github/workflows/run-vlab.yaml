@@ -57,6 +57,11 @@ on:
         type: boolean
         required: false
         default: false
+      extra:
+        description: "Extra name part"
+        type: string
+        required: false
+        default: ""
       debug:
         description: "Enable tmate debugging"
         type: boolean
@@ -68,7 +73,7 @@ permissions:
 
 env:
   # global workflow configs
-  slug: "${{ inputs.hybrid && 'hlab' || 'vlab' }}-${{ inputs.fabricmode == 'spine-leaf' && 'sl' || 'cc' }}-${{ inputs.mesh && 'mesh-' || '' }}${{ inputs.gateway && 'gw-' || '' }}${{ inputs.includeonie && 'onie-' || '' }}${{ inputs.buildmode }}-${{ inputs.vpcmode }}"
+  slug: "${{ inputs.hybrid && 'hlab' || 'vlab' }}-${{ inputs.fabricmode == 'spine-leaf' && 'sl' || 'cc' }}-${{ inputs.mesh && 'mesh-' || '' }}${{ inputs.gateway && 'gw-' || '' }}${{ inputs.includeonie && 'onie-' || '' }}${{ inputs.buildmode }}-${{ inputs.vpcmode }}${{ inputs.extra }}"
   # env vars to configure hhfab
   HHFAB_REG_REPO: 127.0.0.1:30000
   HHFAB_VLAB_COLLECT: true
@@ -97,6 +102,7 @@ jobs:
           echo "  VPC mode: ${{ inputs.vpcmode }}"
           echo "  Release test: ${{ inputs.releasetest }}"
           echo "  Hybrid: ${{ inputs.hybrid }}"
+          echo "  Extra: ${{ inputs.extra }}"
           echo "  Debug: ${{ inputs.debug }}"
           echo "Calculated:"
           echo "  Slug: ${{ env.slug }}"
