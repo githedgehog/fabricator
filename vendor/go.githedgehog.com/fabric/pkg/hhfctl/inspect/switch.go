@@ -18,6 +18,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
+	"math"
+	"slices"
 	"strings"
 	"time"
 
@@ -33,7 +36,12 @@ import (
 )
 
 type SwitchIn struct {
-	Name string
+	Name         string
+	Details      bool
+	Ports        bool
+	Transceivers bool
+	Counters     bool
+	Lasers       bool
 }
 
 type SwitchOut struct {
@@ -44,6 +52,7 @@ type SwitchOut struct {
 	Ports    []*SwitchOutPort             `json:"ports,omitempty"`
 	Serial   string                       `json:"serial,omitempty"`
 	Software string                       `json:"software,omitempty"`
+	Firmware map[string]string            `json:"firmware,omitempty"`
 }
 
 type AgentState struct {
@@ -57,14 +66,15 @@ type AgentState struct {
 }
 
 type SwitchOutPort struct {
-	PortName       string                         `json:"portName,omitempty"`
-	ConnectionName string                         `json:"connectionName,omitempty"`
-	ConnectionType string                         `json:"connectionType,omitempty"`
-	InterfaceState *agentapi.SwitchStateInterface `json:"interfaceState,omitempty"`
-	BreakoutState  *agentapi.SwitchStateBreakout  `json:"breakoutState,omitempty"`
+	PortName         string                           `json:"portName,omitempty"`
+	ConnectionName   string                           `json:"connectionName,omitempty"`
+	ConnectionType   string                           `json:"connectionType,omitempty"`
+	InterfaceState   *agentapi.SwitchStateInterface   `json:"interfaceState,omitempty"`
+	BreakoutState    *agentapi.SwitchStateBreakout    `json:"breakoutState,omitempty"`
+	TransceiverState *agentapi.SwitchStateTransceiver `json:"transceiverState,omitempty"`
 }
 
-func (out *SwitchOut) MarshalText(now time.Time) (string, error) {
+func (out *SwitchOut) MarshalText(in SwitchIn, now time.Time) (string, error) {
 	str := &strings.Builder{}
 
 	applied := ""
@@ -94,94 +104,198 @@ func (out *SwitchOut) MarshalText(now time.Time) (string, error) {
 		},
 	))
 
-	str.WriteString("Ports (in use):\n")
+	if in.Details {
+		str.WriteString("\nFirmware:\n")
+
+		fwData := [][]string{}
+		for _, fwName := range slices.Sorted(maps.Keys(out.Firmware)) {
+			fwVersion := out.Firmware[fwName]
+			fwData = append(fwData, []string{fwName, fwVersion})
+		}
+		str.WriteString(RenderTable(
+			[]string{"Name", "Version"},
+			fwData,
+		))
+	}
 
 	portMap, err := out.Profile.GetAPI2NOSPortsFor(out.Spec)
 	if err != nil {
 		return "", errors.Wrap(err, "cannot get API to NOS port mapping")
 	}
 
-	portData := [][]string{}
-	for _, port := range out.Ports {
-		portType := port.ConnectionType
-		state := ""
-		speed := ""
-		trans := ""
-		nos := portMap[port.PortName]
+	if in.Ports {
+		str.WriteString("\nPorts:\n")
 
-		if port.BreakoutState != nil {
-			portType = "breakout"
-			speed = port.BreakoutState.Mode
-			state = strings.ToLower(port.BreakoutState.Status)
+		portData := [][]string{}
+		for _, port := range out.Ports {
+			portType := port.ConnectionType
+			state := ""
+			speed := ""
+			transName := ""
+			trans := ""
+			nos := portMap[port.PortName]
+			conn := port.ConnectionName
 
-			profile, exists := out.Profile.Ports[port.PortName]
-			if exists {
-				if profile.NOSName != "" {
-					nos = profile.NOSName
+			if port.BreakoutState != nil {
+				portType = "breakout"
+				speed = port.BreakoutState.Mode
+				state = strings.ToLower(port.BreakoutState.Status)
+
+				profile, exists := out.Profile.Ports[port.PortName]
+				if exists {
+					if profile.NOSName != "" {
+						nos = profile.NOSName
+					}
 				}
 			}
-		}
 
-		if port.InterfaceState != nil {
-			state = fmt.Sprintf("%s/%s", port.InterfaceState.AdminStatus, port.InterfaceState.OperStatus)
-			speed = port.InterfaceState.Speed
-			if port.InterfaceState.Transceiver != nil {
-				trans = port.InterfaceState.Transceiver.Description
-				if port.InterfaceState.Transceiver.OperStatus != "" {
-					state += fmt.Sprintf(" (%s)", port.InterfaceState.Transceiver.OperStatus)
+			if port.InterfaceState != nil {
+				state = fmt.Sprintf("%s/%s", port.InterfaceState.AdminStatus, port.InterfaceState.OperStatus)
+				speed = port.InterfaceState.Speed
+				if port.InterfaceState.AutoNegotiate {
+					speed += "/auto"
 				}
 			}
-		}
 
-		portData = append(portData, []string{
-			port.PortName,
-			nos,
-			portType,
-			port.ConnectionName,
-			state,
-			speed,
-			trans,
-		})
+			if port.TransceiverState != nil {
+				transName = port.TransceiverState.Description
+				if port.TransceiverState.OperStatus != "" {
+					trans = port.TransceiverState.OperStatus
+				}
+				trans += "/"
+				if port.TransceiverState.CMISStatus != "" {
+					trans += strings.ToLower(port.TransceiverState.CMISStatus)
+				}
+				trans = strings.TrimSuffix(trans, "/")
+			}
+
+			portData = append(portData, []string{
+				port.PortName,
+				nos,
+				portType,
+				conn,
+				state,
+				speed,
+				transName,
+				trans,
+			})
+		}
+		str.WriteString(RenderTable(
+			[]string{"Name", "NOS", "Type", "Connection/Mode", "Adm/Op", "Speed", "Transceiver", "Transc/CMIS"},
+			portData,
+		))
 	}
-	str.WriteString(RenderTable(
-		[]string{"Name", "NOS", "Type", "Connection", "Adm/Op (Transc)", "Speed", "Transceiver"},
-		portData,
-	))
 
-	str.WriteString("Port Counters (↓ In ↑ Out):\n")
+	if in.Transceivers {
+		str.WriteString("\nTransceivers:\n")
 
-	countersData := [][]string{}
-	for _, port := range out.Ports {
-		if port.InterfaceState == nil || port.InterfaceState.Counters == nil {
-			continue
+		trData := [][]string{}
+		for _, port := range out.Ports {
+			if port.TransceiverState == nil {
+				continue
+			}
+
+			cmis := ""
+			if port.TransceiverState.CMISStatus != "" {
+				cmis = port.TransceiverState.CMISStatus
+				if port.TransceiverState.CMISRev != "" {
+					cmis += " " + port.TransceiverState.CMISRev
+					cmis += fmt.Sprintf(" (%d)", port.TransceiverState.CMISApp)
+				}
+			}
+
+			trData = append(trData, []string{
+				port.PortName,
+				port.TransceiverState.OperStatus,
+				port.TransceiverState.Description,
+				port.TransceiverState.CableClass,
+				strings.TrimSuffix(port.TransceiverState.ConnectorType, "_CONNECTOR"),
+				port.TransceiverState.Vendor,
+				port.TransceiverState.VendorPart,
+				port.TransceiverState.SerialNumber,
+				cmis,
+			})
 		}
-
-		counters := port.InterfaceState.Counters
-
-		lastClear := "-"
-		if !counters.LastClear.IsZero() {
-			lastClear = HumanizeTime(now, counters.LastClear.Time)
-		}
-
-		countersData = append(countersData, []string{
-			port.PortName,
-			port.InterfaceState.Speed,
-			fmt.Sprintf("↓ %3d ↑ %3d ", counters.InUtilization, counters.OutUtilization),
-			fmt.Sprintf("↓ %s", humanize.CommafWithDigits(counters.InBitsPerSecond, 0)),
-			fmt.Sprintf("↑ %s", humanize.CommafWithDigits(counters.OutBitsPerSecond, 0)),
-			fmt.Sprintf("↓ %s", humanize.CommafWithDigits(counters.InPktsPerSecond, 0)),
-			fmt.Sprintf("↑ %s", humanize.CommafWithDigits(counters.OutPktsPerSecond, 0)),
-			lastClear,
-			fmt.Sprintf("↓ %d ↑ %d ", counters.InErrors, counters.OutErrors),
-			fmt.Sprintf("↓ %d ↑ %d", counters.InDiscards, counters.OutDiscards),
-		})
+		str.WriteString(RenderTable(
+			[]string{"Name", "Oper", "Description", "Class", "Connector", "Vendor", "Part", "Serial", "CMIS"},
+			trData,
+		))
 	}
-	str.WriteString(RenderTable(
-		[]string{"Name", "Speed", "Util %", "Bits/sec In", "Bits/sec Out", "Pkts/sec In", "Pkts/sec Out", "Clear", "Errors", "Discards"},
-		countersData,
-	))
 
-	// TODO add port neigbors?
+	if in.Lasers {
+		str.WriteString("\nLaser Status:\n")
+
+		laserData := [][]string{}
+		for _, port := range out.Ports {
+			if port.TransceiverState == nil || port.TransceiverState.Channels == nil {
+				continue
+			}
+
+			line := []string{
+				port.PortName,
+			}
+
+			for _, chName := range slices.Sorted(maps.Keys(port.TransceiverState.Channels)) {
+				chData := port.TransceiverState.Channels[chName]
+				var in, out float64
+				if chData.In == nil {
+					in = math.Inf(-1)
+				} else {
+					in = *chData.In
+				}
+				if chData.Out == nil {
+					out = math.Inf(-1)
+				} else {
+					out = *chData.Out
+				}
+
+				line = append(line, fmt.Sprintf("%s: %.2f/%.2f dBm (%.2f mA)", chName, in, out, chData.Bias))
+			}
+
+			laserData = append(laserData, line)
+		}
+		str.WriteString(RenderTable(
+			[]string{"Name", "Channels In/Out(Bias)"},
+			laserData,
+		))
+	}
+
+	if in.Counters {
+		str.WriteString("\nPort Counters (↓ In ↑ Out):\n")
+
+		countersData := [][]string{}
+		for _, port := range out.Ports {
+			if port.InterfaceState == nil || port.InterfaceState.Counters == nil {
+				continue
+			}
+
+			counters := port.InterfaceState.Counters
+
+			lastClear := "-"
+			if !counters.LastClear.IsZero() {
+				lastClear = HumanizeTime(now, counters.LastClear.Time)
+			}
+
+			countersData = append(countersData, []string{
+				port.PortName,
+				port.InterfaceState.Speed,
+				fmt.Sprintf("↓ %3d ↑ %3d ", counters.InUtilization, counters.OutUtilization),
+				fmt.Sprintf("↓ %s", humanize.CommafWithDigits(counters.InBitsPerSecond, 0)),
+				fmt.Sprintf("↑ %s", humanize.CommafWithDigits(counters.OutBitsPerSecond, 0)),
+				fmt.Sprintf("↓ %s", humanize.CommafWithDigits(counters.InPktsPerSecond, 0)),
+				fmt.Sprintf("↑ %s", humanize.CommafWithDigits(counters.OutPktsPerSecond, 0)),
+				lastClear,
+				fmt.Sprintf("↓ %d ↑ %d ", counters.InErrors, counters.OutErrors),
+				fmt.Sprintf("↓ %d ↑ %d", counters.InDiscards, counters.OutDiscards),
+			})
+		}
+		str.WriteString(RenderTable(
+			[]string{"Name", "Speed", "Util %", "Bits/sec In", "Bits/sec Out", "Pkts/sec In", "Pkts/sec Out", "Clear", "Errors", "Discards"},
+			countersData,
+		))
+	}
+
+	str.WriteString("\nUse flags for more details: -d/--details (e.g. firmware), -p/--ports, -t/--transceivers, -c/--counters, -l/--lasers\n")
 
 	return str.String(), nil
 }
@@ -231,6 +345,7 @@ func Switch(ctx context.Context, kube kclient.Reader, in SwitchIn) (*SwitchOut, 
 
 	out.Serial = agent.Status.State.NOS.SerialNumber
 	out.Software = agent.Status.State.NOS.SoftwareVersion
+	out.Firmware = agent.Status.State.Firmware
 
 	conns := &wiringapi.ConnectionList{}
 	if err := kube.List(ctx, conns, kclient.MatchingLabels{
@@ -258,7 +373,7 @@ func Switch(ctx context.Context, kube kclient.Reader, in SwitchIn) (*SwitchOut, 
 				ConnectionType: conn.Spec.Type(),
 			}
 
-			if !skipActual && agent.Status.State.Interfaces != nil {
+			if agent.Status.State.Interfaces != nil {
 				state, exists := agent.Status.State.Interfaces[portName]
 				if !exists {
 					state, exists = agent.Status.State.Interfaces[portName+"/1"]
@@ -273,21 +388,46 @@ func Switch(ctx context.Context, kube kclient.Reader, in SwitchIn) (*SwitchOut, 
 			}
 
 			ports[portName] = port
+		}
+	}
 
-			if !skipActual && strings.Count(portName, "/") == 2 {
-				breakoutName := portName[:strings.LastIndex(portName, "/")]
-
-				if agent.Status.State.Breakouts != nil {
-					state, exists := agent.Status.State.Breakouts[breakoutName]
-					if exists {
-						ports[breakoutName] = &SwitchOutPort{
-							PortName:      breakoutName,
-							BreakoutState: &state,
-						}
-					}
-				}
+	for ifaceName, ifaceState := range agent.Status.State.Interfaces {
+		if !strings.HasPrefix(ifaceName, "E1") {
+			continue
+		}
+		if _, ok := ports[ifaceName]; !ok {
+			ports[ifaceName] = &SwitchOutPort{
+				ConnectionType: "-",
+				PortName:       ifaceName,
+				InterfaceState: &ifaceState,
 			}
 		}
+	}
+
+	for transceiverName, transceiver := range agent.Status.State.Transceivers {
+		if transceiver.OperStatus == "" {
+			continue
+		}
+
+		port, ok := ports[transceiverName]
+		if !ok {
+			port = &SwitchOutPort{}
+			ports[transceiverName] = port
+		}
+
+		port.PortName = transceiverName
+		port.TransceiverState = &transceiver
+	}
+
+	for breakoutName, breakout := range agent.Status.State.Breakouts {
+		port, ok := ports[breakoutName]
+		if !ok {
+			port = &SwitchOutPort{}
+			ports[breakoutName] = port
+		}
+
+		port.PortName = breakoutName
+		port.BreakoutState = &breakout
 	}
 
 	portNames := lo.Keys(ports)
