@@ -259,6 +259,7 @@ func GetFabricConfig(f fabapi.Fabricator) (*meta.FabricConfig, error) {
 		ProtocolSubnet:           string(f.Spec.Config.Fabric.ProtocolSubnet),
 		VTEPSubnet:               string(f.Spec.Config.Fabric.VTEPSubnet),
 		FabricSubnet:             string(f.Spec.Config.Fabric.FabricSubnet),
+		DisableBFD:               f.Spec.Config.Fabric.DisableBFD,
 	}, nil
 }
 
