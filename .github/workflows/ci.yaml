@@ -261,14 +261,14 @@ jobs:
             hybrid: false
           - fabricmode: spine-leaf
             mesh: false
-            gateway: false
+            gateway: true
             includeonie: true
             buildmode: usb
             vpcmode: l2vni
             hybrid: false
           - fabricmode: spine-leaf
             mesh: false
-            gateway: false
+            gateway: true
             includeonie: true
             buildmode: iso
             vpcmode: l2vni
