@@ -375,6 +375,7 @@ _Appears in:_
 | `fabricSubnet` _[Prefix](#prefix)_ |  |  |  |
 | `baseVPCCommunity` _string_ |  |  |  |
 | `vpcIRBVLANs` _VLANRange array_ |  |  |  |
+| `loopbackWorkaroundDisable` _boolean_ |  |  |  |
 | `vpcWorkaroundVLANs` _VLANRange array_ |  |  |  |
 | `vpcWorkaroundSubnet` _[Prefix](#prefix)_ |  |  |  |
 | `eslagMACBase` _string_ |  |  |  |
@@ -383,6 +384,7 @@ _Appears in:_
 | `defaultSwitchUsers` _object (keys:string, values:[SwitchUser](#switchuser))_ |  |  |  |
 | `defaultAlloyConfig` _[AlloyConfig](#alloyconfig)_ |  |  |  |
 | `includeONIE` _boolean_ |  |  |  |
+| `disableBFD` _boolean_ |  |  |  |
 
 
 #### FabricVersions

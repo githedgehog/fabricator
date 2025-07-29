@@ -215,6 +215,8 @@ type FabricConfig struct {
 	DefaultAlloyConfig fmeta.AlloyConfig     `json:"defaultAlloyConfig,omitempty"`
 
 	IncludeONIE bool `json:"includeONIE,omitempty"`
+
+	DisableBFD bool `json:"disableBFD,omitempty"`
 }
 
 type SwitchUser struct {

@@ -195,6 +195,8 @@ spec:
                               type: string
                           type: object
                         type: object
+                      disableBFD:
+                        type: boolean
                       eslagESIPrefix:
                         type: string
                       eslagMACBase:
@@ -209,6 +211,8 @@ spec:
                       leafASNStart:
                         format: int32
                         type: integer
+                      loopbackWorkaroundDisable:
+                        type: boolean
                       managementDHCPEnd:
                         type: string
                       managementDHCPStart:
