@@ -345,7 +345,7 @@ jobs:
           mkdir old
           curl -fsSL https://i.hhdev.io/hhfab | USE_SUDO=false INSTALL_DIR=./old VERSION="${{ matrix.fromversion }}" bash
 
-          old/hhfab init -v --dev -m ${{ matrix.fabricmode }} --include-onie=true
+          old/hhfab init -v --dev -m ${{ matrix.fabricmode }}
           old/hhfab vlab gen -v
           old/hhfab vlab up -v --ready setup-vpcs --ready test-connectivity --ready exit ${{ matrix.fromflags }}
 
