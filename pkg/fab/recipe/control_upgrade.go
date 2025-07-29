@@ -184,10 +184,6 @@ func (c *ControlUpgrade) checkUpgradeConstraints(ctx context.Context, kube kclie
 			return fmt.Errorf("parsing fabricator control constraint: %w", err)
 		}
 
-		if f.Status.Components.FabricatorCtrl != fabapi.CompStatusReady {
-			return fmt.Errorf("fabricator ctrl is not ready") //nolint:err113
-		}
-
 		fabCtrlVersion, err := semver.NewVersion(string(f.Status.Versions.Fabricator.Controller))
 		if err != nil {
 			return fmt.Errorf("parsing fabricator ctrl version: %w", err)
@@ -206,10 +202,6 @@ func (c *ControlUpgrade) checkUpgradeConstraints(ctx context.Context, kube kclie
 		fabNOSConstr, err := semver.NewConstraint(fab.FabricNOSConstraint)
 		if err != nil {
 			return fmt.Errorf("parsing fabricator NOS constraint: %w", err)
-		}
-
-		if f.Status.Components.FabricCtrl != fabapi.CompStatusReady {
-			return fmt.Errorf("fabric ctrl is not ready") //nolint:err113
 		}
 
 		ags := &agentapi.AgentList{}
