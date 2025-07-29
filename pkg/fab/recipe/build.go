@@ -177,7 +177,7 @@ const (
 	MiB                 uint64            = 1024 * 1024
 	GiB                 uint64            = 1024 * 1024 * 1024
 	espSize             uint64            = 500 * MiB
-	oemSize             uint64            = (7 * GiB)
+	oemSize             uint64            = (8 * GiB)
 	dataSize                              = espSize + oemSize
 	blkSize                               = diskfs.SectorSize512
 	bytesPerBlock                         = 512
