@@ -1372,15 +1372,15 @@ github.com/nwaples/rardecode/v2
 # github.com/oklog/ulid v1.3.1
 ## explicit
 github.com/oklog/ulid
-# github.com/olekukonko/errors v0.0.0-20250405072817-4e6d85265da6
+# github.com/olekukonko/errors v1.1.0
 ## explicit; go 1.21
 github.com/olekukonko/errors
-# github.com/olekukonko/ll v0.0.8
+# github.com/olekukonko/ll v0.0.9
 ## explicit; go 1.21
 github.com/olekukonko/ll
 github.com/olekukonko/ll/lh
 github.com/olekukonko/ll/lx
-# github.com/olekukonko/tablewriter v1.0.8
+# github.com/olekukonko/tablewriter v1.0.9
 ## explicit; go 1.21
 github.com/olekukonko/tablewriter
 github.com/olekukonko/tablewriter/pkg/twwarp
@@ -1699,7 +1699,7 @@ github.com/zeebo/errs
 # go.etcd.io/bbolt v1.3.11
 ## explicit; go 1.22
 go.etcd.io/bbolt
-# go.githedgehog.com/fabric v0.87.0
+# go.githedgehog.com/fabric v0.87.2
 ## explicit; go 1.24.2
 go.githedgehog.com/fabric/api/agent/v1beta1
 go.githedgehog.com/fabric/api/dhcp/v1beta1
