@@ -1483,22 +1483,7 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool,
 	return false, reverts, nil
 }
 
-// helper to get server-1 (might be called differently depending on the env)
-func getServer1(ctx context.Context, kube kclient.Client) (string, error) {
-	serverName := "server-1"
-	server := &wiringapi.Server{}
-	if err := kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: serverName}, server); err != nil {
-		slog.Warn("server-1 not found, attempting to fetch server-01")
-		serverName = "server-01"
-		if err := kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: serverName}, server); err != nil {
-			return "", fmt.Errorf("getting server %s: %w", serverName, err)
-		}
-	}
-
-	return serverName, nil
-}
-
-// check that the DHPC lease is within the expected range.
+// check that the DHCP lease is within the expected range.
 // note: tried to awk but for some reason it is not working if the pipe is passed as part of
 // the ssh command string, so tokenize here. string will be in the format:
 // valid_lft 3098sec preferred_lft 3098sec
@@ -1559,34 +1544,51 @@ func checkDHCPAdvRoutes(grepString, expectedPrefix, expectedGw string, disableDe
 // for MTU, we check the output of "ip link" on the vlan interface;
 // for DHCP Lease, we check the output of "ip addr" on the server.
 func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (bool, []RevertFunc, error) {
-	// TODO: pick any server, derive other elements (i.e. vpc, hhnet params etc) from it
-	serverName, err := getServer1(ctx, testCtx.kube)
-	if err != nil {
-		return false, nil, err
+	vpcAttaches := &vpcapi.VPCAttachmentList{}
+	if err := testCtx.kube.List(ctx, vpcAttaches); err != nil {
+		return false, nil, fmt.Errorf("listing VPCAttachments: %w", err)
 	}
-	// Get the VPC
+	if len(vpcAttaches.Items) == 0 {
+		slog.Warn("No VPCAttachments found, skipping DNS/MTU/NTP test")
+
+		return true, nil, errors.New("no VPCAttachments found") //nolint:goerr113
+	}
+	vpcAttach := vpcAttaches.Items[0]
+	subnetName := vpcAttach.Spec.SubnetName()
+	vpcName := vpcAttach.Spec.VPCName()
 	vpc := &vpcapi.VPC{}
-	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: "vpc-01"}, vpc); err != nil {
-		return false, nil, fmt.Errorf("getting VPC vpc-01: %w", err)
+	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: vpcName}, vpc); err != nil {
+		return false, nil, fmt.Errorf("getting VPC %s: %w", vpcName, err)
 	}
-	// Get the first subnet, where the target server is connected
-	subnet, ok := vpc.Spec.Subnets["subnet-01"]
+	subnet, ok := vpc.Spec.Subnets[subnetName]
 	if !ok {
-		return false, nil, errors.New("subnet subnet-01 not found in VPC vpc-01") //nolint:goerr113
-	}
-	// Get the connection used to attach the server to the VPC
-	conns := &wiringapi.ConnectionList{}
-	if err := testCtx.kube.List(ctx, conns, wiringapi.MatchingLabelsForListLabelServer(serverName)); err != nil {
-		return false, nil, fmt.Errorf("listing connections for server %q: %w", serverName, err)
+		return false, nil, fmt.Errorf("subnet %s not found in VPC %s", subnetName, vpcName) //nolint:goerr113
 	}
 
-	if len(conns.Items) == 0 {
-		return false, nil, fmt.Errorf("no connections for server %q", serverName) //nolint:goerr113
+	conn := &wiringapi.Connection{}
+	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: vpcAttach.Spec.Connection}, conn); err != nil {
+		return false, nil, fmt.Errorf("getting connection %s for VPCAttachment %s: %w", vpcAttach.Spec.Connection, vpcAttach.Name, err)
 	}
-	if len(conns.Items) > 1 {
-		return false, nil, fmt.Errorf("multiple connections for server %q", serverName) //nolint:goerr113
+	_, servers, _, _, epErr := conn.Spec.Endpoints() //nolint:dogsled
+	if epErr != nil {
+		return false, nil, fmt.Errorf("getting endpoints for connection %s: %w", conn.Name, epErr)
 	}
-	conn := conns.Items[0]
+	if len(servers) != 1 {
+		return false, nil, fmt.Errorf("expected 1 server for connection %s, got %d", conn.Name, len(servers)) //nolint:goerr113
+	}
+	serverName := servers[0]
+	netconfCmd, netconfErr := GetServerNetconfCmd(conn, subnet.VLAN, testCtx.opts.HashPolicy)
+	if netconfErr != nil {
+		return false, nil, fmt.Errorf("getting netconf command for server %s: %w", serverName, netconfErr)
+	}
+	var ifName string
+	if conn.Spec.Unbundled != nil {
+		ifName = fmt.Sprintf("%s.%d", conn.Spec.Unbundled.Link.Server.LocalPortName(), subnet.VLAN)
+	} else {
+		ifName = fmt.Sprintf("bond0.%d", subnet.VLAN)
+	}
+
+	slog.Debug("Found server for VPCAttachment", "server", serverName, "vpc", vpcName, "subnet", subnetName, "vlan", subnet.VLAN, "ifName", ifName)
 
 	// Set DNS, NTP and MTU
 	slog.Debug("Setting DNS, NTP, MTU and DHCP lease time")
@@ -1636,10 +1638,6 @@ func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (bool, []Re
 		if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, serverName, "/opt/bin/hhnet cleanup"); err != nil {
 			return fmt.Errorf("cleaning up interfaces on %s: %w", serverName, err)
 		}
-		netconfCmd, netconfErr := GetServerNetconfCmd(&conn, subnet.VLAN, testCtx.opts.HashPolicy)
-		if netconfErr != nil {
-			return fmt.Errorf("getting netconf command for server %s: %w", serverName, netconfErr)
-		}
 		cmd := fmt.Sprintf("/opt/bin/hhnet %s", netconfCmd)
 		if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, serverName, cmd); err != nil {
 			return fmt.Errorf("bonding interfaces on %s: %w", serverName, err)
@@ -1657,13 +1655,12 @@ func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (bool, []Re
 	if err := WaitReady(ctx, testCtx.kube, WaitReadyOpts{AppliedFor: waitAppliedFor, Timeout: waitTimeout}); err != nil {
 		return false, reverts, fmt.Errorf("waiting for ready: %w", err)
 	}
-
 	// Configure network interfaces on target server
-	slog.Debug("Configuring network interfaces", "server", serverName)
+	slog.Debug("Configuring network interfaces", "server", serverName, "netconfCmd", netconfCmd, "ifName", ifName)
 	if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, serverName, "/opt/bin/hhnet cleanup"); err != nil {
 		return false, reverts, fmt.Errorf("cleaning up interfaces on %s: %w", serverName, err)
 	}
-	cmd := fmt.Sprintf("/opt/bin/hhnet bond 1001 %s enp2s1 enp2s2", testCtx.opts.HashPolicy)
+	cmd := fmt.Sprintf("/opt/bin/hhnet %s", netconfCmd)
 	if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, serverName, cmd); err != nil {
 		return false, reverts, fmt.Errorf("bonding interfaces on %s: %w", serverName, err)
 	}
@@ -1681,8 +1678,8 @@ func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (bool, []Re
 	} else {
 		ntpFound = true
 	}
-	if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, serverName, "ip link show dev bond0.1001 | grep \"mtu 1400\""); err != nil {
-		slog.Error("mtu 1400 not found in dev bond0.1001", "error", err)
+	if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, serverName, fmt.Sprintf("ip link show dev %s | grep \"mtu 1400\"", ifName)); err != nil {
+		slog.Error("mtu 1400 not found on server interface", "interface", ifName, "error", err)
 	} else {
 		mtuFound = true
 	}
@@ -1692,7 +1689,7 @@ func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (bool, []Re
 		time.Sleep(10 * time.Second)
 	}
 
-	out, leaseErr := execNodeCmdWOutput(testCtx.hhfabBin, testCtx.workDir, serverName, "ip addr show dev bond0.1001 proto 4 | grep valid_lft")
+	out, leaseErr := execNodeCmdWOutput(testCtx.hhfabBin, testCtx.workDir, serverName, fmt.Sprintf("ip addr show dev %s proto 4 | grep valid_lft", ifName))
 	if leaseErr != nil {
 		slog.Error("failed to get lease time", "error", leaseErr)
 	} else if err := checkDHCPLease(out, 1800, 120); err != nil {
