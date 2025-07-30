@@ -35,6 +35,14 @@ on:
         description: "Run the build with tmate debugging enabled (https://github.com/marketplace/actions/debugging-with-tmate)"
         required: false
         default: false
+      hlab_vpc_mode:
+        type: choice
+        description: "HLab VPC mode (only affects hybrid lab)"
+        required: false
+        default: "l2vni"
+        options:
+          - "l2vni"
+          - "l3vni"
 
 permissions:
   contents: read
@@ -321,7 +329,7 @@ jobs:
             gateway: false
             includeonie: false
             buildmode: iso
-            vpcmode: l2vni
+            vpcmode: ${{ github.event_name == 'workflow_dispatch' && inputs.hlab_vpc_mode || 'l2vni' }}
             hybrid: true
             upgradefrom: ""
 
