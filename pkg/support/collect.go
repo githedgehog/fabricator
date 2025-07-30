@@ -15,7 +15,7 @@ import (
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func Collect(ctx context.Context, name string) (*Dump, error) {
+func Collect(ctx context.Context, name, kubeconfigPath string) (*Dump, error) {
 	hostname, err := os.Hostname()
 	if err != nil {
 		slog.Warn("Can't get hostname, skipping", "err", err)
@@ -51,11 +51,11 @@ func Collect(ctx context.Context, name string) (*Dump, error) {
 		CreatedAt: kmetav1.Now(),
 	}
 
-	if err := collectKubeResources(ctx, dump); err != nil {
+	if err := collectKubeResources(ctx, dump, kubeconfigPath); err != nil {
 		return nil, fmt.Errorf("collecting kube resources: %w", err)
 	}
 
-	if err := collectPodLogs(ctx, dump); err != nil {
+	if err := collectPodLogs(ctx, dump, kubeconfigPath); err != nil {
 		return nil, fmt.Errorf("collecting pod logs: %w", err)
 	}
 
