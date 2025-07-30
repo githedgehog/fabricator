@@ -121,6 +121,12 @@ jobs:
           go-version: stable
           cache: true
 
+      - name: Cache hhfab-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.hhfab-cache
+          key: hhfab-cache-${{ hashFiles('pkg/fab/versions.go') }}
+
       - name: Setup local registry
         run: |
           just --timestamp _localreg &
