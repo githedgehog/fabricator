@@ -2609,7 +2609,7 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 		// check for virtual switches
 		if !skipFlags.VirtualSwitch {
 			if sw.Spec.Profile == meta.SwitchProfileVS {
-				slog.Info("Virtual switch found", "switch", sw.Name)
+				slog.Warn("Virtual switch found, some tests will be skipped", "switch", sw.Name)
 				skipFlags.VirtualSwitch = true
 			}
 		}
@@ -2628,7 +2628,7 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 			profileMap[sw.Spec.Profile] = *profile
 		}
 		if !profile.Spec.Features.Subinterfaces && !skipFlags.SubInterfaces {
-			slog.Info("Subinterfaces not supported on leaf switch", "switch-profile", sw.Spec.Profile, "switch", sw.Name)
+			slog.Warn("Subinterfaces not supported on leaf switch, some tests will be skipped", "switch-profile", sw.Spec.Profile, "switch", sw.Name)
 			skipFlags.SubInterfaces = true
 		}
 		// exclude virtual switches from RoCE check, they do not implement counters
@@ -2637,21 +2637,38 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 		}
 	}
 	if len(roceLeaves) == 0 {
-		slog.Info("No RoCE capable leaves found")
+		slog.Warn("No RoCE capable leaves found, some tests will be skipped")
 		skipFlags.RoCE = true
 	}
 	extList := &vpcapi.ExternalList{}
 	if err := kube.List(ctx, extList); err != nil {
 		return fmt.Errorf("listing externals: %w", err)
 	}
-	if len(extList.Items) == 0 {
-		slog.Info("No externals found")
+	extAttachList := &vpcapi.ExternalAttachmentList{}
+	if err := kube.List(ctx, extAttachList); err != nil {
+		return fmt.Errorf("listing external attachments: %w", err)
+	}
+	if len(extList.Items) == 0 || len(extAttachList.Items) == 0 {
+		slog.Warn("No externals found, some tests will be skipped")
 		skipFlags.NoExternals = true
 		skipFlags.NamedExternal = true
 	} else {
 		ext := &vpcapi.External{}
 		if err := kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: extName}, ext); err != nil {
-			slog.Info("Named External not found", "external", extName)
+			slog.Warn("Named External not found, some tests will be skipped", "external", extName)
+			skipFlags.NamedExternal = true
+		}
+		found := false
+		for _, extAttach := range extAttachList.Items {
+			if extAttach.Spec.External != extName {
+				continue
+			}
+			found = true
+
+			break
+		}
+		if !found {
+			slog.Warn("No external attachments found for named external, some tests will be skipped", "external", extName)
 			skipFlags.NamedExternal = true
 		}
 	}
