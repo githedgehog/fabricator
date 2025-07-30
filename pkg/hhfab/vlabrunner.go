@@ -435,11 +435,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 			if err := execCmd(ctx, true, vmDir, VLABCmdQemuSystem, args, "vm", vm.Name); err != nil {
 				slog.Warn("Failed running VM", "vm", vm.Name, "type", vm.Type, "err", err)
 
-				if opts.CollectShowTech {
-					if err := c.VLABShowTech(ctx, vlab); err != nil {
-						slog.Warn("Failed to collect show-tech diagnostics", "err", err)
-					}
-				}
+				c.CollectVLABDebug(ctx, vlab, opts)
 
 				if opts.FailFast {
 					return fmt.Errorf("running vm: %w", err)
@@ -455,11 +451,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 				if err := c.vmPostProcess(ctx, vlab, d, vm, opts); err != nil {
 					slog.Warn("Failed to post-process VM", "vm", vm.Name, "type", vm.Type, "err", err)
 
-					if opts.CollectShowTech {
-						if err := c.VLABShowTech(ctx, vlab); err != nil {
-							slog.Warn("Failed to collect show-tech diagnostics", "err", err)
-						}
-					}
+					c.CollectVLABDebug(ctx, vlab, opts)
 
 					if opts.FailFast {
 						return fmt.Errorf("post-processing vm %s: %w", vm.Name, err)
@@ -589,11 +581,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 					}); err != nil {
 						slog.Warn("Failed to reinstall switches", "err", err)
 
-						if opts.CollectShowTech {
-							if err := c.VLABShowTech(ctx, vlab); err != nil {
-								slog.Warn("Failed to collect show-tech diagnostics", "err", err)
-							}
-						}
+						c.CollectVLABDebug(ctx, vlab, opts)
 
 						return fmt.Errorf("reinstalling switches: %w", err)
 					}
@@ -612,11 +600,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 					}); err != nil {
 						slog.Warn("Failed to setup VPCs", "err", err)
 
-						if opts.CollectShowTech {
-							if err := c.VLABShowTech(ctx, vlab); err != nil {
-								slog.Warn("Failed to collect show-tech diagnostics", "err", err)
-							}
-						}
+						c.CollectVLABDebug(ctx, vlab, opts)
 
 						return fmt.Errorf("setting up VPCs: %w", err)
 					}
@@ -636,11 +620,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 					}); err != nil {
 						slog.Warn("Failed to setup peerings", "err", err)
 
-						if opts.CollectShowTech {
-							if err := c.VLABShowTech(ctx, vlab); err != nil {
-								slog.Warn("Failed to collect show-tech diagnostics", "err", err)
-							}
-						}
+						c.CollectVLABDebug(ctx, vlab, opts)
 
 						return fmt.Errorf("setting up peerings: %w", err)
 					}
@@ -654,20 +634,12 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 					}); err != nil {
 						slog.Warn("Failed to test connectivity", "err", err)
 
-						if opts.CollectShowTech {
-							if err := c.VLABShowTech(ctx, vlab); err != nil {
-								slog.Warn("Failed to collect show-tech diagnostics", "err", err)
-							}
-						}
+						c.CollectVLABDebug(ctx, vlab, opts)
 
 						return fmt.Errorf("testing connectivity: %w", err)
 					}
 				case OnReadyExit:
-					if opts.CollectShowTech {
-						if err := c.VLABShowTech(ctx, vlab); err != nil {
-							slog.Warn("Failed to collect show-tech diagnostics", "err", err)
-						}
-					}
+					c.CollectVLABDebug(ctx, vlab, opts)
 
 					// TODO seems like some graceful shutdown logic isn't working in CI and we're getting stuck w/o this
 					if os.Getenv("GITHUB_ACTIONS") == "true" {
@@ -680,11 +652,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 					if err := c.Wait(ctx, vlab); err != nil {
 						slog.Warn("Failed to wait for switches ready", "err", err)
 
-						if opts.CollectShowTech {
-							if err := c.VLABShowTech(ctx, vlab); err != nil {
-								slog.Warn("Failed to collect show-tech diagnostics", "err", err)
-							}
-						}
+						c.CollectVLABDebug(ctx, vlab, opts)
 
 						return fmt.Errorf("waiting: %w", err)
 					}
@@ -696,11 +664,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 					}); err != nil {
 						slog.Warn("Failed to inspect", "err", err)
 
-						if opts.CollectShowTech {
-							if err := c.VLABShowTech(ctx, vlab); err != nil {
-								slog.Warn("Failed to collect show-tech diagnostics", "err", err)
-							}
-						}
+						c.CollectVLABDebug(ctx, vlab, opts)
 
 						return fmt.Errorf("inspecting: %w", err)
 					}
@@ -712,11 +676,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 					}); err != nil {
 						slog.Warn("Failed to run release test", "err", err)
 
-						if opts.CollectShowTech {
-							if err := c.VLABShowTech(ctx, vlab); err != nil {
-								slog.Warn("Failed to collect show-tech diagnostics", "err", err)
-							}
-						}
+						c.CollectVLABDebug(ctx, vlab, opts)
 
 						return fmt.Errorf("release test: %w", err)
 					}

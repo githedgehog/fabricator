@@ -167,20 +167,13 @@ jobs:
 
       - name: Print hhfab versions
         run: |
-          bin/hhfab versions
+          bin/hhfab versions | tee versions.txt
 
       - name: Generate VLAB diagrams
         run: |
           bin/hhfab diagram --format=drawio
           bin/hhfab diagram --format=dot
           bin/hhfab diagram --format=mermaid
-
-      - name: Upload VLAB diagrams
-        uses: actions/upload-artifact@v4
-        if: ${{ always() }}
-        with:
-          name: ${{ env.slug }}--diagrams
-          path: result/diagram.*
 
       # TODO: make controls restricted again when we figure out how to get NTP upstream working for isolated VMs
       - name: Run and test ${{ inputs.hybrid && 'hybrid ' || '' }}VLAB
@@ -205,19 +198,23 @@ jobs:
           name: ${{ env.slug }}--test-results
           path: release-test.xml
 
-      - name: Upload show-tech artifacts
-        uses: actions/upload-artifact@v4
+      - name: Prepare debug artifacts
         if: ${{ always() }}
-        with:
-          name: ${{ env.slug }}--show-tech
-          path: show-tech-output
+        run: |
+          mkdir _debug
+          cp versions.txt _debug/ || true
+          cp result/diagram.* _debug/ || true
+          cp vlab.hhs _debug/ || true
+          cp -r show-tech-output _debug/ || true
+          cp .zot/log _debug/zot.log || true
+          mv _debug fab-${{ github.run_id }}-${{ env.slug }}
 
-      - name: Upload local registry logs
+      - name: Upload debug artifacts
         uses: actions/upload-artifact@v4
         if: ${{ always() }}
         with:
-          name: ${{ env.slug }}--registry
-          path: .zot/log
+          name: fab-${{ github.run_id }}-${{ env.slug }}
+          path: fab-${{ github.run_id }}-${{ env.slug }}
 
       - name: Setup tmate session for debug
         if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug }}

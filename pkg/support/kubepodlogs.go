@@ -18,10 +18,10 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-func collectPodLogs(ctx context.Context, dump *Dump) error {
+func collectPodLogs(ctx context.Context, dump *Dump, kubeconfigPath string) error {
 	logs := map[string]map[string]PodLogs{}
 
-	clientset, err := kubeutil.NewClientset(ctx, "")
+	clientset, err := kubeutil.NewClientset(ctx, kubeconfigPath)
 	if err != nil {
 		return fmt.Errorf("creating kubernetes client: %w", err)
 	}
