@@ -146,8 +146,8 @@ func redactAlloyTarget(target *meta.AlloyTarget) {
 	}
 }
 
-func collectKubeResources(ctx context.Context, dump *Dump) error {
-	kube, err := kubeutil.NewClient(ctx, "", schemeBuilders...)
+func collectKubeResources(ctx context.Context, dump *Dump, kubeconfigPath string) error {
+	kube, err := kubeutil.NewClient(ctx, kubeconfigPath, schemeBuilders...)
 	if err != nil {
 		return fmt.Errorf("creating kube client: %w", err)
 	}

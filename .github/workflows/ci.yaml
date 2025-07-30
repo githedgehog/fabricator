@@ -315,7 +315,7 @@ jobs:
             fromflags: "-m=iso"
 
     env:
-      slug: "${{ matrix.fabricmode }}-${{ matrix.fromversion }}-${{ matrix.fromflags == '--usb' && 'usb' || matrix.fromflags == '-m=iso' && 'iso' }}"
+      slug: "vlab-upgrade-${{ matrix.fabricmode }}-${{ matrix.fromversion }}-${{ matrix.fromflags == '--usb' && 'usb' || matrix.fromflags == '-m=iso' && 'iso' }}"
 
     steps:
       - name: Runner host
@@ -355,14 +355,21 @@ jobs:
 
           old/hhfab init -v --dev -m ${{ matrix.fabricmode }}
           old/hhfab vlab gen -v
+          old/hhfab versions | tee versions.txt
+          old/hhfab diagram --format=drawio
+          old/hhfab diagram --format=dot
+          old/hhfab diagram --format=mermaid
           old/hhfab vlab up -v --ready setup-vpcs --ready test-connectivity --ready exit ${{ matrix.fromflags }}
 
-      - name: Upload show-tech artifacts
-        uses: actions/upload-artifact@v4
+      - name: Prepare debug artifacts
         if: ${{ always() }}
-        with:
-          name: vlab-upgrade--${{ env.slug }}--0-before--show-tech
-          path: show-tech-output
+        run: |
+          mkdir -p _debug/0-before
+          cp versions.txt _debug/0-before || true
+          cp result/diagram.* _debug/0-before || true
+          cp vlab.hhs _debug/0-before || true
+          cp -r show-tech-output _debug/0-before || true
+          cp .zot/log _debug/zot.log || true
 
       - name: Build current hhfab
         run: |
@@ -373,35 +380,50 @@ jobs:
           HHFAB_REG_REPO: 127.0.0.1:30000
           HHFAB_VLAB_COLLECT: true
         run: |
+          bin/hhfab versions | tee versions.txt
+          bin/hhfab diagram --format=drawio
+          bin/hhfab diagram --format=dot
+          bin/hhfab diagram --format=mermaid
           bin/hhfab vlab up -v --ready inspect --ready setup-vpcs --ready test-connectivity --ready exit --upgrade
 
-      - name: Upload show-tech artifacts
-        uses: actions/upload-artifact@v4
+      - name: Prepare debug artifacts
         if: ${{ always() }}
-        with:
-          name: vlab-upgrade--${{ env.slug }}--1-curr--show-tech
-          path: show-tech-output
+        run: |
+          mkdir -p _debug/1-curr
+          cp versions.txt _debug/1-curr || true
+          cp result/diagram.* _debug/1-curr || true
+          cp vlab.hhs _debug/1-curr || true
+          cp -r show-tech-output _debug/1-curr || true
+          cp .zot/log _debug/zot.log || true
 
       - name: hhfab vlab up after upgrade
         env:
           HHFAB_REG_REPO: 127.0.0.1:30000
           HHFAB_VLAB_COLLECT: true
         run: |
+          bin/hhfab versions | tee versions.txt
+          bin/hhfab diagram --format=drawio
+          bin/hhfab diagram --format=dot
+          bin/hhfab diagram --format=mermaid
           bin/hhfab vlab up -v --ready wait --ready exit -m=manual
 
-      - name: Upload show-tech artifacts
-        uses: actions/upload-artifact@v4
+      - name: Prepare debug artifacts
         if: ${{ always() }}
-        with:
-          name: vlab-upgrade--${{ env.slug }}--2-after--show-tech
-          path: show-tech-output
+        run: |
+          mkdir -p _debug/2-after
+          cp versions.txt _debug/2-after || true
+          cp result/diagram.* _debug/2-after || true
+          cp vlab.hhs _debug/2-after || true
+          cp -r show-tech-output _debug/2-after || true
+          cp .zot/log _debug/zot.log || true
+          mv _debug fab-${{ github.run_id }}-${{ env.slug }}
 
-      - name: Upload local registry logs
+      - name: Upload debug artifacts
         uses: actions/upload-artifact@v4
         if: ${{ always() }}
         with:
-          name: vlab-upgrade--${{ env.slug }}--registry
-          path: .zot/log
+          name: fab-${{ github.run_id }}-${{ env.slug }}
+          path: fab-${{ github.run_id }}-${{ env.slug }}
 
       - name: Setup tmate session for debug
         if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}

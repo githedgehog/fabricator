@@ -57,7 +57,7 @@ func SupportDump(ctx context.Context, opts SupportDumpOpts) error {
 		return fmt.Errorf("stat dump file: %w", err)
 	}
 
-	dump, err := support.Collect(ctx, opts.Name)
+	dump, err := support.Collect(ctx, opts.Name, "")
 	if err != nil {
 		return fmt.Errorf("collecting support dump: %w", err)
 	}

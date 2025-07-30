@@ -29,6 +29,7 @@ import (
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/hhfab/pdu"
+	"go.githedgehog.com/fabricator/pkg/support"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -872,5 +873,25 @@ func getVMType(entry VLABAccessInfo) VMType {
 		return VMTypeExternal
 	default:
 		return ""
+	}
+}
+
+func (c *Config) CollectVLABDebug(ctx context.Context, vlab *VLAB, opts VLABRunOpts) {
+	if dump, err := support.Collect(ctx, "vlab", filepath.Join(c.WorkDir, VLABDir, VLABKubeConfig)); err != nil {
+		slog.Warn("Failed to collect support dump", "err", err)
+	} else {
+		if data, err := support.Marshal(dump); err != nil {
+			slog.Warn("Failed to marshal support dump", "err", err)
+		} else {
+			if err := os.WriteFile(filepath.Join(c.WorkDir, "vlab.hhs"), data, 0o644); err != nil { //nolint:gosec
+				slog.Warn("Failed to write support dump", "err", err)
+			}
+		}
+	}
+
+	if opts.CollectShowTech {
+		if err := c.VLABShowTech(ctx, vlab); err != nil {
+			slog.Warn("Failed to collect show-tech diagnostics", "err", err)
+		}
 	}
 }
