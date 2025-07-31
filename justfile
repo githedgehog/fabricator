@@ -93,13 +93,13 @@ build: _license_headers gen _gotools hhfab-build hhfabctl-build && version
 oci_repo := "127.0.0.1:30000"
 oci_prefix := "githedgehog/fabricator"
 
-_helm-fabricator-api: _kustomize _helm _kube_gen
+_helm-fabricator-api: _helm _kube_gen
   @rm config/helm/fabricator-api-v*.tgz || true
   {{kustomize}} build config/crd > config/helm/fabricator-api/templates/crds.yaml
   {{helm}} package config/helm/fabricator-api --destination config/helm --version {{version}}
   {{helm}} lint config/helm/fabricator-api-{{version}}.tgz
 
-_helm-fabricator: _kustomize _helm _helmify _kube_gen
+_helm-fabricator: _helm _helmify _kube_gen
   @rm config/helm/fabricator-v*.tgz || true
   @rm config/helm/fabricator/templates/*.yaml config/helm/fabricator/values.yaml || true
   {{kustomize}} build config/default | {{helmify}} config/helm/fabricator
