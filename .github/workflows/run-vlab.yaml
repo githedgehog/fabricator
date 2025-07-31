@@ -115,6 +115,14 @@ jobs:
           repository: githedgehog/lab-ci
           path: "./lab-ci"
 
+      - name: Pre-populate hhfab-cache
+        run: |
+          if [ -d "/hostcache/.hhfab-cache" ]; then
+            cp -r /hostcache/.hhfab-cache ~/
+          else
+            echo "Host cache not available"
+          fi
+
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
