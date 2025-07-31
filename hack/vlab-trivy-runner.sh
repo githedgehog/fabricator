@@ -172,7 +172,7 @@ if [ "$SKIP_VLAB_LAUNCH" = false ]; then
         # Generate topology if switch scanning is enabled
         if [ "$RUN_SWITCH" = true ]; then
             echo -e "${YELLOW}Generating VLAB topology for switch scanning...${NC}"
-            $HHFAB_BIN vlab gen --spines-count 2 --fabric-links-count 1 --orphan-leafs-count 1 --mclag-leafs-count 0 --unbundled-servers 1 --bundled-servers 0 --mclag-servers 0 --eslag-servers 0 --vpc-loopbacks 0
+            $HHFAB_BIN vlab gen --spines-count 2 --fabric-links-count 1 --orphan-leafs-count 1 --mclag-leafs-count 0 --unbundled-servers 1 --bundled-servers 0 --mclag-servers 0 --eslag-servers 0
         fi
     fi
 
