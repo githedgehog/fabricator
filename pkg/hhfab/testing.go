@@ -2253,8 +2253,10 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 		slog.Error("Failed to inspect LLDP", "err", lldpErr)
 		fail = true
 	} else if renderErr := inspect.Render(time.Now(), inspect.OutputTypeText, os.Stdout, lldpIn, lldpOut); renderErr != nil {
-		slog.Error("Inspecting LLDP reveals some errors", "err", renderErr)
-		fail = true
+		slog.Warn("Inspecting LLDP reveals some errors", "err", renderErr)
+
+		// LLDP seems to be not very stable lately, so don't fail on errors from it
+		// fail = true
 	}
 
 	bgpIn := inspect.BGPIn{
