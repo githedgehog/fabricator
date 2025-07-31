@@ -99,12 +99,28 @@ jobs:
             just security-scan $SCAN_ARGS
           fi
 
-      - name: Upload SARIF file
-        if: always() && env.UPLOAD_SARIF == 'true'
+      - name: Upload Control VM SARIF
+        if: always() && env.UPLOAD_SARIF == 'true' && hashFiles('sarif-reports/trivy-consolidated-control-1.sarif') != ''
         uses: github/codeql-action/upload-sarif@v3
         with:
-          sarif_file: ${{ env.SARIF_FILE }}
-          category: trivy-container-scan
+          sarif_file: sarif-reports/trivy-consolidated-control-1.sarif
+          category: trivy-control
+        continue-on-error: true
+
+      - name: Upload Gateway VM SARIF
+        if: always() && env.UPLOAD_SARIF == 'true' && hashFiles('sarif-reports/trivy-consolidated-gateway-1.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: sarif-reports/trivy-consolidated-gateway-1.sarif
+          category: trivy-gateway
+        continue-on-error: true
+
+      - name: Upload SONiC Switches SARIF
+        if: always() && env.UPLOAD_SARIF == 'true' && hashFiles('sarif-reports/trivy-consolidated-sonic-switches.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: sarif-reports/trivy-consolidated-sonic-switches.sarif
+          category: trivy-sonic
         continue-on-error: true
 
       - name: Upload scan artifacts

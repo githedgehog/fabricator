@@ -209,6 +209,7 @@ process_vm_sarif() {
                 image_path_fixed=$(echo "$path_part" | sed 's/_/\//g')
                 reconstructed_image="172.30.0.1:31000/${image_path_fixed}:${version}"
             else
+                # Simple underscore to slash conversion with colon for version
                 reconstructed_image=$(echo "$image_part" | sed 's/_/\//g' | sed 's|\([^/]*\)$|:\1|')
             fi
 
@@ -290,10 +291,8 @@ process_vm_sarif() {
         file_count=${#sarif_files_array[@]}
 
         container_with_version=$(extract_container_info "$representative_image")
-        logical_image=$(normalize_image_name "$representative_image")
 
-        echo "  Processing logical image: $logical_image"
-        echo "    Representative: $representative_image -> $container_with_version"
+        echo "  Processing image: $representative_image -> $container_with_version"
         echo "    Merging $file_count SARIF file(s): $(echo $sarif_files_for_image | tr ' ' '\n' | xargs -I {} basename {})"
 
         # Check if any of the SARIF files have vulnerabilities
@@ -311,8 +310,8 @@ process_vm_sarif() {
 
         echo "    Total vulnerabilities across files: $total_vulnerabilities"
 
-        # Create a merged SARIF file for this logical image
-        merged_sarif_temp="/tmp/merged-${logical_image//\//_}-$.sarif"
+        # Create a merged SARIF file for this image
+        merged_sarif_temp="/tmp/merged-${representative_image//\//_}-$$.sarif"
 
         if [ $file_count -eq 1 ]; then
             # Single file - use directly
@@ -349,7 +348,6 @@ process_vm_sarif() {
            --arg scan_mode "$scan_mode" \
            --arg source_image "$representative_image" \
            --arg container_with_version "$container_with_version" \
-           --arg logical_image "$logical_image" \
            --argjson container_images "$containers_json" \
            '
            # Extract container details
@@ -389,7 +387,7 @@ process_vm_sarif() {
                  .message.text = ("[" + $vm_name + "/" + $container_with_version + "] " + .message.text)
                )) |
 
-               # Add container-specific properties with logical image info
+               # Add container-specific properties
                .properties = (.properties // {}) + {
                  vmName: $vm_name,
                  vmType: $vm_type,
@@ -397,7 +395,6 @@ process_vm_sarif() {
                  containerVersion: $container_version,
                  containerWithVersion: $container_with_version,
                  sourceImage: $source_image,
-                 logicalImage: $logical_image,
                  originalArtifactUri: $original_uri,
                  binaryName: $binary_name,
                  scanContext: ("runtime-deployment-" + $scan_mode),
@@ -408,7 +405,7 @@ process_vm_sarif() {
            ))
            ' "$merged_sarif_temp" > "${merged_sarif_temp}.processed"
 
-        # Merge this logical image's results into the consolidated file
+        # Merge this image's results into the consolidated file
         jq -s '
             .[0] as $consolidated |
             .[1] as $new_file |
@@ -424,7 +421,7 @@ process_vm_sarif() {
         rm -f "$merged_sarif_temp" "${merged_sarif_temp}.processed"
 
         processed_count=$((processed_count + 1))
-        echo "    ✓ Processed logical image: $logical_image"
+        echo "    ✓ Processed image: $representative_image"
         echo ""
     done
 
@@ -520,6 +517,13 @@ process_vm_sarif() {
         TOTAL_CRITICAL_VULNS=$((TOTAL_CRITICAL_VULNS + vm_critical))
         TOTAL_HIGH_VULNS=$((TOTAL_HIGH_VULNS + vm_high))
 
+        # Count unique vulnerabilities (deduplicated rules)
+        local vm_dedup_critical=$(jq '[.runs[0].tool.driver.rules[]? | select(.properties.tags | contains(["CRITICAL"]))] | length' "$consolidated_sarif" 2>/dev/null || echo 0)
+        local vm_dedup_high=$(jq '[.runs[0].tool.driver.rules[]? | select(.properties.tags | contains(["HIGH"]))] | length' "$consolidated_sarif" 2>/dev/null || echo 0)
+
+        DEDUP_CRITICAL=$((DEDUP_CRITICAL + vm_dedup_critical))
+        DEDUP_HIGH=$((DEDUP_HIGH + vm_dedup_high))
+
         echo "✓ Enhanced SARIF for $vm_name:"
         echo "  - VM: $vm_name ($vm_type, $scan_mode mode)"
         echo "  - Container images: $image_count"
@@ -528,6 +532,8 @@ process_vm_sarif() {
         echo "  - Files skipped: $skipped_count (clean containers)"
         echo "  - Critical vulnerabilities: $vm_critical"
         echo "  - High vulnerabilities: $vm_high"
+        echo "  - Unique Critical rules: $vm_dedup_critical"
+        echo "  - Unique High rules: $vm_dedup_high"
         echo "  - Artifact paths: $vm_name/container:version/binary"
         echo ""
 
@@ -558,78 +564,6 @@ if [ $SUCCESS_COUNT -eq 0 ]; then
     exit 1
 fi
 
-# Create final consolidated SARIF report
-echo -e "${YELLOW}Creating final consolidated SARIF report...${NC}"
-final_sarif="$SARIF_OUTPUT_DIR/trivy-security-scan.sarif"
-sarif_files=()
-
-# Collect all VM-specific SARIF files
-while IFS= read -r -d '' file; do
-    sarif_files+=("$file")
-done < <(find "$SARIF_OUTPUT_DIR" -name "trivy-consolidated-*.sarif" -type f -print0 2>/dev/null)
-
-if [ ${#sarif_files[@]} -eq 0 ]; then
-    echo -e "${RED}No consolidated SARIF files found to merge${NC}"
-    exit 1
-fi
-
-if [ ${#sarif_files[@]} -eq 1 ]; then
-    cp "${sarif_files[0]}" "$final_sarif"
-    echo "Single SARIF file copied to final report"
-else
-    echo "Merging ${#sarif_files[@]} VM SARIF files into final report..."
-
-    jq -s '
-        .[0] as $base |
-        (map(.runs[0].results // []) | add | unique_by(.ruleId + .locations[0].physicalLocation.artifactLocation.uri)) as $all_results |
-        (map(.runs[0].tool.driver.rules // []) | add | unique_by(.id)) as $all_rules |
-
-        {
-          "version": "2.1.0",
-          "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
-          "runs": [
-            ($base.runs[0] |
-              .tool.driver.rules = $all_rules |
-              .results = $all_results |
-              .properties.scanMetadata = (.properties.scanMetadata // {} | . + {
-                finalConsolidation: true,
-                vmCount: (. | length),
-                deduplicationStrategy: "unique_by_rule_id",
-                preservesAllLocations: true
-              })
-            )
-          ]
-        }
-    ' "${sarif_files[@]}" > "$final_sarif"
-fi
-
-if [ ! -s "$final_sarif" ] || ! jq empty "$final_sarif" 2>/dev/null; then
-    echo -e "${RED}Failed to create final SARIF report${NC}"
-    exit 1
-fi
-
-# Calculate deduplicated vulnerability counts
-DEDUP_CRITICAL=$(jq '[.runs[0].tool.driver.rules[]? | select(.properties.tags | contains(["CRITICAL"]))] | length' "$final_sarif" 2>/dev/null || echo 0)
-DEDUP_HIGH=$(jq '[.runs[0].tool.driver.rules[]? | select(.properties.tags | contains(["HIGH"]))] | length' "$final_sarif" 2>/dev/null || echo 0)
-
-# Ensure valid numbers
-DEDUP_CRITICAL=${DEDUP_CRITICAL:-0}
-DEDUP_HIGH=${DEDUP_HIGH:-0}
-
-if ! [[ "$DEDUP_CRITICAL" =~ ^[0-9]+$ ]]; then
-    DEDUP_CRITICAL=0
-fi
-if ! [[ "$DEDUP_HIGH" =~ ^[0-9]+$ ]]; then
-    DEDUP_HIGH=0
-fi
-
-total_results=$(jq '.runs[0].results | length' "$final_sarif" 2>/dev/null || echo 0)
-
-echo -e "${GREEN}Final consolidated SARIF report created: $final_sarif${NC}"
-echo "  - Total vulnerability instances: $total_results"
-echo "  - Unique rules (deduplicated): $((DEDUP_CRITICAL + DEDUP_HIGH))"
-
-# Generate summary
 echo ""
 echo -e "${GREEN}=== SARIF Processing Summary ===${NC}"
 echo "Successfully processed: $SUCCESS_COUNT/$VM_COUNT VMs"
@@ -647,13 +581,11 @@ echo "  - High: $DEDUP_HIGH"
 echo "  - Total unique: $((DEDUP_CRITICAL + DEDUP_HIGH))"
 echo ""
 echo "Files created:"
-echo "  - Final SARIF: $final_sarif"
 for file in "$SARIF_OUTPUT_DIR"/trivy-consolidated-*.sarif; do
     [ -f "$file" ] && echo "  - VM SARIF: $(basename "$file")"
 done
 
 if [ ! -z "$GITHUB_ENV" ]; then
-    echo "SARIF_FILE=$final_sarif" >> "$GITHUB_ENV"
     echo "UPLOAD_SARIF=true" >> "$GITHUB_ENV"
 fi
 

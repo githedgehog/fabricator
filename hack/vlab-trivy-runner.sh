@@ -708,48 +708,80 @@ if [ "$SUCCESS" = true ]; then
         if "$CONSOLIDATOR_SCRIPT" "$RAW_SARIF_DIR" "$RESULTS_DIR"; then
             echo -e "${GREEN}SARIF processing completed successfully${NC}"
 
-            if [ -f "sarif-reports/trivy-security-scan.sarif" ]; then
-                # Extract vulnerability counts from final SARIF for summary
-                DEDUP_CRITICAL=$(jq '[.runs[0].tool.driver.rules[]? | select(.properties.tags | contains(["CRITICAL"]))] | length' "sarif-reports/trivy-security-scan.sarif" 2>/dev/null || echo 0)
-                DEDUP_HIGH=$(jq '[.runs[0].tool.driver.rules[]? | select(.properties.tags | contains(["HIGH"]))] | length' "sarif-reports/trivy-security-scan.sarif" 2>/dev/null || echo 0)
+            # Calculate summary metrics from individual SARIF files
+            TOTAL_IMAGES_SCANNED=0
+            TOTAL_CRITICAL_VULNS=0
+            TOTAL_HIGH_VULNS=0
+            DEDUP_CRITICAL=0
+            DEDUP_HIGH=0
+            declare -A VM_IMAGES_SCANNED VM_CRITICAL_VULNS VM_HIGH_VULNS
 
-                # Count raw instances for backwards compatibility
-                TOTAL_CRITICAL_VULNS=$(jq '[.runs[0].results[]? | select(.level == "error" and (.message.text | contains("CRITICAL")))] | length' "sarif-reports/trivy-security-scan.sarif" 2>/dev/null || echo 0)
-                TOTAL_HIGH_VULNS=$(jq '[.runs[0].results[]? | select(.level == "error" and (.message.text | contains("HIGH")))] | length' "sarif-reports/trivy-security-scan.sarif" 2>/dev/null || echo 0)
+            for results_subdir in "$RESULTS_DIR"/*; do
+                if [ -f "$results_subdir/container_images.txt" ]; then
+                    vm_name=$(basename "$results_subdir")
+                    vm_image_count=$(wc -l < "$results_subdir/container_images.txt" 2>/dev/null || echo 0)
+                    TOTAL_IMAGES_SCANNED=$((TOTAL_IMAGES_SCANNED + vm_image_count))
+                    VM_IMAGES_SCANNED["$vm_name"]=$vm_image_count
 
-                # Count images scanned across all VMs and get VM-specific counts
-                TOTAL_IMAGES_SCANNED=0
-                declare -A VM_IMAGES_SCANNED VM_CRITICAL_VULNS VM_HIGH_VULNS
+                    # Extract VM-specific vulnerability counts from consolidated SARIF
+                    vm_sarif="sarif-reports/trivy-consolidated-${vm_name}.sarif"
+                    if [ -f "$vm_sarif" ]; then
+                        VM_CRITICAL_VULNS["$vm_name"]=$(jq '[.runs[0].results[]? | select(.level == "error" and (.message.text | contains("CRITICAL")))] | length' "$vm_sarif" 2>/dev/null || echo 0)
+                        VM_HIGH_VULNS["$vm_name"]=$(jq '[.runs[0].results[]? | select(.level == "error" and (.message.text | contains("HIGH")))] | length' "$vm_sarif" 2>/dev/null || echo 0)
 
-                for results_subdir in "$RESULTS_DIR"/*; do
-                    if [ -f "$results_subdir/container_images.txt" ]; then
-                        vm_name=$(basename "$results_subdir")
-                        vm_image_count=$(wc -l < "$results_subdir/container_images.txt" 2>/dev/null || echo 0)
-                        TOTAL_IMAGES_SCANNED=$((TOTAL_IMAGES_SCANNED + vm_image_count))
-                        VM_IMAGES_SCANNED["$vm_name"]=$vm_image_count
+                        # Add to totals
+                        TOTAL_CRITICAL_VULNS=$((TOTAL_CRITICAL_VULNS + VM_CRITICAL_VULNS["$vm_name"]))
+                        TOTAL_HIGH_VULNS=$((TOTAL_HIGH_VULNS + VM_HIGH_VULNS["$vm_name"]))
 
-                        # Extract VM-specific vulnerability counts from consolidated SARIF
-                        vm_sarif="sarif-reports/trivy-consolidated-${vm_name}.sarif"
-                        if [ -f "$vm_sarif" ]; then
-                            VM_CRITICAL_VULNS["$vm_name"]=$(jq '[.runs[0].results[]? | select(.level == "error" and (.message.text | contains("CRITICAL")))] | length' "$vm_sarif" 2>/dev/null || echo 0)
-                            VM_HIGH_VULNS["$vm_name"]=$(jq '[.runs[0].results[]? | select(.level == "error" and (.message.text | contains("HIGH")))] | length' "$vm_sarif" 2>/dev/null || echo 0)
-                        else
-                            VM_CRITICAL_VULNS["$vm_name"]=0
-                            VM_HIGH_VULNS["$vm_name"]=0
-                        fi
+                        # Calculate unique vulnerabilities from rules
+                        vm_dedup_critical=$(jq '[.runs[0].tool.driver.rules[]? | select(.properties.tags | contains(["CRITICAL"]))] | length' "$vm_sarif" 2>/dev/null || echo 0)
+                        vm_dedup_high=$(jq '[.runs[0].tool.driver.rules[]? | select(.properties.tags | contains(["HIGH"]))] | length' "$vm_sarif" 2>/dev/null || echo 0)
+
+                        DEDUP_CRITICAL=$((DEDUP_CRITICAL + vm_dedup_critical))
+                        DEDUP_HIGH=$((DEDUP_HIGH + vm_dedup_high))
+                    else
+                        VM_CRITICAL_VULNS["$vm_name"]=0
+                        VM_HIGH_VULNS["$vm_name"]=0
                     fi
-                done
+                fi
+            done
 
-                echo ""
-                echo -e "${GREEN}=== Security Scan Summary ===${NC}"
-                echo "Total images scanned: $TOTAL_IMAGES_SCANNED"
-                echo "Unique Critical vulnerabilities: $DEDUP_CRITICAL"
-                echo "Unique High vulnerabilities: $DEDUP_HIGH"
-                echo "Total vulnerability instances: $((TOTAL_CRITICAL_VULNS + TOTAL_HIGH_VULNS))"
-                echo ""
-                echo -e "${GREEN}=== VM-Specific Breakdown ===${NC}"
+            echo ""
+            echo -e "${GREEN}=== Security Scan Summary ===${NC}"
+            echo "Total images scanned: $TOTAL_IMAGES_SCANNED"
+            echo "Unique Critical vulnerabilities: $DEDUP_CRITICAL"
+            echo "Unique High vulnerabilities: $DEDUP_HIGH"
+            echo "Total vulnerability instances: $((TOTAL_CRITICAL_VULNS + TOTAL_HIGH_VULNS))"
+            echo ""
+            echo -e "${GREEN}=== VM-Specific Breakdown ===${NC}"
 
-                # Add VM-specific details to console output
+            # Add VM-specific details to console output
+            for vm_name in "${!VM_IMAGES_SCANNED[@]}"; do
+                vm_display_name=""
+                case "$vm_name" in
+                    control-*) vm_display_name="Control VM" ;;
+                    gateway-*) vm_display_name="Gateway VM" ;;
+                    sonic-switches) vm_display_name="SONiC Switches" ;;
+                    leaf-*|spine-*|*switch*) vm_display_name="SONiC Switch ($vm_name)" ;;
+                    *) vm_display_name="$vm_name" ;;
+                esac
+
+                echo "${vm_display_name} container images scanned: ${VM_IMAGES_SCANNED[$vm_name]}"
+                echo "  - Critical vulnerabilities: ${VM_CRITICAL_VULNS[$vm_name]}"
+                echo "  - High vulnerabilities: ${VM_HIGH_VULNS[$vm_name]}"
+            done
+
+            # GitHub Actions integration
+            if [ ! -z "$GITHUB_STEP_SUMMARY" ] && [ -f "$GITHUB_STEP_SUMMARY" ]; then
+                echo "## Security Scan Summary" >> "$GITHUB_STEP_SUMMARY"
+                echo "- **Total images scanned:** $TOTAL_IMAGES_SCANNED" >> "$GITHUB_STEP_SUMMARY"
+                echo "- **Unique Critical vulnerabilities:** $DEDUP_CRITICAL" >> "$GITHUB_STEP_SUMMARY"
+                echo "- **Unique High vulnerabilities:** $DEDUP_HIGH" >> "$GITHUB_STEP_SUMMARY"
+                echo "- **Total vulnerability instances:** $((TOTAL_CRITICAL_VULNS + TOTAL_HIGH_VULNS))" >> "$GITHUB_STEP_SUMMARY"
+                echo "" >> "$GITHUB_STEP_SUMMARY"
+                echo "### VM-Specific Breakdown" >> "$GITHUB_STEP_SUMMARY"
+
+                # Add VM-specific details
                 for vm_name in "${!VM_IMAGES_SCANNED[@]}"; do
                     vm_display_name=""
                     case "$vm_name" in
@@ -760,51 +792,26 @@ if [ "$SUCCESS" = true ]; then
                         *) vm_display_name="$vm_name" ;;
                     esac
 
-                    echo "${vm_display_name} container images scanned: ${VM_IMAGES_SCANNED[$vm_name]}"
-                    echo "  - Critical vulnerabilities: ${VM_CRITICAL_VULNS[$vm_name]}"
-                    echo "  - High vulnerabilities: ${VM_HIGH_VULNS[$vm_name]}"
+                    echo "- **${vm_display_name} container images scanned:** ${VM_IMAGES_SCANNED[$vm_name]}" >> "$GITHUB_STEP_SUMMARY"
+                    echo "  - Critical vulnerabilities: ${VM_CRITICAL_VULNS[$vm_name]}" >> "$GITHUB_STEP_SUMMARY"
+                    echo "  - High vulnerabilities: ${VM_HIGH_VULNS[$vm_name]}" >> "$GITHUB_STEP_SUMMARY"
                 done
 
-                # GitHub Actions integration
-                if [ ! -z "$GITHUB_STEP_SUMMARY" ] && [ -f "$GITHUB_STEP_SUMMARY" ]; then
-                    echo "## Security Scan Summary" >> "$GITHUB_STEP_SUMMARY"
-                    echo "- **Total images scanned:** $TOTAL_IMAGES_SCANNED" >> "$GITHUB_STEP_SUMMARY"
-                    echo "- **Unique Critical vulnerabilities:** $DEDUP_CRITICAL" >> "$GITHUB_STEP_SUMMARY"
-                    echo "- **Unique High vulnerabilities:** $DEDUP_HIGH" >> "$GITHUB_STEP_SUMMARY"
-                    echo "- **Total vulnerability instances:** $((TOTAL_CRITICAL_VULNS + TOTAL_HIGH_VULNS))" >> "$GITHUB_STEP_SUMMARY"
-                    echo "" >> "$GITHUB_STEP_SUMMARY"
-                    echo "### VM-Specific Breakdown" >> "$GITHUB_STEP_SUMMARY"
+                echo "" >> "$GITHUB_STEP_SUMMARY"
+                echo "Check the [Security tab](https://github.com/$GITHUB_REPOSITORY/security) for detailed vulnerability reports." >> "$GITHUB_STEP_SUMMARY"
+            fi
 
-                    # Add VM-specific details
-                    for vm_name in "${!VM_IMAGES_SCANNED[@]}"; do
-                        vm_display_name=""
-                        case "$vm_name" in
-                            control-*) vm_display_name="Control VM" ;;
-                            gateway-*) vm_display_name="Gateway VM" ;;
-                            sonic-switches) vm_display_name="SONiC Switches" ;;
-                            leaf-*|spine-*|*switch*) vm_display_name="SONiC Switch ($vm_name)" ;;
-                            *) vm_display_name="$vm_name" ;;
-                        esac
-
-                        echo "- **${vm_display_name} container images scanned:** ${VM_IMAGES_SCANNED[$vm_name]}" >> "$GITHUB_STEP_SUMMARY"
-                        echo "  - Critical vulnerabilities: ${VM_CRITICAL_VULNS[$vm_name]}" >> "$GITHUB_STEP_SUMMARY"
-                        echo "  - High vulnerabilities: ${VM_HIGH_VULNS[$vm_name]}" >> "$GITHUB_STEP_SUMMARY"
-                    done
-
-                    echo "" >> "$GITHUB_STEP_SUMMARY"
-                    echo "Check the [Security tab](https://github.com/$GITHUB_REPOSITORY/security) for detailed vulnerability reports." >> "$GITHUB_STEP_SUMMARY"
-                fi
-
-                if [ ! -z "$GITHUB_ENV" ]; then
-                    echo "SARIF_FILE=sarif-reports/trivy-security-scan.sarif" >> "$GITHUB_ENV"
-                    echo "UPLOAD_SARIF=true" >> "$GITHUB_ENV"
-                fi
+            if [ ! -z "$GITHUB_ENV" ]; then
+                echo "UPLOAD_SARIF=true" >> "$GITHUB_ENV"
             fi
 
             echo ""
             echo "Results directory: $RESULTS_DIR"
             echo "SARIF directory: sarif-reports"
-            echo "Final SARIF report: sarif-reports/trivy-security-scan.sarif"
+            echo "Individual SARIF reports:"
+            for sarif_file in sarif-reports/trivy-consolidated-*.sarif; do
+                [ -f "$sarif_file" ] && echo "  - $sarif_file"
+            done
             echo "VLAB log: $VLAB_LOG"
 
         else

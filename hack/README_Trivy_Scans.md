@@ -120,6 +120,96 @@ docker save <image> | trivy image --input /dev/stdin --format sarif
 
 SONiC switches scans are load balanced across available VMs to prevent SSH session timeouts during long scans. Images are distributed across available switches for parallel processing, reducing individual session times from 45+ minutes to ~15 minutes per switch.
 
+## SARIF Enrichment for Infrastructure Context
+
+### Traditional SARIF vs Infrastructure SARIF
+
+Standard vulnerability scanners generate SARIF files with basic artifact paths:
+```json
+{
+  "artifactLocation": {
+    "uri": "usr/bin/bash"
+  },
+  "message": "CVE-2023-1234: Critical vulnerability in bash"
+}
+```
+
+Our system transforms these into infrastructure-aware SARIF files with full deployment context:
+```json
+{
+  "artifactLocation": {
+    "uri": "control-1/fabric:v0.87.0/bash"
+  },
+  "message": "[control-1/fabric:v0.87.0] CVE-2023-1234: Critical vulnerability in bash",
+  "properties": {
+    "vmName": "control-1",
+    "vmType": "control",
+    "containerName": "fabric",
+    "containerVersion": "v0.87.0",
+    "sourceImage": "172.30.0.1:31000/githedgehog/fabric/fabric:v0.87.0",
+    "scanContext": "runtime-deployment-online",
+    "binaryName": "bash"
+  }
+}
+```
+
+### SARIF Artifact Path Structure
+
+Each vulnerability is mapped to a structured path that identifies its deployment location:
+```
+{vm-name}/{container:version}/{binary}
+
+Examples:
+- control-1/fabric:v0.87.0/kubectl      # kubectl binary in fabric container on control VM
+- gateway-1/klipper-helm:v0.9.7/helm   # helm binary in klipper container on gateway VM
+- sonic-switches/bgp:latest/zebra       # zebra daemon in BGP container on SONiC switches
+```
+
+This enables GitHub Security tab filtering by:
+- **Infrastructure tier**: `control-1/*`, `gateway-1/*`, `sonic-switches/*`
+- **Application component**: `*/fabric:*/*`, `*/klipper-helm:*/*`
+- **Binary/service**: `*/*/kubectl`, `*/*/helm`, `*/*/zebra`
+
+### VM-to-Image Mapping Process
+
+The consolidator maps Trivy's raw SARIF outputs to our infrastructure model:
+
+#### 1. Extract Container Metadata
+```bash
+# From VM's container_images.txt
+172.30.0.1:31000/githedgehog/fabric/fabric:v0.87.0
+docker.io/rancher/klipper-helm:v0.9.7
+
+# From SARIF properties
+imageName: "172.30.0.1:31000/githedgehog/fabric/fabric:v0.87.0"
+imageID: "sha256:abc123..."  # For deduplication
+```
+
+#### 2. Handle Airgapped Reconstruction
+```bash
+# Raw airgapped imageName (tar file path):
+"/tmp/trivy-export-$/docker.io_rancher_klipper-helm_v0.9.7.tar"
+
+# Reconstructed to original image name:
+"docker.io/rancher/klipper-helm:v0.9.7"
+```
+
+#### 3. Deduplication by Image ID
+```bash
+# Same imageID = same binary content = single vulnerability report
+172.30.0.1:31000/githedgehog/fabricator/zot:v2.1.1  # imageID: sha256:b65f0e9f...
+ghcr.io/githedgehog/fabricator/zot:v2.1.1           # imageID: sha256:b65f0e9f... (SAME)
+# Result: Merge vulnerabilities, use first image as representative
+```
+
+#### 4. Binary Path Extraction
+```bash
+# Original artifact URI from Trivy
+"usr/bin/kubectl"           → kubectl
+"/tmp/trivy-export-*.tar"   → {container-name}
+"lib/x86_64-linux-gnu/..."  → {library-name}
+```
+
 ## Scan Outputs & Processing
 
 ### Output Formats
@@ -180,58 +270,47 @@ hack/sarif-consolidator.sh
 ├── 3. Deduplicate by imageID within each VM
 ├── 4. Merge vulnerabilities (unique by ruleId + location)
 ├── 5. Add VM context to vulnerability reports
-└── 6. Generate final consolidated SARIF
+└── 6. Generate individual VM SARIF files
 ```
 
-## Image Mapping Logic
+## GitHub Security Integration
 
-### The Challenge
-SARIF files contain container references that must be mapped back to the deployed container images:
-- **Online mode**: `imageName` contains direct registry paths (`docker.io/rancher/klipper-helm:v0.9.7`)
-- **Airgapped mode**: `imageName` contains tar file paths (`/tmp/trivy-export-$/docker.io_rancher_klipper-helm_v0.9.7.tar`)
+### Multiple SARIF Categories
 
-### Mapping Process
-
-#### 1. Extract Image Metadata
-```bash
-# From each SARIF file, extract:
-imageName=$(jq -r '.runs[0].properties.imageName' file.sarif)
-imageID=$(jq -r '.runs[0].properties.imageID' file.sarif)  # SHA256 hash
+The system uploads separate SARIF files for each infrastructure tier:
+```yaml
+# GitHub Security tab categories
+- trivy-control  # Control plane vulnerabilities
+- trivy-gateway  # Gateway vulnerabilities
+- trivy-sonic    # SONiC switch vulnerabilities
 ```
 
-#### 2. Handle Airgapped Reconstruction
-For tar file paths, reconstruct the original image name:
-```bash
-# /tmp/trivy-export-$/docker.io_rancher_klipper-helm_v0.9.7.tar
-# becomes: docker.io/rancher/klipper-helm:v0.9.7
-```
+This enables filtering by infrastructure component in GitHub's Security tab, making it easier to:
+- **Prioritize** control plane vs edge vulnerabilities
+- **Assign** teams based on component ownership
+- **Track** remediation progress by infrastructure tier
 
-#### 3. Validate Against Container List
-Each VM has a `container_images.txt` file listing actually deployed images:
-```bash
-172.30.0.1:31000/githedgehog/fabric/fabric-boot:v0.84.3
-docker.io/rancher/klipper-helm:v0.9.7-build20250616
-...
-```
-
-#### 4. Deduplication by ImageID
-Group SARIF files by `imageID` (SHA256) within each VM:
-```bash
-# Same imageID = same binary content = merge vulnerabilities
-172.30.0.1:31000/githedgehog/fabricator/zot:v2.1.1  # imageID: sha256:b65f0e9f...
-ghcr.io/githedgehog/fabricator/zot:v2.1.1           # imageID: sha256:b65f0e9f... (SAME)
-# Result: Single vulnerability report using first image as representative
-```
-
-#### 5. VM Context Preservation
-Each vulnerability retains its deployment context:
+### VM Context Preservation
+Each vulnerability report includes full deployment context:
 ```json
 {
-  "message": "[control-1/zot:v2.1.1] Critical vulnerability in libssl",
+  "ruleId": "CVE-2023-1234",
+  "message": "[control-1/fabric:v0.87.0] Critical vulnerability in kubectl",
+  "locations": [{
+    "physicalLocation": {
+      "artifactLocation": {
+        "uri": "control-1/fabric:v0.87.0/kubectl"
+      }
+    }
+  }],
   "properties": {
     "vmName": "control-1",
-    "containerWithVersion": "zot:v2.1.1",
-    "sourceImage": "172.30.0.1:31000/githedgehog/fabricator/zot:v2.1.1"
+    "vmType": "control",
+    "containerName": "fabric",
+    "containerVersion": "v0.87.0",
+    "sourceImage": "172.30.0.1:31000/githedgehog/fabric/fabric:v0.87.0",
+    "scanContext": "runtime-deployment-online",
+    "binaryName": "kubectl"
   }
 }
 ```
@@ -268,10 +347,9 @@ raw-sarif-reports/
 
 # Consolidated reports (GitHub integration)
 sarif-reports/
-├── trivy-consolidated-control-1.sarif          # Per-VM consolidated
-├── trivy-consolidated-gateway-1.sarif
-├── trivy-consolidated-sonic-switches.sarif
-└── trivy-security-scan.sarif                   # Final GitHub upload
+├── trivy-consolidated-control-1.sarif          # Control VM vulnerabilities
+├── trivy-consolidated-gateway-1.sarif          # Gateway VM vulnerabilities
+└── trivy-consolidated-sonic-switches.sarif     # SONiC switch vulnerabilities
 ```
 
 ### File Descriptions
@@ -291,35 +369,7 @@ docker.io/rancher/klipper-helm:v0.9.7-build20250616
 - Deduplicated vulnerabilities within each VM
 - VM context added to each vulnerability
 - Clean artifact paths (vm-name/container:version/binary)
-
-**Final SARIF report**: Single file for GitHub Security tab
-- All VMs merged into one report
-- Preserves VM context in vulnerability messages
-- Enables centralized security dashboard
-
-## GitHub Security Integration
-
-The consolidated SARIF enables:
-- **Centralized vulnerability dashboard**
-- **Automated security alerts**
-- **Issue tracking** with affected files/containers
-- **Historical trending** of vulnerability counts
-- **Integration** with pull request checks
-
-### VM Context Preservation
-Each vulnerability report includes:
-```json
-{
-  "ruleId": "CVE-2023-1234",
-  "message": "[control-1/zot:v2.1.1] Critical vulnerability in libssl",
-  "properties": {
-    "vmName": "control-1",
-    "vmType": "control",
-    "containerName": "zot",
-    "scanContext": "runtime-deployment-online"
-  }
-}
-```
+- Uploaded to GitHub Security tab with unique categories
 
 ## Workflow Options
 
@@ -328,7 +378,7 @@ Each vulnerability report includes:
 # .github/workflows/security-scan.yml
 workflow_dispatch:
   inputs:
-    scan_scope:
+    vm_selection:
       description: 'Select components to scan'
       required: true
       default: 'control-gateway'
@@ -357,17 +407,22 @@ workflow_dispatch:
 
 ### Understanding the Output
 ```bash
-# View consolidated results
+# View consolidated results by VM
 ls sarif-reports/
-cat sarif-reports/trivy-security-scan.sarif | jq '.runs[0].results | length'
+jq '.runs[0].results | length' sarif-reports/trivy-consolidated-control-1.sarif
 
-# Check specific VM vulnerabilitie
-cat sarif-reports/trivy-consolidated-control-1.sarif | \
-  jq '.runs[0].results[] | select(.level=="error") | .message.text'
+# Check specific VM vulnerabilities with infrastructure context
+jq '.runs[0].results[] | select(.level=="error") | .message.text' \
+  sarif-reports/trivy-consolidated-control-1.sarif
+
+# Find vulnerabilities in specific container
+jq '.runs[0].results[] | select(.properties.containerName=="fabric") | .message.text' \
+  sarif-reports/trivy-consolidated-control-1.sarif
 ```
 
 ### GitHub Integration
 The system automatically:
-1. **Uploads SARIF** to GitHub Security tab
+1. **Uploads multiple SARIF files** to GitHub Security tab with unique categories
 2. **Sets environment variables** for downstream jobs
-3. **Generates PR summaries** with vulnerability counts
+3. **Generates PR summaries** with vulnerability counts per VM
+4. **Preserves infrastructure context** in vulnerability artifact paths
