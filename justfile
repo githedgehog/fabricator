@@ -37,7 +37,7 @@ _touch_embed:
   @touch {{oem_dir}}/oem.cpio.gz
   @touch {{oem_dir}}/hhfab-flatcar-install
 
-_hhfab_embed: _touch_embed _butane
+_hhfab_embed: _touch_embed
   # Build hhfab-recipe binary for embedding
   {{go_linux_build}} -o ./pkg/embed/recipebin/hhfab-recipe ./cmd/hhfab-recipe
   gzip -fk ./pkg/embed/recipebin/hhfab-recipe
