@@ -659,6 +659,8 @@ github.com/coreos/butane/config/r4e/v1_0
 github.com/coreos/butane/config/r4e/v1_1
 github.com/coreos/butane/config/r4e/v1_2_exp
 github.com/coreos/butane/config/util
+github.com/coreos/butane/internal
+github.com/coreos/butane/internal/version
 github.com/coreos/butane/translate
 # github.com/coreos/go-json v0.0.0-20230131223807-18775e0fb4fb
 ## explicit; go 1.18
