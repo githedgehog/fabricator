@@ -4,8 +4,7 @@
 
 set -e
 
-RAW_SARIF_DIR="${1:-raw-sarif-reports}"
-RESULTS_DIR="${2:-trivy-reports}"
+RESULTS_DIR="${1:-trivy-reports}"
 SARIF_OUTPUT_DIR="sarif-reports"
 
 GREEN='\033[0;32m'
@@ -18,14 +17,13 @@ if ! command -v jq &> /dev/null; then
     exit 1
 fi
 
-if [ ! -d "$RAW_SARIF_DIR" ]; then
-    echo -e "${RED}ERROR: Raw SARIF directory not found: $RAW_SARIF_DIR${NC}"
-    echo "Please run vlab-trivy-runner.sh first to collect raw SARIF files"
+if [ ! -d "$RESULTS_DIR" ]; then
+    echo -e "${RED}ERROR: Results directory not found: $RESULTS_DIR${NC}"
+    echo "Please run vlab-trivy-runner.sh first to collect scan results"
     exit 1
 fi
 
 echo -e "${GREEN}Starting SARIF consolidation and processing${NC}"
-echo "Raw SARIF directory: $RAW_SARIF_DIR"
 echo "Results directory: $RESULTS_DIR"
 echo "Output directory: $SARIF_OUTPUT_DIR"
 echo ""
@@ -62,21 +60,20 @@ extract_container_info() {
 
 process_vm_sarif() {
     local vm_name="$1"
-    local vm_sarif_dir="$RAW_SARIF_DIR/$vm_name"
     local vm_results_dir="$RESULTS_DIR/$vm_name"
 
-    if [ ! -d "$vm_sarif_dir" ]; then
-        echo -e "${YELLOW}No SARIF directory found for $vm_name, skipping${NC}"
+    if [ ! -d "$vm_results_dir" ]; then
+        echo -e "${YELLOW}No results directory found for $vm_name, skipping${NC}"
         return 1
     fi
 
     echo -e "${YELLOW}Processing SARIF files for $vm_name${NC}"
 
-    # Find all SARIF files for this VM
+    # Find all SARIF files for this VM in the results directory
     sarif_files=()
     while IFS= read -r -d '' file; do
         sarif_files+=("$file")
-    done < <(find "$vm_sarif_dir" -name '*_critical.sarif' -type f -print0 2>/dev/null)
+    done < <(find "$vm_results_dir" -name '*_critical.sarif' -type f -print0 2>/dev/null)
 
     if [ ${#sarif_files[@]} -eq 0 ]; then
         echo -e "${YELLOW}No SARIF files found for $vm_name${NC}"
@@ -539,7 +536,7 @@ process_vm_sarif() {
 VM_COUNT=0
 SUCCESS_COUNT=0
 
-for vm_dir in "$RAW_SARIF_DIR"/*; do
+for vm_dir in "$RESULTS_DIR"/*; do
     if [ -d "$vm_dir" ]; then
         vm_name=$(basename "$vm_dir")
         VM_COUNT=$((VM_COUNT + 1))
