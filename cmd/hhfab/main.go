@@ -1042,6 +1042,12 @@ func Run(ctx context.Context) error {
 								Usage: "TOS value to use for iperf3 tests (0 to disable TOS)",
 								Value: 0,
 							},
+							&cli.BoolFlag{
+								Name:    "all-servers",
+								Aliases: []string{"all"},
+								Usage:   "requires all servers to be attached to a VPC",
+								Value:   false,
+							},
 						}),
 						Before: before(false),
 						Action: func(c *cli.Context) error {
@@ -1063,6 +1069,7 @@ func Run(ctx context.Context) error {
 								Destinations:      c.StringSlice("destination"),
 								IPerfsDSCP:        uint8(cliDSCP),
 								IPerfsTOS:         uint8(cliTOS),
+								RequireAllServers: c.Bool("all-servers"),
 							}); err != nil {
 								return fmt.Errorf("test-connectivity: %w", err)
 							}
