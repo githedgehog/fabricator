@@ -395,6 +395,14 @@ type TestFunc func(context.Context) (bool, []RevertFunc, error)
 // tests.
 func (testCtx *VPCPeeringTestCtx) vpcPeeringsStarterTest(ctx context.Context) (bool, []RevertFunc, error) {
 	// 1+2:r=border 1+3 3+5 2+4 4+6 5+6 6+7 7+8 8+9  5~default--5835:s=subnet-01 6~default--5835:s=subnet-01  1~default--5835:s=subnet-01  2~default--5835:s=subnet-01  9~default--5835:s=subnet-01  7~default--5835:s=subnet-01
+	vpcs := &vpcapi.VPCList{}
+	if err := testCtx.kube.List(ctx, vpcs); err != nil {
+		return false, nil, fmt.Errorf("listing VPCs: %w", err)
+	}
+	if len(vpcs.Items) < 9 {
+		return true, nil, errNotEnoughVPCs
+	}
+
 	// check whether border switchgroup exists
 	remote := "border"
 	swGroup := &wiringapi.SwitchGroup{}
@@ -518,6 +526,14 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsFullLoopAllExternalsTest(ctx contex
 // Arbitrary configuration which again was shown to occasionally trigger the gNMI bug.
 func (testCtx *VPCPeeringTestCtx) vpcPeeringsSergeisSpecialTest(ctx context.Context) (bool, []RevertFunc, error) {
 	// 1+2 2+3 2+4:r=border 6+5 1~default--5835:s=subnet-01
+	vpcs := &vpcapi.VPCList{}
+	if err := testCtx.kube.List(ctx, vpcs); err != nil {
+		return false, nil, fmt.Errorf("listing VPCs: %w", err)
+	}
+	if len(vpcs.Items) < 6 {
+		return true, nil, errNotEnoughVPCs
+	}
+
 	// check whether border switchgroup exists
 	remote := "border"
 	swGroup := &wiringapi.SwitchGroup{}
