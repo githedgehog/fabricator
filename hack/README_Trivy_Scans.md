@@ -14,6 +14,86 @@ The scripts perform comprehensive vulnerability scanning across a Hedgehog Fabri
 
 The scripts generate security reports compatible with GitHub's Security tab, providing centralized vulnerability tracking and automated security alerts.
 
+## Getting Started
+
+### Recommended: GitHub Actions (CI)
+
+The security scans are designed to run automatically in CI environments with full VLAB orchestration:
+
+#### **Trigger via GitHub UI**:
+1. Go to **Actions** tab in your repository
+2. Select **"Security Scan"** workflow
+3. Click **"Run workflow"** button
+4. Choose scan scope:
+   - `control-gateway` (default)
+   - `control-only`
+   - `gateway-only`
+   - `switch-only`
+   - `all`
+
+#### **Trigger via PR Comment**:
+```bash
+# In any PR, comment:
+/run security-scan
+/run security-scan --all              # Full scan
+/run security-scan --control-only     # Control VM only
+```
+
+#### **Automatic Triggers**:
+- **Scheduled**: Nightly scans of main branch
+- **PR Reviews**: Triggered on security-sensitive changes
+- **Release**: Full scan before version releases
+
+### Local Development Usage
+
+For development and testing, you can run scans locally:
+
+#### **Prerequisites**:
+- Linux environment (tested on Fedora/Ubuntu)
+- Docker installed and running
+- `jq` command available (`sudo apt install jq` or `sudo dnf install jq`)
+- Sufficient disk space (~10GB for full scan)
+- Network access for downloading Trivy and vulnerability databases
+
+#### **Basic Local Scan**:
+```bash
+# Scan core infrastructure (recommended for development)
+./hack/vlab-trivy-runner.sh --control-only --gateway-only
+
+# Scan everything (comprehensive security review)
+./hack/vlab-trivy-runner.sh --all
+
+# Use existing VLAB (if already running)
+./hack/vlab-trivy-runner.sh --skip-vlab --control-only
+```
+
+#### **Local Scan Workflow**:
+1. Script launches VLAB automatically
+2. Installs Trivy on each VM with appropriate mode (online/airgapped)
+3. Runs security scans across all enabled VMs
+4. Collects and consolidates results
+5. Generates GitHub-compatible SARIF reports
+6. Cleans up VLAB environment
+
+**Note**: Local scans take 15-30 minutes depending on scope and are primarily intended for development/debugging. Production security scanning should use the GitHub Actions workflow.
+
+### Understanding the Output
+```bash
+# View consolidated results
+ls sarif-reports/
+cat sarif-reports/trivy-security-scan.sarif | jq '.runs[0].results | length'
+
+# Check specific VM vulnerabilities
+cat sarif-reports/trivy-consolidated-control-1.sarif | \
+  jq '.runs[0].results[] | select(.level=="error") | .message.text'
+```
+
+### GitHub Integration
+The system automatically:
+1. **Uploads SARIF** to GitHub Security tab
+2. **Sets environment variables** for downstream jobs
+3. **Generates PR summaries** with vulnerability counts
+
 ## VLAB Architecture
 
 Our security scans run against a minimal VLAB (Virtual Lab) topology that represents a real Hedgehog Fabric deployment:
@@ -105,14 +185,45 @@ The system uses three scanning modes based on network access constraints:
 trivy image --format sarif --output report.sarif <image>
 ```
 
-**Airgapped Mode (gateway-1, switches)**: Pre-cached vulnerability database, offline scanning
+**Airgapped Mode (gateway-1, switches)**: Pre-cached vulnerability database, offline scanning with image export
 ```bash
-# Gateway: K3s containers
-trivy image --offline-scan --format sarif <image>
+# Gateway: Export K3s containers to tar files for offline scanning
+ctr -a /run/k3s/containerd/containerd.sock -n k8s.io image export image.tar <image>
+trivy image --offline-scan --input image.tar --format sarif
 
 # Switches: Docker containers exported to tar
 docker save <image> | trivy image --input /dev/stdin --format sarif
 ```
+
+### Airgapped Mode Complexity
+
+Airgapped environments cannot directly access container images from registries, requiring **image export and reconstruction**:
+
+#### **Export Process**:
+1. **Extract images** from containerd/Docker to tar files
+2. **Transfer tar files** to scanning location
+3. **Scan tar files** with pre-cached vulnerability database
+
+#### **Reconstruction Challenge**:
+SARIF files from airgapped scans contain **tar file paths** instead of original image names:
+```bash
+# Original image name (what we want):
+docker.io/rancher/klipper-helm:v0.9.7
+
+# SARIF imageName (what we get from airgapped scan):
+/tmp/trivy-export-$/docker.io_rancher_klipper-helm_v0.9.7.tar
+```
+
+#### **Path Reconstruction Logic**:
+The consolidator reconstructs original image names from tar paths:
+```bash
+# Tar basename: docker.io_rancher_klipper-helm_v0.9.7
+# Registry patterns:
+docker.io_path_to_image_v1.2.3     → docker.io/path/to/image:v1.2.3
+172.30.0.1_31000_org_image_v1.2.3   → 172.30.0.1:31000/org/image:v1.2.3
+```
+
+This complexity is necessary because airgapped environments cannot access original registry metadata, requiring path-based reconstruction to map SARIF files back to deployed containers.
 
 **Output formats**: SARIF (GitHub integration), JSON (programmatic), TXT (human-readable)
 
@@ -215,24 +326,13 @@ trivy-reports/
 │   ├── fabric_v0.87.0_critical.json           # JSON format (programmatic)
 │   ├── fabric_v0.87.0_critical.txt            # TXT format (human-readable)
 │   └── ...
-└── gateway-1/
-    ├── container_images.txt
-    └── ...
-```
-
-### Raw SARIF Files
-The SARIF consolidator processes files from:
-```
-raw-sarif-reports/
-├── control-1/
-│   ├── 20250729-120000_fabric_v0.87.0_critical.sarif
-│   ├── 20250729-120000_zot_v2.1.1_critical.sarif
-│   └── ...
 ├── gateway-1/
-│   ├── 20250729-120100_klipper-helm_critical.sarif
+│   ├── container_images.txt
+│   ├── klipper-helm_critical.sarif
 │   └── ...
 └── sonic-switches/
-    ├── 20250729-120200_bgp_container_critical.sarif
+    ├── container_images.txt
+    ├── bgp_container_critical.sarif
     └── ...
 ```
 
@@ -253,7 +353,7 @@ imageID: sha256:b65f0e9f2e5dc7518c4bfae2649e681e7224915a756d014d8ca83cd1154c9df9
 ### Consolidation Process
 ```bash
 hack/sarif-consolidator.sh
-├── 1. Group SARIF files by VM
+├── 1. Find SARIF files in trivy-reports/ subdirectories
 ├── 2. Map SARIF files to container images
 ├── 3. Deduplicate by imageID within each VM
 ├── 4. Merge vulnerabilities (unique by ruleId + location)
@@ -337,7 +437,7 @@ Each vulnerability retains its deployment context:
 
 ### Directory Structure
 ```
-# Raw scan results per VM
+# Scan results with all formats
 trivy-reports/
 ├── control-1/
 │   ├── container_images.txt                    # List of scanned images
@@ -350,17 +450,6 @@ trivy-reports/
 │   └── ...
 └── sonic-switches/
     ├── container_images.txt
-    └── ...
-
-# Raw SARIF files (input to consolidator)
-raw-sarif-reports/
-├── control-1/
-│   ├── 20250729-120000_fabric_v0.87.0_critical.sarif
-│   ├── 20250729-120000_zot_v2.1.1_critical.sarif
-│   └── ...
-├── gateway-1/
-│   └── ...
-└── sonic-switches/
     └── ...
 
 # Consolidated reports (GitHub integration)
@@ -394,7 +483,43 @@ docker.io/rancher/klipper-helm:v0.9.7-build20250616
 - Preserves VM context in vulnerability messages
 - Enables centralized security dashboard
 
-## GitHub Security Integration
+## Understanding the Security Scan Summary
+
+### Summary Output Explained
+
+The scan generates vulnerability metrics with clear descriptions:
+
+```bash
+=== Security Scan Summary ===
+Total images scanned: 33
+Unique Critical vulnerability rules: 3        # Different critical CVE types discovered
+Unique High vulnerability rules: 18           # Different high CVE types discovered
+Critical vulnerability instances: 5           # Total critical vulnerabilities found
+High vulnerability instances: 38              # Total high vulnerabilities found
+Total vulnerability instances: 43             # All vulnerability occurrences (5+38)
+
+=== VM-Specific Breakdown ===
+Control VM container images scanned: 25
+  - Critical vulnerability instances: 4        # Critical vulnerabilities in control VM
+  - High vulnerability instances: 32           # High vulnerabilities in control VM
+```
+
+### Understanding the Numbers
+
+**Why different metrics matter:**
+- **CVE Types**: How many different security issues exist (useful for security research)
+- **Total Instances**: How many containers need patching (useful for operations)
+
+**Example**:
+```bash
+CVE-2025-22868 found in 6 containers = 1 CVE type, 6 instances
+CVE-2024-34156 found in 4 containers = 1 CVE type, 4 instances
+Result: 2 unique CVE types, 10 total vulnerability instances
+```
+
+The **instances count** is typically what operations teams focus on for remediation planning.
+
+### GitHub Security Integration
 
 The consolidated SARIF enables:
 - **Centralized vulnerability dashboard**
@@ -416,6 +541,140 @@ Each vulnerability report includes:
     "scanContext": "runtime-deployment-online"
   }
 }
+```
+
+## Troubleshooting SARIF Consolidation
+
+### Common Issues & Diagnostics
+
+#### 1. GitHub Shows Different Vulnerability Count
+
+**Problem**: Your summary shows different vulnerability counts than GitHub Security tab.
+
+**Diagnosis**:
+```bash
+# Check if SARIF file is valid and matches your summary
+jq empty sarif-reports/trivy-security-scan.sarif && echo "✓ Valid JSON" || echo "✗ Invalid JSON"
+jq '.runs[0].results | length' sarif-reports/trivy-security-scan.sarif  # Should match your total
+
+# Compare individual vs consolidated totals
+echo "Individual: $(find trivy-reports -name "*_critical.sarif" -exec jq '.runs[0].results | length' {} + | paste -sd+ | bc)"
+echo "Consolidated: $(jq '.runs[0].results | length' sarif-reports/trivy-security-scan.sarif)"
+
+# Check SARIF upload timestamp in GitHub to ensure it's the latest
+```
+
+**Most Common Cause**:
+- **GitHub processing delays** - The Security tab may show cached results from previous scans
+- **Solution**: Wait for GitHub to process the latest SARIF upload, or create a fresh PR to reset the security scan state
+
+#### 2. Deduplication Not Working
+
+**Problem**: Same container appearing multiple times in vulnerability counts.
+
+**Diagnosis**:
+```bash
+# Check if same containers have identical imageIDs (required for deduplication)
+echo "=== Containers with same imageID (should be deduplicated) ==="
+find trivy-reports -name "*_critical.sarif" -exec jq -r '(.runs[0].properties.imageName // "unknown") + " -> " + (.runs[0].properties.imageID // "no-id")' {} + | sort
+
+# Look for containers with different imageIDs that should be the same
+echo "=== Check specific container across registries ==="
+find trivy-reports -name "*zot*_critical.sarif" -exec jq -r '(.runs[0].properties.imageName // "unknown") + " -> " + (.runs[0].properties.imageID // "no-id")' {} +
+
+# Count duplicate vulnerability instances that should be deduplicated
+jq -r '.runs[0].results[] | .ruleId + "@" + .locations[0].physicalLocation.artifactLocation.uri' sarif-reports/trivy-security-scan.sarif | sort | uniq -d
+```
+
+**Expected Behavior**:
+- Same logical container from different registries → **Same imageID** → Deduplicated
+- Different containers or versions → **Different imageIDs** → Not deduplicated
+
+#### 3. Missing VM Context
+
+**Problem**: Vulnerabilities not tagged with VM information.
+
+**Diagnosis**:
+```bash
+# Check if all results have VM context
+jq '.runs[0].results[] | select(.properties.vmName == null or .properties.vmName == "")' sarif-reports/trivy-security-scan.sarif
+
+# Verify artifact paths include VM names
+jq -r '.runs[0].results[].locations[0].physicalLocation.artifactLocation.uri' sarif-reports/trivy-security-scan.sarif | head -5
+
+# Expected format: vm-name/container:version/binary
+# Example: control-1/zot:v2.1.1/libssl.so.3
+```
+
+#### 4. Summary Calculation Verification
+
+**Problem**: Summary numbers don't match expectations.
+
+**Diagnosis**:
+```bash
+# Verify rule counts (unique CVE types)
+echo "Critical rules: $(jq '[.runs[0].tool.driver.rules[]? | select(.properties.tags | contains(["CRITICAL"]))] | length' sarif-reports/trivy-security-scan.sarif)"
+echo "High rules: $(jq '[.runs[0].tool.driver.rules[]? | select(.properties.tags | contains(["HIGH"]))] | length' sarif-reports/trivy-security-scan.sarif)"
+
+# Verify instance counts (total vulnerabilities found)
+echo "Critical instances: $(jq '[.runs[0].results[]? | select(.level == "error" and (.message.text | contains("CRITICAL")))] | length' sarif-reports/trivy-security-scan.sarif)"
+echo "High instances: $(jq '[.runs[0].results[]? | select(.level == "error" and (.message.text | contains("HIGH")))] | length' sarif-reports/trivy-security-scan.sarif)"
+
+# Check VM-specific counts
+jq '[.runs[0].results[]? | select(.level == "error" and (.properties.vmName == "control-1"))] | length' sarif-reports/trivy-security-scan.sarif
+jq '[.runs[0].results[]? | select(.level == "error" and (.properties.vmName == "gateway-1"))] | length' sarif-reports/trivy-security-scan.sarif
+```
+
+#### 5. Most Frequent CVEs Analysis
+
+**Understanding**: Some CVEs appear in many containers, which is normal.
+
+**Analysis**:
+```bash
+# Show most common vulnerabilities (helpful for prioritizing fixes)
+jq -r '.runs[0].results[].ruleId' sarif-reports/trivy-security-scan.sarif | sort | uniq -c | sort -nr | head -10
+
+# Show which containers have the most vulnerabilities
+jq -r '.runs[0].results[] | .properties.containerWithVersion + " (" + .properties.vmName + ")"' sarif-reports/trivy-security-scan.sarif | sort | uniq -c | sort -nr | head -10
+```
+
+### Container Image Mapping Verification
+
+The consolidator maps SARIF files to actual deployed containers:
+
+```bash
+# Verify image mapping worked correctly
+echo "=== SARIF files successfully mapped to containers ==="
+for vm in control-1 gateway-1; do
+    echo "=== $vm ==="
+    if [ -f "trivy-reports/$vm/container_images.txt" ]; then
+        mapped=$(find trivy-reports/$vm -name "*_critical.sarif" -exec jq -r '.runs[0].properties.imageName // empty' {} + | grep -v "^$" | wc -l)
+        total=$(find trivy-reports/$vm -name "*_critical.sarif" | wc -l)
+        echo "Mapped: $mapped/$total SARIF files to container images"
+    fi
+done
+```
+
+### Debug Complete Consolidation Process
+
+**Step-by-step verification**:
+```bash
+# 1. Check raw SARIF files exist
+find trivy-reports -name "*_critical.sarif" | wc -l
+
+# 2. Verify consolidation created output files
+ls -la sarif-reports/
+
+# 3. Check final SARIF structure
+jq '.runs[0] | keys' sarif-reports/trivy-security-scan.sarif
+
+# 4. Verify comprehensive summary
+echo "=== Complete SARIF Summary ==="
+echo "Images scanned: $(for vm in trivy-reports/*/; do [ -f "$vm/container_images.txt" ] && wc -l < "$vm/container_images.txt"; done | paste -sd+ | bc)"
+echo "Total results: $(jq '.runs[0].results | length' sarif-reports/trivy-security-scan.sarif)"
+echo "Unique rules: $(jq '.runs[0].tool.driver.rules | length' sarif-reports/trivy-security-scan.sarif)"
+echo "Critical: $(jq '[.runs[0].results[]? | select(.level == "error" and (.message.text | contains("CRITICAL")))] | length' sarif-reports/trivy-security-scan.sarif)"
+echo "High: $(jq '[.runs[0].results[]? | select(.level == "error" and (.message.text | contains("HIGH")))] | length' sarif-reports/trivy-security-scan.sarif)"
 ```
 
 ## Workflow Options
