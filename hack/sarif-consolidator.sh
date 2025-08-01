@@ -202,7 +202,7 @@ process_vm_sarif() {
                 path_part="${BASH_REMATCH[1]}"
                 version="${BASH_REMATCH[2]}"
                 image_path_fixed=$(echo "$path_part" | sed 's/_/\//g')
-                reconstructed_image="docker.io/${image_path_fixed}:${version}"  
+                reconstructed_image="docker.io/${image_path_fixed}:${version}"
             elif [[ "$image_part" =~ ^172\.30\.0\.1_31000_(.+)_v([0-9].*)$ ]]; then
                 path_part="${BASH_REMATCH[1]}"
                 version="v${BASH_REMATCH[2]}"
@@ -267,7 +267,7 @@ process_vm_sarif() {
     }' > "$temp_consolidated"
 
     # Group SARIF files by representative image for processing
-    echo "Processing SARIF files grouped by logical image..."
+    echo "Processing SARIF files grouped by representative image..."
     declare -A image_to_sarif_files
 
     for file in "${sarif_files[@]}"; do
@@ -290,10 +290,9 @@ process_vm_sarif() {
         file_count=${#sarif_files_array[@]}
 
         container_with_version=$(extract_container_info "$representative_image")
-        logical_image=$(normalize_image_name "$representative_image")
 
-        echo "  Processing logical image: $logical_image"
-        echo "    Representative: $representative_image -> $container_with_version"
+        echo "  Processing representative image: $representative_image"
+        echo "    Container: $container_with_version"
         echo "    Merging $file_count SARIF file(s): $(echo $sarif_files_for_image | tr ' ' '\n' | xargs -I {} basename {})"
 
         # Check if any of the SARIF files have vulnerabilities
@@ -311,8 +310,8 @@ process_vm_sarif() {
 
         echo "    Total vulnerabilities across files: $total_vulnerabilities"
 
-        # Create a merged SARIF file for this logical image
-        merged_sarif_temp="/tmp/merged-${logical_image//\//_}-$.sarif"
+        # Create a merged SARIF file for this representative image
+        merged_sarif_temp="/tmp/merged-${representative_image//\//_}-$.sarif"
 
         if [ $file_count -eq 1 ]; then
             # Single file - use directly
@@ -349,7 +348,6 @@ process_vm_sarif() {
            --arg scan_mode "$scan_mode" \
            --arg source_image "$representative_image" \
            --arg container_with_version "$container_with_version" \
-           --arg logical_image "$logical_image" \
            --argjson container_images "$containers_json" \
            '
            # Extract container details
@@ -389,7 +387,7 @@ process_vm_sarif() {
                  .message.text = ("[" + $vm_name + "/" + $container_with_version + "] " + .message.text)
                )) |
 
-               # Add container-specific properties with logical image info
+               # Add container-specific properties
                .properties = (.properties // {}) + {
                  vmName: $vm_name,
                  vmType: $vm_type,
@@ -397,7 +395,6 @@ process_vm_sarif() {
                  containerVersion: $container_version,
                  containerWithVersion: $container_with_version,
                  sourceImage: $source_image,
-                 logicalImage: $logical_image,
                  originalArtifactUri: $original_uri,
                  binaryName: $binary_name,
                  scanContext: ("runtime-deployment-" + $scan_mode),
@@ -408,7 +405,7 @@ process_vm_sarif() {
            ))
            ' "$merged_sarif_temp" > "${merged_sarif_temp}.processed"
 
-        # Merge this logical image's results into the consolidated file
+        # Merge this representative image's results into the consolidated file
         jq -s '
             .[0] as $consolidated |
             .[1] as $new_file |
@@ -424,7 +421,7 @@ process_vm_sarif() {
         rm -f "$merged_sarif_temp" "${merged_sarif_temp}.processed"
 
         processed_count=$((processed_count + 1))
-        echo "    ✓ Processed logical image: $logical_image"
+        echo "    ✓ Processed representative image: $representative_image"
         echo ""
     done
 
@@ -446,7 +443,7 @@ process_vm_sarif() {
        --arg scan_mode "$scan_mode" \
        --argjson container_images "$containers_json" \
        '
-       # Count vulnerabilities
+       # Count vulnerabilities from individual SARIF files
        ([.runs[0].results[]? | select(.level == "error" and (.message.text | contains("CRITICAL")))] | length) as $critical_count |
        ([.runs[0].results[]? | select(.level == "error" and (.message.text | contains("HIGH")))] | length) as $high_count |
        ([.runs[0].results[]? | select(.level == "warning")] | length) as $medium_count |
@@ -513,7 +510,7 @@ process_vm_sarif() {
     # Check if enhancement succeeded
     if [ -s "$consolidated_sarif" ] && jq empty "$consolidated_sarif" 2>/dev/null; then
 
-        # Count vulnerabilities for this VM
+        # Count vulnerabilities for this VM from the consolidated SARIF
         local vm_critical=$(jq '[.runs[0].results[]? | select(.level == "error" and (.message.text | contains("CRITICAL")))] | length' "$consolidated_sarif" 2>/dev/null || echo 0)
         local vm_high=$(jq '[.runs[0].results[]? | select(.level == "error" and (.message.text | contains("HIGH")))] | length' "$consolidated_sarif" 2>/dev/null || echo 0)
 
@@ -526,8 +523,8 @@ process_vm_sarif() {
         echo "  - SARIF files mapped: $mapped_count/$total_files"
         echo "  - Files processed: $processed_count (with vulnerabilities)"
         echo "  - Files skipped: $skipped_count (clean containers)"
-        echo "  - Critical vulnerabilities: $vm_critical"
-        echo "  - High vulnerabilities: $vm_high"
+        echo "  - Critical vulnerabilities (unique per VM): $vm_critical"
+        echo "  - High vulnerabilities (unique per VM): $vm_high"
         echo "  - Artifact paths: $vm_name/container:version/binary"
         echo ""
 
@@ -608,7 +605,7 @@ if [ ! -s "$final_sarif" ] || ! jq empty "$final_sarif" 2>/dev/null; then
     exit 1
 fi
 
-# Calculate deduplicated vulnerability counts
+# Calculate deduplicated vulnerability counts from final SARIF
 DEDUP_CRITICAL=$(jq '[.runs[0].tool.driver.rules[]? | select(.properties.tags | contains(["CRITICAL"]))] | length' "$final_sarif" 2>/dev/null || echo 0)
 DEDUP_HIGH=$(jq '[.runs[0].tool.driver.rules[]? | select(.properties.tags | contains(["HIGH"]))] | length' "$final_sarif" 2>/dev/null || echo 0)
 
