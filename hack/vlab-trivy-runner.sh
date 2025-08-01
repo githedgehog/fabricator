@@ -701,8 +701,10 @@ if [ "$SUCCESS" = true ]; then
                 echo ""
                 echo -e "${GREEN}=== Security Scan Summary ===${NC}"
                 echo "Total images scanned: $TOTAL_IMAGES_SCANNED"
-                echo "Unique Critical vulnerabilities: $DEDUP_CRITICAL"
-                echo "Unique High vulnerabilities: $DEDUP_HIGH"
+                echo "Unique Critical vulnerability rules: $DEDUP_CRITICAL"
+                echo "Unique High vulnerability rules: $DEDUP_HIGH"
+                echo "Critical vulnerability instances: $TOTAL_CRITICAL_VULNS"
+                echo "High vulnerability instances: $TOTAL_HIGH_VULNS"
                 echo "Total vulnerability instances: $((TOTAL_CRITICAL_VULNS + TOTAL_HIGH_VULNS))"
                 echo ""
                 echo -e "${GREEN}=== VM-Specific Breakdown ===${NC}"
@@ -719,16 +721,18 @@ if [ "$SUCCESS" = true ]; then
                     esac
 
                     echo "${vm_display_name} container images scanned: ${VM_IMAGES_SCANNED[$vm_name]}"
-                    echo "  - Critical vulnerabilities (unique per VM): ${VM_CRITICAL_VULNS[$vm_name]}"
-                    echo "  - High vulnerabilities (unique per VM): ${VM_HIGH_VULNS[$vm_name]}"
+                    echo "  - Critical vulnerability instances: ${VM_CRITICAL_VULNS[$vm_name]}"
+                    echo "  - High vulnerability instances: ${VM_HIGH_VULNS[$vm_name]}"
                 done
 
                 # GitHub Actions integration
                 if [ ! -z "$GITHUB_STEP_SUMMARY" ] && [ -f "$GITHUB_STEP_SUMMARY" ]; then
                     echo "## Security Scan Summary" >> "$GITHUB_STEP_SUMMARY"
                     echo "- **Total images scanned:** $TOTAL_IMAGES_SCANNED" >> "$GITHUB_STEP_SUMMARY"
-                    echo "- **Unique Critical vulnerabilities:** $DEDUP_CRITICAL" >> "$GITHUB_STEP_SUMMARY"
-                    echo "- **Unique High vulnerabilities:** $DEDUP_HIGH" >> "$GITHUB_STEP_SUMMARY"
+                    echo "- **Unique Critical vulnerability rules:** $DEDUP_CRITICAL" >> "$GITHUB_STEP_SUMMARY"
+                    echo "- **Unique High vulnerability rules:** $DEDUP_HIGH" >> "$GITHUB_STEP_SUMMARY"
+                    echo "- **Critical vulnerability instances:** $TOTAL_CRITICAL_VULNS" >> "$GITHUB_STEP_SUMMARY"
+                    echo "- **High vulnerability instances:** $TOTAL_HIGH_VULNS" >> "$GITHUB_STEP_SUMMARY"
                     echo "- **Total vulnerability instances:** $((TOTAL_CRITICAL_VULNS + TOTAL_HIGH_VULNS))" >> "$GITHUB_STEP_SUMMARY"
                     echo "" >> "$GITHUB_STEP_SUMMARY"
                     echo "### VM-Specific Breakdown" >> "$GITHUB_STEP_SUMMARY"
@@ -745,8 +749,8 @@ if [ "$SUCCESS" = true ]; then
                         esac
 
                         echo "- **${vm_display_name} container images scanned:** ${VM_IMAGES_SCANNED[$vm_name]}" >> "$GITHUB_STEP_SUMMARY"
-                        echo "  - Critical vulnerabilities (unique per VM): ${VM_CRITICAL_VULNS[$vm_name]}" >> "$GITHUB_STEP_SUMMARY"
-                        echo "  - High vulnerabilities (unique per VM): ${VM_HIGH_VULNS[$vm_name]}" >> "$GITHUB_STEP_SUMMARY"
+                        echo "  - Critical vulnerability instances: ${VM_CRITICAL_VULNS[$vm_name]}" >> "$GITHUB_STEP_SUMMARY"
+                        echo "  - High vulnerability instances: ${VM_HIGH_VULNS[$vm_name]}" >> "$GITHUB_STEP_SUMMARY"
                     done
 
                     echo "" >> "$GITHUB_STEP_SUMMARY"
