@@ -12,7 +12,7 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
 
-TRIVY_VERSION="0.63.0"  # Updated to latest version
+TRIVY_VERSION="0.65.0"
 HOST_DOWNLOAD_DIR="/tmp/trivy-airgapped-$(date +%s)"
 
 echo -e "${GREEN}Setting up Trivy for Airgapped Operation...${NC}"
@@ -203,7 +203,7 @@ scan_image_directly() {
         echo "✓ SARIF report saved"
     else
         echo "WARNING: SARIF vulnerability scan failed for $image"
-        echo "{\"$schema\":\"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json\",\"version\":\"2.1.0\",\"runs\":[{\"tool\":{\"driver\":{\"name\":\"Trivy\",\"informationUri\":\"https://github.com/aquasecurity/trivy\",\"rules\":[],\"version\":\"0.63.0\"}},\"results\":[]}]}" > "${output_base}_critical.sarif"
+        echo "{\"$schema\":\"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json\",\"version\":\"2.1.0\",\"runs\":[{\"tool\":{\"driver\":{\"name\":\"Trivy\",\"informationUri\":\"https://github.com/aquasecurity/trivy\",\"rules\":[],\"version\":\"0.65.0\"}},\"results\":[]}]}" > "${output_base}_critical.sarif"
     fi
 
     echo "Reports saved to:"
@@ -258,7 +258,7 @@ scan_image_tarball() {
         echo "✓ SARIF report saved"
     else
         echo "WARNING: SARIF vulnerability scan failed for $image"
-        echo "{\"$schema\":\"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json\",\"version\":\"2.1.0\",\"runs\":[{\"tool\":{\"driver\":{\"name\":\"Trivy\",\"informationUri\":\"https://github.com/aquasecurity/trivy\",\"rules\":[],\"version\":\"0.63.0\"}},\"results\":[]}]}" > "${output_base}_critical.sarif"
+        echo "{\"$schema\":\"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json\",\"version\":\"2.1.0\",\"runs\":[{\"tool\":{\"driver\":{\"name\":\"Trivy\",\"informationUri\":\"https://github.com/aquasecurity/trivy\",\"rules\":[],\"version\":\"0.65.0\"}},\"results\":[]}]}" > "${output_base}_critical.sarif"
     fi
 
     echo "Reports saved to:"
