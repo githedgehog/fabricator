@@ -78,7 +78,6 @@ CONTROL_VM="control-1"
 GATEWAY_VM="gateway-1"
 SWITCH_VMS=("leaf-01" "spine-01" "spine-02")
 VLAB_LOG="vlab.log"
-RAW_SARIF_DIR="raw-sarif-reports"
 RESULTS_DIR="trivy-reports"
 SCRIPT_PATH="${SCRIPT_PATH:-./hack/trivy-setup.sh}"
 AIRGAPPED_SCRIPT_PATH="${AIRGAPPED_SCRIPT_PATH:-./hack/trivy-setup-airgapped.sh}"
@@ -149,7 +148,6 @@ echo "Control script: $SCRIPT_PATH"
 echo "Gateway script: $AIRGAPPED_SCRIPT_PATH (airgapped mode)"
 echo "Switch script: $SONIC_AIRGAPPED_SCRIPT_PATH (sonic airgapped mode)"
 echo "Results: $RESULTS_DIR"
-echo "Raw SARIF: $RAW_SARIF_DIR"
 echo "Log: $VLAB_LOG"
 if [ "$SKIP_VLAB_LAUNCH" = false ]; then
     echo "Timeouts: VLAB=${VLAB_TIMEOUT}m"
@@ -399,7 +397,7 @@ fi
 
 echo -e "${GREEN}All enabled VMs setup complete${NC}"
 
-# Function to scan VM and collect raw SARIF files
+# Function to scan VM and collect scan results
 scan_vm() {
     local vm_name="$1"
     local vm_results_dir="$RESULTS_DIR/$vm_name"
@@ -462,39 +460,9 @@ scan_vm() {
     printf '%s\n' "${image_array[@]}"
     echo "==============================="
 
-    echo "Collecting raw SARIF files from VM..."
-    mkdir -p "$RAW_SARIF_DIR/$vm_name"
-
-    sarif_count=$($HHFAB_BIN vlab ssh -b -n "$vm_name" -- 'sudo find /var/lib/trivy/reports -name "*_critical.sarif" -type f | wc -l' 2>/dev/null || echo 0)
-    echo "Found $sarif_count SARIF files on $vm_name"
-
-    if [ "$sarif_count" -eq 0 ]; then
-        echo -e "${YELLOW}No SARIF files found on $vm_name${NC}"
-        return 1
-    fi
-
-    # Create and download SARIF archive
-    if $HHFAB_BIN vlab ssh -b -n "$vm_name" -- "cd /var/lib/trivy/reports && sudo find . -name '*_critical.sarif' -type f -exec sudo tar rf /tmp/sarif-files.tar {} \\; && sudo gzip /tmp/sarif-files.tar" 2>/dev/null; then
-        if $HHFAB_BIN vlab ssh -b -n "$vm_name" -- "cat /tmp/sarif-files.tar.gz" > "/tmp/sarif-files-${vm_name}.tar.gz"; then
-            if tar -xzf "/tmp/sarif-files-${vm_name}.tar.gz" -C "$RAW_SARIF_DIR/$vm_name" 2>/dev/null; then
-                echo "✓ Extracted raw SARIF files to $RAW_SARIF_DIR/$vm_name"
-                rm -f "/tmp/sarif-files-${vm_name}.tar.gz"
-            else
-                echo -e "${RED}Failed to extract SARIF files for $vm_name${NC}"
-                return 1
-            fi
-        else
-            echo -e "${RED}Failed to download SARIF archive from $vm_name${NC}"
-            return 1
-        fi
-    else
-        echo -e "${RED}Failed to create SARIF archive on $vm_name${NC}"
-        return 1
-    fi
-
-    # Collect regular scan results
+    # Collect scan results
     echo "Collecting scan results from $vm_name..."
-    if ! $HHFAB_BIN vlab ssh -b -n "$vm_name" -- 'sudo find /var/lib/trivy/reports -name "*.txt" -o -name "*.json" | head -1' >/dev/null 2>&1; then
+    if ! $HHFAB_BIN vlab ssh -b -n "$vm_name" -- 'sudo find /var/lib/trivy/reports -name "*.txt" -o -name "*.json" -o -name "*.sarif" | head -1' >/dev/null 2>&1; then
         echo -e "${YELLOW}No scan results found on $vm_name${NC}"
         return 1
     fi
@@ -514,14 +482,13 @@ scan_vm() {
     fi
 
     # Clean up remote temp files
-    $HHFAB_BIN vlab ssh -b -n "$vm_name" -- "sudo rm -f /tmp/sarif-files.tar.gz" || true
+    $HHFAB_BIN vlab ssh -b -n "$vm_name" -- "sudo rm -f /tmp/trivy-reports.tar.gz" || true
 
-    echo -e "${GREEN}Raw data collection for $vm_name completed${NC}"
+    echo -e "${GREEN}Scan data collection for $vm_name completed${NC}"
     return 0
 }
 
 mkdir -p "$RESULTS_DIR"
-mkdir -p "$RAW_SARIF_DIR"
 
 echo -e "${YELLOW}Starting security scans...${NC}"
 
@@ -616,17 +583,8 @@ if [ "$RUN_SWITCH" = true ]; then
             fi
 
             echo "Collecting results from $switch..."
-            mkdir -p "$RAW_SARIF_DIR/sonic-switches"
 
-            sarif_count=$($HHFAB_BIN vlab ssh -b -n "$switch" -- 'sudo find /var/lib/trivy/reports -name "*_critical.sarif" -type f | wc -l' 2>/dev/null || echo 0)
-            if [ "$sarif_count" -gt 0 ]; then
-                $HHFAB_BIN vlab ssh -b -n "$switch" -- "cd /var/lib/trivy/reports && sudo find . -name '*_critical.sarif' -type f -exec sudo tar rf /tmp/sarif-files.tar {} \\; && sudo gzip /tmp/sarif-files.tar" 2>/dev/null || true
-                $HHFAB_BIN vlab ssh -b -n "$switch" -- "cat /tmp/sarif-files.tar.gz" > "/tmp/sarif-files-${switch}.tar.gz" 2>/dev/null || true
-                tar -xzf "/tmp/sarif-files-${switch}.tar.gz" -C "$RAW_SARIF_DIR/sonic-switches" 2>/dev/null || true
-                rm -f "/tmp/sarif-files-${switch}.tar.gz"
-            fi
-
-            $HHFAB_BIN vlab ssh -b -n "$switch" -- 'sudo find /var/lib/trivy/reports -name "*.txt" -o -name "*.json" | head -1' >/dev/null 2>&1 && {
+            $HHFAB_BIN vlab ssh -b -n "$switch" -- 'sudo find /var/lib/trivy/reports -name "*.txt" -o -name "*.json" -o -name "*.sarif" | head -1' >/dev/null 2>&1 && {
                 $HHFAB_BIN vlab ssh -b -n "$switch" -- 'sudo tar czf /tmp/trivy-reports.tar.gz -C /var/lib/trivy/reports . 2>/dev/null' || true
                 $HHFAB_BIN vlab ssh -b -n "$switch" -- 'test -s /tmp/trivy-reports.tar.gz' && {
                     $HHFAB_BIN vlab ssh -b -n "$switch" -- 'cat /tmp/trivy-reports.tar.gz' > "$switch_results_dir/trivy-reports-${switch}.tar.gz"
@@ -635,7 +593,7 @@ if [ "$RUN_SWITCH" = true ]; then
             }
 
             # Clean up remote temp files
-            $HHFAB_BIN vlab ssh -b -n "$switch" -- "sudo rm -f /tmp/sarif-files.tar.gz /tmp/trivy-reports.tar.gz" || true
+            $HHFAB_BIN vlab ssh -b -n "$switch" -- "sudo rm -f /tmp/trivy-reports.tar.gz" || true
         done
 
         echo -e "${GREEN}Load-balanced scanning across switches completed${NC}"
@@ -646,7 +604,7 @@ else
 fi
 
 echo ""
-echo -e "${GREEN}=== Raw Data Collection Summary ===${NC}"
+echo -e "${GREEN}=== Scan Data Collection Summary ===${NC}"
 
 if [ "$RUN_CONTROL" = true ]; then
     if [ $CONTROL_RESULT -eq 0 ]; then
@@ -680,7 +638,7 @@ fi
 
 SUCCESS=true
 if [ "$ALLOW_PARTIAL_SUCCESS" = "true" ]; then
-    if [ ! -d "$RAW_SARIF_DIR" ] || [ -z "$(find "$RAW_SARIF_DIR" -name "*.sarif" -type f 2>/dev/null)" ]; then
+    if [ ! -d "$RESULTS_DIR" ] || [ -z "$(find "$RESULTS_DIR" -name "*.sarif" -type f 2>/dev/null)" ]; then
         SUCCESS=false
     fi
 else
@@ -696,7 +654,7 @@ else
 fi
 
 if [ "$SUCCESS" = true ]; then
-    echo -e "${GREEN}Raw data collection completed successfully${NC}"
+    echo -e "${GREEN}Scan data collection completed successfully${NC}"
 
     CONSOLIDATOR_SCRIPT="${BASH_SOURCE%/*}/sarif-consolidator.sh"
     if [ ! -f "$CONSOLIDATOR_SCRIPT" ]; then
@@ -705,7 +663,7 @@ if [ "$SUCCESS" = true ]; then
 
     if [ -f "$CONSOLIDATOR_SCRIPT" ]; then
         echo -e "${YELLOW}Processing and consolidating SARIF files...${NC}"
-        if "$CONSOLIDATOR_SCRIPT" "$RAW_SARIF_DIR" "$RESULTS_DIR"; then
+        if "$CONSOLIDATOR_SCRIPT" "$RESULTS_DIR"; then
             echo -e "${GREEN}SARIF processing completed successfully${NC}"
 
             if [ -f "sarif-reports/trivy-security-scan.sarif" ]; then
@@ -728,7 +686,7 @@ if [ "$SUCCESS" = true ]; then
                         TOTAL_IMAGES_SCANNED=$((TOTAL_IMAGES_SCANNED + vm_image_count))
                         VM_IMAGES_SCANNED["$vm_name"]=$vm_image_count
 
-                        # Extract VM-specific vulnerability counts from consolidated SARIF
+                        # Extract VM-specific vulnerability counts from individual consolidated SARIF
                         vm_sarif="sarif-reports/trivy-consolidated-${vm_name}.sarif"
                         if [ -f "$vm_sarif" ]; then
                             VM_CRITICAL_VULNS["$vm_name"]=$(jq '[.runs[0].results[]? | select(.level == "error" and (.message.text | contains("CRITICAL")))] | length' "$vm_sarif" 2>/dev/null || echo 0)
@@ -761,8 +719,8 @@ if [ "$SUCCESS" = true ]; then
                     esac
 
                     echo "${vm_display_name} container images scanned: ${VM_IMAGES_SCANNED[$vm_name]}"
-                    echo "  - Critical vulnerabilities: ${VM_CRITICAL_VULNS[$vm_name]}"
-                    echo "  - High vulnerabilities: ${VM_HIGH_VULNS[$vm_name]}"
+                    echo "  - Critical vulnerabilities (unique per VM): ${VM_CRITICAL_VULNS[$vm_name]}"
+                    echo "  - High vulnerabilities (unique per VM): ${VM_HIGH_VULNS[$vm_name]}"
                 done
 
                 # GitHub Actions integration
@@ -787,8 +745,8 @@ if [ "$SUCCESS" = true ]; then
                         esac
 
                         echo "- **${vm_display_name} container images scanned:** ${VM_IMAGES_SCANNED[$vm_name]}" >> "$GITHUB_STEP_SUMMARY"
-                        echo "  - Critical vulnerabilities: ${VM_CRITICAL_VULNS[$vm_name]}" >> "$GITHUB_STEP_SUMMARY"
-                        echo "  - High vulnerabilities: ${VM_HIGH_VULNS[$vm_name]}" >> "$GITHUB_STEP_SUMMARY"
+                        echo "  - Critical vulnerabilities (unique per VM): ${VM_CRITICAL_VULNS[$vm_name]}" >> "$GITHUB_STEP_SUMMARY"
+                        echo "  - High vulnerabilities (unique per VM): ${VM_HIGH_VULNS[$vm_name]}" >> "$GITHUB_STEP_SUMMARY"
                     done
 
                     echo "" >> "$GITHUB_STEP_SUMMARY"
@@ -823,6 +781,6 @@ if [ "$SUCCESS" = true ]; then
     fi
     exit 0
 else
-    echo -e "${RED}Raw data collection failed${NC}"
+    echo -e "${RED}Scan data collection failed${NC}"
     exit 1
 fi

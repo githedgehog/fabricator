@@ -115,7 +115,6 @@ jobs:
           path: |
             trivy-reports/
             sarif-reports/
-            raw-sarif-reports/
             vlab.log
           retention-days: 30
 
