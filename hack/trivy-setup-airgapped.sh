@@ -4,20 +4,15 @@
 
 # Trivy airgapped installation script for gateway VM
 # Downloads on HOST, transfers to gateway VM for offline operation
-#
-# UPDATED: Uses hybrid approach - direct scanning for private registry images and export method for public images
-# This approach works reliably in airgapped K3s environments for all types of images
 
 set -e
 
-# Define colors for better readability
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
 
-# Configuration
-TRIVY_VERSION="0.63.0"  # Updated to latest version
+TRIVY_VERSION="0.65.0"
 HOST_DOWNLOAD_DIR="/tmp/trivy-airgapped-$(date +%s)"
 
 echo -e "${GREEN}Setting up Trivy for Airgapped Operation...${NC}"
@@ -138,8 +133,8 @@ AUTH_CONFIGURED=false
 if [ -f /etc/rancher/k3s/registries.yaml ]; then
     echo "Found K3s registry configuration, extracting credentials..."
 
-    USERNAME=$(grep -A5 "$REGISTRY" /etc/rancher/k3s/registries.yaml | grep "username" | head -1 | sed 's/.*username: *//' | tr -d '"' || echo "")
-    PASSWORD=$(grep -A5 "$REGISTRY" /etc/rancher/k3s/registries.yaml | grep "password" | head -1 | sed 's/.*password: *//' | tr -d '"' || echo "")
+    USERNAME=$(sudo grep -A5 "$REGISTRY" /etc/rancher/k3s/registries.yaml | grep "username" | head -1 | sed 's/.*username: *//' | tr -d '"' || echo "")
+    PASSWORD=$(sudo grep -A5 "$REGISTRY" /etc/rancher/k3s/registries.yaml | grep "password" | head -1 | sed 's/.*password: *//' | tr -d '"' || echo "")
 
     if [ ! -z "$USERNAME" ] && [ ! -z "$PASSWORD" ]; then
         echo "Successfully extracted registry credentials"
@@ -208,7 +203,7 @@ scan_image_directly() {
         echo "✓ SARIF report saved"
     else
         echo "WARNING: SARIF vulnerability scan failed for $image"
-        echo "{\"$schema\":\"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json\",\"version\":\"2.1.0\",\"runs\":[{\"tool\":{\"driver\":{\"name\":\"Trivy\",\"informationUri\":\"https://github.com/aquasecurity/trivy\",\"rules\":[],\"version\":\"0.63.0\"}},\"results\":[]}]}" > "${output_base}_critical.sarif"
+        echo "{\"$schema\":\"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json\",\"version\":\"2.1.0\",\"runs\":[{\"tool\":{\"driver\":{\"name\":\"Trivy\",\"informationUri\":\"https://github.com/aquasecurity/trivy\",\"rules\":[],\"version\":\"0.65.0\"}},\"results\":[]}]}" > "${output_base}_critical.sarif"
     fi
 
     echo "Reports saved to:"
@@ -263,7 +258,7 @@ scan_image_tarball() {
         echo "✓ SARIF report saved"
     else
         echo "WARNING: SARIF vulnerability scan failed for $image"
-        echo "{\"$schema\":\"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json\",\"version\":\"2.1.0\",\"runs\":[{\"tool\":{\"driver\":{\"name\":\"Trivy\",\"informationUri\":\"https://github.com/aquasecurity/trivy\",\"rules\":[],\"version\":\"0.63.0\"}},\"results\":[]}]}" > "${output_base}_critical.sarif"
+        echo "{\"$schema\":\"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json\",\"version\":\"2.1.0\",\"runs\":[{\"tool\":{\"driver\":{\"name\":\"Trivy\",\"informationUri\":\"https://github.com/aquasecurity/trivy\",\"rules\":[],\"version\":\"0.65.0\"}},\"results\":[]}]}" > "${output_base}_critical.sarif"
     fi
 
     echo "Reports saved to:"
@@ -445,8 +440,8 @@ REGISTRY="172.30.0.1:31000"
 if [ -f /etc/rancher/k3s/registries.yaml ]; then
     echo "Found K3s registry configuration, attempting to extract credentials..."
 
-    USERNAME=$(grep -A5 "$REGISTRY" /etc/rancher/k3s/registries.yaml | grep "username" | head -1 | sed "s/.*username: *//" | tr -d "\"" || echo "")
-    PASSWORD=$(grep -A5 "$REGISTRY" /etc/rancher/k3s/registries.yaml | grep "password" | head -1 | sed "s/.*password: *//" | tr -d "\"" || echo "")
+    USERNAME=$(sudo grep -A5 "$REGISTRY" /etc/rancher/k3s/registries.yaml | grep "username" | head -1 | sed "s/.*username: *//" | tr -d "\"" || echo "")
+    PASSWORD=$(sudo grep -A5 "$REGISTRY" /etc/rancher/k3s/registries.yaml | grep "password" | head -1 | sed "s/.*password: *//" | tr -d "\"" || echo "")
 
     if [ ! -z "$USERNAME" ] && [ ! -z "$PASSWORD" ]; then
         echo "Successfully extracted registry credentials"
