@@ -120,6 +120,84 @@ docker save <image> | trivy image --input /dev/stdin --format sarif
 
 SONiC switches scans are load balanced across available VMs to prevent SSH session timeouts during long scans. Images are distributed across available switches for parallel processing, reducing individual session times from 45+ minutes to ~15 minutes per switch.
 
+## SARIF Adaptation for Container Security
+
+### Traditional SARIF vs. Container SARIF
+
+**Standard SARIF Usage** (source code analysis):
+```json
+{
+  "artifactLocation": { "uri": "src/main.cpp" },
+  "message": "Buffer overflow vulnerability",
+  "ruleId": "CWE-119"
+}
+```
+
+**Our Container SARIF Usage** (runtime vulnerability analysis):
+```json
+{
+  "artifactLocation": { "uri": "control-1/zot:v2.1.1/libssl.so.3" },
+  "message": "[control-1/zot:v2.1.1] Critical vulnerability in libssl",
+  "properties": {
+    "vmName": "control-1",
+    "containerWithVersion": "zot:v2.1.1",
+    "binaryName": "libssl.so.3",
+    "scanContext": "runtime-deployment-online"
+  }
+}
+```
+
+### Artifact Path Structure
+
+We transform container vulnerability locations into hierarchical SARIF artifact paths:
+
+| SARIF Component | Container Mapping | Example |
+|-----------------|-------------------|---------|
+| **URI Root** | VM name | `control-1/` |
+| **Directory** | Container with version | `zot:v2.1.1/` |
+| **File** | Vulnerable binary/library | `libssl.so.3` |
+
+**Complete artifact path**: `control-1/zot:v2.1.1/libssl.so.3`
+
+### VM Context Preservation
+
+Each vulnerability maintains deployment context through SARIF properties:
+
+```json
+{
+  "properties": {
+    "vmName": "control-1",
+    "vmType": "control",
+    "containerName": "zot",
+    "containerVersion": "v2.1.1",
+    "sourceImage": "172.30.0.1:31000/githedgehog/fabricator/zot:v2.1.1",
+    "scanContext": "runtime-deployment-online",
+    "artifactPath": "control-1/zot:v2.1.1"
+  }
+}
+```
+
+### Binary Context Extraction
+
+The system extracts meaningful binary names from various URI formats:
+
+| Original URI Format | Extracted Binary | Context |
+|---------------------|------------------|---------|
+| `/tmp/trivy-export-xyz.tar` | `{container-name}` | Airgapped tar scan |
+| `usr/bin/kubectl` | `kubectl` | System binary |
+| `/lib/x86_64-linux-gnu/libssl.so.3` | `libssl.so.3` | Shared library |
+| `simple-binary` | `simple-binary` | Direct binary name |
+
+### GitHub Security Integration Benefits
+
+This SARIF adaptation enables:
+
+1. **Hierarchical vulnerability browsing** - Navigate by VM → Container → Binary
+2. **Deployment context tracking** - See which VM/environment has which vulnerabilities
+3. **Centralized security dashboard** - All environments in one GitHub Security view
+4. **Automated alerting** - GitHub notifications for new vulnerabilities
+5. **Historical tracking** - Vulnerability trends across deployments
+
 ## Scan Outputs & Processing
 
 ### Output Formats
@@ -222,6 +300,25 @@ Group SARIF files by `imageID` (SHA256) within each VM:
 ghcr.io/githedgehog/fabricator/zot:v2.1.1           # imageID: sha256:b65f0e9f... (SAME)
 # Result: Single vulnerability report using first image as representative
 ```
+
+### Representative Image Selection
+
+The **representative image** is the canonical image name chosen to represent a group of SARIF files that scan the same logical container:
+
+**Deduplication Logic**:
+1. **For images with same imageID**: The **first image encountered** becomes the representative
+2. **For unique imageIDs**: Each image is its own representative
+
+```bash
+# Example deduplication process:
+imageID_to_representative["sha256:b65f0e9f..."] = "172.30.0.1:31000/githedgehog/fabricator/zot:v2.1.1"
+
+# All SARIF files with this imageID get mapped to the representative:
+sarif_to_image_map["file1.sarif"] = "172.30.0.1:31000/githedgehog/fabricator/zot:v2.1.1"
+sarif_to_image_map["file2.sarif"] = "172.30.0.1:31000/githedgehog/fabricator/zot:v2.1.1"
+```
+
+**Processing Result**: All SARIF files for the same `representative_image` get merged into a single vulnerability report, deduplicated by `ruleId + location`, and labeled with the representative image name in the final SARIF. This prevents duplicate vulnerabilities in GitHub Security while preserving source registry information.
 
 #### 5. VM Context Preservation
 Each vulnerability retains its deployment context:
@@ -361,7 +458,7 @@ workflow_dispatch:
 ls sarif-reports/
 cat sarif-reports/trivy-security-scan.sarif | jq '.runs[0].results | length'
 
-# Check specific VM vulnerabilitie
+# Check specific VM vulnerabilities
 cat sarif-reports/trivy-consolidated-control-1.sarif | \
   jq '.runs[0].results[] | select(.level=="error") | .message.text'
 ```
