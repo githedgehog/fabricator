@@ -1093,7 +1093,7 @@ func Run(ctx context.Context) error {
 								Name:    "wait-applied-for",
 								Aliases: []string{"wait", "w"},
 								Usage:   "wait for switches being applied for this duration in seconds (0 to only wait for ready)",
-								Value:   120,
+								Value:   15,
 							},
 							&cli.BoolFlag{
 								Name:  "strict",

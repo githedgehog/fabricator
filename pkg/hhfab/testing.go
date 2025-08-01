@@ -622,7 +622,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	}
 
 	if opts.WaitSwitchesReady {
-		if err := WaitReady(ctx, kube, WaitReadyOpts{AppliedFor: 1 * time.Minute, Timeout: 30 * time.Minute}); err != nil {
+		if err := WaitReady(ctx, kube, WaitReadyOpts{AppliedFor: 15 * time.Second, Timeout: 10 * time.Minute}); err != nil {
 			return fmt.Errorf("waiting for ready: %w", err)
 		}
 	}
@@ -697,7 +697,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		case <-time.After(15 * time.Second):
 		}
 
-		if err := WaitReady(ctx, kube, WaitReadyOpts{AppliedFor: 1 * time.Minute, Timeout: 30 * time.Minute}); err != nil {
+		if err := WaitReady(ctx, kube, WaitReadyOpts{AppliedFor: 15 * time.Second, Timeout: 10 * time.Minute}); err != nil {
 			return fmt.Errorf("waiting for ready: %w", err)
 		}
 	}
@@ -810,7 +810,7 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 	defer cacheCancel()
 
 	if opts.WaitSwitchesReady {
-		if err := WaitReady(ctx, kube, WaitReadyOpts{AppliedFor: 1 * time.Minute, Timeout: 30 * time.Minute}); err != nil {
+		if err := WaitReady(ctx, kube, WaitReadyOpts{AppliedFor: 15 * time.Second, Timeout: 10 * time.Minute}); err != nil {
 			return fmt.Errorf("waiting for ready: %w", err)
 		}
 	}
@@ -1253,7 +1253,7 @@ func DoSetupPeerings(ctx context.Context, kube client.Client, vpcPeerings map[st
 		case <-time.After(15 * time.Second):
 		}
 
-		if err := WaitReady(ctx, kube, WaitReadyOpts{AppliedFor: 1 * time.Minute, Timeout: 30 * time.Minute}); err != nil {
+		if err := WaitReady(ctx, kube, WaitReadyOpts{AppliedFor: 15 * time.Second, Timeout: 10 * time.Minute}); err != nil {
 			return fmt.Errorf("waiting for ready: %w", err)
 		}
 	}
@@ -1327,7 +1327,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 	}
 
 	if opts.WaitSwitchesReady {
-		if err := WaitReady(ctx, kube, WaitReadyOpts{AppliedFor: 1 * time.Minute, Timeout: 30 * time.Minute}); err != nil {
+		if err := WaitReady(ctx, kube, WaitReadyOpts{AppliedFor: 15 * time.Second, Timeout: 10 * time.Minute}); err != nil {
 			return fmt.Errorf("waiting for ready: %w", err)
 		}
 	}
