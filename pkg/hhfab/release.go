@@ -1107,24 +1107,65 @@ func (testCtx *VPCPeeringTestCtx) multiSubnetsIsolationTest(ctx context.Context)
 }
 
 // Test VPC peering with multiple subnets and with subnet filtering.
-// Assumes the scenario has 3 VPCs and at least 2 subnets in each VPC.
-// It creates peering between all VPCs, but restricts the peering to only one subnet
-// between 1-3 and 2-3. It then tests connectivity.
+// Assumes the scenario has at least 2 VPCs with at least 2 subnets each.
+// It creates peering between them, but restricts the peering to only
+// one subnet each. It then tests connectivity.
 func (testCtx *VPCPeeringTestCtx) multiSubnetsSubnetFilteringTest(ctx context.Context) (bool, []RevertFunc, error) {
-	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec, 3)
-	appendVpcPeeringSpec(vpcPeerings, 1, 2, "", []string{}, []string{})
-	appendVpcPeeringSpec(vpcPeerings, 1, 3, "", []string{}, []string{"subnet-01"})
-	appendVpcPeeringSpec(vpcPeerings, 2, 3, "", []string{}, []string{"subnet-02"})
+	vpcList := &vpcapi.VPCList{}
+	if err := testCtx.kube.List(ctx, vpcList); err != nil {
+		return false, nil, fmt.Errorf("listing VPCs: %w", err)
+	}
+	if len(vpcList.Items) < 2 {
+		return true, nil, errors.New("not enough VPCs found for multi-subnet filtering test") //nolint:goerr113
+	}
+	var vpc1, vpc2 *vpcapi.VPC
+	for _, vpc := range vpcList.Items {
+		if len(vpc.Spec.Subnets) < 2 {
+			continue
+		}
+		if vpc1 == nil {
+			vpc1 = &vpc
+		} else {
+			vpc2 = &vpc
+
+			break
+		}
+	}
+	if vpc1 == nil || vpc2 == nil {
+		return true, nil, errors.New("not enough VPCs with at least 2 subnets found") //nolint:goerr113
+	}
+	var sub1, sub2 string
+	for subName := range vpc1.Spec.Subnets {
+		sub1 = subName
+
+		break
+	}
+	for subName := range vpc2.Spec.Subnets {
+		sub2 = subName
+
+		break
+	}
+	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec, 1)
+	appendVpcPeeringSpecByName(vpcPeerings, vpc1.Name, vpc2.Name, "", []string{sub1}, []string{sub2})
+
 	externalPeerings := make(map[string]*vpcapi.ExternalPeeringSpec, 0)
 	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, nil, true); err != nil {
 		return false, nil, fmt.Errorf("setting up peerings: %w", err)
 	}
+	reverts := make([]RevertFunc, 0)
+	reverts = append(reverts, func(ctx context.Context) error {
+		if err := DoSetupPeerings(ctx, testCtx.kube, nil, nil, nil, true); err != nil {
+			return fmt.Errorf("removing VPC peerings: %w", err)
+		}
+
+		return nil
+	})
 
 	if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
-		return false, nil, fmt.Errorf("testing connectivity: %w", err)
+		return false, reverts, fmt.Errorf("testing connectivity: %w", err)
 	}
 
-	return false, nil, nil
+	return false, reverts, nil
 }
 
 // Test VPC peering with multiple subnets and with restrictions.
