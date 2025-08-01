@@ -100,9 +100,7 @@ func (testCtx *VPCPeeringTestCtx) setupTest(ctx context.Context) error {
 }
 
 // add a single VPC peering spec to an existing map, which will be the input for DoSetupPeerings
-func appendVpcPeeringSpec(vpcPeerings map[string]*vpcapi.VPCPeeringSpec, index1, index2 int, remote string, vpc1Subnets, vpc2Subnets []string) {
-	vpc1 := fmt.Sprintf("vpc-%02d", index1)
-	vpc2 := fmt.Sprintf("vpc-%02d", index2)
+func appendVpcPeeringSpecByName(vpcPeerings map[string]*vpcapi.VPCPeeringSpec, vpc1, vpc2, remote string, vpc1Subnets, vpc2Subnets []string) {
 	entryName := fmt.Sprintf("%s--%s", vpc1, vpc2)
 	vpc1SP := vpcapi.VPCPeer{}
 	vpc1SP.Subnets = vpc1Subnets
@@ -119,10 +117,15 @@ func appendVpcPeeringSpec(vpcPeerings map[string]*vpcapi.VPCPeeringSpec, index1,
 	}
 }
 
+func appendVpcPeeringSpec(vpcPeerings map[string]*vpcapi.VPCPeeringSpec, index1, index2 int, remote string, vpc1Subnets, vpc2Subnets []string) {
+	vpc1 := fmt.Sprintf("vpc-%02d", index1)
+	vpc2 := fmt.Sprintf("vpc-%02d", index2)
+	appendVpcPeeringSpecByName(vpcPeerings, vpc1, vpc2, remote, vpc1Subnets, vpc2Subnets)
+}
+
 // add a single external peering spec to an existing map, which will be the input for DoSetupPeerings
-func appendExtPeeringSpec(extPeerings map[string]*vpcapi.ExternalPeeringSpec, vpcIndex int, ext string, subnets []string, prefixes []string) {
-	entryName := fmt.Sprintf("vpc-%02d--%s", vpcIndex, ext)
-	vpc := fmt.Sprintf("vpc-%02d", vpcIndex)
+func appendExtPeeringSpecByName(extPeerings map[string]*vpcapi.ExternalPeeringSpec, vpc, ext string, subnets []string, prefixes []string) {
+	entryName := fmt.Sprintf("%s--%s", vpc, ext)
 	prefixesSpec := make([]vpcapi.ExternalPeeringSpecPrefix, len(prefixes))
 	for i, prefix := range prefixes {
 		prefixesSpec[i] = vpcapi.ExternalPeeringSpecPrefix{
@@ -141,6 +144,11 @@ func appendExtPeeringSpec(extPeerings map[string]*vpcapi.ExternalPeeringSpec, vp
 			},
 		},
 	}
+}
+
+func appendExtPeeringSpec(extPeerings map[string]*vpcapi.ExternalPeeringSpec, vpcIndex int, ext string, subnets []string, prefixes []string) {
+	vpc := fmt.Sprintf("vpc-%02d", vpcIndex)
+	appendExtPeeringSpecByName(extPeerings, vpc, ext, subnets, prefixes)
 }
 
 // populate the vpcPeerings map with all possible VPC peering combinations
@@ -960,112 +968,137 @@ func (testCtx *VPCPeeringTestCtx) noRestrictionsTest(ctx context.Context) (bool,
 }
 
 // Test VPC peering with multiple subnets and with restrictions.
-// Assumes the scenario has 3 subnets for VPC vpc-01 and vpc-02.
-// 1. Isolate subnet-01 in vpc-01, test connectivity
+// Assumes the scenario has at least 2 VPCs with 2 subnets each.
+// 0. Configure peering between the VPCs
+// 1. Isolate subnet-01 in vpc1, test connectivity
 // 2. Override isolation with explicit permit list, test connectivity
-// 3. Set restricted flag in subnet-02 in vpc-02, test connectivity
-// 4. Remove all restrictions
+// 3. Set restricted flag in subnet-02 in vpc2, test connectivity
+// 4. Remove all restrictions and peerings
 func (testCtx *VPCPeeringTestCtx) multiSubnetsIsolationTest(ctx context.Context) (bool, []RevertFunc, error) {
 	var returnErr error
+	var vpc1, vpc2 *vpcapi.VPC
 
-	// modify vpc-01 to have isolated subnets
-	vpc := &vpcapi.VPC{}
-	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: "vpc-01"}, vpc); err != nil {
-		return false, nil, fmt.Errorf("getting VPC vpc-01: %w", err)
+	vpcs := &vpcapi.VPCList{}
+	if err := testCtx.kube.List(ctx, vpcs); err != nil {
+		return false, nil, fmt.Errorf("listing VPCs: %w", err)
 	}
-	if len(vpc.Spec.Subnets) != 3 {
-		return false, nil, fmt.Errorf("VPC vpc-01 has %d subnets, expected 3", len(vpc.Spec.Subnets)) //nolint:goerr113
+	if len(vpcs.Items) < 2 {
+		return true, nil, errors.New("not enough VPCs found for multi-subnet isolation test") //nolint:goerr113
 	}
-
-	// this is going to be used later, let's get it out of the way
-	vpc2 := &vpcapi.VPC{}
-	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: "vpc-02"}, vpc2); err != nil {
-		return false, nil, fmt.Errorf("getting VPC vpc-02: %w", err)
-	}
-	if len(vpc2.Spec.Subnets) != 3 {
-		return false, nil, fmt.Errorf("VPC vpc-02 has %d subnets, expected 3", len(vpc2.Spec.Subnets)) //nolint:goerr113
-	}
-	subnet2, ok := vpc2.Spec.Subnets["subnet-02"]
-	if !ok {
-		return false, nil, fmt.Errorf("subnet subnet-02 not found in VPC vpc-02") //nolint:goerr113
-	}
-
-	permitList := make([]string, 0)
-	for subName, sub := range vpc.Spec.Subnets {
-		if subName == "subnet-01" {
-			slog.Debug("Isolating subnet subnet-01")
-			sub.Isolated = pointer.To(true)
+	// check that we have at least 2 VPCs with at least 2 subnets each
+	for _, vpc := range vpcs.Items {
+		if len(vpc.Spec.Subnets) < 2 {
+			continue
 		}
-		permitList = append(permitList, subName)
+		if vpc1 == nil {
+			vpc1 = &vpc
+		} else {
+			vpc2 = &vpc
+
+			break
+		}
 	}
-	_, err := CreateOrUpdateVpc(ctx, testCtx.kube, vpc)
-	if err != nil {
-		return false, nil, fmt.Errorf("updating VPC vpc-01: %w", err)
+	if vpc1 == nil || vpc2 == nil {
+		return true, nil, errors.New("not enough VPCs with at least 2 subnets found") //nolint:goerr113
+	}
+
+	// peer the VPCs
+	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec, 1)
+	appendVpcPeeringSpecByName(vpcPeerings, vpc1.Name, vpc2.Name, "", []string{}, []string{})
+	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, nil, nil, false); err != nil {
+		return false, nil, fmt.Errorf("setting up VPC peerings: %w", err)
 	}
 	reverts := make([]RevertFunc, 0)
 	reverts = append(reverts, func(ctx context.Context) error {
+		if err := DoSetupPeerings(ctx, testCtx.kube, nil, nil, nil, true); err != nil {
+			return fmt.Errorf("removing VPC peerings: %w", err)
+		}
+
+		return nil
+	})
+
+	// modify vpc1 to have one isolated subnet
+	permitList := make([]string, 0)
+	isolated := false
+	for subName, sub := range vpc1.Spec.Subnets {
+		if !isolated {
+			slog.Debug("Isolating subnet in vpc1", "vpc1", vpc1.Name, "subnet", subName)
+			sub.Isolated = pointer.To(true)
+			isolated = true
+		}
+		permitList = append(permitList, subName)
+	}
+	_, err := CreateOrUpdateVpc(ctx, testCtx.kube, vpc1)
+	if err != nil {
+		return false, nil, fmt.Errorf("updating VPC %s: %w", vpc1.Name, err)
+	}
+	reverts = append(reverts, func(ctx context.Context) error {
 		slog.Debug("Removing all restrictions")
-		vpc.Spec.Permit = make([][]string, 0)
-		for _, sub := range vpc.Spec.Subnets {
+		vpc1.Spec.Permit = make([][]string, 0)
+		for _, sub := range vpc1.Spec.Subnets {
 			sub.Isolated = pointer.To(false)
 		}
 		for _, sub := range vpc2.Spec.Subnets {
 			sub.Restricted = pointer.To(false)
 		}
-		_, err1 := CreateOrUpdateVpc(ctx, testCtx.kube, vpc)
+		_, err1 := CreateOrUpdateVpc(ctx, testCtx.kube, vpc1)
 		_, err2 := CreateOrUpdateVpc(ctx, testCtx.kube, vpc2)
 		if err1 != nil || err2 != nil {
 			return errors.Join(err1, err2)
 		}
-		time.Sleep(5 * time.Second)
-		if err := WaitReady(ctx, testCtx.kube, WaitReadyOpts{AppliedFor: waitAppliedFor, Timeout: waitTimeout}); err != nil {
-			return fmt.Errorf("waiting for ready: %w", err)
-		}
+		// do not wait as we are reverting the peering next anyway
 
 		return nil
 	})
 
 	// TODO: agent generation check to ensure that the change was picked up
 	// (tricky as we need to derive switch name from vpc, which involves quite a few steps)
-	time.Sleep(5 * time.Second)
+	waitTime := 5 * time.Second
+	time.Sleep(waitTime)
+	tcOpts := testCtx.tcOpts
+	tcOpts.WaitSwitchesReady = true
 	if err := WaitReady(ctx, testCtx.kube, WaitReadyOpts{AppliedFor: waitAppliedFor, Timeout: waitTimeout}); err != nil {
 		returnErr = fmt.Errorf("waiting for ready: %w", err)
-	} else if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
-		returnErr = fmt.Errorf("testing connectivity with isolated subnet-01: %w", err)
+	} else if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, tcOpts); err != nil {
+		returnErr = fmt.Errorf("testing connectivity with isolated subnet: %w", err)
 	}
 
 	// override isolation with explicit permit list
 	if returnErr == nil {
-		vpc.Spec.Permit = make([][]string, 1)
-		vpc.Spec.Permit[0] = make([]string, 3)
-		copy(vpc.Spec.Permit[0], permitList)
+		vpc1.Spec.Permit = make([][]string, 1)
+		vpc1.Spec.Permit[0] = make([]string, len(permitList))
+		copy(vpc1.Spec.Permit[0], permitList)
 		slog.Debug("Permitting subnets", "subnets", permitList)
-		_, err = CreateOrUpdateVpc(ctx, testCtx.kube, vpc)
+		_, err = CreateOrUpdateVpc(ctx, testCtx.kube, vpc1)
 		if err != nil {
-			returnErr = fmt.Errorf("updating VPC vpc-01: %w", err)
+			returnErr = fmt.Errorf("updating VPC %s: %w", vpc1.Name, err)
 		} else {
-			time.Sleep(5 * time.Second)
+			time.Sleep(waitTime)
 			if err := WaitReady(ctx, testCtx.kube, WaitReadyOpts{AppliedFor: waitAppliedFor, Timeout: waitTimeout}); err != nil {
 				returnErr = fmt.Errorf("waiting for ready: %w", err)
-			} else if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
+			} else if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, tcOpts); err != nil {
 				returnErr = fmt.Errorf("testing connectivity with permit-list override: %w", err)
 			}
 		}
 	}
 
-	// set restricted flags in vpc-02
+	// set restricted flag in a single subnet of vpc2
 	if returnErr == nil {
-		slog.Debug("Restricting subnet 'subnet-02'")
-		subnet2.Restricted = pointer.To(true)
+		for subName, sub := range vpc2.Spec.Subnets {
+			slog.Debug("Restricting subnet in vpc2", "vpc2", vpc2.Name, "subnet", subName)
+			sub.Restricted = pointer.To(true)
+
+			break // only restrict one subnet
+		}
 		_, err = CreateOrUpdateVpc(ctx, testCtx.kube, vpc2)
 		if err != nil {
-			returnErr = fmt.Errorf("updating VPC vpc-02: %w", err)
+			returnErr = fmt.Errorf("updating VPC %s: %w", vpc2.Name, err)
 		} else {
-			time.Sleep(5 * time.Second)
+			time.Sleep(waitTime)
 			if err := WaitReady(ctx, testCtx.kube, WaitReadyOpts{AppliedFor: waitAppliedFor, Timeout: waitTimeout}); err != nil {
 				returnErr = fmt.Errorf("waiting for ready: %w", err)
-			} else if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
-				returnErr = fmt.Errorf("testing connectivity with restricted subnet-02: %w", err)
+			} else if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, tcOpts); err != nil {
+				returnErr = fmt.Errorf("testing connectivity with restricted subnet: %w", err)
 			}
 		}
 	}
