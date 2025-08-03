@@ -13,6 +13,30 @@ RED='\033[0;31m'
 NC='\033[0m' # No Color
 
 TRIVY_DIR="/var/lib/trivy"
+SHOW_USAGE=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --show-usage)
+            SHOW_USAGE=true
+            shift
+            ;;
+        --help|-h)
+            echo "Usage: $0 [OPTIONS]"
+            echo ""
+            echo "Options:"
+            echo "  --show-usage       Show usage instructions after installation"
+            echo "  --help, -h         Show this help message"
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Use --help for usage information"
+            exit 1
+            ;;
+    esac
+done
+
 sudo mkdir -p $TRIVY_DIR
 sudo mkdir -p $TRIVY_DIR/.docker
 sudo mkdir -p $TRIVY_DIR/reports
@@ -114,7 +138,8 @@ CONTAINERD_ADDRESS="/run/k3s/containerd/containerd.sock"
 mkdir -p ${REPORTS_DIR}
 
 echo "Cleaning up old scan reports..."
-sudo find ${REPORTS_DIR} -type f -name "*.txt" -o -name "*.json" -o -name "*.sarif" | xargs rm -f 2>/dev/null || true
+sudo rm -rf ${REPORTS_DIR}/* 2>/dev/null || true
+sudo mkdir -p ${REPORTS_DIR}
 echo "Previous scan reports cleaned up"
 
 scan_image() {
@@ -224,9 +249,14 @@ echo -e "${GREEN}Setup complete!${NC}"
 echo -e "Trivy installed at: ${TRIVY_DIR}/trivy"
 echo -e "Scan script created at: ${TRIVY_DIR}/scan.sh"
 echo -e "Reports will be saved to: ${TRIVY_DIR}/reports/"
-echo -e ""
-echo -e "${YELLOW}To run a scan:${NC}"
-echo -e "  ${GREEN}sudo ${TRIVY_DIR}/scan.sh${NC} - Scan all images in K3s"
-echo -e "  ${GREEN}sudo ${TRIVY_DIR}/scan.sh [IMAGE]${NC} - Scan a specific image"
+
+# Show usage instructions only if requested
+if [ "$SHOW_USAGE" = true ]; then
+    echo -e ""
+    echo -e "${YELLOW}To run a scan:${NC}"
+    echo -e "  ${GREEN}sudo ${TRIVY_DIR}/scan.sh${NC} - Scan all images in K3s"
+    echo -e "  ${GREEN}sudo ${TRIVY_DIR}/scan.sh [IMAGE]${NC} - Scan a specific image"
+fi
+
 echo -e ""
 echo -e "${GREEN}Done!${NC}"
