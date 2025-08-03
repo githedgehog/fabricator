@@ -14,6 +14,29 @@ NC='\033[0m' # No Color
 
 TRIVY_VERSION="0.65.0"
 HOST_DOWNLOAD_DIR="/tmp/trivy-airgapped-$(date +%s)"
+SHOW_USAGE=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --show-usage)
+            SHOW_USAGE=true
+            shift
+            ;;
+        --help|-h)
+            echo "Usage: $0 [OPTIONS]"
+            echo ""
+            echo "Options:"
+            echo "  --show-usage       Show usage instructions after installation"
+            echo "  --help, -h         Show this help message"
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Use --help for usage information"
+            exit 1
+            ;;
+    esac
+done
 
 echo -e "${GREEN}Setting up Trivy for Airgapped Operation...${NC}"
 
@@ -114,8 +137,8 @@ mkdir -p ${TEMP_DIR}
 
 # Clean up old scan reports to prevent accumulation
 echo "Cleaning up old scan reports..."
-# Remove all previous scan reports to avoid accumulation
-sudo find ${REPORTS_DIR} -type f -name "*.txt" -o -name "*.json" -o -name "*.sarif" | xargs rm -f 2>/dev/null || true
+sudo rm -rf ${REPORTS_DIR}/* 2>/dev/null || true
+sudo mkdir -p ${REPORTS_DIR}
 echo "Previous scan reports cleaned up"
 
 # Cleanup function
@@ -506,21 +529,26 @@ rm -rf "$HOST_DOWNLOAD_DIR"
 echo -e "${GREEN}Airgapped Trivy setup complete!${NC}"
 echo -e "Gateway VM now has Trivy installed with cached vulnerability databases"
 echo -e "No internet connectivity required for scanning"
-echo
-echo -e "${YELLOW}Usage Instructions:${NC}"
-echo -e "1. Scan all images automatically:"
-echo -e "   sudo /var/lib/trivy/scan-airgapped.sh"
-echo
-echo -e "2. Scan a specific image:"
-echo -e "   sudo /var/lib/trivy/scan-airgapped.sh docker.io/rancher/mirrored-coredns-coredns:1.12.1"
-echo
-echo -e "3. Manual scan using direct method for private registry images:"
-echo -e "   sudo DOCKER_CONFIG=/var/lib/trivy/.docker /var/lib/trivy/trivy image --skip-db-update --cache-dir /var/lib/trivy/cache --insecure 172.30.0.1:31000/image:tag"
-echo
-echo -e "4. Manual scan using export method for public images:"
-echo -e "   sudo ctr -a /run/k3s/containerd/containerd.sock -n k8s.io image export image.tar <image:tag>"
-echo -e "   sudo /var/lib/trivy/trivy image --skip-db-update --cache-dir /var/lib/trivy/cache --input image.tar"
-echo
-echo -e "Reports will be saved to: /var/lib/trivy/reports/"
-echo -e "- *_critical.txt (Human readable HIGH/CRITICAL vulnerabilities)"
-echo -e "- *_all.json (Complete JSON data)"
+
+# Show usage instructions only if requested
+if [ "$SHOW_USAGE" = true ]; then
+    echo
+    echo -e "${YELLOW}Usage Instructions:${NC}"
+    echo -e "1. Scan all images automatically:"
+    echo -e "   sudo /var/lib/trivy/scan-airgapped.sh"
+    echo
+    echo -e "2. Scan a specific image:"
+    echo -e "   sudo /var/lib/trivy/scan-airgapped.sh docker.io/rancher/mirrored-coredns-coredns:1.12.1"
+    echo
+    echo -e "3. Manual scan using direct method for private registry images:"
+    echo -e "   sudo DOCKER_CONFIG=/var/lib/trivy/.docker /var/lib/trivy/trivy image --skip-db-update --cache-dir /var/lib/trivy/cache --insecure 172.30.0.1:31000/image:tag"
+    echo
+    echo -e "4. Manual scan using export method for public images:"
+    echo -e "   sudo ctr -a /run/k3s/containerd/containerd.sock -n k8s.io image export image.tar <image:tag>"
+    echo -e "   sudo /var/lib/trivy/trivy image --skip-db-update --cache-dir /var/lib/trivy/cache --input image.tar"
+    echo
+    echo -e "Reports will be saved to: /var/lib/trivy/reports/"
+    echo -e "- *_critical.txt (Human readable HIGH/CRITICAL vulnerabilities)"
+    echo -e "- *_all.json (Complete JSON data)"
+    echo -e "- *_critical.sarif (SARIF format for GitHub Security)"
+fi

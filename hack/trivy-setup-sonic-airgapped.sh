@@ -15,6 +15,7 @@ NC='\033[0m' # No Color
 TRIVY_VERSION="0.65.0"
 HOST_DOWNLOAD_DIR="/tmp/trivy-sonic-airgapped-$(date +%s)"
 LEAF_NODE="leaf-01"  # Default leaf node name
+SHOW_USAGE=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -22,12 +23,22 @@ while [[ $# -gt 0 ]]; do
             LEAF_NODE="$2"
             shift 2
             ;;
+        --show-usage)
+            SHOW_USAGE=true
+            shift
+            ;;
         --help|-h)
             echo "Usage: $0 [OPTIONS]"
             echo ""
             echo "Options:"
             echo "  --leaf-node NAME   Specify leaf node name (default: leaf-01)"
+            echo "  --show-usage       Show usage instructions after installation"
             echo "  --help, -h         Show this help message"
+            echo ""
+            echo "Examples:"
+            echo "  $0                              # Setup on leaf-01, no usage shown"
+            echo "  $0 --leaf-node spine-01         # Setup on spine-01"
+            echo "  $0 --show-usage                 # Setup and show usage instructions"
             exit 0
             ;;
         *)
@@ -114,7 +125,7 @@ fi
 
 echo -e "${GREEN}Download complete on host${NC}"
 
-# Step 3: Create scan script locally (based on working gateway script but for SONiC Docker)
+# Step 3: Create scan script locally
 echo -e "${YELLOW}Creating SONiC scan script...${NC}"
 cat > scan-sonic-airgapped.sh << 'SCANEOF'
 #!/bin/bash
@@ -132,10 +143,15 @@ TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
 # Ensure directories exist
 mkdir -p ${REPORTS_DIR}
 
-# Clean up old scan reports to prevent accumulation
-echo "Cleaning up old scan reports..."
-sudo find ${REPORTS_DIR} -type f -name "*.txt" -o -name "*.json" -o -name "*.sarif" | xargs rm -f 2>/dev/null || true
-echo "Previous scan reports cleaned up"
+# Clean up old scan reports ONLY when scanning all images (no specific image argument)
+if [ -z "$1" ]; then
+    echo "Cleaning up old scan reports..."
+    sudo rm -rf ${REPORTS_DIR}/* 2>/dev/null || true
+    sudo mkdir -p ${REPORTS_DIR}
+    echo "Previous scan reports cleaned up"
+else
+    echo "Individual image scan mode - preserving existing reports"
+fi
 
 # Function to scan a single image
 scan_image() {
@@ -378,16 +394,20 @@ cd "$ORIGINAL_DIR"
 rm -rf "$HOST_DOWNLOAD_DIR"
 
 echo -e "${GREEN}Trivy setup complete for SONiC switch $LEAF_NODE!${NC}"
-echo -e "Switch is ready for load-balanced scanning"
-echo
-echo -e "${YELLOW}Usage Instructions:${NC}"
-echo -e "1. Scan all running containers:"
-echo -e "   sudo /var/lib/trivy/scan-sonic-airgapped.sh"
-echo
-echo -e "2. Scan a specific image:"
-echo -e "   sudo /var/lib/trivy/scan-sonic-airgapped.sh image_name:tag"
-echo
-echo -e "Reports will be saved to: /var/lib/trivy/reports/"
-echo -e "- *_critical.txt (Human readable HIGH/CRITICAL vulnerabilities)"
-echo -e "- *_all.json (Complete JSON data)"
-echo -e "- *_critical.sarif (SARIF format for GitHub Security)"
+echo -e "Switch is ready for scanning"
+
+# Show usage instructions only if requested
+if [ "$SHOW_USAGE" = true ]; then
+    echo
+    echo -e "${YELLOW}Usage Instructions:${NC}"
+    echo -e "1. Scan all running containers:"
+    echo -e "   sudo /var/lib/trivy/scan-sonic-airgapped.sh"
+    echo
+    echo -e "2. Scan a specific image:"
+    echo -e "   sudo /var/lib/trivy/scan-sonic-airgapped.sh image_name:tag"
+    echo
+    echo -e "Reports will be saved to: /var/lib/trivy/reports/"
+    echo -e "- *_critical.txt (Human readable HIGH/CRITICAL vulnerabilities)"
+    echo -e "- *_all.json (Complete JSON data)"
+    echo -e "- *_critical.sarif (SARIF format for GitHub Security)"
+fi
