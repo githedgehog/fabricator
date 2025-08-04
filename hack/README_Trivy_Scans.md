@@ -57,14 +57,14 @@ For development and testing, you can run scans locally:
 
 #### **Basic Local Scan**:
 ```bash
-# Scan core infrastructure (recommended for development)
-./hack/vlab-trivy-runner.sh --control-only --gateway-only
+# Scan core infrastructure
+./hack/vlab-trivy-runner.sh [ --control-only --gateway-only ]
 
 # Scan everything (comprehensive security review)
 ./hack/vlab-trivy-runner.sh --all
 
 # Use existing VLAB (if already running)
-./hack/vlab-trivy-runner.sh --skip-vlab --control-only
+./hack/vlab-trivy-runner.sh --use-vlab path/to/vlab
 ```
 
 #### **Local Scan Workflow**:
@@ -74,8 +74,6 @@ For development and testing, you can run scans locally:
 4. Collects and consolidates results
 5. Generates GitHub-compatible SARIF reports
 6. Cleans up VLAB environment
-
-**Note**: Local scans take 15-30 minutes depending on scope and are primarily intended for development/debugging. Production security scanning should use the GitHub Actions workflow.
 
 ### Understanding the Output
 ```bash
@@ -695,35 +693,3 @@ workflow_dispatch:
         - 'gateway-only'
         - 'switch-only'
         - 'all'
-```
-
-## Getting Started
-
-### Run a Basic Scan
-```bash
-# Scan core infrastructure (recommended for development)
-./hack/vlab-trivy-runner.sh --control-only --gateway-only
-
-# Scan everything (CI/comprehensive security review
-./hack/vlab-trivy-runner.sh --all
-
-# Use existing VLAB (if already running)
-./hack/vlab-trivy-runner.sh --skip-vlab --control-only
-```
-
-### Understanding the Output
-```bash
-# View consolidated results
-ls sarif-reports/
-cat sarif-reports/trivy-security-scan.sarif | jq '.runs[0].results | length'
-
-# Check specific VM vulnerabilities
-cat sarif-reports/trivy-consolidated-control-1.sarif | \
-  jq '.runs[0].results[] | select(.level=="error") | .message.text'
-```
-
-### GitHub Integration
-The system automatically:
-1. **Uploads SARIF** to GitHub Security tab
-2. **Sets environment variables** for downstream jobs
-3. **Generates PR summaries** with vulnerability counts
