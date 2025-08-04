@@ -2481,7 +2481,7 @@ func doRunTests(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 				break
 			}
 		}
-		if err == nil && revertErr == nil {
+		if !skip && err == nil && revertErr == nil {
 			slog.Info("PASS", "test", test.Name)
 		}
 	}
