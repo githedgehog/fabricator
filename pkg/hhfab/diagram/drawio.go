@@ -143,6 +143,20 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 		serverY = leafY + 250
 	}
 
+	// Detect mesh triangle for special positioning
+	isMeshTriangle := detectMeshTriangle(layers.Leaf, topo.Links)
+	hasGateway := len(layers.Gateway) > 0
+	var meshTriangleUpperY int
+
+	// If we have both gateway and mesh triangle, move mesh triangle down a tier
+	if isMeshTriangle && hasGateway {
+		leafY = gatewayY + 400              // Move leaves down to make room for gateway
+		meshTriangleUpperY = gatewayY + 250 // Upper leaf positioned between gateway and lower leaves
+		serverY = leafY + 250               // Adjust server position accordingly
+	} else if isMeshTriangle {
+		meshTriangleUpperY = leafY - 150
+	}
+
 	cellMap := make(map[string]*MxCell)
 
 	canvasWidth := 600
@@ -279,6 +293,13 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 	for i, node := range layers.Leaf {
 		width, height := GetNodeDimensions(node)
 		x := leafStartX + float64(i)*(float64(width)+leafSpacing)
+
+		// For mesh triangle, put the second leaf (index 1) in upper tier
+		nodeY := float64(leafY)
+		if isMeshTriangle && i == 1 {
+			nodeY = float64(meshTriangleUpperY)
+		}
+
 		cell := MxCell{
 			ID:     node.ID,
 			Parent: "1",
@@ -287,7 +308,7 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 			Vertex: "1",
 			Geometry: &Geometry{
 				X:      x,
-				Y:      float64(leafY),
+				Y:      nodeY,
 				Width:  width,
 				Height: height,
 				As:     "geometry",
@@ -475,64 +496,77 @@ func createLegend(links []Link, style Style) []MxCell {
 			} else if mclagType == MCLAGTypeSession {
 				linkTypesMap[LegendKeyMCLAGSession] = true
 			}
-		} else if link.Type == EdgeTypeMCLAG {
-			// If it's an MCLAG link without a specific type, it's a server link
-			linkTypesMap[LegendKeyMCLAGServer] = true
-		} else if link.Type == EdgeTypeBundled {
-			linkTypesMap[LegendKeyBundled] = true
 		} else if _, ok := link.Properties[PropBundled]; ok {
 			linkTypesMap[LegendKeyBundled] = true
-		} else if link.Type == EdgeTypeESLAG {
-			linkTypesMap[LegendKeyESLAGServer] = true
 		} else if _, ok := link.Properties[PropESLAGServer]; ok {
 			linkTypesMap[LegendKeyESLAGServer] = true
-		} else if link.Type == EdgeTypeGateway {
-			linkTypesMap[LegendKeyGateway] = true
 		} else if _, ok := link.Properties[PropGateway]; ok {
 			linkTypesMap[LegendKeyGateway] = true
-		} else if link.Type == EdgeTypeExternal {
-			linkTypesMap[LegendKeyExternal] = true
 		} else {
-			// For other links, determine type based on node roles
-			sourceNodeFound := false
-			targetNodeFound := false
-			var sourceNode, targetNode Node
+			switch link.Type {
+			case EdgeTypeMCLAG:
+				// If it's an MCLAG link without a specific type, it's a server link
+				linkTypesMap[LegendKeyMCLAGServer] = true
+			case EdgeTypeBundled:
+				linkTypesMap[LegendKeyBundled] = true
+			case EdgeTypeESLAG:
+				linkTypesMap[LegendKeyESLAGServer] = true
+			case EdgeTypeGateway:
+				linkTypesMap[LegendKeyGateway] = true
+			case EdgeTypeExternal:
+				linkTypesMap[LegendKeyExternal] = true
+			case EdgeTypeMesh:
+				linkTypesMap[LegendKeyMesh] = true
+			case EdgeTypeFabric:
+				linkTypesMap[LegendKeyFabric] = true
+			default:
+				// For other links, determine type based on node roles
+				sourceNodeFound := false
+				targetNodeFound := false
+				var sourceNode, targetNode Node
 
-			// Find source node
-			for _, n := range nodes {
-				if n.ID == link.Source {
-					sourceNode = n
-					sourceNodeFound = true
+				// Find source node
+				for _, n := range nodes {
+					if n.ID == link.Source {
+						sourceNode = n
+						sourceNodeFound = true
 
-					break
-				}
-			}
-
-			// Find target node
-			for _, n := range nodes {
-				if n.ID == link.Target {
-					targetNode = n
-					targetNodeFound = true
-
-					break
-				}
-			}
-
-			// If both nodes found, determine link type
-			if sourceNodeFound && targetNodeFound {
-				sourceType, sourceRole := getNodeTypeInfo(sourceNode)
-				targetType, targetRole := getNodeTypeInfo(targetNode)
-
-				if sourceType == NodeTypeSwitch && targetType == NodeTypeSwitch {
-					if (sourceRole == SwitchRoleSpine && targetRole == SwitchRoleLeaf) ||
-						(sourceRole == SwitchRoleLeaf && targetRole == SwitchRoleSpine) {
-						linkTypesMap[LegendKeyFabric] = true
-					} else if sourceRole == SwitchRoleLeaf && targetRole == SwitchRoleLeaf {
-						linkTypesMap[LegendKeyFabric] = true
+						break
 					}
-				} else if (sourceType == NodeTypeSwitch && targetType == NodeTypeServer) ||
-					(sourceType == NodeTypeServer && targetType == NodeTypeSwitch) {
-					linkTypesMap[LegendKeyUnbundled] = true
+				}
+
+				// Find target node
+				for _, n := range nodes {
+					if n.ID == link.Target {
+						targetNode = n
+						targetNodeFound = true
+
+						break
+					}
+				}
+
+				// If both nodes found, determine link type
+				if sourceNodeFound && targetNodeFound {
+					sourceType, sourceRole := getNodeTypeInfo(sourceNode)
+					targetType, targetRole := getNodeTypeInfo(targetNode)
+
+					if sourceType == NodeTypeSwitch && targetType == NodeTypeSwitch {
+						if (sourceRole == SwitchRoleSpine && targetRole == SwitchRoleLeaf) ||
+							(sourceRole == SwitchRoleLeaf && targetRole == SwitchRoleSpine) {
+							linkTypesMap[LegendKeyFabric] = true
+						} else if sourceRole == SwitchRoleLeaf && targetRole == SwitchRoleLeaf {
+							// For leaf-to-leaf connections, check if it's mesh or fabric
+							if link.Type == EdgeTypeMesh {
+								linkTypesMap[LegendKeyMesh] = true
+							} else {
+								// Default leaf-to-leaf connections to fabric unless explicitly mesh
+								linkTypesMap[LegendKeyFabric] = true
+							}
+						}
+					} else if (sourceType == NodeTypeSwitch && targetType == NodeTypeServer) ||
+						(sourceType == NodeTypeServer && targetType == NodeTypeSwitch) {
+						linkTypesMap[LegendKeyUnbundled] = true
+					}
 				}
 			}
 		}
@@ -545,6 +579,7 @@ func createLegend(links []Link, style Style) []MxCell {
 		text     string
 	}{
 		{LegendKeyFabric, style.FabricLinkStyle, "Fabric Links"},
+		{LegendKeyMesh, style.MeshLinkStyle, "Mesh Links"},
 		{LegendKeyMCLAGPeer, style.MCLAGPeerStyle, "MCLAG Peer Links"},
 		{LegendKeyMCLAGSession, style.MCLAGSessionStyle, "MCLAG Session Links"},
 		{LegendKeyMCLAGServer, style.MCLAGServerStyle, "MCLAG Server Links"},
