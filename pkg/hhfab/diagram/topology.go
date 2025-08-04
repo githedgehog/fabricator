@@ -23,6 +23,61 @@ func extractPort(port string) string {
 	return port
 }
 
+func detectMeshTriangle(leaves []Node, links []Link) bool {
+	if len(leaves) != 3 {
+		return false
+	}
+
+	// Create a map of leaf IDs for quick lookup
+	leafIDs := make(map[string]bool)
+	for _, leaf := range leaves {
+		leafIDs[leaf.ID] = true
+	}
+
+	// Count mesh connections between leaves
+	meshConnections := make(map[string]map[string]bool)
+	for _, link := range links {
+		if link.Type != EdgeTypeMesh {
+			continue
+		}
+
+		// Check if both source and target are leaves
+		if leafIDs[link.Source] && leafIDs[link.Target] {
+			if meshConnections[link.Source] == nil {
+				meshConnections[link.Source] = make(map[string]bool)
+			}
+			if meshConnections[link.Target] == nil {
+				meshConnections[link.Target] = make(map[string]bool)
+			}
+			meshConnections[link.Source][link.Target] = true
+			meshConnections[link.Target][link.Source] = true
+		}
+	}
+
+	// Check if we have a triangle: each leaf should connect to exactly 2 others
+	for _, leaf := range leaves {
+		if len(meshConnections[leaf.ID]) != 2 {
+			return false
+		}
+	}
+
+	// Verify it's a complete triangle by checking total unique connections
+	totalConnections := 0
+	counted := make(map[string]bool)
+	for source, targets := range meshConnections {
+		for target := range targets {
+			connectionKey := source + "-" + target
+			reverseKey := target + "-" + source
+			if !counted[connectionKey] && !counted[reverseKey] {
+				counted[connectionKey] = true
+				totalConnections++
+			}
+		}
+	}
+
+	return totalConnections == 3
+}
+
 func findConnectionTypes(links []Link) map[string]*serverConnection {
 	serverConns := make(map[string]*serverConnection)
 
@@ -377,6 +432,8 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 		topo.Nodes = append(topo.Nodes, node)
 	}
 
+	// Gateway nodes will be extracted from gateway connections
+
 	nodes := &fabapi.FabNodeList{}
 	if err := client.List(ctx, nodes); err != nil {
 		return topo, fmt.Errorf("listing nodes: %w", err)
@@ -460,15 +517,44 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 		}
 	}
 
-	// Second pass: process all non-external connections
+	// Second pass: process all non-external connections and extract gateway nodes
 	for _, conn := range conns.Items {
 		_, _, _, links, err := conn.Spec.Endpoints()
 		if err != nil {
 			continue
 		}
 
+		// Extract gateway nodes from gateway connections
+		if conn.Spec.Gateway != nil {
+			for source, target := range links {
+				sourceNodeID := wiringapi.SplitPortName(source)[0]
+				targetNodeID := wiringapi.SplitPortName(target)[0]
+
+				// Determine which is the gateway (not a switch we already know about)
+				var gatewayNodeID string
+				if nodeSet[sourceNodeID] {
+					// Source is a known switch, target must be gateway
+					gatewayNodeID = targetNodeID
+				} else if nodeSet[targetNodeID] {
+					// Target is a known switch, source must be gateway
+					gatewayNodeID = sourceNodeID
+				}
+
+				// Add gateway node if not already added
+				if gatewayNodeID != "" && !nodeSet[gatewayNodeID] {
+					nodeSet[gatewayNodeID] = true
+					node := Node{
+						ID:    gatewayNodeID,
+						Type:  NodeTypeGateway,
+						Label: gatewayNodeID,
+					}
+					topo.Nodes = append(topo.Nodes, node)
+				}
+			}
+		}
+
 		// Handle standard (non-external) connections
-		if conn.Spec.Fabric != nil || conn.Spec.Gateway != nil || conn.Spec.MCLAGDomain != nil ||
+		if conn.Spec.Fabric != nil || conn.Spec.Mesh != nil || conn.Spec.Gateway != nil || conn.Spec.MCLAGDomain != nil ||
 			conn.Spec.Unbundled != nil || conn.Spec.MCLAG != nil || conn.Spec.Bundled != nil ||
 			conn.Spec.ESLAG != nil {
 			for source, target := range links {

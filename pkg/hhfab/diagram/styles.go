@@ -29,6 +29,7 @@ type Style struct {
 	GatewayNodeStyle   string
 	ExternalNodeStyle  string
 	FabricLinkStyle    string
+	MeshLinkStyle      string
 	MCLAGPeerStyle     string
 	MCLAGSessionStyle  string
 	MCLAGServerStyle   string
@@ -61,6 +62,7 @@ func getDefaultStyle() Style {
 		GatewayNodeStyle:   "shape=rectangle;rounded=1;whiteSpace=wrap;html=1;fontSize=11;fillColor=#fff2cc;strokeColor=#d6b656;",
 		ExternalNodeStyle:  "shape=rectangle;rounded=1;whiteSpace=wrap;html=1;fontSize=11;fillColor=#ffcc99;strokeColor=#d79b00;",
 		FabricLinkStyle:    "endArrow=none;html=1;strokeWidth=3;strokeColor=#b85450;",
+		MeshLinkStyle:      "endArrow=none;html=1;strokeWidth=3;strokeColor=#6c8ebf;",
 		MCLAGPeerStyle:     "endArrow=none;html=1;strokeWidth=2;strokeColor=#2f5597;dashed=1;",
 		MCLAGSessionStyle:  "endArrow=none;html=1;strokeWidth=2;strokeColor=#4472c4;dashed=1;",
 		MCLAGServerStyle:   "endArrow=none;html=1;strokeWidth=2;strokeColor=#9cc1f7;dashed=1;",
@@ -98,6 +100,7 @@ func getCiscoStyle() Style {
 			"align=center;verticalLabelPosition=middle;verticalAlign=middle;" +
 			"perimeter=ellipsePerimeter;",
 		FabricLinkStyle:    "endArrow=none;html=1;strokeWidth=3;strokeColor=#4F95D0;",
+		MeshLinkStyle:      "endArrow=none;html=1;strokeWidth=3;strokeColor=#0078D4;",
 		MCLAGPeerStyle:     "endArrow=none;html=1;strokeWidth=2;strokeColor=#2f5597;dashed=1;",
 		MCLAGSessionStyle:  "endArrow=none;html=1;strokeWidth=2;strokeColor=#4472c4;dashed=1;",
 		MCLAGServerStyle:   "endArrow=none;html=1;strokeWidth=2;strokeColor=#9cc1f7;dashed=1;",
@@ -135,6 +138,7 @@ func getHedgehogStyle() Style {
 			"align=center;verticalLabelPosition=middle;verticalAlign=middle;" +
 			"perimeter=ellipsePerimeter;",
 		FabricLinkStyle:    "endArrow=none;html=1;strokeWidth=3;strokeColor=#8D6E4F;",
+		MeshLinkStyle:      "endArrow=none;html=1;strokeWidth=3;strokeColor=#A1887F;",
 		MCLAGPeerStyle:     "endArrow=none;html=1;strokeWidth=2;strokeColor=#8D6E63;dashed=1;",
 		MCLAGSessionStyle:  "endArrow=none;html=1;strokeWidth=2;strokeColor=#A1887F;dashed=1;",
 		MCLAGServerStyle:   "endArrow=none;html=1;strokeWidth=2;strokeColor=#BCAAA4;dashed=1;",
@@ -179,6 +183,8 @@ func GetLinkStyleFromTheme(link Link, style Style) string {
 	switch link.Type {
 	case EdgeTypeFabric:
 		return ExtractStyleParameters(style.FabricLinkStyle)
+	case EdgeTypeMesh:
+		return ExtractStyleParameters(style.MeshLinkStyle)
 	case EdgeTypeMCLAG:
 		if mclagType, ok := link.Properties["mclagType"]; ok {
 			switch mclagType {

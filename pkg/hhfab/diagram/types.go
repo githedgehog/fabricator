@@ -37,6 +37,7 @@ type Topology struct {
 
 const (
 	EdgeTypeFabric     = wiringapi.ConnectionTypeFabric
+	EdgeTypeMesh       = wiringapi.ConnectionTypeMesh
 	EdgeTypeMCLAG      = wiringapi.ConnectionTypeMCLAG
 	EdgeTypeSpine      = "spine" // TODO
 	EdgeTypeBundled    = wiringapi.ConnectionTypeBundled
@@ -102,6 +103,7 @@ const (
 
 const (
 	LegendKeyFabric       = "fabric"
+	LegendKeyMesh         = "mesh"
 	LegendKeyMCLAGPeer    = "mclag_peer"
 	LegendKeyMCLAGSession = "mclag_session"
 	LegendKeyMCLAGServer  = "mclag_server"

@@ -182,6 +182,20 @@ func generateMermaid(topo Topology) string {
 			}
 		}
 
+		// CHANGE: Render ESLAG subgraphs FIRST
+		for groupID, nodes := range eslagSubgraphs {
+			b.WriteString(fmt.Sprintf("\tsubgraph %s [ESLAG]\n", groupID))
+			b.WriteString("\t\tdirection LR\n")
+
+			for _, node := range nodes {
+				nodeID := cleanID(node.ID)
+				label := formatLabel(node.Label)
+				b.WriteString(fmt.Sprintf("\t\t%s[\"%s\"]\n", nodeID, label))
+			}
+
+			b.WriteString("\tend\n\n")
+		}
+
 		// Render separate MCLAG subgraphs for each pair
 		for groupID, nodes := range mclagGroups {
 			b.WriteString(fmt.Sprintf("\tsubgraph %s [MCLAG]\n", groupID))
@@ -196,19 +210,7 @@ func generateMermaid(topo Topology) string {
 			b.WriteString("\tend\n\n")
 		}
 
-		for groupID, nodes := range eslagSubgraphs {
-			b.WriteString(fmt.Sprintf("\tsubgraph %s [ESLAG]\n", groupID))
-			b.WriteString("\t\tdirection LR\n")
-
-			for _, node := range nodes {
-				nodeID := cleanID(node.ID)
-				label := formatLabel(node.Label)
-				b.WriteString(fmt.Sprintf("\t\t%s[\"%s\"]\n", nodeID, label))
-			}
-
-			b.WriteString("\tend\n\n")
-		}
-
+		// CHANGE: Render single leaves AFTER subgraphs
 		for _, node := range singleLeaves {
 			nodeID := cleanID(node.ID)
 			label := formatLabel(node.Label)
@@ -281,6 +283,8 @@ func generateMermaid(topo Topology) string {
 			switch link.Type {
 			case EdgeTypeFabric:
 				connType = EdgeTypeFabric
+			case EdgeTypeMesh:
+				connType = EdgeTypeMesh
 			case EdgeTypeMCLAG:
 				connType = EdgeTypeMCLAG
 			case EdgeTypeBundled:
@@ -304,6 +308,7 @@ func generateMermaid(topo Topology) string {
 	// Track link indices for each type of connection
 	gatewayLinks := []int{}
 	spineLeafLinks := []int{}
+	meshLinks := []int{}
 	mclagLinks := []int{}
 	bundledLinks := []int{}
 	eslagLinks := []int{}
@@ -314,57 +319,65 @@ func generateMermaid(topo Topology) string {
 
 	b.WriteString("%% Connections\n\n")
 
-	// Only add gateway-spine section if both exist
-	if len(layers.Gateway) > 0 && len(layers.Spine) > 0 {
-		b.WriteString("%% Gateways -> Spines\n")
+	// Handle gateway connections (to spines or leaves)
+	if len(layers.Gateway) > 0 {
+		hasGatewayConnections := false
 
 		for key, connTypes := range connectionMap {
 			parts := strings.Split(key, "->")
 			sourceID := parts[0]
 			targetID := parts[1]
 
-			isGatewaySpine := false
+			isGatewayConnection := false
 			for _, node := range layers.Gateway {
-				if cleanID(node.ID) == sourceID {
-					for _, spine := range layers.Spine {
-						if cleanID(spine.ID) == targetID {
-							isGatewaySpine = true
-
-							break
-						}
-					}
-
-					break
-				} else if cleanID(node.ID) == targetID {
-					for _, spine := range layers.Spine {
-						if cleanID(spine.ID) == sourceID {
-							// Swap source and target for consistent display
-							sourceID, targetID = targetID, sourceID
-							isGatewaySpine = true
-
-							break
-						}
-					}
+				if cleanID(node.ID) == sourceID || cleanID(node.ID) == targetID {
+					isGatewayConnection = true
 
 					break
 				}
 			}
 
-			if isGatewaySpine {
+			if isGatewayConnection {
 				for connType, ports := range connTypes {
 					if connType == EdgeTypeGateway {
-						// Fix for inverted labels - swap the ports for gateway connections
-						invertedPorts := make([]string, len(ports))
-						for i, portLabel := range ports {
-							parts := strings.Split(portLabel, "↔")
-							if len(parts) == 2 {
-								invertedPorts[i] = parts[1] + "↔" + parts[0]
-							} else {
-								invertedPorts[i] = portLabel
+						if !hasGatewayConnections {
+							b.WriteString("%% Gateway connections\n")
+							hasGatewayConnections = true
+						}
+
+						// Ensure gateway is always the source for better rendering
+						finalSourceID := sourceID
+						finalTargetID := targetID
+						finalPorts := make([]string, len(ports))
+						copy(finalPorts, ports)
+
+						// Check if target is gateway, if so swap source and target
+						isTargetGateway := false
+						for _, node := range layers.Gateway {
+							if cleanID(node.ID) == targetID {
+								isTargetGateway = true
+
+								break
 							}
 						}
-						portLabel := strings.Join(invertedPorts, "<br>")
-						connection := fmt.Sprintf("%s ---|%q| %s", sourceID, portLabel, targetID)
+
+						if isTargetGateway {
+							// Swap source and target so gateway is source
+							finalSourceID = targetID
+							finalTargetID = sourceID
+							// Don't invert ports when gateway becomes source
+						} else {
+							// Gateway is already source, invert the port labels
+							for i, portLabel := range ports {
+								parts := strings.Split(portLabel, "↔")
+								if len(parts) == 2 {
+									finalPorts[i] = parts[1] + "↔" + parts[0]
+								}
+							}
+						}
+
+						portLabel := strings.Join(finalPorts, "<br>")
+						connection := fmt.Sprintf("%s ---|%q| %s", finalSourceID, portLabel, finalTargetID)
 						b.WriteString(connection + "\n")
 						gatewayLinks = append(gatewayLinks, linkIndex)
 						linkIndex++
@@ -372,7 +385,10 @@ func generateMermaid(topo Topology) string {
 				}
 			}
 		}
-		b.WriteString("\n")
+
+		if hasGatewayConnections {
+			b.WriteString("\n")
+		}
 	}
 
 	// Group spine-leaf connections by spine
@@ -543,6 +559,93 @@ func generateMermaid(topo Topology) string {
 		b.WriteString("\n")
 	}
 
+	// Handle mesh connections between leaves
+	b.WriteString("%% Mesh connections\n")
+
+	// Collect all mesh connections first
+	meshConnections := []string{}
+	for key, connTypes := range connectionMap {
+		parts := strings.Split(key, "->")
+		sourceID := parts[0]
+		targetID := parts[1]
+
+		isMeshConnection := false
+		for _, node := range layers.Leaf {
+			if cleanID(node.ID) == sourceID {
+				for _, leaf := range layers.Leaf {
+					if cleanID(leaf.ID) == targetID {
+						isMeshConnection = true
+
+						break
+					}
+				}
+
+				break
+			}
+		}
+
+		if isMeshConnection {
+			for connType, ports := range connTypes {
+				if connType == EdgeTypeMesh {
+					portLabel := strings.Join(ports, "<br>")
+					connection := fmt.Sprintf("%s ---|%q| %s", sourceID, portLabel, targetID)
+					meshConnections = append(meshConnections, connection)
+				}
+			}
+		}
+	}
+
+	// Custom sort to avoid crossing mesh links
+	// Desired order: Leaf_01->Leaf_02, Leaf_02->Leaf_03, Leaf_01->Leaf_03
+	sort.Slice(meshConnections, func(i, j int) bool {
+		// Extract source and target from connection strings
+		getSourceTarget := func(conn string) (string, string) {
+			parts := strings.Split(conn, " ---|")
+			if len(parts) < 2 {
+				return "", ""
+			}
+			source := parts[0]
+			targetPart := strings.Split(parts[1], "| ")
+			if len(targetPart) < 2 {
+				return source, ""
+			}
+			target := targetPart[1]
+
+			return source, target
+		}
+
+		sourceI, targetI := getSourceTarget(meshConnections[i])
+		sourceJ, targetJ := getSourceTarget(meshConnections[j])
+
+		// Define priority order to minimize crossings
+		getPriority := func(source, target string) int {
+			if source == "Leaf_01" && target == "Leaf_02" {
+				return 1 // First: horizontal connection
+			}
+			if source == "Leaf_02" && target == "Leaf_03" {
+				return 2 // Second: diagonal down
+			}
+			if source == "Leaf_01" && target == "Leaf_03" {
+				return 3 // Third: diagonal up
+			}
+			// For other combinations, use alphabetical as fallback
+			return 10 + int(source[len(source)-1]) + int(target[len(target)-1])
+		}
+
+		priorityI := getPriority(sourceI, targetI)
+		priorityJ := getPriority(sourceJ, targetJ)
+
+		return priorityI < priorityJ
+	})
+
+	// Output sorted mesh connections
+	for _, connection := range meshConnections {
+		b.WriteString(connection + "\n")
+		meshLinks = append(meshLinks, linkIndex)
+		linkIndex++
+	}
+	b.WriteString("\n")
+
 	// External connections
 	b.WriteString("%% External connections\n")
 	for key, connTypes := range connectionMap {
@@ -579,6 +682,10 @@ func generateMermaid(topo Topology) string {
 	// Only include connection types that are actually present in the diagram
 	if len(spineLeafLinks) > 0 {
 		b.WriteString("\tL1(( )) --- |\"Fabric Links\"| L2(( ))\n")
+	}
+
+	if len(meshLinks) > 0 {
+		b.WriteString("\tL15(( )) --- |\"Mesh Links\"| L16(( ))\n")
 	}
 
 	if len(mclagLinks) > 0 {
@@ -657,10 +764,13 @@ func generateMermaid(topo Topology) string {
 
 	b.WriteString("class ESLAG eslag\n")
 
-	// Update hidden class to include P1,P2
+	// Update hidden class to include P1,P2 and mesh legend nodes
 	hiddenNodes := []string{"L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8", "L9", "L10", "L11", "L12", "P1", "P2"}
 	if len(externalLinks) > 0 {
 		hiddenNodes = append(hiddenNodes, "L13", "L14")
+	}
+	if len(meshLinks) > 0 {
+		hiddenNodes = append(hiddenNodes, "L15", "L16")
 	}
 	b.WriteString(fmt.Sprintf("class %s hidden\n", strings.Join(hiddenNodes, ",")))
 
@@ -687,6 +797,10 @@ func generateMermaid(topo Topology) string {
 
 	if len(spineLeafLinks) > 0 {
 		b.WriteString(fmt.Sprintf("linkStyle %s stroke:#CC3333,stroke-width:4px\n", formatIndices(spineLeafLinks)))
+	}
+
+	if len(meshLinks) > 0 {
+		b.WriteString(fmt.Sprintf("linkStyle %s stroke:#0078D4,stroke-width:4px\n", formatIndices(meshLinks)))
 	}
 
 	if len(mclagLinks) > 0 {
@@ -716,6 +830,11 @@ func generateMermaid(topo Topology) string {
 	// Style the legend connection types that are present
 	if len(spineLeafLinks) > 0 {
 		b.WriteString(fmt.Sprintf("linkStyle %d stroke:#B85450,stroke-width:2px\n", legendLinkStart+legendLinkIndex))
+		legendLinkIndex++
+	}
+
+	if len(meshLinks) > 0 {
+		b.WriteString(fmt.Sprintf("linkStyle %d stroke:#0078D4,stroke-width:2px\n", legendLinkStart+legendLinkIndex))
 		legendLinkIndex++
 	}
 
@@ -830,9 +949,9 @@ func findLeafPairs(topo Topology) (map[string]string, map[string]string) {
 	mclagPairs := make(map[string]string)
 	eslagPairs := make(map[string]string)
 
-	// First, find direct MCLAG and ESLAG links between leaves
+	// First, find direct MCLAG, ESLAG, and MESH links between leaves
 	for _, link := range topo.Links {
-		if link.Type == EdgeTypeMCLAG || link.Type == EdgeTypeESLAG {
+		if link.Type == EdgeTypeMCLAG || link.Type == EdgeTypeESLAG || link.Type == EdgeTypeMesh {
 			sourceIsLeaf := false
 			targetIsLeaf := false
 
@@ -857,6 +976,8 @@ func findLeafPairs(topo Topology) (map[string]string, map[string]string) {
 					eslagPairs[link.Source] = link.Target
 					eslagPairs[link.Target] = link.Source
 				}
+				// Note: Mesh links between leaves don't create special pairing for subgraphs
+				// They are handled as regular leaf-to-leaf connections
 			}
 		}
 	}
