@@ -255,8 +255,19 @@ test-diagram y="":
   bin/hhfab diagram --format dot --output test-diagram/4mclag2orphan-dot.dot
   bin/hhfab diagram --format mermaid --output test-diagram/4mclag2orphan-mermaid.mermaid
 
+  @echo "=== Generating diagrams for 3-leaf mesh topology ==="
+  bin/hhfab init -f --dev
+  bin/hhfab vlab gen --mesh-links-count 2
+
+  # Generate all formats and styles for mesh topology
+  bin/hhfab diagram --format drawio --style default --output test-diagram/mesh-drawio-default.drawio
+  bin/hhfab diagram --format drawio --style cisco --output test-diagram/mesh-drawio-cisco.drawio
+  bin/hhfab diagram --format drawio --style hedgehog --output test-diagram/mesh-drawio-hedgehog.drawio
+  bin/hhfab diagram --format dot --output test-diagram/mesh-dot.dot
+  bin/hhfab diagram --format mermaid --output test-diagram/mesh-mermaid.mermaid
+
   @echo "=== Generating diagrams for collapsed core topology ==="
-  bin/hhfab init -f --dev --registry-repo localhost:30000 --fabric-mode collapsed-core
+  bin/hhfab init -f --dev --fabric-mode collapsed-core
   bin/hhfab vlab gen
 
   # Generate all formats and styles for collapsed core topology
