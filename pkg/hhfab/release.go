@@ -1046,7 +1046,7 @@ func (testCtx *VPCPeeringTestCtx) multiSubnetsIsolationTest(ctx context.Context)
 	}
 	_, err := CreateOrUpdateVpc(ctx, testCtx.kube, vpc1)
 	if err != nil {
-		return false, nil, fmt.Errorf("updating VPC %s: %w", vpc1.Name, err)
+		return false, reverts, fmt.Errorf("updating VPC %s: %w", vpc1.Name, err)
 	}
 	reverts = append(reverts, func(ctx context.Context) error {
 		slog.Debug("Removing all restrictions")
