@@ -134,8 +134,23 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 			return fmt.Errorf("gateway uplinks count must be greater than 0") //nolint:goerr113
 		}
 
-		if b.GatewayUplinks > b.SpinesCount {
-			return fmt.Errorf("gateway uplinks count must be less than or equal to spines count") //nolint:goerr113
+		totalESLAGLeafs := 0
+		if b.ESLAGLeafGroups != "" {
+			for _, g := range strings.Split(b.ESLAGLeafGroups, ",") {
+				if v, err := strconv.Atoi(strings.TrimSpace(g)); err == nil {
+					totalESLAGLeafs += v
+				}
+			}
+		}
+
+		if b.MeshLinksCount > 0 {
+			if b.GatewayUplinks > uint8(totalESLAGLeafs)+b.OrphanLeafsCount { //nolint:gosec
+				return fmt.Errorf("gateway uplinks count must be ≤ total leaf switches (ESLAG + orphan)") //nolint:goerr113
+			}
+		} else {
+			if b.GatewayUplinks > b.SpinesCount {
+				return fmt.Errorf("gateway uplinks count must be ≤ spines count") //nolint:goerr113
+			}
 		}
 	}
 
@@ -646,6 +661,30 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 					return err
 				}
 			}
+		}
+	}
+
+	if b.MeshLinksCount > 0 && isGw {
+		connectedLeafs := uint8(0)
+		for leafID := uint8(1); leafID <= b.MCLAGLeafsCount+b.OrphanLeafsCount+totalESLAGLeafs && connectedLeafs < b.GatewayUplinks; leafID++ {
+			leafName := fmt.Sprintf("leaf-%02d", leafID)
+			switchPort := b.nextSwitchPort(leafName)
+			gwPort := fmt.Sprintf("%s/enp2s%d", gw.Name, connectedLeafs+1)
+
+			if _, err := b.createConnection(ctx, wiringapi.ConnectionSpec{
+				Gateway: &wiringapi.ConnGateway{
+					Links: []wiringapi.GatewayLink{
+						{
+							Switch:  wiringapi.ConnFabricLinkSwitch{BasePortName: wiringapi.BasePortName{Port: switchPort}},
+							Gateway: wiringapi.ConnGatewayLinkGateway{BasePortName: wiringapi.BasePortName{Port: gwPort}},
+						},
+					},
+				},
+			}); err != nil {
+				return err
+			}
+
+			connectedLeafs++
 		}
 	}
 
