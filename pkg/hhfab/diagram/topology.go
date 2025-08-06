@@ -509,11 +509,15 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 		return topo, fmt.Errorf("listing connections: %w", err)
 	}
 
-	// First pass: collect all external connections
-	externalConnections := make(map[string]string) // Maps connection name to switch port
+	// First pass: collect all external and static external connections
+	externalConnections := make(map[string]string)       // Maps connection name to switch port
+	staticExternalConnections := make(map[string]string) // Maps connection name to switch port
 	for _, conn := range conns.Items {
 		if conn.Spec.External != nil && conn.Spec.External.Link.Switch.Port != "" {
 			externalConnections[conn.Name] = conn.Spec.External.Link.Switch.Port
+		}
+		if conn.Spec.StaticExternal != nil && conn.Spec.StaticExternal.Link.Switch.Port != "" {
+			staticExternalConnections[conn.Name] = conn.Spec.StaticExternal.Link.Switch.Port
 		}
 	}
 
@@ -623,6 +627,40 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 			}
 			topo.Links = append(topo.Links, link)
 		}
+	}
+
+	// Fourth pass: handle static external connections
+	for connName, switchPort := range staticExternalConnections {
+		switchID := wiringapi.SplitPortName(switchPort)[0]
+
+		// For static external connections, we create a virtual external node based on the connection name
+		externalNodeName := fmt.Sprintf("static-external-%s", connName)
+
+		// Add the external node if it doesn't exist
+		if !nodeSet[externalNodeName] {
+			nodeSet[externalNodeName] = true
+			node := Node{
+				ID:    externalNodeName,
+				Type:  NodeTypeExternal,
+				Label: externalNodeName,
+				Properties: map[string]string{
+					PropRole: SwitchRoleExternal,
+				},
+			}
+			topo.Nodes = append(topo.Nodes, node)
+		}
+
+		// Create link from switch to static external
+		link := Link{
+			Source: switchID,
+			Target: externalNodeName,
+			Type:   EdgeTypeStaticExternal,
+			Properties: map[string]string{
+				PropSourcePort:   switchPort,
+				"connectionName": connName,
+			},
+		}
+		topo.Links = append(topo.Links, link)
 	}
 
 	return topo, nil
