@@ -671,6 +671,10 @@ func (testCtx *VPCPeeringTestCtx) mclagTest(ctx context.Context) (bool, []Revert
 // For each eslag connection, set one of the links down by shutting down the port on the switch,
 // then test connectivity. Repeat for the other link.
 func (testCtx *VPCPeeringTestCtx) eslagTest(ctx context.Context) (bool, []RevertFunc, error) {
+	// l3vni mode is not compatible with ESLAG, so there will be no servers attached to ESLAG connections
+	if testCtx.opts.VPCMode == vpcapi.VPCModeL3VNI {
+		return true, nil, fmt.Errorf("L3VNI mode is not compatible with ESLAG") //nolint:goerr113
+	}
 	// list connections in the fabric, filter by ES-LAG connection type
 	conns := &wiringapi.ConnectionList{}
 	if err := testCtx.kube.List(ctx, conns, kclient.MatchingLabels{wiringapi.LabelConnectionType: wiringapi.ConnectionTypeESLAG}); err != nil {
