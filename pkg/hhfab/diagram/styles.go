@@ -148,7 +148,7 @@ func getHedgehogStyle() Style {
 		BundledServerStyle:      "endArrow=none;html=1;strokeWidth=2;strokeColor=#82b366;",
 		UnbundledStyle:          "endArrow=none;html=1;strokeWidth=2;strokeColor=#666666;",
 		ESLAGServerStyle:        "endArrow=none;html=1;strokeWidth=2;strokeColor=#d79b00;dashed=1;",
-		GatewayLinkStyle:        "endArrow=none;html=1;strokeWidth=2;strokeColor=#D7B98E;dashed=1;",
+		GatewayLinkStyle:        "endArrow=none;html=1;strokeWidth=2;strokeColor=#D7B98E;",
 		ExternalLinkStyle:       "endArrow=none;html=1;strokeWidth=2;strokeColor=#999999;", // Changed from dashed to solid
 		StaticExternalLinkStyle: "endArrow=none;html=1;strokeWidth=2;strokeColor=#999999;", // Same as external, solid
 		BackgroundColor:         "#FFFFFF",

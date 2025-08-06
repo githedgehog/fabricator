@@ -637,13 +637,13 @@ func generateDOT(topo Topology) string {
 			style = StyleDashed
 		case EdgeTypeGateway:
 			color = ColorGateway
-			style = StyleDashed
+			style = StyleSolid
 		case EdgeTypeExternal:
 			color = ColorExternal
-			style = StyleSolid // Changed from dashed to solid
+			style = StyleSolid
 		case EdgeTypeStaticExternal:
-			color = ColorExternal // Same color as external
-			style = StyleSolid    // Solid style
+			color = ColorExternal
+			style = StyleSolid
 		default:
 			color = ColorDefault
 			style = StyleSolid
