@@ -297,6 +297,8 @@ func generateMermaid(topo Topology) string {
 				connType = EdgeTypeGateway
 			case EdgeTypeExternal:
 				connType = EdgeTypeExternal
+			case EdgeTypeStaticExternal:
+				connType = EdgeTypeStaticExternal
 			default:
 				connType = "other"
 			}
@@ -314,6 +316,7 @@ func generateMermaid(topo Topology) string {
 	eslagLinks := []int{}
 	unbundledLinks := []int{}
 	externalLinks := []int{}
+	staticExternalLinks := []int{}
 
 	linkIndex := 0
 
@@ -654,21 +657,39 @@ func generateMermaid(topo Topology) string {
 		targetID := parts[1]
 
 		isExternalConnection := false
+		isStaticExternalConnection := false
+
 		for _, node := range layers.External {
 			if cleanID(node.ID) == sourceID || cleanID(node.ID) == targetID {
 				isExternalConnection = true
+
+				// Check if it's a static external connection by looking at the connection type
+				for connType := range connTypes {
+					if connType == EdgeTypeStaticExternal {
+						isStaticExternalConnection = true
+
+						break
+					}
+				}
 
 				break
 			}
 		}
 
 		if isExternalConnection {
-			for _, ports := range connTypes {
-				portLabel := strings.Join(ports, "<br>")
-				connection := fmt.Sprintf("%s ---|%q| %s", sourceID, portLabel, targetID)
-				b.WriteString(connection + "\n")
-				externalLinks = append(externalLinks, linkIndex)
-				linkIndex++
+			for connType, ports := range connTypes {
+				if connType == EdgeTypeExternal || connType == EdgeTypeStaticExternal {
+					portLabel := strings.Join(ports, "<br>")
+					connection := fmt.Sprintf("%s ---|%q| %s", sourceID, portLabel, targetID)
+					b.WriteString(connection + "\n")
+
+					if isStaticExternalConnection {
+						staticExternalLinks = append(staticExternalLinks, linkIndex)
+					} else {
+						externalLinks = append(externalLinks, linkIndex)
+					}
+					linkIndex++
+				}
 			}
 		}
 	}
@@ -710,6 +731,10 @@ func generateMermaid(topo Topology) string {
 
 	if len(externalLinks) > 0 {
 		b.WriteString("\tL13(( )) --- |\"External Links\"| L14(( ))\n")
+	}
+
+	if len(staticExternalLinks) > 0 {
+		b.WriteString("\tL17(( )) --- |\"Static External Links\"| L18(( ))\n")
 	}
 
 	b.WriteString("\tP1(( )) --- |\"Label Notation: Downstream ↔ Upstream\"| P2(( ))\n")
@@ -769,6 +794,9 @@ func generateMermaid(topo Topology) string {
 	if len(externalLinks) > 0 {
 		hiddenNodes = append(hiddenNodes, "L13", "L14")
 	}
+	if len(staticExternalLinks) > 0 {
+		hiddenNodes = append(hiddenNodes, "L17", "L18")
+	}
 	if len(meshLinks) > 0 {
 		hiddenNodes = append(hiddenNodes, "L15", "L16")
 	}
@@ -823,6 +851,10 @@ func generateMermaid(topo Topology) string {
 		b.WriteString(fmt.Sprintf("linkStyle %s stroke:#D79B00,stroke-width:2px\n", formatIndices(externalLinks)))
 	}
 
+	if len(staticExternalLinks) > 0 {
+		b.WriteString(fmt.Sprintf("linkStyle %s stroke:#D79B00,stroke-width:2px\n", formatIndices(staticExternalLinks)))
+	}
+
 	// Calculate legend link indices
 	legendLinkStart := linkIndex
 	legendLinkIndex := 0
@@ -864,6 +896,11 @@ func generateMermaid(topo Topology) string {
 	}
 
 	if len(externalLinks) > 0 {
+		b.WriteString(fmt.Sprintf("linkStyle %d stroke:#D79B00,stroke-width:2px\n", legendLinkStart+legendLinkIndex))
+		legendLinkIndex++
+	}
+
+	if len(staticExternalLinks) > 0 {
 		b.WriteString(fmt.Sprintf("linkStyle %d stroke:#D79B00,stroke-width:2px\n", legendLinkStart+legendLinkIndex))
 		legendLinkIndex++
 	}
