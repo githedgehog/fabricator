@@ -515,6 +515,8 @@ func createLegend(links []Link, style Style) []MxCell {
 				linkTypesMap[LegendKeyGateway] = true
 			case EdgeTypeExternal:
 				linkTypesMap[LegendKeyExternal] = true
+			case EdgeTypeStaticExternal:
+				linkTypesMap[LegendKeyStaticExternal] = true
 			case EdgeTypeMesh:
 				linkTypesMap[LegendKeyMesh] = true
 			case EdgeTypeFabric:
@@ -588,6 +590,7 @@ func createLegend(links []Link, style Style) []MxCell {
 		{LegendKeyESLAGServer, style.ESLAGServerStyle, "ESLAG Server Links"},
 		{LegendKeyGateway, style.GatewayLinkStyle, "Gateway Links"},
 		{LegendKeyExternal, style.ExternalLinkStyle, "External Links"},
+		{LegendKeyStaticExternal, style.StaticExternalLinkStyle, "Static External Links"},
 	}
 
 	cells := make([]MxCell, 0, 3+4*len(legendEntries))

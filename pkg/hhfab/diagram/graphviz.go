@@ -162,6 +162,8 @@ func generateDOT(topo Topology) string {
 				linkTypesPresent["gateway"] = true
 			case EdgeTypeExternal:
 				linkTypesPresent["external"] = true
+			case EdgeTypeStaticExternal:
+				linkTypesPresent["static_external"] = true
 			case EdgeTypeMesh:
 				linkTypesPresent["mesh"] = true
 			case EdgeTypeFabric:
@@ -313,6 +315,12 @@ func generateDOT(topo Topology) string {
 		b.WriteString("\t\t\t<TR>\n")
 		b.WriteString("\t\t\t<TD ALIGN=\"LEFT\" VALIGN=\"MIDDLE\"><FONT COLOR=\"goldenrod\">────</FONT></TD>\n")
 		b.WriteString("\t\t\t<TD ALIGN=\"LEFT\">External Links</TD>\n")
+		b.WriteString("\t\t\t</TR>\n")
+	}
+	if linkTypesPresent["static_external"] {
+		b.WriteString("\t\t\t<TR>\n")
+		b.WriteString("\t\t\t<TD ALIGN=\"LEFT\" VALIGN=\"MIDDLE\"><FONT COLOR=\"goldenrod\">────</FONT></TD>\n")
+		b.WriteString("\t\t\t<TD ALIGN=\"LEFT\">Static External Links</TD>\n")
 		b.WriteString("\t\t\t</TR>\n")
 	}
 
@@ -632,7 +640,10 @@ func generateDOT(topo Topology) string {
 			style = StyleDashed
 		case EdgeTypeExternal:
 			color = ColorExternal
-			style = StyleSolid
+			style = StyleSolid // Changed from dashed to solid
+		case EdgeTypeStaticExternal:
+			color = ColorExternal // Same color as external
+			style = StyleSolid    // Solid style
 		default:
 			color = ColorDefault
 			style = StyleSolid
