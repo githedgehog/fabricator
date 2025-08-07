@@ -480,6 +480,12 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 
 		node.Properties[PropDescription] = sw.Spec.Description
 
+		// Extract redundancy group information
+		if sw.Spec.Redundancy.Group != "" {
+			node.Properties["redundancyGroup"] = sw.Spec.Redundancy.Group
+			node.Properties["redundancyType"] = string(sw.Spec.Redundancy.Type)
+		}
+
 		topo.Nodes = append(topo.Nodes, node)
 	}
 
@@ -883,4 +889,27 @@ func splitExternalNodes(externals []Node, links []Link, leaves []Node) ([]Node, 
 	}
 
 	return leftExternals, rightExternals
+}
+
+func getRedundancyGroups(nodes []Node) map[string][]Node {
+	redundancyGroups := make(map[string][]Node)
+
+	for _, node := range nodes {
+		if node.Type == NodeTypeSwitch {
+			// Check for redundancy group in properties
+			if groupName, ok := node.Properties["redundancyGroup"]; ok && groupName != "" {
+				redundancyGroups[groupName] = append(redundancyGroups[groupName], node)
+			}
+		}
+	}
+
+	// Only return groups with more than one switch
+	filteredGroups := make(map[string][]Node)
+	for groupName, switches := range redundancyGroups {
+		if len(switches) > 1 {
+			filteredGroups[groupName] = switches
+		}
+	}
+
+	return filteredGroups
 }

@@ -130,3 +130,8 @@ const (
 	NodeSideLeft  = "left"
 	NodeSideRight = "right"
 )
+
+const (
+	RedundancyTypeMCLAG = "mclag"
+	RedundancyTypeESLAG = "eslag"
+)
