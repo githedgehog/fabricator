@@ -321,23 +321,38 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 		model.Root.MxCell = append(model.Root.MxCell, cell)
 	}
 
+	// External node positioning fine-tuning
 	if len(layers.External) > 0 {
 		leftExternals, rightExternals := splitExternalNodes(layers.External, topo.Links, layers.Leaf)
 
 		externalCenterY := float64(externalY)
-		externalDistance := 120.0
+
+		// Detect if this is a spine-leaf topology (has spine nodes)
+		isSpineLeaf := len(layers.Spine) > 0
+
+		// Adjust distance based on topology type
+		var externalDistance float64
+		if isSpineLeaf {
+			// More distance for spine-leaf to accommodate port labels
+			externalDistance = 160.0
+		} else {
+			// Standard distance for mesh topologies
+			externalDistance = 120.0
+		}
+
 		leftmostLeafX := leafStartX
 		rightmostLeafX := leafStartX + totalLeafWidth - 100
 		leftExternalX := leftmostLeafX - externalDistance
 		rightExternalX := rightmostLeafX + externalDistance
 
-		// For mesh triangle, adjust external positioning to stack vertically when needed
+		// For mesh triangle, increase distance even more when needed
 		if isMeshTriangle && (len(leftExternals) > 1 || len(rightExternals) > 1) {
-			externalDistance = 140.0 // Increase distance for better visibility
+			externalDistance = 180.0 // Increased from 140.0
 			leftExternalX = leftmostLeafX - externalDistance
 			rightExternalX = rightmostLeafX + externalDistance
 		}
 
+		// Process left externals
 		for i, node := range leftExternals {
 			width, height := GetNodeDimensions(node)
 
@@ -345,7 +360,16 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 			if len(leftExternals) == 1 {
 				y = externalCenterY
 			} else {
-				nodeSpacing := float64(height) + 40 // Increased spacing for mesh topology
+				// Improved spacing calculation to prevent overlap
+				var nodeSpacing float64
+				if isSpineLeaf {
+					// More vertical spacing for spine-leaf topology
+					nodeSpacing = float64(height) + 60
+				} else {
+					// Increased spacing for mesh topology to prevent overlap
+					nodeSpacing = float64(height) + 80
+				}
+
 				totalHeight := float64(len(leftExternals)-1) * nodeSpacing
 				startY := externalCenterY - totalHeight/2
 				y = startY + float64(i)*nodeSpacing
@@ -387,6 +411,7 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 			model.Root.MxCell = append(model.Root.MxCell, cell)
 		}
 
+		// Process right externals
 		for i, node := range rightExternals {
 			width, height := GetNodeDimensions(node)
 
@@ -394,7 +419,16 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 			if len(rightExternals) == 1 {
 				y = externalCenterY
 			} else {
-				nodeSpacing := float64(height) + 40 // Increased spacing for mesh topology
+				// Improved spacing calculation to prevent overlap
+				var nodeSpacing float64
+				if isSpineLeaf {
+					// More vertical spacing for spine-leaf topology
+					nodeSpacing = float64(height) + 60
+				} else {
+					// Increased spacing for mesh topology to prevent overlap
+					nodeSpacing = float64(height) + 100
+				}
+
 				totalHeight := float64(len(rightExternals)-1) * nodeSpacing
 				startY := externalCenterY - totalHeight/2
 				y = startY + float64(i)*nodeSpacing
