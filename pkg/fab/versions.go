@@ -38,7 +38,7 @@ var Versions = fabapi.Versions{
 		NTP:               "v0.0.2",
 		NTPChart:          FabricatorVersion,
 		Alloy:             "v1.9.2",
-		ControlProxy:      "v.1.11.2-hh1",
+		ControlProxy:      "v1.11.2-hh1",
 		ControlProxyChart: FabricatorVersion,
 	},
 	Fabricator: fabapi.FabricatorVersions{
