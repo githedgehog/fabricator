@@ -69,52 +69,49 @@ func simpleTitle(s string) string {
 	return strings.Join(words, " ")
 }
 
-// getTopologyInfo extracts topology information from filename
+// getTopologyInfo extracts topology information from filename and directory
 func getTopologyInfo(filename string) TopologyInfo {
+	// Get directory name for topology type
+	dir := filepath.Dir(filename)
+	topologyType := filepath.Base(dir)
+
 	// Get base name without extension
 	baseName := strings.TrimSuffix(filepath.Base(filename), filepath.Ext(filename))
 
 	// Handle .dot.svg files (like mesh.dot.svg -> mesh)
 	baseName = strings.TrimSuffix(baseName, ".dot")
 
-	// Handle .drawio.svg files (like mesh-default.drawio.svg -> mesh-default -> mesh)
+	// Handle .drawio.svg files (like default.drawio.svg -> default)
 	baseName = strings.TrimSuffix(baseName, ".drawio")
 
 	// Handle .mermaid.svg files
 	baseName = strings.TrimSuffix(baseName, ".mermaid")
 
-	// Handle drawio files (like mesh-default -> mesh)
-	styles := []string{"-default", "-cisco", "-hedgehog"}
-	for _, style := range styles {
-		if strings.HasSuffix(baseName, style) {
-			baseName = strings.TrimSuffix(baseName, style)
-
-			break
-		}
+	// Create title using topology type and style
+	var title string
+	if baseName == "default" || baseName == "cisco" || baseName == "hedgehog" {
+		title = simpleTitle(strings.ReplaceAll(topologyType, "-", " "))
+	} else {
+		title = simpleTitle(strings.ReplaceAll(baseName, "-", " "))
 	}
 
-	// Create title using simple title case
-	title := simpleTitle(strings.ReplaceAll(baseName, "-", " "))
-
-	// Determine badge
+	// Determine badge based on topology type
 	badgeMap := map[string]string{
-		"live":          "🔴 Live",
-		"default":       "🏠 Default",
-		"3spine":        "🌐 Multi-Spine",
-		"4mclag2orphan": "🔗 MCLAG",
-		"mesh":          "🕸️ Mesh",
-		"collapsed":     "📦 Collapsed",
+		"live":           "🔴 Live",
+		"default":        "🏠 Default",
+		"3spine":         "🌐 Multi-Spine",
+		"4mclag2orphan":  "🔗 MCLAG",
+		"mesh":           "🕸️ Mesh",
+		"collapsed-core": "📦 Collapsed",
 	}
 
-	// Get first part of base name for badge lookup
-	firstPart := strings.Split(baseName, "-")[0]
-	badge, exists := badgeMap[firstPart]
+	badge, exists := badgeMap[topologyType]
 	if !exists {
 		badge = "📊 Topology"
 	}
 
 	return TopologyInfo{
-		Name:  baseName,
+		Name:  topologyType + "-" + baseName,
 		Title: title,
 		Badge: badge,
 	}
@@ -134,7 +131,7 @@ func findFiles(dir, pattern string) ([]string, error) {
 
 // processMermaidFiles processes all mermaid SVG files
 func processMermaidFiles(dir string) ([]MermaidDiagram, error) {
-	files, err := findFiles(dir, "*.mermaid.svg")
+	files, err := findFiles(dir, "*/*.mermaid.svg")
 	if err != nil {
 		return nil, err
 	}
@@ -151,7 +148,8 @@ func processMermaidFiles(dir string) ([]MermaidDiagram, error) {
 			diagram.Error = fmt.Sprintf("Error accessing file: %v", err)
 		} else {
 			// Store relative path to the file
-			diagram.FilePath = filepath.Base(file)
+			relPath, _ := filepath.Rel(dir, file)
+			diagram.FilePath = relPath
 		}
 
 		diagrams = append(diagrams, diagram)
@@ -166,7 +164,7 @@ func processDrawIOFiles(dir string) (map[string][]DrawIODiagram, error) {
 	result := make(map[string][]DrawIODiagram)
 
 	for _, style := range styles {
-		pattern := fmt.Sprintf("*%s.drawio.svg", style)
+		pattern := fmt.Sprintf("*/%s.drawio.svg", style)
 		files, err := findFiles(dir, pattern)
 		if err != nil {
 			return nil, err
@@ -184,7 +182,8 @@ func processDrawIOFiles(dir string) (map[string][]DrawIODiagram, error) {
 				diagram.Error = fmt.Sprintf("Error accessing file: %v", err)
 			} else {
 				// Store relative path to the file
-				diagram.FilePath = filepath.Base(file)
+				relPath, _ := filepath.Rel(dir, file)
+				diagram.FilePath = relPath
 			}
 
 			diagrams = append(diagrams, diagram)
@@ -198,7 +197,7 @@ func processDrawIOFiles(dir string) (map[string][]DrawIODiagram, error) {
 
 // processGraphvizFiles processes all Graphviz SVG files
 func processGraphvizFiles(dir string) ([]GraphvizDiagram, error) {
-	files, err := findFiles(dir, "*.dot.svg")
+	files, err := findFiles(dir, "*/*.dot.svg")
 	if err != nil {
 		return nil, err
 	}
@@ -215,7 +214,8 @@ func processGraphvizFiles(dir string) ([]GraphvizDiagram, error) {
 			diagram.Error = fmt.Sprintf("Error accessing file: %v", err)
 		} else {
 			// Store relative path to the file
-			diagram.FilePath = filepath.Base(file)
+			relPath, _ := filepath.Rel(dir, file)
+			diagram.FilePath = relPath
 		}
 
 		diagrams = append(diagrams, diagram)
@@ -261,9 +261,32 @@ func generateHTMLViewer(diagramDir string) error {
 		firstTab = "graphviz"
 	}
 
+	// Calculate unique topology count by collecting topology types
+	topologyTypes := make(map[string]bool)
+
+	// Add topologies from mermaid files
+	for _, diagram := range mermaidFiles {
+		topologyType := strings.Split(diagram.Name, "-")[0]
+		topologyTypes[topologyType] = true
+	}
+
+	// Add topologies from graphviz files
+	for _, diagram := range graphvizFiles {
+		topologyType := strings.Split(diagram.Name, "-")[0]
+		topologyTypes[topologyType] = true
+	}
+
+	// Add topologies from drawio files
+	for _, diagrams := range drawioFiles {
+		for _, diagram := range diagrams {
+			topologyType := strings.Split(diagram.Name, "-")[0]
+			topologyTypes[topologyType] = true
+		}
+	}
+
 	// Prepare data for template
 	data := ViewerData{
-		DiagramCount:  len(mermaidFiles),
+		DiagramCount:  len(topologyTypes),
 		GeneratedDate: time.Now().Format("2006-01-02"),
 		HasDrawIO:     hasDrawIO,
 		HasGraphviz:   hasGraphviz,
@@ -401,7 +424,7 @@ func generateHTML(data ViewerData) (string, error) {
                     {{end}}
                 {{else}}
                 <div class="diagram-container">
-                    <div class="no-content">No {{$style}} style diagrams found. Looking for files matching pattern: *{{$style}}.drawio.svg</div>
+                    <div class="no-content">No {{$style}} style diagrams found. Looking for files matching pattern: */{{$style}}.drawio.svg</div>
                 </div>
                 {{end}}
             </div>
@@ -439,7 +462,7 @@ func generateHTML(data ViewerData) (string, error) {
                 {{end}}
             {{else}}
             <div class="diagram-container">
-                <div class="no-content">No Graphviz diagrams found. Looking for files matching pattern: *.dot.svg</div>
+                <div class="no-content">No Graphviz diagrams found. Looking for files matching pattern: */*.dot.svg</div>
             </div>
             {{end}}
         </div>
@@ -475,7 +498,7 @@ func generateHTML(data ViewerData) (string, error) {
                 {{end}}
             {{else}}
             <div class="diagram-container">
-                <div class="no-content">No Mermaid diagrams found. Looking for files matching pattern: *.mermaid.svg</div>
+                <div class="no-content">No Mermaid diagrams found. Looking for files matching pattern: */*.mermaid.svg</div>
             </div>
             {{end}}
         </div>
