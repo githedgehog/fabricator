@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 
+	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
@@ -36,6 +37,7 @@ func Diagram(ctx context.Context, workDir, cacheDir string, live bool, format di
 		cacheCancel, kube, err := kubeutil.NewClientWithCache(ctx, kubeconfig,
 			wiringapi.SchemeBuilder,
 			fabapi.SchemeBuilder,
+			vpcapi.SchemeBuilder,
 		)
 		if err != nil {
 			return fmt.Errorf("creating kube client: %w", err)
