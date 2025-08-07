@@ -1905,9 +1905,9 @@ func retrySSHCmd(ctx context.Context, client *goph.Client, cmd string, target st
 		if strings.Contains(err.Error(), "ssh:") {
 			slog.Debug("cannot ssh to run remote command", "cmd", cmd, "remote target", target, "retry", retries+1, "error", err, "output", string(out))
 			if retries < maxRetries-1 {
-				// random backoff in [1, 5] seconds range
-				waitTime := time.Duration(rand.IntN(5)+1) * time.Second
-				slog.Debug("Retrying after random backoff time (between 1 and 5 seconds)", "waitTime", waitTime)
+				// random wait in [1, 5] seconds range
+				waitTime := time.Duration(1000+rand.IntN(4000)) * time.Millisecond
+				slog.Debug("Retrying after random wait time (between 1 and 5 seconds)", "waitTime", waitTime)
 				time.Sleep(waitTime)
 
 				continue
