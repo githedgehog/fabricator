@@ -64,13 +64,9 @@ func generateMermaid(topo Topology) string {
 		return layers.Spine[i].ID < layers.Spine[j].ID
 	})
 
-	mclagPairs, eslagPairs := findLeafPairs(topo)
-
-	processedMCLAG := make(map[string]bool)
-	processedESLAG := make(map[string]bool)
-
-	// Define mclagGroupCount at the function level so it's accessible throughout
-	mclagGroupCount := 0
+	// Declare variables for redundancy handling at function level
+	redundancySubgraphs := make(map[string][]Node)
+	redundancyTypes := make(map[string]string)
 
 	// Only add gateway subgraph if gateways are present
 	if len(layers.Gateway) > 0 {
@@ -125,66 +121,59 @@ func generateMermaid(topo Topology) string {
 		b.WriteString("subgraph Leaves[\" \"]\n")
 		b.WriteString("\tdirection LR\n")
 
-		// Group MCLAG leaf pairs into separate subgraphs
-		mclagGroups := make(map[string][]Node)
-		eslagSubgraphs := make(map[string][]Node)
 		singleLeaves := []Node{}
 
 		for _, node := range layers.Leaf {
-			if pair, hasPair := mclagPairs[node.ID]; hasPair {
-				// Only process each MCLAG pair once
-				if !processedMCLAG[node.ID+pair] && !processedMCLAG[pair+node.ID] {
-					// Create a unique group ID for each MCLAG pair
-					groupID := fmt.Sprintf("MCLAG_%d", mclagGroupCount)
-					mclagGroupCount++
+			if groupName, hasGroup := node.Properties["redundancyGroup"]; hasGroup && groupName != "" {
+				if _, alreadyProcessed := redundancySubgraphs[groupName]; !alreadyProcessed {
+					var groupSwitches []Node
+					var redundancyType string
 
-					if mclagGroups[groupID] == nil {
-						mclagGroups[groupID] = []Node{}
-					}
-
-					mclagGroups[groupID] = append(mclagGroups[groupID], node)
-
-					for _, pairNode := range layers.Leaf {
-						if pairNode.ID == pair {
-							mclagGroups[groupID] = append(mclagGroups[groupID], pairNode)
-
-							break
+					for _, otherNode := range layers.Leaf {
+						if otherGroupName, ok := otherNode.Properties["redundancyGroup"]; ok && otherGroupName == groupName {
+							groupSwitches = append(groupSwitches, otherNode)
+							if redType, hasType := otherNode.Properties["redundancyType"]; hasType && redundancyType == "" {
+								redundancyType = redType
+							}
 						}
 					}
 
-					processedMCLAG[node.ID+pair] = true
-					processedMCLAG[pair+node.ID] = true
-				}
-			} else if pair, hasPair := eslagPairs[node.ID]; hasPair {
-				// Only process each ESLAG pair once
-				if !processedESLAG[node.ID+pair] && !processedESLAG[pair+node.ID] {
-					groupID := "ESLAG"
-
-					if eslagSubgraphs[groupID] == nil {
-						eslagSubgraphs[groupID] = []Node{}
+					if len(groupSwitches) > 1 {
+						redundancySubgraphs[groupName] = groupSwitches
+						redundancyTypes[groupName] = redundancyType
 					}
-
-					eslagSubgraphs[groupID] = append(eslagSubgraphs[groupID], node)
-
-					for _, pairNode := range layers.Leaf {
-						if pairNode.ID == pair {
-							eslagSubgraphs[groupID] = append(eslagSubgraphs[groupID], pairNode)
-
-							break
-						}
-					}
-
-					processedESLAG[node.ID+pair] = true
-					processedESLAG[pair+node.ID] = true
 				}
 			} else {
-				singleLeaves = append(singleLeaves, node)
+				isPartOfGroup := false
+				for _, groupNodes := range redundancySubgraphs {
+					for _, groupNode := range groupNodes {
+						if groupNode.ID == node.ID {
+							isPartOfGroup = true
+
+							break
+						}
+					}
+					if isPartOfGroup {
+						break
+					}
+				}
+
+				if !isPartOfGroup {
+					singleLeaves = append(singleLeaves, node)
+				}
 			}
 		}
 
-		// CHANGE: Render ESLAG subgraphs FIRST
-		for groupID, nodes := range eslagSubgraphs {
-			b.WriteString(fmt.Sprintf("\tsubgraph %s [ESLAG]\n", groupID))
+		var sortedGroupNames []string
+		for groupName := range redundancySubgraphs {
+			sortedGroupNames = append(sortedGroupNames, groupName)
+		}
+		sort.Strings(sortedGroupNames)
+
+		for _, groupName := range sortedGroupNames {
+			nodes := redundancySubgraphs[groupName]
+			cleanGroupName := cleanID(groupName)
+			b.WriteString(fmt.Sprintf("\tsubgraph %s [\"%s\"]\n", cleanGroupName, groupName))
 			b.WriteString("\t\tdirection LR\n")
 
 			for _, node := range nodes {
@@ -196,21 +185,6 @@ func generateMermaid(topo Topology) string {
 			b.WriteString("\tend\n\n")
 		}
 
-		// Render separate MCLAG subgraphs for each pair
-		for groupID, nodes := range mclagGroups {
-			b.WriteString(fmt.Sprintf("\tsubgraph %s [MCLAG]\n", groupID))
-			b.WriteString("\t\tdirection LR\n")
-
-			for _, node := range nodes {
-				nodeID := cleanID(node.ID)
-				label := formatLabel(node.Label)
-				b.WriteString(fmt.Sprintf("\t\t%s[\"%s\"]\n", nodeID, label))
-			}
-
-			b.WriteString("\tend\n\n")
-		}
-
-		// CHANGE: Render single leaves AFTER subgraphs
 		for _, node := range singleLeaves {
 			nodeID := cleanID(node.ID)
 			label := formatLabel(node.Label)
@@ -234,6 +208,10 @@ func generateMermaid(topo Topology) string {
 
 	connectionMap := make(map[string]map[string][]string)
 
+	// Track parallel connections for aggregation in legend
+	maxParallelConnections := make(map[string]int)
+	bundledConnections := make(map[string]map[string]int) // Track bundled connections
+
 	for _, link := range topo.Links {
 		if link.Type == EdgeTypeMCLAG {
 			sourceIsLeaf := false
@@ -254,6 +232,32 @@ func generateMermaid(topo Topology) string {
 
 			if sourceIsLeaf && targetIsLeaf {
 				continue
+			}
+		}
+
+		// Track bundled connections for aggregation
+		if link.Type == EdgeTypeBundled {
+			var leaf, server string
+			if strings.HasPrefix(link.Source, "server-") {
+				server = link.Source
+				leaf = link.Target
+			} else if strings.HasPrefix(link.Target, "server-") {
+				server = link.Target
+				leaf = link.Source
+			}
+
+			if server != "" && leaf != "" {
+				var key1, key2 string
+				if leaf < server {
+					key1, key2 = leaf, server
+				} else {
+					key1, key2 = server, leaf
+				}
+
+				if bundledConnections[key1] == nil {
+					bundledConnections[key1] = make(map[string]int)
+				}
+				bundledConnections[key1][key2]++
 			}
 		}
 
@@ -304,6 +308,15 @@ func generateMermaid(topo Topology) string {
 			}
 
 			connectionMap[key][connType] = append(connectionMap[key][connType], portLabel)
+		}
+	}
+
+	// Calculate max parallel connections for bundled links
+	for _, serverConnections := range bundledConnections {
+		for _, count := range serverConnections {
+			if count > maxParallelConnections["bundled"] {
+				maxParallelConnections["bundled"] = count
+			}
 		}
 	}
 
@@ -598,48 +611,107 @@ func generateMermaid(topo Topology) string {
 		}
 	}
 
-	// Custom sort to avoid crossing mesh links
-	// Desired order: Leaf_01->Leaf_02, Leaf_02->Leaf_03, Leaf_01->Leaf_03
-	sort.Slice(meshConnections, func(i, j int) bool {
-		// Extract source and target from connection strings
-		getSourceTarget := func(conn string) (string, string) {
-			parts := strings.Split(conn, " ---|")
-			if len(parts) < 2 {
-				return "", ""
-			}
-			source := parts[0]
-			targetPart := strings.Split(parts[1], "| ")
-			if len(targetPart) < 2 {
-				return source, ""
-			}
-			target := targetPart[1]
+	// Detect mesh triangle topology and sort accordingly
+	if len(meshConnections) >= 3 {
+		// Get all leaf node IDs that participate in mesh connections
+		meshNodeSet := make(map[string]bool)
+		for _, conn := range meshConnections {
+			getSourceTarget := func(conn string) (string, string) {
+				parts := strings.Split(conn, " ---|")
+				if len(parts) < 2 {
+					return "", ""
+				}
+				source := parts[0]
+				targetPart := strings.Split(parts[1], "| ")
+				if len(targetPart) < 2 {
+					return source, ""
+				}
+				target := targetPart[1]
 
-			return source, target
+				return source, target
+			}
+
+			source, target := getSourceTarget(conn)
+			meshNodeSet[source] = true
+			meshNodeSet[target] = true
 		}
 
-		sourceI, targetI := getSourceTarget(meshConnections[i])
-		sourceJ, targetJ := getSourceTarget(meshConnections[j])
-
-		// Define priority order to minimize crossings
-		getPriority := func(source, target string) int {
-			if source == "Leaf_01" && target == "Leaf_02" {
-				return 1 // First: horizontal connection
-			}
-			if source == "Leaf_02" && target == "Leaf_03" {
-				return 2 // Second: diagonal down
-			}
-			if source == "Leaf_01" && target == "Leaf_03" {
-				return 3 // Third: diagonal up
-			}
-			// For other combinations, use alphabetical as fallback
-			return 10 + int(source[len(source)-1]) + int(target[len(target)-1])
+		// Convert to sorted slice for consistent ordering
+		meshNodes := make([]string, 0, len(meshNodeSet))
+		for node := range meshNodeSet {
+			meshNodes = append(meshNodes, node)
 		}
+		sort.Strings(meshNodes)
 
-		priorityI := getPriority(sourceI, targetI)
-		priorityJ := getPriority(sourceJ, targetJ)
+		// If we have exactly 3 nodes (triangle), use optimal ordering
+		if len(meshNodes) == 3 {
+			// Custom sort for mesh triangle to minimize crossings
+			// Optimal order: [0->1, 1->2, 0->2] where 0,1,2 are sorted node indices
+			sort.Slice(meshConnections, func(i, j int) bool {
+				getSourceTarget := func(conn string) (string, string) {
+					parts := strings.Split(conn, " ---|")
+					if len(parts) < 2 {
+						return "", ""
+					}
+					source := parts[0]
+					targetPart := strings.Split(parts[1], "| ")
+					if len(targetPart) < 2 {
+						return source, ""
+					}
+					target := targetPart[1]
 
-		return priorityI < priorityJ
-	})
+					return source, target
+				}
+
+				sourceI, targetI := getSourceTarget(meshConnections[i])
+				sourceJ, targetJ := getSourceTarget(meshConnections[j])
+
+				// Get node indices in sorted order
+				getNodeIndex := func(nodeID string) int {
+					for idx, node := range meshNodes {
+						if node == nodeID {
+							return idx
+						}
+					}
+
+					return -1
+				}
+
+				getPriority := func(source, target string) int {
+					srcIdx := getNodeIndex(source)
+					tgtIdx := getNodeIndex(target)
+
+					// Ensure consistent ordering (smaller index always first)
+					if srcIdx > tgtIdx {
+						srcIdx, tgtIdx = tgtIdx, srcIdx
+					}
+
+					// Priority for mesh triangle: 0->1, 1->2, 0->2
+					switch {
+					case srcIdx == 0 && tgtIdx == 1:
+						return 1 // First connection
+					case srcIdx == 1 && tgtIdx == 2:
+						return 2 // Second connection
+					case srcIdx == 0 && tgtIdx == 2:
+						return 3 // Third connection (diagonal)
+					default:
+						return 10 + srcIdx + tgtIdx // Fallback
+					}
+				}
+
+				priorityI := getPriority(sourceI, targetI)
+				priorityJ := getPriority(sourceJ, targetJ)
+
+				return priorityI < priorityJ
+			})
+		} else {
+			// For non-triangle mesh (more than 3 nodes), use simple alphabetical sort
+			sort.Strings(meshConnections)
+		}
+	} else {
+		// For simple cases, use alphabetical sort
+		sort.Strings(meshConnections)
+	}
 
 	// Output sorted mesh connections
 	for _, connection := range meshConnections {
@@ -714,7 +786,11 @@ func generateMermaid(topo Topology) string {
 	}
 
 	if len(bundledLinks) > 0 {
-		b.WriteString("\tL5(( )) --- |\"Bundled Server Links\"| L6(( ))\n")
+		bundledLabel := "Bundled Server Links"
+		if maxParallelConnections["bundled"] > 1 {
+			bundledLabel = fmt.Sprintf("Bundled Server Links (x%d)", maxParallelConnections["bundled"])
+		}
+		b.WriteString(fmt.Sprintf("\tL5(( )) --- |\"%s\"| L6(( ))\n", bundledLabel))
 	}
 
 	if len(unbundledLinks) > 0 {
@@ -781,13 +857,18 @@ func generateMermaid(topo Topology) string {
 		b.WriteString(fmt.Sprintf("class %s external\n", strings.Join(externalIDs, ",")))
 	}
 
-	// Add class for each MCLAG subgraph
-	for i := 0; i < mclagGroupCount; i++ {
-		groupName := fmt.Sprintf("MCLAG_%d", i)
-		b.WriteString(fmt.Sprintf("class %s mclag\n", groupName))
-	}
+	// Use actual redundancy group names in subgraphs
+	for groupName := range redundancySubgraphs {
+		redundancyType := redundancyTypes[groupName]
+		cleanGroupName := cleanID(groupName)
 
-	b.WriteString("class ESLAG eslag\n")
+		switch redundancyType {
+		case RedundancyTypeMCLAG:
+			b.WriteString(fmt.Sprintf("class %s mclag\n", cleanGroupName))
+		case RedundancyTypeESLAG:
+			b.WriteString(fmt.Sprintf("class %s eslag\n", cleanGroupName))
+		}
+	}
 
 	// Update hidden class to include P1,P2 and mesh legend nodes
 	hiddenNodes := []string{"L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8", "L9", "L10", "L11", "L12", "P1", "P2"}
@@ -980,75 +1061,6 @@ func splitMermaidExternalNodes(externals []Node, links []Link, leaves []Node) ([
 	}
 
 	return leftExternals, rightExternals
-}
-
-func findLeafPairs(topo Topology) (map[string]string, map[string]string) {
-	mclagPairs := make(map[string]string)
-	eslagPairs := make(map[string]string)
-
-	// First, find direct MCLAG, ESLAG, and MESH links between leaves
-	for _, link := range topo.Links {
-		if link.Type == EdgeTypeMCLAG || link.Type == EdgeTypeESLAG || link.Type == EdgeTypeMesh {
-			sourceIsLeaf := false
-			targetIsLeaf := false
-
-			for _, node := range topo.Nodes {
-				if node.ID == link.Source && node.Type == NodeTypeSwitch {
-					if role, ok := node.Properties["role"]; ok && role != SwitchRoleSpine {
-						sourceIsLeaf = true
-					}
-				}
-				if node.ID == link.Target && node.Type == NodeTypeSwitch {
-					if role, ok := node.Properties["role"]; ok && role != SwitchRoleSpine {
-						targetIsLeaf = true
-					}
-				}
-			}
-
-			if sourceIsLeaf && targetIsLeaf {
-				if link.Type == EdgeTypeMCLAG {
-					mclagPairs[link.Source] = link.Target
-					mclagPairs[link.Target] = link.Source
-				} else if link.Type == EdgeTypeESLAG {
-					eslagPairs[link.Source] = link.Target
-					eslagPairs[link.Target] = link.Source
-				}
-				// Note: Mesh links between leaves don't create special pairing for subgraphs
-				// They are handled as regular leaf-to-leaf connections
-			}
-		}
-	}
-
-	// Find ESLAG leaf pairs from server connections
-	// Group leaf switches that connect to the same servers using ESLAG
-	leafsByServer := make(map[string][]string)
-	for _, link := range topo.Links {
-		if link.Type == EdgeTypeESLAG {
-			var server, leaf string
-			if strings.HasPrefix(link.Source, "server-") {
-				server = link.Source
-				leaf = link.Target
-			} else if strings.HasPrefix(link.Target, "server-") {
-				server = link.Target
-				leaf = link.Source
-			}
-
-			if server != "" && leaf != "" {
-				leafsByServer[server] = append(leafsByServer[server], leaf)
-			}
-		}
-	}
-
-	// Create pairs from leaves connected to the same server with ESLAG connections
-	for _, leaves := range leafsByServer {
-		if len(leaves) >= 2 {
-			// Just pair the first two leaves found for each server
-			eslagPairs[leaves[0]] = leaves[1]
-			eslagPairs[leaves[1]] = leaves[0]
-		}
-	}
-
-	return mclagPairs, eslagPairs
 }
 
 func formatLabel(label string) string {
