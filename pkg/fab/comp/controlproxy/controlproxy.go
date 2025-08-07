@@ -8,6 +8,7 @@ import (
 	_ "embed"
 	"fmt"
 	"net/url"
+	"slices"
 
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
@@ -46,8 +47,8 @@ func Install(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 		if err != nil {
 			return nil, fmt.Errorf("Url parsing Loki Target failed: %w", err)
 		}
-		// TODO dedupe this array
 		urls = append(urls, u.Hostname())
+		urls = slices.Compact(urls)
 
 	}
 	values, err := tmplutil.FromTemplate("values", valuesTmpl, map[string]any{
