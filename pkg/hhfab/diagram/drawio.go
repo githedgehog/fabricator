@@ -128,6 +128,7 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 
 	layers := sortNodes(topo.Nodes, topo.Links)
 	linkGroups := groupLinks(topo.Links)
+	redundancyGroups := getRedundancyGroups(topo.Nodes)
 
 	model.Root.MxCell = append(model.Root.MxCell, createLegend(topo.Links, style)...)
 	model.Root.MxCell = append(model.Root.MxCell, createHedgehogLogo()...)
@@ -153,8 +154,10 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 		leafY = gatewayY + 400              // Move leaves down to make room for gateway
 		meshTriangleUpperY = gatewayY + 250 // Upper leaf positioned between gateway and lower leaves
 		serverY = leafY + 250               // Adjust server position accordingly
+		externalY = gatewayY + 250          // Align externals with mesh triangle level
 	} else if isMeshTriangle {
 		meshTriangleUpperY = leafY - 150
+		externalY = leafY - 75 // Position externals between mesh triangle levels
 	}
 
 	cellMap := make(map[string]*MxCell)
@@ -328,6 +331,13 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 		leftExternalX := leftmostLeafX - externalDistance
 		rightExternalX := rightmostLeafX + externalDistance
 
+		// For mesh triangle, adjust external positioning to stack vertically when needed
+		if isMeshTriangle && (len(leftExternals) > 1 || len(rightExternals) > 1) {
+			externalDistance = 140.0 // Increase distance for better visibility
+			leftExternalX = leftmostLeafX - externalDistance
+			rightExternalX = rightmostLeafX + externalDistance
+		}
+
 		for i, node := range leftExternals {
 			width, height := GetNodeDimensions(node)
 
@@ -335,10 +345,28 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 			if len(leftExternals) == 1 {
 				y = externalCenterY
 			} else {
-				nodeSpacing := float64(height) + 30
+				nodeSpacing := float64(height) + 40 // Increased spacing for mesh topology
 				totalHeight := float64(len(leftExternals)-1) * nodeSpacing
 				startY := externalCenterY - totalHeight/2
 				y = startY + float64(i)*nodeSpacing
+			}
+
+			// For mesh triangle, adjust Y position based on connections
+			if isMeshTriangle {
+				// Check if this external connects to the upper leaf (index 1)
+				connectsToUpperLeaf := false
+				for _, link := range topo.Links {
+					upperLeafID := layers.Leaf[1].ID
+					if (link.Source == node.ID && link.Target == upperLeafID) ||
+						(link.Target == node.ID && link.Source == upperLeafID) {
+						connectsToUpperLeaf = true
+
+						break
+					}
+				}
+				if connectsToUpperLeaf {
+					y = float64(meshTriangleUpperY)
+				}
 			}
 
 			cell := MxCell{
@@ -366,10 +394,28 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 			if len(rightExternals) == 1 {
 				y = externalCenterY
 			} else {
-				nodeSpacing := float64(height) + 30
+				nodeSpacing := float64(height) + 40 // Increased spacing for mesh topology
 				totalHeight := float64(len(rightExternals)-1) * nodeSpacing
 				startY := externalCenterY - totalHeight/2
 				y = startY + float64(i)*nodeSpacing
+			}
+
+			// For mesh triangle, adjust Y position based on connections
+			if isMeshTriangle {
+				// Check if this external connects to the upper leaf (index 1)
+				connectsToUpperLeaf := false
+				for _, link := range topo.Links {
+					upperLeafID := layers.Leaf[1].ID
+					if (link.Source == node.ID && link.Target == upperLeafID) ||
+						(link.Target == node.ID && link.Source == upperLeafID) {
+						connectsToUpperLeaf = true
+
+						break
+					}
+				}
+				if connectsToUpperLeaf {
+					y = float64(meshTriangleUpperY)
+				}
 			}
 
 			cell := MxCell{
@@ -423,6 +469,9 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 	for i, group := range linkGroups {
 		createParallelEdges(model, group, cellMap, i, style)
 	}
+
+	// Add redundancy group layer
+	createRedundancyGroupLayer(model, redundancyGroups, cellMap)
 
 	return model
 }
@@ -1222,4 +1271,142 @@ func getConnectionType(source, target string) string {
 	}
 
 	return ConnTypeUnknown
+}
+
+func createRedundancyGroupLayer(model *MxGraphModel, redundancyGroups map[string][]Node, cellMap map[string]*MxCell) {
+	if len(redundancyGroups) == 0 {
+		return
+	}
+
+	redundancyLayer := MxCell{
+		ID:     "redundancy_layer",
+		Parent: "0",
+		Value:  "Redundancy Groups",
+		Style:  "locked=1;",
+	}
+	model.Root.MxCell = append(model.Root.MxCell, redundancyLayer)
+
+	isMeshTopology := true
+	for _, node := range nodes {
+		_, nodeRole := getNodeTypeInfo(node)
+		if nodeRole == SwitchRoleSpine {
+			isMeshTopology = false
+
+			break
+		}
+	}
+
+	groupIndex := 0
+	for groupName, switches := range redundancyGroups {
+		minX, minY := float64(9999), float64(9999)
+		maxX, maxY := float64(-9999), float64(-9999)
+
+		redundancyType := "mclag"
+		for _, switchNode := range switches {
+			if redType, ok := switchNode.Properties["redundancyType"]; ok {
+				redundancyType = redType
+
+				break
+			}
+		}
+
+		for _, switchNode := range switches {
+			if cell, ok := cellMap[switchNode.ID]; ok && cell.Geometry != nil {
+				x := cell.Geometry.X
+				y := cell.Geometry.Y
+				width := float64(cell.Geometry.Width)
+				height := float64(cell.Geometry.Height)
+
+				if x < minX {
+					minX = x
+				}
+				if y < minY {
+					minY = y
+				}
+				if x+width > maxX {
+					maxX = x + width
+				}
+				if y+height > maxY {
+					maxY = y + height
+				}
+			}
+		}
+
+		var padding float64
+		cornerRadius := "rounded=1;arcSize=8"
+
+		if isMeshTopology {
+			var yCoords []float64
+			for _, switchNode := range switches {
+				if cell, ok := cellMap[switchNode.ID]; ok && cell.Geometry != nil {
+					yCoords = append(yCoords, cell.Geometry.Y)
+				}
+			}
+
+			isWellAligned := true
+			if len(yCoords) > 1 {
+				maxYDiff := 0.0
+				for i := 0; i < len(yCoords); i++ {
+					for j := i + 1; j < len(yCoords); j++ {
+						diff := yCoords[i] - yCoords[j]
+						if diff < 0 {
+							diff = -diff
+						}
+						if diff > maxYDiff {
+							maxYDiff = diff
+						}
+					}
+				}
+				isWellAligned = maxYDiff <= 50
+			}
+
+			if isWellAligned {
+				padding = 6.0
+			} else {
+				padding = 10.0
+			}
+		} else {
+			padding = 8.0
+		}
+
+		minX -= padding
+		minY -= padding
+		maxX += padding
+		maxY += padding
+
+		groupWidth := maxX - minX
+		groupHeight := maxY - minY
+
+		var strokeColor, strokeStyle string
+		switch redundancyType {
+		case RedundancyTypeMCLAG:
+			strokeColor = "#9cc1f7"
+			strokeStyle = "dashed=1;dashPattern=5 5;"
+		case RedundancyTypeESLAG:
+			strokeColor = "#d79b00"
+			strokeStyle = "dashed=1;dashPattern=5 5;"
+		default:
+			strokeColor = "#666666"
+			strokeStyle = "dashed=1;"
+		}
+
+		groupRect := MxCell{
+			ID:     fmt.Sprintf("redundancy_group_%d", groupIndex),
+			Parent: "redundancy_layer",
+			Value:  groupName,
+			Style: fmt.Sprintf("%s;whiteSpace=wrap;html=1;strokeColor=%s;strokeWidth=2;fillColor=none;%slabelPosition=center;verticalLabelPosition=center;verticalAlign=bottom;fontSize=10;fontStyle=1;",
+				cornerRadius, strokeColor, strokeStyle),
+			Vertex: "1",
+			Geometry: &Geometry{
+				X:      minX,
+				Y:      minY,
+				Width:  int(groupWidth),
+				Height: int(groupHeight),
+				As:     "geometry",
+			},
+		}
+
+		model.Root.MxCell = append(model.Root.MxCell, groupRect)
+		groupIndex++
+	}
 }
