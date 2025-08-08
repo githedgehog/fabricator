@@ -186,7 +186,7 @@ jobs:
             ${{ inputs.hybrid && '--ready switch-reinstall' || '' }} \
             --ready=inspect \
             --ready=setup-vpcs \
-            ${{ !inputs.gateway && '--ready=setup-peerings' || '' }} \
+            --ready=setup-peerings \
             --ready=test-connectivity \
             ${{ inputs.releasetest && '--ready=release-test' || '' }} \
             --ready=exit
