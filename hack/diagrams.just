@@ -1,5 +1,6 @@
 # Generate diagrams for multiple environments in different formats and styles
-test-diagram vlab_workdir="" y="":
+
+test-diagram vlab_workdir="" y="": _check-hhfab
   @if [ -n "{{vlab_workdir}}" ]; then mkdir -p test-diagram/live; fi
   @mkdir -p test-diagram/default test-diagram/3spine test-diagram/mesh test-diagram/4mclag2orphan test-diagram/collapsed-core
   @echo "==============================================="
@@ -113,25 +114,25 @@ test-diagram vlab_workdir="" y="":
     echo "WARNING: DrawIO CLI not available, skipping .drawio to SVG conversion"; \
   fi
 
-  # Convert DOT files to SVG
+  # Convert DOT files to SVG (with transparency)
   @echo "=== Converting DOT files to SVG ==="
   @if command -v dot >/dev/null 2>&1; then \
     find test-diagram -name "*.dot" -type f | while read DOT_FILE; do \
       SVG_FILE="${DOT_FILE}.svg"; \
       echo "Converting $DOT_FILE to $SVG_FILE"; \
-      dot -Tsvg "$DOT_FILE" -o "$SVG_FILE"; \
+      dot -Tsvg -Gbgcolor=transparent "$DOT_FILE" -o "$SVG_FILE"; \
     done; \
   else \
     echo "WARNING: GraphViz not available, skipping .dot to SVG conversion"; \
   fi
 
-  # Convert Mermaid files to SVG
+  # Convert Mermaid files to SVG (with transparency)
   @echo "=== Converting Mermaid files to SVG ==="
   @if command -v mmdc >/dev/null 2>&1; then \
     find test-diagram -name "*.mermaid" -type f | while read MERMAID_FILE; do \
       SVG_FILE="${MERMAID_FILE%.mermaid}.mermaid.svg"; \
       echo "Converting $MERMAID_FILE to $SVG_FILE"; \
-      mmdc -i "$MERMAID_FILE" -o "$SVG_FILE" -t default -b white; \
+      mmdc -i "$MERMAID_FILE" -o "$SVG_FILE" -t default -b transparent; \
     done; \
   else \
     echo "WARNING: Mermaid CLI not available, skipping .mermaid to SVG conversion"; \
@@ -170,10 +171,18 @@ clean-diagram:
   @rm -rf test-diagram/
   @echo "Diagrams cleaned"
 
-
 # Generate HTML viewer for all diagrams
 _check-go:
   @command -v go >/dev/null 2>&1 || (echo "Go not installed. Install from https://golang.org" && exit 1)
+
+# Check if hhfab is built, build if needed
+_check-hhfab:
+  @if [ ! -x "bin/hhfab" ]; then \
+    echo "hhfab binary not found, building..."; \
+    just hhfab-build; \
+  else \
+    echo "hhfab binary found at bin/hhfab"; \
+  fi
 
 # Update your existing target
 _create-html: _check-go

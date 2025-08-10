@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<!--
+ Copyright 2025 Hedgehog
+ SPDX-License-Identifier: Apache-2.0
+-->
+
+<html lang="en" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🦔 Hedgehog Network Diagrams</title>
+    <style>{{css}}</style>
+</head>
+<body>
+    <div class="header">
+        <div class="header-content">
+            <div>
+                <h1>🦔 Hedgehog Network Diagrams</h1>
+                <p class="subtitle">Network Topology Visualizations</p>
+            </div>
+            <div class="header-stats">
+                <div class="stat"><span class="stat-number">{{.DiagramCount}}</span><span class="stat-label">Topologies</span></div>
+                <div class="stat"><span class="stat-number">{{.FormatCount}}</span><span class="stat-label">Formats</span></div>
+                <div class="stat"><span class="stat-number">{{.GeneratedDate}}</span><span class="stat-label">Generated</span></div>
+            </div>
+            <div class="header-controls">
+                {{if .SupportsDarkMode}}<button id="theme-toggle" class="control-btn">🌙 Dark</button>{{end}}
+            </div>
+        </div>
+        <div class="tabs">
+            {{if .HasDrawIO}}<button class="tab{{if eq .FirstTab "drawio"}} active{{end}}" onclick="showTab('drawio')">🎨 DrawIO</button>{{end}}
+            {{if .HasGraphviz}}<button class="tab{{if eq .FirstTab "graphviz"}} active{{end}}" onclick="showTab('graphviz')">🔗 Graphviz</button>{{end}}
+            {{if .HasMermaid}}<button class="tab{{if eq .FirstTab "mermaid"}} active{{end}}" onclick="showTab('mermaid')">📊 Mermaid</button>{{end}}
+        </div>
+    </div>
+    <div class="main-layout">
+        <div class="sidebar">
+            {{if .HasDrawIO}}
+            <div id="drawio-toc" class="toc{{if eq .FirstTab "drawio"}} active{{end}}" style="{{if eq .FirstTab "drawio"}}display: block;{{else}}display: none;{{end}}">
+                <h3>🎨 DrawIO Diagrams</h3>
+                <ul>
+                    {{range .ProcessedData.DrawIOFiles.default}}
+                    <li><a onclick="showDrawIODiagram('{{.Name}}')">{{.Title}}</a></li>
+                    {{end}}
+                </ul>
+            </div>
+            {{end}}
+            {{if .HasGraphviz}}
+            <div id="graphviz-toc" class="toc{{if eq .FirstTab "graphviz"}} active{{end}}" style="{{if eq .FirstTab "graphviz"}}display: block;{{else}}display: none;{{end}}">
+                <h3>🔗 Graphviz Diagrams</h3>
+                <ul>
+                    {{range .ProcessedData.GraphvizFiles}}
+                    <li><a onclick="showGraphvizDiagram('{{.Name}}')">{{.Title}}</a></li>
+                    {{end}}
+                </ul>
+            </div>
+            {{end}}
+            {{if .HasMermaid}}
+            <div id="mermaid-toc" class="toc{{if eq .FirstTab "mermaid"}} active{{end}}" style="{{if eq .FirstTab "mermaid"}}display: block;{{else}}display: none;{{end}}">
+                <h3>📊 Mermaid Diagrams</h3>
+                <ul>
+                    {{range .ProcessedData.MermaidFiles}}
+                    <li><a onclick="showMermaidDiagram('{{.Name}}')">{{.Title}}</a></li>
+                    {{end}}
+                </ul>
+            </div>
+            {{end}}
+        </div>
+        <div class="content-area">
+            {{if .HasDrawIO}}
+            <div id="drawio-content" class="tab-content{{if eq .FirstTab "drawio"}} active{{end}}">
+                {{range $style, $diagrams := .ProcessedData.DrawIOFiles}}
+                <div id="drawio-style-{{$style}}" class="style-content{{if eq $style "default"}} active{{end}}">
+                    {{if $diagrams}}
+                        {{range $diagrams}}
+                        <div class="diagram-container" id="drawio-diagram-{{.Name}}" data-diagram="{{.Name}}" data-style="{{$style}}">
+                            <div class="diagram-header">
+                                <h2 class="diagram-title">{{.Title}}</h2>
+                                <div class="diagram-controls">
+                                    <div class="style-selector">
+                                        <button class="style-btn{{if eq $style "default"}} active{{end}}" onclick="showDrawIOStyle('default')">🏠 Default</button>
+                                        <button class="style-btn{{if eq $style "hedgehog"}} active{{end}}" onclick="showDrawIOStyle('hedgehog')">🦔 Hedgehog</button>
+                                        <button class="style-btn{{if eq $style "cisco"}} active{{end}}" onclick="showDrawIOStyle('cisco')">🔧 Cisco</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="diagram">
+                                {{if .ErrorMessage}}
+                                <div class="no-content">{{.ErrorMessage}}</div>
+                                {{else}}
+                                <div class="svg-container">
+                                    {{if $.LazyLoading}}
+                                    <div class="lazy-placeholder" data-src="{{.FilePath}}" data-alt="{{.Title}} Diagram">
+                                        <div class="loading-spinner">Loading diagram...</div>
+                                    </div>
+                                    {{else}}
+                                    <object data="{{.FilePath}}" type="image/svg+xml" class="svg-diagram">
+                                        <img src="{{.FilePath}}" alt="{{.Title}} Diagram" />
+                                    </object>
+                                    {{end}}
+                                    <div class="svg-tooltip" id="tooltip-{{.Name}}"></div>
+                                </div>
+                                {{end}}
+                            </div>
+                        </div>
+                        {{end}}
+                    {{else}}
+                    <div class="diagram-container">
+                        <div class="no-content">No {{$style}} style diagrams found.</div>
+                    </div>
+                    {{end}}
+                </div>
+                {{end}}
+            </div>
+            {{end}}
+
+            {{if .HasGraphviz}}
+            <div id="graphviz-content" class="tab-content{{if eq .FirstTab "graphviz"}} active{{end}}">
+                {{if .ProcessedData.GraphvizFiles}}
+                    {{range .ProcessedData.GraphvizFiles}}
+                    <div class="diagram-container" id="graphviz-diagram-{{.Name}}" data-diagram="{{.Name}}">
+                        <div class="diagram-header">
+                            <h2 class="diagram-title">{{.Title}}</h2>
+                        </div>
+                        <div class="diagram">
+                            {{if .ErrorMessage}}
+                            <div class="no-content">{{.ErrorMessage}}</div>
+                            {{else}}
+                            <div class="svg-container">
+                                {{if $.LazyLoading}}
+                                <div class="lazy-placeholder" data-src="{{.FilePath}}" data-alt="{{.Title}} Diagram">
+                                    <div class="loading-spinner">Loading diagram...</div>
+                                </div>
+                                {{else}}
+                                <img src="{{.FilePath}}" alt="{{.Title}} Diagram" class="svg-diagram" />
+                                {{end}}
+                                <div class="svg-tooltip" id="tooltip-{{.Name}}"></div>
+                            </div>
+                            {{end}}
+                        </div>
+                    </div>
+                    {{end}}
+                {{else}}
+                <div class="diagram-container">
+                    <div class="no-content">No Graphviz diagrams found.</div>
+                </div>
+                {{end}}
+            </div>
+            {{end}}
+
+            {{if .HasMermaid}}
+            <div id="mermaid-content" class="tab-content{{if eq .FirstTab "mermaid"}} active{{end}}">
+                {{if .ProcessedData.MermaidFiles}}
+                    {{range .ProcessedData.MermaidFiles}}
+                    <div class="diagram-container" id="mermaid-diagram-{{.Name}}" data-diagram="{{.Name}}">
+                        <div class="diagram-header">
+                            <h2 class="diagram-title">{{.Title}}</h2>
+                        </div>
+                        <div class="diagram">
+                            {{if .ErrorMessage}}
+                            <div class="no-content">{{.ErrorMessage}}</div>
+                            {{else}}
+                            <div class="svg-container">
+                                {{if $.LazyLoading}}
+                                <div class="lazy-placeholder" data-src="{{.FilePath}}" data-alt="{{.Title}} Diagram">
+                                    <div class="loading-spinner">Loading diagram...</div>
+                                </div>
+                                {{else}}
+                                <object data="{{.FilePath}}" type="image/svg+xml" class="svg-diagram">
+                                    <img src="{{.FilePath}}" alt="{{.Title}} Diagram" />
+                                </object>
+                                {{end}}
+                                <div class="svg-tooltip" id="tooltip-{{.Name}}"></div>
+                            </div>
+                            {{end}}
+                        </div>
+                    </div>
+                    {{end}}
+                {{else}}
+                <div class="diagram-container">
+                    <div class="no-content">No Mermaid diagrams found.</div>
+                </div>
+                {{end}}
+            </div>
+            {{end}}
+        </div>
+    </div>
+
+    <script>{{js}}</script>
+</body>
+</html>
