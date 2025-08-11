@@ -124,15 +124,15 @@ func generateMermaid(topo Topology) string {
 		singleLeaves := []Node{}
 
 		for _, node := range layers.Leaf {
-			if groupName, hasGroup := node.Properties["redundancyGroup"]; hasGroup && groupName != "" {
+			if groupName, hasGroup := node.Properties[PropRedundancyGroup]; hasGroup && groupName != "" {
 				if _, alreadyProcessed := redundancySubgraphs[groupName]; !alreadyProcessed {
 					var groupSwitches []Node
 					var redundancyType string
 
 					for _, otherNode := range layers.Leaf {
-						if otherGroupName, ok := otherNode.Properties["redundancyGroup"]; ok && otherGroupName == groupName {
+						if otherGroupName, ok := otherNode.Properties[PropRedundancyGroup]; ok && otherGroupName == groupName {
 							groupSwitches = append(groupSwitches, otherNode)
-							if redType, hasType := otherNode.Properties["redundancyType"]; hasType && redundancyType == "" {
+							if redType, hasType := otherNode.Properties[PropRedundancyType]; hasType && redundancyType == "" {
 								redundancyType = redType
 							}
 						}
@@ -219,12 +219,12 @@ func generateMermaid(topo Topology) string {
 
 			for _, node := range topo.Nodes {
 				if node.ID == link.Source && node.Type == NodeTypeSwitch {
-					if role, ok := node.Properties["role"]; ok && role != SwitchRoleSpine {
+					if role, ok := node.Properties[PropRole]; ok && role != SwitchRoleSpine {
 						sourceIsLeaf = true
 					}
 				}
 				if node.ID == link.Target && node.Type == NodeTypeSwitch {
-					if role, ok := node.Properties["role"]; ok && role != SwitchRoleSpine {
+					if role, ok := node.Properties[PropRole]; ok && role != SwitchRoleSpine {
 						targetIsLeaf = true
 					}
 				}
@@ -265,8 +265,8 @@ func generateMermaid(topo Topology) string {
 		targetID := cleanID(link.Target)
 		key := sourceID + "->" + targetID
 
-		sourcePort := extractPort(link.Properties["sourcePort"])
-		targetPort := extractPort(link.Properties["targetPort"])
+		sourcePort := extractPort(link.Properties[PropSourcePort])
+		targetPort := extractPort(link.Properties[PropTargetPort])
 		portLabel := ""
 
 		switch {

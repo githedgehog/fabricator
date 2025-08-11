@@ -87,14 +87,17 @@ type NodeMetrics struct {
 }
 
 const (
-	PropMCLAGType   = "mclagType"
-	PropSourcePort  = "sourcePort"
-	PropTargetPort  = "targetPort"
-	PropBundled     = "bundled"
-	PropESLAGServer = "eslag_server"
-	PropGateway     = "gateway"
-	PropDescription = "description"
-	PropRole        = "role"
+	PropMCLAGType       = "mclagType"
+	PropSourcePort      = "sourcePort"
+	PropTargetPort      = "targetPort"
+	PropBundled         = "bundled"
+	PropESLAGServer     = "eslag_server"
+	PropGateway         = "gateway"
+	PropDescription     = "description"
+	PropRole            = "role"
+	PropRedundancyGroup = "redundancyGroup"
+	PropRedundancyType  = "redundancyType"
+	PropConnectionName  = "connectionName"
 )
 
 const (

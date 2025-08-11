@@ -1337,7 +1337,7 @@ func createRedundancyGroupLayer(model *MxGraphModel, redundancyGroups map[string
 
 		redundancyType := "mclag"
 		for _, switchNode := range switches {
-			if redType, ok := switchNode.Properties["redundancyType"]; ok {
+			if redType, ok := switchNode.Properties[PropRedundancyType]; ok {
 				redundancyType = redType
 
 				break
