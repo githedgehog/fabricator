@@ -44,6 +44,14 @@ function setup_vlan() {
     sudo ip l s "$iface_name.$vlan_id" up
 }
 
+function add_vlan_to_bond() {
+    local vlan_id=$1
+    local bond_name=$2
+
+    sudo ip l a link "$bond_name" name "$bond_name.$vlan_id" type vlan id "$vlan_id"
+    sudo ip l s "$bond_name.$vlan_id" up
+}
+
 function get_ip() {
     local iface_name=$1
     local ip=""
@@ -67,15 +75,18 @@ function get_ip() {
 # hhnet cleanup
 # hhnet bond 1000 layer2+3 enp2s1 enp2s2 enp2s3 enp2s4
 # hhnet vlan 1000 enp2s1
+# hhnet addvlan 1001 bond0
 
 function usage() {
-    echo "Usage: $0 <cleanup|bond|vlan> [<args> ...]" >&2
+    echo "Usage: $0 <cleanup|bond|vlan|addvlan> [<args> ...]" >&2
     echo " Cleanup all interfaces (enp2s1-9, bond0-3, vlans 1000-1020): " >&2
     echo "  hhnet cleanup" >&2
     echo " Setup bond from provided interfaces (at least one) and vlan on top of it" >&2
     echo "  hhnet bond 1000 layer2+3 enp2s1 enp2s2 enp2s3 enp2s4" >&2
     echo " Setup vlan on top of provided interface (exactly one)" >&2
     echo "  hhnet vlan 1000 enp2s1" >&2
+    echo " Add vlan to existing bond" >&2
+    echo "  hhnet addvlan 1001 bond0" >&2
 }
 
 if [ "$#" -lt 1 ]; then
@@ -105,6 +116,16 @@ elif [ "$1" == "vlan" ]; then
     fi
 
     setup_vlan "$3" "$2"
+    get_ip "$3"."$2"
+
+    exit 0
+elif [ "$1" == "addvlan" ]; then
+    if [ "$#" -ne 3 ]; then
+        echo "Usage: $0 addvlan <vlan_id> <bond_name>" >&2
+        exit 1
+    fi
+
+    add_vlan_to_bond "$2" "$3"
     get_ip "$3"."$2"
 
     exit 0

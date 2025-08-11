@@ -278,17 +278,18 @@ func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) erro
 }
 
 type SetupVPCsOpts struct {
-	WaitSwitchesReady bool
-	ForceCleanup      bool
-	VLANNamespace     string
-	IPv4Namespace     string
-	ServersPerSubnet  int
-	SubnetsPerVPC     int
-	DNSServers        []string
-	TimeServers       []string
-	InterfaceMTU      uint16
-	HashPolicy        string
-	VPCMode           vpcapi.VPCMode
+	WaitSwitchesReady   bool
+	ForceCleanup        bool
+	VLANNamespace       string
+	IPv4Namespace       string
+	ServersPerSubnet    int
+	SubnetsPerVPC       int
+	DNSServers          []string
+	TimeServers         []string
+	InterfaceMTU        uint16
+	HashPolicy          string
+	VPCMode             vpcapi.VPCMode
+	ServersWithMultiVPC int
 }
 
 func CreateOrUpdateVpc(ctx context.Context, kube client.Client, vpc *vpcapi.VPC) (bool, error) {
@@ -355,7 +356,7 @@ type ServerAttachState struct {
 	L3VNI      bool
 }
 
-func getServerAttachState(ctx context.Context, kube client.Client, server *wiringapi.Server, checkVPCMode bool) (ServerAttachState, error) {
+func getServerAttachState(ctx context.Context, kube client.Client, server *wiringapi.Server, checkVPCMode bool, allowMultiVPC bool) (ServerAttachState, error) {
 	sa := ServerAttachState{
 		ServerName: server.Name,
 	}
@@ -376,7 +377,6 @@ func getServerAttachState(ctx context.Context, kube client.Client, server *wirin
 		if conn.Spec.ESLAG != nil {
 			sa.ESLAG = true
 		}
-		// get the VPC this server is attached to
 		attaches := &vpcapi.VPCAttachmentList{}
 		if err := kube.List(ctx, attaches, kclient.MatchingLabels{wiringapi.LabelConnection: conn.Name}); err != nil {
 			return sa, fmt.Errorf("listing VPC attachments for connection %q: %w", conn.Name, err)
@@ -384,19 +384,24 @@ func getServerAttachState(ctx context.Context, kube client.Client, server *wirin
 		numAttaches := len(attaches.Items)
 		if numAttaches == 0 {
 			continue
-		} else if numAttaches > 1 {
+		}
+
+		if !allowMultiVPC && numAttaches > 1 {
 			return sa, fmt.Errorf("expected at most one VPC attachment for connection %q, got %d", conn.Name, numAttaches)
 		}
+
 		sa.Attached = true
 		if checkVPCMode {
-			attach := attaches.Items[0]
-			vpcName := attach.Spec.VPCName()
-			vpc := &vpcapi.VPC{}
-			if err := kube.Get(ctx, client.ObjectKey{Name: vpcName, Namespace: metav1.NamespaceDefault}, vpc); err != nil {
-				return sa, fmt.Errorf("getting VPC %q: %w", vpcName, err)
-			}
-			if vpc.Spec.Mode != vpcapi.VPCModeL2VNI {
-				sa.L3VNI = true
+			for _, attach := range attaches.Items {
+				vpcName := attach.Spec.VPCName()
+				vpc := &vpcapi.VPC{}
+				if err := kube.Get(ctx, client.ObjectKey{Name: vpcName, Namespace: metav1.NamespaceDefault}, vpc); err != nil {
+					return sa, fmt.Errorf("getting VPC %q: %w", vpcName, err)
+				}
+				if vpc.Spec.Mode != vpcapi.VPCModeL2VNI {
+					sa.L3VNI = true
+					break
+				}
 			}
 		}
 
@@ -433,6 +438,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		"perVPC", opts.SubnetsPerVPC,
 		"wait", opts.WaitSwitchesReady,
 		"cleanup", opts.ForceCleanup,
+		"multiVPC", opts.ServersWithMultiVPC,
 	)
 
 	sshPorts := map[string]uint{}
@@ -474,6 +480,57 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		return int(serverIDs[a.Name]) - int(serverIDs[b.Name])
 	})
 
+	// Determine which servers get multi-VPC by connection type
+	multiVPCServers := make(map[string]bool)
+	if opts.ServersWithMultiVPC > 0 {
+		connectionTypesSeen := make(map[string]bool)
+		multiVPCCount := 0
+
+		for _, server := range servers.Items {
+			if multiVPCCount >= opts.ServersWithMultiVPC {
+				break
+			}
+
+			if opts.VPCMode != vpcapi.VPCModeL2VNI {
+				if sa, err := getServerAttachState(ctx, kube, &server, false, false); err != nil {
+					return fmt.Errorf("checking server %q attachment state: %w", server.Name, err)
+				} else if sa.ESLAG {
+					continue
+				}
+			}
+
+			conns := &wiringapi.ConnectionList{}
+			if err := kube.List(ctx, conns, wiringapi.MatchingLabelsForListLabelServer(server.Name)); err != nil {
+				return fmt.Errorf("listing connections for server %q: %w", server.Name, err)
+			}
+
+			if len(conns.Items) == 0 {
+				continue
+			}
+
+			conn := conns.Items[0]
+			var connType string
+			if conn.Spec.Unbundled != nil {
+				connType = "unbundled"
+			} else if conn.Spec.Bundled != nil {
+				connType = "bundled"
+			} else if conn.Spec.MCLAG != nil {
+				connType = "mclag"
+			} else if conn.Spec.ESLAG != nil {
+				connType = "eslag"
+			} else {
+				continue
+			}
+
+			if !connectionTypesSeen[connType] {
+				multiVPCServers[server.Name] = true
+				connectionTypesSeen[connType] = true
+				multiVPCCount++
+				slog.Info("Selected server for multi-VPC", "server", server.Name, "connectionType", connType)
+			}
+		}
+	}
+
 	vlanNS := &wiringapi.VLANNamespace{}
 	if err := kube.Get(ctx, client.ObjectKey{Name: opts.VLANNamespace, Namespace: metav1.NamespaceDefault}, vlanNS); err != nil {
 		return fmt.Errorf("getting VLAN namespace %s: %w", opts.VLANNamespace, err)
@@ -508,12 +565,14 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	vpcs := []*vpcapi.VPC{}
 	attachNames := map[string]bool{}
 	attaches := []*vpcapi.VPCAttachment{}
-	netconfs := map[string]string{}
-	expectedSubnets := map[string]netip.Prefix{}
+	netconfs := map[string][]string{}
+	expectedSubnets := map[string][]netip.Prefix{}
 	eslagServers := make(map[string]bool, 0)
+
 	for _, server := range servers.Items {
 		if opts.VPCMode != vpcapi.VPCModeL2VNI {
-			if sa, err := getServerAttachState(ctx, kube, &server, false); err != nil {
+			allowMultiVPC := opts.ServersWithMultiVPC > 0
+			if sa, err := getServerAttachState(ctx, kube, &server, false, allowMultiVPC); err != nil {
 				return fmt.Errorf("checking server %q attachment state: %w", server.Name, err)
 			} else if sa.ESLAG {
 				eslagServers[server.Name] = true
@@ -522,6 +581,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 				continue
 			}
 		}
+
 		if serverInSubnet >= opts.ServersPerSubnet {
 			serverInSubnet = 0
 			subnetInVPC++
@@ -532,103 +592,137 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 			vpcID++
 		}
 
-		vpcName := fmt.Sprintf("vpc-%02d", vpcID+1)
-		subnetName := fmt.Sprintf("subnet-%02d", subnetInVPC+1)
-
-		serverInSubnet++
-
-		var vpc *vpcapi.VPC
-		if len(vpcs) > 0 && vpcs[len(vpcs)-1].Name == vpcName {
-			vpc = vpcs[len(vpcs)-1]
-		} else {
-			vpc = &vpcapi.VPC{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      vpcName,
-					Namespace: metav1.NamespaceDefault,
-				},
-				Spec: vpcapi.VPCSpec{
-					Mode:    opts.VPCMode,
-					Subnets: map[string]*vpcapi.VPCSubnet{},
-				},
-			}
-			vpcNames[vpcName] = true
-			vpcs = append(vpcs, vpc)
+		isMultiVPC := multiVPCServers[server.Name]
+		vpcCount := 1
+		if isMultiVPC {
+			vpcCount = 2
 		}
-		if vpc.Spec.Subnets[subnetName] == nil {
-			subnet, ok := nextPrefix()
-			if !ok {
-				return fmt.Errorf("no more subnets available")
-			}
 
-			vlan, ok := nextVLAN()
-			if !ok {
-				return fmt.Errorf("no more vlans available")
-			}
+		expectedSubnets[server.Name] = make([]netip.Prefix, 0, vpcCount)
+		netconfs[server.Name] = make([]string, 0, vpcCount)
 
-			var dhcpOpts *vpcapi.VPCDHCPOptions
-			if len(opts.DNSServers) > 0 || len(opts.TimeServers) > 0 || opts.InterfaceMTU > 0 {
-				dhcpOpts = &vpcapi.VPCDHCPOptions{
-					DNSServers:   opts.DNSServers,
-					TimeServers:  opts.TimeServers,
-					InterfaceMTU: opts.InterfaceMTU,
+		for vpcIndex := 0; vpcIndex < vpcCount; vpcIndex++ {
+			currentVPCID := vpcID
+			if isMultiVPC && vpcIndex == 1 {
+				// Second VPC: primary+next pattern with proper wraparound
+				totalVPCs := (len(servers.Items) + opts.ServersPerSubnet*opts.SubnetsPerVPC - 1) / (opts.ServersPerSubnet * opts.SubnetsPerVPC)
+				currentVPCID = (vpcID + 1) % totalVPCs
+
+				// If wraparound results in same VPC (edge case with single VPC), skip to avoid duplicate
+				if currentVPCID == vpcID && totalVPCs > 1 {
+					currentVPCID = (vpcID + 2) % totalVPCs
 				}
 			}
 
-			vpc.Spec.Subnets[subnetName] = &vpcapi.VPCSubnet{
-				Subnet: subnet.String(),
-				VLAN:   vlan,
-				DHCP: vpcapi.VPCDHCP{
-					Enable:  true,
-					Options: dhcpOpts,
+			vpcName := fmt.Sprintf("vpc-%02d", currentVPCID+1)
+			subnetName := fmt.Sprintf("subnet-%02d", subnetInVPC+1)
+
+			var vpc *vpcapi.VPC
+			found := false
+			for _, existingVPC := range vpcs {
+				if existingVPC.Name == vpcName {
+					vpc = existingVPC
+					found = true
+					break
+				}
+			}
+
+			if !found {
+				vpc = &vpcapi.VPC{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      vpcName,
+						Namespace: metav1.NamespaceDefault,
+					},
+					Spec: vpcapi.VPCSpec{
+						Mode:    opts.VPCMode,
+						Subnets: map[string]*vpcapi.VPCSubnet{},
+					},
+				}
+				vpcNames[vpcName] = true
+				vpcs = append(vpcs, vpc)
+			}
+
+			if vpc.Spec.Subnets[subnetName] == nil {
+				subnet, ok := nextPrefix()
+				if !ok {
+					return fmt.Errorf("no more subnets available")
+				}
+
+				vlan, ok := nextVLAN()
+				if !ok {
+					return fmt.Errorf("no more vlans available")
+				}
+
+				var dhcpOpts *vpcapi.VPCDHCPOptions
+				if len(opts.DNSServers) > 0 || len(opts.TimeServers) > 0 || opts.InterfaceMTU > 0 {
+					dhcpOpts = &vpcapi.VPCDHCPOptions{
+						DNSServers:   opts.DNSServers,
+						TimeServers:  opts.TimeServers,
+						InterfaceMTU: opts.InterfaceMTU,
+					}
+				}
+
+				vpc.Spec.Subnets[subnetName] = &vpcapi.VPCSubnet{
+					Subnet: subnet.String(),
+					VLAN:   vlan,
+					DHCP: vpcapi.VPCDHCP{
+						Enable:  true,
+						Options: dhcpOpts,
+					},
+				}
+			}
+
+			expectedSubnet, err := netip.ParsePrefix(vpc.Spec.Subnets[subnetName].Subnet)
+			if err != nil {
+				return fmt.Errorf("parsing vpc subnet %s/%s %q: %w", vpcName, subnetName, vpc.Spec.Subnets[subnetName].Subnet, err)
+			}
+			expectedSubnets[server.Name] = append(expectedSubnets[server.Name], expectedSubnet)
+
+			conns := &wiringapi.ConnectionList{}
+			if err := kube.List(ctx, conns, wiringapi.MatchingLabelsForListLabelServer(server.Name)); err != nil {
+				return fmt.Errorf("listing connections for server %q: %w", server.Name, err)
+			}
+
+			if len(conns.Items) == 0 {
+				return fmt.Errorf("no connections for server %q", server.Name)
+			}
+			if len(conns.Items) > 1 {
+				return fmt.Errorf("multiple connections for server %q", server.Name)
+			}
+
+			conn := conns.Items[0]
+
+			attachName := fmt.Sprintf("%s--%s--%s", conn.Name, vpcName, subnetName)
+			if isMultiVPC {
+				attachName = fmt.Sprintf("%s--%s--%s--%d", conn.Name, vpcName, subnetName, vpcIndex)
+			}
+			attachNames[attachName] = true
+			attach := &vpcapi.VPCAttachment{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      attachName,
+					Namespace: metav1.NamespaceDefault,
+				},
+				Spec: vpcapi.VPCAttachmentSpec{
+					Connection: conn.Name,
+					Subnet:     fmt.Sprintf("%s/%s", vpcName, subnetName),
 				},
 			}
+			attaches = append(attaches, attach)
+
+			vlan := uint16(0)
+			if !attach.Spec.NativeVLAN {
+				vlan = vpc.Spec.Subnets[subnetName].VLAN
+			}
+
+			netconfCmd, netconfErr := GetServerNetconfCmd(&conn, vlan, opts.HashPolicy)
+			if netconfErr != nil {
+				return fmt.Errorf("getting netconf cmd for server %q: %w", server.Name, netconfErr)
+			}
+
+			netconfs[server.Name] = append(netconfs[server.Name], netconfCmd)
 		}
 
-		expectedSubnet, err := netip.ParsePrefix(vpc.Spec.Subnets[subnetName].Subnet)
-		if err != nil {
-			return fmt.Errorf("parsing vpc subnet %s/%s %q: %w", vpcName, subnetName, vpc.Spec.Subnets[subnetName].Subnet, err)
-		}
-		expectedSubnets[server.Name] = expectedSubnet
-
-		conns := &wiringapi.ConnectionList{}
-		if err := kube.List(ctx, conns, wiringapi.MatchingLabelsForListLabelServer(server.Name)); err != nil {
-			return fmt.Errorf("listing connections for server %q: %w", server.Name, err)
-		}
-
-		if len(conns.Items) == 0 {
-			return fmt.Errorf("no connections for server %q", server.Name)
-		}
-		if len(conns.Items) > 1 {
-			return fmt.Errorf("multiple connections for server %q", server.Name)
-		}
-
-		conn := conns.Items[0]
-
-		attachName := fmt.Sprintf("%s--%s--%s", conn.Name, vpcName, subnetName)
-		attachNames[attachName] = true
-		attach := &vpcapi.VPCAttachment{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      attachName,
-				Namespace: metav1.NamespaceDefault,
-			},
-			Spec: vpcapi.VPCAttachmentSpec{
-				Connection: conn.Name,
-				Subnet:     fmt.Sprintf("%s/%s", vpcName, subnetName),
-			},
-		}
-		attaches = append(attaches, attach)
-
-		vlan := uint16(0)
-		if !attach.Spec.NativeVLAN {
-			vlan = vpc.Spec.Subnets[subnetName].VLAN
-		}
-
-		netconfCmd, netconfErr := GetServerNetconfCmd(&conn, vlan, opts.HashPolicy)
-		if netconfErr != nil {
-			return fmt.Errorf("getting netconf cmd for server %q: %w", server.Name, netconfErr)
-		}
-
-		netconfs[server.Name] = netconfCmd
+		serverInSubnet++
 	}
 
 	if opts.WaitSwitchesReady {
@@ -758,29 +852,110 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 					return fmt.Errorf("running hhnet cleanup: %w: out: %s", err, string(out))
 				}
 
-				out, err = client.RunContext(ctx, "/opt/bin/hhnet "+netconfs[server.Name])
-				if err != nil {
-					return fmt.Errorf("running hhnet %q: %w: out: %s", netconfs[server.Name], err, string(out))
+				// Get connection info to determine interface type for additional VLANs
+				conns := &wiringapi.ConnectionList{}
+				if err := kube.List(ctx, conns, wiringapi.MatchingLabelsForListLabelServer(server.Name)); err != nil {
+					return fmt.Errorf("listing connections for server %q: %w", server.Name, err)
+				}
+				if len(conns.Items) == 0 {
+					return fmt.Errorf("no connections for server %q", server.Name)
+				}
+				conn := conns.Items[0]
+
+				var baseInterface string
+				var connType string
+				if conn.Spec.Unbundled != nil {
+					baseInterface = conn.Spec.Unbundled.Link.Server.LocalPortName()
+					connType = "unbundled"
+				} else if conn.Spec.Bundled != nil {
+					baseInterface = "bond0"
+					connType = "bundled"
+				} else if conn.Spec.MCLAG != nil {
+					baseInterface = "bond0"
+					connType = "mclag"
+				} else if conn.Spec.ESLAG != nil {
+					baseInterface = "bond0"
+					connType = "eslag"
+				} else {
+					baseInterface = "bond0"
+					connType = "unknown"
 				}
 
-				prefix, err := netip.ParsePrefix(strings.TrimSpace(string(out)))
-				if err != nil {
-					return fmt.Errorf("parsing acquired address %q: %w", string(out), err)
-				}
+				slog.Info("Server connection analysis",
+					"server", server.Name,
+					"connType", connType,
+					"baseInterface", baseInterface,
+					"connectionName", conn.Name,
+				)
 
-				expectedSubnet := expectedSubnets[server.Name]
-				expectedBits := 0
-				switch opts.VPCMode {
-				case vpcapi.VPCModeL2VNI:
-					expectedBits = expectedSubnet.Bits()
-				case vpcapi.VPCModeL3Flat, vpcapi.VPCModeL3VNI:
-					expectedBits = 32 // L3 modes always uses /32 for server addresses
-				}
-				if !expectedSubnet.Contains(prefix.Addr()) || prefix.Bits() != expectedBits {
-					return fmt.Errorf("unexpected acquired address %q, expected from %v", prefix.String(), expectedSubnet.String())
-				}
+				serverNetconfs := netconfs[server.Name]
+				for i, netconfCmd := range serverNetconfs {
+					if i == 0 {
+						out, err = client.RunContext(ctx, "/opt/bin/hhnet "+netconfCmd)
+						if err != nil {
+							return fmt.Errorf("running hhnet %q: %w: out: %s", netconfCmd, err, string(out))
+						}
 
-				slog.Info("Configured", "server", server.Name, "addr", prefix.String(), "netconf", netconfs[server.Name])
+						prefix, err := netip.ParsePrefix(strings.TrimSpace(string(out)))
+						if err != nil {
+							return fmt.Errorf("parsing acquired address %q: %w", string(out), err)
+						}
+
+						expectedSubnet := expectedSubnets[server.Name][i]
+						expectedBits := 0
+						switch opts.VPCMode {
+						case vpcapi.VPCModeL2VNI:
+							expectedBits = expectedSubnet.Bits()
+						case vpcapi.VPCModeL3Flat, vpcapi.VPCModeL3VNI:
+							expectedBits = 32 // L3 modes always uses /32 for server addresses
+						}
+						if !expectedSubnet.Contains(prefix.Addr()) || prefix.Bits() != expectedBits {
+							return fmt.Errorf("unexpected acquired address %q, expected from %v", prefix.String(), expectedSubnet.String())
+						}
+
+						slog.Info("Configured", "server", server.Name, "addr", prefix.String(), "netconf", netconfCmd)
+					} else {
+						// Extract VLAN from netconf command for additional VLANs
+						parts := strings.Fields(netconfCmd)
+						if len(parts) < 2 {
+							return fmt.Errorf("invalid netconf command %q", netconfCmd)
+						}
+						vlan := parts[1]
+
+						addvlanCmd := "/opt/bin/hhnet addvlan " + vlan + " " + baseInterface
+
+						slog.Info("Running addvlan command",
+							"server", server.Name,
+							"cmd", addvlanCmd,
+							"vlan", vlan,
+							"baseInterface", baseInterface,
+						)
+
+						out, err = client.RunContext(ctx, addvlanCmd)
+						if err != nil {
+							return fmt.Errorf("running hhnet addvlan %s %s: %w: out: %s", vlan, baseInterface, err, string(out))
+						}
+
+						prefix, err := netip.ParsePrefix(strings.TrimSpace(string(out)))
+						if err != nil {
+							return fmt.Errorf("parsing acquired address %q: %w", string(out), err)
+						}
+
+						expectedSubnet := expectedSubnets[server.Name][i]
+						expectedBits := 0
+						switch opts.VPCMode {
+						case vpcapi.VPCModeL2VNI:
+							expectedBits = expectedSubnet.Bits()
+						case vpcapi.VPCModeL3Flat, vpcapi.VPCModeL3VNI:
+							expectedBits = 32
+						}
+						if !expectedSubnet.Contains(prefix.Addr()) || prefix.Bits() != expectedBits {
+							return fmt.Errorf("unexpected acquired address %q, expected from %v", prefix.String(), expectedSubnet.String())
+						}
+
+						slog.Info("Configured additional VLAN", "server", server.Name, "addr", prefix.String(), "vlan", vlan, "interface", baseInterface)
+					}
+				}
 
 				return nil
 			}(); err != nil {
@@ -1287,6 +1462,14 @@ type TestConnectivityOpts struct {
 	RequireAllServers bool
 }
 
+type VPCAttachmentIP struct {
+	VPC        string
+	Subnet     string
+	VLAN       uint16
+	IP         netip.Prefix
+	Connection string
+}
+
 func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConnectivityOpts) error {
 	if opts.PingsCount == 0 && opts.IPerfsSeconds == 0 && opts.CurlsCount == 0 {
 		return fmt.Errorf("at least one of pings, iperfs or curls should be enabled")
@@ -1356,7 +1539,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 				continue
 			}
 		}
-		if sa, err := getServerAttachState(ctx, kube, &server, true); err != nil {
+		if sa, err := getServerAttachState(ctx, kube, &server, true, true); err != nil {
 			return fmt.Errorf("checking server %q attachment state: %w", server.Name, err)
 		} else if !sa.Attached {
 			if opts.RequireAllServers {
@@ -1426,12 +1609,28 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 				}
 				sshs.Store(server, client)
 
+				// Get connection info once
+				conns := &wiringapi.ConnectionList{}
+				if err := kube.List(ctx, conns, wiringapi.MatchingLabelsForListLabelServer(server)); err != nil {
+					return fmt.Errorf("listing connections for server %q: %w", server, err)
+				}
+				if len(conns.Items) == 0 {
+					return fmt.Errorf("no connections for server %q", server)
+				}
+				connName := conns.Items[0].Name
+
+				// Get VPC attachments once
+				vpcAttachments := &vpcapi.VPCAttachmentList{}
+				if err := kube.List(ctx, vpcAttachments, kclient.MatchingLabels{wiringapi.LabelConnection: connName}); err != nil {
+					return fmt.Errorf("listing VPC attachments for server %q: %w", server, err)
+				}
+
 				out, err := client.RunContext(ctx, "ip -o -4 addr show | awk '{print $2, $4}'")
 				if err != nil {
 					return fmt.Errorf("running ip addr show: %w: out: %s", err, string(out))
 				}
 
-				found := false
+				attachments := []VPCAttachmentIP{}
 				lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 				for _, line := range lines {
 					fields := strings.Fields(line)
@@ -1443,28 +1642,54 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 						continue
 					}
 
-					if found {
-						return fmt.Errorf("unexpected multiple ip addrs")
-					}
-
 					addr, err := netip.ParsePrefix(fields[1])
 					if err != nil {
 						return fmt.Errorf("parsing ip addr %q: %w", fields[1], err)
 					}
 
-					found = true
-					ips.Store(server, addr)
+					// Extract VLAN from interface name (e.g., bond0.1000 -> 1000)
+					vlan := uint16(0)
+					if strings.Contains(fields[0], ".") {
+						vlanStr := strings.Split(fields[0], ".")[1]
+						vlanInt, err := strconv.ParseUint(vlanStr, 10, 16)
+						if err != nil {
+							return fmt.Errorf("parsing VLAN %q: %w", vlanStr, err)
+						}
+						vlan = uint16(vlanInt)
+					}
 
-					slog.Info("Found", "server", server, "addr", addr.String())
+					// Find VPC/subnet for this VLAN using pre-loaded attachments
+					for _, attachment := range vpcAttachments.Items {
+						vpc := &vpcapi.VPC{}
+						vpcName := attachment.Spec.VPCName()
+						if err := kube.Get(ctx, kclient.ObjectKey{Name: vpcName, Namespace: metav1.NamespaceDefault}, vpc); err != nil {
+							continue
+						}
+
+						subnetName := attachment.Spec.SubnetName()
+						if subnet, ok := vpc.Spec.Subnets[subnetName]; ok && subnet.VLAN == vlan {
+							attachments = append(attachments, VPCAttachmentIP{
+								VPC:        vpcName,
+								Subnet:     subnetName,
+								VLAN:       vlan,
+								IP:         addr,
+								Connection: connName,
+							})
+							break
+						}
+					}
 				}
 
-				if !found {
-					return fmt.Errorf("no ip addr found")
+				if len(attachments) == 0 {
+					return fmt.Errorf("no valid IP addresses found")
 				}
+
+				ips.Store(server, attachments)
+				slog.Info("Found IPs", "server", server, "count", len(attachments))
 
 				return nil
 			}(); err != nil {
-				return fmt.Errorf("getting server %q IP: %w", server, err)
+				return fmt.Errorf("getting server %q IPs: %w", server, err)
 			}
 
 			return nil
@@ -1486,7 +1711,6 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 	g = &errgroup.Group{}
 	if len(opts.Sources) == 0 {
 		opts.Sources = make([]string, len(serverIDs))
-		// copy keys of serverIDs to opts.Sources
 		i := 0
 		for k := range serverIDs {
 			opts.Sources[i] = k
@@ -1495,7 +1719,6 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 	}
 	if len(opts.Destinations) == 0 {
 		opts.Destinations = make([]string, len(serverIDs))
-		// copy keys of serverIDs to opts.Destinations
 		i := 0
 		for k := range serverIDs {
 			opts.Destinations[i] = k
@@ -1511,29 +1734,17 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 			if opts.PingsCount > 0 || opts.IPerfsSeconds > 0 {
 				g.Go(func() error {
 					if err := func() error {
-						expectedReachable, err := IsServerReachable(ctx, kube, serverA, serverB, c.Fab.Spec.Config.Gateway.Enable)
-						if err != nil {
-							return fmt.Errorf("checking if should be reachable: %w", err)
-						}
-
-						logArgs := []any{
-							"from", serverA,
-							"to", serverB,
-							"expected", expectedReachable.Reachable,
-						}
-						if expectedReachable.Reachable {
-							logArgs = append(logArgs, "reason", expectedReachable.Reason)
-							if expectedReachable.Peering != "" {
-								logArgs = append(logArgs, "peering", expectedReachable.Peering)
-							}
-						}
-						slog.Debug("Checking connectivity", logArgs...)
-
-						ipBR, ok := ips.Load(serverB)
+						attachmentsAR, ok := ips.Load(serverA)
 						if !ok {
-							return fmt.Errorf("missing IP for %q", serverB)
+							return fmt.Errorf("missing IPs for %q", serverA)
 						}
-						ipB := ipBR.(netip.Prefix)
+						attachmentsA := attachmentsAR.([]VPCAttachmentIP)
+
+						attachmentsBR, ok := ips.Load(serverB)
+						if !ok {
+							return fmt.Errorf("missing IPs for %q", serverB)
+						}
+						attachmentsB := attachmentsBR.([]VPCAttachmentIP)
 
 						clientAR, ok := sshs.Load(serverA)
 						if !ok {
@@ -1547,12 +1758,53 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 						}
 						clientB := clientBR.(*goph.Client)
 
-						if err := checkPing(ctx, opts, pings, serverA, serverB, clientA, ipB.Addr(), expectedReachable.Reachable); err != nil {
-							return fmt.Errorf("checking ping from %s to %s: %w", serverA, serverB, err)
+						// Get connection info for serverA to determine interface type
+						connsA := &wiringapi.ConnectionList{}
+						if err := kube.List(ctx, connsA, wiringapi.MatchingLabelsForListLabelServer(serverA)); err != nil {
+							return fmt.Errorf("listing connections for server %q: %w", serverA, err)
 						}
+						if len(connsA.Items) == 0 {
+							return fmt.Errorf("no connections for server %q", serverA)
+						}
+						connA := connsA.Items[0]
 
-						if err := checkIPerf(ctx, opts, iperfs, serverA, serverB, clientA, clientB, ipB.Addr(), expectedReachable); err != nil {
-							return fmt.Errorf("checking iperf from %s to %s: %w", serverA, serverB, err)
+						// Test all attachment combinations
+						for _, attachA := range attachmentsA {
+							for _, attachB := range attachmentsB {
+								sourceSubnetName := fmt.Sprintf("%s/%s", attachA.VPC, attachA.Subnet)
+								destSubnetName := fmt.Sprintf("%s/%s", attachB.VPC, attachB.Subnet)
+								expectedReachable, err := IsSubnetReachable(ctx, kube, sourceSubnetName, destSubnetName, c.Fab.Spec.Config.Gateway.Enable)
+								if err != nil {
+									return fmt.Errorf("checking if should be reachable: %w", err)
+								}
+
+								logArgs := []any{
+									"from", fmt.Sprintf("%s(%s/%s)", serverA, attachA.VPC, attachA.Subnet),
+									"to", fmt.Sprintf("%s(%s/%s)", serverB, attachB.VPC, attachB.Subnet),
+									"expected", expectedReachable.Reachable,
+								}
+								if expectedReachable.Reachable {
+									logArgs = append(logArgs, "reason", expectedReachable.Reason)
+									if expectedReachable.Peering != "" {
+										logArgs = append(logArgs, "peering", expectedReachable.Peering)
+									}
+								}
+								slog.Debug("Checking connectivity", logArgs...)
+
+								// Use connection-aware interface naming
+								sourceInterface, err := GetSourceInterface(&connA, attachA.VLAN)
+								if err != nil {
+									return fmt.Errorf("getting source interface for server %q: %w", serverA, err)
+								}
+
+								if err := checkPing(ctx, opts, pings, serverA, serverB, clientA, attachB.IP.Addr(), expectedReachable.Reachable, sourceInterface); err != nil {
+									return fmt.Errorf("checking ping from %s.%s to %s.%s: %w", serverA, attachA.VPC, serverB, attachB.VPC, err)
+								}
+
+								if err := checkIPerf(ctx, opts, iperfs, serverA, serverB, clientA, clientB, attachB.IP.Addr(), expectedReachable, sourceInterface); err != nil {
+									return fmt.Errorf("checking iperf from %s.%s to %s.%s: %w", serverA, attachA.VPC, serverB, attachB.VPC, err)
+								}
+							}
 						}
 
 						return nil
@@ -1570,12 +1822,11 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 		if opts.CurlsCount > 0 {
 			g.Go(func() error {
 				if err := func() error {
-					reachable, err := apiutil.IsExternalSubnetReachable(ctx, kube, serverA, "0.0.0.0/0") // TODO test for specific IP
-					if err != nil {
-						return fmt.Errorf("checking if should be reachable: %w", err)
+					attachmentsR, ok := ips.Load(serverA)
+					if !ok {
+						return fmt.Errorf("missing IPs for %q", serverA)
 					}
-
-					slog.Debug("Checking external connectivity", "from", serverA, "reachable", reachable)
+					attachments := attachmentsR.([]VPCAttachmentIP)
 
 					clientR, ok := sshs.Load(serverA)
 					if !ok {
@@ -1583,10 +1834,34 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 					}
 					client := clientR.(*goph.Client)
 
-					// switching to 1.0.0.1 since the previously used target 8.8.8.8 was giving us issue
-					// when curling over virtual external peerings
-					if err := checkCurl(ctx, opts, curls, serverA, client, "1.0.0.1", reachable); err != nil {
-						return fmt.Errorf("checking curl from %q: %w", serverA, err)
+					// Get connection info for serverA to determine interface type
+					connsExt := &wiringapi.ConnectionList{}
+					if err := kube.List(ctx, connsExt, wiringapi.MatchingLabelsForListLabelServer(serverA)); err != nil {
+						return fmt.Errorf("listing connections for server %q: %w", serverA, err)
+					}
+					if len(connsExt.Items) == 0 {
+						return fmt.Errorf("no connections for server %q", serverA)
+					}
+					connExt := connsExt.Items[0]
+
+					// Test external connectivity from each attachment
+					for _, attach := range attachments {
+						reachable, err := apiutil.IsExternalSubnetReachable(ctx, kube, serverA, "0.0.0.0/0")
+						if err != nil {
+							return fmt.Errorf("checking if should be reachable: %w", err)
+						}
+
+						slog.Debug("Checking external connectivity", "from", fmt.Sprintf("%s(%s/%s)", serverA, attach.VPC, attach.Subnet), "reachable", reachable)
+
+						// Use connection-aware interface naming
+						sourceInterface, err := GetSourceInterface(&connExt, attach.VLAN)
+						if err != nil {
+							return fmt.Errorf("getting source interface for server %q: %w", serverA, err)
+						}
+
+						if err := checkCurl(ctx, opts, curls, serverA, client, "1.0.0.1", reachable, sourceInterface); err != nil {
+							return fmt.Errorf("checking curl from %s.%s: %w", serverA, attach.VPC, err)
+						}
 					}
 
 					return nil
@@ -1922,7 +2197,7 @@ func retrySSHCmd(ctx context.Context, client *goph.Client, cmd string, target st
 	return out, nil
 }
 
-func checkPing(ctx context.Context, opts TestConnectivityOpts, pings *semaphore.Weighted, from, to string, fromSSH *goph.Client, toIP netip.Addr, expected bool) error {
+func checkPing(ctx context.Context, opts TestConnectivityOpts, pings *semaphore.Weighted, from, to string, fromSSH *goph.Client, toIP netip.Addr, expected bool, sourceInterface string) error {
 	if opts.PingsCount <= 0 {
 		return nil
 	}
@@ -1937,7 +2212,12 @@ func checkPing(ctx context.Context, opts TestConnectivityOpts, pings *semaphore.
 
 	slog.Debug("Running ping", "from", from, "to", toIP.String())
 
-	cmd := fmt.Sprintf("ping -c %d -W 1 %s", opts.PingsCount, toIP.String()) // TODO wrap with timeout?
+	cmd := fmt.Sprintf("ping -c %d -W 1", opts.PingsCount)
+	if sourceInterface != "" {
+		cmd = fmt.Sprintf("ping -I %s -c %d -W 1", sourceInterface, opts.PingsCount)
+	}
+	cmd = fmt.Sprintf("%s %s", cmd, toIP.String())
+
 	outR, err := retrySSHCmd(ctx, fromSSH, cmd, from)
 	out := strings.TrimSpace(string(outR))
 
@@ -1969,7 +2249,7 @@ func checkPing(ctx context.Context, opts TestConnectivityOpts, pings *semaphore.
 	return nil
 }
 
-func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphore.Weighted, from, to string, fromSSH, toSSH *goph.Client, toIP netip.Addr, reachability Reachability) error {
+func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphore.Weighted, from, to string, fromSSH, toSSH *goph.Client, toIP netip.Addr, reachability Reachability, sourceInterface string) error {
 	if opts.IPerfsSeconds <= 0 || !reachability.Reachable {
 		return nil
 	}
@@ -2002,8 +2282,6 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphor
 	})
 
 	g.Go(func() error {
-		// We could netcat to check if the server is up, but that will make the server shut down if
-		// it was started with -1, and if we don't add -1 it will run until the timeout
 		time.Sleep(1 * time.Second)
 		cmd := fmt.Sprintf("toolbox -q timeout -v %d iperf3 -P 4 -J -c %s -t %d", opts.IPerfsSeconds+25, toIP.String(), opts.IPerfsSeconds)
 
@@ -2054,7 +2332,7 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphor
 	return nil
 }
 
-func checkCurl(ctx context.Context, opts TestConnectivityOpts, curls *semaphore.Weighted, from string, fromSSH *goph.Client, toIP string, expected bool) error {
+func checkCurl(ctx context.Context, opts TestConnectivityOpts, curls *semaphore.Weighted, from string, fromSSH *goph.Client, toIP string, expected bool, sourceInterface string) error {
 	if opts.CurlsCount <= 0 {
 		return nil
 	}
@@ -2071,6 +2349,9 @@ func checkCurl(ctx context.Context, opts TestConnectivityOpts, curls *semaphore.
 
 	for idx := 0; idx < opts.CurlsCount; idx++ {
 		cmd := fmt.Sprintf("timeout -v 5 curl --insecure --connect-timeout 3 --silent http://%s", toIP)
+		if sourceInterface != "" {
+			cmd = fmt.Sprintf("timeout -v 5 curl --interface %s --insecure --connect-timeout 3 --silent http://%s", sourceInterface, toIP)
+		}
 		outR, err := retrySSHCmd(ctx, fromSSH, cmd, from)
 		out := strings.TrimSpace(string(outR))
 
@@ -2330,4 +2611,22 @@ func (c *Config) ReleaseTest(ctx context.Context, opts ReleaseTestOpts) error {
 	}
 
 	return RunReleaseTestSuites(ctx, c.WorkDir, c.CacheDir, opts)
+}
+
+func GetSourceInterface(conn *wiringapi.Connection, vlan uint16) (string, error) {
+	if conn == nil {
+		return "", fmt.Errorf("connection is nil")
+	}
+
+	if conn.Spec.Unbundled != nil {
+		// For unbundled connections, use the server port directly with VLAN
+		return fmt.Sprintf("%s.%d", conn.Spec.Unbundled.Link.Server.LocalPortName(), vlan), nil
+	} else {
+		// For bundled/MCLAG/ESLAG connections, use bond0 with VLAN
+		if conn.Spec.Bundled != nil || conn.Spec.MCLAG != nil || conn.Spec.ESLAG != nil {
+			return fmt.Sprintf("bond0.%d", vlan), nil
+		}
+	}
+
+	return "", fmt.Errorf("unexpected connection type for conn %q", conn.Name)
 }

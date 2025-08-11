@@ -913,21 +913,27 @@ func Run(ctx context.Context) error {
 								Aliases: []string{"mode"},
 								Usage:   "VPC mode: empty (l2vni) by default or l3vni, etc",
 							},
+							&cli.IntFlag{
+								Name:  "servers-with-multi-vpc",
+								Usage: "number of servers that get attached to multiple VPCs (primary+next pattern)",
+								Value: 0,
+							},
 						}),
 						Before: before(false),
 						Action: func(c *cli.Context) error {
 							if err := hhfab.DoVLABSetupVPCs(ctx, workDir, cacheDir, hhfab.SetupVPCsOpts{
-								WaitSwitchesReady: c.Bool("wait-switches-ready"),
-								ForceCleanup:      c.Bool("force-cleanup"),
-								VLANNamespace:     c.String("vlanns"),
-								IPv4Namespace:     c.String("ipns"),
-								ServersPerSubnet:  c.Int("servers-per-subnet"),
-								SubnetsPerVPC:     c.Int("subnets-per-vpc"),
-								DNSServers:        c.StringSlice("dns-servers"),
-								TimeServers:       c.StringSlice("time-servers"),
-								InterfaceMTU:      uint16(c.Uint("interface-mtu")), //nolint:gosec
-								HashPolicy:        c.String(FlagHashPolicy),
-								VPCMode:           vpcapi.VPCMode(handleL2VNI(c.String(FlagNameVPCMode))),
+								WaitSwitchesReady:   c.Bool("wait-switches-ready"),
+								ForceCleanup:        c.Bool("force-cleanup"),
+								VLANNamespace:       c.String("vlanns"),
+								IPv4Namespace:       c.String("ipns"),
+								ServersPerSubnet:    c.Int("servers-per-subnet"),
+								SubnetsPerVPC:       c.Int("subnets-per-vpc"),
+								DNSServers:          c.StringSlice("dns-servers"),
+								TimeServers:         c.StringSlice("time-servers"),
+								InterfaceMTU:        uint16(c.Uint("interface-mtu")), //nolint:gosec
+								HashPolicy:          c.String(FlagHashPolicy),
+								VPCMode:             vpcapi.VPCMode(handleL2VNI(c.String(FlagNameVPCMode))),
+								ServersWithMultiVPC: c.Int("servers-with-multi-vpc"),
 							}); err != nil {
 								return fmt.Errorf("setup-vpcs: %w", err)
 							}
