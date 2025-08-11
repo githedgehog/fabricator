@@ -215,6 +215,7 @@ type FabricConfig struct {
 	DefaultAlloyConfig fmeta.AlloyConfig     `json:"defaultAlloyConfig,omitempty"`
 
 	IncludeONIE bool `json:"includeONIE,omitempty"`
+	IncludeCLS  bool `json:"includeCLS,omitempty"`
 
 	DisableBFD bool `json:"disableBFD,omitempty"`
 }
@@ -262,16 +263,16 @@ type FabricatorVersions struct {
 }
 
 type FabricVersions struct {
-	API        meta.Version            `json:"api,omitempty"`
-	Controller meta.Version            `json:"controller,omitempty"`
-	DHCPD      meta.Version            `json:"dhcpd,omitempty"`
-	Boot       meta.Version            `json:"boot,omitempty"`
-	Agent      meta.Version            `json:"agent,omitempty"`
-	Ctl        meta.Version            `json:"ctl,omitempty"`
-	ProxyChart meta.Version            `json:"proxyChart,omitempty"`
-	Proxy      meta.Version            `json:"proxy,omitempty"`
-	NOS        map[string]meta.Version `json:"nos,omitempty"`
-	ONIE       map[string]meta.Version `json:"onie,omitempty"`
+	API        meta.Version                   `json:"api,omitempty"`
+	Controller meta.Version                   `json:"controller,omitempty"`
+	DHCPD      meta.Version                   `json:"dhcpd,omitempty"`
+	Boot       meta.Version                   `json:"boot,omitempty"`
+	Agent      meta.Version                   `json:"agent,omitempty"`
+	Ctl        meta.Version                   `json:"ctl,omitempty"`
+	ProxyChart meta.Version                   `json:"proxyChart,omitempty"`
+	Proxy      meta.Version                   `json:"proxy,omitempty"`
+	NOS        map[fmeta.NOSType]meta.Version `json:"nos,omitempty"`
+	ONIE       map[string]meta.Version        `json:"onie,omitempty"`
 }
 
 type GatewayVersions struct {

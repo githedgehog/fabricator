@@ -20,6 +20,7 @@ var (
 	DataplaneVersion  = meta.Version("main.x86_64-unknown-linux-gnu.debug.f27f76cd91213cf4dc85d0dab95e7c70ede30efc")
 	FRRVersion        = meta.Version("0ba323e489ea2baf3f85fc42ff23aff674a25690.debug")
 	BCMSONiCVersion   = meta.Version("v4.5.0")
+	CLSSONiCVersion   = meta.Version("v4.1.0-beta1-hh")
 
 	// Upgrade constraints, "-0" to include pre-releases
 	FabricatorCtrlConstraint = ">=0.40.0-0"
@@ -57,10 +58,13 @@ var Versions = fabapi.Versions{
 		Ctl:        FabricVersion,
 		ProxyChart: FabricVersion, // TODO switch to a better proxy
 		Proxy:      "1.9.1",       // TODO use version starting with "v"
-		NOS: map[string]meta.Version{
-			string(fmeta.NOSTypeSONiCBCMVS):     BCMSONiCVersion,
-			string(fmeta.NOSTypeSONiCBCMBase):   BCMSONiCVersion,
-			string(fmeta.NOSTypeSONiCBCMCampus): BCMSONiCVersion,
+		NOS: map[fmeta.NOSType]meta.Version{
+			fmeta.NOSTypeSONiCBCMVS:           BCMSONiCVersion,
+			fmeta.NOSTypeSONiCBCMBase:         BCMSONiCVersion,
+			fmeta.NOSTypeSONiCBCMCampus:       BCMSONiCVersion,
+			fmeta.NOSTypeSONiCCLSPlusVS:       CLSSONiCVersion,
+			fmeta.NOSTypeSONiCCLSPlusBroadcom: CLSSONiCVersion,
+			fmeta.NOSTypeSONiCCLSPlusMarvell:  CLSSONiCVersion,
 		},
 		ONIE: map[string]meta.Version{
 			switchprofile.DellS5232FON.Spec.Platform:         "v0.1.0",

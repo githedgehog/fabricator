@@ -48,6 +48,7 @@ const (
 	FlagNameTLSSAN                = "tls-san"
 	FlagNameDev                   = "dev"
 	FlagIncludeONIE               = "include-onie"
+	FlagIncludeCLS                = "include-cls"
 	FlagControlNodeMgmtLink       = "control-node-mgmt-link"
 	FlagGateway                   = "gateway"
 	FlagNameFabricMode            = "fabric-mode"
@@ -506,6 +507,13 @@ func Run(ctx context.Context) error {
 					},
 					&cli.BoolFlag{
 						Category: FlagCatGenConfig,
+						Name:     FlagIncludeCLS,
+						Hidden:   !preview,
+						Usage:    "[PREVIEW] include Celestica SONiC+ switch profiles",
+						EnvVars:  []string{"HHFAB_INCLUDE_CLS"},
+					},
+					&cli.BoolFlag{
+						Category: FlagCatGenConfig,
 						Name:     FlagNameImportHostUpstream,
 						Hidden:   !preview,
 						Usage:    "[PREVIEW] import host repo/prefix and creds from docker config as an upstream registry mode and config (creds will be stored plain text)",
@@ -545,6 +553,7 @@ func Run(ctx context.Context) error {
 							DefaultAuthorizedKeys:     c.StringSlice(FlagNameDefaultAuthorizedKeys),
 							Dev:                       c.Bool(FlagNameDev),
 							IncludeONIE:               c.Bool(FlagIncludeONIE),
+							IncludeCLS:                c.Bool(FlagIncludeCLS),
 							ControlNodeManagementLink: c.String(FlagControlNodeMgmtLink),
 							Gateway:                   c.Bool(FlagGateway),
 							Preview:                   preview,

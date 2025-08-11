@@ -206,6 +206,41 @@ func TestInitConfig(t *testing.T) {
 			},
 		},
 		{
+			name: "include-cls",
+			in: fab.InitConfigInput{
+				DefaultPasswordHash: "$5$bar",
+				IncludeCLS:          true,
+			},
+			expectedFab: fabapi.Fabricator{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      comp.FabName,
+					Namespace: comp.FabNamespace,
+				},
+				Spec: fabapi.FabricatorSpec{
+					Config: fabapi.FabConfig{
+						Control: fabapi.ControlConfig{
+							DefaultUser: fabapi.ControlUser{
+								PasswordHash: "$5$bar",
+							},
+						},
+						Fabric: fabapi.FabricConfig{
+							IncludeCLS: true,
+							DefaultSwitchUsers: map[string]fabapi.SwitchUser{
+								"admin": {
+									Role:         "admin",
+									PasswordHash: "$5$bar",
+								},
+								"op": {
+									Role:         "operator",
+									PasswordHash: "$5$bar",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
 			name: "control-node-management-link",
 			in: fab.InitConfigInput{
 				DefaultPasswordHash:       "$5$bar",

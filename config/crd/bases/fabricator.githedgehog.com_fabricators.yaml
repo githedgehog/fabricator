@@ -203,6 +203,8 @@ spec:
                         type: string
                       fabricSubnet:
                         type: string
+                      includeCLS:
+                        type: boolean
                       includeONIE:
                         type: boolean
                       leafASNEnd:
