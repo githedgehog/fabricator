@@ -384,6 +384,7 @@ _Appears in:_
 | `defaultSwitchUsers` _object (keys:string, values:[SwitchUser](#switchuser))_ |  |  |  |
 | `defaultAlloyConfig` _[AlloyConfig](#alloyconfig)_ |  |  |  |
 | `includeONIE` _boolean_ |  |  |  |
+| `includeCLS` _boolean_ |  |  |  |
 | `disableBFD` _boolean_ |  |  |  |
 
 
@@ -408,7 +409,7 @@ _Appears in:_
 | `ctl` _[Version](#version)_ |  |  |  |
 | `proxyChart` _[Version](#version)_ |  |  |  |
 | `proxy` _[Version](#version)_ |  |  |  |
-| `nos` _object (keys:string, values:[Version](#version))_ |  |  |  |
+| `nos` _object (keys:NOSType, values:[Version](#version))_ |  |  |  |
 | `onie` _object (keys:string, values:[Version](#version))_ |  |  |  |
 
 

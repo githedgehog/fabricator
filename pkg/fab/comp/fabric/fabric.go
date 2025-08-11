@@ -22,19 +22,20 @@ import (
 )
 
 const (
-	APIChartRef   = "fabric/charts/fabric-api"
-	CtrlChartRef  = "fabric/charts/fabric"
-	CtrlRef       = "fabric/fabric"
-	DHCPChartRef  = "fabric/charts/fabric-dhcpd"
-	DHCPRef       = "fabric/fabric-dhcpd"
-	BootChartRef  = "fabric/charts/fabric-boot"
-	BootRef       = "fabric/fabric-boot"
-	AgentRef      = "fabric/agent"
-	CtlRef        = "fabric/hhfctl"
-	ProxyChartRef = "fabric/charts/fabric-proxy"
-	ProxyRef      = "fabric/fabric-proxy"
-	SonicRefBase  = "sonic-bcm-private"
-	OnieRefBase   = "onie-updater-private"
+	APIChartRef           = "fabric/charts/fabric-api"
+	CtrlChartRef          = "fabric/charts/fabric"
+	CtrlRef               = "fabric/fabric"
+	DHCPChartRef          = "fabric/charts/fabric-dhcpd"
+	DHCPRef               = "fabric/fabric-dhcpd"
+	BootChartRef          = "fabric/charts/fabric-boot"
+	BootRef               = "fabric/fabric-boot"
+	AgentRef              = "fabric/agent"
+	CtlRef                = "fabric/hhfctl"
+	ProxyChartRef         = "fabric/charts/fabric-proxy"
+	ProxyRef              = "fabric/fabric-proxy"
+	BroadcomSonicRefBase  = "sonic-bcm-private"
+	CelesticaSonicRefBase = "sonic-cls-private"
+	OnieRefBase           = "onie-updater-private"
 
 	ProxyNodePort = 31028
 
@@ -260,6 +261,7 @@ func GetFabricConfig(f fabapi.Fabricator) (*meta.FabricConfig, error) {
 		VTEPSubnet:               string(f.Spec.Config.Fabric.VTEPSubnet),
 		FabricSubnet:             string(f.Spec.Config.Fabric.FabricSubnet),
 		DisableBFD:               f.Spec.Config.Fabric.DisableBFD,
+		IncludeSONiCCLSPlus:      f.Spec.Config.Fabric.IncludeCLS,
 	}, nil
 }
 
@@ -271,12 +273,20 @@ func GetFabricBootConfig(f fabapi.Fabricator) (*boot.ServerConfig, error) {
 
 	nosRepos := map[meta.NOSType]string{}
 	for nosType := range f.Status.Versions.Fabric.NOS {
-		nosRepos[meta.NOSType(nosType)] = comp.JoinURLParts(regURL, comp.RegistryPrefix, SonicRefBase, nosType)
+		if !isIncludeNOS(f, nosType) {
+			continue
+		}
+
+		nosRepos[nosType] = comp.JoinURLParts(regURL, comp.RegistryPrefix, getNOSRefBase(nosType), string(nosType))
 	}
 
 	nosVersions := map[meta.NOSType]string{}
 	for nosType, version := range f.Status.Versions.Fabric.NOS {
-		nosVersions[meta.NOSType(nosType)] = string(version)
+		if !isIncludeNOS(f, nosType) {
+			continue
+		}
+
+		nosVersions[nosType] = string(version)
 	}
 
 	onieRepos := map[string]string{}
@@ -316,12 +326,16 @@ func Artifacts(cfg fabapi.Fabricator) (comp.OCIArtifacts, error) {
 		ProxyRef:      cfg.Status.Versions.Fabric.Proxy,
 	}
 
-	for nos, version := range cfg.Status.Versions.Fabric.NOS {
-		if nos == "" || version == "" {
+	for nosType, version := range cfg.Status.Versions.Fabric.NOS {
+		if nosType == "" || version == "" {
 			return nil, fmt.Errorf("empty NOS type or version") //nolint:goerr113
 		}
 
-		arts[comp.JoinURLParts(SonicRefBase, nos)] = version
+		if !isIncludeNOS(cfg, nosType) {
+			continue
+		}
+
+		arts[comp.JoinURLParts(getNOSRefBase(nosType), string(nosType))] = version
 	}
 
 	for platform, version := range cfg.Status.Versions.Fabric.ONIE {
@@ -333,6 +347,28 @@ func Artifacts(cfg fabapi.Fabricator) (comp.OCIArtifacts, error) {
 	}
 
 	return arts, nil
+}
+
+func getNOSRefBase(nosType meta.NOSType) string {
+	switch nosType {
+	case meta.NOSTypeSONiCBCMBase, meta.NOSTypeSONiCBCMCampus, meta.NOSTypeSONiCBCMVS:
+		return BroadcomSonicRefBase
+	case meta.NOSTypeSONiCCLSPlusBroadcom, meta.NOSTypeSONiCCLSPlusMarvell, meta.NOSTypeSONiCCLSPlusVS:
+		return CelesticaSonicRefBase
+	default:
+		return "invalid"
+	}
+}
+
+func isIncludeNOS(cfg fabapi.Fabricator, nosType meta.NOSType) bool {
+	switch nosType {
+	case meta.NOSTypeSONiCBCMBase, meta.NOSTypeSONiCBCMCampus, meta.NOSTypeSONiCBCMVS:
+		return true
+	case meta.NOSTypeSONiCCLSPlusBroadcom, meta.NOSTypeSONiCCLSPlusMarvell, meta.NOSTypeSONiCCLSPlusVS:
+		return cfg.Spec.Config.Fabric.IncludeCLS
+	default:
+		return false
+	}
 }
 
 var (

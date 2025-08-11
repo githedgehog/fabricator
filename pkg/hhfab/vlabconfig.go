@@ -519,7 +519,7 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 			continue
 		}
 
-		if sw.Spec.Profile != fmeta.SwitchProfileVS {
+		if sw.Spec.Profile != fmeta.SwitchProfileVS && sw.Spec.Profile != "vs-clsp" {
 			return nil, fmt.Errorf("switch %q has unsupported profile: %q", sw.Name, sw.Spec.Profile) //nolint:goerr113
 		}
 

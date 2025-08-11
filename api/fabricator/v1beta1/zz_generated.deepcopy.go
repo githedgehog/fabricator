@@ -418,7 +418,7 @@ func (in *FabricVersions) DeepCopyInto(out *FabricVersions) {
 	*out = *in
 	if in.NOS != nil {
 		in, out := &in.NOS, &out.NOS
-		*out = make(map[string]meta.Version, len(*in))
+		*out = make(map[apimeta.NOSType]meta.Version, len(*in))
 		for key, val := range *in {
 			(*out)[key] = val
 		}

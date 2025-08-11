@@ -139,12 +139,22 @@ docker push ghcr.io/githedgehog/fabricator/ntp:${NTP_VERSION}
 ## Broadcom SONiC
 
 ```bash
-export SONIC_VERSION="v4.5.0"
+export BCM_SONIC_VERSION="v4.4.2"
 
-oras push ghcr.io/githedgehog/sonic-bcm-private/sonic-bcm-advanced:${SONIC_VERSION} sonic-broadcom-enterprise-advanced.bin
-oras push ghcr.io/githedgehog/sonic-bcm-private/sonic-bcm-campus:${SONIC_VERSION} sonic-broadcom-campus.bin
-oras push ghcr.io/githedgehog/sonic-bcm-private/sonic-bcm-base:${SONIC_VERSION} sonic-broadcom-enterprise-base.bin
-oras push ghcr.io/githedgehog/sonic-bcm-private/sonic-bcm-vs:${SONIC_VERSION} sonic-vs.bin
+oras push ghcr.io/githedgehog/sonic-bcm-private/sonic-bcm-advanced:${BCM_SONIC_VERSION} sonic-broadcom-enterprise-advanced.bin
+oras push ghcr.io/githedgehog/sonic-bcm-private/sonic-bcm-campus:${BCM_SONIC_VERSION} sonic-broadcom-campus.bin
+oras push ghcr.io/githedgehog/sonic-bcm-private/sonic-bcm-base:${BCM_SONIC_VERSION} sonic-broadcom-enterprise-base.bin
+oras push ghcr.io/githedgehog/sonic-bcm-private/sonic-bcm-vs:${BCM_SONIC_VERSION} sonic-vs.bin
+```
+
+## Celestica SONiC+
+
+```bash
+export CLS_SONIC_VERSION="v4.1.0-beta1-hh" # 4.1.0_Beta1-b6f3c5a4f
+
+oras push ghcr.io/githedgehog/sonic-cls-private/sonic-cls-plus-broadcom:${CLS_SONIC_VERSION} sonic-broadcom.bin
+oras push ghcr.io/githedgehog/sonic-cls-private/sonic-cls-plus-marvell:${CLS_SONIC_VERSION} sonic-innovium.bin
+oras push ghcr.io/githedgehog/sonic-cls-private/sonic-cls-plus-vs:${CLS_SONIC_VERSION} sonic-vs.bin
 ```
 
 ## Grafana Alloy
