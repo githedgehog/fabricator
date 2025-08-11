@@ -17,7 +17,7 @@ var (
 	FabricatorVersion = meta.Version(version.Version)
 	FabricVersion     = meta.Version("v0.87.4")
 	GatewayVersion    = meta.Version("v0.17.0")
-	DataplaneVersion  = meta.Version("2025-08-11.dirty.pr-fredi-fix-vrf-iterator.x86_64-unknown-linux-gnu.debug.637c7f9f5cf9c91bc6d1ee2a0da543cadda93e1c")
+	DataplaneVersion  = meta.Version("2025-08-11.dirty.pr-fredi-simplify-vtep-latest.x86_64-unknown-linux-gnu.debug.8e9196e7b3a285a0520fe556859e8899d6dd8786")
 	FRRVersion        = meta.Version("7e7b0ff13cb13b49977076b091d90cfb8c526b3b.debug")
 	BCMSONiCVersion   = meta.Version("v4.5.0")
 
