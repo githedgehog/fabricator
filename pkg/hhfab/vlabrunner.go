@@ -565,6 +565,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 		slog.Info("VLAB is ready", "took", time.Since(start))
 
 		if err := func() error {
+			onReadyStart := time.Now()
 			if len(opts.OnReady) > 0 {
 				slog.Info("Running on-ready commands", "commands", opts.OnReady)
 			}
@@ -684,7 +685,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 			}
 
 			if len(opts.OnReady) > 0 {
-				slog.Info("All on-ready commands finished")
+				slog.Info("All on-ready commands finished", "took", time.Since(onReadyStart))
 			}
 
 			return nil
