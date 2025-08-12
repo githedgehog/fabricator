@@ -178,25 +178,29 @@ func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) erro
 		for _, swName := range expectedSwitches {
 			ag := &agentapi.Agent{}
 			if err := kube.Get(ctx, client.ObjectKey{Name: swName, Namespace: metav1.NamespaceDefault}, ag); err != nil {
-				if !apierrors.IsNotFound(err) {
-					continue
+				if apierrors.IsNotFound(err) {
+					slog.Warn("Switch agent not found", "name", swName)
+				} else {
+					slog.Warn("Failed to get switch agent", "name", swName, "error", err.Error())
 				}
 
-				return fmt.Errorf("getting switch agent %q: %w", swName, err)
+				swNotReady = append(swNotReady, swName)
+
+				continue
 			}
 
 			// make sure that desired agent version is the same as we expect (same as controller version, may be different if not reconciled)
 			ready := ag.Spec.Version.Default == expectedSwAgentV
 
 			// make sure last applied generation is the same as current generation
-			ready = ready && ag.Status.LastAppliedGen == ag.Generation
+			ready = ready && ag.Generation > 0 && ag.Status.LastAppliedGen == ag.Generation
 
 			// make sure last heartbeat is recent enough
 			ready = ready && time.Since(ag.Status.LastHeartbeat.Time) < 1*time.Minute
 
 			if opts.AppliedFor > 0 {
 				// make sure agent config was applied for long enough
-				ready = ready && time.Since(ag.Status.LastAppliedTime.Time) >= opts.AppliedFor
+				ready = ready && !ag.Status.LastAppliedTime.IsZero() && time.Since(ag.Status.LastAppliedTime.Time) >= opts.AppliedFor
 			}
 
 			if ready {
@@ -222,18 +226,22 @@ func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) erro
 		for _, gwName := range expectedGateways {
 			gwag := &gwintapi.GatewayAgent{}
 			if err := kube.Get(ctx, client.ObjectKey{Name: gwName, Namespace: comp.FabNamespace}, gwag); err != nil {
-				if !apierrors.IsNotFound(err) {
-					continue
+				if apierrors.IsNotFound(err) {
+					slog.Warn("Gateway agent not found", "name", gwName)
+				} else {
+					slog.Warn("Failed to get gateway agent", "name", gwName, "error", err.Error())
 				}
 
-				return fmt.Errorf("getting gateway agent %s: %w", gwName, err)
+				gwNotReady = append(gwNotReady, gwName)
+
+				continue
 			}
 
 			// make sure that desired agent version is the same as we expect (same as controller version, may be different if not reconciled)
 			ready := gwag.Spec.AgentVersion == expectedGwAgentV
 
 			// make sure last applied generation is the same as current generation
-			ready = ready && gwag.Status.LastAppliedGen == gwag.Generation
+			ready = ready && gwag.Generation > 0 && gwag.Status.LastAppliedGen == gwag.Generation
 
 			// TODO consider adding heartbeats
 			// make sure last heartbeat is recent enough
@@ -241,7 +249,7 @@ func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) erro
 
 			if opts.AppliedFor > 0 {
 				// make sure agent config was applied for long enough
-				ready = ready && time.Since(gwag.Status.LastAppliedTime.Time) >= opts.AppliedFor
+				ready = ready && !gwag.Status.LastAppliedTime.IsZero() && time.Since(gwag.Status.LastAppliedTime.Time) >= opts.AppliedFor
 			}
 
 			if ready {
