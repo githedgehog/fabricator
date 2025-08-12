@@ -1342,7 +1342,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 	}
 	if allVS {
 		slog.Warn("All switches are virtual, ignoring IPerf min speed")
-		opts.IPerfsMinSpeed = 0
+		opts.IPerfsMinSpeed = 0.01
 	}
 
 	if opts.WaitSwitchesReady {
