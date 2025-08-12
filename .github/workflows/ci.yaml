@@ -387,11 +387,12 @@ jobs:
       - name: Prepare debug artifacts
         if: ${{ always() }}
         run: |
-          mkdir -p _debug/0-before
+          mkdir -p _debug/0-before/serial
           cp versions.txt _debug/0-before || true
           cp result/diagram.* _debug/0-before || true
           cp vlab.hhs _debug/0-before || true
           cp -r show-tech-output _debug/0-before || true
+          find ./vlab/vms -type f -name serial.log -exec bash -c 'cp $0 _debug/0-before/serial/$(basename $(dirname $0)).log' {} \; || true
           cp .zot/log _debug/zot.log || true
 
       - name: Build current hhfab
@@ -412,11 +413,12 @@ jobs:
       - name: Prepare debug artifacts
         if: ${{ always() }}
         run: |
-          mkdir -p _debug/1-curr
+          mkdir -p _debug/1-curr/serial
           cp versions.txt _debug/1-curr || true
           cp result/diagram.* _debug/1-curr || true
           cp vlab.hhs _debug/1-curr || true
           cp -r show-tech-output _debug/1-curr || true
+          find ./vlab/vms -type f -name serial.log -exec bash -c 'cp $0 _debug/1-curr/serial/$(basename $(dirname $0)).log' {} \; || true
           cp .zot/log _debug/zot.log || true
 
       - name: hhfab vlab up after upgrade
@@ -433,11 +435,12 @@ jobs:
       - name: Prepare debug artifacts
         if: ${{ always() }}
         run: |
-          mkdir -p _debug/2-after
+          mkdir -p _debug/2-after/serial
           cp versions.txt _debug/2-after || true
           cp result/diagram.* _debug/2-after || true
           cp vlab.hhs _debug/2-after || true
           cp -r show-tech-output _debug/2-after || true
+          find ./vlab/vms -type f -name serial.log -exec bash -c 'cp $0 _debug/2-after/serial/$(basename $(dirname $0)).log' {} \; || true
           cp .zot/log _debug/zot.log || true
           mv _debug fab-${{ github.run_id }}-${{ env.slug }}
 

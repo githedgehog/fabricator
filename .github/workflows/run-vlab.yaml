@@ -219,12 +219,13 @@ jobs:
       - name: Prepare debug artifacts
         if: ${{ always() }}
         run: |
-          mkdir _debug
+          mkdir -p _debug/serial
           cp versions.txt _debug/ || true
           cp result/diagram.* _debug/ || true
           cp vlab.hhs _debug/ || true
           cp -r show-tech-output _debug/ || true
           cp .zot/log _debug/zot.log || true
+          find ./vlab/vms -type f -name serial.log -exec bash -c 'cp $0 _debug/serial/$(basename $(dirname $0)).log' {} \; || true
           mv _debug fab-${{ github.run_id }}-${{ env.slug }}
 
       - name: Upload debug artifacts
