@@ -311,6 +311,9 @@ jobs:
             fromversion: "25.03"
             fromflags: "-m=iso"
           - fabricmode: spine-leaf
+            fromversion: "25.04"
+            fromflags: "-m=iso"
+          - fabricmode: spine-leaf
             fromversion: "dev"
             fromflags: "-m=iso"
 
