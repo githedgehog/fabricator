@@ -153,3 +153,4 @@ issues:
   exclude-files:
     - test
     - internal
+    - vendor
