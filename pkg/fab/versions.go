@@ -18,7 +18,7 @@ var (
 	FabricVersion     = meta.Version("v0.87.4")
 	GatewayVersion    = meta.Version("v0.17.0")
 	DataplaneVersion  = meta.Version("pr-fredi-fix-vpc-mgr.x86_64-unknown-linux-gnu.debug.1ccee3f59fa639e00b67c157c0e8ca529f396362")
-	FRRVersion        = meta.Version("7e7b0ff13cb13b49977076b091d90cfb8c526b3b.debug")
+	FRRVersion        = meta.Version("0e2c2eb86fe78685f99e5c6cd2663d5bc5bbb0dc.debug")
 	BCMSONiCVersion   = meta.Version("v4.5.0")
 
 	// Upgrade constraints, "-0" to include pre-releases
