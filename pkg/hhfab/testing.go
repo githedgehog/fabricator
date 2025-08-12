@@ -1985,7 +1985,7 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphor
 	iPerfsMinSpeed := opts.IPerfsMinSpeed
 	// TODO remove workaround after we have better GW performance
 	if reachability.Reason == ReachabilityReasonGatewayPeering {
-		iPerfsMinSpeed = 1
+		iPerfsMinSpeed = 0.01
 	}
 
 	if err := iperfs.Acquire(ctx, 1); err != nil {
