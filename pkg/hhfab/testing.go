@@ -1342,7 +1342,8 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 	}
 	if allVS {
 		slog.Warn("All switches are virtual, ignoring IPerf min speed")
-		opts.IPerfsMinSpeed = 0.01
+		// Seems like we're facing some iPerf speed issues on VS so disabling the check for the speed
+		opts.IPerfsMinSpeed = 0
 	}
 
 	if opts.WaitSwitchesReady {
@@ -1985,7 +1986,7 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphor
 	iPerfsMinSpeed := opts.IPerfsMinSpeed
 	// TODO remove workaround after we have better GW performance
 	if reachability.Reason == ReachabilityReasonGatewayPeering {
-		iPerfsMinSpeed = 0.01
+		iPerfsMinSpeed = min(iPerfsMinSpeed, 0.01)
 	}
 
 	if err := iperfs.Acquire(ctx, 1); err != nil {
