@@ -840,6 +840,11 @@ func Run(ctx context.Context) error {
 								Usage: "exit on first error",
 								Value: true,
 							},
+							&cli.BoolFlag{
+								Name:    FlagPauseOnFail,
+								Aliases: []string{"p"},
+								Usage:   "pause testing on each scenario failure (for troubleshooting)",
+							},
 							&cli.StringSliceFlag{
 								Name:    FlagNameReady,
 								Aliases: []string{"r"},
@@ -884,6 +889,7 @@ func Run(ctx context.Context) error {
 									OnReady:            onReady,
 									CollectShowTech:    c.Bool(FlagNameCollectShowTech),
 									VPCMode:            vpcapi.VPCMode(handleL2VNI(c.String(FlagNameVPCMode))),
+									PauseOnFail:        c.Bool(FlagPauseOnFail),
 								},
 							}); err != nil {
 								return fmt.Errorf("running VLAB: %w", err)

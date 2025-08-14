@@ -34,6 +34,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/util/sshutil"
 	gwapi "go.githedgehog.com/gateway/api/gateway/v1alpha1"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/term"
 	corev1 "k8s.io/api/core/v1"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -3263,12 +3264,24 @@ func printSuiteResults(ts *JUnitTestSuite) {
 }
 
 func pauseOnFail() {
-	// pause until the user presses enter
-	slog.Warn("Test failed, pausing execution. Note that reverts might still need to apply, so if you intend to continue, please make sure to leave the environment in the same state as you found it")
-	slog.Info("Press enter to continue...")
-	var input string
-	_, _ = fmt.Scanln(&input)
-	slog.Info("Continuing...")
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		// CI environment - pause for a long time to allow debugging
+		pauseDuration := 60 * time.Minute
+		slog.Warn("Running in non-interactive environment (CI)")
+		slog.Info("Pausing for debugging", "duration", pauseDuration)
+		slog.Info("You can connect to debug the VLAB state during this pause")
+		slog.Info("The test will automatically continue after the pause duration")
+
+		time.Sleep(pauseDuration)
+		slog.Info("Pause duration expired, continuing...")
+	} else {
+		// pause until the user presses enter
+		slog.Warn("Test failed, pausing execution. Note that reverts might still need to apply, so if you intend to continue, please make sure to leave the environment in the same state as you found it")
+		slog.Info("Press enter to continue...")
+		var input string
+		_, _ = fmt.Scanln(&input)
+		slog.Info("Continuing...")
+	}
 }
 
 func doRunTests(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSuite) (*JUnitTestSuite, error) {

@@ -67,6 +67,11 @@ on:
         type: boolean
         required: false
         default: false
+      pause_on_fail:
+        description: "Pause release tests on failure for debugging"
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -258,6 +263,7 @@ jobs:
             --ready=setup-peerings \
             --ready=test-connectivity \
             ${{ inputs.releasetest && '--ready=release-test' || '' }} \
+            ${{ inputs.releasetest && inputs.pause_on_fail && '--pause-on-fail' || '' }} \
             --ready=exit \
             ${{ inputs.upgradefrom != '' && '--upgrade' || '' }}
 

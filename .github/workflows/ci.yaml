@@ -43,6 +43,11 @@ on:
         options:
           - "l2vni"
           - "l3vni"
+      pause_on_fail:
+        type: boolean
+        description: "Pause release tests on failure for debugging"
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -250,6 +255,8 @@ jobs:
       releasetest: ${{ inputs.releasetest == true || contains(github.event.pull_request.labels.*.name, 'ci:+release') }}
       hybrid: ${{ matrix.hybrid }}
       upgradefrom: ${{ matrix.upgradefrom }}
+      debug: ${{ inputs.debug_enabled || false }}
+      pause_on_fail: ${{ inputs.pause_on_fail || false }}
 
     strategy:
       fail-fast: false
