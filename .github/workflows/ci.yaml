@@ -35,6 +35,14 @@ on:
         description: "Run the build with tmate debugging enabled (https://github.com/marketplace/actions/debugging-with-tmate)"
         required: false
         default: false
+      hlab_vpc_mode:
+        type: choice
+        description: "HLab VPC mode (only affects hybrid lab)"
+        required: false
+        default: "l2vni"
+        options:
+          - "l2vni"
+          - "l3vni"
 
 permissions:
   contents: read
@@ -222,7 +230,7 @@ jobs:
     uses: ./.github/workflows/run-vlab.yaml
     with:
       # if pull_request: skip hlab if not ci:+hlab and skip vlab if ci:-vlab
-      skip: ${{ github.event_name == 'pull_request' && (matrix.hybrid && !contains(github.event.pull_request.labels.*.name, 'ci:+hlab') || !matrix.hybrid && contains(github.event.pull_request.labels.*.name, 'ci:-vlab')) }}
+      skip: ${{ (github.event_name == 'pull_request' && (matrix.hybrid && !contains(github.event.pull_request.labels.*.name, 'ci:+hlab') || !matrix.hybrid && contains(github.event.pull_request.labels.*.name, 'ci:-vlab'))) || (matrix.hybrid && github.event_name != 'workflow_dispatch' && matrix.vpcmode != 'l2vni') || (matrix.hybrid && github.event_name == 'workflow_dispatch' && matrix.vpcmode != (inputs.hlab_vpc_mode || 'l2vni')) }}
       fabricatorref: ${{ github.ref }}
       fabricmode: ${{ matrix.fabricmode }}
       mesh: ${{ matrix.mesh }}
@@ -294,6 +302,13 @@ jobs:
             includeonie: false
             buildmode: iso
             vpcmode: l2vni
+            hybrid: true
+          - fabricmode: spine-leaf
+            mesh: false
+            gateway: false
+            includeonie: false
+            buildmode: iso
+            vpcmode: l3vni
             hybrid: true
 
   vlab-upgrade:
