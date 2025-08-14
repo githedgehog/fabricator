@@ -98,6 +98,7 @@ type VLABRunOpts struct {
 	OnReady            []string
 	CollectShowTech    bool
 	VPCMode            vpcapi.VPCMode
+	PauseOnFail        bool
 }
 
 type OnReady string
@@ -674,6 +675,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						ResultsFile: "release-test.xml",
 						HashPolicy:  HashPolicyL2And3,
 						VPCMode:     opts.VPCMode,
+						PauseOnFail: opts.PauseOnFail,
 					}); err != nil {
 						slog.Warn("Failed to run release test", "err", err)
 

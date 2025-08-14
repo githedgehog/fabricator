@@ -35,6 +35,11 @@ on:
         description: "Run the build with tmate debugging enabled (https://github.com/marketplace/actions/debugging-with-tmate)"
         required: false
         default: false
+      pause_on_fail:
+        type: boolean
+        description: "Pause release tests on failure for debugging"
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -232,6 +237,8 @@ jobs:
       vpcmode: ${{ matrix.vpcmode }}
       releasetest: ${{ inputs.releasetest == true || contains(github.event.pull_request.labels.*.name, 'ci:+release') }}
       hybrid: ${{ matrix.hybrid }}
+      debug: ${{ inputs.debug_enabled || false }}
+      pause_on_fail: ${{ inputs.pause_on_fail || false }}
 
     strategy:
       fail-fast: false
