@@ -250,6 +250,7 @@ type PlatformVersions struct {
 	NTP         meta.Version `json:"ntp,omitempty"`
 	NTPChart    meta.Version `json:"ntpChart,omitempty"`
 	Alloy       meta.Version `json:"alloy,omitempty"`
+	BashCompletion meta.Version `json:"bashCompletion,omitempty"`
 }
 
 type FabricatorVersions struct {

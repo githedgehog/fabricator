@@ -39,6 +39,7 @@ var Versions = fabapi.Versions{
 		NTP:         "v0.0.2",
 		NTPChart:    FabricatorVersion,
 		Alloy:       "v1.9.2",
+		BashCompletion: "v2.16.0",
 	},
 	Fabricator: fabapi.FabricatorVersions{
 		API:            FabricatorVersion,

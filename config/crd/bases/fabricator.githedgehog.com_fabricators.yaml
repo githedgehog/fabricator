@@ -345,6 +345,8 @@ spec:
                         properties:
                           alloy:
                             type: string
+                          bashCompletion:
+                            type: string
                           certManager:
                             type: string
                           k3s:
@@ -556,6 +558,8 @@ spec:
                   platform:
                     properties:
                       alloy:
+                        type: string
+                      bashCompletion:
                         type: string
                       certManager:
                         type: string
