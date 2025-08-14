@@ -169,7 +169,7 @@ func sortNodes(nodes []Node, links []Link) TieredNodes {
 	for _, node := range nodes {
 		switch node.Type {
 		case NodeTypeSwitch:
-			if role, ok := node.Properties["role"]; ok && role == SwitchRoleSpine {
+			if role, ok := node.Properties[PropRole]; ok && role == SwitchRoleSpine {
 				result.Spine = append(result.Spine, node)
 			} else {
 				result.Leaf = append(result.Leaf, node)
@@ -188,8 +188,8 @@ func sortNodes(nodes []Node, links []Link) TieredNodes {
 
 	// Sort spine nodes by description first, then by ID
 	sort.Slice(result.Spine, func(i, j int) bool {
-		descI, hasDescI := result.Spine[i].Properties["description"]
-		descJ, hasDescJ := result.Spine[j].Properties["description"]
+		descI, hasDescI := result.Spine[i].Properties[PropDescription]
+		descJ, hasDescJ := result.Spine[j].Properties[PropDescription]
 
 		if hasDescI && hasDescJ { //nolint:gocritic
 			if descI != descJ {
@@ -206,8 +206,8 @@ func sortNodes(nodes []Node, links []Link) TieredNodes {
 
 	// Sort leaf nodes by description first, then by ID
 	sort.Slice(result.Leaf, func(i, j int) bool {
-		descI, hasDescI := result.Leaf[i].Properties["description"]
-		descJ, hasDescJ := result.Leaf[j].Properties["description"]
+		descI, hasDescI := result.Leaf[i].Properties[PropDescription]
+		descJ, hasDescJ := result.Leaf[j].Properties[PropDescription]
 
 		if hasDescI && hasDescJ { //nolint:gocritic
 			if descI != descJ {
@@ -482,8 +482,8 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 
 		// Extract redundancy group information
 		if sw.Spec.Redundancy.Group != "" {
-			node.Properties["redundancyGroup"] = sw.Spec.Redundancy.Group
-			node.Properties["redundancyType"] = string(sw.Spec.Redundancy.Type)
+			node.Properties[PropRedundancyGroup] = sw.Spec.Redundancy.Group
+			node.Properties[PropRedundancyType] = string(sw.Spec.Redundancy.Type)
 		}
 
 		topo.Nodes = append(topo.Nodes, node)
@@ -627,8 +627,8 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 				Target: externalName,
 				Type:   EdgeTypeExternal,
 				Properties: map[string]string{
-					PropSourcePort:   switchPort,
-					"connectionName": connName,
+					PropSourcePort:     switchPort,
+					PropConnectionName: connName,
 				},
 			}
 			topo.Links = append(topo.Links, link)
@@ -662,8 +662,8 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 			Target: externalNodeName,
 			Type:   EdgeTypeStaticExternal,
 			Properties: map[string]string{
-				PropSourcePort:   switchPort,
-				"connectionName": connName,
+				PropSourcePort:     switchPort,
+				PropConnectionName: connName,
 			},
 		}
 		topo.Links = append(topo.Links, link)
@@ -897,7 +897,7 @@ func getRedundancyGroups(nodes []Node) map[string][]Node {
 	for _, node := range nodes {
 		if node.Type == NodeTypeSwitch {
 			// Check for redundancy group in properties
-			if groupName, ok := node.Properties["redundancyGroup"]; ok && groupName != "" {
+			if groupName, ok := node.Properties[PropRedundancyGroup]; ok && groupName != "" {
 				redundancyGroups[groupName] = append(redundancyGroups[groupName], node)
 			}
 		}
