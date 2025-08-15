@@ -2294,6 +2294,8 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringTest(ctx context.Context) (bool,
 	externalPeerings := make(map[string]*vpcapi.ExternalPeeringSpec, 0)
 	gwPeerings := make(map[string]*gwapi.PeeringSpec, 1)
 
+	// TODO: abstract these steps and have a helper where you pass the name (or index) of two VPCs and
+	// it populates the gateway peering array, similarly to what we do for VPCs and external peerings
 	vpc1 := vpcs.Items[0].Name
 	vpc2 := vpcs.Items[1].Name
 
@@ -2329,11 +2331,6 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringTest(ctx context.Context) (bool,
 	}
 
 	if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
-		if testCtx.pauseOnFail {
-			slog.Warn("Gateway peering test failed, pausing for troubleshooting before cleanup...")
-			pauseOnFail()
-		}
-
 		return false, reverts, fmt.Errorf("testing gateway peering connectivity: %w", err)
 	}
 
@@ -2883,17 +2880,6 @@ func makeVpcPeeringsBasicSuiteRun(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 				SubInterfaces: true,
 			},
 		},
-	}
-	suite.Tests = len(suite.TestCases)
-
-	return suite
-}
-
-func makeGatewayPeeringSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
-	suite := &JUnitTestSuite{
-		Name: "Gateway Peering Suite",
-	}
-	suite.TestCases = []JUnitTestCase{
 		{
 			Name: "Gateway Peering",
 			F:    testCtx.gatewayPeeringTest,
@@ -3094,23 +3080,15 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 		return fmt.Errorf("running basic VPC suite: %w", err)
 	}
 
-	gatewayTestCtx := makeTestCtx(kube, opts, workDir, cacheDir, true, rtOtps, roceLeaves)
-	gatewaySuite := makeGatewayPeeringSuite(gatewayTestCtx)
-	gatewayResults, err := selectAndRunSuite(ctx, gatewayTestCtx, gatewaySuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
-	if err != nil && rtOtps.FailFast {
-		return fmt.Errorf("running gateway suite: %w", err)
-	}
-
 	slog.Info("*** Recap of the test results ***")
 	printSuiteResults(noVpcResults)
 	printSuiteResults(singleVpcResults)
 	printSuiteResults(multiVpcResults)
 	printSuiteResults(basicResults)
-	printSuiteResults(gatewayResults)
 
 	if rtOtps.ResultsFile != "" {
 		report := JUnitReport{
-			Suites: []JUnitTestSuite{*singleVpcResults, *multiVpcResults, *basicResults, *noVpcResults, *gatewayResults},
+			Suites: []JUnitTestSuite{*singleVpcResults, *multiVpcResults, *basicResults, *noVpcResults},
 		}
 		output, err := xml.MarshalIndent(report, "", "  ")
 		if err != nil {
@@ -3122,8 +3100,8 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 	}
 
 	slog.Info("All tests completed", "duration", time.Since(testStart).String())
-	if singleVpcResults.Failures > 0 || multiVpcResults.Failures > 0 || basicResults.Failures > 0 || noVpcResults.Failures > 0 || gatewayResults.Failures > 0 {
-		return fmt.Errorf("some tests failed: singleVpc=%d, multiVpc=%d, basic=%d, noVpc=%d, gateway=%d", singleVpcResults.Failures, multiVpcResults.Failures, basicResults.Failures, noVpcResults.Failures, gatewayResults.Failures) //nolint:goerr113
+	if singleVpcResults.Failures > 0 || multiVpcResults.Failures > 0 || basicResults.Failures > 0 || noVpcResults.Failures > 0 {
+		return fmt.Errorf("some tests failed: singleVpc=%d, multiVpc=%d, basic=%d, noVpc=%d", singleVpcResults.Failures, multiVpcResults.Failures, basicResults.Failures, noVpcResults.Failures) //nolint:goerr113
 	}
 
 	return nil
