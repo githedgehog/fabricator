@@ -23,6 +23,8 @@ import (
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/hhfctl"
 	"go.githedgehog.com/fabric/pkg/util/pointer"
+	"go.githedgehog.com/fabricator/pkg/fab"
+	gwapi "go.githedgehog.com/gateway/api/gateway/v1alpha1"
 	"golang.org/x/sync/errgroup"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -2273,6 +2275,65 @@ func (testCtx *VPCPeeringTestCtx) breakoutTest(ctx context.Context) (bool, []Rev
 	return false, nil, nil
 }
 
+// Test basic gateway peering connectivity between two VPCs.
+// Creates a gateway peering between the first two VPCs found, exposing all subnets
+// from each VPC, then tests connectivity to ensure traffic flows through the gateway.
+func (testCtx *VPCPeeringTestCtx) gatewayPeeringTest(ctx context.Context) (bool, []RevertFunc, error) {
+	vpcs := &vpcapi.VPCList{}
+	if err := testCtx.kube.List(ctx, vpcs); err != nil {
+		return false, nil, fmt.Errorf("listing VPCs: %w", err)
+	}
+	if len(vpcs.Items) < 2 {
+		return true, nil, fmt.Errorf("not enough VPCs for gateway peering test") //nolint:goerr113
+	}
+
+	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec, 0)
+	externalPeerings := make(map[string]*vpcapi.ExternalPeeringSpec, 0)
+	gwPeerings := make(map[string]*gwapi.PeeringSpec, 1)
+
+	// TODO: abstract these steps and have a helper where you pass the name (or index) of two VPCs and
+	// it populates the gateway peering array, similarly to what we do for VPCs and external peerings
+	vpc1 := vpcs.Items[0].Name
+	vpc2 := vpcs.Items[1].Name
+
+	vpc1Expose := gwapi.PeeringEntryExpose{}
+	for _, subnet := range vpcs.Items[0].Spec.Subnets {
+		vpc1Expose.IPs = append(vpc1Expose.IPs, gwapi.PeeringEntryIP{CIDR: subnet.Subnet})
+	}
+
+	vpc2Expose := gwapi.PeeringEntryExpose{}
+	for _, subnet := range vpcs.Items[1].Spec.Subnets {
+		vpc2Expose.IPs = append(vpc2Expose.IPs, gwapi.PeeringEntryIP{CIDR: subnet.Subnet})
+	}
+
+	gwPeerings[fmt.Sprintf("%s--%s", vpc1, vpc2)] = &gwapi.PeeringSpec{
+		Peering: map[string]*gwapi.PeeringEntry{
+			vpc1: {
+				Expose: []gwapi.PeeringEntryExpose{vpc1Expose},
+			},
+			vpc2: {
+				Expose: []gwapi.PeeringEntryExpose{vpc2Expose},
+			},
+		},
+	}
+
+	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, gwPeerings, true); err != nil {
+		return false, nil, fmt.Errorf("setting up gateway peerings: %w", err)
+	}
+
+	reverts := []RevertFunc{
+		func(ctx context.Context) error {
+			return DoSetupPeerings(ctx, testCtx.kube, nil, nil, nil, true)
+		},
+	}
+
+	if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
+		return false, reverts, fmt.Errorf("testing gateway peering connectivity: %w", err)
+	}
+
+	return false, reverts, nil
+}
+
 // Utilities and suite runners
 
 func makeTestCtx(kube kclient.Client, opts SetupVPCsOpts, workDir, cacheDir string, wipeBetweenTests bool, rtOpts ReleaseTestOpts, roceLeaves []string) *VPCPeeringTestCtx {
@@ -2329,6 +2390,7 @@ type SkipFlags struct {
 	SubInterfaces bool `xml:"-"` // skip if subinterfaces are not supported by some of the switches
 	NoFabricLink  bool `xml:"-"` // skip if there's no fabric (i.e. spine-leaf) link between the switches
 	NoMeshLink    bool `xml:"-"` // skip if there's no mesh (i.e. leaf-leaf) link between the switches
+	NoGateway     bool `xml:"-"` // skip if gateway is not enabled or no gateways available
 
 	/* Note about subinterfaces; they are required in the following cases:
 	 * 1. when using VPC loopback workaround - it's applied when we have a pair of vpcs or vpc and external both attached on a switch with peering between them
@@ -2611,6 +2673,14 @@ func selectAndRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, suite *J
 
 			continue
 		}
+		if test.SkipFlags.NoGateway && skipFlags.NoGateway {
+			suite.TestCases[i].Skipped = &Skipped{
+				Message: "Gateway is not enabled or no gateways available",
+			}
+			suite.Skipped++
+
+			continue
+		}
 	}
 	if suite.Skipped == suite.Tests {
 		slog.Info("All tests in suite skipped, skipping suite", "suite", suite.Name)
@@ -2803,6 +2873,13 @@ func makeVpcPeeringsBasicSuiteRun(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 				SubInterfaces: true,
 			},
 		},
+		{
+			Name: "Gateway Peering",
+			F:    testCtx.gatewayPeeringTest,
+			SkipFlags: SkipFlags{
+				NoGateway: true,
+			},
+		},
 	}
 	suite.Tests = len(suite.TestCases)
 
@@ -2870,6 +2947,25 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 	if len(connList.Items) == 0 {
 		slog.Info("No fabric connections found")
 		skipFlags.NoFabricLink = true
+	}
+
+	f, _, _, err := fab.GetFabAndNodes(ctx, kube, fab.GetFabAndNodesOpts{AllowNotHydrated: true})
+	if err != nil {
+		return fmt.Errorf("getting fab: %w", err)
+	}
+
+	if !f.Spec.Config.Gateway.Enable {
+		slog.Info("Gateway not enabled, gateway tests will be skipped")
+		skipFlags.NoGateway = true
+	} else {
+		gateways := &gwapi.GatewayList{}
+		if err := kube.List(ctx, gateways); err != nil {
+			return fmt.Errorf("listing gateways: %w", err)
+		}
+		if len(gateways.Items) == 0 {
+			slog.Info("No gateways found, gateway tests will be skipped")
+			skipFlags.NoGateway = true
+		}
 	}
 
 	swList := &wiringapi.SwitchList{}
