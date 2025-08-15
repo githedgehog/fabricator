@@ -19,7 +19,7 @@ KUBECTL="/opt/bin/kubectl"
     cat /etc/os-release
 
     echo -e "\n=== K3s Version ==="
-    k3s --version
+    /opt/bin/k3s --version
 } >> "$OUTPUT_FILE" 2>&1
 
 # ---------------------------
@@ -74,8 +74,6 @@ KUBECTL="/opt/bin/kubectl"
 # Githedgehog Resources
 # ---------------------------
 {
-    echo -e "\n=== githedgehog.com Resources ==="
-    
     echo -e "\n=== Listing API Resources ==="
     resources_githedgehog=$($KUBECTL api-resources --verbs=list --namespaced=true -o name | grep 'githedgehog.com')
     for resource in $resources_githedgehog; do
