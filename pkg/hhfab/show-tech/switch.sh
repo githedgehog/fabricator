@@ -119,6 +119,9 @@ run_sonic_cmd() {
 # System Logs and Status
 # ---------------------------
 {
+    echo -e "\n=== System Status ==="
+    run_sonic_cmd "show system status brief"
+
     echo -e "\n=== System Logs ==="
     run_sonic_cmd "show logging"
     
