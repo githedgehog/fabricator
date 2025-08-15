@@ -35,6 +35,7 @@ jobs:
           - fabricator/charts/fabricator-api
           - fabricator/charts/ntp
           - fabricator/charts/control-proxy
+          - fabricator/charts/zot
 
     runs-on: ubuntu-latest
     steps:

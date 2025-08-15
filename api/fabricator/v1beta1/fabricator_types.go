@@ -287,6 +287,7 @@ type Versions struct {
 type PlatformVersions struct {
 	K3s               meta.Version `json:"k3s,omitempty"`
 	Zot               meta.Version `json:"zot,omitempty"`
+	ZotChart          meta.Version `json:"zotChart,omitempty"`
 	CertManager       meta.Version `json:"certManager,omitempty"`
 	K9s               meta.Version `json:"k9s,omitempty"`
 	Toolbox           meta.Version `json:"toolbox,omitempty"`
