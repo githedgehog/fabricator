@@ -1,0 +1,81 @@
+# Default values for control-proxy.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+# This will set the replicaset count more information can be found here: https://kubernetes.io/docs/concepts/workloads/controllers/replicaset/
+replicaCount: 1
+
+fullNameOverride: "control-proxy"
+
+# This sets the container image more information can be found here: https://kubernetes.io/docs/concepts/containers/images/
+image:
+  repository: ghcr.io/githedgehog/fabricator/control-proxy
+  # This sets the pull policy for images.
+  pullPolicy: IfNotPresent
+
+#This section builds out the service account more information can be found here: https://kubernetes.io/docs/concepts/security/service-accounts/
+# This is for setting Kubernetes Annotations to a Pod.
+# For more information checkout: https://kubernetes.io/docs/concepts/overview/working-with-objects/annotations/ 
+podAnnotations: {}
+# This is for setting Kubernetes Labels to a Pod.
+# For more information checkout: https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/
+podLabels: {}
+
+podSecurityContext: {}
+  # fsGroup: 2000
+
+securityContext: {}
+  # capabilities:
+  #   drop:
+  #   - ALL
+  # readOnlyRootFilesystem: true
+  # runAsNonRoot: true
+  # runAsUser: 1000
+
+config: |
+  User 65532
+  Group 65532
+  Port 3128
+  LogLevel Connect
+  MaxClients 1024
+  Filter "/conf/filters.conf"
+  FilterDefaultDeny Yes
+  FilterType fnmatch
+
+urls: []
+
+# This is for setting up a service more information can be found here: https://kubernetes.io/docs/concepts/services-networking/service/
+service:
+  type: NodePort
+  port: 3128
+  nodePort: 31028
+
+resources: {}
+  # We usually recommend not to specify default resources and to leave this as a conscious
+  # choice for the user. This also increases chances charts run on environments with little
+  # resources, such as Minikube. If you do want to specify resources, uncomment the following
+  # lines, adjust them as necessary, and remove the curly braces after 'resources:'.
+  # limits:
+  #   cpu: 100m
+  #   memory: 128Mi
+  # requests:
+  #   cpu: 100m
+  #   memory: 128Mi
+
+# Additional volumes on the output Deployment definition.
+volumes:
+ - name: tinyproxy
+   configMap:
+     name: tinyproxy-config
+
+# Additional volumeMounts on the output Deployment definition.
+volumeMounts:
+ - name: tinyproxy
+   mountPath: "/conf"
+   readOnly: true
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}

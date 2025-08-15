@@ -31,8 +31,6 @@ const (
 	BootRef               = "fabric/fabric-boot"
 	AgentRef              = "fabric/agent"
 	CtlRef                = "fabric/hhfctl"
-	ProxyChartRef         = "fabric/charts/fabric-proxy"
-	ProxyRef              = "fabric/fabric-proxy"
 	BroadcomSonicRefBase  = "sonic-bcm-private"
 	CelesticaSonicRefBase = "sonic-cls-private"
 	OnieRefBase           = "onie-updater-private"
@@ -56,9 +54,6 @@ var bootValuesTmpl string
 
 //go:embed dhcp_values.tmpl.yaml
 var dhcpValuesTmpl string
-
-//go:embed proxy_values.tmpl.yaml
-var proxyValuesTmpl string
 
 func Install(control fabapi.ControlNode) comp.KubeInstall {
 	return func(cfg fabapi.Fabricator) ([]kclient.Object, error) {
@@ -144,24 +139,6 @@ func Install(control fabapi.ControlNode) comp.KubeInstall {
 			return nil, fmt.Errorf("creating fabric boot helm chart: %w", err)
 		}
 
-		proxyRef, err := comp.ImageURL(cfg, ProxyRef)
-		if err != nil {
-			return nil, fmt.Errorf("getting image URL for %q: %w", ProxyRef, err)
-		}
-		proxyValues, err := tmplutil.FromTemplate("proxy-values", proxyValuesTmpl, map[string]any{
-			"Repo": proxyRef,
-			"Tag":  string(cfg.Status.Versions.Fabric.Proxy),
-			"Port": ProxyNodePort,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("proxy values: %w", err)
-		}
-		proxyHelm, err := comp.NewHelmChart(cfg, "fabric-proxy", ProxyChartRef,
-			string(cfg.Status.Versions.Fabric.ProxyChart), "", false, proxyValues)
-		if err != nil {
-			return nil, fmt.Errorf("creating fabric proxy helm chart: %w", err)
-		}
-
 		return []kclient.Object{
 			apiHelm,
 			comp.NewConfigMap("fabric-ctrl-config", map[string]string{
@@ -173,7 +150,6 @@ func Install(control fabapi.ControlNode) comp.KubeInstall {
 				"config.yaml": string(bootCfgYaml),
 			}),
 			bootHelm,
-			proxyHelm,
 		}, nil
 	}
 }
@@ -312,18 +288,16 @@ var _ comp.ListOCIArtifacts = Artifacts
 
 func Artifacts(cfg fabapi.Fabricator) (comp.OCIArtifacts, error) {
 	arts := comp.OCIArtifacts{
-		APIChartRef:   cfg.Status.Versions.Fabric.API,
-		CtrlChartRef:  cfg.Status.Versions.Fabric.Controller,
-		CtrlRef:       cfg.Status.Versions.Fabric.Controller,
-		DHCPChartRef:  cfg.Status.Versions.Fabric.DHCPD,
-		DHCPRef:       cfg.Status.Versions.Fabric.DHCPD,
-		BootChartRef:  cfg.Status.Versions.Fabric.Boot,
-		BootRef:       cfg.Status.Versions.Fabric.Boot,
-		AgentRef:      cfg.Status.Versions.Fabric.Agent,
-		CtlRef:        cfg.Status.Versions.Fabric.Ctl,
-		alloy.BinRef:  alloy.Version(cfg),
-		ProxyChartRef: cfg.Status.Versions.Fabric.ProxyChart,
-		ProxyRef:      cfg.Status.Versions.Fabric.Proxy,
+		APIChartRef:  cfg.Status.Versions.Fabric.API,
+		CtrlChartRef: cfg.Status.Versions.Fabric.Controller,
+		CtrlRef:      cfg.Status.Versions.Fabric.Controller,
+		DHCPChartRef: cfg.Status.Versions.Fabric.DHCPD,
+		DHCPRef:      cfg.Status.Versions.Fabric.DHCPD,
+		BootChartRef: cfg.Status.Versions.Fabric.Boot,
+		BootRef:      cfg.Status.Versions.Fabric.Boot,
+		AgentRef:     cfg.Status.Versions.Fabric.Agent,
+		CtlRef:       cfg.Status.Versions.Fabric.Ctl,
+		alloy.BinRef: alloy.Version(cfg),
 	}
 
 	for nosType, version := range cfg.Status.Versions.Fabric.NOS {
@@ -376,7 +350,6 @@ var (
 	_ comp.KubeStatus = StatusCtrl
 	_ comp.KubeStatus = StatusDHCP
 	_ comp.KubeStatus = StatusBoot
-	_ comp.KubeStatus = StatusProxy
 )
 
 func StatusAPI(ctx context.Context, kube kclient.Reader, cfg fabapi.Fabricator) (fabapi.ComponentStatus, error) {
@@ -414,14 +387,4 @@ func StatusBoot(ctx context.Context, kube kclient.Reader, cfg fabapi.Fabricator)
 	image := ref + ":" + string(cfg.Status.Versions.Fabric.Boot)
 
 	return comp.GetDeploymentStatus("fabric-boot", "fabric-boot", image)(ctx, kube, cfg)
-}
-
-func StatusProxy(ctx context.Context, kube kclient.Reader, cfg fabapi.Fabricator) (fabapi.ComponentStatus, error) {
-	ref, err := comp.ImageURL(cfg, ProxyRef)
-	if err != nil {
-		return fabapi.CompStatusUnknown, fmt.Errorf("getting image URL for %q: %w", ProxyRef, err)
-	}
-	image := ref + ":" + string(cfg.Status.Versions.Fabric.Proxy)
-
-	return comp.GetDeploymentStatus("fabric-proxy", "fabric-proxy", image)(ctx, kube, cfg)
 }

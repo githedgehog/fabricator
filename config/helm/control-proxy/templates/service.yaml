@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "control-proxy.fullname" . }}
+  labels:
+    {{- include "control-proxy.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: http-proxy
+      nodePort: {{ .Values.service.nodePort }}
+      protocol: TCP
+      name: tiny-proxy
+  selector:
+    {{- include "control-proxy.selectorLabels" . | nindent 4 }}
