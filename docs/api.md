@@ -660,6 +660,7 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `k3s` _[Version](#version)_ |  |  |  |
 | `zot` _[Version](#version)_ |  |  |  |
+| `zotChart` _[Version](#version)_ |  |  |  |
 | `certManager` _[Version](#version)_ |  |  |  |
 | `k9s` _[Version](#version)_ |  |  |  |
 | `toolbox` _[Version](#version)_ |  |  |  |

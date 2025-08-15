@@ -106,7 +106,8 @@ func Install(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 		return nil, fmt.Errorf("parsing control VIP: %w", err)
 	}
 
-	helmChart, err := comp.NewHelmChart(cfg, releaseName, ChartRef, version, AirgapChartName, false, values)
+	chartVersion := string(cfg.Status.Versions.Platform.ZotChart)
+	helmChart, err := comp.NewHelmChart(cfg, releaseName, ChartRef, chartVersion, AirgapChartName, false, values)
 	if err != nil {
 		return nil, fmt.Errorf("creating Helm chart: %w", err)
 	}
@@ -227,7 +228,7 @@ func Artifacts(cfg fabapi.Fabricator) (comp.OCIArtifacts, error) {
 	version := Version(cfg)
 
 	return comp.OCIArtifacts{
-		ChartRef: version,
+		ChartRef: cfg.Status.Versions.Platform.ZotChart,
 		ImageRef: version,
 	}, nil
 }
