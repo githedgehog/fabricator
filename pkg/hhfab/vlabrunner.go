@@ -585,6 +585,10 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 
 						c.CollectVLABDebug(ctx, vlab, opts)
 
+						if opts.PauseOnFail {
+							pauseOnFail()
+						}
+
 						return fmt.Errorf("reinstalling switches: %w", err)
 					}
 				case OnReadySetupVPCs:
@@ -603,6 +607,10 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						slog.Warn("Failed to setup VPCs", "err", err)
 
 						c.CollectVLABDebug(ctx, vlab, opts)
+
+						if opts.PauseOnFail {
+							pauseOnFail()
+						}
 
 						return fmt.Errorf("setting up VPCs: %w", err)
 					}
@@ -624,6 +632,10 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 
 						c.CollectVLABDebug(ctx, vlab, opts)
 
+						if opts.PauseOnFail {
+							pauseOnFail()
+						}
+
 						return fmt.Errorf("setting up peerings: %w", err)
 					}
 				case OnReadyTestConnectivity:
@@ -637,6 +649,10 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						slog.Warn("Failed to test connectivity", "err", err)
 
 						c.CollectVLABDebug(ctx, vlab, opts)
+
+						if opts.PauseOnFail {
+							pauseOnFail()
+						}
 
 						return fmt.Errorf("testing connectivity: %w", err)
 					}
@@ -656,6 +672,10 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 
 						c.CollectVLABDebug(ctx, vlab, opts)
 
+						if opts.PauseOnFail {
+							pauseOnFail()
+						}
+
 						return fmt.Errorf("waiting: %w", err)
 					}
 				case OnReadyInspect:
@@ -667,6 +687,10 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						slog.Warn("Failed to inspect", "err", err)
 
 						c.CollectVLABDebug(ctx, vlab, opts)
+
+						if opts.PauseOnFail {
+							pauseOnFail()
+						}
 
 						return fmt.Errorf("inspecting: %w", err)
 					}
@@ -680,6 +704,10 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						slog.Warn("Failed to run release test", "err", err)
 
 						c.CollectVLABDebug(ctx, vlab, opts)
+
+						if opts.PauseOnFail {
+							pauseOnFail()
+						}
 
 						return fmt.Errorf("release test: %w", err)
 					}
