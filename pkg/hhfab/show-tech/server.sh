@@ -30,6 +30,16 @@ OUTPUT_FILE="/tmp/show-tech.log"
 
   echo -e "\n=== IP Configuration ==="
   ip addr show
+} >> "$OUTPUT_FILE" 2>&1
+
+# ---------------------------
+# Routing Table Information
+# ---------------------------
+{
+  echo -e "\n=== Routing Table Information ==="
+  ip route show
+
+  echo -e "\n=== All Routing Tables ==="
   ip route show table all
 } >> "$OUTPUT_FILE" 2>&1
 
@@ -38,8 +48,13 @@ OUTPUT_FILE="/tmp/show-tech.log"
 # ---------------------------
 {
   DEFAULT_GW=$(ip route | awk '/^default/ {print $3}')
-  echo -e "\n=== Ping Default Gateway ($DEFAULT_GW) ==="
-  ping -c 1 "$DEFAULT_GW" 2>&1
+  if [ -n "$DEFAULT_GW" ]; then
+    echo -e "\n=== Ping Default Gateway ($DEFAULT_GW) ==="
+    ping -c 1 "$DEFAULT_GW" 2>&1
+  else
+    echo -e "\n=== Ping Default Gateway ==="
+    echo "No default gateway found in routing table"
+  fi
 
   echo -e "\n=== Ping Other Servers ==="
   OWN_IP=$(ip route get 8.8.8.8 | awk '{for(i=1;i<=NF;i++) if($i=="src") {print $(i+1); exit}}')
