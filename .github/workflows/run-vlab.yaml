@@ -52,6 +52,16 @@ on:
         type: boolean
         required: false
         default: false
+      release_test_regex:
+        description: "Regex pattern to filter release tests"
+        type: string
+        required: false
+        default: ""
+      release_test_invert_regex:
+        description: "Invert regex selection"
+        type: boolean
+        required: false
+        default: false
       hybrid:
         description: "Enable hybrid mode (use env with physical switches)"
         type: boolean
@@ -194,7 +204,9 @@ jobs:
             ${{ !inputs.gateway && '--ready=setup-peerings' || '' }} \
             --ready=test-connectivity \
             ${{ inputs.releasetest && '--ready=release-test' || '' }} \
-            ${{ inputs.releasetest && inputs.pause_on_fail && '--pause-on-fail' || '' }} \
+            ${{ inputs.release_test_regex && format('--release-test-regex="{0}"', inputs.release_test_regex) || '' }} \
+            ${{ inputs.release_test_invert_regex && '--release-test-invert-regex' || '' }} \
+            ${{ inputs.pause_on_fail && '--pause-on-fail' || '' }} \
             --ready=exit
 
       - name: Upload Release Test Results
