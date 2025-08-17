@@ -99,6 +99,8 @@ type VLABRunOpts struct {
 	CollectShowTech    bool
 	VPCMode            vpcapi.VPCMode
 	PauseOnFail        bool
+	ReleaseTestRegexes []string
+	ReleaseTestInvert  bool
 }
 
 type OnReady string
@@ -700,14 +702,12 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						HashPolicy:  HashPolicyL2And3,
 						VPCMode:     opts.VPCMode,
 						PauseOnFail: opts.PauseOnFail,
+						Regexes:     opts.ReleaseTestRegexes,
+						InvertRegex: opts.ReleaseTestInvert,
 					}); err != nil {
 						slog.Warn("Failed to run release test", "err", err)
 
 						c.CollectVLABDebug(ctx, vlab, opts)
-
-						if opts.PauseOnFail {
-							pauseOnFail()
-						}
 
 						return fmt.Errorf("release test: %w", err)
 					}

@@ -30,6 +30,16 @@ on:
         description: "Run release tests in vlab/hlab"
         required: false
         default: false
+      release_test_regex:
+        type: string
+        description: "Run only release tests matched by regex"
+        required: false
+        default: ""
+      release_test_invert_regex:
+        type: boolean
+        description: "Invert regex match"
+        required: false
+        default: false
       debug_enabled:
         type: boolean
         description: "Run the build with tmate debugging enabled (https://github.com/marketplace/actions/debugging-with-tmate)"
@@ -236,6 +246,8 @@ jobs:
       buildmode: ${{ matrix.buildmode }}
       vpcmode: ${{ matrix.vpcmode }}
       releasetest: ${{ inputs.releasetest == true || contains(github.event.pull_request.labels.*.name, 'ci:+release') }}
+      release_test_regex: ${{ inputs.release_test_regex || '' }}
+      release_test_invert_regex: ${{ inputs.release_test_invert_regex == true }}
       hybrid: ${{ matrix.hybrid }}
       debug: ${{ inputs.debug_enabled || false }}
       pause_on_fail: ${{ inputs.pause_on_fail || false }}
