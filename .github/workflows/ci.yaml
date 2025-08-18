@@ -45,7 +45,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -132,7 +132,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -327,7 +327,7 @@ jobs:
           echo "$KUBE_NODE"
 
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -498,7 +498,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -530,7 +530,7 @@ jobs:
       # Bump fabricator docs in the docs repository
 
       - name: Checkout docs repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: githedgehog/docs
           path: docs-repo
