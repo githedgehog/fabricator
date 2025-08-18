@@ -572,3 +572,53 @@ jobs:
         timeout-minutes: 30
         with:
           limit-access-to-actor: true
+
+  publish-master:
+    runs-on: lab
+    if: ${{ github.ref == 'refs/heads/master' && github.event_name == 'push' }}
+    needs:
+      - test-build
+      - bundle
+      - vlab
+      - vlab-upgrade
+
+    permissions:
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+
+      - name: Login to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate temp artifacts version
+        id: version-gen
+        env:
+          commit_sha: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          echo "version=v0-master-${commit_sha::9}" >> "$GITHUB_OUTPUT"
+          echo "ref=${commit_sha}" >> "$GITHUB_OUTPUT"
+
+      - name: Build all and push all artifacts
+        run: |
+          just --timestamp oci_repo=ghcr.io version="${{ steps.version-gen.outputs.version }}" push push-multi
+
+      - name: Setup tmate session for debug
+        if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
+        uses: mxschmitt/action-tmate@v3
+        timeout-minutes: 30
+        with:
+          limit-access-to-actor: true
