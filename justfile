@@ -28,7 +28,7 @@ lint-fix: _lint _golangci_lint
   {{golangci_lint}} run --show-stats --fix ./...
 
 oem_dir := "./pkg/embed/flatcaroem"
-go_base_flags := "--tags containers_image_openpgp,containers_image_storage_stub"
+go_base_flags := "--tags containers_image_openpgp,containers_image_storage_stub,containers_image_docker_daemon_stub"
 go_flags := go_base_flags + " -ldflags=\"-w -s -X go.githedgehog.com/fabricator/pkg/version.Version=" + version + "\""
 go_build := "go build " + go_flags
 go_linux_build := "GOOS=linux GOARCH=amd64 " + go_build
@@ -51,9 +51,9 @@ _hhfab_embed: _touch_embed
 
 _kube_gen:
   # Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject implementations
-  {{controller_gen}} object:headerFile="hack/boilerplate.go.txt" paths="./..."
+  {{controller_gen}} object:headerFile="hack/boilerplate.go.txt" paths="./api/..." paths="./pkg/controller/..." paths="./internal/..."
   # Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects
-  {{controller_gen}} rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
+  {{controller_gen}} rbac:roleName=manager-role crd webhook paths="./api/..." paths="./pkg/controller/..." paths="./internal/..." output:crd:artifacts:config=config/crd/bases
 
 # Generate docs, code/manifests, things to embed, etc
 gen: _kube_gen _hhfab_embed _crd_ref_docs
