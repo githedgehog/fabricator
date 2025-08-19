@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab/recipe"
 	"go.githedgehog.com/fabricator/pkg/hhfab/pdu"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
@@ -91,6 +92,12 @@ func VLABUp(ctx context.Context, workDir, cacheDir string, opts VLABUpOpts) erro
 
 			break
 		}
+	}
+
+	if opts.ControlsRestricted && c.Fab.Spec.Config.Registry.Mode == fabapi.RegistryModeUpstream {
+		slog.Warn("Use --controls-restricted=false to allow external access for control nodes")
+
+		return fmt.Errorf("controls restricted mode not supported for upstream registry") //nolint:err113
 	}
 
 	if err := c.build(ctx, BuildOpts{
