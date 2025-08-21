@@ -14,7 +14,6 @@ import (
 	"dario.cat/mergo"
 	"github.com/go-playground/validator/v10"
 	fmeta "go.githedgehog.com/fabric/api/meta"
-	"go.githedgehog.com/fabric/pkg/agent/alloy"
 	"go.githedgehog.com/fabric/pkg/agent/dozer/bcm"
 	"go.githedgehog.com/fabricator/api/meta"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -702,7 +701,7 @@ var knownSwitchUsers = []string{
 	"ntp",
 	"frr",
 	bcm.AgentUser,
-	alloy.UserName,
+	// alloy.UserName, // TODO enable validation after LMA rework
 }
 
 func (f *Fabricator) CheckForKnownSwitchUsers() error {

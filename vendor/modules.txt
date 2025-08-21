@@ -1695,8 +1695,6 @@ go.githedgehog.com/fabric/api/dhcp/v1beta1
 go.githedgehog.com/fabric/api/meta
 go.githedgehog.com/fabric/api/vpc/v1beta1
 go.githedgehog.com/fabric/api/wiring/v1beta1
-go.githedgehog.com/fabric/pkg/agent/alloy
-go.githedgehog.com/fabric/pkg/agent/common
 go.githedgehog.com/fabric/pkg/agent/dozer
 go.githedgehog.com/fabric/pkg/agent/dozer/bcm
 go.githedgehog.com/fabric/pkg/agent/dozer/bcm/gnmi
