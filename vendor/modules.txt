@@ -1370,7 +1370,7 @@ github.com/olekukonko/tablewriter/pkg/twwarp
 github.com/olekukonko/tablewriter/pkg/twwidth
 github.com/olekukonko/tablewriter/renderer
 github.com/olekukonko/tablewriter/tw
-# github.com/onsi/ginkgo/v2 v2.23.4
+# github.com/onsi/ginkgo/v2 v2.24.0
 ## explicit; go 1.23.0
 github.com/onsi/ginkgo/v2
 github.com/onsi/ginkgo/v2/config
@@ -1688,8 +1688,8 @@ go.etcd.io/bbolt
 go.etcd.io/bbolt/errors
 go.etcd.io/bbolt/internal/common
 go.etcd.io/bbolt/internal/freelist
-# go.githedgehog.com/fabric v0.88.3
-## explicit; go 1.24.2
+# go.githedgehog.com/fabric v0.89.0
+## explicit; go 1.25.0
 go.githedgehog.com/fabric/api/agent/v1beta1
 go.githedgehog.com/fabric/api/dhcp/v1beta1
 go.githedgehog.com/fabric/api/meta
@@ -1718,6 +1718,10 @@ go.githedgehog.com/fabric-bcm-ygot/pkg/oc
 go.githedgehog.com/gateway/api/gateway/v1alpha1
 go.githedgehog.com/gateway/api/gwint/v1alpha1
 go.githedgehog.com/gateway/api/meta
+# go.githedgehog.com/libmeta v0.1.0
+## explicit; go 1.25.0
+go.githedgehog.com/libmeta/pkg/alloy
+go.githedgehog.com/libmeta/pkg/tmpl
 # go.opencensus.io v0.24.0
 ## explicit; go 1.13
 go.opencensus.io
