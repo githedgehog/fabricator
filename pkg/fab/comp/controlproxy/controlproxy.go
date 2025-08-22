@@ -1,4 +1,4 @@
-// Copyright 2024 Hedgehog
+// Copyright 2025 Hedgehog
 // SPDX-License-Identifier: Apache-2.0
 
 package controlproxy
@@ -34,7 +34,7 @@ func Install(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 	}
 
 	urls := []string{}
-	for _, val := range cfg.Spec.Config.Fabric.DefaultAlloyConfig.PrometheusTargets {
+	for _, val := range cfg.Spec.Config.Observability.Targets.Prometheus {
 		u, err := url.Parse(val.URL)
 		if err != nil {
 			return nil, fmt.Errorf("url parsing prometheus target failed: %w", err)
@@ -44,7 +44,7 @@ func Install(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 			urls = append(urls, u.Hostname())
 		}
 	}
-	for _, val := range cfg.Spec.Config.Fabric.DefaultAlloyConfig.LokiTargets {
+	for _, val := range cfg.Spec.Config.Observability.Targets.Loki {
 		u, err := url.Parse(val.URL)
 		if err != nil {
 			return nil, fmt.Errorf("url parsing loki target failed: %w", err)
