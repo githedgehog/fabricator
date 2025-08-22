@@ -38,7 +38,7 @@ var Versions = fabapi.Versions{
 		Reloader:          "v1.0.40", // TODO upgrade or get rid of?
 		NTP:               "v0.0.2",
 		NTPChart:          FabricatorVersion,
-		Alloy:             "v1.9.2",
+		Alloy:             "v1.10.2",
 		ControlProxy:      "v1.11.2-hh2",
 		ControlProxyChart: FabricatorVersion,
 	},
