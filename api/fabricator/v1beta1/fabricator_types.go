@@ -478,7 +478,7 @@ func (f *Fabricator) Default() {
 	if f.Spec.Config.Observability.Targets.Loki == nil {
 		f.Spec.Config.Observability.Targets.Loki = map[string]alloy.LokiTarget{}
 	}
-	for name, target := range f.Spec.Config.Observability.Targets.Loki {
+	for name, target := range f.Spec.Config.Fabric.DefaultAlloyConfig.LokiTargets {
 		if _, ok := f.Spec.Config.Observability.Targets.Loki[name]; !ok {
 			f.Spec.Config.Observability.Targets.Loki[name] = alloy.LokiTarget{
 				Target: alloy.Target{
