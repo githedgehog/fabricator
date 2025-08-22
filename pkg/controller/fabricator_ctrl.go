@@ -195,6 +195,10 @@ func (r *FabricatorReconciler) Reconcile(ctx context.Context, req kctrl.Request)
 			return kctrl.Result{}, fmt.Errorf("enforcing controlproxy install: %w", err)
 		}
 
+		if err := comp.DeleteHelmChartIfPresent(ctx, r.Client, "fabric-proxy"); err != nil {
+			return kctrl.Result{}, fmt.Errorf("deleting fabric-proxy helm chart: %w", err)
+		}
+
 		if err := comp.EnforceKubeInstall(ctx, r.Client, *f,
 			k3s.InstallNodeRegistries(comp.RegistryUserReader, string(regPassword)),
 		); err != nil {
