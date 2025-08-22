@@ -14,6 +14,7 @@ import (
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/alloy"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/certmanager"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/controlproxy"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/f8r"
@@ -213,6 +214,10 @@ func (r *FabricatorReconciler) Reconcile(ctx context.Context, req kctrl.Request)
 			return kctrl.Result{}, fmt.Errorf("enforcing gateway install: %w", err)
 		}
 
+		if err := comp.EnforceKubeInstall(ctx, r.Client, *f, alloy.Install); err != nil {
+			return kctrl.Result{}, fmt.Errorf("enforcing alloy install: %w", err)
+		}
+
 		// Should be probably always updated last
 		if err := comp.EnforceKubeInstall(ctx, r.Client, *f, f8r.Install); err != nil {
 			return kctrl.Result{}, fmt.Errorf("enforcing fabricactor install: %w", err)
@@ -326,6 +331,11 @@ func (r *FabricatorReconciler) statusCheck(ctx context.Context, l logr.Logger, f
 	f.Status.Components.GatewayCtrl, err = gateway.StatusCtrl(ctx, r.Client, *f)
 	if err != nil {
 		return fmt.Errorf("getting gateway ctrl status: %w", err)
+	}
+
+	f.Status.Components.GatewayAlloy, err = alloy.StatusGateway(ctx, r.Client, *f)
+	if err != nil {
+		return fmt.Errorf("getting gateway alloy status: %w", err)
 	}
 
 	if f.Status.Components.IsReady(*f) {

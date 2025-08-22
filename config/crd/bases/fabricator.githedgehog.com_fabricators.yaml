@@ -323,6 +323,93 @@ spec:
                         type: boolean
                       mac:
                         type: string
+                      observability:
+                        properties:
+                          dataplane:
+                            properties:
+                              metrics:
+                                type: boolean
+                              metricsInterval:
+                                type: integer
+                              metricsRelabel:
+                                items:
+                                  properties:
+                                    action:
+                                      type: string
+                                    regex:
+                                      type: string
+                                    replacement:
+                                      type: string
+                                    separator:
+                                      type: string
+                                    sourceLabels:
+                                      items:
+                                        type: string
+                                      type: array
+                                    targetLabel:
+                                      type: string
+                                  type: object
+                                type: array
+                            type: object
+                          frr:
+                            properties:
+                              metrics:
+                                type: boolean
+                              metricsInterval:
+                                type: integer
+                              metricsRelabel:
+                                items:
+                                  properties:
+                                    action:
+                                      type: string
+                                    regex:
+                                      type: string
+                                    replacement:
+                                      type: string
+                                    separator:
+                                      type: string
+                                    sourceLabels:
+                                      items:
+                                        type: string
+                                      type: array
+                                    targetLabel:
+                                      type: string
+                                  type: object
+                                type: array
+                            type: object
+                          unix:
+                            properties:
+                              journal:
+                                type: boolean
+                              metrics:
+                                type: boolean
+                              metricsCollectors:
+                                items:
+                                  type: string
+                                type: array
+                              metricsInterval:
+                                type: integer
+                              metricsRelabel:
+                                items:
+                                  properties:
+                                    action:
+                                      type: string
+                                    regex:
+                                      type: string
+                                    replacement:
+                                      type: string
+                                    separator:
+                                      type: string
+                                    sourceLabels:
+                                      items:
+                                        type: string
+                                      type: array
+                                    targetLabel:
+                                      type: string
+                                  type: object
+                                type: array
+                            type: object
+                        type: object
                     type: object
                   observability:
                     properties:
@@ -522,6 +609,8 @@ spec:
                   fabricatorNodeConfig:
                     type: string
                   gatewayAPI:
+                    type: string
+                  gatewayAlloy:
                     type: string
                   gatewayCtrl:
                     type: string

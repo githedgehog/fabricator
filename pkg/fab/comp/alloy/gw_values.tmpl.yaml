@@ -8,7 +8,7 @@ alloy:
   listenAddr: 0.0.0.0 # localhost will break readiness probes
   listenPort: 12345
   storagePath: /tmp/alloy
-  mount:
+  mounts:
     varlog: true
   configMap:
     create: true

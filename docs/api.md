@@ -63,6 +63,7 @@ _Appears in:_
 | `controlProxy` _[ComponentStatus](#componentstatus)_ |  |  |  |
 | `gatewayAPI` _[ComponentStatus](#componentstatus)_ |  |  |  |
 | `gatewayCtrl` _[ComponentStatus](#componentstatus)_ |  |  |  |
+| `gatewayAlloy` _[ComponentStatus](#componentstatus)_ |  |  |  |
 
 
 #### ControlConfig
@@ -513,6 +514,81 @@ _Appears in:_
 | `enable` _boolean_ |  |  |  |
 | `asn` _integer_ |  |  |  |
 | `mac` _string_ |  |  |  |
+| `observability` _[GatewayObservability](#gatewayobservability)_ |  |  |  |
+
+
+#### GatewayObservability
+
+
+
+
+
+
+
+_Appears in:_
+- [GatewayConfig](#gatewayconfig)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `dataplane` _[GatewayObservabilityDataplane](#gatewayobservabilitydataplane)_ |  |  |  |
+| `frr` _[GatewayObservabilityFRR](#gatewayobservabilityfrr)_ |  |  |  |
+| `unix` _[GatewayObservabilityUnix](#gatewayobservabilityunix)_ |  |  |  |
+
+
+#### GatewayObservabilityDataplane
+
+
+
+
+
+
+
+_Appears in:_
+- [GatewayObservability](#gatewayobservability)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `metrics` _boolean_ |  |  |  |
+| `metricsInterval` _integer_ |  |  |  |
+| `metricsRelabel` _ScrapeRelabelRule array_ |  |  |  |
+
+
+#### GatewayObservabilityFRR
+
+
+
+
+
+
+
+_Appears in:_
+- [GatewayObservability](#gatewayobservability)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `metrics` _boolean_ |  |  |  |
+| `metricsInterval` _integer_ |  |  |  |
+| `metricsRelabel` _ScrapeRelabelRule array_ |  |  |  |
+
+
+#### GatewayObservabilityUnix
+
+
+
+
+
+
+
+_Appears in:_
+- [GatewayObservability](#gatewayobservability)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `metrics` _boolean_ |  |  |  |
+| `metricsInterval` _integer_ |  |  |  |
+| `metricsRelabel` _ScrapeRelabelRule array_ |  |  |  |
+| `metricsCollectors` _string array_ |  |  |  |
+| `journal` _boolean_ |  |  |  |
 
 
 #### GatewayVersions
