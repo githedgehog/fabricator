@@ -62,18 +62,6 @@ resources: {}
   #   cpu: 100m
   #   memory: 128Mi
 
-# Additional volumes on the output Deployment definition.
-volumes:
- - name: tinyproxy
-   configMap:
-     name: tinyproxy-config
-
-# Additional volumeMounts on the output Deployment definition.
-volumeMounts:
- - name: tinyproxy
-   mountPath: "/conf"
-   readOnly: true
-
 nodeSelector: {}
 
 tolerations: []
