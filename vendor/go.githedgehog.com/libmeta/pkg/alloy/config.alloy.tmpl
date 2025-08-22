@@ -36,6 +36,7 @@ prometheus.remote_write "{{ $name }}" {
   }
   external_labels = {
     {{ if $.Hostname }}hostname = "{{ $.Hostname }}",{{ end }}
+    {{ if $.AutoHostname }}hostname = constants.hostname,{{ end }}
     {{ range $key, $value := $target.Labels }}
     {{ $key }} = "{{ $value }}",
     {{ end }}
@@ -64,6 +65,7 @@ loki.write "{{ $name }}" {
   }
   external_labels = {
     {{ if $.Hostname }}hostname = "{{ $.Hostname }}",{{ end }}
+    {{ if $.AutoHostname }}hostname = constants.hostname,{{ end }}
     {{ range $key, $value := $target.Labels }}
     {{ $key }} = "{{ $value }}",
     {{ end }}

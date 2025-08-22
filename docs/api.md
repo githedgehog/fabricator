@@ -266,6 +266,7 @@ _Appears in:_
 | `registry` _[RegistryConfig](#registryconfig)_ |  |  |  |
 | `fabric` _[FabricConfig](#fabricconfig)_ |  |  |  |
 | `gateway` _[GatewayConfig](#gatewayconfig)_ |  |  |  |
+| `observability` _[ObservabilityConfig](#observabilityconfig)_ |  |  |  |
 
 
 #### FabNode
@@ -386,6 +387,7 @@ _Appears in:_
 | `includeONIE` _boolean_ |  |  |  |
 | `includeCLS` _boolean_ |  |  |  |
 | `disableBFD` _boolean_ |  |  |  |
+| `observability` _[Observability](#observability)_ |  |  |  |
 
 
 #### FabricVersions
@@ -531,6 +533,22 @@ _Appears in:_
 | `agent` _[Version](#version)_ |  |  |  |
 | `dataplane` _[Version](#version)_ |  |  |  |
 | `frr` _[Version](#version)_ |  |  |  |
+
+
+#### ObservabilityConfig
+
+
+
+
+
+
+
+_Appears in:_
+- [FabConfig](#fabconfig)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `targets` _[Targets](#targets)_ |  |  |  |
 
 
 #### PlatformVersions

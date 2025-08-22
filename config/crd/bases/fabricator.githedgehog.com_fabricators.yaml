@@ -223,6 +223,69 @@ spec:
                         type: string
                       mode:
                         type: string
+                      observability:
+                        properties:
+                          agent:
+                            properties:
+                              logs:
+                                type: boolean
+                              metrics:
+                                type: boolean
+                              metricsInterval:
+                                type: integer
+                              metricsRelabel:
+                                items:
+                                  properties:
+                                    action:
+                                      type: string
+                                    regex:
+                                      type: string
+                                    replacement:
+                                      type: string
+                                    separator:
+                                      type: string
+                                    sourceLabels:
+                                      items:
+                                        type: string
+                                      type: array
+                                    targetLabel:
+                                      type: string
+                                  type: object
+                                type: array
+                            type: object
+                          unix:
+                            properties:
+                              metrics:
+                                type: boolean
+                              metricsCollectors:
+                                items:
+                                  type: string
+                                type: array
+                              metricsInterval:
+                                type: integer
+                              metricsRelabel:
+                                items:
+                                  properties:
+                                    action:
+                                      type: string
+                                    regex:
+                                      type: string
+                                    replacement:
+                                      type: string
+                                    separator:
+                                      type: string
+                                    sourceLabels:
+                                      items:
+                                        type: string
+                                      type: array
+                                    targetLabel:
+                                      type: string
+                                  type: object
+                                type: array
+                              syslog:
+                                type: boolean
+                            type: object
+                        type: object
                       protocolSubnet:
                         type: string
                       spineASN:
@@ -260,6 +323,66 @@ spec:
                         type: boolean
                       mac:
                         type: string
+                    type: object
+                  observability:
+                    properties:
+                      targets:
+                        properties:
+                          loki:
+                            additionalProperties:
+                              properties:
+                                basicAuth:
+                                  properties:
+                                    password:
+                                      type: string
+                                    username:
+                                      type: string
+                                  type: object
+                                bearerToken:
+                                  type: string
+                                caPEM:
+                                  type: string
+                                certPEM:
+                                  type: string
+                                insecureSkipVerify:
+                                  type: boolean
+                                labels:
+                                  additionalProperties:
+                                    type: string
+                                  type: object
+                                url:
+                                  type: string
+                              type: object
+                            type: object
+                          prometheus:
+                            additionalProperties:
+                              properties:
+                                basicAuth:
+                                  properties:
+                                    password:
+                                      type: string
+                                    username:
+                                      type: string
+                                  type: object
+                                bearerToken:
+                                  type: string
+                                caPEM:
+                                  type: string
+                                certPEM:
+                                  type: string
+                                insecureSkipVerify:
+                                  type: boolean
+                                labels:
+                                  additionalProperties:
+                                    type: string
+                                  type: object
+                                sendIntervalSeconds:
+                                  type: integer
+                                url:
+                                  type: string
+                              type: object
+                            type: object
+                        type: object
                     type: object
                   registry:
                     properties:

@@ -44,6 +44,7 @@ require (
 	github.com/vishvananda/netlink v1.3.1
 	go.githedgehog.com/fabric v0.89.0
 	go.githedgehog.com/gateway v0.18.0
+	go.githedgehog.com/libmeta v0.2.0
 	golang.org/x/crypto v0.41.0
 	golang.org/x/mod v0.27.0
 	golang.org/x/sync v0.16.0
@@ -319,7 +320,6 @@ require (
 	github.com/zeebo/errs v1.4.0 // indirect
 	go.etcd.io/bbolt v1.4.2 // indirect
 	go.githedgehog.com/fabric-bcm-ygot v0.5.2-4.5.0 // indirect
-	go.githedgehog.com/libmeta v0.1.0 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
 	go.opentelemetry.io/contrib/detectors/gcp v1.36.0 // indirect
