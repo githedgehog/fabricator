@@ -893,8 +893,8 @@ go.githedgehog.com/fabric v0.89.0 h1:ZNsTlPoPAF9KUWbmt8jxVZQncdZQ024WRZt2AZpOcwM
 go.githedgehog.com/fabric v0.89.0/go.mod h1:OZdUR6WWVSG3WLBT74FIMMsIpilDYtKIvGvLOsD3uoE=
 go.githedgehog.com/fabric-bcm-ygot v0.5.2-4.5.0 h1:BbK131yz1T6ldx7xsREa/A2v5bJdLcs1gVlxDujdEKg=
 go.githedgehog.com/fabric-bcm-ygot v0.5.2-4.5.0/go.mod h1:XWCdFbSbGP6nlg90c/922VblpHOTw07TCwx1yUHPkzc=
-go.githedgehog.com/gateway v0.18.0 h1:VSB/XsQuozkvKwaWUHw1/hDihV+SaTiQ1fMIhglGvtM=
-go.githedgehog.com/gateway v0.18.0/go.mod h1:+bqhH0plMKzh4WiyMlpvaURTS/AjyuZ1WFAlHjowWhI=
+go.githedgehog.com/gateway v0.19.0 h1:6f7DOc5yEVvjJIipOTktRAKs2QDiRmtnIqTqmxcB7VU=
+go.githedgehog.com/gateway v0.19.0/go.mod h1:eCXdcX6lvmoxCnZKBcLekuMoYkhb6//OskRnZQDrM28=
 go.githedgehog.com/libmeta v0.2.0 h1:qLbWSA9nVSW4Gas4f1GStMBiBUSW1i135/wy+CnHSvU=
 go.githedgehog.com/libmeta v0.2.0/go.mod h1:mBpe4kDQ/8Lbi0kT18Em/EcCnTuWtHcMVNOEa7qzEh4=
 go.opencensus.io v0.21.0/go.mod h1:mSImk1erAIZhrmZN+AvHh14ztQfjbGwt4TtuofqLduU=
