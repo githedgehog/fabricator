@@ -588,7 +588,6 @@ _Appears in:_
 | `metricsInterval` _integer_ |  |  |  |
 | `metricsRelabel` _ScrapeRelabelRule array_ |  |  |  |
 | `metricsCollectors` _string array_ |  |  |  |
-| `journal` _boolean_ |  |  |  |
 
 
 #### GatewayVersions
