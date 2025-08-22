@@ -10,7 +10,7 @@ import (
 	"net/netip"
 
 	dhcpapi "go.githedgehog.com/fabric/api/dhcp/v1beta1"
-	"go.githedgehog.com/fabric/api/meta"
+	fmeta "go.githedgehog.com/fabric/api/meta"
 	"go.githedgehog.com/fabric/pkg/boot"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
@@ -178,11 +178,11 @@ func InstallManagementDHCPSubnet(cfg fabapi.Fabricator) ([]kclient.Object, error
 	}, nil
 }
 
-func GetFabricConfig(f fabapi.Fabricator) (*meta.FabricConfig, error) {
+func GetFabricConfig(f fabapi.Fabricator) (*fmeta.FabricConfig, error) {
 	// TODO align APIs (user creds)
-	users := []meta.UserCreds{}
+	users := []fmeta.UserCreds{}
 	for name, user := range f.Spec.Config.Fabric.DefaultSwitchUsers {
-		users = append(users, meta.UserCreds{
+		users = append(users, fmeta.UserCreds{
 			Name:     name,
 			Role:     user.Role,
 			Password: user.PasswordHash,
@@ -196,10 +196,14 @@ func GetFabricConfig(f fabapi.Fabricator) (*meta.FabricConfig, error) {
 	}
 
 	registry := netip.AddrPortFrom(controlVIP.Addr(), comp.RegistryPort).String()
-	f.Spec.Config.Fabric.DefaultAlloyConfig.ControlProxyURL = fmt.Sprintf("http://%s:%d", controlVIP.Addr().String(), ProxyNodePort)
+
+	observability := fmeta.Observability{}
+	if f.Spec.Config.Fabric.Observability != nil {
+		observability = *f.Spec.Config.Fabric.Observability
+	}
 
 	// TODO align APIs (fabric config field names, check agent spec too)
-	return &meta.FabricConfig{
+	return &fmeta.FabricConfig{
 		ControlVIP:           string(f.Spec.Config.Control.VIP),
 		APIServer:            netip.AddrPortFrom(controlVIP.Addr(), k3s.APIPort).String(),
 		AgentRepo:            comp.JoinURLParts(registry, comp.RegistryPrefix, AgentRef),
@@ -225,7 +229,9 @@ func GetFabricConfig(f fabapi.Fabricator) (*meta.FabricConfig, error) {
 		ESLAGESIPrefix:           f.Spec.Config.Fabric.ESLAGESIPrefix,
 		AlloyRepo:                comp.JoinURLParts(registry, comp.RegistryPrefix, alloy.BinRef),
 		AlloyVersion:             string(alloy.Version(f)),
-		Alloy:                    f.Spec.Config.Fabric.DefaultAlloyConfig,
+		AlloyTargets:             f.Spec.Config.Observability.Targets,
+		Observability:            observability,
+		ControlProxyURL:          fmt.Sprintf("http://%s:%d", controlVIP.Addr().String(), controlproxy.NodePort),
 		DefaultMaxPathsEBGP:      64,
 		AllowExtraSwitchProfiles: false,
 		MCLAGSessionSubnet:       string(f.Spec.Config.Fabric.MCLAGSessionSubnet),
@@ -246,7 +252,7 @@ func GetFabricBootConfig(f fabapi.Fabricator) (*boot.ServerConfig, error) {
 		return nil, fmt.Errorf("getting registry URL: %w", err)
 	}
 
-	nosRepos := map[meta.NOSType]string{}
+	nosRepos := map[fmeta.NOSType]string{}
 	for nosType := range f.Status.Versions.Fabric.NOS {
 		if !isIncludeNOS(f, nosType) {
 			continue
@@ -255,7 +261,7 @@ func GetFabricBootConfig(f fabapi.Fabricator) (*boot.ServerConfig, error) {
 		nosRepos[nosType] = comp.JoinURLParts(regURL, comp.RegistryPrefix, getNOSRefBase(nosType), string(nosType))
 	}
 
-	nosVersions := map[meta.NOSType]string{}
+	nosVersions := map[fmeta.NOSType]string{}
 	for nosType, version := range f.Status.Versions.Fabric.NOS {
 		if !isIncludeNOS(f, nosType) {
 			continue
@@ -322,22 +328,22 @@ func Artifacts(cfg fabapi.Fabricator) (comp.OCIArtifacts, error) {
 	return arts, nil
 }
 
-func getNOSRefBase(nosType meta.NOSType) string {
+func getNOSRefBase(nosType fmeta.NOSType) string {
 	switch nosType {
-	case meta.NOSTypeSONiCBCMBase, meta.NOSTypeSONiCBCMCampus, meta.NOSTypeSONiCBCMVS:
+	case fmeta.NOSTypeSONiCBCMBase, fmeta.NOSTypeSONiCBCMCampus, fmeta.NOSTypeSONiCBCMVS:
 		return BroadcomSonicRefBase
-	case meta.NOSTypeSONiCCLSPlusBroadcom, meta.NOSTypeSONiCCLSPlusMarvell, meta.NOSTypeSONiCCLSPlusVS:
+	case fmeta.NOSTypeSONiCCLSPlusBroadcom, fmeta.NOSTypeSONiCCLSPlusMarvell, fmeta.NOSTypeSONiCCLSPlusVS:
 		return CelesticaSonicRefBase
 	default:
 		return "invalid"
 	}
 }
 
-func isIncludeNOS(cfg fabapi.Fabricator, nosType meta.NOSType) bool {
+func isIncludeNOS(cfg fabapi.Fabricator, nosType fmeta.NOSType) bool {
 	switch nosType {
-	case meta.NOSTypeSONiCBCMBase, meta.NOSTypeSONiCBCMCampus, meta.NOSTypeSONiCBCMVS:
+	case fmeta.NOSTypeSONiCBCMBase, fmeta.NOSTypeSONiCBCMCampus, fmeta.NOSTypeSONiCBCMVS:
 		return true
-	case meta.NOSTypeSONiCCLSPlusBroadcom, meta.NOSTypeSONiCCLSPlusMarvell, meta.NOSTypeSONiCCLSPlusVS:
+	case fmeta.NOSTypeSONiCCLSPlusBroadcom, fmeta.NOSTypeSONiCCLSPlusMarvell, fmeta.NOSTypeSONiCCLSPlusVS:
 		return cfg.Spec.Config.Fabric.IncludeCLS
 	default:
 		return false

@@ -15,7 +15,7 @@ import (
 	"github.com/samber/lo"
 	agentapi "go.githedgehog.com/fabric/api/agent/v1beta1"
 	dhcpapi "go.githedgehog.com/fabric/api/dhcp/v1beta1"
-	"go.githedgehog.com/fabric/api/meta"
+	fmeta "go.githedgehog.com/fabric/api/meta"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
@@ -23,6 +23,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	gwapi "go.githedgehog.com/gateway/api/gateway/v1alpha1"
 	gwintapi "go.githedgehog.com/gateway/api/gwint/v1alpha1"
+	"go.githedgehog.com/libmeta/pkg/alloy"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -84,6 +85,16 @@ var kubeResourceRedactors = map[schema.GroupVersionKind]kubeResourceRedactorFunc
 			secret.Data[k] = []byte(RedactedValue)
 		}
 	},
+	corev1.SchemeGroupVersion.WithKind("ConfigMap"): func(obj kclient.Object) {
+		cm := obj.(*corev1.ConfigMap)
+
+		// TODO make it more granular and only remove sensitive data or move it to a separate secret
+		if cm.Name == "fabric-ctrl-config" {
+			for k := range cm.Data {
+				cm.Data[k] = RedactedValue
+			}
+		}
+	},
 	fabapi.GroupVersion.WithKind(fabapi.KindFabricator): func(obj kclient.Object) {
 		fab := obj.(*fabapi.Fabricator)
 
@@ -91,7 +102,8 @@ var kubeResourceRedactors = map[schema.GroupVersionKind]kubeResourceRedactorFunc
 			fab.Spec.Config.Registry.Upstream.Password = RedactedValue
 		}
 
-		redactAlloyConfig(&fab.Spec.Config.Fabric.DefaultAlloyConfig)
+		fab.Spec.Config.Fabric.DefaultAlloyConfig = fmeta.AlloyConfig{}
+		redactAlloyTargets(&fab.Spec.Config.Observability.Targets)
 
 		fab.Spec.Config.Control.DefaultUser.PasswordHash = RedactedValue
 		fab.Spec.Config.Control.DefaultUser.AuthorizedKeys = lo.Map(fab.Spec.Config.Control.DefaultUser.AuthorizedKeys, func(_ string, _ int) string {
@@ -114,7 +126,9 @@ var kubeResourceRedactors = map[schema.GroupVersionKind]kubeResourceRedactorFunc
 		agent := obj.(*agentapi.Agent)
 
 		agent.Spec.Version.Password = RedactedValue
-		redactAlloyConfig(&agent.Spec.Alloy)
+		agent.Spec.Alloy = fmeta.AlloyConfig{}
+
+		redactAlloyTargets(&agent.Spec.Config.Alloy.Targets)
 
 		for name, user := range agent.Spec.Users {
 			user.Password = RedactedValue
@@ -126,18 +140,19 @@ var kubeResourceRedactors = map[schema.GroupVersionKind]kubeResourceRedactorFunc
 	},
 }
 
-func redactAlloyConfig(alloy *meta.AlloyConfig) {
-	for name, target := range alloy.PrometheusTargets {
-		redactAlloyTarget(&target.AlloyTarget)
-		alloy.PrometheusTargets[name] = target
+func redactAlloyTargets(targets *alloy.Targets) {
+	for name, target := range targets.Prometheus {
+		redactAlloyTarget(&target.Target)
+		targets.Prometheus[name] = target
 	}
-	for name, target := range alloy.LokiTargets {
-		redactAlloyTarget(&target.AlloyTarget)
-		alloy.LokiTargets[name] = target
+
+	for name, target := range targets.Loki {
+		redactAlloyTarget(&target.Target)
+		targets.Loki[name] = target
 	}
 }
 
-func redactAlloyTarget(target *meta.AlloyTarget) {
+func redactAlloyTarget(target *alloy.Target) {
 	if target.BasicAuth.Password != "" {
 		target.BasicAuth.Password = RedactedValue
 	}

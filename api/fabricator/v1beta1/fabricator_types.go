@@ -16,6 +16,7 @@ import (
 	fmeta "go.githedgehog.com/fabric/api/meta"
 	"go.githedgehog.com/fabric/pkg/agent/dozer/bcm"
 	"go.githedgehog.com/fabricator/api/meta"
+	"go.githedgehog.com/libmeta/pkg/alloy"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -131,10 +132,11 @@ type FabOverrides struct {
 }
 
 type FabConfig struct {
-	Control  ControlConfig  `json:"control,omitempty"`
-	Registry RegistryConfig `json:"registry,omitempty"`
-	Fabric   FabricConfig   `json:"fabric,omitempty"`
-	Gateway  GatewayConfig  `json:"gateway,omitempty"`
+	Control       ControlConfig       `json:"control,omitempty"`
+	Registry      RegistryConfig      `json:"registry,omitempty"`
+	Fabric        FabricConfig        `json:"fabric,omitempty"`
+	Gateway       GatewayConfig       `json:"gateway,omitempty"`
+	Observability ObservabilityConfig `json:"observability,omitempty"`
 }
 
 type ControlConfig struct {
@@ -211,12 +213,14 @@ type FabricConfig struct {
 	MCLAGSessionSubnet meta.Prefix `json:"mclagSessionSubnet,omitempty"`
 
 	DefaultSwitchUsers map[string]SwitchUser `json:"defaultSwitchUsers,omitempty"`
-	DefaultAlloyConfig fmeta.AlloyConfig     `json:"defaultAlloyConfig,omitempty"`
+	DefaultAlloyConfig fmeta.AlloyConfig     `json:"defaultAlloyConfig,omitempty"` // TODO remove, kept for backward compat, ignored
 
 	IncludeONIE bool `json:"includeONIE,omitempty"`
 	IncludeCLS  bool `json:"includeCLS,omitempty"`
 
 	DisableBFD bool `json:"disableBFD,omitempty"`
+
+	Observability *fmeta.Observability `json:"observability,omitempty"`
 }
 
 type SwitchUser struct {
@@ -229,6 +233,10 @@ type GatewayConfig struct {
 	Enable bool   `json:"enable,omitempty"`
 	ASN    uint32 `json:"asn,omitempty"`
 	MAC    string `json:"mac,omitempty"`
+}
+
+type ObservabilityConfig struct {
+	Targets alloy.Targets `json:"targets,omitempty"`
 }
 
 type Versions struct {
@@ -379,6 +387,69 @@ func (f *Fabricator) Default() {
 	}
 
 	f.Spec.Config.Fabric.LoopbackWorkaroundDisable = false // it's ignored now
+
+	if f.Spec.Config.Fabric.Observability == nil {
+		f.Spec.Config.Fabric.Observability = &fmeta.Observability{
+			Agent: fmeta.ObservabilityAgent{
+				Metrics:         true,
+				MetricsInterval: 60,
+				Logs:            true,
+			},
+			Unix: fmeta.ObservabilityUnix{
+				Metrics:           true,
+				MetricsInterval:   60,
+				MetricsCollectors: []string{"cpu", "loadavg", "meminfo", "filesystem"},
+				Syslog:            true,
+			},
+		}
+	}
+
+	if f.Spec.Config.Observability.Targets.Prometheus == nil {
+		f.Spec.Config.Observability.Targets.Prometheus = map[string]alloy.PrometheusTarget{}
+	}
+	for name, target := range f.Spec.Config.Fabric.DefaultAlloyConfig.PrometheusTargets {
+		if _, ok := f.Spec.Config.Observability.Targets.Prometheus[name]; !ok {
+			f.Spec.Config.Observability.Targets.Prometheus[name] = alloy.PrometheusTarget{
+				Target: alloy.Target{
+					URL: target.URL,
+					BasicAuth: &alloy.TargetBasicAuth{
+						Username: target.BasicAuth.Username,
+						Password: target.BasicAuth.Password,
+					},
+					BearerToken:        target.BearerToken,
+					Labels:             target.Labels,
+					InsecureSkipVerify: target.InsecureSkipVerify,
+					CAPEM:              target.CAPEM,
+					CertPEM:            target.CertPEM,
+				},
+				SendIntervalSeconds: target.SendIntervalSeconds,
+			}
+		}
+	}
+
+	if f.Spec.Config.Observability.Targets.Loki == nil {
+		f.Spec.Config.Observability.Targets.Loki = map[string]alloy.LokiTarget{}
+	}
+	for name, target := range f.Spec.Config.Observability.Targets.Loki {
+		if _, ok := f.Spec.Config.Observability.Targets.Loki[name]; !ok {
+			f.Spec.Config.Observability.Targets.Loki[name] = alloy.LokiTarget{
+				Target: alloy.Target{
+					URL: target.URL,
+					BasicAuth: &alloy.TargetBasicAuth{
+						Username: target.BasicAuth.Username,
+						Password: target.BasicAuth.Password,
+					},
+					BearerToken:        target.BearerToken,
+					Labels:             target.Labels,
+					InsecureSkipVerify: target.InsecureSkipVerify,
+					CAPEM:              target.CAPEM,
+					CertPEM:            target.CertPEM,
+				},
+			}
+		}
+	}
+
+	f.Spec.Config.Fabric.DefaultAlloyConfig = fmeta.AlloyConfig{}
 }
 
 func (f *Fabricator) Validate(ctx context.Context) error {
@@ -701,7 +772,7 @@ var knownSwitchUsers = []string{
 	"ntp",
 	"frr",
 	bcm.AgentUser,
-	// alloy.UserName, // TODO enable validation after LMA rework
+	fmeta.AlloyUser,
 }
 
 func (f *Fabricator) CheckForKnownSwitchUsers() error {
