@@ -96,6 +96,7 @@ type ComponentsStatus struct {
 	ControlProxy         ComponentStatus `json:"controlProxy,omitempty"`
 	GatewayAPI           ComponentStatus `json:"gatewayAPI,omitempty"`
 	GatewayCtrl          ComponentStatus `json:"gatewayCtrl,omitempty"`
+	GatewayAlloy         ComponentStatus `json:"gatewayAlloy,omitempty"`
 }
 
 // TODO simplify or generate it instead
@@ -117,7 +118,8 @@ func (c *ComponentsStatus) IsReady(cfg Fabricator) bool {
 	if cfg.Spec.Config.Gateway.Enable {
 		res = res &&
 			c.GatewayAPI == CompStatusReady &&
-			c.GatewayCtrl == CompStatusReady
+			c.GatewayCtrl == CompStatusReady &&
+			c.GatewayAlloy == CompStatusReady
 	} else {
 		res = res &&
 			c.GatewayAPI == CompStatusSkipped &&
@@ -230,9 +232,36 @@ type SwitchUser struct {
 }
 
 type GatewayConfig struct {
-	Enable bool   `json:"enable,omitempty"`
-	ASN    uint32 `json:"asn,omitempty"`
-	MAC    string `json:"mac,omitempty"`
+	Enable        bool                  `json:"enable,omitempty"`
+	ASN           uint32                `json:"asn,omitempty"`
+	MAC           string                `json:"mac,omitempty"`
+	Observability *GatewayObservability `json:"observability,omitempty"`
+}
+
+type GatewayObservability struct {
+	Dataplane GatewayObservabilityDataplane `json:"dataplane,omitempty"`
+	FRR       GatewayObservabilityFRR       `json:"frr,omitempty"`
+	Unix      GatewayObservabilityUnix      `json:"unix,omitempty"`
+}
+
+type GatewayObservabilityDataplane struct {
+	Metrics         bool                      `json:"metrics,omitempty"`
+	MetricsInterval uint                      `json:"metricsInterval,omitempty"`
+	MetricsRelabel  []alloy.ScrapeRelabelRule `json:"metricsRelabel,omitempty"`
+}
+
+type GatewayObservabilityFRR struct {
+	Metrics         bool                      `json:"metrics,omitempty"`
+	MetricsInterval uint                      `json:"metricsInterval,omitempty"`
+	MetricsRelabel  []alloy.ScrapeRelabelRule `json:"metricsRelabel,omitempty"`
+}
+
+type GatewayObservabilityUnix struct {
+	Metrics           bool                      `json:"metrics,omitempty"`
+	MetricsInterval   uint                      `json:"metricsInterval,omitempty"`
+	MetricsRelabel    []alloy.ScrapeRelabelRule `json:"metricsRelabel,omitempty"`
+	MetricsCollectors []string                  `json:"metricsCollectors,omitempty"`
+	Journal           bool                      `json:"journal,omitempty"`
 }
 
 type ObservabilityConfig struct {
@@ -400,6 +429,25 @@ func (f *Fabricator) Default() {
 				MetricsInterval:   60,
 				MetricsCollectors: []string{"cpu", "loadavg", "meminfo", "filesystem"},
 				Syslog:            true,
+			},
+		}
+	}
+
+	if f.Spec.Config.Gateway.Observability == nil {
+		f.Spec.Config.Gateway.Observability = &GatewayObservability{
+			Dataplane: GatewayObservabilityDataplane{
+				Metrics:         true,
+				MetricsInterval: 60,
+			},
+			FRR: GatewayObservabilityFRR{
+				Metrics:         true,
+				MetricsInterval: 60,
+			},
+			Unix: GatewayObservabilityUnix{
+				Metrics:           true,
+				MetricsInterval:   60,
+				MetricsCollectors: []string{"cpu", "loadavg", "meminfo", "filesystem"},
+				Journal:           true,
 			},
 		}
 	}

@@ -89,7 +89,7 @@ var kubeResourceRedactors = map[schema.GroupVersionKind]kubeResourceRedactorFunc
 		cm := obj.(*corev1.ConfigMap)
 
 		// TODO make it more granular and only remove sensitive data or move it to a separate secret
-		if cm.Name == "fabric-ctrl-config" {
+		if cm.Name == "fabric-ctrl-config" || strings.HasPrefix(cm.Name, "alloy") {
 			for k := range cm.Data {
 				cm.Data[k] = RedactedValue
 			}
