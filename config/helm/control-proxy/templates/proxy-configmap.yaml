@@ -1,7 +1,9 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: tinyproxy-config
+  name: {{ include "control-proxy.fullname" . }}-config
+  labels:
+    {{- include "control-proxy.labels" . | nindent 4 }}
 data:
   tinyproxy.conf: |-
 {{.Values.config | indent 4 }}
