@@ -13,8 +13,6 @@ import (
 
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
-	"go.githedgehog.com/fabricator/pkg/fab/comp/alloy"
-	"go.githedgehog.com/fabricator/pkg/fab/comp/fabric"
 	"go.githedgehog.com/fabricator/pkg/util/tmplutil"
 	"go.githedgehog.com/gateway/api/meta"
 	corev1 "k8s.io/api/core/v1"
@@ -83,16 +81,6 @@ func Install(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 		return nil, fmt.Errorf("getting image URL for %q: %w", FRRRef, err)
 	}
 
-	registryURL, err := comp.RegistryURL(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("getting registry URL: %w", err)
-	}
-
-	controlVIP, err := cfg.Spec.Config.Control.VIP.Parse()
-	if err != nil {
-		return nil, fmt.Errorf("parsing control VIP: %w", err)
-	}
-
 	ctrlCfgData, err := kyaml.Marshal(&meta.GatewayCtrlConfig{
 		Namespace: comp.FabNamespace,
 		Tolerations: []corev1.Toleration{
@@ -107,14 +95,6 @@ func Install(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 		FRRRef:               frrRepo + ":" + string(cfg.Status.Versions.Gateway.FRR),
 		DataplaneMetricsPort: DataplaneMetricsPort,
 		FRRMetricsPort:       FRRMetricsPort,
-		RegistryURL:          registryURL,
-		RegistryCASecret:     comp.FabCAConfigMap,
-		RegistryAuthSecret:   comp.RegistryUserReaderSecret + comp.RegistryUserSecretDockerSuffix,
-		AlloyChartName:       comp.JoinURLParts(comp.RegPrefix, alloy.ChartRef),
-		AlloyChartVersion:    string(alloy.Version(cfg)),
-		AlloyImageName:       comp.JoinURLParts(comp.RegPrefix, alloy.ImageRef),
-		AlloyImageVersion:    string(alloy.Version(cfg)),
-		ControlProxyURL:      fmt.Sprintf("http://%s:%d", controlVIP.Addr().String(), fabric.ProxyNodePort),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("marshalling ctrl config: %w", err)
