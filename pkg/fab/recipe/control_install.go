@@ -91,18 +91,6 @@ func (c *ControlInstall) Run(ctx context.Context) error {
 		return fmt.Errorf("installing fabricator and config: %w", err)
 	}
 
-	if err := c.waitReloader(ctx, kube); err != nil {
-		return fmt.Errorf("installing reloader: %w", err)
-	}
-
-	if err := c.waitNTP(ctx, kube); err != nil {
-		return fmt.Errorf("installing ntp: %w", err)
-	}
-
-	if err := c.waitControlProxy(ctx, kube); err != nil {
-		return fmt.Errorf("installing control-proxy: %w", err)
-	}
-
 	controlVIP, err := c.Fab.Spec.Config.Control.VIP.Parse()
 	if err != nil {
 		return fmt.Errorf("parsing control VIP: %w", err)
@@ -112,7 +100,7 @@ func (c *ControlInstall) Run(ctx context.Context) error {
 		return fmt.Errorf("setting up timesync: %w", err)
 	}
 
-	if err := c.installWaitFabric(ctx, kube); err != nil {
+	if err := c.installFabricCtl(); err != nil {
 		return fmt.Errorf("installing fabric: %w", err)
 	}
 
@@ -349,74 +337,6 @@ func (c *ControlInstall) installZot(ctx context.Context, kube kclient.Client, ca
 	return nil
 }
 
-func (c *ControlInstall) waitReloader(ctx context.Context, kube kclient.Client) error {
-	slog.Info("Waiting for reloader")
-
-	if err := waitKube(ctx, kube, "reloader-reloader", comp.FabNamespace,
-		&comp.Deployment{}, func(obj *comp.Deployment) (bool, error) {
-			for _, cond := range obj.Status.Conditions {
-				if cond.Type == comp.DeploymentAvailable && cond.Status == comp.ConditionTrue {
-					return true, nil
-				}
-			}
-
-			return false, nil
-		}); err != nil {
-		return fmt.Errorf("waiting for reloader ready: %w", err)
-	}
-
-	return nil
-}
-
-func (c *ControlInstall) installWaitFabric(ctx context.Context, kube kclient.Client) error {
-	if err := c.installFabricCtl(ctx); err != nil {
-		return fmt.Errorf("installing kubectl-fabric: %w", err)
-	}
-
-	slog.Info("Waiting for fabric services")
-
-	if err := waitKube(ctx, kube, "fabric-ctrl", comp.FabNamespace,
-		&comp.Deployment{}, func(obj *comp.Deployment) (bool, error) {
-			for _, cond := range obj.Status.Conditions {
-				if cond.Type == comp.DeploymentAvailable && cond.Status == comp.ConditionTrue {
-					return true, nil
-				}
-			}
-
-			return false, nil
-		}); err != nil {
-		return fmt.Errorf("waiting for fabric-ctrl ready: %w", err)
-	}
-
-	if err := waitKube(ctx, kube, "fabric-boot", comp.FabNamespace,
-		&comp.Deployment{}, func(obj *comp.Deployment) (bool, error) {
-			for _, cond := range obj.Status.Conditions {
-				if cond.Type == comp.DeploymentAvailable && cond.Status == comp.ConditionTrue {
-					return true, nil
-				}
-			}
-
-			return false, nil
-		}); err != nil {
-		return fmt.Errorf("waiting for fabric-boot ready: %w", err)
-	}
-
-	if err := waitKube(ctx, kube, "fabric-dhcpd", comp.FabNamespace,
-		&comp.Deployment{}, func(obj *comp.Deployment) (bool, error) {
-			for _, cond := range obj.Status.Conditions {
-				if cond.Type == comp.DeploymentAvailable && cond.Status == comp.ConditionTrue {
-					return true, nil
-				}
-			}
-
-			return false, nil
-		}); err != nil {
-		return fmt.Errorf("waiting for fabric-dhcpd ready: %w", err)
-	}
-
-	return nil
-}
-
 func (c *ControlInstall) installInclude(ctx context.Context, kube kclient.Client) error {
 	slog.Info("Waiting for all used switch profiles ready")
 
@@ -501,44 +421,6 @@ func (c *ControlInstall) installInclude(ctx context.Context, kube kclient.Client
 
 			slog.Debug("Installed included wiring", "kind", kind, "name", name)
 		}
-	}
-
-	return nil
-}
-
-func (c *ControlInstall) waitNTP(ctx context.Context, kube kclient.Client) error {
-	slog.Info("Waiting for NTP server")
-
-	if err := waitKube(ctx, kube, "ntp", comp.FabNamespace,
-		&comp.Deployment{}, func(obj *comp.Deployment) (bool, error) {
-			for _, cond := range obj.Status.Conditions {
-				if cond.Type == comp.DeploymentAvailable && cond.Status == comp.ConditionTrue {
-					return true, nil
-				}
-			}
-
-			return false, nil
-		}); err != nil {
-		return fmt.Errorf("waiting for ntp ready: %w", err)
-	}
-
-	return nil
-}
-
-func (c *ControlInstall) waitControlProxy(ctx context.Context, kube kclient.Client) error {
-	slog.Info("Waiting for Controller Proxy")
-
-	if err := waitKube(ctx, kube, "control-proxy", comp.FabNamespace,
-		&comp.Deployment{}, func(obj *comp.Deployment) (bool, error) {
-			for _, cond := range obj.Status.Conditions {
-				if cond.Type == comp.DeploymentAvailable && cond.Status == comp.ConditionTrue {
-					return true, nil
-				}
-			}
-
-			return false, nil
-		}); err != nil {
-		return fmt.Errorf("waiting for control-proxy ready: %w", err)
 	}
 
 	return nil

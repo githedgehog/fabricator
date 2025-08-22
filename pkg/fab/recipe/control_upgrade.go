@@ -155,7 +155,7 @@ func (c *ControlUpgrade) Run(ctx context.Context) error {
 		return fmt.Errorf("installing fabricator and config: %w", err)
 	}
 
-	if err := c.installFabricCtl(ctx); err != nil {
+	if err := c.installFabricCtl(); err != nil {
 		return fmt.Errorf("installing kubectl-fabric: %w", err)
 	}
 
@@ -426,7 +426,7 @@ func (c *ControlUpgrade) installFabricator(ctx context.Context, kube kclient.Cli
 	return nil
 }
 
-func (c *ControlUpgrade) installFabricCtl(_ context.Context) error {
+func (c *ControlUpgrade) installFabricCtl() error {
 	slog.Info("Installing kubectl-fabric")
 
 	// TODO remove if it'll be managed by control agent?
