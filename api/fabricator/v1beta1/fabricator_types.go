@@ -261,7 +261,6 @@ type GatewayObservabilityUnix struct {
 	MetricsInterval   uint                      `json:"metricsInterval,omitempty"`
 	MetricsRelabel    []alloy.ScrapeRelabelRule `json:"metricsRelabel,omitempty"`
 	MetricsCollectors []string                  `json:"metricsCollectors,omitempty"`
-	Journal           bool                      `json:"journal,omitempty"`
 }
 
 type ObservabilityConfig struct {
@@ -447,7 +446,6 @@ func (f *Fabricator) Default() {
 				Metrics:           true,
 				MetricsInterval:   60,
 				MetricsCollectors: []string{"cpu", "loadavg", "meminfo", "filesystem"},
-				Journal:           true,
 			},
 		}
 	}

@@ -379,8 +379,6 @@ spec:
                             type: object
                           unix:
                             properties:
-                              journal:
-                                type: boolean
                               metrics:
                                 type: boolean
                               metricsCollectors:
