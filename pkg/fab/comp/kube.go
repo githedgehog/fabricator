@@ -461,6 +461,31 @@ func CreateOrUpdate(ctx context.Context, kube kclient.Client, obj kclient.Object
 	return res, nil
 }
 
+func DeleteIfPresent(ctx context.Context, kube kclient.Client, obj kclient.Object) error {
+	if err := kube.Delete(ctx, obj); err != nil {
+		if kapierrors.IsNotFound(err) {
+			return nil
+		}
+
+		return fmt.Errorf("deleting object: %w", err)
+	}
+
+	return nil
+}
+
+func DeleteHelmChartIfPresent(ctx context.Context, kube kclient.Client, name string) error {
+	return DeleteIfPresent(ctx, kube, &helmapi.HelmChart{
+		TypeMeta: kmetav1.TypeMeta{
+			APIVersion: helmapi.SchemeGroupVersion.String(),
+			Kind:       "HelmChart",
+		},
+		ObjectMeta: kmetav1.ObjectMeta{
+			Name:      name,
+			Namespace: FabNamespace,
+		},
+	})
+}
+
 type KubeStatus func(ctx context.Context, kube kclient.Reader, cfg fabapi.Fabricator) (fabapi.ComponentStatus, error)
 
 func GetDeploymentStatus(name, container, image string) KubeStatus {
