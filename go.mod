@@ -42,7 +42,7 @@ require (
 	github.com/urfave/cli/v2 v2.27.7
 	github.com/vbauerster/mpb/v8 v8.10.2
 	github.com/vishvananda/netlink v1.3.1
-	go.githedgehog.com/fabric v0.89.0
+	go.githedgehog.com/fabric v0.89.1
 	go.githedgehog.com/gateway v0.19.0
 	go.githedgehog.com/libmeta v0.2.0
 	golang.org/x/crypto v0.41.0
