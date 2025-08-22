@@ -15,6 +15,7 @@ import (
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/alloy"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/controlproxy"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
 	"go.githedgehog.com/fabricator/pkg/util/tmplutil"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -34,8 +35,6 @@ const (
 	BroadcomSonicRefBase  = "sonic-bcm-private"
 	CelesticaSonicRefBase = "sonic-cls-private"
 	OnieRefBase           = "onie-updater-private"
-
-	ProxyNodePort = 31028
 
 	BinDir         = "/opt/bin"
 	CtlBinName     = "hhfctl"
