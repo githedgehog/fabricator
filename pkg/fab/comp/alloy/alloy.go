@@ -35,10 +35,18 @@ func Version(f fabapi.Fabricator) meta.Version {
 //go:embed gw_values.tmpl.yaml
 var gwValuesTmpl string
 
+//go:embed ctrl_values.tmpl.yaml
+var ctrlValuesTmpl string
+
 var _ comp.KubeInstall = Install
 
 func Install(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 	res := []kclient.Object{}
+	chartVersion := string(Version(cfg))
+	registryURL, err := comp.RegistryURL(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("getting registry URL: %w", err)
+	}
 
 	if cfg.Spec.Config.Gateway.Enable {
 		controlVIP, err := cfg.Spec.Config.Control.VIP.Parse()
@@ -46,11 +54,6 @@ func Install(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 			return nil, fmt.Errorf("parsing control VIP: %w", err)
 		}
 		proxyURL := fmt.Sprintf("http://%s:%d", controlVIP.Addr().String(), controlproxy.NodePort)
-
-		registryURL, err := comp.RegistryURL(cfg)
-		if err != nil {
-			return nil, fmt.Errorf("getting registry URL: %w", err)
-		}
 
 		tolerations, err := kyaml.Marshal([]corev1.Toleration{
 			{
@@ -115,13 +118,48 @@ func Install(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 			return nil, fmt.Errorf("gateway alloy values: %w", err)
 		}
 
-		chartVersion := string(Version(cfg))
 		gwAlloyChart, err := comp.NewHelmChart(cfg, "alloy-gw", ChartRef, chartVersion, "", false, string(gwAlloyValues))
 		if err != nil {
 			return nil, fmt.Errorf("gateway alloy chart: %w", err)
 		}
 
 		res = append(res, gwAlloyChart)
+	}
+
+	{
+		ctrlAlloyCfg := alloy.Config{
+			AutoHostname: true,
+			Targets:      cfg.Spec.Config.Observability.Targets,
+
+			Scrapes:  map[string]alloy.Scrape{},
+			LogFiles: map[string]alloy.LogFile{},
+			Kube: alloy.Kube{
+				PodLogs: cfg.Spec.Config.Control.Observability.KubePodLogs,
+				Events:  cfg.Spec.Config.Control.Observability.KubeEvents,
+			},
+		}
+
+		ctrlAlloyConfigData, err := ctrlAlloyCfg.Render()
+		if err != nil {
+			return nil, fmt.Errorf("ctrl alloy config: %w", err)
+		}
+
+		ctrlAlloyValues, err := tmpl.Render("values", ctrlValuesTmpl, map[string]any{
+			"Registry": registryURL,
+			"Image":    comp.JoinURLParts(comp.RegPrefix, ImageRef),
+			"Version":  string(Version(cfg)),
+			"Config":   string(ctrlAlloyConfigData),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("ctrl alloy values: %w", err)
+		}
+
+		ctrlAlloyChart, err := comp.NewHelmChart(cfg, "alloy-ctrl", ChartRef, chartVersion, "", false, string(ctrlAlloyValues))
+		if err != nil {
+			return nil, fmt.Errorf("ctrl alloy chart: %w", err)
+		}
+
+		res = append(res, ctrlAlloyChart)
 	}
 
 	return res, nil
@@ -136,7 +174,10 @@ func Artifacts(cfg fabapi.Fabricator) (comp.OCIArtifacts, error) {
 	}, nil
 }
 
-var _ comp.KubeStatus = StatusGateway
+var (
+	_ comp.KubeStatus = StatusGateway
+	_ comp.KubeStatus = StatusControl
+)
 
 func StatusGateway(ctx context.Context, kube kclient.Reader, cfg fabapi.Fabricator) (fabapi.ComponentStatus, error) {
 	if !cfg.Spec.Config.Gateway.Enable {
@@ -150,4 +191,14 @@ func StatusGateway(ctx context.Context, kube kclient.Reader, cfg fabapi.Fabricat
 	image := ref + ":" + string(Version(cfg))
 
 	return comp.GetDaemonSetStatus("alloy-gw", "alloy", image)(ctx, kube, cfg)
+}
+
+func StatusControl(ctx context.Context, kube kclient.Reader, cfg fabapi.Fabricator) (fabapi.ComponentStatus, error) {
+	ref, err := comp.ImageURL(cfg, ImageRef)
+	if err != nil {
+		return fabapi.CompStatusUnknown, fmt.Errorf("getting image URL for %q: %w", ImageRef, err)
+	}
+	image := ref + ":" + string(Version(cfg))
+
+	return comp.GetDaemonSetStatus("alloy-ctrl", "alloy", image)(ctx, kube, cfg)
 }

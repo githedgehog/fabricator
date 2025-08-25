@@ -1,0 +1,32 @@
+image:
+  registry: "{{ .Registry }}"
+  repository: "{{ .Image }}"
+  tag: "{{ .Version }}"
+
+alloy:
+  enableReporting: false
+  listenAddr: 0.0.0.0 # localhost will break readiness probes
+  listenPort: 12345
+  storagePath: /tmp/alloy
+  configMap:
+    create: true
+    content: |
+{{ .Config | indent 6 }}
+
+rbac:
+  create: true
+
+serviceAccount:
+  create: true
+
+configReloader:
+  enabled: false
+
+service:
+  enabled: false
+
+controller:
+  type: "daemonset"
+  hostNetwork: false
+  nodeSelector:
+    node-role.kubernetes.io/control-plane: "true"

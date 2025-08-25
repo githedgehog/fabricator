@@ -338,6 +338,11 @@ func (r *FabricatorReconciler) statusCheck(ctx context.Context, l logr.Logger, f
 		return fmt.Errorf("getting gateway alloy status: %w", err)
 	}
 
+	f.Status.Components.ControlAlloy, err = alloy.StatusControl(ctx, r.Client, *f)
+	if err != nil {
+		return fmt.Errorf("getting ctrl alloy status: %w", err)
+	}
+
 	if f.Status.Components.IsReady(*f) {
 		if !kmeta.IsStatusConditionTrue(f.Status.Conditions, fabapi.ConditionReady) {
 			l.Info("All components are ready now")
