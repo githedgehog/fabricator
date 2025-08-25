@@ -30,7 +30,7 @@ require (
 	github.com/mattn/go-isatty v0.0.20
 	github.com/melbahja/goph v1.4.0
 	github.com/mholt/archives v0.1.3
-	github.com/onsi/ginkgo/v2 v2.24.0
+	github.com/onsi/ginkgo/v2 v2.25.1
 	github.com/onsi/gomega v1.38.0
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/pkg/sftp v1.13.8
