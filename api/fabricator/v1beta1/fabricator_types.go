@@ -94,6 +94,7 @@ type ComponentsStatus struct {
 	FabricBoot           ComponentStatus `json:"fabricBoot,omitempty"`
 	FabricDHCP           ComponentStatus `json:"fabricDHCP,omitempty"`
 	ControlProxy         ComponentStatus `json:"controlProxy,omitempty"`
+	ControlAlloy         ComponentStatus `json:"controlAlloy,omitempty"`
 	GatewayAPI           ComponentStatus `json:"gatewayAPI,omitempty"`
 	GatewayCtrl          ComponentStatus `json:"gatewayCtrl,omitempty"`
 	GatewayAlloy         ComponentStatus `json:"gatewayAlloy,omitempty"`
@@ -113,7 +114,8 @@ func (c *ComponentsStatus) IsReady(cfg Fabricator) bool {
 		c.FabricCtrl == CompStatusReady &&
 		c.FabricBoot == CompStatusReady &&
 		c.FabricDHCP == CompStatusReady &&
-		c.ControlProxy == CompStatusReady
+		c.ControlProxy == CompStatusReady &&
+		c.ControlAlloy == CompStatusReady
 
 	if cfg.Spec.Config.Gateway.Enable {
 		res = res &&
@@ -157,11 +159,18 @@ type ControlConfig struct {
 	DefaultUser ControlUser `json:"defaultUser,omitempty"`
 
 	NTPServers []string `json:"ntpServers,omitempty"`
+
+	Observability *ControlObservability `json:"observability,omitempty"`
 }
 
 type ControlUser struct {
 	PasswordHash   string   `json:"password,omitempty"`
 	AuthorizedKeys []string `json:"authorizedKeys,omitempty"`
+}
+
+type ControlObservability struct {
+	KubePodLogs bool `json:"kubePodLogs,omitempty"`
+	KubeEvents  bool `json:"kubeEvents,omitempty"`
 }
 
 type RegistryMode string
@@ -415,6 +424,13 @@ func (f *Fabricator) Default() {
 	}
 
 	f.Spec.Config.Fabric.LoopbackWorkaroundDisable = false // it's ignored now
+
+	if f.Spec.Config.Control.Observability == nil {
+		f.Spec.Config.Control.Observability = &ControlObservability{
+			KubePodLogs: true,
+			KubeEvents:  true,
+		}
+	}
 
 	if f.Spec.Config.Fabric.Observability == nil {
 		f.Spec.Config.Fabric.Observability = &fmeta.Observability{

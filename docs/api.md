@@ -61,6 +61,7 @@ _Appears in:_
 | `fabricBoot` _[ComponentStatus](#componentstatus)_ |  |  |  |
 | `fabricDHCP` _[ComponentStatus](#componentstatus)_ |  |  |  |
 | `controlProxy` _[ComponentStatus](#componentstatus)_ |  |  |  |
+| `controlAlloy` _[ComponentStatus](#componentstatus)_ |  |  |  |
 | `gatewayAPI` _[ComponentStatus](#componentstatus)_ |  |  |  |
 | `gatewayCtrl` _[ComponentStatus](#componentstatus)_ |  |  |  |
 | `gatewayAlloy` _[ComponentStatus](#componentstatus)_ |  |  |  |
@@ -89,6 +90,7 @@ _Appears in:_
 | `dummySubnet` _[Prefix](#prefix)_ |  |  |  |
 | `defaultUser` _[ControlUser](#controluser)_ |  |  |  |
 | `ntpServers` _string array_ |  |  |  |
+| `observability` _[ControlObservability](#controlobservability)_ |  |  |  |
 
 
 #### ControlConfigRegistryUpstream
@@ -231,6 +233,23 @@ _Appears in:_
 _Appears in:_
 - [ControlNode](#controlnode)
 
+
+
+#### ControlObservability
+
+
+
+
+
+
+
+_Appears in:_
+- [ControlConfig](#controlconfig)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `kubePodLogs` _boolean_ |  |  |  |
+| `kubeEvents` _boolean_ |  |  |  |
 
 
 #### ControlUser
