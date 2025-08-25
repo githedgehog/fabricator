@@ -44,7 +44,7 @@ require (
 	github.com/vishvananda/netlink v1.3.1
 	go.githedgehog.com/fabric v0.89.2
 	go.githedgehog.com/gateway v0.19.0
-	go.githedgehog.com/libmeta v0.2.2
+	go.githedgehog.com/libmeta v0.2.3
 	golang.org/x/crypto v0.41.0
 	golang.org/x/mod v0.27.0
 	golang.org/x/sync v0.16.0
