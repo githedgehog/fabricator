@@ -569,6 +569,8 @@ spec:
                             type: string
                           zot:
                             type: string
+                          zotChart:
+                            type: string
                         type: object
                       vlab:
                         properties:
@@ -782,6 +784,8 @@ spec:
                       toolbox:
                         type: string
                       zot:
+                        type: string
+                      zotChart:
                         type: string
                     type: object
                   vlab:
