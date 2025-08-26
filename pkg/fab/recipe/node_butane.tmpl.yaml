@@ -131,9 +131,3 @@ storage:
           TOOLBOX_DOCKER_IMAGE=ghcr.io/githedgehog/toolbox
           TOOLBOX_DOCKER_TAG=latest
           TOOLBOX_USER=root
-    - path: /etc/systemd/networkd.conf.d/nextHops.conf
-      mode: 0644
-      contents:
-        inline: |
-          [Network]
-          ManageForeignNextHops=no

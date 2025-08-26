@@ -64,6 +64,10 @@ function get_ip() {
     echo "$ip"
 }
 
+function restart_networkd() {
+	sudo systemctl restart systemd-networkd.service
+}
+
 # Usage:
 # hhnet cleanup
 # hhnet bond 1000 layer2+3 enp2s1 enp2s2 enp2s3 enp2s4
@@ -85,6 +89,7 @@ if [ "$#" -lt 1 ]; then
     exit 1
 elif [ "$1" == "cleanup" ]; then
     cleanup
+    restart_networkd
 
     exit 0
 elif [ "$1" == "bond" ]; then
