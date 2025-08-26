@@ -80,9 +80,13 @@ storage:
           Kind=!vlan
 
           [Network]
-          DHCP=yes
+          DHCP=ipv4
           LLDP=yes
           EmitLLDP=yes
+
+          [DHCPv4]
+          UseGateway=true
+
 
     - path: /var/lib/scripts/disable_nic_lldp_agent.sh
       mode: 0755
