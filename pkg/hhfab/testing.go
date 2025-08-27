@@ -2002,8 +2002,13 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphor
 	g, ctx := errgroup.WithContext(ctx)
 
 	g.Go(func() error {
-		cmd := fmt.Sprintf("toolbox -q timeout -v %d iperf3 -s -1", opts.IPerfsSeconds+25)
-		if _, err := retrySSHCmd(ctx, toSSH, cmd, to); err != nil {
+		cmd := fmt.Sprintf("toolbox -q timeout -v %d iperf3 -s -1 -J", opts.IPerfsSeconds+25)
+		outR, err := retrySSHCmd(ctx, toSSH, cmd, to)
+		report, parseErr := parseIPerf3Report(outR)
+		if err != nil {
+			if parseErr == nil && report.Error != "" {
+				return fmt.Errorf("running iperf3 server: %w: %s", err, report.Error)
+			}
 			return fmt.Errorf("running iperf3 server: %w", err)
 		}
 
@@ -2028,12 +2033,14 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphor
 			cmd += fmt.Sprintf(" --tos %d", opts.IPerfsTOS)
 		}
 		outR, err := retrySSHCmd(ctx, fromSSH, cmd, from)
+		report, parseErr := parseIPerf3Report(outR)
 		if err != nil {
+			if parseErr == nil && report.Error != "" {
+				return fmt.Errorf("running iperf3 client: %w: %s", err, report.Error)
+			}
 			return fmt.Errorf("running iperf3 client: %w", err)
 		}
-
-		report, err := parseIPerf3Report(outR)
-		if err != nil {
+		if parseErr != nil {
 			return fmt.Errorf("parsing iperf3 report: %w", err)
 		}
 
@@ -2113,6 +2120,7 @@ func checkCurl(ctx context.Context, opts TestConnectivityOpts, curls *semaphore.
 type iperf3Report struct {
 	Intervals []iperf3ReportInterval `json:"intervals"`
 	End       iperf3ReportEnd        `json:"end"`
+	Error     string                 `json:"error,omitempty"`
 }
 
 type iperf3ReportInterval struct {
