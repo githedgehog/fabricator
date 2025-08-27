@@ -297,6 +297,7 @@ type SetupVPCsOpts struct {
 	InterfaceMTU      uint16
 	HashPolicy        string
 	VPCMode           vpcapi.VPCMode
+	KeepPeerings      bool
 }
 
 func CreateOrUpdateVpc(ctx context.Context, kube client.Client, vpc *vpcapi.VPC) (bool, error) {
@@ -458,6 +459,21 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		return fmt.Errorf("creating kube client: %w", err)
 	}
 	defer cacheCancel()
+	if !opts.KeepPeerings {
+		slog.Info("Removing all VPC, External and Gateway peerings")
+
+		if err := client.IgnoreNotFound(kube.DeleteAllOf(ctx, &vpcapi.VPCPeering{})); err != nil {
+			return fmt.Errorf("cleaning up vpc peerings: %w", err)
+		}
+		if err := client.IgnoreNotFound(kube.DeleteAllOf(ctx, &vpcapi.ExternalPeering{})); err != nil {
+			return fmt.Errorf("cleaning up external peerings: %w", err)
+		}
+		if c.Fab.Spec.Config.Gateway.Enable {
+			if err := client.IgnoreNotFound(kube.DeleteAllOf(ctx, &gwapi.Peering{})); err != nil {
+				return fmt.Errorf("cleaning up gateway peerings: %w", err)
+			}
+		}
+	}
 
 	servers := &wiringapi.ServerList{}
 	if err := kube.List(ctx, servers); err != nil {
