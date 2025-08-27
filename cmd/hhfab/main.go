@@ -922,6 +922,11 @@ func Run(ctx context.Context) error {
 								Aliases: []string{"mode"},
 								Usage:   "VPC mode: empty (l2vni) by default or l3vni, etc",
 							},
+							&cli.BoolFlag{
+								Name:    "keep-peerings",
+								Aliases: []string{"peerings"},
+								Usage:   "Do not delete all VPC, External and Gateway peerings before enforcing VPCs",
+							},
 						}),
 						Before: before(false),
 						Action: func(c *cli.Context) error {
@@ -937,6 +942,7 @@ func Run(ctx context.Context) error {
 								InterfaceMTU:      uint16(c.Uint("interface-mtu")), //nolint:gosec
 								HashPolicy:        c.String(FlagHashPolicy),
 								VPCMode:           vpcapi.VPCMode(handleL2VNI(c.String(FlagNameVPCMode))),
+								KeepPeerings:      c.Bool("keep-peerings"),
 							}); err != nil {
 								return fmt.Errorf("setup-vpcs: %w", err)
 							}
