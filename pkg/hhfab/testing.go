@@ -2028,8 +2028,17 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphor
 	g, ctx := errgroup.WithContext(ctx)
 
 	g.Go(func() error {
-		cmd := fmt.Sprintf("toolbox -q timeout -v %d iperf3 -s -1", opts.IPerfsSeconds+25)
-		if _, err := retrySSHCmd(ctx, toSSH, cmd, to); err != nil {
+		// NOTE: JSON parsing of the report does not work for iperf3 server, because they decided
+		// to add some mutex logs before and after the report using perror that cannot be suppressed.
+		// we could just look at stdout, but the library we are using only gives us the combined output
+		// option. at the end of the day, the most likely error is a timeout, so I'm making that explicit
+		// by checking the original error message.
+		cmd := fmt.Sprintf("toolbox -q timeout %d iperf3 -s -1", opts.IPerfsSeconds+25)
+		_, err := retrySSHCmd(ctx, toSSH, cmd, to)
+		if err != nil {
+			if err.Error() == "Process exited with status 124" {
+				return fmt.Errorf("iperf3 server timed out after %d seconds", opts.IPerfsSeconds+25) //nolint:goerr113
+			}
 			return fmt.Errorf("running iperf3 server: %w", err)
 		}
 
@@ -2040,7 +2049,7 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphor
 		// We could netcat to check if the server is up, but that will make the server shut down if
 		// it was started with -1, and if we don't add -1 it will run until the timeout
 		time.Sleep(1 * time.Second)
-		cmd := fmt.Sprintf("toolbox -q timeout -v %d iperf3 -P 4 -J -c %s -t %d", opts.IPerfsSeconds+25, toIP.String(), opts.IPerfsSeconds)
+		cmd := fmt.Sprintf("toolbox -q timeout %d iperf3 -P 4 -J -c %s -t %d", opts.IPerfsSeconds+25, toIP.String(), opts.IPerfsSeconds)
 
 		// TODO remove workaround after we configure correct MTU on the Gateway ports
 		if reachability.Reason == ReachabilityReasonGatewayPeering {
@@ -2054,12 +2063,14 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphor
 			cmd += fmt.Sprintf(" --tos %d", opts.IPerfsTOS)
 		}
 		outR, err := retrySSHCmd(ctx, fromSSH, cmd, from)
+		report, parseErr := parseIPerf3Report(outR)
 		if err != nil {
+			if parseErr == nil && report.Error != "" {
+				return fmt.Errorf("running iperf3 client: %w: %s", err, report.Error)
+			}
 			return fmt.Errorf("running iperf3 client: %w", err)
 		}
-
-		report, err := parseIPerf3Report(outR)
-		if err != nil {
+		if parseErr != nil {
 			return fmt.Errorf("parsing iperf3 report: %w", err)
 		}
 
@@ -2139,6 +2150,7 @@ func checkCurl(ctx context.Context, opts TestConnectivityOpts, curls *semaphore.
 type iperf3Report struct {
 	Intervals []iperf3ReportInterval `json:"intervals"`
 	End       iperf3ReportEnd        `json:"end"`
+	Error     string                 `json:"error,omitempty"`
 }
 
 type iperf3ReportInterval struct {
