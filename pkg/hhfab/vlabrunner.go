@@ -95,7 +95,7 @@ type VLABRunOpts struct {
 	BuildMode          recipe.BuildMode
 	AutoUpgrade        bool
 	FailFast           bool
-	OnReady            []string
+	OnReady            []OnReady
 	CollectShowTech    bool
 	VPCMode            vpcapi.VPCMode
 }
@@ -124,6 +124,24 @@ var AllOnReady = []OnReady{
 	OnReadyReleaseTest,
 }
 
+var fromShortOnReadyMap = map[string]OnReady{
+	"vpcs":      OnReadySetupVPCs,
+	"peers":     OnReadySetupPeerings,
+	"reinstall": OnReadySwitchReinstall,
+	"conns":     OnReadyTestConnectivity,
+	"wait":      OnReadyWait,
+	"inspect":   OnReadyInspect,
+	"rt":        OnReadyReleaseTest,
+}
+
+func FromShortOnReady(short string) OnReady {
+	if onReady, ok := fromShortOnReadyMap[short]; ok {
+		return onReady
+	}
+
+	return OnReady(short)
+}
+
 var ErrExit = fmt.Errorf("exit")
 
 func (c *Config) checkForBins() error {
@@ -144,7 +162,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 	start := time.Now()
 
 	for _, cmd := range opts.OnReady {
-		if !slices.Contains(AllOnReady, OnReady(cmd)) {
+		if !slices.Contains(AllOnReady, cmd) {
 			return fmt.Errorf("unsupported on-ready command %q", cmd) //nolint:goerr113
 		}
 	}
@@ -572,7 +590,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 
 			for _, cmd := range opts.OnReady {
 				slog.Info("Running on-ready command", "command", cmd)
-				switch OnReady(cmd) {
+				switch cmd {
 				case OnReadySwitchReinstall:
 					if err := c.VLABSwitchReinstall(ctx, SwitchReinstallOpts{
 						Mode:        ReinstallModeHardReset,
