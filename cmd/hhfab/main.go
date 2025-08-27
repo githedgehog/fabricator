@@ -783,6 +783,16 @@ func Run(ctx context.Context) error {
 						}),
 						Before: before(false),
 						Action: func(c *cli.Context) error {
+							onReady := []hhfab.OnReady{}
+							for _, readyRaw := range c.StringSlice(FlagNameReady) {
+								ready := hhfab.FromShortOnReady(readyRaw)
+								if !slices.Contains(hhfab.AllOnReady, ready) {
+									return fmt.Errorf("invalid on-ready command: %s", readyRaw) //nolint:err113
+								}
+
+								onReady = append(onReady, ready)
+							}
+
 							if err := hhfab.VLABUp(ctx, workDir, cacheDir, hhfab.VLABUpOpts{
 								HydrateMode:  hhfab.HydrateMode(hydrateMode),
 								ReCreate:     c.Bool(FlagNameReCreate),
@@ -795,7 +805,7 @@ func Run(ctx context.Context) error {
 									BuildMode:          recipe.BuildMode(c.String(FlagNameBuildMode)),
 									AutoUpgrade:        c.Bool(FlagNameAutoUpgrade),
 									FailFast:           c.Bool(FlagNameFailFast),
-									OnReady:            c.StringSlice(FlagNameReady),
+									OnReady:            onReady,
 									CollectShowTech:    c.Bool(FlagNameCollectShowTech),
 									VPCMode:            vpcapi.VPCMode(handleL2VNI(c.String(FlagNameVPCMode))),
 								},
