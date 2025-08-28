@@ -25,6 +25,7 @@ function setup_bond() {
     local hash_policy=$2
 
     sudo ip l a "$bond_name" type bond miimon 100 mode 802.3ad xmit_hash_policy "$hash_policy"
+    sudo ip l s "$bond_name" mtu 9036
 
     for iface in "${@:3}"; do
         # cannot enslave interface if it is up

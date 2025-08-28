@@ -80,9 +80,13 @@ storage:
           Kind=!vlan
 
           [Network]
-          DHCP=yes
+          DHCP=ipv4
           LLDP=yes
           EmitLLDP=yes
+
+          [DHCPv4]
+          UseGateway=true
+
 
     - path: /var/lib/scripts/disable_nic_lldp_agent.sh
       mode: 0755
@@ -104,6 +108,7 @@ storage:
 
           [Link]
           Name=enp2s1
+          MtuBytes=9036
 
     - path: /etc/systemd/network/10-rename-enp2s2.link
       mode: 0644
@@ -114,6 +119,7 @@ storage:
 
           [Link]
           Name=enp2s2
+          MtuBytes=9036
 
     - path: /etc/sysctl.d/arp.conf
       mode: 0644
@@ -121,3 +127,11 @@ storage:
         inline: |
           net.ipv4.conf.all.arp_notify = 1
           net.ipv4.conf.all.arp_announce = 2
+
+    - path: /etc/systemd/networkd.conf.d/20-mng-foreign.conf
+      mode: 0644
+      contents:
+        inline: |
+          [Network]
+          ManageForeignNextHops=no
+          ManageForeignRoutes=no
