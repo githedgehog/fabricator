@@ -121,3 +121,11 @@ storage:
         inline: |
           net.ipv4.conf.all.arp_notify = 1
           net.ipv4.conf.all.arp_announce = 2
+
+    - path: /etc/systemd/networkd.conf.d/20-mng-foreign.conf
+      mode: 0644
+      contents:
+        inline: |
+          [Network]
+          ManageForeignNextHops=no
+          ManageForeignRoutes=no
