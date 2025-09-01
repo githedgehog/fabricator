@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	agentapi "go.githedgehog.com/fabric/api/agent/v1beta1"
@@ -2276,6 +2277,210 @@ func (testCtx *VPCPeeringTestCtx) breakoutTest(ctx context.Context) (bool, []Rev
 	return false, nil, nil
 }
 
+// Test DHCP renewal on VPC-attached interfaces
+// Uses 1 server by default, all servers in extended mode
+// Triggers DHCP renewal via networkctl and verifies connectivity
+// Fails if any renewal takes longer than 15 seconds
+func (testCtx *VPCPeeringTestCtx) dhcpRenewalTest(ctx context.Context) (bool, []RevertFunc, error) {
+	servers, err := testCtx.getServersWithVPCAttachments(ctx)
+	if err != nil {
+		return false, nil, fmt.Errorf("failed to find servers with VPC attachments: %w", err)
+	}
+
+	if len(servers) == 0 {
+		slog.Info("No servers with VPC attachments found, skipping DHCP renewal test")
+
+		return true, nil, fmt.Errorf("no servers with VPC attachments found") //nolint:goerr113
+	}
+
+	// Default 1 server, extended mode tests all available servers
+	testServerCount := 1
+	if testCtx.extended {
+		testServerCount = len(servers)
+	}
+
+	testServers := servers[:testServerCount]
+	slog.Info("Testing DHCP renewal", "servers", len(testServers))
+
+	var wg sync.WaitGroup
+	results := make(chan RenewalResult, len(testServers))
+	errors := sync.Map{}
+
+	for _, server := range testServers {
+		wg.Add(1)
+		go func(srv ServerWithInterface) {
+			defer wg.Done()
+
+			start := time.Now()
+			err := testCtx.performDHCPRenewal(srv.Name, srv.Interface)
+			duration := time.Since(start)
+
+			result := RenewalResult{
+				Server:   srv.Name,
+				Duration: duration,
+				Error:    err,
+			}
+
+			if err != nil {
+				errors.Store(fmt.Sprintf("dhcp-renewal--%s", srv.Name), err)
+			}
+
+			results <- result
+		}(server)
+	}
+
+	wg.Wait()
+	close(results)
+
+	var failures []string
+	var slowRenewals []string
+	successCount := 0
+	maxDuration := time.Duration(0)
+
+	for result := range results {
+		if result.Error != nil {
+			failures = append(failures, fmt.Sprintf("%s: %v", result.Server, result.Error))
+		} else {
+			successCount++
+			if result.Duration > maxDuration {
+				maxDuration = result.Duration
+			}
+			// Flag renewals taking longer than reasonable threshold
+			if result.Duration > DefaultDHCPRenewalTimeout {
+				slowRenewals = append(slowRenewals,
+					fmt.Sprintf("%s: %v", result.Server, result.Duration))
+			}
+		}
+	}
+
+	// Check for any errors stored in the sync.Map
+	var additionalErrors []string
+	errors.Range(func(key, value any) bool {
+		additionalErrors = append(additionalErrors, fmt.Sprintf("%s: %v", key, value))
+
+		return true
+	})
+
+	if len(failures) > 0 || len(additionalErrors) > 0 {
+		failures = append(failures, additionalErrors...) // Fixed: assign to same slice
+
+		return false, nil, fmt.Errorf("DHCP renewal failures: %v", failures) //nolint:goerr113
+	}
+
+	if len(slowRenewals) > 0 {
+		return false, nil, fmt.Errorf("slow DHCP renewals detected (>%v): %v", DefaultDHCPRenewalTimeout, slowRenewals) //nolint:goerr113
+	}
+
+	if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
+		return false, nil, fmt.Errorf("connectivity test failed after renewals: %w", err)
+	}
+
+	slog.Info("DHCP renewal test passed", "servers", len(testServers), "maxDuration", maxDuration)
+
+	return false, nil, nil
+}
+
+const (
+	DefaultDHCPRenewalTimeout = 15 * time.Second
+	DHCPRenewalMaxWait        = 20 * time.Second
+)
+
+type ServerWithInterface struct {
+	Name      string
+	Interface string
+}
+
+type RenewalResult struct {
+	Server   string
+	Duration time.Duration
+	Error    error
+}
+
+func (testCtx *VPCPeeringTestCtx) getServersWithVPCAttachments(ctx context.Context) ([]ServerWithInterface, error) {
+	vpcAttaches := &vpcapi.VPCAttachmentList{}
+	if err := testCtx.kube.List(ctx, vpcAttaches); err != nil {
+		return nil, fmt.Errorf("listing VPCAttachments: %w", err)
+	}
+
+	servers := make([]ServerWithInterface, 0, len(vpcAttaches.Items))
+	for _, attach := range vpcAttaches.Items {
+		conn := &wiringapi.Connection{}
+		if err := testCtx.kube.Get(ctx, kclient.ObjectKey{
+			Namespace: kmetav1.NamespaceDefault,
+			Name:      attach.Spec.Connection,
+		}, conn); err != nil {
+			continue
+		}
+
+		_, serverNames, _, _, err := conn.Spec.Endpoints()
+		if err != nil || len(serverNames) != 1 {
+			continue
+		}
+
+		vpc := &vpcapi.VPC{}
+		if err := testCtx.kube.Get(ctx, kclient.ObjectKey{
+			Namespace: kmetav1.NamespaceDefault,
+			Name:      attach.Spec.VPCName(),
+		}, vpc); err != nil {
+			continue
+		}
+
+		subnet := vpc.Spec.Subnets[attach.Spec.SubnetName()]
+		if subnet == nil {
+			continue
+		}
+
+		// Reuse existing netconf command logic to get proper interface name
+		_, err = GetServerNetconfCmd(conn, subnet.VLAN, testCtx.opts.HashPolicy)
+		if err != nil {
+			continue
+		}
+
+		// Extract interface name from netconf command
+		var ifName string
+		if conn.Spec.Unbundled != nil {
+			ifName = fmt.Sprintf("%s.%d", conn.Spec.Unbundled.Link.Server.LocalPortName(), subnet.VLAN)
+		} else {
+			ifName = fmt.Sprintf("bond0.%d", subnet.VLAN)
+		}
+
+		servers = append(servers, ServerWithInterface{
+			Name:      serverNames[0],
+			Interface: ifName,
+		})
+	}
+
+	return servers, nil
+}
+
+func (testCtx *VPCPeeringTestCtx) performDHCPRenewal(serverName, ifName string) error {
+	if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, serverName,
+		fmt.Sprintf("sudo networkctl renew %s", ifName)); err != nil {
+		return fmt.Errorf("networkctl renew failed: %w", err)
+	}
+
+	// Wait for renewal to complete with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), DHCPRenewalMaxWait)
+	defer cancel()
+
+	// Simple validation that the interface still exists and is configured
+	for {
+		out, err := execNodeCmdWOutput(testCtx.hhfabBin, testCtx.workDir, serverName,
+			fmt.Sprintf("ip link show %s", ifName))
+		if err == nil && strings.Contains(out, "state UP") {
+			break
+		}
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("timeout waiting for DHCP renewal completion on %s", ifName) //nolint:goerr113
+		case <-time.After(1 * time.Second):
+		}
+	}
+
+	return nil
+}
+
 // Utilities and suite runners
 
 func makeTestCtx(kube kclient.Client, setupOpts SetupVPCsOpts, workDir, cacheDir string, wipeBetweenTests bool, rtOpts ReleaseTestOpts, roceLeaves []string) *VPCPeeringTestCtx {
@@ -2661,6 +2866,10 @@ func makeVpcPeeringsSingleVPCSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 		{
 			Name: "DNS/NTP/MTU/DHCP lease",
 			F:    testCtx.dnsNtpMtuTest,
+		},
+		{
+			Name: "DHCP renewal",
+			F:    testCtx.dhcpRenewalTest,
 		},
 		{
 			Name: "MCLAG Failover",
