@@ -21,7 +21,6 @@ import (
 	"go.githedgehog.com/fabric/api/meta"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
-	"go.githedgehog.com/fabric/pkg/hhfctl"
 	"go.githedgehog.com/fabric/pkg/util/pointer"
 	"golang.org/x/sync/errgroup"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -61,7 +60,7 @@ type VPCPeeringTestCtx struct {
 	cacheDir         string
 	kube             kclient.Client
 	wipeBetweenTests bool
-	opts             SetupVPCsOpts
+	setupOpts        SetupVPCsOpts
 	tcOpts           TestConnectivityOpts
 	extName          string
 	hhfabBin         string
@@ -74,8 +73,7 @@ type VPCPeeringTestCtx struct {
 
 var AllZeroPrefix = []string{"0.0.0.0/0"}
 
-// prepare for a test: wipe the fabric and then create the VPCs according to the
-// options in the test context
+// prepare for a test: create the VPCs according to the options in the test context
 func (testCtx *VPCPeeringTestCtx) setupTest(ctx context.Context) error {
 	if testCtx.noSetup {
 		// nothing to setup, but we still want to wait for the switches to be ready
@@ -85,14 +83,12 @@ func (testCtx *VPCPeeringTestCtx) setupTest(ctx context.Context) error {
 
 		return nil
 	}
-	if err := hhfctl.VPCWipeWithClient(ctx, testCtx.kube); err != nil {
-		return fmt.Errorf("wiping fabric: %w", err)
-	}
-	if err := DoVLABSetupVPCs(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.opts); err != nil {
+	// this will also remove all peerings
+	if err := DoVLABSetupVPCs(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.setupOpts); err != nil {
 		return fmt.Errorf("setting up VPCs: %w", err)
 	}
 	// in case of L3 VPC mode, we need to give it time to switch to the longer lease time and switches to learn the routes
-	if testCtx.opts.VPCMode == vpcapi.VPCModeL3VNI || testCtx.opts.VPCMode == vpcapi.VPCModeL3Flat {
+	if testCtx.setupOpts.VPCMode == vpcapi.VPCModeL3VNI || testCtx.setupOpts.VPCMode == vpcapi.VPCModeL3Flat {
 		time.Sleep(10 * time.Second)
 	}
 
@@ -672,7 +668,7 @@ func (testCtx *VPCPeeringTestCtx) mclagTest(ctx context.Context) (bool, []Revert
 // then test connectivity. Repeat for the other link.
 func (testCtx *VPCPeeringTestCtx) eslagTest(ctx context.Context) (bool, []RevertFunc, error) {
 	// l3vni mode is not compatible with ESLAG, so there will be no servers attached to ESLAG connections
-	if testCtx.opts.VPCMode == vpcapi.VPCModeL3VNI {
+	if testCtx.setupOpts.VPCMode == vpcapi.VPCModeL3VNI {
 		return true, nil, fmt.Errorf("L3VNI mode is not compatible with ESLAG") //nolint:goerr113
 	}
 	// list connections in the fabric, filter by ES-LAG connection type
@@ -1510,7 +1506,7 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool,
 			return fmt.Errorf("configuring VLAN on %s: %w", targetServer, err)
 		}
 		// in case of L3 VPC mode, we need to give it time to switch to the longer lease time and switches to learn the routes
-		if testCtx.opts.VPCMode == vpcapi.VPCModeL3VNI || testCtx.opts.VPCMode == vpcapi.VPCModeL3Flat {
+		if testCtx.setupOpts.VPCMode == vpcapi.VPCModeL3VNI || testCtx.setupOpts.VPCMode == vpcapi.VPCModeL3Flat {
 			time.Sleep(10 * time.Second)
 		}
 
@@ -1808,7 +1804,7 @@ func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (bool, []Re
 		return false, nil, fmt.Errorf("expected 1 server for connection %s, got %d", conn.Name, len(servers)) //nolint:goerr113
 	}
 	serverName := servers[0]
-	netconfCmd, netconfErr := GetServerNetconfCmd(conn, subnet.VLAN, testCtx.opts.HashPolicy)
+	netconfCmd, netconfErr := GetServerNetconfCmd(conn, subnet.VLAN, testCtx.setupOpts.HashPolicy)
 	if netconfErr != nil {
 		return false, nil, fmt.Errorf("getting netconf command for server %s: %w", serverName, netconfErr)
 	}
@@ -1823,7 +1819,7 @@ func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (bool, []Re
 
 	// Set DNS, NTP and MTU
 	slog.Debug("Setting DNS, NTP, MTU and DHCP lease time")
-	l3mode := testCtx.opts.VPCMode == vpcapi.VPCModeL3VNI || testCtx.opts.VPCMode == vpcapi.VPCModeL3Flat
+	l3mode := testCtx.setupOpts.VPCMode == vpcapi.VPCModeL3VNI || testCtx.setupOpts.VPCMode == vpcapi.VPCModeL3Flat
 	dhcpOpts := &vpcapi.VPCDHCPOptions{
 		DNSServers:       []string{"1.1.1.1"},
 		TimeServers:      []string{"1.1.1.1"},
@@ -1874,7 +1870,7 @@ func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (bool, []Re
 			return fmt.Errorf("bonding interfaces on %s: %w", serverName, err)
 		}
 		// in case of L3 VPC mode, we need to give it time to switch to the longer lease time and switches to learn the routes
-		if testCtx.opts.VPCMode == vpcapi.VPCModeL3VNI || testCtx.opts.VPCMode == vpcapi.VPCModeL3Flat {
+		if testCtx.setupOpts.VPCMode == vpcapi.VPCModeL3VNI || testCtx.setupOpts.VPCMode == vpcapi.VPCModeL3Flat {
 			time.Sleep(10 * time.Second)
 		}
 
@@ -2275,19 +2271,19 @@ func (testCtx *VPCPeeringTestCtx) breakoutTest(ctx context.Context) (bool, []Rev
 
 // Utilities and suite runners
 
-func makeTestCtx(kube kclient.Client, opts SetupVPCsOpts, workDir, cacheDir string, wipeBetweenTests bool, rtOpts ReleaseTestOpts, roceLeaves []string) *VPCPeeringTestCtx {
+func makeTestCtx(kube kclient.Client, setupOpts SetupVPCsOpts, workDir, cacheDir string, wipeBetweenTests bool, rtOpts ReleaseTestOpts, roceLeaves []string) *VPCPeeringTestCtx {
 	testCtx := new(VPCPeeringTestCtx)
 	testCtx.kube = kube
 	testCtx.workDir = workDir
 	testCtx.cacheDir = cacheDir
-	testCtx.opts = opts
+	testCtx.setupOpts = setupOpts
 	testCtx.tcOpts = TestConnectivityOpts{
 		WaitSwitchesReady: false,
 		PingsCount:        3,
 		IPerfsSeconds:     3,
 		IPerfsMinSpeed:    8200,
 		CurlsCount:        1,
-		RequireAllServers: opts.VPCMode == vpcapi.VPCModeL2VNI, // L3VNI will skip eslag servers
+		RequireAllServers: setupOpts.VPCMode == vpcapi.VPCModeL2VNI, // L3VNI will skip eslag servers
 	}
 	if rtOpts.Extended {
 		testCtx.tcOpts.IPerfsSeconds = 10
@@ -2831,7 +2827,7 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 	serversPerSubnet := int(math.Ceil(float64(len(servers.Items)) / float64(subnetsPerVpc)))
 	slog.Debug("Calculated servers per subnet for single VPC", "servers", len(servers.Items), "subnets-per-vpc", subnetsPerVpc, "servers-per-subnet", serversPerSubnet)
 
-	opts := SetupVPCsOpts{
+	setupOpts := SetupVPCsOpts{
 		WaitSwitchesReady: true,
 		ForceCleanup:      true,
 		ServersPerSubnet:  serversPerSubnet,
@@ -2946,7 +2942,7 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 		}
 	}
 
-	noVpcTestCtx := makeTestCtx(kube, opts, workDir, cacheDir, true, rtOtps, roceLeaves)
+	noVpcTestCtx := makeTestCtx(kube, setupOpts, workDir, cacheDir, true, rtOtps, roceLeaves)
 	noVpcTestCtx.noSetup = true
 	noVpcSuite := makeNoVpcsSuiteRun(noVpcTestCtx)
 	noVpcResults, err := selectAndRunSuite(ctx, noVpcTestCtx, noVpcSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
@@ -2954,23 +2950,23 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 		return fmt.Errorf("running no VPC suite: %w", err)
 	}
 
-	singleVpcTestCtx := makeTestCtx(kube, opts, workDir, cacheDir, false, rtOtps, roceLeaves)
+	singleVpcTestCtx := makeTestCtx(kube, setupOpts, workDir, cacheDir, false, rtOtps, roceLeaves)
 	singleVpcSuite := makeVpcPeeringsSingleVPCSuite(singleVpcTestCtx)
 	singleVpcResults, err := selectAndRunSuite(ctx, singleVpcTestCtx, singleVpcSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
 	if err != nil && rtOtps.FailFast {
 		return fmt.Errorf("running single VPC suite: %w", err)
 	}
 
-	opts.ServersPerSubnet = 1
-	multiVpcTestCtx := makeTestCtx(kube, opts, workDir, cacheDir, false, rtOtps, roceLeaves)
+	setupOpts.ServersPerSubnet = 1
+	multiVpcTestCtx := makeTestCtx(kube, setupOpts, workDir, cacheDir, false, rtOtps, roceLeaves)
 	multiVpcSuite := makeVpcPeeringsMultiVPCSuiteRun(multiVpcTestCtx)
 	multiVpcResults, err := selectAndRunSuite(ctx, multiVpcTestCtx, multiVpcSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
 	if err != nil && rtOtps.FailFast {
 		return fmt.Errorf("running multi VPC suite: %w", err)
 	}
 
-	opts.SubnetsPerVPC = 1
-	basicTestCtx := makeTestCtx(kube, opts, workDir, cacheDir, true, rtOtps, roceLeaves)
+	setupOpts.SubnetsPerVPC = 1
+	basicTestCtx := makeTestCtx(kube, setupOpts, workDir, cacheDir, true, rtOtps, roceLeaves)
 	basicVpcSuite := makeVpcPeeringsBasicSuiteRun(basicTestCtx)
 	basicResults, err := selectAndRunSuite(ctx, basicTestCtx, basicVpcSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
 	if err != nil && rtOtps.FailFast {
