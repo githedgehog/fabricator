@@ -2477,14 +2477,48 @@ func (testCtx *VPCPeeringTestCtx) performDHCPRenewal(ctx context.Context, server
 	for {
 		pollCount++
 		out, err := execNodeCmdWOutput(testCtx.hhfabBin, testCtx.workDir, serverName,
-			fmt.Sprintf("ip addr show dev %s proto 4 | grep valid_lft", ifName))
+			fmt.Sprintf("ip addr show dev %s proto 4", ifName))
 
-		if pollCount%3 == 0 || err != nil {
-			slog.Debug("Lease polling", "server", serverName, "interface", ifName, "poll", pollCount, "lease", strings.TrimSpace(out), "error", err)
+		// Parse the output to understand what's happening
+		var leaseInfo string
+		var hasInterface bool
+		var hasIP bool
+
+		if err == nil {
+			hasInterface = true
+			if strings.Contains(out, "valid_lft") {
+				// Extract just the lease line for logging
+				lines := strings.Split(out, "\n")
+				for _, line := range lines {
+					if strings.Contains(line, "valid_lft") {
+						leaseInfo = strings.TrimSpace(line)
+						hasIP = true
+
+						break
+					}
+				}
+			}
 		}
 
-		if err == nil && strings.TrimSpace(out) != "" {
-			tokens := strings.Split(strings.TrimLeft(out, " \t"), " ")
+		// Improved logging based on interface state
+		if pollCount%3 == 0 || err != nil || !hasIP {
+			var status string
+			switch {
+			case err != nil:
+				status = "interface command failed"
+			case !hasInterface:
+				status = "interface not found"
+			case !hasIP:
+				status = "interface up but no DHCP lease"
+			default:
+				status = "interface has lease"
+			}
+
+			slog.Debug("Lease polling", "server", serverName, "interface", ifName, "poll", pollCount, "status", status, "lease", leaseInfo, "error", err)
+		}
+
+		if hasIP && leaseInfo != "" {
+			tokens := strings.Split(strings.TrimLeft(leaseInfo, " \t"), " ")
 			if len(tokens) >= 2 {
 				stripped, _ := strings.CutSuffix(tokens[1], "sec")
 				if currentLease, parseErr := strconv.Atoi(stripped); parseErr == nil {
