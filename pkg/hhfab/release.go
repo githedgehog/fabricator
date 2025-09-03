@@ -2444,6 +2444,8 @@ type RenewalResult struct {
 }
 
 func (testCtx *VPCPeeringTestCtx) performDHCPRenewal(ctx context.Context, serverName, ifName string) error {
+	isL3Mode := testCtx.opts.VPCMode == vpcapi.VPCModeL3VNI || testCtx.opts.VPCMode == vpcapi.VPCModeL3Flat
+
 	// Log initial state
 	initialOut, _ := execNodeCmdWOutput(testCtx.hhfabBin, testCtx.workDir, serverName,
 		fmt.Sprintf("ip addr show dev %s proto 4 | grep valid_lft", ifName))
@@ -2470,6 +2472,8 @@ func (testCtx *VPCPeeringTestCtx) performDHCPRenewal(ctx context.Context, server
 	defer cancel()
 
 	pollCount := 0
+	shortLeaseFound := false
+
 	for {
 		pollCount++
 		out, err := execNodeCmdWOutput(testCtx.hhfabBin, testCtx.workDir, serverName,
@@ -2484,10 +2488,27 @@ func (testCtx *VPCPeeringTestCtx) performDHCPRenewal(ctx context.Context, server
 			if len(tokens) >= 2 {
 				stripped, _ := strings.CutSuffix(tokens[1], "sec")
 				if currentLease, parseErr := strconv.Atoi(stripped); parseErr == nil {
-					// Success if current lease is higher than initial (indicating renewal)
-					// Allow some tolerance for timing (initial lease might have counted down a bit)
-					if currentLease > initialLease-30 {
-						slog.Debug("DHCP renewal completed", "server", serverName, "interface", ifName, "polls", pollCount, "initial_lease", initialLease, "final_lease", currentLease)
+					if isL3Mode {
+						// L3VNI mode: REQUIRE 2-step process
+						if !shortLeaseFound && currentLease >= 5 && currentLease <= 15 {
+							shortLeaseFound = true
+							slog.Debug("L3 mode short lease detected", "server", serverName, "interface", ifName, "lease", currentLease)
+
+							continue
+						}
+
+						// Only accept full lease if we saw the short lease first
+						if currentLease >= 3590 {
+							if !shortLeaseFound {
+								return fmt.Errorf("L3VNI mode requires 2-step lease process, but no short lease detected before full lease on %s", ifName) //nolint:goerr113
+							}
+							slog.Debug("L3 mode 2-step lease completed", "server", serverName, "interface", ifName, "polls", pollCount, "initial_lease", initialLease, "final_lease", currentLease)
+
+							return nil
+						}
+					} else if currentLease > initialLease-30 {
+						// L2VNI mode: Accept direct renewal to full lease
+						slog.Debug("L2 mode renewal completed", "server", serverName, "interface", ifName, "polls", pollCount, "initial_lease", initialLease, "final_lease", currentLease)
 
 						return nil
 					}
@@ -2499,6 +2520,11 @@ func (testCtx *VPCPeeringTestCtx) performDHCPRenewal(ctx context.Context, server
 		case <-renewalCtx.Done():
 			finalOut, _ := execNodeCmdWOutput(testCtx.hhfabBin, testCtx.workDir, serverName,
 				fmt.Sprintf("ip addr show dev %s proto 4 | grep valid_lft", ifName))
+
+			if isL3Mode && !shortLeaseFound {
+				return fmt.Errorf("timeout waiting for L3VNI short lease on %s after %d polls (final: %s): %w",
+					ifName, pollCount, strings.TrimSpace(finalOut), renewalCtx.Err())
+			}
 
 			return fmt.Errorf("timeout after %d polls waiting for DHCP renewal on %s (initial: %d, final: %s): %w",
 				pollCount, ifName, initialLease, strings.TrimSpace(finalOut), renewalCtx.Err())
