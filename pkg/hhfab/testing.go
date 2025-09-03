@@ -698,6 +698,11 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		}
 	}
 
+	if changed {
+		slog.Debug("Waiting for deletions to settle")
+		time.Sleep(3 * time.Second)
+	}
+
 	for _, vpc := range vpcs {
 		iterChanged, err := CreateOrUpdateVpc(ctx, kube, vpc)
 		if err != nil {
