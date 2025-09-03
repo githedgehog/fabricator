@@ -518,6 +518,9 @@ var controlScript []byte
 //go:embed show-tech/switch.sh
 var switchScript []byte
 
+//go:embed show-tech/gateway.sh
+var gatewayScript []byte
+
 type ShowTechScript struct {
 	Scripts map[VMType][]byte
 }
@@ -528,8 +531,8 @@ func DefaultShowTechScript() ShowTechScript {
 			VMTypeServer:   serverScript,
 			VMTypeControl:  controlScript,
 			VMTypeSwitch:   switchScript,
-			VMTypeGateway:  serverScript, // TODO add gateway script
-			VMTypeExternal: serverScript, // TODO add external script
+			VMTypeGateway:  gatewayScript,
+			VMTypeExternal: serverScript,
 		},
 	}
 }
@@ -810,6 +813,33 @@ func (c *Config) createSSHConfig(ctx context.Context, entryName string, entry VL
 		}, nil
 	}
 
+	if entry.IsNode {
+		nodeIP, err := c.getNodeIP(ctx, entryName)
+		if err != nil {
+			return nil, fmt.Errorf("getting node IP: %w", err)
+		}
+
+		controlPort := getSSHPort(0)
+		if controlPort == 0 {
+			return nil, fmt.Errorf("invalid control node port (0) for %s", entryName) //nolint:goerr113
+		}
+
+		return &easyssh.MakeConfig{
+			User:    "core",
+			Server:  nodeIP,
+			Port:    "22",
+			KeyPath: sshKeyPath,
+			Timeout: 60 * time.Second,
+			Proxy: easyssh.DefaultConfig{
+				User:    "core",
+				Server:  "127.0.0.1",
+				Port:    fmt.Sprintf("%d", controlPort),
+				KeyPath: sshKeyPath,
+				Timeout: 60 * time.Second,
+			},
+		}, nil
+	}
+
 	return nil, fmt.Errorf("unsupported entry type for %s", entryName) //nolint:goerr113
 }
 
@@ -869,8 +899,8 @@ func getVMType(entry VLABAccessInfo) VMType {
 		return VMTypeControl
 	case entry.IsServer:
 		return VMTypeServer
-	case entry.IsExternal:
-		return VMTypeExternal
+	case entry.IsNode:
+		return VMTypeGateway
 	default:
 		return ""
 	}
