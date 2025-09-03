@@ -75,7 +75,7 @@ type VPCPeeringTestCtx struct {
 var AllZeroPrefix = []string{"0.0.0.0/0"}
 
 // prepare for a test: create the VPCs according to the options in the test context
-func (testCtx *VPCPeeringTestCtx) setupTest(ctx context.Context) error {
+func (testCtx *VPCPeeringTestCtx) setupTest(ctx context.Context, initialSuiteSetup bool) error {
 	if testCtx.noSetup {
 		// nothing to setup, but we still want to wait for the switches to be ready
 		if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
@@ -84,12 +84,15 @@ func (testCtx *VPCPeeringTestCtx) setupTest(ctx context.Context) error {
 
 		return nil
 	}
+	// if it is the first setup of the suite, we also want to remove the old VPCs (might have different parameters)
+	opts := testCtx.setupOpts
+	opts.ForceCleanup = initialSuiteSetup
 	// this will also remove all peerings
-	if err := DoVLABSetupVPCs(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.setupOpts); err != nil {
+	if err := DoVLABSetupVPCs(ctx, testCtx.workDir, testCtx.cacheDir, opts); err != nil {
 		return fmt.Errorf("setting up VPCs: %w", err)
 	}
 	// in case of L3 VPC mode, we need to give it time to switch to the longer lease time and switches to learn the routes
-	if testCtx.setupOpts.VPCMode == vpcapi.VPCModeL3VNI || testCtx.setupOpts.VPCMode == vpcapi.VPCModeL3Flat {
+	if opts.VPCMode == vpcapi.VPCModeL3VNI || opts.VPCMode == vpcapi.VPCModeL3Flat {
 		time.Sleep(10 * time.Second)
 	}
 
@@ -2396,7 +2399,7 @@ func doRunTests(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 	slog.Info("** Running test suite", "suite", ts.Name, "tests", len(ts.TestCases), "start-time", suiteStart.Format(time.RFC3339))
 
 	// initial setup
-	if err := testCtx.setupTest(ctx); err != nil {
+	if err := testCtx.setupTest(ctx, true); err != nil {
 		slog.Error("Initial test suite setup failed", "suite", ts.Name, "error", err.Error())
 		if testCtx.pauseOnFail {
 			pauseOnFail()
@@ -2414,7 +2417,7 @@ func doRunTests(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 		}
 		slog.Info("* Running test", "test", test.Name)
 		if (ranSomeTests && testCtx.wipeBetweenTests) || prevRevertsFailed {
-			if err := testCtx.setupTest(ctx); err != nil {
+			if err := testCtx.setupTest(ctx, false); err != nil {
 				ts.TestCases[i].Failure = &Failure{
 					Message: fmt.Sprintf("Failed to run setupTest between tests: %s", err.Error()),
 				}
@@ -2837,7 +2840,7 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 
 	setupOpts := SetupVPCsOpts{
 		WaitSwitchesReady: true,
-		ForceCleanup:      true,
+		ForceCleanup:      false,
 		ServersPerSubnet:  serversPerSubnet,
 		SubnetsPerVPC:     subnetsPerVpc,
 		VLANNamespace:     "default",
