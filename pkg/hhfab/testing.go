@@ -460,16 +460,21 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	}
 	defer cacheCancel()
 	if !opts.KeepPeerings {
-		slog.Info("Removing all VPC, External and Gateway peerings")
+		slog.Info("Removing all peerings (VPC, External and Gateway)")
+		delAllOpts := client.DeleteAllOfOptions{
+			ListOptions: client.ListOptions{
+				Namespace: kmetav1.NamespaceDefault,
+			},
+		}
 
-		if err := client.IgnoreNotFound(kube.DeleteAllOf(ctx, &vpcapi.VPCPeering{})); err != nil {
+		if err := client.IgnoreNotFound(kube.DeleteAllOf(ctx, &vpcapi.VPCPeering{}, &delAllOpts)); err != nil {
 			return fmt.Errorf("cleaning up vpc peerings: %w", err)
 		}
-		if err := client.IgnoreNotFound(kube.DeleteAllOf(ctx, &vpcapi.ExternalPeering{})); err != nil {
+		if err := client.IgnoreNotFound(kube.DeleteAllOf(ctx, &vpcapi.ExternalPeering{}, &delAllOpts)); err != nil {
 			return fmt.Errorf("cleaning up external peerings: %w", err)
 		}
 		if c.Fab.Spec.Config.Gateway.Enable {
-			if err := client.IgnoreNotFound(kube.DeleteAllOf(ctx, &gwapi.Peering{})); err != nil {
+			if err := client.IgnoreNotFound(kube.DeleteAllOf(ctx, &gwapi.Peering{}, &delAllOpts)); err != nil {
 				return fmt.Errorf("cleaning up gateway peerings: %w", err)
 			}
 		}
