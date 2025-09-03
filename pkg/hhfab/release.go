@@ -2315,7 +2315,7 @@ func (testCtx *VPCPeeringTestCtx) dhcpRenewalTest(ctx context.Context) (bool, []
 			continue
 		}
 
-		_, err = GetServerNetconfCmd(conn, subnet.VLAN, testCtx.opts.HashPolicy)
+		_, err = GetServerNetconfCmd(conn, subnet.VLAN, testCtx.setupOpts.HashPolicy)
 		if err != nil {
 			continue
 		}
@@ -2348,11 +2348,11 @@ func (testCtx *VPCPeeringTestCtx) dhcpRenewalTest(ctx context.Context) (bool, []
 
 	// Determine timeout based on VPC mode
 	renewalTimeout := DefaultDHCPRenewalTimeoutL2
-	if testCtx.opts.VPCMode == vpcapi.VPCModeL3VNI || testCtx.opts.VPCMode == vpcapi.VPCModeL3Flat {
+	if testCtx.setupOpts.VPCMode == vpcapi.VPCModeL3VNI || testCtx.setupOpts.VPCMode == vpcapi.VPCModeL3Flat {
 		renewalTimeout = DefaultDHCPRenewalTimeoutL3
 	}
 
-	slog.Info("Testing DHCP renewal", "servers", len(servers), "mode", testCtx.opts.VPCMode, "timeout", renewalTimeout)
+	slog.Info("Testing DHCP renewal", "servers", len(servers), "mode", testCtx.setupOpts.VPCMode, "timeout", renewalTimeout)
 
 	var wg sync.WaitGroup
 	results := make(chan RenewalResult, len(servers))
@@ -2444,7 +2444,7 @@ type RenewalResult struct {
 }
 
 func (testCtx *VPCPeeringTestCtx) performDHCPRenewal(ctx context.Context, serverName, ifName string) error {
-	isL3Mode := testCtx.opts.VPCMode == vpcapi.VPCModeL3VNI || testCtx.opts.VPCMode == vpcapi.VPCModeL3Flat
+	isL3Mode := testCtx.setupOpts.VPCMode == vpcapi.VPCModeL3VNI || testCtx.setupOpts.VPCMode == vpcapi.VPCModeL3Flat
 
 	// Log initial state
 	initialOut, _ := execNodeCmdWOutput(testCtx.hhfabBin, testCtx.workDir, serverName,
