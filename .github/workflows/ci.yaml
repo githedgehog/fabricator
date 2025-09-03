@@ -214,15 +214,22 @@ jobs:
           fi
 
   vlab:
+    name: "${{ matrix.hybrid && 'h' || 'v' }}-${{ matrix.upgradefrom && 'up' || '' }}${{ matrix.upgradefrom }}${{ matrix.upgradefrom && '-' || '' }}${{ matrix.fabricmode == 'collapsed-core' && 'cc-' || '' }}${{ matrix.mesh && 'mesh-' || '' }}${{ matrix.gateway && 'gw-' || '' }}${{ matrix.includeonie && 'onie-' || '' }}${{ matrix.buildmode }}-${{ matrix.vpcmode }}"
     needs:
       - test-build
-
-    name: "${{ matrix.hybrid && 'hlab' || 'vlab' }}-${{ matrix.fabricmode == 'spine-leaf' && 'sl' || 'cc' }}-${{ matrix.mesh && 'mesh-' || '' }}${{ matrix.gateway && 'gw-' || '' }}${{ matrix.includeonie && 'onie-' || '' }}${{ matrix.buildmode }}-${{ matrix.vpcmode }}"
-
     uses: ./.github/workflows/run-vlab.yaml
     with:
       # if pull_request: skip hlab if not ci:+hlab and skip vlab if ci:-vlab
-      skip: ${{ github.event_name == 'pull_request' && (matrix.hybrid && !contains(github.event.pull_request.labels.*.name, 'ci:+hlab') || !matrix.hybrid && contains(github.event.pull_request.labels.*.name, 'ci:-vlab')) }}
+      skip: >-
+        ${{
+          github.event_name == 'pull_request'
+          && (
+            matrix.hybrid && !contains(github.event.pull_request.labels.*.name, 'ci:+hlab')
+            || !matrix.hybrid && contains(github.event.pull_request.labels.*.name, 'ci:-vlab')
+          ) && (
+            matrix.upgradefrom == '' || !contains(github.event.pull_request.labels.*.name, 'ci:-upgrade')
+          )
+        }}
       fabricatorref: ${{ github.ref }}
       fabricmode: ${{ matrix.fabricmode }}
       mesh: ${{ matrix.mesh }}
@@ -232,6 +239,7 @@ jobs:
       vpcmode: ${{ matrix.vpcmode }}
       releasetest: ${{ inputs.releasetest == true || contains(github.event.pull_request.labels.*.name, 'ci:+release') }}
       hybrid: ${{ matrix.hybrid }}
+      upgradefrom: ${{ matrix.upgradefrom }}
 
     strategy:
       fail-fast: false
@@ -252,6 +260,8 @@ jobs:
           - l2vni
         hybrid:
           - false
+        upgradefrom:
+          - ""
         include:
           - fabricmode: collapsed-core
             mesh: false
@@ -260,6 +270,7 @@ jobs:
             buildmode: iso
             vpcmode: l2vni
             hybrid: false
+            upgradefrom: ""
           - fabricmode: spine-leaf
             mesh: false
             gateway: true
@@ -267,6 +278,7 @@ jobs:
             buildmode: usb
             vpcmode: l2vni
             hybrid: false
+            upgradefrom: ""
           - fabricmode: spine-leaf
             mesh: false
             gateway: true
@@ -274,6 +286,7 @@ jobs:
             buildmode: iso
             vpcmode: l2vni
             hybrid: false
+            upgradefrom: ""
           - fabricmode: spine-leaf
             mesh: false
             gateway: false
@@ -281,6 +294,7 @@ jobs:
             buildmode: iso
             vpcmode: l3vni
             hybrid: false
+            upgradefrom: ""
           - fabricmode: spine-leaf
             mesh: false
             gateway: true
@@ -288,6 +302,7 @@ jobs:
             buildmode: iso
             vpcmode: l2vni
             hybrid: false
+            upgradefrom: ""
           - fabricmode: spine-leaf
             mesh: false
             gateway: false
@@ -295,167 +310,33 @@ jobs:
             buildmode: iso
             vpcmode: l2vni
             hybrid: true
-
-  vlab-upgrade:
-    if: ${{ !contains(github.event.pull_request.labels.*.name, 'ci:-upgrade') && !contains(github.event.pull_request.labels.*.name, 'ci:-vlab') }}
-
-    runs-on: vlab
-    needs:
-      - test-build
-    timeout-minutes: 90
-
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
+            upgradefrom: ""
           - fabricmode: spine-leaf
-            fromversion: "25.03"
-            fromflags: "-m=iso"
+            mesh: false
+            gateway: false
+            includeonie: false
+            buildmode: iso
+            vpcmode: l2vni
+            hybrid: false
+            upgradefrom: "25.03"
           - fabricmode: spine-leaf
-            fromversion: "25.04"
-            fromflags: "-m=iso"
-          - fabricmode: spine-leaf
-            fromversion: "dev"
-            fromflags: "-m=iso"
-
-    env:
-      slug: "vlab-upgrade-${{ matrix.fabricmode }}-${{ matrix.fromversion }}-${{ matrix.fromflags == '--usb' && 'usb' || matrix.fromflags == '-m=iso' && 'iso' }}"
-
-    steps:
-      - name: Runner host
-        run: |
-          echo "$KUBE_NODE"
-
-      - name: Checkout repository
-        uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-
-      - name: Pre-populate hhfab-cache
-        run: |
-          if [ -d "/hostcache/.hhfab-cache" ]; then
-            cp -r /hostcache/.hhfab-cache ~/
-          else
-            echo "Host cache not available"
-          fi
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: stable
-          cache: false
-
-      - name: Setup local registry
-        run: |
-          just --timestamp _localreg &
-
-      - name: Initial VLAB with old version
-        env:
-          HHFAB_REG_REPO: 127.0.0.1:30000
-          HHFAB_VLAB_COLLECT: true
-        run: |
-          mkdir old
-          curl -fsSL https://i.hhdev.io/hhfab | USE_SUDO=false INSTALL_DIR=./old VERSION="${{ matrix.fromversion }}" bash
-
-          old/hhfab init -v --dev -m ${{ matrix.fabricmode }}
-          old/hhfab vlab gen -v
-          old/hhfab versions | tee versions.txt
-          old/hhfab diagram --format=drawio
-          old/hhfab diagram --format=dot
-          old/hhfab diagram --format=mermaid
-          old/hhfab vlab up -v --ready setup-vpcs --ready test-connectivity --ready exit ${{ matrix.fromflags }}
-
-      - name: Prepare debug artifacts
-        if: ${{ always() }}
-        run: |
-          mkdir -p _debug/0-before/serial
-          cp versions.txt _debug/0-before || true
-          cp result/diagram.* _debug/0-before || true
-          cp vlab.hhs _debug/0-before || true
-          cp -r show-tech-output _debug/0-before || true
-          find ./vlab/vms -type f -name serial.log -exec bash -c 'cp $0 _debug/0-before/serial/$(basename $(dirname $0)).log' {} \; || true
-          cp .zot/log _debug/zot.log || true
-
-      - name: Build current hhfab
-        run: |
-          just --timestamp oci_repo=127.0.0.1:30000 oci=http push
-
-      - name: hhfab vlab up --upgrade
-        env:
-          HHFAB_REG_REPO: 127.0.0.1:30000
-          HHFAB_VLAB_COLLECT: true
-        run: |
-          bin/hhfab versions | tee versions.txt
-          bin/hhfab diagram --format=drawio
-          bin/hhfab diagram --format=dot
-          bin/hhfab diagram --format=mermaid
-          bin/hhfab vlab up -v --ready inspect --ready setup-vpcs --ready test-connectivity --ready exit --upgrade
-
-      - name: Prepare debug artifacts
-        if: ${{ always() }}
-        run: |
-          mkdir -p _debug/1-curr/serial
-          cp versions.txt _debug/1-curr || true
-          cp result/diagram.* _debug/1-curr || true
-          cp vlab.hhs _debug/1-curr || true
-          cp -r show-tech-output _debug/1-curr || true
-          find ./vlab/vms -type f -name serial.log -exec bash -c 'cp $0 _debug/1-curr/serial/$(basename $(dirname $0)).log' {} \; || true
-          cp .zot/log _debug/zot.log || true
-
-      - name: hhfab vlab up after upgrade
-        env:
-          HHFAB_REG_REPO: 127.0.0.1:30000
-          HHFAB_VLAB_COLLECT: true
-        run: |
-          bin/hhfab versions | tee versions.txt
-          bin/hhfab diagram --format=drawio
-          bin/hhfab diagram --format=dot
-          bin/hhfab diagram --format=mermaid
-          bin/hhfab vlab up -v --ready wait --ready exit -m=manual
-
-      - name: Prepare debug artifacts
-        if: ${{ always() }}
-        run: |
-          mkdir -p _debug/2-after/serial
-          cp versions.txt _debug/2-after || true
-          cp result/diagram.* _debug/2-after || true
-          cp vlab.hhs _debug/2-after || true
-          cp -r show-tech-output _debug/2-after || true
-          find ./vlab/vms -type f -name serial.log -exec bash -c 'cp $0 _debug/2-after/serial/$(basename $(dirname $0)).log' {} \; || true
-          cp .zot/log _debug/zot.log || true
-          mv _debug fab-${{ github.run_id }}-${{ env.slug }}
-
-      - name: Upload debug artifacts
-        uses: actions/upload-artifact@v4
-        if: ${{ always() }}
-        with:
-          name: fab-${{ github.run_id }}-${{ env.slug }}
-          path: fab-${{ github.run_id }}-${{ env.slug }}
-
-      - name: Setup tmate session for debug
-        if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
-        uses: mxschmitt/action-tmate@v3
-        timeout-minutes: 30
-        with:
-          limit-access-to-actor: true
+            mesh: false
+            gateway: false
+            includeonie: false
+            buildmode: iso
+            vpcmode: l2vni
+            hybrid: false
+            upgradefrom: "25.04"
 
   vlabs:
     runs-on: ubuntu-latest
     needs:
       - vlab
-      - vlab-upgrade
     if: ${{ always() }}
 
     steps:
       - run: |
           result="${{ needs.vlab.result }}"
-          if [[ $result == "success" || $result == "skipped" ]]; then
-            exit 0
-          else
-            exit 1
-          fi
-      - run: |
-          result="${{ needs.vlab-upgrade.result }}"
           if [[ $result == "success" || $result == "skipped" ]]; then
             exit 0
           else
@@ -490,7 +371,6 @@ jobs:
       - test-build
       - bundle
       - vlab
-      - vlab-upgrade
 
     permissions:
       contents: write # to be able to create a GH release
@@ -580,7 +460,6 @@ jobs:
       - test-build
       - bundle
       - vlab
-      - vlab-upgrade
 
     permissions:
       packages: write
