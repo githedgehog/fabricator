@@ -3045,6 +3045,8 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 		}
 	}
 
+	logTestSessionConfig(rtOtps, skipFlags)
+
 	noVpcTestCtx := makeTestCtx(kube, setupOpts, workDir, cacheDir, true, rtOtps, roceLeaves)
 	noVpcTestCtx.noSetup = true
 	noVpcSuite := makeNoVpcsSuiteRun(noVpcTestCtx)
@@ -3101,4 +3103,63 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 	}
 
 	return nil
+}
+
+func logTestSessionConfig(rtOpts ReleaseTestOpts, skipFlags SkipFlags) {
+	slog.Info("===========================================================================")
+	slog.Info("TEST SESSION CONFIGURATION")
+	slog.Info("===========================================================================")
+
+	slog.Info("Test Options:",
+		"vpc-mode", string(rtOpts.VPCMode),
+		"hash-policy", rtOpts.HashPolicy,
+		"extended", rtOpts.Extended,
+		"fail-fast", rtOpts.FailFast,
+		"pause-on-fail", rtOpts.PauseOnFail)
+
+	if len(rtOpts.Regexes) > 0 {
+		slog.Info("Test Selection:",
+			"regexes", rtOpts.Regexes,
+			"invert", rtOpts.InvertRegex)
+	} else {
+		slog.Info("Test Selection: All tests (no regex filters)")
+	}
+
+	constraints := []string{}
+	if skipFlags.VirtualSwitch {
+		constraints = append(constraints, "virtual switches present")
+	}
+	if skipFlags.NoExternals {
+		constraints = append(constraints, "no externals available")
+	}
+	if skipFlags.NamedExternal {
+		constraints = append(constraints, "named external not found")
+	}
+	if skipFlags.RoCE {
+		constraints = append(constraints, "no RoCE support")
+	}
+	if skipFlags.SubInterfaces {
+		constraints = append(constraints, "limited subinterface support")
+	}
+	if skipFlags.NoFabricLink {
+		constraints = append(constraints, "no fabric links")
+	}
+	if skipFlags.NoMeshLink {
+		constraints = append(constraints, "no mesh links")
+	}
+
+	if len(constraints) > 0 {
+		slog.Warn("Environment Constraints (will cause test skips):")
+		for _, constraint := range constraints {
+			slog.Warn("  - " + constraint)
+		}
+	} else {
+		slog.Info("Environment: No constraints detected")
+	}
+
+	if rtOpts.ResultsFile != "" {
+		slog.Info("Results Output:", "junit-xml", rtOpts.ResultsFile)
+	}
+
+	slog.Info("===========================================================================")
 }
