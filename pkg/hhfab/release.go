@@ -2889,7 +2889,7 @@ func makeVpcPeeringsBasicSuiteRun(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 	return suite
 }
 
-func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps ReleaseTestOpts) error {
+func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOpts ReleaseTestOpts) error {
 	testStart := time.Now()
 
 	cacheCancel, kube, err := getKubeClientWithCache(ctx, workDir)
@@ -2918,12 +2918,12 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 		SubnetsPerVPC:     subnetsPerVpc,
 		VLANNamespace:     "default",
 		IPv4Namespace:     "default",
-		HashPolicy:        rtOtps.HashPolicy,
-		VPCMode:           rtOtps.VPCMode,
+		HashPolicy:        rtOpts.HashPolicy,
+		VPCMode:           rtOpts.VPCMode,
 	}
 
 	regexesCompiled := make([]*regexp.Regexp, 0)
-	for _, regex := range rtOtps.Regexes {
+	for _, regex := range rtOpts.Regexes {
 		compiled, err := regexp.Compile(regex)
 		if err != nil {
 			return fmt.Errorf("compiling regex %s: %w", regex, err)
@@ -2933,7 +2933,7 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 
 	// detect if any of the skipFlags conditions are true
 	skipFlags := SkipFlags{
-		ExtendedOnly: rtOtps.Extended,
+		ExtendedOnly: rtOpts.Extended,
 	}
 	connList := &wiringapi.ConnectionList{}
 	if err := kube.List(ctx, connList, kclient.MatchingLabels{wiringapi.LabelConnectionType: wiringapi.ConnectionTypeMesh}); err != nil {
@@ -3045,36 +3045,36 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 		}
 	}
 
-	logTestSessionConfig(rtOtps, skipFlags)
+	logTestSessionConfig(rtOpts, skipFlags)
 
-	noVpcTestCtx := makeTestCtx(kube, setupOpts, workDir, cacheDir, true, rtOtps, roceLeaves)
+	noVpcTestCtx := makeTestCtx(kube, setupOpts, workDir, cacheDir, true, rtOpts, roceLeaves)
 	noVpcTestCtx.noSetup = true
 	noVpcSuite := makeNoVpcsSuiteRun(noVpcTestCtx)
-	noVpcResults, err := selectAndRunSuite(ctx, noVpcTestCtx, noVpcSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
-	if err != nil && rtOtps.FailFast {
+	noVpcResults, err := selectAndRunSuite(ctx, noVpcTestCtx, noVpcSuite, regexesCompiled, rtOpts.InvertRegex, skipFlags)
+	if err != nil && rtOpts.FailFast {
 		return fmt.Errorf("running no VPC suite: %w", err)
 	}
 
-	singleVpcTestCtx := makeTestCtx(kube, setupOpts, workDir, cacheDir, false, rtOtps, roceLeaves)
+	singleVpcTestCtx := makeTestCtx(kube, setupOpts, workDir, cacheDir, false, rtOpts, roceLeaves)
 	singleVpcSuite := makeVpcPeeringsSingleVPCSuite(singleVpcTestCtx)
-	singleVpcResults, err := selectAndRunSuite(ctx, singleVpcTestCtx, singleVpcSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
-	if err != nil && rtOtps.FailFast {
+	singleVpcResults, err := selectAndRunSuite(ctx, singleVpcTestCtx, singleVpcSuite, regexesCompiled, rtOpts.InvertRegex, skipFlags)
+	if err != nil && rtOpts.FailFast {
 		return fmt.Errorf("running single VPC suite: %w", err)
 	}
 
 	setupOpts.ServersPerSubnet = 1
-	multiVpcTestCtx := makeTestCtx(kube, setupOpts, workDir, cacheDir, false, rtOtps, roceLeaves)
+	multiVpcTestCtx := makeTestCtx(kube, setupOpts, workDir, cacheDir, false, rtOpts, roceLeaves)
 	multiVpcSuite := makeVpcPeeringsMultiVPCSuiteRun(multiVpcTestCtx)
-	multiVpcResults, err := selectAndRunSuite(ctx, multiVpcTestCtx, multiVpcSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
-	if err != nil && rtOtps.FailFast {
+	multiVpcResults, err := selectAndRunSuite(ctx, multiVpcTestCtx, multiVpcSuite, regexesCompiled, rtOpts.InvertRegex, skipFlags)
+	if err != nil && rtOpts.FailFast {
 		return fmt.Errorf("running multi VPC suite: %w", err)
 	}
 
 	setupOpts.SubnetsPerVPC = 1
-	basicTestCtx := makeTestCtx(kube, setupOpts, workDir, cacheDir, true, rtOtps, roceLeaves)
+	basicTestCtx := makeTestCtx(kube, setupOpts, workDir, cacheDir, true, rtOpts, roceLeaves)
 	basicVpcSuite := makeVpcPeeringsBasicSuiteRun(basicTestCtx)
-	basicResults, err := selectAndRunSuite(ctx, basicTestCtx, basicVpcSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
-	if err != nil && rtOtps.FailFast {
+	basicResults, err := selectAndRunSuite(ctx, basicTestCtx, basicVpcSuite, regexesCompiled, rtOpts.InvertRegex, skipFlags)
+	if err != nil && rtOpts.FailFast {
 		return fmt.Errorf("running basic VPC suite: %w", err)
 	}
 
@@ -3084,7 +3084,7 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 	printSuiteResults(multiVpcResults)
 	printSuiteResults(basicResults)
 
-	if rtOtps.ResultsFile != "" {
+	if rtOpts.ResultsFile != "" {
 		report := JUnitReport{
 			Suites: []JUnitTestSuite{*singleVpcResults, *multiVpcResults, *basicResults, *noVpcResults},
 		}
@@ -3092,7 +3092,7 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 		if err != nil {
 			return fmt.Errorf("marshalling XML: %w", err)
 		}
-		if err := os.WriteFile(rtOtps.ResultsFile, output, 0o600); err != nil {
+		if err := os.WriteFile(rtOpts.ResultsFile, output, 0o600); err != nil {
 			return fmt.Errorf("writing XML file: %w", err)
 		}
 	}
