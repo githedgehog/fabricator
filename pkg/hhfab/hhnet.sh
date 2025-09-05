@@ -6,17 +6,19 @@
 set -e
 
 function cleanup() {
-    for i in {0..3}; do
-        sudo ip l d "bond$i" 2> /dev/null || true
+    mapfile -t bond_intfs < <(ip -brief link show type bond)
+
+    for intf in "${bond_intfs[@]}"; do
+            intf="${intf%% *}"
+            sudo ip link del "$intf"
     done
 
-    for i in {1..9}; do
-        sudo ip l s "enp2s$i" down 2> /dev/null || true
-        for j in {1000..1020}; do
-            sudo ip l d "enp2s$i.$j" 2> /dev/null || true
-        done
+    mapfile -t vlan_intfs < <(ip -brief link show type vlan)
+    for intf in "${vlan_intfs[@]}"; do
+            intf="${intf%@*}"
+            sudo ip link set "$intf" down
+            sudo ip link del "$intf"
     done
-
     sleep 1
 }
 
