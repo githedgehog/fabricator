@@ -30,7 +30,7 @@ import (
 )
 
 const (
-	waitAppliedFor = 15 * time.Second
+	waitAppliedFor = 30 * time.Second
 	waitTimeout    = 5 * time.Minute
 )
 
