@@ -20,6 +20,10 @@ function cleanup() {
     sleep 1
 }
 
+function restart_networkd() {
+	sudo systemctl restart systemd-networkd
+}
+
 function setup_bond() {
     local bond_name=$1
     local hash_policy=$2
@@ -84,6 +88,7 @@ if [ "$#" -lt 1 ]; then
     exit 1
 elif [ "$1" == "cleanup" ]; then
     cleanup
+    restart_networkd
 
     exit 0
 elif [ "$1" == "bond" ]; then
