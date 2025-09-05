@@ -978,9 +978,8 @@ func (testCtx *VPCPeeringTestCtx) meshFailoverTest(ctx context.Context) (bool, [
 
 // Vanilla test for VPC peering, just test connectivity without any further restriction
 func (testCtx *VPCPeeringTestCtx) noRestrictionsTest(ctx context.Context) (bool, []RevertFunc, error) {
-	if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
-		return false, nil, fmt.Errorf("waiting for readiness: %w", err)
-	}
+	slog.Debug("Waiting two minutes for the network to converge...")
+	time.Sleep(2 * time.Minute)
 	if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
 		return false, nil, err
 	}
