@@ -243,6 +243,7 @@ jobs:
 
     strategy:
       fail-fast: false
+      # usb/iso/manual build modes as a base
       matrix:
         fabricmode:
           - spine-leaf
@@ -263,6 +264,7 @@ jobs:
         upgradefrom:
           - ""
         include:
+          # collapsed-core l2vni
           - fabricmode: collapsed-core
             mesh: false
             includeonie: false
@@ -271,6 +273,8 @@ jobs:
             vpcmode: l2vni
             hybrid: false
             upgradefrom: ""
+
+          # gateway l2vni w/ onie, usb (max artifacts)
           - fabricmode: spine-leaf
             mesh: false
             gateway: true
@@ -279,6 +283,8 @@ jobs:
             vpcmode: l2vni
             hybrid: false
             upgradefrom: ""
+
+          # gateway l2vni w/ onie, iso (max artifacts)
           - fabricmode: spine-leaf
             mesh: false
             gateway: true
@@ -287,6 +293,8 @@ jobs:
             vpcmode: l2vni
             hybrid: false
             upgradefrom: ""
+
+          # l3vni
           - fabricmode: spine-leaf
             mesh: false
             gateway: false
@@ -295,14 +303,18 @@ jobs:
             vpcmode: l3vni
             hybrid: false
             upgradefrom: ""
+
+          # gateway l3vni
           - fabricmode: spine-leaf
             mesh: false
             gateway: true
             includeonie: false
             buildmode: iso
-            vpcmode: l2vni
+            vpcmode: l3vni
             hybrid: false
             upgradefrom: ""
+
+          # hlab l2vni
           - fabricmode: spine-leaf
             mesh: false
             gateway: false
@@ -311,6 +323,8 @@ jobs:
             vpcmode: l2vni
             hybrid: true
             upgradefrom: ""
+
+          # l2vni from 25.04
           - fabricmode: spine-leaf
             mesh: false
             gateway: false
@@ -318,13 +332,15 @@ jobs:
             buildmode: iso
             vpcmode: l2vni
             hybrid: false
-            upgradefrom: "25.03"
+            upgradefrom: "25.04"
+
+          # l3vni from 25.04
           - fabricmode: spine-leaf
             mesh: false
             gateway: false
             includeonie: false
             buildmode: iso
-            vpcmode: l2vni
+            vpcmode: l3vni
             hybrid: false
             upgradefrom: "25.04"
 
