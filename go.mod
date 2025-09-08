@@ -35,7 +35,7 @@ require (
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/pkg/sftp v1.13.8
 	github.com/samber/lo v1.51.0
-	github.com/samber/slog-multi v1.4.1
+	github.com/samber/slog-multi v1.5.0
 	github.com/sethvargo/go-password v0.3.1
 	github.com/shirou/gopsutil/v3 v3.24.5
 	github.com/stretchr/testify v1.11.0
