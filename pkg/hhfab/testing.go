@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"iter"
 	"log/slog"
@@ -1305,6 +1306,51 @@ func DoSetupPeerings(ctx context.Context, kube client.Client, vpcPeerings map[st
 	return nil
 }
 
+type PingError struct {
+	Source      string
+	Destination string
+	Expected    bool
+	Sent        int
+	Received    int
+	CmdOutput   string
+	Msg         string
+}
+
+func (pe *PingError) Error() string {
+	return fmt.Sprintf("ping %s -> %s: %s (sent %d, rcvd %d, expected %v)",
+		pe.Source, pe.Destination, pe.Msg, pe.Sent, pe.Received, pe.Expected)
+}
+
+type IperfError struct {
+	Source      string
+	Destination string
+	MinSpeed    string
+	SentSpeed   string
+	RcvdSpeed   string
+	Msg         string
+}
+
+func (ie *IperfError) Error() string {
+	rs := fmt.Sprintf("iperf %s -> %s: %s", ie.Source, ie.Destination, ie.Msg)
+	if ie.SentSpeed != "" {
+		rs += fmt.Sprintf(" (sent %s, rcvd %s, min expected %s)", ie.SentSpeed, ie.RcvdSpeed, ie.MinSpeed)
+	}
+
+	return rs
+}
+
+type CurlError struct {
+	Source   string
+	Expected bool
+	Output   string
+	Msg      string
+}
+
+func (ce *CurlError) Error() string {
+	return fmt.Sprintf("curl from %s: %s (expected %v)",
+		ce.Source, ce.Msg, ce.Expected)
+}
+
 type TestConnectivityOpts struct {
 	WaitSwitchesReady bool
 	PingsCount        int
@@ -1516,9 +1562,6 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 	iperfs := semaphore.NewWeighted(opts.IPerfsParallel)
 	curls := semaphore.NewWeighted(opts.CurlsParallel)
 
-	errors := sync.Map{}
-
-	g = &errgroup.Group{}
 	if len(opts.Sources) == 0 {
 		opts.Sources = make([]string, len(serverIDs))
 		// copy keys of serverIDs to opts.Sources
@@ -1537,6 +1580,9 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 			i++
 		}
 	}
+	wg := &sync.WaitGroup{}
+	errChan := make(chan error, len(opts.Sources)*len(opts.Destinations)+len(opts.Sources))
+
 	for _, serverA := range opts.Sources {
 		for _, serverB := range opts.Destinations {
 			if serverA == serverB {
@@ -1544,7 +1590,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 			}
 
 			if opts.PingsCount > 0 || opts.IPerfsSeconds > 0 {
-				g.Go(func() error {
+				wg.Go(func() {
 					if err := func() error {
 						expectedReachable, err := IsServerReachable(ctx, kube, serverA, serverB, c.Fab.Spec.Config.Gateway.Enable)
 						if err != nil {
@@ -1582,75 +1628,82 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 						}
 						clientB := clientBR.(*goph.Client)
 
-						if err := checkPing(ctx, opts, pings, serverA, serverB, clientA, ipB.Addr(), expectedReachable.Reachable); err != nil {
-							return fmt.Errorf("checking ping from %s to %s: %w", serverA, serverB, err)
+						if pe := checkPing(ctx, opts, pings, serverA, serverB, clientA, ipB.Addr(), expectedReachable.Reachable); pe != nil {
+							return pe
 						}
 
-						if err := checkIPerf(ctx, opts, iperfs, serverA, serverB, clientA, clientB, ipB.Addr(), expectedReachable); err != nil {
-							return fmt.Errorf("checking iperf from %s to %s: %w", serverA, serverB, err)
+						if ie := checkIPerf(ctx, opts, iperfs, serverA, serverB, clientA, clientB, ipB.Addr(), expectedReachable); ie != nil {
+							return ie
 						}
 
 						return nil
 					}(); err != nil {
-						errors.Store("vpcpeer--"+serverA+"--"+serverB, err)
-
-						return fmt.Errorf("testing connectivity from %q to %q: %w", serverA, serverB, err)
+						errChan <- err
 					}
-
-					return nil
 				})
 			}
 		}
 
 		if opts.CurlsCount > 0 {
-			g.Go(func() error {
+			wg.Go(func() {
 				if err := func() error {
+					ce := &CurlError{
+						Source: serverA,
+					}
 					reachable, err := apiutil.IsExternalSubnetReachable(ctx, kube, serverA, "0.0.0.0/0") // TODO test for specific IP
 					if err != nil {
-						return fmt.Errorf("checking if should be reachable: %w", err)
+						ce.Msg = fmt.Sprintf("checking if should be reachable: %s", err)
+
+						return ce
 					}
 
 					slog.Debug("Checking external connectivity", "from", serverA, "reachable", reachable)
 
 					clientR, ok := sshs.Load(serverA)
 					if !ok {
-						return fmt.Errorf("missing ssh client for %q", serverA)
+						ce.Msg = fmt.Sprintf("missing ssh client for %q", serverA)
+
+						return ce
 					}
 					client := clientR.(*goph.Client)
 
 					// switching to 1.0.0.1 since the previously used target 8.8.8.8 was giving us issue
 					// when curling over virtual external peerings
-					if err := checkCurl(ctx, opts, curls, serverA, client, "1.0.0.1", reachable); err != nil {
-						return fmt.Errorf("checking curl from %q: %w", serverA, err)
+					if ce := checkCurl(ctx, opts, curls, serverA, client, "1.0.0.1", reachable); ce != nil {
+						return ce
 					}
 
 					return nil
 				}(); err != nil {
-					errors.Store("extpeer--"+serverA, err)
-
-					return fmt.Errorf("testing connectivity from %q to external: %w", serverA, err)
+					errChan <- err
 				}
-
-				return nil
 			})
 		}
 	}
 
-	if err := g.Wait(); err != nil {
-		slog.Error("Error(s) during testing connectivity")
-
-		errors.Range(func(key, value any) bool {
-			slog.Error("Error", "key", key, "err", value)
-
-			return true
-		})
-
-		return fmt.Errorf("testing connectivity: %w", err)
+	wg.Wait()
+	close(errChan)
+	err = nil
+	var numPingErrs, numIperfErrs, numCurlErrs int
+	for e := range errChan {
+		switch e.(type) {
+		case *PingError:
+			numPingErrs++
+		case *IperfError:
+			numIperfErrs++
+		case *CurlError:
+			numCurlErrs++
+		}
+		err = errors.Join(err, e)
 	}
 
-	slog.Info("All connectivity tested successfully", "took", time.Since(start))
+	if err != nil {
+		slog.Error("Test connectivity failed", "ping", numPingErrs, "iperf", numIperfErrs, "curl", numCurlErrs, "took", time.Since(start), "errors", err)
+	} else {
+		slog.Info("Test connectivity passed", "took", time.Since(start))
+	}
 
-	return nil
+	return err
 }
 
 type Reachability struct {
@@ -1957,13 +2010,20 @@ func retrySSHCmd(ctx context.Context, client *goph.Client, cmd string, target st
 	return out, nil
 }
 
-func checkPing(ctx context.Context, opts TestConnectivityOpts, pings *semaphore.Weighted, from, to string, fromSSH *goph.Client, toIP netip.Addr, expected bool) error {
+func checkPing(ctx context.Context, opts TestConnectivityOpts, pings *semaphore.Weighted, from, to string, fromSSH *goph.Client, toIP netip.Addr, expected bool) *PingError {
 	if opts.PingsCount <= 0 {
 		return nil
 	}
+	pe := &PingError{
+		Source:      from,
+		Destination: to,
+		Expected:    expected,
+	}
 
 	if err := pings.Acquire(ctx, 1); err != nil {
-		return fmt.Errorf("acquiring ping semaphore: %w", err)
+		pe.Msg = fmt.Sprintf("acquiring ping semaphore: %s", err)
+
+		return pe
 	}
 	defer pings.Release(1)
 
@@ -1975,38 +2035,71 @@ func checkPing(ctx context.Context, opts TestConnectivityOpts, pings *semaphore.
 	cmd := fmt.Sprintf("ping -c %d -W 1 %s", opts.PingsCount, toIP.String()) // TODO wrap with timeout?
 	outR, err := retrySSHCmd(ctx, fromSSH, cmd, from)
 	out := strings.TrimSpace(string(outR))
+	pe.CmdOutput = out
 
-	pingOk := err == nil && strings.Contains(out, "0% packet loss")
-	pingFail := err != nil && strings.Contains(out, "100% packet loss")
+	// parse ping output and extract sent and received packets
+	for l := range strings.SplitSeq(out, "\n") {
+		if strings.Contains(l, "packets transmitted") && strings.Contains(l, "received") {
+			parts := strings.Split(l, ", ")
+			if len(parts) >= 2 {
+				sentStr := strings.TrimSpace(strings.Split(parts[0], " ")[0])
+				receivedStr := strings.TrimSpace(strings.Split(parts[1], " ")[0])
+				sent, err1 := strconv.Atoi(sentStr)
+				received, err2 := strconv.Atoi(receivedStr)
+				if err1 == nil && err2 == nil {
+					pe.Sent = sent
+					pe.Received = received
+				}
+			}
 
-	// TODO better logging and handling of errors
+			break
+		}
+	}
+	if pe.Sent == 0 {
+		pe.Msg = "cannot parse ping output to get sent packets"
+
+		return pe
+	}
+
+	pingOk := err == nil && pe.Sent == pe.Received
+	pingFail := err != nil && pe.Received == 0
+
 	slog.Debug("Ping result", "from", from, "to", to,
 		"expected", expected, "ok", pingOk, "fail", pingFail, "err", err, "out", out)
 
 	if pingOk == pingFail {
 		if err != nil {
-			return fmt.Errorf("running ping: %w: %s", err, out) // TODO replace with custom error?
+			pe.Msg = err.Error()
+		} else {
+			// sent != received but not a complete failure
+			pe.Msg = "unexpected ping result"
 		}
 
-		return fmt.Errorf("unexpected ping result (expected %t): %s", expected, out) // TODO replace with custom error?
+		return pe
 	}
 
 	if expected && !pingOk {
-		return fmt.Errorf("should be reachable but ping failed with output: %s", out) // TODO replace with custom error?
+		pe.Msg = "should be reachable but ping failed"
+
+		return pe
 	}
 
 	if !expected && !pingFail {
-		return fmt.Errorf("should not be reachable but ping succeeded with output: %s", out) // TODO replace with custom error?
-	}
+		pe.Msg = "should not be reachable but ping succeeded"
 
-	// TODO other cases to handle?
+		return pe
+	}
 
 	return nil
 }
 
-func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphore.Weighted, from, to string, fromSSH, toSSH *goph.Client, toIP netip.Addr, reachability Reachability) error {
+func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphore.Weighted, from, to string, fromSSH, toSSH *goph.Client, toIP netip.Addr, reachability Reachability) *IperfError {
 	if opts.IPerfsSeconds <= 0 || !reachability.Reachable {
 		return nil
+	}
+	ie := &IperfError{
+		Source:      from,
+		Destination: to,
 	}
 
 	iPerfsMinSpeed := opts.IPerfsMinSpeed
@@ -2014,9 +2107,12 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphor
 	if reachability.Reason == ReachabilityReasonGatewayPeering {
 		iPerfsMinSpeed = min(iPerfsMinSpeed, 0.01)
 	}
+	ie.MinSpeed = asMbps(iPerfsMinSpeed * 1_000_000)
 
 	if err := iperfs.Acquire(ctx, 1); err != nil {
-		return fmt.Errorf("acquiring iperf3 semaphore: %w", err)
+		ie.Msg = fmt.Sprintf("acquiring iperf3 semaphore: %s", err)
+
+		return ie
 	}
 	defer iperfs.Release(1)
 
@@ -2080,6 +2176,8 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphor
 			"sent", asMB(float64(report.End.SumSent.Bytes)),
 			"received", asMB(float64(report.End.SumReceived.Bytes)),
 		)
+		ie.SentSpeed = asMbps(report.End.SumSent.BitsPerSecond)
+		ie.RcvdSpeed = asMbps(report.End.SumReceived.BitsPerSecond)
 
 		if iPerfsMinSpeed > 0 {
 			if report.End.SumSent.BitsPerSecond < iPerfsMinSpeed*1_000_000 {
@@ -2094,19 +2192,27 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphor
 	})
 
 	if err := g.Wait(); err != nil {
-		return fmt.Errorf("running iperf3: %w", err)
+		ie.Msg = err.Error()
+
+		return ie
 	}
 
 	return nil
 }
 
-func checkCurl(ctx context.Context, opts TestConnectivityOpts, curls *semaphore.Weighted, from string, fromSSH *goph.Client, toIP string, expected bool) error {
+func checkCurl(ctx context.Context, opts TestConnectivityOpts, curls *semaphore.Weighted, from string, fromSSH *goph.Client, toIP string, expected bool) *CurlError {
 	if opts.CurlsCount <= 0 {
 		return nil
 	}
+	ce := &CurlError{
+		Source:   from,
+		Expected: expected,
+	}
 
 	if err := curls.Acquire(ctx, 1); err != nil {
-		return fmt.Errorf("acquiring curl semaphore: %w", err)
+		ce.Msg = fmt.Sprintf("acquiring curl semaphore: %s", err)
+
+		return ce
 	}
 	defer curls.Release(1)
 
@@ -2119,6 +2225,7 @@ func checkCurl(ctx context.Context, opts TestConnectivityOpts, curls *semaphore.
 		cmd := fmt.Sprintf("timeout -v 5 curl --insecure --connect-timeout 3 --silent http://%s", toIP)
 		outR, err := retrySSHCmd(ctx, fromSSH, cmd, from)
 		out := strings.TrimSpace(string(outR))
+		ce.Output = out
 
 		curlOk := err == nil && strings.Contains(out, "301 Moved")
 		curlFail := err != nil && !strings.Contains(out, "301 Moved")
@@ -2127,20 +2234,25 @@ func checkCurl(ctx context.Context, opts TestConnectivityOpts, curls *semaphore.
 
 		if curlOk == curlFail {
 			if err != nil {
-				return fmt.Errorf("running curl (expected %t): %w: %s", expected, err, out) // TODO replace with custom error?
+				ce.Msg = err.Error()
+			} else {
+				ce.Msg = "unexpected curl result"
 			}
 
-			return fmt.Errorf("unexpected curl result (expected %t): %s", expected, out)
+			return ce
 		}
 
 		if expected && !curlOk {
-			return fmt.Errorf("should be reachable but curl failed with output: %s", out)
+			ce.Msg = "should be reachable but curl failed"
+
+			return ce
 		}
 
 		if !expected && !curlFail {
-			return fmt.Errorf("should not be reachable but curl succeeded with output: %s", out)
-		}
+			ce.Msg = "should not be reachable but curl succeeded"
 
+			return ce
+		}
 		// TODO better handle other cases?
 	}
 
