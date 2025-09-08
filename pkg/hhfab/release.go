@@ -72,6 +72,9 @@ type VPCPeeringTestCtx struct {
 	pauseOnFail      bool
 	roceLeaves       []string
 	noSetup          bool
+	currentTestNum   int
+	totalTests       int
+	testNumOffset    int
 }
 
 var AllZeroPrefix = []string{"0.0.0.0/0"}
@@ -2365,6 +2368,11 @@ func makeTestCtx(kube kclient.Client, setupOpts SetupVPCsOpts, workDir, cacheDir
 	testCtx.pauseOnFail = rtOpts.PauseOnFail
 	testCtx.roceLeaves = roceLeaves
 
+	// Initialize progress tracking
+	testCtx.currentTestNum = 0
+	testCtx.totalTests = 0
+	testCtx.testNumOffset = 0
+
 	return testCtx
 }
 
@@ -2451,10 +2459,19 @@ func pauseOnFail() {
 	slog.Info("Continuing...")
 }
 
-func doRunTests(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSuite) (*JUnitTestSuite, error) {
+func (testCtx *VPCPeeringTestCtx) doRunTests(ctx context.Context, ts *JUnitTestSuite) (*JUnitTestSuite, error) {
 	suiteStart := time.Now()
-	ranSomeTests := false
-	slog.Info("** Running test suite", "suite", ts.Name, "tests", len(ts.TestCases), "start-time", suiteStart.Format(time.RFC3339))
+
+	// Count runnable tests in this suite
+	runnableTests := 0
+	for _, test := range ts.TestCases {
+		if test.Skipped == nil {
+			runnableTests++
+		}
+	}
+
+	slog.Info("** Running test suite", "suite", ts.Name, "tests", len(ts.TestCases),
+		"runnable", runnableTests, "start-time", suiteStart.Format(time.RFC3339))
 
 	// initial setup
 	if err := testCtx.setupTest(ctx, true); err != nil {
@@ -2473,14 +2490,24 @@ func doRunTests(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 
 			continue
 		}
-		slog.Info("* Running test", "test", test.Name)
-		if (ranSomeTests && testCtx.wipeBetweenTests) || prevRevertsFailed {
+
+		testCtx.currentTestNum++
+		progress := ""
+		if testCtx.totalTests > 0 {
+			actualTestNum := testCtx.testNumOffset + testCtx.currentTestNum
+			progress = fmt.Sprintf("%d/%d", actualTestNum, testCtx.totalTests)
+		}
+
+		slog.Info("* Running test", "progress", progress, "test", test.Name, "suite", ts.Name)
+
+		if ((testCtx.currentTestNum > 1) && testCtx.wipeBetweenTests) || prevRevertsFailed {
 			if err := testCtx.setupTest(ctx, false); err != nil {
 				ts.TestCases[i].Failure = &Failure{
 					Message: fmt.Sprintf("Failed to run setupTest between tests: %s", err.Error()),
 				}
 				ts.Failures++
-				slog.Error("FAIL", "test", test.Name, "error", fmt.Sprintf("Failed to run setupTest between tests: %s", err.Error()))
+				slog.Error("FAIL", "progress", progress, "test", test.Name,
+					"error", fmt.Sprintf("Failed to run setupTest between tests: %s", err.Error()))
 				if testCtx.pauseOnFail {
 					pauseOnFail()
 				}
@@ -2494,14 +2521,15 @@ func doRunTests(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 		prevRevertsFailed = false
 		testStart := time.Now()
 		skip, reverts, err := test.F(ctx)
-		ts.TestCases[i].Time = time.Since(testStart).Seconds()
-		ranSomeTests = true
+		testDuration := time.Since(testStart)
+		ts.TestCases[i].Time = testDuration.Seconds()
 		// logic is getting complex, so let's make a recap:
 		// - if skip is true, we mark the test as skipped, use the error as the skip message, and nullify it
 		// - if err is not nil, we mark the test as failed, use the error message as the failure message, and pause if configured to do so
 		// - we then apply reverts in reverse order, and if any of them fails, we mark the test as failed, and pause (potentially a second time) if configured to do so.
 		//   we also stop applying reverts at the first failure
 		// - finally, if we get to the end without any errors, we log the test as passed
+
 		if skip {
 			var skipMsg string
 			if err != nil {
@@ -2515,23 +2543,25 @@ func doRunTests(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 				Message: skipMsg,
 			}
 			ts.Skipped++
-			slog.Warn("SKIP", "test", test.Name, "reason", skipMsg)
+			slog.Warn("SKIP", "progress", progress, "test", test.Name, "reason", skipMsg,
+				"duration", testDuration.Round(time.Millisecond))
 		}
 		if err != nil {
 			ts.TestCases[i].Failure = &Failure{
 				Message: err.Error(),
 			}
 			ts.Failures++
-			slog.Error("FAIL", "test", test.Name, "error", err.Error())
+			slog.Error("FAIL", "progress", progress, "test", test.Name, "error", err.Error(),
+				"duration", testDuration.Round(time.Millisecond))
 			if testCtx.pauseOnFail {
 				pauseOnFail()
 			}
 		}
 		var revertErr error
-		for i := len(reverts) - 1; i >= 0; i-- {
-			revertErr = reverts[i](ctx)
+		for j := len(reverts) - 1; j >= 0; j-- {
+			revertErr = reverts[j](ctx)
 			if revertErr != nil {
-				slog.Error("REVERT FAIL", "test", test.Name, "error", revertErr.Error())
+				slog.Error("REVERT FAIL", "progress", progress, "test", test.Name, "error", revertErr.Error())
 				if err == nil {
 					// the test had passed, but now we must mark it as failed
 					err = revertErr
@@ -2552,7 +2582,8 @@ func doRunTests(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 			}
 		}
 		if !skip && err == nil && revertErr == nil {
-			slog.Info("PASS", "test", test.Name)
+			slog.Info("PASS", "progress", progress, "test", test.Name,
+				"duration", testDuration.Round(time.Millisecond))
 		}
 	}
 
@@ -2691,7 +2722,7 @@ func selectAndRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, suite *J
 		return suite, nil
 	}
 
-	suite, err := doRunTests(ctx, testCtx, suite)
+	suite, err := testCtx.doRunTests(ctx, suite)
 	if err != nil {
 		// We could get here because:
 		// 1) the initial test setup has failed and we didn't run any tests (regardless of failFast)
@@ -3045,44 +3076,85 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOpts 
 		}
 	}
 
-	logTestSessionConfig(rtOpts, skipFlags)
+	// Create all suites for planning purposes
+	noVpcSuite := makeNoVpcsSuiteRun(&VPCPeeringTestCtx{})
+	singleVpcSuite := makeVpcPeeringsSingleVPCSuite(&VPCPeeringTestCtx{})
+	multiVpcSuite := makeVpcPeeringsMultiVPCSuiteRun(&VPCPeeringTestCtx{})
+	basicVpcSuite := makeVpcPeeringsBasicSuiteRun(&VPCPeeringTestCtx{})
+
+	allSuites := []*JUnitTestSuite{noVpcSuite, singleVpcSuite, multiVpcSuite, basicVpcSuite}
+
+	logTestSessionConfig(rtOpts, skipFlags, allSuites, regexesCompiled)
+
+	// Calculate total runnable tests and individual suite counts for progress tracking
+	totalRunnableTests := 0
+	suiteRunnableCounts := make([]int, len(allSuites))
+
+	for suiteIdx, suite := range allSuites {
+		suite = regexpSelection(regexesCompiled, rtOpts.InvertRegex, suite)
+		suiteRunnable := 0
+		for _, test := range suite.TestCases {
+			if test.Skipped != nil {
+				continue
+			}
+			willSkip := (test.SkipFlags.ExtendedOnly && skipFlags.ExtendedOnly) ||
+				(test.SkipFlags.VirtualSwitch && skipFlags.VirtualSwitch) ||
+				(test.SkipFlags.NamedExternal && skipFlags.NamedExternal) ||
+				(test.SkipFlags.NoExternals && skipFlags.NoExternals) ||
+				(test.SkipFlags.SubInterfaces && skipFlags.SubInterfaces) ||
+				(test.SkipFlags.RoCE && skipFlags.RoCE) ||
+				(test.SkipFlags.NoFabricLink && skipFlags.NoFabricLink) ||
+				(test.SkipFlags.NoMeshLink && skipFlags.NoMeshLink) ||
+				(test.SkipFlags.NoGateway && skipFlags.NoGateway)
+
+			if !willSkip {
+				suiteRunnable++
+				totalRunnableTests++
+			}
+		}
+		suiteRunnableCounts[suiteIdx] = suiteRunnable
+	}
+
+	// Calculate cumulative offsets for progress tracking
+	cumulativeOffset := 0
 
 	noVpcTestCtx := makeTestCtx(kube, setupOpts, workDir, cacheDir, true, rtOpts, roceLeaves)
 	noVpcTestCtx.noSetup = true
-	noVpcSuite := makeNoVpcsSuiteRun(noVpcTestCtx)
-	noVpcResults, err := selectAndRunSuite(ctx, noVpcTestCtx, noVpcSuite, regexesCompiled, rtOpts.InvertRegex, skipFlags)
+	noVpcTestCtx.totalTests = totalRunnableTests
+	noVpcTestCtx.testNumOffset = cumulativeOffset
+	cumulativeOffset += suiteRunnableCounts[0]
+	noVpcResults, err := selectAndRunSuite(ctx, noVpcTestCtx, makeNoVpcsSuiteRun(noVpcTestCtx), regexesCompiled, rtOpts.InvertRegex, skipFlags)
 	if err != nil && rtOpts.FailFast {
 		return fmt.Errorf("running no VPC suite: %w", err)
 	}
 
 	singleVpcTestCtx := makeTestCtx(kube, setupOpts, workDir, cacheDir, false, rtOpts, roceLeaves)
-	singleVpcSuite := makeVpcPeeringsSingleVPCSuite(singleVpcTestCtx)
-	singleVpcResults, err := selectAndRunSuite(ctx, singleVpcTestCtx, singleVpcSuite, regexesCompiled, rtOpts.InvertRegex, skipFlags)
+	singleVpcTestCtx.totalTests = totalRunnableTests
+	singleVpcTestCtx.testNumOffset = cumulativeOffset
+	cumulativeOffset += suiteRunnableCounts[1]
+	singleVpcResults, err := selectAndRunSuite(ctx, singleVpcTestCtx, makeVpcPeeringsSingleVPCSuite(singleVpcTestCtx), regexesCompiled, rtOpts.InvertRegex, skipFlags)
 	if err != nil && rtOpts.FailFast {
 		return fmt.Errorf("running single VPC suite: %w", err)
 	}
 
 	setupOpts.ServersPerSubnet = 1
 	multiVpcTestCtx := makeTestCtx(kube, setupOpts, workDir, cacheDir, false, rtOpts, roceLeaves)
-	multiVpcSuite := makeVpcPeeringsMultiVPCSuiteRun(multiVpcTestCtx)
-	multiVpcResults, err := selectAndRunSuite(ctx, multiVpcTestCtx, multiVpcSuite, regexesCompiled, rtOpts.InvertRegex, skipFlags)
+	multiVpcTestCtx.totalTests = totalRunnableTests
+	multiVpcTestCtx.testNumOffset = cumulativeOffset
+	cumulativeOffset += suiteRunnableCounts[2]
+	multiVpcResults, err := selectAndRunSuite(ctx, multiVpcTestCtx, makeVpcPeeringsMultiVPCSuiteRun(multiVpcTestCtx), regexesCompiled, rtOpts.InvertRegex, skipFlags)
 	if err != nil && rtOpts.FailFast {
 		return fmt.Errorf("running multi VPC suite: %w", err)
 	}
 
 	setupOpts.SubnetsPerVPC = 1
 	basicTestCtx := makeTestCtx(kube, setupOpts, workDir, cacheDir, true, rtOpts, roceLeaves)
-	basicVpcSuite := makeVpcPeeringsBasicSuiteRun(basicTestCtx)
-	basicResults, err := selectAndRunSuite(ctx, basicTestCtx, basicVpcSuite, regexesCompiled, rtOpts.InvertRegex, skipFlags)
+	basicTestCtx.totalTests = totalRunnableTests
+	basicTestCtx.testNumOffset = cumulativeOffset
+	basicResults, err := selectAndRunSuite(ctx, basicTestCtx, makeVpcPeeringsBasicSuiteRun(basicTestCtx), regexesCompiled, rtOpts.InvertRegex, skipFlags)
 	if err != nil && rtOpts.FailFast {
 		return fmt.Errorf("running basic VPC suite: %w", err)
 	}
-
-	slog.Info("*** Recap of the test results ***")
-	printSuiteResults(noVpcResults)
-	printSuiteResults(singleVpcResults)
-	printSuiteResults(multiVpcResults)
-	printSuiteResults(basicResults)
 
 	if rtOpts.ResultsFile != "" {
 		report := JUnitReport{
@@ -3097,7 +3169,9 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOpts 
 		}
 	}
 
-	slog.Info("All tests completed", "duration", time.Since(testStart).String())
+	allResults := []*JUnitTestSuite{noVpcResults, singleVpcResults, multiVpcResults, basicResults}
+	printRecap(allResults, time.Since(testStart))
+
 	if singleVpcResults.Failures > 0 || multiVpcResults.Failures > 0 || basicResults.Failures > 0 || noVpcResults.Failures > 0 {
 		return fmt.Errorf("some tests failed: singleVpc=%d, multiVpc=%d, basic=%d, noVpc=%d", singleVpcResults.Failures, multiVpcResults.Failures, basicResults.Failures, noVpcResults.Failures) //nolint:goerr113
 	}
@@ -3105,7 +3179,7 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOpts 
 	return nil
 }
 
-func logTestSessionConfig(rtOpts ReleaseTestOpts, skipFlags SkipFlags) {
+func logTestSessionConfig(rtOpts ReleaseTestOpts, skipFlags SkipFlags, suites []*JUnitTestSuite, regexes []*regexp.Regexp) {
 	slog.Info("===========================================================================")
 	slog.Info("TEST SESSION CONFIGURATION")
 	slog.Info("===========================================================================")
@@ -3157,8 +3231,116 @@ func logTestSessionConfig(rtOpts ReleaseTestOpts, skipFlags SkipFlags) {
 		slog.Info("Environment: No constraints detected")
 	}
 
+	// Calculate and display test execution plan
+	totalTests := 0
+	runnableTests := 0
+	slog.Info("Test Execution Plan:")
+
+	for _, suite := range suites {
+		suiteRunnable := 0
+		suiteSkipped := 0
+
+		for _, test := range suite.TestCases {
+			totalTests++
+			willSkip := false
+
+			// Apply regex filtering
+			if len(regexes) > 0 {
+				matched := false
+				for _, regex := range regexes {
+					if regex.MatchString(test.Name) {
+						matched = true
+
+						break
+					}
+				}
+				if matched == rtOpts.InvertRegex {
+					willSkip = true
+				}
+			}
+
+			// Apply skip flags
+			if !willSkip {
+				if (test.SkipFlags.ExtendedOnly && skipFlags.ExtendedOnly) ||
+					(test.SkipFlags.VirtualSwitch && skipFlags.VirtualSwitch) ||
+					(test.SkipFlags.NamedExternal && skipFlags.NamedExternal) ||
+					(test.SkipFlags.NoExternals && skipFlags.NoExternals) ||
+					(test.SkipFlags.SubInterfaces && skipFlags.SubInterfaces) ||
+					(test.SkipFlags.RoCE && skipFlags.RoCE) ||
+					(test.SkipFlags.NoFabricLink && skipFlags.NoFabricLink) ||
+					(test.SkipFlags.NoMeshLink && skipFlags.NoMeshLink) ||
+					(test.SkipFlags.NoGateway && skipFlags.NoGateway) {
+					willSkip = true
+				}
+			}
+
+			if willSkip {
+				suiteSkipped++
+			} else {
+				suiteRunnable++
+				runnableTests++
+			}
+		}
+
+		if suiteRunnable > 0 {
+			slog.Info("  "+suite.Name+":", "runnable", suiteRunnable, "skipped", suiteSkipped)
+		} else {
+			slog.Info("  "+suite.Name+":", "all-skipped", len(suite.TestCases))
+		}
+	}
+
+	slog.Info("Total Test Count:", "runnable", runnableTests, "total", totalTests, "skipped", totalTests-runnableTests)
+
 	if rtOpts.ResultsFile != "" {
 		slog.Info("Results Output:", "junit-xml", rtOpts.ResultsFile)
+	}
+
+	slog.Info("===========================================================================")
+}
+
+func printRecap(suites []*JUnitTestSuite, totalDuration time.Duration) {
+	slog.Info("===========================================================================")
+	slog.Info("TEST RESULTS SUMMARY")
+	slog.Info("===========================================================================")
+
+	// Calculate overall totals
+	var totalTests, totalPassed, totalFailed, totalSkipped int
+
+	for _, suite := range suites {
+		passed := suite.Tests - suite.Failures - suite.Skipped
+		totalTests += suite.Tests
+		totalPassed += passed
+		totalFailed += suite.Failures
+		totalSkipped += suite.Skipped
+	}
+
+	// Overall summary
+	slog.Info("OVERALL RESULTS:",
+		"total-tests", totalTests,
+		"passed", totalPassed,
+		"failed", totalFailed,
+		"skipped", totalSkipped,
+		"total-duration", totalDuration.Round(time.Second))
+
+	// Individual suite results
+	slog.Info("DETAILED SUITE RESULTS:")
+	for _, suite := range suites {
+		passed := suite.Tests - suite.Failures - suite.Skipped
+		slog.Info("───────────────────────────────────────────────────────────────────────────")
+		slog.Info("Suite:", "name", suite.Name, "duration", suite.TimeHuman)
+
+		for _, test := range suite.TestCases {
+			switch {
+			case test.Skipped != nil:
+				slog.Warn("  SKIP", "test", test.Name, "reason", test.Skipped.Message)
+			case test.Failure != nil:
+				slog.Error("  FAIL", "test", test.Name, "error", strings.Split(test.Failure.Message, "\n")[0])
+			default:
+				slog.Info("  PASS", "test", test.Name)
+			}
+		}
+
+		slog.Info("Suite Summary:", "passed", passed, "failed", suite.Failures, "skipped", suite.Skipped)
 	}
 
 	slog.Info("===========================================================================")
