@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -22,6 +23,7 @@ import (
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/util/pointer"
+	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab"
 	gwapi "go.githedgehog.com/gateway/api/gateway/v1alpha1"
 	"golang.org/x/sync/errgroup"
@@ -3076,7 +3078,8 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOpts 
 		}
 	}
 
-	// Create all suites for planning purposes
+	// Note: Creating test contexts early for suite planning. While this creates
+	// some unused instances, it keeps the code simple and maintains consistency
 	noVpcSuite := makeNoVpcsSuiteRun(&VPCPeeringTestCtx{})
 	singleVpcSuite := makeVpcPeeringsSingleVPCSuite(&VPCPeeringTestCtx{})
 	multiVpcSuite := makeVpcPeeringsMultiVPCSuiteRun(&VPCPeeringTestCtx{})
@@ -3084,7 +3087,7 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOpts 
 
 	allSuites := []*JUnitTestSuite{noVpcSuite, singleVpcSuite, multiVpcSuite, basicVpcSuite}
 
-	logTestSessionConfig(rtOpts, skipFlags, allSuites, regexesCompiled)
+	logTestSessionConfig(ctx, rtOpts, skipFlags, allSuites, regexesCompiled, kube, swList, &f)
 
 	// Calculate total runnable tests and individual suite counts for progress tracking
 	totalRunnableTests := 0
@@ -3179,9 +3182,9 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOpts 
 	return nil
 }
 
-func logTestSessionConfig(rtOpts ReleaseTestOpts, skipFlags SkipFlags, suites []*JUnitTestSuite, regexes []*regexp.Regexp) {
+func logTestSessionConfig(ctx context.Context, rtOpts ReleaseTestOpts, skipFlags SkipFlags, suites []*JUnitTestSuite, regexes []*regexp.Regexp, kube kclient.Client, swList *wiringapi.SwitchList, f *fabapi.Fabricator) {
 	slog.Info("===========================================================================")
-	slog.Info("TEST SESSION CONFIGURATION")
+	slog.Info("TEST ENVIRONMENT SUMMARY")
 	slog.Info("===========================================================================")
 
 	slog.Info("Test Options:",
@@ -3198,6 +3201,167 @@ func logTestSessionConfig(rtOpts ReleaseTestOpts, skipFlags SkipFlags, suites []
 	} else {
 		slog.Info("Test Selection: All tests (no regex filters)")
 	}
+
+	slog.Info("───────────────────────────────────────────────────────────────────────────")
+
+	// Environment Information - Device Listings
+	slog.Info("Environment Devices:")
+
+	// Control nodes - get from fab.GetFabAndNodes
+	_, controls, _, err := fab.GetFabAndNodes(ctx, kube, fab.GetFabAndNodesOpts{AllowNotHydrated: true})
+	if err == nil {
+		slog.Info("  Control Nodes:")
+		for i := 0; i < len(controls); i++ {
+			slog.Info(fmt.Sprintf("    control-%d: control", i))
+		}
+	}
+
+	// Switches by role - convert if-else to switch statement
+	spines := []string{}
+	leaves := []string{}
+	borders := []string{}
+	mgmt := []string{}
+
+	for _, sw := range swList.Items {
+		switch {
+		case sw.Spec.Role.IsSpine():
+			spines = append(spines, sw.Name)
+		case sw.Spec.Role.IsLeaf():
+			leaves = append(leaves, sw.Name)
+		default:
+			// For any other roles, we can check the string representation
+			roleStr := string(sw.Spec.Role)
+			if strings.Contains(strings.ToLower(roleStr), "border") {
+				borders = append(borders, sw.Name)
+			} else if strings.Contains(strings.ToLower(roleStr), "mgmt") {
+				mgmt = append(mgmt, sw.Name)
+			}
+		}
+	}
+
+	if len(spines) > 0 {
+		slog.Info("  Spine Switches:")
+		for _, name := range spines {
+			slog.Info(fmt.Sprintf("    %s: spine", name))
+		}
+	}
+
+	if len(leaves) > 0 {
+		slog.Info("  Leaf Switches:")
+		for _, name := range leaves {
+			slog.Info("    " + name + ": leaf")
+		}
+	}
+
+	if len(borders) > 0 {
+		slog.Info("  Border Switches:")
+		for _, name := range borders {
+			slog.Info("    " + name + ": border")
+		}
+	}
+
+	if len(mgmt) > 0 {
+		slog.Info("  Management Switches:")
+		for _, name := range mgmt {
+			slog.Info("    " + name + ": mgmt")
+		}
+	}
+
+	// Servers
+	servers := &wiringapi.ServerList{}
+	if err := kube.List(ctx, servers); err == nil && len(servers.Items) > 0 {
+		slog.Info("  Servers:", "count", len(servers.Items))
+	}
+
+	// Gateway nodes (if enabled)
+	if f.Spec.Config.Gateway.Enable {
+		nodes := &fabapi.FabNodeList{}
+		if err := kube.List(ctx, nodes); err == nil {
+			gatewayNodes := []string{}
+			for _, node := range nodes.Items {
+				if slices.Contains(node.Spec.Roles, fabapi.NodeRoleGateway) {
+					gatewayNodes = append(gatewayNodes, node.Name)
+				}
+			}
+			if len(gatewayNodes) > 0 {
+				slog.Info("  Gateway Nodes:", "count", len(gatewayNodes))
+			}
+		}
+	}
+
+	// External connections
+	externals := &vpcapi.ExternalList{}
+	if err := kube.List(ctx, externals); err == nil && len(externals.Items) > 0 {
+		slog.Info("  External Connections:", "count", len(externals.Items))
+	}
+
+	slog.Info("───────────────────────────────────────────────────────────────────────────")
+
+	// Component Versions
+	slog.Info("Component Versions:")
+
+	// Fabricator versions
+	slog.Info("  fabricator:")
+	if f.Status.Versions.Fabricator.API != "" {
+		slog.Info("    api:", "version", string(f.Status.Versions.Fabricator.API))
+	}
+	if f.Status.Versions.Fabricator.Controller != "" {
+		slog.Info("    controller:", "version", string(f.Status.Versions.Fabricator.Controller))
+	}
+	if f.Status.Versions.Fabricator.Ctl != "" {
+		slog.Info("    ctl:", "version", string(f.Status.Versions.Fabricator.Ctl))
+	}
+	if f.Status.Versions.Fabricator.Flatcar != "" {
+		slog.Info("    flatcar:", "version", string(f.Status.Versions.Fabricator.Flatcar))
+	}
+
+	// Fabric versions
+	slog.Info("  fabric:")
+	if f.Status.Versions.Fabric.API != "" {
+		slog.Info("    api:", "version", string(f.Status.Versions.Fabric.API))
+	}
+	if f.Status.Versions.Fabric.Controller != "" {
+		slog.Info("    controller:", "version", string(f.Status.Versions.Fabric.Controller))
+	}
+	if f.Status.Versions.Fabric.Agent != "" {
+		slog.Info("    agent:", "version", string(f.Status.Versions.Fabric.Agent))
+	}
+	if f.Status.Versions.Fabric.Boot != "" {
+		slog.Info("    boot:", "version", string(f.Status.Versions.Fabric.Boot))
+	}
+	if f.Status.Versions.Fabric.DHCPD != "" {
+		slog.Info("    dhcpd:", "version", string(f.Status.Versions.Fabric.DHCPD))
+	}
+	if len(f.Status.Versions.Fabric.NOS) > 0 {
+		slog.Info("    nos:")
+		for nosType, version := range f.Status.Versions.Fabric.NOS {
+			if version != "" {
+				slog.Info("      "+string(nosType)+":", "version", string(version))
+			}
+		}
+	}
+
+	// Gateway versions (if enabled)
+	if f.Spec.Config.Gateway.Enable {
+		slog.Info("  gateway:")
+		if f.Status.Versions.Gateway.API != "" {
+			slog.Info("    api:", "version", string(f.Status.Versions.Gateway.API))
+		}
+		if f.Status.Versions.Gateway.Controller != "" {
+			slog.Info("    controller:", "version", string(f.Status.Versions.Gateway.Controller))
+		}
+		if f.Status.Versions.Gateway.Agent != "" {
+			slog.Info("    agent:", "version", string(f.Status.Versions.Gateway.Agent))
+		}
+		if f.Status.Versions.Gateway.Dataplane != "" {
+			slog.Info("    dataplane:", "version", string(f.Status.Versions.Gateway.Dataplane))
+		}
+		if f.Status.Versions.Gateway.FRR != "" {
+			slog.Info("    frr:", "version", string(f.Status.Versions.Gateway.FRR))
+		}
+	}
+
+	slog.Info("───────────────────────────────────────────────────────────────────────────")
 
 	constraints := []string{}
 	if skipFlags.VirtualSwitch {
@@ -3221,6 +3385,9 @@ func logTestSessionConfig(rtOpts ReleaseTestOpts, skipFlags SkipFlags, suites []
 	if skipFlags.NoMeshLink {
 		constraints = append(constraints, "no mesh links")
 	}
+	if skipFlags.NoGateway {
+		constraints = append(constraints, "gateway not enabled")
+	}
 
 	if len(constraints) > 0 {
 		slog.Warn("Environment Constraints (will cause test skips):")
@@ -3230,6 +3397,8 @@ func logTestSessionConfig(rtOpts ReleaseTestOpts, skipFlags SkipFlags, suites []
 	} else {
 		slog.Info("Environment: No constraints detected")
 	}
+
+	slog.Info("───────────────────────────────────────────────────────────────────────────")
 
 	// Calculate and display test execution plan
 	totalTests := 0
@@ -3283,9 +3452,9 @@ func logTestSessionConfig(rtOpts ReleaseTestOpts, skipFlags SkipFlags, suites []
 		}
 
 		if suiteRunnable > 0 {
-			slog.Info("  "+suite.Name+":", "runnable", suiteRunnable, "skipped", suiteSkipped)
+			slog.Info("Suite stats", "suite", suite.Name, "runnable", suiteRunnable, "skipped", suiteSkipped)
 		} else {
-			slog.Info("  "+suite.Name+":", "all-skipped", len(suite.TestCases))
+			slog.Info("Suite stats", "suite", suite.Name, "all-skipped", len(suite.TestCases))
 		}
 	}
 
