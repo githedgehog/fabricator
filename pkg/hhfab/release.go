@@ -436,7 +436,7 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsStarterTest(ctx context.Context) (b
 		return false, nil, fmt.Errorf("setting up peerings: %w", err)
 	}
 	if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
-		return false, nil, fmt.Errorf("testing connectivity: %w", err)
+		return false, nil, err
 	}
 
 	return false, nil, nil
@@ -459,7 +459,7 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsFullMeshAllExternalsTest(ctx contex
 		return false, nil, fmt.Errorf("setting up peerings: %w", err)
 	}
 	if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
-		return false, nil, fmt.Errorf("testing connectivity: %w", err)
+		return false, nil, err
 	}
 
 	// bonus: remove one external to make sure we do not leek access to it, test again
@@ -476,7 +476,7 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsFullMeshAllExternalsTest(ctx contex
 			return false, nil, fmt.Errorf("setting up peerings: %w", err)
 		}
 		if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
-			return false, nil, fmt.Errorf("testing connectivity: %w", err)
+			return false, nil, err
 		}
 	}
 
@@ -499,7 +499,7 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsOnlyExternalsTest(ctx context.Conte
 		return false, nil, fmt.Errorf("setting up peerings: %w", err)
 	}
 	if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
-		return false, nil, fmt.Errorf("testing connectivity: %w", err)
+		return false, nil, err
 	}
 
 	return false, nil, nil
@@ -519,7 +519,7 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsFullLoopAllExternalsTest(ctx contex
 		return false, nil, fmt.Errorf("setting up peerings: %w", err)
 	}
 	if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
-		return false, nil, fmt.Errorf("testing connectivity: %w", err)
+		return false, nil, err
 	}
 
 	return false, nil, nil
@@ -555,7 +555,7 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsSergeisSpecialTest(ctx context.Cont
 		return false, nil, fmt.Errorf("setting up peerings: %w", err)
 	}
 	if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
-		return false, nil, fmt.Errorf("testing connectivity: %w", err)
+		return false, nil, err
 	}
 
 	return false, nil, nil
@@ -627,11 +627,7 @@ func shutDownLinkAndTest(ctx context.Context, testCtx *VPCPeeringTestCtx, link w
 	slog.Debug("Waiting 5 seconds")
 	time.Sleep(5 * time.Second)
 
-	if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
-		return fmt.Errorf("testing connectivity: %w", err)
-	}
-
-	return nil
+	return DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts)
 }
 
 // Basic test for mclag failover.
@@ -819,7 +815,7 @@ outer:
 		slog.Debug("Waiting 30 seconds for fabric to converge")
 		time.Sleep(30 * time.Second)
 		if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
-			returnErr = fmt.Errorf("testing connectivity: %w", err)
+			returnErr = err
 		}
 	}
 
@@ -966,7 +962,7 @@ func (testCtx *VPCPeeringTestCtx) meshFailoverTest(ctx context.Context) (bool, [
 		slog.Debug("Waiting 30 seconds for fabric to converge")
 		time.Sleep(30 * time.Second)
 		if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
-			return false, reverts, fmt.Errorf("testing connectivity: %w", err)
+			return false, reverts, err
 		}
 		someLeafTested = true
 
@@ -986,7 +982,7 @@ func (testCtx *VPCPeeringTestCtx) noRestrictionsTest(ctx context.Context) (bool,
 		return false, nil, fmt.Errorf("waiting for readiness: %w", err)
 	}
 	if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
-		return false, nil, fmt.Errorf("testing connectivity: %w", err)
+		return false, nil, err
 	}
 
 	return false, nil, nil
@@ -1187,7 +1183,7 @@ func (testCtx *VPCPeeringTestCtx) multiSubnetsSubnetFilteringTest(ctx context.Co
 	})
 
 	if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
-		return false, reverts, fmt.Errorf("testing connectivity: %w", err)
+		return false, reverts, err
 	}
 
 	return false, reverts, nil
@@ -2436,7 +2432,7 @@ func printSuiteResults(ts *JUnitTestSuite) {
 			slog.Warn("SKIP", "test", test.Name, "reason", test.Skipped.Message)
 			numSkipped++
 		} else if test.Failure != nil {
-			slog.Error("FAIL", "test", test.Name, "error", strings.Split(test.Failure.Message, "\n")[0])
+			slog.Error("FAIL", "test", test.Name, "error", strings.ReplaceAll(test.Failure.Message, "\n", "; "))
 			numFailed++
 		} else {
 			slog.Info("PASS", "test", test.Name)
