@@ -274,6 +274,26 @@ jobs:
             hybrid: false
             upgradefrom: ""
 
+          # mesh l2vni
+          - fabricmode: spine-leaf
+            mesh: true
+            includeonie: false
+            gateway: false
+            buildmode: iso
+            vpcmode: l2vni
+            hybrid: false
+            upgradefrom: ""
+
+          # mesh l3vni
+          - fabricmode: spine-leaf
+            mesh: true
+            includeonie: false
+            gateway: false
+            buildmode: iso
+            vpcmode: l3vni
+            hybrid: false
+            upgradefrom: ""
+
           # gateway l2vni w/ onie, usb (max artifacts)
           - fabricmode: spine-leaf
             mesh: false
