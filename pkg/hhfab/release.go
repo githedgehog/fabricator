@@ -2343,7 +2343,7 @@ func makeTestCtx(kube kclient.Client, setupOpts SetupVPCsOpts, workDir, cacheDir
 	testCtx.setupOpts = setupOpts
 	testCtx.tcOpts = TestConnectivityOpts{
 		WaitSwitchesReady: false,
-		PingsCount:        3,
+		PingsCount:        5,
 		IPerfsSeconds:     3,
 		IPerfsMinSpeed:    8200,
 		CurlsCount:        1,

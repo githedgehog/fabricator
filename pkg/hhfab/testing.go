@@ -2032,7 +2032,11 @@ func checkPing(ctx context.Context, opts TestConnectivityOpts, pings *semaphore.
 
 	slog.Debug("Running ping", "from", from, "to", toIP.String())
 
-	cmd := fmt.Sprintf("ping -c %d -W 1 %s", opts.PingsCount, toIP.String()) // TODO wrap with timeout?
+	if out, err := retrySSHCmd(ctx, fromSSH, fmt.Sprintf("ping -c 1 -W 1 %s", toIP.String()), from); err != nil {
+		slog.Debug("Warm-up ping failed, continuing anyway", "err", err, "out", string(out))
+	}
+
+	cmd := fmt.Sprintf("ping -i 0.5 -c %d -W 1 %s", opts.PingsCount, toIP.String()) // TODO wrap with timeout?
 	outR, err := retrySSHCmd(ctx, fromSSH, cmd, from)
 	out := strings.TrimSpace(string(outR))
 	pe.CmdOutput = out
