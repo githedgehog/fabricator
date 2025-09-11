@@ -1,6 +1,6 @@
 module go.githedgehog.com/fabricator
 
-go 1.25.0
+go 1.25
 
 replace gopkg.in/natefinch/lumberjack.v2 v2.2.1 => github.com/githedgehog/lumberjack/v2 v2.2.1-hh
 
@@ -42,9 +42,9 @@ require (
 	github.com/urfave/cli/v2 v2.27.7
 	github.com/vbauerster/mpb/v8 v8.10.2
 	github.com/vishvananda/netlink v1.3.1
-	go.githedgehog.com/fabric v0.90.3
-	go.githedgehog.com/gateway v0.19.3
-	go.githedgehog.com/libmeta v0.2.3
+	go.githedgehog.com/fabric v0.90.4
+	go.githedgehog.com/gateway v0.19.5
+	go.githedgehog.com/libmeta v0.2.4
 	golang.org/x/crypto v0.42.0
 	golang.org/x/mod v0.28.0
 	golang.org/x/sync v0.17.0

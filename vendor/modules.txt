@@ -1690,8 +1690,8 @@ go.etcd.io/bbolt
 go.etcd.io/bbolt/errors
 go.etcd.io/bbolt/internal/common
 go.etcd.io/bbolt/internal/freelist
-# go.githedgehog.com/fabric v0.90.3
-## explicit; go 1.25.0
+# go.githedgehog.com/fabric v0.90.4
+## explicit; go 1.25
 go.githedgehog.com/fabric/api/agent/v1beta1
 go.githedgehog.com/fabric/api/dhcp/v1beta1
 go.githedgehog.com/fabric/api/meta
@@ -1715,13 +1715,13 @@ go.githedgehog.com/fabric/pkg/util/uefiutil
 # go.githedgehog.com/fabric-bcm-ygot v0.5.2-4.5.0
 ## explicit; go 1.24.0
 go.githedgehog.com/fabric-bcm-ygot/pkg/oc
-# go.githedgehog.com/gateway v0.19.3
-## explicit; go 1.25.0
+# go.githedgehog.com/gateway v0.19.5
+## explicit; go 1.25
 go.githedgehog.com/gateway/api/gateway/v1alpha1
 go.githedgehog.com/gateway/api/gwint/v1alpha1
 go.githedgehog.com/gateway/api/meta
-# go.githedgehog.com/libmeta v0.2.3
-## explicit; go 1.25.0
+# go.githedgehog.com/libmeta v0.2.4
+## explicit; go 1.25
 go.githedgehog.com/libmeta/pkg/alloy
 go.githedgehog.com/libmeta/pkg/tmpl
 # go.opencensus.io v0.24.0

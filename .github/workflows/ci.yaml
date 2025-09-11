@@ -52,7 +52,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v6
         with:
-          go-version: stable
+          go-version-file: go.mod
           cache: false
 
       - name: Setup Just
@@ -139,7 +139,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v6
         with:
-          go-version: stable
+          go-version-file: go.mod
           cache: true
 
       - name: Setup Just
@@ -421,7 +421,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v6
         with:
-          go-version: stable
+          go-version-file: go.mod
           cache: false
 
       - name: Login to ghcr.io
@@ -509,7 +509,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v6
         with:
-          go-version: stable
+          go-version-file: go.mod
           cache: false
 
       - name: Login to ghcr.io
