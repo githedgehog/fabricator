@@ -46,6 +46,9 @@ var (
 	errNotEnoughVPCs   = errors.New("not enough VPCs found")
 	errNoRoceLeaves    = errors.New("no leaves supporting RoCE found")
 	errInitialSetup    = errors.New("initial setup failed")
+	errPingFailed      = errors.New("ping failed, expected success")
+	errPingSucceeded   = errors.New("ping succeeded, expected failure")
+	errPingUnexpected  = errors.New("unexpected ping result")
 )
 
 const (
@@ -343,7 +346,8 @@ func changeSwitchPortStatus(hhfabBin, workDir, deviceName, nosPortName string, u
 }
 
 // ping the IP address ip from node nodeName, expectSuccess determines whether the ping should succeed or fail.
-func pingFromFabricNode(hhfabBin, workDir, nodeName, ip string, sourceIP string, expectSuccess bool) error {
+func pingFromFabricNode(hhfabBin, workDir, nodeName, ip string, sourceIP string, expectSuccess bool, count int) error {
+	countStr := strconv.Itoa(count)
 	cmd := exec.Command(
 		hhfabBin,
 		"vlab",
@@ -351,7 +355,7 @@ func pingFromFabricNode(hhfabBin, workDir, nodeName, ip string, sourceIP string,
 		"-n",
 		nodeName,
 		"ping",
-		"-c", "3",
+		"-c", countStr,
 		"-W", "1",
 	)
 	if sourceIP != "" {
@@ -363,15 +367,21 @@ func pingFromFabricNode(hhfabBin, workDir, nodeName, ip string, sourceIP string,
 	// NOTE: there's no real need to check the output as, when both -c and -W are specified,
 	// ping will return exit code 0 only if all packets were received.
 	pingOK := err == nil && strings.Contains(string(out), "0% packet loss")
-	if expectSuccess && !pingOK {
+	pingFail := err != nil || strings.Contains(string(out), "100% packet loss")
+	switch {
+	case expectSuccess && pingFail:
 		slog.Error("Ping failed, expected success", "source", nodeName, "target", ip, "error", err)
 		slog.Debug("Output of ping", "output", string(out))
 
-		return errors.New("ping failed, expected success") //nolint:goerr113
-	} else if !expectSuccess && pingOK {
+		return errPingFailed
+	case !expectSuccess && pingOK:
 		slog.Error("Ping succeeded, expected failure", "source", nodeName, "target", ip, "error", err)
 
-		return errors.New("ping succeeded, expected failure") //nolint:goerr113
+		return errPingSucceeded
+	case pingOK == pingFail:
+		slog.Error("Unexpected ping result", "source", nodeName, "target", ip, "expected", expectSuccess, "error", err)
+
+		return errPingUnexpected
 	}
 
 	return nil
@@ -1328,11 +1338,17 @@ outer:
 
 func (testCtx *VPCPeeringTestCtx) pingStaticExternal(sourceNode string, sourceIP string, expected bool) error {
 	slog.Debug("Pinging static external next hop", "sourceNode", sourceNode, "next-hop", StaticExternalNH, "expected", expected)
-	if err := pingFromFabricNode(testCtx.hhfabBin, testCtx.workDir, sourceNode, StaticExternalNH, sourceIP, expected); err != nil {
+	if err := pingFromFabricNode(testCtx.hhfabBin, testCtx.workDir, sourceNode, StaticExternalNH, sourceIP, expected, 1); err != nil {
+		slog.Warn("Warm-up ping failed, continuing anyway")
+	}
+	if err := pingFromFabricNode(testCtx.hhfabBin, testCtx.workDir, sourceNode, StaticExternalNH, sourceIP, expected, 3); err != nil {
 		return fmt.Errorf("ping from %s to %s: %w", sourceNode, StaticExternalNH, err)
 	}
 	slog.Debug("Pinging static external dummy interface", "sourceNode", sourceNode, "dummy-interface", StaticExternalDummyIface, "expected", expected)
-	if err := pingFromFabricNode(testCtx.hhfabBin, testCtx.workDir, sourceNode, StaticExternalDummyIface, sourceIP, expected); err != nil {
+	if err := pingFromFabricNode(testCtx.hhfabBin, testCtx.workDir, sourceNode, StaticExternalDummyIface, sourceIP, expected, 1); err != nil {
+		slog.Warn("Warm-up ping failed, continuing anyway")
+	}
+	if err := pingFromFabricNode(testCtx.hhfabBin, testCtx.workDir, sourceNode, StaticExternalDummyIface, sourceIP, expected, 3); err != nil {
 		return fmt.Errorf("ping from %s to %s: %w", sourceNode, StaticExternalDummyIface, err)
 	}
 
