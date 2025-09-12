@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -2333,6 +2334,155 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringTest(ctx context.Context) (bool,
 	return false, reverts, nil
 }
 
+// Test gateway peering in a chain configuration where each VPC peers with the next one.
+func (testCtx *VPCPeeringTestCtx) gatewayPeeringChainTest(ctx context.Context) (bool, []RevertFunc, error) {
+	vpcs := &vpcapi.VPCList{}
+	if err := testCtx.kube.List(ctx, vpcs); err != nil {
+		return false, nil, fmt.Errorf("listing VPCs: %w", err)
+	}
+	if len(vpcs.Items) < 3 {
+		return true, nil, fmt.Errorf("not enough VPCs for gateway peering chain test (need at least 3)") //nolint:goerr113
+	}
+
+	sort.Slice(vpcs.Items, func(i, j int) bool {
+		return vpcs.Items[i].Name < vpcs.Items[j].Name
+	})
+
+	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec, 0)
+	externalPeerings := make(map[string]*vpcapi.ExternalPeeringSpec, 0)
+	gwPeerings := make(map[string]*gwapi.PeeringSpec, len(vpcs.Items)-1)
+
+	// Create chain: VPC0↔VPC1↔VPC2↔...↔VPCn-1
+	for i := 0; i < len(vpcs.Items)-1; i++ {
+		vpc1 := vpcs.Items[i]
+		vpc2 := vpcs.Items[i+1]
+
+		vpc1Subnets := make([]string, 0, len(vpc1.Spec.Subnets))
+		for _, subnet := range vpc1.Spec.Subnets {
+			vpc1Subnets = append(vpc1Subnets, subnet.Subnet)
+		}
+
+		vpc2Subnets := make([]string, 0, len(vpc2.Spec.Subnets))
+		for _, subnet := range vpc2.Spec.Subnets {
+			vpc2Subnets = append(vpc2Subnets, subnet.Subnet)
+		}
+
+		appendGwPeeringSpecByName(gwPeerings, vpc1.Name, vpc2.Name, vpc1Subnets, vpc2Subnets)
+	}
+
+	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, gwPeerings, true); err != nil {
+		return false, nil, fmt.Errorf("setting up gateway chain peerings: %w", err)
+	}
+
+	reverts := []RevertFunc{
+		func(ctx context.Context) error {
+			return DoSetupPeerings(ctx, testCtx.kube, nil, nil, nil, true)
+		},
+	}
+
+	if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
+		return false, reverts, fmt.Errorf("testing gateway chain connectivity: %w", err)
+	}
+
+	return false, reverts, nil
+}
+
+// Test combining VPC peering and gateway peering in a chain-like configuration.
+// Create VPC peering between some VPC pairs and gateway peering between other VPC pairs.
+func (testCtx *VPCPeeringTestCtx) gatewayMixedPeeringChainTest(ctx context.Context) (bool, []RevertFunc, error) {
+	vpcs := &vpcapi.VPCList{}
+	if err := testCtx.kube.List(ctx, vpcs); err != nil {
+		return false, nil, fmt.Errorf("listing VPCs: %w", err)
+	}
+	if len(vpcs.Items) < 4 {
+		return true, nil, fmt.Errorf("not enough VPCs for mixed peering chain test (need at least 4)") //nolint:goerr113
+	}
+
+	sort.Slice(vpcs.Items, func(i, j int) bool {
+		return vpcs.Items[i].Name < vpcs.Items[j].Name
+	})
+
+	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec, 0)
+	externalPeerings := make(map[string]*vpcapi.ExternalPeeringSpec, 0)
+	gwPeerings := make(map[string]*gwapi.PeeringSpec, 0)
+
+	// Create VPC peerings for pairs (0,1), (4,5), (8,9), etc.
+	// Create gateway peerings for pairs (2,3), (6,7), (10,11), etc.
+	for i := 0; i < len(vpcs.Items)-1; i += 2 {
+		if i%4 == 0 {
+			// VPC peering for pairs starting at 0, 4, 8, etc.
+			appendVpcPeeringSpecByName(vpcPeerings, vpcs.Items[i].Name, vpcs.Items[i+1].Name, "", []string{}, []string{})
+		} else {
+			// Gateway peering for pairs starting at 2, 6, 10, etc.
+			vpc1 := vpcs.Items[i]
+			vpc2 := vpcs.Items[i+1]
+
+			vpc1Subnets := make([]string, 0, len(vpc1.Spec.Subnets))
+			for _, subnet := range vpc1.Spec.Subnets {
+				vpc1Subnets = append(vpc1Subnets, subnet.Subnet)
+			}
+
+			vpc2Subnets := make([]string, 0, len(vpc2.Spec.Subnets))
+			for _, subnet := range vpc2.Spec.Subnets {
+				vpc2Subnets = append(vpc2Subnets, subnet.Subnet)
+			}
+
+			appendGwPeeringSpecByName(gwPeerings, vpc1.Name, vpc2.Name, vpc1Subnets, vpc2Subnets)
+		}
+	}
+
+	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, gwPeerings, true); err != nil {
+		return false, nil, fmt.Errorf("setting up mixed peering chain: %w", err)
+	}
+
+	reverts := []RevertFunc{
+		func(ctx context.Context) error {
+			return DoSetupPeerings(ctx, testCtx.kube, nil, nil, nil, true)
+		},
+	}
+
+	if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
+		return false, reverts, fmt.Errorf("testing mixed peering chain connectivity: %w", err)
+	}
+
+	return false, reverts, nil
+}
+
+// add a single gateway peering spec to an existing map, which will be the input for DoSetupPeerings
+func appendGwPeeringSpecByName(gwPeerings map[string]*gwapi.PeeringSpec, vpc1, vpc2 string, vpc1Subnets, vpc2Subnets []string) {
+	entryName := fmt.Sprintf("%s--%s", vpc1, vpc2)
+
+	vpc1Expose := gwapi.PeeringEntryExpose{}
+	if len(vpc1Subnets) == 0 {
+		// expose all subnets - this requires getting the VPC, but we'll do it in the caller
+		vpc1Expose.IPs = []gwapi.PeeringEntryIP{}
+	} else {
+		for _, subnet := range vpc1Subnets {
+			vpc1Expose.IPs = append(vpc1Expose.IPs, gwapi.PeeringEntryIP{CIDR: subnet})
+		}
+	}
+
+	vpc2Expose := gwapi.PeeringEntryExpose{}
+	if len(vpc2Subnets) == 0 {
+		vpc2Expose.IPs = []gwapi.PeeringEntryIP{}
+	} else {
+		for _, subnet := range vpc2Subnets {
+			vpc2Expose.IPs = append(vpc2Expose.IPs, gwapi.PeeringEntryIP{CIDR: subnet})
+		}
+	}
+
+	gwPeerings[entryName] = &gwapi.PeeringSpec{
+		Peering: map[string]*gwapi.PeeringEntry{
+			vpc1: {
+				Expose: []gwapi.PeeringEntryExpose{vpc1Expose},
+			},
+			vpc2: {
+				Expose: []gwapi.PeeringEntryExpose{vpc2Expose},
+			},
+		},
+	}
+}
+
 // Utilities and suite runners
 
 func makeTestCtx(kube kclient.Client, setupOpts SetupVPCsOpts, workDir, cacheDir string, wipeBetweenTests bool, rtOpts ReleaseTestOpts, roceLeaves []string) *VPCPeeringTestCtx {
@@ -2879,6 +3029,20 @@ func makeVpcPeeringsBasicSuiteRun(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 		{
 			Name: "Gateway Peering",
 			F:    testCtx.gatewayPeeringTest,
+			SkipFlags: SkipFlags{
+				NoGateway: true,
+			},
+		},
+		{
+			Name: "Gateway Peering Chain",
+			F:    testCtx.gatewayPeeringChainTest,
+			SkipFlags: SkipFlags{
+				NoGateway: true,
+			},
+		},
+		{
+			Name: "Mixed VPC and Gateway Peering Chain",
+			F:    testCtx.gatewayMixedPeeringChainTest,
 			SkipFlags: SkipFlags{
 				NoGateway: true,
 			},
