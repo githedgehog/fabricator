@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"go.githedgehog.com/fabric/pkg/util/logutil"
@@ -101,7 +102,12 @@ func (c *NodeInstall) joinK8s(ctx context.Context) error {
 		filepath.Join(k3s.ImagesDir, f8r.NodeConfigAirgapName),
 		nodeConfigRef+":"+string(c.Fab.Status.Versions.Fabricator.NodeConfig),
 	); err != nil {
-		return fmt.Errorf("installing node config airgap image: %w", err)
+		// error is hardcoded in the lib and so we can't match it
+		if strings.Contains(err.Error(), "docker-archive doesn't support modifying existing images") {
+			slog.Warn("Node config airgap image already loaded, skipping")
+		} else {
+			return fmt.Errorf("installing node config airgap image: %w", err)
+		}
 	}
 
 	if err := os.MkdirAll(k3s.ConfigDir, 0o755); err != nil {
