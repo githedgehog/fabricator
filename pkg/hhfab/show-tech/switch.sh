@@ -19,9 +19,12 @@ run_sonic_cmd() {
 # Basic System Information
 # ---------------------------
 {
-    echo "=== System Information ==="
+    echo "=== System Information and Status ==="
     run_sonic_cmd "show version"
     run_sonic_cmd "show uptime"
+    run_sonic_cmd "show system status brief"
+    run_sonic_cmd "show system status"
+
 } >> "$OUTPUT_FILE" 2>&1
 
 # ---------------------------
@@ -77,7 +80,7 @@ run_sonic_cmd() {
     run_sonic_cmd "show ip bgp summary"
     run_sonic_cmd "show bgp l2vpn evpn summary"
     run_sonic_cmd "show bgp l2vpn evpn"
-    
+
     echo -e "\n=== EVPN Information ==="
     run_sonic_cmd "show evpn vni"
     run_sonic_cmd "show evpn mac"
@@ -96,7 +99,7 @@ run_sonic_cmd() {
     run_sonic_cmd "show platform psusummary"
     run_sonic_cmd "show platform ssdhealth"
     run_sonic_cmd "show platform temperature"
-    
+
     echo -e "\n=== Transceiver Information ==="
     run_sonic_cmd "show interface transceiver summary"
     run_sonic_cmd "show interface transceiver laser status"
@@ -116,24 +119,21 @@ run_sonic_cmd() {
 } >> "$OUTPUT_FILE" 2>&1
 
 # ---------------------------
-# System Logs and Status
+# Agent and System Logs
 # ---------------------------
 {
-    echo -e "\n=== System Status ==="
-    run_sonic_cmd "show system status brief"
-
     echo -e "\n=== System Logs ==="
     run_sonic_cmd "show logging"
-    
+
     echo -e "\n=== Hedgehog Agent Status ==="
     systemctl status hedgehog-agent
-    
+
     echo -e "\n=== Hedgehog Agent Logs ==="
     cat /var/log/agent.log
-    
+
     echo -e "\n=== Docker Status ==="
     docker ps
-    
+
     echo -e "\n=== Docker Container Logs ==="
     CONTAINERS=$(docker ps --format "{{.Names}}")
     for CONTAINER in $CONTAINERS; do
