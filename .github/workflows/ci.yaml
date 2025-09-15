@@ -40,6 +40,11 @@ on:
         description: "Invert regex match"
         required: false
         default: false
+      enable_hlab:
+        type: boolean
+        description: "Enable hlab (hybrid lab) tests"
+        required: false
+        default: false
       debug_enabled:
         type: boolean
         description: "Run the build with tmate debugging enabled (https://github.com/marketplace/actions/debugging-with-tmate)"
@@ -247,12 +252,18 @@ jobs:
       # if pull_request: skip hlab if not ci:+hlab and skip vlab if ci:-vlab
       skip: >-
         ${{
-          github.event_name == 'pull_request'
-          && (
-            matrix.hybrid && !contains(github.event.pull_request.labels.*.name, 'ci:+hlab')
-            || !matrix.hybrid && contains(github.event.pull_request.labels.*.name, 'ci:-vlab')
-          ) && (
-            matrix.upgradefrom == '' || contains(github.event.pull_request.labels.*.name, 'ci:-upgrade')
+          (
+            github.event_name == 'pull_request'
+            && (
+              matrix.hybrid && !contains(github.event.pull_request.labels.*.name, 'ci:+hlab')
+              || !matrix.hybrid && contains(github.event.pull_request.labels.*.name, 'ci:-vlab')
+            ) && (
+              matrix.upgradefrom == '' || !contains(github.event.pull_request.labels.*.name, 'ci:-upgrade')
+            )
+          ) || (
+            github.event_name == 'workflow_dispatch'
+            && matrix.hybrid
+            && !inputs.enable_hlab
           )
         }}
       fabricatorref: ${{ github.ref }}
