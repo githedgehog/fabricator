@@ -15,6 +15,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -1327,11 +1328,20 @@ type IperfError struct {
 	MinSpeed    string
 	SentSpeed   string
 	RcvdSpeed   string
-	Msg         string
+	ClientMsg   string
+	ServerMsg   string
 }
 
 func (ie *IperfError) Error() string {
-	rs := fmt.Sprintf("iperf %s -> %s: %s", ie.Source, ie.Destination, ie.Msg)
+	rs := fmt.Sprintf("iperf %s -> %s", ie.Source, ie.Destination)
+	switch {
+	case ie.ClientMsg != "" && ie.ServerMsg != "":
+		rs += fmt.Sprintf(": client: %s, server: %s", ie.ClientMsg, ie.ServerMsg)
+	case ie.ClientMsg != "":
+		rs += fmt.Sprintf(": client: %s", ie.ClientMsg)
+	case ie.ServerMsg != "":
+		rs += fmt.Sprintf(": server: %s", ie.ServerMsg)
+	}
 	if ie.SentSpeed != "" {
 		rs += fmt.Sprintf(" (sent %s, rcvd %s, min expected %s)", ie.SentSpeed, ie.RcvdSpeed, ie.MinSpeed)
 	}
@@ -2114,7 +2124,7 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphor
 	ie.MinSpeed = asMbps(iPerfsMinSpeed * 1_000_000)
 
 	if err := iperfs.Acquire(ctx, 1); err != nil {
-		ie.Msg = fmt.Sprintf("acquiring iperf3 semaphore: %s", err)
+		ie.ClientMsg = fmt.Sprintf("acquiring iperf3 semaphore: %s", err)
 
 		return ie
 	}
@@ -2128,18 +2138,33 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphor
 	g, ctx := errgroup.WithContext(ctx)
 
 	g.Go(func() error {
-		// NOTE: JSON parsing of the report does not work for iperf3 server, because they decided
-		// to add some mutex logs before and after the report using perror that cannot be suppressed.
-		// we could just look at stdout, but the library we are using only gives us the combined output
-		// option. at the end of the day, the most likely error is a timeout, so I'm making that explicit
-		// by checking the original error message.
-		cmd := fmt.Sprintf("toolbox -q timeout %d iperf3 -s -1", opts.IPerfsSeconds+25)
-		_, err := retrySSHCmd(ctx, toSSH, cmd, to)
+		cmd := fmt.Sprintf("toolbox -q timeout %d iperf3 -s -1 -J", opts.IPerfsSeconds+25)
+		outPre, err := retrySSHCmd(ctx, toSSH, cmd, to)
+		// remove spurious perror messages from iperf3 which will break json parsing
+		re, reErr := regexp.Compile("(?m)([\r\n]^.*iperf_.*$)|(^.*iperf_.*$[\r\n])")
+		if reErr != nil {
+			ie.ServerMsg = fmt.Sprintf("compiling iperf3 output cleanup regexp: %s", reErr)
+
+			return errors.New(ie.ServerMsg)
+		}
+		outR := re.ReplaceAll(outPre, nil)
+
+		report, parseErr := parseIPerf3Report(outR)
 		if err != nil {
-			if err.Error() == "Process exited with status 124" {
-				return fmt.Errorf("iperf3 server timed out after %d seconds", opts.IPerfsSeconds+25) //nolint:goerr113
+			if parseErr == nil && report.Error != "" {
+				ie.ServerMsg = report.Error
+
+				return fmt.Errorf("running iperf3 server: %w: %s", err, report.Error)
 			}
+			slog.Warn("iperf3 server error, but could not retrieve error message from command output", "parseErr", parseErr, "output", string(outR))
+			ie.ServerMsg = err.Error()
+
 			return fmt.Errorf("running iperf3 server: %w", err)
+		}
+		if parseErr != nil {
+			ie.ServerMsg = fmt.Sprintf("cannot parse iperf3 report: %s", parseErr)
+
+			return fmt.Errorf("parsing server's iperf3 report: %w", err)
 		}
 
 		return nil
@@ -2166,12 +2191,18 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphor
 		report, parseErr := parseIPerf3Report(outR)
 		if err != nil {
 			if parseErr == nil && report.Error != "" {
+				ie.ClientMsg = report.Error
+
 				return fmt.Errorf("running iperf3 client: %w: %s", err, report.Error)
 			}
+			ie.ClientMsg = err.Error()
+
 			return fmt.Errorf("running iperf3 client: %w", err)
 		}
 		if parseErr != nil {
-			return fmt.Errorf("parsing iperf3 report: %w", err)
+			ie.ClientMsg = fmt.Sprintf("cannot parse iperf3 report: %s", parseErr)
+
+			return fmt.Errorf("parsing client's iperf3 report: %w", err)
 		}
 
 		slog.Debug("IPerf3 result", "from", from, "to", to,
@@ -2185,10 +2216,14 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphor
 
 		if iPerfsMinSpeed > 0 {
 			if report.End.SumSent.BitsPerSecond < iPerfsMinSpeed*1_000_000 {
-				return fmt.Errorf("iperf3 send speed too low: %s < %s", asMbps(report.End.SumSent.BitsPerSecond), asMbps(iPerfsMinSpeed*1_000_000))
+				ie.ClientMsg = "iperf3 send speed too low"
+
+				return errors.New(ie.ClientMsg)
 			}
 			if report.End.SumReceived.BitsPerSecond < iPerfsMinSpeed*1_000_000 {
-				return fmt.Errorf("iperf3 receive speed too low: %s < %s", asMbps(report.End.SumReceived.BitsPerSecond), asMbps(iPerfsMinSpeed*1_000_000))
+				ie.ClientMsg = "iperf3 receive speed too low"
+
+				return errors.New(ie.ClientMsg)
 			}
 		}
 
@@ -2196,8 +2231,6 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphor
 	})
 
 	if err := g.Wait(); err != nil {
-		ie.Msg = err.Error()
-
 		return ie
 	}
 
