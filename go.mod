@@ -20,7 +20,7 @@ require (
 	github.com/cert-manager/cert-manager v1.18.2
 	github.com/charmbracelet/keygen v0.5.3
 	github.com/containers/image/v5 v5.36.2
-	github.com/coreos/butane v0.24.0
+	github.com/coreos/butane v0.25.0
 	github.com/diskfs/go-diskfs v1.4.2
 	github.com/go-logr/logr v1.4.3
 	github.com/go-playground/validator/v10 v10.27.0
