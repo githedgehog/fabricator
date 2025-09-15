@@ -2138,7 +2138,7 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphor
 	g, ctx := errgroup.WithContext(ctx)
 
 	g.Go(func() error {
-		cmd := fmt.Sprintf("toolbox -q timeout %d iperf3 -s -1 -J", opts.IPerfsSeconds+25)
+		cmd := fmt.Sprintf("toolbox -E LD_PRELOAD=/lib/x86_64-linux-gnu/libgcc_s.so.1 -q timeout %d iperf3 -s -1 -J", opts.IPerfsSeconds+25)
 		outPre, err := retrySSHCmd(ctx, toSSH, cmd, to)
 		// remove spurious perror messages from iperf3 which will break json parsing
 		re, reErr := regexp.Compile("(?m)([\r\n]^.*iperf_.*$)|(^.*iperf_.*$[\r\n])")
@@ -2174,7 +2174,7 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphor
 		// We could netcat to check if the server is up, but that will make the server shut down if
 		// it was started with -1, and if we don't add -1 it will run until the timeout
 		time.Sleep(1 * time.Second)
-		cmd := fmt.Sprintf("toolbox -q timeout %d iperf3 -P 4 -J -c %s -t %d", opts.IPerfsSeconds+25, toIP.String(), opts.IPerfsSeconds)
+		cmd := fmt.Sprintf("toolbox -E LD_PRELOAD=/lib/x86_64-linux-gnu/libgcc_s.so.1 -q timeout %d iperf3 -P 4 -J -c %s -t %d", opts.IPerfsSeconds+25, toIP.String(), opts.IPerfsSeconds)
 
 		// TODO remove workaround after we configure correct MTU on the Gateway ports
 		if reachability.Reason == ReachabilityReasonGatewayPeering {
