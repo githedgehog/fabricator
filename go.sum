@@ -209,8 +209,8 @@ github.com/containers/ocicrypt v1.2.1 h1:0qIOTT9DoYwcKmxSt8QJt+VzMY18onl9jUXsxpV
 github.com/containers/ocicrypt v1.2.1/go.mod h1:aD0AAqfMp0MtwqWgHM1bUwe1anx0VazI108CRrSKINQ=
 github.com/containers/storage v1.59.1 h1:11Zu68MXsEQGBBd+GadPrHPpWeqjKS8hJDGiAHgIqDs=
 github.com/containers/storage v1.59.1/go.mod h1:KoAYHnAjP3/cTsRS+mmWZGkufSY2GACiKQ4V3ZLQnR0=
-github.com/coreos/butane v0.24.0 h1:sput//CnGz1ZUNT3TaSpbgjAjlefGC+/Ikiiwl5wO9Q=
-github.com/coreos/butane v0.24.0/go.mod h1:mLu58/AgW6lC116Rf/9N5b+ixj/zdhRtABBZjADHWFo=
+github.com/coreos/butane v0.25.0 h1:hOedIb6hKLeahVjGOaDX6ri3CKeFTzCrfWbvZUrt0gQ=
+github.com/coreos/butane v0.25.0/go.mod h1:mLu58/AgW6lC116Rf/9N5b+ixj/zdhRtABBZjADHWFo=
 github.com/coreos/go-json v0.0.0-20230131223807-18775e0fb4fb h1:rmqyI19j3Z/74bIRhuC59RB442rXUazKNueVpfJPxg4=
 github.com/coreos/go-json v0.0.0-20230131223807-18775e0fb4fb/go.mod h1:rcFZM3uxVvdyNmsAV2jopgPD1cs5SPWJWU5dOz2LUnw=
 github.com/coreos/go-semver v0.3.1 h1:yi21YpKnrx1gt5R+la8n5WgS0kCrsPp33dmEyHReZr4=
