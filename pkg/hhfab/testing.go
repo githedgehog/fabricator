@@ -2507,6 +2507,7 @@ type ReleaseTestOpts struct {
 	PauseOnFail bool
 	HashPolicy  string
 	VPCMode     vpcapi.VPCMode
+	ListTests   bool
 }
 
 func (c *Config) ReleaseTest(ctx context.Context, opts ReleaseTestOpts) error {

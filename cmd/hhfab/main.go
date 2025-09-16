@@ -71,6 +71,7 @@ const (
 	FlagExtended                  = "extended"
 	FlagPauseOnFail               = "pause-on-fail"
 	FlagHashPolicy                = "hash-policy"
+	FlagListTests                 = "list-tests"
 )
 
 func main() {
@@ -1189,6 +1190,11 @@ func Run(ctx context.Context) error {
 								Aliases: []string{"mode"},
 								Usage:   "VPC mode: empty (l2vni) by default or l3vni, etc",
 							},
+							&cli.BoolFlag{
+								Name:    FlagListTests,
+								Aliases: []string{"list", "l"},
+								Usage:   "list all available tests and exit",
+							},
 						}),
 						Before: before(false),
 						Action: func(c *cli.Context) error {
@@ -1201,6 +1207,7 @@ func Run(ctx context.Context) error {
 								PauseOnFail: c.Bool(FlagPauseOnFail),
 								HashPolicy:  c.String(FlagHashPolicy),
 								VPCMode:     vpcapi.VPCMode(handleL2VNI(c.String(FlagNameVPCMode))),
+								ListTests:   c.Bool(FlagListTests),
 							}
 							if err := hhfab.DoVLABReleaseTest(ctx, workDir, cacheDir, opts); err != nil {
 								return fmt.Errorf("release-test: %w", err)
