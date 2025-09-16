@@ -2458,7 +2458,7 @@ func appendGwPeeringSpec(gwPeerings map[string]*gwapi.PeeringSpec, vpc1, vpc2 *v
 
 // Utilities and suite runners
 
-func makeTestCtx(kube kclient.Client, setupOpts SetupVPCsOpts, workDir, cacheDir string, wipeBetweenTests bool, rtOpts ReleaseTestOpts, roceLeaves []string) *VPCPeeringTestCtx {
+func makeTestCtx(kube kclient.Client, setupOpts SetupVPCsOpts, workDir, cacheDir string, wipeBetweenTests bool, rtOpts ReleaseTestOpts) *VPCPeeringTestCtx {
 	testCtx := new(VPCPeeringTestCtx)
 	testCtx.kube = kube
 	testCtx.workDir = workDir
@@ -2486,7 +2486,6 @@ func makeTestCtx(kube kclient.Client, setupOpts SetupVPCsOpts, workDir, cacheDir
 	testCtx.extended = rtOpts.Extended
 	testCtx.failFast = rtOpts.FailFast
 	testCtx.pauseOnFail = rtOpts.PauseOnFail
-	testCtx.roceLeaves = roceLeaves
 
 	return testCtx
 }
@@ -2525,6 +2524,42 @@ type SkipFlags struct {
 	 */
 }
 
+func (sf *SkipFlags) PrettyPrint() string {
+	var parts []string
+	if sf.VirtualSwitch {
+		parts = append(parts, "VS")
+	}
+	if sf.NamedExternal {
+		parts = append(parts, "NamedExt")
+	}
+	if sf.NoExternals {
+		parts = append(parts, "NoExt")
+	}
+	if sf.ExtendedOnly {
+		parts = append(parts, "EO")
+	}
+	if sf.RoCE {
+		parts = append(parts, "RoCE")
+	}
+	if sf.SubInterfaces {
+		parts = append(parts, "SubIf")
+	}
+	if sf.NoFabricLink {
+		parts = append(parts, "NoFab")
+	}
+	if sf.NoMeshLink {
+		parts = append(parts, "NoMesh")
+	}
+	if sf.NoGateway {
+		parts = append(parts, "NoGW")
+	}
+	if len(parts) == 0 {
+		return "None"
+	}
+
+	return strings.Join(parts, ", ")
+}
+
 type JUnitTestCase struct {
 	XMLName   xml.Name  `xml:"testcase"`
 	ClassName string    `xml:"classname,attr"`
@@ -2545,6 +2580,13 @@ type Failure struct {
 type Skipped struct {
 	XMLName xml.Name `xml:"skipped"`
 	Message string   `xml:"message,attr,omitempty"`
+}
+
+func printTestSuite(ts *JUnitTestSuite) {
+	slog.Info("*** Test suite", "suite", ts.Name, "tests", ts.Tests)
+	for _, test := range ts.TestCases {
+		slog.Info("* Test", "name", test.Name, "skipFlags", test.SkipFlags.PrettyPrint())
+	}
 }
 
 func printSuiteResults(ts *JUnitTestSuite) {
@@ -2901,7 +2943,7 @@ func makeVpcPeeringsSingleVPCSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 	return suite
 }
 
-func makeVpcPeeringsMultiVPCSuiteRun(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
+func makeVpcPeeringsMultiVPCSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 	suite := &JUnitTestSuite{
 		Name: "Multi-Subnets VPC Suite",
 	}
@@ -2938,7 +2980,7 @@ func makeVpcPeeringsMultiVPCSuiteRun(testCtx *VPCPeeringTestCtx) *JUnitTestSuite
 	return suite
 }
 
-func makeNoVpcsSuiteRun(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
+func makeNoVpcsSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 	suite := &JUnitTestSuite{
 		Name: "No VPCs Suite",
 	}
@@ -2956,7 +2998,7 @@ func makeNoVpcsSuiteRun(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 	return suite
 }
 
-func makeVpcPeeringsBasicSuiteRun(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
+func makeVpcPeeringsBasicSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 	suite := &JUnitTestSuite{
 		Name: "Basic VPC Peering Suite",
 	}
@@ -3059,6 +3101,21 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 		VPCMode:           rtOtps.VPCMode,
 	}
 
+	testCtx := makeTestCtx(kube, setupOpts, workDir, cacheDir, false, rtOtps)
+	noVpcSuite := makeNoVpcsSuite(testCtx)
+	singleVpcSuite := makeVpcPeeringsSingleVPCSuite(testCtx)
+	multiVpcSuite := makeVpcPeeringsMultiVPCSuite(testCtx)
+	basicVpcSuite := makeVpcPeeringsBasicSuite(testCtx)
+	suites := []*JUnitTestSuite{noVpcSuite, singleVpcSuite, multiVpcSuite, basicVpcSuite}
+
+	if rtOtps.ListTests {
+		for _, suite := range suites {
+			printTestSuite(suite)
+		}
+
+		return nil
+	}
+
 	regexesCompiled := make([]*regexp.Regexp, 0)
 	for _, regex := range rtOtps.Regexes {
 		compiled, err := regexp.Compile(regex)
@@ -3145,6 +3202,7 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 			roceLeaves = append(roceLeaves, sw.Name)
 		}
 	}
+	testCtx.roceLeaves = roceLeaves
 	if len(roceLeaves) == 0 {
 		slog.Warn("No RoCE capable leaves found, some tests will be skipped")
 		skipFlags.RoCE = true
@@ -3182,46 +3240,44 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 		}
 	}
 
-	noVpcTestCtx := makeTestCtx(kube, setupOpts, workDir, cacheDir, true, rtOtps, roceLeaves)
-	noVpcTestCtx.noSetup = true
-	noVpcSuite := makeNoVpcsSuiteRun(noVpcTestCtx)
-	noVpcResults, err := selectAndRunSuite(ctx, noVpcTestCtx, noVpcSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
+	results := []JUnitTestSuite{}
+	testCtx.noSetup = true
+	noVpcResults, err := selectAndRunSuite(ctx, testCtx, noVpcSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
 	if err != nil && rtOtps.FailFast {
 		return fmt.Errorf("running no VPC suite: %w", err)
 	}
+	results = append(results, *noVpcResults)
 
-	singleVpcTestCtx := makeTestCtx(kube, setupOpts, workDir, cacheDir, false, rtOtps, roceLeaves)
-	singleVpcSuite := makeVpcPeeringsSingleVPCSuite(singleVpcTestCtx)
-	singleVpcResults, err := selectAndRunSuite(ctx, singleVpcTestCtx, singleVpcSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
+	testCtx.noSetup = false
+	singleVpcResults, err := selectAndRunSuite(ctx, testCtx, singleVpcSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
 	if err != nil && rtOtps.FailFast {
 		return fmt.Errorf("running single VPC suite: %w", err)
 	}
+	results = append(results, *singleVpcResults)
 
-	setupOpts.ServersPerSubnet = 1
-	multiVpcTestCtx := makeTestCtx(kube, setupOpts, workDir, cacheDir, false, rtOtps, roceLeaves)
-	multiVpcSuite := makeVpcPeeringsMultiVPCSuiteRun(multiVpcTestCtx)
-	multiVpcResults, err := selectAndRunSuite(ctx, multiVpcTestCtx, multiVpcSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
+	testCtx.setupOpts.ServersPerSubnet = 1
+	multiVpcResults, err := selectAndRunSuite(ctx, testCtx, multiVpcSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
 	if err != nil && rtOtps.FailFast {
 		return fmt.Errorf("running multi VPC suite: %w", err)
 	}
+	results = append(results, *multiVpcResults)
 
-	setupOpts.SubnetsPerVPC = 1
-	basicTestCtx := makeTestCtx(kube, setupOpts, workDir, cacheDir, true, rtOtps, roceLeaves)
-	basicVpcSuite := makeVpcPeeringsBasicSuiteRun(basicTestCtx)
-	basicResults, err := selectAndRunSuite(ctx, basicTestCtx, basicVpcSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
+	testCtx.setupOpts.SubnetsPerVPC = 1
+	testCtx.wipeBetweenTests = true
+	basicResults, err := selectAndRunSuite(ctx, testCtx, basicVpcSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
 	if err != nil && rtOtps.FailFast {
 		return fmt.Errorf("running basic VPC suite: %w", err)
 	}
+	results = append(results, *basicResults)
 
 	slog.Info("*** Recap of the test results ***")
-	printSuiteResults(noVpcResults)
-	printSuiteResults(singleVpcResults)
-	printSuiteResults(multiVpcResults)
-	printSuiteResults(basicResults)
+	for _, suite := range results {
+		printSuiteResults(&suite)
+	}
 
 	if rtOtps.ResultsFile != "" {
 		report := JUnitReport{
-			Suites: []JUnitTestSuite{*singleVpcResults, *multiVpcResults, *basicResults, *noVpcResults},
+			Suites: results,
 		}
 		output, err := xml.MarshalIndent(report, "", "  ")
 		if err != nil {
