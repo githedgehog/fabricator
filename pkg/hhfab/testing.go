@@ -1672,14 +1672,25 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 					ce := &CurlError{
 						Source: serverA,
 					}
-					reachable, err := apiutil.IsExternalSubnetReachable(ctx, kube, serverA, "0.0.0.0/0") // TODO test for specific IP
+					expectedReachable, err := IsExternalSubnetReachable(ctx, kube, serverA, "0.0.0.0/0", c.Fab.Spec.Config.Gateway.Enable) // TODO test for specific IP
 					if err != nil {
 						ce.Msg = fmt.Sprintf("checking if should be reachable: %s", err)
 
 						return ce
 					}
 
-					slog.Debug("Checking external connectivity", "from", serverA, "reachable", reachable)
+					logArgs := []any{
+						"from", serverA,
+						"expected", expectedReachable.Reachable,
+					}
+					if expectedReachable.Reachable {
+						logArgs = append(logArgs, "reason", expectedReachable.Reason)
+						if expectedReachable.Peering != "" {
+							logArgs = append(logArgs, "peering", expectedReachable.Peering)
+						}
+					}
+
+					slog.Debug("Checking external connectivity", logArgs...)
 
 					clientR, ok := sshs.Load(serverA)
 					if !ok {
@@ -1691,7 +1702,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 
 					// switching to 1.0.0.1 since the previously used target 8.8.8.8 was giving us issue
 					// when curling over virtual external peerings
-					if ce := checkCurl(ctx, opts, curls, serverA, client, "1.0.0.1", reachable); ce != nil {
+					if ce := checkCurl(ctx, opts, curls, serverA, client, "1.0.0.1", expectedReachable.Reachable); ce != nil {
 						return ce
 					}
 
@@ -1741,6 +1752,58 @@ const (
 	ReachabilityReasonSwitchPeering  ReachabilityReason = "switch-peering"
 	ReachabilityReasonGatewayPeering ReachabilityReason = "gateway-peering"
 )
+
+func IsExternalSubnetReachable(ctx context.Context, kube kclient.Reader, sourceServer, destSubnet string, checkGateway bool) (Reachability, error) {
+	switchPeeringReachable, err := apiutil.IsExternalSubnetReachable(ctx, kube, sourceServer, destSubnet)
+	if err != nil {
+		return Reachability{}, fmt.Errorf("checking if external subnet %s is reachable from server %s: %w", destSubnet, sourceServer, err)
+	}
+	if switchPeeringReachable {
+		return Reachability{
+			Reachable: true,
+			Reason:    ReachabilityReasonSwitchPeering,
+		}, nil
+	}
+
+	if !checkGateway {
+		return Reachability{}, nil
+	}
+
+	sourceSubnets, err := apiutil.GetAttachedSubnets(ctx, kube, sourceServer)
+	if err != nil {
+		return Reachability{}, fmt.Errorf("getting attached subnets for source server %s: %w", sourceServer, err)
+	}
+
+	externals := &vpcapi.ExternalList{}
+	if err := kube.List(ctx, externals); err != nil {
+		return Reachability{}, fmt.Errorf("listing externals: %w", err)
+	}
+	if len(externals.Items) == 0 {
+		// No externals defined, can't be reachable via gateway
+		return Reachability{}, nil
+	}
+	externalNames := make([]string, len(externals.Items))
+	for i, ext := range externals.Items {
+		externalNames[i] = ext.Name
+	}
+
+	for sourceSubnetName := range sourceSubnets {
+		if !strings.Contains(sourceSubnetName, "/") {
+			return Reachability{}, fmt.Errorf("source must be full VPC subnet name (<vpc-name>/<subnet-name>)")
+		}
+		sourceParts := strings.SplitN(sourceSubnetName, "/", 2)
+		sourceVPC, sourceSubnet := sourceParts[0], sourceParts[1]
+		for _, ext := range externalNames {
+			if r, err := IsSubnetReachableWithGatewayPeering(ctx, kube, sourceVPC, sourceSubnet, "ext."+ext, "external"); err != nil {
+				return Reachability{}, err
+			} else if r.Reachable {
+				return r, nil
+			}
+		}
+	}
+
+	return Reachability{}, nil
+}
 
 func IsServerReachable(ctx context.Context, kube kclient.Reader, sourceServer, destServer string, checkGateway bool) (Reachability, error) {
 	sourceSubnets, err := apiutil.GetAttachedSubnets(ctx, kube, sourceServer)
