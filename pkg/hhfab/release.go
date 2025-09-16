@@ -1649,7 +1649,8 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool,
 
 		return nil
 	})
-	time.Sleep(5 * time.Second)
+	slog.Debug("Waiting 1 minute...")
+	time.Sleep(1 * time.Minute)
 
 	// Ping the addresses from server1 which is in the static external VPC, expect success
 	if err := testCtx.pingStaticExternal(server1, "", true); err != nil {
@@ -1695,6 +1696,8 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool,
 	if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
 		return false, reverts, fmt.Errorf("waiting for switches to be ready: %w", err)
 	}
+	slog.Debug("Waiting 1 minute...")
+	time.Sleep(1 * time.Minute)
 
 	// Ping the addresses from server1, this should now fail
 	if err := testCtx.pingStaticExternal(server1, "", false); err != nil {
