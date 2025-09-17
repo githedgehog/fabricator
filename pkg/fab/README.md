@@ -179,3 +179,18 @@ unzip alloy-linux-amd64.zip
 mv alloy-linux-amd64 alloy
 oras push "ghcr.io/githedgehog/fabricator/alloy-bin:${ALLOY_VERSION}" alloy
 ```
+
+## Bash completion
+
+We need https://github.com/scop/bash-completion to be installed on the system. It's under GPL v2, we don't modify it by
+any means and so we publish the whole package as is and only taking needed files from it when building the installer
+with hhfab build.
+
+```bash
+export BASH_COMPLETION_VERSION="2.16.0"
+
+wget "https://github.com/scop/bash-completion/releases/download/${BASH_COMPLETION_VERSION}/bash-completion-${BASH_COMPLETION_VERSION}.tar.xz"
+tar xzf "bash-completion-${BASH_COMPLETION_VERSION}.tar.xz"
+mv bash-completion-${BASH_COMPLETION_VERSION} bash-completion
+oras push "ghcr.io/githedgehog/fabricator/bash-completion:v${BASH_COMPLETION_VERSION}" bash-completion
+```
