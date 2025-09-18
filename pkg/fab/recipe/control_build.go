@@ -18,6 +18,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/artificer"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/alloy"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/bashcompletion"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/certmanager"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/controlproxy"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/f8r"
@@ -142,6 +143,24 @@ func (b *ControlInstallBuilder) addPayload(ctx context.Context, slog *slog.Logge
 		},
 	}); err != nil {
 		return fmt.Errorf("downloading cert-manager: %w", err)
+	}
+
+	slog.Info("Adding bash-completion to installer", "control", b.Control.Name)
+	if err := b.Downloader.FromORAS(ctx, installDir, bashcompletion.BashCompletionRef, bashcompletion.Version(b.Fab), []artificer.ORASFile{
+		{
+			Name:   "bash-completion/bash_completion", // Source path in ORAS cache
+			Target: bashcompletion.BashCompletionFile, // Flatten to install dir root
+		},
+		{
+			Name:   "bash-completion/bash_completion.d/000_bash_completion_compat.bash", // Source path in ORAS cache
+			Target: bashcompletion.CompatFile,                                           // Flatten to install dir root
+		},
+		{
+			Name:   "bash-completion/COPYING",  // Source path in ORAS cache
+			Target: bashcompletion.LicenseFile, // Flatten to install dir root
+		},
+	}); err != nil {
+		return fmt.Errorf("downloading bash-completion: %w", err)
 	}
 
 	slog.Info("Adding config and wiring files to installer")

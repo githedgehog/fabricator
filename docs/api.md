@@ -670,6 +670,7 @@ _Appears in:_
 | `alloy` _[Version](#version)_ |  |  |  |
 | `controlProxy` _[Version](#version)_ |  |  |  |
 | `controlProxyChart` _[Version](#version)_ |  |  |  |
+| `bashCompletion` _[Version](#version)_ |  |  |  |
 
 
 #### RegistryConfig
