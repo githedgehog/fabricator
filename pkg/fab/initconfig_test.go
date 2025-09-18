@@ -388,6 +388,7 @@ func TestInitConfig(t *testing.T) {
 			f.Kind = ""
 			f.ResourceVersion = ""
 			f.Status = fabapi.FabricatorStatus{}
+			f.Spec.Config.Control.JoinToken = ""
 
 			require.NotNil(t, controls)
 

@@ -5,6 +5,7 @@ package fab
 
 import (
 	"context"
+	"crypto/rand"
 	_ "embed"
 	"fmt"
 	"log/slog"
@@ -50,6 +51,11 @@ func InitConfig(ctx context.Context, in InitConfigInput) ([]byte, error) {
 
 		in.DefaultPasswordHash = DevAdminPasswordHash
 		in.DefaultAuthorizedKeys = append(in.DefaultAuthorizedKeys, DevSSHKey)
+
+		if in.Gateway && in.JoinToken == "" {
+			in.JoinToken = rand.Text()
+			in.SaveJoinToken = true
+		}
 	}
 
 	if in.DefaultPasswordHash != "" && !strings.HasPrefix(in.DefaultPasswordHash, "$5$") {
