@@ -2487,134 +2487,113 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringNATTest(ctx context.Context) (bo
 
 // Test overlapping subnets with NAT - creates separate IPv4 namespace for true overlap
 func (testCtx *VPCPeeringTestCtx) gatewayPeeringOverlapNATTest(ctx context.Context) (bool, []RevertFunc, error) {
-	// Get all existing VPC attachments to find one we can temporarily borrow
-	vpcAttaches := &vpcapi.VPCAttachmentList{}
-	if err := testCtx.kube.List(ctx, vpcAttaches); err != nil {
-		return false, nil, fmt.Errorf("listing VPC attachments: %w", err)
-	}
-	if len(vpcAttaches.Items) < 2 {
-		return true, nil, fmt.Errorf("need at least 2 VPC attachments for overlapping NAT test") //nolint:goerr113
-	}
+	// Initialize reverts slice early
+	reverts := []RevertFunc{}
 
-	// Use the first VPC as our "existing" VPC and temporarily detach the last server
-	existingAttachment := &vpcAttaches.Items[0]
-	attachmentToReuse := &vpcAttaches.Items[len(vpcAttaches.Items)-1]
+	// Use server-02 and detach it from vpc-02
+	serverToDetach := "server-02"
+	attachmentToRemove := "server-02--mclag--leaf-01--leaf-02--vpc-02--subnet-01"
 
-	// Get the existing VPC
+	// Get vpc-01 (leave it in default namespace)
 	existingVPC := &vpcapi.VPC{}
-	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Name: existingAttachment.Spec.VPCName(), Namespace: kmetav1.NamespaceDefault}, existingVPC); err != nil {
-		return false, nil, fmt.Errorf("getting existing VPC: %w", err)
+	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Name: "vpc-01", Namespace: kmetav1.NamespaceDefault}, existingVPC); err != nil {
+		return false, reverts, fmt.Errorf("getting vpc-01: %w", err)
 	}
 
-	// Get subnet info for overlap
+	// Get vpc-01's subnet info for overlap
 	var existingSubnetCIDR, existingGateway string
 	for _, subnet := range existingVPC.Spec.Subnets {
-		existingSubnetCIDR = subnet.Subnet
+		existingSubnetCIDR = subnet.Subnet // This will be 10.0.1.0/24
 		existingGateway = subnet.Gateway
 
 		break
 	}
 
-	// Create separate IPv4 namespace for overlapping test
-	testIPNSName := "test-ovrlp" // Namespace names must be ≤11 chars
+	// Create separate IPv4 namespace for vpc-ovrlp
+	testIPNSName := "ns-overlap" // Different namespace for vpc-ovrlp
 	testIPNS := &vpcapi.IPv4Namespace{
 		ObjectMeta: kmetav1.ObjectMeta{
 			Name:      testIPNSName,
 			Namespace: kmetav1.NamespaceDefault,
 		},
 		Spec: vpcapi.IPv4NamespaceSpec{
-			Subnets: []string{"10.0.0.0/16"}, // Same range as default namespace
+			Subnets: []string{existingSubnetCIDR}, // Same subnet range as vpc-01
 		},
 	}
 
 	slog.Info("Creating test IPv4 namespace for overlapping subnets", "namespace", testIPNSName)
 	if err := testCtx.kube.Create(ctx, testIPNS); err != nil {
-		return false, nil, fmt.Errorf("creating test IPv4 namespace: %w", err)
+		return false, reverts, fmt.Errorf("creating test IPv4 namespace: %w", err)
 	}
-
-	// Get the connection we'll reuse
-	reusableConnection := &wiringapi.Connection{}
-	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Name: attachmentToReuse.Spec.Connection, Namespace: kmetav1.NamespaceDefault}, reusableConnection); err != nil {
-		return false, nil, fmt.Errorf("getting reusable connection: %w", err)
-	}
-
-	_, serverNames, _, _, _ := reusableConnection.Spec.Endpoints()
-	if len(serverNames) == 0 {
-		return false, nil, fmt.Errorf("no servers found in reusable connection") //nolint:goerr113
-	}
-	serverName := serverNames[0]
-
-	// Get the existing VPC's VLAN for server cleanup
-	originalVPC := &vpcapi.VPC{}
-	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Name: attachmentToReuse.Spec.VPCName(), Namespace: kmetav1.NamespaceDefault}, originalVPC); err != nil {
-		return false, nil, fmt.Errorf("getting original VPC: %w", err)
-	}
-	var originalVLAN uint16
-	originalSubnetName := attachmentToReuse.Spec.SubnetName()
-	if originalSubnet, ok := originalVPC.Spec.Subnets[originalSubnetName]; ok {
-		originalVLAN = originalSubnet.VLAN
-	}
-
-	// Get VLAN for new VPC
-	vlanNS := &wiringapi.VLANNamespace{}
-	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Name: "default", Namespace: kmetav1.NamespaceDefault}, vlanNS); err != nil {
-		return false, nil, fmt.Errorf("getting VLAN namespace: %w", err)
-	}
-
-	vlanIter := VLANsFrom(vlanNS.Spec.Ranges...)
-	vlans := make([]uint16, 0, 25)
-	for vlan := range vlanIter {
-		vlans = append(vlans, vlan)
-		if len(vlans) >= 25 {
-			break
+	reverts = append(reverts, func(ctx context.Context) error {
+		if err := kclient.IgnoreNotFound(testCtx.kube.Delete(ctx, testIPNS)); err != nil {
+			return fmt.Errorf("deleting test IPv4 namespace %s: %w", testIPNSName, err)
 		}
+
+		return nil
+	})
+
+	// Get the vpc-02 attachment to remove (server-02)
+	originalAttachment := &vpcapi.VPCAttachment{}
+	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Name: attachmentToRemove, Namespace: kmetav1.NamespaceDefault}, originalAttachment); err != nil {
+		return false, reverts, fmt.Errorf("getting attachment to remove: %w", err)
 	}
 
-	if len(vlans) < 21 {
-		return false, nil, fmt.Errorf("not enough VLANs available for overlapping test") //nolint:goerr113
-	}
-
-	newVLAN := vlans[20]      // Use an available VLAN
-	newVPCName := "vpc-ovrlp" // VPC names must be ≤11 chars because they map to Linux VRF interface names
-
-	// Calculate DHCP range within the existing subnet
+	// Calculate DHCP range within vpc-01's subnet (the overlapping subnet)
 	_, ipNet, err := net.ParseCIDR(existingSubnetCIDR)
 	if err != nil {
-		return false, nil, fmt.Errorf("parsing existing subnet CIDR: %w", err)
+		return false, reverts, fmt.Errorf("parsing existing subnet CIDR: %w", err)
 	}
 	baseIP := ipNet.IP.To4()
 	dhcpStart := fmt.Sprintf("%d.%d.%d.200", baseIP[0], baseIP[1], baseIP[2])
 	dhcpEnd := fmt.Sprintf("%d.%d.%d.254", baseIP[0], baseIP[1], baseIP[2])
 
-	// Temporarily delete the existing attachment
-	slog.Info("Temporarily detaching server for overlapping test", "server", serverName, "attachment", attachmentToReuse.Name)
-	originalAttachment := attachmentToReuse.DeepCopy() // Save for restoration
-	if err := testCtx.kube.Delete(ctx, attachmentToReuse); err != nil {
-		return false, nil, fmt.Errorf("deleting attachment to reuse: %w", err)
+	// Temporarily delete server-02's attachment to vpc-02
+	slog.Info("Temporarily detaching server for overlapping test", "server", serverToDetach, "attachment", attachmentToRemove)
+	if err := testCtx.kube.Delete(ctx, originalAttachment); err != nil {
+		return false, reverts, fmt.Errorf("deleting attachment to reuse: %w", err)
 	}
+
+	// Add restoration of original attachment to reverts
+	reverts = append(reverts, func(ctx context.Context) error {
+		restoredAttachment := &vpcapi.VPCAttachment{
+			ObjectMeta: kmetav1.ObjectMeta{
+				Name:      originalAttachment.Name,
+				Namespace: originalAttachment.Namespace,
+			},
+			Spec: originalAttachment.Spec,
+		}
+		if err := testCtx.kube.Create(ctx, restoredAttachment); err != nil {
+			return fmt.Errorf("restoring original attachment %s: %w", originalAttachment.Name, err)
+		}
+		slog.Info("Restored original attachment", "attachment", originalAttachment.Name)
+
+		return nil
+	})
 
 	// Wait for deletion to take effect
 	time.Sleep(5 * time.Second)
 
-	// Create new overlapping VPC in the separate IPv4 namespace
+	// Create new overlapping VPC with vpc-01's subnet CIDR in the separate namespace
+	newVPCName := "vpc-ovrlp" // VPC names must be ≤11 chars because they map to Linux VRF interface names
 	newVPC := &vpcapi.VPC{
 		ObjectMeta: kmetav1.ObjectMeta{
 			Name:      newVPCName,
 			Namespace: kmetav1.NamespaceDefault,
 		},
 		Spec: vpcapi.VPCSpec{
-			IPv4Namespace: testIPNSName, // Different IPv4 namespace allows overlap
+			IPv4Namespace: testIPNSName, // Different namespace from vpc-01 - allows overlap
 			VLANNamespace: "default",
 			Subnets: map[string]*vpcapi.VPCSubnet{
 				"subnet-01": {
-					Subnet:  existingSubnetCIDR, // Same subnet as existing VPC!
-					VLAN:    newVLAN,            // Different VLAN
-					Gateway: existingGateway,    // Same gateway IP
+					Subnet:  existingSubnetCIDR, // Same subnet as vpc-01! (10.0.1.0/24)
+					VLAN:    1020,               // Use a known available VLAN
+					Gateway: existingGateway,    // Same gateway IP as vpc-01
 					DHCP: vpcapi.VPCDHCP{
 						Enable: true,
 						Range: &vpcapi.VPCDHCPRange{
-							Start: dhcpStart, // Dynamic DHCP range within subnet
-							End:   dhcpEnd,   // Dynamic DHCP range within subnet
+							Start: dhcpStart, // 10.0.1.200 - overlapping with vpc-01's range
+							End:   dhcpEnd,   // 10.0.1.254
 						},
 					},
 				},
@@ -2622,142 +2601,91 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringOverlapNATTest(ctx context.Conte
 		},
 	}
 
-	slog.Info("Creating overlapping VPC for NAT test", "existing", existingVPC.Name, "new", newVPCName, "subnet", existingSubnetCIDR, "ipns", testIPNSName)
+	slog.Info("Creating overlapping VPC for NAT test", "existing", "vpc-01", "new", newVPCName, "subnet", existingSubnetCIDR, "ipns", testIPNSName)
 
 	_, err = CreateOrUpdateVpc(ctx, testCtx.kube, newVPC)
 	if err != nil {
-		return false, nil, fmt.Errorf("creating overlapping VPC %s: %w", newVPCName, err)
+		return false, reverts, fmt.Errorf("creating overlapping VPC %s: %w", newVPCName, err)
 	}
+	// Add cleanup for new VPC
+	reverts = append(reverts, func(ctx context.Context) error {
+		if err := kclient.IgnoreNotFound(testCtx.kube.Delete(ctx, newVPC)); err != nil {
+			return fmt.Errorf("deleting new VPC %s: %w", newVPCName, err)
+		}
 
-	// Create new VPC attachment for the borrowed server
-	newAttachName := fmt.Sprintf("%s--%s--subnet-01", reusableConnection.Name, newVPCName)
+		return nil
+	})
+
+	// Create new VPC attachment for server-02 to the overlapping VPC
+	newAttachName := "server-02--mclag--leaf-01--leaf-02--vpc-ovrlp--subnet-01"
 	newAttach := &vpcapi.VPCAttachment{
 		ObjectMeta: kmetav1.ObjectMeta{
 			Name:      newAttachName,
 			Namespace: kmetav1.NamespaceDefault,
 		},
 		Spec: vpcapi.VPCAttachmentSpec{
-			Connection: reusableConnection.Name,
+			Connection: "server-02--mclag--leaf-01--leaf-02",
 			Subnet:     fmt.Sprintf("%s/subnet-01", newVPCName),
 		},
 	}
 
 	if err := testCtx.kube.Create(ctx, newAttach); err != nil {
-		return false, nil, fmt.Errorf("creating new VPC attachment %s: %w", newAttachName, err)
+		return false, reverts, fmt.Errorf("creating new VPC attachment %s: %w", newAttachName, err)
 	}
+	// Add cleanup for new VPC attachment
+	reverts = append(reverts, func(ctx context.Context) error {
+		if err := kclient.IgnoreNotFound(testCtx.kube.Delete(ctx, newAttach)); err != nil {
+			return fmt.Errorf("deleting new VPC attachment %s: %w", newAttachName, err)
+		}
+
+		return nil
+	})
 
 	// Wait for network configuration
 	time.Sleep(10 * time.Second)
 
-	// Clean up and reconfigure the server for the new VPC
-	if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, serverName, "/opt/bin/hhnet cleanup"); err != nil {
-		return false, nil, fmt.Errorf("cleaning up server %s: %w", serverName, err)
+	// Clean up and reconfigure server-02 for the new overlapping VPC
+	if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, serverToDetach, "/opt/bin/hhnet cleanup"); err != nil {
+		return false, reverts, fmt.Errorf("cleaning up server %s: %w", serverToDetach, err)
 	}
 
-	// Configure networking on the server for the new VPC
-	netconfCmd, err := GetServerNetconfCmd(reusableConnection, newVLAN, testCtx.setupOpts.HashPolicy)
+	// Get connection for netconf command
+	reusableConnection := &wiringapi.Connection{}
+	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Name: "server-02--mclag--leaf-01--leaf-02", Namespace: kmetav1.NamespaceDefault}, reusableConnection); err != nil {
+		return false, reverts, fmt.Errorf("getting reusable connection: %w", err)
+	}
+
+	// Configure networking on server-02 for the new overlapping VPC with VLAN 1020
+	netconfCmd, err := GetServerNetconfCmd(reusableConnection, 1020, testCtx.setupOpts.HashPolicy)
 	if err != nil {
-		return false, nil, fmt.Errorf("getting netconf cmd for server %s: %w", serverName, err)
+		return false, reverts, fmt.Errorf("getting netconf cmd for server %s: %w", serverToDetach, err)
 	}
 
-	if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, serverName, fmt.Sprintf("/opt/bin/hhnet %s", netconfCmd)); err != nil {
-		return false, nil, fmt.Errorf("configuring server %s: %w", serverName, err)
+	if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, serverToDetach, fmt.Sprintf("/opt/bin/hhnet %s", netconfCmd)); err != nil {
+		return false, reverts, fmt.Errorf("configuring server %s: %w", serverToDetach, err)
 	}
-
-	// Find a server from the existing VPC to test against
-	existingConn := &wiringapi.Connection{}
-	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Name: existingAttachment.Spec.Connection, Namespace: kmetav1.NamespaceDefault}, existingConn); err != nil {
-		return false, nil, fmt.Errorf("getting existing connection: %w", err)
-	}
-
-	_, existingServers, _, _, _ := existingConn.Spec.Endpoints()
-	if len(existingServers) == 0 {
-		return false, nil, fmt.Errorf("no servers found for existing VPC") //nolint:goerr113
-	}
-	existingServerName := existingServers[0]
 
 	// Set up NAT gateway peering between the overlapping VPCs
 	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec, 0)
 	externalPeerings := make(map[string]*vpcapi.ExternalPeeringSpec, 0)
 	gwPeerings := make(map[string]*gwapi.PeeringSpec, 1)
 
-	// Use NAT ranges
-	existingVPCNATCIDR := []string{"192.168.11.0/24"}
-	newVPCNATCIDR := []string{"192.168.12.0/24"}
+	// Use NAT ranges to resolve the overlap
+	existingVPCNATCIDR := []string{"192.168.11.0/24"} // NAT range for vpc-01
+	newVPCNATCIDR := []string{"192.168.12.0/24"}      // NAT range for vpc-ovrlp
 
 	appendGwPeeringSpec(gwPeerings, existingVPC, newVPC, nil, nil, existingVPCNATCIDR, newVPCNATCIDR)
 
 	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, gwPeerings, true); err != nil {
-		return false, nil, fmt.Errorf("setting up NAT gateway peerings for overlapping subnets: %w", err)
+		return false, reverts, fmt.Errorf("setting up NAT gateway peerings for overlapping subnets: %w", err)
 	}
 
 	// Wait for NAT peering to take effect
 	time.Sleep(15 * time.Second)
 
-	// Test connectivity through NAT ranges
-	slog.Info("Testing NAT connectivity between overlapping VPCs", "existing", existingServerName, "new", serverName)
-
-	// Test that existing server can reach new server's NAT range
-	if err := pingFromFabricNode(testCtx.hhfabBin, testCtx.workDir, existingServerName, "192.168.12.200", "", true, 3); err != nil {
-		return false, nil, fmt.Errorf("existing server cannot reach new server via NAT: %w", err)
-	}
-
-	// Test that new server can reach existing server's NAT range
-	if err := pingFromFabricNode(testCtx.hhfabBin, testCtx.workDir, serverName, "192.168.11.2", "", true, 3); err != nil {
-		return false, nil, fmt.Errorf("new server cannot reach existing server via NAT: %w", err)
-	}
-
-	// Cleanup function that restores everything
-	reverts := []RevertFunc{
-		func(ctx context.Context) error {
-			// Clean up our test resources first
-			if err := kclient.IgnoreNotFound(testCtx.kube.Delete(ctx, newAttach)); err != nil {
-				return fmt.Errorf("deleting new VPC attachment %s: %w", newAttachName, err)
-			}
-			if err := kclient.IgnoreNotFound(testCtx.kube.Delete(ctx, newVPC)); err != nil {
-				return fmt.Errorf("deleting new VPC %s: %w", newVPCName, err)
-			}
-			if err := kclient.IgnoreNotFound(testCtx.kube.Delete(ctx, testIPNS)); err != nil {
-				return fmt.Errorf("deleting test IPv4 namespace %s: %w", testIPNSName, err)
-			}
-
-			// Wait for cleanup
-			time.Sleep(5 * time.Second)
-
-			// Restore the original attachment
-			restoredAttachment := &vpcapi.VPCAttachment{
-				ObjectMeta: kmetav1.ObjectMeta{
-					Name:      originalAttachment.Name,
-					Namespace: originalAttachment.Namespace,
-				},
-				Spec: originalAttachment.Spec,
-			}
-			if err := testCtx.kube.Create(ctx, restoredAttachment); err != nil {
-				return fmt.Errorf("restoring original attachment %s: %w", originalAttachment.Name, err)
-			}
-
-			// Wait for restoration
-			time.Sleep(5 * time.Second)
-
-			// Reconfigure the server back to its original state
-			if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, serverName, "/opt/bin/hhnet cleanup"); err != nil {
-				return fmt.Errorf("cleaning up server during restore: %w", err)
-			}
-
-			// Restore original network configuration
-			originalNetconfCmd, err := GetServerNetconfCmd(reusableConnection, originalVLAN, testCtx.setupOpts.HashPolicy)
-			if err != nil {
-				return fmt.Errorf("getting original netconf cmd: %w", err)
-			}
-
-			if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, serverName, fmt.Sprintf("/opt/bin/hhnet %s", originalNetconfCmd)); err != nil {
-				return fmt.Errorf("restoring server configuration: %w", err)
-			}
-
-			slog.Info("Restored original configuration", "server", serverName, "attachment", originalAttachment.Name)
-
-			return nil
-		},
+	// Test connectivity using the standard test framework
+	if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
+		return false, reverts, fmt.Errorf("testing NAT gateway peering connectivity: %w", err)
 	}
 
 	return false, reverts, nil
