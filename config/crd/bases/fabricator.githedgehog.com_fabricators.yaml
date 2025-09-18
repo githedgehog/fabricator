@@ -556,6 +556,8 @@ spec:
                         properties:
                           alloy:
                             type: string
+                          bashCompletion:
+                            type: string
                           certManager:
                             type: string
                           controlProxy:
@@ -773,6 +775,8 @@ spec:
                   platform:
                     properties:
                       alloy:
+                        type: string
+                      bashCompletion:
                         type: string
                       certManager:
                         type: string
