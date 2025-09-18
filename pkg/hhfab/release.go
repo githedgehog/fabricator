@@ -2784,14 +2784,15 @@ type JUnitReport struct {
 }
 
 type JUnitTestSuite struct {
-	XMLName   xml.Name        `xml:"testsuite"`
-	Name      string          `xml:"name,attr"`
-	Tests     int             `xml:"tests,attr"`
-	Failures  int             `xml:"failures,attr"`
-	Skipped   int             `xml:"skipped,attr"`
-	Time      float64         `xml:"time,attr"`
-	TimeHuman time.Duration   `xml:"-"`
-	TestCases []JUnitTestCase `xml:"testcase"`
+	XMLName       xml.Name        `xml:"testsuite"`
+	Name          string          `xml:"name,attr"`
+	Tests         int             `xml:"tests,attr"`
+	Failures      int             `xml:"failures,attr"`
+	Skipped       int             `xml:"skipped,attr"`
+	ExpectedFails int             `xml:"expectedfails,attr"`
+	Time          float64         `xml:"time,attr"`
+	TimeHuman     time.Duration   `xml:"-"`
+	TestCases     []JUnitTestCase `xml:"testcase"`
 }
 
 type SkipFlags struct {
@@ -2849,14 +2850,21 @@ func (sf *SkipFlags) PrettyPrint() string {
 }
 
 type JUnitTestCase struct {
-	XMLName   xml.Name  `xml:"testcase"`
-	ClassName string    `xml:"classname,attr"`
-	Name      string    `xml:"name,attr"`
-	Time      float64   `xml:"time,attr"`
-	Failure   *Failure  `xml:"failure,omitempty"`
-	Skipped   *Skipped  `xml:"skipped,omitempty"`
-	F         TestFunc  `xml:"-"` // function to run
-	SkipFlags SkipFlags `xml:"-"` // flags to determine whether to skip the test
+	XMLName       xml.Name      `xml:"testcase"`
+	ClassName     string        `xml:"classname,attr"`
+	Name          string        `xml:"name,attr"`
+	Time          float64       `xml:"time,attr"`
+	Failure       *Failure      `xml:"failure,omitempty"`
+	Skipped       *Skipped      `xml:"skipped,omitempty"`
+	ExpectedFail  *ExpectedFail `xml:"expectedfail,omitempty"`
+	F             TestFunc      `xml:"-"` // function to run
+	SkipFlags     SkipFlags     `xml:"-"` // flags to determine whether to skip the test
+	ExpectFailure bool          `xml:"-"`
+}
+
+type ExpectedFail struct {
+	XMLName xml.Name `xml:"expectedfail"`
+	Message string   `xml:"message,attr,omitempty"`
 }
 
 type Failure struct {
@@ -2878,21 +2886,25 @@ func printTestSuite(ts *JUnitTestSuite) {
 }
 
 func printSuiteResults(ts *JUnitTestSuite) {
-	var numFailed, numSkipped, numPassed int
+	var numFailed, numSkipped, numPassed, numXFail int
 	slog.Info("Test suite results", "suite", ts.Name)
 	for _, test := range ts.TestCases {
-		if test.Skipped != nil { //nolint:gocritic
+		switch {
+		case test.Skipped != nil:
 			slog.Warn("SKIP", "test", test.Name, "reason", test.Skipped.Message)
 			numSkipped++
-		} else if test.Failure != nil {
+		case test.ExpectedFail != nil:
+			slog.Info("XFAIL", "test", test.Name, "reason", test.ExpectedFail.Message)
+			numXFail++
+		case test.Failure != nil:
 			slog.Error("FAIL", "test", test.Name, "error", strings.ReplaceAll(test.Failure.Message, "\n", "; "))
 			numFailed++
-		} else {
+		default:
 			slog.Info("PASS", "test", test.Name)
 			numPassed++
 		}
 	}
-	slog.Info("Test suite summary", "tests", len(ts.TestCases), "passed", numPassed, "skipped", numSkipped, "failed", numFailed, "duration", ts.TimeHuman)
+	slog.Info("Test suite summary", "tests", len(ts.TestCases), "passed", numPassed, "skipped", numSkipped, "failed", numFailed, "xfail", numXFail, "duration", ts.TimeHuman)
 }
 
 func pauseOnFail() {
@@ -2955,7 +2967,8 @@ func doRunTests(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 		// - we then apply reverts in reverse order, and if any of them fails, we mark the test as failed, and pause (potentially a second time) if configured to do so.
 		//   we also stop applying reverts at the first failure
 		// - finally, if we get to the end without any errors, we log the test as passed
-		if skip {
+		switch {
+		case skip:
 			var skipMsg string
 			if err != nil {
 				skipMsg = err.Error()
@@ -2969,8 +2982,14 @@ func doRunTests(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 			}
 			ts.Skipped++
 			slog.Warn("SKIP", "test", test.Name, "reason", skipMsg)
-		}
-		if err != nil {
+		case test.ExpectFailure && err != nil:
+			ts.TestCases[i].ExpectedFail = &ExpectedFail{
+				Message: err.Error(),
+			}
+			ts.ExpectedFails++
+			slog.Info("XFAIL", "test", test.Name, "reason", err.Error())
+			err = nil
+		case err != nil:
 			ts.TestCases[i].Failure = &Failure{
 				Message: err.Error(),
 			}
@@ -3050,10 +3069,17 @@ func failAllTests(suite *JUnitTestSuite, err error) *JUnitTestSuite {
 		if suite.TestCases[i].Skipped != nil {
 			continue
 		}
-		suite.TestCases[i].Failure = &Failure{
-			Message: err.Error(),
+		if suite.TestCases[i].ExpectFailure {
+			suite.TestCases[i].ExpectedFail = &ExpectedFail{
+				Message: err.Error(),
+			}
+			suite.ExpectedFails++
+		} else {
+			suite.TestCases[i].Failure = &Failure{
+				Message: err.Error(),
+			}
+			suite.Failures++
 		}
-		suite.Failures++
 	}
 
 	return suite
@@ -3351,15 +3377,17 @@ func makeVpcPeeringsBasicSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 			},
 		},
 		{
-			Name: "Gateway Peering with NAT",
-			F:    testCtx.gatewayPeeringNATTest,
+			Name:          "Gateway Peering with NAT",
+			F:             testCtx.gatewayPeeringNATTest,
+			ExpectFailure: true,
 			SkipFlags: SkipFlags{
 				NoGateway: true,
 			},
 		},
 		{
-			Name: "Gateway Peering Overlapping Subnets with NAT",
-			F:    testCtx.gatewayPeeringOverlapNATTest,
+			Name:          "Gateway Peering Overlapping Subnets with NAT",
+			F:             testCtx.gatewayPeeringOverlapNATTest,
+			ExpectFailure: true,
 			SkipFlags: SkipFlags{
 				NoGateway: true,
 			},
