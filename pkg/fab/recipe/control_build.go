@@ -18,7 +18,6 @@ import (
 	"go.githedgehog.com/fabricator/pkg/artificer"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/alloy"
-	"go.githedgehog.com/fabricator/pkg/fab/comp/bashcompletion"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/certmanager"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/controlproxy"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/f8r"
@@ -146,18 +145,24 @@ func (b *ControlInstallBuilder) addPayload(ctx context.Context, slog *slog.Logge
 	}
 
 	slog.Info("Adding bash-completion to installer", "control", b.Control.Name)
-	if err := b.Downloader.FromORAS(ctx, installDir, bashcompletion.BashCompletionRef, bashcompletion.Version(b.Fab), []artificer.ORASFile{
+
+	bashCompletionDir := filepath.Join(installDir, "bash-completion")
+	if err := os.MkdirAll(bashCompletionDir, 0755); err != nil {
+		return fmt.Errorf("creating bash-completion directory: %w", err)
+	}
+
+	if err := b.Downloader.FromORAS(ctx, installDir, "fabricator/bash-completion", b.Fab.Status.Versions.Platform.BashCompletion, []artificer.ORASFile{
 		{
-			Name:   "bash-completion/bash_completion", // Source path in ORAS cache
-			Target: bashcompletion.BashCompletionFile, // Flatten to install dir root
+			Name:   "bash-completion/bash_completion",
+			Target: "bash-completion/bash_completion",
 		},
 		{
-			Name:   "bash-completion/bash_completion.d/000_bash_completion_compat.bash", // Source path in ORAS cache
-			Target: bashcompletion.CompatFile,                                           // Flatten to install dir root
+			Name:   "bash-completion/bash_completion.d/000_bash_completion_compat.bash",
+			Target: "bash-completion/000_bash_completion_compat.bash",
 		},
 		{
-			Name:   "bash-completion/COPYING",  // Source path in ORAS cache
-			Target: bashcompletion.LicenseFile, // Flatten to install dir root
+			Name:   "bash-completion/COPYING",
+			Target: "bash-completion/COPYING",
 		},
 	}); err != nil {
 		return fmt.Errorf("downloading bash-completion: %w", err)
