@@ -721,7 +721,7 @@ func Run(ctx context.Context) error {
 						Name:    "generate",
 						Aliases: []string{"gen"},
 						Usage:   "generate VLAB wiring diagram",
-						Flags:   flatten(defaultFlags, vlabWiringGenFlags),
+						Flags:   flatten(defaultFlags, vlabWiringGenFlags, []cli.Flag{yesFlag}),
 						Before:  before(false),
 						Action: func(_ *cli.Context) error {
 							builder := hhfab.VLABBuilder{
@@ -743,6 +743,7 @@ func Run(ctx context.Context) error {
 								ExtMCLAGConnCount:  uint8(wgExtMCLAGConns),  //nolint:gosec
 								ExtESLAGConnCount:  uint8(wgExtESLAGConns),  //nolint:gosec
 								ExtOrphanConnCount: uint8(wgExtOrphanConns), //nolint:gosec
+								YesFlag:            yes,
 							}
 
 							if err := hhfab.VLABGenerate(ctx, workDir, cacheDir, builder, hhfab.DefaultVLABGeneratedFile); err != nil {
