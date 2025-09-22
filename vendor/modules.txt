@@ -1692,7 +1692,7 @@ go.etcd.io/bbolt
 go.etcd.io/bbolt/errors
 go.etcd.io/bbolt/internal/common
 go.etcd.io/bbolt/internal/freelist
-# go.githedgehog.com/fabric v0.90.7
+# go.githedgehog.com/fabric v0.90.8
 ## explicit; go 1.25
 go.githedgehog.com/fabric/api/agent/v1beta1
 go.githedgehog.com/fabric/api/dhcp/v1beta1
