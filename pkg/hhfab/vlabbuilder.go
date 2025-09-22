@@ -5,6 +5,7 @@ package hhfab
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -40,6 +41,7 @@ type VLABBuilder struct {
 	ExtMCLAGConnCount  uint8  // number of external connections to generate from MCLAG leaves
 	ExtESLAGConnCount  uint8  // number of external connections to generate from ESLAG leaves
 	ExtOrphanConnCount uint8  // number of external connections to generate from orphan leaves
+	YesFlag            bool
 
 	data         *apiutil.Loader
 	ifaceTracker map[string]uint8 // next available interface ID for each switch
@@ -209,11 +211,21 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 
 	// warn about https://github.com/githedgehog/internal/issues/145 if there are multiple external connections
 	if b.ExtMCLAGConnCount+b.ExtESLAGConnCount+b.ExtOrphanConnCount > 1 {
-		slog.Warn("Multiple external connections are not supported if using virtual switches",
+		logMsg := "Multiple external connections are not supported if using virtual switches"
+		logArgs := []any{
 			"extMCLAGConnCount", b.ExtMCLAGConnCount,
 			"extESLAGConnCount", b.ExtESLAGConnCount,
 			"extOrphanConnCount", b.ExtOrphanConnCount,
-		)
+		}
+		if b.YesFlag {
+			slog.Warn(logMsg, logArgs...)
+			slog.Warn("Proceeding anyway due to --yes flag")
+		} else {
+			slog.Error(logMsg, logArgs...)
+			slog.Error("Use --yes to proceed anyway")
+
+			return errors.New(logMsg) //nolint:goerr113
+		}
 	}
 
 	slog.Info("Building VLAB wiring diagram", "fabricMode", fabricMode)
