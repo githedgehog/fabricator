@@ -28,19 +28,14 @@ jobs:
       - name: Run govulncheck
         env:
           CGO_ENABLED: "0"
-        run: govulncheck -tags containers_image_openpgp,containers_image_storage_stub -show verbose ./...
+        run: |
+          govulncheck -tags containers_image_openpgp,containers_image_storage_stub -show verbose ./... || echo "GOVULNCHECK_FAILED=true" >> $GITHUB_ENV
 
       - name: Generate SARIF file
+        if: always()
         env:
           CGO_ENABLED: "0"
-        if: always()
-        run: |
-          if [ $? -ne 0 ]; then
-            echo "Full scan failed, running mod-only scan"
-            govulncheck -tags containers_image_openpgp,containers_image_storage_stub -format=sarif -scan=gomod ./... > govulncheck.sarif
-          else
-            govulncheck -tags containers_image_openpgp,containers_image_storage_stub -format=sarif ./... > govulncheck.sarif
-          fi
+        run: govulncheck -tags containers_image_openpgp,containers_image_storage_stub -format=sarif ./... > govulncheck.sarif
 
       - name: Upload SARIF file
         if: always()
@@ -48,3 +43,7 @@ jobs:
         with:
           sarif_file: govulncheck.sarif
           category: govulncheck
+
+      - name: Fail if vulnerabilities found
+        if: env.GOVULNCHECK_FAILED == 'true'
+        run: exit 1
