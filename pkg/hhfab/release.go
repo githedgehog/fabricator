@@ -1366,16 +1366,10 @@ outer:
 
 func (testCtx *VPCPeeringTestCtx) pingStaticExternal(sourceNode string, sourceIP string, expected bool) error {
 	slog.Debug("Pinging static external next hop", "sourceNode", sourceNode, "next-hop", StaticExternalNH, "expected", expected)
-	if err := pingFromFabricNode(testCtx.hhfabBin, testCtx.workDir, sourceNode, StaticExternalNH, sourceIP, expected, 1); err != nil {
-		slog.Warn("Warm-up ping failed, continuing anyway")
-	}
 	if err := pingFromFabricNode(testCtx.hhfabBin, testCtx.workDir, sourceNode, StaticExternalNH, sourceIP, expected, 3); err != nil {
 		return fmt.Errorf("ping from %s to %s: %w", sourceNode, StaticExternalNH, err)
 	}
 	slog.Debug("Pinging static external dummy interface", "sourceNode", sourceNode, "dummy-interface", StaticExternalDummyIface, "expected", expected)
-	if err := pingFromFabricNode(testCtx.hhfabBin, testCtx.workDir, sourceNode, StaticExternalDummyIface, sourceIP, expected, 1); err != nil {
-		slog.Warn("Warm-up ping failed, continuing anyway")
-	}
 	if err := pingFromFabricNode(testCtx.hhfabBin, testCtx.workDir, sourceNode, StaticExternalDummyIface, sourceIP, expected, 3); err != nil {
 		return fmt.Errorf("ping from %s to %s: %w", sourceNode, StaticExternalDummyIface, err)
 	}
@@ -1723,6 +1717,14 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool,
 	// look for routes in the switch(es) before pinging, see https://github.com/githedgehog/fabricator/issues/932#issuecomment-3322976488
 	if err := testCtx.waitForRoutesInSwitches(ctx, routeCheckSwList, []string{StaticExternalNH, StaticExternalDummyIface}, "VrfV"+vpc1.Name, 3*time.Minute); err != nil {
 		return false, reverts, fmt.Errorf("waiting for routes in switch %s vrf VrfV%s: %w", switchName, vpc1.Name, err)
+	}
+
+	slog.Debug("Pinging from the switch attached to the static external to trigger ARP resolution", "switch", switchName, "vrf", "VrfV"+vpc1.Name, "source-ip", StaticExternalIP, "target", StaticExternalNH)
+	pingOut, pingErr := execShowCmd(testCtx.hhfabBin, testCtx.workDir, switchName, fmt.Sprintf("ping vrf VrfV%s -I %s %s -c 3 -W 1", vpc1.Name, StaticExternalIP, StaticExternalNH))
+	if pingErr != nil {
+		slog.Warn("Warm-up ping from switch failed, continuing anyway", "error", pingErr)
+	} else {
+		slog.Debug("Ping output from switch", "output", pingOut)
 	}
 
 	// Ping the addresses from server1 which is in the static external VPC, expect success
