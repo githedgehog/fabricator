@@ -846,47 +846,9 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 
 	slog.Debug("Waiting for ssh", "vm", vm.Name, "type", vm.Type)
 
-	ssh := sshutil.Config{
-		SSHKey: vlab.SSHKey,
-	}
-	if vm.Type == VMTypeServer || vm.Type == VMTypeControl || vm.Type == VMTypeExternal {
-		ssh.Remote = sshutil.Remote{
-			User: "core",
-			Host: "127.0.0.1",
-			Port: getSSHPort(vm.ID),
-		}
-	} else if vm.Type == VMTypeGateway {
-		nodeIP := ""
-		for _, node := range c.Nodes {
-			if node.Name == vm.Name {
-				prefix, err := node.Spec.Management.IP.Parse()
-				if err != nil {
-					return fmt.Errorf("parsing node %s management IP: %w", vm.Name, err)
-				}
-
-				nodeIP = prefix.Addr().String()
-			}
-		}
-
-		controlSSH := uint(0)
-		for _, vm := range vlab.VMs {
-			if vm.Type == VMTypeControl {
-				controlSSH = getSSHPort(vm.ID)
-
-				break
-			}
-		}
-
-		ssh.Remote = sshutil.Remote{
-			User: "core",
-			Host: nodeIP,
-			Port: 22,
-		}
-		ssh.Proxy = &sshutil.Remote{
-			User: "core",
-			Host: "127.0.0.1",
-			Port: controlSSH,
-		}
+	ssh, err := c.SSHVM(ctx, vlab, vm)
+	if err != nil {
+		return fmt.Errorf("creating ssh client: %w", err)
 	}
 
 	if err := ssh.Wait(ctx); err != nil {
