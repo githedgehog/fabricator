@@ -2246,8 +2246,9 @@ func (testCtx *VPCPeeringTestCtx) breakoutTest(ctx context.Context) (bool, []Rev
 
 			// pick a random non-default supported breakout mode
 			targetMode := ""
-			for mode := range breakoutProfile.Supported {
-				if mode != defaultBreakouts[unusedPort] {
+			for mode, breakout := range breakoutProfile.Supported {
+				// only use the breakout mode that has a single resulting port to avoid issues with max ports for the pipelines
+				if mode != defaultBreakouts[unusedPort] && len(breakout.Offsets) == 1 {
 					targetMode = mode
 
 					break
