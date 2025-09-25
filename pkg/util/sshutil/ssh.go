@@ -74,7 +74,9 @@ func (c *Config) Wait(ctx context.Context) error {
 		case <-ctx.Done():
 			return fmt.Errorf("cancelled: %w", ctx.Err())
 		case <-time.After(5 * time.Second):
-			outStr, _, err := c.Run("echo hedgehog", 30*time.Second)
+			runCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			outStr, _, err := c.Run(runCtx, "echo hedgehog")
+			cancel()
 			if err != nil {
 				continue
 			}
@@ -90,37 +92,25 @@ func (c *Config) Wait(ctx context.Context) error {
 	}
 }
 
-func (c *Config) Run(cmd string, timeout ...time.Duration) (string, string, error) {
+func (c *Config) Run(ctx context.Context, cmd string) (string, string, error) {
 	if err := c.init(); err != nil {
 		return "", "", fmt.Errorf("initializing ssh config: %w", err)
 	}
 
-	if len(timeout) == 0 {
-		timeout = append(timeout, 60*time.Second)
-	}
-
-	outStr, errStr, isTimeout, err := c.ssh.Run(cmd, timeout...)
+	outStr, errStr, err := runContext(ctx, c.ssh, cmd)
 	if err != nil {
-		if isTimeout {
-			return outStr, errStr, fmt.Errorf("timeout running command: %w", ErrTimeout)
-		}
-
 		return outStr, errStr, fmt.Errorf("running command: %w", err)
 	}
 
 	return outStr, errStr, nil
 }
 
-func (c *Config) StreamLog(ctx context.Context, cmd string, logName string, log func(msg string, args ...any), timeout ...time.Duration) error {
+func (c *Config) StreamLog(ctx context.Context, cmd string, logName string, log func(msg string, args ...any)) error {
 	if err := c.init(); err != nil {
 		return fmt.Errorf("initializing ssh config: %w", err)
 	}
 
-	if len(timeout) == 0 {
-		timeout = append(timeout, 60*time.Second)
-	}
-
-	stdoutCh, stderrCh, doneCh, errCh, err := c.ssh.Stream(cmd, timeout...)
+	stdoutCh, stderrCh, doneCh, errCh, err := streamContext(ctx, c.ssh, cmd)
 	if err != nil {
 		return fmt.Errorf("streaming command: %w", err)
 	}
@@ -129,9 +119,9 @@ func (c *Config) StreamLog(ctx context.Context, cmd string, logName string, log 
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("cancelled: %w", ctx.Err())
-		case isTimeout := <-doneCh:
-			if isTimeout {
-				return fmt.Errorf("timeout streaming command: %w", ErrTimeout)
+		case isCancelled := <-doneCh:
+			if isCancelled {
+				return fmt.Errorf("streaming command cancelled: %w", ErrTimeout)
 			}
 
 			return nil
