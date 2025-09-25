@@ -9,7 +9,6 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"io"
 	"sync"
 
 	"github.com/appleboy/easyssh-proxy"
@@ -50,11 +49,6 @@ func streamContext(ctx context.Context, ssh *easyssh.MakeConfig, command string)
 		return stdoutChan, stderrChan, errChan, fmt.Errorf("starting command: %w", err)
 	}
 
-	stdoutReader := io.MultiReader(outReader)
-	stderrReader := io.MultiReader(errReader)
-	stdoutScanner := bufio.NewScanner(stdoutReader)
-	stderrScanner := bufio.NewScanner(stderrReader)
-
 	go func() {
 		defer close(errChan)
 		defer client.Close()
@@ -65,6 +59,8 @@ func streamContext(ctx context.Context, ssh *easyssh.MakeConfig, command string)
 
 		resWg.Go(func() {
 			defer close(stdoutChan)
+
+			stdoutScanner := bufio.NewScanner(outReader)
 			for stdoutScanner.Scan() {
 				stdoutChan <- stdoutScanner.Text()
 			}
@@ -72,6 +68,8 @@ func streamContext(ctx context.Context, ssh *easyssh.MakeConfig, command string)
 
 		resWg.Go(func() {
 			defer close(stderrChan)
+
+			stderrScanner := bufio.NewScanner(errReader)
 			for stderrScanner.Scan() {
 				stderrChan <- stderrScanner.Text()
 			}
