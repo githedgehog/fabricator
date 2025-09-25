@@ -110,7 +110,7 @@ func (c *Config) StreamLog(ctx context.Context, cmd string, logName string, log 
 		return fmt.Errorf("initializing ssh config: %w", err)
 	}
 
-	stdoutCh, stderrCh, doneCh, errCh, err := streamContext(ctx, c.ssh, cmd)
+	stdoutCh, stderrCh, errCh, err := streamContext(ctx, c.ssh, cmd)
 	if err != nil {
 		return fmt.Errorf("streaming command: %w", err)
 	}
@@ -119,12 +119,6 @@ func (c *Config) StreamLog(ctx context.Context, cmd string, logName string, log 
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("cancelled: %w", ctx.Err())
-		case isCancelled := <-doneCh:
-			if isCancelled {
-				return fmt.Errorf("streaming command cancelled: %w", ErrTimeout)
-			}
-
-			return nil
 		case err := <-errCh:
 			if err != nil {
 				return fmt.Errorf("streaming command: %w", err)

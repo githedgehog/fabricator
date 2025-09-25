@@ -16,16 +16,15 @@ import (
 )
 
 // streamContext starts a command on a remote server using the provided SSH configuration and context.
-// It returns channels for stdout, stderr, completion status, and error notifications.
-func streamContext(ctx context.Context, ssh *easyssh.MakeConfig, command string) (<-chan string, <-chan string, <-chan bool, <-chan error, error) {
+// It returns channels for stdout, stderr, and error/completion notifications.
+func streamContext(ctx context.Context, ssh *easyssh.MakeConfig, command string) (<-chan string, <-chan string, <-chan error, error) {
 	stdoutChan := make(chan string)
 	stderrChan := make(chan string)
-	doneChan := make(chan bool)
 	errChan := make(chan error)
 
 	session, client, err := ssh.Connect()
 	if err != nil {
-		return stdoutChan, stderrChan, doneChan, errChan, fmt.Errorf("connecting: %w", err)
+		return stdoutChan, stderrChan, errChan, fmt.Errorf("connecting: %w", err)
 	}
 
 	outReader, err := session.StdoutPipe()
@@ -33,14 +32,14 @@ func streamContext(ctx context.Context, ssh *easyssh.MakeConfig, command string)
 		client.Close()
 		session.Close()
 
-		return stdoutChan, stderrChan, doneChan, errChan, fmt.Errorf("opening stdout pipe: %w", err)
+		return stdoutChan, stderrChan, errChan, fmt.Errorf("opening stdout pipe: %w", err)
 	}
 	errReader, err := session.StderrPipe()
 	if err != nil {
 		client.Close()
 		session.Close()
 
-		return stdoutChan, stderrChan, doneChan, errChan, fmt.Errorf("opening stderr pipe: %w", err)
+		return stdoutChan, stderrChan, errChan, fmt.Errorf("opening stderr pipe: %w", err)
 	}
 
 	err = session.Start(command)
@@ -48,7 +47,7 @@ func streamContext(ctx context.Context, ssh *easyssh.MakeConfig, command string)
 		client.Close()
 		session.Close()
 
-		return stdoutChan, stderrChan, doneChan, errChan, fmt.Errorf("starting command: %w", err)
+		return stdoutChan, stderrChan, errChan, fmt.Errorf("starting command: %w", err)
 	}
 
 	stdoutReader := io.MultiReader(outReader)
@@ -57,7 +56,6 @@ func streamContext(ctx context.Context, ssh *easyssh.MakeConfig, command string)
 	stderrScanner := bufio.NewScanner(stderrReader)
 
 	go func() {
-		defer close(doneChan)
 		defer close(errChan)
 		defer client.Close()
 		defer session.Close()
@@ -88,20 +86,18 @@ func streamContext(ctx context.Context, ssh *easyssh.MakeConfig, command string)
 		select {
 		case <-ctx.Done():
 			errChan <- fmt.Errorf("cancelled: %w", ctx.Err())
-			doneChan <- false
 		case <-res:
 			errChan <- session.Wait()
-			doneChan <- true
 		}
 	}()
 
-	return stdoutChan, stderrChan, doneChan, errChan, nil
+	return stdoutChan, stderrChan, errChan, nil
 }
 
 // runContext starts a command on a remote server using the provided SSH configuration and context.
 // It returns the concatenated output and error strings, along with any errors encountered.
 func runContext(ctx context.Context, ssh *easyssh.MakeConfig, command string) (string, string, error) { //
-	stdoutChan, stderrChan, doneChan, errChan, err := streamContext(ctx, ssh, command)
+	stdoutChan, stderrChan, errChan, err := streamContext(ctx, ssh, command)
 	if err != nil {
 		return "", "", err
 	}
@@ -110,7 +106,7 @@ func runContext(ctx context.Context, ssh *easyssh.MakeConfig, command string) (s
 loop:
 	for {
 		select {
-		case <-doneChan:
+		case err = <-errChan:
 			break loop
 		case outline, ok := <-stdoutChan:
 			if !ok {
@@ -126,9 +122,8 @@ loop:
 			if errline != "" {
 				errStr += errline + "\n"
 			}
-		case err = <-errChan:
 		}
 	}
-	// return the concatenation of all signals from the output channel
+
 	return outStr, errStr, err
 }
