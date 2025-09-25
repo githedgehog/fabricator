@@ -42,7 +42,7 @@ require (
 	github.com/urfave/cli/v2 v2.27.7
 	github.com/vbauerster/mpb/v8 v8.10.2
 	github.com/vishvananda/netlink v1.3.1
-	go.githedgehog.com/fabric v0.90.8
+	go.githedgehog.com/fabric v0.91.0
 	go.githedgehog.com/gateway v0.19.5
 	go.githedgehog.com/libmeta v0.2.4
 	golang.org/x/crypto v0.42.0
@@ -259,7 +259,7 @@ require (
 	github.com/nwaples/rardecode/v2 v2.1.1 // indirect
 	github.com/olekukonko/errors v1.1.0 // indirect
 	github.com/olekukonko/ll v0.0.9 // indirect
-	github.com/olekukonko/tablewriter v1.0.9 // indirect
+	github.com/olekukonko/tablewriter v1.1.0 // indirect
 	github.com/openconfig/gnmi v0.14.1 // indirect
 	github.com/openconfig/gnmic v0.32.0 // indirect
 	github.com/openconfig/goyang v1.6.2 // indirect
