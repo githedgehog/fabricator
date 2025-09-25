@@ -855,7 +855,7 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 		return fmt.Errorf("waiting for ssh: %w", err)
 	}
 
-	out, _, err := ssh.Run("hostname")
+	out, _, err := ssh.Run(ctx, "hostname")
 	if err != nil {
 		return fmt.Errorf("checking hostname: %w", err)
 	}
@@ -889,7 +889,7 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 			return fmt.Errorf("writing hhnet: %w", err)
 		}
 
-		if _, _, err := ssh.Run("bash -c 'sudo mv /tmp/hhnet /opt/bin/hhnet && chmod +x /opt/bin/hhnet'", 7*time.Minute); err != nil {
+		if _, _, err := ssh.Run(ctx, "bash -c 'sudo mv /tmp/hhnet /opt/bin/hhnet && chmod +x /opt/bin/hhnet'"); err != nil {
 			return fmt.Errorf("installing hhnet: %w", err)
 		}
 
@@ -904,11 +904,11 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 			return fmt.Errorf("uploading toolbox image: %w", err)
 		}
 
-		if _, _, err := ssh.Run(fmt.Sprintf("bash -c 'sudo ctr image import %s'", toolboxPath), 3*time.Minute); err != nil {
+		if _, _, err := ssh.Run(ctx, fmt.Sprintf("bash -c 'sudo ctr image import %s'", toolboxPath)); err != nil {
 			return fmt.Errorf("loading toolbox into containerd: %w", err)
 		}
 
-		if _, _, err := ssh.Run(fmt.Sprintf("bash -c 'sudo docker load -i %s'", toolboxPath), 3*time.Minute); err != nil {
+		if _, _, err := ssh.Run(ctx, fmt.Sprintf("bash -c 'sudo docker load -i %s'", toolboxPath)); err != nil {
 			return fmt.Errorf("loading toolbox into docker: %w", err)
 		}
 
@@ -916,7 +916,7 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 			return fmt.Errorf("removing toolbox image: %w", err)
 		}
 
-		if _, _, err := ssh.Run("bash -c 'toolbox hostname'"); err != nil {
+		if _, _, err := ssh.Run(ctx, "bash -c 'toolbox hostname'"); err != nil {
 			return fmt.Errorf("trying toolbox: %w", err)
 		}
 	} else if vm.Type == VMTypeControl || vm.Type == VMTypeGateway {
@@ -941,7 +941,7 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 				}
 				fullName := recipeType + recipe.Separator + vm.Name
 
-				if out, _, err := ssh.Run(fmt.Sprintf("bash -c 'rm -rf %s*'", fullName+recipe.Separator)); err != nil {
+				if out, _, err := ssh.Run(ctx, fmt.Sprintf("bash -c 'rm -rf %s*'", fullName+recipe.Separator)); err != nil {
 					return fmt.Errorf("removing previous installer: %w: %s", err, out)
 				}
 
@@ -952,7 +952,7 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 					return fmt.Errorf("uploading installer: %w", err)
 				}
 
-				if out, _, err := ssh.Run(fmt.Sprintf("bash -c 'tar xzf %s'", remote), 5*time.Minute); err != nil {
+				if out, _, err := ssh.Run(ctx, fmt.Sprintf("bash -c 'tar xzf %s'", remote)); err != nil {
 					return fmt.Errorf("extracting installer: %w: %s", err, out)
 				}
 
@@ -967,7 +967,7 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 				if slog.Default().Enabled(ctx, slog.LevelDebug) {
 					installCmd += " -v"
 				}
-				if err := ssh.StreamLog(ctx, installCmd, mode+"("+vm.Name+")", slog.Info, 30*time.Minute); err != nil {
+				if err := ssh.StreamLog(ctx, installCmd, mode+"("+vm.Name+")", slog.Info); err != nil {
 					return fmt.Errorf("running node %s: %w", mode, err)
 				}
 				slog.Info("Node "+mode+" completed", "vm", vm.Name, "type", vm.Type)
@@ -980,7 +980,7 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 
 			if slog.Default().Enabled(ctx, slog.LevelInfo) {
 				go func() {
-					if err := ssh.StreamLog(ctx, "journalctl -n 100 -fu hhfab-install.service", "install("+vm.Name+")", slog.Info, 30*time.Minute); err != nil {
+					if err := ssh.StreamLog(ctx, "journalctl -n 100 -fu hhfab-install.service", "install("+vm.Name+")", slog.Info); err != nil {
 						if !errors.Is(err, context.Canceled) {
 							slog.Debug("Journalctl for installer exited (not an error)", "vm", vm.Name, "type", vm.Type, "reason", err)
 						}
@@ -1073,7 +1073,7 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 			}
 
 			cmd := "PATH=/opt/bin kubectl hhfab support dump -yv"
-			if err := ssh.StreamLog(ctx, cmd, "sdump", slog.Debug, 1*time.Minute); err != nil {
+			if err := ssh.StreamLog(ctx, cmd, "sdump", slog.Debug); err != nil {
 				slog.Warn("Failed to support dump", "vm", vm.Name, "type", vm.Type, "err", err)
 
 				return fmt.Errorf("dumping support info: %w", err)
