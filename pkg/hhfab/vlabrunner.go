@@ -687,7 +687,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						return fmt.Errorf("inspecting: %w", err)
 					}
 				case OnReadyReleaseTest:
-					if err := c.ReleaseTest(ctx, ReleaseTestOpts{
+					if err := c.ReleaseTest(ctx, vlab, ReleaseTestOpts{
 						ResultsFile: "release-test.xml",
 						HashPolicy:  HashPolicyL2And3,
 						VPCMode:     opts.VPCMode,

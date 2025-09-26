@@ -15,14 +15,12 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/melbahja/goph"
 	"github.com/samber/lo"
 	agentapi "go.githedgehog.com/fabric/api/agent/v1beta1"
 	"go.githedgehog.com/fabric/api/meta"
@@ -34,9 +32,9 @@ import (
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
+	"go.githedgehog.com/fabricator/pkg/util/sshutil"
 	gwapi "go.githedgehog.com/gateway/api/gateway/v1alpha1"
 	gwintapi "go.githedgehog.com/gateway/api/gwint/v1alpha1"
-	"golang.org/x/crypto/ssh"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 	coreapi "k8s.io/api/core/v1"
@@ -446,14 +444,13 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		"cleanup", opts.ForceCleanup,
 	)
 
-	sshPorts := map[string]uint{}
+	sshConfigs := map[string]*sshutil.Config{}
 	for _, vm := range vlab.VMs {
-		sshPorts[vm.Name] = getSSHPort(vm.ID)
-	}
-
-	sshAuth, err := goph.RawKey(vlab.SSHKey, "")
-	if err != nil {
-		return fmt.Errorf("getting ssh auth: %w", err)
+		if sshCfg, err := c.SSHVM(ctx, vlab, vm); err != nil {
+			return fmt.Errorf("getting ssh config for vm %q: %w", vm.Name, err)
+		} else {
+			sshConfigs[vm.Name] = sshCfg
+		}
 	}
 
 	cacheCancel, kube, err := getKubeClientWithCache(ctx, c.WorkDir)
@@ -760,48 +757,35 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 			defer cancel()
 
 			if err := func() error {
-				sshPort, ok := sshPorts[server.Name]
+				sshCfg, ok := sshConfigs[server.Name]
 				if !ok {
-					return fmt.Errorf("missing ssh port for %q", server.Name)
+					return fmt.Errorf("no ssh config for server %q", server.Name)
 				}
 
-				client, err := goph.NewConn(&goph.Config{
-					User:     "core",
-					Addr:     "127.0.0.1",
-					Port:     sshPort,
-					Auth:     sshAuth,
-					Timeout:  10 * time.Second,
-					Callback: ssh.InsecureIgnoreHostKey(), //nolint:gosec
-				})
+				stdout, stderr, err := sshCfg.Run(ctx, "toolbox -q hostname")
 				if err != nil {
-					return fmt.Errorf("connecting to %q: %w", server.Name, err)
+					return fmt.Errorf("running toolbox hostname: %w: %s", err, stderr)
 				}
-				defer client.Close()
-
-				out, err := client.RunContext(ctx, "toolbox -q hostname")
-				if err != nil {
-					return fmt.Errorf("running toolbox hostname: %w: %s", err, string(out))
-				}
-				hostname := strings.TrimSpace(string(out))
+				hostname := strings.TrimSpace(stdout)
 				if hostname != server.Name {
 					return fmt.Errorf("unexpected hostname %q, expected %q", hostname, server.Name)
 				}
 
 				slog.Debug("Verified", "server", server.Name)
 
-				out, err = client.RunContext(ctx, "/opt/bin/hhnet cleanup")
+				_, stderr, err = sshCfg.Run(ctx, "/opt/bin/hhnet cleanup")
 				if err != nil {
-					return fmt.Errorf("running hhnet cleanup: %w: out: %s", err, string(out))
+					return fmt.Errorf("running hhnet cleanup: %w: out: %s", err, stderr)
 				}
 
-				out, err = client.RunContext(ctx, "/opt/bin/hhnet "+netconfs[server.Name])
+				stdout, stderr, err = sshCfg.Run(ctx, "/opt/bin/hhnet "+netconfs[server.Name])
 				if err != nil {
-					return fmt.Errorf("running hhnet %q: %w: out: %s", netconfs[server.Name], err, string(out))
+					return fmt.Errorf("running hhnet %q: %w: out: %s", netconfs[server.Name], err, stderr)
 				}
 
-				prefix, err := netip.ParsePrefix(strings.TrimSpace(string(out)))
+				prefix, err := netip.ParsePrefix(strings.TrimSpace(stdout))
 				if err != nil {
-					return fmt.Errorf("parsing acquired address %q: %w", string(out), err)
+					return fmt.Errorf("parsing acquired address %q: %w", stdout, err)
 				}
 
 				expectedSubnet := expectedSubnets[server.Name]
@@ -1395,14 +1379,13 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 
 	slog.Info("Testing server to server and server to external connectivity")
 
-	sshPorts := map[string]uint{}
+	sshConfigs := map[string]*sshutil.Config{}
 	for _, vm := range vlab.VMs {
-		sshPorts[vm.Name] = getSSHPort(vm.ID)
-	}
-
-	sshAuth, err := goph.RawKey(vlab.SSHKey, "")
-	if err != nil {
-		return fmt.Errorf("getting ssh auth: %w", err)
+		if sshCfg, err := c.SSHVM(ctx, vlab, vm); err != nil {
+			return fmt.Errorf("getting ssh config for vm %q: %w", vm.Name, err)
+		} else {
+			sshConfigs[vm.Name] = sshCfg
+		}
 	}
 
 	cacheCancel, kube, err := getKubeClientWithCache(ctx, c.WorkDir)
@@ -1482,15 +1465,6 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 
 	ips := sync.Map{}
 	sshs := sync.Map{}
-	defer func() {
-		sshs.Range(func(key, value any) bool {
-			if err := value.(*goph.Client).Close(); err != nil {
-				slog.Warn("Closing ssh client", "err", err)
-			}
-
-			return true
-		})
-	}()
 
 	g := &errgroup.Group{}
 	for server := range serverIDs {
@@ -1499,32 +1473,20 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 			defer cancel()
 
 			if err := func() error {
-				sshPort, ok := sshPorts[server]
+				sshConfig, ok := sshConfigs[server]
 				if !ok {
-					return fmt.Errorf("missing ssh port for %q", server)
+					return fmt.Errorf("missing ssh config for %q", server)
 				}
+				sshs.Store(server, sshConfig)
 
-				client, err := goph.NewConn(&goph.Config{
-					User:     "core",
-					Addr:     "127.0.0.1",
-					Port:     sshPort,
-					Auth:     sshAuth,
-					Timeout:  10 * time.Second,
-					Callback: ssh.InsecureIgnoreHostKey(), //nolint:gosec
-				})
+				stdout, stderr, err := sshConfig.Run(ctx, "ip -o -4 addr show | awk '{print $2, $4}'")
 				if err != nil {
-					return fmt.Errorf("connecting to %q: %w", server, err)
-				}
-				sshs.Store(server, client)
-
-				out, err := client.RunContext(ctx, "ip -o -4 addr show | awk '{print $2, $4}'")
-				if err != nil {
-					return fmt.Errorf("running ip addr show: %w: out: %s", err, string(out))
+					return fmt.Errorf("running ip addr show: %w: %s", err, stderr)
 				}
 
 				found := false
-				lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-				for _, line := range lines {
+				lines := strings.SplitSeq(strings.TrimSpace(stdout), "\n")
+				for line := range lines {
 					fields := strings.Fields(line)
 					if len(fields) != 2 {
 						return fmt.Errorf("unexpected ip addr line %q", line)
@@ -1550,7 +1512,9 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 				}
 
 				if !found {
-					return fmt.Errorf("no ip addr found")
+					slog.Debug("No IP addr found", "server", server, "stdout", stdout, "stderr", stderr)
+
+					return fmt.Errorf("no IP addr found")
 				}
 
 				return nil
@@ -1630,15 +1594,15 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 						if !ok {
 							return fmt.Errorf("missing ssh client for %q", serverA)
 						}
-						clientA := clientAR.(*goph.Client)
+						clientA := clientAR.(*sshutil.Config)
 
 						clientBR, ok := sshs.Load(serverB)
 						if !ok {
 							return fmt.Errorf("missing ssh client for %q", serverB)
 						}
-						clientB := clientBR.(*goph.Client)
+						clientB := clientBR.(*sshutil.Config)
 
-						if pe := checkPing(ctx, opts, pings, serverA, serverB, clientA, ipB.Addr(), expectedReachable.Reachable); pe != nil {
+						if pe := checkPing(ctx, opts.PingsCount, pings, serverA, serverB, clientA, ipB.Addr(), nil, expectedReachable.Reachable); pe != nil {
 							return pe
 						}
 
@@ -1675,7 +1639,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 
 						return ce
 					}
-					client := clientR.(*goph.Client)
+					client := clientR.(*sshutil.Config)
 
 					// switching to 1.0.0.1 since the previously used target 8.8.8.8 was giving us issue
 					// when curling over virtual external peerings
@@ -1987,21 +1951,20 @@ func isVPCSubnetPresentInPeering(peering *gwapi.PeeringEntry, vpc gwapi.VPCInfo,
 	return false, nil
 }
 
-func retrySSHCmd(ctx context.Context, client *goph.Client, cmd string, target string) ([]byte, error) {
-	if client == nil {
-		return nil, fmt.Errorf("ssh client is nil")
+func retrySSHCmd(ctx context.Context, ssh *sshutil.Config, cmd string, target string) (string, string, error) {
+	var stdout, stderr string
+	if ssh == nil {
+		return stdout, stderr, fmt.Errorf("ssh client is nil")
 	}
 	maxRetries := 3
-	var out []byte
 	var err error
-	for retries := 0; retries < maxRetries; retries++ {
-		out, err = client.RunContext(ctx, cmd)
+	for retries := range maxRetries {
+		stdout, stderr, err = ssh.Run(ctx, cmd)
 		if err == nil {
 			break
 		}
-		// it doesn't look like the goph client defines error types to check with errors.Is
-		if strings.Contains(err.Error(), "ssh:") {
-			slog.Debug("cannot ssh to run remote command", "cmd", cmd, "remote target", target, "retry", retries+1, "error", err, "output", string(out))
+		if strings.Contains(err.Error(), "ssh:") || strings.Contains(stderr, "ssh:") {
+			slog.Debug("cannot ssh to run remote command", "cmd", cmd, "remote target", target, "retry", retries+1, "error", err, "stderr", stderr)
 			if retries < maxRetries-1 {
 				// random wait in [1, 5] seconds range
 				waitTime := time.Duration(1000+rand.IntN(4000)) * time.Millisecond
@@ -2010,18 +1973,18 @@ func retrySSHCmd(ctx context.Context, client *goph.Client, cmd string, target st
 
 				continue
 			} else {
-				return out, fmt.Errorf("ssh for remote command failed after %d retries: %w: %s", maxRetries, err, string(out))
+				return stdout, stderr, fmt.Errorf("ssh for remote command failed after %d retries: %w: %s", maxRetries, err, stderr)
 			}
 		} else {
-			return out, err
+			return stdout, stderr, err
 		}
 	}
 
-	return out, nil
+	return stdout, stderr, nil
 }
 
-func checkPing(ctx context.Context, opts TestConnectivityOpts, pings *semaphore.Weighted, from, to string, fromSSH *goph.Client, toIP netip.Addr, expected bool) *PingError {
-	if opts.PingsCount <= 0 {
+func checkPing(ctx context.Context, pingCount int, semaphore *semaphore.Weighted, from, to string, fromSSH *sshutil.Config, toIP netip.Addr, sourceIP *netip.Addr, expected bool) *PingError {
+	if pingCount <= 0 {
 		return nil
 	}
 	pe := &PingError{
@@ -2030,29 +1993,39 @@ func checkPing(ctx context.Context, opts TestConnectivityOpts, pings *semaphore.
 		Expected:    expected,
 	}
 
-	if err := pings.Acquire(ctx, 1); err != nil {
-		pe.Msg = fmt.Sprintf("acquiring ping semaphore: %s", err)
+	if semaphore != nil {
+		if err := semaphore.Acquire(ctx, 1); err != nil {
+			pe.Msg = fmt.Sprintf("acquiring ping semaphore: %s", err)
 
-		return pe
+			return pe
+		}
+		defer semaphore.Release(1)
 	}
-	defer pings.Release(1)
 
-	ctx, cancel := context.WithTimeout(ctx, time.Duration(opts.PingsCount+30)*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(pingCount+30)*time.Second)
 	defer cancel()
 
-	slog.Debug("Running ping", "from", from, "to", toIP.String())
+	slog.Debug("Running ping", "from", from, "to", toIP.String(), "sourceIP", sourceIP, "expected", expected)
+	cmd := "ping -c 1 -W 1"
+	if sourceIP != nil {
+		cmd += " -I " + sourceIP.String()
+	}
+	cmd += " " + toIP.String()
 
-	if out, err := retrySSHCmd(ctx, fromSSH, fmt.Sprintf("ping -c 1 -W 1 %s", toIP.String()), from); err != nil && expected {
-		slog.Warn("Warm-up ping failed, continuing anyway", "err", err, "out", string(out))
+	if stdout, stderr, err := retrySSHCmd(ctx, fromSSH, cmd, from); err != nil && expected {
+		slog.Warn("Warm-up ping failed, continuing anyway", "err", err, "stdout", stdout, "stderr", stderr)
 	}
 
-	cmd := fmt.Sprintf("ping -i 0.5 -c %d -W 1 %s", opts.PingsCount, toIP.String())
-	outR, err := retrySSHCmd(ctx, fromSSH, cmd, from)
-	out := strings.TrimSpace(string(outR))
-	pe.CmdOutput = out
+	cmd = fmt.Sprintf("ping -i 0.5 -c %d -W 1", pingCount)
+	if sourceIP != nil {
+		cmd += " -I " + sourceIP.String()
+	}
+	cmd += " " + toIP.String()
+	stdout, stderr, err := retrySSHCmd(ctx, fromSSH, cmd, from)
+	pe.CmdOutput = stdout
 
 	// parse ping output and extract sent and received packets
-	for l := range strings.SplitSeq(out, "\n") {
+	for l := range strings.SplitSeq(stdout, "\n") {
 		if strings.Contains(l, "packets transmitted") && strings.Contains(l, "received") {
 			parts := strings.Split(l, ", ")
 			if len(parts) >= 2 {
@@ -2079,7 +2052,7 @@ func checkPing(ctx context.Context, opts TestConnectivityOpts, pings *semaphore.
 	pingFail := err != nil && pe.Received == 0
 
 	slog.Debug("Ping result", "from", from, "to", to,
-		"expected", expected, "ok", pingOk, "fail", pingFail, "err", err, "out", out)
+		"expected", expected, "ok", pingOk, "fail", pingFail, "err", err, "stdout", stdout, "stderr", stderr)
 
 	if pingOk == pingFail {
 		if err != nil {
@@ -2107,7 +2080,7 @@ func checkPing(ctx context.Context, opts TestConnectivityOpts, pings *semaphore.
 	return nil
 }
 
-func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphore.Weighted, from, to string, fromSSH, toSSH *goph.Client, toIP netip.Addr, reachability Reachability) *IperfError {
+func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphore.Weighted, from, to string, fromSSH, toSSH *sshutil.Config, toIP netip.Addr, reachability Reachability) *IperfError {
 	if opts.IPerfsSeconds <= 0 || !reachability.Reachable {
 		return nil
 	}
@@ -2139,25 +2112,17 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphor
 
 	g.Go(func() error {
 		cmd := fmt.Sprintf("toolbox -E LD_PRELOAD=/lib/x86_64-linux-gnu/libgcc_s.so.1 -q timeout %d iperf3 -s -1 -J", opts.IPerfsSeconds+25)
-		outPre, err := retrySSHCmd(ctx, toSSH, cmd, to)
-		// remove spurious perror messages from iperf3 which will break json parsing
-		re, reErr := regexp.Compile("(?m)([\r\n]^.*iperf_.*$)|(^.*iperf_.*$[\r\n])")
-		if reErr != nil {
-			ie.ServerMsg = fmt.Sprintf("compiling iperf3 output cleanup regexp: %s", reErr)
+		stdout, stderr, err := retrySSHCmd(ctx, toSSH, cmd, to)
 
-			return errors.New(ie.ServerMsg)
-		}
-		outR := re.ReplaceAll(outPre, nil)
-
-		report, parseErr := parseIPerf3Report(outR)
+		report, parseErr := parseIPerf3Report([]byte(stdout))
 		if err != nil {
 			if parseErr == nil && report.Error != "" {
 				ie.ServerMsg = report.Error
 
 				return fmt.Errorf("running iperf3 server: %w: %s", err, report.Error)
 			}
-			slog.Warn("iperf3 server error, but could not retrieve error message from command output", "parseErr", parseErr, "output", string(outR))
-			ie.ServerMsg = err.Error()
+			slog.Warn("iperf3 server error, but could not retrieve error message from command output", "parseErr", parseErr, "stdout", stdout, "stderr", stderr)
+			ie.ServerMsg = fmt.Sprintf("%s: %s", err, stderr)
 
 			return fmt.Errorf("running iperf3 server: %w", err)
 		}
@@ -2187,15 +2152,15 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphor
 		if opts.IPerfsTOS > 0 {
 			cmd += fmt.Sprintf(" --tos %d", opts.IPerfsTOS)
 		}
-		outR, err := retrySSHCmd(ctx, fromSSH, cmd, from)
-		report, parseErr := parseIPerf3Report(outR)
+		stdout, stderr, err := retrySSHCmd(ctx, fromSSH, cmd, from)
+		report, parseErr := parseIPerf3Report([]byte(stdout))
 		if err != nil {
 			if parseErr == nil && report.Error != "" {
 				ie.ClientMsg = report.Error
 
 				return fmt.Errorf("running iperf3 client: %w: %s", err, report.Error)
 			}
-			ie.ClientMsg = err.Error()
+			ie.ClientMsg = fmt.Sprintf("%s: %s", err, stderr)
 
 			return fmt.Errorf("running iperf3 client: %w", err)
 		}
@@ -2237,7 +2202,7 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphor
 	return nil
 }
 
-func checkCurl(ctx context.Context, opts TestConnectivityOpts, curls *semaphore.Weighted, from string, fromSSH *goph.Client, toIP string, expected bool) *CurlError {
+func checkCurl(ctx context.Context, opts TestConnectivityOpts, curls *semaphore.Weighted, from string, fromSSH *sshutil.Config, toIP string, expected bool) *CurlError {
 	if opts.CurlsCount <= 0 {
 		return nil
 	}
@@ -2260,14 +2225,13 @@ func checkCurl(ctx context.Context, opts TestConnectivityOpts, curls *semaphore.
 
 	for idx := 0; idx < opts.CurlsCount; idx++ {
 		cmd := fmt.Sprintf("timeout -v 5 curl --insecure --connect-timeout 3 --silent http://%s", toIP)
-		outR, err := retrySSHCmd(ctx, fromSSH, cmd, from)
-		out := strings.TrimSpace(string(outR))
-		ce.Output = out
+		stdout, stderr, err := retrySSHCmd(ctx, fromSSH, cmd, from)
+		ce.Output = stdout
 
-		curlOk := err == nil && strings.Contains(out, "301 Moved")
-		curlFail := err != nil && !strings.Contains(out, "301 Moved")
+		curlOk := err == nil && strings.Contains(stdout, "301 Moved")
+		curlFail := err != nil && !strings.Contains(stdout, "301 Moved")
 
-		slog.Debug("Curl result", "from", from, "to", toIP, "expected", expected, "ok", curlOk, "fail", curlFail, "err", err, "out", out)
+		slog.Debug("Curl result", "from", from, "to", toIP, "expected", expected, "ok", curlOk, "fail", curlFail, "err", err, "stdout", stdout, "stderr", stderr)
 
 		if curlOk == curlFail {
 			if err != nil {
@@ -2501,7 +2465,6 @@ type ReleaseTestOpts struct {
 	Regexes     []string
 	InvertRegex bool
 	ResultsFile string
-	HhfabBin    string
 	Extended    bool
 	FailFast    bool
 	PauseOnFail bool
@@ -2510,13 +2473,7 @@ type ReleaseTestOpts struct {
 	ListTests   bool
 }
 
-func (c *Config) ReleaseTest(ctx context.Context, opts ReleaseTestOpts) error {
-	self, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("getting executable path: %w", err)
-	}
-	opts.HhfabBin = self
-
+func (c *Config) ReleaseTest(ctx context.Context, vlab *VLAB, opts ReleaseTestOpts) error {
 	if !slices.Contains(HashPolicies, opts.HashPolicy) {
 		return fmt.Errorf("invalid hash policy %q, must be one of %v", opts.HashPolicy, HashPolicies)
 	} else if opts.HashPolicy != HashPolicyL2 && opts.HashPolicy != HashPolicyL2And3 {
@@ -2526,5 +2483,5 @@ func (c *Config) ReleaseTest(ctx context.Context, opts ReleaseTestOpts) error {
 		return fmt.Errorf("invalid VPC mode %q, must be one of %v", opts.VPCMode, vpcapi.VPCModes)
 	}
 
-	return RunReleaseTestSuites(ctx, c.WorkDir, c.CacheDir, opts)
+	return RunReleaseTestSuites(ctx, c, vlab, opts)
 }

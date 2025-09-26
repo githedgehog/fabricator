@@ -213,12 +213,12 @@ func DoVLABInspect(ctx context.Context, workDir, cacheDir string, opts InspectOp
 }
 
 func DoVLABReleaseTest(ctx context.Context, workDir, cacheDir string, opts ReleaseTestOpts) error {
-	c, _, err := loadVLABForHelpers(ctx, workDir, cacheDir)
+	c, vlab, err := loadVLABForHelpers(ctx, workDir, cacheDir)
 	if err != nil {
 		return err
 	}
 
-	return c.ReleaseTest(ctx, opts)
+	return c.ReleaseTest(ctx, vlab, opts)
 }
 
 type SwitchPowerOpts struct {
