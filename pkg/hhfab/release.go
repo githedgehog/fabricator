@@ -4,15 +4,14 @@
 package hhfab
 
 import (
-	"bytes"
 	"context"
 	"encoding/xml"
 	"errors"
 	"fmt"
 	"log/slog"
 	"math"
+	"net/netip"
 	"os"
-	"os/exec"
 	"regexp"
 	"sort"
 	"strconv"
@@ -25,6 +24,7 @@ import (
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/util/pointer"
 	"go.githedgehog.com/fabricator/pkg/fab"
+	"go.githedgehog.com/fabricator/pkg/util/sshutil"
 	gwapi "go.githedgehog.com/gateway/api/gateway/v1alpha1"
 	"golang.org/x/sync/errgroup"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -48,9 +48,6 @@ var (
 	errNotEnoughVPCs   = errors.New("not enough VPCs found")
 	errNoRoceLeaves    = errors.New("no leaves supporting RoCE found")
 	errInitialSetup    = errors.New("initial setup failed")
-	errPingFailed      = errors.New("ping failed, expected success")
-	errPingSucceeded   = errors.New("ping succeeded, expected failure")
-	errPingUnexpected  = errors.New("unexpected ping result")
 )
 
 const (
@@ -61,15 +58,14 @@ const (
 )
 
 type VPCPeeringTestCtx struct {
-	workDir          string
-	cacheDir         string
+	vlabCfg          *Config
+	vlab             *VLAB
 	kube             kclient.Client
 	wipeBetweenTests bool
 	setupOpts        SetupVPCsOpts
 	tcOpts           TestConnectivityOpts
 	wrOpts           WaitReadyOpts
 	extName          string
-	hhfabBin         string
 	extended         bool
 	failFast         bool
 	pauseOnFail      bool
@@ -93,7 +89,7 @@ func (testCtx *VPCPeeringTestCtx) setupTest(ctx context.Context, initialSuiteSet
 	opts := testCtx.setupOpts
 	opts.ForceCleanup = initialSuiteSetup
 	// this will also remove all peerings
-	if err := DoVLABSetupVPCs(ctx, testCtx.workDir, testCtx.cacheDir, opts); err != nil {
+	if err := DoVLABSetupVPCs(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, opts); err != nil {
 		return fmt.Errorf("setting up VPCs: %w", err)
 	}
 	// in case of L3 VPC mode, we need to give it time to switch to the longer lease time and switches to learn the routes
@@ -243,25 +239,15 @@ func waitAgentGen(ctx context.Context, kube kclient.Client, swName string, lastG
 // Run a configure command on switch swName via the sonic-cli.
 // Each of the strings in cmds is going to be wrapped in double quotes and
 // passed as a separate argument to sonic-cli.
-func execConfigCmd(hhfabBin, workDir, swName string, cmds ...string) error {
-	cmd := exec.Command(
-		hhfabBin,
-		"vlab",
-		"ssh",
-		"-n",
-		swName,
-		"-b",
-		"sonic-cli",
-		"-c", "configure",
-	)
+func execConfigCmd(ctx context.Context, ssh *sshutil.Config, swName string, cmds ...string) error {
+	cmdList := []string{"sonic-cli", "-c", "configure"}
 	for _, c := range cmds {
 		// add escaped double quotes around the command
-		cmd.Args = append(cmd.Args, "-c", fmt.Sprintf("\"%s\"", c))
+		cmdList = append(cmdList, "-c", fmt.Sprintf("\"%s\"", c))
 	}
-	cmd.Dir = workDir
-	if out, err := cmd.CombinedOutput(); err != nil {
-		slog.Error("Configuring switch", "switch", swName, "error", err)
-		slog.Debug("Output of errored command", "output", string(out))
+	if stdout, stderr, err := ssh.Run(ctx, strings.Join(cmdList, " ")); err != nil {
+		slog.Error("Configuring switch", "switch", swName, "error", err, "stderr", stderr)
+		slog.Debug("Stdout of errored command", "output", stdout)
 
 		return fmt.Errorf("configuring switch %s: %w", swName, err)
 	}
@@ -269,145 +255,33 @@ func execConfigCmd(hhfabBin, workDir, swName string, cmds ...string) error {
 	return nil
 }
 
-func execShowCmd(hhfabBin, workDir, swName string, cmds ...string) (string, error) {
-	cmd := exec.Command(
-		hhfabBin,
-		"vlab",
-		"ssh",
-		"-n",
-		swName,
-		"-b",
-		"sonic-cli",
-	)
-	for _, c := range cmds {
-		// add escaped double quotes around the command
-		cmd.Args = append(cmd.Args, "-c", fmt.Sprintf("\"%s\"", c))
-	}
-	cmd.Dir = workDir
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	stdout, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("configuring switch %s: %w, stderr: %s", swName, err, stderr.String())
-	}
-
-	return string(stdout), nil
-}
-
-// Run a command on node nodeName via ssh.
-func execNodeCmd(hhfabBin, workDir, nodeName string, command string) error {
-	cmd := exec.Command(
-		hhfabBin,
-		"vlab",
-		"ssh",
-		"-n",
-		nodeName,
-		"-b",
-		command,
-	)
-	cmd.Dir = workDir
-	if out, err := cmd.CombinedOutput(); err != nil {
-		slog.Error("Running command", "command", command, "node", nodeName, "error", err)
-		slog.Debug("Output of errored command", "output", string(out))
-
-		return fmt.Errorf("running command %s on node %s: %w", command, nodeName, err)
-	}
-
-	return nil
-}
-
-// Like the above, but return the output.
-func execNodeCmdWOutput(hhfabBin, workDir, nodeName string, command string) (string, error) {
-	cmd := exec.Command(
-		hhfabBin,
-		"vlab",
-		"ssh",
-		"-n",
-		nodeName,
-		"-b",
-		command,
-	)
-	cmd.Dir = workDir
-	bytes, err := cmd.CombinedOutput()
-	out := string(bytes)
-	if err != nil {
-		return out, fmt.Errorf("running command %s on node %s: %w", command, nodeName, err)
-	}
-
-	return out, nil
+func (testCtx *VPCPeeringTestCtx) getSSH(ctx context.Context, nodeName string) (*sshutil.Config, error) {
+	return testCtx.vlabCfg.SSH(ctx, testCtx.vlab, nodeName)
 }
 
 // Enable or disable the hedgehog agent on switch swName.
-func changeAgentStatus(hhfabBin, workDir, swName string, up bool) error {
-	return execNodeCmd(hhfabBin, workDir, swName, fmt.Sprintf("sudo systemctl %s hedgehog-agent.service", map[bool]string{true: "start", false: "stop"}[up]))
-}
+func changeAgentStatus(ctx context.Context, ssh *sshutil.Config, swName string, up bool) error {
+	cmd := fmt.Sprintf("sudo systemctl %s hedgehog-agent.service", map[bool]string{true: "start", false: "stop"}[up])
+	_, stderr, err := ssh.Run(ctx, cmd)
 
-// Change the admin status of a switch port via the sonic-cli, i.e. by running (no) shutdown on the port.
-func changeSwitchPortStatus(hhfabBin, workDir, deviceName, nosPortName string, up bool) error {
-	slog.Debug("Changing switch port status", "device", deviceName, "port", nosPortName, "up", up)
-	if up {
-		if err := execConfigCmd(
-			hhfabBin,
-			workDir,
-			deviceName,
-			fmt.Sprintf("interface %s", nosPortName),
-			"no shutdown",
-		); err != nil {
-			return err
-		}
-	} else {
-		if err := execConfigCmd(
-			hhfabBin,
-			workDir,
-			deviceName,
-			fmt.Sprintf("interface %s", nosPortName),
-			"shutdown",
-		); err != nil {
-			return err
-		}
+	if err != nil {
+		return fmt.Errorf("changing agent status on switch %s: %w: %s", swName, err, stderr)
 	}
 
 	return nil
 }
 
-// ping the IP address ip from node nodeName, expectSuccess determines whether the ping should succeed or fail.
-func pingFromFabricNode(hhfabBin, workDir, nodeName, ip string, sourceIP string, expectSuccess bool, count int) error {
-	countStr := strconv.Itoa(count)
-	cmd := exec.Command(
-		hhfabBin,
-		"vlab",
-		"ssh",
-		"-b",
-		"-n",
-		nodeName,
-		"ping",
-		"-c", countStr,
-		"-W", "1",
-	)
-	if sourceIP != "" {
-		cmd.Args = append(cmd.Args, "-I", sourceIP)
-	}
-	cmd.Args = append(cmd.Args, ip)
-	cmd.Dir = workDir
-	out, err := cmd.CombinedOutput()
-	// NOTE: there's no real need to check the output as, when both -c and -W are specified,
-	// ping will return exit code 0 only if all packets were received.
-	pingOK := err == nil && strings.Contains(string(out), "0% packet loss")
-	pingFail := err != nil || strings.Contains(string(out), "100% packet loss")
-	switch {
-	case expectSuccess && pingFail:
-		slog.Error("Ping failed, expected success", "source", nodeName, "target", ip, "error", err)
-		slog.Debug("Output of ping", "output", string(out))
-
-		return errPingFailed
-	case !expectSuccess && pingOK:
-		slog.Error("Ping succeeded, expected failure", "source", nodeName, "target", ip, "error", err)
-
-		return errPingSucceeded
-	case pingOK == pingFail:
-		slog.Error("Unexpected ping result", "source", nodeName, "target", ip, "expected", expectSuccess, "error", err)
-
-		return errPingUnexpected
+// Change the admin status of a switch port via the sonic-cli, i.e. by running (no) shutdown on the port.
+func changeSwitchPortStatus(ctx context.Context, ssh *sshutil.Config, deviceName, nosPortName string, up bool) error {
+	slog.Debug("Changing switch port status", "device", deviceName, "port", nosPortName, "up", up)
+	if up {
+		if err := execConfigCmd(ctx, ssh, deviceName, fmt.Sprintf("interface %s", nosPortName), "no shutdown"); err != nil {
+			return err
+		}
+	} else {
+		if err := execConfigCmd(ctx, ssh, deviceName, fmt.Sprintf("interface %s", nosPortName), "shutdown"); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -471,7 +345,7 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsStarterTest(ctx context.Context) (b
 	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, nil, true); err != nil {
 		return false, nil, fmt.Errorf("setting up peerings: %w", err)
 	}
-	if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
+	if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
 		return false, nil, err
 	}
 
@@ -494,7 +368,7 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsFullMeshAllExternalsTest(ctx contex
 	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, nil, true); err != nil {
 		return false, nil, fmt.Errorf("setting up peerings: %w", err)
 	}
-	if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
+	if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
 		return false, nil, err
 	}
 
@@ -511,7 +385,7 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsFullMeshAllExternalsTest(ctx contex
 		if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, nil, true); err != nil {
 			return false, nil, fmt.Errorf("setting up peerings: %w", err)
 		}
-		if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
+		if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
 			return false, nil, err
 		}
 	}
@@ -534,7 +408,7 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsOnlyExternalsTest(ctx context.Conte
 	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, nil, true); err != nil {
 		return false, nil, fmt.Errorf("setting up peerings: %w", err)
 	}
-	if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
+	if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
 		return false, nil, err
 	}
 
@@ -554,7 +428,7 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsFullLoopAllExternalsTest(ctx contex
 	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, nil, true); err != nil {
 		return false, nil, fmt.Errorf("setting up peerings: %w", err)
 	}
-	if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
+	if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
 		return false, nil, err
 	}
 
@@ -590,7 +464,7 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsSergeisSpecialTest(ctx context.Cont
 	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, nil, true); err != nil {
 		return false, nil, fmt.Errorf("setting up peerings: %w", err)
 	}
-	if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
+	if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
 		return false, nil, err
 	}
 
@@ -620,14 +494,18 @@ func shutDownLinkAndTest(ctx context.Context, testCtx *VPCPeeringTestCtx, link w
 		return fmt.Errorf("port %s not found in switch profile %s for switch %s", switchPort.LocalPortName(), profile.Name, deviceName) //nolint:goerr113
 	}
 	// disable agent
-	if err := changeAgentStatus(testCtx.hhfabBin, testCtx.workDir, deviceName, false); err != nil {
+	swSSH, sshErr := testCtx.getSSH(ctx, deviceName)
+	if sshErr != nil {
+		return fmt.Errorf("getting ssh config for switch %s: %w", deviceName, sshErr)
+	}
+	if err := changeAgentStatus(ctx, swSSH, deviceName, false); err != nil {
 		return fmt.Errorf("disabling HH agent: %w", err)
 	}
 	defer func() {
 		maxRetries := 5
 		sleepTime := time.Second * 5
-		for i := 0; i < maxRetries; i++ {
-			if err := changeAgentStatus(testCtx.hhfabBin, testCtx.workDir, deviceName, true); err != nil {
+		for i := range maxRetries {
+			if err := changeAgentStatus(ctx, swSSH, deviceName, true); err != nil {
 				slog.Error("Enabling HH agent", "error", err)
 				if i < maxRetries-1 {
 					slog.Warn("Retrying in 5 seconds")
@@ -645,11 +523,11 @@ func shutDownLinkAndTest(ctx context.Context, testCtx *VPCPeeringTestCtx, link w
 	}()
 
 	// set port down
-	if err := changeSwitchPortStatus(testCtx.hhfabBin, testCtx.workDir, deviceName, nosPortName, false); err != nil {
+	if err := changeSwitchPortStatus(ctx, swSSH, deviceName, nosPortName, false); err != nil {
 		return fmt.Errorf("setting switch port down: %w", err)
 	}
 	defer func() {
-		if err := changeSwitchPortStatus(testCtx.hhfabBin, testCtx.workDir, deviceName, nosPortName, true); err != nil {
+		if err := changeSwitchPortStatus(ctx, swSSH, deviceName, nosPortName, true); err != nil {
 			portErr := fmt.Errorf("setting port up on %s: %w", deviceName, err)
 			if returnErr != nil {
 				returnErr = errors.Join(returnErr, portErr)
@@ -663,7 +541,7 @@ func shutDownLinkAndTest(ctx context.Context, testCtx *VPCPeeringTestCtx, link w
 	slog.Debug("Waiting 5 seconds")
 	time.Sleep(5 * time.Second)
 
-	return DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts)
+	return DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts)
 }
 
 // Basic test for mclag failover.
@@ -787,9 +665,15 @@ func (testCtx *VPCPeeringTestCtx) spineFailoverTest(ctx context.Context) (bool, 
 		return false, nil, fmt.Errorf("listing switches: %w", err)
 	}
 	spines := make([]wiringapi.Switch, 0)
+	spinesSSH := make(map[string]*sshutil.Config)
 	for _, sw := range switches.Items {
 		if sw.Spec.Role == wiringapi.SwitchRoleSpine {
 			spines = append(spines, sw)
+			sshCfg, sshErr := testCtx.getSSH(ctx, sw.Name)
+			if sshErr != nil {
+				return false, nil, fmt.Errorf("getting ssh config for spine switch %s: %w", sw.Name, sshErr)
+			}
+			spinesSSH[sw.Name] = sshCfg
 		}
 	}
 
@@ -815,7 +699,11 @@ outer:
 			return false, nil, fmt.Errorf("getting API2NOS ports for switch %s: %w", spine.Name, err)
 		}
 		// disable agent on spine
-		if err := changeAgentStatus(testCtx.hhfabBin, testCtx.workDir, spine.Name, false); err != nil {
+		spineSSH, ok := spinesSSH[spine.Name]
+		if !ok {
+			return false, nil, fmt.Errorf("no ssh config found for spine switch %s", spine.Name) //nolint:goerr113
+		}
+		if err := changeAgentStatus(ctx, spineSSH, spine.Name, false); err != nil {
 			return false, nil, fmt.Errorf("disabling HH agent: %w", err)
 		}
 
@@ -836,7 +724,7 @@ outer:
 
 					break outer
 				}
-				if err := changeSwitchPortStatus(testCtx.hhfabBin, testCtx.workDir, spine.Name, nosPortName, false); err != nil {
+				if err := changeSwitchPortStatus(ctx, spineSSH, spine.Name, nosPortName, false); err != nil {
 					returnErr = fmt.Errorf("setting switch port down: %w", err)
 
 					break outer
@@ -850,7 +738,7 @@ outer:
 		// wait a bit to make sure that the fabric has converged; can't rely on agents as we disabled them
 		slog.Debug("Waiting 30 seconds for fabric to converge")
 		time.Sleep(30 * time.Second)
-		if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
+		if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
 			returnErr = err
 		}
 	}
@@ -863,8 +751,12 @@ outer:
 		maxRetries := 5
 		sleepTime := time.Second * 5
 		enabled := false
-		for i := 0; i < maxRetries; i++ {
-			if err := changeAgentStatus(testCtx.hhfabBin, testCtx.workDir, spine.Name, true); err != nil {
+		for i := range maxRetries {
+			spineSSH, ok := spinesSSH[spine.Name]
+			if !ok {
+				return false, nil, fmt.Errorf("no ssh config found for spine switch %s", spine.Name) //nolint:goerr113
+			}
+			if err := changeAgentStatus(ctx, spineSSH, spine.Name, true); err != nil {
 				slog.Error("Enabling HH agent", "switch", spine.Name, "error", err)
 				if i < maxRetries-1 {
 					slog.Warn("Retrying in 5 seconds")
@@ -900,9 +792,15 @@ func (testCtx *VPCPeeringTestCtx) meshFailoverTest(ctx context.Context) (bool, [
 		return false, nil, fmt.Errorf("listing switches: %w", err)
 	}
 	leaves := make([]wiringapi.Switch, 0)
+	leavesSSH := make(map[string]*sshutil.Config)
 	for _, sw := range switches.Items {
 		if sw.Spec.Role != wiringapi.SwitchRoleSpine {
 			leaves = append(leaves, sw)
+			sshCfg, sshErr := testCtx.getSSH(ctx, sw.Name)
+			if sshErr != nil {
+				return false, nil, fmt.Errorf("getting ssh config for leaf switch %s: %w", sw.Name, sshErr)
+			}
+			leavesSSH[sw.Name] = sshCfg
 		}
 	}
 
@@ -919,8 +817,12 @@ func (testCtx *VPCPeeringTestCtx) meshFailoverTest(ctx context.Context) (bool, [
 			maxRetries := 5
 			sleepTime := time.Second * 5
 			enabled := false
-			for i := 0; i < maxRetries; i++ {
-				if err := changeAgentStatus(testCtx.hhfabBin, testCtx.workDir, leaf.Name, true); err != nil {
+			for i := range maxRetries {
+				leafSSH, ok := leavesSSH[leaf.Name]
+				if !ok {
+					return fmt.Errorf("no ssh config found for leaf switch %s", leaf.Name) //nolint:goerr113
+				}
+				if err := changeAgentStatus(ctx, leafSSH, leaf.Name, true); err != nil {
 					slog.Error("Enabling HH agent", "switch", leaf.Name, "error", err)
 					if i < maxRetries-1 {
 						slog.Warn("Retrying in 5 seconds")
@@ -963,7 +865,11 @@ func (testCtx *VPCPeeringTestCtx) meshFailoverTest(ctx context.Context) (bool, [
 			return false, nil, fmt.Errorf("getting API2NOS ports for switch %s: %w", leaf.Name, err)
 		}
 		// disable agent on leaf
-		if err := changeAgentStatus(testCtx.hhfabBin, testCtx.workDir, leaf.Name, false); err != nil {
+		leafSSH, ok := leavesSSH[leaf.Name]
+		if !ok {
+			return false, nil, fmt.Errorf("no ssh config found for leaf switch %s", leaf.Name) //nolint:goerr113
+		}
+		if err := changeAgentStatus(ctx, leafSSH, leaf.Name, false); err != nil {
 			return false, nil, fmt.Errorf("disabling HH agent: %w", err)
 		}
 
@@ -988,7 +894,7 @@ func (testCtx *VPCPeeringTestCtx) meshFailoverTest(ctx context.Context) (bool, [
 				if !ok {
 					return false, reverts, fmt.Errorf("port %s not found in switch profile %s for switch %s", swPort, profile.Name, leaf.Name) //nolint:goerr113
 				}
-				if err := changeSwitchPortStatus(testCtx.hhfabBin, testCtx.workDir, leaf.Name, nosPortName, false); err != nil {
+				if err := changeSwitchPortStatus(ctx, leafSSH, leaf.Name, nosPortName, false); err != nil {
 					return false, reverts, fmt.Errorf("setting switch port down: %w", err)
 				}
 			}
@@ -997,7 +903,7 @@ func (testCtx *VPCPeeringTestCtx) meshFailoverTest(ctx context.Context) (bool, [
 		// wait a bit to make sure that the fabric has converged; can't rely on agents as we disabled them
 		slog.Debug("Waiting 30 seconds for fabric to converge")
 		time.Sleep(30 * time.Second)
-		if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
+		if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
 			return false, reverts, err
 		}
 		someLeafTested = true
@@ -1017,7 +923,7 @@ func (testCtx *VPCPeeringTestCtx) noRestrictionsTest(ctx context.Context) (bool,
 	if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
 		return false, nil, fmt.Errorf("waiting for readiness: %w", err)
 	}
-	if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
+	if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
 		return false, nil, err
 	}
 
@@ -1116,7 +1022,7 @@ func (testCtx *VPCPeeringTestCtx) multiSubnetsIsolationTest(ctx context.Context)
 	tcOpts.WaitSwitchesReady = true
 	if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
 		returnErr = fmt.Errorf("waiting for ready: %w", err)
-	} else if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, tcOpts); err != nil {
+	} else if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, tcOpts); err != nil {
 		returnErr = fmt.Errorf("testing connectivity with isolated subnet: %w", err)
 	}
 
@@ -1133,7 +1039,7 @@ func (testCtx *VPCPeeringTestCtx) multiSubnetsIsolationTest(ctx context.Context)
 			time.Sleep(waitTime)
 			if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
 				returnErr = fmt.Errorf("waiting for ready: %w", err)
-			} else if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, tcOpts); err != nil {
+			} else if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, tcOpts); err != nil {
 				returnErr = fmt.Errorf("testing connectivity with permit-list override: %w", err)
 			}
 		}
@@ -1154,7 +1060,7 @@ func (testCtx *VPCPeeringTestCtx) multiSubnetsIsolationTest(ctx context.Context)
 			time.Sleep(waitTime)
 			if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
 				returnErr = fmt.Errorf("waiting for ready: %w", err)
-			} else if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, tcOpts); err != nil {
+			} else if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, tcOpts); err != nil {
 				returnErr = fmt.Errorf("testing connectivity with restricted subnet: %w", err)
 			}
 		}
@@ -1218,7 +1124,7 @@ func (testCtx *VPCPeeringTestCtx) multiSubnetsSubnetFilteringTest(ctx context.Co
 		return nil
 	})
 
-	if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
+	if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
 		return false, reverts, err
 	}
 
@@ -1301,7 +1207,7 @@ outer:
 	time.Sleep(waitTime)
 	if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
 		returnErr = fmt.Errorf("waiting for ready: %w", err)
-	} else if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
+	} else if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
 		returnErr = fmt.Errorf("testing connectivity with %s isolated: %w", subnet1Name, err)
 	}
 
@@ -1316,7 +1222,7 @@ outer:
 			time.Sleep(waitTime)
 			if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
 				returnErr = fmt.Errorf("waiting for ready: %w", err)
-			} else if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
+			} else if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
 				returnErr = fmt.Errorf("testing connectivity with %s restricted: %w", subnet2Name, err)
 			}
 		}
@@ -1334,7 +1240,7 @@ outer:
 			time.Sleep(waitTime)
 			if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
 				returnErr = fmt.Errorf("waiting for ready: %w", err)
-			} else if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
+			} else if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
 				returnErr = fmt.Errorf("testing connectivity with %s isolated and restricted: %w", subnet3Name, err)
 			}
 		}
@@ -1353,7 +1259,7 @@ outer:
 			time.Sleep(waitTime)
 			if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
 				returnErr = fmt.Errorf("waiting for ready: %w", err)
-			} else if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
+			} else if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
 				returnErr = fmt.Errorf("testing connectivity with all subnets in permit list: %w", err)
 			}
 		}
@@ -1362,39 +1268,58 @@ outer:
 	return false, reverts, returnErr
 }
 
-func (testCtx *VPCPeeringTestCtx) pingStaticExternal(sourceNode string, sourceIP string, expected bool) error {
+func (testCtx *VPCPeeringTestCtx) pingStaticExternal(ctx context.Context, sourceNode string, sourceIP string, expected bool) error {
 	slog.Debug("Pinging static external next hop", "sourceNode", sourceNode, "next-hop", StaticExternalNH, "expected", expected)
-	if err := pingFromFabricNode(testCtx.hhfabBin, testCtx.workDir, sourceNode, StaticExternalNH, sourceIP, expected, 3); err != nil {
-		return fmt.Errorf("ping from %s to %s: %w", sourceNode, StaticExternalNH, err)
+	ssh, err := testCtx.getSSH(ctx, sourceNode)
+	if err != nil {
+		return fmt.Errorf("getting ssh config for source node %s: %w", sourceNode, err)
+	}
+	seNhIP := netip.MustParseAddr(StaticExternalNH)
+	seDummyIP := netip.MustParseAddr(StaticExternalDummyIface)
+	var sIP *netip.Addr
+	if sourceIP != "" {
+		sIP = pointer.To(netip.MustParseAddr(sourceIP))
+	}
+
+	if err := checkPing(ctx, 3, nil, sourceNode, StaticExternalNH, ssh, seNhIP, sIP, expected); err != nil {
+		return fmt.Errorf("ping to static external next hop: %w", err)
 	}
 	slog.Debug("Pinging static external dummy interface", "sourceNode", sourceNode, "dummy-interface", StaticExternalDummyIface, "expected", expected)
-	if err := pingFromFabricNode(testCtx.hhfabBin, testCtx.workDir, sourceNode, StaticExternalDummyIface, sourceIP, expected, 3); err != nil {
-		return fmt.Errorf("ping from %s to %s: %w", sourceNode, StaticExternalDummyIface, err)
+	if err := checkPing(ctx, 3, nil, sourceNode, StaticExternalDummyIface, ssh, seDummyIP, sIP, expected); err != nil {
+		return fmt.Errorf("ping to static external dummy interface: %w", err)
 	}
 
 	return nil
 }
 
-func (testCtx *VPCPeeringTestCtx) checkRouteInSwitch(switchName, route, vrfName string) (bool, error) {
-	cliCmd := fmt.Sprintf("show ip route vrf %s %s", vrfName, route)
-	out, err := execShowCmd(testCtx.hhfabBin, testCtx.workDir, switchName, cliCmd)
+func checkRouteInSwitch(ctx context.Context, ssh *sshutil.Config, switchName, route, vrfName string) (bool, error) {
+	cmd := fmt.Sprintf("show ip route vrf %s %s", vrfName, route)
+	stdout, stderr, err := ssh.Run(ctx, cmd)
 	if err != nil {
-		return false, fmt.Errorf("executing CLI command '%s' on switch %s: %w", cliCmd, switchName, err)
+		return false, fmt.Errorf("executing '%s' on switch %s: %w: %s", cmd, switchName, err, stderr)
 	}
 
-	return out != "", nil
+	return stdout != "", nil
 }
 
 func (testCtx *VPCPeeringTestCtx) waitForRoutesInSwitches(ctx context.Context, switches, routes []string, vrfName string, timeout time.Duration) error {
 	slog.Debug("Checking for routes in switches", "switches", switches, "routes", routes, "vrf", vrfName, "timeout", timeout)
 	toCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	sshs := make(map[string]*sshutil.Config, len(switches))
+	for _, sw := range switches {
+		ssh, err := testCtx.getSSH(ctx, sw)
+		if err != nil {
+			return fmt.Errorf("getting ssh config for switch %s: %w", sw, err)
+		}
+		sshs[sw] = ssh
+	}
 
 	for {
 		allFound := true
 		for _, sw := range switches {
 			for _, route := range routes {
-				if found, err := testCtx.checkRouteInSwitch(sw, route, vrfName); err != nil {
+				if found, err := checkRouteInSwitch(toCtx, sshs[sw], sw, route, vrfName); err != nil {
 					return fmt.Errorf("checking for route %s in switch %s vrf %s: %w", route, sw, vrfName, err)
 				} else if !found {
 					slog.Debug("Route not found yet", "switch", sw, "route", route, "vrf", vrfName)
@@ -1476,6 +1401,10 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool,
 	switchPortName := conn.Spec.Unbundled.Link.Switch.PortName()
 	serverPortName := conn.Spec.Unbundled.Link.Server.LocalPortName()
 	slog.Debug("Found unbundled connection", "connection", conn.Name, "server", targetServer, "switch", switchName, "port", switchPortName)
+	targetServerSSH, err := testCtx.getSSH(ctx, targetServer)
+	if err != nil {
+		return false, nil, fmt.Errorf("getting ssh config for target server %s: %w", targetServer, err)
+	}
 
 	// find two VPCs with at least a server attached to each, we'll need them later for testing
 	vpcList := &vpcapi.VPCList{}
@@ -1583,12 +1512,12 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool,
 			return fmt.Errorf("waiting for ready: %w", err)
 		}
 		slog.Debug("Invoking hhnet cleanup on server", "server", targetServer)
-		if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, targetServer, "/opt/bin/hhnet cleanup"); err != nil {
-			return fmt.Errorf("cleaning up %s via hhnet: %w", targetServer, err)
+		if _, stderr, err := targetServerSSH.Run(ctx, "/opt/bin/hhnet cleanup"); err != nil {
+			return fmt.Errorf("cleaning up %s via hhnet: %w: %s", targetServer, err, stderr)
 		}
 		slog.Debug("Configuring VLAN on server", "server", targetServer, "vlan", vlan, "port", serverPortName)
-		if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, targetServer, fmt.Sprintf("/opt/bin/hhnet vlan %d %s", vlan, serverPortName)); err != nil {
-			return fmt.Errorf("configuring VLAN on %s: %w", targetServer, err)
+		if _, stderr, err := targetServerSSH.Run(ctx, fmt.Sprintf("/opt/bin/hhnet vlan %d %s", vlan, serverPortName)); err != nil {
+			return fmt.Errorf("configuring VLAN on %s: %w: %s", targetServer, err, stderr)
 		}
 		// in case of L3 VPC mode, we need to give it time to switch to the longer lease time and switches to learn the routes
 		if testCtx.setupOpts.VPCMode == vpcapi.VPCModeL3VNI || testCtx.setupOpts.VPCMode == vpcapi.VPCModeL3Flat {
@@ -1679,35 +1608,35 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool,
 
 	// Add address and default route to en2ps1 on the server
 	slog.Debug("Adding address and default route to en2ps1 on the server", "server", targetServer)
-	if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, targetServer, "hhnet cleanup"); err != nil {
-		return false, reverts, fmt.Errorf("cleaning up server via hhnet: %w", err)
+	if _, stderr, err := targetServerSSH.Run(ctx, "/opt/bin/hhnet cleanup"); err != nil {
+		return false, reverts, fmt.Errorf("cleaning up server via hhnet: %w: %s", err, stderr)
 	}
-	if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, targetServer, fmt.Sprintf("sudo ip addr add %s/%s dev enp2s1", StaticExternalNH, StaticExternalPL)); err != nil {
-		return false, reverts, fmt.Errorf("adding address to server: %w", err)
+	if _, stderr, err := targetServerSSH.Run(ctx, fmt.Sprintf("sudo ip addr add %s/%s dev enp2s1", StaticExternalNH, StaticExternalPL)); err != nil {
+		return false, reverts, fmt.Errorf("adding address to server: %w: %s", err, stderr)
 	}
-	if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, targetServer, "sudo ip link set dev enp2s1 up"); err != nil {
-		return false, reverts, fmt.Errorf("setting up server interface: %w", err)
+	if _, stderr, err := targetServerSSH.Run(ctx, "sudo ip link set dev enp2s1 up"); err != nil {
+		return false, reverts, fmt.Errorf("setting up server interface: %w: %s", err, stderr)
 	}
-	if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, targetServer, fmt.Sprintf("sudo ip route add default via %s", StaticExternalIP)); err != nil {
-		return false, reverts, fmt.Errorf("adding default route to server: %w", err)
+	if _, stderr, err := targetServerSSH.Run(ctx, fmt.Sprintf("sudo ip route add default via %s", StaticExternalIP)); err != nil {
+		return false, reverts, fmt.Errorf("adding default route to server: %w: %s", err, stderr)
 	}
 	slog.Debug("Adding dummy inteface to the server", "server", targetServer, "address", fmt.Sprintf("%s/32", StaticExternalDummyIface))
-	if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, targetServer, "sudo ip link add dummy0 type dummy"); err != nil {
-		return false, reverts, fmt.Errorf("adding dummy interface to server: %w", err)
+	if _, stderr, err := targetServerSSH.Run(ctx, "sudo ip link add dummy0 type dummy"); err != nil {
+		return false, reverts, fmt.Errorf("adding dummy interface to server: %w: %s", err, stderr)
 	}
-	if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, targetServer, fmt.Sprintf("sudo ip addr add %s/32 dev dummy0", StaticExternalDummyIface)); err != nil {
-		return false, reverts, fmt.Errorf("adding address to dummy interface on server: %w", err)
+	if _, stderr, err := targetServerSSH.Run(ctx, fmt.Sprintf("sudo ip addr add %s/32 dev dummy0", StaticExternalDummyIface)); err != nil {
+		return false, reverts, fmt.Errorf("adding address to dummy interface on server: %w: %s", err, stderr)
 	}
 	reverts = append(reverts, func(_ context.Context) error {
 		slog.Debug("Removing address and default route from en2ps1 on the server", "server", targetServer)
-		if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, targetServer, fmt.Sprintf("sudo ip addr del %s/%s dev enp2s1", StaticExternalNH, StaticExternalPL)); err != nil {
-			return fmt.Errorf("removing address from %s: %w", targetServer, err)
+		if _, stderr, err := targetServerSSH.Run(ctx, fmt.Sprintf("sudo ip addr del %s/%s dev enp2s1", StaticExternalNH, StaticExternalPL)); err != nil {
+			return fmt.Errorf("removing address from %s: %w: %s", targetServer, err, stderr)
 		}
-		if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, targetServer, "sudo ip link del dev dummy0"); err != nil {
-			return fmt.Errorf("removing dummy interface from %s: %w", targetServer, err)
+		if _, stderr, err := targetServerSSH.Run(ctx, "sudo ip link del dev dummy0"); err != nil {
+			return fmt.Errorf("removing dummy interface from %s: %w: %s", targetServer, err, stderr)
 		}
-		if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, targetServer, "hhnet cleanup"); err != nil {
-			return fmt.Errorf("cleaning up %s via hhnet: %w", targetServer, err)
+		if _, stderr, err := targetServerSSH.Run(ctx, "/opt/bin/hhnet cleanup"); err != nil {
+			return fmt.Errorf("cleaning up %s via hhnet: %w: %s", targetServer, err, stderr)
 		}
 
 		return nil
@@ -1718,19 +1647,24 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool,
 	}
 
 	slog.Debug("Pinging from the switch attached to the static external to trigger ARP resolution", "switch", switchName, "vrf", "VrfV"+vpc1.Name, "source-ip", StaticExternalIP, "target", StaticExternalNH)
-	pingOut, pingErr := execShowCmd(testCtx.hhfabBin, testCtx.workDir, switchName, fmt.Sprintf("ping vrf VrfV%s -I %s %s -c 3 -W 1", vpc1.Name, StaticExternalIP, StaticExternalNH))
+	wuPingCmd := fmt.Sprintf("sonic-cli -c \"ping vrf VrfV%s -I %s %s -c 3 -W 1\"", vpc1.Name, StaticExternalIP, StaticExternalNH)
+	switchSSH, err := testCtx.getSSH(ctx, switchName)
+	if err != nil {
+		return false, reverts, fmt.Errorf("getting ssh config for switch %s: %w", switchName, err)
+	}
+	stdout, stderr, pingErr := switchSSH.Run(ctx, wuPingCmd)
 	if pingErr != nil {
-		slog.Warn("Warm-up ping from switch failed, continuing anyway", "error", pingErr)
+		slog.Warn("Warm-up ping from switch failed, continuing anyway", "error", pingErr, "stderr", stderr)
 	} else {
-		slog.Debug("Ping output from switch", "output", pingOut)
+		slog.Debug("Ping output from switch", "output", stdout)
 	}
 
 	// Ping the addresses from server1 which is in the static external VPC, expect success
-	if err := testCtx.pingStaticExternal(server1, "", true); err != nil {
+	if err := testCtx.pingStaticExternal(ctx, server1, "", true); err != nil {
 		return false, reverts, fmt.Errorf("pinging static external from %s in the SE VPC: %w", server1, err)
 	}
 	// Ping the addresses from server2 which is in a different VPC, expect failure
-	if err := testCtx.pingStaticExternal(server2, "", false); err != nil {
+	if err := testCtx.pingStaticExternal(ctx, server2, "", false); err != nil {
 		return false, reverts, fmt.Errorf("pinging static external from %s in a different VPC: %w", server2, err)
 	}
 
@@ -1775,7 +1709,7 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool,
 	}
 
 	// Ping the addresses from server1, this should now fail
-	if err := testCtx.pingStaticExternal(server1, "", false); err != nil {
+	if err := testCtx.pingStaticExternal(ctx, server1, "", false); err != nil {
 		return false, reverts, fmt.Errorf("pinging static external from %s after removing VPC: %w", server1, err)
 	}
 	// Ping the addresses from a leaf switch that's not the one the static external is attached to, this should succeed
@@ -1794,7 +1728,7 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool,
 			continue
 		}
 		sourceIP := strings.SplitN(sw.Spec.VTEPIP, "/", 2)[0]
-		if err := testCtx.pingStaticExternal(sw.Name, sourceIP, true); err != nil {
+		if err := testCtx.pingStaticExternal(ctx, sw.Name, sourceIP, true); err != nil {
 			return false, reverts, fmt.Errorf("pinging static external from %s: %w", sw.Name, err)
 		}
 		success = true
@@ -1904,6 +1838,10 @@ func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (bool, []Re
 		return false, nil, fmt.Errorf("expected 1 server for connection %s, got %d", conn.Name, len(servers)) //nolint:goerr113
 	}
 	serverName := servers[0]
+	serverSSH, sshErr := testCtx.getSSH(ctx, serverName)
+	if sshErr != nil {
+		return false, nil, fmt.Errorf("getting ssh config for server %s: %w", serverName, sshErr)
+	}
 	netconfCmd, netconfErr := GetServerNetconfCmd(conn, subnet.VLAN, testCtx.setupOpts.HashPolicy)
 	if netconfErr != nil {
 		return false, nil, fmt.Errorf("getting netconf command for server %s: %w", serverName, netconfErr)
@@ -1962,12 +1900,12 @@ func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (bool, []Re
 		if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
 			return fmt.Errorf("waiting for ready: %w", err)
 		}
-		if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, serverName, "/opt/bin/hhnet cleanup"); err != nil {
-			return fmt.Errorf("cleaning up interfaces on %s: %w", serverName, err)
+		if _, stderr, err := serverSSH.Run(ctx, "/opt/bin/hhnet cleanup"); err != nil {
+			return fmt.Errorf("cleaning up interfaces on %s: %w: %s", serverName, err, stderr)
 		}
 		cmd := fmt.Sprintf("/opt/bin/hhnet %s", netconfCmd)
-		if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, serverName, cmd); err != nil {
-			return fmt.Errorf("bonding interfaces on %s: %w", serverName, err)
+		if _, stderr, err := serverSSH.Run(ctx, cmd); err != nil {
+			return fmt.Errorf("bonding interfaces on %s: %w: %s", serverName, err, stderr)
 		}
 		// in case of L3 VPC mode, we need to give it time to switch to the longer lease time and switches to learn the routes
 		if testCtx.setupOpts.VPCMode == vpcapi.VPCModeL3VNI || testCtx.setupOpts.VPCMode == vpcapi.VPCModeL3Flat {
@@ -1984,29 +1922,29 @@ func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (bool, []Re
 	}
 	// Configure network interfaces on target server
 	slog.Debug("Configuring network interfaces", "server", serverName, "netconfCmd", netconfCmd, "ifName", ifName)
-	if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, serverName, "/opt/bin/hhnet cleanup"); err != nil {
-		return false, reverts, fmt.Errorf("cleaning up interfaces on %s: %w", serverName, err)
+	if _, stderr, err := serverSSH.Run(ctx, "/opt/bin/hhnet cleanup"); err != nil {
+		return false, reverts, fmt.Errorf("cleaning up interfaces on %s: %w: %s", serverName, err, stderr)
 	}
 	cmd := fmt.Sprintf("/opt/bin/hhnet %s", netconfCmd)
-	if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, serverName, cmd); err != nil {
-		return false, reverts, fmt.Errorf("bonding interfaces on %s: %w", serverName, err)
+	if _, stderr, err := serverSSH.Run(ctx, cmd); err != nil {
+		return false, reverts, fmt.Errorf("bonding interfaces on %s: %w: %s", serverName, err, stderr)
 	}
 
 	// Check DNS, NTP, MTU and DHCP lease
 	slog.Debug("Checking DNS, NTP, MTU and DHCP lease")
 	var dnsFound, ntpFound, mtuFound, leaseCheck, advRoutes bool
-	if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, serverName, "grep \"nameserver 1.1.1.1\" /etc/resolv.conf"); err != nil {
-		slog.Error("1.1.1.1 not found in resolv.conf", "error", err)
+	if _, stderr, err := serverSSH.Run(ctx, "grep \"nameserver 1.1.1.1\" /etc/resolv.conf"); err != nil {
+		slog.Error("1.1.1.1 not found in resolv.conf", "error", err, "stderr", stderr)
 	} else {
 		dnsFound = true
 	}
-	if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, serverName, "timedatectl show-timesync | grep 1.1.1.1"); err != nil {
-		slog.Error("1.1.1.1 not found in timesync", "error", err)
+	if _, stderr, err := serverSSH.Run(ctx, "timedatectl show-timesync | grep 1.1.1.1"); err != nil {
+		slog.Error("1.1.1.1 not found in timesync", "error", err, "stderr", stderr)
 	} else {
 		ntpFound = true
 	}
-	if err := execNodeCmd(testCtx.hhfabBin, testCtx.workDir, serverName, fmt.Sprintf("ip link show dev %s | grep \"mtu 1400\"", ifName)); err != nil {
-		slog.Error("mtu 1400 not found on server interface", "interface", ifName, "error", err)
+	if _, stderr, err := serverSSH.Run(ctx, fmt.Sprintf("ip link show dev %s | grep \"mtu 1400\"", ifName)); err != nil {
+		slog.Error("mtu 1400 not found on server interface", "interface", ifName, "error", err, "stderr", stderr)
 	} else {
 		mtuFound = true
 	}
@@ -2016,18 +1954,18 @@ func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (bool, []Re
 		time.Sleep(10 * time.Second)
 	}
 
-	out, leaseErr := execNodeCmdWOutput(testCtx.hhfabBin, testCtx.workDir, serverName, fmt.Sprintf("ip addr show dev %s proto 4 | grep valid_lft", ifName))
+	stdout, stderr, leaseErr := serverSSH.Run(ctx, fmt.Sprintf("ip addr show dev %s proto 4 | grep valid_lft", ifName))
 	if leaseErr != nil {
-		slog.Error("failed to get lease time", "error", leaseErr)
-	} else if err := checkDHCPLease(out, 1800, 120); err != nil {
+		slog.Error("failed to get lease time", "error", leaseErr, "stderr", stderr)
+	} else if err := checkDHCPLease(stdout, 1800, 120); err != nil {
 		slog.Error("DHCP lease time check failed", "error", err)
 	} else {
 		leaseCheck = true
 	}
-	out, advRoutesErr := execNodeCmdWOutput(testCtx.hhfabBin, testCtx.workDir, serverName, "ip route show")
+	stdout, stderr, advRoutesErr := serverSSH.Run(ctx, "ip route show")
 	if advRoutesErr != nil {
-		slog.Error("failed to get IP routes from server", "error", advRoutesErr)
-	} else if err := checkDHCPAdvRoutes(out, "9.9.9.9", subnet.Gateway, dhcpOpts.DisableDefaultRoute, l3mode, subnet.Subnet); err != nil {
+		slog.Error("failed to get IP routes from server", "error", advRoutesErr, "stderr", stderr)
+	} else if err := checkDHCPAdvRoutes(stdout, "9.9.9.9", subnet.Gateway, dhcpOpts.DisableDefaultRoute, l3mode, subnet.Subnet); err != nil {
 		slog.Error("DHCP advertised routes check failed", "error", err)
 	} else {
 		advRoutes = true
@@ -2077,6 +2015,10 @@ func (testCtx *VPCPeeringTestCtx) roceBasicTest(ctx context.Context) (bool, []Re
 		return true, nil, errNoRoceLeaves
 	}
 	swName := testCtx.roceLeaves[0]
+	swSSH, sshErr := testCtx.getSSH(ctx, swName)
+	if sshErr != nil {
+		return false, nil, fmt.Errorf("getting ssh config for switch %s: %w", swName, sshErr)
+	}
 	sw := &wiringapi.Switch{}
 	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: swName}, sw); err != nil {
 		return false, nil, fmt.Errorf("getting switch %s: %w", swName, err)
@@ -2090,12 +2032,12 @@ func (testCtx *VPCPeeringTestCtx) roceBasicTest(ctx context.Context) (bool, []Re
 	dscpOpts.IPerfsDSCP = 24 // Mapped to traffic class 3
 
 	slog.Debug("Clearing queue counters on switch", "switch", swName)
-	if err := execConfigCmd(testCtx.hhfabBin, testCtx.workDir, swName, "clear queue counters"); err != nil {
+	if err := execConfigCmd(ctx, swSSH, swName, "clear queue counters"); err != nil {
 		return false, nil, fmt.Errorf("clearing queue counters on switch %s: %w", swName, err)
 	}
 
 	slog.Debug("Testing connectivity with DSCP options", "dscpOpts", dscpOpts)
-	if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, dscpOpts); err != nil {
+	if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, dscpOpts); err != nil {
 		return false, nil, fmt.Errorf("testing connectivity with DSCP opts: %w", err)
 	}
 
@@ -2396,7 +2338,7 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringTest(ctx context.Context) (bool,
 		return false, nil, fmt.Errorf("setting up gateway peerings: %w", err)
 	}
 
-	if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
+	if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
 		return false, nil, fmt.Errorf("testing gateway peering connectivity: %w", err)
 	}
 
@@ -2436,7 +2378,7 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringLoopTest(ctx context.Context) (b
 		return false, nil, fmt.Errorf("setting up gateway loop peerings: %w", err)
 	}
 
-	if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
+	if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
 		return false, nil, fmt.Errorf("testing gateway loop connectivity: %w", err)
 	}
 
@@ -2482,7 +2424,7 @@ func (testCtx *VPCPeeringTestCtx) gatewayMixedPeeringLoopTest(ctx context.Contex
 		return false, nil, fmt.Errorf("setting up mixed peering loop: %w", err)
 	}
 
-	if err := DoVLABTestConnectivity(ctx, testCtx.workDir, testCtx.cacheDir, testCtx.tcOpts); err != nil {
+	if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
 		return false, nil, fmt.Errorf("testing mixed peering loop connectivity: %w", err)
 	}
 
@@ -2534,11 +2476,11 @@ func appendGwPeeringSpec(gwPeerings map[string]*gwapi.PeeringSpec, vpc1, vpc2 *v
 
 // Utilities and suite runners
 
-func makeTestCtx(kube kclient.Client, setupOpts SetupVPCsOpts, workDir, cacheDir string, wipeBetweenTests bool, rtOpts ReleaseTestOpts) *VPCPeeringTestCtx {
+func makeTestCtx(kube kclient.Client, setupOpts SetupVPCsOpts, vlabCfg *Config, vlab *VLAB, wipeBetweenTests bool, rtOpts ReleaseTestOpts) *VPCPeeringTestCtx {
 	testCtx := new(VPCPeeringTestCtx)
 	testCtx.kube = kube
-	testCtx.workDir = workDir
-	testCtx.cacheDir = cacheDir
+	testCtx.vlabCfg = vlabCfg
+	testCtx.vlab = vlab
 	testCtx.setupOpts = setupOpts
 	testCtx.tcOpts = TestConnectivityOpts{
 		WaitSwitchesReady: false,
@@ -2557,7 +2499,6 @@ func makeTestCtx(kube kclient.Client, setupOpts SetupVPCsOpts, workDir, cacheDir
 		testCtx.tcOpts.CurlsCount = 3
 	}
 	testCtx.wipeBetweenTests = wipeBetweenTests
-	testCtx.hhfabBin = rtOpts.HhfabBin
 	testCtx.extended = rtOpts.Extended
 	testCtx.failFast = rtOpts.FailFast
 	testCtx.pauseOnFail = rtOpts.PauseOnFail
@@ -3131,10 +3072,10 @@ func makeVpcPeeringsBasicSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 	return suite
 }
 
-func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps ReleaseTestOpts) error {
+func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOtps ReleaseTestOpts) error {
 	testStart := time.Now()
 
-	cacheCancel, kube, err := getKubeClientWithCache(ctx, workDir)
+	cacheCancel, kube, err := getKubeClientWithCache(ctx, vlabCfg.WorkDir)
 	if err != nil {
 		return err
 	}
@@ -3164,7 +3105,7 @@ func RunReleaseTestSuites(ctx context.Context, workDir, cacheDir string, rtOtps 
 		VPCMode:           rtOtps.VPCMode,
 	}
 
-	testCtx := makeTestCtx(kube, setupOpts, workDir, cacheDir, false, rtOtps)
+	testCtx := makeTestCtx(kube, setupOpts, vlabCfg, vlab, false, rtOtps)
 	noVpcSuite := makeNoVpcsSuite(testCtx)
 	singleVpcSuite := makeVpcPeeringsSingleVPCSuite(testCtx)
 	multiVpcSuite := makeVpcPeeringsMultiVPCSuite(testCtx)
