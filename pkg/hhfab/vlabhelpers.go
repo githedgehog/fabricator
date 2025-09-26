@@ -19,7 +19,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/appleboy/easyssh-proxy"
 	"github.com/manifoldco/promptui"
 	"github.com/samber/lo"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
@@ -30,6 +29,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/hhfab/pdu"
 	"go.githedgehog.com/fabricator/pkg/support"
+	"go.githedgehog.com/fabricator/pkg/util/sshutil"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -538,11 +538,6 @@ func DefaultShowTechScript() ShowTechScript {
 }
 
 func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB) error {
-	entries, err := c.getVLABEntries(ctx, vlab)
-	if err != nil {
-		return fmt.Errorf("retrieving VM and switch entries: %w", err)
-	}
-
 	scriptConfig := DefaultShowTechScript()
 
 	outputDir := filepath.Join(c.WorkDir, "show-tech-output")
@@ -551,7 +546,7 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB) error {
 	}
 
 	var wg sync.WaitGroup
-	errChan := make(chan error, len(entries))
+	errChan := make(chan error, len(vlab.VMs))
 
 	done := make(chan struct{})
 	defer close(done)
@@ -567,20 +562,33 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB) error {
 
 	var successCount atomic.Int32
 
-	for name, entry := range entries {
+	for _, vm := range vlab.VMs {
+		name := vm.Name
 		wg.Add(1)
-		go func(name string, entry VLABAccessInfo) {
+		go func(name string, vm VM) {
 			defer wg.Done()
+			ssh, err := c.SSHVM(ctx, vlab, vm)
+			if err != nil {
+				errChan <- fmt.Errorf("getting ssh config for entry %s: %w", name, err)
+
+				return
+			}
 
 			collectionCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 			defer cancel()
+			script, ok := scriptConfig.Scripts[vm.Type]
+			if !ok {
+				slog.Debug("No show-tech script available for", "vm", vm.Name, "type", vm.Type)
 
-			if err := c.collectShowTech(collectionCtx, name, entry, scriptConfig, outputDir); err != nil {
+				return
+			}
+
+			if err := c.collectShowTech(collectionCtx, name, ssh, script, outputDir); err != nil {
 				errChan <- fmt.Errorf("collecting show-tech for entry %s: %w", name, err)
 			} else {
 				successCount.Add(1)
 			}
-		}(name, entry)
+		}(name, vm)
 	}
 
 	wg.Wait()
@@ -595,7 +603,7 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB) error {
 	if len(errors) > 0 {
 		slog.Warn("Some diagnostics collection failed",
 			"success_count", successCount.Load(),
-			"total_count", len(entries),
+			"total_count", len(vlab.VMs),
 			"errors", errors)
 	}
 
@@ -659,23 +667,10 @@ func (c *Config) VLABSwitchPower(ctx context.Context, opts SwitchPowerOpts) erro
 	return nil
 }
 
-func (c *Config) collectShowTech(ctx context.Context, entryName string, entry VLABAccessInfo, scriptConfig ShowTechScript, outputDir string) error {
+func (c *Config) collectShowTech(ctx context.Context, entryName string, ssh *sshutil.Config, script []byte, outputDir string) error {
 	// Determine the script for the VM type
-	vmType := getVMType(entry)
-	script, ok := scriptConfig.Scripts[vmType]
-	if !ok {
-		slog.Debug("No show-tech script available for", "entry", entryName, "type", vmType)
-
-		return nil // Skip entries with no defined script
-	}
-
 	remoteScriptPath := "/tmp/show-tech.sh"
 	remoteOutputPath := "/tmp/show-tech.log"
-
-	ssh, err := c.createSSHConfig(ctx, entryName, entry)
-	if err != nil {
-		return fmt.Errorf("creating SSH config for %s: %w", entryName, err)
-	}
 
 	tmpfile, err := os.CreateTemp("", "script-*")
 	if err != nil {
@@ -692,19 +687,17 @@ func (c *Config) collectShowTech(ctx context.Context, entryName string, entry VL
 		return fmt.Errorf("syncing temporary script file: %w", err)
 	}
 
-	err = ssh.Scp(tmpfile.Name(), remoteScriptPath)
+	err = ssh.UploadPath(tmpfile.Name(), remoteScriptPath)
 	if err != nil {
 		return fmt.Errorf("uploading script to %s: %w", entryName, err)
 	}
 
 	chmodCmd := fmt.Sprintf("chmod +x %s && %s", remoteScriptPath, remoteScriptPath)
-	stdout, stderr, done, err := ssh.Run(chmodCmd, 150*time.Second)
+	chmodCtx, chmodCancel := context.WithTimeout(ctx, 150*time.Second)
+	defer chmodCancel()
+	_, stderr, err := ssh.Run(chmodCtx, chmodCmd)
 	if err != nil {
 		return fmt.Errorf("executing show-tech on %s: %w", entryName, err) //nolint:goerr113
-	}
-
-	if !done {
-		return fmt.Errorf("show-tech execution timed out on %s: stdout: %s, stderr: %s", entryName, stdout, stderr) //nolint:goerr113
 	}
 
 	if stderr != "" {
@@ -712,135 +705,14 @@ func (c *Config) collectShowTech(ctx context.Context, entryName string, entry VL
 	}
 
 	localFilePath := filepath.Join(outputDir, entryName+"-show-tech.log")
-	localFile, err := os.Create(localFilePath)
+	err = ssh.DownloadPath(remoteOutputPath, localFilePath)
 	if err != nil {
-		slog.Error("Failed to create local file", "entry", entryName, "error", err)
-
-		return fmt.Errorf("failed to create local file for %s: %w", entryName, err)
-	}
-	defer localFile.Close()
-
-	// Run cat command to fetch remote file contents (no scp download available in easy-ssh)
-	stdoutChan, stderrChan, doneChan, errChan, err := ssh.Stream(fmt.Sprintf("cat %s", remoteOutputPath), 60*time.Second)
-	if err != nil {
-		slog.Error("Failed to connect", "entry", entryName, "error", err)
-
-		return fmt.Errorf("failed to connect to %s: %w", entryName, err)
-	}
-
-	// Read remote file contents and write to local file
-	isTimeout := true
-loop:
-	for {
-		select {
-		case isTimeout = <-doneChan:
-
-			break loop
-		case line := <-stdoutChan:
-			_, writeErr := localFile.WriteString(line + "\n")
-			if writeErr != nil {
-				slog.Error("Failed to write to local file", "entry", entryName, "error", writeErr)
-
-				return fmt.Errorf("failed to write to local file for %s: %w", entryName, writeErr)
-			}
-		case errLine := <-stderrChan:
-			if errLine != "" {
-				fmt.Fprintf(os.Stderr, "%s: %s\n", entryName, errLine)
-			}
-		case err = <-errChan:
-			if err != nil {
-				slog.Error("Error while reading from remote file", "entry", entryName, "error", err)
-
-				break loop
-			}
-
-			break loop
-		}
-	}
-
-	if !isTimeout {
-		slog.Error("Timeout occurred while fetching file", "entry", entryName)
-
-		return fmt.Errorf("timeout occurred while fetching file from %s", entryName) //nolint:goerr113
+		return fmt.Errorf("downloading show-tech output from %s: %w", entryName, err)
 	}
 
 	slog.Debug("Show tech collected successfully", "entry", entryName, "output", localFilePath)
 
 	return nil
-}
-
-func (c *Config) createSSHConfig(ctx context.Context, entryName string, entry VLABAccessInfo) (*easyssh.MakeConfig, error) {
-	sshKeyPath := filepath.Join(VLABDir, VLABSSHKeyFile)
-
-	if _, err := os.Stat(sshKeyPath); err != nil {
-		return nil, fmt.Errorf("SSH key not found at %s: %w", sshKeyPath, err)
-	}
-
-	if entry.SSHPort > 0 {
-		return &easyssh.MakeConfig{
-			User:    "core",
-			Server:  "127.0.0.1",
-			Port:    fmt.Sprintf("%d", entry.SSHPort),
-			KeyPath: sshKeyPath,
-			Timeout: 60 * time.Second,
-		}, nil
-	}
-
-	if entry.IsSwitch {
-		swIP, err := c.getSwitchIP(ctx, entryName)
-		if err != nil {
-			return nil, fmt.Errorf("getting switch IP: %w", err)
-		}
-
-		controlPort := getSSHPort(0)
-		if controlPort == 0 {
-			return nil, fmt.Errorf("invalid control node port (0) for %s", entryName) //nolint:goerr113
-		}
-
-		return &easyssh.MakeConfig{
-			User:    "admin",
-			Server:  swIP,
-			Port:    "22",
-			KeyPath: sshKeyPath,
-			Timeout: 60 * time.Second,
-			Proxy: easyssh.DefaultConfig{
-				User:    "core",
-				Server:  "127.0.0.1",
-				Port:    fmt.Sprintf("%d", controlPort),
-				KeyPath: sshKeyPath,
-				Timeout: 60 * time.Second,
-			},
-		}, nil
-	}
-
-	if entry.IsNode {
-		nodeIP, err := c.getNodeIP(ctx, entryName)
-		if err != nil {
-			return nil, fmt.Errorf("getting node IP: %w", err)
-		}
-
-		controlPort := getSSHPort(0)
-		if controlPort == 0 {
-			return nil, fmt.Errorf("invalid control node port (0) for %s", entryName) //nolint:goerr113
-		}
-
-		return &easyssh.MakeConfig{
-			User:    "core",
-			Server:  nodeIP,
-			Port:    "22",
-			KeyPath: sshKeyPath,
-			Timeout: 60 * time.Second,
-			Proxy: easyssh.DefaultConfig{
-				User:    "core",
-				Server:  "127.0.0.1",
-				Port:    fmt.Sprintf("%d", controlPort),
-				KeyPath: sshKeyPath,
-				Timeout: 60 * time.Second,
-			},
-		}, nil
-	}
-
-	return nil, fmt.Errorf("unsupported entry type for %s", entryName) //nolint:goerr113
 }
 
 func (c *Config) getSwitchIP(ctx context.Context, entryName string) (string, error) {
@@ -889,21 +761,6 @@ func (c *Config) getNodeIP(ctx context.Context, name string) (string, error) {
 	}
 
 	return nodeIP.Addr().String(), nil
-}
-
-func getVMType(entry VLABAccessInfo) VMType {
-	switch {
-	case entry.IsSwitch:
-		return VMTypeSwitch
-	case entry.IsControl:
-		return VMTypeControl
-	case entry.IsServer:
-		return VMTypeServer
-	case entry.IsNode:
-		return VMTypeGateway
-	default:
-		return ""
-	}
 }
 
 func (c *Config) CollectVLABDebug(ctx context.Context, vlab *VLAB, opts VLABRunOpts) {
