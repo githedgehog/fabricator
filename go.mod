@@ -28,7 +28,6 @@ require (
 	github.com/lmittmann/tint v1.1.2
 	github.com/manifoldco/promptui v0.9.0
 	github.com/mattn/go-isatty v0.0.20
-	github.com/melbahja/goph v1.4.0
 	github.com/mholt/archives v0.1.4
 	github.com/onsi/ginkgo/v2 v2.25.3
 	github.com/onsi/gomega v1.38.2
