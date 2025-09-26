@@ -21,7 +21,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/melbahja/goph"
 	"github.com/samber/lo"
 	agentapi "go.githedgehog.com/fabric/api/agent/v1beta1"
 	"go.githedgehog.com/fabric/api/meta"
@@ -36,7 +35,6 @@ import (
 	"go.githedgehog.com/fabricator/pkg/util/sshutil"
 	gwapi "go.githedgehog.com/gateway/api/gateway/v1alpha1"
 	gwintapi "go.githedgehog.com/gateway/api/gwint/v1alpha1"
-	"golang.org/x/crypto/ssh"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 	coreapi "k8s.io/api/core/v1"
@@ -446,14 +444,13 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		"cleanup", opts.ForceCleanup,
 	)
 
-	sshPorts := map[string]uint{}
+	sshConfigs := map[string]*sshutil.Config{}
 	for _, vm := range vlab.VMs {
-		sshPorts[vm.Name] = getSSHPort(vm.ID)
-	}
-
-	sshAuth, err := goph.RawKey(vlab.SSHKey, "")
-	if err != nil {
-		return fmt.Errorf("getting ssh auth: %w", err)
+		if sshCfg, err := c.SSHVM(ctx, vlab, vm); err != nil {
+			return fmt.Errorf("getting ssh config for vm %q: %w", vm.Name, err)
+		} else {
+			sshConfigs[vm.Name] = sshCfg
+		}
 	}
 
 	cacheCancel, kube, err := getKubeClientWithCache(ctx, c.WorkDir)
@@ -760,48 +757,35 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 			defer cancel()
 
 			if err := func() error {
-				sshPort, ok := sshPorts[server.Name]
+				sshCfg, ok := sshConfigs[server.Name]
 				if !ok {
-					return fmt.Errorf("missing ssh port for %q", server.Name)
+					return fmt.Errorf("no ssh config for server %q", server.Name)
 				}
 
-				client, err := goph.NewConn(&goph.Config{
-					User:     "core",
-					Addr:     "127.0.0.1",
-					Port:     sshPort,
-					Auth:     sshAuth,
-					Timeout:  10 * time.Second,
-					Callback: ssh.InsecureIgnoreHostKey(), //nolint:gosec
-				})
+				stdout, stderr, err := sshCfg.Run(ctx, "toolbox -q hostname")
 				if err != nil {
-					return fmt.Errorf("connecting to %q: %w", server.Name, err)
+					return fmt.Errorf("running toolbox hostname: %w: %s", err, stderr)
 				}
-				defer client.Close()
-
-				out, err := client.RunContext(ctx, "toolbox -q hostname")
-				if err != nil {
-					return fmt.Errorf("running toolbox hostname: %w: %s", err, string(out))
-				}
-				hostname := strings.TrimSpace(string(out))
+				hostname := strings.TrimSpace(stdout)
 				if hostname != server.Name {
 					return fmt.Errorf("unexpected hostname %q, expected %q", hostname, server.Name)
 				}
 
 				slog.Debug("Verified", "server", server.Name)
 
-				out, err = client.RunContext(ctx, "/opt/bin/hhnet cleanup")
+				_, stderr, err = sshCfg.Run(ctx, "/opt/bin/hhnet cleanup")
 				if err != nil {
-					return fmt.Errorf("running hhnet cleanup: %w: out: %s", err, string(out))
+					return fmt.Errorf("running hhnet cleanup: %w: out: %s", err, stderr)
 				}
 
-				out, err = client.RunContext(ctx, "/opt/bin/hhnet "+netconfs[server.Name])
+				stdout, stderr, err = sshCfg.Run(ctx, "/opt/bin/hhnet "+netconfs[server.Name])
 				if err != nil {
-					return fmt.Errorf("running hhnet %q: %w: out: %s", netconfs[server.Name], err, string(out))
+					return fmt.Errorf("running hhnet %q: %w: out: %s", netconfs[server.Name], err, stderr)
 				}
 
-				prefix, err := netip.ParsePrefix(strings.TrimSpace(string(out)))
+				prefix, err := netip.ParsePrefix(strings.TrimSpace(stdout))
 				if err != nil {
-					return fmt.Errorf("parsing acquired address %q: %w", string(out), err)
+					return fmt.Errorf("parsing acquired address %q: %w", stdout, err)
 				}
 
 				expectedSubnet := expectedSubnets[server.Name]
