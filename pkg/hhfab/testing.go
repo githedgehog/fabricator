@@ -1602,7 +1602,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 						}
 						clientB := clientBR.(*sshutil.Config)
 
-						if pe := checkPing(ctx, opts, pings, serverA, serverB, clientA, ipB.Addr(), expectedReachable.Reachable); pe != nil {
+						if pe := checkPing(ctx, opts.PingsCount, pings, serverA, serverB, clientA, ipB.Addr(), nil, expectedReachable.Reachable); pe != nil {
 							return pe
 						}
 
@@ -1983,8 +1983,8 @@ func retrySSHCmd(ctx context.Context, ssh *sshutil.Config, cmd string, target st
 	return stdout, stderr, nil
 }
 
-func checkPing(ctx context.Context, opts TestConnectivityOpts, pings *semaphore.Weighted, from, to string, fromSSH *sshutil.Config, toIP netip.Addr, expected bool) *PingError {
-	if opts.PingsCount <= 0 {
+func checkPing(ctx context.Context, pingCount int, semaphore *semaphore.Weighted, from, to string, fromSSH *sshutil.Config, toIP netip.Addr, sourceIP *netip.Addr, expected bool) *PingError {
+	if pingCount <= 0 {
 		return nil
 	}
 	pe := &PingError{
@@ -1993,23 +1993,34 @@ func checkPing(ctx context.Context, opts TestConnectivityOpts, pings *semaphore.
 		Expected:    expected,
 	}
 
-	if err := pings.Acquire(ctx, 1); err != nil {
-		pe.Msg = fmt.Sprintf("acquiring ping semaphore: %s", err)
+	if semaphore != nil {
+		if err := semaphore.Acquire(ctx, 1); err != nil {
+			pe.Msg = fmt.Sprintf("acquiring ping semaphore: %s", err)
 
-		return pe
+			return pe
+		}
+		defer semaphore.Release(1)
 	}
-	defer pings.Release(1)
 
-	ctx, cancel := context.WithTimeout(ctx, time.Duration(opts.PingsCount+30)*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(pingCount+30)*time.Second)
 	defer cancel()
 
-	slog.Debug("Running ping", "from", from, "to", toIP.String())
+	slog.Debug("Running ping", "from", from, "to", toIP.String(), "sourceIP", sourceIP, "expected", expected)
+	cmd := "ping -c 1 -W 1"
+	if sourceIP != nil {
+		cmd += " -I " + sourceIP.String()
+	}
+	cmd += " " + toIP.String()
 
-	if stdout, stderr, err := retrySSHCmd(ctx, fromSSH, fmt.Sprintf("ping -c 1 -W 1 %s", toIP.String()), from); err != nil && expected {
+	if stdout, stderr, err := retrySSHCmd(ctx, fromSSH, cmd, from); err != nil && expected {
 		slog.Warn("Warm-up ping failed, continuing anyway", "err", err, "stdout", stdout, "stderr", stderr)
 	}
 
-	cmd := fmt.Sprintf("ping -i 0.5 -c %d -W 1 %s", opts.PingsCount, toIP.String())
+	cmd = fmt.Sprintf("ping -i 0.5 -c %d -W 1", pingCount)
+	if sourceIP != nil {
+		cmd += " -I " + sourceIP.String()
+	}
+	cmd += " " + toIP.String()
 	stdout, stderr, err := retrySSHCmd(ctx, fromSSH, cmd, from)
 	pe.CmdOutput = stdout
 
@@ -2454,7 +2465,6 @@ type ReleaseTestOpts struct {
 	Regexes     []string
 	InvertRegex bool
 	ResultsFile string
-	HhfabBin    string
 	Extended    bool
 	FailFast    bool
 	PauseOnFail bool
@@ -2463,13 +2473,7 @@ type ReleaseTestOpts struct {
 	ListTests   bool
 }
 
-func (c *Config) ReleaseTest(ctx context.Context, opts ReleaseTestOpts) error {
-	self, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("getting executable path: %w", err)
-	}
-	opts.HhfabBin = self
-
+func (c *Config) ReleaseTest(ctx context.Context, vlab *VLAB, opts ReleaseTestOpts) error {
 	if !slices.Contains(HashPolicies, opts.HashPolicy) {
 		return fmt.Errorf("invalid hash policy %q, must be one of %v", opts.HashPolicy, HashPolicies)
 	} else if opts.HashPolicy != HashPolicyL2 && opts.HashPolicy != HashPolicyL2And3 {
@@ -2479,5 +2483,5 @@ func (c *Config) ReleaseTest(ctx context.Context, opts ReleaseTestOpts) error {
 		return fmt.Errorf("invalid VPC mode %q, must be one of %v", opts.VPCMode, vpcapi.VPCModes)
 	}
 
-	return RunReleaseTestSuites(ctx, c.WorkDir, c.CacheDir, opts)
+	return RunReleaseTestSuites(ctx, c, vlab, opts)
 }
