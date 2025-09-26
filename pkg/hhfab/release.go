@@ -2007,6 +2007,8 @@ func setRoCE(ctx context.Context, kube kclient.Client, swName string, roce bool)
 	return nil
 }
 
+// Test RoCE functionality and DSCP traffic marking by enabling RoCE on a leaf switch
+// with servers, generating DSCP 24 marked traffic, and verifying UC3 queue counters.
 func (testCtx *VPCPeeringTestCtx) roceBasicTest(ctx context.Context) (bool, []RevertFunc, error) {
 	// this should never fail
 	if len(testCtx.roceLeaves) == 0 {
@@ -2014,15 +2016,49 @@ func (testCtx *VPCPeeringTestCtx) roceBasicTest(ctx context.Context) (bool, []Re
 
 		return true, nil, errNoRoceLeaves
 	}
-	swName := testCtx.roceLeaves[0]
+
+	// Find a RoCE-capable leaf with server connections
+	var swName string
+	for _, candidateSwitch := range testCtx.roceLeaves {
+		connList := &wiringapi.ConnectionList{}
+		if err := testCtx.kube.List(ctx, connList, kclient.MatchingLabels{
+			wiringapi.ListLabelSwitch(candidateSwitch): "true",
+		}); err != nil {
+			return false, nil, fmt.Errorf("listing connections for switch %s: %w", candidateSwitch, err)
+		}
+
+		for _, conn := range connList.Items {
+			_, servers, _, _, err := conn.Spec.Endpoints()
+			if err == nil && len(servers) > 0 {
+				swName = candidateSwitch
+				slog.Debug("Selected RoCE leaf with servers", "switch", swName)
+
+				break
+			}
+		}
+
+		if swName != "" {
+			break
+		}
+		slog.Debug("Skipping RoCE leaf with no servers", "switch", candidateSwitch)
+	}
+
+	if swName == "" {
+		slog.Info("No RoCE-capable leaves with servers found, skipping test")
+
+		return true, nil, fmt.Errorf("no RoCE leaves with servers found") //nolint:goerr113
+	}
+
 	swSSH, sshErr := testCtx.getSSH(ctx, swName)
 	if sshErr != nil {
 		return false, nil, fmt.Errorf("getting ssh config for switch %s: %w", swName, sshErr)
 	}
+
 	sw := &wiringapi.Switch{}
 	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: swName}, sw); err != nil {
 		return false, nil, fmt.Errorf("getting switch %s: %w", swName, err)
 	}
+
 	// enable RoCE on the switch if not already enabled
 	if err := setRoCE(ctx, testCtx.kube, swName, true); err != nil {
 		return false, nil, fmt.Errorf("enabling RoCE on switch %s: %w", swName, err)
@@ -2048,6 +2084,7 @@ func (testCtx *VPCPeeringTestCtx) roceBasicTest(ctx context.Context) (bool, []Re
 	if err != nil {
 		return false, nil, fmt.Errorf("getting agent %s: %w", swName, err)
 	}
+
 	for iface, ifaceStats := range agent.Status.State.Interfaces {
 		if ifaceStats.OperStatus != agentapi.OperStatusUp {
 			continue
