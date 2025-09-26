@@ -4,6 +4,7 @@
 package hhfab
 
 import (
+	"bytes"
 	"context"
 	"encoding/xml"
 	"errors"
@@ -270,6 +271,31 @@ func execConfigCmd(hhfabBin, workDir, swName string, cmds ...string) error {
 	return nil
 }
 
+func execShowCmd(hhfabBin, workDir, swName string, cmds ...string) (string, error) {
+	cmd := exec.Command(
+		hhfabBin,
+		"vlab",
+		"ssh",
+		"-n",
+		swName,
+		"-b",
+		"sonic-cli",
+	)
+	for _, c := range cmds {
+		// add escaped double quotes around the command
+		cmd.Args = append(cmd.Args, "-c", fmt.Sprintf("\"%s\"", c))
+	}
+	cmd.Dir = workDir
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	stdout, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("configuring switch %s: %w, stderr: %s", swName, err, stderr.String())
+	}
+
+	return string(stdout), nil
+}
+
 // Run a command on node nodeName via ssh.
 func execNodeCmd(hhfabBin, workDir, nodeName string, command string) error {
 	cmd := exec.Command(
@@ -353,6 +379,7 @@ func pingFromFabricNode(hhfabBin, workDir, nodeName, ip string, sourceIP string,
 		hhfabBin,
 		"vlab",
 		"ssh",
+		"-b",
 		"-n",
 		nodeName,
 		"ping",
@@ -1339,21 +1366,57 @@ outer:
 
 func (testCtx *VPCPeeringTestCtx) pingStaticExternal(sourceNode string, sourceIP string, expected bool) error {
 	slog.Debug("Pinging static external next hop", "sourceNode", sourceNode, "next-hop", StaticExternalNH, "expected", expected)
-	if err := pingFromFabricNode(testCtx.hhfabBin, testCtx.workDir, sourceNode, StaticExternalNH, sourceIP, expected, 1); err != nil {
-		slog.Warn("Warm-up ping failed, continuing anyway")
-	}
 	if err := pingFromFabricNode(testCtx.hhfabBin, testCtx.workDir, sourceNode, StaticExternalNH, sourceIP, expected, 3); err != nil {
 		return fmt.Errorf("ping from %s to %s: %w", sourceNode, StaticExternalNH, err)
 	}
 	slog.Debug("Pinging static external dummy interface", "sourceNode", sourceNode, "dummy-interface", StaticExternalDummyIface, "expected", expected)
-	if err := pingFromFabricNode(testCtx.hhfabBin, testCtx.workDir, sourceNode, StaticExternalDummyIface, sourceIP, expected, 1); err != nil {
-		slog.Warn("Warm-up ping failed, continuing anyway")
-	}
 	if err := pingFromFabricNode(testCtx.hhfabBin, testCtx.workDir, sourceNode, StaticExternalDummyIface, sourceIP, expected, 3); err != nil {
 		return fmt.Errorf("ping from %s to %s: %w", sourceNode, StaticExternalDummyIface, err)
 	}
 
 	return nil
+}
+
+func (testCtx *VPCPeeringTestCtx) checkRouteInSwitch(switchName, route, vrfName string) (bool, error) {
+	cliCmd := fmt.Sprintf("show ip route vrf %s %s", vrfName, route)
+	out, err := execShowCmd(testCtx.hhfabBin, testCtx.workDir, switchName, cliCmd)
+	if err != nil {
+		return false, fmt.Errorf("executing CLI command '%s' on switch %s: %w", cliCmd, switchName, err)
+	}
+
+	return out != "", nil
+}
+
+func (testCtx *VPCPeeringTestCtx) waitForRoutesInSwitches(ctx context.Context, switches, routes []string, vrfName string, timeout time.Duration) error {
+	slog.Debug("Checking for routes in switches", "switches", switches, "routes", routes, "vrf", vrfName, "timeout", timeout)
+	toCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	for {
+		allFound := true
+		for _, sw := range switches {
+			for _, route := range routes {
+				if found, err := testCtx.checkRouteInSwitch(sw, route, vrfName); err != nil {
+					return fmt.Errorf("checking for route %s in switch %s vrf %s: %w", route, sw, vrfName, err)
+				} else if !found {
+					slog.Debug("Route not found yet", "switch", sw, "route", route, "vrf", vrfName)
+					allFound = false
+
+					break
+				}
+			}
+		}
+		if allFound {
+			slog.Debug("All routes found in all switches")
+
+			return nil
+		}
+		select {
+		case <-toCtx.Done():
+			return fmt.Errorf("timeout waiting for routes %v in switches %v", routes, switches) //nolint:goerr113
+		case <-time.After(5 * time.Second):
+		}
+	}
 }
 
 /* This test replaces a server with a "static external" node, Here are the test steps:
@@ -1428,6 +1491,7 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool,
 	}
 	var vpc1, vpc2 *vpcapi.VPC
 	var server1, server2 string
+	routeCheckSwList := []string{switchName}
 	vpcAttachList := &vpcapi.VPCAttachmentList{}
 	for _, vpc := range vpcList.Items {
 		if err := testCtx.kube.List(ctx, vpcAttachList, kclient.MatchingLabels{wiringapi.LabelVPC: vpc.Name}); err != nil {
@@ -1439,7 +1503,7 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool,
 			if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: connName}, conn); err != nil {
 				return false, nil, fmt.Errorf("getting connection %s for VPC Attach %s: %w", connName, vpcAttach.Name, err)
 			}
-			_, servers, _, _, _ := conn.Spec.Endpoints()
+			switches, servers, _, _, _ := conn.Spec.Endpoints()
 			if len(servers) != 1 {
 				return false, nil, fmt.Errorf("expected 1 server for connection %s, got %d", conn.Name, len(servers)) //nolint:goerr113
 			}
@@ -1451,6 +1515,7 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool,
 			if vpc1 == nil {
 				vpc1 = &vpc
 				server1 = servers[0]
+				routeCheckSwList = append(routeCheckSwList, switches...)
 			} else {
 				vpc2 = &vpc
 				server2 = servers[0]
@@ -1649,8 +1714,18 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool,
 
 		return nil
 	})
-	slog.Debug("Waiting 1 minute...")
-	time.Sleep(1 * time.Minute)
+	// look for routes in the switch(es) before pinging, see https://github.com/githedgehog/fabricator/issues/932#issuecomment-3322976488
+	if err := testCtx.waitForRoutesInSwitches(ctx, routeCheckSwList, []string{StaticExternalNH, StaticExternalDummyIface}, "VrfV"+vpc1.Name, 3*time.Minute); err != nil {
+		return false, reverts, fmt.Errorf("waiting for routes in switch %s vrf VrfV%s: %w", switchName, vpc1.Name, err)
+	}
+
+	slog.Debug("Pinging from the switch attached to the static external to trigger ARP resolution", "switch", switchName, "vrf", "VrfV"+vpc1.Name, "source-ip", StaticExternalIP, "target", StaticExternalNH)
+	pingOut, pingErr := execShowCmd(testCtx.hhfabBin, testCtx.workDir, switchName, fmt.Sprintf("ping vrf VrfV%s -I %s %s -c 3 -W 1", vpc1.Name, StaticExternalIP, StaticExternalNH))
+	if pingErr != nil {
+		slog.Warn("Warm-up ping from switch failed, continuing anyway", "error", pingErr)
+	} else {
+		slog.Debug("Ping output from switch", "output", pingOut)
+	}
 
 	// Ping the addresses from server1 which is in the static external VPC, expect success
 	if err := testCtx.pingStaticExternal(server1, "", true); err != nil {
@@ -1696,8 +1771,10 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool,
 	if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
 		return false, reverts, fmt.Errorf("waiting for switches to be ready: %w", err)
 	}
-	slog.Debug("Waiting 1 minute...")
-	time.Sleep(1 * time.Minute)
+	// look for routes in the switch(es) before pinging, see https://github.com/githedgehog/fabricator/issues/932#issuecomment-3322976488
+	if err := testCtx.waitForRoutesInSwitches(ctx, routeCheckSwList, []string{StaticExternalNH, StaticExternalDummyIface}, "default", 3*time.Minute); err != nil {
+		return false, reverts, fmt.Errorf("waiting for routes in switch %s vrf default: %w", switchName, err)
+	}
 
 	// Ping the addresses from server1, this should now fail
 	if err := testCtx.pingStaticExternal(server1, "", false); err != nil {
