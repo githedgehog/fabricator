@@ -1994,6 +1994,8 @@ func setRoCE(ctx context.Context, kube kclient.Client, swName string, roce bool)
 	return nil
 }
 
+// Test RoCE functionality and DSCP traffic marking by enabling RoCE on a leaf switch
+// with servers, generating DSCP 24 marked traffic, and verifying UC3 queue counters.
 func (testCtx *VPCPeeringTestCtx) roceBasicTest(ctx context.Context) (bool, []RevertFunc, error) {
 	// this should never fail
 	if len(testCtx.roceLeaves) == 0 {
@@ -2001,7 +2003,44 @@ func (testCtx *VPCPeeringTestCtx) roceBasicTest(ctx context.Context) (bool, []Re
 
 		return true, nil, errNoRoceLeaves
 	}
-	swName := testCtx.roceLeaves[0]
+
+	// Find a RoCE-capable leaf with server connections
+	var swName string
+	for _, candidateSwitch := range testCtx.roceLeaves {
+		connList := &wiringapi.ConnectionList{}
+		if err := testCtx.kube.List(ctx, connList, kclient.MatchingLabels{
+			wiringapi.ListLabelSwitch(candidateSwitch): "true",
+		}); err != nil {
+			slog.Debug("Error listing connections for switch", "switch", candidateSwitch, "error", err)
+
+			continue
+		}
+
+		hasServers := false
+		for _, conn := range connList.Items {
+			_, servers, _, _, err := conn.Spec.Endpoints()
+			if err == nil && len(servers) > 0 {
+				hasServers = true
+
+				break
+			}
+		}
+
+		if hasServers {
+			swName = candidateSwitch
+			slog.Debug("Selected RoCE leaf with servers", "switch", swName)
+
+			break
+		}
+		slog.Debug("Skipping RoCE leaf with no servers", "switch", candidateSwitch)
+	}
+
+	if swName == "" {
+		slog.Info("No RoCE-capable leaves with servers found, skipping test")
+
+		return true, nil, fmt.Errorf("no RoCE leaves with servers found") //nolint:goerr113
+	}
+
 	sw := &wiringapi.Switch{}
 	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: swName}, sw); err != nil {
 		return false, nil, fmt.Errorf("getting switch %s: %w", swName, err)
