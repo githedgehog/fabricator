@@ -10,9 +10,31 @@ import (
 
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/util/sshutil"
+	kapierrors "k8s.io/apimachinery/pkg/api/errors"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+func getControlProxy(vlab *VLAB) (*sshutil.Remote, error) {
+	controlSSHPort := uint(0)
+	for _, vm := range vlab.VMs {
+		if vm.Type == VMTypeControl {
+			controlSSHPort = getSSHPort(vm.ID)
+
+			break
+		}
+	}
+
+	if controlSSHPort == 0 {
+		return nil, fmt.Errorf("control VM not found") //nolint:err113
+	}
+
+	return &sshutil.Remote{
+		User: "core",
+		Host: "127.0.0.1",
+		Port: controlSSHPort,
+	}, nil
+}
 
 func (c *Config) SSHVM(ctx context.Context, vlab *VLAB, vm VM) (*sshutil.Config, error) {
 	ssh := &sshutil.Config{
@@ -72,24 +94,11 @@ func (c *Config) SSHVM(ctx context.Context, vlab *VLAB, vm VM) (*sshutil.Config,
 	}
 
 	if ssh.Remote.Host != "127.0.0.1" {
-		controlSSHPort := uint(0)
-		for _, vm := range vlab.VMs {
-			if vm.Type == VMTypeControl {
-				controlSSHPort = getSSHPort(vm.ID)
-
-				break
-			}
+		proxy, err := getControlProxy(vlab)
+		if err != nil {
+			return nil, fmt.Errorf("getting control proxy: %w", err)
 		}
-
-		if controlSSHPort == 0 {
-			return nil, fmt.Errorf("control VM not found") //nolint:err113
-		}
-
-		ssh.Proxy = &sshutil.Remote{
-			User: "core",
-			Host: "127.0.0.1",
-			Port: controlSSHPort,
-		}
+		ssh.Proxy = proxy
 	}
 
 	return ssh, nil
@@ -104,5 +113,28 @@ func (c *Config) SSH(ctx context.Context, vlab *VLAB, target string) (*sshutil.C
 		return c.SSHVM(ctx, vlab, vm)
 	}
 
-	return nil, fmt.Errorf("unknown target: %s", target) //nolint:err113
+	// hardware switches are not added to the VLAB VM list
+	swIP, err := c.getSwitchIP(ctx, target)
+	if err != nil {
+		if kapierrors.IsNotFound(err) {
+			return nil, fmt.Errorf("unknown target: %s", target) //nolint:err113
+		}
+
+		return nil, fmt.Errorf("getting switch IP: %w", err)
+	}
+	ssh := &sshutil.Config{
+		SSHKey: vlab.SSHKey,
+		Remote: sshutil.Remote{
+			User: "admin",
+			Host: swIP,
+			Port: 22,
+		},
+	}
+	proxy, err := getControlProxy(vlab)
+	if err != nil {
+		return nil, fmt.Errorf("getting control proxy: %w", err)
+	}
+	ssh.Proxy = proxy
+
+	return ssh, nil
 }
