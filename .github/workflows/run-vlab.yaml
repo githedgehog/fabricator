@@ -306,8 +306,8 @@ jobs:
           path: fab-${{ github.run_id }}-${{ env.slug }}
 
       - name: Setup tmate session for debug
-        if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug }}
+        if: ${{ failure() }}
         uses: mxschmitt/action-tmate@v3
-        timeout-minutes: 30
+        timeout-minutes: 200
         with:
           limit-access-to-actor: true
