@@ -19,18 +19,24 @@ import (
 	"go.githedgehog.com/fabricator/pkg/artificer"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/f8r"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/flatcar"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
 	coreapi "k8s.io/api/core/v1"
 )
 
-type NodeInstall struct {
+type NodeInstallUpgrade struct {
 	WorkDir string
+	Yes     bool
 	Fab     fabapi.Fabricator
 	Node    fabapi.FabNode
 }
 
-func (c *NodeInstall) Run(ctx context.Context) error {
-	slog.Info("Running node installation", "name", c.Node.Name, "roles", c.Node.Spec.Roles)
+func (c *NodeInstallUpgrade) Run(ctx context.Context, upgrade bool) error {
+	mode := "install"
+	if upgrade {
+		mode = "upgrade"
+	}
+	slog.Info("Running node "+mode, "name", c.Node.Name, "roles", c.Node.Spec.Roles)
 
 	if err := checkIfaceAddresses(c.Node.Spec.Management.Interface,
 		string(c.Node.Spec.Management.IP),
@@ -70,11 +76,19 @@ func (c *NodeInstall) Run(ctx context.Context) error {
 		}
 	}
 
+	if upgrade {
+		if err := upgradeFlatcar(ctx, string(flatcar.Version(c.Fab)), c.Yes); err != nil {
+			return fmt.Errorf("upgrading Flatcar: %w", err)
+		}
+	}
+
+	slog.Info("Node " + mode + " completed")
+
 	return nil
 }
 
 // TODO dedup with contol node's k3s install
-func (c *NodeInstall) joinK8s(ctx context.Context) error {
+func (c *NodeInstallUpgrade) joinK8s(ctx context.Context) error {
 	slog.Info("Joining k8s cluster")
 
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
@@ -159,7 +173,7 @@ func (c *NodeInstall) joinK8s(ctx context.Context) error {
 	return nil
 }
 
-func (c *NodeInstall) prepForDataplane(ctx context.Context) error {
+func (c *NodeInstallUpgrade) prepForDataplane(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 1*time.Minute)
 	defer cancel()
 
