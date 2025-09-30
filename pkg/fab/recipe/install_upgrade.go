@@ -146,11 +146,11 @@ func DoInstall(ctx context.Context, workDir string, yes bool) error {
 			return fmt.Errorf("expected exactly 1 node, got %d", len(nodes)) //nolint:goerr113
 		}
 
-		if err := (&NodeInstall{
+		if err := (&NodeInstallUpgrade{
 			WorkDir: workDir,
 			Fab:     f,
 			Node:    nodes[0],
-		}).Run(ctx); err != nil {
+		}).Run(ctx, false); err != nil {
 			return fmt.Errorf("running node install: %w", err)
 		}
 	default:
@@ -209,8 +209,32 @@ func DoUpgrade(ctx context.Context, workDir string, yes, skipChecks bool) error 
 			return fmt.Errorf("running control upgrade: %w", err)
 		}
 	case TypeNode:
-		slog.Warn("Node upgrade is not implemented yet")
-		// TODO implement node upgrade
+		l := apiutil.NewLoader()
+		fabCfg, err := os.ReadFile(filepath.Join(workDir, FabName))
+		if err != nil {
+			return fmt.Errorf("reading fab config: %w", err)
+		}
+
+		if err := l.LoadAdd(ctx, apiutil.FabricatorGVKs, fabCfg); err != nil {
+			return fmt.Errorf("loading fab config: %w", err)
+		}
+
+		f, _, nodes, err := fab.GetFabAndNodes(ctx, l.GetClient(), fab.GetFabAndNodesOpts{AllowNoControls: true})
+		if err != nil {
+			return fmt.Errorf("getting fabricator and nodes: %w", err)
+		}
+
+		if len(nodes) != 1 {
+			return fmt.Errorf("expected exactly 1 node, got %d", len(nodes)) //nolint:goerr113
+		}
+
+		if err := (&NodeInstallUpgrade{
+			WorkDir: workDir,
+			Fab:     f,
+			Node:    nodes[0],
+		}).Run(ctx, true); err != nil {
+			return fmt.Errorf("running node upgrade: %w", err)
+		}
 	default:
 		return fmt.Errorf("unknown upgrader type %q", cfg.Type) //nolint:goerr113
 	}
