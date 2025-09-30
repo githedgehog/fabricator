@@ -1963,7 +1963,7 @@ func retrySSHCmd(ctx context.Context, ssh *sshutil.Config, cmd string, target st
 		if err == nil {
 			break
 		}
-		if strings.Contains(err.Error(), "ssh:") || strings.Contains(stderr, "ssh:") {
+		if strings.Contains(err.Error(), "ssh:") || strings.Contains(stderr, "ssh:") || strings.Contains(stderr, "is currently busy") {
 			slog.Debug("cannot ssh to run remote command", "cmd", cmd, "remote target", target, "retry", retries+1, "error", err, "stderr", stderr)
 			if retries < maxRetries-1 {
 				// random wait in [1, 5] seconds range
