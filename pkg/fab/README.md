@@ -154,8 +154,8 @@ oras push ghcr.io/githedgehog/sonic-cls-private/sonic-cls-plus-vs:${CLS_SONIC_VE
 ## Grafana Alloy
 
 ```bash
-export ALLOY_VERSION="v1.10.2"
-export ALLOY_CHART_VERSION="1.2.1"
+export ALLOY_VERSION="v1.11.0"
+export ALLOY_CHART_VERSION="1.3.0"
 
 helm repo add grafana https://grafana.github.io/helm-charts
 helm repo update
