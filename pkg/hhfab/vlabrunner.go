@@ -98,6 +98,9 @@ type VLABRunOpts struct {
 	OnReady            []OnReady
 	CollectShowTech    bool
 	VPCMode            vpcapi.VPCMode
+	PauseOnFail        bool
+	ReleaseTestRegexes []string
+	ReleaseTestInvert  bool
 }
 
 type OnReady string
@@ -601,6 +604,10 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 
 						c.CollectVLABDebug(ctx, vlab, opts)
 
+						if opts.PauseOnFail {
+							pauseOnFail()
+						}
+
 						return fmt.Errorf("reinstalling switches: %w", err)
 					}
 				case OnReadySetupVPCs:
@@ -619,6 +626,10 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						slog.Warn("Failed to setup VPCs", "err", err)
 
 						c.CollectVLABDebug(ctx, vlab, opts)
+
+						if opts.PauseOnFail {
+							pauseOnFail()
+						}
 
 						return fmt.Errorf("setting up VPCs: %w", err)
 					}
@@ -640,6 +651,10 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 
 						c.CollectVLABDebug(ctx, vlab, opts)
 
+						if opts.PauseOnFail {
+							pauseOnFail()
+						}
+
 						return fmt.Errorf("setting up peerings: %w", err)
 					}
 				case OnReadyTestConnectivity:
@@ -653,6 +668,10 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						slog.Warn("Failed to test connectivity", "err", err)
 
 						c.CollectVLABDebug(ctx, vlab, opts)
+
+						if opts.PauseOnFail {
+							pauseOnFail()
+						}
 
 						return fmt.Errorf("testing connectivity: %w", err)
 					}
@@ -672,6 +691,10 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 
 						c.CollectVLABDebug(ctx, vlab, opts)
 
+						if opts.PauseOnFail {
+							pauseOnFail()
+						}
+
 						return fmt.Errorf("waiting: %w", err)
 					}
 				case OnReadyInspect:
@@ -684,6 +707,10 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 
 						c.CollectVLABDebug(ctx, vlab, opts)
 
+						if opts.PauseOnFail {
+							pauseOnFail()
+						}
+
 						return fmt.Errorf("inspecting: %w", err)
 					}
 				case OnReadyReleaseTest:
@@ -691,6 +718,9 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						ResultsFile: "release-test.xml",
 						HashPolicy:  HashPolicyL2And3,
 						VPCMode:     opts.VPCMode,
+						PauseOnFail: opts.PauseOnFail,
+						Regexes:     opts.ReleaseTestRegexes,
+						InvertRegex: opts.ReleaseTestInvert,
 					}); err != nil {
 						slog.Warn("Failed to run release test", "err", err)
 

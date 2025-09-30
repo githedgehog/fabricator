@@ -30,9 +30,29 @@ on:
         description: "Run release tests in vlab/hlab"
         required: false
         default: false
+      release_test_regex:
+        type: string
+        description: "Run only release tests matched by regex"
+        required: false
+        default: ""
+      release_test_invert_regex:
+        type: boolean
+        description: "Invert regex match"
+        required: false
+        default: false
+      enable_hlab:
+        type: boolean
+        description: "Enable hlab (hybrid lab) tests"
+        required: false
+        default: false
       debug_enabled:
         type: boolean
         description: "Run the build with tmate debugging enabled (https://github.com/marketplace/actions/debugging-with-tmate)"
+        required: false
+        default: false
+      pause_on_fail:
+        type: boolean
+        description: "Pause release tests on failure for debugging"
         required: false
         default: false
 
@@ -214,20 +234,28 @@ jobs:
           fi
 
   vlab:
-    name: "${{ matrix.hybrid && 'h' || 'v' }}-${{ matrix.upgradefrom && 'up' || '' }}${{ matrix.upgradefrom }}${{ matrix.upgradefrom && '-' || '' }}${{ matrix.fabricmode == 'collapsed-core' && 'cc-' || '' }}${{ matrix.mesh && 'mesh-' || '' }}${{ matrix.gateway && 'gw-' || '' }}${{ matrix.includeonie && 'onie-' || '' }}${{ matrix.buildmode }}-${{ matrix.vpcmode }}"
     needs:
       - test-build
+
+    name: "${{ matrix.hybrid && 'h' || 'v' }}-${{ matrix.upgradefrom && 'up' || '' }}${{ matrix.upgradefrom }}${{ matrix.upgradefrom && '-' || '' }}${{ matrix.fabricmode == 'collapsed-core' && 'cc-' || '' }}${{ matrix.mesh && 'mesh-' || '' }}${{ matrix.gateway && 'gw-' || '' }}${{ matrix.includeonie && 'onie-' || '' }}${{ matrix.buildmode }}-${{ matrix.vpcmode }}${{ (inputs.releasetest == true || contains(github.event.pull_request.labels.*.name, 'ci:+release')) && '-rt' || '' }}"
+
     uses: ./.github/workflows/run-vlab.yaml
     with:
       # if pull_request: skip hlab if not ci:+hlab and skip vlab if ci:-vlab
       skip: >-
         ${{
-          github.event_name == 'pull_request'
-          && (
-            matrix.hybrid && !contains(github.event.pull_request.labels.*.name, 'ci:+hlab')
-            || !matrix.hybrid && contains(github.event.pull_request.labels.*.name, 'ci:-vlab')
-          ) && (
-            matrix.upgradefrom == '' || !contains(github.event.pull_request.labels.*.name, 'ci:-upgrade')
+          (
+            github.event_name == 'pull_request'
+            && (
+              matrix.hybrid && !contains(github.event.pull_request.labels.*.name, 'ci:+hlab')
+              || !matrix.hybrid && contains(github.event.pull_request.labels.*.name, 'ci:-vlab')
+            ) && (
+              matrix.upgradefrom == '' || !contains(github.event.pull_request.labels.*.name, 'ci:-upgrade')
+            )
+          ) || (
+            github.event_name == 'workflow_dispatch'
+            && matrix.hybrid
+            && !inputs.enable_hlab
           )
         }}
       fabricatorref: ${{ github.ref }}
@@ -238,8 +266,12 @@ jobs:
       buildmode: ${{ matrix.buildmode }}
       vpcmode: ${{ matrix.vpcmode }}
       releasetest: ${{ inputs.releasetest == true || contains(github.event.pull_request.labels.*.name, 'ci:+release') }}
+      release_test_regex: ${{ inputs.release_test_regex || '' }}
+      release_test_invert_regex: ${{ inputs.release_test_invert_regex == true }}
       hybrid: ${{ matrix.hybrid }}
       upgradefrom: ${{ matrix.upgradefrom }}
+      debug: ${{ inputs.debug_enabled || false }}
+      pause_on_fail: ${{ inputs.pause_on_fail || false }}
 
     strategy:
       fail-fast: false

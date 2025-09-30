@@ -766,6 +766,11 @@ func Run(ctx context.Context) error {
 								Usage: "exit on first error",
 								Value: true,
 							},
+							&cli.BoolFlag{
+								Name:    FlagPauseOnFail,
+								Aliases: []string{"p"},
+								Usage:   "pause testing on each scenario failure (for troubleshooting)",
+							},
 							&cli.StringSliceFlag{
 								Name:    FlagNameReady,
 								Aliases: []string{"r"},
@@ -780,6 +785,16 @@ func Run(ctx context.Context) error {
 							&cli.StringFlag{
 								Name:  FlagNameVPCMode,
 								Usage: "VPC mode to be used for on-ready commands: empty is default (l2vni), l3vni, etc.",
+							},
+							&cli.StringSliceFlag{
+								Name:    "release-test-regex",
+								Aliases: []string{"rt-regex"},
+								Usage:   "regex pattern to filter release tests (used when --ready=release-test)",
+							},
+							&cli.BoolFlag{
+								Name:    "release-test-invert-regex",
+								Aliases: []string{"rt-invert"},
+								Usage:   "invert regex selection for release tests (used when --ready=release-test)",
 							},
 						}),
 						Before: before(false),
@@ -809,6 +824,9 @@ func Run(ctx context.Context) error {
 									OnReady:            onReady,
 									CollectShowTech:    c.Bool(FlagNameCollectShowTech),
 									VPCMode:            vpcapi.VPCMode(handleL2VNI(c.String(FlagNameVPCMode))),
+									PauseOnFail:        c.Bool(FlagPauseOnFail),
+									ReleaseTestRegexes: c.StringSlice("release-test-regex"),
+									ReleaseTestInvert:  c.Bool("release-test-invert-regex"),
 								},
 							}); err != nil {
 								return fmt.Errorf("running VLAB: %w", err)
