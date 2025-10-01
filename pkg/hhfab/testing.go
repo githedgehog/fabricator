@@ -875,6 +875,10 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 	if err := kube.List(ctx, externalList); err != nil {
 		return fmt.Errorf("listing externals: %w", err)
 	}
+	externals := map[string]*vpcapi.External{}
+	for _, ext := range externalList.Items {
+		externals[ext.Name] = &ext
+	}
 
 	switchGroupList := &wiringapi.SwitchGroupList{}
 	if err := kube.List(ctx, switchGroupList); err != nil {
@@ -1037,6 +1041,9 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 			if ext == "" {
 				return fmt.Errorf("invalid external peering request %s, external should be non-empty", reqName)
 			}
+			if _, ok := externals[ext]; !ok {
+				return fmt.Errorf("external %s not found for external peering", ext)
+			}
 
 			if !strings.HasPrefix(vpc, "vpc-") {
 				if vpcID, err := strconv.ParseUint(vpc, 10, 64); err == nil {
@@ -1046,19 +1053,9 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 				vpc = "vpc-" + vpc
 			}
 
-			extPeering := &vpcapi.ExternalPeeringSpec{
-				Permit: vpcapi.ExternalPeeringSpecPermit{
-					VPC: vpcapi.ExternalPeeringSpecVPC{
-						Name:    vpc,
-						Subnets: []string{},
-					},
-					External: vpcapi.ExternalPeeringSpecExternal{
-						Name:     ext,
-						Prefixes: []vpcapi.ExternalPeeringSpecPrefix{},
-					},
-				},
-			}
-
+			gw := false
+			vpcSubnets := []string{}
+			extPrefixes := []string{}
 			for idx, option := range parts[1:] {
 				parts := strings.Split(option, "=")
 				if len(parts) > 2 {
@@ -1071,54 +1068,105 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 					optValue = parts[1]
 				}
 
-				if optName == "vpc_subnets" || optName == "subnets" || optName == "s" {
+				switch optName {
+				case "gw", "gateway":
+					gw = true
+				case "vpc-subnets", "subnets", "s":
 					if optValue == "" {
 						return fmt.Errorf("invalid external peering option #%d %s, VPC subnet names should be non-empty", idx, option)
 					}
-
-					extPeering.Permit.VPC.Subnets = append(extPeering.Permit.VPC.Subnets, strings.Split(optValue, ",")...)
-				} else if optName == "ext_prefixes" || optName == "prefixes" || optName == "p" {
+					vpcSubnets = strings.Split(optValue, ",")
+				case "ext-prefixes", "prefixes", "p":
 					if optValue == "" {
 						return fmt.Errorf("invalid external peering option #%d %s, external prefixes should be non-empty", idx, option)
 					}
-
-					for _, rawPrefix := range strings.Split(optValue, ",") {
-						prefix := vpcapi.ExternalPeeringSpecPrefix{
-							Prefix: rawPrefix,
-						}
-						if strings.Contains(rawPrefix, "_") {
-							prefixParts := strings.Split(rawPrefix, "_")
-							if len(prefixParts) > 1 {
-								return fmt.Errorf("invalid external peering option #%d %s, external prefix should be in format 1.2.3.4/24", idx, option)
-							}
-
-							prefix.Prefix = prefixParts[0]
-						}
-
-						extPeering.Permit.External.Prefixes = append(extPeering.Permit.External.Prefixes, prefix)
-					}
-				} else {
-					return fmt.Errorf("invalid external peering option #%d %s", idx, option)
+					extPrefixes = strings.Split(optValue, ",")
+				default:
+					return fmt.Errorf("invalid peering option #%d %s", idx, option)
 				}
 			}
 
-			if len(extPeering.Permit.VPC.Subnets) == 0 {
-				extPeering.Permit.VPC.Subnets = []string{"default"}
-			}
-			slices.Sort(extPeering.Permit.VPC.Subnets)
+			if !gw {
+				extPeering := &vpcapi.ExternalPeeringSpec{
+					Permit: vpcapi.ExternalPeeringSpecPermit{
+						VPC: vpcapi.ExternalPeeringSpecVPC{
+							Name:    vpc,
+							Subnets: vpcSubnets,
+						},
+						External: vpcapi.ExternalPeeringSpecExternal{
+							Name:     ext,
+							Prefixes: []vpcapi.ExternalPeeringSpecPrefix{},
+						},
+					},
+				}
+				for idx, rawPrefix := range extPrefixes {
+					prefix := vpcapi.ExternalPeeringSpecPrefix{
+						Prefix: rawPrefix,
+					}
+					if strings.Contains(rawPrefix, "_") {
+						prefixParts := strings.Split(rawPrefix, "_")
+						if len(prefixParts) > 1 {
+							return fmt.Errorf("invalid external peering option #%d, external prefix should be in format 1.2.3.4/24 (found %s)", idx, rawPrefix)
+						}
 
-			if len(extPeering.Permit.External.Prefixes) == 0 {
-				extPeering.Permit.External.Prefixes = []vpcapi.ExternalPeeringSpecPrefix{
-					{
-						Prefix: "0.0.0.0/0",
+						prefix.Prefix = prefixParts[0]
+					}
+
+					extPeering.Permit.External.Prefixes = append(extPeering.Permit.External.Prefixes, prefix)
+				}
+				if len(extPeering.Permit.VPC.Subnets) == 0 {
+					extPeering.Permit.VPC.Subnets = []string{"default"}
+				}
+				slices.Sort(extPeering.Permit.VPC.Subnets)
+
+				if len(extPeering.Permit.External.Prefixes) == 0 {
+					extPeering.Permit.External.Prefixes = []vpcapi.ExternalPeeringSpecPrefix{
+						{
+							Prefix: "0.0.0.0/0",
+						},
+					}
+				}
+				slices.SortFunc(extPeering.Permit.External.Prefixes, func(a, b vpcapi.ExternalPeeringSpecPrefix) int {
+					return strings.Compare(a.Prefix, b.Prefix)
+				})
+
+				externalPeerings[fmt.Sprintf("%s--%s", vpc, ext)] = extPeering
+			} else {
+				vpcExpose := gwapi.PeeringEntryExpose{}
+				if vpc1, ok := vpcs[vpc]; ok {
+					for subnetName, subnet := range vpc1.Spec.Subnets {
+						if len(vpcSubnets) > 0 && !slices.Contains(vpcSubnets, subnetName) {
+							continue
+						}
+						vpcExpose.IPs = append(vpcExpose.IPs, gwapi.PeeringEntryIP{CIDR: subnet.Subnet})
+					}
+				}
+
+				ips := []gwapi.PeeringEntryIP{}
+				for idx, p := range extPrefixes {
+					if _, err := netip.ParsePrefix(p); err != nil {
+						return fmt.Errorf("invalid external peering option #%d, external prefix %q is not valid: %w", idx, p, err)
+					}
+					ips = append(ips, gwapi.PeeringEntryIP{CIDR: p})
+				}
+				if len(ips) == 0 {
+					ips = append(ips, gwapi.PeeringEntryIP{CIDR: "0.0.0.0/0"})
+				}
+				extExpose := gwapi.PeeringEntryExpose{
+					IPs: ips,
+				}
+
+				gwPeerings[fmt.Sprintf("%s--%s", vpc, ext)] = &gwapi.PeeringSpec{
+					Peering: map[string]*gwapi.PeeringEntry{
+						vpc: {
+							Expose: []gwapi.PeeringEntryExpose{vpcExpose},
+						},
+						ext: {
+							Expose: []gwapi.PeeringEntryExpose{extExpose},
+						},
 					},
 				}
 			}
-			slices.SortFunc(extPeering.Permit.External.Prefixes, func(a, b vpcapi.ExternalPeeringSpecPrefix) int {
-				return strings.Compare(a.Prefix, b.Prefix)
-			})
-
-			externalPeerings[fmt.Sprintf("%s--%s", vpc, ext)] = extPeering
 		} else {
 			return fmt.Errorf("invalid request name %s", reqName)
 		}
@@ -1660,14 +1708,25 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 					ce := &CurlError{
 						Source: serverA,
 					}
-					reachable, err := apiutil.IsExternalSubnetReachable(ctx, kube, serverA, "0.0.0.0/0") // TODO test for specific IP
+					expectedReachable, err := IsExternalSubnetReachable(ctx, kube, serverA, "0.0.0.0/0", c.Fab.Spec.Config.Gateway.Enable) // TODO test for specific IP
 					if err != nil {
 						ce.Msg = fmt.Sprintf("checking if should be reachable: %s", err)
 
 						return ce
 					}
 
-					slog.Debug("Checking external connectivity", "from", serverA, "reachable", reachable)
+					logArgs := []any{
+						"from", serverA,
+						"expected", expectedReachable.Reachable,
+					}
+					if expectedReachable.Reachable {
+						logArgs = append(logArgs, "reason", expectedReachable.Reason)
+						if expectedReachable.Peering != "" {
+							logArgs = append(logArgs, "peering", expectedReachable.Peering)
+						}
+					}
+
+					slog.Debug("Checking external connectivity", logArgs...)
 
 					clientR, ok := sshs.Load(serverA)
 					if !ok {
@@ -1679,7 +1738,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 
 					// switching to 1.0.0.1 since the previously used target 8.8.8.8 was giving us issue
 					// when curling over virtual external peerings
-					if ce := checkCurl(ctx, opts, curls, serverA, client, "1.0.0.1", reachable); ce != nil {
+					if ce := checkCurl(ctx, opts, curls, serverA, client, "1.0.0.1", expectedReachable.Reachable); ce != nil {
 						return ce
 					}
 
@@ -1729,6 +1788,58 @@ const (
 	ReachabilityReasonSwitchPeering  ReachabilityReason = "switch-peering"
 	ReachabilityReasonGatewayPeering ReachabilityReason = "gateway-peering"
 )
+
+func IsExternalSubnetReachable(ctx context.Context, kube kclient.Reader, sourceServer, destSubnet string, checkGateway bool) (Reachability, error) {
+	switchPeeringReachable, err := apiutil.IsExternalSubnetReachable(ctx, kube, sourceServer, destSubnet)
+	if err != nil {
+		return Reachability{}, fmt.Errorf("checking if external subnet %s is reachable from server %s: %w", destSubnet, sourceServer, err)
+	}
+	if switchPeeringReachable {
+		return Reachability{
+			Reachable: true,
+			Reason:    ReachabilityReasonSwitchPeering,
+		}, nil
+	}
+
+	if !checkGateway {
+		return Reachability{}, nil
+	}
+
+	sourceSubnets, err := apiutil.GetAttachedSubnets(ctx, kube, sourceServer)
+	if err != nil {
+		return Reachability{}, fmt.Errorf("getting attached subnets for source server %s: %w", sourceServer, err)
+	}
+
+	externals := &vpcapi.ExternalList{}
+	if err := kube.List(ctx, externals); err != nil {
+		return Reachability{}, fmt.Errorf("listing externals: %w", err)
+	}
+	if len(externals.Items) == 0 {
+		// No externals defined, can't be reachable via gateway
+		return Reachability{}, nil
+	}
+	externalNames := make([]string, len(externals.Items))
+	for i, ext := range externals.Items {
+		externalNames[i] = ext.Name
+	}
+
+	for sourceSubnetName := range sourceSubnets {
+		if !strings.Contains(sourceSubnetName, "/") {
+			return Reachability{}, fmt.Errorf("source must be full VPC subnet name (<vpc-name>/<subnet-name>)")
+		}
+		sourceParts := strings.SplitN(sourceSubnetName, "/", 2)
+		sourceVPC, sourceSubnet := sourceParts[0], sourceParts[1]
+		for _, ext := range externalNames {
+			if r, err := IsSubnetReachableWithGatewayPeering(ctx, kube, sourceVPC, sourceSubnet, ext, "internet"); err != nil {
+				return Reachability{}, err
+			} else if r.Reachable {
+				return r, nil
+			}
+		}
+	}
+
+	return Reachability{}, nil
+}
 
 func IsServerReachable(ctx context.Context, kube kclient.Reader, sourceServer, destServer string, checkGateway bool) (Reachability, error) {
 	sourceSubnets, err := apiutil.GetAttachedSubnets(ctx, kube, sourceServer)
