@@ -380,7 +380,7 @@ jobs:
           fi
 
   publish-test-results:
-    if: ${{ inputs.releasetest == true || contains(github.event.pull_request.labels.*.name, 'ci:+release') }}
+    if: ${{ (inputs.releasetest == true || contains(github.event.pull_request.labels.*.name, 'ci:+release')) && !cancelled() }}
     runs-on: lab
     needs:
       - vlabs
@@ -399,6 +399,8 @@ jobs:
         uses: EnricoMi/publish-unit-test-result-action@v2
         with:
           files: "artifacts/**/release-test.xml"
+          report_individual_runs: true
+          check_name: "Release Tests"
 
   publish-release:
     runs-on: lab
