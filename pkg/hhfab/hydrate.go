@@ -181,8 +181,6 @@ func (c *Config) getHydration(ctx context.Context, kube kclient.Reader) (Hydrati
 	total := 0
 	missing := 0
 
-	isCC := c.Fab.Spec.Config.Fabric.Mode == fmeta.FabricModeCollapsedCore
-
 	mgmtSubnet, err := c.Fab.Spec.Config.Control.ManagementSubnet.Parse()
 	if err != nil {
 		return status, fmt.Errorf("parsing management subnet: %w", err)
@@ -286,7 +284,7 @@ func (c *Config) getHydration(ctx context.Context, kube kclient.Reader) (Hydrati
 	}
 
 	vtepSubnet, err := c.Fab.Spec.Config.Fabric.VTEPSubnet.Parse()
-	if err != nil && !isCC {
+	if err != nil {
 		return status, fmt.Errorf("parsing VTEP subnet: %w", err)
 	}
 
@@ -395,10 +393,6 @@ func (c *Config) getHydration(ctx context.Context, kube kclient.Reader) (Hydrati
 			}
 		} else {
 			missing++
-		}
-
-		if isCC {
-			continue
 		}
 
 		if sw.Spec.VTEPIP != "" && sw.Spec.Role.IsSpine() {
@@ -693,8 +687,6 @@ func (c *Config) getHydration(ctx context.Context, kube kclient.Reader) (Hydrati
 }
 
 func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
-	isCC := c.Fab.Spec.Config.Fabric.Mode == fmeta.FabricModeCollapsedCore
-
 	mgmtSubnet, err := c.Fab.Spec.Config.Control.ManagementSubnet.Parse()
 	if err != nil {
 		return fmt.Errorf("parsing management subnet: %w", err)
@@ -746,7 +738,7 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 	}
 
 	vtepSubnet, err := c.Fab.Spec.Config.Fabric.VTEPSubnet.Parse()
-	if err != nil && !isCC {
+	if err != nil {
 		return fmt.Errorf("parsing VTEP subnet: %w", err)
 	}
 	nextVTEPIP := vtepSubnet.Masked().Addr()
@@ -818,10 +810,8 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 			nextLeafASN++
 
 			sw.Spec.VTEPIP = ""
-			if !isCC {
-				sw.Spec.VTEPIP = netip.PrefixFrom(nextVTEPIP, 32).String()
-				nextVTEPIP = nextVTEPIP.Next()
-			}
+			sw.Spec.VTEPIP = netip.PrefixFrom(nextVTEPIP, 32).String()
+			nextVTEPIP = nextVTEPIP.Next()
 		}
 	}
 
