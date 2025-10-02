@@ -364,6 +364,16 @@ jobs:
             hybrid: false
             upgradefrom: "25.04"
 
+          # mesh l2vni from 25.04
+          - fabricmode: spine-leaf
+            mesh: true
+            gateway: false
+            includeonie: false
+            buildmode: iso
+            vpcmode: l2vni
+            hybrid: false
+            upgradefrom: "25.04"
+
   vlabs:
     runs-on: ubuntu-latest
     needs:
