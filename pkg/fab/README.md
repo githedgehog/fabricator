@@ -109,11 +109,31 @@ oras push "ghcr.io/githedgehog/fabricator/k9s:${K9S_VERSION}" k9s
 
 ## ONIE
 
-Manually prepared ONIE image. Probably should be shrunk to the minimum size using `qemu-img convert -O qcow2 <from> <to>`.
+ONIE image is preprocessed to 32GB with fixed GPT partition table to prevent installer failures in VLAB. This eliminates the second retry delay during switch startup.
 
 ```bash
-export ONIE_VERSION="v0.2.0"
+export ONIE_VERSION="v0.2.1"
 
+# Step 1: Resize image to target size (32GB to match switch vm.Size.Disk)
+qemu-img resize onie-kvm_x86_64.qcow2 32G
+
+# Step 2: Fix GPT partition table to recognize new disk size
+# This updates the backup GPT header and recalculates usable sectors
+sudo modprobe nbd max_part=8
+sudo qemu-nbd --format=qcow2 --connect=/dev/nbd0 onie-kvm_x86_64.qcow2
+sudo sgdisk --move-second-header /dev/nbd0
+
+# Verify the fix
+sudo sgdisk --print /dev/nbd0 | grep "last usable sector"
+# Should show: last usable sector is 67108830 (32GB)
+
+sudo qemu-nbd --disconnect /dev/nbd0
+
+# Step 3: Verify final image
+qemu-img info onie-kvm_x86_64.qcow2
+# Should show: virtual size: 32 GiB
+
+# Step 4: Push to registry
 oras push "ghcr.io/githedgehog/fabricator/onie-vlab:${ONIE_VERSION}" onie-kvm_x86_64.qcow2 onie_efi_code.fd onie_efi_vars.fd
 ```
 
