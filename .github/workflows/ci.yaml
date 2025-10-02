@@ -214,7 +214,7 @@ jobs:
           fi
 
   vlab:
-    name: "${{ matrix.hybrid && 'h' || 'v' }}-${{ matrix.upgradefrom && 'up' || '' }}${{ matrix.upgradefrom }}${{ matrix.upgradefrom && '-' || '' }}${{ matrix.fabricmode == 'collapsed-core' && 'cc-' || '' }}${{ matrix.mesh && 'mesh-' || '' }}${{ matrix.gateway && 'gw-' || '' }}${{ matrix.includeonie && 'onie-' || '' }}${{ matrix.buildmode }}-${{ matrix.vpcmode }}"
+    name: "${{ matrix.hybrid && 'h' || 'v' }}-${{ matrix.upgradefrom && 'up' || '' }}${{ matrix.upgradefrom }}${{ matrix.upgradefrom && '-' || '' }}${{ matrix.mesh && 'mesh-' || '' }}${{ matrix.gateway && 'gw-' || '' }}${{ matrix.includeonie && 'onie-' || '' }}${{ matrix.buildmode }}-${{ matrix.vpcmode }}"
     needs:
       - test-build
     uses: ./.github/workflows/run-vlab.yaml
@@ -231,7 +231,7 @@ jobs:
           )
         }}
       fabricatorref: ${{ github.ref }}
-      fabricmode: ${{ matrix.fabricmode }}
+      fabricmode: spine-leaf
       mesh: ${{ matrix.mesh }}
       gateway: ${{ matrix.gateway }}
       includeonie: ${{ matrix.includeonie }}
@@ -245,8 +245,6 @@ jobs:
       fail-fast: false
       # usb/iso/manual build modes as a base
       matrix:
-        fabricmode:
-          - spine-leaf
         mesh:
           - false
         gateway:
@@ -264,19 +262,8 @@ jobs:
         upgradefrom:
           - ""
         include:
-          # collapsed-core l2vni
-          - fabricmode: collapsed-core
-            mesh: false
-            includeonie: false
-            gateway: false
-            buildmode: iso
-            vpcmode: l2vni
-            hybrid: false
-            upgradefrom: ""
-
           # mesh l2vni
-          - fabricmode: spine-leaf
-            mesh: true
+          - mesh: true
             includeonie: false
             gateway: false
             buildmode: iso
@@ -285,8 +272,7 @@ jobs:
             upgradefrom: ""
 
           # mesh l3vni
-          - fabricmode: spine-leaf
-            mesh: true
+          - mesh: true
             includeonie: false
             gateway: false
             buildmode: iso
@@ -295,8 +281,7 @@ jobs:
             upgradefrom: ""
 
           # gateway l2vni w/ onie, usb (max artifacts)
-          - fabricmode: spine-leaf
-            mesh: false
+          - mesh: false
             gateway: true
             includeonie: true
             buildmode: usb
@@ -305,8 +290,7 @@ jobs:
             upgradefrom: ""
 
           # gateway l2vni w/ onie, iso (max artifacts)
-          - fabricmode: spine-leaf
-            mesh: false
+          - mesh: false
             gateway: true
             includeonie: true
             buildmode: iso
@@ -315,8 +299,7 @@ jobs:
             upgradefrom: ""
 
           # l3vni
-          - fabricmode: spine-leaf
-            mesh: false
+          - mesh: false
             gateway: false
             includeonie: false
             buildmode: iso
@@ -325,8 +308,7 @@ jobs:
             upgradefrom: ""
 
           # gateway l3vni
-          - fabricmode: spine-leaf
-            mesh: false
+          - mesh: false
             gateway: true
             includeonie: false
             buildmode: iso
@@ -335,8 +317,7 @@ jobs:
             upgradefrom: ""
 
           # hlab l2vni
-          - fabricmode: spine-leaf
-            mesh: false
+          - mesh: false
             gateway: false
             includeonie: false
             buildmode: iso
@@ -345,8 +326,7 @@ jobs:
             upgradefrom: ""
 
           # l2vni from 25.04
-          - fabricmode: spine-leaf
-            mesh: false
+          - mesh: false
             gateway: false
             includeonie: false
             buildmode: iso
@@ -355,8 +335,7 @@ jobs:
             upgradefrom: "25.04"
 
           # l3vni from 25.04
-          - fabricmode: spine-leaf
-            mesh: false
+          - mesh: false
             gateway: false
             includeonie: false
             buildmode: iso

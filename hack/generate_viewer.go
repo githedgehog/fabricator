@@ -44,16 +44,13 @@ var (
 		Normalization map[string]string
 		Badges        map[string]string
 	}{
-		Normalization: map[string]string{
-			"collapsed-core": "collapsed",
-		},
+		Normalization: map[string]string{},
 		Badges: map[string]string{
 			"live":          "🔴 Live",
 			"default":       "🏠 Default",
 			"3spine":        "🌐 Multi-Spine",
 			"4mclag2orphan": "🔗 MCLAG",
 			"mesh":          "🕸️ Mesh",
-			"collapsed":     "📦 Collapsed",
 			"spine-leaf":    "🌿 Spine-Leaf",
 			"gateway":       "🌐 Gateway",
 		},
@@ -566,7 +563,6 @@ func generateHTML(data *ViewerData) (string, error) {
 		"css": func() template.CSS { return template.CSS(cssContent) }, // #nosec G203
 		"js":  func() template.JS { return template.JS(jsContent) },    // #nosec G203
 	}).Parse(string(htmlTemplate))
-
 	if err != nil {
 		return "", fmt.Errorf("failed to parse template: %w", err)
 	}
@@ -611,7 +607,7 @@ func generateViewer(searchDirectories []string, outputDirectory, outputFileName 
 	}
 
 	outputPath := filepath.Join(outputDirectory, outputFileName)
-	err = os.WriteFile(outputPath, []byte(htmlContent), 0600)
+	err = os.WriteFile(outputPath, []byte(htmlContent), 0o600)
 	if err != nil {
 		return &DiagramError{Operation: "file write", Path: outputPath, Cause: err}
 	}

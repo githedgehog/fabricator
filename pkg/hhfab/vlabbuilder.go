@@ -54,7 +54,7 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 	}
 	b.data = l
 
-	switch fabricMode {
+	switch fabricMode { //nolint:exhaustive
 	case meta.FabricModeSpineLeaf:
 		if b.MeshLinksCount > 0 && b.FabricLinksCount > 0 {
 			return fmt.Errorf("cannot use both mesh and fabric links at the same time") //nolint:goerr113
@@ -83,27 +83,6 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 					b.OrphanLeafsCount = 1
 				}
 			}
-		}
-	case meta.FabricModeCollapsedCore:
-		if b.SpinesCount > 0 {
-			return fmt.Errorf("spines not supported for collapsed core fabric mode") //nolint:goerr113
-		}
-		if b.FabricLinksCount > 0 {
-			return fmt.Errorf("fabric links not supported for collapsed core fabric mode") //nolint:goerr113
-		}
-
-		if !b.NoSwitches && b.MCLAGLeafsCount == 0 {
-			b.MCLAGLeafsCount = 2
-		}
-		if b.MCLAGLeafsCount > 2 {
-			return fmt.Errorf("MCLAG leafs count must be 2 for collapsed core fabric mode") //nolint:goerr113
-		}
-		if b.OrphanLeafsCount > 0 {
-			return fmt.Errorf("orphan leafs not supported for collapsed core fabric mode") //nolint:goerr113
-		}
-
-		if b.ESLAGLeafGroups != "" {
-			return fmt.Errorf("ESLAG not supported for collapsed core fabric mode") //nolint:goerr113
 		}
 	default:
 		return fmt.Errorf("unsupported fabric mode %s", fabricMode) //nolint:goerr113

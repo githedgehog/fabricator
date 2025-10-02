@@ -27,7 +27,6 @@ The system generates diagrams for these network topologies:
 - **3spine**: 3-spine topology with MCLAG and orphan leafs
 - **4mclag2orphan**: 4 MCLAG leafs with 2 orphan leafs
 - **Mesh**: Mesh topology with inter-leaf connections
-- **Collapsed Core**: Collapsed core fabric mode
 - **Live**: Real-time diagrams from running VLAB (optional)
 
 ## Output Formats & Styles
@@ -99,7 +98,6 @@ test-diagram/
 ├── 3spine/
 ├── mesh/
 ├── 4mclag2orphan/
-├── collapsed-core/
 ├── live/                    # If vlab_workdir specified
 └── diagram-viewer.html      # Interactive HTML viewer
 ```
