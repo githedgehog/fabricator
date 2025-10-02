@@ -709,7 +709,7 @@ outer:
 
 		// look for connections that have this spine as a switch
 		conns := &wiringapi.ConnectionList{}
-		if err := testCtx.kube.List(ctx, conns, kclient.MatchingLabels{wiringapi.ListLabelSwitch(spine.Name): "true", wiringapi.LabelConnectionType: wiringapi.ConnectionTypeFabric}); err != nil {
+		if err := testCtx.kube.List(ctx, conns, kclient.MatchingLabels{wiringapi.ListLabelSwitch(spine.Name): wiringapi.ListLabelValue, wiringapi.LabelConnectionType: wiringapi.ConnectionTypeFabric}); err != nil {
 			returnErr = fmt.Errorf("listing connections: %w", err)
 
 			break
@@ -847,7 +847,7 @@ func (testCtx *VPCPeeringTestCtx) meshFailoverTest(ctx context.Context) (bool, [
 	for _, leaf := range leaves {
 		// get mesh links for this leaf
 		meshConns := &wiringapi.ConnectionList{}
-		if err := testCtx.kube.List(ctx, meshConns, kclient.MatchingLabels{wiringapi.ListLabelSwitch(leaf.Name): "true", wiringapi.LabelConnectionType: wiringapi.ConnectionTypeMesh}); err != nil {
+		if err := testCtx.kube.List(ctx, meshConns, kclient.MatchingLabels{wiringapi.ListLabelSwitch(leaf.Name): wiringapi.ListLabelValue, wiringapi.LabelConnectionType: wiringapi.ConnectionTypeMesh}); err != nil {
 			return false, nil, fmt.Errorf("listing mesh connections for leaf %s: %w", leaf.Name, err)
 		}
 		if len(meshConns.Items) < 2 {
@@ -2022,7 +2022,7 @@ func (testCtx *VPCPeeringTestCtx) roceBasicTest(ctx context.Context) (bool, []Re
 	for _, candidateSwitch := range testCtx.roceLeaves {
 		connList := &wiringapi.ConnectionList{}
 		if err := testCtx.kube.List(ctx, connList, kclient.MatchingLabels{
-			wiringapi.ListLabelSwitch(candidateSwitch): "true",
+			wiringapi.ListLabelSwitch(candidateSwitch): wiringapi.ListLabelValue,
 		}); err != nil {
 			return false, nil, fmt.Errorf("listing connections for switch %s: %w", candidateSwitch, err)
 		}
