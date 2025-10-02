@@ -91,7 +91,7 @@ var Versions = fabapi.Versions{
 		FRR:        FRRVersion,
 	},
 	VLAB: fabapi.VLABVersions{
-		ONIE:    "v0.2.0",
+		ONIE:    "v0.2.1",
 		Flatcar: "v4230.2.3",
 	},
 }
