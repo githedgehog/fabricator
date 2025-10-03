@@ -54,7 +54,7 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 	}
 	b.data = l
 
-	switch fabricMode { //nolint:exhaustive
+	switch fabricMode {
 	case meta.FabricModeSpineLeaf:
 		if b.MeshLinksCount > 0 && b.FabricLinksCount > 0 {
 			return fmt.Errorf("cannot use both mesh and fabric links at the same time") //nolint:goerr113
