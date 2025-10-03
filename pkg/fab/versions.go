@@ -42,6 +42,7 @@ var Versions = fabapi.Versions{
 		Alloy:             "v1.11.0",
 		ControlProxy:      "v1.11.2-hh2",
 		ControlProxyChart: FabricatorVersion,
+		BashCompletion:    "v2.16.0",
 	},
 	Fabricator: fabapi.FabricatorVersions{
 		API:            FabricatorVersion,

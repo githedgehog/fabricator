@@ -74,6 +74,10 @@ func (c *ControlInstall) Run(ctx context.Context) error {
 		return fmt.Errorf("installing zot: %w", err)
 	}
 
+	if err := installBashCompletion(ctx, c.WorkDir, string(c.Fab.Status.Versions.Platform.BashCompletion)); err != nil {
+		return fmt.Errorf("installing bash completion: %w", err)
+	}
+
 	// we should use in-cluster registry from now on
 	c.Fab.Status.IsBootstrap = false
 

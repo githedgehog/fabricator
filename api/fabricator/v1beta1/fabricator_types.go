@@ -297,6 +297,7 @@ type PlatformVersions struct {
 	Alloy             meta.Version `json:"alloy,omitempty"`
 	ControlProxy      meta.Version `json:"controlProxy,omitempty"`
 	ControlProxyChart meta.Version `json:"controlProxyChart,omitempty"`
+	BashCompletion    meta.Version `json:"bashCompletion,omitempty"`
 }
 
 type FabricatorVersions struct {

@@ -144,6 +144,30 @@ func (b *ControlInstallBuilder) addPayload(ctx context.Context, slog *slog.Logge
 		return fmt.Errorf("downloading cert-manager: %w", err)
 	}
 
+	slog.Info("Adding bash-completion to installer", "control", b.Control.Name)
+
+	bashCompletionDir := filepath.Join(installDir, "bash-completion")
+	if err := os.MkdirAll(bashCompletionDir, 0755); err != nil {
+		return fmt.Errorf("creating bash-completion directory: %w", err)
+	}
+
+	if err := b.Downloader.FromORAS(ctx, installDir, "fabricator/bash-completion", b.Fab.Status.Versions.Platform.BashCompletion, []artificer.ORASFile{
+		{
+			Name:   "bash-completion/bash_completion",
+			Target: "bash-completion/bash_completion",
+		},
+		{
+			Name:   "bash-completion/bash_completion.d/000_bash_completion_compat.bash",
+			Target: "bash-completion/000_bash_completion_compat.bash",
+		},
+		{
+			Name:   "bash-completion/COPYING",
+			Target: "bash-completion/COPYING",
+		},
+	}); err != nil {
+		return fmt.Errorf("downloading bash-completion: %w", err)
+	}
+
 	slog.Info("Adding config and wiring files to installer")
 	fabF, err := os.Create(filepath.Join(installDir, FabName))
 	if err != nil {
