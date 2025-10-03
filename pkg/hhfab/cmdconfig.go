@@ -330,7 +330,8 @@ func load(ctx context.Context, workDir, cacheDir string, wiringAndHydration bool
 		return nil, fmt.Errorf("loading fab config: %w", err)
 	}
 
-	f, controls, nodes, err := fab.GetFabAndNodes(ctx, l.GetClient(), fab.GetFabAndNodesOpts{AllowNotHydrated: true})
+	kube := l.GetClient()
+	f, controls, nodes, err := fab.GetFabAndNodes(ctx, kube, fab.GetFabAndNodesOpts{AllowNotHydrated: true})
 	if err != nil {
 		return nil, fmt.Errorf("getting fabricator and controls nodes: %w", err)
 	}
@@ -365,7 +366,7 @@ func load(ctx context.Context, workDir, cacheDir string, wiringAndHydration bool
 		}
 
 		for _, node := range cfg.Nodes {
-			if err := node.Validate(ctx, &f.Spec.Config, false); err != nil {
+			if err := node.Validate(ctx, &f.Spec.Config, false, kube); err != nil {
 				return nil, fmt.Errorf("validating node %q: %w", node.Name, err)
 			}
 		}
