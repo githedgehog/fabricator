@@ -85,7 +85,7 @@ func GetFabAndNodes(ctx context.Context, kube kclient.Reader, optsSlice ...GetFa
 	}
 
 	for _, node := range nodes.Items {
-		if err := node.Validate(ctx, &f.Spec.Config, opts.AllowNotHydrated); err != nil {
+		if err := node.Validate(ctx, &f.Spec.Config, opts.AllowNotHydrated, kube); err != nil {
 			return fabapi.Fabricator{}, nil, nil, fmt.Errorf("validating node %q: %w", node.GetName(), err)
 		}
 	}

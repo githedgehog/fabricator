@@ -6,9 +6,12 @@ package v1beta1
 import (
 	"context"
 	"fmt"
+	"net/netip"
 
 	"github.com/samber/lo"
+	kmeta "k8s.io/apimachinery/pkg/api/meta"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
@@ -65,7 +68,7 @@ func init() {
 func (n *FabNode) Default() {
 }
 
-func (n *FabNode) Validate(_ context.Context, fabCfg *FabConfig, allowNotHydrated bool) error {
+func (n *FabNode) Validate(ctx context.Context, fabCfg *FabConfig, allowNotHydrated bool, kube kclient.Reader) error {
 	if fabCfg == nil {
 		return fmt.Errorf("fabricator config must be non-nil") //nolint:goerr113
 	}
@@ -116,6 +119,52 @@ func (n *FabNode) Validate(_ context.Context, fabCfg *FabConfig, allowNotHydrate
 
 		if managementAddr.Bits() != managementSubnet.Bits() {
 			return fmt.Errorf("management IP %s not the same subnet as management subnet %s", managementAddr.String(), managementSubnet.String()) //nolint:goerr113
+		}
+
+		if kube != nil {
+			controlVIP, err := fabCfg.Control.VIP.Parse()
+			if err != nil {
+				return fmt.Errorf("parsing control VIP: %w", err)
+			}
+			controls := &ControlNodeList{}
+			if err := kube.List(ctx, controls, kclient.InNamespace(FabNamespace)); err != nil {
+				return fmt.Errorf("listing control nodes: %w", err)
+			}
+			fabnodes := &FabNodeList{}
+			if err := kube.List(ctx, fabnodes, kclient.InNamespace(FabNamespace)); err != nil && !kmeta.IsNoMatchError(err) {
+				return fmt.Errorf("listing fabricator nodes: %w", err)
+			}
+			dummyIPs := map[netip.Addr]bool{}
+			mgmtIPs := map[netip.Addr]bool{
+				controlVIP.Addr(): true,
+			}
+
+			for _, c := range controls.Items {
+				if ip, err := c.Spec.Dummy.IP.Parse(); err == nil {
+					dummyIPs[ip.Addr()] = true
+				}
+				if ip, err := c.Spec.Management.IP.Parse(); err == nil {
+					mgmtIPs[ip.Addr()] = true
+				}
+			}
+			for _, other := range fabnodes.Items {
+				if other.Name == n.Name {
+					continue
+				}
+				if ip, err := other.Spec.Dummy.IP.Parse(); err == nil {
+					dummyIPs[ip.Addr()] = true
+				}
+				if ip, err := other.Spec.Management.IP.Parse(); err == nil {
+					mgmtIPs[ip.Addr()] = true
+				}
+			}
+
+			if _, exists := dummyIPs[dummyAddr.Addr()]; exists {
+				return fmt.Errorf("dummy IP %s already in use", dummyAddr.String()) //nolint:goerr113
+			}
+			if _, exists := mgmtIPs[managementAddr.Addr()]; exists {
+				return fmt.Errorf("management IP %s already in use", managementAddr.String()) //nolint:goerr113
+			}
 		}
 	}
 
