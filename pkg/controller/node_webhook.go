@@ -61,7 +61,7 @@ func (w *NodeWebhook) ValidateCreate(ctx context.Context, obj runtime.Object) (a
 		return nil, fmt.Errorf("failed to get Fabricator object: %w", err)
 	}
 
-	return nil, n.Validate(ctx, &f.Spec.Config, false) //nolint:wrapcheck
+	return nil, n.Validate(ctx, &f.Spec.Config, false, w.Reader) //nolint:wrapcheck
 }
 
 func (w *NodeWebhook) ValidateUpdate(ctx context.Context, oldObj runtime.Object, newObj runtime.Object) (admission.Warnings, error) {
@@ -80,7 +80,7 @@ func (w *NodeWebhook) ValidateUpdate(ctx context.Context, oldObj runtime.Object,
 		return nil, fmt.Errorf("failed to get Fabricator object: %w", err)
 	}
 
-	return nil, c.Validate(ctx, &f.Spec.Config, false) //nolint:wrapcheck
+	return nil, c.Validate(ctx, &f.Spec.Config, false, w.Reader) //nolint:wrapcheck
 }
 
 func (w *NodeWebhook) ValidateDelete(_ context.Context, _ runtime.Object) (admission.Warnings, error) {
