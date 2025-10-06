@@ -36,7 +36,8 @@ var Versions = fabapi.Versions{
 		CertManager:       "v1.18.2",
 		K9s:               "v0.50.16",
 		Toolbox:           "v0.9.0",
-		Reloader:          "v1.0.40", // TODO upgrade or get rid of?
+		ReloaderChart:     "2.2.3",
+		Reloader:          "v1.4.8",
 		NTP:               "v0.0.4",
 		NTPChart:          FabricatorVersion,
 		Alloy:             "v1.12.0",
