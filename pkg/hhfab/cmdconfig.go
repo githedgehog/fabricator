@@ -268,6 +268,22 @@ func Validate(ctx context.Context, workDir, cacheDir string, hMode HydrateMode) 
 }
 
 func Versions(ctx context.Context, workDir, cacheDir string, hMode HydrateMode) error {
+	configPath := filepath.Join(workDir, FabConfigFile)
+	if _, err := os.Stat(configPath); err != nil && errors.Is(err, os.ErrNotExist) {
+		slog.Info("No configuration found", "file", FabConfigFile, "action", "Showing release versions")
+		freshFab := fabapi.Fabricator{}
+		if err := freshFab.CalculateVersions(fab.Versions); err != nil {
+			return fmt.Errorf("calculating default versions: %w", err)
+		}
+		data, err := kyaml.Marshal(freshFab.Status.Versions)
+		if err != nil {
+			return fmt.Errorf("marshalling versions: %w", err)
+		}
+		fmt.Println(string(data))
+
+		return nil
+	}
+
 	cfg, err := load(ctx, workDir, cacheDir, true, hMode, "")
 	if err != nil {
 		return err
