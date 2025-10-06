@@ -608,6 +608,8 @@ spec:
                             type: string
                           reloader:
                             type: string
+                          reloaderChart:
+                            type: string
                           toolbox:
                             type: string
                           zot:
@@ -827,6 +829,8 @@ spec:
                       ntpChart:
                         type: string
                       reloader:
+                        type: string
+                      reloaderChart:
                         type: string
                       toolbox:
                         type: string
