@@ -30,7 +30,8 @@ var valuesTmpl string
 var _ comp.KubeInstall = Install
 
 func Install(cfg fabapi.Fabricator) ([]kclient.Object, error) {
-	version := string(Version(cfg))
+	imageVersion := string(cfg.Status.Versions.Platform.Reloader)
+	chartVersion := string(cfg.Status.Versions.Platform.ReloaderChart)
 
 	repo, err := comp.ImageURL(cfg, ImageRef)
 	if err != nil {
@@ -39,13 +40,13 @@ func Install(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 
 	values, err := tmplutil.FromTemplate("values", valuesTmpl, map[string]any{
 		"Repo": repo,
-		"Tag":  version,
+		"Tag":  imageVersion,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("values: %w", err)
 	}
 
-	helmChart, err := comp.NewHelmChart(cfg, "reloader", ChartRef, version, "", false, values)
+	helmChart, err := comp.NewHelmChart(cfg, "reloader", ChartRef, chartVersion, "", false, values)
 	if err != nil {
 		return nil, fmt.Errorf("helm chart: %w", err)
 	}
@@ -56,11 +57,9 @@ func Install(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 var _ comp.ListOCIArtifacts = Artifacts
 
 func Artifacts(cfg fabapi.Fabricator) (comp.OCIArtifacts, error) {
-	version := Version(cfg)
-
 	return comp.OCIArtifacts{
-		ChartRef: version,
-		ImageRef: version,
+		ChartRef: cfg.Status.Versions.Platform.ReloaderChart,
+		ImageRef: cfg.Status.Versions.Platform.Reloader,
 	}, nil
 }
 

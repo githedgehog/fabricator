@@ -5,7 +5,8 @@ reloader:
   syncAfterRestart: true
   reloadStrategy: default
 
-  deployment:
-    image:
-      name: {{ .Repo }}
-      tag: {{ .Tag }}
+image:
+  repository: {{ .Repo}}
+  tag: {{ .Tag }}
+  pullPolicy: IfNotPresent
+
