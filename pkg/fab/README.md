@@ -218,10 +218,25 @@ mv bash-completion-${BASH_COMPLETION_VERSION} bash-completion
 oras push "ghcr.io/githedgehog/fabricator/bash-completion:v${BASH_COMPLETION_VERSION}" bash-completion
 ```
 
-# Tinyproxy
+## Tinyproxy
 
 The tinyproxy container is built from source, and deployed using a distroless
 container. The repo for the container is https://github.com/githedgehog/control-proxy.
 The justfile inside the repo contains the steps that CI will run run. To update
 tinyproxy bump the tinyproxy version number in the justfile, and increment the tag so the
 CI will pull, build, and push the new version.
+
+## Reloader
+We are using the upstream reloader chart and container image.
+```
+export RELOADER_CHART_VERSION="2.2.3"
+export RELOADER_VERSION="v1.4.8"
+
+helm repo add stakater https://stakater.github.io/stakater-charts
+helm repo update
+helm pull stakater/reloader --version "${RELOADER_CHART_VERSION}"
+
+helm push "reloader-${RELOADER_CHART_VERSION}.tgz" oci://ghcr.io/githedgehog/fabricator/charts
+
+skopeo copy --all docker://ghcr.io/stakater/reloader:${RELOADER_VERSION} docker://ghcr.io/githedgehog/fabricator/reloader:${RELOADER_VERSION}
+```
