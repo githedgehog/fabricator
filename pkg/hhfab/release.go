@@ -2937,38 +2937,27 @@ func makeVpcPeeringsSingleVPCSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 		{
 			Name: "MCLAG Failover",
 			F:    testCtx.mclagTest,
-			SkipFlags: SkipFlags{
-				VirtualSwitch: true,
-			},
 		},
 		{
 			Name: "ESLAG Failover",
 			F:    testCtx.eslagTest,
-			SkipFlags: SkipFlags{
-				VirtualSwitch: true,
-			},
 		},
 		{
 			Name: "Bundled Failover",
 			F:    testCtx.bundledFailoverTest,
-			SkipFlags: SkipFlags{
-				VirtualSwitch: true,
-			},
 		},
 		{
 			Name: "Spine Failover",
 			F:    testCtx.spineFailoverTest,
 			SkipFlags: SkipFlags{
-				VirtualSwitch: true,
-				NoFabricLink:  true,
+				NoFabricLink: true,
 			},
 		},
 		{
 			Name: "Mesh Failover",
 			F:    testCtx.meshFailoverTest,
 			SkipFlags: SkipFlags{
-				VirtualSwitch: true,
-				NoMeshLink:    true,
+				NoMeshLink: true,
 			},
 		},
 		{
