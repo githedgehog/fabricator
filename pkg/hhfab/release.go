@@ -2937,6 +2937,9 @@ func makeVpcPeeringsSingleVPCSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 		{
 			Name: "MCLAG Failover",
 			F:    testCtx.mclagTest,
+			SkipFlags: SkipFlags{
+				VirtualSwitch: true,
+			},
 		},
 		{
 			Name: "ESLAG Failover",
