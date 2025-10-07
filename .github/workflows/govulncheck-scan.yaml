@@ -26,10 +26,12 @@ jobs:
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
 
       - name: Run govulncheck
+        id: govulncheck
+        continue-on-error: true
         env:
           CGO_ENABLED: "0"
         run: |
-          govulncheck -tags containers_image_openpgp,containers_image_storage_stub -show verbose ./... || echo "GOVULNCHECK_FAILED=true" >> $GITHUB_ENV
+          govulncheck -tags containers_image_openpgp,containers_image_storage_stub -show verbose ./...
 
       - name: Generate SARIF file
         if: always()
@@ -45,5 +47,5 @@ jobs:
           category: govulncheck
 
       - name: Fail if vulnerabilities found
-        if: env.GOVULNCHECK_FAILED == 'true'
+        if: steps.govulncheck.outcome == 'failure'
         run: exit 1
