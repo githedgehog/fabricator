@@ -210,7 +210,7 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - bundle
-    if: ${{ always() }}
+    if: ${{ needs.bundle.result != 'skipped' }}
 
     steps:
       - run: |
@@ -365,7 +365,7 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - vlab
-    if: ${{ always() }}
+    if: ${{ needs.vlab.result != 'skipped' }}
 
     steps:
       - run: |
