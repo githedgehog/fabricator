@@ -106,6 +106,20 @@ rules:
   - patch
   - update
 - apiGroups:
+  - fabricator.githedgehog.com
+  resources:
+  - fabnodes
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - fabricator.githedgehog.com
+  resources:
+  - fabnodes/status
+  verbs:
+  - get
+- apiGroups:
   - helm.cattle.io
   resources:
   - helmcharts
