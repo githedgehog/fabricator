@@ -30,8 +30,6 @@ func SetupNodeWebhookWithManager(mgr ctrl.Manager) error {
 
 // TODO(user): EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 
-// +kubebuilder:webhook:path=/mutate-fabricator-githedgehog-com-v1beta1-node,mutating=true,failurePolicy=fail,sideEffects=None,groups=fabricator.githedgehog.com,resources=nodes,verbs=create;update,versions=v1beta1,name=mnode-v1beta1.kb.io,admissionReviewVersions=v1
-
 // NodeCustomDefaulter struct is responsible for setting default values on the custom resource of the
 // Kind Node when those are created or updated.
 //
@@ -60,7 +58,6 @@ func (d *NodeCustomDefaulter) Default(ctx context.Context, obj runtime.Object) e
 // TODO(user): change verbs to "verbs=create;update;delete" if you want to enable deletion validation.
 // NOTE: The 'path' attribute must follow a specific pattern and should not be modified directly here.
 // Modifying the path for an invalid path can cause API server errors; failing to locate the webhook.
-// +kubebuilder:webhook:path=/validate-fabricator-githedgehog-com-v1beta1-node,mutating=false,failurePolicy=fail,sideEffects=None,groups=fabricator.githedgehog.com,resources=nodes,verbs=create;update,versions=v1beta1,name=vnode-v1beta1.kb.io,admissionReviewVersions=v1
 
 // NodeCustomValidator struct is responsible for validating the Node resource
 // when it is created, updated, or deleted.

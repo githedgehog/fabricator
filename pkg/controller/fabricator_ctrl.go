@@ -37,7 +37,13 @@ import (
 // +kubebuilder:rbac:groups=fabricator.githedgehog.com,resources=fabricators/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=fabricator.githedgehog.com,resources=fabricators/finalizers,verbs=update
 
-//+kubebuilder:rbac:groups=dhcp.githedgehog.com,resources=dhcpsubnets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=fabricator.githedgehog.com,resources=controlnodes,verbs=get;list;watch
+// +kubebuilder:rbac:groups=fabricator.githedgehog.com,resources=controlnodes/status,verbs=get
+
+// +kubebuilder:rbac:groups=fabricator.githedgehog.com,resources=fabnodes,verbs=get;list;watch
+// +kubebuilder:rbac:groups=fabricator.githedgehog.com,resources=fabnodes/status,verbs=get
+
+// +kubebuilder:rbac:groups=dhcp.githedgehog.com,resources=dhcpsubnets,verbs=get;list;watch;create;update;patch;delete
 
 // +kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;create;update;patch;delete

@@ -52,7 +52,7 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
-      path: /mutate-fabricator-githedgehog-com-v1beta1-node
+      path: /mutate-fabricator-githedgehog-com-v1beta1-fabnode
   failurePolicy: Fail
   name: mnode.kb.io
   rules:
@@ -65,27 +65,7 @@ webhooks:
     - UPDATE
     - DELETE
     resources:
-    - nodes
-  sideEffects: None
-- admissionReviewVersions:
-  - v1
-  clientConfig:
-    service:
-      name: webhook-service
-      namespace: system
-      path: /mutate-fabricator-githedgehog-com-v1beta1-node
-  failurePolicy: Fail
-  name: mnode-v1beta1.kb.io
-  rules:
-  - apiGroups:
-    - fabricator.githedgehog.com
-    apiVersions:
-    - v1beta1
-    operations:
-    - CREATE
-    - UPDATE
-    resources:
-    - nodes
+    - fabnodes
   sideEffects: None
 ---
 apiVersion: admissionregistration.k8s.io/v1
@@ -141,7 +121,7 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
-      path: /validate-fabricator-githedgehog-com-v1beta1-node
+      path: /validate-fabricator-githedgehog-com-v1beta1-fabnode
   failurePolicy: Fail
   name: vnode.kb.io
   rules:
@@ -154,25 +134,5 @@ webhooks:
     - UPDATE
     - DELETE
     resources:
-    - nodes
-  sideEffects: None
-- admissionReviewVersions:
-  - v1
-  clientConfig:
-    service:
-      name: webhook-service
-      namespace: system
-      path: /validate-fabricator-githedgehog-com-v1beta1-node
-  failurePolicy: Fail
-  name: vnode-v1beta1.kb.io
-  rules:
-  - apiGroups:
-    - fabricator.githedgehog.com
-    apiVersions:
-    - v1beta1
-    operations:
-    - CREATE
-    - UPDATE
-    resources:
-    - nodes
+    - fabnodes
   sideEffects: None
