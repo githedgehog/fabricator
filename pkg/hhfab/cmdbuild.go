@@ -16,11 +16,12 @@ import (
 )
 
 type BuildOpts struct {
-	HydrateMode   HydrateMode
-	BuildMode     recipe.BuildMode
-	BuildControls bool
-	BuildGateways bool
-	SetJoinToken  string
+	HydrateMode        HydrateMode
+	BuildMode          recipe.BuildMode
+	BuildControls      bool
+	BuildGateways      bool
+	BuildObservability bool
+	SetJoinToken       string
 }
 
 func Build(ctx context.Context, workDir, cacheDir string, opts BuildOpts) error {
@@ -38,8 +39,12 @@ func (c *Config) build(ctx context.Context, opts BuildOpts) error {
 	}
 
 	for _, node := range c.Nodes {
-		if !slices.Equal(node.Spec.Roles, []fabapi.FabNodeRole{fabapi.NodeRoleGateway}) {
-			return fmt.Errorf("unsupported node roles %q (only gateway role is currently supported)", node.Spec.Roles) //nolint:goerr113
+		if len(node.Spec.Roles) != 1 {
+			return fmt.Errorf("unsupported node roles %q (only single role is currently supported)", node.Spec.Roles) //nolint:goerr113
+		}
+		role := node.Spec.Roles[0]
+		if role != fabapi.NodeRoleGateway && role != fabapi.NodeRoleObservability {
+			return fmt.Errorf("unsupported node role %q (only gateway and observability roles are supported)", role) //nolint:goerr113
 		}
 	}
 
@@ -68,12 +73,22 @@ func (c *Config) build(ctx context.Context, opts BuildOpts) error {
 		}
 	}
 
-	if opts.BuildGateways {
+	if opts.BuildGateways || opts.BuildObservability {
 		slog.Info("Building node installers")
 
 		for _, node := range c.Nodes {
 			if len(node.Spec.Roles) != 1 {
 				return fmt.Errorf("unsupported node roles %q (only one role is currently supported)", node.Spec.Roles) //nolint:goerr113
+			}
+
+			role := node.Spec.Roles[0]
+
+			// Skip if not building this type
+			if role == fabapi.NodeRoleGateway && !opts.BuildGateways {
+				continue
+			}
+			if role == fabapi.NodeRoleObservability && !opts.BuildObservability {
+				continue
 			}
 
 			if err := (&recipe.NodeInstallBuilder{

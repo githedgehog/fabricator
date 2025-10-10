@@ -68,7 +68,7 @@ func (c *Config) SSHVM(ctx context.Context, vlab *VLAB, vm VM) (*sshutil.Config,
 			Host: swIP.Addr().String(),
 			Port: 22,
 		}
-	case VMTypeGateway:
+	case VMTypeGateway, VMTypeObservability:
 		nodeIP := ""
 		for _, node := range c.Nodes {
 			if node.Name == vm.Name {
@@ -91,6 +91,8 @@ func (c *Config) SSHVM(ctx context.Context, vlab *VLAB, vm VM) (*sshutil.Config,
 			Host: nodeIP,
 			Port: 22,
 		}
+	default:
+		return nil, fmt.Errorf("unsupported VM type %q", vm.Type) //nolint:goerr113
 	}
 
 	if ssh.Remote.Host != "127.0.0.1" {

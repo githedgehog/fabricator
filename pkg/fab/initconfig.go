@@ -38,6 +38,7 @@ type InitConfigInput struct {
 	RegUpstream               *fabapi.ControlConfigRegistryUpstream
 	ControlNodeManagementLink string
 	Gateway                   bool
+	LGTM                      bool
 	Preview                   bool
 	JoinToken                 string
 	SaveJoinToken             bool
@@ -52,7 +53,7 @@ func InitConfig(ctx context.Context, in InitConfigInput) ([]byte, error) {
 		in.DefaultPasswordHash = DevAdminPasswordHash
 		in.DefaultAuthorizedKeys = append(in.DefaultAuthorizedKeys, DevSSHKey)
 
-		if in.Gateway && in.JoinToken == "" {
+		if (in.Gateway || in.LGTM) && in.JoinToken == "" {
 			in.JoinToken = rand.Text()
 			in.SaveJoinToken = true
 		}

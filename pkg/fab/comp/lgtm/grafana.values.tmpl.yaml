@@ -1,0 +1,31 @@
+# Properly structured image reference
+image:
+  registry: {{ .Registry }}
+  repository: {{ .Repository }}
+  tag: {{ .Tag }}
+
+nodeSelector:
+{{ .NodeSelector }}
+tolerations:
+{{ .Tolerations }}
+persistence:
+  enabled: true
+  size: 10Gi
+adminPassword: admin
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+      - name: Loki
+        type: loki
+        url: http://loki-gateway.{{ .Namespace }}.svc.cluster.local
+        isDefault: true
+      - name: Tempo
+        type: tempo
+        url: http://tempo.{{ .Namespace }}.svc.cluster.local:3100
+      - name: Prometheus
+        type: prometheus
+        url: http://prometheus-server.{{ .Namespace }}.svc.cluster.local
+service:
+  type: NodePort
+  nodePort: 31001

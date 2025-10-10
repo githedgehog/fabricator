@@ -80,9 +80,6 @@ func GetFabAndNodes(ctx context.Context, kube kclient.Reader, optsSlice ...GetFa
 	if err := kube.List(ctx, nodes); err != nil && !kmeta.IsNoMatchError(err) {
 		return fabapi.Fabricator{}, nil, nil, fmt.Errorf("listing nodes: %w", err)
 	}
-	if len(nodes.Items) > 1 {
-		return fabapi.Fabricator{}, nil, nil, fmt.Errorf("only one node is currently allowed") //nolint:goerr113
-	}
 
 	for _, node := range nodes.Items {
 		if err := node.Validate(ctx, &f.Spec.Config, opts.AllowNotHydrated, kube); err != nil {

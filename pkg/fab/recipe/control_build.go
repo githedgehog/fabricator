@@ -26,6 +26,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab/comp/gateway"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k9s"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/lgtm"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/ntp"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/reloader"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/zot"
@@ -65,6 +66,10 @@ var AirgapArtifactsBase = []comp.ListOCIArtifacts{
 
 var AirgapArtifactsGateway = []comp.ListOCIArtifacts{
 	gateway.Artifacts,
+}
+
+var AirgapArtifactsLGTM = []comp.ListOCIArtifacts{
+	lgtm.Artifacts,
 }
 
 func (b *ControlInstallBuilder) Build(ctx context.Context) error {
@@ -214,6 +219,23 @@ func (b *ControlInstallBuilder) addPayload(ctx context.Context, slog *slog.Logge
 		arts := slices.Clone(AirgapArtifactsBase)
 		if b.Fab.Spec.Config.Gateway.Enable {
 			arts = append(arts, AirgapArtifactsGateway...)
+		}
+		// Include LGTM artifacts when any node has observability role
+		hasObs := false
+		for _, n := range b.Nodes {
+			for _, r := range n.Spec.Roles {
+				if r == fabapi.NodeRoleObservability {
+					hasObs = true
+
+					break
+				}
+			}
+			if hasObs {
+				break
+			}
+		}
+		if hasObs {
+			arts = append(arts, AirgapArtifactsLGTM...)
 		}
 		airgapArts, err := comp.CollectArtifacts(b.Fab, arts...)
 		if err != nil {

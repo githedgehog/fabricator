@@ -1,0 +1,34 @@
+# Properly structured image reference
+image:
+  registry: {{ .Registry }}
+  repository: {{ .Repository }}
+  tag: {{ .Tag }}
+
+nodeSelector:
+{{ .NodeSelector }}
+tolerations:
+{{ .Tolerations }}
+
+# Storage configuration
+storage:
+  trace:
+    backend: local
+    local:
+      path: /var/tempo/traces
+
+# Resource configuration
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    memory: 1Gi
+
+# Persistence to store traces
+persistence:
+  enabled: true
+  size: 10Gi
+
+# Service configuration
+service:
+  type: ClusterIP
