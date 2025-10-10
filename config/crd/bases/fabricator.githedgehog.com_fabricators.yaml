@@ -416,6 +416,35 @@ spec:
                             type: object
                         type: object
                     type: object
+                  lgtm:
+                    properties:
+                      enable:
+                        type: boolean
+                      grafana:
+                        properties:
+                          adminPassword:
+                            type: string
+                          adminUser:
+                            type: string
+                          enabled:
+                            type: boolean
+                        type: object
+                      loki:
+                        properties:
+                          enabled:
+                            type: boolean
+                        type: object
+                      prometheus:
+                        properties:
+                          enabled:
+                            type: boolean
+                        type: object
+                      tempo:
+                        properties:
+                          enabled:
+                            type: boolean
+                        type: object
+                    type: object
                   observability:
                     properties:
                       targets:
@@ -550,6 +579,17 @@ spec:
                           dataplane:
                             type: string
                           frr:
+                            type: string
+                        type: object
+                      lgtm:
+                        properties:
+                          grafana:
+                            type: string
+                          loki:
+                            type: string
+                          prometheus:
+                            type: string
+                          tempo:
                             type: string
                         type: object
                       platform:
@@ -770,6 +810,17 @@ spec:
                       dataplane:
                         type: string
                       frr:
+                        type: string
+                    type: object
+                  lgtm:
+                    properties:
+                      grafana:
+                        type: string
+                      loki:
+                        type: string
+                      prometheus:
+                        type: string
+                      tempo:
                         type: string
                     type: object
                   platform:

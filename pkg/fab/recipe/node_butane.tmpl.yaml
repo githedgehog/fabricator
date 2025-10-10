@@ -108,7 +108,17 @@ storage:
           LLDP=yes
           EmitLLDP=yes
           ConfigureWithoutCarrier=yes
+{{ if .ExternalInterface }}
+    - path: /etc/systemd/network/30-external.network
+      mode: 0644
+      contents:
+        inline: |
+          [Match]
+          Name={{ .ExternalInterface }}
 
+          [Network]
+          DHCP=yes
+{{ end }}
     - path: /etc/systemd/network/99-default.network
       mode: 0644
       contents:
