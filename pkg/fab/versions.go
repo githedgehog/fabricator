@@ -95,6 +95,12 @@ var Versions = fabapi.Versions{
 		ONIE:    "v0.2.1",
 		Flatcar: "v4230.2.3",
 	},
+	LGTM: fabapi.LGTMVersions{
+		Grafana:    "10.1.1",
+		Loki:       "6.43.0",
+		Tempo:      "1.23.3",
+		Prometheus: "27.41.0",
+	},
 }
 
 func CleanupFabricNOSVersion(version string) string {

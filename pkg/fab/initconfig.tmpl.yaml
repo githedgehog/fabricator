@@ -96,6 +96,32 @@ spec:
     gateway:
       enable: true
     {{- end }}
+    {{ if .LGTM }}
+    observability:
+      targets:
+        loki:
+          monitor:
+            url: http://loki-gateway.lgtm.svc.cluster.local/loki/api/v1/push
+            labels:
+              env: vlab
+        prometheus:
+          monitor:
+            url: http://prometheus-server.lgtm.svc.cluster.local/api/v1/write
+            sendIntervalSeconds: 60
+            labels:
+              env: vlab
+    lgtm:
+      enable: true
+      {{- if or .GrafanaAdminUser .GrafanaAdminPassword }}
+      grafana:
+        {{- if .GrafanaAdminUser }}
+        adminUser: "{{ .GrafanaAdminUser }}"
+        {{- end }}
+        {{- if .GrafanaAdminPassword }}
+        adminPassword: "{{ .GrafanaAdminPassword }}"
+        {{- end }}
+      {{- end }}
+    {{- end }}
 
 ---
 apiVersion: fabricator.githedgehog.com/v1beta1
@@ -130,4 +156,22 @@ spec:
    disk: "/dev/sda" # disk to install OS on, e.g. "sda" or "nvme0n1"
   management:
     interface: enp2s0 # interface for management
+{{- end }}
+{{- if .LGTM }}
+---
+apiVersion: fabricator.githedgehog.com/v1beta1
+kind: FabNode
+metadata:
+  name: monitor-1
+  namespace: fab
+spec:
+  roles:
+    - observability
+  bootstrap:
+   disk: "/dev/sda" # disk to install OS on, e.g. "sda" or "nvme0n1"
+  management:
+    interface: enp2s0 # interface for management
+  external:
+    interface: enp2s1 # interface for external (internet access)
+    ip:	dhcp # IP address for external interface
 {{- end }}

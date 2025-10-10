@@ -21,6 +21,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab/comp/fabric"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/gateway"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/lgtm"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/ntp"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/reloader"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/zot"
@@ -46,10 +47,11 @@ import (
 // +kubebuilder:rbac:groups=dhcp.githedgehog.com,resources=dhcpsubnets,verbs=get;list;watch;create;update;patch;delete
 
 // +kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=core,resources=namespaces,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch;create;update;patch;delete
 
-// +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch
+// +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=apps,resources=daemonsets,verbs=get;list;watch;create;update;patch;delete
 
 // +kubebuilder:rbac:groups=apiextensions.k8s.io,resources=customresourcedefinitions,verbs=get;list;watch
@@ -212,12 +214,24 @@ func (r *FabricatorReconciler) Reconcile(ctx context.Context, req kctrl.Request)
 			return kctrl.Result{}, fmt.Errorf("enforcing k3s node registries install: %w", err)
 		}
 
+		if err := comp.EnforceKubeInstall(ctx, r.Client, *f, k3s.InstallLocalPathConfig); err != nil {
+			return kctrl.Result{}, fmt.Errorf("enforcing local-path config install: %w", err)
+		}
+
+		if err := comp.EnforceKubeInstall(ctx, r.Client, *f, k3s.InstallLocalPathProvisionerPatch); err != nil {
+			return kctrl.Result{}, fmt.Errorf("enforcing local-path provisioner restart: %w", err)
+		}
+
 		if err := comp.EnforceKubeInstall(ctx, r.Client, *f, f8r.InstallNodeConfig); err != nil {
 			return kctrl.Result{}, fmt.Errorf("enforcing node config install: %w", err)
 		}
 
 		if err := comp.EnforceKubeInstall(ctx, r.Client, *f, gateway.Install); err != nil {
 			return kctrl.Result{}, fmt.Errorf("enforcing gateway install: %w", err)
+		}
+
+		if err := comp.EnforceKubeInstall(ctx, r.Client, *f, lgtm.Install); err != nil {
+			return kctrl.Result{}, fmt.Errorf("enforcing lgtm install: %w", err)
 		}
 
 		if err := comp.EnforceKubeInstall(ctx, r.Client, *f, alloy.Install); err != nil {

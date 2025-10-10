@@ -68,7 +68,7 @@ func (c *ControlUpgrade) Run(ctx context.Context) error {
 	if err := retry.OnError(backoff, func(error) bool {
 		return true
 	}, func() error {
-		f, control, _, err := fab.GetFabAndNodes(ctx, kube)
+		f, control, nodes, err := fab.GetFabAndNodes(ctx, kube)
 		if err != nil {
 			return fmt.Errorf("getting fabricator and control nodes: %w", err)
 		}
@@ -79,6 +79,7 @@ func (c *ControlUpgrade) Run(ctx context.Context) error {
 
 		c.Fab = f
 		c.Control = control[0]
+		c.Nodes = nodes
 
 		return nil
 	}); err != nil {
@@ -247,6 +248,23 @@ func (c *ControlUpgrade) uploadAirgap(ctx context.Context, username, password st
 	arts := slices.Clone(AirgapArtifactsBase)
 	if c.Fab.Spec.Config.Gateway.Enable {
 		arts = append(arts, AirgapArtifactsGateway...)
+	}
+	// Include LGTM artifacts when any node has observability role
+	hasObs := false
+	for _, n := range c.Nodes {
+		for _, r := range n.Spec.Roles {
+			if r == fabapi.NodeRoleObservability {
+				hasObs = true
+
+				break
+			}
+		}
+		if hasObs {
+			break
+		}
+	}
+	if hasObs {
+		arts = append(arts, AirgapArtifactsLGTM...)
 	}
 	airgapArts, err := comp.CollectArtifacts(c.Fab, arts...)
 	if err != nil {

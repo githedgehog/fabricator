@@ -198,6 +198,10 @@ func Duration(d time.Duration) *kmetav1.Duration {
 }
 
 func NewHelmChart(cfg fabapi.Fabricator, name, chart, version, bootstrapChart string, abortOnFail bool, values string) (kclient.Object, error) {
+	return NewHelmChartWithNamespace(cfg, name, FabNamespace, chart, version, bootstrapChart, abortOnFail, values)
+}
+
+func NewHelmChartWithNamespace(cfg fabapi.Fabricator, name, namespace, chart, version, bootstrapChart string, abortOnFail bool, values string) (kclient.Object, error) {
 	failurePolicy := ""
 	if abortOnFail {
 		failurePolicy = "abort"
@@ -230,7 +234,7 @@ func NewHelmChart(cfg fabapi.Fabricator, name, chart, version, bootstrapChart st
 		Spec: helmapi.HelmChartSpec{
 			Chart:                chartURL,
 			Version:              version,
-			TargetNamespace:      FabNamespace,
+			TargetNamespace:      namespace,
 			CreateNamespace:      true,
 			FailurePolicy:        helmapi.FailurePolicy(failurePolicy),
 			DockerRegistrySecret: auth,
@@ -408,6 +412,13 @@ func CreateOrUpdate(ctx context.Context, kube kclient.Client, obj kclient.Object
 
 			return nil
 		})
+	case *coreapi.Namespace:
+		tmp := &coreapi.Namespace{ObjectMeta: obj.ObjectMeta}
+		res, err = ctrlutil.CreateOrUpdate(ctx, kube, tmp, func() error {
+			// Namespace has no spec to update, only metadata
+
+			return nil
+		})
 	case *coreapi.Service:
 		tmp := &coreapi.Service{ObjectMeta: obj.ObjectMeta}
 		res, err = ctrlutil.CreateOrUpdate(ctx, kube, tmp, func() error {
@@ -445,6 +456,13 @@ func CreateOrUpdate(ctx context.Context, kube kclient.Client, obj kclient.Object
 		})
 	case *fabapi.FabNode:
 		tmp := &fabapi.FabNode{ObjectMeta: obj.ObjectMeta}
+		res, err = ctrlutil.CreateOrUpdate(ctx, kube, tmp, func() error {
+			tmp.Spec = obj.Spec
+
+			return nil
+		})
+	case *appsapi.Deployment:
+		tmp := &appsapi.Deployment{ObjectMeta: obj.ObjectMeta}
 		res, err = ctrlutil.CreateOrUpdate(ctx, kube, tmp, func() error {
 			tmp.Spec = obj.Spec
 

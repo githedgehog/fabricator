@@ -40,6 +40,21 @@ systemd:
         [Install]
         WantedBy=first-boot-complete.target
 {{ end }}
+    - name: patch-local-path-config.service
+      enabled: true
+      contents: |
+        [Unit]
+        Description=Patch local-path-config with observability tolerations
+        After=k3s.service
+        Requires=k3s.service
+
+        [Service]
+        Type=oneshot
+        ExecStart=/opt/bin/patch-local-path-config.sh
+        RemainAfterExit=yes
+
+        [Install]
+        WantedBy=multi-user.target
 
 storage:
   files:
@@ -169,6 +184,22 @@ storage:
           TOOLBOX_DOCKER_IMAGE=ghcr.io/githedgehog/toolbox
           TOOLBOX_DOCKER_TAG=latest
           TOOLBOX_USER=root
+
+    - path: /opt/bin/patch-local-path-config.sh
+      mode: 0755
+      contents:
+        inline: |
+          #!/bin/bash
+          set -e
+          export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+          # Wait for k3s to be ready
+          while ! /opt/bin/kubectl get configmap -n kube-system local-path-config &>/dev/null; do
+            sleep 5
+          done
+          # Patch the helperPod.yaml to add observability tolerations
+          /opt/bin/kubectl patch configmap -n kube-system local-path-config --type='json' -p='[{"op": "replace", "path": "/data/helperPod.yaml", "value":"apiVersion: v1\nkind: Pod\nmetadata:\n  name: helper-pod\nspec:\n  tolerations:\n  - key: role.fabricator.githedgehog.com/observability\n    operator: Exists\n    effect: NoExecute\n  containers:\n  - name: helper-pod\n    image: \"rancher/mirrored-library-busybox:1.36.1\"\n    imagePullPolicy: IfNotPresent"}]'
+          # Restart local-path-provisioner to pick up the change
+          /opt/bin/kubectl rollout restart deployment -n kube-system local-path-provisioner
 
   directories:
     - path: /home/core/.kube

@@ -86,11 +86,13 @@ func VLABUp(ctx context.Context, workDir, cacheDir string, opts VLABUpOpts) erro
 	}
 
 	buildGateways := false
+	buildObservability := false
 	for _, vm := range vlab.VMs {
 		if vm.Type == VMTypeGateway {
 			buildGateways = true
-
-			break
+		}
+		if vm.Type == VMTypeObservability {
+			buildObservability = true
 		}
 	}
 
@@ -101,10 +103,11 @@ func VLABUp(ctx context.Context, workDir, cacheDir string, opts VLABUpOpts) erro
 	}
 
 	if err := c.build(ctx, BuildOpts{
-		HydrateMode:   opts.HydrateMode,
-		BuildMode:     opts.BuildMode,
-		BuildControls: true,
-		BuildGateways: buildGateways,
+		HydrateMode:        opts.HydrateMode,
+		BuildMode:          opts.BuildMode,
+		BuildControls:      true,
+		BuildGateways:      buildGateways,
+		BuildObservability: buildObservability,
 	}); err != nil {
 		return fmt.Errorf("building: %w", err)
 	}

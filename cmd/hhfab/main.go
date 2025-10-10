@@ -51,6 +51,7 @@ const (
 	FlagIncludeCLS                = "include-cls"
 	FlagControlNodeMgmtLink       = "control-node-mgmt-link"
 	FlagGateway                   = "gateway"
+	FlagObservability             = "obs"
 	FlagNameFabricMode            = "fabric-mode"
 	FlagNameCount                 = "count"
 	FlagNameKillStale             = "kill-stale"
@@ -556,6 +557,13 @@ func Run(ctx context.Context) error {
 						Usage:    "[PREVIEW] add and enable gateway node",
 						EnvVars:  []string{"HHFAB_GATEWAY"},
 					},
+					&cli.BoolFlag{
+						Category: FlagCatGenConfig,
+						Name:     FlagObservability,
+						Hidden:   !preview,
+						Usage:    "[PREVIEW] add and enable observability node with LGTM stack (Loki, Grafana, Tempo, Prometheus)",
+						EnvVars:  []string{"HHFAB_OBS"},
+					},
 				}),
 				Before: before(false),
 				Action: func(c *cli.Context) error {
@@ -578,6 +586,7 @@ func Run(ctx context.Context) error {
 							IncludeCLS:                c.Bool(FlagIncludeCLS),
 							ControlNodeManagementLink: c.String(FlagControlNodeMgmtLink),
 							Gateway:                   c.Bool(FlagGateway),
+							LGTM:                      c.Bool(FlagObservability),
 							Preview:                   preview,
 							JoinToken:                 joinToken,
 							SaveJoinToken:             saveJoinToken,

@@ -14,7 +14,9 @@ cat > .zot/config.json <<- EOM
     "level": "debug"
   },
   "storage": {
-    "rootDirectory": "$(pwd)/.zot/data"
+    "rootDirectory": "$(pwd)/.zot/data",
+    "dedupe": false,
+    "gc": false
   },
   "http": {
     "address": "127.0.0.1",

@@ -245,7 +245,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 			}
 
 			resize := false
-			if (vm.Type == VMTypeControl || vm.Type == VMTypeGateway) && opts.BuildMode == recipe.BuildModeManual || vm.Type == VMTypeServer || vm.Type == VMTypeExternal { //nolint:gocritic
+			if (vm.Type == VMTypeControl || vm.Type == VMTypeGateway || vm.Type == VMTypeObservability) && opts.BuildMode == recipe.BuildModeManual || vm.Type == VMTypeServer || vm.Type == VMTypeExternal { //nolint:gocritic
 				resize = true
 
 				if err := d.FromORAS(ctx, vmDir, vlabcomp.FlatcarRef, vlabcomp.FlatcarVersion(c.Fab), []artificer.ORASFile{
@@ -264,7 +264,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 				}); err != nil {
 					return fmt.Errorf("copying flatcar files: %w", err)
 				}
-			} else if (vm.Type == VMTypeControl || vm.Type == VMTypeGateway) && (opts.BuildMode == recipe.BuildModeUSB || opts.BuildMode == recipe.BuildModeISO) {
+			} else if (vm.Type == VMTypeControl || vm.Type == VMTypeGateway || vm.Type == VMTypeObservability) && (opts.BuildMode == recipe.BuildModeUSB || opts.BuildMode == recipe.BuildModeISO) {
 				if err := d.FromORAS(ctx, vmDir, vlabcomp.FlatcarRef, vlabcomp.FlatcarVersion(c.Fab), []artificer.ORASFile{
 					{
 						Name:   "flatcar_efi_code.fd",
@@ -285,7 +285,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 				}
 
 				recipeType := string(recipe.TypeControl)
-				if vm.Type == VMTypeGateway {
+				if vm.Type == VMTypeGateway || vm.Type == VMTypeObservability {
 					recipeType = string(recipe.TypeNode)
 				}
 				fullName := recipeType + recipe.Separator + vm.Name
@@ -408,11 +408,11 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 			// -daemonize
 			// -pidfile
 
-			if (vm.Type == VMTypeControl || vm.Type == VMTypeGateway) && opts.BuildMode == recipe.BuildModeManual || vm.Type == VMTypeServer || vm.Type == VMTypeExternal {
+			if (vm.Type == VMTypeControl || vm.Type == VMTypeGateway || vm.Type == VMTypeObservability) && opts.BuildMode == recipe.BuildModeManual || vm.Type == VMTypeServer || vm.Type == VMTypeExternal {
 				ign := VLABIgnition
 				if vm.Type == VMTypeControl {
 					ign = filepath.Join(c.WorkDir, ResultDir, string(recipe.TypeControl)+recipe.Separator+vm.Name+recipe.Separator+recipe.InstallIgnitionSuffix)
-				} else if vm.Type == VMTypeGateway {
+				} else if vm.Type == VMTypeGateway || vm.Type == VMTypeObservability {
 					ign = filepath.Join(c.WorkDir, ResultDir, string(recipe.TypeNode)+recipe.Separator+vm.Name+recipe.Separator+recipe.InstallIgnitionSuffix)
 				}
 				args = append(args,
@@ -420,14 +420,14 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 				)
 			}
 
-			if (vm.Type == VMTypeControl || vm.Type == VMTypeGateway) && opts.BuildMode == recipe.BuildModeUSB {
+			if (vm.Type == VMTypeControl || vm.Type == VMTypeGateway || vm.Type == VMTypeObservability) && opts.BuildMode == recipe.BuildModeUSB {
 				args = append(args,
 					"-drive", fmt.Sprintf("if=none,format=raw,file=%s,id=disk2", VLABUSBImageFile),
 					"-device", "virtio-blk-pci,drive=disk2,bootindex=2",
 				)
 			}
 
-			if (vm.Type == VMTypeControl || vm.Type == VMTypeGateway) && opts.BuildMode == recipe.BuildModeISO {
+			if (vm.Type == VMTypeControl || vm.Type == VMTypeGateway || vm.Type == VMTypeObservability) && opts.BuildMode == recipe.BuildModeISO {
 				args = append(args,
 					"-device", "virtio-scsi-pci,id=scsi0",
 					"-device", "scsi-cd,bus=scsi0.0,drive=cdrom0,bootindex=2",
@@ -461,7 +461,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 			return nil
 		})
 
-		if vm.Type == VMTypeServer || vm.Type == VMTypeControl || vm.Type == VMTypeGateway || vm.Type == VMTypeExternal {
+		if vm.Type == VMTypeServer || vm.Type == VMTypeControl || vm.Type == VMTypeGateway || vm.Type == VMTypeExternal || vm.Type == VMTypeObservability {
 			postProcesses.Add(1)
 			group.Go(func() error {
 				if err := c.vmPostProcess(ctx, vlab, d, vm, opts); err != nil {
@@ -500,7 +500,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 
 		expected := map[string]bool{}
 		for _, vm := range vlab.VMs {
-			if vm.Type == VMTypeControl || vm.Type == VMTypeGateway {
+			if vm.Type == VMTypeControl || vm.Type == VMTypeGateway || vm.Type == VMTypeObservability {
 				expected[vm.Name] = true
 			}
 		}
@@ -826,7 +826,7 @@ func serverIgnition(fab fabapi.Fabricator, vm VM) (string, []byte, error) {
 }
 
 func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Downloader, vm VM, opts VLABRunOpts) error {
-	if vm.Type != VMTypeServer && vm.Type != VMTypeControl && vm.Type != VMTypeGateway && vm.Type != VMTypeExternal {
+	if vm.Type != VMTypeServer && vm.Type != VMTypeControl && vm.Type != VMTypeGateway && vm.Type != VMTypeExternal && vm.Type != VMTypeObservability {
 		return nil
 	}
 
@@ -915,7 +915,7 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 		if _, _, err := ssh.Run(ctx, "bash -c 'toolbox hostname'"); err != nil {
 			return fmt.Errorf("trying toolbox: %w", err)
 		}
-	} else if vm.Type == VMTypeControl || vm.Type == VMTypeGateway {
+	} else if vm.Type == VMTypeControl || vm.Type == VMTypeGateway || vm.Type == VMTypeObservability {
 		if opts.BuildMode == recipe.BuildModeManual || opts.AutoUpgrade {
 			marker, err := sshReadMarker(ftp)
 			if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -932,7 +932,7 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 				slog.Info("Uploading installer", "vm", vm.Name, "type", vm.Type)
 
 				recipeType := string(recipe.TypeControl)
-				if vm.Type == VMTypeGateway {
+				if vm.Type == VMTypeGateway || vm.Type == VMTypeObservability {
 					recipeType = string(recipe.TypeNode)
 				}
 				fullName := recipeType + recipe.Separator + vm.Name
