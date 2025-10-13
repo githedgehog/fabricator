@@ -34,7 +34,7 @@ var Versions = fabapi.Versions{
 		Zot:               "v2.1.7",
 		ZotChart:          "v0.1.67-hh1",
 		CertManager:       "v1.18.2",
-		K9s:               "v0.50.7",
+		K9s:               "v0.50.15",
 		Toolbox:           "v0.6.0",
 		Reloader:          "v1.0.40", // TODO upgrade or get rid of?
 		NTP:               "v0.0.2",
