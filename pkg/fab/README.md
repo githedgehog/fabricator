@@ -42,6 +42,9 @@ oras push "ghcr.io/githedgehog/fabricator/k3s-airgap:${K3S_VERSION}" k3s k3s-air
 ```
 
 ## Zot
+We have forked the upstream zot chart because the upstream chart switched to
+using stateful sets, instead of a deployment. Our chart is the last version of
+the upstream before the stateful sets.
 
 Zot changed their defaults from deployment to stateful sets. There is no easy
 way to move from deployments to stateful sets. We forked the chart at the last
@@ -143,17 +146,17 @@ qemu-img info onie-kvm_x86_64.qcow2
 oras push "ghcr.io/githedgehog/fabricator/onie-vlab:${ONIE_VERSION}" onie-kvm_x86_64.qcow2 onie_efi_code.fd onie_efi_vars.fd
 ```
 
-## NTP
+## NTP / Chrony
 
-Image is basically taken from cturra/ntp:latest at some point in time.
+Image is taken from cturra/ntp:latest. The version of chrony is from the Alpine
+Linux build. The container is an alpine Linux distro.
 
 ```bash
-export NTP_VERSION="v0.0.2"
+export NTP_VERSION="v0.0.4"
+export UPSTREAM_SHA="sha256:8ee0cfcabfa3d0d77dde02cb2930da02da8c33a2b7393bb429010cbae0b9d509"
 
-docker image rm cturra/ntp:latest
-docker pull --platform linux/amd64 cturra/ntp:latest
-docker tag cturra/ntp:latest ghcr.io/githedgehog/fabricator/ntp:${NTP_VERSION}
-docker push ghcr.io/githedgehog/fabricator/ntp:${NTP_VERSION}
+docker image rm cturra/ntp@${UPSTREAM_SHA}
+skopeo copy --all docker://cturra/ntp@${UPSTREAM_SHA} docker://ghcr.io/githedgehog/fabricator/ntp:${NTP_VERSION}
 ```
 
 ## Broadcom SONiC
@@ -214,3 +217,11 @@ tar xzf "bash-completion-${BASH_COMPLETION_VERSION}.tar.xz"
 mv bash-completion-${BASH_COMPLETION_VERSION} bash-completion
 oras push "ghcr.io/githedgehog/fabricator/bash-completion:v${BASH_COMPLETION_VERSION}" bash-completion
 ```
+
+# Tinyproxy
+
+The tinyproxy container is built from source, and deployed using a distroless
+container. The repo for the container is https://github.com/githedgehog/control-proxy.
+The justfile inside the repo contains the steps that CI will run run. To update
+tinyproxy bump the tinyproxy version number in the justfile, and increment the tag so the
+CI will pull, build, and push the new version.
