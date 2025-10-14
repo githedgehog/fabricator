@@ -16,7 +16,7 @@ require (
 	dario.cat/mergo v1.0.2
 	github.com/Masterminds/semver/v3 v3.4.0
 	github.com/Masterminds/sprig/v3 v3.3.0
-	github.com/appleboy/easyssh-proxy v1.5.0
+	github.com/appleboy/easyssh-proxy v1.5.2
 	github.com/cert-manager/cert-manager v1.18.2
 	github.com/charmbracelet/keygen v0.5.3
 	github.com/containers/image/v5 v5.36.2
@@ -83,7 +83,7 @@ require (
 	github.com/Microsoft/hcsshim v0.13.0 // indirect
 	github.com/ProtonMail/go-crypto v1.1.6 // indirect
 	github.com/STARRY-S/zip v0.2.3 // indirect
-	github.com/ScaleFT/sshkeys v1.2.0 // indirect
+	github.com/ScaleFT/sshkeys v1.4.0 // indirect
 	github.com/Shopify/ejson v1.3.3 // indirect
 	github.com/VividCortex/ewma v1.2.0 // indirect
 	github.com/acarl005/stripansi v0.0.0-20180116102854-5a71ef0e047d // indirect
