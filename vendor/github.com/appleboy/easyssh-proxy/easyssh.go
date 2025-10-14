@@ -6,12 +6,15 @@ package easyssh
 
 import (
 	"bufio"
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,7 +23,15 @@ import (
 	"golang.org/x/crypto/ssh/agent"
 )
 
-var defaultTimeout = 60 * time.Second
+var (
+	defaultTimeout    = 60 * time.Second
+	defaultBufferSize = 4096
+)
+
+var (
+	// ErrProxyDialTimeout is returned when proxy dial connection times out
+	ErrProxyDialTimeout = errors.New("proxy dial timeout")
+)
 
 type Protocol string
 
@@ -49,6 +60,7 @@ type (
 		Password     string
 		Timeout      time.Duration
 		Proxy        DefaultConfig
+		ReadBuffSize int
 		Ciphers      []string
 		KeyExchanges []string
 		Fingerprint  string
@@ -246,7 +258,43 @@ func (ssh_conf *MakeConfig) Connect() (*ssh.Session, *ssh.Client, error) {
 			return nil, nil, err
 		}
 
-		conn, err := proxyClient.Dial(string(ssh_conf.Protocol), net.JoinHostPort(ssh_conf.Server, ssh_conf.Port))
+		// Apply timeout to the connection from proxy to target server
+		timeout := ssh_conf.Timeout
+		if timeout == 0 {
+			timeout = defaultTimeout
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+
+		type connResult struct {
+			conn net.Conn
+			err  error
+		}
+
+		connCh := make(chan connResult, 1)
+		go func() {
+			conn, err := proxyClient.Dial(string(ssh_conf.Protocol), net.JoinHostPort(ssh_conf.Server, ssh_conf.Port))
+			select {
+			case connCh <- connResult{conn: conn, err: err}:
+				// Successfully sent result
+			case <-ctx.Done():
+				// Context was cancelled, clean up the connection if it was established
+				if conn != nil {
+					conn.Close()
+				}
+			}
+		}()
+
+		var conn net.Conn
+		select {
+		case result := <-connCh:
+			conn = result.conn
+			err = result.err
+		case <-ctx.Done():
+			return nil, nil, fmt.Errorf("%w: %v", ErrProxyDialTimeout, ctx.Err())
+		}
+
 		if err != nil {
 			return nil, nil, err
 		}
@@ -324,10 +372,23 @@ func (ssh_conf *MakeConfig) Stream(command string, timeout ...time.Duration) (<-
 	// combine outputs, create a line-by-line scanner
 	stdoutReader := io.MultiReader(outReader)
 	stderrReader := io.MultiReader(errReader)
-	stdoutScanner := bufio.NewScanner(stdoutReader)
-	stderrScanner := bufio.NewScanner(stderrReader)
 
-	go func(stdoutScanner, stderrScanner *bufio.Scanner, stdoutChan, stderrChan chan string, doneChan chan bool, errChan chan error) {
+	var stdoutScanner *bufio.Reader
+	var stderrScanner *bufio.Reader
+
+	if ssh_conf.ReadBuffSize > 0 {
+		stdoutScanner = bufio.NewReaderSize(stdoutReader, ssh_conf.ReadBuffSize)
+	} else {
+		stdoutScanner = bufio.NewReaderSize(stdoutReader, defaultBufferSize)
+	}
+
+	if ssh_conf.ReadBuffSize > 0 {
+		stderrScanner = bufio.NewReaderSize(stderrReader, ssh_conf.ReadBuffSize)
+	} else {
+		stderrScanner = bufio.NewReaderSize(stderrReader, defaultBufferSize)
+	}
+
+	go func(stdoutScanner, stderrScanner *bufio.Reader, stdoutChan, stderrChan chan string, doneChan chan bool, errChan chan error) {
 		defer close(doneChan)
 		defer close(errChan)
 		defer client.Close()
@@ -338,23 +399,34 @@ func (ssh_conf *MakeConfig) Stream(command string, timeout ...time.Duration) (<-
 		if len(timeout) > 0 {
 			executeTimeout = timeout[0]
 		}
-		timeoutChan := time.After(executeTimeout)
+		ctxTimeout, cancel := context.WithTimeout(context.Background(), executeTimeout)
+		defer cancel()
 		res := make(chan struct{}, 1)
 		var resWg sync.WaitGroup
 		resWg.Add(2)
 
 		go func() {
 			defer close(stdoutChan)
-			for stdoutScanner.Scan() {
-				stdoutChan <- stdoutScanner.Text()
+			for {
+				var text string
+				text, err = stdoutScanner.ReadString('\n')
+				if errors.Is(err, io.EOF) {
+					break
+				}
+				stdoutChan <- strings.TrimRight(text, "\n")
 			}
 			resWg.Done()
 		}()
 
 		go func() {
 			defer close(stderrChan)
-			for stderrScanner.Scan() {
-				stderrChan <- stderrScanner.Text()
+			for {
+				var text string
+				text, err = stderrScanner.ReadString('\n')
+				if errors.Is(err, io.EOF) {
+					break
+				}
+				stderrChan <- strings.TrimRight(text, "\n")
 			}
 			resWg.Done()
 		}()
@@ -369,8 +441,8 @@ func (ssh_conf *MakeConfig) Stream(command string, timeout ...time.Duration) (<-
 		case <-res:
 			errChan <- session.Wait()
 			doneChan <- true
-		case <-timeoutChan:
-			errChan <- fmt.Errorf("Run Command Timeout")
+		case <-ctxTimeout.Done():
+			errChan <- fmt.Errorf("Run Command Timeout: %v", ctxTimeout.Err())
 			doneChan <- false
 		}
 	}(stdoutScanner, stderrScanner, stdoutChan, stderrChan, doneChan, errChan)
@@ -382,6 +454,10 @@ func (ssh_conf *MakeConfig) Stream(command string, timeout ...time.Duration) (<-
 func (ssh_conf *MakeConfig) Run(command string, timeout ...time.Duration) (outStr string, errStr string, isTimeout bool, err error) {
 	stdoutChan, stderrChan, doneChan, errChan, err := ssh_conf.Stream(command, timeout...)
 	if err != nil {
+		// Check if the error is from a proxy dial timeout
+		if errors.Is(err, ErrProxyDialTimeout) {
+			isTimeout = true
+		}
 		return outStr, errStr, isTimeout, err
 	}
 	// read from the output channel until the done signal is passed

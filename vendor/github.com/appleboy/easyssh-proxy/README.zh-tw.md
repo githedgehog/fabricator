@@ -6,18 +6,16 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/appleboy/easyssh-proxy)](https://goreportcard.com/report/github.com/appleboy/easyssh-proxy)
 [![Sourcegraph](https://sourcegraph.com/github.com/appleboy/easyssh-proxy/-/badge.svg)](https://sourcegraph.com/github.com/appleboy/easyssh-proxy?badge)
 
-[繁體中文](./README.zh-tw.md)
+easyssh-proxy 提供了一個用 Go 語言實現的一些 SSH 協議功能的簡單實現。
 
-easyssh-proxy provides a simple implementation of some SSH protocol features in Go.
+## 功能
 
-## Feature
+這個項目是從 [easyssh](https://github.com/hypersleep/easyssh) 分叉而來，但添加了一些如下所示的功能。
 
-This project is forked from [easyssh](https://github.com/hypersleep/easyssh) but add some features as the following.
-
-- [x] Support plain text of user private key.
-- [x] Support key path of user private key.
-- [x] Support Timeout for the TCP connection to establish.
-- [x] Support SSH ProxyCommand.
+- [x] 支援用戶私鑰的純文字。
+- [x] 支援用戶私鑰的路徑。
+- [x] 支援 TCP 連接建立的超時設定。
+- [x] 支援 SSH ProxyCommand。
 
 ```bash
      +--------+       +----------+      +-----------+
@@ -32,21 +30,21 @@ This project is forked from [easyssh](https://github.com/hypersleep/easyssh) but
      192.168.1.5       121.1.2.3         10.10.29.68
 ```
 
-## Installation
+## 安裝
 
 ```bash
 go get github.com/appleboy/easyssh-proxy
 ```
 
-**Requirements:** Go 1.24 or higher
+**需求：** Go 1.24 或更高版本
 
-## Usage
+## 使用方法
 
-You can see detailed examples of the `ssh`, `scp`, `Proxy`, and `stream` commands inside the [`examples`](./_examples/) folder.
+你可以在 [`examples`](./_examples/) 資料夾中看到 `ssh`、`scp`、`Proxy` 和 `stream` 命令的詳細範例。
 
 ### MakeConfig
 
-All functionality provided by this package is accessed via methods of the MakeConfig struct.
+這個套件提供的所有功能都是通過 MakeConfig 結構體的方法來訪問的。
 
 ```go
   ssh := &easyssh.MakeConfig{
@@ -62,26 +60,26 @@ All functionality provided by this package is accessed via methods of the MakeCo
   stdoutChan, stderrChan, doneChan, errChan, err = ssh.Stream("for i in {1..5}; do echo ${i}; sleep 1; done; exit 2;", 60*time.Second)
 ```
 
-MakeConfig takes in the following properties:
+MakeConfig 接受以下屬性：
 
-| property          | description                                                                                                                                    |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| user              | The SSH user to be logged in with                                                                                                              |
-| Server            | The IP or hostname pointing of the server                                                                                                      |
-| Key               | A string containing the private key to be used when making the connection                                                                      |
-| KeyPath           | The path pointing to the SSH key file to be used when making the connection                                                                    |
-| Port              | The port to use when connecting to the SSH daemon of the server                                                                                |
-| Protocol          | The tcp protocol to be used: `"tcp", "tcp4" "tcp6"`                                                                                            |
-| Passphrase        | The Passphrase to unlock the provided SSH key (leave blank if no Passphrase is required)                                                       |
-| Password          | The Password to use to login the specified user                                                                                                |
-| Timeout           | The length of time to wait before timing out the request                                                                                       |
-| Proxy             | An additional set of configuration params that will be used to SSH into an additional server via the server configured in this top-level block |
-| Ciphers           | An array of ciphers (e.g. aes256-ctr) to enable for the SSH connection                                                                         |
-| KeyExchanges      | An array of key exchanges (e.g. ecdh-sha2-nistp384) to enable for the SSH connection                                                           |
-| Fingerprint       | The expected fingerprint to be returned by the SSH server, results in a fingerprint error if they do not match                                 |
-| UseInsecureCipher | Enables the use of insecure ciphers and key exchanges that are insecure and can lead to compromise, [see ssh](#ssh)                            |
+| 屬性              | 描述                                                                         |
+| ----------------- | ---------------------------------------------------------------------------- |
+| user              | 要登入的 SSH 用戶                                                            |
+| Server            | 伺服器的 IP 或主機名稱                                                       |
+| Key               | 包含用於建立連接的私鑰的字串                                                 |
+| KeyPath           | 指向用於建立連接的 SSH 密鑰文件的路徑                                        |
+| Port              | 連接到伺服器的 SSH 守護程序時使用的端口                                      |
+| Protocol          | 要使用的 TCP 協議："tcp", "tcp4", "tcp6"                                     |
+| Passphrase        | 用於解鎖提供的 SSH 密鑰的密碼（如果不需要密碼，則留空）                      |
+| Password          | 用於登入指定用戶的密碼                                                       |
+| Timeout           | 請求超時前等待的時間長度                                                     |
+| Proxy             | 一組額外的配置參數，將通過此頂層塊中配置的伺服器 SSH 到另一個伺服器          |
+| Ciphers           | 用於 SSH 連接的密碼陣列（例如 aes256-ctr）                                   |
+| KeyExchanges      | 用於 SSH 連接的密鑰交換陣列（例如 ecdh-sha2-nistp384）                       |
+| Fingerprint       | SSH 伺服器返回的預期指紋，如果不匹配則會導致指紋錯誤                         |
+| UseInsecureCipher | 啟用不安全的密碼和密鑰交換，這些是不安全的，可能會導致妥協，[參見 ssh](#ssh) |
 
-NOTE: Please view the reference documentation for the most up to date properties of [MakeConfig](https://pkg.go.dev/github.com/appleboy/easyssh-proxy#MakeConfig) and [DefaultConfig](https://pkg.go.dev/github.com/appleboy/easyssh-proxy#DefaultConfig)
+注意：請查看參考文件以獲取 [MakeConfig](https://pkg.go.dev/github.com/appleboy/easyssh-proxy#MakeConfig) 和 [DefaultConfig](https://pkg.go.dev/github.com/appleboy/easyssh-proxy#DefaultConfig) 的最新屬性。
 
 ### ssh
 
@@ -167,7 +165,7 @@ func main() {
   }
 
   // Call Scp method with file you want to upload to remote server.
-  // Please make sure the `tmp` floder exists.
+  // Please make sure the `tmp` folder exists.
   err := ssh.Scp("/root/source.csv", "/tmp/target.csv")
 
   // Handle errors
@@ -200,9 +198,9 @@ See [examples/proxy/proxy.go](./_examples/proxy/proxy.go)
   }
 ```
 
-NOTE: Properties for the Proxy connection are not inherited from the Jumphost. You must explicitly specify them in the DefaultConfig struct.
+注意：代理連接的屬性不會從跳板機繼承。您必須在 DefaultConfig 結構體中明確指定它們。
 
-e.g. A custom `Timeout` length must be specified for both the Jumphost (intermediary server) and the destination server.
+例如，必須為跳板機（中介伺服器）和目標伺服器分別指定自定義的 `Timeout` 長度。
 
 ### SSH Stream Log
 
@@ -255,7 +253,7 @@ func main() {
 
 ### WriteFile
 
-See [examples/writeFile/writeFile.go](./_examples/writeFile/writeFile.go)
+參見 [examples/writeFile/writeFile.go](./_examples/writeFile/writeFile.go)
 
 ```go
 func (ssh_conf *MakeConfig) WriteFile(reader io.Reader, size int64, etargetFile string) error
@@ -263,7 +261,7 @@ func (ssh_conf *MakeConfig) WriteFile(reader io.Reader, size int64, etargetFile 
 
 ```go
 func main() {
-  // Create MakeConfig instance with remote username, server address and path to private key.
+  // 使用遠程用戶名、伺服器地址和私鑰路徑創建 MakeConfig 實例。
   ssh := &easyssh.MakeConfig{
     Server:  "localhost",
     User:    "drone-scp",
@@ -275,16 +273,16 @@ func main() {
   fileContents := "Example Text..."
   reader := strings.NewReader(fileContents)
 
-  // Write a file to the remote server using the writeFile command.
-  // Second argument specifies the number of bytes to write to the server from the reader.
+  // 使用 writeFile 命令將文件寫入到遠程伺服器。
+  // 第二個參數指定從 reader 中寫入到伺服器的字節數。
   if err := ssh.WriteFile(reader, int64(len(fileContents)), "/home/user/foo.txt"); err != nil {
-    return fmt.Errorf("Error: failed to write file to client. error: %w", err)
+    return fmt.Errorf("錯誤：無法將文件寫入到客戶端。錯誤：%w", err)
   }
 }
 ```
 
-| property    | description                                                         |
-| ----------- | ------------------------------------------------------------------- |
-| reader      | The `io.reader` who's contents will be read and saved to the server |
-| size        | The number of bytes to be read from the `io.reader`                 |
-| etargetFile | The location on the server that the file will be written to         |
+| 屬性        | 描述                                          |
+| ----------- | --------------------------------------------- |
+| reader      | 將讀取其內容並保存到伺服器的 `io.reader`      |
+| size        | 要從 `io.reader` 中讀取的字節數               |
+| etargetFile | 文件將被寫入到伺服器上的位置                   |

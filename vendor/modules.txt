@@ -158,8 +158,8 @@ github.com/ProtonMail/go-crypto/openpgp/x448
 # github.com/STARRY-S/zip v0.2.3
 ## explicit; go 1.23
 github.com/STARRY-S/zip
-# github.com/ScaleFT/sshkeys v1.2.0
-## explicit; go 1.13
+# github.com/ScaleFT/sshkeys v1.4.0
+## explicit; go 1.23.0
 github.com/ScaleFT/sshkeys
 # github.com/Shopify/ejson v1.3.3
 ## explicit; go 1.18
@@ -179,8 +179,8 @@ github.com/andybalholm/brotli/matchfinder
 # github.com/apparentlymart/go-cidr v1.1.0
 ## explicit
 github.com/apparentlymart/go-cidr/cidr
-# github.com/appleboy/easyssh-proxy v1.5.0
-## explicit; go 1.18
+# github.com/appleboy/easyssh-proxy v1.5.2
+## explicit; go 1.24.0
 github.com/appleboy/easyssh-proxy
 # github.com/armon/go-metrics v0.4.1
 ## explicit; go 1.12
@@ -1851,7 +1851,7 @@ gocloud.dev/internal/oc
 gocloud.dev/internal/openurl
 gocloud.dev/internal/retry
 gocloud.dev/internal/useragent
-# golang.org/x/crypto v0.42.0
+# golang.org/x/crypto v0.43.0
 ## explicit; go 1.24.0
 golang.org/x/crypto/argon2
 golang.org/x/crypto/bcrypt
@@ -1894,7 +1894,7 @@ golang.org/x/mod/internal/lazyregexp
 golang.org/x/mod/modfile
 golang.org/x/mod/module
 golang.org/x/mod/semver
-# golang.org/x/net v0.44.0
+# golang.org/x/net v0.45.0
 ## explicit; go 1.24.0
 golang.org/x/net/context
 golang.org/x/net/html
@@ -1925,7 +1925,7 @@ golang.org/x/oauth2/jwt
 ## explicit; go 1.24.0
 golang.org/x/sync/errgroup
 golang.org/x/sync/semaphore
-# golang.org/x/sys v0.36.0
+# golang.org/x/sys v0.37.0
 ## explicit; go 1.24.0
 golang.org/x/sys/cpu
 golang.org/x/sys/execabs
@@ -1933,10 +1933,10 @@ golang.org/x/sys/plan9
 golang.org/x/sys/unix
 golang.org/x/sys/windows
 golang.org/x/sys/windows/registry
-# golang.org/x/term v0.35.0
+# golang.org/x/term v0.36.0
 ## explicit; go 1.24.0
 golang.org/x/term
-# golang.org/x/text v0.29.0
+# golang.org/x/text v0.30.0
 ## explicit; go 1.24.0
 golang.org/x/text/cases
 golang.org/x/text/encoding
