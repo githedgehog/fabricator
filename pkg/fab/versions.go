@@ -37,7 +37,7 @@ var Versions = fabapi.Versions{
 		K9s:               "v0.50.15",
 		Toolbox:           "v0.6.0",
 		Reloader:          "v1.0.40", // TODO upgrade or get rid of?
-		NTP:               "v0.0.2",
+		NTP:               "v0.0.4",
 		NTPChart:          FabricatorVersion,
 		Alloy:             "v1.11.2",
 		ControlProxy:      "v1.11.2-hh2",
