@@ -8,6 +8,7 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/netip"
 	"os"
@@ -27,6 +28,7 @@ import (
 	"go.githedgehog.com/fabric/pkg/util/logutil"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
 	"go.githedgehog.com/fabricator/pkg/hhfab/pdu"
 	"go.githedgehog.com/fabricator/pkg/support"
 	"go.githedgehog.com/fabricator/pkg/util/sshutil"
@@ -764,7 +766,28 @@ func (c *Config) getNodeIP(ctx context.Context, name string) (string, error) {
 }
 
 func (c *Config) CollectVLABDebug(ctx context.Context, vlab *VLAB, opts VLABRunOpts) {
-	if dump, err := support.Collect(ctx, "vlab", filepath.Join(c.WorkDir, VLABDir, VLABKubeConfig)); err != nil {
+	kubeconfig := filepath.Join(c.WorkDir, VLABDir, VLABKubeConfig)
+
+	if _, err := os.Stat(kubeconfig); errors.Is(err, fs.ErrNotExist) {
+		for _, vm := range vlab.VMs {
+			if vm.Type == VMTypeControl {
+				ssh, err := c.SSHVM(ctx, vlab, vm)
+				if err != nil {
+					slog.Warn("Failed to setup ssh to copy kubeconfig", "vm", vm.Name)
+
+					break
+				}
+
+				if err := ssh.DownloadPath(k3s.KubeConfigPath, kubeconfig); err != nil {
+					slog.Warn("Failed to download kubeconfig", "vm", vm.Name)
+				}
+
+				break
+			}
+		}
+	}
+
+	if dump, err := support.Collect(ctx, "vlab", kubeconfig); err != nil {
 		slog.Warn("Failed to collect support dump", "err", err)
 	} else {
 		if data, err := support.Marshal(dump); err != nil {
