@@ -1302,8 +1302,8 @@ github.com/mattn/go-runewidth
 # github.com/mattn/go-sqlite3 v1.14.28
 ## explicit; go 1.19
 github.com/mattn/go-sqlite3
-# github.com/mholt/archives v0.1.4
-## explicit; go 1.23.0
+# github.com/mholt/archives v0.1.5
+## explicit; go 1.24.0
 github.com/mholt/archives
 # github.com/miekg/pkcs11 v1.1.1
 ## explicit; go 1.12
@@ -1356,7 +1356,7 @@ github.com/monochromegane/go-gitignore
 # github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822
 ## explicit
 github.com/munnerz/goautoneg
-# github.com/nwaples/rardecode/v2 v2.1.1
+# github.com/nwaples/rardecode/v2 v2.2.0
 ## explicit; go 1.21
 github.com/nwaples/rardecode/v2
 # github.com/olekukonko/errors v1.1.0
@@ -1587,8 +1587,8 @@ github.com/smallstep/pkcs7/internal/legacy/x509
 # github.com/sorairolake/lzip-go v0.3.8
 ## explicit; go 1.22
 github.com/sorairolake/lzip-go
-# github.com/spf13/afero v1.12.0
-## explicit; go 1.21
+# github.com/spf13/afero v1.15.0
+## explicit; go 1.23.0
 github.com/spf13/afero
 github.com/spf13/afero/internal/common
 github.com/spf13/afero/mem
