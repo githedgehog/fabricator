@@ -24,7 +24,7 @@ require (
 	github.com/diskfs/go-diskfs v1.4.2
 	github.com/go-logr/logr v1.4.3
 	github.com/go-playground/validator/v10 v10.28.0
-	github.com/k3s-io/helm-controller v0.16.13
+	github.com/k3s-io/helm-controller v0.16.14
 	github.com/lmittmann/tint v1.1.2
 	github.com/manifoldco/promptui v0.9.0
 	github.com/mattn/go-isatty v0.0.20
@@ -33,7 +33,7 @@ require (
 	github.com/onsi/gomega v1.38.2
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/pkg/sftp v1.13.8
-	github.com/samber/lo v1.51.0
+	github.com/samber/lo v1.52.0
 	github.com/samber/slog-multi v1.5.0
 	github.com/sethvargo/go-password v0.3.1
 	github.com/shirou/gopsutil/v3 v3.24.5
@@ -42,7 +42,7 @@ require (
 	github.com/vbauerster/mpb/v8 v8.10.2
 	github.com/vishvananda/netlink v1.3.1
 	go.githedgehog.com/fabric v0.92.0
-	go.githedgehog.com/gateway v0.19.5
+	go.githedgehog.com/gateway v0.20.0
 	go.githedgehog.com/libmeta v0.2.4
 	golang.org/x/crypto v0.43.0
 	golang.org/x/mod v0.29.0
@@ -167,7 +167,7 @@ require (
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
 	github.com/go-git/go-billy/v5 v5.6.0 // indirect
 	github.com/go-git/go-git/v5 v5.13.0 // indirect
-	github.com/go-jose/go-jose/v4 v4.1.1 // indirect
+	github.com/go-jose/go-jose/v4 v4.1.2 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-logr/zapr v1.3.0 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
@@ -350,10 +350,10 @@ require (
 	gomodules.xyz/jsonpatch/v2 v2.4.0 // indirect
 	google.golang.org/api v0.243.0 // indirect
 	google.golang.org/genproto v0.0.0-20250603155806-513f23925822 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20250721164621-a45f3dfb1074 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20250721164621-a45f3dfb1074 // indirect
-	google.golang.org/grpc v1.75.0 // indirect
-	google.golang.org/protobuf v1.36.8 // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20250804133106-a7a43d27e69b // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20250804133106-a7a43d27e69b // indirect
+	google.golang.org/grpc v1.76.0 // indirect
+	google.golang.org/protobuf v1.36.10 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.12.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
