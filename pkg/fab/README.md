@@ -43,8 +43,14 @@ oras push "ghcr.io/githedgehog/fabricator/k3s-airgap:${K3S_VERSION}" k3s k3s-air
 
 ## Zot
 
+Zot changed their defaults from deployment to stateful sets. There is no easy
+way to move from deployments to stateful sets. We forked the chart at the last
+versions with deployments, and have cherry picked the health and status checks
+from the new charts into the old chart. We have used their last version number
+and added the hh1 suffix.
+
 ```bash
-export ZOT_VERSION="v2.1.7"
+export ZOT_VERSION="v2.1.9"
 export HH_CHART_VERSION="v0.1.67-hh1"
 
 helm pull --version ${HH_CHART_VERSION} "oci://ghcr.io/githedgehog/fabricator/charts/zot"
