@@ -5,12 +5,16 @@ package hhfab
 
 import (
 	"context"
+	"encoding/json"
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"math"
+	"net/http"
 	"net/netip"
+	"net/url"
 	"os"
 	"regexp"
 	"sort"
@@ -23,10 +27,12 @@ import (
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/util/pointer"
+	fabricatorapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/util/sshutil"
 	gwapi "go.githedgehog.com/gateway/api/gateway/v1alpha1"
 	"golang.org/x/sync/errgroup"
+	corev1 "k8s.io/api/core/v1"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -2511,6 +2517,364 @@ func appendGwPeeringSpec(gwPeerings map[string]*gwapi.PeeringSpec, vpc1, vpc2 *v
 	}
 }
 
+// Structure to hold observability endpoint details
+type ObsEndpoint struct {
+	URL      string
+	Username string
+	Password string
+}
+
+// Transform observability endpoints from push to query URLs
+func getObservabilityQueryURLs(ctx context.Context, kube kclient.Client) (ObsEndpoint, ObsEndpoint, error) {
+	var loki, prometheus ObsEndpoint
+
+	fabricator := &fabricatorapi.Fabricator{}
+	if err := kube.Get(ctx, kclient.ObjectKey{Namespace: "fab", Name: "default"}, fabricator); err != nil {
+		return ObsEndpoint{}, ObsEndpoint{}, fmt.Errorf("getting Fabricator object: %w", err)
+	}
+
+	// Check if Loki targets exist and iterate through all of them
+	if fabricator.Spec.Config.Observability.Targets.Loki != nil {
+		for targetName, lokiTarget := range fabricator.Spec.Config.Observability.Targets.Loki {
+			if lokiTarget.URL != "" {
+				slog.Debug("Found Loki target", "name", targetName, "url", lokiTarget.URL)
+
+				// Transform push URL to query URL based on URL pattern
+				lokiPushURL := lokiTarget.URL
+
+				// Handle different URL patterns
+				if strings.Contains(lokiPushURL, "grafana.net") {
+					// Grafana Cloud URL
+					loki.URL = strings.Replace(lokiPushURL, "/api/v1/push", "/api/v1", 1)
+				} else {
+					// Generic URL
+					loki.URL = strings.TrimSuffix(lokiPushURL, "/push")
+					if !strings.HasSuffix(loki.URL, "/api/v1") {
+						loki.URL += "/api/v1"
+					}
+				}
+
+				// Extract auth credentials if present - these won't be used for querying
+				// but we store them for reference
+				if lokiTarget.BasicAuth != nil {
+					loki.Username = lokiTarget.BasicAuth.Username
+					loki.Password = lokiTarget.BasicAuth.Password
+				}
+
+				// Take the first valid URL we find
+				break
+			}
+		}
+	}
+
+	// Check if Prometheus targets exist and iterate through all of them
+	if fabricator.Spec.Config.Observability.Targets.Prometheus != nil {
+		for targetName, promTarget := range fabricator.Spec.Config.Observability.Targets.Prometheus {
+			if promTarget.URL != "" {
+				slog.Debug("Found Prometheus target", "name", targetName, "url", promTarget.URL)
+
+				// Transform push URL to query URL based on URL pattern
+				promPushURL := promTarget.URL
+
+				// Handle different URL patterns
+				if strings.Contains(promPushURL, "grafana.net") {
+					// Grafana Cloud URL
+					prometheus.URL = strings.Replace(promPushURL, "/api/prom/push", "/api/v1", 1)
+				} else {
+					// Generic URL
+					prometheus.URL = strings.TrimSuffix(promPushURL, "/push")
+					if !strings.HasSuffix(prometheus.URL, "/api/v1") {
+						prometheus.URL += "/api/v1"
+					}
+				}
+
+				// Extract auth credentials if present
+				if promTarget.BasicAuth != nil {
+					prometheus.Username = promTarget.BasicAuth.Username
+					prometheus.Password = promTarget.BasicAuth.Password
+				}
+
+				// Take the first valid URL we find
+				break
+			}
+		}
+	}
+
+	return loki, prometheus, nil
+}
+
+// Test that logs are being correctly sent to and can be retrieved from Loki
+func (testCtx *VPCPeeringTestCtx) lokiObservabilityTest(ctx context.Context) (bool, []RevertFunc, error) {
+	lokiEndpoint, _, err := getObservabilityQueryURLs(ctx, testCtx.kube)
+	if err != nil {
+		return true, nil, fmt.Errorf("error getting observability endpoints: %w", err)
+	}
+
+	if lokiEndpoint.URL == "" {
+		slog.Info("No Loki target found, Loki test will be skipped")
+
+		return true, nil, nil
+	}
+
+	// Get credentials from environment variables for querying
+	lokiUser := os.Getenv("LOKI_USER")
+	lokiPass := os.Getenv("LOKI_PASS")
+
+	hasAuth := lokiUser != "" || lokiPass != ""
+
+	slog.Debug("Using Loki endpoint",
+		"url", lokiEndpoint.URL,
+		"auth_from_env", hasAuth)
+
+	// Get all switches from K8s API
+	switches := &wiringapi.SwitchList{}
+	if err := testCtx.kube.List(ctx, switches); err != nil {
+		return false, nil, fmt.Errorf("listing switches: %w", err)
+	}
+
+	if len(switches.Items) == 0 {
+		slog.Info("No switches found, Loki test will be skipped")
+
+		return true, nil, nil
+	}
+
+	// Get gateway devices from K8s API
+	var gateways []string
+	gatewayList := &gwapi.GatewayList{}
+	if err := testCtx.kube.List(ctx, gatewayList); err != nil {
+		// Gracefully handle missing Gateway CRD
+		if !strings.Contains(err.Error(), "no matches for kind") {
+			// Only warn for unexpected errors
+			slog.Warn("Could not list gateways", "error", err)
+		}
+	} else {
+		// Add gateway names if the CRD exists and gateways were found
+		for _, gw := range gatewayList.Items {
+			gateways = append(gateways, gw.Name)
+		}
+	}
+
+	// Get alloy controller pods
+	alloyPods := &corev1.PodList{}
+	if err := testCtx.kube.List(ctx, alloyPods,
+		kclient.InNamespace("fab"),
+		kclient.MatchingLabels{"app.kubernetes.io/instance": "alloy-ctrl"}); err != nil {
+		slog.Debug("Could not list alloy controller pods with instance label", "error", err)
+	}
+
+	if len(alloyPods.Items) == 0 {
+		allPods := &corev1.PodList{}
+		if err := testCtx.kube.List(ctx, allPods, kclient.InNamespace("fab")); err == nil {
+			for _, pod := range allPods.Items {
+				if strings.HasPrefix(pod.Name, "alloy-ctrl-") {
+					alloyPods.Items = append(alloyPods.Items, pod)
+				}
+			}
+		}
+	}
+
+	client := &http.Client{
+		Timeout: 15 * time.Second,
+	}
+
+	expectedHostnames := make([]string, 0, len(switches.Items)+len(alloyPods.Items)+len(gateways))
+
+	// Add switch names to expected hostnames
+	for _, sw := range switches.Items {
+		expectedHostnames = append(expectedHostnames, sw.Name)
+	}
+
+	// Add gateway names to expected hostnames
+	expectedHostnames = append(expectedHostnames, gateways...)
+
+	// Add alloy controller pod names to expected hostnames
+	for _, pod := range alloyPods.Items {
+		expectedHostnames = append(expectedHostnames, pod.Name)
+	}
+
+	slog.Info("Checking logs for devices", "expected", expectedHostnames)
+
+	// Pre-check connectivity and authentication
+	labelsURL := fmt.Sprintf("%s/labels", lokiEndpoint.URL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, labelsURL, nil)
+	if err != nil {
+		return false, nil, fmt.Errorf("failed to create loki API request: %w", err)
+	}
+
+	// Use credentials from environment variables
+	if hasAuth {
+		req.SetBasicAuth(lokiUser, lokiPass)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return false, nil, fmt.Errorf("loki connectivity check failed: %w", err)
+	}
+
+	body, _ := io.ReadAll(resp.Body) // Ignoring error, we only need body for error messages
+	resp.Body.Close()
+
+	// Check connectivity and authentication
+	if resp.StatusCode == http.StatusUnauthorized {
+		return false, nil, fmt.Errorf("loki authentication failed: %s", string(body)) //nolint:goerr113
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return false, nil, fmt.Errorf("loki API connectivity check failed: status %d", resp.StatusCode) //nolint:goerr113
+	}
+
+	// Pre-allocate slices with estimated capacity
+	missingLogs := make([]string, 0, len(expectedHostnames))
+	foundLogs := make([]string, 0, len(expectedHostnames))
+	var errorSample string
+
+	// Extended time window for querying logs (24 hours instead of 15 minutes)
+	// to account for possible delays in log delivery
+	for _, hostname := range expectedHostnames {
+		slog.Debug("Checking logs for device", "hostname", hostname)
+
+		endTime := time.Now().UnixNano()
+		startTime := time.Now().Add(-24 * time.Hour).UnixNano()
+		query := fmt.Sprintf(`{hostname="%s"}`, hostname)
+
+		queryURL := fmt.Sprintf("%s/query_range?query=%s&start=%d&end=%d&limit=20",
+			lokiEndpoint.URL,
+			url.QueryEscape(query),
+			startTime,
+			endTime)
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, queryURL, nil)
+		if err != nil {
+			if errorSample == "" {
+				errorSample = fmt.Sprintf("Failed to create request: %v", err)
+			}
+			missingLogs = append(missingLogs, hostname)
+
+			continue
+		}
+
+		// Use credentials from environment variables
+		if hasAuth {
+			req.SetBasicAuth(lokiUser, lokiPass)
+		}
+
+		resp, err := client.Do(req)
+		if err != nil {
+			if errorSample == "" {
+				errorSample = fmt.Sprintf("HTTP request failed: %v", err)
+			}
+			missingLogs = append(missingLogs, hostname)
+
+			continue
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		if err != nil {
+			if errorSample == "" {
+				errorSample = fmt.Sprintf("Failed to read response: %v", err)
+			}
+			missingLogs = append(missingLogs, hostname)
+
+			continue
+		}
+
+		// Only show full response in extended verbose mode to reduce clutter
+		if testCtx.extended {
+			slog.Debug("Loki query details",
+				"hostname", hostname,
+				"status", resp.Status,
+				"query", query,
+				"response", string(body))
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			if errorSample == "" {
+				errorSample = fmt.Sprintf("HTTP status %d for query: %s", resp.StatusCode, query)
+			}
+			missingLogs = append(missingLogs, hostname)
+
+			continue
+		}
+
+		var lokiResp struct {
+			Status string `json:"status"`
+			Data   struct {
+				ResultType string `json:"resultType"`
+				Result     []struct {
+					Stream map[string]string `json:"stream"`
+					Values [][]string        `json:"values"`
+				} `json:"result"`
+			} `json:"data"`
+		}
+
+		if err := json.Unmarshal(body, &lokiResp); err != nil {
+			if errorSample == "" {
+				errorSample = fmt.Sprintf("Failed to parse response: %v", err)
+			}
+			missingLogs = append(missingLogs, hostname)
+
+			continue
+		}
+
+		if lokiResp.Status != "success" {
+			if errorSample == "" {
+				errorSample = fmt.Sprintf("Query failed with status: %s", lokiResp.Status)
+			}
+			missingLogs = append(missingLogs, hostname)
+
+			continue
+		}
+
+		// Count log entries
+		logCount := 0
+		for _, result := range lokiResp.Data.Result {
+			logCount += len(result.Values)
+		}
+
+		if logCount == 0 {
+			slog.Debug("No logs found for device", "hostname", hostname)
+			missingLogs = append(missingLogs, hostname)
+
+			continue
+		}
+
+		// Logs found!
+		foundLogs = append(foundLogs, hostname)
+		slog.Info("Found logs for device", "hostname", hostname, "count", logCount)
+	}
+
+	// Only fail if ALL expected devices are missing logs
+	if len(foundLogs) == 0 && len(expectedHostnames) > 0 {
+		// Show a sample error to help debug without overwhelming with all errors
+		if errorSample != "" {
+			return false, nil, fmt.Errorf("no logs found for any devices: %s", errorSample) //nolint:goerr113
+		}
+
+		return false, nil, fmt.Errorf("no logs found for any devices; checked %d devices", len(expectedHostnames)) //nolint:goerr113
+	}
+
+	if len(missingLogs) > 0 {
+		// Some logs are missing, but not all - just warn rather than fail
+		slog.Warn("Some devices missing logs in Loki",
+			"missing_count", len(missingLogs),
+			"total_count", len(expectedHostnames))
+
+		// Only show detailed missing list in verbose mode to reduce clutter
+		if testCtx.extended {
+			slog.Debug("Devices missing logs", "missing", missingLogs)
+		}
+	}
+
+	slog.Info("Verified logs delivery to Loki",
+		"devices_with_logs", len(foundLogs),
+		"devices_checked", len(expectedHostnames),
+		"success_rate", fmt.Sprintf("%.1f%%", float64(len(foundLogs))*100/float64(len(expectedHostnames))))
+
+	return false, nil, nil
+}
+
 // Utilities and suite runners
 
 func makeTestCtx(kube kclient.Client, setupOpts SetupVPCsOpts, vlabCfg *Config, vlab *VLAB, wipeBetweenTests bool, rtOpts ReleaseTestOpts) *VPCPeeringTestCtx {
@@ -2568,6 +2932,8 @@ type SkipFlags struct {
 	NoFabricLink  bool `xml:"-"` // skip if there's no fabric (i.e. spine-leaf) link between the switches
 	NoMeshLink    bool `xml:"-"` // skip if there's no mesh (i.e. leaf-leaf) link between the switches
 	NoGateway     bool `xml:"-"` // skip if gateway is not enabled or no gateways available
+	NoLoki        bool `xml:"-"` // skip if Loki is not configured or available
+	NoPrometheus  bool `xml:"-"` // skip if Prometheus is not configured or available
 
 	/* Note about subinterfaces; they are required in the following cases:
 	 * 1. when using VPC loopback workaround - it's applied when we have a pair of vpcs or vpc and external both attached on a switch with peering between them
@@ -2601,6 +2967,12 @@ func (sf *SkipFlags) PrettyPrint() string {
 	}
 	if sf.NoGateway {
 		parts = append(parts, "NoGW")
+	}
+	if sf.NoLoki {
+		parts = append(parts, "NoLoki")
+	}
+	if sf.NoPrometheus {
+		parts = append(parts, "NoPrometheus")
 	}
 	if len(parts) == 0 {
 		return "None"
@@ -3103,6 +3475,20 @@ func makeVpcPeeringsBasicSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 				NoGateway: true,
 			},
 		},
+		{
+			Name: "Loki Observability",
+			F:    testCtx.lokiObservabilityTest,
+			SkipFlags: SkipFlags{
+				NoLoki: true,
+			},
+		},
+		//		{
+		//			Name: "Prometheus Observability",
+		//			F:    testCtx.prometheusObservabilityTest,
+		//			SkipFlags: SkipFlags{
+		//				NoPrometheus: true,
+		//			},
+		//		},
 	}
 	suite.Tests = len(suite.TestCases)
 
@@ -3323,6 +3709,34 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 		}
 	}
 
+	fabricator := &fabricatorapi.Fabricator{}
+	if err := kube.Get(ctx, kclient.ObjectKey{Namespace: "fab", Name: "default"}, fabricator); err != nil {
+		slog.Warn("Unable to get Fabricator object, observability tests will be skipped", "error", err)
+		skipFlags.NoLoki = true
+		skipFlags.NoPrometheus = true
+	} else {
+		skipFlags.NoLoki = true
+		if fabricator.Spec.Config.Observability.Targets.Loki != nil {
+			if _, ok := fabricator.Spec.Config.Observability.Targets.Loki["monitor"]; ok {
+				skipFlags.NoLoki = false
+			}
+		}
+
+		skipFlags.NoPrometheus = true
+		if fabricator.Spec.Config.Observability.Targets.Prometheus != nil {
+			if _, ok := fabricator.Spec.Config.Observability.Targets.Prometheus["monitor"]; ok {
+				skipFlags.NoPrometheus = false
+			}
+		}
+	}
+
+	if skipFlags.NoLoki {
+		slog.Info("No Loki target found, Loki test will be skipped")
+	}
+
+	if skipFlags.NoPrometheus {
+		slog.Info("No Prometheus target found, Prometheus test will be skipped")
+	}
 	results := []JUnitTestSuite{}
 	testCtx.noSetup = true
 	noVpcResults, err := selectAndRunSuite(ctx, testCtx, noVpcSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
