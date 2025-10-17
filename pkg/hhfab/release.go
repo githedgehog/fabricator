@@ -2553,8 +2553,7 @@ func getObservabilityQueryURLs(ctx context.Context, kube kclient.Client) (ObsEnd
 					}
 				}
 
-				// Extract auth credentials if present - these won't be used for querying
-				// but we store them for reference
+				// Extract auth credentials if present
 				if lokiTarget.BasicAuth != nil {
 					loki.Username = lokiTarget.BasicAuth.Username
 					loki.Password = lokiTarget.BasicAuth.Password
@@ -2577,8 +2576,8 @@ func getObservabilityQueryURLs(ctx context.Context, kube kclient.Client) (ObsEnd
 
 				// Handle different URL patterns
 				if strings.Contains(promPushURL, "grafana.net") {
-					// Grafana Cloud URL
-					prometheus.URL = strings.Replace(promPushURL, "/api/prom/push", "/api/v1", 1)
+					// Grafana Cloud URL - use /api/prom/api/v1 instead of /api/v1
+					prometheus.URL = strings.Replace(promPushURL, "/api/prom/push", "/api/prom/api/v1", 1)
 				} else {
 					// Generic URL
 					prometheus.URL = strings.TrimSuffix(promPushURL, "/push")
@@ -2868,6 +2867,154 @@ func (testCtx *VPCPeeringTestCtx) lokiObservabilityTest(ctx context.Context) (bo
 		"devices_with_logs", len(foundLogs),
 		"devices_checked", len(expectedHostnames),
 		"success_rate", fmt.Sprintf("%.1f%%", float64(len(foundLogs))*100/float64(len(expectedHostnames))))
+
+	return false, nil, nil
+}
+
+func (testCtx *VPCPeeringTestCtx) prometheusObservabilityTest(ctx context.Context) (bool, []RevertFunc, error) {
+	_, prometheusEndpoint, err := getObservabilityQueryURLs(ctx, testCtx.kube)
+	if err != nil {
+		return true, nil, fmt.Errorf("error getting observability endpoints: %w", err)
+	}
+
+	if prometheusEndpoint.URL == "" {
+		slog.Info("No Prometheus target found, Prometheus test will be skipped")
+
+		return true, nil, nil
+	}
+
+	// Get credentials from environment variables for querying
+	promUser := os.Getenv("PROMETHEUS_USER")
+	promPass := os.Getenv("PROMETHEUS_PASS")
+
+	// Alternative environment variable names if needed
+	if promUser == "" {
+		promUser = os.Getenv("PROM_USER")
+	}
+	if promPass == "" {
+		promPass = os.Getenv("PROM_PASS")
+	}
+
+	hasAuth := promUser != "" || promPass != ""
+
+	slog.Debug("Using Prometheus endpoint",
+		"url", prometheusEndpoint.URL,
+		"auth_from_env", hasAuth)
+
+	// List switches to check for metrics
+	switches := &wiringapi.SwitchList{}
+	if err := testCtx.kube.List(ctx, switches); err != nil {
+		return false, nil, fmt.Errorf("listing switches: %w", err)
+	}
+	if len(switches.Items) == 0 {
+		slog.Info("No switches found, Prometheus test will be skipped")
+
+		return true, nil, nil
+	}
+
+	client := &http.Client{Timeout: 15 * time.Second}
+
+	// First verify we can access Prometheus API with a simple query
+	queryURL := fmt.Sprintf("%s/query?query=%s", prometheusEndpoint.URL, "up")
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, queryURL, nil)
+	if err != nil {
+		return false, nil, fmt.Errorf("failed to create prometheus API request: %w", err)
+	}
+
+	// Use credentials from environment variables
+	if hasAuth {
+		req.SetBasicAuth(promUser, promPass)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return false, nil, fmt.Errorf("prometheus connectivity check failed: %w", err)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	// Check connectivity and authentication
+	if resp.StatusCode == http.StatusUnauthorized {
+		return false, nil, fmt.Errorf("prometheus authentication failed: %s", string(body)) //nolint:goerr113
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return false, nil, fmt.Errorf("prometheus API connectivity check failed: status %d", resp.StatusCode) //nolint:goerr113
+	}
+
+	// Query for fabric_agent_agent_generation across all switches
+	metricName := "fabric_agent_agent_generation"
+	queryURL = fmt.Sprintf("%s/query?query=%s", prometheusEndpoint.URL, url.QueryEscape(metricName))
+
+	req, err = http.NewRequestWithContext(ctx, http.MethodGet, queryURL, nil)
+	if err != nil {
+		return false, nil, fmt.Errorf("failed to create metric query: %w", err)
+	}
+
+	// Add authentication
+	if hasAuth {
+		req.SetBasicAuth(promUser, promPass)
+	}
+
+	resp, err = client.Do(req)
+	if err != nil {
+		return false, nil, fmt.Errorf("failed to execute metric query: %w", err)
+	}
+
+	body, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return false, nil, fmt.Errorf("metric query failed: status %d", resp.StatusCode) //nolint:goerr113
+	}
+
+	var promResp struct {
+		Status string `json:"status"`
+		Data   struct {
+			ResultType string `json:"resultType"`
+			Result     []struct {
+				Metric map[string]string `json:"metric"`
+				Value  []interface{}     `json:"value"`
+			} `json:"result"`
+		} `json:"data"`
+	}
+
+	if err := json.Unmarshal(body, &promResp); err != nil {
+		return false, nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	if promResp.Status != "success" {
+		return false, nil, fmt.Errorf("metric query returned non-success status: %s", promResp.Status) //nolint:goerr113
+	}
+
+	// Check if we got any results
+	if len(promResp.Data.Result) == 0 {
+		return false, nil, fmt.Errorf("no '%s' metrics found for any switches", metricName) //nolint:goerr113
+	}
+
+	// Count switches for which we found metrics
+	foundSwitches := make(map[string]bool)
+	for _, result := range promResp.Data.Result {
+		hostname, ok := result.Metric["hostname"]
+		if ok {
+			foundSwitches[hostname] = true
+			if testCtx.extended {
+				value := ""
+				if len(result.Value) > 1 {
+					value = fmt.Sprintf("%v", result.Value[1])
+				}
+				slog.Debug("Found metric", "metric", metricName, "switch", hostname, "value", value)
+			}
+		}
+	}
+
+	slog.Info("Verified Prometheus metrics delivery",
+		"metric", metricName,
+		"switches_with_metric", len(foundSwitches),
+		"switches_checked", len(switches.Items),
+		"success_rate", fmt.Sprintf("%.1f%%", float64(len(foundSwitches))*100/float64(len(switches.Items))),
+	)
 
 	return false, nil, nil
 }
@@ -3423,13 +3570,13 @@ func makeNoVpcsSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 				NoLoki: true,
 			},
 		},
-		//		{
-		//			Name: "Prometheus Observability",
-		//			F:    testCtx.prometheusObservabilityTest,
-		//			SkipFlags: SkipFlags{
-		//				NoPrometheus: true,
-		//			},
-		//		},
+		{
+			Name: "Prometheus Observability",
+			F:    testCtx.prometheusObservabilityTest,
+			SkipFlags: SkipFlags{
+				NoPrometheus: true,
+			},
+		},
 	}
 	suite.Tests = len(suite.TestCases)
 
