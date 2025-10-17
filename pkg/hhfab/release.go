@@ -43,7 +43,6 @@ const (
 )
 
 var (
-	errNoServers       = errors.New("no servers found")
 	errNoExternals     = errors.New("no external peers found")
 	errNoMclags        = errors.New("no MCLAG connections found")
 	errNoEslags        = errors.New("no ESLAG connections found")
@@ -2633,9 +2632,7 @@ func (testCtx *VPCPeeringTestCtx) lokiObservabilityTest(ctx context.Context) (bo
 	}
 
 	if len(switches.Items) == 0 {
-		slog.Info("No switches found, Loki test will be skipped")
-
-		return true, nil, nil
+		slog.Warn("No switches found, Alloy on switches will not be tested")
 	}
 
 	// Get gateway devices from K8s API
@@ -2934,6 +2931,7 @@ type SkipFlags struct {
 	NoGateway     bool `xml:"-"` // skip if gateway is not enabled or no gateways available
 	NoLoki        bool `xml:"-"` // skip if Loki is not configured or available
 	NoPrometheus  bool `xml:"-"` // skip if Prometheus is not configured or available
+	NoServers     bool `xml:"-"` // skip if there are no servers in the fabric
 
 	/* Note about subinterfaces; they are required in the following cases:
 	 * 1. when using VPC loopback workaround - it's applied when we have a pair of vpcs or vpc and external both attached on a switch with peering between them
@@ -3294,12 +3292,16 @@ func makeVpcPeeringsSingleVPCSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 		{
 			Name: "No restrictions",
 			F:    testCtx.noRestrictionsTest,
+			SkipFlags: SkipFlags{
+				NoServers: true,
+			},
 		},
 		{
 			Name: "Single VPC with restrictions",
 			F:    testCtx.singleVPCWithRestrictionsTest,
 			SkipFlags: SkipFlags{
 				VirtualSwitch: true,
+				NoServers:     true,
 			},
 		},
 		{
@@ -3311,6 +3313,7 @@ func makeVpcPeeringsSingleVPCSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 			F:    testCtx.mclagTest,
 			SkipFlags: SkipFlags{
 				VirtualSwitch: true,
+				NoServers:     true,
 			},
 		},
 		{
@@ -3318,6 +3321,7 @@ func makeVpcPeeringsSingleVPCSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 			F:    testCtx.eslagTest,
 			SkipFlags: SkipFlags{
 				VirtualSwitch: true,
+				NoServers:     true,
 			},
 		},
 		{
@@ -3325,6 +3329,7 @@ func makeVpcPeeringsSingleVPCSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 			F:    testCtx.bundledFailoverTest,
 			SkipFlags: SkipFlags{
 				VirtualSwitch: true,
+				NoServers:     true,
 			},
 		},
 		{
@@ -3333,6 +3338,7 @@ func makeVpcPeeringsSingleVPCSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 			SkipFlags: SkipFlags{
 				VirtualSwitch: true,
 				NoFabricLink:  true,
+				NoServers:     true,
 			},
 		},
 		{
@@ -3341,13 +3347,15 @@ func makeVpcPeeringsSingleVPCSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 			SkipFlags: SkipFlags{
 				VirtualSwitch: true,
 				NoMeshLink:    true,
+				NoServers:     true,
 			},
 		},
 		{
 			Name: "RoCE flag and basic traffic marking",
 			F:    testCtx.roceBasicTest,
 			SkipFlags: SkipFlags{
-				RoCE: true,
+				RoCE:      true,
+				NoServers: true,
 			},
 		},
 	}
@@ -3370,6 +3378,7 @@ func makeVpcPeeringsMultiVPCSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 			F:    testCtx.multiSubnetsIsolationTest,
 			SkipFlags: SkipFlags{
 				VirtualSwitch: true,
+				NoServers:     true,
 			},
 		},
 		{
@@ -3378,6 +3387,7 @@ func makeVpcPeeringsMultiVPCSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 			SkipFlags: SkipFlags{
 				VirtualSwitch: true,
 				SubInterfaces: true,
+				NoServers:     true,
 			},
 		},
 		{
@@ -3385,6 +3395,7 @@ func makeVpcPeeringsMultiVPCSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 			F:    testCtx.staticExternalTest,
 			SkipFlags: SkipFlags{
 				VirtualSwitch: true,
+				NoServers:     true,
 			},
 		},
 	}
@@ -3403,76 +3414,6 @@ func makeNoVpcsSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 			F:    testCtx.breakoutTest,
 			SkipFlags: SkipFlags{
 				VirtualSwitch: true,
-			},
-		},
-	}
-	suite.Tests = len(suite.TestCases)
-
-	return suite
-}
-
-func makeVpcPeeringsBasicSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
-	suite := &JUnitTestSuite{
-		Name: "Basic VPC Peering Suite",
-	}
-	suite.TestCases = []JUnitTestCase{
-		{
-			Name: "Starter Test",
-			F:    testCtx.vpcPeeringsStarterTest,
-			SkipFlags: SkipFlags{
-				NoExternals:   true,
-				SubInterfaces: true,
-			},
-		},
-		{
-			Name: "Only Externals",
-			F:    testCtx.vpcPeeringsOnlyExternalsTest,
-			SkipFlags: SkipFlags{
-				NoExternals:   true,
-				SubInterfaces: true,
-			},
-		},
-		{
-			Name: "Full Mesh All Externals",
-			F:    testCtx.vpcPeeringsFullMeshAllExternalsTest,
-			SkipFlags: SkipFlags{
-				SubInterfaces: true,
-			},
-		},
-		{
-			Name: "Full Loop All Externals",
-			F:    testCtx.vpcPeeringsFullLoopAllExternalsTest,
-			SkipFlags: SkipFlags{
-				SubInterfaces: true,
-			},
-		},
-		{
-			Name: "Sergei's Special Test",
-			F:    testCtx.vpcPeeringsSergeisSpecialTest,
-			SkipFlags: SkipFlags{
-				NoExternals:   true,
-				SubInterfaces: true,
-			},
-		},
-		{
-			Name: "Gateway Peering",
-			F:    testCtx.gatewayPeeringTest,
-			SkipFlags: SkipFlags{
-				NoGateway: true,
-			},
-		},
-		{
-			Name: "Gateway Peering Loop",
-			F:    testCtx.gatewayPeeringLoopTest,
-			SkipFlags: SkipFlags{
-				NoGateway: true,
-			},
-		},
-		{
-			Name: "Mixed VPC and Gateway Peering Loop",
-			F:    testCtx.gatewayMixedPeeringLoopTest,
-			SkipFlags: SkipFlags{
-				NoGateway: true,
 			},
 		},
 		{
@@ -3495,6 +3436,84 @@ func makeVpcPeeringsBasicSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 	return suite
 }
 
+func makeVpcPeeringsBasicSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
+	suite := &JUnitTestSuite{
+		Name: "Basic VPC Peering Suite",
+	}
+	suite.TestCases = []JUnitTestCase{
+		{
+			Name: "Starter Test",
+			F:    testCtx.vpcPeeringsStarterTest,
+			SkipFlags: SkipFlags{
+				NoExternals:   true,
+				SubInterfaces: true,
+				NoServers:     true,
+			},
+		},
+		{
+			Name: "Only Externals",
+			F:    testCtx.vpcPeeringsOnlyExternalsTest,
+			SkipFlags: SkipFlags{
+				NoExternals:   true,
+				SubInterfaces: true,
+				NoServers:     true,
+			},
+		},
+		{
+			Name: "Full Mesh All Externals",
+			F:    testCtx.vpcPeeringsFullMeshAllExternalsTest,
+			SkipFlags: SkipFlags{
+				SubInterfaces: true,
+				NoServers:     true,
+			},
+		},
+		{
+			Name: "Full Loop All Externals",
+			F:    testCtx.vpcPeeringsFullLoopAllExternalsTest,
+			SkipFlags: SkipFlags{
+				SubInterfaces: true,
+				NoServers:     true,
+			},
+		},
+		{
+			Name: "Sergei's Special Test",
+			F:    testCtx.vpcPeeringsSergeisSpecialTest,
+			SkipFlags: SkipFlags{
+				NoExternals:   true,
+				SubInterfaces: true,
+				NoServers:     true,
+			},
+		},
+		{
+			Name: "Gateway Peering",
+			F:    testCtx.gatewayPeeringTest,
+			SkipFlags: SkipFlags{
+				NoGateway: true,
+				NoServers: true,
+			},
+		},
+		{
+			Name: "Gateway Peering Loop",
+			F:    testCtx.gatewayPeeringLoopTest,
+			SkipFlags: SkipFlags{
+				NoGateway: true,
+				NoServers: true,
+			},
+		},
+		{
+			Name: "Mixed VPC and Gateway Peering Loop",
+			F:    testCtx.gatewayMixedPeeringLoopTest,
+			SkipFlags: SkipFlags{
+				NoGateway: true,
+				NoServers: true,
+			},
+		},
+	}
+	suite.Tests = len(suite.TestCases)
+
+	return suite
+}
+
 func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOtps ReleaseTestOpts) error {
 	testStart := time.Now()
 
@@ -3510,8 +3529,9 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 	if err := kube.List(ctx, servers); err != nil {
 		return fmt.Errorf("listing servers: %w", err)
 	}
-	if len(servers.Items) == 0 {
-		return errNoServers
+	noServers := len(servers.Items) == 0
+	if noServers {
+		slog.Warn("No servers found, server-requiring tests will be skipped")
 	}
 	subnetsPerVpc := 3
 	serversPerSubnet := int(math.Ceil(float64(len(servers.Items)) / float64(subnetsPerVpc)))
@@ -3555,6 +3575,7 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 	// detect if any of the skipFlags conditions are true
 	skipFlags := SkipFlags{
 		ExtendedOnly: rtOtps.Extended,
+		NoServers:    noServers,
 	}
 	connList := &wiringapi.ConnectionList{}
 	if err := kube.List(ctx, connList, kclient.MatchingLabels{wiringapi.LabelConnectionType: wiringapi.ConnectionTypeMesh}); err != nil {
