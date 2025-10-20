@@ -2576,13 +2576,17 @@ func getObservabilityQueryURLs(ctx context.Context, kube kclient.Client) (ObsEnd
 
 				// Handle different URL patterns
 				if strings.Contains(promPushURL, "grafana.net") {
-					// Grafana Cloud URL - use /api/prom/api/v1 instead of /api/v1
+					// Grafana Cloud URL
 					prometheus.URL = strings.Replace(promPushURL, "/api/prom/push", "/api/prom/api/v1", 1)
 				} else {
-					// Generic URL
-					prometheus.URL = strings.TrimSuffix(promPushURL, "/push")
-					if !strings.HasSuffix(prometheus.URL, "/api/v1") {
-						prometheus.URL += "/api/v1"
+					// Generic URL - for standalone Prometheus, we need to convert /api/v1/write to /api/v1
+					if strings.Contains(promPushURL, "/api/v1/write") {
+						prometheus.URL = strings.Replace(promPushURL, "/api/v1/write", "/api/v1", 1)
+					} else {
+						prometheus.URL = strings.TrimSuffix(promPushURL, "/push")
+						if !strings.HasSuffix(prometheus.URL, "/api/v1") {
+							prometheus.URL += "/api/v1"
+						}
 					}
 				}
 
@@ -2687,8 +2691,6 @@ func (testCtx *VPCPeeringTestCtx) lokiObservabilityTest(ctx context.Context) (bo
 	for _, pod := range alloyPods.Items {
 		expectedHostnames = append(expectedHostnames, pod.Name)
 	}
-
-	slog.Info("Checking logs for devices", "expected", expectedHostnames)
 
 	// Pre-check connectivity and authentication
 	labelsURL := fmt.Sprintf("%s/labels", lokiEndpoint.URL)
@@ -2993,19 +2995,51 @@ func (testCtx *VPCPeeringTestCtx) prometheusObservabilityTest(ctx context.Contex
 		return false, nil, fmt.Errorf("no '%s' metrics found for any switches", metricName) //nolint:goerr113
 	}
 
+	// Pre-allocate slices with estimated capacity
+	missing := make([]string, 0, len(switches.Items))
+	found := make([]string, 0, len(switches.Items))
+	expectedSwitches := make([]string, 0, len(switches.Items))
+
+	// Build list of switch names
+	for _, sw := range switches.Items {
+		expectedSwitches = append(expectedSwitches, sw.Name)
+	}
+
+	slog.Info("Checking metrics for switches", "expected", expectedSwitches)
+
 	// Count switches for which we found metrics
 	foundSwitches := make(map[string]bool)
 	for _, result := range promResp.Data.Result {
 		hostname, ok := result.Metric["hostname"]
 		if ok {
 			foundSwitches[hostname] = true
-			if testCtx.extended {
-				value := ""
-				if len(result.Value) > 1 {
-					value = fmt.Sprintf("%v", result.Value[1])
-				}
-				slog.Debug("Found metric", "metric", metricName, "switch", hostname, "value", value)
+			found = append(found, hostname)
+
+			value := ""
+			if len(result.Value) > 1 {
+				value = fmt.Sprintf("%v", result.Value[1])
 			}
+
+			slog.Debug("Found metric", "metric", metricName, "switch", hostname, "value", value)
+		}
+	}
+
+	// Find which switches are missing
+	for _, sw := range switches.Items {
+		if !foundSwitches[sw.Name] {
+			missing = append(missing, sw.Name)
+			slog.Debug("No metrics found for switch", "switch", sw.Name)
+		}
+	}
+
+	// If we found metrics but not for all switches, just warn
+	if len(missing) > 0 && len(found) > 0 {
+		slog.Warn("Some switches missing metrics",
+			"missing_count", len(missing),
+			"total_count", len(switches.Items))
+
+		if testCtx.extended {
+			slog.Debug("Switches missing metrics", "missing", missing)
 		}
 	}
 
@@ -3013,7 +3047,7 @@ func (testCtx *VPCPeeringTestCtx) prometheusObservabilityTest(ctx context.Contex
 		"metric", metricName,
 		"switches_with_metric", len(foundSwitches),
 		"switches_checked", len(switches.Items),
-		"success_rate", fmt.Sprintf("%.1f%%", float64(len(foundSwitches))*100/float64(len(switches.Items))),
+		"success_rate", fmt.Sprintf("%.1f%%", float64(len(found))*100/float64(len(switches.Items))),
 	)
 
 	return false, nil, nil
