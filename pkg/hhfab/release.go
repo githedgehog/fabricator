@@ -2524,12 +2524,13 @@ type ObsEndpoint struct {
 }
 
 // Transform observability endpoints from push to query URLs
-func getObservabilityQueryURLs(ctx context.Context, kube kclient.Client) (ObsEndpoint, ObsEndpoint, error) {
+func getObservabilityQueryURLs(ctx context.Context, kube kclient.Client) (ObsEndpoint, ObsEndpoint, string, error) {
 	var loki, prometheus ObsEndpoint
+	var env string
 
 	fabricator := &fabricatorapi.Fabricator{}
 	if err := kube.Get(ctx, kclient.ObjectKey{Namespace: "fab", Name: "default"}, fabricator); err != nil {
-		return ObsEndpoint{}, ObsEndpoint{}, fmt.Errorf("getting Fabricator object: %w", err)
+		return ObsEndpoint{}, ObsEndpoint{}, "", fmt.Errorf("getting Fabricator object: %w", err)
 	}
 
 	// Check if Loki targets exist and iterate through all of them
@@ -2557,6 +2558,13 @@ func getObservabilityQueryURLs(ctx context.Context, kube kclient.Client) (ObsEnd
 				if lokiTarget.BasicAuth != nil {
 					loki.Username = lokiTarget.BasicAuth.Username
 					loki.Password = lokiTarget.BasicAuth.Password
+				}
+
+				// Extract environment label if present
+				if lokiTarget.Labels != nil {
+					if envLabel, ok := lokiTarget.Labels["env"]; ok {
+						env = envLabel
+					}
 				}
 
 				// Take the first valid URL we find
@@ -2602,12 +2610,11 @@ func getObservabilityQueryURLs(ctx context.Context, kube kclient.Client) (ObsEnd
 		}
 	}
 
-	return loki, prometheus, nil
+	return loki, prometheus, env, nil
 }
 
-// Test that logs are being correctly sent to and can be retrieved from Loki
 func (testCtx *VPCPeeringTestCtx) lokiObservabilityTest(ctx context.Context) (bool, []RevertFunc, error) {
-	lokiEndpoint, _, err := getObservabilityQueryURLs(ctx, testCtx.kube)
+	lokiEndpoint, _, env, err := getObservabilityQueryURLs(ctx, testCtx.kube)
 	if err != nil {
 		return true, nil, fmt.Errorf("error getting observability endpoints: %w", err)
 	}
@@ -2621,14 +2628,14 @@ func (testCtx *VPCPeeringTestCtx) lokiObservabilityTest(ctx context.Context) (bo
 	// Get credentials from environment variables for querying
 	lokiUser := os.Getenv("LOKI_USER")
 	lokiPass := os.Getenv("LOKI_PASS")
-
 	hasAuth := lokiUser != "" || lokiPass != ""
 
 	slog.Debug("Using Loki endpoint",
 		"url", lokiEndpoint.URL,
-		"auth_from_env", hasAuth)
+		"auth_from_env", hasAuth,
+		"env", env)
 
-	// Get all switches from K8s API
+	// Get all switches, gateways and alloy controller pods
 	switches := &wiringapi.SwitchList{}
 	if err := testCtx.kube.List(ctx, switches); err != nil {
 		return false, nil, fmt.Errorf("listing switches: %w", err)
@@ -2640,31 +2647,21 @@ func (testCtx *VPCPeeringTestCtx) lokiObservabilityTest(ctx context.Context) (bo
 		return true, nil, nil
 	}
 
-	// Get gateway devices from K8s API
+	// Get gateway devices from K8s API (with simplified error handling)
 	var gateways []string
 	gatewayList := &gwapi.GatewayList{}
-	if err := testCtx.kube.List(ctx, gatewayList); err != nil {
-		// Gracefully handle missing Gateway CRD
-		if !strings.Contains(err.Error(), "no matches for kind") {
-			// Only warn for unexpected errors
-			slog.Warn("Could not list gateways", "error", err)
-		}
-	} else {
-		// Add gateway names if the CRD exists and gateways were found
+	if err := testCtx.kube.List(ctx, gatewayList); err == nil {
 		for _, gw := range gatewayList.Items {
 			gateways = append(gateways, gw.Name)
 		}
 	}
 
-	// Get alloy controller pods
+	// Get alloy controller pods (simplified logic)
 	alloyPods := &corev1.PodList{}
 	if err := testCtx.kube.List(ctx, alloyPods,
 		kclient.InNamespace("fab"),
 		kclient.MatchingLabels{"app.kubernetes.io/instance": "alloy-ctrl"}); err != nil {
-		slog.Debug("Could not list alloy controller pods with instance label", "error", err)
-	}
-
-	if len(alloyPods.Items) == 0 {
+		// Try alternate method if first approach fails
 		allPods := &corev1.PodList{}
 		if err := testCtx.kube.List(ctx, allPods, kclient.InNamespace("fab")); err == nil {
 			for _, pod := range allPods.Items {
@@ -2675,35 +2672,29 @@ func (testCtx *VPCPeeringTestCtx) lokiObservabilityTest(ctx context.Context) (bo
 		}
 	}
 
-	client := &http.Client{
-		Timeout: 15 * time.Second,
-	}
-
+	// Build list of expected hostnames
 	expectedHostnames := make([]string, 0, len(switches.Items)+len(alloyPods.Items)+len(gateways))
-
-	// Add switch names to expected hostnames
 	for _, sw := range switches.Items {
 		expectedHostnames = append(expectedHostnames, sw.Name)
 	}
-
-	// Add gateway names to expected hostnames
 	expectedHostnames = append(expectedHostnames, gateways...)
-
-	// Add alloy controller pod names to expected hostnames
 	for _, pod := range alloyPods.Items {
 		expectedHostnames = append(expectedHostnames, pod.Name)
 	}
 
 	slog.Info("Checking logs for devices", "expected", expectedHostnames)
 
-	// Pre-check connectivity and authentication
+	// Set up HTTP client and perform connectivity check
+	client := &http.Client{
+		Timeout: 15 * time.Second,
+	}
 	labelsURL := fmt.Sprintf("%s/labels", lokiEndpoint.URL)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, labelsURL, nil)
 	if err != nil {
 		return false, nil, fmt.Errorf("failed to create loki API request: %w", err)
 	}
 
-	// Use credentials from environment variables
+	// Add auth if needed
 	if hasAuth {
 		req.SetBasicAuth(lokiUser, lokiPass)
 	}
@@ -2719,16 +2710,15 @@ func (testCtx *VPCPeeringTestCtx) lokiObservabilityTest(ctx context.Context) (bo
 		return false, nil, fmt.Errorf("failed to read response body from loki connectivity check: %w", err)
 	}
 
-	// Check connectivity and authentication
+	// Verify connection is working
 	if resp.StatusCode == http.StatusUnauthorized {
 		return false, nil, fmt.Errorf("loki authentication failed: %s", string(body)) //nolint:goerr113
 	}
-
 	if resp.StatusCode != http.StatusOK {
 		return false, nil, fmt.Errorf("loki API connectivity check failed: status %d", resp.StatusCode) //nolint:goerr113
 	}
 
-	// Pre-allocate slices with estimated capacity
+	// Track results
 	missingLogs := make([]string, 0, len(expectedHostnames))
 	foundLogs := make([]string, 0, len(expectedHostnames))
 	var errorSample string
@@ -2736,14 +2726,19 @@ func (testCtx *VPCPeeringTestCtx) lokiObservabilityTest(ctx context.Context) (bo
 	// Define maximum age for logs to be considered fresh
 	const maxLogAgeSecs = 900 // 15 minutes
 
-	// Extended time window for querying logs (24 hours instead of 15 minutes)
-	// to account for possible delays in log delivery
+	// Check each device for logs
 	for _, hostname := range expectedHostnames {
-		slog.Debug("Checking logs for device", "hostname", hostname)
-
+		// Build time range for query
 		endTime := time.Now().UnixNano()
 		startTime := time.Now().Add(-24 * time.Hour).UnixNano()
-		query := fmt.Sprintf(`{hostname="%s"}`, hostname)
+
+		// Build query with environment label if available
+		var query string
+		if env != "" {
+			query = fmt.Sprintf(`{hostname="%s", env="%s"}`, hostname, env)
+		} else {
+			query = fmt.Sprintf(`{hostname="%s"}`, hostname)
+		}
 
 		queryURL := fmt.Sprintf("%s/query_range?query=%s&start=%d&end=%d&limit=20",
 			lokiEndpoint.URL,
@@ -2787,7 +2782,7 @@ func (testCtx *VPCPeeringTestCtx) lokiObservabilityTest(ctx context.Context) (bo
 			continue
 		}
 
-		// Only show full response in extended verbose mode to reduce clutter
+		// Only show full response in extended verbose mode
 		if testCtx.extended {
 			slog.Debug("Loki query details",
 				"hostname", hostname,
@@ -2854,7 +2849,6 @@ func (testCtx *VPCPeeringTestCtx) lokiObservabilityTest(ctx context.Context) (bo
 		}
 
 		if logCount == 0 {
-			slog.Debug("No logs found for device", "hostname", hostname)
 			missingLogs = append(missingLogs, hostname)
 
 			continue
@@ -2869,7 +2863,7 @@ func (testCtx *VPCPeeringTestCtx) lokiObservabilityTest(ctx context.Context) (bo
 
 		// Logs found!
 		foundLogs = append(foundLogs, hostname)
-		slog.Info("Found logs for device", "hostname", hostname, "count", logCount)
+		slog.Info("Found logs for device", "hostname", hostname, "count", logCount, "env", env)
 	}
 
 	// Only fail if ALL expected devices are missing logs
@@ -2888,7 +2882,7 @@ func (testCtx *VPCPeeringTestCtx) lokiObservabilityTest(ctx context.Context) (bo
 			"missing_count", len(missingLogs),
 			"total_count", len(expectedHostnames))
 
-		// Only show detailed missing list in verbose mode to reduce clutter
+		// Only show detailed missing list in verbose mode
 		if testCtx.extended {
 			slog.Debug("Devices missing logs", "missing", missingLogs)
 		}
@@ -2903,7 +2897,7 @@ func (testCtx *VPCPeeringTestCtx) lokiObservabilityTest(ctx context.Context) (bo
 }
 
 func (testCtx *VPCPeeringTestCtx) prometheusObservabilityTest(ctx context.Context) (bool, []RevertFunc, error) {
-	_, prometheusEndpoint, err := getObservabilityQueryURLs(ctx, testCtx.kube)
+	_, prometheusEndpoint, env, err := getObservabilityQueryURLs(ctx, testCtx.kube)
 	if err != nil {
 		return true, nil, fmt.Errorf("error getting observability endpoints: %w", err)
 	}
@@ -2915,22 +2909,14 @@ func (testCtx *VPCPeeringTestCtx) prometheusObservabilityTest(ctx context.Contex
 	}
 
 	// Get credentials from environment variables for querying
-	promUser := os.Getenv("PROMETHEUS_USER")
-	promPass := os.Getenv("PROMETHEUS_PASS")
-
-	// Alternative environment variable names if needed
-	if promUser == "" {
-		promUser = os.Getenv("PROM_USER")
-	}
-	if promPass == "" {
-		promPass = os.Getenv("PROM_PASS")
-	}
-
+	promUser := os.Getenv("PROM_USER")
+	promPass := os.Getenv("PROM_PASS")
 	hasAuth := promUser != "" || promPass != ""
 
 	slog.Debug("Using Prometheus endpoint",
 		"url", prometheusEndpoint.URL,
-		"auth_from_env", hasAuth)
+		"auth_from_env", hasAuth,
+		"env", env)
 
 	// List switches to check for metrics
 	switches := &wiringapi.SwitchList{}
@@ -2944,8 +2930,6 @@ func (testCtx *VPCPeeringTestCtx) prometheusObservabilityTest(ctx context.Contex
 		return true, nil, nil
 	}
 
-	client := &http.Client{Timeout: 15 * time.Second}
-
 	// Build list of switch names to check
 	expectedSwitches := make([]string, 0, len(switches.Items))
 	for _, sw := range switches.Items {
@@ -2953,6 +2937,8 @@ func (testCtx *VPCPeeringTestCtx) prometheusObservabilityTest(ctx context.Contex
 	}
 
 	slog.Info("Checking metrics for switches", "expected", expectedSwitches)
+
+	client := &http.Client{Timeout: 15 * time.Second}
 
 	// First verify we can access Prometheus API with a simple query
 	queryURL := fmt.Sprintf("%s/query?query=%s", prometheusEndpoint.URL, "up")
@@ -2981,7 +2967,6 @@ func (testCtx *VPCPeeringTestCtx) prometheusObservabilityTest(ctx context.Contex
 	if resp.StatusCode == http.StatusUnauthorized {
 		return false, nil, fmt.Errorf("prometheus authentication failed: %s", string(body)) //nolint:goerr113
 	}
-
 	if resp.StatusCode != http.StatusOK {
 		return false, nil, fmt.Errorf("prometheus API connectivity check failed: status %d", resp.StatusCode) //nolint:goerr113
 	}
@@ -2991,7 +2976,14 @@ func (testCtx *VPCPeeringTestCtx) prometheusObservabilityTest(ctx context.Contex
 
 	// Query for fabric_agent_agent_generation across all switches
 	metricName := "fabric_agent_agent_generation"
-	queryURL = fmt.Sprintf("%s/query?query=%s", prometheusEndpoint.URL, url.QueryEscape(metricName))
+	var queryExpr string
+	if env != "" {
+		queryExpr = fmt.Sprintf("%s{env=\"%s\"}", metricName, env)
+	} else {
+		queryExpr = metricName
+	}
+
+	queryURL = fmt.Sprintf("%s/query?query=%s", prometheusEndpoint.URL, url.QueryEscape(queryExpr))
 
 	req, err = http.NewRequestWithContext(ctx, http.MethodGet, queryURL, nil)
 	if err != nil {
@@ -3039,76 +3031,85 @@ func (testCtx *VPCPeeringTestCtx) prometheusObservabilityTest(ctx context.Contex
 
 	// Check if we got any results
 	if len(promResp.Data.Result) == 0 {
-		return false, nil, fmt.Errorf("no '%s' metrics found for any switches", metricName) //nolint:goerr113
+		return false, nil, fmt.Errorf("no '%s' metrics found for any switches with env=%s", metricName, env) //nolint:goerr113
 	}
 
-	// Pre-allocate slices with estimated capacity
-	missing := make([]string, 0, len(switches.Items))
-	found := make([]string, 0, len(switches.Items))
+	// Process results
+	foundHostnames := make([]string, 0, len(promResp.Data.Result))
 
-	// Count switches for which we found metrics
-	foundSwitches := make(map[string]bool)
+	// Check freshness and collect found metrics
 	for _, result := range promResp.Data.Result {
 		hostname, ok := result.Metric["hostname"]
 		if !ok {
 			continue
 		}
 
-		// Check metric freshness if we have timestamp
+		// Check metric freshness
+		isFresh := true
 		if len(result.Value) > 0 {
 			if ts, ok := result.Value[0].(float64); ok {
 				metricTime := time.Unix(int64(ts), 0)
 				if time.Since(metricTime) > maxMetricAgeSecs*time.Second {
 					slog.Debug("Stale metric found for switch (older than 15 minutes)", "switch", hostname)
-
-					continue
+					isFresh = false
 				}
 			}
 		}
 
-		foundSwitches[hostname] = true
-		found = append(found, hostname)
+		if !isFresh {
+			continue
+		}
+
+		foundHostnames = append(foundHostnames, hostname)
 
 		value := ""
 		if len(result.Value) > 1 {
 			value = fmt.Sprintf("%v", result.Value[1])
 		}
 
-		slog.Info("Found metric", "metric", metricName, "switch", hostname, "value", value)
+		slog.Info("Found metric", "metric", metricName, "switch", hostname, "value", value, "env", env)
 	}
 
-	// Find which switches are missing metrics
-	for _, sw := range switches.Items {
-		if !foundSwitches[sw.Name] {
-			missing = append(missing, sw.Name)
-			slog.Debug("No fresh metrics found for switch", "switch", sw.Name)
-		}
+	// Note naming mismatch
+	if !sliceContainsAny(expectedSwitches, foundHostnames) {
+		slog.Warn("Note: Switch names in metrics don't match Kubernetes names",
+			"k8s_names", strings.Join(expectedSwitches, ", "),
+			"metric_names", strings.Join(foundHostnames, ", "))
 	}
 
-	// Only fail if ALL expected switches are missing metrics
-	if len(foundSwitches) == 0 {
+	// As long as we found metrics, consider the test successful
+	if len(foundHostnames) == 0 {
 		return false, nil, fmt.Errorf("no fresh '%s' metrics found for any switches", metricName) //nolint:goerr113
-	}
-
-	// If we found metrics but not for all switches, just warn
-	if len(missing) > 0 {
-		slog.Warn("Some switches missing fresh metrics",
-			"missing_count", len(missing),
-			"total_count", len(switches.Items))
-
-		if testCtx.extended {
-			slog.Debug("Switches missing metrics", "missing", missing)
-		}
 	}
 
 	slog.Info("Verified Prometheus metrics delivery",
 		"metric", metricName,
-		"switches_with_metric", len(foundSwitches),
-		"switches_checked", len(switches.Items),
-		"success_rate", fmt.Sprintf("%.1f%%", float64(len(found))*100/float64(len(switches.Items))),
-	)
+		"metrics_count", len(foundHostnames),
+		"switches_checked", len(switches.Items))
 
 	return false, nil, nil
+}
+
+// Helper function to check if a string is in a slice
+func stringInSlice(s string, slice []string) bool {
+	for _, item := range slice {
+		if s == item {
+			return true
+		}
+	}
+
+	return false
+}
+
+// Helper function to check if any element from one slice is in another
+func sliceContainsAny(slice1, slice2 []string) bool {
+	for _, item := range slice1 {
+		if stringInSlice(item, slice2) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // Utilities and suite runners
@@ -4005,6 +4006,7 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 			for _, lokiTarget := range fabricator.Spec.Config.Observability.Targets.Loki {
 				if lokiTarget.URL != "" {
 					skipFlags.NoLoki = false
+
 					break
 				}
 			}
@@ -4016,6 +4018,7 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 			for _, promTarget := range fabricator.Spec.Config.Observability.Targets.Prometheus {
 				if promTarget.URL != "" {
 					skipFlags.NoPrometheus = false
+
 					break
 				}
 			}
