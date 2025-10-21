@@ -2579,9 +2579,9 @@ func getObservabilityQueryURLs(ctx context.Context, kube kclient.Client) (ObsEnd
 					// Grafana Cloud URL
 					prometheus.URL = strings.Replace(promPushURL, "/api/prom/push", "/api/prom/api/v1", 1)
 				} else {
-					// Generic URL - for standalone Prometheus, we need to convert /api/v1/write to /api/v1
+					// Generic URL - for standalone Prometheus
 					if strings.Contains(promPushURL, "/api/v1/write") {
-						prometheus.URL = strings.Replace(promPushURL, "/api/v1/write", "/api/v1", 1)
+						prometheus.URL = strings.Replace(promPushURL, "/write", "", 1)
 					} else {
 						prometheus.URL = strings.TrimSuffix(promPushURL, "/push")
 						if !strings.HasSuffix(prometheus.URL, "/api/v1") {
@@ -2635,7 +2635,9 @@ func (testCtx *VPCPeeringTestCtx) lokiObservabilityTest(ctx context.Context) (bo
 	}
 
 	if len(switches.Items) == 0 {
-		slog.Warn("No switches found, Alloy on switches will not be tested")
+		slog.Info("No switches found, skipping test")
+
+		return true, nil, nil
 	}
 
 	// Get gateway devices from K8s API
@@ -2692,6 +2694,8 @@ func (testCtx *VPCPeeringTestCtx) lokiObservabilityTest(ctx context.Context) (bo
 		expectedHostnames = append(expectedHostnames, pod.Name)
 	}
 
+	slog.Info("Checking logs for devices", "expected", expectedHostnames)
+
 	// Pre-check connectivity and authentication
 	labelsURL := fmt.Sprintf("%s/labels", lokiEndpoint.URL)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, labelsURL, nil)
@@ -2709,8 +2713,11 @@ func (testCtx *VPCPeeringTestCtx) lokiObservabilityTest(ctx context.Context) (bo
 		return false, nil, fmt.Errorf("loki connectivity check failed: %w", err)
 	}
 
-	body, _ := io.ReadAll(resp.Body) // Ignoring error, we only need body for error messages
+	body, err := io.ReadAll(resp.Body)
 	resp.Body.Close()
+	if err != nil {
+		return false, nil, fmt.Errorf("failed to read response body from loki connectivity check: %w", err)
+	}
 
 	// Check connectivity and authentication
 	if resp.StatusCode == http.StatusUnauthorized {
@@ -2725,6 +2732,9 @@ func (testCtx *VPCPeeringTestCtx) lokiObservabilityTest(ctx context.Context) (bo
 	missingLogs := make([]string, 0, len(expectedHostnames))
 	foundLogs := make([]string, 0, len(expectedHostnames))
 	var errorSample string
+
+	// Define maximum age for logs to be considered fresh
+	const maxLogAgeSecs = 900 // 15 minutes
 
 	// Extended time window for querying logs (24 hours instead of 15 minutes)
 	// to account for possible delays in log delivery
@@ -2768,7 +2778,6 @@ func (testCtx *VPCPeeringTestCtx) lokiObservabilityTest(ctx context.Context) (bo
 
 		body, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
-
 		if err != nil {
 			if errorSample == "" {
 				errorSample = fmt.Sprintf("Failed to read response: %v", err)
@@ -2825,14 +2834,34 @@ func (testCtx *VPCPeeringTestCtx) lokiObservabilityTest(ctx context.Context) (bo
 			continue
 		}
 
-		// Count log entries
+		// Count log entries and check freshness
 		logCount := 0
+		freshLogsFound := false
 		for _, result := range lokiResp.Data.Result {
-			logCount += len(result.Values)
+			for _, value := range result.Values {
+				logCount++
+
+				// Check log freshness if we have timestamp
+				if len(value) > 0 {
+					if ts, err := strconv.ParseInt(value[0], 10, 64); err == nil {
+						logTime := time.Unix(0, ts)
+						if time.Since(logTime) <= maxLogAgeSecs*time.Second {
+							freshLogsFound = true
+						}
+					}
+				}
+			}
 		}
 
 		if logCount == 0 {
 			slog.Debug("No logs found for device", "hostname", hostname)
+			missingLogs = append(missingLogs, hostname)
+
+			continue
+		}
+
+		if !freshLogsFound {
+			slog.Debug("Only stale logs found for device (older than 15 minutes)", "hostname", hostname)
 			missingLogs = append(missingLogs, hostname)
 
 			continue
@@ -2908,6 +2937,7 @@ func (testCtx *VPCPeeringTestCtx) prometheusObservabilityTest(ctx context.Contex
 	if err := testCtx.kube.List(ctx, switches); err != nil {
 		return false, nil, fmt.Errorf("listing switches: %w", err)
 	}
+
 	if len(switches.Items) == 0 {
 		slog.Info("No switches found, Prometheus test will be skipped")
 
@@ -2915,6 +2945,14 @@ func (testCtx *VPCPeeringTestCtx) prometheusObservabilityTest(ctx context.Contex
 	}
 
 	client := &http.Client{Timeout: 15 * time.Second}
+
+	// Build list of switch names to check
+	expectedSwitches := make([]string, 0, len(switches.Items))
+	for _, sw := range switches.Items {
+		expectedSwitches = append(expectedSwitches, sw.Name)
+	}
+
+	slog.Info("Checking metrics for switches", "expected", expectedSwitches)
 
 	// First verify we can access Prometheus API with a simple query
 	queryURL := fmt.Sprintf("%s/query?query=%s", prometheusEndpoint.URL, "up")
@@ -2933,8 +2971,11 @@ func (testCtx *VPCPeeringTestCtx) prometheusObservabilityTest(ctx context.Contex
 		return false, nil, fmt.Errorf("prometheus connectivity check failed: %w", err)
 	}
 
-	body, _ := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	resp.Body.Close()
+	if err != nil {
+		return false, nil, fmt.Errorf("failed to read response body from prometheus connectivity check: %w", err)
+	}
 
 	// Check connectivity and authentication
 	if resp.StatusCode == http.StatusUnauthorized {
@@ -2944,6 +2985,9 @@ func (testCtx *VPCPeeringTestCtx) prometheusObservabilityTest(ctx context.Contex
 	if resp.StatusCode != http.StatusOK {
 		return false, nil, fmt.Errorf("prometheus API connectivity check failed: status %d", resp.StatusCode) //nolint:goerr113
 	}
+
+	// Define maximum age for metrics to be considered fresh
+	const maxMetricAgeSecs = 900 // 15 minutes
 
 	// Query for fabric_agent_agent_generation across all switches
 	metricName := "fabric_agent_agent_generation"
@@ -2964,8 +3008,11 @@ func (testCtx *VPCPeeringTestCtx) prometheusObservabilityTest(ctx context.Contex
 		return false, nil, fmt.Errorf("failed to execute metric query: %w", err)
 	}
 
-	body, _ = io.ReadAll(resp.Body)
+	body, err = io.ReadAll(resp.Body)
 	resp.Body.Close()
+	if err != nil {
+		return false, nil, fmt.Errorf("failed to read metric query response: %w", err)
+	}
 
 	if resp.StatusCode != http.StatusOK {
 		return false, nil, fmt.Errorf("metric query failed: status %d", resp.StatusCode) //nolint:goerr113
@@ -2983,7 +3030,7 @@ func (testCtx *VPCPeeringTestCtx) prometheusObservabilityTest(ctx context.Contex
 	}
 
 	if err := json.Unmarshal(body, &promResp); err != nil {
-		return false, nil, fmt.Errorf("failed to parse response: %w", err)
+		return false, nil, fmt.Errorf("failed to parse prometheus response: %w", err)
 	}
 
 	if promResp.Status != "success" {
@@ -2998,43 +3045,54 @@ func (testCtx *VPCPeeringTestCtx) prometheusObservabilityTest(ctx context.Contex
 	// Pre-allocate slices with estimated capacity
 	missing := make([]string, 0, len(switches.Items))
 	found := make([]string, 0, len(switches.Items))
-	expectedSwitches := make([]string, 0, len(switches.Items))
-
-	// Build list of switch names
-	for _, sw := range switches.Items {
-		expectedSwitches = append(expectedSwitches, sw.Name)
-	}
-
-	slog.Info("Checking metrics for switches", "expected", expectedSwitches)
 
 	// Count switches for which we found metrics
 	foundSwitches := make(map[string]bool)
 	for _, result := range promResp.Data.Result {
 		hostname, ok := result.Metric["hostname"]
-		if ok {
-			foundSwitches[hostname] = true
-			found = append(found, hostname)
-
-			value := ""
-			if len(result.Value) > 1 {
-				value = fmt.Sprintf("%v", result.Value[1])
-			}
-
-			slog.Debug("Found metric", "metric", metricName, "switch", hostname, "value", value)
+		if !ok {
+			continue
 		}
+
+		// Check metric freshness if we have timestamp
+		if len(result.Value) > 0 {
+			if ts, ok := result.Value[0].(float64); ok {
+				metricTime := time.Unix(int64(ts), 0)
+				if time.Since(metricTime) > maxMetricAgeSecs*time.Second {
+					slog.Debug("Stale metric found for switch (older than 15 minutes)", "switch", hostname)
+
+					continue
+				}
+			}
+		}
+
+		foundSwitches[hostname] = true
+		found = append(found, hostname)
+
+		value := ""
+		if len(result.Value) > 1 {
+			value = fmt.Sprintf("%v", result.Value[1])
+		}
+
+		slog.Info("Found metric", "metric", metricName, "switch", hostname, "value", value)
 	}
 
-	// Find which switches are missing
+	// Find which switches are missing metrics
 	for _, sw := range switches.Items {
 		if !foundSwitches[sw.Name] {
 			missing = append(missing, sw.Name)
-			slog.Debug("No metrics found for switch", "switch", sw.Name)
+			slog.Debug("No fresh metrics found for switch", "switch", sw.Name)
 		}
 	}
 
+	// Only fail if ALL expected switches are missing metrics
+	if len(foundSwitches) == 0 {
+		return false, nil, fmt.Errorf("no fresh '%s' metrics found for any switches", metricName) //nolint:goerr113
+	}
+
 	// If we found metrics but not for all switches, just warn
-	if len(missing) > 0 && len(found) > 0 {
-		slog.Warn("Some switches missing metrics",
+	if len(missing) > 0 {
+		slog.Warn("Some switches missing fresh metrics",
 			"missing_count", len(missing),
 			"total_count", len(switches.Items))
 
@@ -3377,7 +3435,7 @@ func selectAndRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, suite *J
 		if test.Skipped != nil {
 			continue
 		}
-		if test.SkipFlags.ExtendedOnly && skipFlags.ExtendedOnly {
+		if test.SkipFlags.ExtendedOnly && !skipFlags.ExtendedOnly {
 			suite.TestCases[i].Skipped = &Skipped{
 				Message: "Extended tests are not enabled",
 			}
@@ -3436,6 +3494,30 @@ func selectAndRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, suite *J
 		if test.SkipFlags.NoGateway && skipFlags.NoGateway {
 			suite.TestCases[i].Skipped = &Skipped{
 				Message: "Gateway is not enabled or no gateways available",
+			}
+			suite.Skipped++
+
+			continue
+		}
+		if test.SkipFlags.NoLoki && skipFlags.NoLoki {
+			suite.TestCases[i].Skipped = &Skipped{
+				Message: "Loki is not configured or available",
+			}
+			suite.Skipped++
+
+			continue
+		}
+		if test.SkipFlags.NoPrometheus && skipFlags.NoPrometheus {
+			suite.TestCases[i].Skipped = &Skipped{
+				Message: "Prometheus is not configured or available",
+			}
+			suite.Skipped++
+
+			continue
+		}
+		if test.SkipFlags.NoServers && skipFlags.NoServers {
+			suite.TestCases[i].Skipped = &Skipped{
+				Message: "There are no servers in the fabric",
 			}
 			suite.Skipped++
 
@@ -3917,17 +3999,25 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 		skipFlags.NoLoki = true
 		skipFlags.NoPrometheus = true
 	} else {
+		// Check for any Loki targets with valid URLs
 		skipFlags.NoLoki = true
 		if fabricator.Spec.Config.Observability.Targets.Loki != nil {
-			if _, ok := fabricator.Spec.Config.Observability.Targets.Loki["monitor"]; ok {
-				skipFlags.NoLoki = false
+			for _, lokiTarget := range fabricator.Spec.Config.Observability.Targets.Loki {
+				if lokiTarget.URL != "" {
+					skipFlags.NoLoki = false
+					break
+				}
 			}
 		}
 
+		// Check for any Prometheus targets with valid URLs
 		skipFlags.NoPrometheus = true
 		if fabricator.Spec.Config.Observability.Targets.Prometheus != nil {
-			if _, ok := fabricator.Spec.Config.Observability.Targets.Prometheus["monitor"]; ok {
-				skipFlags.NoPrometheus = false
+			for _, promTarget := range fabricator.Spec.Config.Observability.Targets.Prometheus {
+				if promTarget.URL != "" {
+					skipFlags.NoPrometheus = false
+					break
+				}
 			}
 		}
 	}
@@ -3939,6 +4029,7 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 	if skipFlags.NoPrometheus {
 		slog.Info("No Prometheus target found, Prometheus test will be skipped")
 	}
+
 	results := []JUnitTestSuite{}
 	testCtx.noSetup = true
 	noVpcResults, err := selectAndRunSuite(ctx, testCtx, noVpcSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
