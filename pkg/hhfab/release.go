@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -29,6 +30,7 @@ import (
 	"go.githedgehog.com/fabric/pkg/util/pointer"
 	fabricatorapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab"
+	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/util/sshutil"
 	gwapi "go.githedgehog.com/gateway/api/gateway/v1alpha1"
 	"golang.org/x/sync/errgroup"
@@ -2529,7 +2531,7 @@ func getObservabilityQueryURLs(ctx context.Context, kube kclient.Client) (ObsEnd
 	var env string
 
 	fabricator := &fabricatorapi.Fabricator{}
-	if err := kube.Get(ctx, kclient.ObjectKey{Namespace: "fab", Name: "default"}, fabricator); err != nil {
+	if err := kube.Get(ctx, kclient.ObjectKey{Namespace: comp.FabNamespace, Name: kmetav1.NamespaceDefault}, fabricator); err != nil {
 		return ObsEndpoint{}, ObsEndpoint{}, "", fmt.Errorf("getting Fabricator object: %w", err)
 	}
 
@@ -2613,6 +2615,11 @@ func getObservabilityQueryURLs(ctx context.Context, kube kclient.Client) (ObsEnd
 	return loki, prometheus, env, nil
 }
 
+const (
+	LabelAppInstance   = "app.kubernetes.io/instance"
+	AlloyCtrlComponent = "alloy-ctrl"
+)
+
 func (testCtx *VPCPeeringTestCtx) lokiObservabilityTest(ctx context.Context) (bool, []RevertFunc, error) {
 	lokiEndpoint, _, env, err := getObservabilityQueryURLs(ctx, testCtx.kube)
 	if err != nil {
@@ -2628,23 +2635,17 @@ func (testCtx *VPCPeeringTestCtx) lokiObservabilityTest(ctx context.Context) (bo
 	// Get credentials from environment variables for querying
 	lokiUser := os.Getenv("LOKI_USER")
 	lokiPass := os.Getenv("LOKI_PASS")
-	hasAuth := lokiUser != "" || lokiPass != ""
+	hasAuth := lokiUser != "" && lokiPass != ""
 
 	slog.Debug("Using Loki endpoint",
 		"url", lokiEndpoint.URL,
 		"auth_from_env", hasAuth,
 		"env", env)
 
-	// Get all switches, gateways and alloy controller pods
+	// List switches to check for logs
 	switches := &wiringapi.SwitchList{}
 	if err := testCtx.kube.List(ctx, switches); err != nil {
 		return false, nil, fmt.Errorf("listing switches: %w", err)
-	}
-
-	if len(switches.Items) == 0 {
-		slog.Info("No switches found, skipping test")
-
-		return true, nil, nil
 	}
 
 	// Get gateway devices from K8s API (with simplified error handling)
@@ -2659,13 +2660,13 @@ func (testCtx *VPCPeeringTestCtx) lokiObservabilityTest(ctx context.Context) (bo
 	// Get alloy controller pods (simplified logic)
 	alloyPods := &corev1.PodList{}
 	if err := testCtx.kube.List(ctx, alloyPods,
-		kclient.InNamespace("fab"),
-		kclient.MatchingLabels{"app.kubernetes.io/instance": "alloy-ctrl"}); err != nil {
+		kclient.InNamespace(comp.FabNamespace),
+		kclient.MatchingLabels{LabelAppInstance: AlloyCtrlComponent}); err != nil {
 		// Try alternate method if first approach fails
 		allPods := &corev1.PodList{}
-		if err := testCtx.kube.List(ctx, allPods, kclient.InNamespace("fab")); err == nil {
+		if err := testCtx.kube.List(ctx, allPods, kclient.InNamespace(comp.FabNamespace)); err == nil {
 			for _, pod := range allPods.Items {
-				if strings.HasPrefix(pod.Name, "alloy-ctrl-") {
+				if strings.HasPrefix(pod.Name, AlloyCtrlComponent+"-") {
 					alloyPods.Items = append(alloyPods.Items, pod)
 				}
 			}
@@ -2704,18 +2705,27 @@ func (testCtx *VPCPeeringTestCtx) lokiObservabilityTest(ctx context.Context) (bo
 		return false, nil, fmt.Errorf("loki connectivity check failed: %w", err)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, bodyErr := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if err != nil {
-		return false, nil, fmt.Errorf("failed to read response body from loki connectivity check: %w", err)
-	}
 
-	// Verify connection is working
+	// Check connectivity and authentication
 	if resp.StatusCode == http.StatusUnauthorized {
+		if bodyErr != nil {
+			return false, nil, fmt.Errorf("loki authentication failed (could not read body: %w)", bodyErr) //nolint:goerr113
+		}
+
 		return false, nil, fmt.Errorf("loki authentication failed: %s", string(body)) //nolint:goerr113
 	}
 	if resp.StatusCode != http.StatusOK {
+		if bodyErr != nil {
+			return false, nil, fmt.Errorf("loki API connectivity check failed: status %d (could not read body: %w)", resp.StatusCode, bodyErr) //nolint:goerr113
+		}
+
 		return false, nil, fmt.Errorf("loki API connectivity check failed: status %d", resp.StatusCode) //nolint:goerr113
+	}
+
+	if bodyErr != nil {
+		return false, nil, fmt.Errorf("failed to read response body from loki connectivity check: %w", bodyErr)
 	}
 
 	// Track results
@@ -2782,24 +2792,6 @@ func (testCtx *VPCPeeringTestCtx) lokiObservabilityTest(ctx context.Context) (bo
 			continue
 		}
 
-		// Only show full response in extended verbose mode
-		if testCtx.extended {
-			slog.Debug("Loki query details",
-				"hostname", hostname,
-				"status", resp.Status,
-				"query", query,
-				"response", string(body))
-		}
-
-		if resp.StatusCode != http.StatusOK {
-			if errorSample == "" {
-				errorSample = fmt.Sprintf("HTTP status %d for query: %s", resp.StatusCode, query)
-			}
-			missingLogs = append(missingLogs, hostname)
-
-			continue
-		}
-
 		var lokiResp struct {
 			Status string `json:"status"`
 			Data   struct {
@@ -2814,6 +2806,28 @@ func (testCtx *VPCPeeringTestCtx) lokiObservabilityTest(ctx context.Context) (bo
 		if err := json.Unmarshal(body, &lokiResp); err != nil {
 			if errorSample == "" {
 				errorSample = fmt.Sprintf("Failed to parse response: %v", err)
+			}
+			missingLogs = append(missingLogs, hostname)
+
+			continue
+		}
+
+		// Count total entries and get a sample if available
+		entryCount := 0
+		var sample string
+		for _, result := range lokiResp.Data.Result {
+			entryCount += len(result.Values)
+			if sample == "" && len(result.Values) > 0 && len(result.Values[0]) > 1 {
+				sample = result.Values[0][1]
+			}
+		}
+
+		// Log only count and one sample entry
+		slog.Debug("Loki query details", "hostname", hostname, "status", resp.Status, "query", query, "entries", entryCount, "sample", sample)
+
+		if resp.StatusCode != http.StatusOK {
+			if errorSample == "" {
+				errorSample = fmt.Sprintf("HTTP status %d for query: %s", resp.StatusCode, query)
 			}
 			missingLogs = append(missingLogs, hostname)
 
@@ -2878,20 +2892,9 @@ func (testCtx *VPCPeeringTestCtx) lokiObservabilityTest(ctx context.Context) (bo
 
 	if len(missingLogs) > 0 {
 		// Some logs are missing, but not all - just warn rather than fail
-		slog.Warn("Some devices missing logs in Loki",
-			"missing_count", len(missingLogs),
-			"total_count", len(expectedHostnames))
-
-		// Only show detailed missing list in verbose mode
-		if testCtx.extended {
-			slog.Debug("Devices missing logs", "missing", missingLogs)
-		}
+		slog.Warn("Some devices missing logs in Loki", "missing_count", len(missingLogs), "total_count", len(expectedHostnames))
+		slog.Debug("Devices missing logs", "missing", missingLogs)
 	}
-
-	slog.Info("Verified logs delivery to Loki",
-		"devices_with_logs", len(foundLogs),
-		"devices_checked", len(expectedHostnames),
-		"success_rate", fmt.Sprintf("%.1f%%", float64(len(foundLogs))*100/float64(len(expectedHostnames))))
 
 	return false, nil, nil
 }
@@ -2911,7 +2914,7 @@ func (testCtx *VPCPeeringTestCtx) prometheusObservabilityTest(ctx context.Contex
 	// Get credentials from environment variables for querying
 	promUser := os.Getenv("PROM_USER")
 	promPass := os.Getenv("PROM_PASS")
-	hasAuth := promUser != "" || promPass != ""
+	hasAuth := promUser != "" && promPass != ""
 
 	slog.Debug("Using Prometheus endpoint",
 		"url", prometheusEndpoint.URL,
@@ -2922,12 +2925,6 @@ func (testCtx *VPCPeeringTestCtx) prometheusObservabilityTest(ctx context.Contex
 	switches := &wiringapi.SwitchList{}
 	if err := testCtx.kube.List(ctx, switches); err != nil {
 		return false, nil, fmt.Errorf("listing switches: %w", err)
-	}
-
-	if len(switches.Items) == 0 {
-		slog.Info("No switches found, Prometheus test will be skipped")
-
-		return true, nil, nil
 	}
 
 	// Build list of switch names to check
@@ -2957,18 +2954,27 @@ func (testCtx *VPCPeeringTestCtx) prometheusObservabilityTest(ctx context.Contex
 		return false, nil, fmt.Errorf("prometheus connectivity check failed: %w", err)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, bodyErr := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if err != nil {
-		return false, nil, fmt.Errorf("failed to read response body from prometheus connectivity check: %w", err)
-	}
 
 	// Check connectivity and authentication
 	if resp.StatusCode == http.StatusUnauthorized {
+		if bodyErr != nil {
+			return false, nil, fmt.Errorf("prometheus authentication failed (could not read body: %w)", bodyErr) //nolint:goerr113
+		}
+
 		return false, nil, fmt.Errorf("prometheus authentication failed: %s", string(body)) //nolint:goerr113
 	}
 	if resp.StatusCode != http.StatusOK {
+		if bodyErr != nil {
+			return false, nil, fmt.Errorf("prometheus API connectivity check failed: status %d (could not read body: %w)", resp.StatusCode, bodyErr) //nolint:goerr113
+		}
+
 		return false, nil, fmt.Errorf("prometheus API connectivity check failed: status %d", resp.StatusCode) //nolint:goerr113
+	}
+
+	if bodyErr != nil {
+		return false, nil, fmt.Errorf("failed to read response body from prometheus connectivity check: %w", bodyErr)
 	}
 
 	// Define maximum age for metrics to be considered fresh
@@ -3000,14 +3006,19 @@ func (testCtx *VPCPeeringTestCtx) prometheusObservabilityTest(ctx context.Contex
 		return false, nil, fmt.Errorf("failed to execute metric query: %w", err)
 	}
 
-	body, err = io.ReadAll(resp.Body)
+	body, bodyErr = io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if err != nil {
-		return false, nil, fmt.Errorf("failed to read metric query response: %w", err)
-	}
 
 	if resp.StatusCode != http.StatusOK {
+		if bodyErr != nil {
+			return false, nil, fmt.Errorf("metric query failed: status %d (could not read body: %w)", resp.StatusCode, bodyErr) //nolint:goerr113
+		}
+
 		return false, nil, fmt.Errorf("metric query failed: status %d", resp.StatusCode) //nolint:goerr113
+	}
+
+	if bodyErr != nil {
+		return false, nil, fmt.Errorf("failed to read metric query response: %w", bodyErr)
 	}
 
 	var promResp struct {
@@ -3024,6 +3035,9 @@ func (testCtx *VPCPeeringTestCtx) prometheusObservabilityTest(ctx context.Contex
 	if err := json.Unmarshal(body, &promResp); err != nil {
 		return false, nil, fmt.Errorf("failed to parse prometheus response: %w", err)
 	}
+
+	// Log query details with status and count
+	slog.Debug("Prometheus query details", "query", queryExpr, "status", resp.Status, "count", len(promResp.Data.Result))
 
 	if promResp.Status != "success" {
 		return false, nil, fmt.Errorf("metric query returned non-success status: %s", promResp.Status) //nolint:goerr113
@@ -3044,16 +3058,25 @@ func (testCtx *VPCPeeringTestCtx) prometheusObservabilityTest(ctx context.Contex
 			continue
 		}
 
-		// Check metric freshness
-		isFresh := true
+		// Extract timestamp
+		var timestamp time.Time
 		if len(result.Value) > 0 {
 			if ts, ok := result.Value[0].(float64); ok {
-				metricTime := time.Unix(int64(ts), 0)
-				if time.Since(metricTime) > maxMetricAgeSecs*time.Second {
-					slog.Debug("Stale metric found for switch (older than 15 minutes)", "switch", hostname)
-					isFresh = false
-				}
+				timestamp = time.Unix(int64(ts), 0)
 			}
+		}
+
+		// Get value as string
+		var valueStr string
+		if len(result.Value) > 1 {
+			valueStr = fmt.Sprintf("%v", result.Value[1])
+		}
+
+		// Check metric freshness
+		isFresh := true
+		if timestamp.Unix() > 0 && time.Since(timestamp) > maxMetricAgeSecs*time.Second {
+			slog.Debug("Stale metric found for switch (older than 15 minutes)", "switch", hostname)
+			isFresh = false
 		}
 
 		if !isFresh {
@@ -3062,16 +3085,15 @@ func (testCtx *VPCPeeringTestCtx) prometheusObservabilityTest(ctx context.Contex
 
 		foundHostnames = append(foundHostnames, hostname)
 
-		value := ""
-		if len(result.Value) > 1 {
-			value = fmt.Sprintf("%v", result.Value[1])
-		}
+		// Log each device with its value and timestamp
+		slog.Debug("Prometheus metric", "hostname", hostname, "value", valueStr, "timestamp", timestamp.Format(time.RFC3339))
 
-		slog.Info("Found metric", "metric", metricName, "switch", hostname, "value", value, "env", env)
+		slog.Info("Found metric", "metric", metricName, "switch", hostname, "value", valueStr, "env", env)
 	}
 
-	// Note naming mismatch
-	if !sliceContainsAny(expectedSwitches, foundHostnames) {
+	if !slices.ContainsFunc(expectedSwitches, func(sw string) bool {
+		return slices.Contains(foundHostnames, sw)
+	}) {
 		slog.Warn("Note: Switch names in metrics don't match Kubernetes names",
 			"k8s_names", strings.Join(expectedSwitches, ", "),
 			"metric_names", strings.Join(foundHostnames, ", "))
@@ -3082,34 +3104,9 @@ func (testCtx *VPCPeeringTestCtx) prometheusObservabilityTest(ctx context.Contex
 		return false, nil, fmt.Errorf("no fresh '%s' metrics found for any switches", metricName) //nolint:goerr113
 	}
 
-	slog.Info("Verified Prometheus metrics delivery",
-		"metric", metricName,
-		"metrics_count", len(foundHostnames),
-		"switches_checked", len(switches.Items))
+	slog.Info("Verified Prometheus metrics delivery", "metric", metricName, "metrics_count", len(foundHostnames), "switches_checked", len(switches.Items))
 
 	return false, nil, nil
-}
-
-// Helper function to check if a string is in a slice
-func stringInSlice(s string, slice []string) bool {
-	for _, item := range slice {
-		if s == item {
-			return true
-		}
-	}
-
-	return false
-}
-
-// Helper function to check if any element from one slice is in another
-func sliceContainsAny(slice1, slice2 []string) bool {
-	for _, item := range slice1 {
-		if stringInSlice(item, slice2) {
-			return true
-		}
-	}
-
-	return false
 }
 
 // Utilities and suite runners
@@ -3170,7 +3167,7 @@ type SkipFlags struct {
 	NoMeshLink    bool `xml:"-"` // skip if there's no mesh (i.e. leaf-leaf) link between the switches
 	NoGateway     bool `xml:"-"` // skip if gateway is not enabled or no gateways available
 	NoLoki        bool `xml:"-"` // skip if Loki is not configured or available
-	NoPrometheus  bool `xml:"-"` // skip if Prometheus is not configured or available
+	NoProm        bool `xml:"-"` // skip if Prometheus is not configured or available
 	NoServers     bool `xml:"-"` // skip if there are no servers in the fabric
 
 	/* Note about subinterfaces; they are required in the following cases:
@@ -3206,11 +3203,14 @@ func (sf *SkipFlags) PrettyPrint() string {
 	if sf.NoGateway {
 		parts = append(parts, "NoGW")
 	}
+	if sf.NoServers {
+		parts = append(parts, "NoSrvs")
+	}
 	if sf.NoLoki {
 		parts = append(parts, "NoLoki")
 	}
-	if sf.NoPrometheus {
-		parts = append(parts, "NoPrometheus")
+	if sf.NoProm {
+		parts = append(parts, "NoProm")
 	}
 	if len(parts) == 0 {
 		return "None"
@@ -3508,7 +3508,7 @@ func selectAndRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, suite *J
 
 			continue
 		}
-		if test.SkipFlags.NoPrometheus && skipFlags.NoPrometheus {
+		if test.SkipFlags.NoProm && skipFlags.NoProm {
 			suite.TestCases[i].Skipped = &Skipped{
 				Message: "Prometheus is not configured or available",
 			}
@@ -3691,7 +3691,7 @@ func makeNoVpcsSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 			Name: "Prometheus Observability",
 			F:    testCtx.prometheusObservabilityTest,
 			SkipFlags: SkipFlags{
-				NoPrometheus: true,
+				NoProm: true,
 			},
 		},
 	}
@@ -3995,10 +3995,10 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 	}
 
 	fabricator := &fabricatorapi.Fabricator{}
-	if err := kube.Get(ctx, kclient.ObjectKey{Namespace: "fab", Name: "default"}, fabricator); err != nil {
+	if err := kube.Get(ctx, kclient.ObjectKey{Namespace: comp.FabNamespace, Name: kmetav1.NamespaceDefault}, fabricator); err != nil {
 		slog.Warn("Unable to get Fabricator object, observability tests will be skipped", "error", err)
 		skipFlags.NoLoki = true
-		skipFlags.NoPrometheus = true
+		skipFlags.NoProm = true
 	} else {
 		// Check for any Loki targets with valid URLs
 		skipFlags.NoLoki = true
@@ -4013,11 +4013,11 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 		}
 
 		// Check for any Prometheus targets with valid URLs
-		skipFlags.NoPrometheus = true
+		skipFlags.NoProm = true
 		if fabricator.Spec.Config.Observability.Targets.Prometheus != nil {
 			for _, promTarget := range fabricator.Spec.Config.Observability.Targets.Prometheus {
 				if promTarget.URL != "" {
-					skipFlags.NoPrometheus = false
+					skipFlags.NoProm = false
 
 					break
 				}
@@ -4029,7 +4029,7 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 		slog.Info("No Loki target found, Loki test will be skipped")
 	}
 
-	if skipFlags.NoPrometheus {
+	if skipFlags.NoProm {
 		slog.Info("No Prometheus target found, Prometheus test will be skipped")
 	}
 
