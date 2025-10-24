@@ -2,12 +2,23 @@
 # Copyright 2025 Hedgehog
 # SPDX-License-Identifier: Apache-2.0
 
-# show-tech.sh: Collect diagnostics from a Gateway node (OS level only).
+# show-tech.sh: Collect diagnostics from a Gateway node (OS level + FRR/vtysh).
 set +e
 
 OUTPUT_FILE="/tmp/show-tech.log"
 
 : > "$OUTPUT_FILE"
+
+# Find the running FRR container ID
+FRR_CONTAINER_ID=$(sudo crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock ps \
+    | grep ' frr ' \
+    | awk '{print $1}')
+
+# Helper for running vtysh commands inside the FRR container
+run_vtysh_cmd() {
+    echo -e "\n=== Executing: vtysh -c '$1' ===" >> "$OUTPUT_FILE"
+    sudo crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock exec -it "$FRR_CONTAINER_ID" vtysh -c "$1" >> "$OUTPUT_FILE" 2>&1
+}
 
 # ---------------------------
 # Basic System Information
@@ -64,6 +75,32 @@ OUTPUT_FILE="/tmp/show-tech.log"
 
     echo -e "\n=== All Running Processes ==="
     ps aux
+} >> "$OUTPUT_FILE" 2>&1
+
+# ---------------------------
+# FRR / vtysh Diagnostics
+# ---------------------------
+{
+    echo -e "\n=== FRR (vtysh) Diagnostics ==="
+
+    run_vtysh_cmd "show version"
+    run_vtysh_cmd "show running-config"
+    run_vtysh_cmd "show bgp summary"
+    run_vtysh_cmd "show bgp ipv4 unicast summary"
+    run_vtysh_cmd "show bgp l2vpn evpn summary"
+    run_vtysh_cmd "show bgp l2vpn evpn route"
+    run_vtysh_cmd "show bgp neighbor"
+    run_vtysh_cmd "show bgp vrf all summary"
+    run_vtysh_cmd "show bgp vrf all neighbor"
+    run_vtysh_cmd "show ip route"
+    run_vtysh_cmd "show ip route vrf all"
+    run_vtysh_cmd "show interface"
+    run_vtysh_cmd "show logging"
+    run_vtysh_cmd "show protocols"
+    run_vtysh_cmd "show zebra status"
+    run_vtysh_cmd "show memory"
+    run_vtysh_cmd "show thread cpu"
+    run_vtysh_cmd "show ip bgp"
 } >> "$OUTPUT_FILE" 2>&1
 
 # ---------------------------
