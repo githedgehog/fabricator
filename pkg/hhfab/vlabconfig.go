@@ -113,11 +113,12 @@ type VLABConfig struct {
 }
 
 type VMSizes struct {
-	Control  VMSize `json:"control"`
-	Switch   VMSize `json:"switch"`
-	Server   VMSize `json:"server"`
-	Gateway  VMSize `json:"gateway"`
-	External VMSize `json:"external"`
+	Control       VMSize `json:"control"`
+	Switch        VMSize `json:"switch"`
+	Server        VMSize `json:"server"`
+	Gateway       VMSize `json:"gateway"`
+	External      VMSize `json:"external"`
+	Observability VMSize `json:"observability"`
 }
 
 type VMConfig struct {
@@ -128,11 +129,12 @@ type VMConfig struct {
 type VMType string
 
 const (
-	VMTypeControl  VMType = "control"
-	VMTypeSwitch   VMType = "switch"
-	VMTypeServer   VMType = "server"
-	VMTypeGateway  VMType = "gateway"
-	VMTypeExternal VMType = "external"
+	VMTypeControl       VMType = "control"
+	VMTypeSwitch        VMType = "switch"
+	VMTypeServer        VMType = "server"
+	VMTypeGateway       VMType = "gateway"
+	VMTypeExternal      VMType = "external"
+	VMTypeObservability VMType = "observability"
 )
 
 var VMTypes = []VMType{
@@ -141,6 +143,7 @@ var VMTypes = []VMType{
 	VMTypeServer,
 	VMTypeGateway,
 	VMTypeExternal,
+	VMTypeObservability,
 }
 
 const (
@@ -167,11 +170,12 @@ type VMSize struct {
 }
 
 var DefaultSizes = VMSizes{
-	Control:  VMSize{CPU: 6, RAM: 6144, Disk: 100}, // TODO 8GB RAM?
-	Switch:   VMSize{CPU: 4, RAM: 5120, Disk: 50},  // TODO 6GB RAM?
-	Server:   VMSize{CPU: 2, RAM: 768, Disk: 10},   // TODO 1GB RAM?
-	Gateway:  VMSize{CPU: 8, RAM: 6144, Disk: 50},  // TODO proper min size
-	External: VMSize{CPU: 4, RAM: 5120, Disk: 50},  // TODO 6GB RAM?
+	Control:       VMSize{CPU: 6, RAM: 6144, Disk: 100},  // TODO 8GB RAM?
+	Switch:        VMSize{CPU: 4, RAM: 5120, Disk: 50},   // TODO 6GB RAM?
+	Server:        VMSize{CPU: 2, RAM: 768, Disk: 10},    // TODO 1GB RAM?
+	Gateway:       VMSize{CPU: 8, RAM: 6144, Disk: 50},   // TODO proper min size
+	External:      VMSize{CPU: 4, RAM: 5120, Disk: 50},   // TODO 6GB RAM?
+	Observability: VMSize{CPU: 8, RAM: 16384, Disk: 100}, // More RAM for LGTM stack
 }
 
 func (c *Config) PrepareVLAB(ctx context.Context, opts VLABUpOpts) (*VLAB, error) {
@@ -384,8 +388,13 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 
 	// TODO deduplicate
 	for _, node := range nodes {
-		if len(node.Spec.Roles) != 1 || node.Spec.Roles[0] != fabapi.NodeRoleGateway {
-			return nil, fmt.Errorf("node %q isn't a gateway role", node.Name) //nolint:goerr113
+		if len(node.Spec.Roles) != 1 {
+			return nil, fmt.Errorf("node %q must have exactly one role", node.Name) //nolint:goerr113
+		}
+
+		role := node.Spec.Roles[0]
+		if role != fabapi.NodeRoleGateway && role != fabapi.NodeRoleObservability {
+			return nil, fmt.Errorf("node %q has unsupported role %q", node.Name, role) //nolint:goerr113
 		}
 
 		if _, exists := cfg.VMs[node.Name]; exists {
@@ -417,11 +426,30 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 			return nil, fmt.Errorf("node VM %q can't be hardware", node.Name) //nolint:goerr113
 		}
 
+		// Determine VM type based on role
+		vmType := VMTypeGateway
+		if role == fabapi.NodeRoleObservability {
+			vmType = VMTypeObservability
+		}
+
+		// Gateway nodes only have management interface
+		// Observability nodes need external (usernet) for internet access
+		nics := map[string]string{
+			mgmtIface: mgmt,
+		}
+
+		// For observability nodes, add external interface with usernet (no restrict flag for internet access)
+		if role == fabapi.NodeRoleObservability {
+			extIface := node.Spec.External.Interface
+			if extIface == "" {
+				return nil, fmt.Errorf("observability node %q has no external interface", node.Name) //nolint:goerr113
+			}
+			nics[extIface] = NICTypeUsernet
+		}
+
 		cfg.VMs[node.Name] = VMConfig{
-			Type: VMTypeGateway,
-			NICs: map[string]string{
-				mgmtIface: mgmt,
-			},
+			Type: vmType,
+			NICs: nics,
 		}
 	}
 
@@ -917,6 +945,12 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 					// TODO use consts and enable for other control VMs
 					netdev += ",hostfwd=tcp:0.0.0.0:6443-:6443,hostfwd=tcp:0.0.0.0:31000-:31000"
 				}
+				if vm.Type == VMTypeObservability {
+					// Expose LGTM services on standard ports by forwarding to NodePorts
+					netdev += ",hostfwd=tcp:0.0.0.0:3000-:30300" // Grafana
+					netdev += ",hostfwd=tcp:0.0.0.0:3100-:30310" // Loki Gateway
+					netdev += ",hostfwd=tcp:0.0.0.0:9090-:30900" // Prometheus
+				}
 				if vm.Type == VMTypeControl && opts.ControlsRestricted || vm.Type == VMTypeServer && opts.ServersRestricted {
 					netdev += ",restrict=yes"
 				}
@@ -971,6 +1005,8 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 			size = cfg.Sizes.Server
 		case VMTypeExternal:
 			size = cfg.Sizes.External
+		case VMTypeObservability:
+			size = cfg.Sizes.Observability
 		}
 
 		vms = append(vms, VM{

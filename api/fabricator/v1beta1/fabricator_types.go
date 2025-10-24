@@ -141,6 +141,7 @@ type FabConfig struct {
 	Fabric        FabricConfig        `json:"fabric,omitempty"`
 	Gateway       GatewayConfig       `json:"gateway,omitempty"`
 	Observability ObservabilityConfig `json:"observability,omitempty"`
+	LGTM          LGTMConfig          `json:"lgtm,omitempty"`
 }
 
 type ControlConfig struct {
@@ -276,12 +277,46 @@ type ObservabilityConfig struct {
 	Targets alloy.Targets `json:"targets,omitempty"`
 }
 
+type LGTMConfig struct {
+	Enable     bool             `json:"enable,omitempty"`
+	Grafana    GrafanaConfig    `json:"grafana,omitempty"`
+	Loki       LokiConfig       `json:"loki,omitempty"`
+	Tempo      TempoConfig      `json:"tempo,omitempty"`
+	Prometheus PrometheusConfig `json:"prometheus,omitempty"`
+}
+
+type GrafanaConfig struct {
+	Enabled       bool   `json:"enabled,omitempty"`
+	AdminUser     string `json:"adminUser,omitempty"`
+	AdminPassword string `json:"adminPassword,omitempty"`
+}
+
+type LokiConfig struct {
+	Enabled bool `json:"enabled,omitempty"`
+}
+
+type TempoConfig struct {
+	Enabled bool `json:"enabled,omitempty"`
+}
+
+type PrometheusConfig struct {
+	Enabled bool `json:"enabled,omitempty"`
+}
+
+type LGTMVersions struct {
+	Grafana    meta.Version `json:"grafana,omitempty"`
+	Loki       meta.Version `json:"loki,omitempty"`
+	Tempo      meta.Version `json:"tempo,omitempty"`
+	Prometheus meta.Version `json:"prometheus,omitempty"`
+}
+
 type Versions struct {
 	Platform   PlatformVersions   `json:"platform,omitempty"`
 	Fabricator FabricatorVersions `json:"fabricator,omitempty"`
 	Fabric     FabricVersions     `json:"fabric,omitempty"`
 	Gateway    GatewayVersions    `json:"gateway,omitempty"`
 	VLAB       VLABVersions       `json:"vlab,omitempty"`
+	LGTM       LGTMVersions       `json:"lgtm,omitempty"`
 }
 
 type PlatformVersions struct {
@@ -466,6 +501,14 @@ func (f *Fabricator) Default() {
 				MetricsCollectors: []string{"cpu", "loadavg", "meminfo", "filesystem"},
 			},
 		}
+	}
+
+	// Enable all LGTM subcomponents by default when LGTM is enabled
+	if f.Spec.Config.LGTM.Enable {
+		f.Spec.Config.LGTM.Grafana.Enabled = true
+		f.Spec.Config.LGTM.Loki.Enabled = true
+		f.Spec.Config.LGTM.Tempo.Enabled = true
+		f.Spec.Config.LGTM.Prometheus.Enabled = true
 	}
 
 	if f.Spec.Config.Observability.Targets.Prometheus == nil {

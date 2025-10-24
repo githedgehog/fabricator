@@ -153,7 +153,7 @@ func redactAlloyTargets(targets *alloy.Targets) {
 }
 
 func redactAlloyTarget(target *alloy.Target) {
-	if target.BasicAuth.Password != "" {
+	if target.BasicAuth != nil && target.BasicAuth.Password != "" {
 		target.BasicAuth.Password = RedactedValue
 	}
 	if target.BearerToken != "" {

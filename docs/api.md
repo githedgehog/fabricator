@@ -176,6 +176,7 @@ _Appears in:_
 
 _Appears in:_
 - [ControlNodeSpec](#controlnodespec)
+- [FabNodeSpec](#fabnodespec)
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
@@ -287,6 +288,7 @@ _Appears in:_
 | `fabric` _[FabricConfig](#fabricconfig)_ |  |  |  |
 | `gateway` _[GatewayConfig](#gatewayconfig)_ |  |  |  |
 | `observability` _[ObservabilityConfig](#observabilityconfig)_ |  |  |  |
+| `lgtm` _[LGTMConfig](#lgtmconfig)_ |  |  |  |
 
 
 #### FabNode
@@ -322,6 +324,7 @@ _Appears in:_
 | Field | Description |
 | --- | --- |
 | `gateway` |  |
+| `observability` |  |
 
 
 #### FabNodeSpec
@@ -340,6 +343,7 @@ _Appears in:_
 | `roles` _[FabNodeRole](#fabnoderole) array_ |  |  |  |
 | `bootstrap` _[ControlNodeBootstrap](#controlnodebootstrap)_ |  |  |  |
 | `management` _[ControlNodeManagement](#controlnodemanagement)_ |  |  |  |
+| `external` _[ControlNodeExternal](#controlnodeexternal)_ |  |  |  |
 | `dummy` _[ControlNodeDummy](#controlnodedummy)_ |  |  |  |
 
 
@@ -629,6 +633,79 @@ _Appears in:_
 | `frr` _[Version](#version)_ |  |  |  |
 
 
+#### GrafanaConfig
+
+
+
+
+
+
+
+_Appears in:_
+- [LGTMConfig](#lgtmconfig)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `enabled` _boolean_ |  |  |  |
+| `adminUser` _string_ |  |  |  |
+| `adminPassword` _string_ |  |  |  |
+
+
+#### LGTMConfig
+
+
+
+
+
+
+
+_Appears in:_
+- [FabConfig](#fabconfig)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `enable` _boolean_ |  |  |  |
+| `grafana` _[GrafanaConfig](#grafanaconfig)_ |  |  |  |
+| `loki` _[LokiConfig](#lokiconfig)_ |  |  |  |
+| `tempo` _[TempoConfig](#tempoconfig)_ |  |  |  |
+| `prometheus` _[PrometheusConfig](#prometheusconfig)_ |  |  |  |
+
+
+#### LGTMVersions
+
+
+
+
+
+
+
+_Appears in:_
+- [Versions](#versions)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `grafana` _[Version](#version)_ |  |  |  |
+| `loki` _[Version](#version)_ |  |  |  |
+| `tempo` _[Version](#version)_ |  |  |  |
+| `prometheus` _[Version](#version)_ |  |  |  |
+
+
+#### LokiConfig
+
+
+
+
+
+
+
+_Appears in:_
+- [LGTMConfig](#lgtmconfig)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `enabled` _boolean_ |  |  |  |
+
+
 #### ObservabilityConfig
 
 
@@ -671,6 +748,22 @@ _Appears in:_
 | `controlProxy` _[Version](#version)_ |  |  |  |
 | `controlProxyChart` _[Version](#version)_ |  |  |  |
 | `bashCompletion` _[Version](#version)_ |  |  |  |
+
+
+#### PrometheusConfig
+
+
+
+
+
+
+
+_Appears in:_
+- [LGTMConfig](#lgtmconfig)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `enabled` _boolean_ |  |  |  |
 
 
 #### RegistryConfig
@@ -725,6 +818,22 @@ _Appears in:_
 | `authorizedKeys` _string array_ |  |  |  |
 
 
+#### TempoConfig
+
+
+
+
+
+
+
+_Appears in:_
+- [LGTMConfig](#lgtmconfig)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `enabled` _boolean_ |  |  |  |
+
+
 #### VLABVersions
 
 
@@ -761,5 +870,6 @@ _Appears in:_
 | `fabric` _[FabricVersions](#fabricversions)_ |  |  |  |
 | `gateway` _[GatewayVersions](#gatewayversions)_ |  |  |  |
 | `vlab` _[VLABVersions](#vlabversions)_ |  |  |  |
+| `lgtm` _[LGTMVersions](#lgtmversions)_ |  |  |  |
 
 
