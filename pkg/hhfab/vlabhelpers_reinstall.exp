@@ -1,4 +1,4 @@
-#!/usr/bin/expect -f
+#!/usr/bin/env expect
 # Copyright 2024 Hedgehog
 # SPDX-License-Identifier: Apache-2.0
 
@@ -187,7 +187,7 @@ if { ! $POWER_RESET} {
 expect -timeout 300 -ex "GNU GRUB" {
 	log_message "EXP-DBG" "GRUB Menu detected"
 	# Select the ONIE option, and finally the Install OS option
-	
+
 	# Wait for menu to be fully rendered
 	expect -timeout 10 -ex "Press enter to boot the selected OS" {
 		log_message "EXP-DBG" "GRUB menu fully rendered"
