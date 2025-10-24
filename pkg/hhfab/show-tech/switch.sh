@@ -51,11 +51,16 @@ run_sonic_cmd() {
     echo -e "\n=== VLAN and VXLAN Information ==="
     run_sonic_cmd "show vlan config"
     run_sonic_cmd "show vlan brief"
+    run_sonic_cmd "show vlan"
     run_sonic_cmd "show vxlan interface"
     run_sonic_cmd "show vxlan vlan-vni"
     run_sonic_cmd "show vxlan vrf-vni"
     run_sonic_cmd "show vxlan tunnel"
     run_sonic_cmd "show vxlan remote-vtep"
+    run_sonic_cmd "show vxlan remote mac"
+    run_sonic_cmd "show vxlan remote vni"
+    run_sonic_cmd "show vxlan vlanvnimap"
+    run_sonic_cmd "show vxlan vrfvnimap"
 } >> "$OUTPUT_FILE" 2>&1
 
 # ---------------------------
@@ -77,11 +82,38 @@ run_sonic_cmd() {
     run_sonic_cmd "show ip bgp summary"
     run_sonic_cmd "show bgp l2vpn evpn summary"
     run_sonic_cmd "show bgp l2vpn evpn"
-    
+    run_sonic_cmd "show bgp l2vpn evpn route"
+
     echo -e "\n=== EVPN Information ==="
     run_sonic_cmd "show evpn vni"
     run_sonic_cmd "show evpn mac"
+    run_sonic_cmd "show evpn es"
+    run_sonic_cmd "show evpn mac vni all"
+    run_sonic_cmd "show evpn vni detail"
     run_sonic_cmd "show evpn arp-cache"
+} >> "$OUTPUT_FILE" 2>&1
+
+# ---------------------------
+# Route Tables
+# ---------------------------
+{
+    echo -e "\n=== Route Table (default VRF) ==="
+    run_sonic_cmd "show ip route"
+    echo -e "\n=== VRF List ==="
+    run_sonic_cmd "show ip vrf"
+    echo -e "\n=== Route Summary (all VRFs) ==="
+    run_sonic_cmd "show ip route vrf all"
+
+    # --- Per-VRF route and ARP tables ---
+    vrfs=$(sonic-cli -c "show ip vrf | no-more" | awk 'NR>2{print $1}')
+    for vrf in $vrfs; do
+        echo -e "\n=== Routes for VRF: $vrf ===" >> "$OUTPUT_FILE"
+        run_sonic_cmd "show ip route vrf $vrf"
+        echo -e "\n=== ARP for VRF: $vrf ===" >> "$OUTPUT_FILE"
+        run_sonic_cmd "show ip arp vrf $vrf"
+        echo -e "\n=== BGP IPv4 Unicast Summary for VRF: $vrf ===" >> "$OUTPUT_FILE"
+        run_sonic_cmd "show bgp ipv4 unicast vrf $vrf summary"
+    done
 } >> "$OUTPUT_FILE" 2>&1
 
 # ---------------------------
@@ -96,7 +128,7 @@ run_sonic_cmd() {
     run_sonic_cmd "show platform psusummary"
     run_sonic_cmd "show platform ssdhealth"
     run_sonic_cmd "show platform temperature"
-    
+
     echo -e "\n=== Transceiver Information ==="
     run_sonic_cmd "show interface transceiver summary"
     run_sonic_cmd "show interface transceiver laser status"
@@ -113,6 +145,29 @@ run_sonic_cmd() {
     echo -e "\n=== Broadcom PHY Information ==="
     bcmcmd "phy info"
 
+    echo -e "\n=== Broadcom L2 Table ==="
+    bcmcmd "l2 show"
+
+    echo -e "\n=== Broadcom L3 Interfaces ==="
+    bcmcmd "l3 intf show"
+
+    echo -e "\n=== Broadcom L3 ACLs ==="
+    bcmcmd "l3 aacl show"
+
+    echo -e "\n=== Broadcom L3 Route Table ==="
+    bcmcmd "l3 route show"
+
+    echo -e "\n=== Broadcom L3 ECMP Table ==="
+    bcmcmd "l3 ecmp show"
+
+    echo -e "\n=== Broadcom L3 Host Table ==="
+    bcmcmd "l3 host show"
+
+    echo -e "\n=== Broadcom VLAN Table ==="
+    bcmcmd "vlan show"
+
+    echo -e "\n=== Broadcom Trunk Table ==="
+    bcmcmd "trunk show"
 } >> "$OUTPUT_FILE" 2>&1
 
 # ---------------------------
@@ -124,16 +179,16 @@ run_sonic_cmd() {
 
     echo -e "\n=== System Logs ==="
     run_sonic_cmd "show logging"
-    
+
     echo -e "\n=== Hedgehog Agent Status ==="
     systemctl status hedgehog-agent
-    
+
     echo -e "\n=== Hedgehog Agent Logs ==="
     cat /var/log/agent.log
-    
+
     echo -e "\n=== Docker Status ==="
     docker ps
-    
+
     echo -e "\n=== Docker Container Logs ==="
     CONTAINERS=$(docker ps --format "{{.Names}}")
     for CONTAINER in $CONTAINERS; do
