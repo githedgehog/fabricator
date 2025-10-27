@@ -111,7 +111,7 @@ jobs:
           just run hhfab diagram -f dot -o test-diagrams/default-vlab-diagram.dot -v
 
       - name: Upload diagram artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: test-build--diagrams
           path: test-diagrams
