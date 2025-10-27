@@ -253,7 +253,7 @@ jobs:
             ${{ inputs.upgradefrom != '' && '--upgrade' || '' }}
 
       - name: Upload Release Test Results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         if: ${{ inputs.releasetest && !cancelled()}}
         with:
           name: ${{ env.slug }}--test-results
@@ -299,7 +299,7 @@ jobs:
           mv _debug fab-${{ github.run_id }}-${{ env.slug }}
 
       - name: Upload debug artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         if: ${{ always() }}
         with:
           name: fab-${{ github.run_id }}-${{ env.slug }}
