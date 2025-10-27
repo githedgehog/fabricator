@@ -29,7 +29,7 @@ require (
 	github.com/manifoldco/promptui v0.9.0
 	github.com/mattn/go-isatty v0.0.20
 	github.com/mholt/archives v0.1.5
-	github.com/onsi/ginkgo/v2 v2.26.0
+	github.com/onsi/ginkgo/v2 v2.27.1
 	github.com/onsi/gomega v1.38.2
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/pkg/sftp v1.13.8
