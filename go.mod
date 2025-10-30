@@ -29,7 +29,7 @@ require (
 	github.com/manifoldco/promptui v0.9.0
 	github.com/mattn/go-isatty v0.0.20
 	github.com/mholt/archives v0.1.5
-	github.com/onsi/ginkgo/v2 v2.27.1
+	github.com/onsi/ginkgo/v2 v2.27.2
 	github.com/onsi/gomega v1.38.2
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/pkg/sftp v1.13.8
@@ -41,8 +41,8 @@ require (
 	github.com/urfave/cli/v2 v2.27.7
 	github.com/vbauerster/mpb/v8 v8.10.2
 	github.com/vishvananda/netlink v1.3.1
-	go.githedgehog.com/fabric v0.93.0
-	go.githedgehog.com/gateway v0.21.0
+	go.githedgehog.com/fabric v0.93.1
+	go.githedgehog.com/gateway v0.22.0
 	go.githedgehog.com/libmeta v0.2.4
 	golang.org/x/crypto v0.43.0
 	golang.org/x/mod v0.29.0
@@ -330,7 +330,6 @@ require (
 	go.opentelemetry.io/otel/sdk v1.37.0 // indirect
 	go.opentelemetry.io/otel/sdk/metric v1.37.0 // indirect
 	go.opentelemetry.io/otel/trace v1.37.0 // indirect
-	go.uber.org/automaxprocs v1.6.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
