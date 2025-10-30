@@ -1374,12 +1374,13 @@ github.com/olekukonko/tablewriter/pkg/twwarp
 github.com/olekukonko/tablewriter/pkg/twwidth
 github.com/olekukonko/tablewriter/renderer
 github.com/olekukonko/tablewriter/tw
-# github.com/onsi/ginkgo/v2 v2.27.1
+# github.com/onsi/ginkgo/v2 v2.27.2
 ## explicit; go 1.23.0
 github.com/onsi/ginkgo/v2
 github.com/onsi/ginkgo/v2/config
 github.com/onsi/ginkgo/v2/formatter
 github.com/onsi/ginkgo/v2/ginkgo
+github.com/onsi/ginkgo/v2/ginkgo/automaxprocs
 github.com/onsi/ginkgo/v2/ginkgo/build
 github.com/onsi/ginkgo/v2/ginkgo/command
 github.com/onsi/ginkgo/v2/ginkgo/generators
@@ -1694,7 +1695,7 @@ go.etcd.io/bbolt
 go.etcd.io/bbolt/errors
 go.etcd.io/bbolt/internal/common
 go.etcd.io/bbolt/internal/freelist
-# go.githedgehog.com/fabric v0.93.0
+# go.githedgehog.com/fabric v0.93.1
 ## explicit; go 1.25
 go.githedgehog.com/fabric/api/agent/v1beta1
 go.githedgehog.com/fabric/api/dhcp/v1beta1
@@ -1719,7 +1720,7 @@ go.githedgehog.com/fabric/pkg/util/uefiutil
 # go.githedgehog.com/fabric-bcm-ygot v0.5.2-4.5.0
 ## explicit; go 1.24.0
 go.githedgehog.com/fabric-bcm-ygot/pkg/oc
-# go.githedgehog.com/gateway v0.21.0
+# go.githedgehog.com/gateway v0.22.0
 ## explicit; go 1.25
 go.githedgehog.com/gateway/api/gateway/v1alpha1
 go.githedgehog.com/gateway/api/gwint/v1alpha1
@@ -1802,12 +1803,6 @@ go.opentelemetry.io/otel/trace
 go.opentelemetry.io/otel/trace/embedded
 go.opentelemetry.io/otel/trace/internal/telemetry
 go.opentelemetry.io/otel/trace/noop
-# go.uber.org/automaxprocs v1.6.0
-## explicit; go 1.20
-go.uber.org/automaxprocs
-go.uber.org/automaxprocs/internal/cgroups
-go.uber.org/automaxprocs/internal/runtime
-go.uber.org/automaxprocs/maxprocs
 # go.uber.org/multierr v1.11.0
 ## explicit; go 1.19
 go.uber.org/multierr
