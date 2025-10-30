@@ -33,7 +33,7 @@ var Versions = fabapi.Versions{
 		K3s:               "v1.34.1-k3s1",
 		Zot:               "v2.1.9",
 		ZotChart:          "v0.1.67-hh1",
-		CertManager:       "v1.18.2",
+		CertManager:       "v1.19.1",
 		K9s:               "v0.50.15",
 		Toolbox:           "v0.7.2",
 		Reloader:          "v1.0.40", // TODO upgrade or get rid of?
