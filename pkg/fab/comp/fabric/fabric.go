@@ -243,6 +243,12 @@ func GetFabricConfig(f fabapi.Fabricator) (*fmeta.FabricConfig, error) {
 		FabricSubnet:             string(f.Spec.Config.Fabric.FabricSubnet),
 		DisableBFD:               f.Spec.Config.Fabric.DisableBFD,
 		IncludeSONiCCLSPlus:      f.Spec.Config.Fabric.IncludeCLS,
+		SpineASN:                 f.Spec.Config.Fabric.SpineASN,
+		LeafASNStart:             f.Spec.Config.Fabric.LeafASNStart,
+		LeafASNEnd:               f.Spec.Config.Fabric.LeafASNEnd,
+		ManagementSubnet:         string(f.Spec.Config.Control.ManagementSubnet),
+		ManagementDHCPStart:      string(f.Spec.Config.Fabric.ManagementDHCPStart),
+		ManagementDHCPEnd:        string(f.Spec.Config.Fabric.ManagementDHCPEnd),
 	}, nil
 }
 
