@@ -64,6 +64,19 @@ spec:
                   ip:
                     type: string
                 type: object
+              external:
+                properties:
+                  dns:
+                    items:
+                      type: string
+                    type: array
+                  gateway:
+                    type: string
+                  interface:
+                    type: string
+                  ip:
+                    type: string
+                type: object
               management:
                 properties:
                   interface:

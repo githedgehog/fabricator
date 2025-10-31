@@ -1,0 +1,54 @@
+# Properly structured image reference
+image:
+  registry: {{ .Registry }}
+  repository: {{ .Repository }}
+  tag: {{ .Tag }}
+
+nodeSelector:
+{{ .NodeSelector }}
+tolerations:
+{{ .Tolerations }}
+persistence:
+  enabled: true
+  size: 10Gi
+adminUser: {{ .AdminUser }}
+adminPassword: {{ .AdminPassword }}
+dashboardProviders:
+  dashboardproviders.yaml:
+    apiVersion: 1
+    providers:
+    - name: 'default'
+      orgId: 1
+      folder: ''
+      type: file
+      disableDeletion: false
+      editable: true
+      options:
+        path: /var/lib/grafana/dashboards/default
+dashboards:
+  default:
+{{- range $name, $json := .Dashboards }}
+    {{ $name }}:
+      json: |
+{{ $json | indent 8 }}
+{{- end }}
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+      - name: Loki
+        type: loki
+        uid: loki
+        url: http://loki-gateway.{{ .Namespace }}.svc.cluster.local
+        isDefault: true
+      - name: Tempo
+        type: tempo
+        uid: tempo
+        url: http://tempo.{{ .Namespace }}.svc.cluster.local:3100
+      - name: Prometheus
+        type: prometheus
+        uid: prom
+        url: http://prometheus-server.{{ .Namespace }}.svc.cluster.local
+service:
+  type: NodePort
+  nodePort: 30300

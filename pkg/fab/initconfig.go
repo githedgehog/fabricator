@@ -23,8 +23,10 @@ import (
 var initConfigTmpl string
 
 const (
-	DevAdminPasswordHash = "$5$8nAYPGcl4l6G7Av1$Qi4/gnM0yPtGv9kjpMh78NuNSfQWy7vR1rulHpurL36" //nolint:gosec
-	DevSSHKey            = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGpF2+9I1Nj4BcN7y6DjzTbq1VcUYIRGyfzId5ZoBEFj"
+	DevAdminPasswordHash  = "$5$8nAYPGcl4l6G7Av1$Qi4/gnM0yPtGv9kjpMh78NuNSfQWy7vR1rulHpurL36" //nolint:gosec
+	DevSSHKey             = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGpF2+9I1Nj4BcN7y6DjzTbq1VcUYIRGyfzId5ZoBEFj"
+	DevGrafanaAdminUser   = "admin"
+	DevGrafanaAdminPasswd = "HH.Obs!"
 )
 
 type InitConfigInput struct {
@@ -38,6 +40,9 @@ type InitConfigInput struct {
 	RegUpstream               *fabapi.ControlConfigRegistryUpstream
 	ControlNodeManagementLink string
 	Gateway                   bool
+	LGTM                      bool
+	GrafanaAdminUser          string
+	GrafanaAdminPassword      string
 	Preview                   bool
 	JoinToken                 string
 	SaveJoinToken             bool
@@ -52,9 +57,15 @@ func InitConfig(ctx context.Context, in InitConfigInput) ([]byte, error) {
 		in.DefaultPasswordHash = DevAdminPasswordHash
 		in.DefaultAuthorizedKeys = append(in.DefaultAuthorizedKeys, DevSSHKey)
 
-		if in.Gateway && in.JoinToken == "" {
+		if (in.Gateway || in.LGTM) && in.JoinToken == "" {
 			in.JoinToken = rand.Text()
 			in.SaveJoinToken = true
+		}
+
+		// Set Grafana credentials when LGTM is enabled
+		if in.LGTM {
+			in.GrafanaAdminUser = DevGrafanaAdminUser
+			in.GrafanaAdminPassword = DevGrafanaAdminPasswd
 		}
 	}
 

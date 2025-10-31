@@ -143,7 +143,7 @@ func (c *Config) VLABAccess(ctx context.Context, vlab *VLAB, t VLABAccessType, n
 				"admin@"+swIP,
 			)
 		} else if entry.IsNode {
-			slog.Info("SSH through control node", "name", name, "type", "gateway")
+			slog.Info("SSH through control node", "name", name, "type", "node")
 
 			nodeIP, err := c.getNodeIP(ctx, name)
 			if err != nil {
@@ -490,7 +490,7 @@ func (c *Config) getVLABEntries(ctx context.Context, vlab *VLAB) (map[string]VLA
 			IsSwitch:   vm.Type == VMTypeSwitch,
 			IsServer:   vm.Type == VMTypeServer,
 			IsControl:  vm.Type == VMTypeControl,
-			IsNode:     vm.Type == VMTypeGateway,
+			IsNode:     vm.Type == VMTypeGateway || vm.Type == VMTypeObservability,
 			IsExternal: vm.Type == VMTypeExternal,
 		}
 	}
@@ -530,11 +530,12 @@ type ShowTechScript struct {
 func DefaultShowTechScript() ShowTechScript {
 	return ShowTechScript{
 		Scripts: map[VMType][]byte{
-			VMTypeServer:   serverScript,
-			VMTypeControl:  controlScript,
-			VMTypeSwitch:   switchScript,
-			VMTypeGateway:  gatewayScript,
-			VMTypeExternal: serverScript,
+			VMTypeServer:        serverScript,
+			VMTypeControl:       controlScript,
+			VMTypeSwitch:        switchScript,
+			VMTypeGateway:       gatewayScript,
+			VMTypeExternal:      serverScript,
+			VMTypeObservability: gatewayScript, // Observability nodes use same script as gateway
 		},
 	}
 }

@@ -125,15 +125,21 @@ func (b *NodeInstallBuilder) buildIgnition() ([]byte, error) {
 		return nil, fmt.Errorf("dummy IP must be a /31") //nolint:goerr113
 	}
 
+	externalInterface := ""
+	if b.Node.Spec.External.Interface != "" {
+		externalInterface = b.Node.Spec.External.Interface
+	}
+
 	but, err := tmplutil.FromTemplate("node-butane", nodeButaneTmpl, map[string]any{
-		"Hostname":       b.Node.Name,
-		"PasswordHash":   b.Fab.Spec.Config.Control.DefaultUser.PasswordHash,
-		"AuthorizedKeys": b.Fab.Spec.Config.Control.DefaultUser.AuthorizedKeys,
-		"MgmtInterface":  b.Node.Spec.Management.Interface,
-		"MgmtAddress":    b.Node.Spec.Management.IP,
-		"DummyAddress":   dummyIP.Masked().String(),
-		"DummyGateway":   dummyIP.Masked().Addr().Next().String(),
-		"AutoInstall":    autoInstallPath,
+		"Hostname":          b.Node.Name,
+		"PasswordHash":      b.Fab.Spec.Config.Control.DefaultUser.PasswordHash,
+		"AuthorizedKeys":    b.Fab.Spec.Config.Control.DefaultUser.AuthorizedKeys,
+		"MgmtInterface":     b.Node.Spec.Management.Interface,
+		"MgmtAddress":       b.Node.Spec.Management.IP,
+		"ExternalInterface": externalInterface,
+		"DummyAddress":      dummyIP.Masked().String(),
+		"DummyGateway":      dummyIP.Masked().Addr().Next().String(),
+		"AutoInstall":       autoInstallPath,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("butane: %w", err)

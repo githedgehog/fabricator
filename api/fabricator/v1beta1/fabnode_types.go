@@ -21,17 +21,20 @@ type FabNodeSpec struct {
 	Roles      []FabNodeRole         `json:"roles"`
 	Bootstrap  ControlNodeBootstrap  `json:"bootstrap,omitempty"`
 	Management ControlNodeManagement `json:"management,omitempty"`
+	External   ControlNodeExternal   `json:"external,omitempty"`
 	Dummy      ControlNodeDummy      `json:"dummy,omitempty"`
 }
 
 type FabNodeRole string
 
 const (
-	NodeRoleGateway FabNodeRole = "gateway"
+	NodeRoleGateway       FabNodeRole = "gateway"
+	NodeRoleObservability FabNodeRole = "observability"
 )
 
 var NodeRoles = []FabNodeRole{
 	NodeRoleGateway,
+	NodeRoleObservability,
 }
 
 // FabNodeStatus defines the observed state of Node.
@@ -84,6 +87,9 @@ func (n *FabNode) Validate(ctx context.Context, fabCfg *FabConfig, allowNotHydra
 	if !lo.Every(NodeRoles, n.Spec.Roles) {
 		return fmt.Errorf("unexpected node roles %q", n.Spec.Roles) //nolint:goerr113
 	}
+
+	// Check if this is an observability node
+	isObservability := len(n.Spec.Roles) > 0 && n.Spec.Roles[0] == NodeRoleObservability
 
 	if !allowNotHydrated {
 		dummyAddr, err := n.Spec.Dummy.IP.Parse()
@@ -165,6 +171,17 @@ func (n *FabNode) Validate(ctx context.Context, fabCfg *FabConfig, allowNotHydra
 			if _, exists := mgmtIPs[managementAddr.Addr()]; exists {
 				return fmt.Errorf("management IP %s already in use", managementAddr.String()) //nolint:goerr113
 			}
+		}
+	}
+
+	// Observability nodes need external interface validation
+	if isObservability {
+		if _, _, err := n.Spec.External.IP.Parse(); err != nil {
+			return fmt.Errorf("parsing external IP: %w", err)
+		}
+
+		if n.Spec.External.Interface == "" {
+			return fmt.Errorf("external interface must be set for observability node") //nolint:goerr113
 		}
 	}
 

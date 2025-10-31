@@ -1,0 +1,123 @@
+# TEMPORARY WORKAROUND - Use Docker Hub while registry issues are resolved
+global:
+  image:
+    registry: docker.io
+
+# Main Loki image
+image:
+  registry: docker.io
+  repository: grafana/loki
+  tag: 3.5.5  # Use the exact app version rather than chart version
+
+# Sidecar configuration
+sidecar:
+  image:
+    registry: docker.io
+    repository: kiwigrid/k8s-sidecar
+    tag: 1.30.10
+
+# Gateway configuration
+gateway:
+  enabled: true
+  image:
+    registry: docker.io
+    repository: nginxinc/nginx-unprivileged
+    tag: 1.29-alpine
+  service:
+    type: NodePort
+    nodePort: 30310
+  nodeSelector:
+{{ .NodeSelector }}
+  tolerations:
+{{ .Tolerations }}
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: role.fabricator.githedgehog.com/observability
+            operator: In
+            values:
+            - "true"
+
+# Deployment configuration
+deploymentMode: SingleBinary
+loki:
+  auth_enabled: false
+  commonConfig:
+    replication_factor: 1
+  storage:
+    type: filesystem
+  schemaConfig:
+    configs:
+      - from: 2024-01-01
+        store: tsdb
+        object_store: filesystem
+        schema: v13
+        index:
+          prefix: loki_index_
+          period: 24h
+
+singleBinary:
+  replicas: 1
+  nodeSelector:
+{{ .NodeSelector }}
+  tolerations:
+{{ .Tolerations }}
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: role.fabricator.githedgehog.com/observability
+            operator: In
+            values:
+            - "true"
+  persistence:
+    enabled: true
+    size: 20Gi
+
+# Disable unused components
+lokiCanary:
+  enabled: false
+test:
+  enabled: false
+
+# Configure cache components
+chunksCache:
+  nodeSelector:
+{{ .NodeSelector }}
+  tolerations:
+{{ .Tolerations }}
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: role.fabricator.githedgehog.com/observability
+            operator: In
+            values:
+            - "true"
+
+resultsCache:
+  nodeSelector:
+{{ .NodeSelector }}
+  tolerations:
+{{ .Tolerations }}
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: role.fabricator.githedgehog.com/observability
+            operator: In
+            values:
+            - "true"
+
+# Disable distributed components
+read:
+  replicas: 0
+write:
+  replicas: 0
+backend:
+  replicas: 0
