@@ -2632,14 +2632,12 @@ func (testCtx *VPCPeeringTestCtx) lokiObservabilityTest(ctx context.Context) (bo
 		return true, nil, nil
 	}
 
-	// Get credentials from environment variables for querying
-	lokiUser := os.Getenv("LOKI_USER")
-	lokiPass := os.Getenv("LOKI_PASS")
-	hasAuth := lokiUser != "" && lokiPass != ""
+	// Get credentials from endpoint object
+	hasAuth := lokiEndpoint.Username != "" && lokiEndpoint.Password != ""
 
 	slog.Debug("Using Loki endpoint",
 		"url", lokiEndpoint.URL,
-		"auth_from_env", hasAuth,
+		"auth_from_endpoint", hasAuth,
 		"env", env)
 
 	// List switches to check for logs
@@ -2697,7 +2695,7 @@ func (testCtx *VPCPeeringTestCtx) lokiObservabilityTest(ctx context.Context) (bo
 
 	// Add auth if needed
 	if hasAuth {
-		req.SetBasicAuth(lokiUser, lokiPass)
+		req.SetBasicAuth(lokiEndpoint.Username, lokiEndpoint.Password)
 	}
 
 	resp, err := client.Do(req)
@@ -2734,13 +2732,13 @@ func (testCtx *VPCPeeringTestCtx) lokiObservabilityTest(ctx context.Context) (bo
 	var errorSample string
 
 	// Define maximum age for logs to be considered fresh
-	const maxLogAgeSecs = 900 // 15 minutes
+	const maxLogAgeSecs = 300 // 5 minutes
 
 	// Check each device for logs
 	for _, hostname := range expectedHostnames {
 		// Build time range for query
 		endTime := time.Now().UnixNano()
-		startTime := time.Now().Add(-24 * time.Hour).UnixNano()
+		startTime := time.Now().Add(-5 * time.Minute).UnixNano()
 
 		// Build query with environment label if available
 		var query string
@@ -2766,9 +2764,9 @@ func (testCtx *VPCPeeringTestCtx) lokiObservabilityTest(ctx context.Context) (bo
 			continue
 		}
 
-		// Use credentials from environment variables
+		// Use credentials from endpoint object
 		if hasAuth {
-			req.SetBasicAuth(lokiUser, lokiPass)
+			req.SetBasicAuth(lokiEndpoint.Username, lokiEndpoint.Password)
 		}
 
 		resp, err := client.Do(req)
@@ -2869,7 +2867,7 @@ func (testCtx *VPCPeeringTestCtx) lokiObservabilityTest(ctx context.Context) (bo
 		}
 
 		if !freshLogsFound {
-			slog.Debug("Only stale logs found for device (older than 15 minutes)", "hostname", hostname)
+			slog.Debug("Only stale logs found for device (older than 5 minutes)", "hostname", hostname)
 			missingLogs = append(missingLogs, hostname)
 
 			continue
@@ -2911,14 +2909,12 @@ func (testCtx *VPCPeeringTestCtx) prometheusObservabilityTest(ctx context.Contex
 		return true, nil, nil
 	}
 
-	// Get credentials from environment variables for querying
-	promUser := os.Getenv("PROM_USER")
-	promPass := os.Getenv("PROM_PASS")
-	hasAuth := promUser != "" && promPass != ""
+	// Get credentials from endpoint object
+	hasAuth := prometheusEndpoint.Username != "" && prometheusEndpoint.Password != ""
 
 	slog.Debug("Using Prometheus endpoint",
 		"url", prometheusEndpoint.URL,
-		"auth_from_env", hasAuth,
+		"auth_from_endpoint", hasAuth,
 		"env", env)
 
 	// List switches to check for metrics
@@ -2944,9 +2940,9 @@ func (testCtx *VPCPeeringTestCtx) prometheusObservabilityTest(ctx context.Contex
 		return false, nil, fmt.Errorf("failed to create prometheus API request: %w", err)
 	}
 
-	// Use credentials from environment variables
+	// Use credentials from endpoint object
 	if hasAuth {
-		req.SetBasicAuth(promUser, promPass)
+		req.SetBasicAuth(prometheusEndpoint.Username, prometheusEndpoint.Password)
 	}
 
 	resp, err := client.Do(req)
@@ -2978,7 +2974,7 @@ func (testCtx *VPCPeeringTestCtx) prometheusObservabilityTest(ctx context.Contex
 	}
 
 	// Define maximum age for metrics to be considered fresh
-	const maxMetricAgeSecs = 900 // 15 minutes
+	const maxMetricAgeSecs = 300 // 5 minutes
 
 	// Query for fabric_agent_agent_generation across all switches
 	metricName := "fabric_agent_agent_generation"
@@ -2998,7 +2994,7 @@ func (testCtx *VPCPeeringTestCtx) prometheusObservabilityTest(ctx context.Contex
 
 	// Add authentication
 	if hasAuth {
-		req.SetBasicAuth(promUser, promPass)
+		req.SetBasicAuth(prometheusEndpoint.Username, prometheusEndpoint.Password)
 	}
 
 	resp, err = client.Do(req)
@@ -3075,7 +3071,7 @@ func (testCtx *VPCPeeringTestCtx) prometheusObservabilityTest(ctx context.Contex
 		// Check metric freshness
 		isFresh := true
 		if timestamp.Unix() > 0 && time.Since(timestamp) > maxMetricAgeSecs*time.Second {
-			slog.Debug("Stale metric found for switch (older than 15 minutes)", "switch", hostname)
+			slog.Debug("Stale metric found for switch (older than 5 minutes)", "switch", hostname)
 			isFresh = false
 		}
 
