@@ -12,6 +12,7 @@ import (
 	"io"
 	"log/slog"
 	"math"
+	"net"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -2356,9 +2357,9 @@ func (testCtx *VPCPeeringTestCtx) breakoutTest(ctx context.Context) (bool, []Rev
 	return false, nil, nil
 }
 
+// Update existing gateway peering functions to use new signature with nil NAT parameters
+
 // Test basic gateway peering connectivity between two VPCs.
-// Creates a gateway peering between the first two VPCs found, exposing all subnets
-// from each VPC, then tests connectivity to ensure traffic flows through the gateway.
 func (testCtx *VPCPeeringTestCtx) gatewayPeeringTest(ctx context.Context) (bool, []RevertFunc, error) {
 	vpcs := &vpcapi.VPCList{}
 	if err := testCtx.kube.List(ctx, vpcs); err != nil {
@@ -2375,8 +2376,8 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringTest(ctx context.Context) (bool,
 	vpc1 := &vpcs.Items[0]
 	vpc2 := &vpcs.Items[1]
 
-	// Use all subnets from both VPCs by passing empty subnet lists
-	appendGwPeeringSpec(gwPeerings, vpc1, vpc2, nil, nil)
+	// Use all subnets from both VPCs, no NAT
+	appendGwPeeringSpec(gwPeerings, vpc1, vpc2, nil, nil, nil, nil)
 
 	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, gwPeerings, true); err != nil {
 		return false, nil, fmt.Errorf("setting up gateway peerings: %w", err)
@@ -2389,8 +2390,7 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringTest(ctx context.Context) (bool,
 	return false, nil, nil
 }
 
-// Test gateway peering in a loop configuration where each VPC peers with the next one.
-// VPC1↔VPC2↔VPC3↔...↔VPCn↔VPC1. Test connectivity in a complete loop.
+// Test gateway peering in a loop configuration.
 func (testCtx *VPCPeeringTestCtx) gatewayPeeringLoopTest(ctx context.Context) (bool, []RevertFunc, error) {
 	vpcs := &vpcapi.VPCList{}
 	if err := testCtx.kube.List(ctx, vpcs); err != nil {
@@ -2414,8 +2414,8 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringLoopTest(ctx context.Context) (b
 		vpc1 := &vpcs.Items[i]
 		vpc2 := &vpcs.Items[(i+1)%len(vpcs.Items)] // wrap around to create loop
 
-		// Use all subnets from both VPCs by passing empty subnet lists
-		appendGwPeeringSpec(gwPeerings, vpc1, vpc2, nil, nil)
+		// Use all subnets from both VPCs, no NAT
+		appendGwPeeringSpec(gwPeerings, vpc1, vpc2, nil, nil, nil, nil)
 	}
 
 	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, gwPeerings, true); err != nil {
@@ -2430,7 +2430,6 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringLoopTest(ctx context.Context) (b
 }
 
 // Test combining VPC peering and gateway peering in an alternating loop configuration.
-// Create alternating VPC and gateway peerings to form a complete loop through all VPCs.
 func (testCtx *VPCPeeringTestCtx) gatewayMixedPeeringLoopTest(ctx context.Context) (bool, []RevertFunc, error) {
 	vpcs := &vpcapi.VPCList{}
 	if err := testCtx.kube.List(ctx, vpcs); err != nil {
@@ -2458,9 +2457,8 @@ func (testCtx *VPCPeeringTestCtx) gatewayMixedPeeringLoopTest(ctx context.Contex
 			// Even-indexed connections use VPC peering
 			appendVpcPeeringSpecByName(vpcPeerings, vpc1.Name, vpc2.Name, "", []string{}, []string{})
 		} else {
-			// Odd-indexed connections use Gateway peering
-			// Use all subnets from both VPCs by passing empty subnet lists
-			appendGwPeeringSpec(gwPeerings, vpc1, vpc2, nil, nil)
+			// Odd-indexed connections use Gateway peering, no NAT
+			appendGwPeeringSpec(gwPeerings, vpc1, vpc2, nil, nil, nil, nil)
 		}
 	}
 
@@ -2475,9 +2473,298 @@ func (testCtx *VPCPeeringTestCtx) gatewayMixedPeeringLoopTest(ctx context.Contex
 	return false, nil, nil
 }
 
+// Test basic gateway peering with NAT
+func (testCtx *VPCPeeringTestCtx) gatewayPeeringNATTest(ctx context.Context) (bool, []RevertFunc, error) {
+	vpcs := &vpcapi.VPCList{}
+	if err := testCtx.kube.List(ctx, vpcs); err != nil {
+		return false, nil, fmt.Errorf("listing VPCs: %w", err)
+	}
+	if len(vpcs.Items) < 2 {
+		return true, nil, fmt.Errorf("not enough VPCs for NAT gateway peering test") //nolint:goerr113
+	}
+
+	// Sort VPCs to ensure consistent selection
+	sort.Slice(vpcs.Items, func(i, j int) bool {
+		return vpcs.Items[i].Name < vpcs.Items[j].Name
+	})
+
+	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec, 0)
+	externalPeerings := make(map[string]*vpcapi.ExternalPeeringSpec, 0)
+	gwPeerings := make(map[string]*gwapi.PeeringSpec, 1)
+
+	vpc1 := &vpcs.Items[0]
+	vpc2 := &vpcs.Items[1]
+
+	// Remove any existing VPC peering that might conflict
+	existingVPCPeering := &vpcapi.VPCPeering{}
+	vpcPeeringName := fmt.Sprintf("%s--%s", vpc1.Name, vpc2.Name)
+	if vpc1.Name > vpc2.Name {
+		vpcPeeringName = fmt.Sprintf("%s--%s", vpc2.Name, vpc1.Name)
+	}
+
+	removedVPCPeering := false
+	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: vpcPeeringName}, existingVPCPeering); err == nil {
+		if err := testCtx.kube.Delete(ctx, existingVPCPeering); err != nil {
+			return false, nil, fmt.Errorf("deleting conflicting VPC peering %s: %w", vpcPeeringName, err)
+		}
+		removedVPCPeering = true
+		slog.Info("Removed conflicting VPC peering", "peering", vpcPeeringName)
+		time.Sleep(5 * time.Second) // Wait for deletion to take effect
+	}
+
+	vpc1NATCIDR := []string{"192.168.11.0/24"}
+	vpc2NATCIDR := []string{"192.168.12.0/24"}
+
+	appendGwPeeringSpec(gwPeerings, vpc1, vpc2, nil, nil, vpc1NATCIDR, vpc2NATCIDR)
+
+	reverts := []RevertFunc{}
+	if removedVPCPeering {
+		reverts = append(reverts, func(ctx context.Context) error {
+			// Restore the VPC peering we removed
+			newVPCPeering := &vpcapi.VPCPeering{
+				ObjectMeta: kmetav1.ObjectMeta{
+					Name:      existingVPCPeering.Name,
+					Namespace: existingVPCPeering.Namespace,
+				},
+				Spec: existingVPCPeering.Spec,
+			}
+
+			return testCtx.kube.Create(ctx, newVPCPeering)
+		})
+	}
+
+	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, gwPeerings, true); err != nil {
+		return false, reverts, fmt.Errorf("setting up NAT gateway peerings: %w", err)
+	}
+
+	// Wait for NAT gateway peering to take effect
+	time.Sleep(15 * time.Second)
+
+	if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
+		return false, reverts, fmt.Errorf("testing NAT gateway peering connectivity: %w", err)
+	}
+
+	return false, reverts, nil
+}
+
+// Test overlapping subnets with NAT - creates separate IPv4 namespace for true overlap
+func (testCtx *VPCPeeringTestCtx) gatewayPeeringOverlapNATTest(ctx context.Context) (bool, []RevertFunc, error) {
+	// Initialize reverts slice early
+	reverts := []RevertFunc{}
+
+	// Use server-02 and detach it from vpc-02
+	serverToDetach := "server-02"
+	attachmentToRemove := "server-02--mclag--leaf-01--leaf-02--vpc-02--subnet-01"
+
+	// Get vpc-01 (leave it in default namespace)
+	existingVPC := &vpcapi.VPC{}
+	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Name: "vpc-01", Namespace: kmetav1.NamespaceDefault}, existingVPC); err != nil {
+		return false, reverts, fmt.Errorf("getting vpc-01: %w", err)
+	}
+
+	// Get vpc-01's subnet info for overlap
+	var existingSubnetCIDR, existingGateway string
+	for _, subnet := range existingVPC.Spec.Subnets {
+		existingSubnetCIDR = subnet.Subnet // This will be 10.0.1.0/24
+		existingGateway = subnet.Gateway
+
+		break
+	}
+
+	// Create separate IPv4 namespace for vpc-ovrlp
+	testIPNSName := "ns-overlap" // Different namespace for vpc-ovrlp
+	testIPNS := &vpcapi.IPv4Namespace{
+		ObjectMeta: kmetav1.ObjectMeta{
+			Name:      testIPNSName,
+			Namespace: kmetav1.NamespaceDefault,
+		},
+		Spec: vpcapi.IPv4NamespaceSpec{
+			Subnets: []string{existingSubnetCIDR}, // Same subnet range as vpc-01
+		},
+	}
+
+	slog.Info("Creating test IPv4 namespace for overlapping subnets", "namespace", testIPNSName)
+	if err := testCtx.kube.Create(ctx, testIPNS); err != nil {
+		return false, reverts, fmt.Errorf("creating test IPv4 namespace: %w", err)
+	}
+	reverts = append(reverts, func(ctx context.Context) error {
+		if err := kclient.IgnoreNotFound(testCtx.kube.Delete(ctx, testIPNS)); err != nil {
+			return fmt.Errorf("deleting test IPv4 namespace %s: %w", testIPNSName, err)
+		}
+
+		return nil
+	})
+
+	// Get the vpc-02 attachment to remove (server-02)
+	originalAttachment := &vpcapi.VPCAttachment{}
+	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Name: attachmentToRemove, Namespace: kmetav1.NamespaceDefault}, originalAttachment); err != nil {
+		return false, reverts, fmt.Errorf("getting attachment to remove: %w", err)
+	}
+
+	// Calculate DHCP range within vpc-01's subnet (the overlapping subnet)
+	_, ipNet, err := net.ParseCIDR(existingSubnetCIDR)
+	if err != nil {
+		return false, reverts, fmt.Errorf("parsing existing subnet CIDR: %w", err)
+	}
+	baseIP := ipNet.IP.To4()
+	dhcpStart := fmt.Sprintf("%d.%d.%d.200", baseIP[0], baseIP[1], baseIP[2])
+	dhcpEnd := fmt.Sprintf("%d.%d.%d.254", baseIP[0], baseIP[1], baseIP[2])
+
+	// Temporarily delete server-02's attachment to vpc-02
+	slog.Info("Temporarily detaching server for overlapping test", "server", serverToDetach, "attachment", attachmentToRemove)
+	if err := testCtx.kube.Delete(ctx, originalAttachment); err != nil {
+		return false, reverts, fmt.Errorf("deleting attachment to reuse: %w", err)
+	}
+
+	// Add restoration of original attachment to reverts
+	reverts = append(reverts, func(ctx context.Context) error {
+		restoredAttachment := &vpcapi.VPCAttachment{
+			ObjectMeta: kmetav1.ObjectMeta{
+				Name:      originalAttachment.Name,
+				Namespace: originalAttachment.Namespace,
+			},
+			Spec: originalAttachment.Spec,
+		}
+		if err := testCtx.kube.Create(ctx, restoredAttachment); err != nil {
+			return fmt.Errorf("restoring original attachment %s: %w", originalAttachment.Name, err)
+		}
+		slog.Info("Restored original attachment", "attachment", originalAttachment.Name)
+
+		return nil
+	})
+
+	// Wait for deletion to take effect
+	time.Sleep(5 * time.Second)
+
+	// Create new overlapping VPC with vpc-01's subnet CIDR in the separate namespace
+	newVPCName := "vpc-ovrlp" // VPC names must be ≤11 chars because they map to Linux VRF interface names
+	newVPC := &vpcapi.VPC{
+		ObjectMeta: kmetav1.ObjectMeta{
+			Name:      newVPCName,
+			Namespace: kmetav1.NamespaceDefault,
+		},
+		Spec: vpcapi.VPCSpec{
+			IPv4Namespace: testIPNSName, // Different namespace from vpc-01 - allows overlap
+			VLANNamespace: "default",
+			Subnets: map[string]*vpcapi.VPCSubnet{
+				"subnet-01": {
+					Subnet:  existingSubnetCIDR, // Same subnet as vpc-01! (10.0.1.0/24)
+					VLAN:    1020,               // Use a known available VLAN
+					Gateway: existingGateway,    // Same gateway IP as vpc-01
+					DHCP: vpcapi.VPCDHCP{
+						Enable: true,
+						Range: &vpcapi.VPCDHCPRange{
+							Start: dhcpStart, // 10.0.1.200 - overlapping with vpc-01's range
+							End:   dhcpEnd,   // 10.0.1.254
+						},
+					},
+				},
+			},
+		},
+	}
+
+	slog.Info("Creating overlapping VPC for NAT test", "existing", "vpc-01", "new", newVPCName, "subnet", existingSubnetCIDR, "ipns", testIPNSName)
+
+	_, err = CreateOrUpdateVpc(ctx, testCtx.kube, newVPC)
+	if err != nil {
+		return false, reverts, fmt.Errorf("creating overlapping VPC %s: %w", newVPCName, err)
+	}
+	// Add cleanup for new VPC
+	reverts = append(reverts, func(ctx context.Context) error {
+		if err := kclient.IgnoreNotFound(testCtx.kube.Delete(ctx, newVPC)); err != nil {
+			return fmt.Errorf("deleting new VPC %s: %w", newVPCName, err)
+		}
+
+		return nil
+	})
+
+	// Create new VPC attachment for server-02 to the overlapping VPC
+	newAttachName := "server-02--mclag--leaf-01--leaf-02--vpc-ovrlp--subnet-01"
+	newAttach := &vpcapi.VPCAttachment{
+		ObjectMeta: kmetav1.ObjectMeta{
+			Name:      newAttachName,
+			Namespace: kmetav1.NamespaceDefault,
+		},
+		Spec: vpcapi.VPCAttachmentSpec{
+			Connection: "server-02--mclag--leaf-01--leaf-02",
+			Subnet:     fmt.Sprintf("%s/subnet-01", newVPCName),
+		},
+	}
+
+	if err := testCtx.kube.Create(ctx, newAttach); err != nil {
+		return false, reverts, fmt.Errorf("creating new VPC attachment %s: %w", newAttachName, err)
+	}
+	// Add cleanup for new VPC attachment
+	reverts = append(reverts, func(ctx context.Context) error {
+		if err := kclient.IgnoreNotFound(testCtx.kube.Delete(ctx, newAttach)); err != nil {
+			return fmt.Errorf("deleting new VPC attachment %s: %w", newAttachName, err)
+		}
+
+		return nil
+	})
+
+	// Wait for network configuration
+	time.Sleep(10 * time.Second)
+
+	// Get SSH connection for server-02
+	serverSSH, err := testCtx.getSSH(ctx, serverToDetach)
+	if err != nil {
+		return false, reverts, fmt.Errorf("getting ssh config for server %s: %w", serverToDetach, err)
+	}
+
+	// Clean up and reconfigure server-02 for the new overlapping VPC
+	if _, stderr, err := serverSSH.Run(ctx, "/opt/bin/hhnet cleanup"); err != nil {
+		return false, reverts, fmt.Errorf("cleaning up server %s: %w: %s", serverToDetach, err, stderr)
+	}
+
+	// Get connection for netconf command
+	reusableConnection := &wiringapi.Connection{}
+	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Name: "server-02--mclag--leaf-01--leaf-02", Namespace: kmetav1.NamespaceDefault}, reusableConnection); err != nil {
+		return false, reverts, fmt.Errorf("getting reusable connection: %w", err)
+	}
+
+	// Configure networking on server-02 for the new overlapping VPC with VLAN 1020
+	netconfCmd, err := GetServerNetconfCmd(reusableConnection, 1020, testCtx.setupOpts.HashPolicy)
+	if err != nil {
+		return false, reverts, fmt.Errorf("getting netconf cmd for server %s: %w", serverToDetach, err)
+	}
+
+	cmd := fmt.Sprintf("/opt/bin/hhnet %s", netconfCmd)
+	if _, stderr, err := serverSSH.Run(ctx, cmd); err != nil {
+		return false, reverts, fmt.Errorf("configuring server %s: %w: %s", serverToDetach, err, stderr)
+	}
+
+	// Set up NAT gateway peering between the overlapping VPCs
+	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec, 0)
+	externalPeerings := make(map[string]*vpcapi.ExternalPeeringSpec, 0)
+	gwPeerings := make(map[string]*gwapi.PeeringSpec, 1)
+
+	// Use NAT ranges to resolve the overlap
+	existingVPCNATCIDR := []string{"192.168.11.0/24"} // NAT range for vpc-01
+	newVPCNATCIDR := []string{"192.168.12.0/24"}      // NAT range for vpc-ovrlp
+
+	appendGwPeeringSpec(gwPeerings, existingVPC, newVPC, nil, nil, existingVPCNATCIDR, newVPCNATCIDR)
+
+	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, gwPeerings, true); err != nil {
+		return false, reverts, fmt.Errorf("setting up NAT gateway peerings for overlapping subnets: %w", err)
+	}
+
+	// Wait for NAT peering to take effect
+	time.Sleep(15 * time.Second)
+
+	// Test connectivity using the standard test framework
+	if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
+		return false, reverts, fmt.Errorf("testing NAT gateway peering connectivity: %w", err)
+	}
+
+	return false, reverts, nil
+}
+
 // add a single gateway peering spec to an existing map, which will be the input for DoSetupPeerings
 // If vpc1Subnets or vpc2Subnets are empty, all subnets from the respective VPC will be used
-func appendGwPeeringSpec(gwPeerings map[string]*gwapi.PeeringSpec, vpc1, vpc2 *vpcapi.VPC, vpc1Subnets, vpc2Subnets []string) {
+// If vpc1NATCIDR or vpc2NATCIDR are provided, NAT will be configured for the respective VPC
+// NOTE: vpc1Subnets/vpc2Subnets currently always receive nil in basic tests (for future multi-subnet suite)
+func appendGwPeeringSpec(gwPeerings map[string]*gwapi.PeeringSpec, vpc1, vpc2 *vpcapi.VPC, vpc1Subnets, vpc2Subnets, vpc1NATCIDR, vpc2NATCIDR []string) { //nolint:unparam
 	entryName := fmt.Sprintf("%s--%s", vpc1.Name, vpc2.Name)
 
 	// If no specific subnets provided, use all subnets from vpc1
@@ -2500,10 +2787,18 @@ func appendGwPeeringSpec(gwPeerings map[string]*gwapi.PeeringSpec, vpc1, vpc2 *v
 	for _, subnet := range vpc1Subnets {
 		vpc1Expose.IPs = append(vpc1Expose.IPs, gwapi.PeeringEntryIP{CIDR: subnet})
 	}
+	// Add NAT ranges if provided
+	for _, natCIDR := range vpc1NATCIDR {
+		vpc1Expose.As = append(vpc1Expose.As, gwapi.PeeringEntryAs{CIDR: natCIDR})
+	}
 
 	vpc2Expose := gwapi.PeeringEntryExpose{}
 	for _, subnet := range vpc2Subnets {
 		vpc2Expose.IPs = append(vpc2Expose.IPs, gwapi.PeeringEntryIP{CIDR: subnet})
+	}
+	// Add NAT ranges if provided
+	for _, natCIDR := range vpc2NATCIDR {
+		vpc2Expose.As = append(vpc2Expose.As, gwapi.PeeringEntryAs{CIDR: natCIDR})
 	}
 
 	gwPeerings[entryName] = &gwapi.PeeringSpec{
@@ -3143,14 +3438,15 @@ type JUnitReport struct {
 }
 
 type JUnitTestSuite struct {
-	XMLName   xml.Name        `xml:"testsuite"`
-	Name      string          `xml:"name,attr"`
-	Tests     int             `xml:"tests,attr"`
-	Failures  int             `xml:"failures,attr"`
-	Skipped   int             `xml:"skipped,attr"`
-	Time      float64         `xml:"time,attr"`
-	TimeHuman time.Duration   `xml:"-"`
-	TestCases []JUnitTestCase `xml:"testcase"`
+	XMLName       xml.Name        `xml:"testsuite"`
+	Name          string          `xml:"name,attr"`
+	Tests         int             `xml:"tests,attr"`
+	Failures      int             `xml:"failures,attr"`
+	Skipped       int             `xml:"skipped,attr"`
+	ExpectedFails int             `xml:"expectedfails,attr"`
+	Time          float64         `xml:"time,attr"`
+	TimeHuman     time.Duration   `xml:"-"`
+	TestCases     []JUnitTestCase `xml:"testcase"`
 }
 
 type SkipFlags struct {
@@ -3216,14 +3512,21 @@ func (sf *SkipFlags) PrettyPrint() string {
 }
 
 type JUnitTestCase struct {
-	XMLName   xml.Name  `xml:"testcase"`
-	ClassName string    `xml:"classname,attr"`
-	Name      string    `xml:"name,attr"`
-	Time      float64   `xml:"time,attr"`
-	Failure   *Failure  `xml:"failure,omitempty"`
-	Skipped   *Skipped  `xml:"skipped,omitempty"`
-	F         TestFunc  `xml:"-"` // function to run
-	SkipFlags SkipFlags `xml:"-"` // flags to determine whether to skip the test
+	XMLName       xml.Name      `xml:"testcase"`
+	ClassName     string        `xml:"classname,attr"`
+	Name          string        `xml:"name,attr"`
+	Time          float64       `xml:"time,attr"`
+	Failure       *Failure      `xml:"failure,omitempty"`
+	Skipped       *Skipped      `xml:"skipped,omitempty"`
+	ExpectedFail  *ExpectedFail `xml:"expectedfail,omitempty"`
+	F             TestFunc      `xml:"-"` // function to run
+	SkipFlags     SkipFlags     `xml:"-"` // flags to determine whether to skip the test
+	ExpectFailure bool          `xml:"-"`
+}
+
+type ExpectedFail struct {
+	XMLName xml.Name `xml:"expectedfail"`
+	Message string   `xml:"message,attr,omitempty"`
 }
 
 type Failure struct {
@@ -3245,21 +3548,25 @@ func printTestSuite(ts *JUnitTestSuite) {
 }
 
 func printSuiteResults(ts *JUnitTestSuite) {
-	var numFailed, numSkipped, numPassed int
+	var numFailed, numSkipped, numPassed, numXFail int
 	slog.Info("Test suite results", "suite", ts.Name)
 	for _, test := range ts.TestCases {
-		if test.Skipped != nil { //nolint:gocritic
+		switch {
+		case test.Skipped != nil:
 			slog.Warn("SKIP", "test", test.Name, "reason", test.Skipped.Message)
 			numSkipped++
-		} else if test.Failure != nil {
+		case test.ExpectedFail != nil:
+			slog.Info("XFAIL", "test", test.Name, "reason", test.ExpectedFail.Message)
+			numXFail++
+		case test.Failure != nil:
 			slog.Error("FAIL", "test", test.Name, "error", strings.ReplaceAll(test.Failure.Message, "\n", "; "))
 			numFailed++
-		} else {
+		default:
 			slog.Info("PASS", "test", test.Name)
 			numPassed++
 		}
 	}
-	slog.Info("Test suite summary", "tests", len(ts.TestCases), "passed", numPassed, "skipped", numSkipped, "failed", numFailed, "duration", ts.TimeHuman)
+	slog.Info("Test suite summary", "tests", len(ts.TestCases), "passed", numPassed, "skipped", numSkipped, "failed", numFailed, "xfail", numXFail, "duration", ts.TimeHuman)
 }
 
 func pauseOnFail() {
@@ -3322,7 +3629,8 @@ func doRunTests(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 		// - we then apply reverts in reverse order, and if any of them fails, we mark the test as failed, and pause (potentially a second time) if configured to do so.
 		//   we also stop applying reverts at the first failure
 		// - finally, if we get to the end without any errors, we log the test as passed
-		if skip {
+		switch {
+		case skip:
 			var skipMsg string
 			if err != nil {
 				skipMsg = err.Error()
@@ -3336,8 +3644,14 @@ func doRunTests(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 			}
 			ts.Skipped++
 			slog.Warn("SKIP", "test", test.Name, "reason", skipMsg)
-		}
-		if err != nil {
+		case test.ExpectFailure && err != nil:
+			ts.TestCases[i].ExpectedFail = &ExpectedFail{
+				Message: err.Error(),
+			}
+			ts.ExpectedFails++
+			slog.Info("XFAIL", "test", test.Name, "reason", err.Error())
+			err = nil
+		case err != nil:
 			ts.TestCases[i].Failure = &Failure{
 				Message: err.Error(),
 			}
@@ -3417,10 +3731,17 @@ func failAllTests(suite *JUnitTestSuite, err error) *JUnitTestSuite {
 		if suite.TestCases[i].Skipped != nil {
 			continue
 		}
-		suite.TestCases[i].Failure = &Failure{
-			Message: err.Error(),
+		if suite.TestCases[i].ExpectFailure {
+			suite.TestCases[i].ExpectedFail = &ExpectedFail{
+				Message: err.Error(),
+			}
+			suite.ExpectedFails++
+		} else {
+			suite.TestCases[i].Failure = &Failure{
+				Message: err.Error(),
+			}
+			suite.Failures++
 		}
-		suite.Failures++
 	}
 
 	return suite
@@ -3766,6 +4087,22 @@ func makeVpcPeeringsBasicSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 			SkipFlags: SkipFlags{
 				NoGateway: true,
 				NoServers: true,
+			},
+		},
+		{
+			Name:          "Gateway Peering with NAT",
+			F:             testCtx.gatewayPeeringNATTest,
+			ExpectFailure: true,
+			SkipFlags: SkipFlags{
+				NoGateway: true,
+			},
+		},
+		{
+			Name:          "Gateway Peering Overlapping Subnets with NAT",
+			F:             testCtx.gatewayPeeringOverlapNATTest,
+			ExpectFailure: true,
+			SkipFlags: SkipFlags{
+				NoGateway: true,
 			},
 		},
 	}
