@@ -92,6 +92,14 @@ spec:
           #authorizedKeys: # optional SSH authorized keys
           #  - "ssh-ed25519 AAAAC3Nza..."
           {{- end }}
+    observability:
+      defaults: "{{ .O11yDefaults }}"
+      {{ if .O11yLabels }}
+      labels:
+        {{- range $key, $value := .O11yLabels }}
+        "{{ $key }}": "{{ $value }}"
+        {{- end }}
+      {{- end }}
     {{ if .Gateway }}
     gateway:
       enable: true
