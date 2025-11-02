@@ -63,6 +63,7 @@ const (
 	FlagNameBuildMode             = "build-mode"
 	FlagNameBuildControls         = "build-controls"
 	FlagNameBuildGateways         = "build-gateways"
+	FlagNameObservabilityTargets  = "o11y-targets"
 	FlagNameAutoUpgrade           = "auto-upgrade"
 	FlagNameFailFast              = "fail-fast"
 	FlagNameReady                 = "ready"
@@ -396,13 +397,18 @@ func Run(ctx context.Context) error {
 		},
 	}
 
-	buildModeFlags := []cli.Flag{
+	builFlags := []cli.Flag{
 		&cli.StringFlag{
 			Name:    FlagNameBuildMode,
 			Aliases: []string{"mode", "m"},
 			Usage:   "build mode: one of " + strings.Join(buildModes, ", "),
 			EnvVars: []string{"HHFAB_BUILD_MODE"},
 			Value:   string(recipe.BuildModeISO),
+		},
+		&cli.StringFlag{
+			Name:    FlagNameObservabilityTargets,
+			Usage:   "inject extra observability targets",
+			EnvVars: []string{"HHFAB_O11Y_TARGETS"},
 		},
 	}
 
@@ -713,7 +719,7 @@ func Run(ctx context.Context) error {
 			{
 				Name:  "build",
 				Usage: "build installers",
-				Flags: flatten(defaultFlags, hModeFlags, buildModeFlags, joinTokenFlags, []cli.Flag{
+				Flags: flatten(defaultFlags, hModeFlags, builFlags, joinTokenFlags, []cli.Flag{
 					&cli.BoolFlag{
 						Name:    FlagNameBuildControls,
 						Aliases: []string{"controls"},
@@ -731,11 +737,12 @@ func Run(ctx context.Context) error {
 				Before: before(false),
 				Action: func(c *cli.Context) error {
 					if err := hhfab.Build(ctx, workDir, cacheDir, hhfab.BuildOpts{
-						HydrateMode:   hhfab.HydrateMode(hydrateMode),
-						BuildMode:     recipe.BuildMode(c.String(FlagNameBuildMode)),
-						BuildControls: c.Bool(FlagNameBuildControls),
-						BuildGateways: c.Bool(FlagNameBuildGateways),
-						SetJoinToken:  joinToken,
+						HydrateMode:          hhfab.HydrateMode(hydrateMode),
+						BuildMode:            recipe.BuildMode(c.String(FlagNameBuildMode)),
+						BuildControls:        c.Bool(FlagNameBuildControls),
+						BuildGateways:        c.Bool(FlagNameBuildGateways),
+						SetJoinToken:         joinToken,
+						ObservabilityTargets: c.String(FlagNameObservabilityTargets),
 					}); err != nil {
 						return fmt.Errorf("building: %w", err)
 					}
@@ -786,7 +793,7 @@ func Run(ctx context.Context) error {
 					{
 						Name:  "up",
 						Usage: "run VLAB",
-						Flags: flatten(defaultFlags, hModeFlags, buildModeFlags, joinTokenFlags, []cli.Flag{
+						Flags: flatten(defaultFlags, hModeFlags, builFlags, joinTokenFlags, []cli.Flag{
 							&cli.BoolFlag{
 								Name:    FlagNameReCreate,
 								Aliases: []string{"f"},
@@ -851,10 +858,11 @@ func Run(ctx context.Context) error {
 							}
 
 							if err := hhfab.VLABUp(ctx, workDir, cacheDir, hhfab.VLABUpOpts{
-								HydrateMode:  hhfab.HydrateMode(hydrateMode),
-								ReCreate:     c.Bool(FlagNameReCreate),
-								BuildMode:    recipe.BuildMode(c.String(FlagNameBuildMode)),
-								SetJoinToken: joinToken,
+								HydrateMode:          hhfab.HydrateMode(hydrateMode),
+								ReCreate:             c.Bool(FlagNameReCreate),
+								BuildMode:            recipe.BuildMode(c.String(FlagNameBuildMode)),
+								SetJoinToken:         joinToken,
+								ObservabilityTargets: c.String(FlagNameObservabilityTargets),
 								VLABRunOpts: hhfab.VLABRunOpts{
 									KillStale:          c.Bool(FlagNameKillStale),
 									ControlsRestricted: c.Bool(FlagNameControlsRestricted),
