@@ -2855,6 +2855,10 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringNATTest(ctx context.Context) (bo
 
 	// Test NAT connectivity with custom function that pings correct NAT IPs
 	if err := testCtx.testNATGatewayConnectivity(ctx, vpc1, vpc2, vpc1NATCIDR, vpc2NATCIDR); err != nil {
+		if testCtx.pauseOnFail {
+			pauseOnFail()
+		}
+
 		return false, reverts, fmt.Errorf("testing NAT gateway peering connectivity: %w", err)
 	}
 
@@ -2938,6 +2942,10 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringStatefulNATTest(ctx context.Cont
 	// Test stateful NAT connectivity with custom function that pings correct NAT IPs
 	// Note: Stateful NAT uses the same IP translation algorithm as stateless
 	if err := testCtx.testNATGatewayConnectivity(ctx, vpc1, vpc2, vpc1NATCIDR, vpc2NATCIDR); err != nil {
+		if testCtx.pauseOnFail {
+			pauseOnFail()
+		}
+
 		return false, reverts, fmt.Errorf("testing stateful NAT gateway peering connectivity: %w", err)
 	}
 
@@ -3175,6 +3183,10 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringOverlapNATTest(ctx context.Conte
 
 	// Test connectivity using custom NAT-aware connectivity testing
 	if err := testCtx.testNATGatewayConnectivity(ctx, existingVPC, newVPC, existingVPCNATCIDR, newVPCNATCIDR); err != nil {
+		if testCtx.pauseOnFail {
+			pauseOnFail()
+		}
+
 		return false, reverts, fmt.Errorf("testing NAT gateway peering connectivity: %w", err)
 	}
 
@@ -4115,7 +4127,7 @@ func doRunTests(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 				break
 			}
 		}
-		if !skip && err == nil && revertErr == nil {
+		if !skip && err == nil && revertErr == nil && ts.TestCases[i].ExpectedFail == nil {
 			slog.Info("PASS", "test", test.Name)
 		}
 	}
