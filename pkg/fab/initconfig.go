@@ -38,7 +38,6 @@ type InitConfigInput struct {
 	RegUpstream               *fabapi.ControlConfigRegistryUpstream
 	ControlNodeManagementLink string
 	Gateway                   bool
-	Preview                   bool
 	JoinToken                 string
 	SaveJoinToken             bool
 }
@@ -63,7 +62,7 @@ func InitConfig(ctx context.Context, in InitConfigInput) ([]byte, error) {
 	}
 
 	if !in.SaveJoinToken {
-		if in.JoinToken != "" && in.Preview {
+		if in.JoinToken != "" {
 			slog.Warn("Join token is specified by flag env var, but is not saved to the config, use --save-join-token flag to save it")
 		}
 
