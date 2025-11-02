@@ -642,7 +642,27 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
+| `defaults` _[ObservabilityDefaults](#observabilitydefaults)_ |  |  |  |
+| `labels` _object (keys:string, values:string)_ |  |  |  |
 | `targets` _[Targets](#targets)_ |  |  |  |
+
+
+#### ObservabilityDefaults
+
+_Underlying type:_ _string_
+
+
+
+
+
+_Appears in:_
+- [ObservabilityConfig](#observabilityconfig)
+
+| Field | Description |
+| --- | --- |
+| `` |  |
+| `none` |  |
+| `minimal` |  |
 
 
 #### PlatformVersions

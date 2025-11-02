@@ -273,7 +273,23 @@ type GatewayObservabilityUnix struct {
 }
 
 type ObservabilityConfig struct {
-	Targets alloy.Targets `json:"targets,omitempty"`
+	Defaults ObservabilityDefaults `json:"defaults,omitempty"`
+	Labels   map[string]string     `json:"labels,omitempty"`
+	Targets  alloy.Targets         `json:"targets,omitempty"`
+}
+
+type ObservabilityDefaults string
+
+const (
+	ObservabilityDefaultsAll     ObservabilityDefaults = ""        // just enable everything by default
+	ObservabilityDefaultsNone    ObservabilityDefaults = "none"    // disable all observability
+	ObservabilityDefaultsMinimal ObservabilityDefaults = "minimal" // disable almost everything for testing
+)
+
+var ObservabilityDefaultsList = []ObservabilityDefaults{
+	ObservabilityDefaultsAll,
+	ObservabilityDefaultsNone,
+	ObservabilityDefaultsMinimal,
 }
 
 type Versions struct {
@@ -427,44 +443,72 @@ func (f *Fabricator) Default() {
 
 	f.Spec.Config.Fabric.LoopbackWorkaroundDisable = false // it's ignored now
 
+	o11yNotNone := f.Spec.Config.Observability.Defaults != ObservabilityDefaultsNone
+	o11yMinimal := f.Spec.Config.Observability.Defaults == ObservabilityDefaultsMinimal
+
 	if f.Spec.Config.Control.Observability == nil {
 		f.Spec.Config.Control.Observability = &ControlObservability{
-			KubePodLogs: true,
-			KubeEvents:  true,
+			KubePodLogs: o11yNotNone,
+			KubeEvents:  o11yNotNone,
 		}
 	}
 
 	if f.Spec.Config.Fabric.Observability == nil {
 		f.Spec.Config.Fabric.Observability = &fmeta.Observability{
 			Agent: fmeta.ObservabilityAgent{
-				Metrics:         true,
+				Metrics:         o11yNotNone,
 				MetricsInterval: 60,
 				Logs:            true,
 			},
 			Unix: fmeta.ObservabilityUnix{
-				Metrics:           true,
+				Metrics:           o11yNotNone,
 				MetricsInterval:   60,
 				MetricsCollectors: []string{"cpu", "loadavg", "meminfo", "filesystem"},
 				Syslog:            true,
 			},
+		}
+		if o11yMinimal {
+			f.Spec.Config.Fabric.Observability.Agent.MetricsRelabel = []alloy.ScrapeRelabelRule{
+				{
+					Action:       "keep",
+					Regex:        ".*(_in_bits|_status|_generation|_temperature|_transceiver).*",
+					SourceLabels: []string{"__name__"},
+				},
+			}
+			f.Spec.Config.Fabric.Observability.Unix.MetricsRelabel = []alloy.ScrapeRelabelRule{
+				{
+					Action:       "keep",
+					Regex:        ".*(_load).*",
+					SourceLabels: []string{"__name__"},
+				},
+			}
 		}
 	}
 
 	if f.Spec.Config.Gateway.Observability == nil {
 		f.Spec.Config.Gateway.Observability = &GatewayObservability{
 			Dataplane: GatewayObservabilityDataplane{
-				Metrics:         true,
+				Metrics:         o11yNotNone,
 				MetricsInterval: 60,
 			},
 			FRR: GatewayObservabilityFRR{
-				Metrics:         true,
+				Metrics:         o11yNotNone,
 				MetricsInterval: 60,
 			},
 			Unix: GatewayObservabilityUnix{
-				Metrics:           true,
+				Metrics:           o11yNotNone,
 				MetricsInterval:   60,
 				MetricsCollectors: []string{"cpu", "loadavg", "meminfo", "filesystem"},
 			},
+		}
+		if o11yMinimal {
+			f.Spec.Config.Gateway.Observability.Unix.MetricsRelabel = []alloy.ScrapeRelabelRule{
+				{
+					Action:       "keep",
+					Regex:        ".*(_load).*",
+					SourceLabels: []string{"__name__"},
+				},
+			}
 		}
 	}
 
@@ -514,6 +558,29 @@ func (f *Fabricator) Default() {
 	}
 
 	f.Spec.Config.Fabric.DefaultAlloyConfig = fmeta.AlloyConfig{}
+
+	for name, target := range f.Spec.Config.Observability.Targets.Prometheus {
+		if target.Labels == nil {
+			target.Labels = map[string]string{}
+		}
+		for k, v := range f.Spec.Config.Observability.Labels {
+			if _, ok := target.Labels[k]; !ok {
+				target.Labels[k] = v
+			}
+		}
+		f.Spec.Config.Observability.Targets.Prometheus[name] = target
+	}
+	for name, target := range f.Spec.Config.Observability.Targets.Loki {
+		if target.Labels == nil {
+			target.Labels = map[string]string{}
+		}
+		for k, v := range f.Spec.Config.Observability.Labels {
+			if _, ok := target.Labels[k]; !ok {
+				target.Labels[k] = v
+			}
+		}
+		f.Spec.Config.Observability.Targets.Loki[name] = target
+	}
 }
 
 func (f *Fabricator) Validate(ctx context.Context) error {
@@ -758,6 +825,10 @@ func (f *Fabricator) Validate(ctx context.Context) error {
 				return fmt.Errorf("subnets %s and %s overlap", some, other) //nolint:goerr113
 			}
 		}
+	}
+
+	if !slices.Contains(ObservabilityDefaultsList, f.Spec.Config.Observability.Defaults) {
+		return fmt.Errorf("invalid observability defaults mode: %s", f.Spec.Config.Observability.Defaults) //nolint:err113
 	}
 
 	return f.CheckForKnownSwitchUsers()

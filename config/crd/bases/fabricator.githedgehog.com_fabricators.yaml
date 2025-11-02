@@ -418,6 +418,12 @@ spec:
                     type: object
                   observability:
                     properties:
+                      defaults:
+                        type: string
+                      labels:
+                        additionalProperties:
+                          type: string
+                        type: object
                       targets:
                         properties:
                           loki:

@@ -9,6 +9,7 @@ import (
 	_ "embed"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 
 	"go.githedgehog.com/fabric/api/meta"
@@ -40,6 +41,8 @@ type InitConfigInput struct {
 	Gateway                   bool
 	JoinToken                 string
 	SaveJoinToken             bool
+	O11yDefaults              fabapi.ObservabilityDefaults
+	O11yLabels                map[string]string
 }
 
 func InitConfig(ctx context.Context, in InitConfigInput) ([]byte, error) {
@@ -67,6 +70,10 @@ func InitConfig(ctx context.Context, in InitConfigInput) ([]byte, error) {
 		}
 
 		in.JoinToken = ""
+	}
+
+	if !slices.Contains(fabapi.ObservabilityDefaultsList, in.O11yDefaults) {
+		return nil, fmt.Errorf("invalid observability defaults mode: %s", in.O11yDefaults) //nolint:err113
 	}
 
 	data, err := tmplutil.FromTemplate("initconfig", initConfigTmpl, in)

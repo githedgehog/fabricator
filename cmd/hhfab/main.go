@@ -22,6 +22,7 @@ import (
 	"github.com/urfave/cli/v2"
 	"go.githedgehog.com/fabric/api/meta"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
+	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/fab/recipe"
 	"go.githedgehog.com/fabricator/pkg/hhfab"
@@ -51,6 +52,8 @@ const (
 	FlagIncludeCLS                = "include-cls"
 	FlagControlNodeMgmtLink       = "control-node-mgmt-link"
 	FlagGateway                   = "gateway"
+	FlagO11yDefaults              = "o11y-defaults"
+	FlagO11yLabels                = "o11y-labels"
 	FlagNameFabricMode            = "fabric-mode"
 	FlagNameCount                 = "count"
 	FlagNameKillStale             = "kill-stale"
@@ -552,9 +555,34 @@ func Run(ctx context.Context) error {
 						Usage:    "add and enable gateway node",
 						EnvVars:  []string{"HHFAB_GATEWAY"},
 					},
+					&cli.StringFlag{
+						Category: FlagCatGenConfig,
+						Name:     FlagO11yDefaults,
+						Usage:    "default values for observability configuration",
+						EnvVars:  []string{"HHFAB_O11Y_DEFAULTS"},
+					},
+					&cli.StringSliceFlag{
+						Category: FlagCatGenConfig,
+						Name:     FlagO11yLabels,
+						Usage:    "default labels for observability targets",
+						EnvVars:  []string{"HHFAB_O11Y_LABELS"},
+					},
 				}),
 				Before: before(false),
 				Action: func(c *cli.Context) error {
+					o11yLabels := map[string]string{}
+					for _, entry := range c.StringSlice(FlagO11yLabels) {
+						parts := strings.SplitN(entry, "=", 2)
+						if len(parts) != 2 {
+							return fmt.Errorf("invalid o11y label format: %s", entry) //nolint:err113
+						}
+
+						if _, ok := o11yLabels[parts[0]]; ok {
+							return fmt.Errorf("duplicate o11y label key: %s", parts[0]) //nolint:err113
+						}
+						o11yLabels[parts[0]] = parts[1]
+					}
+
 					if err := hhfab.Init(ctx, hhfab.InitConfig{
 						WorkDir:            workDir,
 						CacheDir:           cacheDir,
@@ -576,6 +604,8 @@ func Run(ctx context.Context) error {
 							Gateway:                   c.Bool(FlagGateway),
 							JoinToken:                 joinToken,
 							SaveJoinToken:             saveJoinToken,
+							O11yDefaults:              fabapi.ObservabilityDefaults(c.String(FlagO11yDefaults)),
+							O11yLabels:                o11yLabels,
 						},
 					}); err != nil {
 						return fmt.Errorf("initializing: %w", err)
