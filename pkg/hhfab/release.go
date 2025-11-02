@@ -5,6 +5,7 @@ package hhfab
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"encoding/xml"
 	"errors"
@@ -22,12 +23,14 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	agentapi "go.githedgehog.com/fabric/api/agent/v1beta1"
 	"go.githedgehog.com/fabric/api/meta"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
+	"go.githedgehog.com/fabric/pkg/util/apiutil"
 	"go.githedgehog.com/fabric/pkg/util/pointer"
 	fabricatorapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab"
@@ -35,6 +38,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/util/sshutil"
 	gwapi "go.githedgehog.com/gateway/api/gateway/v1alpha1"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 	corev1 "k8s.io/api/core/v1"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -2473,6 +2477,315 @@ func (testCtx *VPCPeeringTestCtx) gatewayMixedPeeringLoopTest(ctx context.Contex
 	return false, nil, nil
 }
 
+// calculateStatelessNATIP calculates the expected NAT IP for a source IP using the stateless NAT offset algorithm.
+// NOTE: This function mirrors the algorithm from dataplane
+// nat_ip = nat_pool_start + (source_ip - source_subnet_start)
+func calculateStatelessNATIP(sourceIP, sourceSubnet, natPoolStart netip.Addr) (netip.Addr, error) {
+	// Calculate offset from source subnet start
+	var offset uint32
+	if sourceIP.Is4() && sourceSubnet.Is4() && natPoolStart.Is4() {
+		sourceBytes := sourceIP.As4()
+		subnetBytes := sourceSubnet.As4()
+
+		sourceInt := binary.BigEndian.Uint32(sourceBytes[:])
+		subnetInt := binary.BigEndian.Uint32(subnetBytes[:])
+
+		if sourceInt < subnetInt {
+			return netip.Addr{}, fmt.Errorf("source IP %s is before subnet start %s", sourceIP, sourceSubnet) //nolint:err113
+		}
+		offset = sourceInt - subnetInt
+
+		// Add offset to NAT pool start
+		natPoolBytes := natPoolStart.As4()
+		natPoolInt := binary.BigEndian.Uint32(natPoolBytes[:])
+		natIPInt := natPoolInt + offset
+
+		var natIPBytes [4]byte
+		binary.BigEndian.PutUint32(natIPBytes[:], natIPInt)
+
+		return netip.AddrFrom4(natIPBytes), nil
+	}
+
+	return netip.Addr{}, fmt.Errorf("only IPv4 NAT is currently supported") //nolint:err113
+}
+
+// testNATGatewayConnectivity performs E2E connectivity testing for NAT gateway peering.
+// It discovers server IPs, calculates expected NAT IPs, and performs ping/iperf3 tests.
+// NOTE: This uses calculateStatelessNATIP which couples to the dataplane NAT algorithm.
+func (testCtx *VPCPeeringTestCtx) testNATGatewayConnectivity(
+	ctx context.Context,
+	vpc1, vpc2 *vpcapi.VPC,
+	_ /* vpc1NATPool */, vpc2NATPool []string,
+) error {
+	startTime := time.Now()
+	slog.Info("Testing NAT gateway peering connectivity")
+
+	servers := &wiringapi.ServerList{}
+	if err := testCtx.kube.List(ctx, servers); err != nil {
+		return fmt.Errorf("listing servers: %w", err)
+	}
+
+	// Get servers attached to each VPC
+	vpc1Servers := []string{}
+	vpc2Servers := []string{}
+
+	for _, server := range servers.Items {
+		attachedSubnets, err := apiutil.GetAttachedSubnets(ctx, testCtx.kube, server.Name)
+		if err != nil {
+			continue
+		}
+
+		for subnetName := range attachedSubnets {
+			if strings.HasPrefix(subnetName, vpc1.Name+"/") {
+				vpc1Servers = append(vpc1Servers, server.Name)
+
+				break
+			}
+			if strings.HasPrefix(subnetName, vpc2.Name+"/") {
+				vpc2Servers = append(vpc2Servers, server.Name)
+
+				break
+			}
+		}
+	}
+
+	if len(vpc1Servers) == 0 || len(vpc2Servers) == 0 {
+		return fmt.Errorf("need servers in both VPCs for NAT connectivity test") //nolint:err113
+	}
+
+	slog.Debug("Found servers for NAT test", "vpc1", vpc1.Name, "servers", vpc1Servers, "vpc2", vpc2.Name, "servers", vpc2Servers)
+
+	// Get SSH configs for servers
+	sshConfigs := map[string]*sshutil.Config{}
+	for _, serverName := range append(vpc1Servers, vpc2Servers...) {
+		// Find VM by name
+		var vm VM
+		found := false
+		for _, v := range testCtx.vlab.VMs {
+			if v.Name == serverName {
+				vm = v
+				found = true
+
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("VM not found for server %s", serverName) //nolint:err113
+		}
+
+		sshCfg, err := testCtx.vlabCfg.SSHVM(ctx, testCtx.vlab, vm)
+		if err != nil {
+			return fmt.Errorf("getting ssh config for %s: %w", serverName, err)
+		}
+
+		sshConfigs[serverName] = sshCfg
+	}
+
+	// Discover server IPs
+	serverIPs := map[string]netip.Addr{}
+	for _, serverName := range append(vpc1Servers, vpc2Servers...) {
+		sshCfg := sshConfigs[serverName]
+		stdout, stderr, err := sshCfg.Run(ctx, "ip -o -4 addr show | awk '{print $2, $4}'")
+		if err != nil {
+			return fmt.Errorf("getting IP for %s: %w: %s", serverName, err, stderr)
+		}
+
+		found := false
+		for _, line := range strings.Split(strings.TrimSpace(stdout), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) != 2 {
+				continue
+			}
+			if fields[0] == "lo" || fields[0] == "enp2s0" || fields[0] == "docker0" {
+				continue
+			}
+
+			addr, err := netip.ParsePrefix(fields[1])
+			if err != nil {
+				continue
+			}
+
+			serverIPs[serverName] = addr.Addr()
+			found = true
+			slog.Debug("Discovered server IP", "server", serverName, "ip", addr.Addr().String())
+
+			break
+		}
+
+		if !found {
+			return fmt.Errorf("no IP found for server %s", serverName) //nolint:err113
+		}
+	}
+
+	// Parse NAT pools
+	var vpc2NATPoolStart netip.Addr
+	if len(vpc2NATPool) > 0 {
+		prefix, err := netip.ParsePrefix(vpc2NATPool[0])
+		if err != nil {
+			return fmt.Errorf("parsing vpc2 NAT pool: %w", err)
+		}
+		vpc2NATPoolStart = prefix.Addr()
+	}
+
+	// Get VPC subnet starts for offset calculation
+	vpc2SubnetStart := netip.Addr{}
+	for _, subnet := range vpc2.Spec.Subnets {
+		if prefix, err := netip.ParsePrefix(subnet.Subnet); err == nil {
+			vpc2SubnetStart = prefix.Addr()
+
+			break
+		}
+	}
+
+	// Test connectivity: vpc1 -> vpc2 (pinging NAT IP of vpc2 server)
+	pings := semaphore.NewWeighted(10)
+	var errors []error
+	var errMutex sync.Mutex
+
+	for _, serverA := range vpc1Servers {
+		for _, serverB := range vpc2Servers {
+			destIP := serverIPs[serverB]
+
+			// Calculate expected NAT IP for destination
+			natDestIP := destIP
+			if !vpc2NATPoolStart.IsUnspecified() {
+				var err error
+				natDestIP, err = calculateStatelessNATIP(destIP, vpc2SubnetStart, vpc2NATPoolStart)
+				if err != nil {
+					return fmt.Errorf("calculating NAT IP for %s: %w", serverB, err)
+				}
+				slog.Debug("Calculated NAT IP", "server", serverB, "real", destIP, "nat", natDestIP)
+			}
+
+			// Ping NAT IP
+			if err := pings.Acquire(ctx, 1); err != nil {
+				return fmt.Errorf("acquiring ping semaphore: %w", err)
+			}
+
+			go func(from, to string, targetIP netip.Addr) {
+				defer pings.Release(1)
+
+				sshCfg := sshConfigs[from]
+				cmd := fmt.Sprintf("ping -c 5 -W 2 %s", targetIP)
+				stdout, stderr, err := sshCfg.Run(ctx, cmd)
+				if err != nil {
+					slog.Debug("Ping result", "from", from, "to", to, "target", targetIP, "expected", true, "ok", false, "fail", true, "err", err, "stdout", stdout, "stderr", stderr)
+					errMutex.Lock()
+					errors = append(errors, fmt.Errorf("ping from %s to %s (%s) failed: %w", from, to, targetIP, err))
+					errMutex.Unlock()
+				} else {
+					slog.Debug("Ping result", "from", from, "to", to, "target", targetIP, "expected", true, "ok", true, "fail", false, "err", nil, "stdout", stdout, "stderr", stderr)
+				}
+			}(serverA, serverB, natDestIP)
+		}
+	}
+
+	// Wait for all pings to complete
+	if err := pings.Acquire(ctx, 10); err != nil {
+		return fmt.Errorf("waiting for pings: %w", err)
+	}
+
+	if len(errors) > 0 {
+		return fmt.Errorf("NAT ping test failed with %d errors: %v", len(errors), errors) //nolint:err113
+	}
+
+	slog.Debug("NAT ping tests completed successfully, starting iperf3 tests")
+
+	// Test iperf3: vpc1 -> vpc2
+	iperfs := semaphore.NewWeighted(5)
+	errors = []error{}
+
+	for _, serverA := range vpc1Servers {
+		for _, serverB := range vpc2Servers {
+			destIP := serverIPs[serverB]
+
+			// Calculate expected NAT IP for destination
+			natDestIP := destIP
+			if !vpc2NATPoolStart.IsUnspecified() {
+				var err error
+				natDestIP, err = calculateStatelessNATIP(destIP, vpc2SubnetStart, vpc2NATPoolStart)
+				if err != nil {
+					return fmt.Errorf("calculating NAT IP for %s: %w", serverB, err)
+				}
+			}
+
+			if err := iperfs.Acquire(ctx, 1); err != nil {
+				return fmt.Errorf("acquiring iperf3 semaphore: %w", err)
+			}
+
+			go func(from, to string, targetIP netip.Addr) {
+				defer iperfs.Release(1)
+
+				fromSSH := sshConfigs[from]
+				toSSH := sshConfigs[to]
+
+				testCtx, cancel := context.WithTimeout(ctx, 35*time.Second)
+				defer cancel()
+
+				g, gctx := errgroup.WithContext(testCtx)
+
+				// Start iperf3 server
+				g.Go(func() error {
+					cmd := "toolbox -E LD_PRELOAD=/lib/x86_64-linux-gnu/libgcc_s.so.1 -q timeout 30 iperf3 -s -1 -J"
+					stdout, stderr, err := toSSH.Run(gctx, cmd)
+					if err != nil {
+						slog.Error("iperf3 server failed", "to", to, "err", err, "stdout", stdout, "stderr", stderr)
+
+						return fmt.Errorf("running iperf3 server: %w", err)
+					}
+
+					return nil
+				})
+
+				// Start iperf3 client
+				g.Go(func() error {
+					time.Sleep(1 * time.Second) // Give server time to start
+					cmd := fmt.Sprintf("toolbox -E LD_PRELOAD=/lib/x86_64-linux-gnu/libgcc_s.so.1 -q timeout 30 iperf3 -P 4 -J -c %s -t 5 -M 1200", targetIP.String())
+					stdout, stderr, err := fromSSH.Run(gctx, cmd)
+					if err != nil {
+						slog.Error("iperf3 client failed", "from", from, "to", to, "target", targetIP, "err", err, "stdout", stdout, "stderr", stderr)
+
+						return fmt.Errorf("running iperf3 client: %w", err)
+					}
+
+					// Parse iperf3 results
+					report, parseErr := parseIPerf3Report([]byte(stdout))
+					if parseErr == nil {
+						slog.Debug("IPerf3 result", "from", from, "to", to,
+							"sendSpeed", asMbps(report.End.SumSent.BitsPerSecond),
+							"receiveSpeed", asMbps(report.End.SumReceived.BitsPerSecond),
+							"sent", asMB(float64(report.End.SumSent.Bytes)),
+							"received", asMB(float64(report.End.SumReceived.Bytes)))
+					} else {
+						slog.Debug("iperf3 test succeeded", "from", from, "to", to, "target", targetIP)
+					}
+
+					return nil
+				})
+
+				if err := g.Wait(); err != nil {
+					errMutex.Lock()
+					errors = append(errors, fmt.Errorf("iperf3 from %s to %s (%s) failed: %w", from, to, targetIP, err))
+					errMutex.Unlock()
+				}
+			}(serverA, serverB, natDestIP)
+		}
+	}
+
+	// Wait for all iperf3 tests to complete
+	if err := iperfs.Acquire(ctx, 5); err != nil {
+		return fmt.Errorf("waiting for iperf3 tests: %w", err)
+	}
+
+	if len(errors) > 0 {
+		return fmt.Errorf("NAT iperf3 test failed with %d errors: %v", len(errors), errors) //nolint:err113
+	}
+
+	slog.Info("NAT connectivity test (ping+iperf3) completed successfully", "took", time.Since(startTime))
+
+	return nil
+}
+
 // Test basic gateway peering with NAT
 func (testCtx *VPCPeeringTestCtx) gatewayPeeringNATTest(ctx context.Context) (bool, []RevertFunc, error) {
 	vpcs := &vpcapi.VPCList{}
@@ -2540,7 +2853,8 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringNATTest(ctx context.Context) (bo
 	// Wait for NAT gateway peering to take effect
 	time.Sleep(15 * time.Second)
 
-	if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
+	// Test NAT connectivity with custom function that pings correct NAT IPs
+	if err := testCtx.testNATGatewayConnectivity(ctx, vpc1, vpc2, vpc1NATCIDR, vpc2NATCIDR); err != nil {
 		return false, reverts, fmt.Errorf("testing NAT gateway peering connectivity: %w", err)
 	}
 
@@ -2621,7 +2935,9 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringStatefulNATTest(ctx context.Cont
 	// Wait for stateful NAT gateway peering to take effect
 	time.Sleep(15 * time.Second)
 
-	if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
+	// Test stateful NAT connectivity with custom function that pings correct NAT IPs
+	// Note: Stateful NAT uses the same IP translation algorithm as stateless
+	if err := testCtx.testNATGatewayConnectivity(ctx, vpc1, vpc2, vpc1NATCIDR, vpc2NATCIDR); err != nil {
 		return false, reverts, fmt.Errorf("testing stateful NAT gateway peering connectivity: %w", err)
 	}
 
@@ -2635,7 +2951,31 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringOverlapNATTest(ctx context.Conte
 
 	// Use server-02 and detach it from vpc-02
 	serverToDetach := "server-02"
-	attachmentToRemove := "server-02--mclag--leaf-01--leaf-02--vpc-02--subnet-01"
+
+	// Discover server-02's attachment to vpc-02 dynamically by listing all and filtering
+	allAttList := &vpcapi.VPCAttachmentList{}
+	if err := testCtx.kube.List(ctx, allAttList); err != nil {
+		return false, reverts, fmt.Errorf("listing VPCAttachments: %w", err)
+	}
+
+	var attachmentToRemove string
+	var connectionName string
+	for _, att := range allAttList.Items {
+		// Match attachments that belong to server-02 and vpc-02
+		// Format: server-02--{connection}--vpc-02--subnet-01
+		if strings.Contains(att.Name, serverToDetach+"--") && strings.Contains(att.Name, "--vpc-02--") {
+			attachmentToRemove = att.Name
+			connectionName = att.Spec.Connection
+
+			break
+		}
+	}
+
+	if attachmentToRemove == "" {
+		return false, reverts, fmt.Errorf("no VPCAttachment found for server %s in vpc-02 (checked %d attachments)", serverToDetach, len(allAttList.Items)) //nolint:err113
+	}
+
+	slog.Debug("Discovered server attachment", "server", serverToDetach, "attachment", attachmentToRemove, "connection", connectionName)
 
 	// Get vpc-01 (leave it in default namespace)
 	existingVPC := &vpcapi.VPC{}
@@ -2759,15 +3099,15 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringOverlapNATTest(ctx context.Conte
 		return nil
 	})
 
-	// Create new VPC attachment for server-02 to the overlapping VPC
-	newAttachName := "server-02--mclag--leaf-01--leaf-02--vpc-ovrlp--subnet-01"
+	// Create new VPC attachment for server-02 to the overlapping VPC using discovered connection
+	newAttachName := fmt.Sprintf("%s--%s--subnet-01", connectionName, newVPCName)
 	newAttach := &vpcapi.VPCAttachment{
 		ObjectMeta: kmetav1.ObjectMeta{
 			Name:      newAttachName,
 			Namespace: kmetav1.NamespaceDefault,
 		},
 		Spec: vpcapi.VPCAttachmentSpec{
-			Connection: "server-02--mclag--leaf-01--leaf-02",
+			Connection: connectionName,
 			Subnet:     fmt.Sprintf("%s/subnet-01", newVPCName),
 		},
 	}
@@ -2798,9 +3138,9 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringOverlapNATTest(ctx context.Conte
 		return false, reverts, fmt.Errorf("cleaning up server %s: %w: %s", serverToDetach, err, stderr)
 	}
 
-	// Get connection for netconf command
+	// Get connection for netconf command using discovered connection name
 	reusableConnection := &wiringapi.Connection{}
-	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Name: "server-02--mclag--leaf-01--leaf-02", Namespace: kmetav1.NamespaceDefault}, reusableConnection); err != nil {
+	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Name: connectionName, Namespace: kmetav1.NamespaceDefault}, reusableConnection); err != nil {
 		return false, reverts, fmt.Errorf("getting reusable connection: %w", err)
 	}
 
@@ -2833,8 +3173,8 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringOverlapNATTest(ctx context.Conte
 	// Wait for NAT peering to take effect
 	time.Sleep(15 * time.Second)
 
-	// Test connectivity using the standard test framework
-	if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
+	// Test connectivity using custom NAT-aware connectivity testing
+	if err := testCtx.testNATGatewayConnectivity(ctx, existingVPC, newVPC, existingVPCNATCIDR, newVPCNATCIDR); err != nil {
 		return false, reverts, fmt.Errorf("testing NAT gateway peering connectivity: %w", err)
 	}
 
