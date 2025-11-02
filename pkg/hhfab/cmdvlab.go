@@ -61,11 +61,12 @@ func VLABGenerate(ctx context.Context, workDir, cacheDir string, builder VLABBui
 }
 
 type VLABUpOpts struct {
-	HydrateMode  HydrateMode
-	NoCreate     bool
-	ReCreate     bool
-	BuildMode    recipe.BuildMode
-	SetJoinToken string
+	HydrateMode          HydrateMode
+	NoCreate             bool
+	ReCreate             bool
+	BuildMode            recipe.BuildMode
+	SetJoinToken         string
+	ObservabilityTargets string
 	VLABRunOpts
 }
 
@@ -101,10 +102,11 @@ func VLABUp(ctx context.Context, workDir, cacheDir string, opts VLABUpOpts) erro
 	}
 
 	if err := c.build(ctx, BuildOpts{
-		HydrateMode:   opts.HydrateMode,
-		BuildMode:     opts.BuildMode,
-		BuildControls: true,
-		BuildGateways: buildGateways,
+		HydrateMode:          opts.HydrateMode,
+		BuildMode:            opts.BuildMode,
+		BuildControls:        true,
+		BuildGateways:        buildGateways,
+		ObservabilityTargets: opts.ObservabilityTargets,
 	}); err != nil {
 		return fmt.Errorf("building: %w", err)
 	}

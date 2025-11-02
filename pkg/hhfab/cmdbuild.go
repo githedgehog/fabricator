@@ -13,14 +13,17 @@ import (
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/artificer"
 	"go.githedgehog.com/fabricator/pkg/fab/recipe"
+	"go.githedgehog.com/libmeta/pkg/alloy"
+	kyaml "sigs.k8s.io/yaml"
 )
 
 type BuildOpts struct {
-	HydrateMode   HydrateMode
-	BuildMode     recipe.BuildMode
-	BuildControls bool
-	BuildGateways bool
-	SetJoinToken  string
+	HydrateMode          HydrateMode
+	BuildMode            recipe.BuildMode
+	BuildControls        bool
+	BuildGateways        bool
+	SetJoinToken         string
+	ObservabilityTargets string
 }
 
 func Build(ctx context.Context, workDir, cacheDir string, opts BuildOpts) error {
@@ -41,6 +44,36 @@ func (c *Config) build(ctx context.Context, opts BuildOpts) error {
 		if !slices.Equal(node.Spec.Roles, []fabapi.FabNodeRole{fabapi.NodeRoleGateway}) {
 			return fmt.Errorf("unsupported node roles %q (only gateway role is currently supported)", node.Spec.Roles) //nolint:goerr113
 		}
+	}
+
+	targets := alloy.Targets{}
+	if err := kyaml.Unmarshal([]byte(opts.ObservabilityTargets), &targets); err != nil {
+		return fmt.Errorf("unmarshaling extra observability targets: %w", err)
+	}
+
+	if c.Fab.Spec.Config.Observability.Targets.Prometheus == nil {
+		c.Fab.Spec.Config.Observability.Targets.Prometheus = map[string]alloy.PrometheusTarget{}
+	}
+	for name, target := range targets.Prometheus {
+		if _, ok := c.Fab.Spec.Config.Observability.Targets.Prometheus[name]; ok {
+			slog.Warn("Skipping extra Prometheus target that is already defined in Fabricator", "name", name)
+
+			continue
+		}
+		slog.Debug("Adding extra Prometheus target", "name", name)
+		c.Fab.Spec.Config.Observability.Targets.Prometheus[name] = target
+	}
+	if c.Fab.Spec.Config.Observability.Targets.Loki == nil {
+		c.Fab.Spec.Config.Observability.Targets.Loki = map[string]alloy.LokiTarget{}
+	}
+	for name, target := range targets.Loki {
+		if _, ok := c.Fab.Spec.Config.Observability.Targets.Loki[name]; ok {
+			slog.Warn("Skipping extra Loki target that is already defined in Fabricator", "name", name)
+
+			continue
+		}
+		slog.Debug("Adding extra Loki target", "name", name)
+		c.Fab.Spec.Config.Observability.Targets.Loki[name] = target
 	}
 
 	d, err := artificer.NewDownloaderWithDockerCreds(c.CacheDir, c.Repo, c.Prefix)
