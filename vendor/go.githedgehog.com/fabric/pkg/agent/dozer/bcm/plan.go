@@ -983,7 +983,9 @@ func planExternals(agent *agentapi.Agent, spec *dozer.Spec) error {
 						ImportVRFs: map[string]*dozer.SpecVRFBGPImportVRF{},
 					},
 					L2VPNEVPN: dozer.SpecVRFBGPL2VPNEVPN{
-						Enabled: agent.IsSpineLeaf(),
+						Enabled:                       agent.IsSpineLeaf(),
+						AdvertiseIPv4Unicast:          pointer.To(true),
+						AdvertiseIPv4UnicastRouteMaps: []string{extInboundRouteMapName(externalName)},
 					},
 					Neighbors: map[string]*dozer.SpecVRFBGPNeighbor{},
 				},
@@ -1015,16 +1017,11 @@ func planExternals(agent *agentapi.Agent, spec *dozer.Spec) error {
 			},
 		}
 
-		prefList := extOutboundPrefixList(externalName)
-		spec.PrefixLists[prefList] = &dozer.SpecPrefixList{
-			Prefixes: map[uint32]*dozer.SpecPrefixListEntry{},
-		}
-
 		spec.RouteMaps[extOutboundRouteMapName(externalName)] = &dozer.SpecRouteMap{
 			Statements: map[string]*dozer.SpecRouteMapStatement{
 				"10": {
 					Conditions: dozer.SpecRouteMapConditions{
-						MatchPrefixList: pointer.To(prefList),
+						MatchPrefixList: pointer.To(ipnsSubnetsPrefixListName(external.IPv4Namespace)),
 					},
 					SetCommunities: []string{external.OutboundCommunity},
 					Result:         dozer.SpecRouteMapResultAccept,
@@ -1033,6 +1030,29 @@ func planExternals(agent *agentapi.Agent, spec *dozer.Spec) error {
 					Result: dozer.SpecRouteMapResultReject,
 				},
 			},
+		}
+
+		irbVLAN := agent.Spec.Catalog.IRBVLANs[librarian.ReqForExt(externalName)]
+		extVNI := agent.Spec.Catalog.VPCVNIs[librarian.ReqForExt(externalName)]
+		if irbVLAN == 0 {
+			return fmt.Errorf("IRB VLAN for external %s not found in catalog", externalName) //nolint:goerr113
+		}
+		if extVNI == 0 {
+			return fmt.Errorf("VNI for external %s not found in catalog", externalName) //nolint:goerr113
+		}
+		irbIface := vlanName(irbVLAN)
+		spec.Interfaces[irbIface] = &dozer.SpecInterface{
+			Enabled:     pointer.To(true),
+			Description: pointer.To(fmt.Sprintf("External %s IRB", externalName)),
+		}
+		spec.VRFs[extVrfName].Interfaces[irbIface] = &dozer.SpecVRFInterface{}
+		spec.VRFVNIMap[extVrfName] = &dozer.SpecVRFVNIEntry{
+			VNI: pointer.To(extVNI),
+		}
+		spec.VXLANTunnelMap[fmt.Sprintf("map_%d_%s", extVNI, irbIface)] = &dozer.SpecVXLANTunnelMap{
+			VTEP: pointer.To(VTEPFabric),
+			VNI:  pointer.To(extVNI),
+			VLAN: pointer.To(irbVLAN),
 		}
 	}
 
@@ -2813,21 +2833,9 @@ func planExternalPeerings(agent *agentapi.Agent, spec *dozer.Spec) error {
 		}
 
 		for _, subnetName := range peering.Permit.VPC.Subnets {
-			subnet, exists := vpc.Subnets[subnetName]
+			_, exists := vpc.Subnets[subnetName]
 			if !exists {
 				return errors.Errorf("VPC %s subnet %s not found for external peering %s", vpcName, subnetName, name)
-			}
-
-			vni, exists := agent.Spec.Catalog.GetVPCSubnetVNI(vpcName, subnetName)
-			if vni == 0 || !exists {
-				return errors.Errorf("VNI for VPC %s subnet %s not found for external peering %s", vpcName, subnetName, name)
-			}
-
-			spec.PrefixLists[extOutboundPrefixList(externalName)].Prefixes[vni] = &dozer.SpecPrefixListEntry{
-				Prefix: dozer.SpecPrefixListPrefix{
-					Prefix: subnet.Subnet,
-				},
-				Action: dozer.SpecPrefixListActionPermit,
 			}
 		}
 
@@ -2884,15 +2892,6 @@ func planExternalPeerings(agent *agentapi.Agent, spec *dozer.Spec) error {
 				Prefixes: prefixes,
 			}
 
-			importVrfRouteMap := vpcExtImportVrfRouteMapName(vpcName)
-			spec.RouteMaps[importVrfRouteMap].Statements["5"] = &dozer.SpecRouteMapStatement{
-				Conditions: dozer.SpecRouteMapConditions{
-					MatchPrefixList: pointer.To(ipnsSubnetsPrefixListName(vpc.IPv4Namespace)),
-					MatchSourceVRF:  pointer.To(extVrf),
-				},
-				Result: dozer.SpecRouteMapResultReject,
-			}
-
 			idx := agent.Spec.Catalog.ExternalIDs[externalName]
 			if idx == 0 {
 				return errors.Errorf("no external seq for external %s", externalName)
@@ -2900,9 +2899,18 @@ func planExternalPeerings(agent *agentapi.Agent, spec *dozer.Spec) error {
 			if idx < 10 { // first 10 reserved for static statements
 				return errors.Errorf("external seq for external %s is too small", externalName)
 			}
-			if idx >= 10000 {
+			if idx >= 5000 {
 				return errors.Errorf("external seq for external %s is too large", externalName)
 			}
+			importVrfRouteMap := vpcExtImportVrfRouteMapName(vpcName)
+			spec.RouteMaps[importVrfRouteMap].Statements[fmt.Sprintf("%d", 5000+idx)] = &dozer.SpecRouteMapStatement{
+				Conditions: dozer.SpecRouteMapConditions{
+					MatchPrefixList: pointer.To(ipnsSubnetsPrefixListName(vpc.IPv4Namespace)),
+					MatchSourceVRF:  pointer.To(extVrf),
+				},
+				Result: dozer.SpecRouteMapResultReject,
+			}
+
 			spec.RouteMaps[importVrfRouteMap].Statements[fmt.Sprintf("%d", 50000+idx)] = &dozer.SpecRouteMapStatement{
 				Conditions: dozer.SpecRouteMapConditions{
 					MatchCommunityList: pointer.To(extInboundCommListName(externalName)),
@@ -2915,7 +2923,7 @@ func planExternalPeerings(agent *agentapi.Agent, spec *dozer.Spec) error {
 			spec.VRFs[extVrf].BGP.IPv4Unicast.ImportVRFs[vpcVrf] = &dozer.SpecVRFBGPImportVRF{}
 			spec.VRFs[vpcVrf].BGP.IPv4Unicast.ImportVRFs[extVrf] = &dozer.SpecVRFBGPImportVRF{}
 		} else {
-			sub1, sub2, ip1, ip2, err := planLoopbackWorkaround(agent, spec, librarian.LoWReqForExt(name))
+			sub1, sub2, ip1, ip2, err := planLoopbackWorkaround(agent, spec, librarian.ReqForExt(name))
 			if err != nil {
 				return errors.Wrapf(err, "failed to plan loopback workaround for external peering %s", name)
 			}
@@ -3113,10 +3121,6 @@ func extInboundCommListName(external string) string {
 
 func extInboundRouteMapName(external string) string {
 	return fmt.Sprintf("ext-inbound--%s", external)
-}
-
-func extOutboundPrefixList(external string) string {
-	return fmt.Sprintf("ext-outbound--%s", external)
 }
 
 func extOutboundRouteMapName(external string) string {
