@@ -1047,6 +1047,7 @@ const (
 	srvPrefix = "enp2s"
 	swMPrefix = "M1"
 	swEPrefix = "E1/"
+	gwPrefix  = "port"
 )
 
 var devlinkPhysPort = regexp.MustCompile(`^` + srvPrefix + `\d+np\d+$`)
@@ -1069,6 +1070,8 @@ func getNICID(nic string) (uint, error) {
 		raw = nic[len(srvPrefix):]
 	} else if strings.HasPrefix(nic, swEPrefix) {
 		raw = nic[len(swEPrefix):]
+	} else if strings.HasPrefix(nic, gwPrefix) {
+		raw = nic[len(gwPrefix):]
 	} else {
 		return 0, fmt.Errorf("invalid NIC ID %q", nic) //nolint:goerr113
 	}
