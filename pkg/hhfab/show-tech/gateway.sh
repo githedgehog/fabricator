@@ -2,7 +2,7 @@
 # Copyright 2025 Hedgehog
 # SPDX-License-Identifier: Apache-2.0
 
-# show-tech.sh: Collect diagnostics from a Gateway node (OS level + FRR/vtysh).
+# show-tech.sh: Collect diagnostics from a Gateway node (OS level + FRR/vtysh + dataplane).
 set +e
 
 OUTPUT_FILE="/tmp/show-tech.log"
@@ -14,10 +14,22 @@ FRR_CONTAINER_ID=$(sudo crictl --runtime-endpoint unix:///run/k3s/containerd/con
     | grep ' frr ' \
     | awk '{print $1}')
 
+# Find the running dataplane container ID
+DATAPLANE_CONTAINER_ID=$(sudo crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock ps \
+    | grep ' dataplane ' \
+    | awk '{print $1}')
+
 # Helper for running vtysh commands inside the FRR container
 run_vtysh_cmd() {
     echo -e "\n=== Executing: vtysh -c '$1' ===" >> "$OUTPUT_FILE"
     sudo crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock exec -it "$FRR_CONTAINER_ID" vtysh -c "$1" >> "$OUTPUT_FILE" 2>&1
+}
+
+# Helper for running dataplane-cli show commands inside the dataplane container
+run_dataplane_show() {
+    local CMD="$1"
+    echo -e "\n=== Executing: /dataplane-cli -c 'connect /tmp/dataplane_ctl.sock; $CMD' ===" >> "$OUTPUT_FILE"
+    sudo crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock exec -it "$DATAPLANE_CONTAINER_ID" /dataplane-cli -c "connect /tmp/dataplane_ctl.sock; $CMD" >> "$OUTPUT_FILE" 2>&1
 }
 
 # ---------------------------
@@ -101,6 +113,49 @@ run_vtysh_cmd() {
     run_vtysh_cmd "show memory"
     run_vtysh_cmd "show thread cpu"
     run_vtysh_cmd "show ip bgp"
+} >> "$OUTPUT_FILE" 2>&1
+
+# ---------------------------
+# Dataplane CLI Diagnostics
+# ---------------------------
+{
+    echo -e "\n=== Dataplane CLI Diagnostics ==="
+
+    # List of all show commands to collect
+    run_dataplane_show "show adjacency-table"
+    run_dataplane_show "show dpdk port"
+    run_dataplane_show "show dpdk port stats"
+    run_dataplane_show "show evpn rmac-store"
+    run_dataplane_show "show evpn vrfs"
+    run_dataplane_show "show evpn vtep"
+    run_dataplane_show "show interface"
+    run_dataplane_show "show interface address"
+    run_dataplane_show "show ip fib"
+    run_dataplane_show "show ip fib group"
+    run_dataplane_show "show ip next-hop"
+    run_dataplane_show "show ip route"
+    run_dataplane_show "show ip route summary"
+    run_dataplane_show "show ipv6 fib"
+    run_dataplane_show "show ipv6 fib group"
+    run_dataplane_show "show ipv6 next-hop"
+    run_dataplane_show "show ipv6 route"
+    run_dataplane_show "show ipv6 route summary"
+    run_dataplane_show "show kernel interfaces"
+    run_dataplane_show "show nat port-usage"
+    run_dataplane_show "show nat rules"
+    run_dataplane_show "show pipeline"
+    run_dataplane_show "show pipeline stages"
+    run_dataplane_show "show pipeline stats"
+    run_dataplane_show "show router cpi stats"
+    run_dataplane_show "show router events"
+    run_dataplane_show "show router frrmi stats"
+    run_dataplane_show "show router frrmi last-config"
+    run_dataplane_show "show tracing tag-groups"
+    run_dataplane_show "show tracing targets"
+    run_dataplane_show "show vpc"
+    run_dataplane_show "show vpc peering interfaces"
+    run_dataplane_show "show vpc peering policies"
+    run_dataplane_show "show vrf"
 } >> "$OUTPUT_FILE" 2>&1
 
 # ---------------------------
