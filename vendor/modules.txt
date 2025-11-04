@@ -1287,7 +1287,7 @@ github.com/mailru/easyjson/jwriter
 github.com/manifoldco/promptui
 github.com/manifoldco/promptui/list
 github.com/manifoldco/promptui/screenbuf
-# github.com/maruel/natural v1.1.1
+# github.com/maruel/natural v1.2.1
 ## explicit; go 1.21
 github.com/maruel/natural
 # github.com/mattn/go-colorable v0.1.13
@@ -1695,7 +1695,7 @@ go.etcd.io/bbolt
 go.etcd.io/bbolt/errors
 go.etcd.io/bbolt/internal/common
 go.etcd.io/bbolt/internal/freelist
-# go.githedgehog.com/fabric v0.94.1
+# go.githedgehog.com/fabric v0.94.2
 ## explicit; go 1.25
 go.githedgehog.com/fabric/api/agent/v1beta1
 go.githedgehog.com/fabric/api/dhcp/v1beta1
