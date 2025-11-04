@@ -7,6 +7,11 @@ alloy:
   enableReporting: false
   listenAddr: 0.0.0.0 # localhost will break readiness probes
   listenPort: 12345
+  extraPorts:
+    - name: "pyroscope"
+      port: 4040
+      protocol: "TCP"
+      targetPort: 4040
   storagePath: /tmp/alloy
   mounts:
     varlog: true
@@ -25,7 +30,7 @@ configReloader:
   enabled: false
 
 service:
-  enabled: false
+  enabled: true
 
 controller:
   type: "daemonset"

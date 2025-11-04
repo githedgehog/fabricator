@@ -39,9 +39,8 @@ func Install(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 		if err != nil {
 			return nil, fmt.Errorf("url parsing prometheus target failed: %w", err)
 		}
-		hostname := u.Hostname()
-		if hostname != "" {
-			urls = append(urls, u.Hostname())
+		if hostname := u.Hostname(); hostname != "" {
+			urls = append(urls, hostname)
 		}
 	}
 	for _, val := range cfg.Spec.Config.Observability.Targets.Loki {
@@ -49,9 +48,17 @@ func Install(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 		if err != nil {
 			return nil, fmt.Errorf("url parsing loki target failed: %w", err)
 		}
-		hostname := u.Hostname()
-		if hostname != "" {
-			urls = append(urls, u.Hostname())
+		if hostname := u.Hostname(); hostname != "" {
+			urls = append(urls, hostname)
+		}
+	}
+	for _, val := range cfg.Spec.Config.Observability.Targets.Pyroscope {
+		u, err := url.Parse(val.URL)
+		if err != nil {
+			return nil, fmt.Errorf("url parsing pyroscope target failed: %w", err)
+		}
+		if hostname := u.Hostname(); hostname != "" {
+			urls = append(urls, hostname)
 		}
 	}
 	urls = lo.Uniq(urls)

@@ -557,6 +557,10 @@ func (f *Fabricator) Default() {
 		}
 	}
 
+	if f.Spec.Config.Observability.Targets.Pyroscope == nil {
+		f.Spec.Config.Observability.Targets.Pyroscope = map[string]alloy.PyroscopeTarget{}
+	}
+
 	f.Spec.Config.Fabric.DefaultAlloyConfig = fmeta.AlloyConfig{}
 
 	for name, target := range f.Spec.Config.Observability.Targets.Prometheus {
@@ -580,6 +584,17 @@ func (f *Fabricator) Default() {
 			}
 		}
 		f.Spec.Config.Observability.Targets.Loki[name] = target
+	}
+	for name, target := range f.Spec.Config.Observability.Targets.Pyroscope {
+		if target.Labels == nil {
+			target.Labels = map[string]string{}
+		}
+		for k, v := range f.Spec.Config.Observability.Labels {
+			if _, ok := target.Labels[k]; !ok {
+				target.Labels[k] = v
+			}
+		}
+		f.Spec.Config.Observability.Targets.Pyroscope[name] = target
 	}
 }
 
