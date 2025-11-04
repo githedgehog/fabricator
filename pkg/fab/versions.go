@@ -17,8 +17,8 @@ var (
 	FabricatorVersion = meta.Version(version.Version)
 	FabricVersion     = meta.Version("v0.94.1")
 	GatewayVersion    = meta.Version("v0.23.0")
-	DataplaneVersion  = meta.Version("x86_64-unknown-linux-gnu.release.fb59f2f1ef28a714d22987a5958a964a0728c5de")
-	FRRVersion        = meta.Version("267f854b266a4184f01d52a841a5d4dbf47e80d2.release")
+	DataplaneVersion  = meta.Version("x86_64-unknown-linux-gnu.release.d6835fb07764549e866ad3f0ae1aab47e4c475d3")
+	FRRVersion        = meta.Version("7def4a3770b4c9fd0090fb3fe6a4f8eff0346b85.release")
 	BCMSONiCVersion   = meta.Version("v4.5.0")
 	CLSSONiCVersion   = meta.Version("v4.1.0-beta1-hh")
 
