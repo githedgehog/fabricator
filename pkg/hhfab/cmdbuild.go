@@ -75,6 +75,18 @@ func (c *Config) build(ctx context.Context, opts BuildOpts) error {
 		slog.Debug("Adding extra Loki target", "name", name)
 		c.Fab.Spec.Config.Observability.Targets.Loki[name] = target
 	}
+	if c.Fab.Spec.Config.Observability.Targets.Pyroscope == nil {
+		c.Fab.Spec.Config.Observability.Targets.Pyroscope = map[string]alloy.PyroscopeTarget{}
+	}
+	for name, target := range targets.Pyroscope {
+		if _, ok := c.Fab.Spec.Config.Observability.Targets.Pyroscope[name]; ok {
+			slog.Warn("Skipping extra Pyroscope target that is already defined in Fabricator", "name", name)
+
+			continue
+		}
+		slog.Debug("Adding extra Pyroscope target", "name", name)
+		c.Fab.Spec.Config.Observability.Targets.Pyroscope[name] = target
+	}
 
 	d, err := artificer.NewDownloaderWithDockerCreds(c.CacheDir, c.Repo, c.Prefix)
 	if err != nil {

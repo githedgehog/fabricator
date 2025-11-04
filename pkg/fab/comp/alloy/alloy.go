@@ -73,6 +73,9 @@ func Install(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 
 			Scrapes:  map[string]alloy.Scrape{},
 			LogFiles: map[string]alloy.LogFile{},
+			Pyroscope: alloy.Pyroscope{
+				Enable: true,
+			},
 		}
 		if cfg.Spec.Config.Gateway.Observability != nil {
 			obs := cfg.Spec.Config.Gateway.Observability
