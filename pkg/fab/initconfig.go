@@ -38,6 +38,7 @@ type InitConfigInput struct {
 	IncludeCLS                bool
 	RegUpstream               *fabapi.ControlConfigRegistryUpstream
 	ControlNodeManagementLink string
+	GatewayNodeManagementLink string
 	Gateway                   bool
 	JoinToken                 string
 	SaveJoinToken             bool

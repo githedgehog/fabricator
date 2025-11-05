@@ -51,6 +51,7 @@ const (
 	FlagIncludeONIE               = "include-onie"
 	FlagIncludeCLS                = "include-cls"
 	FlagControlNodeMgmtLink       = "control-node-mgmt-link"
+	FlagGatewayNodeMgmtLink       = "gateway-node-mgmt-link"
 	FlagGateway                   = "gateway"
 	FlagO11yDefaults              = "o11y-defaults"
 	FlagO11yLabels                = "o11y-labels"
@@ -561,6 +562,13 @@ func Run(ctx context.Context) error {
 						Usage:    "[PREVIEW] control node management link (for pci passthrough for VLAB-only)",
 						EnvVars:  []string{"HHFAB_CONTROL_NODE_MGMT_LINK"},
 					},
+					&cli.StringFlag{
+						Category: FlagCatGenConfig,
+						Name:     FlagGatewayNodeMgmtLink,
+						Hidden:   !preview,
+						Usage:    "[PREVIEW] gateway node management link (for pci passthrough for VLAB-only)",
+						EnvVars:  []string{"HHFAB_GATEWAY_NODE_MGMT_LINK"},
+					},
 					&cli.BoolFlag{
 						Category: FlagCatGenConfig,
 						Name:     FlagGateway,
@@ -614,6 +622,7 @@ func Run(ctx context.Context) error {
 							IncludeONIE:               c.Bool(FlagIncludeONIE),
 							IncludeCLS:                c.Bool(FlagIncludeCLS),
 							ControlNodeManagementLink: c.String(FlagControlNodeMgmtLink),
+							GatewayNodeManagementLink: c.String(FlagGatewayNodeMgmtLink),
 							Gateway:                   c.Bool(FlagGateway),
 							JoinToken:                 joinToken,
 							SaveJoinToken:             saveJoinToken,

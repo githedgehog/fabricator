@@ -131,6 +131,10 @@ kind: FabNode
 metadata:
   name: gateway-1
   namespace: fab
+  {{- if .GatewayNodeManagementLink }}
+  annotations:
+    link.hhfab.githedgehog.com/enp2s0: {{ .GatewayNodeManagementLink}}
+  {{- end }}
 spec:
   roles:
     - gateway

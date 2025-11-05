@@ -226,7 +226,8 @@ jobs:
             --fabric-mode=${{ inputs.fabricmode }} \
             --include-onie=${{ inputs.includeonie }} \
             --gateway=${{ inputs.gateway }} \
-            -w "./lab-ci/envs/$KUBE_NODE/wiring.yaml"
+            -w "./lab-ci/envs/$KUBE_NODE/wiring.yaml" \
+            ${{ inputs.gateway && '-w "./lab-ci/envs/$KUBE_NODE/wiring-gateway.yaml"' || '' }}
 
       - name: Print hhfab versions and generate diagrams
         run: |
