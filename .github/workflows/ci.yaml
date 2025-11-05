@@ -333,6 +333,15 @@ jobs:
             hybrid: true
             upgradefrom: ""
 
+          # hlab gateway l2vni
+          - mesh: false
+            gateway: true
+            includeonie: false
+            buildmode: iso
+            vpcmode: ${{ github.event_name == 'workflow_dispatch' && inputs.hlab_vpc_mode || 'l2vni' }}
+            hybrid: true
+            upgradefrom: ""
+
           # l2vni from 25.04
           - mesh: false
             gateway: false
