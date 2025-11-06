@@ -2512,6 +2512,10 @@ func calculateStatelessNATIP(sourceIP, sourceSubnet, natPoolStart netip.Addr) (n
 // testNATGatewayConnectivity performs E2E connectivity testing for NAT gateway peering.
 // It discovers server IPs, calculates expected NAT IPs, and performs ping/iperf3 tests.
 // NOTE: This uses calculateStatelessNATIP which couples to the dataplane NAT algorithm.
+// The function supports both source NAT and destination NAT:
+// - If vpc2NATPool is set: vpc1 pings vpc2 using vpc2's NAT IPs (destination NAT)
+// - If vpc2NATPool is empty: vpc1 pings vpc2's real IPs (source NAT on vpc1 side)
+// vpc1NATPool is not used because source NAT is transparent from the client perspective.
 func (testCtx *VPCPeeringTestCtx) testNATGatewayConnectivity(
 	ctx context.Context,
 	vpc1, vpc2 *vpcapi.VPC,
@@ -2637,7 +2641,9 @@ func (testCtx *VPCPeeringTestCtx) testNATGatewayConnectivity(
 		}
 	}
 
-	// Test connectivity: vpc1 -> vpc2 (pinging NAT IP of vpc2 server)
+	// Test connectivity: vpc1 -> vpc2
+	// If vpc2NATPool is set, ping vpc2's NAT IPs (destination NAT)
+	// If vpc2NATPool is empty, ping vpc2's real IPs (source NAT on vpc1 side)
 	pings := semaphore.NewWeighted(10)
 	var errors []error
 	var errMutex sync.Mutex
@@ -2646,9 +2652,9 @@ func (testCtx *VPCPeeringTestCtx) testNATGatewayConnectivity(
 		for _, serverB := range vpc2Servers {
 			destIP := serverIPs[serverB]
 
-			// Calculate expected NAT IP for destination
+			// Calculate expected NAT IP for destination (only if vpc2 has NAT configured)
 			natDestIP := destIP
-			if !vpc2NATPoolStart.IsUnspecified() {
+			if len(vpc2NATPool) > 0 && !vpc2NATPoolStart.IsUnspecified() {
 				var err error
 				natDestIP, err = calculateStatelessNATIP(destIP, vpc2SubnetStart, vpc2NATPoolStart)
 				if err != nil {
@@ -2699,9 +2705,9 @@ func (testCtx *VPCPeeringTestCtx) testNATGatewayConnectivity(
 		for _, serverB := range vpc2Servers {
 			destIP := serverIPs[serverB]
 
-			// Calculate expected NAT IP for destination
+			// Calculate expected NAT IP for destination (only if vpc2 has NAT configured)
 			natDestIP := destIP
-			if !vpc2NATPoolStart.IsUnspecified() {
+			if len(vpc2NATPool) > 0 && !vpc2NATPoolStart.IsUnspecified() {
 				var err error
 				natDestIP, err = calculateStatelessNATIP(destIP, vpc2SubnetStart, vpc2NATPoolStart)
 				if err != nil {
@@ -2865,7 +2871,9 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringNATTest(ctx context.Context) (bo
 	return false, reverts, nil
 }
 
-// Test basic gateway peering with stateful NAT
+// Test basic gateway peering with stateful source NAT
+// Note: Stateful NAT has a limitation where it can only be configured on one side of the peering.
+// This test configures NAT on vpc-01 side only, allowing vpc-01 to reach vpc-02 with source NAT.
 func (testCtx *VPCPeeringTestCtx) gatewayPeeringStatefulNATTest(ctx context.Context) (bool, []RevertFunc, error) {
 	vpcs := &vpcapi.VPCList{}
 	if err := testCtx.kube.List(ctx, vpcs); err != nil {
@@ -2905,7 +2913,7 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringStatefulNATTest(ctx context.Cont
 	}
 
 	vpc1NATCIDR := []string{"192.168.11.0/24"}
-	vpc2NATCIDR := []string{"192.168.12.0/24"}
+	vpc2NATCIDR := []string{} // Empty - no NAT on vpc-02 side (limitation: NAT only on one side)
 
 	// Configure stateful NAT with custom idle timeout
 	statefulNATConfig := &gwapi.PeeringNAT{
@@ -2939,8 +2947,9 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringStatefulNATTest(ctx context.Cont
 	// Wait for stateful NAT gateway peering to take effect
 	time.Sleep(15 * time.Second)
 
-	// Test stateful NAT connectivity with custom function that pings correct NAT IPs
-	// Note: Stateful NAT uses the same IP translation algorithm as stateless
+	// Test stateful NAT connectivity from vpc1 to vpc2
+	// vpc1 will present to vpc2 as 192.168.11.x (NAT translation)
+	// vpc2 has no NAT, so remains as 10.0.2.x
 	if err := testCtx.testNATGatewayConnectivity(ctx, vpc1, vpc2, vpc1NATCIDR, vpc2NATCIDR); err != nil {
 		if testCtx.pauseOnFail {
 			pauseOnFail()
