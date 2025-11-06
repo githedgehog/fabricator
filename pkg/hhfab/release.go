@@ -4546,6 +4546,7 @@ func makeVpcPeeringsBasicSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 			ExpectFailure: true,
 			SkipFlags: SkipFlags{
 				NoGateway: true,
+				NoServers: true,
 			},
 		},
 		{
@@ -4554,6 +4555,7 @@ func makeVpcPeeringsBasicSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 			ExpectFailure: true,
 			SkipFlags: SkipFlags{
 				NoGateway: true,
+				NoServers: true,
 			},
 		},
 		{
@@ -4562,6 +4564,7 @@ func makeVpcPeeringsBasicSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 			ExpectFailure: true,
 			SkipFlags: SkipFlags{
 				NoGateway: true,
+				NoServers: true,
 			},
 		},
 	}
