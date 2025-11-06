@@ -782,7 +782,62 @@ func splitExternalNodes(externals []Node, links []Link, leaves []Node) ([]Node, 
 	leftExternals := []Node{}
 	rightExternals := []Node{}
 
-	// If only one external, default to right side unless it clearly connects to the left
+	// Special handling for mesh triangle topology
+	if detectMeshTriangle(leaves, links) && len(leaves) == 3 {
+		leafIndexMap := make(map[string]int)
+		for i, leaf := range leaves {
+			leafIndexMap[leaf.ID] = i
+		}
+
+		// Sort externals by ID for deterministic output
+		sortedExternals := make([]Node, len(externals))
+		copy(sortedExternals, externals)
+		sort.Slice(sortedExternals, func(i, j int) bool {
+			return sortedExternals[i].ID < sortedExternals[j].ID
+		})
+
+		for _, ext := range sortedExternals {
+			var connectsTo [3]bool
+
+			for _, link := range links {
+				var leafID string
+				if link.Source == ext.ID {
+					leafID = link.Target
+				} else if link.Target == ext.ID {
+					leafID = link.Source
+				}
+
+				if idx, exists := leafIndexMap[leafID]; exists {
+					connectsTo[idx] = true
+				}
+			}
+
+			// Place based on connection pattern
+			placeLeft := (connectsTo[0] && connectsTo[1] && !connectsTo[2]) || // left+top
+				(connectsTo[0] && !connectsTo[1] && !connectsTo[2]) // left only
+
+			placeRight := (connectsTo[1] && connectsTo[2] && !connectsTo[0]) || // top+right
+				(connectsTo[2] && !connectsTo[0] && !connectsTo[1]) // right only
+
+			switch {
+			case placeLeft:
+				leftExternals = append(leftExternals, ext)
+			case placeRight:
+				rightExternals = append(rightExternals, ext)
+			default:
+				// Balance for all other patterns
+				if len(leftExternals) <= len(rightExternals) {
+					leftExternals = append(leftExternals, ext)
+				} else {
+					rightExternals = append(rightExternals, ext)
+				}
+			}
+		}
+
+		return leftExternals, rightExternals
+	}
+
+	// Standard algorithm for non-mesh-triangle topologies
 	if len(externals) == 1 {
 		leftCount, rightCount := 0, 0
 		for _, link := range links {
