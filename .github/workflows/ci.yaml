@@ -324,15 +324,6 @@ jobs:
             hybrid: false
             upgradefrom: ""
 
-          # hlab l2vni
-          - mesh: false
-            gateway: false
-            includeonie: false
-            buildmode: iso
-            vpcmode: ${{ github.event_name == 'workflow_dispatch' && inputs.hlab_vpc_mode || 'l2vni' }}
-            hybrid: true
-            upgradefrom: ""
-
           # hlab gateway l2vni
           - mesh: false
             gateway: true
