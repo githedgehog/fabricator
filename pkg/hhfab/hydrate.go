@@ -892,11 +892,23 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 					return fmt.Errorf("parsing gateway %s link %d switch IP %s: %w", gwName, idx, link.Switch.IP, err)
 				}
 
+				asn := uint32(0)
+				for _, sw := range switches.Items {
+					if sw.Name == link.Switch.DeviceName() {
+						asn = sw.Spec.ASN
+
+						break
+					}
+				}
+				if asn == 0 {
+					return fmt.Errorf("switch %s not found or ASN not set", link.Switch.DeviceName()) //nolint:err113
+				}
+
 				// TODO check that it's not already set?
 				gw.Spec.Neighbors = append(gw.Spec.Neighbors, gwapi.GatewayBGPNeighbor{
 					Source: link.Gateway.LocalPortName(),
 					IP:     switchIP.Addr().String(),
-					ASN:    c.Fab.Spec.Config.Fabric.SpineASN,
+					ASN:    asn,
 				})
 
 				if err := kube.Update(ctx, gw); err != nil {
