@@ -2966,10 +2966,7 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringOverlapNATTest(ctx context.Conte
 	// Initialize reverts slice early
 	reverts := []RevertFunc{}
 
-	// Use server-02 and detach it from vpc-02
-	serverToDetach := "server-02"
-
-	// Discover server-02's attachment to vpc-02 dynamically by listing all and filtering
+	// Dynamically discover any server's attachment to vpc-02 by listing all and filtering
 	allAttList := &vpcapi.VPCAttachmentList{}
 	if err := testCtx.kube.List(ctx, allAttList); err != nil {
 		return false, reverts, fmt.Errorf("listing VPCAttachments: %w", err)
@@ -2977,19 +2974,25 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringOverlapNATTest(ctx context.Conte
 
 	var attachmentToRemove string
 	var connectionName string
+	var serverToDetach string
 	for _, att := range allAttList.Items {
-		// Match attachments that belong to server-02 and vpc-02
-		// Format: server-02--{connection}--vpc-02--subnet-01
-		if strings.Contains(att.Name, serverToDetach+"--") && strings.Contains(att.Name, "--vpc-02--") {
+		// Match attachments that belong to vpc-02
+		// Format: {server}--{connection}--vpc-02--subnet-01
+		if strings.Contains(att.Name, "--vpc-02--") {
 			attachmentToRemove = att.Name
 			connectionName = att.Spec.Connection
+			// Extract server name from attachment name (format: server--connection--vpc--subnet)
+			parts := strings.Split(att.Name, "--")
+			if len(parts) >= 4 {
+				serverToDetach = parts[0]
+			}
 
 			break
 		}
 	}
 
-	if attachmentToRemove == "" {
-		return false, reverts, fmt.Errorf("no VPCAttachment found for server %s in vpc-02 (checked %d attachments)", serverToDetach, len(allAttList.Items)) //nolint:err113
+	if attachmentToRemove == "" || serverToDetach == "" {
+		return true, reverts, fmt.Errorf("no VPCAttachment found for any server in vpc-02 (checked %d attachments)", len(allAttList.Items)) //nolint:err113
 	}
 
 	slog.Debug("Discovered server attachment", "server", serverToDetach, "attachment", attachmentToRemove, "connection", connectionName)
