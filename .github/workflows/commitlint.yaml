@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   commitlint:
-    runs-on: lab
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
