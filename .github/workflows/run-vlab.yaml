@@ -183,8 +183,8 @@ jobs:
             --vpc-mode="${{ inputs.vpcmode != 'l2vni' && inputs.vpcmode || ''  }}" \
             ${{ inputs.hybrid && '--controls-restricted=false' || '' }} \
             ${{ inputs.hybrid && '--ready switch-reinstall' || '' }} \
-            --ready=inspect \
             --ready=setup-vpcs \
+            --ready=inspect \
             ${{ inputs.upgradefrom != '25.03' && '--ready=setup-peerings' || '' }} \
             --ready=test-connectivity \
             --ready=exit
