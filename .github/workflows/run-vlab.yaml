@@ -47,11 +47,6 @@ on:
         type: string
         required: false
         default: "l2vni"
-      releasetest:
-        description: "Run Release tests"
-        type: boolean
-        required: false
-        default: false
       hybrid:
         description: "Enable hybrid mode (use env with physical switches)"
         type: boolean
@@ -62,8 +57,28 @@ on:
         type: string
         required: false
         default: ""
+      releasetest:
+        description: "Run Release tests"
+        type: boolean
+        required: false
+        default: false
+      releasetest_regex:
+        description: "Run only release tests matched by regex"
+        type: string
+        required: false
+        default: ""
+      releasetest_regex_invert:
+        description: "Invert release test regex (only if regex is provided)"
+        type: boolean
+        required: false
+        default: false
       debug:
         description: "Enable tmate debugging"
+        type: boolean
+        required: false
+        default: false
+      pause_on_failure:
+        description: "Pause on failure (only if debug is enabled)"
         type: boolean
         required: false
         default: false
@@ -73,7 +88,7 @@ permissions:
 
 env:
   # global workflow configs
-  slug: "${{ inputs.hybrid && 'h' || 'v' }}-${{ inputs.upgradefrom }}${{ inputs.upgradefrom && '-' || '' }}${{ inputs.fabricmode != 'spine-leaf' && inputs.fabricmode || '' }}${{ inputs.mesh && 'mesh-' || '' }}${{ inputs.gateway && 'gw-' || '' }}${{ inputs.includeonie && 'onie-' || '' }}${{ inputs.buildmode }}-${{ inputs.vpcmode }}"
+  slug: "${{ inputs.hybrid && 'h' || 'v' }}-${{ inputs.upgradefrom }}${{ inputs.upgradefrom && '-' || '' }}${{ inputs.fabricmode != 'spine-leaf' && inputs.fabricmode || '' }}${{ inputs.mesh && 'mesh-' || '' }}${{ inputs.gateway && 'gw-' || '' }}${{ inputs.includeonie && 'onie-' || '' }}${{ inputs.buildmode }}-${{ inputs.vpcmode }}${{ inputs.releasetest && '-rt' || '' }}${{ inputs.releasetest_regex != '' && 'r' || '' }}"
   # env vars to configure hhfab
   HHFAB_REG_REPO: 127.0.0.1:30000
   HHFAB_VLAB_COLLECT: true
@@ -100,10 +115,13 @@ jobs:
           echo "  Include ONIE: ${{ inputs.includeonie }}"
           echo "  Build mode: ${{ inputs.buildmode }}"
           echo "  VPC mode: ${{ inputs.vpcmode }}"
-          echo "  Release test: ${{ inputs.releasetest }}"
           echo "  Hybrid: ${{ inputs.hybrid }}"
           echo "  Upgrade from: ${{ inputs.upgradefrom }}"
+          echo "  Release test: ${{ inputs.releasetest }}"
+          echo "  Release test regex: ${{ inputs.releasetest_regex }}"
+          echo "  Release test regex invert: ${{ inputs.releasetest_regex_invert }}"
           echo "  Debug: ${{ inputs.debug }}"
+          echo "  Pause on failure: ${{ inputs.pause_on_failure }}"
           echo "Calculated:"
           echo "  Slug: ${{ env.slug }}"
 
@@ -250,7 +268,10 @@ jobs:
             --ready=setup-peerings \
             --ready=test-connectivity \
             ${{ inputs.releasetest && '--ready=release-test' || '' }} \
+            ${{ inputs.releasetest_regex && format('--release-test-regexes="{0}"', inputs.releasetest_regex) || '' }} \
+            ${{ inputs.releasetest_regex_invert && '--release-test-regexes-invert' || '' }} \
             --ready=exit \
+            ${{ inputs.pause_on_failure && inputs.debug && '--pause-on-failure' || '' }} \
             ${{ inputs.upgradefrom != '' && '--upgrade' || '' }}
 
       - name: Upload Release Test Results
