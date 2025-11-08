@@ -173,4 +173,26 @@ flag and argument to `hhfab init` along with other flags. From there continue
 * `hhfab vlab gen`
 * `hhfab vlab up --mode iso`
 
+## Documentation
+
+### Getting Started
+
+- **[Usage Guide](docs/usage/USAGE_GUIDE.md)** - Comprehensive usage instructions with examples
+- **[Debug Guide](docs/debug/DEBUG_GUIDE.md)** - Debugging tools and techniques
+- **[Troubleshooting](docs/debug/TROUBLESHOOTING.md)** - Solutions to common problems
+
+### Helper Tools
+
+Debug helper scripts are available in `hack/debug/`:
+
+- `collect-debug-info.sh` - Collect system and environment information
+- `verify-system.sh` - Verify system meets requirements
+- `check-vlab-health.sh` - Check VLAB environment health
+
+### Additional Documentation
+
+- **[API Reference](docs/api.md)** - Fabricator API documentation
+- **[Trivy Security Scans](hack/README_Trivy_Scans.md)** - Security scanning guide
+- **[Test Diagrams](hack/README_Test_Diagrams.md)** - Testing documentation
+
 
