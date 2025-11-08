@@ -167,6 +167,7 @@ func InstallManagementDHCPSubnet(cfg fabapi.Fabricator) ([]kclient.Object, error
 	return []kclient.Object{
 		comp.NewDHCPSubnet(dhcpapi.ManagementSubnet, dhcpapi.DHCPSubnetSpec{
 			Subnet:      dhcpapi.ManagementSubnet,
+			ONIEOnly:    true,
 			CIDRBlock:   mgmt.Masked().String(),
 			Gateway:     mgmt.Addr().Next().String(),
 			StartIP:     string(cfg.Spec.Config.Fabric.ManagementDHCPStart),
