@@ -34,6 +34,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/util/sshutil"
 	gwapi "go.githedgehog.com/gateway/api/gateway/v1alpha1"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/term"
 	corev1 "k8s.io/api/core/v1"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -270,7 +271,6 @@ func (testCtx *VPCPeeringTestCtx) getSSH(ctx context.Context, nodeName string) (
 func changeAgentStatus(ctx context.Context, ssh *sshutil.Config, swName string, up bool) error {
 	cmd := fmt.Sprintf("sudo systemctl %s hedgehog-agent.service", map[bool]string{true: "start", false: "stop"}[up])
 	_, stderr, err := ssh.Run(ctx, cmd)
-
 	if err != nil {
 		return fmt.Errorf("changing agent status on switch %s: %w: %s", swName, err, stderr)
 	}
@@ -3132,7 +3132,7 @@ func makeTestCtx(kube kclient.Client, setupOpts SetupVPCsOpts, vlabCfg *Config, 
 	testCtx.wipeBetweenTests = wipeBetweenTests
 	testCtx.extended = rtOpts.Extended
 	testCtx.failFast = rtOpts.FailFast
-	testCtx.pauseOnFail = rtOpts.PauseOnFail
+	testCtx.pauseOnFail = rtOpts.PauseOnFailure
 
 	return testCtx
 }
@@ -3262,13 +3262,32 @@ func printSuiteResults(ts *JUnitTestSuite) {
 	slog.Info("Test suite summary", "tests", len(ts.TestCases), "passed", numPassed, "skipped", numSkipped, "failed", numFailed, "duration", ts.TimeHuman)
 }
 
-func pauseOnFail() {
-	// pause until the user presses enter
+func pauseOnFailure(ctx context.Context) error {
 	slog.Warn("Test failed, pausing execution. Note that reverts might still need to apply, so if you intend to continue, please make sure to leave the environment in the same state as you found it")
-	slog.Info("Press enter to continue...")
-	var input string
-	_, _ = fmt.Scanln(&input)
+
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		// CI environment - pause for a long time to allow debugging
+		pauseDuration := 60 * time.Minute
+		slog.Info("Test will automatically continue due to the non-interactive env after the pause duration", "duration", pauseDuration)
+		slog.Info("You can connect to debug the VLAB state during this pause")
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("sleeping for pause on failure: %w", ctx.Err())
+		case <-time.After(pauseDuration):
+		}
+	} else {
+		// pause until the user presses enter
+		slog.Info("Press enter to continue...")
+		var input string
+		if _, err := fmt.Scanln(&input); err != nil {
+			return fmt.Errorf("waiting for enter: %w", err)
+		}
+	}
+
 	slog.Info("Continuing...")
+
+	return nil
 }
 
 func doRunTests(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSuite) (*JUnitTestSuite, error) {
@@ -3280,7 +3299,9 @@ func doRunTests(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 	if err := testCtx.setupTest(ctx, true); err != nil {
 		slog.Error("Initial test suite setup failed", "suite", ts.Name, "error", err.Error())
 		if testCtx.pauseOnFail {
-			pauseOnFail()
+			if err := pauseOnFailure(ctx); err != nil {
+				slog.Warn("Pause on failure failed, ignoring", "err", err.Error())
+			}
 		}
 
 		return ts, fmt.Errorf("%w: %w", errInitialSetup, err)
@@ -3302,7 +3323,9 @@ func doRunTests(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 				ts.Failures++
 				slog.Error("FAIL", "test", test.Name, "error", fmt.Sprintf("Failed to run setupTest between tests: %s", err.Error()))
 				if testCtx.pauseOnFail {
-					pauseOnFail()
+					if err := pauseOnFailure(ctx); err != nil {
+						slog.Warn("Pause on failure failed, ignoring", "err", err.Error())
+					}
 				}
 				if testCtx.failFast {
 					return ts, fmt.Errorf("setupTest failed: %w", err)
@@ -3344,7 +3367,9 @@ func doRunTests(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 			ts.Failures++
 			slog.Error("FAIL", "test", test.Name, "error", err.Error())
 			if testCtx.pauseOnFail {
-				pauseOnFail()
+				if err := pauseOnFailure(ctx); err != nil {
+					slog.Warn("Pause on failure failed, ignoring", "err", err.Error())
+				}
 			}
 		}
 		var revertErr error
@@ -3365,7 +3390,9 @@ func doRunTests(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 				}
 				prevRevertsFailed = true
 				if testCtx.pauseOnFail {
-					pauseOnFail()
+					if err := pauseOnFailure(ctx); err != nil {
+						slog.Warn("Pause on failure failed, ignoring", "err", err.Error())
+					}
 				}
 
 				break

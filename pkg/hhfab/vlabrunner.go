@@ -97,6 +97,7 @@ type VLABRunOpts struct {
 	OnReady            []OnReady
 	CollectShowTech    bool
 	VPCMode            vpcapi.VPCMode
+	PauseOnFailure     bool
 }
 
 type OnReady string
@@ -599,6 +600,11 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						slog.Warn("Failed to reinstall switches", "err", err)
 
 						c.CollectVLABDebug(ctx, vlab, opts)
+						if opts.PauseOnFailure {
+							if err := pauseOnFailure(ctx); err != nil {
+								slog.Warn("Pause on failure failed, ignoring", "err", err.Error())
+							}
+						}
 
 						return fmt.Errorf("reinstalling switches: %w", err)
 					}
@@ -618,6 +624,11 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						slog.Warn("Failed to setup VPCs", "err", err)
 
 						c.CollectVLABDebug(ctx, vlab, opts)
+						if opts.PauseOnFailure {
+							if err := pauseOnFailure(ctx); err != nil {
+								slog.Warn("Pause on failure failed, ignoring", "err", err.Error())
+							}
+						}
 
 						return fmt.Errorf("setting up VPCs: %w", err)
 					}
@@ -635,6 +646,11 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						slog.Warn("Failed to setup peerings", "err", err)
 
 						c.CollectVLABDebug(ctx, vlab, opts)
+						if opts.PauseOnFailure {
+							if err := pauseOnFailure(ctx); err != nil {
+								slog.Warn("Pause on failure failed, ignoring", "err", err.Error())
+							}
+						}
 
 						return fmt.Errorf("setting up peerings: %w", err)
 					}
@@ -649,6 +665,11 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						slog.Warn("Failed to test connectivity", "err", err)
 
 						c.CollectVLABDebug(ctx, vlab, opts)
+						if opts.PauseOnFailure {
+							if err := pauseOnFailure(ctx); err != nil {
+								slog.Warn("Pause on failure failed, ignoring", "err", err.Error())
+							}
+						}
 
 						return fmt.Errorf("testing connectivity: %w", err)
 					}
@@ -667,6 +688,11 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						slog.Warn("Failed to wait for switches ready", "err", err)
 
 						c.CollectVLABDebug(ctx, vlab, opts)
+						if opts.PauseOnFailure {
+							if err := pauseOnFailure(ctx); err != nil {
+								slog.Warn("Pause on failure failed, ignoring", "err", err.Error())
+							}
+						}
 
 						return fmt.Errorf("waiting: %w", err)
 					}
@@ -679,14 +705,20 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						slog.Warn("Failed to inspect", "err", err)
 
 						c.CollectVLABDebug(ctx, vlab, opts)
+						if opts.PauseOnFailure {
+							if err := pauseOnFailure(ctx); err != nil {
+								slog.Warn("Pause on failure failed, ignoring", "err", err.Error())
+							}
+						}
 
 						return fmt.Errorf("inspecting: %w", err)
 					}
 				case OnReadyReleaseTest:
 					if err := c.ReleaseTest(ctx, vlab, ReleaseTestOpts{
-						ResultsFile: "release-test.xml",
-						HashPolicy:  HashPolicyL2And3,
-						VPCMode:     opts.VPCMode,
+						ResultsFile:    "release-test.xml",
+						HashPolicy:     HashPolicyL2And3,
+						VPCMode:        opts.VPCMode,
+						PauseOnFailure: opts.PauseOnFailure,
 					}); err != nil {
 						slog.Warn("Failed to run release test", "err", err)
 

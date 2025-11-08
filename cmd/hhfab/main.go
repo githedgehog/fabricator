@@ -74,7 +74,7 @@ const (
 	FlagInvertRegex               = "invert-regex"
 	FlagResultsFile               = "results-file"
 	FlagExtended                  = "extended"
-	FlagPauseOnFail               = "pause-on-fail"
+	FlagPauseOnFailure            = "pause-on-failure"
 	FlagHashPolicy                = "hash-policy"
 	FlagListTests                 = "list-tests"
 )
@@ -840,6 +840,11 @@ func Run(ctx context.Context) error {
 								Usage: "exit on first error",
 								Value: true,
 							},
+							&cli.BoolFlag{
+								Name:    FlagPauseOnFailure,
+								Aliases: []string{"p"},
+								Usage:   "pause running on-ready commands or release tests on failure (for troubleshooting)",
+							},
 							&cli.StringSliceFlag{
 								Name:    FlagNameReady,
 								Aliases: []string{"r"},
@@ -881,6 +886,7 @@ func Run(ctx context.Context) error {
 									BuildMode:          recipe.BuildMode(c.String(FlagNameBuildMode)),
 									AutoUpgrade:        c.Bool(FlagNameAutoUpgrade),
 									FailFast:           c.Bool(FlagNameFailFast),
+									PauseOnFailure:     c.Bool(FlagPauseOnFailure),
 									OnReady:            onReady,
 									CollectShowTech:    c.Bool(FlagNameCollectShowTech),
 									VPCMode:            vpcapi.VPCMode(handleL2VNI(c.String(FlagNameVPCMode))),
@@ -1250,7 +1256,7 @@ func Run(ctx context.Context) error {
 								Usage:   "stop testing on first failure",
 							},
 							&cli.BoolFlag{
-								Name:    FlagPauseOnFail,
+								Name:    FlagPauseOnFailure,
 								Aliases: []string{"p"},
 								Usage:   "pause testing on each scenario failure (for troubleshooting)",
 							},
@@ -1274,15 +1280,15 @@ func Run(ctx context.Context) error {
 						Before: before(false),
 						Action: func(c *cli.Context) error {
 							opts := hhfab.ReleaseTestOpts{
-								Regexes:     c.StringSlice(FlagRegEx),
-								InvertRegex: c.Bool(FlagInvertRegex),
-								ResultsFile: c.String(FlagResultsFile),
-								Extended:    c.Bool(FlagExtended),
-								FailFast:    c.Bool(FlagNameFailFast),
-								PauseOnFail: c.Bool(FlagPauseOnFail),
-								HashPolicy:  c.String(FlagHashPolicy),
-								VPCMode:     vpcapi.VPCMode(handleL2VNI(c.String(FlagNameVPCMode))),
-								ListTests:   c.Bool(FlagListTests),
+								Regexes:        c.StringSlice(FlagRegEx),
+								InvertRegex:    c.Bool(FlagInvertRegex),
+								ResultsFile:    c.String(FlagResultsFile),
+								Extended:       c.Bool(FlagExtended),
+								FailFast:       c.Bool(FlagNameFailFast),
+								PauseOnFailure: c.Bool(FlagPauseOnFailure),
+								HashPolicy:     c.String(FlagHashPolicy),
+								VPCMode:        vpcapi.VPCMode(handleL2VNI(c.String(FlagNameVPCMode))),
+								ListTests:      c.Bool(FlagListTests),
 							}
 							if err := hhfab.DoVLABReleaseTest(ctx, workDir, cacheDir, opts); err != nil {
 								return fmt.Errorf("release-test: %w", err)
