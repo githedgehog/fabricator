@@ -49,7 +49,7 @@ permissions:
 
 jobs:
   test-build:
-    runs-on: lab
+    runs-on: ubuntu-latest-x86-8-cores
 
     steps:
       - name: Checkout repository
