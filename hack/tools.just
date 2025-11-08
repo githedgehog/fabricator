@@ -4,11 +4,34 @@
 
 version_extra := ""
 version_dirty := `[ -z "$(git status -s)" ] || echo "-$(LC_ALL=C tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 2)$(date +"%H%M")"`
-version := `git describe --tags --dirty --always` + version_dirty + version_extra
+# Ensure version is semver-compliant for Helm packaging.
+# git-describe output (e.g., v0.42.0-216-gec19e921) is already semver, but
+# when no tag is reachable, we get a raw SHA (e.g., 64d17628) which Helm rejects.
+# Transform SHA-only versions into semver format: 0.0.0-<sha>
+version_raw := `git describe --tags --dirty --always` + version_dirty
+version_base := if version_raw =~ '^v?[0-9]+\.[0-9]+\.[0-9]+' { version_raw } else { "0.0.0-" + version_raw }
+version := version_base + version_extra
 
 # Print version that will be used in the build
 version:
   @echo "Using version: {{version}}"
+
+# Validate that version is semver-compliant for Helm
+test-version:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  VERSION="{{version}}"
+  # Helm requires semantic versioning: https://semver.org/
+  # Valid formats: v1.2.3, v1.2.3-alpha, v1.2.3+build, 1.2.3, etc.
+  # This regex matches the core semver pattern that Helm accepts
+  if echo "$VERSION" | grep -qE '^v?[0-9]+\.[0-9]+\.[0-9]+'; then
+    echo "✓ Version '$VERSION' is semver-compliant"
+    exit 0
+  else
+    echo "✗ Version '$VERSION' is NOT semver-compliant (Helm will reject it)"
+    echo "  Expected format: v0.0.0 or 0.0.0 (with optional prerelease/build metadata)"
+    exit 1
+  fi
 
 _is_clean:
   [ -z "`git status -s`" ] || exit 1
