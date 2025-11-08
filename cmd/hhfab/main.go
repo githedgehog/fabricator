@@ -77,6 +77,8 @@ const (
 	FlagPauseOnFailure            = "pause-on-failure"
 	FlagHashPolicy                = "hash-policy"
 	FlagListTests                 = "list-tests"
+	FlagReleaseTestRegexes        = "release-test-regexes"
+	FlagReleaseTestRegexesInvert  = "release-test-regexes-invert"
 )
 
 func main() {
@@ -860,6 +862,16 @@ func Run(ctx context.Context) error {
 								Name:  FlagNameVPCMode,
 								Usage: "VPC mode to be used for on-ready commands: empty is default (l2vni), l3vni, etc.",
 							},
+							&cli.StringSliceFlag{
+								Name:    FlagReleaseTestRegexes,
+								Aliases: []string{"rt-regex"},
+								Usage:   "regex pattern to filter release tests (used when --ready=release-test)",
+							},
+							&cli.BoolFlag{
+								Name:    FlagReleaseTestRegexesInvert,
+								Aliases: []string{"rt-invert"},
+								Usage:   "invert regex selection for release tests (used when --ready=release-test)",
+							},
 						}),
 						Before: before(false),
 						Action: func(c *cli.Context) error {
@@ -880,16 +892,18 @@ func Run(ctx context.Context) error {
 								SetJoinToken:         joinToken,
 								ObservabilityTargets: c.String(FlagNameObservabilityTargets),
 								VLABRunOpts: hhfab.VLABRunOpts{
-									KillStale:          c.Bool(FlagNameKillStale),
-									ControlsRestricted: c.Bool(FlagNameControlsRestricted),
-									ServersRestricted:  c.Bool(FlagNameServersRestricted),
-									BuildMode:          recipe.BuildMode(c.String(FlagNameBuildMode)),
-									AutoUpgrade:        c.Bool(FlagNameAutoUpgrade),
-									FailFast:           c.Bool(FlagNameFailFast),
-									PauseOnFailure:     c.Bool(FlagPauseOnFailure),
-									OnReady:            onReady,
-									CollectShowTech:    c.Bool(FlagNameCollectShowTech),
-									VPCMode:            vpcapi.VPCMode(handleL2VNI(c.String(FlagNameVPCMode))),
+									KillStale:                c.Bool(FlagNameKillStale),
+									ControlsRestricted:       c.Bool(FlagNameControlsRestricted),
+									ServersRestricted:        c.Bool(FlagNameServersRestricted),
+									BuildMode:                recipe.BuildMode(c.String(FlagNameBuildMode)),
+									AutoUpgrade:              c.Bool(FlagNameAutoUpgrade),
+									FailFast:                 c.Bool(FlagNameFailFast),
+									PauseOnFailure:           c.Bool(FlagPauseOnFailure),
+									OnReady:                  onReady,
+									CollectShowTech:          c.Bool(FlagNameCollectShowTech),
+									VPCMode:                  vpcapi.VPCMode(handleL2VNI(c.String(FlagNameVPCMode))),
+									ReleaseTestRegexes:       c.StringSlice(FlagReleaseTestRegexes),
+									ReleaseTestRegexesInvert: c.Bool(FlagReleaseTestRegexesInvert),
 								},
 							}); err != nil {
 								return fmt.Errorf("running VLAB: %w", err)

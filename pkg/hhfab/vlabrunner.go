@@ -88,16 +88,18 @@ var VLABCmds = []string{
 }
 
 type VLABRunOpts struct {
-	KillStale          bool
-	ControlsRestricted bool
-	ServersRestricted  bool
-	BuildMode          recipe.BuildMode
-	AutoUpgrade        bool
-	FailFast           bool
-	OnReady            []OnReady
-	CollectShowTech    bool
-	VPCMode            vpcapi.VPCMode
-	PauseOnFailure     bool
+	KillStale                bool
+	ControlsRestricted       bool
+	ServersRestricted        bool
+	BuildMode                recipe.BuildMode
+	AutoUpgrade              bool
+	FailFast                 bool
+	OnReady                  []OnReady
+	CollectShowTech          bool
+	VPCMode                  vpcapi.VPCMode
+	PauseOnFailure           bool
+	ReleaseTestRegexes       []string
+	ReleaseTestRegexesInvert bool
 }
 
 type OnReady string
@@ -719,6 +721,8 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						HashPolicy:     HashPolicyL2And3,
 						VPCMode:        opts.VPCMode,
 						PauseOnFailure: opts.PauseOnFailure,
+						Regexes:        opts.ReleaseTestRegexes,
+						InvertRegex:    opts.ReleaseTestRegexesInvert,
 					}); err != nil {
 						slog.Warn("Failed to run release test", "err", err)
 
