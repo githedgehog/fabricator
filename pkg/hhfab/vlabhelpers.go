@@ -547,8 +547,31 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB) error {
 		return fmt.Errorf("creating output directory: %w", err)
 	}
 
+	// Get all switches from Kubernetes
+	switches := wiringapi.SwitchList{}
+	if err := c.Client.List(ctx, &switches); err != nil {
+		return fmt.Errorf("failed to list switches: %w", err)
+	}
+
+	targets := []VM{}
+
+	// Add non-switch VMs
+	for _, vm := range vlab.VMs {
+		if vm.Type != VMTypeSwitch {
+			targets = append(targets, vm)
+		}
+	}
+
+	// Add switches
+	for _, sw := range switches.Items {
+		targets = append(targets, VM{
+			Name: sw.Name,
+			Type: VMTypeSwitch,
+		})
+	}
+
 	var wg sync.WaitGroup
-	errChan := make(chan error, len(vlab.VMs))
+	errChan := make(chan error, len(targets))
 
 	done := make(chan struct{})
 	defer close(done)
@@ -564,7 +587,7 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB) error {
 
 	var successCount atomic.Int32
 
-	for _, vm := range vlab.VMs {
+	for _, vm := range targets {
 		name := vm.Name
 		wg.Add(1)
 		go func(name string, vm VM) {
@@ -605,7 +628,7 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB) error {
 	if len(errors) > 0 {
 		slog.Warn("Some diagnostics collection failed",
 			"success_count", successCount.Load(),
-			"total_count", len(vlab.VMs),
+			"total_count", len(targets),
 			"errors", errors)
 	}
 
