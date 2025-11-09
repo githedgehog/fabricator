@@ -245,8 +245,8 @@ jobs:
             --vpc-mode="${{ inputs.vpcmode }}" \
             ${{ inputs.hybrid && '--controls-restricted=false' || '' }} \
             ${{ (inputs.upgradefrom == '' && inputs.hybrid) && '--ready switch-reinstall' || '' }} \
-            --ready=inspect \
             --ready=setup-vpcs \
+            --ready=inspect \
             --ready=setup-peerings \
             --ready=test-connectivity \
             ${{ inputs.releasetest && '--ready=release-test' || '' }} \
