@@ -547,8 +547,31 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB) error {
 		return fmt.Errorf("creating output directory: %w", err)
 	}
 
+	// Get all switches from Kubernetes
+	switches := wiringapi.SwitchList{}
+	if err := c.Client.List(ctx, &switches); err != nil {
+		return fmt.Errorf("failed to list switches: %w", err)
+	}
+
+	targets := []VM{}
+
+	// Add non-switch VMs
+	for _, vm := range vlab.VMs {
+		if vm.Type != VMTypeSwitch {
+			targets = append(targets, vm)
+		}
+	}
+
+	// Add switches
+	for _, sw := range switches.Items {
+		targets = append(targets, VM{
+			Name: sw.Name,
+			Type: VMTypeSwitch,
+		})
+	}
+
 	var wg sync.WaitGroup
-	errChan := make(chan error, len(vlab.VMs))
+	errChan := make(chan error, len(targets))
 
 	done := make(chan struct{})
 	defer close(done)
@@ -564,31 +587,42 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB) error {
 
 	var successCount atomic.Int32
 
-	for _, vm := range vlab.VMs {
+	for _, vm := range targets {
 		name := vm.Name
 		wg.Add(1)
 		go func(name string, vm VM) {
 			defer wg.Done()
-			ssh, err := c.SSHVM(ctx, vlab, vm)
-			if err != nil {
-				errChan <- fmt.Errorf("getting ssh config for entry %s: %w", name, err)
 
-				return
-			}
+			if err := func() error {
+				ssh, err := c.SSHVM(ctx, vlab, vm)
+				if err != nil {
+					return fmt.Errorf("getting ssh config for entry %s: %w", name, err)
+				}
 
-			collectionCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-			defer cancel()
-			script, ok := scriptConfig.Scripts[vm.Type]
-			if !ok {
-				slog.Debug("No show-tech script available for", "vm", vm.Name, "type", vm.Type)
+				// Need a longer timeout for real switches
+				timeout := 5 * time.Minute
+				if vm.Type == VMTypeSwitch {
+					timeout = 10 * time.Minute
+				}
+				collectionCtx, cancel := context.WithTimeout(ctx, timeout)
+				defer cancel()
 
-				return
-			}
+				script, ok := scriptConfig.Scripts[vm.Type]
+				if !ok {
+					slog.Debug("No show-tech script available for", "vm", vm.Name, "type", vm.Type)
 
-			if err := c.collectShowTech(collectionCtx, name, ssh, script, outputDir); err != nil {
-				errChan <- fmt.Errorf("collecting show-tech for entry %s: %w", name, err)
-			} else {
+					return nil
+				}
+
+				if err := c.collectShowTech(collectionCtx, name, ssh, script, outputDir); err != nil {
+					return fmt.Errorf("collecting show-tech for entry %s: %w", name, err)
+				}
+
 				successCount.Add(1)
+
+				return nil
+			}(); err != nil {
+				errChan <- err
 			}
 		}(name, vm)
 	}
@@ -605,7 +639,7 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB) error {
 	if len(errors) > 0 {
 		slog.Warn("Some diagnostics collection failed",
 			"success_count", successCount.Load(),
-			"total_count", len(vlab.VMs),
+			"total_count", len(targets),
 			"errors", errors)
 	}
 
@@ -695,9 +729,7 @@ func (c *Config) collectShowTech(ctx context.Context, entryName string, ssh *ssh
 	}
 
 	chmodCmd := fmt.Sprintf("chmod +x %s && %s", remoteScriptPath, remoteScriptPath)
-	chmodCtx, chmodCancel := context.WithTimeout(ctx, 150*time.Second)
-	defer chmodCancel()
-	_, stderr, err := ssh.Run(chmodCtx, chmodCmd)
+	_, stderr, err := ssh.Run(ctx, chmodCmd)
 	if err != nil {
 		return fmt.Errorf("executing show-tech on %s: %w", entryName, err) //nolint:goerr113
 	}
@@ -765,7 +797,12 @@ func (c *Config) getNodeIP(ctx context.Context, name string) (string, error) {
 	return nodeIP.Addr().String(), nil
 }
 
-func (c *Config) CollectVLABDebug(ctx context.Context, vlab *VLAB, opts VLABRunOpts) {
+func (c *Config) CollectVLABDebug(ctx context.Context, vlab *VLAB, opts VLABRunOpts, onComplete func()) {
+	// Signal completion when done, if callback is provided
+	if onComplete != nil {
+		defer onComplete()
+	}
+
 	kubeconfig := filepath.Join(c.WorkDir, VLABDir, VLABKubeConfig)
 
 	if _, err := os.Stat(kubeconfig); errors.Is(err, fs.ErrNotExist) {
@@ -800,7 +837,12 @@ func (c *Config) CollectVLABDebug(ctx context.Context, vlab *VLAB, opts VLABRunO
 	}
 
 	if opts.CollectShowTech {
-		if err := c.VLABShowTech(ctx, vlab); err != nil {
+		// Use a fresh background context with timeout to ensure show-tech completes
+		// even if the main context is cancelled due to test failures
+		showTechCtx, showTechCancel := context.WithTimeout(context.Background(), 15*time.Minute)
+		defer showTechCancel()
+
+		if err := c.VLABShowTech(showTechCtx, vlab); err != nil { //nolint:contextcheck
 			slog.Warn("Failed to collect show-tech diagnostics", "err", err)
 		}
 	}
