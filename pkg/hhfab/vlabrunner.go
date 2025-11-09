@@ -680,7 +680,11 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 
 						// Emit GitHub Actions warning annotation if running in CI
 						if os.Getenv("GITHUB_ACTIONS") == "true" {
-							fmt.Fprintf(os.Stderr, "::warning title=Inspect Failed::Fabric inspection failed: %v\n", err)
+							jobName := os.Getenv("GITHUB_JOB")
+							if jobName == "" {
+								jobName = "unknown"
+							}
+							fmt.Fprintf(os.Stderr, "::warning title=Inspect Failed (%s)::Fabric inspection failed: %v\n", jobName, err)
 						}
 
 						c.CollectVLABDebug(ctx, vlab, opts)
