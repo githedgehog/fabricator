@@ -678,6 +678,11 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 					}); err != nil {
 						slog.Warn("Failed to inspect", "err", err)
 
+						// Emit GitHub Actions warning annotation if running in CI
+						if os.Getenv("GITHUB_ACTIONS") == "true" {
+							fmt.Fprintf(os.Stderr, "::warning title=Inspect Failed::Fabric inspection failed: %v\n", err)
+						}
+
 						c.CollectVLABDebug(ctx, vlab, opts)
 
 						return fmt.Errorf("inspecting: %w", err)
