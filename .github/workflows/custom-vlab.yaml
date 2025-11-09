@@ -1,4 +1,5 @@
 name: Custom VLAB
+run-name: "${{ inputs.hybrid && 'h' || 'v' }}-${{ inputs.upgradefrom }}${{ inputs.upgradefrom && '-' || '' }}${{ inputs.mesh && 'mesh-' || '' }}${{ inputs.gateway && 'gw-' || '' }}${{ inputs.buildmode }}-${{ inputs.vpcmode }}${{ inputs.releasetest && '-rt' || '' }}${{ inputs.releasetest_regex != '' && 'r' || '' }}"
 
 on:
   workflow_dispatch:
