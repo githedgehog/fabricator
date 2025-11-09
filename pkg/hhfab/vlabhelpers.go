@@ -599,7 +599,12 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB) error {
 				return
 			}
 
-			collectionCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+			// Need a longer timeout for real switches
+			timeout := 5 * time.Minute
+			if vm.Type == VMTypeSwitch {
+				timeout = 10 * time.Minute
+			}
+			collectionCtx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
 			script, ok := scriptConfig.Scripts[vm.Type]
 			if !ok {
@@ -718,9 +723,7 @@ func (c *Config) collectShowTech(ctx context.Context, entryName string, ssh *ssh
 	}
 
 	chmodCmd := fmt.Sprintf("chmod +x %s && %s", remoteScriptPath, remoteScriptPath)
-	chmodCtx, chmodCancel := context.WithTimeout(ctx, 150*time.Second)
-	defer chmodCancel()
-	_, stderr, err := ssh.Run(chmodCtx, chmodCmd)
+	_, stderr, err := ssh.Run(ctx, chmodCmd)
 	if err != nil {
 		return fmt.Errorf("executing show-tech on %s: %w", entryName, err) //nolint:goerr113
 	}
