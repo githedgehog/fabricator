@@ -157,12 +157,13 @@ func (c *Config) checkForBins() error {
 	return nil
 }
 
-func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) error {
-	ctx, cancel := context.WithCancel(ctx)
+func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) error { //nolint:contextcheck
+	ctx, cancel := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(signalChan)
 
 	go func() {
 		<-signalChan
@@ -380,9 +381,33 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 		}
 	}
 
+	// Create a separate context for VM lifecycle that we control explicitly
+	// This prevents VMs from being killed when the main errgroup context cancels
+	vmCtx, vmCancel := context.WithCancel(context.Background())
+	defer vmCancel()
+
 	group, ctx := errgroup.WithContext(ctx)
 	postProcesses := &sync.WaitGroup{}
 	postProcessDone := make(chan struct{})
+
+	// cleanupVMs collects diagnostics while VMs are still running, then shuts down VMs
+	cleanupVMs := func() {
+		slog.Debug("Collecting diagnostics before VM shutdown")
+		// Collect show-tech while VMs are still running
+		// Use vmCtx so SSH connections work until collection completes
+		c.CollectVLABDebug(vmCtx, vlab, opts, nil)
+		slog.Debug("Diagnostics collection complete, shutting down VMs")
+		// Now shut down the VMs
+		vmCancel()
+	}
+
+	go func() {
+		<-ctx.Done()
+		slog.Debug("Main context cancelled, starting cleanup")
+		cleanupVMs()
+		slog.Debug("Force exit with code 2", "err", ctx.Err())
+		os.Exit(2)
+	}()
 
 	for _, vm := range vlab.VMs {
 		vmDir := filepath.Join(c.WorkDir, VLABDir, VLABVMsDir, vm.Name)
@@ -461,14 +486,15 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 
 			slog.Debug("Starting", "vm", vm.Name, "type", vm.Type, "cmd", VLABCmdQemuSystem+" "+strings.Join(args, " "))
 
-			if err := execCmd(ctx, true, vmDir, VLABCmdQemuSystem, args, "vm", vm.Name); err != nil {
+			// Use vmCtx so VMs don't get killed when main context cancels
+			if err := execCmd(vmCtx, true, vmDir, VLABCmdQemuSystem, args, "vm", vm.Name); err != nil {
 				if c.Shutdown.Load() == int32(ShutdownTypeGraceful) {
 					return nil
 				}
 
 				slog.Warn("Failed running VM", "vm", vm.Name, "type", vm.Type, "err", err)
 
-				c.CollectVLABDebug(ctx, vlab, opts)
+				c.CollectVLABDebug(vmCtx, vlab, opts, nil)
 
 				if opts.FailFast {
 					return fmt.Errorf("running vm: %w", err)
@@ -488,7 +514,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 
 					slog.Warn("Failed to post-process VM", "vm", vm.Name, "type", vm.Type, "err", err)
 
-					c.CollectVLABDebug(ctx, vlab, opts)
+					c.CollectVLABDebug(vmCtx, vlab, opts, nil)
 
 					if opts.FailFast {
 						return fmt.Errorf("post-processing vm %s: %w", vm.Name, err)
@@ -617,7 +643,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						PDUPassword: os.Getenv(VLABEnvPDUPassword),
 						WaitReady:   true,
 					}); err != nil {
-						return c.handleShutdownWithPause(ctx, vlab, opts, fmt.Errorf("reinstalling switches: %w", err))
+						return c.handleShutdownWithPause(ctx, vmCtx, vlab, opts, fmt.Errorf("reinstalling switches: %w", err))
 					}
 				case OnReadySetupVPCs:
 					// TODO make it configurable
@@ -632,7 +658,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						HashPolicy:        HashPolicyL2And3,
 						VPCMode:           opts.VPCMode,
 					}); err != nil {
-						return c.handleShutdownWithPause(ctx, vlab, opts, fmt.Errorf("setting up VPCs: %w", err))
+						return c.handleShutdownWithPause(ctx, vmCtx, vlab, opts, fmt.Errorf("setting up VPCs: %w", err))
 					}
 				case OnReadySetupPeerings:
 					// TODO make it configurable
@@ -645,7 +671,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						WaitSwitchesReady: true,
 						Requests:          peerings,
 					}); err != nil {
-						return c.handleShutdownWithPause(ctx, vlab, opts, fmt.Errorf("setting up peerings: %w", err))
+						return c.handleShutdownWithPause(ctx, vmCtx, vlab, opts, fmt.Errorf("setting up peerings: %w", err))
 					}
 				case OnReadyTestConnectivity:
 					// TODO make it configurable
@@ -655,14 +681,18 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						IPerfsSeconds:     5,
 						CurlsCount:        3,
 					}); err != nil {
-						return c.handleShutdownWithPause(ctx, vlab, opts, fmt.Errorf("testing connectivity: %w", err))
+						return c.handleShutdownWithPause(ctx, vmCtx, vlab, opts, fmt.Errorf("testing connectivity: %w", err))
 					}
 				case OnReadyExit:
 					if c.Shutdown.Load() == int32(ShutdownTypeGraceful) {
 						return nil
 					}
 
-					c.CollectVLABDebug(ctx, vlab, opts)
+					// Don't collect show-tech on successful exit to save time
+					// Show-tech is only collected on error paths for forensics
+					exitOpts := opts
+					exitOpts.CollectShowTech = false
+					c.CollectVLABDebug(vmCtx, vlab, exitOpts, nil)
 
 					// TODO seems like some graceful shutdown logic isn't working in CI and we're getting stuck w/o this
 					if os.Getenv("GITHUB_ACTIONS") == "true" {
@@ -673,7 +703,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 					return ErrExit
 				case OnReadyWait:
 					if err := c.Wait(ctx, vlab); err != nil {
-						return c.handleShutdownWithPause(ctx, vlab, opts, fmt.Errorf("waiting: %w", err))
+						return c.handleShutdownWithPause(ctx, vmCtx, vlab, opts, fmt.Errorf("waiting: %w", err))
 					}
 				case OnReadyInspect:
 					if err := c.Inspect(ctx, vlab, InspectOpts{
@@ -681,7 +711,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						Strict:         !opts.AutoUpgrade,
 						Attempts:       3,
 					}); err != nil {
-						return c.handleShutdownWithPause(ctx, vlab, opts, fmt.Errorf("inspecting: %w", err))
+						return c.handleShutdownWithPause(ctx, vmCtx, vlab, opts, fmt.Errorf("inspecting: %w", err))
 					}
 				case OnReadyReleaseTest:
 					if err := c.ReleaseTest(ctx, vlab, ReleaseTestOpts{
@@ -698,7 +728,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 
 						slog.Warn("Failed to run release test", "err", err)
 
-						c.CollectVLABDebug(ctx, vlab, opts)
+						c.CollectVLABDebug(vmCtx, vlab, opts, nil)
 
 						return fmt.Errorf("release test: %w", err)
 					}
@@ -725,13 +755,6 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 		return nil
 	})
 
-	go func() {
-		<-ctx.Done()
-		time.Sleep(15 * time.Second)
-		slog.Debug("Force exit with code 2", "err", ctx.Err())
-		os.Exit(2)
-	}()
-
 	if err := group.Wait(); err != nil && !errors.Is(err, ErrExit) {
 		return fmt.Errorf("running task: %w", err)
 	}
@@ -741,14 +764,14 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 	return nil
 }
 
-func (c *Config) handleShutdownWithPause(ctx context.Context, vlab *VLAB, opts VLABRunOpts, err error) error {
+func (c *Config) handleShutdownWithPause(ctx context.Context, vmCtx context.Context, vlab *VLAB, opts VLABRunOpts, err error) error {
 	if c.Shutdown.Load() == int32(ShutdownTypeGraceful) {
 		return nil
 	}
 
 	slog.Warn("Failed", "err", err.Error())
 
-	c.CollectVLABDebug(ctx, vlab, opts)
+	c.CollectVLABDebug(vmCtx, vlab, opts, nil)
 	if opts.PauseOnFailure {
 		if err := pauseOnFailure(ctx); err != nil {
 			slog.Warn("Pause on failure failed, ignoring", "err", err.Error())
