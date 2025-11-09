@@ -592,31 +592,37 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB) error {
 		wg.Add(1)
 		go func(name string, vm VM) {
 			defer wg.Done()
-			ssh, err := c.SSHVM(ctx, vlab, vm)
-			if err != nil {
-				errChan <- fmt.Errorf("getting ssh config for entry %s: %w", name, err)
 
-				return
-			}
+			if err := func() error {
+				ssh, err := c.SSHVM(ctx, vlab, vm)
+				if err != nil {
+					return fmt.Errorf("getting ssh config for entry %s: %w", name, err)
+				}
 
-			// Need a longer timeout for real switches
-			timeout := 5 * time.Minute
-			if vm.Type == VMTypeSwitch {
-				timeout = 10 * time.Minute
-			}
-			collectionCtx, cancel := context.WithTimeout(ctx, timeout)
-			defer cancel()
-			script, ok := scriptConfig.Scripts[vm.Type]
-			if !ok {
-				slog.Debug("No show-tech script available for", "vm", vm.Name, "type", vm.Type)
+				// Need a longer timeout for real switches
+				timeout := 5 * time.Minute
+				if vm.Type == VMTypeSwitch {
+					timeout = 10 * time.Minute
+				}
+				collectionCtx, cancel := context.WithTimeout(ctx, timeout)
+				defer cancel()
 
-				return
-			}
+				script, ok := scriptConfig.Scripts[vm.Type]
+				if !ok {
+					slog.Debug("No show-tech script available for", "vm", vm.Name, "type", vm.Type)
 
-			if err := c.collectShowTech(collectionCtx, name, ssh, script, outputDir); err != nil {
-				errChan <- fmt.Errorf("collecting show-tech for entry %s: %w", name, err)
-			} else {
+					return nil
+				}
+
+				if err := c.collectShowTech(collectionCtx, name, ssh, script, outputDir); err != nil {
+					return fmt.Errorf("collecting show-tech for entry %s: %w", name, err)
+				}
+
 				successCount.Add(1)
+
+				return nil
+			}(); err != nil {
+				errChan <- err
 			}
 		}(name, vm)
 	}
