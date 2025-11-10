@@ -832,7 +832,12 @@ func (c *Config) CollectVLABDebug(ctx context.Context, vlab *VLAB, opts VLABRunO
 	}
 
 	if opts.CollectShowTech {
-		if err := c.VLABShowTech(ctx, vlab); err != nil {
+		// Use a fresh background context with timeout to ensure show-tech completes
+		// even if the main context is cancelled due to test failures
+		showTechCtx, showTechCancel := context.WithTimeout(context.Background(), 15*time.Minute)
+		defer showTechCancel()
+
+		if err := c.VLABShowTech(showTechCtx, vlab); err != nil { //nolint:contextcheck
 			slog.Warn("Failed to collect show-tech diagnostics", "err", err)
 		}
 	}
