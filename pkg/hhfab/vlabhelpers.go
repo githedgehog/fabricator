@@ -797,7 +797,12 @@ func (c *Config) getNodeIP(ctx context.Context, name string) (string, error) {
 	return nodeIP.Addr().String(), nil
 }
 
-func (c *Config) CollectVLABDebug(ctx context.Context, vlab *VLAB, opts VLABRunOpts) {
+func (c *Config) CollectVLABDebug(ctx context.Context, vlab *VLAB, opts VLABRunOpts, onComplete func()) {
+	// Signal completion when done, if callback is provided
+	if onComplete != nil {
+		defer onComplete()
+	}
+
 	kubeconfig := filepath.Join(c.WorkDir, VLABDir, VLABKubeConfig)
 
 	if _, err := os.Stat(kubeconfig); errors.Is(err, fs.ErrNotExist) {
