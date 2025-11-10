@@ -46,7 +46,7 @@ require (
 	go.githedgehog.com/libmeta v0.3.0
 	golang.org/x/crypto v0.43.0
 	golang.org/x/mod v0.29.0
-	golang.org/x/sync v0.17.0
+	golang.org/x/sync v0.18.0
 	golang.org/x/term v0.36.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	k8s.io/api v0.33.4
