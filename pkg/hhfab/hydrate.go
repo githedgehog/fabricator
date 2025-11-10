@@ -879,13 +879,13 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 					gw.Spec.Interfaces = map[string]gwapi.GatewayInterface{}
 				}
 
-				if _, exist := gw.Spec.Interfaces[link.Gateway.LocalPortName()]; !exist {
+				iface, exist := gw.Spec.Interfaces[link.Gateway.LocalPortName()]
+				if !exist {
 					return fmt.Errorf("gateway %s does not have interface %s", gwName, link.Gateway.LocalPortName()) //nolint:goerr113
 				}
-				gw.Spec.Interfaces[link.Gateway.LocalPortName()] = gwapi.GatewayInterface{
-					IPs: []string{link.Gateway.IP},
-					MTU: fabric.MTU,
-				}
+				iface.IPs = []string{link.Gateway.IP}
+				iface.MTU = fabric.MTU
+				gw.Spec.Interfaces[link.Gateway.LocalPortName()] = iface
 
 				switchIP, err := netip.ParsePrefix(link.Switch.IP)
 				if err != nil {
