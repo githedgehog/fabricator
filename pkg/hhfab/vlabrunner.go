@@ -755,7 +755,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 					}); err != nil {
 						slog.Warn("Failed to run release test", "err", err)
 
-						c.CollectVLABDebug(ctx, vlab, opts, nil)
+						c.CollectVLABDebug(ctx, vlab, opts, closeDebugDone)
 
 						return fmt.Errorf("release test: %w", err)
 					}
