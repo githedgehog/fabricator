@@ -22,6 +22,7 @@ on:
       - labeled
       - unlabeled
   schedule:
+    - cron: "0 6 * * *" # ~10pm PST
     - cron: "0 10 * * *" # ~2am PST
   workflow_dispatch:
     inputs:
@@ -214,7 +215,7 @@ jobs:
           fi
 
   vlab:
-    name: "${{ matrix.hybrid && 'h' || 'v' }}-${{ matrix.upgradefrom && 'up' || '' }}${{ matrix.upgradefrom }}${{ matrix.upgradefrom && '-' || '' }}${{ matrix.mesh && 'mesh-' || '' }}${{ matrix.gateway && 'gw-' || '' }}${{ matrix.includeonie && 'onie-' || '' }}${{ matrix.buildmode }}-${{ matrix.vpcmode }}${{ (inputs.releasetest == true || contains(github.event.pull_request.labels.*.name, 'ci:+release')) && '-rt' || '' }}"
+    name: "${{ matrix.hybrid && 'h' || 'v' }}-${{ matrix.upgradefrom && 'up' || '' }}${{ matrix.upgradefrom }}${{ matrix.upgradefrom && '-' || '' }}${{ matrix.mesh && 'mesh-' || '' }}${{ matrix.gateway && 'gw-' || '' }}${{ matrix.includeonie && 'onie-' || '' }}${{ matrix.buildmode }}-${{ matrix.vpcmode }}${{ (inputs.releasetest == true || contains(github.event.pull_request.labels.*.name, 'ci:+release') || github.event.schedule == '0 6 * * *') && '-rt' || '' }}"
     needs:
       - test-build
     uses: ./.github/workflows/run-vlab.yaml
@@ -237,7 +238,7 @@ jobs:
       includeonie: ${{ matrix.includeonie }}
       buildmode: ${{ matrix.buildmode }}
       vpcmode: ${{ matrix.vpcmode }}
-      releasetest: ${{ inputs.releasetest == true || contains(github.event.pull_request.labels.*.name, 'ci:+release') }}
+      releasetest: ${{ inputs.releasetest == true || contains(github.event.pull_request.labels.*.name, 'ci:+release') || github.event.schedule == '0 6 * * *' }}
       hybrid: ${{ matrix.hybrid }}
       upgradefrom: ${{ matrix.upgradefrom }}
 
@@ -369,7 +370,7 @@ jobs:
           fi
 
   publish-test-results:
-    if: ${{ (inputs.releasetest == true || contains(github.event.pull_request.labels.*.name, 'ci:+release')) && !cancelled() }}
+    if: ${{ (inputs.releasetest == true || contains(github.event.pull_request.labels.*.name, 'ci:+release') || github.event.schedule == '0 6 * * *') && !cancelled() }}
     runs-on: lab
     needs:
       - vlabs
