@@ -15,6 +15,9 @@ passwd:
         - wheel
       shell: /bin/bash
 
+kernel_arguments:
+  should_exist:
+    - vfio-pci.ids=8086:100e
 systemd:
   units:
     - name: locksmithd.service
