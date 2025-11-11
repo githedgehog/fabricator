@@ -134,10 +134,6 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 			return fmt.Errorf("unsupported gateway driver %s", b.GatewayDriver) //nolint:goerr113
 		}
 
-		if b.GatewayUplinks == 0 {
-			return fmt.Errorf("gateway uplinks count must be greater than 0") //nolint:goerr113
-		}
-
 		totalESLAGLeafs := 0
 		if b.ESLAGLeafGroups != "" {
 			for _, g := range strings.Split(b.ESLAGLeafGroups, ",") {
@@ -147,13 +143,21 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 			}
 		}
 
-		if b.MeshLinksCount > 0 {
-			if b.GatewayUplinks > uint8(totalESLAGLeafs)+b.OrphanLeafsCount { //nolint:gosec
-				return fmt.Errorf("gateway uplinks count must be ≤ total leaf switches (ESLAG + orphan)") //nolint:goerr113
+		if b.GatewayUplinks == 0 {
+			if b.SpinesCount > 0 {
+				b.GatewayUplinks = min(2, b.SpinesCount)
+			} else if b.MeshLinksCount > 0 {
+				b.GatewayUplinks = min(2, uint8(totalESLAGLeafs)+b.OrphanLeafsCount) //nolint:gosec
 			}
 		} else {
-			if b.GatewayUplinks > b.SpinesCount {
-				return fmt.Errorf("gateway uplinks count must be ≤ spines count") //nolint:goerr113
+			if b.MeshLinksCount > 0 {
+				if b.GatewayUplinks > uint8(totalESLAGLeafs)+b.OrphanLeafsCount { //nolint:gosec
+					return fmt.Errorf("gateway uplinks count must be ≤ total leaf switches (ESLAG + orphan)") //nolint:goerr113
+				}
+			} else {
+				if b.GatewayUplinks > b.SpinesCount {
+					return fmt.Errorf("gateway uplinks count must be ≤ spines count") //nolint:goerr113
+				}
 			}
 		}
 	}

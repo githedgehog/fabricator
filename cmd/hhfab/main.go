@@ -254,9 +254,8 @@ func Run(ctx context.Context) error {
 		},
 		&cli.UintFlag{
 			Name:        "gateway-uplinks",
-			Usage:       "number of uplinks for gateway",
+			Usage:       "number of uplinks for gateway, if 0 defaults to the number of spines or mesh nodes (up to 2)",
 			Destination: &wgGatewayUplinks,
-			Value:       2,
 		},
 		&cli.StringFlag{
 			Name:        "gateway-driver",
