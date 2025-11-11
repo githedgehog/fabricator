@@ -324,12 +324,10 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsStarterTest(ctx context.Context) (b
 
 	// check whether border switchgroup exists
 	remote := "border"
-	swGroup := &wiringapi.SwitchGroup{}
-	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: remote}, swGroup); err != nil {
-		slog.Warn("Border switch group not found, not using remote", "error", err)
+	if err := checkRemotePeering(ctx, testCtx.kube, remote, 1, 2); err != nil {
+		slog.Warn("Remote peering not viable, skipping it", "error", err)
 		remote = ""
 	}
-
 	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec, 9)
 	appendVpcPeeringSpec(vpcPeerings, 1, 2, remote, []string{}, []string{})
 	appendVpcPeeringSpec(vpcPeerings, 1, 3, "", []string{}, []string{})
@@ -442,6 +440,48 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsFullLoopAllExternalsTest(ctx contex
 	return false, nil, nil
 }
 
+func checkRemotePeering(ctx context.Context, kube kclient.Reader, remote string, firstVPCIndex, secondVPCIndex int) error {
+	vpc1Name := fmt.Sprintf("vpc-%02d", firstVPCIndex)
+	vpc1 := &vpcapi.VPC{}
+	vpc2Name := fmt.Sprintf("vpc-%02d", secondVPCIndex)
+	vpc2 := &vpcapi.VPC{}
+	swGroup := &wiringapi.SwitchGroup{}
+	if err := kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: remote}, swGroup); err != nil {
+		return fmt.Errorf("remote switch group %s not found: %w", remote, err)
+	}
+	if err := kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: vpc1Name}, vpc1); err != nil {
+		return fmt.Errorf("error getting first VPC: %w", err)
+	}
+	if err := kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: vpc2Name}, vpc2); err != nil {
+		return fmt.Errorf("error getting second VPC: %w", err)
+	}
+	for _, vpc := range []string{vpc1Name, vpc2Name} {
+		vpcAttachList := &vpcapi.VPCAttachmentList{}
+		if err := kube.List(ctx, vpcAttachList, kclient.MatchingLabels{wiringapi.LabelVPC: vpc}); err != nil {
+			return fmt.Errorf("error listing VPCAttachments for VPC %s: %w", vpc, err)
+		}
+		for _, vpcAttach := range vpcAttachList.Items {
+			conn := &wiringapi.Connection{}
+			connName := vpcAttach.Spec.Connection
+			if err := kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: connName}, conn); err != nil {
+				return fmt.Errorf("error getting connection %s for VPC Attach %s: %w", connName, vpcAttach.Name, err)
+			}
+			switches, _, _, _, _ := conn.Spec.Endpoints()
+			for _, swName := range switches {
+				sw := &wiringapi.Switch{}
+				if err := kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: swName}, sw); err != nil {
+					return fmt.Errorf("error getting switch %s for VPC Attach %s: %w", swName, vpcAttach.Name, err)
+				}
+				if slices.Contains(sw.Spec.Groups, remote) {
+					return fmt.Errorf("VPC %s is attached to switch %s which is in remote group %s", vpc, swName, remote) //nolint:goerr113
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
 // Arbitrary configuration which again was shown to occasionally trigger the gNMI bug.
 func (testCtx *VPCPeeringTestCtx) vpcPeeringsSergeisSpecialTest(ctx context.Context) (bool, []RevertFunc, error) {
 	// 1+2 2+3 2+4:r=border 6+5 1~default--5835:s=subnet-01
@@ -455,9 +495,8 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsSergeisSpecialTest(ctx context.Cont
 
 	// check whether border switchgroup exists
 	remote := "border"
-	swGroup := &wiringapi.SwitchGroup{}
-	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: remote}, swGroup); err != nil {
-		slog.Warn("Border switch group not found, not using remote", "error", err)
+	if err := checkRemotePeering(ctx, testCtx.kube, remote, 2, 3); err != nil {
+		slog.Warn("Remote peering not viable, skipping it", "error", err)
 		remote = ""
 	}
 
