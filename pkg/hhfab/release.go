@@ -463,8 +463,8 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsSergeisSpecialTest(ctx context.Cont
 
 	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec, 4)
 	appendVpcPeeringSpec(vpcPeerings, 1, 2, "", []string{}, []string{})
-	appendVpcPeeringSpec(vpcPeerings, 2, 3, "", []string{}, []string{})
-	appendVpcPeeringSpec(vpcPeerings, 2, 4, remote, []string{}, []string{})
+	appendVpcPeeringSpec(vpcPeerings, 2, 3, remote, []string{}, []string{})
+	appendVpcPeeringSpec(vpcPeerings, 2, 4, "", []string{}, []string{})
 	appendVpcPeeringSpec(vpcPeerings, 6, 5, "", []string{}, []string{})
 	externalPeerings := make(map[string]*vpcapi.ExternalPeeringSpec, 6)
 	appendExtPeeringSpec(externalPeerings, 1, testCtx.extName, []string{"subnet-01"}, AllZeroPrefix)
