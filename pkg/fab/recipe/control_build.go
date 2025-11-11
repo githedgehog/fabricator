@@ -103,6 +103,15 @@ func (b *ControlInstallBuilder) addPayload(ctx context.Context, slog *slog.Logge
 		return fmt.Errorf("downloading k3s: %w", err)
 	}
 
+	slog.Info("Adding toolbox to installer")
+	if err := b.Downloader.FromORAS(ctx, installDir, flatcar.ToolboxRef, flatcar.ToolboxVersion(b.Fab), []artificer.ORASFile{
+		{
+			Name: flatcar.ToolboxBin,
+		},
+	}); err != nil {
+		return fmt.Errorf("downloading toolbox: %w", err)
+	}
+
 	if err := b.Downloader.FromORAS(ctx, installDir, k9s.Ref, k9s.Version(b.Fab), []artificer.ORASFile{
 		{
 			Name: k9s.BinName,
@@ -147,7 +156,7 @@ func (b *ControlInstallBuilder) addPayload(ctx context.Context, slog *slog.Logge
 	slog.Info("Adding bash-completion to installer", "control", b.Control.Name)
 
 	bashCompletionDir := filepath.Join(installDir, "bash-completion")
-	if err := os.MkdirAll(bashCompletionDir, 0755); err != nil {
+	if err := os.MkdirAll(bashCompletionDir, 0o755); err != nil {
 		return fmt.Errorf("creating bash-completion directory: %w", err)
 	}
 
