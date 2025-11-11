@@ -147,6 +147,10 @@ func (c *ControlUpgrade) Run(ctx context.Context) error {
 		return fmt.Errorf("upgrading K8s: %w", err)
 	}
 
+	if err := installToolbox(ctx); err != nil {
+		return fmt.Errorf("installing toolbox: %w", err)
+	}
+
 	if err := c.installK9s(); err != nil {
 		return fmt.Errorf("installing k9s: %w", err)
 	}

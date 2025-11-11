@@ -80,6 +80,15 @@ func (b *NodeInstallBuilder) addPayload(ctx context.Context, slog *slog.Logger, 
 		return fmt.Errorf("downloading k3s: %w", err)
 	}
 
+	slog.Info("Adding toolbox to installer")
+	if err := b.Downloader.FromORAS(ctx, installDir, flatcar.ToolboxRef, flatcar.ToolboxVersion(b.Fab), []artificer.ORASFile{
+		{
+			Name: flatcar.ToolboxBin,
+		},
+	}); err != nil {
+		return fmt.Errorf("downloading toolbox: %w", err)
+	}
+
 	slog.Info("Adding flatcar upgrade bin to installer")
 	if err := b.Downloader.FromORAS(ctx, installDir, flatcar.UpdateRef, flatcar.Version(b.Fab), []artificer.ORASFile{
 		{

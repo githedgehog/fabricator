@@ -69,6 +69,10 @@ func (c *NodeInstallUpgrade) Run(ctx context.Context, upgrade bool) error {
 		return fmt.Errorf("joining k8s cluster: %w", err)
 	}
 
+	if err := installToolbox(ctx); err != nil {
+		return fmt.Errorf("installing toolbox: %w", err)
+	}
+
 	// TODO remove after dataplane takes care of it
 	if slices.Contains(c.Node.Spec.Roles, fabapi.NodeRoleGateway) {
 		if err := c.prepForDataplane(ctx); err != nil {
@@ -186,6 +190,36 @@ func (c *NodeInstallUpgrade) prepForDataplane(ctx context.Context) error {
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("running iptables drop udp: %w", err)
+	}
+
+	return nil
+}
+
+func installToolbox(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
+	slog.Info("Installing toolbox")
+
+	var lastErr error
+	for attempt := range 24 {
+		if attempt > 0 {
+			time.Sleep(5 * time.Second)
+		}
+		cmd := exec.CommandContext(ctx, "ctr", "image", "import", flatcar.ToolboxBin) //nolint:gosec
+		cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "ctr-import: ")
+		cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "ctr-import: ")
+		lastErr = cmd.Run()
+		if lastErr == nil {
+			break
+		}
+	}
+	if lastErr != nil {
+		return fmt.Errorf("ctr image import: %w", lastErr)
+	}
+
+	if err := os.WriteFile("/etc/default/toolbox", []byte(flatcar.ToolboxConfig), 0o644); err != nil { //nolint:gosec
+		return fmt.Errorf("writing toolbox config: %w", err)
 	}
 
 	return nil

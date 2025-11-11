@@ -11,10 +11,17 @@ import (
 
 const (
 	ToolboxRef    = "fabricator/toolbox"
+	ToolboxBin    = "toolbox.tar"
 	Home          = "/home/core"
 	UpdateRef     = "fabricator/flatcar-update"
 	UpdateBinName = "flatcar_production_update.gz"
 )
+
+const ToolboxConfig = `
+TOOLBOX_DOCKER_IMAGE=ghcr.io/githedgehog/toolbox
+TOOLBOX_DOCKER_TAG=latest
+TOOLBOX_USER=root
+`
 
 func ToolboxVersion(f fabapi.Fabricator) meta.Version {
 	return f.Status.Versions.Platform.Toolbox

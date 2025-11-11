@@ -57,6 +57,10 @@ func (c *ControlInstall) Run(ctx context.Context) error {
 	c.Fab.Status.IsBootstrap = true
 	c.Fab.Status.IsInstall = true
 
+	if err := installToolbox(ctx); err != nil {
+		return fmt.Errorf("installing toolbox: %w", err)
+	}
+
 	if err := kube.Create(ctx, comp.NewNamespace(comp.FabNamespace)); err != nil && !kapierrors.IsAlreadyExists(err) {
 		return fmt.Errorf("creating namespace %q: %w", comp.FabNamespace, err)
 	}
