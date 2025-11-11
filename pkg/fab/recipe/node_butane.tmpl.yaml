@@ -15,9 +15,6 @@ passwd:
         - wheel
       shell: /bin/bash
 
-kernel_arguments:
-  should_exist:
-    - vfio-pci.ids=8086:100e
 systemd:
   units:
     - name: locksmithd.service
@@ -54,6 +51,11 @@ storage:
           SERVER=disabled
           REBOOT_STRATEGY=off
       # https://www.flatcar.org/docs/latest/setup/releases/update-strategies/#disable-automatic-updates
+
+    - path: /etc/modules-load.d/vfio-pci.conf
+      mode: 0644
+      contents:
+        inline: vfio-pci
 
     - path: /etc/hostname
       mode: 0644
