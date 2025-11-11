@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"slices"
 
 	"github.com/samber/lo"
@@ -31,7 +32,9 @@ func collectPodLogs(ctx context.Context, dump *Dump, kubeconfigPath string) erro
 		return fmt.Errorf("listing pods: %w", err)
 	}
 	for _, pod := range pods.Items {
-		slog.Debug("Collecting Kube pod logs", "pod", pod.Name, "namespace", pod.Namespace)
+		if os.Getenv("GITHUB_ACTIONS") != githubActionsValue {
+			slog.Debug("Collecting Kube pod logs", "pod", pod.Name, "namespace", pod.Namespace)
+		}
 
 		for _, container := range lo.Map(slices.Concat(pod.Spec.Containers, pod.Spec.InitContainers),
 			func(c corev1.Container, _ int) string { return c.Name }) {

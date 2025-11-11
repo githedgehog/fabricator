@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"reflect"
 	"strings"
 
@@ -39,7 +40,8 @@ import (
 )
 
 const (
-	RedactedValue = "SUPPORT-DUMP-REDACTED"
+	RedactedValue      = "SUPPORT-DUMP-REDACTED"
+	githubActionsValue = "true"
 )
 
 var schemeBuilders = []*scheme.Builder{
@@ -221,7 +223,9 @@ func collectKubeObjects(ctx context.Context, kube kclient.Reader, scheme *runtim
 			continue
 		}
 
-		slog.Debug("Collecting Kube resource", "gvk", gvk.String())
+		if os.Getenv("GITHUB_ACTIONS") != githubActionsValue {
+			slog.Debug("Collecting Kube resource", "gvk", gvk.String())
+		}
 
 		objListType, ok := scheme.AllKnownTypes()[schema.GroupVersionKind{
 			Group:   gvk.Group,
@@ -241,7 +245,9 @@ func collectKubeObjects(ctx context.Context, kube kclient.Reader, scheme *runtim
 
 		if err := kube.List(ctx, objList); err != nil {
 			if kmeta.IsNoMatchError(err) {
-				slog.Debug("Skipping Kube resource, no match", "gvk", gvk.String(), "err", err)
+				if os.Getenv("GITHUB_ACTIONS") != githubActionsValue {
+					slog.Debug("Skipping Kube resource, no match", "gvk", gvk.String(), "err", err)
+				}
 
 				continue
 			}
