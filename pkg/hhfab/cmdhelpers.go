@@ -130,9 +130,9 @@ func PreparePassthrough(_ context.Context, devs []string) error {
 	}
 
 	slog.Debug("Preparing devices for passthrough", "devices", devs)
-	cmd := exec.Command("modprobe", "vfio_pci")
+	cmd := exec.Command("modprobe", "vfio-pci")
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("cannot insert vfio_pci: %w", err)
+		return fmt.Errorf("cannot insert vfio-pci: %w", err)
 	}
 
 	for _, dev := range devs {
