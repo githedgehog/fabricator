@@ -2003,9 +2003,11 @@ func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (bool, []Re
 		return false, reverts, fmt.Errorf("cleaning up interfaces on %s: %w: %s", serverName, err, stderr)
 	}
 	cmd := fmt.Sprintf("/opt/bin/hhnet %s", netconfCmd)
-	if _, stderr, err := serverSSH.Run(ctx, cmd); err != nil {
-		return false, reverts, fmt.Errorf("bonding interfaces on %s: %w: %s", serverName, err, stderr)
+	hhnetStdOut, hhnetStdErr, hhnetErr := serverSSH.Run(ctx, cmd)
+	if hhnetErr != nil {
+		return false, reverts, fmt.Errorf("running hhnet %s on %s: %w: %s", netconfCmd, serverName, hhnetErr, hhnetStdErr)
 	}
+	slog.Debug("Network interface configured correctly", "server", serverName, "ifname", ifName, "DHCP address", strings.TrimSpace(hhnetStdOut))
 
 	// Check DNS, NTP, MTU and DHCP lease
 	slog.Debug("Checking DNS, NTP, MTU and DHCP lease")
