@@ -1792,29 +1792,20 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool,
 }
 
 // check that the DHCP lease is within the expected range.
-// note: tried to awk but for some reason it is not working if the pipe is passed as part of
-// the ssh command string, so tokenize here. string will be in the format:
-// valid_lft 3098sec preferred_lft 3098sec
-func checkDHCPLease(grepString string, expectedLease int, tolerance int) error {
-	tokens := strings.Split(strings.TrimLeft(grepString, " \t"), " ")
-	if len(tokens) < 4 {
-		return fmt.Errorf("DHCP lease string %s is too short, expected at least 4 tokens", grepString) //nolint:goerr113
+func checkDHCPLease(leaseInfo *DHCPLeaseInfo, expectedLease int, tolerance int) error {
+	if leaseInfo == nil {
+		return fmt.Errorf("DHCP lease info is nil") //nolint:goerr113
 	}
-	stripped, found := strings.CutSuffix(tokens[1], "sec")
-	if !found {
-		return fmt.Errorf("DHCP lease %s does not end with 'sec'", tokens[1]) //nolint:goerr113
+	if !leaseInfo.HasLease {
+		return fmt.Errorf("no DHCP lease found") //nolint:goerr113
 	}
-	lease, err := strconv.Atoi(stripped)
-	if err != nil {
-		return fmt.Errorf("parsing DHCP lease %s: %w", stripped, err) //nolint:goerr113
+	if leaseInfo.ValidLifetime > expectedLease {
+		return fmt.Errorf("DHCP lease valid lifetime %d is greater than expected %d", leaseInfo.ValidLifetime, expectedLease) //nolint:goerr113
 	}
-	if lease > expectedLease {
-		return fmt.Errorf("DHCP lease %d is greater than expected %d", lease, expectedLease) //nolint:goerr113
+	if leaseInfo.ValidLifetime < expectedLease-tolerance {
+		return fmt.Errorf("DHCP lease valid lifetime %d is less than expected %d (tolerance %d)", leaseInfo.ValidLifetime, expectedLease, tolerance) //nolint:goerr113
 	}
-	if lease < expectedLease-tolerance {
-		return fmt.Errorf("DHCP lease %d is less than expected %d (tolerance %d)", lease, expectedLease, tolerance) //nolint:goerr113
-	}
-	slog.Debug("DHCP lease check passed", "lease", lease, "expected", expectedLease, "tolerance", tolerance)
+	slog.Debug("DHCP lease check passed", "lease", leaseInfo.ValidLifetime, "expected", expectedLease, "tolerance", tolerance)
 
 	return nil
 }
@@ -2001,10 +1992,10 @@ func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (bool, []Re
 		time.Sleep(10 * time.Second)
 	}
 
-	stdout, stderr, leaseErr := serverSSH.Run(ctx, fmt.Sprintf("ip addr show dev %s proto 4 | grep valid_lft", ifName))
+	lease, leaseErr := fetchAndParseDHCPLease(ctx, serverSSH, ifName)
 	if leaseErr != nil {
-		slog.Error("failed to get lease time", "error", leaseErr, "stderr", stderr)
-	} else if err := checkDHCPLease(stdout, 1800, 120); err != nil {
+		slog.Error("failed to get lease time", "error", leaseErr)
+	} else if err := checkDHCPLease(lease, 1800, 120); err != nil {
 		slog.Error("DHCP lease time check failed", "error", err)
 	} else {
 		leaseCheck = true
@@ -3306,7 +3297,7 @@ func (testCtx *VPCPeeringTestCtx) dhcpRenewalTest(ctx context.Context) (bool, []
 	if testVPC == nil || len(testServers) == 0 {
 		slog.Info("No servers with DHCP-enabled VPC attachments found, skipping DHCP renewal test")
 
-		return true, nil, nil
+		return true, nil, fmt.Errorf("no servers with DHCP-enabled VPC attachments found") //nolint:goerr113
 	}
 
 	testServerCount := 1
@@ -3458,11 +3449,7 @@ func (testCtx *VPCPeeringTestCtx) waitForDHCPRenewal(ctx context.Context, server
 			case <-time.After(1 * time.Second):
 			}
 
-			out, _, err := ssh.Run(ctx, fmt.Sprintf("ip addr show dev %s proto 4", ifName))
-			if err != nil {
-				continue
-			}
-			info, err := parseDHCPLease(out)
+			info, err := fetchAndParseDHCPLease(ctx, ssh, ifName)
 			if err != nil || !info.HasLease {
 				continue
 			}
@@ -3494,24 +3481,16 @@ func (testCtx *VPCPeeringTestCtx) waitForDHCPRenewal(ctx context.Context, server
 		}
 	}
 
-	initialOut, _, err := ssh.Run(ctx, fmt.Sprintf("ip addr show dev %s proto 4", ifName))
-	if err != nil {
-		return fmt.Errorf("getting initial lease info: %w", err)
-	}
-
-	initialInfo, err := parseDHCPLease(initialOut)
+	initialInfo, err := fetchAndParseDHCPLease(ctx, ssh, ifName)
 	if err != nil {
 		return fmt.Errorf("parsing initial lease: %w", err)
 	}
-
 	if !initialInfo.HasLease {
 		return fmt.Errorf("no initial lease found on %s", ifName) //nolint:goerr113
 	}
-
 	slog.Info("Initial short lease acquired", "server", serverName, "interface", ifName,
 		"lease_time", initialInfo.ValidLifetime, "expected_short", shortLeaseTime)
-
-	if err := checkDHCPLease(initialInfo.LeaseText, int(shortLeaseTime), 20); err != nil {
+	if err := checkDHCPLease(initialInfo, int(shortLeaseTime), 20); err != nil {
 		return fmt.Errorf("initial lease time not as expected: %w", err)
 	}
 
@@ -3526,27 +3505,20 @@ func (testCtx *VPCPeeringTestCtx) waitForDHCPRenewal(ctx context.Context, server
 	case <-time.After(renewalWaitTime):
 	}
 
-	renewedOut, _, err := ssh.Run(ctx, fmt.Sprintf("ip addr show dev %s proto 4", ifName))
-	if err != nil {
-		return fmt.Errorf("getting renewed lease info: %w", err)
-	}
-
-	renewedInfo, err := parseDHCPLease(renewedOut)
+	renewedInfo, err := fetchAndParseDHCPLease(ctx, ssh, ifName)
 	if err != nil {
 		return fmt.Errorf("parsing renewed lease: %w", err)
 	}
-
 	if !renewedInfo.HasLease {
 		return fmt.Errorf("no lease found after renewal period on %s", ifName) //nolint:goerr113
 	}
-
 	slog.Info("Post-renewal lease state", "server", serverName, "interface", ifName,
 		"lease_time", renewedInfo.ValidLifetime, "initial_lease", initialInfo.ValidLifetime)
 
 	// Verify the renewed lease has the configured short lease time
 	// This tests both that renewal works AND that the DHCP configuration is properly applied
 	expectedRenewedLease := int(shortLeaseTime)
-	if err := checkDHCPLease(renewedInfo.LeaseText, expectedRenewedLease, 20); err != nil {
+	if err := checkDHCPLease(renewedInfo, expectedRenewedLease, 20); err != nil {
 		return fmt.Errorf("renewed lease time not as expected: %w", err)
 	}
 
@@ -3617,6 +3589,20 @@ func parseDHCPLease(output string) (*DHCPLeaseInfo, error) {
 
 	if info.HasLease && info.ValidLifetime == 0 {
 		return nil, fmt.Errorf("failed to parse lease time from: %s", info.LeaseText) //nolint:goerr113
+	}
+
+	return info, nil
+}
+
+func fetchAndParseDHCPLease(ctx context.Context, ssh *sshutil.Config, ifName string) (*DHCPLeaseInfo, error) {
+	output, _, err := ssh.Run(ctx, fmt.Sprintf("ip addr show dev %s proto 4", ifName))
+	if err != nil {
+		return nil, fmt.Errorf("running ip addr on the host: %w", err)
+	}
+
+	info, err := parseDHCPLease(output)
+	if err != nil {
+		return nil, fmt.Errorf("parsing lease: %w", err)
 	}
 
 	return info, nil
