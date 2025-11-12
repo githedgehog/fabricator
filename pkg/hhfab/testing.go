@@ -1583,6 +1583,10 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 	pings := semaphore.NewWeighted(opts.PingsParallel)
 	iperfs := semaphore.NewWeighted(opts.IPerfsParallel)
 	curls := semaphore.NewWeighted(opts.CurlsParallel)
+	toolboxMutexes := make(map[string]*sync.Mutex, len(serverIDs))
+	for server := range serverIDs {
+		toolboxMutexes[server] = &sync.Mutex{}
+	}
 
 	if len(opts.Sources) == 0 {
 		opts.Sources = make([]string, len(serverIDs))
@@ -1654,7 +1658,17 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 							return pe
 						}
 
-						if ie := checkIPerf(ctx, opts, iperfs, serverA, serverB, clientA, clientB, ipB.Addr(), expectedReachable); ie != nil {
+						if err := iperfs.Acquire(ctx, 1); err != nil {
+							return fmt.Errorf("acquiring iperf3 semaphore: %s", err)
+						}
+						defer iperfs.Release(1)
+
+						// Acquire toolbox mutexes for both servers to avoid concurrent toolbox usage
+						toolboxMutexes[serverA].Lock()
+						defer toolboxMutexes[serverA].Unlock()
+						toolboxMutexes[serverB].Lock()
+						defer toolboxMutexes[serverB].Unlock()
+						if ie := checkIPerf(ctx, opts, serverA, serverB, clientA, clientB, ipB.Addr(), expectedReachable); ie != nil {
 							return ie
 						}
 
@@ -2191,7 +2205,7 @@ func checkPing(ctx context.Context, pingCount int, semaphore *semaphore.Weighted
 	return nil
 }
 
-func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphore.Weighted, from, to string, fromSSH, toSSH *sshutil.Config, toIP netip.Addr, reachability Reachability) *IperfError {
+func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string, fromSSH, toSSH *sshutil.Config, toIP netip.Addr, reachability Reachability) *IperfError {
 	if opts.IPerfsSeconds <= 0 || !reachability.Reachable {
 		return nil
 	}
@@ -2206,13 +2220,6 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphor
 		iPerfsMinSpeed = min(iPerfsMinSpeed, 0.01)
 	}
 	ie.MinSpeed = asMbps(iPerfsMinSpeed * 1_000_000)
-
-	if err := iperfs.Acquire(ctx, 1); err != nil {
-		ie.ClientMsg = fmt.Sprintf("acquiring iperf3 semaphore: %s", err)
-
-		return ie
-	}
-	defer iperfs.Release(1)
 
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(opts.IPerfsSeconds+30)*time.Second)
 	defer cancel()
