@@ -701,10 +701,19 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 				case OnReadyInspect:
 					if err := c.Inspect(ctx, vlab, InspectOpts{
 						WaitAppliedFor: 30 * time.Second,
-						Strict:         !opts.AutoUpgrade,
+						Strict:         true,
 						Attempts:       3,
 					}); err != nil {
 						slog.Warn("Failed to inspect", "err", err)
+
+						// Emit GitHub Actions warning annotation if running in CI
+						if os.Getenv("GITHUB_ACTIONS") == "true" {
+							jobName := os.Getenv("GITHUB_JOB")
+							if jobName == "" {
+								jobName = "unknown"
+							}
+							fmt.Fprintf(os.Stderr, "::warning title=Inspect Failed (%s)::Fabric inspection failed: %v\n", jobName, err)
+						}
 
 						c.CollectVLABDebug(ctx, vlab, opts)
 						if opts.PauseOnFailure {
