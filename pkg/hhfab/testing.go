@@ -1145,7 +1145,7 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 						vpc: {
 							Expose: []gwapi.PeeringEntryExpose{vpcExpose},
 						},
-						"ext." + ext: {
+						gwapi.VPCInfoExtPrefix + ext: {
 							Expose: []gwapi.PeeringEntryExpose{extExpose},
 						},
 					},
@@ -1794,7 +1794,7 @@ func IsExternalSubnetReachable(ctx context.Context, kube kclient.Reader, sourceS
 		sourceParts := strings.SplitN(sourceSubnetName, "/", 2)
 		sourceVPC, sourceSubnet := sourceParts[0], sourceParts[1]
 		for _, ext := range externalNames {
-			if r, err := IsSubnetReachableWithGatewayPeering(ctx, kube, sourceVPC, sourceSubnet, "ext."+ext, "external"); err != nil {
+			if r, err := IsSubnetReachableWithGatewayPeering(ctx, kube, sourceVPC, sourceSubnet, gwapi.VPCInfoExtPrefix+ext, "external"); err != nil {
 				return Reachability{}, err
 			} else if r.Reachable {
 				return r, nil
