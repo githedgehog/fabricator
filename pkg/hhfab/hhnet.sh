@@ -2,52 +2,73 @@
 # Copyright 2024 Hedgehog
 # SPDX-License-Identifier: Apache-2.0
 
-
 set -e
+trap 'echo "Error on line $LINENO: $BASH_COMMAND" >&2' ERR
 
 function cleanup() {
     mapfile -t bond_intfs < <(ip -brief link show type bond)
 
     for intf in "${bond_intfs[@]}"; do
             intf="${intf%% *}"
-            sudo ip link del "$intf"
+            sudo ip link del "$intf" || echo "warning: could not delete $intf" >&2
     done
 
     mapfile -t vlan_intfs < <(ip -brief link show type vlan)
     for intf in "${vlan_intfs[@]}"; do
             intf="${intf%@*}"
-            sudo ip link set "$intf" down
-            sudo ip link del "$intf"
+            sudo ip link set "$intf" down || echo "warning: could not bring down $intf" >&2
+            sudo ip link del "$intf" || echo "warning: could not delete $intf" >&2
     done
     sleep 1
 }
 
 function restart_networkd() {
-	sudo systemctl restart systemd-networkd
+	sudo systemctl restart systemd-networkd || {
+		echo "error: failed to restart systemd-networkd" >&2
+		return 1
+	}
 }
 
 function setup_bond() {
     local bond_name=$1
     local hash_policy=$2
 
-    sudo ip l a "$bond_name" type bond miimon 100 mode 802.3ad xmit_hash_policy "$hash_policy"
+    sudo ip l a "$bond_name" type bond miimon 100 mode 802.3ad xmit_hash_policy "$hash_policy" || {
+        echo "error: failed to create bond $bond_name" >&2
+        return 1
+    }
 
     for iface in "${@:3}"; do
         # cannot enslave interface if it is up
-        sudo ip l s "$iface" down 2> /dev/null || true
-        sudo ip l s "$iface" master "$bond_name"
+        sudo ip l s "$iface" down 2> /dev/null || echo "warning: could not bring down $iface" >&2
+        sudo ip l s "$iface" master "$bond_name" || {
+            echo "error: failed to enslave $iface to $bond_name" >&2
+            return 1
+        }
     done
 
-    sudo ip l s "$bond_name" up
+    sudo ip l s "$bond_name" up || {
+        echo "error: failed to bring up $bond_name" >&2
+        return 1
+    }
 }
 
 function setup_vlan() {
     local iface_name=$1
     local vlan_id=$2
 
-    sudo ip l s "$iface_name" up
-    sudo ip l a link "$iface_name" name "$iface_name.$vlan_id" type vlan id "$vlan_id"
-    sudo ip l s "$iface_name.$vlan_id" up
+    sudo ip l s "$iface_name" up || {
+        echo "error: failed to bring up interface $iface_name" >&2
+        return 1
+    }
+    sudo ip l a link "$iface_name" name "$iface_name.$vlan_id" type vlan id "$vlan_id" || {
+        echo "error: failed to create VLAN $vlan_id on $iface_name" >&2
+        return 1
+    }
+    sudo ip l s "$iface_name.$vlan_id" up || {
+        echo "error: failed to bring up VLAN interface $iface_name.$vlan_id" >&2
+        return 1
+    }
 }
 
 function get_ip() {
