@@ -21,6 +21,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	agentapi "go.githedgehog.com/fabric/api/agent/v1beta1"
@@ -1791,29 +1792,20 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool,
 }
 
 // check that the DHCP lease is within the expected range.
-// note: tried to awk but for some reason it is not working if the pipe is passed as part of
-// the ssh command string, so tokenize here. string will be in the format:
-// valid_lft 3098sec preferred_lft 3098sec
-func checkDHCPLease(grepString string, expectedLease int, tolerance int) error {
-	tokens := strings.Split(strings.TrimLeft(grepString, " \t"), " ")
-	if len(tokens) < 4 {
-		return fmt.Errorf("DHCP lease string %s is too short, expected at least 4 tokens", grepString) //nolint:goerr113
+func checkDHCPLease(leaseInfo *DHCPLeaseInfo, expectedLease int, tolerance int) error {
+	if leaseInfo == nil {
+		return fmt.Errorf("DHCP lease info is nil") //nolint:goerr113
 	}
-	stripped, found := strings.CutSuffix(tokens[1], "sec")
-	if !found {
-		return fmt.Errorf("DHCP lease %s does not end with 'sec'", tokens[1]) //nolint:goerr113
+	if !leaseInfo.HasLease {
+		return fmt.Errorf("no DHCP lease found") //nolint:goerr113
 	}
-	lease, err := strconv.Atoi(stripped)
-	if err != nil {
-		return fmt.Errorf("parsing DHCP lease %s: %w", stripped, err) //nolint:goerr113
+	if leaseInfo.ValidLifetime > expectedLease {
+		return fmt.Errorf("DHCP lease valid lifetime %d is greater than expected %d", leaseInfo.ValidLifetime, expectedLease) //nolint:goerr113
 	}
-	if lease > expectedLease {
-		return fmt.Errorf("DHCP lease %d is greater than expected %d", lease, expectedLease) //nolint:goerr113
+	if leaseInfo.ValidLifetime < expectedLease-tolerance {
+		return fmt.Errorf("DHCP lease valid lifetime %d is less than expected %d (tolerance %d)", leaseInfo.ValidLifetime, expectedLease, tolerance) //nolint:goerr113
 	}
-	if lease < expectedLease-tolerance {
-		return fmt.Errorf("DHCP lease %d is less than expected %d (tolerance %d)", lease, expectedLease, tolerance) //nolint:goerr113
-	}
-	slog.Debug("DHCP lease check passed", "lease", lease, "expected", expectedLease, "tolerance", tolerance)
+	slog.Debug("DHCP lease check passed", "lease", leaseInfo.ValidLifetime, "expected", expectedLease, "tolerance", tolerance)
 
 	return nil
 }
@@ -2000,10 +1992,10 @@ func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (bool, []Re
 		time.Sleep(10 * time.Second)
 	}
 
-	stdout, stderr, leaseErr := serverSSH.Run(ctx, fmt.Sprintf("ip addr show dev %s proto 4 | grep valid_lft", ifName))
+	lease, leaseErr := fetchAndParseDHCPLease(ctx, serverSSH, ifName)
 	if leaseErr != nil {
-		slog.Error("failed to get lease time", "error", leaseErr, "stderr", stderr)
-	} else if err := checkDHCPLease(stdout, 1800, 120); err != nil {
+		slog.Error("failed to get lease time", "error", leaseErr)
+	} else if err := checkDHCPLease(lease, 1800, 120); err != nil {
 		slog.Error("DHCP lease time check failed", "error", err)
 	} else {
 		leaseCheck = true
@@ -3144,6 +3136,389 @@ func (testCtx *VPCPeeringTestCtx) prometheusObservabilityTest(ctx context.Contex
 	return false, nil, nil
 }
 
+// Test DHCP renewal on VPC-attached interfaces
+// Uses 1 server by default, all servers in extended mode
+// Sets VPC DHCPOptions to a shorter lease and reconfigures servers via networkctl
+// Waits for DHCP renewal and checks lease time
+func (testCtx *VPCPeeringTestCtx) dhcpRenewalTest(ctx context.Context) (bool, []RevertFunc, error) {
+	// Find VPC with at least one server attached that has DHCP enabled
+	vpcAttaches := &vpcapi.VPCAttachmentList{}
+	if err := testCtx.kube.List(ctx, vpcAttaches); err != nil {
+		return false, nil, fmt.Errorf("listing VPCAttachments: %w", err)
+	}
+
+	var testVPC *vpcapi.VPC
+	testServers := []ServerWithInterface{}
+
+	for _, attach := range vpcAttaches.Items {
+		conn := &wiringapi.Connection{}
+		if err := testCtx.kube.Get(ctx, kclient.ObjectKey{
+			Namespace: kmetav1.NamespaceDefault,
+			Name:      attach.Spec.Connection,
+		}, conn); err != nil {
+			continue
+		}
+
+		_, serverNames, _, _, err := conn.Spec.Endpoints()
+		if err != nil || len(serverNames) != 1 {
+			continue
+		}
+
+		vpc := &vpcapi.VPC{}
+		if err := testCtx.kube.Get(ctx, kclient.ObjectKey{
+			Namespace: kmetav1.NamespaceDefault,
+			Name:      attach.Spec.VPCName(),
+		}, vpc); err != nil {
+			continue
+		}
+
+		subnetName := attach.Spec.SubnetName()
+		subnet := vpc.Spec.Subnets[subnetName]
+		if subnet == nil || !subnet.DHCP.Enable {
+			continue
+		}
+
+		// Determine the interface name based on connection type
+		var ifName string
+		if conn.Spec.Unbundled != nil {
+			ifName = fmt.Sprintf("%s.%d", conn.Spec.Unbundled.Link.Server.LocalPortName(), subnet.VLAN)
+		} else {
+			ifName = fmt.Sprintf("bond0.%d", subnet.VLAN)
+		}
+
+		// If this is the first VPC, save it
+		if testVPC == nil {
+			testVPC = vpc
+		}
+
+		// Collect servers from the same VPC
+		if testVPC.Name == vpc.Name {
+			testServers = append(testServers, ServerWithInterface{
+				Name:      serverNames[0],
+				Interface: ifName,
+			})
+		}
+
+		// In non-extended mode, stop after finding first server
+		if !testCtx.extended && len(testServers) > 0 {
+			break
+		}
+	}
+
+	if testVPC == nil || len(testServers) == 0 {
+		slog.Info("No servers with DHCP-enabled VPC attachments found, skipping DHCP renewal test")
+
+		return true, nil, fmt.Errorf("no servers with DHCP-enabled VPC attachments found") //nolint:goerr113
+	}
+
+	testServerCount := 1
+	if testCtx.extended {
+		testServerCount = len(testServers)
+	}
+
+	testServers = testServers[:testServerCount]
+	slog.Info("Testing DHCP renewal", "servers", len(testServers), "vpc", testVPC.Name)
+
+	// Save original lease times for all DHCP-enabled subnets
+	originalLeaseTimes := make(map[string]uint32)
+	for subnetName, subnet := range testVPC.Spec.Subnets {
+		if subnet.DHCP.Enable && subnet.DHCP.Options != nil {
+			originalLeaseTimes[subnetName] = subnet.DHCP.Options.LeaseTimeSeconds
+		}
+	}
+
+	reverts := make([]RevertFunc, 0)
+	reverts = append(reverts, func(ctx context.Context) error {
+		slog.Debug("Reverting DHCP lease time for all subnets", "vpc", testVPC.Name)
+
+		// Restore original lease times
+		for subnetName, originalLeaseTime := range originalLeaseTimes {
+			if subnet := testVPC.Spec.Subnets[subnetName]; subnet != nil && subnet.DHCP.Options != nil {
+				subnet.DHCP.Options.LeaseTimeSeconds = originalLeaseTime
+			}
+		}
+
+		_, err := CreateOrUpdateVpc(ctx, testCtx.kube, testVPC)
+		if err != nil {
+			return fmt.Errorf("reverting VPC %s DHCP lease times: %w", testVPC.Name, err)
+		}
+
+		time.Sleep(5 * time.Second)
+
+		return WaitReady(ctx, testCtx.kube, testCtx.wrOpts)
+	})
+
+	shortLeaseTime := uint32(60)
+	slog.Debug("Setting short DHCP lease time for all subnets", "vpc", testVPC.Name, "lease_time", shortLeaseTime)
+
+	// Set short lease time for all DHCP-enabled subnets in the VPC
+	for _, subnet := range testVPC.Spec.Subnets {
+		if !subnet.DHCP.Enable {
+			continue
+		}
+
+		if subnet.DHCP.Options == nil {
+			subnet.DHCP.Options = &vpcapi.VPCDHCPOptions{
+				DNSServers:       []string{},
+				TimeServers:      []string{},
+				InterfaceMTU:     9036,
+				AdvertisedRoutes: []vpcapi.VPCDHCPRoute{},
+			}
+		}
+
+		subnet.DHCP.Options.LeaseTimeSeconds = shortLeaseTime
+	}
+
+	change, err := CreateOrUpdateVpc(ctx, testCtx.kube, testVPC)
+	if err != nil || !change {
+		return false, reverts, fmt.Errorf("updating VPC %s with short lease time: %w", testVPC.Name, err)
+	}
+
+	slog.Debug("Waiting for DHCP configuration to propagate")
+	if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
+		return false, reverts, fmt.Errorf("waiting for ready after DHCP change: %w", err)
+	}
+
+	// Give extra time for DHCP server to pick up the new lease configuration
+	// This ensures that when we test renewal, the server will give out the correct lease time
+	slog.Debug("Waiting for DHCP server to apply new lease time configuration")
+	time.Sleep(30 * time.Second)
+
+	var wg sync.WaitGroup
+	results := make(chan RenewalResult, len(testServers))
+
+	for _, server := range testServers {
+		wg.Add(1)
+		go func(srv ServerWithInterface) {
+			defer wg.Done()
+
+			start := time.Now()
+			err := testCtx.waitForDHCPRenewal(ctx, srv.Name, srv.Interface, shortLeaseTime)
+			duration := time.Since(start)
+
+			result := RenewalResult{
+				Server:   srv.Name,
+				Duration: duration,
+				Error:    err,
+			}
+
+			results <- result
+		}(server)
+	}
+
+	wg.Wait()
+	close(results)
+
+	var failures []string
+	successCount := 0
+	maxDuration := time.Duration(0)
+
+	for result := range results {
+		if result.Error != nil {
+			failures = append(failures, fmt.Sprintf("%s: %v", result.Server, result.Error))
+		} else {
+			successCount++
+			if result.Duration > maxDuration {
+				maxDuration = result.Duration
+			}
+		}
+	}
+
+	if len(failures) > 0 {
+		return false, reverts, fmt.Errorf("DHCP renewal failures: %v", failures) //nolint:goerr113
+	}
+
+	slog.Info("DHCP renewal test completed successfully", "servers", len(testServers), "maxDuration", maxDuration)
+
+	return false, reverts, nil
+}
+
+func (testCtx *VPCPeeringTestCtx) waitForDHCPRenewal(ctx context.Context, serverName, ifName string, shortLeaseTime uint32) error {
+	isL3Mode := testCtx.setupOpts.VPCMode == vpcapi.VPCModeL3VNI || testCtx.setupOpts.VPCMode == vpcapi.VPCModeL3Flat
+
+	ssh, err := testCtx.getSSH(ctx, serverName)
+	if err != nil {
+		return fmt.Errorf("getting ssh config for server %s: %w", serverName, err)
+	}
+
+	_, stderr, err := ssh.Run(ctx, fmt.Sprintf("sudo networkctl reconfigure %s", ifName))
+	if err != nil {
+		if stderr != "" {
+			return fmt.Errorf("reconfiguring interface to get short lease: %w (stderr: %s)", err, stderr)
+		}
+
+		return fmt.Errorf("reconfiguring interface to get short lease: %w", err)
+	}
+
+	// In L3VNI mode, check immediately for 2-step process
+	if isL3Mode {
+		shortLeaseFound := false
+		for i := 0; i < 30; i++ {
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("context cancelled during L3 reconfiguration polling: %w", ctx.Err())
+			case <-time.After(1 * time.Second):
+			}
+
+			info, err := fetchAndParseDHCPLease(ctx, ssh, ifName)
+			if err != nil || !info.HasLease {
+				continue
+			}
+
+			// Look for short lease (L3VNI 2-step process)
+			if !shortLeaseFound && info.ValidLifetime >= 5 && info.ValidLifetime <= 15 {
+				shortLeaseFound = true
+				slog.Debug("L3 mode short lease detected during reconfiguration", "server", serverName, "lease", info.ValidLifetime)
+
+				continue
+			}
+
+			// Wait for full lease
+			if info.ValidLifetime >= int(shortLeaseTime)-10 {
+				if !shortLeaseFound {
+					return fmt.Errorf("L3VNI mode requires 2-step lease process, but no short lease detected before full lease on %s", ifName) //nolint:goerr113
+				}
+				slog.Debug("L3 mode 2-step reconfiguration completed", "server", serverName, "final_lease", info.ValidLifetime)
+
+				break
+			}
+		}
+	} else {
+		// L2VNI mode: simple wait
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("context cancelled during initial wait: %w", ctx.Err())
+		case <-time.After(15 * time.Second):
+		}
+	}
+
+	initialInfo, err := fetchAndParseDHCPLease(ctx, ssh, ifName)
+	if err != nil {
+		return fmt.Errorf("parsing initial lease: %w", err)
+	}
+	if !initialInfo.HasLease {
+		return fmt.Errorf("no initial lease found on %s", ifName) //nolint:goerr113
+	}
+	slog.Info("Initial short lease acquired", "server", serverName, "interface", ifName,
+		"lease_time", initialInfo.ValidLifetime, "expected_short", shortLeaseTime)
+	if err := checkDHCPLease(initialInfo, int(shortLeaseTime), 20); err != nil {
+		return fmt.Errorf("initial lease time not as expected: %w", err)
+	}
+
+	// Wait longer to ensure renewal has time to complete
+	// DHCP renewal happens at T1 (50% of lease = 30s), plus time for server response
+	renewalWaitTime := time.Duration(shortLeaseTime/2+25) * time.Second
+	slog.Info("Waiting for automatic DHCP renewal", "server", serverName, "wait_time", renewalWaitTime)
+
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("context cancelled during renewal wait: %w", ctx.Err())
+	case <-time.After(renewalWaitTime):
+	}
+
+	renewedInfo, err := fetchAndParseDHCPLease(ctx, ssh, ifName)
+	if err != nil {
+		return fmt.Errorf("parsing renewed lease: %w", err)
+	}
+	if !renewedInfo.HasLease {
+		return fmt.Errorf("no lease found after renewal period on %s", ifName) //nolint:goerr113
+	}
+	slog.Info("Post-renewal lease state", "server", serverName, "interface", ifName,
+		"lease_time", renewedInfo.ValidLifetime, "initial_lease", initialInfo.ValidLifetime)
+
+	// Verify the renewed lease has the configured short lease time
+	// This tests both that renewal works AND that the DHCP configuration is properly applied
+	expectedRenewedLease := int(shortLeaseTime)
+	if err := checkDHCPLease(renewedInfo, expectedRenewedLease, 20); err != nil {
+		return fmt.Errorf("renewed lease time not as expected: %w", err)
+	}
+
+	// Also verify that renewal actually happened (lease didn't just count down)
+	if renewedInfo.ValidLifetime <= initialInfo.ValidLifetime/2 {
+		return fmt.Errorf("lease doesn't appear to have been renewed - time not refreshed (initial: %d, renewed: %d)", //nolint:goerr113
+			initialInfo.ValidLifetime, renewedInfo.ValidLifetime)
+	}
+
+	slog.Info("DHCP renewal completed successfully", "server", serverName,
+		"initial_lease", initialInfo.ValidLifetime, "renewed_lease", renewedInfo.ValidLifetime)
+
+	return nil
+}
+
+type ServerWithInterface struct {
+	Name      string
+	Interface string
+}
+
+type RenewalResult struct {
+	Server   string
+	Duration time.Duration
+	Error    error
+}
+
+type DHCPLeaseInfo struct {
+	ValidLifetime     int
+	PreferredLifetime int
+	HasLease          bool
+	LeaseText         string
+}
+
+func parseDHCPLease(output string) (*DHCPLeaseInfo, error) {
+	info := &DHCPLeaseInfo{}
+
+	lines := strings.Split(output, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if !strings.Contains(line, "valid_lft") {
+			continue
+		}
+
+		info.HasLease = true
+		info.LeaseText = line
+
+		tokens := strings.Fields(line)
+
+		for i, token := range tokens {
+			if token == "valid_lft" && i+1 < len(tokens) {
+				if stripped, found := strings.CutSuffix(tokens[i+1], "sec"); found {
+					if lease, err := strconv.Atoi(stripped); err == nil {
+						info.ValidLifetime = lease
+					}
+				}
+			}
+			if token == "preferred_lft" && i+1 < len(tokens) {
+				if stripped, found := strings.CutSuffix(tokens[i+1], "sec"); found {
+					if lease, err := strconv.Atoi(stripped); err == nil {
+						info.PreferredLifetime = lease
+					}
+				}
+			}
+		}
+
+		break
+	}
+
+	if info.HasLease && info.ValidLifetime == 0 {
+		return nil, fmt.Errorf("failed to parse lease time from: %s", info.LeaseText) //nolint:goerr113
+	}
+
+	return info, nil
+}
+
+func fetchAndParseDHCPLease(ctx context.Context, ssh *sshutil.Config, ifName string) (*DHCPLeaseInfo, error) {
+	output, _, err := ssh.Run(ctx, fmt.Sprintf("ip addr show dev %s proto 4", ifName))
+	if err != nil {
+		return nil, fmt.Errorf("running ip addr on the host: %w", err)
+	}
+
+	info, err := parseDHCPLease(output)
+	if err != nil {
+		return nil, fmt.Errorf("parsing lease: %w", err)
+	}
+
+	return info, nil
+}
+
 // Utilities and suite runners
 
 func makeTestCtx(kube kclient.Client, setupOpts SetupVPCsOpts, vlabCfg *Config, vlab *VLAB, wipeBetweenTests bool, rtOpts ReleaseTestOpts) *VPCPeeringTestCtx {
@@ -3633,6 +4008,10 @@ func makeVpcPeeringsSingleVPCSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 		{
 			Name: "DNS/NTP/MTU/DHCP lease",
 			F:    testCtx.dnsNtpMtuTest,
+		},
+		{
+			Name: "DHCP renewal",
+			F:    testCtx.dhcpRenewalTest,
 		},
 		{
 			Name: "MCLAG Failover",
