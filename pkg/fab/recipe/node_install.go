@@ -206,7 +206,7 @@ func installToolbox(ctx context.Context) error {
 		if attempt > 0 {
 			time.Sleep(5 * time.Second)
 		}
-		cmd := exec.CommandContext(ctx, "ctr", "image", "import", flatcar.ToolboxBin) //nolint:gosec
+		cmd := exec.CommandContext(ctx, "ctr", "image", "import", flatcar.ToolboxArchiveBin) //nolint:gosec
 		cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "ctr-import: ")
 		cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "ctr-import: ")
 		lastErr = cmd.Run()

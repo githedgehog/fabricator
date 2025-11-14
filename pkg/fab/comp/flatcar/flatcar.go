@@ -10,11 +10,12 @@ import (
 )
 
 const (
-	ToolboxRef    = "fabricator/toolbox"
-	ToolboxBin    = "toolbox.tar"
-	Home          = "/home/core"
-	UpdateRef     = "fabricator/flatcar-update"
-	UpdateBinName = "flatcar_production_update.gz"
+	ToolboxArchiveRef = "fabricator/toolbox"
+	ToolboxArchiveBin = "toolbox.tar"
+	ToolboxRef        = "toolbox"
+	Home              = "/home/core"
+	UpdateRef         = "fabricator/flatcar-update"
+	UpdateBinName     = "flatcar_production_update.gz"
 )
 
 const ToolboxConfig = `
@@ -31,7 +32,6 @@ var _ comp.ListOCIArtifacts = Artifacts
 
 func Artifacts(cfg fabapi.Fabricator) (comp.OCIArtifacts, error) {
 	return comp.OCIArtifacts{
-		// TODO do we actually need it in that form?
 		ToolboxRef: ToolboxVersion(cfg),
 	}, nil
 }

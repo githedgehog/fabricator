@@ -81,9 +81,9 @@ func (b *NodeInstallBuilder) addPayload(ctx context.Context, slog *slog.Logger, 
 	}
 
 	slog.Info("Adding toolbox to installer")
-	if err := b.Downloader.FromORAS(ctx, installDir, flatcar.ToolboxRef, flatcar.ToolboxVersion(b.Fab), []artificer.ORASFile{
+	if err := b.Downloader.FromORAS(ctx, installDir, flatcar.ToolboxArchiveRef, flatcar.ToolboxVersion(b.Fab), []artificer.ORASFile{
 		{
-			Name: flatcar.ToolboxBin,
+			Name: flatcar.ToolboxArchiveBin,
 		},
 	}); err != nil {
 		return fmt.Errorf("downloading toolbox: %w", err)
