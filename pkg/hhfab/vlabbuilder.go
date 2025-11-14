@@ -143,11 +143,12 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 			}
 		}
 
+		// TODO set default gateway uplinks count back to 2 when we fix the issue with the gateway kernel driver
 		if b.GatewayUplinks == 0 {
 			if b.SpinesCount > 0 {
-				b.GatewayUplinks = min(2, b.SpinesCount)
+				b.GatewayUplinks = min(1, b.SpinesCount)
 			} else if b.MeshLinksCount > 0 {
-				b.GatewayUplinks = min(2, uint8(totalESLAGLeafs)+b.OrphanLeafsCount) //nolint:gosec
+				b.GatewayUplinks = min(1, uint8(totalESLAGLeafs)+b.OrphanLeafsCount) //nolint:gosec
 			}
 		} else {
 			if b.MeshLinksCount > 0 {
