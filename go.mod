@@ -41,7 +41,7 @@ require (
 	github.com/urfave/cli/v2 v2.27.7
 	github.com/vbauerster/mpb/v8 v8.11.2
 	github.com/vishvananda/netlink v1.3.1
-	go.githedgehog.com/fabric v0.94.4
+	go.githedgehog.com/fabric v0.95.0
 	go.githedgehog.com/gateway v0.25.1
 	go.githedgehog.com/libmeta v0.3.0
 	golang.org/x/crypto v0.43.0
@@ -121,6 +121,7 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/chzyer/readline v1.5.1 // indirect
 	github.com/clarketm/json v1.17.1 // indirect
+	github.com/clipperhouse/displaywidth v0.3.1 // indirect
 	github.com/clipperhouse/stringish v0.1.1 // indirect
 	github.com/clipperhouse/uax29/v2 v2.3.0 // indirect
 	github.com/cloudflare/circl v1.6.1 // indirect
@@ -259,9 +260,10 @@ require (
 	github.com/monochromegane/go-gitignore v0.0.0-20200626010858-205db1a8cc00 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/nwaples/rardecode/v2 v2.2.0 // indirect
+	github.com/olekukonko/cat v0.0.0-20250911104152-50322a0618f6 // indirect
 	github.com/olekukonko/errors v1.1.0 // indirect
-	github.com/olekukonko/ll v0.0.9 // indirect
-	github.com/olekukonko/tablewriter v1.1.0 // indirect
+	github.com/olekukonko/ll v0.1.2 // indirect
+	github.com/olekukonko/tablewriter v1.1.1 // indirect
 	github.com/openconfig/gnmi v0.14.1 // indirect
 	github.com/openconfig/gnmic v0.32.0 // indirect
 	github.com/openconfig/goyang v1.6.2 // indirect
@@ -282,7 +284,6 @@ require (
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.66.1 // indirect
 	github.com/prometheus/procfs v0.16.1 // indirect
-	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/rs/zerolog v1.29.0 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/ryanuber/go-glob v1.0.0 // indirect
