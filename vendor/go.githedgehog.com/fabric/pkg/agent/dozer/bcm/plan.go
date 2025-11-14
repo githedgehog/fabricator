@@ -883,6 +883,36 @@ func planExternals(agent *agentapi.Agent, spec *dozer.Spec) error {
 				Action: dozer.SpecPrefixListActionPermit,
 			}
 		}
+
+		spec.RouteMaps[ipnsSubnetsRouteMapName(ipnsName)] = &dozer.SpecRouteMap{
+			Statements: map[string]*dozer.SpecRouteMapStatement{
+				"10": {
+					Conditions: dozer.SpecRouteMapConditions{
+						MatchPrefixList: pointer.To(ipnsSubnetsPrefixListName(ipnsName)),
+					},
+					Result: dozer.SpecRouteMapResultAccept,
+				},
+			},
+		}
+
+		aclName := ipNsNoExtPeeringACLName(ipnsName)
+		entries := map[uint32]*dozer.SpecACLEntry{}
+		for iSrc, src := range ipns.Subnets {
+			for iDst, dst := range ipns.Subnets {
+				entries[uint32(iSrc*100+iDst+1)] = &dozer.SpecACLEntry{ //nolint:gosec
+					SourceAddress:      pointer.To(src),
+					DestinationAddress: pointer.To(dst),
+					Action:             dozer.SpecACLEntryActionDrop,
+				}
+			}
+		}
+		entries[65535] = &dozer.SpecACLEntry{
+			Action: dozer.SpecACLEntryActionAccept,
+		}
+		spec.ACLs[aclName] = &dozer.SpecACL{
+			Description: pointer.To("Prevent VPCs to cross-talk via the external"),
+			Entries:     entries,
+		}
 	}
 
 	attachedExternals := map[string]bool{}
@@ -977,10 +1007,11 @@ func planExternals(agent *agentapi.Agent, spec *dozer.Spec) error {
 					RouterID:           pointer.To(protocolIP.String()),
 					NetworkImportCheck: pointer.To(true),
 					IPv4Unicast: dozer.SpecVRFBGPIPv4Unicast{
-						Enabled:    true,
-						MaxPaths:   pointer.To(getMaxPaths(agent)),
-						Networks:   map[string]*dozer.SpecVRFBGPNetwork{},
-						ImportVRFs: map[string]*dozer.SpecVRFBGPImportVRF{},
+						Enabled:      true,
+						MaxPaths:     pointer.To(getMaxPaths(agent)),
+						Networks:     map[string]*dozer.SpecVRFBGPNetwork{},
+						ImportVRFs:   map[string]*dozer.SpecVRFBGPImportVRF{},
+						ImportPolicy: pointer.To(ipnsSubnetsPrefixListName(external.IPv4Namespace)),
 					},
 					L2VPNEVPN: dozer.SpecVRFBGPL2VPNEVPN{
 						Enabled:                       agent.IsSpineLeaf(),
@@ -1009,7 +1040,8 @@ func planExternals(agent *agentapi.Agent, spec *dozer.Spec) error {
 					Conditions: dozer.SpecRouteMapConditions{
 						MatchCommunityList: pointer.To(commList),
 					},
-					Result: dozer.SpecRouteMapResultAccept,
+					SetLocalPreference: pointer.To(uint32(500)),
+					Result:             dozer.SpecRouteMapResultAccept,
 				},
 				"100": {
 					Result: dozer.SpecRouteMapResultReject,
@@ -1053,6 +1085,12 @@ func planExternals(agent *agentapi.Agent, spec *dozer.Spec) error {
 			VTEP: pointer.To(VTEPFabric),
 			VNI:  pointer.To(extVNI),
 			VLAN: pointer.To(irbVLAN),
+		}
+		if spec.ACLInterfaces == nil {
+			spec.ACLInterfaces = map[string]*dozer.SpecACLInterface{}
+		}
+		spec.ACLInterfaces[irbIface] = &dozer.SpecACLInterface{
+			Ingress: pointer.To(ipNsNoExtPeeringACLName(external.IPv4Namespace)),
 		}
 	}
 
@@ -3141,6 +3179,10 @@ func ipNsExternalCommsRouteMapName(ipns string) string {
 	return fmt.Sprintf("ipns-ext-communities--%s", ipns)
 }
 
+func ipNsNoExtPeeringACLName(ipns string) string {
+	return fmt.Sprintf("no-ipns-peering--%s", ipns)
+}
+
 func vpcExtImportVrfPrefixListName(vpc, ext string) string {
 	return fmt.Sprintf("import-vrf--%s--%s", vpc, ext)
 }
@@ -3186,6 +3228,10 @@ func vpcRedistributeStaticRouteMapName(vpc string) string {
 }
 
 func ipnsSubnetsPrefixListName(ipns string) string {
+	return fmt.Sprintf("ipns-subnets--%s", ipns)
+}
+
+func ipnsSubnetsRouteMapName(ipns string) string {
 	return fmt.Sprintf("ipns-subnets--%s", ipns)
 }
 
