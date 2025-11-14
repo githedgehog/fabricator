@@ -926,8 +926,8 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 		}
 
 		toolboxPath := filepath.Join(flatcar.Home, "toolbox")
-		if err := d.WithORAS(ctx, flatcar.ToolboxRef, flatcar.ToolboxVersion(c.Fab), func(cachePath string) error {
-			if err := sshutil.UploadPathWith(ftp, filepath.Join(cachePath, flatcar.ToolboxBin), toolboxPath); err != nil {
+		if err := d.WithORAS(ctx, flatcar.ToolboxArchiveRef, flatcar.ToolboxVersion(c.Fab), func(cachePath string) error {
+			if err := sshutil.UploadPathWith(ftp, filepath.Join(cachePath, flatcar.ToolboxArchiveBin), toolboxPath); err != nil {
 				return fmt.Errorf("uploading: %w", err)
 			}
 
