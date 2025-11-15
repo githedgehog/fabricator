@@ -13,6 +13,7 @@ type GatewayCtrlConfig struct {
 	AgentRef             string              `json:"agentRef,omitempty"`
 	DataplaneRef         string              `json:"dataplaneRef,omitempty"`
 	FRRRef               string              `json:"frrRef,omitempty"`
+	ToolboxRef           string              `json:"toolboxRef,omitempty"`
 	DataplaneMetricsPort uint16              `json:"dataplaneMetricsPort,omitempty"`
 	FRRMetricsPort       uint16              `json:"frrMetricsPort,omitempty"`
 }
