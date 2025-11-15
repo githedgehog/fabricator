@@ -13,6 +13,7 @@ import (
 
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/flatcar"
 	"go.githedgehog.com/fabricator/pkg/util/tmplutil"
 	"go.githedgehog.com/gateway/api/meta"
 	corev1 "k8s.io/api/core/v1"
@@ -81,6 +82,11 @@ func Install(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 		return nil, fmt.Errorf("getting image URL for %q: %w", FRRRef, err)
 	}
 
+	toolboxRepo, err := comp.ImageURL(cfg, flatcar.ToolboxRef)
+	if err != nil {
+		return nil, fmt.Errorf("getting image URL for %q: %w", flatcar.ToolboxRef, err)
+	}
+
 	ctrlCfgData, err := kyaml.Marshal(&meta.GatewayCtrlConfig{
 		Namespace: comp.FabNamespace,
 		Tolerations: []corev1.Toleration{
@@ -93,6 +99,7 @@ func Install(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 		AgentRef:             agentRepo + ":" + string(cfg.Status.Versions.Gateway.Agent),
 		DataplaneRef:         dataplaneRepo + ":" + string(cfg.Status.Versions.Gateway.Dataplane),
 		FRRRef:               frrRepo + ":" + string(cfg.Status.Versions.Gateway.FRR),
+		ToolboxRef:           toolboxRepo + ":" + string(flatcar.ToolboxVersion(cfg)),
 		DataplaneMetricsPort: DataplaneMetricsPort,
 		FRRMetricsPort:       FRRMetricsPort,
 	})
