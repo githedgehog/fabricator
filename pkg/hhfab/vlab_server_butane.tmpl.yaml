@@ -70,6 +70,37 @@ storage:
           TOOLBOX_DOCKER_TAG=latest
           TOOLBOX_USER=root
 
+    - path: /etc/systemd/network/98-vlan.network
+      mode: 0644
+      contents:
+        inline: |
+          [Match]
+          Kind=vlan
+
+          [Network]
+          DHCP=yes
+
+          [DHCPv4]
+          UseMTU=yes
+
+    - path: /etc/systemd/network/99-fabric.network
+      mode: 0644
+      contents:
+        inline: |
+          [Match]
+          Name=bond* enp2s1 enp2s2
+          Kind=!vlan
+
+          [Network]
+          LLDP=yes
+          EmitLLDP=yes
+
+          [Link]
+          # Set physical interface to jumbo frame maximum
+          # This allows VLAN interface to accept DHCP MTU
+          MTUBytes=9216
+
+
     - path: /etc/systemd/network/99-lldp.network
       mode: 0644
       contents:
