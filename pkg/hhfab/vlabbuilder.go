@@ -48,6 +48,7 @@ type VLABBuilder struct {
 	NoSwitches         bool   // do not generate any switches
 	GatewayUplinks     uint8  // number of uplinks for gateway node to the spines
 	GatewayDriver      string // gateway driver to use for gateway node
+	GatewayWorkers     uint8  // number of workers for gateway node
 	ExtCount           uint8  // number of "externals" to generate
 	ExtMCLAGConnCount  uint8  // number of external connections to generate from MCLAG leaves
 	ExtESLAGConnCount  uint8  // number of external connections to generate from ESLAG leaves
@@ -128,6 +129,9 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 
 		if b.GatewayDriver == "" {
 			b.GatewayDriver = GatewayDriverKernel
+		}
+		if b.GatewayWorkers == 0 {
+			b.GatewayWorkers = 8
 		}
 
 		if !slices.Contains(GatewayDrivers, b.GatewayDriver) {
@@ -301,6 +305,7 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 
 			if _, err := b.createGateway(ctx, gwName, gwapi.GatewaySpec{
 				Interfaces: ifaces,
+				Workers:    b.GatewayWorkers,
 				// Neighbors will be later hydrated in based on the gateway connections
 			}); err != nil {
 				return err
