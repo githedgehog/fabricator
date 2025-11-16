@@ -69,6 +69,13 @@ function get_ip() {
     echo "$ip"
 }
 
+function update_motd() {
+    # Update network info banner if the script exists
+    if [ -f /var/lib/scripts/generate_network_info.sh ]; then
+        sudo /var/lib/scripts/generate_network_info.sh 2>/dev/null || true
+    fi
+}
+
 # Usage:
 # hhnet cleanup
 # hhnet bond 1000 layer2+3 enp2s1 enp2s2 enp2s3 enp2s4
@@ -91,6 +98,7 @@ if [ "$#" -lt 1 ]; then
 elif [ "$1" == "cleanup" ]; then
     cleanup
     restart_networkd
+    update_motd
 
     exit 0
 elif [ "$1" == "bond" ]; then
@@ -103,6 +111,7 @@ elif [ "$1" == "bond" ]; then
     sleep 1
     setup_vlan bond0 "$2"
     get_ip bond0."$2"
+    update_motd
 
     exit 0
 elif [ "$1" == "vlan" ]; then
@@ -113,6 +122,7 @@ elif [ "$1" == "vlan" ]; then
 
     setup_vlan "$3" "$2"
     get_ip "$3"."$2"
+    update_motd
 
     exit 0
 else
