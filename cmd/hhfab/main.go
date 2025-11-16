@@ -37,6 +37,7 @@ import (
 
 const (
 	FlagCatGlobal                 = "Global options:"
+	FlagCatVMSizes                = "VLAB VM size overrides:"
 	FlagNameRegistryRepo          = "registry-repo"
 	FlagNameRegistryPrefix        = "registry-prefix"
 	FlagNameConfig                = "config"
@@ -871,6 +872,60 @@ func Run(ctx context.Context) error {
 								Aliases: []string{"rt-invert"},
 								Usage:   "invert regex selection for release tests (used when --ready=release-test)",
 							},
+							&cli.UintFlag{
+								Category: FlagCatVMSizes,
+								Name:     "control-cpus",
+								Usage:    fmt.Sprintf("override control node VM number of CPUs (default: %d)", hhfab.DefaultSizes.Control.CPU),
+								EnvVars:  []string{"HHFAB_VLAB_CTRL_CPUS"},
+							},
+							&cli.UintFlag{
+								Category: FlagCatVMSizes,
+								Name:     "control-ram",
+								Usage:    fmt.Sprintf("override control node VM RAM (in MB) (default: %d)", hhfab.DefaultSizes.Control.RAM),
+								EnvVars:  []string{"HHFAB_VLAB_CTRL_RAM"},
+							},
+							&cli.UintFlag{
+								Category: FlagCatVMSizes,
+								Name:     "control-disk",
+								Usage:    fmt.Sprintf("override control node VM disk size (in GB) (default: %d)", hhfab.DefaultSizes.Control.Disk),
+								EnvVars:  []string{"HHFAB_VLAB_CTRL_DISK"},
+							},
+							&cli.UintFlag{
+								Category: FlagCatVMSizes,
+								Name:     "gateway-cpus",
+								Usage:    fmt.Sprintf("override gateway node VM number of CPUs (default: %d)", hhfab.DefaultSizes.Gateway.CPU),
+								EnvVars:  []string{"HHFAB_VLAB_GW_CPUS"},
+							},
+							&cli.UintFlag{
+								Category: FlagCatVMSizes,
+								Name:     "gateway-ram",
+								Usage:    fmt.Sprintf("override gateway node VM RAM (in MB) (default: %d)", hhfab.DefaultSizes.Gateway.RAM),
+								EnvVars:  []string{"HHFAB_VLAB_GW_RAM"},
+							},
+							&cli.UintFlag{
+								Category: FlagCatVMSizes,
+								Name:     "gateway-disk",
+								Usage:    fmt.Sprintf("override gateway node VM disk size (in GB) (default: %d)", hhfab.DefaultSizes.Gateway.Disk),
+								EnvVars:  []string{"HHFAB_VLAB_GW_DISK"},
+							},
+							&cli.UintFlag{
+								Category: FlagCatVMSizes,
+								Name:     "server-cpus",
+								Usage:    fmt.Sprintf("override server VM number of CPUs (default: %d)", hhfab.DefaultSizes.Server.CPU),
+								EnvVars:  []string{"HHFAB_VLAB_SRV_CPUS"},
+							},
+							&cli.UintFlag{
+								Category: FlagCatVMSizes,
+								Name:     "server-ram",
+								Usage:    fmt.Sprintf("override server VM RAM (in MB) (default: %d)", hhfab.DefaultSizes.Server.RAM),
+								EnvVars:  []string{"HHFAB_VLAB_SRV_RAM"},
+							},
+							&cli.UintFlag{
+								Category: FlagCatVMSizes,
+								Name:     "server-disk",
+								Usage:    fmt.Sprintf("override server VM disk size (in GB) (default: %d)", hhfab.DefaultSizes.Server.Disk),
+								EnvVars:  []string{"HHFAB_VLAB_SRV_DISK"},
+							},
 						}),
 						Before: before(false),
 						Action: func(c *cli.Context) error {
@@ -890,6 +945,23 @@ func Run(ctx context.Context) error {
 								BuildMode:            recipe.BuildMode(c.String(FlagNameBuildMode)),
 								SetJoinToken:         joinToken,
 								ObservabilityTargets: c.String(FlagNameObservabilityTargets),
+								VMSizesOverrides: hhfab.VMSizes{
+									Control: hhfab.VMSize{
+										CPU:  c.Uint("control-cpus"),
+										RAM:  c.Uint("control-ram"),
+										Disk: c.Uint("control-disk"),
+									},
+									Gateway: hhfab.VMSize{
+										CPU:  c.Uint("gateway-cpus"),
+										RAM:  c.Uint("gateway-ram"),
+										Disk: c.Uint("gateway-disk"),
+									},
+									Server: hhfab.VMSize{
+										CPU:  c.Uint("server-cpus"),
+										RAM:  c.Uint("server-ram"),
+										Disk: c.Uint("server-disk"),
+									},
+								},
 								VLABRunOpts: hhfab.VLABRunOpts{
 									KillStale:                c.Bool(FlagNameKillStale),
 									ControlsRestricted:       c.Bool(FlagNameControlsRestricted),

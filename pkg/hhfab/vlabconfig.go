@@ -244,9 +244,20 @@ func (c *Config) PrepareVLAB(ctx context.Context, opts VLABUpOpts) (*VLAB, error
 		return nil, fmt.Errorf("unmarshaling VLAB config: %w", err)
 	}
 
-	if err := mergo.Merge(&vlabCfg.Sizes, DefaultSizes); err != nil {
-		return nil, fmt.Errorf("merging VLAB sizes: %w", err)
+	sizes := opts.VMSizesOverrides
+	if err := mergo.Merge(&sizes, vlabCfg.Sizes); err != nil {
+		return nil, fmt.Errorf("merging VLAB sizes from config: %w", err)
 	}
+	if err := mergo.Merge(&sizes, DefaultSizes); err != nil {
+		return nil, fmt.Errorf("merging default VLAB sizes: %w", err)
+	}
+	vlabCfg.Sizes = sizes
+
+	slog.Debug("Control VM", "cpus", sizes.Control.CPU, "ram", sizes.Control.RAM, "disk", sizes.Control.Disk)
+	slog.Debug("Gateway VM", "cpus", sizes.Gateway.CPU, "ram", sizes.Gateway.RAM, "disk", sizes.Gateway.Disk)
+	slog.Debug("Server VM", "cpus", sizes.Server.CPU, "ram", sizes.Server.RAM, "disk", sizes.Server.Disk)
+	slog.Debug("Switch VM", "cpus", sizes.Switch.CPU, "ram", sizes.Switch.RAM, "disk", sizes.Switch.Disk)
+	slog.Debug("External VM", "cpus", sizes.External.CPU, "ram", sizes.External.RAM, "disk", sizes.External.Disk)
 
 	for name, vm := range vlabCfg.VMs {
 		if !slices.Contains(VMTypes, vm.Type) {

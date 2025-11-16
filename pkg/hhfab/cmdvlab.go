@@ -67,6 +67,7 @@ type VLABUpOpts struct {
 	BuildMode            recipe.BuildMode
 	SetJoinToken         string
 	ObservabilityTargets string
+	VMSizesOverrides     VMSizes
 	VLABRunOpts
 }
 
