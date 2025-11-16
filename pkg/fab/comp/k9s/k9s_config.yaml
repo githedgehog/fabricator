@@ -31,12 +31,13 @@ k9s:
       namespaces: []
       labels: {}
   logger:
-    tail: 100
-    buffer: 5000
+    tail: 5000
+    buffer: 25000
     sinceSeconds: -1
     textWrap: false
     disableAutoscroll: false
     showTime: false
+    fullScreen: true
   thresholds:
     cpu:
       critical: 90
