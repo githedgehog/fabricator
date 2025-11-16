@@ -182,6 +182,7 @@ func Run(ctx context.Context) error {
 	var wgNoSwitches bool
 	var wgGatewayUplinks uint
 	var wgGatewayDriver string
+	var wgGatewayWorkers uint
 	var wgExternals, wgExtMCLAGConns, wgExtESLAGConns, wgExtOrphanConns uint
 	vlabWiringGenFlags := []cli.Flag{
 		&cli.UintFlag{
@@ -263,6 +264,12 @@ func Run(ctx context.Context) error {
 			Usage:       "gateway driver to use (one of: " + strings.Join(hhfab.GatewayDrivers, ", ") + ")",
 			Destination: &wgGatewayDriver,
 			Value:       hhfab.GatewayDriverKernel,
+		},
+		&cli.UintFlag{
+			Name:        "gateway-workers",
+			Usage:       "number of workers for gateway",
+			Destination: &wgGatewayWorkers,
+			Value:       8,
 		},
 		&cli.UintFlag{
 			Name:        "externals",
@@ -789,6 +796,7 @@ func Run(ctx context.Context) error {
 								NoSwitches:         wgNoSwitches,
 								GatewayUplinks:     uint8(wgGatewayUplinks), //nolint:gosec
 								GatewayDriver:      wgGatewayDriver,
+								GatewayWorkers:     uint8(wgGatewayWorkers), //nolint:gosec
 								ExtCount:           uint8(wgExternals),      //nolint:gosec
 								ExtMCLAGConnCount:  uint8(wgExtMCLAGConns),  //nolint:gosec
 								ExtESLAGConnCount:  uint8(wgExtESLAGConns),  //nolint:gosec
