@@ -2252,11 +2252,6 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphor
 		time.Sleep(1 * time.Second)
 		cmd := fmt.Sprintf("toolbox -E LD_PRELOAD=/lib/x86_64-linux-gnu/libgcc_s.so.1 -q timeout %d iperf3 -P 4 -J -c %s -t %d", opts.IPerfsSeconds+25, toIP.String(), opts.IPerfsSeconds)
 
-		// TODO remove workaround after we configure correct MTU on the Gateway ports
-		if reachability.Reason == ReachabilityReasonGatewayPeering {
-			cmd += " -M 1000"
-		}
-
 		if opts.IPerfsDSCP > 0 {
 			cmd += fmt.Sprintf(" --dscp %d", opts.IPerfsDSCP)
 		}
