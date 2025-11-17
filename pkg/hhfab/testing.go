@@ -1666,8 +1666,15 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 						// Acquire toolbox mutexes for both servers to avoid concurrent toolbox usage
 						toolboxMutexes[serverA].Lock()
 						defer toolboxMutexes[serverA].Unlock()
+						if err := checkToolboxLock(ctx, serverA, clientA, 2*time.Minute); err != nil {
+							return fmt.Errorf("checkToolbockLock: %w", err)
+						}
 						toolboxMutexes[serverB].Lock()
 						defer toolboxMutexes[serverB].Unlock()
+						if err := checkToolboxLock(ctx, serverB, clientB, 2*time.Minute); err != nil {
+							return fmt.Errorf("checkToolbockLock: %w", err)
+						}
+
 						if ie := checkIPerf(ctx, opts, serverA, serverB, clientA, clientB, ipB.Addr(), expectedReachable); ie != nil {
 							return ie
 						}
@@ -2200,6 +2207,31 @@ func checkPing(ctx context.Context, pingCount int, semaphore *semaphore.Weighted
 		pe.Msg = "should not be reachable but ping succeeded"
 
 		return pe
+	}
+
+	return nil
+}
+
+func checkToolboxLock(ctx context.Context, server string, ssh *sshutil.Config, timeout time.Duration) error {
+	lockCmd := "[ ! -f /var/lib/toolbox/.#core-ghcr.io_githedgehog_toolbox-latest.lck ]"
+	if _, _, err := retrySSHCmd(ctx, ssh, lockCmd, server); err != nil {
+		slog.Warn("toolbox lock file exists on target server, waiting for cleanup", "server", server)
+		timeoutChan := time.After(timeout)
+		for {
+			select {
+			case <-timeoutChan:
+				return fmt.Errorf("timeout waiting for toolbox lock file to be removed on server %s", server) // nolint:goerr113
+			case <-ctx.Done():
+				return fmt.Errorf("context cancelled while waiting for toolbox lock file to be removed on server %s: %w", server, ctx.Err())
+			case <-time.After(5 * time.Second):
+				if _, _, err := retrySSHCmd(ctx, ssh, lockCmd, server); err == nil {
+					slog.Info("toolbox lock file removed, continuing with iperf3 test", "server", server)
+
+					return nil
+				}
+				slog.Debug("toolbox lock file still exists on target server, waiting for cleanup", "server", server)
+			}
+		}
 	}
 
 	return nil
