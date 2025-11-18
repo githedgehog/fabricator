@@ -1564,7 +1564,7 @@ github.com/samber/lo/mutable
 # github.com/samber/slog-common v0.19.0
 ## explicit; go 1.21
 github.com/samber/slog-common
-# github.com/samber/slog-multi v1.5.0
+# github.com/samber/slog-multi v1.6.0
 ## explicit; go 1.21
 github.com/samber/slog-multi
 # github.com/secure-systems-lab/go-securesystemslib v0.9.0
@@ -1722,7 +1722,7 @@ go.etcd.io/bbolt
 go.etcd.io/bbolt/errors
 go.etcd.io/bbolt/internal/common
 go.etcd.io/bbolt/internal/freelist
-# go.githedgehog.com/fabric v0.95.0
+# go.githedgehog.com/fabric v0.96.0
 ## explicit; go 1.25
 go.githedgehog.com/fabric/api/agent/v1beta1
 go.githedgehog.com/fabric/api/dhcp/v1beta1
