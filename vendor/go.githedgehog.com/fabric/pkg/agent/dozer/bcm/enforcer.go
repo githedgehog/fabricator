@@ -114,11 +114,6 @@ const (
 	ActionWeightMCLAGDomainUpdate
 	ActionWeightMCLAGInterfaceUpdate
 
-	ActionWeightACLBaseUpdate
-	ActionWeightACLInterfaceUpdate
-	ActionWeightACLEntryDelete
-	ActionWeightACLEntryUpdate
-
 	ActionWeightNATBaseUpdate
 	ActionWeightNATPoolUpdate
 	ActionWeightNATBindingUpdate
@@ -129,8 +124,6 @@ const (
 	ActionWeightVRFStaticRouteDelete // it seems like it's better to first remove routes and then add new ones
 	ActionWeightVRFStaticRouteUpdate
 
-	ActionWeightVRFBGPBaseUpdate
-	ActionWeightVRFBGPL2VPNUpdate
 	ActionWeightVRFSAGUpdate
 	ActionWeightVRFEVPNMHUpdate
 	ActionWeightVRFEthernetSegmentUpdate
@@ -146,6 +139,14 @@ const (
 	ActionWeightVXLANTunnelDelete
 	ActionWeightVXLANTunnelMapUpdate
 
+	// ACL after VNI mappings (for BCM bug) and before BGP (to avoid traffic leaking)
+	ActionWeightACLBaseUpdate
+	ActionWeightACLEntryDelete
+	ActionWeightACLEntryUpdate
+	ActionWeightACLInterfaceUpdate
+
+	ActionWeightVRFBGPBaseUpdate
+	ActionWeightVRFBGPL2VPNUpdate
 	ActionWeightBFDProfileUpdate
 	ActionWeightVRFBGPNeighborUpdate
 	ActionWeightVRFBGPNetworkUpdate

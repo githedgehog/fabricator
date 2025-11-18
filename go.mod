@@ -34,14 +34,14 @@ require (
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/pkg/sftp v1.13.8
 	github.com/samber/lo v1.52.0
-	github.com/samber/slog-multi v1.5.0
+	github.com/samber/slog-multi v1.6.0
 	github.com/sethvargo/go-password v0.3.1
 	github.com/shirou/gopsutil/v3 v3.24.5
 	github.com/stretchr/testify v1.11.1
 	github.com/urfave/cli/v2 v2.27.7
 	github.com/vbauerster/mpb/v8 v8.11.2
 	github.com/vishvananda/netlink v1.3.1
-	go.githedgehog.com/fabric v0.95.0
+	go.githedgehog.com/fabric v0.96.1
 	go.githedgehog.com/gateway v0.27.1
 	go.githedgehog.com/libmeta v0.3.0
 	golang.org/x/crypto v0.44.0
