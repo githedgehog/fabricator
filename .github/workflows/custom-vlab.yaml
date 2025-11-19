@@ -92,10 +92,6 @@ jobs:
     needs:
       - vlab
 
-    permissions:
-      checks: write
-      pull-requests: write
-
     steps:
       - name: Download Artifacts
         uses: actions/download-artifact@v6
@@ -107,4 +103,6 @@ jobs:
         with:
           files: "artifacts/**/release-test.xml"
           report_individual_runs: true
-          check_name: "Release Tests"
+          check_run: false
+          job_summary: true
+          comment_mode: off
