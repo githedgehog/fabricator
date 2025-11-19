@@ -169,10 +169,13 @@ func sortNodes(nodes []Node, links []Link) TieredNodes {
 	for _, node := range nodes {
 		switch node.Type {
 		case NodeTypeSwitch:
-			if role, ok := node.Properties[PropRole]; ok && role == SwitchRoleSpine {
-				result.Spine = append(result.Spine, node)
-			} else {
-				result.Leaf = append(result.Leaf, node)
+			// Only include switches that have connections
+			if hasConnections(node.ID, links) {
+				if role, ok := node.Properties[PropRole]; ok && role == SwitchRoleSpine {
+					result.Spine = append(result.Spine, node)
+				} else {
+					result.Leaf = append(result.Leaf, node)
+				}
 			}
 		case NodeTypeServer:
 			result.Server = append(result.Server, node)
