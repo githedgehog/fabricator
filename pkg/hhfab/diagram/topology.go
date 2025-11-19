@@ -229,6 +229,59 @@ func sortNodes(nodes []Node, links []Link) TieredNodes {
 		return result.Gateway[i].ID < result.Gateway[j].ID
 	})
 
+	// Special handling for mesh triangle with gateways:
+	// Place the leaf with 2 gateway connections at index 1 (top vertex)
+	if detectMeshTriangle(result.Leaf, links) && len(result.Gateway) > 0 {
+		// Count gateway connections for each leaf
+		gatewayConnCounts := make(map[string]int)
+		for _, link := range links {
+			if link.Type != EdgeTypeGateway {
+				continue
+			}
+
+			// Check if one end is a gateway and the other is a leaf
+			for _, leaf := range result.Leaf {
+				for _, gw := range result.Gateway {
+					if (link.Source == leaf.ID && link.Target == gw.ID) ||
+						(link.Target == leaf.ID && link.Source == gw.ID) {
+						gatewayConnCounts[leaf.ID]++
+					}
+				}
+			}
+		}
+
+		// Find the leaf with 2 gateway connections
+		var leafWith2Gateways string
+		for leafID, count := range gatewayConnCounts {
+			if count == 2 {
+				leafWith2Gateways = leafID
+
+				break
+			}
+		}
+
+		// Reorder leaves so the leaf with 2 gateway connections is at index 1
+		if leafWith2Gateways != "" && len(result.Leaf) == 3 {
+			var reorderedLeaves []Node
+			var targetLeaf Node
+			var otherLeaves []Node
+
+			for _, leaf := range result.Leaf {
+				if leaf.ID == leafWith2Gateways {
+					targetLeaf = leaf
+				} else {
+					otherLeaves = append(otherLeaves, leaf)
+				}
+			}
+
+			// Ensure otherLeaves maintains the original order
+			if len(otherLeaves) == 2 {
+				reorderedLeaves = []Node{otherLeaves[0], targetLeaf, otherLeaves[1]}
+				result.Leaf = reorderedLeaves
+			}
+		}
+	}
+
 	// Sort external nodes by ID
 	sort.Slice(result.External, func(i, j int) bool {
 		return result.External[i].ID < result.External[j].ID
