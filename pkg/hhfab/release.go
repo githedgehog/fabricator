@@ -1348,12 +1348,12 @@ func checkRouteInSwitch(ctx context.Context, ssh *sshutil.Config, switchName, ro
 	return stdout != "", nil
 }
 
-func (testCtx *VPCPeeringTestCtx) waitForRoutesInSwitches(ctx context.Context, switches, routes []string, vrfName string, timeout time.Duration) error {
+func (testCtx *VPCPeeringTestCtx) waitForRoutesInSwitches(ctx context.Context, switches map[string]bool, routes []string, vrfName string, timeout time.Duration) error {
 	slog.Debug("Checking for routes in switches", "switches", switches, "routes", routes, "vrf", vrfName, "timeout", timeout)
 	toCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	sshs := make(map[string]*sshutil.Config, len(switches))
-	for _, sw := range switches {
+	for sw := range switches {
 		ssh, err := testCtx.getSSH(ctx, sw)
 		if err != nil {
 			return fmt.Errorf("getting ssh config for switch %s: %w", sw, err)
@@ -1363,7 +1363,7 @@ func (testCtx *VPCPeeringTestCtx) waitForRoutesInSwitches(ctx context.Context, s
 
 	for {
 		allFound := true
-		for _, sw := range switches {
+		for sw := range switches {
 			for _, route := range routes {
 				if found, err := checkRouteInSwitch(toCtx, sshs[sw], sw, route, vrfName); err != nil {
 					return fmt.Errorf("checking for route %s in switch %s vrf %s: %w", route, sw, vrfName, err)
@@ -1429,24 +1429,36 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool,
 		}
 	}
 	var conn *wiringapi.Connection
+	var targetServerVPC string
 	for _, c := range connList.Items {
 		swName := c.Spec.Unbundled.Link.Switch.DeviceName()
-		if _, ok := mclagSwitches[swName]; !ok {
-			conn = &c
-
-			break
+		if _, ok := mclagSwitches[swName]; ok {
+			continue
 		}
+		conn = &c
+		// recall the VPC attached to this connection for later
+		vpcAttachList := &vpcapi.VPCAttachmentList{}
+		if err := testCtx.kube.List(ctx, vpcAttachList, kclient.MatchingLabels{wiringapi.LabelConnection: conn.Name}); err != nil {
+			return false, nil, fmt.Errorf("listing VPCAttachments for connection %s: %w", conn.Name, err)
+		}
+		if len(vpcAttachList.Items) != 1 {
+			return false, nil, fmt.Errorf("expected 1 VPCAttachment for connection %s, got %d", conn.Name, len(vpcAttachList.Items)) //nolint:goerr113
+		}
+		targetServerVPC = vpcAttachList.Items[0].Spec.VPCName()
+
+		break
 	}
 	if conn == nil {
 		slog.Info("No unbundled connections found that are not attached to an MCLAG switch, skipping test")
 
 		return true, nil, errNoUnbundled
 	}
+
 	targetServer := conn.Spec.Unbundled.Link.Server.DeviceName()
 	switchName := conn.Spec.Unbundled.Link.Switch.DeviceName()
 	switchPortName := conn.Spec.Unbundled.Link.Switch.PortName()
 	serverPortName := conn.Spec.Unbundled.Link.Server.LocalPortName()
-	slog.Debug("Found unbundled connection", "connection", conn.Name, "server", targetServer, "switch", switchName, "port", switchPortName)
+	slog.Debug("Found unbundled connection", "connection", conn.Name, "server", targetServer, "switch", switchName, "port", switchPortName, "VPC", targetServerVPC)
 	targetServerSSH, err := testCtx.getSSH(ctx, targetServer)
 	if err != nil {
 		return false, nil, fmt.Errorf("getting ssh config for target server %s: %w", targetServer, err)
@@ -1462,11 +1474,19 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool,
 
 		return true, nil, errNotEnoughVPCs
 	}
-	var vpc1, vpc2 *vpcapi.VPC
-	var server1, server2 string
-	routeCheckSwList := []string{switchName}
+	// inVPC is the VPC where we will add the static external
+	// otherVPC is a separate VPC we will use for negative connectivity testing
+	var inVPC, otherVPC *vpcapi.VPC
+	var inServer, otherServer string
+	// routeCheckSw keeps track of switches where we need to check for route presence later
+	routeCheckSw := map[string]bool{}
+	routeCheckSw[switchName] = true
+
 	vpcAttachList := &vpcapi.VPCAttachmentList{}
 	for _, vpc := range vpcList.Items {
+		if inVPC != nil && otherVPC != nil {
+			break
+		}
 		if err := testCtx.kube.List(ctx, vpcAttachList, kclient.MatchingLabels{wiringapi.LabelVPC: vpc.Name}); err != nil {
 			return false, nil, fmt.Errorf("listing VPCAttachments for VPC %s: %w", vpc.Name, err)
 		}
@@ -1485,24 +1505,36 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool,
 
 				continue
 			}
-			if vpc1 == nil {
-				vpc1 = &vpc
-				server1 = servers[0]
-				routeCheckSwList = append(routeCheckSwList, switches...)
-			} else {
-				vpc2 = &vpc
-				server2 = servers[0]
+			if inVPC == nil {
+				// if we have not found yet the VPC where we will add the static external and there's a single attachment to the target server,
+				// that means we cannot use this VPC - there would be no other server within the VPC to test from
+				if vpc.Name == targetServerVPC && len(vpcAttachList.Items) == 2 {
+					slog.Debug("VPC has only one additional server beyond target, using it as otherVPC")
+					otherVPC = &vpc
+					otherServer = servers[0]
+
+					break
+				}
+				inVPC = &vpc
+				inServer = servers[0]
+				for _, sw := range switches {
+					routeCheckSw[sw] = true
+				}
 
 				break
 			}
+			otherVPC = &vpc
+			otherServer = servers[0]
+
+			break
 		}
 	}
-	if vpc1 == nil || vpc2 == nil || server1 == "" || server2 == "" {
+	if inVPC == nil || otherVPC == nil || inServer == "" || otherServer == "" {
 		slog.Info("Not enough VPCs with attached servers found, skipping test")
 
 		return true, nil, errNotEnoughVPCs
 	}
-	slog.Debug("Found VPCs and servers", "vpc1", vpc1.Name, "server1", server1, "vpc2", vpc2.Name, "server2", server2)
+	slog.Debug("Found VPCs and servers", "inVPC", inVPC.Name, "inServer", inServer, "otherVPC", otherVPC.Name, "otherServer", otherServer)
 
 	// get agent generation for the switch
 	gen, genErr := getAgentGen(ctx, testCtx.kube, switchName)
@@ -1622,7 +1654,7 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool,
 	staticExtConn.Name = fmt.Sprintf("release-test--static-external--%s", switchName)
 	staticExtConn.Namespace = kmetav1.NamespaceDefault
 	staticExtConn.Spec.StaticExternal = &wiringapi.ConnStaticExternal{
-		WithinVPC: vpc1.Name,
+		WithinVPC: inVPC.Name,
 		Link: wiringapi.ConnStaticExternalLink{
 			Switch: wiringapi.ConnStaticExternalLinkSwitch{
 				BasePortName: wiringapi.NewBasePortName(switchPortName),
@@ -1688,12 +1720,12 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool,
 		return nil
 	})
 	// look for routes in the switch(es) before pinging, see https://github.com/githedgehog/fabricator/issues/932#issuecomment-3322976488
-	if err := testCtx.waitForRoutesInSwitches(ctx, routeCheckSwList, []string{StaticExternalNH, StaticExternalDummyIface}, "VrfV"+vpc1.Name, 3*time.Minute); err != nil {
-		return false, reverts, fmt.Errorf("waiting for routes in switch %s vrf VrfV%s: %w", switchName, vpc1.Name, err)
+	if err := testCtx.waitForRoutesInSwitches(ctx, routeCheckSw, []string{StaticExternalNH, StaticExternalDummyIface}, "VrfV"+inVPC.Name, 3*time.Minute); err != nil {
+		return false, reverts, fmt.Errorf("waiting for routes in switch %s vrf VrfV%s: %w", switchName, inVPC.Name, err)
 	}
 
-	slog.Debug("Pinging from the switch attached to the static external to trigger ARP resolution", "switch", switchName, "vrf", "VrfV"+vpc1.Name, "source-ip", StaticExternalIP, "target", StaticExternalNH)
-	wuPingCmd := fmt.Sprintf("sonic-cli -c \"ping vrf VrfV%s -I %s %s -c 3 -W 1\"", vpc1.Name, StaticExternalIP, StaticExternalNH)
+	slog.Debug("Pinging from the switch attached to the static external to trigger ARP resolution", "switch", switchName, "vrf", "VrfV"+inVPC.Name, "source-ip", StaticExternalIP, "target", StaticExternalNH)
+	wuPingCmd := fmt.Sprintf("sonic-cli -c \"ping vrf VrfV%s -I %s %s -c 3 -W 1\"", inVPC.Name, StaticExternalIP, StaticExternalNH)
 	switchSSH, err := testCtx.getSSH(ctx, switchName)
 	if err != nil {
 		return false, reverts, fmt.Errorf("getting ssh config for switch %s: %w", switchName, err)
@@ -1706,12 +1738,12 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool,
 	}
 
 	// Ping the addresses from server1 which is in the static external VPC, expect success
-	if err := testCtx.pingStaticExternal(ctx, server1, "", true); err != nil {
-		return false, reverts, fmt.Errorf("pinging static external from %s in the SE VPC: %w", server1, err)
+	if err := testCtx.pingStaticExternal(ctx, inServer, "", true); err != nil {
+		return false, reverts, fmt.Errorf("pinging static external from %s in the SE VPC: %w", inServer, err)
 	}
 	// Ping the addresses from server2 which is in a different VPC, expect failure
-	if err := testCtx.pingStaticExternal(ctx, server2, "", false); err != nil {
-		return false, reverts, fmt.Errorf("pinging static external from %s in a different VPC: %w", server2, err)
+	if err := testCtx.pingStaticExternal(ctx, otherServer, "", false); err != nil {
+		return false, reverts, fmt.Errorf("pinging static external from %s in a different VPC: %w", otherServer, err)
 	}
 
 	slog.Debug("Deleting static external")
@@ -1750,13 +1782,13 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool,
 		return false, reverts, fmt.Errorf("waiting for switches to be ready: %w", err)
 	}
 	// look for routes in the switch(es) before pinging, see https://github.com/githedgehog/fabricator/issues/932#issuecomment-3322976488
-	if err := testCtx.waitForRoutesInSwitches(ctx, routeCheckSwList, []string{StaticExternalNH, StaticExternalDummyIface}, "default", 3*time.Minute); err != nil {
+	if err := testCtx.waitForRoutesInSwitches(ctx, routeCheckSw, []string{StaticExternalNH, StaticExternalDummyIface}, "default", 3*time.Minute); err != nil {
 		return false, reverts, fmt.Errorf("waiting for routes in switch %s vrf default: %w", switchName, err)
 	}
 
 	// Ping the addresses from server1, this should now fail
-	if err := testCtx.pingStaticExternal(ctx, server1, "", false); err != nil {
-		return false, reverts, fmt.Errorf("pinging static external from %s after removing VPC: %w", server1, err)
+	if err := testCtx.pingStaticExternal(ctx, inServer, "", false); err != nil {
+		return false, reverts, fmt.Errorf("pinging static external from %s after removing VPC: %w", inServer, err)
 	}
 	// Ping the addresses from a leaf switch that's not the one the static external is attached to, this should succeed
 	success := false
@@ -1770,6 +1802,13 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool,
 		}
 		if sw.Spec.VTEPIP == "" {
 			slog.Warn("Leaf switch with no VTEP IP, skipping it", "switch", sw.Name)
+
+			continue
+		}
+		// skip the switch if it is unused, i.e. left in a mesh topology from a spine-leaf one
+		// FIXME: hack based on description, we should have a proper way to identify unused switches
+		if strings.Contains(sw.Spec.Description, "unused") {
+			slog.Debug("Skipping unused switch", "switch", sw.Name)
 
 			continue
 		}
