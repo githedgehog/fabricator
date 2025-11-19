@@ -85,3 +85,26 @@ jobs:
       releasetest_regex_invert: ${{ inputs.releasetest_regex_invert }}
       debug: ${{ inputs.pause_on_failure }}
       pause_on_failure: ${{ inputs.pause_on_failure }}
+
+  publish-test-results:
+    if: ${{ inputs.releasetest && !cancelled() }}
+    runs-on: lab
+    needs:
+      - vlab
+
+    permissions:
+      checks: write
+      pull-requests: write
+
+    steps:
+      - name: Download Artifacts
+        uses: actions/download-artifact@v6
+        with:
+          path: artifacts
+
+      - name: Publish Test Results
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        with:
+          files: "artifacts/**/release-test.xml"
+          report_individual_runs: true
+          check_name: "Release Tests"
