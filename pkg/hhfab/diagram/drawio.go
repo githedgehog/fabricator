@@ -507,6 +507,11 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 	// Add redundancy group layer
 	createRedundancyGroupLayer(model, redundancyGroups, cellMap)
 
+	// Add unused switches layer
+	if len(layers.Unused) > 0 {
+		createUnusedSwitchesLayer(model, layers.Unused, serverY, style)
+	}
+
 	return model
 }
 
@@ -1442,5 +1447,72 @@ func createRedundancyGroupLayer(model *MxGraphModel, redundancyGroups map[string
 
 		model.Root.MxCell = append(model.Root.MxCell, groupRect)
 		groupIndex++
+	}
+}
+
+func createUnusedSwitchesLayer(model *MxGraphModel, unusedSwitches []Node, serverY int, style Style) {
+	if len(unusedSwitches) == 0 {
+		return
+	}
+
+	// Create a layer for unused switches
+	unusedLayer := MxCell{
+		ID:     "unused_layer",
+		Parent: "0",
+		Value:  "Unused Switches",
+		Style:  "locked=1;",
+	}
+	model.Root.MxCell = append(model.Root.MxCell, unusedLayer)
+
+	// Position on the left, aligned bottom with servers
+	nodeWidth := 100
+	nodeHeight := 50
+	verticalSpacing := 10.0
+	titleHeight := 30.0
+
+	// Calculate container dimensions
+	containerHeight := titleHeight + float64(len(unusedSwitches))*(float64(nodeHeight)+verticalSpacing)
+
+	// Position: bottom-left, aligned with bottom of servers
+	startX := -400.0
+	serverBottomY := float64(serverY + nodeHeight) // Bottom of server nodes
+	startY := serverBottomY - containerHeight      // Align bottom
+
+	// Create transparent container with label
+	containerBg := MxCell{
+		ID:     "unused_container_bg",
+		Parent: "unused_layer",
+		Value:  "Unused",
+		Style:  "rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=none;verticalAlign=top;fontSize=14;fontStyle=1;",
+		Vertex: "1",
+		Geometry: &Geometry{
+			X:      startX,
+			Y:      startY,
+			Width:  120,
+			Height: int(containerHeight),
+			As:     "geometry",
+		},
+	}
+	model.Root.MxCell = append(model.Root.MxCell, containerBg)
+
+	// Add each unused switch in a vertical column
+	for i, node := range unusedSwitches {
+		y := startY + titleHeight + float64(i)*(float64(nodeHeight)+verticalSpacing)
+
+		cell := MxCell{
+			ID:     node.ID,
+			Parent: "unused_layer",
+			Value:  FormatNodeValue(node, style),
+			Style:  GetNodeStyle(node, style) + "opacity=50;",
+			Vertex: "1",
+			Geometry: &Geometry{
+				X:      startX + 10,
+				Y:      y,
+				Width:  nodeWidth,
+				Height: nodeHeight,
+				As:     "geometry",
+			},
+		}
+		model.Root.MxCell = append(model.Root.MxCell, cell)
 	}
 }

@@ -169,6 +169,14 @@ func sortNodes(nodes []Node, links []Link) TieredNodes {
 	for _, node := range nodes {
 		switch node.Type {
 		case NodeTypeSwitch:
+			// Check if switch is marked as "unused" in description
+			desc, hasDesc := node.Properties[PropDescription]
+			if hasDesc && desc == "unused" {
+				result.Unused = append(result.Unused, node)
+
+				continue
+			}
+
 			// Only include switches that have connections
 			if hasConnections(node.ID, links) {
 				if role, ok := node.Properties[PropRole]; ok && role == SwitchRoleSpine {
@@ -441,6 +449,11 @@ func sortNodes(nodes []Node, links []Link) TieredNodes {
 		}
 
 		return posI < posJ
+	})
+
+	// Sort unused nodes by ID
+	sort.Slice(result.Unused, func(i, j int) bool {
+		return result.Unused[i].ID < result.Unused[j].ID
 	})
 
 	return result
