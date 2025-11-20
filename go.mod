@@ -44,7 +44,7 @@ require (
 	go.githedgehog.com/fabric v0.96.2
 	go.githedgehog.com/gateway v0.27.1
 	go.githedgehog.com/libmeta v0.3.0
-	golang.org/x/crypto v0.44.0
+	golang.org/x/crypto v0.45.0
 	golang.org/x/mod v0.30.0
 	golang.org/x/sync v0.18.0
 	golang.org/x/term v0.37.0
