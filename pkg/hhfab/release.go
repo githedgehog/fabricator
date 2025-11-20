@@ -2104,7 +2104,20 @@ func (testCtx *VPCPeeringTestCtx) roceBasicTest(ctx context.Context) (bool, []Re
 
 	// Find a RoCE-capable leaf with server connections
 	var swName string
+	sw := &wiringapi.Switch{}
+outer:
 	for _, candidateSwitch := range testCtx.roceLeaves {
+		if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: candidateSwitch}, sw); err != nil {
+			return false, nil, fmt.Errorf("getting switch %s: %w", swName, err)
+		}
+		// Skip switches that are unused
+		// FIXME: hack based on description, we should have a proper way to identify unused switches
+		if strings.Contains(sw.Spec.Description, "unused") {
+			slog.Debug("Skipping unused switch", "switch", candidateSwitch)
+
+			continue
+		}
+
 		connList := &wiringapi.ConnectionList{}
 		if err := testCtx.kube.List(ctx, connList, kclient.MatchingLabels{
 			wiringapi.ListLabelSwitch(candidateSwitch): wiringapi.ListLabelValue,
@@ -2118,12 +2131,8 @@ func (testCtx *VPCPeeringTestCtx) roceBasicTest(ctx context.Context) (bool, []Re
 				swName = candidateSwitch
 				slog.Debug("Selected RoCE leaf with servers", "switch", swName)
 
-				break
+				break outer
 			}
-		}
-
-		if swName != "" {
-			break
 		}
 		slog.Debug("Skipping RoCE leaf with no servers", "switch", candidateSwitch)
 	}
@@ -2133,15 +2142,11 @@ func (testCtx *VPCPeeringTestCtx) roceBasicTest(ctx context.Context) (bool, []Re
 
 		return true, nil, fmt.Errorf("no RoCE leaves with servers found") //nolint:goerr113
 	}
+	slog.Debug("Using RoCE leaf switch for test", "switch", swName)
 
 	swSSH, sshErr := testCtx.getSSH(ctx, swName)
 	if sshErr != nil {
 		return false, nil, fmt.Errorf("getting ssh config for switch %s: %w", swName, sshErr)
-	}
-
-	sw := &wiringapi.Switch{}
-	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: swName}, sw); err != nil {
-		return false, nil, fmt.Errorf("getting switch %s: %w", swName, err)
 	}
 
 	// enable RoCE on the switch if not already enabled
@@ -2163,37 +2168,56 @@ func (testCtx *VPCPeeringTestCtx) roceBasicTest(ctx context.Context) (bool, []Re
 	}
 
 	// check counters on the RoCE enabled switch for UC3 traffic. they are stored as part of the switch agent status
-	uc3Map := make(map[string]uint64) // map of interface name to UC3 transmit bits
-	agent := &agentapi.Agent{}
-	err := testCtx.kube.Get(ctx, kclient.ObjectKey{Name: swName, Namespace: kmetav1.NamespaceDefault}, agent)
-	if err != nil {
-		return false, nil, fmt.Errorf("getting agent %s: %w", swName, err)
+	// retry a few times as we only sync up stats every 15 seconds or so, and sometimes we appear to only update
+	// partial statistics (e.g. packets transmitted but not bits)
+	maxAttempts := 6
+	minTransmitBits := uint64(5000)
+	minTransmitPkts := uint64(50)
+	for i := 0; i < maxAttempts; i++ {
+		slog.Debug("Checking UC3 transmit bits on switch", "switch", swName, "attempt", i+1)
+		uc3Map := make(map[string]bool)
+		agent := &agentapi.Agent{}
+		err := testCtx.kube.Get(ctx, kclient.ObjectKey{Name: swName, Namespace: kmetav1.NamespaceDefault}, agent)
+		if err != nil {
+			return false, nil, fmt.Errorf("getting agent %s: %w", swName, err)
+		}
+
+		for iface, ifaceStats := range agent.Status.State.Interfaces {
+			if ifaceStats.OperStatus != agentapi.OperStatusUp {
+				continue
+			}
+			if ifaceStats.Counters == nil {
+				slog.Debug("No counters for operUp interface", "switch", swName, "interface", iface)
+
+				continue
+			}
+			uc3, ok := ifaceStats.Counters.Queues["UC3"]
+			if !ok {
+				slog.Debug("No UC3 queue counters for operUP interface", "switch", swName, "interface", iface)
+
+				continue
+			}
+			if uc3.TransmitBits > minTransmitBits {
+				slog.Debug("Found UC3 transmit bits on interface", "switch", swName, "interface", iface, "uc3TransmitBits", uc3.TransmitBits)
+				uc3Map[iface] = true
+			} else if uc3.TransmitPkts > minTransmitPkts {
+				slog.Debug("Found UC3 transmit packets but no bits on interface", "switch", swName, "interface", iface, "uc3TransmitPackets", uc3.TransmitPkts)
+				uc3Map[iface] = true
+			}
+		}
+
+		if len(uc3Map) != 0 {
+			slog.Debug("UC3 transmit bits/pkts found on switch", "switch", swName, "uc3Map", uc3Map)
+
+			break
+		}
+		if i < maxAttempts-1 {
+			slog.Debug("No UC3 transmit bits/pkts found yet, retrying in 10 seconds", "switch", swName, "attempt", i+1, "maxAttempts", maxAttempts)
+			time.Sleep(10 * time.Second)
+		} else {
+			return false, nil, fmt.Errorf("no UC3 transmit bits/pkts found on switch %s after %d attempts", swName, maxAttempts) //nolint:goerr113
+		}
 	}
-
-	for iface, ifaceStats := range agent.Status.State.Interfaces {
-		if ifaceStats.OperStatus != agentapi.OperStatusUp {
-			continue
-		}
-		if ifaceStats.Counters == nil {
-			slog.Debug("No counters for operUp interface", "switch", swName, "interface", iface)
-
-			continue
-		}
-		uc3, ok := ifaceStats.Counters.Queues["UC3"]
-		if !ok {
-			slog.Debug("No UC3 queue counters for operUP interface", "switch", swName, "interface", iface)
-
-			continue
-		}
-		if uc3.TransmitBits > 0 {
-			uc3Map[iface] = uc3.TransmitBits
-		}
-	}
-
-	if len(uc3Map) == 0 {
-		return false, nil, fmt.Errorf("no UC3 transmit bits found on switch %s", swName) //nolint:goerr113
-	}
-	slog.Debug("UC3 transmit bits found on switch", "switch", swName, "uc3Map", uc3Map)
 
 	return false, nil, nil
 }
