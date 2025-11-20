@@ -69,6 +69,7 @@ type TieredNodes struct {
 	Server   []Node
 	Gateway  []Node
 	External []Node
+	Unused   []Node
 }
 
 type serverConnection struct {
