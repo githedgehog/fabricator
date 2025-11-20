@@ -1465,20 +1465,34 @@ func createUnusedSwitchesLayer(model *MxGraphModel, unusedSwitches []Node, serve
 	model.Root.MxCell = append(model.Root.MxCell, unusedLayer)
 
 	// Position on the left, aligned bottom with servers
-	nodeWidth := 100
-	nodeHeight := 50
 	verticalSpacing := 10.0
 	titleHeight := 30.0
 
-	// Calculate container dimensions
-	containerHeight := titleHeight + float64(len(unusedSwitches))*(float64(nodeHeight)+verticalSpacing)
+	// Calculate container dimensions from style
+	totalHeight := titleHeight
+	var maxWidth int
+	nodeDimensions := make([][2]int, len(unusedSwitches))
+
+	for i, node := range unusedSwitches {
+		width, height := GetNodeDimensions(node)
+		nodeDimensions[i] = [2]int{width, height}
+		totalHeight += float64(height) + verticalSpacing
+		if width > maxWidth {
+			maxWidth = width
+		}
+	}
 
 	// Position: bottom-left, aligned with bottom of servers
 	startX := -400.0
-	serverBottomY := float64(serverY + nodeHeight) // Bottom of server nodes
-	startY := serverBottomY - containerHeight      // Align bottom
+	serverNodeHeight := 50
+	if len(unusedSwitches) > 0 {
+		_, h := GetNodeDimensions(unusedSwitches[0])
+		serverNodeHeight = h
+	}
+	serverBottomY := float64(serverY + serverNodeHeight) // Bottom of server nodes
+	startY := serverBottomY - totalHeight                // Align bottom
 
-	// Create transparent container with label
+	// Create transparent container
 	containerBg := MxCell{
 		ID:     "unused_container_bg",
 		Parent: "unused_layer",
@@ -1488,16 +1502,18 @@ func createUnusedSwitchesLayer(model *MxGraphModel, unusedSwitches []Node, serve
 		Geometry: &Geometry{
 			X:      startX,
 			Y:      startY,
-			Width:  120,
-			Height: int(containerHeight),
+			Width:  maxWidth + 20,
+			Height: int(totalHeight),
 			As:     "geometry",
 		},
 	}
 	model.Root.MxCell = append(model.Root.MxCell, containerBg)
 
-	// Add each unused switch in a vertical column
+	// Add each unused switch in a vertical column with proper dimensions
+	currentY := startY + titleHeight
 	for i, node := range unusedSwitches {
-		y := startY + titleHeight + float64(i)*(float64(nodeHeight)+verticalSpacing)
+		width := nodeDimensions[i][0]
+		height := nodeDimensions[i][1]
 
 		cell := MxCell{
 			ID:     node.ID,
@@ -1507,12 +1523,14 @@ func createUnusedSwitchesLayer(model *MxGraphModel, unusedSwitches []Node, serve
 			Vertex: "1",
 			Geometry: &Geometry{
 				X:      startX + 10,
-				Y:      y,
-				Width:  nodeWidth,
-				Height: nodeHeight,
+				Y:      currentY,
+				Width:  width,
+				Height: height,
 				As:     "geometry",
 			},
 		}
 		model.Root.MxCell = append(model.Root.MxCell, cell)
+
+		currentY += float64(height) + verticalSpacing
 	}
 }
