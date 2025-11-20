@@ -77,6 +77,10 @@ func VLABUp(ctx context.Context, workDir, cacheDir string, opts VLABUpOpts) erro
 		opts.VLABRunOpts.BuildMode = recipe.BuildModeManual
 	}
 
+	if opts.AutoUpgrade && opts.ReCreate {
+		return fmt.Errorf("--upgrade and --recreate (-f) are mutually exclusive: upgrade requires existing VMs") //nolint:goerr113
+	}
+
 	c, err := load(ctx, workDir, cacheDir, true, opts.HydrateMode, opts.SetJoinToken)
 	if err != nil {
 		return err
