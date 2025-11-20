@@ -10,6 +10,7 @@ import (
 type GatewayCtrlConfig struct {
 	Namespace            string              `json:"namespace,omitempty"`
 	Tolerations          []corev1.Toleration `json:"tolerations,omitempty"`
+	Agentless            bool                `json:"agentless,omitempty"`
 	AgentRef             string              `json:"agentRef,omitempty"`
 	DataplaneRef         string              `json:"dataplaneRef,omitempty"`
 	FRRRef               string              `json:"frrRef,omitempty"`
