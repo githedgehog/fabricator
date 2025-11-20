@@ -245,6 +245,7 @@ type GatewayConfig struct {
 	ASN           uint32                `json:"asn,omitempty"`
 	MAC           string                `json:"mac,omitempty"`
 	Observability *GatewayObservability `json:"observability,omitempty"`
+	Agentless     bool                  `json:"agentless,omitempty"`
 }
 
 type GatewayObservability struct {

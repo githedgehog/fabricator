@@ -534,6 +534,7 @@ _Appears in:_
 | `asn` _integer_ |  |  |  |
 | `mac` _string_ |  |  |  |
 | `observability` _[GatewayObservability](#gatewayobservability)_ |  |  |  |
+| `agentless` _boolean_ |  |  |  |
 
 
 #### GatewayObservability
