@@ -354,6 +354,34 @@ jobs:
             hybrid: false
             upgradefrom: "25.04"
 
+          # gateway l2vni from 25.05
+          - mesh: false
+            gateway: true
+            includeonie: false
+            buildmode: iso
+            vpcmode: l2vni
+            hybrid: false
+            upgradefrom: "25.05"
+
+          # gateway l3vni from 25.05
+          - mesh: false
+            gateway: true
+            includeonie: false
+            buildmode: iso
+            vpcmode: l3vni
+            hybrid: false
+            upgradefrom: "25.05"
+
+          # gateway mesh l2vni from 25.05
+          - fabricmode: spine-leaf
+            mesh: true
+            gateway: true
+            includeonie: false
+            buildmode: iso
+            vpcmode: l2vni
+            hybrid: false
+            upgradefrom: "25.05"
+
   vlabs:
     runs-on: ubuntu-latest
     needs:
