@@ -98,6 +98,8 @@ func copyOCI(ctx context.Context, src, dst string, srcAuth, dstAuth *types.Docke
 					))
 			case types.ProgressEventSkipped:
 				// bars[digest].SetCurrent(p.Artifact.Size)
+			case types.ProgressEventDone:
+				bars[digest].SetCurrent(p.Artifact.Size)
 			default:
 				bars[digest].EwmaIncrInt64(int64(p.OffsetUpdate), time.Since(barStart[digest])) //nolint:gosec
 			}
