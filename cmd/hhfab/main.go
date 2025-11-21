@@ -1156,6 +1156,7 @@ func Run(ctx context.Context) error {
 							VPC Peerings:
 
 							1+2 -- VPC peering between vpc-01 and vpc-02
+							1+2:gw -- same as above but using gateway peering, only valid if gateway is present
 							demo-1+demo-2 -- VPC peering between vpc-demo-1 and vpc-demo-2
 							1+2:r -- remote VPC peering between vpc-01 and vpc-02 on switch group if only one switch group is present
 							1+2:r=border -- remote VPC peering between vpc-01 and vpc-02 on switch group named border
@@ -1164,6 +1165,7 @@ func Run(ctx context.Context) error {
 							External Peerings:
 
 							1~as5835 -- external peering for vpc-01 with External as5835
+							1~as5835:gw -- same as above but using gateway peering, only valid if gateway is present
 							1~ -- external peering for vpc-1 with external if only one external is present for ipv4 namespace of vpc-01, allowing
 								default subnet and any route from external
 							1~:subnets=default@prefixes=0.0.0.0/0 -- external peering for vpc-1 with auth external with default vpc subnet and
