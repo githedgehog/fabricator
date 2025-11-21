@@ -13,11 +13,11 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/containers/image/v5/types"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/vbauerster/mpb/v8"
 	"github.com/vbauerster/mpb/v8/decor"
 	"go.githedgehog.com/fabricator/api/meta"
+	"go.podman.io/image/v5/types"
 	"oras.land/oras-go/v2"
 	"oras.land/oras-go/v2/content/file"
 	"oras.land/oras-go/v2/registry/remote"

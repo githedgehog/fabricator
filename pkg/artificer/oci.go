@@ -12,13 +12,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/containers/image/v5/copy"
-	"github.com/containers/image/v5/signature"
-	"github.com/containers/image/v5/transports/alltransports"
-	"github.com/containers/image/v5/types"
 	"github.com/vbauerster/mpb/v8"
 	"github.com/vbauerster/mpb/v8/decor"
 	"go.githedgehog.com/fabricator/api/meta"
+	"go.podman.io/image/v5/copy"
+	"go.podman.io/image/v5/signature"
+	"go.podman.io/image/v5/transports/alltransports"
+	"go.podman.io/image/v5/types"
 )
 
 func UploadOCIArchive(ctx context.Context, workDir, name string, version meta.Version, repo, prefix, username, password string) error {
