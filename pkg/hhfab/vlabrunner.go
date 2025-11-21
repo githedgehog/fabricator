@@ -374,6 +374,28 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 	postProcesses := &sync.WaitGroup{}
 	postProcessDone := make(chan struct{})
 
+	// Signal when debug collection is complete
+	debugDone := make(chan struct{})
+	var debugDoneOnce sync.Once
+	closeDebugDone := func() {
+		debugDoneOnce.Do(func() {
+			close(debugDone)
+		})
+	}
+
+	go func() {
+		<-ctx.Done()
+		// Wait for debug collection to complete or timeout after 20 minutes
+		select {
+		case <-debugDone:
+			slog.Debug("Debug collection completed, exiting gracefully")
+		case <-time.After(20 * time.Minute):
+			slog.Warn("Debug collection timeout, forcing exit")
+		}
+		slog.Debug("Force exit with code 2", "err", ctx.Err())
+		os.Exit(2)
+	}()
+
 	for _, vm := range vlab.VMs {
 		vmDir := filepath.Join(c.WorkDir, VLABDir, VLABVMsDir, vm.Name)
 
@@ -454,7 +476,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 			if err := execCmd(ctx, true, vmDir, VLABCmdQemuSystem, args, "vm", vm.Name); err != nil {
 				slog.Warn("Failed running VM", "vm", vm.Name, "type", vm.Type, "err", err)
 
-				c.CollectVLABDebug(ctx, vlab, opts)
+				c.CollectVLABDebug(ctx, vlab, opts, closeDebugDone)
 
 				if opts.FailFast {
 					return fmt.Errorf("running vm: %w", err)
@@ -470,7 +492,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 				if err := c.vmPostProcess(ctx, vlab, d, vm, opts); err != nil {
 					slog.Warn("Failed to post-process VM", "vm", vm.Name, "type", vm.Type, "err", err)
 
-					c.CollectVLABDebug(ctx, vlab, opts)
+					c.CollectVLABDebug(ctx, vlab, opts, closeDebugDone)
 
 					if opts.FailFast {
 						return fmt.Errorf("post-processing vm %s: %w", vm.Name, err)
@@ -601,7 +623,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 					}); err != nil {
 						slog.Warn("Failed to reinstall switches", "err", err)
 
-						c.CollectVLABDebug(ctx, vlab, opts)
+						c.CollectVLABDebug(ctx, vlab, opts, closeDebugDone)
 						if opts.PauseOnFailure {
 							if err := pauseOnFailure(ctx); err != nil {
 								slog.Warn("Pause on failure failed, ignoring", "err", err.Error())
@@ -625,7 +647,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 					}); err != nil {
 						slog.Warn("Failed to setup VPCs", "err", err)
 
-						c.CollectVLABDebug(ctx, vlab, opts)
+						c.CollectVLABDebug(ctx, vlab, opts, closeDebugDone)
 						if opts.PauseOnFailure {
 							if err := pauseOnFailure(ctx); err != nil {
 								slog.Warn("Pause on failure failed, ignoring", "err", err.Error())
@@ -647,7 +669,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 					}); err != nil {
 						slog.Warn("Failed to setup peerings", "err", err)
 
-						c.CollectVLABDebug(ctx, vlab, opts)
+						c.CollectVLABDebug(ctx, vlab, opts, closeDebugDone)
 						if opts.PauseOnFailure {
 							if err := pauseOnFailure(ctx); err != nil {
 								slog.Warn("Pause on failure failed, ignoring", "err", err.Error())
@@ -666,7 +688,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 					}); err != nil {
 						slog.Warn("Failed to test connectivity", "err", err)
 
-						c.CollectVLABDebug(ctx, vlab, opts)
+						c.CollectVLABDebug(ctx, vlab, opts, closeDebugDone)
 						if opts.PauseOnFailure {
 							if err := pauseOnFailure(ctx); err != nil {
 								slog.Warn("Pause on failure failed, ignoring", "err", err.Error())
@@ -676,7 +698,14 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						return fmt.Errorf("testing connectivity: %w", err)
 					}
 				case OnReadyExit:
-					c.CollectVLABDebug(ctx, vlab, opts)
+					// Don't collect show-tech on successful exit to save time
+					// Show-tech is only collected on error paths for forensics
+					exitOpts := opts
+					exitOpts.CollectShowTech = false
+					c.CollectVLABDebug(ctx, vlab, exitOpts, nil)
+
+					// Close debugDone to unblock force-exit goroutine if it's waiting
+					closeDebugDone()
 
 					// TODO seems like some graceful shutdown logic isn't working in CI and we're getting stuck w/o this
 					if os.Getenv("GITHUB_ACTIONS") == "true" {
@@ -689,7 +718,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 					if err := c.Wait(ctx, vlab); err != nil {
 						slog.Warn("Failed to wait for switches ready", "err", err)
 
-						c.CollectVLABDebug(ctx, vlab, opts)
+						c.CollectVLABDebug(ctx, vlab, opts, closeDebugDone)
 						if opts.PauseOnFailure {
 							if err := pauseOnFailure(ctx); err != nil {
 								slog.Warn("Pause on failure failed, ignoring", "err", err.Error())
@@ -706,7 +735,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 					}); err != nil {
 						slog.Warn("Failed to inspect", "err", err)
 
-						c.CollectVLABDebug(ctx, vlab, opts)
+						c.CollectVLABDebug(ctx, vlab, opts, closeDebugDone)
 						if opts.PauseOnFailure {
 							if err := pauseOnFailure(ctx); err != nil {
 								slog.Warn("Pause on failure failed, ignoring", "err", err.Error())
@@ -726,7 +755,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 					}); err != nil {
 						slog.Warn("Failed to run release test", "err", err)
 
-						c.CollectVLABDebug(ctx, vlab, opts)
+						c.CollectVLABDebug(ctx, vlab, opts, closeDebugDone)
 
 						return fmt.Errorf("release test: %w", err)
 					}
@@ -752,13 +781,6 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 
 		return nil
 	})
-
-	go func() {
-		<-ctx.Done()
-		time.Sleep(15 * time.Second)
-		slog.Debug("Force exit with code 2", "err", ctx.Err())
-		os.Exit(2)
-	}()
 
 	if err := group.Wait(); err != nil && !errors.Is(err, ErrExit) {
 		return fmt.Errorf("running task: %w", err)
