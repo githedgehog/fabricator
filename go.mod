@@ -40,7 +40,7 @@ require (
 	github.com/urfave/cli/v2 v2.27.7
 	github.com/vbauerster/mpb/v8 v8.11.2
 	github.com/vishvananda/netlink v1.3.1
-	go.githedgehog.com/fabric v0.96.2
+	go.githedgehog.com/fabric v0.97.0
 	go.githedgehog.com/gateway v0.28.1
 	go.githedgehog.com/libmeta v0.3.0
 	go.podman.io/image/v5 v5.38.0
