@@ -33,6 +33,22 @@ type LinkGroup struct {
 type Topology struct {
 	Nodes []Node
 	Links []Link
+	VPCs  map[string]*VPCInfo
+}
+
+type VPCInfo struct {
+	Name            string
+	Subnets         map[string]*SubnetInfo
+	AttachedServers []string // server IDs attached to this VPC
+}
+
+type SubnetInfo struct {
+	Name      string
+	CIDR      string
+	VLAN      int
+	Gateway   string
+	Servers   []string          // server IDs in this subnet
+	ServerIPs map[string]string // server ID -> IP address
 }
 
 const (
@@ -118,6 +134,7 @@ const (
 	LegendKeyGateway        = "gateway"
 	LegendKeyExternal       = "external"
 	LegendKeyStaticExternal = "static_external" // New legend key
+	LegendKeyVPC            = "vpc"
 )
 
 const (
