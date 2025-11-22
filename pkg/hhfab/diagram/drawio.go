@@ -1626,6 +1626,7 @@ func createVPCBoxForServer(model *MxGraphModel, vpcName string, vpcInfo *VPCInfo
 	for _, subnet := range vpcInfo.Subnets {
 		if ip, hasIP := subnet.ServerIPs[serverID]; hasIP {
 			serverIP = ip
+
 			break
 		}
 	}
