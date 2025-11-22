@@ -507,6 +507,14 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 	// Add redundancy group layer
 	createRedundancyGroupLayer(model, redundancyGroups, cellMap)
 
+	// Add VPC layer
+	createVPCLayer(model, topo.VPCs, cellMap)
+
+	// Add VPC legend on the top right, below Hedgehog logo
+	if len(topo.VPCs) > 0 {
+		createVPCLegend(model, topo.VPCs)
+	}
+
 	// Add unused switches layer
 	if len(layers.Unused) > 0 {
 		createUnusedSwitchesLayer(model, layers.Unused, serverY, style)
@@ -1532,5 +1540,237 @@ func createUnusedSwitchesLayer(model *MxGraphModel, unusedSwitches []Node, serve
 		model.Root.MxCell = append(model.Root.MxCell, cell)
 
 		currentY += float64(height) + verticalSpacing
+	}
+}
+
+func createVPCLayer(model *MxGraphModel, vpcs map[string]*VPCInfo, cellMap map[string]*MxCell) {
+	if len(vpcs) == 0 {
+		return
+	}
+
+	// Create VPC layer
+	vpcLayer := MxCell{
+		ID:     "vpc_layer",
+		Parent: "0",
+		Value:  "VPCs",
+		Style:  "locked=1;",
+	}
+	model.Root.MxCell = append(model.Root.MxCell, vpcLayer)
+
+	// Build a map of server -> VPCs for that server
+	serverVPCs := make(map[string][]string)
+	for vpcName, vpcInfo := range vpcs {
+		for _, serverID := range vpcInfo.AttachedServers {
+			serverVPCs[serverID] = append(serverVPCs[serverID], vpcName)
+		}
+	}
+
+	// Sort VPC names in each server's list for consistent ordering
+	for serverID := range serverVPCs {
+		sort.Strings(serverVPCs[serverID])
+	}
+
+	// Create VPC boxes for each server
+	boxIndex := 0
+	for serverID, vpcNames := range serverVPCs {
+		cell, ok := cellMap[serverID]
+		if !ok || cell.Geometry == nil {
+			continue
+		}
+
+		// Create a box for each VPC this server belongs to
+		for vpcIndex, vpcName := range vpcNames {
+			vpcInfo := vpcs[vpcName]
+			createVPCBoxForServer(model, vpcName, vpcInfo, serverID, cell, boxIndex, vpcIndex)
+			boxIndex++
+		}
+	}
+}
+
+func createVPCBoxForServer(model *MxGraphModel, vpcName string, vpcInfo *VPCInfo, serverID string, serverCell *MxCell, boxIndex int, vpcIndex int) {
+	// Get server dimensions
+	x := serverCell.Geometry.X
+	y := serverCell.Geometry.Y
+	width := float64(serverCell.Geometry.Width)
+	height := float64(serverCell.Geometry.Height)
+
+	// Add padding around the server
+	padding := 8.0
+
+	// Label space at the bottom for VPC labels
+	// Each label needs enough vertical space to be clearly visible
+	// First VPC uses baseLabelSpace (12px)
+	// Each subsequent VPC adds labelHeight (18px) for proper spacing
+	// This means:
+	// - VPC 0: 12 + (18 * 0) = 12px (first VPC)
+	// - VPC 1: 12 + (18 * 1) = 30px (second VPC)
+	// - VPC 2: 12 + (18 * 2) = 48px (third VPC)
+	baseLabelSpace := 12.0
+	labelHeight := 18.0
+	totalLabelSpace := baseLabelSpace + (labelHeight * float64(vpcIndex))
+
+	minX := x - padding
+	minY := y - padding
+	maxX := x + width + padding
+	maxY := y + height + padding + totalLabelSpace
+
+	// Select color from palette based on VPC name hash for consistency
+	colorIndex := 0
+	for _, c := range vpcName {
+		colorIndex += int(c)
+	}
+	color := VPCColorPalette[colorIndex%len(VPCColorPalette)]
+
+	// Find the server's IP in this VPC (from any of its subnets)
+	serverIP := ""
+	for _, subnet := range vpcInfo.Subnets {
+		if ip, hasIP := subnet.ServerIPs[serverID]; hasIP {
+			serverIP = ip
+			break
+		}
+	}
+
+	// Create label with VPC name (bold, colored) and IP (regular, black)
+	labelValue := fmt.Sprintf("<b><font color=\"%s\">%s</font></b>", color, vpcName)
+	if serverIP != "" {
+		labelValue = fmt.Sprintf("<b><font color=\"%s\">%s</font></b>: <font color=\"#000000\">%s</font>", color, vpcName, serverIP)
+	}
+
+	// Create the VPC box with label at the bottom (like redundancy groups)
+	vpcRect := MxCell{
+		ID:     fmt.Sprintf("vpc_%d", boxIndex),
+		Parent: "vpc_layer",
+		Value:  labelValue,
+		Style: fmt.Sprintf("rounded=1;arcSize=8;whiteSpace=wrap;html=1;strokeColor=%s;strokeWidth=2;"+
+			"fillColor=none;dashed=1;dashPattern=5 5;"+
+			"labelPosition=center;verticalLabelPosition=center;align=center;verticalAlign=bottom;"+
+			"fontSize=10;",
+			color),
+		Vertex: "1",
+		Geometry: &Geometry{
+			X:      minX,
+			Y:      minY,
+			Width:  int(maxX - minX),
+			Height: int(maxY - minY),
+			As:     "geometry",
+		},
+	}
+
+	model.Root.MxCell = append(model.Root.MxCell, vpcRect)
+}
+
+func createVPCLegend(model *MxGraphModel, vpcs map[string]*VPCInfo) {
+	// Sort VPC names for consistent ordering
+	vpcNames := make([]string, 0, len(vpcs))
+	for vpcName := range vpcs {
+		vpcNames = append(vpcNames, vpcName)
+	}
+	sort.Strings(vpcNames)
+
+	// Calculate dimensions
+	vpcEntrySpacing := 10.0
+	subnetLineHeight := 20.0 // Increased for fontSize 14
+	maxVPCsPerColumn := 3
+	columnWidth := 320.0
+	columnSpacing := 20.0
+
+	// Position on the top right, below hedgehog logo
+	hedgehogLogoX := 820.0
+	hedgehogLogoWidth := 150.0
+
+	// Calculate number of columns needed
+	numColumns := (len(vpcNames) + maxVPCsPerColumn - 1) / maxVPCsPerColumn
+	if numColumns < 1 {
+		numColumns = 1
+	}
+
+	// Total width needed for all columns
+	totalWidth := float64(numColumns)*columnWidth + float64(numColumns-1)*columnSpacing
+
+	// Center-align the entire legend block with the logo's rightmost edge
+	logoRightEdge := hedgehogLogoX + hedgehogLogoWidth
+	startX := logoRightEdge - (totalWidth / 2.0)
+
+	hedgehogLogoY := 10.0
+	hedgehogLogoHeight := 30.0
+	startY := hedgehogLogoY + hedgehogLogoHeight + 60.0
+
+	// Process VPCs in columns
+	for i, vpcName := range vpcNames {
+		vpcInfo := vpcs[vpcName]
+
+		// Calculate which column this VPC belongs to
+		column := i / maxVPCsPerColumn
+		indexInColumn := i % maxVPCsPerColumn
+
+		// Calculate X position for this column
+		columnX := startX + float64(column)*(columnWidth+columnSpacing)
+
+		// Calculate Y position (reset for each column)
+		currentY := startY
+		if indexInColumn > 0 {
+			// Need to calculate Y based on previous VPCs in this column
+			for j := column * maxVPCsPerColumn; j < i; j++ {
+				prevVPCInfo := vpcs[vpcNames[j]]
+				currentY += 25.0                                                 // VPC header height
+				currentY += float64(len(prevVPCInfo.Subnets)) * subnetLineHeight // Subnets
+				currentY += vpcEntrySpacing                                      // Spacing after VPC
+			}
+		}
+
+		// Get consistent color for this VPC
+		colorIndex := 0
+		for _, c := range vpcName {
+			colorIndex += int(c)
+		}
+		color := VPCColorPalette[colorIndex%len(VPCColorPalette)]
+
+		// VPC name header
+		vpcHeader := MxCell{
+			ID:     fmt.Sprintf("vpc_legend_header_%d", i),
+			Parent: "vpc_layer",
+			Value:  fmt.Sprintf("<b>%s</b>", vpcName),
+			Style:  fmt.Sprintf("text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontColor=%s;fontStyle=1;", color),
+			Vertex: "1",
+			Geometry: &Geometry{
+				X:      columnX + 10,
+				Y:      currentY,
+				Width:  int(columnWidth) - 20,
+				Height: 20,
+				As:     "geometry",
+			},
+		}
+		model.Root.MxCell = append(model.Root.MxCell, vpcHeader)
+		currentY += 25.0
+
+		// Sort subnet names
+		subnetNames := make([]string, 0, len(vpcInfo.Subnets))
+		for subnetName := range vpcInfo.Subnets {
+			subnetNames = append(subnetNames, subnetName)
+		}
+		sort.Strings(subnetNames)
+
+		// Add subnet details
+		for j, subnetName := range subnetNames {
+			subnet := vpcInfo.Subnets[subnetName]
+			subnetText := fmt.Sprintf("<b>%s</b>: %s (VLAN %d)", subnetName, subnet.CIDR, subnet.VLAN)
+
+			subnetCell := MxCell{
+				ID:     fmt.Sprintf("vpc_legend_subnet_%d_%d", i, j),
+				Parent: "vpc_layer",
+				Value:  subnetText,
+				Style:  "text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontColor=#666666;",
+				Vertex: "1",
+				Geometry: &Geometry{
+					X:      columnX + 10,
+					Y:      currentY,
+					Width:  int(columnWidth) - 20,
+					Height: int(subnetLineHeight),
+					As:     "geometry",
+				},
+			}
+			model.Root.MxCell = append(model.Root.MxCell, subnetCell)
+			currentY += subnetLineHeight
+		}
 	}
 }

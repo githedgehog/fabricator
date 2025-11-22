@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	dhcpapi "go.githedgehog.com/fabric/api/dhcp/v1beta1"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
@@ -460,7 +461,9 @@ func sortNodes(nodes []Node, links []Link) TieredNodes {
 }
 
 func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error) {
-	topo := Topology{}
+	topo := Topology{
+		VPCs: make(map[string]*VPCInfo),
+	}
 	nodeSet := make(map[string]bool)
 	// Maps connection names to external names
 	connectionToExternalMap := make(map[string][]string)
@@ -736,6 +739,110 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 			},
 		}
 		topo.Links = append(topo.Links, link)
+	}
+
+	// Load VPCs and VPC Attachments
+	vpcs := &vpcapi.VPCList{}
+	if err := client.List(ctx, vpcs); err != nil {
+		return topo, fmt.Errorf("listing VPCs: %w", err)
+	}
+
+	// Initialize VPC info map
+	for _, vpc := range vpcs.Items {
+		topo.VPCs[vpc.Name] = &VPCInfo{
+			Name:            vpc.Name,
+			Subnets:         make(map[string]*SubnetInfo),
+			AttachedServers: []string{},
+		}
+
+		// Extract subnet information from VPC spec
+		for subnetName, subnetSpec := range vpc.Spec.Subnets {
+			topo.VPCs[vpc.Name].Subnets[subnetName] = &SubnetInfo{
+				Name:      subnetName,
+				CIDR:      subnetSpec.Subnet,
+				VLAN:      int(subnetSpec.VLAN),
+				Gateway:   subnetSpec.Gateway,
+				Servers:   []string{},
+				ServerIPs: make(map[string]string),
+			}
+		}
+	}
+
+	// Load VPC Attachments and map servers to VPCs
+	vpcAttachments := &vpcapi.VPCAttachmentList{}
+	if err := client.List(ctx, vpcAttachments); err != nil {
+		return topo, fmt.Errorf("listing VPC attachments: %w", err)
+	}
+
+	for _, attachment := range vpcAttachments.Items {
+		// Parse "vpc-01/subnet-01" format
+		vpcName, subnetName, ok := parseVPCSubnetRef(attachment.Spec.Subnet)
+		if !ok {
+			continue
+		}
+
+		// Extract server name from connection
+		// Connection format: "server-1--unbundled--s5248-04"
+		connectionParts := strings.Split(attachment.Spec.Connection, "--")
+		if len(connectionParts) == 0 {
+			continue
+		}
+		serverName := connectionParts[0]
+
+		// Add server to VPC
+		if vpcInfo, ok := topo.VPCs[vpcName]; ok {
+			// Add to VPC's server list if not already present
+			found := false
+			for _, s := range vpcInfo.AttachedServers {
+				if s == serverName {
+					found = true
+
+					break
+				}
+			}
+			if !found {
+				vpcInfo.AttachedServers = append(vpcInfo.AttachedServers, serverName)
+			}
+
+			// Add to subnet's server list
+			if subnet, ok := vpcInfo.Subnets[subnetName]; ok {
+				subnet.Servers = append(subnet.Servers, serverName)
+			}
+		}
+	}
+
+	// Load DHCP Subnets to get server IP allocations
+	dhcpSubnets := &dhcpapi.DHCPSubnetList{}
+	if err := client.List(ctx, dhcpSubnets); err != nil {
+		return topo, fmt.Errorf("listing DHCP subnets: %w", err)
+	}
+
+	for _, dhcpSubnet := range dhcpSubnets.Items {
+		// Parse "vpc-01/subnet-01" format from subnet field
+		vpcName, subnetName, ok := parseVPCSubnetRef(dhcpSubnet.Spec.Subnet)
+		if !ok {
+			continue
+		}
+
+		// Get the subnet info
+		vpcInfo, vpcExists := topo.VPCs[vpcName]
+		if !vpcExists {
+			continue
+		}
+		subnet, subnetExists := vpcInfo.Subnets[subnetName]
+		if !subnetExists {
+			continue
+		}
+
+		// Extract allocated IPs from status
+		for _, allocated := range dhcpSubnet.Status.Allocated {
+			// The hostname should match the server name
+			serverName := allocated.Hostname
+			ip := allocated.IP
+
+			// Store the IP for this server
+			subnet.ServerIPs[serverName] = ip
+		}
 	}
 
 	return topo, nil
@@ -1036,4 +1143,16 @@ func getRedundancyGroups(nodes []Node) map[string][]Node {
 	}
 
 	return filteredGroups
+}
+
+// parseVPCSubnetRef parses a VPC subnet reference in the format "vpc-name/subnet-name"
+// and returns the VPC name, subnet name, and true if parsing was successful.
+// Returns empty strings and false if the format is invalid.
+func parseVPCSubnetRef(ref string) (string, string, bool) {
+	parts := strings.Split(ref, "/")
+	if len(parts) != 2 {
+		return "", "", false
+	}
+
+	return parts[0], parts[1], true
 }
