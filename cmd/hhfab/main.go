@@ -730,7 +730,10 @@ func Run(ctx context.Context) error {
 			   hhfab diagram --format dot
 
 			   # Generate draw.io diagram with custom style
-			   hhfab diagram --format drawio --style hedgehog`),
+			   hhfab diagram --format drawio --style hedgehog
+
+			   # Generate diagram from live cluster with custom kubeconfig
+			   hhfab diagram --live --kubeconfig ~/.kube/env-1.config`),
 				Flags: flatten(defaultFlags, []cli.Flag{
 					&cli.StringFlag{
 						Name:    "format",
@@ -755,12 +758,22 @@ func Run(ctx context.Context) error {
 						Name:  "live",
 						Usage: "load resources from actually running API instead of the config file (fab.yaml and include/*)",
 					},
+					&cli.StringFlag{
+						Name:    "kubeconfig",
+						Aliases: []string{"k"},
+						Usage:   "path to kubeconfig file for remote k8s API (only with --live, defaults to vlab/kubeconfig)",
+					},
 				}),
 				Before: before(false),
 				Action: func(c *cli.Context) error {
+					// Validate that kubeconfig is only used with --live
+					if c.String("kubeconfig") != "" && !c.Bool("live") {
+						return fmt.Errorf("--kubeconfig/-k can only be used with --live flag") //nolint:goerr113
+					}
+
 					format := diagram.Format(strings.ToLower(c.String("format")))
 					styleType := diagram.StyleType(c.String("style"))
-					if err := hhfab.Diagram(ctx, workDir, cacheDir, c.Bool("live"), format, styleType, c.String("output")); err != nil {
+					if err := hhfab.Diagram(ctx, workDir, cacheDir, c.Bool("live"), format, styleType, c.String("output"), c.String("kubeconfig")); err != nil {
 						return fmt.Errorf("failed to generate %s diagram: %w", format, err)
 					}
 

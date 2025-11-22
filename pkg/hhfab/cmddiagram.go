@@ -19,7 +19,7 @@ import (
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func Diagram(ctx context.Context, workDir, cacheDir string, live bool, format diagram.Format, style diagram.StyleType, outputPath string) error {
+func Diagram(ctx context.Context, workDir, cacheDir string, live bool, format diagram.Format, style diagram.StyleType, outputPath string, kubeconfigPath string) error {
 	resultDir := filepath.Join(workDir, ResultDir)
 	if err := os.MkdirAll(resultDir, 0o755); err != nil {
 		return fmt.Errorf("creating result directory: %w", err)
@@ -35,7 +35,12 @@ func Diagram(ctx context.Context, workDir, cacheDir string, live bool, format di
 
 		client = c.Client
 	} else {
-		kubeconfig := filepath.Join(workDir, VLABDir, VLABKubeConfig)
+		// Use provided kubeconfig path, or default to vlab kubeconfig
+		kubeconfig := kubeconfigPath
+		if kubeconfig == "" {
+			kubeconfig = filepath.Join(workDir, VLABDir, VLABKubeConfig)
+		}
+
 		cacheCancel, kube, err := kubeutil.NewClientWithCache(ctx, kubeconfig,
 			wiringapi.SchemeBuilder,
 			fabapi.SchemeBuilder,
