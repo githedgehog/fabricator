@@ -126,14 +126,14 @@ jobs:
           echo "  Slug: ${{ env.slug }}"
 
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           repository: githedgehog/fabricator
           ref: ${{ inputs.fabricatorref }}
           fetch-depth: 0
 
       - name: Checkout lab-ci repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         if: ${{ inputs.hybrid }}
         with:
           repository: githedgehog/lab-ci
