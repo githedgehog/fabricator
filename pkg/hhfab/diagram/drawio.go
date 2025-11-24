@@ -510,9 +510,21 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 	// Add VPC layer
 	createVPCLayer(model, topo.VPCs, cellMap)
 
-	// Add VPC legend on the top right, below Hedgehog logo
+	// Calculate server bottom Y for positioning elements below
+	serverNodeHeight := 80 // Default server node height
+	if len(layers.Server) > 0 {
+		_, h := GetNodeDimensions(layers.Server[0])
+		serverNodeHeight = h
+	}
+	serverBottomY := serverY + serverNodeHeight
+
+	// Add VPC legend below the server layer
 	if len(topo.VPCs) > 0 {
-		createVPCLegend(model, topo.VPCs)
+		// Calculate server layer dimensions for VPC legend positioning
+		numServers := len(layers.Server)
+		serverLayerStartX := serverStartX
+		serverLayerWidth := totalServerWidth
+		createVPCLegend(model, topo.VPCs, serverBottomY, numServers, serverLayerStartX, serverLayerWidth)
 	}
 
 	// Add unused switches layer
@@ -1659,7 +1671,7 @@ func createVPCBoxForServer(model *MxGraphModel, vpcName string, vpcInfo *VPCInfo
 	model.Root.MxCell = append(model.Root.MxCell, vpcRect)
 }
 
-func createVPCLegend(model *MxGraphModel, vpcs map[string]*VPCInfo) {
+func createVPCLegend(model *MxGraphModel, vpcs map[string]*VPCInfo, serverBottomY int, numServers int, serverLayerStartX, serverLayerWidth float64) {
 	// Sort VPC names for consistent ordering
 	vpcNames := make([]string, 0, len(vpcs))
 	for vpcName := range vpcs {
@@ -1669,31 +1681,32 @@ func createVPCLegend(model *MxGraphModel, vpcs map[string]*VPCInfo) {
 
 	// Calculate dimensions
 	vpcEntrySpacing := 10.0
-	subnetLineHeight := 20.0 // Increased for fontSize 14
-	maxVPCsPerColumn := 3
+	subnetLineHeight := 20.0
 	columnWidth := 320.0
 	columnSpacing := 20.0
 
-	// Position on the top right, below hedgehog logo
-	hedgehogLogoX := 820.0
-	hedgehogLogoWidth := 150.0
+	// Calculate available horizontal space based on server layout
+	// A VPC legend entry (320px column) spans approximately 2 servers
+	maxColumns := (numServers + 1) / 2
+	if maxColumns < 1 {
+		maxColumns = 1
+	}
 
-	// Calculate number of columns needed
-	numColumns := (len(vpcNames) + maxVPCsPerColumn - 1) / maxVPCsPerColumn
+	// Minimize rows by using as many columns as possible
+	numColumns := min(len(vpcNames), maxColumns)
 	if numColumns < 1 {
 		numColumns = 1
 	}
 
-	// Total width needed for all columns
-	totalWidth := float64(numColumns)*columnWidth + float64(numColumns-1)*columnSpacing
+	maxVPCsPerColumn := (len(vpcNames) + numColumns - 1) / numColumns
 
-	// Center-align the entire legend block with the logo's rightmost edge
-	logoRightEdge := hedgehogLogoX + hedgehogLogoWidth
-	startX := logoRightEdge - (totalWidth / 2.0)
+	// Center VPC legend under server layer based on actual server positions
+	legendTotalWidth := float64(numColumns)*columnWidth + float64(numColumns-1)*columnSpacing
+	serverLayerCenterX := serverLayerStartX + (serverLayerWidth / 2)
+	startX := serverLayerCenterX - (legendTotalWidth / 2)
 
-	hedgehogLogoY := 10.0
-	hedgehogLogoHeight := 30.0
-	startY := hedgehogLogoY + hedgehogLogoHeight + 60.0
+	// Position below the server layer with some spacing
+	startY := float64(serverBottomY) + 80.0
 
 	// Process VPCs in columns
 	for i, vpcName := range vpcNames {
@@ -1703,13 +1716,10 @@ func createVPCLegend(model *MxGraphModel, vpcs map[string]*VPCInfo) {
 		column := i / maxVPCsPerColumn
 		indexInColumn := i % maxVPCsPerColumn
 
-		// Calculate X position for this column
 		columnX := startX + float64(column)*(columnWidth+columnSpacing)
 
-		// Calculate Y position (reset for each column)
 		currentY := startY
 		if indexInColumn > 0 {
-			// Need to calculate Y based on previous VPCs in this column
 			for j := column * maxVPCsPerColumn; j < i; j++ {
 				prevVPCInfo := vpcs[vpcNames[j]]
 				currentY += 25.0                                                 // VPC header height
