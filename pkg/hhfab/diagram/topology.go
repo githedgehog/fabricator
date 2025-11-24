@@ -587,15 +587,33 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 		return topo, fmt.Errorf("listing connections: %w", err)
 	}
 
-	// First pass: collect all external and static external connections
+	// First pass: collect all external and static external connections, and build connection-to-server map
 	externalConnections := make(map[string]string)       // Maps connection name to switch port
 	staticExternalConnections := make(map[string]string) // Maps connection name to switch port
+	connectionToServer := make(map[string]string)        // Maps connection name to server name
 	for _, conn := range conns.Items {
 		if conn.Spec.External != nil && conn.Spec.External.Link.Switch.Port != "" {
 			externalConnections[conn.Name] = conn.Spec.External.Link.Switch.Port
 		}
 		if conn.Spec.StaticExternal != nil && conn.Spec.StaticExternal.Link.Switch.Port != "" {
 			staticExternalConnections[conn.Name] = conn.Spec.StaticExternal.Link.Switch.Port
+		}
+
+		// Extract server name from server-facing connections
+		var serverPort string
+		switch {
+		case conn.Spec.Unbundled != nil && conn.Spec.Unbundled.Link.Server.Port != "":
+			serverPort = conn.Spec.Unbundled.Link.Server.Port
+		case conn.Spec.Bundled != nil && len(conn.Spec.Bundled.Links) > 0 && conn.Spec.Bundled.Links[0].Server.Port != "":
+			serverPort = conn.Spec.Bundled.Links[0].Server.Port
+		case conn.Spec.MCLAG != nil && len(conn.Spec.MCLAG.Links) > 0 && conn.Spec.MCLAG.Links[0].Server.Port != "":
+			serverPort = conn.Spec.MCLAG.Links[0].Server.Port
+		case conn.Spec.ESLAG != nil && len(conn.Spec.ESLAG.Links) > 0 && conn.Spec.ESLAG.Links[0].Server.Port != "":
+			serverPort = conn.Spec.ESLAG.Links[0].Server.Port
+		}
+		if serverPort != "" {
+			serverName := wiringapi.SplitPortName(serverPort)[0]
+			connectionToServer[conn.Name] = serverName
 		}
 	}
 
@@ -781,13 +799,12 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 			continue
 		}
 
-		// Extract server name from connection
-		// Connection format: "server-1--unbundled--s5248-04"
-		connectionParts := strings.Split(attachment.Spec.Connection, "--")
-		if len(connectionParts) == 0 {
+		// Get server name from connection
+		serverName, ok := connectionToServer[attachment.Spec.Connection]
+		if !ok {
+			// Connection not found or doesn't have a server
 			continue
 		}
-		serverName := connectionParts[0]
 
 		// Add server to VPC
 		if vpcInfo, ok := topo.VPCs[vpcName]; ok {
