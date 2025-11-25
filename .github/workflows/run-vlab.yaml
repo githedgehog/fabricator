@@ -97,7 +97,7 @@ jobs:
   run:
     if: ${{ !inputs.skip }}
     runs-on: ${{ inputs.hybrid && 'hlab' || 'vlab' }}
-    timeout-minutes: "${{ inputs.pause_on_failure && (inputs.releasetest && (inputs.hybrid && 290 || 190) || 100) || (inputs.releasetest && (inputs.hybrid && 250 || 150) || 60) }}"
+    timeout-minutes: "${{ inputs.pause_on_failure && (inputs.releasetest && (inputs.hybrid && 320 || 220) || 130) || (inputs.releasetest && (inputs.hybrid && 250 || 150) || 60) }}"
 
     steps:
       - name: Runner host
