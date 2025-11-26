@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	agentapi "go.githedgehog.com/fabric/api/agent/v1beta1"
 	dhcpapi "go.githedgehog.com/fabric/api/dhcp/v1beta1"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
@@ -533,6 +534,61 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 	if err := client.List(ctx, switches); err != nil {
 		return topo, fmt.Errorf("listing switches: %w", err)
 	}
+
+	// Load switch profiles for port speed information
+	switchProfiles := &wiringapi.SwitchProfileList{}
+	if err := client.List(ctx, switchProfiles); err != nil {
+		return topo, fmt.Errorf("listing switch profiles: %w", err)
+	}
+
+	// Build profile map for quick lookup
+	profileMap := make(map[string]*wiringapi.SwitchProfile)
+	for i := range switchProfiles.Items {
+		profile := &switchProfiles.Items[i]
+		profileMap[profile.Name] = profile
+	}
+
+	// Build switch map for speed lookup when creating links
+	switchMap := make(map[string]*wiringapi.Switch)
+	for i := range switches.Items {
+		sw := &switches.Items[i]
+		switchMap[sw.Name] = sw
+	}
+
+	// Load agents for port status information (only available in live mode)
+	agents := &agentapi.AgentList{}
+	portStatusMap := make(map[string]map[string]string)
+
+	// Try to list agents - if it fails (e.g., non-live mode), continue without port status
+	hasAgentData := true
+	if err := client.List(ctx, agents); err != nil {
+		// Agents not available (non-live mode or API not registered), continue without port status
+		agents = nil
+		hasAgentData = false
+	}
+
+	// Build port status map if agents are available
+	if agents != nil {
+		for i := range agents.Items {
+			agent := &agents.Items[i]
+			if agent.Status.State.Interfaces == nil {
+				continue
+			}
+
+			portStatusMap[agent.Name] = make(map[string]string)
+			for portName, iface := range agent.Status.State.Interfaces {
+				var status string
+				// Only check OperStatus (operational status)
+				if iface.OperStatus == "up" {
+					status = PortStatusUp
+				} else {
+					status = PortStatusDown
+				}
+				portStatusMap[agent.Name][portName] = status
+			}
+		}
+	}
+
 	for _, sw := range switches.Items {
 		if nodeSet[sw.Name] {
 			continue
@@ -662,9 +718,14 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 					Source: wiringapi.SplitPortName(source)[0],
 					Target: wiringapi.SplitPortName(target)[0],
 					Type:   conn.Spec.Type(),
+					Speed:  getLinkSpeed(source, target, agents, switchMap, profileMap),
 					Properties: map[string]string{
-						PropSourcePort: source,
-						PropTargetPort: target,
+						PropSourcePort:       source,
+						PropTargetPort:       target,
+						PropSourcePortStatus: getPortStatus(source, portStatusMap),
+						PropTargetPortStatus: getPortStatus(target, portStatusMap),
+						PropSourcePortNOS:    getPortNOSName(source, switchMap, profileMap),
+						PropTargetPortNOS:    getPortNOSName(target, switchMap, profileMap),
 					},
 				}
 
@@ -716,9 +777,12 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 				Source: switchID,
 				Target: externalName,
 				Type:   EdgeTypeExternal,
+				Speed:  getLinkSpeed(switchPort, "", agents, switchMap, profileMap),
 				Properties: map[string]string{
-					PropSourcePort:     switchPort,
-					PropConnectionName: connName,
+					PropSourcePort:       switchPort,
+					PropSourcePortStatus: getPortStatus(switchPort, portStatusMap),
+					PropSourcePortNOS:    getPortNOSName(switchPort, switchMap, profileMap),
+					PropConnectionName:   connName,
 				},
 			}
 			topo.Links = append(topo.Links, link)
@@ -751,9 +815,12 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 			Source: switchID,
 			Target: externalNodeName,
 			Type:   EdgeTypeStaticExternal,
+			Speed:  getLinkSpeed(switchPort, "", agents, switchMap, profileMap),
 			Properties: map[string]string{
-				PropSourcePort:     switchPort,
-				PropConnectionName: connName,
+				PropSourcePort:       switchPort,
+				PropSourcePortStatus: getPortStatus(switchPort, portStatusMap),
+				PropSourcePortNOS:    getPortNOSName(switchPort, switchMap, profileMap),
+				PropConnectionName:   connName,
 			},
 		}
 		topo.Links = append(topo.Links, link)
@@ -861,6 +928,9 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 			subnet.ServerIPs[serverName] = ip
 		}
 	}
+
+	// Set flag indicating whether agent runtime data is available
+	topo.HasAgentData = hasAgentData
 
 	return topo, nil
 }
@@ -1172,4 +1242,171 @@ func parseVPCSubnetRef(ref string) (string, string, bool) {
 	}
 
 	return parts[0], parts[1], true
+}
+
+// getPortSpeed returns the speed of a port based on switch port group configuration
+func getPortSpeed(portName string, sw *wiringapi.Switch, profile *wiringapi.SwitchProfile) string {
+	if profile == nil || sw == nil {
+		return ""
+	}
+
+	// Extract just the port name (e.g., "E1/3" from "s5248-04/E1/3")
+	portParts := wiringapi.SplitPortName(portName)
+	if len(portParts) < 2 {
+		return ""
+	}
+	port := portParts[1]
+
+	// Find port in profile to get its group
+	portSpec, ok := profile.Spec.Ports[port]
+	if !ok {
+		return ""
+	}
+
+	// Get speed from switch's port group speeds
+	speed, ok := sw.Spec.PortGroupSpeeds[portSpec.Group]
+	if !ok {
+		return ""
+	}
+
+	return speed
+}
+
+// getSpeedFromAgent gets interface speed from agent for a specific port
+func getSpeedFromAgent(portName string, agents *agentapi.AgentList) string {
+	if agents == nil {
+		return ""
+	}
+
+	parts := wiringapi.SplitPortName(portName)
+	if len(parts) < 2 {
+		return ""
+	}
+
+	switchName, port := parts[0], parts[1]
+
+	for i := range agents.Items {
+		agent := &agents.Items[i]
+		if agent.Name != switchName || agent.Status.State.Interfaces == nil {
+			continue
+		}
+
+		// Try exact match first
+		if iface, ok := agent.Status.State.Interfaces[port]; ok && iface.Speed != "" {
+			return iface.Speed
+		}
+		// Try with /1 suffix for breakout ports
+		if iface, ok := agent.Status.State.Interfaces[port+"/1"]; ok && iface.Speed != "" {
+			return iface.Speed
+		}
+	}
+
+	return ""
+}
+
+// getSpeedFromSwitch gets configured speed from switch profile
+func getSpeedFromSwitch(portName string, switchMap map[string]*wiringapi.Switch, profileMap map[string]*wiringapi.SwitchProfile) string {
+	parts := wiringapi.SplitPortName(portName)
+	if len(parts) < 2 {
+		return ""
+	}
+
+	switchName := parts[0]
+	sw, ok := switchMap[switchName]
+	if !ok {
+		return ""
+	}
+
+	profile, ok := profileMap[sw.Spec.Profile]
+	if !ok {
+		return ""
+	}
+
+	return getPortSpeed(portName, sw, profile)
+}
+
+// getLinkSpeed calculates link speed from either end (source or target)
+// Tries Agent data first, then falls back to Switch config
+func getLinkSpeed(sourcePort, targetPort string, agents *agentapi.AgentList, switchMap map[string]*wiringapi.Switch, profileMap map[string]*wiringapi.SwitchProfile) string {
+	// Try source port: agent then switch config
+	if speed := getSpeedFromAgent(sourcePort, agents); speed != "" {
+		return speed
+	}
+	if speed := getSpeedFromSwitch(sourcePort, switchMap, profileMap); speed != "" {
+		return speed
+	}
+
+	// Try target port: agent then switch config
+	if speed := getSpeedFromAgent(targetPort, agents); speed != "" {
+		return speed
+	}
+
+	return getSpeedFromSwitch(targetPort, switchMap, profileMap)
+}
+
+// getPortStatus returns the status of a port from the port status map
+func getPortStatus(portName string, portStatusMap map[string]map[string]string) string {
+	portParts := wiringapi.SplitPortName(portName)
+	if len(portParts) < 2 {
+		return ""
+	}
+
+	switchName := portParts[0]
+	port := portParts[1]
+
+	if switchPorts, ok := portStatusMap[switchName]; ok {
+		// Try exact match first
+		if status, ok := switchPorts[port]; ok {
+			return status
+		}
+		// Try with /1 suffix for breakout ports (e.g., E1/5 -> E1/5/1)
+		if status, ok := switchPorts[port+"/1"]; ok {
+			return status
+		}
+	}
+
+	return ""
+}
+
+// getPortNOSName returns the NOS (Ethernet) name for a port
+func getPortNOSName(portName string, switchMap map[string]*wiringapi.Switch, profileMap map[string]*wiringapi.SwitchProfile) string {
+	portParts := wiringapi.SplitPortName(portName)
+	if len(portParts) < 2 {
+		return ""
+	}
+
+	switchName := portParts[0]
+	port := portParts[1]
+
+	sw, ok := switchMap[switchName]
+	if !ok {
+		return ""
+	}
+
+	profile, ok := profileMap[sw.Spec.Profile]
+	if !ok {
+		return ""
+	}
+
+	// For breakout ports (e.g., E1/5/1), try the base port first (E1/5)
+	basePort := port
+	if parts := strings.Split(port, "/"); len(parts) > 2 {
+		basePort = strings.Join(parts[:2], "/") // E1/5/1 -> E1/5
+	}
+
+	portSpec, ok := profile.Spec.Ports[basePort]
+	if !ok {
+		// If base port not found, try exact match
+		portSpec, ok = profile.Spec.Ports[port]
+		if !ok {
+			return ""
+		}
+	}
+
+	// Use BaseNOSName if available (for breakout ports), otherwise use NOSName
+	if portSpec.BaseNOSName != "" {
+		return portSpec.BaseNOSName
+	}
+
+	return portSpec.NOSName
 }
