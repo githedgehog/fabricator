@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 
+	agentapi "go.githedgehog.com/fabric/api/agent/v1beta1"
 	dhcpapi "go.githedgehog.com/fabric/api/dhcp/v1beta1"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
@@ -40,6 +41,7 @@ func Diagram(ctx context.Context, workDir, cacheDir string, live bool, format di
 			fabapi.SchemeBuilder,
 			vpcapi.SchemeBuilder,
 			dhcpapi.SchemeBuilder,
+			agentapi.SchemeBuilder,
 		)
 		if err != nil {
 			return fmt.Errorf("creating kube client: %w", err)
