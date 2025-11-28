@@ -3055,6 +3055,497 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringNATTest(ctx context.Context) (bo
 	return false, reverts, nil
 }
 
+// Test stateless source NAT only (one-sided NAT)
+func (testCtx *VPCPeeringTestCtx) gatewayPeeringStatelessSourceNATTest(ctx context.Context) (bool, []RevertFunc, error) {
+	vpcs := &vpcapi.VPCList{}
+	if err := testCtx.kube.List(ctx, vpcs); err != nil {
+		return false, nil, fmt.Errorf("listing VPCs: %w", err)
+	}
+	if len(vpcs.Items) < 2 {
+		return true, nil, fmt.Errorf("not enough VPCs for stateless source NAT gateway peering test") //nolint:goerr113
+	}
+
+	// Sort VPCs to ensure consistent selection
+	sort.Slice(vpcs.Items, func(i, j int) bool {
+		return vpcs.Items[i].Name < vpcs.Items[j].Name
+	})
+
+	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec, 0)
+	externalPeerings := make(map[string]*vpcapi.ExternalPeeringSpec, 0)
+	gwPeerings := make(map[string]*gwapi.PeeringSpec, 1)
+
+	vpc1 := &vpcs.Items[0]
+	vpc2 := &vpcs.Items[1]
+
+	// Remove any existing VPC peering that might conflict
+	existingVPCPeering := &vpcapi.VPCPeering{}
+	vpcPeeringName := fmt.Sprintf("%s--%s", vpc1.Name, vpc2.Name)
+	if vpc1.Name > vpc2.Name {
+		vpcPeeringName = fmt.Sprintf("%s--%s", vpc2.Name, vpc1.Name)
+	}
+
+	removedVPCPeering := false
+	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: vpcPeeringName}, existingVPCPeering); err == nil {
+		if err := testCtx.kube.Delete(ctx, existingVPCPeering); err != nil {
+			return false, nil, fmt.Errorf("deleting conflicting VPC peering %s: %w", vpcPeeringName, err)
+		}
+		removedVPCPeering = true
+		slog.Info("Removed conflicting VPC peering", "peering", vpcPeeringName)
+		time.Sleep(5 * time.Second) // Wait for deletion to take effect
+	}
+
+	// Stateless source NAT: only vpc1 has NAT configured
+	vpc1NATCIDR := []string{"192.168.11.0/24"}
+	vpc2NATCIDR := []string{} // No NAT on vpc-02 side
+
+	// Configure stateless NAT explicitly
+	statelessNATConfig := &gwapi.PeeringNAT{
+		Stateless: &gwapi.PeeringStatelessNAT{},
+	}
+
+	appendGwPeeringSpec(gwPeerings, vpc1, vpc2, nil, nil, vpc1NATCIDR, vpc2NATCIDR, statelessNATConfig)
+
+	reverts := []RevertFunc{}
+	if removedVPCPeering {
+		reverts = append(reverts, func(ctx context.Context) error {
+			// Restore the VPC peering we removed
+			newVPCPeering := &vpcapi.VPCPeering{
+				ObjectMeta: kmetav1.ObjectMeta{
+					Name:      existingVPCPeering.Name,
+					Namespace: existingVPCPeering.Namespace,
+				},
+				Spec: existingVPCPeering.Spec,
+			}
+
+			return testCtx.kube.Create(ctx, newVPCPeering)
+		})
+	}
+
+	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, gwPeerings, true); err != nil {
+		return false, reverts, fmt.Errorf("setting up stateless source NAT gateway peerings: %w", err)
+	}
+
+	// Wait for NAT gateway peering to take effect
+	time.Sleep(15 * time.Second)
+
+	// Test stateless source NAT connectivity from vpc1 to vpc2
+	// vpc1 will present to vpc2 as 192.168.11.x (source NAT)
+	// vpc2 has no NAT, so remains as 10.0.2.x
+	if err := testCtx.testNATGatewayConnectivity(ctx, vpc1, vpc2, vpc1NATCIDR, vpc2NATCIDR); err != nil {
+		if testCtx.pauseOnFail {
+			if err := pauseOnFailure(ctx); err != nil {
+				slog.Error("Failed to pause on failure", "error", err)
+			}
+		}
+
+		return false, reverts, fmt.Errorf("testing stateless source NAT gateway peering connectivity: %w", err)
+	}
+
+	return false, reverts, nil
+}
+
+// Test stateless destination NAT only (reverse one-sided NAT)
+func (testCtx *VPCPeeringTestCtx) gatewayPeeringStatelessDestinationNATTest(ctx context.Context) (bool, []RevertFunc, error) {
+	vpcs := &vpcapi.VPCList{}
+	if err := testCtx.kube.List(ctx, vpcs); err != nil {
+		return false, nil, fmt.Errorf("listing VPCs: %w", err)
+	}
+	if len(vpcs.Items) < 2 {
+		return true, nil, fmt.Errorf("not enough VPCs for stateless destination NAT gateway peering test") //nolint:goerr113
+	}
+
+	// Sort VPCs to ensure consistent selection
+	sort.Slice(vpcs.Items, func(i, j int) bool {
+		return vpcs.Items[i].Name < vpcs.Items[j].Name
+	})
+
+	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec, 0)
+	externalPeerings := make(map[string]*vpcapi.ExternalPeeringSpec, 0)
+	gwPeerings := make(map[string]*gwapi.PeeringSpec, 1)
+
+	vpc1 := &vpcs.Items[0]
+	vpc2 := &vpcs.Items[1]
+
+	// Remove any existing VPC peering that might conflict
+	existingVPCPeering := &vpcapi.VPCPeering{}
+	vpcPeeringName := fmt.Sprintf("%s--%s", vpc1.Name, vpc2.Name)
+	if vpc1.Name > vpc2.Name {
+		vpcPeeringName = fmt.Sprintf("%s--%s", vpc2.Name, vpc1.Name)
+	}
+
+	removedVPCPeering := false
+	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: vpcPeeringName}, existingVPCPeering); err == nil {
+		if err := testCtx.kube.Delete(ctx, existingVPCPeering); err != nil {
+			return false, nil, fmt.Errorf("deleting conflicting VPC peering %s: %w", vpcPeeringName, err)
+		}
+		removedVPCPeering = true
+		slog.Info("Removed conflicting VPC peering", "peering", vpcPeeringName)
+		time.Sleep(5 * time.Second) // Wait for deletion to take effect
+	}
+
+	// Stateless destination NAT: only vpc2 has NAT configured
+	vpc1NATCIDR := []string{} // No NAT on vpc-01 side
+	vpc2NATCIDR := []string{"192.168.12.0/24"}
+
+	// Configure stateless NAT explicitly
+	statelessNATConfig := &gwapi.PeeringNAT{
+		Stateless: &gwapi.PeeringStatelessNAT{},
+	}
+
+	appendGwPeeringSpec(gwPeerings, vpc1, vpc2, nil, nil, vpc1NATCIDR, vpc2NATCIDR, statelessNATConfig)
+
+	reverts := []RevertFunc{}
+	if removedVPCPeering {
+		reverts = append(reverts, func(ctx context.Context) error {
+			// Restore the VPC peering we removed
+			newVPCPeering := &vpcapi.VPCPeering{
+				ObjectMeta: kmetav1.ObjectMeta{
+					Name:      existingVPCPeering.Name,
+					Namespace: existingVPCPeering.Namespace,
+				},
+				Spec: existingVPCPeering.Spec,
+			}
+
+			return testCtx.kube.Create(ctx, newVPCPeering)
+		})
+	}
+
+	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, gwPeerings, true); err != nil {
+		return false, reverts, fmt.Errorf("setting up stateless destination NAT gateway peerings: %w", err)
+	}
+
+	// Wait for NAT gateway peering to take effect
+	time.Sleep(15 * time.Second)
+
+	// Test stateless destination NAT connectivity from vpc1 to vpc2
+	// vpc1 has no NAT, remains as 10.0.1.x
+	// vpc2 presented to vpc1 as 192.168.12.x (destination NAT)
+	if err := testCtx.testNATGatewayConnectivity(ctx, vpc1, vpc2, vpc1NATCIDR, vpc2NATCIDR); err != nil {
+		if testCtx.pauseOnFail {
+			if err := pauseOnFailure(ctx); err != nil {
+				slog.Error("Failed to pause on failure", "error", err)
+			}
+		}
+
+		return false, reverts, fmt.Errorf("testing stateless destination NAT gateway peering connectivity: %w", err)
+	}
+
+	return false, reverts, nil
+}
+
+// Test stateless NAT with IP exclusion (using Not field)
+// Exposes 10.0.1.0/24 but excludes 10.0.1.128/25 (upper half of the subnet)
+func (testCtx *VPCPeeringTestCtx) gatewayPeeringStatelessNATWithIPExclusionTest(ctx context.Context) (bool, []RevertFunc, error) {
+	vpcs := &vpcapi.VPCList{}
+	if err := testCtx.kube.List(ctx, vpcs); err != nil {
+		return false, nil, fmt.Errorf("listing VPCs: %w", err)
+	}
+	if len(vpcs.Items) < 2 {
+		return true, nil, fmt.Errorf("not enough VPCs for NAT with IP exclusion test") //nolint:goerr113
+	}
+
+	// Sort VPCs to ensure consistent selection
+	sort.Slice(vpcs.Items, func(i, j int) bool {
+		return vpcs.Items[i].Name < vpcs.Items[j].Name
+	})
+
+	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec, 0)
+	externalPeerings := make(map[string]*vpcapi.ExternalPeeringSpec, 0)
+	gwPeerings := make(map[string]*gwapi.PeeringSpec, 1)
+
+	vpc1 := &vpcs.Items[0]
+	vpc2 := &vpcs.Items[1]
+
+	// Remove any existing VPC peering that might conflict
+	existingVPCPeering := &vpcapi.VPCPeering{}
+	vpcPeeringName := fmt.Sprintf("%s--%s", vpc1.Name, vpc2.Name)
+	if vpc1.Name > vpc2.Name {
+		vpcPeeringName = fmt.Sprintf("%s--%s", vpc2.Name, vpc1.Name)
+	}
+
+	removedVPCPeering := false
+	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: vpcPeeringName}, existingVPCPeering); err == nil {
+		if err := testCtx.kube.Delete(ctx, existingVPCPeering); err != nil {
+			return false, nil, fmt.Errorf("deleting conflicting VPC peering %s: %w", vpcPeeringName, err)
+		}
+		removedVPCPeering = true
+		slog.Info("Removed conflicting VPC peering", "peering", vpcPeeringName)
+		time.Sleep(5 * time.Second) // Wait for deletion to take effect
+	}
+
+	// Manually build peering spec with IP exclusion using Not field
+	// Get actual VPC subnet CIDRs
+	vpc1SubnetCIDR := ""
+	for _, subnet := range vpc1.Spec.Subnets {
+		vpc1SubnetCIDR = subnet.Subnet
+
+		break
+	}
+	vpc2SubnetCIDR := ""
+	for _, subnet := range vpc2.Spec.Subnets {
+		vpc2SubnetCIDR = subnet.Subnet
+
+		break
+	}
+
+	if vpc1SubnetCIDR == "" || vpc2SubnetCIDR == "" {
+		return false, nil, fmt.Errorf("VPCs must have at least one subnet") //nolint:goerr113
+	}
+
+	// Parse vpc1 subnet to create exclusion range
+	vpc1Prefix, err := netip.ParsePrefix(vpc1SubnetCIDR)
+	if err != nil {
+		return false, nil, fmt.Errorf("parsing vpc1 subnet: %w", err)
+	}
+
+	// Create exclusion: exclude upper half of vpc1 subnet
+	// e.g., 10.10.1.0/24 -> exclude 10.10.1.128/25 (upper half, 128 IPs)
+	vpc1Bits := vpc1Prefix.Bits()
+	// Calculate the start of upper half
+	vpc1Base := vpc1Prefix.Addr().As4()
+	vpc1UpperHalf := netip.AddrFrom4([4]byte{vpc1Base[0], vpc1Base[1], vpc1Base[2], vpc1Base[3] + 128})
+	vpc1Exclusion := netip.PrefixFrom(vpc1UpperHalf, vpc1Bits+1).String()
+
+	entryName := fmt.Sprintf("%s--%s", vpc1.Name, vpc2.Name)
+
+	statelessNATConfig := &gwapi.PeeringNAT{
+		Stateless: &gwapi.PeeringStatelessNAT{},
+	}
+
+	// After exclusion, vpc1 exposes 128 IPs, so NAT pool must be 128 IPs too (192.168.11.0/25)
+	gwPeerings[entryName] = &gwapi.PeeringSpec{
+		Peering: map[string]*gwapi.PeeringEntry{
+			vpc1.Name: {
+				Expose: []gwapi.PeeringEntryExpose{
+					{
+						IPs: []gwapi.PeeringEntryIP{
+							{
+								CIDR: vpc1SubnetCIDR, // Use actual VPC subnet
+							},
+							{
+								Not: vpc1Exclusion, // Exclude upper half (128 IPs)
+							},
+						},
+						As: []gwapi.PeeringEntryAs{
+							{
+								CIDR: "192.168.11.0/25", // 128 IPs to match excluded IPs
+							},
+						},
+						NAT: statelessNATConfig,
+					},
+				},
+			},
+			vpc2.Name: {
+				Expose: []gwapi.PeeringEntryExpose{
+					{
+						IPs: []gwapi.PeeringEntryIP{
+							{
+								CIDR: vpc2SubnetCIDR, // Use actual VPC subnet
+							},
+						},
+						As: []gwapi.PeeringEntryAs{
+							{
+								CIDR: "192.168.12.0/24",
+							},
+						},
+						NAT: statelessNATConfig,
+					},
+				},
+			},
+		},
+	}
+
+	reverts := []RevertFunc{}
+	if removedVPCPeering {
+		reverts = append(reverts, func(ctx context.Context) error {
+			newVPCPeering := &vpcapi.VPCPeering{
+				ObjectMeta: kmetav1.ObjectMeta{
+					Name:      existingVPCPeering.Name,
+					Namespace: existingVPCPeering.Namespace,
+				},
+				Spec: existingVPCPeering.Spec,
+			}
+
+			return testCtx.kube.Create(ctx, newVPCPeering)
+		})
+	}
+
+	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, gwPeerings, true); err != nil {
+		return false, reverts, fmt.Errorf("setting up NAT with IP exclusion: %w", err)
+	}
+
+	// Wait for NAT gateway peering to take effect
+	time.Sleep(15 * time.Second)
+
+	// Test connectivity - only non-excluded IPs should be reachable
+	// Note: Full validation of exclusions requires TestConnectivity framework
+	if err := testCtx.testNATGatewayConnectivity(ctx, vpc1, vpc2, []string{"192.168.11.0/25"}, []string{"192.168.12.0/24"}); err != nil {
+		if testCtx.pauseOnFail {
+			if err := pauseOnFailure(ctx); err != nil {
+				slog.Error("Failed to pause on failure", "error", err)
+			}
+		}
+
+		return false, reverts, fmt.Errorf("testing NAT with IP exclusion connectivity: %w", err)
+	}
+
+	return false, reverts, nil
+}
+
+// Test gateway peering with stateless NAT and NAT pool (As) exclusion using the Not field
+func (testCtx *VPCPeeringTestCtx) gatewayPeeringStatelessNATWithNATPoolExclusionTest(ctx context.Context) (bool, []RevertFunc, error) {
+	vpcs := &vpcapi.VPCList{}
+	if err := testCtx.kube.List(ctx, vpcs); err != nil {
+		return false, nil, fmt.Errorf("listing VPCs: %w", err)
+	}
+	if len(vpcs.Items) < 2 {
+		return true, nil, fmt.Errorf("not enough VPCs for NAT with NAT pool exclusion test") //nolint:goerr113
+	}
+
+	// Sort VPCs to ensure consistent selection
+	sort.Slice(vpcs.Items, func(i, j int) bool {
+		return vpcs.Items[i].Name < vpcs.Items[j].Name
+	})
+
+	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec, 0)
+	externalPeerings := make(map[string]*vpcapi.ExternalPeeringSpec, 0)
+	gwPeerings := make(map[string]*gwapi.PeeringSpec, 1)
+
+	vpc1 := &vpcs.Items[0]
+	vpc2 := &vpcs.Items[1]
+
+	// Remove any existing VPC peering that might conflict
+	existingVPCPeering := &vpcapi.VPCPeering{}
+	vpcPeeringName := fmt.Sprintf("%s--%s", vpc1.Name, vpc2.Name)
+	if vpc1.Name > vpc2.Name {
+		vpcPeeringName = fmt.Sprintf("%s--%s", vpc2.Name, vpc1.Name)
+	}
+
+	removedVPCPeering := false
+	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: vpcPeeringName}, existingVPCPeering); err == nil {
+		if err := testCtx.kube.Delete(ctx, existingVPCPeering); err != nil {
+			return false, nil, fmt.Errorf("deleting conflicting VPC peering %s: %w", vpcPeeringName, err)
+		}
+		removedVPCPeering = true
+		slog.Info("Removed conflicting VPC peering", "peering", vpcPeeringName)
+		time.Sleep(5 * time.Second) // Wait for deletion to take effect
+	}
+
+	// Manually build peering spec with NAT pool exclusion using Not field
+	// Get actual VPC subnet CIDRs
+	vpc1SubnetCIDR := ""
+	for _, subnet := range vpc1.Spec.Subnets {
+		vpc1SubnetCIDR = subnet.Subnet
+
+		break
+	}
+	vpc2SubnetCIDR := ""
+	for _, subnet := range vpc2.Spec.Subnets {
+		vpc2SubnetCIDR = subnet.Subnet
+
+		break
+	}
+
+	if vpc1SubnetCIDR == "" || vpc2SubnetCIDR == "" {
+		return false, nil, fmt.Errorf("VPCs must have at least one subnet") //nolint:goerr113
+	}
+
+	// Parse vpc1 subnet to expose only lower half (128 IPs)
+	// e.g., 10.10.1.0/24 -> expose 10.10.1.0/25 (lower half, 128 IPs)
+	vpc1Prefix, err := netip.ParsePrefix(vpc1SubnetCIDR)
+	if err != nil {
+		return false, nil, fmt.Errorf("parsing vpc1 subnet: %w", err)
+	}
+
+	vpc1Bits := vpc1Prefix.Bits()
+	vpc1LowerHalf := netip.PrefixFrom(vpc1Prefix.Addr(), vpc1Bits+1).String() // /25 for lower half
+
+	entryName := fmt.Sprintf("%s--%s", vpc1.Name, vpc2.Name)
+
+	statelessNATConfig := &gwapi.PeeringNAT{
+		Stateless: &gwapi.PeeringStatelessNAT{},
+	}
+
+	// Expose lower half of vpc1 subnet (128 IPs), NAT to 192.168.11.0/24 minus upper half (128 IPs remaining)
+	gwPeerings[entryName] = &gwapi.PeeringSpec{
+		Peering: map[string]*gwapi.PeeringEntry{
+			vpc1.Name: {
+				Expose: []gwapi.PeeringEntryExpose{
+					{
+						IPs: []gwapi.PeeringEntryIP{
+							{
+								CIDR: vpc1LowerHalf, // Lower half (128 IPs) to match NAT pool after exclusion
+							},
+						},
+						As: []gwapi.PeeringEntryAs{
+							{
+								CIDR: "192.168.11.0/24",
+							},
+							{
+								Not: "192.168.11.128/25", // Exclude upper half of NAT pool (128 IPs)
+							},
+						},
+						NAT: statelessNATConfig,
+					},
+				},
+			},
+			vpc2.Name: {
+				Expose: []gwapi.PeeringEntryExpose{
+					{
+						IPs: []gwapi.PeeringEntryIP{
+							{
+								CIDR: vpc2SubnetCIDR, // Use actual VPC subnet
+							},
+						},
+						As: []gwapi.PeeringEntryAs{
+							{
+								CIDR: "192.168.12.0/24",
+							},
+						},
+						NAT: statelessNATConfig,
+					},
+				},
+			},
+		},
+	}
+
+	reverts := []RevertFunc{}
+	if removedVPCPeering {
+		reverts = append(reverts, func(ctx context.Context) error {
+			newVPCPeering := &vpcapi.VPCPeering{
+				ObjectMeta: kmetav1.ObjectMeta{
+					Name:      existingVPCPeering.Name,
+					Namespace: existingVPCPeering.Namespace,
+				},
+				Spec: existingVPCPeering.Spec,
+			}
+
+			return testCtx.kube.Create(ctx, newVPCPeering)
+		})
+	}
+
+	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, gwPeerings, true); err != nil {
+		return false, reverts, fmt.Errorf("setting up NAT with NAT pool exclusion: %w", err)
+	}
+
+	// Wait for NAT gateway peering to take effect
+	time.Sleep(15 * time.Second)
+
+	// Test connectivity - only non-excluded NAT pool IPs should be used
+	// Note: Full validation of NAT pool exclusions requires TestConnectivity framework
+	if err := testCtx.testNATGatewayConnectivity(ctx, vpc1, vpc2, []string{"192.168.11.0/24"}, []string{"192.168.12.0/24"}); err != nil {
+		if testCtx.pauseOnFail {
+			if err := pauseOnFailure(ctx); err != nil {
+				slog.Error("Failed to pause on failure", "error", err)
+			}
+		}
+
+		return false, reverts, fmt.Errorf("testing NAT with NAT pool exclusion connectivity: %w", err)
+	}
+
+	return false, reverts, nil
+}
+
 // Test basic gateway peering with stateful source NAT
 // Note: Stateful NAT has a limitation where it can only be configured on one side of the peering.
 // This test configures NAT on vpc-01 side only, allowing vpc-01 to reach vpc-02 with source NAT.
@@ -5164,6 +5655,24 @@ func makeVpcPeeringsBasicSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 			},
 		},
 		{
+			Name:          "Gateway Peering with Stateless Source NAT",
+			F:             testCtx.gatewayPeeringStatelessSourceNATTest,
+			ExpectFailure: true,
+			SkipFlags: SkipFlags{
+				NoGateway: true,
+				NoServers: true,
+			},
+		},
+		{
+			Name:          "Gateway Peering with Stateless Destination NAT",
+			F:             testCtx.gatewayPeeringStatelessDestinationNATTest,
+			ExpectFailure: true,
+			SkipFlags: SkipFlags{
+				NoGateway: true,
+				NoServers: true,
+			},
+		},
+		{
 			Name:          "Gateway Peering with Stateful NAT",
 			F:             testCtx.gatewayPeeringStatefulNATTest,
 			ExpectFailure: true,
@@ -5175,6 +5684,24 @@ func makeVpcPeeringsBasicSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 		{
 			Name:          "Gateway Peering Overlapping Subnets with NAT",
 			F:             testCtx.gatewayPeeringOverlapNATTest,
+			ExpectFailure: true,
+			SkipFlags: SkipFlags{
+				NoGateway: true,
+				NoServers: true,
+			},
+		},
+		{
+			Name:          "Gateway Peering with Stateless NAT and IP Exclusion",
+			F:             testCtx.gatewayPeeringStatelessNATWithIPExclusionTest,
+			ExpectFailure: true,
+			SkipFlags: SkipFlags{
+				NoGateway: true,
+				NoServers: true,
+			},
+		},
+		{
+			Name:          "Gateway Peering with Stateless NAT and NAT Pool Exclusion",
+			F:             testCtx.gatewayPeeringStatelessNATWithNATPoolExclusionTest,
 			ExpectFailure: true,
 			SkipFlags: SkipFlags{
 				NoGateway: true,
