@@ -34,6 +34,25 @@ systemd:
         [Install]
         WantedBy=multi-user.target
 
+    - name: force-nic-rename.service
+      enabled: true
+      contents: |
+        [Unit]
+        Description=Force network interface renaming via udev
+        DefaultDependencies=no
+        After=systemd-udev-trigger.service
+        Before=network-pre.target systemd-networkd.service
+        Wants=network-pre.target
+
+        [Service]
+        Type=oneshot
+        ExecStart=/usr/bin/udevadm trigger --action=add --subsystem-match=net
+        ExecStart=/usr/bin/udevadm settle
+        RemainAfterExit=yes
+
+        [Install]
+        WantedBy=sysinit.target
+
 storage:
   files:
     - path: /etc/flatcar/update.conf
@@ -100,20 +119,22 @@ storage:
       contents:
         inline: |
           [Match]
-          OriginalName=enp2s1np*
+          Path=pci-0000:02:01.0
 
           [Link]
           Name=enp2s1
+          MACAddressPolicy=persistent
 
     - path: /etc/systemd/network/10-rename-enp2s2.link
       mode: 0644
       contents:
         inline: |
           [Match]
-          OriginalName=enp2s2np*
+          Path=pci-0000:02:02.0
 
           [Link]
           Name=enp2s2
+          MACAddressPolicy=persistent
 
     - path: /etc/sysctl.d/arp.conf
       mode: 0644
