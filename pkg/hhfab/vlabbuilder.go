@@ -45,6 +45,7 @@ type VLABBuilder struct {
 	ESLAGServers       uint8  // number of ESLAG servers to generate for ESLAG switches
 	UnbundledServers   uint8  // number of unbundled servers to generate for switches (only for one of the first switch in the redundancy group or orphan switch)
 	BundledServers     uint8  // number of bundled servers to generate for switches (only for one of the second switch in the redundancy group or orphan switch)
+	MultiHomedServers  uint8  // number of multi-homed servers (2 connections to 2 different orphan leaves)
 	NoSwitches         bool   // do not generate any switches
 	GatewayUplinks     uint8  // number of uplinks for gateway node to the spines
 	GatewayDriver      string // gateway driver to use for gateway node
@@ -205,6 +206,10 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 		return fmt.Errorf("MCLAG peer links count must be greater than 0") //nolint:goerr113
 	}
 
+	if b.MultiHomedServers > 0 && b.OrphanLeafsCount < 2 {
+		return fmt.Errorf("at least two orphan leaves are needed for multihomed servers") //nolint:goerr113
+	}
+
 	if b.ExtESLAGConnCount > totalESLAGLeafs {
 		return fmt.Errorf("external ESLAG connections count must be less than or equal to total ESLAG leaves") //nolint:goerr113
 	}
@@ -244,7 +249,7 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 	}
 	slog.Info(">>>", "mclagLeafsCount", b.MCLAGLeafsCount, "mclagSessionLinks", b.MCLAGSessionLinks, "mclagPeerLinks", b.MCLAGPeerLinks)
 	slog.Info(">>>", "orphanLeafsCount", b.OrphanLeafsCount)
-	slog.Info(">>>", "mclagServers", b.MCLAGServers, "eslagServers", b.ESLAGServers, "unbundledServers", b.UnbundledServers, "bundledServers", b.BundledServers)
+	slog.Info(">>>", "mclagServers", b.MCLAGServers, "eslagServers", b.ESLAGServers, "unbundledServers", b.UnbundledServers, "bundledServers", b.BundledServers, "multihomedServers", b.MultiHomedServers)
 	slog.Info(">>>", "externalCount", b.ExtCount, "externalMclagConnCount", b.ExtMCLAGConnCount, "externalEslagConnCount", b.ExtESLAGConnCount, "externalOrphanConnCount", b.ExtOrphanConnCount)
 
 	if err := b.data.Add(ctx, &wiringapi.VLANNamespace{
@@ -605,6 +610,7 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 		}
 	}
 
+	orphanLeaves := []string{}
 	for idx := uint8(1); idx <= b.OrphanLeafsCount; idx++ {
 		leafName := fmt.Sprintf("leaf-%02d", leafID)
 
@@ -614,6 +620,7 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 		}); err != nil {
 			return err
 		}
+		orphanLeaves = append(orphanLeaves, leafName)
 
 		if extOrphanConns < b.ExtOrphanConnCount {
 			var err error
@@ -678,6 +685,44 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 
 			serverID++
 		}
+	}
+
+	orphanIdx := 0
+	for range int(b.MultiHomedServers) {
+		serverName := fmt.Sprintf("server-%02d", serverID)
+		orphan1 := orphanLeaves[orphanIdx]
+		orphanIdx = (orphanIdx + 1) % len(orphanLeaves)
+		orphan2 := orphanLeaves[orphanIdx]
+		orphanIdx = (orphanIdx + 1) % len(orphanLeaves)
+
+		if _, err := b.createServer(ctx, serverName, wiringapi.ServerSpec{
+			Description: fmt.Sprintf("S-%02d MultiHomed %s + %s", serverID, orphan1, orphan2),
+		}); err != nil {
+			return err
+		}
+
+		if _, err := b.createConnection(ctx, wiringapi.ConnectionSpec{
+			Unbundled: &wiringapi.ConnUnbundled{
+				Link: wiringapi.ServerToSwitchLink{
+					Server: wiringapi.BasePortName{Port: b.nextServerPort(serverName)},
+					Switch: wiringapi.BasePortName{Port: b.nextSwitchPort(orphan1)},
+				},
+			},
+		}); err != nil {
+			return err
+		}
+		if _, err := b.createConnection(ctx, wiringapi.ConnectionSpec{
+			Unbundled: &wiringapi.ConnUnbundled{
+				Link: wiringapi.ServerToSwitchLink{
+					Server: wiringapi.BasePortName{Port: b.nextServerPort(serverName)},
+					Switch: wiringapi.BasePortName{Port: b.nextSwitchPort(orphan2)},
+				},
+			},
+		}); err != nil {
+			return err
+		}
+
+		serverID++
 	}
 
 	for spineID := uint8(1); spineID <= b.SpinesCount; spineID++ {

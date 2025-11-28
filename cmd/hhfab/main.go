@@ -178,7 +178,7 @@ func Run(ctx context.Context) error {
 
 	var wgSpinesCount, wgFabricLinksCount, wgMeshLinksCount, wgMCLAGLeafsCount, wgOrphanLeafsCount, wgMCLAGSessionLinks, wgMCLAGPeerLinks uint
 	var wgESLAGLeafGroups string
-	var wgMCLAGServers, wgESLAGServers, wgUnbundledServers, wgBundledServers uint
+	var wgMCLAGServers, wgESLAGServers, wgUnbundledServers, wgBundledServers, wgMultiHomedServers uint
 	var wgNoSwitches bool
 	var wgGatewayUplinks uint
 	var wgGatewayDriver string
@@ -248,6 +248,11 @@ func Run(ctx context.Context) error {
 			Usage:       "number of bundled servers to generate for switches (only for one of the second switch in the redundancy group or orphan switch)",
 			Destination: &wgBundledServers,
 			Value:       1,
+		},
+		&cli.UintFlag{
+			Name:        "multihomed-servers",
+			Usage:       "number of multihomed servers (2 connections to 2 different orphan leaves)",
+			Destination: &wgMultiHomedServers,
 		},
 		&cli.BoolFlag{
 			Name:        "no-switches",
@@ -793,6 +798,7 @@ func Run(ctx context.Context) error {
 								ESLAGServers:       uint8(wgESLAGServers),      //nolint:gosec
 								UnbundledServers:   uint8(wgUnbundledServers),  //nolint:gosec
 								BundledServers:     uint8(wgBundledServers),    //nolint:gosec
+								MultiHomedServers:  uint8(wgMultiHomedServers), //nolint:gosec
 								NoSwitches:         wgNoSwitches,
 								GatewayUplinks:     uint8(wgGatewayUplinks), //nolint:gosec
 								GatewayDriver:      wgGatewayDriver,
