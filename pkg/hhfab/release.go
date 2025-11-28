@@ -3007,7 +3007,9 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringNATTest(ctx context.Context) (bo
 	}
 
 	// Wait for NAT gateway peering to take effect
-	time.Sleep(15 * time.Second)
+	if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
+		return false, nil, fmt.Errorf("waiting for gateways to be ready after NAT peering setup: %w", err)
+	}
 
 	// Test NAT connectivity with custom function that pings correct NAT IPs
 	if err := testCtx.testNATGatewayConnectivity(ctx, vpc1, vpc2, vpc1NATCIDR, vpc2NATCIDR); err != nil {
@@ -3049,15 +3051,10 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringStatelessSourceNATTest(ctx conte
 	vpc1NATCIDR := []string{"192.168.11.0/24"}
 	vpc2NATCIDR := []string{} // No NAT on vpc-02 side
 
-	// Configure stateless NAT explicitly
-	statelessNATConfig := &gwapi.PeeringNAT{
-		Stateless: &gwapi.PeeringStatelessNAT{},
-	}
-
 	appendGwPeeringSpec(gwPeerings, vpc1, vpc2, GwPeeringOptions{
 		VPC1NATCIDR: vpc1NATCIDR,
 		VPC2NATCIDR: vpc2NATCIDR,
-		NATConfig:   statelessNATConfig,
+		StatefulNAT: false, // Stateless NAT
 	})
 
 	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, gwPeerings, true); err != nil {
@@ -3065,11 +3062,13 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringStatelessSourceNATTest(ctx conte
 	}
 
 	// Wait for NAT gateway peering to take effect
-	time.Sleep(15 * time.Second)
+	if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
+		return false, nil, fmt.Errorf("waiting for gateways to be ready after NAT peering setup: %w", err)
+	}
 
 	// Test stateless source NAT connectivity from vpc1 to vpc2
 	// vpc1 will present to vpc2 as 192.168.11.x (source NAT)
-	// vpc2 has no NAT, so remains as 10.0.2.x
+	// vpc2 has no NAT, so retains its original subnet IPs
 	if err := testCtx.testNATGatewayConnectivity(ctx, vpc1, vpc2, vpc1NATCIDR, vpc2NATCIDR); err != nil {
 		if testCtx.pauseOnFail {
 			if err := pauseOnFailure(ctx); err != nil {
@@ -3109,15 +3108,10 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringStatelessDestinationNATTest(ctx 
 	vpc1NATCIDR := []string{} // No NAT on vpc-01 side
 	vpc2NATCIDR := []string{"192.168.12.0/24"}
 
-	// Configure stateless NAT explicitly
-	statelessNATConfig := &gwapi.PeeringNAT{
-		Stateless: &gwapi.PeeringStatelessNAT{},
-	}
-
 	appendGwPeeringSpec(gwPeerings, vpc1, vpc2, GwPeeringOptions{
 		VPC1NATCIDR: vpc1NATCIDR,
 		VPC2NATCIDR: vpc2NATCIDR,
-		NATConfig:   statelessNATConfig,
+		StatefulNAT: false, // Stateless NAT
 	})
 
 	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, gwPeerings, true); err != nil {
@@ -3125,10 +3119,12 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringStatelessDestinationNATTest(ctx 
 	}
 
 	// Wait for NAT gateway peering to take effect
-	time.Sleep(15 * time.Second)
+	if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
+		return false, nil, fmt.Errorf("waiting for gateways to be ready after NAT peering setup: %w", err)
+	}
 
 	// Test stateless destination NAT connectivity from vpc1 to vpc2
-	// vpc1 has no NAT, remains as 10.0.1.x
+	// vpc1 has no NAT, retains its original subnet IPs
 	// vpc2 presented to vpc1 as 192.168.12.x (destination NAT)
 	if err := testCtx.testNATGatewayConnectivity(ctx, vpc1, vpc2, vpc1NATCIDR, vpc2NATCIDR); err != nil {
 		if testCtx.pauseOnFail {
@@ -3144,7 +3140,7 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringStatelessDestinationNATTest(ctx 
 }
 
 // Test stateless NAT with IP exclusion (using Not field)
-// Exposes 10.0.1.0/24 but excludes 10.0.1.128/25 (upper half of the subnet)
+// Exposes the VPC subnet but excludes the upper half of it
 func (testCtx *VPCPeeringTestCtx) gatewayPeeringStatelessNATWithIPExclusionTest(ctx context.Context) (bool, []RevertFunc, error) {
 	vpcs := &vpcapi.VPCList{}
 	if err := testCtx.kube.List(ctx, vpcs); err != nil {
@@ -3191,8 +3187,7 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringStatelessNATWithIPExclusionTest(
 		return false, nil, fmt.Errorf("parsing vpc1 subnet: %w", err)
 	}
 
-	// Create exclusion: exclude upper half of vpc1 subnet
-	// e.g., 10.10.1.0/24 -> exclude 10.10.1.128/25 (upper half, 128 IPs)
+	// Create exclusion: exclude upper half of vpc1 subnet (128 IPs for a /24)
 	vpc1Bits := vpc1Prefix.Bits()
 	// Calculate the start of upper half
 	vpc1Base := vpc1Prefix.Addr().As4()
@@ -3253,7 +3248,9 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringStatelessNATWithIPExclusionTest(
 	}
 
 	// Wait for NAT gateway peering to take effect
-	time.Sleep(15 * time.Second)
+	if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
+		return false, nil, fmt.Errorf("waiting for gateways to be ready after NAT peering setup: %w", err)
+	}
 
 	// Test connectivity - only non-excluded IPs should be reachable
 	// Note: Full validation of exclusions requires TestConnectivity framework
@@ -3311,8 +3308,7 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringStatelessNATWithNATPoolExclusion
 		return false, nil, fmt.Errorf("VPCs must have at least one subnet") //nolint:goerr113
 	}
 
-	// Parse vpc1 subnet to expose only lower half (128 IPs)
-	// e.g., 10.10.1.0/24 -> expose 10.10.1.0/25 (lower half, 128 IPs)
+	// Parse vpc1 subnet to expose only lower half (128 IPs for a /24)
 	vpc1Prefix, err := netip.ParsePrefix(vpc1SubnetCIDR)
 	if err != nil {
 		return false, nil, fmt.Errorf("parsing vpc1 subnet: %w", err)
@@ -3375,7 +3371,9 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringStatelessNATWithNATPoolExclusion
 	}
 
 	// Wait for NAT gateway peering to take effect
-	time.Sleep(15 * time.Second)
+	if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
+		return false, nil, fmt.Errorf("waiting for gateways to be ready after NAT peering setup: %w", err)
+	}
 
 	// Test connectivity - only non-excluded NAT pool IPs should be used
 	// Note: Full validation of NAT pool exclusions requires TestConnectivity framework
@@ -3419,17 +3417,10 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringStatefulNATTest(ctx context.Cont
 	vpc1NATCIDR := []string{"192.168.11.0/24"}
 	vpc2NATCIDR := []string{} // Empty - no NAT on vpc-02 side (limitation: NAT only on one side)
 
-	// Configure stateful NAT with custom idle timeout
-	statefulNATConfig := &gwapi.PeeringNAT{
-		Stateful: &gwapi.PeeringStatefulNAT{
-			IdleTimeout: kmetav1.Duration{Duration: 5 * time.Minute},
-		},
-	}
-
 	appendGwPeeringSpec(gwPeerings, vpc1, vpc2, GwPeeringOptions{
 		VPC1NATCIDR: vpc1NATCIDR,
 		VPC2NATCIDR: vpc2NATCIDR,
-		NATConfig:   statefulNATConfig,
+		StatefulNAT: true, // Stateful NAT
 	})
 
 	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, gwPeerings, true); err != nil {
@@ -3437,11 +3428,13 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringStatefulNATTest(ctx context.Cont
 	}
 
 	// Wait for stateful NAT gateway peering to take effect
-	time.Sleep(15 * time.Second)
+	if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
+		return false, nil, fmt.Errorf("waiting for gateways to be ready after NAT peering setup: %w", err)
+	}
 
 	// Test stateful NAT connectivity from vpc1 to vpc2
 	// vpc1 will present to vpc2 as 192.168.11.x (NAT translation)
-	// vpc2 has no NAT, so remains as 10.0.2.x
+	// vpc2 has no NAT, so retains its original subnet IPs
 	if err := testCtx.testNATGatewayConnectivity(ctx, vpc1, vpc2, vpc1NATCIDR, vpc2NATCIDR); err != nil {
 		if testCtx.pauseOnFail {
 			if err := pauseOnFailure(ctx); err != nil {
@@ -3500,7 +3493,7 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringOverlapNATTest(ctx context.Conte
 	// Get vpc-01's subnet info for overlap
 	var existingSubnetCIDR, existingGateway string
 	for _, subnet := range existingVPC.Spec.Subnets {
-		existingSubnetCIDR = subnet.Subnet // This will be 10.0.1.0/24
+		existingSubnetCIDR = subnet.Subnet
 		existingGateway = subnet.Gateway
 
 		break
@@ -3571,6 +3564,25 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringOverlapNATTest(ctx context.Conte
 	// Wait for deletion to take effect
 	time.Sleep(5 * time.Second)
 
+	// Get the default VLANNamespace to find the last available VLAN
+	vlanNS := &wiringapi.VLANNamespace{}
+	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Name: "default", Namespace: kmetav1.NamespaceDefault}, vlanNS); err != nil {
+		return false, reverts, fmt.Errorf("getting default VLAN namespace: %w", err)
+	}
+
+	// Find the highest VLAN in the namespace ranges
+	var maxVLAN uint16
+	for _, vlanRange := range vlanNS.Spec.Ranges {
+		if vlanRange.To > maxVLAN {
+			maxVLAN = vlanRange.To
+		}
+	}
+	if maxVLAN == 0 {
+		return false, reverts, fmt.Errorf("no VLANs available in default VLAN namespace") //nolint:goerr113
+	}
+
+	slog.Info("Using highest VLAN from namespace for overlap test", "vlan", maxVLAN, "namespace", "default")
+
 	// Create new overlapping VPC with vpc-01's subnet CIDR in the separate namespace
 	newVPCName := "vpc-ovrlp" // VPC names must be ≤11 chars because they map to Linux VRF interface names
 	newVPC := &vpcapi.VPC{
@@ -3583,14 +3595,14 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringOverlapNATTest(ctx context.Conte
 			VLANNamespace: "default",
 			Subnets: map[string]*vpcapi.VPCSubnet{
 				"subnet-01": {
-					Subnet:  existingSubnetCIDR, // Same subnet as vpc-01! (10.0.1.0/24)
-					VLAN:    1020,               // Use a known available VLAN
+					Subnet:  existingSubnetCIDR, // Same subnet as vpc-01
+					VLAN:    maxVLAN,            // Highest VLAN to avoid clashes with regular VPC allocations
 					Gateway: existingGateway,    // Same gateway IP as vpc-01
 					DHCP: vpcapi.VPCDHCP{
 						Enable: true,
 						Range: &vpcapi.VPCDHCPRange{
-							Start: dhcpStart, // 10.0.1.200 - overlapping with vpc-01's range
-							End:   dhcpEnd,   // 10.0.1.254
+							Start: dhcpStart, // Overlapping with vpc-01's range
+							End:   dhcpEnd,
 						},
 					},
 				},
@@ -3658,8 +3670,8 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringOverlapNATTest(ctx context.Conte
 		return false, reverts, fmt.Errorf("getting reusable connection: %w", err)
 	}
 
-	// Configure networking on server-02 for the new overlapping VPC with VLAN 1020
-	netconfCmd, err := GetServerNetconfCmd(reusableConnection, 1020, testCtx.setupOpts.HashPolicy)
+	// Configure networking on server for the new overlapping VPC
+	netconfCmd, err := GetServerNetconfCmd(reusableConnection, maxVLAN, testCtx.setupOpts.HashPolicy)
 	if err != nil {
 		return false, reverts, fmt.Errorf("getting netconf cmd for server %s: %w", serverToDetach, err)
 	}
@@ -3714,8 +3726,8 @@ type GwPeeringOptions struct {
 	VPC1NATCIDR []string
 	// VPC2NATCIDR specifies the NAT CIDR ranges for VPC2
 	VPC2NATCIDR []string
-	// NATConfig specifies the NAT mode configuration (stateful/stateless)
-	NATConfig *gwapi.PeeringNAT
+	// StatefulNAT enables stateful NAT instead of stateless (default: false = stateless)
+	StatefulNAT bool
 }
 
 // appendGwPeeringSpec adds a single gateway peering spec to an existing map, which will be the input for DoSetupPeerings
@@ -3740,6 +3752,22 @@ func appendGwPeeringSpec(gwPeerings map[string]*gwapi.PeeringSpec, vpc1, vpc2 *v
 		}
 	}
 
+	// Build NAT configuration based on mode
+	var natConfig *gwapi.PeeringNAT
+	if len(opts.VPC1NATCIDR) > 0 || len(opts.VPC2NATCIDR) > 0 {
+		if opts.StatefulNAT {
+			natConfig = &gwapi.PeeringNAT{
+				Stateful: &gwapi.PeeringStatefulNAT{
+					IdleTimeout: kmetav1.Duration{Duration: 5 * time.Minute},
+				},
+			}
+		} else {
+			natConfig = &gwapi.PeeringNAT{
+				Stateless: &gwapi.PeeringStatelessNAT{},
+			}
+		}
+	}
+
 	vpc1Expose := gwapi.PeeringEntryExpose{}
 	for _, subnet := range vpc1Subnets {
 		vpc1Expose.IPs = append(vpc1Expose.IPs, gwapi.PeeringEntryIP{CIDR: subnet})
@@ -3749,8 +3777,8 @@ func appendGwPeeringSpec(gwPeerings map[string]*gwapi.PeeringSpec, vpc1, vpc2 *v
 		vpc1Expose.As = append(vpc1Expose.As, gwapi.PeeringEntryAs{CIDR: natCIDR})
 	}
 	// Set NAT configuration if NAT ranges are provided
-	if len(opts.VPC1NATCIDR) > 0 && opts.NATConfig != nil {
-		vpc1Expose.NAT = opts.NATConfig
+	if len(opts.VPC1NATCIDR) > 0 {
+		vpc1Expose.NAT = natConfig
 	}
 
 	vpc2Expose := gwapi.PeeringEntryExpose{}
@@ -3762,8 +3790,8 @@ func appendGwPeeringSpec(gwPeerings map[string]*gwapi.PeeringSpec, vpc1, vpc2 *v
 		vpc2Expose.As = append(vpc2Expose.As, gwapi.PeeringEntryAs{CIDR: natCIDR})
 	}
 	// Set NAT configuration if NAT ranges are provided
-	if len(opts.VPC2NATCIDR) > 0 && opts.NATConfig != nil {
-		vpc2Expose.NAT = opts.NATConfig
+	if len(opts.VPC2NATCIDR) > 0 {
+		vpc2Expose.NAT = natConfig
 	}
 
 	gwPeerings[entryName] = &gwapi.PeeringSpec{
