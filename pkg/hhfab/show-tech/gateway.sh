@@ -104,6 +104,32 @@ run_vtysh_cmd() {
 } >> "$OUTPUT_FILE" 2>&1
 
 # ---------------------------
+# Resource Pressure & Container Runtime
+# ---------------------------
+{
+    echo -e "\n=== Kubelet Status ==="
+    systemctl status k3s-agent --no-pager -l
+
+    echo -e "\n=== Kubelet Logs (last 200 lines) ==="
+    journalctl -u k3s-agent --no-pager -n 200
+
+    echo -e "\n=== Container Runtime Stats ==="
+    sudo crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock stats --no-stream
+
+    echo -e "\n=== Memory Pressure (PSI) ==="
+    cat /proc/pressure/memory 2>/dev/null || echo "PSI not available"
+
+    echo -e "\n=== CPU Pressure (PSI) ==="
+    cat /proc/pressure/cpu 2>/dev/null || echo "PSI not available"
+
+    echo -e "\n=== Detailed Memory Info ==="
+    cat /proc/meminfo | grep -E "MemTotal|MemFree|MemAvailable|Cached|Slab|PageTables|Committed"
+
+    echo -e "\n=== VM Stats ==="
+    vmstat 1 5
+} >> "$OUTPUT_FILE" 2>&1
+
+# ---------------------------
 # System Logs
 # ---------------------------
 {
