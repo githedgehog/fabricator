@@ -87,7 +87,33 @@ KUBECTL="/opt/bin/kubectl"
         $KUBECTL describe $resource -A
     done
 } >> "$OUTPUT_FILE" 2>&1
-    
+
+# ---------------------------
+# Resource Pressure & Timing
+# ---------------------------
+{
+    echo -e "\n=== Memory Pressure (PSI) ==="
+    cat /proc/pressure/memory 2>/dev/null || echo "PSI not available"
+
+    echo -e "\n=== CPU Pressure (PSI) ==="
+    cat /proc/pressure/cpu 2>/dev/null || echo "PSI not available"
+
+    echo -e "\n=== VM Stats ==="
+    vmstat 1 5
+
+    echo -e "\n=== Detailed Memory Info ==="
+    cat /proc/meminfo
+
+    echo -e "\n=== Pod Resource Usage ==="
+    $KUBECTL top pods -A 2>&1 || echo "Metrics not available"
+
+    echo -e "\n=== Node Resource Usage ==="
+    $KUBECTL top nodes 2>&1 || echo "Metrics not available"
+
+    echo -e "\n=== Pod Ready/Unhealthy Events ==="
+    $KUBECTL get events -A --sort-by='.lastTimestamp' | grep -E "Ready|Unhealthy|Failed|BackOff" | tail -100
+} >> "$OUTPUT_FILE" 2>&1
+
 # ---------------------------
 # System Logs
 # ---------------------------
