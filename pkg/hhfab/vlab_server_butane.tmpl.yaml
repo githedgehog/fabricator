@@ -34,6 +34,22 @@ systemd:
         [Install]
         WantedBy=multi-user.target
 
+    - name: network-info-motd.service
+      enabled: true
+      contents: |
+        [Unit]
+        Description=Generate Network Info MOTD
+        After=network-online.target
+        Wants=network-online.target
+
+        [Service]
+        ExecStart=/var/lib/scripts/generate_network_info.sh
+        Type=oneshot
+        RemainAfterExit=yes
+
+        [Install]
+        WantedBy=multi-user.target
+
 storage:
   files:
     - path: /etc/flatcar/update.conf
@@ -95,25 +111,143 @@ storage:
               fi
           done
 
-    - path: /etc/systemd/network/10-rename-enp2s1.link
+    - path: /var/lib/scripts/generate_network_info.sh
+      mode: 0755
+      contents:
+        inline: |
+          #!/bin/bash
+          TEMP_FILE="/tmp/network-info.tmp"
+          MOTD_BASE="/etc/motd.base"
+          OUTPUT_FILE="/etc/motd"
+
+          # Save the base MOTD if it doesn't exist
+          if [ ! -f "$MOTD_BASE" ]; then
+            head -n 2 "$OUTPUT_FILE" > "$MOTD_BASE" 2>/dev/null || true
+          fi
+
+          {
+            # Find and display VLAN interfaces only
+            for iface in $(ls /sys/class/net/ 2>/dev/null); do
+              if [[ "$iface" =~ \. ]]; then
+                vlan_id="${iface##*.}"
+                parent="${iface%.*}"
+
+                # Get IP addresses
+                ips=$(ip -o -4 addr show $iface 2>/dev/null | awk '{print $4}')
+                if [ -z "$ips" ]; then
+                  ips="no address"
+                fi
+
+                # Get MTU
+                mtu=$(cat /sys/class/net/$iface/mtu 2>/dev/null || echo "unknown")
+
+                # Get default gateway
+                gateway=$(ip route show default 2>/dev/null | awk '/default/ {print $3; exit}')
+
+                # Build the main line
+                echo ""
+                if [ -n "$gateway" ]; then
+                  # Ping test (quick, 1 packet)
+                  if ping -c 1 -W 1 -q "$gateway" &>/dev/null 2>&1; then
+                    gw_status="gw:$gateway"
+                  else
+                    gw_status="gw:$gateway [!]"
+                  fi
+                  echo "FABRIC: $iface ($ips) mtu:$mtu $gw_status"
+                else
+                  echo "FABRIC: $iface ($ips) mtu:$mtu"
+                fi
+                echo "──────────────────────────────────────────────────────────────"
+
+                # Collect interfaces to show LLDP for
+                lldp_ifaces=""
+                if [ -f "/proc/net/bonding/$parent" ]; then
+                  # Get bond members
+                  lldp_ifaces=$(awk '/^Slave Interface:/ {print $3}' /proc/net/bonding/$parent)
+
+                  # Get bond mode
+                  bond_mode=$(awk '/^Bonding Mode:/ {print $3, $4, $5, $6}' /proc/net/bonding/$parent | head -1)
+
+                  # Show bond info
+                  member_info=$(awk '/^Slave Interface:/ {iface=$3} /^MII Status:/ && iface {printf "%s:%s ", iface, $3; iface=""}' /proc/net/bonding/$parent)
+                  members=""
+                  for member in $member_info; do
+                    m_iface="${member%:*}"
+                    m_status="${member#*:}"
+                    if [ "$m_status" = "up" ]; then
+                      members="$members$m_iface "
+                    else
+                      members="$members$m_iface[!] "
+                    fi
+                  done
+                  if [ -n "$members" ]; then
+                    echo "  Bond: $parent ($bond_mode) members: $members"
+                  fi
+                else
+                  # Single interface
+                  lldp_ifaces="$parent"
+                fi
+
+                # Show LLDP neighbors and link info for each interface
+                for physical_iface in $lldp_ifaces; do
+                  # Get link speed and duplex
+                  if [ -f "/sys/class/net/$physical_iface/speed" ]; then
+                    speed=$(cat /sys/class/net/$physical_iface/speed 2>/dev/null || echo "unknown")
+                    duplex=$(cat /sys/class/net/$physical_iface/duplex 2>/dev/null || echo "unknown")
+                    link_info="${speed}Mb/${duplex}"
+                  else
+                    link_info=""
+                  fi
+
+                  # Get LLDP info from networkctl
+                  lldp_info=$(networkctl lldp "$physical_iface" 2>/dev/null | awk 'NR>1 && NF>0 {print $2, $3}' | head -1)
+
+                  if [ -n "$lldp_info" ]; then
+                    if [ -n "$link_info" ]; then
+                      echo "    $physical_iface ($link_info) → $lldp_info"
+                    else
+                      echo "    $physical_iface → $lldp_info"
+                    fi
+                  elif [ -n "$link_info" ]; then
+                    echo "    $physical_iface ($link_info)"
+                  fi
+                done
+              fi
+            done
+
+            echo ""
+
+          } > "$TEMP_FILE"
+
+          # Combine base MOTD with network info
+          {
+            cat "$MOTD_BASE" 2>/dev/null || echo "Hedgehog VLAB Server"
+            cat "$TEMP_FILE"
+          } > "$OUTPUT_FILE"
+
+          rm -f "$TEMP_FILE"
+
+    - path: /etc/systemd/network/10-fabric-enp2s1.link
       mode: 0644
       contents:
         inline: |
           [Match]
-          OriginalName=enp2s1np*
+          Path=pci-0000:02:01.0
 
           [Link]
           Name=enp2s1
+          MACAddressPolicy=persistent
 
-    - path: /etc/systemd/network/10-rename-enp2s2.link
+    - path: /etc/systemd/network/10-fabric-enp2s2.link
       mode: 0644
       contents:
         inline: |
           [Match]
-          OriginalName=enp2s2np*
+          Path=pci-0000:02:02.0
 
           [Link]
           Name=enp2s2
+          MACAddressPolicy=persistent
 
     - path: /etc/sysctl.d/arp.conf
       mode: 0644
