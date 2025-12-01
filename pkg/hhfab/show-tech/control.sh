@@ -115,6 +115,35 @@ KUBECTL="/opt/bin/kubectl"
 } >> "$OUTPUT_FILE" 2>&1
 
 # ---------------------------
+# K3s Control Plane Health
+# ---------------------------
+{
+    echo -e "\n=== K3s Service Status ==="
+    systemctl status k3s --no-pager -l
+
+    echo -e "\n=== K3s Service Logs (last 500 lines) ==="
+    journalctl -u k3s --no-pager -n 500
+
+    echo -e "\n=== Containerd Service Status ==="
+    systemctl status containerd --no-pager -l 2>&1 || echo "containerd service not found"
+
+    echo -e "\n=== API Server Health Check ==="
+    $KUBECTL get --raw /healthz 2>&1 || echo "API server health check failed"
+
+    echo -e "\n=== API Server Readiness Check ==="
+    $KUBECTL get --raw '/readyz?verbose=1' 2>&1 || echo "API server readiness check failed"
+
+    echo -e "\n=== API Server Liveness Check ==="
+    $KUBECTL get --raw '/livez?verbose=1' 2>&1 || echo "API server liveness check failed"
+
+    echo -e "\n=== Control Plane Pods Status ==="
+    $KUBECTL get pods -n kube-system -o wide 2>&1 || echo "Cannot get kube-system pods"
+
+    echo -e "\n=== Recent Control Plane Pod Events ==="
+    $KUBECTL get events -n kube-system --sort-by='.lastTimestamp' 2>&1 | tail -50 || echo "Cannot get kube-system events"
+} >> "$OUTPUT_FILE" 2>&1
+
+# ---------------------------
 # System Logs
 # ---------------------------
 {
