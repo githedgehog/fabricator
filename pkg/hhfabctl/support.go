@@ -20,7 +20,7 @@ type SupportDumpOpts struct {
 }
 
 func SupportDump(ctx context.Context, opts SupportDumpOpts) error {
-	slog.Info("Crearing support dump", "workdir", opts.WorkDir, "name", opts.Name)
+	slog.Info("Creating support dump", "workdir", opts.WorkDir, "name", opts.Name)
 
 	if opts.WorkDir == "" {
 		return fmt.Errorf("empty path") //nolint:goerr113
