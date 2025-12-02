@@ -685,12 +685,13 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 					}
 				case OnReadyReleaseTest:
 					if err := c.ReleaseTest(ctx, vlab, ReleaseTestOpts{
-						ResultsFile:    "release-test.xml",
-						HashPolicy:     HashPolicyL2And3,
-						VPCMode:        opts.VPCMode,
-						PauseOnFailure: opts.PauseOnFailure,
-						Regexes:        opts.ReleaseTestRegexes,
-						InvertRegex:    opts.ReleaseTestRegexesInvert,
+						ResultsFile:              "release-test.xml",
+						HashPolicy:               HashPolicyL2And3,
+						VPCMode:                  opts.VPCMode,
+						PauseOnFailure:           opts.PauseOnFailure,
+						CollectShowTechOnFailure: true,
+						Regexes:                  opts.ReleaseTestRegexes,
+						InvertRegex:              opts.ReleaseTestRegexesInvert,
 					}); err != nil {
 						if c.Shutdown.Load() == int32(ShutdownTypeGraceful) {
 							return nil

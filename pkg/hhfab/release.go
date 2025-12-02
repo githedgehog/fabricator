@@ -16,14 +16,17 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/samber/lo"
 	agentapi "go.githedgehog.com/fabric/api/agent/v1beta1"
 	"go.githedgehog.com/fabric/api/meta"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
@@ -67,19 +70,20 @@ const (
 )
 
 type VPCPeeringTestCtx struct {
-	vlabCfg          *Config
-	vlab             *VLAB
-	kube             kclient.Client
-	wipeBetweenTests bool
-	setupOpts        SetupVPCsOpts
-	tcOpts           TestConnectivityOpts
-	wrOpts           WaitReadyOpts
-	extName          string
-	extended         bool
-	failFast         bool
-	pauseOnFail      bool
-	roceLeaves       []string
-	noSetup          bool
+	vlabCfg               *Config
+	vlab                  *VLAB
+	kube                  kclient.Client
+	wipeBetweenTests      bool
+	setupOpts             SetupVPCsOpts
+	tcOpts                TestConnectivityOpts
+	wrOpts                WaitReadyOpts
+	extName               string
+	extended              bool
+	failFast              bool
+	pauseOnFail           bool
+	collectShowTechOnFail bool
+	roceLeaves            []string
+	noSetup               bool
 }
 
 var AllZeroPrefix = []string{"0.0.0.0/0"}
@@ -3675,6 +3679,113 @@ func fetchAndParseDHCPLease(ctx context.Context, ssh *sshutil.Config, ifName str
 
 // Utilities and suite runners
 
+// sanitizeTestName converts a test display name into a filesystem-safe directory name
+func sanitizeTestName(name string) string {
+	// Replace spaces and special characters with hyphens
+	sanitized := strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' {
+			return r
+		}
+
+		return '-'
+	}, name)
+	// Remove consecutive hyphens
+	sanitized = strings.ReplaceAll(sanitized, "--", "-")
+	// Remove leading/trailing hyphens
+	sanitized = strings.Trim(sanitized, "-")
+	// Truncate to reasonable length (100 chars)
+	if len(sanitized) > 100 {
+		sanitized = sanitized[:100]
+	}
+
+	return sanitized
+}
+
+// collectShowTechForTest collects show-tech diagnostics for a specific failed test
+func (testCtx *VPCPeeringTestCtx) collectShowTechForTest(ctx context.Context, test *JUnitTestCase) {
+	if !testCtx.collectShowTechOnFail {
+		return
+	}
+
+	dirName := sanitizeTestName(test.Name)
+	baseOutputDir := filepath.Join(testCtx.vlabCfg.WorkDir, "show-tech-output")
+	testOutputDir := filepath.Join(baseOutputDir, dirName)
+
+	slog.Info("Collecting show-tech for failed test", "test", test.Name, "dir", dirName, "output", testOutputDir)
+
+	// Create a temporary modified config to use the test-specific output directory
+	scriptConfig := DefaultShowTechScript()
+	if err := os.MkdirAll(testOutputDir, 0o755); err != nil {
+		slog.Warn("Failed to create show-tech output directory", "test", test.Name, "err", err)
+
+		return
+	}
+
+	var wg sync.WaitGroup
+	errChan := make(chan error, len(testCtx.vlab.VMs))
+
+	done := make(chan struct{})
+	defer close(done)
+
+	go func() {
+		select {
+		case <-ctx.Done():
+			slog.Warn("Context cancelled during show-tech collection, but continuing to collect available diagnostics")
+		case <-done:
+			return
+		}
+	}()
+
+	var successCount atomic.Int32
+
+	for _, vm := range testCtx.vlab.VMs {
+		name := vm.Name
+		wg.Add(1)
+		go func(name string, vm VM) {
+			defer wg.Done()
+			ssh, err := testCtx.vlabCfg.SSHVM(ctx, testCtx.vlab, vm)
+			if err != nil {
+				errChan <- fmt.Errorf("getting ssh config for entry %s: %w", name, err)
+
+				return
+			}
+
+			collectionCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+			defer cancel()
+			script, ok := scriptConfig.Scripts[vm.Type]
+			if !ok {
+				slog.Debug("No show-tech script available for", "vm", vm.Name, "type", vm.Type)
+
+				return
+			}
+
+			if err := testCtx.vlabCfg.collectShowTech(collectionCtx, name, ssh, script, testOutputDir); err != nil {
+				errChan <- fmt.Errorf("collecting show-tech for entry %s: %w", name, err)
+			} else {
+				successCount.Add(1)
+			}
+		}(name, vm)
+	}
+
+	wg.Wait()
+	close(errChan)
+
+	errors := lo.ChannelToSlice(errChan)
+
+	switch {
+	case successCount.Load() == 0:
+		slog.Warn("Failed to collect any diagnostics for test", "test", test.Name, "errors", errors)
+	case len(errors) > 0:
+		slog.Warn("Some diagnostics collection failed for test",
+			"test", test.Name,
+			"success_count", successCount.Load(),
+			"total_count", len(testCtx.vlab.VMs),
+			"errors", errors)
+	default:
+		slog.Info("Show tech for test collected successfully", "test", test.Name, "folder", testOutputDir)
+	}
+}
+
 func makeTestCtx(kube kclient.Client, setupOpts SetupVPCsOpts, vlabCfg *Config, vlab *VLAB, wipeBetweenTests bool, rtOpts ReleaseTestOpts) *VPCPeeringTestCtx {
 	testCtx := new(VPCPeeringTestCtx)
 	testCtx.kube = kube
@@ -3701,6 +3812,7 @@ func makeTestCtx(kube kclient.Client, setupOpts SetupVPCsOpts, vlabCfg *Config, 
 	testCtx.extended = rtOpts.Extended
 	testCtx.failFast = rtOpts.FailFast
 	testCtx.pauseOnFail = rtOpts.PauseOnFailure
+	testCtx.collectShowTechOnFail = rtOpts.CollectShowTechOnFailure
 
 	return testCtx
 }
@@ -3890,6 +4002,7 @@ func doRunTests(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 				}
 				ts.Failures++
 				slog.Error("FAIL", "test", test.Name, "error", fmt.Sprintf("Failed to run setupTest between tests: %s", err.Error()))
+				testCtx.collectShowTechForTest(ctx, &ts.TestCases[i])
 				if testCtx.pauseOnFail {
 					if err := pauseOnFailure(ctx); err != nil {
 						slog.Warn("Pause on failure failed, ignoring", "err", err.Error())
@@ -3934,6 +4047,7 @@ func doRunTests(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 			}
 			ts.Failures++
 			slog.Error("FAIL", "test", test.Name, "error", err.Error())
+			testCtx.collectShowTechForTest(ctx, &ts.TestCases[i])
 			if testCtx.pauseOnFail {
 				if err := pauseOnFailure(ctx); err != nil {
 					slog.Warn("Pause on failure failed, ignoring", "err", err.Error())

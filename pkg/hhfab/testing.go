@@ -2657,15 +2657,16 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 }
 
 type ReleaseTestOpts struct {
-	Regexes        []string
-	InvertRegex    bool
-	ResultsFile    string
-	Extended       bool
-	FailFast       bool
-	PauseOnFailure bool
-	HashPolicy     string
-	VPCMode        vpcapi.VPCMode
-	ListTests      bool
+	Regexes                  []string
+	InvertRegex              bool
+	ResultsFile              string
+	Extended                 bool
+	FailFast                 bool
+	PauseOnFailure           bool
+	CollectShowTechOnFailure bool
+	HashPolicy               string
+	VPCMode                  vpcapi.VPCMode
+	ListTests                bool
 }
 
 func (c *Config) ReleaseTest(ctx context.Context, vlab *VLAB, opts ReleaseTestOpts) error {
