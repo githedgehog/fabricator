@@ -275,6 +275,9 @@ func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) erro
 			// make sure last applied generation is the same as current generation
 			ready = ready && gwag.Generation > 0 && gwag.Status.LastAppliedGen == gwag.Generation
 
+			// make sure last gen applied to the frr as well
+			ready = ready && gwag.Generation > 0 && gwag.Status.State.FRR.LastAppliedGen == gwag.Generation
+
 			// TODO consider adding heartbeats
 			// make sure last heartbeat is recent enough
 			// ready = ready && time.Since(gwag.Status.LastHeartbeat.Time) < 1*time.Minute
