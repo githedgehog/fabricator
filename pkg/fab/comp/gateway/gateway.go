@@ -7,6 +7,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"slices"
 
 	// just to keep the import
 	_ "go.githedgehog.com/gateway/api/gateway/v1alpha1"
@@ -159,4 +160,58 @@ func StatusCtrl(ctx context.Context, kube kclient.Reader, cfg fabapi.Fabricator)
 	image := ref + ":" + string(cfg.Status.Versions.Gateway.Controller)
 
 	return comp.GetDeploymentStatus("gateway-ctrl", "manager", image)(ctx, kube, cfg)
+}
+
+func StatusDataplane(ctx context.Context, kube kclient.Reader, cfg fabapi.Fabricator, nodes []fabapi.FabNode) (map[string]fabapi.ComponentStatus, error) {
+	res := map[string]fabapi.ComponentStatus{}
+	if !cfg.Spec.Config.Gateway.Enable {
+		return res, nil
+	}
+
+	ref, err := comp.ImageURL(cfg, DataplaneRef)
+	if err != nil {
+		return nil, fmt.Errorf("getting image URL for %q: %w", DataplaneRef, err)
+	}
+	image := ref + ":" + string(cfg.Status.Versions.Gateway.Dataplane)
+
+	for _, node := range nodes {
+		if !slices.Contains(node.Spec.Roles, fabapi.NodeRoleGateway) {
+			continue
+		}
+
+		// TODO make name builder reusable in the gayeway-ctrl
+		res[node.Name], err = comp.GetDaemonSetStatus(fmt.Sprintf("gw--%s--dataplane", node.Name), "dataplane", image)(ctx, kube, cfg)
+		if err != nil {
+			return nil, fmt.Errorf("getting status for dataplane on node %q: %w", node.Name, err)
+		}
+	}
+
+	return res, nil
+}
+
+func StatusFRR(ctx context.Context, kube kclient.Reader, cfg fabapi.Fabricator, nodes []fabapi.FabNode) (map[string]fabapi.ComponentStatus, error) {
+	res := map[string]fabapi.ComponentStatus{}
+	if !cfg.Spec.Config.Gateway.Enable {
+		return res, nil
+	}
+
+	ref, err := comp.ImageURL(cfg, FRRRef)
+	if err != nil {
+		return nil, fmt.Errorf("getting image URL for %q: %w", FRRRef, err)
+	}
+	image := ref + ":" + string(cfg.Status.Versions.Gateway.FRR)
+
+	for _, node := range nodes {
+		if !slices.Contains(node.Spec.Roles, fabapi.NodeRoleGateway) {
+			continue
+		}
+
+		// TODO make name builder reusable in the gateway-ctrl
+		res[node.Name], err = comp.GetDaemonSetStatus(fmt.Sprintf("gw--%s--frr", node.Name), "frr", image)(ctx, kube, cfg)
+		if err != nil {
+			return nil, fmt.Errorf("getting status for FRR on node %q: %w", node.Name, err)
+		}
+	}
+
+	return res, nil
 }

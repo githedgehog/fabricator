@@ -39,7 +39,7 @@ _Appears in:_
 
 
 
-! WARNING: Make sure to update the IsReady method if you add or remove components
+! WARNING: Make sure to update the IsReady/IsGatewayReady methods if you add or remove components
 
 
 
@@ -65,6 +65,8 @@ _Appears in:_
 | `gatewayAPI` _[ComponentStatus](#componentstatus)_ |  |  |  |
 | `gatewayCtrl` _[ComponentStatus](#componentstatus)_ |  |  |  |
 | `gatewayAlloy` _[ComponentStatus](#componentstatus)_ |  |  |  |
+| `gatewayDataplane` _object (keys:string, values:[ComponentStatus](#componentstatus))_ |  |  |  |
+| `gatewayFRR` _object (keys:string, values:[ComponentStatus](#componentstatus))_ |  |  |  |
 
 
 #### ControlConfig

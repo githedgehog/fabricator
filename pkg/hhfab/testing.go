@@ -39,6 +39,7 @@ import (
 	"golang.org/x/sync/semaphore"
 	coreapi "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	kmeta "k8s.io/apimachinery/pkg/api/meta"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -125,12 +126,43 @@ func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) erro
 
 	start := time.Now()
 
-	slog.Info("Waiting for switches and gateways ready", "appliedFor", opts.AppliedFor, "timeout", opts.Timeout)
+	slog.Info("Waiting for fabricator ready", "timeout", opts.Timeout)
 
-	f, _, _, err := fab.GetFabAndNodes(ctx, kube, fab.GetFabAndNodesOpts{AllowNotHydrated: true})
-	if err != nil {
-		return fmt.Errorf("getting fab: %w", err)
+	var f fabapi.Fabricator
+	var err error
+
+	for idx := 0; ; idx++ {
+		f, _, _, err = fab.GetFabAndNodes(ctx, kube, fab.GetFabAndNodesOpts{AllowNotHydrated: true})
+		if err != nil {
+			slog.Warn("Failed to get fabricator", "error", err.Error())
+
+			continue
+		}
+
+		upToDate := string(f.Status.Versions.Fabricator.Controller) == f.Status.LastAppliedController
+		lastApplied := f.Generation == f.Status.LastAppliedGen
+		applied := kmeta.IsStatusConditionTrue(f.Status.Conditions, fabapi.ConditionApplied)
+		ready := kmeta.IsStatusConditionTrue(f.Status.Conditions, fabapi.ConditionReady)
+		gwReady := kmeta.IsStatusConditionTrue(f.Status.Conditions, fabapi.ConditionGatewayReady)
+
+		if upToDate && lastApplied && applied && ready && gwReady {
+			slog.Info("Fabricator ready", "gen", f.Generation, "version", f.Status.LastAppliedController)
+
+			break
+		}
+
+		if idx%opts.PrintEvery == 0 {
+			slog.Info("Fabricator status", "upToDate", upToDate, "lastApplied", lastApplied, "applied", applied, "ready", ready, "gatewayReady", gwReady)
+		}
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("waiting for ready: %w", ctx.Err())
+		case <-time.After(opts.PollInterval):
+		}
 	}
+
+	slog.Info("Waiting for switches and gateways ready", "appliedFor", opts.AppliedFor, "timeout", opts.Timeout)
 
 	// fabric controller will set agent version to its own version by default
 	expectedSwAgentV := string(f.Status.Versions.Fabric.Controller)

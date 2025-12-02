@@ -26,8 +26,9 @@ const (
 	FabName      = "default"
 	FabNamespace = "fab"
 
-	ConditionApplied = "Applied"
-	ConditionReady   = "Ready"
+	ConditionApplied      = "Applied"
+	ConditionReady        = "Ready"        // Control node(s) services
+	ConditionGatewayReady = "GatewayReady" // Gateway services
 )
 
 type FabricatorSpec struct {
@@ -79,29 +80,31 @@ var ComponentStatuses = []ComponentStatus{
 	CompStatusSkipped,
 }
 
-// ! WARNING: Make sure to update the IsReady method if you add or remove components
+// ! WARNING: Make sure to update the IsReady/IsGatewayReady methods if you add or remove components
 type ComponentsStatus struct {
-	FabricatorAPI        ComponentStatus `json:"fabricatorAPI,omitempty"`
-	FabricatorCtrl       ComponentStatus `json:"fabricatorCtrl,omitempty"`
-	FabricatorNodeConfig ComponentStatus `json:"fabricatorNodeConfig,omitempty"`
-	CertManagerCtrl      ComponentStatus `json:"certManagerCtrl,omitempty"`
-	CertManagerWebhook   ComponentStatus `json:"certManagerWebhook,omitempty"`
-	Reloader             ComponentStatus `json:"reloader,omitempty"`
-	Zot                  ComponentStatus `json:"zot,omitempty"`
-	NTP                  ComponentStatus `json:"ntp,omitempty"`
-	FabricAPI            ComponentStatus `json:"fabricAPI,omitempty"`
-	FabricCtrl           ComponentStatus `json:"fabricCtrl,omitempty"`
-	FabricBoot           ComponentStatus `json:"fabricBoot,omitempty"`
-	FabricDHCP           ComponentStatus `json:"fabricDHCP,omitempty"`
-	ControlProxy         ComponentStatus `json:"controlProxy,omitempty"`
-	ControlAlloy         ComponentStatus `json:"controlAlloy,omitempty"`
-	GatewayAPI           ComponentStatus `json:"gatewayAPI,omitempty"`
-	GatewayCtrl          ComponentStatus `json:"gatewayCtrl,omitempty"`
-	GatewayAlloy         ComponentStatus `json:"gatewayAlloy,omitempty"`
+	FabricatorAPI        ComponentStatus            `json:"fabricatorAPI,omitempty"`
+	FabricatorCtrl       ComponentStatus            `json:"fabricatorCtrl,omitempty"`
+	FabricatorNodeConfig ComponentStatus            `json:"fabricatorNodeConfig,omitempty"`
+	CertManagerCtrl      ComponentStatus            `json:"certManagerCtrl,omitempty"`
+	CertManagerWebhook   ComponentStatus            `json:"certManagerWebhook,omitempty"`
+	Reloader             ComponentStatus            `json:"reloader,omitempty"`
+	Zot                  ComponentStatus            `json:"zot,omitempty"`
+	NTP                  ComponentStatus            `json:"ntp,omitempty"`
+	FabricAPI            ComponentStatus            `json:"fabricAPI,omitempty"`
+	FabricCtrl           ComponentStatus            `json:"fabricCtrl,omitempty"`
+	FabricBoot           ComponentStatus            `json:"fabricBoot,omitempty"`
+	FabricDHCP           ComponentStatus            `json:"fabricDHCP,omitempty"`
+	ControlProxy         ComponentStatus            `json:"controlProxy,omitempty"`
+	ControlAlloy         ComponentStatus            `json:"controlAlloy,omitempty"`
+	GatewayAPI           ComponentStatus            `json:"gatewayAPI,omitempty"`
+	GatewayCtrl          ComponentStatus            `json:"gatewayCtrl,omitempty"`
+	GatewayAlloy         ComponentStatus            `json:"gatewayAlloy,omitempty"`
+	GatewayDataplane     map[string]ComponentStatus `json:"gatewayDataplane,omitempty"`
+	GatewayFRR           map[string]ComponentStatus `json:"gatewayFRR,omitempty"`
 }
 
 // TODO simplify or generate it instead
-func (c *ComponentsStatus) IsReady(cfg Fabricator) bool {
+func (c *ComponentsStatus) IsReady(cfg Fabricator, nodes []FabNode) bool {
 	res := c.FabricatorAPI == CompStatusReady &&
 		c.FabricatorCtrl == CompStatusReady &&
 		c.FabricatorNodeConfig == CompStatusReady &&
@@ -122,10 +125,67 @@ func (c *ComponentsStatus) IsReady(cfg Fabricator) bool {
 			c.GatewayAPI == CompStatusReady &&
 			c.GatewayCtrl == CompStatusReady &&
 			c.GatewayAlloy == CompStatusReady
+
+		gws := map[string]bool{}
+		for _, node := range nodes {
+			if !slices.Contains(node.Spec.Roles, NodeRoleGateway) {
+				continue
+			}
+
+			gws[node.Name] = true
+		}
+
+		for name, dp := range c.GatewayDataplane {
+			res = res &&
+				gws[name] &&
+				dp != CompStatusUnknown
+		}
+
+		for name, frr := range c.GatewayFRR {
+			res = res &&
+				gws[name] &&
+				frr != CompStatusUnknown
+		}
 	} else {
 		res = res &&
 			c.GatewayAPI == CompStatusSkipped &&
-			c.GatewayCtrl == CompStatusSkipped
+			c.GatewayCtrl == CompStatusSkipped &&
+			c.GatewayAlloy == CompStatusSkipped &&
+			len(c.GatewayDataplane) == 0 &&
+			len(c.GatewayFRR) == 0
+	}
+
+	return res
+}
+
+func (c *ComponentsStatus) IsGatewayReady(cfg Fabricator, nodes []FabNode) bool {
+	if !cfg.Spec.Config.Gateway.Enable {
+		return true
+	}
+
+	res := c.GatewayAPI == CompStatusReady &&
+		c.GatewayCtrl == CompStatusReady &&
+		c.GatewayAlloy == CompStatusReady
+
+	gws := map[string]bool{}
+	for _, node := range nodes {
+		if !slices.Contains(node.Spec.Roles, NodeRoleGateway) {
+			continue
+		}
+
+		gws[node.Name] = true
+	}
+
+	for name, dp := range c.GatewayDataplane {
+		res = res &&
+			gws[name] &&
+			dp == CompStatusReady
+	}
+
+	for name, frr := range c.GatewayFRR {
+		res = res &&
+			gws[name] &&
+			frr == CompStatusReady
 	}
 
 	return res
