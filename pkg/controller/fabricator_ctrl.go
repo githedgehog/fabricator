@@ -108,6 +108,11 @@ func (r *FabricatorReconciler) Reconcile(ctx context.Context, req kctrl.Request)
 	f.Status.IsBootstrap = false
 	f.Status.IsInstall = false
 
+	nodes := &fabapi.FabNodeList{}
+	if err := r.List(ctx, nodes); err != nil {
+		return kctrl.Result{}, fmt.Errorf("listing nodes: %w", err)
+	}
+
 	outdated := f.Status.LastAppliedController != version.Version || f.Status.LastAppliedGen != f.Generation
 	if outdated || !kmeta.IsStatusConditionTrue(f.Status.Conditions, fabapi.ConditionApplied) {
 		l.Info("Reconciling Fabricator")
@@ -158,6 +163,13 @@ func (r *FabricatorReconciler) Reconcile(ctx context.Context, req kctrl.Request)
 		})
 		kmeta.SetStatusCondition(&f.Status.Conditions, kmetav1.Condition{
 			Type:               fabapi.ConditionReady,
+			Status:             kmetav1.ConditionFalse,
+			Reason:             "ApplyPending",
+			ObservedGeneration: f.Generation,
+			Message:            "Config will be applied",
+		})
+		kmeta.SetStatusCondition(&f.Status.Conditions, kmetav1.Condition{
+			Type:               fabapi.ConditionGatewayReady,
 			Status:             kmetav1.ConditionFalse,
 			Reason:             "ApplyPending",
 			ObservedGeneration: f.Generation,
@@ -249,10 +261,10 @@ func (r *FabricatorReconciler) Reconcile(ctx context.Context, req kctrl.Request)
 		l.Info("Reconciled Fabricator")
 	}
 
-	return kctrl.Result{}, r.statusCheck(ctx, l, f)
+	return kctrl.Result{}, r.statusCheck(ctx, l, f, nodes.Items)
 }
 
-func (r *FabricatorReconciler) statusCheck(ctx context.Context, l logr.Logger, f *fabapi.Fabricator) error {
+func (r *FabricatorReconciler) statusCheck(ctx context.Context, l logr.Logger, f *fabapi.Fabricator, nodes []fabapi.FabNode) error {
 	if time.Since(f.Status.LastStatusCheck.Time) < 1*time.Minute && kmeta.IsStatusConditionTrue(f.Status.Conditions, fabapi.ConditionReady) {
 		return nil
 	}
@@ -339,6 +351,16 @@ func (r *FabricatorReconciler) statusCheck(ctx context.Context, l logr.Logger, f
 		return fmt.Errorf("getting gateway ctrl status: %w", err)
 	}
 
+	f.Status.Components.GatewayDataplane, err = gateway.StatusDataplane(ctx, r.Client, *f, nodes)
+	if err != nil {
+		return fmt.Errorf("getting gateway dataplane status: %w", err)
+	}
+
+	f.Status.Components.GatewayFRR, err = gateway.StatusFRR(ctx, r.Client, *f, nodes)
+	if err != nil {
+		return fmt.Errorf("getting gateway frr status: %w", err)
+	}
+
 	f.Status.Components.GatewayAlloy, err = alloy.StatusGateway(ctx, r.Client, *f)
 	if err != nil {
 		return fmt.Errorf("getting gateway alloy status: %w", err)
@@ -349,7 +371,7 @@ func (r *FabricatorReconciler) statusCheck(ctx context.Context, l logr.Logger, f
 		return fmt.Errorf("getting ctrl alloy status: %w", err)
 	}
 
-	if f.Status.Components.IsReady(*f) {
+	if f.Status.Components.IsReady(*f, nodes) {
 		if !kmeta.IsStatusConditionTrue(f.Status.Conditions, fabapi.ConditionReady) {
 			l.Info("All components are ready now")
 		}
@@ -361,15 +383,7 @@ func (r *FabricatorReconciler) statusCheck(ctx context.Context, l logr.Logger, f
 			ObservedGeneration: f.Generation,
 			Message:            "All components are ready",
 		})
-
-		f.Status.LastStatusCheck = kmetav1.Time{Time: time.Now()}
-
-		if err := r.Status().Update(ctx, f); err != nil {
-			return fmt.Errorf("updating ready status: %w", err)
-		}
-
-		return nil
-	} else { //nolint:revive
+	} else {
 		if kmeta.IsStatusConditionTrue(f.Status.Conditions, fabapi.ConditionReady) {
 			l.Info("Some components are not ready now")
 		}
@@ -381,15 +395,41 @@ func (r *FabricatorReconciler) statusCheck(ctx context.Context, l logr.Logger, f
 			ObservedGeneration: f.Generation,
 			Message:            "Not all components are ready",
 		})
+	}
 
-		f.Status.LastStatusCheck = kmetav1.Time{Time: time.Now()}
-
-		if err := r.Status().Update(ctx, f); err != nil {
-			return fmt.Errorf("updating not ready status: %w", err)
+	if f.Status.Components.IsGatewayReady(*f, nodes) {
+		if !kmeta.IsStatusConditionTrue(f.Status.Conditions, fabapi.ConditionGatewayReady) {
+			l.Info("All gateways are ready now")
 		}
 
-		return nil
+		kmeta.SetStatusCondition(&f.Status.Conditions, kmetav1.Condition{
+			Type:               fabapi.ConditionGatewayReady,
+			Status:             kmetav1.ConditionTrue,
+			Reason:             "GatewaysReady",
+			ObservedGeneration: f.Generation,
+			Message:            "All gateways are ready",
+		})
+	} else {
+		if kmeta.IsStatusConditionTrue(f.Status.Conditions, fabapi.ConditionGatewayReady) {
+			l.Info("Some gateways are not ready now")
+		}
+
+		kmeta.SetStatusCondition(&f.Status.Conditions, kmetav1.Condition{
+			Type:               fabapi.ConditionGatewayReady,
+			Status:             kmetav1.ConditionFalse,
+			Reason:             "GatewaysPending",
+			ObservedGeneration: f.Generation,
+			Message:            "Not all gateways are ready",
+		})
 	}
+
+	f.Status.LastStatusCheck = kmetav1.Time{Time: time.Now()}
+
+	if err := r.Status().Update(ctx, f); err != nil {
+		return fmt.Errorf("updating ready status: %w", err)
+	}
+
+	return nil
 }
 
 // Only one status watcher is needed
@@ -415,7 +455,14 @@ func (r *FabricatorReconciler) Start(ctx context.Context) error {
 				continue
 			}
 
-			if err := r.statusCheck(ctx, l, f); err != nil {
+			nodes := &fabapi.FabNodeList{}
+			if err := r.List(ctx, nodes); err != nil {
+				l.Error(err, "Fetching nodes")
+
+				continue
+			}
+
+			if err := r.statusCheck(ctx, l, f, nodes.Items); err != nil {
 				l.Error(err, "Checking status")
 
 				continue

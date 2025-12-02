@@ -628,8 +628,8 @@ spec:
           status:
             properties:
               components:
-                description: '! WARNING: Make sure to update the IsReady method if
-                  you add or remove components'
+                description: '! WARNING: Make sure to update the IsReady/IsGatewayReady
+                  methods if you add or remove components'
                 properties:
                   certManagerCtrl:
                     type: string
@@ -659,6 +659,14 @@ spec:
                     type: string
                   gatewayCtrl:
                     type: string
+                  gatewayDataplane:
+                    additionalProperties:
+                      type: string
+                    type: object
+                  gatewayFRR:
+                    additionalProperties:
+                      type: string
+                    type: object
                   ntp:
                     type: string
                   reloader:
