@@ -419,8 +419,10 @@ type VLABVersions struct {
 // +kubebuilder:printcolumn:name="Appl",type=string,JSONPath=`.status.lastAppliedGen`,priority=0
 // +kubebuilder:printcolumn:name="ApplT",type=date,JSONPath=`.status.lastAppliedTime`,priority=0
 // +kubebuilder:printcolumn:name="Status",type=date,JSONPath=`.status.lastStatusCheck`,priority=0
-// +kubebuilder:printcolumn:name="Reg",type=string,JSONPath=`.status.components.zot`,priority=1
+// +kubebuilder:printcolumn:name="Registry",type=string,JSONPath=`.status.components.zot`,priority=1
 // +kubebuilder:printcolumn:name="Ctrl",type=string,JSONPath=`.status.components.fabricatorCtrl`,priority=1
+// +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`,priority=0
+// +kubebuilder:printcolumn:name="GwReady",type=string,JSONPath=`.status.conditions[?(@.type=="GatewayReady")].status`,priority=0
 // Fabricator defines configuration for the Fabricator controller
 type Fabricator struct {
 	kmetav1.TypeMeta   `json:",inline"`
