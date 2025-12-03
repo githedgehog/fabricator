@@ -26,9 +26,14 @@ on:
     - cron: "0 10 * * *" # ~2am PST
   workflow_dispatch:
     inputs:
-      releasetest:
+      releasetest_vlab:
         type: boolean
-        description: "Run release tests in vlab/hlab"
+        description: "Run release tests in vlab"
+        required: false
+        default: false
+      releasetest_hlab:
+        type: boolean
+        description: "Run release tests in hlab"
         required: false
         default: false
       debug_enabled:
@@ -216,12 +221,13 @@ jobs:
           fi
 
   vlab:
-    name: "${{ matrix.hybrid && 'h' || 'v' }}-${{ matrix.upgradefrom && 'up' || '' }}${{ matrix.upgradefrom }}${{ matrix.upgradefrom && '-' || '' }}${{ matrix.mesh && 'mesh-' || '' }}${{ matrix.gateway && 'gw-' || '' }}${{ matrix.includeonie && 'onie-' || '' }}${{ matrix.buildmode }}-${{ matrix.vpcmode }}${{ (inputs.releasetest == true || contains(github.event.pull_request.labels.*.name, 'ci:+release') || github.event.schedule == '0 6 * * *') && '-rt' || '' }}"
+    name: "${{ matrix.hybrid && 'h' || 'v' }}-${{ matrix.upgradefrom && 'up' || '' }}${{ matrix.upgradefrom }}${{ matrix.upgradefrom && '-' || '' }}${{ matrix.mesh && 'mesh-' || '' }}${{ matrix.gateway && 'gw-' || '' }}${{ matrix.includeonie && 'onie-' || '' }}${{ matrix.buildmode }}-${{ matrix.vpcmode }}${{ ((matrix.hybrid && (inputs.releasetest_hlab == true || contains(github.event.pull_request.labels.*.name, 'ci:+release') || github.event.schedule == '0 6 * * *')) || (!matrix.hybrid && (inputs.releasetest_vlab == true || contains(github.event.pull_request.labels.*.name, 'ci:+release') || github.event.schedule == '0 6 * * *'))) && '-rt' || '' }}"
     needs:
       - test-build
     uses: ./.github/workflows/run-vlab.yaml
     with:
       # if pull_request: skip hlab if not ci:+hlab and skip vlab if ci:-vlab
+      # if workflow_dispatch: skip hlab if only vlab release tests requested and skip vlab if only hlab release tests requested
       skip: >-
         ${{
           github.event_name == 'pull_request'
@@ -229,6 +235,11 @@ jobs:
             matrix.hybrid && !contains(github.event.pull_request.labels.*.name, 'ci:+hlab')
             || !matrix.hybrid && contains(github.event.pull_request.labels.*.name, 'ci:-vlab')
             || matrix.upgradefrom != '' && contains(github.event.pull_request.labels.*.name, 'ci:-upgrade')
+          )
+          || github.event_name == 'workflow_dispatch'
+          && (
+            matrix.hybrid && inputs.releasetest_hlab != true
+            || !matrix.hybrid && inputs.releasetest_vlab != true
           )
         }}
       fabricatorref: ${{ github.ref }}
@@ -238,7 +249,7 @@ jobs:
       includeonie: ${{ matrix.includeonie }}
       buildmode: ${{ matrix.buildmode }}
       vpcmode: ${{ matrix.vpcmode }}
-      releasetest: ${{ inputs.releasetest == true || contains(github.event.pull_request.labels.*.name, 'ci:+release') || github.event.schedule == '0 6 * * *' }}
+      releasetest: ${{ (matrix.hybrid && (inputs.releasetest_hlab == true || contains(github.event.pull_request.labels.*.name, 'ci:+release') || github.event.schedule == '0 6 * * *')) || (!matrix.hybrid && (inputs.releasetest_vlab == true || contains(github.event.pull_request.labels.*.name, 'ci:+release') || github.event.schedule == '0 6 * * *')) }}
       hybrid: ${{ matrix.hybrid }}
       upgradefrom: ${{ matrix.upgradefrom }}
 
@@ -398,7 +409,7 @@ jobs:
           fi
 
   publish-test-results:
-    if: ${{ (inputs.releasetest == true || contains(github.event.pull_request.labels.*.name, 'ci:+release') || github.event.schedule == '0 6 * * *') && !cancelled() }}
+    if: ${{ (inputs.releasetest_vlab == true || inputs.releasetest_hlab == true || contains(github.event.pull_request.labels.*.name, 'ci:+release') || github.event.schedule == '0 6 * * *') && !cancelled() }}
     runs-on: lab
     needs:
       - vlabs
