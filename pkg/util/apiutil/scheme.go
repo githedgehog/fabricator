@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/samber/lo"
+	dhcpapi "go.githedgehog.com/fabric/api/dhcp/v1beta1"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
@@ -51,6 +52,9 @@ func init() {
 	}
 	if err := vpcapi.AddToScheme(scheme); err != nil {
 		panic(fmt.Errorf("adding vpcapi to the scheme: %w", err))
+	}
+	if err := dhcpapi.AddToScheme(scheme); err != nil {
+		panic(fmt.Errorf("adding dhcpapi to the scheme: %w", err))
 	}
 	if err := fabapi.AddToScheme(scheme); err != nil {
 		panic(fmt.Errorf("adding fabapi to the scheme: %w", err))
