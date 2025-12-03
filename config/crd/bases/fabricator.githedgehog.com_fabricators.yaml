@@ -36,12 +36,18 @@ spec:
       name: Status
       type: date
     - jsonPath: .status.components.zot
-      name: Reg
+      name: Registry
       priority: 1
       type: string
     - jsonPath: .status.components.fabricatorCtrl
       name: Ctrl
       priority: 1
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="GatewayReady")].status
+      name: GwReady
       type: string
     name: v1beta1
     schema:
