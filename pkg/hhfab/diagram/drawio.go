@@ -31,7 +31,8 @@ type MxGraphModel struct {
 }
 
 type Root struct {
-	MxCell []MxCell `xml:"mxCell"`
+	MxCell     []MxCell     `xml:"mxCell"`
+	UserObject []UserObject `xml:"UserObject"`
 }
 
 type MxCell struct {
@@ -49,6 +50,13 @@ type MxCell struct {
 	EntryX      float64   `xml:"entryX,attr,omitempty"`
 	EntryY      float64   `xml:"entryY,attr,omitempty"`
 	Geometry    *Geometry `xml:"mxGeometry,omitempty"`
+}
+
+type UserObject struct {
+	Label   string  `xml:"label,attr"`
+	Tooltip string  `xml:"tooltip,attr,omitempty"`
+	ID      string  `xml:"id,attr"`
+	MxCell  *MxCell `xml:"mxCell"`
 }
 
 type Geometry struct {
@@ -71,6 +79,22 @@ var nodeConnectionsMap map[string][]float64
 
 var nodes []Node
 
+// EdgePositionData stores position and rotation information for an edge
+type EdgePositionData struct {
+	EdgeID   string
+	Link     Link
+	SrcX     float64
+	SrcY     float64
+	TgtX     float64
+	TgtY     float64
+	UnitX    float64
+	UnitY    float64
+	Rotation float64
+}
+
+var edgePositions []EdgePositionData
+var generateLinkSpeedLayer bool // Only generate when agent data is available
+
 func GenerateDrawio(workDir string, topo Topology, styleType StyleType, outputPath string) error {
 	var finalOutputPath string
 	if outputPath != "" {
@@ -82,6 +106,8 @@ func GenerateDrawio(workDir string, topo Topology, styleType StyleType, outputPa
 	style := GetStyle(styleType)
 
 	nodeConnectionsMap = make(map[string][]float64)
+	edgePositions = nil                        // Reset edge positions for this diagram
+	generateLinkSpeedLayer = topo.HasAgentData // Only generate link speed layer when agent data available
 
 	model := createDrawioModel(topo, style)
 	outputXML, err := xml.MarshalIndent(model, "", "  ")
@@ -509,6 +535,11 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 
 	// Add VPC layer
 	createVPCLayer(model, topo.VPCs, cellMap)
+
+	// Add link speed layer (only when agent data is available)
+	if generateLinkSpeedLayer {
+		createLinkSpeedLayer(model)
+	}
 
 	// Calculate server bottom Y for positioning elements below
 	serverNodeHeight := 80 // Default server node height
@@ -1037,6 +1068,18 @@ func calculateSpineToLeafOffset(source, target string, cellMap map[string]*MxCel
 	return false, 0
 }
 
+// getPortLabelColor returns the fill color for a port label based on its status
+func getPortLabelColor(status string) string {
+	switch status {
+	case PortStatusUp:
+		return "#90EE90" // Light green
+	case PortStatusDown:
+		return "#FFB6C1" // Light red
+	default:
+		return "#FFFFFF" // White (default)
+	}
+}
+
 func generateEdgeLabels(model *MxGraphModel, edgeID string, link Link, srcX, srcY, tgtX, tgtY, ux, uy float64) {
 	// Calculate vector properties
 	dx := tgtX - srcX
@@ -1093,55 +1136,88 @@ func generateEdgeLabels(model *MxGraphModel, edgeID string, link Link, srcX, src
 	// Slightly taller height to better center the text
 	const labelHeight = 10
 
-	// Style with improved alignment settings
-	textStyle := fmt.Sprintf("text;html=1;strokeColor=#888888;strokeWidth=0.5;"+
-		"fillColor=#FFFFFF;fillOpacity=80;align=center;verticalAlign=middle;"+
+	// Get port status and NOS names from link properties
+	srcPortStatus := link.Properties[PropSourcePortStatus]
+	tgtPortStatus := link.Properties[PropTargetPortStatus]
+	srcPortNOS := link.Properties[PropSourcePortNOS]
+	tgtPortNOS := link.Properties[PropTargetPortNOS]
+
+	// Create styles with colors based on port status
+	srcTextStyle := fmt.Sprintf("text;html=1;strokeColor=#888888;strokeWidth=0.5;"+
+		"fillColor=%s;fillOpacity=80;align=center;verticalAlign=middle;"+
 		"whiteSpace=wrap;rounded=1;fontSize=10;rotation=%.1f;",
-		angle)
+		getPortLabelColor(srcPortStatus), angle)
+
+	tgtTextStyle := fmt.Sprintf("text;html=1;strokeColor=#888888;strokeWidth=0.5;"+
+		"fillColor=%s;fillOpacity=80;align=center;verticalAlign=middle;"+
+		"whiteSpace=wrap;rounded=1;fontSize=10;rotation=%.1f;",
+		getPortLabelColor(tgtPortStatus), angle)
 
 	// Create unique IDs for the text elements
 	srcLabelID := fmt.Sprintf("%s_src_label", edgeID)
 	tgtLabelID := fmt.Sprintf("%s_tgt_label", edgeID)
 
-	// Create source port label as a separate text element
-	srcLabelCell := MxCell{
-		ID:     srcLabelID,
-		Parent: "1", // Attach directly to the root, not to the edge
-		Value:  srcText,
-		Style:  textStyle,
-		Vertex: "1",
-		Geometry: &Geometry{
-			X:      srcLabelX - float64(srcWidth)/2,    // Center the text horizontally
-			Y:      srcLabelY - float64(labelHeight)/2, // Center the text vertically
-			Width:  srcWidth,
-			Height: labelHeight,
-			As:     "geometry",
+	// Create source port label as UserObject with Ethernet name as tooltip
+	srcLabelObj := UserObject{
+		Label:   srcText,
+		Tooltip: srcPortNOS,
+		ID:      srcLabelID,
+		MxCell: &MxCell{
+			Parent: "1", // Attach directly to the root, not to the edge
+			Style:  srcTextStyle,
+			Vertex: "1",
+			Geometry: &Geometry{
+				X:      srcLabelX - float64(srcWidth)/2,    // Center the text horizontally
+				Y:      srcLabelY - float64(labelHeight)/2, // Center the text vertically
+				Width:  srcWidth,
+				Height: labelHeight,
+				As:     "geometry",
+			},
 		},
 	}
 
-	// Create target port label as a separate text element
-	tgtLabelCell := MxCell{
-		ID:     tgtLabelID,
-		Parent: "1", // Attach directly to the root, not to the edge
-		Value:  tgtText,
-		Style:  textStyle,
-		Vertex: "1",
-		Geometry: &Geometry{
-			X:      tgtLabelX - float64(tgtWidth)/2,    // Center the text horizontally
-			Y:      tgtLabelY - float64(labelHeight)/2, // Center the text vertically
-			Width:  tgtWidth,
-			Height: labelHeight,
-			As:     "geometry",
+	// Create target port label as UserObject with Ethernet name as tooltip
+	tgtLabelObj := UserObject{
+		Label:   tgtText,
+		Tooltip: tgtPortNOS,
+		ID:      tgtLabelID,
+		MxCell: &MxCell{
+			Parent: "1", // Attach directly to the root, not to the edge
+			Style:  tgtTextStyle,
+			Vertex: "1",
+			Geometry: &Geometry{
+				X:      tgtLabelX - float64(tgtWidth)/2,    // Center the text horizontally
+				Y:      tgtLabelY - float64(labelHeight)/2, // Center the text vertically
+				Width:  tgtWidth,
+				Height: labelHeight,
+				As:     "geometry",
+			},
 		},
 	}
 
-	// Add the label cells to the model only if they have text
+	// Add the label objects to the model only if they have text
 	if srcPort != "" {
-		model.Root.MxCell = append(model.Root.MxCell, srcLabelCell)
+		model.Root.UserObject = append(model.Root.UserObject, srcLabelObj)
 	}
 
 	if tgtPort != "" {
-		model.Root.MxCell = append(model.Root.MxCell, tgtLabelCell)
+		model.Root.UserObject = append(model.Root.UserObject, tgtLabelObj)
+	}
+
+	// Store edge position data for speed label layer creation later (only when agent data available)
+	// Store all edges (not just those with speed) so we can show Ethernet interface names
+	if generateLinkSpeedLayer {
+		edgePositions = append(edgePositions, EdgePositionData{
+			EdgeID:   edgeID,
+			Link:     link,
+			SrcX:     srcX,
+			SrcY:     srcY,
+			TgtX:     tgtX,
+			TgtY:     tgtY,
+			UnitX:    unitX,
+			UnitY:    unitY,
+			Rotation: angle,
+		})
 	}
 }
 
@@ -1782,6 +1858,73 @@ func createVPCLegend(model *MxGraphModel, vpcs map[string]*VPCInfo, serverBottom
 			}
 			model.Root.MxCell = append(model.Root.MxCell, subnetCell)
 			currentY += subnetLineHeight
+		}
+	}
+}
+
+func createLinkSpeedLayer(model *MxGraphModel) {
+	if len(edgePositions) == 0 {
+		return
+	}
+
+	// Create link speed layer
+	speedLayer := MxCell{
+		ID:     "link_speed_layer",
+		Parent: "0",
+		Value:  "Link Speed",
+		Style:  "locked=1;",
+	}
+	model.Root.MxCell = append(model.Root.MxCell, speedLayer)
+
+	// Create speed labels for each edge
+	const labelHeight = 10
+
+	for _, edgeData := range edgePositions {
+		// Calculate edge properties
+		dx := edgeData.TgtX - edgeData.SrcX
+		dy := edgeData.TgtY - edgeData.SrcY
+		edgeLength := math.Sqrt(dx*dx + dy*dy)
+
+		if edgeLength < 10 {
+			continue
+		}
+
+		// Calculate midpoint of the edge
+		midX := (edgeData.SrcX + edgeData.TgtX) / 2
+		midY := (edgeData.SrcY + edgeData.TgtY) / 2
+
+		// Calculate vertical offset from rotation
+		verticalOffset := calculateVerticalOffset(edgeData.Rotation)
+
+		// Calculate perpendicular Y component for vertical adjustment
+		perpY := edgeData.UnitX
+
+		// Create speed label in the middle
+		if edgeData.Link.Speed != "" {
+			speedText := fmt.Sprintf("<span style=\"font-size:10px;\">%s</span>", edgeData.Link.Speed)
+			speedWidth := len(edgeData.Link.Speed)*4 + 8
+
+			speedStyle := fmt.Sprintf("text;html=1;strokeColor=#888888;strokeWidth=0.5;"+
+				"fillColor=#FFFFFF;fillOpacity=80;align=center;verticalAlign=middle;"+
+				"whiteSpace=wrap;rounded=1;fontSize=10;rotation=%.1f;",
+				edgeData.Rotation)
+
+			speedLabelID := fmt.Sprintf("%s_speed", edgeData.EdgeID)
+			speedLabelCell := MxCell{
+				ID:     speedLabelID,
+				Parent: "link_speed_layer",
+				Value:  speedText,
+				Style:  speedStyle,
+				Vertex: "1",
+				Geometry: &Geometry{
+					X:      midX - float64(speedWidth)/2,
+					Y:      midY - float64(labelHeight)/2 + (perpY * verticalOffset),
+					Width:  speedWidth,
+					Height: labelHeight,
+					As:     "geometry",
+				},
+			}
+			model.Root.MxCell = append(model.Root.MxCell, speedLabelCell)
 		}
 	}
 }

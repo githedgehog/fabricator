@@ -31,9 +31,10 @@ type LinkGroup struct {
 }
 
 type Topology struct {
-	Nodes []Node
-	Links []Link
-	VPCs  map[string]*VPCInfo
+	Nodes        []Node
+	Links        []Link
+	VPCs         map[string]*VPCInfo
+	HasAgentData bool // true when agent runtime data is available (live mode)
 }
 
 type VPCInfo struct {
@@ -104,17 +105,26 @@ type NodeMetrics struct {
 }
 
 const (
-	PropMCLAGType       = "mclagType"
-	PropSourcePort      = "sourcePort"
-	PropTargetPort      = "targetPort"
-	PropBundled         = "bundled"
-	PropESLAGServer     = "eslag_server"
-	PropGateway         = "gateway"
-	PropDescription     = "description"
-	PropRole            = "role"
-	PropRedundancyGroup = "redundancyGroup"
-	PropRedundancyType  = "redundancyType"
-	PropConnectionName  = "connectionName"
+	PropMCLAGType        = "mclagType"
+	PropSourcePort       = "sourcePort"
+	PropTargetPort       = "targetPort"
+	PropSourcePortStatus = "sourcePortStatus"
+	PropTargetPortStatus = "targetPortStatus"
+	PropSourcePortNOS    = "sourcePortNOS"
+	PropTargetPortNOS    = "targetPortNOS"
+	PropBundled          = "bundled"
+	PropESLAGServer      = "eslag_server"
+	PropGateway          = "gateway"
+	PropDescription      = "description"
+	PropRole             = "role"
+	PropRedundancyGroup  = "redundancyGroup"
+	PropRedundancyType   = "redundancyType"
+	PropConnectionName   = "connectionName"
+)
+
+const (
+	PortStatusUp   = "up"
+	PortStatusDown = "down"
 )
 
 const (
