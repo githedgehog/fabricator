@@ -107,7 +107,7 @@ type ComponentsStatus struct {
 func (c *ComponentsStatus) IsReady(cfg Fabricator, nodes []FabNode) bool {
 	res := c.FabricatorAPI == CompStatusReady &&
 		c.FabricatorCtrl == CompStatusReady &&
-		c.FabricatorNodeConfig == CompStatusReady &&
+		c.FabricatorNodeConfig != CompStatusUnknown &&
 		c.CertManagerCtrl == CompStatusReady &&
 		c.CertManagerWebhook == CompStatusReady &&
 		c.Reloader == CompStatusReady &&
@@ -124,7 +124,7 @@ func (c *ComponentsStatus) IsReady(cfg Fabricator, nodes []FabNode) bool {
 		res = res &&
 			c.GatewayAPI == CompStatusReady &&
 			c.GatewayCtrl == CompStatusReady &&
-			c.GatewayAlloy == CompStatusReady
+			c.GatewayAlloy != CompStatusUnknown
 
 		gws := map[string]bool{}
 		for _, node := range nodes {
@@ -165,7 +165,8 @@ func (c *ComponentsStatus) IsGatewayReady(cfg Fabricator, nodes []FabNode) bool 
 
 	res := c.GatewayAPI == CompStatusReady &&
 		c.GatewayCtrl == CompStatusReady &&
-		c.GatewayAlloy == CompStatusReady
+		c.GatewayAlloy == CompStatusReady &&
+		c.FabricatorNodeConfig != CompStatusUnknown
 
 	gws := map[string]bool{}
 	for _, node := range nodes {
