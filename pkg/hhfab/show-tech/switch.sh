@@ -61,6 +61,17 @@ run_sonic_cmd() {
     run_sonic_cmd "show vxlan remote vni"
     run_sonic_cmd "show vxlan vlanvnimap"
     run_sonic_cmd "show vxlan vrfvnimap"
+
+    echo -e "\n=== VRF-VNI Consistency Check ==="
+    # Check that each VRF has a proper VNI mapping
+    vrfs=$(sonic-cli -c "show ip vrf | no-more" | awk 'NR>2{print $1}')
+    for vrf in $vrfs; do
+        echo -e "\n--- VRF: $vrf ---" >> "$OUTPUT_FILE"
+        echo "VNI mapping:" >> "$OUTPUT_FILE"
+        sonic-cli -c "show vxlan vrfvnimap | grep $vrf" >> "$OUTPUT_FILE" 2>&1
+        echo "BGP L2VPN EVPN VNI status:" >> "$OUTPUT_FILE"
+        sonic-cli -c "show bgp l2vpn evpn vni | grep $vrf" >> "$OUTPUT_FILE" 2>&1
+    done
 } >> "$OUTPUT_FILE" 2>&1
 
 # ---------------------------
@@ -94,6 +105,55 @@ run_sonic_cmd() {
 } >> "$OUTPUT_FILE" 2>&1
 
 # ---------------------------
+# VRF Configuration and Status
+# ---------------------------
+{
+    echo -e "\n=== VRF Configuration ==="
+    run_sonic_cmd "show ip vrf"
+
+    echo -e "\n=== VRF Interface Membership ==="
+    # Show which interfaces belong to which VRF
+    vrfs=$(sonic-cli -c "show ip vrf | no-more" | awk 'NR>2{print $1}')
+    for vrf in $vrfs; do
+        echo -e "\n--- VRF: $vrf ---" >> "$OUTPUT_FILE"
+        sonic-cli -c "show running-configuration | grep -A2 \"ip vrf forwarding $vrf\"" >> "$OUTPUT_FILE" 2>&1
+    done
+
+    echo -e "\n=== VLAN Operational Status ==="
+    # Check operational status of all VLANs
+    ip -br link show type vlan >> "$OUTPUT_FILE" 2>&1
+
+    echo -e "\n=== VLAN Interface Details ==="
+    # Detailed VLAN interface status
+    for vlan_intf in $(ip -br link show type vlan | awk '{print $1}'); do
+        echo -e "\n--- Interface: $vlan_intf ---" >> "$OUTPUT_FILE"
+        ip addr show dev "$vlan_intf" 2>&1 >> "$OUTPUT_FILE"
+        echo "VRF binding:" >> "$OUTPUT_FILE"
+        ip link show "$vlan_intf" 2>&1 | grep -i "vrf" >> "$OUTPUT_FILE"
+    done
+
+    echo -e "\n=== Anycast Gateway Reachability ==="
+    # Test reachability to anycast gateway IPs configured on VLANs
+    # Extract anycast-address from running config
+    echo "Testing local anycast gateway IPs..." >> "$OUTPUT_FILE"
+    sonic-cli -c "show running-configuration | grep \"ip anycast-address\"" 2>/dev/null | while read -r line; do
+        gw_ip=$(echo "$line" | awk '{print $3}' | cut -d'/' -f1)
+        if [ -n "$gw_ip" ]; then
+            echo -e "\n--- Testing gateway: $gw_ip ---" >> "$OUTPUT_FILE"
+            # Find which interface has this IP
+            vlan_intf=$(ip -4 -br addr show | grep "$gw_ip" | awk '{print $1}')
+            if [ -n "$vlan_intf" ]; then
+                echo "Gateway $gw_ip is on interface $vlan_intf" >> "$OUTPUT_FILE"
+                # Check if we can ARP resolve it from the switch itself
+                ip neigh show dev "$vlan_intf" | grep "$gw_ip" >> "$OUTPUT_FILE" 2>&1
+            else
+                echo "WARNING: Gateway $gw_ip not found on any interface!" >> "$OUTPUT_FILE"
+            fi
+        fi
+    done
+} >> "$OUTPUT_FILE" 2>&1
+
+# ---------------------------
 # Route Tables
 # ---------------------------
 {
@@ -113,6 +173,8 @@ run_sonic_cmd() {
         run_sonic_cmd "show ip arp vrf $vrf"
         echo -e "\n=== BGP IPv4 Unicast Summary for VRF: $vrf ===" >> "$OUTPUT_FILE"
         run_sonic_cmd "show bgp ipv4 unicast vrf $vrf summary"
+        echo -e "\n=== BGP EVPN VNI for VRF: $vrf ===" >> "$OUTPUT_FILE"
+        run_sonic_cmd "show bgp l2vpn evpn vni $vrf"
     done
 } >> "$OUTPUT_FILE" 2>&1
 
@@ -168,6 +230,32 @@ run_sonic_cmd() {
 
     echo -e "\n=== Broadcom Trunk Table ==="
     bcmcmd "trunk show"
+} >> "$OUTPUT_FILE" 2>&1
+
+# ---------------------------
+# Recent Configuration Changes
+# ---------------------------
+{
+    echo -e "\n=== Recent VRF and VLAN Configuration Changes ==="
+    echo "Last 500 lines from orchestration agents showing VRF/VLAN changes:"
+
+    echo -e "\n--- Recent VRF Manager Events ---" >> "$OUTPUT_FILE"
+    docker logs --tail 500 --timestamps swss 2>&1 | grep -E "vrfmgrd|VRF|VrfVvpc" | tail -200 >> "$OUTPUT_FILE"
+
+    echo -e "\n--- Recent Interface Manager Events (VLANs) ---" >> "$OUTPUT_FILE"
+    docker logs --tail 500 --timestamps swss 2>&1 | grep -E "intfmgrd.*Vlan|doIntfGeneralTask.*Vlan|sagStateDbUpdate.*Vlan" | tail -200 >> "$OUTPUT_FILE"
+
+    echo -e "\n--- Recent Orchestration Agent Events (VRF/VLAN) ---" >> "$OUTPUT_FILE"
+    docker logs --tail 500 --timestamps swss 2>&1 | grep -E "orchagent.*VRF|orchagent.*Vlan.*vrf|addRoute.*vrf|removeRoute.*vrf" | tail -200 >> "$OUTPUT_FILE"
+
+    echo -e "\n--- Recent BGP FPM Events (Route changes) ---" >> "$OUTPUT_FILE"
+    docker logs --tail 500 --timestamps bgp 2>&1 | grep -E "fpmsyncd.*VrfVvpc|fpmsyncd.*10.0.[0-9]" | tail -200 >> "$OUTPUT_FILE"
+
+    echo -e "\n--- Recent VLAN Manager Events ---" >> "$OUTPUT_FILE"
+    docker logs --tail 500 --timestamps swss 2>&1 | grep -E "vlanmgrd|doVlanTask|doVlanMember" | tail -200 >> "$OUTPUT_FILE"
+
+    echo -e "\n--- Recent Interface Status Changes ---" >> "$OUTPUT_FILE"
+    docker logs --tail 500 --timestamps eventd 2>&1 | grep -E "INTERFACE_OPER_STATUS.*Vlan" | tail -100 >> "$OUTPUT_FILE"
 } >> "$OUTPUT_FILE" 2>&1
 
 # ---------------------------
