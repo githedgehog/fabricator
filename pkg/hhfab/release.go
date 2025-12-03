@@ -3675,7 +3675,7 @@ func fetchAndParseDHCPLease(ctx context.Context, ssh *sshutil.Config, ifName str
 
 // Utilities and suite runners
 
-func makeTestCtx(kube kclient.Client, setupOpts SetupVPCsOpts, vlabCfg *Config, vlab *VLAB, wipeBetweenTests bool, rtOpts ReleaseTestOpts) *VPCPeeringTestCtx {
+func makeTestCtx(ctx context.Context, kube kclient.Client, setupOpts SetupVPCsOpts, vlabCfg *Config, vlab *VLAB, wipeBetweenTests bool, rtOpts ReleaseTestOpts) *VPCPeeringTestCtx {
 	testCtx := new(VPCPeeringTestCtx)
 	testCtx.kube = kube
 	testCtx.vlabCfg = vlabCfg
@@ -3689,9 +3689,29 @@ func makeTestCtx(kube kclient.Client, setupOpts SetupVPCsOpts, vlabCfg *Config, 
 		CurlsCount:        1,
 		RequireAllServers: setupOpts.VPCMode == vpcapi.VPCModeL2VNI, // L3VNI will skip eslag servers
 	}
+
+	// Detect if we have virtual switches to adjust wait times
+	hasVirtualSwitches := false
+	switches := &wiringapi.SwitchList{}
+	if err := kube.List(ctx, switches); err == nil {
+		for _, sw := range switches.Items {
+			if sw.Spec.Profile == meta.SwitchProfileVS || sw.Spec.Profile == meta.SwitchProfileVSCLSP {
+				hasVirtualSwitches = true
+
+				break
+			}
+		}
+	}
+
 	testCtx.wrOpts = WaitReadyOpts{
 		AppliedFor: waitAppliedFor,
 		Timeout:    waitTimeout,
+	}
+
+	// Virtual switches need extra time for fabric convergence
+	if hasVirtualSwitches {
+		testCtx.wrOpts.StabilizationPeriod = 45 * time.Second
+		testCtx.wrOpts.Timeout = 10 * time.Minute
 	}
 	if rtOpts.Extended {
 		testCtx.tcOpts.IPerfsSeconds = 10
@@ -4416,7 +4436,7 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 		VPCMode:           rtOtps.VPCMode,
 	}
 
-	testCtx := makeTestCtx(kube, setupOpts, vlabCfg, vlab, false, rtOtps)
+	testCtx := makeTestCtx(ctx, kube, setupOpts, vlabCfg, vlab, false, rtOtps)
 	noVpcSuite := makeNoVpcsSuite(testCtx)
 	singleVpcSuite := makeVpcPeeringsSingleVPCSuite(testCtx)
 	multiVpcSuite := makeVpcPeeringsMultiVPCSuite(testCtx)
