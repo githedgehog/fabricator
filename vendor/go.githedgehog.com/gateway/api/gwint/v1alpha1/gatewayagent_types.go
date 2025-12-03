@@ -32,6 +32,8 @@ type GatewayAgentStatus struct {
 	LastAppliedTime kmetav1.Time `json:"lastAppliedTime,omitempty"`
 	// Generation of the last successful configuration application
 	LastAppliedGen int64 `json:"lastAppliedGen,omitempty"`
+	// Time of the last heartbeat from the agent
+	LastHeartbeat kmetav1.Time `json:"lastHeartbeat,omitempty"`
 	// State represents collected data from the dataplane API that includes FRR as well
 	State GatewayState `json:"state,omitempty"`
 }

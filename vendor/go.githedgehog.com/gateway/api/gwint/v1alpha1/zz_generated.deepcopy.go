@@ -120,6 +120,7 @@ func (in *GatewayAgentSpec) DeepCopy() *GatewayAgentSpec {
 func (in *GatewayAgentStatus) DeepCopyInto(out *GatewayAgentStatus) {
 	*out = *in
 	in.LastAppliedTime.DeepCopyInto(&out.LastAppliedTime)
+	in.LastHeartbeat.DeepCopyInto(&out.LastHeartbeat)
 	in.State.DeepCopyInto(&out.State)
 }
 
