@@ -560,11 +560,11 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 	portStatusMap := make(map[string]map[string]string)
 
 	// Try to list agents - if it fails (e.g., non-live mode), continue without port status
-	hasAgentData := true
-	if err := client.List(ctx, agents); err != nil {
+	err := client.List(ctx, agents)
+	hasAgentData := err == nil
+	if err != nil {
 		// Agents not available (non-live mode or API not registered), continue without port status
 		agents = nil
-		hasAgentData = false
 	}
 
 	// Build port status map if agents are available

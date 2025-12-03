@@ -31,7 +31,8 @@ type MxGraphModel struct {
 }
 
 type Root struct {
-	MxCell []MxCell `xml:"mxCell"`
+	MxCell     []MxCell     `xml:"mxCell"`
+	UserObject []UserObject `xml:"UserObject"`
 }
 
 type MxCell struct {
@@ -49,6 +50,13 @@ type MxCell struct {
 	EntryX      float64   `xml:"entryX,attr,omitempty"`
 	EntryY      float64   `xml:"entryY,attr,omitempty"`
 	Geometry    *Geometry `xml:"mxGeometry,omitempty"`
+}
+
+type UserObject struct {
+	Label   string  `xml:"label,attr"`
+	Tooltip string  `xml:"tooltip,attr,omitempty"`
+	ID      string  `xml:"id,attr"`
+	MxCell  *MxCell `xml:"mxCell"`
 }
 
 type Geometry struct {
@@ -1128,9 +1136,11 @@ func generateEdgeLabels(model *MxGraphModel, edgeID string, link Link, srcX, src
 	// Slightly taller height to better center the text
 	const labelHeight = 10
 
-	// Get port status from link properties
+	// Get port status and NOS names from link properties
 	srcPortStatus := link.Properties[PropSourcePortStatus]
 	tgtPortStatus := link.Properties[PropTargetPortStatus]
+	srcPortNOS := link.Properties[PropSourcePortNOS]
+	tgtPortNOS := link.Properties[PropTargetPortNOS]
 
 	// Create styles with colors based on port status
 	srcTextStyle := fmt.Sprintf("text;html=1;strokeColor=#888888;strokeWidth=0.5;"+
@@ -1147,45 +1157,51 @@ func generateEdgeLabels(model *MxGraphModel, edgeID string, link Link, srcX, src
 	srcLabelID := fmt.Sprintf("%s_src_label", edgeID)
 	tgtLabelID := fmt.Sprintf("%s_tgt_label", edgeID)
 
-	// Create source port label as a separate text element
-	srcLabelCell := MxCell{
-		ID:     srcLabelID,
-		Parent: "1", // Attach directly to the root, not to the edge
-		Value:  srcText,
-		Style:  srcTextStyle,
-		Vertex: "1",
-		Geometry: &Geometry{
-			X:      srcLabelX - float64(srcWidth)/2,    // Center the text horizontally
-			Y:      srcLabelY - float64(labelHeight)/2, // Center the text vertically
-			Width:  srcWidth,
-			Height: labelHeight,
-			As:     "geometry",
+	// Create source port label as UserObject with Ethernet name as tooltip
+	srcLabelObj := UserObject{
+		Label:   srcText,
+		Tooltip: srcPortNOS,
+		ID:      srcLabelID,
+		MxCell: &MxCell{
+			Parent: "1", // Attach directly to the root, not to the edge
+			Style:  srcTextStyle,
+			Vertex: "1",
+			Geometry: &Geometry{
+				X:      srcLabelX - float64(srcWidth)/2,    // Center the text horizontally
+				Y:      srcLabelY - float64(labelHeight)/2, // Center the text vertically
+				Width:  srcWidth,
+				Height: labelHeight,
+				As:     "geometry",
+			},
 		},
 	}
 
-	// Create target port label as a separate text element
-	tgtLabelCell := MxCell{
-		ID:     tgtLabelID,
-		Parent: "1", // Attach directly to the root, not to the edge
-		Value:  tgtText,
-		Style:  tgtTextStyle,
-		Vertex: "1",
-		Geometry: &Geometry{
-			X:      tgtLabelX - float64(tgtWidth)/2,    // Center the text horizontally
-			Y:      tgtLabelY - float64(labelHeight)/2, // Center the text vertically
-			Width:  tgtWidth,
-			Height: labelHeight,
-			As:     "geometry",
+	// Create target port label as UserObject with Ethernet name as tooltip
+	tgtLabelObj := UserObject{
+		Label:   tgtText,
+		Tooltip: tgtPortNOS,
+		ID:      tgtLabelID,
+		MxCell: &MxCell{
+			Parent: "1", // Attach directly to the root, not to the edge
+			Style:  tgtTextStyle,
+			Vertex: "1",
+			Geometry: &Geometry{
+				X:      tgtLabelX - float64(tgtWidth)/2,    // Center the text horizontally
+				Y:      tgtLabelY - float64(labelHeight)/2, // Center the text vertically
+				Width:  tgtWidth,
+				Height: labelHeight,
+				As:     "geometry",
+			},
 		},
 	}
 
-	// Add the label cells to the model only if they have text
+	// Add the label objects to the model only if they have text
 	if srcPort != "" {
-		model.Root.MxCell = append(model.Root.MxCell, srcLabelCell)
+		model.Root.UserObject = append(model.Root.UserObject, srcLabelObj)
 	}
 
 	if tgtPort != "" {
-		model.Root.MxCell = append(model.Root.MxCell, tgtLabelCell)
+		model.Root.UserObject = append(model.Root.UserObject, tgtLabelObj)
 	}
 
 	// Store edge position data for speed label layer creation later (only when agent data available)
@@ -1860,9 +1876,8 @@ func createLinkSpeedLayer(model *MxGraphModel) {
 	}
 	model.Root.MxCell = append(model.Root.MxCell, speedLayer)
 
-	// Create speed labels and Ethernet interface labels for each edge
+	// Create speed labels for each edge
 	const labelHeight = 10
-	const fixedDistance = 30.0 // Same distance as port labels
 
 	for _, edgeData := range edgePositions {
 		// Calculate edge properties
@@ -1881,11 +1896,10 @@ func createLinkSpeedLayer(model *MxGraphModel) {
 		// Calculate vertical offset from rotation
 		verticalOffset := calculateVerticalOffset(edgeData.Rotation)
 
-		// Calculate perpendicular vector for vertical adjustment
-		perpX := -edgeData.UnitY
+		// Calculate perpendicular Y component for vertical adjustment
 		perpY := edgeData.UnitX
 
-		// 1. Create speed label in the middle with semi-transparent background (only if speed exists)
+		// Create speed label in the middle
 		if edgeData.Link.Speed != "" {
 			speedText := fmt.Sprintf("<span style=\"font-size:10px;\">%s</span>", edgeData.Link.Speed)
 			speedWidth := len(edgeData.Link.Speed)*4 + 8
@@ -1911,78 +1925,6 @@ func createLinkSpeedLayer(model *MxGraphModel) {
 				},
 			}
 			model.Root.MxCell = append(model.Root.MxCell, speedLabelCell)
-		}
-
-		// 2. Create Ethernet interface name labels (source and target) with status-based colors
-		srcNOS := edgeData.Link.Properties[PropSourcePortNOS]
-		tgtNOS := edgeData.Link.Properties[PropTargetPortNOS]
-		srcStatus := edgeData.Link.Properties[PropSourcePortStatus]
-		tgtStatus := edgeData.Link.Properties[PropTargetPortStatus]
-
-		// Source Ethernet label (if available)
-		if srcNOS != "" {
-			// Use exact port name as it appears in the API
-			srcNOSText := fmt.Sprintf("<span style=\"font-size:10px;\">%s</span>", srcNOS)
-			srcNOSWidth := len(srcNOS)*4 + 8
-
-			srcNOSStyle := fmt.Sprintf("text;html=1;strokeColor=#888888;strokeWidth=0.5;"+
-				"fillColor=%s;fillOpacity=80;align=center;verticalAlign=middle;"+
-				"whiteSpace=wrap;rounded=1;fontSize=10;rotation=%.1f;",
-				getPortLabelColor(srcStatus), edgeData.Rotation)
-
-			// Position: same as source port label
-			srcLabelX := edgeData.SrcX + (edgeData.UnitX * fixedDistance) + (perpX * verticalOffset)
-			srcLabelY := edgeData.SrcY + (edgeData.UnitY * fixedDistance) + (perpY * verticalOffset)
-
-			srcNOSLabelID := fmt.Sprintf("%s_src_nos", edgeData.EdgeID)
-			srcNOSLabelCell := MxCell{
-				ID:     srcNOSLabelID,
-				Parent: "link_speed_layer",
-				Value:  srcNOSText,
-				Style:  srcNOSStyle,
-				Vertex: "1",
-				Geometry: &Geometry{
-					X:      srcLabelX - float64(srcNOSWidth)/2,
-					Y:      srcLabelY - float64(labelHeight)/2,
-					Width:  srcNOSWidth,
-					Height: labelHeight,
-					As:     "geometry",
-				},
-			}
-			model.Root.MxCell = append(model.Root.MxCell, srcNOSLabelCell)
-		}
-
-		// Target Ethernet label (if available)
-		if tgtNOS != "" {
-			// Use exact port name as it appears in the API
-			tgtNOSText := fmt.Sprintf("<span style=\"font-size:10px;\">%s</span>", tgtNOS)
-			tgtNOSWidth := len(tgtNOS)*4 + 8
-
-			tgtNOSStyle := fmt.Sprintf("text;html=1;strokeColor=#888888;strokeWidth=0.5;"+
-				"fillColor=%s;fillOpacity=80;align=center;verticalAlign=middle;"+
-				"whiteSpace=wrap;rounded=1;fontSize=10;rotation=%.1f;",
-				getPortLabelColor(tgtStatus), edgeData.Rotation)
-
-			// Position: same as target port label
-			tgtLabelX := edgeData.TgtX - (edgeData.UnitX * fixedDistance) + (perpX * verticalOffset)
-			tgtLabelY := edgeData.TgtY - (edgeData.UnitY * fixedDistance) + (perpY * verticalOffset)
-
-			tgtNOSLabelID := fmt.Sprintf("%s_tgt_nos", edgeData.EdgeID)
-			tgtNOSLabelCell := MxCell{
-				ID:     tgtNOSLabelID,
-				Parent: "link_speed_layer",
-				Value:  tgtNOSText,
-				Style:  tgtNOSStyle,
-				Vertex: "1",
-				Geometry: &Geometry{
-					X:      tgtLabelX - float64(tgtNOSWidth)/2,
-					Y:      tgtLabelY - float64(labelHeight)/2,
-					Width:  tgtNOSWidth,
-					Height: labelHeight,
-					As:     "geometry",
-				},
-			}
-			model.Root.MxCell = append(model.Root.MxCell, tgtNOSLabelCell)
 		}
 	}
 }
