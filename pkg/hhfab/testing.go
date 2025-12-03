@@ -104,10 +104,11 @@ func (c *Config) Wait(ctx context.Context, vlab *VLAB) error {
 }
 
 type WaitReadyOpts struct {
-	AppliedFor   time.Duration
-	Timeout      time.Duration
-	PollInterval time.Duration
-	PrintEvery   int
+	AppliedFor          time.Duration
+	Timeout             time.Duration
+	PollInterval        time.Duration
+	PrintEvery          int
+	StabilizationPeriod time.Duration
 }
 
 func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) error {
@@ -308,6 +309,17 @@ func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) erro
 
 		if len(swNotReady) == 0 && len(gwNotReady) == 0 {
 			slog.Info("All switches and gateways are ready", "took", time.Since(start))
+
+			// Wait additional time for fabric convergence after agents are ready
+			if opts.StabilizationPeriod > 0 {
+				slog.Info("Waiting for fabric stabilization", "period", opts.StabilizationPeriod)
+				select {
+				case <-ctx.Done():
+					return fmt.Errorf("cancelled during stabilization: %w", ctx.Err())
+				case <-time.After(opts.StabilizationPeriod):
+					slog.Info("Fabric stabilization complete")
+				}
+			}
 
 			return nil
 		}
