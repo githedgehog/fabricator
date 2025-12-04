@@ -4,6 +4,7 @@ reloader:
   reloadOnCreate: true
   syncAfterRestart: true
   reloadStrategy: default
+  ignoreJobs: true
 
 image:
   repository: {{ .Repo}}
