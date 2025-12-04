@@ -29,10 +29,10 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apiextv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
-	kapierrors "k8s.io/apimachinery/pkg/api/errors"
 	kmeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/util/retry"
 	metricsapi "k8s.io/metrics/pkg/apis/metrics/v1beta1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/scheme"
@@ -243,22 +243,18 @@ func collectKubeObjects(ctx context.Context, kube kclient.Reader, scheme *runtim
 		objListValue := reflect.New(objListType)
 		objList := objListValue.Interface().(kclient.ObjectList)
 
-		if err := kube.List(ctx, objList); err != nil {
-			if kmeta.IsNoMatchError(err) {
-				if os.Getenv("GITHUB_ACTIONS") != githubActionsValue {
-					slog.Debug("Skipping Kube resource, no match", "gvk", gvk.String(), "err", err)
+		if err := retry.OnError(longBackoff, func(err error) bool { return true }, func() error {
+			if err := kube.List(ctx, objList); err != nil {
+				if kmeta.IsNoMatchError(err) {
+					return nil
 				}
 
-				continue
+				return fmt.Errorf("listing %s: %w", gvk.String(), err)
 			}
 
-			if kapierrors.IsServiceUnavailable(err) {
-				slog.Warn("Skipping Kube resource, service unavailable; please try re-running later", "gvk", gvk.String(), "err", err)
-
-				continue
-			}
-
-			return fmt.Errorf("listing %s: %w", gvk.String(), err)
+			return nil
+		}); err != nil {
+			return fmt.Errorf("retrying: %w", err)
 		}
 
 		items := objListValue.Elem().FieldByName("Items")
@@ -267,7 +263,7 @@ func collectKubeObjects(ctx context.Context, kube kclient.Reader, scheme *runtim
 		}
 
 		itemsLen := items.Len()
-		for idx := 0; idx < itemsLen; idx++ {
+		for idx := range itemsLen {
 			itemValue, ok := items.Index(idx).Addr().Interface().(kclient.Object)
 			if !ok {
 				return fmt.Errorf("item %d of %s list is not a client object", idx, gvk.String()) //nolint:goerr113

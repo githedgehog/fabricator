@@ -10,12 +10,24 @@ import (
 	"log/slog"
 	"os"
 	"os/user"
+	"time"
 
 	"go.githedgehog.com/fabricator/pkg/version"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 )
 
+var longBackoff = wait.Backoff{
+	Steps:    10,
+	Duration: 100 * time.Millisecond,
+	Factor:   2.0,
+	Jitter:   0,
+}
+
 func Collect(ctx context.Context, name, kubeconfigPath string) (*Dump, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
 	hostname, err := os.Hostname()
 	if err != nil {
 		slog.Warn("Can't get hostname, skipping", "err", err)
