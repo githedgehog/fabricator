@@ -50,7 +50,8 @@ type Dump struct {
 type PodLogs map[string]ContainerLogs // Logs for all containers in the pod: container name -> logs
 
 type ContainerLogs struct {
-	Current string `json:"current,omitempty"`
+	Current  string `json:"current,omitempty"`
+	Previous string `json:"previous,omitempty"`
 }
 
 func Marshal(d *Dump) ([]byte, error) {
