@@ -2321,7 +2321,7 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string,
 			slog.Warn("iperf3 server error, but could not retrieve error message from command output", "parseErr", parseErr, "stdout", stdout, "stderr", stderr)
 			ie.ServerMsg = fmt.Sprintf("%s: %s", err, stderr)
 
-			return fmt.Errorf("running iperf3 server: %w", err)
+			return fmt.Errorf("running iperf3 server: %w (stderr: %s)", err, stderr)
 		}
 		if parseErr != nil {
 			ie.ServerMsg = fmt.Sprintf("cannot parse iperf3 report: %s", parseErr)
@@ -2354,7 +2354,7 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string,
 			}
 			ie.ClientMsg = fmt.Sprintf("%s: %s", err, stderr)
 
-			return fmt.Errorf("running iperf3 client: %w", err)
+			return fmt.Errorf("running iperf3 client: %w (stderr: %s)", err, stderr)
 		}
 		if parseErr != nil {
 			ie.ClientMsg = fmt.Sprintf("cannot parse iperf3 report: %s", parseErr)
