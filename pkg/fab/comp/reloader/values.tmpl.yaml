@@ -4,8 +4,10 @@ reloader:
   reloadOnCreate: true
   syncAfterRestart: true
   reloadStrategy: default
+  ignoreJobs: true
 
-  deployment:
-    image:
-      name: {{ .Repo }}
-      tag: {{ .Tag }}
+image:
+  repository: {{ .Repo}}
+  tag: {{ .Tag }}
+  pullPolicy: IfNotPresent
+

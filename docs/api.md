@@ -688,6 +688,7 @@ _Appears in:_
 | `k9s` _[Version](#version)_ |  |  |  |
 | `toolbox` _[Version](#version)_ |  |  |  |
 | `reloader` _[Version](#version)_ |  |  |  |
+| `reloaderChart` _[Version](#version)_ |  |  |  |
 | `ntp` _[Version](#version)_ |  |  |  |
 | `ntpChart` _[Version](#version)_ |  |  |  |
 | `alloy` _[Version](#version)_ |  |  |  |

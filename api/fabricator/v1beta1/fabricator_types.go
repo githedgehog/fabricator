@@ -370,6 +370,7 @@ type PlatformVersions struct {
 	K9s               meta.Version `json:"k9s,omitempty"`
 	Toolbox           meta.Version `json:"toolbox,omitempty"`
 	Reloader          meta.Version `json:"reloader,omitempty"`
+	ReloaderChart     meta.Version `json:"reloaderChart,omitempty"`
 	NTP               meta.Version `json:"ntp,omitempty"`
 	NTPChart          meta.Version `json:"ntpChart,omitempty"`
 	Alloy             meta.Version `json:"alloy,omitempty"`

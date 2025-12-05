@@ -48,7 +48,7 @@ KUBECTL="/opt/bin/kubectl"
     $KUBECTL get pods -A -o wide
 
     echo -e "\n=== Kubernetes Events ==="
-    $KUBECTL get events -A
+    $KUBECTL get events -A --sort-by='.metadata.creationTimestamp'
 } >> "$OUTPUT_FILE" 2>&1
 
 # ---------------------------
