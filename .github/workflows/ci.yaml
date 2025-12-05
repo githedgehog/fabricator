@@ -119,12 +119,13 @@ jobs:
   # faster build installer without airgap using hosted runners and ghcr.io
   bundle:
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    timeout-minutes: 45
 
     needs:
       - test-build
 
     strategy:
+      fail-fast: false
       matrix:
         os:
           - ubuntu-latest-x86-4-cores
