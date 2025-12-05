@@ -23,9 +23,6 @@
             }
           ],
           "defaultPolicy": []
-        },
-        "__kubeprobe": {
-          "anonymousPolicy": ["read"]
         }
       },
       "adminPolicy": {
