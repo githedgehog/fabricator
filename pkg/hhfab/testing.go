@@ -2308,8 +2308,21 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string,
 	g, ctx := errgroup.WithContext(ctx)
 
 	g.Go(func() error {
+		// Log iperf3 server invocation for diagnostics
+		timestamp := time.Now().Format(time.RFC3339)
+		logCmd := fmt.Sprintf("echo '[%s] iperf3 server start: from=%s' >> /tmp/iperf3-activity.log", timestamp, from)
+		_, _, _ = retrySSHCmd(ctx, toSSH, logCmd, to)
+
 		cmd := fmt.Sprintf("toolbox -E LD_PRELOAD=/lib/x86_64-linux-gnu/libgcc_s.so.1 -q timeout %d iperf3 -s -1 -J", opts.IPerfsSeconds+25)
 		stdout, stderr, err := retrySSHCmd(ctx, toSSH, cmd, to)
+
+		// Log iperf3 server result for diagnostics
+		exitStatus := "pass"
+		if err != nil {
+			exitStatus = "fail"
+		}
+		logCmd = fmt.Sprintf("echo '[%s] iperf3 server end: from=%s status=%s err=%q stderr=%q' >> /tmp/iperf3-activity.log", time.Now().Format(time.RFC3339), from, exitStatus, err, stderr)
+		_, _, _ = retrySSHCmd(ctx, toSSH, logCmd, to)
 
 		report, parseErr := parseIPerf3Report([]byte(stdout))
 		if err != nil {
@@ -2336,6 +2349,12 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string,
 		// We could netcat to check if the server is up, but that will make the server shut down if
 		// it was started with -1, and if we don't add -1 it will run until the timeout
 		time.Sleep(1 * time.Second)
+
+		// Log iperf3 client invocation for diagnostics
+		timestamp := time.Now().Format(time.RFC3339)
+		logCmd := fmt.Sprintf("echo '[%s] iperf3 client start: to=%s' >> /tmp/iperf3-activity.log", timestamp, to)
+		_, _, _ = retrySSHCmd(ctx, fromSSH, logCmd, from)
+
 		cmd := fmt.Sprintf("toolbox -E LD_PRELOAD=/lib/x86_64-linux-gnu/libgcc_s.so.1 -q timeout %d iperf3 -P 4 -J -c %s -t %d", opts.IPerfsSeconds+25, toIP.String(), opts.IPerfsSeconds)
 
 		if opts.IPerfsDSCP > 0 {
@@ -2345,6 +2364,14 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string,
 			cmd += fmt.Sprintf(" --tos %d", opts.IPerfsTOS)
 		}
 		stdout, stderr, err := retrySSHCmd(ctx, fromSSH, cmd, from)
+
+		// Log iperf3 client result for diagnostics
+		exitStatus := "pass"
+		if err != nil {
+			exitStatus = "fail"
+		}
+		logCmd = fmt.Sprintf("echo '[%s] iperf3 client end: to=%s status=%s err=%q stderr=%q' >> /tmp/iperf3-activity.log", time.Now().Format(time.RFC3339), to, exitStatus, err, stderr)
+		_, _, _ = retrySSHCmd(ctx, fromSSH, logCmd, from)
 		report, parseErr := parseIPerf3Report([]byte(stdout))
 		if err != nil {
 			if parseErr == nil && report.Error != "" {
