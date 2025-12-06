@@ -333,18 +333,19 @@ func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) erro
 }
 
 type SetupVPCsOpts struct {
-	WaitSwitchesReady bool
-	ForceCleanup      bool
-	VLANNamespace     string
-	IPv4Namespace     string
-	ServersPerSubnet  int
-	SubnetsPerVPC     int
-	DNSServers        []string
-	TimeServers       []string
-	InterfaceMTU      uint16
-	HashPolicy        string
-	VPCMode           vpcapi.VPCMode
-	KeepPeerings      bool
+	WaitSwitchesReady   bool
+	ForceCleanup        bool
+	StabilizationPeriod time.Duration
+	VLANNamespace       string
+	IPv4Namespace       string
+	ServersPerSubnet    int
+	SubnetsPerVPC       int
+	DNSServers          []string
+	TimeServers         []string
+	InterfaceMTU        uint16
+	HashPolicy          string
+	VPCMode             vpcapi.VPCMode
+	KeepPeerings        bool
 }
 
 func CreateOrUpdateVpc(ctx context.Context, kube client.Client, vpc *vpcapi.VPC) (bool, error) {
@@ -787,7 +788,11 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		case <-time.After(15 * time.Second):
 		}
 
-		if err := WaitReady(ctx, kube, WaitReadyOpts{AppliedFor: 15 * time.Second, Timeout: 10 * time.Minute}); err != nil {
+		if err := WaitReady(ctx, kube, WaitReadyOpts{
+			AppliedFor:          15 * time.Second,
+			Timeout:             10 * time.Minute,
+			StabilizationPeriod: opts.StabilizationPeriod,
+		}); err != nil {
 			return fmt.Errorf("waiting for ready: %w", err)
 		}
 	}
