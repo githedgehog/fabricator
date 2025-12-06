@@ -720,6 +720,16 @@ func (c *Config) collectShowTech(ctx context.Context, entryName string, ssh *ssh
 		return fmt.Errorf("downloading show-tech output from %s: %w", entryName, err)
 	}
 
+	// Also download the error summary file if it exists
+	remoteErrorPath := "/tmp/show-tech-errors.log"
+	localErrorPath := filepath.Join(outputDir, entryName+"-show-tech-errors.log")
+	if err := ssh.DownloadPath(remoteErrorPath, localErrorPath); err != nil {
+		// Don't fail if error file doesn't exist (older scripts might not generate it)
+		slog.Debug("Error file not available", "entry", entryName, "err", err)
+	} else {
+		slog.Debug("Error summary collected", "entry", entryName, "output", localErrorPath)
+	}
+
 	slog.Debug("Show tech collected successfully", "entry", entryName, "output", localFilePath)
 
 	return nil
