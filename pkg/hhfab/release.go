@@ -3823,6 +3823,7 @@ func makeTestCtx(ctx context.Context, kube kclient.Client, setupOpts SetupVPCsOp
 	if hasVirtualSwitches {
 		testCtx.wrOpts.StabilizationPeriod = 45 * time.Second
 		testCtx.wrOpts.Timeout = 10 * time.Minute
+		testCtx.setupOpts.StabilizationPeriod = 45 * time.Second
 	}
 	if rtOpts.Extended {
 		testCtx.tcOpts.IPerfsSeconds = 10
