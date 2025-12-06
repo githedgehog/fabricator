@@ -2586,9 +2586,10 @@ func CollectN[E any](n int, seq iter.Seq[E]) []E {
 }
 
 type InspectOpts struct {
-	WaitAppliedFor time.Duration
-	Strict         bool
-	Attempts       int
+	WaitAppliedFor      time.Duration
+	StabilizationPeriod time.Duration
+	Strict              bool
+	Attempts            int
 }
 
 func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) error {
@@ -2610,7 +2611,28 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 
 	fail := false
 
-	if err := WaitReady(ctx, kube, WaitReadyOpts{AppliedFor: opts.WaitAppliedFor, Timeout: 30 * time.Minute}); err != nil {
+	// Detect if we have virtual switches to adjust stabilization period
+	stabilizationPeriod := opts.StabilizationPeriod
+	if stabilizationPeriod == 0 {
+		switches := &wiringapi.SwitchList{}
+		if err := kube.List(ctx, switches); err == nil {
+			for _, sw := range switches.Items {
+				if sw.Spec.Profile == meta.SwitchProfileVS || sw.Spec.Profile == meta.SwitchProfileVSCLSP {
+					// Virtual switches need extra time for fabric convergence
+					stabilizationPeriod = 45 * time.Second
+					slog.Info("Detected virtual switches, using extended stabilization period", "period", stabilizationPeriod)
+
+					break
+				}
+			}
+		}
+	}
+
+	if err := WaitReady(ctx, kube, WaitReadyOpts{
+		AppliedFor:          opts.WaitAppliedFor,
+		Timeout:             30 * time.Minute,
+		StabilizationPeriod: stabilizationPeriod,
+	}); err != nil {
 		slog.Error("Failed to wait for ready", "err", err)
 		fail = true
 	}
