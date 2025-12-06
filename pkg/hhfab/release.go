@@ -3784,6 +3784,120 @@ func (testCtx *VPCPeeringTestCtx) collectShowTechForTest(ctx context.Context, te
 	default:
 		slog.Info("Show tech for test collected successfully", "test", test.Name, "folder", testOutputDir)
 	}
+
+	// Write test failure context file
+	if successCount.Load() > 0 {
+		testCtx.writeTestFailureContext(testOutputDir, test)
+	}
+}
+
+// writeTestFailureContext writes a human-readable context file for test failure analysis
+func (testCtx *VPCPeeringTestCtx) writeTestFailureContext(outputDir string, test *JUnitTestCase) {
+	contextFile := filepath.Join(outputDir, "_test-failure-context.txt")
+
+	var content strings.Builder
+
+	content.WriteString("TEST FAILURE CONTEXT\n")
+	content.WriteString("====================\n\n")
+
+	// Test metadata
+	content.WriteString(fmt.Sprintf("Test Name: %s\n", test.Name))
+	if test.ClassName != "" {
+		content.WriteString(fmt.Sprintf("Test Suite: %s\n", test.ClassName))
+	}
+	content.WriteString(fmt.Sprintf("Collection Time: %s\n", time.Now().Format(time.RFC3339)))
+	content.WriteString(fmt.Sprintf("Test Duration: %.2fs\n\n", test.Time))
+
+	// Failure information
+	if test.Failure != nil {
+		content.WriteString("FAILURE:\n")
+		content.WriteString(fmt.Sprintf("%s\n\n", test.Failure.Message))
+	}
+
+	// VPC Configuration
+	content.WriteString("VPC CONFIGURATION:\n")
+	content.WriteString(fmt.Sprintf("  Mode: %s\n", testCtx.setupOpts.VPCMode))
+	content.WriteString(fmt.Sprintf("  Servers Per Subnet: %d\n", testCtx.setupOpts.ServersPerSubnet))
+	content.WriteString(fmt.Sprintf("  Subnets Per VPC: %d\n", testCtx.setupOpts.SubnetsPerVPC))
+	if testCtx.setupOpts.VLANNamespace != "" {
+		content.WriteString(fmt.Sprintf("  VLAN Namespace: %s\n", testCtx.setupOpts.VLANNamespace))
+	}
+	if testCtx.setupOpts.IPv4Namespace != "" {
+		content.WriteString(fmt.Sprintf("  IPv4 Namespace: %s\n", testCtx.setupOpts.IPv4Namespace))
+	}
+	content.WriteString(fmt.Sprintf("  Hash Policy: %s\n", testCtx.setupOpts.HashPolicy))
+	if testCtx.setupOpts.InterfaceMTU > 0 {
+		content.WriteString(fmt.Sprintf("  Interface MTU: %d\n", testCtx.setupOpts.InterfaceMTU))
+	}
+	content.WriteString("\n")
+
+	// Test connectivity options
+	content.WriteString("TEST CONNECTIVITY SETTINGS:\n")
+	content.WriteString(fmt.Sprintf("  Pings Count: %d\n", testCtx.tcOpts.PingsCount))
+	content.WriteString(fmt.Sprintf("  IPerf Seconds: %d\n", testCtx.tcOpts.IPerfsSeconds))
+	if testCtx.tcOpts.IPerfsMinSpeed > 0 {
+		content.WriteString(fmt.Sprintf("  IPerf Min Speed: %.0f Mbps\n", testCtx.tcOpts.IPerfsMinSpeed))
+	}
+	content.WriteString(fmt.Sprintf("  Curls Count: %d\n", testCtx.tcOpts.CurlsCount))
+	content.WriteString(fmt.Sprintf("  Require All Servers: %v\n", testCtx.tcOpts.RequireAllServers))
+	content.WriteString("\n")
+
+	// Wait/stability settings
+	content.WriteString("FABRIC WAIT SETTINGS:\n")
+	content.WriteString(fmt.Sprintf("  Applied For: %s\n", testCtx.wrOpts.AppliedFor))
+	content.WriteString(fmt.Sprintf("  Timeout: %s\n", testCtx.wrOpts.Timeout))
+	if testCtx.wrOpts.StabilizationPeriod > 0 {
+		content.WriteString(fmt.Sprintf("  Stabilization Period: %s\n", testCtx.wrOpts.StabilizationPeriod))
+	} else {
+		content.WriteString("  Stabilization Period: NONE (may cause timing issues!)\n")
+	}
+	if testCtx.setupOpts.StabilizationPeriod > 0 {
+		content.WriteString(fmt.Sprintf("  VPC Setup Stabilization: %s\n", testCtx.setupOpts.StabilizationPeriod))
+	} else {
+		content.WriteString("  VPC Setup Stabilization: NONE (may cause timing issues!)\n")
+	}
+	content.WriteString("\n")
+
+	// Test context flags
+	content.WriteString("TEST CONTEXT:\n")
+	content.WriteString(fmt.Sprintf("  Wipe Between Tests: %v\n", testCtx.wipeBetweenTests))
+	content.WriteString(fmt.Sprintf("  Extended Tests: %v\n", testCtx.extended))
+	content.WriteString(fmt.Sprintf("  Fail Fast: %v\n", testCtx.failFast))
+	content.WriteString("\n")
+
+	// VLAB information
+	if testCtx.vlab != nil {
+		content.WriteString("VLAB INFORMATION:\n")
+		content.WriteString(fmt.Sprintf("  Total VMs: %d\n", len(testCtx.vlab.VMs)))
+
+		// Count VM types
+		vmTypes := make(map[VMType]int)
+		for _, vm := range testCtx.vlab.VMs {
+			vmTypes[vm.Type]++
+		}
+		for vmType, count := range vmTypes {
+			content.WriteString(fmt.Sprintf("    %s: %d\n", vmType, count))
+		}
+		content.WriteString("\n")
+	}
+
+	// Helpful analysis hints
+	content.WriteString("ANALYSIS HINTS:\n")
+	content.WriteString("  - Check _errors.log for recent errors from switches/servers\n")
+	content.WriteString("  - Look for VLAN/VRF configuration errors around test start time\n")
+	content.WriteString("  - Compare routing tables across switches for consistency\n")
+	content.WriteString("  - Verify BGP sessions are established between all fabric peers\n")
+	content.WriteString("  - Check if anycast gateway IPs are reachable from servers\n")
+	if testCtx.wrOpts.StabilizationPeriod == 0 || testCtx.setupOpts.StabilizationPeriod == 0 {
+		content.WriteString("  - WARNING: No stabilization period configured - fabric may not have converged!\n")
+	}
+	content.WriteString("\n")
+
+	if err := os.WriteFile(contextFile, []byte(content.String()), 0o600); err != nil {
+		slog.Warn("Failed to write test failure context file", "err", err)
+	} else {
+		slog.Info("Wrote test failure context file", "file", contextFile)
+	}
 }
 
 func makeTestCtx(ctx context.Context, kube kclient.Client, setupOpts SetupVPCsOpts, vlabCfg *Config, vlab *VLAB, wipeBetweenTests bool, rtOpts ReleaseTestOpts) *VPCPeeringTestCtx {
