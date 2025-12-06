@@ -14,6 +14,7 @@ import (
 
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab"
+	"go.githedgehog.com/fabricator/pkg/hhfab/timeline"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 	"oras.land/oras-go/v2/registry/remote/credentials"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -45,6 +46,7 @@ type Config struct {
 	Controls []fabapi.ControlNode
 	Nodes    []fabapi.FabNode
 	Client   kclient.Reader // all resources (fab, fabric and gateway)
+	timeline *timeline.Timeline
 }
 
 type RegistryConfig struct {

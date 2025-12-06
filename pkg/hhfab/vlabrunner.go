@@ -33,6 +33,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
 	vlabcomp "go.githedgehog.com/fabricator/pkg/fab/comp/vlab"
 	"go.githedgehog.com/fabricator/pkg/fab/recipe"
+	"go.githedgehog.com/fabricator/pkg/hhfab/timeline"
 	"go.githedgehog.com/fabricator/pkg/util/butaneutil"
 	"go.githedgehog.com/fabricator/pkg/util/sshutil"
 	"go.githedgehog.com/fabricator/pkg/util/tmplutil"
@@ -162,6 +163,22 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 	defer cancel()
 
 	start := time.Now()
+
+	// Create timeline logger
+	timelinePath := filepath.Join(c.WorkDir, "vlab-timeline.txt")
+	tl, err := timeline.New(timelinePath)
+	if err != nil {
+		slog.Warn("Failed to create timeline", "err", err)
+		// Continue without timeline
+	} else {
+		c.timeline = tl
+		defer func() {
+			if c.timeline != nil {
+				c.timeline.Close()
+			}
+		}()
+		c.timeline.Log("[VLAB] Starting VLAB run")
+	}
 
 	for _, cmd := range opts.OnReady {
 		if !slices.Contains(AllOnReady, cmd) {
@@ -486,6 +503,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 	}
 
 	slog.Info("Starting VMs", "count", len(vlab.VMs), "cpu", fmt.Sprintf("%d vCPUs", cpu), "ram", fmt.Sprintf("%d MB", ram), "disk", fmt.Sprintf("%d GB", disk))
+	c.timeline.Logf("[BOOT] Starting %d VMs", len(vlab.VMs))
 
 	group.Go(func() error {
 		go func() {
@@ -500,6 +518,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 		}
 
 		slog.Info("All VMs are ready")
+		c.timeline.Log("[READY] All VMs are ready")
 
 		expected := map[string]bool{}
 		for _, vm := range vlab.VMs {
@@ -509,6 +528,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 		}
 
 		slog.Info("Waiting for all nodes to show up in K8s", "expected", lo.Keys(expected))
+		c.timeline.Logf("[WAIT] Waiting for %d K8s nodes", len(expected))
 
 		kubeconfig := filepath.Join(c.WorkDir, VLABDir, VLABKubeConfig)
 		ready := false
@@ -579,9 +599,11 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 			ready = true
 
 			slog.Info("All K8s nodes are ready")
+			c.timeline.Log("[READY] All K8s nodes are ready")
 		}
 
 		slog.Info("VLAB is ready", "took", time.Since(start))
+		c.timeline.Log("[READY] VLAB is ready")
 
 		if err := func() error {
 			onReadyStart := time.Now()
@@ -591,6 +613,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 
 			for _, cmd := range opts.OnReady {
 				slog.Info("Running on-ready command", "command", cmd)
+				c.timeline.Logf("[CMD] Running on-ready: %s", cmd)
 				switch cmd {
 				case OnReadySwitchReinstall:
 					if err := c.VLABSwitchReinstall(ctx, SwitchReinstallOpts{
@@ -736,6 +759,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 
 			if len(opts.OnReady) > 0 {
 				slog.Info("All on-ready commands finished", "took", time.Since(onReadyStart))
+				c.timeline.Log("[CMD] All on-ready commands finished")
 			}
 
 			return nil

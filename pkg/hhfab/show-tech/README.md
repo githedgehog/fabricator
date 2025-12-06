@@ -45,6 +45,9 @@ All files saved to: show-tech-output/{timestamp}/
 ### Directory Structure
 
 ```
+Working directory root:
+├── vlab-timeline.txt              # Execution timeline (Phase 2.2)
+
 show-tech-output/
 └── 2025-01-06T12-34-56/          # Timestamp of collection
     ├── _test-failure-context.txt  # Test metadata and analysis hints
@@ -80,6 +83,27 @@ show-tech-output/
 - Test name, VPC configuration, timing settings
 - Created only when show-tech is collected after test failure
 - Provides context for understanding what was being tested
+
+#### `vlab-timeline.txt` (Execution Timeline)
+- Chronological log of VLAB execution events with elapsed time
+- **Start here for timing analysis** - shows sequence and duration
+- Contains:
+  - VM boot and readiness events
+  - K8s node join and readiness
+  - OnReady command execution (SetupVPCs, Inspect, tests)
+  - WaitReady calls with stabilization periods
+  - Test start/completion/failure markers
+- Format: `+MM:SS [TAG] Event description`
+- Example:
+  ```
+  +03:35 [WAIT] WaitReady started (applied-for: 15s, stabilization: 0s)
+  +03:50 [WAIT] WaitReady completed
+  +03:50 [TEST] SetupVPCs started
+  +04:15 [TEST] SetupVPCs completed
+  +04:26 [TEST] Inspect started
+  +04:26 [FAIL] Inspect failed
+  ```
+- Immediately reveals timing issues like insufficient stabilization periods
 
 ## Error Extraction Details
 
@@ -291,16 +315,22 @@ The collection code handles this gracefully with debug logging.
    - Understand what test failed and why
    - Note VPC configuration and timing
 
-2. **Check `*-errors.log` files**
+2. **Review `vlab-timeline.txt`**
+   - Check event sequence and timing
+   - Look for insufficient stabilization periods
+   - Identify when failure occurred relative to setup
+   - Spot timing-related issues (too fast, too slow)
+
+3. **Check `*-errors.log` files**
    - Start with switches (usually root cause)
    - Check error counts and specific sections
    - Review top error patterns
 
-3. **Deep dive into `*-show-tech.log`** (if needed)
+4. **Deep dive into `*-show-tech.log`** (if needed)
    - Use error file as guide to find relevant sections
    - Search for specific error messages or timestamps
 
-4. **Cross-reference between nodes**
+5. **Cross-reference between nodes**
    - Compare timestamps across nodes
    - Look for error propagation (switch → server)
 
