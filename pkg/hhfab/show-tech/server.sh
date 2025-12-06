@@ -162,4 +162,23 @@ OUTPUT_FILE="/tmp/show-tech.log"
 
 } >> "$OUTPUT_FILE" 2>&1
 
+# ---------------------------
+# iperf3 Diagnostics
+# ---------------------------
+{
+  echo -e "\n=== iperf3 Activity Log ==="
+  if [ -f /tmp/iperf3-activity.log ]; then
+    cat /tmp/iperf3-activity.log
+  else
+    echo "No iperf3 activity log found"
+  fi
+
+  echo -e "\n=== Currently Running iperf3 Processes ==="
+  ps aux | grep iperf3 | grep -v grep || echo "No iperf3 processes currently running"
+
+  echo -e "\n=== iperf3 Port Status (5201) ==="
+  ss -tulnp | grep 5201 || echo "Port 5201 not in use"
+
+} >> "$OUTPUT_FILE" 2>&1
+
 echo "Diagnostics collected to $OUTPUT_FILE"

@@ -104,10 +104,11 @@ func (c *Config) Wait(ctx context.Context, vlab *VLAB) error {
 }
 
 type WaitReadyOpts struct {
-	AppliedFor   time.Duration
-	Timeout      time.Duration
-	PollInterval time.Duration
-	PrintEvery   int
+	AppliedFor          time.Duration
+	Timeout             time.Duration
+	PollInterval        time.Duration
+	PrintEvery          int
+	StabilizationPeriod time.Duration
 }
 
 func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) error {
@@ -309,6 +310,17 @@ func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) erro
 		if len(swNotReady) == 0 && len(gwNotReady) == 0 {
 			slog.Info("All switches and gateways are ready", "took", time.Since(start))
 
+			// Wait additional time for fabric convergence after agents are ready
+			if opts.StabilizationPeriod > 0 {
+				slog.Info("Waiting for fabric stabilization", "period", opts.StabilizationPeriod)
+				select {
+				case <-ctx.Done():
+					return fmt.Errorf("cancelled during stabilization: %w", ctx.Err())
+				case <-time.After(opts.StabilizationPeriod):
+					slog.Info("Fabric stabilization complete")
+				}
+			}
+
 			return nil
 		}
 
@@ -321,18 +333,19 @@ func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) erro
 }
 
 type SetupVPCsOpts struct {
-	WaitSwitchesReady bool
-	ForceCleanup      bool
-	VLANNamespace     string
-	IPv4Namespace     string
-	ServersPerSubnet  int
-	SubnetsPerVPC     int
-	DNSServers        []string
-	TimeServers       []string
-	InterfaceMTU      uint16
-	HashPolicy        string
-	VPCMode           vpcapi.VPCMode
-	KeepPeerings      bool
+	WaitSwitchesReady   bool
+	ForceCleanup        bool
+	StabilizationPeriod time.Duration
+	VLANNamespace       string
+	IPv4Namespace       string
+	ServersPerSubnet    int
+	SubnetsPerVPC       int
+	DNSServers          []string
+	TimeServers         []string
+	InterfaceMTU        uint16
+	HashPolicy          string
+	VPCMode             vpcapi.VPCMode
+	KeepPeerings        bool
 }
 
 func CreateOrUpdateVpc(ctx context.Context, kube client.Client, vpc *vpcapi.VPC) (bool, error) {
@@ -775,7 +788,11 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		case <-time.After(15 * time.Second):
 		}
 
-		if err := WaitReady(ctx, kube, WaitReadyOpts{AppliedFor: 15 * time.Second, Timeout: 10 * time.Minute}); err != nil {
+		if err := WaitReady(ctx, kube, WaitReadyOpts{
+			AppliedFor:          15 * time.Second,
+			Timeout:             10 * time.Minute,
+			StabilizationPeriod: opts.StabilizationPeriod,
+		}); err != nil {
 			return fmt.Errorf("waiting for ready: %w", err)
 		}
 	}
@@ -2296,8 +2313,21 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string,
 	g, ctx := errgroup.WithContext(ctx)
 
 	g.Go(func() error {
+		// Log iperf3 server invocation for diagnostics
+		timestamp := time.Now().Format(time.RFC3339)
+		logCmd := fmt.Sprintf("echo '[%s] iperf3 server start: from=%s' >> /tmp/iperf3-activity.log", timestamp, from)
+		_, _, _ = retrySSHCmd(ctx, toSSH, logCmd, to)
+
 		cmd := fmt.Sprintf("toolbox -E LD_PRELOAD=/lib/x86_64-linux-gnu/libgcc_s.so.1 -q timeout %d iperf3 -s -1 -J", opts.IPerfsSeconds+25)
 		stdout, stderr, err := retrySSHCmd(ctx, toSSH, cmd, to)
+
+		// Log iperf3 server result for diagnostics
+		exitStatus := "pass"
+		if err != nil {
+			exitStatus = "fail"
+		}
+		logCmd = fmt.Sprintf("echo '[%s] iperf3 server end: from=%s status=%s err=%q stderr=%q' >> /tmp/iperf3-activity.log", time.Now().Format(time.RFC3339), from, exitStatus, err, stderr)
+		_, _, _ = retrySSHCmd(ctx, toSSH, logCmd, to)
 
 		report, parseErr := parseIPerf3Report([]byte(stdout))
 		if err != nil {
@@ -2309,7 +2339,7 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string,
 			slog.Warn("iperf3 server error, but could not retrieve error message from command output", "parseErr", parseErr, "stdout", stdout, "stderr", stderr)
 			ie.ServerMsg = fmt.Sprintf("%s: %s", err, stderr)
 
-			return fmt.Errorf("running iperf3 server: %w", err)
+			return fmt.Errorf("running iperf3 server: %w (stderr: %s)", err, stderr)
 		}
 		if parseErr != nil {
 			ie.ServerMsg = fmt.Sprintf("cannot parse iperf3 report: %s", parseErr)
@@ -2324,6 +2354,12 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string,
 		// We could netcat to check if the server is up, but that will make the server shut down if
 		// it was started with -1, and if we don't add -1 it will run until the timeout
 		time.Sleep(1 * time.Second)
+
+		// Log iperf3 client invocation for diagnostics
+		timestamp := time.Now().Format(time.RFC3339)
+		logCmd := fmt.Sprintf("echo '[%s] iperf3 client start: to=%s' >> /tmp/iperf3-activity.log", timestamp, to)
+		_, _, _ = retrySSHCmd(ctx, fromSSH, logCmd, from)
+
 		cmd := fmt.Sprintf("toolbox -E LD_PRELOAD=/lib/x86_64-linux-gnu/libgcc_s.so.1 -q timeout %d iperf3 -P 4 -J -c %s -t %d", opts.IPerfsSeconds+25, toIP.String(), opts.IPerfsSeconds)
 
 		if opts.IPerfsDSCP > 0 {
@@ -2333,6 +2369,14 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string,
 			cmd += fmt.Sprintf(" --tos %d", opts.IPerfsTOS)
 		}
 		stdout, stderr, err := retrySSHCmd(ctx, fromSSH, cmd, from)
+
+		// Log iperf3 client result for diagnostics
+		exitStatus := "pass"
+		if err != nil {
+			exitStatus = "fail"
+		}
+		logCmd = fmt.Sprintf("echo '[%s] iperf3 client end: to=%s status=%s err=%q stderr=%q' >> /tmp/iperf3-activity.log", time.Now().Format(time.RFC3339), to, exitStatus, err, stderr)
+		_, _, _ = retrySSHCmd(ctx, fromSSH, logCmd, from)
 		report, parseErr := parseIPerf3Report([]byte(stdout))
 		if err != nil {
 			if parseErr == nil && report.Error != "" {
@@ -2342,7 +2386,7 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string,
 			}
 			ie.ClientMsg = fmt.Sprintf("%s: %s", err, stderr)
 
-			return fmt.Errorf("running iperf3 client: %w", err)
+			return fmt.Errorf("running iperf3 client: %w (stderr: %s)", err, stderr)
 		}
 		if parseErr != nil {
 			ie.ClientMsg = fmt.Sprintf("cannot parse iperf3 report: %s", parseErr)
@@ -2547,9 +2591,10 @@ func CollectN[E any](n int, seq iter.Seq[E]) []E {
 }
 
 type InspectOpts struct {
-	WaitAppliedFor time.Duration
-	Strict         bool
-	Attempts       int
+	WaitAppliedFor      time.Duration
+	StabilizationPeriod time.Duration
+	Strict              bool
+	Attempts            int
 }
 
 func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) error {
@@ -2571,7 +2616,28 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 
 	fail := false
 
-	if err := WaitReady(ctx, kube, WaitReadyOpts{AppliedFor: opts.WaitAppliedFor, Timeout: 30 * time.Minute}); err != nil {
+	// Detect if we have virtual switches to adjust stabilization period
+	stabilizationPeriod := opts.StabilizationPeriod
+	if stabilizationPeriod == 0 {
+		switches := &wiringapi.SwitchList{}
+		if err := kube.List(ctx, switches); err == nil {
+			for _, sw := range switches.Items {
+				if sw.Spec.Profile == meta.SwitchProfileVS || sw.Spec.Profile == meta.SwitchProfileVSCLSP {
+					// Virtual switches need extra time for fabric convergence
+					stabilizationPeriod = 45 * time.Second
+					slog.Info("Detected virtual switches, using extended stabilization period", "period", stabilizationPeriod)
+
+					break
+				}
+			}
+		}
+	}
+
+	if err := WaitReady(ctx, kube, WaitReadyOpts{
+		AppliedFor:          opts.WaitAppliedFor,
+		Timeout:             30 * time.Minute,
+		StabilizationPeriod: stabilizationPeriod,
+	}); err != nil {
 		slog.Error("Failed to wait for ready", "err", err)
 		fail = true
 	}
@@ -2642,15 +2708,16 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 }
 
 type ReleaseTestOpts struct {
-	Regexes        []string
-	InvertRegex    bool
-	ResultsFile    string
-	Extended       bool
-	FailFast       bool
-	PauseOnFailure bool
-	HashPolicy     string
-	VPCMode        vpcapi.VPCMode
-	ListTests      bool
+	Regexes                  []string
+	InvertRegex              bool
+	ResultsFile              string
+	Extended                 bool
+	FailFast                 bool
+	PauseOnFailure           bool
+	CollectShowTechOnFailure bool
+	HashPolicy               string
+	VPCMode                  vpcapi.VPCMode
+	ListTests                bool
 }
 
 func (c *Config) ReleaseTest(ctx context.Context, vlab *VLAB, opts ReleaseTestOpts) error {
