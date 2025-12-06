@@ -285,4 +285,46 @@ run_sonic_cmd() {
     done
 } >> "$OUTPUT_FILE" 2>&1
 
+# ---------------------------
+# Extract Errors to Separate File
+# ---------------------------
+ERROR_FILE="/tmp/show-tech-errors.log"
+: > "$ERROR_FILE"
+
+{
+    echo "ERROR AND WARNING SUMMARY"
+    echo "========================="
+    echo ""
+    echo "Extracted from: $(hostname) at $(date)"
+    echo ""
+
+    # Extract errors and warnings from main log
+    echo "=== ERRORS AND WARNINGS FROM SHOW-TECH ==="
+    grep -E "ERR|FAIL|WARN|ERROR|WARNING|error|fail" "$OUTPUT_FILE" | grep -v "err-disabled" | head -500
+
+    echo ""
+    echo "=== SUMMARY ==="
+
+    # Count occurrences
+    err_count=$(grep -c "ERR" "$OUTPUT_FILE" 2>/dev/null || echo 0)
+    fail_count=$(grep -c "FAIL" "$OUTPUT_FILE" 2>/dev/null || echo 0)
+    warn_count=$(grep -c "WARN" "$OUTPUT_FILE" 2>/dev/null || echo 0)
+
+    echo "Total ERR messages: $err_count"
+    echo "Total FAIL messages: $fail_count"
+    echo "Total WARN messages: $warn_count"
+
+    echo ""
+    echo "=== MOST COMMON ERROR PATTERNS ==="
+
+    # Find most common error patterns (top 10)
+    grep -E "ERR|FAIL" "$OUTPUT_FILE" 2>/dev/null | \
+        sed 's/[0-9][0-9]:[0-9][0-9]:[0-9][0-9]\.[0-9]*/TIME/g' | \
+        sed 's/Vlan[0-9]*/VlanX/g' | \
+        sed 's/[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}/IP/g' | \
+        sort | uniq -c | sort -rn | head -10 || echo "No patterns found"
+
+} > "$ERROR_FILE" 2>&1
+
 echo "Diagnostics collected to $OUTPUT_FILE"
+echo "Errors extracted to $ERROR_FILE"
