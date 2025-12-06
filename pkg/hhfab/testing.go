@@ -32,6 +32,7 @@ import (
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
+	"go.githedgehog.com/fabricator/pkg/hhfab/timeline"
 	"go.githedgehog.com/fabricator/pkg/util/sshutil"
 	gwapi "go.githedgehog.com/gateway/api/gateway/v1alpha1"
 	gwintapi "go.githedgehog.com/gateway/api/gwint/v1alpha1"
@@ -47,6 +48,21 @@ import (
 	ctrlutil "sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/scheme"
 )
+
+type timelineContextKey struct{}
+
+// timelineFromContext retrieves the timeline from the context if available.
+func timelineFromContext(ctx context.Context) *timeline.Timeline {
+	if tl, ok := ctx.Value(timelineContextKey{}).(*timeline.Timeline); ok {
+		return tl
+	}
+	return nil
+}
+
+// contextWithTimeline attaches a timeline to the context.
+func contextWithTimeline(ctx context.Context, tl *timeline.Timeline) context.Context {
+	return context.WithValue(ctx, timelineContextKey{}, tl)
+}
 
 const (
 	ServerNamePrefix        = "server-"
@@ -126,6 +142,9 @@ func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) erro
 	}
 
 	start := time.Now()
+
+	tl := timelineFromContext(ctx)
+	tl.Logf("[WAIT] WaitReady started (applied-for: %v, stabilization: %v)", opts.AppliedFor, opts.StabilizationPeriod)
 
 	slog.Info("Waiting for fabricator ready", "timeout", opts.Timeout)
 
@@ -321,6 +340,8 @@ func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) erro
 				}
 			}
 
+			tl.Log("[WAIT] WaitReady completed")
+
 			return nil
 		}
 
@@ -491,6 +512,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		"wait", opts.WaitSwitchesReady,
 		"cleanup", opts.ForceCleanup,
 	)
+	c.timeline.Log("[TEST] SetupVPCs started")
 
 	sshConfigs := map[string]*sshutil.Config{}
 	for _, vm := range vlab.VMs {
@@ -788,7 +810,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		case <-time.After(15 * time.Second):
 		}
 
-		if err := WaitReady(ctx, kube, WaitReadyOpts{
+		if err := WaitReady(contextWithTimeline(ctx, c.timeline), kube, WaitReadyOpts{
 			AppliedFor:          15 * time.Second,
 			Timeout:             10 * time.Minute,
 			StabilizationPeriod: opts.StabilizationPeriod,
@@ -868,6 +890,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	}
 
 	slog.Info("All servers configured and verified", "took", time.Since(start))
+	c.timeline.Log("[TEST] SetupVPCs completed")
 
 	return nil
 }
@@ -2599,6 +2622,7 @@ type InspectOpts struct {
 
 func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) error {
 	slog.Info("Inspecting fabric")
+	c.timeline.Log("[TEST] Inspect started")
 
 	opts.Attempts = max(1, opts.Attempts)
 	opts.Attempts = min(10, opts.Attempts)
@@ -2633,7 +2657,7 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 		}
 	}
 
-	if err := WaitReady(ctx, kube, WaitReadyOpts{
+	if err := WaitReady(contextWithTimeline(ctx, c.timeline), kube, WaitReadyOpts{
 		AppliedFor:          opts.WaitAppliedFor,
 		Timeout:             30 * time.Minute,
 		StabilizationPeriod: stabilizationPeriod,
@@ -2698,11 +2722,13 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 
 	if fail {
 		slog.Error("Failed to inspect fabric", "took", time.Since(start))
+		c.timeline.Log("[FAIL] Inspect failed")
 
 		return fmt.Errorf("failed to inspect fabric")
 	}
 
 	slog.Info("Inspect completed", "took", time.Since(start))
+	c.timeline.Log("[PASS] Inspect completed")
 
 	return nil
 }
