@@ -254,14 +254,49 @@ func CheckStaleVMs(ctx context.Context, kill bool) ([]int32, error) {
 		}
 
 		if kill {
-			slog.Warn("Found stale VM process, killing it", "pid", pr.Pid)
+			slog.Warn("Found stale VM process, killing it", "pid", pr.Pid, "vm", cmd[2], "uuid", cmd[4])
 			err = pr.KillWithContext(ctx)
 			if err != nil {
 				return nil, fmt.Errorf("killing stale VM process %d: %w", pr.Pid, err)
 			}
+			stale = append(stale, pr.Pid)
 		} else {
 			stale = append(stale, pr.Pid)
 		}
+	}
+
+	// Wait for killed processes to fully terminate and release locks
+	if kill && len(stale) > 0 {
+		slog.Info("Waiting for killed VMs to fully terminate and release locks", "count", len(stale), "pids", stale)
+		maxWaitTime := 5 * time.Second
+		checkInterval := 100 * time.Millisecond
+		maxAttempts := int(maxWaitTime / checkInterval)
+
+		for attempt := 0; attempt < maxAttempts; attempt++ {
+			allGone := true
+			remaining := []int32{}
+			for _, pid := range stale {
+				exists, _ := process.PidExistsWithContext(ctx, pid)
+				if exists {
+					allGone = false
+					remaining = append(remaining, pid)
+				}
+			}
+			if allGone {
+				slog.Debug("All killed VM processes terminated", "elapsed", time.Duration(attempt)*checkInterval)
+
+				break
+			}
+			if attempt == maxAttempts-1 {
+				slog.Warn("Some VM processes did not terminate within timeout", "remaining_pids", remaining, "timeout", maxWaitTime)
+			}
+			time.Sleep(checkInterval)
+		}
+
+		// Extra time for QEMU to release file locks after process termination
+		extraWait := 1 * time.Second
+		slog.Debug("Waiting extra time for file lock release", "duration", extraWait)
+		time.Sleep(extraWait)
 	}
 
 	return stale, nil
