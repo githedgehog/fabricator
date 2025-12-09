@@ -202,8 +202,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 			return fmt.Errorf("running helper to cleanup stale VMs: %w", err)
 		}
 
-		time.Sleep(1 * time.Second)
-
+		// CheckStaleVMs now handles waiting for process termination and lock release
 		stale, err := CheckStaleVMs(ctx, false)
 		if err != nil {
 			return fmt.Errorf("checking for stale VMs after cleanup: %w", err)
@@ -783,7 +782,7 @@ func execCmd(ctx context.Context, sudo bool, baseDir, name string, args []string
 	cmd.Dir = baseDir
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = logutil.NewSink(ctx, slog.Debug, name+": ", logArgs...)
-	cmd.Stderr = logutil.NewSink(ctx, slog.Debug, name+": ", logArgs...)
+	cmd.Stderr = logutil.NewSink(ctx, slog.Error, name+": ", logArgs...)
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("running %q: %w", name, err)

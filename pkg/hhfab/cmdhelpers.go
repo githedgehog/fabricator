@@ -276,14 +276,21 @@ func CheckStaleVMs(ctx context.Context, kill bool) ([]int32, error) {
 			allGone := true
 			remaining := []int32{}
 			for _, pid := range stale {
-				exists, _ := process.PidExistsWithContext(ctx, pid)
+				exists, err := process.PidExistsWithContext(ctx, pid)
+				if err != nil {
+					slog.Warn("Error checking if VM process exists, assuming it still exists", "pid", pid, "error", err)
+					allGone = false
+					remaining = append(remaining, pid)
+
+					continue
+				}
 				if exists {
 					allGone = false
 					remaining = append(remaining, pid)
 				}
 			}
 			if allGone {
-				slog.Debug("All killed VM processes terminated", "elapsed", time.Duration(attempt)*checkInterval)
+				slog.Debug("All killed VM processes terminated", "elapsed", time.Duration(attempt+1)*checkInterval)
 
 				break
 			}
