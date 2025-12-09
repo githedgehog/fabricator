@@ -56,6 +56,7 @@ const (
 	HashPolicyEncap2And3    = "encap2+3"
 	HashPolicyEncap3And4    = "encap3+4"
 	HashPolicyVLANAndSrcMAC = "vlan+srcmac"
+	iperf3DefaultPort       = 5201
 )
 
 var HashPolicies = []string{
@@ -2336,9 +2337,34 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string,
 	})
 
 	g.Go(func() error {
-		// We could netcat to check if the server is up, but that will make the server shut down if
-		// it was started with -1, and if we don't add -1 it will run until the timeout
-		time.Sleep(1 * time.Second)
+		// Wait for iperf3 server to be ready by polling the port
+		// Use ss to check if port is listening without making a connection
+		maxWait := 10 * time.Second
+		checkInterval := 100 * time.Millisecond
+		start := time.Now()
+		for {
+			// Check timeout before attempting SSH command
+			if time.Since(start) >= maxWait {
+				ie.ClientMsg = fmt.Sprintf("iperf3 server did not start listening within %s", maxWait)
+				return fmt.Errorf("iperf3 server on %s did not start listening within %s", to, maxWait)
+			}
+
+			// Check if server is listening using ss on the target server (doesn't connect)
+			// ss -ltn shows listening TCP sockets in numeric format: *:5201
+			checkCmd := fmt.Sprintf("timeout 1 ss -ltn | grep -q ' \\*:%d '", iperf3DefaultPort)
+			if _, _, err := retrySSHCmd(ctx, toSSH, checkCmd, to); err == nil {
+				waited := time.Since(start)
+				slog.Debug("iperf3 server is ready", "from", from, "to", to, "waitTime", waited)
+				break
+			}
+
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("waiting for iperf3 server: %w", ctx.Err())
+			case <-time.After(checkInterval):
+			}
+		}
+
 		cmd := fmt.Sprintf("toolbox -E LD_PRELOAD=/lib/x86_64-linux-gnu/libgcc_s.so.1 -q timeout %d iperf3 -P 4 -J -c %s -t %d", opts.IPerfsSeconds+25, toIP.String(), opts.IPerfsSeconds)
 
 		if opts.IPerfsDSCP > 0 {
