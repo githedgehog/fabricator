@@ -2711,9 +2711,34 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 	bgpIn := inspect.BGPIn{
 		Strict: opts.Strict,
 	}
+	var bgpOut inspect.Out[inspect.BGPIn]
+	var bgpErr error
 
-	if bgpOut, err := inspect.BGP(ctx, kube, bgpIn); err != nil {
-		slog.Error("Failed to inspect BGP", "err", err)
+	for attempt := 0; attempt < opts.Attempts; attempt++ {
+		if attempt > 0 {
+			slog.Info("Retry attempt", "number", attempt+1)
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("context cancelled during retry: %w", ctx.Err())
+			case <-time.After(15 * time.Second):
+			}
+		}
+
+		bgpOut, bgpErr = inspect.BGP(ctx, kube, bgpIn)
+
+		if bgpErr == nil {
+			if withErrors, ok := bgpOut.(inspect.WithErrors); ok {
+				if len(withErrors.Errors()) == 0 {
+					break
+				}
+			} else {
+				break
+			}
+		}
+	}
+
+	if bgpErr != nil {
+		slog.Error("Failed to inspect BGP", "err", bgpErr)
 		fail = true
 	} else if renderErr := inspect.Render(time.Now(), inspect.OutputTypeText, os.Stdout, bgpIn, bgpOut); renderErr != nil {
 		slog.Error("Inspecting BGP reveals some errors", "err", renderErr)
