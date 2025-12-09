@@ -2374,9 +2374,28 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string,
 	})
 
 	g.Go(func() error {
-		// We could netcat to check if the server is up, but that will make the server shut down if
-		// it was started with -1, and if we don't add -1 it will run until the timeout
-		time.Sleep(1 * time.Second)
+		// Wait for iperf3 server to be ready by polling the port
+		// Use ss to check if port is listening without making a connection
+		maxWait := 10 * time.Second
+		checkInterval := 100 * time.Millisecond
+		serverReady := false
+		for waited := time.Duration(0); waited < maxWait; waited += checkInterval {
+			time.Sleep(checkInterval)
+
+			// Check if server is listening on port 5201 using ss on the target server (doesn't connect)
+			// ss -ltn shows listening TCP sockets in numeric format
+			checkCmd := "timeout 1 ss -ltn | grep :5201"
+			if _, _, err := retrySSHCmd(ctx, toSSH, checkCmd, to); err == nil {
+				serverReady = true
+				slog.Debug("iperf3 server is ready", "from", from, "to", to, "waitTime", waited+checkInterval)
+				break
+			}
+		}
+
+		if !serverReady {
+			ie.ClientMsg = fmt.Sprintf("iperf3 server did not start listening within %s", maxWait)
+			return fmt.Errorf("iperf3 server on %s did not start listening within %s", to, maxWait)
+		}
 
 		// Log iperf3 client invocation for diagnostics
 		timestamp := time.Now().Format(time.RFC3339)
