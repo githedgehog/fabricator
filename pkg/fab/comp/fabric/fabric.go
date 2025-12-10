@@ -205,12 +205,13 @@ func GetFabricConfig(f fabapi.Fabricator) (*fmeta.FabricConfig, error) {
 
 	// TODO align APIs (fabric config field names, check agent spec too)
 	return &fmeta.FabricConfig{
-		ControlVIP:           string(f.Spec.Config.Control.VIP),
-		APIServer:            netip.AddrPortFrom(controlVIP.Addr(), k3s.APIPort).String(),
-		AgentRepo:            comp.JoinURLParts(registry, comp.RegistryPrefix, AgentRef),
-		VPCIRBVLANRanges:     f.Spec.Config.Fabric.VPCIRBVLANs,
-		VPCPeeringVLANRanges: f.Spec.Config.Fabric.VPCWorkaroundVLANs,
-		VPCPeeringDisabled:   false, // TODO remove?
+		ControlVIP:             string(f.Spec.Config.Control.VIP),
+		APIServer:              netip.AddrPortFrom(controlVIP.Addr(), k3s.APIPort).String(),
+		AgentRepo:              comp.JoinURLParts(registry, comp.RegistryPrefix, AgentRef),
+		VPCIRBVLANRanges:       f.Spec.Config.Fabric.VPCIRBVLANs,
+		VPCPeeringVLANRanges:   f.Spec.Config.Fabric.VPCWorkaroundVLANs,
+		TH5WorkaroundVLANRange: f.Spec.Config.Fabric.TH5WorkaroundVLANs,
+		VPCPeeringDisabled:     false, // TODO remove?
 		ReservedSubnets: []string{
 			// TODO what else?
 			string(f.Spec.Config.Control.ManagementSubnet),

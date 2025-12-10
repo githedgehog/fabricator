@@ -304,6 +304,15 @@ spec:
                       spineASN:
                         format: int32
                         type: integer
+                      th5WorkaroundVLANs:
+                        items:
+                          properties:
+                            from:
+                              type: integer
+                            to:
+                              type: integer
+                          type: object
+                        type: array
                       vpcIRBVLANs:
                         items:
                           properties:

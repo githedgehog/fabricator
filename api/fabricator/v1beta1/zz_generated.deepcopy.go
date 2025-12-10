@@ -429,6 +429,11 @@ func (in *FabricConfig) DeepCopyInto(out *FabricConfig) {
 		*out = make([]apimeta.VLANRange, len(*in))
 		copy(*out, *in)
 	}
+	if in.TH5WorkaroundVLANs != nil {
+		in, out := &in.TH5WorkaroundVLANs, &out.TH5WorkaroundVLANs
+		*out = make([]apimeta.VLANRange, len(*in))
+		copy(*out, *in)
+	}
 	if in.DefaultSwitchUsers != nil {
 		in, out := &in.DefaultSwitchUsers, &out.DefaultSwitchUsers
 		*out = make(map[string]SwitchUser, len(*in))
