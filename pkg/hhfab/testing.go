@@ -242,18 +242,21 @@ func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) erro
 			}
 
 			// make sure that desired agent version is the same as we expect (same as controller version, may be different if not reconciled)
-			ready := ag.Spec.Version.Default == expectedSwAgentV
+			versionMatches := ag.Spec.Version.Default == expectedSwAgentV
 
 			// make sure last applied generation is the same as current generation
-			ready = ready && ag.Generation > 0 && ag.Status.LastAppliedGen == ag.Generation
+			generationMatches := ag.Generation > 0 && ag.Status.LastAppliedGen == ag.Generation
 
 			// make sure last heartbeat is recent enough
-			ready = ready && time.Since(ag.Status.LastHeartbeat.Time) < 1*time.Minute
+			heartbeatRecent := time.Since(ag.Status.LastHeartbeat.Time) < 1*time.Minute
 
+			appliedForLongEnough := true
 			if opts.AppliedFor > 0 {
 				// make sure agent config was applied for long enough
-				ready = ready && !ag.Status.LastAppliedTime.IsZero() && time.Since(ag.Status.LastAppliedTime.Time) >= opts.AppliedFor
+				appliedForLongEnough = !ag.Status.LastAppliedTime.IsZero() && time.Since(ag.Status.LastAppliedTime.Time) >= opts.AppliedFor
 			}
+
+			ready := versionMatches && generationMatches && heartbeatRecent && appliedForLongEnough
 
 			if ready {
 				if ag.Status.Version == expectedSwAgentV {
@@ -262,6 +265,27 @@ func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) erro
 
 				swNotUpdated = append(swNotUpdated, swName)
 			} else {
+				// Log detailed reason why switch is not ready (only on first iteration and then every 5 minutes)
+				if idx == 0 || idx%(int(5*time.Minute/opts.PollInterval)) == 0 {
+					reasons := []string{}
+					if !versionMatches {
+						reasons = append(reasons, fmt.Sprintf("spec version mismatch (expected=%s, got=%s)", expectedSwAgentV, ag.Spec.Version.Default))
+					}
+					if !generationMatches {
+						reasons = append(reasons, fmt.Sprintf("generation mismatch (gen=%d, lastApplied=%d)", ag.Generation, ag.Status.LastAppliedGen))
+					}
+					if !heartbeatRecent {
+						reasons = append(reasons, fmt.Sprintf("stale heartbeat (age=%s)", time.Since(ag.Status.LastHeartbeat.Time)))
+					}
+					if !appliedForLongEnough {
+						if ag.Status.LastAppliedTime.IsZero() {
+							reasons = append(reasons, "config never applied")
+						} else {
+							reasons = append(reasons, fmt.Sprintf("config not applied long enough (appliedFor=%s, actual=%s)", opts.AppliedFor, time.Since(ag.Status.LastAppliedTime.Time)))
+						}
+					}
+					slog.Warn("Switch not ready", "name", swName, "statusVersion", ag.Status.Version, "reasons", reasons)
+				}
 				swNotReady = append(swNotReady, swName)
 			}
 		}
@@ -290,22 +314,25 @@ func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) erro
 			}
 
 			// make sure that desired agent version is the same as we expect (same as controller version, may be different if not reconciled)
-			ready := gwag.Spec.AgentVersion == expectedGwAgentV
+			versionMatches := gwag.Spec.AgentVersion == expectedGwAgentV
 
 			// make sure last applied generation is the same as current generation
-			ready = ready && gwag.Generation > 0 && gwag.Status.LastAppliedGen == gwag.Generation
+			generationMatches := gwag.Generation > 0 && gwag.Status.LastAppliedGen == gwag.Generation
 
 			// make sure last gen applied to the frr as well
-			ready = ready && gwag.Generation > 0 && gwag.Status.State.FRR.LastAppliedGen == gwag.Generation
+			frrGenerationMatches := gwag.Generation > 0 && gwag.Status.State.FRR.LastAppliedGen == gwag.Generation
 
 			// TODO consider adding heartbeats
 			// make sure last heartbeat is recent enough
-			// ready = ready && time.Since(gwag.Status.LastHeartbeat.Time) < 1*time.Minute
+			// heartbeatRecent := time.Since(gwag.Status.LastHeartbeat.Time) < 1*time.Minute
 
+			appliedForLongEnough := true
 			if opts.AppliedFor > 0 {
 				// make sure agent config was applied for long enough
-				ready = ready && !gwag.Status.LastAppliedTime.IsZero() && time.Since(gwag.Status.LastAppliedTime.Time) >= opts.AppliedFor
+				appliedForLongEnough = !gwag.Status.LastAppliedTime.IsZero() && time.Since(gwag.Status.LastAppliedTime.Time) >= opts.AppliedFor
 			}
+
+			ready := versionMatches && generationMatches && frrGenerationMatches && appliedForLongEnough
 
 			if ready {
 				if gwag.Status.AgentVersion == expectedGwAgentV {
@@ -314,6 +341,27 @@ func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) erro
 
 				gwNotUpdated = append(gwNotUpdated, gwName)
 			} else {
+				// Log detailed reason why gateway is not ready (only on first iteration and then every 5 minutes)
+				if idx == 0 || idx%(int(5*time.Minute/opts.PollInterval)) == 0 {
+					reasons := []string{}
+					if !versionMatches {
+						reasons = append(reasons, fmt.Sprintf("spec version mismatch (expected=%s, got=%s)", expectedGwAgentV, gwag.Spec.AgentVersion))
+					}
+					if !generationMatches {
+						reasons = append(reasons, fmt.Sprintf("generation mismatch (gen=%d, lastApplied=%d)", gwag.Generation, gwag.Status.LastAppliedGen))
+					}
+					if !frrGenerationMatches {
+						reasons = append(reasons, fmt.Sprintf("FRR generation mismatch (gen=%d, frrLastApplied=%d)", gwag.Generation, gwag.Status.State.FRR.LastAppliedGen))
+					}
+					if !appliedForLongEnough {
+						if gwag.Status.LastAppliedTime.IsZero() {
+							reasons = append(reasons, "config never applied")
+						} else {
+							reasons = append(reasons, fmt.Sprintf("config not applied long enough (appliedFor=%s, actual=%s)", opts.AppliedFor, time.Since(gwag.Status.LastAppliedTime.Time)))
+						}
+					}
+					slog.Warn("Gateway not ready", "name", gwName, "statusVersion", gwag.Status.AgentVersion, "reasons", reasons)
+				}
 				gwNotReady = append(gwNotReady, gwName)
 			}
 		}
