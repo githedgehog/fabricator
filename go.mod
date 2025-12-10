@@ -29,7 +29,7 @@ require (
 	github.com/mattn/go-isatty v0.0.20
 	github.com/mholt/archives v0.1.5
 	github.com/onsi/ginkgo/v2 v2.27.2
-	github.com/onsi/gomega v1.38.2
+	github.com/onsi/gomega v1.38.3
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/pkg/sftp v1.13.8
 	github.com/samber/lo v1.52.0
@@ -40,13 +40,13 @@ require (
 	github.com/urfave/cli/v2 v2.27.7
 	github.com/vbauerster/mpb/v8 v8.11.2
 	github.com/vishvananda/netlink v1.3.1
-	go.githedgehog.com/fabric v0.97.0
+	go.githedgehog.com/fabric v0.98.0
 	go.githedgehog.com/gateway v0.29.0
 	go.githedgehog.com/libmeta v0.3.0
 	go.podman.io/image/v5 v5.38.0
 	golang.org/x/crypto v0.45.0
 	golang.org/x/mod v0.30.0
-	golang.org/x/sync v0.18.0
+	golang.org/x/sync v0.19.0
 	golang.org/x/term v0.37.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	k8s.io/api v0.33.4
@@ -120,7 +120,7 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/chzyer/readline v1.5.1 // indirect
 	github.com/clarketm/json v1.17.1 // indirect
-	github.com/clipperhouse/displaywidth v0.3.1 // indirect
+	github.com/clipperhouse/displaywidth v0.6.0 // indirect
 	github.com/clipperhouse/stringish v0.1.1 // indirect
 	github.com/clipperhouse/uax29/v2 v2.3.0 // indirect
 	github.com/cloudflare/circl v1.6.1 // indirect
@@ -256,8 +256,8 @@ require (
 	github.com/nwaples/rardecode/v2 v2.2.0 // indirect
 	github.com/olekukonko/cat v0.0.0-20250911104152-50322a0618f6 // indirect
 	github.com/olekukonko/errors v1.1.0 // indirect
-	github.com/olekukonko/ll v0.1.2 // indirect
-	github.com/olekukonko/tablewriter v1.1.1 // indirect
+	github.com/olekukonko/ll v0.1.3 // indirect
+	github.com/olekukonko/tablewriter v1.1.2 // indirect
 	github.com/openconfig/gnmi v0.14.1 // indirect
 	github.com/openconfig/gnmic v0.32.0 // indirect
 	github.com/openconfig/goyang v1.6.2 // indirect
