@@ -51,8 +51,7 @@ const (
 	FlagNameDev                   = "dev"
 	FlagIncludeONIE               = "include-onie"
 	FlagIncludeCLS                = "include-cls"
-	FlagControlNodeMgmtLink       = "control-node-mgmt-link"
-	FlagGatewayNodeMgmtLink       = "gateway-node-mgmt-link"
+	FlagNodeMgmtLinks             = "node-mgmt-links"
 	FlagGateway                   = "gateway"
 	FlagGateways                  = "gateways"
 	FlagO11yDefaults              = "o11y-defaults"
@@ -570,19 +569,12 @@ func Run(ctx context.Context) error {
 						Usage:    "[PREVIEW] import host repo/prefix and creds from docker config as an upstream registry mode and config (creds will be stored plain text)",
 						EnvVars:  []string{"HHFAB_IMPORT_HOST_UPSTREAM"},
 					},
-					&cli.StringFlag{
+					&cli.StringSliceFlag{
 						Category: FlagCatGenConfig,
-						Name:     FlagControlNodeMgmtLink,
+						Name:     FlagNodeMgmtLinks,
 						Hidden:   !preview,
-						Usage:    "[PREVIEW] control node management link (for pci passthrough for VLAB-only)",
-						EnvVars:  []string{"HHFAB_CONTROL_NODE_MGMT_LINK"},
-					},
-					&cli.StringFlag{
-						Category: FlagCatGenConfig,
-						Name:     FlagGatewayNodeMgmtLink,
-						Hidden:   !preview,
-						Usage:    "[PREVIEW] gateway node management link (for pci passthrough for VLAB-only)",
-						EnvVars:  []string{"HHFAB_GATEWAY_NODE_MGMT_LINK"},
+						Usage:    "[PREVIEW] management links (<node-name>=<pci-address> for pci passthrough for VLAB-only)",
+						EnvVars:  []string{"HHFAB_NODE_MGMT_LINKS"},
 					},
 					&cli.BoolFlag{
 						Category: FlagCatGenConfig,
@@ -613,6 +605,21 @@ func Run(ctx context.Context) error {
 				}),
 				Before: before(false),
 				Action: func(c *cli.Context) error {
+					mgmtLinks := map[string]string{}
+					for _, entry := range c.StringSlice(FlagNodeMgmtLinks) {
+						parts := strings.Split(entry, "=")
+						if len(parts) != 2 {
+							return fmt.Errorf("invalid node management link format: %s", entry) //nolint:err113
+						}
+
+						if _, ok := mgmtLinks[parts[0]]; ok {
+							return fmt.Errorf("duplicate node management link key: %s", parts[0]) //nolint:err113
+						}
+						mgmtLinks[parts[0]] = parts[1]
+					}
+
+					slog.Info("Info", "node-mgmt-links", mgmtLinks)
+
 					o11yLabels := map[string]string{}
 					for _, entry := range c.StringSlice(FlagO11yLabels) {
 						parts := strings.SplitN(entry, "=", 2)
@@ -636,21 +643,20 @@ func Run(ctx context.Context) error {
 						Wiring:             c.StringSlice(FlagNameWiring),
 						ImportHostUpstream: c.Bool(FlagNameImportHostUpstream),
 						InitConfigInput: fab.InitConfigInput{
-							FabricMode:                meta.FabricMode(c.String(FlagNameFabricMode)),
-							TLSSAN:                    c.StringSlice(FlagNameTLSSAN),
-							DefaultPasswordHash:       c.String(FlagNameDefaultPasswordHash),
-							DefaultAuthorizedKeys:     c.StringSlice(FlagNameDefaultAuthorizedKeys),
-							Dev:                       c.Bool(FlagNameDev),
-							IncludeONIE:               c.Bool(FlagIncludeONIE),
-							IncludeCLS:                c.Bool(FlagIncludeCLS),
-							ControlNodeManagementLink: c.String(FlagControlNodeMgmtLink),
-							GatewayNodeManagementLink: c.String(FlagGatewayNodeMgmtLink),
-							Gateway:                   c.Bool(FlagGateway),
-							Gateways:                  c.Int(FlagGateways),
-							JoinToken:                 joinToken,
-							SaveJoinToken:             saveJoinToken,
-							O11yDefaults:              fabapi.ObservabilityDefaults(c.String(FlagO11yDefaults)),
-							O11yLabels:                o11yLabels,
+							FabricMode:            meta.FabricMode(c.String(FlagNameFabricMode)),
+							TLSSAN:                c.StringSlice(FlagNameTLSSAN),
+							DefaultPasswordHash:   c.String(FlagNameDefaultPasswordHash),
+							DefaultAuthorizedKeys: c.StringSlice(FlagNameDefaultAuthorizedKeys),
+							Dev:                   c.Bool(FlagNameDev),
+							IncludeONIE:           c.Bool(FlagIncludeONIE),
+							IncludeCLS:            c.Bool(FlagIncludeCLS),
+							NodeManagementLinks:   mgmtLinks,
+							Gateway:               c.Bool(FlagGateway),
+							Gateways:              c.Int(FlagGateways),
+							JoinToken:             joinToken,
+							SaveJoinToken:         saveJoinToken,
+							O11yDefaults:          fabapi.ObservabilityDefaults(c.String(FlagO11yDefaults)),
+							O11yLabels:            o11yLabels,
 						},
 					}); err != nil {
 						return fmt.Errorf("initializing: %w", err)

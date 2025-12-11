@@ -244,8 +244,10 @@ func TestInitConfig(t *testing.T) {
 		{
 			name: "control-node-management-link",
 			in: fab.InitConfigInput{
-				DefaultPasswordHash:       "$5$bar",
-				ControlNodeManagementLink: "pci@0000:00:00.0",
+				DefaultPasswordHash: "$5$bar",
+				NodeManagementLinks: map[string]string{
+					"control-1": "pci@0000:00:00.0",
+				},
 			},
 			expectedFab: fabapi.Fabricator{
 				ObjectMeta: metav1.ObjectMeta{
@@ -355,6 +357,51 @@ func TestInitConfig(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "gateways--node-management-links",
+			in: fab.InitConfigInput{
+				Dev:      true,
+				Gateways: 2,
+				NodeManagementLinks: map[string]string{
+					"control-1": "pci@0000:00:00.0",
+					"gateway-1": "pci@0000:00:00.1",
+					"gateway-2": "pci@0000:00:00.2",
+				},
+			},
+			expectedFab: fabapi.Fabricator{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      comp.FabName,
+					Namespace: comp.FabNamespace,
+				},
+				Spec: fabapi.FabricatorSpec{
+					Config: fabapi.FabConfig{
+						Control: fabapi.ControlConfig{
+							DefaultUser: fabapi.ControlUser{
+								PasswordHash:   fab.DevAdminPasswordHash,
+								AuthorizedKeys: []string{fab.DevSSHKey},
+							},
+						},
+						Fabric: fabapi.FabricConfig{
+							DefaultSwitchUsers: map[string]fabapi.SwitchUser{
+								"admin": {
+									Role:           "admin",
+									PasswordHash:   fab.DevAdminPasswordHash,
+									AuthorizedKeys: []string{fab.DevSSHKey},
+								},
+								"op": {
+									Role:           "operator",
+									PasswordHash:   fab.DevAdminPasswordHash,
+									AuthorizedKeys: []string{fab.DevSSHKey},
+								},
+							},
+						},
+						Gateway: fabapi.GatewayConfig{
+							Enable: true,
+						},
+					},
+				},
+			},
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			expectedControls := []fabapi.ControlNode{
@@ -377,11 +424,6 @@ func TestInitConfig(t *testing.T) {
 					},
 				},
 			}
-			if test.in.ControlNodeManagementLink != "" {
-				expectedControls[0].Annotations = map[string]string{
-					"link.hhfab.githedgehog.com/enp2s1": test.in.ControlNodeManagementLink,
-				}
-			}
 
 			expectedNodes := []fabapi.FabNode{}
 			if test.in.Gateway || test.in.Gateways > 0 {
@@ -403,6 +445,30 @@ func TestInitConfig(t *testing.T) {
 							},
 						},
 					})
+				}
+			}
+
+			for name, link := range test.in.NodeManagementLinks {
+				for idx, control := range expectedControls {
+					if control.Name != name {
+						continue
+					}
+
+					control.Annotations = map[string]string{
+						"link.hhfab.githedgehog.com/enp2s1": link,
+					}
+					expectedControls[idx] = control
+				}
+
+				for idx, node := range expectedNodes {
+					if node.Name != name {
+						continue
+					}
+
+					node.Annotations = map[string]string{
+						"link.hhfab.githedgehog.com/enp2s0": link,
+					}
+					expectedNodes[idx] = node
 				}
 			}
 

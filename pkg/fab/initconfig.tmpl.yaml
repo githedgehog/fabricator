@@ -111,9 +111,9 @@ kind: ControlNode
 metadata:
   name: control-1
   namespace: fab
-  {{- if .ControlNodeManagementLink }}
+  {{- if index .NodeManagementLinks "control-1" }}
   annotations:
-    link.hhfab.githedgehog.com/enp2s1: {{ .ControlNodeManagementLink}}
+    link.hhfab.githedgehog.com/enp2s1: {{ index .NodeManagementLinks "control-1" }}
   {{- end }}
 spec:
   bootstrap:
@@ -126,16 +126,16 @@ spec:
 
 {{- if .Gateway }}
 {{ range $idx := until .Gateways }}
+{{- $name := printf "gateway-%d" (add $idx 1) }}
 ---
 apiVersion: fabricator.githedgehog.com/v1beta1
 kind: FabNode
 metadata:
-  name: gateway-{{ add $idx 1 }}
+  name: {{ $name }}
   namespace: fab
-  {{/* TODO support per-gw (and probably per-control node) */}}
-  {{- if $.GatewayNodeManagementLink }}
+  {{- if index $.NodeManagementLinks $name }}
   annotations:
-    link.hhfab.githedgehog.com/enp2s0: {{ $.GatewayNodeManagementLink}}
+    link.hhfab.githedgehog.com/enp2s0: {{ index $.NodeManagementLinks $name }}
   {{- end }}
 spec:
   roles:
