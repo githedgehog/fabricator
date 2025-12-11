@@ -40,6 +40,7 @@ type InitConfigInput struct {
 	ControlNodeManagementLink string
 	GatewayNodeManagementLink string
 	Gateway                   bool
+	Gateways                  int
 	JoinToken                 string
 	SaveJoinToken             bool
 	O11yDefaults              fabapi.ObservabilityDefaults
@@ -47,6 +48,18 @@ type InitConfigInput struct {
 }
 
 func InitConfig(ctx context.Context, in InitConfigInput) ([]byte, error) {
+	if in.Gateways > 0 {
+		in.Gateway = true
+	}
+	if in.Gateway {
+		if in.Gateways == 0 {
+			in.Gateways = 1
+		}
+	}
+	if in.Gateways < 0 {
+		return nil, fmt.Errorf("invalid number of gateways: %d", in.Gateways) //nolint:err113
+	}
+
 	if in.Dev {
 		if in.DefaultPasswordHash != "" {
 			return nil, fmt.Errorf("dev mode overrides default password hash") //nolint:goerr113

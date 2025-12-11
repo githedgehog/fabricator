@@ -4,6 +4,7 @@
 package fab_test
 
 import (
+	"fmt"
 	"testing"
 
 	"dario.cat/mergo"
@@ -314,6 +315,46 @@ func TestInitConfig(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "gateways",
+			in: fab.InitConfigInput{
+				Dev:      true,
+				Gateways: 2,
+			},
+			expectedFab: fabapi.Fabricator{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      comp.FabName,
+					Namespace: comp.FabNamespace,
+				},
+				Spec: fabapi.FabricatorSpec{
+					Config: fabapi.FabConfig{
+						Control: fabapi.ControlConfig{
+							DefaultUser: fabapi.ControlUser{
+								PasswordHash:   fab.DevAdminPasswordHash,
+								AuthorizedKeys: []string{fab.DevSSHKey},
+							},
+						},
+						Fabric: fabapi.FabricConfig{
+							DefaultSwitchUsers: map[string]fabapi.SwitchUser{
+								"admin": {
+									Role:           "admin",
+									PasswordHash:   fab.DevAdminPasswordHash,
+									AuthorizedKeys: []string{fab.DevSSHKey},
+								},
+								"op": {
+									Role:           "operator",
+									PasswordHash:   fab.DevAdminPasswordHash,
+									AuthorizedKeys: []string{fab.DevSSHKey},
+								},
+							},
+						},
+						Gateway: fabapi.GatewayConfig{
+							Enable: true,
+						},
+					},
+				},
+			},
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			expectedControls := []fabapi.ControlNode{
@@ -343,22 +384,26 @@ func TestInitConfig(t *testing.T) {
 			}
 
 			expectedNodes := []fabapi.FabNode{}
-			if test.in.Gateway {
-				expectedNodes = append(expectedNodes, fabapi.FabNode{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "gateway-1",
-						Namespace: comp.FabNamespace,
-					},
-					Spec: fabapi.FabNodeSpec{
-						Roles: []fabapi.FabNodeRole{fabapi.NodeRoleGateway},
-						Bootstrap: fabapi.ControlNodeBootstrap{
-							Disk: "/dev/sda",
+			if test.in.Gateway || test.in.Gateways > 0 {
+				test.in.Gateways = max(test.in.Gateways, 1)
+
+				for idx := range test.in.Gateways {
+					expectedNodes = append(expectedNodes, fabapi.FabNode{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      fmt.Sprintf("gateway-%d", idx+1),
+							Namespace: comp.FabNamespace,
 						},
-						Management: fabapi.ControlNodeManagement{
-							Interface: "enp2s0",
+						Spec: fabapi.FabNodeSpec{
+							Roles: []fabapi.FabNodeRole{fabapi.NodeRoleGateway},
+							Bootstrap: fabapi.ControlNodeBootstrap{
+								Disk: "/dev/sda",
+							},
+							Management: fabapi.ControlNodeManagement{
+								Interface: "enp2s0",
+							},
 						},
-					},
-				})
+					})
+				}
 			}
 
 			test.expectedFab.Default()
