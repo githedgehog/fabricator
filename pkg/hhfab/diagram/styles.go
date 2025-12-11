@@ -289,3 +289,17 @@ func GetGatewayLabelStyle() string {
 func GetExternalLabelStyle() string {
 	return "rounded=0;whiteSpace=wrap;html=1;strokeColor=none;fontSize=9;"
 }
+
+// VPCColorPalette defines the color palette for VPC boxes (darker shades)
+var VPCColorPalette = []string{
+	"#3A9BD9", // Darker blue
+	"#5BB9A8", // Darker mint green
+	"#D65A5A", // Darker coral
+	"#8366C0", // Darker lavender
+	"#E088B3", // Darker pink
+	"#E0B61F", // Darker yellow
+	"#4AA358", // Darker green
+	"#2E75D9", // Darker blue
+	"#E04976", // Darker pink
+	"#A45DD9", // Darker purple
+}
