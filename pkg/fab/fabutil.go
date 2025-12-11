@@ -53,6 +53,8 @@ func GetFabAndNodes(ctx context.Context, kube kclient.Reader, optsSlice ...GetFa
 		return fabapi.Fabricator{}, nil, nil, fmt.Errorf("calculating versions: %w", err)
 	}
 
+	nodeNames := map[string]bool{}
+
 	controls := &fabapi.ControlNodeList{}
 	if err := kube.List(ctx, controls); err != nil {
 		return fabapi.Fabricator{}, nil, nil, fmt.Errorf("listing control nodes: %w", err)
@@ -68,6 +70,8 @@ func GetFabAndNodes(ctx context.Context, kube kclient.Reader, optsSlice ...GetFa
 		if err := control.Validate(ctx, &f.Spec.Config, opts.AllowNotHydrated); err != nil {
 			return fabapi.Fabricator{}, nil, nil, fmt.Errorf("validating control node %q: %w", control.GetName(), err)
 		}
+
+		nodeNames[control.Name] = true
 	}
 
 	slices.SortFunc(controls.Items, func(a, b fabapi.ControlNode) int {
@@ -80,14 +84,16 @@ func GetFabAndNodes(ctx context.Context, kube kclient.Reader, optsSlice ...GetFa
 	if err := kube.List(ctx, nodes); err != nil && !kmeta.IsNoMatchError(err) {
 		return fabapi.Fabricator{}, nil, nil, fmt.Errorf("listing nodes: %w", err)
 	}
-	if len(nodes.Items) > 1 {
-		return fabapi.Fabricator{}, nil, nil, fmt.Errorf("only one node is currently allowed") //nolint:goerr113
-	}
 
 	for _, node := range nodes.Items {
 		if err := node.Validate(ctx, &f.Spec.Config, opts.AllowNotHydrated, kube); err != nil {
 			return fabapi.Fabricator{}, nil, nil, fmt.Errorf("validating node %q: %w", node.GetName(), err)
 		}
+
+		if nodeNames[node.Name] {
+			return fabapi.Fabricator{}, nil, nil, fmt.Errorf("duplicate node name %q", node.Name) //nolint:goerr113
+		}
+		nodeNames[node.Name] = true
 	}
 
 	slices.SortFunc(nodes.Items, func(a, b fabapi.FabNode) int {

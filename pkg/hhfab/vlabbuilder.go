@@ -111,17 +111,16 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 	}
 
 	isGw := false
-	gw := fabapi.FabNode{}
+	gws := []fabapi.FabNode{}
 	for _, node := range nodes {
 		if slices.Contains(node.Spec.Roles, fabapi.NodeRoleGateway) {
-			if isGw {
-				return fmt.Errorf("multiple gateway nodes not supported") //nolint:goerr113
-			}
-
 			isGw = true
-			gw = node
+			gws = append(gws, node)
 		}
 	}
+	slices.SortFunc(gws, func(a, b fabapi.FabNode) int {
+		return strings.Compare(a.Name, b.Name)
+	})
 
 	if isGw {
 		if fabricMode != meta.FabricModeSpineLeaf {
@@ -244,7 +243,7 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 		slog.Info(">>>", "spinesCount", b.SpinesCount, "fabricLinksCount", b.FabricLinksCount, "meshLinksCount", b.MeshLinksCount)
 		slog.Info(">>>", "eslagLeafGroups", b.ESLAGLeafGroups)
 		if isGw {
-			slog.Info(">>>", "gatewayUplinks", b.GatewayUplinks, "gatewayDriver", b.GatewayDriver)
+			slog.Info(">>>", "gateways", len(gws), "gatewayUplinks", b.GatewayUplinks, "gatewayDriver", b.GatewayDriver)
 		}
 	}
 	slog.Info(">>>", "mclagLeafsCount", b.MCLAGLeafsCount, "mclagSessionLinks", b.MCLAGSessionLinks, "mclagPeerLinks", b.MCLAGPeerLinks)
@@ -761,29 +760,31 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 		}
 
 		if isGw && spineID <= b.GatewayUplinks {
-			switchPort := b.nextSwitchPort(spineName)
+			for _, gw := range gws {
+				switchPort := b.nextSwitchPort(spineName)
 
-			gwPort := fmt.Sprintf("%s/", gw.Name)
-			switch b.GatewayDriver {
-			case GatewayDriverKernel:
-				gwPort += fmt.Sprintf("enp2s%d", spineID)
-				// TODO enable after migrating dataplane to a new interface format
-				// gwPort += fmt.Sprintf("port%d", spineID)
-			case GatewayDriverDPDK:
-				gwPort += fmt.Sprintf("port%d", spineID)
-			}
+				gwPort := fmt.Sprintf("%s/", gw.Name)
+				switch b.GatewayDriver {
+				case GatewayDriverKernel:
+					gwPort += fmt.Sprintf("enp2s%d", spineID)
+					// TODO enable after migrating dataplane to a new interface format
+					// gwPort += fmt.Sprintf("port%d", spineID)
+				case GatewayDriverDPDK:
+					gwPort += fmt.Sprintf("port%d", spineID)
+				}
 
-			if _, err := b.createConnection(ctx, wiringapi.ConnectionSpec{
-				Gateway: &wiringapi.ConnGateway{
-					Links: []wiringapi.GatewayLink{
-						{
-							Switch:  wiringapi.ConnFabricLinkSwitch{BasePortName: wiringapi.BasePortName{Port: switchPort}},
-							Gateway: wiringapi.ConnGatewayLinkGateway{BasePortName: wiringapi.BasePortName{Port: gwPort}},
+				if _, err := b.createConnection(ctx, wiringapi.ConnectionSpec{
+					Gateway: &wiringapi.ConnGateway{
+						Links: []wiringapi.GatewayLink{
+							{
+								Switch:  wiringapi.ConnFabricLinkSwitch{BasePortName: wiringapi.BasePortName{Port: switchPort}},
+								Gateway: wiringapi.ConnGatewayLinkGateway{BasePortName: wiringapi.BasePortName{Port: gwPort}},
+							},
 						},
 					},
-				},
-			}); err != nil {
-				return err
+				}); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -820,30 +821,32 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 	if b.MeshLinksCount > 0 && isGw {
 		connectedLeafs := uint8(0)
 		for leafID := uint8(1); leafID <= b.MCLAGLeafsCount+b.OrphanLeafsCount+totalESLAGLeafs && connectedLeafs < b.GatewayUplinks; leafID++ {
-			leafName := fmt.Sprintf("leaf-%02d", leafID)
-			switchPort := b.nextSwitchPort(leafName)
+			for _, gw := range gws {
+				leafName := fmt.Sprintf("leaf-%02d", leafID)
+				switchPort := b.nextSwitchPort(leafName)
 
-			gwPort := fmt.Sprintf("%s/", gw.Name)
-			switch b.GatewayDriver {
-			case GatewayDriverKernel:
-				gwPort += fmt.Sprintf("enp2s%d", connectedLeafs+1)
-				// TODO enable after migrating dataplane to a new interface format
-				// gwPort += fmt.Sprintf("port%d", connectedLeafs+1)
-			case GatewayDriverDPDK:
-				gwPort += fmt.Sprintf("port%d", connectedLeafs+1)
-			}
+				gwPort := fmt.Sprintf("%s/", gw.Name)
+				switch b.GatewayDriver {
+				case GatewayDriverKernel:
+					gwPort += fmt.Sprintf("enp2s%d", connectedLeafs+1)
+					// TODO enable after migrating dataplane to a new interface format
+					// gwPort += fmt.Sprintf("port%d", connectedLeafs+1)
+				case GatewayDriverDPDK:
+					gwPort += fmt.Sprintf("port%d", connectedLeafs+1)
+				}
 
-			if _, err := b.createConnection(ctx, wiringapi.ConnectionSpec{
-				Gateway: &wiringapi.ConnGateway{
-					Links: []wiringapi.GatewayLink{
-						{
-							Switch:  wiringapi.ConnFabricLinkSwitch{BasePortName: wiringapi.BasePortName{Port: switchPort}},
-							Gateway: wiringapi.ConnGatewayLinkGateway{BasePortName: wiringapi.BasePortName{Port: gwPort}},
+				if _, err := b.createConnection(ctx, wiringapi.ConnectionSpec{
+					Gateway: &wiringapi.ConnGateway{
+						Links: []wiringapi.GatewayLink{
+							{
+								Switch:  wiringapi.ConnFabricLinkSwitch{BasePortName: wiringapi.BasePortName{Port: switchPort}},
+								Gateway: wiringapi.ConnGatewayLinkGateway{BasePortName: wiringapi.BasePortName{Port: gwPort}},
+							},
 						},
 					},
-				},
-			}); err != nil {
-				return err
+				}); err != nil {
+					return err
+				}
 			}
 
 			connectedLeafs++
