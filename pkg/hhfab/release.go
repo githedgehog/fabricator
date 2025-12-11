@@ -4113,6 +4113,17 @@ func doRunTests(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 	// initial setup
 	if err := testCtx.setupTest(ctx, true); err != nil {
 		slog.Error("Initial test suite setup failed", "suite", ts.Name, "error", err.Error())
+
+		// Collect show-tech for initial setup failure
+		// Create a synthetic test case for the setup failure
+		setupFailureTest := &JUnitTestCase{
+			Name: fmt.Sprintf("%s-initial-setup", ts.Name),
+			Failure: &Failure{
+				Message: err.Error(),
+			},
+		}
+		testCtx.collectShowTechForTest(ctx, setupFailureTest)
+
 		if testCtx.pauseOnFail {
 			if err := pauseOnFailure(ctx); err != nil {
 				slog.Warn("Pause on failure failed, ignoring", "err", err.Error())
