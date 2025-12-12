@@ -32,6 +32,7 @@ import (
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
+	"go.githedgehog.com/fabricator/pkg/hhfab/timeline"
 	"go.githedgehog.com/fabricator/pkg/util/sshutil"
 	gwapi "go.githedgehog.com/gateway/api/gateway/v1alpha1"
 	gwintapi "go.githedgehog.com/gateway/api/gwint/v1alpha1"
@@ -47,6 +48,21 @@ import (
 	ctrlutil "sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/scheme"
 )
+
+type timelineContextKey struct{}
+
+// timelineFromContext retrieves the timeline from the context if available.
+func timelineFromContext(ctx context.Context) *timeline.Timeline {
+	if tl, ok := ctx.Value(timelineContextKey{}).(*timeline.Timeline); ok {
+		return tl
+	}
+	return nil
+}
+
+// contextWithTimeline attaches a timeline to the context.
+func contextWithTimeline(ctx context.Context, tl *timeline.Timeline) context.Context {
+	return context.WithValue(ctx, timelineContextKey{}, tl)
+}
 
 const (
 	ServerNamePrefix        = "server-"
@@ -104,10 +120,11 @@ func (c *Config) Wait(ctx context.Context, vlab *VLAB) error {
 }
 
 type WaitReadyOpts struct {
-	AppliedFor   time.Duration
-	Timeout      time.Duration
-	PollInterval time.Duration
-	PrintEvery   int
+	AppliedFor          time.Duration
+	Timeout             time.Duration
+	PollInterval        time.Duration
+	PrintEvery          int
+	StabilizationPeriod time.Duration
 }
 
 func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) error {
@@ -125,6 +142,9 @@ func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) erro
 	}
 
 	start := time.Now()
+
+	tl := timelineFromContext(ctx)
+	tl.Logf("[WAIT] WaitReady started (applied-for: %v, stabilization: %v)", opts.AppliedFor, opts.StabilizationPeriod)
 
 	slog.Info("Waiting for fabricator ready", "timeout", opts.Timeout)
 
@@ -222,18 +242,21 @@ func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) erro
 			}
 
 			// make sure that desired agent version is the same as we expect (same as controller version, may be different if not reconciled)
-			ready := ag.Spec.Version.Default == expectedSwAgentV
+			versionMatches := ag.Spec.Version.Default == expectedSwAgentV
 
 			// make sure last applied generation is the same as current generation
-			ready = ready && ag.Generation > 0 && ag.Status.LastAppliedGen == ag.Generation
+			generationMatches := ag.Generation > 0 && ag.Status.LastAppliedGen == ag.Generation
 
 			// make sure last heartbeat is recent enough
-			ready = ready && time.Since(ag.Status.LastHeartbeat.Time) < 1*time.Minute
+			heartbeatRecent := time.Since(ag.Status.LastHeartbeat.Time) < 1*time.Minute
 
+			appliedForLongEnough := true
 			if opts.AppliedFor > 0 {
 				// make sure agent config was applied for long enough
-				ready = ready && !ag.Status.LastAppliedTime.IsZero() && time.Since(ag.Status.LastAppliedTime.Time) >= opts.AppliedFor
+				appliedForLongEnough = !ag.Status.LastAppliedTime.IsZero() && time.Since(ag.Status.LastAppliedTime.Time) >= opts.AppliedFor
 			}
+
+			ready := versionMatches && generationMatches && heartbeatRecent && appliedForLongEnough
 
 			if ready {
 				if ag.Status.Version == expectedSwAgentV {
@@ -242,6 +265,27 @@ func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) erro
 
 				swNotUpdated = append(swNotUpdated, swName)
 			} else {
+				// Log detailed reason why switch is not ready (only on first iteration and then every 5 minutes)
+				if idx == 0 || idx%(int(5*time.Minute/opts.PollInterval)) == 0 {
+					reasons := []string{}
+					if !versionMatches {
+						reasons = append(reasons, fmt.Sprintf("spec version mismatch (expected=%s, got=%s)", expectedSwAgentV, ag.Spec.Version.Default))
+					}
+					if !generationMatches {
+						reasons = append(reasons, fmt.Sprintf("generation mismatch (gen=%d, lastApplied=%d)", ag.Generation, ag.Status.LastAppliedGen))
+					}
+					if !heartbeatRecent {
+						reasons = append(reasons, fmt.Sprintf("stale heartbeat (age=%s)", time.Since(ag.Status.LastHeartbeat.Time)))
+					}
+					if !appliedForLongEnough {
+						if ag.Status.LastAppliedTime.IsZero() {
+							reasons = append(reasons, "config never applied")
+						} else {
+							reasons = append(reasons, fmt.Sprintf("config not applied long enough (appliedFor=%s, actual=%s)", opts.AppliedFor, time.Since(ag.Status.LastAppliedTime.Time)))
+						}
+					}
+					slog.Warn("Switch not ready", "name", swName, "statusVersion", ag.Status.Version, "reasons", reasons)
+				}
 				swNotReady = append(swNotReady, swName)
 			}
 		}
@@ -270,22 +314,25 @@ func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) erro
 			}
 
 			// make sure that desired agent version is the same as we expect (same as controller version, may be different if not reconciled)
-			ready := gwag.Spec.AgentVersion == expectedGwAgentV
+			versionMatches := gwag.Spec.AgentVersion == expectedGwAgentV
 
 			// make sure last applied generation is the same as current generation
-			ready = ready && gwag.Generation > 0 && gwag.Status.LastAppliedGen == gwag.Generation
+			generationMatches := gwag.Generation > 0 && gwag.Status.LastAppliedGen == gwag.Generation
 
 			// make sure last gen applied to the frr as well
-			ready = ready && gwag.Generation > 0 && gwag.Status.State.FRR.LastAppliedGen == gwag.Generation
+			frrGenerationMatches := gwag.Generation > 0 && gwag.Status.State.FRR.LastAppliedGen == gwag.Generation
 
 			// TODO consider adding heartbeats
 			// make sure last heartbeat is recent enough
-			// ready = ready && time.Since(gwag.Status.LastHeartbeat.Time) < 1*time.Minute
+			// heartbeatRecent := time.Since(gwag.Status.LastHeartbeat.Time) < 1*time.Minute
 
+			appliedForLongEnough := true
 			if opts.AppliedFor > 0 {
 				// make sure agent config was applied for long enough
-				ready = ready && !gwag.Status.LastAppliedTime.IsZero() && time.Since(gwag.Status.LastAppliedTime.Time) >= opts.AppliedFor
+				appliedForLongEnough = !gwag.Status.LastAppliedTime.IsZero() && time.Since(gwag.Status.LastAppliedTime.Time) >= opts.AppliedFor
 			}
+
+			ready := versionMatches && generationMatches && frrGenerationMatches && appliedForLongEnough
 
 			if ready {
 				if gwag.Status.AgentVersion == expectedGwAgentV {
@@ -294,6 +341,27 @@ func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) erro
 
 				gwNotUpdated = append(gwNotUpdated, gwName)
 			} else {
+				// Log detailed reason why gateway is not ready (only on first iteration and then every 5 minutes)
+				if idx == 0 || idx%(int(5*time.Minute/opts.PollInterval)) == 0 {
+					reasons := []string{}
+					if !versionMatches {
+						reasons = append(reasons, fmt.Sprintf("spec version mismatch (expected=%s, got=%s)", expectedGwAgentV, gwag.Spec.AgentVersion))
+					}
+					if !generationMatches {
+						reasons = append(reasons, fmt.Sprintf("generation mismatch (gen=%d, lastApplied=%d)", gwag.Generation, gwag.Status.LastAppliedGen))
+					}
+					if !frrGenerationMatches {
+						reasons = append(reasons, fmt.Sprintf("FRR generation mismatch (gen=%d, frrLastApplied=%d)", gwag.Generation, gwag.Status.State.FRR.LastAppliedGen))
+					}
+					if !appliedForLongEnough {
+						if gwag.Status.LastAppliedTime.IsZero() {
+							reasons = append(reasons, "config never applied")
+						} else {
+							reasons = append(reasons, fmt.Sprintf("config not applied long enough (appliedFor=%s, actual=%s)", opts.AppliedFor, time.Since(gwag.Status.LastAppliedTime.Time)))
+						}
+					}
+					slog.Warn("Gateway not ready", "name", gwName, "statusVersion", gwag.Status.AgentVersion, "reasons", reasons)
+				}
 				gwNotReady = append(gwNotReady, gwName)
 			}
 		}
@@ -309,6 +377,19 @@ func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) erro
 		if len(swNotReady) == 0 && len(gwNotReady) == 0 {
 			slog.Info("All switches and gateways are ready", "took", time.Since(start))
 
+			// Wait additional time for fabric convergence after agents are ready
+			if opts.StabilizationPeriod > 0 {
+				slog.Info("Waiting for fabric stabilization", "period", opts.StabilizationPeriod)
+				select {
+				case <-ctx.Done():
+					return fmt.Errorf("cancelled during stabilization: %w", ctx.Err())
+				case <-time.After(opts.StabilizationPeriod):
+					slog.Info("Fabric stabilization complete")
+				}
+			}
+
+			tl.Log("[WAIT] WaitReady completed")
+
 			return nil
 		}
 
@@ -321,18 +402,19 @@ func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) erro
 }
 
 type SetupVPCsOpts struct {
-	WaitSwitchesReady bool
-	ForceCleanup      bool
-	VLANNamespace     string
-	IPv4Namespace     string
-	ServersPerSubnet  int
-	SubnetsPerVPC     int
-	DNSServers        []string
-	TimeServers       []string
-	InterfaceMTU      uint16
-	HashPolicy        string
-	VPCMode           vpcapi.VPCMode
-	KeepPeerings      bool
+	WaitSwitchesReady   bool
+	ForceCleanup        bool
+	StabilizationPeriod time.Duration
+	VLANNamespace       string
+	IPv4Namespace       string
+	ServersPerSubnet    int
+	SubnetsPerVPC       int
+	DNSServers          []string
+	TimeServers         []string
+	InterfaceMTU        uint16
+	HashPolicy          string
+	VPCMode             vpcapi.VPCMode
+	KeepPeerings        bool
 }
 
 func CreateOrUpdateVpc(ctx context.Context, kube client.Client, vpc *vpcapi.VPC) (bool, error) {
@@ -478,6 +560,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		"wait", opts.WaitSwitchesReady,
 		"cleanup", opts.ForceCleanup,
 	)
+	c.timeline.Log("[TEST] SetupVPCs started")
 
 	sshConfigs := map[string]*sshutil.Config{}
 	for _, vm := range vlab.VMs {
@@ -775,7 +858,11 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		case <-time.After(15 * time.Second):
 		}
 
-		if err := WaitReady(ctx, kube, WaitReadyOpts{AppliedFor: 15 * time.Second, Timeout: 10 * time.Minute}); err != nil {
+		if err := WaitReady(contextWithTimeline(ctx, c.timeline), kube, WaitReadyOpts{
+			AppliedFor:          15 * time.Second,
+			Timeout:             10 * time.Minute,
+			StabilizationPeriod: opts.StabilizationPeriod,
+		}); err != nil {
 			return fmt.Errorf("waiting for ready: %w", err)
 		}
 	}
@@ -851,6 +938,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	}
 
 	slog.Info("All servers configured and verified", "took", time.Since(start))
+	c.timeline.Log("[TEST] SetupVPCs completed")
 
 	return nil
 }
@@ -2296,8 +2384,21 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string,
 	g, ctx := errgroup.WithContext(ctx)
 
 	g.Go(func() error {
+		// Log iperf3 server invocation for diagnostics
+		timestamp := time.Now().Format(time.RFC3339)
+		logCmd := fmt.Sprintf("echo '[%s] iperf3 server start: from=%s' >> /tmp/iperf3-activity.log", timestamp, from)
+		_, _, _ = retrySSHCmd(ctx, toSSH, logCmd, to)
+
 		cmd := fmt.Sprintf("toolbox -E LD_PRELOAD=/lib/x86_64-linux-gnu/libgcc_s.so.1 -q timeout %d iperf3 -s -1 -J", opts.IPerfsSeconds+25)
 		stdout, stderr, err := retrySSHCmd(ctx, toSSH, cmd, to)
+
+		// Log iperf3 server result for diagnostics
+		exitStatus := "pass"
+		if err != nil {
+			exitStatus = "fail"
+		}
+		logCmd = fmt.Sprintf("echo '[%s] iperf3 server end: from=%s status=%s err=%q stderr=%q' >> /tmp/iperf3-activity.log", time.Now().Format(time.RFC3339), from, exitStatus, err, stderr)
+		_, _, _ = retrySSHCmd(ctx, toSSH, logCmd, to)
 
 		report, parseErr := parseIPerf3Report([]byte(stdout))
 		if err != nil {
@@ -2309,7 +2410,7 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string,
 			slog.Warn("iperf3 server error, but could not retrieve error message from command output", "parseErr", parseErr, "stdout", stdout, "stderr", stderr)
 			ie.ServerMsg = fmt.Sprintf("%s: %s", err, stderr)
 
-			return fmt.Errorf("running iperf3 server: %w", err)
+			return fmt.Errorf("running iperf3 server: %w (stderr: %s)", err, stderr)
 		}
 		if parseErr != nil {
 			ie.ServerMsg = fmt.Sprintf("cannot parse iperf3 report: %s", parseErr)
@@ -2321,9 +2422,34 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string,
 	})
 
 	g.Go(func() error {
-		// We could netcat to check if the server is up, but that will make the server shut down if
-		// it was started with -1, and if we don't add -1 it will run until the timeout
-		time.Sleep(1 * time.Second)
+		// Wait for iperf3 server to be ready by polling the port
+		// Use ss to check if port is listening without making a connection
+		maxWait := 10 * time.Second
+		checkInterval := 100 * time.Millisecond
+		serverReady := false
+		for waited := time.Duration(0); waited < maxWait; waited += checkInterval {
+			time.Sleep(checkInterval)
+
+			// Check if server is listening on port 5201 using ss on the target server (doesn't connect)
+			// ss -ltn shows listening TCP sockets in numeric format
+			checkCmd := "timeout 1 ss -ltn | grep :5201"
+			if _, _, err := retrySSHCmd(ctx, toSSH, checkCmd, to); err == nil {
+				serverReady = true
+				slog.Debug("iperf3 server is ready", "from", from, "to", to, "waitTime", waited+checkInterval)
+				break
+			}
+		}
+
+		if !serverReady {
+			ie.ClientMsg = fmt.Sprintf("iperf3 server did not start listening within %s", maxWait)
+			return fmt.Errorf("iperf3 server on %s did not start listening within %s", to, maxWait)
+		}
+
+		// Log iperf3 client invocation for diagnostics
+		timestamp := time.Now().Format(time.RFC3339)
+		logCmd := fmt.Sprintf("echo '[%s] iperf3 client start: to=%s' >> /tmp/iperf3-activity.log", timestamp, to)
+		_, _, _ = retrySSHCmd(ctx, fromSSH, logCmd, from)
+
 		cmd := fmt.Sprintf("toolbox -E LD_PRELOAD=/lib/x86_64-linux-gnu/libgcc_s.so.1 -q timeout %d iperf3 -P 4 -J -c %s -t %d", opts.IPerfsSeconds+25, toIP.String(), opts.IPerfsSeconds)
 
 		if opts.IPerfsDSCP > 0 {
@@ -2333,6 +2459,14 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string,
 			cmd += fmt.Sprintf(" --tos %d", opts.IPerfsTOS)
 		}
 		stdout, stderr, err := retrySSHCmd(ctx, fromSSH, cmd, from)
+
+		// Log iperf3 client result for diagnostics
+		exitStatus := "pass"
+		if err != nil {
+			exitStatus = "fail"
+		}
+		logCmd = fmt.Sprintf("echo '[%s] iperf3 client end: to=%s status=%s err=%q stderr=%q' >> /tmp/iperf3-activity.log", time.Now().Format(time.RFC3339), to, exitStatus, err, stderr)
+		_, _, _ = retrySSHCmd(ctx, fromSSH, logCmd, from)
 		report, parseErr := parseIPerf3Report([]byte(stdout))
 		if err != nil {
 			if parseErr == nil && report.Error != "" {
@@ -2342,7 +2476,7 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string,
 			}
 			ie.ClientMsg = fmt.Sprintf("%s: %s", err, stderr)
 
-			return fmt.Errorf("running iperf3 client: %w", err)
+			return fmt.Errorf("running iperf3 client: %w (stderr: %s)", err, stderr)
 		}
 		if parseErr != nil {
 			ie.ClientMsg = fmt.Sprintf("cannot parse iperf3 report: %s", parseErr)
@@ -2547,13 +2681,15 @@ func CollectN[E any](n int, seq iter.Seq[E]) []E {
 }
 
 type InspectOpts struct {
-	WaitAppliedFor time.Duration
-	Strict         bool
-	Attempts       int
+	WaitAppliedFor      time.Duration
+	StabilizationPeriod time.Duration
+	Strict              bool
+	Attempts            int
 }
 
 func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) error {
 	slog.Info("Inspecting fabric")
+	c.timeline.Log("[TEST] Inspect started")
 
 	opts.Attempts = max(1, opts.Attempts)
 	opts.Attempts = min(10, opts.Attempts)
@@ -2571,7 +2707,28 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 
 	fail := false
 
-	if err := WaitReady(ctx, kube, WaitReadyOpts{AppliedFor: opts.WaitAppliedFor, Timeout: 30 * time.Minute}); err != nil {
+	// Detect if we have virtual switches to adjust stabilization period
+	stabilizationPeriod := opts.StabilizationPeriod
+	if stabilizationPeriod == 0 {
+		switches := &wiringapi.SwitchList{}
+		if err := kube.List(ctx, switches); err == nil {
+			for _, sw := range switches.Items {
+				if sw.Spec.Profile == meta.SwitchProfileVS || sw.Spec.Profile == meta.SwitchProfileVSCLSP {
+					// Virtual switches need extra time for fabric convergence
+					stabilizationPeriod = 45 * time.Second
+					slog.Info("Detected virtual switches, using extended stabilization period", "period", stabilizationPeriod)
+
+					break
+				}
+			}
+		}
+	}
+
+	if err := WaitReady(contextWithTimeline(ctx, c.timeline), kube, WaitReadyOpts{
+		AppliedFor:          opts.WaitAppliedFor,
+		Timeout:             30 * time.Minute,
+		StabilizationPeriod: stabilizationPeriod,
+	}); err != nil {
 		slog.Error("Failed to wait for ready", "err", err)
 		fail = true
 	}
@@ -2621,9 +2778,34 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 	bgpIn := inspect.BGPIn{
 		Strict: opts.Strict,
 	}
+	var bgpOut inspect.Out[inspect.BGPIn]
+	var bgpErr error
 
-	if bgpOut, err := inspect.BGP(ctx, kube, bgpIn); err != nil {
-		slog.Error("Failed to inspect BGP", "err", err)
+	for attempt := 0; attempt < opts.Attempts; attempt++ {
+		if attempt > 0 {
+			slog.Info("Retry attempt", "number", attempt+1)
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("context cancelled during retry: %w", ctx.Err())
+			case <-time.After(15 * time.Second):
+			}
+		}
+
+		bgpOut, bgpErr = inspect.BGP(ctx, kube, bgpIn)
+
+		if bgpErr == nil {
+			if withErrors, ok := bgpOut.(inspect.WithErrors); ok {
+				if len(withErrors.Errors()) == 0 {
+					break
+				}
+			} else {
+				break
+			}
+		}
+	}
+
+	if bgpErr != nil {
+		slog.Error("Failed to inspect BGP", "err", bgpErr)
 		fail = true
 	} else if renderErr := inspect.Render(time.Now(), inspect.OutputTypeText, os.Stdout, bgpIn, bgpOut); renderErr != nil {
 		slog.Error("Inspecting BGP reveals some errors", "err", renderErr)
@@ -2632,25 +2814,28 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 
 	if fail {
 		slog.Error("Failed to inspect fabric", "took", time.Since(start))
+		c.timeline.Log("[FAIL] Inspect failed")
 
 		return fmt.Errorf("failed to inspect fabric")
 	}
 
 	slog.Info("Inspect completed", "took", time.Since(start))
+	c.timeline.Log("[PASS] Inspect completed")
 
 	return nil
 }
 
 type ReleaseTestOpts struct {
-	Regexes        []string
-	InvertRegex    bool
-	ResultsFile    string
-	Extended       bool
-	FailFast       bool
-	PauseOnFailure bool
-	HashPolicy     string
-	VPCMode        vpcapi.VPCMode
-	ListTests      bool
+	Regexes                  []string
+	InvertRegex              bool
+	ResultsFile              string
+	Extended                 bool
+	FailFast                 bool
+	PauseOnFailure           bool
+	CollectShowTechOnFailure bool
+	HashPolicy               string
+	VPCMode                  vpcapi.VPCMode
+	ListTests                bool
 }
 
 func (c *Config) ReleaseTest(ctx context.Context, vlab *VLAB, opts ReleaseTestOpts) error {

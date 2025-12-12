@@ -193,6 +193,7 @@ jobs:
 
       # TODO: make controls restricted again when we figure out how to get NTP upstream working for isolated VMs
       - name: (${{ inputs.upgradefrom }}) Run and test ${{ inputs.hybrid && 'hybrid ' || '' }}VLAB
+        id: vlab-old
         if: ${{ inputs.upgradefrom != '' }}
         run: |
           export HHFAB_JOIN_TOKEN=$(openssl rand -base64 24)
@@ -205,7 +206,8 @@ jobs:
             --ready=setup-vpcs \
             ${{ inputs.upgradefrom != '25.03' && '--ready=setup-peerings' || '' }} \
             --ready=test-connectivity \
-            --ready=exit
+            --ready=exit \
+            --collect-show-tech
 
       - name: (${{ inputs.upgradefrom }}) Prepare debug artifacts
         if: ${{ always() && inputs.upgradefrom != '' }}
@@ -219,16 +221,18 @@ jobs:
           find ./vlab/vms -type f -name serial.log -exec bash -c 'cp $0 _debug/0-before/serial/$(basename $(dirname $0)).log' {} \; || true
 
       - name: Pre-build script
+        if: ${{ !failure() }}
         run: |
           echo "Running pre-build script"
           ${{ inputs.prebuild }}
 
       - name: Build hhfab
+        if: ${{ !failure() }}
         run: |
           just --timestamp oci_repo=127.0.0.1:30000 oci=http push
 
       - name: Init hhfab for virtual mode
-        if: ${{ inputs.upgradefrom == '' && !inputs.hybrid }}
+        if: ${{ !failure() && inputs.upgradefrom == '' && !inputs.hybrid }}
         run: |
           bin/hhfab init -v --dev \
             --fabric-mode=${{ inputs.fabricmode }} \
@@ -237,7 +241,7 @@ jobs:
           bin/hhfab vlab gen -v ${{ inputs.mesh && '--mesh-links-count=3' || '' }}
 
       - name: Init hhfab for hybrid mode
-        if: ${{ inputs.upgradefrom == '' && inputs.hybrid }}
+        if: ${{ !failure() && inputs.upgradefrom == '' && inputs.hybrid }}
         run: |
           source "./lab-ci/envs/$KUBE_NODE/source.sh"
           bin/hhfab init -v --dev \
@@ -248,6 +252,7 @@ jobs:
             ${{ inputs.gateway && '-w "./lab-ci/envs/$KUBE_NODE/wiring-gateway.yaml"' || '' }}
 
       - name: Print hhfab versions and generate diagrams
+        if: ${{ !failure() }}
         run: |
           bin/hhfab versions | tee versions.txt
           bin/hhfab diagram --format=drawio
@@ -256,6 +261,8 @@ jobs:
 
       # TODO: make controls restricted again when we figure out how to get NTP upstream working for isolated VMs
       - name: ${{ inputs.upgradefrom != '' && 'Upgrade' || 'Run' }} and test ${{ inputs.hybrid && 'hybrid ' || '' }}VLAB
+        id: vlab-upgrade
+        if: ${{ !failure() }}
         run: |
           export HHFAB_JOIN_TOKEN=$(openssl rand -base64 24)
           bin/hhfab vlab up -v \
@@ -272,7 +279,8 @@ jobs:
             ${{ inputs.releasetest_regex_invert && '--release-test-regexes-invert' || '' }} \
             --ready=exit \
             ${{ inputs.pause_on_failure && inputs.debug && '--pause-on-failure' || '' }} \
-            ${{ inputs.upgradefrom != '' && '--upgrade' || '' }}
+            ${{ inputs.upgradefrom != '' && '--upgrade' || '' }} \
+            --collect-show-tech
 
       - name: Upload Release Test Results
         uses: actions/upload-artifact@v5
@@ -282,7 +290,7 @@ jobs:
           path: release-test.xml
 
       - name: Prepare debug artifacts
-        if: ${{ always() }}
+        if: ${{ always() && (steps.vlab-old.conclusion == 'skipped' || steps.vlab-old.conclusion == 'success') }}
         run: |
           mkdir -p _debug/1-current/serial
           cp versions.txt _debug/1-current || true
@@ -294,7 +302,8 @@ jobs:
 
         # TODO: make controls restricted again when we figure out how to get NTP upstream working for isolated VMs
       - name: (After) Run ${{ inputs.hybrid && 'hybrid ' || '' }}VLAB one more time
-        if: ${{ inputs.upgradefrom != '' }}
+        id: vlab-after
+        if: ${{ !failure() && inputs.upgradefrom != '' }}
         run: |
           export HHFAB_JOIN_TOKEN=$(openssl rand -base64 24)
           bin/hhfab vlab up -v \
@@ -305,7 +314,7 @@ jobs:
             --ready=exit
 
       - name: (After) Prepare debug artifacts
-        if: ${{ always() && inputs.upgradefrom != '' }}
+        if: ${{ always() && inputs.upgradefrom != '' && steps.vlab-upgrade.conclusion == 'success' }}
         run: |
           mkdir -p _debug/2-after/serial
           cp versions.txt _debug/2-after || true
