@@ -401,6 +401,7 @@ _Appears in:_
 | `loopbackWorkaroundDisable` _boolean_ |  |  |  |
 | `vpcWorkaroundVLANs` _VLANRange array_ |  |  |  |
 | `vpcWorkaroundSubnet` _[Prefix](#prefix)_ |  |  |  |
+| `th5WorkaroundVLANs` _VLANRange array_ |  |  |  |
 | `eslagMACBase` _string_ |  |  |  |
 | `eslagESIPrefix` _string_ |  |  |  |
 | `mclagSessionSubnet` _[Prefix](#prefix)_ |  |  |  |

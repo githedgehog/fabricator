@@ -279,6 +279,8 @@ type FabricConfig struct {
 	VPCWorkaroundVLANs        []fmeta.VLANRange `json:"vpcWorkaroundVLANs,omitempty"`
 	VPCWorkaroundSubnet       meta.Prefix       `json:"vpcWorkaroundSubnet,omitempty"`
 
+	TH5WorkaroundVLANs []fmeta.VLANRange `json:"th5WorkaroundVLANs,omitempty"`
+
 	ESLAGMACBase   string `json:"eslagMACBase,omitempty"`
 	ESLAGESIPrefix string `json:"eslagESIPrefix,omitempty"`
 
@@ -872,6 +874,11 @@ func (f *Fabricator) Validate(ctx context.Context) error {
 	// TODO validate actual VLANs and that it's a reasonable range
 	if len(f.Spec.Config.Fabric.VPCWorkaroundVLANs) == 0 {
 		return fmt.Errorf("VPC workaround VLANs are required") //nolint:goerr113
+	}
+
+	// TODO validate actual VLANs and that it's a reasonable range
+	if len(f.Spec.Config.Fabric.TH5WorkaroundVLANs) == 0 {
+		return fmt.Errorf("TH5 workaround VLANs are required") //nolint:goerr113
 	}
 
 	// TODO validate MAC base

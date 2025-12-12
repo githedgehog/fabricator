@@ -46,6 +46,9 @@ var DefaultConfig = fabapi.FabConfig{
 		MCLAGSessionSubnet:  "172.30.95.0/31",
 		DefaultSwitchUsers:  map[string]fabapi.SwitchUser{},
 		DefaultAlloyConfig:  fmeta.AlloyConfig{},
+		TH5WorkaroundVLANs: []fmeta.VLANRange{
+			{From: 3900, To: 3999},
+		},
 	},
 	Gateway: fabapi.GatewayConfig{
 		ASN: 65534, // TODO do we need to be able to have gateways with different ASNs?
