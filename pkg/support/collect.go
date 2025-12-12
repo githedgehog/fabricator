@@ -18,7 +18,7 @@ import (
 )
 
 var longBackoff = wait.Backoff{
-	Steps:    10,
+	Steps:    11,
 	Duration: 100 * time.Millisecond,
 	Factor:   2.0,
 	Jitter:   0,
