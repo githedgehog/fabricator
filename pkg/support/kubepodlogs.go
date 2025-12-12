@@ -51,12 +51,12 @@ func collectPodLogs(ctx context.Context, dump *Dump, kubeconfigPath string) erro
 			func(c corev1.Container, _ int) string { return c.Name }) {
 			current, err := getPodContainerLogs(ctx, clientset, pod.Namespace, pod.Name, container, false)
 			if err != nil {
-				return fmt.Errorf("getting pod %s/%s container %s current logs: %w", pod.Namespace, pod.Name, container, err)
+				slog.Error("Failed to get pod current container logs, skipping", "pod", pod.Name, "namespace", pod.Namespace, "container", container, "error", err.Error())
 			}
 
 			previous, err := getPodContainerLogs(ctx, clientset, pod.Namespace, pod.Name, container, true)
 			if err != nil {
-				return fmt.Errorf("getting pod %s/%s container %s previous logs: %w", pod.Namespace, pod.Name, container, err)
+				slog.Error("Failed to get pod previous container logs, skipping", "pod", pod.Name, "namespace", pod.Namespace, "container", container, "error", err.Error())
 			}
 
 			if len(current) == 0 && len(previous) == 0 {
