@@ -508,6 +508,12 @@ func (f *Fabricator) Default() {
 		}
 	}
 
+	if len(f.Spec.Config.Fabric.TH5WorkaroundVLANs) == 0 {
+		f.Spec.Config.Fabric.TH5WorkaroundVLANs = []fmeta.VLANRange{
+			{From: 3900, To: 3999},
+		}
+	}
+
 	f.Spec.Config.Fabric.LoopbackWorkaroundDisable = false // it's ignored now
 
 	o11yNotNone := f.Spec.Config.Observability.Defaults != ObservabilityDefaultsNone
