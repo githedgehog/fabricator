@@ -17,6 +17,7 @@ type GatewayCtrlConfig struct {
 	ToolboxRef           string              `json:"toolboxRef,omitempty"`
 	DataplaneMetricsPort uint16              `json:"dataplaneMetricsPort,omitempty"`
 	FRRMetricsPort       uint16              `json:"frrMetricsPort,omitempty"`
+	Communities          map[uint32]string   `json:"communities,omitempty"`
 }
 
 type AgentConfig struct {
