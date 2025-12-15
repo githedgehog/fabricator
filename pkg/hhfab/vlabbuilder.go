@@ -287,6 +287,12 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 
 	b.ifaceTracker = map[string]uint8{}
 
+	if isGw {
+		if _, err := b.createGatewayGroup(ctx, gwapi.DefaultGatewayGroup); err != nil {
+			return err
+		}
+	}
+
 	for _, node := range nodes {
 		if slices.Contains(node.Spec.Roles, fabapi.NodeRoleGateway) {
 			gwName := node.Name
@@ -308,6 +314,9 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 			}
 
 			if _, err := b.createGateway(ctx, gwName, gwapi.GatewaySpec{
+				Groups: []gwapi.GatewayGroupMembership{
+					{Name: gwapi.DefaultGatewayGroup},
+				},
 				Interfaces: ifaces,
 				Workers:    b.GatewayWorkers,
 				// Neighbors will be later hydrated in based on the gateway connections
@@ -1025,6 +1034,25 @@ func (b *VLABBuilder) createGateway(ctx context.Context, name string, spec gwapi
 
 	if err := b.data.Add(ctx, gw); err != nil {
 		return nil, fmt.Errorf("creating gateway %s: %w", name, err) //nolint:goerr113
+	}
+
+	return gw, nil
+}
+
+func (b *VLABBuilder) createGatewayGroup(ctx context.Context, name string) (*gwapi.GatewayGroup, error) {
+	gw := &gwapi.GatewayGroup{
+		TypeMeta: kmetav1.TypeMeta{
+			Kind:       "GatewayGroup",
+			APIVersion: gwapi.GroupVersion.String(),
+		},
+		ObjectMeta: kmetav1.ObjectMeta{
+			Name:      name,
+			Namespace: comp.FabNamespace,
+		},
+	}
+
+	if err := b.data.Add(ctx, gw); err != nil {
+		return nil, fmt.Errorf("creating gateway group %s: %w", name, err) //nolint:goerr113
 	}
 
 	return gw, nil

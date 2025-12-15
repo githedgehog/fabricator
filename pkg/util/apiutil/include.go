@@ -93,6 +93,17 @@ func ValidateFabricGateway(ctx context.Context, l *Loader, fabricCfg *meta.Fabri
 		return fmt.Errorf("validating external peerings: %w", err)
 	}
 
+	gwGroups := &gwapi.GatewayGroupList{}
+	if err := kube.List(ctx, gwGroups); err != nil {
+		return fmt.Errorf("listing gateway groups: %w", err)
+	}
+	for _, gwGroup := range gwGroups.Items {
+		gwGroup.Default()
+		if err := gwGroup.Validate(ctx, kube); err != nil {
+			return fmt.Errorf("validating gateway group %q: %w", gwGroup.GetName(), err)
+		}
+	}
+
 	gateways := &gwapi.GatewayList{}
 	if err := kube.List(ctx, gateways); err != nil {
 		return fmt.Errorf("listing gateways: %w", err)
@@ -157,6 +168,7 @@ var printIncludeLists = []kclient.ObjectList{
 	&vpcapi.VPCAttachmentList{},
 	&vpcapi.VPCPeeringList{},
 	&vpcapi.ExternalPeeringList{},
+	&gwapi.GatewayGroupList{},
 	&gwapi.GatewayList{},
 	&gwapi.VPCInfoList{},
 	&gwapi.PeeringList{},
