@@ -181,7 +181,10 @@ func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) erro
 	}
 
 	// gateway controller will set agent version to its own version by default
-	expectedGwAgentV := string(f.Status.Versions.Gateway.Controller)
+	expectedGwAgentV := ""
+	if !f.Spec.Config.Gateway.Agentless {
+		expectedGwAgentV = string(f.Status.Versions.Gateway.Controller)
+	}
 	expectedGateways := []string{}
 	if f.Spec.Config.Gateway.Enable {
 		gateways := &gwapi.GatewayList{}
@@ -193,7 +196,14 @@ func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) erro
 		}
 	}
 	if len(expectedGateways) > 0 {
-		slog.Info("Expected gateways", "agent", expectedGwAgentV, "gateways", expectedGateways)
+		args := []any{}
+		if !f.Spec.Config.Gateway.Agentless {
+			args = append(args, "agent", expectedGwAgentV)
+		} else {
+			args = append(args, "mode", "agentless")
+		}
+		args = append(args, "gateways", expectedGateways)
+		slog.Info("Expected gateways", args...)
 	}
 
 	swNotReady := []string{}
@@ -269,8 +279,13 @@ func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) erro
 				continue
 			}
 
-			// make sure that desired agent version is the same as we expect (same as controller version, may be different if not reconciled)
-			ready := gwag.Spec.AgentVersion == expectedGwAgentV
+			ready := true
+
+			// TODO gw-ctrl shouldn't set it for agentless
+			if !f.Spec.Config.Gateway.Agentless {
+				// make sure that desired agent version is the same as we expect (same as controller version, may be different if not reconciled, empty if agentless)
+				ready = gwag.Spec.AgentVersion == expectedGwAgentV
+			}
 
 			// make sure last applied generation is the same as current generation
 			ready = ready && gwag.Generation > 0 && gwag.Status.LastAppliedGen == gwag.Generation
@@ -278,9 +293,9 @@ func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) erro
 			// make sure last gen applied to the frr as well
 			ready = ready && gwag.Generation > 0 && gwag.Status.State.FRR.LastAppliedGen == gwag.Generation
 
-			// TODO consider adding heartbeats
+			// TODO switch to LastHeartbeat when available
 			// make sure last heartbeat is recent enough
-			// ready = ready && time.Since(gwag.Status.LastHeartbeat.Time) < 1*time.Minute
+			ready = ready && time.Since(gwag.Status.State.LastCollectedTime.Time) < 1*time.Minute
 
 			if opts.AppliedFor > 0 {
 				// make sure agent config was applied for long enough
