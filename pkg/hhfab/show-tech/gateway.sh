@@ -104,6 +104,32 @@ run_vtysh_cmd() {
 } >> "$OUTPUT_FILE" 2>&1
 
 # ---------------------------
+# Resource Pressure & Container Runtime
+# ---------------------------
+{
+    echo -e "\n=== Kubelet Status ==="
+    systemctl status k3s-agent --no-pager -l
+
+    echo -e "\n=== Kubelet Logs (last 200 lines) ==="
+    journalctl -u k3s-agent --no-pager -n 200
+
+    echo -e "\n=== Container Runtime Stats ==="
+    sudo crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock stats --no-stream
+
+    echo -e "\n=== Memory Pressure (PSI) ==="
+    cat /proc/pressure/memory 2>/dev/null || echo "PSI not available"
+
+    echo -e "\n=== CPU Pressure (PSI) ==="
+    cat /proc/pressure/cpu 2>/dev/null || echo "PSI not available"
+
+    echo -e "\n=== Detailed Memory Info ==="
+    cat /proc/meminfo | grep -E "MemTotal|MemFree|MemAvailable|Cached|Slab|PageTables|Committed"
+
+    echo -e "\n=== VM Stats ==="
+    vmstat 1 5
+} >> "$OUTPUT_FILE" 2>&1
+
+# ---------------------------
 # System Logs
 # ---------------------------
 {
@@ -117,4 +143,59 @@ run_vtysh_cmd() {
     dmesg | grep -i "network\|bond\|vlan"
 } >> "$OUTPUT_FILE" 2>&1
 
+# ---------------------------
+# Extract Errors to Separate File
+# ---------------------------
+ERROR_FILE="/tmp/show-tech-errors.log"
+: > "$ERROR_FILE"
+
+{
+    echo "ERROR AND WARNING SUMMARY"
+    echo "========================="
+    echo ""
+    echo "Extracted from: $(hostname) at $(date)"
+    echo ""
+
+    # Extract errors and warnings from main log
+    echo "=== ERRORS AND WARNINGS FROM SHOW-TECH ==="
+    grep -E "ERR|FAIL|WARN|ERROR|WARNING|error|fail|failed|Failed|down|Down|Idle|Active \(Connect\)" "$OUTPUT_FILE" | head -500
+
+    echo ""
+    echo "=== SUMMARY ==="
+
+    # Count occurrences
+    err_count=$(grep -c -E "ERR|error|Error" "$OUTPUT_FILE" 2>/dev/null || echo 0)
+    fail_count=$(grep -c -E "FAIL|fail|Failed" "$OUTPUT_FILE" 2>/dev/null || echo 0)
+    warn_count=$(grep -c -E "WARN|warning|Warning" "$OUTPUT_FILE" 2>/dev/null || echo 0)
+
+    echo "Total ERR messages: $err_count"
+    echo "Total FAIL messages: $fail_count"
+    echo "Total WARN messages: $warn_count"
+
+    echo ""
+    echo "=== BGP SESSION ISSUES ==="
+    grep -E "Idle|Active \(Connect\)|down|notification|BGP.*error|neighbor.*down" "$OUTPUT_FILE" 2>/dev/null | head -30 || echo "No BGP session issues detected"
+
+    echo ""
+    echo "=== INTERFACE ISSUES ==="
+    grep -E "interface.*down|link.*down|no carrier" "$OUTPUT_FILE" 2>/dev/null | head -20 || echo "No interface issues detected"
+
+    echo ""
+    echo "=== FRR ERRORS ==="
+    grep -E "zebra.*error|bgpd.*error|frr.*error|failed to|cannot" "$OUTPUT_FILE" 2>/dev/null | head -30 || echo "No FRR errors detected"
+
+    echo ""
+    echo "=== MOST COMMON ERROR PATTERNS ==="
+
+    # Find most common error patterns (top 10)
+    grep -E "ERR|FAIL|error|fail|Error|Failed|Idle|down" "$OUTPUT_FILE" 2>/dev/null | \
+        sed 's/[0-9][0-9]:[0-9][0-9]:[0-9][0-9]/TIME/g' | \
+        sed 's/[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}/IP/g' | \
+        sed 's/neighbor [0-9a-f:.]*/neighbor PEER/g' | \
+        sed 's/AS [0-9]*/AS ASN/g' | \
+        sort | uniq -c | sort -rn | head -10 || echo "No patterns found"
+
+} > "$ERROR_FILE" 2>&1
+
 echo "Diagnostics collected to $OUTPUT_FILE"
+echo "Errors extracted to $ERROR_FILE"

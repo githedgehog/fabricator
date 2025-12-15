@@ -16,14 +16,17 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/samber/lo"
 	agentapi "go.githedgehog.com/fabric/api/agent/v1beta1"
 	"go.githedgehog.com/fabric/api/meta"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
@@ -67,19 +70,20 @@ const (
 )
 
 type VPCPeeringTestCtx struct {
-	vlabCfg          *Config
-	vlab             *VLAB
-	kube             kclient.Client
-	wipeBetweenTests bool
-	setupOpts        SetupVPCsOpts
-	tcOpts           TestConnectivityOpts
-	wrOpts           WaitReadyOpts
-	extName          string
-	extended         bool
-	failFast         bool
-	pauseOnFail      bool
-	roceLeaves       []string
-	noSetup          bool
+	vlabCfg               *Config
+	vlab                  *VLAB
+	kube                  kclient.Client
+	wipeBetweenTests      bool
+	setupOpts             SetupVPCsOpts
+	tcOpts                TestConnectivityOpts
+	wrOpts                WaitReadyOpts
+	extName               string
+	extended              bool
+	failFast              bool
+	pauseOnFail           bool
+	collectShowTechOnFail bool
+	roceLeaves            []string
+	noSetup               bool
 }
 
 var AllZeroPrefix = []string{"0.0.0.0/0"}
@@ -3675,7 +3679,228 @@ func fetchAndParseDHCPLease(ctx context.Context, ssh *sshutil.Config, ifName str
 
 // Utilities and suite runners
 
-func makeTestCtx(kube kclient.Client, setupOpts SetupVPCsOpts, vlabCfg *Config, vlab *VLAB, wipeBetweenTests bool, rtOpts ReleaseTestOpts) *VPCPeeringTestCtx {
+// sanitizeTestName converts a test display name into a filesystem-safe directory name
+func sanitizeTestName(name string) string {
+	// Replace spaces and special characters with hyphens
+	sanitized := strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' {
+			return r
+		}
+
+		return '-'
+	}, name)
+	// Remove consecutive hyphens
+	sanitized = strings.ReplaceAll(sanitized, "--", "-")
+	// Remove leading/trailing hyphens
+	sanitized = strings.Trim(sanitized, "-")
+	// Truncate to reasonable length (100 chars)
+	if len(sanitized) > 100 {
+		sanitized = sanitized[:100]
+	}
+
+	return sanitized
+}
+
+// collectShowTechForTest collects show-tech diagnostics for a specific failed test
+func (testCtx *VPCPeeringTestCtx) collectShowTechForTest(ctx context.Context, test *JUnitTestCase) {
+	if !testCtx.collectShowTechOnFail {
+		return
+	}
+
+	dirName := sanitizeTestName(test.Name)
+	baseOutputDir := filepath.Join(testCtx.vlabCfg.WorkDir, "show-tech-output")
+	testOutputDir := filepath.Join(baseOutputDir, dirName)
+
+	slog.Info("Collecting show-tech for failed test", "test", test.Name, "dir", dirName, "output", testOutputDir)
+
+	// Create a temporary modified config to use the test-specific output directory
+	scriptConfig := DefaultShowTechScript()
+	if err := os.MkdirAll(testOutputDir, 0o755); err != nil {
+		slog.Warn("Failed to create show-tech output directory", "test", test.Name, "err", err)
+
+		return
+	}
+
+	var wg sync.WaitGroup
+	errChan := make(chan error, len(testCtx.vlab.VMs))
+
+	done := make(chan struct{})
+	defer close(done)
+
+	go func() {
+		select {
+		case <-ctx.Done():
+			slog.Warn("Context cancelled during show-tech collection, but continuing to collect available diagnostics")
+		case <-done:
+			return
+		}
+	}()
+
+	var successCount atomic.Int32
+
+	for _, vm := range testCtx.vlab.VMs {
+		name := vm.Name
+		wg.Add(1)
+		go func(name string, vm VM) {
+			defer wg.Done()
+			ssh, err := testCtx.vlabCfg.SSHVM(ctx, testCtx.vlab, vm)
+			if err != nil {
+				errChan <- fmt.Errorf("getting ssh config for entry %s: %w", name, err)
+
+				return
+			}
+
+			collectionCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+			defer cancel()
+			script, ok := scriptConfig.Scripts[vm.Type]
+			if !ok {
+				slog.Debug("No show-tech script available for", "vm", vm.Name, "type", vm.Type)
+
+				return
+			}
+
+			if err := testCtx.vlabCfg.collectShowTech(collectionCtx, name, ssh, script, testOutputDir); err != nil {
+				errChan <- fmt.Errorf("collecting show-tech for entry %s: %w", name, err)
+			} else {
+				successCount.Add(1)
+			}
+		}(name, vm)
+	}
+
+	wg.Wait()
+	close(errChan)
+
+	errors := lo.ChannelToSlice(errChan)
+
+	switch {
+	case successCount.Load() == 0:
+		slog.Warn("Failed to collect any diagnostics for test", "test", test.Name, "errors", errors)
+	case len(errors) > 0:
+		slog.Warn("Some diagnostics collection failed for test",
+			"test", test.Name,
+			"success_count", successCount.Load(),
+			"total_count", len(testCtx.vlab.VMs),
+			"errors", errors)
+	default:
+		slog.Info("Show tech for test collected successfully", "test", test.Name, "folder", testOutputDir)
+	}
+
+	// Write test failure context file
+	if successCount.Load() > 0 {
+		testCtx.writeTestFailureContext(testOutputDir, test)
+	}
+}
+
+// writeTestFailureContext writes a human-readable context file for test failure analysis
+func (testCtx *VPCPeeringTestCtx) writeTestFailureContext(outputDir string, test *JUnitTestCase) {
+	contextFile := filepath.Join(outputDir, "_test-failure-context.txt")
+
+	var content strings.Builder
+
+	content.WriteString("TEST FAILURE CONTEXT\n")
+	content.WriteString("====================\n\n")
+
+	// Test metadata
+	content.WriteString(fmt.Sprintf("Test Name: %s\n", test.Name))
+	if test.ClassName != "" {
+		content.WriteString(fmt.Sprintf("Test Suite: %s\n", test.ClassName))
+	}
+	content.WriteString(fmt.Sprintf("Collection Time: %s\n", time.Now().Format(time.RFC3339)))
+	content.WriteString(fmt.Sprintf("Test Duration: %.2fs\n\n", test.Time))
+
+	// Failure information
+	if test.Failure != nil {
+		content.WriteString("FAILURE:\n")
+		content.WriteString(fmt.Sprintf("%s\n\n", test.Failure.Message))
+	}
+
+	// VPC Configuration
+	content.WriteString("VPC CONFIGURATION:\n")
+	content.WriteString(fmt.Sprintf("  Mode: %s\n", testCtx.setupOpts.VPCMode))
+	content.WriteString(fmt.Sprintf("  Servers Per Subnet: %d\n", testCtx.setupOpts.ServersPerSubnet))
+	content.WriteString(fmt.Sprintf("  Subnets Per VPC: %d\n", testCtx.setupOpts.SubnetsPerVPC))
+	if testCtx.setupOpts.VLANNamespace != "" {
+		content.WriteString(fmt.Sprintf("  VLAN Namespace: %s\n", testCtx.setupOpts.VLANNamespace))
+	}
+	if testCtx.setupOpts.IPv4Namespace != "" {
+		content.WriteString(fmt.Sprintf("  IPv4 Namespace: %s\n", testCtx.setupOpts.IPv4Namespace))
+	}
+	content.WriteString(fmt.Sprintf("  Hash Policy: %s\n", testCtx.setupOpts.HashPolicy))
+	if testCtx.setupOpts.InterfaceMTU > 0 {
+		content.WriteString(fmt.Sprintf("  Interface MTU: %d\n", testCtx.setupOpts.InterfaceMTU))
+	}
+	content.WriteString("\n")
+
+	// Test connectivity options
+	content.WriteString("TEST CONNECTIVITY SETTINGS:\n")
+	content.WriteString(fmt.Sprintf("  Pings Count: %d\n", testCtx.tcOpts.PingsCount))
+	content.WriteString(fmt.Sprintf("  IPerf Seconds: %d\n", testCtx.tcOpts.IPerfsSeconds))
+	if testCtx.tcOpts.IPerfsMinSpeed > 0 {
+		content.WriteString(fmt.Sprintf("  IPerf Min Speed: %.0f Mbps\n", testCtx.tcOpts.IPerfsMinSpeed))
+	}
+	content.WriteString(fmt.Sprintf("  Curls Count: %d\n", testCtx.tcOpts.CurlsCount))
+	content.WriteString(fmt.Sprintf("  Require All Servers: %v\n", testCtx.tcOpts.RequireAllServers))
+	content.WriteString("\n")
+
+	// Wait/stability settings
+	content.WriteString("FABRIC WAIT SETTINGS:\n")
+	content.WriteString(fmt.Sprintf("  Applied For: %s\n", testCtx.wrOpts.AppliedFor))
+	content.WriteString(fmt.Sprintf("  Timeout: %s\n", testCtx.wrOpts.Timeout))
+	if testCtx.wrOpts.StabilizationPeriod > 0 {
+		content.WriteString(fmt.Sprintf("  Stabilization Period: %s\n", testCtx.wrOpts.StabilizationPeriod))
+	} else {
+		content.WriteString("  Stabilization Period: NONE (may cause timing issues!)\n")
+	}
+	if testCtx.setupOpts.StabilizationPeriod > 0 {
+		content.WriteString(fmt.Sprintf("  VPC Setup Stabilization: %s\n", testCtx.setupOpts.StabilizationPeriod))
+	} else {
+		content.WriteString("  VPC Setup Stabilization: NONE (may cause timing issues!)\n")
+	}
+	content.WriteString("\n")
+
+	// Test context flags
+	content.WriteString("TEST CONTEXT:\n")
+	content.WriteString(fmt.Sprintf("  Wipe Between Tests: %v\n", testCtx.wipeBetweenTests))
+	content.WriteString(fmt.Sprintf("  Extended Tests: %v\n", testCtx.extended))
+	content.WriteString(fmt.Sprintf("  Fail Fast: %v\n", testCtx.failFast))
+	content.WriteString("\n")
+
+	// VLAB information
+	if testCtx.vlab != nil {
+		content.WriteString("VLAB INFORMATION:\n")
+		content.WriteString(fmt.Sprintf("  Total VMs: %d\n", len(testCtx.vlab.VMs)))
+
+		// Count VM types
+		vmTypes := make(map[VMType]int)
+		for _, vm := range testCtx.vlab.VMs {
+			vmTypes[vm.Type]++
+		}
+		for vmType, count := range vmTypes {
+			content.WriteString(fmt.Sprintf("    %s: %d\n", vmType, count))
+		}
+		content.WriteString("\n")
+	}
+
+	// Helpful analysis hints
+	content.WriteString("ANALYSIS HINTS:\n")
+	content.WriteString("  - Check _errors.log for recent errors from switches/servers\n")
+	content.WriteString("  - Look for VLAN/VRF configuration errors around test start time\n")
+	content.WriteString("  - Compare routing tables across switches for consistency\n")
+	content.WriteString("  - Verify BGP sessions are established between all fabric peers\n")
+	content.WriteString("  - Check if anycast gateway IPs are reachable from servers\n")
+	if testCtx.wrOpts.StabilizationPeriod == 0 || testCtx.setupOpts.StabilizationPeriod == 0 {
+		content.WriteString("  - WARNING: No stabilization period configured - fabric may not have converged!\n")
+	}
+	content.WriteString("\n")
+
+	if err := os.WriteFile(contextFile, []byte(content.String()), 0o600); err != nil {
+		slog.Warn("Failed to write test failure context file", "err", err)
+	} else {
+		slog.Info("Wrote test failure context file", "file", contextFile)
+	}
+}
+
+func makeTestCtx(ctx context.Context, kube kclient.Client, setupOpts SetupVPCsOpts, vlabCfg *Config, vlab *VLAB, wipeBetweenTests bool, rtOpts ReleaseTestOpts) *VPCPeeringTestCtx {
 	testCtx := new(VPCPeeringTestCtx)
 	testCtx.kube = kube
 	testCtx.vlabCfg = vlabCfg
@@ -3689,9 +3914,30 @@ func makeTestCtx(kube kclient.Client, setupOpts SetupVPCsOpts, vlabCfg *Config, 
 		CurlsCount:        1,
 		RequireAllServers: setupOpts.VPCMode == vpcapi.VPCModeL2VNI, // L3VNI will skip eslag servers
 	}
+
+	// Detect if we have virtual switches to adjust wait times
+	hasVirtualSwitches := false
+	switches := &wiringapi.SwitchList{}
+	if err := kube.List(ctx, switches); err == nil {
+		for _, sw := range switches.Items {
+			if sw.Spec.Profile == meta.SwitchProfileVS || sw.Spec.Profile == meta.SwitchProfileVSCLSP {
+				hasVirtualSwitches = true
+
+				break
+			}
+		}
+	}
+
 	testCtx.wrOpts = WaitReadyOpts{
 		AppliedFor: waitAppliedFor,
 		Timeout:    waitTimeout,
+	}
+
+	// Virtual switches need extra time for fabric convergence
+	if hasVirtualSwitches {
+		testCtx.wrOpts.StabilizationPeriod = 45 * time.Second
+		testCtx.wrOpts.Timeout = 10 * time.Minute
+		testCtx.setupOpts.StabilizationPeriod = 45 * time.Second
 	}
 	if rtOpts.Extended {
 		testCtx.tcOpts.IPerfsSeconds = 10
@@ -3701,6 +3947,7 @@ func makeTestCtx(kube kclient.Client, setupOpts SetupVPCsOpts, vlabCfg *Config, 
 	testCtx.extended = rtOpts.Extended
 	testCtx.failFast = rtOpts.FailFast
 	testCtx.pauseOnFail = rtOpts.PauseOnFailure
+	testCtx.collectShowTechOnFail = rtOpts.CollectShowTechOnFailure
 
 	return testCtx
 }
@@ -3866,6 +4113,17 @@ func doRunTests(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 	// initial setup
 	if err := testCtx.setupTest(ctx, true); err != nil {
 		slog.Error("Initial test suite setup failed", "suite", ts.Name, "error", err.Error())
+
+		// Collect show-tech for initial setup failure
+		// Create a synthetic test case for the setup failure
+		setupFailureTest := &JUnitTestCase{
+			Name: fmt.Sprintf("%s-initial-setup", ts.Name),
+			Failure: &Failure{
+				Message: err.Error(),
+			},
+		}
+		testCtx.collectShowTechForTest(ctx, setupFailureTest)
+
 		if testCtx.pauseOnFail {
 			if err := pauseOnFailure(ctx); err != nil {
 				slog.Warn("Pause on failure failed, ignoring", "err", err.Error())
@@ -3890,6 +4148,7 @@ func doRunTests(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 				}
 				ts.Failures++
 				slog.Error("FAIL", "test", test.Name, "error", fmt.Sprintf("Failed to run setupTest between tests: %s", err.Error()))
+				testCtx.collectShowTechForTest(ctx, &ts.TestCases[i])
 				if testCtx.pauseOnFail {
 					if err := pauseOnFailure(ctx); err != nil {
 						slog.Warn("Pause on failure failed, ignoring", "err", err.Error())
@@ -3934,6 +4193,7 @@ func doRunTests(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 			}
 			ts.Failures++
 			slog.Error("FAIL", "test", test.Name, "error", err.Error())
+			testCtx.collectShowTechForTest(ctx, &ts.TestCases[i])
 			if testCtx.pauseOnFail {
 				if err := pauseOnFailure(ctx); err != nil {
 					slog.Warn("Pause on failure failed, ignoring", "err", err.Error())
@@ -4416,7 +4676,7 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 		VPCMode:           rtOtps.VPCMode,
 	}
 
-	testCtx := makeTestCtx(kube, setupOpts, vlabCfg, vlab, false, rtOtps)
+	testCtx := makeTestCtx(ctx, kube, setupOpts, vlabCfg, vlab, false, rtOtps)
 	noVpcSuite := makeNoVpcsSuite(testCtx)
 	singleVpcSuite := makeVpcPeeringsSingleVPCSuite(testCtx)
 	multiVpcSuite := makeVpcPeeringsMultiVPCSuite(testCtx)
