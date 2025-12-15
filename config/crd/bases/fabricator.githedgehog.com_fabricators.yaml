@@ -343,6 +343,10 @@ spec:
                       asn:
                         format: int32
                         type: integer
+                      communities:
+                        additionalProperties:
+                          type: string
+                        type: object
                       enable:
                         type: boolean
                       mac:
