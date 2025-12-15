@@ -8,6 +8,7 @@ import (
 	_ "embed"
 	"fmt"
 	"net/netip"
+	"strconv"
 
 	dhcpapi "go.githedgehog.com/fabric/api/dhcp/v1beta1"
 	fmeta "go.githedgehog.com/fabric/api/meta"
@@ -203,6 +204,16 @@ func GetFabricConfig(f fabapi.Fabricator) (*fmeta.FabricConfig, error) {
 		observability = *f.Spec.Config.Fabric.Observability
 	}
 
+	gwComms := map[uint32]string{}
+	for prioStr, commStr := range f.Spec.Config.Gateway.Communities {
+		prio, err := strconv.ParseUint(prioStr, 10, 32)
+		if err != nil {
+			return nil, fmt.Errorf("config: gatewayCommunity priority %s is invalid: %w", prioStr, err)
+		}
+
+		gwComms[uint32(prio)] = commStr
+	}
+
 	// TODO align APIs (fabric config field names, check agent spec too)
 	return &fmeta.FabricConfig{
 		ControlVIP:             string(f.Spec.Config.Control.VIP),
@@ -251,6 +262,7 @@ func GetFabricConfig(f fabapi.Fabricator) (*fmeta.FabricConfig, error) {
 		ManagementSubnet:         string(f.Spec.Config.Control.ManagementSubnet),
 		ManagementDHCPStart:      string(f.Spec.Config.Fabric.ManagementDHCPStart),
 		ManagementDHCPEnd:        string(f.Spec.Config.Fabric.ManagementDHCPEnd),
+		GatewayCommunities:       gwComms,
 	}, nil
 }
 
