@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab"
@@ -45,12 +46,20 @@ type Config struct {
 	Controls []fabapi.ControlNode
 	Nodes    []fabapi.FabNode
 	Client   kclient.Reader // all resources (fab, fabric and gateway)
+	Shutdown atomic.Int32
 }
 
 type RegistryConfig struct {
 	Repo   string `json:"repo,omitempty"`
 	Prefix string `json:"prefix,omitempty"`
 }
+
+type ShutdownType int32
+
+const (
+	ShutdownTypeError ShutdownType = iota
+	ShutdownTypeGraceful
+)
 
 func checkWorkCacheDir(workDir, cacheDir string) error {
 	stat, err := os.Stat(workDir)

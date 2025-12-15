@@ -158,8 +158,19 @@ func (c *Config) checkForBins() error {
 }
 
 func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) error {
-	ctx, cancel := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+
+	signalChan := make(chan os.Signal, 1)
+	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		<-signalChan
+
+		slog.Info("Received signal, exiting...")
+		c.Shutdown.Store(int32(ShutdownTypeGraceful))
+		cancel()
+	}()
 
 	start := time.Now()
 
@@ -452,6 +463,10 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 			slog.Debug("Starting", "vm", vm.Name, "type", vm.Type, "cmd", VLABCmdQemuSystem+" "+strings.Join(args, " "))
 
 			if err := execCmd(ctx, true, vmDir, VLABCmdQemuSystem, args, "vm", vm.Name); err != nil {
+				if c.Shutdown.Load() == int32(ShutdownTypeGraceful) {
+					return nil
+				}
+
 				slog.Warn("Failed running VM", "vm", vm.Name, "type", vm.Type, "err", err)
 
 				c.CollectVLABDebug(ctx, vlab, opts)
@@ -468,6 +483,10 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 			postProcesses.Add(1)
 			group.Go(func() error {
 				if err := c.vmPostProcess(ctx, vlab, d, vm, opts); err != nil {
+					if c.Shutdown.Load() == int32(ShutdownTypeGraceful) {
+						return nil
+					}
+
 					slog.Warn("Failed to post-process VM", "vm", vm.Name, "type", vm.Type, "err", err)
 
 					c.CollectVLABDebug(ctx, vlab, opts)
@@ -599,16 +618,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						PDUPassword: os.Getenv(VLABEnvPDUPassword),
 						WaitReady:   true,
 					}); err != nil {
-						slog.Warn("Failed to reinstall switches", "err", err)
-
-						c.CollectVLABDebug(ctx, vlab, opts)
-						if opts.PauseOnFailure {
-							if err := pauseOnFailure(ctx); err != nil {
-								slog.Warn("Pause on failure failed, ignoring", "err", err.Error())
-							}
-						}
-
-						return fmt.Errorf("reinstalling switches: %w", err)
+						return c.handleShutdownWithPause(ctx, vlab, opts, fmt.Errorf("reinstalling switches: %w", err))
 					}
 				case OnReadySetupVPCs:
 					// TODO make it configurable
@@ -623,16 +633,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						HashPolicy:        HashPolicyL2And3,
 						VPCMode:           opts.VPCMode,
 					}); err != nil {
-						slog.Warn("Failed to setup VPCs", "err", err)
-
-						c.CollectVLABDebug(ctx, vlab, opts)
-						if opts.PauseOnFailure {
-							if err := pauseOnFailure(ctx); err != nil {
-								slog.Warn("Pause on failure failed, ignoring", "err", err.Error())
-							}
-						}
-
-						return fmt.Errorf("setting up VPCs: %w", err)
+						return c.handleShutdownWithPause(ctx, vlab, opts, fmt.Errorf("setting up VPCs: %w", err))
 					}
 				case OnReadySetupPeerings:
 					// TODO make it configurable
@@ -645,16 +646,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						WaitSwitchesReady: true,
 						Requests:          peerings,
 					}); err != nil {
-						slog.Warn("Failed to setup peerings", "err", err)
-
-						c.CollectVLABDebug(ctx, vlab, opts)
-						if opts.PauseOnFailure {
-							if err := pauseOnFailure(ctx); err != nil {
-								slog.Warn("Pause on failure failed, ignoring", "err", err.Error())
-							}
-						}
-
-						return fmt.Errorf("setting up peerings: %w", err)
+						return c.handleShutdownWithPause(ctx, vlab, opts, fmt.Errorf("setting up peerings: %w", err))
 					}
 				case OnReadyTestConnectivity:
 					// TODO make it configurable
@@ -664,18 +656,13 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						IPerfsSeconds:     5,
 						CurlsCount:        3,
 					}); err != nil {
-						slog.Warn("Failed to test connectivity", "err", err)
-
-						c.CollectVLABDebug(ctx, vlab, opts)
-						if opts.PauseOnFailure {
-							if err := pauseOnFailure(ctx); err != nil {
-								slog.Warn("Pause on failure failed, ignoring", "err", err.Error())
-							}
-						}
-
-						return fmt.Errorf("testing connectivity: %w", err)
+						return c.handleShutdownWithPause(ctx, vlab, opts, fmt.Errorf("testing connectivity: %w", err))
 					}
 				case OnReadyExit:
+					if c.Shutdown.Load() == int32(ShutdownTypeGraceful) {
+						return nil
+					}
+
 					c.CollectVLABDebug(ctx, vlab, opts)
 
 					// TODO seems like some graceful shutdown logic isn't working in CI and we're getting stuck w/o this
@@ -687,16 +674,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 					return ErrExit
 				case OnReadyWait:
 					if err := c.Wait(ctx, vlab); err != nil {
-						slog.Warn("Failed to wait for switches ready", "err", err)
-
-						c.CollectVLABDebug(ctx, vlab, opts)
-						if opts.PauseOnFailure {
-							if err := pauseOnFailure(ctx); err != nil {
-								slog.Warn("Pause on failure failed, ignoring", "err", err.Error())
-							}
-						}
-
-						return fmt.Errorf("waiting: %w", err)
+						return c.handleShutdownWithPause(ctx, vlab, opts, fmt.Errorf("waiting: %w", err))
 					}
 				case OnReadyInspect:
 					if err := c.Inspect(ctx, vlab, InspectOpts{
@@ -704,16 +682,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						Strict:         !opts.AutoUpgrade,
 						Attempts:       3,
 					}); err != nil {
-						slog.Warn("Failed to inspect", "err", err)
-
-						c.CollectVLABDebug(ctx, vlab, opts)
-						if opts.PauseOnFailure {
-							if err := pauseOnFailure(ctx); err != nil {
-								slog.Warn("Pause on failure failed, ignoring", "err", err.Error())
-							}
-						}
-
-						return fmt.Errorf("inspecting: %w", err)
+						return c.handleShutdownWithPause(ctx, vlab, opts, fmt.Errorf("inspecting: %w", err))
 					}
 				case OnReadyReleaseTest:
 					if err := c.ReleaseTest(ctx, vlab, ReleaseTestOpts{
@@ -724,6 +693,10 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						Regexes:        opts.ReleaseTestRegexes,
 						InvertRegex:    opts.ReleaseTestRegexesInvert,
 					}); err != nil {
+						if c.Shutdown.Load() == int32(ShutdownTypeGraceful) {
+							return nil
+						}
+
 						slog.Warn("Failed to run release test", "err", err)
 
 						c.CollectVLABDebug(ctx, vlab, opts)
@@ -767,6 +740,23 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 	slog.Info("VLAB finished successfully")
 
 	return nil
+}
+
+func (c *Config) handleShutdownWithPause(ctx context.Context, vlab *VLAB, opts VLABRunOpts, err error) error {
+	if c.Shutdown.Load() == int32(ShutdownTypeGraceful) {
+		return nil
+	}
+
+	slog.Warn("Failed", "err", err.Error())
+
+	c.CollectVLABDebug(ctx, vlab, opts)
+	if opts.PauseOnFailure {
+		if err := pauseOnFailure(ctx); err != nil {
+			slog.Warn("Pause on failure failed, ignoring", "err", err.Error())
+		}
+	}
+
+	return err
 }
 
 func isPresent(dir string, files ...string) bool {
