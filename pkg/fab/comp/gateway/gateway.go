@@ -8,6 +8,7 @@ import (
 	_ "embed"
 	"fmt"
 	"slices"
+	"strconv"
 
 	// just to keep the import
 	_ "go.githedgehog.com/gateway/api/gateway/v1alpha1"
@@ -88,6 +89,16 @@ func Install(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 		return nil, fmt.Errorf("getting image URL for %q: %w", flatcar.ToolboxRef, err)
 	}
 
+	comms := map[uint32]string{}
+	for prioStr, commStr := range cfg.Spec.Config.Gateway.Communities {
+		prio, err := strconv.ParseUint(prioStr, 10, 32)
+		if err != nil {
+			return nil, fmt.Errorf("config: gatewayCommunity priority %s is invalid: %w", prioStr, err)
+		}
+
+		comms[uint32(prio)] = commStr
+	}
+
 	ctrlCfgData, err := kyaml.Marshal(&meta.GatewayCtrlConfig{
 		Namespace: comp.FabNamespace,
 		Tolerations: []corev1.Toleration{
@@ -104,6 +115,7 @@ func Install(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 		ToolboxRef:           toolboxRepo + ":" + string(flatcar.ToolboxVersion(cfg)),
 		DataplaneMetricsPort: DataplaneMetricsPort,
 		FRRMetricsPort:       FRRMetricsPort,
+		Communities:          comms,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("marshalling ctrl config: %w", err)

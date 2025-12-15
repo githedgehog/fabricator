@@ -9,6 +9,7 @@ import (
 	"net/netip"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 
 	"dario.cat/mergo"
@@ -309,6 +310,7 @@ type GatewayConfig struct {
 	MAC           string                `json:"mac,omitempty"`
 	Observability *GatewayObservability `json:"observability,omitempty"`
 	Agentless     bool                  `json:"agentless,omitempty"`
+	Communities   map[string]string     `json:"communities,omitempty"`
 }
 
 type GatewayObservability struct {
@@ -511,6 +513,21 @@ func (f *Fabricator) Default() {
 	if len(f.Spec.Config.Fabric.TH5WorkaroundVLANs) == 0 {
 		f.Spec.Config.Fabric.TH5WorkaroundVLANs = []fmeta.VLANRange{
 			{From: 3900, To: 3999},
+		}
+	}
+
+	if len(f.Spec.Config.Gateway.Communities) == 0 {
+		f.Spec.Config.Gateway.Communities = map[string]string{
+			"0": "50001:0",
+			"1": "50001:1",
+			"2": "50001:2",
+			"3": "50001:3",
+			"4": "50001:4",
+			"5": "50001:5",
+			"6": "50001:6",
+			"7": "50001:7",
+			"8": "50001:8",
+			"9": "50001:9",
 		}
 	}
 
@@ -922,6 +939,22 @@ func (f *Fabricator) Validate(ctx context.Context) error {
 
 	if !slices.Contains(ObservabilityDefaultsList, f.Spec.Config.Observability.Defaults) {
 		return fmt.Errorf("invalid observability defaults mode: %s", f.Spec.Config.Observability.Defaults) //nolint:err113
+	}
+
+	for prioStr, commStr := range f.Spec.Config.Gateway.Communities {
+		if _, err := strconv.ParseUint(prioStr, 10, 32); err != nil {
+			return fmt.Errorf("config: gatewayCommunity priority %s is invalid: %w", prioStr, err)
+		}
+		parts := strings.Split(commStr, ":")
+		if len(parts) != 2 {
+			return fmt.Errorf("config: gatewayCommunity community %s format is invalid", commStr) //nolint:err113
+		}
+		if _, err := strconv.ParseUint(parts[0], 10, 16); err != nil {
+			return fmt.Errorf("config: gatewayCommunity community %s is invalid: %w", commStr, err)
+		}
+		if _, err := strconv.ParseUint(parts[1], 10, 16); err != nil {
+			return fmt.Errorf("config: gatewayCommunity community %s is invalid: %w", commStr, err)
+		}
 	}
 
 	return f.CheckForKnownSwitchUsers()
