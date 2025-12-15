@@ -69,6 +69,12 @@ set +e
     echo -e "\n=== QEMU/KVM Processes ==="
     ps aux | grep -E "[q]emu" || echo "No QEMU processes running"
 
+    echo -e "\n=== Network & NAT (host) ==="
+    ip addr show
+    ip route show
+    sudo iptables -L -n -v 2>/dev/null || echo "iptables (filter) not available"
+    sudo iptables -t nat -L -n -v 2>/dev/null || echo "iptables (nat) not available"
+
     # Disk usage
     echo -e "\n=== Disk Usage ==="
     df -h

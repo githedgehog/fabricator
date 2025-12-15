@@ -28,7 +28,16 @@ KUBECTL="/opt/bin/kubectl"
 {
     echo -e "\n=== Network Configuration ==="
     ip addr show
+    ip addr show enp2s1 2>/dev/null || true
+    ip -s link show enp2s1 2>/dev/null || true
+    ethtool -S enp2s1 2>/dev/null || echo "ethtool stats unavailable for enp2s1"
     ip route show
+    ip route show table all
+    ip rule show
+    echo -e "\n=== Neighbor Table (ARP) ==="
+    ip neigh show
+    echo -e "\n=== Socket Summary (listening and recent TCP) ==="
+    ss -ltnup 2>/dev/null || ss -ltn 2>/dev/null || echo "ss not available"
     
     echo -e "\n=== Disk Usage ==="
     df -h
@@ -46,9 +55,66 @@ KUBECTL="/opt/bin/kubectl"
 
     echo -e "\n=== Kubernetes Pods ==="
     $KUBECTL get pods -A -o wide
+    echo -e "\n=== Kubernetes Services ==="
+    $KUBECTL get svc -A -o wide
+    echo -e "\n=== Kubernetes Nodes (describe) ==="
+    for n in $($KUBECTL get nodes -o name); do
+        $KUBECTL describe "$n"
+    done
+    echo -e "\n=== Fabric Nodes (mgmt IPs) ==="
+    $KUBECTL get fabnodes.fabricator.githedgehog.com -A -o wide || true
+    echo -e "\n=== Switch CRs (mgmt IPs) ==="
+    $KUBECTL get switches.wiring.githedgehog.com -o wide || true
+    echo -e "\n=== Switch Agents ==="
+    $KUBECTL get agents.agent.githedgehog.com -o wide || true
+    echo -e "\n=== Flannel/CNI Config ==="
+    $KUBECTL -n kube-system get cm kube-flannel-cfg -o yaml 2>/dev/null || echo "kube-flannel-cfg not found"
 
     echo -e "\n=== Kubernetes Events ==="
     $KUBECTL get events -A --sort-by='.metadata.creationTimestamp'
+
+    echo -e "\n=== Switch Management Reachability ==="
+    switch_list=$($KUBECTL get switches.wiring.githedgehog.com -o jsonpath='{range .items[*]}{.metadata.name},{.spec.ip}{"\n"}{end}' 2>/dev/null)
+    if [ -z "$switch_list" ]; then
+        echo "No switches found (switch CRs missing?)"
+    else
+        while IFS=',' read -r sw_name sw_ip; do
+            [ -z "$sw_name" ] && continue
+            sw_ip_addr=${sw_ip%%/*}
+            if [ -z "$sw_ip_addr" ]; then
+                echo "$sw_name: management IP not set in CR (spec.ip=$sw_ip)"
+                continue
+            fi
+            echo -e "\nPing $sw_name ($sw_ip_addr)"
+            ping -c 2 -W 1 "$sw_ip_addr" && echo "$sw_name reachable" || echo "$sw_name NOT reachable"
+            echo "TCP/22 check to $sw_name"
+            if command -v nc >/dev/null 2>&1; then
+                nc -z -w2 "$sw_ip_addr" 22 && echo "$sw_name ssh reachable" || echo "$sw_name ssh NOT reachable"
+            else
+                timeout 3 bash -c "</dev/tcp/${sw_ip_addr}/22" && echo "$sw_name ssh reachable" || echo "$sw_name ssh NOT reachable"
+            fi
+        done <<< "$switch_list"
+    fi
+
+    echo -e "\n=== Control Proxy Health ==="
+    $KUBECTL -n fab get pods -l app.kubernetes.io/name=control-proxy -o wide
+    $KUBECTL -n fab get svc control-proxy -o wide
+    echo -e "\nControl-proxy logs (last 200 lines):"
+    $KUBECTL -n fab logs -l app.kubernetes.io/name=control-proxy --tail=200
+    echo -e "\nControl-proxy config:"
+    $KUBECTL -n fab get cm control-proxy-config -o yaml
+
+    echo -e "\n=== Host Firewall & Conntrack ==="
+    # Many of these require root; fall back gracefully if sudo not available
+    (sudo iptables -L -n -v 2>/dev/null || iptables -L -n -v 2>/dev/null || echo "iptables not available")
+    (sudo iptables -t nat -L -n -v 2>/dev/null || iptables -t nat -L -n -v 2>/dev/null || true)
+    (sudo nft list ruleset 2>/dev/null || nft list ruleset 2>/dev/null || echo "nftables not available")
+    (sudo conntrack -S 2>/dev/null || conntrack -S 2>/dev/null || echo "conntrack not available")
+
+    echo -e "\n=== Flannel Interface & Routes ==="
+    ip -d link show flannel.1 2>/dev/null || true
+    ip route show table 100 2>/dev/null || true
+
 } >> "$OUTPUT_FILE" 2>&1
 
 # ---------------------------
