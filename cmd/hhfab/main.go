@@ -418,6 +418,19 @@ func Run(ctx context.Context) error {
 		},
 	}
 
+	showTechConsoleFlags := []cli.Flag{
+		&cli.StringFlag{
+			Name:    "switch-username",
+			Usage:   "switch username for console show-tech",
+			EnvVars: []string{hhfab.VLABEnvSwitchUser, "HHFAB_SWITCH_USERNAME"},
+		},
+		&cli.StringFlag{
+			Name:    "switch-password",
+			Usage:   "switch password for console show-tech",
+			EnvVars: []string{hhfab.VLABEnvSwitchPass, "HHFAB_SWITCH_PASSWORD"},
+		},
+	}
+
 	builFlags := []cli.Flag{
 		&cli.StringFlag{
 			Name:    FlagNameBuildMode,
@@ -1052,9 +1065,21 @@ func Run(ctx context.Context) error {
 					{
 						Name:   "show-tech",
 						Usage:  "collect diagnostic information from all VLAB devices",
-						Flags:  defaultFlags,
+						Flags:  flatten(defaultFlags, showTechConsoleFlags),
 						Before: before(false),
-						Action: func(_ *cli.Context) error {
+						Action: func(c *cli.Context) error {
+							switchUser := c.String("switch-username")
+							switchPass := c.String("switch-password")
+							if switchUser != "" {
+								if err := os.Setenv(hhfab.VLABEnvSwitchUser, switchUser); err != nil {
+									return fmt.Errorf("setting %s: %w", hhfab.VLABEnvSwitchUser, err)
+								}
+							}
+							if switchPass != "" {
+								if err := os.Setenv(hhfab.VLABEnvSwitchPass, switchPass); err != nil {
+									return fmt.Errorf("setting %s: %w", hhfab.VLABEnvSwitchPass, err)
+								}
+							}
 							if err := hhfab.DoShowTech(ctx, workDir, cacheDir); err != nil {
 								return fmt.Errorf("ssh: %w", err)
 							}

@@ -13,7 +13,7 @@ OUTPUT_FILE="/tmp/show-tech.log"
 export CRI_CONFIG_FILE=/dev/null
 
 # Find the running FRR container ID
-FRR_CONTAINER_ID=$(sudo -E crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock ps \
+FRR_CONTAINER_ID=$(sudo -E crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock ps 2>>"$OUTPUT_FILE" \
     | grep ' frr ' \
     | awk '{print $1}')
 
