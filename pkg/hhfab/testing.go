@@ -2354,7 +2354,9 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string,
 			checkCmd := fmt.Sprintf("timeout 1 ss -ltn | grep -q ' \\*:%d '", iperf3DefaultPort)
 			if _, _, err := retrySSHCmd(ctx, toSSH, checkCmd, to); err == nil {
 				waited := time.Since(start)
-				slog.Debug("iperf3 server is ready", "from", from, "to", to, "waitTime", waited)
+				if waited > 1*time.Second {
+					slog.Debug("iperf3 server took longer than usual to start", "from", from, "to", to, "waitTime", waited)
+				}
 				break
 			}
 
