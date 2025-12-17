@@ -40,7 +40,6 @@ type InitConfigInput struct {
 	NodeManagementLinks   map[string]string
 	Gateway               bool
 	Gateways              int
-	GatewayAgentless      bool
 	JoinToken             string
 	SaveJoinToken         bool
 	O11yDefaults          fabapi.ObservabilityDefaults

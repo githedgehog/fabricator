@@ -54,7 +54,6 @@ const (
 	FlagNodeMgmtLinks             = "node-mgmt-links"
 	FlagGateway                   = "gateway"
 	FlagGateways                  = "gateways"
-	FlagGatewayAgentless          = "gateway-agentless"
 	FlagO11yDefaults              = "o11y-defaults"
 	FlagO11yLabels                = "o11y-labels"
 	FlagNameFabricMode            = "fabric-mode"
@@ -591,14 +590,6 @@ func Run(ctx context.Context) error {
 						Usage:    "add specified number of gateway nodes",
 						EnvVars:  []string{"HHFAB_GATEWAYS"},
 					},
-					&cli.BoolFlag{
-						Category: FlagCatGenConfig,
-						Name:     FlagGatewayAgentless,
-						Aliases:  []string{"gwa"},
-						Hidden:   !preview,
-						Usage:    "[PREVIEW] enable gateway agentless mode",
-						EnvVars:  []string{"HHFAB_GATEWAY_AGENTLESS"},
-					},
 					&cli.StringFlag{
 						Category: FlagCatGenConfig,
 						Name:     FlagO11yDefaults,
@@ -662,7 +653,6 @@ func Run(ctx context.Context) error {
 							NodeManagementLinks:   mgmtLinks,
 							Gateway:               c.Bool(FlagGateway),
 							Gateways:              c.Int(FlagGateways),
-							GatewayAgentless:      c.Bool(FlagGatewayAgentless),
 							JoinToken:             joinToken,
 							SaveJoinToken:         saveJoinToken,
 							O11yDefaults:          fabapi.ObservabilityDefaults(c.String(FlagO11yDefaults)),

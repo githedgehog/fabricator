@@ -103,9 +103,6 @@ spec:
     {{ if .Gateway }}
     gateway:
       enable: true
-      {{- if .GatewayAgentless }}
-      agentless: true
-      {{- end }}
     {{- end }}
 
 ---

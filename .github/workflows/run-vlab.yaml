@@ -32,11 +32,6 @@ on:
         type: boolean
         required: false
         default: false
-      gateway_agentless:
-        description: "Enable gateway agentless mode"
-        type: boolean
-        required: false
-        default: false
       includeonie:
         description: "Include ONIE into installer"
         type: boolean
@@ -93,7 +88,7 @@ permissions:
 
 env:
   # global workflow configs
-  slug: "${{ inputs.hybrid && 'h' || 'v' }}-${{ inputs.upgradefrom && 'up' || '' }}${{ inputs.upgradefrom }}${{ inputs.upgradefrom && '-' || '' }}${{ inputs.fabricmode != 'spine-leaf' && inputs.fabricmode || '' }}${{ inputs.mesh && 'mesh-' || '' }}${{ inputs.gateway && 'gw-' || '' }}${{ inputs.gateway_agentless && 'a-' || '' }}${{ inputs.includeonie && 'onie-' || '' }}${{ inputs.buildmode }}-${{ inputs.vpcmode }}${{ inputs.releasetest && '-rt' || '' }}${{ inputs.releasetest_regex != '' && 'r' || '' }}"
+  slug: "${{ inputs.hybrid && 'h' || 'v' }}-${{ inputs.upgradefrom && 'up' || '' }}${{ inputs.upgradefrom }}${{ inputs.upgradefrom && '-' || '' }}${{ inputs.fabricmode != 'spine-leaf' && inputs.fabricmode || '' }}${{ inputs.mesh && 'mesh-' || '' }}${{ inputs.gateway && 'gw-' || '' }}${{ inputs.includeonie && 'onie-' || '' }}${{ inputs.buildmode }}-${{ inputs.vpcmode }}${{ inputs.releasetest && '-rt' || '' }}${{ inputs.releasetest_regex != '' && 'r' || '' }}"
   # env vars to configure hhfab
   HHFAB_REG_REPO: 127.0.0.1:30000
   HHFAB_VLAB_COLLECT: true
@@ -117,7 +112,6 @@ jobs:
           echo "  Fabric mode: ${{ inputs.fabricmode }}"
           echo "  Mesh: ${{ inputs.mesh }}"
           echo "  Gateway: ${{ inputs.gateway }}"
-          echo "  Gateway agentless: ${{ inputs.gateway_agentless }}"
           echo "  Include ONIE: ${{ inputs.includeonie }}"
           echo "  Build mode: ${{ inputs.buildmode }}"
           echo "  VPC mode: ${{ inputs.vpcmode }}"
@@ -239,8 +233,7 @@ jobs:
           bin/hhfab init -v --dev \
             --fabric-mode=${{ inputs.fabricmode }} \
             --include-onie=${{ inputs.includeonie }} \
-            --gateway=${{ inputs.gateway }} \
-            --gateway-agentless=${{ inputs.gateway_agentless }}
+            --gateway=${{ inputs.gateway }}
           bin/hhfab vlab gen -v ${{ inputs.mesh && '--mesh-links-count=3' || '' }}
 
       - name: Init hhfab for hybrid mode
