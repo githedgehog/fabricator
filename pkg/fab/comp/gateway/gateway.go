@@ -108,7 +108,7 @@ func Install(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 				Effect:   corev1.TaintEffectNoExecute,
 			},
 		},
-		Agentless:            cfg.Spec.Config.Gateway.Agentless,
+		Agentless:            true,
 		AgentRef:             agentRepo + ":" + string(cfg.Status.Versions.Gateway.Agent),
 		DataplaneRef:         dataplaneRepo + ":" + string(cfg.Status.Versions.Gateway.Dataplane),
 		FRRRef:               frrRepo + ":" + string(cfg.Status.Versions.Gateway.FRR),
