@@ -9,15 +9,18 @@ OUTPUT_FILE="/tmp/show-tech.log"
 
 : > "$OUTPUT_FILE"
 
+# Suppress crictl config file warnings by pointing to /dev/null
+export CRI_CONFIG_FILE=/dev/null
+
 # Find the running FRR container ID
-FRR_CONTAINER_ID=$(sudo crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock ps \
+FRR_CONTAINER_ID=$(sudo -E crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock ps \
     | grep ' frr ' \
     | awk '{print $1}')
 
 # Helper for running vtysh commands inside the FRR container
 run_vtysh_cmd() {
     echo -e "\n=== Executing: vtysh -c '$1' ===" >> "$OUTPUT_FILE"
-    sudo crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock exec "$FRR_CONTAINER_ID" vtysh -c "$1" >> "$OUTPUT_FILE" 2>&1
+    sudo -E crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock exec "$FRR_CONTAINER_ID" vtysh -c "$1" >> "$OUTPUT_FILE" 2>&1
 }
 
 # ---------------------------
