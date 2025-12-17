@@ -87,6 +87,11 @@ on:
         type: boolean
         required: false
         default: false
+    secrets:
+      HHFAB_SWITCH_USER:
+        required: false
+      HHFAB_SWITCH_PASS:
+        required: false
 
 permissions:
   contents: read
@@ -103,6 +108,9 @@ jobs:
     if: ${{ !inputs.skip }}
     runs-on: ${{ inputs.hybrid && 'hlab' || 'vlab' }}
     timeout-minutes: "${{ inputs.pause_on_failure && (inputs.releasetest && (inputs.hybrid && 320 || 220) || 130) || (inputs.releasetest && (inputs.hybrid && 250 || 150) || 60) }}"
+    env:
+      HHFAB_SWITCH_USER: ${{ secrets.HHFAB_SWITCH_USER }}
+      HHFAB_SWITCH_PASS: ${{ secrets.HHFAB_SWITCH_PASS }}
 
     steps:
       - name: Runner host
