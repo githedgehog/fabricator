@@ -309,7 +309,7 @@ type GatewayConfig struct {
 	ASN           uint32                `json:"asn,omitempty"`
 	MAC           string                `json:"mac,omitempty"`
 	Observability *GatewayObservability `json:"observability,omitempty"`
-	Agentless     bool                  `json:"agentless,omitempty"`
+	DepAgentless  bool                  `json:"agentless,omitempty"`
 	Communities   map[string]string     `json:"communities,omitempty"`
 }
 
@@ -530,6 +530,9 @@ func (f *Fabricator) Default() {
 			"9": "50001:9",
 		}
 	}
+
+	// TODO remove when upgrade from 25.05 is no more needed
+	f.Spec.Config.Gateway.DepAgentless = false // it's ignored now
 
 	f.Spec.Config.Fabric.LoopbackWorkaroundDisable = false // it's ignored now
 
