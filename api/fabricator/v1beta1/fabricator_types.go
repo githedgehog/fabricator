@@ -510,6 +510,11 @@ func (f *Fabricator) Default() {
 		}
 	}
 
+	// apply new default to IRB VLANs if it was unchanged, to avoid TH5 clash during upgrade
+	if len(f.Spec.Config.Fabric.VPCIRBVLANs) == 1 && f.Spec.Config.Fabric.VPCIRBVLANs[0].From == 3000 && f.Spec.Config.Fabric.VPCIRBVLANs[0].To == 3999 {
+		f.Spec.Config.Fabric.VPCIRBVLANs[0].To = 3899
+	}
+
 	if len(f.Spec.Config.Fabric.TH5WorkaroundVLANs) == 0 {
 		f.Spec.Config.Fabric.TH5WorkaroundVLANs = []fmeta.VLANRange{
 			{From: 3900, To: 3999},

@@ -35,7 +35,7 @@ var DefaultConfig = fabapi.FabConfig{
 		FabricSubnet:        "172.30.128.0/17", // 16384 /31 subnets: 172.30.128.1 - 172.30.255.254
 		BaseVPCCommunity:    "50000:0",         // TODO make sure it's really used
 		VPCIRBVLANs: []fmeta.VLANRange{
-			{From: 3000, To: 3999},
+			{From: 3000, To: 3899},
 		},
 		VPCWorkaroundVLANs: []fmeta.VLANRange{
 			{From: 100, To: 3999},
