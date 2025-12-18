@@ -912,6 +912,12 @@ func (f *Fabricator) Validate(ctx context.Context) error {
 		return fmt.Errorf("TH5 workaround VLANs are required") //nolint:goerr113
 	}
 
+	// Ensure that TH5 and IRB VLANs do not overlap. VPC workaround VLANs are not a problem
+	// as they are used on subinterfaces instead
+	if err := fmeta.CheckVLANRangesOverlap(append(slices.Clone(f.Spec.Config.Fabric.TH5WorkaroundVLANs), f.Spec.Config.Fabric.VPCIRBVLANs...)); err != nil {
+		return fmt.Errorf("overlap between TH5 workaround VLAN ranges and IRB VLAN ranges: %w", err)
+	}
+
 	// TODO validate MAC base
 	if f.Spec.Config.Fabric.ESLAGMACBase == "" {
 		return fmt.Errorf("ESLAG MAC base is required") //nolint:goerr113
