@@ -564,11 +564,18 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB) error {
 			vmSwitchNames[vm.Name] = true
 		}
 	}
-	physicalSwitchCount := len(switches.Items) - len(vmSwitchNames)
+
+	physicalSwitchCount := 0
+	for _, sw := range switches.Items {
+		if !vmSwitchNames[sw.Name] {
+			physicalSwitchCount++
+		}
+	}
+
 	totalTargets := len(vlab.VMs) + physicalSwitchCount
 
 	var wg sync.WaitGroup
-	errChan := make(chan error, totalTargets)
+	errChan := make(chan error, len(vlab.VMs)+len(switches.Items))
 
 	done := make(chan struct{})
 	defer close(done)
