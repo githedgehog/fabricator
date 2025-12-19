@@ -271,6 +271,7 @@ func CheckStaleVMs(ctx context.Context, kill bool) ([]int32, error) {
 		maxWaitTime := 5 * time.Second
 		checkInterval := 100 * time.Millisecond
 		maxAttempts := int(maxWaitTime / checkInterval)
+		start := time.Now()
 
 		for attempt := 0; attempt < maxAttempts; attempt++ {
 			allGone := true
@@ -290,7 +291,7 @@ func CheckStaleVMs(ctx context.Context, kill bool) ([]int32, error) {
 				}
 			}
 			if allGone {
-				slog.Debug("All killed VM processes terminated", "elapsed", time.Duration(attempt+1)*checkInterval)
+				slog.Debug("All killed VM processes terminated", "elapsed", time.Since(start))
 
 				break
 			}
