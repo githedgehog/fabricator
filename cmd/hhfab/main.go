@@ -618,8 +618,6 @@ func Run(ctx context.Context) error {
 						mgmtLinks[parts[0]] = parts[1]
 					}
 
-					slog.Info("Info", "node-mgmt-links", mgmtLinks)
-
 					o11yLabels := map[string]string{}
 					for _, entry := range c.StringSlice(FlagO11yLabels) {
 						parts := strings.SplitN(entry, "=", 2)
