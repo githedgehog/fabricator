@@ -237,6 +237,7 @@ jobs:
             || matrix.upgradefrom != '' && contains(github.event.pull_request.labels.*.name, 'ci:-upgrade')
           )
           || github.event_name == 'workflow_dispatch'
+          && (inputs.releasetest_vlab == true || inputs.releasetest_hlab == true)
           && (
             matrix.hybrid && inputs.releasetest_hlab != true
             || !matrix.hybrid && inputs.releasetest_vlab != true
