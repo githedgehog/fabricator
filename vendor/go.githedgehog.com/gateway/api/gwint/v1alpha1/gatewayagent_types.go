@@ -21,9 +21,9 @@ type GatewayGroupInfo struct {
 }
 
 type GatewayGroupMember struct {
-	Name     string `json:"name,omitempty"`
-	Priority uint32 `json:"priority,omitempty"`
-	VTEPIP   string `json:"vtepIP,omitempty"`
+	Name     string `json:"name"`
+	Priority uint32 `json:"priority"`
+	VTEPIP   string `json:"vtepIP"`
 }
 
 // GatewayAgentSpec defines the desired state of GatewayAgent.
