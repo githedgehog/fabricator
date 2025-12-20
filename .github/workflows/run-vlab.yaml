@@ -239,7 +239,10 @@ jobs:
             --fabric-mode=${{ inputs.fabricmode }} \
             --include-onie=${{ inputs.includeonie }} \
             --gateway=${{ inputs.gateway }}
-          bin/hhfab vlab gen -v ${{ inputs.mesh && '--mesh-links-count=3' || '' }}
+          bin/hhfab vlab gen -v \
+            ${{ inputs.mesh && '--mesh-links-count=3' || '' }} \
+            --externals=1 \
+            --external-orphan-connections=1
 
       - name: Init hhfab for hybrid mode
         if: ${{ inputs.upgradefrom == '' && inputs.hybrid }}
