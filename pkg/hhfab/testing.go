@@ -105,10 +105,11 @@ func (c *Config) Wait(ctx context.Context, vlab *VLAB) error {
 }
 
 type WaitReadyOpts struct {
-	AppliedFor   time.Duration
-	Timeout      time.Duration
-	PollInterval time.Duration
-	PrintEvery   int
+	AppliedFor          time.Duration
+	Timeout             time.Duration
+	PollInterval        time.Duration
+	PrintEvery          int
+	StabilizationPeriod time.Duration
 }
 
 func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) error {
@@ -311,6 +312,17 @@ func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) erro
 		if len(swNotReady) == 0 && len(gwNotReady) == 0 {
 			slog.Info("All switches and gateways are ready", "took", time.Since(start))
 
+			// Wait additional time for fabric convergence after agents are ready
+			if opts.StabilizationPeriod > 0 {
+				slog.Info("Waiting for fabric stabilization", "period", opts.StabilizationPeriod)
+				select {
+				case <-ctx.Done():
+					return fmt.Errorf("cancelled during stabilization: %w", ctx.Err())
+				case <-time.After(opts.StabilizationPeriod):
+					slog.Info("Fabric stabilization complete")
+				}
+			}
+
 			return nil
 		}
 
@@ -323,18 +335,19 @@ func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) erro
 }
 
 type SetupVPCsOpts struct {
-	WaitSwitchesReady bool
-	ForceCleanup      bool
-	VLANNamespace     string
-	IPv4Namespace     string
-	ServersPerSubnet  int
-	SubnetsPerVPC     int
-	DNSServers        []string
-	TimeServers       []string
-	InterfaceMTU      uint16
-	HashPolicy        string
-	VPCMode           vpcapi.VPCMode
-	KeepPeerings      bool
+	WaitSwitchesReady   bool
+	ForceCleanup        bool
+	StabilizationPeriod time.Duration
+	VLANNamespace       string
+	IPv4Namespace       string
+	ServersPerSubnet    int
+	SubnetsPerVPC       int
+	DNSServers          []string
+	TimeServers         []string
+	InterfaceMTU        uint16
+	HashPolicy          string
+	VPCMode             vpcapi.VPCMode
+	KeepPeerings        bool
 }
 
 func CreateOrUpdateVpc(ctx context.Context, kube client.Client, vpc *vpcapi.VPC) (bool, error) {
@@ -777,7 +790,11 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		case <-time.After(15 * time.Second):
 		}
 
-		if err := WaitReady(ctx, kube, WaitReadyOpts{AppliedFor: 15 * time.Second, Timeout: 10 * time.Minute}); err != nil {
+		if err := WaitReady(ctx, kube, WaitReadyOpts{
+			AppliedFor:          15 * time.Second,
+			Timeout:             10 * time.Minute,
+			StabilizationPeriod: opts.StabilizationPeriod,
+		}); err != nil {
 			return fmt.Errorf("waiting for ready: %w", err)
 		}
 	}
@@ -2576,9 +2593,10 @@ func CollectN[E any](n int, seq iter.Seq[E]) []E {
 }
 
 type InspectOpts struct {
-	WaitAppliedFor time.Duration
-	Strict         bool
-	Attempts       int
+	WaitAppliedFor      time.Duration
+	StabilizationPeriod time.Duration
+	Strict              bool
+	Attempts            int
 }
 
 func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) error {
@@ -2600,7 +2618,28 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 
 	fail := false
 
-	if err := WaitReady(ctx, kube, WaitReadyOpts{AppliedFor: opts.WaitAppliedFor, Timeout: 30 * time.Minute}); err != nil {
+	// Detect if we have virtual switches to adjust stabilization period
+	stabilizationPeriod := opts.StabilizationPeriod
+	if stabilizationPeriod == 0 {
+		switches := &wiringapi.SwitchList{}
+		if err := kube.List(ctx, switches); err == nil {
+			for _, sw := range switches.Items {
+				if sw.Spec.Profile == meta.SwitchProfileVS || sw.Spec.Profile == meta.SwitchProfileVSCLSP {
+					// Virtual switches need extra time for fabric convergence
+					stabilizationPeriod = 45 * time.Second
+					slog.Info("Detected virtual switches, using extended stabilization period", "period", stabilizationPeriod)
+
+					break
+				}
+			}
+		}
+	}
+
+	if err := WaitReady(ctx, kube, WaitReadyOpts{
+		AppliedFor:          opts.WaitAppliedFor,
+		Timeout:             30 * time.Minute,
+		StabilizationPeriod: stabilizationPeriod,
+	}); err != nil {
 		slog.Error("Failed to wait for ready", "err", err)
 		fail = true
 	}
