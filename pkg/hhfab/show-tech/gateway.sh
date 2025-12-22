@@ -110,6 +110,12 @@ run_vtysh_cmd() {
 # System Logs
 # ---------------------------
 {
+    echo -e "\n=== k3s-agent.service status ==="
+    systemctl status k3s-agent.service --no-pager
+
+    echo -e "\n=== k3s-agent.service logs (last hour) ==="
+    journalctl -u k3s-agent.service --no-pager --since "1 hour ago"
+
     echo -e "\n=== systemd-networkd logs ==="
     journalctl -u systemd-networkd --no-pager --since "1 hour ago"
 
