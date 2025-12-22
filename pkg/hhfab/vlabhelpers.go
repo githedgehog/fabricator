@@ -547,8 +547,35 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB) error {
 		return fmt.Errorf("creating output directory: %w", err)
 	}
 
+	// Get physical switches from K8s
+	kubeconfig := filepath.Join(c.WorkDir, VLABDir, VLABKubeConfig)
+	kube, err := kubeutil.NewClient(ctx, kubeconfig, wiringapi.SchemeBuilder)
+	var switches wiringapi.SwitchList
+	if err != nil {
+		slog.Warn("Failed to create kube client for switch enumeration", "err", err)
+	} else if err := kube.List(ctx, &switches); err != nil {
+		slog.Warn("Failed to list switches", "err", err)
+	}
+
+	// Build a map of VM switch names to skip them when collecting from physical switches
+	vmSwitchNames := make(map[string]bool)
+	for _, vm := range vlab.VMs {
+		if vm.Type == VMTypeSwitch {
+			vmSwitchNames[vm.Name] = true
+		}
+	}
+
+	physicalSwitchCount := 0
+	for _, sw := range switches.Items {
+		if !vmSwitchNames[sw.Name] {
+			physicalSwitchCount++
+		}
+	}
+
+	totalTargets := len(vlab.VMs) + physicalSwitchCount
+
 	var wg sync.WaitGroup
-	errChan := make(chan error, len(vlab.VMs))
+	errChan := make(chan error, len(vlab.VMs)+len(switches.Items))
 
 	done := make(chan struct{})
 	defer close(done)
@@ -564,6 +591,7 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB) error {
 
 	var successCount atomic.Int32
 
+	// Collect show-tech from VMs
 	for _, vm := range vlab.VMs {
 		name := vm.Name
 		wg.Add(1)
@@ -593,6 +621,38 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB) error {
 		}(name, vm)
 	}
 
+	// Collect show-tech from physical switches (skip VM switches)
+	for _, sw := range switches.Items {
+		// Skip if this is a VM switch (already handled above)
+		if vmSwitchNames[sw.Name] {
+			continue
+		}
+
+		name := sw.Name
+		wg.Add(1)
+		go func(name string) {
+			defer wg.Done()
+
+			// Use the SSH helper to get SSH config for physical switch
+			ssh, err := c.SSH(ctx, vlab, name)
+			if err != nil {
+				errChan <- fmt.Errorf("getting ssh config for switch %s: %w", name, err)
+
+				return
+			}
+
+			collectionCtx, cancel := context.WithTimeout(ctx, 25*time.Minute)
+			defer cancel()
+
+			script := scriptConfig.Scripts[VMTypeSwitch]
+			if err := c.collectShowTech(collectionCtx, name, ssh, script, outputDir); err != nil {
+				errChan <- fmt.Errorf("collecting show-tech for switch %s: %w", name, err)
+			} else {
+				successCount.Add(1)
+			}
+		}(name)
+	}
+
 	wg.Wait()
 	close(errChan)
 
@@ -605,7 +665,7 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB) error {
 	if len(errors) > 0 {
 		slog.Warn("Some diagnostics collection failed",
 			"success_count", successCount.Load(),
-			"total_count", len(vlab.VMs),
+			"total_count", totalTargets,
 			"errors", errors)
 	}
 
@@ -695,9 +755,7 @@ func (c *Config) collectShowTech(ctx context.Context, entryName string, ssh *ssh
 	}
 
 	chmodCmd := fmt.Sprintf("chmod +x %s && %s", remoteScriptPath, remoteScriptPath)
-	chmodCtx, chmodCancel := context.WithTimeout(ctx, 150*time.Second)
-	defer chmodCancel()
-	_, stderr, err := ssh.Run(chmodCtx, chmodCmd)
+	_, stderr, err := ssh.Run(ctx, chmodCmd)
 	if err != nil {
 		return fmt.Errorf("executing show-tech on %s: %w", entryName, err) //nolint:goerr113
 	}
