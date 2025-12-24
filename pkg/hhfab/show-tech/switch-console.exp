@@ -178,13 +178,16 @@ proc run_cmd {cmd prompt prompt_timeout} {
 
 if {$logged_in} {
     run_cmd "ip addr show eth0" $prompt_re $prompt_timeout
+    run_cmd "ip link show eth0" $prompt_re $prompt_timeout
+    run_cmd "ip route show" $prompt_re $prompt_timeout
     run_cmd "ip neigh | grep eth0" $prompt_re $prompt_timeout
     run_cmd "systemctl status sshd --no-pager" $prompt_re $prompt_timeout
+    run_cmd "ss -tulnp | grep ':22'" $prompt_re $prompt_timeout
 
     if {[info exists env(CONTROL_PLANE_IP)]} {
         run_cmd "ping -c 3 $env(CONTROL_PLANE_IP)" $prompt_re $prompt_timeout
     } else {
-        log_message "EXP-DBG" "CONTROL_PLANE_IP not set; skipping ping"
+        run_cmd "ping -c 3 172.30.0.1" $prompt_re $prompt_timeout
     }
 } else {
     log_message "EXP-DBG" "Not logged in; skipping console commands"

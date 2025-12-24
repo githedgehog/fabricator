@@ -162,10 +162,12 @@ proc run_cmd {cmd prompt prompt_timeout} {
 
 if {$logged_in} {
     run_cmd "ip addr show" $prompt_re 30
+    run_cmd "ip link show" $prompt_re 30
     run_cmd "ip route show" $prompt_re 30
     run_cmd "ip neigh show" $prompt_re 30
     run_cmd "networkctl status" $prompt_re 30
-    run_cmd "systemctl status sshd.socket --no-pager" $prompt_re 30
+    run_cmd "systemctl status sshd --no-pager" $prompt_re 30
+    run_cmd "ss -tulnp | grep ':22'" $prompt_re 30
 } else {
     log_message "EXP-DBG" "Not logged in; skipping console commands"
 }

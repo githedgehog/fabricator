@@ -69,13 +69,23 @@ set +e
     iostat -x 1 3 2>/dev/null || echo "iostat not available"
 
     echo -e "\n=== Network Interface Stats ==="
-    ip -s link show 2>/dev/null || echo "ip command not available"
+    if command -v ip >/dev/null 2>&1; then
+        ip -s link show 2>/dev/null || echo "ip link failed"
+    else
+        echo "ip command not available"
+        echo -e "\n=== /sys/class/net (fallback) ==="
+        ls /sys/class/net 2>/dev/null || echo "cannot list /sys/class/net"
+    fi
 
     echo -e "\n=== VLAB Bridge/Tap Diagnostics ==="
-    if ip -d link show hhbr >/dev/null 2>&1; then
-        ip -d link show hhbr
+    if command -v ip >/dev/null 2>&1; then
+        if ip -d link show hhbr >/dev/null 2>&1; then
+            ip -d link show hhbr
+        else
+            echo "hhbr bridge not found"
+        fi
     else
-        echo "hhbr bridge not found"
+        echo "ip command not available"
     fi
 
     if command -v bridge >/dev/null 2>&1; then
@@ -86,16 +96,91 @@ set +e
         echo "bridge command not available"
     fi
 
-    if ip -d link show hhtap* >/dev/null 2>&1; then
-        ip -d link show hhtap*
+    if command -v ip >/dev/null 2>&1; then
+        if ip -d link show hhtap* >/dev/null 2>&1; then
+            ip -d link show hhtap*
+        else
+            echo "no hhtap interfaces present"
+        fi
     else
-        echo "no hhtap interfaces present"
+        echo "ip command not available"
+    fi
+
+    echo -e "\n=== VLAB sysfs Fallback (no ip/bridge) ==="
+    if [ -d /sys/class/net ]; then
+        ls /sys/class/net 2>/dev/null || echo "cannot list /sys/class/net"
+    fi
+    if [ -d /sys/class/net/hhbr ]; then
+        echo "hhbr exists"
+        ls /sys/class/net/hhbr/brif 2>/dev/null || echo "hhbr has no ports"
+    else
+        echo "hhbr missing"
+    fi
+    if [ -d /proc/net/bridge ]; then
+        echo -e "\n=== /proc/net/bridge (fallback) ==="
+        cat /proc/net/bridge/bridge 2>/dev/null || echo "cannot read /proc/net/bridge/bridge"
+        cat /proc/net/bridge/brif 2>/dev/null || echo "cannot read /proc/net/bridge/brif"
+        cat /proc/net/bridge/brforward 2>/dev/null || echo "cannot read /proc/net/bridge/brforward"
+    fi
+    for tap in /sys/class/net/hhtap*; do
+        [ -e "$tap" ] || continue
+        iface=$(basename "$tap")
+        echo -e "\n--- $iface ---"
+        cat "$tap/address" 2>/dev/null
+        cat "$tap/operstate" 2>/dev/null
+        cat "$tap/statistics/rx_packets" 2>/dev/null
+        cat "$tap/statistics/tx_packets" 2>/dev/null
+    done
+    if [ -d /sys/class/net/hhbr/brif ]; then
+        for port in /sys/class/net/hhbr/brif/*; do
+            [ -e "$port" ] || continue
+            state_file="$port/brport/state"
+            if [ -f "$state_file" ]; then
+                echo "$(basename "$port") state=$(cat "$state_file")"
+            fi
+        done
     fi
 
     echo -e "\n=== Host Networking Summary ==="
-    ip addr 2>/dev/null || echo "ip addr failed"
-    ip route 2>/dev/null || echo "ip route failed"
-    ip neigh 2>/dev/null || echo "ip neigh failed"
+    if command -v ip >/dev/null 2>&1; then
+        ip addr 2>/dev/null || echo "ip addr failed"
+        ip route 2>/dev/null || echo "ip route failed"
+        ip neigh 2>/dev/null || echo "ip neigh failed"
+    else
+        echo "ip command not available"
+        echo -e "\n=== /proc/net/dev (fallback) ==="
+        cat /proc/net/dev 2>/dev/null || echo "cannot read /proc/net/dev"
+        echo -e "\n=== /proc/net/route (fallback) ==="
+        cat /proc/net/route 2>/dev/null || echo "cannot read /proc/net/route"
+        echo -e "\n=== /proc/net/arp (fallback) ==="
+        cat /proc/net/arp 2>/dev/null || echo "cannot read /proc/net/arp"
+    fi
+
+    echo -e "\n=== QEMU netns Check ==="
+    if command -v pgrep >/dev/null 2>&1; then
+        QPID=$(pgrep -f 'qemu-system-x86_64' | head -n 1)
+    else
+        QPID=$(for p in /proc/[0-9]*; do
+            cmd=$(tr '\0' ' ' < "$p/cmdline" 2>/dev/null)
+            case "$cmd" in
+                *qemu-system-x86_64*) echo "${p##*/}"; break ;;
+            esac
+        done)
+    fi
+    echo "qpid=${QPID:-none}"
+    readlink /proc/1/ns/net 2>/dev/null || echo "cannot read /proc/1/ns/net"
+    if [ -n "$QPID" ]; then
+        readlink "/proc/$QPID/ns/net" 2>/dev/null || \
+            (command -v sudo >/dev/null 2>&1 && sudo -n readlink "/proc/$QPID/ns/net" 2>/dev/null) || \
+            echo "cannot read /proc/$QPID/ns/net"
+    fi
+
+    echo -e "\n=== Runner Devices ==="
+    ls -l /dev/kvm /dev/net/tun 2>/dev/null || echo "/dev/kvm or /dev/net/tun missing"
+    stat /dev/kvm /dev/net/tun 2>/dev/null || true
+
+    echo -e "\n=== UDP Sockets (QEMU netdev socket links) ==="
+    cat /proc/net/udp 2>/dev/null || echo "cannot read /proc/net/udp"
 
     echo -e "\n=== Bridge Netfilter Sysctls ==="
     for key in net.bridge.bridge-nf-call-iptables net.bridge.bridge-nf-call-ip6tables; do
