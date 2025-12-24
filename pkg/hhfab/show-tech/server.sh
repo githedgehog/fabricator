@@ -119,6 +119,14 @@ OUTPUT_FILE="/tmp/show-tech.log"
 } >> "$OUTPUT_FILE" 2>&1
 
 # ---------------------------
+# SSH Diagnostics
+# ---------------------------
+{
+  echo -e "\n=== sshd status ==="
+  systemctl status sshd --no-pager
+} >> "$OUTPUT_FILE" 2>&1
+
+# ---------------------------
 # Logs & Kernel Information
 # ---------------------------
 {

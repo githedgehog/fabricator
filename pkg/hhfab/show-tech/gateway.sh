@@ -53,6 +53,9 @@ run_vtysh_cmd() {
 
     echo -e "\n=== ARP Table ==="
     ip neigh show
+
+    echo -e "\n=== Link Status ==="
+    ip link show
 } >> "$OUTPUT_FILE" 2>&1
 
 # ---------------------------
@@ -112,6 +115,9 @@ run_vtysh_cmd() {
 {
     echo -e "\n=== k3s-agent.service status ==="
     systemctl status k3s-agent.service --no-pager
+
+    echo -e "\n=== sshd status ==="
+    systemctl status sshd --no-pager
 
     echo -e "\n=== k3s-agent.service logs (last hour) ==="
     journalctl -u k3s-agent.service --no-pager --since "1 hour ago"
