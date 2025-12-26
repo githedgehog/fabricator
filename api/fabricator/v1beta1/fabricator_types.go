@@ -510,6 +510,11 @@ func (f *Fabricator) Default() {
 		}
 	}
 
+	// apply new default to IRB VLANs if it was unchanged, to avoid TH5 clash during upgrade
+	if len(f.Spec.Config.Fabric.VPCIRBVLANs) == 1 && f.Spec.Config.Fabric.VPCIRBVLANs[0].From == 3000 && f.Spec.Config.Fabric.VPCIRBVLANs[0].To == 3999 {
+		f.Spec.Config.Fabric.VPCIRBVLANs[0].To = 3899
+	}
+
 	if len(f.Spec.Config.Fabric.TH5WorkaroundVLANs) == 0 {
 		f.Spec.Config.Fabric.TH5WorkaroundVLANs = []fmeta.VLANRange{
 			{From: 3900, To: 3999},
@@ -905,6 +910,12 @@ func (f *Fabricator) Validate(ctx context.Context) error {
 	// TODO validate actual VLANs and that it's a reasonable range
 	if len(f.Spec.Config.Fabric.TH5WorkaroundVLANs) == 0 {
 		return fmt.Errorf("TH5 workaround VLANs are required") //nolint:goerr113
+	}
+
+	// Ensure that TH5 and IRB VLANs do not overlap. VPC workaround VLANs are not a problem
+	// as they are used on subinterfaces instead
+	if err := fmeta.CheckVLANRangesOverlap(append(slices.Clone(f.Spec.Config.Fabric.TH5WorkaroundVLANs), f.Spec.Config.Fabric.VPCIRBVLANs...)); err != nil {
+		return fmt.Errorf("overlap between TH5 workaround VLAN ranges and IRB VLAN ranges: %w", err)
 	}
 
 	// TODO validate MAC base
