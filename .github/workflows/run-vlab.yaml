@@ -197,6 +197,7 @@ jobs:
           old/hhfab diagram --format=mermaid
 
       # TODO: make controls restricted again when we figure out how to get NTP upstream working for isolated VMs
+      # TODO: once the earliest version we upgrade from has the basic scenario in RT, replace it here too
       - name: (${{ inputs.upgradefrom }}) Run and test ${{ inputs.hybrid && 'hybrid ' || '' }}VLAB
         if: ${{ inputs.upgradefrom != '' }}
         run: |
@@ -269,12 +270,10 @@ jobs:
             ${{ inputs.hybrid && '--controls-restricted=false' || '' }} \
             ${{ (inputs.upgradefrom == '' && inputs.hybrid) && '--ready switch-reinstall' || '' }} \
             --ready=inspect \
-            --ready=setup-vpcs \
-            --ready=setup-peerings \
-            --ready=test-connectivity \
-            ${{ inputs.releasetest && '--ready=release-test' || '' }} \
-            ${{ inputs.releasetest_regex && format('--release-test-regexes="{0}"', inputs.releasetest_regex) || '' }} \
-            ${{ inputs.releasetest_regex_invert && '--release-test-regexes-invert' || '' }} \
+            --ready=release-test \
+            ${{ !inputs.releasetest && '--release-test-regexes="OnReady"' || '' }} \
+            ${{ (inputs.releasetest && inputs.releasetest_regex) && format('--release-test-regexes="{0}"', inputs.releasetest_regex) || '' }} \
+            ${{ (inputs.releasetest && inputs.releasetest_regex_invert) && '--release-test-regexes-invert' || '' }} \
             --ready=exit \
             ${{ inputs.pause_on_failure && inputs.debug && '--pause-on-failure' || '' }} \
             ${{ inputs.upgradefrom != '' && '--upgrade' || '' }}
