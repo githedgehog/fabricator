@@ -61,6 +61,13 @@ func makeMultiVPCMultiSubnetSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 				NoServers:     true,
 			},
 		},
+		{
+			Name: "Old VLAB OnReady Test",
+			F:    testCtx.oldOnReadyTest,
+			SkipFlags: SkipFlags{
+				NoServers: true,
+			},
+		},
 	}
 	suite.Tests = len(suite.TestCases)
 
@@ -731,4 +738,30 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool,
 	slog.Debug("All good, cleaning up")
 
 	return false, reverts, nil
+}
+
+// Basic test connectivity with VPCs with multiple subnets; if there are at least 2 VPCs we will also
+// create a peering between the first 2. This is meant to replace the old OnReady checks; eventually
+// we coul try to expand it to increase the coverage, but for now the objective is to always use the
+// release-test infra path and get rid of the ad-hoc OnReady commands for the CI vlab jobs
+func (testCtx *VPCPeeringTestCtx) oldOnReadyTest(ctx context.Context) (bool, []RevertFunc, error) {
+	vpcs := &vpcapi.VPCList{}
+	if err := testCtx.kube.List(ctx, vpcs); err != nil {
+		return false, nil, fmt.Errorf("listing VPCs: %w", err)
+	}
+	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec, 1)
+	if len(vpcs.Items) >= 2 {
+		appendVpcPeeringSpec(vpcPeerings, 1, 2, "", []string{}, []string{})
+	} else {
+		slog.Warn("Not enough VPCs to create a peering in old OnReady test", "vpcs", len(vpcs.Items))
+	}
+
+	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, nil, nil, true); err != nil {
+		return false, nil, fmt.Errorf("setting up peerings: %w", err)
+	}
+	if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
+		return false, nil, err
+	}
+
+	return false, nil, nil
 }
