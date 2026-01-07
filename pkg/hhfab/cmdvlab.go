@@ -171,7 +171,7 @@ func DoShowTech(ctx context.Context, workDir, cacheDir string) error {
 		return err
 	}
 
-	return c.VLABShowTech(ctx, vlab)
+	return c.VLABShowTech(ctx, vlab, ShowTechOpts{})
 }
 
 func DoVLABSetupVPCs(ctx context.Context, workDir, cacheDir string, opts SetupVPCsOpts) error {

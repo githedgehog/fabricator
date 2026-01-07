@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"math"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -43,6 +44,9 @@ var (
 	errNotEnoughVPCs   = errors.New("not enough VPCs found")
 	errNoRoceLeaves    = errors.New("no leaves supporting RoCE found")
 	errInitialSetup    = errors.New("initial setup failed")
+
+	// nonAlphanumRegex matches any sequence of non-alphanumeric characters
+	nonAlphanumRegex = regexp.MustCompile(`[^a-z0-9]+`)
 )
 
 type VPCPeeringTestCtx struct {
@@ -291,6 +295,10 @@ func doRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 	// initial setup
 	if err := testCtx.setupTest(ctx, true); err != nil {
 		slog.Error("Initial test suite setup failed", "suite", ts.Name, "error", err.Error())
+
+		// Collect diagnostics for suite setup failure
+		testCtx.collectDiagnosticsOnFailure(ctx, ts.Name, "suite-setup")
+
 		if testCtx.pauseOnFail {
 			if err := pauseOnFailure(ctx); err != nil {
 				slog.Warn("Pause on failure failed, ignoring", "err", err.Error())
@@ -315,6 +323,10 @@ func doRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 				}
 				ts.Failures++
 				slog.Error("FAIL", "test", test.Name, "error", fmt.Sprintf("Failed to run setupTest between tests: %s", err.Error()))
+
+				// Collect diagnostics for setup failure between tests
+				testCtx.collectDiagnosticsOnFailure(ctx, ts.Name, test.Name)
+
 				if testCtx.pauseOnFail {
 					if err := pauseOnFailure(ctx); err != nil {
 						slog.Warn("Pause on failure failed, ignoring", "err", err.Error())
@@ -359,6 +371,10 @@ func doRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 			}
 			ts.Failures++
 			slog.Error("FAIL", "test", test.Name, "error", err.Error())
+
+			// Collect diagnostics for test failure
+			testCtx.collectDiagnosticsOnFailure(ctx, ts.Name, test.Name)
+
 			if testCtx.pauseOnFail {
 				if err := pauseOnFailure(ctx); err != nil {
 					slog.Warn("Pause on failure failed, ignoring", "err", err.Error())
@@ -370,10 +386,12 @@ func doRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 			revertErr = reverts[i](ctx)
 			if revertErr != nil {
 				slog.Error("REVERT FAIL", "test", test.Name, "error", revertErr.Error())
+				collectDiagnostics := false
 				if err == nil {
 					// the test had passed, but now we must mark it as failed
 					err = revertErr
 					ts.Failures++
+					collectDiagnostics = true
 				} else {
 					// the test had failed, let's keep track of both errors in the message
 					err = errors.Join(err, revertErr)
@@ -382,6 +400,13 @@ func doRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 					Message: err.Error(),
 				}
 				prevRevertsFailed = true
+
+				// Collect diagnostics only if this is a new failure (revert failed after test passed)
+				// If test already failed, diagnostics were already collected
+				if collectDiagnostics {
+					testCtx.collectDiagnosticsOnFailure(ctx, ts.Name, test.Name)
+				}
+
 				if testCtx.pauseOnFail {
 					if err := pauseOnFailure(ctx); err != nil {
 						slog.Warn("Pause on failure failed, ignoring", "err", err.Error())
@@ -872,4 +897,28 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 	}
 
 	return nil
+}
+
+// sanitizeNameForFolder converts a test or suite name to a safe folder name
+// by converting to lowercase and replacing non-alphanumeric characters with hyphens
+func sanitizeNameForFolder(name string) string {
+	return strings.Trim(nonAlphanumRegex.ReplaceAllString(strings.ToLower(name), "-"), "-")
+}
+
+// collectDiagnosticsOnFailure collects show-tech diagnostics for a failed test or suite setup
+// Diagnostics are organized in folders: <root>/<suite-name>/<test-name>/
+// For suite setup failures, use testName = "suite-setup"
+func (testCtx *VPCPeeringTestCtx) collectDiagnosticsOnFailure(ctx context.Context, suiteName, testName string) {
+	rootDir := filepath.Join(testCtx.vlabCfg.WorkDir, ShowTechOutputDir)
+	suiteDir := filepath.Join(rootDir, sanitizeNameForFolder(suiteName))
+	testDir := filepath.Join(suiteDir, sanitizeNameForFolder(testName))
+
+	slog.Info("Collecting diagnostics for failed test", "suite", suiteName, "test", testName, "output", testDir)
+
+	// Collect show-tech from VMs and switches using existing VLABShowTech
+	if err := testCtx.vlabCfg.VLABShowTech(ctx, testCtx.vlab, ShowTechOpts{OutputDir: testDir}); err != nil {
+		slog.Warn("Failed to collect show-tech diagnostics", "err", err)
+	} else {
+		slog.Info("Diagnostics collected successfully", "path", testDir)
+	}
 }

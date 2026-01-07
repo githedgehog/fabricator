@@ -697,6 +697,11 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						return c.handleShutdownWithPause(ctx, vlab, opts, fmt.Errorf("testing connectivity: %w", err))
 					}
 				case OnReadyExit:
+					// Collect show-tech on exit for debugging (even on success)
+					if err := c.VLABShowTech(ctx, vlab, ShowTechOpts{}); err != nil {
+						slog.Warn("Failed to collect show-tech on exit", "err", err)
+					}
+
 					if c.Shutdown.Load() == int32(ShutdownTypeGraceful) {
 						return nil
 					}
