@@ -16,14 +16,17 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/samber/lo"
 	agentapi "go.githedgehog.com/fabric/api/agent/v1beta1"
 	"go.githedgehog.com/fabric/api/meta"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
@@ -3866,6 +3869,10 @@ func doRunTests(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 	// initial setup
 	if err := testCtx.setupTest(ctx, true); err != nil {
 		slog.Error("Initial test suite setup failed", "suite", ts.Name, "error", err.Error())
+
+		// Collect diagnostics for suite setup failure
+		testCtx.collectDiagnosticsOnFailure(ctx, ts.Name, "suite-setup")
+
 		if testCtx.pauseOnFail {
 			if err := pauseOnFailure(ctx); err != nil {
 				slog.Warn("Pause on failure failed, ignoring", "err", err.Error())
@@ -3890,6 +3897,10 @@ func doRunTests(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 				}
 				ts.Failures++
 				slog.Error("FAIL", "test", test.Name, "error", fmt.Sprintf("Failed to run setupTest between tests: %s", err.Error()))
+
+				// Collect diagnostics for setup failure between tests
+				testCtx.collectDiagnosticsOnFailure(ctx, ts.Name, test.Name)
+
 				if testCtx.pauseOnFail {
 					if err := pauseOnFailure(ctx); err != nil {
 						slog.Warn("Pause on failure failed, ignoring", "err", err.Error())
@@ -3934,6 +3945,10 @@ func doRunTests(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 			}
 			ts.Failures++
 			slog.Error("FAIL", "test", test.Name, "error", err.Error())
+
+			// Collect diagnostics for test failure
+			testCtx.collectDiagnosticsOnFailure(ctx, ts.Name, test.Name)
+
 			if testCtx.pauseOnFail {
 				if err := pauseOnFailure(ctx); err != nil {
 					slog.Warn("Pause on failure failed, ignoring", "err", err.Error())
@@ -3945,10 +3960,12 @@ func doRunTests(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 			revertErr = reverts[i](ctx)
 			if revertErr != nil {
 				slog.Error("REVERT FAIL", "test", test.Name, "error", revertErr.Error())
+				collectDiagnostics := false
 				if err == nil {
 					// the test had passed, but now we must mark it as failed
 					err = revertErr
 					ts.Failures++
+					collectDiagnostics = true
 				} else {
 					// the test had failed, let's keep track of both errors in the message
 					err = errors.Join(err, revertErr)
@@ -3957,6 +3974,13 @@ func doRunTests(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 					Message: err.Error(),
 				}
 				prevRevertsFailed = true
+
+				// Collect diagnostics only if this is a new failure (revert failed after test passed)
+				// If test already failed, diagnostics were already collected
+				if collectDiagnostics {
+					testCtx.collectDiagnosticsOnFailure(ctx, ts.Name, test.Name)
+				}
+
 				if testCtx.pauseOnFail {
 					if err := pauseOnFailure(ctx); err != nil {
 						slog.Warn("Pause on failure failed, ignoring", "err", err.Error())
@@ -4688,6 +4712,182 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 	slog.Info("All tests completed", "duration", time.Since(testStart).String())
 	if singleVpcResults.Failures > 0 || multiVpcResults.Failures > 0 || basicResults.Failures > 0 || noVpcResults.Failures > 0 {
 		return fmt.Errorf("some tests failed: singleVpc=%d, multiVpc=%d, basic=%d, noVpc=%d", singleVpcResults.Failures, multiVpcResults.Failures, basicResults.Failures, noVpcResults.Failures) //nolint:goerr113
+	}
+
+	return nil
+}
+
+// sanitizeNameForFolder converts a test or suite name to a safe folder name
+// by converting to lowercase and replacing spaces and special characters with hyphens
+func sanitizeNameForFolder(name string) string {
+	// Convert to lowercase
+	name = strings.ToLower(name)
+	// Replace spaces and slashes with hyphens
+	name = strings.ReplaceAll(name, " ", "-")
+	name = strings.ReplaceAll(name, "/", "-")
+	// Remove any other special characters that might be problematic
+	name = strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+			return r
+		}
+
+		return '-'
+	}, name)
+	// Remove consecutive hyphens
+	for strings.Contains(name, "--") {
+		name = strings.ReplaceAll(name, "--", "-")
+	}
+	// Trim hyphens from start and end
+	name = strings.Trim(name, "-")
+
+	return name
+}
+
+// collectDiagnosticsOnFailure collects show-tech diagnostics for a failed test or suite setup
+// Diagnostics are organized in folders: <root>/<suite-name>/<test-name>/
+// For suite setup failures, use testName = "suite-setup"
+func (testCtx *VPCPeeringTestCtx) collectDiagnosticsOnFailure(ctx context.Context, suiteName, testName string) {
+	timestamp := time.Now().Format("20060102-150405")
+	rootDir := filepath.Join(testCtx.vlabCfg.WorkDir, fmt.Sprintf("show-tech-output-%s", timestamp))
+	suiteDir := filepath.Join(rootDir, sanitizeNameForFolder(suiteName))
+	testDir := filepath.Join(suiteDir, sanitizeNameForFolder(testName))
+
+	if err := os.MkdirAll(testDir, 0o755); err != nil {
+		slog.Warn("Failed to create diagnostics directory", "path", testDir, "err", err)
+
+		return
+	}
+
+	slog.Info("Collecting diagnostics for failed test", "suite", suiteName, "test", testName, "output", testDir)
+
+	// Collect show-tech from VMs and switches
+	if err := testCtx.collectShowTechToDir(ctx, testDir); err != nil {
+		slog.Warn("Failed to collect show-tech diagnostics", "err", err)
+	} else {
+		slog.Info("Diagnostics collected successfully", "path", testDir)
+	}
+}
+
+// collectShowTechToDir collects show-tech from all VMs and switches to a specific directory
+func (testCtx *VPCPeeringTestCtx) collectShowTechToDir(ctx context.Context, outputDir string) error {
+	scriptConfig := DefaultShowTechScript()
+
+	// Get physical switches from K8s using the test context's kube client
+	var switches wiringapi.SwitchList
+	if err := testCtx.kube.List(ctx, &switches); err != nil {
+		slog.Warn("Failed to list switches", "err", err)
+	}
+
+	// Build a map of VM switch names to skip them when collecting from physical switches
+	vmSwitchNames := make(map[string]bool)
+	for _, vm := range testCtx.vlab.VMs {
+		if vm.Type == VMTypeSwitch {
+			vmSwitchNames[vm.Name] = true
+		}
+	}
+
+	physicalSwitchCount := 0
+	for _, sw := range switches.Items {
+		if !vmSwitchNames[sw.Name] {
+			physicalSwitchCount++
+		}
+	}
+
+	totalTargets := len(testCtx.vlab.VMs) + physicalSwitchCount
+
+	var wg sync.WaitGroup
+	errChan := make(chan error, len(testCtx.vlab.VMs)+len(switches.Items))
+
+	done := make(chan struct{})
+	defer close(done)
+
+	go func() {
+		select {
+		case <-ctx.Done():
+			slog.Warn("Context cancelled, but continuing to collect available diagnostics")
+		case <-done:
+			return
+		}
+	}()
+
+	var successCount atomic.Int32
+
+	// Collect show-tech from VMs
+	for _, vm := range testCtx.vlab.VMs {
+		name := vm.Name
+		wg.Add(1)
+		go func(name string, vm VM) {
+			defer wg.Done()
+			ssh, err := testCtx.vlabCfg.SSHVM(ctx, testCtx.vlab, vm)
+			if err != nil {
+				errChan <- fmt.Errorf("getting ssh config for entry %s: %w", name, err)
+
+				return
+			}
+
+			collectionCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+			defer cancel()
+			script, ok := scriptConfig.Scripts[vm.Type]
+			if !ok {
+				slog.Debug("No show-tech script available for", "vm", vm.Name, "type", vm.Type)
+
+				return
+			}
+
+			if err := testCtx.vlabCfg.collectShowTech(collectionCtx, name, ssh, script, outputDir); err != nil {
+				errChan <- fmt.Errorf("collecting show-tech for entry %s: %w", name, err)
+			} else {
+				successCount.Add(1)
+			}
+		}(name, vm)
+	}
+
+	// Collect show-tech from physical switches (skip VM switches)
+	for _, sw := range switches.Items {
+		// Skip if this is a VM switch (already handled above)
+		if vmSwitchNames[sw.Name] {
+			continue
+		}
+
+		name := sw.Name
+		wg.Add(1)
+		go func(name string) {
+			defer wg.Done()
+
+			// Use the SSH helper to get SSH config for physical switch
+			ssh, err := testCtx.vlabCfg.SSH(ctx, testCtx.vlab, name)
+			if err != nil {
+				errChan <- fmt.Errorf("getting ssh config for switch %s: %w", name, err)
+
+				return
+			}
+
+			collectionCtx, cancel := context.WithTimeout(ctx, 25*time.Minute)
+			defer cancel()
+
+			script := scriptConfig.Scripts[VMTypeSwitch]
+			if err := testCtx.vlabCfg.collectShowTech(collectionCtx, name, ssh, script, outputDir); err != nil {
+				errChan <- fmt.Errorf("collecting show-tech for switch %s: %w", name, err)
+			} else {
+				successCount.Add(1)
+			}
+		}(name)
+	}
+
+	wg.Wait()
+	close(errChan)
+
+	errors := lo.ChannelToSlice(errChan)
+
+	if successCount.Load() == 0 {
+		return fmt.Errorf("failed to collect any diagnostics: %v", errors) //nolint:goerr113
+	}
+
+	if len(errors) > 0 {
+		slog.Warn("Some diagnostics collection failed",
+			"success_count", successCount.Load(),
+			"total_count", totalTargets,
+			"errors", errors)
 	}
 
 	return nil
