@@ -29,6 +29,8 @@ KUBECTL="/opt/bin/kubectl"
     echo -e "\n=== Network Configuration ==="
     ip addr show
     ip route show
+    ip neigh show
+    ip link show
     
     echo -e "\n=== Disk Usage ==="
     df -h
@@ -94,6 +96,9 @@ KUBECTL="/opt/bin/kubectl"
 {
     echo -e "\n=== systemd-networkd logs ==="
     journalctl -u systemd-networkd
+
+    echo -e "\n=== sshd status ==="
+    systemctl status sshd --no-pager
 
     echo -e "\n=== kernel logs ==="
     journalctl -k
