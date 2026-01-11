@@ -63,6 +63,8 @@ type GatewayState struct {
 	VPCs map[string]VPCStatus `json:"vpcs,omitempty"`
 	// Peerings is the status of the VPCs peerings where key is VPC1->VPC2 and data is for one direction only
 	Peerings map[string]PeeringStatus `json:"peerings,omitempty"`
+	// BGP is BGP status
+	BGP BGPStatus `json:"bgp,omitempty"`
 }
 
 // DataplaneStatus represents the status of the dataplane
@@ -97,6 +99,67 @@ type PeeringStatus struct {
 	BytesPerSecond float64 `json:"bps,omitempty"`
 	// PktsPerSecond is the number of packets sent per second on the peering
 	PktsPerSecond float64 `json:"pps,omitempty"`
+}
+
+// BGPStatus represents BGP status across VRFs, derived from BMP/FRR.
+type BGPStatus struct {
+	// VRFs keyed by VRF name (e.g. "default", "vrfVvpc-1")
+	VRFs map[string]BGPVRFStatus `json:"vrfs,omitempty"`
+}
+
+type BGPVRFStatus struct {
+	// Neighbors keyed by an ip address string
+	Neighbors map[string]BGPNeighborStatus `json:"neighbors,omitempty"`
+}
+
+// BGPNeighborSessionState represents the BGP FSM state for a neighbor.
+// +kubebuilder:validation:Enum=unset;idle;connect;active;open;established
+type BGPNeighborSessionState string
+
+const (
+	BGPStateUnset       BGPNeighborSessionState = "unset"
+	BGPStateIdle        BGPNeighborSessionState = "idle"
+	BGPStateConnect     BGPNeighborSessionState = "connect"
+	BGPStateActive      BGPNeighborSessionState = "active"
+	BGPStateOpen        BGPNeighborSessionState = "open"
+	BGPStateEstablished BGPNeighborSessionState = "established"
+)
+
+type BGPNeighborStatus struct {
+	Enabled        bool   `json:"enabled,omitempty"`
+	LocalAS        uint32 `json:"localAS,omitempty"`
+	PeerAS         uint32 `json:"peerAS,omitempty"`
+	RemoteRouterID string `json:"remoteRouterID,omitempty"`
+
+	SessionState           BGPNeighborSessionState `json:"sessionState,omitempty"`
+	ConnectionsDropped     uint64                  `json:"connectionsDropped,omitempty"`
+	EstablishedTransitions uint64                  `json:"establishedTransitions,omitempty"`
+	LastResetReason        string                  `json:"lastResetReason,omitempty"`
+
+	Messages            BGPMessages         `json:"messages,omitempty"`
+	IPv4UnicastPrefixes BGPNeighborPrefixes `json:"ipv4UnicastPrefixes,omitempty"`
+	IPv6UnicastPrefixes BGPNeighborPrefixes `json:"ipv6UnicastPrefixes,omitempty"`
+	L2VPNEVPNPrefixes   BGPNeighborPrefixes `json:"l2VPNEVPNPrefixes,omitempty"`
+}
+
+type BGPMessages struct {
+	Received BGPMessageCounters `json:"received,omitempty"`
+	Sent     BGPMessageCounters `json:"sent,omitempty"`
+}
+
+type BGPMessageCounters struct {
+	Capability   uint64 `json:"capability,omitempty"`
+	Keepalive    uint64 `json:"keepalive,omitempty"`
+	Notification uint64 `json:"notification,omitempty"`
+	Open         uint64 `json:"open,omitempty"`
+	RouteRefresh uint64 `json:"routeRefresh,omitempty"`
+	Update       uint64 `json:"update,omitempty"`
+}
+
+type BGPNeighborPrefixes struct {
+	Received          uint32 `json:"received,omitempty"`
+	ReceivedPrePolicy uint32 `json:"receivedPrePolicy,omitempty"`
+	Sent              uint32 `json:"sent,omitempty"`
 }
 
 // +kubebuilder:object:root=true
