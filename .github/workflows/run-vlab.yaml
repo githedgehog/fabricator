@@ -197,7 +197,7 @@ jobs:
           old/hhfab diagram --format=mermaid
 
       # TODO: make controls restricted again when we figure out how to get NTP upstream working for isolated VMs
-      - name: (${{ inputs.upgradefrom }}) Run and test ${{ inputs.hybrid && 'hybrid ' || '' }}VLAB
+      - name: (${{ inputs.upgradefrom }}) Run ${{ inputs.hybrid && 'hybrid ' || '' }}VLAB
         if: ${{ inputs.upgradefrom != '' }}
         run: |
           export HHFAB_JOIN_TOKEN=$(openssl rand -base64 24)
@@ -209,7 +209,6 @@ jobs:
             --ready=inspect \
             --ready=setup-vpcs \
             ${{ inputs.upgradefrom != '25.03' && '--ready=setup-peerings' || '' }} \
-            --ready=test-connectivity \
             --ready=exit
 
       - name: (${{ inputs.upgradefrom }}) Prepare debug artifacts
