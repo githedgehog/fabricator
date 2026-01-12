@@ -923,7 +923,12 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 // sanitizeNameForFolder converts a test or suite name to a safe folder name
 // by converting to lowercase and replacing non-alphanumeric characters with hyphens
 func sanitizeNameForFolder(name string) string {
-	return strings.Trim(nonAlphanumRegex.ReplaceAllString(strings.ToLower(name), "-"), "-")
+	result := strings.Trim(nonAlphanumRegex.ReplaceAllString(strings.ToLower(name), "-"), "-")
+	if result == "" {
+		return "unnamed"
+	}
+
+	return result
 }
 
 // collectDiagnosticsOnFailure collects show-tech diagnostics for a failed test or suite setup
