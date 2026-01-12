@@ -202,7 +202,8 @@ jobs:
           old/hhfab diagram --format=mermaid
 
       # TODO: make controls restricted again when we figure out how to get NTP upstream working for isolated VMs
-      - name: (${{ inputs.upgradefrom }}) Run ${{ inputs.hybrid && 'hybrid ' || '' }}VLAB
+      - name: (${{ inputs.upgradefrom }}) Run and test ${{ inputs.hybrid && 'hybrid ' || '' }}VLAB
+        id: test-before
         if: ${{ inputs.upgradefrom != '' }}
         run: |
           export HHFAB_JOIN_TOKEN=$(openssl rand -base64 24)
@@ -217,7 +218,7 @@ jobs:
             --ready=exit
 
       - name: (${{ inputs.upgradefrom }}) Prepare debug artifacts
-        if: ${{ always() && inputs.upgradefrom != '' }}
+        if: ${{ always() && !cancelled() && steps.test-before.outcome != 'skipped' }}
         run: |
           mkdir -p _debug/0-before/serial
           cp versions.txt _debug/0-before || true
@@ -267,6 +268,7 @@ jobs:
 
       # TODO: make controls restricted again when we figure out how to get NTP upstream working for isolated VMs
       - name: ${{ inputs.upgradefrom != '' && 'Upgrade' || 'Run' }} and test ${{ inputs.hybrid && 'hybrid ' || '' }}VLAB
+        id: test-current
         run: |
           if [[ "${{ inputs.hybrid }}" == "true" ]]; then
             source "./lab-ci/envs/$KUBE_NODE/source.sh"
@@ -297,7 +299,7 @@ jobs:
           path: release-test.xml
 
       - name: Prepare debug artifacts
-        if: ${{ always() }}
+        if: ${{ always() && !cancelled() && steps.test-current.outcome != 'skipped' }}
         run: |
           mkdir -p _debug/1-current/serial
           cp versions.txt _debug/1-current || true
@@ -309,6 +311,7 @@ jobs:
 
         # TODO: make controls restricted again when we figure out how to get NTP upstream working for isolated VMs
       - name: (After) Run ${{ inputs.hybrid && 'hybrid ' || '' }}VLAB one more time
+        id: test-after
         if: ${{ inputs.upgradefrom != '' }}
         run: |
           export HHFAB_JOIN_TOKEN=$(openssl rand -base64 24)
@@ -320,7 +323,7 @@ jobs:
             --ready=exit
 
       - name: (After) Prepare debug artifacts
-        if: ${{ always() && inputs.upgradefrom != '' }}
+        if: ${{ always() && !cancelled() && steps.test-after.outcome != 'skipped' }}
         run: |
           mkdir -p _debug/2-after/serial
           cp versions.txt _debug/2-after || true
