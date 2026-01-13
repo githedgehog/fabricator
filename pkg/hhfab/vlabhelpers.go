@@ -598,7 +598,12 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB) error {
 				return
 			}
 
-			collectionCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+			// Use longer timeout for switches since they can take 5+ minutes
+			timeout := 5 * time.Minute
+			if vmType == VMTypeSwitch {
+				timeout = 10 * time.Minute
+			}
+			collectionCtx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
 
 			script := scriptConfig.Scripts[vmType]
