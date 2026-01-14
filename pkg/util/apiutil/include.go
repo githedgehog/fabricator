@@ -174,7 +174,7 @@ var printIncludeLists = []kclient.ObjectList{
 	&gwapi.PeeringList{},
 }
 
-func PrintInclude(ctx context.Context, kube kclient.Reader, w io.Writer) error {
+func PrintInclude(ctx context.Context, kube ReaderWithScheme, w io.Writer) error {
 	if err := printKubeObjects(ctx, kube, w, printIncludeLists...); err != nil {
 		return fmt.Errorf("printing kube objects: %w", err)
 	}

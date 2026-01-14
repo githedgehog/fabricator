@@ -33,7 +33,6 @@ import (
 	"go.githedgehog.com/fabricator/pkg/util/butaneutil"
 	"go.githedgehog.com/fabricator/pkg/util/tmplutil"
 	"go.githedgehog.com/fabricator/pkg/version"
-	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 type ControlInstallBuilder struct {
@@ -41,7 +40,7 @@ type ControlInstallBuilder struct {
 	Fab        fabapi.Fabricator
 	Control    fabapi.ControlNode
 	Nodes      []fabapi.FabNode
-	Client     kclient.Reader
+	Client     apiutil.ReaderWithScheme
 	Mode       BuildMode
 	Downloader *artificer.Downloader
 }
@@ -184,7 +183,7 @@ func (b *ControlInstallBuilder) addPayload(ctx context.Context, slog *slog.Logge
 	}
 	defer fabF.Close()
 
-	if err := apiutil.PrintFab(b.Fab, []fabapi.ControlNode{b.Control}, b.Nodes, fabF); err != nil {
+	if err := apiutil.PrintFab(b.Fab, []fabapi.ControlNode{b.Control}, b.Nodes, b.Client.Scheme(), fabF); err != nil {
 		return fmt.Errorf("printing fab: %w", err)
 	}
 
@@ -290,7 +289,7 @@ func (b *ControlInstallBuilder) hash(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("hashing version: %w", err)
 	}
 
-	if err := apiutil.PrintFab(b.Fab, []fabapi.ControlNode{b.Control}, b.Nodes, h); err != nil {
+	if err := apiutil.PrintFab(b.Fab, []fabapi.ControlNode{b.Control}, b.Nodes, b.Client.Scheme(), h); err != nil {
 		return "", fmt.Errorf("hashing fab: %w", err)
 	}
 

@@ -396,6 +396,10 @@ func (c *ControlInstall) installInclude(ctx context.Context, kube kclient.Client
 		}
 
 		for _, obj := range apiutil.KubeListItems(objList) {
+			if err := apiutil.EnsureKind(obj, kube.Scheme()); err != nil {
+				return fmt.Errorf("ensuring kind: %w", err)
+			}
+
 			kind := obj.GetObjectKind().GroupVersionKind().Kind
 			name := obj.GetName()
 

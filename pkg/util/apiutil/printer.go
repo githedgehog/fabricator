@@ -10,23 +10,27 @@ import (
 	"reflect"
 
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
+	"k8s.io/apimachinery/pkg/runtime"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 	kyaml "sigs.k8s.io/yaml"
 )
 
-func printKubeObjects(ctx context.Context, kube kclient.Reader, w io.Writer, objLists ...kclient.ObjectList) error {
+type ReaderWithScheme interface {
+	kclient.Reader
+	Scheme() *runtime.Scheme
+}
+
+func printKubeObjects(ctx context.Context, kube ReaderWithScheme, w io.Writer, objLists ...kclient.ObjectList) error {
 	objs := 0
 
 	for _, objList := range objLists {
-		gvk := objList.GetObjectKind().GroupVersionKind()
-
 		if err := kube.List(ctx, objList); err != nil {
 			return fmt.Errorf("listing %T: %w", objList, err)
 		}
 
 		items := reflect.ValueOf(objList).Elem().FieldByName("Items")
 		if items.Kind() != reflect.Slice {
-			return fmt.Errorf("items field is not a slice in %s", gvk.String()) //nolint:goerr113
+			return fmt.Errorf("items field is not a slice in %T", objList) //nolint:goerr113
 		}
 
 		itemsLen := items.Len()
@@ -40,7 +44,7 @@ func printKubeObjects(ctx context.Context, kube kclient.Reader, w io.Writer, obj
 		for idx := 0; idx < itemsLen; idx++ {
 			itemValue, ok := items.Index(idx).Addr().Interface().(kclient.Object)
 			if !ok {
-				return fmt.Errorf("item %d of %s is not an object", idx, gvk.String()) //nolint:goerr113
+				return fmt.Errorf("item %d of %T is not an object", idx, objList) //nolint:goerr113
 			}
 
 			if objs > 0 {
@@ -50,8 +54,8 @@ func printKubeObjects(ctx context.Context, kube kclient.Reader, w io.Writer, obj
 			}
 			objs++
 
-			if err := PrintKubeObject(itemValue, w, false); err != nil {
-				return fmt.Errorf("printing item %d of %s: %w", idx, gvk.String(), err)
+			if err := PrintKubeObject(itemValue, kube.Scheme(), w, false); err != nil {
+				return fmt.Errorf("printing item %d of %T: %w", idx, objList, err)
 			}
 		}
 	}
@@ -74,7 +78,7 @@ type printObjMeta struct {
 	Annotations map[string]string `json:"annotations,omitempty"`
 }
 
-func PrintKubeObject(obj kclient.Object, w io.Writer, withStatus bool) error {
+func PrintKubeObject(obj kclient.Object, scheme *runtime.Scheme, w io.Writer, withStatus bool) error {
 	annotations := obj.GetAnnotations()
 	delete(annotations, "kubectl.kubernetes.io/last-applied-configuration")
 	if len(annotations) == 0 {
@@ -86,6 +90,10 @@ func PrintKubeObject(obj kclient.Object, w io.Writer, withStatus bool) error {
 	// TODO: do we have some other labels to clean up?
 	if len(labels) == 0 {
 		labels = nil
+	}
+
+	if err := EnsureKind(obj, scheme); err != nil {
+		return fmt.Errorf("ensuring kind: %w", err)
 	}
 
 	p := printObj{
