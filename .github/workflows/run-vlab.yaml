@@ -261,6 +261,10 @@ jobs:
       # TODO: make controls restricted again when we figure out how to get NTP upstream working for isolated VMs
       - name: ${{ inputs.upgradefrom != '' && 'Upgrade' || 'Run' }} and test ${{ inputs.hybrid && 'hybrid ' || '' }}VLAB
         run: |
+          if [[ "${{ inputs.hybrid }}" == "true" ]]; then
+            source "./lab-ci/envs/$KUBE_NODE/source.sh"
+          fi
+
           export HHFAB_JOIN_TOKEN=$(openssl rand -base64 24)
           bin/hhfab vlab up -v \
             --build-mode="${{ inputs.buildmode }}" \
