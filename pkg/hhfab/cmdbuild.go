@@ -125,6 +125,7 @@ func (c *Config) build(ctx context.Context, opts BuildOpts) error {
 				WorkDir:    resultDir,
 				Fab:        c.Fab,
 				Node:       node,
+				Client:     c.Client,
 				Mode:       opts.BuildMode,
 				Downloader: d,
 			}).Build(ctx); err != nil {

@@ -37,7 +37,7 @@ func ConfigExport(ctx context.Context) error {
 
 	out := os.Stdout
 
-	if err := apiutil.PrintKubeObject(&f, out, false); err != nil {
+	if err := apiutil.PrintKubeObject(&f, kube.Scheme(), out, false); err != nil {
 		return fmt.Errorf("printing fabricator: %w", err)
 	}
 
@@ -47,7 +47,7 @@ func ConfigExport(ctx context.Context) error {
 			return fmt.Errorf("writing separator: %w", err)
 		}
 
-		if err := apiutil.PrintKubeObject(&c, out, false); err != nil {
+		if err := apiutil.PrintKubeObject(&c, kube.Scheme(), out, false); err != nil {
 			return fmt.Errorf("printing control node: %w", err)
 		}
 	}
@@ -58,7 +58,7 @@ func ConfigExport(ctx context.Context) error {
 			return fmt.Errorf("writing separator: %w", err)
 		}
 
-		if err := apiutil.PrintKubeObject(&n, out, false); err != nil {
+		if err := apiutil.PrintKubeObject(&n, kube.Scheme(), out, false); err != nil {
 			return fmt.Errorf("printing node: %w", err)
 		}
 	}

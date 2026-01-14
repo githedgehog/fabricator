@@ -15,6 +15,7 @@ import (
 	helmapi "github.com/k3s-io/helm-controller/pkg/apis/helm.cattle.io/v1"
 	dhcpapi "go.githedgehog.com/fabric/api/dhcp/v1beta1"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
+	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 	appsapi "k8s.io/api/apps/v1"
 	coreapi "k8s.io/api/core/v1"
 	rbacapi "k8s.io/api/rbac/v1"
@@ -149,6 +150,10 @@ func EnforceKubeInstall(ctx context.Context, kube kclient.Client, cfg fabapi.Fab
 		}
 
 		for _, obj := range objs {
+			if err := apiutil.EnsureKind(obj, kube.Scheme()); err != nil {
+				return fmt.Errorf("ensuring kind: %w", err)
+			}
+
 			kind := obj.GetObjectKind().GroupVersionKind().Kind
 			name := obj.GetName()
 

@@ -8,10 +8,11 @@ import (
 	"io"
 
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
-func PrintFab(f fabapi.Fabricator, controls []fabapi.ControlNode, nodes []fabapi.FabNode, w io.Writer) error {
-	if err := PrintKubeObject(&f, w, true); err != nil {
+func PrintFab(f fabapi.Fabricator, controls []fabapi.ControlNode, nodes []fabapi.FabNode, scheme *runtime.Scheme, w io.Writer) error {
+	if err := PrintKubeObject(&f, scheme, w, true); err != nil {
 		return fmt.Errorf("printing fabricator: %w", err)
 	}
 
@@ -21,7 +22,7 @@ func PrintFab(f fabapi.Fabricator, controls []fabapi.ControlNode, nodes []fabapi
 			return fmt.Errorf("writing separator: %w", err)
 		}
 
-		if err := PrintKubeObject(&control, w, false); err != nil {
+		if err := PrintKubeObject(&control, scheme, w, false); err != nil {
 			return fmt.Errorf("printing control node %s: %w", control.Name, err)
 		}
 	}
@@ -32,7 +33,7 @@ func PrintFab(f fabapi.Fabricator, controls []fabapi.ControlNode, nodes []fabapi
 			return fmt.Errorf("writing separator: %w", err)
 		}
 
-		if err := PrintKubeObject(&node, w, false); err != nil {
+		if err := PrintKubeObject(&node, scheme, w, false); err != nil {
 			return fmt.Errorf("printing node %s: %w", node.Name, err)
 		}
 	}

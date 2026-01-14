@@ -32,6 +32,7 @@ type NodeInstallBuilder struct {
 	WorkDir    string
 	Fab        fabapi.Fabricator // TODO can we actually get rid of it for the node installation?
 	Node       fabapi.FabNode
+	Client     apiutil.ReaderWithScheme
 	Mode       BuildMode
 	Downloader *artificer.Downloader
 }
@@ -105,7 +106,7 @@ func (b *NodeInstallBuilder) addPayload(ctx context.Context, slog *slog.Logger, 
 	}
 	defer fabF.Close()
 
-	if err := apiutil.PrintFab(b.Fab, nil, []fabapi.FabNode{b.Node}, fabF); err != nil {
+	if err := apiutil.PrintFab(b.Fab, nil, []fabapi.FabNode{b.Node}, b.Client.Scheme(), fabF); err != nil {
 		return fmt.Errorf("printing fab: %w", err)
 	}
 
@@ -163,7 +164,7 @@ func (b *NodeInstallBuilder) hash() (string, error) {
 		return "", fmt.Errorf("hashing version: %w", err)
 	}
 
-	if err := apiutil.PrintFab(b.Fab, nil, []fabapi.FabNode{b.Node}, h); err != nil {
+	if err := apiutil.PrintFab(b.Fab, nil, []fabapi.FabNode{b.Node}, b.Client.Scheme(), h); err != nil {
 		return "", fmt.Errorf("hashing fab: %w", err)
 	}
 
