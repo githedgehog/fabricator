@@ -27,7 +27,6 @@ const (
 	CtrlRef              = "gateway/gateway"
 	CtrlChartRef         = "gateway/charts/gateway"
 	APIChartRef          = "gateway/charts/gateway-api"
-	AgentRef             = "gateway/gateway-agent"
 	DataplaneRef         = "dataplane"
 	FRRRef               = "dpdk-sys/frr"
 	DataplaneMetricsPort = 9442
@@ -69,11 +68,6 @@ func Install(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 		return nil, fmt.Errorf("api chart: %w", err)
 	}
 
-	agentRepo, err := comp.ImageURL(cfg, AgentRef)
-	if err != nil {
-		return nil, fmt.Errorf("getting image URL for %q: %w", AgentRef, err)
-	}
-
 	dataplaneRepo, err := comp.ImageURL(cfg, DataplaneRef)
 	if err != nil {
 		return nil, fmt.Errorf("getting image URL for %q: %w", DataplaneRef, err)
@@ -109,7 +103,6 @@ func Install(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 			},
 		},
 		Agentless:            true,
-		AgentRef:             agentRepo + ":" + string(cfg.Status.Versions.Gateway.Agent),
 		DataplaneRef:         dataplaneRepo + ":" + string(cfg.Status.Versions.Gateway.Dataplane),
 		FRRRef:               frrRepo + ":" + string(cfg.Status.Versions.Gateway.FRR),
 		ToolboxRef:           toolboxRepo + ":" + string(flatcar.ToolboxVersion(cfg)),
@@ -137,7 +130,6 @@ func Artifacts(cfg fabapi.Fabricator) (comp.OCIArtifacts, error) {
 		APIChartRef:  cfg.Status.Versions.Gateway.API,
 		CtrlRef:      cfg.Status.Versions.Gateway.Controller,
 		CtrlChartRef: cfg.Status.Versions.Gateway.Controller,
-		AgentRef:     cfg.Status.Versions.Gateway.Agent,
 		DataplaneRef: cfg.Status.Versions.Gateway.Dataplane,
 		FRRRef:       cfg.Status.Versions.Gateway.FRR,
 	}, nil
