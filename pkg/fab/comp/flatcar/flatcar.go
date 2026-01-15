@@ -13,6 +13,9 @@ const (
 	ToolboxArchiveRef = "fabricator/toolbox"
 	ToolboxArchiveBin = "toolbox.tar"
 	ToolboxRef        = "toolbox"
+	HostBGPArchiveRef = "fabricator/host-bgp"
+	HostBGPArchiveBin = "host-bgp.tar"
+	HostBGPRef        = "host-bgp"
 	Home              = "/home/core"
 	UpdateRef         = "fabricator/flatcar-update"
 	UpdateBinName     = "flatcar_production_update.gz"
@@ -28,11 +31,16 @@ func ToolboxVersion(f fabapi.Fabricator) meta.Version {
 	return f.Status.Versions.Platform.Toolbox
 }
 
+func HostBGPContainerVersion(f fabapi.Fabricator) meta.Version {
+	return f.Status.Versions.Platform.HostBGPContainer
+}
+
 var _ comp.ListOCIArtifacts = Artifacts
 
 func Artifacts(cfg fabapi.Fabricator) (comp.OCIArtifacts, error) {
 	return comp.OCIArtifacts{
 		ToolboxRef: ToolboxVersion(cfg),
+		HostBGPRef: HostBGPContainerVersion(cfg),
 	}, nil
 }
 

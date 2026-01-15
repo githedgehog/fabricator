@@ -27,6 +27,7 @@ import (
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
 	"go.githedgehog.com/fabric/pkg/util/logutil"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
+	"go.githedgehog.com/fabricator/api/meta"
 	"go.githedgehog.com/fabricator/pkg/artificer"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/flatcar"
@@ -168,6 +169,7 @@ func PrecacheVLABORAS(cfg fabapi.Fabricator) (comp.OCIArtifacts, error) {
 		vlabcomp.FlatcarRef:       vlabcomp.FlatcarVersion(cfg),
 		vlabcomp.ONIERef:          vlabcomp.ONIEVersion(cfg),
 		flatcar.ToolboxArchiveRef: flatcar.ToolboxVersion(cfg),
+		flatcar.HostBGPArchiveRef: flatcar.HostBGPContainerVersion(cfg),
 	}, nil
 }
 
@@ -869,6 +871,32 @@ func serverIgnition(fab fabapi.Fabricator, vm VM) (string, []byte, error) {
 	return but, ign, nil
 }
 
+func orasUploadAndInstall(ctx context.Context, d *artificer.Downloader, ssh *sshutil.Config, ftp *sftp.Client, name string, version meta.Version, path, archiveRef, archiveBin string) error {
+	if err := d.WithORAS(ctx, archiveRef, version, func(cachePath string) error {
+		if err := sshutil.UploadPathWith(ftp, filepath.Join(cachePath, archiveBin), path); err != nil {
+			return fmt.Errorf("uploading: %w", err)
+		}
+
+		return nil
+	}); err != nil {
+		return fmt.Errorf("uploading %s image: %w", name, err)
+	}
+
+	if _, _, err := ssh.Run(ctx, fmt.Sprintf("bash -c 'sudo ctr image import %s'", path)); err != nil {
+		return fmt.Errorf("loading %s into containerd: %w", name, err)
+	}
+
+	if _, _, err := ssh.Run(ctx, fmt.Sprintf("bash -c 'sudo docker load -i %s'", path)); err != nil {
+		return fmt.Errorf("loading %s into docker: %w", name, err)
+	}
+
+	if err := ftp.Remove(path); err != nil {
+		return fmt.Errorf("removing %s image: %w", name, err)
+	}
+
+	return nil
+}
+
 func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Downloader, vm VM, opts VLABRunOpts) error {
 	if vm.Type != VMTypeServer && vm.Type != VMTypeControl && vm.Type != VMTypeGateway && vm.Type != VMTypeExternal {
 		return nil
@@ -934,31 +962,18 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 		}
 
 		toolboxPath := filepath.Join(flatcar.Home, "toolbox")
-		if err := d.WithORAS(ctx, flatcar.ToolboxArchiveRef, flatcar.ToolboxVersion(c.Fab), func(cachePath string) error {
-			if err := sshutil.UploadPathWith(ftp, filepath.Join(cachePath, flatcar.ToolboxArchiveBin), toolboxPath); err != nil {
-				return fmt.Errorf("uploading: %w", err)
-			}
-
-			return nil
-		}); err != nil {
-			return fmt.Errorf("uploading toolbox image: %w", err)
+		if err := orasUploadAndInstall(ctx, d, ssh, ftp, "toolbox", flatcar.ToolboxVersion(c.Fab), toolboxPath, flatcar.ToolboxArchiveRef, flatcar.ToolboxArchiveBin); err != nil {
+			return fmt.Errorf("installing toolbox: %w", err)
 		}
-
-		if _, _, err := ssh.Run(ctx, fmt.Sprintf("bash -c 'sudo ctr image import %s'", toolboxPath)); err != nil {
-			return fmt.Errorf("loading toolbox into containerd: %w", err)
-		}
-
-		if _, _, err := ssh.Run(ctx, fmt.Sprintf("bash -c 'sudo docker load -i %s'", toolboxPath)); err != nil {
-			return fmt.Errorf("loading toolbox into docker: %w", err)
-		}
-
-		if err := ftp.Remove(toolboxPath); err != nil {
-			return fmt.Errorf("removing toolbox image: %w", err)
-		}
-
 		if _, _, err := ssh.Run(ctx, "bash -c 'toolbox hostname'"); err != nil {
 			return fmt.Errorf("trying toolbox: %w", err)
 		}
+
+		hostBGPPath := filepath.Join(flatcar.Home, "hostbgp")
+		if err := orasUploadAndInstall(ctx, d, ssh, ftp, "hostbgp", flatcar.HostBGPContainerVersion(c.Fab), hostBGPPath, flatcar.HostBGPArchiveRef, flatcar.HostBGPArchiveBin); err != nil {
+			return fmt.Errorf("installing hostbgp: %w", err)
+		}
+		// TODO: Test
 	} else if vm.Type == VMTypeControl || vm.Type == VMTypeGateway {
 		if opts.BuildMode == recipe.BuildModeManual || opts.AutoUpgrade {
 			marker, err := sshReadMarker(ftp)
