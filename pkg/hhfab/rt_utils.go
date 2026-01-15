@@ -573,11 +573,7 @@ func appendGwExtPeeringSpec(gwPeerings map[string]*gwapi.PeeringSpec, vpc1 *vpca
 		vpc1Expose.IPs = append(vpc1Expose.IPs, gwapi.PeeringEntryIP{CIDR: subnet})
 	}
 	extExpose := gwapi.PeeringEntryExpose{
-		IPs: []gwapi.PeeringEntryIP{
-			{
-				CIDR: "0.0.0.0/0",
-			},
-		},
+		DefaultDestination: true,
 	}
 
 	gwPeerings[entryName] = &gwapi.PeeringSpec{
