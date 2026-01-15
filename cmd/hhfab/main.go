@@ -1214,8 +1214,9 @@ func Run(ctx context.Context) error {
 								default subnet and any route from external
 							1~:subnets=default@prefixes=0.0.0.0/0 -- external peering for vpc-1 with auth external with default vpc subnet and
 								default route from external permitted
-							1~as5835:subnets=default,other:prefixes=0.0.0.0/0_le32_ge32,22.22.22.0/24 -- same but with more details
-							1~as5835:s=default,other:p=0.0.0.0/0_le32_ge32,22.22.22.0/24 -- same as above
+							1~as5835:s=default:p=default:gw -- same as above but via the gateway
+							1~as5835:s=default,other:p=1.0.0.1/32_le32_ge32,22.22.22.0/24 -- two explicit prefixes allowed from the external,
+								provided the external it is advertising them they will be imported and exposed to the VPC
 						`, "							", "")),
 						Flags: flatten(defaultFlags, accessNameFlags, []cli.Flag{
 							&cli.BoolFlag{

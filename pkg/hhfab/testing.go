@@ -1164,17 +1164,26 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 				}
 
 				ips := []gwapi.PeeringEntryIP{}
+				defaultDestination := false
 				for idx, p := range extPrefixes {
+					if p == "0.0.0.0/0" || p == "default" {
+						defaultDestination = true
+
+						continue
+					}
 					if _, err := netip.ParsePrefix(p); err != nil {
 						return fmt.Errorf("invalid external peering option #%d, external prefix %q is not valid: %w", idx, p, err)
 					}
 					ips = append(ips, gwapi.PeeringEntryIP{CIDR: p})
 				}
 				if len(ips) == 0 {
-					ips = append(ips, gwapi.PeeringEntryIP{CIDR: "0.0.0.0/0"})
+					defaultDestination = true
+				} else if defaultDestination {
+					return fmt.Errorf("cannot expose default route and other IP prefixes at the same time") //nolint:goerr113
 				}
 				extExpose := gwapi.PeeringEntryExpose{
-					IPs: ips,
+					IPs:                ips,
+					DefaultDestination: defaultDestination,
 				}
 
 				gwPeerings[fmt.Sprintf("%s--%s", vpc, ext)] = &gwapi.PeeringSpec{
