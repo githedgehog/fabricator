@@ -381,6 +381,7 @@ type PlatformVersions struct {
 	ControlProxy      meta.Version `json:"controlProxy,omitempty"`
 	ControlProxyChart meta.Version `json:"controlProxyChart,omitempty"`
 	BashCompletion    meta.Version `json:"bashCompletion,omitempty"`
+	HostBGPContainer  meta.Version `json:"hostBGPContainer,omitempty"`
 }
 
 type FabricatorVersions struct {

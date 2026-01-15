@@ -617,6 +617,8 @@ spec:
                             type: string
                           controlProxyChart:
                             type: string
+                          hostBGPContainer:
+                            type: string
                           k3s:
                             type: string
                           k9s:
@@ -846,6 +848,8 @@ spec:
                       controlProxy:
                         type: string
                       controlProxyChart:
+                        type: string
+                      hostBGPContainer:
                         type: string
                       k3s:
                         type: string

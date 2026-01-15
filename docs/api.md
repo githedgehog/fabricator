@@ -697,6 +697,7 @@ _Appears in:_
 | `controlProxy` _[Version](#version)_ |  |  |  |
 | `controlProxyChart` _[Version](#version)_ |  |  |  |
 | `bashCompletion` _[Version](#version)_ |  |  |  |
+| `hostBGPContainer` _[Version](#version)_ |  |  |  |
 
 
 #### RegistryConfig
