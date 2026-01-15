@@ -28,8 +28,8 @@ require (
 	github.com/manifoldco/promptui v0.9.0
 	github.com/mattn/go-isatty v0.0.20
 	github.com/mholt/archives v0.1.5
-	github.com/onsi/ginkgo/v2 v2.27.4
-	github.com/onsi/gomega v1.38.3
+	github.com/onsi/ginkgo/v2 v2.27.5
+	github.com/onsi/gomega v1.39.0
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/pkg/sftp v1.13.8
 	github.com/samber/lo v1.52.0
@@ -41,7 +41,7 @@ require (
 	github.com/vbauerster/mpb/v8 v8.11.3
 	github.com/vishvananda/netlink v1.3.1
 	go.githedgehog.com/fabric v0.100.0
-	go.githedgehog.com/gateway v0.34.0
+	go.githedgehog.com/gateway v0.35.0
 	go.githedgehog.com/libmeta v0.3.0
 	go.podman.io/image/v5 v5.38.0
 	golang.org/x/crypto v0.46.0
