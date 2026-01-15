@@ -20,7 +20,7 @@ var (
 	DataplaneVersion  = meta.Version("v0.7.0")
 	FRRVersion        = meta.Version("v0.4.0")
 	BCMSONiCVersion   = meta.Version("v4.5.0")
-	CLSSONiCVersion   = meta.Version("v4.1.0-beta1-hh")
+	CLSSONiCVersion   = meta.Version("v4.2.1")
 
 	// Upgrade constraints, "-0" to include pre-releases
 	FabricatorCtrlConstraint = ">=0.41.3-0"
