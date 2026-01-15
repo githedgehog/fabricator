@@ -2724,7 +2724,23 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 
 	fail := false
 
-	if err := WaitReady(ctx, kube, WaitReadyOpts{AppliedFor: opts.WaitAppliedFor, Timeout: 30 * time.Minute}); err != nil {
+	// Detect virtual switches and use extended wait time
+	appliedFor := opts.WaitAppliedFor
+	switches := &wiringapi.SwitchList{}
+	if err := kube.List(ctx, switches); err != nil {
+		slog.Warn("Failed to list switches for virtual switch detection", "error", err)
+	} else {
+		for _, sw := range switches.Items {
+			if sw.Spec.Profile == meta.SwitchProfileVS {
+				appliedFor = 60 * time.Second
+				slog.Info("Virtual switch detected, using extended wait time", "appliedFor", appliedFor)
+
+				break
+			}
+		}
+	}
+
+	if err := WaitReady(ctx, kube, WaitReadyOpts{AppliedFor: appliedFor, Timeout: 30 * time.Minute}); err != nil {
 		slog.Error("Failed to wait for ready", "err", err)
 		fail = true
 	}
