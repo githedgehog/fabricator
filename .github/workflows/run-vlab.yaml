@@ -87,13 +87,18 @@ on:
         type: boolean
         required: false
         default: false
+      custom_init_args:
+        description: "Custom arguments to be passed to hhfab init"
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: read
 
 env:
   # global workflow configs
-  slug: "${{ inputs.hybrid && 'h' || 'v' }}-${{ inputs.upgradefrom && 'up' || '' }}${{ inputs.upgradefrom }}${{ inputs.upgradefrom && '-' || '' }}${{ inputs.fabricmode != 'spine-leaf' && inputs.fabricmode || '' }}${{ inputs.mesh && 'mesh-' || '' }}${{ inputs.gateway && 'gw-' || '' }}${{ inputs.includeonie && 'onie-' || '' }}${{ inputs.buildmode }}-${{ inputs.vpcmode }}${{ inputs.releasetest && '-rt' || '' }}${{ inputs.releasetest_regex != '' && 'r' || '' }}"
+  slug: "${{ inputs.hybrid && 'h' || 'v' }}-${{ inputs.upgradefrom && 'up' || '' }}${{ inputs.upgradefrom }}${{ inputs.upgradefrom && '-' || '' }}${{ inputs.fabricmode != 'spine-leaf' && inputs.fabricmode || '' }}${{ inputs.mesh && 'mesh-' || '' }}${{ inputs.gateway && 'gw-' || '' }}${{ inputs.includeonie && 'onie-' || '' }}${{ inputs.buildmode }}-${{ inputs.vpcmode }}${{ inputs.releasetest && '-rt' || '' }}${{ inputs.releasetest_regex != '' && 'r' || '' }}${{ inputs.custom_init_args != '' && '-custom' || '' }}"
   # env vars to configure hhfab
   HHFAB_REG_REPO: 127.0.0.1:30000
   HHFAB_VLAB_COLLECT: true
@@ -237,7 +242,8 @@ jobs:
           bin/hhfab init -v --dev \
             --fabric-mode=${{ inputs.fabricmode }} \
             --include-onie=${{ inputs.includeonie }} \
-            --gateway=${{ inputs.gateway }}
+            --gateway=${{ inputs.gateway }} \
+            ${{ inputs.custom_init_args }}
           bin/hhfab vlab gen -v ${{ inputs.mesh && '--mesh-links-count=3' || '' }}
 
       - name: Init hhfab for hybrid mode
@@ -248,6 +254,7 @@ jobs:
             --fabric-mode=${{ inputs.fabricmode }} \
             --include-onie=${{ inputs.includeonie }} \
             --gateway=${{ inputs.gateway }} \
+            ${{ inputs.custom_init_args }} \
             -w "./lab-ci/envs/$KUBE_NODE/wiring.yaml" \
             ${{ inputs.gateway && '-w "./lab-ci/envs/$KUBE_NODE/wiring-gateway.yaml"' || '' }}
 
