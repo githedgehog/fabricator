@@ -62,11 +62,6 @@ on:
         type: boolean
         required: false
         default: false
-      releasetest_extended:
-        description: "Run extended release tests"
-        type: boolean
-        required: false
-        default: false
 
 permissions:
   contents: read
@@ -88,7 +83,6 @@ jobs:
       releasetest: ${{ inputs.releasetest }}
       releasetest_regex: ${{ inputs.releasetest_regex }}
       releasetest_regex_invert: ${{ inputs.releasetest_regex_invert }}
-      releasetest_extended: ${{ inputs.releasetest_extended }}
       debug: ${{ inputs.pause_on_failure }}
       pause_on_failure: ${{ inputs.pause_on_failure }}
 
