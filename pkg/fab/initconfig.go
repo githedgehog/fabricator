@@ -44,6 +44,7 @@ type InitConfigInput struct {
 	SaveJoinToken         bool
 	O11yDefaults          fabapi.ObservabilityDefaults
 	O11yLabels            map[string]string
+	GatewayLogLevel       string
 }
 
 func InitConfig(ctx context.Context, in InitConfigInput) ([]byte, error) {

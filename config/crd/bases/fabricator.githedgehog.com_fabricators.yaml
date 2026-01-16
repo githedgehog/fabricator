@@ -351,6 +351,8 @@ spec:
                         type: object
                       enable:
                         type: boolean
+                      loglevel:
+                        type: string
                       mac:
                         type: string
                       observability:

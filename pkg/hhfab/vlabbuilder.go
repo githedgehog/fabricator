@@ -63,7 +63,7 @@ type VLABBuilder struct {
 	switchID     uint             // switch ID counter
 }
 
-func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode meta.FabricMode, nodes []fabapi.FabNode) error {
+func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode meta.FabricMode, nodes []fabapi.FabNode, logLevel string) error {
 	if l == nil {
 		return fmt.Errorf("loader is nil") //nolint:goerr113
 	}
@@ -114,6 +114,7 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 
 	isGw := false
 	gws := []fabapi.FabNode{}
+	var gwLogLevel gwapi.GatewayLogLevel
 	for _, node := range nodes {
 		if slices.Contains(node.Spec.Roles, fabapi.NodeRoleGateway) {
 			isGw = true
@@ -138,6 +139,11 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 
 		if !slices.Contains(GatewayDrivers, b.GatewayDriver) {
 			return fmt.Errorf("unsupported gateway driver %s", b.GatewayDriver) //nolint:goerr113
+		}
+
+		gwLogLevel = gwapi.GatewayLogLevel(logLevel)
+		if !slices.Contains(gwapi.GatewayLogLevels, gwLogLevel) {
+			return fmt.Errorf("invalid gateway log level %s", logLevel) //nolint:goerr113
 		}
 
 		totalESLAGLeafs := 0
@@ -327,6 +333,9 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 				},
 				Interfaces: ifaces,
 				Workers:    b.GatewayWorkers,
+				Logs: gwapi.GatewayLogs{
+					Default: gwLogLevel,
+				},
 				// Neighbors will be later hydrated in based on the gateway connections
 			}); err != nil {
 				return err
