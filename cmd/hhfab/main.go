@@ -80,6 +80,7 @@ const (
 	FlagListTests                 = "list-tests"
 	FlagReleaseTestRegexes        = "release-test-regexes"
 	FlagReleaseTestRegexesInvert  = "release-test-regexes-invert"
+	FlagGatewayLogLevel           = "gateway-log-level"
 )
 
 func main() {
@@ -602,6 +603,13 @@ func Run(ctx context.Context) error {
 						Usage:    "default labels for observability targets",
 						EnvVars:  []string{"HHFAB_O11Y_LABELS"},
 					},
+					&cli.StringFlag{
+						Category: FlagCatGenConfig,
+						Name:     FlagGatewayLogLevel,
+						Usage:    "default log level for gateway",
+						EnvVars:  []string{"HHFAB_GW_LOG_LEVEL"},
+						Value:    "info",
+					},
 				}),
 				Before: before(false),
 				Action: func(c *cli.Context) error {
@@ -655,6 +663,7 @@ func Run(ctx context.Context) error {
 							SaveJoinToken:         saveJoinToken,
 							O11yDefaults:          fabapi.ObservabilityDefaults(c.String(FlagO11yDefaults)),
 							O11yLabels:            o11yLabels,
+							GatewayLogLevel:       c.String(FlagGatewayLogLevel),
 						},
 					}); err != nil {
 						return fmt.Errorf("initializing: %w", err)
