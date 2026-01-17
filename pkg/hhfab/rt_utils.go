@@ -816,3 +816,23 @@ func fetchAndParseDHCPLease(ctx context.Context, ssh *sshutil.Config, ifName str
 
 	return info, nil
 }
+
+func waitForDHCPIPAssignment(ctx context.Context, ssh *sshutil.Config, ifName string, maxRetries int) (string, error) {
+	var assignedIP string
+
+	for retry := 0; retry < maxRetries; retry++ {
+		time.Sleep(2 * time.Second)
+
+		ipOut, _, err := ssh.Run(ctx, fmt.Sprintf("ip addr show dev %s proto 4 | grep 'inet ' | awk '{print $2}' | cut -d'/' -f1", ifName))
+		if err != nil {
+			return "", fmt.Errorf("getting IP address: %w", err)
+		}
+
+		assignedIP = strings.TrimSpace(ipOut)
+		if assignedIP != "" {
+			return assignedIP, nil
+		}
+	}
+
+	return "", nil
+}
