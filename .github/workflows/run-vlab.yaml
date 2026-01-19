@@ -179,7 +179,8 @@ jobs:
           old/hhfab init -v --dev \
             --fabric-mode=${{ inputs.fabricmode }} \
             --include-onie=${{ inputs.includeonie }} \
-            --gateway=${{ inputs.gateway }}
+            --gateway=${{ inputs.gateway }} \
+            ${{ inputs.custom_init_args }}
           old/hhfab vlab gen -v ${{ inputs.mesh && '--mesh-links-count=3' || '' }}
 
       - name: (${{ inputs.upgradefrom }}) Init hhfab for hybrid mode
@@ -191,6 +192,7 @@ jobs:
             --fabric-mode=${{ inputs.fabricmode }} \
             --include-onie=${{ inputs.includeonie }} \
             --gateway=${{ inputs.gateway }} \
+            ${{ inputs.custom_init_args }} \
             -w "./lab-ci/envs/$KUBE_NODE/wiring.yaml"
 
       - name: (${{ inputs.upgradefrom }}) Print hhfab versions and generate diagrams
