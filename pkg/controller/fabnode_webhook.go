@@ -7,7 +7,6 @@ import (
 	"context"
 	"fmt"
 
-	"k8s.io/apimachinery/pkg/runtime"
 	kctrl "sigs.k8s.io/controller-runtime"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
@@ -28,8 +27,7 @@ func SetupNodeWebhookWith(mgr kctrl.Manager) error {
 		Reader: mgr.GetClient(),
 	}
 
-	if err := kctrl.NewWebhookManagedBy(mgr).
-		For(&fabapi.FabNode{}).
+	if err := kctrl.NewWebhookManagedBy(mgr, &fabapi.FabNode{}).
 		WithDefaulter(w).
 		WithValidator(w).
 		Complete(); err != nil {
@@ -39,56 +37,31 @@ func SetupNodeWebhookWith(mgr kctrl.Manager) error {
 	return nil
 }
 
-func (w *FabNodeWebhook) Default(_ context.Context, obj runtime.Object) error {
-	n, ok := obj.(*fabapi.FabNode)
-	if !ok {
-		return fmt.Errorf("expected a FabNode object but got %T", obj) //nolint:goerr113
-	}
-
-	n.Default()
+func (w *FabNodeWebhook) Default(_ context.Context, node *fabapi.FabNode) error {
+	node.Default()
 
 	return nil
 }
 
-func (w *FabNodeWebhook) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
-	n, ok := obj.(*fabapi.FabNode)
-	if !ok {
-		return nil, fmt.Errorf("expected a FabNode object but got %T", obj) //nolint:goerr113
-	}
-
+func (w *FabNodeWebhook) ValidateCreate(ctx context.Context, node *fabapi.FabNode) (admission.Warnings, error) {
 	f := &fabapi.Fabricator{}
 	if err := w.Get(ctx, kclient.ObjectKey{Namespace: comp.FabNamespace, Name: comp.FabName}, f); err != nil {
 		return nil, fmt.Errorf("failed to get Fabricator object: %w", err)
 	}
 
-	return nil, n.Validate(ctx, &f.Spec.Config, false, w.Reader) //nolint:wrapcheck
+	return nil, node.Validate(ctx, &f.Spec.Config, false, w.Reader) //nolint:wrapcheck
 }
 
-func (w *FabNodeWebhook) ValidateUpdate(ctx context.Context, oldObj runtime.Object, newObj runtime.Object) (admission.Warnings, error) {
-	_, ok := oldObj.(*fabapi.FabNode)
-	if !ok {
-		return nil, fmt.Errorf("expected a FabNode old object but got %T", oldObj) //nolint
-	}
-
-	c, ok := newObj.(*fabapi.FabNode)
-	if !ok {
-		return nil, fmt.Errorf("expected a FabNode new object but got %T", newObj) //nolint:goerr113
-	}
-
+func (w *FabNodeWebhook) ValidateUpdate(ctx context.Context, _ *fabapi.FabNode, node *fabapi.FabNode) (admission.Warnings, error) {
 	f := &fabapi.Fabricator{}
 	if err := w.Get(ctx, kclient.ObjectKey{Namespace: comp.FabNamespace, Name: comp.FabName}, f); err != nil {
 		return nil, fmt.Errorf("failed to get Fabricator object: %w", err)
 	}
 
-	return nil, c.Validate(ctx, &f.Spec.Config, false, w.Reader) //nolint:wrapcheck
+	return nil, node.Validate(ctx, &f.Spec.Config, false, w.Reader) //nolint:wrapcheck
 }
 
-func (w *FabNodeWebhook) ValidateDelete(_ context.Context, obj runtime.Object) (admission.Warnings, error) {
-	_, ok := obj.(*fabapi.FabNode)
-	if !ok {
-		return nil, fmt.Errorf("expected a FabNode object but got %T", obj) //nolint:goerr113
-	}
-
+func (w *FabNodeWebhook) ValidateDelete(_ context.Context, _ *fabapi.FabNode) (admission.Warnings, error) {
 	// TODO check when ControlNode is migrated to FabNode
 	// if slices.Contains(n.Spec.Roles, fabapi.NodeRoleControl) {
 	// 	return nil, fmt.Errorf("not allowed to delete control node") //nolint:goerr113

@@ -7,7 +7,6 @@ import (
 	"context"
 	"fmt"
 
-	"k8s.io/apimachinery/pkg/runtime"
 	kctrl "sigs.k8s.io/controller-runtime"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
@@ -28,8 +27,7 @@ func SetupControlNodeWebhookWith(mgr kctrl.Manager) error {
 		Reader: mgr.GetClient(),
 	}
 
-	if err := kctrl.NewWebhookManagedBy(mgr).
-		For(&fabapi.ControlNode{}).
+	if err := kctrl.NewWebhookManagedBy(mgr, &fabapi.ControlNode{}).
 		WithDefaulter(w).
 		WithValidator(w).
 		Complete(); err != nil {
@@ -39,50 +37,30 @@ func SetupControlNodeWebhookWith(mgr kctrl.Manager) error {
 	return nil
 }
 
-func (w *ControlNodeWebhook) Default(_ context.Context, obj runtime.Object) error {
-	c, ok := obj.(*fabapi.ControlNode)
-	if !ok {
-		return fmt.Errorf("expected a ControlNode object but got %T", obj) //nolint:goerr113
-	}
-
-	c.Default()
+func (w *ControlNodeWebhook) Default(_ context.Context, ctrl *fabapi.ControlNode) error {
+	ctrl.Default()
 
 	return nil
 }
 
-func (w *ControlNodeWebhook) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
-	c, ok := obj.(*fabapi.ControlNode)
-	if !ok {
-		return nil, fmt.Errorf("expected a ControlNode object but got %T", obj) //nolint:goerr113
-	}
-
+func (w *ControlNodeWebhook) ValidateCreate(ctx context.Context, ctrl *fabapi.ControlNode) (admission.Warnings, error) {
 	f := &fabapi.Fabricator{}
 	if err := w.Get(ctx, kclient.ObjectKey{Namespace: comp.FabNamespace, Name: comp.FabName}, f); err != nil {
 		return nil, fmt.Errorf("failed to get Fabricator object: %w", err)
 	}
 
-	return nil, c.Validate(ctx, &f.Spec.Config, false) //nolint:wrapcheck
+	return nil, ctrl.Validate(ctx, &f.Spec.Config, false) //nolint:wrapcheck
 }
 
-func (w *ControlNodeWebhook) ValidateUpdate(ctx context.Context, oldObj runtime.Object, newObj runtime.Object) (admission.Warnings, error) {
-	_, ok := oldObj.(*fabapi.ControlNode)
-	if !ok {
-		return nil, fmt.Errorf("expected a ControlNode old object but got %T", oldObj) //nolint:goerr113
-	}
-
-	c, ok := newObj.(*fabapi.ControlNode)
-	if !ok {
-		return nil, fmt.Errorf("expected a ControlNode new object but got %T", newObj) //nolint:goerr113
-	}
-
+func (w *ControlNodeWebhook) ValidateUpdate(ctx context.Context, _ *fabapi.ControlNode, ctrl *fabapi.ControlNode) (admission.Warnings, error) {
 	f := &fabapi.Fabricator{}
 	if err := w.Get(ctx, kclient.ObjectKey{Namespace: comp.FabNamespace, Name: comp.FabName}, f); err != nil {
 		return nil, fmt.Errorf("failed to get Fabricator object: %w", err)
 	}
 
-	return nil, c.Validate(ctx, &f.Spec.Config, false) //nolint:wrapcheck
+	return nil, ctrl.Validate(ctx, &f.Spec.Config, false) //nolint:wrapcheck
 }
 
-func (w *ControlNodeWebhook) ValidateDelete(_ context.Context, _ runtime.Object) (admission.Warnings, error) {
+func (w *ControlNodeWebhook) ValidateDelete(_ context.Context, _ *fabapi.ControlNode) (admission.Warnings, error) {
 	return nil, fmt.Errorf("not allowed to delete ControlNode object") //nolint:goerr113
 }
