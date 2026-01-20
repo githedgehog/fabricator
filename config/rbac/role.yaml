@@ -80,6 +80,21 @@ rules:
   - fabricator.githedgehog.com
   resources:
   - controlnodes
+  - fabnodes
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - fabricator.githedgehog.com
+  resources:
+  - controlnodes/status
+  - fabnodes/status
+  verbs:
+  - get
+- apiGroups:
+  - fabricator.githedgehog.com
+  resources:
   - fabricators
   verbs:
   - create
@@ -92,33 +107,17 @@ rules:
 - apiGroups:
   - fabricator.githedgehog.com
   resources:
-  - controlnodes/finalizers
   - fabricators/finalizers
   verbs:
   - update
 - apiGroups:
   - fabricator.githedgehog.com
   resources:
-  - controlnodes/status
   - fabricators/status
   verbs:
   - get
   - patch
   - update
-- apiGroups:
-  - fabricator.githedgehog.com
-  resources:
-  - fabnodes
-  verbs:
-  - get
-  - list
-  - watch
-- apiGroups:
-  - fabricator.githedgehog.com
-  resources:
-  - fabnodes/status
-  verbs:
-  - get
 - apiGroups:
   - helm.cattle.io
   resources:
