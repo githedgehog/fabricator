@@ -19,7 +19,7 @@
 
 # Testing framework and tools
 /pkg/hhfab/testing*.go @githedgehog/fab-testing
-/pkg/hhfab/release*.go @githedgehog/fab-testing
+/pkg/hhfab/rt_*.go @githedgehog/fab-testing
 /pkg/hhfab/pdu/ @githedgehog/fab-testing
 /pkg/hhfab/show-tech/ @githedgehog/fab-testing
 /pkg/hhfab/vlabhelpers* @githedgehog/fab-testing
