@@ -52,7 +52,7 @@ BGP sessions:
     !
     ```
 1. We create BGP community lists based on the gateway priority levels defined in the Agent configuration.
-These will be used by gateways depending on the priority group of a parituclar Expose; together with
+These will be used by gateways depending on the priority group of a particular Expose; together with
 the route-map described further down, they allow us to prefer prefixes advertised by a particular
 gateway over another. These are the community lists generated with the default configuration:
     ```
@@ -140,19 +140,6 @@ which routes are redistributed, as we will see:
     route-map loopback-all-vteps permit 100
      match ip address prefix-list static-ext-subnets
     ```
-1. If the switch is a leaf, as opposed to a spine, we also create the following:
-    ```
-    ip prefix-list vtep-prefix seq 10 permit <SWITCH_VTEP/32> le 32
-    route-map loopback-vtep permit 10
-     match ip address prefix-list vtep-prefix
-    !
-    route-map loopback-vtep permit 100
-     match ip address prefix-list static-ext-subnets
-    ```
-   This is essentially the same as the above, but with only the switch's own VTEP
-   as opposed to any of the /32 in the VTEP Subnet space. Leaves only advertise their
-   own VTEP, spines (and mesh leaves) advertise all of the VTEP they know about as they
-   are transit nodes.
 1. We create the following prefix list and corresponding route-map to only advertise
 the protocol loopback on the fabric point-to-point links between switches:
     ```
@@ -258,10 +245,10 @@ loopback, e.g.:
 Additionally, once per neighboring node (no matter the number of fabric links to it)
 we create a BGP session with its protocol IP, for which we have learned a route over
 the point-to-point BGP sessions described above. We will use this session for both IPv4
-unicast, where we will advertise VTEPs (all of them for spines, only the leaf's own for leaves),
-and for EVPN, where we will exchange overlay routes. This session will go down if all of the
-point-to-point sessions above are down, which would mean that this switch is no longer able
-to reach this particularneighbor. Allowas-in is required to support remote peering, where
+unicast, where we will advertise all the VTEPs we know of, and for EVPN, where we will
+exchange overlay routes. This session will go down if all of the point-to-point sessions
+above are down, which would mean that this switch is no longer able to reach this
+particular neighbor. Allowas-in is required to support remote peering, where
 traffic goes to a remote fabric switch and then comes back, thus creating an ASN loop.
 
 Here's an example config for a leaf:
@@ -274,7 +261,7 @@ neighbor 172.30.8.0
  !
  address-family ipv4 unicast
   activate
-  route-map loopback-vtep out
+  route-map loopback-all-vteps out
  !
  address-family l2vpn evpn
   activate
@@ -365,11 +352,74 @@ neighbor 172.30.8.2
  !
 ```
 
+#### Workaround for TH5-based platforms
+
+For TH5-based platforms such as the DS5000, due to a limitation of the hardware, we do
+something slightly different:
+1. we take a VLAN from a range reserved specifically for this (by default, VLANs 3900
+to 3999) and configure it as an access VLAN on the interface of the connection:
+    ```
+    interface Ethernet5
+     description "Mesh leaf-02/E1/5 leaf-01--mesh--leaf-02"
+     mtu 9100
+     speed 25000
+     unreliable-los auto
+     no shutdown
+    ```
+1. we configure the hydration IP address on that VLAN interface:
+    ```
+    interface Vlan3901
+     description "TH5 Workaround Mesh Port leaf-02/E1/5"
+     ip address 172.30.128.2/31
+    ```
+
+The BGP configuration is unchanged.
+
+### Gateway Connections
+
+Gateway connections represent a connection between a Fabric switch and a Gateway.
+For spine-leaf topologies the switch is typically a spine, while for mesh topologies
+it will necessarily be a leaf.
+
+For each link in a gateway connection, we:
+1. configure the corresponding interface on the switch, setting it to admin-up
+and assigning it a /31 IPv4 address from the hydration pool, e.g.:
+    ```
+    interface Ethernet6
+     description "Gateway gateway-1/enp2s1 spine-01--gateway--gateway-1"
+     mtu 9100
+     speed 25000
+     unreliable-los auto
+     no shutdown
+     ip address 172.30.128.12/31
+    ```
+1. create a BGP session with the other host in that /31 range. The ASN of the
+gateway currently comes from config (note: we could use `remote-as external` instead).
+Like for other EVPN peers in our config, we set `allowas-in` in the L2VPN AF.
+    ```
+    neighbor 172.30.128.13
+     description "Gateway gateway-1/enp2s1 spine-01--gateway--gateway-1"
+     remote-as 65534
+     !
+     address-family ipv4 unicast
+      activate
+     !
+     address-family l2vpn evpn
+      activate
+      allowas-in
+    ```
+
+#### Workaround for TH5-based platforms
+
+The same exact workaround steps described for Mesh connections also apply to the
+gateway case, i.e. an Access VLAN from the dedicated range is configured on the switch
+interface and the hydration IP address is configured on that VLAN instead.
+
 ### MCLAGDomain Connections
 
 These are processed on switches that belong to a redundancy group of type MCLAG.
 Each MCLAGDomain connection defines a pair of switches that act like a single logical
-switch, and the connectiosn between them. Specifically:
+switch, and the connections between them. Specifically:
 1. for each of the links defined in the `peerLinks` section of the CRD, we will add
 those interfaces to a port channel, e.g.:
     ```
@@ -410,7 +460,7 @@ these to a port channel, e.g.:
      ip address 172.30.95.0/31
     ```
 1. each MCLAGDomain object identifies an MCLAG domain, which is configured on both
-peering switches with some self-explainatory parameters:
+peering switches with some self-explanatory parameters:
     ```
     mclag domain 100
      source-ip 172.30.95.0
@@ -510,12 +560,12 @@ simplifies the config; we should at some point investigate them.*
 
 On top of that, there is some config that is applied on all switches that belong to
 a redundancy group of type ESLAG, regardless of the specific connection instances:
-1. We configure some basic parameters of EVPN multihoming. The startup delay is an
-initial interval of time during the VTEP bootup process where the ESLAG interfaces
+1. We configure some basic parameters of EVPN multi-homing. The startup delay is an
+initial interval of time during the VTEP boot-up process where the ESLAG interfaces
 are brought administratively down to avoid traffic loss; during this initial time,
-traffic from the multihomed servers is not load-balanced between the ESLAG servers.
-The holdtime is the time in seconds to wait before the switch ages out MAC addresses
-of downstream devices that are learned from the multihomed VTEP and that have not
+traffic from the multi-homed servers is not load-balanced between the ESLAG servers.
+The hold-time is the time in seconds to wait before the switch ages out MAC addresses
+of downstream devices that are learned from the multi-homed VTEP and that have not
 been used.
     ```
     evpn esi-multihoming
@@ -595,7 +645,7 @@ in the [Externals](#externals) section.
 
 For each static external object we configure the corresponding switch interface,
 with some nuances:
-- if `vlan` is non-zero, we create a subinterface with that VLAN, else
+- if `vlan` is non-zero, we create a sub-interface with that VLAN, else
 we configure the parent interface;
 - if `withinVPC` is non null, we enslave the interface or sub-interface
 to the VPC VRF.
@@ -607,7 +657,7 @@ with the `nextHop` specified in the static external object.
 Finally, we populate a prefix list with the network prefix of the `ip` field
 and with all of the `subnets` listed; this prefix list is used in route maps
 to filter the connected and static routes we redistribute in BGP, so essentially
-this makes sure that these routes are riditributed to peers accordingly.
+this makes sure that these routes are redistributed to peers accordingly.
 ```
 interface Ethernet0
  description "StaticExt release-test--static-external--ds5000-02"
@@ -695,7 +745,7 @@ in the form `<base>:<vni/100>`, e.g. for VNI `100` the community will be `50000:
     - we deny any route that matches the prefix list of the VPC loopback addresses, used
       for the deprecated loopback workaround. This should go as soon as we fully remove the workaround.
     - we permit any route that matches the prefix list of the VPC subnets, and we set the community
-      for the VPC on these routes, to tag them as origining from this VPC.
+      for the VPC on these routes, to tag them as originating from this VPC.
     - we permit any route that matches the prefix list of the VPC static external subnets
     - we explicitly deny everything else. This is superfluous as the default action is to deny
     ```

@@ -76,6 +76,9 @@ const (
 
 	ActionWeightCommunityListUpdate
 
+	ActionWeightVLANProxyARPDelete
+	ActionWeightSubinterfaceProxyARPDelete
+
 	ActionWeightInterfaceBasePortChannelsUpdate
 	ActionWeightInterfaceBaseUpdate
 
@@ -98,14 +101,23 @@ const (
 	ActionWeightPortChannelConfigFallbackUpdate
 
 	ActionWeightInterfaceSubinterfaceIPsDelete
+	ActionWeightInterfaceVLANStaticARPDelete
+	ActionWeightInterfaceSubinterfaceStaticARPDelete
 	ActionWeightVRFAttachedHostDelete
+	ActionWeightInterfaceSubinterfaceIPv6Delete
 	ActionWeightVRFInterfaceDelete
 	ActionWeightACLInterfaceDelete
 	ActionWeightInterfaceSubinterfaceDelete
 	ActionWeightInterfaceSubinterfaceUpdate
+	ActionWeightInterfaceVLANStaticARPUpdate
+	ActionWeightInterfaceSubinterfaceStaticARPUpdate
 	ActionWeightVRFInterfaceUpdate
+	ActionWeightInterfaceSubinterfaceIPv6Update
 	ActionWeightVRFAttachedHostUpdate
 	ActionWeightInterfaceSubinterfaceIPsUpdate
+
+	ActionWeightVLANProxyARPUpdate
+	ActionWeightSubinterfaceProxyARPUpdate
 
 	ActionWeightLLDPInterfaceUpdate
 	ActionWeightNTP
