@@ -161,14 +161,14 @@ func (in *AgentSpec) DeepCopyInto(out *AgentSpec) {
 		in, out := &in.Externals, &out.Externals
 		*out = make(map[string]vpcv1beta1.ExternalSpec, len(*in))
 		for key, val := range *in {
-			(*out)[key] = val
+			(*out)[key] = *val.DeepCopy()
 		}
 	}
 	if in.ExternalAttachments != nil {
 		in, out := &in.ExternalAttachments, &out.ExternalAttachments
 		*out = make(map[string]vpcv1beta1.ExternalAttachmentSpec, len(*in))
 		for key, val := range *in {
-			(*out)[key] = val
+			(*out)[key] = *val.DeepCopy()
 		}
 	}
 	if in.ExternalPeerings != nil {
@@ -463,6 +463,13 @@ func (in *CatalogSpec) DeepCopyInto(out *CatalogSpec) {
 	}
 	if in.LoopbackWorkaroundVLANs != nil {
 		in, out := &in.LoopbackWorkaroundVLANs, &out.LoopbackWorkaroundVLANs
+		*out = make(map[string]uint16, len(*in))
+		for key, val := range *in {
+			(*out)[key] = val
+		}
+	}
+	if in.TH5WorkaroundVLANs != nil {
+		in, out := &in.TH5WorkaroundVLANs, &out.TH5WorkaroundVLANs
 		*out = make(map[string]uint16, len(*in))
 		for key, val := range *in {
 			(*out)[key] = val
