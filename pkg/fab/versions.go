@@ -51,8 +51,8 @@ var Versions = fabapi.Versions{
 		Ctl:            FabricatorVersion,
 		NodeConfig:     FabricatorVersion,
 		Pause:          "3.6", // wait image from k3s // TODO embed wait into node-config image?
-		ControlUSBRoot: "v4459.2.1-hh1",
-		Flatcar:        "v4459.2.1",
+		ControlUSBRoot: "v4459.2.2-hh1",
+		Flatcar:        "v4459.2.2",
 	},
 	Fabric: fabapi.FabricVersions{
 		API:        FabricVersion,
@@ -94,7 +94,7 @@ var Versions = fabapi.Versions{
 	},
 	VLAB: fabapi.VLABVersions{
 		ONIE:    "v0.2.1",
-		Flatcar: "v4459.2.1",
+		Flatcar: "v4459.2.2",
 	},
 }
 
