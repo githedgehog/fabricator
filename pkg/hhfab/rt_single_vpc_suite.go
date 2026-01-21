@@ -1377,8 +1377,9 @@ func (testCtx *VPCPeeringTestCtx) dhcpDepletionTest(ctx context.Context) (bool, 
 
 	time.Sleep(10 * time.Second)
 
-	// First, flush IPs from all servers and clear DHCP allocations to start fresh
-	slog.Info("Flushing existing IPs from all servers")
+	// First, flush IPs and bring interfaces down to prevent automatic DHCP requests
+	// This ensures we have full control over when each server requests an IP
+	slog.Info("Flushing existing IPs and bringing interfaces down on all servers")
 
 	for _, server := range testServers {
 		ssh, err := testCtx.getSSH(ctx, server.Name)
@@ -1386,9 +1387,10 @@ func (testCtx *VPCPeeringTestCtx) dhcpDepletionTest(ctx context.Context) (bool, 
 			return false, reverts, fmt.Errorf("getting ssh config for server %s: %w", server.Name, err)
 		}
 
-		_, _, err = ssh.Run(ctx, fmt.Sprintf("sudo ip addr flush dev %s", server.Interface))
+		// Flush IP and bring interface down to prevent networkd from auto-requesting DHCP
+		_, _, err = ssh.Run(ctx, fmt.Sprintf("sudo ip addr flush dev %s && sudo ip link set %s down", server.Interface, server.Interface))
 		if err != nil {
-			return false, reverts, fmt.Errorf("flushing IP on %s: %w", server.Name, err)
+			return false, reverts, fmt.Errorf("flushing IP and bringing down interface on %s: %w", server.Name, err)
 		}
 	}
 
@@ -1430,12 +1432,13 @@ func (testCtx *VPCPeeringTestCtx) dhcpDepletionTest(ctx context.Context) (bool, 
 			return false, reverts, fmt.Errorf("getting ssh config for server %s: %w", server.Name, err)
 		}
 
-		_, _, err = ssh.Run(ctx, fmt.Sprintf("sudo networkctl reconfigure %s", server.Interface))
+		// Bring interface up and reconfigure to trigger DHCP request
+		_, _, err = ssh.Run(ctx, fmt.Sprintf("sudo ip link set %s up && sudo networkctl reconfigure %s", server.Interface, server.Interface))
 		if err != nil {
-			return false, reverts, fmt.Errorf("reconfiguring interface on %s: %w", server.Name, err)
+			return false, reverts, fmt.Errorf("bringing up and reconfiguring interface on %s: %w", server.Name, err)
 		}
 
-		// Wait for IP assignment with retries (DHCP can take a few seconds)
+		// Wait for IP assignment with retries
 		gotIP, err := waitForDHCPIP(ctx, ssh, server.Interface, 10)
 		if err != nil {
 			return false, reverts, fmt.Errorf("waiting for IP on %s: %w", server.Name, err)
@@ -1468,9 +1471,10 @@ func (testCtx *VPCPeeringTestCtx) dhcpDepletionTest(ctx context.Context) (bool, 
 		return false, reverts, fmt.Errorf("getting ssh config for server %s: %w", lastServer.Name, err)
 	}
 
-	_, _, err = ssh.Run(ctx, fmt.Sprintf("sudo networkctl reconfigure %s", lastServer.Interface))
+	// Bring interface up and reconfigure to trigger DHCP request
+	_, _, err = ssh.Run(ctx, fmt.Sprintf("sudo ip link set %s up && sudo networkctl reconfigure %s", lastServer.Interface, lastServer.Interface))
 	if err != nil {
-		return false, reverts, fmt.Errorf("reconfiguring interface on %s: %w", lastServer.Name, err)
+		return false, reverts, fmt.Errorf("bringing up and reconfiguring interface on %s: %w", lastServer.Name, err)
 	}
 
 	time.Sleep(5 * time.Second)
@@ -1525,12 +1529,13 @@ func (testCtx *VPCPeeringTestCtx) dhcpDepletionTest(ctx context.Context) (bool, 
 	// Now try to get IP on last server again - should succeed
 	slog.Info("Attempting to get IP on last server after freeing one IP")
 
+	// Reconfigure to trigger new DHCP request (interface is already up from depletion check)
 	_, _, err = ssh.Run(ctx, fmt.Sprintf("sudo networkctl reconfigure %s", lastServer.Interface))
 	if err != nil {
 		return false, reverts, fmt.Errorf("reconfiguring interface on %s after freeing IP: %w", lastServer.Name, err)
 	}
 
-	// Wait for IP assignment with retries (DHCP can take a few seconds)
+	// Wait for IP assignment with retries
 	recoveredIP, err := waitForDHCPIP(ctx, ssh, lastServer.Interface, 10)
 	if err != nil {
 		return false, reverts, fmt.Errorf("waiting for IP on %s after recovery: %w", lastServer.Name, err)
