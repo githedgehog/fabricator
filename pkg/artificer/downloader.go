@@ -64,6 +64,14 @@ func NewDownloaderWithDockerCreds(cacheDir, repo, prefix string) (*Downloader, e
 	}, nil
 }
 
+type CachePathFunc func(cachePath string) error
+
+var _ CachePathFunc = Noop
+
+func Noop(cachePath string) error {
+	return nil
+}
+
 type ORASFile struct {
 	Name   string
 	Target string
@@ -99,7 +107,7 @@ func (d *Downloader) FromORAS(ctx context.Context, destPath, name string, versio
 	})
 }
 
-func (d *Downloader) WithORAS(ctx context.Context, name string, version meta.Version, do func(cachePath string) error) error {
+func (d *Downloader) WithORAS(ctx context.Context, name string, version meta.Version, do CachePathFunc) error {
 	cachePath, err := d.getORAS(ctx, name, version)
 	if err != nil {
 		return fmt.Errorf("getting oras: %w", err)
@@ -218,14 +226,24 @@ func (d *Downloader) getORAS(ctx context.Context, name string, version meta.Vers
 }
 
 func (d *Downloader) GetOCI(ctx context.Context, name string, version meta.Version, target string) error {
+	return d.WithOCI(ctx, name, version, func(cachePath string) error {
+		target = filepath.Join(target, filepath.Base(cachePath))
+		if err := CopyDir(cachePath, target); err != nil {
+			return fmt.Errorf("copying %q to %q: %w", cachePath, target, err)
+		}
+
+		return nil
+	})
+}
+
+func (d *Downloader) WithOCI(ctx context.Context, name string, version meta.Version, do CachePathFunc) error {
 	cachePath, err := d.getOCI(ctx, name, version)
 	if err != nil {
 		return err
 	}
 
-	target = filepath.Join(target, filepath.Base(cachePath))
-	if err := CopyDir(cachePath, target); err != nil {
-		return fmt.Errorf("copying %q to %q: %w", cachePath, target, err)
+	if err := do(cachePath); err != nil {
+		return fmt.Errorf("running func: %w", err)
 	}
 
 	return nil

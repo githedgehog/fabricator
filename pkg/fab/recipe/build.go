@@ -19,11 +19,48 @@ import (
 	"github.com/diskfs/go-diskfs/filesystem/fat32"
 	"github.com/diskfs/go-diskfs/filesystem/iso9660"
 	"github.com/diskfs/go-diskfs/partition/gpt"
+	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/api/meta"
 	"go.githedgehog.com/fabricator/pkg/artificer"
 	"go.githedgehog.com/fabricator/pkg/embed/flatcaroem"
 	"go.githedgehog.com/fabricator/pkg/embed/recipebin"
+	"go.githedgehog.com/fabricator/pkg/fab/comp"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/certmanager"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/f8r"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/fabric"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/flatcar"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/k9s"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/zot"
 )
+
+var (
+	_ comp.ListOCIArtifacts = PrecacheNodeBuildORAS
+	_ comp.ListOCIArtifacts = PrecacheNodeBuildOCI
+)
+
+// PrecacheNodeBuildORAS returns a list of ORAS artifacts that are required for building the node installer
+func PrecacheNodeBuildORAS(cfg fabapi.Fabricator) (comp.OCIArtifacts, error) {
+	return comp.OCIArtifacts{
+		FlatcarUSBRootRef:         cfg.Status.Versions.Fabricator.ControlUSBRoot,
+		k3s.Ref:                   k3s.Version(cfg),
+		flatcar.ToolboxArchiveRef: flatcar.ToolboxVersion(cfg),
+		k9s.Ref:                   k9s.Version(cfg),
+		zot.AirgapRef:             zot.Version(cfg),
+		flatcar.UpdateRef:         flatcar.Version(cfg),
+		certmanager.AirgapRef:     certmanager.Version(cfg),
+		f8r.BashCompletionRef:     cfg.Status.Versions.Platform.BashCompletion,
+		fabric.CtlRef:             cfg.Status.Versions.Fabric.Ctl,
+		f8r.CtlRef:                cfg.Status.Versions.Fabricator.Ctl,
+	}, nil
+}
+
+// PrecacheNodeBuildOCI returns a list of OCI artifacts that are required for building the node installer
+func PrecacheNodeBuildOCI(cfg fabapi.Fabricator) (comp.OCIArtifacts, error) {
+	return comp.OCIArtifacts{
+		f8r.NodeConfigRef: cfg.Status.Versions.Fabricator.NodeConfig,
+	}, nil
+}
 
 type BuildMode string
 

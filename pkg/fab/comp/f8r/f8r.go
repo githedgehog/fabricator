@@ -16,10 +16,11 @@ import (
 )
 
 const (
-	CtrlRef      = "fabricator/fabricator"
-	CtrlChartRef = "fabricator/charts/fabricator"
-	APIChartRef  = "fabricator/charts/fabricator-api"
-	CtlRef       = "fabricator/hhfabctl"
+	CtrlRef           = "fabricator/fabricator"
+	CtrlChartRef      = "fabricator/charts/fabricator"
+	APIChartRef       = "fabricator/charts/fabricator-api"
+	CtlRef            = "fabricator/hhfabctl"
+	BashCompletionRef = "fabricator/bash-completion"
 
 	BinDir         = "/opt/bin"
 	CtlBinName     = "hhfabctl"

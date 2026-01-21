@@ -788,6 +788,31 @@ func Run(ctx context.Context) error {
 				},
 			},
 			{
+				Name:  "precache",
+				Usage: "precache artifacts (only ones needed for build command by default)",
+				Flags: flatten(defaultFlags, []cli.Flag{
+					&cli.BoolFlag{
+						Name:  "all",
+						Usage: "include all artifacts",
+					},
+					&cli.BoolFlag{
+						Name:  "vlab",
+						Usage: "include VLAB artifacts",
+					},
+				}),
+				Before: before(false),
+				Action: func(c *cli.Context) error {
+					if err := hhfab.Precache(ctx, workDir, cacheDir, hhfab.PrecacheOpts{
+						All:  c.Bool("all"),
+						VLAB: c.Bool("vlab"),
+					}); err != nil {
+						return fmt.Errorf("precaching: %w", err)
+					}
+
+					return nil
+				},
+			},
+			{
 				Name:  "vlab",
 				Usage: "operate Virtual Lab",
 				Subcommands: []*cli.Command{
