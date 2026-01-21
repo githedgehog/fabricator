@@ -1047,7 +1047,7 @@ func (b *VLABBuilder) createGatewayGroup(ctx context.Context, name string) (*gwa
 		},
 		ObjectMeta: kmetav1.ObjectMeta{
 			Name:      name,
-			Namespace: comp.FabNamespace,
+			Namespace: kmetav1.NamespaceDefault,
 		},
 	}
 
