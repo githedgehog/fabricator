@@ -157,6 +157,25 @@ func (c *Config) checkForBins() error {
 	return nil
 }
 
+var (
+	_ comp.ListOCIArtifacts = PrecacheVLABORAS
+	_ comp.ListOCIArtifacts = PrecacheVLABOCI
+)
+
+// PrecacheVLABORAS returns a list of ORAS artifacts that are required for building the VLAB
+func PrecacheVLABORAS(cfg fabapi.Fabricator) (comp.OCIArtifacts, error) {
+	return comp.OCIArtifacts{
+		vlabcomp.FlatcarRef:       vlabcomp.FlatcarVersion(cfg),
+		vlabcomp.ONIERef:          vlabcomp.ONIEVersion(cfg),
+		flatcar.ToolboxArchiveRef: flatcar.ToolboxVersion(cfg),
+	}, nil
+}
+
+// PrecacheVLABOCI returns a list of OCI artifacts that are required for building the VLAB
+func PrecacheVLABOCI(cfg fabapi.Fabricator) (comp.OCIArtifacts, error) {
+	return comp.OCIArtifacts{}, nil
+}
+
 func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()

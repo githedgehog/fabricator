@@ -159,7 +159,7 @@ func (b *ControlInstallBuilder) addPayload(ctx context.Context, slog *slog.Logge
 		return fmt.Errorf("creating bash-completion directory: %w", err)
 	}
 
-	if err := b.Downloader.FromORAS(ctx, installDir, "fabricator/bash-completion", b.Fab.Status.Versions.Platform.BashCompletion, []artificer.ORASFile{
+	if err := b.Downloader.FromORAS(ctx, installDir, f8r.BashCompletionRef, b.Fab.Status.Versions.Platform.BashCompletion, []artificer.ORASFile{
 		{
 			Name:   "bash-completion/bash_completion",
 			Target: "bash-completion/bash_completion",
