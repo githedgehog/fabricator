@@ -335,6 +335,7 @@ type SetupVPCsOpts struct {
 	HashPolicy        string
 	VPCMode           vpcapi.VPCMode
 	KeepPeerings      bool
+	HostBGPSubnet     bool
 }
 
 func CreateOrUpdateVpc(ctx context.Context, kube client.Client, vpc *vpcapi.VPC) (bool, error) {
@@ -392,6 +393,45 @@ func GetServerNetconfCmd(conn *wiringapi.Connection, vlan uint16, hashPolicy str
 	}
 
 	return netconfCmd, nil
+}
+
+func getServerHostBGPCmd(conn *wiringapi.Connection, subnet netip.Prefix, serversInSubnet int) (string, error) {
+	if conn == nil {
+		return "", fmt.Errorf("connection is nil")
+	}
+
+	interfaces := []string{}
+	switch {
+	case conn.Spec.Unbundled != nil:
+		interfaces = append(interfaces, conn.Spec.Unbundled.Link.Server.LocalPortName())
+	case conn.Spec.Bundled != nil:
+		for _, link := range conn.Spec.Bundled.Links {
+			interfaces = append(interfaces, link.Server.LocalPortName())
+		}
+	case conn.Spec.MCLAG != nil:
+		for _, link := range conn.Spec.MCLAG.Links {
+			interfaces = append(interfaces, link.Server.LocalPortName())
+		}
+	case conn.Spec.ESLAG != nil:
+		for _, link := range conn.Spec.ESLAG.Links {
+			interfaces = append(interfaces, link.Server.LocalPortName())
+		}
+	default:
+		return "", fmt.Errorf("unexpected connection type for conn %q", conn.Name)
+	}
+
+	cmd := strings.Join(interfaces, ",")
+	addr := subnet.Addr()
+	for _ = range serversInSubnet {
+		addr = addr.Next()
+	}
+	if !addr.IsValid() {
+		return "", fmt.Errorf("failed to get IP address from subnet %s", subnet.String())
+	}
+	cmd += " " + addr.String() + "/32"
+
+	return cmd, nil
+
 }
 
 type ServerAttachState struct {
@@ -479,6 +519,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		"perVPC", opts.SubnetsPerVPC,
 		"wait", opts.WaitSwitchesReady,
 		"cleanup", opts.ForceCleanup,
+		"hostBGP", opts.HostBGPSubnet,
 	)
 
 	sshConfigs := map[string]*sshutil.Config{}
@@ -569,6 +610,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	serverInSubnet := 0
 	subnetInVPC := 0
 	vpcID := 0
+	hostBGPDoneForVPC := false
 	vpcNames := map[string]bool{}
 	vpcs := []*vpcapi.VPC{}
 	attachNames := map[string]bool{}
@@ -576,6 +618,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	netconfs := map[string]string{}
 	expectedSubnets := map[string]netip.Prefix{}
 	eslagServers := make(map[string]bool, 0)
+	hostBGPServers := map[string]bool{}
 	for _, server := range servers.Items {
 		if opts.VPCMode != vpcapi.VPCModeL2VNI {
 			if sa, err := getServerAttachState(ctx, kube, &server, false); err != nil {
@@ -595,10 +638,27 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 			serverInSubnet = 0
 			subnetInVPC = 0
 			vpcID++
+			hostBGPDoneForVPC = false
 		}
+
+		conns := &wiringapi.ConnectionList{}
+		if err := kube.List(ctx, conns, wiringapi.MatchingLabelsForListLabelServer(server.Name)); err != nil {
+			return fmt.Errorf("listing connections for server %q: %w", server.Name, err)
+		}
+		if len(conns.Items) == 0 {
+			return fmt.Errorf("no connections for server %q", server.Name)
+		}
+		if len(conns.Items) > 1 {
+			return fmt.Errorf("multiple connections for server %q", server.Name)
+		}
+		conn := conns.Items[0]
 
 		vpcName := fmt.Sprintf("vpc-%02d", vpcID+1)
 		subnetName := fmt.Sprintf("subnet-%02d", subnetInVPC+1)
+		hostBGP := opts.HostBGPSubnet && !hostBGPDoneForVPC && conn.Spec.Unbundled != nil
+		if hostBGP {
+			hostBGPDoneForVPC = true
+		}
 
 		serverInSubnet++
 
@@ -625,11 +685,6 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 				return fmt.Errorf("no more subnets available")
 			}
 
-			vlan, ok := nextVLAN()
-			if !ok {
-				return fmt.Errorf("no more vlans available")
-			}
-
 			var dhcpOpts *vpcapi.VPCDHCPOptions
 			if len(opts.DNSServers) > 0 || len(opts.TimeServers) > 0 || opts.InterfaceMTU > 0 {
 				dhcpOpts = &vpcapi.VPCDHCPOptions{
@@ -639,13 +694,23 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 				}
 			}
 
+			var vlan uint16
+			dhcp := vpcapi.VPCDHCP{}
+			if !hostBGP {
+				dhcp.Enable = true
+				dhcp.Options = dhcpOpts
+				vlan, ok = nextVLAN()
+				if !ok {
+					return fmt.Errorf("no more vlans available")
+				}
+
+			}
+
 			vpc.Spec.Subnets[subnetName] = &vpcapi.VPCSubnet{
-				Subnet: subnet.String(),
-				VLAN:   vlan,
-				DHCP: vpcapi.VPCDHCP{
-					Enable:  true,
-					Options: dhcpOpts,
-				},
+				Subnet:  subnet.String(),
+				VLAN:    vlan,
+				DHCP:    dhcp,
+				HostBGP: hostBGP,
 			}
 		}
 
@@ -654,20 +719,9 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 			return fmt.Errorf("parsing vpc subnet %s/%s %q: %w", vpcName, subnetName, vpc.Spec.Subnets[subnetName].Subnet, err)
 		}
 		expectedSubnets[server.Name] = expectedSubnet
-
-		conns := &wiringapi.ConnectionList{}
-		if err := kube.List(ctx, conns, wiringapi.MatchingLabelsForListLabelServer(server.Name)); err != nil {
-			return fmt.Errorf("listing connections for server %q: %w", server.Name, err)
+		if hostBGP {
+			hostBGPServers[server.Name] = true
 		}
-
-		if len(conns.Items) == 0 {
-			return fmt.Errorf("no connections for server %q", server.Name)
-		}
-		if len(conns.Items) > 1 {
-			return fmt.Errorf("multiple connections for server %q", server.Name)
-		}
-
-		conn := conns.Items[0]
 
 		attachName := fmt.Sprintf("%s--%s--%s", conn.Name, vpcName, subnetName)
 		attachNames[attachName] = true
@@ -688,12 +742,19 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 			vlan = vpc.Spec.Subnets[subnetName].VLAN
 		}
 
-		netconfCmd, netconfErr := GetServerNetconfCmd(&conn, vlan, opts.HashPolicy)
-		if netconfErr != nil {
-			return fmt.Errorf("getting netconf cmd for server %q: %w", server.Name, netconfErr)
+		var confCmd string
+		var confErr error
+
+		if hostBGP {
+			confCmd, confErr = getServerHostBGPCmd(&conn, expectedSubnet, serverInSubnet)
+		} else {
+			confCmd, confErr = GetServerNetconfCmd(&conn, vlan, opts.HashPolicy)
+		}
+		if confErr != nil {
+			return fmt.Errorf("getting conf cmd for server %q: %w", server.Name, confErr)
 		}
 
-		netconfs[server.Name] = netconfCmd
+		netconfs[server.Name] = confCmd
 	}
 
 	if opts.WaitSwitchesReady {
@@ -808,36 +869,64 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 					return fmt.Errorf("unexpected hostname %q, expected %q", hostname, server.Name)
 				}
 
-				slog.Debug("Verified", "server", server.Name)
-
+				_, isHostBGP := hostBGPServers[server.Name]
+				slog.Debug("Verified", "server", server.Name, "hostBGP", isHostBGP)
+				var prefix netip.Prefix
+				// stop hostbgp container in case it was running already;
+				// ignore errors as it might not be running at all
+				_, _, _ = sshCfg.Run(ctx, "docker stop -t 1 hostbgp")
 				_, stderr, err = sshCfg.Run(ctx, "/opt/bin/hhnet cleanup")
 				if err != nil {
 					return fmt.Errorf("running hhnet cleanup: %w: out: %s", err, stderr)
 				}
+				if isHostBGP {
+					_, stderr, err := sshCfg.Run(ctx, "docker run --network=host --privileged --rm --detach --name hostbgp ghcr.io/githedgehog/host-bgp-container "+netconfs[server.Name])
+					if err != nil {
+						return fmt.Errorf("running hostbgp %q: %w: out: %s", netconfs[server.Name], err, stderr)
+					}
+					for attempt := range 5 {
+						time.Sleep(1 * time.Second)
+						stdout, stderr, err = sshCfg.Run(ctx, "/opt/bin/hhnet getvips")
+						if err != nil {
+							return fmt.Errorf("fetching ip address on loopback: %w: out: %s", err, stderr)
+						}
+						slog.Debug("hostBGP VIP parsing", "server", server.Name, "attempt", attempt+1, "stdout", stdout)
+						for line := range strings.Lines(stdout) {
+							line = strings.TrimSpace(line)
+							prefix, err = netip.ParsePrefix(line)
+							if err != nil {
+								return fmt.Errorf("parsing VIP %q: %w", line, err)
+							}
 
-				stdout, stderr, err = sshCfg.Run(ctx, "/opt/bin/hhnet "+netconfs[server.Name])
-				if err != nil {
-					return fmt.Errorf("running hhnet %q: %w: out: %s", netconfs[server.Name], err, stderr)
-				}
+							break
+						}
+						if prefix.IsValid() {
+							break
+						}
+					}
+				} else {
+					stdout, stderr, err = sshCfg.Run(ctx, "/opt/bin/hhnet "+netconfs[server.Name])
+					if err != nil {
+						return fmt.Errorf("running hhnet %q: %w: out: %s", netconfs[server.Name], err, stderr)
+					}
 
-				prefix, err := netip.ParsePrefix(strings.TrimSpace(stdout))
-				if err != nil {
-					return fmt.Errorf("parsing acquired address %q: %w", stdout, err)
+					prefix, err = netip.ParsePrefix(strings.TrimSpace(stdout))
+					if err != nil {
+						return fmt.Errorf("parsing acquired address %q: %w", stdout, err)
+					}
 				}
 
 				expectedSubnet := expectedSubnets[server.Name]
-				expectedBits := 0
-				switch opts.VPCMode {
-				case vpcapi.VPCModeL2VNI:
+				// for hostBGP or non-l2vni subnets we expect a /32, else the same prefix lenght of the subnet
+				expectedBits := 32
+				if opts.VPCMode == vpcapi.VPCModeL2VNI && !isHostBGP {
 					expectedBits = expectedSubnet.Bits()
-				case vpcapi.VPCModeL3Flat, vpcapi.VPCModeL3VNI:
-					expectedBits = 32 // L3 modes always uses /32 for server addresses
 				}
 				if !expectedSubnet.Contains(prefix.Addr()) || prefix.Bits() != expectedBits {
 					return fmt.Errorf("unexpected acquired address %q, expected from %v", prefix.String(), expectedSubnet.String())
 				}
 
-				slog.Info("Configured", "server", server.Name, "addr", prefix.String(), "netconf", netconfs[server.Name])
+				slog.Info("Configured", "server", server.Name, "addr", prefix.String(), "conf", netconfs[server.Name])
 
 				return nil
 			}(); err != nil {
