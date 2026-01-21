@@ -817,22 +817,116 @@ func fetchAndParseDHCPLease(ctx context.Context, ssh *sshutil.Config, ifName str
 	return info, nil
 }
 
-func waitForDHCPIPAssignment(ctx context.Context, ssh *sshutil.Config, ifName string, maxRetries int) (string, error) {
-	var assignedIP string
+// getInterfaceIPv4 retrieves the IPv4 address assigned to the specified network interface.
+func getInterfaceIPv4(ctx context.Context, ssh *sshutil.Config, ifName string) (string, error) {
+	ipOut, _, err := ssh.Run(ctx, fmt.Sprintf("ip addr show dev %s proto 4 | grep 'inet ' | awk '{print $2}' | cut -d'/' -f1", ifName))
+	if err != nil {
+		return "", fmt.Errorf("getting IP address: %w", err)
+	}
 
+	return strings.TrimSpace(ipOut), nil
+}
+
+// getInterfaceMAC retrieves the MAC address of the specified network interface.
+func getInterfaceMAC(ctx context.Context, ssh *sshutil.Config, ifName string) (string, error) {
+	macOut, _, err := ssh.Run(ctx, fmt.Sprintf("ip link show %s | grep -o 'link/ether [0-9a-f:]*' | awk '{print $2}'", ifName))
+	if err != nil {
+		return "", fmt.Errorf("getting MAC address: %w", err)
+	}
+
+	return strings.TrimSpace(macOut), nil
+}
+
+// waitForDHCPIP polls for an IPv4 address to be assigned to the interface via DHCP.
+// It retries up to maxRetries times with a 2-second delay between attempts.
+func waitForDHCPIP(ctx context.Context, ssh *sshutil.Config, ifName string, maxRetries int) (string, error) {
 	for retry := 0; retry < maxRetries; retry++ {
 		time.Sleep(2 * time.Second)
 
-		ipOut, _, err := ssh.Run(ctx, fmt.Sprintf("ip addr show dev %s proto 4 | grep 'inet ' | awk '{print $2}' | cut -d'/' -f1", ifName))
+		assignedIP, err := getInterfaceIPv4(ctx, ssh, ifName)
 		if err != nil {
-			return "", fmt.Errorf("getting IP address: %w", err)
+			return "", err
 		}
 
-		assignedIP = strings.TrimSpace(ipOut)
 		if assignedIP != "" {
 			return assignedIP, nil
 		}
 	}
 
 	return "", nil
+}
+
+// DHCPServerInfo contains information about a server attached to a DHCP-enabled subnet.
+type DHCPServerInfo struct {
+	ServerName string
+	Interface  string
+	VPCName    string
+	SubnetName string
+	VPC        *vpcapi.VPC
+	Subnet     *vpcapi.VPCSubnet
+}
+
+// findDHCPEnabledServers finds all servers attached to DHCP-enabled VPC subnets.
+// It returns servers grouped by VPC/subnet combination.
+func findDHCPEnabledServers(ctx context.Context, kube kclient.Client) (map[string][]DHCPServerInfo, error) {
+	vpcAttaches := &vpcapi.VPCAttachmentList{}
+	if err := kube.List(ctx, vpcAttaches); err != nil {
+		return nil, fmt.Errorf("listing VPCAttachments: %w", err)
+	}
+
+	result := make(map[string][]DHCPServerInfo)
+
+	for _, attach := range vpcAttaches.Items {
+		conn := &wiringapi.Connection{}
+		if err := kube.Get(ctx, kclient.ObjectKey{
+			Namespace: kmetav1.NamespaceDefault,
+			Name:      attach.Spec.Connection,
+		}, conn); err != nil {
+			continue
+		}
+
+		_, serverNames, _, _, err := conn.Spec.Endpoints()
+		if err != nil || len(serverNames) != 1 {
+			continue
+		}
+
+		vpc := &vpcapi.VPC{}
+		if err := kube.Get(ctx, kclient.ObjectKey{
+			Namespace: kmetav1.NamespaceDefault,
+			Name:      attach.Spec.VPCName(),
+		}, vpc); err != nil {
+			continue
+		}
+
+		subnetName := attach.Spec.SubnetName()
+		subnet := vpc.Spec.Subnets[subnetName]
+		if subnet == nil || !subnet.DHCP.Enable {
+			continue
+		}
+
+		// Skip hostBGP subnets as they behave differently
+		if subnet.HostBGP {
+			continue
+		}
+
+		// Determine the interface name based on connection type
+		var ifName string
+		if conn.Spec.Unbundled != nil {
+			ifName = fmt.Sprintf("%s.%d", conn.Spec.Unbundled.Link.Server.LocalPortName(), subnet.VLAN)
+		} else {
+			ifName = fmt.Sprintf("bond0.%d", subnet.VLAN)
+		}
+
+		key := fmt.Sprintf("%s--%s", vpc.Name, subnetName)
+		result[key] = append(result[key], DHCPServerInfo{
+			ServerName: serverNames[0],
+			Interface:  ifName,
+			VPCName:    vpc.Name,
+			SubnetName: subnetName,
+			VPC:        vpc,
+			Subnet:     subnet,
+		})
+	}
+
+	return result, nil
 }

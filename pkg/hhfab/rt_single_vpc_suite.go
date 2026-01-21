@@ -1017,14 +1017,91 @@ func (testCtx *VPCPeeringTestCtx) dhcpRenewalTest(ctx context.Context) (bool, []
 	return false, reverts, nil
 }
 
+// testStaticIPAssignment tests that a server gets the expected static IP assignment.
+// It updates the VPC with the static allocation, reconfigures the server's interface,
+// and verifies both the assigned IP and the DHCPSubnet status.
+func (testCtx *VPCPeeringTestCtx) testStaticIPAssignment(ctx context.Context, vpc *vpcapi.VPC, subnetName string, server ServerWithInterface, serverMAC string, staticIP net.IP, description string) error {
+	slog.Info("Testing static IP assignment", "description", description, "ip", staticIP.String(), "mac", serverMAC)
+
+	// Add static allocation
+	subnet := vpc.Spec.Subnets[subnetName]
+	if subnet.DHCP.Static == nil {
+		subnet.DHCP.Static = make(map[string]vpcapi.VPCDHCPStatic)
+	}
+	subnet.DHCP.Static[serverMAC] = vpcapi.VPCDHCPStatic{IP: staticIP.String()}
+
+	change, err := CreateOrUpdateVpc(ctx, testCtx.kube, vpc)
+	if err != nil || !change {
+		return fmt.Errorf("updating VPC %s with static allocation: %w", vpc.Name, err)
+	}
+
+	slog.Debug("Waiting for DHCP configuration to propagate")
+	if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
+		return fmt.Errorf("waiting for ready after DHCP change: %w", err)
+	}
+
+	time.Sleep(10 * time.Second)
+
+	// Reconfigure interface to get new IP
+	ssh, err := testCtx.getSSH(ctx, server.Name)
+	if err != nil {
+		return fmt.Errorf("getting ssh config for server %s: %w", server.Name, err)
+	}
+
+	_, stderr, err := ssh.Run(ctx, fmt.Sprintf("sudo networkctl reconfigure %s", server.Interface))
+	if err != nil {
+		if stderr != "" {
+			return fmt.Errorf("reconfiguring interface: %w (stderr: %s)", err, stderr)
+		}
+
+		return fmt.Errorf("reconfiguring interface: %w", err)
+	}
+
+	time.Sleep(5 * time.Second)
+
+	// Verify server got the static IP
+	assignedIP, err := getInterfaceIPv4(ctx, ssh, server.Interface)
+	if err != nil {
+		return fmt.Errorf("getting IP address from %s: %w", server.Name, err)
+	}
+	if assignedIP != staticIP.String() {
+		return fmt.Errorf("server %s did not get static IP: expected %s, got %s", server.Name, staticIP.String(), assignedIP) //nolint:goerr113
+	}
+
+	slog.Info("Static IP assignment verified", "description", description, "server", server.Name, "ip", assignedIP)
+
+	// Verify static IP is reserved in DHCPSubnet status
+	dhcpSubnetName := fmt.Sprintf("%s--%s", vpc.Name, subnetName)
+	dhcpSubnet := &dhcpapi.DHCPSubnet{}
+	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{
+		Namespace: kmetav1.NamespaceDefault,
+		Name:      dhcpSubnetName,
+	}, dhcpSubnet); err != nil {
+		return fmt.Errorf("getting DHCPSubnet %s: %w", dhcpSubnetName, err)
+	}
+
+	allocation, found := dhcpSubnet.Status.Allocated[serverMAC]
+	if !found {
+		return fmt.Errorf("static allocation for MAC %s not found in DHCPSubnet status", serverMAC) //nolint:goerr113
+	}
+
+	if allocation.IP != staticIP.String() {
+		return fmt.Errorf("DHCPSubnet allocation mismatch: expected %s, got %s", staticIP.String(), allocation.IP) //nolint:goerr113
+	}
+
+	slog.Info("Static IP test passed", "description", description, "ip", staticIP.String())
+
+	return nil
+}
+
 // Test DHCP static reservations within dynamic pool range
 // Verifies that static IP assignments work correctly even when the IP is within the dynamic range
 // Tests that static MACs get their reserved IP and dynamic clients never get the static IP
 func (testCtx *VPCPeeringTestCtx) dhcpStaticLeaseTest(ctx context.Context) (bool, []RevertFunc, error) {
-	// Find VPC with at least one server attached that has DHCP enabled
-	vpcAttaches := &vpcapi.VPCAttachmentList{}
-	if err := testCtx.kube.List(ctx, vpcAttaches); err != nil {
-		return false, nil, fmt.Errorf("listing VPCAttachments: %w", err)
+	// Find a server attached to a DHCP-enabled VPC subnet
+	serversBySubnet, err := findDHCPEnabledServers(ctx, testCtx.kube)
+	if err != nil {
+		return false, nil, err
 	}
 
 	var testVPC *vpcapi.VPC
@@ -1032,60 +1109,30 @@ func (testCtx *VPCPeeringTestCtx) dhcpStaticLeaseTest(ctx context.Context) (bool
 	var testServer ServerWithInterface
 	var testServerMAC string
 
-	for _, attach := range vpcAttaches.Items {
-		conn := &wiringapi.Connection{}
-		if err := testCtx.kube.Get(ctx, kclient.ObjectKey{
-			Namespace: kmetav1.NamespaceDefault,
-			Name:      attach.Spec.Connection,
-		}, conn); err != nil {
+	// Find the first server we can get MAC address for
+	for _, servers := range serversBySubnet {
+		if len(servers) == 0 {
 			continue
 		}
 
-		_, serverNames, _, _, err := conn.Spec.Endpoints()
-		if err != nil || len(serverNames) != 1 {
-			continue
-		}
-
-		vpc := &vpcapi.VPC{}
-		if err := testCtx.kube.Get(ctx, kclient.ObjectKey{
-			Namespace: kmetav1.NamespaceDefault,
-			Name:      attach.Spec.VPCName(),
-		}, vpc); err != nil {
-			continue
-		}
-
-		subnetName := attach.Spec.SubnetName()
-		subnet := vpc.Spec.Subnets[subnetName]
-		if subnet == nil || !subnet.DHCP.Enable {
-			continue
-		}
-
-		// Determine the interface name based on connection type
-		var ifName string
-		if conn.Spec.Unbundled != nil {
-			ifName = fmt.Sprintf("%s.%d", conn.Spec.Unbundled.Link.Server.LocalPortName(), subnet.VLAN)
-		} else {
-			ifName = fmt.Sprintf("bond0.%d", subnet.VLAN)
-		}
-
-		// Get the MAC address of this interface
-		ssh, err := testCtx.getSSH(ctx, serverNames[0])
+		info := servers[0]
+		ssh, err := testCtx.getSSH(ctx, info.ServerName)
 		if err != nil {
 			continue
 		}
 
-		macOut, _, err := ssh.Run(ctx, fmt.Sprintf("ip link show %s | grep -o 'link/ether [0-9a-f:]*' | awk '{print $2}'", ifName))
-		if err != nil || macOut == "" {
+		mac, err := getInterfaceMAC(ctx, ssh, info.Interface)
+		if err != nil || mac == "" {
 			continue
 		}
 
-		testVPC = vpc
-		testSubnetName = subnetName
+		testVPC = info.VPC
+		testSubnetName = info.SubnetName
 		testServer = ServerWithInterface{
-			Name:      serverNames[0],
-			Interface: ifName,
+			Name:      info.ServerName,
+			Interface: info.Interface,
 		}
-		testServerMAC = strings.TrimSpace(macOut)
+		testServerMAC = mac
 
 		break
 	}
@@ -1211,90 +1258,13 @@ func (testCtx *VPCPeeringTestCtx) dhcpStaticLeaseTest(ctx context.Context) (bool
 		return WaitReady(ctx, testCtx.kube, testCtx.wrOpts)
 	})
 
-	// Helper function to test a static IP assignment
-	testStaticIP := func(staticIP net.IP, description string) error {
-		slog.Info("Testing static IP assignment", "description", description, "ip", staticIP.String(), "mac", testServerMAC)
-
-		// Add static allocation
-		subnet := testVPC.Spec.Subnets[testSubnetName]
-		if subnet.DHCP.Static == nil {
-			subnet.DHCP.Static = make(map[string]vpcapi.VPCDHCPStatic)
-		}
-		subnet.DHCP.Static[testServerMAC] = vpcapi.VPCDHCPStatic{IP: staticIP.String()}
-
-		change, err := CreateOrUpdateVpc(ctx, testCtx.kube, testVPC)
-		if err != nil || !change {
-			return fmt.Errorf("updating VPC %s with static allocation: %w", testVPC.Name, err)
-		}
-
-		slog.Debug("Waiting for DHCP configuration to propagate")
-		if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
-			return fmt.Errorf("waiting for ready after DHCP change: %w", err)
-		}
-
-		time.Sleep(10 * time.Second)
-
-		// Reconfigure interface to get new IP
-		ssh, err := testCtx.getSSH(ctx, testServer.Name)
-		if err != nil {
-			return fmt.Errorf("getting ssh config for server %s: %w", testServer.Name, err)
-		}
-
-		_, stderr, err := ssh.Run(ctx, fmt.Sprintf("sudo networkctl reconfigure %s", testServer.Interface))
-		if err != nil {
-			if stderr != "" {
-				return fmt.Errorf("reconfiguring interface: %w (stderr: %s)", err, stderr)
-			}
-
-			return fmt.Errorf("reconfiguring interface: %w", err)
-		}
-
-		time.Sleep(5 * time.Second)
-
-		// Verify server got the static IP
-		ipOut, _, err := ssh.Run(ctx, fmt.Sprintf("ip addr show dev %s proto 4 | grep 'inet ' | awk '{print $2}' | cut -d'/' -f1", testServer.Interface))
-		if err != nil {
-			return fmt.Errorf("getting IP address from %s: %w", testServer.Name, err)
-		}
-
-		assignedIP := strings.TrimSpace(ipOut)
-		if assignedIP != staticIP.String() {
-			return fmt.Errorf("server %s did not get static IP: expected %s, got %s", testServer.Name, staticIP.String(), assignedIP) //nolint:goerr113
-		}
-
-		slog.Info("Static IP assignment verified", "description", description, "server", testServer.Name, "ip", assignedIP)
-
-		// Verify static IP is reserved in DHCPSubnet status
-		dhcpSubnetName := fmt.Sprintf("%s--%s", testVPC.Name, testSubnetName)
-		dhcpSubnet := &dhcpapi.DHCPSubnet{}
-		if err := testCtx.kube.Get(ctx, kclient.ObjectKey{
-			Namespace: kmetav1.NamespaceDefault,
-			Name:      dhcpSubnetName,
-		}, dhcpSubnet); err != nil {
-			return fmt.Errorf("getting DHCPSubnet %s: %w", dhcpSubnetName, err)
-		}
-
-		allocation, found := dhcpSubnet.Status.Allocated[testServerMAC]
-		if !found {
-			return fmt.Errorf("static allocation for MAC %s not found in DHCPSubnet status", testServerMAC) //nolint:goerr113
-		}
-
-		if allocation.IP != staticIP.String() {
-			return fmt.Errorf("DHCPSubnet allocation mismatch: expected %s, got %s", staticIP.String(), allocation.IP) //nolint:goerr113
-		}
-
-		slog.Info("Static IP test passed", "description", description, "ip", staticIP.String())
-
-		return nil
-	}
-
 	// Test 1: Static IP within the dynamic range
-	if err := testStaticIP(staticIPInRange, "static IP within dynamic range"); err != nil {
+	if err := testCtx.testStaticIPAssignment(ctx, testVPC, testSubnetName, testServer, testServerMAC, staticIPInRange, "static IP within dynamic range"); err != nil {
 		return false, reverts, err
 	}
 
 	// Test 2: Static IP outside the dynamic range
-	if err := testStaticIP(staticIPOutsideRange, "static IP outside dynamic range"); err != nil {
+	if err := testCtx.testStaticIPAssignment(ctx, testVPC, testSubnetName, testServer, testServerMAC, staticIPOutsideRange, "static IP outside dynamic range"); err != nil {
 		return false, reverts, err
 	}
 
@@ -1303,68 +1273,17 @@ func (testCtx *VPCPeeringTestCtx) dhcpStaticLeaseTest(ctx context.Context) (bool
 	return false, reverts, nil
 }
 
+// Test DHCP pool exhaustion and recovery behavior
+// Requires N >= 2 servers attached to same DHCP-enabled subnet
+// Shrinks the DHCP pool to N-1 addresses so N-1 servers deplete it
+// Verifies the Nth server cannot get an IP, then releases one and verifies recovery
 func (testCtx *VPCPeeringTestCtx) dhcpDepletionTest(ctx context.Context) (bool, []RevertFunc, error) {
-	const minServers = 2 // Need at least 2 servers: N-1 to deplete + 1 to test recovery
+	const minServers = 2
 
-	// Find a VPC with DHCP-enabled subnet and servers
-	vpcAttaches := &vpcapi.VPCAttachmentList{}
-	if err := testCtx.kube.List(ctx, vpcAttaches); err != nil {
-		return false, nil, fmt.Errorf("listing VPCAttachments: %w", err)
-	}
-
-	// Group attachments by VPC and subnet
-	type vpcSubnetKey struct {
-		vpcName    string
-		subnetName string
-	}
-
-	serversByVPCSubnet := make(map[vpcSubnetKey][]ServerWithInterface)
-
-	for _, attach := range vpcAttaches.Items {
-		conn := &wiringapi.Connection{}
-		if err := testCtx.kube.Get(ctx, kclient.ObjectKey{
-			Namespace: kmetav1.NamespaceDefault,
-			Name:      attach.Spec.Connection,
-		}, conn); err != nil {
-			continue
-		}
-
-		_, serverNames, _, _, err := conn.Spec.Endpoints()
-		if err != nil || len(serverNames) != 1 {
-			continue
-		}
-
-		vpc := &vpcapi.VPC{}
-		if err := testCtx.kube.Get(ctx, kclient.ObjectKey{
-			Namespace: kmetav1.NamespaceDefault,
-			Name:      attach.Spec.VPCName(),
-		}, vpc); err != nil {
-			continue
-		}
-
-		subnetName := attach.Spec.SubnetName()
-		subnet := vpc.Spec.Subnets[subnetName]
-		if subnet == nil || !subnet.DHCP.Enable {
-			continue
-		}
-
-		// Determine the interface name based on connection type
-		var ifName string
-		if conn.Spec.Unbundled != nil {
-			ifName = fmt.Sprintf("%s.%d", conn.Spec.Unbundled.Link.Server.LocalPortName(), subnet.VLAN)
-		} else {
-			ifName = fmt.Sprintf("bond0.%d", subnet.VLAN)
-		}
-
-		key := vpcSubnetKey{
-			vpcName:    vpc.Name,
-			subnetName: subnetName,
-		}
-
-		serversByVPCSubnet[key] = append(serversByVPCSubnet[key], ServerWithInterface{
-			Name:      serverNames[0],
-			Interface: ifName,
-		})
+	// Find all servers attached to DHCP-enabled VPC subnets
+	serversBySubnet, err := findDHCPEnabledServers(ctx, testCtx.kube)
+	if err != nil {
+		return false, nil, err
 	}
 
 	// Find the VPC/subnet with the most servers (at least minServers)
@@ -1373,19 +1292,18 @@ func (testCtx *VPCPeeringTestCtx) dhcpDepletionTest(ctx context.Context) (bool, 
 	var testServers []ServerWithInterface
 	maxServers := 0
 
-	for key, servers := range serversByVPCSubnet {
+	for _, servers := range serversBySubnet {
 		if len(servers) >= minServers && len(servers) > maxServers {
-			vpc := &vpcapi.VPC{}
-			if err := testCtx.kube.Get(ctx, kclient.ObjectKey{
-				Namespace: kmetav1.NamespaceDefault,
-				Name:      key.vpcName,
-			}, vpc); err != nil {
-				continue
+			// All servers in a group have the same VPC
+			testVPC = servers[0].VPC
+			testSubnetName = servers[0].SubnetName
+			testServers = make([]ServerWithInterface, len(servers))
+			for i, s := range servers {
+				testServers[i] = ServerWithInterface{
+					Name:      s.ServerName,
+					Interface: s.Interface,
+				}
 			}
-
-			testVPC = vpc
-			testSubnetName = key.subnetName
-			testServers = servers
 			maxServers = len(servers)
 		}
 	}
@@ -1518,7 +1436,7 @@ func (testCtx *VPCPeeringTestCtx) dhcpDepletionTest(ctx context.Context) (bool, 
 		}
 
 		// Wait for IP assignment with retries (DHCP can take a few seconds)
-		gotIP, err := waitForDHCPIPAssignment(ctx, ssh, server.Interface, 10)
+		gotIP, err := waitForDHCPIP(ctx, ssh, server.Interface, 10)
 		if err != nil {
 			return false, reverts, fmt.Errorf("waiting for IP on %s: %w", server.Name, err)
 		}
@@ -1558,12 +1476,10 @@ func (testCtx *VPCPeeringTestCtx) dhcpDepletionTest(ctx context.Context) (bool, 
 	time.Sleep(5 * time.Second)
 
 	// Check that last server did NOT get an IP
-	ipOut, _, err := ssh.Run(ctx, fmt.Sprintf("ip addr show dev %s proto 4 | grep 'inet ' | awk '{print $2}' | cut -d'/' -f1", lastServer.Interface))
+	assignedIP, err := getInterfaceIPv4(ctx, ssh, lastServer.Interface)
 	if err != nil {
 		return false, reverts, fmt.Errorf("getting IP address from %s: %w", lastServer.Name, err)
 	}
-
-	assignedIP := strings.TrimSpace(ipOut)
 	if assignedIP != "" {
 		return false, reverts, fmt.Errorf("last server %s got IP %s when pool should be depleted", lastServer.Name, assignedIP) //nolint:goerr113
 	}
@@ -1579,12 +1495,10 @@ func (testCtx *VPCPeeringTestCtx) dhcpDepletionTest(ctx context.Context) (bool, 
 	}
 
 	// Get MAC address of the first server's interface to clear its DHCP allocation
-	macOut, _, err := firstSSH.Run(ctx, fmt.Sprintf("ip link show %s | grep -o 'link/ether [0-9a-f:]*' | awk '{print $2}'", testServers[0].Interface))
+	firstServerMAC, err := getInterfaceMAC(ctx, firstSSH, testServers[0].Interface)
 	if err != nil {
 		return false, reverts, fmt.Errorf("getting MAC address from %s: %w", testServers[0].Name, err)
 	}
-
-	firstServerMAC := strings.TrimSpace(macOut)
 
 	_, _, err = firstSSH.Run(ctx, fmt.Sprintf("sudo ip addr flush dev %s", testServers[0].Interface))
 	if err != nil {
@@ -1617,7 +1531,7 @@ func (testCtx *VPCPeeringTestCtx) dhcpDepletionTest(ctx context.Context) (bool, 
 	}
 
 	// Wait for IP assignment with retries (DHCP can take a few seconds)
-	recoveredIP, err := waitForDHCPIPAssignment(ctx, ssh, lastServer.Interface, 10)
+	recoveredIP, err := waitForDHCPIP(ctx, ssh, lastServer.Interface, 10)
 	if err != nil {
 		return false, reverts, fmt.Errorf("waiting for IP on %s after recovery: %w", lastServer.Name, err)
 	}
