@@ -29,7 +29,19 @@ KUBECTL="/opt/bin/kubectl"
     echo -e "\n=== Network Configuration ==="
     ip addr show
     ip route show
-    
+    ip neigh show
+    ip link show
+
+    echo -e "\n=== Switch connectivity from control node ==="
+    for sw in $($KUBECTL get switches -o jsonpath='{.items[*].spec.ip}' 2>/dev/null | tr ' ' '\n' | cut -d/ -f1); do
+        echo -n "Switch $sw: ping="
+        ping -c1 -W2 "$sw" >/dev/null 2>&1 && echo -n "ok" || echo -n "fail"
+        echo -n " arp="
+        ip neigh show "$sw" 2>/dev/null | awk '{print $NF}' || echo -n "none"
+        echo -n " ssh:22="
+        nc -zw2 "$sw" 22 >/dev/null 2>&1 && echo "open" || echo "closed"
+    done
+
     echo -e "\n=== Disk Usage ==="
     df -h
     
@@ -92,6 +104,15 @@ KUBECTL="/opt/bin/kubectl"
 # System Logs
 # ---------------------------
 {
+    echo -e "\n=== k3s.service status ==="
+    systemctl status k3s.service --no-pager
+
+    echo -e "\n=== sshd status ==="
+    systemctl status sshd --no-pager
+
+    echo -e "\n=== k3s.service logs (last hour) ==="
+    journalctl -u k3s.service --no-pager --since "1 hour ago"
+
     echo -e "\n=== systemd-networkd logs ==="
     journalctl -u systemd-networkd
 
