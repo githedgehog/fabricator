@@ -18,6 +18,7 @@ type GatewayCtrlConfig struct {
 	DataplaneMetricsPort uint16              `json:"dataplaneMetricsPort,omitempty"`
 	FRRMetricsPort       uint16              `json:"frrMetricsPort,omitempty"`
 	Communities          map[uint32]string   `json:"communities,omitempty"`
+	FabricBFD            bool                `json:"fabricBFD,omitempty"`
 }
 
 type AgentConfig struct {

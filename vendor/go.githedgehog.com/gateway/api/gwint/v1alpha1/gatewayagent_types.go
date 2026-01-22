@@ -35,6 +35,12 @@ type GatewayAgentSpec struct {
 	Peerings     map[string]gwapi.PeeringSpec `json:"peerings,omitempty"`
 	Groups       map[string]GatewayGroupInfo  `json:"groups,omitempty"`
 	Communities  map[string]string            `json:"communities,omitempty"`
+	Config       GatewayAgentSpecConfig       `json:"config,omitempty"`
+}
+
+type GatewayAgentSpecConfig struct {
+	// FabricBFD defines if fabric-facing links should be configured with BFD
+	FabricBFD bool `json:"fabricBFD,omitempty"`
 }
 
 // GatewayAgentStatus defines the observed state of GatewayAgent.
