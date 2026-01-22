@@ -137,16 +137,24 @@ _hhfabctl-push-multi: (_hhfabctl-push "linux" "amd64") (_hhfabctl-push "linux" "
 # Publish hhfab and other user-facing binaries for all supported OS/Arch
 push-multi: _hhfab-push-multi _hhfabctl-push-multi && version
 
+_test_api_kind := "fab-api"
+
 # Install API on a kind cluster and wait for CRDs to be ready
-test-api: _helm-fabricator-api
-    kind export kubeconfig --name kind || kind create cluster --name kind
-    kind export kubeconfig --name kind
-    {{helm}} install -n default fabricator-api config/helm/fabricator-api-{{version}}.tgz
-    sleep 10
-    kubectl wait --for condition=established --timeout=60s crd/fabricators.fabricator.githedgehog.com
-    kubectl wait --for condition=established --timeout=60s crd/controlnodes.fabricator.githedgehog.com
-    kubectl get crd | grep fabricator
-    kind delete cluster --name kind
+test-api: _helm _helm-fabricator-api
+  {{helm}} install -n default fabricator-api config/helm/fabricator-api-{{version}}.tgz
+  sleep 10
+  kubectl wait --for condition=established --timeout=60s crd/fabricators.fabricator.githedgehog.com
+  kubectl wait --for condition=established --timeout=60s crd/fabnodes.fabricator.githedgehog.com
+  kubectl get crd | grep fabricator
+
+test-api-auto: _kind_prep test-api _kind_cleanup
+
+_kind_prep:
+  kind export kubeconfig --name {{_test_api_kind}} || kind delete cluster --name {{_test_api_kind}}
+  kind create cluster --name {{_test_api_kind}}
+
+_kind_cleanup:
+  kind delete cluster --name {{_test_api_kind}}
 
 # Run VLAB Trivy security scan with configurable options
 security-scan *args="": && version

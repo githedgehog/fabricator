@@ -46,6 +46,37 @@ permissions:
   contents: read
 
 jobs:
+  test-api:
+    runs-on: lab
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Create k8s Kind Cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: fab-api
+
+      - name: Install CRDs
+        run: |
+          just --timestamp test-api
+
+      - name: Setup tmate session for debug
+        if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
+        uses: mxschmitt/action-tmate@v3
+        timeout-minutes: 30
+        with:
+          limit-access-to-actor: true
+
   test-build:
     runs-on: lab
 
@@ -223,6 +254,7 @@ jobs:
   vlab:
     name: "${{ matrix.hybrid && 'h' || 'v' }}-${{ matrix.upgradefrom && 'up' || '' }}${{ matrix.upgradefrom }}${{ matrix.upgradefrom && '-' || '' }}${{ matrix.mesh && 'mesh-' || '' }}${{ matrix.gateway && 'gw-' || '' }}${{ matrix.includeonie && 'onie-' || '' }}${{ matrix.buildmode }}-${{ matrix.vpcmode }}${{ ((matrix.hybrid && (inputs.releasetest_hlab == true || contains(github.event.pull_request.labels.*.name, 'ci:+release') || github.event.schedule == '0 6 * * *')) || (!matrix.hybrid && (inputs.releasetest_vlab == true || contains(github.event.pull_request.labels.*.name, 'ci:+release') || github.event.schedule == '0 6 * * *'))) && '-rt' || '' }}"
     needs:
+      - test-api
       - test-build
     uses: ./.github/workflows/run-vlab.yaml
     with:
