@@ -1675,7 +1675,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 						return fmt.Errorf("unexpected ip addr line %q", line)
 					}
 
-					if fields[0] == "lo" || fields[0] == "enp2s0" || fields[0] == "docker0" {
+					if (fields[0] == "lo" && fields[1] == "127.0.0.1/8") || fields[0] == "enp2s0" || fields[0] == "docker0" {
 						continue
 					}
 
