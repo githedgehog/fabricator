@@ -2309,7 +2309,7 @@ func checkPing(ctx context.Context, pingCount int, semaphore *semaphore.Weighted
 			break
 		}
 	}
-	if pe.Sent == 0 {
+	if pe.Sent == 0 && err == nil {
 		pe.Msg = "cannot parse ping output to get sent packets"
 
 		return pe
