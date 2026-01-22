@@ -13,7 +13,7 @@ OUTPUT_FILE="/tmp/show-tech.log"
 export CRI_CONFIG_FILE=/dev/null
 
 # Find the running FRR container ID
-FRR_CONTAINER_ID=$(sudo -E crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock ps \
+FRR_CONTAINER_ID=$(sudo -E crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock ps 2>>"$OUTPUT_FILE" \
     | grep ' frr ' \
     | awk '{print $1}')
 
@@ -53,6 +53,9 @@ run_vtysh_cmd() {
 
     echo -e "\n=== ARP Table ==="
     ip neigh show
+
+    echo -e "\n=== Link Status ==="
+    ip link show
 } >> "$OUTPUT_FILE" 2>&1
 
 # ---------------------------
@@ -112,6 +115,15 @@ run_vtysh_cmd() {
 # System Logs
 # ---------------------------
 {
+    echo -e "\n=== k3s-agent.service status ==="
+    systemctl status k3s-agent.service --no-pager
+
+    echo -e "\n=== sshd status ==="
+    systemctl status sshd --no-pager
+
+    echo -e "\n=== k3s-agent.service logs (last hour) ==="
+    journalctl -u k3s-agent.service --no-pager --since "1 hour ago"
+
     echo -e "\n=== systemd-networkd logs ==="
     journalctl -u systemd-networkd --no-pager --since "1 hour ago"
 
