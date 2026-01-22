@@ -523,6 +523,9 @@ var switchScript []byte
 //go:embed show-tech/gateway.sh
 var gatewayScript []byte
 
+//go:embed show-tech/runner.sh
+var runnerScript []byte
+
 type ShowTechScript struct {
 	Scripts map[VMType][]byte
 }
@@ -545,6 +548,10 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB) error {
 	outputDir := filepath.Join(c.WorkDir, "show-tech-output")
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return fmt.Errorf("creating output directory: %w", err)
+	}
+
+	if err := c.collectRunnerShowTech(ctx, outputDir); err != nil {
+		slog.Warn("Failed to collect runner diagnostics", "err", err)
 	}
 
 	// Get all switches from Kubernetes
@@ -733,6 +740,49 @@ func (c *Config) collectShowTech(ctx context.Context, entryName string, ssh *ssh
 	}
 
 	slog.Debug("Show tech collected successfully", "entry", entryName, "output", localFilePath)
+
+	return nil
+}
+
+func (c *Config) collectRunnerShowTech(ctx context.Context, outputDir string) error {
+	tmpfile, err := os.CreateTemp("", "runner-show-tech-*")
+	if err != nil {
+		return fmt.Errorf("creating temporary script file: %w", err)
+	}
+	defer os.Remove(tmpfile.Name())
+	defer tmpfile.Close()
+
+	if _, err := tmpfile.Write(runnerScript); err != nil {
+		return fmt.Errorf("writing script to temporary file: %w", err)
+	}
+
+	if err := tmpfile.Sync(); err != nil {
+		return fmt.Errorf("syncing temporary script file: %w", err)
+	}
+
+	if err := tmpfile.Close(); err != nil {
+		return fmt.Errorf("closing temporary script file: %w", err)
+	}
+
+	if err := os.Chmod(tmpfile.Name(), 0o755); err != nil {
+		return fmt.Errorf("making script executable: %w", err)
+	}
+
+	execCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(execCtx, "/bin/bash", tmpfile.Name()) //nolint:gosec
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		slog.Warn("Runner show-tech script execution failed", "err", err, "output", string(output))
+	}
+
+	localFilePath := filepath.Join(outputDir, "runner-show-tech.log")
+	if err := os.WriteFile(localFilePath, output, 0o600); err != nil {
+		return fmt.Errorf("writing runner show-tech output: %w", err)
+	}
+
+	slog.Debug("Runner show-tech collected successfully", "output", localFilePath)
 
 	return nil
 }
