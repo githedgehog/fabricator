@@ -425,6 +425,19 @@ func Run(ctx context.Context) error {
 		},
 	}
 
+	showTechConsoleFlags := []cli.Flag{
+		&cli.StringFlag{
+			Name:    "switch-username",
+			Usage:   "switch username for console show-tech",
+			EnvVars: []string{hhfab.VLABEnvSwitchUser},
+		},
+		&cli.StringFlag{
+			Name:    "switch-password",
+			Usage:   "switch password for console show-tech",
+			EnvVars: []string{hhfab.VLABEnvSwitchPass},
+		},
+	}
+
 	builFlags := []cli.Flag{
 		&cli.StringFlag{
 			Name:    FlagNameBuildMode,
@@ -1092,7 +1105,7 @@ func Run(ctx context.Context) error {
 					{
 						Name:   "show-tech",
 						Usage:  "collect diagnostic information from all VLAB devices",
-						Flags:  defaultFlags,
+						Flags:  flatten(defaultFlags, showTechConsoleFlags),
 						Before: before(false),
 						Action: func(_ *cli.Context) error {
 							if err := hhfab.DoShowTech(ctx, workDir, cacheDir); err != nil {

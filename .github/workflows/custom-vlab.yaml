@@ -70,6 +70,7 @@ jobs:
   vlab:
     name: "${{ inputs.hybrid && 'h' || 'v' }}-${{ inputs.upgradefrom && 'up' || '' }}${{ inputs.upgradefrom }}${{ inputs.upgradefrom && '-' || '' }}${{ inputs.mesh && 'mesh-' || '' }}${{ inputs.gateway && 'gw-' || '' }}${{ inputs.buildmode }}-${{ inputs.vpcmode }}${{ inputs.releasetest && '-rt' || '' }}${{ inputs.releasetest_regex != '' && 'r' || '' }}"
     uses: ./.github/workflows/run-vlab.yaml
+    secrets: inherit
     with:
       fabricatorref: ${{ github.ref }}
       fabricmode: "spine-leaf"
