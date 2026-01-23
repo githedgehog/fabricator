@@ -152,7 +152,7 @@ jobs:
       - name: Pre-populate hhfab-cache
         run: |
           if [ -d "/hostcache/.hhfab-cache" ]; then
-            cp -r /hostcache/.hhfab-cache ~/
+            rsync -aW --inplace --exclude='download-*' --stats /hostcache/.hhfab-cache ~/
           else
             echo "Host cache not available"
           fi
