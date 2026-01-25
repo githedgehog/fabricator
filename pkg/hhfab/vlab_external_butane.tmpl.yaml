@@ -127,21 +127,23 @@ storage:
           log file /var/run/frr/frr.log debug
           !{{range $vrfkey, $vrf := .ExternalVRFs}}
           vrf {{$vrfkey}}
-           ip route 0.0.0.0/0 172.31.1.2 enp2s0 nexthop-vrf default
+           {{if $vrf.IsL2}}{{range $prefix := .L2Cfg.Prefixes}}ip route {{$prefix}} 172.31.1.2 enp2s0 nexthop-vrf default{{end}}
+           {{else}}ip route 0.0.0.0/0 172.31.1.2 enp2s0 nexthop-vrf default {{end}}
           exit-vrf
-          !
-          bgp community-list standard {{$vrfkey}}In seq 5 permit {{$vrf.InCommunity}}
-          bgp community-list standard {{$vrfkey}}Out seq 5 permit {{$vrf.OutCommunity}}
+          !{{if $vrf.IsL2}}{{range $gwIP := .L2Cfg.GatewayIPs}}
+          ip route {{$gwIP}} {{$vrf.L2Cfg.NICName}} nexthop-vrf {{$vrfkey}}{{end}}{{else}}
+          bgp community-list standard {{$vrfkey}}In seq 5 permit {{$vrf.BGPCfg.InCommunity}}
+          bgp community-list standard {{$vrfkey}}Out seq 5 permit {{$vrf.BGPCfg.OutCommunity}}
           !
           route-map {{$vrfkey}}In permit 10
            match community {{$vrfkey}}In
           !
           route-map {{$vrfkey}}Out permit 10
-           set community {{$vrf.OutCommunity}}
+           set community {{$vrf.BGPCfg.OutCommunity}}
           !
           route-map {{$vrfkey}}Out deny 2000
-          !{{end}}{{range $vrfkey, $vrf := .ExternalVRFs}}
-          router bgp {{$vrf.ASN}} vrf {{$vrfkey}}
+          !{{end}}{{end}}{{range $vrfkey, $vrf := .ExternalVRFs}}{{if not $vrf.IsL2}}
+          router bgp {{$vrf.BGPCfg.ASN}} vrf {{$vrfkey}}
            bgp log-neighbor-changes
            bgp bestpath as-path multipath-relax
            no bgp ebgp-requires-policy
@@ -165,12 +167,12 @@ storage:
             redistribute static
             import vrf default
            !
-          !{{end}}{{end}}
+          !{{end}}{{end}}{{end}}
           router bgp 1
            bgp bestpath as-path multipath-relax
            address-family ipv4 unicast
-            redistribute static{{range $vrfkey, $vrf := .ExternalVRFs}}
-            import vrf {{$vrfkey}}{{end}}
+            redistribute static{{range $vrfkey, $vrf := .ExternalVRFs}}{{if not $vrf.IsL2}}
+            import vrf {{$vrfkey}}{{end}}{{end}}
            !
           !
           line vty
