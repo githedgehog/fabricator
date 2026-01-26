@@ -607,6 +607,18 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		nextPrefix()
 	}
 
+	// Collect MCLAG switches for later (needed for hostbgp validation)
+	switchList := wiringapi.SwitchList{}
+	if err := kube.List(ctx, &switchList); err != nil {
+		return fmt.Errorf("listing switches: %w", err)
+	}
+	mclagSwitches := map[string]bool{}
+	for _, sw := range switchList.Items {
+		if sw.Spec.Redundancy.Type == meta.RedundancyTypeMCLAG {
+			mclagSwitches[sw.Name] = true
+		}
+	}
+
 	serverInSubnet := 0
 	subnetInVPC := 0
 	vpcID := 0
@@ -653,9 +665,19 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		}
 		conn := conns.Items[0]
 
+		switches, _, _, _, err := conn.Spec.Endpoints()
+		if err != nil {
+			return fmt.Errorf("getting connection %q endpoints: %w", conn.Name, err)
+		}
+		isMclag := false
+		for _, sw := range switches {
+			_, found := mclagSwitches[sw]
+			isMclag = isMclag || found
+		}
+
 		vpcName := fmt.Sprintf("vpc-%02d", vpcID+1)
 		subnetName := fmt.Sprintf("subnet-%02d", subnetInVPC+1)
-		hostBGP := opts.HostBGPSubnet && !hostBGPDoneForVPC && conn.Spec.Unbundled != nil
+		hostBGP := opts.HostBGPSubnet && !hostBGPDoneForVPC && conn.Spec.Unbundled != nil && !isMclag
 		if hostBGP {
 			hostBGPDoneForVPC = true
 		}
