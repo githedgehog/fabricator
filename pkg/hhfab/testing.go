@@ -880,7 +880,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 					return fmt.Errorf("running hhnet cleanup: %w: out: %s", err, stderr)
 				}
 				if isHostBGP {
-					_, stderr, err := sshCfg.Run(ctx, "docker run --network=host --privileged --rm --detach --name hostbgp ghcr.io/githedgehog/host-bgp-container "+netconfs[server.Name])
+					_, stderr, err := sshCfg.Run(ctx, "docker run --network=host --privileged --rm --detach --name hostbgp ghcr.io/githedgehog/host-bgp "+netconfs[server.Name])
 					if err != nil {
 						return fmt.Errorf("running hostbgp %q: %w: out: %s", netconfs[server.Name], err, stderr)
 					}
