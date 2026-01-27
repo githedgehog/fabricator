@@ -53,7 +53,7 @@ from the new charts into the old chart. We have used their last version number
 and added the hh1 suffix.
 
 ```bash
-export ZOT_VERSION="v2.1.13"
+export ZOT_VERSION="v2.1.14"
 export HH_CHART_VERSION="v0.1.67-hh1"
 
 helm pull --version ${HH_CHART_VERSION} "oci://ghcr.io/githedgehog/fabricator/charts/zot"
