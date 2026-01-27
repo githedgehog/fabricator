@@ -23,6 +23,7 @@ import (
 
 	"github.com/samber/lo"
 	agentapi "go.githedgehog.com/fabric/api/agent/v1beta1"
+	dhcpapi "go.githedgehog.com/fabric/api/dhcp/v1beta1"
 	"go.githedgehog.com/fabric/api/meta"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
@@ -72,6 +73,7 @@ var schemeBuilders = []*scheme.Builder{
 	wiringapi.SchemeBuilder,
 	vpcapi.SchemeBuilder,
 	agentapi.SchemeBuilder,
+	dhcpapi.SchemeBuilder,
 	fabapi.SchemeBuilder,
 	gwapi.SchemeBuilder,
 	gwintapi.SchemeBuilder,
