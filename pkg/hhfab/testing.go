@@ -2209,6 +2209,10 @@ func IsSubnetReachableWithGatewayPeering(ctx context.Context, kube kclient.Reade
 
 func isVPCSubnetPresentInPeering(peering *gwapi.PeeringEntry, vpc gwapi.VPCInfo, vpcName string, vpcSubnet string) (bool, error) {
 	for _, expose := range peering.Expose {
+		if expose.DefaultDestination {
+			return true, nil
+		}
+
 		if len(expose.As) > 0 {
 			return false, fmt.Errorf("expose as %s is not supported yet", expose.As)
 		}
