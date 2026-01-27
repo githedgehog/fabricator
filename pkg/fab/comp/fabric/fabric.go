@@ -263,6 +263,7 @@ func GetFabricConfig(f fabapi.Fabricator) (*fmeta.FabricConfig, error) {
 		ManagementDHCPStart:      string(f.Spec.Config.Fabric.ManagementDHCPStart),
 		ManagementDHCPEnd:        string(f.Spec.Config.Fabric.ManagementDHCPEnd),
 		GatewayCommunities:       gwComms,
+		GatewayBFD:               true,
 	}, nil
 }
 
