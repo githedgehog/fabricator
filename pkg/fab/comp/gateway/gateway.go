@@ -109,6 +109,7 @@ func Install(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 		DataplaneMetricsPort: DataplaneMetricsPort,
 		FRRMetricsPort:       FRRMetricsPort,
 		Communities:          comms,
+		FabricBFD:            true,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("marshalling ctrl config: %w", err)
