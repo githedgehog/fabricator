@@ -17,8 +17,9 @@ import (
 )
 
 type GetFabAndNodesOpts struct {
-	AllowNotHydrated bool
-	AllowNoControls  bool
+	AllowNotHydrated    bool
+	AllowNoControls     bool
+	NoCalculateVersions bool
 }
 
 func GetFabAndNodes(ctx context.Context, kube kclient.Reader, optsSlice ...GetFabAndNodesOpts) (fabapi.Fabricator, []fabapi.ControlNode, []fabapi.FabNode, error) {
@@ -26,6 +27,7 @@ func GetFabAndNodes(ctx context.Context, kube kclient.Reader, optsSlice ...GetFa
 	for _, o := range optsSlice {
 		opts.AllowNotHydrated = opts.AllowNotHydrated || o.AllowNotHydrated
 		opts.AllowNoControls = opts.AllowNoControls || o.AllowNoControls
+		opts.NoCalculateVersions = opts.NoCalculateVersions || o.NoCalculateVersions
 	}
 
 	f := &fabapi.Fabricator{}
@@ -49,8 +51,10 @@ func GetFabAndNodes(ctx context.Context, kube kclient.Reader, optsSlice ...GetFa
 		return fabapi.Fabricator{}, nil, nil, fmt.Errorf("validating fabricator: %w", err)
 	}
 
-	if err := f.CalculateVersions(Versions); err != nil {
-		return fabapi.Fabricator{}, nil, nil, fmt.Errorf("calculating versions: %w", err)
+	if !opts.NoCalculateVersions {
+		if err := f.CalculateVersions(Versions); err != nil {
+			return fabapi.Fabricator{}, nil, nil, fmt.Errorf("calculating versions: %w", err)
+		}
 	}
 
 	nodeNames := map[string]bool{}
