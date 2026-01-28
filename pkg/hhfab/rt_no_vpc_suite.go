@@ -793,18 +793,43 @@ func (testCtx *VPCPeeringTestCtx) prometheusObservabilityTest(ctx context.Contex
 			expectedGateways = append(expectedGateways, gw.Name)
 		}
 
-		slog.Info("Checking gateway metrics", "expected_gateways", expectedGateways, "gateway_count", len(expectedGateways))
+		// Get Fabricator config to check which gateway metrics are enabled
+		fabricator := &fabricatorapi.Fabricator{}
+		if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: comp.FabNamespace, Name: kmetav1.NamespaceDefault}, fabricator); err != nil {
+			return false, nil, fmt.Errorf("getting Fabricator object: %w", err)
+		}
 
-		// Define gateway-specific metrics to check
-		// Each metric type corresponds to a different scrape target
-		gatewayMetrics := []struct {
+		gwObs := fabricator.Spec.Config.Gateway.Observability
+
+		// Build list of gateway metrics to check based on what's enabled
+		type gwMetricDef struct {
 			name   string // human-readable name
 			metric string // PromQL metric name
-		}{
-			{name: "Dataplane", metric: "vpc_packet_count"},
-			{name: "FRR", metric: "frr_exporter_build_info"},
-			{name: "Unix", metric: "node_memory_MemTotal_bytes"},
 		}
+
+		var gatewayMetrics []gwMetricDef
+		if gwObs != nil {
+			if gwObs.Dataplane.Metrics {
+				gatewayMetrics = append(gatewayMetrics, gwMetricDef{name: "Dataplane", metric: "vpc_packet_count"})
+			}
+			if gwObs.FRR.Metrics {
+				gatewayMetrics = append(gatewayMetrics, gwMetricDef{name: "FRR", metric: "frr_exporter_build_info"})
+			}
+			if gwObs.Unix.Metrics {
+				gatewayMetrics = append(gatewayMetrics, gwMetricDef{name: "Unix", metric: "node_memory_MemTotal_bytes"})
+			}
+		}
+
+		if len(gatewayMetrics) == 0 {
+			slog.Info("No gateway metrics enabled in Fabricator config, skipping gateway metrics check")
+
+			return false, nil, nil
+		}
+
+		slog.Info("Checking gateway metrics",
+			"expected_gateways", expectedGateways,
+			"gateway_count", len(expectedGateways),
+			"enabled_metrics", len(gatewayMetrics))
 
 		// Track which gateways have metrics for each type
 		// gateway -> metric_type -> found
