@@ -27,6 +27,8 @@ import (
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+const promStatusSuccess = "success"
+
 func makeNoVpcsSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 	suite := &JUnitTestSuite{
 		Name: "No VPCs Suite",
@@ -509,7 +511,7 @@ func (testCtx *VPCPeeringTestCtx) lokiObservabilityTest(ctx context.Context) (bo
 			continue
 		}
 
-		if lokiResp.Status != "success" {
+		if lokiResp.Status != promStatusSuccess {
 			if errorSample == "" {
 				errorSample = fmt.Sprintf("Query failed with status: %s", lokiResp.Status)
 			}
@@ -712,7 +714,7 @@ func (testCtx *VPCPeeringTestCtx) prometheusObservabilityTest(ctx context.Contex
 	// Log query details with status and count
 	slog.Debug("Prometheus query details", "query", queryExpr, "status", resp.Status, "count", len(promResp.Data.Result))
 
-	if promResp.Status != "success" {
+	if promResp.Status != promStatusSuccess {
 		return false, nil, fmt.Errorf("metric query returned non-success status: %s", promResp.Status) //nolint:goerr113
 	}
 
@@ -778,6 +780,169 @@ func (testCtx *VPCPeeringTestCtx) prometheusObservabilityTest(ctx context.Contex
 	}
 
 	slog.Info("Verified Prometheus metrics delivery", "metric", metricName, "metrics_count", len(foundHostnames), "switches_checked", len(switches.Items))
+
+	// Check gateway metrics if gateways exist
+	gatewayList := &gwapi.GatewayList{}
+	if err := testCtx.kube.List(ctx, gatewayList); err != nil {
+		return false, nil, fmt.Errorf("listing gateways: %w", err)
+	}
+
+	if len(gatewayList.Items) > 0 {
+		expectedGateways := make([]string, 0, len(gatewayList.Items))
+		for _, gw := range gatewayList.Items {
+			expectedGateways = append(expectedGateways, gw.Name)
+		}
+
+		slog.Info("Checking gateway metrics", "expected_gateways", expectedGateways, "gateway_count", len(expectedGateways))
+
+		// Define gateway-specific metrics to check
+		// Each metric type corresponds to a different scrape target
+		gatewayMetrics := []struct {
+			name   string // human-readable name
+			metric string // PromQL metric name
+		}{
+			{name: "Dataplane", metric: "vpc_packet_count"},
+			{name: "FRR", metric: "frr_exporter_build_info"},
+			{name: "Unix", metric: "node_memory_MemTotal_bytes"},
+		}
+
+		// Track which gateways have metrics for each type
+		// gateway -> metric_type -> found
+		gatewayMetricsFound := make(map[string]map[string]bool)
+		for _, gw := range expectedGateways {
+			gatewayMetricsFound[gw] = make(map[string]bool)
+		}
+
+		// Check each metric type
+		for _, gm := range gatewayMetrics {
+			var gwQueryExpr string
+			if env != "" {
+				gwQueryExpr = fmt.Sprintf("%s{env=\"%s\"}", gm.metric, env)
+			} else {
+				gwQueryExpr = gm.metric
+			}
+
+			gwQueryURL := fmt.Sprintf("%s/query?query=%s", prometheusEndpoint.URL, url.QueryEscape(gwQueryExpr))
+
+			gwReq, err := http.NewRequestWithContext(ctx, http.MethodGet, gwQueryURL, nil)
+			if err != nil {
+				return false, nil, fmt.Errorf("failed to create %s metric query: %w", gm.name, err)
+			}
+
+			if hasAuth {
+				gwReq.SetBasicAuth(prometheusEndpoint.Username, prometheusEndpoint.Password)
+			}
+
+			gwResp, err := client.Do(gwReq)
+			if err != nil {
+				return false, nil, fmt.Errorf("failed to execute %s metric query: %w", gm.name, err)
+			}
+
+			gwBody, gwBodyErr := io.ReadAll(gwResp.Body)
+			gwResp.Body.Close()
+
+			if gwResp.StatusCode != http.StatusOK {
+				if gwBodyErr != nil {
+					return false, nil, fmt.Errorf("%s metric query failed: status %d (could not read body: %w)", gm.name, gwResp.StatusCode, gwBodyErr) //nolint:goerr113
+				}
+
+				return false, nil, fmt.Errorf("%s metric query failed: status %d, body: %s", gm.name, gwResp.StatusCode, string(gwBody)) //nolint:goerr113
+			}
+
+			if gwBodyErr != nil {
+				return false, nil, fmt.Errorf("failed to read %s metric response: %w", gm.name, gwBodyErr)
+			}
+
+			var gwPromResp struct {
+				Status string `json:"status"`
+				Data   struct {
+					ResultType string `json:"resultType"`
+					Result     []struct {
+						Metric map[string]string `json:"metric"`
+						Value  []interface{}     `json:"value"`
+					} `json:"result"`
+				} `json:"data"`
+			}
+
+			if err := json.Unmarshal(gwBody, &gwPromResp); err != nil {
+				return false, nil, fmt.Errorf("failed to parse %s metric response: %w", gm.name, err)
+			}
+
+			slog.Debug("Gateway metric query",
+				"metric_type", gm.name,
+				"query", gwQueryExpr,
+				"status", gwPromResp.Status,
+				"result_count", len(gwPromResp.Data.Result))
+
+			if gwPromResp.Status != promStatusSuccess {
+				return false, nil, fmt.Errorf("%s metric query returned non-success status: %s", gm.name, gwPromResp.Status) //nolint:goerr113
+			}
+
+			// Process results and match to gateways
+			for _, result := range gwPromResp.Data.Result {
+				hostname, ok := result.Metric["hostname"]
+				if !ok {
+					continue
+				}
+
+				// Check if this hostname is one of our expected gateways
+				if !slices.Contains(expectedGateways, hostname) {
+					continue
+				}
+
+				// Check freshness
+				var gwTimestamp time.Time
+				if len(result.Value) > 0 {
+					if ts, ok := result.Value[0].(float64); ok {
+						gwTimestamp = time.Unix(int64(ts), 0)
+					}
+				}
+
+				if gwTimestamp.Unix() > 0 && time.Since(gwTimestamp) > maxMetricAgeSecs*time.Second {
+					slog.Debug("Stale gateway metric found",
+						"gateway", hostname,
+						"metric_type", gm.name,
+						"age_seconds", time.Since(gwTimestamp).Seconds())
+
+					continue
+				}
+
+				gatewayMetricsFound[hostname][gm.name] = true
+				slog.Debug("Found gateway metric",
+					"gateway", hostname,
+					"metric_type", gm.name,
+					"metric", gm.metric)
+			}
+		}
+
+		// Evaluate results - ALL gateways must have ALL metric types
+		var failedGateways []string
+		for gw, metrics := range gatewayMetricsFound {
+			var missingMetrics []string
+			for _, gm := range gatewayMetrics {
+				if !metrics[gm.name] {
+					missingMetrics = append(missingMetrics, gm.name)
+				}
+			}
+
+			if len(missingMetrics) > 0 {
+				failedGateways = append(failedGateways, fmt.Sprintf("%s (missing: %s)", gw, strings.Join(missingMetrics, ", ")))
+				slog.Error("Gateway missing metrics",
+					"gateway", gw,
+					"missing_metrics", missingMetrics)
+			} else {
+				slog.Info("Gateway has all required metrics", "gateway", gw)
+			}
+		}
+
+		if len(failedGateways) > 0 {
+			return false, nil, fmt.Errorf("gateways missing required metrics: %s", strings.Join(failedGateways, "; ")) //nolint:goerr113
+		}
+
+		slog.Info("Verified gateway metrics delivery",
+			"gateway_count", len(expectedGateways),
+			"metric_types_checked", len(gatewayMetrics))
+	}
 
 	return false, nil, nil
 }
