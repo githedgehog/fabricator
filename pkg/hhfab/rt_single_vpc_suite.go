@@ -5,14 +5,17 @@ package hhfab
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"strings"
 	"sync"
 	"time"
 
 	agentapi "go.githedgehog.com/fabric/api/agent/v1beta1"
+	dhcpapi "go.githedgehog.com/fabric/api/dhcp/v1beta1"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/util/pointer"
@@ -48,6 +51,10 @@ func makeSingleVPCSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 		{
 			Name: "DHCP renewal",
 			F:    testCtx.dhcpRenewalTest,
+		},
+		{
+			Name: "DHCP pool depletion",
+			F:    testCtx.dhcpDepletionTest,
 		},
 		{
 			Name: "MCLAG Failover",
@@ -1002,6 +1009,285 @@ func (testCtx *VPCPeeringTestCtx) dhcpRenewalTest(ctx context.Context) (bool, []
 	}
 
 	slog.Info("DHCP renewal test completed successfully", "servers", len(testServers), "maxDuration", maxDuration)
+
+	return false, reverts, nil
+}
+
+// Test DHCP pool exhaustion and recovery behavior
+// Requires N >= 2 servers attached to same DHCP-enabled subnet
+// Shrinks the DHCP pool to N-1 addresses so N-1 servers deplete it
+// Verifies the Nth server cannot get an IP, then releases one and verifies recovery
+func (testCtx *VPCPeeringTestCtx) dhcpDepletionTest(ctx context.Context) (bool, []RevertFunc, error) {
+	const minServers = 2
+
+	// Find all servers attached to DHCP-enabled VPC subnets
+	serversBySubnet, err := findDHCPEnabledServers(ctx, testCtx.kube)
+	if err != nil {
+		return false, nil, err
+	}
+
+	// Find the VPC/subnet with the most servers (at least minServers)
+	var testVPC *vpcapi.VPC
+	var testSubnetName string
+	var testServers []ServerWithInterface
+	maxServers := 0
+
+	for _, servers := range serversBySubnet {
+		if len(servers) >= minServers && len(servers) > maxServers {
+			// All servers in a group have the same VPC
+			testVPC = servers[0].VPC
+			testSubnetName = servers[0].SubnetName
+			testServers = make([]ServerWithInterface, len(servers))
+			for i, s := range servers {
+				testServers[i] = ServerWithInterface{
+					Name:      s.ServerName,
+					Interface: s.Interface,
+				}
+			}
+			maxServers = len(servers)
+		}
+	}
+
+	if testVPC == nil {
+		slog.Info("Not enough servers with DHCP-enabled VPC attachments found, skipping DHCP depletion test", "min_required", minServers)
+
+		return true, nil, nil
+	}
+
+	// Calculate how many IPs we need for depletion (one less than total servers)
+	numServersToDeplete := len(testServers) - 1
+	poolSize := uint32(numServersToDeplete) //nolint:gosec // Safe: server count is small
+
+	// Log server details
+	serverNames := make([]string, len(testServers))
+	for i, s := range testServers {
+		serverNames[i] = s.Name
+	}
+
+	slog.Info("Testing DHCP pool depletion and recovery", "vpc", testVPC.Name, "subnet", testSubnetName, "total_servers", len(testServers), "pool_size", poolSize, "servers", serverNames, "last_server", testServers[len(testServers)-1].Name)
+
+	subnet := testVPC.Spec.Subnets[testSubnetName]
+
+	// Save original range
+	originalRangeStart := subnet.DHCP.Range.Start
+	originalRangeEnd := subnet.DHCP.Range.End
+
+	// Shrink range to exactly poolSize IPs
+	startIP := net.ParseIP(subnet.DHCP.Range.Start)
+	if startIP == nil {
+		return false, nil, fmt.Errorf("invalid DHCP range start: %s", subnet.DHCP.Range.Start) //nolint:goerr113
+	}
+
+	startInt := binary.BigEndian.Uint32(startIP.To4())
+	newEndInt := startInt + poolSize - 1 // poolSize IPs total
+	newEndIP := make(net.IP, 4)
+	binary.BigEndian.PutUint32(newEndIP, newEndInt)
+
+	subnet.DHCP.Range.End = newEndIP.String()
+
+	slog.Info("Shrinking DHCP range for depletion test", "original_start", originalRangeStart, "original_end", originalRangeEnd, "new_start", subnet.DHCP.Range.Start, "new_end", subnet.DHCP.Range.End, "pool_size", poolSize)
+
+	reverts := make([]RevertFunc, 0)
+	reverts = append(reverts, func(ctx context.Context) error {
+		slog.Debug("Reverting DHCP range", "vpc", testVPC.Name, "subnet", testSubnetName)
+
+		subnet := testVPC.Spec.Subnets[testSubnetName]
+		subnet.DHCP.Range.Start = originalRangeStart
+		subnet.DHCP.Range.End = originalRangeEnd
+
+		_, err := CreateOrUpdateVpc(ctx, testCtx.kube, testVPC)
+		if err != nil {
+			return fmt.Errorf("reverting VPC %s DHCP range: %w", testVPC.Name, err)
+		}
+
+		time.Sleep(5 * time.Second)
+
+		return WaitReady(ctx, testCtx.kube, testCtx.wrOpts)
+	})
+
+	// Update VPC with shrunk range
+	change, err := CreateOrUpdateVpc(ctx, testCtx.kube, testVPC)
+	if err != nil || !change {
+		return false, reverts, fmt.Errorf("updating VPC %s with shrunk range: %w", testVPC.Name, err)
+	}
+
+	if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
+		return false, reverts, fmt.Errorf("waiting for ready after range change: %w", err)
+	}
+
+	time.Sleep(10 * time.Second)
+
+	// First, flush IPs and bring interfaces down to prevent automatic DHCP requests
+	// This ensures we have full control over when each server requests an IP
+	slog.Info("Flushing existing IPs and bringing interfaces down on all servers")
+
+	for _, server := range testServers {
+		ssh, err := testCtx.getSSH(ctx, server.Name)
+		if err != nil {
+			return false, reverts, fmt.Errorf("getting ssh config for server %s: %w", server.Name, err)
+		}
+
+		// Flush IP and bring interface down to prevent networkd from auto-requesting DHCP
+		_, _, err = ssh.Run(ctx, fmt.Sprintf("sudo ip addr flush dev %s && sudo ip link set %s down", server.Interface, server.Interface))
+		if err != nil {
+			return false, reverts, fmt.Errorf("flushing IP and bringing down interface on %s: %w", server.Name, err)
+		}
+	}
+
+	// Clear all DHCP allocations from the DHCPSubnet to ensure clean state
+	dhcpSubnetName := fmt.Sprintf("%s--%s", testVPC.Name, testSubnetName)
+	dhcpSubnet := &dhcpapi.DHCPSubnet{}
+	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{
+		Namespace: kmetav1.NamespaceDefault,
+		Name:      dhcpSubnetName,
+	}, dhcpSubnet); err != nil {
+		return false, reverts, fmt.Errorf("getting DHCPSubnet %s: %w", dhcpSubnetName, err)
+	}
+
+	// Clear all allocations to start fresh
+	dhcpSubnet.Status.Allocated = make(map[string]dhcpapi.DHCPAllocated)
+	if err := testCtx.kube.Status().Update(ctx, dhcpSubnet); err != nil {
+		return false, reverts, fmt.Errorf("clearing DHCPSubnet allocations: %w", err)
+	}
+
+	slog.Debug("Cleared DHCP allocations", "subnet", dhcpSubnetName)
+
+	time.Sleep(5 * time.Second)
+
+	// Reconfigure first N-1 servers to deplete the pool
+	slog.Info("Depleting DHCP pool", "num_servers", numServersToDeplete)
+
+	// Parse the DHCP range to validate assigned IPs are within it
+	rangeStartIP := net.ParseIP(subnet.DHCP.Range.Start)
+	rangeEndIP := net.ParseIP(subnet.DHCP.Range.End)
+	rangeStartInt := binary.BigEndian.Uint32(rangeStartIP.To4())
+	rangeEndInt := binary.BigEndian.Uint32(rangeEndIP.To4())
+
+	for i := 0; i < numServersToDeplete; i++ {
+		server := testServers[i]
+		slog.Debug("Requesting IP for depletion", "server", server.Name, "index", i)
+
+		ssh, err := testCtx.getSSH(ctx, server.Name)
+		if err != nil {
+			return false, reverts, fmt.Errorf("getting ssh config for server %s: %w", server.Name, err)
+		}
+
+		// Bring interface up and reconfigure to trigger DHCP request
+		_, _, err = ssh.Run(ctx, fmt.Sprintf("sudo ip link set %s up && sudo networkctl reconfigure %s", server.Interface, server.Interface))
+		if err != nil {
+			return false, reverts, fmt.Errorf("bringing up and reconfiguring interface on %s: %w", server.Name, err)
+		}
+
+		// Wait for IP assignment with retries
+		gotIP, err := waitForDHCPIP(ctx, ssh, server.Interface, 10)
+		if err != nil {
+			return false, reverts, fmt.Errorf("waiting for IP on %s: %w", server.Name, err)
+		}
+
+		if gotIP == "" {
+			return false, reverts, fmt.Errorf("server %s did not get IP during depletion phase", server.Name) //nolint:goerr113
+		}
+
+		// Validate that the assigned IP is within the configured DHCP range
+		gotIPParsed := net.ParseIP(gotIP)
+		if gotIPParsed == nil {
+			return false, reverts, fmt.Errorf("server %s got invalid IP %s", server.Name, gotIP) //nolint:goerr113
+		}
+
+		gotIPInt := binary.BigEndian.Uint32(gotIPParsed.To4())
+		if gotIPInt < rangeStartInt || gotIPInt > rangeEndInt {
+			return false, reverts, fmt.Errorf("server %s got IP %s which is outside configured range %s-%s", server.Name, gotIP, subnet.DHCP.Range.Start, subnet.DHCP.Range.End) //nolint:goerr113
+		}
+
+		slog.Debug("Server got IP during depletion", "server", server.Name, "ip", gotIP)
+	}
+
+	// Verify pool is depleted by trying to get IP on the last server
+	lastServer := testServers[len(testServers)-1]
+	slog.Info("Verifying pool depletion on last server", "server", lastServer.Name)
+
+	ssh, err := testCtx.getSSH(ctx, lastServer.Name)
+	if err != nil {
+		return false, reverts, fmt.Errorf("getting ssh config for server %s: %w", lastServer.Name, err)
+	}
+
+	// Bring interface up and reconfigure to trigger DHCP request
+	_, _, err = ssh.Run(ctx, fmt.Sprintf("sudo ip link set %s up && sudo networkctl reconfigure %s", lastServer.Interface, lastServer.Interface))
+	if err != nil {
+		return false, reverts, fmt.Errorf("bringing up and reconfiguring interface on %s: %w", lastServer.Name, err)
+	}
+
+	time.Sleep(5 * time.Second)
+
+	// Check that last server did NOT get an IP
+	assignedIP, err := getInterfaceIPv4(ctx, ssh, lastServer.Interface)
+	if err != nil {
+		return false, reverts, fmt.Errorf("getting IP address from %s: %w", lastServer.Name, err)
+	}
+	if assignedIP != "" {
+		return false, reverts, fmt.Errorf("last server %s got IP %s when pool should be depleted", lastServer.Name, assignedIP) //nolint:goerr113
+	}
+
+	slog.Info("Pool depletion verified - last server has no IP")
+
+	// Release IP from first server by flushing interface and clearing DHCP allocation
+	slog.Info("Releasing IP from first server", "server", testServers[0].Name)
+
+	firstSSH, err := testCtx.getSSH(ctx, testServers[0].Name)
+	if err != nil {
+		return false, reverts, fmt.Errorf("getting ssh config for server %s: %w", testServers[0].Name, err)
+	}
+
+	// Get MAC address of the first server's interface to clear its DHCP allocation
+	firstServerMAC, err := getInterfaceMAC(ctx, firstSSH, testServers[0].Interface)
+	if err != nil {
+		return false, reverts, fmt.Errorf("getting MAC address from %s: %w", testServers[0].Name, err)
+	}
+
+	_, _, err = firstSSH.Run(ctx, fmt.Sprintf("sudo ip addr flush dev %s", testServers[0].Interface))
+	if err != nil {
+		return false, reverts, fmt.Errorf("flushing IP on %s: %w", testServers[0].Name, err)
+	}
+
+	// Clear the DHCP allocation for this server to free up the IP
+	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{
+		Namespace: kmetav1.NamespaceDefault,
+		Name:      dhcpSubnetName,
+	}, dhcpSubnet); err != nil {
+		return false, reverts, fmt.Errorf("getting DHCPSubnet %s: %w", dhcpSubnetName, err)
+	}
+
+	delete(dhcpSubnet.Status.Allocated, firstServerMAC)
+	if err := testCtx.kube.Status().Update(ctx, dhcpSubnet); err != nil {
+		return false, reverts, fmt.Errorf("clearing DHCP allocation for %s: %w", testServers[0].Name, err)
+	}
+
+	slog.Debug("Cleared DHCP allocation for first server", "server", testServers[0].Name, "mac", firstServerMAC)
+
+	time.Sleep(5 * time.Second)
+
+	// Now try to get IP on last server again - should succeed
+	slog.Info("Attempting to get IP on last server after freeing one IP")
+
+	// Reconfigure to trigger new DHCP request (interface is already up from depletion check)
+	_, _, err = ssh.Run(ctx, fmt.Sprintf("sudo networkctl reconfigure %s", lastServer.Interface))
+	if err != nil {
+		return false, reverts, fmt.Errorf("reconfiguring interface on %s after freeing IP: %w", lastServer.Name, err)
+	}
+
+	// Wait for IP assignment with retries
+	recoveredIP, err := waitForDHCPIP(ctx, ssh, lastServer.Interface, 10)
+	if err != nil {
+		return false, reverts, fmt.Errorf("waiting for IP on %s after recovery: %w", lastServer.Name, err)
+	}
+
+	if recoveredIP == "" {
+		return false, reverts, fmt.Errorf("last server %s did not get IP after pool recovery", lastServer.Name) //nolint:goerr113
+	}
+
+	slog.Info("DHCP pool recovery verified", "server", lastServer.Name, "ip", recoveredIP)
+
+	slog.Info("DHCP depletion test completed successfully")
 
 	return false, reverts, nil
 }
