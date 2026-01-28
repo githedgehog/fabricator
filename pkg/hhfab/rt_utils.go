@@ -837,8 +837,8 @@ func getInterfaceMAC(ctx context.Context, ssh *sshutil.Config, ifName string) (s
 	return strings.TrimSpace(macOut), nil
 }
 
-// DHCPServerInfo contains information about a server attached to a DHCP-enabled subnet.
-type DHCPServerInfo struct {
+// AttachedServerInfo contains information about a server attached to a VPC subnet.
+type AttachedServerInfo struct {
 	ServerName string
 	Interface  string
 	VPCName    string
@@ -847,15 +847,16 @@ type DHCPServerInfo struct {
 	Subnet     *vpcapi.VPCSubnet
 }
 
-// findDHCPEnabledServers finds all servers attached to DHCP-enabled VPC subnets.
-// It returns servers grouped by VPC/subnet combination.
-func findDHCPEnabledServers(ctx context.Context, kube kclient.Client) (map[string][]DHCPServerInfo, error) {
+var errNoAttachedServers = errors.New("no servers attached to VPC subnets found")
+
+// findAnyAttachedServer finds the first server attached to any VPC subnet.
+// Does not filter on DHCP being enabled. Skips hostBGP subnets as they behave differently.
+// Returns errNoAttachedServers if no suitable server is found.
+func findAnyAttachedServer(ctx context.Context, kube kclient.Client) (*AttachedServerInfo, error) {
 	vpcAttaches := &vpcapi.VPCAttachmentList{}
 	if err := kube.List(ctx, vpcAttaches); err != nil {
 		return nil, fmt.Errorf("listing VPCAttachments: %w", err)
 	}
-
-	result := make(map[string][]DHCPServerInfo)
 
 	for _, attach := range vpcAttaches.Items {
 		conn := &wiringapi.Connection{}
@@ -881,16 +882,10 @@ func findDHCPEnabledServers(ctx context.Context, kube kclient.Client) (map[strin
 
 		subnetName := attach.Spec.SubnetName()
 		subnet := vpc.Spec.Subnets[subnetName]
-		if subnet == nil || !subnet.DHCP.Enable {
+		if subnet == nil || subnet.HostBGP {
 			continue
 		}
 
-		// Skip hostBGP subnets as they behave differently
-		if subnet.HostBGP {
-			continue
-		}
-
-		// Determine the interface name based on connection type
 		var ifName string
 		if conn.Spec.Unbundled != nil {
 			ifName = fmt.Sprintf("%s.%d", conn.Spec.Unbundled.Link.Server.LocalPortName(), subnet.VLAN)
@@ -898,16 +893,15 @@ func findDHCPEnabledServers(ctx context.Context, kube kclient.Client) (map[strin
 			ifName = fmt.Sprintf("bond0.%d", subnet.VLAN)
 		}
 
-		key := fmt.Sprintf("%s--%s", vpc.Name, subnetName)
-		result[key] = append(result[key], DHCPServerInfo{
+		return &AttachedServerInfo{
 			ServerName: serverNames[0],
 			Interface:  ifName,
 			VPCName:    vpc.Name,
 			SubnetName: subnetName,
 			VPC:        vpc,
 			Subnet:     subnet,
-		})
+		}, nil
 	}
 
-	return result, nil
+	return nil, errNoAttachedServers
 }
