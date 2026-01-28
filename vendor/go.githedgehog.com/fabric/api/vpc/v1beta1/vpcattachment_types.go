@@ -175,6 +175,7 @@ func (attach *VPCAttachment) Validate(ctx context.Context, kube kclient.Reader, 
 		if vpc.Spec.Subnets == nil || vpc.Spec.Subnets[subnet] == nil {
 			return nil, errors.Errorf("subnet %s not found in vpc %s", subnet, vpcName)
 		}
+		subnetSpec := vpc.Spec.Subnets[subnet]
 
 		conn := &wiringapi.Connection{}
 		err = kube.Get(ctx, ktypes.NamespacedName{Name: attach.Spec.Connection, Namespace: attach.Namespace}, conn)
@@ -188,15 +189,18 @@ func (attach *VPCAttachment) Validate(ctx context.Context, kube kclient.Reader, 
 		if conn.Spec.ESLAG != nil && vpc.Spec.Mode != VPCModeL2VNI {
 			return nil, errors.Errorf("vpc mode %s is not supported for ESLAG connections", vpc.Spec.Mode)
 		}
+		if subnetSpec.HostBGP && conn.Spec.Unbundled == nil {
+			return nil, errors.Errorf("only unbundled links can be used to attach to a hostBGP subnet")
+		}
 
 		var switchNames []string
-		if conn.Spec.Unbundled != nil || conn.Spec.Bundled == nil || conn.Spec.MCLAG == nil {
+		if conn.Spec.Unbundled != nil || conn.Spec.Bundled != nil || conn.Spec.MCLAG != nil || conn.Spec.ESLAG != nil {
 			switchNames, _, _, _, err = conn.Spec.Endpoints()
 			if err != nil {
 				return nil, errors.Wrapf(err, "failed to get endpoints for connection %s", attach.Spec.Connection) // TODO replace with some internal error to not expose to the user
 			}
 		} else {
-			return nil, errors.Errorf("vpc could be attached only to Unbundled, Bundled and MCLAG connections")
+			return nil, errors.Errorf("vpc can be attached only to Unbundled, Bundled, MCLAG or ESLAG connections")
 		}
 
 		if len(switchNames) == 0 {
@@ -236,6 +240,10 @@ func (attach *VPCAttachment) Validate(ctx context.Context, kube kclient.Reader, 
 				if !spf.L3VNI {
 					return nil, errors.Errorf("vpc mode %s is not supported on switch profile %s", vpc.Spec.Mode, sw.Spec.Profile)
 				}
+			}
+
+			if subnetSpec.HostBGP && sw.Spec.Redundancy.Group != "" && sw.Spec.Redundancy.Type == meta.RedundancyTypeMCLAG {
+				return nil, errors.Errorf("cannot attach hostBGP subnet to switch %s which is an MCLAG peer", sw.Name)
 			}
 		}
 
