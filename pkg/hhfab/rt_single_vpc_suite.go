@@ -5,14 +5,17 @@ package hhfab
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"strings"
 	"sync"
 	"time"
 
 	agentapi "go.githedgehog.com/fabric/api/agent/v1beta1"
+	dhcpapi "go.githedgehog.com/fabric/api/dhcp/v1beta1"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/util/pointer"
@@ -48,6 +51,10 @@ func makeSingleVPCSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 		{
 			Name: "DHCP renewal",
 			F:    testCtx.dhcpRenewalTest,
+		},
+		{
+			Name: "DHCP static lease",
+			F:    testCtx.dhcpStaticLeaseTest,
 		},
 		{
 			Name: "MCLAG Failover",
@@ -1002,6 +1009,210 @@ func (testCtx *VPCPeeringTestCtx) dhcpRenewalTest(ctx context.Context) (bool, []
 	}
 
 	slog.Info("DHCP renewal test completed successfully", "servers", len(testServers), "maxDuration", maxDuration)
+
+	return false, reverts, nil
+}
+
+// testStaticIPAssignment tests that a server gets the expected static IP assignment.
+// It updates the VPC with the static allocation, reconfigures the server's interface,
+// and verifies both the assigned IP and the DHCPSubnet status.
+func (testCtx *VPCPeeringTestCtx) testStaticIPAssignment(ctx context.Context, vpc *vpcapi.VPC, subnetName string, server ServerWithInterface, serverMAC string, staticIP net.IP, description string) error {
+	slog.Info("Testing static IP assignment", "description", description, "ip", staticIP.String(), "mac", serverMAC)
+
+	// Add static allocation
+	subnet := vpc.Spec.Subnets[subnetName]
+	if subnet.DHCP.Static == nil {
+		subnet.DHCP.Static = make(map[string]vpcapi.VPCDHCPStatic)
+	}
+	subnet.DHCP.Static[serverMAC] = vpcapi.VPCDHCPStatic{IP: staticIP.String()}
+
+	change, err := CreateOrUpdateVpc(ctx, testCtx.kube, vpc)
+	if err != nil || !change {
+		return fmt.Errorf("updating VPC %s with static allocation: %w", vpc.Name, err)
+	}
+
+	slog.Debug("Waiting for DHCP configuration to propagate")
+	if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
+		return fmt.Errorf("waiting for ready after DHCP change: %w", err)
+	}
+
+	time.Sleep(10 * time.Second)
+
+	// Reconfigure interface to get new IP
+	ssh, err := testCtx.getSSH(ctx, server.Name)
+	if err != nil {
+		return fmt.Errorf("getting ssh config for server %s: %w", server.Name, err)
+	}
+
+	_, stderr, err := ssh.Run(ctx, fmt.Sprintf("sudo networkctl reconfigure %s", server.Interface))
+	if err != nil {
+		if stderr != "" {
+			return fmt.Errorf("reconfiguring interface: %w (stderr: %s)", err, stderr)
+		}
+
+		return fmt.Errorf("reconfiguring interface: %w", err)
+	}
+
+	time.Sleep(5 * time.Second)
+
+	// Verify server got the static IP
+	assignedIP, err := getInterfaceIPv4(ctx, ssh, server.Interface)
+	if err != nil {
+		return fmt.Errorf("getting IP address from %s: %w", server.Name, err)
+	}
+	if assignedIP != staticIP.String() {
+		return fmt.Errorf("server %s did not get static IP: expected %s, got %s", server.Name, staticIP.String(), assignedIP) //nolint:goerr113
+	}
+
+	slog.Info("Static IP assignment verified", "description", description, "server", server.Name, "ip", assignedIP)
+
+	// Verify static IP is reserved in DHCPSubnet status
+	dhcpSubnetName := fmt.Sprintf("%s--%s", vpc.Name, subnetName)
+	dhcpSubnet := &dhcpapi.DHCPSubnet{}
+	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{
+		Namespace: kmetav1.NamespaceDefault,
+		Name:      dhcpSubnetName,
+	}, dhcpSubnet); err != nil {
+		return fmt.Errorf("getting DHCPSubnet %s: %w", dhcpSubnetName, err)
+	}
+
+	allocation, found := dhcpSubnet.Status.Allocated[serverMAC]
+	if !found {
+		return fmt.Errorf("static allocation for MAC %s not found in DHCPSubnet status", serverMAC) //nolint:goerr113
+	}
+
+	if allocation.IP != staticIP.String() {
+		return fmt.Errorf("DHCPSubnet allocation mismatch: expected %s, got %s", staticIP.String(), allocation.IP) //nolint:goerr113
+	}
+
+	slog.Info("Static IP test passed", "description", description, "ip", staticIP.String())
+
+	return nil
+}
+
+// Test DHCP static reservations within dynamic pool range
+// Verifies that static IP assignments work correctly both within and outside the dynamic range.
+// The test finds any server on any subnet, saves the existing DHCP config (if any),
+// forces a hardcoded DHCP config, runs tests, and restores the original config.
+func (testCtx *VPCPeeringTestCtx) dhcpStaticLeaseTest(ctx context.Context) (bool, []RevertFunc, error) {
+	// 1. Find any server attached to any VPC subnet (regardless of DHCP config)
+	serverInfo, err := findAnyAttachedServer(ctx, testCtx.kube)
+	if errors.Is(err, errNoAttachedServers) {
+		slog.Info("No servers with VPC attachments found, skipping DHCP static lease test")
+
+		return true, nil, nil
+	}
+	if err != nil {
+		return false, nil, err
+	}
+
+	ssh, err := testCtx.getSSH(ctx, serverInfo.ServerName)
+	if err != nil {
+		return false, nil, fmt.Errorf("getting ssh config for server %s: %w", serverInfo.ServerName, err)
+	}
+
+	serverMAC, err := getInterfaceMAC(ctx, ssh, serverInfo.Interface)
+	if err != nil || serverMAC == "" {
+		return false, nil, fmt.Errorf("getting MAC address for server %s interface %s: %w", serverInfo.ServerName, serverInfo.Interface, err)
+	}
+
+	testServer := ServerWithInterface{
+		Name:      serverInfo.ServerName,
+		Interface: serverInfo.Interface,
+	}
+
+	slog.Info("Testing DHCP static lease", "server", testServer.Name, "vpc", serverInfo.VPCName, "subnet", serverInfo.SubnetName, "mac", serverMAC)
+
+	// 2. Save the current DHCP config (may be empty/disabled)
+	subnet := serverInfo.VPC.Spec.Subnets[serverInfo.SubnetName]
+	savedDHCP := vpcapi.VPCDHCP{
+		Relay:  subnet.DHCP.Relay,
+		Enable: subnet.DHCP.Enable,
+	}
+	if subnet.DHCP.Range != nil {
+		savedDHCP.Range = &vpcapi.VPCDHCPRange{
+			Start: subnet.DHCP.Range.Start,
+			End:   subnet.DHCP.Range.End,
+		}
+	}
+	if subnet.DHCP.Static != nil {
+		savedDHCP.Static = make(map[string]vpcapi.VPCDHCPStatic, len(subnet.DHCP.Static))
+		for k, v := range subnet.DHCP.Static {
+			savedDHCP.Static[k] = v
+		}
+	}
+
+	// Parse subnet CIDR to derive hardcoded test IPs
+	_, subnetCIDR, err := net.ParseCIDR(subnet.Subnet)
+	if err != nil {
+		return false, nil, fmt.Errorf("parsing subnet CIDR %s: %w", subnet.Subnet, err)
+	}
+	baseIP := subnetCIDR.IP.To4()
+	if baseIP == nil {
+		return false, nil, fmt.Errorf("subnet %s is not IPv4", subnet.Subnet) //nolint:goerr113
+	}
+	baseInt := binary.BigEndian.Uint32(baseIP)
+
+	// Hardcoded test values derived from subnet base:
+	// - Dynamic range: base+10 to base+50
+	// - Static IP in range: base+20
+	// - Static IP outside range: base+100
+	rangeStart := make(net.IP, 4)
+	binary.BigEndian.PutUint32(rangeStart, baseInt+10)
+	rangeEnd := make(net.IP, 4)
+	binary.BigEndian.PutUint32(rangeEnd, baseInt+50)
+	staticIPInRange := make(net.IP, 4)
+	binary.BigEndian.PutUint32(staticIPInRange, baseInt+20)
+	staticIPOutsideRange := make(net.IP, 4)
+	binary.BigEndian.PutUint32(staticIPOutsideRange, baseInt+100)
+
+	// 3. Force a hardcoded DHCP config
+	subnet.DHCP = vpcapi.VPCDHCP{
+		Enable: true,
+		Range: &vpcapi.VPCDHCPRange{
+			Start: rangeStart.String(),
+			End:   rangeEnd.String(),
+		},
+	}
+
+	if _, err := CreateOrUpdateVpc(ctx, testCtx.kube, serverInfo.VPC); err != nil {
+		return false, nil, fmt.Errorf("updating VPC %s with test DHCP config: %w", serverInfo.VPCName, err)
+	}
+
+	if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
+		return false, nil, fmt.Errorf("waiting for ready after DHCP config change: %w", err)
+	}
+
+	time.Sleep(5 * time.Second)
+
+	// 5. Setup revert to restore original DHCP config
+	reverts := []RevertFunc{
+		func(ctx context.Context) error {
+			slog.Debug("Reverting DHCP config", "vpc", serverInfo.VPCName, "subnet", serverInfo.SubnetName)
+
+			subnet := serverInfo.VPC.Spec.Subnets[serverInfo.SubnetName]
+			subnet.DHCP = savedDHCP
+
+			if _, err := CreateOrUpdateVpc(ctx, testCtx.kube, serverInfo.VPC); err != nil {
+				return fmt.Errorf("reverting VPC %s DHCP config: %w", serverInfo.VPCName, err)
+			}
+
+			return WaitReady(ctx, testCtx.kube, testCtx.wrOpts)
+		},
+	}
+
+	// 4. Run the tests with known hardcoded IPs
+	// Test 1: Static IP within the dynamic range
+	if err := testCtx.testStaticIPAssignment(ctx, serverInfo.VPC, serverInfo.SubnetName, testServer, serverMAC, staticIPInRange, "static IP within dynamic range"); err != nil {
+		return false, reverts, err
+	}
+
+	// Test 2: Static IP outside the dynamic range
+	if err := testCtx.testStaticIPAssignment(ctx, serverInfo.VPC, serverInfo.SubnetName, testServer, serverMAC, staticIPOutsideRange, "static IP outside dynamic range"); err != nil {
+		return false, reverts, err
+	}
+
+	slog.Info("DHCP static lease test completed successfully", "server", testServer.Name)
 
 	return false, reverts, nil
 }

@@ -816,3 +816,92 @@ func fetchAndParseDHCPLease(ctx context.Context, ssh *sshutil.Config, ifName str
 
 	return info, nil
 }
+
+// getInterfaceIPv4 retrieves the IPv4 address assigned to the specified network interface.
+func getInterfaceIPv4(ctx context.Context, ssh *sshutil.Config, ifName string) (string, error) {
+	ipOut, _, err := ssh.Run(ctx, fmt.Sprintf("ip addr show dev %s proto 4 | grep 'inet ' | awk '{print $2}' | cut -d'/' -f1", ifName))
+	if err != nil {
+		return "", fmt.Errorf("getting IP address: %w", err)
+	}
+
+	return strings.TrimSpace(ipOut), nil
+}
+
+// getInterfaceMAC retrieves the MAC address of the specified network interface.
+func getInterfaceMAC(ctx context.Context, ssh *sshutil.Config, ifName string) (string, error) {
+	macOut, _, err := ssh.Run(ctx, fmt.Sprintf("ip link show %s | grep -o 'link/ether [0-9a-f:]*' | awk '{print $2}'", ifName))
+	if err != nil {
+		return "", fmt.Errorf("getting MAC address: %w", err)
+	}
+
+	return strings.TrimSpace(macOut), nil
+}
+
+// DHCPServerInfo contains information about a server attached to a VPC subnet.
+type DHCPServerInfo struct {
+	ServerName string
+	Interface  string
+	VPCName    string
+	SubnetName string
+	VPC        *vpcapi.VPC
+	Subnet     *vpcapi.VPCSubnet
+}
+
+var errNoAttachedServers = errors.New("no servers attached to VPC subnets found")
+
+// findAnyAttachedServer finds the first server attached to any VPC subnet.
+// Does not filter on DHCP being enabled. Skips hostBGP subnets as they behave differently.
+// Returns errNoAttachedServers if no suitable server is found.
+func findAnyAttachedServer(ctx context.Context, kube kclient.Client) (*DHCPServerInfo, error) {
+	vpcAttaches := &vpcapi.VPCAttachmentList{}
+	if err := kube.List(ctx, vpcAttaches); err != nil {
+		return nil, fmt.Errorf("listing VPCAttachments: %w", err)
+	}
+
+	for _, attach := range vpcAttaches.Items {
+		conn := &wiringapi.Connection{}
+		if err := kube.Get(ctx, kclient.ObjectKey{
+			Namespace: kmetav1.NamespaceDefault,
+			Name:      attach.Spec.Connection,
+		}, conn); err != nil {
+			continue
+		}
+
+		_, serverNames, _, _, err := conn.Spec.Endpoints()
+		if err != nil || len(serverNames) != 1 {
+			continue
+		}
+
+		vpc := &vpcapi.VPC{}
+		if err := kube.Get(ctx, kclient.ObjectKey{
+			Namespace: kmetav1.NamespaceDefault,
+			Name:      attach.Spec.VPCName(),
+		}, vpc); err != nil {
+			continue
+		}
+
+		subnetName := attach.Spec.SubnetName()
+		subnet := vpc.Spec.Subnets[subnetName]
+		if subnet == nil || subnet.HostBGP {
+			continue
+		}
+
+		var ifName string
+		if conn.Spec.Unbundled != nil {
+			ifName = fmt.Sprintf("%s.%d", conn.Spec.Unbundled.Link.Server.LocalPortName(), subnet.VLAN)
+		} else {
+			ifName = fmt.Sprintf("bond0.%d", subnet.VLAN)
+		}
+
+		return &DHCPServerInfo{
+			ServerName: serverNames[0],
+			Interface:  ifName,
+			VPCName:    vpc.Name,
+			SubnetName: subnetName,
+			VPC:        vpc,
+			Subnet:     subnet,
+		}, nil
+	}
+
+	return nil, errNoAttachedServers
+}
