@@ -539,11 +539,14 @@ func DefaultShowTechScript() ShowTechScript {
 	}
 }
 
-func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB) error {
+func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB, outputDir ...string) error {
 	scriptConfig := DefaultShowTechScript()
 
-	outputDir := filepath.Join(c.WorkDir, "show-tech-output")
-	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+	outDir := filepath.Join(c.WorkDir, "show-tech-output")
+	if len(outputDir) > 0 && outputDir[0] != "" {
+		outDir = outputDir[0]
+	}
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return fmt.Errorf("creating output directory: %w", err)
 	}
 
@@ -607,7 +610,7 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB) error {
 			defer cancel()
 
 			script := scriptConfig.Scripts[vmType]
-			if err := c.collectShowTech(collectionCtx, name, ssh, script, outputDir); err != nil {
+			if err := c.collectShowTech(collectionCtx, name, ssh, script, outDir); err != nil {
 				errChan <- fmt.Errorf("collecting show-tech for %s: %w", name, err)
 			} else {
 				successCount.Add(1)
@@ -631,7 +634,7 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB) error {
 			"errors", errors)
 	}
 
-	slog.Info("Show tech files saved in", "folder", outputDir)
+	slog.Info("Show tech files saved in", "folder", outDir)
 
 	return nil
 }
