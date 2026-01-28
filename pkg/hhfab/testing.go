@@ -133,14 +133,17 @@ func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) erro
 	var err error
 
 	for idx := 0; ; idx++ {
-		f, _, _, err = fab.GetFabAndNodes(ctx, kube, fab.GetFabAndNodesOpts{AllowNotHydrated: true})
+		// we don't need to calculate versions as we need to check against what's currently running fabricator controller expecting
+		f, _, _, err = fab.GetFabAndNodes(ctx, kube, fab.GetFabAndNodesOpts{AllowNotHydrated: true, NoCalculateVersions: true})
 		if err != nil {
 			slog.Warn("Failed to get fabricator", "error", err.Error())
 
 			continue
 		}
 
-		upToDate := string(f.Status.Versions.Fabricator.Controller) == f.Status.LastAppliedController
+		expectedFab := string(f.Status.Versions.Fabricator.Controller)
+
+		upToDate := expectedFab == f.Status.LastAppliedController
 		lastApplied := f.Generation == f.Status.LastAppliedGen
 		applied := kmeta.IsStatusConditionTrue(f.Status.Conditions, fabapi.ConditionApplied)
 		ready := kmeta.IsStatusConditionTrue(f.Status.Conditions, fabapi.ConditionReady)
@@ -153,7 +156,7 @@ func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) erro
 		}
 
 		if idx%opts.PrintEvery == 0 {
-			slog.Info("Fabricator status", "upToDate", upToDate, "lastApplied", lastApplied, "applied", applied, "ready", ready, "gatewayReady", gwReady)
+			slog.Info("Fabricator status", "expected", expectedFab, "upToDate", upToDate, "lastApplied", lastApplied, "applied", applied, "ready", ready, "gatewayReady", gwReady)
 		}
 
 		select {
@@ -422,7 +425,7 @@ func getServerHostBGPCmd(conn *wiringapi.Connection, subnet netip.Prefix, server
 
 	cmd := strings.Join(interfaces, ",")
 	addr := subnet.Addr()
-	for _ = range serversInSubnet {
+	for range serversInSubnet {
 		addr = addr.Next()
 	}
 	if !addr.IsValid() {
@@ -431,7 +434,6 @@ func getServerHostBGPCmd(conn *wiringapi.Connection, subnet netip.Prefix, server
 	cmd += " " + addr.String() + "/32"
 
 	return cmd, nil
-
 }
 
 type ServerAttachState struct {
