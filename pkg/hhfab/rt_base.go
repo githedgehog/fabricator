@@ -28,8 +28,9 @@ import (
 )
 
 const (
-	waitAppliedFor = 15 * time.Second
-	waitTimeout    = 5 * time.Minute
+	waitAppliedFor   = 15 * time.Second
+	waitAppliedForVS = 60 * time.Second // extended wait for virtual switches
+	waitTimeout      = 5 * time.Minute
 )
 
 var (
@@ -675,6 +676,7 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 			if sw.Spec.Profile == meta.SwitchProfileVS {
 				slog.Warn("Virtual switch found, some tests will be skipped", "switch", sw.Name)
 				skipFlags.VirtualSwitch = true
+				testCtx.wrOpts.AppliedFor = waitAppliedForVS
 			}
 		}
 		// check for leaf switches supporting subinterfaces and/or RoCE
