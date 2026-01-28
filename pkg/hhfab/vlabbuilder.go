@@ -915,10 +915,8 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 			}
 			if ext.Spec.L2 != nil {
 				extAttachSpec.L2 = &vpcapi.ExternalAttachmentL2{
-					IP:           fmt.Sprintf("100.%d.%d.6", connOctet, vlanID),
-					VLAN:         vlanID,
-					GatewayIPs:   []string{fmt.Sprintf("100.%d.%d.1/24", connOctet, vlanID)},
-					FabricEdgeIP: fmt.Sprintf("192.168.%d.1/31", connOctet),
+					IP:   fmt.Sprintf("100.%d.%d.1", connOctet, vlanID),
+					VLAN: vlanID,
 				}
 			} else {
 				extAttachSpec.Switch = vpcapi.ExternalAttachmentSwitch{
