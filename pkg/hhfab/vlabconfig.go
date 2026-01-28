@@ -768,9 +768,11 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 				}
 				if extVrf.IsL2 {
 					// update VRF config with some attachment specs that are handy to keep there for the template
-					// TODO: transform gateway IPs into /32 for the purpose of installing static routes in the external?
-					// it would be more accurate, although this should work just fine
-					extVrf.L2Cfg.GatewayIPs = extAttach.Spec.L2.GatewayIPs
+					l2IP, err := netip.ParsePrefix(extAttach.Spec.L2.IP + "/24")
+					if err != nil {
+						return nil, fmt.Errorf("failed to parse L2 external IP %q: %w", extAttach.Spec.L2.IP, err)
+					}
+					extVrf.L2Cfg.GatewayIPs = []string{l2IP.Masked().String()}
 					// add vlan to the interface name for the static route
 					if extAttach.Spec.L2.VLAN != 0 {
 						extVrf.L2Cfg.NICName = fmt.Sprintf("%s.%d", nicName, extAttach.Spec.L2.VLAN)
