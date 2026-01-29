@@ -101,7 +101,7 @@ run_vtysh_cmd() {
     run_vtysh_cmd "show logging"
     run_vtysh_cmd "show protocols"
     run_vtysh_cmd "show zebra status"
-    run_vtysh_cmd "show memory"
+#    run_vtysh_cmd "show memory"
     run_vtysh_cmd "show thread cpu"
     run_vtysh_cmd "show ip bgp"
 } >> "$OUTPUT_FILE" 2>&1
