@@ -20,7 +20,7 @@ FRR_CONTAINER_ID=$(sudo -E crictl --runtime-endpoint unix:///run/k3s/containerd/
 # Helper for running vtysh commands inside the FRR container
 run_vtysh_cmd() {
     echo -e "\n=== Executing: vtysh -c '$1' ===" >> "$OUTPUT_FILE"
-    sudo -E crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock exec "$FRR_CONTAINER_ID" vtysh -c "$1" >> "$OUTPUT_FILE" 2>&1
+    sudo -E crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock exec "$FRR_CONTAINER_ID" vtysh -X /lib/libvtysh_hedgehog.so -c "$1" >> "$OUTPUT_FILE" 2>&1
 }
 
 # ---------------------------
@@ -104,6 +104,8 @@ run_vtysh_cmd() {
 #    run_vtysh_cmd "show memory"
     run_vtysh_cmd "show thread cpu"
     run_vtysh_cmd "show ip bgp"
+    run_vtysh_cmd "show hedgehog plugin version"
+    run_vtysh_cmd "show hedgehog rpc stats"
 } >> "$OUTPUT_FILE" 2>&1
 
 # ---------------------------
