@@ -77,6 +77,11 @@ on:
         type: boolean
         required: false
         default: false
+      releasetest_extended:
+        description: "Run extended release tests"
+        type: boolean
+        required: false
+        default: false
       debug:
         description: "Enable tmate debugging"
         type: boolean
@@ -130,6 +135,7 @@ jobs:
           echo "  Release test: ${{ inputs.releasetest }}"
           echo "  Release test regex: ${{ inputs.releasetest_regex }}"
           echo "  Release test regex invert: ${{ inputs.releasetest_regex_invert }}"
+          echo "  Release test extended: ${{ inputs.releasetest_extended }}"
           echo "  Debug: ${{ inputs.debug }}"
           echo "  Pause on failure: ${{ inputs.pause_on_failure }}"
           echo "Calculated:"
@@ -285,6 +291,7 @@ jobs:
             ${{ inputs.releasetest && '--ready=release-test' || '' }} \
             ${{ inputs.releasetest_regex && format('--release-test-regexes="{0}"', inputs.releasetest_regex) || '' }} \
             ${{ inputs.releasetest_regex_invert && '--release-test-regexes-invert' || '' }} \
+            ${{ inputs.releasetest_extended && '--release-test-extended' || '' }} \
             --ready=exit \
             ${{ inputs.pause_on_failure && inputs.debug && '--pause-on-failure' || '' }} \
             ${{ inputs.upgradefrom != '' && '--upgrade' || '' }}

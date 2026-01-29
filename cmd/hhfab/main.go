@@ -80,6 +80,7 @@ const (
 	FlagListTests                 = "list-tests"
 	FlagReleaseTestRegexes        = "release-test-regexes"
 	FlagReleaseTestRegexesInvert  = "release-test-regexes-invert"
+	FlagReleaseTestExtended       = "release-test-extended"
 )
 
 func main() {
@@ -930,6 +931,11 @@ func Run(ctx context.Context) error {
 								Aliases: []string{"rt-invert"},
 								Usage:   "invert regex selection for release tests (used when --ready=release-test)",
 							},
+							&cli.BoolFlag{
+								Name:    FlagReleaseTestExtended,
+								Aliases: []string{"rt-extended"},
+								Usage:   "run extended release tests (used when --ready=release-test)",
+							},
 							&cli.UintFlag{
 								Category: FlagCatVMSizes,
 								Name:     "control-cpus",
@@ -1033,6 +1039,7 @@ func Run(ctx context.Context) error {
 									VPCMode:                  vpcapi.VPCMode(handleL2VNI(c.String(FlagNameVPCMode))),
 									ReleaseTestRegexes:       c.StringSlice(FlagReleaseTestRegexes),
 									ReleaseTestRegexesInvert: c.Bool(FlagReleaseTestRegexesInvert),
+									ReleaseTestExtended:      c.Bool(FlagReleaseTestExtended),
 								},
 							}); err != nil {
 								return fmt.Errorf("running VLAB: %w", err)

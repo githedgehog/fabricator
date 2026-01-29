@@ -36,6 +36,11 @@ on:
         description: "Run release tests in hlab"
         required: false
         default: false
+      releasetest_extended:
+        type: boolean
+        description: "Run extended release tests"
+        required: false
+        default: false
       debug_enabled:
         type: boolean
         description: "Run the build with tmate debugging enabled (https://github.com/marketplace/actions/debugging-with-tmate)"
@@ -260,6 +265,7 @@ jobs:
       buildmode: ${{ matrix.buildmode }}
       vpcmode: ${{ matrix.vpcmode }}
       releasetest: ${{ (matrix.hybrid && (inputs.releasetest_hlab == true || contains(github.event.pull_request.labels.*.name, 'ci:+release') || github.event.schedule == '0 6 * * *')) || (!matrix.hybrid && (inputs.releasetest_vlab == true || contains(github.event.pull_request.labels.*.name, 'ci:+release') || github.event.schedule == '0 6 * * *')) }}
+      releasetest_extended: ${{ github.event_name == 'workflow_dispatch' && inputs.releasetest_extended == true }}
       hybrid: ${{ matrix.hybrid }}
       upgradefrom: ${{ matrix.upgradefrom }}
 

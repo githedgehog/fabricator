@@ -101,6 +101,7 @@ type VLABRunOpts struct {
 	PauseOnFailure           bool
 	ReleaseTestRegexes       []string
 	ReleaseTestRegexesInvert bool
+	ReleaseTestExtended      bool
 }
 
 type OnReady string
@@ -712,6 +713,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						PauseOnFailure: opts.PauseOnFailure,
 						Regexes:        opts.ReleaseTestRegexes,
 						InvertRegex:    opts.ReleaseTestRegexesInvert,
+						Extended:       opts.ReleaseTestExtended,
 					}); err != nil {
 						if c.Shutdown.Load() == int32(ShutdownTypeGraceful) {
 							return nil
