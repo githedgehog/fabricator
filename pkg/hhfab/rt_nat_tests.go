@@ -746,16 +746,14 @@ func getNATTestCases(testCtx *VPCPeeringTestCtx) []JUnitTestCase {
 			Name: "Gateway Peering Stateless NAT with IP Exclusion",
 			F:    testCtx.gatewayPeeringStatelessNATWithIPExclusionTest,
 			SkipFlags: SkipFlags{
-				NoGateway:    true,
-				ExtendedOnly: true,
+				NoGateway: true,
 			},
 		},
 		{
 			Name: "Gateway Peering Stateless NAT with NAT Pool Exclusion",
 			F:    testCtx.gatewayPeeringStatelessNATWithNATPoolExclusionTest,
 			SkipFlags: SkipFlags{
-				NoGateway:    true,
-				ExtendedOnly: true,
+				NoGateway: true,
 			},
 		},
 		{
@@ -769,8 +767,7 @@ func getNATTestCases(testCtx *VPCPeeringTestCtx) []JUnitTestCase {
 			Name: "Gateway Peering Overlap NAT",
 			F:    testCtx.gatewayPeeringOverlapNATTest,
 			SkipFlags: SkipFlags{
-				NoGateway:    true,
-				ExtendedOnly: true,
+				NoGateway: true,
 			},
 		},
 	}
