@@ -4,6 +4,7 @@
 package hhfab
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -2616,8 +2617,21 @@ type iperf3ReportSum struct {
 }
 
 func parseIPerf3Report(data []byte) (*iperf3Report, error) {
+	// iperf3 may output error messages before/after the JSON (e.g., pthread_mutex errors)
+	// Find the start of the JSON object and use a streaming decoder to ignore trailing content
+	start := bytes.IndexByte(data, '{')
+	if start == -1 {
+		return nil, fmt.Errorf("no JSON object found in iperf3 output")
+	}
+	if start > 0 {
+		slog.Debug("iperf3 output contained non-JSON prefix, stripping", "prefix", string(data[:start]))
+		data = data[start:]
+	}
+
+	// Use json.Decoder to parse just the first JSON object, ignoring any trailing content
 	report := &iperf3Report{}
-	if err := json.Unmarshal(data, report); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	if err := decoder.Decode(report); err != nil {
 		return nil, fmt.Errorf("unmarshaling iperf3 report: %w", err)
 	}
 
