@@ -52,12 +52,14 @@ const (
 	FlagIncludeONIE               = "include-onie"
 	FlagIncludeCLS                = "include-cls"
 	FlagNodeMgmtLinks             = "node-mgmt-links"
+	FlagOOBMgmtIface              = "mgmt-link"
 	FlagGateway                   = "gateway"
 	FlagGateways                  = "gateways"
 	FlagO11yDefaults              = "o11y-defaults"
 	FlagO11yLabels                = "o11y-labels"
 	FlagNameFabricMode            = "fabric-mode"
 	FlagNameCount                 = "count"
+	FlagNameIface                 = "iface"
 	FlagNameKillStale             = "kill-stale"
 	FlagNameControlsRestricted    = "controls-restricted"
 	FlagNameServersRestricted     = "servers-restricted"
@@ -910,6 +912,12 @@ func Run(ctx context.Context) error {
 								Aliases: []string{"r"},
 								Usage:   "run commands on all VMs ready (one of: " + strings.Join(onReadyCommands, ", ") + ")",
 							},
+							&cli.StringFlag{
+								Name:    FlagOOBMgmtIface,
+								Aliases: []string{"oob"},
+								Usage:   "management (OOB network) interface name to be used to attach hardware devices (hlab)",
+								EnvVars: []string{"HHFAB_OOB_MGMT_IFACE"},
+							},
 							&cli.BoolFlag{
 								Name:    FlagNameCollectShowTech,
 								Aliases: []string{"collect"},
@@ -1029,6 +1037,7 @@ func Run(ctx context.Context) error {
 									FailFast:                 c.Bool(FlagNameFailFast),
 									PauseOnFailure:           c.Bool(FlagPauseOnFailure),
 									OnReady:                  onReady,
+									OOBMgmtIface:             c.String(FlagOOBMgmtIface),
 									CollectShowTech:          c.Bool(FlagNameCollectShowTech),
 									VPCMode:                  vpcapi.VPCMode(handleL2VNI(c.String(FlagNameVPCMode))),
 									ReleaseTestRegexes:       c.StringSlice(FlagReleaseTestRegexes),
@@ -1597,8 +1606,8 @@ func Run(ctx context.Context) error {
 				Hidden: true,
 				Subcommands: []*cli.Command{
 					{
-						Name:  "setup-taps",
-						Usage: "setup tap devices and a bridge for VLAB",
+						Name:  "setup-oob-mgmt-net",
+						Usage: "setup bridge to be OOB Mgmt Network with tap devices and interfaces",
 						Flags: flatten(defaultFlags, []cli.Flag{
 							&cli.IntFlag{
 								Name:     FlagNameCount,
@@ -1616,11 +1625,16 @@ func Run(ctx context.Context) error {
 									return nil
 								},
 							},
+							&cli.StringSliceFlag{
+								Name:     FlagNameIface,
+								Usage:    "list of interfaces to include into the bridge",
+								Required: false,
+							},
 						}),
 						Before: before(true),
 						Action: func(c *cli.Context) error {
-							if err := hhfab.PrepareTaps(ctx, c.Int(FlagNameCount)); err != nil {
-								return fmt.Errorf("preparing taps: %w", err)
+							if err := hhfab.SetupOOBMgmtNet(ctx, c.Int(FlagNameCount), c.StringSlice(FlagNameIface)); err != nil {
+								return fmt.Errorf("preparing oob mgmt net: %w", err)
 							}
 
 							return nil
