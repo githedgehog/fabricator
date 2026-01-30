@@ -338,8 +338,9 @@ func (testCtx *VPCPeeringTestCtx) testNATGatewayConnectivity(
 	return nil
 }
 
-// Test basic gateway peering with stateful NAT (bidirectional NAT on both VPCs)
-func (testCtx *VPCPeeringTestCtx) gatewayPeeringNATTest(ctx context.Context) (bool, []RevertFunc, error) {
+// Test gateway peering with stateful source NAT (only VPC1 has stateful NAT configured)
+// NOTE: Stateful NAT on both sides of a peering is not supported (see dataplane#1248)
+func (testCtx *VPCPeeringTestCtx) gatewayPeeringStatefulSourceNATTest(ctx context.Context) (bool, []RevertFunc, error) {
 	vpcs := &vpcapi.VPCList{}
 	if err := testCtx.kube.List(ctx, vpcs); err != nil {
 		return false, nil, fmt.Errorf("listing VPCs: %w", err)
@@ -360,12 +361,11 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringNATTest(ctx context.Context) (bo
 	vpc1 := &vpcs.Items[0]
 	vpc2 := &vpcs.Items[1]
 
+	// Only VPC1 has stateful NAT - VPC1's traffic will be source-NATed
 	vpc1NATCIDR := []string{"192.168.11.0/24"}
-	vpc2NATCIDR := []string{"192.168.12.0/24"}
 
 	appendGwPeeringSpec(gwPeerings, vpc1, vpc2, GwPeeringOptions{
 		VPC1NATCIDR: vpc1NATCIDR,
-		VPC2NATCIDR: vpc2NATCIDR,
 		StatefulNAT: true,
 	})
 
@@ -380,8 +380,8 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringNATTest(ctx context.Context) (bo
 	// Wait for NAT peering to take effect
 	time.Sleep(15 * time.Second)
 
-	// Test connectivity using custom NAT-aware connectivity testing
-	if err := testCtx.testNATGatewayConnectivity(ctx, vpc1, vpc2, vpc1NATCIDR, vpc2NATCIDR); err != nil {
+	// Test connectivity - VPC2 has no NAT, so we ping real IPs
+	if err := testCtx.testNATGatewayConnectivity(ctx, vpc1, vpc2, vpc1NATCIDR, nil); err != nil {
 		if testCtx.pauseOnFail {
 			if err := pauseOnFailure(ctx); err != nil {
 				slog.Warn("Pause on failure failed, ignoring", "err", err.Error())
@@ -608,8 +608,9 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringStatelessNATWithNATPoolExclusion
 	return false, nil, nil
 }
 
-// Test gateway peering with stateful NAT
-func (testCtx *VPCPeeringTestCtx) gatewayPeeringStatefulNATTest(ctx context.Context) (bool, []RevertFunc, error) {
+// Test gateway peering with stateful destination NAT (only VPC2 has stateful NAT configured)
+// NOTE: Stateful NAT on both sides of a peering is not supported (see dataplane#1248)
+func (testCtx *VPCPeeringTestCtx) gatewayPeeringStatefulDestinationNATTest(ctx context.Context) (bool, []RevertFunc, error) {
 	vpcs := &vpcapi.VPCList{}
 	if err := testCtx.kube.List(ctx, vpcs); err != nil {
 		return false, nil, fmt.Errorf("listing VPCs: %w", err)
@@ -629,12 +630,10 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringStatefulNATTest(ctx context.Cont
 	vpc1 := &vpcs.Items[0]
 	vpc2 := &vpcs.Items[1]
 
-	// Both VPCs have stateful NAT configured
-	vpc1NATCIDR := []string{"192.168.51.0/24"}
+	// Only VPC2 has stateful NAT - VPC1 will ping VPC2's NAT IPs (destination NAT)
 	vpc2NATCIDR := []string{"192.168.52.0/24"}
 
 	appendGwPeeringSpec(gwPeerings, vpc1, vpc2, GwPeeringOptions{
-		VPC1NATCIDR: vpc1NATCIDR,
 		VPC2NATCIDR: vpc2NATCIDR,
 		StatefulNAT: true,
 	})
@@ -649,7 +648,8 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringStatefulNATTest(ctx context.Cont
 
 	time.Sleep(15 * time.Second)
 
-	if err := testCtx.testNATGatewayConnectivity(ctx, vpc1, vpc2, vpc1NATCIDR, vpc2NATCIDR); err != nil {
+	// Test connectivity - VPC1 pings VPC2's NAT IPs
+	if err := testCtx.testNATGatewayConnectivity(ctx, vpc1, vpc2, nil, vpc2NATCIDR); err != nil {
 		if testCtx.pauseOnFail {
 			if err := pauseOnFailure(ctx); err != nil {
 				slog.Warn("Pause on failure failed, ignoring", "err", err.Error())
@@ -722,8 +722,8 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringOverlapNATTest(ctx context.Conte
 func getNATTestCases(testCtx *VPCPeeringTestCtx) []JUnitTestCase {
 	return []JUnitTestCase{
 		{
-			Name: "Gateway Peering NAT (Stateful Bidirectional)",
-			F:    testCtx.gatewayPeeringNATTest,
+			Name: "Gateway Peering Stateful Source NAT",
+			F:    testCtx.gatewayPeeringStatefulSourceNATTest,
 			SkipFlags: SkipFlags{
 				NoGateway: true,
 			},
@@ -759,8 +759,8 @@ func getNATTestCases(testCtx *VPCPeeringTestCtx) []JUnitTestCase {
 			},
 		},
 		{
-			Name: "Gateway Peering Stateful NAT",
-			F:    testCtx.gatewayPeeringStatefulNATTest,
+			Name: "Gateway Peering Stateful Destination NAT",
+			F:    testCtx.gatewayPeeringStatefulDestinationNATTest,
 			SkipFlags: SkipFlags{
 				NoGateway: true,
 			},
