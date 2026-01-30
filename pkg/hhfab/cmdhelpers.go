@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -19,11 +20,11 @@ import (
 	"github.com/vishvananda/netlink"
 )
 
-func PrepareTaps(_ context.Context, count int) error {
+func SetupOOBMgmtNet(_ context.Context, count int, includeIfaces []string) error {
 	if count > 0 {
-		slog.Debug("Preparing taps and bridge", "count", count)
+		slog.Debug("Preparing OOB Mgmt Net", "bridge", VLABBridge, "taps", count, "include", includeIfaces)
 	} else {
-		slog.Debug("Deleting taps and bridge")
+		slog.Debug("Removing OOB Mgmt Net", "bridge", VLABBridge)
 	}
 
 	br, err := netlink.LinkByName(VLABBridge)
@@ -85,7 +86,7 @@ func PrepareTaps(_ context.Context, count int) error {
 		existing[name] = link
 	}
 
-	for idx := 0; idx < count; idx++ {
+	for idx := range count {
 		name := fmt.Sprintf("%s%d", VLABTapPrefix, idx)
 		tap, exist := existing[name]
 		if !exist {
@@ -115,10 +116,40 @@ func PrepareTaps(_ context.Context, count int) error {
 		}
 	}
 
+	included := map[string]bool{}
+	for _, link := range links {
+		name := link.Attrs().Name
+		if !slices.Contains(includeIfaces, name) {
+			continue
+		}
+
+		slog.Debug("Attaching to bridge", "iface", name)
+
+		if err := netlink.LinkSetDown(link); err != nil {
+			return fmt.Errorf("setting link down %q: %w", name, err)
+		}
+
+		if err := netlink.LinkSetMaster(link, br); err != nil {
+			return fmt.Errorf("adding link %q to %q: %w", name, VLABBridge, err)
+		}
+
+		if err := netlink.LinkSetUp(link); err != nil {
+			return fmt.Errorf("setting link up %q: %w", name, err)
+		}
+
+		included[name] = true
+	}
+
+	for _, iface := range includeIfaces {
+		if !included[iface] {
+			return fmt.Errorf("interface %q not found", iface) //nolint:err113
+		}
+	}
+
 	if count > 0 {
-		slog.Info("Taps and bridge are ready", "count", count)
+		slog.Info("OOB Mgmt Net is ready", "bridge", VLABBridge, "taps", count, "included", includeIfaces)
 	} else {
-		slog.Info("Taps and bridge are deleted")
+		slog.Info("OOB Mgmt Net is removed", "bridge", VLABBridge)
 	}
 
 	return nil

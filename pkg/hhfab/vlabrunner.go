@@ -96,6 +96,7 @@ type VLABRunOpts struct {
 	AutoUpgrade              bool
 	FailFast                 bool
 	OnReady                  []OnReady
+	OOBMgmtIface             string
 	CollectShowTech          bool
 	VPCMode                  vpcapi.VPCMode
 	PauseOnFailure           bool
@@ -234,10 +235,16 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 		}
 	}
 
-	if err := execHelper(ctx, c.WorkDir, []string{
-		"setup-taps", "--count", fmt.Sprintf("%d", vlab.Taps),
-	}); err != nil {
-		return fmt.Errorf("running helper to prepare taps: %w", err)
+	{
+		args := []string{
+			"setup-oob-mgmt-net", "--count", fmt.Sprintf("%d", vlab.Taps),
+		}
+		if opts.OOBMgmtIface != "" {
+			args = append(args, "--iface", opts.OOBMgmtIface)
+		}
+		if err := execHelper(ctx, c.WorkDir, args); err != nil {
+			return fmt.Errorf("running helper to prepare taps: %w", err)
+		}
 	}
 
 	toBind := []string{}
