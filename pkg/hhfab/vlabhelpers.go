@@ -646,9 +646,9 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB) error {
 	} else {
 		slog.Warn("Expect not available; console fallback disabled", "err", err)
 	}
-	if switchConsoleScriptPath != "" && (os.Getenv(VLABEnvSwitchUser) == "" || os.Getenv(VLABEnvSwitchPass) == "") {
+	if switchConsoleScriptPath != "" && (os.Getenv(VLABEnvSwitchUsername) == "" || os.Getenv(VLABEnvSwitchPassword) == "") {
 		slog.Info("Switch console credentials not set; skipping console diagnostics",
-			"env", VLABEnvSwitchUser+"/"+VLABEnvSwitchPass)
+			"env", VLABEnvSwitchUsername+"/"+VLABEnvSwitchPassword)
 		switchConsoleScriptPath = ""
 	}
 
