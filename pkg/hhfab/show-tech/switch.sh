@@ -69,6 +69,7 @@ run_sonic_cmd() {
 {
     echo -e "\n=== L2 Information ==="
     run_sonic_cmd "show mac address-table"
+    run_sonic_cmd "show mac address-table count"
     run_sonic_cmd "show mclag brief"
     run_sonic_cmd "show mclag interface"
     run_sonic_cmd "show port-channel summary"
@@ -102,6 +103,8 @@ run_sonic_cmd() {
     echo -e "\n=== VRF List ==="
     run_sonic_cmd "show ip vrf"
     echo -e "\n=== Route Summary (all VRFs) ==="
+    run_sonic_cmd "show ip route vrf all summary"
+    echo -e "\n=== Routes (all VRFs) ==="
     run_sonic_cmd "show ip route vrf all"
 
     # --- Per-VRF route and ARP tables ---
@@ -133,6 +136,15 @@ run_sonic_cmd() {
     run_sonic_cmd "show interface transceiver summary"
     run_sonic_cmd "show interface transceiver laser status"
     run_sonic_cmd "show interface transceiver wattage"
+} >> "$OUTPUT_FILE" 2>&1
+
+# ---------------------------
+# Critical Resources
+# ---------------------------
+{
+    echo -e "\n=== Critical Resource Monitoring ==="
+    run_sonic_cmd "show crm resources all"
+    run_sonic_cmd "show crm thresholds all"
 } >> "$OUTPUT_FILE" 2>&1
 
 # ---------------------------
