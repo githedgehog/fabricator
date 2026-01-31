@@ -429,12 +429,12 @@ func Run(ctx context.Context) error {
 		&cli.StringFlag{
 			Name:    "switch-username",
 			Usage:   "switch username for console show-tech",
-			EnvVars: []string{hhfab.VLABEnvSwitchUser},
+			EnvVars: []string{hhfab.VLABEnvSwitchUsername},
 		},
 		&cli.StringFlag{
 			Name:    "switch-password",
 			Usage:   "switch password for console show-tech",
-			EnvVars: []string{hhfab.VLABEnvSwitchPass},
+			EnvVars: []string{hhfab.VLABEnvSwitchPassword},
 		},
 	}
 

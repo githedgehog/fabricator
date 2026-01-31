@@ -75,10 +75,10 @@ const (
 
 	VLABKubeConfig = "kubeconfig"
 
-	VLABEnvPDUUsername = "HHFAB_VLAB_PDU_USERNAME"
-	VLABEnvPDUPassword = "HHFAB_VLAB_PDU_PASSWORD" //nolint:gosec
-	VLABEnvSwitchUser  = "HHFAB_SWITCH_USER"
-	VLABEnvSwitchPass  = "HHFAB_SWITCH_PASS" //nolint:gosec
+	VLABEnvPDUUsername    = "HHFAB_VLAB_PDU_USERNAME"
+	VLABEnvPDUPassword    = "HHFAB_VLAB_PDU_PASSWORD" //nolint:gosec
+	VLABEnvSwitchUsername = "HHFAB_SWITCH_USERNAME"
+	VLABEnvSwitchPassword = "HHFAB_SWITCH_PASSWORD" //nolint:gosec
 )
 
 var VLABCmds = []string{
