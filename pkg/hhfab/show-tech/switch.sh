@@ -148,6 +148,57 @@ run_sonic_cmd() {
 } >> "$OUTPUT_FILE" 2>&1
 
 # ---------------------------
+# Process Core Dumps (systemd-coredump)
+# ---------------------------
+{
+    echo -e "\n=== Process Core Dumps ==="
+
+    # List all recorded core dumps
+    echo -e "\n=== coredumpctl list ==="
+    coredumpctl list --no-pager 2>&1
+
+    # Get info (includes stack traces)
+    echo -e "\n=== coredumpctl info ==="
+    coredumpctl info --no-pager 2>&1
+
+} >> "$OUTPUT_FILE" 2>&1
+
+# ---------------------------
+# Extract core dump files for download
+# ---------------------------
+COREDUMP_DIR="/tmp/coredumps"
+# Safety check: only remove directory if it is the one we expect
+if [[ "$COREDUMP_DIR" == "/tmp/coredumps" ]]; then
+    rm -rf "$COREDUMP_DIR"
+fi
+rm -f /tmp/coredumps.tar.gz
+mkdir -p "$COREDUMP_DIR"
+
+# Extract each core dump to a file
+coredumpctl list --no-pager --no-legend 2>/dev/null | while read -r line; do
+    # Extract PID (5th column) and executable name (last column, use basename to strip path)
+    pid=$(echo "$line" | awk '{print $5}')
+    exe=$(basename "$(echo "$line" | awk '{print $NF}')")
+    timestamp=$(echo "$line" | awk '{print $3"_"$4}' | tr ':' '-')
+
+    # Validate that PID is a number to prevent command injection
+    if [ -n "$pid" ] && [ "$pid" != "PID" ] && [[ "$pid" =~ ^[0-9]+$ ]]; then
+        outfile="${COREDUMP_DIR}/${exe}-${pid}-${timestamp}.core"
+        echo "Extracting core dump: $outfile" >> "$OUTPUT_FILE"
+        sudo coredumpctl dump "$pid" -o "$outfile" 2>> "$OUTPUT_FILE" || true
+    fi
+done
+
+# Create tarball only if core dumps were extracted
+if ls "$COREDUMP_DIR"/*.core 1>/dev/null 2>&1; then
+    ls -la "$COREDUMP_DIR" > "${COREDUMP_DIR}/manifest.txt" 2>&1
+    tar -czf /tmp/coredumps.tar.gz -C /tmp coredumps 2>/dev/null
+    echo "Core dumps extracted to $COREDUMP_DIR and archived to /tmp/coredumps.tar.gz" >> "$OUTPUT_FILE"
+else
+    echo "No core dumps found to extract" >> "$OUTPUT_FILE"
+fi
+
+# ---------------------------
 # Broadcom SDK Diagnostics
 # ---------------------------
 {

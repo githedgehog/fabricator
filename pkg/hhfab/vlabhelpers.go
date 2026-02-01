@@ -690,7 +690,7 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB) error {
 				if ssh == nil {
 					showTechErr = fmt.Errorf("getting ssh config for %s: %w", name, err)
 				} else {
-					showTechErr = c.collectShowTech(collectionCtx, name, ssh, script, outputDir)
+					showTechErr = c.collectShowTech(collectionCtx, name, ssh, script, outputDir, vmType)
 				}
 			}
 
@@ -789,7 +789,7 @@ func (c *Config) VLABSwitchPower(ctx context.Context, opts SwitchPowerOpts) erro
 	return nil
 }
 
-func (c *Config) collectShowTech(ctx context.Context, entryName string, ssh *sshutil.Config, script []byte, outputDir string) error {
+func (c *Config) collectShowTech(ctx context.Context, entryName string, ssh *sshutil.Config, script []byte, outputDir string, vmType VMType) error {
 	// Determine the script for the VM type
 	remoteScriptPath := "/tmp/show-tech.sh"
 	remoteOutputPath := "/tmp/show-tech.log"
@@ -831,6 +831,16 @@ func (c *Config) collectShowTech(ctx context.Context, entryName string, ssh *ssh
 	}
 
 	slog.Debug("Show tech collected successfully", "entry", entryName, "output", localFilePath)
+
+	// Download core dumps tarball for switches
+	if vmType == VMTypeSwitch {
+		coredumpTarball := filepath.Join(outputDir, entryName+"-coredumps.tar.gz")
+		if err := ssh.DownloadPath("/tmp/coredumps.tar.gz", coredumpTarball); err != nil {
+			slog.Debug("No core dumps to download", "entry", entryName, "error", err)
+		} else {
+			slog.Debug("Core dumps collected", "entry", entryName, "output", coredumpTarball)
+		}
+	}
 
 	return nil
 }
