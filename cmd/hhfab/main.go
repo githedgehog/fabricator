@@ -185,7 +185,7 @@ func Run(ctx context.Context) error {
 	var wgGatewayUplinks uint
 	var wgGatewayDriver string
 	var wgGatewayWorkers uint
-	var wgBGPExternals, wgL2Externals, wgExtMCLAGConns, wgExtESLAGConns, wgExtOrphanConns uint
+	var wgExternals, wgExtMCLAGConns, wgExtESLAGConns, wgExtOrphanConns uint
 	vlabWiringGenFlags := []cli.Flag{
 		&cli.UintFlag{
 			Name:        "spines-count",
@@ -279,14 +279,9 @@ func Run(ctx context.Context) error {
 			Value:       8,
 		},
 		&cli.UintFlag{
-			Name:        "externals-bgp",
-			Usage:       "number of BGP externals to generate",
-			Destination: &wgBGPExternals,
-		},
-		&cli.UintFlag{
-			Name:        "externals-l2",
-			Usage:       "number of L2 externals to generate",
-			Destination: &wgL2Externals,
+			Name:        "externals",
+			Usage:       "number of externals to generate",
+			Destination: &wgExternals,
 		},
 		&cli.UintFlag{
 			Name:        "external-mclag-connections",
@@ -861,8 +856,7 @@ func Run(ctx context.Context) error {
 								GatewayUplinks:     uint8(wgGatewayUplinks), //nolint:gosec
 								GatewayDriver:      wgGatewayDriver,
 								GatewayWorkers:     uint8(wgGatewayWorkers), //nolint:gosec
-								ExtBGPCount:        uint8(wgBGPExternals),   //nolint:gosec
-								ExtL2Count:         uint8(wgL2Externals),    //nolint:gosec
+								ExtCount:           uint8(wgExternals),      //nolint:gosec
 								ExtMCLAGConnCount:  uint8(wgExtMCLAGConns),  //nolint:gosec
 								ExtESLAGConnCount:  uint8(wgExtESLAGConns),  //nolint:gosec
 								ExtOrphanConnCount: uint8(wgExtOrphanConns), //nolint:gosec
