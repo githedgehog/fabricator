@@ -1,0 +1,228 @@
+name: Demo VLAB
+
+on:
+  push:
+    paths:
+      - ".github/workflows/demo-vlab.yaml"
+  workflow_dispatch:
+    inputs:
+      debug:
+        description: "Enable tmate debugging"
+        type: boolean
+        required: false
+        default: false
+      pause_on_failure:
+        description: "Pause on failure (only if debug is enabled)"
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  HHFAB_REG_REPO: 127.0.0.1:30000
+  HHFAB_VLAB_COLLECT: true
+
+jobs:
+  demo:
+    runs-on: vlab
+    timeout-minutes: 90
+
+    steps:
+      - name: Runner host
+        run: |
+          echo "$KUBE_NODE"
+
+      - name: Inputs summary
+        run: |
+          echo "Inputs:"
+          echo "  Debug: ${{ inputs.debug }}"
+          echo "  Pause on failure: ${{ inputs.pause_on_failure }}"
+
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Pre-populate hhfab-cache
+        run: |
+          if [ -d "/hostcache/.hhfab-cache" ]; then
+            rsync -aW --inplace --exclude='download-*' --stats /hostcache/.hhfab-cache ~/
+          else
+            echo "Host cache not available"
+          fi
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Setup local registry
+        run: |
+          just --timestamp _localreg &
+
+      - name: Build hhfab
+        run: |
+          just --timestamp oci_repo=127.0.0.1:30000 oci=http push
+
+      - name: Init hhfab with gateway
+        run: |
+          bin/hhfab init -v --dev --gw
+          bin/hhfab vlab gen -v
+
+      - name: Print hhfab versions and generate diagrams
+        run: |
+          bin/hhfab versions | tee versions.txt
+          bin/hhfab diagram --format=drawio
+          bin/hhfab diagram --format=dot
+          bin/hhfab diagram --format=mermaid
+
+      - name: Start VLAB in background
+        run: |
+          export HHFAB_JOIN_TOKEN=$(openssl rand -base64 24)
+          bin/hhfab vlab up -v \
+            --build-mode=iso \
+            --ready=inspect 2>&1 | tee vlab.log &
+          echo $! > /tmp/vlab.pid
+
+      - name: Wait for VLAB ready
+        run: |
+          echo "Waiting for VLAB inspect to complete..."
+          timeout 60m bash -c '
+            tail -f vlab.log 2>/dev/null | while read line; do
+              echo "$line"
+              if echo "$line" | grep -q "All on-ready commands finished\|Inspect completed"; then
+                echo "VLAB is ready!"
+                pkill -P $$ tail 2>/dev/null || true
+                exit 0
+              fi
+              if echo "$line" | grep -q "FATAL\|panic:"; then
+                echo "VLAB startup failed!"
+                exit 1
+              fi
+            done
+          '
+
+      # Demo test steps - each step mirrors customer workflow
+      # kubectl commands run via SSH to control-1 (as customers would do)
+
+      - name: "Demo: Verify initial state (no VPCs)"
+        run: |
+          bin/hhfab vlab ssh -bn control-1 -- kubectl get vpc || true
+          bin/hhfab vlab ssh -bn control-1 -- kubectl get vpcattachment || true
+          bin/hhfab vlab ssh -bn control-1 -- kubectl get vpcpeering || true
+
+      - name: "Demo: Create VPCs using setup-vpcs"
+        run: |
+          bin/hhfab vlab setup-vpcs -v --servers 1 --subnets 1
+
+      - name: "Demo: Verify VPCs created"
+        run: |
+          bin/hhfab vlab ssh -bn control-1 -- kubectl get vpc
+          bin/hhfab vlab ssh -bn control-1 -- kubectl get vpcattachment
+          bin/hhfab vlab ssh -bn control-1 -- kubectl get vpcpeering || echo "No VPCPeerings (expected)"
+
+      - name: "Demo: Create VPCPeering manually via kubectl"
+        run: |
+          bin/hhfab vlab ssh -bn control-1 -- kubectl fabric vpc peer --vpc vpc-01 --vpc vpc-02
+
+      - name: "Demo: Verify VPCPeering created"
+        run: |
+          bin/hhfab vlab ssh -bn control-1 -- kubectl get vpcpeering
+          bin/hhfab vlab ssh -bn control-1 -- kubectl get vpcpeering -o yaml
+
+      - name: "Demo: Test connectivity with VPCPeering"
+        run: |
+          bin/hhfab vlab test-connectivity -v --pings 3 --iperfs 0 --curls 0
+
+      - name: "Demo: Transition VPCPeering to GatewayPeering"
+        run: |
+          echo "Before transition:"
+          bin/hhfab vlab ssh -bn control-1 -- kubectl get vpcpeering
+          echo ""
+          echo "Running: hhfab vlab setup-peerings 1+2:gw"
+          bin/hhfab vlab setup-peerings 1+2:gw
+
+      - name: "Demo: Verify GatewayPeering replaced VPCPeering"
+        run: |
+          echo "VPCPeerings (should be empty):"
+          bin/hhfab vlab ssh -bn control-1 -- kubectl get vpcpeering || echo "No VPCPeerings (expected)"
+          echo ""
+          echo "GatewayPeerings (should exist):"
+          bin/hhfab vlab ssh -bn control-1 -- kubectl get peering.gateway.githedgehog.com
+          bin/hhfab vlab ssh -bn control-1 -- kubectl get peering.gateway.githedgehog.com -o yaml
+
+      - name: "Demo: Test connectivity with GatewayPeering"
+        run: |
+          bin/hhfab vlab test-connectivity -v --pings 5 --iperfs 0 --curls 0
+
+      - name: "Demo: Transition GatewayPeering back to VPCPeering"
+        run: |
+          bin/hhfab vlab setup-peerings 1+2
+
+      - name: "Demo: Verify VPCPeering replaced GatewayPeering"
+        run: |
+          echo "VPCPeerings (should exist):"
+          bin/hhfab vlab ssh -bn control-1 -- kubectl get vpcpeering
+          echo ""
+          echo "GatewayPeerings (should be empty):"
+          bin/hhfab vlab ssh -bn control-1 -- kubectl get peering.gateway.githedgehog.com || echo "No GatewayPeerings (expected)"
+
+      - name: "Demo: Final connectivity test"
+        run: |
+          bin/hhfab vlab test-connectivity -v --pings 5 --iperfs 0 --curls 0
+
+      - name: Pause on failure
+        if: ${{ failure() && inputs.pause_on_failure && inputs.debug }}
+        run: |
+          echo "Test failed, pausing for 60 minutes to allow debugging"
+          echo "Connect via tmate to debug the VLAB state"
+          sleep 3600
+
+      - name: Shutdown VLAB
+        if: ${{ always() }}
+        run: |
+          if [ -f /tmp/vlab.pid ]; then
+            kill $(cat /tmp/vlab.pid) 2>/dev/null || true
+            wait $(cat /tmp/vlab.pid) 2>/dev/null || true
+          fi
+
+      - name: Prepare debug artifacts
+        if: ${{ always() }}
+        run: |
+          mkdir -p _debug/serial
+          cp versions.txt _debug || true
+          cp result/diagram.* _debug || true
+          cp vlab.log _debug || true
+          cp vlab.hhs _debug || true
+          cp -r show-tech-output _debug || true
+          cp .zot/log _debug/zot.log || true
+          find ./vlab/vms -type f -name serial.log -exec bash -c 'cp $0 _debug/serial/$(basename $(dirname $0)).log' {} \; || true
+
+          # Collect kubectl state for debugging (via SSH to control-1)
+          bin/hhfab vlab ssh -bn control-1 -- kubectl get vpc -o yaml > _debug/vpcs.yaml 2>/dev/null || true
+          bin/hhfab vlab ssh -bn control-1 -- kubectl get vpcattachment -o yaml > _debug/vpcattachments.yaml 2>/dev/null || true
+          bin/hhfab vlab ssh -bn control-1 -- kubectl get vpcpeering -o yaml > _debug/vpcpeerings.yaml 2>/dev/null || true
+          bin/hhfab vlab ssh -bn control-1 -- kubectl get peering.gateway.githedgehog.com -o yaml > _debug/gwpeerings.yaml 2>/dev/null || true
+          bin/hhfab vlab ssh -bn control-1 -- kubectl get agents -o yaml > _debug/agents.yaml 2>/dev/null || true
+
+      - name: Rename debug artifacts for upload
+        if: ${{ always() }}
+        run: |
+          mv _debug fab-${{ github.run_id }}-demo
+
+      - name: Upload debug artifacts
+        uses: actions/upload-artifact@v6
+        if: ${{ always() }}
+        with:
+          name: fab-${{ github.run_id }}-demo
+          path: fab-${{ github.run_id }}-demo
+
+      - name: Setup tmate session for debug
+        if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug }}
+        uses: mxschmitt/action-tmate@v3
+        timeout-minutes: 30
+        with:
+          limit-access-to-actor: true
