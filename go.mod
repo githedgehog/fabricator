@@ -17,7 +17,7 @@ require (
 	github.com/Masterminds/semver/v3 v3.4.0
 	github.com/Masterminds/sprig/v3 v3.3.0
 	github.com/appleboy/easyssh-proxy v1.5.2
-	github.com/cert-manager/cert-manager v1.18.2
+	github.com/cert-manager/cert-manager v1.18.5
 	github.com/charmbracelet/keygen v0.5.3
 	github.com/coreos/butane v0.26.0
 	github.com/diskfs/go-diskfs v1.4.2

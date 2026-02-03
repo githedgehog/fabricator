@@ -33,7 +33,7 @@ var Versions = fabapi.Versions{
 		K3s:               "v1.35.0-k3s1",
 		Zot:               "v2.1.14",
 		ZotChart:          "v0.1.67-hh1",
-		CertManager:       "v1.18.2",
+		CertManager:       "v1.18.5",
 		K9s:               "v0.50.16",
 		Toolbox:           "v0.10.0",
 		ReloaderChart:     "2.2.5",
