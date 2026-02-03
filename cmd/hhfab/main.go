@@ -1244,9 +1244,9 @@ func Run(ctx context.Context) error {
 
 							1~as5835 -- external peering for vpc-01 with External as5835
 							1~as5835:gw -- same as above but using gateway peering, only valid if gateway is present
-							1~ -- external peering for vpc-1 with external if only one external is present for ipv4 namespace of vpc-01, allowing
+							1~ -- external peering for vpc-01 with external if only one external is present for ipv4 namespace of vpc-01, allowing
 								default subnet and any route from external
-							1~:subnets=default@prefixes=0.0.0.0/0 -- external peering for vpc-1 with auth external with default vpc subnet and
+							1~:subnets=default@prefixes=0.0.0.0/0 -- external peering for vpc-01 with auth external with default vpc subnet and
 								default route from external permitted
 							1~as5835:s=default:p=default:gw -- same as above but via the gateway
 							1~as5835:s=default,other:p=1.0.0.1/32_le32_ge32,22.22.22.0/24 -- two explicit prefixes allowed from the external,
