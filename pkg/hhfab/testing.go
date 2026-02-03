@@ -263,16 +263,32 @@ func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) erro
 
 		for _, gwName := range expectedGateways {
 			gwag := &gwintapi.GatewayAgent{}
-			if err := kube.Get(ctx, client.ObjectKey{Name: gwName, Namespace: comp.FabNamespace}, gwag); err != nil {
+			var err error
+			if err = kube.Get(ctx, client.ObjectKey{Name: gwName, Namespace: kmetav1.NamespaceDefault}, gwag); err != nil {
 				if apierrors.IsNotFound(err) {
 					slog.Warn("Gateway agent not found", "name", gwName)
 				} else {
 					slog.Warn("Failed to get gateway agent", "name", gwName, "error", err.Error())
 				}
 
-				gwNotReady = append(gwNotReady, gwName)
+				// gwNotReady = append(gwNotReady, gwName)
 
-				continue
+				// continue
+			}
+
+			// TODO remove it after dataplane is switched over to the default namespace
+			if err != nil || gwag.Status.LastAppliedGen == 0 {
+				if err := kube.Get(ctx, client.ObjectKey{Name: gwName, Namespace: comp.FabNamespace}, gwag); err != nil {
+					if apierrors.IsNotFound(err) {
+						slog.Warn("Gateway agent in fab namespace not found", "name", gwName)
+					} else {
+						slog.Warn("Failed to get gateway agent from fab namespace", "name", gwName, "error", err.Error())
+					}
+
+					gwNotReady = append(gwNotReady, gwName)
+
+					continue
+				}
 			}
 
 			ready := true
