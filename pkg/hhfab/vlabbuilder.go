@@ -50,7 +50,8 @@ type VLABBuilder struct {
 	GatewayUplinks     uint8  // number of uplinks for gateway node to the spines
 	GatewayDriver      string // gateway driver to use for gateway node
 	GatewayWorkers     uint8  // number of workers for gateway node
-	ExtCount           uint8  // number of "externals" to generate
+	ExtBGPCount        uint8  // number of BGP externals to generate
+	ExtStaticCount     uint8  // number of static externals to generate
 	ExtMCLAGConnCount  uint8  // number of external connections to generate from MCLAG leaves
 	ExtESLAGConnCount  uint8  // number of external connections to generate from ESLAG leaves
 	ExtOrphanConnCount uint8  // number of external connections to generate from orphan leaves
@@ -249,7 +250,7 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 	slog.Info(">>>", "mclagLeafsCount", b.MCLAGLeafsCount, "mclagSessionLinks", b.MCLAGSessionLinks, "mclagPeerLinks", b.MCLAGPeerLinks)
 	slog.Info(">>>", "orphanLeafsCount", b.OrphanLeafsCount)
 	slog.Info(">>>", "mclagServers", b.MCLAGServers, "eslagServers", b.ESLAGServers, "unbundledServers", b.UnbundledServers, "bundledServers", b.BundledServers, "multihomedServers", b.MultiHomedServers)
-	slog.Info(">>>", "externalCount", b.ExtCount, "externalMclagConnCount", b.ExtMCLAGConnCount, "externalEslagConnCount", b.ExtESLAGConnCount, "externalOrphanConnCount", b.ExtOrphanConnCount)
+	slog.Info(">>>", "externalBGPCount", b.ExtBGPCount, "externalStaticCount", b.ExtStaticCount, "externalMclagConnCount", b.ExtMCLAGConnCount, "externalEslagConnCount", b.ExtESLAGConnCount, "externalOrphanConnCount", b.ExtOrphanConnCount)
 
 	if err := b.data.Add(ctx, &wiringapi.VLANNamespace{
 		TypeMeta: kmetav1.TypeMeta{
@@ -862,14 +863,15 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 		}
 	}
 
-	if b.ExtCount > 0 {
-		externals := []vpcapi.External{}
-		extAsn := 64102
+	externals := []vpcapi.External{}
+	extAsn := 64102
+
+	if b.ExtBGPCount > 0 {
 		inboundCommPrefix := 65102
 		communityRuleID := 1000
 
-		for i := uint8(1); i <= b.ExtCount; i++ {
-			externalName := fmt.Sprintf("external-%02d", i)
+		for i := uint8(1); i <= b.ExtBGPCount; i++ {
+			externalName := fmt.Sprintf("ext-bgp-%02d", i)
 			externalSpec := vpcapi.ExternalSpec{
 				IPv4Namespace:     "default",
 				InboundCommunity:  fmt.Sprintf("%d:%d", inboundCommPrefix, communityRuleID),
@@ -882,30 +884,54 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 			externals = append(externals, *ext)
 			communityRuleID += 100
 		}
+	}
 
-		// create attachments per external and external connection
-		connOctet := uint8(0)
-		for _, conn := range externalConns {
-			connOctet++
-			vlanID := uint16(10)
-			for _, ext := range externals {
-				extAttachName := fmt.Sprintf("%s--%s", conn.Spec.External.Link.Switch.DeviceName(), ext.Name)
-				extAttachSpec := vpcapi.ExternalAttachmentSpec{
-					External:   ext.Name,
-					Connection: conn.Name,
-					Switch: vpcapi.ExternalAttachmentSwitch{
-						VLAN: vlanID,
-						IP:   fmt.Sprintf("100.%d.%d.1/24", connOctet, vlanID),
-					},
-					Neighbor: vpcapi.ExternalAttachmentNeighbor{
-						ASN: uint32(extAsn),
-						IP:  fmt.Sprintf("100.%d.%d.6", connOctet, vlanID),
-					},
+	if b.ExtStaticCount > 0 {
+		for i := uint8(1); i <= b.ExtStaticCount; i++ {
+			externalName := fmt.Sprintf("ext-sta-%02d", i)
+			externalSpec := vpcapi.ExternalSpec{
+				IPv4Namespace: "default",
+				Static: &vpcapi.ExternalStaticSpec{
+					Prefixes: []string{"0.0.0.0/0"},
+				},
+			}
+			ext, err := b.createExternal(ctx, externalName, externalSpec)
+			if err != nil {
+				return err
+			}
+			externals = append(externals, *ext)
+		}
+	}
+
+	connOctet := uint8(0)
+	for _, conn := range externalConns {
+		connOctet++
+		vlanID := uint16(10)
+		for _, ext := range externals {
+			extAttachName := fmt.Sprintf("%s--%s", conn.Spec.External.Link.Switch.DeviceName(), ext.Name)
+			extAttachSpec := vpcapi.ExternalAttachmentSpec{
+				External:   ext.Name,
+				Connection: conn.Name,
+			}
+			if ext.Spec.Static != nil {
+				extAttachSpec.Static = &vpcapi.ExternalAttachmentStatic{
+					RemoteIP: fmt.Sprintf("100.%d.%d.1", connOctet, vlanID),
+					VLAN:     vlanID,
+					Proxy:    true,
 				}
-				vlanID += 10
-				if _, err := b.createExternalAttach(ctx, extAttachName, extAttachSpec); err != nil {
-					return err
+			} else {
+				extAttachSpec.Switch = vpcapi.ExternalAttachmentSwitch{
+					VLAN: vlanID,
+					IP:   fmt.Sprintf("100.%d.%d.1/24", connOctet, vlanID),
 				}
+				extAttachSpec.Neighbor = vpcapi.ExternalAttachmentNeighbor{
+					ASN: uint32(extAsn),
+					IP:  fmt.Sprintf("100.%d.%d.6", connOctet, vlanID),
+				}
+			}
+			vlanID += 10
+			if _, err := b.createExternalAttach(ctx, extAttachName, extAttachSpec); err != nil {
+				return err
 			}
 		}
 	}
