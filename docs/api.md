@@ -396,6 +396,7 @@ _Appears in:_
 | `protocolSubnet` _[Prefix](#prefix)_ |  |  |  |
 | `vtepSubnet` _[Prefix](#prefix)_ |  |  |  |
 | `fabricSubnet` _[Prefix](#prefix)_ |  |  |  |
+| `proxyExternalSubnet` _[Prefix](#prefix)_ |  |  |  |
 | `baseVPCCommunity` _string_ |  |  |  |
 | `vpcIRBVLANs` _VLANRange array_ |  |  |  |
 | `loopbackWorkaroundDisable` _boolean_ |  |  |  |

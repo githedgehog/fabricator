@@ -269,9 +269,10 @@ type FabricConfig struct {
 	LeafASNStart uint32 `json:"leafASNStart,omitempty"`
 	LeafASNEnd   uint32 `json:"leafASNEnd,omitempty"`
 
-	ProtocolSubnet meta.Prefix `json:"protocolSubnet,omitempty"`
-	VTEPSubnet     meta.Prefix `json:"vtepSubnet,omitempty"`
-	FabricSubnet   meta.Prefix `json:"fabricSubnet,omitempty"`
+	ProtocolSubnet      meta.Prefix `json:"protocolSubnet,omitempty"`
+	VTEPSubnet          meta.Prefix `json:"vtepSubnet,omitempty"`
+	FabricSubnet        meta.Prefix `json:"fabricSubnet,omitempty"`
+	ProxyExternalSubnet meta.Prefix `json:"proxyExternalSubnet,omitempty"`
 
 	BaseVPCCommunity string            `json:"baseVPCCommunity,omitempty"`
 	VPCIRBVLANs      []fmeta.VLANRange `json:"vpcIRBVLANs,omitempty"`
@@ -520,6 +521,10 @@ func (f *Fabricator) Default() {
 		f.Spec.Config.Fabric.TH5WorkaroundVLANs = []fmeta.VLANRange{
 			{From: 3900, To: 3999},
 		}
+	}
+
+	if f.Spec.Config.Fabric.ProxyExternalSubnet == "" {
+		f.Spec.Config.Fabric.ProxyExternalSubnet = "172.30.16.0/22"
 	}
 
 	if len(f.Spec.Config.Gateway.Communities) == 0 {

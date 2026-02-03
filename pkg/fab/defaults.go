@@ -32,6 +32,7 @@ var DefaultConfig = fabapi.FabConfig{
 		LeafASNEnd:          65533,             // only 432 leafs
 		ProtocolSubnet:      "172.30.8.0/22",   // 1022 hosts: 172.30.8.1 - 172.30.11.254
 		VTEPSubnet:          "172.30.12.0/22",  // 1022 hosts: 172.30.12.1 - 172.30.15.254
+		ProxyExternalSubnet: "172.30.16.0/22",  // 516 /31 subnets: 172.30.16.0/31 - 172.30.19.254/31
 		FabricSubnet:        "172.30.128.0/17", // 16384 /31 subnets: 172.30.128.1 - 172.30.255.254
 		BaseVPCCommunity:    "50000:0",         // TODO make sure it's really used
 		VPCIRBVLANs: []fmeta.VLANRange{

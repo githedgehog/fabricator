@@ -301,6 +301,8 @@ spec:
                         type: object
                       protocolSubnet:
                         type: string
+                      proxyExternalSubnet:
+                        type: string
                       spineASN:
                         format: int32
                         type: integer
