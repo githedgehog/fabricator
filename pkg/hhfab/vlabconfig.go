@@ -80,9 +80,10 @@ type VM struct {
 }
 
 type ExternalAttachCfg struct {
+	IsStatic    bool   `json:"isStatic"`    // whether this is a static attachment (as opposed to a BGP speaker)
 	Prefix      string `json:"prefix"`      // IP prefix to configure on the NIC
-	NeighborIP  string `json:"neighborIP"`  // IP address of the BGP neighbor
-	NeighborASN string `json:"neighborASN"` // ASN of the BGP neighbor
+	NeighborIP  string `json:"neighborIP"`  // IP address of the BGP neighbor or static external
+	NeighborASN string `json:"neighborASN"` // ASN of the BGP neighbor (only for BGP externals)
 	Vlan        uint16 `json:"vlan"`        // VLAN ID to configure on the NIC, 0 is untagged
 	VRF         string `json:"vrf"`         // VRF name to configure on the NIC (name of the external)
 }
@@ -93,11 +94,23 @@ type ExternalNICCfg struct {
 	UntaggedCfg ExternalAttachCfg   `json:"untaggedCfg"` // if untagged, the configuration for the untagged attachment
 }
 
+type ExternalBGPVRFCfg struct {
+	ASN          uint32 `json:"asn"`          // the ASN of the BGP external
+	InCommunity  string `json:"inCommunity"`  // the inbound community for the BGP external
+	OutCommunity string `json:"outCommunity"` // the outbound community for the BGP external
+}
+
+type ExternalStaticVrfCfg struct {
+	Prefixes   []string `json:"prefixes"`   // the prefixes reachable via this external
+	GatewayIPs []string `json:"gatewayIPs"` // the addresses that can be used on the gateway to connect to this external
+	NICName    string   `json:"nicName"`    // name of the NIC attachment
+}
+
 type ExternalVRFCfg struct {
-	TableID      uint32 `json:"tableID"`      // the VRF table ID
-	ASN          uint32 `json:"asn"`          // the ASN of the external
-	InCommunity  string `json:"inCommunity"`  // the inbound community for the external
-	OutCommunity string `json:"outCommunity"` // the outbound community for the external
+	IsStatic  bool                 `json:"isStatic"` // whether this is a static external (as opposed to a BGP speaker)
+	TableID   uint32               `json:"tableID"`  // the VRF table ID
+	BGPCfg    ExternalBGPVRFCfg    `json:"bgpCfg"`
+	StaticCfg ExternalStaticVrfCfg `json:"staticCfg"`
 }
 
 type ExternalsCfg struct {
@@ -492,16 +505,28 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 		if _, exists := cfg.Externals.VRFs[external.Name]; exists {
 			return nil, fmt.Errorf("duplicate external VRF name: %q", external.Name) //nolint:goerr113
 		}
-		asn := getAsn(&external)
-		if asn == 0 {
-			slog.Debug("Virtual external has no ASN annotation, will attempt to fetch it from the external attachments", "name", external.Name)
-		}
-		cfg.Externals.VRFs[external.Name] = ExternalVRFCfg{
-			TableID: tableID,
-			ASN:     asn,
-			// Invert inbound and outbound communities
-			InCommunity:  external.Spec.OutboundCommunity,
-			OutCommunity: external.Spec.InboundCommunity,
+		if external.Spec.Static == nil {
+			asn := getAsn(&external)
+			if asn == 0 {
+				slog.Debug("Virtual external has no ASN annotation, will attempt to fetch it from the external attachments", "name", external.Name)
+			}
+			cfg.Externals.VRFs[external.Name] = ExternalVRFCfg{
+				TableID: tableID,
+				BGPCfg: ExternalBGPVRFCfg{
+					ASN: asn,
+					// Invert inbound and outbound communities
+					InCommunity:  external.Spec.OutboundCommunity,
+					OutCommunity: external.Spec.InboundCommunity,
+				},
+			}
+		} else {
+			cfg.Externals.VRFs[external.Name] = ExternalVRFCfg{
+				TableID:  tableID,
+				IsStatic: true,
+				StaticCfg: ExternalStaticVrfCfg{
+					Prefixes: external.Spec.Static.Prefixes,
+				},
+			}
 		}
 		tableID++
 	}
@@ -727,6 +752,7 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 			// note that we have a limitation where we cannot support both untagged and tagged
 			// on the same connection, so complain if we notice that's the case
 			var tagged, untagged bool
+			var attachCfg ExternalAttachCfg
 			for _, extAttach := range externalAttachs.Items {
 				if extAttach.Spec.Connection != conn.Name {
 					continue
@@ -740,40 +766,62 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 				if !ok {
 					return nil, fmt.Errorf("virtual external attachment %q has no associated VRF for the external %q", extAttach.Name, extName) //nolint:goerr113
 				}
-				if extVrf.ASN == 0 {
-					slog.Debug("Setting ASN for virtual external", "external", extName, "attachment", extAttach.Name, "ASN", extAttach.Spec.Neighbor.ASN)
-					extVrf.ASN = extAttach.Spec.Neighbor.ASN
+				if extVrf.IsStatic {
+					// update VRF config with some attachment specs that are handy to keep there for the template
+					staticIP, err := netip.ParsePrefix(extAttach.Spec.Static.RemoteIP + "/24")
+					if err != nil {
+						return nil, fmt.Errorf("failed to parse static external remote IP %q: %w", extAttach.Spec.Static.RemoteIP, err)
+					}
+					extVrf.StaticCfg.GatewayIPs = []string{staticIP.Masked().String()}
+					// add vlan to the interface name for the static route
+					if extAttach.Spec.Static.VLAN != 0 {
+						extVrf.StaticCfg.NICName = fmt.Sprintf("%s.%d", nicName, extAttach.Spec.Static.VLAN)
+					} else {
+						extVrf.StaticCfg.NICName = nicName
+					}
 					cfg.Externals.VRFs[extName] = extVrf
-				} else if extVrf.ASN != extAttach.Spec.Neighbor.ASN {
-					return nil, fmt.Errorf("external attachment %q has inconsistent ASN: connection %q, attach ASN %d, previously known ASN %d", extAttach.Name, conn.Name, extAttach.Spec.Neighbor.ASN, extVrf.ASN) //nolint:goerr113
-				}
-				// Fetch the switch to retrieve its ASN
-				sw := &wiringapi.Switch{}
-				if err := wiring.Get(ctx, kclient.ObjectKey{Name: switchName, Namespace: conn.Namespace}, sw); err != nil {
-					return nil, fmt.Errorf("failed to get switch %q: %w", switchName, err)
-				}
+					attachCfg = ExternalAttachCfg{
+						Prefix:   extAttach.Spec.Static.RemoteIP + "/32",
+						IsStatic: true,
+						Vlan:     extAttach.Spec.Static.VLAN,
+						VRF:      extName,
+					}
+				} else {
+					if extVrf.BGPCfg.ASN == 0 {
+						slog.Debug("Setting ASN for virtual external", "external", extName, "attachment", extAttach.Name, "ASN", extAttach.Spec.Neighbor.ASN)
+						extVrf.BGPCfg.ASN = extAttach.Spec.Neighbor.ASN
+						cfg.Externals.VRFs[extName] = extVrf
+					} else if extVrf.BGPCfg.ASN != extAttach.Spec.Neighbor.ASN {
+						return nil, fmt.Errorf("external attachment %q has inconsistent ASN: connection %q, attach ASN %d, previously known ASN %d", extAttach.Name, conn.Name, extAttach.Spec.Neighbor.ASN, extVrf.BGPCfg.ASN) //nolint:goerr113
+					}
+					// Fetch the switch to retrieve its ASN
+					sw := &wiringapi.Switch{}
+					if err := wiring.Get(ctx, kclient.ObjectKey{Name: switchName, Namespace: conn.Namespace}, sw); err != nil {
+						return nil, fmt.Errorf("failed to get switch %q: %w", switchName, err)
+					}
 
-				// We get the external IP as the "neighbor IP" in the wiring, but we need to
-				// convert it to a prefix. Conversely, the fabric "switch IP" is given as a prefix
-				// and we need to convert it to an address for the BGP neighbor commands.
-				// So we take the prefix length of the switch IP and apply it to the external IP.
-				fabSwitchPrefix, parseErr := netip.ParsePrefix(extAttach.Spec.Switch.IP)
-				if parseErr != nil {
-					return nil, fmt.Errorf("failed to parse switch IP %q: %w", extAttach.Spec.Switch.IP, parseErr)
+					// We get the external IP as the "neighbor IP" in the wiring, but we need to
+					// convert it to a prefix. Conversely, the fabric "switch IP" is given as a prefix
+					// and we need to convert it to an address for the BGP neighbor commands.
+					// So we take the prefix length of the switch IP and apply it to the external IP.
+					fabSwitchPrefix, parseErr := netip.ParsePrefix(extAttach.Spec.Switch.IP)
+					if parseErr != nil {
+						return nil, fmt.Errorf("failed to parse switch IP %q: %w", extAttach.Spec.Switch.IP, parseErr)
+					}
+					extAddr, parseErr := netip.ParseAddr(extAttach.Spec.Neighbor.IP)
+					if parseErr != nil {
+						return nil, fmt.Errorf("failed to parse virtual external IP %q: %w", extAttach.Spec.Neighbor.IP, parseErr)
+					}
+					extPrefix := netip.PrefixFrom(extAddr, fabSwitchPrefix.Bits())
+					attachCfg = ExternalAttachCfg{
+						Prefix:      extPrefix.String(),
+						NeighborIP:  fabSwitchPrefix.Addr().String(),
+						NeighborASN: strconv.FormatUint(uint64(sw.Spec.ASN), 10),
+						Vlan:        extAttach.Spec.Switch.VLAN,
+						VRF:         extName,
+					}
 				}
-				extAddr, parseErr := netip.ParseAddr(extAttach.Spec.Neighbor.IP)
-				if parseErr != nil {
-					return nil, fmt.Errorf("failed to parse virtual external IP %q: %w", extAttach.Spec.Neighbor.IP, parseErr)
-				}
-				extPrefix := netip.PrefixFrom(extAddr, fabSwitchPrefix.Bits())
-				attachCfg := ExternalAttachCfg{
-					Prefix:      extPrefix.String(),
-					NeighborIP:  fabSwitchPrefix.Addr().String(),
-					NeighborASN: strconv.FormatUint(uint64(sw.Spec.ASN), 10),
-					Vlan:        extAttach.Spec.Switch.VLAN,
-					VRF:         extName,
-				}
-				if extAttach.Spec.Switch.VLAN == 0 {
+				if (extAttach.Spec.Static != nil && extAttach.Spec.Static.VLAN == 0) || (extAttach.Spec.Static == nil && extAttach.Spec.Switch.VLAN == 0) {
 					if extNicCfg.Untagged {
 						return nil, fmt.Errorf("multiple untagged attachments for the same virtual external %s", extName) //nolint:goerr113
 					}
@@ -792,6 +840,8 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 					nicName,
 					"external",
 					extName,
+					"isStatic",
+					attachCfg.IsStatic,
 					"switch",
 					switchName,
 					"VLAN",
@@ -803,7 +853,7 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 					"external Prefix",
 					attachCfg.Prefix,
 					"external ASN",
-					extVrf.ASN,
+					extVrf.BGPCfg.ASN,
 				)
 			}
 			cfg.Externals.NICs[nicName] = extNicCfg
