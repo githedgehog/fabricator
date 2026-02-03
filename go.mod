@@ -40,7 +40,7 @@ require (
 	github.com/urfave/cli/v2 v2.27.7
 	github.com/vbauerster/mpb/v8 v8.11.3
 	github.com/vishvananda/netlink v1.3.1
-	go.githedgehog.com/fabric v0.103.2
+	go.githedgehog.com/fabric v0.104.0
 	go.githedgehog.com/gateway v0.38.1
 	go.githedgehog.com/libmeta v0.3.0
 	go.podman.io/image/v5 v5.38.0
@@ -333,7 +333,7 @@ require (
 	go4.org/intern v0.0.0-20230205224052-192e9f60865c // indirect
 	go4.org/unsafe/assume-no-moving-gc v0.0.0-20230525183740-e7c30c78aeb2 // indirect
 	gocloud.dev v0.37.0 // indirect
-	golang.org/x/exp v0.0.0-20251113190631-e25ba8c21ef6 // indirect
+	golang.org/x/exp v0.0.0-20260112195511-716be5621a96 // indirect
 	golang.org/x/net v0.49.0 // indirect
 	golang.org/x/oauth2 v0.34.0 // indirect
 	golang.org/x/sys v0.40.0 // indirect
