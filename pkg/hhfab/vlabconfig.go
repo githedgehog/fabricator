@@ -103,6 +103,7 @@ type ExternalBGPVRFCfg struct {
 type ExternalStaticVrfCfg struct {
 	Prefixes   []string `json:"prefixes"`   // the prefixes reachable via this external
 	GatewayIPs []string `json:"gatewayIPs"` // the addresses that can be used on the gateway to connect to this external
+	SwitchIP   string   `json:"switchIP"`   // the address on the switch on the other side of the attachment
 	NICName    string   `json:"nicName"`    // name of the NIC attachment
 }
 
@@ -773,6 +774,13 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 						return nil, fmt.Errorf("failed to parse static external remote IP %q: %w", extAttach.Spec.Static.RemoteIP, err)
 					}
 					extVrf.StaticCfg.GatewayIPs = []string{staticIP.Masked().String()}
+					if extAttach.Spec.Static.IP != "" {
+						swPrefix, err := netip.ParsePrefix(extAttach.Spec.Static.IP)
+						if err != nil {
+							return nil, fmt.Errorf("failed to parse static external switch IP %q: %w", extAttach.Spec.Static.IP, err)
+						}
+						extVrf.StaticCfg.SwitchIP = swPrefix.Addr().String()
+					}
 					// add vlan to the interface name for the static route
 					if extAttach.Spec.Static.VLAN != 0 {
 						extVrf.StaticCfg.NICName = fmt.Sprintf("%s.%d", nicName, extAttach.Spec.Static.VLAN)
@@ -781,7 +789,7 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 					}
 					cfg.Externals.VRFs[extName] = extVrf
 					attachCfg = ExternalAttachCfg{
-						Prefix:   extAttach.Spec.Static.RemoteIP + "/32",
+						Prefix:   extAttach.Spec.Static.RemoteIP + "/24",
 						IsStatic: true,
 						Vlan:     extAttach.Spec.Static.VLAN,
 						VRF:      extName,

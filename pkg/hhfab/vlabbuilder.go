@@ -33,29 +33,30 @@ var GatewayDrivers = []string{
 }
 
 type VLABBuilder struct {
-	SpinesCount        uint8  // number of spines to generate
-	FabricLinksCount   uint8  // number of links for each spine <> leaf pair
-	MeshLinksCount     uint8  // number of mesh links for each leaf <> leaf pair
-	MCLAGLeafsCount    uint8  // number of MCLAG server-leafs to generate
-	ESLAGLeafGroups    string // eslag leaf groups - comma separated list of number of ESLAG switches in each group, should be 2-4 per group, e.g. 2,4,2 for 3 groups with 2, 4 and 2 switches
-	OrphanLeafsCount   uint8  // number of non-MCLAG server-leafs to generate
-	MCLAGSessionLinks  uint8  // number of MCLAG session links to generate
-	MCLAGPeerLinks     uint8  // number of MCLAG peer links to generate
-	MCLAGServers       uint8  // number of MCLAG servers to generate for MCLAG switches
-	ESLAGServers       uint8  // number of ESLAG servers to generate for ESLAG switches
-	UnbundledServers   uint8  // number of unbundled servers to generate for switches (only for one of the first switch in the redundancy group or orphan switch)
-	BundledServers     uint8  // number of bundled servers to generate for switches (only for one of the second switch in the redundancy group or orphan switch)
-	MultiHomedServers  uint8  // number of multi-homed servers (2 connections to 2 different orphan leaves)
-	NoSwitches         bool   // do not generate any switches
-	GatewayUplinks     uint8  // number of uplinks for gateway node to the spines
-	GatewayDriver      string // gateway driver to use for gateway node
-	GatewayWorkers     uint8  // number of workers for gateway node
-	ExtBGPCount        uint8  // number of BGP externals to generate
-	ExtStaticCount     uint8  // number of static externals to generate
-	ExtMCLAGConnCount  uint8  // number of external connections to generate from MCLAG leaves
-	ExtESLAGConnCount  uint8  // number of external connections to generate from ESLAG leaves
-	ExtOrphanConnCount uint8  // number of external connections to generate from orphan leaves
-	YesFlag            bool
+	SpinesCount         uint8  // number of spines to generate
+	FabricLinksCount    uint8  // number of links for each spine <> leaf pair
+	MeshLinksCount      uint8  // number of mesh links for each leaf <> leaf pair
+	MCLAGLeafsCount     uint8  // number of MCLAG server-leafs to generate
+	ESLAGLeafGroups     string // eslag leaf groups - comma separated list of number of ESLAG switches in each group, should be 2-4 per group, e.g. 2,4,2 for 3 groups with 2, 4 and 2 switches
+	OrphanLeafsCount    uint8  // number of non-MCLAG server-leafs to generate
+	MCLAGSessionLinks   uint8  // number of MCLAG session links to generate
+	MCLAGPeerLinks      uint8  // number of MCLAG peer links to generate
+	MCLAGServers        uint8  // number of MCLAG servers to generate for MCLAG switches
+	ESLAGServers        uint8  // number of ESLAG servers to generate for ESLAG switches
+	UnbundledServers    uint8  // number of unbundled servers to generate for switches (only for one of the first switch in the redundancy group or orphan switch)
+	BundledServers      uint8  // number of bundled servers to generate for switches (only for one of the second switch in the redundancy group or orphan switch)
+	MultiHomedServers   uint8  // number of multi-homed servers (2 connections to 2 different orphan leaves)
+	NoSwitches          bool   // do not generate any switches
+	GatewayUplinks      uint8  // number of uplinks for gateway node to the spines
+	GatewayDriver       string // gateway driver to use for gateway node
+	GatewayWorkers      uint8  // number of workers for gateway node
+	ExtBGPCount         uint8  // number of BGP externals to generate
+	ExtStaticCount      uint8  // number of static externals to generate (no proxy)
+	ExtStaticProxyCount uint8  // number of static externals to generate (with proxy)
+	ExtMCLAGConnCount   uint8  // number of external connections to generate from MCLAG leaves
+	ExtESLAGConnCount   uint8  // number of external connections to generate from ESLAG leaves
+	ExtOrphanConnCount  uint8  // number of external connections to generate from orphan leaves
+	YesFlag             bool
 
 	data         *apiutil.Loader
 	ifaceTracker map[string]uint8 // next available interface ID for each switch
@@ -250,7 +251,8 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 	slog.Info(">>>", "mclagLeafsCount", b.MCLAGLeafsCount, "mclagSessionLinks", b.MCLAGSessionLinks, "mclagPeerLinks", b.MCLAGPeerLinks)
 	slog.Info(">>>", "orphanLeafsCount", b.OrphanLeafsCount)
 	slog.Info(">>>", "mclagServers", b.MCLAGServers, "eslagServers", b.ESLAGServers, "unbundledServers", b.UnbundledServers, "bundledServers", b.BundledServers, "multihomedServers", b.MultiHomedServers)
-	slog.Info(">>>", "externalBGPCount", b.ExtBGPCount, "externalStaticCount", b.ExtStaticCount, "externalMclagConnCount", b.ExtMCLAGConnCount, "externalEslagConnCount", b.ExtESLAGConnCount, "externalOrphanConnCount", b.ExtOrphanConnCount)
+	slog.Info(">>>", "externalBGPCount", b.ExtBGPCount, "externalStaticCount", b.ExtStaticCount, "externalStaticProxyCount", b.ExtStaticProxyCount)
+	slog.Info(">>>", "externalMclagConnCount", b.ExtMCLAGConnCount, "externalEslagConnCount", b.ExtESLAGConnCount, "externalOrphanConnCount", b.ExtOrphanConnCount)
 
 	if err := b.data.Add(ctx, &wiringapi.VLANNamespace{
 		TypeMeta: kmetav1.TypeMeta{
@@ -886,9 +888,15 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 		}
 	}
 
-	if b.ExtStaticCount > 0 {
-		for i := uint8(1); i <= b.ExtStaticCount; i++ {
-			externalName := fmt.Sprintf("ext-sta-%02d", i)
+	staticExternals := b.ExtStaticCount + b.ExtStaticProxyCount
+	if staticExternals > 0 {
+		var externalName string
+		for i := uint8(1); i <= staticExternals; i++ {
+			if i <= b.ExtStaticProxyCount {
+				externalName = fmt.Sprintf("ext-sp-%02d", i)
+			} else {
+				externalName = fmt.Sprintf("ext-snp-%02d", i)
+			}
 			externalSpec := vpcapi.ExternalSpec{
 				IPv4Namespace: "default",
 				Static: &vpcapi.ExternalStaticSpec{
@@ -914,11 +922,16 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 				Connection: conn.Name,
 			}
 			if ext.Spec.Static != nil {
-				extAttachSpec.Static = &vpcapi.ExternalAttachmentStatic{
+				staticSpec := &vpcapi.ExternalAttachmentStatic{
 					RemoteIP: fmt.Sprintf("100.%d.%d.1", connOctet, vlanID),
 					VLAN:     vlanID,
-					Proxy:    true,
 				}
+				if strings.HasPrefix(ext.Name, "ext-sp") {
+					staticSpec.Proxy = true
+				} else {
+					staticSpec.IP = fmt.Sprintf("100.%d.%d.2/24", connOctet, vlanID)
+				}
+				extAttachSpec.Static = staticSpec
 			} else {
 				extAttachSpec.Switch = vpcapi.ExternalAttachmentSwitch{
 					VLAN: vlanID,
