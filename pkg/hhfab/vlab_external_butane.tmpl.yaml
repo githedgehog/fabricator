@@ -128,10 +128,12 @@ storage:
           !{{range $vrfkey, $vrf := .ExternalVRFs}}
           vrf {{$vrfkey}}
            {{if $vrf.IsStatic}}{{range $prefix := .StaticCfg.Prefixes}}ip route {{$prefix}} 172.31.1.2 enp2s0 nexthop-vrf default{{end}}
+           {{if ne $vrf.StaticCfg.SwitchIP ""}}ip route 10.0.0.0/16 {{$vrf.StaticCfg.SwitchIP}} {{$vrf.StaticCfg.NICName}}{{end}}
            {{else}}ip route 0.0.0.0/0 172.31.1.2 enp2s0 nexthop-vrf default {{end}}
           exit-vrf
           !{{if $vrf.IsStatic}}{{range $gwIP := .StaticCfg.GatewayIPs}}
-          ip route {{$gwIP}} {{$vrf.StaticCfg.NICName}} nexthop-vrf {{$vrfkey}}{{end}}{{else}}
+          ip route {{$gwIP}} {{$vrf.StaticCfg.NICName}} nexthop-vrf {{$vrfkey}}
+          ip prefix-list static-ext-routes permit {{$gwIP}}{{end}}{{else}}
           bgp community-list standard {{$vrfkey}}In seq 5 permit {{$vrf.BGPCfg.InCommunity}}
           bgp community-list standard {{$vrfkey}}Out seq 5 permit {{$vrf.BGPCfg.OutCommunity}}
           !
@@ -168,10 +170,15 @@ storage:
             import vrf default
            !
           !{{end}}{{end}}{{end}}
+          route-map filter-static-redist deny 10
+           match ip address prefix-list static-ext-routes
+          !
+          route-map filter-static-redist permit 100
+          !
           router bgp 1
            bgp bestpath as-path multipath-relax
            address-family ipv4 unicast
-            redistribute static{{range $vrfkey, $vrf := .ExternalVRFs}}{{if not $vrf.IsStatic}}
+            redistribute static route-map filter-static-redist{{range $vrfkey, $vrf := .ExternalVRFs}}{{if not $vrf.IsStatic}}
             import vrf {{$vrfkey}}{{end}}{{end}}
            !
           !

@@ -185,7 +185,7 @@ func Run(ctx context.Context) error {
 	var wgGatewayUplinks uint
 	var wgGatewayDriver string
 	var wgGatewayWorkers uint
-	var wgBGPExternals, wgStaticExternals, wgExtMCLAGConns, wgExtESLAGConns, wgExtOrphanConns uint
+	var wgBGPExternals, wgStaticExternals, wgStaticExternalsProxy, wgExtMCLAGConns, wgExtESLAGConns, wgExtOrphanConns uint
 	vlabWiringGenFlags := []cli.Flag{
 		&cli.UintFlag{
 			Name:        "spines-count",
@@ -285,8 +285,14 @@ func Run(ctx context.Context) error {
 		},
 		&cli.UintFlag{
 			Name:        "externals-static",
-			Usage:       "number of static externals to generate",
+			Aliases:     []string{"externals-static-no-proxy"},
+			Usage:       "number of static externals without proxy to generate",
 			Destination: &wgStaticExternals,
+		},
+		&cli.UintFlag{
+			Name:        "externals-static-proxy",
+			Usage:       "number of static externals with proxy to generate",
+			Destination: &wgStaticExternalsProxy,
 		},
 		&cli.UintFlag{
 			Name:        "external-mclag-connections",
@@ -844,29 +850,30 @@ func Run(ctx context.Context) error {
 						Before:  before(false),
 						Action: func(_ *cli.Context) error {
 							builder := hhfab.VLABBuilder{
-								SpinesCount:        uint8(wgSpinesCount),      //nolint:gosec
-								FabricLinksCount:   uint8(wgFabricLinksCount), //nolint:gosec
-								MeshLinksCount:     uint8(wgMeshLinksCount),   //nolint:gosec
-								MCLAGLeafsCount:    uint8(wgMCLAGLeafsCount),  //nolint:gosec
-								ESLAGLeafGroups:    wgESLAGLeafGroups,
-								OrphanLeafsCount:   uint8(wgOrphanLeafsCount),  //nolint:gosec
-								MCLAGSessionLinks:  uint8(wgMCLAGSessionLinks), //nolint:gosec
-								MCLAGPeerLinks:     uint8(wgMCLAGPeerLinks),    //nolint:gosec
-								MCLAGServers:       uint8(wgMCLAGServers),      //nolint:gosec
-								ESLAGServers:       uint8(wgESLAGServers),      //nolint:gosec
-								UnbundledServers:   uint8(wgUnbundledServers),  //nolint:gosec
-								BundledServers:     uint8(wgBundledServers),    //nolint:gosec
-								MultiHomedServers:  uint8(wgMultiHomedServers), //nolint:gosec
-								NoSwitches:         wgNoSwitches,
-								GatewayUplinks:     uint8(wgGatewayUplinks), //nolint:gosec
-								GatewayDriver:      wgGatewayDriver,
-								GatewayWorkers:     uint8(wgGatewayWorkers),  //nolint:gosec
-								ExtBGPCount:        uint8(wgBGPExternals),    //nolint:gosec
-								ExtStaticCount:     uint8(wgStaticExternals), //nolint:gosec
-								ExtMCLAGConnCount:  uint8(wgExtMCLAGConns),   //nolint:gosec
-								ExtESLAGConnCount:  uint8(wgExtESLAGConns),   //nolint:gosec
-								ExtOrphanConnCount: uint8(wgExtOrphanConns),  //nolint:gosec
-								YesFlag:            yes,
+								SpinesCount:         uint8(wgSpinesCount),      //nolint:gosec
+								FabricLinksCount:    uint8(wgFabricLinksCount), //nolint:gosec
+								MeshLinksCount:      uint8(wgMeshLinksCount),   //nolint:gosec
+								MCLAGLeafsCount:     uint8(wgMCLAGLeafsCount),  //nolint:gosec
+								ESLAGLeafGroups:     wgESLAGLeafGroups,
+								OrphanLeafsCount:    uint8(wgOrphanLeafsCount),  //nolint:gosec
+								MCLAGSessionLinks:   uint8(wgMCLAGSessionLinks), //nolint:gosec
+								MCLAGPeerLinks:      uint8(wgMCLAGPeerLinks),    //nolint:gosec
+								MCLAGServers:        uint8(wgMCLAGServers),      //nolint:gosec
+								ESLAGServers:        uint8(wgESLAGServers),      //nolint:gosec
+								UnbundledServers:    uint8(wgUnbundledServers),  //nolint:gosec
+								BundledServers:      uint8(wgBundledServers),    //nolint:gosec
+								MultiHomedServers:   uint8(wgMultiHomedServers), //nolint:gosec
+								NoSwitches:          wgNoSwitches,
+								GatewayUplinks:      uint8(wgGatewayUplinks), //nolint:gosec
+								GatewayDriver:       wgGatewayDriver,
+								GatewayWorkers:      uint8(wgGatewayWorkers),       //nolint:gosec
+								ExtBGPCount:         uint8(wgBGPExternals),         //nolint:gosec
+								ExtStaticCount:      uint8(wgStaticExternals),      //nolint:gosec
+								ExtStaticProxyCount: uint8(wgStaticExternalsProxy), //nolint:gosec
+								ExtMCLAGConnCount:   uint8(wgExtMCLAGConns),        //nolint:gosec
+								ExtESLAGConnCount:   uint8(wgExtESLAGConns),        //nolint:gosec
+								ExtOrphanConnCount:  uint8(wgExtOrphanConns),       //nolint:gosec
+								YesFlag:             yes,
 							}
 
 							if err := hhfab.VLABGenerate(ctx, workDir, cacheDir, builder, hhfab.DefaultVLABGeneratedFile); err != nil {
