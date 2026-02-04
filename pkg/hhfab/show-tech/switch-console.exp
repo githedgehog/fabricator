@@ -98,7 +98,7 @@ set prompt_re {.*[#\$] $}
 set logged_in 0
 set prompt_timeout 20
 
-if {[info exists env(HHFAB_SWITCH_USER)] && [info exists env(HHFAB_SWITCH_PASS)]} {
+if {[info exists env(HHFAB_SWITCH_USERNAME)] && [info exists env(HHFAB_SWITCH_PASSWORD)]} {
     log_message "EXP-DBG" "Attempting login with provided credentials"
     set max_login_attempts 3
     set login_attempts 0
@@ -106,7 +106,7 @@ if {[info exists env(HHFAB_SWITCH_USER)] && [info exists env(HHFAB_SWITCH_PASS)]
     while {!$login_done} {
         expect {
             -re "(?i)login:" {
-                send "$env(HHFAB_SWITCH_USER)\r"
+                send "$env(HHFAB_SWITCH_USERNAME)\r"
                 exp_continue
             }
             -re "Password:" {
@@ -114,7 +114,7 @@ if {[info exists env(HHFAB_SWITCH_USER)] && [info exists env(HHFAB_SWITCH_PASS)]
                     log_message "EXP-ERR" "Login failed: max attempts reached"
                     set login_done 1
                 } else {
-                    send "$env(HHFAB_SWITCH_PASS)\r"
+                    send "$env(HHFAB_SWITCH_PASSWORD)\r"
                     incr login_attempts
                     exp_continue
                 }
