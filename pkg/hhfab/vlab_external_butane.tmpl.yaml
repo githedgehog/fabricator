@@ -133,7 +133,8 @@ storage:
           exit-vrf
           !{{if $vrf.IsStatic}}{{range $gwIP := .StaticCfg.GatewayIPs}}
           ip route {{$gwIP}} {{$vrf.StaticCfg.NICName}} nexthop-vrf {{$vrfkey}}
-          ip prefix-list static-ext-routes permit {{$gwIP}}{{end}}{{else}}
+          ip prefix-list static-ext-routes permit {{$gwIP}}{{end}}
+          {{if ne $vrf.StaticCfg.SwitchIP ""}}ip route 10.0.0.0/16 {{$vrf.StaticCfg.SwitchIP}} {{$vrf.StaticCfg.NICName}} nexthop-vrf {{$vrfkey}}{{end}}{{else}}
           bgp community-list standard {{$vrfkey}}In seq 5 permit {{$vrf.BGPCfg.InCommunity}}
           bgp community-list standard {{$vrfkey}}Out seq 5 permit {{$vrf.BGPCfg.OutCommunity}}
           !

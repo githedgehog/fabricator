@@ -240,6 +240,11 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 		}
 	}
 
+	// multiple non-proxy static externals would cause ecmp between them when returning packets from the fabric, so forbid it
+	if b.ExtStaticCount > 1 {
+		return fmt.Errorf("multiple non-proxy static externals are not supported") //nolint:goerr113
+	}
+
 	slog.Info("Building VLAB wiring diagram", "fabricMode", fabricMode)
 	if fabricMode == meta.FabricModeSpineLeaf {
 		slog.Info(">>>", "spinesCount", b.SpinesCount, "fabricLinksCount", b.FabricLinksCount, "meshLinksCount", b.MeshLinksCount)
