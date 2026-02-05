@@ -112,6 +112,18 @@ run_vtysh_cmd() {
 } >> "$OUTPUT_FILE" 2>&1
 
 # ---------------------------
+# FRR Container Logs
+# ---------------------------
+{
+    echo -e "\n=== FRR Container Logs ==="
+    if [ -n "$FRR_CONTAINER_ID" ]; then
+        sudo -E crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock logs "$FRR_CONTAINER_ID"
+    else
+        echo "FRR container not found — skipping container logs"
+    fi
+} >> "$OUTPUT_FILE" 2>&1
+
+# ---------------------------
 # System Logs
 # ---------------------------
 {
