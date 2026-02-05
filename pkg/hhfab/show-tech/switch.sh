@@ -81,8 +81,10 @@ run_sonic_cmd() {
     echo -e "\n=== BGP and EVPN Status ==="
     run_sonic_cmd "show ip bgp summary"
     run_sonic_cmd "show bgp l2vpn evpn summary"
+    run_sonic_cmd "show bgp l2vpn evpn neighbor"
     run_sonic_cmd "show bgp l2vpn evpn"
     run_sonic_cmd "show bgp l2vpn evpn route"
+    run_sonic_cmd "show route-map"
 
     echo -e "\n=== EVPN Information ==="
     run_sonic_cmd "show evpn vni"
