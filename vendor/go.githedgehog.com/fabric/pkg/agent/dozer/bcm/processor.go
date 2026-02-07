@@ -36,17 +36,22 @@ import (
 )
 
 type BroadcomProcessor struct {
-	client *gnmi.Client
+	client          *gnmi.Client
+	skipCustomFuncs bool
 }
 
 var _ dozer.Processor = &BroadcomProcessor{}
 
 func Processor() (*BroadcomProcessor, error) {
-	return &BroadcomProcessor{}, initCompat()
+	return &BroadcomProcessor{}, nil
 }
 
 func (p *BroadcomProcessor) SetClient(client *gnmi.Client) {
 	p.client = client
+}
+
+func (p *BroadcomProcessor) SetSkipCustomFuncs(skip bool) {
+	p.skipCustomFuncs = skip
 }
 
 func (p *BroadcomProcessor) WaitReady(ctx context.Context) error {
@@ -217,6 +222,11 @@ func (p *BroadcomProcessor) ApplyActions(ctx context.Context, actions []dozer.Ac
 		act := action.(*Action)
 
 		if act.CustomFunc != nil {
+			if p.skipCustomFuncs {
+				slog.Debug("Action (custom func) skipped", "idx", idx, "weight", act.Weight, "summary", action.Summary())
+
+				continue
+			}
 			slog.Debug("Action", "idx", idx, "weight", act.Weight, "summary", action.Summary())
 
 			err := act.CustomFunc(ctx, p.client)
