@@ -71,10 +71,6 @@ const (
 )
 
 func (p *BroadcomProcessor) PlanDesiredState(_ context.Context, agent *agentapi.Agent) (*dozer.Spec, error) {
-	if sonicVersionCurr.Compare(sonicVersion450) < 0 {
-		return nil, fmt.Errorf("minimum sonic version required is 4.5.0") //nolint:err113
-	}
-
 	spec := &dozer.Spec{
 		ZTP:             pointer.To(false),
 		Hostname:        pointer.To(agent.Name),
@@ -842,13 +838,14 @@ func planGatewayConnections(agent *agentapi.Agent, spec *dozer.Spec) error {
 			}
 
 			spec.VRFs[VRFDefault].BGP.Neighbors[ip.String()] = &dozer.SpecVRFBGPNeighbor{
-				Enabled:             pointer.To(true),
-				Description:         pointer.To(fmt.Sprintf("Gateway %s %s", remote, connName)),
-				RemoteAS:            pointer.To(agent.Spec.Config.GatewayASN), // TODO load peer GW and get ASN from it
-				IPv4Unicast:         pointer.To(true),
-				L2VPNEVPN:           pointer.To(true),
-				L2VPNEVPNAllowOwnAS: pointer.To(true),
-				BFDProfile:          bfdProfile,
+				Enabled:                 pointer.To(true),
+				Description:             pointer.To(fmt.Sprintf("Gateway %s %s", remote, connName)),
+				RemoteAS:                pointer.To(agent.Spec.Config.GatewayASN), // TODO load peer GW and get ASN from it
+				IPv4Unicast:             pointer.To(true),
+				L2VPNEVPN:               pointer.To(true),
+				L2VPNEVPNAllowOwnAS:     pointer.To(true),
+				L2VPNEVPNImportPolicies: []string{RouteMapL2VPNNeighbors},
+				BFDProfile:              bfdProfile,
 			}
 		}
 	}
@@ -1866,20 +1863,14 @@ func planVPCs(agent *agentapi.Agent, spec *dozer.Spec) error {
 		},
 	}
 
-	if sonicVersionCurr.Compare(sonicVersion450) >= 0 {
-		spec.RouteMaps[RouteMapFilterAttachedHost].Statements["10"] = &dozer.SpecRouteMapStatement{
-			Conditions: dozer.SpecRouteMapConditions{
-				AttachedHost: pointer.To(true),
-			},
-			Result: dozer.SpecRouteMapResultReject,
-		}
+	spec.RouteMaps[RouteMapFilterAttachedHost].Statements["10"] = &dozer.SpecRouteMapStatement{
+		Conditions: dozer.SpecRouteMapConditions{
+			AttachedHost: pointer.To(true),
+		},
+		Result: dozer.SpecRouteMapResultReject,
 	}
 
 	for vpcName, vpc := range agent.Spec.VPCs {
-		if vpc.Mode != vpcapi.VPCModeL2VNI && sonicVersionCurr.Compare(sonicVersion450) < 0 {
-			return errors.Errorf("VPC %s mode %s is not supported on SONiC version %s", vpcName, vpc.Mode, sonicVersionCurr)
-		}
-
 		switch vpc.Mode {
 		case vpcapi.VPCModeL2VNI, vpcapi.VPCModeL3VNI:
 			if err := planVNIVPC(agent, spec, vpcName, vpc); err != nil {
@@ -2317,10 +2308,7 @@ func planVNIVPC(agent *agentapi.Agent, spec *dozer.Spec, vpcName string, vpc vpc
 			ImportPolicies: []string{vpcRedistributeStaticRouteMap},
 		},
 	}
-	if sonicVersionCurr.Compare(sonicVersion450) >= 0 {
-		spec.VRFs[vrfName].TableConnections[string(dozer.SpecVRFBGPTableConnectionAttachedHost)] = &dozer.SpecVRFTableConnection{}
-	}
-
+	spec.VRFs[vrfName].TableConnections[string(dozer.SpecVRFBGPTableConnectionAttachedHost)] = &dozer.SpecVRFTableConnection{}
 	spec.VRFs[vrfName].Interfaces[irbIface] = &dozer.SpecVRFInterface{}
 
 	if agent.IsSpineLeaf() {
@@ -2747,10 +2735,7 @@ func planVNIVPCSubnet(agent *agentapi.Agent, spec *dozer.Spec, vpcName string, v
 	}
 
 	spec.VRFs[vrfName].Interfaces[subnetIface] = &dozer.SpecVRFInterface{}
-
-	if sonicVersionCurr.Compare(sonicVersion450) >= 0 {
-		spec.VRFs[vrfName].AttachedHosts[subnetIface] = &dozer.SpecVRFAttachedHost{}
-	}
+	spec.VRFs[vrfName].AttachedHosts[subnetIface] = &dozer.SpecVRFAttachedHost{}
 
 	vpcFilteringACL := vpcFilteringAccessListName(vpcName, subnetName)
 	spec.ACLInterfaces[subnetIface] = &dozer.SpecACLInterface{
