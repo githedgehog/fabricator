@@ -19,6 +19,26 @@ systemd:
   units:
     - name: locksmithd.service
       mask: true
+
+    # VLAB-only: force NIC renaming early in boot based on QEMU-specific PCI paths
+    - name: force-nic-rename.service
+      enabled: true
+      contents: |
+        [Unit]
+        Description=Force network interface renaming via udev
+        DefaultDependencies=no
+        After=systemd-udev-trigger.service
+        Before=network-pre.target systemd-networkd.service
+        Wants=network-pre.target
+
+        [Service]
+        Type=oneshot
+        ExecStart=/usr/bin/udevadm trigger --action=add --subsystem-match=net
+        ExecStart=/usr/bin/udevadm settle
+        RemainAfterExit=yes
+
+        [Install]
+        WantedBy=sysinit.target
 {{ if .AutoInstall }}
     - name: hhfab-install.service
       enabled: true
@@ -43,6 +63,29 @@ systemd:
 
 storage:
   files:
+    # VLAB-only: rename NICs based on QEMU-specific PCI paths
+    - path: /etc/systemd/network/10-rename-enp2s0.link
+      mode: 0644
+      contents:
+        inline: |
+          [Match]
+          Path=pci-0000:02:00.0
+
+          [Link]
+          Name=enp2s0
+          MACAddressPolicy=persistent
+
+    - path: /etc/systemd/network/10-rename-enp2s1.link
+      mode: 0644
+      contents:
+        inline: |
+          [Match]
+          Path=pci-0000:02:01.0
+
+          [Link]
+          Name=enp2s1
+          MACAddressPolicy=persistent
+
     - path: /etc/flatcar/update.conf
       mode: 0644
       overwrite: true

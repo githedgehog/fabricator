@@ -1011,7 +1011,12 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 			}
 
 			if device == "" {
-				device = fmt.Sprintf("e1000,netdev=eth%02d,mac=%s", nicID, mac)
+				// Use e1000 by default, virtio-net-pci only for control nodes to avoid Tx Unit Hang
+				nicModel := "e1000"
+				if vm.Type == VMTypeControl {
+					nicModel = "virtio-net-pci"
+				}
+				device = fmt.Sprintf("%s,netdev=eth%02d,mac=%s", nicModel, nicID, mac)
 			}
 			device += fmt.Sprintf(",bus=%s%d,addr=0x%x", VLABPCIBridgePrefix, nicID/VLABNICsPerPCIBridge, nicID%VLABNICsPerPCIBridge)
 
