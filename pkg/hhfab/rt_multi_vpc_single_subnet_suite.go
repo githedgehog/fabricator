@@ -70,6 +70,14 @@ func makeMultiVPCSingleSubnetSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 			},
 		},
 		{
+			Name: "Gateway Failover",
+			F:    testCtx.gatewayFailoverTest,
+			SkipFlags: SkipFlags{
+				NoGateway: true,
+				NoServers: true,
+			},
+		},
+		{
 			Name: "Gateway Peering Loop",
 			F:    testCtx.gatewayPeeringLoopTest,
 			SkipFlags: SkipFlags{
