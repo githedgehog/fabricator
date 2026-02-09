@@ -33,16 +33,17 @@ const (
 )
 
 var (
-	errNoExternals     = errors.New("no external peers found")
-	errNoMclags        = errors.New("no MCLAG connections found")
-	errNoEslags        = errors.New("no ESLAG connections found")
-	errNoBundled       = errors.New("no bundled connections found")
-	errNoUnbundled     = errors.New("no unbundled connections found")
-	errNotEnoughSpines = errors.New("not enough spines found")
-	errNotEnoughLeaves = errors.New("not enough leaves found")
-	errNotEnoughVPCs   = errors.New("not enough VPCs found")
-	errNoRoceLeaves    = errors.New("no leaves supporting RoCE found")
-	errInitialSetup    = errors.New("initial setup failed")
+	errNoExternals       = errors.New("no external peers found")
+	errNoMclags          = errors.New("no MCLAG connections found")
+	errNoEslags          = errors.New("no ESLAG connections found")
+	errNoBundled         = errors.New("no bundled connections found")
+	errNoUnbundled       = errors.New("no unbundled connections found")
+	errNotEnoughSpines   = errors.New("not enough spines found")
+	errNotEnoughLeaves   = errors.New("not enough leaves found")
+	errNotEnoughGateways = errors.New("not enough gateways found")
+	errNotEnoughVPCs     = errors.New("not enough VPCs found")
+	errNoRoceLeaves      = errors.New("no leaves supporting RoCE found")
+	errInitialSetup      = errors.New("initial setup failed")
 )
 
 type VPCPeeringTestCtx struct {
