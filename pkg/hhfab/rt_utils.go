@@ -290,7 +290,7 @@ func shutDownLinkAndTest(ctx context.Context, testCtx *VPCPeeringTestCtx, link w
 			if err := changeAgentStatus(ctx, swSSH, deviceName, true); err != nil {
 				slog.Error("Enabling HH agent", "error", err)
 				if i < maxRetries-1 {
-					slog.Warn("Retrying in 5 seconds")
+					slog.Warn("Retrying", "delay", sleepTime)
 					time.Sleep(sleepTime)
 				}
 			} else {
