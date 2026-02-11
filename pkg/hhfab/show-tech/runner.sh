@@ -206,4 +206,32 @@ set +e
         echo "nft command not available"
     fi
 
+    echo -e "\n=== QEMU VM Status (via QMP) ==="
+    if command -v socat >/dev/null 2>&1; then
+        for qmp in vlab/vms/*/qmp.sock; do
+            [ -S "$qmp" ] || continue
+            vm=$(dirname "$qmp" | xargs basename)
+            echo -n "$vm: "
+            status=$(printf '{"execute":"qmp_capabilities"}\n{"execute":"query-status"}\n' | \
+                sudo -n socat -t1 - UNIX-CONNECT:"$qmp" 2>/dev/null | \
+                grep -oP '"status"\s*:\s*"\K[^"]+')
+            echo "${status:-QMP query failed}"
+        done
+    else
+        echo "socat not available"
+    fi
+
+    echo -e "\n=== Per-VM QEMU Process Details ==="
+    for pid in $(pgrep -f 'qemu-system' 2>/dev/null); do
+        rss=$(awk '/VmRSS/{print $2}' /proc/$pid/status 2>/dev/null)
+        [ -z "$rss" ] || [ "$rss" -lt 100000 ] && continue
+        name=$(tr '\0' ' ' < /proc/$pid/cmdline 2>/dev/null | grep -oP '(?<=-name )[^ ,]+' | head -1)
+        echo "--- ${name:-unknown} (PID $pid) ---"
+        awk '{printf "state=%s utime=%s stime=%s threads=%s\n", $3, $14, $15, $20}' /proc/$pid/stat 2>/dev/null
+        grep -E '^(VmRSS|VmSize|Threads):' /proc/$pid/status 2>/dev/null
+    done
+
+    echo -e "\n=== Recent KVM/QEMU Kernel Messages ==="
+    dmesg -T 2>/dev/null | grep -iE 'kvm|qemu|vhost' | tail -20 || echo "No messages or dmesg not accessible"
+
 } 2>&1
