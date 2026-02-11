@@ -683,6 +683,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						WaitSwitchesReady: true,
 						PingsCount:        5,
 						IPerfsSeconds:     5,
+						IPerfsMinSpeed:    10000, // Temporarily increased to induce failure for diagnostics debugging
 						CurlsCount:        3,
 					}); err != nil {
 						return c.handleShutdownWithPause(ctx, vlab, opts, fmt.Errorf("testing connectivity: %w", err))

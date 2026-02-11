@@ -85,7 +85,7 @@ func makeTestCtx(kube kclient.Client, setupOpts SetupVPCsOpts, vlabCfg *Config, 
 		WaitSwitchesReady: false,
 		PingsCount:        5,
 		IPerfsSeconds:     3,
-		IPerfsMinSpeed:    8200,
+		IPerfsMinSpeed:    10000, // Temporarily increased to induce failure for diagnostics debugging
 		CurlsCount:        1,
 		RequireAllServers: setupOpts.VPCMode == vpcapi.VPCModeL2VNI, // L3VNI will skip eslag servers
 	}
