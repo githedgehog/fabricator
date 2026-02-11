@@ -440,6 +440,10 @@ spec:
                                 type: array
                             type: object
                         type: object
+                      tags:
+                        additionalProperties:
+                          type: string
+                        type: object
                     type: object
                   observability:
                     properties:

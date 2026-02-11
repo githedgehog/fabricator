@@ -106,6 +106,12 @@ spec:
       {{- if .GatewayLogLevel }}
       loglevel: "{{ .GatewayLogLevel }}"
       {{- end }}
+      {{ if .GatewayTags }}
+      tags:
+        {{- range $key, $value := .GatewayTags }}
+        "{{ $key }}": "{{ $value }}"
+        {{- end }}
+      {{- end }}
     {{- end }}
 
 ---

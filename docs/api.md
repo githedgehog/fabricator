@@ -541,6 +541,7 @@ _Appears in:_
 | `agentless` _boolean_ |  |  |  |
 | `communities` _object (keys:string, values:string)_ |  |  |  |
 | `loglevel` _string_ |  |  |  |
+| `tags` _object (keys:string, values:string)_ |  |  |  |
 
 
 #### GatewayObservability

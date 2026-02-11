@@ -45,6 +45,7 @@ type InitConfigInput struct {
 	O11yDefaults          fabapi.ObservabilityDefaults
 	O11yLabels            map[string]string
 	GatewayLogLevel       string
+	GatewayTags           map[string]string
 }
 
 func InitConfig(ctx context.Context, in InitConfigInput) ([]byte, error) {
