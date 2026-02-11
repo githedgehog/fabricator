@@ -70,9 +70,10 @@ func TestFabricatorCtrlUpgradeConstraint(t *testing.T) {
 		expected bool
 	}{
 		{"current", version.Version, true},
-		{"dev", "v0.42.0", true},
-		{"25.04", "v0.41.3", true},
-		{"25.04.0", "v0.41.3", true},
+		{"dev", "v0.44.0", true},
+		{"25.05", "v0.43.1", true},
+		{"25.04", "v0.41.3", false},
+		{"25.04.0", "v0.41.3", false},
 		{"25.03", "v0.40.0", false},
 		{"25.03.0", "v0.40.0", false},
 		{"25.02", "v0.38.1", false},
@@ -103,9 +104,10 @@ func TestFabricAgentUpgradeConstraint(t *testing.T) {
 		expected bool
 	}{
 		{"current", string(FabricVersion), true},
-		{"dev", "v0.89.0", true},
-		{"25.04", "v0.87.4", true},
-		{"25.04.0", "v0.87.4", true},
+		{"dev", "v0.100.0", true},
+		{"25.05", "v0.96.2", true},
+		{"25.04", "v0.87.4", false},
+		{"25.04.0", "v0.87.4", false},
 		{"25.03", "v0.81.1", false},
 		{"25.03.0", "v0.81.1", false},
 		{"25.02", "v0.75.3", false},

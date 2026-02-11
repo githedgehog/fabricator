@@ -23,8 +23,8 @@ var (
 	CLSSONiCVersion   = meta.Version("v4.2.1")
 
 	// Upgrade constraints, "-0" to include pre-releases
-	FabricatorCtrlConstraint = ">=0.41.3-0"
-	FabricAgentConstraint    = ">=0.87.4-0"
+	FabricatorCtrlConstraint = ">=0.43.1-0"
+	FabricAgentConstraint    = ">=0.96.2-0"
 	FabricNOSConstraint      = ">=4.5.0-0" // -0 is to allow -Enterprise_Base suffix
 )
 

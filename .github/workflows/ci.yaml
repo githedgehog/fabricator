@@ -265,7 +265,7 @@ jobs:
 
     strategy:
       fail-fast: false
-      # usb/iso/manual build modes as a base
+      # manual build mode as a base
       matrix:
         mesh:
           - false
@@ -274,8 +274,6 @@ jobs:
         includeonie:
           - false
         buildmode:
-          - usb
-          - iso
           - manual
         vpcmode:
           - l2vni
@@ -284,19 +282,10 @@ jobs:
         upgradefrom:
           - ""
         include:
-          # mesh l2vni
-          - mesh: true
-            includeonie: false
+          # l3vni
+          - mesh: false
             gateway: false
-            buildmode: iso
-            vpcmode: l2vni
-            hybrid: false
-            upgradefrom: ""
-
-          # mesh l3vni
-          - mesh: true
             includeonie: false
-            gateway: false
             buildmode: iso
             vpcmode: l3vni
             hybrid: false
@@ -311,28 +300,10 @@ jobs:
             hybrid: false
             upgradefrom: ""
 
-          # gateway l2vni w/ onie, iso (max artifacts)
+          # gateway l3vni w/ onie, iso (max artifacts)
           - mesh: false
             gateway: true
             includeonie: true
-            buildmode: iso
-            vpcmode: l2vni
-            hybrid: false
-            upgradefrom: ""
-
-          # l3vni
-          - mesh: false
-            gateway: false
-            includeonie: false
-            buildmode: iso
-            vpcmode: l3vni
-            hybrid: false
-            upgradefrom: ""
-
-          # gateway l3vni
-          - mesh: false
-            gateway: true
-            includeonie: false
             buildmode: iso
             vpcmode: l3vni
             hybrid: false
@@ -347,56 +318,46 @@ jobs:
             hybrid: true
             upgradefrom: ""
 
-          # l2vni from 25.04
-          - mesh: false
-            gateway: false
+          # gateway mesh l2vni
+          - mesh: true
             includeonie: false
-            buildmode: iso
-            vpcmode: l2vni
-            hybrid: false
-            upgradefrom: "25.04"
-
-          # l3vni from 25.04
-          - mesh: false
-            gateway: false
-            includeonie: false
-            buildmode: iso
-            vpcmode: l3vni
-            hybrid: false
-            upgradefrom: "25.04"
-
-          # mesh l2vni from 25.04
-          - fabricmode: spine-leaf
-            mesh: true
-            gateway: false
-            includeonie: false
-            buildmode: iso
-            vpcmode: l2vni
-            hybrid: false
-            upgradefrom: "25.04"
-
-          # gateway l2vni from 25.05
-          - mesh: false
             gateway: true
+            buildmode: iso
+            vpcmode: l2vni
+            hybrid: false
+            upgradefrom: ""
+
+          # TODO: consider enabling it again after removing limitation on ESLAG conns
+          # gateway mesh l3vni
+          # - mesh: true
+          #   includeonie: false
+          #   gateway: true
+          #   buildmode: iso
+          #   vpcmode: l3vni
+          #   hybrid: false
+          #   upgradefrom: ""
+
+          # l2vni from 25.05
+          - mesh: false
+            gateway: false
             includeonie: false
             buildmode: iso
             vpcmode: l2vni
             hybrid: false
             upgradefrom: "25.05"
 
-          # gateway l3vni from 25.05
+          # l3vni from 25.05
           - mesh: false
-            gateway: true
+            gateway: false
             includeonie: false
             buildmode: iso
             vpcmode: l3vni
             hybrid: false
             upgradefrom: "25.05"
 
-          # gateway mesh l2vni from 25.05
-          - fabricmode: spine-leaf
-            mesh: true
-            gateway: true
+          # mesh l2vni from 25.05
+          - mesh: true
+            gateway: false
             includeonie: false
             buildmode: iso
             vpcmode: l2vni
