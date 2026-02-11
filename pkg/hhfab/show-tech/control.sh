@@ -32,6 +32,12 @@ KUBECTL="/opt/bin/kubectl"
     ip neigh show
     ip link show
 
+    echo -e "\n=== NIC Offload Settings ==="
+    for iface in $(ls /sys/class/net/ | grep -v '^lo$'); do
+        echo "--- $iface ---"
+        ethtool -k "$iface" 2>/dev/null | grep -E 'offload|segmentation' || echo "ethtool not available"
+    done
+
     echo -e "\n=== Switch connectivity from control node ==="
     for sw in $($KUBECTL get switches -o jsonpath='{.items[*].spec.ip}' 2>/dev/null | tr ' ' '\n' | cut -d/ -f1); do
         echo -n "Switch $sw: ping="
@@ -104,6 +110,9 @@ KUBECTL="/opt/bin/kubectl"
 # System Logs
 # ---------------------------
 {
+    echo -e "\n=== disable-e1000-offloads.service status ==="
+    systemctl status disable-e1000-offloads.service --no-pager 2>&1 || true
+
     echo -e "\n=== k3s.service status ==="
     systemctl status k3s.service --no-pager
 
