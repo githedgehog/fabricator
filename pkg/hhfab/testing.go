@@ -3173,9 +3173,45 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 	bgpIn := inspect.BGPIn{
 		Strict: opts.Strict,
 	}
+	var bgpOut inspect.Out[inspect.BGPIn]
+	var bgpErr error
+	var bgpWithErrors []error
 
-	if bgpOut, err := inspect.BGP(ctx, kube, bgpIn); err != nil {
-		slog.Error("Failed to inspect BGP", "err", err)
+	const bgpRetryDelay = 10 * time.Second
+
+	for attempt := 0; attempt < opts.Attempts; attempt++ {
+		if attempt > 0 {
+			slog.Info("BGP inspect retry attempt", "number", attempt+1)
+			retryTimer := time.NewTimer(bgpRetryDelay)
+			select {
+			case <-ctx.Done():
+				retryTimer.Stop()
+
+				return fmt.Errorf("context cancelled during BGP inspect retry: %w", ctx.Err())
+			case <-retryTimer.C:
+			}
+		}
+
+		bgpOut, bgpErr = inspect.BGP(ctx, kube, bgpIn)
+		bgpWithErrors = nil
+
+		if bgpErr == nil {
+			if withErrors, ok := bgpOut.(inspect.WithErrors); ok {
+				bgpWithErrors = withErrors.Errors()
+				if len(bgpWithErrors) == 0 {
+					break
+				}
+			} else {
+				break
+			}
+		}
+	}
+
+	if bgpErr != nil {
+		slog.Error("Failed to inspect BGP", "err", bgpErr)
+		fail = true
+	} else if len(bgpWithErrors) > 0 {
+		slog.Error("BGP inspection has errors after all retries", "errors", bgpWithErrors)
 		fail = true
 	} else if renderErr := inspect.Render(time.Now(), inspect.OutputTypeText, os.Stdout, bgpIn, bgpOut); renderErr != nil {
 		slog.Error("Inspecting BGP reveals some errors", "err", renderErr)
