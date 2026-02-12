@@ -82,6 +82,8 @@ const (
 	FlagListTests                 = "list-tests"
 	FlagReleaseTestRegexes        = "release-test-regexes"
 	FlagReleaseTestRegexesInvert  = "release-test-regexes-invert"
+	FlagGatewayLogLevel           = "gateway-log-level"
+	FlagGatewayTag                = "gateway-tag"
 )
 
 func main() {
@@ -628,6 +630,18 @@ func Run(ctx context.Context) error {
 						Usage:    "default labels for observability targets",
 						EnvVars:  []string{"HHFAB_O11Y_LABELS"},
 					},
+					&cli.StringFlag{
+						Category: FlagCatGenConfig,
+						Name:     FlagGatewayLogLevel,
+						Usage:    "default log level for gateway",
+						EnvVars:  []string{"HHFAB_GW_LOG_LEVEL"},
+						Value:    "info",
+					},
+					&cli.StringSliceFlag{
+						Category: FlagCatGenConfig,
+						Name:     FlagGatewayTag,
+						Usage:    "tracing tag for gateway in format TAG=LOGLEVEL (can be repeated)",
+					},
 				}),
 				Before: before(false),
 				Action: func(c *cli.Context) error {
@@ -656,6 +670,18 @@ func Run(ctx context.Context) error {
 						}
 						o11yLabels[parts[0]] = parts[1]
 					}
+					gwTags := map[string]string{}
+					for _, entry := range c.StringSlice(FlagGatewayTag) {
+						parts := strings.SplitN(entry, "=", 2)
+						if len(parts) != 2 {
+							return fmt.Errorf("invalid gateway tag format: %s", entry) //nolint:err113
+						}
+
+						if _, ok := gwTags[parts[0]]; ok {
+							return fmt.Errorf("duplicate gateway tag key: %s", parts[0]) //nolint:err113
+						}
+						gwTags[parts[0]] = parts[1]
+					}
 
 					if err := hhfab.Init(ctx, hhfab.InitConfig{
 						WorkDir:            workDir,
@@ -681,6 +707,8 @@ func Run(ctx context.Context) error {
 							SaveJoinToken:         saveJoinToken,
 							O11yDefaults:          fabapi.ObservabilityDefaults(c.String(FlagO11yDefaults)),
 							O11yLabels:            o11yLabels,
+							GatewayLogLevel:       c.String(FlagGatewayLogLevel),
+							GatewayTags:           gwTags,
 						},
 					}); err != nil {
 						return fmt.Errorf("initializing: %w", err)

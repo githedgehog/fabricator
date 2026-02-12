@@ -28,7 +28,7 @@ func VLABGenerate(ctx context.Context, workDir, cacheDir string, builder VLABBui
 	}
 
 	includeL := apiutil.NewLoader()
-	if err := builder.Build(ctx, includeL, cfg.Fab.Spec.Config.Fabric.Mode, cfg.Nodes); err != nil {
+	if err := builder.Build(ctx, includeL, cfg.Fab.Spec.Config.Fabric.Mode, cfg.Nodes, cfg.Fab.Spec.Config.Gateway.LogLevel, cfg.Fab.Spec.Config.Gateway.Tags); err != nil {
 		return err
 	}
 

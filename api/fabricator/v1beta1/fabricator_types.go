@@ -312,6 +312,8 @@ type GatewayConfig struct {
 	Observability *GatewayObservability `json:"observability,omitempty"`
 	DepAgentless  bool                  `json:"agentless,omitempty"`
 	Communities   map[string]string     `json:"communities,omitempty"`
+	LogLevel      string                `json:"loglevel,omitempty"`
+	Tags          map[string]string     `json:"tags,omitempty"`
 }
 
 type GatewayObservability struct {
