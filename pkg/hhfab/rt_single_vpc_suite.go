@@ -439,7 +439,7 @@ func (testCtx *VPCPeeringTestCtx) gatewayFailoverTest(ctx context.Context) (bool
 	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec, 0)
 	externalPeerings := make(map[string]*vpcapi.ExternalPeeringSpec, 0)
 	gwPeerings := make(map[string]*gwapi.PeeringSpec, 1)
-	appendGwPeeringSpec(gwPeerings, &vpcs.Items[0], &vpcs.Items[1], nil, nil)
+	appendGwPeeringSpec(gwPeerings, &vpcs.Items[0], &vpcs.Items[1], nil)
 	// set the peering to use our custom gateway group
 	for _, spec := range gwPeerings {
 		spec.GatewayGroup = failoverTestGroup
