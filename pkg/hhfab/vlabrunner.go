@@ -689,6 +689,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						WaitSwitchesReady: true,
 						PingsCount:        5,
 						IPerfsSeconds:     5,
+						IPerfsMinSpeed:    8200, // Match the CLI default
 						CurlsCount:        3,
 					}
 					slog.Debug("Running test-connectivity", "opts", testConnOpts)
