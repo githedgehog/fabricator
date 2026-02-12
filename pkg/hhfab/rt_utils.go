@@ -629,13 +629,13 @@ func appendGwPeeringSpec(gwPeerings map[string]*gwapi.PeeringSpec, vpc1, vpc2 *v
 	if len(opts.VPC1NATCIDR) > 0 || len(opts.VPC2NATCIDR) > 0 {
 		if opts.StatefulNAT {
 			natConfig = &gwapi.PeeringNAT{
-				Stateful: &gwapi.PeeringStatefulNAT{
+				Masquerade: &gwapi.PeeringNATMasquerade{
 					IdleTimeout: kmetav1.Duration{Duration: 5 * time.Minute},
 				},
 			}
 		} else {
 			natConfig = &gwapi.PeeringNAT{
-				Stateless: &gwapi.PeeringStatelessNAT{},
+				Static: &gwapi.PeeringNATStatic{},
 			}
 		}
 	}
