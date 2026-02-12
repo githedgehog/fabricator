@@ -641,17 +641,19 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 				slog.Info("Running on-ready command", "command", cmd)
 				switch cmd {
 				case OnReadySwitchReinstall:
-					if err := c.VLABSwitchReinstall(ctx, SwitchReinstallOpts{
+					reinstallOpts := SwitchReinstallOpts{
 						Mode:        ReinstallModeHardReset,
 						PDUUsername: os.Getenv(VLABEnvPDUUsername),
 						PDUPassword: os.Getenv(VLABEnvPDUPassword),
 						WaitReady:   true,
-					}); err != nil {
+					}
+					slog.Debug("Running switch-reinstall", "mode", reinstallOpts.Mode, "waitReady", reinstallOpts.WaitReady)
+					if err := c.VLABSwitchReinstall(ctx, reinstallOpts); err != nil {
 						return c.handleShutdownWithPause(ctx, vlab, opts, fmt.Errorf("reinstalling switches: %w", err))
 					}
 				case OnReadySetupVPCs:
 					// TODO make it configurable
-					if err := c.SetupVPCs(ctx, vlab, SetupVPCsOpts{
+					setupVPCsOpts := SetupVPCsOpts{
 						WaitSwitchesReady: true,
 						VLANNamespace:     "default",
 						IPv4Namespace:     "default",
@@ -661,7 +663,9 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						TimeServers:       []string{"219.239.35.0"},
 						HashPolicy:        HashPolicyL2And3,
 						VPCMode:           opts.VPCMode,
-					}); err != nil {
+					}
+					slog.Debug("Running setup-vpcs", "opts", setupVPCsOpts)
+					if err := c.SetupVPCs(ctx, vlab, setupVPCsOpts); err != nil {
 						return c.handleShutdownWithPause(ctx, vlab, opts, fmt.Errorf("setting up VPCs: %w", err))
 					}
 				case OnReadySetupPeerings:
@@ -671,20 +675,24 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						peerings = append(peerings, "2+3:gw:vpc1=subnet-01:vpc2=subnet-01")
 					}
 
-					if err := c.SetupPeerings(ctx, vlab, SetupPeeringsOpts{
+					setupPeeringsOpts := SetupPeeringsOpts{
 						WaitSwitchesReady: true,
 						Requests:          peerings,
-					}); err != nil {
+					}
+					slog.Debug("Running setup-peerings", "opts", setupPeeringsOpts)
+					if err := c.SetupPeerings(ctx, vlab, setupPeeringsOpts); err != nil {
 						return c.handleShutdownWithPause(ctx, vlab, opts, fmt.Errorf("setting up peerings: %w", err))
 					}
 				case OnReadyTestConnectivity:
 					// TODO make it configurable
-					if err := c.TestConnectivity(ctx, vlab, TestConnectivityOpts{
+					testConnOpts := TestConnectivityOpts{
 						WaitSwitchesReady: true,
 						PingsCount:        5,
 						IPerfsSeconds:     5,
 						CurlsCount:        3,
-					}); err != nil {
+					}
+					slog.Debug("Running test-connectivity", "opts", testConnOpts)
+					if err := c.TestConnectivity(ctx, vlab, testConnOpts); err != nil {
 						return c.handleShutdownWithPause(ctx, vlab, opts, fmt.Errorf("testing connectivity: %w", err))
 					}
 				case OnReadyExit:
@@ -706,22 +714,26 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						return c.handleShutdownWithPause(ctx, vlab, opts, fmt.Errorf("waiting: %w", err))
 					}
 				case OnReadyInspect:
-					if err := c.Inspect(ctx, vlab, InspectOpts{
+					inspectOpts := InspectOpts{
 						WaitAppliedFor: 30 * time.Second,
 						Strict:         !opts.AutoUpgrade,
 						Attempts:       3,
-					}); err != nil {
+					}
+					slog.Debug("Running inspect", "opts", inspectOpts)
+					if err := c.Inspect(ctx, vlab, inspectOpts); err != nil {
 						return c.handleShutdownWithPause(ctx, vlab, opts, fmt.Errorf("inspecting: %w", err))
 					}
 				case OnReadyReleaseTest:
-					if err := c.ReleaseTest(ctx, vlab, ReleaseTestOpts{
+					releaseTestOpts := ReleaseTestOpts{
 						ResultsFile:    "release-test.xml",
 						HashPolicy:     HashPolicyL2And3,
 						VPCMode:        opts.VPCMode,
 						PauseOnFailure: opts.PauseOnFailure,
 						Regexes:        opts.ReleaseTestRegexes,
 						InvertRegex:    opts.ReleaseTestRegexesInvert,
-					}); err != nil {
+					}
+					slog.Debug("Running release-test", "opts", releaseTestOpts)
+					if err := c.ReleaseTest(ctx, vlab, releaseTestOpts); err != nil {
 						if c.Shutdown.Load() == int32(ShutdownTypeGraceful) {
 							return nil
 						}
