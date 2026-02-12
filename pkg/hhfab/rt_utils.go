@@ -588,6 +588,16 @@ func appendGwExtPeeringSpec(gwPeerings map[string]*gwapi.PeeringSpec, vpc1 *vpca
 	}
 }
 
+// NATMode specifies the type of NAT to use
+type NATMode int
+
+const (
+	// NATModeStatic uses static (1:1) NAT mapping
+	NATModeStatic NATMode = iota
+	// NATModeMasquerade uses masquerade (many:1) NAT with connection tracking
+	NATModeMasquerade
+)
+
 // GwPeeringOptions contains optional parameters for gateway peering configuration
 type GwPeeringOptions struct {
 	// VPC1Subnets specifies which subnets from VPC1 to expose (if empty, all subnets are used)
@@ -598,13 +608,36 @@ type GwPeeringOptions struct {
 	VPC1NATCIDR []string
 	// VPC2NATCIDR specifies the NAT CIDR ranges for VPC2
 	VPC2NATCIDR []string
-	// StatefulNAT enables stateful NAT instead of stateless (default: false = stateless)
-	StatefulNAT bool
+	// VPC1NATMode specifies the NAT mode for VPC1 (default: static)
+	VPC1NATMode NATMode
+	// VPC2NATMode specifies the NAT mode for VPC2 (default: static)
+	VPC2NATMode NATMode
+}
+
+// buildNATConfig creates a NAT configuration based on the specified mode
+func buildNATConfig(mode NATMode) *gwapi.PeeringNAT {
+	if mode == NATModeMasquerade {
+		return &gwapi.PeeringNAT{
+			Masquerade: &gwapi.PeeringNATMasquerade{
+				IdleTimeout: kmetav1.Duration{Duration: 5 * time.Minute},
+			},
+		}
+	}
+
+	return &gwapi.PeeringNAT{
+		Static: &gwapi.PeeringNATStatic{},
+	}
 }
 
 // appendGwPeeringSpec adds a single gateway peering spec to an existing map, which will be the input for DoSetupPeerings
-func appendGwPeeringSpec(gwPeerings map[string]*gwapi.PeeringSpec, vpc1, vpc2 *vpcapi.VPC, opts GwPeeringOptions) {
+// If opts is nil, default options are used (all subnets, no NAT).
+func appendGwPeeringSpec(gwPeerings map[string]*gwapi.PeeringSpec, vpc1, vpc2 *vpcapi.VPC, opts *GwPeeringOptions) {
 	entryName := fmt.Sprintf("%s--%s", vpc1.Name, vpc2.Name)
+
+	// Handle nil opts
+	if opts == nil {
+		opts = &GwPeeringOptions{}
+	}
 
 	// If no specific subnets provided, use all subnets from vpc1
 	vpc1Subnets := opts.VPC1Subnets
@@ -624,46 +657,28 @@ func appendGwPeeringSpec(gwPeerings map[string]*gwapi.PeeringSpec, vpc1, vpc2 *v
 		}
 	}
 
-	// Build NAT configuration based on mode
-	var natConfig *gwapi.PeeringNAT
-	if len(opts.VPC1NATCIDR) > 0 || len(opts.VPC2NATCIDR) > 0 {
-		if opts.StatefulNAT {
-			natConfig = &gwapi.PeeringNAT{
-				Stateful: &gwapi.PeeringStatefulNAT{
-					IdleTimeout: kmetav1.Duration{Duration: 5 * time.Minute},
-				},
-			}
-		} else {
-			natConfig = &gwapi.PeeringNAT{
-				Stateless: &gwapi.PeeringStatelessNAT{},
-			}
-		}
-	}
-
 	vpc1Expose := gwapi.PeeringEntryExpose{}
 	for _, subnet := range vpc1Subnets {
 		vpc1Expose.IPs = append(vpc1Expose.IPs, gwapi.PeeringEntryIP{CIDR: subnet})
 	}
-	// Add NAT ranges if provided
+	// Add NAT ranges and config if provided for VPC1
 	for _, natCIDR := range opts.VPC1NATCIDR {
 		vpc1Expose.As = append(vpc1Expose.As, gwapi.PeeringEntryAs{CIDR: natCIDR})
 	}
-	// Set NAT configuration if NAT ranges are provided
 	if len(opts.VPC1NATCIDR) > 0 {
-		vpc1Expose.NAT = natConfig
+		vpc1Expose.NAT = buildNATConfig(opts.VPC1NATMode)
 	}
 
 	vpc2Expose := gwapi.PeeringEntryExpose{}
 	for _, subnet := range vpc2Subnets {
 		vpc2Expose.IPs = append(vpc2Expose.IPs, gwapi.PeeringEntryIP{CIDR: subnet})
 	}
-	// Add NAT ranges if provided
+	// Add NAT ranges and config if provided for VPC2
 	for _, natCIDR := range opts.VPC2NATCIDR {
 		vpc2Expose.As = append(vpc2Expose.As, gwapi.PeeringEntryAs{CIDR: natCIDR})
 	}
-	// Set NAT configuration if NAT ranges are provided
 	if len(opts.VPC2NATCIDR) > 0 {
-		vpc2Expose.NAT = natConfig
+		vpc2Expose.NAT = buildNATConfig(opts.VPC2NATMode)
 	}
 
 	gwPeerings[entryName] = &gwapi.PeeringSpec{
