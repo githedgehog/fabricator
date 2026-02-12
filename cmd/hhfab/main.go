@@ -1258,6 +1258,23 @@ func Run(ctx context.Context) error {
 							1~as5835:s=default:p=default:gw -- same as above but via the gateway
 							1~as5835:s=default,other:p=1.0.0.1/32_le32_ge32,22.22.22.0/24 -- two explicit prefixes allowed from the external,
 								provided the external it is advertising them they will be imported and exposed to the VPC
+
+							Gateway NAT options:
+
+							These are available only when :gw is used. Options are per side of the peering; the examples below are for the
+							first VPC in a VPC peering. For the second VPC, replace '1' with '2'; for external peerings, use 'ext' and 'vpc'
+							instead to target respectively the external or the VPC in the peering (e.g. 'vpc-as' or 'ext-as').
+							- vpc1-as / as1: expose NAT "as" prefixes (one or more CIDRs, comma-separated; use !CIDR for Not)
+							- vpc1-nat / nat1: static|masquerade|port-forward (if *-as is set and *-nat omitted => static)
+							- vpc1-pf / pf1: port-forward rules (required when *-nat=port-forward), comma-separated:
+								tcp/80=8080,udp/10000-10010=20000-20010,443=8443
+
+							Example of VPC↔VPC with NAT via gateway:
+							1+2:gw:vpc1-as=10.10.0.0/24:vpc1-nat=masquerade:vpc2-as=172.16.0.0/16:vpc2-nat=static
+							1+2:gw:as1=10.10.0.0/24:nat1=port-forward:pf1=tcp/80=8080:as2=172.16.0.0/16
+
+							Example of VPC↔External with NAT via gateway:
+							1~as5835:gw:vpc-as=10.10.0.1/32:vpc-nat=masquerade:ext-as=192.0.2.0/24:ext-nat=port-forward:ext-pf=udp/53=5353:p=1.0.0.0/8
 						`, "							", "")),
 						Flags: flatten(defaultFlags, accessNameFlags, []cli.Flag{
 							&cli.BoolFlag{
