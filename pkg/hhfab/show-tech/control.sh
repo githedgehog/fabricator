@@ -56,6 +56,12 @@ KUBECTL="/opt/bin/kubectl"
     echo -e "\n=== Kubernetes Nodes ==="
     $KUBECTL get nodes -o wide
 
+    echo -e "\n=== Kubernetes Node Conditions with Heartbeat Times ==="
+    $KUBECTL get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{range .status.conditions[*]}  {.type}: {.status} (LastHeartbeat: {.lastHeartbeatTime}, LastTransition: {.lastTransitionTime}){"\n"}{end}{"\n"}{end}'
+
+    echo -e "\n=== Describe All Kubernetes Nodes ==="
+    $KUBECTL describe nodes
+
     echo -e "\n=== Kubernetes Pods ==="
     $KUBECTL get pods -A -o wide
 
@@ -110,14 +116,14 @@ KUBECTL="/opt/bin/kubectl"
     echo -e "\n=== sshd status ==="
     systemctl status sshd --no-pager
 
-    echo -e "\n=== k3s.service logs (last hour) ==="
-    journalctl -u k3s.service --no-pager --since "1 hour ago"
+    echo -e "\n=== k3s.service logs (last 2 hours) ==="
+    journalctl -u k3s.service --no-pager --since "2 hours ago"
 
-    echo -e "\n=== systemd-networkd logs ==="
-    journalctl -u systemd-networkd
+    echo -e "\n=== systemd-networkd logs (last 2 hours) ==="
+    journalctl -u systemd-networkd --no-pager --since "2 hours ago"
 
-    echo -e "\n=== kernel logs ==="
-    journalctl -k
+    echo -e "\n=== kernel logs (last 2 hours) ==="
+    journalctl -k --no-pager --since "2 hours ago"
 
     echo -e "\n=== Kernel Network Logs ==="
     dmesg | grep -i "network\|bond\|vlan"

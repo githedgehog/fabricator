@@ -567,6 +567,8 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 				case <-ctx.Done():
 					slog.Error("Failed to wait for k8s api", "err", readyErr)
 
+					c.CollectVLABDebug(ctx, vlab, opts)
+
 					return fmt.Errorf("cancelled while waiting for k8s nodes: %w", ctx.Err())
 				case <-time.After(15 * time.Second):
 				}
