@@ -567,6 +567,11 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 				case <-ctx.Done():
 					slog.Error("Failed to wait for k8s api", "err", readyErr)
 
+					// Use fresh context since parent ctx is cancelled
+					debugCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+					defer cancel()
+					c.CollectVLABDebug(debugCtx, vlab, opts) //nolint:contextcheck
+
 					return fmt.Errorf("cancelled while waiting for k8s nodes: %w", ctx.Err())
 				case <-time.After(15 * time.Second):
 				}
