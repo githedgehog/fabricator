@@ -133,14 +133,14 @@ run_vtysh_cmd() {
     echo -e "\n=== sshd status ==="
     systemctl status sshd --no-pager
 
-    echo -e "\n=== k3s-agent.service logs (last hour) ==="
-    journalctl -u k3s-agent.service --no-pager --since "1 hour ago"
+    echo -e "\n=== k3s-agent.service logs (last 2 hours) ==="
+    journalctl -u k3s-agent.service --no-pager --since "2 hours ago"
 
-    echo -e "\n=== systemd-networkd logs ==="
-    journalctl -u systemd-networkd --no-pager --since "1 hour ago"
+    echo -e "\n=== systemd-networkd logs (last 2 hours) ==="
+    journalctl -u systemd-networkd --no-pager --since "2 hours ago"
 
-    echo -e "\n=== kernel logs (last hour) ==="
-    journalctl -k --no-pager --since "1 hour ago"
+    echo -e "\n=== kernel logs (last 2 hours) ==="
+    journalctl -k --no-pager --since "2 hours ago"
 
     echo -e "\n=== Kernel Network Logs ==="
     dmesg | grep -i "network\|bond\|vlan"
