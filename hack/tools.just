@@ -97,13 +97,16 @@ gcov2lcov := localbin / "gcov2lcov" + "-" + gcov2lcov_version
 @_gcov2lcov: _localbin
   [ -f {{gcov2lcov}} ] || just _goinstall "github.com/jandelgado/gcov2lcov" {{gcov2lcov_version}} "gcov2lcov" {{gcov2lcov}}
 
+# go toolchain version (e.g., "1.26.0" from "go1.26.0")
+go_version := `go env GOVERSION | sed 's/^go//'`
+
 # go install helper
 _goinstall PACKAGE VERSION BINNAME TARGET FLAGS="": _localbin
   #!/usr/bin/env bash
   set -euo pipefail
 
   echo "Installing go package: {{PACKAGE}}@{{VERSION}}..."
-  GOBIN=`pwd`/{{localbin}} go install {{FLAGS}} {{PACKAGE}}@{{VERSION}}
+  GOTOOLCHAIN="go{{go_version}}" GOBIN=`pwd`/{{localbin}} go install {{FLAGS}} {{PACKAGE}}@{{VERSION}}
   mv {{localbin}}/{{BINNAME}} {{TARGET}}
 
 #
