@@ -1523,6 +1523,7 @@ type IperfError struct {
 	RcvdSpeed   string
 	ClientMsg   string
 	ServerMsg   string
+	SpeedTooLow bool // Indicates failure was due to low speed, eligible for retry
 }
 
 func (ie *IperfError) Error() string {
@@ -2402,13 +2403,16 @@ func checkToolboxLock(ctx context.Context, server string, ssh *sshutil.Config, t
 	return nil
 }
 
+// iperf3SpeedRetries is the number of additional attempts for iperf3 tests that fail due to low speed.
+// This helps handle transient network congestion or ECMP hash imbalance issues.
+const iperf3SpeedRetries = 2
+
+// iperf3RetryDelay is the delay between retry attempts to allow network conditions to stabilize.
+const iperf3RetryDelay = 2 * time.Second
+
 func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string, fromSSH, toSSH *sshutil.Config, toIP netip.Addr, reachability Reachability) *IperfError {
 	if opts.IPerfsSeconds <= 0 || !reachability.Reachable {
 		return nil
-	}
-	ie := &IperfError{
-		Source:      from,
-		Destination: to,
 	}
 
 	iPerfsMinSpeed := opts.IPerfsMinSpeed
@@ -2416,7 +2420,48 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string,
 	if reachability.Reason == ReachabilityReasonGatewayPeering {
 		iPerfsMinSpeed = min(iPerfsMinSpeed, 0.01)
 	}
-	ie.MinSpeed = asMbps(iPerfsMinSpeed * 1_000_000)
+
+	var lastError *IperfError
+	for attempt := 0; attempt <= iperf3SpeedRetries; attempt++ {
+		if attempt > 0 {
+			slog.Warn("Retrying iperf3 test due to low speed", "from", from, "to", to,
+				"attempt", attempt+1, "maxAttempts", iperf3SpeedRetries+1,
+				"previousSentSpeed", lastError.SentSpeed, "previousRcvdSpeed", lastError.RcvdSpeed,
+				"minSpeed", lastError.MinSpeed)
+			// Brief delay before retry to allow network conditions to stabilize
+			select {
+			case <-ctx.Done():
+				return lastError
+			case <-time.After(iperf3RetryDelay):
+			}
+		}
+
+		ie := runIPerf3Test(ctx, opts, from, to, fromSSH, toSSH, toIP, iPerfsMinSpeed)
+		if ie == nil {
+			if attempt > 0 {
+				slog.Info("iperf3 test succeeded on retry", "from", from, "to", to, "attempt", attempt+1)
+			}
+			return nil
+		}
+
+		// Only retry on speed-related failures
+		if !ie.SpeedTooLow {
+			return ie
+		}
+
+		lastError = ie
+	}
+
+	// All retries exhausted
+	return lastError
+}
+
+func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to string, fromSSH, toSSH *sshutil.Config, toIP netip.Addr, iPerfsMinSpeed float64) *IperfError {
+	ie := &IperfError{
+		Source:      from,
+		Destination: to,
+		MinSpeed:    asMbps(iPerfsMinSpeed * 1_000_000),
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(opts.IPerfsSeconds+30)*time.Second)
 	defer cancel()
@@ -2518,11 +2563,13 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string,
 
 		if iPerfsMinSpeed > 0 {
 			if report.End.SumSent.BitsPerSecond < iPerfsMinSpeed*1_000_000 {
+				ie.SpeedTooLow = true
 				ie.ClientMsg = "iperf3 send speed too low"
 
 				return errors.New(ie.ClientMsg)
 			}
 			if report.End.SumReceived.BitsPerSecond < iPerfsMinSpeed*1_000_000 {
+				ie.SpeedTooLow = true
 				ie.ClientMsg = "iperf3 receive speed too low"
 
 				return errors.New(ie.ClientMsg)
