@@ -26,14 +26,14 @@ on:
     - cron: "0 10 * * *" # ~2am PST
   workflow_dispatch:
     inputs:
-      releasetest_vlab:
+      releasetest:
         type: boolean
-        description: "Run release tests in vlab"
+        description: "Run release tests"
         required: false
         default: false
-      releasetest_hlab:
+      hlab:
         type: boolean
-        description: "Run release tests in hlab"
+        description: "Run hlab"
         required: false
         default: false
       debug_enabled:
@@ -48,7 +48,6 @@ permissions:
 jobs:
   test-build:
     runs-on: lab
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -111,7 +110,6 @@ jobs:
           mkdir -p test-diagrams
           just run hhfab init -f --dev --gw
           just run hhfab vlab gen
-
           # Generate diagrams in all formats and save to test-diagrams directory
           just run hhfab diagram -f mermaid -o test-diagrams/default-vlab-diagram.mmd -v
           just run hhfab diagram -f drawio -o test-diagrams/default-vlab-diagram.drawio -v
@@ -134,7 +132,6 @@ jobs:
   bundle:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
-
     needs:
       - test-build
 
@@ -230,28 +227,13 @@ jobs:
           fi
 
   vlab:
-    name: "${{ matrix.hybrid && 'h' || 'v' }}-${{ matrix.upgradefrom && 'up' || '' }}${{ matrix.upgradefrom }}${{ matrix.upgradefrom && '-' || '' }}${{ matrix.mesh && 'mesh-' || '' }}${{ matrix.gateway && 'gw-' || '' }}${{ matrix.includeonie && 'onie-' || '' }}${{ matrix.buildmode }}-${{ matrix.vpcmode }}${{ ((matrix.hybrid && (inputs.releasetest_hlab == true || contains(github.event.pull_request.labels.*.name, 'ci:+release') || github.event.schedule == '0 6 * * *')) || (!matrix.hybrid && (inputs.releasetest_vlab == true || contains(github.event.pull_request.labels.*.name, 'ci:+release') || github.event.schedule == '0 6 * * *'))) && '-rt' || '' }}"
+    name: "${{ matrix.hybrid && 'h' || 'v' }}-${{ matrix.upgradefrom && 'up' || '' }}${{ matrix.upgradefrom }}${{ matrix.upgradefrom && '-' || '' }}${{ matrix.mesh && 'mesh-' || '' }}${{ matrix.gateway && 'gw-' || '' }}${{ matrix.includeonie && 'onie-' || '' }}${{ matrix.buildmode }}-${{ matrix.vpcmode }}${{ github.event.inputs.releasetest == 'true' && '-rt' || '' }}"
     needs:
       - test-build
     uses: ./.github/workflows/run-vlab.yaml
     with:
       # if pull_request: skip hlab if not ci:+hlab and skip vlab if ci:-vlab
       # if workflow_dispatch: skip hlab if only vlab release tests requested and skip vlab if only hlab release tests requested
-      skip: >-
-        ${{
-          github.event_name == 'pull_request'
-          && (
-            matrix.hybrid && !contains(github.event.pull_request.labels.*.name, 'ci:+hlab')
-            || !matrix.hybrid && contains(github.event.pull_request.labels.*.name, 'ci:-vlab')
-            || matrix.upgradefrom != '' && contains(github.event.pull_request.labels.*.name, 'ci:-upgrade')
-          )
-          || github.event_name == 'workflow_dispatch'
-          && (inputs.releasetest_vlab == true || inputs.releasetest_hlab == true)
-          && (
-            matrix.hybrid && inputs.releasetest_hlab != true
-            || !matrix.hybrid && inputs.releasetest_vlab != true
-          )
-        }}
       fabricatorref: ${{ github.ref }}
       fabricmode: spine-leaf
       mesh: ${{ matrix.mesh }}
@@ -259,7 +241,7 @@ jobs:
       includeonie: ${{ matrix.includeonie }}
       buildmode: ${{ matrix.buildmode }}
       vpcmode: ${{ matrix.vpcmode }}
-      releasetest: ${{ (matrix.hybrid && (inputs.releasetest_hlab == true || contains(github.event.pull_request.labels.*.name, 'ci:+release') || github.event.schedule == '0 6 * * *')) || (!matrix.hybrid && (inputs.releasetest_vlab == true || contains(github.event.pull_request.labels.*.name, 'ci:+release') || github.event.schedule == '0 6 * * *')) }}
+      releasetest: ${{ github.event.inputs.releasetest == 'true' }}
       hybrid: ${{ matrix.hybrid }}
       upgradefrom: ${{ matrix.upgradefrom }}
 
@@ -290,7 +272,6 @@ jobs:
             vpcmode: l3vni
             hybrid: false
             upgradefrom: ""
-
           # gateway l2vni w/ onie, usb (max artifacts)
           - mesh: false
             gateway: true
@@ -299,7 +280,6 @@ jobs:
             vpcmode: l2vni
             hybrid: false
             upgradefrom: ""
-
           # gateway l3vni w/ onie, iso (max artifacts)
           - mesh: false
             gateway: true
@@ -308,7 +288,6 @@ jobs:
             vpcmode: l3vni
             hybrid: false
             upgradefrom: ""
-
           # hlab gateway l2vni
           - mesh: false
             gateway: true
@@ -317,7 +296,6 @@ jobs:
             vpcmode: l2vni
             hybrid: true
             upgradefrom: ""
-
           # gateway mesh l2vni
           - mesh: true
             includeonie: false
@@ -326,7 +304,6 @@ jobs:
             vpcmode: l2vni
             hybrid: false
             upgradefrom: ""
-
           # TODO: consider enabling it again after removing limitation on ESLAG conns
           # gateway mesh l3vni
           # - mesh: true
@@ -336,7 +313,6 @@ jobs:
           #   vpcmode: l3vni
           #   hybrid: false
           #   upgradefrom: ""
-
           # l2vni from 25.05
           - mesh: false
             gateway: false
@@ -345,7 +321,6 @@ jobs:
             vpcmode: l2vni
             hybrid: false
             upgradefrom: "25.05"
-
           # l3vni from 25.05
           - mesh: false
             gateway: false
@@ -354,7 +329,6 @@ jobs:
             vpcmode: l3vni
             hybrid: false
             upgradefrom: "25.05"
-
           # mesh l2vni from 25.05
           - mesh: true
             gateway: false
@@ -363,6 +337,8 @@ jobs:
             vpcmode: l2vni
             hybrid: false
             upgradefrom: "25.05"
+
+    if: ${{ github.event_name != 'workflow_dispatch' || (!matrix.hybrid && github.event.inputs.releasetest == 'true') || (matrix.hybrid && github.event.inputs.releasetest == 'true' && github.event.inputs.hlab == 'true') }}
 
   vlabs:
     runs-on: ubuntu-latest
@@ -380,7 +356,7 @@ jobs:
           fi
 
   publish-test-results:
-    if: ${{ (inputs.releasetest_vlab == true || inputs.releasetest_hlab == true || contains(github.event.pull_request.labels.*.name, 'ci:+release') || github.event.schedule == '0 6 * * *') && !cancelled() }}
+    if: ${{ (github.event.inputs.releasetest == 'true' || contains(github.event.pull_request.labels.*.name, 'ci:+release') || github.event.schedule == '0 6 * * *') && !cancelled() }}
     runs-on: lab
     needs:
       - vlabs
@@ -475,7 +451,6 @@ jobs:
           branch: pr/auto/fabricator-bump
           commit-message: |
             Update docs from fabricator@${{ github.ref_name }}
-
             This is an automated commit created by GitHub Actions workflow,
             in the fabricator repository.
           signoff: true
