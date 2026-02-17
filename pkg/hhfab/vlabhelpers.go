@@ -998,7 +998,16 @@ func (c *Config) getNodeIP(ctx context.Context, name string) (string, error) {
 	return nodeIP.Addr().String(), nil
 }
 
+//nolint:contextcheck // intentionally using fresh context when original is cancelled
 func (c *Config) CollectVLABDebug(ctx context.Context, vlab *VLAB, opts VLABRunOpts) {
+	// Check if context is already cancelled and create a fresh one if needed
+	if ctx.Err() != nil {
+		slog.Debug("Context already cancelled, using fresh context for debug collection")
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+	}
+
 	kubeconfig := filepath.Join(c.WorkDir, VLABDir, VLABKubeConfig)
 
 	if _, err := os.Stat(kubeconfig); errors.Is(err, fs.ErrNotExist) {
