@@ -54,6 +54,7 @@ type VPCPeeringTestCtx struct {
 	tcOpts           TestConnectivityOpts
 	wrOpts           WaitReadyOpts
 	extName          string
+	staticExtName    string
 	extended         bool
 	failFast         bool
 	pauseOnFail      bool
@@ -122,17 +123,18 @@ type JUnitTestSuite struct {
 }
 
 type SkipFlags struct {
-	VirtualSwitch bool `xml:"-"` // skip if there's any virtual switch in the vlab
-	NoExternals   bool `xml:"-"` // skip if there are no externals
-	ExtendedOnly  bool `xml:"-"` // skip if extended tests are not enabled
-	RoCE          bool `xml:"-"` // skip if RoCE is not supported by any of the leaf switches
-	SubInterfaces bool `xml:"-"` // skip if subinterfaces are not supported by some of the switches
-	NoFabricLink  bool `xml:"-"` // skip if there's no fabric (i.e. spine-leaf) link between the switches
-	NoMeshLink    bool `xml:"-"` // skip if there's no mesh (i.e. leaf-leaf) link between the switches
-	NoGateway     bool `xml:"-"` // skip if gateway is not enabled or no gateways available
-	NoLoki        bool `xml:"-"` // skip if Loki is not configured or available
-	NoProm        bool `xml:"-"` // skip if Prometheus is not configured or available
-	NoServers     bool `xml:"-"` // skip if there are no servers in the fabric
+	VirtualSwitch     bool `xml:"-"` // skip if there's any virtual switch in the vlab
+	NoExternals       bool `xml:"-"` // skip if there are no externals
+	NoStaticExternals bool `xml:"-"` // skip if there are no static externals (new API)
+	ExtendedOnly      bool `xml:"-"` // skip if extended tests are not enabled
+	RoCE              bool `xml:"-"` // skip if RoCE is not supported by any of the leaf switches
+	SubInterfaces     bool `xml:"-"` // skip if subinterfaces are not supported by some of the switches
+	NoFabricLink      bool `xml:"-"` // skip if there's no fabric (i.e. spine-leaf) link between the switches
+	NoMeshLink        bool `xml:"-"` // skip if there's no mesh (i.e. leaf-leaf) link between the switches
+	NoGateway         bool `xml:"-"` // skip if gateway is not enabled or no gateways available
+	NoLoki            bool `xml:"-"` // skip if Loki is not configured or available
+	NoProm            bool `xml:"-"` // skip if Prometheus is not configured or available
+	NoServers         bool `xml:"-"` // skip if there are no servers in the fabric
 
 	/* Note about subinterfaces; they are required in the following cases:
 	 * 1. when using VPC loopback workaround - it's applied when we have a pair of vpcs or vpc and external both attached on a switch with peering between them
@@ -148,6 +150,9 @@ func (sf *SkipFlags) PrettyPrint() string {
 	}
 	if sf.NoExternals {
 		parts = append(parts, "NoExt")
+	}
+	if sf.NoStaticExternals {
+		parts = append(parts, "NoStaticExt")
 	}
 	if sf.ExtendedOnly {
 		parts = append(parts, "EO")
@@ -540,6 +545,14 @@ func selectAndRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, suite *J
 
 			continue
 		}
+		if test.SkipFlags.NoStaticExternals && skipFlags.NoStaticExternals {
+			suite.TestCases[i].Skipped = &Skipped{
+				Message: "There are no static externals configured",
+			}
+			suite.Skipped++
+
+			continue
+		}
 	}
 	if suite.Skipped == suite.Tests {
 		slog.Info("All tests in suite skipped, skipping suite", "suite", suite.Name)
@@ -778,6 +791,46 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 				skipFlags.NoExternals = true
 			}
 		}
+	}
+
+	// Check for static externals have attachments
+	skipFlags.NoStaticExternals = true
+	for _, ext := range extList.Items {
+		if ext.Spec.Static != nil && len(ext.Spec.Static.Prefixes) > 0 {
+			// Check if it has at least one static attachment configured
+			extAttachList := &vpcapi.ExternalAttachmentList{}
+			if err := kube.List(ctx, extAttachList, kclient.MatchingLabels{vpcapi.LabelExternal: ext.Name}); err != nil {
+				slog.Warn("Failed to list external attachments for static external", "external", ext.Name, "error", err)
+
+				continue
+			}
+
+			// Find a non-proxied static attachment
+			hasStaticAttach := false
+			for _, attach := range extAttachList.Items {
+				if attach.Spec.Static != nil && attach.Spec.Static.IP != "" {
+					hasStaticAttach = true
+					slog.Debug("Found non-proxied static attachment", "external", ext.Name, "attachment", attach.Name)
+
+					break
+				}
+			}
+
+			if !hasStaticAttach {
+				slog.Debug("Static external has no static attachments configured", "external", ext.Name)
+
+				continue
+			}
+
+			testCtx.staticExtName = ext.Name
+			skipFlags.NoStaticExternals = false
+			slog.Info("Found static external with attachment for testing", "external", ext.Name)
+
+			break
+		}
+	}
+	if skipFlags.NoStaticExternals {
+		slog.Info("No static externals with attachments found, static external tests will be skipped")
 	}
 
 	fabricator := &fabricatorapi.Fabricator{}
