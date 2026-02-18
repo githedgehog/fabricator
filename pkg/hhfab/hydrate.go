@@ -19,10 +19,10 @@ import (
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/api/meta"
-	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/fabric"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 	gwapi "go.githedgehog.com/gateway/api/gateway/v1alpha1"
+	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -872,7 +872,7 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 
 				gwName := link.Gateway.DeviceName()
 				gw := &gwapi.Gateway{}
-				if err := kube.Get(ctx, kclient.ObjectKey{Namespace: comp.FabNamespace, Name: gwName}, gw); err != nil {
+				if err := kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: gwName}, gw); err != nil {
 					return fmt.Errorf("getting gateway %s: %w", gwName, err)
 				}
 				if gw.Spec.Interfaces == nil {
