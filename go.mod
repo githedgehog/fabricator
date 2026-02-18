@@ -40,7 +40,7 @@ require (
 	github.com/urfave/cli/v2 v2.27.7
 	github.com/vbauerster/mpb/v8 v8.11.3
 	github.com/vishvananda/netlink v1.3.1
-	go.githedgehog.com/fabric v0.105.0
+	go.githedgehog.com/fabric v0.106.0
 	go.githedgehog.com/gateway v0.42.0
 	go.githedgehog.com/libmeta v0.3.0
 	go.podman.io/image/v5 v5.39.1
@@ -52,7 +52,7 @@ require (
 	k8s.io/api v0.35.1
 	k8s.io/apiextensions-apiserver v0.35.0
 	k8s.io/apimachinery v0.35.1
-	k8s.io/client-go v0.35.0
+	k8s.io/client-go v0.35.1
 	k8s.io/klog/v2 v2.130.1
 	k8s.io/metrics v0.35.0
 	k8s.io/utils v0.0.0-20260108192941-914a6e750570
@@ -163,7 +163,7 @@ require (
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.12 // indirect
-	github.com/go-chi/chi/v5 v5.2.4 // indirect
+	github.com/go-chi/chi/v5 v5.2.5 // indirect
 	github.com/go-errors/errors v1.4.2 // indirect
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
 	github.com/go-git/go-billy/v5 v5.6.2 // indirect

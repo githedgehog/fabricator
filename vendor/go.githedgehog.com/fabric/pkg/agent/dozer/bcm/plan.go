@@ -878,6 +878,20 @@ func planVPCLoopbacks(agent *agentapi.Agent, spec *dozer.Spec) error { //nolint:
 	return nil
 }
 
+func addToAddr(addr netip.Addr, n uint32) netip.Addr {
+	ipv4 := addr.As4()
+	val := uint32(ipv4[0])<<24 | uint32(ipv4[1])<<16 | uint32(ipv4[2])<<8 | uint32(ipv4[3])
+	val += n
+	newIP := [4]byte{
+		byte(val >> 24),
+		byte(val >> 16),
+		byte(val >> 8),
+		byte(val),
+	}
+
+	return netip.AddrFrom4(newIP)
+}
+
 func planExternals(agent *agentapi.Agent, spec *dozer.Spec) error {
 	spec.PrefixLists[PrefixListAny] = &dozer.SpecPrefixList{
 		Prefixes: map[uint32]*dozer.SpecPrefixListEntry{
@@ -1212,29 +1226,38 @@ func planExternals(agent *agentapi.Agent, spec *dozer.Spec) error {
 				ifaceName = fmt.Sprintf("%s.%d", port, attach.Static.VLAN)
 			}
 
-			// if proxy mode is set, assign a link-local IP to the external facing interface so that
+			// if proxy mode is set, assign a /31 IP to the external facing interface so that
 			// we can configure proxy arp on it; otherwise, use the IP specified in the spec
 			var fabricEdgeIP netip.Prefix
 			if attach.Static.Proxy {
-				idx := agent.Spec.Catalog.ExternalIDs[externalName]
-				if idx == 0 {
-					return fmt.Errorf("external ID for external %s not found in catalog", externalName) //nolint:goerr113
-				} else if idx > 5000 {
-					return fmt.Errorf("external ID for external %s is out of range (>5000)", externalName) //nolint:goerr113
+				subnetOffset, ok := agent.Spec.Catalog.StaticExternalSubnetOffsets[name]
+				if !ok {
+					return errors.Errorf("no subnet offset found in catalog for proxied static external attach %s", name)
 				}
-				thirdOctet := uint8(1 + ((idx * 2) / 256)) //nolint:gosec
-				fourthOctet := uint8((idx * 2) % 256)      //nolint:gosec
-				fabricEdgeIPStr := fmt.Sprintf("169.254.%d.%d/31", thirdOctet, fourthOctet)
+				reservedRange := agent.Spec.Config.ProxyExternalSubnet
+				reservedPrefix, parseErr := netip.ParsePrefix(reservedRange)
+				if parseErr != nil {
+					return errors.Wrapf(parseErr, "failed to parse reserved subnet %s for proxied static externals", reservedRange)
+				}
+				baseAddr := reservedPrefix.Masked().Addr()
+				if !baseAddr.IsValid() || !baseAddr.Is4() {
+					return errors.Errorf("invalid or non v4 base address %s for proxied static externals in reserved subnet %s", baseAddr, reservedRange)
+				}
+				// Set baseAddr to the first address in the /31 block at subnetOffset
+				baseAddr = addToAddr(baseAddr, uint32(2*subnetOffset))
+				if !reservedPrefix.Contains(baseAddr) {
+					return errors.Errorf("calculated fabric edge IP %s for proxied static external attach %s is out of the reserved subnet %s", baseAddr, name, reservedRange)
+				}
 				var err error
-				fabricEdgeIP, err = netip.ParsePrefix(fabricEdgeIPStr)
+				fabricEdgeIP, err = baseAddr.Prefix(31)
 				if err != nil {
-					return errors.Wrapf(err, "failed to parse external attach fabric edge IP %s", fabricEdgeIPStr)
+					return errors.Wrapf(err, "failed to convert proxied static external attach IP %s to /31 prefix", baseAddr.String())
 				}
 			} else {
 				var err error
 				fabricEdgeIP, err = netip.ParsePrefix(attach.Static.IP)
 				if err != nil {
-					return errors.Wrapf(err, "failed to parse external attach static IP %s", attach.Static.IP)
+					return errors.Wrapf(err, "failed to parse static external attach IP %s", attach.Static.IP)
 				}
 			}
 			prefixLen := uint8(fabricEdgeIP.Bits()) //nolint:gosec
@@ -1249,10 +1272,7 @@ func planExternals(agent *agentapi.Agent, spec *dozer.Spec) error {
 				},
 			}
 			if attach.Static.Proxy {
-				subIfaceSpec.ProxyARP = &dozer.SpecProxyARP{
-					// when using link-local we have to set this to true, else it won't kick in
-					All: true,
-				}
+				subIfaceSpec.ProxyARP = &dozer.SpecProxyARP{}
 			}
 			spec.Interfaces[port].Subinterfaces[uint32(attach.Static.VLAN)] = subIfaceSpec
 			spec.VRFs[extVrfName].Interfaces[ifaceName] = &dozer.SpecVRFInterface{}
@@ -2676,20 +2696,29 @@ func planHostBGPSubnet(agent *agentapi.Agent, spec *dozer.Spec, vpcName string, 
 	// for each of the attachment interfaces on the switch side, enslave them to the VPC VRF and enable IPv6 for BGP unnumbered
 	// then add an unnumbered BGP neighbor on that interface in the VPC VRF instance
 	// finally add the ACL to handle restricted subnets (this will be removed if it's empty)
+	// note that if VLAN != 0 we will do the above for a subinterface instead
 	for _, iface := range ifaceNames {
-		spec.VRFs[vrfName].Interfaces[iface] = &dozer.SpecVRFInterface{}
+		targetIface := iface
+		vlan := uint32(subnet.VLAN)
+		if vlan != 0 {
+			targetIface = fmt.Sprintf("%s.%d", iface, vlan)
+		}
+		spec.VRFs[vrfName].Interfaces[targetIface] = &dozer.SpecVRFInterface{}
 		if spec.Interfaces[iface].Subinterfaces == nil {
 			spec.Interfaces[iface].Subinterfaces = map[uint32]*dozer.SpecSubinterface{
 				0: {},
 			}
 		}
-		subIf0, ok := spec.Interfaces[iface].Subinterfaces[0]
+		subIf, ok := spec.Interfaces[iface].Subinterfaces[vlan]
 		if !ok {
-			spec.Interfaces[iface].Subinterfaces[0] = &dozer.SpecSubinterface{}
-			subIf0 = spec.Interfaces[iface].Subinterfaces[0]
+			spec.Interfaces[iface].Subinterfaces[vlan] = &dozer.SpecSubinterface{}
+			subIf = spec.Interfaces[iface].Subinterfaces[vlan]
 		}
-		subIf0.IPv6 = &dozer.SpecInterfaceIPv6{
+		subIf.IPv6 = &dozer.SpecInterfaceIPv6{
 			Enabled: pointer.To(true),
+		}
+		if vlan != 0 {
+			subIf.VLAN = pointer.To(subnet.VLAN)
 		}
 
 		if spec.VRFs[vrfName].BGP == nil {
@@ -2698,9 +2727,9 @@ func planHostBGPSubnet(agent *agentapi.Agent, spec *dozer.Spec, vpcName string, 
 		if spec.VRFs[vrfName].BGP.Neighbors == nil {
 			spec.VRFs[vrfName].BGP.Neighbors = map[string]*dozer.SpecVRFBGPNeighbor{}
 		}
-		spec.VRFs[vrfName].BGP.Neighbors[iface] = &dozer.SpecVRFBGPNeighbor{
+		spec.VRFs[vrfName].BGP.Neighbors[targetIface] = &dozer.SpecVRFBGPNeighbor{
 			Enabled:                   pointer.To(true),
-			Description:               pointer.To(fmt.Sprintf("HostBGP unnumbered %s", iface)),
+			Description:               pointer.To(fmt.Sprintf("HostBGP unnumbered %s", targetIface)),
 			PeerType:                  pointer.To(string(dozer.SpecVRFBGPNeighborPeerTypeExternal)),
 			ExtendedNexthop:           pointer.To(true),
 			IPv4Unicast:               pointer.To(true),
@@ -2708,7 +2737,7 @@ func planHostBGPSubnet(agent *agentapi.Agent, spec *dozer.Spec, vpcName string, 
 			IPv4ASOverride:            pointer.To(true),
 		}
 
-		spec.ACLInterfaces[iface] = &dozer.SpecACLInterface{
+		spec.ACLInterfaces[targetIface] = &dozer.SpecACLInterface{
 			Ingress: pointer.To(vpcFilteringACL),
 		}
 	}
