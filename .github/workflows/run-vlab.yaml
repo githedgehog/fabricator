@@ -32,11 +32,6 @@ on:
         type: boolean
         required: false
         default: false
-      gateway_agentless:
-        description: "(Deprecated, not used) Enable gateway agentless mode"
-        type: boolean
-        required: false
-        default: false
       includeonie:
         description: "Include ONIE into installer"
         type: boolean

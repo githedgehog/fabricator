@@ -340,8 +340,6 @@ spec:
                     type: object
                   gateway:
                     properties:
-                      agentless:
-                        type: boolean
                       asn:
                         format: int32
                         type: integer
