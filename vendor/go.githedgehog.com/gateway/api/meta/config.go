@@ -8,10 +8,9 @@ import (
 )
 
 type GatewayCtrlConfig struct {
+	// Namespace where pods for gateways are deployed
 	Namespace            string              `json:"namespace,omitempty"`
 	Tolerations          []corev1.Toleration `json:"tolerations,omitempty"`
-	Agentless            bool                `json:"agentless,omitempty"` // Deprecated, has no effect
-	AgentRef             string              `json:"agentRef,omitempty"`  // Deprecated, has no effect
 	DataplaneRef         string              `json:"dataplaneRef,omitempty"`
 	FRRRef               string              `json:"frrRef,omitempty"`
 	ToolboxRef           string              `json:"toolboxRef,omitempty"`
