@@ -109,7 +109,7 @@ jobs:
       - name: Test diagram generation
         run: |
           mkdir -p test-diagrams
-          just run hhfab init -f --dev --gw
+          just run hhfab init -f --dev --gws 2
           just run hhfab vlab gen
 
           # Generate diagrams in all formats and save to test-diagrams directory

@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -383,8 +384,8 @@ func (testCtx *VPCPeeringTestCtx) gatewayFailoverTest(ctx context.Context) (bool
 	}
 
 	// sort gateways alphabetically for consistent selection
-	slices.SortFunc(gateways.Items, func(gw1, gw2 gwapi.Gateway) int {
-		return strings.Compare(gw1.Name, gw2.Name)
+	sort.Slice(gateways.Items, func(i, j int) bool {
+		return gateways.Items[i].Name < gateways.Items[j].Name
 	})
 
 	// create a custom gateway group to exercise the GatewayGroup API
@@ -598,8 +599,9 @@ func (testCtx *VPCPeeringTestCtx) gatewayFailoverTest(ctx context.Context) (bool
 
 	// test connectivity after revert (both gateways should be working)
 	if returnErr == nil {
-		slog.Debug("Waiting 30 seconds for fabric to converge after revert")
-		time.Sleep(30 * time.Second)
+		// BFD provides sub-second failover detection; 10s buffer for agent restart + route reconvergence
+		slog.Debug("Waiting for fabric to converge after revert")
+		time.Sleep(10 * time.Second)
 
 		slog.Debug("Testing connectivity after revert")
 		if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
