@@ -32,29 +32,31 @@ var GatewayDrivers = []string{
 }
 
 type VLABBuilder struct {
-	SpinesCount         uint8  // number of spines to generate
-	FabricLinksCount    uint8  // number of links for each spine <> leaf pair
-	MeshLinksCount      uint8  // number of mesh links for each leaf <> leaf pair
-	MCLAGLeafsCount     uint8  // number of MCLAG server-leafs to generate
-	ESLAGLeafGroups     string // eslag leaf groups - comma separated list of number of ESLAG switches in each group, should be 2-4 per group, e.g. 2,4,2 for 3 groups with 2, 4 and 2 switches
-	OrphanLeafsCount    uint8  // number of non-MCLAG server-leafs to generate
-	MCLAGSessionLinks   uint8  // number of MCLAG session links to generate
-	MCLAGPeerLinks      uint8  // number of MCLAG peer links to generate
-	MCLAGServers        uint8  // number of MCLAG servers to generate for MCLAG switches
-	ESLAGServers        uint8  // number of ESLAG servers to generate for ESLAG switches
-	UnbundledServers    uint8  // number of unbundled servers to generate for switches (only for one of the first switch in the redundancy group or orphan switch)
-	BundledServers      uint8  // number of bundled servers to generate for switches (only for one of the second switch in the redundancy group or orphan switch)
-	MultiHomedServers   uint8  // number of multi-homed servers (2 connections to 2 different orphan leaves)
-	NoSwitches          bool   // do not generate any switches
-	GatewayUplinks      uint8  // number of uplinks for gateway node to the spines
-	GatewayDriver       string // gateway driver to use for gateway node
-	GatewayWorkers      uint8  // number of workers for gateway node
-	ExtBGPCount         uint8  // number of BGP externals to generate
-	ExtStaticCount      uint8  // number of static externals to generate (no proxy)
-	ExtStaticProxyCount uint8  // number of static externals to generate (with proxy)
-	ExtMCLAGConnCount   uint8  // number of external connections to generate from MCLAG leaves
-	ExtESLAGConnCount   uint8  // number of external connections to generate from ESLAG leaves
-	ExtOrphanConnCount  uint8  // number of external connections to generate from orphan leaves
+	SpinesCount         uint8             // number of spines to generate
+	FabricLinksCount    uint8             // number of links for each spine <> leaf pair
+	MeshLinksCount      uint8             // number of mesh links for each leaf <> leaf pair
+	MCLAGLeafsCount     uint8             // number of MCLAG server-leafs to generate
+	ESLAGLeafGroups     string            // eslag leaf groups - comma separated list of number of ESLAG switches in each group, should be 2-4 per group, e.g. 2,4,2 for 3 groups with 2, 4 and 2 switches
+	OrphanLeafsCount    uint8             // number of non-MCLAG server-leafs to generate
+	MCLAGSessionLinks   uint8             // number of MCLAG session links to generate
+	MCLAGPeerLinks      uint8             // number of MCLAG peer links to generate
+	MCLAGServers        uint8             // number of MCLAG servers to generate for MCLAG switches
+	ESLAGServers        uint8             // number of ESLAG servers to generate for ESLAG switches
+	UnbundledServers    uint8             // number of unbundled servers to generate for switches (only for one of the first switch in the redundancy group or orphan switch)
+	BundledServers      uint8             // number of bundled servers to generate for switches (only for one of the second switch in the redundancy group or orphan switch)
+	MultiHomedServers   uint8             // number of multi-homed servers (2 connections to 2 different orphan leaves)
+	NoSwitches          bool              // do not generate any switches
+	GatewayUplinks      uint8             // number of uplinks for gateway node to the spines
+	GatewayDriver       string            // gateway driver to use for gateway node
+	GatewayWorkers      uint8             // number of workers for gateway node
+	GatewayLogLevel     string            // initial log level for gateway
+	GatewayTags         map[string]string // tracing targets for gateway
+	ExtBGPCount         uint8             // number of BGP externals to generate
+	ExtStaticCount      uint8             // number of static externals to generate (no proxy)
+	ExtStaticProxyCount uint8             // number of static externals to generate (with proxy)
+	ExtMCLAGConnCount   uint8             // number of external connections to generate from MCLAG leaves
+	ExtESLAGConnCount   uint8             // number of external connections to generate from ESLAG leaves
+	ExtOrphanConnCount  uint8             // number of external connections to generate from orphan leaves
 	YesFlag             bool
 
 	data         *apiutil.Loader
@@ -113,6 +115,8 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 
 	isGw := false
 	gws := []fabapi.FabNode{}
+	gwTags := map[string]gwapi.GatewayLogLevel{}
+	var gwLogLevel gwapi.GatewayLogLevel
 	for _, node := range nodes {
 		if slices.Contains(node.Spec.Roles, fabapi.NodeRoleGateway) {
 			isGw = true
@@ -137,6 +141,19 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 
 		if !slices.Contains(GatewayDrivers, b.GatewayDriver) {
 			return fmt.Errorf("unsupported gateway driver %s", b.GatewayDriver) //nolint:goerr113
+		}
+
+		gwLogLevel = gwapi.GatewayLogLevel(b.GatewayLogLevel)
+		if !slices.Contains(gwapi.GatewayLogLevels, gwLogLevel) {
+			return fmt.Errorf("invalid gateway log level %s", b.GatewayLogLevel) //nolint:goerr113
+		}
+
+		for tagTarget, tagLevel := range b.GatewayTags {
+			gwTagLevel := gwapi.GatewayLogLevel(tagLevel)
+			if !slices.Contains(gwapi.GatewayLogLevels, gwTagLevel) {
+				return fmt.Errorf("invalid gateway log level %s for tag target %s", tagLevel, tagTarget) //nolint:goerr113
+			}
+			gwTags[tagTarget] = gwTagLevel
 		}
 
 		totalESLAGLeafs := 0
@@ -326,6 +343,10 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 				},
 				Interfaces: ifaces,
 				Workers:    b.GatewayWorkers,
+				Logs: gwapi.GatewayLogs{
+					Default: gwLogLevel,
+					Tags:    gwTags,
+				},
 				// Neighbors will be later hydrated in based on the gateway connections
 			}); err != nil {
 				return err
