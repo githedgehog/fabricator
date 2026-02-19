@@ -255,10 +255,10 @@ jobs:
 
       - name: Print hhfab versions and generate diagrams
         run: |
-          bin/hhfab versions | tee versions.txt ${{ inputs.upgradefrom != '' && '|| true' || '' }}
-          bin/hhfab diagram --format=drawio ${{ inputs.upgradefrom != '' && '|| true' || '' }}
-          bin/hhfab diagram --format=dot ${{ inputs.upgradefrom != '' && '|| true' || '' }}
-          bin/hhfab diagram --format=mermaid ${{ inputs.upgradefrom != '' && '|| true' || '' }}
+          bin/hhfab versions | tee versions.txt
+          bin/hhfab diagram --format=drawio
+          bin/hhfab diagram --format=dot
+          bin/hhfab diagram --format=mermaid
 
       # TODO: make controls restricted again when we figure out how to get NTP upstream working for isolated VMs
       - name: ${{ inputs.upgradefrom != '' && 'Upgrade' || 'Run' }} and test ${{ inputs.hybrid && 'hybrid ' || '' }}VLAB
