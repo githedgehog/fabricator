@@ -83,6 +83,8 @@ const (
 	FlagListTests                 = "list-tests"
 	FlagReleaseTestRegexes        = "release-test-regexes"
 	FlagReleaseTestRegexesInvert  = "release-test-regexes-invert"
+	FlagGatewayLogLevel           = "gateway-log-level"
+	FlagGatewayTag                = "gateway-tag"
 )
 
 func main() {
@@ -280,6 +282,15 @@ func Run(ctx context.Context) error {
 			Usage:       "number of workers for gateway",
 			Destination: &wgGatewayWorkers,
 			Value:       8,
+		},
+		&cli.StringFlag{
+			Name:  FlagGatewayLogLevel,
+			Usage: "default log level for gateway",
+			Value: "info",
+		},
+		&cli.StringSliceFlag{
+			Name:  FlagGatewayTag,
+			Usage: "tracing tag for gateway in format TAG=LOGLEVEL (can be repeated)",
 		},
 		&cli.UintFlag{
 			Name:        "externals-bgp",
@@ -874,7 +885,7 @@ func Run(ctx context.Context) error {
 						Usage:   "generate VLAB wiring diagram",
 						Flags:   flatten(defaultFlags, vlabWiringGenFlags, []cli.Flag{yesFlag}),
 						Before:  before(false),
-						Action: func(_ *cli.Context) error {
+						Action: func(c *cli.Context) error {
 							overrides := map[string]string{}
 							if wgSwitchProfileOverrides != nil {
 								for _, override := range wgSwitchProfileOverrides.Value() {
@@ -884,6 +895,22 @@ func Run(ctx context.Context) error {
 									}
 									overrides[parts[0]] = parts[1]
 								}
+							}
+							gwTags := map[string]string{}
+							for _, entry := range c.StringSlice(FlagGatewayTag) {
+								parts := strings.SplitN(entry, "=", 2)
+								if len(parts) != 2 {
+									return fmt.Errorf("invalid gateway tag format: %s", entry) //nolint:err113
+								}
+								key := strings.TrimSpace(parts[0])
+								value := strings.TrimSpace(parts[1])
+								if key == "" || value == "" {
+									return fmt.Errorf("invalid gateway tag format (empty key or value): %s", entry) //nolint:err113
+								}
+								if _, ok := gwTags[key]; ok {
+									return fmt.Errorf("duplicate gateway tag key: %s", key) //nolint:err113
+								}
+								gwTags[key] = value
 							}
 
 							builder := hhfab.VLABBuilder{
@@ -903,7 +930,9 @@ func Run(ctx context.Context) error {
 								NoSwitches:             wgNoSwitches,
 								GatewayUplinks:         uint8(wgGatewayUplinks), //nolint:gosec
 								GatewayDriver:          wgGatewayDriver,
-								GatewayWorkers:         uint8(wgGatewayWorkers),       //nolint:gosec
+								GatewayWorkers:         uint8(wgGatewayWorkers), //nolint:gosec
+								GatewayLogLevel:        c.String(FlagGatewayLogLevel),
+								GatewayTags:            gwTags,
 								ExtBGPCount:            uint8(wgBGPExternals),         //nolint:gosec
 								ExtStaticCount:         uint8(wgStaticExternals),      //nolint:gosec
 								ExtStaticProxyCount:    uint8(wgStaticExternalsProxy), //nolint:gosec
