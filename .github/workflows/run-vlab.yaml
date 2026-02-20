@@ -87,6 +87,11 @@ on:
         type: string
         required: false
         default: ""
+      custom_gen_args:
+        description: "Custom arguments to be passed to hhfab vlab gen"
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -239,7 +244,7 @@ jobs:
             --include-onie=${{ inputs.includeonie }} \
             --gateway=${{ inputs.gateway }} \
             ${{ inputs.custom_init_args }}
-          bin/hhfab vlab gen -v ${{ inputs.mesh && '--mesh-links-count=3' || '' }}
+          bin/hhfab vlab gen -v ${{ inputs.mesh && '--mesh-links-count=3' || '' }} ${{ inputs.custom_gen_args }}
 
       - name: Init hhfab for hybrid mode
         if: ${{ inputs.upgradefrom == '' && inputs.hybrid }}
