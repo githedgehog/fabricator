@@ -79,6 +79,8 @@ const (
 	VLABEnvPDUPassword    = "HHFAB_VLAB_PDU_PASSWORD" //nolint:gosec
 	VLABEnvSwitchUsername = "HHFAB_SWITCH_USERNAME"
 	VLABEnvSwitchPassword = "HHFAB_SWITCH_PASSWORD" //nolint:gosec
+	VLABEnvServerUsername = "HHFAB_SERVER_USERNAME"
+	VLABEnvServerPassword = "HHFAB_SERVER_PASSWORD" //nolint:gosec
 )
 
 var VLABCmds = []string{
