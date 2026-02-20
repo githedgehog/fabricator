@@ -798,7 +798,7 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 	for _, ext := range extList.Items {
 		if ext.Spec.Static != nil && len(ext.Spec.Static.Prefixes) > 0 {
 			// Check if it has at least one static attachment configured
-			extAttachList := &vpcapi.ExternalAttachmentList{}
+			extAttachList = &vpcapi.ExternalAttachmentList{}
 			if err := kube.List(ctx, extAttachList, kclient.MatchingLabels{vpcapi.LabelExternal: ext.Name}); err != nil {
 				slog.Warn("Failed to list external attachments for static external", "external", ext.Name, "error", err)
 
