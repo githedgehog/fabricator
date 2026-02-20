@@ -16,6 +16,7 @@ import (
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/util/pointer"
+	gwapi "go.githedgehog.com/gateway/api/gateway/v1alpha1"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -59,6 +60,13 @@ func makeMultiVPCMultiSubnetSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 			SkipFlags: SkipFlags{
 				VirtualSwitch: true,
 				NoServers:     true,
+			},
+		},
+		{
+			Name: "Old VLAB OnReady Test",
+			F:    testCtx.oldOnReadyTest,
+			SkipFlags: SkipFlags{
+				NoServers: true,
 			},
 		},
 	}
@@ -731,4 +739,61 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool,
 	slog.Debug("All good, cleaning up")
 
 	return false, reverts, nil
+}
+
+// Basic test connectivity with VPCs with multiple subnets; if there are at least 2 VPCs we will also
+// create a peering between the first 2, and if there are 3 and a gateway, we create a gateway peering
+// between the 2nd and the 3rd. This is meant to replace the old OnReady checks; eventually
+// we could try to expand it to increase the coverage, but for now the objective is to always use the
+// release-test infra path and get rid of the ad-hoc OnReady commands for the CI vlab jobs
+func (testCtx *VPCPeeringTestCtx) oldOnReadyTest(ctx context.Context) (bool, []RevertFunc, error) {
+	vpcs := &vpcapi.VPCList{}
+	if err := testCtx.kube.List(ctx, vpcs); err != nil {
+		return false, nil, fmt.Errorf("listing VPCs: %w", err)
+	}
+	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec, 1)
+	var gwPeerings map[string]*gwapi.PeeringSpec
+
+	if len(vpcs.Items) < 2 {
+		return true, nil, fmt.Errorf("not enough VPCs to create VPC peerings, need at least 2 (found %d)", len(vpcs.Items)) //nolint:goerr113
+	}
+	appendVpcPeeringSpec(vpcPeerings, 1, 2, "", []string{}, []string{})
+
+	if testCtx.gwSupported && len(vpcs.Items) >= 3 {
+		// find vpc-02 and vpc-03 in the slice
+		vpc2Idx := -1
+		vpc3Idx := -1
+		for i, vpc := range vpcs.Items {
+			if vpc.Name == "vpc-02" || vpc.Name == "vpc-2" {
+				vpc2Idx = i
+			} else if vpc.Name == "vpc-03" || vpc.Name == "vpc-3" {
+				vpc3Idx = i
+			}
+			if vpc2Idx >= 0 && vpc3Idx >= 0 {
+				gwPeerings = make(map[string]*gwapi.PeeringSpec, 1)
+				vpc2 := &vpcs.Items[vpc2Idx]
+				vpc2subnet1 := vpc2.Spec.Subnets["subnet-01"].Subnet
+				vpc3 := &vpcs.Items[vpc3Idx]
+				vpc3subnet1 := vpc3.Spec.Subnets["subnet-01"].Subnet
+				// only expose one subnet per VPC
+				appendGwPeeringSpec(gwPeerings, vpc2, vpc3, []string{vpc2subnet1}, []string{vpc3subnet1})
+
+				break
+			}
+		}
+	}
+	if !testCtx.gwSupported {
+		slog.Debug("no gateway available, skipping gateway peering")
+	} else if len(gwPeerings) == 0 {
+		slog.Warn("skipping gateway peering test, could not find vpc-02 and vpc-03", "vpcs", len(vpcs.Items))
+	}
+
+	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, nil, gwPeerings, true); err != nil {
+		return false, nil, fmt.Errorf("setting up peerings: %w", err)
+	}
+	if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
+		return false, nil, err
+	}
+
+	return false, nil, nil
 }
