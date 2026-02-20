@@ -1,5 +1,5 @@
 #!/usr/bin/env expect
-# Copyright 2024 Hedgehog
+# Copyright 2025 Hedgehog
 # SPDX-License-Identifier: Apache-2.0
 
 set force_conservative 1
@@ -23,9 +23,9 @@ for {set i 2} {$i < [llength $argv]} {incr i} {
 
 log_file -a $OUTPUT_FILE
 
-puts "== Console diagnostics for $SERVER_NAME =="
-if {[info exists env(SERVER_DIAG_REASON)]} {
-    puts "Reason: $env(SERVER_DIAG_REASON)"
+puts "== Console diagnostics for $SERVER_NAME (server) =="
+if {[info exists env(CONSOLE_DIAG_REASON)]} {
+    puts "Reason: $env(CONSOLE_DIAG_REASON)"
 }
 puts "Started at: [clock format [clock seconds]]"
 
@@ -96,54 +96,22 @@ expect {
 
 set prompt_re {.*[#\$] $}
 set logged_in 0
-set login_attempts 0
-set max_login_attempts 3
-set login_done 0
+set prompt_timeout 20
 
-while {!$login_done} {
-    expect {
-        -re $prompt_re {
-            set logged_in 1
-            set login_done 1
-        }
-        -re "(?i)login:" {
-            send "core\r"
-            exp_continue
-        }
-        -re "Password:" {
-            if {$login_attempts >= $max_login_attempts} {
-                log_message "EXP-ERR" "Login failed: max attempts reached"
-                set login_done 1
-            } else {
-                send "\r"
-                incr login_attempts
-                exp_continue
-            }
-        }
-        -re "Login incorrect" {
-            if {$login_attempts >= $max_login_attempts} {
-                log_message "EXP-ERR" "Login failed after $login_attempts attempts"
-                set login_done 1
-            } else {
-                exp_continue
-            }
-        }
-        -re "Maximum number of tries exceeded" {
-            log_message "EXP-ERR" "Login failed: maximum number of tries exceeded"
-            set login_done 1
-        }
-        timeout {
-            log_message "EXP-ERR" "Login to console timed out"
-            set login_done 1
-        }
-        eof {
-            log_message "EXP-ERR" "Login to console failed (EOF)"
-            set login_done 1
-        }
-        default {
-            log_message "EXP-DBG" "Waiting for login prompt or shell"
-            send "\r"
-        }
+# Servers should be auto-logged in, just check for prompt
+log_message "EXP-DBG" "Checking for shell prompt"
+expect -timeout $prompt_timeout {
+    -re $prompt_re {
+        set logged_in 1
+    }
+    -re "(?i)login:" {
+        log_message "EXP-DBG" "Unexpected login prompt on server"
+    }
+    timeout {
+        log_message "EXP-DBG" "No prompt detected"
+    }
+    eof {
+        log_message "EXP-ERR" "Console check failed (EOF)"
     }
 }
 
@@ -161,15 +129,19 @@ proc run_cmd {cmd prompt prompt_timeout} {
 }
 
 if {$logged_in} {
+    # Basic network diagnostics for test endpoints
     run_cmd "ip addr show" $prompt_re 30
     run_cmd "ip link show" $prompt_re 30
     run_cmd "ip route show" $prompt_re 30
     run_cmd "ip neigh show" $prompt_re 30
     run_cmd "networkctl status" $prompt_re 30
+
+    # SSH diagnostics
     run_cmd "systemctl status sshd --no-pager" $prompt_re 30
     run_cmd "ss -tulnp | grep ':22'" $prompt_re 30
+    run_cmd "journalctl -u sshd --no-pager -n 30" $prompt_re 60
 } else {
-    log_message "EXP-DBG" "Not logged in; skipping console commands"
+    log_message "EXP-DBG" "No shell prompt; skipping console commands"
 }
 
 puts "Finished console capture at: [clock format [clock seconds]]"
