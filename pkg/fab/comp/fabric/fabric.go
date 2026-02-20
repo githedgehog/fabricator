@@ -167,15 +167,16 @@ func InstallManagementDHCPSubnet(cfg fabapi.Fabricator) ([]kclient.Object, error
 
 	return []kclient.Object{
 		comp.NewDHCPSubnet(dhcpapi.ManagementSubnet, dhcpapi.DHCPSubnetSpec{
-			Subnet:      dhcpapi.ManagementSubnet,
-			ONIEOnly:    true,
-			CIDRBlock:   mgmt.Masked().String(),
-			Gateway:     mgmt.Addr().Next().String(),
-			StartIP:     string(cfg.Spec.Config.Fabric.ManagementDHCPStart),
-			EndIP:       string(cfg.Spec.Config.Fabric.ManagementDHCPEnd),
-			DefaultURL:  "http://" + controlVIP.Addr().String() + ":32000/onie", // TODO const
-			DNSServers:  []string{},
-			TimeServers: []string{},
+			Subnet:           dhcpapi.ManagementSubnet,
+			ONIEOnly:         true,
+			CIDRBlock:        mgmt.Masked().String(),
+			Gateway:          mgmt.Addr().Next().String(),
+			StartIP:          string(cfg.Spec.Config.Fabric.ManagementDHCPStart),
+			EndIP:            string(cfg.Spec.Config.Fabric.ManagementDHCPEnd),
+			LeaseTimeSeconds: 1800,                                                   // 30 mins should be enough for ZTP needs
+			DefaultURL:       "http://" + controlVIP.Addr().String() + ":32000/onie", // TODO const
+			DNSServers:       []string{},
+			TimeServers:      []string{},
 		}),
 	}, nil
 }
