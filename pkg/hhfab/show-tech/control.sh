@@ -32,10 +32,12 @@ KUBECTL="/opt/bin/kubectl"
     ip neigh show
     ip link show
 
-    echo -e "\n=== NIC Offload Settings ==="
+    echo -e "\n=== NIC Statistics and Offload Settings ==="
     for iface in $(ls /sys/class/net/ | grep -v '^lo$'); do
-        echo "--- $iface ---"
-        ethtool -k "$iface" 2>/dev/null | grep -E 'offload|segmentation' || echo "ethtool not available"
+        echo "--- $iface Statistics---"
+        ethtool -S "$iface" 2>/dev/null
+        echo "--- $iface Offload Settings---"
+        ethtool -k "$iface" 2>/dev/null | grep -E 'offload|segmentation'
     done
 
     echo -e "\n=== Switch connectivity from control node ==="

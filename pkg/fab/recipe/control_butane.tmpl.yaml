@@ -33,7 +33,7 @@ systemd:
         [Service]
         Type=oneshot
         ExecCondition=/bin/sh -c '[ "$(basename $(readlink /sys/class/net/{{ .ExtInterface }}/device/driver))" = "e1000" ]'
-        ExecStart=/usr/sbin/ethtool -K {{ .ExtInterface }} tso off gso off gro off tx off rx off sg off
+        ExecStart=/usr/sbin/ethtool -K {{ .ExtInterface }} tso off gso off gro off tx off rx off sg off rxvlan off txvlan off rx-checksumming off tx-checksumming off
         RemainAfterExit=yes
 
         [Install]
