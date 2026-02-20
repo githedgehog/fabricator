@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -20,6 +21,7 @@ import (
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/util/pointer"
 	"go.githedgehog.com/fabricator/pkg/util/sshutil"
+	gwapi "go.githedgehog.com/gateway/api/gateway/v1alpha1"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -327,7 +329,7 @@ outer:
 			if err := changeAgentStatus(ctx, spineSSH, spine.Name, true); err != nil {
 				slog.Error("Enabling HH agent", "switch", spine.Name, "error", err)
 				if i < maxRetries-1 {
-					slog.Warn("Retrying in 5 seconds")
+					slog.Warn("Retrying", "delay", sleepTime)
 					time.Sleep(sleepTime)
 				}
 			} else {
@@ -344,6 +346,298 @@ outer:
 			returnErr = errors.Join(returnErr, fmt.Errorf("could not enable HH agent on switch %s after %d attempts", spine.Name, maxRetries)) //nolint:goerr113
 		} else {
 			returnErr = fmt.Errorf("could not enable HH agent on switch %s after %d attempts", spine.Name, maxRetries) //nolint:goerr113
+		}
+	}
+
+	return false, nil, returnErr
+}
+
+// Basic test for gateway failover.
+// Creates a custom gateway group with explicit priorities, sets up gateway peering using
+// that group, then shuts down all spine ports connected to the primary gateway.
+// After restoring, tests connectivity again.
+// Requires at least 2 gateways and 2 VPCs.
+func (testCtx *VPCPeeringTestCtx) gatewayFailoverTest(ctx context.Context) (bool, []RevertFunc, error) {
+	var returnErr error
+
+	// list gateways
+	gateways := &gwapi.GatewayList{}
+	if err := testCtx.kube.List(ctx, gateways); err != nil {
+		return false, nil, fmt.Errorf("listing gateways: %w", err)
+	}
+	if len(gateways.Items) < 2 {
+		slog.Info("Not enough gateways found, skipping test", "gateways", len(gateways.Items))
+
+		return true, nil, errNotEnoughGateways
+	}
+
+	// list VPCs for gateway peering setup
+	vpcs := &vpcapi.VPCList{}
+	if err := testCtx.kube.List(ctx, vpcs); err != nil {
+		return false, nil, fmt.Errorf("listing VPCs: %w", err)
+	}
+	if len(vpcs.Items) < 2 {
+		slog.Info("Not enough VPCs found for gateway peering, skipping test", "vpcs", len(vpcs.Items))
+
+		return true, nil, errNotEnoughVPCs
+	}
+
+	// sort gateways alphabetically for consistent selection
+	slices.SortFunc(gateways.Items, func(gw1, gw2 gwapi.Gateway) int {
+		return strings.Compare(gw1.Name, gw2.Name)
+	})
+
+	// create a custom gateway group to exercise the GatewayGroup API
+	const failoverTestGroup = "failover-test"
+	const (
+		primaryPriority = uint32(100)
+		backupPriority  = uint32(50)
+	)
+
+	slog.Debug("Creating gateway group for failover test", "group", failoverTestGroup)
+	gwGroup := &gwapi.GatewayGroup{
+		TypeMeta: kmetav1.TypeMeta{
+			Kind:       "GatewayGroup",
+			APIVersion: gwapi.GroupVersion.String(),
+		},
+		ObjectMeta: kmetav1.ObjectMeta{
+			Name:      failoverTestGroup,
+			Namespace: kmetav1.NamespaceDefault,
+		},
+	}
+	if err := testCtx.kube.Create(ctx, gwGroup); err != nil {
+		return false, nil, fmt.Errorf("creating gateway group %s: %w", failoverTestGroup, err)
+	}
+
+	// store original group specs for revert (deep copy to avoid modification by append)
+	originalGroups := make(map[string][]gwapi.GatewayGroupMembership)
+	for i := range gateways.Items {
+		originalGroups[gateways.Items[i].Name] = slices.Clone(gateways.Items[i].Spec.Groups)
+	}
+
+	// add gateways to the new group with explicit priorities
+	// first gateway (alphabetically) gets higher priority (100), second gets lower (50)
+	slog.Debug("Adding gateways to failover test group", "group", failoverTestGroup,
+		"primary", gateways.Items[0].Name, "primaryPriority", primaryPriority,
+		"backup", gateways.Items[1].Name, "backupPriority", backupPriority)
+
+	gateways.Items[0].Spec.Groups = append(gateways.Items[0].Spec.Groups,
+		gwapi.GatewayGroupMembership{Name: failoverTestGroup, Priority: primaryPriority})
+	gateways.Items[1].Spec.Groups = append(gateways.Items[1].Spec.Groups,
+		gwapi.GatewayGroupMembership{Name: failoverTestGroup, Priority: backupPriority})
+
+	if err := testCtx.kube.Update(ctx, &gateways.Items[0]); err != nil {
+		return false, nil, fmt.Errorf("updating gateway %s group membership: %w", gateways.Items[0].Name, err)
+	}
+	if err := testCtx.kube.Update(ctx, &gateways.Items[1]); err != nil {
+		return false, nil, fmt.Errorf("updating gateway %s group membership: %w", gateways.Items[1].Name, err)
+	}
+
+	// set up gateway peering between the first two VPCs using the custom group
+	slog.Debug("Setting up gateway peering for failover test", "group", failoverTestGroup)
+	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec, 0)
+	externalPeerings := make(map[string]*vpcapi.ExternalPeeringSpec, 0)
+	gwPeerings := make(map[string]*gwapi.PeeringSpec, 1)
+	appendGwPeeringSpec(gwPeerings, &vpcs.Items[0], &vpcs.Items[1], nil, nil)
+	// set the peering to use our custom gateway group
+	for _, spec := range gwPeerings {
+		spec.GatewayGroup = failoverTestGroup
+	}
+
+	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, gwPeerings, true); err != nil {
+		return false, nil, fmt.Errorf("setting up gateway peerings: %w", err)
+	}
+
+	// the target is the gateway with highest priority (we set it explicitly above)
+	targetGateway := gateways.Items[0].Name
+	slog.Debug("Selected gateway for failover test (highest priority)", "gateway", targetGateway, "priority", primaryPriority)
+
+	// find all gateway connections for the target gateway
+	conns := &wiringapi.ConnectionList{}
+	if err := testCtx.kube.List(ctx, conns, kclient.MatchingLabels{wiringapi.LabelConnectionType: wiringapi.ConnectionTypeGateway}); err != nil {
+		return false, nil, fmt.Errorf("listing gateway connections: %w", err)
+	}
+
+	// collect spine ports to shut down and their SSH configs
+	type spinePort struct {
+		spineName   string
+		nosPortName string
+	}
+	spinePorts := make([]spinePort, 0)
+	spinesSSH := make(map[string]*sshutil.Config)
+	spineProfiles := make(map[string]*wiringapi.SwitchProfile)
+	spineSpecs := make(map[string]*wiringapi.SwitchSpec)
+
+	for _, conn := range conns.Items {
+		if conn.Spec.Gateway == nil {
+			continue
+		}
+		for _, link := range conn.Spec.Gateway.Links {
+			// check if this link connects to our target gateway
+			gatewayPort := link.Gateway.Port
+			if !strings.HasPrefix(gatewayPort, targetGateway+"/") {
+				continue
+			}
+
+			spineName := link.Switch.DeviceName()
+			spinePortName := link.Switch.LocalPortName()
+
+			slog.Debug("Found gateway link", "gateway", targetGateway, "spine", spineName, "port", spinePortName)
+
+			// get SSH config for this spine if we don't have it yet
+			if _, ok := spinesSSH[spineName]; !ok {
+				sshCfg, sshErr := testCtx.getSSH(ctx, spineName)
+				if sshErr != nil {
+					return false, nil, fmt.Errorf("getting ssh config for spine switch %s: %w", spineName, sshErr)
+				}
+				spinesSSH[spineName] = sshCfg
+
+				// get switch and profile for port mapping
+				sw := &wiringapi.Switch{}
+				if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: spineName}, sw); err != nil {
+					return false, nil, fmt.Errorf("getting switch %s: %w", spineName, err)
+				}
+				spineSpecs[spineName] = &sw.Spec
+
+				profile := &wiringapi.SwitchProfile{}
+				if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: sw.Spec.Profile}, profile); err != nil {
+					return false, nil, fmt.Errorf("getting switch profile %s: %w", sw.Spec.Profile, err)
+				}
+				spineProfiles[spineName] = profile
+			}
+
+			// map API port name to NOS port name
+			portMap, err := spineProfiles[spineName].Spec.GetAPI2NOSPortsFor(spineSpecs[spineName])
+			if err != nil {
+				return false, nil, fmt.Errorf("getting API2NOS ports for switch %s: %w", spineName, err)
+			}
+			nosPortName, ok := portMap[spinePortName]
+			if !ok {
+				return false, nil, fmt.Errorf("port %s not found in switch profile for switch %s", spinePortName, spineName) //nolint:goerr113
+			}
+
+			spinePorts = append(spinePorts, spinePort{spineName: spineName, nosPortName: nosPortName})
+		}
+	}
+
+	if len(spinePorts) == 0 {
+		return false, nil, fmt.Errorf("no spine ports found for gateway %s", targetGateway) //nolint:goerr113
+	}
+
+	slog.Debug("Found spine ports to shut down", "gateway", targetGateway, "ports", len(spinePorts))
+
+	// disable agent on all involved spines to prevent ports up
+	// track which spines were disabled so we can roll back on error
+	disabledSpines := make([]string, 0, len(spinesSSH))
+	for spineName, spineSSH := range spinesSSH {
+		slog.Debug("Disabling HH agent on spine", "spine", spineName)
+		if err := changeAgentStatus(ctx, spineSSH, spineName, false); err != nil {
+			// rollback: re-enable agents on already-disabled spines to avoid leaving them in a bad state
+			for _, ds := range disabledSpines {
+				slog.Debug("Re-enabling HH agent on spine after error", "spine", ds)
+				if reErr := changeAgentStatus(ctx, spinesSSH[ds], ds, true); reErr != nil {
+					slog.Warn("Failed to re-enable HH agent on spine during rollback", "spine", ds, "error", reErr)
+				}
+			}
+
+			return false, nil, fmt.Errorf("disabling HH agent on spine %s: %w", spineName, err)
+		}
+		disabledSpines = append(disabledSpines, spineName)
+	}
+
+	// shut down all spine ports connected to the target gateway
+	for _, sp := range spinePorts {
+		slog.Debug("Shutting down spine port", "spine", sp.spineName, "port", sp.nosPortName)
+		if err := changeSwitchPortStatus(ctx, spinesSSH[sp.spineName], sp.spineName, sp.nosPortName, false); err != nil {
+			returnErr = fmt.Errorf("setting switch port down: %w", err)
+
+			break
+		}
+	}
+
+	if returnErr == nil {
+		// wait for fabric to converge; with BFD this should be sub-second, but we give it some buffer
+		slog.Debug("Waiting 10 seconds for fabric to converge after failover")
+		time.Sleep(10 * time.Second)
+
+		// test connectivity during failover
+		slog.Debug("Testing connectivity during failover")
+		if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
+			returnErr = fmt.Errorf("connectivity test during failover: %w", err)
+		}
+	}
+
+	// re-enable agents on all spines
+	for spineName, spineSSH := range spinesSSH {
+		maxRetries := 5
+		sleepTime := time.Second * 5
+		enabled := false
+		for i := range maxRetries {
+			if err := changeAgentStatus(ctx, spineSSH, spineName, true); err != nil {
+				slog.Error("Enabling HH agent", "switch", spineName, "error", err)
+				if i < maxRetries-1 {
+					slog.Warn("Retrying", "delay", sleepTime)
+					time.Sleep(sleepTime)
+				}
+			} else {
+				enabled = true
+
+				break
+			}
+		}
+		if enabled {
+			continue
+		}
+		// if we get here, we failed to enable the agent
+		if returnErr != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("could not enable HH agent on switch %s after %d attempts", spineName, maxRetries)) //nolint:goerr113
+		} else {
+			returnErr = fmt.Errorf("could not enable HH agent on switch %s after %d attempts", spineName, maxRetries) //nolint:goerr113
+		}
+	}
+
+	// test connectivity after revert (both gateways should be working)
+	if returnErr == nil {
+		slog.Debug("Waiting 30 seconds for fabric to converge after revert")
+		time.Sleep(30 * time.Second)
+
+		slog.Debug("Testing connectivity after revert")
+		if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
+			returnErr = fmt.Errorf("connectivity test after revert: %w", err)
+		}
+	}
+
+	// restore original gateway group memberships
+	slog.Debug("Restoring original gateway group memberships")
+	for i := range gateways.Items {
+		gw := &gateways.Items[i]
+		// re-fetch to get latest version
+		if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: gw.Namespace, Name: gw.Name}, gw); err != nil {
+			if returnErr != nil {
+				returnErr = errors.Join(returnErr, fmt.Errorf("fetching gateway %s for restore: %w", gw.Name, err))
+			} else {
+				returnErr = fmt.Errorf("fetching gateway %s for restore: %w", gw.Name, err)
+			}
+
+			continue
+		}
+		gw.Spec.Groups = originalGroups[gw.Name]
+		if err := testCtx.kube.Update(ctx, gw); err != nil {
+			if returnErr != nil {
+				returnErr = errors.Join(returnErr, fmt.Errorf("restoring gateway %s group membership: %w", gw.Name, err))
+			} else {
+				returnErr = fmt.Errorf("restoring gateway %s group membership: %w", gw.Name, err)
+			}
+		}
+	}
+
+	// delete the custom gateway group
+	slog.Debug("Deleting failover test gateway group", "group", failoverTestGroup)
+	if err := testCtx.kube.Delete(ctx, gwGroup); err != nil {
+		if returnErr != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("deleting gateway group %s: %w", failoverTestGroup, err))
+		} else {
+			returnErr = fmt.Errorf("deleting gateway group %s: %w", failoverTestGroup, err)
 		}
 	}
 
@@ -393,7 +687,7 @@ func (testCtx *VPCPeeringTestCtx) meshFailoverTest(ctx context.Context) (bool, [
 				if err := changeAgentStatus(ctx, leafSSH, leaf.Name, true); err != nil {
 					slog.Error("Enabling HH agent", "switch", leaf.Name, "error", err)
 					if i < maxRetries-1 {
-						slog.Warn("Retrying in 5 seconds")
+						slog.Warn("Retrying", "delay", sleepTime)
 						time.Sleep(sleepTime)
 					}
 				} else {

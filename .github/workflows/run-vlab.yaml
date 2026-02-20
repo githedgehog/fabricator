@@ -237,7 +237,7 @@ jobs:
           bin/hhfab init -v --dev \
             --fabric-mode=${{ inputs.fabricmode }} \
             --include-onie=${{ inputs.includeonie }} \
-            --gateway=${{ inputs.gateway }} \
+            --gateways=${{ inputs.gateway && 2 || 0 }} \
             ${{ inputs.custom_init_args }}
           bin/hhfab vlab gen -v ${{ inputs.mesh && '--mesh-links-count=3' || '' }}
 
