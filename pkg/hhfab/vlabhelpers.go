@@ -581,15 +581,18 @@ func (c *Config) prepareShowTechServerConsoleScript() (func(), string, error) {
 	return cleanup, path, nil
 }
 
-func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB) error {
+func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB, outputDir ...string) error {
 	scriptConfig := DefaultShowTechScript()
 
-	outputDir := filepath.Join(c.WorkDir, "show-tech-output")
-	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+	outDir := filepath.Join(c.WorkDir, "show-tech-output")
+	if len(outputDir) > 0 && outputDir[0] != "" {
+		outDir = outputDir[0]
+	}
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return fmt.Errorf("creating output directory: %w", err)
 	}
 
-	if err := c.collectRunnerShowTech(ctx, outputDir); err != nil {
+	if err := c.collectRunnerShowTech(ctx, outDir); err != nil {
 		slog.Warn("Failed to collect runner diagnostics", "err", err)
 	}
 
@@ -690,7 +693,7 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB) error {
 				if ssh == nil {
 					showTechErr = fmt.Errorf("getting ssh config for %s: %w", name, err)
 				} else {
-					showTechErr = c.collectShowTech(collectionCtx, name, ssh, script, outputDir)
+					showTechErr = c.collectShowTech(collectionCtx, name, ssh, script, outDir)
 				}
 			}
 
@@ -701,12 +704,12 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB) error {
 			}
 
 			if vmType == VMTypeSwitch && switchConsoleScriptPath != "" && showTechErr != nil {
-				if err := c.collectSwitchConsoleDiagnostics(ctx, name, showTechErr, outputDir, switchConsoleScriptPath, controlPlaneIP); err != nil {
+				if err := c.collectSwitchConsoleDiagnostics(ctx, name, showTechErr, outDir, switchConsoleScriptPath, controlPlaneIP); err != nil {
 					errChan <- fmt.Errorf("console diagnostics for %s: %w", name, err)
 				}
 			}
 			if vmType == VMTypeServer && serverConsoleScriptPath != "" && showTechErr != nil {
-				if err := c.collectServerConsoleDiagnostics(ctx, name, showTechErr, outputDir, serverConsoleScriptPath); err != nil {
+				if err := c.collectServerConsoleDiagnostics(ctx, name, showTechErr, outDir, serverConsoleScriptPath); err != nil {
 					errChan <- fmt.Errorf("console fallback for %s: %w", name, err)
 				}
 			}
@@ -729,7 +732,7 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB) error {
 			"errors", errors)
 	}
 
-	slog.Info("Show tech files saved in", "folder", outputDir)
+	slog.Info("Show tech files saved in", "folder", outDir)
 
 	return nil
 }
