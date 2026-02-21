@@ -10,12 +10,12 @@ import (
 	"os"
 	"time"
 
+	"github.com/DeRuina/timberjack"
 	"github.com/lmittmann/tint"
 	"github.com/mattn/go-isatty"
 	slogmulti "github.com/samber/slog-multi"
 	"go.githedgehog.com/fabricator/pkg/fab/node"
 	"go.githedgehog.com/fabricator/pkg/version"
-	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 func main() {
@@ -38,14 +38,15 @@ func Run(ctx context.Context) error {
 		}),
 	}
 
-	logFile := &lumberjack.Logger{
-		Filename:   "/var/log/hhfab-node-config.log",
-		MaxSize:    5, // MB
-		MaxBackups: 4,
-		MaxAge:     30, // days
-		Compress:   true,
-		FileMode:   0o644,
+	logFile := &timberjack.Logger{
+		Filename:    "/var/log/hhfab-node-config.log",
+		MaxSize:     5, // MB
+		MaxBackups:  4,
+		MaxAge:      30, // days
+		Compression: "gzip",
+		FileMode:    0o644,
 	}
+	defer logFile.Close()
 
 	handlers = append(handlers, slog.NewTextHandler(logFile, &slog.HandlerOptions{
 		Level: slog.LevelDebug,
