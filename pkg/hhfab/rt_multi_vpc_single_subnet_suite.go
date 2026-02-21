@@ -95,6 +95,9 @@ func makeMultiVPCSingleSubnetSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 			},
 		},
 	}
+
+	// Add NAT test cases
+	suite.TestCases = append(suite.TestCases, getNATTestCases(testCtx)...)
 	suite.Tests = len(suite.TestCases)
 
 	return suite
@@ -287,7 +290,7 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringTest(ctx context.Context) (bool,
 	vpc2 := &vpcs.Items[1]
 
 	// Use all subnets from both VPCs by passing empty subnet lists
-	appendGwPeeringSpec(gwPeerings, vpc1, vpc2, nil, nil)
+	appendGwPeeringSpec(gwPeerings, vpc1, vpc2, nil)
 
 	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, gwPeerings, true); err != nil {
 		return false, nil, fmt.Errorf("setting up gateway peerings: %w", err)
@@ -326,7 +329,7 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringLoopTest(ctx context.Context) (b
 		vpc2 := &vpcs.Items[(i+1)%len(vpcs.Items)] // wrap around to create loop
 
 		// Use all subnets from both VPCs by passing empty subnet lists
-		appendGwPeeringSpec(gwPeerings, vpc1, vpc2, nil, nil)
+		appendGwPeeringSpec(gwPeerings, vpc1, vpc2, nil)
 	}
 
 	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, gwPeerings, true); err != nil {
@@ -371,7 +374,7 @@ func (testCtx *VPCPeeringTestCtx) gatewayMixedPeeringLoopTest(ctx context.Contex
 		} else {
 			// Odd-indexed connections use Gateway peering
 			// Use all subnets from both VPCs by passing empty subnet lists
-			appendGwPeeringSpec(gwPeerings, vpc1, vpc2, nil, nil)
+			appendGwPeeringSpec(gwPeerings, vpc1, vpc2, nil)
 		}
 	}
 
@@ -427,7 +430,7 @@ func (testCtx *VPCPeeringTestCtx) mixedGatewayAndFabricExternals(ctx context.Con
 	// now peer some VPCs to make sure we are not blocking traffic via the filters
 	slog.Debug("Creating VPC peering between some VPCs to verify connectivity is not affected by mixed external peerings")
 	appendVpcPeeringSpecByName(vpcPeerings, vpcs.Items[0].Name, vpcs.Items[1].Name, "", []string{}, []string{})
-	appendGwPeeringSpec(gwPeerings, &vpcs.Items[2], &vpcs.Items[3], nil, nil)
+	appendGwPeeringSpec(gwPeerings, &vpcs.Items[2], &vpcs.Items[3], nil)
 	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, gwPeerings, true); err != nil {
 		return false, nil, fmt.Errorf("setting up mixed peering loop: %w", err)
 	}
