@@ -2,8 +2,6 @@ module go.githedgehog.com/fabricator
 
 go 1.26
 
-replace gopkg.in/natefinch/lumberjack.v2 v2.2.1 => github.com/githedgehog/lumberjack/v2 v2.2.1-hh
-
 replace github.com/diskfs/go-diskfs => github.com/Frostman/go-diskfs v1.4.2-hh3
 
 tool (
@@ -14,6 +12,7 @@ tool (
 
 require (
 	dario.cat/mergo v1.0.2
+	github.com/DeRuina/timberjack v1.3.9
 	github.com/Masterminds/semver/v3 v3.4.0
 	github.com/Masterminds/sprig/v3 v3.3.0
 	github.com/appleboy/easyssh-proxy v1.5.2
@@ -48,7 +47,6 @@ require (
 	golang.org/x/mod v0.33.0
 	golang.org/x/sync v0.19.0
 	golang.org/x/term v0.40.0
-	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	k8s.io/api v0.35.1
 	k8s.io/apiextensions-apiserver v0.35.0
 	k8s.io/apimachinery v0.35.1
