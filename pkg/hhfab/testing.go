@@ -3480,6 +3480,7 @@ type ReleaseTestOpts struct {
 	ListTests      bool
 	ShowTechDump   bool
 	IPerfsMinSpeed float64
+	OnReadyTest    bool
 }
 
 func (c *Config) ReleaseTest(ctx context.Context, vlab *VLAB, opts ReleaseTestOpts) error {
