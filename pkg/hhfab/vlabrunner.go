@@ -104,6 +104,7 @@ type VLABRunOpts struct {
 	PauseOnFailure           bool
 	ReleaseTestRegexes       []string
 	ReleaseTestRegexesInvert bool
+	ReleaseTestOnReadyOnly   bool
 }
 
 type OnReady string
@@ -732,6 +733,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						PauseOnFailure: opts.PauseOnFailure,
 						Regexes:        opts.ReleaseTestRegexes,
 						InvertRegex:    opts.ReleaseTestRegexesInvert,
+						OnReadyTest:    opts.ReleaseTestOnReadyOnly,
 					}
 					slog.Debug("Running release-test", "opts", releaseTestOpts)
 					if err := c.ReleaseTest(ctx, vlab, releaseTestOpts); err != nil {
