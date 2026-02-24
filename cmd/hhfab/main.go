@@ -89,6 +89,8 @@ const (
 	FlagGatewayLogLevel           = "gateway-log-level"
 	FlagGatewayTag                = "gateway-tag"
 	FlagShowTech                  = "show-tech"
+	FlagReleaseTestOnReadyOnly    = "release-test-on-ready-only"
+	FlagOnReadyOnly               = "on-ready-only"
 )
 
 func main() {
@@ -1151,6 +1153,11 @@ func Run(ctx context.Context) error {
 								Aliases: []string{"rt-invert"},
 								Usage:   "invert regex selection for release tests (used when --ready=release-test)",
 							},
+							&cli.BoolFlag{
+								Name:    FlagReleaseTestOnReadyOnly,
+								Aliases: []string{"rt-or"},
+								Usage:   "run only the special on-ready suite (used when --ready=release-test)",
+							},
 							&cli.UintFlag{
 								Category: FlagCatVMSizes,
 								Name:     "control-cpus",
@@ -1261,6 +1268,7 @@ func Run(ctx context.Context) error {
 									VPCMode:                  vpcapi.VPCMode(handleL2VNI(c.String(FlagNameVPCMode))),
 									ReleaseTestRegexes:       c.StringSlice(FlagReleaseTestRegexes),
 									ReleaseTestRegexesInvert: c.Bool(FlagReleaseTestRegexesInvert),
+									ReleaseTestOnReadyOnly:   c.Bool(FlagReleaseTestOnReadyOnly),
 									InterfaceMTU:             ifMTU,
 								},
 							}); err != nil {
@@ -1725,6 +1733,11 @@ func Run(ctx context.Context) error {
 								Usage:   "collect show-tech diagnostics on failure",
 								Value:   true,
 							},
+							&cli.BoolFlag{
+								Name:    FlagOnReadyOnly,
+								Aliases: []string{"on-ready", "o"},
+								Usage:   "Run only the special OnReady test suite, replacing old on-ready vlab jobs",
+							},
 						}),
 						Before: before(false),
 						Action: func(c *cli.Context) error {
@@ -1739,6 +1752,7 @@ func Run(ctx context.Context) error {
 								VPCMode:        vpcapi.VPCMode(handleL2VNI(c.String(FlagNameVPCMode))),
 								ListTests:      c.Bool(FlagListTests),
 								ShowTechDump:   c.Bool(FlagShowTech),
+								OnReadyTest:    c.Bool(FlagOnReadyOnly),
 							}
 							if err := hhfab.DoVLABReleaseTest(ctx, workDir, cacheDir, opts); err != nil {
 								return fmt.Errorf("release-test: %w", err)

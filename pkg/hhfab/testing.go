@@ -3399,6 +3399,7 @@ type ReleaseTestOpts struct {
 	VPCMode        vpcapi.VPCMode
 	ListTests      bool
 	ShowTechDump   bool
+	OnReadyTest    bool
 }
 
 func (c *Config) ReleaseTest(ctx context.Context, vlab *VLAB, opts ReleaseTestOpts) error {
