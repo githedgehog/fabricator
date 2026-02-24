@@ -3345,6 +3345,7 @@ type ReleaseTestOpts struct {
 	HashPolicy     string
 	VPCMode        vpcapi.VPCMode
 	ListTests      bool
+	OnReadyTest    bool
 }
 
 func (c *Config) ReleaseTest(ctx context.Context, vlab *VLAB, opts ReleaseTestOpts) error {
