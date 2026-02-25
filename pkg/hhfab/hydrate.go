@@ -20,6 +20,7 @@ import (
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/api/meta"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/fabric"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/gateway"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 	gwapi "go.githedgehog.com/gateway/api/gateway/v1alpha1"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -69,7 +70,12 @@ func (c *Config) loadHydrateValidate(ctx context.Context, mode HydrateMode) erro
 		return fmt.Errorf("initializing fabric config: %w", err)
 	}
 
-	if err := apiutil.ValidateFabricGateway(ctx, l, fabricCfg); err != nil {
+	gwCtrlCfg, err := gateway.GetGatewayCtrlConfig(c.Fab)
+	if err != nil {
+		return fmt.Errorf("getting gateway control config: %w", err)
+	}
+
+	if err := apiutil.ValidateFabricGateway(ctx, l, fabricCfg, gwCtrlCfg); err != nil {
 		return fmt.Errorf("validating wiring after hydrate: %w", err)
 	}
 
