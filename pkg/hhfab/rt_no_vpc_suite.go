@@ -801,6 +801,16 @@ type gwMetricDef struct {
 func (testCtx *VPCPeeringTestCtx) checkGatewayMetrics(ctx context.Context, prometheusEndpoint ObsEndpoint, env string, hasAuth bool, client *http.Client) error {
 	const maxMetricAgeSecs = 300 // 5 minutes
 
+	// Check if gateway is enabled before trying to list gateways
+	fabricator := &fabricatorapi.Fabricator{}
+	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: comp.FabNamespace, Name: kmetav1.NamespaceDefault}, fabricator); err != nil {
+		return fmt.Errorf("getting Fabricator object: %w", err)
+	}
+
+	if !fabricator.Spec.Config.Gateway.Enable {
+		return nil
+	}
+
 	gatewayList := &gwapi.GatewayList{}
 	if err := testCtx.kube.List(ctx, gatewayList); err != nil {
 		return fmt.Errorf("listing gateways: %w", err)
@@ -813,12 +823,6 @@ func (testCtx *VPCPeeringTestCtx) checkGatewayMetrics(ctx context.Context, prome
 	expectedGateways := make([]string, 0, len(gatewayList.Items))
 	for _, gw := range gatewayList.Items {
 		expectedGateways = append(expectedGateways, gw.Name)
-	}
-
-	// Get Fabricator config to check which gateway metrics are enabled
-	fabricator := &fabricatorapi.Fabricator{}
-	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: comp.FabNamespace, Name: kmetav1.NamespaceDefault}, fabricator); err != nil {
-		return fmt.Errorf("getting Fabricator object: %w", err)
 	}
 
 	gwObs := fabricator.Spec.Config.Gateway.Observability
