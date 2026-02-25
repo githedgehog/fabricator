@@ -38,6 +38,51 @@ var valuesTmpl string
 
 var _ comp.KubeInstall = Install
 
+func GetGatewayCtrlConfig(cfg fabapi.Fabricator) (*meta.GatewayCtrlConfig, error) {
+	dataplaneRepo, err := comp.ImageURL(cfg, DataplaneRef)
+	if err != nil {
+		return nil, fmt.Errorf("getting image URL for %q: %w", DataplaneRef, err)
+	}
+
+	frrRepo, err := comp.ImageURL(cfg, FRRRef)
+	if err != nil {
+		return nil, fmt.Errorf("getting image URL for %q: %w", FRRRef, err)
+	}
+
+	toolboxRepo, err := comp.ImageURL(cfg, flatcar.ToolboxRef)
+	if err != nil {
+		return nil, fmt.Errorf("getting image URL for %q: %w", flatcar.ToolboxRef, err)
+	}
+
+	comms := map[uint32]string{}
+	for prioStr, commStr := range cfg.Spec.Config.Gateway.Communities {
+		prio, err := strconv.ParseUint(prioStr, 10, 32)
+		if err != nil {
+			return nil, fmt.Errorf("config: gatewayCommunity priority %s is invalid: %w", prioStr, err)
+		}
+
+		comms[uint32(prio)] = commStr
+	}
+
+	return &meta.GatewayCtrlConfig{
+		Namespace: comp.FabNamespace,
+		Tolerations: []corev1.Toleration{
+			{
+				Key:      fabapi.RoleTaintKey(fabapi.NodeRoleGateway),
+				Operator: corev1.TolerationOpExists,
+				Effect:   corev1.TaintEffectNoExecute,
+			},
+		},
+		DataplaneRef:         dataplaneRepo + ":" + string(cfg.Status.Versions.Gateway.Dataplane),
+		FRRRef:               frrRepo + ":" + string(cfg.Status.Versions.Gateway.FRR),
+		ToolboxRef:           toolboxRepo + ":" + string(flatcar.ToolboxVersion(cfg)),
+		DataplaneMetricsPort: DataplaneMetricsPort,
+		FRRMetricsPort:       FRRMetricsPort,
+		Communities:          comms,
+		FabricBFD:            true,
+	}, nil
+}
+
 func Install(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 	if !cfg.Spec.Config.Gateway.Enable {
 		return nil, nil
@@ -68,48 +113,12 @@ func Install(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 		return nil, fmt.Errorf("api chart: %w", err)
 	}
 
-	dataplaneRepo, err := comp.ImageURL(cfg, DataplaneRef)
+	gwCtrlCfg, err := GetGatewayCtrlConfig(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("getting image URL for %q: %w", DataplaneRef, err)
+		return nil, fmt.Errorf("getting gateway ctrl config: %w", err)
 	}
 
-	frrRepo, err := comp.ImageURL(cfg, FRRRef)
-	if err != nil {
-		return nil, fmt.Errorf("getting image URL for %q: %w", FRRRef, err)
-	}
-
-	toolboxRepo, err := comp.ImageURL(cfg, flatcar.ToolboxRef)
-	if err != nil {
-		return nil, fmt.Errorf("getting image URL for %q: %w", flatcar.ToolboxRef, err)
-	}
-
-	comms := map[uint32]string{}
-	for prioStr, commStr := range cfg.Spec.Config.Gateway.Communities {
-		prio, err := strconv.ParseUint(prioStr, 10, 32)
-		if err != nil {
-			return nil, fmt.Errorf("config: gatewayCommunity priority %s is invalid: %w", prioStr, err)
-		}
-
-		comms[uint32(prio)] = commStr
-	}
-
-	ctrlCfgData, err := kyaml.Marshal(&meta.GatewayCtrlConfig{
-		Namespace: comp.FabNamespace,
-		Tolerations: []corev1.Toleration{
-			{
-				Key:      fabapi.RoleTaintKey(fabapi.NodeRoleGateway),
-				Operator: corev1.TolerationOpExists,
-				Effect:   corev1.TaintEffectNoExecute,
-			},
-		},
-		DataplaneRef:         dataplaneRepo + ":" + string(cfg.Status.Versions.Gateway.Dataplane),
-		FRRRef:               frrRepo + ":" + string(cfg.Status.Versions.Gateway.FRR),
-		ToolboxRef:           toolboxRepo + ":" + string(flatcar.ToolboxVersion(cfg)),
-		DataplaneMetricsPort: DataplaneMetricsPort,
-		FRRMetricsPort:       FRRMetricsPort,
-		Communities:          comms,
-		FabricBFD:            true,
-	})
+	ctrlCfgData, err := kyaml.Marshal(gwCtrlCfg)
 	if err != nil {
 		return nil, fmt.Errorf("marshalling ctrl config: %w", err)
 	}
