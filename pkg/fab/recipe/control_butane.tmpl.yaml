@@ -19,25 +19,6 @@ systemd:
   units:
     - name: locksmithd.service
       mask: true
-
-    # VLAB-only: disable e1000 offloads to prevent Tx Unit Hang in QEMU
-    # On physical hardware, the driver check will fail and the service will skip
-    - name: disable-e1000-offloads.service
-      enabled: true
-      contents: |
-        [Unit]
-        Description=Disable e1000 NIC offloads to prevent Tx Unit Hang
-        After=systemd-networkd.service
-        ConditionPathIsSymbolicLink=/sys/class/net/{{ .ExtInterface }}/device/driver
-
-        [Service]
-        Type=oneshot
-        ExecCondition=/bin/sh -c '[ "$(basename $(readlink /sys/class/net/{{ .ExtInterface }}/device/driver))" = "e1000" ]'
-        ExecStart=/usr/sbin/ethtool -K {{ .ExtInterface }} tso off gso off gro off tx off rx off sg off rxvlan off txvlan off rx-checksumming off tx-checksumming off
-        RemainAfterExit=yes
-
-        [Install]
-        WantedBy=multi-user.target
 {{ if .AutoInstall }}
     - name: hhfab-install.service
       enabled: true
@@ -70,6 +51,27 @@ storage:
           SERVER=disabled
           REBOOT_STRATEGY=off
       # https://www.flatcar.org/docs/latest/setup/releases/update-strategies/#disable-automatic-updates
+
+    # VLAB-only: disable e1000 offloads to prevent Tx Unit Hang in QEMU
+    # On physical hardware with other drivers this .link file won't match
+    # Using .link file ensures offloads stay disabled across networkd reconfigurations
+    - path: /etc/systemd/network/10-e1000-offloads.link
+      mode: 0644
+      contents:
+        inline: |
+          [Match]
+          Driver=e1000
+
+          [Link]
+          TCPSegmentationOffload=false
+          TCP6SegmentationOffload=false
+          GenericSegmentationOffload=false
+          GenericReceiveOffload=false
+          LargeReceiveOffload=false
+          ReceiveChecksumOffload=false
+          TransmitChecksumOffload=false
+          ReceiveVLANCTAGHardwareAcceleration=false
+          TransmitVLANCTAGHardwareAcceleration=false
 
     - path: /etc/hostname
       mode: 0644
