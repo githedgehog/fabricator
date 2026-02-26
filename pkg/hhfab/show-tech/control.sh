@@ -112,8 +112,8 @@ KUBECTL="/opt/bin/kubectl"
 # System Logs
 # ---------------------------
 {
-    echo -e "\n=== disable-e1000-offloads.service status ==="
-    systemctl status disable-e1000-offloads.service --no-pager 2>&1 || true
+    echo -e "\n=== e1000 offloads .link file ==="
+    cat /etc/systemd/network/10-e1000-offloads.link 2>/dev/null || echo "Not found"
 
     echo -e "\n=== k3s.service status ==="
     systemctl status k3s.service --no-pager
