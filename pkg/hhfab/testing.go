@@ -2832,9 +2832,11 @@ func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to stri
 			return fmt.Errorf("running iperf3 server: %w", err)
 		}
 		if parseErr != nil {
+			// Log the raw output to help diagnose what iperf3 returned instead of valid JSON
+			slog.Warn("iperf3 server report parse failed", "parseErr", parseErr, "stdout", stdout, "stderr", stderr)
 			ie.ServerMsg = fmt.Sprintf("cannot parse iperf3 report: %s", parseErr)
 
-			return fmt.Errorf("parsing server's iperf3 report: %w", err)
+			return fmt.Errorf("parsing server's iperf3 report: %w", parseErr)
 		}
 
 		return nil
@@ -2892,9 +2894,11 @@ func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to stri
 			return fmt.Errorf("running iperf3 client: %w", err)
 		}
 		if parseErr != nil {
+			// Log the raw output to help diagnose what iperf3 returned instead of valid JSON
+			slog.Warn("iperf3 client report parse failed", "parseErr", parseErr, "stdout", stdout, "stderr", stderr)
 			ie.ClientMsg = fmt.Sprintf("cannot parse iperf3 report: %s", parseErr)
 
-			return fmt.Errorf("parsing client's iperf3 report: %w", err)
+			return fmt.Errorf("parsing client's iperf3 report: %w", parseErr)
 		}
 
 		slog.Debug("IPerf3 result", "from", from, "to", to,
