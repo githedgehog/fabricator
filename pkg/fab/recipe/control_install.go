@@ -5,6 +5,7 @@ package recipe
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -27,6 +28,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 	kapierrors "k8s.io/apimachinery/pkg/api/errors"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kapinet "k8s.io/apimachinery/pkg/util/net"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -62,8 +64,51 @@ func (c *ControlInstall) Run(ctx context.Context) error {
 		return fmt.Errorf("installing toolbox: %w", err)
 	}
 
-	if err := kube.Create(ctx, comp.NewNamespace(comp.FabNamespace)); err != nil && !kapierrors.IsAlreadyExists(err) {
-		return fmt.Errorf("creating namespace %q: %w", comp.FabNamespace, err)
+	// Retry namespace creation to handle transient k3s restarts during early initialization.
+	// k3s may crash with "failed to start networking: unable to initialize network policy
+	// controller" and auto-restart, causing brief API server unavailability even after
+	// the node was reported ready.
+	attempt := 0
+	var lastErr error
+	if err := wait.ExponentialBackoffWithContext(ctx, wait.Backoff{
+		Steps:    17,
+		Duration: 500 * time.Millisecond,
+		Factor:   1.5,
+		Jitter:   0.1,
+	}, func(ctx context.Context) (bool, error) {
+		if attempt > 0 {
+			slog.Debug("Retrying namespace creation", "name", comp.FabNamespace, "attempt", attempt)
+		}
+		attempt++
+
+		err := kube.Create(ctx, comp.NewNamespace(comp.FabNamespace))
+		if err == nil || kapierrors.IsAlreadyExists(err) {
+			return true, nil
+		}
+
+		// Retry only on transient errors: transport failures (connection refused/reset/EOF)
+		// and k8s server-side transient errors. Fail fast on permanent errors (RBAC, validation, etc.).
+		if kapierrors.IsTimeout(err) ||
+			kapierrors.IsTooManyRequests(err) ||
+			kapierrors.IsServerTimeout(err) ||
+			kapierrors.IsServiceUnavailable(err) ||
+			kapinet.IsConnectionRefused(err) ||
+			kapinet.IsConnectionReset(err) ||
+			kapinet.IsProbableEOF(err) {
+			lastErr = err
+
+			return false, nil
+		}
+
+		return false, fmt.Errorf("creating namespace %q: %w", comp.FabNamespace, err)
+	}); err != nil {
+		// Surface the last transient error when retries are exhausted;
+		// keep ctx errors as-is so cancellation/timeout propagate cleanly.
+		if lastErr != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			return fmt.Errorf("creating namespace %q: %w", comp.FabNamespace, lastErr)
+		}
+
+		return fmt.Errorf("creating namespace: %w", err)
 	}
 
 	if err := c.installCertManager(ctx, kube); err != nil {
