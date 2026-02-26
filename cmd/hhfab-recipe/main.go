@@ -10,6 +10,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/DeRuina/timberjack"
 	"github.com/go-logr/logr"
 	"github.com/lmittmann/tint"
 	"github.com/mattn/go-isatty"
@@ -18,7 +19,6 @@ import (
 	"github.com/urfave/cli/v2"
 	"go.githedgehog.com/fabricator/pkg/fab/recipe"
 	"go.githedgehog.com/fabricator/pkg/version"
-	"gopkg.in/natefinch/lumberjack.v2"
 	kctrl "sigs.k8s.io/controller-runtime"
 )
 
@@ -68,6 +68,8 @@ func Run(ctx context.Context) error {
 		Category:    FlagCatGlobal,
 	}
 
+	var logFile *timberjack.Logger
+
 	before := func(installLog bool) cli.BeforeFunc {
 		return func(_ *cli.Context) error {
 			if verbose && brief {
@@ -91,13 +93,13 @@ func Run(ctx context.Context) error {
 			}
 
 			if installLog {
-				logFile := &lumberjack.Logger{
-					Filename:   recipe.InstallLog,
-					MaxSize:    5, // MB
-					MaxBackups: 4,
-					MaxAge:     30, // days
-					Compress:   true,
-					FileMode:   0o644,
+				logFile = &timberjack.Logger{
+					Filename:    recipe.InstallLog,
+					MaxSize:     5, // MB
+					MaxBackups:  4,
+					MaxAge:      30, // days
+					Compression: "gzip",
+					FileMode:    0o644,
 				}
 
 				handlers = append(handlers, slog.NewTextHandler(logFile, &slog.HandlerOptions{
@@ -189,7 +191,13 @@ func Run(ctx context.Context) error {
 		},
 	}
 
-	return app.Run(os.Args) //nolint:wrapcheck
+	err = app.Run(os.Args)
+
+	if logFile != nil {
+		logFile.Close()
+	}
+
+	return err //nolint:wrapcheck
 }
 
 func flatten[T any, Slice ~[]T](collection ...Slice) Slice {
