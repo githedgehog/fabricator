@@ -697,11 +697,14 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						return c.handleShutdownWithPause(ctx, vlab, opts, fmt.Errorf("testing connectivity: %w", err))
 					}
 				case OnReadyExit:
+					// Collect show-tech on exit for debugging (even on success)
+					if err := c.VLABShowTech(ctx, vlab, ShowTechOpts{}); err != nil {
+						slog.Warn("Failed to collect show-tech on exit", "err", err)
+					}
+
 					if c.Shutdown.Load() == int32(ShutdownTypeGraceful) {
 						return nil
 					}
-
-					c.CollectVLABDebug(ctx, vlab, opts)
 
 					// TODO seems like some graceful shutdown logic isn't working in CI and we're getting stuck w/o this
 					if os.Getenv("GITHUB_ACTIONS") == "true" {
