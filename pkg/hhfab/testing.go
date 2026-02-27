@@ -2678,10 +2678,6 @@ func isVPCSubnetPresentInPeering(peering *gwapi.PeeringEntry, vpc gwapi.VPCInfo,
 			return true, nil
 		}
 
-		if len(expose.As) > 0 {
-			return false, fmt.Errorf("expose as %s is not supported yet", expose.As)
-		}
-
 		for _, exposeEntry := range expose.IPs {
 			// TODO make some helper in the gateway project
 			exposeSubnetName := ""

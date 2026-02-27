@@ -557,6 +557,103 @@ func setPortBreakout(ctx context.Context, kube kclient.Client, swName string, po
 	return nil
 }
 
+// extBGPNATAnnotation is the annotation key on an External object that specifies the NAT pool CIDR
+// for BGP external NAT tests. Each environment must use a unique CIDR so that when multiple
+// environments run tests simultaneously, the edge device (DS2000) routes return traffic to the
+// correct environment's gateway. The CIDR is dynamically learned by the edge device via BGP from
+// the gateway when a peering is active, and withdrawn when the peering is removed.
+// Example: hhfab.githedgehog.com/test-bgp-nat-pool: 192.168.85.0/24 (env-5)
+const extBGPNATAnnotation = "hhfab.githedgehog.com/test-bgp-nat-pool"
+
+// extStaticNATPoolAnnotation is the annotation key on a static External object that specifies
+// the NAT pool CIDR for static external NAT tests. Each environment must use a unique /24 CIDR
+// because the return routes are pre-configured as static routes on the shared edge device (DS2000)
+// pointing to that environment's gateway — multiple environments would conflict if they shared
+// the same CIDR. The annotation must be set to the /24 that DS2000 has a static route for via
+// this environment's static external path.
+// Example: hhfab.githedgehog.com/test-static-nat-pool: 192.168.81.0/24 (env-5)
+const extStaticNATPoolAnnotation = "hhfab.githedgehog.com/test-static-nat-pool"
+
+// getExternalBGPNATCIDR returns the BGP NAT pool CIDR from the External object's annotation.
+// Returns ("", nil) if the annotation is absent, which callers should treat as skip.
+func getExternalBGPNATCIDR(ctx context.Context, kube kclient.Client, extName string) (string, error) {
+	ext := &vpcapi.External{}
+	if err := kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: extName}, ext); err != nil {
+		return "", fmt.Errorf("getting external %s: %w", extName, err)
+	}
+
+	return ext.Annotations[extBGPNATAnnotation], nil
+}
+
+// getExternalStaticNATCIDR returns the static NAT pool CIDR from the External object's annotation.
+// Returns ("", nil) if the annotation is absent, which callers should treat as skip.
+func getExternalStaticNATCIDR(ctx context.Context, kube kclient.Client, extName string) (string, error) {
+	ext := &vpcapi.External{}
+	if err := kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: extName}, ext); err != nil {
+		return "", fmt.Errorf("getting external %s: %w", extName, err)
+	}
+
+	return ext.Annotations[extStaticNATPoolAnnotation], nil
+}
+
+// getExternalRemoteIP returns the IP of the external device from its ExternalAttachment.
+// For static externals it uses spec.static.remoteIP; for BGP externals it uses spec.neighbor.ip.
+// Returns empty string without error if no attachment with an IP is found.
+func getExternalRemoteIP(ctx context.Context, kube kclient.Client, extName string) (string, error) {
+	attachList := &vpcapi.ExternalAttachmentList{}
+	if err := kube.List(ctx, attachList, kclient.MatchingLabels{vpcapi.LabelExternal: extName}); err != nil {
+		return "", fmt.Errorf("listing external attachments for %s: %w", extName, err)
+	}
+
+	for _, attach := range attachList.Items {
+		if attach.Spec.Static != nil && attach.Spec.Static.RemoteIP != "" {
+			return attach.Spec.Static.RemoteIP, nil
+		}
+		if attach.Spec.Neighbor.IP != "" {
+			return attach.Spec.Neighbor.IP, nil
+		}
+	}
+
+	return "", nil
+}
+
+// appendGwExtInvertedPortForwardPeeringSpec adds a gateway external peering where the port-forward
+// NAT is on the external side, allowing VPC to initiate connections to the external device.
+// VPC subnets are exposed as-is (no NAT). The external device IP is NAT'd to natCIDR with
+// port-forward rules, so VPC can connect to natCIDR:rule.As and reach extIP:rule.Port.
+// Note: this is the reverse of the typical customer use case (where an external client connects
+// INTO a VPC service). In tests, iperf is initiated from the VPC side (as client) targeting
+// iperf3 services pre-configured on the DS2000. The other direction was too difficult to automate.
+func appendGwExtInvertedPortForwardPeeringSpec(gwPeerings map[string]*gwapi.PeeringSpec, vpc *vpcapi.VPC, external, extIP, natCIDR string, portForwardRules []gwapi.PeeringNATPortForwardEntry) {
+	entryName := fmt.Sprintf("%s--%s", vpc.Name, external)
+
+	vpcExpose := gwapi.PeeringEntryExpose{}
+	for _, subnet := range vpc.Spec.Subnets {
+		vpcExpose.IPs = append(vpcExpose.IPs, gwapi.PeeringEntryIP{CIDR: subnet.Subnet})
+	}
+
+	extExpose := gwapi.PeeringEntryExpose{
+		IPs: []gwapi.PeeringEntryIP{{CIDR: extIP + "/32"}},
+		As:  []gwapi.PeeringEntryAs{{CIDR: natCIDR}},
+		NAT: &gwapi.PeeringNAT{
+			PortForward: &gwapi.PeeringNATPortForward{
+				Ports: portForwardRules,
+			},
+		},
+	}
+
+	gwPeerings[entryName] = &gwapi.PeeringSpec{
+		Peering: map[string]*gwapi.PeeringEntry{
+			vpc.Name: {
+				Expose: []gwapi.PeeringEntryExpose{vpcExpose},
+			},
+			"ext." + external: {
+				Expose: []gwapi.PeeringEntryExpose{extExpose},
+			},
+		},
+	}
+}
+
 // add a single gateway peering spec to an existing map, which will be the input for DoSetupPeerings
 // If vpc1Subnets is empty, all subnets from the respective VPC will be used
 func appendGwExtPeeringSpec(gwPeerings map[string]*gwapi.PeeringSpec, vpc1 *vpcapi.VPC, vpc1Subnets []string, external string) {
@@ -598,6 +695,10 @@ const (
 	NATModeStatic NATMode = iota
 	// NATModeMasquerade uses masquerade (many:1) NAT with connection tracking
 	NATModeMasquerade
+	// NATModePortForward uses port-forwarding NAT
+	NATModePortForward
+	// NATModeMasqueradePortForward uses combined masquerade and port-forwarding NAT (two separate expose entries)
+	NATModeMasqueradePortForward
 )
 
 // GwPeeringOptions contains optional parameters for gateway peering configuration
@@ -614,26 +715,112 @@ type GwPeeringOptions struct {
 	VPC1NATMode NATMode
 	// VPC2NATMode specifies the NAT mode for VPC2 (default: static)
 	VPC2NATMode NATMode
+	// VPC1PortForwardRules specifies port-forwarding rules for VPC1
+	VPC1PortForwardRules []gwapi.PeeringNATPortForwardEntry
+	// VPC2PortForwardRules specifies port-forwarding rules for VPC2
+	VPC2PortForwardRules []gwapi.PeeringNATPortForwardEntry
 }
 
-// buildNATConfig creates a NAT configuration based on the specified mode
-func buildNATConfig(mode NATMode) *gwapi.PeeringNAT {
-	if mode == NATModeMasquerade {
-		return &gwapi.PeeringNAT{
-			Masquerade: &gwapi.PeeringNATMasquerade{
-				IdleTimeout: kmetav1.Duration{Duration: 5 * time.Minute},
-			},
+// GwExtPeeringOptions contains optional parameters for gateway external peering configuration
+type GwExtPeeringOptions struct {
+	// VPCSubnets specifies which subnets from VPC to expose (if empty, all subnets are used)
+	VPCSubnets []string
+	// VPCNATCIDR specifies the NAT CIDR ranges for VPC
+	VPCNATCIDR []string
+	// VPCNATMode specifies the NAT mode for VPC (default: static)
+	VPCNATMode NATMode
+	// VPCPortForwardRules specifies port-forwarding rules for VPC
+	VPCPortForwardRules []gwapi.PeeringNATPortForwardEntry
+}
+
+// buildNATConfig creates a NAT configuration based on the specified mode and optional port-forward rules.
+// Returns an error for invalid inputs (e.g. NATModePortForward with no rules, or an unknown mode).
+func buildNATConfig(mode NATMode, portForwardRules []gwapi.PeeringNATPortForwardEntry) (*gwapi.PeeringNAT, error) {
+	nat := &gwapi.PeeringNAT{}
+
+	switch mode {
+	case NATModeStatic:
+		nat.Static = &gwapi.PeeringNATStatic{}
+	case NATModeMasquerade:
+		nat.Masquerade = &gwapi.PeeringNATMasquerade{
+			IdleTimeout: kmetav1.Duration{Duration: 5 * time.Minute},
 		}
+	case NATModePortForward:
+		if len(portForwardRules) == 0 {
+			return nil, fmt.Errorf("NATModePortForward requires at least one port-forward rule") //nolint:goerr113
+		}
+		nat.PortForward = &gwapi.PeeringNATPortForward{
+			IdleTimeout: kmetav1.Duration{Duration: 5 * time.Minute},
+			Ports:       portForwardRules,
+		}
+	case NATModeMasqueradePortForward:
+		// unreachable: buildExposes splits this mode into two separate expose entries
+		// (NATModeMasquerade + NATModePortForward) before calling buildNATConfig.
+		return nil, fmt.Errorf("NATModeMasqueradePortForward should not be passed to buildNATConfig directly") //nolint:goerr113
+	default:
+		return nil, fmt.Errorf("unknown NATMode %d passed to buildNATConfig", mode) //nolint:goerr113
 	}
 
-	return &gwapi.PeeringNAT{
-		Static: &gwapi.PeeringNATStatic{},
+	return nat, nil
+}
+
+// buildExposes constructs the PeeringEntryExpose slice for one side of a peering.
+// For NATModeMasqueradePortForward, two entries are returned (masquerade + port-forward),
+// because the gateway API schema does not allow both NAT types in a single expose entry;
+// two entries with the same IPs/As but different NAT blocks is the intended workaround.
+// natCIDRs must be non-empty whenever NAT is configured (gateway API requires expose.As
+// and expose.NAT together). portForwardRules is only used for port-forward modes.
+func buildExposes(subnets, natCIDRs []string, mode NATMode, portForwardRules []gwapi.PeeringNATPortForwardEntry) ([]gwapi.PeeringEntryExpose, error) {
+	makeBase := func() gwapi.PeeringEntryExpose {
+		e := gwapi.PeeringEntryExpose{}
+		for _, subnet := range subnets {
+			e.IPs = append(e.IPs, gwapi.PeeringEntryIP{CIDR: subnet})
+		}
+		for _, natCIDR := range natCIDRs {
+			e.As = append(e.As, gwapi.PeeringEntryAs{CIDR: natCIDR})
+		}
+
+		return e
 	}
+
+	if mode == NATModeMasqueradePortForward {
+		if len(natCIDRs) == 0 {
+			return nil, fmt.Errorf("NATModeMasqueradePortForward requires natCIDRs: gateway API requires expose.As and expose.NAT together") //nolint:goerr113
+		}
+		masq := makeBase()
+		masqNAT, err := buildNATConfig(NATModeMasquerade, nil)
+		if err != nil {
+			return nil, fmt.Errorf("building masquerade NAT config: %w", err)
+		}
+		masq.NAT = masqNAT
+		pf := makeBase()
+		pfNAT, err := buildNATConfig(NATModePortForward, portForwardRules)
+		if err != nil {
+			return nil, fmt.Errorf("building port-forward NAT config: %w", err)
+		}
+		pf.NAT = pfNAT
+
+		return []gwapi.PeeringEntryExpose{masq, pf}, nil
+	}
+
+	e := makeBase()
+	if len(natCIDRs) > 0 || len(portForwardRules) > 0 {
+		if len(natCIDRs) == 0 {
+			return nil, fmt.Errorf("NAT configuration requires natCIDRs: gateway API requires expose.As and expose.NAT together") //nolint:goerr113
+		}
+		natCfg, err := buildNATConfig(mode, portForwardRules)
+		if err != nil {
+			return nil, fmt.Errorf("building NAT config: %w", err)
+		}
+		e.NAT = natCfg
+	}
+
+	return []gwapi.PeeringEntryExpose{e}, nil
 }
 
 // appendGwPeeringSpec adds a single gateway peering spec to an existing map, which will be the input for DoSetupPeerings
 // If opts is nil, default options are used (all subnets, no NAT).
-func appendGwPeeringSpec(gwPeerings map[string]*gwapi.PeeringSpec, vpc1, vpc2 *vpcapi.VPC, opts *GwPeeringOptions) {
+func appendGwPeeringSpec(gwPeerings map[string]*gwapi.PeeringSpec, vpc1, vpc2 *vpcapi.VPC, opts *GwPeeringOptions) error {
 	entryName := fmt.Sprintf("%s--%s", vpc1.Name, vpc2.Name)
 
 	// Handle nil opts
@@ -659,40 +846,67 @@ func appendGwPeeringSpec(gwPeerings map[string]*gwapi.PeeringSpec, vpc1, vpc2 *v
 		}
 	}
 
-	vpc1Expose := gwapi.PeeringEntryExpose{}
-	for _, subnet := range vpc1Subnets {
-		vpc1Expose.IPs = append(vpc1Expose.IPs, gwapi.PeeringEntryIP{CIDR: subnet})
+	vpc1Exposes, err := buildExposes(vpc1Subnets, opts.VPC1NATCIDR, opts.VPC1NATMode, opts.VPC1PortForwardRules)
+	if err != nil {
+		return fmt.Errorf("building VPC1 exposes for %s: %w", vpc1.Name, err)
 	}
-	// Add NAT ranges and config if provided for VPC1
-	for _, natCIDR := range opts.VPC1NATCIDR {
-		vpc1Expose.As = append(vpc1Expose.As, gwapi.PeeringEntryAs{CIDR: natCIDR})
-	}
-	if len(opts.VPC1NATCIDR) > 0 {
-		vpc1Expose.NAT = buildNATConfig(opts.VPC1NATMode)
-	}
-
-	vpc2Expose := gwapi.PeeringEntryExpose{}
-	for _, subnet := range vpc2Subnets {
-		vpc2Expose.IPs = append(vpc2Expose.IPs, gwapi.PeeringEntryIP{CIDR: subnet})
-	}
-	// Add NAT ranges and config if provided for VPC2
-	for _, natCIDR := range opts.VPC2NATCIDR {
-		vpc2Expose.As = append(vpc2Expose.As, gwapi.PeeringEntryAs{CIDR: natCIDR})
-	}
-	if len(opts.VPC2NATCIDR) > 0 {
-		vpc2Expose.NAT = buildNATConfig(opts.VPC2NATMode)
+	vpc2Exposes, err := buildExposes(vpc2Subnets, opts.VPC2NATCIDR, opts.VPC2NATMode, opts.VPC2PortForwardRules)
+	if err != nil {
+		return fmt.Errorf("building VPC2 exposes for %s: %w", vpc2.Name, err)
 	}
 
 	gwPeerings[entryName] = &gwapi.PeeringSpec{
 		Peering: map[string]*gwapi.PeeringEntry{
 			vpc1.Name: {
-				Expose: []gwapi.PeeringEntryExpose{vpc1Expose},
+				Expose: vpc1Exposes,
 			},
 			vpc2.Name: {
-				Expose: []gwapi.PeeringEntryExpose{vpc2Expose},
+				Expose: vpc2Exposes,
 			},
 		},
 	}
+
+	return nil
+}
+
+// appendGwExtPeeringSpecWithNAT adds a gateway external peering spec with NAT configuration.
+// If opts is nil, default options are used (all subnets, no NAT).
+func appendGwExtPeeringSpecWithNAT(gwPeerings map[string]*gwapi.PeeringSpec, vpc *vpcapi.VPC, external string, opts *GwExtPeeringOptions) error {
+	entryName := fmt.Sprintf("%s--%s", vpc.Name, external)
+
+	if opts == nil {
+		opts = &GwExtPeeringOptions{}
+	}
+
+	vpcSubnets := opts.VPCSubnets
+	if len(vpcSubnets) == 0 {
+		vpcSubnets = make([]string, 0, len(vpc.Spec.Subnets))
+		for _, subnet := range vpc.Spec.Subnets {
+			vpcSubnets = append(vpcSubnets, subnet.Subnet)
+		}
+	}
+
+	extExpose := gwapi.PeeringEntryExpose{
+		DefaultDestination: true,
+	}
+
+	vpcExposes, err := buildExposes(vpcSubnets, opts.VPCNATCIDR, opts.VPCNATMode, opts.VPCPortForwardRules)
+	if err != nil {
+		return fmt.Errorf("building VPC exposes for %s: %w", vpc.Name, err)
+	}
+
+	gwPeerings[entryName] = &gwapi.PeeringSpec{
+		Peering: map[string]*gwapi.PeeringEntry{
+			vpc.Name: {
+				Expose: vpcExposes,
+			},
+			"ext." + external: {
+				Expose: []gwapi.PeeringEntryExpose{extExpose},
+			},
+		},
+	}
+
+	return nil
 }
 
 func (testCtx *VPCPeeringTestCtx) waitForDHCPRenewal(ctx context.Context, serverName, ifName string, shortLeaseTime uint32) error {
