@@ -1584,7 +1584,7 @@ go.githedgehog.com/fabric/pkg/util/uefiutil
 # go.githedgehog.com/fabric-bcm-ygot v0.5.2-4.5.0
 ## explicit; go 1.24.0
 go.githedgehog.com/fabric-bcm-ygot/pkg/oc
-# go.githedgehog.com/gateway v0.43.1
+# go.githedgehog.com/gateway v0.43.2
 ## explicit; go 1.26
 go.githedgehog.com/gateway/api/gateway/v1alpha1
 go.githedgehog.com/gateway/api/gwint/v1alpha1
@@ -1857,8 +1857,8 @@ golang.org/x/mod/internal/lazyregexp
 golang.org/x/mod/modfile
 golang.org/x/mod/module
 golang.org/x/mod/semver
-# golang.org/x/net v0.49.0
-## explicit; go 1.24.0
+# golang.org/x/net v0.51.0
+## explicit; go 1.25.0
 golang.org/x/net/context
 golang.org/x/net/html
 golang.org/x/net/html/atom
@@ -1868,11 +1868,12 @@ golang.org/x/net/http2
 golang.org/x/net/http2/hpack
 golang.org/x/net/idna
 golang.org/x/net/internal/httpcommon
+golang.org/x/net/internal/httpsfv
 golang.org/x/net/internal/socks
 golang.org/x/net/internal/timeseries
 golang.org/x/net/proxy
 golang.org/x/net/trace
-# golang.org/x/oauth2 v0.34.0
+# golang.org/x/oauth2 v0.35.0
 ## explicit; go 1.24.0
 golang.org/x/oauth2
 golang.org/x/oauth2/authhandler
@@ -1926,7 +1927,7 @@ golang.org/x/text/unicode/norm
 # golang.org/x/time v0.14.0
 ## explicit; go 1.24.0
 golang.org/x/time/rate
-# golang.org/x/tools v0.41.0
+# golang.org/x/tools v0.42.0
 ## explicit; go 1.24.0
 golang.org/x/tools/cover
 golang.org/x/tools/go/ast/astutil
