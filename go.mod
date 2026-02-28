@@ -41,7 +41,7 @@ require (
 	github.com/vbauerster/mpb/v8 v8.11.3
 	github.com/vishvananda/netlink v1.3.1
 	go.githedgehog.com/fabric v0.106.0
-	go.githedgehog.com/gateway v0.43.1
+	go.githedgehog.com/gateway v0.43.2
 	go.githedgehog.com/libmeta v0.3.0
 	go.podman.io/image/v5 v5.39.1
 	golang.org/x/crypto v0.48.0
@@ -335,12 +335,12 @@ require (
 	go4.org/unsafe/assume-no-moving-gc v0.0.0-20230525183740-e7c30c78aeb2 // indirect
 	gocloud.dev v0.37.0 // indirect
 	golang.org/x/exp v0.0.0-20260112195511-716be5621a96 // indirect
-	golang.org/x/net v0.49.0 // indirect
-	golang.org/x/oauth2 v0.34.0 // indirect
+	golang.org/x/net v0.51.0 // indirect
+	golang.org/x/oauth2 v0.35.0 // indirect
 	golang.org/x/sys v0.41.0 // indirect
 	golang.org/x/text v0.34.0 // indirect
 	golang.org/x/time v0.14.0 // indirect
-	golang.org/x/tools v0.41.0 // indirect
+	golang.org/x/tools v0.42.0 // indirect
 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da // indirect
 	gomodules.xyz/jsonpatch/v2 v2.5.0 // indirect
 	google.golang.org/api v0.259.0 // indirect
