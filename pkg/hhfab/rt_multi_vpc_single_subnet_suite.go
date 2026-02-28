@@ -106,6 +106,8 @@ func makeMultiVPCSingleSubnetSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 
 	// Add NAT test cases
 	suite.TestCases = append(suite.TestCases, getNATTestCases(testCtx)...)
+	// Add external NAT test cases
+	suite.TestCases = append(suite.TestCases, getExternalNATTestCases(testCtx)...)
 	suite.Tests = len(suite.TestCases)
 
 	return suite

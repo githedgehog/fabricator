@@ -499,6 +499,52 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringOverlapNATTest(ctx context.Conte
 	return false, nil, nil
 }
 
+// Test gateway peering with combined masquerade and port-forwarding NAT
+func (testCtx *VPCPeeringTestCtx) gatewayPeeringMasqueradePortForwardNATTest(ctx context.Context) (bool, []RevertFunc, error) {
+	vpcs := &vpcapi.VPCList{}
+	if err := testCtx.kube.List(ctx, vpcs); err != nil {
+		return false, nil, fmt.Errorf("listing VPCs: %w", err)
+	}
+	if len(vpcs.Items) < 2 {
+		return true, nil, fmt.Errorf("not enough VPCs for masquerade+port-forward NAT test") //nolint:goerr113
+	}
+
+	sort.Slice(vpcs.Items, func(i, j int) bool {
+		return vpcs.Items[i].Name < vpcs.Items[j].Name
+	})
+
+	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec)
+	externalPeerings := make(map[string]*vpcapi.ExternalPeeringSpec)
+	gwPeerings := make(map[string]*gwapi.PeeringSpec)
+
+	vpc1 := &vpcs.Items[0]
+	vpc2 := &vpcs.Items[1]
+
+	portForwardRules := []gwapi.PeeringNATPortForwardEntry{
+		{Protocol: gwapi.PeeringNATProtocolTCP, Port: "5201", As: "15201"},
+	}
+
+	appendGwPeeringSpec(gwPeerings, vpc1, vpc2, &GwPeeringOptions{
+		VPC1NATCIDR:          []string{"192.168.51.0/24"},
+		VPC1NATMode:          NATModeMasqueradePortForward,
+		VPC1PortForwardRules: portForwardRules,
+	})
+
+	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, gwPeerings, true); err != nil {
+		return false, nil, fmt.Errorf("setting up masquerade+port-forward NAT peerings: %w", err)
+	}
+
+	if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
+		return false, nil, fmt.Errorf("waiting for switches to be ready: %w", err)
+	}
+
+	if err := testCtx.testNATGatewayConnectivity(ctx, vpc1, vpc2, []string{"192.168.51.0/24"}, nil); err != nil {
+		return false, nil, fmt.Errorf("testing masquerade+port-forward NAT connectivity: %w", err)
+	}
+
+	return false, nil, nil
+}
+
 // getNATTestCases returns the NAT test cases to be added to the multi-VPC single-subnet suite
 func getNATTestCases(testCtx *VPCPeeringTestCtx) []JUnitTestCase {
 	return []JUnitTestCase{
@@ -533,6 +579,13 @@ func getNATTestCases(testCtx *VPCPeeringTestCtx) []JUnitTestCase {
 		{
 			Name: "Gateway Peering Overlap NAT",
 			F:    testCtx.gatewayPeeringOverlapNATTest,
+			SkipFlags: SkipFlags{
+				NoGateway: true,
+			},
+		},
+		{
+			Name: "Gateway Peering Masquerade + Port Forward NAT",
+			F:    testCtx.gatewayPeeringMasqueradePortForwardNATTest,
 			SkipFlags: SkipFlags{
 				NoGateway: true,
 			},

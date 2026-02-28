@@ -596,6 +596,8 @@ const (
 	NATModeStatic NATMode = iota
 	// NATModeMasquerade uses masquerade (many:1) NAT with connection tracking
 	NATModeMasquerade
+	// NATModeMasqueradePortForward uses combined masquerade and port-forwarding NAT
+	NATModeMasqueradePortForward
 )
 
 // GwPeeringOptions contains optional parameters for gateway peering configuration
@@ -612,21 +614,33 @@ type GwPeeringOptions struct {
 	VPC1NATMode NATMode
 	// VPC2NATMode specifies the NAT mode for VPC2 (default: static)
 	VPC2NATMode NATMode
+	// VPC1PortForwardRules specifies port-forwarding rules for VPC1
+	VPC1PortForwardRules []gwapi.PeeringNATPortForwardEntry
+	// VPC2PortForwardRules specifies port-forwarding rules for VPC2
+	VPC2PortForwardRules []gwapi.PeeringNATPortForwardEntry
 }
 
-// buildNATConfig creates a NAT configuration based on the specified mode
-func buildNATConfig(mode NATMode) *gwapi.PeeringNAT {
-	if mode == NATModeMasquerade {
-		return &gwapi.PeeringNAT{
-			Masquerade: &gwapi.PeeringNATMasquerade{
-				IdleTimeout: kmetav1.Duration{Duration: 5 * time.Minute},
-			},
+// buildNATConfig creates a NAT configuration based on the specified mode and optional port-forward rules
+func buildNATConfig(mode NATMode, portForwardRules []gwapi.PeeringNATPortForwardEntry) *gwapi.PeeringNAT {
+	nat := &gwapi.PeeringNAT{}
+
+	switch mode {
+	case NATModeStatic:
+		nat.Static = &gwapi.PeeringNATStatic{}
+	case NATModeMasquerade:
+		nat.Masquerade = &gwapi.PeeringNATMasquerade{
+			IdleTimeout: kmetav1.Duration{Duration: 5 * time.Minute},
+		}
+	case NATModeMasqueradePortForward:
+		nat.Masquerade = &gwapi.PeeringNATMasquerade{
+			IdleTimeout: kmetav1.Duration{Duration: 5 * time.Minute},
+		}
+		nat.PortForward = &gwapi.PeeringNATPortForward{
+			Ports: portForwardRules,
 		}
 	}
 
-	return &gwapi.PeeringNAT{
-		Static: &gwapi.PeeringNATStatic{},
-	}
+	return nat
 }
 
 // appendGwPeeringSpec adds a single gateway peering spec to an existing map, which will be the input for DoSetupPeerings
@@ -665,8 +679,8 @@ func appendGwPeeringSpec(gwPeerings map[string]*gwapi.PeeringSpec, vpc1, vpc2 *v
 	for _, natCIDR := range opts.VPC1NATCIDR {
 		vpc1Expose.As = append(vpc1Expose.As, gwapi.PeeringEntryAs{CIDR: natCIDR})
 	}
-	if len(opts.VPC1NATCIDR) > 0 {
-		vpc1Expose.NAT = buildNATConfig(opts.VPC1NATMode)
+	if len(opts.VPC1NATCIDR) > 0 || len(opts.VPC1PortForwardRules) > 0 {
+		vpc1Expose.NAT = buildNATConfig(opts.VPC1NATMode, opts.VPC1PortForwardRules)
 	}
 
 	vpc2Expose := gwapi.PeeringEntryExpose{}
@@ -677,8 +691,8 @@ func appendGwPeeringSpec(gwPeerings map[string]*gwapi.PeeringSpec, vpc1, vpc2 *v
 	for _, natCIDR := range opts.VPC2NATCIDR {
 		vpc2Expose.As = append(vpc2Expose.As, gwapi.PeeringEntryAs{CIDR: natCIDR})
 	}
-	if len(opts.VPC2NATCIDR) > 0 {
-		vpc2Expose.NAT = buildNATConfig(opts.VPC2NATMode)
+	if len(opts.VPC2NATCIDR) > 0 || len(opts.VPC2PortForwardRules) > 0 {
+		vpc2Expose.NAT = buildNATConfig(opts.VPC2NATMode, opts.VPC2PortForwardRules)
 	}
 
 	gwPeerings[entryName] = &gwapi.PeeringSpec{
