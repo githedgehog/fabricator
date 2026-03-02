@@ -446,6 +446,14 @@ type DiffPathOpt struct {
 	// -ignore_shadow_schema_paths flag, and therefore have the
 	// "shadow-path" tag.
 	PreferShadowPath bool
+	// Explicitly delete and then update leaf-list, which is different and exists in both orig and modified.
+	// For example, if the original path is x/y/[a, b] and the modified leaf-list is x/y/[b, c],
+	// Then resulting notification will contain:
+	//   - Delete { Path: x/y }
+	//   - Update { Path: x/y Value: [b,c] }
+	// If this is false, then the leaf-list will be updated directly to the new value
+	// without the delete step.
+	OverrideLeafList bool
 }
 
 // IsDiffOpt marks DiffPathOpt as a diff option.
@@ -646,6 +654,16 @@ func createAtomicNotif(atomicLeaves []*pathval, ts int64, subtreePfx *gnmiPath) 
 	return no, nil
 }
 
+// isLeafList returns true if the value is a leaf-list.
+func isLeafList(val any) bool {
+	if val == nil {
+		return false
+	}
+	v := reflect.TypeOf(val)
+	// Binary is represented as a []byte (slice), but is not a leaf-list.
+	return v.Kind() == reflect.Slice && v.Name() != BinaryTypeName
+}
+
 // diff produces a slice of notifications given two GoStructs.
 //
 // See documentation for Diff and DiffWithAtomic for more information.
@@ -678,15 +696,21 @@ func diff(original, modified GoStruct, withAtomic bool, opts ...DiffOpt) ([]*gnm
 
 	var atomicNotifs []*gnmipb.Notification
 	n := &gnmipb.Notification{}
-	processUpdate := func(path string, modVal *pathInfo) error {
+	processUpdate := func(path string, modVal *pathInfo, origVal *pathInfo) error {
+		diffopts := hasDiffPathOpt(opts)
 		if orderedMap, isOrderedMap := modVal.val.(GoOrderedMap); isOrderedMap {
-			diffopts := hasDiffPathOpt(opts)
 			preferShadowPath := diffopts != nil && diffopts.PreferShadowPath
 			notif, err := orderedMapNotif(orderedMap, newPathElemGNMIPath(modVal.path.GetElem()), 0, preferShadowPath)
 			if err != nil {
 				return err
 			}
 			atomicNotifs = append(atomicNotifs, notif)
+		} else if diffopts != nil && diffopts.OverrideLeafList && isLeafList(modVal.val) && origVal != nil {
+			// Handle the leaf-list replace. Delete the original path before updating it.
+			n.Delete = append(n.Delete, origVal.path)
+			if err := appendUpdate(n, path, modVal); err != nil {
+				return err
+			}
 		} else {
 			// The contents of the value should indicate that value a has changed
 			// to value b.
@@ -700,7 +724,7 @@ func diff(original, modified GoStruct, withAtomic bool, opts ...DiffOpt) ([]*gnm
 	for origPath, origVal := range origLeavesStr {
 		if modVal, ok := modLeavesStr[origPath]; ok {
 			if !reflect.DeepEqual(origVal.val, modVal.val) {
-				if err := processUpdate(origPath, modVal); err != nil {
+				if err := processUpdate(origPath, modVal, origVal); err != nil {
 					return nil, err
 				}
 			}
@@ -723,7 +747,7 @@ func diff(original, modified GoStruct, withAtomic bool, opts ...DiffOpt) ([]*gnm
 		// not they are updates.
 		for modPath, modVal := range modLeavesStr {
 			if _, ok := origLeavesStr[modPath]; !ok {
-				if err := processUpdate(modPath, modVal); err != nil {
+				if err := processUpdate(modPath, modVal, nil); err != nil {
 					return nil, err
 				}
 			}
