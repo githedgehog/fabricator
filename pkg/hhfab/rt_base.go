@@ -60,6 +60,7 @@ type VPCPeeringTestCtx struct {
 	pauseOnFail      bool
 	roceLeaves       []string
 	noSetup          bool
+	gwSupported      bool
 }
 
 // Test function types
@@ -565,6 +566,28 @@ func selectAndRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, suite *J
 	return suite, nil
 }
 
+func recapAndReport(results []JUnitTestSuite, rtOtps ReleaseTestOpts) error {
+	slog.Info("*** Recap of the test results ***")
+	for _, suite := range results {
+		printSuiteResults(&suite)
+	}
+
+	if rtOtps.ResultsFile != "" {
+		report := JUnitReport{
+			Suites: results,
+		}
+		output, err := xml.MarshalIndent(report, "", "  ")
+		if err != nil {
+			return fmt.Errorf("marshalling XML: %w", err)
+		}
+		if err := os.WriteFile(rtOtps.ResultsFile, output, 0o600); err != nil {
+			return fmt.Errorf("writing XML file: %w", err)
+		}
+	}
+
+	return nil
+}
+
 func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOtps ReleaseTestOpts) error {
 	testStart := time.Now()
 
@@ -600,11 +623,18 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 	}
 
 	testCtx := makeTestCtx(kube, setupOpts, vlabCfg, vlab, false, rtOtps)
+	var suites []*JUnitTestSuite
 	noVpcSuite := makeNoVpcsSuite(testCtx)
 	singleVpcSuite := makeSingleVPCSuite(testCtx)
 	multiVPCMultiSubnetSuite := makeMultiVPCMultiSubnetSuite(testCtx)
 	multiVPCSingleSubnetSuite := makeMultiVPCSingleSubnetSuite(testCtx)
-	suites := []*JUnitTestSuite{noVpcSuite, singleVpcSuite, multiVPCMultiSubnetSuite, multiVPCSingleSubnetSuite}
+	ortSuite := makeOnReadyTestSuite(testCtx)
+
+	if rtOtps.OnReadyTest {
+		suites = []*JUnitTestSuite{ortSuite}
+	} else {
+		suites = []*JUnitTestSuite{noVpcSuite, singleVpcSuite, multiVPCMultiSubnetSuite, multiVPCSingleSubnetSuite}
+	}
 
 	if rtOtps.ListTests {
 		for _, suite := range suites {
@@ -663,6 +693,7 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 			skipFlags.NoGateway = true
 		}
 	}
+	testCtx.gwSupported = !skipFlags.NoGateway
 
 	swList := &wiringapi.SwitchList{}
 	if err := kube.List(ctx, swList, kclient.MatchingLabels{}); err != nil {
@@ -822,6 +853,24 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 
 	results := []JUnitTestSuite{}
 	testCtx.noSetup = true
+
+	if rtOtps.OnReadyTest {
+		ortResults, err := selectAndRunSuite(ctx, testCtx, ortSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
+		if err != nil && rtOtps.FailFast {
+			return fmt.Errorf("running on-ready test suite: %w", err)
+		}
+		results = append(results, *ortResults)
+		if err := recapAndReport(results, rtOtps); err != nil {
+			return fmt.Errorf("recapping and reporting results: %w", err)
+		}
+		slog.Info("OnReady Test Suite completed", "duration", time.Since(testStart).String())
+		if ortResults.Failures > 0 {
+			return fmt.Errorf("some tests failed: onReady=%d", ortResults.Failures) //nolint:goerr113
+		}
+
+		return nil
+	}
+
 	noVpcResults, err := selectAndRunSuite(ctx, testCtx, noVpcSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
 	if err != nil && rtOtps.FailFast {
 		return fmt.Errorf("running no VPC suite: %w", err)
@@ -849,22 +898,8 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 	}
 	results = append(results, *basicResults)
 
-	slog.Info("*** Recap of the test results ***")
-	for _, suite := range results {
-		printSuiteResults(&suite)
-	}
-
-	if rtOtps.ResultsFile != "" {
-		report := JUnitReport{
-			Suites: results,
-		}
-		output, err := xml.MarshalIndent(report, "", "  ")
-		if err != nil {
-			return fmt.Errorf("marshalling XML: %w", err)
-		}
-		if err := os.WriteFile(rtOtps.ResultsFile, output, 0o600); err != nil {
-			return fmt.Errorf("writing XML file: %w", err)
-		}
+	if err := recapAndReport(results, rtOtps); err != nil {
+		return fmt.Errorf("recapping and reporting results: %w", err)
 	}
 
 	slog.Info("All tests completed", "duration", time.Since(testStart).String())

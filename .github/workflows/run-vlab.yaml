@@ -239,7 +239,8 @@ jobs:
             --include-onie=${{ inputs.includeonie }} \
             --gateways=${{ inputs.gateway && 2 || 0 }} \
             ${{ inputs.custom_init_args }}
-          bin/hhfab vlab gen -v ${{ inputs.mesh && '--mesh-links-count=3' || '' }}
+          bin/hhfab vlab gen -v ${{ inputs.mesh && '--mesh-links-count=3 --unbundled-servers=2' || '' }} \
+            --externals-bgp=1 --externals-static=1 --externals-static-proxy=1 --external-orphan-connections=1
 
       - name: Init hhfab for hybrid mode
         if: ${{ inputs.upgradefrom == '' && inputs.hybrid }}
@@ -274,12 +275,10 @@ jobs:
             ${{ inputs.hybrid && '--controls-restricted=false' || '' }} \
             ${{ (inputs.upgradefrom == '' && inputs.hybrid) && '--ready switch-reinstall' || '' }} \
             --ready=inspect \
-            --ready=setup-vpcs \
-            --ready=setup-peerings \
-            --ready=test-connectivity \
-            ${{ inputs.releasetest && '--ready=release-test' || '' }} \
-            ${{ inputs.releasetest_regex && format('--release-test-regexes="{0}"', inputs.releasetest_regex) || '' }} \
-            ${{ inputs.releasetest_regex_invert && '--release-test-regexes-invert' || '' }} \
+            ${{ inputs.upgradefrom != '' && '--ready=setup-vpcs --ready=setup-peerings --ready=test-connectivity' || '--ready=release-test' }} \
+            ${{ (inputs.upgradefrom == '' && !inputs.releasetest) && '--release-test-on-ready-only' || '' }} \
+            ${{ (inputs.releasetest && inputs.releasetest_regex) && format('--release-test-regexes="{0}"', inputs.releasetest_regex) || '' }} \
+            ${{ (inputs.releasetest && inputs.releasetest_regex_invert) && '--release-test-regexes-invert' || '' }} \
             --ready=exit \
             ${{ inputs.pause_on_failure && inputs.debug && '--pause-on-failure' || '' }} \
             ${{ inputs.upgradefrom != '' && '--upgrade' || '' }}
