@@ -102,6 +102,15 @@ func makeMultiVPCSingleSubnetSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 				NoServers:   true,
 			},
 		},
+		{
+			Name: "Static External Peering",
+			F:    testCtx.staticExternalPeeringTest,
+			SkipFlags: SkipFlags{
+				NoStaticExternals: true,
+				SubInterfaces:     true,
+				NoServers:         true,
+			},
+		},
 	}
 	suite.Tests = len(suite.TestCases)
 
