@@ -25,6 +25,7 @@ import (
 	gwapi "go.githedgehog.com/gateway/api/gateway/v1alpha1"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
+	ctrlutil "sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
 type HydrateMode string
@@ -57,6 +58,21 @@ func (c *Config) loadHydrateValidate(ctx context.Context, mode HydrateMode) erro
 	}
 
 	kube := l.GetClient()
+
+	// TODO remove after upgrades only supported from 26.01
+	{
+		defGwGr := &gwapi.GatewayGroup{
+			ObjectMeta: kmetav1.ObjectMeta{
+				Name:      gwapi.DefaultGatewayGroup,
+				Namespace: kmetav1.NamespaceDefault,
+			},
+		}
+		if _, err := ctrlutil.CreateOrUpdate(ctx, kube, defGwGr, func() error {
+			return nil
+		}); err != nil {
+			return fmt.Errorf("ensuring default gateway group: %w", err)
+		}
+	}
 
 	if err := c.ensureHydrated(ctx, kube, mode); err != nil {
 		return fmt.Errorf("ensuring hydrated: %w", err)
