@@ -61,7 +61,29 @@ func (c *ControlInstall) Run(ctx context.Context) error {
 		return fmt.Errorf("installing toolbox: %w", err)
 	}
 
-	if err := kube.Create(ctx, comp.NewNamespace(comp.FabNamespace)); err != nil && !kapierrors.IsAlreadyExists(err) {
+	// Retry namespace creation to handle transient k3s restarts during early initialization.
+	// k3s may crash and auto-restart (e.g., due to cloud-controller-manager race conditions),
+	// causing brief API server unavailability even after the node was reported ready.
+	attempt := 0
+	if err := retry.OnError(wait.Backoff{
+		Steps:    17,
+		Duration: 500 * time.Millisecond,
+		Factor:   1.5,
+		Jitter:   0.1,
+	}, func(error) bool {
+		return true
+	}, func() error {
+		if attempt > 0 {
+			slog.Debug("Retrying creating namespace", "name", comp.FabNamespace, "attempt", attempt)
+		}
+		attempt++
+
+		if err := kube.Create(ctx, comp.NewNamespace(comp.FabNamespace)); err != nil && !kapierrors.IsAlreadyExists(err) {
+			return fmt.Errorf("creating namespace %q: %w", comp.FabNamespace, err)
+		}
+
+		return nil
+	}); err != nil {
 		return fmt.Errorf("creating namespace %q: %w", comp.FabNamespace, err)
 	}
 
