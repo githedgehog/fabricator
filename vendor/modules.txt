@@ -108,7 +108,7 @@ github.com/bodgit/windows
 ## explicit; go 1.21
 github.com/bufbuild/protocompile/internal/editions
 github.com/bufbuild/protocompile/protoutil
-# github.com/cert-manager/cert-manager v1.19.3
+# github.com/cert-manager/cert-manager v1.19.4
 ## explicit; go 1.25.0
 github.com/cert-manager/cert-manager/pkg/apis/acme
 github.com/cert-manager/cert-manager/pkg/apis/acme/v1
@@ -979,8 +979,6 @@ go.opentelemetry.io/otel/semconv/v1.39.0
 go.opentelemetry.io/otel/metric
 go.opentelemetry.io/otel/metric/embedded
 go.opentelemetry.io/otel/metric/noop
-# go.opentelemetry.io/otel/sdk v1.40.0
-## explicit; go 1.24.0
 # go.opentelemetry.io/otel/trace v1.40.0
 ## explicit; go 1.24.0
 go.opentelemetry.io/otel/trace
