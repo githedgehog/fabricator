@@ -367,8 +367,8 @@ func doRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 			}
 		}
 		var revertErr error
-		for i := len(reverts) - 1; i >= 0; i-- {
-			revertErr = reverts[i](ctx)
+		for j := len(reverts) - 1; j >= 0; j-- {
+			revertErr = reverts[j](ctx)
 			if revertErr != nil {
 				slog.Error("REVERT FAIL", "test", test.Name, "error", revertErr.Error())
 				if err == nil {
