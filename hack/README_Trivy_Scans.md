@@ -6,6 +6,7 @@
 |------|---------|
 | `hack/vlab-trivy-runner.sh` | Main orchestration script |
 | `hack/sarif-consolidator.sh` | SARIF processing and deduplication |
+| `hack/trivy-version.sh` | Centralized Trivy version (override with `TRIVY_VERSION` env var) |
 | `hack/trivy-setup.sh` | Online mode setup (control-1) |
 | `hack/trivy-setup-airgapped.sh` | Airgapped mode setup (gateway-1) |
 | `hack/trivy-setup-sonic-airgapped.sh` | SONiC switch setup |

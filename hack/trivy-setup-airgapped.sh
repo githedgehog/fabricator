@@ -7,12 +7,14 @@
 
 set -e
 
+# Source centralized version configuration
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/trivy-version.sh"
+
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
-
-TRIVY_VERSION="0.65.0"
 HOST_DOWNLOAD_DIR="/tmp/trivy-airgapped-$(date +%s)"
 SHOW_USAGE=false
 
@@ -130,6 +132,8 @@ CACHE_DIR="${TRIVY_DIR}/cache"
 TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
 CONTAINERD_ADDRESS="/run/k3s/containerd/containerd.sock"
 TEMP_DIR="/tmp/trivy-export-$"
+# Get installed Trivy version for SARIF reports
+TRIVY_INSTALLED_VERSION=$(sudo ${TRIVY_DIR}/trivy --version 2>/dev/null | head -1 | awk '{print $2}' || echo "unknown")
 
 # Ensure directories exist
 mkdir -p ${REPORTS_DIR}
@@ -226,7 +230,7 @@ scan_image_directly() {
         echo "✓ SARIF report saved"
     else
         echo "WARNING: SARIF vulnerability scan failed for $image"
-        echo "{\"$schema\":\"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json\",\"version\":\"2.1.0\",\"runs\":[{\"tool\":{\"driver\":{\"name\":\"Trivy\",\"informationUri\":\"https://github.com/aquasecurity/trivy\",\"rules\":[],\"version\":\"0.65.0\"}},\"results\":[]}]}" > "${output_base}_critical.sarif"
+        echo "{\"\$schema\":\"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json\",\"version\":\"2.1.0\",\"runs\":[{\"tool\":{\"driver\":{\"name\":\"Trivy\",\"informationUri\":\"https://github.com/aquasecurity/trivy\",\"rules\":[],\"version\":\"${TRIVY_INSTALLED_VERSION}\"}},\"results\":[]}]}" > "${output_base}_critical.sarif"
     fi
 
     echo "Reports saved to:"
@@ -281,7 +285,7 @@ scan_image_tarball() {
         echo "✓ SARIF report saved"
     else
         echo "WARNING: SARIF vulnerability scan failed for $image"
-        echo "{\"$schema\":\"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json\",\"version\":\"2.1.0\",\"runs\":[{\"tool\":{\"driver\":{\"name\":\"Trivy\",\"informationUri\":\"https://github.com/aquasecurity/trivy\",\"rules\":[],\"version\":\"0.65.0\"}},\"results\":[]}]}" > "${output_base}_critical.sarif"
+        echo "{\"\$schema\":\"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json\",\"version\":\"2.1.0\",\"runs\":[{\"tool\":{\"driver\":{\"name\":\"Trivy\",\"informationUri\":\"https://github.com/aquasecurity/trivy\",\"rules\":[],\"version\":\"${TRIVY_INSTALLED_VERSION}\"}},\"results\":[]}]}" > "${output_base}_critical.sarif"
     fi
 
     echo "Reports saved to:"

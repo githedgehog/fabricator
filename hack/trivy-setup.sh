@@ -7,6 +7,11 @@
 
 set -e
 
+# Use TRIVY_VERSION from environment (set by caller via vlab-trivy-runner.sh)
+# This script runs on remote VMs, so it can't source local files
+# Default should match hack/trivy-version.sh
+TRIVY_VERSION="${TRIVY_VERSION:-0.69.2}"
+
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
@@ -49,8 +54,8 @@ if ! sudo curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/co
     exit 1
 fi
 
-echo "Running Trivy installer..."
-if ! sudo sh /tmp/trivy-install.sh -b /var/lib/trivy; then
+echo "Running Trivy installer (v${TRIVY_VERSION})..."
+if ! sudo sh /tmp/trivy-install.sh -b /var/lib/trivy "v${TRIVY_VERSION}"; then
     echo -e "${RED}Trivy installation failed${NC}"
     echo "Installation script failed. Debug info:"
     echo "Installer script contents:"
@@ -134,6 +139,8 @@ REPORTS_DIR="${TRIVY_DIR}/reports"
 DOCKER_CONFIG="${TRIVY_DIR}/.docker"
 TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
 CONTAINERD_ADDRESS="/run/k3s/containerd/containerd.sock"
+# Get installed Trivy version for SARIF reports
+TRIVY_INSTALLED_VERSION=$(sudo ${TRIVY_DIR}/trivy --version 2>/dev/null | head -1 | awk '{print $2}' || echo "unknown")
 
 mkdir -p ${REPORTS_DIR}
 
@@ -182,7 +189,7 @@ scan_image() {
         echo "✓ SARIF report saved"
     else
         echo "WARNING: SARIF vulnerability scan failed for $image"
-        echo "{\"$schema\":\"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json\",\"version\":\"2.1.0\",\"runs\":[{\"tool\":{\"driver\":{\"name\":\"Trivy\",\"informationUri\":\"https://github.com/aquasecurity/trivy\",\"rules\":[],\"version\":\"0.65.0\"}},\"results\":[]}]}" > "${output_base}_critical.sarif"
+        echo "{\"\$schema\":\"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json\",\"version\":\"2.1.0\",\"runs\":[{\"tool\":{\"driver\":{\"name\":\"Trivy\",\"informationUri\":\"https://github.com/aquasecurity/trivy\",\"rules\":[],\"version\":\"${TRIVY_INSTALLED_VERSION}\"}},\"results\":[]}]}" > "${output_base}_critical.sarif"
     fi
 
     echo "Reports saved to:"
