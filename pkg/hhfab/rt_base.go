@@ -124,7 +124,7 @@ type JUnitTestSuite struct {
 
 type SkipFlags struct {
 	VirtualSwitch bool `xml:"-"` // skip if there's any virtual switch in the vlab
-	NoExternals   bool `xml:"-"` // skip if there are no externals
+	NoExternals   bool `xml:"-"` // skip if there are no viable externals
 	ExtendedOnly  bool `xml:"-"` // skip if extended tests are not enabled
 	RoCE          bool `xml:"-"` // skip if RoCE is not supported by any of the leaf switches
 	SubInterfaces bool `xml:"-"` // skip if subinterfaces are not supported by some of the switches
@@ -471,7 +471,7 @@ func selectAndRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, suite *J
 		}
 		if test.SkipFlags.NoExternals && skipFlags.NoExternals {
 			suite.TestCases[i].Skipped = &Skipped{
-				Message: "There are no externals",
+				Message: "There are no viable externals",
 			}
 			suite.Skipped++
 
@@ -706,8 +706,9 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 		slog.Warn("No RoCE capable leaves found, some tests will be skipped")
 		skipFlags.RoCE = true
 	}
+	// only fetch externals that are in the same IPv4 namespace as the VPCs we will be creating
 	extList := &vpcapi.ExternalList{}
-	if err := kube.List(ctx, extList); err != nil {
+	if err := kube.List(ctx, extList, kclient.MatchingLabels{vpcapi.LabelIPv4NS: testCtx.setupOpts.IPv4Namespace}); err != nil {
 		return fmt.Errorf("listing externals: %w", err)
 	}
 	extAttachList := &vpcapi.ExternalAttachmentList{}
@@ -715,7 +716,7 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 		return fmt.Errorf("listing external attachments: %w", err)
 	}
 	if len(extList.Items) == 0 || len(extAttachList.Items) == 0 {
-		slog.Warn("No externals found, some tests will be skipped")
+		slog.Warn("No viable externals found, some tests will be skipped")
 		skipFlags.NoExternals = true
 	} else {
 		testCtx.extName = ""

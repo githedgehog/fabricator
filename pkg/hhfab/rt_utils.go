@@ -117,7 +117,9 @@ func populateAllExternalVpcPeerings(ctx context.Context, kube kclient.Client, ex
 	}
 	for i := 0; i < len(vpcs.Items); i++ {
 		for j := 0; j < len(exts.Items); j++ {
-			appendExtPeeringSpec(extPeerings, i+1, exts.Items[j].Name, []string{"subnet-01"}, AllZeroPrefix)
+			if exts.Items[j].Spec.IPv4Namespace == vpcs.Items[i].Spec.IPv4Namespace {
+				appendExtPeeringSpec(extPeerings, i+1, exts.Items[j].Name, []string{"subnet-01"}, AllZeroPrefix)
+			}
 		}
 	}
 
