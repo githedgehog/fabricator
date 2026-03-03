@@ -4,6 +4,10 @@
 
 set -e
 
+# Source centralized version configuration
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/trivy-version.sh"
+
 # Parse command line arguments
 RUN_CONTROL=true
 RUN_GATEWAY=true
@@ -400,7 +404,7 @@ setup_control_vm() {
     fi
 
     echo "Installing Trivy on Control VM (online mode)..."
-    if ! $HHFAB_BIN vlab ssh -b -n "$CONTROL_VM" -- 'chmod +x /tmp/trivy-setup.sh && sudo /tmp/trivy-setup.sh'; then
+    if ! $HHFAB_BIN vlab ssh -b -n "$CONTROL_VM" -- "chmod +x /tmp/trivy-setup.sh && sudo TRIVY_VERSION=${TRIVY_VERSION} /tmp/trivy-setup.sh"; then
         echo -e "${RED}Failed to setup Trivy on Control VM${NC}"
         return 1
     fi
