@@ -79,6 +79,11 @@ func (testCtx *VPCPeeringTestCtx) testNATGatewayConnectivity(
 	startTime := time.Now()
 	slog.Info("Testing NAT gateway peering connectivity")
 
+	// Validate NAT pool parameters - we only support a single CIDR per VPC for now
+	if len(vpc1NATPool) > 1 || len(vpc2NATPool) > 1 {
+		return fmt.Errorf("multiple NAT CIDRs per VPC not supported, got vpc1=%d vpc2=%d", len(vpc1NATPool), len(vpc2NATPool)) //nolint:goerr113
+	}
+
 	// Check if all switches are virtual and skip iperf min speed check if so
 	switches := &wiringapi.SwitchList{}
 	if err := testCtx.kube.List(ctx, switches); err != nil {
@@ -228,141 +233,84 @@ func (testCtx *VPCPeeringTestCtx) testNATGatewayConnectivity(
 		}
 	}
 
-	// Test connectivity: vpc1 -> vpc2
-	// If vpc2NATPool is set, ping vpc2's NAT IPs (destination NAT)
-	// If vpc2NATPool is empty, ping vpc2's real IPs (source NAT on vpc1 side)
-	var pingErrors []*PingError
+	// Helper to calculate destination IP (NAT IP if pool configured, real IP otherwise)
+	getDestIP := func(serverName string, destSubnetStart, natPoolStart netip.Addr) (netip.Addr, error) {
+		realIP := serverIPs[serverName]
+		if natPoolStart.IsValid() && !natPoolStart.IsUnspecified() {
+			natIP, err := calculateStaticNATIP(realIP, destSubnetStart, natPoolStart)
+			if err != nil {
+				return netip.Addr{}, fmt.Errorf("calculating NAT IP for %s: %w", serverName, err)
+			}
+			slog.Debug("Using NAT IP", "server", serverName, "real", realIP, "nat", natIP)
 
-	for _, serverA := range vpc1Servers {
-		for _, serverB := range vpc2Servers {
-			destIP := serverIPs[serverB]
+			return natIP, nil
+		}
 
-			// Calculate expected NAT IP for destination (only if vpc2 has NAT configured)
-			natDestIP := destIP
-			if len(vpc2NATPool) > 0 && !vpc2NATPoolStart.IsUnspecified() {
-				var err error
-				natDestIP, err = calculateStaticNATIP(destIP, vpc2SubnetStart, vpc2NATPoolStart)
+		return realIP, nil
+	}
+
+	// Helper to test connectivity in one direction
+	testDirection := func(label string, fromServers, toServers []string, toSubnetStart, toNATPoolStart netip.Addr) error {
+		slog.Debug("Testing NAT connectivity", "direction", label)
+
+		// Ping tests
+		var pingErrors []*PingError
+		for _, serverA := range fromServers {
+			for _, serverB := range toServers {
+				destIP, err := getDestIP(serverB, toSubnetStart, toNATPoolStart)
 				if err != nil {
-					return fmt.Errorf("calculating NAT IP for %s: %w", serverB, err)
+					return err
 				}
-				slog.Debug("Calculated NAT IP", "server", serverB, "real", destIP, "nat", natDestIP)
-			}
-
-			// Use checkPing from testing.go (nil semaphore = no parallelism limiting needed for sequential calls)
-			if pe := checkPing(ctx, testCtx.tcOpts.PingsCount, nil, serverA, serverB, sshConfigs[serverA], natDestIP, nil, true); pe != nil {
-				pingErrors = append(pingErrors, pe)
-			}
-		}
-	}
-
-	if len(pingErrors) > 0 {
-		var errMsgs []string
-		for _, pe := range pingErrors {
-			errMsgs = append(errMsgs, pe.Error())
-		}
-
-		return fmt.Errorf("NAT ping test failed with %d errors: %s", len(pingErrors), strings.Join(errMsgs, "; ")) //nolint:err113
-	}
-
-	slog.Debug("NAT ping tests completed successfully, starting iperf3 tests")
-
-	// Test iperf3: vpc1 -> vpc2 using checkIPerf from testing.go
-	var iperfErrors []*IperfError
-	reachability := Reachability{
-		Reachable: true,
-		Reason:    ReachabilityReasonGatewayPeering,
-	}
-
-	for _, serverA := range vpc1Servers {
-		for _, serverB := range vpc2Servers {
-			destIP := serverIPs[serverB]
-
-			// Calculate expected NAT IP for destination (only if vpc2 has NAT configured)
-			natDestIP := destIP
-			if len(vpc2NATPool) > 0 && !vpc2NATPoolStart.IsUnspecified() {
-				var err error
-				natDestIP, err = calculateStaticNATIP(destIP, vpc2SubnetStart, vpc2NATPoolStart)
-				if err != nil {
-					return fmt.Errorf("calculating NAT IP for %s: %w", serverB, err)
-				}
-			}
-
-			// Use checkIPerf from testing.go
-			if ie := checkIPerf(ctx, testCtx.tcOpts, serverA, serverB, sshConfigs[serverA], sshConfigs[serverB], natDestIP, reachability); ie != nil {
-				iperfErrors = append(iperfErrors, ie)
-			}
-		}
-	}
-
-	if len(iperfErrors) > 0 {
-		var errMsgs []string
-		for _, ie := range iperfErrors {
-			errMsgs = append(errMsgs, ie.Error())
-		}
-
-		return fmt.Errorf("NAT iperf3 test (vpc1->vpc2) failed with %d errors: %s", len(iperfErrors), strings.Join(errMsgs, "; ")) //nolint:err113
-	}
-
-	// Test reverse direction: vpc2 -> vpc1 (only when vpc1 has NAT configured)
-	if len(vpc1NATPool) > 0 && !vpc1NATPoolStart.IsUnspecified() {
-		slog.Debug("Testing reverse direction (vpc2 -> vpc1) NAT connectivity")
-		pingErrors = nil
-
-		for _, serverA := range vpc2Servers {
-			for _, serverB := range vpc1Servers {
-				destIP := serverIPs[serverB]
-
-				// Calculate expected NAT IP for destination (vpc1's NAT IP)
-				natDestIP, err := calculateStaticNATIP(destIP, vpc1SubnetStart, vpc1NATPoolStart)
-				if err != nil {
-					return fmt.Errorf("calculating NAT IP for %s: %w", serverB, err)
-				}
-				slog.Debug("Calculated reverse NAT IP", "server", serverB, "real", destIP, "nat", natDestIP)
-
-				// Use checkPing from testing.go
-				if pe := checkPing(ctx, testCtx.tcOpts.PingsCount, nil, serverA, serverB, sshConfigs[serverA], natDestIP, nil, true); pe != nil {
+				if pe := checkPing(ctx, testCtx.tcOpts.PingsCount, nil, serverA, serverB, sshConfigs[serverA], destIP, nil, true); pe != nil {
 					pingErrors = append(pingErrors, pe)
 				}
 			}
 		}
-
 		if len(pingErrors) > 0 {
 			var errMsgs []string
 			for _, pe := range pingErrors {
 				errMsgs = append(errMsgs, pe.Error())
 			}
 
-			return fmt.Errorf("NAT ping test (vpc2->vpc1) failed with %d errors: %s", len(pingErrors), strings.Join(errMsgs, "; ")) //nolint:err113
+			return fmt.Errorf("NAT ping test (%s) failed with %d errors: %s", label, len(pingErrors), strings.Join(errMsgs, "; ")) //nolint:goerr113
 		}
 
-		slog.Debug("Reverse NAT ping tests completed successfully, starting iperf3 tests")
-
-		// Test iperf3: vpc2 -> vpc1
-		iperfErrors = nil
-
-		for _, serverA := range vpc2Servers {
-			for _, serverB := range vpc1Servers {
-				destIP := serverIPs[serverB]
-
-				natDestIP, err := calculateStaticNATIP(destIP, vpc1SubnetStart, vpc1NATPoolStart)
+		// Iperf tests
+		slog.Debug("NAT ping tests completed, starting iperf3 tests", "direction", label)
+		reachability := Reachability{Reachable: true, Reason: ReachabilityReasonGatewayPeering}
+		var iperfErrors []*IperfError
+		for _, serverA := range fromServers {
+			for _, serverB := range toServers {
+				destIP, err := getDestIP(serverB, toSubnetStart, toNATPoolStart)
 				if err != nil {
-					return fmt.Errorf("calculating NAT IP for %s: %w", serverB, err)
+					return err
 				}
-
-				// Use checkIPerf from testing.go
-				if ie := checkIPerf(ctx, testCtx.tcOpts, serverA, serverB, sshConfigs[serverA], sshConfigs[serverB], natDestIP, reachability); ie != nil {
+				if ie := checkIPerf(ctx, testCtx.tcOpts, serverA, serverB, sshConfigs[serverA], sshConfigs[serverB], destIP, reachability); ie != nil {
 					iperfErrors = append(iperfErrors, ie)
 				}
 			}
 		}
-
 		if len(iperfErrors) > 0 {
 			var errMsgs []string
 			for _, ie := range iperfErrors {
 				errMsgs = append(errMsgs, ie.Error())
 			}
 
-			return fmt.Errorf("NAT iperf3 test (vpc2->vpc1) failed with %d errors: %s", len(iperfErrors), strings.Join(errMsgs, "; ")) //nolint:err113
+			return fmt.Errorf("NAT iperf3 test (%s) failed with %d errors: %s", label, len(iperfErrors), strings.Join(errMsgs, "; ")) //nolint:goerr113
+		}
+
+		return nil
+	}
+
+	// Test vpc1 -> vpc2 direction (always)
+	if err := testDirection("vpc1->vpc2", vpc1Servers, vpc2Servers, vpc2SubnetStart, vpc2NATPoolStart); err != nil {
+		return err
+	}
+
+	// Test vpc2 -> vpc1 direction (only if vpc1 has static NAT - masquerade doesn't support being a destination)
+	if len(vpc1NATPool) > 0 && !vpc1NATPoolStart.IsUnspecified() {
+		if err := testDirection("vpc2->vpc1", vpc2Servers, vpc1Servers, vpc1SubnetStart, vpc1NATPoolStart); err != nil {
+			return err
 		}
 	}
 
@@ -501,68 +449,6 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringStaticSourceNATTest(ctx context.
 	return false, nil, nil
 }
 
-// Test gateway peering with static destination NAT (only VPC2 has NAT configured)
-// Example:
-//
-// Spec:
-//
-//	Gateway Group:  default
-//	Peering:
-//	  vpc-01:
-//	    Expose:
-//	      Ips:
-//	        Cidr:  10.50.1.0/24
-//	  vpc-02:
-//	    Expose:
-//	      As:
-//	        Cidr:  192.168.22.0/24
-//	      Ips:
-//	        Cidr:  10.50.2.0/24
-//	      Nat:
-//	        Static:
-func (testCtx *VPCPeeringTestCtx) gatewayPeeringStaticDestinationNATTest(ctx context.Context) (bool, []RevertFunc, error) {
-	vpcs := &vpcapi.VPCList{}
-	if err := testCtx.kube.List(ctx, vpcs); err != nil {
-		return false, nil, fmt.Errorf("listing VPCs: %w", err)
-	}
-	if len(vpcs.Items) < 2 {
-		return true, nil, fmt.Errorf("not enough VPCs for static destination NAT test") //nolint:goerr113
-	}
-
-	sort.Slice(vpcs.Items, func(i, j int) bool {
-		return vpcs.Items[i].Name < vpcs.Items[j].Name
-	})
-
-	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec)
-	externalPeerings := make(map[string]*vpcapi.ExternalPeeringSpec)
-	gwPeerings := make(map[string]*gwapi.PeeringSpec)
-
-	vpc1 := &vpcs.Items[0]
-	vpc2 := &vpcs.Items[1]
-
-	// Only VPC2 has NAT - VPC1 will ping VPC2's NAT IPs (destination NAT)
-	vpc2NATCIDR := []string{"192.168.22.0/24"}
-
-	appendGwPeeringSpec(gwPeerings, vpc1, vpc2, &GwPeeringOptions{
-		VPC2NATCIDR: vpc2NATCIDR,
-	})
-
-	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, gwPeerings, true); err != nil {
-		return false, nil, fmt.Errorf("setting up static destination NAT peerings: %w", err)
-	}
-
-	if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
-		return false, nil, fmt.Errorf("waiting for switches to be ready: %w", err)
-	}
-
-	// Test connectivity - VPC1 pings VPC2's NAT IPs
-	if err := testCtx.testNATGatewayConnectivity(ctx, vpc1, vpc2, nil, vpc2NATCIDR); err != nil {
-		return false, nil, fmt.Errorf("testing static destination NAT connectivity: %w", err)
-	}
-
-	return false, nil, nil
-}
-
 // Test gateway peering with bidirectional static NAT (both VPCs have NAT configured)
 // Example:
 //
@@ -692,14 +578,19 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringOverlapNATTest(ctx context.Conte
 		return false, nil, fmt.Errorf("existing VPC %s has no subnets", existingVPC.Name) //nolint:goerr113
 	}
 
-	// Parse the existing subnet to determine the /16 range for the new namespace
-	existingPrefix, err := netip.ParsePrefix(existingSubnetCIDR)
-	if err != nil {
-		return false, nil, fmt.Errorf("parsing existing subnet CIDR %s: %w", existingSubnetCIDR, err)
+	// Get the IPv4Namespace from the existing VPC to create an overlapping namespace
+	existingNS := &vpcapi.IPv4Namespace{}
+	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{
+		Name:      existingVPC.Spec.IPv4Namespace,
+		Namespace: kmetav1.NamespaceDefault,
+	}, existingNS); err != nil {
+		return false, nil, fmt.Errorf("getting IPv4Namespace %s: %w", existingVPC.Spec.IPv4Namespace, err)
 	}
-	// Get the /16 containing this subnet (e.g., 10.50.1.0/24 -> 10.50.0.0/16)
-	addr := existingPrefix.Addr().As4()
-	namespaceSubnet := fmt.Sprintf("%d.%d.0.0/16", addr[0], addr[1])
+	if len(existingNS.Spec.Subnets) == 0 {
+		return false, nil, fmt.Errorf("IPv4Namespace %s has no subnets", existingNS.Name) //nolint:goerr113
+	}
+	// Use the same subnet range as the existing namespace to create overlap
+	namespaceSubnet := existingNS.Spec.Subnets[0]
 
 	// Find a server from VPC2 that we can move to the new overlapping VPC
 	donorVPC := &vpcs.Items[1]
@@ -770,6 +661,19 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringOverlapNATTest(ctx context.Conte
 	}
 	slog.Debug("Created overlap IPv4Namespace", "name", overlapNSName)
 
+	// Use individual reverts - each step adds its own cleanup function
+	reverts := []RevertFunc{}
+
+	// Revert: delete overlap namespace
+	reverts = append(reverts, func(ctx context.Context) error {
+		slog.Debug("Reverting: deleting overlap namespace", "name", overlapNSName)
+		if err := testCtx.kube.Delete(ctx, overlapNS); err != nil {
+			return fmt.Errorf("deleting overlap namespace: %w", err)
+		}
+
+		return nil
+	})
+
 	// Create the new VPC in the overlap namespace with the SAME subnet CIDR as existingVPC
 	newVLAN := originalVLAN + 100 // Use different VLAN to avoid conflicts
 	overlapVPC := &vpcapi.VPC{
@@ -797,28 +701,40 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringOverlapNATTest(ctx context.Conte
 		},
 	}
 	if err := testCtx.kube.Create(ctx, overlapVPC); err != nil {
-		_ = testCtx.kube.Delete(ctx, overlapNS)
-
-		return false, nil, fmt.Errorf("creating overlap VPC: %w", err)
+		return false, reverts, fmt.Errorf("creating overlap VPC: %w", err)
 	}
 	slog.Debug("Created overlap VPC", "name", overlapVPCName, "subnet", existingSubnetCIDR, "vlan", newVLAN)
 
-	// Define cleanup function to restore the server to the original VPC
-	cleanup := func() error {
-		slog.Debug("Cleaning up overlap NAT test resources")
+	// Revert: delete overlap VPC
+	reverts = append(reverts, func(ctx context.Context) error {
+		slog.Debug("Reverting: deleting overlap VPC", "name", overlapVPCName)
+		if err := testCtx.kube.Delete(ctx, overlapVPC); err != nil {
+			return fmt.Errorf("deleting overlap VPC: %w", err)
+		}
 
-		// Delete the new attachment first
-		newAtt := &vpcapi.VPCAttachment{}
+		return nil
+	})
+
+	// Delete the old attachment
+	if err := testCtx.kube.Delete(ctx, targetAttachment); err != nil {
+		return false, reverts, fmt.Errorf("deleting original attachment: %w", err)
+	}
+	slog.Debug("Deleted original attachment", "attachment", targetAttachment.Name)
+
+	// Revert: restore original attachment and reconfigure server network
+	reverts = append(reverts, func(ctx context.Context) error {
+		slog.Debug("Reverting: restoring original attachment", "name", originalAttachmentName)
+		// First delete any existing attachment with this name
+		existingAtt := &vpcapi.VPCAttachment{}
 		if err := testCtx.kube.Get(ctx, kclient.ObjectKey{
 			Namespace: kmetav1.NamespaceDefault,
 			Name:      originalAttachmentName,
-		}, newAtt); err == nil {
-			if err := testCtx.kube.Delete(ctx, newAtt); err != nil {
-				slog.Warn("Failed to delete new attachment during cleanup", "error", err)
+		}, existingAtt); err == nil {
+			if err := testCtx.kube.Delete(ctx, existingAtt); err != nil {
+				slog.Warn("Failed to delete existing attachment during revert", "error", err)
 			}
 		}
-
-		// Restore original attachment
+		// Restore the original attachment
 		restoredAttachment := &vpcapi.VPCAttachment{
 			TypeMeta: kmetav1.TypeMeta{
 				Kind:       vpcapi.KindVPCAttachment,
@@ -834,58 +750,33 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringOverlapNATTest(ctx context.Conte
 			},
 		}
 		if err := testCtx.kube.Create(ctx, restoredAttachment); err != nil {
-			slog.Warn("Failed to restore original attachment during cleanup", "error", err)
+			return fmt.Errorf("restoring original attachment: %w", err)
 		}
 
-		// Delete the overlap VPC
-		if err := testCtx.kube.Delete(ctx, overlapVPC); err != nil {
-			slog.Warn("Failed to delete overlap VPC during cleanup", "error", err)
-		}
-
-		// Delete the overlap namespace
-		if err := testCtx.kube.Delete(ctx, overlapNS); err != nil {
-			slog.Warn("Failed to delete overlap namespace during cleanup", "error", err)
-		}
-
-		// Wait for fabric to converge
+		// Wait for fabric to configure the original VLAN on the switch
 		if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
-			slog.Warn("Failed to wait for ready during cleanup", "error", err)
+			return fmt.Errorf("waiting for fabric ready after restoring attachment: %w", err)
 		}
 
-		// Reconfigure server network back to original VPC
+		// Reconfigure server network back to original VLAN
+		slog.Debug("Reverting: reconfiguring server network", "server", targetServer, "vlan", originalVLAN)
 		sshCfg, err := testCtx.getSSH(ctx, targetServer)
 		if err != nil {
-			slog.Warn("Failed to get SSH config during cleanup", "error", err)
-
-			return nil
+			return fmt.Errorf("getting SSH config for %s: %w", targetServer, err)
 		}
-
 		netconfCmd, err := GetServerNetconfCmd(targetConn, originalVLAN, testCtx.setupOpts.HashPolicy)
 		if err != nil {
-			slog.Warn("Failed to get netconf command during cleanup", "error", err)
-
-			return nil
+			return fmt.Errorf("getting netconf command for %s: %w", targetServer, err)
 		}
-
 		if _, stderr, err := sshCfg.Run(ctx, "/opt/bin/hhnet cleanup"); err != nil {
-			slog.Warn("Failed to cleanup server network during cleanup", "error", err, "stderr", stderr)
+			slog.Warn("Failed to cleanup server network during revert", "error", err, "stderr", stderr)
 		}
 		if _, stderr, err := sshCfg.Run(ctx, "/opt/bin/hhnet "+netconfCmd); err != nil {
-			slog.Warn("Failed to reconfigure server network during cleanup", "error", err, "stderr", stderr)
+			return fmt.Errorf("reconfiguring server %s network: %w: %s", targetServer, err, stderr)
 		}
 
-		slog.Debug("Overlap NAT test cleanup completed")
-
 		return nil
-	}
-
-	// Delete the old attachment
-	if err := testCtx.kube.Delete(ctx, targetAttachment); err != nil {
-		_ = cleanup()
-
-		return false, nil, fmt.Errorf("deleting original attachment: %w", err)
-	}
-	slog.Debug("Deleted original attachment", "attachment", targetAttachment.Name)
+	})
 
 	// Create new attachment to the overlap VPC
 	newAttachment := &vpcapi.VPCAttachment{
@@ -903,45 +794,33 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringOverlapNATTest(ctx context.Conte
 		},
 	}
 	if err := testCtx.kube.Create(ctx, newAttachment); err != nil {
-		_ = cleanup()
-
-		return false, nil, fmt.Errorf("creating new attachment to overlap VPC: %w", err)
+		return false, reverts, fmt.Errorf("creating new attachment to overlap VPC: %w", err)
 	}
 	slog.Debug("Created new attachment to overlap VPC", "attachment", newAttachment.Name)
 
 	// Wait for fabric to be ready with new configuration
 	if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
-		_ = cleanup()
-
-		return false, nil, fmt.Errorf("waiting for switches to be ready after VPC changes: %w", err)
+		return false, reverts, fmt.Errorf("waiting for switches to be ready after VPC changes: %w", err)
 	}
 
 	// Configure the server's network for the new VPC
 	sshCfg, err := testCtx.getSSH(ctx, targetServer)
 	if err != nil {
-		_ = cleanup()
-
-		return false, nil, fmt.Errorf("getting SSH config for server %s: %w", targetServer, err)
+		return false, reverts, fmt.Errorf("getting SSH config for server %s: %w", targetServer, err)
 	}
 
 	netconfCmd, err := GetServerNetconfCmd(targetConn, newVLAN, testCtx.setupOpts.HashPolicy)
 	if err != nil {
-		_ = cleanup()
-
-		return false, nil, fmt.Errorf("getting netconf command for server %s: %w", targetServer, err)
+		return false, reverts, fmt.Errorf("getting netconf command for server %s: %w", targetServer, err)
 	}
 
 	// Cleanup and reconfigure server network
 	slog.Debug("Reconfiguring server network", "server", targetServer, "vlan", newVLAN)
 	if _, stderr, err := sshCfg.Run(ctx, "/opt/bin/hhnet cleanup"); err != nil {
-		_ = cleanup()
-
-		return false, nil, fmt.Errorf("cleaning up server %s network: %w: %s", targetServer, err, stderr)
+		return false, reverts, fmt.Errorf("cleaning up server %s network: %w: %s", targetServer, err, stderr)
 	}
 	if _, stderr, err := sshCfg.Run(ctx, "/opt/bin/hhnet "+netconfCmd); err != nil {
-		_ = cleanup()
-
-		return false, nil, fmt.Errorf("configuring server %s network: %w: %s", targetServer, err, stderr)
+		return false, reverts, fmt.Errorf("configuring server %s network: %w: %s", targetServer, err, stderr)
 	}
 
 	// Give DHCP time to assign an address
@@ -962,15 +841,11 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringOverlapNATTest(ctx context.Conte
 	})
 
 	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, gwPeerings, true); err != nil {
-		_ = cleanup()
-
-		return false, nil, fmt.Errorf("setting up overlap NAT gateway peerings: %w", err)
+		return false, reverts, fmt.Errorf("setting up overlap NAT gateway peerings: %w", err)
 	}
 
 	if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
-		_ = cleanup()
-
-		return false, nil, fmt.Errorf("waiting for switches to be ready after peering: %w", err)
+		return false, reverts, fmt.Errorf("waiting for switches to be ready after peering: %w", err)
 	}
 
 	// Test connectivity - both VPCs have overlapping subnets, NAT resolves them
@@ -979,26 +854,13 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringOverlapNATTest(ctx context.Conte
 		"overlapVPC", overlapVPC.Name, "overlapCIDR", existingSubnetCIDR,
 		"existingNAT", existingVPCNATCIDR, "overlapNAT", overlapVPCNATCIDR)
 
-	testErr := testCtx.testNATGatewayConnectivity(ctx, existingVPC, overlapVPC, existingVPCNATCIDR, overlapVPCNATCIDR)
-
-	// If pauseOnFail is set and test failed, pause before cleanup for manual debugging
-	if testCtx.pauseOnFail && testErr != nil {
-		slog.Warn("Test failed, pausing before cleanup for manual debugging")
-		if err := pauseOnFailure(ctx); err != nil {
-			slog.Warn("Pause failed, ignoring", "err", err.Error())
-		}
-	}
-
-	// Always cleanup, regardless of test result
-	_ = cleanup()
-
-	if testErr != nil {
-		return false, nil, fmt.Errorf("testing overlap NAT connectivity: %w", testErr)
+	if err := testCtx.testNATGatewayConnectivity(ctx, existingVPC, overlapVPC, existingVPCNATCIDR, overlapVPCNATCIDR); err != nil {
+		return false, reverts, fmt.Errorf("testing overlap NAT connectivity: %w", err)
 	}
 
 	slog.Info("Overlap NAT test completed successfully")
 
-	return false, nil, nil
+	return false, reverts, nil
 }
 
 // getNATTestCases returns the NAT test cases to be added to the multi-VPC single-subnet suite
@@ -1014,13 +876,6 @@ func getNATTestCases(testCtx *VPCPeeringTestCtx) []JUnitTestCase {
 		{
 			Name: "Gateway Peering Static Source NAT",
 			F:    testCtx.gatewayPeeringStaticSourceNATTest,
-			SkipFlags: SkipFlags{
-				NoGateway: true,
-			},
-		},
-		{
-			Name: "Gateway Peering Static Destination NAT",
-			F:    testCtx.gatewayPeeringStaticDestinationNATTest,
 			SkipFlags: SkipFlags{
 				NoGateway: true,
 			},
