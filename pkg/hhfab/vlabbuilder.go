@@ -35,12 +35,8 @@ type VLABBuilder struct {
 	SpinesCount         uint8  // number of spines to generate
 	FabricLinksCount    uint8  // number of links for each spine <> leaf pair
 	MeshLinksCount      uint8  // number of mesh links for each leaf <> leaf pair
-	MCLAGLeafsCount     uint8  // number of MCLAG server-leafs to generate
 	ESLAGLeafGroups     string // eslag leaf groups - comma separated list of number of ESLAG switches in each group, should be 2-4 per group, e.g. 2,4,2 for 3 groups with 2, 4 and 2 switches
 	OrphanLeafsCount    uint8  // number of non-MCLAG server-leafs to generate
-	MCLAGSessionLinks   uint8  // number of MCLAG session links to generate
-	MCLAGPeerLinks      uint8  // number of MCLAG peer links to generate
-	MCLAGServers        uint8  // number of MCLAG servers to generate for MCLAG switches
 	ESLAGServers        uint8  // number of ESLAG servers to generate for ESLAG switches
 	UnbundledServers    uint8  // number of unbundled servers to generate for switches (only for one of the first switch in the redundancy group or orphan switch)
 	BundledServers      uint8  // number of bundled servers to generate for switches (only for one of the second switch in the redundancy group or orphan switch)
@@ -52,7 +48,6 @@ type VLABBuilder struct {
 	ExtBGPCount         uint8  // number of BGP externals to generate
 	ExtStaticCount      uint8  // number of static externals to generate (no proxy)
 	ExtStaticProxyCount uint8  // number of static externals to generate (with proxy)
-	ExtMCLAGConnCount   uint8  // number of external connections to generate from MCLAG leaves
 	ExtESLAGConnCount   uint8  // number of external connections to generate from ESLAG leaves
 	ExtOrphanConnCount  uint8  // number of external connections to generate from orphan leaves
 	YesFlag             bool
@@ -82,8 +77,7 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 				if b.FabricLinksCount == 0 && b.MeshLinksCount == 0 {
 					b.FabricLinksCount = 2
 				}
-				if b.MCLAGLeafsCount == 0 && b.OrphanLeafsCount == 0 && b.ESLAGLeafGroups == "" {
-					b.MCLAGLeafsCount = 2
+				if b.OrphanLeafsCount == 0 && b.ESLAGLeafGroups == "" {
 					b.ESLAGLeafGroups = "2"
 					b.OrphanLeafsCount = 1
 				}
@@ -92,7 +86,7 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 				if b.SpinesCount != 0 {
 					return fmt.Errorf("spines not supported for when using mesh connections") //nolint:goerr113
 				}
-				if b.MCLAGLeafsCount == 0 && b.OrphanLeafsCount == 0 && b.ESLAGLeafGroups == "" {
+				if b.OrphanLeafsCount == 0 && b.ESLAGLeafGroups == "" {
 					b.ESLAGLeafGroups = "2"
 					b.OrphanLeafsCount = 1
 				}
@@ -100,15 +94,6 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 		}
 	default:
 		return fmt.Errorf("unsupported fabric mode %s", fabricMode) //nolint:goerr113
-	}
-
-	if b.MCLAGLeafsCount > 0 {
-		if b.MCLAGSessionLinks == 0 {
-			b.MCLAGSessionLinks = 2
-		}
-		if b.MCLAGPeerLinks == 0 {
-			b.MCLAGPeerLinks = 2
-		}
 	}
 
 	isGw := false
@@ -192,19 +177,6 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 	if totalESLAGLeafs == 0 {
 		b.ESLAGServers = 0
 	}
-	if b.MCLAGLeafsCount == 0 {
-		b.MCLAGServers = 0
-	}
-
-	if b.MCLAGLeafsCount%2 != 0 {
-		return fmt.Errorf("MCLAG leafs count must be even") //nolint:goerr113
-	}
-	if b.MCLAGLeafsCount > 0 && b.MCLAGSessionLinks == 0 {
-		return fmt.Errorf("MCLAG session links count must be greater than 0") //nolint:goerr113
-	}
-	if b.MCLAGLeafsCount > 0 && b.MCLAGPeerLinks == 0 {
-		return fmt.Errorf("MCLAG peer links count must be greater than 0") //nolint:goerr113
-	}
 
 	if b.MultiHomedServers > 0 && b.OrphanLeafsCount < 2 {
 		return fmt.Errorf("at least two orphan leaves are needed for multihomed servers") //nolint:goerr113
@@ -213,18 +185,14 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 	if b.ExtESLAGConnCount > totalESLAGLeafs {
 		return fmt.Errorf("external ESLAG connections count must be less than or equal to total ESLAG leaves") //nolint:goerr113
 	}
-	if b.ExtMCLAGConnCount > b.MCLAGLeafsCount {
-		return fmt.Errorf("external MCLAG connections count must be less than or equal to MCLAG leaves") //nolint:goerr113
-	}
 	if b.ExtOrphanConnCount > b.OrphanLeafsCount {
 		return fmt.Errorf("external orphan connections count must be less than or equal to orphan leaves") //nolint:goerr113
 	}
 
 	// warn about https://github.com/githedgehog/internal/issues/145 if there are multiple external connections
-	if b.ExtMCLAGConnCount+b.ExtESLAGConnCount+b.ExtOrphanConnCount > 1 {
+	if b.ExtESLAGConnCount+b.ExtOrphanConnCount > 1 {
 		logMsg := "Multiple external connections are not supported if using virtual switches"
 		logArgs := []any{
-			"extMCLAGConnCount", b.ExtMCLAGConnCount,
 			"extESLAGConnCount", b.ExtESLAGConnCount,
 			"extOrphanConnCount", b.ExtOrphanConnCount,
 		}
@@ -252,11 +220,10 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 			slog.Info(">>>", "gateways", len(gws), "gatewayUplinks", b.GatewayUplinks, "gatewayDriver", b.GatewayDriver)
 		}
 	}
-	slog.Info(">>>", "mclagLeafsCount", b.MCLAGLeafsCount, "mclagSessionLinks", b.MCLAGSessionLinks, "mclagPeerLinks", b.MCLAGPeerLinks)
 	slog.Info(">>>", "orphanLeafsCount", b.OrphanLeafsCount)
-	slog.Info(">>>", "mclagServers", b.MCLAGServers, "eslagServers", b.ESLAGServers, "unbundledServers", b.UnbundledServers, "bundledServers", b.BundledServers, "multihomedServers", b.MultiHomedServers)
+	slog.Info(">>>", "eslagServers", b.ESLAGServers, "unbundledServers", b.UnbundledServers, "bundledServers", b.BundledServers, "multihomedServers", b.MultiHomedServers)
 	slog.Info(">>>", "externalBGPCount", b.ExtBGPCount, "externalStaticCount", b.ExtStaticCount, "externalStaticProxyCount", b.ExtStaticProxyCount)
-	slog.Info(">>>", "externalMclagConnCount", b.ExtMCLAGConnCount, "externalEslagConnCount", b.ExtESLAGConnCount, "externalOrphanConnCount", b.ExtOrphanConnCount)
+	slog.Info(">>>", "externalEslagConnCount", b.ExtESLAGConnCount, "externalOrphanConnCount", b.ExtOrphanConnCount)
 
 	if err := b.data.Add(ctx, &wiringapi.VLANNamespace{
 		TypeMeta: kmetav1.TypeMeta{
@@ -342,168 +309,8 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 	leafID := uint8(1)   // leaf ID counter
 	serverID := uint8(1) // server ID counter
 	externalConns := []wiringapi.Connection{}
-	extMCLAGConns := uint8(0)
 	extESLAGConns := uint8(0)
 	extOrphanConns := uint8(0)
-
-	for mclagID := uint8(1); mclagID <= b.MCLAGLeafsCount/2; mclagID++ {
-		leaf1Name := fmt.Sprintf("leaf-%02d", leafID)
-		leaf2Name := fmt.Sprintf("leaf-%02d", leafID+1)
-
-		sg := fmt.Sprintf("mclag-%d", mclagID)
-		if _, err := b.createSwitchGroup(ctx, sg); err != nil {
-			return err
-		}
-
-		if _, err := b.createSwitch(ctx, leaf1Name, wiringapi.SwitchSpec{
-			Role:        wiringapi.SwitchRoleServerLeaf,
-			Description: fmt.Sprintf("VS-%02d MCLAG %d", switchID, mclagID),
-			Groups:      []string{sg},
-			Redundancy: wiringapi.SwitchRedundancy{
-				Group: sg,
-				Type:  meta.RedundancyTypeMCLAG,
-			},
-		}); err != nil {
-			return err
-		}
-		if _, err := b.createSwitch(ctx, leaf2Name, wiringapi.SwitchSpec{
-			Role:        wiringapi.SwitchRoleServerLeaf,
-			Description: fmt.Sprintf("VS-%02d MCLAG %d", switchID+1, mclagID),
-			Groups:      []string{sg},
-			Redundancy: wiringapi.SwitchRedundancy{
-				Group: sg,
-				Type:  meta.RedundancyTypeMCLAG,
-			},
-		}); err != nil {
-			return err
-		}
-
-		switchID += 2
-		leafID += 2
-
-		sessionLinks := []wiringapi.SwitchToSwitchLink{}
-		for i := uint8(0); i < b.MCLAGSessionLinks; i++ {
-			sessionLinks = append(sessionLinks, wiringapi.SwitchToSwitchLink{
-				Switch1: wiringapi.BasePortName{Port: b.nextSwitchPort(leaf1Name)},
-				Switch2: wiringapi.BasePortName{Port: b.nextSwitchPort(leaf2Name)},
-			})
-		}
-
-		peerLinks := []wiringapi.SwitchToSwitchLink{}
-		for i := uint8(0); i < b.MCLAGPeerLinks; i++ {
-			peerLinks = append(peerLinks, wiringapi.SwitchToSwitchLink{
-				Switch1: wiringapi.BasePortName{Port: b.nextSwitchPort(leaf1Name)},
-				Switch2: wiringapi.BasePortName{Port: b.nextSwitchPort(leaf2Name)},
-			})
-		}
-
-		if _, err := b.createConnection(ctx, wiringapi.ConnectionSpec{
-			MCLAGDomain: &wiringapi.ConnMCLAGDomain{
-				SessionLinks: sessionLinks,
-				PeerLinks:    peerLinks,
-			},
-		}); err != nil {
-			return err
-		}
-		if b.ExtMCLAGConnCount > 0 {
-			var err error
-			if extMCLAGConns < b.ExtMCLAGConnCount {
-				externalConns, err = b.addExternalConnection(ctx, externalConns, leaf1Name)
-				if err != nil {
-					return err
-				}
-				extMCLAGConns++
-			}
-			if extMCLAGConns < b.ExtMCLAGConnCount {
-				externalConns, err = b.addExternalConnection(ctx, externalConns, leaf2Name)
-				if err != nil {
-					return err
-				}
-				extMCLAGConns++
-			}
-		}
-
-		for i := 0; i < int(b.MCLAGServers); i++ {
-			serverName := fmt.Sprintf("server-%02d", serverID)
-
-			if _, err := b.createServer(ctx, serverName, wiringapi.ServerSpec{
-				Description: fmt.Sprintf("S-%02d MCLAG %s %s", serverID, leaf1Name, leaf2Name),
-			}); err != nil {
-				return err
-			}
-
-			if _, err := b.createConnection(ctx, wiringapi.ConnectionSpec{
-				MCLAG: &wiringapi.ConnMCLAG{
-					Links: []wiringapi.ServerToSwitchLink{
-						{
-							Server: wiringapi.BasePortName{Port: b.nextServerPort(serverName)},
-							Switch: wiringapi.BasePortName{Port: b.nextSwitchPort(leaf1Name)},
-						},
-						{
-							Server: wiringapi.BasePortName{Port: b.nextServerPort(serverName)},
-							Switch: wiringapi.BasePortName{Port: b.nextSwitchPort(leaf2Name)},
-						},
-					},
-				},
-			}); err != nil {
-				return err
-			}
-
-			serverID++
-		}
-
-		for i := 0; i < int(b.UnbundledServers); i++ {
-			serverName := fmt.Sprintf("server-%02d", serverID)
-
-			if _, err := b.createServer(ctx, serverName, wiringapi.ServerSpec{
-				Description: fmt.Sprintf("S-%02d Unbundled %s", serverID, leaf1Name),
-			}); err != nil {
-				return err
-			}
-
-			if _, err := b.createConnection(ctx, wiringapi.ConnectionSpec{
-				Unbundled: &wiringapi.ConnUnbundled{
-					Link: wiringapi.ServerToSwitchLink{
-						Server: wiringapi.BasePortName{Port: b.nextServerPort(serverName)},
-						Switch: wiringapi.BasePortName{Port: b.nextSwitchPort(leaf1Name)},
-					},
-				},
-			}); err != nil {
-				return err
-			}
-
-			serverID++
-		}
-
-		for i := 0; i < int(b.BundledServers); i++ {
-			serverName := fmt.Sprintf("server-%02d", serverID)
-
-			if _, err := b.createServer(ctx, serverName, wiringapi.ServerSpec{
-				Description: fmt.Sprintf("S-%02d Bundled %s", serverID, leaf2Name),
-			}); err != nil {
-				return err
-			}
-
-			if _, err := b.createConnection(ctx, wiringapi.ConnectionSpec{
-				Bundled: &wiringapi.ConnBundled{
-					Links: []wiringapi.ServerToSwitchLink{
-						{
-							Server: wiringapi.BasePortName{Port: b.nextServerPort(serverName)},
-							Switch: wiringapi.BasePortName{Port: b.nextSwitchPort(leaf2Name)},
-						},
-						{
-							Server: wiringapi.BasePortName{Port: b.nextServerPort(serverName)},
-							Switch: wiringapi.BasePortName{Port: b.nextSwitchPort(leaf2Name)},
-						},
-					},
-				},
-			}); err != nil {
-				return err
-			}
-
-			serverID++
-		}
-	}
 
 	for eslagID := uint8(0); eslagID < uint8(len(eslagLeafGroups)); eslagID++ { //nolint:gosec
 		sg := fmt.Sprintf("eslag-%d", eslagID+1)
@@ -752,7 +559,7 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 
 		switchID++
 
-		for leafID := uint8(1); leafID <= b.MCLAGLeafsCount+b.OrphanLeafsCount+totalESLAGLeafs; leafID++ {
+		for leafID := uint8(1); leafID <= b.OrphanLeafsCount+totalESLAGLeafs; leafID++ {
 			leafName := fmt.Sprintf("leaf-%02d", leafID)
 
 			links := []wiringapi.FabricLink{}
@@ -806,10 +613,10 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 	}
 
 	if b.MeshLinksCount > 0 {
-		for leaf1ID := uint8(1); leaf1ID <= b.MCLAGLeafsCount+b.OrphanLeafsCount+totalESLAGLeafs; leaf1ID++ {
+		for leaf1ID := uint8(1); leaf1ID <= b.OrphanLeafsCount+totalESLAGLeafs; leaf1ID++ {
 			leaf1Name := fmt.Sprintf("leaf-%02d", leaf1ID)
 
-			for leaf2ID := leaf1ID + 1; leaf2ID <= b.MCLAGLeafsCount+b.OrphanLeafsCount+totalESLAGLeafs; leaf2ID++ {
+			for leaf2ID := leaf1ID + 1; leaf2ID <= b.OrphanLeafsCount+totalESLAGLeafs; leaf2ID++ {
 				leaf2Name := fmt.Sprintf("leaf-%02d", leaf2ID)
 
 				links := []wiringapi.MeshLink{}
@@ -836,7 +643,7 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 
 	if b.MeshLinksCount > 0 && isGw {
 		connectedLeafs := uint8(0)
-		for leafID := uint8(1); leafID <= b.MCLAGLeafsCount+b.OrphanLeafsCount+totalESLAGLeafs && connectedLeafs < b.GatewayUplinks; leafID++ {
+		for leafID := uint8(1); leafID <= b.OrphanLeafsCount+totalESLAGLeafs && connectedLeafs < b.GatewayUplinks; leafID++ {
 			for _, gw := range gws {
 				leafName := fmt.Sprintf("leaf-%02d", leafID)
 				switchPort := b.nextSwitchPort(leafName)
