@@ -598,6 +598,10 @@ const (
 	NATModeStatic NATMode = iota
 	// NATModeMasquerade uses masquerade (many:1) NAT with connection tracking
 	NATModeMasquerade
+	// NATModePortForward uses port-forwarding NAT
+	NATModePortForward
+	// NATModeMasqueradePortForward uses combined masquerade and port-forwarding NAT (two separate expose entries)
+	NATModeMasqueradePortForward
 )
 
 // GwPeeringOptions contains optional parameters for gateway peering configuration
@@ -614,21 +618,34 @@ type GwPeeringOptions struct {
 	VPC1NATMode NATMode
 	// VPC2NATMode specifies the NAT mode for VPC2 (default: static)
 	VPC2NATMode NATMode
+	// VPC1PortForwardRules specifies port-forwarding rules for VPC1
+	VPC1PortForwardRules []gwapi.PeeringNATPortForwardEntry
+	// VPC2PortForwardRules specifies port-forwarding rules for VPC2
+	VPC2PortForwardRules []gwapi.PeeringNATPortForwardEntry
 }
 
-// buildNATConfig creates a NAT configuration based on the specified mode
-func buildNATConfig(mode NATMode) *gwapi.PeeringNAT {
-	if mode == NATModeMasquerade {
-		return &gwapi.PeeringNAT{
-			Masquerade: &gwapi.PeeringNATMasquerade{
-				IdleTimeout: kmetav1.Duration{Duration: 5 * time.Minute},
-			},
+// buildNATConfig creates a NAT configuration based on the specified mode and optional port-forward rules
+func buildNATConfig(mode NATMode, portForwardRules []gwapi.PeeringNATPortForwardEntry) *gwapi.PeeringNAT {
+	nat := &gwapi.PeeringNAT{}
+
+	switch mode {
+	case NATModeStatic:
+		nat.Static = &gwapi.PeeringNATStatic{}
+	case NATModeMasquerade:
+		nat.Masquerade = &gwapi.PeeringNATMasquerade{
+			IdleTimeout: kmetav1.Duration{Duration: 5 * time.Minute},
 		}
+	case NATModePortForward:
+		nat.PortForward = &gwapi.PeeringNATPortForward{
+			IdleTimeout: kmetav1.Duration{Duration: 5 * time.Minute},
+			Ports:       portForwardRules,
+		}
+	case NATModeMasqueradePortForward:
+		// This mode is handled specially in appendGwPeeringSpec by creating two separate expose entries
+		panic("NATModeMasqueradePortForward should not be passed to buildNATConfig directly")
 	}
 
-	return &gwapi.PeeringNAT{
-		Static: &gwapi.PeeringNATStatic{},
-	}
+	return nat
 }
 
 // appendGwPeeringSpec adds a single gateway peering spec to an existing map, which will be the input for DoSetupPeerings
@@ -659,37 +676,87 @@ func appendGwPeeringSpec(gwPeerings map[string]*gwapi.PeeringSpec, vpc1, vpc2 *v
 		}
 	}
 
-	vpc1Expose := gwapi.PeeringEntryExpose{}
-	for _, subnet := range vpc1Subnets {
-		vpc1Expose.IPs = append(vpc1Expose.IPs, gwapi.PeeringEntryIP{CIDR: subnet})
-	}
-	// Add NAT ranges and config if provided for VPC1
-	for _, natCIDR := range opts.VPC1NATCIDR {
-		vpc1Expose.As = append(vpc1Expose.As, gwapi.PeeringEntryAs{CIDR: natCIDR})
-	}
-	if len(opts.VPC1NATCIDR) > 0 {
-		vpc1Expose.NAT = buildNATConfig(opts.VPC1NATMode)
+	// Build expose entries for VPC1
+	vpc1Exposes := []gwapi.PeeringEntryExpose{}
+	if opts.VPC1NATMode == NATModeMasqueradePortForward {
+		// Combined mode: create two expose entries - one for masquerade, one for port-forward
+		masqExpose := gwapi.PeeringEntryExpose{}
+		for _, subnet := range vpc1Subnets {
+			masqExpose.IPs = append(masqExpose.IPs, gwapi.PeeringEntryIP{CIDR: subnet})
+		}
+		for _, natCIDR := range opts.VPC1NATCIDR {
+			masqExpose.As = append(masqExpose.As, gwapi.PeeringEntryAs{CIDR: natCIDR})
+		}
+		masqExpose.NAT = buildNATConfig(NATModeMasquerade, nil)
+		vpc1Exposes = append(vpc1Exposes, masqExpose)
+
+		pfExpose := gwapi.PeeringEntryExpose{}
+		for _, subnet := range vpc1Subnets {
+			pfExpose.IPs = append(pfExpose.IPs, gwapi.PeeringEntryIP{CIDR: subnet})
+		}
+		for _, natCIDR := range opts.VPC1NATCIDR {
+			pfExpose.As = append(pfExpose.As, gwapi.PeeringEntryAs{CIDR: natCIDR})
+		}
+		pfExpose.NAT = buildNATConfig(NATModePortForward, opts.VPC1PortForwardRules)
+		vpc1Exposes = append(vpc1Exposes, pfExpose)
+	} else {
+		vpc1Expose := gwapi.PeeringEntryExpose{}
+		for _, subnet := range vpc1Subnets {
+			vpc1Expose.IPs = append(vpc1Expose.IPs, gwapi.PeeringEntryIP{CIDR: subnet})
+		}
+		for _, natCIDR := range opts.VPC1NATCIDR {
+			vpc1Expose.As = append(vpc1Expose.As, gwapi.PeeringEntryAs{CIDR: natCIDR})
+		}
+		if len(opts.VPC1NATCIDR) > 0 || len(opts.VPC1PortForwardRules) > 0 {
+			vpc1Expose.NAT = buildNATConfig(opts.VPC1NATMode, opts.VPC1PortForwardRules)
+		}
+		vpc1Exposes = append(vpc1Exposes, vpc1Expose)
 	}
 
-	vpc2Expose := gwapi.PeeringEntryExpose{}
-	for _, subnet := range vpc2Subnets {
-		vpc2Expose.IPs = append(vpc2Expose.IPs, gwapi.PeeringEntryIP{CIDR: subnet})
-	}
-	// Add NAT ranges and config if provided for VPC2
-	for _, natCIDR := range opts.VPC2NATCIDR {
-		vpc2Expose.As = append(vpc2Expose.As, gwapi.PeeringEntryAs{CIDR: natCIDR})
-	}
-	if len(opts.VPC2NATCIDR) > 0 {
-		vpc2Expose.NAT = buildNATConfig(opts.VPC2NATMode)
+	// Build expose entries for VPC2
+	vpc2Exposes := []gwapi.PeeringEntryExpose{}
+	if opts.VPC2NATMode == NATModeMasqueradePortForward {
+		// Combined mode: create two expose entries - one for masquerade, one for port-forward
+		masqExpose := gwapi.PeeringEntryExpose{}
+		for _, subnet := range vpc2Subnets {
+			masqExpose.IPs = append(masqExpose.IPs, gwapi.PeeringEntryIP{CIDR: subnet})
+		}
+		for _, natCIDR := range opts.VPC2NATCIDR {
+			masqExpose.As = append(masqExpose.As, gwapi.PeeringEntryAs{CIDR: natCIDR})
+		}
+		masqExpose.NAT = buildNATConfig(NATModeMasquerade, nil)
+		vpc2Exposes = append(vpc2Exposes, masqExpose)
+
+		pfExpose := gwapi.PeeringEntryExpose{}
+		for _, subnet := range vpc2Subnets {
+			pfExpose.IPs = append(pfExpose.IPs, gwapi.PeeringEntryIP{CIDR: subnet})
+		}
+		for _, natCIDR := range opts.VPC2NATCIDR {
+			pfExpose.As = append(pfExpose.As, gwapi.PeeringEntryAs{CIDR: natCIDR})
+		}
+		pfExpose.NAT = buildNATConfig(NATModePortForward, opts.VPC2PortForwardRules)
+		vpc2Exposes = append(vpc2Exposes, pfExpose)
+	} else {
+		vpc2Expose := gwapi.PeeringEntryExpose{}
+		for _, subnet := range vpc2Subnets {
+			vpc2Expose.IPs = append(vpc2Expose.IPs, gwapi.PeeringEntryIP{CIDR: subnet})
+		}
+		for _, natCIDR := range opts.VPC2NATCIDR {
+			vpc2Expose.As = append(vpc2Expose.As, gwapi.PeeringEntryAs{CIDR: natCIDR})
+		}
+		if len(opts.VPC2NATCIDR) > 0 || len(opts.VPC2PortForwardRules) > 0 {
+			vpc2Expose.NAT = buildNATConfig(opts.VPC2NATMode, opts.VPC2PortForwardRules)
+		}
+		vpc2Exposes = append(vpc2Exposes, vpc2Expose)
 	}
 
 	gwPeerings[entryName] = &gwapi.PeeringSpec{
 		Peering: map[string]*gwapi.PeeringEntry{
 			vpc1.Name: {
-				Expose: []gwapi.PeeringEntryExpose{vpc1Expose},
+				Expose: vpc1Exposes,
 			},
 			vpc2.Name: {
-				Expose: []gwapi.PeeringEntryExpose{vpc2Expose},
+				Expose: vpc2Exposes,
 			},
 		},
 	}
