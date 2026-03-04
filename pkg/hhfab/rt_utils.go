@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -25,14 +24,13 @@ import (
 var AllZeroPrefix = []string{"0.0.0.0/0"}
 
 // add a single VPC peering spec to an existing map, which will be the input for DoSetupPeerings
-func appendVpcPeeringSpecByName(vpcPeerings map[string]*vpcapi.VPCPeeringSpec, vpc1, vpc2, remote string, vpc1Subnets, vpc2Subnets []string) {
+func appendVpcPeeringSpecByName(vpcPeerings map[string]*vpcapi.VPCPeeringSpec, vpc1, vpc2 string, vpc1Subnets, vpc2Subnets []string) {
 	entryName := fmt.Sprintf("%s--%s", vpc1, vpc2)
 	vpc1SP := vpcapi.VPCPeer{}
 	vpc1SP.Subnets = vpc1Subnets
 	vpc2SP := vpcapi.VPCPeer{}
 	vpc2SP.Subnets = vpc2Subnets
 	vpcPeerings[entryName] = &vpcapi.VPCPeeringSpec{
-		Remote: remote,
 		Permit: []map[string]vpcapi.VPCPeer{
 			{
 				vpc1: vpc1SP,
@@ -42,10 +40,10 @@ func appendVpcPeeringSpecByName(vpcPeerings map[string]*vpcapi.VPCPeeringSpec, v
 	}
 }
 
-func appendVpcPeeringSpec(vpcPeerings map[string]*vpcapi.VPCPeeringSpec, index1, index2 int, remote string, vpc1Subnets, vpc2Subnets []string) {
+func appendVpcPeeringSpec(vpcPeerings map[string]*vpcapi.VPCPeeringSpec, index1, index2 int, vpc1Subnets, vpc2Subnets []string) {
 	vpc1 := fmt.Sprintf("vpc-%02d", index1)
 	vpc2 := fmt.Sprintf("vpc-%02d", index2)
-	appendVpcPeeringSpecByName(vpcPeerings, vpc1, vpc2, remote, vpc1Subnets, vpc2Subnets)
+	appendVpcPeeringSpecByName(vpcPeerings, vpc1, vpc2, vpc1Subnets, vpc2Subnets)
 }
 
 // add a single external peering spec to an existing map, which will be the input for DoSetupPeerings
@@ -84,7 +82,7 @@ func populateFullMeshVpcPeerings(ctx context.Context, kube kclient.Client, vpcPe
 	}
 	for i := 0; i < len(vpcs.Items); i++ {
 		for j := i + 1; j < len(vpcs.Items); j++ {
-			appendVpcPeeringSpec(vpcPeerings, i+1, j+1, "", []string{}, []string{})
+			appendVpcPeeringSpec(vpcPeerings, i+1, j+1, []string{}, []string{})
 		}
 	}
 
@@ -99,7 +97,7 @@ func populateFullLoopVpcPeerings(ctx context.Context, kube kclient.Client, vpcPe
 		return fmt.Errorf("listing VPCs: %w", err)
 	}
 	for i := 0; i < len(vpcs.Items); i++ {
-		appendVpcPeeringSpec(vpcPeerings, i+1, (i+1)%len(vpcs.Items)+1, "", []string{}, []string{})
+		appendVpcPeeringSpec(vpcPeerings, i+1, (i+1)%len(vpcs.Items)+1, []string{}, []string{})
 	}
 
 	return nil
@@ -206,49 +204,6 @@ func changeSwitchPortStatus(ctx context.Context, ssh *sshutil.Config, deviceName
 	} else {
 		if err := execConfigCmd(ctx, ssh, deviceName, fmt.Sprintf("interface %s", nosPortName), "shutdown"); err != nil {
 			return err
-		}
-	}
-
-	return nil
-}
-
-// check if remote peering between two VPCs (as defined by their indexes) is legal, return an error otherwise
-func checkRemotePeering(ctx context.Context, kube kclient.Reader, remote string, firstVPCIndex, secondVPCIndex int) error {
-	vpc1Name := fmt.Sprintf("vpc-%02d", firstVPCIndex)
-	vpc1 := &vpcapi.VPC{}
-	vpc2Name := fmt.Sprintf("vpc-%02d", secondVPCIndex)
-	vpc2 := &vpcapi.VPC{}
-	swGroup := &wiringapi.SwitchGroup{}
-	if err := kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: remote}, swGroup); err != nil {
-		return fmt.Errorf("remote switch group %s not found: %w", remote, err)
-	}
-	if err := kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: vpc1Name}, vpc1); err != nil {
-		return fmt.Errorf("error getting first VPC: %w", err)
-	}
-	if err := kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: vpc2Name}, vpc2); err != nil {
-		return fmt.Errorf("error getting second VPC: %w", err)
-	}
-	for _, vpc := range []string{vpc1Name, vpc2Name} {
-		vpcAttachList := &vpcapi.VPCAttachmentList{}
-		if err := kube.List(ctx, vpcAttachList, kclient.MatchingLabels{wiringapi.LabelVPC: vpc}); err != nil {
-			return fmt.Errorf("error listing VPCAttachments for VPC %s: %w", vpc, err)
-		}
-		for _, vpcAttach := range vpcAttachList.Items {
-			conn := &wiringapi.Connection{}
-			connName := vpcAttach.Spec.Connection
-			if err := kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: connName}, conn); err != nil {
-				return fmt.Errorf("error getting connection %s for VPC Attach %s: %w", connName, vpcAttach.Name, err)
-			}
-			switches, _, _, _, _ := conn.Spec.Endpoints()
-			for _, swName := range switches {
-				sw := &wiringapi.Switch{}
-				if err := kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: swName}, sw); err != nil {
-					return fmt.Errorf("error getting switch %s for VPC Attach %s: %w", swName, vpcAttach.Name, err)
-				}
-				if slices.Contains(sw.Spec.Groups, remote) {
-					return fmt.Errorf("VPC %s is attached to switch %s which is in remote group %s", vpc, swName, remote) //nolint:goerr113
-				}
-			}
 		}
 	}
 
