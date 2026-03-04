@@ -104,7 +104,7 @@ func (testCtx *VPCPeeringTestCtx) multiSubnetsIsolationTest(ctx context.Context)
 
 	// peer the VPCs
 	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec, 1)
-	appendVpcPeeringSpecByName(vpcPeerings, vpc1.Name, vpc2.Name, "", []string{}, []string{})
+	appendVpcPeeringSpecByName(vpcPeerings, vpc1.Name, vpc2.Name, []string{}, []string{})
 	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, nil, nil, false); err != nil {
 		return false, nil, fmt.Errorf("setting up VPC peerings: %w", err)
 	}
@@ -246,7 +246,7 @@ func (testCtx *VPCPeeringTestCtx) multiSubnetsSubnetFilteringTest(ctx context.Co
 		break
 	}
 	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec, 1)
-	appendVpcPeeringSpecByName(vpcPeerings, vpc1.Name, vpc2.Name, "", []string{sub1}, []string{sub2})
+	appendVpcPeeringSpecByName(vpcPeerings, vpc1.Name, vpc2.Name, []string{sub1}, []string{sub2})
 
 	externalPeerings := make(map[string]*vpcapi.ExternalPeeringSpec, 0)
 	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, nil, true); err != nil {

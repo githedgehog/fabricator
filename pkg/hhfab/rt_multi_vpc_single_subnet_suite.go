@@ -113,7 +113,7 @@ func makeMultiVPCSingleSubnetSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 // the gNMI bug. Note that in order to reproduce it one should disable the forced cleanup between
 // tests.
 func (testCtx *VPCPeeringTestCtx) vpcPeeringsStarterTest(ctx context.Context) (bool, []RevertFunc, error) {
-	// 1+2:r=border 1+3 3+5 2+4 4+6 5+6 6+7 7+8 8+9  5~default--5835:s=subnet-01 6~default--5835:s=subnet-01  1~default--5835:s=subnet-01  2~default--5835:s=subnet-01  9~default--5835:s=subnet-01  7~default--5835:s=subnet-01
+	// 1+2 1+3 3+5 2+4 4+6 5+6 6+7 7+8 8+9  5~default--5835:s=subnet-01 6~default--5835:s=subnet-01  1~default--5835:s=subnet-01  2~default--5835:s=subnet-01  9~default--5835:s=subnet-01  7~default--5835:s=subnet-01
 	vpcs := &vpcapi.VPCList{}
 	if err := testCtx.kube.List(ctx, vpcs); err != nil {
 		return false, nil, fmt.Errorf("listing VPCs: %w", err)
@@ -122,22 +122,16 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsStarterTest(ctx context.Context) (b
 		return true, nil, errNotEnoughVPCs
 	}
 
-	// check whether border switchgroup exists
-	remote := "border"
-	if err := checkRemotePeering(ctx, testCtx.kube, remote, 1, 2); err != nil {
-		slog.Warn("Remote peering not viable, skipping it", "error", err)
-		remote = ""
-	}
 	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec, 9)
-	appendVpcPeeringSpec(vpcPeerings, 1, 2, remote, []string{}, []string{})
-	appendVpcPeeringSpec(vpcPeerings, 1, 3, "", []string{}, []string{})
-	appendVpcPeeringSpec(vpcPeerings, 3, 5, "", []string{}, []string{})
-	appendVpcPeeringSpec(vpcPeerings, 2, 4, "", []string{}, []string{})
-	appendVpcPeeringSpec(vpcPeerings, 4, 6, "", []string{}, []string{})
-	appendVpcPeeringSpec(vpcPeerings, 5, 6, "", []string{}, []string{})
-	appendVpcPeeringSpec(vpcPeerings, 6, 7, "", []string{}, []string{})
-	appendVpcPeeringSpec(vpcPeerings, 7, 8, "", []string{}, []string{})
-	appendVpcPeeringSpec(vpcPeerings, 8, 9, "", []string{}, []string{})
+	appendVpcPeeringSpec(vpcPeerings, 1, 2, []string{}, []string{})
+	appendVpcPeeringSpec(vpcPeerings, 1, 3, []string{}, []string{})
+	appendVpcPeeringSpec(vpcPeerings, 3, 5, []string{}, []string{})
+	appendVpcPeeringSpec(vpcPeerings, 2, 4, []string{}, []string{})
+	appendVpcPeeringSpec(vpcPeerings, 4, 6, []string{}, []string{})
+	appendVpcPeeringSpec(vpcPeerings, 5, 6, []string{}, []string{})
+	appendVpcPeeringSpec(vpcPeerings, 6, 7, []string{}, []string{})
+	appendVpcPeeringSpec(vpcPeerings, 7, 8, []string{}, []string{})
+	appendVpcPeeringSpec(vpcPeerings, 8, 9, []string{}, []string{})
 
 	externalPeerings := make(map[string]*vpcapi.ExternalPeeringSpec, 6)
 	appendExtPeeringSpec(externalPeerings, 5, testCtx.extName, []string{"subnet-01"}, AllZeroPrefix)
@@ -242,7 +236,7 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsFullLoopAllExternalsTest(ctx contex
 
 // Arbitrary configuration which again was shown to occasionally trigger the gNMI bug.
 func (testCtx *VPCPeeringTestCtx) vpcPeeringsSergeisSpecialTest(ctx context.Context) (bool, []RevertFunc, error) {
-	// 1+2 2+3 2+4:r=border 6+5 1~default--5835:s=subnet-01
+	// 1+2 2+3 2+4 6+5 1~default--5835:s=subnet-01
 	vpcs := &vpcapi.VPCList{}
 	if err := testCtx.kube.List(ctx, vpcs); err != nil {
 		return false, nil, fmt.Errorf("listing VPCs: %w", err)
@@ -251,18 +245,11 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsSergeisSpecialTest(ctx context.Cont
 		return true, nil, errNotEnoughVPCs
 	}
 
-	// check whether border switchgroup exists
-	remote := "border"
-	if err := checkRemotePeering(ctx, testCtx.kube, remote, 2, 3); err != nil {
-		slog.Warn("Remote peering not viable, skipping it", "error", err)
-		remote = ""
-	}
-
 	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec, 4)
-	appendVpcPeeringSpec(vpcPeerings, 1, 2, "", []string{}, []string{})
-	appendVpcPeeringSpec(vpcPeerings, 2, 3, remote, []string{}, []string{})
-	appendVpcPeeringSpec(vpcPeerings, 2, 4, "", []string{}, []string{})
-	appendVpcPeeringSpec(vpcPeerings, 6, 5, "", []string{}, []string{})
+	appendVpcPeeringSpec(vpcPeerings, 1, 2, []string{}, []string{})
+	appendVpcPeeringSpec(vpcPeerings, 2, 3, []string{}, []string{})
+	appendVpcPeeringSpec(vpcPeerings, 2, 4, []string{}, []string{})
+	appendVpcPeeringSpec(vpcPeerings, 6, 5, []string{}, []string{})
 	externalPeerings := make(map[string]*vpcapi.ExternalPeeringSpec, 6)
 	appendExtPeeringSpec(externalPeerings, 1, testCtx.extName, []string{"subnet-01"}, AllZeroPrefix)
 	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, nil, true); err != nil {
@@ -375,7 +362,7 @@ func (testCtx *VPCPeeringTestCtx) gatewayMixedPeeringLoopTest(ctx context.Contex
 
 		if i%2 == 0 {
 			// Even-indexed connections use VPC peering
-			appendVpcPeeringSpecByName(vpcPeerings, vpc1.Name, vpc2.Name, "", []string{}, []string{})
+			appendVpcPeeringSpecByName(vpcPeerings, vpc1.Name, vpc2.Name, []string{}, []string{})
 		} else {
 			// Odd-indexed connections use Gateway peering
 			// Use all subnets from both VPCs by passing empty subnet lists
@@ -434,7 +421,7 @@ func (testCtx *VPCPeeringTestCtx) mixedGatewayAndFabricExternals(ctx context.Con
 
 	// now peer some VPCs to make sure we are not blocking traffic via the filters
 	slog.Debug("Creating VPC peering between some VPCs to verify connectivity is not affected by mixed external peerings")
-	appendVpcPeeringSpecByName(vpcPeerings, vpcs.Items[0].Name, vpcs.Items[1].Name, "", []string{}, []string{})
+	appendVpcPeeringSpecByName(vpcPeerings, vpcs.Items[0].Name, vpcs.Items[1].Name, []string{}, []string{})
 	appendGwPeeringSpec(gwPeerings, &vpcs.Items[2], &vpcs.Items[3], nil, nil)
 	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, gwPeerings, true); err != nil {
 		return false, nil, fmt.Errorf("setting up mixed peering loop: %w", err)
