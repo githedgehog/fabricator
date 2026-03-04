@@ -6,4 +6,4 @@
 # Update this single file when bumping Trivy version
 # Can be overridden via environment variable: TRIVY_VERSION=x.y.z ./script.sh
 
-export TRIVY_VERSION="${TRIVY_VERSION:-0.69.2}"
+export TRIVY_VERSION="${TRIVY_VERSION:-0.69.3}"
