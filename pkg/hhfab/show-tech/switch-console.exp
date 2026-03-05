@@ -183,6 +183,10 @@ if {$logged_in} {
     run_cmd "ip neigh | grep eth0" $prompt_re $prompt_timeout
     run_cmd "systemctl status sshd --no-pager" $prompt_re $prompt_timeout
     run_cmd "ss -tulnp | grep ':22'" $prompt_re $prompt_timeout
+    run_cmd "systemctl status hedgehog-agent --no-pager" $prompt_re $prompt_timeout
+    run_cmd "tail -n 100 /var/log/agent.log" $prompt_re $prompt_timeout
+    run_cmd "systemctl status hedgehog-alloy --no-pager" $prompt_re $prompt_timeout
+    run_cmd "tail -n 100 /var/log/syslog" $prompt_re $prompt_timeout
 
     if {[info exists env(CONTROL_PLANE_IP)]} {
         run_cmd "ping -c 3 $env(CONTROL_PLANE_IP)" $prompt_re $prompt_timeout
