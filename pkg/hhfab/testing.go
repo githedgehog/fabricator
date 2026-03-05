@@ -2906,6 +2906,7 @@ func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to stri
 			"receiveSpeed", asMbps(report.End.SumReceived.BitsPerSecond),
 			"sent", asMB(float64(report.End.SumSent.Bytes)),
 			"received", asMB(float64(report.End.SumReceived.Bytes)),
+			"minSpeed", asMbps(iPerfsMinSpeed*1_000_000),
 		)
 		ie.SentSpeed = asMbps(report.End.SumSent.BitsPerSecond)
 		ie.RcvdSpeed = asMbps(report.End.SumReceived.BitsPerSecond)

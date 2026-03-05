@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"go.githedgehog.com/fabric/api/meta"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/util/apiutil"
@@ -82,23 +81,6 @@ func (testCtx *VPCPeeringTestCtx) testNATGatewayConnectivity(
 	// Validate NAT pool parameters - we only support a single CIDR per VPC for now
 	if len(vpc1NATPool) > 1 || len(vpc2NATPool) > 1 {
 		return fmt.Errorf("multiple NAT CIDRs per VPC not supported, got vpc1=%d vpc2=%d", len(vpc1NATPool), len(vpc2NATPool)) //nolint:goerr113
-	}
-
-	// Check if all switches are virtual and skip iperf min speed check if so
-	switches := &wiringapi.SwitchList{}
-	if err := testCtx.kube.List(ctx, switches); err != nil {
-		return fmt.Errorf("listing switches: %w", err)
-	}
-	allVS := len(switches.Items) > 0
-	for _, sw := range switches.Items {
-		if sw.Spec.Profile != meta.SwitchProfileVS {
-			allVS = false
-			break
-		}
-	}
-	if allVS {
-		slog.Warn("All switches are virtual, ignoring IPerf min speed for NAT tests")
-		testCtx.tcOpts.IPerfsMinSpeed = 0
 	}
 
 	servers := &wiringapi.ServerList{}
@@ -171,7 +153,7 @@ func (testCtx *VPCPeeringTestCtx) testNATGatewayConnectivity(
 			return fmt.Errorf("getting IP for %s: %w: %s", serverName, err, stderr)
 		}
 
-		found := false
+		var eligibleAddrs []netip.Addr
 		for _, line := range strings.Split(strings.TrimSpace(stdout), "\n") {
 			fields := strings.Fields(line)
 			if len(fields) != 2 {
@@ -186,57 +168,64 @@ func (testCtx *VPCPeeringTestCtx) testNATGatewayConnectivity(
 				continue
 			}
 
-			serverIPs[serverName] = addr.Addr()
-			found = true
-			slog.Debug("Discovered server IP", "server", serverName, "ip", addr.Addr().String())
-
-			break
+			eligibleAddrs = append(eligibleAddrs, addr.Addr())
 		}
 
-		if !found {
+		if len(eligibleAddrs) == 0 {
 			return fmt.Errorf("no IP found for server %s", serverName) //nolint:err113
 		}
+		if len(eligibleAddrs) > 1 {
+			return fmt.Errorf("server %s has multiple IPs %v, NAT test requires single IP", serverName, eligibleAddrs) //nolint:err113
+		}
+		serverIPs[serverName] = eligibleAddrs[0]
+		slog.Debug("Discovered server IP", "server", serverName, "ip", eligibleAddrs[0].String())
 	}
 
-	// Parse NAT pools
+	// Parse NAT pools - use Masked() to get the network address
 	var vpc1NATPoolStart, vpc2NATPoolStart netip.Addr
 	if len(vpc1NATPool) > 0 {
 		prefix, err := netip.ParsePrefix(vpc1NATPool[0])
 		if err != nil {
 			return fmt.Errorf("parsing vpc1 NAT pool: %w", err)
 		}
-		vpc1NATPoolStart = prefix.Addr()
+		vpc1NATPoolStart = prefix.Masked().Addr()
 	}
 	if len(vpc2NATPool) > 0 {
 		prefix, err := netip.ParsePrefix(vpc2NATPool[0])
 		if err != nil {
 			return fmt.Errorf("parsing vpc2 NAT pool: %w", err)
 		}
-		vpc2NATPoolStart = prefix.Addr()
+		vpc2NATPoolStart = prefix.Masked().Addr()
 	}
 
 	// Get VPC subnet starts for offset calculation
-	vpc1SubnetStart := netip.Addr{}
-	for _, subnet := range vpc1.Spec.Subnets {
-		if prefix, err := netip.ParsePrefix(subnet.Subnet); err == nil {
-			vpc1SubnetStart = prefix.Addr()
-
-			break
-		}
+	// NAT test requires exactly one subnet per VPC to avoid ambiguity in offset calculation
+	if len(vpc1.Spec.Subnets) != 1 {
+		return fmt.Errorf("VPC %s has %d subnets, NAT test requires exactly one", vpc1.Name, len(vpc1.Spec.Subnets)) //nolint:err113
 	}
-	vpc2SubnetStart := netip.Addr{}
-	for _, subnet := range vpc2.Spec.Subnets {
-		if prefix, err := netip.ParsePrefix(subnet.Subnet); err == nil {
-			vpc2SubnetStart = prefix.Addr()
-
-			break
+	if len(vpc2.Spec.Subnets) != 1 {
+		return fmt.Errorf("VPC %s has %d subnets, NAT test requires exactly one", vpc2.Name, len(vpc2.Spec.Subnets)) //nolint:err113
+	}
+	var vpc1SubnetStart, vpc2SubnetStart netip.Addr
+	for _, subnet := range vpc1.Spec.Subnets {
+		prefix, err := netip.ParsePrefix(subnet.Subnet)
+		if err != nil {
+			return fmt.Errorf("parsing VPC %s subnet %s: %w", vpc1.Name, subnet.Subnet, err)
 		}
+		vpc1SubnetStart = prefix.Masked().Addr()
+	}
+	for _, subnet := range vpc2.Spec.Subnets {
+		prefix, err := netip.ParsePrefix(subnet.Subnet)
+		if err != nil {
+			return fmt.Errorf("parsing VPC %s subnet %s: %w", vpc2.Name, subnet.Subnet, err)
+		}
+		vpc2SubnetStart = prefix.Masked().Addr()
 	}
 
 	// Helper to calculate destination IP (NAT IP if pool configured, real IP otherwise)
 	getDestIP := func(serverName string, destSubnetStart, natPoolStart netip.Addr) (netip.Addr, error) {
 		realIP := serverIPs[serverName]
-		if natPoolStart.IsValid() && !natPoolStart.IsUnspecified() {
+		if natPoolStart.IsValid() {
 			natIP, err := calculateStaticNATIP(realIP, destSubnetStart, natPoolStart)
 			if err != nil {
 				return netip.Addr{}, fmt.Errorf("calculating NAT IP for %s: %w", serverName, err)
@@ -308,7 +297,7 @@ func (testCtx *VPCPeeringTestCtx) testNATGatewayConnectivity(
 	}
 
 	// Test vpc2 -> vpc1 direction (only if vpc1 has static NAT - masquerade doesn't support being a destination)
-	if len(vpc1NATPool) > 0 && !vpc1NATPoolStart.IsUnspecified() {
+	if vpc1NATPoolStart.IsValid() {
 		if err := testDirection("vpc2->vpc1", vpc2Servers, vpc1Servers, vpc1SubnetStart, vpc1NATPoolStart); err != nil {
 			return err
 		}
