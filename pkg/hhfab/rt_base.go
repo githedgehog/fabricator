@@ -76,7 +76,7 @@ type TestFunc func(context.Context) (bool, []RevertFunc, error)
 
 // Utilities and suite runners
 
-func makeTestCtx(kube kclient.Client, setupOpts SetupVPCsOpts, vlabCfg *Config, vlab *VLAB, wipeBetweenTests bool, rtOpts ReleaseTestOpts) *VPCPeeringTestCtx {
+func makeTestCtx(ctx context.Context, kube kclient.Client, setupOpts SetupVPCsOpts, vlabCfg *Config, vlab *VLAB, wipeBetweenTests bool, rtOpts ReleaseTestOpts) *VPCPeeringTestCtx {
 	testCtx := new(VPCPeeringTestCtx)
 	testCtx.kube = kube
 	testCtx.vlabCfg = vlabCfg
@@ -102,6 +102,25 @@ func makeTestCtx(kube kclient.Client, setupOpts SetupVPCsOpts, vlabCfg *Config, 
 	testCtx.extended = rtOpts.Extended
 	testCtx.failFast = rtOpts.FailFast
 	testCtx.pauseOnFail = rtOpts.PauseOnFailure
+
+	// Detect virtual switches and disable IPerf min speed check if all switches are virtual
+	switches := &wiringapi.SwitchList{}
+	if err := kube.List(ctx, switches); err != nil {
+		slog.Warn("Failed to list switches for virtual switch detection", "error", err)
+	} else {
+		allVS := len(switches.Items) > 0
+		for _, sw := range switches.Items {
+			if sw.Spec.Profile != meta.SwitchProfileVS {
+				allVS = false
+
+				break
+			}
+		}
+		if allVS {
+			slog.Info("All switches are virtual, disabling IPerf min speed check for all tests")
+			testCtx.tcOpts.IPerfsMinSpeed = 0
+		}
+	}
 
 	return testCtx
 }
@@ -599,7 +618,7 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 		VPCMode:           rtOtps.VPCMode,
 	}
 
-	testCtx := makeTestCtx(kube, setupOpts, vlabCfg, vlab, false, rtOtps)
+	testCtx := makeTestCtx(ctx, kube, setupOpts, vlabCfg, vlab, false, rtOtps)
 	noVpcSuite := makeNoVpcsSuite(testCtx)
 	singleVpcSuite := makeSingleVPCSuite(testCtx)
 	multiVPCMultiSubnetSuite := makeMultiVPCMultiSubnetSuite(testCtx)
