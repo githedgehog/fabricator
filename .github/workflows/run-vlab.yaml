@@ -239,7 +239,24 @@ jobs:
             --include-onie=${{ inputs.includeonie }} \
             --gateways=${{ inputs.gateway && 2 || 0 }} \
             ${{ inputs.custom_init_args }}
-          bin/hhfab vlab gen -v ${{ inputs.mesh && '--mesh-links-count=3 --unbundled-servers=2' || '' }} \
+          VLAB_MCLAG_LEAVES=2
+          VLAB_ESLAG_GROUPS=2
+          VLAB_ORPHAN_LEAVES=1
+          VLAB_MESH_LINKS=0
+          VLAB_UNBUNDLED_SERVERS=1
+          if [[ ${{ inputs.vpcmode }} == "l3vni" ]]; then
+            VLAB_MCLAG_LEAVES=0
+            VLAB_ESLAG_GROUPS=""
+            VLAB_ORPHAN_LEAVES=3
+            VLAB_UNBUNDLED_SERVERS=2
+          fi
+          if [[ ${{ inputs.mesh }} == "true" ]]; then
+            VLAB_MESH_LINKS=3
+            VLAB_MCLAG_LEAVES=0
+            VLAB_ORPHAN_LEAVES=3
+          fi
+          bin/hhfab vlab gen -v --mesh-links-count=$VLAB_MESH_LINKS --mclag-leafs-count=$VLAB_MCLAG_LEAVES \
+            --eslag-leaf-groups=$VLAB_ESLAG_GROUPS --orphan-leafs-count=$VLAB_ORPHAN_LEAVES --unbundled-servers=$VLAB_UNBUNDLED_SERVERS \
             --externals-bgp=1 --externals-static=1 --externals-static-proxy=1 --external-orphan-connections=1
 
       - name: Init hhfab for hybrid mode
