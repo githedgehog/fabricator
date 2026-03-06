@@ -57,6 +57,10 @@ type VLABBuilder struct {
 	ExtOrphanConnCount  uint8  // number of external connections to generate from orphan leaves
 	YesFlag             bool
 
+	// Helpers to build topologies based on non-default or mixed profiles
+	DefaultSwitchProfile   string            // default switch profile to use for switches
+	SwitchProfileOverrides map[string]string // switch profile overrides to use for switches
+
 	data         *apiutil.Loader
 	ifaceTracker map[string]uint8 // next available interface ID for each switch
 	switchID     uint             // switch ID counter
@@ -108,6 +112,15 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 		}
 		if b.MCLAGPeerLinks == 0 {
 			b.MCLAGPeerLinks = 2
+		}
+	}
+
+	if !slices.Contains(meta.VirtualSwitchProfiles, b.DefaultSwitchProfile) {
+		return fmt.Errorf("unsupported default switch profile %s", b.DefaultSwitchProfile) //nolint:goerr113
+	}
+	for _, profile := range b.SwitchProfileOverrides {
+		if !slices.Contains(meta.VirtualSwitchProfiles, profile) {
+			return fmt.Errorf("unsupported switch profile override %s", profile) //nolint:goerr113
 		}
 	}
 
@@ -245,6 +258,14 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 	}
 
 	slog.Info("Building VLAB wiring diagram", "fabricMode", fabricMode)
+	slog.Info(">>>", "profile", b.DefaultSwitchProfile)
+	if len(b.SwitchProfileOverrides) > 0 {
+		overrides := []any{}
+		for k, v := range b.SwitchProfileOverrides {
+			overrides = append(overrides, k, v)
+		}
+		slog.Info(">>>", overrides...)
+	}
 	if fabricMode == meta.FabricModeSpineLeaf {
 		slog.Info(">>>", "spinesCount", b.SpinesCount, "fabricLinksCount", b.FabricLinksCount, "meshLinksCount", b.MeshLinksCount)
 		slog.Info(">>>", "eslagLeafGroups", b.ESLAGLeafGroups)
@@ -1021,7 +1042,11 @@ func (b *VLABBuilder) createSwitchGroup(ctx context.Context, name string) (*wiri
 }
 
 func (b *VLABBuilder) createSwitch(ctx context.Context, name string, spec wiringapi.SwitchSpec) (*wiringapi.Switch, error) { //nolint:unparam
-	spec.Profile = meta.SwitchProfileVS
+	spec.Profile = b.DefaultSwitchProfile
+	if override, ok := b.SwitchProfileOverrides[name]; ok {
+		spec.Profile = override
+	}
+
 	spec.Boot.MAC = fmt.Sprintf(VLABSwitchMACTmpl, b.switchID)
 	b.switchID++
 

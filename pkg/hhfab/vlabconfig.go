@@ -74,6 +74,7 @@ type VM struct {
 	ID         uint
 	Name       string
 	Type       VMType
+	SwitchMode VMSwitchMode
 	Restricted bool
 	NICs       []string
 	Size       VMSize
@@ -135,8 +136,9 @@ type VMSizes struct {
 }
 
 type VMConfig struct {
-	Type VMType            `json:"type"`
-	NICs map[string]string `json:"nics"`
+	Type       VMType            `json:"type"`
+	SwitchMode VMSwitchMode      `json:"switchMode,omitempty"`
+	NICs       map[string]string `json:"nics"`
 }
 
 type VMType string
@@ -155,6 +157,18 @@ var VMTypes = []VMType{
 	VMTypeServer,
 	VMTypeGateway,
 	VMTypeExternal,
+}
+
+type VMSwitchMode string
+
+const (
+	VMSwitchModeONIE  VMSwitchMode = ""
+	VMSwitchModeImage VMSwitchMode = "image"
+)
+
+var VMSwitchModes = []VMSwitchMode{
+	VMSwitchModeONIE,
+	VMSwitchModeImage,
 }
 
 const (
@@ -276,6 +290,16 @@ func (c *Config) PrepareVLAB(ctx context.Context, opts VLABUpOpts) (*VLAB, error
 	for name, vm := range vlabCfg.VMs {
 		if !slices.Contains(VMTypes, vm.Type) {
 			return nil, fmt.Errorf("invalid VM type %q for VM %q", vm.Type, name) //nolint:goerr113
+		}
+
+		if vm.Type != VMTypeSwitch {
+			if vm.SwitchMode != "" {
+				return nil, fmt.Errorf("non-switch VM %s should not have switch mode", name) //nolint:goerr113
+			}
+		} else {
+			if !slices.Contains(VMSwitchModes, vm.SwitchMode) {
+				return nil, fmt.Errorf("invalid switch mode %q for switch VM %q", vm.SwitchMode, name) //nolint:goerr113
+			}
 		}
 
 		for nicName, nicConfig := range vm.NICs {
@@ -556,7 +580,7 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 			continue
 		}
 
-		if sw.Spec.Profile != fmeta.SwitchProfileVS && sw.Spec.Profile != fmeta.SwitchProfileVSCLSP {
+		if sw.Spec.Profile != fmeta.SwitchProfileVS && sw.Spec.Profile != fmeta.SwitchProfileVSCLSP && sw.Spec.Profile != fmeta.SwitchProfileCmlsVX {
 			return nil, fmt.Errorf("switch %q has unsupported profile: %q", sw.Name, sw.Spec.Profile) //nolint:goerr113
 		}
 
@@ -569,8 +593,14 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 			mgmt = NICTypePassthrough + NICTypeSep + pci
 		}
 
+		sm := VMSwitchModeONIE
+		if sw.Spec.Profile == fmeta.SwitchProfileCmlsVX {
+			sm = VMSwitchModeImage
+		}
+
 		cfg.VMs[sw.Name] = VMConfig{
-			Type: VMTypeSwitch,
+			Type:       VMTypeSwitch,
+			SwitchMode: sm,
 			NICs: map[string]string{
 				"M1": mgmt,
 			},
@@ -1011,7 +1041,12 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 			}
 
 			if device == "" {
-				device = fmt.Sprintf("e1000,netdev=eth%02d,mac=%s", nicID, mac)
+				nic := "e1000"
+				if vm.Type == VMTypeSwitch {
+					nic = "virtio-net-pci"
+				}
+
+				device = fmt.Sprintf("%s,netdev=eth%02d,mac=%s", nic, nicID, mac)
 			}
 			device += fmt.Sprintf(",bus=%s%d,addr=0x%x", VLABPCIBridgePrefix, nicID/VLABNICsPerPCIBridge, nicID%VLABNICsPerPCIBridge)
 
@@ -1043,11 +1078,12 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 		}
 
 		vms = append(vms, VM{
-			ID:   vmID,
-			Name: name,
-			Type: vm.Type,
-			NICs: paddedNICs,
-			Size: size,
+			ID:         vmID,
+			Name:       name,
+			Type:       vm.Type,
+			SwitchMode: vm.SwitchMode,
+			NICs:       paddedNICs,
+			Size:       size,
 		})
 	}
 

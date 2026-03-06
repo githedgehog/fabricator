@@ -50,7 +50,8 @@ const (
 	FlagNameTLSSAN                = "tls-san"
 	FlagNameDev                   = "dev"
 	FlagIncludeONIE               = "include-onie"
-	FlagIncludeCLS                = "include-cls"
+	FlagIncludeCLSP               = "include-clsp"
+	FlagIncludeCumulus            = "include-cumulus"
 	FlagNodeMgmtLinks             = "node-mgmt-links"
 	FlagOOBMgmtIface              = "mgmt-link"
 	FlagGateway                   = "gateway"
@@ -186,6 +187,8 @@ func Run(ctx context.Context) error {
 	var wgGatewayDriver string
 	var wgGatewayWorkers uint
 	var wgBGPExternals, wgStaticExternals, wgStaticExternalsProxy, wgExtMCLAGConns, wgExtESLAGConns, wgExtOrphanConns uint
+	var wgDefaultSwitchProfile string
+	var wgSwitchProfileOverrides *cli.StringSlice
 	vlabWiringGenFlags := []cli.Flag{
 		&cli.UintFlag{
 			Name:        "spines-count",
@@ -308,6 +311,19 @@ func Run(ctx context.Context) error {
 			Name:        "external-orphan-connections",
 			Usage:       "number of external connections from orphan switches. NOTE: only 1 external connection in total is supported if using virtual switches",
 			Destination: &wgExtOrphanConns,
+		},
+		&cli.StringFlag{
+			Name:        "default-switch-profile",
+			Aliases:     []string{"sp"},
+			Usage:       "default switch profile to use for switches",
+			Destination: &wgDefaultSwitchProfile,
+			Value:       meta.SwitchProfileVS,
+		},
+		&cli.StringSliceFlag{
+			Name:        "switch-profile-overrides",
+			Aliases:     []string{"spo"},
+			Usage:       "switch profile overrides to use for switches (name=profile)",
+			Destination: wgSwitchProfileOverrides,
 		},
 	}
 
@@ -585,10 +601,17 @@ func Run(ctx context.Context) error {
 					},
 					&cli.BoolFlag{
 						Category: FlagCatGenConfig,
-						Name:     FlagIncludeCLS,
+						Name:     FlagIncludeCLSP,
 						Hidden:   !preview,
 						Usage:    "[PREVIEW] include Celestica SONiC+ switch profiles",
-						EnvVars:  []string{"HHFAB_INCLUDE_CLS"},
+						EnvVars:  []string{"HHFAB_INCLUDE_CLSP"},
+					},
+					&cli.BoolFlag{
+						Category: FlagCatGenConfig,
+						Name:     FlagIncludeCumulus,
+						Hidden:   !preview,
+						Usage:    "[PREVIEW] include Cumulus switch profiles",
+						EnvVars:  []string{"HHFAB_INCLUDE_CUMULUS"},
 					},
 					&cli.BoolFlag{
 						Category: FlagCatGenConfig,
@@ -675,7 +698,8 @@ func Run(ctx context.Context) error {
 							DefaultAuthorizedKeys: c.StringSlice(FlagNameDefaultAuthorizedKeys),
 							Dev:                   c.Bool(FlagNameDev),
 							IncludeONIE:           c.Bool(FlagIncludeONIE),
-							IncludeCLS:            c.Bool(FlagIncludeCLS),
+							IncludeCLSP:           c.Bool(FlagIncludeCLSP),
+							IncludeCumulus:        c.Bool(FlagIncludeCumulus),
 							NodeManagementLinks:   mgmtLinks,
 							Gateway:               c.Bool(FlagGateway),
 							Gateways:              c.Int(FlagGateways),
@@ -851,31 +875,44 @@ func Run(ctx context.Context) error {
 						Flags:   flatten(defaultFlags, vlabWiringGenFlags, []cli.Flag{yesFlag}),
 						Before:  before(false),
 						Action: func(_ *cli.Context) error {
+							overrides := map[string]string{}
+							if wgSwitchProfileOverrides != nil {
+								for _, override := range wgSwitchProfileOverrides.Value() {
+									parts := strings.SplitN(override, "=", 2)
+									if len(parts) != 2 {
+										return fmt.Errorf("invalid switch profile override: %s", override) //nolint:err113
+									}
+									overrides[parts[0]] = parts[1]
+								}
+							}
+
 							builder := hhfab.VLABBuilder{
-								SpinesCount:         uint8(wgSpinesCount),      //nolint:gosec
-								FabricLinksCount:    uint8(wgFabricLinksCount), //nolint:gosec
-								MeshLinksCount:      uint8(wgMeshLinksCount),   //nolint:gosec
-								MCLAGLeafsCount:     uint8(wgMCLAGLeafsCount),  //nolint:gosec
-								ESLAGLeafGroups:     wgESLAGLeafGroups,
-								OrphanLeafsCount:    uint8(wgOrphanLeafsCount),  //nolint:gosec
-								MCLAGSessionLinks:   uint8(wgMCLAGSessionLinks), //nolint:gosec
-								MCLAGPeerLinks:      uint8(wgMCLAGPeerLinks),    //nolint:gosec
-								MCLAGServers:        uint8(wgMCLAGServers),      //nolint:gosec
-								ESLAGServers:        uint8(wgESLAGServers),      //nolint:gosec
-								UnbundledServers:    uint8(wgUnbundledServers),  //nolint:gosec
-								BundledServers:      uint8(wgBundledServers),    //nolint:gosec
-								MultiHomedServers:   uint8(wgMultiHomedServers), //nolint:gosec
-								NoSwitches:          wgNoSwitches,
-								GatewayUplinks:      uint8(wgGatewayUplinks), //nolint:gosec
-								GatewayDriver:       wgGatewayDriver,
-								GatewayWorkers:      uint8(wgGatewayWorkers),       //nolint:gosec
-								ExtBGPCount:         uint8(wgBGPExternals),         //nolint:gosec
-								ExtStaticCount:      uint8(wgStaticExternals),      //nolint:gosec
-								ExtStaticProxyCount: uint8(wgStaticExternalsProxy), //nolint:gosec
-								ExtMCLAGConnCount:   uint8(wgExtMCLAGConns),        //nolint:gosec
-								ExtESLAGConnCount:   uint8(wgExtESLAGConns),        //nolint:gosec
-								ExtOrphanConnCount:  uint8(wgExtOrphanConns),       //nolint:gosec
-								YesFlag:             yes,
+								SpinesCount:            uint8(wgSpinesCount),      //nolint:gosec
+								FabricLinksCount:       uint8(wgFabricLinksCount), //nolint:gosec
+								MeshLinksCount:         uint8(wgMeshLinksCount),   //nolint:gosec
+								MCLAGLeafsCount:        uint8(wgMCLAGLeafsCount),  //nolint:gosec
+								ESLAGLeafGroups:        wgESLAGLeafGroups,
+								OrphanLeafsCount:       uint8(wgOrphanLeafsCount),  //nolint:gosec
+								MCLAGSessionLinks:      uint8(wgMCLAGSessionLinks), //nolint:gosec
+								MCLAGPeerLinks:         uint8(wgMCLAGPeerLinks),    //nolint:gosec
+								MCLAGServers:           uint8(wgMCLAGServers),      //nolint:gosec
+								ESLAGServers:           uint8(wgESLAGServers),      //nolint:gosec
+								UnbundledServers:       uint8(wgUnbundledServers),  //nolint:gosec
+								BundledServers:         uint8(wgBundledServers),    //nolint:gosec
+								MultiHomedServers:      uint8(wgMultiHomedServers), //nolint:gosec
+								NoSwitches:             wgNoSwitches,
+								GatewayUplinks:         uint8(wgGatewayUplinks), //nolint:gosec
+								GatewayDriver:          wgGatewayDriver,
+								GatewayWorkers:         uint8(wgGatewayWorkers),       //nolint:gosec
+								ExtBGPCount:            uint8(wgBGPExternals),         //nolint:gosec
+								ExtStaticCount:         uint8(wgStaticExternals),      //nolint:gosec
+								ExtStaticProxyCount:    uint8(wgStaticExternalsProxy), //nolint:gosec
+								ExtMCLAGConnCount:      uint8(wgExtMCLAGConns),        //nolint:gosec
+								ExtESLAGConnCount:      uint8(wgExtESLAGConns),        //nolint:gosec
+								ExtOrphanConnCount:     uint8(wgExtOrphanConns),       //nolint:gosec
+								YesFlag:                yes,
+								DefaultSwitchProfile:   wgDefaultSwitchProfile,
+								SwitchProfileOverrides: overrides,
 							}
 
 							if err := hhfab.VLABGenerate(ctx, workDir, cacheDir, builder, hhfab.DefaultVLABGeneratedFile); err != nil {

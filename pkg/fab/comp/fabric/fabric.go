@@ -35,6 +35,7 @@ const (
 	CtlRef                = "fabric/hhfctl"
 	BroadcomSonicRefBase  = "sonic-bcm-private"
 	CelesticaSonicRefBase = "sonic-cls-private"
+	CumulusRefBase        = "cumulus-private"
 	OnieRefBase           = "onie-updater-private"
 
 	BinDir         = "/opt/bin"
@@ -257,7 +258,8 @@ func GetFabricConfig(f fabapi.Fabricator) (*fmeta.FabricConfig, error) {
 		FabricSubnet:             string(f.Spec.Config.Fabric.FabricSubnet),
 		L2ProxyExternalSubnet:    string(f.Spec.Config.Fabric.ProxyExternalSubnet),
 		DisableBFD:               f.Spec.Config.Fabric.DisableBFD,
-		IncludeSONiCCLSPlus:      f.Spec.Config.Fabric.IncludeCLS,
+		IncludeSONiCCLSPlus:      f.Spec.Config.Fabric.IncludeCLSP,
+		IncludeCumulus:           f.Spec.Config.Fabric.IncludeCumulus,
 		SpineASN:                 f.Spec.Config.Fabric.SpineASN,
 		LeafASNStart:             f.Spec.Config.Fabric.LeafASNStart,
 		LeafASNEnd:               f.Spec.Config.Fabric.LeafASNEnd,
@@ -309,6 +311,8 @@ func GetFabricBootConfig(f fabapi.Fabricator) (*boot.ServerConfig, error) {
 		NOSVersions:          nosVersions,
 		ONIERepos:            onieRepos,
 		ONIEPlatformVersions: onieVersions,
+		AgentRef:             comp.JoinURLParts(regURL, comp.RegistryPrefix, AgentRef),
+		AgentVersion:         string(f.Status.Versions.Fabric.Agent),
 	}, nil
 }
 
@@ -357,6 +361,10 @@ func getNOSRefBase(nosType fmeta.NOSType) string {
 		return BroadcomSonicRefBase
 	case fmeta.NOSTypeSONiCCLSPlusBroadcom, fmeta.NOSTypeSONiCCLSPlusMarvell, fmeta.NOSTypeSONiCCLSPlusVS:
 		return CelesticaSonicRefBase
+	case fmeta.NOSTypeCumulusMlx:
+		return CumulusRefBase
+	case fmeta.NOSTypeCumulusVX: // there is no installer for Cumulus VX
+		return "invalid"
 	default:
 		return "invalid"
 	}
@@ -367,7 +375,11 @@ func isIncludeNOS(cfg fabapi.Fabricator, nosType fmeta.NOSType) bool {
 	case fmeta.NOSTypeSONiCBCMBase, fmeta.NOSTypeSONiCBCMCampus, fmeta.NOSTypeSONiCBCMVS:
 		return true
 	case fmeta.NOSTypeSONiCCLSPlusBroadcom, fmeta.NOSTypeSONiCCLSPlusMarvell, fmeta.NOSTypeSONiCCLSPlusVS:
-		return cfg.Spec.Config.Fabric.IncludeCLS
+		return cfg.Spec.Config.Fabric.IncludeCLSP
+	case fmeta.NOSTypeCumulusMlx:
+		return cfg.Spec.Config.Fabric.IncludeCumulus
+	case fmeta.NOSTypeCumulusVX: // there is no installer for Cumulus VX
+		return false
 	default:
 		return false
 	}

@@ -216,7 +216,9 @@ spec:
                         type: string
                       fabricSubnet:
                         type: string
-                      includeCLS:
+                      includeCLSP:
+                        type: boolean
+                      includeCumulus:
                         type: boolean
                       includeONIE:
                         type: boolean

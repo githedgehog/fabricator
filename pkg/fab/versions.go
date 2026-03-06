@@ -21,6 +21,7 @@ var (
 	FRRVersion        = meta.Version("v0.6.0")
 	BCMSONiCVersion   = meta.Version("v4.5.0")
 	CLSSONiCVersion   = meta.Version("v4.2.1")
+	CumulusVersion    = meta.Version("v5.15.1")
 
 	// Upgrade constraints, "-0" to include pre-releases
 	FabricatorCtrlConstraint = ">=0.43.1-0"
@@ -69,6 +70,8 @@ var Versions = fabapi.Versions{
 			fmeta.NOSTypeSONiCCLSPlusVS:       CLSSONiCVersion,
 			fmeta.NOSTypeSONiCCLSPlusBroadcom: CLSSONiCVersion,
 			fmeta.NOSTypeSONiCCLSPlusMarvell:  CLSSONiCVersion,
+			fmeta.NOSTypeCumulusVX:            CumulusVersion,
+			fmeta.NOSTypeCumulusMlx:           CumulusVersion,
 		},
 		ONIE: map[string]meta.Version{
 			switchprofile.DellS5232FON.Spec.Platform:         "v0.1.0",

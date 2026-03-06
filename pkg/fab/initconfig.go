@@ -35,7 +35,8 @@ type InitConfigInput struct {
 	DefaultAuthorizedKeys []string
 	Dev                   bool
 	IncludeONIE           bool
-	IncludeCLS            bool
+	IncludeCLSP           bool
+	IncludeCumulus        bool
 	RegUpstream           *fabapi.ControlConfigRegistryUpstream
 	NodeManagementLinks   map[string]string
 	Gateway               bool
