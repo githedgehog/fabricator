@@ -1042,7 +1042,8 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 
 			if device == "" {
 				nic := "e1000"
-				if vm.Type == VMTypeSwitch {
+				// TODO consider switch all switches to virtio-net-pci, it's just a hack for Cumulus to work
+				if vm.Type == VMTypeSwitch && vm.SwitchMode == VMSwitchModeImage {
 					nic = "virtio-net-pci"
 				}
 
