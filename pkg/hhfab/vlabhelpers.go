@@ -527,6 +527,12 @@ var switchConsoleScript string
 //go:embed show-tech/server-console.exp
 var serverConsoleScript string
 
+//go:embed show-tech/control-console.exp
+var controlConsoleScript string
+
+//go:embed show-tech/gateway-console.exp
+var gatewayConsoleScript string
+
 //go:embed show-tech/gateway.sh
 var gatewayScript []byte
 
@@ -581,6 +587,21 @@ func (c *Config) prepareShowTechServerConsoleScript() (func(), string, error) {
 	return cleanup, path, nil
 }
 
+func (c *Config) prepareShowTechVMConsoleScript(vmType, script string) (func(), string, error) {
+	dir, err := os.MkdirTemp(c.CacheDir, "vlabhelpers_showtech_"+vmType+"_console-*")
+	if err != nil {
+		return nil, "", fmt.Errorf("creating temp dir for %s show-tech console script: %w", vmType, err)
+	}
+	cleanup := func() { os.RemoveAll(dir) }
+
+	path := filepath.Join(dir, vmType+"-console.exp")
+	if err := os.WriteFile(path, []byte(script), 0o700); err != nil { //nolint:gosec
+		return cleanup, "", fmt.Errorf("failed to write %s show-tech console script: %w", vmType, err)
+	}
+
+	return cleanup, path, nil
+}
+
 func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB) error {
 	scriptConfig := DefaultShowTechScript()
 
@@ -630,12 +651,14 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB) error {
 
 	var switchConsoleScriptPath string
 	var serverConsoleScriptPath string
+	var controlConsoleScriptPath string
+	var gatewayConsoleScriptPath string
 	if _, err := exec.LookPath(VLABCmdExpect); err == nil {
 		if cleanup, path, err := c.prepareShowTechConsoleScript(); err == nil {
 			defer cleanup()
 			switchConsoleScriptPath = path
 		} else {
-			slog.Warn("Failed to prepare console show-tech script; console fallback disabled", "err", err)
+			slog.Warn("Failed to prepare switch console show-tech script; console fallback disabled", "err", err)
 		}
 		if cleanup, path, err := c.prepareShowTechServerConsoleScript(); err == nil {
 			defer cleanup()
@@ -643,13 +666,30 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB) error {
 		} else {
 			slog.Warn("Failed to prepare server console show-tech script; console fallback disabled", "err", err)
 		}
+		if cleanup, path, err := c.prepareShowTechVMConsoleScript("control", controlConsoleScript); err == nil {
+			defer cleanup()
+			controlConsoleScriptPath = path
+		} else {
+			slog.Warn("Failed to prepare control console show-tech script; console fallback disabled", "err", err)
+		}
+		if cleanup, path, err := c.prepareShowTechVMConsoleScript("gateway", gatewayConsoleScript); err == nil {
+			defer cleanup()
+			gatewayConsoleScriptPath = path
+		} else {
+			slog.Warn("Failed to prepare gateway console show-tech script; console fallback disabled", "err", err)
+		}
 	} else {
 		slog.Warn("Expect not available; console fallback disabled", "err", err)
 	}
 	if switchConsoleScriptPath != "" && (os.Getenv(VLABEnvSwitchUsername) == "" || os.Getenv(VLABEnvSwitchPassword) == "") {
-		slog.Info("Switch console credentials not set; skipping console diagnostics",
+		slog.Info("Switch console credentials not set; skipping switch console diagnostics",
 			"env", VLABEnvSwitchUsername+"/"+VLABEnvSwitchPassword)
 		switchConsoleScriptPath = ""
+	}
+	hasServerCredentials := os.Getenv(VLABEnvServerUsername) != "" && os.Getenv(VLABEnvServerPassword) != ""
+	if (controlConsoleScriptPath != "" || gatewayConsoleScriptPath != "") && !hasServerCredentials {
+		slog.Info("Server credentials not set; control/gateway console diagnostics will only capture visible output",
+			"env", VLABEnvServerUsername+"/"+VLABEnvServerPassword)
 	}
 
 	controlPlaneIP := ControlPlaneAPIIP
@@ -664,7 +704,7 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB) error {
 
 			// SSH helper automatically handles VM vs hardware switches
 			ssh, err := c.SSH(ctx, vlab, name)
-			allowFallback := vmType == VMTypeSwitch || vmType == VMTypeServer
+			allowFallback := vmType == VMTypeSwitch || vmType == VMTypeServer || vmType == VMTypeControl || vmType == VMTypeGateway
 			if err != nil && !allowFallback {
 				errChan <- fmt.Errorf("getting ssh config for %s: %w", name, err)
 
@@ -707,6 +747,16 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB) error {
 			}
 			if vmType == VMTypeServer && serverConsoleScriptPath != "" && showTechErr != nil {
 				if err := c.collectServerConsoleDiagnostics(ctx, name, showTechErr, outputDir, serverConsoleScriptPath); err != nil {
+					errChan <- fmt.Errorf("console fallback for %s: %w", name, err)
+				}
+			}
+			if vmType == VMTypeControl && controlConsoleScriptPath != "" && showTechErr != nil {
+				if err := c.collectVMConsoleDiagnostics(ctx, "control", name, showTechErr, outputDir, controlConsoleScriptPath); err != nil {
+					errChan <- fmt.Errorf("console fallback for %s: %w", name, err)
+				}
+			}
+			if vmType == VMTypeGateway && gatewayConsoleScriptPath != "" && showTechErr != nil {
+				if err := c.collectVMConsoleDiagnostics(ctx, "gateway", name, showTechErr, outputDir, gatewayConsoleScriptPath); err != nil {
 					errChan <- fmt.Errorf("console fallback for %s: %w", name, err)
 				}
 			}
@@ -882,10 +932,7 @@ func (c *Config) collectRunnerShowTech(ctx context.Context, outputDir string) er
 func (c *Config) collectSwitchConsoleDiagnostics(ctx context.Context, name string, showTechErr error, outputDir, scriptPath, controlPlaneIP string) error {
 	outputPath := filepath.Join(outputDir, name+"-console.log")
 
-	reason := "n/a"
-	if showTechErr != nil {
-		reason = showTechErr.Error()
-	}
+	reason := showTechErr.Error()
 	header := fmt.Sprintf("Show-tech error for %s: %s\nCollecting console diagnostics.\n\n", name, reason)
 	if err := os.WriteFile(outputPath, []byte(header), 0o644); err != nil { //nolint:gosec
 		return fmt.Errorf("writing console diagnostics header for %s: %w", name, err)
@@ -919,10 +966,7 @@ func (c *Config) collectSwitchConsoleDiagnostics(ctx context.Context, name strin
 func (c *Config) collectServerConsoleDiagnostics(ctx context.Context, name string, showTechErr error, outputDir, scriptPath string) error {
 	outputPath := filepath.Join(outputDir, name+"-console.log")
 
-	reason := "n/a"
-	if showTechErr != nil {
-		reason = showTechErr.Error()
-	}
+	reason := showTechErr.Error()
 	header := fmt.Sprintf("Show-tech error for %s: %s\nCollecting console diagnostics.\n\n", name, reason)
 	if err := os.WriteFile(outputPath, []byte(header), 0o644); err != nil { //nolint:gosec
 		return fmt.Errorf("writing console diagnostics header for %s: %w", name, err)
@@ -938,11 +982,48 @@ func (c *Config) collectServerConsoleDiagnostics(ctx context.Context, name strin
 	cmd.Stderr = io.Discard
 	cmd.Env = append(os.Environ(),
 		"HHFAB_BIN="+self,
-		"SERVER_DIAG_REASON="+reason,
+		"CONSOLE_DIAG_REASON="+reason,
 	)
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("running server console diagnostics expect script for %s: %w", name, err)
+	}
+
+	slog.Debug("Show tech collected successfully (console fallback)", "entry", name, "output", outputPath)
+
+	return nil
+}
+
+func (c *Config) collectVMConsoleDiagnostics(ctx context.Context, vmType, name string, showTechErr error, outputDir, scriptPath string) error {
+	outputPath := filepath.Join(outputDir, name+"-console.log")
+
+	reason := showTechErr.Error()
+	header := fmt.Sprintf("Show-tech error for %s: %s\nCollecting console diagnostics.\n\n", name, reason)
+	if err := os.WriteFile(outputPath, []byte(header), 0o644); err != nil { //nolint:gosec
+		return fmt.Errorf("writing console diagnostics header for %s: %w", name, err)
+	}
+
+	self, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("determining executable path: %w", err)
+	}
+
+	cmd := exec.CommandContext(ctx, VLABCmdExpect, scriptPath, name, outputPath)
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	cmd.Env = append(os.Environ(),
+		"HHFAB_BIN="+self,
+		"CONSOLE_DIAG_REASON="+reason,
+	)
+	if serverUser := os.Getenv(VLABEnvServerUsername); serverUser != "" {
+		cmd.Env = append(cmd.Env, VLABEnvServerUsername+"="+serverUser)
+	}
+	if serverPass := os.Getenv(VLABEnvServerPassword); serverPass != "" {
+		cmd.Env = append(cmd.Env, VLABEnvServerPassword+"="+serverPass)
+	}
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("running %s console diagnostics expect script for %s: %w", vmType, name, err)
 	}
 
 	slog.Debug("Show tech collected successfully (console fallback)", "entry", name, "output", outputPath)
