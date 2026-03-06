@@ -210,7 +210,7 @@ func TestInitConfig(t *testing.T) {
 			name: "include-cls",
 			in: fab.InitConfigInput{
 				DefaultPasswordHash: "$5$bar",
-				IncludeCLS:          true,
+				IncludeCLSP:         true,
 			},
 			expectedFab: fabapi.Fabricator{
 				ObjectMeta: metav1.ObjectMeta{
@@ -225,7 +225,7 @@ func TestInitConfig(t *testing.T) {
 							},
 						},
 						Fabric: fabapi.FabricConfig{
-							IncludeCLS: true,
+							IncludeCLSP: true,
 							DefaultSwitchUsers: map[string]fabapi.SwitchUser{
 								"admin": {
 									Role:         "admin",
