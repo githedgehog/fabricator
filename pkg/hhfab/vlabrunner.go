@@ -353,7 +353,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 				resize = true
 
 				if vm.SwitchMode == VMSwitchModeImage {
-					if err := d.FromORAS(ctx, vmDir, vlabcomp.CumuluxVXImgRef, vlabcomp.CumuluxVXImgVersion(c.Fab), []artificer.ORASFile{
+					if err := d.FromORAS(ctx, vmDir, vlabcomp.CumulusVXImgRef, vlabcomp.CumulusVXImgVersion(c.Fab), []artificer.ORASFile{
 						{
 							// TODO replace with more generic handling
 							Name:   "cumulus-linux-vx-amd64.qcow2",
