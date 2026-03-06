@@ -58,7 +58,8 @@ spec:
     fabric:
       mode: {{ .FabricMode }} # "spine-leaf"
       {{ if .IncludeONIE }}includeONIE: true{{ end }}
-      {{ if .IncludeCLS }}includeCLS: true{{ end }}
+      {{ if .IncludeCLSP }}includeCLSP: true{{ end }}
+      {{ if .IncludeCumulus }}includeCumulus: true{{ end }}
       defaultSwitchUsers:
         admin: # at least one user with name 'admin' and role 'admin'
           role: admin

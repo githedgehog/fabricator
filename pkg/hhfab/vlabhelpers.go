@@ -52,9 +52,16 @@ var SSHQuietFlags = []string{
 	"-o", "LogLevel=ERROR",
 }
 
-func (c *Config) VLABAccess(ctx context.Context, vlab *VLAB, t VLABAccessType, name string, inArgs []string) error {
+func (c *Config) VLABAccess(ctx context.Context, vlab *VLAB, t VLABAccessType, name, username string, inArgs []string) error {
 	if len(inArgs) > 0 && t != VLABAccessSSH {
 		return fmt.Errorf("arguments only supported for ssh") //nolint:goerr113
+	}
+
+	if t == VLABAccessSSH && username == "" {
+		return fmt.Errorf("username is required") //nolint:err113
+	}
+	if t != VLABAccessSSH && username != "" {
+		return fmt.Errorf("username is only supported for ssh") //nolint:err113
 	}
 
 	if err := c.checkForBins(); err != nil {
@@ -141,7 +148,7 @@ func (c *Config) VLABAccess(ctx context.Context, vlab *VLAB, t VLABAccessType, n
 			args = append(slices.Clone(SSHQuietFlags),
 				"-i", filepath.Join(VLABDir, VLABSSHKeyFile),
 				"-o", "ProxyCommand="+proxyCmd,
-				"admin@"+swIP,
+				username+"@"+swIP,
 			)
 		} else if entry.IsNode {
 			slog.Info("SSH through control node", "name", name, "type", "gateway")

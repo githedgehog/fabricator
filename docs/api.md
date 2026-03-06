@@ -409,7 +409,8 @@ _Appears in:_
 | `defaultSwitchUsers` _object (keys:string, values:[SwitchUser](#switchuser))_ |  |  |  |
 | `defaultAlloyConfig` _[AlloyConfig](#alloyconfig)_ |  |  |  |
 | `includeONIE` _boolean_ |  |  |  |
-| `includeCLS` _boolean_ |  |  |  |
+| `includeCLSP` _boolean_ |  |  |  |
+| `includeCumulus` _boolean_ |  |  |  |
 | `disableBFD` _boolean_ |  |  |  |
 | `observability` _[Observability](#observability)_ |  |  |  |
 

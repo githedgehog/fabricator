@@ -291,8 +291,9 @@ type FabricConfig struct {
 	DefaultSwitchUsers map[string]SwitchUser `json:"defaultSwitchUsers,omitempty"`
 	DefaultAlloyConfig fmeta.AlloyConfig     `json:"defaultAlloyConfig,omitempty"` // TODO remove, kept for backward compat, ignored
 
-	IncludeONIE bool `json:"includeONIE,omitempty"`
-	IncludeCLS  bool `json:"includeCLS,omitempty"`
+	IncludeONIE    bool `json:"includeONIE,omitempty"`
+	IncludeCLSP    bool `json:"includeCLSP,omitempty"`
+	IncludeCumulus bool `json:"includeCumulus,omitempty"`
 
 	DisableBFD bool `json:"disableBFD,omitempty"`
 

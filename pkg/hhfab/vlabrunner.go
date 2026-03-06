@@ -278,7 +278,11 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 	for _, vm := range vlab.VMs {
 		vmDir := filepath.Join(c.WorkDir, VLABDir, VLABVMsDir, vm.Name)
 
-		if isPresent(vmDir, VLABOSImageFile, VLABEFICodeFile, VLABEFIVarsFile) {
+		expectedFiles := []string{VLABOSImageFile}
+		if vm.SwitchMode != VMSwitchModeImage {
+			expectedFiles = append(expectedFiles, VLABEFICodeFile, VLABEFIVarsFile)
+		}
+		if isPresent(vmDir, expectedFiles...) {
 			slog.Info("Using existing", "vm", vm.Name, "type", vm.Type)
 		} else {
 			slog.Info("Preparing new", "vm", vm.Name, "type", vm.Type)
@@ -348,21 +352,33 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 			} else if vm.Type == VMTypeSwitch {
 				resize = true
 
-				if err := d.FromORAS(ctx, vmDir, vlabcomp.ONIERef, vlabcomp.ONIEVersion(c.Fab), []artificer.ORASFile{
-					{
-						Name:   "onie-kvm_x86_64.qcow2",
-						Target: VLABOSImageFile,
-					},
-					{
-						Name:   "onie_efi_code.fd",
-						Target: VLABEFICodeFile,
-					},
-					{
-						Name:   "onie_efi_vars.fd",
-						Target: VLABEFIVarsFile,
-					},
-				}); err != nil {
-					return fmt.Errorf("copying onie files: %w", err)
+				if vm.SwitchMode == VMSwitchModeImage {
+					if err := d.FromORAS(ctx, vmDir, vlabcomp.CumulusVXImgRef, vlabcomp.CumulusVXImgVersion(c.Fab), []artificer.ORASFile{
+						{
+							// TODO replace with more generic handling
+							Name:   "cumulus-linux-vx-amd64.qcow2",
+							Target: VLABOSImageFile,
+						},
+					}); err != nil {
+						return fmt.Errorf("copying vm image: %w", err)
+					}
+				} else {
+					if err := d.FromORAS(ctx, vmDir, vlabcomp.ONIERef, vlabcomp.ONIEVersion(c.Fab), []artificer.ORASFile{
+						{
+							Name:   "onie-kvm_x86_64.qcow2",
+							Target: VLABOSImageFile,
+						},
+						{
+							Name:   "onie_efi_code.fd",
+							Target: VLABEFICodeFile,
+						},
+						{
+							Name:   "onie_efi_vars.fd",
+							Target: VLABEFIVarsFile,
+						},
+					}); err != nil {
+						return fmt.Errorf("copying onie files: %w", err)
+					}
 				}
 			} else {
 				return fmt.Errorf("unsupported VM type %q", vm.Type) //nolint:goerr113
@@ -437,15 +453,21 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 				"-global", "ICH9-LPC.disable_s3=1",
 			}
 
-			efiFormat, err := getImageFormat(filepath.Join(vmDir, VLABEFICodeFile))
-			if err != nil {
-				return fmt.Errorf("getting EFI image type for VM %s: %w", vm.Name, err)
-			}
+			// TODO fix by copying system OVMF?
+			// e.g. on ubuntu there is ovmf package (seems like installed together with the qemu one)
+			// /usr/share/OVMF/OVMF_CODE_4M.fd
+			// /usr/share/OVMF/OVMF_VARS_4M.fd
+			if vm.SwitchMode != VMSwitchModeImage {
+				efiFormat, err := getImageFormat(filepath.Join(vmDir, VLABEFICodeFile))
+				if err != nil {
+					return fmt.Errorf("getting EFI image type for VM %s: %w", vm.Name, err)
+				}
 
-			args = append(args,
-				"-drive", "if=pflash,file="+VLABEFICodeFile+",format="+efiFormat+",readonly=on",
-				"-drive", "if=pflash,file="+VLABEFIVarsFile+",format="+efiFormat,
-			)
+				args = append(args,
+					"-drive", "if=pflash,file="+VLABEFICodeFile+",format="+efiFormat+",readonly=on",
+					"-drive", "if=pflash,file="+VLABEFIVarsFile+",format="+efiFormat,
+				)
+			}
 
 			// for detached:
 			// -daemonize
