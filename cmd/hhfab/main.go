@@ -1073,12 +1073,19 @@ func Run(ctx context.Context) error {
 						},
 					},
 					{
-						Name:   "ssh",
-						Usage:  "ssh to a VLAB VM or HW if supported",
-						Flags:  flatten(defaultFlags, accessNameFlags),
+						Name:  "ssh",
+						Usage: "ssh to a VLAB VM or HW if supported",
+						Flags: flatten(defaultFlags, accessNameFlags, []cli.Flag{
+							&cli.StringFlag{
+								Name:    "username",
+								Aliases: []string{"u"},
+								Usage:   "target device ssh username",
+								Value:   "admin",
+							},
+						}),
 						Before: before(false),
 						Action: func(c *cli.Context) error {
-							if err := hhfab.DoVLABSSH(ctx, workDir, cacheDir, accessName, c.Args().Slice()); err != nil {
+							if err := hhfab.DoVLABSSH(ctx, workDir, cacheDir, accessName, c.String("username"), c.Args().Slice()); err != nil {
 								return fmt.Errorf("ssh: %w", err)
 							}
 

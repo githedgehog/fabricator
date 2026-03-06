@@ -138,13 +138,13 @@ func loadVLABForHelpers(ctx context.Context, workDir, cacheDir string) (*Config,
 	return c, vlab, nil
 }
 
-func DoVLABSSH(ctx context.Context, workDir, cacheDir, name string, args []string) error {
+func DoVLABSSH(ctx context.Context, workDir, cacheDir, name, username string, args []string) error {
 	c, vlab, err := loadVLABForHelpers(ctx, workDir, cacheDir)
 	if err != nil {
 		return err
 	}
 
-	return c.VLABAccess(ctx, vlab, VLABAccessSSH, name, args)
+	return c.VLABAccess(ctx, vlab, VLABAccessSSH, name, username, args)
 }
 
 func DoVLABSerial(ctx context.Context, workDir, cacheDir, name string, args []string) error {
@@ -153,7 +153,7 @@ func DoVLABSerial(ctx context.Context, workDir, cacheDir, name string, args []st
 		return err
 	}
 
-	return c.VLABAccess(ctx, vlab, VLABAccessSerial, name, args)
+	return c.VLABAccess(ctx, vlab, VLABAccessSerial, name, "", args)
 }
 
 func DoVLABSerialLog(ctx context.Context, workDir, cacheDir, name string, args []string) error {
@@ -162,7 +162,7 @@ func DoVLABSerialLog(ctx context.Context, workDir, cacheDir, name string, args [
 		return err
 	}
 
-	return c.VLABAccess(ctx, vlab, VLABAccessSerialLog, name, args)
+	return c.VLABAccess(ctx, vlab, VLABAccessSerialLog, name, "", args)
 }
 
 func DoShowTech(ctx context.Context, workDir, cacheDir string) error {
