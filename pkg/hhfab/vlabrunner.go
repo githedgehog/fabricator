@@ -1092,6 +1092,14 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 		slog.Debug("Node install marker is complete", "vm", vm.Name, "type", vm.Type)
 
 		if vm.Type == VMTypeControl {
+			// Increase SSH connection limits on the control node to prevent errors during show-tech
+			// Only needed for VLAB testing, not in production where the default limits provide DoS protection
+			slog.Debug("Increasing SSH connection limits for VLAB", "vm", vm.Name)
+			sshConfigCmd := `bash -c 'echo -e "MaxStartups 100:30:200\nMaxSessions 50" | sudo tee /etc/ssh/sshd_config.d/99-vlab.conf > /dev/null && sudo systemctl restart sshd'`
+			if _, _, err := ssh.Run(ctx, sshConfigCmd); err != nil {
+				slog.Warn("Failed to increase SSH limits on control node (non-fatal)", "vm", vm.Name, "err", err)
+			}
+
 			kubeconfig := filepath.Join(c.WorkDir, VLABDir, VLABKubeConfig)
 			if err := sshutil.DownloadPathWith(ftp, k3s.KubeConfigPath, kubeconfig); err != nil {
 				return fmt.Errorf("downloading kubeconfig: %w", err)
