@@ -12,7 +12,7 @@ import (
 const (
 	FlatcarRef      = "fabricator/flatcar-vlab"
 	ONIERef         = "fabricator/onie-vlab"
-	CumuluxVXImgRef = "cumulus-private/cumulus-vx-img"
+	CumulusVXImgRef = "cumulus-private/cumulus-vx-img"
 )
 
 func FlatcarVersion(f fabapi.Fabricator) meta.Version {
@@ -23,6 +23,6 @@ func ONIEVersion(f fabapi.Fabricator) meta.Version {
 	return f.Status.Versions.VLAB.ONIE
 }
 
-func CumuluxVXImgVersion(f fabapi.Fabricator) meta.Version {
+func CumulusVXImgVersion(f fabapi.Fabricator) meta.Version {
 	return f.Status.Versions.Fabric.NOS[fmeta.NOSTypeCumulusVX]
 }
