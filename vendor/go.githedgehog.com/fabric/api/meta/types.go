@@ -56,7 +56,14 @@ type ObjectList interface {
 const (
 	SwitchProfileVS     = "vs"
 	SwitchProfileVSCLSP = "vs-clsp"
+	SwitchProfileCmlsVX = "cumulus-vx"
 )
+
+var VirtualSwitchProfiles = []string{
+	SwitchProfileVS,
+	SwitchProfileVSCLSP,
+	SwitchProfileCmlsVX,
+}
 
 type UserCreds struct {
 	Name     string   `json:"name,omitempty"`
@@ -96,6 +103,7 @@ type FabricConfig struct {
 	GatewayAPISync           bool              `json:"gatewayAPISync,omitempty"`
 	LoopbackWorkaround       bool              `json:"loopbackWorkaround,omitempty"`
 	IncludeSONiCCLSPlus      bool              `json:"includeSONiCCLSPlus,omitempty"` // Include Celestica SONiC+
+	IncludeCumulus           bool              `json:"includeCumulus,omitempty"`      // Include Cumulus
 	ProtocolSubnet           string            `json:"protocolSubnet,omitempty"`
 	VTEPSubnet               string            `json:"vtepSubnet,omitempty"`
 	FabricSubnet             string            `json:"fabricSubnet,omitempty"`
@@ -132,6 +140,8 @@ const (
 	NOSTypeSONiCCLSPlusBroadcom NOSType = "sonic-cls-plus-broadcom"
 	NOSTypeSONiCCLSPlusMarvell  NOSType = "sonic-cls-plus-marvell"
 	NOSTypeSONiCCLSPlusVS       NOSType = "sonic-cls-plus-vs"
+	NOSTypeCumulusVX            NOSType = "cumulus-vx"
+	NOSTypeCumulusMlx           NOSType = "cumulus-mlx"
 )
 
 var NOSTypes = []NOSType{
@@ -141,6 +151,25 @@ var NOSTypes = []NOSType{
 	NOSTypeSONiCCLSPlusBroadcom,
 	NOSTypeSONiCCLSPlusMarvell,
 	NOSTypeSONiCCLSPlusVS,
+	NOSTypeCumulusVX,
+	NOSTypeCumulusMlx,
+}
+
+var NOSTypesSONiCBCM = []NOSType{
+	NOSTypeSONiCBCMBase,
+	NOSTypeSONiCBCMCampus,
+	NOSTypeSONiCBCMVS,
+}
+
+var NOSTypesSONiCCLSPlus = []NOSType{
+	NOSTypeSONiCCLSPlusBroadcom,
+	NOSTypeSONiCCLSPlusMarvell,
+	NOSTypeSONiCCLSPlusVS,
+}
+
+var NOSTypesCumulus = []NOSType{
+	NOSTypeCumulusVX,
+	NOSTypeCumulusMlx,
 }
 
 // +kubebuilder:object:generate=true
