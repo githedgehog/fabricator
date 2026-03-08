@@ -258,6 +258,7 @@ jobs:
       releasetest: ${{ inputs.releasetest == true || contains(github.event.pull_request.labels.*.name, 'ci:+release') || github.event.schedule == '0 6 * * *' }}
       hybrid: ${{ matrix.hybrid }}
       upgradefrom: ${{ matrix.upgradefrom }}
+      debug: ${{ inputs.debug_enabled == true }}
 
     strategy:
       fail-fast: false
