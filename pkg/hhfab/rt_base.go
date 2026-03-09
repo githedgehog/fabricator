@@ -863,6 +863,7 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 	results = append(results, *multiVpcResults)
 
 	testCtx.setupOpts.SubnetsPerVPC = 1
+	testCtx.wipeBetweenTests = true
 	basicResults, err := selectAndRunSuite(ctx, testCtx, multiVPCSingleSubnetSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
 	if err != nil && rtOtps.FailFast {
 		return fmt.Errorf("running basic VPC suite: %w", err)
