@@ -168,9 +168,13 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsFullMeshAllExternalsTest(ctx contex
 		return false, nil, fmt.Errorf("populating full mesh VPC peerings: %w", err)
 	}
 
-	externalPeerings := make(map[string]*vpcapi.ExternalPeeringSpec, 6)
-	if err := populateAllExternalVpcPeerings(ctx, testCtx.kube, externalPeerings); err != nil {
-		return false, nil, fmt.Errorf("populating all external VPC peerings: %w", err)
+	externalPeerings := map[string]*vpcapi.ExternalPeeringSpec{}
+	if testCtx.skipFlags.VirtualSwitch {
+		slog.Warn("Skipping external peerings as there are virtual switches, which would lead to unwanted VPC peerings via the external")
+	} else {
+		if err := populateAllExternalVpcPeerings(ctx, testCtx.kube, externalPeerings); err != nil {
+			return false, nil, fmt.Errorf("populating all external VPC peerings: %w", err)
+		}
 	}
 
 	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, nil, true); err != nil {
@@ -180,7 +184,7 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsFullMeshAllExternalsTest(ctx contex
 		return false, nil, err
 	}
 
-	// bonus: remove one external to make sure we do not leek access to it, test again
+	// bonus: remove one external to make sure we do not leak access to it, test again
 	if len(externalPeerings) < 2 {
 		slog.Warn("Not enough external peerings to remove one and check for leaks, skipping next step")
 	} else {
@@ -224,14 +228,20 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsOnlyExternalsTest(ctx context.Conte
 }
 
 // Test connectivity between all VPCs in a full loop configuration, including all externals.
+// Note: if switches are virtual we skip external peerings, as VS do not implement ACLs and VPCs
+// end up peering via the external, making the test fail
 func (testCtx *VPCPeeringTestCtx) vpcPeeringsFullLoopAllExternalsTest(ctx context.Context) (bool, []RevertFunc, error) {
-	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec, 6)
+	vpcPeerings := map[string]*vpcapi.VPCPeeringSpec{}
 	if err := populateFullLoopVpcPeerings(ctx, testCtx.kube, vpcPeerings); err != nil {
 		return false, nil, fmt.Errorf("populating full loop VPC peerings: %w", err)
 	}
-	externalPeerings := make(map[string]*vpcapi.ExternalPeeringSpec, 6)
-	if err := populateAllExternalVpcPeerings(ctx, testCtx.kube, externalPeerings); err != nil {
-		return false, nil, fmt.Errorf("populating all external VPC peerings: %w", err)
+	externalPeerings := map[string]*vpcapi.ExternalPeeringSpec{}
+	if testCtx.skipFlags.VirtualSwitch {
+		slog.Warn("Skipping external peerings as there are virtual switches, which would lead to unwanted VPC peerings via the external")
+	} else {
+		if err := populateAllExternalVpcPeerings(ctx, testCtx.kube, externalPeerings); err != nil {
+			return false, nil, fmt.Errorf("populating all external VPC peerings: %w", err)
+		}
 	}
 	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, nil, true); err != nil {
 		return false, nil, fmt.Errorf("setting up peerings: %w", err)
