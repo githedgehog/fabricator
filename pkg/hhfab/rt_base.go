@@ -813,7 +813,7 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 		skipFlags.NoExternals = true
 	} else {
 		testCtx.extName = ""
-		// look first for hardware externals with at least one attachment
+		// look first for hardware externals with at least one non-proxy attachment
 		for _, ext := range extList.Items {
 			if !isHardware(&ext) {
 				slog.Debug("Skipping non-hardware external", "external", ext.Name)
@@ -822,6 +822,10 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 			}
 			for _, extAttach := range extAttachList.Items {
 				if extAttach.Spec.External != ext.Name {
+					continue
+				} else if extAttach.Spec.Static != nil && extAttach.Spec.Static.Proxy {
+					slog.Debug("Skipping proxied hw static external", "external", ext.Name)
+
 					continue
 				}
 				testCtx.extName = ext.Name
@@ -850,6 +854,12 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 				// check if all of the attachments are via hardware connections
 				someNotHW := false
 				for _, attach := range extAttach.Items {
+					// skip proxied static externals as we want to use the one we pick here with external peerings and they are not supported
+					if attach.Spec.Static != nil && attach.Spec.Static.Proxy {
+						slog.Debug("Skipping proxied virtual static external", "external", attach.Spec.External)
+
+						continue
+					}
 					conn := &wiringapi.Connection{}
 					if err := kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: attach.Spec.Connection}, conn); err != nil {
 						return fmt.Errorf("getting connection %s: %w", attach.Spec.Connection, err)
