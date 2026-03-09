@@ -265,6 +265,9 @@ jobs:
           path: build-diagnostics
 
       - name: Init hhfab for virtual mode
+        env:
+          INPUT_VPC_MODE: ${{ inputs.vpcmode }}
+          INPUT_MESH: ${{ inputs.mesh }}
         if: ${{ inputs.upgradefrom == '' && !inputs.hybrid }}
         run: |
           bin/hhfab init -v --dev \
@@ -277,16 +280,16 @@ jobs:
           VLAB_ORPHAN_LEAVES=1
           VLAB_MESH_LINKS=0
           VLAB_UNBUNDLED_SERVERS=1
-          if [[ ${{ inputs.vpcmode }} == "l3vni" ]]; then
+          if [[ "$INPUT_MESH" == "true" ]]; then
+            VLAB_MESH_LINKS=3
+            VLAB_MCLAG_LEAVES=0
+            VLAB_UNBUNDLED_SERVERS=2
+          fi
+          if [[ "$INPUT_VPC_MODE" == "l3vni" ]]; then
             VLAB_MCLAG_LEAVES=0
             VLAB_ESLAG_GROUPS=""
             VLAB_ORPHAN_LEAVES=3
             VLAB_UNBUNDLED_SERVERS=2
-          fi
-          if [[ ${{ inputs.mesh }} == "true" ]]; then
-            VLAB_MESH_LINKS=3
-            VLAB_MCLAG_LEAVES=0
-            VLAB_ORPHAN_LEAVES=3
           fi
           bin/hhfab vlab gen -v --mesh-links-count=$VLAB_MESH_LINKS --mclag-leafs-count=$VLAB_MCLAG_LEAVES \
             --eslag-leaf-groups=$VLAB_ESLAG_GROUPS --orphan-leafs-count=$VLAB_ORPHAN_LEAVES --unbundled-servers=$VLAB_UNBUNDLED_SERVERS \
@@ -314,6 +317,10 @@ jobs:
 
       # TODO: make controls restricted again when we figure out how to get NTP upstream working for isolated VMs
       - name: ${{ inputs.upgradefrom != '' && 'Upgrade' || 'Run' }} and test ${{ inputs.hybrid && 'hybrid ' || '' }}VLAB
+        env:
+          INPUT_VPC_MODE: ${{ inputs.vpcmode }}
+          INPUT_BUILD_MODE: ${{ inputs.buildmode }}
+          INPUT_RT_REGEX: ${{ inputs.releasetest_regex }}
         id: test-current
         run: |
           if [[ "${{ inputs.hybrid }}" == "true" ]]; then
@@ -321,16 +328,28 @@ jobs:
           fi
 
           export HHFAB_JOIN_TOKEN=$(openssl rand -base64 24)
+
+          HHFAB_TEST_ARGS=(--ready=release-test)
+          if [[ "${{ inputs.releasetest }}" == "true" ]]; then
+            if [[ -n "$INPUT_RT_REGEX" ]]; then
+              HHFAB_TEST_ARGS+=("--release-test-regexes=$INPUT_RT_REGEX")
+              if [[ "${{ inputs.releasetest_regex_invert }}" == "true" ]]; then
+                HHFAB_TEST_ARGS+=(--release-test-regexes-invert)
+              fi
+            fi
+          elif [[ -n "${{ inputs.upgradefrom }}" ]]; then
+            HHFAB_TEST_ARGS=(--ready=setup-vpcs --ready=setup-peerings --ready=test-connectivity)
+          else
+            HHFAB_TEST_ARGS+=(--release-test-on-ready-only)
+          fi
+          echo "HHFAB_TEST_ARGS: ${HHFAB_TEST_ARGS[*]}"
           bin/hhfab vlab up -v \
-            --build-mode="${{ inputs.buildmode }}" \
-            --vpc-mode="${{ inputs.vpcmode }}" \
+            --build-mode="$INPUT_BUILD_MODE" \
+            --vpc-mode="$INPUT_VPC_MODE" \
             ${{ inputs.hybrid && '--controls-restricted=false' || '' }} \
             ${{ (inputs.upgradefrom == '' && inputs.hybrid) && '--ready switch-reinstall' || '' }} \
             --ready=inspect \
-            ${{ inputs.upgradefrom != '' && '--ready=setup-vpcs --ready=setup-peerings --ready=test-connectivity' || '--ready=release-test' }} \
-            ${{ (inputs.upgradefrom == '' && !inputs.releasetest) && '--release-test-on-ready-only' || '' }} \
-            ${{ (inputs.releasetest && inputs.releasetest_regex) && format('--release-test-regexes="{0}"', inputs.releasetest_regex) || '' }} \
-            ${{ (inputs.releasetest && inputs.releasetest_regex_invert) && '--release-test-regexes-invert' || '' }} \
+            "${HHFAB_TEST_ARGS[@]}" \
             --ready=exit \
             ${{ inputs.pause_on_failure && inputs.debug && '--pause-on-failure' || '' }} \
             ${{ inputs.upgradefrom != '' && '--upgrade' || '' }}
