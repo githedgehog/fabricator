@@ -726,7 +726,7 @@ func (testCtx *VPCPeeringTestCtx) newOnReadyTest(ctx context.Context) (bool, []R
 	// Note that we skip peering between the first two servers as they are respectively peered to the BGP external
 	// and the static non-proxy one, and by peering them the bgp VRF would get a LPM route to the second server
 	// compared to the flat ipv4 namespace route the static external vrf has in the virtual external
-	if testCtx.gwSupported {
+	if !testCtx.skipFlags.NoGateway {
 		for i := 1; i <= len(singleServers)-2; i++ {
 			appendGwPeeringSpec(gwPeerings, singleServerVPCs[singleServers[i].name], singleServerVPCs[singleServers[i+1].name], nil)
 		}
