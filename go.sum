@@ -562,8 +562,8 @@ github.com/xyproto/randomstring v1.0.5/go.mod h1:rgmS5DeNXLivK7YprL0pY+lTuhNQW3i
 github.com/yuin/goldmark v1.4.13/go.mod h1:6yULJ656Px+3vBD8DxQVa3kxgyrAnzto9xy5taEt/CY=
 github.com/yusufpapurcu/wmi v1.2.4 h1:zFUKzehAFReQwLys1b/iSMl+JQGSCSjtVqQn9bBrPo0=
 github.com/yusufpapurcu/wmi v1.2.4/go.mod h1:SBZ9tNy3G9/m5Oi98Zks0QjeHVDvuK0qfxQmPyzfmi0=
-go.githedgehog.com/fabric v0.108.0 h1:CXh6NIOHuJBg/Jtxiv9W+jefzpSQMHBOsLPdLa58pqU=
-go.githedgehog.com/fabric v0.108.0/go.mod h1:8j/O6Q1+PWxhlkMl8nfC47UA0zHU91tF3sJZM/5BJXg=
+go.githedgehog.com/fabric v0.109.0 h1:O4n9iRWRBRXDMh0KwEuf8F3FsnsR+9EPtKi42my3eQg=
+go.githedgehog.com/fabric v0.109.0/go.mod h1:vPbINyMNScsffsxTMgwLTwPEjISX6pEV+Wx3JzWU+S0=
 go.githedgehog.com/fabric-bcm-ygot v0.5.2-4.5.0 h1:BbK131yz1T6ldx7xsREa/A2v5bJdLcs1gVlxDujdEKg=
 go.githedgehog.com/fabric-bcm-ygot v0.5.2-4.5.0/go.mod h1:XWCdFbSbGP6nlg90c/922VblpHOTw07TCwx1yUHPkzc=
 go.githedgehog.com/gateway v0.43.4 h1:FxdynWiimlukkTUqW3IGbXFKyQyMe4fK4EgMkEeC/o0=
