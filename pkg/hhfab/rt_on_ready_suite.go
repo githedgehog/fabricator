@@ -166,7 +166,7 @@ func (testCtx *VPCPeeringTestCtx) newOnReadyTest(ctx context.Context) (bool, []R
 		return false, nil, fmt.Errorf("listing external attachments: %w", err)
 	}
 
-	var bgpExtName, staticExtNonProxyName, staticExtProxyName string
+	var bgpExtName, staticExtNonProxyName string
 	// var staticExtProxyRemoteIP string
 	for _, ext := range extList.Items {
 		if ext.Spec.Static == nil {
@@ -187,17 +187,14 @@ func (testCtx *VPCPeeringTestCtx) newOnReadyTest(ctx context.Context) (bool, []R
 				if att.Spec.External != ext.Name || att.Spec.Static == nil {
 					continue
 				}
-				if att.Spec.Static.Proxy && staticExtProxyName == "" {
-					staticExtProxyName = ext.Name
-					// staticExtProxyRemoteIP = att.Spec.Static.RemoteIP
-				} else if !att.Spec.Static.Proxy && staticExtNonProxyName == "" {
+				if !att.Spec.Static.Proxy && staticExtNonProxyName == "" {
 					staticExtNonProxyName = ext.Name
 				}
 			}
 		}
 	}
 	slog.Info("Discovered externals",
-		"bgp", bgpExtName, "staticNonProxy", staticExtNonProxyName, "staticProxy", staticExtProxyName)
+		"bgp", bgpExtName, "staticNonProxy", staticExtNonProxyName)
 
 	// ── Phase 4: Validate preconditions ──────────────────────────────────
 	if bgpExtName == "" {
@@ -205,9 +202,6 @@ func (testCtx *VPCPeeringTestCtx) newOnReadyTest(ctx context.Context) (bool, []R
 	}
 	if staticExtNonProxyName == "" {
 		return false, nil, fmt.Errorf("no static external without proxy found, cannot run on-ready test") //nolint:goerr113
-	}
-	if staticExtProxyName == "" {
-		slog.Warn("no proxied static external found, but we are currently skipping its testing")
 	}
 	const minServers = 7
 	if len(available) < minServers {
@@ -659,13 +653,6 @@ func (testCtx *VPCPeeringTestCtx) newOnReadyTest(ctx context.Context) (bool, []R
 	// ── Phase 10: Build and apply peerings ───────────────────────────────
 	slog.Info("Setting up peerings")
 
-	// We need the created VPCs (with defaults applied) to build gateway peering specs.
-	// Re-fetch VPC C to get full subnet CIDRs after defaults.
-	vpcC := &vpcapi.VPC{}
-	if err := kube.Get(ctx, kclient.ObjectKey{Name: vpcCName, Namespace: kmetav1.NamespaceDefault}, vpcC); err != nil {
-		return false, reverts, fmt.Errorf("getting VPC %s: %w", vpcCName, err)
-	}
-
 	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec)
 	extPeerings := make(map[string]*vpcapi.ExternalPeeringSpec)
 	gwPeerings := make(map[string]*gwapi.PeeringSpec)
@@ -679,44 +666,6 @@ func (testCtx *VPCPeeringTestCtx) newOnReadyTest(ctx context.Context) (bool, []R
 	staticPeerVPC := singleServerVPCs[singleServers[1].name]
 	appendExtPeeringSpecByName(extPeerings, staticPeerVPC.Name, staticExtNonProxyName, []string{"subnet-01"}, AllZeroPrefix)
 	slog.Debug("Added static (non-proxy) external peering", "server", singleServers[1].name, "vpc", staticPeerVPC.Name, "external", staticExtNonProxyName)
-
-	// Peering 3: VPC C (2-server, multi-switch) peered with the proxied static external via gateway, masquerade NAT
-	// commented out as test-connectivity does not support NAT currently
-	// if testCtx.gwSupported {
-	// 	entryName := fmt.Sprintf("%s--ext.%s", vpcCName, staticExtProxyName)
-	// 	// Expose VPC C's subnet with masquerade NAT
-	// 	vpcCSubnets := make([]gwapi.PeeringEntryIP, 0)
-	// 	for _, sub := range vpcC.Spec.Subnets {
-	// 		vpcCSubnets = append(vpcCSubnets, gwapi.PeeringEntryIP{CIDR: sub.Subnet})
-	// 	}
-	// 	extIP, err := netip.ParseAddr(staticExtProxyRemoteIP)
-	// 	if err != nil {
-	// 		return false, reverts, fmt.Errorf("parsing static external proxy remote IP %q: %w", staticExtProxyRemoteIP, err)
-	// 	}
-	// 	masqPrefix, err := extIP.Next().Prefix(32)
-	// 	if err != nil {
-	// 		return false, reverts, fmt.Errorf("creating masquerade prefix from %q: %w", extIP.Next(), err)
-	// 	}
-	// 	gwPeerings[entryName] = &gwapi.PeeringSpec{
-	// 		Peering: map[string]*gwapi.PeeringEntry{
-	// 			vpcCName: {
-	// 				Expose: []gwapi.PeeringEntryExpose{
-	// 					{
-	// 						IPs: vpcCSubnets,
-	// 						As:  []gwapi.PeeringEntryAs{{CIDR: masqPrefix.String()}},
-	// 						NAT: &gwapi.PeeringNAT{Masquerade: &gwapi.PeeringNATMasquerade{}},
-	// 					},
-	// 				},
-	// 			},
-	// 			"ext." + staticExtProxyName: {
-	// 				Expose: []gwapi.PeeringEntryExpose{
-	// 					{DefaultDestination: true},
-	// 				},
-	// 			},
-	// 		},
-	// 	}
-	// 	slog.Debug("Added gateway masquerade peering", "vpc", vpcCName, "external", staticExtProxyName)
-	// }
 
 	// Peering 4: hostBGP VPC (B) peered with VPC A (a regular VPC)
 	appendVpcPeeringSpecByName(vpcPeerings, vpcBName, vpcAName, "", []string{}, []string{})
