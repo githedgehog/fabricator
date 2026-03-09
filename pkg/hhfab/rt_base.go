@@ -150,16 +150,38 @@ func findExternals(ctx context.Context, kube kclient.Client, extList *vpcapi.Ext
 		return false
 	}
 
-	// hasStaticAttachment checks that at least one attachment for the external has
-	// Spec.Static configured, which is required for static external tests to work.
-	hasStaticAttachment := func(extName string) bool {
+	// hasStaticAttachments checks that all attachments for the external are static,
+	// which is required for static external tests to work.
+	// externals with proxied attachments are discarded (they need gw peering instead)
+	hasStaticAttachments := func(extName string) bool {
+		var proxy, nonProxy, retVal bool
 		for _, attach := range extAttachList.Items {
-			if attach.Spec.External == extName && attach.Spec.Static != nil {
-				return true
+			if attach.Spec.External == extName {
+				if attach.Spec.Static == nil {
+					slog.Warn("Non-static attachment for static external", "attachment", attach.Name, "external", extName)
+
+					return false
+				}
+				if attach.Spec.Static.Proxy {
+					proxy = true
+				} else {
+					nonProxy = true
+				}
 			}
 		}
 
-		return false
+		switch {
+		case !proxy && !nonProxy:
+			slog.Debug("Skipping static external with no attachments", "external", extName)
+		case proxy && nonProxy:
+			slog.Warn("Mixed proxied and non-proxied static external attachments, skipping external", "external", extName)
+		case proxy:
+			slog.Debug("Skipping proxied static external", "external", extName)
+		case nonProxy:
+			retVal = true
+		}
+
+		return retVal
 	}
 
 	allAttachmentsHW := func(extName string) bool {
@@ -184,7 +206,7 @@ func findExternals(ctx context.Context, kube kclient.Client, extList *vpcapi.Ext
 		if !isHardware(&ext) || !hasAttachment(ext.Name) {
 			continue
 		}
-		if ext.Spec.Static != nil && staticExt == "" && hasStaticAttachment(ext.Name) {
+		if ext.Spec.Static != nil && staticExt == "" && hasStaticAttachments(ext.Name) {
 			staticExt = ext.Name
 			slog.Info("Using hardware static external", "external", staticExt)
 		} else if ext.Spec.Static == nil && bgpExt == "" {
@@ -201,7 +223,7 @@ func findExternals(ctx context.Context, kube kclient.Client, extList *vpcapi.Ext
 		if !hasAttachment(ext.Name) || !allAttachmentsHW(ext.Name) {
 			continue
 		}
-		if ext.Spec.Static != nil && staticExt == "" && hasStaticAttachment(ext.Name) {
+		if ext.Spec.Static != nil && staticExt == "" && hasStaticAttachments(ext.Name) {
 			staticExt = ext.Name
 			slog.Info("Using virtual static external (hw-attached)", "external", staticExt)
 		} else if ext.Spec.Static == nil && bgpExt == "" {
