@@ -151,16 +151,38 @@ func findExternals(ctx context.Context, kube kclient.Client, extList *vpcapi.Ext
 		return false
 	}
 
-	// hasStaticAttachment checks that at least one attachment for the external has
-	// Spec.Static configured, which is required for static external tests to work.
-	hasStaticAttachment := func(extName string) bool {
+	// hasStaticAttachments checks that all attachments for the external are static,
+	// which is required for static external tests to work.
+	// externals with proxied attachments are discarded (they need gw peering instead)
+	hasStaticAttachments := func(extName string) bool {
+		var proxy, nonProxy, retVal bool
 		for _, attach := range extAttachList.Items {
-			if attach.Spec.External == extName && attach.Spec.Static != nil {
-				return true
+			if attach.Spec.External == extName {
+				if attach.Spec.Static == nil {
+					slog.Warn("Non-static attachment for static external", "attachment", attach.Name, "external", extName)
+
+					return false
+				}
+				if attach.Spec.Static.Proxy {
+					proxy = true
+				} else {
+					nonProxy = true
+				}
 			}
 		}
 
-		return false
+		switch {
+		case !proxy && !nonProxy:
+			slog.Debug("Skipping static external with no attachments", "external", extName)
+		case proxy && nonProxy:
+			slog.Warn("Mixed proxied and non-proxied static external attachments, skipping external", "external", extName)
+		case proxy:
+			slog.Debug("Skipping proxied static external", "external", extName)
+		case nonProxy:
+			retVal = true
+		}
+
+		return retVal
 	}
 
 	allAttachmentsHW := func(extName string) bool {
@@ -185,7 +207,7 @@ func findExternals(ctx context.Context, kube kclient.Client, extList *vpcapi.Ext
 		if !isHardware(&ext) || !hasAttachment(ext.Name) {
 			continue
 		}
-		if ext.Spec.Static != nil && staticExt == "" && hasStaticAttachment(ext.Name) {
+		if ext.Spec.Static != nil && staticExt == "" && hasStaticAttachments(ext.Name) {
 			staticExt = ext.Name
 			slog.Info("Using hardware static external", "external", staticExt)
 		} else if ext.Spec.Static == nil && bgpExt == "" {
@@ -202,7 +224,7 @@ func findExternals(ctx context.Context, kube kclient.Client, extList *vpcapi.Ext
 		if !hasAttachment(ext.Name) || !allAttachmentsHW(ext.Name) {
 			continue
 		}
-		if ext.Spec.Static != nil && staticExt == "" && hasStaticAttachment(ext.Name) {
+		if ext.Spec.Static != nil && staticExt == "" && hasStaticAttachments(ext.Name) {
 			staticExt = ext.Name
 			slog.Info("Using virtual static external (hw-attached)", "external", staticExt)
 		} else if ext.Spec.Static == nil && bgpExt == "" {
@@ -219,7 +241,7 @@ func findExternals(ctx context.Context, kube kclient.Client, extList *vpcapi.Ext
 		if !hasAttachment(ext.Name) {
 			continue
 		}
-		if ext.Spec.Static != nil && staticExt == "" && hasStaticAttachment(ext.Name) {
+		if ext.Spec.Static != nil && staticExt == "" && hasStaticAttachments(ext.Name) {
 			staticExt = ext.Name
 			slog.Info("Using virtual static external (virtual switch)", "external", staticExt)
 		} else if ext.Spec.Static == nil && bgpExt == "" {
@@ -939,46 +961,6 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 			slog.Warn("No viable static external found, static external tests will be skipped")
 			skipFlags.NoStaticExternals = true
 		}
-	}
-
-	// Check for static externals have attachments
-	skipFlags.NoStaticExternals = true
-	for _, ext := range extList.Items {
-		if ext.Spec.Static != nil && len(ext.Spec.Static.Prefixes) > 0 {
-			// Check if it has at least one static attachment configured
-			extAttachList := &vpcapi.ExternalAttachmentList{}
-			if err := kube.List(ctx, extAttachList, kclient.MatchingLabels{vpcapi.LabelExternal: ext.Name}); err != nil {
-				slog.Warn("Failed to list external attachments for static external", "external", ext.Name, "error", err)
-
-				continue
-			}
-
-			// Find an attachment with static config
-			hasStaticAttach := false
-			for _, attach := range extAttachList.Items {
-				if attach.Spec.Static != nil {
-					hasStaticAttach = true
-					slog.Debug("Found static attachment", "external", ext.Name, "attachment", attach.Name)
-
-					break
-				}
-			}
-
-			if !hasStaticAttach {
-				slog.Debug("Static external has no static attachments configured", "external", ext.Name)
-
-				continue
-			}
-
-			testCtx.staticExtName = ext.Name
-			skipFlags.NoStaticExternals = false
-			slog.Info("Found static external with attachment for testing", "external", ext.Name)
-
-			break
-		}
-	}
-	if skipFlags.NoStaticExternals {
-		slog.Info("No static externals with attachments found, static external tests will be skipped")
 	}
 
 	fabricator := &fabricatorapi.Fabricator{}
