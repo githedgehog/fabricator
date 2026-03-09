@@ -756,7 +756,6 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 			skipFlags.NoGateway = true
 		}
 	}
-	testCtx.gwSupported = !skipFlags.NoGateway
 
 	swList := &wiringapi.SwitchList{}
 	if err := kube.List(ctx, swList, kclient.MatchingLabels{}); err != nil {
@@ -954,6 +953,9 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 	if skipFlags.NoProm {
 		slog.Info("No Prometheus target found, Prometheus test will be skipped")
 	}
+
+	// save skip flags in test context so that tests can adapt to the limitations of the topology
+	testCtx.skipFlags = skipFlags
 
 	results := []JUnitTestSuite{}
 	testCtx.noSetup = true
