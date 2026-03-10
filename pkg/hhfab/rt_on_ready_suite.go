@@ -24,14 +24,14 @@ import (
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func makeOnReadyTestSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
+func makeOnReadyTestSuite() *JUnitTestSuite {
 	suite := &JUnitTestSuite{
 		Name: "OnReady Suite",
 	}
 	suite.TestCases = []JUnitTestCase{
 		{
 			Name:      "New VLAB OnReady Test",
-			F:         testCtx.newOnReadyTest,
+			F:         newOnReadyTest,
 			SkipFlags: SkipFlags{},
 		},
 	}
@@ -68,7 +68,7 @@ type ortServerInfo struct {
 // At the end of the test, we clean up all VPCs and peerings to leave a clean slate.
 //
 //nolint:cyclop
-func (testCtx *VPCPeeringTestCtx) newOnReadyTest(ctx context.Context) (bool, []RevertFunc, error) {
+func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
 	slog.Info("Starting new on-ready test: discovering resources")
 
 	kube := testCtx.kube
