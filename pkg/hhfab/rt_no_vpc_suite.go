@@ -41,28 +41,28 @@ type prometheusQueryResponse struct {
 	} `json:"data"`
 }
 
-func makeNoVpcsSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
+func makeNoVpcsSuite() *JUnitTestSuite {
 	suite := &JUnitTestSuite{
 		Name: "No VPCs Suite",
 	}
 	suite.TestCases = []JUnitTestCase{
 		{
 			Name: "Breakout ports",
-			F:    testCtx.breakoutTest,
+			F:    breakoutTest,
 			SkipFlags: SkipFlags{
 				VirtualSwitch: true,
 			},
 		},
 		{
 			Name: "Loki Observability",
-			F:    testCtx.lokiObservabilityTest,
+			F:    lokiObservabilityTest,
 			SkipFlags: SkipFlags{
 				NoLoki: true,
 			},
 		},
 		{
 			Name: "Prometheus Observability",
-			F:    testCtx.prometheusObservabilityTest,
+			F:    prometheusObservabilityTest,
 			SkipFlags: SkipFlags{
 				NoProm: true,
 			},
@@ -78,7 +78,7 @@ func makeNoVpcsSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 // 2. change breakout to some non default mode
 // 3. wait for all switches to be ready for 1 minute
 // 4. check that all agents report the breakout to be completed and that the port is in the expected mode
-func (testCtx *VPCPeeringTestCtx) breakoutTest(ctx context.Context) (bool, []RevertFunc, error) {
+func breakoutTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
 	// get all agents in the fabric
 	agents := &agentapi.AgentList{}
 	if err := testCtx.kube.List(ctx, agents); err != nil {
@@ -311,7 +311,7 @@ const (
 	AlloyCtrlComponent = "alloy-ctrl"
 )
 
-func (testCtx *VPCPeeringTestCtx) lokiObservabilityTest(ctx context.Context) (bool, []RevertFunc, error) {
+func lokiObservabilityTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
 	lokiEndpoint, _, env, err := getObservabilityQueryURLs(ctx, testCtx.kube)
 	if err != nil {
 		return true, nil, fmt.Errorf("error getting observability endpoints: %w", err)
@@ -588,7 +588,7 @@ func (testCtx *VPCPeeringTestCtx) lokiObservabilityTest(ctx context.Context) (bo
 	return false, nil, nil
 }
 
-func (testCtx *VPCPeeringTestCtx) prometheusObservabilityTest(ctx context.Context) (bool, []RevertFunc, error) {
+func prometheusObservabilityTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
 	_, prometheusEndpoint, env, err := getObservabilityQueryURLs(ctx, testCtx.kube)
 	if err != nil {
 		return true, nil, fmt.Errorf("error getting observability endpoints: %w", err)
