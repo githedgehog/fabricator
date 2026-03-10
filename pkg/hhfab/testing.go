@@ -340,6 +340,7 @@ type SetupVPCsOpts struct {
 	VPCMode           vpcapi.VPCMode
 	KeepPeerings      bool
 	HostBGPSubnet     bool
+	P2P               bool
 }
 
 func CreateOrUpdateVpc(ctx context.Context, kube client.Client, vpc *vpcapi.VPC) (bool, error) {
@@ -367,17 +368,45 @@ func CreateOrUpdateVpc(ctx context.Context, kube client.Client, vpc *vpcapi.VPC)
 	return changed, nil
 }
 
-func GetServerNetconfCmd(conn *wiringapi.Connection, vlan uint16, hashPolicy string) (string, error) {
+type ServerNetconfOpts struct {
+	VLAN       uint16
+	HashPolicy string
+	P2P        string
+}
+
+func GetServerNetconfCmd(conn *wiringapi.Connection, opts ServerNetconfOpts) (string, error) {
 	if conn == nil {
 		return "", fmt.Errorf("connection is nil")
 	}
 
+	if opts.P2P != "" {
+		if opts.VLAN != 0 || opts.HashPolicy != "" {
+			return "", fmt.Errorf("p2p option cannot be used with VLAN or HashPolicy")
+		}
+		if conn.Spec.Unbundled == nil {
+			return "", fmt.Errorf("p2p option cannot be used with connections other than unbundled")
+		}
+	}
+
 	var netconfCmd string
 
-	if conn.Spec.Unbundled != nil {
-		netconfCmd = fmt.Sprintf("vlan %d %s", vlan, conn.Spec.Unbundled.Link.Server.LocalPortName())
-	} else {
-		netconfCmd = fmt.Sprintf("bond %d %s", vlan, hashPolicy)
+	switch {
+	case opts.P2P != "":
+		p2p, err := netip.ParsePrefix(opts.P2P)
+		if err != nil {
+			return "", fmt.Errorf("invalid p2p prefix: %w", err)
+		}
+		if !p2p.IsValid() || !p2p.Addr().Is4() || p2p.Bits() != 31 {
+			return "", fmt.Errorf("p2p prefix must be a valid /31 IPv4 prefix: %s", opts.P2P)
+		}
+
+		localIP := p2p.Masked().String()
+		remoteIP := p2p.Masked().Addr().Next().String()
+		netconfCmd = fmt.Sprintf("p2p %s %s %s", conn.Spec.Unbundled.Link.Server.LocalPortName(), localIP, remoteIP)
+	case conn.Spec.Unbundled != nil:
+		netconfCmd = fmt.Sprintf("vlan %d %s", opts.VLAN, conn.Spec.Unbundled.Link.Server.LocalPortName())
+	default:
+		netconfCmd = fmt.Sprintf("bond %d %s", opts.VLAN, opts.HashPolicy)
 
 		if conn.Spec.Bundled != nil {
 			for _, link := range conn.Spec.Bundled.Links {
@@ -516,14 +545,53 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		return fmt.Errorf("invalid VPC mode %q, must be one of %v", opts.VPCMode, vpcapi.VPCModes)
 	}
 
-	slog.Info("Setting up VPCs and VPCAttachments",
-		"mode", opts.VPCMode,
-		"perSubnet", opts.ServersPerSubnet,
-		"perVPC", opts.SubnetsPerVPC,
-		"wait", opts.WaitSwitchesReady,
-		"cleanup", opts.ForceCleanup,
-		"hostBGP", opts.HostBGPSubnet,
-	)
+	cacheCancel, kube, err := getKubeClientWithCache(ctx, c.WorkDir)
+	if err != nil {
+		return fmt.Errorf("creating kube client: %w", err)
+	}
+	defer cacheCancel()
+
+	switchList := wiringapi.SwitchList{}
+	if err := kube.List(ctx, &switchList); err != nil {
+		return fmt.Errorf("listing switches: %w", err)
+	}
+	allCumulus := true
+	for _, sw := range switchList.Items {
+		sp := &wiringapi.SwitchProfile{}
+		if err := kube.Get(ctx, kclient.ObjectKey{Name: sw.Spec.Profile, Namespace: kmetav1.NamespaceDefault}, sp); err != nil {
+			return fmt.Errorf("getting switch profile %q: %w", sw.Spec.Profile, err)
+		}
+
+		if !slices.Contains(meta.NOSTypesCumulus, sp.Spec.NOSType) {
+			allCumulus = false
+
+			break
+		}
+	}
+	if opts.P2P && !allCumulus {
+		return fmt.Errorf("P2P mode requires all switches to be cumulus")
+	}
+	if !opts.P2P && allCumulus {
+		opts.P2P = true
+		slog.Warn("Forcing P2P mode since all switches are cumulus")
+	}
+
+	{
+		args := []any{
+			"mode", opts.VPCMode,
+			"perSubnet", opts.ServersPerSubnet,
+			"perVPC", opts.SubnetsPerVPC,
+			"wait", opts.WaitSwitchesReady,
+			"cleanup", opts.ForceCleanup,
+		}
+		if opts.HostBGPSubnet {
+			args = append(args, "hostBGP", opts.HostBGPSubnet)
+		}
+		if opts.P2P {
+			args = append(args, "p2p", opts.P2P)
+		}
+		slog.Info("Setting up VPCs and VPCAttachments", args...)
+	}
 
 	sshConfigs := map[string]*sshutil.Config{}
 	for _, vm := range vlab.VMs {
@@ -534,11 +602,6 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		}
 	}
 
-	cacheCancel, kube, err := getKubeClientWithCache(ctx, c.WorkDir)
-	if err != nil {
-		return fmt.Errorf("creating kube client: %w", err)
-	}
-	defer cacheCancel()
 	if !opts.KeepPeerings {
 		slog.Info("Removing all peerings (VPC, External and Gateway)")
 		delAllOpts := client.DeleteAllOfOptions{
@@ -611,10 +674,6 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	}
 
 	// Collect MCLAG switches for later (needed for hostbgp validation)
-	switchList := wiringapi.SwitchList{}
-	if err := kube.List(ctx, &switchList); err != nil {
-		return fmt.Errorf("listing switches: %w", err)
-	}
 	mclagSwitches := map[string]bool{}
 	for _, sw := range switchList.Items {
 		if sw.Spec.Redundancy.Type == meta.RedundancyTypeMCLAG {
@@ -685,8 +744,6 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 			hostBGPDoneForVPC = true
 		}
 
-		serverInSubnet++
-
 		var vpc *vpcapi.VPC
 		if len(vpcs) > 0 && vpcs[len(vpcs)-1].Name == vpcName {
 			vpc = vpcs[len(vpcs)-1]
@@ -722,13 +779,15 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 			var vlan uint16
 			dhcp := vpcapi.VPCDHCP{}
 			if !hostBGP {
-				dhcp.Enable = true
-				dhcp.Options = dhcpOpts
+				if !opts.P2P {
+					dhcp.Enable = true
+					dhcp.Options = dhcpOpts
+				}
+
 				vlan, ok = nextVLAN()
 				if !ok {
 					return fmt.Errorf("no more vlans available")
 				}
-
 			}
 
 			vpc.Spec.Subnets[subnetName] = &vpcapi.VPCSubnet{
@@ -739,21 +798,46 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 			}
 		}
 
+		p2p := netip.Prefix{}
+		if opts.P2P {
+			subnet, err := netip.ParsePrefix(vpc.Spec.Subnets[subnetName].Subnet)
+			if err != nil {
+				return fmt.Errorf("parsing vpc subnet %s/%s %q: %w", vpcName, subnetName, vpc.Spec.Subnets[subnetName].Subnet, err)
+			}
+
+			b := subnet.Masked().Addr().As4()
+			v := binary.BigEndian.Uint32(b[:])
+			v += 2 * uint32(serverInSubnet)
+			binary.BigEndian.PutUint32(b[:], v)
+			p2p = netip.PrefixFrom(netip.AddrFrom4(b), 31)
+		}
+
+		serverInSubnet++
+
 		expectedSubnet, err := netip.ParsePrefix(vpc.Spec.Subnets[subnetName].Subnet)
 		if err != nil {
 			return fmt.Errorf("parsing vpc subnet %s/%s %q: %w", vpcName, subnetName, vpc.Spec.Subnets[subnetName].Subnet, err)
 		}
 		expectedSubnets[server.Name] = expectedSubnet
+		if opts.P2P {
+			expectedSubnets[server.Name] = p2p
+		}
 		if hostBGP {
 			hostBGPServers[server.Name] = true
 		}
 
 		attachName := fmt.Sprintf("%s--%s--%s", conn.Name, vpcName, subnetName)
 		attachNames[attachName] = true
+		attachAnns := map[string]string{}
+		if opts.P2P {
+			attachAnns[vpcapi.AnnotationVPCAttachmentP2PLink] = p2p.String()
+		}
+
 		attach := &vpcapi.VPCAttachment{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      attachName,
-				Namespace: metav1.NamespaceDefault,
+				Name:        attachName,
+				Namespace:   metav1.NamespaceDefault,
+				Annotations: attachAnns,
 			},
 			Spec: vpcapi.VPCAttachmentSpec{
 				Connection: conn.Name,
@@ -772,8 +856,15 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 
 		if hostBGP {
 			confCmd, confErr = getServerHostBGPCmd(&conn, expectedSubnet, serverInSubnet)
+		} else if opts.P2P {
+			confCmd, confErr = GetServerNetconfCmd(&conn, ServerNetconfOpts{
+				P2P: p2p.String(),
+			})
 		} else {
-			confCmd, confErr = GetServerNetconfCmd(&conn, vlan, opts.HashPolicy)
+			confCmd, confErr = GetServerNetconfCmd(&conn, ServerNetconfOpts{
+				VLAN:       vlan,
+				HashPolicy: opts.HashPolicy,
+			})
 		}
 		if confErr != nil {
 			return fmt.Errorf("getting conf cmd for server %q: %w", server.Name, confErr)
@@ -836,6 +927,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	for _, attach := range attaches {
 		some := &vpcapi.VPCAttachment{ObjectMeta: metav1.ObjectMeta{Name: attach.Name, Namespace: attach.Namespace}}
 		res, err := ctrlutil.CreateOrUpdate(ctx, kube, some, func() error {
+			some.Annotations = attach.Annotations
 			some.Spec = attach.Spec
 			some.Default()
 
@@ -947,8 +1039,11 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 				if opts.VPCMode == vpcapi.VPCModeL2VNI && !isHostBGP {
 					expectedBits = expectedSubnet.Bits()
 				}
-				if !expectedSubnet.Contains(prefix.Addr()) || prefix.Bits() != expectedBits {
+				if !expectedSubnet.Contains(prefix.Addr()) {
 					return fmt.Errorf("unexpected acquired address %q, expected from %v", prefix.String(), expectedSubnet.String())
+				}
+				if prefix.Bits() != expectedBits {
+					return fmt.Errorf("unexpected acquired address %q, expected prefix length %d", prefix.String(), expectedBits)
 				}
 
 				slog.Info("Configured", "server", server.Name, "addr", prefix.String(), "conf", netconfs[server.Name])
@@ -1953,17 +2048,26 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 	if err := kube.List(ctx, switches); err != nil {
 		return fmt.Errorf("listing switches: %w", err)
 	}
-	allVS := len(switches.Items) > 0
+	allVirtual := len(switches.Items) > 0
+	allCumulusVX := true
 	for _, sw := range switches.Items {
-		if sw.Spec.Profile != meta.SwitchProfileVS {
-			allVS = false
-			break
+		if !slices.Contains(meta.VirtualSwitchProfiles, sw.Spec.Profile) {
+			allVirtual = false
+		}
+		if sw.Spec.Profile != meta.SwitchProfileCmlsVX {
+			allCumulusVX = false
 		}
 	}
-	if allVS {
-		slog.Warn("All switches are virtual, ignoring IPerf min speed")
-		// Seems like we're facing some iPerf speed issues on VS so disabling the check for the speed
-		opts.IPerfsMinSpeed = 0
+	if allVirtual {
+		if !allCumulusVX {
+			slog.Warn("All switches are virtual, ignoring IPerf min speed")
+			// Seems like we're facing some iPerf speed issues on VS so disabling the check for the speed
+			opts.IPerfsMinSpeed = 0
+		} else {
+			slog.Warn("All switches are Cumulus VX, setting IPerf min speed to 400")
+			// Seems like Cumulus VX shows 700+ Mbps on iPerf quite reliably
+			opts.IPerfsMinSpeed = 400
+		}
 	}
 
 	if opts.WaitSwitchesReady {

@@ -753,7 +753,10 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringOverlapNATTest(ctx context.Conte
 		if err != nil {
 			return fmt.Errorf("getting SSH config for %s: %w", targetServer, err)
 		}
-		netconfCmd, err := GetServerNetconfCmd(targetConn, originalVLAN, testCtx.setupOpts.HashPolicy)
+		netconfCmd, err := GetServerNetconfCmd(targetConn, ServerNetconfOpts{
+			VLAN:       originalVLAN,
+			HashPolicy: testCtx.setupOpts.HashPolicy,
+		})
 		if err != nil {
 			return fmt.Errorf("getting netconf command for %s: %w", targetServer, err)
 		}
@@ -798,7 +801,10 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringOverlapNATTest(ctx context.Conte
 		return false, reverts, fmt.Errorf("getting SSH config for server %s: %w", targetServer, err)
 	}
 
-	netconfCmd, err := GetServerNetconfCmd(targetConn, newVLAN, testCtx.setupOpts.HashPolicy)
+	netconfCmd, err := GetServerNetconfCmd(targetConn, ServerNetconfOpts{
+		VLAN:       newVLAN,
+		HashPolicy: testCtx.setupOpts.HashPolicy,
+	})
 	if err != nil {
 		return false, reverts, fmt.Errorf("getting netconf command for server %s: %w", targetServer, err)
 	}

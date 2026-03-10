@@ -974,7 +974,10 @@ func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (bool, []Re
 	if sshErr != nil {
 		return false, nil, fmt.Errorf("getting ssh config for server %s: %w", serverName, sshErr)
 	}
-	netconfCmd, netconfErr := GetServerNetconfCmd(conn, subnet.VLAN, testCtx.setupOpts.HashPolicy)
+	netconfCmd, netconfErr := GetServerNetconfCmd(conn, ServerNetconfOpts{
+		VLAN:       subnet.VLAN,
+		HashPolicy: testCtx.setupOpts.HashPolicy,
+	})
 	if netconfErr != nil {
 		return false, nil, fmt.Errorf("getting netconf command for server %s: %w", serverName, netconfErr)
 	}
