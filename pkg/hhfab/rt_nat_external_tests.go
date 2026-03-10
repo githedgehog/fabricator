@@ -137,7 +137,7 @@ func (testCtx *VPCPeeringTestCtx) testNATExternalConnectivity(ctx context.Contex
 //	    Expose:
 //	      Ips:
 //	        Cidr:  0.0.0.0/0
-func (testCtx *VPCPeeringTestCtx) bgpExternalNoNatTest(ctx context.Context) (bool, []RevertFunc, error) {
+func bgpExternalNoNatTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
 	if testCtx.extName == "" {
 		return true, nil, fmt.Errorf("no BGP external available for testing") //nolint:goerr113
 	}
@@ -194,7 +194,7 @@ func (testCtx *VPCPeeringTestCtx) bgpExternalNoNatTest(ctx context.Context) (boo
 //	    Expose:
 //	      Ips:
 //	        Cidr:  0.0.0.0/0
-func (testCtx *VPCPeeringTestCtx) bgpExternalStaticNATTest(ctx context.Context) (bool, []RevertFunc, error) {
+func bgpExternalStaticNATTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
 	if testCtx.extName == "" {
 		return true, nil, fmt.Errorf("no BGP external available for testing") //nolint:goerr113
 	}
@@ -269,7 +269,7 @@ func (testCtx *VPCPeeringTestCtx) bgpExternalStaticNATTest(ctx context.Context) 
 //	    Expose:
 //	      Ips:
 //	        Cidr:  0.0.0.0/0
-func (testCtx *VPCPeeringTestCtx) bgpExternalMasqueradeNATTest(ctx context.Context) (bool, []RevertFunc, error) {
+func bgpExternalMasqueradeNATTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
 	if testCtx.extName == "" {
 		return true, nil, fmt.Errorf("no BGP external available for testing") //nolint:goerr113
 	}
@@ -352,7 +352,7 @@ func (testCtx *VPCPeeringTestCtx) bgpExternalMasqueradeNATTest(ctx context.Conte
 //	          - Protocol: TCP
 //	            Port: 5201
 //	            As: 15201
-func (testCtx *VPCPeeringTestCtx) bgpExternalPortForwardNATTest(ctx context.Context) (bool, []RevertFunc, error) {
+func bgpExternalPortForwardNATTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
 	if testCtx.extName == "" {
 		return true, nil, fmt.Errorf("no BGP external available for testing") //nolint:goerr113
 	}
@@ -456,7 +456,7 @@ func (testCtx *VPCPeeringTestCtx) bgpExternalPortForwardNATTest(ctx context.Cont
 //	    Expose:
 //	      Ips:
 //	        Cidr:  0.0.0.0/0
-func (testCtx *VPCPeeringTestCtx) bgpExternalMasqueradePortForwardNATTest(ctx context.Context) (bool, []RevertFunc, error) {
+func bgpExternalMasqueradePortForwardNATTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
 	if testCtx.extName == "" {
 		return true, nil, fmt.Errorf("no BGP external available for testing") //nolint:goerr113
 	}
@@ -530,7 +530,7 @@ func (testCtx *VPCPeeringTestCtx) bgpExternalMasqueradePortForwardNATTest(ctx co
 //	    Expose:
 //	      Ips:
 //	        Cidr:  0.0.0.0/0
-func (testCtx *VPCPeeringTestCtx) staticExternalNoNATGatewayTest(ctx context.Context) (bool, []RevertFunc, error) {
+func staticExternalNoNATGatewayTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
 	if testCtx.staticExtName == "" {
 		return true, nil, fmt.Errorf("no static external available for testing") //nolint:goerr113
 	}
@@ -587,7 +587,7 @@ func (testCtx *VPCPeeringTestCtx) staticExternalNoNATGatewayTest(ctx context.Con
 //	    Expose:
 //	      Ips:
 //	        Cidr:  0.0.0.0/0
-func (testCtx *VPCPeeringTestCtx) staticExternalStaticNATGatewayTest(ctx context.Context) (bool, []RevertFunc, error) {
+func staticExternalStaticNATGatewayTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
 	if testCtx.staticExtName == "" {
 		return true, nil, fmt.Errorf("no static external available for testing") //nolint:goerr113
 	}
@@ -662,7 +662,7 @@ func (testCtx *VPCPeeringTestCtx) staticExternalStaticNATGatewayTest(ctx context
 //	    Expose:
 //	      Ips:
 //	        Cidr:  0.0.0.0/0
-func (testCtx *VPCPeeringTestCtx) staticExternalMasqueradeNATGatewayTest(ctx context.Context) (bool, []RevertFunc, error) {
+func staticExternalMasqueradeNATGatewayTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
 	if testCtx.staticExtName == "" {
 		return true, nil, fmt.Errorf("no static external available for testing") //nolint:goerr113
 	}
@@ -805,7 +805,7 @@ func (testCtx *VPCPeeringTestCtx) testIperfToExternal(ctx context.Context, vpc *
 //	          - Protocol: TCP
 //	            Port: 5201
 //	            As: 15201
-func (testCtx *VPCPeeringTestCtx) staticExternalPortForwardNATGatewayTest(ctx context.Context) (bool, []RevertFunc, error) {
+func staticExternalPortForwardNATGatewayTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
 	if testCtx.staticExtName == "" {
 		return true, nil, fmt.Errorf("no static external available for testing") //nolint:goerr113
 	}
@@ -909,7 +909,7 @@ func (testCtx *VPCPeeringTestCtx) staticExternalPortForwardNATGatewayTest(ctx co
 //	    Expose:
 //	      Ips:
 //	        Cidr:  0.0.0.0/0
-func (testCtx *VPCPeeringTestCtx) staticExternalMasqueradePortForwardNATGatewayTest(ctx context.Context) (bool, []RevertFunc, error) {
+func staticExternalMasqueradePortForwardNATGatewayTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
 	if testCtx.staticExtName == "" {
 		return true, nil, fmt.Errorf("no static external available for testing") //nolint:goerr113
 	}
@@ -971,11 +971,11 @@ func (testCtx *VPCPeeringTestCtx) staticExternalMasqueradePortForwardNATGatewayT
 }
 
 // getExternalNATTestCases returns the external NAT test cases
-func getExternalNATTestCases(testCtx *VPCPeeringTestCtx) []JUnitTestCase {
+func getExternalNATTestCases() []JUnitTestCase {
 	return []JUnitTestCase{
 		{
 			Name: "Gateway Peering BGP External No NAT",
-			F:    testCtx.bgpExternalNoNatTest,
+			F:    bgpExternalNoNatTest,
 			SkipFlags: SkipFlags{
 				NoGateway:      true,
 				NoBGPExternals: true,
@@ -983,7 +983,7 @@ func getExternalNATTestCases(testCtx *VPCPeeringTestCtx) []JUnitTestCase {
 		},
 		{
 			Name: "Gateway Peering BGP External Static NAT",
-			F:    testCtx.bgpExternalStaticNATTest,
+			F:    bgpExternalStaticNATTest,
 			SkipFlags: SkipFlags{
 				NoGateway:      true,
 				NoBGPExternals: true,
@@ -991,7 +991,7 @@ func getExternalNATTestCases(testCtx *VPCPeeringTestCtx) []JUnitTestCase {
 		},
 		{
 			Name: "Gateway Peering BGP External Masquerade NAT",
-			F:    testCtx.bgpExternalMasqueradeNATTest,
+			F:    bgpExternalMasqueradeNATTest,
 			SkipFlags: SkipFlags{
 				NoGateway:      true,
 				NoBGPExternals: true,
@@ -999,7 +999,7 @@ func getExternalNATTestCases(testCtx *VPCPeeringTestCtx) []JUnitTestCase {
 		},
 		{
 			Name: "Gateway Peering BGP External Port Forward NAT",
-			F:    testCtx.bgpExternalPortForwardNATTest,
+			F:    bgpExternalPortForwardNATTest,
 			SkipFlags: SkipFlags{
 				NoGateway:      true,
 				NoBGPExternals: true,
@@ -1007,7 +1007,7 @@ func getExternalNATTestCases(testCtx *VPCPeeringTestCtx) []JUnitTestCase {
 		},
 		{
 			Name: "Gateway Peering BGP External Masquerade and Port Forward NAT",
-			F:    testCtx.bgpExternalMasqueradePortForwardNATTest,
+			F:    bgpExternalMasqueradePortForwardNATTest,
 			SkipFlags: SkipFlags{
 				NoGateway:      true,
 				NoBGPExternals: true,
@@ -1015,7 +1015,7 @@ func getExternalNATTestCases(testCtx *VPCPeeringTestCtx) []JUnitTestCase {
 		},
 		{
 			Name: "Gateway Peering Static External No NAT",
-			F:    testCtx.staticExternalNoNATGatewayTest,
+			F:    staticExternalNoNATGatewayTest,
 			SkipFlags: SkipFlags{
 				NoGateway:         true,
 				NoStaticExternals: true,
@@ -1023,7 +1023,7 @@ func getExternalNATTestCases(testCtx *VPCPeeringTestCtx) []JUnitTestCase {
 		},
 		{
 			Name: "Gateway Peering Static External Static NAT",
-			F:    testCtx.staticExternalStaticNATGatewayTest,
+			F:    staticExternalStaticNATGatewayTest,
 			SkipFlags: SkipFlags{
 				NoGateway:         true,
 				NoStaticExternals: true,
@@ -1031,7 +1031,7 @@ func getExternalNATTestCases(testCtx *VPCPeeringTestCtx) []JUnitTestCase {
 		},
 		{
 			Name: "Gateway Peering Static External Masquerade NAT",
-			F:    testCtx.staticExternalMasqueradeNATGatewayTest,
+			F:    staticExternalMasqueradeNATGatewayTest,
 			SkipFlags: SkipFlags{
 				NoGateway:         true,
 				NoStaticExternals: true,
@@ -1039,7 +1039,7 @@ func getExternalNATTestCases(testCtx *VPCPeeringTestCtx) []JUnitTestCase {
 		},
 		{
 			Name: "Gateway Peering Static External Port Forward NAT",
-			F:    testCtx.staticExternalPortForwardNATGatewayTest,
+			F:    staticExternalPortForwardNATGatewayTest,
 			SkipFlags: SkipFlags{
 				NoGateway:         true,
 				NoStaticExternals: true,
@@ -1047,7 +1047,7 @@ func getExternalNATTestCases(testCtx *VPCPeeringTestCtx) []JUnitTestCase {
 		},
 		{
 			Name: "Gateway Peering Static External Masquerade and Port Forward NAT",
-			F:    testCtx.staticExternalMasqueradePortForwardNATGatewayTest,
+			F:    staticExternalMasqueradePortForwardNATGatewayTest,
 			SkipFlags: SkipFlags{
 				NoGateway:         true,
 				NoStaticExternals: true,
