@@ -651,7 +651,7 @@ func recapAndReport(results []JUnitTestSuite, rtOtps ReleaseTestOpts) error {
 	return nil
 }
 
-func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOtps ReleaseTestOpts) error {
+func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOpts ReleaseTestOpts) error {
 	testStart := time.Now()
 
 	cacheCancel, kube, err := getKubeClientWithCache(ctx, vlabCfg.WorkDir)
@@ -681,11 +681,11 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 		SubnetsPerVPC:     subnetsPerVpc,
 		VLANNamespace:     "default",
 		IPv4Namespace:     "default",
-		HashPolicy:        rtOtps.HashPolicy,
-		VPCMode:           rtOtps.VPCMode,
+		HashPolicy:        rtOpts.HashPolicy,
+		VPCMode:           rtOpts.VPCMode,
 	}
 
-	testCtx := makeTestCtx(ctx, kube, setupOpts, vlabCfg, vlab, false, rtOtps)
+	testCtx := makeTestCtx(ctx, kube, setupOpts, vlabCfg, vlab, false, rtOpts)
 	var suites []*JUnitTestSuite
 	noVpcSuite := makeNoVpcsSuite(testCtx)
 	singleVpcSuite := makeSingleVPCSuite(testCtx)
@@ -693,13 +693,13 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 	multiVPCSingleSubnetSuite := makeMultiVPCSingleSubnetSuite(testCtx)
 	ortSuite := makeOnReadyTestSuite(testCtx)
 
-	if rtOtps.OnReadyTest {
+	if rtOpts.OnReadyTest {
 		suites = []*JUnitTestSuite{ortSuite}
 	} else {
 		suites = []*JUnitTestSuite{noVpcSuite, singleVpcSuite, multiVPCMultiSubnetSuite, multiVPCSingleSubnetSuite}
 	}
 
-	if rtOtps.ListTests {
+	if rtOpts.ListTests {
 		for _, suite := range suites {
 			printTestSuite(suite)
 		}
@@ -708,7 +708,7 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 	}
 
 	regexesCompiled := make([]*regexp.Regexp, 0)
-	for _, regex := range rtOtps.Regexes {
+	for _, regex := range rtOpts.Regexes {
 		compiled, err := regexp.Compile(regex)
 		if err != nil {
 			return fmt.Errorf("compiling regex %s: %w", regex, err)
@@ -718,7 +718,7 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 
 	// detect if any of the skipFlags conditions are true
 	skipFlags := SkipFlags{
-		ExtendedOnly: rtOtps.Extended,
+		ExtendedOnly: rtOpts.Extended,
 		NoServers:    noServers,
 	}
 	connList := &wiringapi.ConnectionList{}
@@ -970,13 +970,13 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 	results := []JUnitTestSuite{}
 	testCtx.noSetup = true
 
-	if rtOtps.OnReadyTest {
-		ortResults, err := selectAndRunSuite(ctx, testCtx, ortSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
-		if err != nil && rtOtps.FailFast {
+	if rtOpts.OnReadyTest {
+		ortResults, err := selectAndRunSuite(ctx, testCtx, ortSuite, regexesCompiled, rtOpts.InvertRegex, skipFlags)
+		if err != nil && rtOpts.FailFast {
 			return fmt.Errorf("running on-ready test suite: %w", err)
 		}
 		results = append(results, *ortResults)
-		if err := recapAndReport(results, rtOtps); err != nil {
+		if err := recapAndReport(results, rtOpts); err != nil {
 			return fmt.Errorf("recapping and reporting results: %w", err)
 		}
 		slog.Info("OnReady Test Suite completed", "duration", time.Since(testStart).String())
@@ -987,35 +987,35 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 		return nil
 	}
 
-	noVpcResults, err := selectAndRunSuite(ctx, testCtx, noVpcSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
-	if err != nil && rtOtps.FailFast {
+	noVpcResults, err := selectAndRunSuite(ctx, testCtx, noVpcSuite, regexesCompiled, rtOpts.InvertRegex, skipFlags)
+	if err != nil && rtOpts.FailFast {
 		return fmt.Errorf("running no VPC suite: %w", err)
 	}
 	results = append(results, *noVpcResults)
 
 	testCtx.noSetup = false
-	singleVpcResults, err := selectAndRunSuite(ctx, testCtx, singleVpcSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
-	if err != nil && rtOtps.FailFast {
+	singleVpcResults, err := selectAndRunSuite(ctx, testCtx, singleVpcSuite, regexesCompiled, rtOpts.InvertRegex, skipFlags)
+	if err != nil && rtOpts.FailFast {
 		return fmt.Errorf("running single VPC suite: %w", err)
 	}
 	results = append(results, *singleVpcResults)
 
 	testCtx.setupOpts.ServersPerSubnet = 1
-	multiVpcResults, err := selectAndRunSuite(ctx, testCtx, multiVPCMultiSubnetSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
-	if err != nil && rtOtps.FailFast {
+	multiVpcResults, err := selectAndRunSuite(ctx, testCtx, multiVPCMultiSubnetSuite, regexesCompiled, rtOpts.InvertRegex, skipFlags)
+	if err != nil && rtOpts.FailFast {
 		return fmt.Errorf("running multi VPC suite: %w", err)
 	}
 	results = append(results, *multiVpcResults)
 
 	testCtx.setupOpts.SubnetsPerVPC = 1
 	testCtx.wipeBetweenTests = true
-	basicResults, err := selectAndRunSuite(ctx, testCtx, multiVPCSingleSubnetSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
-	if err != nil && rtOtps.FailFast {
+	basicResults, err := selectAndRunSuite(ctx, testCtx, multiVPCSingleSubnetSuite, regexesCompiled, rtOpts.InvertRegex, skipFlags)
+	if err != nil && rtOpts.FailFast {
 		return fmt.Errorf("running basic VPC suite: %w", err)
 	}
 	results = append(results, *basicResults)
 
-	if err := recapAndReport(results, rtOtps); err != nil {
+	if err := recapAndReport(results, rtOpts); err != nil {
 		return fmt.Errorf("recapping and reporting results: %w", err)
 	}
 
