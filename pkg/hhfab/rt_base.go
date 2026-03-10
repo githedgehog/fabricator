@@ -266,7 +266,7 @@ func pauseOnFailure(ctx context.Context) error {
 
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
 		// CI environment - pause for a long time to allow debugging
-		pauseDuration := 60 * time.Minute
+		pauseDuration := 180 * time.Minute
 		slog.Info("Test will automatically continue due to the non-interactive env after the pause duration", "duration", pauseDuration)
 		slog.Info("You can connect to debug the VLAB state during this pause")
 
