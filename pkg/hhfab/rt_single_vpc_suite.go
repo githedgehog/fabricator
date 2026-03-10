@@ -409,6 +409,14 @@ func (testCtx *VPCPeeringTestCtx) gatewayFailoverTest(ctx context.Context) (bool
 	if err := testCtx.kube.Create(ctx, gwGroup); err != nil {
 		return false, nil, fmt.Errorf("creating gateway group %s: %w", failoverTestGroup, err)
 	}
+	reverts := []RevertFunc{func(ctx context.Context) error {
+		slog.Debug("Deleting failover test gateway group", "group", failoverTestGroup)
+		if err := testCtx.kube.Delete(ctx, gwGroup); err != nil {
+			return fmt.Errorf("deleting gateway group %s: %w", failoverTestGroup, err)
+		}
+
+		return nil
+	}}
 
 	// store original group specs for revert (deep copy to avoid modification by append)
 	originalGroups := make(map[string][]gwapi.GatewayGroupMembership)
@@ -428,11 +436,31 @@ func (testCtx *VPCPeeringTestCtx) gatewayFailoverTest(ctx context.Context) (bool
 		gwapi.GatewayGroupMembership{Name: failoverTestGroup, Priority: backupPriority})
 
 	if err := testCtx.kube.Update(ctx, &gateways.Items[0]); err != nil {
-		return false, nil, fmt.Errorf("updating gateway %s group membership: %w", gateways.Items[0].Name, err)
+		return false, reverts, fmt.Errorf("updating gateway %s group membership: %w", gateways.Items[0].Name, err)
 	}
+
+	restoreGwGroup := func(ctx context.Context, gw *gwapi.Gateway) error { // re-fetch to get latest version
+		if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: gw.Namespace, Name: gw.Name}, gw); err != nil {
+			return fmt.Errorf("fetching gateway %s for restore: %w", gw.Name, err)
+		}
+		gw.Spec.Groups = originalGroups[gw.Name]
+		if err := testCtx.kube.Update(ctx, gw); err != nil {
+			return fmt.Errorf("restoring gateway %s group membership: %w", gw.Name, err)
+		}
+
+		return nil
+	}
+
+	reverts = append(reverts, func(ctx context.Context) error {
+		return restoreGwGroup(ctx, &gateways.Items[0])
+	})
+
 	if err := testCtx.kube.Update(ctx, &gateways.Items[1]); err != nil {
-		return false, nil, fmt.Errorf("updating gateway %s group membership: %w", gateways.Items[1].Name, err)
+		return false, reverts, fmt.Errorf("updating gateway %s group membership: %w", gateways.Items[1].Name, err)
 	}
+	reverts = append(reverts, func(ctx context.Context) error {
+		return restoreGwGroup(ctx, &gateways.Items[1])
+	})
 
 	// set up gateway peering between the first two VPCs using the custom group
 	slog.Debug("Setting up gateway peering for failover test", "group", failoverTestGroup)
@@ -446,8 +474,35 @@ func (testCtx *VPCPeeringTestCtx) gatewayFailoverTest(ctx context.Context) (bool
 	}
 
 	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, gwPeerings, true); err != nil {
-		return false, nil, fmt.Errorf("setting up gateway peerings: %w", err)
+		return false, reverts, fmt.Errorf("setting up gateway peerings: %w", err)
 	}
+
+	reverts = append(reverts, func(ctx context.Context) error {
+		slog.Debug("Removing gateway peering with custom group", "group", failoverTestGroup)
+		vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec, 0)
+		externalPeerings := make(map[string]*vpcapi.ExternalPeeringSpec, 0)
+		gwPeerings := make(map[string]*gwapi.PeeringSpec, 0)
+		if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, gwPeerings, true); err != nil {
+			return fmt.Errorf("deleting gateway peering with custom group: %w", err)
+		}
+
+		return nil
+	})
+
+	// HACK: test connectivity after restoring spines as part of the reverts
+	reverts = append(reverts, func(ctx context.Context) error {
+		slog.Debug("Waiting for agents to converge...")
+		time.Sleep(10 * time.Second)
+		if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
+			return fmt.Errorf("waiting in reverts before testing connectivity: %w", err)
+		}
+		slog.Debug("Testing connectivity after re-enabling spines and agents")
+		if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
+			return fmt.Errorf("connectivity test after re-enabling spines and agents: %w", err)
+		}
+
+		return nil
+	})
 
 	// the target is the gateway with highest priority (we set it explicitly above)
 	targetGateway := gateways.Items[0].Name
@@ -456,7 +511,7 @@ func (testCtx *VPCPeeringTestCtx) gatewayFailoverTest(ctx context.Context) (bool
 	// find all gateway connections for the target gateway
 	conns := &wiringapi.ConnectionList{}
 	if err := testCtx.kube.List(ctx, conns, kclient.MatchingLabels{wiringapi.LabelConnectionType: wiringapi.ConnectionTypeGateway}); err != nil {
-		return false, nil, fmt.Errorf("listing gateway connections: %w", err)
+		return false, reverts, fmt.Errorf("listing gateway connections: %w", err)
 	}
 
 	// collect spine ports to shut down and their SSH configs
@@ -489,20 +544,20 @@ func (testCtx *VPCPeeringTestCtx) gatewayFailoverTest(ctx context.Context) (bool
 			if _, ok := spinesSSH[spineName]; !ok {
 				sshCfg, sshErr := testCtx.getSSH(ctx, spineName)
 				if sshErr != nil {
-					return false, nil, fmt.Errorf("getting ssh config for spine switch %s: %w", spineName, sshErr)
+					return false, reverts, fmt.Errorf("getting ssh config for spine switch %s: %w", spineName, sshErr)
 				}
 				spinesSSH[spineName] = sshCfg
 
 				// get switch and profile for port mapping
 				sw := &wiringapi.Switch{}
 				if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: spineName}, sw); err != nil {
-					return false, nil, fmt.Errorf("getting switch %s: %w", spineName, err)
+					return false, reverts, fmt.Errorf("getting switch %s: %w", spineName, err)
 				}
 				spineSpecs[spineName] = &sw.Spec
 
 				profile := &wiringapi.SwitchProfile{}
 				if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: sw.Spec.Profile}, profile); err != nil {
-					return false, nil, fmt.Errorf("getting switch profile %s: %w", sw.Spec.Profile, err)
+					return false, reverts, fmt.Errorf("getting switch profile %s: %w", sw.Spec.Profile, err)
 				}
 				spineProfiles[spineName] = profile
 			}
@@ -510,11 +565,11 @@ func (testCtx *VPCPeeringTestCtx) gatewayFailoverTest(ctx context.Context) (bool
 			// map API port name to NOS port name
 			portMap, err := spineProfiles[spineName].Spec.GetAPI2NOSPortsFor(spineSpecs[spineName])
 			if err != nil {
-				return false, nil, fmt.Errorf("getting API2NOS ports for switch %s: %w", spineName, err)
+				return false, reverts, fmt.Errorf("getting API2NOS ports for switch %s: %w", spineName, err)
 			}
 			nosPortName, ok := portMap[spinePortName]
 			if !ok {
-				return false, nil, fmt.Errorf("port %s not found in switch profile for switch %s", spinePortName, spineName) //nolint:goerr113
+				return false, reverts, fmt.Errorf("port %s not found in switch profile for switch %s", spinePortName, spineName) //nolint:goerr113
 			}
 
 			spinePorts = append(spinePorts, spinePort{spineName: spineName, nosPortName: nosPortName})
@@ -522,28 +577,36 @@ func (testCtx *VPCPeeringTestCtx) gatewayFailoverTest(ctx context.Context) (bool
 	}
 
 	if len(spinePorts) == 0 {
-		return false, nil, fmt.Errorf("no spine ports found for gateway %s", targetGateway) //nolint:goerr113
+		return false, reverts, fmt.Errorf("no spine ports found for gateway %s", targetGateway) //nolint:goerr113
 	}
 
 	slog.Debug("Found spine ports to shut down", "gateway", targetGateway, "ports", len(spinePorts))
 
 	// disable agent on all involved spines to prevent ports up
-	// track which spines were disabled so we can roll back on error
-	disabledSpines := make([]string, 0, len(spinesSSH))
 	for spineName, spineSSH := range spinesSSH {
 		slog.Debug("Disabling HH agent on spine", "spine", spineName)
 		if err := changeAgentStatus(ctx, spineSSH, spineName, false); err != nil {
-			// rollback: re-enable agents on already-disabled spines to avoid leaving them in a bad state
-			for _, ds := range disabledSpines {
-				slog.Debug("Re-enabling HH agent on spine after error", "spine", ds)
-				if reErr := changeAgentStatus(ctx, spinesSSH[ds], ds, true); reErr != nil {
-					slog.Warn("Failed to re-enable HH agent on spine during rollback", "spine", ds, "error", reErr)
+			return false, reverts, fmt.Errorf("disabling HH agent on spine %s: %w", spineName, err)
+		}
+		reverts = append(reverts, func(ctx context.Context) error {
+			maxRetries := 5
+			sleepTime := time.Second * 5
+			var err error
+			for i := range maxRetries {
+				err = changeAgentStatus(ctx, spineSSH, spineName, true)
+				if err != nil {
+					slog.Error("Enabling HH agent", "switch", spineName, "error", err)
+					if i < maxRetries-1 {
+						slog.Warn("Retrying", "delay", sleepTime)
+						time.Sleep(sleepTime)
+					}
+				} else {
+					return nil
 				}
 			}
 
-			return false, nil, fmt.Errorf("disabling HH agent on spine %s: %w", spineName, err)
-		}
-		disabledSpines = append(disabledSpines, spineName)
+			return fmt.Errorf("failed to re-enable HH agent on spine %s after %d attempts: %w", spineName, maxRetries, err)
+		})
 	}
 
 	// shut down all spine ports connected to the target gateway
@@ -568,82 +631,7 @@ func (testCtx *VPCPeeringTestCtx) gatewayFailoverTest(ctx context.Context) (bool
 		}
 	}
 
-	// re-enable agents on all spines
-	for spineName, spineSSH := range spinesSSH {
-		maxRetries := 5
-		sleepTime := time.Second * 5
-		enabled := false
-		for i := range maxRetries {
-			if err := changeAgentStatus(ctx, spineSSH, spineName, true); err != nil {
-				slog.Error("Enabling HH agent", "switch", spineName, "error", err)
-				if i < maxRetries-1 {
-					slog.Warn("Retrying", "delay", sleepTime)
-					time.Sleep(sleepTime)
-				}
-			} else {
-				enabled = true
-
-				break
-			}
-		}
-		if enabled {
-			continue
-		}
-		// if we get here, we failed to enable the agent
-		if returnErr != nil {
-			returnErr = errors.Join(returnErr, fmt.Errorf("could not enable HH agent on switch %s after %d attempts", spineName, maxRetries)) //nolint:goerr113
-		} else {
-			returnErr = fmt.Errorf("could not enable HH agent on switch %s after %d attempts", spineName, maxRetries) //nolint:goerr113
-		}
-	}
-
-	// test connectivity after revert (both gateways should be working)
-	if returnErr == nil {
-		// BFD provides sub-second failover detection; 10s buffer for agent restart + route reconvergence
-		slog.Debug("Waiting for fabric to converge after revert")
-		time.Sleep(10 * time.Second)
-
-		slog.Debug("Testing connectivity after revert")
-		if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
-			returnErr = fmt.Errorf("connectivity test after revert: %w", err)
-		}
-	}
-
-	// restore original gateway group memberships
-	slog.Debug("Restoring original gateway group memberships")
-	for i := range gateways.Items {
-		gw := &gateways.Items[i]
-		// re-fetch to get latest version
-		if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: gw.Namespace, Name: gw.Name}, gw); err != nil {
-			if returnErr != nil {
-				returnErr = errors.Join(returnErr, fmt.Errorf("fetching gateway %s for restore: %w", gw.Name, err))
-			} else {
-				returnErr = fmt.Errorf("fetching gateway %s for restore: %w", gw.Name, err)
-			}
-
-			continue
-		}
-		gw.Spec.Groups = originalGroups[gw.Name]
-		if err := testCtx.kube.Update(ctx, gw); err != nil {
-			if returnErr != nil {
-				returnErr = errors.Join(returnErr, fmt.Errorf("restoring gateway %s group membership: %w", gw.Name, err))
-			} else {
-				returnErr = fmt.Errorf("restoring gateway %s group membership: %w", gw.Name, err)
-			}
-		}
-	}
-
-	// delete the custom gateway group
-	slog.Debug("Deleting failover test gateway group", "group", failoverTestGroup)
-	if err := testCtx.kube.Delete(ctx, gwGroup); err != nil {
-		if returnErr != nil {
-			returnErr = errors.Join(returnErr, fmt.Errorf("deleting gateway group %s: %w", failoverTestGroup, err))
-		} else {
-			returnErr = fmt.Errorf("deleting gateway group %s: %w", failoverTestGroup, err)
-		}
-	}
-
-	return false, nil, returnErr
+	return false, reverts, returnErr
 }
 
 // Basic test for mesh failover.
