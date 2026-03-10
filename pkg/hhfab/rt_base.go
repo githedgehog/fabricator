@@ -69,11 +69,11 @@ type VPCPeeringTestCtx struct {
 // to be run after the test is done, regardless of whether it succeeded or failed.
 type RevertFunc func(context.Context) error
 
-// A test function is a function that runs a test. It takes a context and returns
+// A test function is a function that runs a test. It takes a go context and a test context, and returns
 // a boolean indicating whether the test was skipped (e.g. due to missing resources),
 // a list of revert functions to be run after the test, and an error if the test failed.
 // note that the error contains the reason for the skip if the test was skipped.
-type TestFunc func(context.Context) (bool, []RevertFunc, error)
+type TestFunc func(context.Context, *VPCPeeringTestCtx) (bool, []RevertFunc, error)
 
 // Utilities and suite runners
 
@@ -350,7 +350,7 @@ func doRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 		}
 		prevRevertsFailed = false
 		testStart := time.Now()
-		skip, reverts, err := test.F(ctx)
+		skip, reverts, err := test.F(ctx, testCtx)
 		ts.TestCases[i].Time = time.Since(testStart).Seconds()
 		ranSomeTests = true
 		// logic is getting complex, so let's make a recap:
@@ -610,6 +610,27 @@ func recapAndReport(results []JUnitTestSuite, rtOtps ReleaseTestOpts) error {
 func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOpts ReleaseTestOpts) error {
 	testStart := time.Now()
 
+	var suites []*JUnitTestSuite
+	noVpcSuite := makeNoVpcsSuite()
+	singleVpcSuite := makeSingleVPCSuite()
+	multiVPCMultiSubnetSuite := makeMultiVPCMultiSubnetSuite()
+	multiVPCSingleSubnetSuite := makeMultiVPCSingleSubnetSuite()
+	ortSuite := makeOnReadyTestSuite()
+
+	if rtOpts.OnReadyTest {
+		suites = []*JUnitTestSuite{ortSuite}
+	} else {
+		suites = []*JUnitTestSuite{noVpcSuite, singleVpcSuite, multiVPCMultiSubnetSuite, multiVPCSingleSubnetSuite}
+	}
+
+	if rtOpts.ListTests {
+		for _, suite := range suites {
+			printTestSuite(suite)
+		}
+
+		return nil
+	}
+
 	cacheCancel, kube, err := getKubeClientWithCache(ctx, vlabCfg.WorkDir)
 	if err != nil {
 		return err
@@ -642,26 +663,6 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOp
 	}
 
 	testCtx := makeTestCtx(ctx, kube, setupOpts, vlabCfg, vlab, false, rtOpts)
-	var suites []*JUnitTestSuite
-	noVpcSuite := makeNoVpcsSuite(testCtx)
-	singleVpcSuite := makeSingleVPCSuite(testCtx)
-	multiVPCMultiSubnetSuite := makeMultiVPCMultiSubnetSuite(testCtx)
-	multiVPCSingleSubnetSuite := makeMultiVPCSingleSubnetSuite(testCtx)
-	ortSuite := makeOnReadyTestSuite(testCtx)
-
-	if rtOpts.OnReadyTest {
-		suites = []*JUnitTestSuite{ortSuite}
-	} else {
-		suites = []*JUnitTestSuite{noVpcSuite, singleVpcSuite, multiVPCMultiSubnetSuite, multiVPCSingleSubnetSuite}
-	}
-
-	if rtOpts.ListTests {
-		for _, suite := range suites {
-			printTestSuite(suite)
-		}
-
-		return nil
-	}
 
 	regexesCompiled := make([]*regexp.Regexp, 0)
 	for _, regex := range rtOpts.Regexes {

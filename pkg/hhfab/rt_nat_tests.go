@@ -329,7 +329,7 @@ func (testCtx *VPCPeeringTestCtx) testNATGatewayConnectivity(
 //		          Cidr:  10.50.2.0/24
 //
 // NOTE: Masquerade NAT on both sides of a peering is not supported (see dataplane#1248)
-func (testCtx *VPCPeeringTestCtx) gatewayPeeringMasqueradeSourceNATTest(ctx context.Context) (bool, []RevertFunc, error) {
+func gatewayPeeringMasqueradeSourceNATTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
 	vpcs := &vpcapi.VPCList{}
 	if err := testCtx.kube.List(ctx, vpcs); err != nil {
 		return false, nil, fmt.Errorf("listing VPCs: %w", err)
@@ -395,7 +395,7 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringMasqueradeSourceNATTest(ctx cont
 //	    Expose:
 //	      Ips:
 //	        Cidr:  10.50.2.0/24
-func (testCtx *VPCPeeringTestCtx) gatewayPeeringStaticSourceNATTest(ctx context.Context) (bool, []RevertFunc, error) {
+func gatewayPeeringStaticSourceNATTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
 	vpcs := &vpcapi.VPCList{}
 	if err := testCtx.kube.List(ctx, vpcs); err != nil {
 		return false, nil, fmt.Errorf("listing VPCs: %w", err)
@@ -461,7 +461,7 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringStaticSourceNATTest(ctx context.
 //	        Cidr:  10.50.2.0/24
 //	      Nat:
 //	        Static:
-func (testCtx *VPCPeeringTestCtx) gatewayPeeringBidirectionalStaticNATTest(ctx context.Context) (bool, []RevertFunc, error) {
+func gatewayPeeringBidirectionalStaticNATTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
 	vpcs := &vpcapi.VPCList{}
 	if err := testCtx.kube.List(ctx, vpcs); err != nil {
 		return false, nil, fmt.Errorf("listing VPCs: %w", err)
@@ -531,7 +531,7 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringBidirectionalStaticNATTest(ctx c
 //	        Cidr:  10.50.1.0/24
 //	      Nat:
 //	        Static:
-func (testCtx *VPCPeeringTestCtx) gatewayPeeringOverlapNATTest(ctx context.Context) (bool, []RevertFunc, error) {
+func gatewayPeeringOverlapNATTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
 	const (
 		overlapNSName  = "overlap-ns"  // max 11 chars for IPv4Namespace name
 		overlapVPCName = "vpc-overlap" // max 11 chars for VPC name (VRF interface limit)
@@ -859,32 +859,32 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringOverlapNATTest(ctx context.Conte
 }
 
 // getNATTestCases returns the NAT test cases to be added to the multi-VPC single-subnet suite
-func getNATTestCases(testCtx *VPCPeeringTestCtx) []JUnitTestCase {
+func getNATTestCases() []JUnitTestCase {
 	return []JUnitTestCase{
 		{
 			Name: "Gateway Peering Masquerade Source NAT",
-			F:    testCtx.gatewayPeeringMasqueradeSourceNATTest,
+			F:    gatewayPeeringMasqueradeSourceNATTest,
 			SkipFlags: SkipFlags{
 				NoGateway: true,
 			},
 		},
 		{
 			Name: "Gateway Peering Static Source NAT",
-			F:    testCtx.gatewayPeeringStaticSourceNATTest,
+			F:    gatewayPeeringStaticSourceNATTest,
 			SkipFlags: SkipFlags{
 				NoGateway: true,
 			},
 		},
 		{
 			Name: "Gateway Peering Bidirectional Static NAT",
-			F:    testCtx.gatewayPeeringBidirectionalStaticNATTest,
+			F:    gatewayPeeringBidirectionalStaticNATTest,
 			SkipFlags: SkipFlags{
 				NoGateway: true,
 			},
 		},
 		{
 			Name: "Gateway Peering Overlap NAT",
-			F:    testCtx.gatewayPeeringOverlapNATTest,
+			F:    gatewayPeeringOverlapNATTest,
 			SkipFlags: SkipFlags{
 				NoGateway: true,
 			},
