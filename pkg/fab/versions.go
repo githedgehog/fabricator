@@ -20,7 +20,7 @@ var (
 	FRRVersion        = meta.Version("v0.19.0")
 	BCMSONiCVersion   = meta.Version("v4.5.0")
 	CLSSONiCVersion   = meta.Version("v4.2.1")
-	CumulusVersion    = meta.Version("v5.15.1")
+	CumulusVersion    = meta.Version("v5.16.0")
 
 	// Upgrade constraints, "-0" to include pre-releases
 	FabricatorCtrlConstraint = ">=0.45.5-0"
