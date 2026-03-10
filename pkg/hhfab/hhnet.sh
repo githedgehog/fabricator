@@ -56,6 +56,16 @@ function setup_vlan() {
     sudo ip l s "$iface_name.$vlan_id" up
 }
 
+function setup_p2p() {
+    local iface_name=$1
+    local ip_local=$2
+    local ip_remote=$3
+
+    sudo ip l s "$iface_name" up
+    sudo ip a a "$ip_local" dev "$iface_name"
+    sudo ip r a default via "$ip_remote" dev "$iface_name"
+}
+
 function get_vips() {
     ip -o address show dev lo scope global | awk '{ print $4 }'
 }
@@ -85,13 +95,15 @@ function get_ip() {
 # hhnet vlan 1000 enp2s1
 
 function usage() {
-    echo "Usage: $0 <cleanup|bond|vlan|getvips> [<args> ...]" >&2
+    echo "Usage: $0 <cleanup|bond|vlan|p2p|getvips> [<args> ...]" >&2
     echo " Cleanup all interfaces (enp2s1-9, bond0-3, vlans 1000-1020): " >&2
     echo "  hhnet cleanup" >&2
     echo " Setup bond from provided interfaces (at least one) and vlan on top of it" >&2
     echo "  hhnet bond 1000 layer2+3 enp2s1 enp2s2 enp2s3 enp2s4" >&2
     echo " Setup vlan on top of provided interface (exactly one)" >&2
     echo "  hhnet vlan 1000 enp2s1" >&2
+    echo " Setup p2p link (switch port and host on /31)" >&2
+    echo "  hhnet p2p <iface> <local_ip> <remote_ip>" >&2
     echo " Get all Virtual IPs (VIPs) on the loopback interface: " >&2
     echo "  hhnet getvips" >&2
 }
@@ -125,6 +137,16 @@ elif [ "$1" == "vlan" ]; then
 
     setup_vlan "$3" "$2"
     get_ip "$3"."$2"
+
+    exit 0
+elif [ "$1" == "p2p" ]; then
+    if [ "$#" -ne 4 ]; then
+        echo "Usage: $0 p2p <iface> <local_ip> <remote_ip>" >&2
+        exit 1
+    fi
+
+    setup_p2p "$2" "$3" "$4"
+    get_ip "$2"
 
     exit 0
 elif [ "$1" == "getvips" ] ; then
