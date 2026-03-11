@@ -214,8 +214,12 @@ spec:
                         type: string
                       eslagMACBase:
                         type: string
+                      excludeNOSInstallers:
+                        type: boolean
                       fabricSubnet:
                         type: string
+                      includeBCM:
+                        type: boolean
                       includeCLSP:
                         type: boolean
                       includeCumulus:

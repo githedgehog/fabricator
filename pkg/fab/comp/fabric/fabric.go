@@ -371,9 +371,13 @@ func getNOSRefBase(nosType fmeta.NOSType) string {
 }
 
 func isIncludeNOS(cfg fabapi.Fabricator, nosType fmeta.NOSType) bool {
+	if cfg.Spec.Config.Fabric.ExcludeNOSInstallers {
+		return false
+	}
+
 	switch nosType {
 	case fmeta.NOSTypeSONiCBCMBase, fmeta.NOSTypeSONiCBCMCampus, fmeta.NOSTypeSONiCBCMVS:
-		return true
+		return cfg.Spec.Config.Fabric.IncludeBCM
 	case fmeta.NOSTypeSONiCCLSPlusBroadcom, fmeta.NOSTypeSONiCCLSPlusMarvell, fmeta.NOSTypeSONiCCLSPlusVS:
 		return cfg.Spec.Config.Fabric.IncludeCLSP
 	case fmeta.NOSTypeCumulusMlx:

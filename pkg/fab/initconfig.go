@@ -34,7 +34,9 @@ type InitConfigInput struct {
 	DefaultPasswordHash   string
 	DefaultAuthorizedKeys []string
 	Dev                   bool
+	ExcludeNOSInstallers  bool
 	IncludeONIE           bool
+	IncludeBCM            bool
 	IncludeCLSP           bool
 	IncludeCumulus        bool
 	RegUpstream           *fabapi.ControlConfigRegistryUpstream
@@ -88,6 +90,10 @@ func InitConfig(ctx context.Context, in InitConfigInput) ([]byte, error) {
 
 	if !slices.Contains(fabapi.ObservabilityDefaultsList, in.O11yDefaults) {
 		return nil, fmt.Errorf("invalid observability defaults mode: %s", in.O11yDefaults) //nolint:err113
+	}
+
+	if !in.IncludeBCM && !in.IncludeCLSP && !in.IncludeCumulus {
+		in.IncludeBCM = true
 	}
 
 	data, err := tmplutil.FromTemplate("initconfig", initConfigTmpl, in)
