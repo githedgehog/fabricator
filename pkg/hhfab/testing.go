@@ -901,6 +901,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	if err := kube.List(ctx, existingVPCs); err != nil {
 		return fmt.Errorf("listing existing VPCs: %w", err)
 	}
+	deletedVPCs := false
 	for _, vpc := range existingVPCs.Items {
 		if opts.ForceCleanup || !vpcNames[vpc.Name] {
 			if err := kube.Delete(ctx, &vpc); err != nil {
@@ -908,12 +909,22 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 			}
 			slog.Info("Deleted", "vpc", vpc.Name)
 			changed = true
+			deletedVPCs = true
 		}
 	}
 
 	if changed {
+		// Wait for switches to process deletions before creating new VPCs
+		// A short sleep is not enough: if VPCs are deleted and recreated quickly
+		// See https://github.com/githedgehog/fabric/issues/656
 		slog.Debug("Waiting for deletions to settle")
 		time.Sleep(3 * time.Second)
+
+		if deletedVPCs && opts.WaitSwitchesReady {
+			if err := WaitReady(ctx, kube, WaitReadyOpts{AppliedFor: 15 * time.Second, Timeout: 10 * time.Minute}); err != nil {
+				return fmt.Errorf("waiting for switches after VPC deletion: %w", err)
+			}
+		}
 	}
 
 	for _, vpc := range vpcs {
