@@ -408,7 +408,9 @@ _Appears in:_
 | `mclagSessionSubnet` _[Prefix](#prefix)_ |  |  |  |
 | `defaultSwitchUsers` _object (keys:string, values:[SwitchUser](#switchuser))_ |  |  |  |
 | `defaultAlloyConfig` _[AlloyConfig](#alloyconfig)_ |  |  |  |
+| `excludeNOSInstallers` _boolean_ |  |  |  |
 | `includeONIE` _boolean_ |  |  |  |
+| `includeBCM` _boolean_ |  |  |  |
 | `includeCLSP` _boolean_ |  |  |  |
 | `includeCumulus` _boolean_ |  |  |  |
 | `disableBFD` _boolean_ |  |  |  |

@@ -49,6 +49,8 @@ const (
 	FlagNameDefaultAuthorizedKeys = "default-authorized-keys"
 	FlagNameTLSSAN                = "tls-san"
 	FlagNameDev                   = "dev"
+	FlagExcludeNOSInstallers      = "exclude-nos-installers"
+	FlagIncludeBCM                = "include-bcm"
 	FlagIncludeONIE               = "include-onie"
 	FlagIncludeCLSP               = "include-clsp"
 	FlagIncludeCumulus            = "include-cumulus"
@@ -605,6 +607,13 @@ func Run(ctx context.Context) error {
 					},
 					&cli.BoolFlag{
 						Category: FlagCatGenConfig,
+						Name:     FlagExcludeNOSInstallers,
+						Hidden:   !preview,
+						Usage:    "[PREVIEW] exclude NOS installers for supported switch platforms by default",
+						EnvVars:  []string{"HHFAB_EXCLUDE_NOS_INSTALLERS"},
+					},
+					&cli.BoolFlag{
+						Category: FlagCatGenConfig,
 						Name:     FlagIncludeONIE,
 						Hidden:   !preview,
 						Usage:    "[PREVIEW] include tested ONIE updaters for supported switches in the build",
@@ -612,16 +621,22 @@ func Run(ctx context.Context) error {
 					},
 					&cli.BoolFlag{
 						Category: FlagCatGenConfig,
+						Name:     FlagIncludeBCM,
+						Usage:    "include Broadcom SONiC support (default if no other platform support is included)",
+						EnvVars:  []string{"HHFAB_INCLUDE_BCM"},
+					},
+					&cli.BoolFlag{
+						Category: FlagCatGenConfig,
 						Name:     FlagIncludeCLSP,
 						Hidden:   !preview,
-						Usage:    "[PREVIEW] include Celestica SONiC+ switch profiles",
+						Usage:    "[PREVIEW] include Celestica SONiC+ support",
 						EnvVars:  []string{"HHFAB_INCLUDE_CLSP"},
 					},
 					&cli.BoolFlag{
 						Category: FlagCatGenConfig,
 						Name:     FlagIncludeCumulus,
 						Hidden:   !preview,
-						Usage:    "[PREVIEW] include Cumulus switch profiles",
+						Usage:    "[PREVIEW] include Cumulus support",
 						EnvVars:  []string{"HHFAB_INCLUDE_CUMULUS"},
 					},
 					&cli.BoolFlag{
@@ -708,7 +723,9 @@ func Run(ctx context.Context) error {
 							DefaultPasswordHash:   c.String(FlagNameDefaultPasswordHash),
 							DefaultAuthorizedKeys: c.StringSlice(FlagNameDefaultAuthorizedKeys),
 							Dev:                   c.Bool(FlagNameDev),
+							ExcludeNOSInstallers:  c.Bool(FlagExcludeNOSInstallers),
 							IncludeONIE:           c.Bool(FlagIncludeONIE),
+							IncludeBCM:            c.Bool(FlagIncludeBCM),
 							IncludeCLSP:           c.Bool(FlagIncludeCLSP),
 							IncludeCumulus:        c.Bool(FlagIncludeCumulus),
 							NodeManagementLinks:   mgmtLinks,
