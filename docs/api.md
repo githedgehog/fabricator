@@ -84,6 +84,8 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `managementSubnet` _[Prefix](#prefix)_ |  |  |  |
 | `controlVIP` _[Prefix](#prefix)_ |  |  |  |
+| `managementSubnetAnyDevice` _boolean_ |  |  |  |
+| `managementSubnetStatic` _object (keys:string, values:string)_ |  |  |  |
 | `tlsSAN` _string array_ |  |  |  |
 | `joinToken` _string_ |  |  |  |
 | `kubeClusterSubnet` _[Prefix](#prefix)_ |  |  |  |
