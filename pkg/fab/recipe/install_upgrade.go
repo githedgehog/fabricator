@@ -248,6 +248,13 @@ func DoUpgrade(ctx context.Context, workDir string, yes, skipChecks bool) error 
 }
 
 func setupTimesync(ctx context.Context, controlVIP string) error {
+	if ubuntu, err := isUbuntu(); err == nil && ubuntu {
+		// TODO do something on ubuntu
+		slog.Warn("Skipping timesync conf on ubuntu")
+
+		return nil
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 
@@ -278,6 +285,13 @@ const (
 )
 
 func upgradeFlatcar(ctx context.Context, targetVersion string, yes bool) error {
+	if ubuntu, err := isUbuntu(); err == nil && ubuntu {
+		// TODO do something on ubuntu
+		slog.Warn("Skipping flatcar upgrade on ubuntu")
+
+		return nil
+	}
+
 	slog.Info("Upgrading Flatcar")
 	const filename = "/etc/os-release"
 
@@ -519,30 +533,30 @@ func installBashCompletion(_ context.Context, workDir string, version string) er
 	installDir := "/opt/bash-completion"
 	bashCompletionDir := filepath.Join(installDir, "bash_completion.d")
 
-	if err := os.MkdirAll(bashCompletionDir, 0755); err != nil {
+	if err := os.MkdirAll(bashCompletionDir, 0o755); err != nil {
 		return fmt.Errorf("creating directory %s: %w", bashCompletionDir, err)
 	}
 
 	bashCompletionSrc := filepath.Join(workDir, "bash-completion", "bash_completion")
 	bashCompletionDst := filepath.Join(installDir, "bash_completion")
-	if err := copyFile(bashCompletionSrc, bashCompletionDst, 0644); err != nil {
+	if err := copyFile(bashCompletionSrc, bashCompletionDst, 0o644); err != nil {
 		return fmt.Errorf("copying bash_completion file: %w", err)
 	}
 
 	compatSrc := filepath.Join(workDir, "bash-completion", "000_bash_completion_compat.bash")
 	compatDst := filepath.Join(bashCompletionDir, "000_bash_completion_compat.bash")
-	if err := copyFile(compatSrc, compatDst, 0644); err != nil {
+	if err := copyFile(compatSrc, compatDst, 0o644); err != nil {
 		return fmt.Errorf("copying bash_completion.d compat file: %w", err)
 	}
 
 	licenseSrc := filepath.Join(workDir, "bash-completion", "COPYING")
 	licenseDst := filepath.Join(installDir, "COPYING")
-	if err := copyFile(licenseSrc, licenseDst, 0644); err != nil {
+	if err := copyFile(licenseSrc, licenseDst, 0o644); err != nil {
 		return fmt.Errorf("copying license file: %w", err)
 	}
 
 	profilePath := filepath.Join("/etc/profile.d", "bash-completion.sh")
-	if err := os.WriteFile(profilePath, bashCompletionProfileScript, 0644); err != nil { //nolint:gosec
+	if err := os.WriteFile(profilePath, bashCompletionProfileScript, 0o644); err != nil { //nolint:gosec
 		return fmt.Errorf("writing bash-completion profile script: %w", err)
 	}
 

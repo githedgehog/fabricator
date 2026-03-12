@@ -313,7 +313,7 @@ func (c *ControlUpgrade) preCacheZot(ctx context.Context) error {
 			}
 		}
 
-		cmd := exec.CommandContext(ctx, "k3s", "crictl", "pull", img)
+		cmd := exec.CommandContext(ctx, "/opt/bin/k3s", "crictl", "pull", img)
 		cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "crictl: ")
 		cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "crictl: ")
 
