@@ -980,9 +980,10 @@ func Run(ctx context.Context) error {
 						},
 					},
 					{
+						Hidden:  !preview,
 						Name:    "generate-gpu-rail",
 						Aliases: []string{"gen-gpu-rail"},
-						Usage:   "generate VLAB wiring diagram for GPU rail-optimized fabric with 8 rails, 4 leafs per scalable unit and VPCs/attachements",
+						Usage:   "[PREVIEW] generate VLAB wiring diagram for GPU rail-optimized fabric with 8 rails, 4 leafs per scalable unit and VPCs/attachements",
 						Flags: flatten(defaultFlags, []cli.Flag{
 							&cli.UintFlag{
 								Name:    "scalable-units",
@@ -1244,6 +1245,20 @@ func Run(ctx context.Context) error {
 								},
 							}); err != nil {
 								return fmt.Errorf("running VLAB: %w", err)
+							}
+
+							return nil
+						},
+					},
+					{
+						Hidden: !preview,
+						Name:   "air",
+						Usage:  "[PREVIEW] generate nvidia air topology and helpers",
+						Flags:  flatten(defaultFlags, hModeFlags),
+						Before: before(false),
+						Action: func(_ *cli.Context) error {
+							if err := hhfab.AirGenerate(ctx, workDir, cacheDir, hhfab.HydrateMode(hydrateMode)); err != nil {
+								return fmt.Errorf("air: %w", err)
 							}
 
 							return nil
