@@ -206,9 +206,12 @@ type FabConfig struct {
 }
 
 type ControlConfig struct {
-	ManagementSubnet meta.Prefix `json:"managementSubnet,omitempty"`
-	VIP              meta.Prefix `json:"controlVIP,omitempty"`
-	TLSSAN           []string    `json:"tlsSAN,omitempty"`
+	ManagementSubnet          meta.Prefix       `json:"managementSubnet,omitempty"`
+	VIP                       meta.Prefix       `json:"controlVIP,omitempty"`
+	ManagementSubnetAnyDevice bool              `json:"managementSubnetAnyDevice,omitempty"`
+	ManagementSubnetStatic    map[string]string `json:"managementSubnetStatic,omitempty"`
+
+	TLSSAN []string `json:"tlsSAN,omitempty"`
 
 	JoinToken string `json:"joinToken,omitempty"`
 
