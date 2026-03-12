@@ -112,6 +112,7 @@ func Install(control fabapi.ControlNode) comp.KubeInstall {
 			"Repo":            dhcpRef,
 			"Tag":             string(cfg.Status.Versions.Fabric.DHCPD),
 			"ListenInterface": control.Spec.Management.Interface,
+			"AnyDeviceOnMgmt": cfg.Spec.Config.Control.ManagementSubnetAnyDevice,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("dhcp values: %w", err)
@@ -166,6 +167,11 @@ func InstallManagementDHCPSubnet(cfg fabapi.Fabricator) ([]kclient.Object, error
 		return nil, fmt.Errorf("parsing control VIP: %w", err)
 	}
 
+	static := map[string]dhcpapi.DHCPSubnetStatic{}
+	for mac, ip := range cfg.Spec.Config.Control.ManagementSubnetStatic {
+		static[mac] = dhcpapi.DHCPSubnetStatic{IP: ip}
+	}
+
 	return []kclient.Object{
 		comp.NewDHCPSubnet(dhcpapi.ManagementSubnet, dhcpapi.DHCPSubnetSpec{
 			Subnet:           dhcpapi.ManagementSubnet,
@@ -177,6 +183,7 @@ func InstallManagementDHCPSubnet(cfg fabapi.Fabricator) ([]kclient.Object, error
 			ZTPBaseURL:       "http://" + controlVIP.Addr().String() + ":32000", // TODO port from const
 			DNSServers:       []string{},
 			TimeServers:      []string{},
+			Static:           static,
 		}),
 	}, nil
 }
