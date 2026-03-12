@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"time"
 
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
@@ -469,4 +470,14 @@ func waitKube[T kclient.Object](ctx context.Context, kube kclient.Reader, name, 
 			}
 		}
 	}
+}
+
+func isUbuntu() (bool, error) {
+	if osRelease, err := os.ReadFile("/etc/os-release"); err != nil {
+		return false, fmt.Errorf("reading os-release: %w", err)
+	} else if strings.Contains(strings.ToLower(string(osRelease)), "id=ubuntu") {
+		return true, nil
+	}
+
+	return false, nil
 }
