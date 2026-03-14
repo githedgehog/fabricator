@@ -57,7 +57,9 @@ spec:
 
     fabric:
       mode: {{ .FabricMode }} # "spine-leaf"
+      {{ if .ExcludeNOSInstallers }}excludeNOSInstallers: true{{ end }}
       {{ if .IncludeONIE }}includeONIE: true{{ end }}
+      {{ if .IncludeBCM }}includeBCM: true{{ end }}
       {{ if .IncludeCLSP }}includeCLSP: true{{ end }}
       {{ if .IncludeCumulus }}includeCumulus: true{{ end }}
       defaultSwitchUsers:

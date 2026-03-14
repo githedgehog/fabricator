@@ -206,9 +206,12 @@ type FabConfig struct {
 }
 
 type ControlConfig struct {
-	ManagementSubnet meta.Prefix `json:"managementSubnet,omitempty"`
-	VIP              meta.Prefix `json:"controlVIP,omitempty"`
-	TLSSAN           []string    `json:"tlsSAN,omitempty"`
+	ManagementSubnet          meta.Prefix       `json:"managementSubnet,omitempty"`
+	VIP                       meta.Prefix       `json:"controlVIP,omitempty"`
+	ManagementSubnetAnyDevice bool              `json:"managementSubnetAnyDevice,omitempty"`
+	ManagementSubnetStatic    map[string]string `json:"managementSubnetStatic,omitempty"`
+
+	TLSSAN []string `json:"tlsSAN,omitempty"`
 
 	JoinToken string `json:"joinToken,omitempty"`
 
@@ -291,9 +294,11 @@ type FabricConfig struct {
 	DefaultSwitchUsers map[string]SwitchUser `json:"defaultSwitchUsers,omitempty"`
 	DefaultAlloyConfig fmeta.AlloyConfig     `json:"defaultAlloyConfig,omitempty"` // TODO remove, kept for backward compat, ignored
 
-	IncludeONIE    bool `json:"includeONIE,omitempty"`
-	IncludeCLSP    bool `json:"includeCLSP,omitempty"`
-	IncludeCumulus bool `json:"includeCumulus,omitempty"`
+	ExcludeNOSInstallers bool `json:"excludeNOSInstallers,omitempty"`
+	IncludeONIE          bool `json:"includeONIE,omitempty"`
+	IncludeBCM           bool `json:"includeBCM,omitempty"`
+	IncludeCLSP          bool `json:"includeCLSP,omitempty"`
+	IncludeCumulus       bool `json:"includeCumulus,omitempty"`
 
 	DisableBFD bool `json:"disableBFD,omitempty"`
 
@@ -696,6 +701,11 @@ func (f *Fabricator) Default() {
 			}
 		}
 		f.Spec.Config.Observability.Targets.Pyroscope[name] = target
+	}
+
+	// TODO fallback for upgrades from versions before 26.01
+	if !f.Spec.Config.Fabric.IncludeBCM && !f.Spec.Config.Fabric.IncludeCLSP && !f.Spec.Config.Fabric.IncludeCumulus {
+		f.Spec.Config.Fabric.IncludeBCM = true
 	}
 }
 

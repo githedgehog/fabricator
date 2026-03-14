@@ -49,6 +49,8 @@ const (
 	FlagNameDefaultAuthorizedKeys = "default-authorized-keys"
 	FlagNameTLSSAN                = "tls-san"
 	FlagNameDev                   = "dev"
+	FlagExcludeNOSInstallers      = "exclude-nos-installers"
+	FlagIncludeBCM                = "include-bcm"
 	FlagIncludeONIE               = "include-onie"
 	FlagIncludeCLSP               = "include-clsp"
 	FlagIncludeCumulus            = "include-cumulus"
@@ -191,6 +193,7 @@ func Run(ctx context.Context) error {
 	var wgBGPExternals, wgStaticExternals, wgStaticExternalsProxy, wgExtMCLAGConns, wgExtESLAGConns, wgExtOrphanConns uint
 	var wgDefaultSwitchProfile string
 	var wgSwitchProfileOverrides *cli.StringSlice
+	var wgServerPortBase string
 	vlabWiringGenFlags := []cli.Flag{
 		&cli.UintFlag{
 			Name:        "spines-count",
@@ -335,6 +338,13 @@ func Run(ctx context.Context) error {
 			Aliases:     []string{"spo"},
 			Usage:       "switch profile overrides to use for switches (name=profile)",
 			Destination: wgSwitchProfileOverrides,
+		},
+		&cli.StringFlag{
+			Name:        "server-port-base",
+			Aliases:     []string{"port"},
+			Usage:       "base for server port interfaces (e.g. enp2s for ports like enp2s1, enp2s2, etc.)",
+			Destination: &wgServerPortBase,
+			Value:       "enp2s",
 		},
 	}
 
@@ -605,6 +615,13 @@ func Run(ctx context.Context) error {
 					},
 					&cli.BoolFlag{
 						Category: FlagCatGenConfig,
+						Name:     FlagExcludeNOSInstallers,
+						Hidden:   !preview,
+						Usage:    "[PREVIEW] exclude NOS installers for supported switch platforms by default",
+						EnvVars:  []string{"HHFAB_EXCLUDE_NOS_INSTALLERS"},
+					},
+					&cli.BoolFlag{
+						Category: FlagCatGenConfig,
 						Name:     FlagIncludeONIE,
 						Hidden:   !preview,
 						Usage:    "[PREVIEW] include tested ONIE updaters for supported switches in the build",
@@ -612,16 +629,22 @@ func Run(ctx context.Context) error {
 					},
 					&cli.BoolFlag{
 						Category: FlagCatGenConfig,
+						Name:     FlagIncludeBCM,
+						Usage:    "include Broadcom SONiC support (default if no other platform support is included)",
+						EnvVars:  []string{"HHFAB_INCLUDE_BCM"},
+					},
+					&cli.BoolFlag{
+						Category: FlagCatGenConfig,
 						Name:     FlagIncludeCLSP,
 						Hidden:   !preview,
-						Usage:    "[PREVIEW] include Celestica SONiC+ switch profiles",
+						Usage:    "[PREVIEW] include Celestica SONiC+ support",
 						EnvVars:  []string{"HHFAB_INCLUDE_CLSP"},
 					},
 					&cli.BoolFlag{
 						Category: FlagCatGenConfig,
 						Name:     FlagIncludeCumulus,
 						Hidden:   !preview,
-						Usage:    "[PREVIEW] include Cumulus switch profiles",
+						Usage:    "[PREVIEW] include Cumulus support",
 						EnvVars:  []string{"HHFAB_INCLUDE_CUMULUS"},
 					},
 					&cli.BoolFlag{
@@ -708,7 +731,9 @@ func Run(ctx context.Context) error {
 							DefaultPasswordHash:   c.String(FlagNameDefaultPasswordHash),
 							DefaultAuthorizedKeys: c.StringSlice(FlagNameDefaultAuthorizedKeys),
 							Dev:                   c.Bool(FlagNameDev),
+							ExcludeNOSInstallers:  c.Bool(FlagExcludeNOSInstallers),
 							IncludeONIE:           c.Bool(FlagIncludeONIE),
+							IncludeBCM:            c.Bool(FlagIncludeBCM),
 							IncludeCLSP:           c.Bool(FlagIncludeCLSP),
 							IncludeCumulus:        c.Bool(FlagIncludeCumulus),
 							NodeManagementLinks:   mgmtLinks,
@@ -913,35 +938,122 @@ func Run(ctx context.Context) error {
 								gwTags[key] = value
 							}
 
-							builder := hhfab.VLABBuilder{
-								SpinesCount:            uint8(wgSpinesCount),      //nolint:gosec
-								FabricLinksCount:       uint8(wgFabricLinksCount), //nolint:gosec
-								MeshLinksCount:         uint8(wgMeshLinksCount),   //nolint:gosec
-								MCLAGLeafsCount:        uint8(wgMCLAGLeafsCount),  //nolint:gosec
-								ESLAGLeafGroups:        wgESLAGLeafGroups,
-								OrphanLeafsCount:       uint8(wgOrphanLeafsCount),  //nolint:gosec
-								MCLAGSessionLinks:      uint8(wgMCLAGSessionLinks), //nolint:gosec
-								MCLAGPeerLinks:         uint8(wgMCLAGPeerLinks),    //nolint:gosec
-								MCLAGServers:           uint8(wgMCLAGServers),      //nolint:gosec
-								ESLAGServers:           uint8(wgESLAGServers),      //nolint:gosec
-								UnbundledServers:       uint8(wgUnbundledServers),  //nolint:gosec
-								BundledServers:         uint8(wgBundledServers),    //nolint:gosec
-								MultiHomedServers:      uint8(wgMultiHomedServers), //nolint:gosec
-								NoSwitches:             wgNoSwitches,
-								GatewayUplinks:         uint8(wgGatewayUplinks), //nolint:gosec
-								GatewayDriver:          wgGatewayDriver,
-								GatewayWorkers:         uint8(wgGatewayWorkers), //nolint:gosec
-								GatewayLogLevel:        c.String(FlagGatewayLogLevel),
-								GatewayTags:            gwTags,
-								ExtBGPCount:            uint8(wgBGPExternals),         //nolint:gosec
-								ExtStaticCount:         uint8(wgStaticExternals),      //nolint:gosec
-								ExtStaticProxyCount:    uint8(wgStaticExternalsProxy), //nolint:gosec
-								ExtMCLAGConnCount:      uint8(wgExtMCLAGConns),        //nolint:gosec
-								ExtESLAGConnCount:      uint8(wgExtESLAGConns),        //nolint:gosec
-								ExtOrphanConnCount:     uint8(wgExtOrphanConns),       //nolint:gosec
-								YesFlag:                yes,
-								DefaultSwitchProfile:   wgDefaultSwitchProfile,
-								SwitchProfileOverrides: overrides,
+							builder := &hhfab.VLABBuilderDefault{
+								SpinesCount:         uint8(wgSpinesCount),      //nolint:gosec
+								FabricLinksCount:    uint8(wgFabricLinksCount), //nolint:gosec
+								MeshLinksCount:      uint8(wgMeshLinksCount),   //nolint:gosec
+								MCLAGLeafsCount:     uint8(wgMCLAGLeafsCount),  //nolint:gosec
+								ESLAGLeafGroups:     wgESLAGLeafGroups,
+								OrphanLeafsCount:    uint8(wgOrphanLeafsCount),  //nolint:gosec
+								MCLAGSessionLinks:   uint8(wgMCLAGSessionLinks), //nolint:gosec
+								MCLAGPeerLinks:      uint8(wgMCLAGPeerLinks),    //nolint:gosec
+								MCLAGServers:        uint8(wgMCLAGServers),      //nolint:gosec
+								ESLAGServers:        uint8(wgESLAGServers),      //nolint:gosec
+								UnbundledServers:    uint8(wgUnbundledServers),  //nolint:gosec
+								BundledServers:      uint8(wgBundledServers),    //nolint:gosec
+								MultiHomedServers:   uint8(wgMultiHomedServers), //nolint:gosec
+								NoSwitches:          wgNoSwitches,
+								GatewayUplinks:      uint8(wgGatewayUplinks), //nolint:gosec
+								GatewayDriver:       wgGatewayDriver,
+								GatewayWorkers:      uint8(wgGatewayWorkers), //nolint:gosec
+								GatewayLogLevel:     c.String(FlagGatewayLogLevel),
+								GatewayTags:         gwTags,
+								ExtBGPCount:         uint8(wgBGPExternals),         //nolint:gosec
+								ExtStaticCount:      uint8(wgStaticExternals),      //nolint:gosec
+								ExtStaticProxyCount: uint8(wgStaticExternalsProxy), //nolint:gosec
+								ExtMCLAGConnCount:   uint8(wgExtMCLAGConns),        //nolint:gosec
+								ExtESLAGConnCount:   uint8(wgExtESLAGConns),        //nolint:gosec
+								ExtOrphanConnCount:  uint8(wgExtOrphanConns),       //nolint:gosec
+								YesFlag:             yes,
+								VLABBuilderBase: hhfab.VLABBuilderBase{
+									DefaultSwitchProfile:   wgDefaultSwitchProfile,
+									SwitchProfileOverrides: overrides,
+									ServerPortBase:         wgServerPortBase,
+								},
+							}
+
+							if err := hhfab.VLABGenerate(ctx, workDir, cacheDir, builder, hhfab.DefaultVLABGeneratedFile); err != nil {
+								return fmt.Errorf("generating VLAB wiring diagram: %w", err)
+							}
+
+							return nil
+						},
+					},
+					{
+						Hidden:  !preview,
+						Name:    "generate-gpu-rail",
+						Aliases: []string{"gen-gpu-rail"},
+						Usage:   "[PREVIEW] generate VLAB wiring diagram for GPU rail-optimized fabric with 8 rails, 4 leafs per scalable unit and VPCs/attachements",
+						Flags: flatten(defaultFlags, []cli.Flag{
+							&cli.UintFlag{
+								Name:    "scalable-units",
+								Aliases: []string{"units"},
+								Usage:   "number of scalable units",
+								Value:   1,
+							},
+							&cli.UintFlag{
+								Name:  "vpcs",
+								Usage: "number of VPCs",
+								Value: 2,
+							},
+							&cli.UintFlag{
+								Name:    "servers-per-vpc-per-scalable-unit",
+								Aliases: []string{"servers"},
+								Usage:   "number of servers per VPC per scalable unit",
+								Value:   2,
+							},
+							// TODO dedup
+							&cli.StringFlag{
+								Name:        "default-switch-profile",
+								Aliases:     []string{"sp"},
+								Usage:       "default switch profile to use for switches",
+								Destination: &wgDefaultSwitchProfile,
+								Value:       meta.SwitchProfileVS,
+							},
+							// TODO dedup
+							&cli.StringSliceFlag{
+								Name:        "switch-profile-overrides",
+								Aliases:     []string{"spo"},
+								Usage:       "switch profile overrides to use for switches (name=profile)",
+								Destination: wgSwitchProfileOverrides,
+							},
+							// TODO dedup
+							&cli.StringFlag{
+								Name:        "server-port-base",
+								Aliases:     []string{"port"},
+								Usage:       "base for server port interfaces (e.g. enp2s for ports like enp2s1, enp2s2, etc.)",
+								Destination: &wgServerPortBase,
+								Value:       "enp2s",
+							},
+							&cli.BoolFlag{
+								Name:  "p2p",
+								Usage: "create point-to-point annotations for vpc attachements",
+							},
+						}),
+						Before: before(false),
+						Action: func(c *cli.Context) error {
+							// TODO dedup
+							overrides := map[string]string{}
+							if wgSwitchProfileOverrides != nil {
+								for _, override := range wgSwitchProfileOverrides.Value() {
+									parts := strings.SplitN(override, "=", 2)
+									if len(parts) != 2 {
+										return fmt.Errorf("invalid switch profile override: %s", override) //nolint:err113
+									}
+									overrides[parts[0]] = parts[1]
+								}
+							}
+
+							builder := &hhfab.VLABBuilderGPURail{
+								ScalableUnits:        c.Uint("scalable-units"),
+								VPCs:                 c.Uint("vpcs"),
+								ServersPerVPCPerUnit: c.Uint("servers-per-vpc-per-scalable-unit"),
+								P2P:                  c.Bool("p2p"),
+								VLABBuilderBase: hhfab.VLABBuilderBase{
+									DefaultSwitchProfile:   wgDefaultSwitchProfile,
+									SwitchProfileOverrides: overrides,
+									ServerPortBase:         wgServerPortBase,
+								},
 							}
 
 							if err := hhfab.VLABGenerate(ctx, workDir, cacheDir, builder, hhfab.DefaultVLABGeneratedFile); err != nil {
@@ -1133,6 +1245,20 @@ func Run(ctx context.Context) error {
 								},
 							}); err != nil {
 								return fmt.Errorf("running VLAB: %w", err)
+							}
+
+							return nil
+						},
+					},
+					{
+						Hidden: !preview,
+						Name:   "air",
+						Usage:  "[PREVIEW] generate nvidia air topology and helpers",
+						Flags:  flatten(defaultFlags, hModeFlags),
+						Before: before(false),
+						Action: func(_ *cli.Context) error {
+							if err := hhfab.AirGenerate(ctx, workDir, cacheDir, hhfab.HydrateMode(hydrateMode)); err != nil {
+								return fmt.Errorf("air: %w", err)
 							}
 
 							return nil

@@ -196,6 +196,13 @@ func (c *NodeInstallUpgrade) prepForDataplane(ctx context.Context) error {
 }
 
 func installToolbox(ctx context.Context) error {
+	if ubuntu, err := isUbuntu(); err == nil && ubuntu {
+		// TODO do something on ubuntu
+		slog.Warn("Skipping toolbox on ubuntu")
+
+		return nil
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 
@@ -206,6 +213,7 @@ func installToolbox(ctx context.Context) error {
 		if attempt > 0 {
 			time.Sleep(5 * time.Second)
 		}
+		// using system ctr as we need to load it for the toolbox, not for k8s
 		cmd := exec.CommandContext(ctx, "ctr", "image", "import", flatcar.ToolboxArchiveBin) //nolint:gosec
 		cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "ctr-import: ")
 		cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "ctr-import: ")
@@ -213,6 +221,8 @@ func installToolbox(ctx context.Context) error {
 		if lastErr == nil {
 			break
 		}
+
+		slog.Debug("Failed to install toolbox", "attempt", attempt, "err", lastErr)
 	}
 	if lastErr != nil {
 		return fmt.Errorf("ctr image import: %w", lastErr)

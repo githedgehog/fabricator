@@ -31,7 +31,22 @@ var GatewayDrivers = []string{
 	GatewayDriverDPDK,
 }
 
-type VLABBuilder struct {
+type VLABBuilder interface {
+	Build(ctx context.Context, l *apiutil.Loader, fabricMode meta.FabricMode, nodes []fabapi.FabNode) error
+}
+
+type VLABBuilderBase struct {
+	// Helpers to build topologies based on non-default or mixed profiles
+	DefaultSwitchProfile   string            // default switch profile to use for switches
+	SwitchProfileOverrides map[string]string // switch profile overrides to use for switches
+	ServerPortBase         string            // base for server port interfaces (e.g. enp2s for ports like enp2s1, enp2s2, etc.)
+
+	data         *apiutil.Loader
+	ifaceTracker map[string]uint8 // next available interface ID for each switch
+	switchID     uint             // switch ID counter
+}
+
+type VLABBuilderDefault struct {
 	SpinesCount         uint8             // number of spines to generate
 	FabricLinksCount    uint8             // number of links for each spine <> leaf pair
 	MeshLinksCount      uint8             // number of mesh links for each leaf <> leaf pair
@@ -59,16 +74,12 @@ type VLABBuilder struct {
 	ExtOrphanConnCount  uint8             // number of external connections to generate from orphan leaves
 	YesFlag             bool
 
-	// Helpers to build topologies based on non-default or mixed profiles
-	DefaultSwitchProfile   string            // default switch profile to use for switches
-	SwitchProfileOverrides map[string]string // switch profile overrides to use for switches
-
-	data         *apiutil.Loader
-	ifaceTracker map[string]uint8 // next available interface ID for each switch
-	switchID     uint             // switch ID counter
+	VLABBuilderBase
 }
 
-func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode meta.FabricMode, nodes []fabapi.FabNode) error {
+var _ VLABBuilder = (*VLABBuilderDefault)(nil)
+
+func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, fabricMode meta.FabricMode, nodes []fabapi.FabNode) error {
 	if l == nil {
 		return fmt.Errorf("loader is nil") //nolint:goerr113
 	}
@@ -405,7 +416,7 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 				Group: sg,
 				Type:  meta.RedundancyTypeMCLAG,
 			},
-		}); err != nil {
+		}, nil); err != nil {
 			return err
 		}
 		if _, err := b.createSwitch(ctx, leaf2Name, wiringapi.SwitchSpec{
@@ -416,7 +427,7 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 				Group: sg,
 				Type:  meta.RedundancyTypeMCLAG,
 			},
-		}); err != nil {
+		}, nil); err != nil {
 			return err
 		}
 
@@ -567,7 +578,7 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 					Group: sg,
 					Type:  meta.RedundancyTypeESLAG,
 				},
-			}); err != nil {
+			}, nil); err != nil {
 				return err
 			}
 			if extESLAGConns < b.ExtESLAGConnCount {
@@ -674,7 +685,7 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 		if _, err := b.createSwitch(ctx, leafName, wiringapi.SwitchSpec{
 			Role:        wiringapi.SwitchRoleServerLeaf,
 			Description: fmt.Sprintf("VS-%02d", switchID),
-		}); err != nil {
+		}, nil); err != nil {
 			return err
 		}
 		orphanLeaves = append(orphanLeaves, leafName)
@@ -788,7 +799,7 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 		if _, err := b.createSwitch(ctx, spineName, wiringapi.SwitchSpec{
 			Role:        wiringapi.SwitchRoleSpine,
 			Description: fmt.Sprintf("VS-%02d", switchID),
-		}); err != nil {
+		}, nil); err != nil {
 			return err
 		}
 
@@ -998,7 +1009,202 @@ func (b *VLABBuilder) Build(ctx context.Context, l *apiutil.Loader, fabricMode m
 	return nil
 }
 
-func (b *VLABBuilder) addExternalConnection(ctx context.Context, extConnList []wiringapi.Connection, switchName string) ([]wiringapi.Connection, error) {
+type VLABBuilderGPURail struct {
+	ScalableUnits        uint
+	VPCs                 uint
+	ServersPerVPCPerUnit uint
+	P2P                  bool
+
+	VLABBuilderBase
+}
+
+var _ VLABBuilder = (*VLABBuilderGPURail)(nil)
+
+func (b *VLABBuilderGPURail) Build(ctx context.Context, l *apiutil.Loader, fabricMode meta.FabricMode, nodes []fabapi.FabNode) error {
+	if l == nil {
+		return fmt.Errorf("loader is nil") //nolint:goerr113
+	}
+	b.data = l
+
+	spines := uint(2)
+	leafsPerScalableUnit := uint(4)
+	startingVLAN := uint16(1000)
+	fabricLinks := uint(4)
+	rails := uint(8)
+
+	slog.Info("Building VLAB wiring diagram for GPU rail-optimized fabric")
+	slog.Info(">>>", "profile", b.DefaultSwitchProfile)
+	if len(b.SwitchProfileOverrides) > 0 {
+		overrides := []any{}
+		for k, v := range b.SwitchProfileOverrides {
+			overrides = append(overrides, k, v)
+		}
+		slog.Info(">>>", overrides...)
+	}
+	slog.Info(">>>", "units", b.ScalableUnits, "vpcCount", b.VPCs, "serversPerVPCPerUnit", b.ServersPerVPCPerUnit, "p2p", b.P2P)
+
+	if err := b.data.Add(ctx, &wiringapi.VLANNamespace{
+		TypeMeta: kmetav1.TypeMeta{
+			Kind:       wiringapi.KindVLANNamespace,
+			APIVersion: wiringapi.GroupVersion.String(),
+		},
+		ObjectMeta: kmetav1.ObjectMeta{
+			Name: "default",
+		},
+		Spec: wiringapi.VLANNamespaceSpec{
+			Ranges: []meta.VLANRange{
+				{From: startingVLAN, To: 2999},
+			},
+		},
+	}); err != nil {
+		return fmt.Errorf("creating VLAN namespace: %w", err) //nolint:goerr113
+	}
+
+	if err := b.data.Add(ctx, &vpcapi.IPv4Namespace{
+		TypeMeta: kmetav1.TypeMeta{
+			Kind:       vpcapi.KindIPv4Namespace,
+			APIVersion: vpcapi.GroupVersion.String(),
+		},
+		ObjectMeta: kmetav1.ObjectMeta{
+			Name: "default",
+		},
+		Spec: vpcapi.IPv4NamespaceSpec{
+			Subnets: []string{
+				"10.0.0.0/8",
+			},
+		},
+	}); err != nil {
+		return fmt.Errorf("creating IPv4 namespace: %w", err) //nolint:goerr113
+	}
+
+	b.ifaceTracker = map[string]uint8{}
+
+	leafNameFor := func(suID, leafID uint) string {
+		return fmt.Sprintf("leaf-su%02d-r%d", suID, leafID)
+	}
+
+	for spineID := range spines {
+		spineName := fmt.Sprintf("spine-s%02d", spineID)
+
+		if _, err := b.createSwitch(ctx, spineName, wiringapi.SwitchSpec{
+			Role:           wiringapi.SwitchRoleSpine,
+			VLANNamespaces: []string{"default"},
+		}, nil); err != nil {
+			return err
+		}
+
+		for suID := range b.ScalableUnits {
+			for leafID := range leafsPerScalableUnit {
+				leafName := leafNameFor(suID, leafID)
+
+				links := []wiringapi.FabricLink{}
+				for range fabricLinks {
+					spinePort := b.nextSwitchPort(spineName)
+					leafPort := b.nextSwitchPort(leafName)
+
+					links = append(links, wiringapi.FabricLink{
+						Spine: wiringapi.ConnFabricLinkSwitch{BasePortName: wiringapi.BasePortName{Port: spinePort}},
+						Leaf:  wiringapi.ConnFabricLinkSwitch{BasePortName: wiringapi.BasePortName{Port: leafPort}},
+					})
+				}
+
+				if _, err := b.createConnection(ctx, wiringapi.ConnectionSpec{
+					Fabric: &wiringapi.ConnFabric{
+						Links: links,
+					},
+				}); err != nil {
+					return err
+				}
+			}
+		}
+	}
+
+	routeSumm := map[string][]string{}
+	for vpcID := range b.VPCs {
+		vpcName := fmt.Sprintf("vpc-%d", vpcID)
+		// /13 for each VPC so we can allocate full /16 per rail
+		vpcSubnetStr := fmt.Sprintf("10.%d.0.0/13", rails*vpcID)
+		if _, err := b.createVPC(ctx, vpcName, vpcapi.VPCSpec{
+			VLANNamespace: "default",
+			Subnets: map[string]*vpcapi.VPCSubnet{
+				"default": {
+					Subnet: vpcSubnetStr,
+					VLAN:   startingVLAN + uint16(vpcID), //nolint:gosec
+				},
+			},
+		}); err != nil {
+			return err
+		}
+
+		for suID := range b.ScalableUnits {
+			for serverIDInSUInVPC := range b.ServersPerVPCPerUnit {
+				serverID := serverIDInSUInVPC + vpcID*b.ServersPerVPCPerUnit
+				serverName := fmt.Sprintf("server-su%02d-n%02d", suID, serverID)
+
+				if _, err := b.createServer(ctx, serverName, wiringapi.ServerSpec{}); err != nil {
+					return err
+				}
+
+				for railID := range rails {
+					leafName := leafNameFor(suID, railID%leafsPerScalableUnit)
+					connName := fmt.Sprintf("%s-r%d-%s", serverName, railID, leafName)
+					if _, err := b.createConnectionWithName(ctx, connName, wiringapi.ConnectionSpec{
+						Unbundled: &wiringapi.ConnUnbundled{
+							Link: wiringapi.ServerToSwitchLink{
+								Server: wiringapi.BasePortName{Port: b.nextServerPort(serverName)},
+								Switch: wiringapi.BasePortName{Port: b.nextSwitchPort(leafName)},
+							},
+						},
+					}); err != nil {
+						return err
+					}
+
+					attachName := fmt.Sprintf("%s-%s", vpcName, connName)
+					p2p := ""
+					if b.P2P {
+						p2p = fmt.Sprintf("10.%d.%d.%d/31", rails*vpcID+railID, suID, 2*serverIDInSUInVPC)
+					}
+					if _, err := b.createVPCAttachment(ctx, attachName, vpcapi.VPCAttachmentSpec{
+						Connection: connName,
+						Subnet:     fmt.Sprintf("%s/default", vpcName),
+					}, map[string]string{
+						vpcapi.AnnotationVPCAttachmentP2PLink: p2p,
+					}); err != nil {
+						return err
+					}
+				}
+			}
+
+			for railID := range rails {
+				leafName := leafNameFor(suID, railID%leafsPerScalableUnit)
+
+				hints := routeSumm[leafName]
+				hints = append(hints, vpcName+"="+fmt.Sprintf("10.%d.%d.0/24", rails*vpcID+railID, suID))
+				routeSumm[leafName] = hints
+			}
+		}
+	}
+
+	for suID := range b.ScalableUnits {
+		for leafID := range leafsPerScalableUnit {
+			leafName := leafNameFor(suID, leafID)
+
+			if _, err := b.createSwitch(ctx, leafName, wiringapi.SwitchSpec{
+				Role:           wiringapi.SwitchRoleServerLeaf,
+				VLANNamespaces: []string{"default"},
+			}, map[string]string{
+				// TODO use const wiringapi.AnnotationSwitchRouteSumm
+				"fabric.githedgehog.com/route-summ": strings.Join(routeSumm[leafName], ","),
+			}); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+func (b *VLABBuilderBase) addExternalConnection(ctx context.Context, extConnList []wiringapi.Connection, switchName string) ([]wiringapi.Connection, error) {
 	extConnSpec := wiringapi.ConnExternal{
 		Link: wiringapi.ConnExternalLink{
 			Switch: wiringapi.BasePortName{Port: b.nextSwitchPort(switchName)},
@@ -1014,7 +1220,7 @@ func (b *VLABBuilder) addExternalConnection(ctx context.Context, extConnList []w
 	return append(extConnList, *extConn), nil
 }
 
-func (b *VLABBuilder) nextSwitchPort(switchName string) string {
+func (b *VLABBuilderBase) nextSwitchPort(switchName string) string {
 	ifaceID := b.ifaceTracker[switchName]
 	portName := fmt.Sprintf("%s/E1/%d", switchName, ifaceID+1)
 
@@ -1033,16 +1239,20 @@ func (b *VLABBuilder) nextSwitchPort(switchName string) string {
 	return portName
 }
 
-func (b *VLABBuilder) nextServerPort(serverName string) string {
+func (b *VLABBuilderBase) nextServerPort(serverName string) string {
+	portBase := b.ServerPortBase
+	if portBase == "" {
+		portBase = "enp2s"
+	}
 	ifaceID := b.ifaceTracker[serverName]
-	portName := fmt.Sprintf("%s/enp2s%d", serverName, ifaceID+1) // value for VLAB
+	portName := fmt.Sprintf("%s/%s%d", serverName, portBase, ifaceID+1) // value for VLAB
 	ifaceID++
 	b.ifaceTracker[serverName] = ifaceID
 
 	return portName
 }
 
-func (b *VLABBuilder) createSwitchGroup(ctx context.Context, name string) (*wiringapi.SwitchGroup, error) { //nolint:unparam
+func (b *VLABBuilderBase) createSwitchGroup(ctx context.Context, name string) (*wiringapi.SwitchGroup, error) { //nolint:unparam
 	sg := &wiringapi.SwitchGroup{
 		TypeMeta: kmetav1.TypeMeta{
 			Kind:       wiringapi.KindSwitchGroup,
@@ -1062,7 +1272,7 @@ func (b *VLABBuilder) createSwitchGroup(ctx context.Context, name string) (*wiri
 	return sg, nil
 }
 
-func (b *VLABBuilder) createSwitch(ctx context.Context, name string, spec wiringapi.SwitchSpec) (*wiringapi.Switch, error) { //nolint:unparam
+func (b *VLABBuilderBase) createSwitch(ctx context.Context, name string, spec wiringapi.SwitchSpec, anns map[string]string) (*wiringapi.Switch, error) { //nolint:unparam
 	spec.Profile = b.DefaultSwitchProfile
 	if override, ok := b.SwitchProfileOverrides[name]; ok {
 		spec.Profile = override
@@ -1077,7 +1287,8 @@ func (b *VLABBuilder) createSwitch(ctx context.Context, name string, spec wiring
 			APIVersion: wiringapi.GroupVersion.String(),
 		},
 		ObjectMeta: kmetav1.ObjectMeta{
-			Name: name,
+			Name:        name,
+			Annotations: anns,
 		},
 		Spec: spec,
 	}
@@ -1089,7 +1300,7 @@ func (b *VLABBuilder) createSwitch(ctx context.Context, name string, spec wiring
 	return sw, nil
 }
 
-func (b *VLABBuilder) createServer(ctx context.Context, name string, spec wiringapi.ServerSpec) (*wiringapi.Server, error) { //nolint:unparam
+func (b *VLABBuilderBase) createServer(ctx context.Context, name string, spec wiringapi.ServerSpec) (*wiringapi.Server, error) { //nolint:unparam
 	server := &wiringapi.Server{
 		TypeMeta: kmetav1.TypeMeta{
 			Kind:       wiringapi.KindServer,
@@ -1108,7 +1319,7 @@ func (b *VLABBuilder) createServer(ctx context.Context, name string, spec wiring
 	return server, nil
 }
 
-func (b *VLABBuilder) createGateway(ctx context.Context, name string, spec gwapi.GatewaySpec) (*gwapi.Gateway, error) {
+func (b *VLABBuilderBase) createGateway(ctx context.Context, name string, spec gwapi.GatewaySpec) (*gwapi.Gateway, error) {
 	gw := &gwapi.Gateway{
 		TypeMeta: kmetav1.TypeMeta{
 			Kind:       "Gateway",
@@ -1128,7 +1339,7 @@ func (b *VLABBuilder) createGateway(ctx context.Context, name string, spec gwapi
 	return gw, nil
 }
 
-func (b *VLABBuilder) createGatewayGroup(ctx context.Context, name string) (*gwapi.GatewayGroup, error) {
+func (b *VLABBuilderBase) createGatewayGroup(ctx context.Context, name string) (*gwapi.GatewayGroup, error) {
 	gw := &gwapi.GatewayGroup{
 		TypeMeta: kmetav1.TypeMeta{
 			Kind:       "GatewayGroup",
@@ -1147,9 +1358,11 @@ func (b *VLABBuilder) createGatewayGroup(ctx context.Context, name string) (*gwa
 	return gw, nil
 }
 
-func (b *VLABBuilder) createConnection(ctx context.Context, spec wiringapi.ConnectionSpec) (*wiringapi.Connection, error) {
-	name := spec.GenerateName()
+func (b *VLABBuilderBase) createConnection(ctx context.Context, spec wiringapi.ConnectionSpec) (*wiringapi.Connection, error) {
+	return b.createConnectionWithName(ctx, spec.GenerateName(), spec)
+}
 
+func (b *VLABBuilderBase) createConnectionWithName(ctx context.Context, name string, spec wiringapi.ConnectionSpec) (*wiringapi.Connection, error) {
 	conn := &wiringapi.Connection{
 		TypeMeta: kmetav1.TypeMeta{
 			Kind:       wiringapi.KindConnection,
@@ -1169,7 +1382,7 @@ func (b *VLABBuilder) createConnection(ctx context.Context, spec wiringapi.Conne
 	return conn, nil
 }
 
-func (b *VLABBuilder) createExternal(ctx context.Context, name string, spec vpcapi.ExternalSpec) (*vpcapi.External, error) {
+func (b *VLABBuilderBase) createExternal(ctx context.Context, name string, spec vpcapi.ExternalSpec) (*vpcapi.External, error) {
 	external := &vpcapi.External{
 		TypeMeta: kmetav1.TypeMeta{
 			Kind:       "External",
@@ -1188,7 +1401,7 @@ func (b *VLABBuilder) createExternal(ctx context.Context, name string, spec vpca
 	return external, nil
 }
 
-func (b *VLABBuilder) createExternalAttach(ctx context.Context, name string, spec vpcapi.ExternalAttachmentSpec) (*vpcapi.ExternalAttachment, error) {
+func (b *VLABBuilderBase) createExternalAttach(ctx context.Context, name string, spec vpcapi.ExternalAttachmentSpec) (*vpcapi.ExternalAttachment, error) {
 	externalAttach := &vpcapi.ExternalAttachment{
 		TypeMeta: kmetav1.TypeMeta{
 			Kind:       "ExternalAttachment",
@@ -1205,4 +1418,43 @@ func (b *VLABBuilder) createExternalAttach(ctx context.Context, name string, spe
 	}
 
 	return externalAttach, nil
+}
+
+func (b *VLABBuilderBase) createVPC(ctx context.Context, name string, spec vpcapi.VPCSpec) (*vpcapi.VPC, error) {
+	vpc := &vpcapi.VPC{
+		TypeMeta: kmetav1.TypeMeta{
+			Kind:       "VPC",
+			APIVersion: vpcapi.GroupVersion.String(),
+		},
+		ObjectMeta: kmetav1.ObjectMeta{
+			Name: name,
+		},
+		Spec: spec,
+	}
+
+	if err := b.data.Add(ctx, vpc); err != nil {
+		return nil, fmt.Errorf("creating vpc %s: %w", name, err) //nolint:goerr113
+	}
+
+	return vpc, nil
+}
+
+func (b *VLABBuilderBase) createVPCAttachment(ctx context.Context, name string, spec vpcapi.VPCAttachmentSpec, anns map[string]string) (*vpcapi.VPCAttachment, error) {
+	vpc := &vpcapi.VPCAttachment{
+		TypeMeta: kmetav1.TypeMeta{
+			Kind:       "VPCAttachment",
+			APIVersion: vpcapi.GroupVersion.String(),
+		},
+		ObjectMeta: kmetav1.ObjectMeta{
+			Name:        name,
+			Annotations: anns,
+		},
+		Spec: spec,
+	}
+
+	if err := b.data.Add(ctx, vpc); err != nil {
+		return nil, fmt.Errorf("creating vpc attachment %s: %w", name, err) //nolint:goerr113
+	}
+
+	return vpc, nil
 }

@@ -1,0 +1,71 @@
+{
+  "format": "JSON",
+  "content": {
+    "nodes": {
+      {{ range $idx, $node := $.Nodes }}
+      {{- if $idx -}},{{ end }}
+      "{{ $node.Name }}": {
+        "nic_model": "{{ $node.NIC }}",
+        "cpu": {{ $node.CPU }},
+        "memory": {{ $node.Memory }},
+        "storage": {{ $node.Storage }},
+        "os": "{{ $node.OS }}",
+        "features": {
+          "uefi": false,
+          "tpm": false
+        },
+        "pxehost": false,
+        "secureboot": false,
+        "oob": false,
+        "emulation_type": null,
+        "network_pci": {},
+        "management_ip": "{{ $node.IP }}",
+        "management_mac": "{{ $node.MAC }}",
+        "cpu_options": [],
+        "storage_pci": {}
+      }
+      {{ end }}
+    },
+    "links": [
+      {{ range $idx, $link := $.Links }}
+      {{- if $idx -}},{{ end }}
+      [
+        {{ range $eidx, $enp := $link.Endpoints }}
+        {{- if $eidx -}},{{ end }}
+        {
+          "interface": "{{ $enp.Interface }}",
+          "node": "{{ $enp.Node }}",
+          "mac": "{{ $enp.MAC }}"
+        }
+        {{ end }}
+      ]
+      {{ end }}
+    ],
+    "oob": {
+      "nodes": {
+        "oob-mgmt-server": {
+          "cpu": 8,
+          "memory": 8192,
+          "storage": 100
+        },
+        "oob-mgmt-switch": {
+          "cpu": 1,
+          "memory": 2048,
+          "storage": 10
+        }
+      },
+      "enable_dhcp": true
+    },
+    "netq": {
+      "nodes": {
+        "netq-ts": {
+          "cpu": 4,
+          "memory": 6144,
+          "storage": 64,
+          "os": "netq-ts-cloud-4.15.0",
+          "nic_model": "virtio"
+        }
+      }
+    }
+  }
+}

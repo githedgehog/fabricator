@@ -84,6 +84,8 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `managementSubnet` _[Prefix](#prefix)_ |  |  |  |
 | `controlVIP` _[Prefix](#prefix)_ |  |  |  |
+| `managementSubnetAnyDevice` _boolean_ |  |  |  |
+| `managementSubnetStatic` _object (keys:string, values:string)_ |  |  |  |
 | `tlsSAN` _string array_ |  |  |  |
 | `joinToken` _string_ |  |  |  |
 | `kubeClusterSubnet` _[Prefix](#prefix)_ |  |  |  |
@@ -408,7 +410,9 @@ _Appears in:_
 | `mclagSessionSubnet` _[Prefix](#prefix)_ |  |  |  |
 | `defaultSwitchUsers` _object (keys:string, values:[SwitchUser](#switchuser))_ |  |  |  |
 | `defaultAlloyConfig` _[AlloyConfig](#alloyconfig)_ |  |  |  |
+| `excludeNOSInstallers` _boolean_ |  |  |  |
 | `includeONIE` _boolean_ |  |  |  |
+| `includeBCM` _boolean_ |  |  |  |
 | `includeCLSP` _boolean_ |  |  |  |
 | `includeCumulus` _boolean_ |  |  |  |
 | `disableBFD` _boolean_ |  |  |  |

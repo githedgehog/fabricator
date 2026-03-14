@@ -100,6 +100,12 @@ spec:
                         type: string
                       managementSubnet:
                         type: string
+                      managementSubnetAnyDevice:
+                        type: boolean
+                      managementSubnetStatic:
+                        additionalProperties:
+                          type: string
+                        type: object
                       ntpServers:
                         items:
                           type: string
@@ -214,8 +220,12 @@ spec:
                         type: string
                       eslagMACBase:
                         type: string
+                      excludeNOSInstallers:
+                        type: boolean
                       fabricSubnet:
                         type: string
+                      includeBCM:
+                        type: boolean
                       includeCLSP:
                         type: boolean
                       includeCumulus:
