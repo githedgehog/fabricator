@@ -161,10 +161,17 @@ func (c *Config) AirGenerate(ctx context.Context) error {
 	if err := c.Client.List(ctx, attaches); err != nil {
 		return fmt.Errorf("listing vpc attachments: %w", err)
 	}
+	slices.SortFunc(attaches.Items, func(a, b vpcapi.VPCAttachment) int {
+		return strings.Compare(a.Name, b.Name)
+	})
+
 	connList := &wiringapi.ConnectionList{}
 	if err := c.Client.List(ctx, connList); err != nil {
 		return fmt.Errorf("listing connections: %w", err)
 	}
+	slices.SortFunc(connList.Items, func(a, b wiringapi.Connection) int {
+		return strings.Compare(a.Name, b.Name)
+	})
 	conns := map[string]wiringapi.Connection{}
 	for _, conn := range connList.Items {
 		conns[conn.Name] = conn

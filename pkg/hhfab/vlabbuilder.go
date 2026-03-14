@@ -416,7 +416,7 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, fabri
 				Group: sg,
 				Type:  meta.RedundancyTypeMCLAG,
 			},
-		}); err != nil {
+		}, nil); err != nil {
 			return err
 		}
 		if _, err := b.createSwitch(ctx, leaf2Name, wiringapi.SwitchSpec{
@@ -427,7 +427,7 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, fabri
 				Group: sg,
 				Type:  meta.RedundancyTypeMCLAG,
 			},
-		}); err != nil {
+		}, nil); err != nil {
 			return err
 		}
 
@@ -578,7 +578,7 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, fabri
 					Group: sg,
 					Type:  meta.RedundancyTypeESLAG,
 				},
-			}); err != nil {
+			}, nil); err != nil {
 				return err
 			}
 			if extESLAGConns < b.ExtESLAGConnCount {
@@ -685,7 +685,7 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, fabri
 		if _, err := b.createSwitch(ctx, leafName, wiringapi.SwitchSpec{
 			Role:        wiringapi.SwitchRoleServerLeaf,
 			Description: fmt.Sprintf("VS-%02d", switchID),
-		}); err != nil {
+		}, nil); err != nil {
 			return err
 		}
 		orphanLeaves = append(orphanLeaves, leafName)
@@ -799,7 +799,7 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, fabri
 		if _, err := b.createSwitch(ctx, spineName, wiringapi.SwitchSpec{
 			Role:        wiringapi.SwitchRoleSpine,
 			Description: fmt.Sprintf("VS-%02d", switchID),
-		}); err != nil {
+		}, nil); err != nil {
 			return err
 		}
 
@@ -1089,7 +1089,7 @@ func (b *VLABBuilderGPURail) Build(ctx context.Context, l *apiutil.Loader, fabri
 		if _, err := b.createSwitch(ctx, spineName, wiringapi.SwitchSpec{
 			Role:           wiringapi.SwitchRoleSpine,
 			VLANNamespaces: []string{"default"},
-		}); err != nil {
+		}, nil); err != nil {
 			return err
 		}
 
@@ -1119,22 +1119,11 @@ func (b *VLABBuilderGPURail) Build(ctx context.Context, l *apiutil.Loader, fabri
 		}
 	}
 
-	for suID := range b.ScalableUnits {
-		for leafID := range leafsPerScalableUnit {
-			leafName := leafNameFor(suID, leafID)
-
-			if _, err := b.createSwitch(ctx, leafName, wiringapi.SwitchSpec{
-				Role:           wiringapi.SwitchRoleServerLeaf,
-				VLANNamespaces: []string{"default"},
-			}); err != nil {
-				return err
-			}
-		}
-	}
-
+	routeSumm := map[string][]string{}
 	for vpcID := range b.VPCs {
 		vpcName := fmt.Sprintf("vpc-%d", vpcID)
-		vpcSubnetStr := fmt.Sprintf("10.%d.0.0/16", vpcID)
+		// /13 for each VPC so we can allocate full /16 per rail
+		vpcSubnetStr := fmt.Sprintf("10.%d.0.0/13", rails*vpcID)
 		if _, err := b.createVPC(ctx, vpcName, vpcapi.VPCSpec{
 			VLANNamespace: "default",
 			Subnets: map[string]*vpcapi.VPCSubnet{
@@ -1147,7 +1136,6 @@ func (b *VLABBuilderGPURail) Build(ctx context.Context, l *apiutil.Loader, fabri
 			return err
 		}
 
-		serverIDInVPC := uint(0)
 		for suID := range b.ScalableUnits {
 			for serverIDInSUInVPC := range b.ServersPerVPCPerUnit {
 				serverID := serverIDInSUInVPC + vpcID*b.ServersPerVPCPerUnit
@@ -1174,17 +1162,41 @@ func (b *VLABBuilderGPURail) Build(ctx context.Context, l *apiutil.Loader, fabri
 					attachName := fmt.Sprintf("%s-%s", vpcName, connName)
 					p2p := ""
 					if b.P2P {
-						p2p = fmt.Sprintf("10.%d.%d.%d/31", vpcID, railID, 2*serverIDInVPC)
+						p2p = fmt.Sprintf("10.%d.%d.%d/31", rails*vpcID+railID, suID, 2*serverIDInSUInVPC)
 					}
 					if _, err := b.createVPCAttachment(ctx, attachName, vpcapi.VPCAttachmentSpec{
 						Connection: connName,
 						Subnet:     fmt.Sprintf("%s/default", vpcName),
-					}, p2p); err != nil {
+					}, map[string]string{
+						vpcapi.AnnotationVPCAttachmentP2PLink: p2p,
+					}); err != nil {
 						return err
 					}
 				}
+			}
 
-				serverIDInVPC++
+			for railID := range rails {
+				leafName := leafNameFor(suID, railID%leafsPerScalableUnit)
+
+				hints := routeSumm[leafName]
+				hints = append(hints, vpcName+"="+fmt.Sprintf("10.%d.%d.0/24", rails*vpcID+railID, suID))
+				routeSumm[leafName] = hints
+			}
+		}
+	}
+
+	for suID := range b.ScalableUnits {
+		for leafID := range leafsPerScalableUnit {
+			leafName := leafNameFor(suID, leafID)
+
+			if _, err := b.createSwitch(ctx, leafName, wiringapi.SwitchSpec{
+				Role:           wiringapi.SwitchRoleServerLeaf,
+				VLANNamespaces: []string{"default"},
+			}, map[string]string{
+				// TODO use const wiringapi.AnnotationSwitchRouteSumm
+				"fabric.githedgehog.com/route-summ": strings.Join(routeSumm[leafName], ","),
+			}); err != nil {
+				return err
 			}
 		}
 	}
@@ -1260,7 +1272,7 @@ func (b *VLABBuilderBase) createSwitchGroup(ctx context.Context, name string) (*
 	return sg, nil
 }
 
-func (b *VLABBuilderBase) createSwitch(ctx context.Context, name string, spec wiringapi.SwitchSpec) (*wiringapi.Switch, error) { //nolint:unparam
+func (b *VLABBuilderBase) createSwitch(ctx context.Context, name string, spec wiringapi.SwitchSpec, anns map[string]string) (*wiringapi.Switch, error) { //nolint:unparam
 	spec.Profile = b.DefaultSwitchProfile
 	if override, ok := b.SwitchProfileOverrides[name]; ok {
 		spec.Profile = override
@@ -1275,7 +1287,8 @@ func (b *VLABBuilderBase) createSwitch(ctx context.Context, name string, spec wi
 			APIVersion: wiringapi.GroupVersion.String(),
 		},
 		ObjectMeta: kmetav1.ObjectMeta{
-			Name: name,
+			Name:        name,
+			Annotations: anns,
 		},
 		Spec: spec,
 	}
@@ -1426,11 +1439,7 @@ func (b *VLABBuilderBase) createVPC(ctx context.Context, name string, spec vpcap
 	return vpc, nil
 }
 
-func (b *VLABBuilderBase) createVPCAttachment(ctx context.Context, name string, spec vpcapi.VPCAttachmentSpec, p2p string) (*vpcapi.VPCAttachment, error) {
-	anns := map[string]string{}
-	if p2p != "" {
-		anns[vpcapi.AnnotationVPCAttachmentP2PLink] = p2p
-	}
+func (b *VLABBuilderBase) createVPCAttachment(ctx context.Context, name string, spec vpcapi.VPCAttachmentSpec, anns map[string]string) (*vpcapi.VPCAttachment, error) {
 	vpc := &vpcapi.VPCAttachment{
 		TypeMeta: kmetav1.TypeMeta{
 			Kind:       "VPCAttachment",
