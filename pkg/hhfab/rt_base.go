@@ -65,6 +65,7 @@ type VPCPeeringTestCtx struct {
 	pauseOnFail      bool
 	roceLeaves       []string
 	noSetup          bool
+	skipFlags        SkipFlags
 }
 
 // Test function types
@@ -622,7 +623,29 @@ func selectAndRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, suite *J
 	return suite, nil
 }
 
-func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOtps ReleaseTestOpts) error {
+func recapAndReport(results []JUnitTestSuite, rtOtps ReleaseTestOpts) error {
+	slog.Info("*** Recap of the test results ***")
+	for _, suite := range results {
+		printSuiteResults(&suite)
+	}
+
+	if rtOtps.ResultsFile != "" {
+		report := JUnitReport{
+			Suites: results,
+		}
+		output, err := xml.MarshalIndent(report, "", "  ")
+		if err != nil {
+			return fmt.Errorf("marshalling XML: %w", err)
+		}
+		if err := os.WriteFile(rtOtps.ResultsFile, output, 0o600); err != nil {
+			return fmt.Errorf("writing XML file: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOpts ReleaseTestOpts) error {
 	testStart := time.Now()
 
 	cacheCancel, kube, err := getKubeClientWithCache(ctx, vlabCfg.WorkDir)
@@ -652,18 +675,25 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 		SubnetsPerVPC:     subnetsPerVpc,
 		VLANNamespace:     "default",
 		IPv4Namespace:     "default",
-		HashPolicy:        rtOtps.HashPolicy,
-		VPCMode:           rtOtps.VPCMode,
+		HashPolicy:        rtOpts.HashPolicy,
+		VPCMode:           rtOpts.VPCMode,
 	}
 
-	testCtx := makeTestCtx(ctx, kube, setupOpts, vlabCfg, vlab, false, rtOtps)
+	testCtx := makeTestCtx(ctx, kube, setupOpts, vlabCfg, vlab, false, rtOpts)
+	var suites []*JUnitTestSuite
 	noVpcSuite := makeNoVpcsSuite(testCtx)
 	singleVpcSuite := makeSingleVPCSuite(testCtx)
 	multiVPCMultiSubnetSuite := makeMultiVPCMultiSubnetSuite(testCtx)
 	multiVPCSingleSubnetSuite := makeMultiVPCSingleSubnetSuite(testCtx)
-	suites := []*JUnitTestSuite{noVpcSuite, singleVpcSuite, multiVPCMultiSubnetSuite, multiVPCSingleSubnetSuite}
+	ortSuite := makeOnReadyTestSuite(testCtx)
 
-	if rtOtps.ListTests {
+	if rtOpts.OnReadyTest {
+		suites = []*JUnitTestSuite{ortSuite}
+	} else {
+		suites = []*JUnitTestSuite{noVpcSuite, singleVpcSuite, multiVPCMultiSubnetSuite, multiVPCSingleSubnetSuite}
+	}
+
+	if rtOpts.ListTests {
 		for _, suite := range suites {
 			printTestSuite(suite)
 		}
@@ -672,7 +702,7 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 	}
 
 	regexesCompiled := make([]*regexp.Regexp, 0)
-	for _, regex := range rtOtps.Regexes {
+	for _, regex := range rtOpts.Regexes {
 		compiled, err := regexp.Compile(regex)
 		if err != nil {
 			return fmt.Errorf("compiling regex %s: %w", regex, err)
@@ -682,7 +712,7 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 
 	// detect if any of the skipFlags conditions are true
 	skipFlags := SkipFlags{
-		ExtendedOnly: rtOtps.Extended,
+		ExtendedOnly: rtOpts.Extended,
 		NoServers:    noServers,
 	}
 	connList := &wiringapi.ConnectionList{}
@@ -777,7 +807,7 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 		skipFlags.NoExternals = true
 	} else {
 		testCtx.extName = ""
-		// look first for hardware externals with at least one attachment
+		// look first for hardware externals with at least one non-proxy attachment
 		for _, ext := range extList.Items {
 			if !isHardware(&ext) {
 				slog.Debug("Skipping non-hardware external", "external", ext.Name)
@@ -786,6 +816,10 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 			}
 			for _, extAttach := range extAttachList.Items {
 				if extAttach.Spec.External != ext.Name {
+					continue
+				} else if extAttach.Spec.Static != nil && extAttach.Spec.Static.Proxy {
+					slog.Debug("Skipping proxied hw static external", "external", ext.Name)
+
 					continue
 				}
 				testCtx.extName = ext.Name
@@ -814,6 +848,12 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 				// check if all of the attachments are via hardware connections
 				someNotHW := false
 				for _, attach := range extAttach.Items {
+					// skip proxied static externals as we want to use the one we pick here with external peerings and they are not supported
+					if attach.Spec.Static != nil && attach.Spec.Static.Proxy {
+						slog.Debug("Skipping proxied virtual static external", "external", attach.Spec.External)
+
+						continue
+					}
 					conn := &wiringapi.Connection{}
 					if err := kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: attach.Spec.Connection}, conn); err != nil {
 						return fmt.Errorf("getting connection %s: %w", attach.Spec.Connection, err)
@@ -918,52 +958,59 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 		slog.Info("No Prometheus target found, Prometheus test will be skipped")
 	}
 
+	// save skip flags in test context so that tests can adapt to the limitations of the topology
+	testCtx.skipFlags = skipFlags
+
 	results := []JUnitTestSuite{}
 	testCtx.noSetup = true
-	noVpcResults, err := selectAndRunSuite(ctx, testCtx, noVpcSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
-	if err != nil && rtOtps.FailFast {
+
+	if rtOpts.OnReadyTest {
+		ortResults, err := selectAndRunSuite(ctx, testCtx, ortSuite, regexesCompiled, rtOpts.InvertRegex, skipFlags)
+		if err != nil && rtOpts.FailFast {
+			return fmt.Errorf("running on-ready test suite: %w", err)
+		}
+		results = append(results, *ortResults)
+		if err := recapAndReport(results, rtOpts); err != nil {
+			return fmt.Errorf("recapping and reporting results: %w", err)
+		}
+		slog.Info("OnReady Test Suite completed", "duration", time.Since(testStart).String())
+		if ortResults.Failures > 0 {
+			return fmt.Errorf("some tests failed: onReady=%d", ortResults.Failures) //nolint:goerr113
+		}
+
+		return nil
+	}
+
+	noVpcResults, err := selectAndRunSuite(ctx, testCtx, noVpcSuite, regexesCompiled, rtOpts.InvertRegex, skipFlags)
+	if err != nil && rtOpts.FailFast {
 		return fmt.Errorf("running no VPC suite: %w", err)
 	}
 	results = append(results, *noVpcResults)
 
 	testCtx.noSetup = false
-	singleVpcResults, err := selectAndRunSuite(ctx, testCtx, singleVpcSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
-	if err != nil && rtOtps.FailFast {
+	singleVpcResults, err := selectAndRunSuite(ctx, testCtx, singleVpcSuite, regexesCompiled, rtOpts.InvertRegex, skipFlags)
+	if err != nil && rtOpts.FailFast {
 		return fmt.Errorf("running single VPC suite: %w", err)
 	}
 	results = append(results, *singleVpcResults)
 
 	testCtx.setupOpts.ServersPerSubnet = 1
-	multiVpcResults, err := selectAndRunSuite(ctx, testCtx, multiVPCMultiSubnetSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
-	if err != nil && rtOtps.FailFast {
+	multiVpcResults, err := selectAndRunSuite(ctx, testCtx, multiVPCMultiSubnetSuite, regexesCompiled, rtOpts.InvertRegex, skipFlags)
+	if err != nil && rtOpts.FailFast {
 		return fmt.Errorf("running multi VPC suite: %w", err)
 	}
 	results = append(results, *multiVpcResults)
 
 	testCtx.setupOpts.SubnetsPerVPC = 1
 	testCtx.wipeBetweenTests = true
-	basicResults, err := selectAndRunSuite(ctx, testCtx, multiVPCSingleSubnetSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
-	if err != nil && rtOtps.FailFast {
+	basicResults, err := selectAndRunSuite(ctx, testCtx, multiVPCSingleSubnetSuite, regexesCompiled, rtOpts.InvertRegex, skipFlags)
+	if err != nil && rtOpts.FailFast {
 		return fmt.Errorf("running basic VPC suite: %w", err)
 	}
 	results = append(results, *basicResults)
 
-	slog.Info("*** Recap of the test results ***")
-	for _, suite := range results {
-		printSuiteResults(&suite)
-	}
-
-	if rtOtps.ResultsFile != "" {
-		report := JUnitReport{
-			Suites: results,
-		}
-		output, err := xml.MarshalIndent(report, "", "  ")
-		if err != nil {
-			return fmt.Errorf("marshalling XML: %w", err)
-		}
-		if err := os.WriteFile(rtOtps.ResultsFile, output, 0o600); err != nil {
-			return fmt.Errorf("writing XML file: %w", err)
-		}
+	if err := recapAndReport(results, rtOpts); err != nil {
+		return fmt.Errorf("recapping and reporting results: %w", err)
 	}
 
 	slog.Info("All tests completed", "duration", time.Since(testStart).String())

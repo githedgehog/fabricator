@@ -245,7 +245,26 @@ jobs:
             --include-onie=${{ inputs.includeonie }} \
             --gateways=${{ inputs.gateway && 2 || 0 }} \
             ${{ inputs.custom_init_args }}
-          bin/hhfab vlab gen -v ${{ inputs.mesh && '--mesh-links-count=3' || '' }} ${{ inputs.custom_gen_args }}
+          VLAB_MCLAG_LEAVES=2
+          VLAB_ESLAG_GROUPS=2
+          VLAB_ORPHAN_LEAVES=1
+          VLAB_MESH_LINKS=0
+          VLAB_UNBUNDLED_SERVERS=1
+          if [[ ${{ inputs.vpcmode }} == "l3vni" ]]; then
+            VLAB_MCLAG_LEAVES=0
+            VLAB_ESLAG_GROUPS=""
+            VLAB_ORPHAN_LEAVES=3
+            VLAB_UNBUNDLED_SERVERS=2
+          fi
+          if [[ ${{ inputs.mesh }} == "true" ]]; then
+            VLAB_MESH_LINKS=3
+            VLAB_MCLAG_LEAVES=0
+            VLAB_ORPHAN_LEAVES=3
+          fi
+          bin/hhfab vlab gen -v --mesh-links-count=$VLAB_MESH_LINKS --mclag-leafs-count=$VLAB_MCLAG_LEAVES \
+            --eslag-leaf-groups=$VLAB_ESLAG_GROUPS --orphan-leafs-count=$VLAB_ORPHAN_LEAVES --unbundled-servers=$VLAB_UNBUNDLED_SERVERS \
+            --externals-bgp=1 --externals-static=1 --external-orphan-connections=1 \
+            ${{ inputs.custom_gen_args }}
 
       - name: Init hhfab for hybrid mode
         if: ${{ inputs.upgradefrom == '' && inputs.hybrid }}
@@ -275,18 +294,28 @@ jobs:
           fi
 
           export HHFAB_JOIN_TOKEN=$(openssl rand -base64 24)
+
+          HHFAB_TEST_ARGS=(--ready=release-test)
+          if [[ "${{ inputs.releasetest }}" == "true" ]]; then
+            if [[ -n "${{ inputs.releasetest_regex }}" ]]; then
+              HHFAB_TEST_ARGS+=("--release-test-regexes=${{ inputs.releasetest_regex }}")
+              if [[ "${{ inputs.releasetest_regex_invert }}" == "true" ]]; then
+                HHFAB_TEST_ARGS+=(--release-test-regexes-invert)
+              fi
+            fi
+          elif [[ -n "${{ inputs.upgradefrom }}" ]]; then
+            HHFAB_TEST_ARGS=(--ready=setup-vpcs --ready=setup-peerings --ready=test-connectivity)
+          else
+            HHFAB_TEST_ARGS+=(--release-test-on-ready-only)
+          fi
+          echo "HHFAB_TEST_ARGS: ${HHFAB_TEST_ARGS[*]}"
           bin/hhfab vlab up -v \
             --build-mode="${{ inputs.buildmode }}" \
             --vpc-mode="${{ inputs.vpcmode }}" \
             ${{ inputs.hybrid && '--controls-restricted=false' || '' }} \
             ${{ (inputs.upgradefrom == '' && inputs.hybrid) && '--ready switch-reinstall' || '' }} \
             --ready=inspect \
-            --ready=setup-vpcs \
-            --ready=setup-peerings \
-            --ready=test-connectivity \
-            ${{ inputs.releasetest && '--ready=release-test' || '' }} \
-            ${{ inputs.releasetest_regex && format('--release-test-regexes="{0}"', inputs.releasetest_regex) || '' }} \
-            ${{ inputs.releasetest_regex_invert && '--release-test-regexes-invert' || '' }} \
+            "${HHFAB_TEST_ARGS[@]}" \
             --ready=exit \
             ${{ inputs.pause_on_failure && inputs.debug && '--pause-on-failure' || '' }} \
             ${{ inputs.upgradefrom != '' && '--upgrade' || '' }}
