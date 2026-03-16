@@ -96,23 +96,39 @@ expect {
 
 set prompt_re {.*[#\$] $}
 set logged_in 0
-set prompt_timeout 20
+set prompt_poll_interval 10
+set prompt_max_retries 9
 
-# Servers should be auto-logged in, just check for prompt
-log_message "EXP-DBG" "Checking for shell prompt"
-expect -timeout $prompt_timeout {
-    -re $prompt_re {
-        set logged_in 1
+# Servers use flatcar.autologin: auto-login getty starts after the initrd→userspace
+# transition, which can take 30-60s after the serial goes quiet. Retry sending \r
+# to elicit a prompt instead of giving up after a single short wait.
+log_message "EXP-DBG" "Checking for shell prompt (up to [expr {$prompt_poll_interval * $prompt_max_retries}]s)"
+set attempt 0
+set give_up 0
+while {$attempt < $prompt_max_retries && !$logged_in && !$give_up} {
+    if {$attempt > 0} {
+        log_message "EXP-DBG" "Retrying prompt check (attempt [expr {$attempt + 1}]/$prompt_max_retries)"
+        send "\r"
     }
-    -re "(?i)login:" {
-        log_message "EXP-DBG" "Unexpected login prompt on server"
+    expect -timeout $prompt_poll_interval {
+        -re $prompt_re {
+            set logged_in 1
+        }
+        -re "(?i)login:" {
+            log_message "EXP-DBG" "Unexpected login prompt on server"
+            set give_up 1
+        }
+        timeout {
+            incr attempt
+        }
+        eof {
+            log_message "EXP-ERR" "Console check failed (EOF)"
+            set give_up 1
+        }
     }
-    timeout {
-        log_message "EXP-DBG" "No prompt detected"
-    }
-    eof {
-        log_message "EXP-ERR" "Console check failed (EOF)"
-    }
+}
+if {!$logged_in} {
+    log_message "EXP-DBG" "No shell prompt after [expr {$prompt_poll_interval * $prompt_max_retries}]s"
 }
 
 proc run_cmd {cmd prompt prompt_timeout} {
@@ -129,7 +145,15 @@ proc run_cmd {cmd prompt prompt_timeout} {
 }
 
 if {$logged_in} {
-    # Basic network diagnostics for test endpoints
+    # Basic system info
+    run_cmd "uname -a" $prompt_re 10
+    run_cmd "uptime" $prompt_re 10
+
+    # Systemd health: failed units and pending jobs help explain slow/stuck boots
+    run_cmd "systemctl --failed --no-pager" $prompt_re 30
+    run_cmd "systemctl list-jobs --no-pager" $prompt_re 30
+
+    # Network diagnostics for test endpoints
     run_cmd "ip addr show" $prompt_re 30
     run_cmd "ip link show" $prompt_re 30
     run_cmd "ip route show" $prompt_re 30
@@ -140,6 +164,9 @@ if {$logged_in} {
     run_cmd "systemctl status sshd --no-pager" $prompt_re 30
     run_cmd "ss -tulnp | grep ':22'" $prompt_re 30
     run_cmd "journalctl -u sshd --no-pager -n 30" $prompt_re 60
+
+    # Recent boot messages to catch ignition/service failures
+    run_cmd "journalctl -b --no-pager -n 50" $prompt_re 60
 } else {
     log_message "EXP-DBG" "No shell prompt; skipping console commands"
 }
