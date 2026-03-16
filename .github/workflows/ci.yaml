@@ -455,7 +455,7 @@ jobs:
           cp docs/api.md docs-repo/docs/reference/fab-api.md.gen
 
       - name: Generate token for the docs repository
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         id: docs-app-token
         with:
           app-id: ${{ secrets.DOCS_APP_ID }}
