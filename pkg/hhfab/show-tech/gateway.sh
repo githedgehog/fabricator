@@ -13,14 +13,22 @@ OUTPUT_FILE="/tmp/show-tech.log"
 export CRI_CONFIG_FILE=/dev/null
 
 # Find the running FRR container ID
-FRR_CONTAINER_ID=$(sudo -E crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock ps 2>>"$OUTPUT_FILE" \
-    | grep ' frr ' \
-    | awk '{print $1}')
+FRR_CONTAINER_ID=$(sudo -E crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock ps -q --name frr 2>>"$OUTPUT_FILE" | head -1)
+
+# Find the running dataplane container ID
+DATAPLANE_CONTAINER_ID=$(sudo -E crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock ps -q --name dataplane 2>>"$OUTPUT_FILE" | head -1)
 
 # Helper for running vtysh commands inside the FRR container
 run_vtysh_cmd() {
     echo -e "\n=== Executing: vtysh -c '$1' ===" >> "$OUTPUT_FILE"
     sudo -E crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock exec "$FRR_CONTAINER_ID" vtysh -X /lib/libvtysh_hedgehog.so -c "$1" >> "$OUTPUT_FILE" 2>&1
+}
+
+# Helper for running dataplane-cli commands inside the dataplane container
+run_dp_cmd() {
+    echo -e "\n=== Executing: dataplane-cli -c '$1' ===" >> "$OUTPUT_FILE"
+    sudo -E crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock exec "$DATAPLANE_CONTAINER_ID" \
+        /dataplane-cli -c "$1" >> "$OUTPUT_FILE" 2>&1
 }
 
 # ---------------------------
@@ -120,6 +128,30 @@ run_vtysh_cmd() {
         sudo -E crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock logs "$FRR_CONTAINER_ID"
     else
         echo "FRR container not found — skipping container logs"
+    fi
+} >> "$OUTPUT_FILE" 2>&1
+
+# ---------------------------
+# Dataplane Diagnostics
+# ---------------------------
+{
+    echo -e "\n=== Dataplane Diagnostics ==="
+    if [ -z "$DATAPLANE_CONTAINER_ID" ]; then
+        echo "Dataplane container not found — skipping dataplane diagnostics"
+    else
+        run_dp_cmd "show tech"
+    fi
+} >> "$OUTPUT_FILE" 2>&1
+
+# ---------------------------
+# Dataplane Container Logs
+# ---------------------------
+{
+    echo -e "\n=== Dataplane Container Logs ==="
+    if [ -n "$DATAPLANE_CONTAINER_ID" ]; then
+        sudo -E crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock logs "$DATAPLANE_CONTAINER_ID"
+    else
+        echo "Dataplane container not found — skipping container logs"
     fi
 } >> "$OUTPUT_FILE" 2>&1
 
