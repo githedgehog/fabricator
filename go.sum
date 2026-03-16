@@ -35,8 +35,8 @@ github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03
 github.com/BurntSushi/toml v1.5.0 h1:W5quZX/G/csjUnuI8SUYlsHs9M38FC7znL0lIO+DvMg=
 github.com/BurntSushi/toml v1.5.0/go.mod h1:ukJfTF/6rtPPRCnwkur4qwRxa8vTRFBF0uk2lLoLwho=
 github.com/BurntSushi/xgb v0.0.0-20160522181843-27f122750802/go.mod h1:IVnqGOEym/WlBOVXweHU+Q+/VP0lqqI8lqeDx9IjBqo=
-github.com/DeRuina/timberjack v1.3.9 h1:6UXZ1I7ExPGTX/1UNYawR58LlOJUHKBPiYC7WQ91eBo=
-github.com/DeRuina/timberjack v1.3.9/go.mod h1:RLoeQrwrCGIEF8gO5nV5b/gMD0QIy7bzQhBUgpp1EqE=
+github.com/DeRuina/timberjack v1.4.0 h1:Ipw9KjS/6K6A9D1xdhWebYJFqdQez5gXwfzmeKOroqE=
+github.com/DeRuina/timberjack v1.4.0/go.mod h1:RLoeQrwrCGIEF8gO5nV5b/gMD0QIy7bzQhBUgpp1EqE=
 github.com/Frostman/go-diskfs v1.4.2-hh3 h1:87nsTHdbHNBAkaESGX8MQeC8NZnjvg16nDOU+TARYPo=
 github.com/Frostman/go-diskfs v1.4.2-hh3/go.mod h1:ss1uAUBhgDdEOewZFDWWpYqJFjNPbK7hYSjRoQE+D94=
 github.com/Masterminds/goutils v1.1.1 h1:5nUrii3FMTL5diU80unEVvNevw1nH4+ZV4DSLVJLSYI=
