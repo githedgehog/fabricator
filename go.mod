@@ -39,7 +39,7 @@ require (
 	github.com/urfave/cli/v2 v2.27.7
 	github.com/vbauerster/mpb/v8 v8.12.0
 	github.com/vishvananda/netlink v1.3.1
-	go.githedgehog.com/fabric v0.111.0
+	go.githedgehog.com/fabric v0.112.0
 	go.githedgehog.com/gateway v0.43.5
 	go.githedgehog.com/libmeta v0.3.0
 	go.podman.io/image/v5 v5.39.1
@@ -176,9 +176,9 @@ require (
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/nwaples/rardecode/v2 v2.2.0 // indirect
 	github.com/olekukonko/cat v0.0.0-20250911104152-50322a0618f6 // indirect
-	github.com/olekukonko/errors v1.1.0 // indirect
-	github.com/olekukonko/ll v0.1.4-0.20260115111900-9e59c2286df0 // indirect
-	github.com/olekukonko/tablewriter v1.1.3 // indirect
+	github.com/olekukonko/errors v1.2.0 // indirect
+	github.com/olekukonko/ll v0.1.6 // indirect
+	github.com/olekukonko/tablewriter v1.1.4 // indirect
 	github.com/openconfig/gnmi v0.14.1 // indirect
 	github.com/openconfig/gnmic/pkg/api v0.1.11 // indirect
 	github.com/openconfig/goyang v1.6.3 // indirect
