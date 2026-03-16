@@ -149,19 +149,34 @@ if {[info exists env(HHFAB_SERVER_USERNAME)] && [info exists env(HHFAB_SERVER_PA
     }
 } else {
     log_message "EXP-DBG" "No credentials provided; checking for an existing prompt"
-    expect -timeout $prompt_timeout {
-        -re $prompt_re {
-            set logged_in 1
+    set prompt_poll_interval 10
+    set prompt_max_retries 9
+    set attempt 0
+    set give_up 0
+    while {$attempt < $prompt_max_retries && !$logged_in && !$give_up} {
+        if {$attempt > 0} {
+            log_message "EXP-DBG" "Retrying prompt check (attempt [expr {$attempt + 1}]/$prompt_max_retries)"
+            send "\r"
         }
-        -re "(?i)login:" {
-            log_message "EXP-DBG" "Login prompt detected without credentials"
+        expect -timeout $prompt_poll_interval {
+            -re $prompt_re {
+                set logged_in 1
+            }
+            -re "(?i)login:" {
+                log_message "EXP-DBG" "Login prompt detected without credentials"
+                set give_up 1
+            }
+            timeout {
+                incr attempt
+            }
+            eof {
+                log_message "EXP-ERR" "Login check failed (EOF)"
+                set give_up 1
+            }
         }
-        timeout {
-            log_message "EXP-DBG" "No prompt detected; skipping console commands"
-        }
-        eof {
-            log_message "EXP-ERR" "Login check failed (EOF)"
-        }
+    }
+    if {!$logged_in} {
+        log_message "EXP-DBG" "No prompt after [expr {$prompt_poll_interval * $prompt_max_retries}]s; skipping console commands"
     }
 }
 
