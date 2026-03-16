@@ -58,7 +58,7 @@ type (
 	KubeInstall func(cfg fabapi.Fabricator) ([]kclient.Object, error)
 
 	LocalObjectReference  = coreapi.LocalObjectReference
-	CMObjectReference     = cmmeta.ObjectReference
+	CMObjectReference     = cmmeta.IssuerReference
 	IssuerSpec            = cmapi.IssuerSpec
 	IssuerConfig          = cmapi.IssuerConfig
 	SelfSignedIssuer      = cmapi.SelfSignedIssuer
