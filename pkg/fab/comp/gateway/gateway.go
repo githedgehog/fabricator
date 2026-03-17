@@ -28,7 +28,7 @@ const (
 	CtrlChartRef         = "gateway/charts/gateway"
 	APIChartRef          = "gateway/charts/gateway-api"
 	DataplaneRef         = "dataplane"
-	FRRRef               = "dpdk-sys/frr"
+	FRRRef               = "dataplane/frr"
 	DataplaneMetricsPort = 9442
 	FRRMetricsPort       = 9342
 )
