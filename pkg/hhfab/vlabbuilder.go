@@ -1193,8 +1193,7 @@ func (b *VLABBuilderGPURail) Build(ctx context.Context, l *apiutil.Loader, fabri
 				Role:           wiringapi.SwitchRoleServerLeaf,
 				VLANNamespaces: []string{"default"},
 			}, map[string]string{
-				// TODO use const wiringapi.AnnotationSwitchRouteSumm
-				"fabric.githedgehog.com/route-summ": strings.Join(routeSumm[leafName], ","),
+				wiringapi.AnnotationSwitchRouteSumm: strings.Join(routeSumm[leafName], ","),
 			}); err != nil {
 				return err
 			}
