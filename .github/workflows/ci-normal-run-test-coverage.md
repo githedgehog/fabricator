@@ -10,12 +10,12 @@ With `releasetest=false`, the workflow passes `--release-test-on-ready-only`, wh
 
 The topology is parameterized by `vpcmode` and `mesh`:
 
-| Input | MCLAG leaves | ESLAG groups | Orphan leaves | Unbundled servers | Externals |
-|---|---|---|---|---|---|
-| `vpcmode=l2vni,mesh=false` (default) | 2 | 2 | 1 | 1 | 1 BGP + 1 static |
-| `vpcmode=l3vni,mesh=false` | 0 | 0 | 3 | 2 | 1 BGP + 1 static |
-| `vpcmode=l2vni,mesh=true` | 0 | 2 | 1 | 2 | 1 BGP + 1 static |
-| `vpcmode=l3vni,mesh=true` | 0 | 0 | 3 | 2 | 1 BGP + 1 static |
+| Input | ESLAG groups | Orphan leaves | Externals |
+|---|---|---|---|
+| `vpcmode=l2vni,mesh=false` (default) | 2 | 1 | 1 BGP + 1 static |
+| `vpcmode=l3vni,mesh=false` | 0 | 3 | 1 BGP + 1 static |
+| `vpcmode=l2vni,mesh=true` | 2 | 1 | 1 BGP + 1 static |
+| `vpcmode=l3vni,mesh=true` | 0 | 3 | 1 BGP + 1 static |
 
 All topologies include one external BGP attachment and one non-proxy static external attachment (via `--externals-bgp=1 --externals-static=1 --external-orphan-connections=1`).
 
@@ -33,8 +33,8 @@ Gateway (`--gateways=2 / 0`) is controlled independently by the `gateway` input.
 | VPC | Subnets | Servers | Notes |
 |---|---|---|---|
 | `ort-a` | 2 regular DHCP subnets | 1 per subnet | Any available servers |
-| `ort-b` | 1 hostBGP subnet | 1 unbundled, non-MCLAG | Runs `host-bgp` docker container; waits for VIP acquisition |
-| `ort-c` | 1 regular DHCP subnet | 2 non-MCLAG servers on **different switches** | Tests multi-switch attachment to the same subnet |
+| `ort-b` | 1 hostBGP subnet | 1 unbundled | Runs `host-bgp` docker container; waits for VIP acquisition |
+| `ort-c` | 1 regular DHCP subnet | 2 servers on **different switches** | Tests multi-switch attachment to the same subnet |
 | `ort-d1..N` | 1 regular DHCP subnet each | 1 server each | All remaining servers |
 
 All VPCs are created with the active `vpcmode`. Server networking is configured via `hhnet`; L3VNI/L3Flat mode gets an extra 10 s propagation wait after server setup.
@@ -62,7 +62,7 @@ All created VPCs, peerings, and server network configurations are torn down rega
 
 | Input | Effect |
 |---|---|
-| `vpcmode=l3vni` | ESLAG servers skipped; no MCLAG topology; extra route propagation wait |
+| `vpcmode=l3vni` | ESLAG servers skipped; extra route propagation wait |
 | `gateway=true` | GatewayPeerings created between consecutive `ort-d2..N` VPCs; `NoGateway` skip lifted |
 | `gateway=false` | Gateway peerings skipped; test still passes as long as other preconditions are met |
-| `mesh=true` | No MCLAG topology; mesh-only switch connections (does not affect the on-ready test logic directly) |
+| `mesh=true` | mesh-only switch connections (does not affect the on-ready test logic directly) |
