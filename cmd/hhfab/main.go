@@ -186,14 +186,14 @@ func Run(ctx context.Context) error {
 		},
 	}
 
-	var wgSpinesCount, wgFabricLinksCount, wgMeshLinksCount, wgMCLAGLeafsCount, wgOrphanLeafsCount, wgMCLAGSessionLinks, wgMCLAGPeerLinks uint
+	var wgSpinesCount, wgFabricLinksCount, wgMeshLinksCount, wgOrphanLeafsCount uint
 	var wgESLAGLeafGroups string
-	var wgMCLAGServers, wgESLAGServers, wgUnbundledServers, wgBundledServers, wgMultiHomedServers uint
+	var wgESLAGServers, wgUnbundledServers, wgBundledServers, wgMultiHomedServers uint
 	var wgNoSwitches bool
 	var wgGatewayUplinks uint
 	var wgGatewayDriver string
 	var wgGatewayWorkers uint
-	var wgBGPExternals, wgStaticExternals, wgStaticExternalsProxy, wgExtMCLAGConns, wgExtESLAGConns, wgExtOrphanConns uint
+	var wgBGPExternals, wgStaticExternals, wgStaticExternalsProxy, wgExtESLAGConns, wgExtOrphanConns uint
 	var wgDefaultSwitchProfile string
 	var wgSwitchProfileOverrides *cli.StringSlice
 	var wgServerPortBase string
@@ -213,11 +213,6 @@ func Run(ctx context.Context) error {
 			Usage:       "number of mesh links",
 			Destination: &wgMeshLinksCount,
 		},
-		&cli.UintFlag{
-			Name:        "mclag-leafs-count",
-			Usage:       "number of mclag leafs (should be even)",
-			Destination: &wgMCLAGLeafsCount,
-		},
 		&cli.StringFlag{
 			Name:        "eslag-leaf-groups",
 			Usage:       "eslag leaf groups (comma separated list of number of ESLAG switches in each group, should be 2-4 per group, e.g. 2,4,2 for 3 groups with 2, 4 and 2 switches)",
@@ -227,22 +222,6 @@ func Run(ctx context.Context) error {
 			Name:        "orphan-leafs-count",
 			Usage:       "number of orphan leafs",
 			Destination: &wgOrphanLeafsCount,
-		},
-		&cli.UintFlag{
-			Name:        "mclag-session-links",
-			Usage:       "number of mclag session links for each mclag leaf",
-			Destination: &wgMCLAGSessionLinks,
-		},
-		&cli.UintFlag{
-			Name:        "mclag-peer-links",
-			Usage:       "number of mclag peer links for each mclag leaf",
-			Destination: &wgMCLAGPeerLinks,
-		},
-		&cli.UintFlag{
-			Name:        "mclag-servers",
-			Usage:       "number of MCLAG servers to generate for MCLAG switches",
-			Destination: &wgMCLAGServers,
-			Value:       2,
 		},
 		&cli.UintFlag{
 			Name:        "eslag-servers",
@@ -313,11 +292,6 @@ func Run(ctx context.Context) error {
 			Name:        "externals-static-proxy",
 			Usage:       "number of static externals with proxy to generate",
 			Destination: &wgStaticExternalsProxy,
-		},
-		&cli.UintFlag{
-			Name:        "external-mclag-connections",
-			Usage:       "number of external connections from MCLAG switches. NOTE: only 1 external connection in total is supported if using virtual switches",
-			Destination: &wgExtMCLAGConns,
 		},
 		&cli.UintFlag{
 			Name:        "external-eslag-connections",
@@ -945,12 +919,8 @@ func Run(ctx context.Context) error {
 								SpinesCount:         uint8(wgSpinesCount),      //nolint:gosec
 								FabricLinksCount:    uint8(wgFabricLinksCount), //nolint:gosec
 								MeshLinksCount:      uint8(wgMeshLinksCount),   //nolint:gosec
-								MCLAGLeafsCount:     uint8(wgMCLAGLeafsCount),  //nolint:gosec
 								ESLAGLeafGroups:     wgESLAGLeafGroups,
 								OrphanLeafsCount:    uint8(wgOrphanLeafsCount),  //nolint:gosec
-								MCLAGSessionLinks:   uint8(wgMCLAGSessionLinks), //nolint:gosec
-								MCLAGPeerLinks:      uint8(wgMCLAGPeerLinks),    //nolint:gosec
-								MCLAGServers:        uint8(wgMCLAGServers),      //nolint:gosec
 								ESLAGServers:        uint8(wgESLAGServers),      //nolint:gosec
 								UnbundledServers:    uint8(wgUnbundledServers),  //nolint:gosec
 								BundledServers:      uint8(wgBundledServers),    //nolint:gosec
@@ -964,7 +934,6 @@ func Run(ctx context.Context) error {
 								ExtBGPCount:         uint8(wgBGPExternals),         //nolint:gosec
 								ExtStaticCount:      uint8(wgStaticExternals),      //nolint:gosec
 								ExtStaticProxyCount: uint8(wgStaticExternalsProxy), //nolint:gosec
-								ExtMCLAGConnCount:   uint8(wgExtMCLAGConns),        //nolint:gosec
 								ExtESLAGConnCount:   uint8(wgExtESLAGConns),        //nolint:gosec
 								ExtOrphanConnCount:  uint8(wgExtOrphanConns),       //nolint:gosec
 								YesFlag:             yes,
