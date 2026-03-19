@@ -430,6 +430,10 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringStaticSourceNATTest(ctx context.
 		return false, nil, fmt.Errorf("waiting for switches to be ready: %w", err)
 	}
 
+	// wait a little more - see https://github.com/githedgehog/fabricator/issues/1574
+	slog.Debug("waiting 10 more seconds to allow dataplane to stabilize...")
+	time.Sleep(10 * time.Second)
+
 	// Test connectivity - VPC2 has no NAT, so we ping real IPs
 	if err := testCtx.testNATGatewayConnectivity(ctx, vpc1, vpc2, vpc1NATCIDR, nil); err != nil {
 		return false, nil, fmt.Errorf("testing static source NAT connectivity: %w", err)
