@@ -65,6 +65,7 @@ type VPCPeeringTestCtx struct {
 	pauseOnFail      bool
 	roceLeaves       []string
 	noSetup          bool
+	showTechDump     bool
 }
 
 // Test function types
@@ -107,6 +108,7 @@ func makeTestCtx(ctx context.Context, kube kclient.Client, setupOpts SetupVPCsOp
 	testCtx.extended = rtOpts.Extended
 	testCtx.failFast = rtOpts.FailFast
 	testCtx.pauseOnFail = rtOpts.PauseOnFailure
+	testCtx.showTechDump = rtOpts.ShowTechDump
 
 	// Detect virtual switches and disable IPerf min speed check if all switches are virtual
 	switches := &wiringapi.SwitchList{}
@@ -993,6 +995,11 @@ func sanitizeNameForFolder(name string) string {
 // Diagnostics are organized in folders: <root>/<suite-name>/<test-name>/
 // For suite setup failures, use testName = "suite-setup"
 func (testCtx *VPCPeeringTestCtx) collectDiagnosticsOnFailure(ctx context.Context, suiteName, testName string) {
+	if !testCtx.showTechDump {
+		slog.Info("Skipping collection of show-tech diagnostics")
+
+		return
+	}
 	rootDir := filepath.Join(testCtx.vlabCfg.WorkDir, ShowTechOutputDir)
 	suiteDir := filepath.Join(rootDir, sanitizeNameForFolder(suiteName))
 	testDir := filepath.Join(suiteDir, sanitizeNameForFolder(testName))

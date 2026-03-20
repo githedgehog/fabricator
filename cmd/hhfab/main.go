@@ -87,6 +87,7 @@ const (
 	FlagReleaseTestRegexesInvert  = "release-test-regexes-invert"
 	FlagGatewayLogLevel           = "gateway-log-level"
 	FlagGatewayTag                = "gateway-tag"
+	FlagShowTech                  = "show-tech"
 )
 
 func main() {
@@ -1675,6 +1676,12 @@ func Run(ctx context.Context) error {
 								Aliases: []string{"list", "l"},
 								Usage:   "list all available tests and exit",
 							},
+							&cli.BoolFlag{
+								Name:    FlagShowTech,
+								Aliases: []string{"s"},
+								Usage:   "collect show-tech diagnostics on failure",
+								Value:   true,
+							},
 						}),
 						Before: before(false),
 						Action: func(c *cli.Context) error {
@@ -1688,6 +1695,7 @@ func Run(ctx context.Context) error {
 								HashPolicy:     c.String(FlagHashPolicy),
 								VPCMode:        vpcapi.VPCMode(handleL2VNI(c.String(FlagNameVPCMode))),
 								ListTests:      c.Bool(FlagListTests),
+								ShowTechDump:   c.Bool(FlagShowTech),
 							}
 							if err := hhfab.DoVLABReleaseTest(ctx, workDir, cacheDir, opts); err != nil {
 								return fmt.Errorf("release-test: %w", err)

@@ -756,6 +756,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						PauseOnFailure: opts.PauseOnFailure,
 						Regexes:        opts.ReleaseTestRegexes,
 						InvertRegex:    opts.ReleaseTestRegexesInvert,
+						ShowTechDump:   true,
 					}
 					slog.Debug("Running release-test", "opts", releaseTestOpts)
 					if err := c.ReleaseTest(ctx, vlab, releaseTestOpts); err != nil {
