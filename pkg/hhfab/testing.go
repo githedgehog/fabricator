@@ -3358,6 +3358,7 @@ type ReleaseTestOpts struct {
 	HashPolicy     string
 	VPCMode        vpcapi.VPCMode
 	ListTests      bool
+	ShowTechDump   bool
 }
 
 func (c *Config) ReleaseTest(ctx context.Context, vlab *VLAB, opts ReleaseTestOpts) error {
