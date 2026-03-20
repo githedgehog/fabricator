@@ -441,6 +441,10 @@ func doRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 				break
 			}
 		}
+		if testCtx.failFast && err != nil {
+			return ts, fmt.Errorf("test %s failed: %w", test.Name, err)
+		}
+
 		if !skip && err == nil && revertErr == nil {
 			slog.Info("PASS", "test", test.Name)
 		}
