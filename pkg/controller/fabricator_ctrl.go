@@ -228,10 +228,6 @@ func (r *FabricatorReconciler) Reconcile(ctx context.Context, req kctrl.Request)
 			return kctrl.Result{}, fmt.Errorf("enforcing node config install: %w", err)
 		}
 
-		if err := comp.EnforceKubeInstall(ctx, r.Client, *f, gateway.Install); err != nil {
-			return kctrl.Result{}, fmt.Errorf("enforcing gateway install: %w", err)
-		}
-
 		if err := comp.EnforceKubeInstall(ctx, r.Client, *f, alloy.Install); err != nil {
 			return kctrl.Result{}, fmt.Errorf("enforcing alloy install: %w", err)
 		}
@@ -339,16 +335,6 @@ func (r *FabricatorReconciler) statusCheck(ctx context.Context, l logr.Logger, f
 	f.Status.Components.ControlProxy, err = controlproxy.Status(ctx, r.Client, *f)
 	if err != nil {
 		return fmt.Errorf("getting controlproxy status: %w", err)
-	}
-
-	f.Status.Components.GatewayAPI, err = gateway.StatusAPI(ctx, r.Client, *f)
-	if err != nil {
-		return fmt.Errorf("getting gateway api status: %w", err)
-	}
-
-	f.Status.Components.GatewayCtrl, err = gateway.StatusCtrl(ctx, r.Client, *f)
-	if err != nil {
-		return fmt.Errorf("getting gateway ctrl status: %w", err)
 	}
 
 	f.Status.Components.GatewayDataplane, err = gateway.StatusDataplane(ctx, r.Client, *f, nodes)

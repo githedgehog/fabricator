@@ -688,11 +688,7 @@ spec:
                     type: string
                   fabricatorNodeConfig:
                     type: string
-                  gatewayAPI:
-                    type: string
                   gatewayAlloy:
-                    type: string
-                  gatewayCtrl:
                     type: string
                   gatewayDataplane:
                     additionalProperties:

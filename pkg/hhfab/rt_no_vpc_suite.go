@@ -17,10 +17,10 @@ import (
 	"time"
 
 	agentapi "go.githedgehog.com/fabric/api/agent/v1beta1"
+	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	fabricatorapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
-	gwapi "go.githedgehog.com/gateway/api/gateway/v1alpha1"
 	"golang.org/x/sync/errgroup"
 	corev1 "k8s.io/api/core/v1"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"

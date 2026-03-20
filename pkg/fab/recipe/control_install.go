@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
@@ -24,7 +25,6 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/zot"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
-	gwapi "go.githedgehog.com/gateway/api/gateway/v1alpha1"
 	kapierrors "k8s.io/apimachinery/pkg/api/errors"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -391,7 +391,7 @@ func (c *ControlInstall) installInclude(ctx context.Context, kube kclient.Client
 		&gwapi.GatewayGroupList{},
 		&gwapi.GatewayList{},
 		&gwapi.VPCInfoList{},
-		&gwapi.PeeringList{},
+		&gwapi.GatewayPeeringList{},
 	} {
 		if err := c.Include.List(ctx, objList); err != nil {
 			return fmt.Errorf("listing %T: %w", objList, err)

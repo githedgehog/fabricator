@@ -15,14 +15,13 @@ import (
 	"slices"
 	"strings"
 
+	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
 	fmeta "go.githedgehog.com/fabric/api/meta"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/api/meta"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/fabric"
-	"go.githedgehog.com/fabricator/pkg/fab/comp/gateway"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
-	gwapi "go.githedgehog.com/gateway/api/gateway/v1alpha1"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -70,12 +69,7 @@ func (c *Config) loadHydrateValidate(ctx context.Context, mode HydrateMode) erro
 		return fmt.Errorf("initializing fabric config: %w", err)
 	}
 
-	gwCtrlCfg, err := gateway.GetGatewayCtrlConfig(c.Fab)
-	if err != nil {
-		return fmt.Errorf("getting gateway control config: %w", err)
-	}
-
-	if err := apiutil.ValidateFabricGateway(ctx, l, fabricCfg, gwCtrlCfg); err != nil {
+	if err := apiutil.ValidateFabricGateway(ctx, l, fabricCfg); err != nil {
 		return fmt.Errorf("validating wiring after hydrate: %w", err)
 	}
 

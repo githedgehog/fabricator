@@ -62,8 +62,6 @@ _Appears in:_
 | `fabricDHCP` _[ComponentStatus](#componentstatus)_ |  |  |  |
 | `controlProxy` _[ComponentStatus](#componentstatus)_ |  |  |  |
 | `controlAlloy` _[ComponentStatus](#componentstatus)_ |  |  |  |
-| `gatewayAPI` _[ComponentStatus](#componentstatus)_ |  |  |  |
-| `gatewayCtrl` _[ComponentStatus](#componentstatus)_ |  |  |  |
 | `gatewayAlloy` _[ComponentStatus](#componentstatus)_ |  |  |  |
 | `gatewayDataplane` _object (keys:string, values:[ComponentStatus](#componentstatus))_ |  |  |  |
 | `gatewayFRR` _object (keys:string, values:[ComponentStatus](#componentstatus))_ |  |  |  |
