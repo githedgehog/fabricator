@@ -9,8 +9,8 @@ import (
 	"log/slog"
 	"sort"
 
+	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
-	gwapi "go.githedgehog.com/gateway/api/gateway/v1alpha1"
 )
 
 func makeMultiVPCSingleSubnetSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {

@@ -204,11 +204,6 @@ bump component version ref="":
     sed -i.bak "s/^\tFabricVersion.*/\tFabricVersion=meta.Version(\"{{ version }}\")/" pkg/fab/versions.go
     go get go.githedgehog.com/fabric@{{ ref }}
     tidy=true
-  elif [ "{{component}}" == "gateway" ]; then
-    echo "Bumping gateway version to {{version}} ref {{ref}}"
-    sed -i.bak "s/^\tGatewayVersion.*/\tGatewayVersion=meta.Version(\"{{ version }}\")/" pkg/fab/versions.go
-    go get go.githedgehog.com/gateway@{{ ref }}
-    tidy=true
   elif [ "{{component}}" == "dataplane" ]; then
     echo "Bumping dataplane version to {{version}}"
     sed -i.bak "s/^\tDataplaneVersion.*/\tDataplaneVersion=meta.Version(\"{{ version }}\")/" pkg/fab/versions.go

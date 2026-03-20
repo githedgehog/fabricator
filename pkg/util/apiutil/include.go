@@ -8,24 +8,20 @@ import (
 	"fmt"
 	"io"
 
+	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
 	"go.githedgehog.com/fabric/api/meta"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/ctrl/switchprofile"
-	gwapi "go.githedgehog.com/gateway/api/gateway/v1alpha1"
-	gwmeta "go.githedgehog.com/gateway/api/meta"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func ValidateFabricGateway(ctx context.Context, l *Loader, fabricCfg *meta.FabricConfig, gwCfg *gwmeta.GatewayCtrlConfig) error {
+func ValidateFabricGateway(ctx context.Context, l *Loader, fabricCfg *meta.FabricConfig) error {
 	if l == nil {
 		return fmt.Errorf("loader is nil") //nolint:goerr113
 	}
 	if fabricCfg == nil {
 		return fmt.Errorf("fabric config is nil") //nolint:goerr113
-	}
-	if gwCfg == nil {
-		return fmt.Errorf("gateway control config is nil") //nolint:goerr113
 	}
 
 	kube := l.kube
@@ -114,7 +110,7 @@ func ValidateFabricGateway(ctx context.Context, l *Loader, fabricCfg *meta.Fabri
 	}
 	for _, gw := range gateways.Items {
 		gw.Default()
-		if err := gw.Validate(ctx, kube, gwCfg); err != nil {
+		if err := gw.Validate(ctx, kube, fabricCfg); err != nil {
 			return fmt.Errorf("validating gateway %q: %w", gw.GetName(), err)
 		}
 	}
@@ -130,7 +126,7 @@ func ValidateFabricGateway(ctx context.Context, l *Loader, fabricCfg *meta.Fabri
 		}
 	}
 
-	peerings := &gwapi.PeeringList{}
+	peerings := &gwapi.GatewayPeeringList{}
 	if err := kube.List(ctx, peerings); err != nil {
 		return fmt.Errorf("listing peerings: %w", err)
 	}
@@ -175,7 +171,7 @@ var printIncludeLists = []kclient.ObjectList{
 	&gwapi.GatewayGroupList{},
 	&gwapi.GatewayList{},
 	&gwapi.VPCInfoList{},
-	&gwapi.PeeringList{},
+	&gwapi.GatewayPeeringList{},
 }
 
 func PrintInclude(ctx context.Context, kube ReaderWithScheme, w io.Writer) error {

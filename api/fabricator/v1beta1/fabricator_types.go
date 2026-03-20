@@ -97,8 +97,6 @@ type ComponentsStatus struct {
 	FabricDHCP           ComponentStatus            `json:"fabricDHCP,omitempty"`
 	ControlProxy         ComponentStatus            `json:"controlProxy,omitempty"`
 	ControlAlloy         ComponentStatus            `json:"controlAlloy,omitempty"`
-	GatewayAPI           ComponentStatus            `json:"gatewayAPI,omitempty"`
-	GatewayCtrl          ComponentStatus            `json:"gatewayCtrl,omitempty"`
 	GatewayAlloy         ComponentStatus            `json:"gatewayAlloy,omitempty"`
 	GatewayDataplane     map[string]ComponentStatus `json:"gatewayDataplane,omitempty"`
 	GatewayFRR           map[string]ComponentStatus `json:"gatewayFRR,omitempty"`
@@ -123,8 +121,8 @@ func (c *ComponentsStatus) IsReady(cfg Fabricator, nodes []FabNode) bool {
 
 	if cfg.Spec.Config.Gateway.Enable {
 		res = res &&
-			c.GatewayAPI == CompStatusReady &&
-			c.GatewayCtrl == CompStatusReady &&
+			c.FabricAPI == CompStatusReady && // GW API is part of the Fabric API now
+			c.FabricCtrl == CompStatusReady && // GW Ctrl is part of the Fabric ctrl now
 			c.GatewayAlloy != CompStatusUnknown
 
 		gws := map[string]bool{}
@@ -149,8 +147,6 @@ func (c *ComponentsStatus) IsReady(cfg Fabricator, nodes []FabNode) bool {
 		}
 	} else {
 		res = res &&
-			c.GatewayAPI == CompStatusSkipped &&
-			c.GatewayCtrl == CompStatusSkipped &&
 			c.GatewayAlloy == CompStatusSkipped &&
 			len(c.GatewayDataplane) == 0 &&
 			len(c.GatewayFRR) == 0
@@ -164,8 +160,8 @@ func (c *ComponentsStatus) IsGatewayReady(cfg Fabricator, nodes []FabNode) bool 
 		return true
 	}
 
-	res := c.GatewayAPI == CompStatusReady &&
-		c.GatewayCtrl == CompStatusReady &&
+	res := c.FabricAPI == CompStatusReady && // GW API is part of the Fabric API now
+		c.FabricCtrl == CompStatusReady && // GW Ctrl is part of the Fabric ctrl now
 		c.GatewayAlloy == CompStatusReady &&
 		c.FabricatorNodeConfig != CompStatusUnknown
 

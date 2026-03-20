@@ -24,6 +24,8 @@ import (
 	"github.com/samber/lo"
 	agentapi "go.githedgehog.com/fabric/api/agent/v1beta1"
 	dhcpapi "go.githedgehog.com/fabric/api/dhcp/v1beta1"
+	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
+	gwintapi "go.githedgehog.com/fabric/api/gwint/v1alpha1"
 	"go.githedgehog.com/fabric/api/meta"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
@@ -33,8 +35,6 @@ import (
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/util/sshutil"
-	gwapi "go.githedgehog.com/gateway/api/gateway/v1alpha1"
-	gwintapi "go.githedgehog.com/gateway/api/gwint/v1alpha1"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 	coreapi "k8s.io/api/core/v1"
@@ -617,7 +617,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 			return fmt.Errorf("cleaning up external peerings: %w", err)
 		}
 		if c.Fab.Spec.Config.Gateway.Enable {
-			if err := client.IgnoreNotFound(kube.DeleteAllOf(ctx, &gwapi.Peering{}, &delAllOpts)); err != nil {
+			if err := client.IgnoreNotFound(kube.DeleteAllOf(ctx, &gwapi.GatewayPeering{}, &delAllOpts)); err != nil {
 				return fmt.Errorf("cleaning up gateway peerings: %w", err)
 			}
 		}
@@ -1822,7 +1822,7 @@ func DoSetupPeerings(ctx context.Context, kube client.Client, vpcPeerings map[st
 		}
 	}
 
-	gwPeeringList := &gwapi.PeeringList{}
+	gwPeeringList := &gwapi.GatewayPeeringList{}
 	if f.Spec.Config.Gateway.Enable {
 		if err := kube.List(ctx, gwPeeringList); err != nil {
 			return fmt.Errorf("listing gateway peerings: %w", err)
@@ -1911,7 +1911,7 @@ func DoSetupPeerings(ctx context.Context, kube client.Client, vpcPeerings map[st
 
 		slog.Info("Enforcing GatewayPeering", "name", name, "vpc1", vpcs[0], "vpc2", vpcs[1])
 
-		gwPeering := &gwapi.Peering{
+		gwPeering := &gwapi.GatewayPeering{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      name,
 				Namespace: metav1.NamespaceDefault,
@@ -2628,7 +2628,7 @@ func IsSubnetReachableWithGatewayPeering(ctx context.Context, kube kclient.Reade
 		return Reachability{}, fmt.Errorf("destination subnet %s not found in VPC %s", vpc2Subnet, vpc2Name)
 	}
 
-	peerings := gwapi.PeeringList{}
+	peerings := gwapi.GatewayPeeringList{}
 	if err := kube.List(ctx, &peerings,
 		kclient.InNamespace(kmetav1.NamespaceDefault),
 		kclient.MatchingLabels{

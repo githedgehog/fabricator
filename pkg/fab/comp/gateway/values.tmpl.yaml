@@ -1,5 +1,0 @@
-ctrl:
-  manager:
-    image:
-      repository: {{ .Repo }}
-      tag: {{ .Tag }}

@@ -17,8 +17,11 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/alloy"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/controlproxy"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/flatcar"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/gateway"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
 	"go.githedgehog.com/fabricator/pkg/util/tmplutil"
+	corev1 "k8s.io/api/core/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 	kyaml "sigs.k8s.io/yaml"
 )
@@ -222,6 +225,21 @@ func GetFabricConfig(f fabapi.Fabricator) (*fmeta.FabricConfig, error) {
 		gwComms[uint32(prio)] = commStr
 	}
 
+	dataplaneRepo, err := comp.ImageURL(f, gateway.DataplaneRef)
+	if err != nil {
+		return nil, fmt.Errorf("getting image URL for %q: %w", gateway.DataplaneRef, err)
+	}
+
+	frrRepo, err := comp.ImageURL(f, gateway.FRRRef)
+	if err != nil {
+		return nil, fmt.Errorf("getting image URL for %q: %w", gateway.FRRRef, err)
+	}
+
+	toolboxRepo, err := comp.ImageURL(f, flatcar.ToolboxRef)
+	if err != nil {
+		return nil, fmt.Errorf("getting image URL for %q: %w", flatcar.ToolboxRef, err)
+	}
+
 	// TODO align APIs (fabric config field names, check agent spec too)
 	return &fmeta.FabricConfig{
 		ControlVIP:             string(f.Spec.Config.Control.VIP),
@@ -275,6 +293,19 @@ func GetFabricConfig(f fabapi.Fabricator) (*fmeta.FabricConfig, error) {
 		ManagementDHCPEnd:        string(f.Spec.Config.Fabric.ManagementDHCPEnd),
 		GatewayCommunities:       gwComms,
 		GatewayBFD:               true,
+		GatewayNamespace:         comp.FabNamespace,
+		GatewayTolerations: []corev1.Toleration{
+			{
+				Key:      fabapi.RoleTaintKey(fabapi.NodeRoleGateway),
+				Operator: corev1.TolerationOpExists,
+				Effect:   corev1.TaintEffectNoExecute,
+			},
+		},
+		DataplaneRef:         dataplaneRepo + ":" + string(f.Status.Versions.Gateway.Dataplane),
+		FRRRef:               frrRepo + ":" + string(f.Status.Versions.Gateway.FRR),
+		ToolboxRef:           toolboxRepo + ":" + string(flatcar.ToolboxVersion(f)),
+		DataplaneMetricsPort: gateway.DataplaneMetricsPort,
+		FRRMetricsPort:       gateway.FRRMetricsPort,
 	}, nil
 }
 
