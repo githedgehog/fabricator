@@ -99,7 +99,7 @@ func ValidateFabricGateway(ctx context.Context, l *Loader, fabricCfg *meta.Fabri
 	}
 	for _, gwGroup := range gwGroups.Items {
 		gwGroup.Default()
-		if err := gwGroup.Validate(ctx, kube); err != nil {
+		if err := gwGroup.Validate(ctx, kube, fabricCfg); err != nil {
 			return fmt.Errorf("validating gateway group %q: %w", gwGroup.GetName(), err)
 		}
 	}
@@ -121,7 +121,7 @@ func ValidateFabricGateway(ctx context.Context, l *Loader, fabricCfg *meta.Fabri
 	}
 	for _, vpcInfo := range vpcInfos.Items {
 		vpcInfo.Default()
-		if err := vpcInfo.Validate(ctx, kube); err != nil {
+		if err := vpcInfo.Validate(ctx, kube, fabricCfg); err != nil {
 			return fmt.Errorf("validating vpc info %q: %w", vpcInfo.GetName(), err)
 		}
 	}
@@ -132,7 +132,7 @@ func ValidateFabricGateway(ctx context.Context, l *Loader, fabricCfg *meta.Fabri
 	}
 	for _, peering := range peerings.Items {
 		peering.Default()
-		if err := peering.Validate(ctx, kube); err != nil {
+		if err := peering.Validate(ctx, kube, fabricCfg); err != nil {
 			return fmt.Errorf("validating peering %q: %w", peering.GetName(), err)
 		}
 	}
