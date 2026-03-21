@@ -293,6 +293,7 @@ func GetFabricConfig(f fabapi.Fabricator) (*fmeta.FabricConfig, error) {
 		ManagementDHCPEnd:        string(f.Spec.Config.Fabric.ManagementDHCPEnd),
 		GatewayCommunities:       gwComms,
 		GatewayBFD:               true,
+		EnableGateway:            f.Spec.Config.Gateway.Enable,
 		GatewayNamespace:         comp.FabNamespace,
 		GatewayTolerations: []corev1.Toleration{
 			{
