@@ -4,7 +4,7 @@
 package v1alpha1
 
 import (
-	gwapi "go.githedgehog.com/gateway/api/gateway/v1alpha1"
+	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 

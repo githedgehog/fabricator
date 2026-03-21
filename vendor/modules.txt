@@ -875,10 +875,12 @@ github.com/xrash/smetrics
 # github.com/yusufpapurcu/wmi v1.2.4
 ## explicit; go 1.16
 github.com/yusufpapurcu/wmi
-# go.githedgehog.com/fabric v0.112.1
+# go.githedgehog.com/fabric v0.113.0
 ## explicit; go 1.26
 go.githedgehog.com/fabric/api/agent/v1beta1
 go.githedgehog.com/fabric/api/dhcp/v1beta1
+go.githedgehog.com/fabric/api/gateway/v1alpha1
+go.githedgehog.com/fabric/api/gwint/v1alpha1
 go.githedgehog.com/fabric/api/meta
 go.githedgehog.com/fabric/api/vpc/v1beta1
 go.githedgehog.com/fabric/api/wiring/v1beta1
@@ -900,11 +902,6 @@ go.githedgehog.com/fabric/pkg/util/uefiutil
 # go.githedgehog.com/fabric-bcm-ygot v0.5.2-4.5.0
 ## explicit; go 1.24.0
 go.githedgehog.com/fabric-bcm-ygot/pkg/oc
-# go.githedgehog.com/gateway v0.43.5
-## explicit; go 1.26
-go.githedgehog.com/gateway/api/gateway/v1alpha1
-go.githedgehog.com/gateway/api/gwint/v1alpha1
-go.githedgehog.com/gateway/api/meta
 # go.githedgehog.com/libmeta v0.3.0
 ## explicit; go 1.25
 go.githedgehog.com/libmeta/pkg/alloy
@@ -1321,7 +1318,7 @@ gopkg.in/yaml.v2
 # gopkg.in/yaml.v3 v3.0.1
 ## explicit
 gopkg.in/yaml.v3
-# k8s.io/api v0.35.2
+# k8s.io/api v0.35.3
 ## explicit; go 1.25.0
 k8s.io/api/admission/v1
 k8s.io/api/admission/v1beta1
@@ -1388,7 +1385,7 @@ k8s.io/api/storagemigration/v1beta1
 k8s.io/apiextensions-apiserver/pkg/apis/apiextensions
 k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1
 k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1
-# k8s.io/apimachinery v0.35.2
+# k8s.io/apimachinery v0.35.3
 ## explicit; go 1.25.0
 k8s.io/apimachinery/pkg/api/equality
 k8s.io/apimachinery/pkg/api/errors
@@ -1451,7 +1448,7 @@ k8s.io/apimachinery/pkg/version
 k8s.io/apimachinery/pkg/watch
 k8s.io/apimachinery/third_party/forked/golang/json
 k8s.io/apimachinery/third_party/forked/golang/reflect
-# k8s.io/client-go v0.35.2
+# k8s.io/client-go v0.35.3
 ## explicit; go 1.25.0
 k8s.io/client-go/applyconfigurations
 k8s.io/client-go/applyconfigurations/admissionregistration/v1
