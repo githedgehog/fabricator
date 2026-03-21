@@ -37,18 +37,17 @@ require (
 	github.com/urfave/cli/v2 v2.27.7
 	github.com/vbauerster/mpb/v8 v8.12.0
 	github.com/vishvananda/netlink v1.3.1
-	go.githedgehog.com/fabric v0.112.1
-	go.githedgehog.com/gateway v0.43.5
+	go.githedgehog.com/fabric v0.113.0
 	go.githedgehog.com/libmeta v0.3.0
 	go.podman.io/image/v5 v5.39.1
 	golang.org/x/crypto v0.49.0
 	golang.org/x/mod v0.34.0
 	golang.org/x/sync v0.20.0
 	golang.org/x/term v0.41.0
-	k8s.io/api v0.35.2
+	k8s.io/api v0.35.3
 	k8s.io/apiextensions-apiserver v0.35.2
-	k8s.io/apimachinery v0.35.2
-	k8s.io/client-go v0.35.2
+	k8s.io/apimachinery v0.35.3
+	k8s.io/client-go v0.35.3
 	k8s.io/klog/v2 v2.140.0
 	k8s.io/metrics v0.35.2
 	k8s.io/utils v0.0.0-20260210185600-b8788abfbbc2

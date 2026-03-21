@@ -14,7 +14,7 @@ import (
 	"strconv"
 	"strings"
 
-	"go.githedgehog.com/gateway/api/meta"
+	"go.githedgehog.com/fabric/api/meta"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -170,7 +170,10 @@ func (gw *Gateway) Default() {
 
 var linuxIfaceNameRegex = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_.-]{0,8}[a-zA-Z0-9]$`)
 
-func (gw *Gateway) Validate(ctx context.Context, kube kclient.Reader, gwCfg *meta.GatewayCtrlConfig) error {
+func (gw *Gateway) Validate(ctx context.Context, kube kclient.Reader, fabricCfg *meta.FabricConfig) error {
+	if fabricCfg != nil && !fabricCfg.EnableGateway {
+		return fmt.Errorf("gateway support is not enabled: %w", ErrInvalidGW)
+	}
 	if gw.Namespace != kmetav1.NamespaceDefault {
 		return fmt.Errorf("gateway namespace must be %s: %w", kmetav1.NamespaceDefault, ErrInvalidGW)
 	}
@@ -401,8 +404,8 @@ func (gw *Gateway) Validate(ctx context.Context, kube kclient.Reader, gwCfg *met
 			if !gwGroups[gwGroup.Name] {
 				return fmt.Errorf("gateway group %s not found: %w", gwGroup.Name, ErrInvalidGW)
 			}
-			if gwCfg != nil && len(gwCfg.Communities) > 0 && gwGroupMembers[gwGroup.Name] >= len(gwCfg.Communities) {
-				return fmt.Errorf("gateway group %s already has too many members (%d), max is %d: %w", gwGroup.Name, gwGroupMembers[gwGroup.Name], len(gwCfg.Communities), ErrInvalidGW)
+			if fabricCfg != nil && len(fabricCfg.GatewayCommunities) > 0 && gwGroupMembers[gwGroup.Name] >= len(fabricCfg.GatewayCommunities) {
+				return fmt.Errorf("gateway group %s already has too many members (%d), max is %d: %w", gwGroup.Name, gwGroupMembers[gwGroup.Name], len(fabricCfg.GatewayCommunities), ErrInvalidGW)
 			}
 		}
 	}

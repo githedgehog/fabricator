@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"go.githedgehog.com/fabric/api/meta"
 	kapierrors "k8s.io/apimachinery/pkg/api/errors"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -108,11 +109,11 @@ type PeeringStatus struct{}
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:categories=hedgehog;hedgehog-gateway,shortName=peer
+// +kubebuilder:resource:categories=hedgehog;hedgehog-gateway,shortName=gwpeer
 // +kubebuilder:printcolumn:name="GatewayGroup",type=string,JSONPath=`.spec.gatewayGroup`,priority=0
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`,priority=0
-// Peering is the Schema for the peerings API.
-type Peering struct {
+// GatewayPeering is the Schema for the peerings API.
+type GatewayPeering struct {
 	kmetav1.TypeMeta   `json:",inline"`
 	kmetav1.ObjectMeta `json:"metadata,omitempty"`
 
@@ -122,18 +123,21 @@ type Peering struct {
 
 // +kubebuilder:object:root=true
 
-// PeeringList contains a list of Peering.
-type PeeringList struct {
+// GatewayPeeringList contains a list of Peering.
+type GatewayPeeringList struct {
 	kmetav1.TypeMeta `json:",inline"`
 	kmetav1.ListMeta `json:"metadata,omitempty"`
-	Items            []Peering `json:"items"`
+	Items            []GatewayPeering `json:"items"`
 }
 
 func init() {
-	SchemeBuilder.Register(&Peering{}, &PeeringList{})
+	SchemeBuilder.Register(&GatewayPeering{}, &GatewayPeeringList{})
 }
 
-func (p *Peering) Default() {
+func (p *GatewayPeering) Default() {
+	if p.Namespace == "" {
+		p.Namespace = kmetav1.NamespaceDefault
+	}
 	if p.Labels == nil {
 		p.Labels = map[string]string{}
 	}
@@ -171,7 +175,13 @@ func (p *Peering) Default() {
 	}
 }
 
-func (p *Peering) Validate(ctx context.Context, kube kclient.Reader) error {
+func (p *GatewayPeering) Validate(ctx context.Context, kube kclient.Reader, fabricCfg *meta.FabricConfig) error {
+	if fabricCfg != nil && !fabricCfg.EnableGateway {
+		return fmt.Errorf("gateway support is not enabled") //nolint:err113
+	}
+	if p.Namespace != kmetav1.NamespaceDefault {
+		return fmt.Errorf("gatewaypeering namespace must be %s", kmetav1.NamespaceDefault) //nolint:err113
+	}
 	if p.Spec.GatewayGroup == "" {
 		return fmt.Errorf("gateway group must be specified %s", p.Name) //nolint:err113
 	}
@@ -320,7 +330,7 @@ func (p *Peering) Validate(ctx context.Context, kube kclient.Reader) error {
 			if len(ourCIDRs) == 0 {
 				continue
 			}
-			peeringList := &PeeringList{}
+			peeringList := &GatewayPeeringList{}
 			if err := kube.List(ctx, peeringList, kclient.MatchingLabels{ListLabelVPC(targetVPC): ListLabelValue}); err != nil {
 				return fmt.Errorf("failed to list peerings for VPC %s: %w", targetVPC, err)
 			}
