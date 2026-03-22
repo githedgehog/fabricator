@@ -39,9 +39,14 @@ on:
         default: false
       upgradefrom:
         description: "Upgrade from version"
-        type: string
+        type: choice
         required: false
         default: ""
+        options:
+          - ""
+          - "25.03"
+          - "25.04"
+          - "25.05"
       releasetest:
         description: "Run Release tests"
         type: boolean
