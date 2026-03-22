@@ -1,5 +1,5 @@
 name: Custom VLAB
-run-name: "${{ inputs.hybrid && 'h' || 'v' }}-${{ inputs.upgradefrom }}${{ inputs.upgradefrom && '-' || '' }}${{ inputs.mesh && 'mesh-' || '' }}${{ inputs.gateway && 'gw-' || '' }}${{ inputs.buildmode }}-${{ inputs.vpcmode }}${{ inputs.releasetest && '-rt' || '' }}${{ inputs.releasetest_regex != '' && 'r' || '' }}"
+run-name: "${{ inputs.hybrid && 'h' || 'v' }}-${{ inputs.upgradefrom != 'none' && inputs.upgradefrom || '' }}${{ inputs.upgradefrom != 'none' && '-' || '' }}${{ inputs.mesh && 'mesh-' || '' }}${{ inputs.gateway && 'gw-' || '' }}${{ inputs.buildmode }}-${{ inputs.vpcmode }}${{ inputs.releasetest && '-rt' || '' }}${{ inputs.releasetest_regex != '' && 'r' || '' }}"
 
 on:
   workflow_dispatch:
@@ -38,12 +38,12 @@ on:
         required: false
         default: false
       upgradefrom:
-        description: "Upgrade from version"
+        description: "Upgrade from version (none = no upgrade)"
         type: choice
         required: false
-        default: ""
+        default: "none"
         options:
-          - ""
+          - none
           - "25.03"
           - "25.04"
           - "25.05"
@@ -73,7 +73,7 @@ permissions:
 
 jobs:
   vlab:
-    name: "${{ inputs.hybrid && 'h' || 'v' }}-${{ inputs.upgradefrom && 'up' || '' }}${{ inputs.upgradefrom }}${{ inputs.upgradefrom && '-' || '' }}${{ inputs.mesh && 'mesh-' || '' }}${{ inputs.gateway && 'gw-' || '' }}${{ inputs.buildmode }}-${{ inputs.vpcmode }}${{ inputs.releasetest && '-rt' || '' }}${{ inputs.releasetest_regex != '' && 'r' || '' }}"
+    name: "${{ inputs.hybrid && 'h' || 'v' }}-${{ inputs.upgradefrom != 'none' && 'up' || '' }}${{ inputs.upgradefrom != 'none' && inputs.upgradefrom || '' }}${{ inputs.upgradefrom != 'none' && '-' || '' }}${{ inputs.mesh && 'mesh-' || '' }}${{ inputs.gateway && 'gw-' || '' }}${{ inputs.buildmode }}-${{ inputs.vpcmode }}${{ inputs.releasetest && '-rt' || '' }}${{ inputs.releasetest_regex != '' && 'r' || '' }}"
     uses: ./.github/workflows/run-vlab.yaml
     with:
       fabricatorref: ${{ github.ref }}
@@ -84,7 +84,7 @@ jobs:
       buildmode: ${{ inputs.buildmode }}
       vpcmode: ${{ inputs.vpcmode }}
       hybrid: ${{ inputs.hybrid }}
-      upgradefrom: ${{ inputs.upgradefrom }}
+      upgradefrom: ${{ inputs.upgradefrom != 'none' && inputs.upgradefrom || '' }}
       releasetest: ${{ inputs.releasetest }}
       releasetest_regex: ${{ inputs.releasetest_regex }}
       releasetest_regex_invert: ${{ inputs.releasetest_regex_invert }}
