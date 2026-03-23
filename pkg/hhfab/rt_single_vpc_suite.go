@@ -27,21 +27,21 @@ import (
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func makeSingleVPCSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
+func makeSingleVPCSuite() *JUnitTestSuite {
 	suite := &JUnitTestSuite{
 		Name: "Single VPC Suite",
 	}
 	suite.TestCases = []JUnitTestCase{
 		{
 			Name: "No restrictions",
-			F:    testCtx.noRestrictionsTest,
+			F:    noRestrictionsTest,
 			SkipFlags: SkipFlags{
 				NoServers: true,
 			},
 		},
 		{
 			Name: "Single VPC with restrictions",
-			F:    testCtx.singleVPCWithRestrictionsTest,
+			F:    singleVPCWithRestrictionsTest,
 			SkipFlags: SkipFlags{
 				VirtualSwitch: true,
 				NoServers:     true,
@@ -49,19 +49,19 @@ func makeSingleVPCSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 		},
 		{
 			Name: "DNS/NTP/MTU/DHCP lease",
-			F:    testCtx.dnsNtpMtuTest,
+			F:    dnsNtpMtuTest,
 		},
 		{
 			Name: "DHCP renewal",
-			F:    testCtx.dhcpRenewalTest,
+			F:    dhcpRenewalTest,
 		},
 		{
 			Name: "DHCP static lease",
-			F:    testCtx.dhcpStaticLeaseTest,
+			F:    dhcpStaticLeaseTest,
 		},
 		{
 			Name: "MCLAG Failover",
-			F:    testCtx.mclagTest,
+			F:    mclagTest,
 			SkipFlags: SkipFlags{
 				VirtualSwitch: true,
 				NoServers:     true,
@@ -69,7 +69,7 @@ func makeSingleVPCSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 		},
 		{
 			Name: "ESLAG Failover",
-			F:    testCtx.eslagTest,
+			F:    eslagTest,
 			SkipFlags: SkipFlags{
 				VirtualSwitch: true,
 				NoServers:     true,
@@ -77,7 +77,7 @@ func makeSingleVPCSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 		},
 		{
 			Name: "Bundled Failover",
-			F:    testCtx.bundledFailoverTest,
+			F:    bundledFailoverTest,
 			SkipFlags: SkipFlags{
 				VirtualSwitch: true,
 				NoServers:     true,
@@ -85,7 +85,7 @@ func makeSingleVPCSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 		},
 		{
 			Name: "Spine Failover",
-			F:    testCtx.spineFailoverTest,
+			F:    spineFailoverTest,
 			SkipFlags: SkipFlags{
 				VirtualSwitch: true,
 				NoFabricLink:  true,
@@ -94,7 +94,7 @@ func makeSingleVPCSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 		},
 		{
 			Name: "Mesh Failover",
-			F:    testCtx.meshFailoverTest,
+			F:    meshFailoverTest,
 			SkipFlags: SkipFlags{
 				VirtualSwitch: true,
 				NoMeshLink:    true,
@@ -103,7 +103,7 @@ func makeSingleVPCSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 		},
 		{
 			Name: "RoCE flag and basic traffic marking",
-			F:    testCtx.roceBasicTest,
+			F:    roceBasicTest,
 			SkipFlags: SkipFlags{
 				RoCE:      true,
 				NoServers: true,
@@ -118,7 +118,7 @@ func makeSingleVPCSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 // Basic test for mclag failover.
 // For each mclag connection, set one of the links down by shutting down the port on the switch,
 // then test connectivity. Repeat for the other link.
-func (testCtx *VPCPeeringTestCtx) mclagTest(ctx context.Context) (bool, []RevertFunc, error) {
+func mclagTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
 	// list connections in the fabric, filter by MC-LAG connection type
 	conns := &wiringapi.ConnectionList{}
 	if err := testCtx.kube.List(ctx, conns, kclient.MatchingLabels{wiringapi.LabelConnectionType: wiringapi.ConnectionTypeMCLAG}); err != nil {
@@ -153,7 +153,7 @@ func (testCtx *VPCPeeringTestCtx) mclagTest(ctx context.Context) (bool, []Revert
 // Basic test for eslag failover.
 // For each eslag connection, set one of the links down by shutting down the port on the switch,
 // then test connectivity. Repeat for the other link.
-func (testCtx *VPCPeeringTestCtx) eslagTest(ctx context.Context) (bool, []RevertFunc, error) {
+func eslagTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
 	// l3vni mode is not compatible with ESLAG, so there will be no servers attached to ESLAG connections
 	if testCtx.setupOpts.VPCMode == vpcapi.VPCModeL3VNI {
 		return true, nil, fmt.Errorf("L3VNI mode is not compatible with ESLAG") //nolint:goerr113
@@ -192,7 +192,7 @@ func (testCtx *VPCPeeringTestCtx) eslagTest(ctx context.Context) (bool, []Revert
 // Basic test for bundled connection failover.
 // For each bundled connection, set one of the links down by shutting down the port on the switch,
 // then test connectivity. Repeat for the other link(s).
-func (testCtx *VPCPeeringTestCtx) bundledFailoverTest(ctx context.Context) (bool, []RevertFunc, error) {
+func bundledFailoverTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
 	// list connections in the fabric, filter by bundled connection type
 	conns := &wiringapi.ConnectionList{}
 	if err := testCtx.kube.List(ctx, conns, kclient.MatchingLabels{wiringapi.LabelConnectionType: wiringapi.ConnectionTypeBundled}); err != nil {
@@ -227,7 +227,7 @@ func (testCtx *VPCPeeringTestCtx) bundledFailoverTest(ctx context.Context) (bool
 // Basic test for spine failover.
 // Iterate over the spine switches (skip the first one), and shut down all links towards them.
 // Test connectivity, then re-enable the links.
-func (testCtx *VPCPeeringTestCtx) spineFailoverTest(ctx context.Context) (bool, []RevertFunc, error) {
+func spineFailoverTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
 	var returnErr error
 
 	// list spines, unfortunately we cannot filter by role
@@ -358,7 +358,7 @@ outer:
 // that group, then shuts down all spine ports connected to the primary gateway.
 // After restoring, tests connectivity again.
 // Requires at least 2 gateways and 2 VPCs.
-func (testCtx *VPCPeeringTestCtx) gatewayFailoverTest(ctx context.Context) (bool, []RevertFunc, error) {
+func gatewayFailoverTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
 	var returnErr error
 
 	// list gateways
@@ -637,7 +637,7 @@ func (testCtx *VPCPeeringTestCtx) gatewayFailoverTest(ctx context.Context) (bool
 // Basic test for mesh failover.
 // Iterate over leaf switches, shutdown all mesh links except for one, test connectivity
 // as soon as we manage to test this on a leaf, return and renable all agents as part of the revert
-func (testCtx *VPCPeeringTestCtx) meshFailoverTest(ctx context.Context) (bool, []RevertFunc, error) {
+func meshFailoverTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
 	// list leaves, unfortunately we cannot filter by role
 	switches := &wiringapi.SwitchList{}
 	if err := testCtx.kube.List(ctx, switches); err != nil {
@@ -771,7 +771,7 @@ func (testCtx *VPCPeeringTestCtx) meshFailoverTest(ctx context.Context) (bool, [
 }
 
 // Vanilla test for VPC peering, just test connectivity without any further restriction
-func (testCtx *VPCPeeringTestCtx) noRestrictionsTest(ctx context.Context) (bool, []RevertFunc, error) {
+func noRestrictionsTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
 	if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
 		return false, nil, fmt.Errorf("waiting for readiness: %w", err)
 	}
@@ -789,7 +789,7 @@ func (testCtx *VPCPeeringTestCtx) noRestrictionsTest(ctx context.Context) (bool,
 // 3. Set both isolated and restricted flags in the third subnet, test connectivity
 // 4. Override isolation with explicit permit list, test connectivity
 // 5. Remove all restrictions
-func (testCtx *VPCPeeringTestCtx) singleVPCWithRestrictionsTest(ctx context.Context) (bool, []RevertFunc, error) {
+func singleVPCWithRestrictionsTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
 	var returnErr error
 
 	vpcs := &vpcapi.VPCList{}
@@ -924,7 +924,7 @@ outer:
 // for NTP, we check the output of timedatectl show-timesync;
 // for MTU, we check the output of "ip link" on the vlan interface;
 // for DHCP Lease, we check the output of "ip addr" on the server.
-func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (bool, []RevertFunc, error) {
+func dnsNtpMtuTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
 	vpcAttaches := &vpcapi.VPCAttachmentList{}
 	if err := testCtx.kube.List(ctx, vpcAttaches); err != nil {
 		return false, nil, fmt.Errorf("listing VPCAttachments: %w", err)
@@ -1107,7 +1107,7 @@ func (testCtx *VPCPeeringTestCtx) dnsNtpMtuTest(ctx context.Context) (bool, []Re
 // Uses 1 server by default, all servers in extended mode
 // Sets VPC DHCPOptions to a shorter lease and reconfigures servers via networkctl
 // Waits for DHCP renewal and checks lease time
-func (testCtx *VPCPeeringTestCtx) dhcpRenewalTest(ctx context.Context) (bool, []RevertFunc, error) {
+func dhcpRenewalTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
 	// Find VPC with at least one server attached that has DHCP enabled
 	vpcAttaches := &vpcapi.VPCAttachmentList{}
 	if err := testCtx.kube.List(ctx, vpcAttaches); err != nil {
@@ -1381,7 +1381,7 @@ func (testCtx *VPCPeeringTestCtx) testStaticIPAssignment(ctx context.Context, vp
 // Verifies that static IP assignments work correctly both within and outside the dynamic range.
 // The test finds any server on any subnet, saves the existing DHCP config (if any),
 // forces a hardcoded DHCP config, runs tests, and restores the original config.
-func (testCtx *VPCPeeringTestCtx) dhcpStaticLeaseTest(ctx context.Context) (bool, []RevertFunc, error) {
+func dhcpStaticLeaseTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
 	// 1. Find any server attached to any VPC subnet (regardless of DHCP config)
 	serverInfo, err := findAnyAttachedServer(ctx, testCtx.kube)
 	if errors.Is(err, errNoAttachedServers) {
@@ -1491,7 +1491,7 @@ func (testCtx *VPCPeeringTestCtx) dhcpStaticLeaseTest(ctx context.Context) (bool
 
 // Test RoCE functionality and DSCP traffic marking by enabling RoCE on a leaf switch
 // with servers, generating DSCP 24 marked traffic, and verifying UC3 queue counters.
-func (testCtx *VPCPeeringTestCtx) roceBasicTest(ctx context.Context) (bool, []RevertFunc, error) {
+func roceBasicTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
 	// this should never fail
 	if len(testCtx.roceLeaves) == 0 {
 		slog.Error("RoCE leaves not specified, skipping RoCE basic test")
