@@ -15,7 +15,7 @@ import (
 
 var (
 	FabricatorVersion = meta.Version(version.Version)
-	FabricVersion     = meta.Version("v0.113.2")
+	FabricVersion     = meta.Version("v0.113.5")
 	DataplaneVersion  = meta.Version("v0.16.0")
 	FRRVersion        = meta.Version("v0.16.0")
 	BCMSONiCVersion   = meta.Version("v4.5.0")
