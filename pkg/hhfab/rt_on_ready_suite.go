@@ -675,7 +675,7 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []Re
 	slog.Debug("Added static (non-proxy) external peering", "server", singleServers[1].name, "vpc", staticPeerVPC.Name, "external", staticExtNonProxyName)
 
 	// Peering 4: hostBGP VPC (B) peered with VPC A (a regular VPC)
-	appendVpcPeeringSpecByName(vpcPeerings, vpcBName, vpcAName, "", []string{}, []string{})
+	appendVpcPeeringSpecByName(vpcPeerings, vpcBName, vpcAName, []string{}, []string{})
 	slog.Debug("Added VPC peering", "vpc1", vpcBName, "vpc2", vpcAName)
 
 	// Extra gateway peerings to increase coverage. TODO: add NAT once test-connectivity supports it.
