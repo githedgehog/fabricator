@@ -112,7 +112,7 @@ run_dp_cmd() {
     run_vtysh_cmd "show logging"
     run_vtysh_cmd "show protocols"
     run_vtysh_cmd "show zebra status"
-#    run_vtysh_cmd "show memory"
+    run_vtysh_cmd "show memory"
     run_vtysh_cmd "show thread cpu"
     run_vtysh_cmd "show ip bgp"
     run_vtysh_cmd "show hedgehog plugin version"
