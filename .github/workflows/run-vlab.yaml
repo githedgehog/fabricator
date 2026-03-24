@@ -148,6 +148,7 @@ jobs:
         with:
           repository: githedgehog/lab-ci
           path: "./lab-ci"
+          ref: "dev/frostman/bigger-servers"
 
       - name: Pre-populate hhfab-cache
         run: |
