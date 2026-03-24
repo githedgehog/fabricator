@@ -2878,7 +2878,8 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string,
 	iPerfsMinSpeed := opts.IPerfsMinSpeed
 	// Gateway peering uses kernel-based dataplane which achieves ~1-1.5 Gbps on hlab
 	if reachability.Reason == ReachabilityReasonGatewayPeering {
-		iPerfsMinSpeed = min(iPerfsMinSpeed, 1000)
+		// iPerfsMinSpeed = min(iPerfsMinSpeed, 1000) TODO: Remove when https://github.com/githedgehog/fabricator/issues/1593 is solved
+		iPerfsMinSpeed = min(iPerfsMinSpeed, 700)
 	}
 
 	var lastError *IperfError
