@@ -117,6 +117,24 @@ jobs:
           just run hhfab diagram -f drawio -o test-diagrams/default-vlab-diagram.drawio -v
           just run hhfab diagram -f dot -o test-diagrams/default-vlab-diagram.dot -v
 
+      - name: Checkout lab-ci repository
+        uses: actions/checkout@v6
+        with:
+          repository: githedgehog/lab-ci
+          path: "./lab-ci"
+
+      - name: Test hlab diagram generation
+        run: |
+          source "./lab-ci/envs/env-ci-1.l/source.sh"
+          just run hhfab init -f --dev --gateway=true \
+            -w "./lab-ci/envs/env-ci-1.l/wiring.yaml" \
+            -w "./lab-ci/envs/env-ci-1.l/wiring-gateway.yaml"
+
+          # Generate diagrams in all formats and save to test-diagrams directory
+          just run hhfab diagram -f mermaid -o test-diagrams/hlab-diagram.mmd -v
+          just run hhfab diagram -f drawio -o test-diagrams/hlab-diagram.drawio -v
+          just run hhfab diagram -f dot -o test-diagrams/hlab-diagram.dot -v
+
       - name: Upload diagram artifacts
         uses: actions/upload-artifact@v7
         with:
