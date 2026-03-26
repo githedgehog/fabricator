@@ -230,6 +230,11 @@ func GetFabricConfig(f fabapi.Fabricator) (*fmeta.FabricConfig, error) {
 		return nil, fmt.Errorf("getting image URL for %q: %w", gateway.DataplaneRef, err)
 	}
 
+	dataplaneValidatorRepo, err := comp.ImageURL(f, gateway.DataplaneValidatorRef)
+	if err != nil {
+		return nil, fmt.Errorf("getting image URL for %q: %w", gateway.DataplaneValidatorRef, err)
+	}
+
 	frrRepo, err := comp.ImageURL(f, gateway.FRRRef)
 	if err != nil {
 		return nil, fmt.Errorf("getting image URL for %q: %w", gateway.FRRRef, err)
@@ -302,11 +307,12 @@ func GetFabricConfig(f fabapi.Fabricator) (*fmeta.FabricConfig, error) {
 				Effect:   corev1.TaintEffectNoExecute,
 			},
 		},
-		DataplaneRef:         dataplaneRepo + ":" + string(f.Status.Versions.Gateway.Dataplane),
-		FRRRef:               frrRepo + ":" + string(f.Status.Versions.Gateway.FRR),
-		ToolboxRef:           toolboxRepo + ":" + string(flatcar.ToolboxVersion(f)),
-		DataplaneMetricsPort: gateway.DataplaneMetricsPort,
-		FRRMetricsPort:       gateway.FRRMetricsPort,
+		DataplaneRef:          dataplaneRepo + ":" + string(f.Status.Versions.Gateway.Dataplane),
+		DataplaneValidatorRef: dataplaneValidatorRepo + ":" + string(f.Status.Versions.Gateway.Dataplane),
+		FRRRef:                frrRepo + ":" + string(f.Status.Versions.Gateway.FRR),
+		ToolboxRef:            toolboxRepo + ":" + string(flatcar.ToolboxVersion(f)),
+		DataplaneMetricsPort:  gateway.DataplaneMetricsPort,
+		FRRMetricsPort:        gateway.FRRMetricsPort,
 	}, nil
 }
 
