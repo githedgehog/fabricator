@@ -17,18 +17,20 @@ import (
 )
 
 const (
-	DataplaneRef         = "dataplane"
-	FRRRef               = "dpdk-sys/frr"
-	DataplaneMetricsPort = 9442
-	FRRMetricsPort       = 9342
+	DataplaneRef          = "dataplane"
+	DataplaneValidatorRef = "dataplane/validator"
+	FRRRef                = "dpdk-sys/frr"
+	DataplaneMetricsPort  = 9442
+	FRRMetricsPort        = 9342
 )
 
 var _ comp.ListOCIArtifacts = Artifacts
 
 func Artifacts(cfg fabapi.Fabricator) (comp.OCIArtifacts, error) {
 	return comp.OCIArtifacts{
-		DataplaneRef: cfg.Status.Versions.Gateway.Dataplane,
-		FRRRef:       cfg.Status.Versions.Gateway.FRR,
+		DataplaneRef:          cfg.Status.Versions.Gateway.Dataplane,
+		DataplaneValidatorRef: cfg.Status.Versions.Gateway.Dataplane,
+		FRRRef:                cfg.Status.Versions.Gateway.FRR,
 	}, nil
 }
 
