@@ -18,7 +18,7 @@ import (
 
 const (
 	DataplaneRef         = "dataplane"
-	FRRRef               = "dpdk-sys/frr"
+	FRRRef               = "dataplane/frr"
 	DataplaneMetricsPort = 9442
 	FRRMetricsPort       = 9342
 )
