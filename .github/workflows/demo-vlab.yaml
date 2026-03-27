@@ -1,0 +1,408 @@
+name: Demo VLAB
+
+on:
+  push:
+    paths:
+      - ".github/workflows/demo-vlab.yaml"
+  workflow_dispatch:
+    inputs:
+      debug:
+        description: "Enable tmate debugging"
+        type: boolean
+        required: false
+        default: false
+      pause_on_failure:
+        description: "Pause on failure (only if debug is enabled)"
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  HHFAB_REG_REPO: 127.0.0.1:30000
+  HHFAB_VLAB_COLLECT: true
+
+jobs:
+  demo:
+    runs-on: vlab
+    timeout-minutes: 90
+
+    steps:
+      - name: Runner host
+        run: |
+          echo "$KUBE_NODE"
+
+      - name: Inputs summary
+        run: |
+          echo "Inputs:"
+          echo "  Debug: ${{ inputs.debug }}"
+          echo "  Pause on failure: ${{ inputs.pause_on_failure }}"
+
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Pre-populate hhfab-cache
+        run: |
+          if [ -d "/hostcache/.hhfab-cache" ]; then
+            rsync -aW --inplace --exclude='download-*' --stats /hostcache/.hhfab-cache ~/
+          else
+            echo "Host cache not available"
+          fi
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Setup local registry
+        run: |
+          just --timestamp _localreg &
+
+      - name: Build hhfab
+        run: |
+          just --timestamp oci_repo=127.0.0.1:30000 oci=http push
+
+      - name: Init hhfab with gateway
+        run: |
+          bin/hhfab init -v --dev --gw
+          bin/hhfab vlab gen -v --mclag-leafs-count 0 --eslag-leaf-groups 2
+
+      - name: Print hhfab versions and generate diagrams
+        run: |
+          bin/hhfab versions | tee versions.txt
+          bin/hhfab diagram --format=drawio
+          bin/hhfab diagram --format=dot
+          bin/hhfab diagram --format=mermaid
+
+      - name: Start VLAB in background
+        run: |
+          export HHFAB_JOIN_TOKEN=$(openssl rand -base64 24)
+          bin/hhfab vlab up -v \
+            --build-mode=iso \
+            --ready=inspect 2>&1 | tee vlab.log &
+          echo $! > /tmp/vlab.pid
+
+      - name: Wait for VLAB ready
+        run: |
+          echo "Waiting for VLAB inspect to complete..."
+          timeout 60m bash -c '
+            tail -f vlab.log 2>/dev/null | while read line; do
+              echo "$line"
+              if echo "$line" | grep -q "All on-ready commands finished\|Inspect completed"; then
+                echo "VLAB is ready!"
+                pkill -P $$ tail 2>/dev/null || true
+                exit 0
+              fi
+              if echo "$line" | grep -q "FATAL\|panic:"; then
+                echo "VLAB startup failed!"
+                exit 1
+              fi
+            done
+          '
+
+      # =============================================================================
+      # Demo test steps - mirrors the documentation user experience
+      # See: docs/vlab/demo.md "Manual VPC creation" section
+      # All kubectl commands run via SSH to control-1 (as customers would do)
+      # =============================================================================
+
+      # --- Step 1: Verify initial state ---
+      - name: "Demo: Verify initial state (no VPCs)"
+        run: |
+          echo "=== Checking IPv4 Namespaces ==="
+          bin/hhfab vlab ssh -bn control-1 -- kubectl get ipns
+
+          echo ""
+          echo "=== Checking available server connections ==="
+          bin/hhfab vlab ssh -bn control-1 -- kubectl get conn | grep server
+
+          echo ""
+          echo "=== Checking VPCs (should be empty) ==="
+          bin/hhfab vlab ssh -bn control-1 -- kubectl get vpc || echo "No VPCs (expected)"
+
+      # --- Step 2: Create VPCs manually (as documented) ---
+      - name: "Demo: Create VPCs manually via kubectl"
+        run: |
+          echo "=== Creating vpc-01 with subnet 10.0.1.0/24 ==="
+          bin/hhfab vlab ssh -bn control-1 -- \
+            kubectl fabric vpc create --name vpc-01 --subnet 10.0.1.0/24 --vlan 1001 --dhcp --dhcp-start 10.0.1.10
+
+          echo ""
+          echo "=== Creating vpc-02 with subnet 10.0.2.0/24 ==="
+          bin/hhfab vlab ssh -bn control-1 -- \
+            kubectl fabric vpc create --name vpc-02 --subnet 10.0.2.0/24 --vlan 1002 --dhcp --dhcp-start 10.0.2.10
+
+      # --- Step 3: Attach VPCs to servers (as documented) ---
+      - name: "Demo: Attach VPCs to servers via kubectl"
+        run: |
+          echo "=== Attaching vpc-01 to server-01 ==="
+          bin/hhfab vlab ssh -bn control-1 -- \
+            kubectl fabric vpc attach --vpc-subnet vpc-01/default --connection server-01--eslag--leaf-01--leaf-02
+
+          echo ""
+          echo "=== Attaching vpc-02 to server-02 ==="
+          bin/hhfab vlab ssh -bn control-1 -- \
+            kubectl fabric vpc attach --vpc-subnet vpc-02/default --connection server-02--eslag--leaf-01--leaf-02
+
+      # --- Step 4: Verify VPCs and attachments created ---
+      - name: "Demo: Verify VPCs and attachments created"
+        run: |
+          echo "=== VPCs ==="
+          bin/hhfab vlab ssh -bn control-1 -- kubectl get vpc
+
+          echo ""
+          echo "=== VPC Attachments ==="
+          bin/hhfab vlab ssh -bn control-1 -- kubectl get vpcattachment
+
+      # --- Step 5: Wait for agents to apply configuration ---
+      - name: "Demo: Wait for switch agents to apply VPC configuration"
+        run: |
+          echo "=== Waiting for agents to apply configuration ==="
+          echo "Checking that APPLIEDG == CURRENTG for all agents..."
+          for i in $(seq 1 30); do
+            if bin/hhfab vlab ssh -bn control-1 -- kubectl get agents -o json | \
+               jq -e '[.items[] | select(.status.lastAppliedGen != .metadata.generation)] | length == 0' > /dev/null 2>&1; then
+              echo "All agents have applied configuration"
+              bin/hhfab vlab ssh -bn control-1 -- kubectl get agents
+              break
+            fi
+            echo "Waiting for agents... (attempt $i/30)"
+            sleep 10
+          done
+
+      # --- Step 6: Setup networking on test servers (as documented) ---
+      - name: "Demo: Setup networking on server-01 (bond + VLAN 1001)"
+        run: |
+          echo "=== Configuring server-01 networking ==="
+          bin/hhfab vlab ssh -bn server-01 -- hhnet cleanup
+          bin/hhfab vlab ssh -bn server-01 -- hhnet bond 1001 layer2+3 enp2s1 enp2s2
+
+          echo ""
+          echo "=== Verifying server-01 IP address ==="
+          bin/hhfab vlab ssh -bn server-01 -- ip address show bond0.1001
+
+      - name: "Demo: Setup networking on server-02 (bond + VLAN 1002)"
+        run: |
+          echo "=== Configuring server-02 networking ==="
+          bin/hhfab vlab ssh -bn server-02 -- hhnet cleanup
+          bin/hhfab vlab ssh -bn server-02 -- hhnet bond 1002 layer2+3 enp2s1 enp2s2
+
+          echo ""
+          echo "=== Verifying server-02 IP address ==="
+          bin/hhfab vlab ssh -bn server-02 -- ip address show bond0.1002
+
+      # --- Step 7: Test connectivity BEFORE peering (should fail) ---
+      - name: "Demo: Test connectivity BEFORE peering (expected to fail)"
+        run: |
+          echo "=== Testing connectivity from server-01 to server-02 (should fail) ==="
+          echo "Pinging 10.0.2.10 from server-01..."
+          if bin/hhfab vlab ssh -bn server-01 -- ping -c 3 -W 2 10.0.2.10; then
+            echo "ERROR: Ping succeeded but should have failed (VPCs not peered yet)"
+            exit 1
+          else
+            echo "Ping failed as expected - VPCs are isolated"
+          fi
+
+          echo ""
+          echo "=== Testing connectivity from server-02 to server-01 (should fail) ==="
+          echo "Pinging 10.0.1.10 from server-02..."
+          if bin/hhfab vlab ssh -bn server-02 -- ping -c 3 -W 2 10.0.1.10; then
+            echo "ERROR: Ping succeeded but should have failed (VPCs not peered yet)"
+            exit 1
+          else
+            echo "Ping failed as expected - VPCs are isolated"
+          fi
+
+      # --- Step 8: Create VPC peering (as documented) ---
+      - name: "Demo: Create VPCPeering via kubectl"
+        run: |
+          echo "=== Creating VPC peering between vpc-01 and vpc-02 ==="
+          bin/hhfab vlab ssh -bn control-1 -- kubectl fabric vpc peer --vpc vpc-01 --vpc vpc-02
+
+      # --- Step 9: Wait for agents to apply peering ---
+      - name: "Demo: Wait for switch agents to apply peering configuration"
+        run: |
+          echo "=== Waiting for agents to apply peering configuration ==="
+          for i in $(seq 1 30); do
+            if bin/hhfab vlab ssh -bn control-1 -- kubectl get agents -o json | \
+               jq -e '[.items[] | select(.status.lastAppliedGen != .metadata.generation)] | length == 0' > /dev/null 2>&1; then
+              echo "All agents have applied configuration"
+              bin/hhfab vlab ssh -bn control-1 -- kubectl get agents
+              break
+            fi
+            echo "Waiting for agents... (attempt $i/30)"
+            sleep 10
+          done
+
+      # --- Step 10: Verify VPCPeering created ---
+      - name: "Demo: Verify VPCPeering created"
+        run: |
+          echo "=== VPC Peerings ==="
+          bin/hhfab vlab ssh -bn control-1 -- kubectl get vpcpeering
+          bin/hhfab vlab ssh -bn control-1 -- kubectl get vpcpeering -o yaml
+
+      # --- Step 11: Test connectivity AFTER peering (should succeed) ---
+      - name: "Demo: Test connectivity AFTER VPCPeering (expected to succeed)"
+        run: |
+          echo "=== Testing connectivity from server-01 to server-02 ==="
+          bin/hhfab vlab ssh -bn server-01 -- ping -c 3 10.0.2.10
+
+          echo ""
+          echo "=== Testing connectivity from server-02 to server-01 ==="
+          bin/hhfab vlab ssh -bn server-02 -- ping -c 3 10.0.1.10
+
+      # --- Step 12: Delete VPCPeering and verify connectivity lost ---
+      - name: "Demo: Delete VPCPeering"
+        run: |
+          echo "=== Deleting VPC peering ==="
+          bin/hhfab vlab ssh -bn control-1 -- kubectl delete vpcpeering/vpc-01--vpc-02
+
+      - name: "Demo: Wait for agents to apply deletion"
+        run: |
+          echo "=== Waiting for agents to apply deletion ==="
+          for i in $(seq 1 30); do
+            if bin/hhfab vlab ssh -bn control-1 -- kubectl get agents -o json | \
+               jq -e '[.items[] | select(.status.lastAppliedGen != .metadata.generation)] | length == 0' > /dev/null 2>&1; then
+              echo "All agents have applied configuration"
+              bin/hhfab vlab ssh -bn control-1 -- kubectl get agents
+              break
+            fi
+            echo "Waiting for agents... (attempt $i/30)"
+            sleep 10
+          done
+
+      - name: "Demo: Verify connectivity lost after deleting VPCPeering"
+        run: |
+          echo "=== Testing connectivity after peering deletion (should fail) ==="
+          if bin/hhfab vlab ssh -bn server-01 -- ping -c 3 -W 2 10.0.2.10; then
+            echo "ERROR: Ping succeeded but should have failed (peering deleted)"
+            exit 1
+          else
+            echo "Ping failed as expected - peering was deleted"
+          fi
+
+      # =============================================================================
+      # Gateway Peering Demo (advanced)
+      # See: docs/vlab/demo.md "Gateway peerings and NAT" section
+      # =============================================================================
+
+      - name: "Demo: Create GatewayPeering via kubectl (manual YAML)"
+        run: |
+          echo "=== Creating Gateway peering between vpc-01 and vpc-02 ==="
+          cat <<'EOF' | bin/hhfab vlab ssh -bn control-1 -- kubectl create -f -
+          apiVersion: gateway.githedgehog.com/v1alpha1
+          kind: Peering
+          metadata:
+            name: vpc-01--vpc-02
+            namespace: default
+          spec:
+            peering:
+              vpc-01:
+                expose:
+                  - ips:
+                    - cidr: 10.0.1.0/24
+              vpc-02:
+                expose:
+                  - ips:
+                    - cidr: 10.0.2.0/24
+          EOF
+
+      - name: "Demo: Verify GatewayPeering created"
+        run: |
+          echo "=== Gateway Peerings ==="
+          bin/hhfab vlab ssh -bn control-1 -- kubectl get peering.gateway.githedgehog.com
+          bin/hhfab vlab ssh -bn control-1 -- kubectl get peering.gateway.githedgehog.com -o yaml
+
+          echo ""
+          echo "=== VPC Peerings (should be empty) ==="
+          bin/hhfab vlab ssh -bn control-1 -- kubectl get vpcpeering || echo "No VPCPeerings (expected)"
+
+      - name: "Demo: Wait for gateway peering to be applied"
+        run: |
+          echo "=== Waiting for gateway peering to be ready ==="
+          sleep 30
+          bin/hhfab vlab ssh -bn control-1 -- kubectl get agents
+
+      - name: "Demo: Test connectivity with GatewayPeering"
+        run: |
+          echo "=== Testing connectivity via Gateway ==="
+          bin/hhfab vlab ssh -bn server-01 -- ping -c 3 10.0.2.10
+          bin/hhfab vlab ssh -bn server-02 -- ping -c 3 10.0.1.10
+
+      # --- Cleanup and transition back to VPCPeering ---
+      - name: "Demo: Delete GatewayPeering and recreate VPCPeering"
+        run: |
+          echo "=== Deleting Gateway peering ==="
+          bin/hhfab vlab ssh -bn control-1 -- kubectl delete peering.gateway.githedgehog.com/vpc-01--vpc-02
+
+          echo ""
+          echo "=== Recreating VPC peering ==="
+          bin/hhfab vlab ssh -bn control-1 -- kubectl fabric vpc peer --vpc vpc-01 --vpc vpc-02
+
+      - name: "Demo: Final connectivity test"
+        run: |
+          echo "=== Waiting for final configuration to apply ==="
+          sleep 20
+
+          echo ""
+          echo "=== Final connectivity test ==="
+          bin/hhfab vlab ssh -bn server-01 -- ping -c 5 10.0.2.10
+          bin/hhfab vlab ssh -bn server-02 -- ping -c 5 10.0.1.10
+
+      - name: Pause on failure
+        if: ${{ failure() && inputs.pause_on_failure && inputs.debug }}
+        run: |
+          echo "Test failed, pausing for 60 minutes to allow debugging"
+          echo "Connect via tmate to debug the VLAB state"
+          sleep 3600
+
+      - name: Shutdown VLAB
+        if: ${{ always() }}
+        run: |
+          if [ -f /tmp/vlab.pid ]; then
+            kill $(cat /tmp/vlab.pid) 2>/dev/null || true
+            wait $(cat /tmp/vlab.pid) 2>/dev/null || true
+          fi
+
+      - name: Prepare debug artifacts
+        if: ${{ always() }}
+        run: |
+          mkdir -p _debug/serial
+          cp versions.txt _debug || true
+          cp result/diagram.* _debug || true
+          cp vlab.log _debug || true
+          cp vlab.hhs _debug || true
+          cp -r show-tech-output _debug || true
+          cp .zot/log _debug/zot.log || true
+          find ./vlab/vms -type f -name serial.log -exec bash -c 'cp $0 _debug/serial/$(basename $(dirname $0)).log' {} \; || true
+
+          # Collect kubectl state for debugging (via SSH to control-1)
+          bin/hhfab vlab ssh -bn control-1 -- kubectl get vpc -o yaml > _debug/vpcs.yaml 2>/dev/null || true
+          bin/hhfab vlab ssh -bn control-1 -- kubectl get vpcattachment -o yaml > _debug/vpcattachments.yaml 2>/dev/null || true
+          bin/hhfab vlab ssh -bn control-1 -- kubectl get vpcpeering -o yaml > _debug/vpcpeerings.yaml 2>/dev/null || true
+          bin/hhfab vlab ssh -bn control-1 -- kubectl get peering.gateway.githedgehog.com -o yaml > _debug/gwpeerings.yaml 2>/dev/null || true
+          bin/hhfab vlab ssh -bn control-1 -- kubectl get agents -o yaml > _debug/agents.yaml 2>/dev/null || true
+
+      - name: Rename debug artifacts for upload
+        if: ${{ always() }}
+        run: |
+          mv _debug fab-${{ github.run_id }}-demo
+
+      - name: Upload debug artifacts
+        uses: actions/upload-artifact@v6
+        if: ${{ always() }}
+        with:
+          name: fab-${{ github.run_id }}-demo
+          path: fab-${{ github.run_id }}-demo
+
+      - name: Setup tmate session for debug
+        if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug }}
+        uses: mxschmitt/action-tmate@v3
+        timeout-minutes: 30
+        with:
+          limit-access-to-actor: true
