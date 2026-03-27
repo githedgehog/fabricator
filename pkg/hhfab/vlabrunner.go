@@ -106,6 +106,7 @@ type VLABRunOpts struct {
 	PauseOnFailure           bool
 	ReleaseTestRegexes       []string
 	ReleaseTestRegexesInvert bool
+	InterfaceMTU             uint16
 }
 
 type OnReady string
@@ -676,7 +677,6 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						return c.handleShutdownWithPause(ctx, vlab, opts, fmt.Errorf("reinstalling switches: %w", err))
 					}
 				case OnReadySetupVPCs:
-					// TODO make it configurable
 					setupVPCsOpts := SetupVPCsOpts{
 						WaitSwitchesReady: true,
 						VLANNamespace:     "default",
@@ -687,6 +687,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						TimeServers:       []string{"219.239.35.0"},
 						HashPolicy:        HashPolicyL2And3,
 						VPCMode:           opts.VPCMode,
+						InterfaceMTU:      opts.InterfaceMTU,
 					}
 					slog.Debug("Running setup-vpcs", "opts", setupVPCsOpts)
 					if err := c.SetupVPCs(ctx, vlab, setupVPCsOpts); err != nil {

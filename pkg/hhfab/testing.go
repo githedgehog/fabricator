@@ -34,6 +34,7 @@ import (
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab"
+	fabcomp "go.githedgehog.com/fabricator/pkg/fab/comp/fabric"
 	"go.githedgehog.com/fabricator/pkg/util/sshutil"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
@@ -372,6 +373,7 @@ type ServerNetconfOpts struct {
 	VLAN       uint16
 	HashPolicy string
 	P2P        string
+	MTU        uint16
 }
 
 func GetServerNetconfCmd(conn *wiringapi.Connection, opts ServerNetconfOpts) (string, error) {
@@ -382,6 +384,9 @@ func GetServerNetconfCmd(conn *wiringapi.Connection, opts ServerNetconfOpts) (st
 	if opts.P2P != "" {
 		if opts.VLAN != 0 || opts.HashPolicy != "" {
 			return "", fmt.Errorf("p2p option cannot be used with VLAN or HashPolicy")
+		}
+		if opts.MTU != 0 {
+			return "", fmt.Errorf("p2p option does not support MTU configuration")
 		}
 		if conn.Spec.Unbundled == nil {
 			return "", fmt.Errorf("p2p option cannot be used with connections other than unbundled")
@@ -405,6 +410,9 @@ func GetServerNetconfCmd(conn *wiringapi.Connection, opts ServerNetconfOpts) (st
 		netconfCmd = fmt.Sprintf("p2p %s %s %s", conn.Spec.Unbundled.Link.Server.LocalPortName(), localIP, remoteIP)
 	case conn.Spec.Unbundled != nil:
 		netconfCmd = fmt.Sprintf("vlan %d %s", opts.VLAN, conn.Spec.Unbundled.Link.Server.LocalPortName())
+		if opts.MTU > 0 {
+			netconfCmd += fmt.Sprintf(" --mtu=%d", opts.MTU)
+		}
 	default:
 		netconfCmd = fmt.Sprintf("bond %d %s", opts.VLAN, opts.HashPolicy)
 
@@ -422,6 +430,10 @@ func GetServerNetconfCmd(conn *wiringapi.Connection, opts ServerNetconfOpts) (st
 			}
 		} else {
 			return "", fmt.Errorf("unexpected connection type for conn %q", conn.Name)
+		}
+
+		if opts.MTU > 0 {
+			netconfCmd += fmt.Sprintf(" --mtu=%d", opts.MTU)
 		}
 	}
 
@@ -574,6 +586,28 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	if !opts.P2P && allCumulus {
 		opts.P2P = true
 		slog.Warn("Forcing P2P mode since all switches are cumulus")
+	}
+
+	if opts.InterfaceMTU == 0 {
+		hasSonicVS := false
+		for _, sw := range switchList.Items {
+			if sw.Spec.Profile == meta.SwitchProfileVS || sw.Spec.Profile == meta.SwitchProfileVSCLSP {
+				hasSonicVS = true
+
+				break
+			}
+		}
+		if hasSonicVS {
+			if len(opts.DNSServers) > 0 || len(opts.TimeServers) > 0 {
+				opts.InterfaceMTU = 1500 // prevent VPC API from defaulting to 9036 when DHCP options are present
+				slog.Info("SONiC VS switches detected, using standard MTU to prevent DHCP jumbo frame advertisement", "mtu", opts.InterfaceMTU)
+			} else {
+				slog.Info("SONiC VS switches detected, skipping jumbo frame MTU auto-configuration")
+			}
+		} else {
+			opts.InterfaceMTU = uint16(fabcomp.ServerFacingMTU) //nolint:gosec
+			slog.Info("Auto-configuring server interface MTU", "mtu", opts.InterfaceMTU)
+		}
 	}
 
 	{
@@ -864,6 +898,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 			confCmd, confErr = GetServerNetconfCmd(&conn, ServerNetconfOpts{
 				VLAN:       vlan,
 				HashPolicy: opts.HashPolicy,
+				MTU:        opts.InterfaceMTU,
 			})
 		}
 		if confErr != nil {
