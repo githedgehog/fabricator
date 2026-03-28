@@ -120,6 +120,11 @@ const (
 	PropRedundancyGroup  = "redundancyGroup"
 	PropRedundancyType   = "redundancyType"
 	PropConnectionName   = "connectionName"
+	PropASN              = "asn"
+	PropProtocolIP       = "protocolIP"
+	PropVTEPIP           = "vtepIP"
+	PropSrcLinkIP        = "srcLinkIP"
+	PropDstLinkIP        = "dstLinkIP"
 )
 
 const (

@@ -11,6 +11,7 @@ import (
 
 	agentapi "go.githedgehog.com/fabric/api/agent/v1beta1"
 	dhcpapi "go.githedgehog.com/fabric/api/dhcp/v1beta1"
+	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
@@ -614,6 +615,13 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 			node.Properties[PropRedundancyType] = string(sw.Spec.Redundancy.Type)
 		}
 
+		// Extract underlay information
+		if sw.Spec.ASN != 0 {
+			node.Properties[PropASN] = fmt.Sprintf("%d", sw.Spec.ASN)
+		}
+		node.Properties[PropProtocolIP] = sw.Spec.ProtocolIP
+		node.Properties[PropVTEPIP] = sw.Spec.VTEPIP
+
 		topo.Nodes = append(topo.Nodes, node)
 	}
 
@@ -713,6 +721,27 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 		if conn.Spec.Fabric != nil || conn.Spec.Mesh != nil || conn.Spec.Gateway != nil || conn.Spec.MCLAGDomain != nil ||
 			conn.Spec.Unbundled != nil || conn.Spec.MCLAG != nil || conn.Spec.Bundled != nil ||
 			conn.Spec.ESLAG != nil {
+			// Build per-port-pair IP map for underlay (fabric/mesh/gateway connections only)
+			type pairIPs struct{ src, dst string }
+			portPairIPs := map[string]pairIPs{}
+			switch {
+			case conn.Spec.Fabric != nil:
+				for _, fl := range conn.Spec.Fabric.Links {
+					portPairIPs[fl.Spine.Port+"->"+fl.Leaf.Port] = pairIPs{fl.Spine.IP, fl.Leaf.IP}
+					portPairIPs[fl.Leaf.Port+"->"+fl.Spine.Port] = pairIPs{fl.Leaf.IP, fl.Spine.IP}
+				}
+			case conn.Spec.Mesh != nil:
+				for _, ml := range conn.Spec.Mesh.Links {
+					portPairIPs[ml.Leaf1.Port+"->"+ml.Leaf2.Port] = pairIPs{ml.Leaf1.IP, ml.Leaf2.IP}
+					portPairIPs[ml.Leaf2.Port+"->"+ml.Leaf1.Port] = pairIPs{ml.Leaf2.IP, ml.Leaf1.IP}
+				}
+			case conn.Spec.Gateway != nil:
+				for _, gl := range conn.Spec.Gateway.Links {
+					portPairIPs[gl.Switch.Port+"->"+gl.Gateway.Port] = pairIPs{gl.Switch.IP, gl.Gateway.IP}
+					portPairIPs[gl.Gateway.Port+"->"+gl.Switch.Port] = pairIPs{gl.Gateway.IP, gl.Switch.IP}
+				}
+			}
+
 			for source, target := range links {
 				link := Link{
 					Source: wiringapi.SplitPortName(source)[0],
@@ -727,6 +756,10 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 						PropSourcePortNOS:    getPortNOSName(source, switchMap, profileMap),
 						PropTargetPortNOS:    getPortNOSName(target, switchMap, profileMap),
 					},
+				}
+				if ips, ok := portPairIPs[source+"->"+target]; ok {
+					link.Properties[PropSrcLinkIP] = ips.src
+					link.Properties[PropDstLinkIP] = ips.dst
 				}
 
 				if conn.Spec.MCLAGDomain != nil {
@@ -931,6 +964,36 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 
 	// Set flag indicating whether agent runtime data is available
 	topo.HasAgentData = hasAgentData
+
+	// Enrich gateway nodes with underlay data (ASN, ProtocolIP, VTEPIP).
+	// Done after all passes so connection-discovered gateways are included.
+	gateways := &gwapi.GatewayList{}
+	if err := client.List(ctx, gateways); err != nil {
+		return topo, fmt.Errorf("listing gateways: %w", err)
+	}
+	gatewaySpecMap := make(map[string]gwapi.GatewaySpec)
+	for _, gw := range gateways.Items {
+		gatewaySpecMap[gw.Name] = gw.Spec
+	}
+	for i, node := range topo.Nodes {
+		if node.Type != NodeTypeGateway {
+			continue
+		}
+		spec, ok := gatewaySpecMap[node.ID]
+		if !ok {
+			continue
+		}
+		if topo.Nodes[i].Properties == nil {
+			topo.Nodes[i].Properties = map[string]string{}
+		}
+		if spec.ASN != 0 {
+			topo.Nodes[i].Properties[PropASN] = fmt.Sprintf("%d", spec.ASN)
+		}
+		topo.Nodes[i].Properties[PropProtocolIP] = spec.ProtocolIP
+		topo.Nodes[i].Properties[PropVTEPIP] = spec.VTEPIP
+	}
+
+	generateUnderlayLayer = hasUnderlayData(topo)
 
 	return topo, nil
 }
