@@ -147,6 +147,7 @@ jobs:
         if: ${{ inputs.hybrid }}
         with:
           repository: githedgehog/lab-ci
+          ref: pau/use-two-gateways
           path: "./lab-ci"
 
       - name: Pre-populate hhfab-cache
