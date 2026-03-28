@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 type MxGraphModel struct {
@@ -45,6 +46,7 @@ type MxCell struct {
 	Source      string    `xml:"source,attr,omitempty"`
 	Target      string    `xml:"target,attr,omitempty"`
 	Connectable string    `xml:"connectable,attr,omitempty"`
+	Visible     string    `xml:"visible,attr,omitempty"`
 	ExitX       float64   `xml:"exitX,attr,omitempty"`
 	ExitY       float64   `xml:"exitY,attr,omitempty"`
 	EntryX      float64   `xml:"entryX,attr,omitempty"`
@@ -94,6 +96,25 @@ type EdgePositionData struct {
 
 var edgePositions []EdgePositionData
 var generateLinkSpeedLayer bool // Only generate when agent data is available
+var generateUnderlayLayer bool  // Only generate when underlay data is available
+
+func hasUnderlayData(topo Topology) bool {
+	for _, node := range topo.Nodes {
+		if node.Type != NodeTypeSwitch && node.Type != NodeTypeGateway {
+			continue
+		}
+		if node.Properties[PropASN] != "" || node.Properties[PropProtocolIP] != "" || node.Properties[PropVTEPIP] != "" {
+			return true
+		}
+	}
+	for _, link := range topo.Links {
+		if link.Properties[PropSrcLinkIP] != "" || link.Properties[PropDstLinkIP] != "" {
+			return true
+		}
+	}
+
+	return false
+}
 
 func GenerateDrawio(workDir string, topo Topology, styleType StyleType, outputPath string) error {
 	var finalOutputPath string
@@ -148,6 +169,7 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 			MxCell: []MxCell{
 				{ID: "0"},
 				{ID: "1", Parent: "0"},
+				{ID: "port_labels_layer", Parent: "0", Value: "Port Labels", Style: "locked=1;"},
 			},
 		},
 	}
@@ -246,10 +268,13 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 		usingIconStyle := IsIconBasedStyle(style)
 
 		if usingIconStyle {
+			// Name is placed inside the icon at the top so it matches the underlay overlay.
+			iconStyle := strings.ReplaceAll(GetNodeStyle(node, style), "verticalAlign=middle", "verticalAlign=top")
 			iconCell := MxCell{
 				ID:     node.ID,
 				Parent: "1",
-				Style:  GetNodeStyle(node, style),
+				Value:  FormatNodeValue(node, style),
+				Style:  iconStyle,
 				Vertex: "1",
 				Geometry: &Geometry{
 					X:      x,
@@ -260,22 +285,7 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 				},
 			}
 
-			labelCell := MxCell{
-				ID:     fmt.Sprintf("%s_label", node.ID),
-				Parent: "1",
-				Value:  FormatNodeValue(node, style),
-				Style:  GetGatewayLabelStyle(),
-				Vertex: "1",
-				Geometry: &Geometry{
-					X:      x + 26,
-					Y:      float64(gatewayY) + 70,
-					Width:  48,
-					Height: 13,
-					As:     "geometry",
-				},
-			}
-
-			model.Root.MxCell = append(model.Root.MxCell, iconCell, labelCell)
+			model.Root.MxCell = append(model.Root.MxCell, iconCell)
 			cellMap[node.ID] = &iconCell
 		} else {
 			cell := MxCell{
@@ -535,6 +545,9 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 
 	// Add VPC layer
 	createVPCLayer(model, topo.VPCs, cellMap)
+
+	// Add underlay layer (ASN boxes, switch RID/VTEP overlays, P2P link IP labels)
+	createUnderlayLayer(model, topo, cellMap, style)
 
 	// Add link speed layer (only when agent data is available)
 	if generateLinkSpeedLayer {
@@ -1163,7 +1176,7 @@ func generateEdgeLabels(model *MxGraphModel, edgeID string, link Link, srcX, src
 		Tooltip: srcPortNOS,
 		ID:      srcLabelID,
 		MxCell: &MxCell{
-			Parent: "1", // Attach directly to the root, not to the edge
+			Parent: "port_labels_layer",
 			Style:  srcTextStyle,
 			Vertex: "1",
 			Geometry: &Geometry{
@@ -1182,7 +1195,7 @@ func generateEdgeLabels(model *MxGraphModel, edgeID string, link Link, srcX, src
 		Tooltip: tgtPortNOS,
 		ID:      tgtLabelID,
 		MxCell: &MxCell{
-			Parent: "1", // Attach directly to the root, not to the edge
+			Parent: "port_labels_layer",
 			Style:  tgtTextStyle,
 			Vertex: "1",
 			Geometry: &Geometry{
@@ -1204,9 +1217,7 @@ func generateEdgeLabels(model *MxGraphModel, edgeID string, link Link, srcX, src
 		model.Root.UserObject = append(model.Root.UserObject, tgtLabelObj)
 	}
 
-	// Store edge position data for speed label layer creation later (only when agent data available)
-	// Store all edges (not just those with speed) so we can show Ethernet interface names
-	if generateLinkSpeedLayer {
+	if generateLinkSpeedLayer || generateUnderlayLayer {
 		edgePositions = append(edgePositions, EdgePositionData{
 			EdgeID:   edgeID,
 			Link:     link,
@@ -1858,6 +1869,319 @@ func createVPCLegend(model *MxGraphModel, vpcs map[string]*VPCInfo, serverBottom
 			}
 			model.Root.MxCell = append(model.Root.MxCell, subnetCell)
 			currentY += subnetLineHeight
+		}
+	}
+}
+
+func createUnderlayLayer(model *MxGraphModel, topo Topology, cellMap map[string]*MxCell, style Style) {
+	if !generateUnderlayLayer {
+		return
+	}
+
+	underlayLayer := MxCell{
+		ID:      "underlay_layer",
+		Parent:  "0",
+		Value:   "Underlay",
+		Style:   "locked=1;",
+		Visible: "0",
+	}
+	model.Root.MxCell = append(model.Root.MxCell, underlayLayer)
+
+	// --- 1. ASN group boxes ---
+	asnGroups := map[string][]Node{}
+	for _, node := range topo.Nodes {
+		if node.Type != NodeTypeSwitch && node.Type != NodeTypeGateway {
+			continue
+		}
+		asn := node.Properties[PropASN]
+		if asn == "" {
+			continue
+		}
+		asnGroups[asn] = append(asnGroups[asn], node)
+	}
+
+	// Sort ASN keys for deterministic output
+	asnKeys := make([]string, 0, len(asnGroups))
+	for asn := range asnGroups {
+		asnKeys = append(asnKeys, asn)
+	}
+	sort.Strings(asnKeys)
+
+	for asnIdx, asn := range asnKeys {
+		switchNodes := asnGroups[asn]
+
+		minX, minY := float64(9999), float64(9999)
+		maxX, maxY := float64(-9999), float64(-9999)
+
+		for _, switchNode := range switchNodes {
+			cell, ok := cellMap[switchNode.ID]
+			if !ok || cell.Geometry == nil {
+				continue
+			}
+			x := cell.Geometry.X
+			y := cell.Geometry.Y
+			w := float64(cell.Geometry.Width)
+			h := float64(cell.Geometry.Height)
+			if x < minX {
+				minX = x
+			}
+			if y < minY {
+				minY = y
+			}
+			if x+w > maxX {
+				maxX = x + w
+			}
+			if y+h > maxY {
+				maxY = y + h
+			}
+		}
+
+		// Uniform 8px padding on all sides matches the redundancy group layer
+		// so ASN boxes overlap redundancy boxes exactly.
+		// The label uses verticalLabelPosition=top so it renders above the cell
+		// boundary — this keeps the box tight while keeping the label clear of
+		// the node top.
+		const sidePadding = 8.0
+		minX -= sidePadding
+		minY -= sidePadding
+		maxX += sidePadding
+		maxY += sidePadding
+
+		asnBox := MxCell{
+			ID:     fmt.Sprintf("underlay_asn_%d", asnIdx),
+			Parent: "underlay_layer",
+			Value:  fmt.Sprintf("ASN %s", asn),
+			Style: "rounded=1;arcSize=8;whiteSpace=wrap;html=1;" +
+				"dashed=1;dashPattern=8 4;strokeColor=#9673a6;strokeWidth=2;" +
+				"fillColor=none;labelPosition=center;verticalLabelPosition=top;" +
+				"verticalAlign=bottom;spacingBottom=2;fontSize=10;fontStyle=1;fontColor=#9673a6;",
+			Vertex: "1",
+			Geometry: &Geometry{
+				X:      minX,
+				Y:      minY,
+				Width:  int(maxX - minX),
+				Height: int(maxY - minY),
+				As:     "geometry",
+			},
+		}
+		model.Root.MxCell = append(model.Root.MxCell, asnBox)
+	}
+
+	// --- 2. Switch/gateway overlay cells (replace role text with RID + VTEP) ---
+	for _, node := range topo.Nodes {
+		if node.Type != NodeTypeSwitch && node.Type != NodeTypeGateway {
+			continue
+		}
+		rid := node.Properties[PropProtocolIP]
+		vtep := node.Properties[PropVTEPIP]
+		if rid == "" && vtep == "" {
+			continue
+		}
+
+		origCell, ok := cellMap[node.ID]
+		if !ok || origCell.Geometry == nil {
+			continue
+		}
+
+		var infoLines []string
+		if ip, _, ok := strings.Cut(rid, "/"); ok {
+			infoLines = append(infoLines, "lo1: "+ip)
+		} else if rid != "" {
+			infoLines = append(infoLines, "lo1: "+rid)
+		}
+		if ip, _, ok := strings.Cut(vtep, "/"); ok {
+			infoLines = append(infoLines, "lo2: "+ip)
+		} else if vtep != "" {
+			infoLines = append(infoLines, "lo2: "+vtep)
+		}
+
+		if IsIconBasedStyle(style) && node.Type == NodeTypeGateway {
+			iconStyle := strings.ReplaceAll(GetNodeStyle(node, style), "verticalAlign=middle", "verticalAlign=top")
+			iconOverlay := MxCell{
+				ID:     fmt.Sprintf("underlay_sw_%s", node.ID),
+				Parent: "underlay_layer",
+				Value:  fmt.Sprintf("<font style=\"color: rgb(0, 0, 0);\"><b>%s</b></font>", node.ID),
+				Style:  iconStyle,
+				Vertex: "1",
+				Geometry: &Geometry{
+					X:      origCell.Geometry.X,
+					Y:      origCell.Geometry.Y,
+					Width:  origCell.Geometry.Width,
+					Height: origCell.Geometry.Height,
+					As:     "geometry",
+				},
+			}
+			loHeight := 13 * len(infoLines)
+			loCell := MxCell{
+				ID:     fmt.Sprintf("underlay_sw_%s_lo", node.ID),
+				Parent: "underlay_layer",
+				Value:  fmt.Sprintf("<font style=\"color: rgb(0, 0, 0);\">%s</font>", strings.Join(infoLines, "<br>")),
+				Style:  "rounded=0;whiteSpace=wrap;html=1;strokeColor=none;fillColor=none;fontSize=9;align=center;",
+				Vertex: "1",
+				Geometry: &Geometry{
+					X:      origCell.Geometry.X,
+					Y:      origCell.Geometry.Y + float64(origCell.Geometry.Height-loHeight),
+					Width:  origCell.Geometry.Width,
+					Height: loHeight,
+					As:     "geometry",
+				},
+			}
+			model.Root.MxCell = append(model.Root.MxCell, iconOverlay, loCell)
+
+			continue
+		}
+
+		var label string
+		if IsIconBasedStyle(style) {
+			brs := strings.Repeat("<br>", 6-len(infoLines))
+			label = fmt.Sprintf(
+				"<font style=\"color: rgb(0, 0, 0);\"><b>%s</b></font>%s<font style=\"color: rgb(0, 0, 0);\">%s</font>",
+				node.ID, brs, strings.Join(infoLines, "<br>"))
+		} else {
+			label = fmt.Sprintf("<b>%s</b>\n%s", node.ID, strings.Join(infoLines, "\n"))
+		}
+
+		overlayCell := MxCell{
+			ID:     fmt.Sprintf("underlay_sw_%s", node.ID),
+			Parent: "underlay_layer",
+			Value:  label,
+			Style:  GetNodeStyle(node, style),
+			Vertex: "1",
+			Geometry: &Geometry{
+				X:      origCell.Geometry.X,
+				Y:      origCell.Geometry.Y,
+				Width:  origCell.Geometry.Width,
+				Height: origCell.Geometry.Height,
+				As:     "geometry",
+			},
+		}
+		model.Root.MxCell = append(model.Root.MxCell, overlayCell)
+	}
+
+	// --- 3. P2P link IP labels on fabric/mesh/gateway edges ---
+	lastOctet := func(cidr string) string {
+		ip, _, _ := strings.Cut(cidr, "/")
+		dot := strings.LastIndex(ip, ".")
+		if dot < 0 {
+			return cidr
+		}
+
+		return "." + ip[dot+1:]
+	}
+	subnetOf := func(cidr string) string {
+		ip, _, ok := strings.Cut(cidr, "/")
+		if !ok {
+			return cidr
+		}
+		dot := strings.LastIndex(ip, ".")
+		if dot < 0 {
+			return cidr
+		}
+		var octet int
+		for _, ch := range ip[dot+1:] {
+			if ch < '0' || ch > '9' {
+				return cidr
+			}
+			octet = octet*10 + int(ch-'0')
+		}
+
+		return fmt.Sprintf("%s.%d/31", ip[:dot], octet&^1)
+	}
+
+	const p2pFixedDist = 30.0
+	const p2pMidHeight = 10 // same as port/speed label height
+	const p2pOctHeight = 10 // same as port/speed label height
+	const p2pOctWidth = 24  // len(".255")*4+8 — fixed at max last-octet length
+
+	for _, edgeData := range edgePositions {
+		srcIP := edgeData.Link.Properties[PropSrcLinkIP]
+		dstIP := edgeData.Link.Properties[PropDstLinkIP]
+		if srcIP == "" && dstIP == "" {
+			continue
+		}
+
+		dx := edgeData.TgtX - edgeData.SrcX
+		dy := edgeData.TgtY - edgeData.SrcY
+		edgeLength := math.Sqrt(dx*dx + dy*dy)
+		if edgeLength < 10 {
+			continue
+		}
+
+		verticalOffset := calculateVerticalOffset(edgeData.Rotation)
+		perpY := edgeData.UnitX // perpendicular Y component for vertical offset
+		perpX := -edgeData.UnitY
+
+		// Midpoint subnet label
+		if srcIP != "" {
+			subnet := subnetOf(srcIP)
+			midX := (edgeData.SrcX + edgeData.TgtX) / 2
+			midY := (edgeData.SrcY + edgeData.TgtY) / 2
+			subnetWidth := len(subnet)*4 + 8
+			subnetStyle := fmt.Sprintf("text;html=1;strokeColor=#9673a6;strokeWidth=0.5;"+
+				"fillColor=#f3ecf8;fillOpacity=85;align=center;verticalAlign=middle;"+
+				"whiteSpace=wrap;rounded=1;fontSize=9;rotation=%.1f;",
+				edgeData.Rotation)
+			model.Root.MxCell = append(model.Root.MxCell, MxCell{
+				ID:     fmt.Sprintf("%s_p2p", edgeData.EdgeID),
+				Parent: "underlay_layer",
+				Value:  subnet,
+				Style:  subnetStyle,
+				Vertex: "1",
+				Geometry: &Geometry{
+					X:      midX - float64(subnetWidth)/2,
+					Y:      midY - float64(p2pMidHeight)/2 + (perpY * verticalOffset),
+					Width:  subnetWidth,
+					Height: p2pMidHeight,
+					As:     "geometry",
+				},
+			})
+		}
+
+		octStyle := fmt.Sprintf("text;html=1;strokeColor=#9673a6;strokeWidth=0.5;"+
+			"fillColor=#f3ecf8;fillOpacity=80;align=center;verticalAlign=middle;"+
+			"whiteSpace=wrap;rounded=1;fontSize=9;rotation=%.1f;",
+			edgeData.Rotation)
+
+		// Near-source last-octet label
+		if srcIP != "" {
+			oct := lastOctet(srcIP)
+			lx := edgeData.SrcX + edgeData.UnitX*p2pFixedDist + perpX*verticalOffset
+			ly := edgeData.SrcY + edgeData.UnitY*p2pFixedDist + perpY*verticalOffset
+			model.Root.MxCell = append(model.Root.MxCell, MxCell{
+				ID:     fmt.Sprintf("%s_p2p_src", edgeData.EdgeID),
+				Parent: "underlay_layer",
+				Value:  oct,
+				Style:  octStyle,
+				Vertex: "1",
+				Geometry: &Geometry{
+					X:      lx - float64(p2pOctWidth)/2,
+					Y:      ly - float64(p2pOctHeight)/2,
+					Width:  p2pOctWidth,
+					Height: p2pOctHeight,
+					As:     "geometry",
+				},
+			})
+		}
+
+		// Near-destination last-octet label
+		if dstIP != "" {
+			oct := lastOctet(dstIP)
+			lx := edgeData.TgtX - edgeData.UnitX*p2pFixedDist + perpX*verticalOffset
+			ly := edgeData.TgtY - edgeData.UnitY*p2pFixedDist + perpY*verticalOffset
+			model.Root.MxCell = append(model.Root.MxCell, MxCell{
+				ID:     fmt.Sprintf("%s_p2p_dst", edgeData.EdgeID),
+				Parent: "underlay_layer",
+				Value:  oct,
+				Style:  octStyle,
+				Vertex: "1",
+				Geometry: &Geometry{
+					X:      lx - float64(p2pOctWidth)/2,
+					Y:      ly - float64(p2pOctHeight)/2,
+					Width:  p2pOctWidth,
+					Height: p2pOctHeight,
+					As:     "geometry",
+				},
+			})
 		}
 	}
 }
