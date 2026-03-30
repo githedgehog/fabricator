@@ -515,8 +515,8 @@ github.com/josharian/intern
 # github.com/json-iterator/go v1.1.12
 ## explicit; go 1.12
 github.com/json-iterator/go
-# github.com/k3s-io/helm-controller v0.16.17
-## explicit; go 1.23.4
+# github.com/k3s-io/helm-controller v0.17.0
+## explicit; go 1.25.0
 github.com/k3s-io/helm-controller/pkg/apis/helm.cattle.io
 github.com/k3s-io/helm-controller/pkg/apis/helm.cattle.io/v1
 # github.com/klauspost/compress v1.18.4

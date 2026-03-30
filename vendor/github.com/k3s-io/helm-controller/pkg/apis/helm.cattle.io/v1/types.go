@@ -1,7 +1,10 @@
 package v1
 
+//revive:disable:struct-tag
+
 import (
 	corev1 "k8s.io/api/core/v1"
+	apiextv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -12,6 +15,7 @@ type FailurePolicy string
 
 // +genclient
 // +kubebuilder:subresource:status
+// +kubebuilder:resource:shortName=hc
 // +kubebuilder:printcolumn:name="Repo",type=string,JSONPath=`.spec.repo`
 // +kubebuilder:printcolumn:name="Chart",type=string,JSONPath=`.spec.chart`
 // +kubebuilder:printcolumn:name="Version",type=string,JSONPath=`.spec.version`
@@ -53,9 +57,12 @@ type HelmChartSpec struct {
 	// Reference to a ConfigMap containing CA Certificates to be be trusted by Helm. Can be used along with or instead of `.spec.repoCA`
 	// Helm CLI positional argument/flag: `--ca-file`
 	RepoCAConfigMap *corev1.LocalObjectReference `json:"repoCAConfigMap,omitempty"`
-	// Override simple Chart values. These take precedence over options set via valuesContent.
+	// Override simple Chart values. These take precedence over options set via values or valuesContent.
 	// Helm CLI positional argument/flag: `--set`, `--set-string`
 	Set map[string]intstr.IntOrString `json:"set,omitempty"`
+	// Override complex Chart values via structured YAML. Takes precedence over options set via valuesContent.
+	// Helm CLI positional argument/flag: `--values`
+	Values *apiextv1.JSON `json:"values,omitempty"`
 	// Override complex Chart values via inline YAML content.
 	// Helm CLI positional argument/flag: `--values`
 	ValuesContent string `json:"valuesContent,omitempty"`
@@ -118,6 +125,7 @@ type HelmChartStatus struct {
 }
 
 // +genclient
+// +kubebuilder:resource:shortName=hcc
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
 // HelmChartConfig represents additional configuration for the installation of Helm chart release.
@@ -133,6 +141,9 @@ type HelmChartConfig struct {
 // HelmChartConfigSpec represents additional user-configurable details of an installed and configured Helm chart release.
 // These fields are merged with or override the corresponding fields on the related HelmChart resource.
 type HelmChartConfigSpec struct {
+	// Override complex Chart values via structured YAML. Takes precedence over options set via valuesContent.
+	// Helm CLI positional argument/flag: `--values`
+	Values *apiextv1.JSON `json:"values,omitempty"`
 	// Override complex Chart values via inline YAML content.
 	// Helm CLI positional argument/flag: `--values`
 	ValuesContent string `json:"valuesContent,omitempty"`
