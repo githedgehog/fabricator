@@ -132,6 +132,89 @@ func makeTestCtx(ctx context.Context, kube kclient.Client, setupOpts SetupVPCsOp
 	return testCtx
 }
 
+// findExternals finds a viable BGP external and a viable static external, returning (bgpExtName, staticExtName).
+// Two passes ensure hardware externals always win regardless of API response order: pass 1 selects
+// hardware externals, pass 2 accepts virtual externals whose attachments all go through hardware
+// connections (same data path, only the peer device is emulated).
+func findExternals(ctx context.Context, kube kclient.Client, extList *vpcapi.ExternalList, extAttachList *vpcapi.ExternalAttachmentList) (string, string) {
+	bgpExt, staticExt := "", ""
+
+	hasAttachment := func(extName string) bool {
+		for _, attach := range extAttachList.Items {
+			if attach.Spec.External == extName {
+				return true
+			}
+		}
+
+		return false
+	}
+
+	// hasStaticAttachment checks that at least one attachment for the external has
+	// Spec.Static configured, which is required for static external tests to work.
+	hasStaticAttachment := func(extName string) bool {
+		for _, attach := range extAttachList.Items {
+			if attach.Spec.External == extName && attach.Spec.Static != nil {
+				return true
+			}
+		}
+
+		return false
+	}
+
+	allAttachmentsHW := func(extName string) bool {
+		for _, attach := range extAttachList.Items {
+			if attach.Spec.External != extName {
+				continue
+			}
+			conn := &wiringapi.Connection{}
+			if err := kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: attach.Spec.Connection}, conn); err != nil {
+				return false
+			}
+			if !isHardware(conn) {
+				return false
+			}
+		}
+
+		return true
+	}
+
+	// First pass: prefer hardware externals
+	for _, ext := range extList.Items {
+		if !isHardware(&ext) || !hasAttachment(ext.Name) {
+			continue
+		}
+		if ext.Spec.Static != nil && staticExt == "" && hasStaticAttachment(ext.Name) {
+			staticExt = ext.Name
+			slog.Info("Using hardware static external", "external", staticExt)
+		} else if ext.Spec.Static == nil && bgpExt == "" {
+			bgpExt = ext.Name
+			slog.Info("Using hardware BGP external", "external", bgpExt)
+		}
+		if bgpExt != "" && staticExt != "" {
+			return bgpExt, staticExt
+		}
+	}
+
+	// Second pass: virtual externals with all-hardware attachments
+	for _, ext := range extList.Items {
+		if !hasAttachment(ext.Name) || !allAttachmentsHW(ext.Name) {
+			continue
+		}
+		if ext.Spec.Static != nil && staticExt == "" && hasStaticAttachment(ext.Name) {
+			staticExt = ext.Name
+			slog.Info("Using virtual static external (hw-attached)", "external", staticExt)
+		} else if ext.Spec.Static == nil && bgpExt == "" {
+			bgpExt = ext.Name
+			slog.Info("Using virtual BGP external (hw-attached)", "external", bgpExt)
+		}
+		if bgpExt != "" && staticExt != "" {
+			return bgpExt, staticExt
+		}
+	}
+
+	return bgpExt, staticExt
+}
+
 type JUnitReport struct {
 	XMLName xml.Name         `xml:"testsuites"`
 	Suites  []JUnitTestSuite `xml:"testsuite"`
@@ -150,8 +233,8 @@ type JUnitTestSuite struct {
 
 type SkipFlags struct {
 	VirtualSwitch     bool `xml:"-"` // skip if there's any virtual switch in the vlab
-	NoExternals       bool `xml:"-"` // skip if there are no externals
-	NoStaticExternals bool `xml:"-"` // skip if there are no static externals (new API)
+	NoBGPExternals    bool `xml:"-"` // skip if there are no viable BGP externals
+	NoStaticExternals bool `xml:"-"` // skip if there are no viable static externals
 	ExtendedOnly      bool `xml:"-"` // skip if extended tests are not enabled
 	RoCE              bool `xml:"-"` // skip if RoCE is not supported by any of the leaf switches
 	SubInterfaces     bool `xml:"-"` // skip if subinterfaces are not supported by some of the switches
@@ -174,8 +257,8 @@ func (sf *SkipFlags) PrettyPrint() string {
 	if sf.VirtualSwitch {
 		parts = append(parts, "VS")
 	}
-	if sf.NoExternals {
-		parts = append(parts, "NoExt")
+	if sf.NoBGPExternals {
+		parts = append(parts, "NoBGPExt")
 	}
 	if sf.NoStaticExternals {
 		parts = append(parts, "NoStaticExt")
@@ -524,9 +607,17 @@ func selectAndRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, suite *J
 
 			continue
 		}
-		if test.SkipFlags.NoExternals && skipFlags.NoExternals {
+		if test.SkipFlags.NoBGPExternals && skipFlags.NoBGPExternals {
 			suite.TestCases[i].Skipped = &Skipped{
 				Message: "There are no viable externals",
+			}
+			suite.Skipped++
+
+			continue
+		}
+		if test.SkipFlags.NoStaticExternals && skipFlags.NoStaticExternals {
+			suite.TestCases[i].Skipped = &Skipped{
+				Message: "There are no viable static externals",
 			}
 			suite.Skipped++
 
@@ -780,68 +871,17 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 	}
 	if len(extList.Items) == 0 || len(extAttachList.Items) == 0 {
 		slog.Warn("No viable externals found, some tests will be skipped")
-		skipFlags.NoExternals = true
+		skipFlags.NoBGPExternals = true
+		skipFlags.NoStaticExternals = true
 	} else {
-		testCtx.extName = ""
-		// look first for hardware externals with at least one attachment
-		for _, ext := range extList.Items {
-			if !isHardware(&ext) {
-				slog.Debug("Skipping non-hardware external", "external", ext.Name)
-
-				continue
-			}
-			for _, extAttach := range extAttachList.Items {
-				if extAttach.Spec.External != ext.Name {
-					continue
-				}
-				testCtx.extName = ext.Name
-
-				break
-			}
-			if testCtx.extName == "" {
-				slog.Debug("No external attachments found for hardware external, skipping it", "external", ext.Name)
-
-				continue
-			}
-			slog.Info("Using hardware external as the \"default\"", "external", testCtx.extName)
-
-			break
-		}
+		testCtx.extName, testCtx.staticExtName = findExternals(ctx, kube, extList, extAttachList)
 		if testCtx.extName == "" {
-			slog.Debug("No viable hardware externals found, checking for virtual externals attached to hw switches")
-			for _, ext := range extList.Items {
-				extAttach := &vpcapi.ExternalAttachmentList{}
-				if err := kube.List(ctx, extAttach, kclient.MatchingLabels{wiringapi.LabelName("external"): ext.Name}); err != nil {
-					return fmt.Errorf("listing external attachments for %s: %w", ext.Name, err)
-				}
-				if len(extAttach.Items) == 0 {
-					continue
-				}
-				// check if all of the attachments are via hardware connections
-				someNotHW := false
-				for _, attach := range extAttach.Items {
-					conn := &wiringapi.Connection{}
-					if err := kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: attach.Spec.Connection}, conn); err != nil {
-						return fmt.Errorf("getting connection %s: %w", attach.Spec.Connection, err)
-					}
-					if !isHardware(conn) {
-						slog.Debug("Skipping virtual external due to non-hardware attachment", "external", ext.Name, "connection", conn.Name)
-						someNotHW = true
-
-						break
-					}
-				}
-				if !someNotHW {
-					testCtx.extName = ext.Name
-					slog.Info("Using virtual external as the \"default\"", "external", testCtx.extName)
-
-					break
-				}
-			}
-			if testCtx.extName == "" {
-				slog.Warn("No viable external found, some tests will be skipped")
-				skipFlags.NoExternals = true
-			}
+			slog.Warn("No viable BGP external found, BGP external tests will be skipped")
+			skipFlags.NoBGPExternals = true
+		}
+		if testCtx.staticExtName == "" {
+			slog.Warn("No viable static external found, static external tests will be skipped")
+			skipFlags.NoStaticExternals = true
 		}
 	}
 

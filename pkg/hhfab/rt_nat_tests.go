@@ -18,6 +18,7 @@ import (
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/util/apiutil"
 	"go.githedgehog.com/fabricator/pkg/util/sshutil"
+	"golang.org/x/sync/errgroup"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -353,10 +354,12 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringMasqueradeSourceNATTest(ctx cont
 	// Only VPC1 has masquerade NAT - VPC1's traffic will be source-NATed
 	vpc1NATCIDR := []string{"192.168.11.0/24"}
 
-	appendGwPeeringSpec(gwPeerings, vpc1, vpc2, &GwPeeringOptions{
+	if err := appendGwPeeringSpec(gwPeerings, vpc1, vpc2, &GwPeeringOptions{
 		VPC1NATCIDR: vpc1NATCIDR,
 		VPC1NATMode: NATModeMasquerade,
-	})
+	}); err != nil {
+		return false, nil, fmt.Errorf("setting up gateway peering: %w", err)
+	}
 
 	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, gwPeerings, true); err != nil {
 		return false, nil, fmt.Errorf("setting up NAT gateway peerings: %w", err)
@@ -418,9 +421,11 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringStaticSourceNATTest(ctx context.
 	// Only VPC1 has NAT - this means VPC1's traffic will be source-NATed
 	vpc1NATCIDR := []string{"192.168.21.0/24"}
 
-	appendGwPeeringSpec(gwPeerings, vpc1, vpc2, &GwPeeringOptions{
+	if err := appendGwPeeringSpec(gwPeerings, vpc1, vpc2, &GwPeeringOptions{
 		VPC1NATCIDR: vpc1NATCIDR,
-	})
+	}); err != nil {
+		return false, nil, fmt.Errorf("setting up gateway peering: %w", err)
+	}
 
 	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, gwPeerings, true); err != nil {
 		return false, nil, fmt.Errorf("setting up static source NAT peerings: %w", err)
@@ -485,10 +490,12 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringBidirectionalStaticNATTest(ctx c
 	vpc1NATCIDR := []string{"192.168.31.0/24"}
 	vpc2NATCIDR := []string{"192.168.32.0/24"}
 
-	appendGwPeeringSpec(gwPeerings, vpc1, vpc2, &GwPeeringOptions{
+	if err := appendGwPeeringSpec(gwPeerings, vpc1, vpc2, &GwPeeringOptions{
 		VPC1NATCIDR: vpc1NATCIDR,
 		VPC2NATCIDR: vpc2NATCIDR,
-	})
+	}); err != nil {
+		return false, nil, fmt.Errorf("setting up gateway peering: %w", err)
+	}
 
 	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, gwPeerings, true); err != nil {
 		return false, nil, fmt.Errorf("setting up bidirectional NAT peerings: %w", err)
@@ -631,6 +638,7 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringOverlapNATTest(ctx context.Conte
 	originalSubnet := targetAttachment.Spec.Subnet
 	originalVLAN := donorVPC.Spec.Subnets[originalSubnetName].VLAN
 
+	newVLAN := originalVLAN + 100 // Use different VLAN to avoid conflicts
 	// Create the new IPv4Namespace with the same subnet range as the existing VPC's namespace
 	overlapNS := &vpcapi.IPv4Namespace{
 		TypeMeta: kmetav1.TypeMeta{
@@ -664,7 +672,6 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringOverlapNATTest(ctx context.Conte
 	})
 
 	// Create the new VPC in the overlap namespace with the SAME subnet CIDR as existingVPC
-	newVLAN := originalVLAN + 100 // Use different VLAN to avoid conflicts
 	overlapVPC := &vpcapi.VPC{
 		TypeMeta: kmetav1.TypeMeta{
 			Kind:       vpcapi.KindVPC,
@@ -830,10 +837,12 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringOverlapNATTest(ctx context.Conte
 	existingVPCNATCIDR := []string{"192.168.71.0/24"}
 	overlapVPCNATCIDR := []string{"192.168.72.0/24"}
 
-	appendGwPeeringSpec(gwPeerings, existingVPC, overlapVPC, &GwPeeringOptions{
+	if err := appendGwPeeringSpec(gwPeerings, existingVPC, overlapVPC, &GwPeeringOptions{
 		VPC1NATCIDR: existingVPCNATCIDR,
 		VPC2NATCIDR: overlapVPCNATCIDR,
-	})
+	}); err != nil {
+		return false, reverts, fmt.Errorf("setting up gateway peering: %w", err)
+	}
 
 	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, gwPeerings, true); err != nil {
 		return false, reverts, fmt.Errorf("setting up overlap NAT gateway peerings: %w", err)
@@ -856,6 +865,318 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringOverlapNATTest(ctx context.Conte
 	slog.Info("Overlap NAT test completed successfully")
 
 	return false, reverts, nil
+}
+
+// testPortForwardInboundConnectivity tests inbound port-forward NAT connectivity.
+// The peering side with port-forward NAT (vpc1) exposes a NAT pool CIDR; the other side (vpc2)
+// connects to vpc1's NAT IPs on the forwarded external port. The gateway translates to the
+// real vpc1 server port (5201). This mirrors the port-forward semantics: inbound only.
+func (testCtx *VPCPeeringTestCtx) testPortForwardInboundConnectivity(
+	ctx context.Context,
+	vpc1, vpc2 *vpcapi.VPC,
+	vpc1NATCIDRStr string,
+	externalPort int,
+) error {
+	servers := &wiringapi.ServerList{}
+	if err := testCtx.kube.List(ctx, servers); err != nil {
+		return fmt.Errorf("listing servers: %w", err)
+	}
+
+	var vpc1Servers, vpc2Servers []string
+	for _, server := range servers.Items {
+		attachedSubnets, err := apiutil.GetAttachedSubnets(ctx, testCtx.kube, server.Name)
+		if err != nil {
+			continue
+		}
+		for subnetName := range attachedSubnets {
+			if strings.HasPrefix(subnetName, vpc1.Name+"/") {
+				vpc1Servers = append(vpc1Servers, server.Name)
+
+				break
+			}
+			if strings.HasPrefix(subnetName, vpc2.Name+"/") {
+				vpc2Servers = append(vpc2Servers, server.Name)
+
+				break
+			}
+		}
+	}
+
+	if len(vpc1Servers) == 0 || len(vpc2Servers) == 0 {
+		return fmt.Errorf("need servers in both VPCs for port-forward test") //nolint:goerr113
+	}
+
+	sshConfigs := map[string]*sshutil.Config{}
+	for _, serverName := range append(vpc1Servers, vpc2Servers...) {
+		sshCfg, err := testCtx.getSSH(ctx, serverName)
+		if err != nil {
+			return fmt.Errorf("getting ssh config for %s: %w", serverName, err)
+		}
+		sshConfigs[serverName] = sshCfg
+	}
+
+	// Discover vpc1 server IPs
+	serverIPs := map[string]netip.Addr{}
+	for _, serverName := range vpc1Servers {
+		stdout, stderr, err := sshConfigs[serverName].Run(ctx, "ip -o -4 addr show | awk '{print $2, $4}'")
+		if err != nil {
+			return fmt.Errorf("getting IP for %s: %w: %s", serverName, err, stderr)
+		}
+		var eligibleAddrs []netip.Addr
+		for _, line := range strings.Split(strings.TrimSpace(stdout), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) != 2 {
+				continue
+			}
+			if excludedInterfaces[fields[0]] {
+				continue
+			}
+			addr, err := netip.ParsePrefix(fields[1])
+			if err != nil {
+				continue
+			}
+			eligibleAddrs = append(eligibleAddrs, addr.Addr())
+		}
+		if len(eligibleAddrs) != 1 {
+			return fmt.Errorf("server %s has %d eligible IPs, expected exactly 1", serverName, len(eligibleAddrs)) //nolint:goerr113
+		}
+		serverIPs[serverName] = eligibleAddrs[0]
+		slog.Debug("Discovered vpc1 server IP", "server", serverName, "ip", eligibleAddrs[0].String())
+	}
+
+	natPrefix, err := netip.ParsePrefix(vpc1NATCIDRStr)
+	if err != nil {
+		return fmt.Errorf("parsing NAT CIDR %s: %w", vpc1NATCIDRStr, err)
+	}
+	natPoolStart := natPrefix.Masked().Addr()
+
+	if len(vpc1.Spec.Subnets) != 1 {
+		return fmt.Errorf("VPC %s has %d subnets, port-forward test requires exactly one", vpc1.Name, len(vpc1.Spec.Subnets)) //nolint:goerr113
+	}
+	var vpc1SubnetStart netip.Addr
+	for _, subnet := range vpc1.Spec.Subnets {
+		prefix, err := netip.ParsePrefix(subnet.Subnet)
+		if err != nil {
+			return fmt.Errorf("parsing VPC subnet: %w", err)
+		}
+		vpc1SubnetStart = prefix.Masked().Addr()
+	}
+
+	// Test inbound port-forward: vpc2 server → vpc1's NAT IP:externalPort → vpc1 server:5201
+	for _, serverB := range vpc1Servers { // iperf3 server side (behind NAT)
+		natIP, err := calculateStaticNATIP(serverIPs[serverB], vpc1SubnetStart, natPoolStart)
+		if err != nil {
+			return fmt.Errorf("calculating NAT IP for %s: %w", serverB, err)
+		}
+
+		for _, serverA := range vpc2Servers { // iperf3 client side (initiates connection)
+			slog.Debug("Testing port-forward inbound",
+				"from", serverA, "to", serverB, "natIP", natIP, "externalPort", externalPort)
+
+			serverBName := serverB
+			serverAName := serverA
+			g, gCtx := errgroup.WithContext(ctx)
+
+			g.Go(func() error {
+				cmd := fmt.Sprintf("toolbox -E LD_PRELOAD=/lib/x86_64-linux-gnu/libgcc_s.so.1 -q timeout %d iperf3 -s -1",
+					testCtx.tcOpts.IPerfsSeconds+25)
+				if _, stderr, err := retrySSHCmd(gCtx, sshConfigs[serverBName], cmd, serverBName); err != nil {
+					return fmt.Errorf("iperf3 server on %s: %w: %s", serverBName, err, stderr)
+				}
+
+				return nil
+			})
+
+			g.Go(func() error {
+				// Wait for iperf3 server to start listening on port 5201
+				maxWait := 10 * time.Second
+				checkInterval := 100 * time.Millisecond
+				start := time.Now()
+				for {
+					if time.Since(start) >= maxWait {
+						return fmt.Errorf("iperf3 server on %s did not start within %s", serverBName, maxWait) //nolint:goerr113
+					}
+					checkCmd := fmt.Sprintf("timeout 1 ss -ltn | grep -q ' \\*:%d '", iperf3DefaultPort)
+					if _, _, checkErr := retrySSHCmd(gCtx, sshConfigs[serverBName], checkCmd, serverBName); checkErr == nil {
+						break
+					}
+					select {
+					case <-gCtx.Done():
+						return fmt.Errorf("waiting for iperf3 server: %w", gCtx.Err())
+					case <-time.After(checkInterval):
+					}
+				}
+				// Connect to vpc1's NAT IP on the forwarded external port
+				cmd := fmt.Sprintf("toolbox -E LD_PRELOAD=/lib/x86_64-linux-gnu/libgcc_s.so.1 -q timeout %d iperf3 -c %s -p %d -t %d",
+					testCtx.tcOpts.IPerfsSeconds+25, natIP.String(), externalPort, testCtx.tcOpts.IPerfsSeconds)
+				if _, stderr, err := retrySSHCmd(gCtx, sshConfigs[serverAName], cmd, serverAName); err != nil {
+					return fmt.Errorf("iperf3 client from %s to %s:%d: %w: %s", serverAName, natIP, externalPort, err, stderr)
+				}
+
+				return nil
+			})
+
+			if err := g.Wait(); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+// Test gateway peering with port-forwarding NAT only
+// Port-forward NAT is INBOUND: vpc2 connects to vpc1's NAT IP:15201, gateway forwards to vpc1's real IP:5201.
+// vpc1 cannot initiate connections to vpc2 (port-forward does not enable outbound NAT).
+//
+// Peering spec:
+//
+//	Gateway Group:  default
+//	Peering:
+//	  vpc-01:
+//	    Expose:
+//	      As:
+//	        Cidr:  192.168.52.0/24
+//	      Ips:
+//	        Cidr:  10.50.1.0/24
+//	      Nat:
+//	        Port Forward:
+//	          Rules:
+//	          - Protocol: TCP
+//	            Port: 5201
+//	            As: 15201
+//	  vpc-02:
+//	    Expose:
+//	      Ips:
+//	        Cidr:  10.50.2.0/24
+func (testCtx *VPCPeeringTestCtx) gatewayPeeringPortForwardNATTest(ctx context.Context) (bool, []RevertFunc, error) {
+	vpcs := &vpcapi.VPCList{}
+	if err := testCtx.kube.List(ctx, vpcs); err != nil {
+		return false, nil, fmt.Errorf("listing VPCs: %w", err)
+	}
+	if len(vpcs.Items) < 2 {
+		return true, nil, fmt.Errorf("not enough VPCs for port-forward NAT test") //nolint:goerr113
+	}
+
+	sort.Slice(vpcs.Items, func(i, j int) bool {
+		return vpcs.Items[i].Name < vpcs.Items[j].Name
+	})
+
+	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec)
+	externalPeerings := make(map[string]*vpcapi.ExternalPeeringSpec)
+	gwPeerings := make(map[string]*gwapi.PeeringSpec)
+
+	vpc1 := &vpcs.Items[0]
+	vpc2 := &vpcs.Items[1]
+
+	portForwardRules := []gwapi.PeeringNATPortForwardEntry{
+		{Protocol: gwapi.PeeringNATProtocolTCP, Port: "5201", As: "15201"},
+	}
+
+	if err := appendGwPeeringSpec(gwPeerings, vpc1, vpc2, &GwPeeringOptions{
+		VPC1NATCIDR:          []string{"192.168.52.0/24"},
+		VPC1NATMode:          NATModePortForward,
+		VPC1PortForwardRules: portForwardRules,
+	}); err != nil {
+		return false, nil, fmt.Errorf("setting up gateway peering: %w", err)
+	}
+
+	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, gwPeerings, true); err != nil {
+		return false, nil, fmt.Errorf("setting up port-forward NAT peerings: %w", err)
+	}
+
+	if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
+		return false, nil, fmt.Errorf("waiting for switches to be ready: %w", err)
+	}
+
+	// Port-forward is INBOUND only: vpc2 connects to vpc1's NAT IP on the forwarded external port.
+	// vpc1 cannot initiate connections to vpc2 (no outbound NAT).
+	const vpc1NATCIDR = "192.168.52.0/24"
+	if err := testCtx.testPortForwardInboundConnectivity(ctx, vpc1, vpc2, vpc1NATCIDR, 15201); err != nil {
+		return false, nil, fmt.Errorf("testing port-forward inbound connectivity: %w", err)
+	}
+
+	return false, nil, nil
+}
+
+// Test gateway peering with combined masquerade and port-forwarding NAT
+// Masquerade enables outbound NAT from vpc1 to vpc2; port-forward enables inbound on port 15201→5201.
+// Both directions are tested: outbound via masquerade (vpc1→vpc2) and inbound via port-forward (vpc2→vpc1).
+//
+// Peering spec:
+//
+//	Gateway Group:  default
+//	Peering:
+//	  vpc-01:
+//	    Expose:
+//	      As:
+//	        Cidr:  192.168.51.0/24
+//	      Ips:
+//	        Cidr:  10.50.1.0/24
+//	      Nat:
+//	        Masquerade:
+//	          Idle Timeout:  5m0s
+//	        Port Forward:
+//	          Rules:
+//	          - Protocol: TCP
+//	            Port: 5201
+//	            As: 15201
+//	  vpc-02:
+//	    Expose:
+//	      Ips:
+//	        Cidr:  10.50.2.0/24
+func (testCtx *VPCPeeringTestCtx) gatewayPeeringMasqueradePortForwardNATTest(ctx context.Context) (bool, []RevertFunc, error) {
+	vpcs := &vpcapi.VPCList{}
+	if err := testCtx.kube.List(ctx, vpcs); err != nil {
+		return false, nil, fmt.Errorf("listing VPCs: %w", err)
+	}
+	if len(vpcs.Items) < 2 {
+		return true, nil, fmt.Errorf("not enough VPCs for masquerade+port-forward NAT test") //nolint:goerr113
+	}
+
+	sort.Slice(vpcs.Items, func(i, j int) bool {
+		return vpcs.Items[i].Name < vpcs.Items[j].Name
+	})
+
+	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec)
+	externalPeerings := make(map[string]*vpcapi.ExternalPeeringSpec)
+	gwPeerings := make(map[string]*gwapi.PeeringSpec)
+
+	vpc1 := &vpcs.Items[0]
+	vpc2 := &vpcs.Items[1]
+
+	portForwardRules := []gwapi.PeeringNATPortForwardEntry{
+		{Protocol: gwapi.PeeringNATProtocolTCP, Port: "5201", As: "15201"},
+	}
+
+	if err := appendGwPeeringSpec(gwPeerings, vpc1, vpc2, &GwPeeringOptions{
+		VPC1NATCIDR:          []string{"192.168.51.0/24"},
+		VPC1NATMode:          NATModeMasqueradePortForward,
+		VPC1PortForwardRules: portForwardRules,
+	}); err != nil {
+		return false, nil, fmt.Errorf("setting up gateway peering: %w", err)
+	}
+
+	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, gwPeerings, true); err != nil {
+		return false, nil, fmt.Errorf("setting up masquerade+port-forward NAT peerings: %w", err)
+	}
+
+	if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
+		return false, nil, fmt.Errorf("waiting for switches to be ready: %w", err)
+	}
+
+	// Outbound direction: vpc1 reaches vpc2 via masquerade NAT (vpc1 traffic appears from 192.168.51.x)
+	if err := testCtx.testNATGatewayConnectivity(ctx, vpc1, vpc2, nil, nil); err != nil {
+		return false, nil, fmt.Errorf("testing masquerade+port-forward NAT outbound connectivity: %w", err)
+	}
+
+	// Inbound direction: vpc2 connects to vpc1's NAT IP:15201, gateway forwards to vpc1 real IP:5201
+	const vpc1NATCIDR = "192.168.51.0/24"
+	if err := testCtx.testPortForwardInboundConnectivity(ctx, vpc1, vpc2, vpc1NATCIDR, 15201); err != nil {
+		return false, nil, fmt.Errorf("testing masquerade+port-forward NAT inbound connectivity: %w", err)
+	}
+
+	return false, nil, nil
 }
 
 // getNATTestCases returns the NAT test cases to be added to the multi-VPC single-subnet suite
@@ -885,6 +1206,20 @@ func getNATTestCases(testCtx *VPCPeeringTestCtx) []JUnitTestCase {
 		{
 			Name: "Gateway Peering Overlap NAT",
 			F:    testCtx.gatewayPeeringOverlapNATTest,
+			SkipFlags: SkipFlags{
+				NoGateway: true,
+			},
+		},
+		{
+			Name: "Gateway Peering Port Forward NAT",
+			F:    testCtx.gatewayPeeringPortForwardNATTest,
+			SkipFlags: SkipFlags{
+				NoGateway: true,
+			},
+		},
+		{
+			Name: "Gateway Peering Masquerade and Port Forward NAT",
+			F:    testCtx.gatewayPeeringMasqueradePortForwardNATTest,
 			SkipFlags: SkipFlags{
 				NoGateway: true,
 			},
