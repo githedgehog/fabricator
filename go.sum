@@ -302,8 +302,8 @@ github.com/json-iterator/go v1.1.12 h1:PV8peI4a0ysnczrg+LtxykD8LfKY9ML6u2jnxaEnr
 github.com/json-iterator/go v1.1.12/go.mod h1:e30LSqwooZae/UwlEbR2852Gd8hjQvJoHmT4TnhNGBo=
 github.com/jstemmer/go-junit-report v0.0.0-20190106144839-af01ea7f8024/go.mod h1:6v2b51hI/fHJwM22ozAgKL4VKDeJcHhJFhtBdhmNjmU=
 github.com/jstemmer/go-junit-report v0.9.1/go.mod h1:Brl9GWCQeLvo8nXZwPNNblvFj/XSXhF0NWZEnDohbsk=
-github.com/k3s-io/helm-controller v0.16.17 h1:VXMmXQmmTB49x6bnN/PsJUTVKHb0r69b+SffIDUTMTM=
-github.com/k3s-io/helm-controller v0.16.17/go.mod h1:jmrgGttLQbh2yB1kcf9XFAigNW6U8oWCswCSuEjkxXU=
+github.com/k3s-io/helm-controller v0.17.0 h1:rVLMEBiyo8RSC0BDeroxkwegp7L1MdULSbX0oFvda8E=
+github.com/k3s-io/helm-controller v0.17.0/go.mod h1:5cuEedP5BgBkWpUO1C3BY05hnaBLycsm/2PsW3DY6WE=
 github.com/kisielk/gotool v1.0.0/go.mod h1:XhKaO+MFFWcvkIS/tQcRk01m1F5IRFswLeQ+oQHNcck=
 github.com/klauspost/compress v1.4.1/go.mod h1:RyIbtBH6LamlWaDj8nUwkbUhJ87Yi3uG0guNDohfE1A=
 github.com/klauspost/compress v1.18.4 h1:RPhnKRAQ4Fh8zU2FY/6ZFDwTVTxgJ/EMydqSTzE9a2c=
