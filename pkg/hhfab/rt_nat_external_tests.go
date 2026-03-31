@@ -35,7 +35,7 @@ const gwNATConvergenceInterval = 5 * time.Second
 // fabric switches are programmed, but the gateway still needs to advertise the NAT pool to DS2000
 // via BGP before return traffic can flow. Static externals have pre-configured routes so no wait
 // is needed.
-func (testCtx *VPCPeeringTestCtx) testNATExternalConnectivity(ctx context.Context, vpc *vpcapi.VPC, waitForBGPConvergence bool) error {
+func (testCtx *VPCPeeringTestCtx) testNATExternalConnectivity(ctx context.Context, vpc *vpcapi.VPC, extName string, waitForBGPConvergence bool) error {
 	servers := &wiringapi.ServerList{}
 	if err := testCtx.kube.List(ctx, servers); err != nil {
 		return fmt.Errorf("listing servers: %w", err)
@@ -88,6 +88,20 @@ func (testCtx *VPCPeeringTestCtx) testNATExternalConnectivity(ctx context.Contex
 			}
 		} else if curlErr != nil {
 			return fmt.Errorf("NAT external connectivity check: %w", curlErr)
+		}
+
+		if remoteIP, err := getExternalRemoteIP(ctx, testCtx.kube, extName); err != nil {
+			return fmt.Errorf("getting external remote IP for ping: %w", err)
+		} else if remoteIP != "" {
+			remoteAddr, err := netip.ParseAddr(remoteIP)
+			if err != nil {
+				return fmt.Errorf("parsing external remote IP %s: %w", remoteIP, err)
+			}
+			slog.Debug("Testing NAT external connectivity stability via ping", "server", server.Name, "target", remoteIP)
+			pingSem := semaphore.NewWeighted(1)
+			if pingErr := checkPing(ctx, 10, pingSem, server.Name, remoteIP, sshCfg, remoteAddr, nil, true); pingErr != nil {
+				return fmt.Errorf("NAT external connectivity ping stability check: %w", pingErr)
+			}
 		}
 
 		tested++
@@ -216,7 +230,7 @@ func (testCtx *VPCPeeringTestCtx) bgpExternalStaticNATTest(ctx context.Context) 
 		return false, nil, fmt.Errorf("waiting for switches to be ready: %w", err)
 	}
 
-	if err := testCtx.testNATExternalConnectivity(ctx, vpc, true); err != nil {
+	if err := testCtx.testNATExternalConnectivity(ctx, vpc, testCtx.extName, true); err != nil {
 		return false, nil, fmt.Errorf("testing BGP external static NAT connectivity: %w", err)
 	}
 
@@ -287,7 +301,7 @@ func (testCtx *VPCPeeringTestCtx) bgpExternalMasqueradeNATTest(ctx context.Conte
 		return false, nil, fmt.Errorf("waiting for switches to be ready: %w", err)
 	}
 
-	if err := testCtx.testNATExternalConnectivity(ctx, vpc, true); err != nil {
+	if err := testCtx.testNATExternalConnectivity(ctx, vpc, testCtx.extName, true); err != nil {
 		return false, nil, fmt.Errorf("testing BGP external masquerade NAT connectivity: %w", err)
 	}
 
@@ -470,7 +484,7 @@ func (testCtx *VPCPeeringTestCtx) bgpExternalMasqueradePortForwardNATTest(ctx co
 		return false, nil, fmt.Errorf("waiting for switches to be ready: %w", err)
 	}
 
-	if err := testCtx.testNATExternalConnectivity(ctx, vpc, true); err != nil {
+	if err := testCtx.testNATExternalConnectivity(ctx, vpc, testCtx.extName, true); err != nil {
 		return false, nil, fmt.Errorf("testing BGP external masquerade+port-forward NAT connectivity: %w", err)
 	}
 
@@ -593,7 +607,7 @@ func (testCtx *VPCPeeringTestCtx) staticExternalStaticNATGatewayTest(ctx context
 		return false, nil, fmt.Errorf("waiting for switches to be ready: %w", err)
 	}
 
-	if err := testCtx.testNATExternalConnectivity(ctx, vpc, false); err != nil {
+	if err := testCtx.testNATExternalConnectivity(ctx, vpc, testCtx.staticExtName, false); err != nil {
 		return false, nil, fmt.Errorf("testing static external static NAT connectivity: %w", err)
 	}
 
@@ -664,7 +678,7 @@ func (testCtx *VPCPeeringTestCtx) staticExternalMasqueradeNATGatewayTest(ctx con
 		return false, nil, fmt.Errorf("waiting for switches to be ready: %w", err)
 	}
 
-	if err := testCtx.testNATExternalConnectivity(ctx, vpc, false); err != nil {
+	if err := testCtx.testNATExternalConnectivity(ctx, vpc, testCtx.staticExtName, false); err != nil {
 		return false, nil, fmt.Errorf("testing static external masquerade NAT connectivity: %w", err)
 	}
 
@@ -916,7 +930,7 @@ func (testCtx *VPCPeeringTestCtx) staticExternalMasqueradePortForwardNATGatewayT
 		return false, nil, fmt.Errorf("waiting for switches to be ready: %w", err)
 	}
 
-	if err := testCtx.testNATExternalConnectivity(ctx, vpc, false); err != nil {
+	if err := testCtx.testNATExternalConnectivity(ctx, vpc, testCtx.staticExtName, false); err != nil {
 		return false, nil, fmt.Errorf("testing static external masquerade+port-forward NAT connectivity: %w", err)
 	}
 
