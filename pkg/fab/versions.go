@@ -23,8 +23,8 @@ var (
 	CumulusVersion    = meta.Version("v5.15.1")
 
 	// Upgrade constraints, "-0" to include pre-releases
-	FabricatorCtrlConstraint = ">=0.43.1-0"
-	FabricAgentConstraint    = ">=0.96.2-0"
+	FabricatorCtrlConstraint = ">=0.45.5-0"
+	FabricAgentConstraint    = ">=0.115.4-0"
 	FabricNOSConstraint      = ">=4.5.0-0" // -0 is to allow -Enterprise_Base suffix
 )
 

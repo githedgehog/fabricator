@@ -69,8 +69,10 @@ func TestFabricatorCtrlUpgradeConstraint(t *testing.T) {
 		expected bool
 	}{
 		{"current", version.Version, true},
-		{"dev", "v0.44.0", true},
-		{"25.05", "v0.43.1", true},
+		{"dev", "v0.46.0", true},
+		{"26.01", "v0.45.5", true},
+		{"26.01.0", "v0.45.5", true},
+		{"25.05", "v0.43.1", false},
 		{"25.04", "v0.41.3", false},
 		{"25.04.0", "v0.41.3", false},
 		{"25.03", "v0.40.0", false},
@@ -103,8 +105,10 @@ func TestFabricAgentUpgradeConstraint(t *testing.T) {
 		expected bool
 	}{
 		{"current", string(FabricVersion), true},
-		{"dev", "v0.100.0", true},
-		{"25.05", "v0.96.2", true},
+		{"dev", "v0.116.0", true},
+		{"26.01", "v0.115.4", true},
+		{"26.01.0", "v0.115.4", true},
+		{"25.05", "v0.96.2", false},
 		{"25.04", "v0.87.4", false},
 		{"25.04.0", "v0.87.4", false},
 		{"25.03", "v0.81.1", false},
@@ -138,6 +142,8 @@ func TestFabricNOSUpgradeConstraint(t *testing.T) {
 	}{
 		{"current", string(BCMSONiCVersion), true},
 		{"dev", "v4.5.0", true},
+		{"26.01", "v4.5.0", true},
+		{"26.01.0", "v4.5.0", true},
 		{"25.03", "v4.5.0", true},
 		{"25.03.0", "v4.5.0", true},
 		{"25.02", "v4.4.2", false},
