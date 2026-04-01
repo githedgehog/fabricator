@@ -834,7 +834,7 @@ func (testCtx *VPCPeeringTestCtx) checkGatewayMetrics(ctx context.Context, prome
 			gatewayMetrics = append(gatewayMetrics, gwMetricDef{name: "Dataplane", metric: "vpc_packet_count"})
 		}
 		if gwObs.FRR.Metrics {
-			gatewayMetrics = append(gatewayMetrics, gwMetricDef{name: "FRR", metric: "frr_bgp_peer_state"})
+			gatewayMetrics = append(gatewayMetrics, gwMetricDef{name: "FRR", metric: "frr_bgp_peer_status"})
 		}
 		if gwObs.Unix.Metrics {
 			gatewayMetrics = append(gatewayMetrics, gwMetricDef{name: "Unix", metric: "node_load1"})
