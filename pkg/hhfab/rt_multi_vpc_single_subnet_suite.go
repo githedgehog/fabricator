@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"time"
 
 	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
@@ -351,6 +352,43 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringLoopTest(ctx context.Context) (b
 
 	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, gwPeerings, true); err != nil {
 		return false, nil, fmt.Errorf("setting up gateway loop peerings: %w", err)
+	}
+
+	// Wait for EVPN Type-5 routes to be installed in leaf switch RIBs before
+	// running connectivity tests. WaitReady only confirms frr-reload.py exited;
+	// the ZEBRA CPI blast + BGP UPDATE propagation to leaves takes 26-38s more.
+	// Pinging before leaves have the routes causes intermittent failures.
+	for i, vpc := range vpcs.Items {
+		prevVPC := vpcs.Items[(i-1+len(vpcs.Items))%len(vpcs.Items)]
+		nextVPC := vpcs.Items[(i+1)%len(vpcs.Items)]
+
+		var peerRoutes []string
+		for _, s := range prevVPC.Spec.Subnets {
+			peerRoutes = append(peerRoutes, s.Subnet)
+		}
+		for _, s := range nextVPC.Spec.Subnets {
+			peerRoutes = append(peerRoutes, s.Subnet)
+		}
+
+		leavesForVPC, err := getSwitchesForVPC(ctx, testCtx.kube, vpc.Name)
+		if err != nil {
+			return false, nil, fmt.Errorf("getting switches for vpc %s: %w", vpc.Name, err)
+		}
+
+		if len(leavesForVPC) == 0 || len(peerRoutes) == 0 {
+			continue
+		}
+
+		vrfName := "VrfV" + vpc.Name
+		if vpc.Spec.Mode == vpcapi.VPCModeL3Flat {
+			vrfName = "default"
+		}
+
+		slog.Info("Waiting for gateway routes on leaves", "vpc", vpc.Name, "leaves", leavesForVPC, "routes", peerRoutes, "vrf", vrfName)
+		if err := testCtx.waitForRoutesInSwitches(ctx, leavesForVPC, peerRoutes,
+			vrfName, 3*time.Minute); err != nil {
+			return false, nil, fmt.Errorf("waiting for gateway routes in vpc %s: %w", vpc.Name, err)
+		}
 	}
 
 	if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {

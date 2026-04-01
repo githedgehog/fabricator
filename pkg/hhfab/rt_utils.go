@@ -328,6 +328,29 @@ func shutDownLinkAndTest(ctx context.Context, testCtx *VPCPeeringTestCtx, link w
 	return DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts)
 }
 
+// getSwitchesForVPC returns the set of leaf switch names that have VPCAttachments for the given VPC.
+func getSwitchesForVPC(ctx context.Context, kube kclient.Client, vpcName string) (map[string]bool, error) {
+	attachments := &vpcapi.VPCAttachmentList{}
+	if err := kube.List(ctx, attachments, kclient.MatchingLabels{wiringapi.LabelVPC: vpcName}); err != nil {
+		return nil, fmt.Errorf("listing attachments for vpc %s: %w", vpcName, err)
+	}
+	switches := map[string]bool{}
+	for _, att := range attachments.Items {
+		conn := &wiringapi.Connection{}
+		if err := kube.Get(ctx, kclient.ObjectKey{
+			Namespace: kmetav1.NamespaceDefault, Name: att.Spec.Connection,
+		}, conn); err != nil {
+			return nil, fmt.Errorf("getting connection %s: %w", att.Spec.Connection, err)
+		}
+		sws, _, _, _, _ := conn.Spec.Endpoints()
+		for _, sw := range sws {
+			switches[sw] = true
+		}
+	}
+
+	return switches, nil
+}
+
 // check that a route is present in a switch (by checking in the sonic-cli)
 func checkRouteInSwitch(ctx context.Context, ssh *sshutil.Config, switchName, route, vrfName string) (bool, error) {
 	cmd := fmt.Sprintf("show ip route vrf %s %s", vrfName, route)
