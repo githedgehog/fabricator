@@ -149,18 +149,19 @@ type JUnitTestSuite struct {
 }
 
 type SkipFlags struct {
-	VirtualSwitch     bool `xml:"-"` // skip if there's any virtual switch in the vlab
-	NoExternals       bool `xml:"-"` // skip if there are no externals
-	NoStaticExternals bool `xml:"-"` // skip if there are no static externals (new API)
-	ExtendedOnly      bool `xml:"-"` // skip if extended tests are not enabled
-	RoCE              bool `xml:"-"` // skip if RoCE is not supported by any of the leaf switches
-	SubInterfaces     bool `xml:"-"` // skip if subinterfaces are not supported by some of the switches
-	NoFabricLink      bool `xml:"-"` // skip if there's no fabric (i.e. spine-leaf) link between the switches
-	NoMeshLink        bool `xml:"-"` // skip if there's no mesh (i.e. leaf-leaf) link between the switches
-	NoGateway         bool `xml:"-"` // skip if gateway is not enabled or no gateways available
-	NoLoki            bool `xml:"-"` // skip if Loki is not configured or available
-	NoProm            bool `xml:"-"` // skip if Prometheus is not configured or available
-	NoServers         bool `xml:"-"` // skip if there are no servers in the fabric
+	VirtualSwitch       bool `xml:"-"` // skip if there's any virtual switch in the vlab
+	NoExternals         bool `xml:"-"` // skip if there are no externals
+	NoStaticExternals   bool `xml:"-"` // skip if there are no static externals (new API)
+	ExtendedOnly        bool `xml:"-"` // skip if extended tests are not enabled
+	RoCE                bool `xml:"-"` // skip if RoCE is not supported by any of the leaf switches
+	SubInterfaces       bool `xml:"-"` // skip if subinterfaces are not supported by some of the switches
+	NoFabricLink        bool `xml:"-"` // skip if there's no fabric (i.e. spine-leaf) link between the switches
+	NoMeshLink          bool `xml:"-"` // skip if there's no mesh (i.e. leaf-leaf) link between the switches
+	NoGateway           bool `xml:"-"` // skip if gateway is not enabled or no gateways available
+	NoLoki              bool `xml:"-"` // skip if Loki is not configured or available
+	NoProm              bool `xml:"-"` // skip if Prometheus is not configured or available
+	NoServers           bool `xml:"-"` // skip if there are no servers in the fabric
+	NoUnbundledNonMclag bool `xml:"-"` // skip if there is no unbundled non-MCLAG server (required for host-bgp)
 
 	/* Note about subinterfaces; they are required in the following cases:
 	 * 1. when using VPC loopback workaround - it's applied when we have a pair of vpcs or vpc and external both attached on a switch with peering between them
@@ -200,6 +201,9 @@ func (sf *SkipFlags) PrettyPrint() string {
 	}
 	if sf.NoServers {
 		parts = append(parts, "NoSrvs")
+	}
+	if sf.NoUnbundledNonMclag {
+		parts = append(parts, "NoUnbundledNonMclag")
 	}
 	if sf.NoLoki {
 		parts = append(parts, "NoLoki")
@@ -604,6 +608,14 @@ func selectAndRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, suite *J
 
 			continue
 		}
+		if test.SkipFlags.NoUnbundledNonMclag && skipFlags.NoUnbundledNonMclag {
+			suite.TestCases[i].Skipped = &Skipped{
+				Message: "There is no unbundled non-MCLAG server available for host-bgp",
+			}
+			suite.Skipped++
+
+			continue
+		}
 	}
 	if suite.Skipped == suite.Tests {
 		slog.Info("All tests in suite skipped, skipping suite", "suite", suite.Name)
@@ -667,7 +679,15 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 	singleVpcSuite := makeSingleVPCSuite(testCtx)
 	multiVPCMultiSubnetSuite := makeMultiVPCMultiSubnetSuite(testCtx)
 	multiVPCSingleSubnetSuite := makeMultiVPCSingleSubnetSuite(testCtx)
-	suites := []*JUnitTestSuite{noVpcSuite, singleVpcSuite, multiVPCMultiSubnetSuite, multiVPCSingleSubnetSuite}
+
+	hostBGPSetupOpts := setupOpts
+	hostBGPSetupOpts.ServersPerSubnet = 1
+	hostBGPSetupOpts.SubnetsPerVPC = 2
+	hostBGPSetupOpts.HostBGPSubnet = true
+	hostBGPTestCtx := makeTestCtx(ctx, kube, hostBGPSetupOpts, vlabCfg, vlab, false, rtOtps)
+	hostBGPSuite := makeHostBGPSuite(hostBGPTestCtx)
+
+	suites := []*JUnitTestSuite{noVpcSuite, singleVpcSuite, multiVPCMultiSubnetSuite, multiVPCSingleSubnetSuite, hostBGPSuite}
 
 	if rtOtps.ListTests {
 		for _, suite := range suites {
@@ -733,6 +753,7 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 	}
 	profileMap := make(map[string]wiringapi.SwitchProfile, 0)
 	roceLeaves := make([]string, 0)
+	mclagSwitches := map[string]bool{}
 	for _, sw := range swList.Items {
 		// check for virtual switches
 		if !skipFlags.VirtualSwitch {
@@ -740,6 +761,9 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 				slog.Warn("Virtual switch found, some tests will be skipped", "switch", sw.Name)
 				skipFlags.VirtualSwitch = true
 			}
+		}
+		if sw.Spec.Redundancy.Type == meta.RedundancyTypeMCLAG {
+			mclagSwitches[sw.Name] = true
 		}
 		// check for leaf switches supporting subinterfaces and/or RoCE
 		if !sw.Spec.Role.IsLeaf() {
@@ -924,6 +948,42 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 		slog.Info("No Prometheus target found, Prometheus test will be skipped")
 	}
 
+	// Detect whether a host-bgp capable server exists (unbundled, non-MCLAG)
+	unbundledConns := &wiringapi.ConnectionList{}
+	if err := kube.List(ctx, unbundledConns, kclient.MatchingLabels{wiringapi.LabelConnectionType: wiringapi.ConnectionTypeUnbundled}); err != nil {
+		slog.Warn("Failed to list unbundled connections, host-bgp suite will be skipped", "error", err)
+		skipFlags.NoUnbundledNonMclag = true
+	} else {
+		skipFlags.NoUnbundledNonMclag = true
+		for _, conn := range unbundledConns.Items {
+			switches, _, _, _, err := conn.Spec.Endpoints()
+			if err != nil {
+				continue
+			}
+			isMclag := false
+			for _, sw := range switches {
+				if mclagSwitches[sw] {
+					isMclag = true
+
+					break
+				}
+			}
+			if !isMclag {
+				skipFlags.NoUnbundledNonMclag = false
+
+				break
+			}
+		}
+	}
+	if skipFlags.NoUnbundledNonMclag {
+		slog.Info("No unbundled non-MCLAG server found, host-bgp suite will be skipped")
+	}
+
+	// Propagate externals and skip-flag context detected above to the host-bgp test context
+	hostBGPTestCtx.extName = testCtx.extName
+	hostBGPTestCtx.staticExtName = testCtx.staticExtName
+	hostBGPTestCtx.tcOpts = testCtx.tcOpts
+
 	results := []JUnitTestSuite{}
 	testCtx.noSetup = true
 	noVpcResults, err := selectAndRunSuite(ctx, testCtx, noVpcSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
@@ -954,6 +1014,12 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 	}
 	results = append(results, *basicResults)
 
+	hostBGPResults, err := selectAndRunSuite(ctx, hostBGPTestCtx, hostBGPSuite, regexesCompiled, rtOtps.InvertRegex, skipFlags)
+	if err != nil && rtOtps.FailFast {
+		return fmt.Errorf("running host-bgp suite: %w", err)
+	}
+	results = append(results, *hostBGPResults)
+
 	slog.Info("*** Recap of the test results ***")
 	for _, suite := range results {
 		printSuiteResults(&suite)
@@ -973,8 +1039,8 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 	}
 
 	slog.Info("All tests completed", "duration", time.Since(testStart).String())
-	if singleVpcResults.Failures > 0 || multiVpcResults.Failures > 0 || basicResults.Failures > 0 || noVpcResults.Failures > 0 {
-		return fmt.Errorf("some tests failed: singleVpc=%d, multiVpc=%d, basic=%d, noVpc=%d", singleVpcResults.Failures, multiVpcResults.Failures, basicResults.Failures, noVpcResults.Failures) //nolint:goerr113
+	if singleVpcResults.Failures > 0 || multiVpcResults.Failures > 0 || basicResults.Failures > 0 || noVpcResults.Failures > 0 || hostBGPResults.Failures > 0 {
+		return fmt.Errorf("some tests failed: singleVpc=%d, multiVpc=%d, basic=%d, noVpc=%d, hostBGP=%d", singleVpcResults.Failures, multiVpcResults.Failures, basicResults.Failures, noVpcResults.Failures, hostBGPResults.Failures) //nolint:goerr113
 	}
 
 	return nil
