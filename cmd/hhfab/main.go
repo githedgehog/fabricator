@@ -1286,6 +1286,25 @@ func Run(ctx context.Context) error {
 						},
 					},
 					{
+						Name:  "scp",
+						Usage: "scp files to/from a VLAB VM or HW if supported (use ':path' for remote paths)",
+						Flags: flatten(defaultFlags, accessNameFlags, []cli.Flag{
+							&cli.StringFlag{
+								Name:    "username",
+								Aliases: []string{"u"},
+								Usage:   "target device scp username (default: admin for switches, core for servers)",
+							},
+						}),
+						Before: before(false),
+						Action: func(c *cli.Context) error {
+							if err := hhfab.DoVLABSCP(ctx, workDir, cacheDir, accessName, c.String("username"), c.Args().Slice()); err != nil {
+								return fmt.Errorf("scp: %w", err)
+							}
+
+							return nil
+						},
+					},
+					{
 						Name:   "serial",
 						Usage:  "get serial console of a VLAB VM or HW if supported",
 						Flags:  flatten(defaultFlags, accessNameFlags),
