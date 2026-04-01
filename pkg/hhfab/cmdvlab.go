@@ -147,6 +147,15 @@ func DoVLABSSH(ctx context.Context, workDir, cacheDir, name, username string, ar
 	return c.VLABAccess(ctx, vlab, VLABAccessSSH, name, username, args)
 }
 
+func DoVLABSCP(ctx context.Context, workDir, cacheDir, name, username string, args []string) error {
+	c, vlab, err := loadVLABForHelpers(ctx, workDir, cacheDir)
+	if err != nil {
+		return err
+	}
+
+	return c.VLABAccess(ctx, vlab, VLABAccessSCP, name, username, args)
+}
+
 func DoVLABSerial(ctx context.Context, workDir, cacheDir, name string, args []string) error {
 	c, vlab, err := loadVLABForHelpers(ctx, workDir, cacheDir)
 	if err != nil {

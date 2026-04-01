@@ -41,6 +41,7 @@ type VLABAccessType string
 
 const (
 	VLABAccessSSH       VLABAccessType = "ssh"
+	VLABAccessSCP       VLABAccessType = "scp"
 	VLABAccessSerial    VLABAccessType = "serial"
 	VLABAccessSerialLog VLABAccessType = "serial log"
 
@@ -58,15 +59,15 @@ var SSHQuietFlags = []string{
 }
 
 func (c *Config) VLABAccess(ctx context.Context, vlab *VLAB, t VLABAccessType, name, username string, inArgs []string) error {
-	if len(inArgs) > 0 && t != VLABAccessSSH {
-		return fmt.Errorf("arguments only supported for ssh") //nolint:goerr113
+	if len(inArgs) > 0 && t != VLABAccessSSH && t != VLABAccessSCP {
+		return fmt.Errorf("arguments only supported for ssh and scp") //nolint:goerr113
 	}
 
 	if t == VLABAccessSSH && username == "" {
 		return fmt.Errorf("username is required") //nolint:err113
 	}
-	if t != VLABAccessSSH && username != "" {
-		return fmt.Errorf("username is only supported for ssh") //nolint:err113
+	if t != VLABAccessSSH && t != VLABAccessSCP && username != "" {
+		return fmt.Errorf("username is only supported for ssh and scp") //nolint:err113
 	}
 
 	if err := c.checkForBins(); err != nil {
@@ -181,6 +182,86 @@ func (c *Config) VLABAccess(ctx context.Context, vlab *VLAB, t VLABAccessType, n
 
 		if len(inArgs) > 0 {
 			args = append(args, "PATH=$PATH:/opt/bin "+strings.Join(inArgs, " "))
+		}
+	case VLABAccessSCP:
+		if len(inArgs) < 2 {
+			return fmt.Errorf("scp requires source and destination arguments") //nolint:goerr113
+		}
+
+		if username == "" {
+			if entry.IsSwitch {
+				username = "admin"
+			} else {
+				username = "core"
+			}
+		}
+
+		var remoteHost string
+
+		if entry.SSHPort > 0 { //nolint:gocritic
+			slog.Info("SCP using local port", "name", name, "port", entry.SSHPort)
+
+			remoteHost = "127.0.0.1"
+			cmdName = VLABCmdSCP
+			args = append(slices.Clone(SSHQuietFlags),
+				"-P", fmt.Sprintf("%d", entry.SSHPort),
+				"-i", filepath.Join(VLABDir, VLABSSHKeyFile),
+			)
+		} else if entry.IsSwitch {
+			slog.Info("SCP through control node", "name", name, "type", "switch")
+
+			swIP, err := c.getSwitchIP(ctx, name)
+			if err != nil {
+				return fmt.Errorf("getting switch IP: %w", err)
+			}
+
+			remoteHost = swIP
+			proxyCmd := fmt.Sprintf("ssh %s -i %s -W %%h:%%p -p %d core@127.0.0.1",
+				strings.Join(SSHQuietFlags, " "),
+				filepath.Join(VLABDir, VLABSSHKeyFile),
+				getSSHPort(0), // TODO get control node ID
+			)
+
+			cmdName = VLABCmdSCP
+			args = append(slices.Clone(SSHQuietFlags),
+				"-i", filepath.Join(VLABDir, VLABSSHKeyFile),
+				"-o", "ProxyCommand="+proxyCmd,
+			)
+		} else if entry.IsNode {
+			slog.Info("SCP through control node", "name", name, "type", "gateway")
+
+			nodeIP, err := c.getNodeIP(ctx, name)
+			if err != nil {
+				return fmt.Errorf("getting node IP: %w", err)
+			}
+
+			remoteHost = nodeIP
+			proxyCmd := fmt.Sprintf("ssh %s -i %s -W %%h:%%p -p %d core@127.0.0.1",
+				strings.Join(SSHQuietFlags, " "),
+				filepath.Join(VLABDir, VLABSSHKeyFile),
+				getSSHPort(0), // TODO get control node ID
+			)
+
+			cmdName = VLABCmdSCP
+			args = append(slices.Clone(SSHQuietFlags),
+				"-i", filepath.Join(VLABDir, VLABSSHKeyFile),
+				"-o", "ProxyCommand="+proxyCmd,
+			)
+		} else {
+			return fmt.Errorf("SCP not available: %s", name) //nolint:goerr113
+		}
+
+		var hasRemote bool
+		for _, arg := range inArgs {
+			if strings.HasPrefix(arg, ":") {
+				hasRemote = true
+				args = append(args, username+"@"+remoteHost+arg)
+			} else {
+				args = append(args, arg)
+			}
+		}
+		if !hasRemote {
+			return fmt.Errorf("scp requires at least one remote path; prefix the remote path with ':' (for example ':~/file')") //nolint:goerr113
 		}
 	case VLABAccessSerial:
 		if entry.SerialSock != "" { //nolint:gocritic

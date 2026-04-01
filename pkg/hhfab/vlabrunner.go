@@ -67,6 +67,7 @@ const (
 	VLABCmdQemuSystem = "qemu-system-x86_64"
 	VLABCmdSocat      = "socat"
 	VLABCmdSSH        = "ssh"
+	VLABCmdSCP        = "scp"
 	VLABCmdLess       = "less"
 	VLABCmdExpect     = "expect"
 
