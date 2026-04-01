@@ -351,32 +351,32 @@ jobs:
           #   hybrid: false
           #   upgradefrom: ""
 
-          # l2vni from 25.05
+          # l2vni from 26.01
           - mesh: false
             gateway: false
             includeonie: false
             buildmode: iso
             vpcmode: l2vni
             hybrid: false
-            upgradefrom: "25.05"
+            upgradefrom: "26.01"
 
-          # l3vni from 25.05
+          # l3vni from 26.01
           - mesh: false
             gateway: false
             includeonie: false
             buildmode: iso
             vpcmode: l3vni
             hybrid: false
-            upgradefrom: "25.05"
+            upgradefrom: "26.01"
 
-          # mesh l2vni from 25.05
+          # mesh l2vni from 26.01
           - mesh: true
             gateway: false
             includeonie: false
             buildmode: iso
             vpcmode: l2vni
             hybrid: false
-            upgradefrom: "25.05"
+            upgradefrom: "26.01"
 
   vlabs:
     runs-on: ubuntu-latest
