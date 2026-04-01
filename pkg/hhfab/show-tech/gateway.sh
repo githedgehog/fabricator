@@ -13,7 +13,7 @@ OUTPUT_FILE="/tmp/show-tech.log"
 export CRI_CONFIG_FILE=/dev/null
 
 # Find the running FRR container ID
-FRR_CONTAINER_ID=$(sudo -E crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock ps -q --name frr 2>>"$OUTPUT_FILE" | head -1)
+FRR_CONTAINER_ID=$(sudo -E crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock ps --name '^frr$' -q 2>>"$OUTPUT_FILE" | head -1)
 
 # Find the running dataplane container ID
 DATAPLANE_CONTAINER_ID=$(sudo -E crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock ps -q --name dataplane 2>>"$OUTPUT_FILE" | head -1)
