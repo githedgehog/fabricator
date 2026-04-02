@@ -29,6 +29,7 @@ type Config struct {
 
 	SSHKey     string
 	SSHKeyPath string
+	Password   string
 	SSHTimeout time.Duration
 
 	ssh *easyssh.MakeConfig
@@ -41,12 +42,13 @@ func (c *Config) init() error {
 
 	if c.ssh == nil {
 		c.ssh = &easyssh.MakeConfig{
-			User:    c.Remote.User,
-			Server:  c.Remote.Host,
-			Port:    fmt.Sprintf("%d", c.Remote.Port),
-			Key:     c.SSHKey,
-			KeyPath: c.SSHKeyPath,
-			Timeout: c.SSHTimeout,
+			User:     c.Remote.User,
+			Server:   c.Remote.Host,
+			Port:     fmt.Sprintf("%d", c.Remote.Port),
+			Key:      c.SSHKey,
+			KeyPath:  c.SSHKeyPath,
+			Password: c.Password,
+			Timeout:  c.SSHTimeout,
 		}
 
 		if c.Proxy != nil {
