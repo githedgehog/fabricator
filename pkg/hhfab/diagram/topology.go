@@ -469,6 +469,10 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 	nodeSet := make(map[string]bool)
 	// Maps connection names to external names
 	connectionToExternalMap := make(map[string][]string)
+	// connName -> externalName -> spec (BGP externals only, Static == nil)
+	connExtAttachMap := map[string]map[string]*vpcapi.ExternalAttachmentSpec{}
+	// externalName -> neighbor ASN (from any BGP attachment to that external)
+	externalNodeASN := map[string]uint32{}
 
 	// First load all ExternalAttachment resources to map connections to externals
 	externalAttachments := &vpcapi.ExternalAttachmentList{}
@@ -477,11 +481,18 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 	}
 
 	// Build a map of connection name to external resources
-	for _, attachment := range externalAttachments.Items {
+	for i, attachment := range externalAttachments.Items {
 		connectionToExternalMap[attachment.Spec.Connection] = append(
 			connectionToExternalMap[attachment.Spec.Connection],
 			attachment.Spec.External,
 		)
+		if attachment.Spec.Static == nil && attachment.Spec.Neighbor.ASN != 0 {
+			if connExtAttachMap[attachment.Spec.Connection] == nil {
+				connExtAttachMap[attachment.Spec.Connection] = map[string]*vpcapi.ExternalAttachmentSpec{}
+			}
+			connExtAttachMap[attachment.Spec.Connection][attachment.Spec.External] = &externalAttachments.Items[i].Spec
+			externalNodeASN[attachment.Spec.External] = attachment.Spec.Neighbor.ASN
+		}
 	}
 
 	// Load external resources as nodes
@@ -502,6 +513,9 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 			Properties: map[string]string{
 				PropRole: SwitchRoleExternal,
 			},
+		}
+		if asn, ok := externalNodeASN[external.Name]; ok {
+			node.Properties[PropASN] = fmt.Sprintf("%d", asn)
 		}
 		topo.Nodes = append(topo.Nodes, node)
 	}
@@ -586,6 +600,22 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 					status = PortStatusDown
 				}
 				portStatusMap[agent.Name][portName] = status
+			}
+		}
+	}
+
+	// Build BGP neighbor state map from agents (live mode only)
+	// switchName -> neighborIP (no prefix) -> session state
+	bgpNeighborStateMap := map[string]map[string]agentapi.BGPNeighborSessionState{}
+	if agents != nil {
+		for i := range agents.Items {
+			agent := &agents.Items[i]
+			bgpNeighborStateMap[agent.Name] = map[string]agentapi.BGPNeighborSessionState{}
+			for _, vrfNeighbors := range agent.Status.State.BGPNeighbors {
+				for neighborIP, neighbor := range vrfNeighbors {
+					ip, _, _ := strings.Cut(neighborIP, "/")
+					bgpNeighborStateMap[agent.Name][ip] = neighbor.SessionState
+				}
 			}
 		}
 	}
@@ -760,6 +790,12 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 				if ips, ok := portPairIPs[source+"->"+target]; ok {
 					link.Properties[PropSrcLinkIP] = ips.src
 					link.Properties[PropDstLinkIP] = ips.dst
+					dstIPOnly, _, _ := strings.Cut(ips.dst, "/")
+					if stateMap, ok := bgpNeighborStateMap[link.Source]; ok {
+						if state, ok := stateMap[dstIPOnly]; ok && state != "" {
+							link.Properties[PropBGPState] = string(state)
+						}
+					}
 				}
 
 				if conn.Spec.MCLAGDomain != nil {
@@ -817,6 +853,17 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 					PropSourcePortNOS:    getPortNOSName(switchPort, switchMap, profileMap),
 					PropConnectionName:   connName,
 				},
+			}
+			if extMap, ok := connExtAttachMap[connName]; ok {
+				if spec, ok := extMap[externalName]; ok {
+					link.Properties[PropSrcLinkIP] = spec.Switch.IP
+					link.Properties[PropDstLinkIP] = spec.Neighbor.IP
+					if stateMap, ok := bgpNeighborStateMap[switchID]; ok {
+						if state, ok := stateMap[spec.Neighbor.IP]; ok && state != "" {
+							link.Properties[PropBGPState] = string(state)
+						}
+					}
+				}
 			}
 			topo.Links = append(topo.Links, link)
 		}
