@@ -671,6 +671,9 @@ var gatewayScript []byte
 //go:embed show-tech/runner.sh
 var runnerScript []byte
 
+//go:embed show-tech/external-switch.sh
+var externalSwitchScript []byte
+
 const ControlPlaneAPIIP = "172.30.0.5"
 
 type ShowTechScript struct {
@@ -901,7 +904,7 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB, opts ShowTechOpts
 					if vmType == VMTypeServer || vmType == VMTypeExternal {
 						var peerIPs []string
 						for host, ip := range serverHostIPs {
-							if host != name {
+							if host != name && targets[host] != "" {
 								peerIPs = append(peerIPs, ip)
 							}
 						}
@@ -959,6 +962,27 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB, opts ShowTechOpts
 			"success_count", successCount.Load(),
 			"total_count", len(targets),
 			"errors", errors)
+	}
+
+	// Collect show-tech from a hardware external SONiC switch.
+	// All three env vars must be set; management IP is kept out of wiring YAML
+	// to avoid exposing internal addresses in public repos.
+	extUser := os.Getenv(VLABEnvExternalUsername)
+	extPass := os.Getenv(VLABEnvExternalPassword)
+	extIP := os.Getenv(VLABEnvExternalMgmtIP)
+	if extUser == "" || extPass == "" || extIP == "" {
+		slog.Info("External switch env vars not set, skipping external show-tech",
+			"env", VLABEnvExternalUsername+"/"+VLABEnvExternalPassword+"/"+VLABEnvExternalMgmtIP)
+	} else {
+		extSSH := &sshutil.Config{
+			Remote:   sshutil.Remote{User: extUser, Host: extIP, Port: 22},
+			Password: extPass,
+		}
+		collCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+		if err := c.collectShowTech(collCtx, "external", extSSH, externalSwitchScript, outDir); err != nil {
+			slog.Warn("Failed to collect external switch show-tech", "err", err)
+		}
+		cancel()
 	}
 
 	slog.Info("Show tech files saved in", "folder", outDir)
