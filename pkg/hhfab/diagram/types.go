@@ -126,6 +126,7 @@ const (
 	PropVTEPIP           = "vtepIP"
 	PropSrcLinkIP        = "srcLinkIP"
 	PropDstLinkIP        = "dstLinkIP"
+	PropBGPState         = "bgpState"
 )
 
 const (
