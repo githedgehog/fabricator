@@ -634,6 +634,9 @@ var gatewayScript []byte
 //go:embed show-tech/runner.sh
 var runnerScript []byte
 
+//go:embed show-tech/external-switch.sh
+var externalSwitchScript []byte
+
 const ControlPlaneAPIIP = "172.30.0.5"
 
 type ShowTechScript struct {
@@ -856,7 +859,7 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB, opts ShowTechOpts
 					if vmType == VMTypeServer || vmType == VMTypeExternal {
 						var peerIPs []string
 						for host, ip := range serverHostIPs {
-							if host != name {
+							if host != name && targets[host] != "" {
 								peerIPs = append(peerIPs, ip)
 							}
 						}
@@ -914,6 +917,26 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB, opts ShowTechOpts
 			"success_count", successCount.Load(),
 			"total_count", len(targets),
 			"errors", errors)
+	}
+
+	// Collect show-tech from the DS2000 hardware external switch.
+	// All three env vars must be set; management IP is kept out of wiring YAML
+	// to avoid exposing internal addresses in public repos.
+	ds2000User := os.Getenv("HHFAB_DS2000_SSH_USER")
+	ds2000Pass := os.Getenv("HHFAB_DS2000_SSH_PASS")
+	ds2000IP := os.Getenv("HHFAB_DS2000_MGMT_IP")
+	if ds2000User == "" || ds2000Pass == "" || ds2000IP == "" {
+		slog.Info("DS2000 env vars not set, skipping external show-tech", "env", "HHFAB_DS2000_SSH_USER/HHFAB_DS2000_SSH_PASS/HHFAB_DS2000_MGMT_IP")
+	} else {
+		ds2000SSH := &sshutil.Config{
+			Remote:   sshutil.Remote{User: ds2000User, Host: ds2000IP, Port: 22},
+			Password: ds2000Pass,
+		}
+		collCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+		if err := c.collectShowTech(collCtx, "external", ds2000SSH, externalSwitchScript, outDir); err != nil {
+			slog.Warn("Failed to collect DS2000 show-tech", "err", err)
+		}
+		cancel()
 	}
 
 	slog.Info("Show tech files saved in", "folder", outDir)
