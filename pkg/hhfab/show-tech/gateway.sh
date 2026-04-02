@@ -62,6 +62,12 @@ run_dp_cmd() {
     echo -e "\n=== ARP Table ==="
     ip neigh show
 
+    echo -e "\n=== VRF Devices ==="
+    ip -br link show type vrf
+
+    echo -e "\n=== Routing Tables (all, incl. per-VRF) ==="
+    ip route show table all
+
     echo -e "\n=== Link Status ==="
     ip link show
 } >> "$OUTPUT_FILE" 2>&1
