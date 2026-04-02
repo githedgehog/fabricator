@@ -24,6 +24,7 @@ import (
 
 	"github.com/manifoldco/promptui"
 	"github.com/samber/lo"
+	dhcpapi "go.githedgehog.com/fabric/api/dhcp/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/hhfctl"
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
@@ -761,6 +762,30 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB, opts ShowTechOpts
 		slog.Warn("Failed to list switches", "err", err)
 	}
 
+	// Build hostname→IP map from DHCPSubnet status for peer server ping injection.
+	// DHCP leases are runtime state, so read them from the live cluster (c.Client
+	// is the in-memory wiring loader and never has them). Best-effort: if the
+	// cluster is unreachable, peer pings are simply skipped.
+	serverHostIPs := map[string]string{}
+	kubeconfig := filepath.Join(c.WorkDir, VLABDir, VLABKubeConfig)
+	if kube, err := kubeutil.NewClient(ctx, kubeconfig, dhcpapi.SchemeBuilder); err != nil {
+		slog.Warn("Failed to create kube client for peer server IPs", "err", err)
+	} else {
+		dhcpSubnets := &dhcpapi.DHCPSubnetList{}
+		if err := kube.List(ctx, dhcpSubnets); err != nil {
+			slog.Warn("Failed to list DHCPSubnets for peer server IPs", "err", err)
+		} else {
+			for _, subnet := range dhcpSubnets.Items {
+				for _, alloc := range subnet.Status.Allocated {
+					if alloc.Discover || alloc.Hostname == "" || alloc.IP == "" {
+						continue
+					}
+					serverHostIPs[alloc.Hostname] = alloc.IP
+				}
+			}
+		}
+	}
+
 	// Build list of all targets to collect from
 	targets := make(map[string]VMType)
 	for _, vm := range vlab.VMs {
@@ -872,7 +897,22 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB, opts ShowTechOpts
 				if ssh == nil {
 					showTechErr = fmt.Errorf("getting ssh config for %s: %w", name, err)
 				} else {
-					showTechErr = c.collectShowTech(collectionCtx, name, ssh, script, outDir)
+					scriptToRun := script
+					if vmType == VMTypeServer || vmType == VMTypeExternal {
+						var peerIPs []string
+						for host, ip := range serverHostIPs {
+							if host != name {
+								peerIPs = append(peerIPs, ip)
+							}
+						}
+						if len(peerIPs) > 0 {
+							injection := []byte("PEER_SERVER_IPS='" + strings.Join(peerIPs, " ") + "'\n")
+							if nl := bytes.IndexByte(script, '\n'); nl >= 0 {
+								scriptToRun = slices.Concat(script[:nl+1], injection, script[nl+1:])
+							}
+						}
+					}
+					showTechErr = c.collectShowTech(collectionCtx, name, ssh, scriptToRun, outDir)
 				}
 			}
 
