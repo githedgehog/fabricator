@@ -82,6 +82,10 @@ const (
 	VLABEnvSwitchPassword = "HHFAB_SWITCH_PASSWORD" //nolint:gosec
 	VLABEnvServerUsername = "HHFAB_SERVER_USERNAME"
 	VLABEnvServerPassword = "HHFAB_SERVER_PASSWORD" //nolint:gosec
+
+	VLABEnvExternalUsername = "HHFAB_EXTERNAL_USERNAME"
+	VLABEnvExternalPassword = "HHFAB_EXTERNAL_PASSWORD" //nolint:gosec
+	VLABEnvExternalMgmtIP   = "HHFAB_EXTERNAL_MGMT_IP"
 )
 
 var VLABCmds = []string{
