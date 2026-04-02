@@ -56,15 +56,15 @@ OUTPUT_FILE="/tmp/show-tech.log"
     echo "No default gateway found in routing table"
   fi
 
-  echo -e "\n=== Ping Other Servers ==="
-  OWN_IP=$(ip route get 8.8.8.8 | awk '{for(i=1;i<=NF;i++) if($i=="src") {print $(i+1); exit}}')
-  for i in {1..9}; do
-    TARGET_IP="10.0.$i.2"
-    if [ "$TARGET_IP" == "$OWN_IP" ]; then
-      continue
-    fi
-    ping -c 1 "$TARGET_IP" 2>&1
-  done
+  echo -e "\n=== Ping Peer Servers ==="
+  if [ -n "$PEER_SERVER_IPS" ]; then
+    for PEER_IP in $PEER_SERVER_IPS; do
+      echo -e "\n--- ping $PEER_IP ---"
+      ping -c 1 -W 2 "$PEER_IP" 2>&1
+    done
+  else
+    echo "PEER_SERVER_IPS not set — peer server pings skipped"
+  fi
 } >> "$OUTPUT_FILE" 2>&1
 
 # ---------------------------
