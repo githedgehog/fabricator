@@ -806,16 +806,11 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB, opts ShowTechOpts
 	} else {
 		slog.Warn("Expect not available; console fallback disabled", "err", err)
 	}
-	if switchConsoleScriptPath != "" && (os.Getenv(VLABEnvSwitchUsername) == "" || os.Getenv(VLABEnvSwitchPassword) == "") {
-		slog.Info("Switch console credentials not set; skipping switch console diagnostics",
-			"env", VLABEnvSwitchUsername+"/"+VLABEnvSwitchPassword)
+	switchConsoleMissingCreds := switchConsoleScriptPath != "" && (os.Getenv(VLABEnvSwitchUsername) == "" || os.Getenv(VLABEnvSwitchPassword) == "")
+	if switchConsoleMissingCreds {
 		switchConsoleScriptPath = ""
 	}
 	hasServerCredentials := os.Getenv(VLABEnvServerUsername) != "" && os.Getenv(VLABEnvServerPassword) != ""
-	if (controlConsoleScriptPath != "" || gatewayConsoleScriptPath != "") && !hasServerCredentials {
-		slog.Info("Server credentials not set; control/gateway console diagnostics will only capture visible output",
-			"env", VLABEnvServerUsername+"/"+VLABEnvServerPassword)
-	}
 
 	controlPlaneIP := ControlPlaneAPIIP
 
@@ -880,9 +875,14 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB, opts ShowTechOpts
 				successCount.Add(1)
 			}
 
-			if vmType == VMTypeSwitch && switchConsoleScriptPath != "" && showTechErr != nil {
-				if err := c.collectSwitchConsoleDiagnostics(ctx, name, showTechErr, outDir, switchConsoleScriptPath, controlPlaneIP); err != nil {
-					errChan <- fmt.Errorf("console diagnostics for %s: %w", name, err)
+			if vmType == VMTypeSwitch && showTechErr != nil {
+				if switchConsoleMissingCreds {
+					slog.Info("Switch SSH failed; console fallback skipped (credentials not set)",
+						"name", name, "env", VLABEnvSwitchUsername+"/"+VLABEnvSwitchPassword)
+				} else if switchConsoleScriptPath != "" {
+					if err := c.collectSwitchConsoleDiagnostics(ctx, name, showTechErr, outDir, switchConsoleScriptPath, controlPlaneIP); err != nil {
+						errChan <- fmt.Errorf("console diagnostics for %s: %w", name, err)
+					}
 				}
 			}
 			if vmType == VMTypeServer && serverConsoleScriptPath != "" && showTechErr != nil {
@@ -891,11 +891,19 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB, opts ShowTechOpts
 				}
 			}
 			if vmType == VMTypeControl && controlConsoleScriptPath != "" && showTechErr != nil {
+				if !hasServerCredentials {
+					slog.Info("Control SSH failed; console fallback will only capture visible output (server credentials not set)",
+						"name", name, "env", VLABEnvServerUsername+"/"+VLABEnvServerPassword)
+				}
 				if err := c.collectVMConsoleDiagnostics(ctx, "control", name, showTechErr, outDir, controlConsoleScriptPath); err != nil {
 					errChan <- fmt.Errorf("console fallback for %s: %w", name, err)
 				}
 			}
 			if vmType == VMTypeGateway && gatewayConsoleScriptPath != "" && showTechErr != nil {
+				if !hasServerCredentials {
+					slog.Info("Gateway SSH failed; console fallback will only capture visible output (server credentials not set)",
+						"name", name, "env", VLABEnvServerUsername+"/"+VLABEnvServerPassword)
+				}
 				if err := c.collectVMConsoleDiagnostics(ctx, "gateway", name, showTechErr, outDir, gatewayConsoleScriptPath); err != nil {
 					errChan <- fmt.Errorf("console fallback for %s: %w", name, err)
 				}
