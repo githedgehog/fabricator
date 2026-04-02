@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	agentapi "go.githedgehog.com/fabric/api/agent/v1beta1"
 )
 
 type MxGraphModel struct {
@@ -100,11 +102,15 @@ var generateUnderlayLayer bool  // Only generate when underlay data is available
 
 func hasUnderlayData(topo Topology) bool {
 	for _, node := range topo.Nodes {
-		if node.Type != NodeTypeSwitch && node.Type != NodeTypeGateway {
-			continue
-		}
-		if node.Properties[PropASN] != "" || node.Properties[PropProtocolIP] != "" || node.Properties[PropVTEPIP] != "" {
-			return true
+		switch node.Type {
+		case NodeTypeSwitch, NodeTypeGateway:
+			if node.Properties[PropASN] != "" || node.Properties[PropProtocolIP] != "" || node.Properties[PropVTEPIP] != "" {
+				return true
+			}
+		case NodeTypeExternal:
+			if node.Properties[PropASN] != "" {
+				return true
+			}
 		}
 	}
 	for _, link := range topo.Links {
@@ -1873,6 +1879,26 @@ func createVPCLegend(model *MxGraphModel, vpcs map[string]*VPCInfo, serverBottom
 	}
 }
 
+// bgpStateColors returns (strokeColor, fillColor) for a BGP session state.
+// Returns purple (neutral) when no live state is available.
+func bgpStateColors(state string) (string, string) {
+	switch agentapi.BGPNeighborSessionState(state) {
+	case agentapi.BGPNeighborSessionStateEstablished:
+		return "#82b366", "#d5e8d4" // green
+	case agentapi.BGPNeighborSessionStateActive,
+		agentapi.BGPNeighborSessionStateOpenSent,
+		agentapi.BGPNeighborSessionStateOpenConfirm,
+		agentapi.BGPNeighborSessionStateConnect:
+		return "#d79b00", "#ffe6cc" // amber
+	case agentapi.BGPNeighborSessionStateIdle:
+		return "#b85450", "#f8cecc" // red
+	case agentapi.BGPNeighborSessionStateUnset:
+		fallthrough
+	default:
+		return "#9673a6", "#f3ecf8" // purple — no live data
+	}
+}
+
 func createUnderlayLayer(model *MxGraphModel, topo Topology, cellMap map[string]*MxCell, style Style) {
 	if !generateUnderlayLayer {
 		return
@@ -1965,6 +1991,80 @@ func createUnderlayLayer(model *MxGraphModel, topo Topology, cellMap map[string]
 			},
 		}
 		model.Root.MxCell = append(model.Root.MxCell, asnBox)
+	}
+
+	// --- 1b. External ASN group boxes (amber — matches external node/link palette) ---
+	extAsnGroups := map[string][]Node{}
+	for _, node := range topo.Nodes {
+		if node.Type != NodeTypeExternal {
+			continue
+		}
+		asn := node.Properties[PropASN]
+		if asn == "" {
+			continue
+		}
+		extAsnGroups[asn] = append(extAsnGroups[asn], node)
+	}
+
+	extAsnKeys := make([]string, 0, len(extAsnGroups))
+	for asn := range extAsnGroups {
+		extAsnKeys = append(extAsnKeys, asn)
+	}
+	sort.Strings(extAsnKeys)
+
+	for extAsnIdx, asn := range extAsnKeys {
+		extNodes := extAsnGroups[asn]
+
+		minX, minY := float64(9999), float64(9999)
+		maxX, maxY := float64(-9999), float64(-9999)
+
+		for _, extNode := range extNodes {
+			cell, ok := cellMap[extNode.ID]
+			if !ok || cell.Geometry == nil {
+				continue
+			}
+			x := cell.Geometry.X
+			y := cell.Geometry.Y
+			w := float64(cell.Geometry.Width)
+			h := float64(cell.Geometry.Height)
+			if x < minX {
+				minX = x
+			}
+			if y < minY {
+				minY = y
+			}
+			if x+w > maxX {
+				maxX = x + w
+			}
+			if y+h > maxY {
+				maxY = y + h
+			}
+		}
+
+		const extSidePadding = 8.0
+		minX -= extSidePadding
+		minY -= extSidePadding
+		maxX += extSidePadding
+		maxY += extSidePadding
+
+		extAsnBox := MxCell{
+			ID:     fmt.Sprintf("underlay_ext_asn_%d", extAsnIdx),
+			Parent: "underlay_layer",
+			Value:  fmt.Sprintf("ASN %s", asn),
+			Style: "rounded=1;arcSize=8;whiteSpace=wrap;html=1;" +
+				"dashed=1;dashPattern=8 4;strokeColor=#d79b00;strokeWidth=2;" +
+				"fillColor=none;labelPosition=center;verticalLabelPosition=top;" +
+				"verticalAlign=bottom;spacingBottom=2;fontSize=10;fontStyle=1;fontColor=#d79b00;",
+			Vertex: "1",
+			Geometry: &Geometry{
+				X:      minX,
+				Y:      minY,
+				Width:  int(maxX - minX),
+				Height: int(maxY - minY),
+				As:     "geometry",
+			},
+		}
+		model.Root.MxCell = append(model.Root.MxCell, extAsnBox)
 	}
 
 	// --- 2. Switch/gateway overlay cells (replace role text with RID + VTEP) ---
@@ -2069,7 +2169,7 @@ func createUnderlayLayer(model *MxGraphModel, topo Topology, cellMap map[string]
 		return "." + ip[dot+1:]
 	}
 	subnetOf := func(cidr string) string {
-		ip, _, ok := strings.Cut(cidr, "/")
+		ip, prefix, ok := strings.Cut(cidr, "/")
 		if !ok {
 			return cidr
 		}
@@ -2085,7 +2185,7 @@ func createUnderlayLayer(model *MxGraphModel, topo Topology, cellMap map[string]
 			octet = octet*10 + int(ch-'0')
 		}
 
-		return fmt.Sprintf("%s.%d/31", ip[:dot], octet&^1)
+		return fmt.Sprintf("%s.%d/%s", ip[:dot], octet&^1, prefix)
 	}
 
 	const p2pFixedDist = 30.0
@@ -2111,16 +2211,18 @@ func createUnderlayLayer(model *MxGraphModel, topo Topology, cellMap map[string]
 		perpY := edgeData.UnitX // perpendicular Y component for vertical offset
 		perpX := -edgeData.UnitY
 
+		strokeColor, fillColor := bgpStateColors(edgeData.Link.Properties[PropBGPState])
+
 		// Midpoint subnet label
 		if srcIP != "" {
 			subnet := subnetOf(srcIP)
 			midX := (edgeData.SrcX + edgeData.TgtX) / 2
 			midY := (edgeData.SrcY + edgeData.TgtY) / 2
 			subnetWidth := len(subnet)*4 + 8
-			subnetStyle := fmt.Sprintf("text;html=1;strokeColor=#9673a6;strokeWidth=0.5;"+
-				"fillColor=#f3ecf8;fillOpacity=85;align=center;verticalAlign=middle;"+
+			subnetStyle := fmt.Sprintf("text;html=1;strokeColor=%s;strokeWidth=0.5;"+
+				"fillColor=%s;fillOpacity=85;align=center;verticalAlign=middle;"+
 				"whiteSpace=wrap;rounded=1;fontSize=9;rotation=%.1f;",
-				edgeData.Rotation)
+				strokeColor, fillColor, edgeData.Rotation)
 			model.Root.MxCell = append(model.Root.MxCell, MxCell{
 				ID:     fmt.Sprintf("%s_p2p", edgeData.EdgeID),
 				Parent: "underlay_layer",
@@ -2137,10 +2239,10 @@ func createUnderlayLayer(model *MxGraphModel, topo Topology, cellMap map[string]
 			})
 		}
 
-		octStyle := fmt.Sprintf("text;html=1;strokeColor=#9673a6;strokeWidth=0.5;"+
-			"fillColor=#f3ecf8;fillOpacity=80;align=center;verticalAlign=middle;"+
+		octStyle := fmt.Sprintf("text;html=1;strokeColor=%s;strokeWidth=0.5;"+
+			"fillColor=%s;fillOpacity=80;align=center;verticalAlign=middle;"+
 			"whiteSpace=wrap;rounded=1;fontSize=9;rotation=%.1f;",
-			edgeData.Rotation)
+			strokeColor, fillColor, edgeData.Rotation)
 
 		// Near-source last-octet label
 		if srcIP != "" {
