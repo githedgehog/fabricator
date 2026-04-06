@@ -39,7 +39,7 @@ require (
 	github.com/vishvananda/netlink v1.3.1
 	go.githedgehog.com/fabric v0.116.0
 	go.githedgehog.com/libmeta v0.3.0
-	go.podman.io/image/v5 v5.39.1
+	go.podman.io/image/v5 v5.39.2
 	golang.org/x/crypto v0.49.0
 	golang.org/x/mod v0.34.0
 	golang.org/x/sync v0.20.0
