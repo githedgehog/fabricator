@@ -899,10 +899,12 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB, opts ShowTechOpts
 					if vmType == VMTypeServer || vmType == VMTypeExternal {
 						var peerIPs []string
 						for host, ip := range serverHostIPs {
-							if host != name && targets[host] != "" {
+							if _, ok := targets[host]; ok && host != name {
 								peerIPs = append(peerIPs, ip)
 							}
 						}
+						slices.Sort(peerIPs)
+						peerIPs = slices.Compact(peerIPs)
 						if len(peerIPs) > 0 {
 							injection := []byte("PEER_SERVER_IPS='" + strings.Join(peerIPs, " ") + "'\n")
 							if nl := bytes.IndexByte(script, '\n'); nl >= 0 {
