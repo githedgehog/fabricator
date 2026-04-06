@@ -858,6 +858,7 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB, opts ShowTechOpts
 								peerIPs = append(peerIPs, ip)
 							}
 						}
+						slices.Sort(peerIPs)
 						if len(peerIPs) > 0 {
 							injection := []byte("PEER_SERVER_IPS='" + strings.Join(peerIPs, " ") + "'\n")
 							if nl := bytes.IndexByte(script, '\n'); nl >= 0 {
