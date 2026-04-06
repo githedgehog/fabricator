@@ -12,6 +12,19 @@ permissions:
   contents: read
   security-events: write
 
+# Vulnerabilities dismissed pending an available fix in the Go module ecosystem.
+# GO-2026-4887: github.com/docker/docker AuthZ plugin bypass (GHSA-x744-4wpc-v9h2)
+#   Fixed in moby/moby docker-v29.3.1, but that release uses a new module path
+#   (github.com/moby/moby/v2) with no compatible drop-in replacement for
+#   github.com/docker/docker. We only use Docker client libs (not the daemon or
+#   AuthZ plugins), so this is not exploitable here.
+# GO-2026-4883: github.com/docker/docker off-by-one in plugin privilege validation (GHSA-pxq6-2prw-chj9)
+#   Same root cause: fix only in github.com/moby/moby/v2 >= 2.0.0-beta.8, no fix
+#   available for github.com/docker/docker. Daemon-side issue, not exploitable here.
+# Remove both entries once go.podman.io/image/v5 migrates to github.com/moby/moby/v2.
+env:
+  DISMISSED_VULNS: "GO-2026-4887,GO-2026-4883"
+
 jobs:
   govulncheck:
     runs-on: lab
@@ -26,7 +39,9 @@ jobs:
           cache: true
 
       - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          sudo apt-get install -y --no-install-recommends jq
 
       - name: Run govulncheck
         id: govulncheck
@@ -42,13 +57,32 @@ jobs:
           CGO_ENABLED: "0"
         run: govulncheck -tags containers_image_openpgp,containers_image_storage_stub -format=sarif ./... > govulncheck.sarif
 
+      - name: Filter dismissed vulns from SARIF
+        if: always()
+        run: |
+          pattern="^($(printf '%s\n' "$DISMISSED_VULNS" | tr ',' '|'))$"
+          jq --arg pattern "$pattern" \
+            'del(.runs[].results[] | select(.ruleId | test($pattern)))' \
+            govulncheck.sarif > govulncheck-filtered.sarif
+
       - name: Upload SARIF file
         if: always()
         uses: github/codeql-action/upload-sarif@v4
         with:
-          sarif_file: govulncheck.sarif
+          sarif_file: govulncheck-filtered.sarif
           category: govulncheck
 
       - name: Fail if vulnerabilities found
         if: steps.govulncheck.outcome == 'failure'
-        run: exit 1
+        run: |
+          # govulncheck-filtered.sarif has already had DISMISSED_VULNS stripped out;
+          # any remaining results are unexpected.
+          unexpected=$(jq -r '[.runs[]?.results[]?.ruleId | select(. != null and . != "")] | unique | .[]' \
+            govulncheck-filtered.sarif)
+
+          if [ -n "$unexpected" ]; then
+            echo "Unexpected vulnerabilities found (not in dismissed list):"
+            echo "$unexpected"
+            exit 1
+          fi
+          echo "All findings are in the dismissed list: $DISMISSED_VULNS"
