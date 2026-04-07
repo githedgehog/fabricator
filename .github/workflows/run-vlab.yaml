@@ -92,6 +92,11 @@ on:
         type: string
         required: false
         default: ""
+      collect_show_tech:
+        description: "Collect show-tech from all devices on pass (always collected on failure)"
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -101,7 +106,7 @@ env:
   slug: "${{ inputs.hybrid && 'h' || 'v' }}-${{ inputs.upgradefrom && 'up' || '' }}${{ inputs.upgradefrom }}${{ inputs.upgradefrom && '-' || '' }}${{ inputs.fabricmode != 'spine-leaf' && inputs.fabricmode || '' }}${{ inputs.mesh && 'mesh-' || '' }}${{ inputs.gateway && 'gw-' || '' }}${{ inputs.includeonie && 'onie-' || '' }}${{ inputs.buildmode }}-${{ inputs.vpcmode }}${{ inputs.releasetest && '-rt' || '' }}${{ inputs.releasetest_regex != '' && 'r' || '' }}${{ (inputs.custom_init_args != '' || inputs.custom_gen_args != '') && '-custom' || '' }}"
   # env vars to configure hhfab
   HHFAB_REG_REPO: 127.0.0.1:30000
-  HHFAB_VLAB_COLLECT: true
+  HHFAB_VLAB_COLLECT: ${{ inputs.collect_show_tech }}
 
 jobs:
   run:

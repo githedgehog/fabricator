@@ -1192,7 +1192,7 @@ func (c *Config) getNodeIP(ctx context.Context, name string) (string, error) {
 	return nodeIP.Addr().String(), nil
 }
 
-func (c *Config) CollectVLABDebug(ctx context.Context, vlab *VLAB, opts VLABRunOpts) {
+func (c *Config) CollectVLABDebug(ctx context.Context, vlab *VLAB, opts VLABRunOpts, forceShowTech bool) {
 	kubeconfig := filepath.Join(c.WorkDir, VLABDir, VLABKubeConfig)
 
 	if _, err := os.Stat(kubeconfig); errors.Is(err, fs.ErrNotExist) {
@@ -1226,7 +1226,7 @@ func (c *Config) CollectVLABDebug(ctx context.Context, vlab *VLAB, opts VLABRunO
 		}
 	}
 
-	if opts.CollectShowTech {
+	if forceShowTech || opts.ForceCollectShowTech || opts.CollectShowTech {
 		if err := c.VLABShowTech(ctx, vlab, ShowTechOpts{}); err != nil {
 			slog.Warn("Failed to collect show-tech diagnostics", "err", err)
 		}

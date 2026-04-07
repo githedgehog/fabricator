@@ -75,6 +75,7 @@ const (
 	FlagNameFailFast              = "fail-fast"
 	FlagNameReady                 = "ready"
 	FlagNameCollectShowTech       = "collect-show-tech"
+	FlagNameForceCollectShowTech  = "force-collect-show-tech"
 	FlagNameVPCMode               = "vpc-mode"
 	FlagRegEx                     = "regex"
 	FlagInvertRegex               = "invert-regex"
@@ -1125,6 +1126,11 @@ func Run(ctx context.Context) error {
 								Usage:   "collect show-tech from all devices at exit or error",
 								EnvVars: []string{"HHFAB_VLAB_COLLECT"},
 							},
+							&cli.BoolFlag{
+								Name:    FlagNameForceCollectShowTech,
+								Usage:   "force show-tech collection on all exits (pass included) even when --collect-show-tech is not set",
+								EnvVars: []string{"HHFAB_VLAB_COLLECT_FORCE"},
+							},
 							&cli.StringFlag{
 								Name:  FlagNameVPCMode,
 								Usage: "VPC mode to be used for on-ready commands: empty is default (l2vni), l3vni, etc.",
@@ -1240,6 +1246,7 @@ func Run(ctx context.Context) error {
 									OnReady:                  onReady,
 									OOBMgmtIface:             c.String(FlagOOBMgmtIface),
 									CollectShowTech:          c.Bool(FlagNameCollectShowTech),
+									ForceCollectShowTech:     c.Bool(FlagNameForceCollectShowTech),
 									VPCMode:                  vpcapi.VPCMode(handleL2VNI(c.String(FlagNameVPCMode))),
 									ReleaseTestRegexes:       c.StringSlice(FlagReleaseTestRegexes),
 									ReleaseTestRegexesInvert: c.Bool(FlagReleaseTestRegexesInvert),
