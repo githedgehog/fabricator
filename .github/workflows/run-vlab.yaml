@@ -98,7 +98,28 @@ permissions:
 
 env:
   # global workflow configs
-  slug: "${{ inputs.hybrid && 'h' || 'v' }}-${{ inputs.upgradefrom && 'up' || '' }}${{ inputs.upgradefrom }}${{ inputs.upgradefrom && '-' || '' }}${{ inputs.fabricmode != 'spine-leaf' && inputs.fabricmode || '' }}${{ inputs.mesh && 'mesh-' || '' }}${{ inputs.gateway && 'gw-' || '' }}${{ inputs.includeonie && 'onie-' || '' }}${{ inputs.buildmode }}-${{ inputs.vpcmode }}${{ inputs.releasetest && '-rt' || '' }}${{ inputs.releasetest_regex != '' && 'r' || '' }}${{ (inputs.custom_init_args != '' || inputs.custom_gen_args != '') && '-custom' || '' }}"
+  slug: >-
+    ${{ inputs.hybrid && 'h' || 'v' }}-${{
+      inputs.upgradefrom && format('up{0}-', inputs.upgradefrom) || ''
+    }}${{
+      inputs.fabricmode != 'spine-leaf' && inputs.fabricmode || ''
+    }}${{
+      inputs.mesh && 'mesh-' || ''
+    }}${{
+      inputs.gateway && 'gw-' || ''
+    }}${{
+      inputs.includeonie && 'onie-' || ''
+    }}${{
+      inputs.buildmode
+    }}-${{
+      inputs.vpcmode
+    }}${{
+      inputs.releasetest && '-rt' || ''
+    }}${{
+      inputs.releasetest_regex != '' && 'r' || ''
+    }}${{
+      (inputs.custom_init_args != '' || inputs.custom_gen_args != '') && '-custom' || ''
+    }}
   # env vars to configure hhfab
   HHFAB_REG_REPO: 127.0.0.1:30000
   HHFAB_VLAB_COLLECT: true
@@ -107,7 +128,21 @@ jobs:
   run:
     if: ${{ !inputs.skip }}
     runs-on: ${{ inputs.hybrid && 'hlab' || 'vlab' }}
-    timeout-minutes: "${{ inputs.pause_on_failure && (inputs.releasetest && (inputs.hybrid && 320 || 220) || (inputs.hybrid && 160 || 130)) || (inputs.releasetest && (inputs.hybrid && 250 || (inputs.upgradefrom != '' && 180 || 150)) || (inputs.hybrid && (inputs.upgradefrom != '' && 120 || 90) || (inputs.upgradefrom != '' && 90 || 60))) }}"
+    # pause_on_failure: rt+hybrid=320, rt=220, hybrid=160, default=130
+    # no pause:         rt+hybrid=250, rt+upgrade=180, rt=150, hybrid+upgrade=120, hybrid=90, upgrade=90, default=60
+    timeout-minutes: >-
+      ${{
+        inputs.pause_on_failure
+        && (inputs.releasetest
+          && (inputs.hybrid && 320 || 220)
+          || (inputs.hybrid && 160 || 130))
+        || (inputs.releasetest
+          && (inputs.hybrid && 250
+            || (inputs.upgradefrom != '' && 180 || 150))
+          || (inputs.hybrid
+            && (inputs.upgradefrom != '' && 120 || 90)
+            || (inputs.upgradefrom != '' && 90 || 60)))
+      }}
 
     steps:
       - name: Runner host

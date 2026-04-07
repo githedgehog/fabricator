@@ -248,7 +248,25 @@ jobs:
           fi
 
   vlab:
-    name: "${{ matrix.hybrid && 'h' || 'v' }}-${{ matrix.upgradefrom && 'up' || '' }}${{ matrix.upgradefrom }}${{ matrix.upgradefrom && '-' || '' }}${{ matrix.mesh && 'mesh-' || '' }}${{ matrix.gateway && 'gw-' || '' }}${{ matrix.includeonie && 'onie-' || '' }}${{ matrix.buildmode }}-${{ matrix.vpcmode }}${{ (inputs.releasetest == true || contains(github.event.pull_request.labels.*.name, 'ci:+release') || github.event.schedule == '0 6 * * *') && '-rt' || '' }}"
+    name: >-
+      ${{ matrix.hybrid && 'h' || 'v' }}-${{
+        matrix.upgradefrom && format('up{0}-', matrix.upgradefrom) || ''
+      }}${{
+        matrix.mesh && 'mesh-' || ''
+      }}${{
+        matrix.gateway && 'gw-' || ''
+      }}${{
+        matrix.includeonie && 'onie-' || ''
+      }}${{
+        matrix.buildmode
+      }}-${{
+        matrix.vpcmode
+      }}${{
+        (inputs.releasetest == true
+          || contains(github.event.pull_request.labels.*.name, 'ci:+release')
+          || github.event.schedule == '0 6 * * *')
+        && '-rt' || ''
+      }}
     needs:
       - test-build
     uses: ./.github/workflows/run-vlab.yaml
