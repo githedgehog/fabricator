@@ -103,6 +103,7 @@ type VLABRunOpts struct {
 	OnReady                  []OnReady
 	OOBMgmtIface             string
 	CollectShowTech          bool
+	ForceCollectShowTech     bool
 	VPCMode                  vpcapi.VPCMode
 	PauseOnFailure           bool
 	ReleaseTestRegexes       []string
@@ -523,7 +524,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 
 				slog.Warn("Failed running VM", "vm", vm.Name, "type", vm.Type, "err", err)
 
-				c.CollectVLABDebug(ctx, vlab, opts)
+				c.CollectVLABDebug(ctx, vlab, opts, true)
 
 				if opts.FailFast {
 					return fmt.Errorf("running vm: %w", err)
@@ -543,7 +544,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 
 					slog.Warn("Failed to post-process VM", "vm", vm.Name, "type", vm.Type, "err", err)
 
-					c.CollectVLABDebug(ctx, vlab, opts)
+					c.CollectVLABDebug(ctx, vlab, opts, true)
 
 					if opts.FailFast {
 						return fmt.Errorf("post-processing vm %s: %w", vm.Name, err)
@@ -726,7 +727,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						return nil
 					}
 
-					c.CollectVLABDebug(ctx, vlab, opts)
+					c.CollectVLABDebug(ctx, vlab, opts, false)
 
 					// TODO seems like some graceful shutdown logic isn't working in CI and we're getting stuck w/o this
 					if os.Getenv("GITHUB_ACTIONS") == "true" {
@@ -767,7 +768,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 
 						slog.Warn("Failed to run release test", "err", err)
 
-						c.CollectVLABDebug(ctx, vlab, opts)
+						c.CollectVLABDebug(ctx, vlab, opts, true)
 
 						return fmt.Errorf("release test: %w", err)
 					}
@@ -817,7 +818,7 @@ func (c *Config) handleShutdownWithPause(ctx context.Context, vlab *VLAB, opts V
 
 	slog.Warn("Failed", "err", err.Error())
 
-	c.CollectVLABDebug(ctx, vlab, opts)
+	c.CollectVLABDebug(ctx, vlab, opts, true)
 	if opts.PauseOnFailure {
 		if err := pauseOnFailure(ctx); err != nil {
 			slog.Warn("Pause on failure failed, ignoring", "err", err.Error())

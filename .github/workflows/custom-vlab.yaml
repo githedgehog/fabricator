@@ -52,13 +52,13 @@ on:
         type: string
         required: false
         default: ""
-      releasetest_regex_invert:
-        description: "Invert release test regex (only if regex is provided)"
+      pause_on_failure:
+        description: "Pause on failure (enables debug)"
         type: boolean
         required: false
         default: false
-      pause_on_failure:
-        description: "Pause on failure (enables debug)"
+      collect_show_tech:
+        description: "Force show-tech collection on all exits including success"
         type: boolean
         required: false
         default: false
@@ -82,9 +82,9 @@ jobs:
       upgradefrom: ${{ inputs.upgradefrom }}
       releasetest: ${{ inputs.releasetest }}
       releasetest_regex: ${{ inputs.releasetest_regex }}
-      releasetest_regex_invert: ${{ inputs.releasetest_regex_invert }}
       debug: ${{ inputs.pause_on_failure }}
       pause_on_failure: ${{ inputs.pause_on_failure }}
+      collect_show_tech: ${{ inputs.collect_show_tech }}
 
   publish-test-results:
     if: ${{ inputs.releasetest && !cancelled() }}

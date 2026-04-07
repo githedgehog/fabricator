@@ -92,6 +92,11 @@ on:
         type: string
         required: false
         default: ""
+      collect_show_tech:
+        description: "Force show-tech collection on all exits including success"
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -102,6 +107,7 @@ env:
   # env vars to configure hhfab
   HHFAB_REG_REPO: 127.0.0.1:30000
   HHFAB_VLAB_COLLECT: true
+  HHFAB_VLAB_COLLECT_FORCE: ${{ inputs.collect_show_tech }}
 
 jobs:
   run:
