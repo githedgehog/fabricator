@@ -24,14 +24,14 @@ on all exits including pass. All failure paths collect unconditionally.
 ```
 show-tech-output/
   runner.log                   # CI runner host diagnostics
-  <vm-or-switch-name>.log      # one file per device (SSH path)
-  <vm-or-switch-name>-console.log  # console fallback if SSH failed
+  <vm-or-switch-name>-show-tech.log  # one file per device (SSH path)
+  <vm-or-switch-name>-console.log    # console fallback if SSH failed
 
   # release-test per-failure layout:
   <suite-name>/
     <test-name>/
       runner.log
-      <device>.log
+      <device>-show-tech.log
       ...
     suite-setup/               # used when the suite itself fails to set up
       ...
@@ -112,8 +112,9 @@ Collected via `sonic-cli` and direct `bcmcmd` (Broadcom SDK).
 - **System**: kernel version, OS release
 - **Networking**: `networkctl status`, VLAN interfaces (`ip -d link show type
   vlan`), `ip addr`, full and per-table routing (`ip route show table all`)
-- **Connectivity**: ping to default gateway, ping to `10.0.{1-9}.2` (other
-  servers in the lab)
+- **Connectivity**: ping to default gateway, ping to peer server IPs
+  injected via `PEER_SERVER_IPS` from DHCP allocations (skipped when no
+  peer IPs are available)
 - **Link detail**: `networkctl list`, `ip -d link show`, bonding configuration
   (`/proc/net/bonding`), MTU, LLDP data, DHCP leases, per-NIC ethtool offload
   settings, systemd network unit files
