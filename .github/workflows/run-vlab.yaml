@@ -128,20 +128,14 @@ jobs:
   run:
     if: ${{ !inputs.skip }}
     runs-on: ${{ inputs.hybrid && 'hlab' || 'vlab' }}
-    # pause_on_failure: rt+hybrid=320, rt=220, hybrid=160, default=130
-    # no pause:         rt+hybrid=250, rt+upgrade=180, rt=150, hybrid+upgrade=120, hybrid=90, upgrade=90, default=60
     timeout-minutes: >-
       ${{
-        inputs.pause_on_failure
-        && (inputs.releasetest
-          && (inputs.hybrid && 320 || 220)
-          || (inputs.hybrid && 160 || 130))
-        || (inputs.releasetest
-          && (inputs.hybrid && 250
-            || (inputs.upgradefrom != '' && 180 || 150))
-          || (inputs.hybrid
-            && (inputs.upgradefrom != '' && 120 || 90)
-            || (inputs.upgradefrom != '' && 90 || 60)))
+        inputs.pause_on_failure && 360
+        || inputs.releasetest && inputs.hybrid && 270
+        || inputs.releasetest && !inputs.hybrid && 150
+        || !inputs.releasetest && inputs.hybrid && 120
+        || !inputs.releasetest && !inputs.hybrid && 90
+        || 60
       }}
 
     steps:
