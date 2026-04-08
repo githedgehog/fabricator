@@ -875,7 +875,7 @@ github.com/xrash/smetrics
 # github.com/yusufpapurcu/wmi v1.2.4
 ## explicit; go 1.16
 github.com/yusufpapurcu/wmi
-# go.githedgehog.com/fabric v0.116.0
+# go.githedgehog.com/fabric v0.117.0
 ## explicit; go 1.26
 go.githedgehog.com/fabric/api/agent/v1beta1
 go.githedgehog.com/fabric/api/dhcp/v1beta1
