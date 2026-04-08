@@ -93,6 +93,23 @@ func (testCtx *VPCPeeringTestCtx) staticExternalPeeringTest(ctx context.Context)
 		return nil
 	})
 
+	// Wait for EVPN Type-5 routes to be installed in leaf switch RIBs before
+	// running connectivity tests. WaitReady only confirms frr-reload.py exited;
+	// the ZEBRA CPI blast + BGP UPDATE propagation to leaves takes 26-38s more.
+	leavesForVPC, err := getSwitchesForVPC(ctx, testCtx.kube, targetVPC)
+	if err != nil {
+		return false, reverts, fmt.Errorf("getting switches for vpc %s: %w", targetVPC, err)
+	}
+
+	if len(leavesForVPC) > 0 {
+		vrfName := "VrfV" + targetVPC
+		slog.Info("Waiting for static external routes on leaves", "vpc", targetVPC, "leaves", leavesForVPC, "vrf", vrfName)
+		if err := testCtx.waitForRoutesInSwitches(ctx, leavesForVPC, []string{"0.0.0.0/0"},
+			vrfName); err != nil {
+			return false, reverts, fmt.Errorf("waiting for static external routes in vpc %s: %w", targetVPC, err)
+		}
+	}
+
 	if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
 		return false, reverts, fmt.Errorf("testing static external connectivity: %w", err)
 	}
