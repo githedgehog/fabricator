@@ -496,6 +496,38 @@ func (testCtx *VPCPeeringTestCtx) gatewayFailoverTest(ctx context.Context) (bool
 		if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
 			return fmt.Errorf("waiting in reverts before testing connectivity: %w", err)
 		}
+
+		// Wait for EVPN Type-5 routes to be re-installed in leaf VRFs after
+		// spine recovery. WaitReady only confirms frr-reload.py exited; BGP
+		// UPDATE propagation to leaves takes additional time.
+		for _, vpc := range vpcs.Items[:2] {
+			peerVPC := vpcs.Items[0]
+			if vpc.Name == peerVPC.Name {
+				peerVPC = vpcs.Items[1]
+			}
+
+			var peerRoutes []string
+			for _, s := range peerVPC.Spec.Subnets {
+				peerRoutes = append(peerRoutes, s.Subnet)
+			}
+
+			leavesForVPC, err := getSwitchesForVPC(ctx, testCtx.kube, vpc.Name)
+			if err != nil {
+				return fmt.Errorf("getting switches for vpc %s: %w", vpc.Name, err)
+			}
+			if len(leavesForVPC) == 0 || len(peerRoutes) == 0 {
+				continue
+			}
+
+			vrfName := "VrfV" + vpc.Name
+			slog.Info("Waiting for gateway routes on leaves after spine recovery",
+				"vpc", vpc.Name, "leaves", leavesForVPC, "routes", peerRoutes, "vrf", vrfName)
+			if err := testCtx.waitForRoutesInSwitches(ctx, leavesForVPC, peerRoutes,
+				vrfName); err != nil {
+				return fmt.Errorf("waiting for gateway routes after spine recovery in vpc %s: %w", vpc.Name, err)
+			}
+		}
+
 		slog.Debug("Testing connectivity after re-enabling spines and agents")
 		if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
 			return fmt.Errorf("connectivity test after re-enabling spines and agents: %w", err)
