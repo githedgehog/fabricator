@@ -182,7 +182,7 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, fabri
 
 		totalESLAGLeafs := 0
 		if b.ESLAGLeafGroups != "" {
-			for _, g := range strings.Split(b.ESLAGLeafGroups, ",") {
+			for g := range strings.SplitSeq(b.ESLAGLeafGroups, ",") {
 				if v, err := strconv.Atoi(strings.TrimSpace(g)); err == nil {
 					totalESLAGLeafs += v
 				}
@@ -212,8 +212,8 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, fabri
 	eslagLeafGroups := []uint8{}
 
 	if b.ESLAGLeafGroups != "" {
-		parts := strings.Split(b.ESLAGLeafGroups, ",")
-		for _, part := range parts {
+		parts := strings.SplitSeq(b.ESLAGLeafGroups, ",")
+		for part := range parts {
 			part = strings.TrimSpace(part)
 			leafs, err := strconv.ParseUint(part, 10, 8)
 			if err != nil {
@@ -566,7 +566,7 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, fabri
 
 		leafs := eslagLeafGroups[eslagID]
 		leafNames := []string{}
-		for eslagLeafID := uint8(0); eslagLeafID < leafs; eslagLeafID++ {
+		for eslagLeafID := range leafs {
 			leafName := fmt.Sprintf("leaf-%02d", leafID+eslagLeafID)
 			leafNames = append(leafNames, leafName)
 

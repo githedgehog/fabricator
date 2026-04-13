@@ -508,7 +508,7 @@ func (c *ControlUpgrade) upgradeK8s(ctx context.Context, kube kclient.Reader) er
 	slog.Debug("Waiting for registry after K8s upgrade")
 
 	// make sure registry is ready after K8s upgrade and up for at least a minute
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("waiting before registry check after upgrade: %w", ctx.Err())

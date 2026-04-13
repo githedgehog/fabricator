@@ -802,9 +802,7 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB, opts ShowTechOpts
 
 	// Collect show-tech from all targets
 	for name, vmType := range targets {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 
 			// SSH helper automatically handles VM vs hardware switches
 			ssh, err := c.SSH(ctx, vlab, name)
@@ -864,7 +862,7 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB, opts ShowTechOpts
 					errChan <- fmt.Errorf("console fallback for %s: %w", name, err)
 				}
 			}
-		}()
+		})
 	}
 
 	wg.Wait()

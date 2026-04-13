@@ -21,7 +21,6 @@ import (
 	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
-	"go.githedgehog.com/fabric/pkg/util/pointer"
 	"go.githedgehog.com/fabricator/pkg/util/sshutil"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -861,7 +860,7 @@ outer:
 
 	// isolate subnet1
 	slog.Debug("Isolating subnet1", "subnet", subnet1Name)
-	subnet1.Isolated = pointer.To(true)
+	subnet1.Isolated = new(true)
 	_, err := CreateOrUpdateVpc(ctx, testCtx.kube, vpc)
 	if err != nil {
 		return false, nil, fmt.Errorf("updating VPC %s: %w", vpc.Name, err)
@@ -872,8 +871,8 @@ outer:
 		slog.Debug("Removing all restrictions")
 		vpc.Spec.Permit = make([][]string, 0)
 		for _, sub := range vpc.Spec.Subnets {
-			sub.Isolated = pointer.To(false)
-			sub.Restricted = pointer.To(false)
+			sub.Isolated = new(false)
+			sub.Restricted = new(false)
 		}
 		_, err = CreateOrUpdateVpc(ctx, testCtx.kube, vpc)
 		if err != nil {
@@ -897,7 +896,7 @@ outer:
 	// set restricted flags for subnet2
 	if returnErr == nil {
 		slog.Debug("Restricting subnet2", "subnet", subnet2Name)
-		subnet2.Restricted = pointer.To(true)
+		subnet2.Restricted = new(true)
 		_, err = CreateOrUpdateVpc(ctx, testCtx.kube, vpc)
 		if err != nil {
 			returnErr = fmt.Errorf("updating VPC %s: %w", vpc.Name, err)
@@ -914,8 +913,8 @@ outer:
 	// make subnet3 isolated and restricted
 	if returnErr == nil {
 		slog.Debug("Isolating and restricting subnet3", "subnet", subnet3Name)
-		subnet3.Isolated = pointer.To(true)
-		subnet3.Restricted = pointer.To(true)
+		subnet3.Isolated = new(true)
+		subnet3.Restricted = new(true)
 		_, err = CreateOrUpdateVpc(ctx, testCtx.kube, vpc)
 		if err != nil {
 			returnErr = fmt.Errorf("updating VPC %s: %w", vpc.Name, err)
@@ -1602,7 +1601,7 @@ outer:
 	maxAttempts := 6
 	minTransmitBits := uint64(5000)
 	minTransmitPkts := uint64(50)
-	for i := 0; i < maxAttempts; i++ {
+	for i := range maxAttempts {
 		slog.Debug("Checking UC3 transmit bits on switch", "switch", swName, "attempt", i+1)
 		uc3Map := make(map[string]bool)
 		agent := &agentapi.Agent{}

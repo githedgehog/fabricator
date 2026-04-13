@@ -1764,16 +1764,10 @@ func createVPCLegend(model *MxGraphModel, vpcs map[string]*VPCInfo, serverBottom
 
 	// Calculate available horizontal space based on server layout
 	// A VPC legend entry (320px column) spans approximately 2 servers
-	maxColumns := (numServers + 1) / 2
-	if maxColumns < 1 {
-		maxColumns = 1
-	}
+	maxColumns := max((numServers+1)/2, 1)
 
 	// Minimize rows by using as many columns as possible
-	numColumns := min(len(vpcNames), maxColumns)
-	if numColumns < 1 {
-		numColumns = 1
-	}
+	numColumns := max(min(len(vpcNames), maxColumns), 1)
 
 	maxVPCsPerColumn := (len(vpcNames) + numColumns - 1) / numColumns
 

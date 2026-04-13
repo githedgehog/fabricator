@@ -505,7 +505,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 				)
 			}
 
-			for idx := 0; idx < VLABPCIBridges; idx++ {
+			for idx := range VLABPCIBridges {
 				args = append(args,
 					"-device", fmt.Sprintf("i82801b11-bridge,id=dmi_pci_bridge%d", idx),
 					"-device", fmt.Sprintf("pci-bridge,id=%s%d,bus=dmi_pci_bridge%d,chassis_nr=0x1,addr=0x%d,shpc=off", VLABPCIBridgePrefix, idx, idx, idx),

@@ -168,7 +168,7 @@ func PreparePassthrough(_ context.Context, devs []string) error {
 
 	for _, dev := range devs {
 		var err error
-		for attempt := 0; attempt < 6; attempt++ {
+		for range 6 {
 			err = bindDeviceToVFIO(dev)
 			if err == nil {
 				break
@@ -304,7 +304,7 @@ func CheckStaleVMs(ctx context.Context, kill bool) ([]int32, error) {
 		maxAttempts := int(maxWaitTime / checkInterval)
 		start := time.Now()
 
-		for attempt := 0; attempt < maxAttempts; attempt++ {
+		for attempt := range maxAttempts {
 			allGone := true
 			remaining := []int32{}
 			for _, pid := range stale {

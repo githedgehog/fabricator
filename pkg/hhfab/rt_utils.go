@@ -739,7 +739,7 @@ func (testCtx *VPCPeeringTestCtx) waitForDHCPRenewal(ctx context.Context, server
 	// In L3VNI mode, check immediately for 2-step process
 	if isL3Mode {
 		shortLeaseFound := false
-		for i := 0; i < 30; i++ {
+		for range 30 {
 			select {
 			case <-ctx.Done():
 				return fmt.Errorf("context cancelled during L3 reconfiguration polling: %w", ctx.Err())
@@ -852,8 +852,8 @@ type DHCPLeaseInfo struct {
 func parseDHCPLease(output string) (*DHCPLeaseInfo, error) {
 	info := &DHCPLeaseInfo{}
 
-	lines := strings.Split(output, "\n")
-	for _, line := range lines {
+	lines := strings.SplitSeq(output, "\n")
+	for line := range lines {
 		line = strings.TrimSpace(line)
 		if !strings.Contains(line, "valid_lft") {
 			continue
