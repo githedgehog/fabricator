@@ -15,7 +15,6 @@ import (
 	"dario.cat/mergo"
 	"github.com/go-playground/validator/v10"
 	fmeta "go.githedgehog.com/fabric/api/meta"
-	"go.githedgehog.com/fabric/pkg/agent/dozer/bcm"
 	"go.githedgehog.com/fabricator/api/meta"
 	"go.githedgehog.com/libmeta/pkg/alloy"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -1055,7 +1054,7 @@ var knownSwitchUsers = []string{
 	"systemd-coredump",
 	"ntp",
 	"frr",
-	bcm.AgentUser,
+	fmeta.AgentUser,
 	fmeta.AlloyUser,
 }
 

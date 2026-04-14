@@ -103,10 +103,12 @@ type VLABRunOpts struct {
 	OnReady                  []OnReady
 	OOBMgmtIface             string
 	CollectShowTech          bool
+	ForceCollectShowTech     bool
 	VPCMode                  vpcapi.VPCMode
 	PauseOnFailure           bool
 	ReleaseTestRegexes       []string
 	ReleaseTestRegexesInvert bool
+	InterfaceMTU             uint16
 }
 
 type OnReady string
@@ -523,7 +525,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 
 				slog.Warn("Failed running VM", "vm", vm.Name, "type", vm.Type, "err", err)
 
-				c.CollectVLABDebug(ctx, vlab, opts)
+				c.CollectVLABDebug(ctx, vlab, opts, true)
 
 				if opts.FailFast {
 					return fmt.Errorf("running vm: %w", err)
@@ -543,7 +545,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 
 					slog.Warn("Failed to post-process VM", "vm", vm.Name, "type", vm.Type, "err", err)
 
-					c.CollectVLABDebug(ctx, vlab, opts)
+					c.CollectVLABDebug(ctx, vlab, opts, true)
 
 					if opts.FailFast {
 						return fmt.Errorf("post-processing vm %s: %w", vm.Name, err)
@@ -677,7 +679,6 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						return c.handleShutdownWithPause(ctx, vlab, opts, fmt.Errorf("reinstalling switches: %w", err))
 					}
 				case OnReadySetupVPCs:
-					// TODO make it configurable
 					setupVPCsOpts := SetupVPCsOpts{
 						WaitSwitchesReady: true,
 						VLANNamespace:     "default",
@@ -688,6 +689,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						TimeServers:       []string{"219.239.35.0"},
 						HashPolicy:        HashPolicyL2And3,
 						VPCMode:           opts.VPCMode,
+						InterfaceMTU:      opts.InterfaceMTU,
 					}
 					slog.Debug("Running setup-vpcs", "opts", setupVPCsOpts)
 					if err := c.SetupVPCs(ctx, vlab, setupVPCsOpts); err != nil {
@@ -726,7 +728,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						return nil
 					}
 
-					c.CollectVLABDebug(ctx, vlab, opts)
+					c.CollectVLABDebug(ctx, vlab, opts, false)
 
 					// TODO seems like some graceful shutdown logic isn't working in CI and we're getting stuck w/o this
 					if os.Getenv("GITHUB_ACTIONS") == "true" {
@@ -767,7 +769,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 
 						slog.Warn("Failed to run release test", "err", err)
 
-						c.CollectVLABDebug(ctx, vlab, opts)
+						c.CollectVLABDebug(ctx, vlab, opts, true)
 
 						return fmt.Errorf("release test: %w", err)
 					}
@@ -817,7 +819,7 @@ func (c *Config) handleShutdownWithPause(ctx context.Context, vlab *VLAB, opts V
 
 	slog.Warn("Failed", "err", err.Error())
 
-	c.CollectVLABDebug(ctx, vlab, opts)
+	c.CollectVLABDebug(ctx, vlab, opts, true)
 	if opts.PauseOnFailure {
 		if err := pauseOnFailure(ctx); err != nil {
 			slog.Warn("Pause on failure failed, ignoring", "err", err.Error())

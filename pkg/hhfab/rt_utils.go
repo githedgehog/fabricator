@@ -362,8 +362,9 @@ func checkRouteInSwitch(ctx context.Context, ssh *sshutil.Config, switchName, ro
 	return stdout != "", nil
 }
 
-// wait until all switches in a set have a bunch of routes installed, or error out after a configurable timeout
-func (testCtx *VPCPeeringTestCtx) waitForRoutesInSwitches(ctx context.Context, switches map[string]bool, routes []string, vrfName string, timeout time.Duration) error {
+// wait until all switches in a set have a bunch of routes installed, or error out after 3 minutes
+func (testCtx *VPCPeeringTestCtx) waitForRoutesInSwitches(ctx context.Context, switches map[string]bool, routes []string, vrfName string) error {
+	const timeout = 3 * time.Minute
 	slog.Debug("Checking for routes in switches", "switches", switches, "routes", routes, "vrf", vrfName, "timeout", timeout)
 	toCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()

@@ -114,6 +114,8 @@ linters-settings:
             desc: use stdlib slices or samber/lo package
           - pkg: gopkg.in/yaml
             desc: use sigs.k8s.io/yaml
+          - pkg: go.githedgehog.com/fabric/pkg/agent
+            desc: don't import fabric agent package
   reassign:
     patterns:
       - ".*"

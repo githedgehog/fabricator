@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
-	"time"
 
 	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
@@ -386,7 +385,7 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringLoopTest(ctx context.Context) (b
 
 		slog.Info("Waiting for gateway routes on leaves", "vpc", vpc.Name, "leaves", leavesForVPC, "routes", peerRoutes, "vrf", vrfName)
 		if err := testCtx.waitForRoutesInSwitches(ctx, leavesForVPC, peerRoutes,
-			vrfName, 3*time.Minute); err != nil {
+			vrfName); err != nil {
 			return false, nil, fmt.Errorf("waiting for gateway routes in vpc %s: %w", vpc.Name, err)
 		}
 	}

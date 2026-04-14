@@ -928,6 +928,15 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 	if err := kube.List(ctx, gateways); err != nil {
 		return fmt.Errorf("listing gateways: %w", err)
 	}
+	const MaxVTEPMACs = 254
+	if len(gateways.Items) > MaxVTEPMACs {
+		return fmt.Errorf("too many gateways (%d) for our current VTEPMAC hydration scheme, maximum is %d", len(gateways.Items), MaxVTEPMACs) //nolint:goerr113
+	}
+	nextMACFinalOctet := uint8(1)
+
+	slices.SortFunc(gateways.Items, func(a, b gwapi.Gateway) int {
+		return cmp.Compare(a.Name, b.Name)
+	})
 
 	for _, gw := range gateways.Items {
 		gw.Spec.ASN = c.Fab.Spec.Config.Gateway.ASN
@@ -938,7 +947,8 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 		gw.Spec.VTEPIP = netip.PrefixFrom(nextVTEPIP, 32).String()
 		nextVTEPIP = nextVTEPIP.Next()
 
-		gw.Spec.VTEPMAC = "CA:FE:BA:BE:01:02" // TODO replace with properly generated or configured MAC address
+		gw.Spec.VTEPMAC = fmt.Sprintf("CA:FE:BA:BE:01:%02x", nextMACFinalOctet)
+		nextMACFinalOctet++
 		gw.Spec.VTEPMTU = fabric.ServerFacingMTU
 
 		if err := kube.Update(ctx, &gw); err != nil {

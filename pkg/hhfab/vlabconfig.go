@@ -956,6 +956,7 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 			}
 		}
 
+		usernet := 0
 		for nicID, nicCfgRaw := range paddedNICs {
 			if nicID >= VLABMaxNICs {
 				return nil, fmt.Errorf("too many NICs for VM %q: %d", name, len(nics)) //nolint:goerr113
@@ -972,7 +973,6 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 
 			netdev := ""
 			device := ""
-			usernet := 0
 			if nicType == NICTypeNoop || nicType == NICTypeDirect { //nolint:gocritic
 				port := getDirectNICPort(vmID, uint(nicID)) //nolint:gosec
 				netdev = fmt.Sprintf("socket,udp=127.0.0.1:%d", port)

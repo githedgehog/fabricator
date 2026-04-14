@@ -35,10 +35,15 @@ function restart_networkd() {
 function setup_bond() {
     local bond_name=$1
     local hash_policy=$2
+    local mtu=$3
 
     sudo ip l a "$bond_name" type bond miimon 100 mode 802.3ad xmit_hash_policy "$hash_policy"
 
-    for iface in "${@:3}"; do
+    if [ -n "$mtu" ]; then
+        sudo ip l s "$bond_name" mtu "$mtu"
+    fi
+
+    for iface in "${@:4}"; do
         # cannot enslave interface if it is up
         sudo ip l s "$iface" down 2> /dev/null || echo "warning: could not bring down $iface" >&2
         sudo ip l s "$iface" master "$bond_name"
@@ -50,6 +55,11 @@ function setup_bond() {
 function setup_vlan() {
     local iface_name=$1
     local vlan_id=$2
+    local mtu=$3
+
+    if [ -n "$mtu" ]; then
+        sudo ip l s "$iface_name" mtu "$mtu"
+    fi
 
     sudo ip l s "$iface_name" up
     sudo ip l a link "$iface_name" name "$iface_name.$vlan_id" type vlan id "$vlan_id"
@@ -119,24 +129,46 @@ elif [ "$1" == "cleanup" ]; then
     exit 0
 elif [ "$1" == "bond" ]; then
     if [ "$#" -lt 4 ]; then
-        echo "Usage: $0 bond <vlan_id> <hash_policy> <iface1> [<iface2> ...]" >&2
+        echo "Usage: $0 bond <vlan_id> <hash_policy> <iface1> [<iface2> ...] [--mtu=<value>]" >&2
         exit 1
     fi
 
-    setup_bond bond0 "${@:3}"
+    mtu=""
+    ifaces=()
+    for arg in "${@:4}"; do
+        case "$arg" in
+            --mtu=*) mtu="${arg#--mtu=}" ;;
+            *) ifaces+=("$arg") ;;
+        esac
+    done
+
+    if [ "${#ifaces[@]}" -eq 0 ]; then
+        echo "Error: at least one interface required for bond" >&2
+        exit 1
+    fi
+
+    setup_bond bond0 "$3" "$mtu" "${ifaces[@]}"
     sleep 1
     setup_vlan bond0 "$2"
     get_ip bond0."$2"
 
     exit 0
 elif [ "$1" == "vlan" ]; then
-    if [ "$#" -ne 3 ]; then
-        echo "Usage: $0 vlan <vlan_id> <iface1>" >&2
+    if [ "$#" -lt 3 ]; then
+        echo "Usage: $0 vlan <vlan_id> <iface1> [--mtu=<value>]" >&2
         exit 1
     fi
 
-    setup_vlan "$3" "$2"
-    get_ip "$3"."$2"
+    mtu=""
+    iface="$3"
+    for arg in "${@:4}"; do
+        case "$arg" in
+            --mtu=*) mtu="${arg#--mtu=}" ;;
+        esac
+    done
+
+    setup_vlan "$iface" "$2" "$mtu"
+    get_ip "$iface"."$2"
 
     exit 0
 elif [ "$1" == "p2p" ]; then

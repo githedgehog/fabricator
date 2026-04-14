@@ -75,6 +75,7 @@ const (
 	FlagNameFailFast              = "fail-fast"
 	FlagNameReady                 = "ready"
 	FlagNameCollectShowTech       = "collect-show-tech"
+	FlagNameForceCollectShowTech  = "force-collect-show-tech"
 	FlagNameVPCMode               = "vpc-mode"
 	FlagRegEx                     = "regex"
 	FlagInvertRegex               = "invert-regex"
@@ -1122,12 +1123,23 @@ func Run(ctx context.Context) error {
 							&cli.BoolFlag{
 								Name:    FlagNameCollectShowTech,
 								Aliases: []string{"collect"},
-								Usage:   "collect show-tech from all devices at exit or error",
+								Usage:   "enable show-tech collection on failure paths",
 								EnvVars: []string{"HHFAB_VLAB_COLLECT"},
+							},
+							&cli.BoolFlag{
+								Name:    FlagNameForceCollectShowTech,
+								Usage:   "force show-tech collection on all exits including success",
+								EnvVars: []string{"HHFAB_VLAB_COLLECT_FORCE"},
 							},
 							&cli.StringFlag{
 								Name:  FlagNameVPCMode,
 								Usage: "VPC mode to be used for on-ready commands: empty is default (l2vni), l3vni, etc.",
+							},
+							&cli.UintFlag{
+								Name:    "interface-mtu",
+								Aliases: []string{"mtu"},
+								Usage:   "interface MTU for server interfaces and VPCs advertised by DHCP when using on-ready commands (0 = auto: 9036 for non-VS, disabled for SONiC VS)",
+								EnvVars: []string{"HHFAB_INTERFACE_MTU"},
 							},
 							&cli.StringSliceFlag{
 								Name:    FlagReleaseTestRegexes,
@@ -1206,6 +1218,11 @@ func Run(ctx context.Context) error {
 								onReady = append(onReady, ready)
 							}
 
+							ifMTU, err := parseInterfaceMTU(c)
+							if err != nil {
+								return err
+							}
+
 							if err := hhfab.VLABUp(ctx, workDir, cacheDir, hhfab.VLABUpOpts{
 								HydrateMode:          hhfab.HydrateMode(hydrateMode),
 								ReCreate:             c.Bool(FlagNameReCreate),
@@ -1240,9 +1257,11 @@ func Run(ctx context.Context) error {
 									OnReady:                  onReady,
 									OOBMgmtIface:             c.String(FlagOOBMgmtIface),
 									CollectShowTech:          c.Bool(FlagNameCollectShowTech),
+									ForceCollectShowTech:     c.Bool(FlagNameForceCollectShowTech),
 									VPCMode:                  vpcapi.VPCMode(handleL2VNI(c.String(FlagNameVPCMode))),
 									ReleaseTestRegexes:       c.StringSlice(FlagReleaseTestRegexes),
 									ReleaseTestRegexesInvert: c.Bool(FlagReleaseTestRegexesInvert),
+									InterfaceMTU:             ifMTU,
 								},
 							}); err != nil {
 								return fmt.Errorf("running VLAB: %w", err)
@@ -1420,6 +1439,11 @@ func Run(ctx context.Context) error {
 						}),
 						Before: before(false),
 						Action: func(c *cli.Context) error {
+							ifMTU, err := parseInterfaceMTU(c)
+							if err != nil {
+								return err
+							}
+
 							if err := hhfab.DoVLABSetupVPCs(ctx, workDir, cacheDir, hhfab.SetupVPCsOpts{
 								WaitSwitchesReady: c.Bool("wait-switches-ready"),
 								ForceCleanup:      c.Bool("force-cleanup"),
@@ -1429,7 +1453,7 @@ func Run(ctx context.Context) error {
 								SubnetsPerVPC:     c.Int("subnets-per-vpc"),
 								DNSServers:        c.StringSlice("dns-servers"),
 								TimeServers:       c.StringSlice("time-servers"),
-								InterfaceMTU:      uint16(c.Uint("interface-mtu")), //nolint:gosec
+								InterfaceMTU:      ifMTU,
 								HashPolicy:        c.String(FlagHashPolicy),
 								VPCMode:           vpcapi.VPCMode(handleL2VNI(c.String(FlagNameVPCMode))),
 								KeepPeerings:      c.Bool("keep-peerings"),
@@ -1947,6 +1971,20 @@ func Run(ctx context.Context) error {
 
 func flatten[T any, Slice ~[]T](collection ...Slice) Slice {
 	return lo.Flatten(collection)
+}
+
+func parseInterfaceMTU(c *cli.Context) (uint16, error) {
+	const minMTU = 96   // matches the DHCP API lower bound
+	const maxMTU = 9036 // matches the DHCP API upper bound
+	mtu := c.Uint("interface-mtu")
+	if mtu != 0 && mtu < minMTU {
+		return 0, fmt.Errorf("interface-mtu %d is below minimum allowed value of %d", mtu, minMTU) //nolint:err113
+	}
+	if mtu > maxMTU {
+		return 0, fmt.Errorf("interface-mtu %d exceeds maximum allowed value of %d", mtu, maxMTU) //nolint:err113
+	}
+
+	return uint16(mtu), nil
 }
 
 func handleL2VNI(in string) string {
