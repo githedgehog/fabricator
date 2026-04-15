@@ -27,18 +27,18 @@ const (
 	StaticExternalDummyIface = "10.199.0.100"
 )
 
-func makeMultiVPCMultiSubnetSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
+func makeMultiVPCMultiSubnetSuite() *JUnitTestSuite {
 	suite := &JUnitTestSuite{
 		Name: "Multi-Subnet Multi-VPC Suite",
 	}
 	suite.TestCases = []JUnitTestCase{
 		{
 			Name: "Multi-Subnets no restrictions",
-			F:    testCtx.noRestrictionsTest,
+			F:    noRestrictionsTest,
 		},
 		{
 			Name: "Multi-Subnets isolation",
-			F:    testCtx.multiSubnetsIsolationTest,
+			F:    multiSubnetsIsolationTest,
 			SkipFlags: SkipFlags{
 				VirtualSwitch: true,
 				NoServers:     true,
@@ -46,7 +46,7 @@ func makeMultiVPCMultiSubnetSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 		},
 		{
 			Name: "Multi-Subnets with filtering",
-			F:    testCtx.multiSubnetsSubnetFilteringTest,
+			F:    multiSubnetsSubnetFilteringTest,
 			SkipFlags: SkipFlags{
 				VirtualSwitch: true,
 				SubInterfaces: true,
@@ -55,7 +55,7 @@ func makeMultiVPCMultiSubnetSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 		},
 		{
 			Name: "StaticExternal",
-			F:    testCtx.staticExternalTest,
+			F:    staticExternalTest,
 			SkipFlags: SkipFlags{
 				VirtualSwitch: true,
 				NoServers:     true,
@@ -74,7 +74,7 @@ func makeMultiVPCMultiSubnetSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 // 2. Override isolation with explicit permit list, test connectivity
 // 3. Set restricted flag in subnet-02 in vpc2, test connectivity
 // 4. Remove all restrictions and peerings
-func (testCtx *VPCPeeringTestCtx) multiSubnetsIsolationTest(ctx context.Context) (bool, []RevertFunc, error) {
+func multiSubnetsIsolationTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
 	var returnErr error
 	var vpc1, vpc2 *vpcapi.VPC
 
@@ -210,7 +210,7 @@ func (testCtx *VPCPeeringTestCtx) multiSubnetsIsolationTest(ctx context.Context)
 // Assumes the scenario has at least 2 VPCs with at least 2 subnets each.
 // It creates peering between them, but restricts the peering to only
 // one subnet each. It then tests connectivity.
-func (testCtx *VPCPeeringTestCtx) multiSubnetsSubnetFilteringTest(ctx context.Context) (bool, []RevertFunc, error) {
+func multiSubnetsSubnetFilteringTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
 	vpcList := &vpcapi.VPCList{}
 	if err := testCtx.kube.List(ctx, vpcList); err != nil {
 		return false, nil, fmt.Errorf("listing VPCs: %w", err)
@@ -311,7 +311,7 @@ func (testCtx *VPCPeeringTestCtx) pingStaticExternal(ctx context.Context, source
  * 10a. repeat tests 7a and 7b from a switch that's not the one the static external is attached to (should succeed)
  * 11. cleanup everything and restore the original state
  */
-func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool, []RevertFunc, error) {
+func staticExternalTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
 	// find an unbundled connection not attached to an MCLAG switch (see https://github.com/githedgehog/fabricator/issues/673#issuecomment-3028423762)
 	connList := &wiringapi.ConnectionList{}
 	if err := testCtx.kube.List(ctx, connList, kclient.MatchingLabels{wiringapi.LabelConnectionType: wiringapi.ConnectionTypeUnbundled}); err != nil {

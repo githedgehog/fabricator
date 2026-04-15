@@ -13,14 +13,14 @@ import (
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 )
 
-func makeMultiVPCSingleSubnetSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
+func makeMultiVPCSingleSubnetSuite() *JUnitTestSuite {
 	suite := &JUnitTestSuite{
 		Name: "Multi-VPC Single-Subnet Suite",
 	}
 	suite.TestCases = []JUnitTestCase{
 		{
 			Name: "Starter Test",
-			F:    testCtx.vpcPeeringsStarterTest,
+			F:    vpcPeeringsStarterTest,
 			SkipFlags: SkipFlags{
 				NoExternals:   true,
 				SubInterfaces: true,
@@ -29,7 +29,7 @@ func makeMultiVPCSingleSubnetSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 		},
 		{
 			Name: "Only Externals",
-			F:    testCtx.vpcPeeringsOnlyExternalsTest,
+			F:    vpcPeeringsOnlyExternalsTest,
 			SkipFlags: SkipFlags{
 				NoExternals:   true,
 				SubInterfaces: true,
@@ -38,7 +38,7 @@ func makeMultiVPCSingleSubnetSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 		},
 		{
 			Name: "Full Mesh All Externals",
-			F:    testCtx.vpcPeeringsFullMeshAllExternalsTest,
+			F:    vpcPeeringsFullMeshAllExternalsTest,
 			SkipFlags: SkipFlags{
 				SubInterfaces: true,
 				NoServers:     true,
@@ -46,7 +46,7 @@ func makeMultiVPCSingleSubnetSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 		},
 		{
 			Name: "Full Loop All Externals",
-			F:    testCtx.vpcPeeringsFullLoopAllExternalsTest,
+			F:    vpcPeeringsFullLoopAllExternalsTest,
 			SkipFlags: SkipFlags{
 				SubInterfaces: true,
 				NoServers:     true,
@@ -54,7 +54,7 @@ func makeMultiVPCSingleSubnetSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 		},
 		{
 			Name: "Sergei's Special Test",
-			F:    testCtx.vpcPeeringsSergeisSpecialTest,
+			F:    vpcPeeringsSergeisSpecialTest,
 			SkipFlags: SkipFlags{
 				NoExternals:   true,
 				SubInterfaces: true,
@@ -63,7 +63,7 @@ func makeMultiVPCSingleSubnetSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 		},
 		{
 			Name: "Gateway Peering",
-			F:    testCtx.gatewayPeeringTest,
+			F:    gatewayPeeringTest,
 			SkipFlags: SkipFlags{
 				NoGateway: true,
 				NoServers: true,
@@ -71,7 +71,7 @@ func makeMultiVPCSingleSubnetSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 		},
 		{
 			Name: "Gateway Failover",
-			F:    testCtx.gatewayFailoverTest,
+			F:    gatewayFailoverTest,
 			SkipFlags: SkipFlags{
 				NoGateway: true,
 				NoServers: true,
@@ -79,7 +79,7 @@ func makeMultiVPCSingleSubnetSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 		},
 		{
 			Name: "Gateway Peering Loop",
-			F:    testCtx.gatewayPeeringLoopTest,
+			F:    gatewayPeeringLoopTest,
 			SkipFlags: SkipFlags{
 				NoGateway: true,
 				NoServers: true,
@@ -87,7 +87,7 @@ func makeMultiVPCSingleSubnetSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 		},
 		{
 			Name: "Mixed VPC and Gateway Peering Loop",
-			F:    testCtx.gatewayMixedPeeringLoopTest,
+			F:    gatewayMixedPeeringLoopTest,
 			SkipFlags: SkipFlags{
 				NoGateway: true,
 				NoServers: true,
@@ -95,7 +95,7 @@ func makeMultiVPCSingleSubnetSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 		},
 		{
 			Name: "Mixed Gateway and Fabric External Peering",
-			F:    testCtx.mixedGatewayAndFabricExternals,
+			F:    mixedGatewayAndFabricExternals,
 			SkipFlags: SkipFlags{
 				NoExternals: true,
 				NoGateway:   true,
@@ -104,7 +104,7 @@ func makeMultiVPCSingleSubnetSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 		},
 		{
 			Name: "Static External Peering",
-			F:    testCtx.staticExternalPeeringTest,
+			F:    staticExternalPeeringTest,
 			SkipFlags: SkipFlags{
 				NoStaticExternals: true,
 				SubInterfaces:     true,
@@ -114,7 +114,7 @@ func makeMultiVPCSingleSubnetSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 	}
 
 	// Add NAT test cases
-	suite.TestCases = append(suite.TestCases, getNATTestCases(testCtx)...)
+	suite.TestCases = append(suite.TestCases, getNATTestCases()...)
 	suite.Tests = len(suite.TestCases)
 
 	return suite
@@ -124,7 +124,7 @@ func makeMultiVPCSingleSubnetSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 // It was presumably chosen because going from this to a full mesh configuration could trigger
 // the gNMI bug. Note that in order to reproduce it one should disable the forced cleanup between
 // tests.
-func (testCtx *VPCPeeringTestCtx) vpcPeeringsStarterTest(ctx context.Context) (bool, []RevertFunc, error) {
+func vpcPeeringsStarterTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
 	// 1+2:r=border 1+3 3+5 2+4 4+6 5+6 6+7 7+8 8+9  5~default--5835:s=subnet-01 6~default--5835:s=subnet-01  1~default--5835:s=subnet-01  2~default--5835:s=subnet-01  9~default--5835:s=subnet-01  7~default--5835:s=subnet-01
 	vpcs := &vpcapi.VPCList{}
 	if err := testCtx.kube.List(ctx, vpcs); err != nil {
@@ -171,7 +171,7 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsStarterTest(ctx context.Context) (b
 
 // Test connectivity between all VPCs in a full mesh configuration, including all externals
 // Then, remove one external peering and test connectivity again.
-func (testCtx *VPCPeeringTestCtx) vpcPeeringsFullMeshAllExternalsTest(ctx context.Context) (bool, []RevertFunc, error) {
+func vpcPeeringsFullMeshAllExternalsTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
 	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec, 15)
 	if err := populateFullMeshVpcPeerings(ctx, testCtx.kube, vpcPeerings); err != nil {
 		return false, nil, fmt.Errorf("populating full mesh VPC peerings: %w", err)
@@ -215,7 +215,7 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsFullMeshAllExternalsTest(ctx contex
 }
 
 // Test connectivity between all VPCs with no peering except of the external ones.
-func (testCtx *VPCPeeringTestCtx) vpcPeeringsOnlyExternalsTest(ctx context.Context) (bool, []RevertFunc, error) {
+func vpcPeeringsOnlyExternalsTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
 	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec, 0)
 	externalPeerings := make(map[string]*vpcapi.ExternalPeeringSpec, 6)
 	if err := populateAllExternalVpcPeerings(ctx, testCtx.kube, externalPeerings); err != nil {
@@ -239,7 +239,7 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsOnlyExternalsTest(ctx context.Conte
 // Test connectivity between all VPCs in a full loop configuration, including all externals.
 // Note: if switches are virtual we skip external peerings, as VS do not implement ACLs and VPCs
 // end up peering via the external, making the test fail
-func (testCtx *VPCPeeringTestCtx) vpcPeeringsFullLoopAllExternalsTest(ctx context.Context) (bool, []RevertFunc, error) {
+func vpcPeeringsFullLoopAllExternalsTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
 	vpcPeerings := map[string]*vpcapi.VPCPeeringSpec{}
 	if err := populateFullLoopVpcPeerings(ctx, testCtx.kube, vpcPeerings); err != nil {
 		return false, nil, fmt.Errorf("populating full loop VPC peerings: %w", err)
@@ -263,7 +263,7 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsFullLoopAllExternalsTest(ctx contex
 }
 
 // Arbitrary configuration which again was shown to occasionally trigger the gNMI bug.
-func (testCtx *VPCPeeringTestCtx) vpcPeeringsSergeisSpecialTest(ctx context.Context) (bool, []RevertFunc, error) {
+func vpcPeeringsSergeisSpecialTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
 	// 1+2 2+3 2+4:r=border 6+5 1~default--5835:s=subnet-01
 	vpcs := &vpcapi.VPCList{}
 	if err := testCtx.kube.List(ctx, vpcs); err != nil {
@@ -300,7 +300,7 @@ func (testCtx *VPCPeeringTestCtx) vpcPeeringsSergeisSpecialTest(ctx context.Cont
 // Test basic gateway peering connectivity between two VPCs.
 // Creates a gateway peering between the first two VPCs found, exposing all subnets
 // from each VPC, then tests connectivity to ensure traffic flows through the gateway.
-func (testCtx *VPCPeeringTestCtx) gatewayPeeringTest(ctx context.Context) (bool, []RevertFunc, error) {
+func gatewayPeeringTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
 	vpcs := &vpcapi.VPCList{}
 	if err := testCtx.kube.List(ctx, vpcs); err != nil {
 		return false, nil, fmt.Errorf("listing VPCs: %w", err)
@@ -332,7 +332,7 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringTest(ctx context.Context) (bool,
 
 // Test gateway peering in a loop configuration where each VPC peers with the next one.
 // VPC1↔VPC2↔VPC3↔...↔VPCn↔VPC1. Test connectivity in a complete loop.
-func (testCtx *VPCPeeringTestCtx) gatewayPeeringLoopTest(ctx context.Context) (bool, []RevertFunc, error) {
+func gatewayPeeringLoopTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
 	vpcs := &vpcapi.VPCList{}
 	if err := testCtx.kube.List(ctx, vpcs); err != nil {
 		return false, nil, fmt.Errorf("listing VPCs: %w", err)
@@ -409,7 +409,7 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringLoopTest(ctx context.Context) (b
 
 // Test combining VPC peering and gateway peering in an alternating loop configuration.
 // Create alternating VPC and gateway peerings to form a complete loop through all VPCs.
-func (testCtx *VPCPeeringTestCtx) gatewayMixedPeeringLoopTest(ctx context.Context) (bool, []RevertFunc, error) {
+func gatewayMixedPeeringLoopTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
 	vpcs := &vpcapi.VPCList{}
 	if err := testCtx.kube.List(ctx, vpcs); err != nil {
 		return false, nil, fmt.Errorf("listing VPCs: %w", err)
@@ -454,7 +454,7 @@ func (testCtx *VPCPeeringTestCtx) gatewayMixedPeeringLoopTest(ctx context.Contex
 }
 
 // Test combining external peering via fabric and via gateway.
-func (testCtx *VPCPeeringTestCtx) mixedGatewayAndFabricExternals(ctx context.Context) (bool, []RevertFunc, error) {
+func mixedGatewayAndFabricExternals(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
 	vpcs := &vpcapi.VPCList{}
 	if err := testCtx.kube.List(ctx, vpcs); err != nil {
 		return false, nil, fmt.Errorf("listing VPCs: %w", err)
