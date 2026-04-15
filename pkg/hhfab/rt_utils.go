@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -105,7 +106,8 @@ func populateFullLoopVpcPeerings(ctx context.Context, kube kclient.Client, vpcPe
 	return nil
 }
 
-// populate the externalPeerings map with all possible external VPC peering combinations
+// populate the externalPeerings map with all possible external VPC peering combinations, skipping proxy static externals
+// as they require gateway peerings with NAT to work
 func populateAllExternalVpcPeerings(ctx context.Context, kube kclient.Client, extPeerings map[string]*vpcapi.ExternalPeeringSpec) error {
 	vpcs := &vpcapi.VPCList{}
 	if err := kube.List(ctx, vpcs); err != nil {
@@ -113,12 +115,27 @@ func populateAllExternalVpcPeerings(ctx context.Context, kube kclient.Client, ex
 	}
 	exts := &vpcapi.ExternalList{}
 	if err := kube.List(ctx, exts); err != nil {
-		return fmt.Errorf("listing VPCs: %w", err)
+		return fmt.Errorf("listing externals: %w", err)
 	}
-	for i := 0; i < len(vpcs.Items); i++ {
-		for j := 0; j < len(exts.Items); j++ {
-			if exts.Items[j].Spec.IPv4Namespace == vpcs.Items[i].Spec.IPv4Namespace {
-				appendExtPeeringSpec(extPeerings, i+1, exts.Items[j].Name, []string{"subnet-01"}, AllZeroPrefix)
+	extAttachs := &vpcapi.ExternalAttachmentList{}
+	if err := kube.List(ctx, extAttachs); err != nil {
+		return fmt.Errorf("listing external attachments: %w", err)
+	}
+	proxyExts := map[string]bool{}
+	for _, attach := range extAttachs.Items {
+		if attach.Spec.Static != nil && attach.Spec.Static.Proxy {
+			proxyExts[attach.Spec.External] = true
+		}
+	}
+
+	for i, vpc := range vpcs.Items {
+		for _, ext := range exts.Items {
+			if ext.Spec.Static != nil && proxyExts[ext.Name] {
+				continue
+			}
+			if ext.Spec.IPv4Namespace == vpc.Spec.IPv4Namespace {
+				subnets := slices.Collect(maps.Keys(vpc.Spec.Subnets))
+				appendExtPeeringSpec(extPeerings, i+1, ext.Name, subnets, AllZeroPrefix)
 			}
 		}
 	}
