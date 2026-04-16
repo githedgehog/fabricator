@@ -194,7 +194,7 @@ func Run(ctx context.Context) error {
 	var wgGatewayWorkers uint
 	var wgBGPExternals, wgStaticExternals, wgStaticExternalsProxy, wgExtMCLAGConns, wgExtESLAGConns, wgExtOrphanConns uint
 	var wgDefaultSwitchProfile string
-	var wgSwitchProfileOverrides *cli.StringSlice
+	wgSwitchProfileOverrides := cli.NewStringSlice()
 	var wgServerPortBase string
 	vlabWiringGenFlags := []cli.Flag{
 		&cli.UintFlag{
