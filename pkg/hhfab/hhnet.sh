@@ -39,10 +39,6 @@ function setup_bond() {
 
     sudo ip l a "$bond_name" type bond miimon 100 mode 802.3ad xmit_hash_policy "$hash_policy"
 
-    if [ -n "$mtu" ]; then
-        sudo ip l s "$bond_name" mtu "$mtu"
-    fi
-
     for iface in "${@:4}"; do
         # cannot enslave interface if it is up
         sudo ip l s "$iface" down 2> /dev/null || echo "warning: could not bring down $iface" >&2
@@ -50,6 +46,14 @@ function setup_bond() {
     done
 
     sudo ip l s "$bond_name" up
+
+    # Set MTU after bring-up: enslaving triggers carrier events that cause
+    # systemd-networkd to re-apply its default config and reset slave MTUs.
+    # Setting bond MTU last ensures it sticks and propagates to all slaves.
+    if [ -n "$mtu" ]; then
+        sleep 1
+        sudo ip l s "$bond_name" mtu "$mtu"
+    fi
 }
 
 function setup_vlan() {
