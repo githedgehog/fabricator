@@ -145,6 +145,23 @@ func (testCtx *VPCPeeringTestCtx) breakoutTest(ctx context.Context) (bool, []Rev
 					if portProfile.Breakout == nil {
 						continue
 					}
+					// skip ports where portAutoNegs has sub-ports that won't be valid in any
+					// 1-offset breakout mode (we only test with 1-offset modes, which only
+					// generate sub-port /1); e.g. E1/1 configured as 2x400G with autoNeg on
+					// E1/1/2 can't be switched to 1x800G without the webhook rejecting it
+					hasConflict := false
+					for autoNegPort := range agent.Spec.Switch.PortAutoNegs {
+						if strings.HasPrefix(autoNegPort, portName+"/") && strings.TrimPrefix(autoNegPort, portName+"/") != "1" {
+							hasConflict = true
+
+							break
+						}
+					}
+					if hasConflict {
+						slog.Debug("Skipping port with portAutoNegs conflicting with 1-offset breakout modes", "port", portName, "switch", agent.Name)
+
+						continue
+					}
 					unusedPort = portName
 					breakoutProfile = portProfile.Breakout
 					slog.Debug("Found unused port for breakout", "port", unusedPort, "switch", agent.Name, "switchProfile", swProfile.Name)
