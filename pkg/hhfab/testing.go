@@ -1987,6 +1987,22 @@ func DoSetupPeerings(ctx context.Context, kube client.Client, vpcPeerings map[st
 		if err := WaitReady(ctx, kube, WaitReadyOpts{AppliedFor: 15 * time.Second, Timeout: 10 * time.Minute}); err != nil {
 			return fmt.Errorf("waiting for ready: %w", err)
 		}
+
+		if len(gwPeerings) > 0 {
+			// Gateway peering routes propagate via BGP EVPN from the gateway to
+			// the leaf switches. WaitReady confirms the fabric agents applied
+			// their config, but the routes still need to arrive in the leaf RIB
+			// and then be programmed into the switch ASIC hardware forwarding
+			// tables by orchagent/syncd. Without this delay, traffic can hit the
+			// software slow-path and report throughput below line rate.
+			const gwRouteSettleDelay = 10 * time.Second
+			slog.Info("Waiting for gateway peering routes to settle in HW FIB", "delay", gwRouteSettleDelay)
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("sleeping for gateway route settle: %w", ctx.Err())
+			case <-time.After(gwRouteSettleDelay):
+			}
+		}
 	}
 
 	return nil
@@ -2905,8 +2921,8 @@ func checkToolboxLock(ctx context.Context, server string, ssh *sshutil.Config, t
 }
 
 // iperf3SpeedRetries is the number of additional attempts for iperf3 tests that fail due to low speed.
-// This helps handle transient network congestion or ECMP hash imbalance issues.
-const iperf3SpeedRetries = 2
+// Gateway VM vCPU scheduling jitter causes per-worker throughput variance near the ceiling.
+const iperf3SpeedRetries = 4
 
 // iperf3RetryDelay is the delay between retry attempts to allow network conditions to stabilize.
 const iperf3RetryDelay = 2 * time.Second
@@ -2917,11 +2933,6 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string,
 	}
 
 	iPerfsMinSpeed := opts.IPerfsMinSpeed
-	// Gateway peering uses kernel-based dataplane which achieves ~1-1.5 Gbps on hlab
-	if reachability.Reason == ReachabilityReasonGatewayPeering {
-		// iPerfsMinSpeed = min(iPerfsMinSpeed, 1000) TODO: Remove when https://github.com/githedgehog/fabricator/issues/1593 is solved
-		iPerfsMinSpeed = min(iPerfsMinSpeed, 700)
-	}
 
 	var lastError *IperfError
 	for attempt := 0; attempt <= iperf3SpeedRetries; attempt++ {
