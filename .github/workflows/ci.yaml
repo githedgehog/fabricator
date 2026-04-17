@@ -141,6 +141,22 @@ jobs:
           name: test-build--diagrams
           path: test-diagrams
 
+      - name: Collect build diagnostics
+        if: ${{ failure() }}
+        run: |
+          mkdir -p build-diagnostics
+          ps aux > build-diagnostics/processes.txt 2>&1 || true
+          df -h > build-diagnostics/disk-usage.txt 2>&1 || true
+          free -h > build-diagnostics/memory.txt 2>&1 || true
+          dmesg --time-format iso 2>/dev/null | tail -200 > build-diagnostics/dmesg.txt 2>&1 || true
+
+      - name: Upload build diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-build--diagnostics
+          path: build-diagnostics
+
       - name: Setup tmate session for debug
         if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
         uses: mxschmitt/action-tmate@v3
@@ -194,6 +210,9 @@ jobs:
           LOCALREG_SYNC_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
         run: |
           just --timestamp _localreg &
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:30000/v2/ > /dev/null 2>&1 && break || sleep 1; done
+          curl -sf http://127.0.0.1:30000/v2/ > /dev/null 2>&1 || { echo "Local registry failed to start"; exit 1; }
+          echo "Local registry is ready"
 
       - name: Build hhfab for local OS/ARCH
         run: |
@@ -220,10 +239,22 @@ jobs:
           bin/hhfab build -v --mode=iso
           ls -lah result
 
-      - name: Dump local registry logs
-        if: ${{ always() }}
+      - name: Collect build diagnostics
+        if: ${{ failure() }}
         run: |
-          cat .zot/log
+          mkdir -p build-diagnostics
+          cp .zot/log build-diagnostics/zot.log 2>/dev/null || echo "no zot log" > build-diagnostics/zot.log
+          cp .zot/config.json build-diagnostics/zot-config.json 2>/dev/null || true
+          ss -tlnp > build-diagnostics/listening-ports.txt 2>&1 || true
+          ps aux > build-diagnostics/processes.txt 2>&1 || true
+          cat build-diagnostics/zot.log
+
+      - name: Upload build diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-diagnostics--${{ matrix.os }}
+          path: build-diagnostics
 
       - name: Setup tmate session for debug
         if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
