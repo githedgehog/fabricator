@@ -243,8 +243,26 @@ jobs:
           ${{ inputs.prebuild }}
 
       - name: Build hhfab
+        id: build-hhfab
         run: |
           just --timestamp oci_repo=127.0.0.1:30000 oci=http push
+
+      - name: Collect build diagnostics
+        if: ${{ failure() && steps.build-hhfab.conclusion == 'failure' }}
+        run: |
+          mkdir -p build-diagnostics
+          cp .zot/log build-diagnostics/zot.log 2>/dev/null || echo "no zot log" > build-diagnostics/zot.log
+          cp .zot/config.json build-diagnostics/zot-config.json 2>/dev/null || true
+          ss -tlnp > build-diagnostics/listening-ports.txt 2>&1 || true
+          ps aux > build-diagnostics/processes.txt 2>&1 || true
+          cat build-diagnostics/zot.log
+
+      - name: Upload build diagnostics
+        if: ${{ failure() && steps.build-hhfab.conclusion == 'failure' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-diagnostics--${{ env.slug }}
+          path: build-diagnostics
 
       - name: Init hhfab for virtual mode
         if: ${{ inputs.upgradefrom == '' && !inputs.hybrid }}
