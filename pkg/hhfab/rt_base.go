@@ -133,9 +133,10 @@ func makeTestCtx(ctx context.Context, kube kclient.Client, setupOpts SetupVPCsOp
 }
 
 // findExternals finds a viable BGP external and a viable static external, returning (bgpExtName, staticExtName).
-// Two passes ensure hardware externals always win regardless of API response order: pass 1 selects
+// Three passes ensure hardware externals always win regardless of API response order: pass 1 selects
 // hardware externals, pass 2 accepts virtual externals whose attachments all go through hardware
-// connections (same data path, only the peer device is emulated).
+// connections (same data path, only the peer device is emulated), pass 3 accepts any external with
+// attachments, needed in pure VLAB where both the switch and the external are virtual.
 func findExternals(ctx context.Context, kube kclient.Client, extList *vpcapi.ExternalList, extAttachList *vpcapi.ExternalAttachmentList) (string, string) {
 	bgpExt, staticExt := "", ""
 
@@ -206,6 +207,23 @@ func findExternals(ctx context.Context, kube kclient.Client, extList *vpcapi.Ext
 		} else if ext.Spec.Static == nil && bgpExt == "" {
 			bgpExt = ext.Name
 			slog.Info("Using virtual BGP external (hw-attached)", "external", bgpExt)
+		}
+		if bgpExt != "" && staticExt != "" {
+			return bgpExt, staticExt
+		}
+	}
+
+	// Third pass: any external with attachments (pure VLAB: both switch and external are virtual)
+	for _, ext := range extList.Items {
+		if !hasAttachment(ext.Name) {
+			continue
+		}
+		if ext.Spec.Static != nil && staticExt == "" && hasStaticAttachment(ext.Name) {
+			staticExt = ext.Name
+			slog.Info("Using virtual static external (virtual switch)", "external", staticExt)
+		} else if ext.Spec.Static == nil && bgpExt == "" {
+			bgpExt = ext.Name
+			slog.Info("Using virtual BGP external (virtual switch)", "external", bgpExt)
 		}
 		if bgpExt != "" && staticExt != "" {
 			return bgpExt, staticExt
