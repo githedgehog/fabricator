@@ -102,10 +102,11 @@ type ExternalBGPVRFCfg struct {
 }
 
 type ExternalStaticVrfCfg struct {
-	Prefixes   []string `json:"prefixes"`   // the prefixes reachable via this external
-	GatewayIPs []string `json:"gatewayIPs"` // the addresses that can be used on the gateway to connect to this external
-	SwitchIP   string   `json:"switchIP"`   // the address on the switch on the other side of the attachment
-	NICName    string   `json:"nicName"`    // name of the NIC attachment
+	Prefixes    []string `json:"prefixes"`    // the prefixes reachable via this external
+	GatewayIPs  []string `json:"gatewayIPs"`  // the addresses that can be used on the gateway to connect to this external
+	SwitchIP    string   `json:"switchIP"`    // the address on the switch on the other side of the attachment
+	NICName     string   `json:"nicName"`     // name of the NIC attachment
+	NATPoolCIDR string   `json:"natPoolCIDR"` // NAT pool CIDR that the gateway source-NATs into; installs a return route toward the switch
 }
 
 type ExternalVRFCfg struct {
@@ -545,11 +546,23 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 				},
 			}
 		} else {
+			natPoolCIDR := external.Annotations[extStaticNATPoolAnnotation]
+			if natPoolCIDR != "" {
+				prefix, err := netip.ParsePrefix(natPoolCIDR)
+				if err != nil {
+					return nil, fmt.Errorf("invalid %s annotation on external %q: %q: %w", extStaticNATPoolAnnotation, external.Name, natPoolCIDR, err)
+				}
+				if !prefix.Addr().Is4() || prefix.Bits() != 24 {
+					return nil, fmt.Errorf("invalid %s annotation on external %q: %q: must be an IPv4 /24 prefix", extStaticNATPoolAnnotation, external.Name, natPoolCIDR) //nolint:goerr113
+				}
+				natPoolCIDR = prefix.Masked().String()
+			}
 			cfg.Externals.VRFs[external.Name] = ExternalVRFCfg{
 				TableID:  tableID,
 				IsStatic: true,
 				StaticCfg: ExternalStaticVrfCfg{
-					Prefixes: external.Spec.Static.Prefixes,
+					Prefixes:    external.Spec.Static.Prefixes,
+					NATPoolCIDR: natPoolCIDR,
 				},
 			}
 		}

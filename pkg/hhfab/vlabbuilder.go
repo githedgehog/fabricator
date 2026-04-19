@@ -925,6 +925,20 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, fabri
 	externals := []vpcapi.External{}
 	extAsn := 64102
 
+	// Reserve disjoint /24 ranges per external type to keep auto-generated NAT
+	// pool CIDRs unique and non-overlapping: 192.168.91..99.0/24 for BGP (90+i)
+	// and 192.168.101..109.0/24 for static (100+i). 9 of each is plenty for any
+	// VLAB topology and avoids crossing into the adjacent range.
+	const maxExtBGPForNATPool = 9
+	const maxExtStaticForNATPool = 9
+	if b.ExtBGPCount > maxExtBGPForNATPool {
+		return fmt.Errorf("ExtBGPCount=%d exceeds %d (NAT pool CIDR scheme limit)", b.ExtBGPCount, maxExtBGPForNATPool) //nolint:goerr113
+	}
+	totalStaticExternals := int(b.ExtStaticCount) + int(b.ExtStaticProxyCount)
+	if totalStaticExternals > maxExtStaticForNATPool {
+		return fmt.Errorf("ExtStaticCount+ExtStaticProxyCount=%d exceeds %d (NAT pool CIDR scheme limit)", totalStaticExternals, maxExtStaticForNATPool) //nolint:goerr113
+	}
+
 	if b.ExtBGPCount > 0 {
 		inboundCommPrefix := 65102
 		communityRuleID := 1000
@@ -936,7 +950,10 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, fabri
 				InboundCommunity:  fmt.Sprintf("%d:%d", inboundCommPrefix, communityRuleID),
 				OutboundCommunity: fmt.Sprintf("%d:%d", extAsn, communityRuleID),
 			}
-			ext, err := b.createExternal(ctx, externalName, externalSpec)
+			anns := map[string]string{
+				extBGPNATAnnotation: fmt.Sprintf("192.168.%d.0/24", 90+int(i)),
+			}
+			ext, err := b.createExternal(ctx, externalName, externalSpec, anns)
 			if err != nil {
 				return err
 			}
@@ -945,14 +962,20 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, fabri
 		}
 	}
 
-	staticExternals := b.ExtStaticCount + b.ExtStaticProxyCount
-	if staticExternals > 0 {
+	if totalStaticExternals > 0 {
 		var externalName string
-		for i := uint8(1); i <= staticExternals; i++ {
-			if i <= b.ExtStaticProxyCount {
+		for i := 1; i <= totalStaticExternals; i++ {
+			var anns map[string]string
+			if i <= int(b.ExtStaticProxyCount) {
 				externalName = fmt.Sprintf("ext-sp-%02d", i)
+				// Proxy static externals have no SwitchIP, so the NAT pool return route
+				// can't be installed on the virtual external. Skip the annotation so NAT
+				// tests skip cleanly rather than running with broken data-plane wiring.
 			} else {
 				externalName = fmt.Sprintf("ext-snp-%02d", i)
+				anns = map[string]string{
+					extStaticNATPoolAnnotation: fmt.Sprintf("192.168.%d.0/24", 100+i),
+				}
 			}
 			externalSpec := vpcapi.ExternalSpec{
 				IPv4Namespace: "default",
@@ -960,7 +983,7 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, fabri
 					Prefixes: []string{"0.0.0.0/0"},
 				},
 			}
-			ext, err := b.createExternal(ctx, externalName, externalSpec)
+			ext, err := b.createExternal(ctx, externalName, externalSpec, anns)
 			if err != nil {
 				return err
 			}
@@ -1381,14 +1404,15 @@ func (b *VLABBuilderBase) createConnectionWithName(ctx context.Context, name str
 	return conn, nil
 }
 
-func (b *VLABBuilderBase) createExternal(ctx context.Context, name string, spec vpcapi.ExternalSpec) (*vpcapi.External, error) {
+func (b *VLABBuilderBase) createExternal(ctx context.Context, name string, spec vpcapi.ExternalSpec, anns map[string]string) (*vpcapi.External, error) {
 	external := &vpcapi.External{
 		TypeMeta: kmetav1.TypeMeta{
 			Kind:       "External",
 			APIVersion: vpcapi.GroupVersion.String(),
 		},
 		ObjectMeta: kmetav1.ObjectMeta{
-			Name: name,
+			Name:        name,
+			Annotations: anns,
 		},
 		Spec: spec,
 	}
