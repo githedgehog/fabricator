@@ -110,7 +110,7 @@ jobs:
         run: |
           mkdir -p test-diagrams
           just run hhfab init -f --dev --gws 2
-          just run hhfab vlab gen
+          just run hhfab vlab gen --externals-bgp=1 --externals-static=1 --external-orphan-connections=1
 
           # Generate diagrams in all formats and save to test-diagrams directory
           just run hhfab diagram -f mermaid -o test-diagrams/default-vlab-diagram.mmd -v
