@@ -441,11 +441,13 @@ func GetServerNetconfCmd(conn *wiringapi.Connection, opts ServerNetconfOpts) (st
 	return netconfCmd, nil
 }
 
-func getServerHostBGPCmd(conn *wiringapi.Connection, subnet netip.Prefix, serversInSubnet int) (string, error) {
+// TODO: multi subnet support once test-connectivity supports it
+func getServerHostBGPCmd(conn *wiringapi.Connection, vlan uint16, subnet netip.Prefix, serversInSubnet int) (string, error) {
 	if conn == nil {
 		return "", fmt.Errorf("connection is nil")
 	}
 
+	cmd := fmt.Sprintf("vpc:v=%d:i=", vlan)
 	interfaces := []string{}
 	switch {
 	case conn.Spec.Unbundled != nil:
@@ -466,7 +468,7 @@ func getServerHostBGPCmd(conn *wiringapi.Connection, subnet netip.Prefix, server
 		return "", fmt.Errorf("unexpected connection type for conn %q", conn.Name)
 	}
 
-	cmd := strings.Join(interfaces, ",")
+	cmd += strings.Join(interfaces, ":i=")
 	addr := subnet.Addr()
 	for range serversInSubnet {
 		addr = addr.Next()
@@ -474,7 +476,7 @@ func getServerHostBGPCmd(conn *wiringapi.Connection, subnet netip.Prefix, server
 	if !addr.IsValid() {
 		return "", fmt.Errorf("failed to get IP address from subnet %s", subnet.String())
 	}
-	cmd += " " + addr.String() + "/32"
+	cmd += ":a=" + addr.String() + "/32"
 
 	return cmd, nil
 }
@@ -840,18 +842,14 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 				}
 			}
 
-			var vlan uint16
+			vlan, ok := nextVLAN()
+			if !ok {
+				return fmt.Errorf("no more vlans available")
+			}
 			dhcp := vpcapi.VPCDHCP{}
-			if !hostBGP {
-				if !opts.P2P {
-					dhcp.Enable = true
-					dhcp.Options = dhcpOpts
-				}
-
-				vlan, ok = nextVLAN()
-				if !ok {
-					return fmt.Errorf("no more vlans available")
-				}
+			if !hostBGP && !opts.P2P {
+				dhcp.Enable = true
+				dhcp.Options = dhcpOpts
 			}
 
 			vpc.Spec.Subnets[subnetName] = &vpcapi.VPCSubnet{
@@ -919,7 +917,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		var confErr error
 
 		if hostBGP {
-			confCmd, confErr = getServerHostBGPCmd(&conn, expectedSubnet, serverInSubnet)
+			confCmd, confErr = getServerHostBGPCmd(&conn, vlan, expectedSubnet, serverInSubnet)
 		} else if opts.P2P {
 			confCmd, confErr = GetServerNetconfCmd(&conn, ServerNetconfOpts{
 				P2P: p2p.String(),
