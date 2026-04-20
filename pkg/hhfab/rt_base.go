@@ -753,6 +753,14 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOt
 		VPCMode:           rtOtps.VPCMode,
 	}
 
+	// Resolve the default server MTU up front so testCtx.setupOpts.InterfaceMTU
+	// carries the fabric-advertised value. SetupVPCs takes opts by value, so
+	// without this pre-resolve, tests that need the applied MTU (e.g. overlap
+	// NAT server reconfig) would see 0 and lose the jumbo setting.
+	if err := ResolveDefaultServerMTU(ctx, kube, &setupOpts); err != nil {
+		return fmt.Errorf("resolving default server MTU: %w", err)
+	}
+
 	testCtx := makeTestCtx(ctx, kube, setupOpts, vlabCfg, vlab, false, rtOtps)
 	noVpcSuite := makeNoVpcsSuite(testCtx)
 	singleVpcSuite := makeSingleVPCSuite(testCtx)

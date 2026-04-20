@@ -638,6 +638,10 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringOverlapNATTest(ctx context.Conte
 	originalSubnet := targetAttachment.Spec.Subnet
 	originalVLAN := donorVPC.Spec.Subnets[originalSubnetName].VLAN
 
+	// Preserve the fabric-advertised MTU across the overlap VPC reattach so the
+	// server doesn't fall back to the DHCP default and cap iperf throughput.
+	preservedMTU := testCtx.setupOpts.InterfaceMTU
+
 	newVLAN := originalVLAN + 100 // Use different VLAN to avoid conflicts
 	// Create the new IPv4Namespace with the same subnet range as the existing VPC's namespace
 	overlapNS := &vpcapi.IPv4Namespace{
@@ -763,6 +767,7 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringOverlapNATTest(ctx context.Conte
 		netconfCmd, err := GetServerNetconfCmd(targetConn, ServerNetconfOpts{
 			VLAN:       originalVLAN,
 			HashPolicy: testCtx.setupOpts.HashPolicy,
+			MTU:        preservedMTU,
 		})
 		if err != nil {
 			return fmt.Errorf("getting netconf command for %s: %w", targetServer, err)
@@ -811,6 +816,7 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringOverlapNATTest(ctx context.Conte
 	netconfCmd, err := GetServerNetconfCmd(targetConn, ServerNetconfOpts{
 		VLAN:       newVLAN,
 		HashPolicy: testCtx.setupOpts.HashPolicy,
+		MTU:        preservedMTU,
 	})
 	if err != nil {
 		return false, reverts, fmt.Errorf("getting netconf command for server %s: %w", targetServer, err)
