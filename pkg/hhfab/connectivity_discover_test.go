@@ -82,8 +82,8 @@ func TestMatchEndpointIPsHostBGP(t *testing.T) {
 func TestMatchEndpointIPsHostBGPMixedWithBundled(t *testing.T) {
 	// Server attached to one HostBGP subnet (vpc-1) and one regular subnet (vpc-2).
 	addrs := []ifaceAddr{
-		{iface: "lo", prefix: netip.MustParsePrefix("10.0.1.42/32")},    // VIP for vpc-1
-		{iface: "bond0", prefix: netip.MustParsePrefix("10.0.2.5/24")},  // DHCP for vpc-2
+		{iface: "lo", prefix: netip.MustParsePrefix("10.0.1.42/32")},   // VIP for vpc-1
+		{iface: "bond0", prefix: netip.MustParsePrefix("10.0.2.5/24")}, // DHCP for vpc-2
 	}
 	atts := []subnetAttachment{
 		{FullName: "vpc-1/default", CIDR: netip.MustParsePrefix("10.0.1.0/24"), HostBGP: true},
