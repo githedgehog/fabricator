@@ -536,6 +536,53 @@ func getServerAttachState(ctx context.Context, kube client.Client, server *wirin
 	return sa, nil
 }
 
+// ResolveDefaultServerMTU sets opts.InterfaceMTU to a sensible default when left
+// at 0, based on the switch profiles present in the cluster:
+//   - SONiC VS: 1500 when DNS/NTP options are set (forces a non-jumbo advertisement
+//     via DHCP to avoid the API webhook defaulting to 9036); left at 0 otherwise so
+//     no MTU is advertised.
+//   - Otherwise: fabcomp.ServerFacingMTU (jumbo).
+//
+// Idempotent: no-op when opts.InterfaceMTU is already non-zero. Callers that need
+// the resolved value back in their own SetupVPCsOpts (e.g. release-test drivers
+// that later read testCtx.setupOpts.InterfaceMTU) must invoke this before
+// constructing that context, since SetupVPCs receives opts by value.
+func ResolveDefaultServerMTU(ctx context.Context, kube kclient.Client, opts *SetupVPCsOpts) error {
+	if opts.InterfaceMTU != 0 {
+		return nil
+	}
+
+	switchList := wiringapi.SwitchList{}
+	if err := kube.List(ctx, &switchList); err != nil {
+		return fmt.Errorf("listing switches: %w", err)
+	}
+
+	hasSonicVS := false
+	for _, sw := range switchList.Items {
+		if sw.Spec.Profile == meta.SwitchProfileVS || sw.Spec.Profile == meta.SwitchProfileVSCLSP {
+			hasSonicVS = true
+
+			break
+		}
+	}
+
+	if hasSonicVS {
+		if len(opts.DNSServers) > 0 || len(opts.TimeServers) > 0 {
+			opts.InterfaceMTU = 1500
+			slog.Info("SONiC VS switches detected, using standard MTU to prevent DHCP jumbo frame advertisement", "mtu", opts.InterfaceMTU)
+		} else {
+			slog.Info("SONiC VS switches detected, skipping jumbo frame MTU auto-configuration")
+		}
+
+		return nil
+	}
+
+	opts.InterfaceMTU = uint16(fabcomp.ServerFacingMTU) //nolint:gosec
+	slog.Info("Auto-configuring server interface MTU", "mtu", opts.InterfaceMTU)
+
+	return nil
+}
+
 func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) error {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
@@ -588,32 +635,8 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		slog.Warn("Forcing P2P mode since all switches are cumulus")
 	}
 
-	// Auto-configure server interface MTU when not explicitly set (0 = auto).
-	// For non-VS environments, we use jumbo frames (9036) matching the fabric server-facing MTU.
-	// For SONiC VS, jumbo frames are not supported. When DNS/NTP options are configured, DHCP options
-	// will be created and the VPC API defaults InterfaceMTU to 9036 if left at 0 — so we explicitly
-	// set 1500 to prevent advertising jumbo MTU via DHCP. When no DNS/NTP options are configured,
-	// no DHCP options object is created, the API default doesn't apply, and no MTU is advertised.
-	if opts.InterfaceMTU == 0 {
-		hasSonicVS := false
-		for _, sw := range switchList.Items {
-			if sw.Spec.Profile == meta.SwitchProfileVS || sw.Spec.Profile == meta.SwitchProfileVSCLSP {
-				hasSonicVS = true
-
-				break
-			}
-		}
-		if hasSonicVS {
-			if len(opts.DNSServers) > 0 || len(opts.TimeServers) > 0 {
-				opts.InterfaceMTU = 1500
-				slog.Info("SONiC VS switches detected, using standard MTU to prevent DHCP jumbo frame advertisement", "mtu", opts.InterfaceMTU)
-			} else {
-				slog.Info("SONiC VS switches detected, skipping jumbo frame MTU auto-configuration")
-			}
-		} else {
-			opts.InterfaceMTU = uint16(fabcomp.ServerFacingMTU) //nolint:gosec
-			slog.Info("Auto-configuring server interface MTU", "mtu", opts.InterfaceMTU)
-		}
+	if err := ResolveDefaultServerMTU(ctx, kube, &opts); err != nil {
+		return fmt.Errorf("resolving default server MTU: %w", err)
 	}
 
 	{
