@@ -4,6 +4,7 @@
 package hhfab
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -2008,14 +2009,16 @@ func (pe *PingError) Error() string {
 }
 
 type IperfError struct {
-	Source          string
-	Destination     string
-	MinSpeed        string
-	SentSpeed       string
-	RcvdSpeed       string
-	ClientMsg       string
-	ServerMsg       string
-	SendSpeedTooLow bool
+	Source             string
+	Destination        string
+	MinSpeed           string
+	SentSpeed          string
+	RcvdSpeed          string
+	ClientMsg          string
+	ServerMsg          string
+	SendSpeedTooLow    bool
+	ServerInfraFailure bool
+	ClientInfraFailure bool
 }
 
 func (ie *IperfError) Error() string {
@@ -2926,10 +2929,14 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string,
 	var lastError *IperfError
 	for attempt := 0; attempt <= iperf3SpeedRetries; attempt++ {
 		if attempt > 0 {
-			slog.Warn("Retrying iperf3 test due to low speed", "from", from, "to", to,
+			reason := "low speed"
+			if lastError.ServerInfraFailure || lastError.ClientInfraFailure {
+				reason = "infrastructure failure"
+			}
+			slog.Warn("Retrying iperf3 test", "reason", reason, "from", from, "to", to,
 				"attempt", attempt+1, "maxAttempts", iperf3SpeedRetries+1,
 				"previousSentSpeed", lastError.SentSpeed, "previousRcvdSpeed", lastError.RcvdSpeed,
-				"minSpeed", lastError.MinSpeed)
+				"clientMsg", lastError.ClientMsg, "serverMsg", lastError.ServerMsg)
 			// Brief delay before retry to allow network conditions to stabilize
 			select {
 			case <-ctx.Done():
@@ -2946,8 +2953,8 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string,
 			return nil
 		}
 
-		// Only retry on speed-related failures
-		if !ie.SendSpeedTooLow {
+		// Retry on speed-related failures and infrastructure failures
+		if !ie.SendSpeedTooLow && !ie.ServerInfraFailure && !ie.ClientInfraFailure {
 			return ie
 		}
 
@@ -2978,6 +2985,7 @@ func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to stri
 
 		report, parseErr := parseIPerf3Report([]byte(stdout))
 		if err != nil {
+			ie.ServerInfraFailure = true
 			if parseErr == nil && report.Error != "" {
 				ie.ServerMsg = report.Error
 
@@ -2992,8 +3000,17 @@ func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to stri
 			// Log the raw output to help diagnose what iperf3 returned instead of valid JSON
 			slog.Warn("iperf3 server report parse failed", "parseErr", parseErr, "stdout", stdout, "stderr", stderr)
 			ie.ServerMsg = fmt.Sprintf("cannot parse iperf3 report: %s", parseErr)
+			ie.ServerInfraFailure = true
 
 			return fmt.Errorf("parsing server's iperf3 report: %w", parseErr)
+		}
+		// Check if iperf3 reported an error in the JSON
+		if report.Error != "" {
+			slog.Warn("iperf3 server reported error in JSON output", "error", report.Error)
+			ie.ServerMsg = report.Error
+			ie.ServerInfraFailure = true
+
+			return fmt.Errorf("iperf3 server error: %s", report.Error)
 		}
 
 		return nil
@@ -3041,6 +3058,7 @@ func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to stri
 		stdout, stderr, err := retrySSHCmd(ctx, fromSSH, cmd, from)
 		report, parseErr := parseIPerf3Report([]byte(stdout))
 		if err != nil {
+			ie.ClientInfraFailure = true
 			if parseErr == nil && report.Error != "" {
 				ie.ClientMsg = report.Error
 
@@ -3054,8 +3072,17 @@ func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to stri
 			// Log the raw output to help diagnose what iperf3 returned instead of valid JSON
 			slog.Warn("iperf3 client report parse failed", "parseErr", parseErr, "stdout", stdout, "stderr", stderr)
 			ie.ClientMsg = fmt.Sprintf("cannot parse iperf3 report: %s", parseErr)
+			ie.ClientInfraFailure = true
 
 			return fmt.Errorf("parsing client's iperf3 report: %w", parseErr)
+		}
+		// Check if iperf3 reported an error in the JSON
+		if report.Error != "" {
+			slog.Warn("iperf3 client reported error in JSON output", "error", report.Error)
+			ie.ClientMsg = report.Error
+			ie.ClientInfraFailure = true
+
+			return fmt.Errorf("iperf3 client error: %s", report.Error)
 		}
 
 		slog.Debug("IPerf3 result", "from", from, "to", to,
@@ -3174,6 +3201,14 @@ type iperf3ReportSum struct {
 }
 
 func parseIPerf3Report(data []byte) (*iperf3Report, error) {
+	// iperf3 sometimes outputs warning messages before the JSON
+	// Strip any text before the first '{' character
+	if idx := bytes.IndexByte(data, '{'); idx > 0 {
+		data = data[idx:]
+	} else if idx == -1 {
+		return nil, fmt.Errorf("no JSON object found in iperf3 output")
+	}
+
 	report := &iperf3Report{}
 	if err := json.Unmarshal(data, report); err != nil {
 		return nil, fmt.Errorf("unmarshaling iperf3 report: %w", err)
