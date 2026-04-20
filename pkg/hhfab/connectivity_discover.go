@@ -110,31 +110,12 @@ func discoverServerEndpoints(
 		return nil, fmt.Errorf("running ip addr show: %w: %s", err, stderr)
 	}
 
-	type ifaceAddr struct {
-		iface  string
-		prefix netip.Prefix
-	}
-	addrs := []ifaceAddr{}
-	for _, line := range strings.Split(strings.TrimSpace(stdout), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) != 2 {
-			continue
-		}
-		// Keep lo so HostBGP /32 VIPs are discoverable; filter only true management interfaces.
-		if fields[0] == "enp2s0" || fields[0] == "docker0" {
-			continue
-		}
-		prefix, err := netip.ParsePrefix(fields[1])
-		if err != nil {
-			return nil, fmt.Errorf("parsing ip %q on %q: %w", fields[1], fields[0], err)
-		}
-		if prefix.Addr().IsLoopback() {
-			continue
-		}
-		addrs = append(addrs, ifaceAddr{iface: fields[0], prefix: prefix})
+	addrs, err := parseInterfaceAddrs(stdout)
+	if err != nil {
+		return nil, err
 	}
 
-	endpoints := []Endpoint{}
+	attachments := make([]subnetAttachment, 0, len(attached))
 	for subnetName := range attached {
 		vpcName, subName, ok := strings.Cut(subnetName, "/")
 		if !ok {
@@ -152,20 +133,75 @@ func discoverServerEndpoints(
 		if err != nil {
 			return nil, fmt.Errorf("parsing CIDR %q for subnet %q: %w", sub.Subnet, subnetName, err)
 		}
+		attachments = append(attachments, subnetAttachment{
+			FullName: subnetName,
+			CIDR:     cidr,
+			HostBGP:  sub.HostBGP,
+		})
+	}
 
+	return matchEndpointIPs(server, addrs, attachments), nil
+}
+
+// ifaceAddr pairs a Linux interface name with one IPv4 prefix.
+type ifaceAddr struct {
+	iface  string
+	prefix netip.Prefix
+}
+
+// subnetAttachment is the subset of per-subnet configuration needed to match
+// a server's interface addresses to its (server, subnet) endpoint.
+type subnetAttachment struct {
+	FullName string       // "vpc-1/default"
+	CIDR     netip.Prefix // e.g. 10.0.1.0/24
+	HostBGP  bool
+}
+
+// parseInterfaceAddrs parses stdout from `ip -o -4 addr show | awk '{print $2, $4}'`
+// into (iface, prefix) tuples, skipping known management interfaces and
+// 127.0.0.1/8. It keeps the loopback interface so HostBGP VIPs remain visible.
+func parseInterfaceAddrs(stdout string) ([]ifaceAddr, error) {
+	out := []ifaceAddr{}
+	for _, line := range strings.Split(strings.TrimSpace(stdout), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 2 {
+			continue
+		}
+		if fields[0] == "enp2s0" || fields[0] == "docker0" {
+			continue
+		}
+		prefix, err := netip.ParsePrefix(fields[1])
+		if err != nil {
+			return nil, fmt.Errorf("parsing ip %q on %q: %w", fields[1], fields[0], err)
+		}
+		if prefix.Addr().IsLoopback() {
+			continue
+		}
+		out = append(out, ifaceAddr{iface: fields[0], prefix: prefix})
+	}
+
+	return out, nil
+}
+
+// matchEndpointIPs matches each subnet attachment to an interface address.
+// For regular subnets the IP must be on a non-loopback interface and contained
+// in the subnet CIDR. For HostBGP subnets the IP must be a /32 on `lo` and
+// contained in the subnet CIDR.
+func matchEndpointIPs(server string, addrs []ifaceAddr, attachments []subnetAttachment) []Endpoint {
+	endpoints := []Endpoint{}
+	for _, att := range attachments {
 		ep := Endpoint{
 			Server:  server,
-			Subnet:  subnetName,
-			HostBGP: sub.HostBGP,
+			Subnet:  att.FullName,
+			HostBGP: att.HostBGP,
 		}
 
 		var matched []ifaceAddr
 		for _, a := range addrs {
-			if !cidr.Contains(a.prefix.Addr()) {
+			if !att.CIDR.Contains(a.prefix.Addr()) {
 				continue
 			}
-			if sub.HostBGP {
-				// HostBGP VIPs live as /32 on the loopback.
+			if att.HostBGP {
 				if a.iface != "lo" || a.prefix.Bits() != 32 {
 					continue
 				}
@@ -175,17 +211,17 @@ func discoverServerEndpoints(
 			matched = append(matched, a)
 		}
 		if len(matched) == 0 {
-			slog.Warn("No IP found for endpoint", "server", server, "subnet", subnetName, "cidr", cidr.String(), "hostBGP", sub.HostBGP)
+			slog.Warn("No IP found for endpoint", "server", server, "subnet", att.FullName, "cidr", att.CIDR.String(), "hostBGP", att.HostBGP)
 
 			continue
 		}
 		if len(matched) > 1 {
-			slog.Warn("Multiple IPs matched endpoint, using first", "server", server, "subnet", subnetName, "matches", matched)
+			slog.Warn("Multiple IPs matched endpoint, using first", "server", server, "subnet", att.FullName, "matches", matched)
 		}
 		ep.IP = matched[0].prefix.Addr()
-		slog.Debug("Discovered endpoint", "server", server, "subnet", subnetName, "ip", ep.IP.String(), "hostBGP", sub.HostBGP)
+		slog.Debug("Discovered endpoint", "server", server, "subnet", att.FullName, "ip", ep.IP.String(), "hostBGP", att.HostBGP)
 		endpoints = append(endpoints, ep)
 	}
 
-	return endpoints, nil
+	return endpoints
 }
