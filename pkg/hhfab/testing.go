@@ -1053,8 +1053,8 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 					if err != nil {
 						return fmt.Errorf("running hostbgp %q: %w: out: %s", netconfs[server.Name], err, stderr)
 					}
-					for attempt := range 5 {
-						time.Sleep(1 * time.Second)
+					for attempt := range 30 {
+						time.Sleep(2 * time.Second)
 						stdout, stderr, err = sshCfg.Run(ctx, "/opt/bin/hhnet getvips")
 						if err != nil {
 							return fmt.Errorf("fetching ip address on loopback: %w: out: %s", err, stderr)
@@ -1062,6 +1062,9 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 						slog.Debug("hostBGP VIP parsing", "server", server.Name, "attempt", attempt+1, "stdout", stdout)
 						for line := range strings.Lines(stdout) {
 							line = strings.TrimSpace(line)
+							if line == "" {
+								continue
+							}
 							prefix, err = netip.ParsePrefix(line)
 							if err != nil {
 								return fmt.Errorf("parsing VIP %q: %w", line, err)
