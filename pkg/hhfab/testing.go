@@ -978,7 +978,9 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		if len(serverConfCmds) == 1 {
 			netconfs[server.Name] = serverConfCmds[0]
 		} else {
-			netconfs[server.Name] = strings.Join(serverConfCmds, " && ")
+			// Callers run this as `/opt/bin/hhnet <netconf>`; for trunking we
+			// need each chained invocation to invoke the binary again.
+			netconfs[server.Name] = strings.Join(serverConfCmds, " && /opt/bin/hhnet ")
 		}
 	}
 
