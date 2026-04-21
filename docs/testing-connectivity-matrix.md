@@ -898,7 +898,14 @@ without needing to cross-reference API objects.
 
 ## Migration Path
 
-### Phase 1: Foundation + Gateway Peering Fix
+Phase order is **1 → 2 → 4 → 3**. Phase 1 lands the structural change; Phase
+2 closes the genuine Phase-1 coverage gaps (no new external dependencies);
+Phase 4 is reporting/DX polish that pays back during Phase 3 triage; Phase 3
+is last because it is blocked on a firewall CRD that does not exist on
+master yet. The original document had Phases 3 and 4 swapped; this reflects
+what was learned while landing Phase 1.
+
+### Phase 1: Foundation + Gateway Peering Fix — LANDED
 
 **Goal:** Fix the gateway peering bypass. Make `test-connectivity` correctly
 handle NAT-aware peerings with directional asymmetry.
@@ -911,55 +918,109 @@ handle NAT-aware peerings with directional asymmetry.
    - HostBGP subnets: `hhnet getvips` → /32 VIP on loopback
    - Deduplicate multihomed `(server, subnet)` pairs from multiple
      VPCAttachments to the same subnet via different leaves
+   - Capture the Linux interface name per endpoint for later source binding
 3. Implement `MatrixBuilder` with providers:
    - `IntraVPCProvider` (port of existing intra-VPC logic, with HostBGP subnet awareness)
    - `SwitchPeeringProvider` (port of `IsSubnetReachableWithSwitchPeering`)
    - `GatewayPeeringProvider` with NAT awareness and direction
-   - `ExternalPeeringProvider` (port of `IsExternalSubnetReachable`)
+   - `ExternalPeeringProvider` (no-op stub; populated in Phase 2)
 4. Implement `MatrixExecutor` with:
    - Positive/negative ICMP checks
    - NAT-target IP support (ping NATted IP instead of real IP)
    - Direction-aware testing (skip reverse for masquerade)
    - Per-endpoint IP targeting (use the subnet-specific IP, not a single
      server-level IP)
+   - Source-interface binding via `ping -I <iface>` so trunked servers test
+     the right egress path
+   - Skip same-server pairs (different-subnet pings on the same box always
+     succeed, which would false-positive implicit-DENY)
 5. Wire into `TestConnectivity()` replacing the current inline logic
-6. Preserve `IsServerReachable()` API for release test backward compat
+6. Preserve `IsServerReachable()` API for release test backward compat;
+   route it through the new matrix so callers inherit NAT awareness
+7. Add a `--vpcattachments-per-server` flag to `setup-vpcs` so VLAB can
+   generate a multi-VPC trunking topology to exercise per-endpoint paths
+8. Per-sub-interface source-based policy routing in `hhnet.sh` so replies
+   on a trunked server egress the sub-interface that owns the source IP
+   (main-table FIB-multipath across two DHCP defaults would otherwise
+   route replies out the wrong VPC's VLAN; the leaf then drops them in
+   the wrong VRF)
 
 **What this unblocks:** Gateway peering smoke tests work without bypass.
-NAT peerings are validated at the smoke test level, not just release tests.
-Multi-VPC attachment (VLAN trunking) works — each subnet attachment is tested
-with its own IP. HostBGP servers are first-class participants in connectivity
-checks (githedgehog/fabricator#1648 can proceed with proper single-attachment
-coverage; multihomed path validation tracked separately).
+NAT peerings (static offset, masquerade direction, `expose.As`) are
+validated at the smoke-test level, not just release tests. Multi-VPC
+trunking works end-to-end — each subnet attachment has its own endpoint
+with its own IP and own source-bound ping. HostBGP servers are first-class
+participants (githedgehog/fabricator#1648 carries the complementary
+release-suite work).
 
-### Phase 2: Protocol/Port Checks + SNAT Verification
+### Phase 2: Externals in the matrix, per-endpoint iperf, SNAT verification
 
-**Goal:** Add transport-layer testing using socat. Validate NAT translation.
+**Goal:** Close the coverage gaps Phase 1 structurally cannot — without
+waiting for the firewall CRD. No new tools required.
 
-1. Add socat-based TCP/UDP checks to the executor
-2. Add SNAT verification (tcpdump capture at destination)
-3. Add port-forward validation (connect to external port, verify backend)
-4. Implement `expose.As` support in GatewayPeeringProvider
+1. Populate `ExternalPeeringProvider` so externals are matrix endpoints
+   with per-prefix reachability expectations. Retire the ad-hoc curl
+   loop in `TestConnectivity` (or keep it as a thin wrapper).
+2. Iperf3 as a matrix-executor check type: iterate endpoint pairs, use
+   `--bind <src.IP>` and target `<dst.IP>`. Phase 1's policy routing
+   makes source-IP binding sufficient for deterministic egress on
+   trunked servers (iperf3 has no `-I <iface>` flag; the policy rules
+   route every packet with a given source IP out the owning interface).
+3. SNAT source verification: start a short tcpdump at the destination,
+   send pings/TCP, compare the captured source IP against the expected
+   NAT pool prefix (`prefix.Contains(capturedSrc)` for masquerade;
+   exact match for static).
+4. Retire `rt_nat_tests.go`'s reachability-side bypass (the ping path)
+   in favor of `IsServerReachable`. Keep the iperf3-on-port
+   port-forward check — that is how port-forward DNAT is validated
+   today (`iperf3 -c <pool-IP> -p <ext-port>` → backend on 5201),
+   and it already works; Phase 2 just makes it matrix-driven.
 
-**What this unblocks:** Port-forward NAT validated at smoke level.
-SNAT correctness verified, not just reachability.
+**What this unblocks:** SNAT correctness (not just reachability),
+per-external-prefix assertions, trunking iperf coverage, and removal of
+the parallel NAT-reachability code in rt_nat_tests.
 
-### Phase 3: Firewall Support
+### Phase 4: Reporting + CI integration
 
-**Goal:** Support 5-tuple firewall rules when the CRD is defined.
+**Goal:** Make failure triage fast, make the matrix a first-class CI
+artifact, integrate with the tiered test strategy. Unblocked today; the
+investment compounds through Phase 3.
 
-1. Implement `FirewallProvider` once CRD is available
-2. Add per-rule proto/port expectations to the matrix
-3. Add default-policy handling (default-allow vs default-deny)
-4. Extend negative checks to cover specific denied ports
-5. Add stateful return-traffic verification
+1. Structured `MatrixResult` → JUnit XML.
+2. Matrix diff on failure: expected-vs-actual rendered as an NxN grid
+   with colored cells; surface only the disagreeing pairs.
+3. Matrix visualization as a build artifact on each CI run (HTML or
+   ASCII — doesn't matter, just needs to be readable in a PR comment).
+4. Integrate with the tiered test strategy (PR #1290) so smoke vs
+   release lanes consume the same matrix output.
+
+### Phase 3: Firewall support
+
+**Goal:** Support 5-tuple firewall rules when the CRD is defined. Blocked
+on the CRD until it lands on master.
+
+1. Implement `FirewallProvider` once the CRD exists.
+2. Add per-rule proto/port expectations to the matrix.
+3. Add default-policy handling (default-allow vs default-deny — flipping
+   existing gateway ALLOWs to DENYs when default-deny is set, unless a
+   specific ALLOW rule covers the pair).
+4. Extend the executor with per-port checks for ALLOW and DENY rules.
+   Implementation choice: iperf3 on specific ports (already in the
+   toolbox, works for port-forward today) or socat (cleaner pass/fail
+   semantics, supports UDP). This is a DX call, not a phase boundary.
+5. Add stateful return-traffic verification — idle timeouts, table
+   exhaustion, concurrent connection reuse.
 
 **What this unblocks:** Firewall feature can use test-connectivity for
-smoke testing without needing to bypass it.
+smoke and release testing without needing to bypass it.
 
-### Phase 4: Enhanced Reporting + CI Integration
+### Note on socat
 
-1. Structured matrix result in JUnit XML format
-2. Matrix diff on failure (expected vs actual reachability)
-3. Matrix visualization (NxN grid in test artifacts)
-4. Integration with tiered test strategy (PR #1290)
+The original plan introduced socat in Phase 2 for TCP/UDP testing. In
+practice, today's non-firewall fabric treats a peering as all-or-nothing
+at L4: if ICMP works, TCP and UDP work; if ICMP fails, so do the rest.
+Port-forward DNAT is the one case that needs L4 validation today, and
+`rt_nat_tests.go` already covers it with iperf3 on the forwarded port.
+socat only becomes necessary when per-port ALLOW/DENY differentiation
+matters, which is firewall territory — so it moves into Phase 3 as an
+implementation option alongside iperf3-on-port.
