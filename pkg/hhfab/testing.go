@@ -520,22 +520,25 @@ func getServerAttachState(ctx context.Context, kube client.Client, server *wirin
 		if err := kube.List(ctx, attaches, kclient.MatchingLabels{wiringapi.LabelConnection: conn.Name}); err != nil {
 			return sa, fmt.Errorf("listing VPC attachments for connection %q: %w", conn.Name, err)
 		}
-		numAttaches := len(attaches.Items)
-		if numAttaches == 0 {
+		if len(attaches.Items) == 0 {
 			continue
-		} else if numAttaches > 1 {
-			return sa, fmt.Errorf("expected at most one VPC attachment for connection %q, got %d", conn.Name, numAttaches)
 		}
+		// Multiple attachments on the same Connection are valid with VLAN
+		// trunking (one per VPC). If any attachment points at a non-L2VNI VPC,
+		// mark the server L3VNI — L3VNI and trunking aren't combined today,
+		// but checking all keeps the signal honest.
 		sa.Attached = true
 		if checkVPCMode {
-			attach := attaches.Items[0]
-			vpcName := attach.Spec.VPCName()
-			vpc := &vpcapi.VPC{}
-			if err := kube.Get(ctx, client.ObjectKey{Name: vpcName, Namespace: metav1.NamespaceDefault}, vpc); err != nil {
-				return sa, fmt.Errorf("getting VPC %q: %w", vpcName, err)
-			}
-			if vpc.Spec.Mode != vpcapi.VPCModeL2VNI {
-				sa.L3VNI = true
+			for _, attach := range attaches.Items {
+				vpc := &vpcapi.VPC{}
+				if err := kube.Get(ctx, client.ObjectKey{Name: attach.Spec.VPCName(), Namespace: metav1.NamespaceDefault}, vpc); err != nil {
+					return sa, fmt.Errorf("getting VPC %q: %w", attach.Spec.VPCName(), err)
+				}
+				if vpc.Spec.Mode != vpcapi.VPCModeL2VNI {
+					sa.L3VNI = true
+
+					break
+				}
 			}
 		}
 
