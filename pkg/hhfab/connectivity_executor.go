@@ -48,6 +48,12 @@ func (e *MatrixExecutor) Execute(ctx context.Context) error {
 				continue
 			}
 			src, dst := endpoints[i], endpoints[j]
+			// Skip pairs where both endpoints live on the same server: pinging
+			// our own IP always succeeds regardless of fabric configuration
+			// and would register as a false positive for implicit-DENY pairs.
+			if src.Server == dst.Server {
+				continue
+			}
 			pair := pairWork{src: src, dst: dst}
 			exp := pickExpectation(e.matrix.Get(src.Key(), dst.Key()))
 			pair.expectation = exp
@@ -133,7 +139,13 @@ func (e *MatrixExecutor) runPair(ctx context.Context, pings *semaphore.Weighted,
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(e.opts.PingsCount+30)*time.Second)
 	defer cancel()
 
-	if pe := checkPing(ctx, e.opts.PingsCount, pings, p.src.Server, p.dst.Server, srcSSH, targetIP, nil, expectedOK); pe != nil {
+	// Pin the source IP. For trunking, a server has multiple IPs and the
+	// kernel's default route could pick a source that isn't part of the path
+	// we're testing — producing false positives (ping succeeds via the
+	// "wrong" VPC peering) or false negatives (the expected peering's source
+	// subnet is not selected).
+	srcIP := p.src.IP
+	if pe := checkPing(ctx, e.opts.PingsCount, pings, p.src.Server, p.dst.Server, srcSSH, targetIP, &srcIP, expectedOK); pe != nil {
 		return pe
 	}
 
