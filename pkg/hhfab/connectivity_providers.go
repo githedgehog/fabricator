@@ -463,6 +463,12 @@ func resolveNATTranslation(expose *gwapi.PeeringEntryExpose, serverIP netip.Addr
 
 	switch {
 	case expose.NAT.Static != nil:
+		// IsServerReachable's API-only endpoints have no SSH-discovered IP;
+		// skip the per-server offset in that case and return just the pool
+		// so callers still see the peering as ALLOW with NAT configured.
+		if !serverIP.IsValid() {
+			return &TranslatedAddress{SourcePool: poolCIDR}, nil
+		}
 		natIP, err := calculateStaticNATIP(serverIP, subnetCIDR.Masked().Addr(), poolCIDR.Masked().Addr())
 		if err != nil {
 			return nil, fmt.Errorf("static NAT: %w", err)

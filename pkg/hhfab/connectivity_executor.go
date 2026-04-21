@@ -114,9 +114,11 @@ func (e *MatrixExecutor) runPair(ctx context.Context, pings *semaphore.Weighted,
 
 		return nil
 	}
-	// Port-forward-only destinations don't respond to ICMP on the pool IP;
+	// Port-forward destinations don't respond to ICMP on the pool IP — only
+	// on the configured forwarded ports. Skip whenever port-forward entries
+	// are present, regardless of whether DestinationIP happens to be set;
 	// Phase 2's TCP check covers them.
-	if p.expectation.Verdict == VerdictAllow && p.expectation.NAT != nil && len(p.expectation.NAT.PortForwards) > 0 && !p.expectation.NAT.DestinationIP.IsValid() {
+	if p.expectation.Verdict == VerdictAllow && p.expectation.NAT != nil && len(p.expectation.NAT.PortForwards) > 0 {
 		return nil
 	}
 

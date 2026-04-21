@@ -178,17 +178,19 @@ func (m *ConnectivityMatrix) Get(src, dst EndpointKey) []ConnectivityExpectation
 // falling back to the default (proto-agnostic) entry if no proto-specific one
 // matches. When no expectation exists at all, returns an implicit-DENY record.
 func (m *ConnectivityMatrix) GetForProto(src, dst EndpointKey, pp ProtoPort) ConnectivityExpectation {
-	var fallback *ConnectivityExpectation
+	var fallback ConnectivityExpectation
+	hasFallback := false
 	for _, e := range m.entries[EndpointPair{Source: src, Destination: dst}] {
 		if e.ProtoPort != nil && *e.ProtoPort == pp {
 			return e
 		}
 		if e.ProtoPort == nil {
-			fallback = &e
+			fallback = e
+			hasFallback = true
 		}
 	}
-	if fallback != nil {
-		return *fallback
+	if hasFallback {
+		return fallback
 	}
 
 	return ConnectivityExpectation{
