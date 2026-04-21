@@ -247,7 +247,6 @@ jobs:
           cp .zot/config.json build-diagnostics/zot-config.json 2>/dev/null || true
           ss -tlnp > build-diagnostics/listening-ports.txt 2>&1 || true
           ps aux > build-diagnostics/processes.txt 2>&1 || true
-          cat build-diagnostics/zot.log
 
       - name: Upload build diagnostics
         if: ${{ failure() }}
