@@ -900,10 +900,13 @@ without needing to cross-reference API objects.
 
 Phase order is **1 → 2 → 4 → 3**. Phase 1 lands the structural change; Phase
 2 closes the genuine Phase-1 coverage gaps (no new external dependencies);
-Phase 4 is reporting/DX polish that pays back during Phase 3 triage; Phase 3
-is last because it is blocked on a firewall CRD that does not exist on
-master yet. The original document had Phases 3 and 4 swapped; this reflects
-what was learned while landing Phase 1.
+Phase 4 is a small triage-DX improvement (matrix diff on failure, ~150 LOC);
+Phase 3 is last because it is blocked on a firewall CRD that does not exist
+on master yet. The original document had Phases 3 and 4 swapped and bundled
+JUnit XML / NxN visualization into Phase 4 — this revision reflects what
+was learned while landing Phase 1, including the fact that release-test
+JUnit already covers the higher-level signal and NxN visualization doesn't
+scale to release-test sizes.
 
 ### Phase 1: Foundation + Gateway Peering Fix — LANDED
 
@@ -980,19 +983,27 @@ waiting for the firewall CRD. No new tools required.
 per-external-prefix assertions, trunking iperf coverage, and removal of
 the parallel NAT-reachability code in rt_nat_tests.
 
-### Phase 4: Reporting + CI integration
+### Phase 4: Matrix diff on failure
 
-**Goal:** Make failure triage fast, make the matrix a first-class CI
-artifact, integrate with the tiered test strategy. Unblocked today; the
-investment compounds through Phase 3.
+**Goal:** Make failure triage fast. Intentionally small.
 
-1. Structured `MatrixResult` → JUnit XML.
-2. Matrix diff on failure: expected-vs-actual rendered as an NxN grid
-   with colored cells; surface only the disagreeing pairs.
-3. Matrix visualization as a build artifact on each CI run (HTML or
-   ASCII — doesn't matter, just needs to be readable in a PR comment).
-4. Integrate with the tiered test strategy (PR #1290) so smoke vs
-   release lanes consume the same matrix output.
+1. On a failed `TestConnectivity` run, render the divergences between the
+   expected matrix and the observed results as a compact table — only the
+   cells where expected ≠ actual, annotated with the specific failure
+   (packet loss, unexpected reachability, NAT mismatch).
+
+**What this deliberately leaves out** (and why):
+
+- **JUnit XML per pair.** Release tests already emit JUnit via
+  `JUnitTestSuite` in `rt_*.go`; when a release test wraps
+  `TestConnectivity`, the failure string (with failing pairs listed) is
+  captured at the rt level. Duplicating that signal as per-pair XML
+  inside `TestConnectivity` adds noise without informing CI tiering.
+  Revisit if PR #1290's tiered tests actually need finer granularity.
+- **NxN matrix visualization.** Readable at phase-1 VLAB scale (N ≈ 12)
+  but unworkable at release-test scale (N ≈ 60 → 3600 cells). The diff
+  above already shows every useful signal on failure; a full-matrix
+  render is redundant. Defer indefinitely unless someone asks for it.
 
 ### Phase 3: Firewall support
 
