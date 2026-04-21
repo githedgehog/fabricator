@@ -960,6 +960,14 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 				confCmd, confErr = GetServerNetconfCmd(&conn, ServerNetconfOpts{
 					P2P: primaryP2P.String(),
 				})
+			case attachmentIdx > 0 && conn.Spec.Unbundled == nil:
+				// Trunking follow-up on bonded/MCLAG/ESLAG connections: bond0
+				// was created by the primary attachment; here we only add
+				// another VLAN sub-interface.
+				confCmd = fmt.Sprintf("vlan %d bond0", vlan)
+				if opts.InterfaceMTU > 0 {
+					confCmd += fmt.Sprintf(" --mtu=%d", opts.InterfaceMTU)
+				}
 			default:
 				confCmd, confErr = GetServerNetconfCmd(&conn, ServerNetconfOpts{
 					VLAN:       vlan,
