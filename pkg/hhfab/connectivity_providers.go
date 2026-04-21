@@ -451,7 +451,7 @@ func exposeIncludesSubnet(expose *gwapi.PeeringEntryExpose, info *gwapi.VPCInfo,
 // expose entry. Returns nil when expose.NAT is nil.
 func resolveNATTranslation(expose *gwapi.PeeringEntryExpose, serverIP netip.Addr, subnetCIDR netip.Prefix) (*TranslatedAddress, error) {
 	if expose.NAT == nil {
-		return nil, nil
+		return nil, nil //nolint:nilnil // "no NAT" is a legitimate no-op, not an error
 	}
 	if len(expose.As) == 0 {
 		return nil, fmt.Errorf("expose.NAT set but no expose.As CIDR") //nolint:err113
@@ -508,7 +508,7 @@ func resolveNATTranslation(expose *gwapi.PeeringEntryExpose, serverIP netip.Addr
 		}, nil
 	}
 
-	return nil, nil
+	return nil, nil //nolint:nilnil // defensive: validation enforces at least one NAT mode
 }
 
 func parseFirstAsCIDR(as []gwapi.PeeringEntryAs) (netip.Prefix, error) {
@@ -517,7 +517,12 @@ func parseFirstAsCIDR(as []gwapi.PeeringEntryAs) (netip.Prefix, error) {
 			continue
 		}
 
-		return netip.ParsePrefix(a.CIDR)
+		cidr, err := netip.ParsePrefix(a.CIDR)
+		if err != nil {
+			return netip.Prefix{}, fmt.Errorf("parsing expose.As CIDR %q: %w", a.CIDR, err)
+		}
+
+		return cidr, nil
 	}
 
 	return netip.Prefix{}, fmt.Errorf("no CIDR in expose.As") //nolint:err113

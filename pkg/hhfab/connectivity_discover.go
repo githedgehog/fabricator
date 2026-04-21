@@ -63,7 +63,7 @@ func discoverEndpoints(
 		})
 	}
 	if err := g.Wait(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("discovering endpoints: %w", err)
 	}
 
 	out := []Endpoint{}

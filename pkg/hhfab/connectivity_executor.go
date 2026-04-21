@@ -150,9 +150,14 @@ func (e *MatrixExecutor) runPair(ctx context.Context, pings *semaphore.Weighted,
 	if bind == "" {
 		bind = p.src.IP.String()
 	}
-	if pe := checkPing(ctx, e.opts.PingsCount, pings, p.src.Server, p.dst.Server, srcSSH, targetIP, nil, expectedOK, bind); pe != nil {
-		return pe
+	// Capture concretely and early-return on success. Returning *PingError
+	// directly through an `error` interface would produce a non-nil
+	// interface wrapping a nil pointer — downstream type-switch on
+	// *PingError would then miscount ping failures.
+	pe := checkPing(ctx, e.opts.PingsCount, pings, p.src.Server, p.dst.Server, srcSSH, targetIP, nil, expectedOK, bind)
+	if pe == nil {
+		return nil
 	}
 
-	return nil
+	return pe
 }
