@@ -1152,7 +1152,12 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 						return fmt.Errorf("running hhnet %q: %w: out: %s", netconfs[server.Name], err, stderr)
 					}
 
-					prefix, err = netip.ParsePrefix(strings.TrimSpace(stdout))
+					// Trunking produces one CIDR line per hhnet invocation.
+					// The first line corresponds to the primary attachment,
+					// which is the one expectedSubnets[server.Name] refers to.
+					// Matrix endpoint discovery validates the rest per-subnet.
+					firstLine := strings.TrimSpace(strings.SplitN(strings.TrimSpace(stdout), "\n", 2)[0])
+					prefix, err = netip.ParsePrefix(firstLine)
 					if err != nil {
 						return fmt.Errorf("parsing acquired address %q: %w", stdout, err)
 					}
