@@ -79,10 +79,16 @@ type EndpointPair struct {
 
 // Endpoint is a test endpoint: a (server, subnet) slot with a resolved IP.
 type Endpoint struct {
-	Server  string
-	Subnet  string
-	IP      netip.Addr
-	HostBGP bool
+	Server string
+	Subnet string
+	IP     netip.Addr
+	// Interface is the Linux interface name that carries the subnet's IP on
+	// the server (e.g. "bond0.1001", "enp2s1.1002", "lo"). The executor uses
+	// it as ping -I so that the outgoing path is pinned — without it, the
+	// kernel's routing may pick a different source interface when a server
+	// has multiple VPC attachments (trunking).
+	Interface string
+	HostBGP   bool
 
 	// External is true when this endpoint represents an external destination
 	// (not a fabric-attached server). Phase 1 keeps externals out of the matrix

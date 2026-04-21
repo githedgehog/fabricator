@@ -139,13 +139,18 @@ func (e *MatrixExecutor) runPair(ctx context.Context, pings *semaphore.Weighted,
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(e.opts.PingsCount+30)*time.Second)
 	defer cancel()
 
-	// Pin the source IP. For trunking, a server has multiple IPs and the
-	// kernel's default route could pick a source that isn't part of the path
-	// we're testing — producing false positives (ping succeeds via the
-	// "wrong" VPC peering) or false negatives (the expected peering's source
-	// subnet is not selected).
-	srcIP := p.src.IP
-	if pe := checkPing(ctx, e.opts.PingsCount, pings, p.src.Server, p.dst.Server, srcSSH, targetIP, &srcIP, expectedOK); pe != nil {
+	// Pin the outgoing interface. For trunking, a server has multiple IPs
+	// AND multiple sub-interfaces; binding only the source IP still lets
+	// the kernel pick a different egress interface based on routing, which
+	// would make the request leave via the wrong VPC (false positive for
+	// implicit-DENY pairs, false negative for the intended peering path).
+	// Binding the interface forces symmetric routing aligned with the
+	// endpoint under test.
+	bind := p.src.Interface
+	if bind == "" {
+		bind = p.src.IP.String()
+	}
+	if pe := checkPing(ctx, e.opts.PingsCount, pings, p.src.Server, p.dst.Server, srcSSH, targetIP, nil, expectedOK, bind); pe != nil {
 		return pe
 	}
 

@@ -2863,7 +2863,13 @@ func retrySSHCmd(ctx context.Context, ssh *sshutil.Config, cmd string, target st
 	return stdout, stderr, nil
 }
 
-func checkPing(ctx context.Context, pingCount int, semaphore *semaphore.Weighted, from, to string, fromSSH *sshutil.Config, toIP netip.Addr, sourceIP *netip.Addr, expected bool) *PingError {
+// checkPing runs an ICMP echo between two servers over SSH. sourceBind, when
+// non-empty, is passed to ping -I verbatim: it may be an interface name
+// (binds outgoing interface, required for multi-VPC trunking where the source
+// IP alone cannot pin the egress path) or an IP address. sourceIP is kept for
+// backward compatibility — when non-nil and sourceBind is empty, the IP is
+// used as the bind value.
+func checkPing(ctx context.Context, pingCount int, semaphore *semaphore.Weighted, from, to string, fromSSH *sshutil.Config, toIP netip.Addr, sourceIP *netip.Addr, expected bool, sourceBind ...string) *PingError {
 	if pingCount <= 0 {
 		return nil
 	}
@@ -2885,10 +2891,17 @@ func checkPing(ctx context.Context, pingCount int, semaphore *semaphore.Weighted
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(pingCount+30)*time.Second)
 	defer cancel()
 
-	slog.Debug("Running ping", "from", from, "to", toIP.String(), "sourceIP", sourceIP, "expected", expected)
+	bind := ""
+	if len(sourceBind) > 0 && sourceBind[0] != "" {
+		bind = sourceBind[0]
+	} else if sourceIP != nil {
+		bind = sourceIP.String()
+	}
+
+	slog.Debug("Running ping", "from", from, "to", toIP.String(), "bind", bind, "expected", expected)
 	cmd := "ping -c 1 -W 1"
-	if sourceIP != nil {
-		cmd += " -I " + sourceIP.String()
+	if bind != "" {
+		cmd += " -I " + bind
 	}
 	cmd += " " + toIP.String()
 
@@ -2897,8 +2910,8 @@ func checkPing(ctx context.Context, pingCount int, semaphore *semaphore.Weighted
 	}
 
 	cmd = fmt.Sprintf("ping -i 0.5 -c %d -W 1", pingCount)
-	if sourceIP != nil {
-		cmd += " -I " + sourceIP.String()
+	if bind != "" {
+		cmd += " -I " + bind
 	}
 	cmd += " " + toIP.String()
 	stdout, stderr, err := retrySSHCmd(ctx, fromSSH, cmd, from)

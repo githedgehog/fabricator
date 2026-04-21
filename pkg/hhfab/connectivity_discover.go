@@ -219,7 +219,8 @@ func matchEndpointIPs(server string, addrs []ifaceAddr, attachments []subnetAtta
 			slog.Warn("Multiple IPs matched endpoint, using first", "server", server, "subnet", att.FullName, "matches", matched)
 		}
 		ep.IP = matched[0].prefix.Addr()
-		slog.Debug("Discovered endpoint", "server", server, "subnet", att.FullName, "ip", ep.IP.String(), "hostBGP", att.HostBGP)
+		ep.Interface = matched[0].iface
+		slog.Debug("Discovered endpoint", "server", server, "subnet", att.FullName, "ip", ep.IP.String(), "iface", ep.Interface, "hostBGP", att.HostBGP)
 		endpoints = append(endpoints, ep)
 	}
 
