@@ -7,10 +7,23 @@ trap 'echo "Error on line $LINENO: $BASH_COMMAND" >&2' ERR
 
 function cleanup() {
     # Drop source-based policy rules left over from previous trunking setups.
-    # Matches any rule created by setup_policy_routing (priority 1000, from <ip>).
-    mapfile -t policy_rules < <(ip rule show priority 1000 2>/dev/null | awk -F'from ' '/from /{print $2}' | awk '{print $1}')
-    for src in "${policy_rules[@]}"; do
-        sudo ip rule del from "$src" priority 1000 2>/dev/null || true
+    # Only remove priority-1000 rules that have BOTH a `from <src>` and a
+    # `lookup <table>` clause (the exact shape setup_policy_routing creates),
+    # so unrelated rules at the same priority are untouched.
+    mapfile -t policy_rules < <(ip rule show priority 1000 2>/dev/null | awk '
+        /from / && /lookup / {
+            src = ""
+            table = ""
+            for (i = 1; i <= NF; i++) {
+                if ($i == "from" && i + 1 <= NF) src = $(i + 1)
+                if ($i == "lookup" && i + 1 <= NF) table = $(i + 1)
+            }
+            if (src != "" && table != "") print src "\t" table
+        }')
+    for rule in "${policy_rules[@]}"; do
+        IFS=$'\t' read -r src table <<< "$rule"
+        [ -n "$src" ] && [ -n "$table" ] || continue
+        sudo ip rule del from "$src" lookup "$table" priority 1000 2>/dev/null || true
     done
 
     mapfile -t bond_intfs < <(ip -brief link show type bond)
