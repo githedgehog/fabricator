@@ -5,7 +5,6 @@ package hhfab
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
 	"log/slog"
 	"net/netip"
@@ -17,6 +16,7 @@ import (
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/util/apiutil"
+	"go.githedgehog.com/fabricator/pkg/hhfab/connmatrix"
 	"go.githedgehog.com/fabricator/pkg/util/sshutil"
 	"golang.org/x/sync/errgroup"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -31,42 +31,10 @@ var excludedInterfaces = map[string]bool{
 	"docker0": true, // docker bridge
 }
 
-// calculateStaticNATIP calculates the expected NAT IP for a source IP using the static NAT offset algorithm.
-// NOTE: This function mirrors the algorithm from dataplane
-// nat_ip = nat_pool_start + (source_ip - source_subnet_start)
-func calculateStaticNATIP(sourceIP, sourceSubnet, natPoolStart netip.Addr) (netip.Addr, error) {
-	if !sourceIP.Is4() || !sourceSubnet.Is4() || !natPoolStart.Is4() {
-		return netip.Addr{}, fmt.Errorf("only IPv4 NAT is currently supported") //nolint:err113
-	}
-
-	sourceBytes := sourceIP.As4()
-	subnetBytes := sourceSubnet.As4()
-
-	sourceInt := binary.BigEndian.Uint32(sourceBytes[:])
-	subnetInt := binary.BigEndian.Uint32(subnetBytes[:])
-
-	if sourceInt < subnetInt {
-		return netip.Addr{}, fmt.Errorf("source IP %s is before subnet start %s", sourceIP, sourceSubnet) //nolint:err113
-	}
-
-	// Calculate offset from source subnet start
-	offset := sourceInt - subnetInt
-
-	// Add offset to NAT pool start
-	natPoolBytes := natPoolStart.As4()
-	natPoolInt := binary.BigEndian.Uint32(natPoolBytes[:])
-	natIPInt := natPoolInt + offset
-
-	var natIPBytes [4]byte
-	binary.BigEndian.PutUint32(natIPBytes[:], natIPInt)
-
-	return netip.AddrFrom4(natIPBytes), nil
-}
-
 // testNATGatewayConnectivity performs E2E connectivity testing for NAT gateway peering.
 // It discovers server IPs, calculates expected NAT IPs, and performs ping/iperf3 tests
 // using the shared checkPing and checkIPerf functions from testing.go.
-// NOTE: This uses calculateStaticNATIP which couples to the dataplane NAT algorithm.
+// NOTE: This uses connmatrix.CalculateStaticNATIP which couples to the dataplane NAT algorithm.
 // The function supports both source NAT and destination NAT:
 // - If vpc2NATPool is set: vpc1 pings vpc2 using vpc2's NAT IPs (destination NAT)
 // - If vpc2NATPool is empty: vpc1 pings vpc2's real IPs (source NAT on vpc1 side)
@@ -227,7 +195,7 @@ func (testCtx *VPCPeeringTestCtx) testNATGatewayConnectivity(
 	getDestIP := func(serverName string, destSubnetStart, natPoolStart netip.Addr) (netip.Addr, error) {
 		realIP := serverIPs[serverName]
 		if natPoolStart.IsValid() {
-			natIP, err := calculateStaticNATIP(realIP, destSubnetStart, natPoolStart)
+			natIP, err := connmatrix.CalculateStaticNATIP(realIP, destSubnetStart, natPoolStart)
 			if err != nil {
 				return netip.Addr{}, fmt.Errorf("calculating NAT IP for %s: %w", serverName, err)
 			}
@@ -267,7 +235,7 @@ func (testCtx *VPCPeeringTestCtx) testNATGatewayConnectivity(
 
 		// Iperf tests
 		slog.Debug("NAT ping tests completed, starting iperf3 tests", "direction", label)
-		reachability := Reachability{Reachable: true, Reason: ReachabilityReasonGatewayPeering}
+		reachability := Reachability{Reachable: true, Reason: connmatrix.ReachabilityReasonGatewayPeering}
 		var iperfErrors []*IperfError
 		for _, serverA := range fromServers {
 			for _, serverB := range toServers {
@@ -970,7 +938,7 @@ func (testCtx *VPCPeeringTestCtx) testPortForwardInboundConnectivity(
 
 	// Test inbound port-forward: vpc2 server → vpc1's NAT IP:externalPort → vpc1 server:5201
 	for _, serverB := range vpc1Servers { // iperf3 server side (behind NAT)
-		natIP, err := calculateStaticNATIP(serverIPs[serverB], vpc1SubnetStart, natPoolStart)
+		natIP, err := connmatrix.CalculateStaticNATIP(serverIPs[serverB], vpc1SubnetStart, natPoolStart)
 		if err != nil {
 			return fmt.Errorf("calculating NAT IP for %s: %w", serverB, err)
 		}
