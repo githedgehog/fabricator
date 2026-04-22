@@ -31,26 +31,18 @@ var excludedInterfaces = map[string]bool{
 	"docker0": true, // docker bridge
 }
 
-// testNATGatewayConnectivity performs E2E connectivity testing for NAT gateway peering.
-// It discovers server IPs, calculates expected NAT IPs, and performs ping/iperf3 tests
-// using the shared checkPing and checkIPerf functions from testing.go.
-// NOTE: This uses connmatrix.CalculateStaticNATIP which couples to the dataplane NAT algorithm.
-// The function supports both source NAT and destination NAT:
-// - If vpc2NATPool is set: vpc1 pings vpc2 using vpc2's NAT IPs (destination NAT)
-// - If vpc2NATPool is empty: vpc1 pings vpc2's real IPs (source NAT on vpc1 side)
-// - If vpc1NATPool is set: also test vpc2 -> vpc1 direction (bidirectional NAT)
+// testNATGatewayConnectivity performs E2E connectivity testing for NAT gateway
+// peering. Reachability expectations and NAT target IPs are derived from the
+// connectivity matrix (GatewayPeeringProvider reads the peering CRDs that the
+// caller has already set up), so this function no longer takes NAT pool CIDRs
+// as parameters. Direction asymmetry (masquerade is initiator-only, static NAT
+// is bidirectional) is picked up from the matrix verdict.
 func (testCtx *VPCPeeringTestCtx) testNATGatewayConnectivity(
 	ctx context.Context,
 	vpc1, vpc2 *vpcapi.VPC,
-	vpc1NATPool, vpc2NATPool []string,
 ) error {
 	startTime := time.Now()
 	slog.Info("Testing NAT gateway peering connectivity")
-
-	// Validate NAT pool parameters - we only support a single CIDR per VPC for now
-	if len(vpc1NATPool) > 1 || len(vpc2NATPool) > 1 {
-		return fmt.Errorf("multiple NAT CIDRs per VPC not supported, got vpc1=%d vpc2=%d", len(vpc1NATPool), len(vpc2NATPool)) //nolint:goerr113
-	}
 
 	servers := &wiringapi.ServerList{}
 	if err := testCtx.kube.List(ctx, servers); err != nil {
@@ -150,74 +142,76 @@ func (testCtx *VPCPeeringTestCtx) testNATGatewayConnectivity(
 		slog.Debug("Discovered server IP", "server", serverName, "ip", eligibleAddrs[0].String())
 	}
 
-	// Parse NAT pools - use Masked() to get the network address
-	var vpc1NATPoolStart, vpc2NATPoolStart netip.Addr
-	if len(vpc1NATPool) > 0 {
-		prefix, err := netip.ParsePrefix(vpc1NATPool[0])
-		if err != nil {
-			return fmt.Errorf("parsing vpc1 NAT pool: %w", err)
-		}
-		vpc1NATPoolStart = prefix.Masked().Addr()
-	}
-	if len(vpc2NATPool) > 0 {
-		prefix, err := netip.ParsePrefix(vpc2NATPool[0])
-		if err != nil {
-			return fmt.Errorf("parsing vpc2 NAT pool: %w", err)
-		}
-		vpc2NATPoolStart = prefix.Masked().Addr()
-	}
-
-	// Get VPC subnet starts for offset calculation
-	// NAT test requires exactly one subnet per VPC to avoid ambiguity in offset calculation
+	// Build a connectivity matrix for these servers and let it answer both
+	// "is this pair expected to reach each other" and "what IP should the
+	// initiator target". The matrix bakes in GatewayPeeringProvider's NAT
+	// translation (static offset, masquerade pool, expose.As), so this test
+	// no longer needs to parse NAT pool CIDRs or compute static offsets
+	// locally — we just consult matrix.Get(src, dst).
+	//
+	// NAT test still assumes a single subnet per VPC and a single IP per
+	// server (enforced above); the matrix likewise sees one endpoint per
+	// server in this topology.
 	if len(vpc1.Spec.Subnets) != 1 {
 		return fmt.Errorf("VPC %s has %d subnets, NAT test requires exactly one", vpc1.Name, len(vpc1.Spec.Subnets)) //nolint:err113
 	}
 	if len(vpc2.Spec.Subnets) != 1 {
 		return fmt.Errorf("VPC %s has %d subnets, NAT test requires exactly one", vpc2.Name, len(vpc2.Spec.Subnets)) //nolint:err113
 	}
-	var vpc1SubnetStart, vpc2SubnetStart netip.Addr
-	for _, subnet := range vpc1.Spec.Subnets {
-		prefix, err := netip.ParsePrefix(subnet.Subnet)
-		if err != nil {
-			return fmt.Errorf("parsing VPC %s subnet %s: %w", vpc1.Name, subnet.Subnet, err)
-		}
-		vpc1SubnetStart = prefix.Masked().Addr()
+	var vpc1SubnetFull, vpc2SubnetFull string
+	for subnetName := range vpc1.Spec.Subnets {
+		vpc1SubnetFull = vpc1.Name + "/" + subnetName
 	}
-	for _, subnet := range vpc2.Spec.Subnets {
-		prefix, err := netip.ParsePrefix(subnet.Subnet)
-		if err != nil {
-			return fmt.Errorf("parsing VPC %s subnet %s: %w", vpc2.Name, subnet.Subnet, err)
-		}
-		vpc2SubnetStart = prefix.Masked().Addr()
+	for subnetName := range vpc2.Spec.Subnets {
+		vpc2SubnetFull = vpc2.Name + "/" + subnetName
+	}
+	endpoints := make([]connmatrix.Endpoint, 0, len(vpc1Servers)+len(vpc2Servers))
+	for _, s := range vpc1Servers {
+		endpoints = append(endpoints, connmatrix.Endpoint{Server: s, Subnet: vpc1SubnetFull, IP: serverIPs[s]})
+	}
+	for _, s := range vpc2Servers {
+		endpoints = append(endpoints, connmatrix.Endpoint{Server: s, Subnet: vpc2SubnetFull, IP: serverIPs[s]})
+	}
+	matrix, err := connmatrix.NewMatrixBuilder(testCtx.kube, true).Build(ctx, endpoints)
+	if err != nil {
+		return fmt.Errorf("building connectivity matrix: %w", err)
 	}
 
-	// Helper to calculate destination IP (NAT IP if pool configured, real IP otherwise)
-	getDestIP := func(serverName string, destSubnetStart, natPoolStart netip.Addr) (netip.Addr, error) {
-		realIP := serverIPs[serverName]
-		if natPoolStart.IsValid() {
-			natIP, err := connmatrix.CalculateStaticNATIP(realIP, destSubnetStart, natPoolStart)
-			if err != nil {
-				return netip.Addr{}, fmt.Errorf("calculating NAT IP for %s: %w", serverName, err)
-			}
-			slog.Debug("Using NAT IP", "server", serverName, "real", realIP, "nat", natIP)
-
-			return natIP, nil
+	// resolveTarget consults the matrix for a given (src, dst) pair and
+	// returns (destIP, reachability-equivalent, ok). It returns ok=false
+	// when the matrix does not expect the pair to be reachable in that
+	// direction (masquerade reverse, missing peering, etc.). Callers in
+	// testDirection treat !ok as a topology/matrix mismatch and fail the
+	// test — direction-skip is the testDirection caller's job (done via
+	// the forward/reverse reachability probe below), not resolveTarget's.
+	resolveTarget := func(srcServer, dstServer, srcSubnet, dstSubnet string) (netip.Addr, Reachability, bool) {
+		exp := connmatrix.PickExpectation(matrix.Get(
+			connmatrix.EndpointKey{Server: srcServer, Subnet: srcSubnet},
+			connmatrix.EndpointKey{Server: dstServer, Subnet: dstSubnet},
+		))
+		if exp.Verdict != connmatrix.VerdictAllow {
+			return netip.Addr{}, Reachability{}, false
+		}
+		destIP := serverIPs[dstServer]
+		if exp.NAT != nil && exp.NAT.DestinationIP.IsValid() {
+			destIP = exp.NAT.DestinationIP
+			slog.Debug("Using NAT IP from matrix", "server", dstServer, "real", serverIPs[dstServer], "nat", destIP)
 		}
 
-		return realIP, nil
+		return destIP, Reachability{Reachable: true, Reason: exp.Reason, Peering: exp.Peering}, true
 	}
 
 	// Helper to test connectivity in one direction
-	testDirection := func(label string, fromServers, toServers []string, toSubnetStart, toNATPoolStart netip.Addr) error {
+	testDirection := func(label string, fromServers, toServers []string, fromSubnet, toSubnet string) error {
 		slog.Debug("Testing NAT connectivity", "direction", label)
 
 		// Ping tests
 		var pingErrors []*PingError
 		for _, serverA := range fromServers {
 			for _, serverB := range toServers {
-				destIP, err := getDestIP(serverB, toSubnetStart, toNATPoolStart)
-				if err != nil {
-					return err
+				destIP, _, ok := resolveTarget(serverA, serverB, fromSubnet, toSubnet)
+				if !ok {
+					return fmt.Errorf("matrix does not expect %s → %s to be reachable", serverA, serverB) //nolint:goerr113
 				}
 				if pe := checkPing(ctx, testCtx.tcOpts.PingsCount, nil, serverA, serverB, sshConfigs[serverA], destIP, nil, true); pe != nil {
 					pingErrors = append(pingErrors, pe)
@@ -235,13 +229,12 @@ func (testCtx *VPCPeeringTestCtx) testNATGatewayConnectivity(
 
 		// Iperf tests
 		slog.Debug("NAT ping tests completed, starting iperf3 tests", "direction", label)
-		reachability := Reachability{Reachable: true, Reason: connmatrix.ReachabilityReasonGatewayPeering}
 		var iperfErrors []*IperfError
 		for _, serverA := range fromServers {
 			for _, serverB := range toServers {
-				destIP, err := getDestIP(serverB, toSubnetStart, toNATPoolStart)
-				if err != nil {
-					return err
+				destIP, reachability, ok := resolveTarget(serverA, serverB, fromSubnet, toSubnet)
+				if !ok {
+					return fmt.Errorf("matrix does not expect %s → %s to be reachable", serverA, serverB) //nolint:goerr113
 				}
 				if ie := checkIPerf(ctx, testCtx.tcOpts, serverA, serverB, sshConfigs[serverA], sshConfigs[serverB], destIP, reachability); ie != nil {
 					iperfErrors = append(iperfErrors, ie)
@@ -260,14 +253,23 @@ func (testCtx *VPCPeeringTestCtx) testNATGatewayConnectivity(
 		return nil
 	}
 
-	// Test vpc1 -> vpc2 direction (always)
-	if err := testDirection("vpc1->vpc2", vpc1Servers, vpc2Servers, vpc2SubnetStart, vpc2NATPoolStart); err != nil {
+	// Test vpc1 → vpc2. Always attempted; masquerade (vpc1-side) tests the
+	// forward direction, static NAT tests both directions.
+	if err := testDirection("vpc1->vpc2", vpc1Servers, vpc2Servers, vpc1SubnetFull, vpc2SubnetFull); err != nil {
 		return err
 	}
 
-	// Test vpc2 -> vpc1 direction (only if vpc1 has static NAT - masquerade doesn't support being a destination)
-	if vpc1NATPoolStart.IsValid() {
-		if err := testDirection("vpc2->vpc1", vpc2Servers, vpc1Servers, vpc1SubnetStart, vpc1NATPoolStart); err != nil {
+	// Test vpc2 → vpc1 only when the matrix expects it to be reachable.
+	// Masquerade NAT on vpc1 yields reverse-side DENY (initiator-only), so
+	// the matrix-derived verdict is the authoritative check here — we used
+	// to key this on vpc1NATPool being non-empty, but the matrix already
+	// encodes direction from the peering's NAT mode.
+	reverseReachable := false
+	if len(vpc2Servers) > 0 && len(vpc1Servers) > 0 {
+		_, _, reverseReachable = resolveTarget(vpc2Servers[0], vpc1Servers[0], vpc2SubnetFull, vpc1SubnetFull)
+	}
+	if reverseReachable {
+		if err := testDirection("vpc2->vpc1", vpc2Servers, vpc1Servers, vpc2SubnetFull, vpc1SubnetFull); err != nil {
 			return err
 		}
 	}
@@ -337,10 +339,9 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringMasqueradeSourceNATTest(ctx cont
 		return false, nil, fmt.Errorf("waiting for switches to be ready: %w", err)
 	}
 
-	// Test connectivity - VPC2 has no NAT, so we ping real IPs
-	// Note: For masquerade NAT, we only test VPC1 -> VPC2 direction (pass nil for vpc1NATPool)
-	// because masquerade is stateful and doesn't support VPC2 initiating connections to VPC1's NAT IPs
-	if err := testCtx.testNATGatewayConnectivity(ctx, vpc1, vpc2, nil, nil); err != nil {
+	// Test connectivity. Direction handling (masquerade is initiator-only;
+	// static NAT is bidirectional) is picked up from the matrix verdict.
+	if err := testCtx.testNATGatewayConnectivity(ctx, vpc1, vpc2); err != nil {
 		return false, nil, fmt.Errorf("testing NAT gateway peering connectivity: %w", err)
 	}
 
@@ -403,8 +404,9 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringStaticSourceNATTest(ctx context.
 		return false, nil, fmt.Errorf("waiting for switches to be ready: %w", err)
 	}
 
-	// Test connectivity - VPC2 has no NAT, so we ping real IPs
-	if err := testCtx.testNATGatewayConnectivity(ctx, vpc1, vpc2, vpc1NATCIDR, nil); err != nil {
+	// Test connectivity. The matrix queries peering CRDs to derive NAT
+	// targets, so local NAT-pool plumbing is no longer needed here.
+	if err := testCtx.testNATGatewayConnectivity(ctx, vpc1, vpc2); err != nil {
 		return false, nil, fmt.Errorf("testing static source NAT connectivity: %w", err)
 	}
 
@@ -473,7 +475,7 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringBidirectionalStaticNATTest(ctx c
 		return false, nil, fmt.Errorf("waiting for switches to be ready: %w", err)
 	}
 
-	if err := testCtx.testNATGatewayConnectivity(ctx, vpc1, vpc2, vpc1NATCIDR, vpc2NATCIDR); err != nil {
+	if err := testCtx.testNATGatewayConnectivity(ctx, vpc1, vpc2); err != nil {
 		return false, nil, fmt.Errorf("testing bidirectional NAT connectivity: %w", err)
 	}
 
@@ -832,7 +834,7 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringOverlapNATTest(ctx context.Conte
 		"overlapVPC", overlapVPC.Name, "overlapCIDR", existingSubnetCIDR,
 		"existingNAT", existingVPCNATCIDR, "overlapNAT", overlapVPCNATCIDR)
 
-	if err := testCtx.testNATGatewayConnectivity(ctx, existingVPC, overlapVPC, existingVPCNATCIDR, overlapVPCNATCIDR); err != nil {
+	if err := testCtx.testNATGatewayConnectivity(ctx, existingVPC, overlapVPC); err != nil {
 		return false, reverts, fmt.Errorf("testing overlap NAT connectivity: %w", err)
 	}
 
@@ -1140,7 +1142,7 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringMasqueradePortForwardNATTest(ctx
 	}
 
 	// Outbound direction: vpc1 reaches vpc2 via masquerade NAT (vpc1 traffic appears from 192.168.51.x)
-	if err := testCtx.testNATGatewayConnectivity(ctx, vpc1, vpc2, nil, nil); err != nil {
+	if err := testCtx.testNATGatewayConnectivity(ctx, vpc1, vpc2); err != nil {
 		return false, nil, fmt.Errorf("testing masquerade+port-forward NAT outbound connectivity: %w", err)
 	}
 
