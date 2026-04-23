@@ -1400,6 +1400,12 @@ func Run(ctx context.Context) error {
 								Usage:   "number of subnets per VPC",
 								Value:   1,
 							},
+							&cli.IntFlag{
+								Name:    "vpcattachments-per-server",
+								Aliases: []string{"attachments-per-server"},
+								Usage:   "number of VPCAttachments per server (>1 enables multi-VPC trunking on VLAN-tagged sub-interfaces; incompatible with --host-bgp and p2p mode)",
+								Value:   1,
+							},
 							&cli.StringSliceFlag{
 								Name:    "dns-servers",
 								Aliases: []string{"dns"},
@@ -1445,19 +1451,20 @@ func Run(ctx context.Context) error {
 							}
 
 							if err := hhfab.DoVLABSetupVPCs(ctx, workDir, cacheDir, hhfab.SetupVPCsOpts{
-								WaitSwitchesReady: c.Bool("wait-switches-ready"),
-								ForceCleanup:      c.Bool("force-cleanup"),
-								VLANNamespace:     c.String("vlanns"),
-								IPv4Namespace:     c.String("ipns"),
-								ServersPerSubnet:  c.Int("servers-per-subnet"),
-								SubnetsPerVPC:     c.Int("subnets-per-vpc"),
-								DNSServers:        c.StringSlice("dns-servers"),
-								TimeServers:       c.StringSlice("time-servers"),
-								InterfaceMTU:      ifMTU,
-								HashPolicy:        c.String(FlagHashPolicy),
-								VPCMode:           vpcapi.VPCMode(handleL2VNI(c.String(FlagNameVPCMode))),
-								KeepPeerings:      c.Bool("keep-peerings"),
-								HostBGPSubnet:     c.Bool("host-bgp"),
+								WaitSwitchesReady:       c.Bool("wait-switches-ready"),
+								ForceCleanup:            c.Bool("force-cleanup"),
+								VLANNamespace:           c.String("vlanns"),
+								IPv4Namespace:           c.String("ipns"),
+								ServersPerSubnet:        c.Int("servers-per-subnet"),
+								SubnetsPerVPC:           c.Int("subnets-per-vpc"),
+								VPCAttachmentsPerServer: c.Int("vpcattachments-per-server"),
+								DNSServers:              c.StringSlice("dns-servers"),
+								TimeServers:             c.StringSlice("time-servers"),
+								InterfaceMTU:            ifMTU,
+								HashPolicy:              c.String(FlagHashPolicy),
+								VPCMode:                 vpcapi.VPCMode(handleL2VNI(c.String(FlagNameVPCMode))),
+								KeepPeerings:            c.Bool("keep-peerings"),
+								HostBGPSubnet:           c.Bool("host-bgp"),
 							}); err != nil {
 								return fmt.Errorf("setup-vpcs: %w", err)
 							}

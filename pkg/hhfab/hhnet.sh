@@ -6,6 +6,26 @@ set -e
 trap 'echo "Error on line $LINENO: $BASH_COMMAND" >&2' ERR
 
 function cleanup() {
+    # Drop source-based policy rules left over from previous trunking setups.
+    # Only remove priority-1000 rules that have BOTH a `from <src>` and a
+    # `lookup <table>` clause (the exact shape setup_policy_routing creates),
+    # so unrelated rules at the same priority are untouched.
+    mapfile -t policy_rules < <(ip rule show priority 1000 2>/dev/null | awk '
+        /from / && /lookup / {
+            src = ""
+            table = ""
+            for (i = 1; i <= NF; i++) {
+                if ($i == "from" && i + 1 <= NF) src = $(i + 1)
+                if ($i == "lookup" && i + 1 <= NF) table = $(i + 1)
+            }
+            if (src != "" && table != "") print src "\t" table
+        }')
+    for rule in "${policy_rules[@]}"; do
+        IFS=$'\t' read -r src table <<< "$rule"
+        [ -n "$src" ] && [ -n "$table" ] || continue
+        sudo ip rule del from "$src" lookup "$table" priority 1000 2>/dev/null || true
+    done
+
     mapfile -t bond_intfs < <(ip -brief link show type bond)
 
     for intf in "${bond_intfs[@]}"; do
@@ -99,6 +119,45 @@ function get_ip() {
     echo "$ip"
 }
 
+# Source-based policy routing for a VLAN sub-interface.
+#
+# When a server is trunked into multiple VPCs, every sub-interface gets its own
+# DHCP default route with the same metric. Linux FIB-multipath then alternates
+# replies across the sub-interfaces; replies that egress the "wrong" VLAN land
+# in a VRF at the leaf that doesn't have the route back (the peering only
+# leaks one direction per pair) and get silently dropped.
+#
+# Fix: for each sub-interface, add an `ip rule from <our IP> lookup <vlan>`
+# plus a default route pinned to that sub-interface in table <vlan>. Replies
+# then always egress the sub-interface that owns the source IP. Benign for
+# single-attachment servers (one rule, same default as main).
+function setup_policy_routing() {
+    local subif=$1
+    local vlan=$2
+
+    local cidr
+    cidr=$(ip -4 -o addr show dev "$subif" 2>/dev/null | awk '{print $4; exit}')
+    if [ -z "$cidr" ]; then
+        echo "warning: no IPv4 on $subif, skipping policy routing" >&2
+
+        return 0
+    fi
+    local ip="${cidr%%/*}"
+
+    local gw
+    gw=$(ip route show dev "$subif" 2>/dev/null | awk '$1=="default"{print $3; exit}')
+    if [ -z "$gw" ]; then
+        echo "warning: no default route on $subif, skipping policy routing" >&2
+
+        return 0
+    fi
+
+    # Idempotent: drop any prior rule for this source, then add fresh.
+    sudo ip rule del from "$ip" lookup "$vlan" 2>/dev/null || true
+    sudo ip rule add from "$ip" lookup "$vlan" priority 1000
+    sudo ip route replace default via "$gw" dev "$subif" table "$vlan"
+}
+
 # Usage:
 # hhnet cleanup
 # hhnet bond 1000 layer2+3 enp2s1 enp2s2 enp2s3 enp2s4
@@ -151,6 +210,7 @@ elif [ "$1" == "bond" ]; then
     sleep 1
     setup_vlan bond0 "$2"
     get_ip bond0."$2"
+    setup_policy_routing "bond0.$2" "$2"
 
     exit 0
 elif [ "$1" == "vlan" ]; then
@@ -169,6 +229,7 @@ elif [ "$1" == "vlan" ]; then
 
     setup_vlan "$iface" "$2" "$mtu"
     get_ip "$iface"."$2"
+    setup_policy_routing "$iface.$2" "$2"
 
     exit 0
 elif [ "$1" == "p2p" ]; then

@@ -335,14 +335,21 @@ type SetupVPCsOpts struct {
 	IPv4Namespace     string
 	ServersPerSubnet  int
 	SubnetsPerVPC     int
-	DNSServers        []string
-	TimeServers       []string
-	InterfaceMTU      uint16
-	HashPolicy        string
-	VPCMode           vpcapi.VPCMode
-	KeepPeerings      bool
-	HostBGPSubnet     bool
-	P2P               bool
+	// VPCAttachmentsPerServer is the number of VPCAttachments each server
+	// receives. Values >1 create trunking: one "primary" attachment as per
+	// ServersPerSubnet/SubnetsPerVPC, plus (N-1) additional attachments on
+	// distinct VPCs (each with its own VLAN, single subnet). Incompatible with
+	// HostBGPSubnet and P2P. Zero or one means today's single-attachment
+	// behaviour.
+	VPCAttachmentsPerServer int
+	DNSServers              []string
+	TimeServers             []string
+	InterfaceMTU            uint16
+	HashPolicy              string
+	VPCMode                 vpcapi.VPCMode
+	KeepPeerings            bool
+	HostBGPSubnet           bool
+	P2P                     bool
 }
 
 func CreateOrUpdateVpc(ctx context.Context, kube client.Client, vpc *vpcapi.VPC) (bool, error) {
@@ -441,11 +448,13 @@ func GetServerNetconfCmd(conn *wiringapi.Connection, opts ServerNetconfOpts) (st
 	return netconfCmd, nil
 }
 
-func getServerHostBGPCmd(conn *wiringapi.Connection, subnet netip.Prefix, serversInSubnet int) (string, error) {
+// TODO: multi subnet support once test-connectivity supports it
+func getServerHostBGPCmd(conn *wiringapi.Connection, vlan uint16, subnet netip.Prefix, serversInSubnet int) (string, error) {
 	if conn == nil {
 		return "", fmt.Errorf("connection is nil")
 	}
 
+	cmd := fmt.Sprintf("vpc:v=%d:i=", vlan)
 	interfaces := []string{}
 	switch {
 	case conn.Spec.Unbundled != nil:
@@ -466,7 +475,7 @@ func getServerHostBGPCmd(conn *wiringapi.Connection, subnet netip.Prefix, server
 		return "", fmt.Errorf("unexpected connection type for conn %q", conn.Name)
 	}
 
-	cmd := strings.Join(interfaces, ",")
+	cmd += strings.Join(interfaces, ":i=")
 	addr := subnet.Addr()
 	for range serversInSubnet {
 		addr = addr.Next()
@@ -474,7 +483,7 @@ func getServerHostBGPCmd(conn *wiringapi.Connection, subnet netip.Prefix, server
 	if !addr.IsValid() {
 		return "", fmt.Errorf("failed to get IP address from subnet %s", subnet.String())
 	}
-	cmd += " " + addr.String() + "/32"
+	cmd += ":a=" + addr.String() + "/32"
 
 	return cmd, nil
 }
@@ -512,22 +521,25 @@ func getServerAttachState(ctx context.Context, kube client.Client, server *wirin
 		if err := kube.List(ctx, attaches, kclient.MatchingLabels{wiringapi.LabelConnection: conn.Name}); err != nil {
 			return sa, fmt.Errorf("listing VPC attachments for connection %q: %w", conn.Name, err)
 		}
-		numAttaches := len(attaches.Items)
-		if numAttaches == 0 {
+		if len(attaches.Items) == 0 {
 			continue
-		} else if numAttaches > 1 {
-			return sa, fmt.Errorf("expected at most one VPC attachment for connection %q, got %d", conn.Name, numAttaches)
 		}
+		// Multiple attachments on the same Connection are valid with VLAN
+		// trunking (one per VPC). If any attachment points at a non-L2VNI VPC,
+		// mark the server L3VNI — L3VNI and trunking aren't combined today,
+		// but checking all keeps the signal honest.
 		sa.Attached = true
 		if checkVPCMode {
-			attach := attaches.Items[0]
-			vpcName := attach.Spec.VPCName()
-			vpc := &vpcapi.VPC{}
-			if err := kube.Get(ctx, client.ObjectKey{Name: vpcName, Namespace: metav1.NamespaceDefault}, vpc); err != nil {
-				return sa, fmt.Errorf("getting VPC %q: %w", vpcName, err)
-			}
-			if vpc.Spec.Mode != vpcapi.VPCModeL2VNI {
-				sa.L3VNI = true
+			for _, attach := range attaches.Items {
+				vpc := &vpcapi.VPC{}
+				if err := kube.Get(ctx, client.ObjectKey{Name: attach.Spec.VPCName(), Namespace: metav1.NamespaceDefault}, vpc); err != nil {
+					return sa, fmt.Errorf("getting VPC %q: %w", attach.Spec.VPCName(), err)
+				}
+				if vpc.Spec.Mode != vpcapi.VPCModeL2VNI {
+					sa.L3VNI = true
+
+					break
+				}
 			}
 		}
 
@@ -596,6 +608,18 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	if opts.SubnetsPerVPC <= 0 {
 		return fmt.Errorf("subnets per VPC must be positive")
 	}
+	attachmentsPerServer := opts.VPCAttachmentsPerServer
+	if attachmentsPerServer <= 0 {
+		attachmentsPerServer = 1
+	}
+	if attachmentsPerServer > 1 {
+		if opts.HostBGPSubnet {
+			return fmt.Errorf("VPCAttachmentsPerServer > 1 is not supported with HostBGPSubnet") //nolint:err113
+		}
+		if opts.P2P {
+			return fmt.Errorf("VPCAttachmentsPerServer > 1 is not supported with P2P") //nolint:err113
+		}
+	}
 	if !slices.Contains(HashPolicies, opts.HashPolicy) {
 		return fmt.Errorf("invalid hash policy %q, must be one of %v", opts.HashPolicy, HashPolicies)
 	} else if opts.HashPolicy != HashPolicyL2 && opts.HashPolicy != HashPolicyL2And3 {
@@ -634,6 +658,13 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	if !opts.P2P && allCumulus {
 		opts.P2P = true
 		slog.Warn("Forcing P2P mode since all switches are cumulus")
+	}
+	// Re-check trunking/P2P incompatibility now that P2P may have been
+	// auto-enabled for an all-Cumulus cluster. The first validation above
+	// only catches explicit --p2p misuse; this catch covers the case
+	// where the caller didn't set P2P but the cluster forced it on.
+	if attachmentsPerServer > 1 && opts.P2P {
+		return fmt.Errorf("VPCAttachmentsPerServer > 1 is not supported with P2P (auto-enabled for all-Cumulus cluster)") //nolint:err113
 	}
 
 	if err := ResolveDefaultServerMTU(ctx, kube, &opts); err != nil {
@@ -745,6 +776,25 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		}
 	}
 
+	// Pre-compute the number of primary VPCs so trunking VPCs (attachmentIdx>0)
+	// can be offset correctly. Mirrors the filter below: ESLAG-attached servers
+	// are skipped outside L2VNI mode.
+	eligibleCount := 0
+	for i := range servers.Items {
+		if opts.VPCMode != vpcapi.VPCModeL2VNI {
+			sa, err := getServerAttachState(ctx, kube, &servers.Items[i], false)
+			if err != nil {
+				return fmt.Errorf("checking server %q attachment state: %w", servers.Items[i].Name, err)
+			}
+			if sa.ESLAG {
+				continue
+			}
+		}
+		eligibleCount++
+	}
+	vpcsPerAttachmentRound := (eligibleCount + opts.ServersPerSubnet*opts.SubnetsPerVPC - 1) /
+		max(1, opts.ServersPerSubnet*opts.SubnetsPerVPC)
+
 	serverInSubnet := 0
 	subnetInVPC := 0
 	vpcID := 0
@@ -757,6 +807,29 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	expectedSubnets := map[string]netip.Prefix{}
 	eslagServers := make(map[string]bool, 0)
 	hostBGPServers := map[string]bool{}
+
+	findOrCreateVPC := func(name string) *vpcapi.VPC {
+		for _, v := range vpcs {
+			if v.Name == name {
+				return v
+			}
+		}
+		vpc := &vpcapi.VPC{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: metav1.NamespaceDefault,
+			},
+			Spec: vpcapi.VPCSpec{
+				Mode:    opts.VPCMode,
+				Subnets: map[string]*vpcapi.VPCSubnet{},
+			},
+		}
+		vpcNames[name] = true
+		vpcs = append(vpcs, vpc)
+
+		return vpc
+	}
+
 	for _, server := range servers.Items {
 		if opts.VPCMode != vpcapi.VPCModeL2VNI {
 			if sa, err := getServerAttachState(ctx, kube, &server, false); err != nil {
@@ -801,141 +874,156 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 			isMclag = isMclag || found
 		}
 
-		vpcName := fmt.Sprintf("vpc-%02d", vpcID+1)
-		subnetName := fmt.Sprintf("subnet-%02d", subnetInVPC+1)
-		hostBGP := opts.HostBGPSubnet && !hostBGPDoneForVPC && conn.Spec.Unbundled != nil && !isMclag
-		if hostBGP {
-			hostBGPDoneForVPC = true
-		}
+		serverConfCmds := []string{}
+		var primaryExpectedSubnet netip.Prefix
+		var primaryP2P netip.Prefix
 
-		var vpc *vpcapi.VPC
-		if len(vpcs) > 0 && vpcs[len(vpcs)-1].Name == vpcName {
-			vpc = vpcs[len(vpcs)-1]
-		} else {
-			vpc = &vpcapi.VPC{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      vpcName,
-					Namespace: metav1.NamespaceDefault,
-				},
-				Spec: vpcapi.VPCSpec{
-					Mode:    opts.VPCMode,
-					Subnets: map[string]*vpcapi.VPCSubnet{},
-				},
-			}
-			vpcNames[vpcName] = true
-			vpcs = append(vpcs, vpc)
-		}
-		if vpc.Spec.Subnets[subnetName] == nil {
-			subnet, ok := nextPrefix()
-			if !ok {
-				return fmt.Errorf("no more subnets available")
+		for attachmentIdx := 0; attachmentIdx < attachmentsPerServer; attachmentIdx++ {
+			// Primary attachment keeps the existing (vpcID, subnetInVPC) slot.
+			// Trunking attachments use a parallel VPC at offset
+			// `attachmentIdx * vpcsPerAttachmentRound` with a single subnet-01,
+			// so server pairs that share a primary VPC also share each trunking
+			// VPC. Peerings applied to trunking VPCs exercise the second
+			// endpoint on each server.
+			var vpcName, subnetName string
+			if attachmentIdx == 0 {
+				vpcName = fmt.Sprintf("vpc-%02d", vpcID+1)
+				subnetName = fmt.Sprintf("subnet-%02d", subnetInVPC+1)
+			} else {
+				vpcName = fmt.Sprintf("vpc-%02d", vpcID+1+attachmentIdx*vpcsPerAttachmentRound)
+				subnetName = "subnet-01"
 			}
 
-			var dhcpOpts *vpcapi.VPCDHCPOptions
-			if len(opts.DNSServers) > 0 || len(opts.TimeServers) > 0 || opts.InterfaceMTU > 0 {
-				dhcpOpts = &vpcapi.VPCDHCPOptions{
-					DNSServers:   opts.DNSServers,
-					TimeServers:  opts.TimeServers,
-					InterfaceMTU: opts.InterfaceMTU,
+			hostBGP := attachmentIdx == 0 &&
+				opts.HostBGPSubnet && !hostBGPDoneForVPC && conn.Spec.Unbundled != nil && !isMclag
+			if hostBGP {
+				hostBGPDoneForVPC = true
+			}
+
+			vpc := findOrCreateVPC(vpcName)
+			if vpc.Spec.Subnets[subnetName] == nil {
+				subnet, ok := nextPrefix()
+				if !ok {
+					return fmt.Errorf("no more subnets available")
 				}
-			}
 
-			var vlan uint16
-			dhcp := vpcapi.VPCDHCP{}
-			if !hostBGP {
-				if !opts.P2P {
+				var dhcpOpts *vpcapi.VPCDHCPOptions
+				if len(opts.DNSServers) > 0 || len(opts.TimeServers) > 0 || opts.InterfaceMTU > 0 {
+					dhcpOpts = &vpcapi.VPCDHCPOptions{
+						DNSServers:   opts.DNSServers,
+						TimeServers:  opts.TimeServers,
+						InterfaceMTU: opts.InterfaceMTU,
+					}
+				}
+
+				vlan, ok := nextVLAN()
+				if !ok {
+					return fmt.Errorf("no more vlans available")
+				}
+				dhcp := vpcapi.VPCDHCP{}
+				if !hostBGP && !opts.P2P {
 					dhcp.Enable = true
 					dhcp.Options = dhcpOpts
 				}
 
-				vlan, ok = nextVLAN()
-				if !ok {
-					return fmt.Errorf("no more vlans available")
+				vpc.Spec.Subnets[subnetName] = &vpcapi.VPCSubnet{
+					Subnet:  subnet.String(),
+					VLAN:    vlan,
+					DHCP:    dhcp,
+					HostBGP: hostBGP,
 				}
 			}
 
-			vpc.Spec.Subnets[subnetName] = &vpcapi.VPCSubnet{
-				Subnet:  subnet.String(),
-				VLAN:    vlan,
-				DHCP:    dhcp,
-				HostBGP: hostBGP,
-			}
-		}
-
-		p2p := netip.Prefix{}
-		if opts.P2P {
-			subnet, err := netip.ParsePrefix(vpc.Spec.Subnets[subnetName].Subnet)
+			expectedSubnet, err := netip.ParsePrefix(vpc.Spec.Subnets[subnetName].Subnet)
 			if err != nil {
 				return fmt.Errorf("parsing vpc subnet %s/%s %q: %w", vpcName, subnetName, vpc.Spec.Subnets[subnetName].Subnet, err)
 			}
 
-			b := subnet.Masked().Addr().As4()
-			v := binary.BigEndian.Uint32(b[:])
-			v += 2 * uint32(serverInSubnet)
-			binary.BigEndian.PutUint32(b[:], v)
-			p2p = netip.PrefixFrom(netip.AddrFrom4(b), 31)
+			p2p := netip.Prefix{}
+			if opts.P2P {
+				b := expectedSubnet.Masked().Addr().As4()
+				v := binary.BigEndian.Uint32(b[:])
+				v += 2 * uint32(serverInSubnet)
+				binary.BigEndian.PutUint32(b[:], v)
+				p2p = netip.PrefixFrom(netip.AddrFrom4(b), 31)
+			}
+
+			if attachmentIdx == 0 {
+				primaryExpectedSubnet = expectedSubnet
+				primaryP2P = p2p
+				expectedSubnets[server.Name] = expectedSubnet
+				if opts.P2P {
+					expectedSubnets[server.Name] = p2p
+				}
+				if hostBGP {
+					hostBGPServers[server.Name] = true
+				}
+			}
+
+			attachName := fmt.Sprintf("%s--%s--%s", conn.Name, vpcName, subnetName)
+			attachNames[attachName] = true
+			attachAnns := map[string]string{}
+			if opts.P2P {
+				attachAnns[vpcapi.AnnotationVPCAttachmentP2PLink] = p2p.String()
+			}
+
+			attach := &vpcapi.VPCAttachment{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        attachName,
+					Namespace:   metav1.NamespaceDefault,
+					Annotations: attachAnns,
+				},
+				Spec: vpcapi.VPCAttachmentSpec{
+					Connection: conn.Name,
+					Subnet:     fmt.Sprintf("%s/%s", vpcName, subnetName),
+				},
+			}
+			attaches = append(attaches, attach)
+
+			vlan := uint16(0)
+			if !attach.Spec.NativeVLAN {
+				vlan = vpc.Spec.Subnets[subnetName].VLAN
+			}
+
+			var confCmd string
+			var confErr error
+			switch {
+			case hostBGP:
+				confCmd, confErr = getServerHostBGPCmd(&conn, vlan, primaryExpectedSubnet, serverInSubnet)
+			case opts.P2P:
+				confCmd, confErr = GetServerNetconfCmd(&conn, ServerNetconfOpts{
+					P2P: primaryP2P.String(),
+				})
+			case attachmentIdx > 0 && conn.Spec.Unbundled == nil:
+				// Trunking follow-up on bonded/MCLAG/ESLAG connections: bond0
+				// was created by the primary attachment; here we only add
+				// another VLAN sub-interface.
+				confCmd = fmt.Sprintf("vlan %d bond0", vlan)
+				if opts.InterfaceMTU > 0 {
+					confCmd += fmt.Sprintf(" --mtu=%d", opts.InterfaceMTU)
+				}
+			default:
+				confCmd, confErr = GetServerNetconfCmd(&conn, ServerNetconfOpts{
+					VLAN:       vlan,
+					HashPolicy: opts.HashPolicy,
+					MTU:        opts.InterfaceMTU,
+				})
+			}
+			if confErr != nil {
+				return fmt.Errorf("getting conf cmd for server %q: %w", server.Name, confErr)
+			}
+			serverConfCmds = append(serverConfCmds, confCmd)
 		}
 
 		serverInSubnet++
 
-		expectedSubnet, err := netip.ParsePrefix(vpc.Spec.Subnets[subnetName].Subnet)
-		if err != nil {
-			return fmt.Errorf("parsing vpc subnet %s/%s %q: %w", vpcName, subnetName, vpc.Spec.Subnets[subnetName].Subnet, err)
-		}
-		expectedSubnets[server.Name] = expectedSubnet
-		if opts.P2P {
-			expectedSubnets[server.Name] = p2p
-		}
-		if hostBGP {
-			hostBGPServers[server.Name] = true
-		}
-
-		attachName := fmt.Sprintf("%s--%s--%s", conn.Name, vpcName, subnetName)
-		attachNames[attachName] = true
-		attachAnns := map[string]string{}
-		if opts.P2P {
-			attachAnns[vpcapi.AnnotationVPCAttachmentP2PLink] = p2p.String()
-		}
-
-		attach := &vpcapi.VPCAttachment{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:        attachName,
-				Namespace:   metav1.NamespaceDefault,
-				Annotations: attachAnns,
-			},
-			Spec: vpcapi.VPCAttachmentSpec{
-				Connection: conn.Name,
-				Subnet:     fmt.Sprintf("%s/%s", vpcName, subnetName),
-			},
-		}
-		attaches = append(attaches, attach)
-
-		vlan := uint16(0)
-		if !attach.Spec.NativeVLAN {
-			vlan = vpc.Spec.Subnets[subnetName].VLAN
-		}
-
-		var confCmd string
-		var confErr error
-
-		if hostBGP {
-			confCmd, confErr = getServerHostBGPCmd(&conn, expectedSubnet, serverInSubnet)
-		} else if opts.P2P {
-			confCmd, confErr = GetServerNetconfCmd(&conn, ServerNetconfOpts{
-				P2P: p2p.String(),
-			})
+		if len(serverConfCmds) == 1 {
+			netconfs[server.Name] = serverConfCmds[0]
 		} else {
-			confCmd, confErr = GetServerNetconfCmd(&conn, ServerNetconfOpts{
-				VLAN:       vlan,
-				HashPolicy: opts.HashPolicy,
-				MTU:        opts.InterfaceMTU,
-			})
+			// Callers run this as `/opt/bin/hhnet <netconf>`; for trunking we
+			// need each chained invocation to invoke the binary again.
+			netconfs[server.Name] = strings.Join(serverConfCmds, " && /opt/bin/hhnet ")
 		}
-		if confErr != nil {
-			return fmt.Errorf("getting conf cmd for server %q: %w", server.Name, confErr)
-		}
-
-		netconfs[server.Name] = confCmd
 	}
 
 	if opts.WaitSwitchesReady {
@@ -1103,7 +1191,12 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 						return fmt.Errorf("running hhnet %q: %w: out: %s", netconfs[server.Name], err, stderr)
 					}
 
-					prefix, err = netip.ParsePrefix(strings.TrimSpace(stdout))
+					// Trunking produces one CIDR line per hhnet invocation.
+					// The first line corresponds to the primary attachment,
+					// which is the one expectedSubnets[server.Name] refers to.
+					// Matrix endpoint discovery validates the rest per-subnet.
+					firstLine := strings.TrimSpace(strings.SplitN(strings.TrimSpace(stdout), "\n", 2)[0])
+					prefix, err = netip.ParsePrefix(firstLine)
 					if err != nil {
 						return fmt.Errorf("parsing acquired address %q: %w", stdout, err)
 					}
