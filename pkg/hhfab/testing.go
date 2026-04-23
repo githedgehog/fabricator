@@ -441,40 +441,55 @@ func GetServerNetconfCmd(conn *wiringapi.Connection, opts ServerNetconfOpts) (st
 	return netconfCmd, nil
 }
 
-func getServerHostBGPCmd(conn *wiringapi.Connection, subnet netip.Prefix, serversInSubnet int) (string, error) {
-	if conn == nil {
-		return "", fmt.Errorf("connection is nil")
+// getServerHostBGPCmd builds the hhnet/host-bgp command string for a HostBGP
+// server. Callers pass one connection for single-leaf topologies and N
+// connections for multihomed topologies (one per orphan leaf the server is
+// attached to via a distinct Unbundled connection). All interfaces from all
+// connections are merged into a single command: the host-bgp container runs
+// one FRR instance that brings up a BGP session per interface and advertises
+// a single /32 VIP from the loopback across all of them.
+//
+// TODO: multi subnet support once test-connectivity supports it
+func getServerHostBGPCmd(conns []*wiringapi.Connection, vlan uint16, subnet netip.Prefix, serversInSubnet int) (string, error) {
+	if len(conns) == 0 {
+		return "", fmt.Errorf("no connections for host-bgp command") //nolint:err113
 	}
 
 	interfaces := []string{}
-	switch {
-	case conn.Spec.Unbundled != nil:
-		interfaces = append(interfaces, conn.Spec.Unbundled.Link.Server.LocalPortName())
-	case conn.Spec.Bundled != nil:
-		for _, link := range conn.Spec.Bundled.Links {
-			interfaces = append(interfaces, link.Server.LocalPortName())
+	for _, conn := range conns {
+		if conn == nil {
+			return "", fmt.Errorf("connection is nil") //nolint:err113
 		}
-	case conn.Spec.MCLAG != nil:
-		for _, link := range conn.Spec.MCLAG.Links {
-			interfaces = append(interfaces, link.Server.LocalPortName())
+		switch {
+		case conn.Spec.Unbundled != nil:
+			interfaces = append(interfaces, conn.Spec.Unbundled.Link.Server.LocalPortName())
+		case conn.Spec.Bundled != nil:
+			for _, link := range conn.Spec.Bundled.Links {
+				interfaces = append(interfaces, link.Server.LocalPortName())
+			}
+		case conn.Spec.MCLAG != nil:
+			for _, link := range conn.Spec.MCLAG.Links {
+				interfaces = append(interfaces, link.Server.LocalPortName())
+			}
+		case conn.Spec.ESLAG != nil:
+			for _, link := range conn.Spec.ESLAG.Links {
+				interfaces = append(interfaces, link.Server.LocalPortName())
+			}
+		default:
+			return "", fmt.Errorf("unexpected connection type for conn %q", conn.Name) //nolint:err113
 		}
-	case conn.Spec.ESLAG != nil:
-		for _, link := range conn.Spec.ESLAG.Links {
-			interfaces = append(interfaces, link.Server.LocalPortName())
-		}
-	default:
-		return "", fmt.Errorf("unexpected connection type for conn %q", conn.Name)
 	}
 
-	cmd := strings.Join(interfaces, ",")
+	cmd := fmt.Sprintf("vpc:v=%d:i=", vlan)
+	cmd += strings.Join(interfaces, ":i=")
 	addr := subnet.Addr()
 	for range serversInSubnet {
 		addr = addr.Next()
 	}
 	if !addr.IsValid() {
-		return "", fmt.Errorf("failed to get IP address from subnet %s", subnet.String())
+		return "", fmt.Errorf("failed to get IP address from subnet %s", subnet.String()) //nolint:err113
 	}
-	cmd += " " + addr.String() + "/32"
+	cmd += ":a=" + addr.String() + "/32"
 
 	return cmd, nil
 }
@@ -786,9 +801,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		if len(conns.Items) == 0 {
 			return fmt.Errorf("no connections for server %q", server.Name)
 		}
-		if len(conns.Items) > 1 {
-			return fmt.Errorf("multiple connections for server %q", server.Name)
-		}
+
 		conn := conns.Items[0]
 
 		switches, _, _, _, err := conn.Spec.Endpoints()
@@ -806,6 +819,43 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		hostBGP := opts.HostBGPSubnet && !hostBGPDoneForVPC && conn.Spec.Unbundled != nil && !isMclag
 		if hostBGP {
 			hostBGPDoneForVPC = true
+		}
+
+		// Admit multihomed HostBGP wiring only when this server is actually
+		// being configured as the VPC's HostBGP server. If HostBGPSubnet is
+		// set but hostBGPDoneForVPC already covered another server in the
+		// same VPC, the extra VPCAttachments and merged netconf would be
+		// meaningless and the single-conn netconf below would silently drop
+		// the extra connections. Gating on hostBGP keeps that invariant.
+		multihomedHostBGP := false
+		if hostBGP && len(conns.Items) > 1 {
+			allUnbundled := true
+			anyMclag := false
+			leafSeen := map[string]bool{}
+			for i := range conns.Items {
+				c := &conns.Items[i]
+				if c.Spec.Unbundled == nil {
+					allUnbundled = false
+
+					break
+				}
+				cSwitches, _, _, _, err := c.Spec.Endpoints()
+				if err != nil {
+					return fmt.Errorf("getting connection %q endpoints: %w", c.Name, err)
+				}
+				for _, sw := range cSwitches {
+					if _, m := mclagSwitches[sw]; m {
+						anyMclag = true
+					}
+					leafSeen[sw] = true
+				}
+			}
+			if allUnbundled && !anyMclag && len(leafSeen) == len(conns.Items) {
+				multihomedHostBGP = true
+			}
+		}
+		if !multihomedHostBGP && len(conns.Items) > 1 {
+			return fmt.Errorf("multiple connections for server %q", server.Name) //nolint:err113
 		}
 
 		var vpc *vpcapi.VPC
@@ -840,18 +890,14 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 				}
 			}
 
-			var vlan uint16
+			vlan, ok := nextVLAN()
+			if !ok {
+				return fmt.Errorf("no more vlans available")
+			}
 			dhcp := vpcapi.VPCDHCP{}
-			if !hostBGP {
-				if !opts.P2P {
-					dhcp.Enable = true
-					dhcp.Options = dhcpOpts
-				}
-
-				vlan, ok = nextVLAN()
-				if !ok {
-					return fmt.Errorf("no more vlans available")
-				}
+			if !hostBGP && !opts.P2P {
+				dhcp.Enable = true
+				dhcp.Options = dhcpOpts
 			}
 
 			vpc.Spec.Subnets[subnetName] = &vpcapi.VPCSubnet{
@@ -910,6 +956,38 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		}
 		attaches = append(attaches, attach)
 
+		// Collect all connections driving the server-side config. For a
+		// single-leaf server this is just the primary connection; for
+		// multihomed HostBGP we also emit one VPCAttachment per extra
+		// Unbundled connection so each leaf learns the VIP. The extra
+		// attachments carry the same annotations as the primary so
+		// downstream consumers (e.g. VLAB air generator reading the
+		// P2P-link annotation) see a consistent attachment shape.
+		serverConns := []*wiringapi.Connection{&conns.Items[0]}
+		if multihomedHostBGP {
+			for i := 1; i < len(conns.Items); i++ {
+				extraConn := &conns.Items[i]
+				extraAttachName := fmt.Sprintf("%s--%s--%s", extraConn.Name, vpcName, subnetName)
+				attachNames[extraAttachName] = true
+				extraAttachAnns := make(map[string]string, len(attachAnns))
+				for k, v := range attachAnns {
+					extraAttachAnns[k] = v
+				}
+				attaches = append(attaches, &vpcapi.VPCAttachment{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:        extraAttachName,
+						Namespace:   metav1.NamespaceDefault,
+						Annotations: extraAttachAnns,
+					},
+					Spec: vpcapi.VPCAttachmentSpec{
+						Connection: extraConn.Name,
+						Subnet:     fmt.Sprintf("%s/%s", vpcName, subnetName),
+					},
+				})
+				serverConns = append(serverConns, extraConn)
+			}
+		}
+
 		vlan := uint16(0)
 		if !attach.Spec.NativeVLAN {
 			vlan = vpc.Spec.Subnets[subnetName].VLAN
@@ -919,7 +997,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		var confErr error
 
 		if hostBGP {
-			confCmd, confErr = getServerHostBGPCmd(&conn, expectedSubnet, serverInSubnet)
+			confCmd, confErr = getServerHostBGPCmd(serverConns, vlan, expectedSubnet, serverInSubnet)
 		} else if opts.P2P {
 			confCmd, confErr = GetServerNetconfCmd(&conn, ServerNetconfOpts{
 				P2P: p2p.String(),
@@ -1077,8 +1155,9 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 					if err != nil {
 						return fmt.Errorf("running hostbgp %q: %w: out: %s", netconfs[server.Name], err, stderr)
 					}
-					for attempt := range 5 {
-						time.Sleep(1 * time.Second)
+					const vipAttempts = 30
+					for attempt := range vipAttempts {
+						time.Sleep(2 * time.Second)
 						stdout, stderr, err = sshCfg.Run(ctx, "/opt/bin/hhnet getvips")
 						if err != nil {
 							return fmt.Errorf("fetching ip address on loopback: %w: out: %s", err, stderr)
@@ -1086,6 +1165,9 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 						slog.Debug("hostBGP VIP parsing", "server", server.Name, "attempt", attempt+1, "stdout", stdout)
 						for line := range strings.Lines(stdout) {
 							line = strings.TrimSpace(line)
+							if line == "" {
+								continue
+							}
 							prefix, err = netip.ParsePrefix(line)
 							if err != nil {
 								return fmt.Errorf("parsing VIP %q: %w", line, err)
@@ -1096,6 +1178,14 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 						if prefix.IsValid() {
 							break
 						}
+					}
+					// Without this guard the next block would fall through
+					// with a zero-value prefix and the subnet-containment
+					// check would report "unexpected acquired address" —
+					// misleading when the real problem is that no VIP ever
+					// appeared on loopback.
+					if !prefix.IsValid() {
+						return fmt.Errorf("no HostBGP VIP found on %s after %d attempts", server.Name, vipAttempts) //nolint:err113
 					}
 				} else {
 					stdout, stderr, err = sshCfg.Run(ctx, "/opt/bin/hhnet "+netconfs[server.Name])
