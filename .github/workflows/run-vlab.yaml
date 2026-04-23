@@ -227,7 +227,8 @@ jobs:
             --ready=exit
 
       - name: (${{ inputs.upgradefrom }}) Prepare debug artifacts
-        if: ${{ always() && !cancelled() && steps.test-before.outcome != 'skipped' }}
+        # Forensic branch: drop the !cancelled() guard so artifacts are captured on job timeout too.
+        if: ${{ always() && steps.test-before.outcome != 'skipped' }}
         run: |
           mkdir -p _debug/0-before/serial
           cp versions.txt _debug/0-before || true
@@ -325,8 +326,30 @@ jobs:
           name: ${{ env.slug }}--test-results
           path: release-test.xml
 
+      # Fallback when the main step was cancelled (runner job-level timeout)
+      # or failed without populating show-tech-output. On SIGTERM, hhfab
+      # flips ShutdownTypeGraceful and every in-process CollectVLABDebug
+      # call-site short-circuits, so show-tech-output ends up empty. Run
+      # show-tech out-of-process here so this step gets its own budget.
+      # Only fires on failure or cancel; successful runs skip it. The
+      # internal "already populated" check still covers the case where
+      # the failure path did run in-process show-tech before exiting.
+      - name: Collect show-tech (cancel/timeout fallback)
+        if: ${{ always() && (steps.test-current.outcome == 'failure' || steps.test-current.outcome == 'cancelled') }}
+        timeout-minutes: 10
+        continue-on-error: true
+        run: |
+          if [ -d show-tech-output ] && [ -n "$(ls -A show-tech-output 2>/dev/null)" ]; then
+            echo "show-tech-output already populated by hhfab; skipping standalone collection"
+            ls -la show-tech-output
+            exit 0
+          fi
+          echo "show-tech-output empty, running standalone hhfab vlab show-tech"
+          bin/hhfab vlab show-tech || echo "standalone show-tech returned non-zero; see log above"
+
       - name: Prepare debug artifacts
-        if: ${{ always() && !cancelled() && steps.test-current.outcome != 'skipped' }}
+        # Forensic branch: drop the !cancelled() guard so artifacts are captured on job timeout too.
+        if: ${{ always() && steps.test-current.outcome != 'skipped' }}
         run: |
           mkdir -p _debug/1-current/serial
           cp versions.txt _debug/1-current || true
@@ -350,7 +373,8 @@ jobs:
             --ready=exit
 
       - name: (After) Prepare debug artifacts
-        if: ${{ always() && !cancelled() && steps.test-after.outcome != 'skipped' }}
+        # Forensic branch: drop the !cancelled() guard so artifacts are captured on job timeout too.
+        if: ${{ always() && steps.test-after.outcome != 'skipped' }}
         run: |
           mkdir -p _debug/2-after/serial
           cp versions.txt _debug/2-after || true
@@ -361,7 +385,8 @@ jobs:
           find ./vlab/vms -type f -name serial.log -exec bash -c 'cp $0 _debug/2-after/serial/$(basename $(dirname $0)).log' {} \; || true
 
       - name: Rename debug artifacts for upload
-        if: ${{ always() && !cancelled() && (steps.test-before.outcome != 'skipped' || steps.test-current.outcome != 'skipped' || steps.test-after.outcome != 'skipped') }}
+        # Forensic branch: drop the !cancelled() guard so artifacts are captured on job timeout too.
+        if: ${{ always() && (steps.test-before.outcome != 'skipped' || steps.test-current.outcome != 'skipped' || steps.test-after.outcome != 'skipped') }}
         run: |
           mv _debug fab-${{ github.run_id }}-${{ env.slug }}
 
