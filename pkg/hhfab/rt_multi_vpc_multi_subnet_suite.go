@@ -686,7 +686,7 @@ func (testCtx *VPCPeeringTestCtx) staticExternalTest(ctx context.Context) (bool,
 		return false, reverts, fmt.Errorf("waiting for switches to be ready: %w", err)
 	}
 	// look for routes in the switch(es) before pinging, see https://github.com/githedgehog/fabricator/issues/932#issuecomment-3322976488
-	if err := testCtx.waitForRoutesInSwitches(ctx, routeCheckSw, []string{StaticExternalNH, StaticExternalDummyIface}, "default"); err != nil {
+	if err := testCtx.waitForRoutesInSwitches(ctx, routeCheckSw, []string{StaticExternalNH, StaticExternalDummyIface}, defaultVRFName); err != nil {
 		return false, reverts, fmt.Errorf("waiting for routes in switch %s vrf default: %w", switchName, err)
 	}
 
