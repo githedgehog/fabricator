@@ -390,7 +390,7 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringLoopTest(ctx context.Context) (b
 
 		vrfName := "VrfV" + vpc.Name
 		if vpc.Spec.Mode == vpcapi.VPCModeL3Flat {
-			vrfName = "default"
+			vrfName = defaultVRFName
 		}
 
 		slog.Info("Waiting for gateway routes on leaves", "vpc", vpc.Name, "leaves", leavesForVPC, "routes", peerRoutes, "vrf", vrfName)
