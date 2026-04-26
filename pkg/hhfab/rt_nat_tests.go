@@ -275,8 +275,8 @@ func (testCtx *VPCPeeringTestCtx) testNATGatewayConnectivity(
 				if err != nil {
 					return err
 				}
-				if ie := checkIPerf(ctx, testCtx.tcOpts, serverA, serverB, sshConfigs[serverA], sshConfigs[serverB], destIP, reachability); ie != nil {
-					iperfErrors = append(iperfErrors, ie)
+				if ies := checkIPerf(ctx, testCtx.tcOpts, serverA, serverB, sshConfigs[serverA], sshConfigs[serverB], destIP, reachability, false); len(ies) > 0 {
+					iperfErrors = append(iperfErrors, ies...)
 				}
 			}
 		}
