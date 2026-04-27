@@ -41,6 +41,11 @@ on:
         description: "Run the build with tmate debugging enabled (https://github.com/marketplace/actions/debugging-with-tmate)"
         required: false
         default: false
+      pause_on_failure:
+        type: boolean
+        description: "Pause on failure"
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -307,6 +312,8 @@ jobs:
       releasetest: ${{ inputs.releasetest == true || contains(github.event.pull_request.labels.*.name, 'ci:+release') || github.event.schedule == '0 6 * * *' }}
       hybrid: ${{ matrix.hybrid }}
       upgradefrom: ${{ matrix.upgradefrom }}
+      debug: ${{ inputs.debug_enabled == true || inputs.pause_on_failure == true }}
+      pause_on_failure: ${{ inputs.pause_on_failure == true }}
 
     strategy:
       fail-fast: false
