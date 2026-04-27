@@ -1214,7 +1214,22 @@ func (c *Config) CollectVLABDebug(ctx context.Context, vlab *VLAB, opts VLABRunO
 		}
 	}
 
-	if dump, err := support.Collect(ctx, "vlab", kubeconfig); err != nil {
+	// Collect show-tech before the support dump: show-tech has per-target deadlines,
+	// while support dump pod-log retrieval can hang for many minutes when pods are
+	// stuck in PodInitializing (each container retry burns ~2 min of ctx). Running
+	// show-tech first guarantees we get host/switch/gateway diagnostics even if the
+	// support dump later stalls and we get killed by the runner timeout.
+	if (opts.CollectShowTech && forceShowTech) || opts.ForceCollectShowTech {
+		if err := c.VLABShowTech(ctx, vlab, ShowTechOpts{}); err != nil {
+			slog.Warn("Failed to collect show-tech diagnostics", "err", err)
+		}
+	}
+
+	// Bound the support dump so a stuck pod-log fetch can't eat the whole remaining
+	// budget before artifacts are uploaded.
+	dumpCtx, dumpCancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer dumpCancel()
+	if dump, err := support.Collect(dumpCtx, "vlab", kubeconfig); err != nil {
 		slog.Warn("Failed to collect support dump", "err", err)
 	} else {
 		if data, err := support.Marshal(dump); err != nil {
@@ -1223,12 +1238,6 @@ func (c *Config) CollectVLABDebug(ctx context.Context, vlab *VLAB, opts VLABRunO
 			if err := os.WriteFile(filepath.Join(c.WorkDir, "vlab.hhs"), data, 0o644); err != nil { //nolint:gosec
 				slog.Warn("Failed to write support dump", "err", err)
 			}
-		}
-	}
-
-	if (opts.CollectShowTech && forceShowTech) || opts.ForceCollectShowTech {
-		if err := c.VLABShowTech(ctx, vlab, ShowTechOpts{}); err != nil {
-			slog.Warn("Failed to collect show-tech diagnostics", "err", err)
 		}
 	}
 }
