@@ -2292,8 +2292,24 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 			i++
 		}
 	}
+	// Snapshot which directed pairs were requested so each goroutine can tell
+	// whether the reverse direction is also under test (a precondition for
+	// collapsing two unidirectional iperf3 runs into one --bidir session).
+	requestedPairs := make(map[[2]string]bool, len(opts.Sources)*len(opts.Destinations))
+	for _, a := range opts.Sources {
+		for _, b := range opts.Destinations {
+			if a == b {
+				continue
+			}
+			requestedPairs[[2]string{a, b}] = true
+		}
+	}
+
 	wg := &sync.WaitGroup{}
-	errChan := make(chan error, len(opts.Sources)*len(opts.Destinations)+len(opts.Sources))
+	// Buffered for the worst case where every directed pair contributes both a
+	// ping error and an iperf error (and bidir runs report two iperf errors per
+	// canonical pair) plus one curl error per source.
+	errChan := make(chan error, 2*len(opts.Sources)*len(opts.Destinations)+len(opts.Sources))
 
 	for _, serverA := range opts.Sources {
 		for _, serverB := range opts.Destinations {
@@ -2344,6 +2360,38 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 							return pe
 						}
 
+						if opts.IPerfsSeconds <= 0 {
+							return nil
+						}
+
+						// Collapse forward+reverse iperf into one --bidir session when both
+						// directions are reachable and the reason is symmetric/no-NAT.
+						// Forward reachability and reason are not enough on their own:
+						// once isBidirSafeReason admits cases beyond intra-VPC and
+						// switch-peering (e.g. gateway peerings with expose.NAT == nil
+						// on both sides), or once TestConnectivity is generalized over
+						// NAT scenarios, the reverse direction can be unreachable while
+						// forward is fine (masquerade, port-forward, asymmetric NAT).
+						// Probe the reverse explicitly so the gate stays conservative
+						// across those extensions.
+						bidir := false
+						if expectedReachable.Reachable && isBidirSafeReason(expectedReachable.Reason) && requestedPairs[[2]string{serverB, serverA}] {
+							revReachable, err := IsServerReachable(ctx, kube, serverB, serverA, c.Fab.Spec.Config.Gateway.Enable)
+							if err != nil {
+								return fmt.Errorf("checking reverse reachability for bidir: %w", err)
+							}
+							if revReachable.Reachable && isBidirSafeReason(revReachable.Reason) {
+								bidir = true
+							}
+						}
+
+						// In bidir mode only the canonical direction (lex-smaller server
+						// first) actually drives iperf3; the reverse-direction goroutine
+						// has already done its ping check above and now bails out.
+						if bidir && serverA > serverB {
+							return nil
+						}
+
 						if err := iperfs.Acquire(ctx, 1); err != nil {
 							return fmt.Errorf("acquiring iperf3 semaphore: %s", err)
 						}
@@ -2361,8 +2409,8 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 							return fmt.Errorf("checkToolbockLock: %w", err)
 						}
 
-						if ie := checkIPerf(ctx, opts, serverA, serverB, clientA, clientB, ipB.Addr(), expectedReachable); ie != nil {
-							return ie
+						for _, ie := range checkIPerf(ctx, opts, serverA, serverB, clientA, clientB, ipB.Addr(), expectedReachable, bidir) {
+							errChan <- ie
 						}
 
 						return nil
@@ -2459,6 +2507,15 @@ const (
 	ReachabilityReasonSwitchPeering  ReachabilityReason = "switch-peering"
 	ReachabilityReasonGatewayPeering ReachabilityReason = "gateway-peering"
 )
+
+// isBidirSafeReason reports whether two reachable directions sharing this
+// reason can be collapsed into a single iperf3 --bidir session. Only fully
+// symmetric, non-NAT peering reasons qualify: gateway peerings are excluded
+// because they may carry NAT, and Reachability does not currently surface
+// per-pair NAT state. See iperf3 --bidir notes in the PR description.
+func isBidirSafeReason(r ReachabilityReason) bool {
+	return r == ReachabilityReasonIntraVPC || r == ReachabilityReasonSwitchPeering
+}
 
 func IsExternalSubnetReachable(ctx context.Context, kube kclient.Reader, sourceServer, destSubnet string, checkGateway bool) (Reachability, error) {
 	switchPeeringReachable, err := apiutil.IsExternalSubnetReachable(ctx, kube, sourceServer, destSubnet)
@@ -2934,7 +2991,7 @@ const iperf3SpeedRetries = 2
 // iperf3RetryDelay is the delay between retry attempts to allow network conditions to stabilize.
 const iperf3RetryDelay = 2 * time.Second
 
-func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string, fromSSH, toSSH *sshutil.Config, toIP netip.Addr, reachability Reachability) *IperfError {
+func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string, fromSSH, toSSH *sshutil.Config, toIP netip.Addr, reachability Reachability, bidir bool) []*IperfError {
 	if opts.IPerfsSeconds <= 0 || !reachability.Reachable {
 		return nil
 	}
@@ -2944,53 +3001,80 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string,
 	if reachability.Reason == ReachabilityReasonGatewayPeering {
 		iPerfsMinSpeed = min(iPerfsMinSpeed, 6500)
 	}
+	// No bidir-specific cap adjustment: the only reasons currently bidir-eligible
+	// (intra-VPC, switch-peering) traverse switch ASICs that forward at line rate
+	// full-duplex, so each direction sustains the same throughput in bidir as in
+	// unidir. HLAB measurements on this code path confirm ~9.9 Gbps per direction
+	// concurrently. If isBidirSafeReason is ever extended to kernel-bottlenecked
+	// paths (e.g. NAT-less gateway peerings, where both directions share the
+	// gateway CPU and per-direction throughput drops), the cap must be revisited
+	// in that PR rather than blanket-halved here.
 
-	var lastError *IperfError
+	var lastErrors []*IperfError
 	for attempt := 0; attempt <= iperf3SpeedRetries; attempt++ {
 		if attempt > 0 {
-			slog.Warn("Retrying iperf3 test due to low speed", "from", from, "to", to,
-				"attempt", attempt+1, "maxAttempts", iperf3SpeedRetries+1,
-				"previousSentSpeed", lastError.SentSpeed, "previousRcvdSpeed", lastError.RcvdSpeed,
-				"minSpeed", lastError.MinSpeed)
+			logArgs := []any{"from", from, "to", to, "bidir", bidir, "attempt", attempt + 1, "maxAttempts", iperf3SpeedRetries + 1}
+			for _, le := range lastErrors {
+				logArgs = append(logArgs,
+					fmt.Sprintf("previousSentSpeed[%s->%s]", le.Source, le.Destination), le.SentSpeed,
+					fmt.Sprintf("previousRcvdSpeed[%s->%s]", le.Source, le.Destination), le.RcvdSpeed,
+				)
+			}
+			slog.Warn("Retrying iperf3 test due to low speed", logArgs...)
 			// Brief delay before retry to allow network conditions to stabilize
 			select {
 			case <-ctx.Done():
-				return lastError
+				return lastErrors
 			case <-time.After(iperf3RetryDelay):
 			}
 		}
 
-		ie := runIPerf3Test(ctx, opts, from, to, fromSSH, toSSH, toIP, iPerfsMinSpeed)
-		if ie == nil {
+		ies := runIPerf3Test(ctx, opts, from, to, fromSSH, toSSH, toIP, iPerfsMinSpeed, bidir)
+		if len(ies) == 0 {
 			if attempt > 0 {
-				slog.Info("iperf3 test succeeded on retry", "from", from, "to", to, "attempt", attempt+1)
+				slog.Info("iperf3 test succeeded on retry", "from", from, "to", to, "bidir", bidir, "attempt", attempt+1)
 			}
+
 			return nil
 		}
 
-		// Only retry on speed-related failures
-		if !ie.SendSpeedTooLow {
-			return ie
+		// Only retry if every failure is a send-speed-too-low condition (the
+		// existing low-speed retry signal). Any other failure -- parse error,
+		// ssh error, server crash, or a receive-speed shortfall not flagged
+		// via SendSpeedTooLow -- won't be helped by retrying.
+		allSendTooLow := true
+		for _, ie := range ies {
+			if !ie.SendSpeedTooLow {
+				allSendTooLow = false
+
+				break
+			}
+		}
+		if !allSendTooLow {
+			return ies
 		}
 
-		lastError = ie
+		lastErrors = ies
 	}
 
 	// All retries exhausted
-	return lastError
+	return lastErrors
 }
 
-func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to string, fromSSH, toSSH *sshutil.Config, toIP netip.Addr, iPerfsMinSpeed float64) *IperfError {
-	ie := &IperfError{
-		Source:      from,
-		Destination: to,
-		MinSpeed:    asMbps(iPerfsMinSpeed * 1_000_000),
+func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to string, fromSSH, toSSH *sshutil.Config, toIP netip.Addr, iPerfsMinSpeed float64, bidir bool) []*IperfError {
+	minSpeedStr := asMbps(iPerfsMinSpeed * 1_000_000)
+	// Forward direction: client (`from`) sends to server (`to`).
+	fwd := &IperfError{Source: from, Destination: to, MinSpeed: minSpeedStr}
+	// Reverse direction (bidir only): server (`to`) sends back to client (`from`).
+	var rev *IperfError
+	if bidir {
+		rev = &IperfError{Source: to, Destination: from, MinSpeed: minSpeedStr}
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(opts.IPerfsSeconds+30)*time.Second)
 	defer cancel()
 
-	slog.Debug("Running iperf3", "from", from, "to", to)
+	slog.Debug("Running iperf3", "from", from, "to", to, "bidir", bidir)
 
 	g, ctx := errgroup.WithContext(ctx)
 
@@ -3001,19 +3085,19 @@ func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to stri
 		report, parseErr := parseIPerf3Report([]byte(stdout))
 		if err != nil {
 			if parseErr == nil && report.Error != "" {
-				ie.ServerMsg = report.Error
+				fwd.ServerMsg = report.Error
 
 				return fmt.Errorf("running iperf3 server: %w: %s", err, report.Error)
 			}
 			slog.Warn("iperf3 server error, but could not retrieve error message from command output", "parseErr", parseErr, "stdout", stdout, "stderr", stderr)
-			ie.ServerMsg = fmt.Sprintf("%s: %s", err, stderr)
+			fwd.ServerMsg = fmt.Sprintf("%s: %s", err, stderr)
 
 			return fmt.Errorf("running iperf3 server: %w", err)
 		}
 		if parseErr != nil {
 			// Log the raw output to help diagnose what iperf3 returned instead of valid JSON
 			slog.Warn("iperf3 server report parse failed", "parseErr", parseErr, "stdout", stdout, "stderr", stderr)
-			ie.ServerMsg = fmt.Sprintf("cannot parse iperf3 report: %s", parseErr)
+			fwd.ServerMsg = fmt.Sprintf("cannot parse iperf3 report: %s", parseErr)
 
 			return fmt.Errorf("parsing server's iperf3 report: %w", parseErr)
 		}
@@ -3030,7 +3114,7 @@ func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to stri
 		for {
 			// Check timeout before attempting SSH command
 			if time.Since(start) >= maxWait {
-				ie.ClientMsg = fmt.Sprintf("iperf3 server did not start listening within %s", maxWait)
+				fwd.ClientMsg = fmt.Sprintf("iperf3 server did not start listening within %s", maxWait)
 				return fmt.Errorf("iperf3 server on %s did not start listening within %s", to, maxWait)
 			}
 
@@ -3053,6 +3137,9 @@ func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to stri
 		}
 
 		cmd := fmt.Sprintf("toolbox -E LD_PRELOAD=/lib/x86_64-linux-gnu/libgcc_s.so.1 -q timeout %d iperf3 -P 4 -J -c %s -t %d", opts.IPerfsSeconds+25, toIP.String(), opts.IPerfsSeconds)
+		if bidir {
+			cmd += " --bidir"
+		}
 
 		if opts.IPerfsDSCP > 0 {
 			cmd += fmt.Sprintf(" --dscp %d", opts.IPerfsDSCP)
@@ -3064,57 +3151,106 @@ func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to stri
 		report, parseErr := parseIPerf3Report([]byte(stdout))
 		if err != nil {
 			if parseErr == nil && report.Error != "" {
-				ie.ClientMsg = report.Error
+				fwd.ClientMsg = report.Error
 
 				return fmt.Errorf("running iperf3 client: %w: %s", err, report.Error)
 			}
-			ie.ClientMsg = fmt.Sprintf("%s: %s", err, stderr)
+			fwd.ClientMsg = fmt.Sprintf("%s: %s", err, stderr)
 
 			return fmt.Errorf("running iperf3 client: %w", err)
 		}
 		if parseErr != nil {
 			// Log the raw output to help diagnose what iperf3 returned instead of valid JSON
 			slog.Warn("iperf3 client report parse failed", "parseErr", parseErr, "stdout", stdout, "stderr", stderr)
-			ie.ClientMsg = fmt.Sprintf("cannot parse iperf3 report: %s", parseErr)
+			fwd.ClientMsg = fmt.Sprintf("cannot parse iperf3 report: %s", parseErr)
 
 			return fmt.Errorf("parsing client's iperf3 report: %w", parseErr)
 		}
 
-		slog.Debug("IPerf3 result", "from", from, "to", to,
-			"sendSpeed", asMbps(report.End.SumSent.BitsPerSecond),
-			"receiveSpeed", asMbps(report.End.SumReceived.BitsPerSecond),
-			"sent", asMB(float64(report.End.SumSent.Bytes)),
-			"received", asMB(float64(report.End.SumReceived.Bytes)),
-			"minSpeed", asMbps(iPerfsMinSpeed*1_000_000),
-		)
-		ie.SentSpeed = asMbps(report.End.SumSent.BitsPerSecond)
-		ie.RcvdSpeed = asMbps(report.End.SumReceived.BitsPerSecond)
+		fwdSent := report.End.SumSent
+		fwdRcvd := report.End.SumReceived
+		logArgs := []any{
+			"from", from, "to", to, "bidir", bidir,
+			"sendSpeed", asMbps(fwdSent.BitsPerSecond),
+			"receiveSpeed", asMbps(fwdRcvd.BitsPerSecond),
+			"sent", asMB(float64(fwdSent.Bytes)),
+			"received", asMB(float64(fwdRcvd.Bytes)),
+			"minSpeed", asMbps(iPerfsMinSpeed * 1_000_000),
+		}
+		if bidir {
+			logArgs = append(logArgs,
+				"reverseSendSpeed", asMbps(report.End.SumSentBidirReverse.BitsPerSecond),
+				"reverseReceiveSpeed", asMbps(report.End.SumReceivedBidirReverse.BitsPerSecond),
+			)
+		}
+		slog.Debug("IPerf3 result", logArgs...)
 
-		if iPerfsMinSpeed > 0 {
-			sendTooLow := report.End.SumSent.BitsPerSecond < iPerfsMinSpeed*1_000_000
-			rcvTooLow := report.End.SumReceived.BitsPerSecond < iPerfsMinSpeed*1_000_000
+		fwd.SentSpeed = asMbps(fwdSent.BitsPerSecond)
+		fwd.RcvdSpeed = asMbps(fwdRcvd.BitsPerSecond)
+		if rev != nil {
+			rev.SentSpeed = asMbps(report.End.SumSentBidirReverse.BitsPerSecond)
+			rev.RcvdSpeed = asMbps(report.End.SumReceivedBidirReverse.BitsPerSecond)
+		}
 
-			if sendTooLow {
-				ie.SendSpeedTooLow = true
-				ie.ClientMsg = "iperf3 send speed too low"
+		if iPerfsMinSpeed <= 0 {
+			return nil
+		}
 
-				return errors.New(ie.ClientMsg)
-			}
-			if rcvTooLow {
-				ie.ClientMsg = "iperf3 receive speed too low"
+		threshold := iPerfsMinSpeed * 1_000_000
+		applySpeedCheck(fwd, fwdSent.BitsPerSecond, fwdRcvd.BitsPerSecond, threshold, "")
+		if rev != nil {
+			applySpeedCheck(rev, report.End.SumSentBidirReverse.BitsPerSecond, report.End.SumReceivedBidirReverse.BitsPerSecond, threshold, "reverse ")
+		}
 
-				return errors.New(ie.ClientMsg)
-			}
+		if fwd.ClientMsg != "" || (rev != nil && rev.ClientMsg != "") {
+			// Surface a single error to the errgroup; per-direction errors are
+			// returned via fwd/rev to the caller.
+			return errors.New("iperf3 speed check failed")
 		}
 
 		return nil
 	})
 
-	if err := g.Wait(); err != nil {
-		return ie
+	if err := g.Wait(); err == nil {
+		return nil
 	}
 
-	return nil
+	var out []*IperfError
+	if isReportableIperfError(fwd) {
+		out = append(out, fwd)
+	}
+	if rev != nil && isReportableIperfError(rev) {
+		out = append(out, rev)
+	}
+	if len(out) == 0 {
+		// Fallback: g.Wait reported a non-empty error but no per-direction
+		// state captured it (shouldn't normally happen). Return at least the
+		// forward shell so the caller sees something.
+		out = append(out, fwd)
+	}
+
+	return out
+}
+
+// applySpeedCheck mutates ie to flag a low-speed failure when either the send
+// or receive throughput is below threshold. label prepends a direction tag to
+// the diagnostic message (e.g. "reverse ").
+func applySpeedCheck(ie *IperfError, sentBps, rcvdBps, thresholdBps float64, label string) {
+	if sentBps < thresholdBps {
+		ie.SendSpeedTooLow = true
+		ie.ClientMsg = fmt.Sprintf("iperf3 %ssend speed too low", label)
+
+		return
+	}
+	if rcvdBps < thresholdBps {
+		ie.ClientMsg = fmt.Sprintf("iperf3 %sreceive speed too low", label)
+	}
+}
+
+// isReportableIperfError returns true if any per-direction state was populated
+// indicating that direction failed.
+func isReportableIperfError(ie *IperfError) bool {
+	return ie.ClientMsg != "" || ie.ServerMsg != ""
 }
 
 func checkCurl(ctx context.Context, opts TestConnectivityOpts, curls *semaphore.Weighted, from string, fromSSH *sshutil.Config, toIP string, expected bool) *CurlError {
@@ -3186,8 +3322,10 @@ type iperf3ReportInterval struct {
 }
 
 type iperf3ReportEnd struct {
-	SumSent     iperf3ReportSum `json:"sum_sent"`
-	SumReceived iperf3ReportSum `json:"sum_received"`
+	SumSent                 iperf3ReportSum `json:"sum_sent"`
+	SumReceived             iperf3ReportSum `json:"sum_received"`
+	SumSentBidirReverse     iperf3ReportSum `json:"sum_sent_bidir_reverse"`
+	SumReceivedBidirReverse iperf3ReportSum `json:"sum_received_bidir_reverse"`
 }
 
 type iperf3ReportSum struct {
