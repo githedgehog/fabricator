@@ -25,6 +25,7 @@ func makeMultiVPCSingleSubnetSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 				NoBGPExternals: true,
 				SubInterfaces:  true,
 				NoServers:      true,
+				VirtualSwitch:  true,
 			},
 		},
 		{
@@ -34,6 +35,7 @@ func makeMultiVPCSingleSubnetSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 				NoBGPExternals: true,
 				SubInterfaces:  true,
 				NoServers:      true,
+				VirtualSwitch:  true,
 			},
 		},
 		{
@@ -50,6 +52,7 @@ func makeMultiVPCSingleSubnetSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 			SkipFlags: SkipFlags{
 				SubInterfaces: true,
 				NoServers:     true,
+				VirtualSwitch: true,
 			},
 		},
 		{
@@ -100,6 +103,7 @@ func makeMultiVPCSingleSubnetSuite(testCtx *VPCPeeringTestCtx) *JUnitTestSuite {
 				NoBGPExternals: true,
 				NoGateway:      true,
 				NoServers:      true,
+				VirtualSwitch:  true,
 			},
 		},
 		{
@@ -386,7 +390,7 @@ func (testCtx *VPCPeeringTestCtx) gatewayPeeringLoopTest(ctx context.Context) (b
 
 		vrfName := "VrfV" + vpc.Name
 		if vpc.Spec.Mode == vpcapi.VPCModeL3Flat {
-			vrfName = "default"
+			vrfName = defaultVRFName
 		}
 
 		slog.Info("Waiting for gateway routes on leaves", "vpc", vpc.Name, "leaves", leavesForVPC, "routes", peerRoutes, "vrf", vrfName)

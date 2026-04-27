@@ -114,6 +114,13 @@ storage:
         inline: |
           Hedgehog VLAB External Instance
 
+    - path: /etc/sysctl.d/10-vrf-l3mdev-accept.conf
+      mode: 0644
+      contents:
+        inline: |
+          net.ipv4.tcp_l3mdev_accept=1
+          net.ipv4.udp_l3mdev_accept=1
+
     - path: /etc/frr/frr.conf
       mode: 0644
       user:
@@ -129,12 +136,15 @@ storage:
           vrf {{$vrfkey}}
            {{if $vrf.IsStatic}}{{range $prefix := .StaticCfg.Prefixes}}ip route {{$prefix}} 172.31.1.2 enp2s0 nexthop-vrf default{{end}}
            {{if ne $vrf.StaticCfg.SwitchIP ""}}ip route 10.0.0.0/16 {{$vrf.StaticCfg.SwitchIP}} {{$vrf.StaticCfg.NICName}}{{end}}
+           {{if and (ne $vrf.StaticCfg.NATPoolCIDR "") (ne $vrf.StaticCfg.SwitchIP "")}}ip route {{$vrf.StaticCfg.NATPoolCIDR}} {{$vrf.StaticCfg.SwitchIP}} {{$vrf.StaticCfg.NICName}}{{end}}
            {{else}}ip route 0.0.0.0/0 172.31.1.2 enp2s0 nexthop-vrf default {{end}}
           exit-vrf
           !{{if $vrf.IsStatic}}{{range $gwIP := .StaticCfg.GatewayIPs}}
           ip route {{$gwIP}} {{$vrf.StaticCfg.NICName}} nexthop-vrf {{$vrfkey}}
           ip prefix-list static-ext-routes permit {{$gwIP}}{{end}}
-          {{if ne $vrf.StaticCfg.SwitchIP ""}}ip route 10.0.0.0/16 {{$vrf.StaticCfg.SwitchIP}} {{$vrf.StaticCfg.NICName}} nexthop-vrf {{$vrfkey}}{{end}}{{else}}
+          {{if ne $vrf.StaticCfg.SwitchIP ""}}ip route 10.0.0.0/16 {{$vrf.StaticCfg.SwitchIP}} {{$vrf.StaticCfg.NICName}} nexthop-vrf {{$vrfkey}}{{end}}
+          {{if and (ne $vrf.StaticCfg.NATPoolCIDR "") (ne $vrf.StaticCfg.SwitchIP "")}}ip route {{$vrf.StaticCfg.NATPoolCIDR}} {{$vrf.StaticCfg.SwitchIP}} {{$vrf.StaticCfg.NICName}} nexthop-vrf {{$vrfkey}}
+          ip prefix-list static-ext-routes permit {{$vrf.StaticCfg.NATPoolCIDR}}{{end}}{{else}}
           bgp community-list standard {{$vrfkey}}In seq 5 permit {{$vrf.BGPCfg.InCommunity}}
           bgp community-list standard {{$vrfkey}}Out seq 5 permit {{$vrf.BGPCfg.OutCommunity}}
           !
@@ -284,6 +294,25 @@ systemd:
 
         [Service]
         ExecStart=/usr/bin/docker exec frr /usr/lib/frr/frr-reload
+
+    - name: iperf3.service
+      enabled: true
+      contents: |
+        [Unit]
+        Description=iperf3 server for VLAB external NAT tests
+        After=docker.service network-online.target
+        Wants=network-online.target
+        Requires=docker.service
+
+        [Service]
+        Type=simple
+        ExecStart=/usr/bin/docker run --name=iperf3 --rm --network=host ghcr.io/githedgehog/toolbox:latest iperf3 -s
+        ExecStop=/usr/bin/docker stop iperf3
+        Restart=on-failure
+        RestartSec=5
+
+        [Install]
+        WantedBy=multi-user.target
 
     - name: iptables-nat.service
       enabled: true

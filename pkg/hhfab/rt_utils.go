@@ -25,6 +25,10 @@ import (
 
 var AllZeroPrefix = []string{"0.0.0.0/0"}
 
+// defaultVRFName is the SONiC default VRF, used as a fallback when a VPC has no per-VRF table
+// (e.g. L3Flat mode) and as the lookup VRF for some static external route checks.
+const defaultVRFName = "default"
+
 // add a single VPC peering spec to an existing map, which will be the input for DoSetupPeerings
 func appendVpcPeeringSpecByName(vpcPeerings map[string]*vpcapi.VPCPeeringSpec, vpc1, vpc2, remote string, vpc1Subnets, vpc2Subnets []string) {
 	entryName := fmt.Sprintf("%s--%s", vpc1, vpc2)
@@ -377,6 +381,28 @@ func checkRouteInSwitch(ctx context.Context, ssh *sshutil.Config, switchName, ro
 	}
 
 	return stdout != "", nil
+}
+
+// waitForNATPoolInLeaves waits until the gateway-originated NAT pool CIDR appears in the FIB of
+// the leaves attached to the given VPC, in the VPC's VRF. WaitReady only confirms the gateway and
+// switches are programmed; this verifies the route has actually propagated through the fabric so
+// subsequent NAT-pool traffic has a valid forwarding path. Replaces blind iperf3/curl retry loops
+// with a precise reachability gate.
+func (testCtx *VPCPeeringTestCtx) waitForNATPoolInLeaves(ctx context.Context, vpc *vpcapi.VPC, poolCIDR string) error {
+	leaves, err := getSwitchesForVPC(ctx, testCtx.kube, vpc.Name)
+	if err != nil {
+		return fmt.Errorf("getting switches for vpc %s: %w", vpc.Name, err)
+	}
+	if len(leaves) == 0 {
+		return nil
+	}
+	vrfName := "VrfV" + vpc.Name
+	if vpc.Spec.Mode == vpcapi.VPCModeL3Flat {
+		vrfName = defaultVRFName
+	}
+	slog.Info("Waiting for NAT pool route on leaves", "vpc", vpc.Name, "leaves", leaves, "pool", poolCIDR, "vrf", vrfName)
+
+	return testCtx.waitForRoutesInSwitches(ctx, leaves, []string{poolCIDR}, vrfName)
 }
 
 // wait until all switches in a set have a bunch of routes installed, or error out after 3 minutes

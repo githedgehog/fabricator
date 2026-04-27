@@ -16,26 +16,54 @@ import (
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/util/apiutil"
+	"go.githedgehog.com/fabricator/pkg/util/sshutil"
 	"golang.org/x/sync/semaphore"
 )
 
-// gwNATConvergenceTimeout is the maximum time to wait for the gateway NAT dataplane to
-// become active after a peering is established. WaitReady confirms the fabric switches are
-// ready, but the gateway still needs to program NAT rules (and, for BGP externals, advertise
-// routes to the upstream peer). Both take additional time that varies by environment.
-const gwNATConvergenceTimeout = 2 * time.Minute
+// gwNATPortForwardProbeTimeout is the maximum time to wait for the gateway's port-forward
+// NAT rule to become active in the dataplane after the peering is applied. Unlike fabric
+// route propagation (which waitForNATPoolInLeaves gates on), the gateway's DNAT rule
+// programming has its own latency that no Kubernetes condition signals.
+const gwNATPortForwardProbeTimeout = 2 * time.Minute
 
-// gwNATConvergenceInterval is the polling interval between retries while waiting for the
-// gateway NAT dataplane to converge.
-const gwNATConvergenceInterval = 5 * time.Second
+// gwNATPortForwardProbeInterval is the polling interval between TCP-reachability probes.
+const gwNATPortForwardProbeInterval = 5 * time.Second
+
+// waitForPortForwardReachable retries a TCP connect probe from the given server until it
+// succeeds or gwNATPortForwardProbeTimeout elapses. Used to gate iperf3 port-forward tests
+// on the actual reachability of the NAT-pool target IP:port; once a TCP handshake completes,
+// iperf3 can run exactly once and any failure is a real test failure rather than a
+// programming-lag race.
+func (testCtx *VPCPeeringTestCtx) waitForPortForwardReachable(ctx context.Context, sshCfg *sshutil.Config, server, host string, port int) error {
+	// nc -z performs a TCP connect probe with no data; -w2 caps the connect attempt at 2s.
+	// Same primitive used in show-tech/control.sh, so we know it's available on flatcar.
+	cmd := fmt.Sprintf("nc -zw2 %s %d", host, port)
+	deadline := time.Now().Add(gwNATPortForwardProbeTimeout)
+	var lastErr error
+	for {
+		if _, _, err := retrySSHCmd(ctx, sshCfg, cmd, server); err == nil {
+			return nil
+		} else { //nolint:revive
+			lastErr = err
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("port-forward target %s:%d not reachable after %s: %w", host, port, gwNATPortForwardProbeTimeout, lastErr)
+		}
+		slog.Debug("Port-forward target not reachable yet, retrying", "server", server, "host", host, "port", port, "retryIn", gwNATPortForwardProbeInterval)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(gwNATPortForwardProbeInterval):
+		}
+	}
+}
 
 // testNATExternalConnectivity tests outbound connectivity from a VPC through a NAT gateway peering
 // by curling 1.0.0.1 directly, bypassing the standard peering check that does not understand NAT
-// expose CIDRs. Pass waitForBGPConvergence=true for BGP externals: WaitReady only confirms the
-// fabric switches are programmed, but the gateway still needs to advertise the NAT pool to DS2000
-// via BGP before return traffic can flow. Static externals have pre-configured routes so no wait
-// is needed.
-func (testCtx *VPCPeeringTestCtx) testNATExternalConnectivity(ctx context.Context, vpc *vpcapi.VPC, extName string, waitForBGPConvergence bool) error {
+// expose CIDRs. Callers are expected to gate this on waitForNATPoolInLeaves first when the test
+// depends on a freshly-applied NAT pool route reaching the fabric, so any failure here is a real
+// connectivity failure, not a route-propagation race.
+func (testCtx *VPCPeeringTestCtx) testNATExternalConnectivity(ctx context.Context, vpc *vpcapi.VPC, extName string) error {
 	servers := &wiringapi.ServerList{}
 	if err := testCtx.kube.List(ctx, servers); err != nil {
 		return fmt.Errorf("listing servers: %w", err)
@@ -68,25 +96,7 @@ func (testCtx *VPCPeeringTestCtx) testNATExternalConnectivity(ctx context.Contex
 		}
 
 		slog.Debug("Testing NAT external connectivity via curl", "server", server.Name)
-		curlErr := checkCurl(ctx, testCtx.tcOpts, curlSem, server.Name, sshCfg, "1.0.0.1", true)
-		if curlErr != nil && waitForBGPConvergence {
-			deadline := time.Now().Add(gwNATConvergenceTimeout)
-			for curlErr != nil {
-				if time.Now().After(deadline) {
-					break
-				}
-				slog.Debug("BGP routes not yet propagated, retrying", "server", server.Name, "error", curlErr, "retryIn", gwNATConvergenceInterval)
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case <-time.After(gwNATConvergenceInterval):
-				}
-				curlErr = checkCurl(ctx, testCtx.tcOpts, curlSem, server.Name, sshCfg, "1.0.0.1", true)
-			}
-			if curlErr != nil {
-				return fmt.Errorf("NAT external connectivity check (BGP not converged after %s): %w", gwNATConvergenceTimeout, curlErr)
-			}
-		} else if curlErr != nil {
+		if curlErr := checkCurl(ctx, testCtx.tcOpts, curlSem, server.Name, sshCfg, "1.0.0.1", true); curlErr != nil {
 			return fmt.Errorf("NAT external connectivity check: %w", curlErr)
 		}
 
@@ -230,7 +240,11 @@ func (testCtx *VPCPeeringTestCtx) bgpExternalStaticNATTest(ctx context.Context) 
 		return false, nil, fmt.Errorf("waiting for switches to be ready: %w", err)
 	}
 
-	if err := testCtx.testNATExternalConnectivity(ctx, vpc, testCtx.extName, true); err != nil {
+	if err := testCtx.waitForNATPoolInLeaves(ctx, vpc, bgpNATCIDR); err != nil {
+		return false, nil, fmt.Errorf("waiting for NAT pool route to propagate: %w", err)
+	}
+
+	if err := testCtx.testNATExternalConnectivity(ctx, vpc, testCtx.extName); err != nil {
 		return false, nil, fmt.Errorf("testing BGP external static NAT connectivity: %w", err)
 	}
 
@@ -301,7 +315,11 @@ func (testCtx *VPCPeeringTestCtx) bgpExternalMasqueradeNATTest(ctx context.Conte
 		return false, nil, fmt.Errorf("waiting for switches to be ready: %w", err)
 	}
 
-	if err := testCtx.testNATExternalConnectivity(ctx, vpc, testCtx.extName, true); err != nil {
+	if err := testCtx.waitForNATPoolInLeaves(ctx, vpc, bgpNATCIDR); err != nil {
+		return false, nil, fmt.Errorf("waiting for NAT pool route to propagate: %w", err)
+	}
+
+	if err := testCtx.testNATExternalConnectivity(ctx, vpc, testCtx.extName); err != nil {
 		return false, nil, fmt.Errorf("testing BGP external masquerade NAT connectivity: %w", err)
 	}
 
@@ -400,7 +418,11 @@ func (testCtx *VPCPeeringTestCtx) bgpExternalPortForwardNATTest(ctx context.Cont
 		return false, nil, fmt.Errorf("waiting for switches to be ready: %w", err)
 	}
 
-	if err := testCtx.testIperfToExternal(ctx, vpc, bgpInvertedNATCIDR, true); err != nil {
+	if err := testCtx.waitForNATPoolInLeaves(ctx, vpc, bgpNATCIDR); err != nil {
+		return false, nil, fmt.Errorf("waiting for NAT pool route to propagate: %w", err)
+	}
+
+	if err := testCtx.testIperfToExternal(ctx, vpc, bgpInvertedNATCIDR); err != nil {
 		return false, nil, fmt.Errorf("testing BGP external port-forward via iperf3: %w", err)
 	}
 
@@ -484,7 +506,11 @@ func (testCtx *VPCPeeringTestCtx) bgpExternalMasqueradePortForwardNATTest(ctx co
 		return false, nil, fmt.Errorf("waiting for switches to be ready: %w", err)
 	}
 
-	if err := testCtx.testNATExternalConnectivity(ctx, vpc, testCtx.extName, true); err != nil {
+	if err := testCtx.waitForNATPoolInLeaves(ctx, vpc, bgpNATCIDR); err != nil {
+		return false, nil, fmt.Errorf("waiting for NAT pool route to propagate: %w", err)
+	}
+
+	if err := testCtx.testNATExternalConnectivity(ctx, vpc, testCtx.extName); err != nil {
 		return false, nil, fmt.Errorf("testing BGP external masquerade+port-forward NAT connectivity: %w", err)
 	}
 
@@ -607,7 +633,11 @@ func (testCtx *VPCPeeringTestCtx) staticExternalStaticNATGatewayTest(ctx context
 		return false, nil, fmt.Errorf("waiting for switches to be ready: %w", err)
 	}
 
-	if err := testCtx.testNATExternalConnectivity(ctx, vpc, testCtx.staticExtName, false); err != nil {
+	if err := testCtx.waitForNATPoolInLeaves(ctx, vpc, staticNATCIDR); err != nil {
+		return false, nil, fmt.Errorf("waiting for NAT pool route to propagate: %w", err)
+	}
+
+	if err := testCtx.testNATExternalConnectivity(ctx, vpc, testCtx.staticExtName); err != nil {
 		return false, nil, fmt.Errorf("testing static external static NAT connectivity: %w", err)
 	}
 
@@ -678,7 +708,11 @@ func (testCtx *VPCPeeringTestCtx) staticExternalMasqueradeNATGatewayTest(ctx con
 		return false, nil, fmt.Errorf("waiting for switches to be ready: %w", err)
 	}
 
-	if err := testCtx.testNATExternalConnectivity(ctx, vpc, testCtx.staticExtName, false); err != nil {
+	if err := testCtx.waitForNATPoolInLeaves(ctx, vpc, staticNATCIDR); err != nil {
+		return false, nil, fmt.Errorf("waiting for NAT pool route to propagate: %w", err)
+	}
+
+	if err := testCtx.testNATExternalConnectivity(ctx, vpc, testCtx.staticExtName); err != nil {
 		return false, nil, fmt.Errorf("testing static external masquerade NAT connectivity: %w", err)
 	}
 
@@ -687,10 +721,10 @@ func (testCtx *VPCPeeringTestCtx) staticExternalMasqueradeNATGatewayTest(ctx con
 
 // testIperfToExternal runs iperf3 from a VPC server to invertedNATCIDR:15201, testing
 // connectivity through the gateway's inverted port-forward NAT (external side has NAT).
-// One server in the VPC is sufficient.
-// waitForBGPConvergence should be true for BGP externals where the port-forward target IP is
-// reachable only after BGP route propagation; false for static externals with pre-configured routes.
-func (testCtx *VPCPeeringTestCtx) testIperfToExternal(ctx context.Context, vpc *vpcapi.VPC, invertedNATCIDR string, waitForBGPConvergence bool) error {
+// One server in the VPC is sufficient. Callers are expected to gate this on
+// waitForNATPoolInLeaves first when the test depends on a freshly-applied NAT pool route, so any
+// failure here is a real connectivity failure rather than a route-propagation race.
+func (testCtx *VPCPeeringTestCtx) testIperfToExternal(ctx context.Context, vpc *vpcapi.VPC, invertedNATCIDR string) error {
 	servers := &wiringapi.ServerList{}
 	if err := testCtx.kube.List(ctx, servers); err != nil {
 		return fmt.Errorf("listing servers: %w", err)
@@ -725,28 +759,19 @@ func (testCtx *VPCPeeringTestCtx) testIperfToExternal(ctx context.Context, vpc *
 			return fmt.Errorf("getting ssh config for %s: %w", server.Name, err)
 		}
 
+		// Gate iperf3 on TCP reachability: the gateway's port-forward DNAT rule has its own
+		// programming lag separate from fabric route propagation, and probing a TCP handshake
+		// is the precise signal that both halves of the path (fabric route + gateway DNAT) are
+		// active. After the probe succeeds, iperf3 runs once and any failure is a real test
+		// failure.
+		if err := testCtx.waitForPortForwardReachable(ctx, sshCfg, server.Name, extNATIP, 15201); err != nil {
+			return fmt.Errorf("waiting for port-forward target reachability: %w", err)
+		}
+
 		cmd := fmt.Sprintf("toolbox -E LD_PRELOAD=/lib/x86_64-linux-gnu/libgcc_s.so.1 -q timeout %d iperf3 -J -c %s -p 15201 -t %d",
 			secs+25, extNATIP, secs)
 		slog.Debug("Testing iperf3 through inverted port-forward NAT", "server", server.Name, "target", extNATIP+":15201")
-		_, _, iperfErr := retrySSHCmd(ctx, sshCfg, cmd, server.Name)
-		if iperfErr != nil && waitForBGPConvergence {
-			deadline := time.Now().Add(gwNATConvergenceTimeout)
-			for iperfErr != nil {
-				if time.Now().After(deadline) {
-					break
-				}
-				slog.Debug("BGP port-forward route not yet propagated, retrying", "server", server.Name, "error", iperfErr, "retryIn", gwNATConvergenceInterval)
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case <-time.After(gwNATConvergenceInterval):
-				}
-				_, _, iperfErr = retrySSHCmd(ctx, sshCfg, cmd, server.Name)
-			}
-			if iperfErr != nil {
-				return fmt.Errorf("iperf3 from %s to %s:15201 (BGP not converged after %s): %w", server.Name, extNATIP, gwNATConvergenceTimeout, iperfErr)
-			}
-		} else if iperfErr != nil {
+		if _, _, iperfErr := retrySSHCmd(ctx, sshCfg, cmd, server.Name); iperfErr != nil {
 			return fmt.Errorf("iperf3 from %s to %s:15201: %w", server.Name, extNATIP, iperfErr)
 		}
 
@@ -846,7 +871,11 @@ func (testCtx *VPCPeeringTestCtx) staticExternalPortForwardNATGatewayTest(ctx co
 		return false, nil, fmt.Errorf("waiting for switches to be ready: %w", err)
 	}
 
-	if err := testCtx.testIperfToExternal(ctx, vpc, staticInvertedNATCIDR, false); err != nil {
+	if err := testCtx.waitForNATPoolInLeaves(ctx, vpc, staticNATCIDR); err != nil {
+		return false, nil, fmt.Errorf("waiting for NAT pool route to propagate: %w", err)
+	}
+
+	if err := testCtx.testIperfToExternal(ctx, vpc, staticInvertedNATCIDR); err != nil {
 		return false, nil, fmt.Errorf("testing static external port-forward via iperf3: %w", err)
 	}
 
@@ -930,7 +959,11 @@ func (testCtx *VPCPeeringTestCtx) staticExternalMasqueradePortForwardNATGatewayT
 		return false, nil, fmt.Errorf("waiting for switches to be ready: %w", err)
 	}
 
-	if err := testCtx.testNATExternalConnectivity(ctx, vpc, testCtx.staticExtName, false); err != nil {
+	if err := testCtx.waitForNATPoolInLeaves(ctx, vpc, staticNATCIDR); err != nil {
+		return false, nil, fmt.Errorf("waiting for NAT pool route to propagate: %w", err)
+	}
+
+	if err := testCtx.testNATExternalConnectivity(ctx, vpc, testCtx.staticExtName); err != nil {
 		return false, nil, fmt.Errorf("testing static external masquerade+port-forward NAT connectivity: %w", err)
 	}
 
