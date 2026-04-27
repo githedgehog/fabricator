@@ -73,10 +73,14 @@ func (c *NodeInstallUpgrade) Run(ctx context.Context, upgrade bool) error {
 		return fmt.Errorf("installing toolbox: %w", err)
 	}
 
-	// TODO remove after dataplane takes care of it
 	if slices.Contains(c.Node.Spec.Roles, fabapi.NodeRoleGateway) {
+		// TODO remove after dataplane takes care of it
 		if err := c.prepForDataplane(ctx); err != nil {
 			return fmt.Errorf("preparing node for dataplane: %w", err)
+		}
+
+		if err := c.enableLLDPOnAllEther(ctx); err != nil {
+			return fmt.Errorf("enabling LLDP on all ether interfaces: %w", err)
 		}
 	}
 
@@ -190,6 +194,42 @@ func (c *NodeInstallUpgrade) prepForDataplane(ctx context.Context) error {
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("running iptables drop udp: %w", err)
+	}
+
+	return nil
+}
+
+func (c *NodeInstallUpgrade) enableLLDPOnAllEther(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, 1*time.Minute)
+	defer cancel()
+
+	slog.Debug("Enabling LLDP on all ether interfaces")
+
+	if err := os.WriteFile("/etc/systemd/network/90-lldp.network", //nolint:gosec
+		[]byte(`# Enable LLDP on all ether interfaces
+[Match]
+Name=*
+Type=ether
+Driver=!veth
+Kind=!dummy
+
+[Network]
+DHCP=no
+IPv6AcceptRA=no
+IPv6SendRA=no
+LLDP=yes
+EmitLLDP=yes
+`), 0o644); err != nil {
+		return fmt.Errorf("writing 90-lldp.network: %w", err)
+	}
+
+	cmd := exec.CommandContext(ctx, "networkctl", "reload")
+	cmd.Dir = c.WorkDir
+	cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "networkctl: ")
+	cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "networkctl: ")
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("running networkctl reload: %w", err)
 	}
 
 	return nil
