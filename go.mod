@@ -25,7 +25,7 @@ require (
 	github.com/k3s-io/helm-controller v0.17.0
 	github.com/lmittmann/tint v1.1.3
 	github.com/manifoldco/promptui v0.9.0
-	github.com/mattn/go-isatty v0.0.21
+	github.com/mattn/go-isatty v0.0.22
 	github.com/mholt/archives v0.1.5
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/pkg/sftp v1.13.8
