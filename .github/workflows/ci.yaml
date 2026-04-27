@@ -391,18 +391,18 @@ jobs:
             hybrid: false
             upgradefrom: "26.01"
 
-          # l3vni from 26.01
+          # gateway l3vni from 26.01
           - mesh: false
-            gateway: false
+            gateway: true
             includeonie: false
             buildmode: iso
             vpcmode: l3vni
             hybrid: false
             upgradefrom: "26.01"
 
-          # mesh l2vni from 26.01
+          # gateway mesh l2vni from 26.01
           - mesh: true
-            gateway: false
+            gateway: true
             includeonie: false
             buildmode: iso
             vpcmode: l2vni
