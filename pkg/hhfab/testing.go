@@ -35,6 +35,7 @@ import (
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab"
 	fabcomp "go.githedgehog.com/fabricator/pkg/fab/comp/fabric"
+	"go.githedgehog.com/fabricator/pkg/hhfab/connmatrix"
 	"go.githedgehog.com/fabricator/pkg/util/sshutil"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
@@ -2195,78 +2196,36 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 		return int(serverIDs[a.Name]) - int(serverIDs[b.Name])
 	})
 
-	slog.Info("Discovering server IPs", "servers", len(servers.Items))
+	slog.Info("Discovering server endpoints", "servers", len(serverIDs))
 
-	ips := sync.Map{}
-	sshs := sync.Map{}
-
-	g := &errgroup.Group{}
-	for server := range serverIDs {
-		g.Go(func() error {
-			ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-			defer cancel()
-
-			if err := func() error {
-				sshConfig, ok := sshConfigs[server]
-				if !ok {
-					return fmt.Errorf("missing ssh config for %q", server)
-				}
-				sshs.Store(server, sshConfig)
-
-				stdout, stderr, err := sshConfig.Run(ctx, "ip -o -4 addr show | awk '{print $2, $4}'")
-				if err != nil {
-					return fmt.Errorf("running ip addr show: %w: %s", err, stderr)
-				}
-
-				found := false
-				lines := strings.SplitSeq(strings.TrimSpace(stdout), "\n")
-				for line := range lines {
-					fields := strings.Fields(line)
-					if len(fields) != 2 {
-						return fmt.Errorf("unexpected ip addr line %q", line)
-					}
-
-					if (fields[0] == "lo" && fields[1] == "127.0.0.1/8") || fields[0] == "enp2s0" || fields[0] == "docker0" {
-						continue
-					}
-
-					if found {
-						return fmt.Errorf("unexpected multiple ip addrs")
-					}
-
-					addr, err := netip.ParsePrefix(fields[1])
-					if err != nil {
-						return fmt.Errorf("parsing ip addr %q: %w", fields[1], err)
-					}
-
-					found = true
-					ips.Store(server, addr)
-
-					slog.Info("Found", "server", server, "addr", addr.String())
-				}
-
-				if !found {
-					slog.Debug("No IP addr found", "server", server, "stdout", stdout, "stderr", stderr)
-
-					return fmt.Errorf("no IP addr found")
-				}
-
-				return nil
-			}(); err != nil {
-				return fmt.Errorf("getting server %q IP: %w", server, err)
-			}
-
-			return nil
-		})
+	serverNames := make([]string, 0, len(serverIDs))
+	for name := range serverIDs {
+		serverNames = append(serverNames, name)
+	}
+	endpoints, err := discoverEndpoints(ctx, kube, sshConfigs, serverNames)
+	if err != nil {
+		return fmt.Errorf("discovering endpoints: %w", err)
 	}
 
-	if err := g.Wait(); err != nil {
-		return fmt.Errorf("discovering server IPs: %w", err)
+	// primaryIP maps server → first discovered address, used by iperf3 and the
+	// legacy IsServerReachable-driven pair loop below. Multi-VPC servers still
+	// have correct per-subnet targeting in the matrix executor; iperf3 sticks
+	// with first-endpoint semantics for Phase 1.
+	primaryIP := map[string]netip.Addr{}
+	for _, ep := range endpoints {
+		if _, ok := primaryIP[ep.Server]; !ok {
+			primaryIP[ep.Server] = ep.IP
+			slog.Info("Found", "server", ep.Server, "subnet", ep.Subnet, "addr", ep.IP.String())
+		}
 	}
 
-	slog.Info("Running pings, iperfs and curls", "servers", len(servers.Items))
+	matrix, err := connmatrix.NewMatrixBuilder(kube, c.Fab.Spec.Config.Gateway.Enable).Build(ctx, endpoints)
+	if err != nil {
+		return fmt.Errorf("building connectivity matrix: %w", err)
+	}
 
-	pings := semaphore.NewWeighted(opts.PingsParallel)
+	slog.Info("Running pings, iperfs and curls", "servers", len(servers.Items), "endpoints", len(endpoints))
+
 	iperfs := semaphore.NewWeighted(opts.IPerfsParallel)
 	curls := semaphore.NewWeighted(opts.CurlsParallel)
 	toolboxMutexes := make(map[string]*sync.Mutex, len(serverIDs))
@@ -2295,13 +2254,25 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 	wg := &sync.WaitGroup{}
 	errChan := make(chan error, len(opts.Sources)*len(opts.Destinations)+len(opts.Sources))
 
+	// Pings run against the connectivity matrix. The executor covers every
+	// (source, destination) endpoint pair — including multi-VPC trunking,
+	// HostBGP VIPs, and NAT-translated destinations — and emits positive or
+	// negative checks based on the matrix verdict.
+	if opts.PingsCount > 0 {
+		wg.Go(func() {
+			if err := NewMatrixExecutor(opts, sshConfigs, matrix).Execute(ctx); err != nil {
+				errChan <- err
+			}
+		})
+	}
+
 	for _, serverA := range opts.Sources {
 		for _, serverB := range opts.Destinations {
 			if serverA == serverB {
 				continue
 			}
 
-			if opts.PingsCount > 0 || opts.IPerfsSeconds > 0 {
+			if opts.IPerfsSeconds > 0 {
 				wg.Go(func() {
 					if err := func() error {
 						expectedReachable, err := IsServerReachable(ctx, kube, serverA, serverB, c.Fab.Spec.Config.Gateway.Enable)
@@ -2322,26 +2293,26 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 						}
 						slog.Debug("Checking connectivity", logArgs...)
 
-						ipBR, ok := ips.Load(serverB)
-						if !ok {
-							return fmt.Errorf("missing IP for %q", serverB)
+						// checkIPerf is a no-op when !Reachable, so skip the
+						// semaphore/mutex/toolbox-lock dance entirely. Also
+						// guards against a nil-map deref on toolboxMutexes
+						// should serverA/serverB ever be absent from
+						// serverIDs while still present in sshConfigs.
+						if !expectedReachable.Reachable {
+							return nil
 						}
-						ipB := ipBR.(netip.Prefix)
 
-						clientAR, ok := sshs.Load(serverA)
+						ipB, ok := primaryIP[serverB]
 						if !ok {
-							return fmt.Errorf("missing ssh client for %q", serverA)
+							return fmt.Errorf("missing IP for %q", serverB) //nolint:err113
 						}
-						clientA := clientAR.(*sshutil.Config)
-
-						clientBR, ok := sshs.Load(serverB)
+						clientA, ok := sshConfigs[serverA]
 						if !ok {
-							return fmt.Errorf("missing ssh client for %q", serverB)
+							return fmt.Errorf("missing ssh client for %q", serverA) //nolint:err113
 						}
-						clientB := clientBR.(*sshutil.Config)
-
-						if pe := checkPing(ctx, opts.PingsCount, pings, serverA, serverB, clientA, ipB.Addr(), nil, expectedReachable.Reachable); pe != nil {
-							return pe
+						clientB, ok := sshConfigs[serverB]
+						if !ok {
+							return fmt.Errorf("missing ssh client for %q", serverB) //nolint:err113
 						}
 
 						if err := iperfs.Acquire(ctx, 1); err != nil {
@@ -2361,7 +2332,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 							return fmt.Errorf("checkToolbockLock: %w", err)
 						}
 
-						if ie := checkIPerf(ctx, opts, serverA, serverB, clientA, clientB, ipB.Addr(), expectedReachable); ie != nil {
+						if ie := checkIPerf(ctx, opts, serverA, serverB, clientA, clientB, ipB, expectedReachable); ie != nil {
 							return ie
 						}
 
@@ -2399,13 +2370,12 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 
 					slog.Debug("Checking external connectivity", logArgs...)
 
-					clientR, ok := sshs.Load(serverA)
+					client, ok := sshConfigs[serverA]
 					if !ok {
 						ce.Msg = fmt.Sprintf("missing ssh client for %q", serverA)
 
 						return ce
 					}
-					client := clientR.(*sshutil.Config)
 
 					// switching to 1.0.0.1 since the previously used target 8.8.8.8 was giving us issue
 					// when curling over virtual external peerings
@@ -2448,17 +2418,9 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 
 type Reachability struct {
 	Reachable bool
-	Reason    ReachabilityReason
+	Reason    connmatrix.ReachabilityReason
 	Peering   string
 }
-
-type ReachabilityReason string
-
-const (
-	ReachabilityReasonIntraVPC       ReachabilityReason = "intra-vpc"
-	ReachabilityReasonSwitchPeering  ReachabilityReason = "switch-peering"
-	ReachabilityReasonGatewayPeering ReachabilityReason = "gateway-peering"
-)
 
 func IsExternalSubnetReachable(ctx context.Context, kube kclient.Reader, sourceServer, destSubnet string, checkGateway bool) (Reachability, error) {
 	switchPeeringReachable, err := apiutil.IsExternalSubnetReachable(ctx, kube, sourceServer, destSubnet)
@@ -2468,7 +2430,7 @@ func IsExternalSubnetReachable(ctx context.Context, kube kclient.Reader, sourceS
 	if switchPeeringReachable {
 		return Reachability{
 			Reachable: true,
-			Reason:    ReachabilityReasonSwitchPeering,
+			Reason:    connmatrix.ReachabilityReasonSwitchPeering,
 		}, nil
 	}
 
@@ -2512,28 +2474,73 @@ func IsExternalSubnetReachable(ctx context.Context, kube kclient.Reader, sourceS
 	return Reachability{}, nil
 }
 
+// IsServerReachable reports whether any path allows traffic from sourceServer
+// to destServer. It is now backed by the connectivity matrix so callers inherit
+// NAT awareness, directional asymmetry, and expose.As support without changing
+// their call sites. Multi-VPC servers return the first ALLOW path found,
+// matching the original "any reachable subnet pair" semantics.
 func IsServerReachable(ctx context.Context, kube kclient.Reader, sourceServer, destServer string, checkGateway bool) (Reachability, error) {
-	sourceSubnets, err := apiutil.GetAttachedSubnets(ctx, kube, sourceServer)
+	endpoints, err := buildAPIEndpoints(ctx, kube, []string{sourceServer, destServer})
 	if err != nil {
-		return Reachability{}, fmt.Errorf("getting attached subnets for source server %s: %w", sourceServer, err)
+		return Reachability{}, err
 	}
 
-	destSubnets, err := apiutil.GetAttachedSubnets(ctx, kube, destServer)
+	matrix, err := connmatrix.NewMatrixBuilder(kube, checkGateway).Build(ctx, endpoints)
 	if err != nil {
-		return Reachability{}, fmt.Errorf("getting attached subnets for dest server %s: %w", destServer, err)
+		return Reachability{}, fmt.Errorf("building connectivity matrix: %w", err)
 	}
 
-	for sourceSubnetName := range sourceSubnets {
-		for destSubnetName := range destSubnets {
-			if r, err := IsSubnetReachable(ctx, kube, sourceSubnetName, destSubnetName, checkGateway); err != nil {
-				return Reachability{}, err
-			} else if r.Reachable {
-				return r, nil
+	for _, srcEp := range endpoints {
+		if srcEp.Server != sourceServer {
+			continue
+		}
+		for _, dstEp := range endpoints {
+			if dstEp.Server != destServer {
+				continue
+			}
+			for _, e := range matrix.Get(srcEp.Key(), dstEp.Key()) {
+				if e.ProtoPort != nil || e.Verdict != connmatrix.VerdictAllow {
+					continue
+				}
+				// Port-forward-only paths answer on configured external
+				// ports, not general ICMP/TCP traffic. Treating them as
+				// "server reachable" would cause the legacy iperf loop
+				// to attempt traffic that is not supposed to work.
+				if e.NAT != nil && len(e.NAT.PortForwards) > 0 {
+					continue
+				}
+
+				return Reachability{
+					Reachable: true,
+					Reason:    e.Reason,
+					Peering:   e.Peering,
+				}, nil
 			}
 		}
 	}
 
 	return Reachability{}, nil
+}
+
+func buildAPIEndpoints(ctx context.Context, kube kclient.Reader, serverNames []string) ([]connmatrix.Endpoint, error) {
+	out := []connmatrix.Endpoint{}
+	for _, s := range serverNames {
+		attached, err := apiutil.GetAttachedSubnets(ctx, kube, s)
+		if err != nil {
+			return nil, fmt.Errorf("getting attached subnets for %s: %w", s, err)
+		}
+		for subnet := range attached {
+			out = append(out, connmatrix.Endpoint{Server: s, Subnet: subnet})
+		}
+	}
+	// Sort endpoints so IsServerReachable's "first ALLOW path wins" loop
+	// returns a stable Reason/Peering across runs — map iteration above is
+	// unordered, and callers like release tests expect reproducible output.
+	slices.SortFunc(out, func(a, b connmatrix.Endpoint) int {
+		return strings.Compare(a.Key().String(), b.Key().String())
+	})
+
+	return out, nil
 }
 
 func IsSubnetReachable(ctx context.Context, kube kclient.Reader, source, dest string, checkGateway bool) (Reachability, error) {
@@ -2559,7 +2566,7 @@ func IsSubnetReachable(ctx context.Context, kube kclient.Reader, source, dest st
 
 		return Reachability{
 			Reachable: reacheable,
-			Reason:    ReachabilityReasonIntraVPC,
+			Reason:    connmatrix.ReachabilityReasonIntraVPC,
 		}, nil
 	}
 
@@ -2653,7 +2660,7 @@ func IsSubnetReachableWithSwitchPeering(ctx context.Context, kube kclient.Reader
 			if vpc1SubnetContains && vpc2SubnetContains {
 				return Reachability{
 					Reachable: true,
-					Reason:    ReachabilityReasonSwitchPeering,
+					Reason:    connmatrix.ReachabilityReasonSwitchPeering,
 					Peering:   vpcPeering.Name,
 				}, nil
 			}
@@ -2727,7 +2734,7 @@ func IsSubnetReachableWithGatewayPeering(ctx context.Context, kube kclient.Reade
 		if vpc1Found && vpc2Found {
 			return Reachability{
 				Reachable: true,
-				Reason:    ReachabilityReasonGatewayPeering,
+				Reason:    connmatrix.ReachabilityReasonGatewayPeering,
 				Peering:   peering.Name,
 			}, nil
 		}
@@ -2805,7 +2812,13 @@ func retrySSHCmd(ctx context.Context, ssh *sshutil.Config, cmd string, target st
 	return stdout, stderr, nil
 }
 
-func checkPing(ctx context.Context, pingCount int, semaphore *semaphore.Weighted, from, to string, fromSSH *sshutil.Config, toIP netip.Addr, sourceIP *netip.Addr, expected bool) *PingError {
+// checkPing runs an ICMP echo between two servers over SSH. sourceBind, when
+// non-empty, is passed to ping -I verbatim: it may be an interface name
+// (binds outgoing interface, required for multi-VPC trunking where the source
+// IP alone cannot pin the egress path) or an IP address. sourceIP is kept for
+// backward compatibility — when non-nil and sourceBind is empty, the IP is
+// used as the bind value.
+func checkPing(ctx context.Context, pingCount int, semaphore *semaphore.Weighted, from, to string, fromSSH *sshutil.Config, toIP netip.Addr, sourceIP *netip.Addr, expected bool, sourceBind ...string) *PingError {
 	if pingCount <= 0 {
 		return nil
 	}
@@ -2827,10 +2840,17 @@ func checkPing(ctx context.Context, pingCount int, semaphore *semaphore.Weighted
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(pingCount+30)*time.Second)
 	defer cancel()
 
-	slog.Debug("Running ping", "from", from, "to", toIP.String(), "sourceIP", sourceIP, "expected", expected)
+	bind := ""
+	if len(sourceBind) > 0 && sourceBind[0] != "" {
+		bind = sourceBind[0]
+	} else if sourceIP != nil {
+		bind = sourceIP.String()
+	}
+
+	slog.Debug("Running ping", "from", from, "to", toIP.String(), "bind", bind, "expected", expected)
 	cmd := "ping -c 1 -W 1"
-	if sourceIP != nil {
-		cmd += " -I " + sourceIP.String()
+	if bind != "" {
+		cmd += " -I " + bind
 	}
 	cmd += " " + toIP.String()
 
@@ -2839,8 +2859,8 @@ func checkPing(ctx context.Context, pingCount int, semaphore *semaphore.Weighted
 	}
 
 	cmd = fmt.Sprintf("ping -i 0.5 -c %d -W 1", pingCount)
-	if sourceIP != nil {
-		cmd += " -I " + sourceIP.String()
+	if bind != "" {
+		cmd += " -I " + bind
 	}
 	cmd += " " + toIP.String()
 	stdout, stderr, err := retrySSHCmd(ctx, fromSSH, cmd, from)
@@ -2941,7 +2961,7 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string,
 
 	iPerfsMinSpeed := opts.IPerfsMinSpeed
 	// Gateway peering uses kernel-based dataplane which achieves ~6.5-9.5 Gbps on HLAB
-	if reachability.Reason == ReachabilityReasonGatewayPeering {
+	if reachability.Reason == connmatrix.ReachabilityReasonGatewayPeering {
 		iPerfsMinSpeed = min(iPerfsMinSpeed, 6500)
 	}
 
