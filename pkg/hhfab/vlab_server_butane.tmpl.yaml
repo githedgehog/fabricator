@@ -53,6 +53,29 @@ systemd:
         [Install]
         WantedBy=sysinit.target
 
+    - name: iperf3.service
+      enabled: true
+      contents: |
+        [Unit]
+        Description=iperf3 server for VLAB connectivity tests
+        After=docker.service network-online.target
+        Wants=network-online.target
+        Requires=docker.service
+
+        [Service]
+        Type=simple
+        TimeoutStartSec=600
+        ExecStartPre=/bin/bash -c 'until /usr/bin/docker info >/dev/null 2>&1; do sleep 2; done'
+        ExecStartPre=/bin/bash -c 'until /usr/bin/docker image inspect ghcr.io/githedgehog/toolbox:latest >/dev/null 2>&1; do sleep 2; done'
+        ExecStartPre=-/usr/bin/docker rm -f iperf3
+        ExecStart=/usr/bin/docker run --name=iperf3 --rm --network=host ghcr.io/githedgehog/toolbox:latest iperf3 -s
+        ExecStop=-/usr/bin/docker stop iperf3
+        Restart=on-failure
+        RestartSec=5
+
+        [Install]
+        WantedBy=multi-user.target
+
 storage:
   files:
     - path: /etc/flatcar/update.conf

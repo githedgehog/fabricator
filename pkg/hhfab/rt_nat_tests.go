@@ -18,7 +18,6 @@ import (
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/util/apiutil"
 	"go.githedgehog.com/fabricator/pkg/util/sshutil"
-	"golang.org/x/sync/errgroup"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -275,7 +274,7 @@ func (testCtx *VPCPeeringTestCtx) testNATGatewayConnectivity(
 				if err != nil {
 					return err
 				}
-				if ies := checkIPerf(ctx, testCtx.tcOpts, serverA, serverB, sshConfigs[serverA], sshConfigs[serverB], destIP, reachability, false); len(ies) > 0 {
+				if ies := checkIPerf(ctx, testCtx.tcOpts, serverA, serverB, sshConfigs[serverA], destIP, reachability, false); len(ies) > 0 {
 					iperfErrors = append(iperfErrors, ies...)
 				}
 			}
@@ -979,51 +978,10 @@ func (testCtx *VPCPeeringTestCtx) testPortForwardInboundConnectivity(
 			slog.Debug("Testing port-forward inbound",
 				"from", serverA, "to", serverB, "natIP", natIP, "externalPort", externalPort)
 
-			serverBName := serverB
-			serverAName := serverA
-			g, gCtx := errgroup.WithContext(ctx)
-
-			g.Go(func() error {
-				cmd := fmt.Sprintf("toolbox -E LD_PRELOAD=/lib/x86_64-linux-gnu/libgcc_s.so.1 -q timeout %d iperf3 -s -1",
-					testCtx.tcOpts.IPerfsSeconds+25)
-				if _, stderr, err := retrySSHCmd(gCtx, sshConfigs[serverBName], cmd, serverBName); err != nil {
-					return fmt.Errorf("iperf3 server on %s: %w: %s", serverBName, err, stderr)
-				}
-
-				return nil
-			})
-
-			g.Go(func() error {
-				// Wait for iperf3 server to start listening on port 5201
-				maxWait := 10 * time.Second
-				checkInterval := 100 * time.Millisecond
-				start := time.Now()
-				for {
-					if time.Since(start) >= maxWait {
-						return fmt.Errorf("iperf3 server on %s did not start within %s", serverBName, maxWait) //nolint:goerr113
-					}
-					checkCmd := fmt.Sprintf("timeout 1 ss -ltn | grep -q ' \\*:%d '", iperf3DefaultPort)
-					if _, _, checkErr := retrySSHCmd(gCtx, sshConfigs[serverBName], checkCmd, serverBName); checkErr == nil {
-						break
-					}
-					select {
-					case <-gCtx.Done():
-						return fmt.Errorf("waiting for iperf3 server: %w", gCtx.Err())
-					case <-time.After(checkInterval):
-					}
-				}
-				// Connect to vpc1's NAT IP on the forwarded external port
-				cmd := fmt.Sprintf("toolbox -E LD_PRELOAD=/lib/x86_64-linux-gnu/libgcc_s.so.1 -q timeout %d iperf3 -c %s -p %d -t %d",
-					testCtx.tcOpts.IPerfsSeconds+25, natIP.String(), externalPort, testCtx.tcOpts.IPerfsSeconds)
-				if _, stderr, err := retrySSHCmd(gCtx, sshConfigs[serverAName], cmd, serverAName); err != nil {
-					return fmt.Errorf("iperf3 client from %s to %s:%d: %w: %s", serverAName, natIP, externalPort, err, stderr)
-				}
-
-				return nil
-			})
-
-			if err := g.Wait(); err != nil {
-				return err
+			cmd := fmt.Sprintf("toolbox -E LD_PRELOAD=/lib/x86_64-linux-gnu/libgcc_s.so.1 -q timeout %d iperf3 -c %s -p %d -t %d",
+				testCtx.tcOpts.IPerfsSeconds+25, natIP.String(), externalPort, testCtx.tcOpts.IPerfsSeconds)
+			if _, stderr, err := retrySSHCmd(ctx, sshConfigs[serverA], cmd, serverA); err != nil {
+				return fmt.Errorf("iperf3 client from %s to %s:%d: %w: %s", serverA, natIP, externalPort, err, stderr)
 			}
 		}
 	}
