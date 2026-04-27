@@ -5,6 +5,7 @@ package hhfab
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -57,7 +58,6 @@ const (
 	HashPolicyEncap2And3    = "encap2+3"
 	HashPolicyEncap3And4    = "encap3+4"
 	HashPolicyVLANAndSrcMAC = "vlan+srcmac"
-	iperf3DefaultPort       = 5201
 )
 
 var HashPolicies = []string{
@@ -1122,6 +1122,10 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 				}
 
 				slog.Info("Configured", "server", server.Name, "addr", prefix.String(), "conf", netconfs[server.Name])
+
+				if err := ensureIperf3Daemon(ctx, sshCfg, server.Name); err != nil {
+					return err
+				}
 
 				return nil
 			}(); err != nil {
@@ -2350,12 +2354,6 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 						}
 						clientA := clientAR.(*sshutil.Config)
 
-						clientBR, ok := sshs.Load(serverB)
-						if !ok {
-							return fmt.Errorf("missing ssh client for %q", serverB)
-						}
-						clientB := clientBR.(*sshutil.Config)
-
 						if pe := checkPing(ctx, opts.PingsCount, pings, serverA, serverB, clientA, ipB.Addr(), nil, expectedReachable.Reachable); pe != nil {
 							return pe
 						}
@@ -2397,19 +2395,17 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 						}
 						defer iperfs.Release(1)
 
-						// Acquire toolbox mutexes for both servers to avoid concurrent toolbox usage
+						// iperf3 runs in toolbox only on the source side (the destination
+						// is served by a long-lived systemd-managed iperf3 daemon, see
+						// vlab_server_butane.tmpl.yaml), so only the source's toolbox
+						// mutex needs to gate concurrent toolbox usage with other tests.
 						toolboxMutexes[serverA].Lock()
 						defer toolboxMutexes[serverA].Unlock()
 						if err := checkToolboxLock(ctx, serverA, clientA, 2*time.Minute); err != nil {
-							return fmt.Errorf("checkToolbockLock: %w", err)
-						}
-						toolboxMutexes[serverB].Lock()
-						defer toolboxMutexes[serverB].Unlock()
-						if err := checkToolboxLock(ctx, serverB, clientB, 2*time.Minute); err != nil {
-							return fmt.Errorf("checkToolbockLock: %w", err)
+							return fmt.Errorf("checkToolboxLock: %w", err)
 						}
 
-						for _, ie := range checkIPerf(ctx, opts, serverA, serverB, clientA, clientB, ipB.Addr(), expectedReachable, bidir) {
+						for _, ie := range checkIPerf(ctx, opts, serverA, serverB, clientA, ipB.Addr(), expectedReachable, bidir) {
 							errChan <- ie
 						}
 
@@ -2984,6 +2980,53 @@ func checkToolboxLock(ctx context.Context, server string, ssh *sshutil.Config, t
 	return nil
 }
 
+// iperf3DaemonUnit is the systemd service definition for the always-on iperf3
+// server we install on every VLAB server VM. Installed by ensureIperf3Daemon
+// during setup-vpcs rather than baked into vlab_server_butane.tmpl.yaml so
+// upgrades from older releases (which carry over their original VM butanes
+// without an iperf3 service) pick up the daemon as part of normal server prep
+// without requiring a VM recreate.
+const iperf3DaemonUnit = `[Unit]
+Description=iperf3 server for VLAB connectivity tests
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+TimeoutStartSec=600
+ExecStartPre=/bin/bash -c 'until /usr/bin/docker info >/dev/null 2>&1; do sleep 2; done'
+ExecStartPre=/bin/bash -c 'until /usr/bin/docker image inspect ghcr.io/githedgehog/toolbox:latest >/dev/null 2>&1; do sleep 2; done'
+ExecStartPre=-/usr/bin/docker rm -f iperf3
+ExecStart=/usr/bin/docker run --name=iperf3 --rm --network=host ghcr.io/githedgehog/toolbox:latest iperf3 -s
+ExecStop=-/usr/bin/docker stop iperf3
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+`
+
+// ensureIperf3Daemon installs (or refreshes) iperf3.service on the target
+// server and ensures it is enabled and active. Idempotent: rewriting the same
+// unit content is a no-op for systemd, and `systemctl start` on an already-
+// running unit does not restart it.
+func ensureIperf3Daemon(ctx context.Context, sshCfg *sshutil.Config, server string) error {
+	encoded := base64.StdEncoding.EncodeToString([]byte(iperf3DaemonUnit))
+	cmd := fmt.Sprintf(
+		"echo %s | base64 -d | sudo tee /etc/systemd/system/iperf3.service > /dev/null && "+
+			"sudo systemctl daemon-reload && "+
+			"sudo systemctl enable iperf3.service && "+
+			"sudo systemctl start iperf3.service",
+		encoded,
+	)
+	if _, stderr, err := sshCfg.Run(ctx, cmd); err != nil {
+		return fmt.Errorf("installing iperf3.service on %s: %w: %s", server, err, stderr)
+	}
+
+	return nil
+}
+
 // iperf3SpeedRetries is the number of additional attempts for iperf3 tests that fail due to low speed.
 // This helps handle transient network congestion or ECMP hash imbalance issues.
 const iperf3SpeedRetries = 2
@@ -2991,7 +3034,7 @@ const iperf3SpeedRetries = 2
 // iperf3RetryDelay is the delay between retry attempts to allow network conditions to stabilize.
 const iperf3RetryDelay = 2 * time.Second
 
-func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string, fromSSH, toSSH *sshutil.Config, toIP netip.Addr, reachability Reachability, bidir bool) []*IperfError {
+func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string, fromSSH *sshutil.Config, toIP netip.Addr, reachability Reachability, bidir bool) []*IperfError {
 	if opts.IPerfsSeconds <= 0 || !reachability.Reachable {
 		return nil
 	}
@@ -3029,7 +3072,7 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string,
 			}
 		}
 
-		ies := runIPerf3Test(ctx, opts, from, to, fromSSH, toSSH, toIP, iPerfsMinSpeed, bidir)
+		ies := runIPerf3Test(ctx, opts, from, to, fromSSH, toIP, iPerfsMinSpeed, bidir)
 		if len(ies) == 0 {
 			if attempt > 0 {
 				slog.Info("iperf3 test succeeded on retry", "from", from, "to", to, "bidir", bidir, "attempt", attempt+1)
@@ -3061,7 +3104,7 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string,
 	return lastErrors
 }
 
-func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to string, fromSSH, toSSH *sshutil.Config, toIP netip.Addr, iPerfsMinSpeed float64, bidir bool) []*IperfError {
+func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to string, fromSSH *sshutil.Config, toIP netip.Addr, iPerfsMinSpeed float64, bidir bool) []*IperfError {
 	minSpeedStr := asMbps(iPerfsMinSpeed * 1_000_000)
 	// Forward direction: client (`from`) sends to server (`to`).
 	fwd := &IperfError{Source: from, Destination: to, MinSpeed: minSpeedStr}
@@ -3076,143 +3119,70 @@ func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to stri
 
 	slog.Debug("Running iperf3", "from", from, "to", to, "bidir", bidir)
 
-	g, ctx := errgroup.WithContext(ctx)
+	// No server-side setup: every VLAB server VM runs a persistent iperf3 daemon on 5201.
+	cmd := fmt.Sprintf("toolbox -E LD_PRELOAD=/lib/x86_64-linux-gnu/libgcc_s.so.1 -q timeout %d iperf3 -P 4 -J -c %s -t %d", opts.IPerfsSeconds+25, toIP.String(), opts.IPerfsSeconds)
+	if bidir {
+		cmd += " --bidir"
+	}
+	if opts.IPerfsDSCP > 0 {
+		cmd += fmt.Sprintf(" --dscp %d", opts.IPerfsDSCP)
+	}
+	if opts.IPerfsTOS > 0 {
+		cmd += fmt.Sprintf(" --tos %d", opts.IPerfsTOS)
+	}
 
-	g.Go(func() error {
-		cmd := fmt.Sprintf("toolbox -E LD_PRELOAD=/lib/x86_64-linux-gnu/libgcc_s.so.1 -q timeout %d iperf3 -s -1 -J", opts.IPerfsSeconds+25)
-		stdout, stderr, err := retrySSHCmd(ctx, toSSH, cmd, to)
-
-		report, parseErr := parseIPerf3Report([]byte(stdout))
-		if err != nil {
-			if parseErr == nil && report.Error != "" {
-				fwd.ServerMsg = report.Error
-
-				return fmt.Errorf("running iperf3 server: %w: %s", err, report.Error)
-			}
-			slog.Warn("iperf3 server error, but could not retrieve error message from command output", "parseErr", parseErr, "stdout", stdout, "stderr", stderr)
-			fwd.ServerMsg = fmt.Sprintf("%s: %s", err, stderr)
-
-			return fmt.Errorf("running iperf3 server: %w", err)
-		}
-		if parseErr != nil {
-			// Log the raw output to help diagnose what iperf3 returned instead of valid JSON
-			slog.Warn("iperf3 server report parse failed", "parseErr", parseErr, "stdout", stdout, "stderr", stderr)
-			fwd.ServerMsg = fmt.Sprintf("cannot parse iperf3 report: %s", parseErr)
-
-			return fmt.Errorf("parsing server's iperf3 report: %w", parseErr)
-		}
-
-		return nil
-	})
-
-	g.Go(func() error {
-		// Wait for iperf3 server to be ready by polling the port
-		// Use ss to check if port is listening without making a connection
-		maxWait := 10 * time.Second
-		checkInterval := 100 * time.Millisecond
-		start := time.Now()
-		for {
-			// Check timeout before attempting SSH command
-			if time.Since(start) >= maxWait {
-				fwd.ClientMsg = fmt.Sprintf("iperf3 server did not start listening within %s", maxWait)
-				return fmt.Errorf("iperf3 server on %s did not start listening within %s", to, maxWait)
-			}
-
-			// Check if server is listening using ss on the target server (doesn't connect)
-			// ss -ltn shows listening TCP sockets in numeric format: *:5201
-			checkCmd := fmt.Sprintf("timeout 1 ss -ltn | grep -q ' \\*:%d '", iperf3DefaultPort)
-			if _, _, err := retrySSHCmd(ctx, toSSH, checkCmd, to); err == nil {
-				waited := time.Since(start)
-				if waited > 1*time.Second {
-					slog.Debug("iperf3 server took longer than usual to start", "from", from, "to", to, "waitTime", waited)
-				}
-				break
-			}
-
-			select {
-			case <-ctx.Done():
-				return fmt.Errorf("waiting for iperf3 server: %w", ctx.Err())
-			case <-time.After(checkInterval):
-			}
-		}
-
-		cmd := fmt.Sprintf("toolbox -E LD_PRELOAD=/lib/x86_64-linux-gnu/libgcc_s.so.1 -q timeout %d iperf3 -P 4 -J -c %s -t %d", opts.IPerfsSeconds+25, toIP.String(), opts.IPerfsSeconds)
-		if bidir {
-			cmd += " --bidir"
-		}
-
-		if opts.IPerfsDSCP > 0 {
-			cmd += fmt.Sprintf(" --dscp %d", opts.IPerfsDSCP)
-		}
-		if opts.IPerfsTOS > 0 {
-			cmd += fmt.Sprintf(" --tos %d", opts.IPerfsTOS)
-		}
-		stdout, stderr, err := retrySSHCmd(ctx, fromSSH, cmd, from)
-		report, parseErr := parseIPerf3Report([]byte(stdout))
-		if err != nil {
-			if parseErr == nil && report.Error != "" {
-				fwd.ClientMsg = report.Error
-
-				return fmt.Errorf("running iperf3 client: %w: %s", err, report.Error)
-			}
+	stdout, stderr, err := retrySSHCmd(ctx, fromSSH, cmd, from)
+	report, parseErr := parseIPerf3Report([]byte(stdout))
+	if err != nil {
+		if parseErr == nil && report.Error != "" {
+			fwd.ClientMsg = report.Error
+		} else {
 			fwd.ClientMsg = fmt.Sprintf("%s: %s", err, stderr)
-
-			return fmt.Errorf("running iperf3 client: %w", err)
-		}
-		if parseErr != nil {
-			// Log the raw output to help diagnose what iperf3 returned instead of valid JSON
-			slog.Warn("iperf3 client report parse failed", "parseErr", parseErr, "stdout", stdout, "stderr", stderr)
-			fwd.ClientMsg = fmt.Sprintf("cannot parse iperf3 report: %s", parseErr)
-
-			return fmt.Errorf("parsing client's iperf3 report: %w", parseErr)
 		}
 
-		fwdSent := report.End.SumSent
-		fwdRcvd := report.End.SumReceived
-		logArgs := []any{
-			"from", from, "to", to, "bidir", bidir,
-			"sendSpeed", asMbps(fwdSent.BitsPerSecond),
-			"receiveSpeed", asMbps(fwdRcvd.BitsPerSecond),
-			"sent", asMB(float64(fwdSent.Bytes)),
-			"received", asMB(float64(fwdRcvd.Bytes)),
-			"minSpeed", asMbps(iPerfsMinSpeed * 1_000_000),
-		}
-		if bidir {
-			logArgs = append(logArgs,
-				"reverseSendSpeed", asMbps(report.End.SumSentBidirReverse.BitsPerSecond),
-				"reverseReceiveSpeed", asMbps(report.End.SumReceivedBidirReverse.BitsPerSecond),
-			)
-		}
-		slog.Debug("IPerf3 result", logArgs...)
+		return []*IperfError{fwd}
+	}
+	if parseErr != nil {
+		// Log the raw output to help diagnose what iperf3 returned instead of valid JSON
+		slog.Warn("iperf3 client report parse failed", "parseErr", parseErr, "stdout", stdout, "stderr", stderr)
+		fwd.ClientMsg = fmt.Sprintf("cannot parse iperf3 report: %s", parseErr)
 
-		fwd.SentSpeed = asMbps(fwdSent.BitsPerSecond)
-		fwd.RcvdSpeed = asMbps(fwdRcvd.BitsPerSecond)
-		if rev != nil {
-			rev.SentSpeed = asMbps(report.End.SumSentBidirReverse.BitsPerSecond)
-			rev.RcvdSpeed = asMbps(report.End.SumReceivedBidirReverse.BitsPerSecond)
-		}
+		return []*IperfError{fwd}
+	}
 
-		if iPerfsMinSpeed <= 0 {
-			return nil
-		}
+	fwdSent := report.End.SumSent
+	fwdRcvd := report.End.SumReceived
+	logArgs := []any{
+		"from", from, "to", to, "bidir", bidir,
+		"sendSpeed", asMbps(fwdSent.BitsPerSecond),
+		"receiveSpeed", asMbps(fwdRcvd.BitsPerSecond),
+		"sent", asMB(float64(fwdSent.Bytes)),
+		"received", asMB(float64(fwdRcvd.Bytes)),
+		"minSpeed", asMbps(iPerfsMinSpeed * 1_000_000),
+	}
+	if bidir {
+		logArgs = append(logArgs,
+			"reverseSendSpeed", asMbps(report.End.SumSentBidirReverse.BitsPerSecond),
+			"reverseReceiveSpeed", asMbps(report.End.SumReceivedBidirReverse.BitsPerSecond),
+		)
+	}
+	slog.Debug("IPerf3 result", logArgs...)
 
-		threshold := iPerfsMinSpeed * 1_000_000
-		applySpeedCheck(fwd, fwdSent.BitsPerSecond, fwdRcvd.BitsPerSecond, threshold, "")
-		if rev != nil {
-			applySpeedCheck(rev, report.End.SumSentBidirReverse.BitsPerSecond, report.End.SumReceivedBidirReverse.BitsPerSecond, threshold, "reverse ")
-		}
+	fwd.SentSpeed = asMbps(fwdSent.BitsPerSecond)
+	fwd.RcvdSpeed = asMbps(fwdRcvd.BitsPerSecond)
+	if rev != nil {
+		rev.SentSpeed = asMbps(report.End.SumSentBidirReverse.BitsPerSecond)
+		rev.RcvdSpeed = asMbps(report.End.SumReceivedBidirReverse.BitsPerSecond)
+	}
 
-		if fwd.ClientMsg != "" || (rev != nil && rev.ClientMsg != "") {
-			// Surface a single error to the errgroup; per-direction errors are
-			// returned via fwd/rev to the caller.
-			return errors.New("iperf3 speed check failed")
-		}
-
+	if iPerfsMinSpeed <= 0 {
 		return nil
-	})
+	}
 
-	if err := g.Wait(); err == nil {
-		return nil
+	threshold := iPerfsMinSpeed * 1_000_000
+	applySpeedCheck(fwd, fwdSent.BitsPerSecond, fwdRcvd.BitsPerSecond, threshold, "")
+	if rev != nil {
+		applySpeedCheck(rev, report.End.SumSentBidirReverse.BitsPerSecond, report.End.SumReceivedBidirReverse.BitsPerSecond, threshold, "reverse ")
 	}
 
 	var out []*IperfError
@@ -3221,12 +3191,6 @@ func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to stri
 	}
 	if rev != nil && isReportableIperfError(rev) {
 		out = append(out, rev)
-	}
-	if len(out) == 0 {
-		// Fallback: g.Wait reported a non-empty error but no per-direction
-		// state captured it (shouldn't normally happen). Return at least the
-		// forward shell so the caller sees something.
-		out = append(out, fwd)
 	}
 
 	return out
