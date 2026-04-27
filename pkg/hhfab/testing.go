@@ -1231,8 +1231,8 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 			}
 
 			as := gwapi.PeeringEntryAs{}
-			if strings.HasPrefix(item, "!") {
-				asStr := strings.TrimPrefix(item, "!")
+			if after, ok := strings.CutPrefix(item, "!"); ok {
+				asStr := after
 				_, err := netip.ParsePrefix(asStr)
 				if err != nil {
 					return nil, fmt.Errorf("invalid as not prefix at index %d: %w", idx, err)

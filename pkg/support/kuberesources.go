@@ -184,7 +184,7 @@ func collectKubeObjects(ctx context.Context, kube kclient.Reader, scheme *runtim
 	withGVKs []schema.GroupVersionKind, redactors map[schema.GroupVersionKind]kubeResourceRedactorFunc,
 	w io.Writer,
 ) error {
-	kubeObjListType := reflect.TypeOf((*kclient.ObjectList)(nil)).Elem()
+	kubeObjListType := reflect.TypeFor[kclient.ObjectList]()
 	objs := 0
 
 	for gvk, objType := range scheme.AllKnownTypes() {

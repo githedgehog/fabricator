@@ -16,7 +16,6 @@ import (
 	appsapi "k8s.io/api/apps/v1"
 	coreapi "k8s.io/api/core/v1"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/ptr"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -88,7 +87,7 @@ func InstallNodeConfig(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 							Image:           image,
 							ImagePullPolicy: coreapi.PullIfNotPresent,
 							SecurityContext: &coreapi.SecurityContext{
-								Privileged: ptr.To(true),
+								Privileged: new(true),
 							},
 							Command: []string{
 								"/bin/sh",

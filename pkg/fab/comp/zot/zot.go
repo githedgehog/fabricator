@@ -176,7 +176,7 @@ func NewUsers() (map[string]string, error) {
 func InstallUsers(users map[string]string) comp.KubeInstall {
 	return func(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 		objs := []kclient.Object{}
-		htpasswd := ""
+		var htpasswd strings.Builder
 
 		regURL, err := comp.RegistryURL(cfg)
 		if err != nil {
@@ -188,7 +188,7 @@ func InstallUsers(users map[string]string) comp.KubeInstall {
 			if err != nil {
 				return nil, fmt.Errorf("hashing password: %w", err)
 			}
-			htpasswd += fmt.Sprintf("%s:%s\n", user, hash)
+			htpasswd.WriteString(fmt.Sprintf("%s:%s\n", user, hash))
 
 			dockerSecret := comp.RegistryUserSecretPrefix + user + comp.RegistryUserSecretDockerSuffix
 			dockerCfg := map[string]any{
@@ -217,7 +217,7 @@ func InstallUsers(users map[string]string) comp.KubeInstall {
 		}
 
 		return append(objs, comp.NewSecret(HtpasswdSecret, comp.SecretTypeOpaque, map[string]string{
-			"htpasswd": htpasswd,
+			"htpasswd": htpasswd.String(),
 		})), nil
 	}
 }

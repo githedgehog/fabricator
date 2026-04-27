@@ -6,6 +6,7 @@ package diagram
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -328,18 +329,14 @@ func sortNodes(nodes []Node, links []Link) TieredNodes {
 		// Prefer bundled connection for primary leaf
 		primarySet := false
 		for _, leaf := range leaves {
-			for _, t := range conn.connTypes[leaf] {
-				if t == EdgeTypeBundled {
-					conn.primaryLeaf = leaf
-					for _, l := range leaves {
-						if l != leaf {
-							conn.secondaryLeaf = l
-						}
+			if slices.Contains(conn.connTypes[leaf], EdgeTypeBundled) {
+				conn.primaryLeaf = leaf
+				for _, l := range leaves {
+					if l != leaf {
+						conn.secondaryLeaf = l
 					}
-					primarySet = true
-
-					break
 				}
+				primarySet = true
 			}
 			if primarySet {
 				break
@@ -876,14 +873,7 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 		// Add server to VPC
 		if vpcInfo, ok := topo.VPCs[vpcName]; ok {
 			// Add to VPC's server list if not already present
-			found := false
-			for _, s := range vpcInfo.AttachedServers {
-				if s == serverName {
-					found = true
-
-					break
-				}
-			}
+			found := slices.Contains(vpcInfo.AttachedServers, serverName)
 			if !found {
 				vpcInfo.AttachedServers = append(vpcInfo.AttachedServers, serverName)
 			}

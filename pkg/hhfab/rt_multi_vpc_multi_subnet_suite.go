@@ -15,7 +15,6 @@ import (
 	"go.githedgehog.com/fabric/api/meta"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
-	"go.githedgehog.com/fabric/pkg/util/pointer"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -123,7 +122,7 @@ func (testCtx *VPCPeeringTestCtx) multiSubnetsIsolationTest(ctx context.Context)
 	for subName, sub := range vpc1.Spec.Subnets {
 		if !isolated {
 			slog.Debug("Isolating subnet in vpc1", "vpc1", vpc1.Name, "subnet", subName)
-			sub.Isolated = pointer.To(true)
+			sub.Isolated = new(true)
 			isolated = true
 		}
 		permitList = append(permitList, subName)
@@ -136,10 +135,10 @@ func (testCtx *VPCPeeringTestCtx) multiSubnetsIsolationTest(ctx context.Context)
 		slog.Debug("Removing all restrictions")
 		vpc1.Spec.Permit = make([][]string, 0)
 		for _, sub := range vpc1.Spec.Subnets {
-			sub.Isolated = pointer.To(false)
+			sub.Isolated = new(false)
 		}
 		for _, sub := range vpc2.Spec.Subnets {
-			sub.Restricted = pointer.To(false)
+			sub.Restricted = new(false)
 		}
 		_, err1 := CreateOrUpdateVpc(ctx, testCtx.kube, vpc1)
 		_, err2 := CreateOrUpdateVpc(ctx, testCtx.kube, vpc2)
@@ -186,7 +185,7 @@ func (testCtx *VPCPeeringTestCtx) multiSubnetsIsolationTest(ctx context.Context)
 	if returnErr == nil {
 		for subName, sub := range vpc2.Spec.Subnets {
 			slog.Debug("Restricting subnet in vpc2", "vpc2", vpc2.Name, "subnet", subName)
-			sub.Restricted = pointer.To(true)
+			sub.Restricted = new(true)
 
 			break // only restrict one subnet
 		}
@@ -278,7 +277,7 @@ func (testCtx *VPCPeeringTestCtx) pingStaticExternal(ctx context.Context, source
 	seDummyIP := netip.MustParseAddr(StaticExternalDummyIface)
 	var sIP *netip.Addr
 	if sourceIP != "" {
-		sIP = pointer.To(netip.MustParseAddr(sourceIP))
+		sIP = new(netip.MustParseAddr(sourceIP))
 	}
 
 	if err := checkPing(ctx, 3, nil, sourceNode, StaticExternalNH, ssh, seNhIP, sIP, expected); err != nil {
