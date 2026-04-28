@@ -973,33 +973,36 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 
 			netdev := ""
 			device := ""
-			if nicType == NICTypeNoop || nicType == NICTypeDirect { //nolint:gocritic
-				port := getDirectNICPort(vmID, uint(nicID)) //nolint:gosec
-				netdev = fmt.Sprintf("socket,udp=127.0.0.1:%d", port)
-
-				if nicCfg != "" {
-					parts := strings.SplitN(nicCfg, "/", 2)
-					if len(parts) != 2 {
-						return nil, fmt.Errorf("invalid NIC config %q for VM %q", nicCfg, name) //nolint:goerr113
-					}
-
-					otherVM, otherNIC := parts[0], parts[1]
-					otherVMID, ok := vmIDs[otherVM]
-					if !ok {
-						return nil, fmt.Errorf("unknown VM %q in NIC config %q for VM %q", otherVM, nicCfg, name) //nolint:goerr113
-					}
-
-					otherNICID, err := getNICID(otherNIC)
-					if err != nil {
-						return nil, fmt.Errorf("getting NIC ID for %q: %w", nicCfg, err)
-					}
-
-					otherPort := getDirectNICPort(otherVMID, otherNICID)
-					netdev += fmt.Sprintf(",localaddr=127.0.0.1:%d", otherPort)
-				} else if nicType == NICTypeDirect {
+			port := getDirectNICPort(vmID, uint(nicID)) //nolint:gosec
+			switch nicType {
+			case NICTypeNoop:
+				// Gap-filler NIC: needs a valid QEMU netdev but no peer. Use TCP listen
+				// mode so QEMU accepts it without requiring a localaddr counterpart.
+				netdev = fmt.Sprintf("socket,listen=127.0.0.1:%d", port)
+			case NICTypeDirect:
+				if nicCfg == "" {
 					return nil, fmt.Errorf("missing NIC config for direct NIC %d of VM %q, nicCfgRaw: %q", nicID, name, nicCfgRaw) //nolint:goerr113
 				}
-			} else if nicType == NICTypeUsernet {
+
+				parts := strings.SplitN(nicCfg, "/", 2)
+				if len(parts) != 2 {
+					return nil, fmt.Errorf("invalid NIC config %q for VM %q", nicCfg, name) //nolint:goerr113
+				}
+
+				otherVM, otherNIC := parts[0], parts[1]
+				otherVMID, ok := vmIDs[otherVM]
+				if !ok {
+					return nil, fmt.Errorf("unknown VM %q in NIC config %q for VM %q", otherVM, nicCfg, name) //nolint:goerr113
+				}
+
+				otherNICID, err := getNICID(otherNIC)
+				if err != nil {
+					return nil, fmt.Errorf("getting NIC ID for %q: %w", nicCfg, err)
+				}
+
+				otherPort := getDirectNICPort(otherVMID, otherNICID)
+				netdev = fmt.Sprintf("socket,udp=127.0.0.1:%d,localaddr=127.0.0.1:%d", port, otherPort)
+			case NICTypeUsernet:
 				if usernet > 0 {
 					return nil, fmt.Errorf("multiple usernet NICs for VM %q", name) //nolint:goerr113
 				}
@@ -1019,20 +1022,20 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 				if vm.Type == VMTypeControl && opts.ControlsRestricted || vm.Type == VMTypeServer && opts.ServersRestricted {
 					netdev += ",restrict=yes"
 				}
-			} else if nicType == NICTypeManagement {
+			case NICTypeManagement:
 				if nicCfg != "" {
 					mac = nicCfg
 				}
 				netdev = fmt.Sprintf("tap,ifname=%s%d,script=no,downscript=no", VLABTapPrefix, tapID)
 				tapID++
-			} else if nicType == NICTypePassthrough {
+			case NICTypePassthrough:
 				if nicCfg == "" {
 					return nil, fmt.Errorf("missing NIC config for passthrough NIC %d of VM %q", nicID, name) //nolint:goerr113
 				}
 
 				passthroughs = append(passthroughs, nicCfg)
 				device = fmt.Sprintf("vfio-pci,host=%s", nicCfg)
-			} else {
+			default:
 				return nil, fmt.Errorf("unknown NIC type %q for VM %q", nicType, name) //nolint:goerr113
 			}
 
