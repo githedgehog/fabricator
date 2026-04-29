@@ -1307,6 +1307,15 @@ func Run(ctx context.Context) error {
 					{
 						Name:  "scp",
 						Usage: "scp files to/from a VLAB VM or HW if supported (use ':path' for remote paths)",
+						Description: `Prefix the remote path with ':' so it is resolved on the target device (-n).
+
+Examples:
+  Download a remote file into the current directory:
+    hhfab vlab scp -n leaf-01 :/etc/hostname .
+  Upload a local file to the device home dir:
+    hhfab vlab scp -n leaf-01 ./patch.bin :~/patch.bin
+  Recursively copy a remote directory (pass -r through to scp after --):
+    hhfab vlab scp -n leaf-01 -- -r :/var/log/frr ./frr-logs`,
 						Flags: flatten(defaultFlags, accessNameFlags, []cli.Flag{
 							&cli.StringFlag{
 								Name:    "username",
