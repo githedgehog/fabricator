@@ -261,7 +261,7 @@ func (c *Config) VLABAccess(ctx context.Context, vlab *VLAB, t VLABAccessType, n
 			}
 		}
 		if !hasRemote {
-			return fmt.Errorf("scp requires at least one remote path; prefix the remote path with ':' (for example ':~/file')") //nolint:goerr113
+			return fmt.Errorf("scp requires at least one remote path; prefix the remote path with ':' (for example: hhfab vlab scp -n %s :/etc/hostname .)", name) //nolint:goerr113
 		}
 	case VLABAccessSerial:
 		if entry.SerialSock != "" { //nolint:gocritic
