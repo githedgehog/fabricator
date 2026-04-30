@@ -80,16 +80,16 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `managementSubnet` _[Prefix](#prefix)_ |  |  |  |
-| `controlVIP` _[Prefix](#prefix)_ |  |  |  |
+| `managementSubnet` _Prefix_ |  |  |  |
+| `controlVIP` _Prefix_ |  |  |  |
 | `managementSubnetAnyDevice` _boolean_ |  |  |  |
 | `managementSubnetStatic` _object (keys:string, values:string)_ |  |  |  |
 | `tlsSAN` _string array_ |  |  |  |
 | `joinToken` _string_ |  |  |  |
-| `kubeClusterSubnet` _[Prefix](#prefix)_ |  |  |  |
-| `kubeServiceSubnet` _[Prefix](#prefix)_ |  |  |  |
-| `kubeClusterDNS` _[Addr](#addr)_ |  |  |  |
-| `dummySubnet` _[Prefix](#prefix)_ |  |  |  |
+| `kubeClusterSubnet` _Prefix_ |  |  |  |
+| `kubeServiceSubnet` _Prefix_ |  |  |  |
+| `kubeClusterDNS` _Addr_ |  |  |  |
+| `dummySubnet` _Prefix_ |  |  |  |
 | `defaultUser` _[ControlUser](#controluser)_ |  |  |  |
 | `ntpServers` _string array_ |  |  |  |
 | `observability` _[ControlObservability](#controlobservability)_ |  |  |  |
@@ -129,7 +129,7 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `apiVersion` _string_ | `fabricator.githedgehog.com/v1beta1` | | |
 | `kind` _string_ | `ControlNode` | | |
-| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
+| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
 | `spec` _[ControlNodeSpec](#controlnodespec)_ |  |  |  |
 | `status` _[ControlNodeStatus](#controlnodestatus)_ |  |  |  |
 
@@ -165,7 +165,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `ip` _[Prefix](#prefix)_ |  |  |  |
+| `ip` _Prefix_ |  |  |  |
 
 
 #### ControlNodeExternal
@@ -181,9 +181,9 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `ip` _[PrefixOrDHCP](#prefixordhcp)_ |  |  |  |
-| `gateway` _[Addr](#addr)_ |  |  |  |
-| `dns` _[Addr](#addr) array_ |  |  |  |
+| `ip` _PrefixOrDHCP_ |  |  |  |
+| `gateway` _Addr_ |  |  |  |
+| `dns` _Addr array_ |  |  |  |
 | `interface` _string_ |  |  |  |
 
 
@@ -201,7 +201,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `ip` _[Prefix](#prefix)_ |  |  |  |
+| `ip` _Prefix_ |  |  |  |
 | `interface` _string_ |  |  |  |
 
 
@@ -305,7 +305,7 @@ FabNode is the Schema for the nodes API.
 | --- | --- | --- | --- |
 | `apiVersion` _string_ | `fabricator.githedgehog.com/v1beta1` | | |
 | `kind` _string_ | `FabNode` | | |
-| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
+| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
 | `spec` _[FabNodeSpec](#fabnodespec)_ |  |  |  |
 | `status` _[FabNodeStatus](#fabnodestatus)_ |  |  |  |
 
@@ -387,34 +387,34 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `mode` _[FabricMode](#fabricmode)_ |  |  |  |
-| `managementDHCPStart` _[Addr](#addr)_ |  |  |  |
-| `managementDHCPEnd` _[Addr](#addr)_ |  |  |  |
+| `mode` _FabricMode_ |  |  |  |
+| `managementDHCPStart` _Addr_ |  |  |  |
+| `managementDHCPEnd` _Addr_ |  |  |  |
 | `spineASN` _integer_ |  |  |  |
 | `leafASNStart` _integer_ |  |  |  |
 | `leafASNEnd` _integer_ |  |  |  |
-| `protocolSubnet` _[Prefix](#prefix)_ |  |  |  |
-| `vtepSubnet` _[Prefix](#prefix)_ |  |  |  |
-| `fabricSubnet` _[Prefix](#prefix)_ |  |  |  |
-| `proxyExternalSubnet` _[Prefix](#prefix)_ |  |  |  |
+| `protocolSubnet` _Prefix_ |  |  |  |
+| `vtepSubnet` _Prefix_ |  |  |  |
+| `fabricSubnet` _Prefix_ |  |  |  |
+| `proxyExternalSubnet` _Prefix_ |  |  |  |
 | `baseVPCCommunity` _string_ |  |  |  |
 | `vpcIRBVLANs` _VLANRange array_ |  |  |  |
 | `loopbackWorkaroundDisable` _boolean_ |  |  |  |
 | `vpcWorkaroundVLANs` _VLANRange array_ |  |  |  |
-| `vpcWorkaroundSubnet` _[Prefix](#prefix)_ |  |  |  |
+| `vpcWorkaroundSubnet` _Prefix_ |  |  |  |
 | `th5WorkaroundVLANs` _VLANRange array_ |  |  |  |
 | `eslagMACBase` _string_ |  |  |  |
 | `eslagESIPrefix` _string_ |  |  |  |
-| `mclagSessionSubnet` _[Prefix](#prefix)_ |  |  |  |
+| `mclagSessionSubnet` _Prefix_ |  |  |  |
 | `defaultSwitchUsers` _object (keys:string, values:[SwitchUser](#switchuser))_ |  |  |  |
-| `defaultAlloyConfig` _[AlloyConfig](#alloyconfig)_ |  |  |  |
+| `defaultAlloyConfig` _AlloyConfig_ |  |  |  |
 | `excludeNOSInstallers` _boolean_ |  |  |  |
 | `includeONIE` _boolean_ |  |  |  |
 | `includeBCM` _boolean_ |  |  |  |
 | `includeCLSP` _boolean_ |  |  |  |
 | `includeCumulus` _boolean_ |  |  |  |
 | `disableBFD` _boolean_ |  |  |  |
-| `observability` _[Observability](#observability)_ |  |  |  |
+| `observability` _Observability_ |  |  |  |
 
 
 #### FabricVersions
@@ -430,14 +430,14 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `api` _[Version](#version)_ |  |  |  |
-| `controller` _[Version](#version)_ |  |  |  |
-| `dhcpd` _[Version](#version)_ |  |  |  |
-| `boot` _[Version](#version)_ |  |  |  |
-| `agent` _[Version](#version)_ |  |  |  |
-| `ctl` _[Version](#version)_ |  |  |  |
-| `nos` _object (keys:NOSType, values:[Version](#version))_ |  |  |  |
-| `onie` _object (keys:string, values:[Version](#version))_ |  |  |  |
+| `api` _Version_ |  |  |  |
+| `controller` _Version_ |  |  |  |
+| `dhcpd` _Version_ |  |  |  |
+| `boot` _Version_ |  |  |  |
+| `agent` _Version_ |  |  |  |
+| `ctl` _Version_ |  |  |  |
+| `nos` _object (keys:NOSType, values:Version)_ |  |  |  |
+| `onie` _object (keys:string, values:Version)_ |  |  |  |
 
 
 #### Fabricator
@@ -454,7 +454,7 @@ Fabricator defines configuration for the Fabricator controller
 | --- | --- | --- | --- |
 | `apiVersion` _string_ | `fabricator.githedgehog.com/v1beta1` | | |
 | `kind` _string_ | `Fabricator` | | |
-| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
+| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
 | `spec` _[FabricatorSpec](#fabricatorspec)_ |  |  |  |
 | `status` _[FabricatorStatus](#fabricatorstatus)_ |  |  |  |
 
@@ -492,13 +492,13 @@ _Appears in:_
 | `isBootstrap` _boolean_ |  |  |  |
 | `isInstall` _boolean_ |  |  |  |
 | `versions` _[Versions](#versions)_ |  |  |  |
-| `lastAttemptTime` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#time-v1-meta)_ | Time of the last attempt to apply configuration |  |  |
+| `lastAttemptTime` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#time-v1-meta)_ | Time of the last attempt to apply configuration |  |  |
 | `lastAttemptGen` _integer_ | Generation of the last attempt to apply configuration |  |  |
-| `lastAppliedTime` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#time-v1-meta)_ | Time of the last successful configuration application |  |  |
+| `lastAppliedTime` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#time-v1-meta)_ | Time of the last successful configuration application |  |  |
 | `lastAppliedGen` _integer_ | Generation of the last successful configuration application |  |  |
 | `lastAppliedController` _string_ | Controller version that applied the last successful configuration |  |  |
-| `lastStatusCheck` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#time-v1-meta)_ | Time of the last status check |  |  |
-| `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#condition-v1-meta) array_ | Conditions of the fabricator, includes readiness marker for use with kubectl wait |  |  |
+| `lastStatusCheck` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#time-v1-meta)_ | Time of the last status check |  |  |
+| `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#condition-v1-meta) array_ | Conditions of the fabricator, includes readiness marker for use with kubectl wait |  |  |
 | `components` _[ComponentsStatus](#componentsstatus)_ |  |  |  |
 
 
@@ -515,13 +515,13 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `api` _[Version](#version)_ |  |  |  |
-| `controller` _[Version](#version)_ |  |  |  |
-| `controlISORoot` _[Version](#version)_ |  |  |  |
-| `ctl` _[Version](#version)_ |  |  |  |
-| `nodeConfig` _[Version](#version)_ |  |  |  |
-| `pause` _[Version](#version)_ |  |  |  |
-| `flatcar` _[Version](#version)_ |  |  |  |
+| `api` _Version_ |  |  |  |
+| `controller` _Version_ |  |  |  |
+| `controlISORoot` _Version_ |  |  |  |
+| `ctl` _Version_ |  |  |  |
+| `nodeConfig` _Version_ |  |  |  |
+| `pause` _Version_ |  |  |  |
+| `flatcar` _Version_ |  |  |  |
 
 
 #### GatewayConfig
@@ -630,11 +630,11 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `api` _[Version](#version)_ |  |  |  |
-| `controller` _[Version](#version)_ |  |  |  |
-| `agent` _[Version](#version)_ |  |  |  |
-| `dataplane` _[Version](#version)_ |  |  |  |
-| `frr` _[Version](#version)_ |  |  |  |
+| `api` _Version_ |  |  |  |
+| `controller` _Version_ |  |  |  |
+| `agent` _Version_ |  |  |  |
+| `dataplane` _Version_ |  |  |  |
+| `frr` _Version_ |  |  |  |
 
 
 #### ObservabilityConfig
@@ -652,7 +652,7 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `defaults` _[ObservabilityDefaults](#observabilitydefaults)_ |  |  |  |
 | `labels` _object (keys:string, values:string)_ |  |  |  |
-| `targets` _[Targets](#targets)_ |  |  |  |
+| `targets` _Targets_ |  |  |  |
 
 
 #### ObservabilityDefaults
@@ -686,21 +686,21 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `k3s` _[Version](#version)_ |  |  |  |
-| `zot` _[Version](#version)_ |  |  |  |
-| `zotChart` _[Version](#version)_ |  |  |  |
-| `certManager` _[Version](#version)_ |  |  |  |
-| `k9s` _[Version](#version)_ |  |  |  |
-| `toolbox` _[Version](#version)_ |  |  |  |
-| `reloader` _[Version](#version)_ |  |  |  |
-| `reloaderChart` _[Version](#version)_ |  |  |  |
-| `ntp` _[Version](#version)_ |  |  |  |
-| `ntpChart` _[Version](#version)_ |  |  |  |
-| `alloy` _[Version](#version)_ |  |  |  |
-| `controlProxy` _[Version](#version)_ |  |  |  |
-| `controlProxyChart` _[Version](#version)_ |  |  |  |
-| `bashCompletion` _[Version](#version)_ |  |  |  |
-| `hostBGPContainer` _[Version](#version)_ |  |  |  |
+| `k3s` _Version_ |  |  |  |
+| `zot` _Version_ |  |  |  |
+| `zotChart` _Version_ |  |  |  |
+| `certManager` _Version_ |  |  |  |
+| `k9s` _Version_ |  |  |  |
+| `toolbox` _Version_ |  |  |  |
+| `reloader` _Version_ |  |  |  |
+| `reloaderChart` _Version_ |  |  |  |
+| `ntp` _Version_ |  |  |  |
+| `ntpChart` _Version_ |  |  |  |
+| `alloy` _Version_ |  |  |  |
+| `controlProxy` _Version_ |  |  |  |
+| `controlProxyChart` _Version_ |  |  |  |
+| `bashCompletion` _Version_ |  |  |  |
+| `hostBGPContainer` _Version_ |  |  |  |
 
 
 #### RegistryConfig
@@ -768,8 +768,8 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `onie` _[Version](#version)_ |  |  |  |
-| `flatcar` _[Version](#version)_ |  |  |  |
+| `onie` _Version_ |  |  |  |
+| `flatcar` _Version_ |  |  |  |
 
 
 #### Versions
