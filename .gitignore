@@ -32,3 +32,5 @@ config/helm/*.tgz
 *.swp
 *.swo
 *~
+
+docs/test
