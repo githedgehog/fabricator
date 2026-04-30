@@ -611,12 +611,208 @@ accordingly.
 
 ### Provider: ExternalPeeringProvider
 
-Derives expectations from ExternalPeering CRDs. Handles both switch-based
-(fabric) external peerings and gateway external peerings.
+Derives expectations for traffic between VPC endpoints and `External` CRDs.
+There are two distinct VPC-to-External models in the fabric and the provider
+covers both:
 
-For gateway external peerings, delegates NAT logic to the same NAT mode
-mapping as GatewayPeeringProvider (since gateway externals use the same
-GatewayPeering CRD with `ext~` prefix in VPCInfo names).
+1. **Switch-based external peering.** An `ExternalPeering` CRD names a VPC
+   and an External; the leaf hosting the External's `ExternalAttachment`
+   advertises the VPC's permitted subnets into the External's VRF (BGP for
+   dynamic externals, static routes for static externals). No NAT. No
+   gateway involvement. The External's reachable prefixes come from the
+   ExternalPeering's `permit.external.prefixes` list (filtered against
+   the External CRD's `static.prefixes` for static externals, or against
+   inbound community-tagged BGP routes for dynamic ones).
+2. **Proxied gateway external peering.** A `GatewayPeering` whose Peering
+   map has one entry keyed `vpc-X` and one keyed `ext.<external-name>`.
+   The gateway is the peering point; NAT (static, masquerade, port-forward)
+   applies on the VPC side. The L2/L3 plumbing that puts the upstream peer
+   on a fabric-edge IP uses an `ExternalAttachment` with
+   `spec.static.proxy: true`; the leaf allocates a /31 from
+   `FabricConfig.L2ProxyExternalSubnet`, configures ProxyARP on the chosen
+   subinterface, and the gateway VTEP advertises the NAT pool CIDRs (the
+   per-`expose.As` CIDRs from the VPC side) into the proxy External's VRF
+   on the leaf. The bound between the two CRD subsystems is the prefix
+   `gwapi.VPCInfoExtPrefix` (`ext.`): every External produces a sibling
+   `VPCInfo/ext.<external-name>` automatically (see
+   `pkg/ctrl/gateway_sync.go`), and a GatewayPeering whose key matches
+   that prefixed name is interpreted as a gateway external peering.
+
+The provider walks both. Phase 1 leaves it as a no-op so that the curl
+loop in `TestConnectivity` keeps owning external reachability checks
+end-to-end; Phase 2 turns externals into first-class matrix endpoints.
+
+```go
+func (p *ExternalPeeringProvider) BuildExpectations(ctx context.Context, kube kclient.Reader,
+    endpoints []Endpoint, current *ConnectivityMatrix,
+) ([]ConnectivityExpectation, error) {
+    // 1. Discover external endpoints: one Endpoint per (External, prefix) for
+    //    static externals, one per advertised prefix for dynamic externals
+    //    (after the matrix builder has run BGP-aware discovery, or per the
+    //    External.Spec.Static.Prefixes list, depending on which is available).
+    //    Each carries Endpoint{External: true, ExternalName: <name>, IP: <pickIP>}
+    //    where pickIP is a representative address inside the prefix used as the
+    //    ping/socat target from inside the fabric.
+    // 2. List ExternalPeering CRDs. For each one, emit bidirectional ALLOW
+    //    expectations between the named VPC's endpoints (filtered by
+    //    permit.vpc.subnets) and the External's endpoints (filtered by
+    //    permit.external.prefixes). Direction = bidirectional, NAT = nil.
+    // 3. List GatewayPeering CRDs whose Peering map has an `ext.X` key.
+    //    For each one, emit per-direction expectations between the VPC's
+    //    endpoints and ext.X's endpoints, applying resolveNATTranslation()
+    //    to the VPC-side expose entry exactly as GatewayPeeringProvider does.
+    //    The ext.X side never has expose.NAT set (the External is the
+    //    upstream world; NAT lives on the VPC side only), which constrains
+    //    the direction matrix below.
+}
+```
+
+#### External-side endpoint representation
+
+An external endpoint in the matrix carries:
+
+```go
+Endpoint{
+    Server:       "",        // empty: no fabric SSH target on this side
+    Subnet:       "",        // empty: externals do not have a VPC subnet
+    IP:           pickIP,    // representative IP in the External's prefix
+    Interface:    "",        // empty: no per-interface source binding
+    HostBGP:      false,
+    External:     true,
+    ExternalName: "default", // External CRD name (the human-readable one,
+                             //  not the ext.-prefixed VPCInfo)
+}
+```
+
+The matrix executor recognizes `External: true` and routes checks via the
+existing `IsExternalSubnetReachable` curl path on the VPC server side
+(curl from the VPC server toward an HTTP endpoint that is reachable only
+across the External). Phase 2 keeps that test type for end-to-end
+validation; the matrix change is that each `(VPC server, External)` pair
+gets an explicit expectation instead of the current implicit "iterate all
+external prefixes" loop. For NAT-validated paths, `pickIP` is the address
+the VPC server uses to send traffic, which under masquerade or port-forward
+is a NAT pool address from the VPC side's `expose.As`, not an address from
+`External.Spec.Static.Prefixes`. See the per-mode subsections below.
+
+#### NAT Address Resolution for proxied externals
+
+For a `GatewayPeering` whose Peering map is `{vpc-X: entryX, ext.Y: entryY}`,
+NAT is applied identically to the VPC-to-VPC case in GatewayPeeringProvider.
+`resolveNATTranslation` (defined above) is called with `expose = entryX`,
+`serverIP = <VPC-X server IP>`, and `subnetCIDR = <VPC-X subnet CIDR>`. The
+result describes how the VPC's traffic appears on the External side. Because
+`entryY.NAT` is required to be nil (validation does not actually enforce this
+yet, but no shipped fabricator config sets NAT on the External-side entry,
+since the External does not have a backend, only a routable reach), there is
+no matching call in the External-to-VPC direction.
+
+**Static (`entryX.NAT.Static != nil`):**
+- `entryX.As[0].CIDR` is the public NAT range. For each VPC-side server
+  there is a deterministic NAT IP via `calculateStaticNATIP`.
+- `TranslatedAddress{DestinationIP: natIP}` from the External side; the
+  ExternalAttachment's static prefix list does NOT need to contain the NAT
+  pool. The gateway BGP-advertises the As CIDR into the proxy External's
+  VRF on the leaf, so the upstream peer learns it via the proxy /31.
+- The VPC server pings the External's pickIP at its real address; the
+  external endpoint pings the VPC's NAT IP, not the VPC's real IP.
+
+**Masquerade (`entryX.NAT.Masquerade != nil`):**
+- VPC-X to ext.Y: ALLOW, source-NAT to a pool IP inside `entryX.As[0].CIDR`.
+  The captured source on the External side is verified with
+  `prefix.Contains(capturedSrc)`, not exact match, same as VPC-to-VPC
+  masquerade.
+- ext.Y to VPC-X: DENY. Masquerade is initiator-only; the External cannot
+  open a new flow toward VPC-X through the peering. The gateway dataplane
+  drops cold inbound that has no matching outbound conntrack state.
+- The matrix must encode this as an explicit DENY (not implicit
+  absence-of-rule) so test-connectivity positively verifies the inbound
+  drop, since the masquerade pool CIDR is BGP-advertised in the proxy
+  External's VRF and looks reachable at L3 from the External side.
+
+**Port Forward (`entryX.NAT.PortForward != nil`):**
+- The pool IP is the first usable address in `entryX.As[0].CIDR` (or the
+  /32 itself for /32 pools). For each `PortForward.Ports[]` entry, the
+  External side targets `(poolIP, entry.Port)` and the gateway DNATs to
+  `(VPC backend, entry.As)`.
+- ext.Y to VPC-X: ALLOW, but only on the forwarded ports. Other ports from
+  the External side are DENY.
+- VPC-X to ext.Y: forward direction is not exposed by port-forward NAT.
+  Whether the VPC initiates outbound to the External depends on whether
+  the same VPC entry also has `Masquerade` (combined SNAT + DNAT
+  configuration). Phase 2 emits two expectations per pair in that case.
+
+#### NAT Mode → Expectation Mapping (proxied externals)
+
+| VPC-side `entryX.NAT` | Direction | VPC initiates target | External initiates target | Notes |
+|---|---|---|---|---|
+| `nil` | Bidirectional | External pickIP | VPC server's real IP | Plain gateway external peering with no NAT; VPC subnet must be reachable in the External's VRF |
+| `Static` | Bidirectional | External pickIP | NAT IP from `calculateStaticNATIP` per server | Pool CIDR is `entryX.As[0].CIDR`; static prefix list on the External does not need to overlap the As CIDR |
+| `Masquerade` | Forward only | External pickIP | DENY (no outbound state) | Capture source on the External side; verify against `entryX.As[0].CIDR` prefix |
+| `PortForward` | Reverse only (per port) | DENY (port-forward is not outbound) | `(poolIP, ext-port)` per `PortForward.Ports[]` | Other remote-initiated ports are DENY |
+| `Masq + PortFwd` | Asymmetric | External pickIP | Pool IP at port-forwarded ports only | Two expectations per pair; non-forwarded ports from External are DENY |
+| `Static` on VPC-X, `nil` on ext.Y | Bidirectional | External pickIP | NAT IP per server | Same as Static row; called out for symmetry with the GatewayPeering NAT-on-both-sides table. NAT on the External-side entry is not modeled |
+
+The "External pickIP" column is the address the VPC server tests against.
+For switch-based external peerings (no proxy, no gateway), the VPC server
+targets an IP inside the External's `permit.external.prefixes` (typically
+the upstream peer's loopback or a service IP advertised by it). For proxied
+gateway external peerings, the VPC server targets the same: the gateway
+forwards to the External's prefixes via the proxy /31 just like it does for
+switch-based peerings, and the VPC's outbound NAT (if any) translates the
+source on the way out.
+
+#### Direction Logic for proxied externals
+
+The forward direction (VPC to External) follows the VPC-side NAT entry
+exactly as in GatewayPeeringProvider:
+
+```
+VPC-X → ext.Y (NAT.Masquerade on entryX): ALLOW (forward), SNAT to As pool
+VPC-X → ext.Y (NAT.PortForward on entryX): DENY (port-forward is reverse-only)
+VPC-X → ext.Y (NAT.Static on entryX): ALLOW (forward), DNAT optional
+VPC-X → ext.Y (NAT == nil on entryX): ALLOW (bidirectional)
+```
+
+The reverse direction (External to VPC) is constrained by the absence of
+NAT on the External-side entry plus the gateway dataplane's drop-cold-inbound
+behavior:
+
+```
+ext.Y → VPC-X (NAT.Masquerade on entryX):  DENY
+ext.Y → VPC-X (NAT.PortForward on entryX): ALLOW only on forwarded ports
+ext.Y → VPC-X (NAT.Static on entryX):      ALLOW, target NAT IP per server
+ext.Y → VPC-X (NAT == nil on entryX):      ALLOW (bidirectional)
+```
+
+#### Phase-1 stub invariants
+
+The Phase-1 stub returns `nil, nil`. For that to remain safe as Phase 2
+populates the provider, `GatewayPeeringProvider` already skips peerings
+whose Peering map has an `ext.`-prefixed key (see
+`providers.go:292`). That skip is the contract: the gateway peering
+provider does NOT emit expectations for proxied gateway externals, so the
+matrix shows them as implicit DENY today, and the curl loop in
+`TestConnectivity` continues to be the source of truth for those pairs.
+Phase 2 lifts the skip and populates this provider; until then, the
+invariants the stub must not violate are:
+
+1. Proxied gateway external peerings must remain skipped in
+   GatewayPeeringProvider. Removing the `VPCInfoExtPrefix` skip without
+   populating ExternalPeeringProvider would cause the matrix to emit
+   expectations whose External side has no Endpoint, breaking the
+   builder's `(srcServer, dstServer)` pairing.
+2. Switch-based ExternalPeering CRDs must not generate matrix expectations
+   in any provider yet. The current curl path expects to be the only
+   producer of external-reachability checks; a parallel set of matrix
+   expectations would double-count or contradict.
+3. The matrix executor must continue to recognize `Endpoint{External: true}`
+   as a "skip in the matrix path, defer to curl" sentinel even when no
+   such endpoints exist today, so that Phase 2 can add them without
+   touching the executor's pair iteration.
+
+The matching code locations are listed in Phase 2 of the migration plan
+below.
 
 ### Provider: FirewallProvider (Future)
 
