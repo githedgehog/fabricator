@@ -3007,6 +3007,12 @@ func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to stri
 
 		report, parseErr := parseIPerf3Report([]byte(stdout))
 		if err != nil {
+			// SSH cmd may fail purely because the peer goroutine returned an error
+			// first and errgroup canceled this context; that's not a server-side
+			// infrastructure failure, so don't mask the peer's diagnostics.
+			if errors.Is(ctx.Err(), context.Canceled) {
+				return err
+			}
 			ie.ServerInfraFailure = true
 			if parseErr == nil && report.Error != "" {
 				ie.ServerMsg = report.Error
@@ -3080,6 +3086,12 @@ func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to stri
 		stdout, stderr, err := retrySSHCmd(ctx, fromSSH, cmd, from)
 		report, parseErr := parseIPerf3Report([]byte(stdout))
 		if err != nil {
+			// Same reasoning as the server side: if the context was canceled by
+			// the peer goroutine returning first, don't tag this as an infra
+			// failure or we'll override the real reason in the retry logs.
+			if errors.Is(ctx.Err(), context.Canceled) {
+				return err
+			}
 			ie.ClientInfraFailure = true
 			if parseErr == nil && report.Error != "" {
 				ie.ClientMsg = report.Error
