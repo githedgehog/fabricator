@@ -11,3 +11,28 @@ processor:
 render:
   # Version of Kubernetes to use when generating links to Kubernetes API documentation.
   kubernetesVersion: 1.35
+  knownTypes:
+    - name: Prefix
+      package: go.githedgehog.com/fabricator/api/meta
+      link: ""
+    - name: Addr
+      package: go.githedgehog.com/fabricator/api/meta
+      link: ""
+    - name: PrefixOrDHCP
+      package: go.githedgehog.com/fabricator/api/meta
+      link: ""
+    - name: Version
+      package: go.githedgehog.com/fabricator/api/meta
+      link: ""
+    - name: FabricMode
+      package: go.githedgehog.com/fabric/api/meta
+      link: ""
+    - name: AlloyConfig
+      package: go.githedgehog.com/fabric/api/meta
+      link: ""
+    - name: Observability
+      package: go.githedgehog.com/fabric/api/meta
+      link: ""
+    - name: Targets
+      package: go.githedgehog.com/libmeta/pkg/alloy
+      link: ""
