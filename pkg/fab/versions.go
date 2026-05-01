@@ -15,18 +15,34 @@ import (
 	"go.githedgehog.com/fabricator/pkg/version"
 )
 
-var (
+const (
+	// User-facing release version for the whole project (as referenced in docs.hedgehog.cloud)
 	Release = "26.02.0"
 
-	FabricatorVersion = meta.Version(version.Version)
-	FabricVersion     = meta.Version("v0.120.1")
-	DataplaneVersion  = meta.Version("v0.20.0")
-	FRRVersion        = meta.Version("v0.20.0")
-	BCMSONiCVersion   = meta.Version("v4.5.0")
-	CLSSONiCVersion   = meta.Version("v4.2.1")
-	CumulusVersion    = meta.Version("v5.16.0")
+	// Fabric version used for all fabric components
+	FabricVersion = meta.Version("v0.120.1")
 
-	// Upgrade constraints, "-0" to include pre-releases
+	// Gateway Dataplane version (including WASM validator)
+	DataplaneVersion = meta.Version("v0.20.0")
+
+	// Gateway FRR version
+	FRRVersion = meta.Version("v0.20.0")
+
+	// Broadcom Enterprise SONiC version (including all flavors)
+	BCMSONiCVersion = meta.Version("v4.5.0")
+
+	// Celestica SONiC+ version (including all flavors)
+	CLSSONiCVersion = meta.Version("v4.2.1")
+
+	// NVIDIA Cumulus version (including all flavors)
+	CumulusVersion = meta.Version("v5.16.0")
+)
+
+// Fabricator version is set at build time via ldflags
+var FabricatorVersion = meta.Version(version.Version)
+
+// Upgrade constraints, "-0" to include pre-releases
+const (
 	FabricatorCtrlConstraint = ">=0.45.5-0"
 	FabricAgentConstraint    = ">=0.115.4-0"
 	FabricNOSConstraint      = ">=4.5.0-0" // -0 is to allow -Enterprise_Base suffix
