@@ -4,8 +4,10 @@
 package fab
 
 import (
+	"fmt"
 	"strings"
 
+	"github.com/Masterminds/semver/v3"
 	fmeta "go.githedgehog.com/fabric/api/meta"
 	"go.githedgehog.com/fabric/pkg/ctrl/switchprofile"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
@@ -14,6 +16,8 @@ import (
 )
 
 var (
+	Release = "26.02.0"
+
 	FabricatorVersion = meta.Version(version.Version)
 	FabricVersion     = meta.Version("v0.120.1")
 	DataplaneVersion  = meta.Version("v0.20.0")
@@ -100,4 +104,13 @@ var Versions = fabapi.Versions{
 
 func CleanupFabricNOSVersion(version string) string {
 	return strings.ReplaceAll(version, "_", "-")
+}
+
+func ReleaseChannel() (string, error) {
+	ver, err := semver.NewVersion(Release)
+	if err != nil {
+		return "", fmt.Errorf("parsing release version: %w", err)
+	}
+
+	return fmt.Sprintf("%d.%02d", ver.Major(), ver.Minor()), nil
 }

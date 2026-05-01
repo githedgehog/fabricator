@@ -790,6 +790,10 @@ spec:
                 description: Time of the last status check
                 format: date-time
                 type: string
+              release:
+                type: string
+              releaseChannel:
+                type: string
               versions:
                 properties:
                   fabric:

@@ -500,6 +500,8 @@ _Appears in:_
 | `lastStatusCheck` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#time-v1-meta)_ | Time of the last status check |  |  |
 | `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#condition-v1-meta) array_ | Conditions of the fabricator, includes readiness marker for use with kubectl wait |  |  |
 | `components` _[ComponentsStatus](#componentsstatus)_ |  |  |  |
+| `release` _string_ |  |  |  |
+| `releaseChannel` _string_ |  |  |  |
 
 
 #### FabricatorVersions

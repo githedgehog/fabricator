@@ -170,3 +170,10 @@ func TestFabricNOSUpgradeConstraint(t *testing.T) {
 		})
 	}
 }
+
+func TestReleaseChannel(t *testing.T) {
+	ch, err := ReleaseChannel()
+	require.NoError(t, err, "Error getting release channel")
+	assert.NotEmpty(t, ch, "Release channel should not be empty")
+	assert.Equal(t, Release[0:5], ch, "Invalid release channel")
+}

@@ -108,6 +108,13 @@ func (r *FabricatorReconciler) Reconcile(ctx context.Context, req kctrl.Request)
 	f.Status.IsBootstrap = false
 	f.Status.IsInstall = false
 
+	ch, err := fab.ReleaseChannel()
+	if err != nil {
+		return kctrl.Result{}, fmt.Errorf("getting release channel: %w", err)
+	}
+	f.Status.ReleaseChannel = ch
+	f.Status.Release = fab.Release
+
 	nodes := &fabapi.FabNodeList{}
 	if err := r.List(ctx, nodes); err != nil {
 		return kctrl.Result{}, fmt.Errorf("listing nodes: %w", err)

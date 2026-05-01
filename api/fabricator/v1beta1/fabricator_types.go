@@ -59,6 +59,9 @@ type FabricatorStatus struct {
 
 	Components ComponentsStatus `json:"components,omitempty"`
 
+	Release        string `json:"release,omitempty"`
+	ReleaseChannel string `json:"releaseChannel,omitempty"`
+
 	// TODO reserved VLANs, subnets, etc.
 }
 
