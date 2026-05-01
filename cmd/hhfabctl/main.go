@@ -178,6 +178,32 @@ func main() {
 					},
 				},
 			},
+			{
+				Name:  "release",
+				Usage: "release helpers",
+				Flags: []cli.Flag{
+					verboseFlag,
+				},
+				Subcommands: []*cli.Command{
+					{
+						Name:  "show",
+						Usage: "Show release information",
+						Flags: []cli.Flag{
+							verboseFlag,
+						},
+						Before: func(_ *cli.Context) error {
+							return setupLogger(verbose)
+						},
+						Action: func(_ *cli.Context) error {
+							if err := hhfabctl.ReleaseShow(ctx); err != nil {
+								return fmt.Errorf("showing release: %w", err)
+							}
+
+							return nil
+						},
+					},
+				},
+			},
 		},
 	}
 
