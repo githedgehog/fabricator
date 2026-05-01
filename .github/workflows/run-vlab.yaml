@@ -228,7 +228,7 @@ jobs:
             --ready=exit
 
       - name: (${{ inputs.upgradefrom }}) Prepare debug artifacts
-        if: ${{ always() && !cancelled() && steps.test-before.outcome != 'skipped' }}
+        if: ${{ always() && steps.test-before.outcome != 'skipped' }}
         run: |
           mkdir -p _debug/0-before/serial
           cp versions.txt _debug/0-before || true
@@ -326,7 +326,7 @@ jobs:
           path: release-test.xml
 
       - name: Prepare debug artifacts
-        if: ${{ always() && !cancelled() && steps.test-current.outcome != 'skipped' }}
+        if: ${{ always() && steps.test-current.outcome != 'skipped' }}
         run: |
           mkdir -p _debug/1-current/serial
           cp versions.txt _debug/1-current || true
@@ -350,7 +350,7 @@ jobs:
             --ready=exit
 
       - name: (After) Prepare debug artifacts
-        if: ${{ always() && !cancelled() && steps.test-after.outcome != 'skipped' }}
+        if: ${{ always() && steps.test-after.outcome != 'skipped' }}
         run: |
           mkdir -p _debug/2-after/serial
           cp versions.txt _debug/2-after || true
@@ -361,7 +361,7 @@ jobs:
           find ./vlab/vms -type f -name serial.log -exec bash -c 'cp $0 _debug/2-after/serial/$(basename $(dirname $0)).log' {} \; || true
 
       - name: Rename debug artifacts for upload
-        if: ${{ always() && !cancelled() && (steps.test-before.outcome != 'skipped' || steps.test-current.outcome != 'skipped' || steps.test-after.outcome != 'skipped') }}
+        if: ${{ always() && (steps.test-before.outcome != 'skipped' || steps.test-current.outcome != 'skipped' || steps.test-after.outcome != 'skipped') }}
         run: |
           mv _debug fab-${{ github.run_id }}-${{ env.slug }}
 
