@@ -425,6 +425,7 @@ type VLABVersions struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:categories=hedgehog;fabricator,shortName=fab
+// +kubebuilder:printcolumn:name="Release",type=string,JSONPath=`.status.release`,priority=0
 // +kubebuilder:printcolumn:name="CtrlVer",type=string,JSONPath=`.status.versions.fabricator.controller`,priority=0
 // +kubebuilder:printcolumn:name="Gen",type=string,JSONPath=`.metadata.generation`,priority=0
 // +kubebuilder:printcolumn:name="Appl",type=string,JSONPath=`.status.lastAppliedGen`,priority=0

@@ -20,6 +20,9 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
+    - jsonPath: .status.release
+      name: Release
+      type: string
     - jsonPath: .status.versions.fabricator.controller
       name: CtrlVer
       type: string
