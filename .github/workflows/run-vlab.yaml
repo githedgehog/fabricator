@@ -312,12 +312,17 @@ jobs:
         run: |
           # shellcheck source=/dev/null
           source "./lab-ci/envs/$KUBE_NODE/source.sh"
+          extra_w=""
+          if [ -f "./lab-ci/envs/$KUBE_NODE/wiring-port-acl.yaml" ]; then
+            extra_w="$extra_w -w ./lab-ci/envs/$KUBE_NODE/wiring-port-acl.yaml"
+          fi
           bin/hhfab init -v --dev \
             --fabric-mode=${{ inputs.fabricmode }} \
             --include-onie=${{ inputs.includeonie }} \
             --gateways=${{ inputs.gateway && 2 || 0 }} \
             ${{ inputs.custom_init_args }} \
             -w "./lab-ci/envs/$KUBE_NODE/wiring.yaml" \
+            $extra_w \
             ${{ inputs.gateway && '-w "./lab-ci/envs/$KUBE_NODE/wiring-gateway.yaml"' || '' }}
 
       - name: Print hhfab versions and generate diagrams
