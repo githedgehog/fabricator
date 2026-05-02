@@ -3098,6 +3098,7 @@ func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to stri
 
 			if sendTooLow || rcvTooLow {
 				logIPerf3Diagnostics(from, to, iPerfsMinSpeed, report)
+				snapshotHostCounters(ctx, fromSSH, toSSH, from, to)
 			}
 
 			if sendTooLow {
@@ -3121,6 +3122,38 @@ func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to stri
 	}
 
 	return nil
+}
+
+func snapshotHostCounters(ctx context.Context, fromSSH, toSSH *sshutil.Config, from, to string) {
+	cmd := strings.Join([]string{
+		"echo '=== nstat ==='; nstat -a 2>&1 || true",
+		"echo '=== ip -s link ==='; ip -s link 2>&1 || true",
+		"echo '=== tc qdisc ==='; tc -s qdisc show 2>&1 || true",
+		"echo '=== sockstat ==='; cat /proc/net/sockstat 2>&1 || true",
+		"echo '=== softnet_stat ==='; cat /proc/net/softnet_stat 2>&1 || true",
+	}, "; ")
+
+	snapCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	g, snapCtx := errgroup.WithContext(snapCtx)
+	for _, side := range []struct {
+		host string
+		ssh  *sshutil.Config
+	}{{from, fromSSH}, {to, toSSH}} {
+		g.Go(func() error {
+			out, _, err := side.ssh.Run(snapCtx, cmd)
+			if err != nil {
+				slog.Warn("Host counter snapshot failed", "host", side.host, "err", err)
+
+				return nil
+			}
+			slog.Warn("Host counter snapshot", "host", side.host, "output", out)
+
+			return nil
+		})
+	}
+	_ = g.Wait()
 }
 
 func logIPerf3Diagnostics(from, to string, iPerfsMinSpeed float64, report *iperf3Report) {
