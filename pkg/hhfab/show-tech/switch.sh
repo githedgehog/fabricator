@@ -212,6 +212,20 @@ run_sonic_cmd() {
 } >> "$OUTPUT_FILE" 2>&1
 
 # ---------------------------
+# SONiC ACLs (rendered + counters) and host-stack firewall
+# ---------------------------
+{
+    echo -e "\n=== SONiC IP Access Lists (rendered, with match counters) ==="
+    run_sonic_cmd "show ip access-list"
+
+    echo -e "\n=== iptables INPUT (host-stack rules + per-rule counters) ==="
+    sudo iptables -L INPUT -n -v -x
+
+    echo -e "\n=== iptables-save -c (full ruleset with counters) ==="
+    sudo iptables-save -c
+} >> "$OUTPUT_FILE" 2>&1
+
+# ---------------------------
 # System Logs and Status
 # ---------------------------
 {
