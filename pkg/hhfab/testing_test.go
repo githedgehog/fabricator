@@ -289,3 +289,49 @@ func mapSlice[IN, OUT any](f func(IN) OUT, in []IN) []OUT {
 func prefixToString(prefix netip.Prefix) string {
 	return prefix.String()
 }
+
+func TestParseIPerf3Report_DiagnosticFields(t *testing.T) {
+	// Fail loudly if iperf3 renames or reshapes the keys diagnostics depend on,
+	// instead of the unmarshal silently producing zero-valued fields.
+	data := []byte(`{
+		"intervals": [
+			{"sum": {"bytes": 800000000, "bits_per_second": 6400000000, "retransmits": 12}},
+			{"sum": {"bytes": 750000000, "bits_per_second": 6000000000, "retransmits": 5}}
+		],
+		"end": {
+			"streams": [
+				{
+					"sender":   {"bytes": 1500000000, "bits_per_second": 1200000000, "retransmits": 7,
+					             "min_rtt": 1100, "mean_rtt": 1500, "max_rtt": 2000},
+					"receiver": {"bytes": 1490000000, "bits_per_second": 1192000000}
+				},
+				{
+					"sender":   {"bytes": 2000000000, "bits_per_second": 1600000000, "retransmits": 10,
+					             "min_rtt": 900, "mean_rtt": 1200, "max_rtt": 1700},
+					"receiver": {"bytes": 1980000000, "bits_per_second": 1584000000}
+				}
+			],
+			"sum_sent":     {"bytes": 7500000000, "bits_per_second": 6000000000, "retransmits": 17},
+			"sum_received": {"bytes": 7400000000, "bits_per_second": 5920000000}
+		}
+	}`)
+
+	report, err := parseIPerf3Report(data)
+	require.NoError(t, err)
+	require.NotNil(t, report)
+
+	require.Len(t, report.Intervals, 2)
+	require.Equal(t, int64(12), report.Intervals[0].Sum.Retransmits)
+	require.InDelta(t, 6.4e9, report.Intervals[0].Sum.BitsPerSecond, 1)
+
+	require.Len(t, report.End.Streams, 2)
+	require.Equal(t, int64(7), report.End.Streams[0].Sender.Retransmits)
+	require.InDelta(t, 1100.0, report.End.Streams[0].Sender.MinRtt, 1)
+	require.InDelta(t, 1500.0, report.End.Streams[0].Sender.MeanRtt, 1)
+	require.InDelta(t, 2000.0, report.End.Streams[0].Sender.MaxRtt, 1)
+	require.InDelta(t, 1.192e9, report.End.Streams[0].Receiver.BitsPerSecond, 1)
+
+	require.Equal(t, int64(17), report.End.SumSent.Retransmits)
+	require.InDelta(t, 6.0e9, report.End.SumSent.BitsPerSecond, 1)
+	require.InDelta(t, 5.92e9, report.End.SumReceived.BitsPerSecond, 1)
+}

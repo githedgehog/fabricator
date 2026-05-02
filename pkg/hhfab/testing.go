@@ -3086,6 +3086,7 @@ func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to stri
 			"receiveSpeed", asMbps(report.End.SumReceived.BitsPerSecond),
 			"sent", asMB(float64(report.End.SumSent.Bytes)),
 			"received", asMB(float64(report.End.SumReceived.Bytes)),
+			"retransmits", report.End.SumSent.Retransmits,
 			"minSpeed", asMbps(iPerfsMinSpeed*1_000_000),
 		)
 		ie.SentSpeed = asMbps(report.End.SumSent.BitsPerSecond)
@@ -3094,6 +3095,10 @@ func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to stri
 		if iPerfsMinSpeed > 0 {
 			sendTooLow := report.End.SumSent.BitsPerSecond < iPerfsMinSpeed*1_000_000
 			rcvTooLow := report.End.SumReceived.BitsPerSecond < iPerfsMinSpeed*1_000_000
+
+			if sendTooLow || rcvTooLow {
+				logIPerf3Diagnostics(from, to, iPerfsMinSpeed, report)
+			}
 
 			if sendTooLow {
 				ie.SendSpeedTooLow = true
@@ -3116,6 +3121,34 @@ func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to stri
 	}
 
 	return nil
+}
+
+func logIPerf3Diagnostics(from, to string, iPerfsMinSpeed float64, report *iperf3Report) {
+	intervals := make([]string, 0, len(report.Intervals))
+	for i, iv := range report.Intervals {
+		intervals = append(intervals, fmt.Sprintf("t%d=%s/r%d",
+			i, asMbps(iv.Sum.BitsPerSecond), iv.Sum.Retransmits))
+	}
+
+	streams := make([]string, 0, len(report.End.Streams))
+	for i, st := range report.End.Streams {
+		streams = append(streams, fmt.Sprintf(
+			"s%d sent=%s/r%d rcvd=%s rtt(min/mean/max us)=%.0f/%.0f/%.0f",
+			i,
+			asMbps(st.Sender.BitsPerSecond), st.Sender.Retransmits,
+			asMbps(st.Receiver.BitsPerSecond),
+			st.Sender.MinRtt, st.Sender.MeanRtt, st.Sender.MaxRtt))
+	}
+
+	slog.Warn("IPerf3 below floor diagnostics",
+		"from", from, "to", to,
+		"sendSpeed", asMbps(report.End.SumSent.BitsPerSecond),
+		"receiveSpeed", asMbps(report.End.SumReceived.BitsPerSecond),
+		"minSpeed", asMbps(iPerfsMinSpeed*1_000_000),
+		"totalRetransmits", report.End.SumSent.Retransmits,
+		"intervals", strings.Join(intervals, " "),
+		"streams", strings.Join(streams, " | "),
+	)
 }
 
 func checkCurl(ctx context.Context, opts TestConnectivityOpts, curls *semaphore.Weighted, from string, fromSSH *sshutil.Config, toIP string, expected bool) *CurlError {
@@ -3187,13 +3220,23 @@ type iperf3ReportInterval struct {
 }
 
 type iperf3ReportEnd struct {
-	SumSent     iperf3ReportSum `json:"sum_sent"`
-	SumReceived iperf3ReportSum `json:"sum_received"`
+	Streams     []iperf3ReportStream `json:"streams"`
+	SumSent     iperf3ReportSum      `json:"sum_sent"`
+	SumReceived iperf3ReportSum      `json:"sum_received"`
+}
+
+type iperf3ReportStream struct {
+	Sender   iperf3ReportSum `json:"sender"`
+	Receiver iperf3ReportSum `json:"receiver"`
 }
 
 type iperf3ReportSum struct {
 	Bytes         int64   `json:"bytes"`
 	BitsPerSecond float64 `json:"bits_per_second"`
+	Retransmits   int64   `json:"retransmits"`
+	MinRtt        float64 `json:"min_rtt"`
+	MeanRtt       float64 `json:"mean_rtt"`
+	MaxRtt        float64 `json:"max_rtt"`
 }
 
 func parseIPerf3Report(data []byte) (*iperf3Report, error) {
