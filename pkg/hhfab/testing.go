@@ -3140,6 +3140,11 @@ func snapshotHostCounters(ctx context.Context, fromSSH, toSSH *sshutil.Config, f
 		"echo '=== tc qdisc ==='; tc -s qdisc show 2>&1 || true",
 		"echo '=== sockstat ==='; cat /proc/net/sockstat 2>&1 || true",
 		"echo '=== softnet_stat ==='; cat /proc/net/softnet_stat 2>&1 || true",
+		"echo '=== interrupts ==='; cat /proc/interrupts 2>&1 || true",
+		"echo '=== softirqs ==='; cat /proc/softirqs 2>&1 || true",
+		"echo '=== ethtool ==='; for i in $(ls /sys/class/net 2>/dev/null | grep -E '^en|^bond'); do echo --- $i ---; ethtool -S $i 2>&1 || true; done",
+		"echo '=== dp-threads ==='; for p in $(pgrep -x dataplane 2>/dev/null); do top -bH -p $p -n 2 -d 1 2>&1 | tail -40; done",
+		"echo '=== dp-metrics ==='; curl -sm 2 http://localhost:9442/metrics 2>&1 | head -300 || true",
 	}, "; ")
 
 	type target struct {
