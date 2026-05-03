@@ -268,6 +268,7 @@ func (testCtx *VPCPeeringTestCtx) testNATGatewayConnectivity(
 		// Iperf tests
 		slog.Debug("NAT ping tests completed, starting iperf3 tests", "direction", label)
 		reachability := Reachability{Reachable: true, Reason: ReachabilityReasonGatewayPeering}
+		gatewayDiagSSH := gatewaySSHConfigs(ctx, testCtx.vlabCfg, testCtx.vlab)
 		var iperfErrors []*IperfError
 		for _, serverA := range fromServers {
 			for _, serverB := range toServers {
@@ -275,7 +276,7 @@ func (testCtx *VPCPeeringTestCtx) testNATGatewayConnectivity(
 				if err != nil {
 					return err
 				}
-				if ie := checkIPerf(ctx, testCtx.tcOpts, serverA, serverB, sshConfigs[serverA], sshConfigs[serverB], destIP, reachability); ie != nil {
+				if ie := checkIPerf(ctx, testCtx.tcOpts, serverA, serverB, sshConfigs[serverA], sshConfigs[serverB], destIP, reachability, gatewayDiagSSH); ie != nil {
 					iperfErrors = append(iperfErrors, ie)
 				}
 			}

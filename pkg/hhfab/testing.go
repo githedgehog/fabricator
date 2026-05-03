@@ -2113,6 +2113,15 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 		}
 	}
 
+	gatewayDiagSSH := map[string]*sshutil.Config{}
+	for _, vm := range vlab.VMs {
+		if vm.Type == VMTypeGateway {
+			if cfg, ok := sshConfigs[vm.Name]; ok {
+				gatewayDiagSSH[vm.Name] = cfg
+			}
+		}
+	}
+
 	cacheCancel, kube, err := getKubeClientWithCache(ctx, c.WorkDir)
 	if err != nil {
 		return fmt.Errorf("creating kube client: %w", err)
@@ -2361,7 +2370,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 							return fmt.Errorf("checkToolbockLock: %w", err)
 						}
 
-						if ie := checkIPerf(ctx, opts, serverA, serverB, clientA, clientB, ipB.Addr(), expectedReachable); ie != nil {
+						if ie := checkIPerf(ctx, opts, serverA, serverB, clientA, clientB, ipB.Addr(), expectedReachable, gatewayDiagSSH); ie != nil {
 							return ie
 						}
 
@@ -2934,7 +2943,7 @@ const iperf3SpeedRetries = 2
 // iperf3RetryDelay is the delay between retry attempts to allow network conditions to stabilize.
 const iperf3RetryDelay = 2 * time.Second
 
-func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string, fromSSH, toSSH *sshutil.Config, toIP netip.Addr, reachability Reachability) *IperfError {
+func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string, fromSSH, toSSH *sshutil.Config, toIP netip.Addr, reachability Reachability, diagSSH map[string]*sshutil.Config) *IperfError {
 	if opts.IPerfsSeconds <= 0 || !reachability.Reachable {
 		return nil
 	}
@@ -2961,7 +2970,7 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string,
 			}
 		}
 
-		ie := runIPerf3Test(ctx, opts, from, to, fromSSH, toSSH, toIP, iPerfsMinSpeed)
+		ie := runIPerf3Test(ctx, opts, from, to, fromSSH, toSSH, toIP, iPerfsMinSpeed, diagSSH)
 		if ie == nil {
 			if attempt > 0 {
 				slog.Info("iperf3 test succeeded on retry", "from", from, "to", to, "attempt", attempt+1)
@@ -2981,7 +2990,7 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string,
 	return lastError
 }
 
-func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to string, fromSSH, toSSH *sshutil.Config, toIP netip.Addr, iPerfsMinSpeed float64) *IperfError {
+func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to string, fromSSH, toSSH *sshutil.Config, toIP netip.Addr, iPerfsMinSpeed float64, diagSSH map[string]*sshutil.Config) *IperfError {
 	ie := &IperfError{
 		Source:      from,
 		Destination: to,
@@ -3098,7 +3107,7 @@ func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to stri
 
 			if sendTooLow || rcvTooLow {
 				logIPerf3Diagnostics(from, to, iPerfsMinSpeed, report)
-				snapshotHostCounters(ctx, fromSSH, toSSH, from, to)
+				snapshotHostCounters(ctx, fromSSH, toSSH, from, to, diagSSH)
 			}
 
 			if sendTooLow {
@@ -3124,7 +3133,7 @@ func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to stri
 	return nil
 }
 
-func snapshotHostCounters(ctx context.Context, fromSSH, toSSH *sshutil.Config, from, to string) {
+func snapshotHostCounters(ctx context.Context, fromSSH, toSSH *sshutil.Config, from, to string, diagSSH map[string]*sshutil.Config) {
 	cmd := strings.Join([]string{
 		"echo '=== nstat ==='; nstat -a 2>&1 || true",
 		"echo '=== ip -s link ==='; ip -s link 2>&1 || true",
@@ -3133,14 +3142,23 @@ func snapshotHostCounters(ctx context.Context, fromSSH, toSSH *sshutil.Config, f
 		"echo '=== softnet_stat ==='; cat /proc/net/softnet_stat 2>&1 || true",
 	}, "; ")
 
+	type target struct {
+		host string
+		ssh  *sshutil.Config
+	}
+	targets := []target{{from, fromSSH}, {to, toSSH}}
+	for name, ssh := range diagSSH {
+		if ssh == nil || name == from || name == to {
+			continue
+		}
+		targets = append(targets, target{name, ssh})
+	}
+
 	snapCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
 	g, snapCtx := errgroup.WithContext(snapCtx)
-	for _, side := range []struct {
-		host string
-		ssh  *sshutil.Config
-	}{{from, fromSSH}, {to, toSSH}} {
+	for _, side := range targets {
 		g.Go(func() error {
 			out, _, err := side.ssh.Run(snapCtx, cmd)
 			if err != nil {
@@ -3154,6 +3172,24 @@ func snapshotHostCounters(ctx context.Context, fromSSH, toSSH *sshutil.Config, f
 		})
 	}
 	_ = g.Wait()
+}
+
+func gatewaySSHConfigs(ctx context.Context, c *Config, vlab *VLAB) map[string]*sshutil.Config {
+	out := map[string]*sshutil.Config{}
+	for _, vm := range vlab.VMs {
+		if vm.Type != VMTypeGateway {
+			continue
+		}
+		ssh, err := c.SSHVM(ctx, vlab, vm)
+		if err != nil {
+			slog.Warn("Failed to build gateway SSH config for diagnostics", "vm", vm.Name, "err", err)
+
+			continue
+		}
+		out[vm.Name] = ssh
+	}
+
+	return out
 }
 
 func logIPerf3Diagnostics(from, to string, iPerfsMinSpeed float64, report *iperf3Report) {
