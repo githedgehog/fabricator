@@ -2953,6 +2953,10 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string,
 	// ~5-6.5 Gbps with periodic real packet loss, so cap floor at 5000 to avoid flake.
 	if reachability.Reason == ReachabilityReasonGatewayPeering {
 		iPerfsMinSpeed = min(iPerfsMinSpeed, 5000)
+	} else {
+		// Dataplane sampling and gateway-VM snapshots only matter for traffic
+		// that traverses the gateway; skip overhead for other paths.
+		diagSSH = nil
 	}
 
 	var lastError *IperfError
@@ -3003,6 +3007,35 @@ func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to stri
 	slog.Debug("Running iperf3", "from", from, "to", to)
 
 	g, ctx := errgroup.WithContext(ctx)
+
+	dpSamples := &sync.Map{}
+	g.Go(func() error {
+		sampleSec := opts.IPerfsSeconds
+		cmd := fmt.Sprintf(
+			"PID=$(pgrep -x dataplane 2>/dev/null | head -1); "+
+				"[ -z \"$PID\" ] && exit 0; "+
+				"timeout %d pidstat -t -h -p $PID 1 %d 2>&1 || true",
+			sampleSec+2, sampleSec,
+		)
+		var wg sync.WaitGroup
+		for name, ssh := range diagSSH {
+			if ssh == nil {
+				continue
+			}
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				out, _, err := ssh.Run(ctx, cmd)
+				if err != nil {
+					return
+				}
+				dpSamples.Store(name, out)
+			}()
+		}
+		wg.Wait()
+
+		return nil
+	})
 
 	g.Go(func() error {
 		cmd := fmt.Sprintf("toolbox -E LD_PRELOAD=/lib/x86_64-linux-gnu/libgcc_s.so.1 -q timeout %d iperf3 -s -1 -J", opts.IPerfsSeconds+25)
@@ -3127,6 +3160,14 @@ func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to stri
 	})
 
 	if err := g.Wait(); err != nil {
+		if ie.SendSpeedTooLow || ie.ClientMsg == "iperf3 receive speed too low" {
+			dpSamples.Range(func(k, v any) bool {
+				slog.Warn("Dataplane CPU sample during iperf3", "host", k, "output", v)
+
+				return true
+			})
+		}
+
 		return ie
 	}
 
