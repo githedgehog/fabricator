@@ -3014,8 +3014,8 @@ func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to stri
 		cmd := fmt.Sprintf(
 			"PID=$(pgrep -x dataplane 2>/dev/null | head -1); "+
 				"[ -z \"$PID\" ] && exit 0; "+
-				"timeout %d pidstat -t -h -p $PID 1 %d 2>&1 || true",
-			sampleSec+2, sampleSec,
+				"timeout %d top -bH -p $PID -n 2 -d %d 2>&1 || true",
+			sampleSec+5, sampleSec,
 		)
 		var wg sync.WaitGroup
 		for name, ssh := range diagSSH {
