@@ -13,7 +13,7 @@ tool (
 require (
 	dario.cat/mergo v1.0.2
 	github.com/DeRuina/timberjack v1.4.2
-	github.com/Masterminds/semver/v3 v3.4.0
+	github.com/Masterminds/semver/v3 v3.5.0
 	github.com/Masterminds/sprig/v3 v3.3.0
 	github.com/appleboy/easyssh-proxy v1.5.2
 	github.com/cert-manager/cert-manager v1.20.2
