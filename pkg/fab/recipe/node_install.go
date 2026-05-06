@@ -211,12 +211,14 @@ func (c *NodeInstallUpgrade) enableLLDPOnAllEther(ctx context.Context) error {
 Name=*
 Type=ether
 Driver=!veth
-Kind=!dummy
+Kind=!*
 
 [Network]
+KeepConfiguration=yes
 DHCP=no
 IPv6AcceptRA=no
 IPv6SendRA=no
+LinkLocalAddressing=no
 LLDP=yes
 EmitLLDP=yes
 `), 0o644); err != nil {
