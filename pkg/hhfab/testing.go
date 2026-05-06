@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/samber/lo"
@@ -2949,10 +2950,14 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string,
 	}
 
 	iPerfsMinSpeed := opts.IPerfsMinSpeed
+	iPerfsDiagSpeed := iPerfsMinSpeed
 	// Gateway peering uses kernel-based dataplane; observed sustained throughput on HLAB is
 	// ~5-6.5 Gbps with periodic real packet loss, so cap floor at 5000 to avoid flake.
+	// Diagnostics still fire below 6500 (the original expectation) so we can investigate
+	// dips even when the test passes at 5000.
 	if reachability.Reason == ReachabilityReasonGatewayPeering {
 		iPerfsMinSpeed = min(iPerfsMinSpeed, 5000)
+		iPerfsDiagSpeed = min(opts.IPerfsMinSpeed, 6500)
 	} else {
 		// Dataplane sampling and gateway-VM snapshots only matter for traffic
 		// that traverses the gateway; skip overhead for other paths.
@@ -2974,7 +2979,7 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string,
 			}
 		}
 
-		ie := runIPerf3Test(ctx, opts, from, to, fromSSH, toSSH, toIP, iPerfsMinSpeed, diagSSH)
+		ie := runIPerf3Test(ctx, opts, from, to, fromSSH, toSSH, toIP, iPerfsMinSpeed, iPerfsDiagSpeed, diagSSH)
 		if ie == nil {
 			if attempt > 0 {
 				slog.Info("iperf3 test succeeded on retry", "from", from, "to", to, "attempt", attempt+1)
@@ -2994,7 +2999,7 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string,
 	return lastError
 }
 
-func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to string, fromSSH, toSSH *sshutil.Config, toIP netip.Addr, iPerfsMinSpeed float64, diagSSH map[string]*sshutil.Config) *IperfError {
+func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to string, fromSSH, toSSH *sshutil.Config, toIP netip.Addr, iPerfsMinSpeed, iPerfsDiagSpeed float64, diagSSH map[string]*sshutil.Config) *IperfError {
 	ie := &IperfError{
 		Source:      from,
 		Destination: to,
@@ -3009,6 +3014,7 @@ func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to stri
 	g, ctx := errgroup.WithContext(ctx)
 
 	dpSamples := &sync.Map{}
+	var belowDiag atomic.Bool
 	g.Go(func() error {
 		sampleSec := opts.IPerfsSeconds
 		cmd := fmt.Sprintf(
@@ -3134,14 +3140,20 @@ func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to stri
 		ie.SentSpeed = asMbps(report.End.SumSent.BitsPerSecond)
 		ie.RcvdSpeed = asMbps(report.End.SumReceived.BitsPerSecond)
 
+		if iPerfsDiagSpeed > 0 {
+			sendBelowDiag := report.End.SumSent.BitsPerSecond < iPerfsDiagSpeed*1_000_000
+			rcvBelowDiag := report.End.SumReceived.BitsPerSecond < iPerfsDiagSpeed*1_000_000
+
+			if sendBelowDiag || rcvBelowDiag {
+				belowDiag.Store(true)
+				logIPerf3Diagnostics(from, to, iPerfsDiagSpeed, report)
+				snapshotHostCounters(ctx, fromSSH, toSSH, from, to, diagSSH)
+			}
+		}
+
 		if iPerfsMinSpeed > 0 {
 			sendTooLow := report.End.SumSent.BitsPerSecond < iPerfsMinSpeed*1_000_000
 			rcvTooLow := report.End.SumReceived.BitsPerSecond < iPerfsMinSpeed*1_000_000
-
-			if sendTooLow || rcvTooLow {
-				logIPerf3Diagnostics(from, to, iPerfsMinSpeed, report)
-				snapshotHostCounters(ctx, fromSSH, toSSH, from, to, diagSSH)
-			}
 
 			if sendTooLow {
 				ie.SendSpeedTooLow = true
@@ -3159,15 +3171,15 @@ func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to stri
 		return nil
 	})
 
-	if err := g.Wait(); err != nil {
-		if ie.SendSpeedTooLow || ie.ClientMsg == "iperf3 receive speed too low" {
-			dpSamples.Range(func(k, v any) bool {
-				slog.Warn("Dataplane CPU sample during iperf3", "host", k, "output", v)
+	err := g.Wait()
+	if belowDiag.Load() {
+		dpSamples.Range(func(k, v any) bool {
+			slog.Warn("Dataplane CPU sample during iperf3", "host", k, "output", v)
 
-				return true
-			})
-		}
-
+			return true
+		})
+	}
+	if err != nil {
 		return ie
 	}
 
