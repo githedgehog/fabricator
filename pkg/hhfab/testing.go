@@ -3020,7 +3020,14 @@ func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to stri
 		cmd := fmt.Sprintf(
 			"PID=$(pgrep -x dataplane 2>/dev/null | head -1); "+
 				"[ -z \"$PID\" ] && exit 0; "+
-				"timeout %d top -bH -p $PID -n 2 -d %d 2>&1 || true",
+				"echo === BEFORE ===; date +%%s.%%N; "+
+				"echo === proc-stat ===; cat /proc/stat; "+
+				"echo === interrupts ===; cat /proc/interrupts; "+
+				"echo === top ===; "+
+				"timeout %d top -bH -p $PID -n 2 -d %d 2>&1 || true; "+
+				"echo === AFTER ===; date +%%s.%%N; "+
+				"echo === proc-stat ===; cat /proc/stat; "+
+				"echo === interrupts ===; cat /proc/interrupts",
 			sampleSec+5, sampleSec,
 		)
 		var wg sync.WaitGroup
