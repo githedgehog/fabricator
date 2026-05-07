@@ -836,6 +836,7 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 	for _, vpc := range vpcs.Items {
 		topo.VPCs[vpc.Name] = &VPCInfo{
 			Name:            vpc.Name,
+			Mode:            string(vpc.Spec.Mode),
 			Subnets:         make(map[string]*SubnetInfo),
 			AttachedServers: []string{},
 		}

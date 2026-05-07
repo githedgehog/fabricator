@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 type MxGraphModel struct {
@@ -1675,6 +1676,25 @@ func createVPCLayer(model *MxGraphModel, vpcs map[string]*VPCInfo, cellMap map[s
 	}
 }
 
+// vpcDisplayName renders a VPC's k8s name with the canonical "VPC-NN" capitalization.
+func vpcDisplayName(name string) string {
+	if strings.HasPrefix(name, "vpc-") {
+		return "VPC-" + name[len("vpc-"):]
+	}
+
+	return name
+}
+
+// vpcModeDisplay maps the raw vpcapi.VPCMode value to the legend label.
+// Empty (the API constant for L2VNI) renders as "L2VNI".
+func vpcModeDisplay(mode string) string {
+	if mode == "" {
+		return "L2VNI"
+	}
+
+	return strings.ToUpper(mode)
+}
+
 func createVPCBoxForServer(model *MxGraphModel, vpcName string, vpcInfo *VPCInfo, serverID string, serverCell *MxCell, boxIndex int, vpcIndex int) {
 	// Get server dimensions
 	x := serverCell.Geometry.X
@@ -1720,9 +1740,10 @@ func createVPCBoxForServer(model *MxGraphModel, vpcName string, vpcInfo *VPCInfo
 	}
 
 	// Create label with VPC name (bold, colored) and IP (regular, black)
-	labelValue := fmt.Sprintf("<b><font color=\"%s\">%s</font></b>", color, vpcName)
+	displayName := vpcDisplayName(vpcName)
+	labelValue := fmt.Sprintf("<b><font color=\"%s\">%s</font></b>", color, displayName)
 	if serverIP != "" {
-		labelValue = fmt.Sprintf("<b><font color=\"%s\">%s</font></b>: <font color=\"#000000\">%s</font>", color, vpcName, serverIP)
+		labelValue = fmt.Sprintf("<b><font color=\"%s\">%s</font></b>: <font color=\"#000000\">%s</font>", color, displayName, serverIP)
 	}
 
 	// Create the VPC box with label at the bottom (like redundancy groups)
@@ -1812,11 +1833,12 @@ func createVPCLegend(model *MxGraphModel, vpcs map[string]*VPCInfo, serverBottom
 		}
 		color := VPCColorPalette[colorIndex%len(VPCColorPalette)]
 
-		// VPC name header
+		// VPC name header (with mode in parentheses for the legend only)
+		headerText := fmt.Sprintf("%s (%s)", vpcDisplayName(vpcName), vpcModeDisplay(vpcInfo.Mode))
 		vpcHeader := MxCell{
 			ID:     fmt.Sprintf("vpc_legend_header_%d", i),
 			Parent: "vpc_layer",
-			Value:  fmt.Sprintf("<b>%s</b>", vpcName),
+			Value:  fmt.Sprintf("<b>%s</b>", headerText),
 			Style:  fmt.Sprintf("text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontColor=%s;fontStyle=1;", color),
 			Vertex: "1",
 			Geometry: &Geometry{

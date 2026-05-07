@@ -39,6 +39,7 @@ type Topology struct {
 
 type VPCInfo struct {
 	Name            string
+	Mode            string // raw vpcapi.VPCMode value: "" (l2vni), "l3vni", "l3flat"
 	Subnets         map[string]*SubnetInfo
 	AttachedServers []string // server IDs attached to this VPC
 }
