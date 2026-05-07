@@ -233,8 +233,8 @@ CI will pull, build, and push the new version.
 We are using the upstream reloader chart and container image.
 
 ```bash
-export RELOADER_CHART_VERSION="2.2.9"
-export RELOADER_VERSION="v1.4.14"
+export RELOADER_CHART_VERSION="2.2.11"
+export RELOADER_VERSION="v1.4.16"
 
 helm repo add stakater https://stakater.github.io/stakater-charts
 helm repo update
