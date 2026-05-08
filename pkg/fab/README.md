@@ -152,8 +152,8 @@ Image is taken from cturra/ntp:latest. The version of chrony is from the Alpine
 Linux build. The container is an alpine Linux distro.
 
 ```bash
-export NTP_VERSION="v0.0.4"
-export UPSTREAM_SHA="sha256:8ee0cfcabfa3d0d77dde02cb2930da02da8c33a2b7393bb429010cbae0b9d509"
+export NTP_VERSION="v0.0.5"
+export UPSTREAM_SHA="sha256:7224d4e7c7833aabbcb7dd70c46c8a8dcccda365314c6db047b9b10403ace3bc"
 
 docker image rm cturra/ntp@${UPSTREAM_SHA}
 skopeo copy --all docker://cturra/ntp@${UPSTREAM_SHA} docker://ghcr.io/githedgehog/fabricator/ntp:${NTP_VERSION}
