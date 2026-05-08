@@ -3017,18 +3017,22 @@ func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to stri
 	var belowDiag atomic.Bool
 	g.Go(func() error {
 		sampleSec := opts.IPerfsSeconds
+		// procfs-based bracketing (top -bH -d N -n 2 sometimes ignores -d, capping at ~3s).
+		// Shell sleep guarantees the window. Per-thread CPU deltas come from
+		// /proc/<pid>/task/<tid>/stat utime+stime fields.
 		cmd := fmt.Sprintf(
 			"PID=$(pgrep -x dataplane 2>/dev/null | head -1); "+
 				"[ -z \"$PID\" ] && exit 0; "+
-				"echo === BEFORE ===; date +%%s.%%N; "+
+				"snap() { "+
 				"echo === proc-stat ===; cat /proc/stat; "+
 				"echo === interrupts ===; cat /proc/interrupts; "+
-				"echo === top ===; "+
-				"timeout %d top -bH -p $PID -n 2 -d %d 2>&1 || true; "+
-				"echo === AFTER ===; date +%%s.%%N; "+
-				"echo === proc-stat ===; cat /proc/stat; "+
-				"echo === interrupts ===; cat /proc/interrupts",
-			sampleSec+5, sampleSec,
+				"echo === thread-stat ===; "+
+				"for t in /proc/$PID/task/*/stat; do cat \"$t\" 2>/dev/null; done; "+
+				"}; "+
+				"echo === BEFORE ===; date +%%s.%%N; snap; "+
+				"sleep %d; "+
+				"echo === AFTER ===; date +%%s.%%N; snap",
+			sampleSec,
 		)
 		var wg sync.WaitGroup
 		for name, ssh := range diagSSH {
