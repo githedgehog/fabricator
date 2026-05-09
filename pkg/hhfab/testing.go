@@ -3321,13 +3321,15 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 	var lldpOut inspect.Out[inspect.LLDPIn]
 	var lldpErr error
 
+	const lldpRetryDelay = 30 * time.Second
+
 	for attempt := 0; attempt < opts.Attempts; attempt++ {
 		if attempt > 0 {
-			slog.Info("Retry attempt", "number", attempt+1)
+			slog.Info("LLDP inspect retry attempt", "number", attempt+1)
 			select {
 			case <-ctx.Done():
 				return fmt.Errorf("context cancelled during retry: %w", ctx.Err())
-			case <-time.After(10 * time.Second):
+			case <-time.After(lldpRetryDelay):
 			}
 		}
 
@@ -3347,9 +3349,14 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 	if lldpErr != nil {
 		slog.Error("Failed to inspect LLDP", "err", lldpErr)
 		fail = true
-	} else if renderErr := inspect.Render(time.Now(), inspect.OutputTypeText, os.Stdout, lldpIn, lldpOut); renderErr != nil {
-		slog.Error("Inspecting LLDP reveals some errors", "err", renderErr)
-		fail = true
+	} else {
+		if renderErr := inspect.Render(time.Now(), inspect.OutputTypeText, os.Stdout, lldpIn, lldpOut); renderErr != nil {
+			slog.Error("Failed to render LLDP inspection output", "err", renderErr)
+			fail = true
+		}
+		if we, ok := lldpOut.(inspect.WithErrors); ok && len(we.Errors()) > 0 {
+			fail = true
+		}
 	}
 
 	bgpIn := inspect.BGPIn{
