@@ -252,12 +252,7 @@ func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) erro
 			}
 		}
 
-		if len(swNotReady) == 0 && len(swNotUpdated) > 0 {
-			slices.Sort(swNotUpdated)
-			slog.Warn("All switches ready, but some not updated", "notUpdated", swNotUpdated)
-
-			return fmt.Errorf("all switches ready but some not updated")
-		} else if idx%opts.PrintEvery == 0 && (len(swNotReady) > 0 || len(swNotUpdated) > 0) {
+		if idx%opts.PrintEvery == 0 && (len(swNotReady) > 0 || len(swNotUpdated) > 0) {
 			slog.Info("Switches status", "notReady", swNotReady, "notUpdated", swNotUpdated)
 		}
 
@@ -304,16 +299,11 @@ func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) erro
 				gwNotReady = append(gwNotReady, gwName)
 			}
 		}
-		if len(gwNotReady) == 0 && len(gwNotUpdated) > 0 {
-			slices.Sort(gwNotUpdated)
-			slog.Warn("All gateways ready, but some not updated", "notUpdated", gwNotUpdated)
-
-			return fmt.Errorf("all gateways ready but some not updated")
-		} else if idx%opts.PrintEvery == 0 && (len(gwNotReady) > 0 || len(gwNotUpdated) > 0) {
+		if idx%opts.PrintEvery == 0 && (len(gwNotReady) > 0 || len(gwNotUpdated) > 0) {
 			slog.Info("Gateways status", "notReady", gwNotReady, "notUpdated", gwNotUpdated)
 		}
 
-		if len(swNotReady) == 0 && len(gwNotReady) == 0 {
+		if len(swNotReady) == 0 && len(swNotUpdated) == 0 && len(gwNotReady) == 0 && len(gwNotUpdated) == 0 {
 			slog.Info("All switches and gateways are ready", "took", time.Since(start))
 
 			return nil
