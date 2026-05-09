@@ -38,6 +38,22 @@ wget "https://raw.githubusercontent.com/k3s-io/k3s/${K3S_VERSION_UPSTREAM}/insta
 
 mv install.sh k3s-install.sh
 
+# Strip mirrored-library-traefik from the airgap bundle: we start k3s with
+# --disable=servicelb,traefik so it never runs, and shipping it just adds CVE noise.
+mv k3s-airgap-images-amd64.tar.gz k3s-airgap-images-amd64.upstream.tar.gz
+hack/k3s-airgap-strip.sh \
+    k3s-airgap-images-amd64.upstream.tar.gz \
+    k3s-airgap-images-amd64.tar.gz \
+    traefik
+rm k3s-airgap-images-amd64.upstream.tar.gz
+
+# Sanity check: traefik must be gone from both the docker-save manifest and
+# the OCI index. Either grep printing a match means the strip didn't take.
+tar -xzOf k3s-airgap-images-amd64.tar.gz manifest.json \
+    | jq -r '.[].RepoTags[]?' | grep -i traefik && exit 1 || echo "manifest.json OK"
+tar -xzOf k3s-airgap-images-amd64.tar.gz index.json \
+    | jq -r '.manifests[].annotations["io.containerd.image.name"]' | grep -i traefik && exit 1 || echo "index.json OK"
+
 oras push "ghcr.io/githedgehog/fabricator/k3s-airgap:${K3S_VERSION}" k3s k3s-airgap-images-amd64.tar.gz k3s-install.sh
 ```
 
