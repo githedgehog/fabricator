@@ -552,18 +552,24 @@ scan_vm() {
             echo -e "${RED}Failed to run airgapped scan on $vm_name${NC}"
             scan_result=1
         fi
+        echo "Running rootfs scan on $vm_name..."
+        $HHFAB_BIN vlab ssh -b -n "$vm_name" -- 'sudo /var/lib/trivy/scan-sonic-airgapped.sh --rootfs' || true
     elif [ "$vm_type" = "gateway" ]; then
         echo "Running airgapped security scan on $vm_name..."
         if ! $HHFAB_BIN vlab ssh -b -n "$vm_name" -- 'sudo /var/lib/trivy/scan-airgapped.sh'; then
             echo -e "${RED}Failed to run airgapped scan on $vm_name${NC}"
             scan_result=1
         fi
+        echo "Running rootfs scan on $vm_name..."
+        $HHFAB_BIN vlab ssh -b -n "$vm_name" -- 'sudo /var/lib/trivy/scan-airgapped.sh --rootfs' || true
     else
         echo "Running online security scan on $vm_name..."
         if ! $HHFAB_BIN vlab ssh -b -n "$vm_name" -- 'sudo /var/lib/trivy/scan.sh'; then
             echo -e "${RED}Failed to run Trivy scan on $vm_name${NC}"
             scan_result=1
         fi
+        echo "Running rootfs scan on $vm_name..."
+        $HHFAB_BIN vlab ssh -b -n "$vm_name" -- 'sudo /var/lib/trivy/scan.sh --rootfs' || true
     fi
 
     # Restore SSH timeout if it was modified
@@ -729,6 +735,14 @@ if [ "$RUN_SWITCH" = true ]; then
             # Wait for all switch scans to complete
             for i in "${!SWITCH_PIDS[@]}"; do
                 wait "${SWITCH_PIDS[$i]}"
+            done
+
+            # Per-image invocations above bypass the auto-discover path that
+            # runs the host rootfs scan, so trigger it explicitly per switch.
+            echo "Running host rootfs scan on each switch..."
+            for switch in "${SWITCH_VMS[@]}"; do
+                echo "  Rootfs scan on $switch..."
+                $HHFAB_BIN vlab ssh -b -n "$switch" -- 'sudo /var/lib/trivy/scan-sonic-airgapped.sh --rootfs' || true
             done
 
             echo "Collecting scan results from all switches..."
@@ -932,6 +946,91 @@ if [ "$SUCCESS" = true ]; then
                         echo "  - High vulnerability instances: ${VM_HIGH_VULNS[$vm_name]}" >> "$GITHUB_STEP_SUMMARY"
                     done
 
+                fi
+
+                # Host rootfs scan summary. Rootfs SARIFs are uploaded under
+                # category trivy-host-rootfs and bypass the consolidator, so we
+                # tally them directly per VM here. Unit conventions match the
+                # container section: instances counted from results, unique
+                # rules counted across VMs after dedup.
+                declare -A VM_ROOTFS_CRIT_INST VM_ROOTFS_HIGH_INST
+                ROOTFS_SARIFS=()
+                ROOTFS_HOSTS=0
+                TOTAL_ROOTFS_CRIT_INST=0
+                TOTAL_ROOTFS_HIGH_INST=0
+                for results_subdir in "$RESULTS_DIR"/*; do
+                    [ -d "$results_subdir" ] || continue
+                    rootfs_vm=$(basename "$results_subdir")
+                    rootfs_sarif=$(find "$results_subdir" -maxdepth 1 -name "*rootfs*_critical.sarif" 2>/dev/null | head -1)
+                    [ -n "$rootfs_sarif" ] && [ -f "$rootfs_sarif" ] || continue
+                    ROOTFS_SARIFS+=("$rootfs_sarif")
+                    rcrit_inst=$(jq '[.runs[0].results[]? | select(.level == "error" and (.message.text | contains("CRITICAL")))] | length' "$rootfs_sarif" 2>/dev/null || echo 0)
+                    rhigh_inst=$(jq '[.runs[0].results[]? | select(.level == "error" and (.message.text | contains("HIGH")))] | length' "$rootfs_sarif" 2>/dev/null || echo 0)
+                    VM_ROOTFS_CRIT_INST["$rootfs_vm"]=$rcrit_inst
+                    VM_ROOTFS_HIGH_INST["$rootfs_vm"]=$rhigh_inst
+                    TOTAL_ROOTFS_CRIT_INST=$((TOTAL_ROOTFS_CRIT_INST + rcrit_inst))
+                    TOTAL_ROOTFS_HIGH_INST=$((TOTAL_ROOTFS_HIGH_INST + rhigh_inst))
+                    ROOTFS_HOSTS=$((ROOTFS_HOSTS + 1))
+                done
+
+                if [ "$ROOTFS_HOSTS" -gt 0 ]; then
+                    # Dedup unique rule IDs across all rootfs SARIFs.
+                    # wc -l returns 0 cleanly on empty input; avoids the
+                    # `grep -c .` exit-1-on-empty + `|| echo 0` double-output bug.
+                    DEDUP_ROOTFS_CRIT=$(
+                        for s in "${ROOTFS_SARIFS[@]}"; do
+                            jq -r '.runs[0].tool.driver.rules[]? | select(.properties.tags | contains(["CRITICAL"])) | .id' "$s" 2>/dev/null
+                        done | sort -u | wc -l | tr -d '[:space:]'
+                    )
+                    DEDUP_ROOTFS_HIGH=$(
+                        for s in "${ROOTFS_SARIFS[@]}"; do
+                            jq -r '.runs[0].tool.driver.rules[]? | select(.properties.tags | contains(["HIGH"])) | .id' "$s" 2>/dev/null
+                        done | sort -u | wc -l | tr -d '[:space:]'
+                    )
+
+                    echo ""
+                    echo -e "${GREEN}=== Host Rootfs Scan Summary ===${NC}"
+                    echo "Hosts scanned: $ROOTFS_HOSTS"
+                    echo "Unique Critical vulnerability rules: $DEDUP_ROOTFS_CRIT"
+                    echo "Unique High vulnerability rules: $DEDUP_ROOTFS_HIGH"
+                    echo "Critical vulnerability instances: $TOTAL_ROOTFS_CRIT_INST"
+                    echo "High vulnerability instances: $TOTAL_ROOTFS_HIGH_INST"
+                    echo "Total vulnerability instances: $((TOTAL_ROOTFS_CRIT_INST + TOTAL_ROOTFS_HIGH_INST))"
+                    for rootfs_vm in "${!VM_ROOTFS_CRIT_INST[@]}"; do
+                        echo "  ${rootfs_vm}: ${VM_ROOTFS_CRIT_INST[$rootfs_vm]} CRITICAL, ${VM_ROOTFS_HIGH_INST[$rootfs_vm]} HIGH"
+                    done
+
+                    if [ ! -z "$GITHUB_STEP_SUMMARY" ] && [ -f "$GITHUB_STEP_SUMMARY" ]; then
+                        {
+                            echo ""
+                            echo "## Host Rootfs Scan Summary"
+                            echo "- **Hosts scanned:** $ROOTFS_HOSTS"
+                            echo "- **Unique Critical vulnerability rules:** $DEDUP_ROOTFS_CRIT"
+                            echo "- **Unique High vulnerability rules:** $DEDUP_ROOTFS_HIGH"
+                            echo "- **Critical vulnerability instances:** $TOTAL_ROOTFS_CRIT_INST"
+                            echo "- **High vulnerability instances:** $TOTAL_ROOTFS_HIGH_INST"
+                            echo "- **Total vulnerability instances:** $((TOTAL_ROOTFS_CRIT_INST + TOTAL_ROOTFS_HIGH_INST))"
+                            echo ""
+                            echo "### Per-Host Breakdown"
+                        } >> "$GITHUB_STEP_SUMMARY"
+                        for rootfs_vm in "${!VM_ROOTFS_CRIT_INST[@]}"; do
+                            rootfs_display=""
+                            case "$rootfs_vm" in
+                                control-*) rootfs_display="Control VM ($rootfs_vm)" ;;
+                                gateway-*) rootfs_display="Gateway VM ($rootfs_vm)" ;;
+                                leaf-*|spine-*|*switch*) rootfs_display="SONiC Switch ($rootfs_vm)" ;;
+                                *) rootfs_display="$rootfs_vm" ;;
+                            esac
+                            echo "- **${rootfs_display}:**" >> "$GITHUB_STEP_SUMMARY"
+                            echo "  - Critical vulnerability instances: ${VM_ROOTFS_CRIT_INST[$rootfs_vm]}" >> "$GITHUB_STEP_SUMMARY"
+                            echo "  - High vulnerability instances: ${VM_ROOTFS_HIGH_INST[$rootfs_vm]}" >> "$GITHUB_STEP_SUMMARY"
+                        done
+                    fi
+                fi
+
+                # Single trailing pointer to the Security tab covering both
+                # container and host findings.
+                if [ ! -z "$GITHUB_STEP_SUMMARY" ] && [ -f "$GITHUB_STEP_SUMMARY" ]; then
                     echo "" >> "$GITHUB_STEP_SUMMARY"
                     echo "Check the [Security tab](https://github.com/$GITHUB_REPOSITORY/security) for detailed vulnerability reports." >> "$GITHUB_STEP_SUMMARY"
                 fi

@@ -198,6 +198,46 @@ scan_image() {
     echo "  - ${output_base}_critical.sarif (GitHub Security)"
 }
 
+scan_rootfs() {
+    local target="${1:-/}"
+    local host
+    host=$(hostname -s 2>/dev/null || echo "host")
+    local output_base="${REPORTS_DIR}/${TIMESTAMP}_rootfs_${host}"
+    # Skip container state (covered by image scans), trivy's own cache, pseudo
+    # filesystems, transient and user paths. Flatcar's binaries live under /usr
+    # and /opt; trivy still scans those.
+    local skip="/var/lib/rancher,/var/lib/containerd,/var/lib/docker,/var/lib/trivy,/proc,/sys,/dev,/run,/tmp,/home,/var/log"
+
+    echo "Scanning rootfs $target on $host..."
+
+    if sudo ${TRIVY_DIR}/trivy rootfs \
+        --severity HIGH,CRITICAL \
+        --scanners vuln \
+        --skip-java-db-update \
+        --skip-dirs "$skip" \
+        --output "${output_base}_critical.txt" \
+        "$target"; then
+        echo "✓ Rootfs critical text report saved"
+    else
+        echo "WARNING: Rootfs text scan failed for $target on $host"
+        echo "Rootfs $target on $host - scan failed at $(date)" > "${output_base}_critical.txt"
+    fi
+
+    if sudo ${TRIVY_DIR}/trivy rootfs \
+        --severity HIGH,CRITICAL \
+        --scanners vuln \
+        --skip-java-db-update \
+        --skip-dirs "$skip" \
+        --format sarif \
+        --output "${output_base}_critical.sarif" \
+        "$target"; then
+        echo "✓ Rootfs SARIF saved"
+    else
+        echo "WARNING: Rootfs SARIF scan failed for $target on $host"
+        echo "{\"\$schema\":\"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json\",\"version\":\"2.1.0\",\"runs\":[{\"tool\":{\"driver\":{\"name\":\"Trivy\",\"informationUri\":\"https://github.com/aquasecurity/trivy\",\"rules\":[],\"version\":\"${TRIVY_INSTALLED_VERSION}\"}},\"results\":[]}]}" > "${output_base}_critical.sarif"
+    fi
+}
+
 # Check if an image should be excluded (Trivy itself)
 should_exclude() {
     local image="$1"
@@ -214,6 +254,15 @@ if ! sudo test -x ${TRIVY_DIR}/trivy; then
     echo "Debug info:"
     sudo ls -la ${TRIVY_DIR}/
     exit 1
+fi
+
+# --rootfs sentinel: skip image scans, run only the host rootfs scan. The
+# runner invokes this as a separate call so rootfs runs regardless of whether
+# crictl/containerd are healthy.
+if [ "$1" = "--rootfs" ]; then
+    scan_rootfs /
+    echo "Rootfs scan completed. Reports saved to ${REPORTS_DIR}"
+    exit 0
 fi
 
 # Scan specific image if provided

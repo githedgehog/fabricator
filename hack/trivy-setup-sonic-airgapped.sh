@@ -125,6 +125,13 @@ if ! ./trivy image --download-db-only --cache-dir ./cache alpine:latest >/dev/nu
     exit 1
 fi
 
+# Java DB powers JAR analysis. SONiC bundles Java archives; without this the
+# rootfs scan would fail trying to fetch the Java DB on-demand from an
+# airgapped switch.
+if ! ./trivy image --download-java-db-only --cache-dir ./cache >/dev/null 2>&1; then
+    echo -e "${YELLOW}WARNING: Java DB download failed (rootfs scan will skip Java archives)${NC}"
+fi
+
 echo -e "${GREEN}Download complete on host${NC}"
 
 # Step 3: Create scan script locally
@@ -242,8 +249,59 @@ if ! command -v docker >/dev/null; then
     exit 1
 fi
 
+scan_rootfs() {
+    local target="${1:-/}"
+    local host
+    host=$(hostname -s 2>/dev/null || echo "switch")
+    local output_base="${REPORTS_DIR}/${TIMESTAMP}_rootfs_${host}"
+    # Skip Docker container state, trivy's own cache, and pseudo/transient paths.
+    local skip="/var/lib/docker,/var/lib/trivy,/proc,/sys,/dev,/run,/tmp,/home,/var/log"
+
+    echo "Scanning rootfs $target on $host..."
+
+    if sudo ${TRIVY_DIR}/trivy rootfs \
+        --skip-db-update \
+        --skip-java-db-update \
+        --cache-dir ${CACHE_DIR} \
+        --severity HIGH,CRITICAL \
+        --scanners vuln \
+        --skip-dirs "$skip" \
+        --output "${output_base}_critical.txt" \
+        "$target"; then
+        echo "✓ Rootfs critical text report saved"
+    else
+        echo "WARNING: Rootfs text scan failed for $target on $host"
+        echo "Rootfs $target on $host - scan failed at $(date)" > "${output_base}_critical.txt"
+    fi
+
+    if sudo ${TRIVY_DIR}/trivy rootfs \
+        --skip-db-update \
+        --skip-java-db-update \
+        --cache-dir ${CACHE_DIR} \
+        --severity HIGH,CRITICAL \
+        --scanners vuln \
+        --skip-dirs "$skip" \
+        --format sarif \
+        --output "${output_base}_critical.sarif" \
+        "$target"; then
+        echo "✓ Rootfs SARIF saved"
+    else
+        echo "WARNING: Rootfs SARIF scan failed for $target on $host"
+        echo "{\"\$schema\":\"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json\",\"version\":\"2.1.0\",\"runs\":[{\"tool\":{\"driver\":{\"name\":\"Trivy\",\"informationUri\":\"https://github.com/aquasecurity/trivy\",\"rules\":[],\"version\":\"${TRIVY_INSTALLED_VERSION}\"}},\"results\":[]}]}" > "${output_base}_critical.sarif"
+    fi
+}
+
 echo "Starting Trivy airgapped scan for SONiC containers..."
 echo "Timestamp: ${TIMESTAMP}"
+
+# --rootfs sentinel: skip image scans, run only the host rootfs scan. The runner
+# uses this in load-balanced switch mode where per-image invocations bypass the
+# auto-discover path.
+if [ "$1" = "--rootfs" ]; then
+    scan_rootfs /
+    echo "Rootfs scan completed. Reports saved to ${REPORTS_DIR}"
+    exit 0
+fi
 
 # Scan specific image if provided
 if [ ! -z "$1" ]; then

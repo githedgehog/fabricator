@@ -115,6 +115,56 @@ jobs:
           category: trivy-container-scan
         continue-on-error: true
 
+      # Host rootfs SARIFs are not container-image findings, so the consolidator
+      # (which dedups by container imageID) drops them. Merge them into a single
+      # SARIF with a single run and upload under a separate code-scanning
+      # category. The merge avoids the "multiple SARIF runs in one upload"
+      # restriction introduced by GitHub on 2025-07-21.
+      - name: Merge host rootfs SARIFs
+        if: always()
+        id: collect_rootfs
+        run: |
+          mkdir -p sarif-reports-rootfs
+          tmp_dir=$(mktemp -d)
+          found=0
+          while IFS= read -r f; do
+            cp "$f" "$tmp_dir/"
+            found=$((found + 1))
+          done < <(find trivy-reports -name '*rootfs*_critical.sarif' 2>/dev/null)
+          echo "found=$found" >> "$GITHUB_OUTPUT"
+          echo "Collected $found rootfs SARIF(s)"
+          if [ "$found" -gt 0 ]; then
+            # Prefix every result's location URI with the VM name so findings
+            # stay per-host distinct (matches the container-scan path style
+            # like `<vm>/<image>:<tag>/<binary>`). Without this, the same CVE
+            # on the same binary path across hosts collapses to one alert and
+            # loses the host identifier.
+            for f in "$tmp_dir"/*.sarif; do
+              vm=$(basename "$f" | sed -E 's/.*_rootfs_(.+)_critical\.sarif/\1/')
+              jq --arg vm "$vm" '
+                .runs[0].results |= [.[] | .locations |= [
+                  .[] | .physicalLocation.artifactLocation.uri |= "\($vm)/" + .
+                ]]
+              ' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+            done
+            jq -s '
+              . as $files
+              | $files[0]
+              | .runs[0].results = ([$files[].runs[0].results // []] | flatten)
+              | .runs[0].tool.driver.rules = ([$files[].runs[0].tool.driver.rules // []] | flatten | unique_by(.id))
+            ' "$tmp_dir"/*.sarif > sarif-reports-rootfs/merged.sarif
+            echo "Merged into sarif-reports-rootfs/merged.sarif ($(jq '.runs[0].results | length' sarif-reports-rootfs/merged.sarif) results, $(jq '.runs[0].tool.driver.rules | length' sarif-reports-rootfs/merged.sarif) unique rules)"
+          fi
+          rm -rf "$tmp_dir"
+
+      - name: Upload host rootfs SARIF
+        if: steps.collect_rootfs.outcome == 'success' && steps.collect_rootfs.outputs.found != '0'
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: sarif-reports-rootfs/merged.sarif
+          category: trivy-host-rootfs
+        continue-on-error: true
+
       - name: Upload scan artifacts
         uses: actions/upload-artifact@v7
         if: always()
