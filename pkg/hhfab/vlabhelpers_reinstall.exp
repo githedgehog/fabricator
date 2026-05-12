@@ -109,6 +109,10 @@ expect {
 		log_message "EXP-DBG" "Connected via second console type"
 		send "\r"
 	}
+	-ex "Connected over SSH; use <Enter>~? to list SSH escape commands, safe to use Ctrl+C/Ctrl+Z" {
+		log_message "EXP-DBG" "Connected via third console type"
+		send "\r"
+	}
 	-ex "The connection was unsuccessful" {
 		log_message "EXP-ERR" "Connection unsuccessful"
 		exit $ERROR_CONSOLE

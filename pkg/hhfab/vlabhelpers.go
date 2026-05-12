@@ -284,6 +284,7 @@ func (c *Config) VLABAccess(ctx context.Context, vlab *VLAB, t VLABAccessType, n
 
 			cmdName = VLABCmdSSH
 			args = append(slices.Clone(SSHQuietFlags), "-p", parts[1], parts[0])
+			slog.Info("Connected over SSH; use <Enter>~? to list SSH escape commands, safe to use Ctrl+C/Ctrl+Z")
 		} else {
 			return fmt.Errorf("serial not available: %s", name) //nolint:goerr113
 		}
