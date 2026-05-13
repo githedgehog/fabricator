@@ -633,11 +633,22 @@ func runMatrixServerServerPhase(ctx context.Context, opts TestConnectivityOpts, 
 				}
 			}
 
+			// a /32 VIP on lo is never the kernel's own choice of source, and a
+			// host in several hostBGP VPCs has one VIP per VPC. Only this phase
+			// binds it: the proto-port, port-forward and curl phases key probes
+			// by server name, which cannot name one VIP out of several, so a
+			// hostBGP source there probes from whatever the kernel picks.
+			srcIP := netip.Addr{}
+			if src.Server.HostBGP {
+				srcIP = src.Server.IP
+			}
+
 			args := pingIperfPairArgs{
 				From:     src.Server.Name,
 				To:       dst.Server.Name,
 				FromSSH:  deps.sshByServer[src.Server.Name],
 				ToIP:     toIP,
+				SrcIP:    srcIP,
 				Expected: expected,
 				Bidir:    bidir,
 				Pings:    deps.pings,
