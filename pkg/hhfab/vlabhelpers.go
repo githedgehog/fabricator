@@ -4,6 +4,7 @@
 package hhfab
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"errors"
@@ -312,9 +313,45 @@ func (c *Config) VLABAccess(ctx context.Context, vlab *VLAB, t VLABAccessType, n
 	cmd.Dir = c.WorkDir
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+
+	// Tee ssh's stderr so we can disambiguate the exit-255 case below without
+	// hiding stderr from the user.
+	var stderrBuf bytes.Buffer
+	cmd.Stderr = io.MultiWriter(os.Stderr, &stderrBuf)
 
 	if err := cmd.Run(); err != nil {
+		// OpenSSH returns exit 255 for any non-clean session end: user `~.`,
+		// server-initiated close, SONiC idle auto-logout, parent process
+		// killed, and also for genuine connect-time failures. The clean cases
+		// either print a "Connection to <host>" line on stderr or print
+		// nothing (signal kills); the failure cases print specific
+		// auth/network/KEX error messages. Treat 255 as clean for the
+		// hardware-serial path unless stderr matches a known fatal pattern.
+		var exitErr *exec.ExitError
+		if t == VLABAccessSerial && entry.RemoteSerial != "" &&
+			errors.As(err, &exitErr) && exitErr.ExitCode() == 255 {
+			fatal := false
+			for _, sig := range []string{
+				"Permission denied",
+				"ssh: connect to host",
+				"ssh: Could not resolve",
+				"No route to host",
+				"ssh_dispatch_run_fatal",
+				"Bad packet length",
+			} {
+				if strings.Contains(stderrBuf.String(), sig) {
+					fatal = true
+
+					break
+				}
+			}
+			if !fatal {
+				slog.Info("Serial session ended")
+
+				return nil
+			}
+		}
+
 		return fmt.Errorf("failed to run command: %w", err)
 	}
 
