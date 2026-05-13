@@ -429,42 +429,63 @@ func GetServerNetconfCmd(conn *wiringapi.Connection, opts ServerNetconfOpts) (st
 	return netconfCmd, nil
 }
 
-// TODO: multi subnet support once test-connectivity supports it
-func getServerHostBGPCmd(conn *wiringapi.Connection, vlan uint16, subnet netip.Prefix, serversInSubnet int) (string, error) {
-	if conn == nil {
-		return "", fmt.Errorf("connection is nil")
+type HostBGPParams struct {
+	VPCLabel     string
+	Connections  []*wiringapi.Connection
+	VLAN         uint16
+	Subnet       netip.Prefix
+	ServerOffset int
+}
+
+func getServerHostBGPCmd(params []HostBGPParams) (string, error) {
+	if len(params) == 0 {
+		return "", fmt.Errorf("no params provided")
 	}
 
-	cmd := fmt.Sprintf("vpc:v=%d:i=", vlan)
-	interfaces := []string{}
-	switch {
-	case conn.Spec.Unbundled != nil:
-		interfaces = append(interfaces, conn.Spec.Unbundled.Link.Server.LocalPortName())
-	case conn.Spec.Bundled != nil:
-		for _, link := range conn.Spec.Bundled.Links {
-			interfaces = append(interfaces, link.Server.LocalPortName())
+	cmd := ""
+	for i, param := range params {
+		if i > 0 {
+			cmd += " "
 		}
-	case conn.Spec.MCLAG != nil:
-		for _, link := range conn.Spec.MCLAG.Links {
-			interfaces = append(interfaces, link.Server.LocalPortName())
+		if len(param.Connections) == 0 {
+			return "", fmt.Errorf("no connections provided")
 		}
-	case conn.Spec.ESLAG != nil:
-		for _, link := range conn.Spec.ESLAG.Links {
-			interfaces = append(interfaces, link.Server.LocalPortName())
+		interfaces := []string{}
+		for _, conn := range param.Connections {
+			if conn == nil {
+				return "", fmt.Errorf("connection is nil")
+			}
+			switch {
+			case conn.Spec.Unbundled != nil:
+				interfaces = append(interfaces, conn.Spec.Unbundled.Link.Server.LocalPortName())
+			case conn.Spec.Bundled != nil:
+				for _, link := range conn.Spec.Bundled.Links {
+					interfaces = append(interfaces, link.Server.LocalPortName())
+				}
+			case conn.Spec.MCLAG != nil:
+				for _, link := range conn.Spec.MCLAG.Links {
+					interfaces = append(interfaces, link.Server.LocalPortName())
+				}
+			case conn.Spec.ESLAG != nil:
+				for _, link := range conn.Spec.ESLAG.Links {
+					interfaces = append(interfaces, link.Server.LocalPortName())
+				}
+			default:
+				return "", fmt.Errorf("unexpected connection type for conn %q", conn.Name)
+			}
 		}
-	default:
-		return "", fmt.Errorf("unexpected connection type for conn %q", conn.Name)
-	}
 
-	cmd += strings.Join(interfaces, ":i=")
-	addr := subnet.Addr()
-	for range serversInSubnet {
-		addr = addr.Next()
+		cmd += fmt.Sprintf("%s:v=%d:i=", param.VPCLabel, param.VLAN)
+		cmd += strings.Join(interfaces, ":i=")
+		addr := param.Subnet.Addr()
+		for range param.ServerOffset {
+			addr = addr.Next()
+		}
+		if !addr.IsValid() {
+			return "", fmt.Errorf("failed to get IP address from subnet %s", param.Subnet.String())
+		}
+		cmd += ":a=" + addr.String() + "/32"
 	}
-	if !addr.IsValid() {
-		return "", fmt.Errorf("failed to get IP address from subnet %s", subnet.String())
-	}
-	cmd += ":a=" + addr.String() + "/32"
 
 	return cmd, nil
 }
@@ -911,7 +932,15 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		var confErr error
 
 		if hostBGP {
-			confCmd, confErr = getServerHostBGPCmd(&conn, vlan, expectedSubnet, serverInSubnet)
+			confCmd, confErr = getServerHostBGPCmd([]HostBGPParams{
+				{
+					VPCLabel:     vpcName,
+					Connections:  []*wiringapi.Connection{&conn},
+					VLAN:         vlan,
+					Subnet:       expectedSubnet,
+					ServerOffset: serverInSubnet,
+				},
+			})
 		} else if opts.P2P {
 			confCmd, confErr = GetServerNetconfCmd(&conn, ServerNetconfOpts{
 				P2P: p2p.String(),
