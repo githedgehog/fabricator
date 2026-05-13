@@ -6,10 +6,12 @@ package hhfab
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"slices"
 	"strconv"
@@ -18,9 +20,12 @@ import (
 
 	agentapi "go.githedgehog.com/fabric/api/agent/v1beta1"
 	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
+	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
+	"go.githedgehog.com/fabric/pkg/hhfctl"
 	fabricatorapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
+	"go.githedgehog.com/fabricator/pkg/util/sshutil"
 	"golang.org/x/sync/errgroup"
 	corev1 "k8s.io/api/core/v1"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -65,6 +70,14 @@ func makeNoVpcsSuite() *JUnitTestSuite {
 			F:    prometheusObservabilityTest,
 			SkipFlags: SkipFlags{
 				NoProm: true,
+			},
+		},
+		{
+			Name: "HostBGP Multihoming",
+			F:    hostBGPTest,
+			SkipFlags: SkipFlags{
+				SubInterfaces: true,
+				NoServers:     true,
 			},
 		},
 	}
@@ -997,4 +1010,531 @@ func (testCtx *VPCPeeringTestCtx) checkGatewayMetrics(ctx context.Context, prome
 		"metric_types_checked", len(gatewayMetrics))
 
 	return nil
+}
+
+// prerequisites: no existing VPCs, at least 1 unbundled multihomed server, at least 2 other servers.
+// look for a server with unbundled connections to different switches; create two separate hostBGP VPCs,
+// and attach them both to the server via all of its connections.
+// Create two regular VPCs and attach them to the 2 other servers.
+// Peer each hostBGP VPC with one of the regular VPCs and check connectivity between them
+// by directly running ping and iperfs (test connectivity does not support multiple addresses).
+// Bring down one link and ensure connectivity is still achieved via another link.
+// Finally restore everything to the initial state by wiping all VPCs and their attachments.
+func hostBGPTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
+	reverts := []RevertFunc{}
+
+	mhServers, err := findUnbundledMHServers(ctx, testCtx.kube, 1)
+	if err != nil {
+		return false, reverts, fmt.Errorf("looking for unbundled multihomed servers: %w", err)
+	}
+	if len(mhServers) != 1 {
+		return true, reverts, fmt.Errorf("no available unbundled multihomed server") //nolint:err113
+	}
+	mhServer := mhServers[0]
+	slog.Debug("Found unbundled multihomed server", "server", mhServer.Server.Name)
+
+	// Collect all unbundled connections for the multihomed server (needed to build attachments)
+	mhConns := &wiringapi.ConnectionList{}
+	if err := testCtx.kube.List(ctx, mhConns, kclient.MatchingLabels{
+		wiringapi.LabelConnectionType:                   wiringapi.ConnectionTypeUnbundled,
+		wiringapi.ListLabelServer(mhServer.Server.Name): wiringapi.ListLabelValue,
+	}); err != nil {
+		return false, reverts, fmt.Errorf("listing unbundled connections for %s: %w", mhServer.Server.Name, err)
+	}
+
+	alloc, err := newVPCSubnetAllocator(ctx, testCtx.kube, testCtx.setupOpts.VLANNamespace, testCtx.setupOpts.IPv4Namespace)
+	if err != nil {
+		return false, reverts, fmt.Errorf("setting up VPC subnet allocator: %w", err)
+	}
+	defer alloc.stop()
+
+	// Create two hostBGP VPCs, each attached to the server via all its unbundled connections
+	const (
+		hbgpVPCAName    = "hostbgp-01"
+		hbgpVPCBName    = "hostbgp-02"
+		regularVPCAName = "regular-01"
+		regularVPCBName = "regular-02"
+		regularSubnetID = "subnet-01"
+	)
+
+	allVPCs := []*vpcapi.VPC{}
+	allAttaches := []*vpcapi.VPCAttachment{}
+	type HostBGPVPC struct {
+		VPC     *vpcapi.VPC
+		VPCName string
+		Subnet  netip.Prefix
+		Vlan    uint16
+		VIP     netip.Prefix
+	}
+	var hostBGP struct {
+		A HostBGPVPC
+		B HostBGPVPC
+	}
+	type RegularVPC struct {
+		VPC          *vpcapi.VPC
+		Server       *wiringapi.Server
+		Connection   *wiringapi.Connection
+		ServerPrefix netip.Prefix
+	}
+	var regularVPCA, regularVPCB RegularVPC
+
+	for _, vpcName := range []string{hbgpVPCAName, hbgpVPCBName} {
+		hbgp := HostBGPVPC{VPCName: vpcName}
+		hbgp.Subnet, err = alloc.allocSubnet()
+		if err != nil {
+			return false, reverts, fmt.Errorf("allocating subnet for %s: %w", vpcName, err)
+		}
+		hbgp.Vlan, err = alloc.allocVLAN()
+		if err != nil {
+			return false, reverts, fmt.Errorf("allocating VLAN for %s: %w", vpcName, err)
+		}
+		hbgp.VPC = &vpcapi.VPC{
+			ObjectMeta: kmetav1.ObjectMeta{Name: vpcName, Namespace: kmetav1.NamespaceDefault},
+			Spec: vpcapi.VPCSpec{
+				Mode:          testCtx.setupOpts.VPCMode,
+				IPv4Namespace: testCtx.setupOpts.IPv4Namespace,
+				VLANNamespace: testCtx.setupOpts.VLANNamespace,
+				Subnets: map[string]*vpcapi.VPCSubnet{
+					"subnet-01": {
+						Subnet:  hbgp.Subnet.String(),
+						HostBGP: true,
+						VLAN:    hbgp.Vlan,
+					},
+				},
+			},
+		}
+		allVPCs = append(allVPCs, hbgp.VPC)
+
+		switch vpcName {
+		case hbgpVPCAName:
+			hostBGP.A = hbgp
+
+		case hbgpVPCBName:
+			hostBGP.B = hbgp
+		}
+		for i := range mhConns.Items {
+			allAttaches = append(allAttaches, makeVPCAttachment(mhConns.Items[i].Name, vpcName, "subnet-01"))
+		}
+	}
+
+	// Find 2 other servers and create regular VPCs for them
+	serverList := &wiringapi.ServerList{}
+	if err := testCtx.kube.List(ctx, serverList); err != nil {
+		return false, reverts, fmt.Errorf("listing servers: %w", err)
+	}
+
+	for _, server := range serverList.Items {
+		if server.Name == mhServer.Server.Name {
+			continue
+		}
+		connList := &wiringapi.ConnectionList{}
+		if err := testCtx.kube.List(ctx, connList, kclient.MatchingLabels{
+			wiringapi.ListLabelServer(server.Name): wiringapi.ListLabelValue,
+		}); err != nil {
+			return false, reverts, fmt.Errorf("listing connections for server %s: %w", server.Name, err)
+		}
+		if len(connList.Items) == 0 {
+			continue
+		}
+		connIndex := 0
+		if testCtx.setupOpts.VPCMode != vpcapi.VPCModeL2VNI {
+			found := false
+			for i, conn := range connList.Items {
+				if conn.Spec.ESLAG != nil {
+					continue
+				}
+				found = true
+				connIndex = i
+
+				break
+			}
+			if !found {
+				slog.Debug("skipping server as it only has ESLAG connections and we are not in L2VNI mode", "server", server.Name)
+
+				continue
+			}
+		}
+
+		if regularVPCA.Server == nil {
+			regularVPCA.Server = &server
+			regularVPCA.Connection = &connList.Items[connIndex]
+		} else {
+			regularVPCB.Server = &server
+			regularVPCB.Connection = &connList.Items[connIndex]
+
+			break
+		}
+	}
+	if regularVPCB.Server == nil {
+		return true, reverts, fmt.Errorf("not enough servers to create two regular VPCs") //nolint:err113
+	}
+	slog.Debug("Found regular servers for hostBGP test", "serverA", regularVPCA.Server.Name, "connA", regularVPCA.Connection.Name, "serverB", regularVPCB.Server.Name, "connB", regularVPCB.Connection.Name)
+
+	for _, vpcName := range []string{regularVPCAName, regularVPCBName} {
+		regularSubnet, err := alloc.allocSubnet()
+		if err != nil {
+			return false, reverts, fmt.Errorf("allocating subnet for VPC %s: %w", vpcName, err)
+		}
+		regularVLAN, err := alloc.allocVLAN()
+		if err != nil {
+			return false, reverts, fmt.Errorf("allocating VLAN for VPC %s: %w", vpcName, err)
+		}
+		regularVPC := &vpcapi.VPC{
+			ObjectMeta: kmetav1.ObjectMeta{Name: vpcName, Namespace: kmetav1.NamespaceDefault},
+			Spec: vpcapi.VPCSpec{
+				Mode:          testCtx.setupOpts.VPCMode,
+				IPv4Namespace: testCtx.setupOpts.IPv4Namespace,
+				VLANNamespace: testCtx.setupOpts.VLANNamespace,
+				Subnets: map[string]*vpcapi.VPCSubnet{
+					regularSubnetID: {
+						Subnet: regularSubnet.String(),
+						VLAN:   regularVLAN,
+						DHCP:   vpcapi.VPCDHCP{Enable: true},
+					},
+				},
+			},
+		}
+		allVPCs = append(allVPCs, regularVPC)
+		switch vpcName {
+		case regularVPCAName:
+			regularVPCA.VPC = regularVPC
+			allAttaches = append(allAttaches, makeVPCAttachment(regularVPCA.Connection.Name, vpcName, regularSubnetID))
+		case regularVPCBName:
+			regularVPCB.VPC = regularVPC
+			allAttaches = append(allAttaches, makeVPCAttachment(regularVPCB.Connection.Name, vpcName, regularSubnetID))
+		}
+	}
+
+	// Register cleanup revert before creating any resources
+	reverts = append(reverts, func(ctx context.Context) error {
+		return hhfctl.VPCWipeWithClient(ctx, testCtx.kube)
+	})
+
+	for _, vpc := range allVPCs {
+		if _, err := CreateOrUpdateVpc(ctx, testCtx.kube, vpc); err != nil {
+			return false, reverts, fmt.Errorf("creating VPC %s: %w", vpc.Name, err)
+		}
+	}
+	for _, attach := range allAttaches {
+		if err := testCtx.kube.Create(ctx, attach); err != nil {
+			return false, reverts, fmt.Errorf("creating attachment %s: %w", attach.Name, err)
+		}
+	}
+
+	peeringA := vpcapi.VPCPeering{
+		ObjectMeta: kmetav1.ObjectMeta{Name: fmt.Sprintf("%s--%s", hbgpVPCAName, regularVPCA.VPC.Name), Namespace: kmetav1.NamespaceDefault},
+		Spec: vpcapi.VPCPeeringSpec{
+			Permit: []map[string]vpcapi.VPCPeer{
+				{
+					hbgpVPCAName: {
+						Subnets: []string{"subnet-01"},
+					},
+					regularVPCA.VPC.Name: {
+						Subnets: []string{"subnet-01"},
+					},
+				},
+			},
+		},
+	}
+	if err := testCtx.kube.Create(ctx, &peeringA); err != nil {
+		return false, reverts, fmt.Errorf("creating peering %s: %w", peeringA.Name, err)
+	}
+	peeringB := vpcapi.VPCPeering{
+		ObjectMeta: kmetav1.ObjectMeta{Name: fmt.Sprintf("%s--%s", hbgpVPCBName, regularVPCB.VPC.Name), Namespace: kmetav1.NamespaceDefault},
+		Spec: vpcapi.VPCPeeringSpec{
+			Permit: []map[string]vpcapi.VPCPeer{
+				{
+					hbgpVPCBName: {
+						Subnets: []string{"subnet-01"},
+					},
+					regularVPCB.VPC.Name: {
+						Subnets: []string{"subnet-01"},
+					},
+				},
+			},
+		},
+	}
+	if err := testCtx.kube.Create(ctx, &peeringB); err != nil {
+		return false, reverts, fmt.Errorf("creating peering %s: %w", peeringB.Name, err)
+	}
+
+	if err := DoVLABWait(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir); err != nil {
+		return false, reverts, fmt.Errorf("waiting for VLAB: %w", err)
+	}
+
+	// get SSH clients for all servers
+	sshClients := map[string]*sshutil.Config{}
+	for _, server := range []string{mhServer.Server.Name, regularVPCA.Server.Name, regularVPCB.Server.Name} {
+		ssh, err := testCtx.getSSH(ctx, server)
+		if err != nil {
+			return false, reverts, fmt.Errorf("getting SSH for %s: %w", server, err)
+		}
+		sshClients[server] = ssh
+	}
+
+	g := errgroup.Group{}
+	g.Go(func() error {
+		ssh, ok := sshClients[mhServer.Server.Name]
+		if !ok {
+			return fmt.Errorf("no SSH client for %s", mhServer.Server.Name) //nolint:err113
+		}
+		// Cleanup any previous config
+		if _, _, err := ssh.Run(ctx, "docker stop -t 1 hostbgp"); err != nil {
+			// Ignore – container may not be running
+			_ = err
+		}
+		if _, stderr, err := ssh.Run(ctx, "/opt/bin/hhnet cleanup"); err != nil {
+			return fmt.Errorf("hhnet cleanup on %s: %w: %s", mhServer.Server.Name, err, stderr)
+		}
+		params := make([]HostBGPParams, 2)
+		conns := make([]*wiringapi.Connection, len(mhConns.Items))
+		for i, conn := range mhConns.Items {
+			conns[i] = &conn
+		}
+		for i, vpc := range []*vpcapi.VPC{hostBGP.A.VPC, hostBGP.B.VPC} {
+			vpcsub, ok := vpc.Spec.Subnets["subnet-01"]
+			if !ok {
+				return fmt.Errorf("no subnet-01 in hostBGP VPC %s", vpc.Name) //nolint:err113
+			}
+			prefix, err := netip.ParsePrefix(vpcsub.Subnet)
+			if err != nil {
+				return fmt.Errorf("error parsing VPC's %s subnet: %w", vpc.Name, err)
+			}
+			params[i] = HostBGPParams{VPCLabel: vpc.Name, Connections: conns, VLAN: vpcsub.VLAN, Subnet: prefix, ServerOffset: 1}
+		}
+		cmd, err := getServerHostBGPCmd(params)
+		if err != nil {
+			return fmt.Errorf("error getting hostBGP command: %w", err)
+		}
+		slog.Debug("Starting hostBGP container", "server", mhServer.Server.Name, "args", cmd)
+		_, stderr, err := ssh.Run(ctx, "docker run --network=host --privileged --rm --detach --name hostbgp ghcr.io/githedgehog/host-bgp "+cmd)
+		if err != nil {
+			return fmt.Errorf("starting hostbgp on %s: %w: %s", mhServer.Server.Name, err, stderr)
+		}
+		time.Sleep(1 * time.Second)
+		stdout, stderr, err := ssh.Run(ctx, "/opt/bin/hhnet getvips")
+		if err != nil {
+			return fmt.Errorf("fetching ip addresses on loopback: %w: out: %s", err, stderr)
+		}
+		for line := range strings.Lines(stdout) {
+			line = strings.TrimSpace(line)
+			prefix, err := netip.ParsePrefix(line)
+			if err != nil {
+				return fmt.Errorf("parsing VIP %q: %w", line, err)
+			}
+			switch {
+			case hostBGP.A.Subnet.Contains(prefix.Addr()):
+				hostBGP.A.VIP = prefix
+			case hostBGP.B.Subnet.Contains(prefix.Addr()):
+				hostBGP.B.VIP = prefix
+			default:
+				slog.Warn("hostBGP VIP does not match any of the VPCs subnets, ignoring it", "VIP", prefix.String())
+			}
+		}
+
+		return nil
+	})
+
+	for _, regularVPC := range []RegularVPC{regularVPCA, regularVPCB} {
+		g.Go(func() error {
+			ssh, ok := sshClients[regularVPC.Server.Name]
+			if !ok {
+				return fmt.Errorf("no SSH client for %s", regularVPC.Server.Name) //nolint:err113
+			}
+			// Cleanup any previous config
+			if _, _, err := ssh.Run(ctx, "docker stop -t 1 hostbgp"); err != nil {
+				// Ignore – container may not be running
+				_ = err
+			}
+			if _, stderr, err := ssh.Run(ctx, "/opt/bin/hhnet cleanup"); err != nil {
+				return fmt.Errorf("hhnet cleanup on %s: %w: %s", regularVPC.Server.Name, err, stderr)
+			}
+			subnet, ok := regularVPC.VPC.Spec.Subnets["subnet-01"]
+			if !ok {
+				return fmt.Errorf("no subnet-01 in regular VPC %s", regularVPC.VPC.Name) //nolint:err113
+			}
+			netconfCmd, err := GetServerNetconfCmd(regularVPC.Connection, ServerNetconfOpts{
+				VLAN:       subnet.VLAN,
+				HashPolicy: testCtx.setupOpts.HashPolicy,
+			})
+			if err != nil {
+				return fmt.Errorf("error getting netconf command for server %s: %w", regularVPC.Server.Name, err)
+			}
+			slog.Debug("Configuring server with hhnet", "server", regularVPC.Server.Name, "netconfCmd", netconfCmd)
+			stdout, stderr, err := ssh.Run(ctx, "/opt/bin/hhnet "+netconfCmd)
+			if err != nil {
+				return fmt.Errorf("hhnet configure on %s: %w: %s", regularVPC.Server.Name, err, stderr)
+			}
+			prefix, err := netip.ParsePrefix(strings.TrimSpace(stdout))
+			if err != nil {
+				return fmt.Errorf("parsing acquired address %q: %w", stdout, err)
+			}
+			switch regularVPC.VPC.Name {
+			case regularVPCA.VPC.Name:
+				regularVPCA.ServerPrefix = prefix
+			case regularVPCB.VPC.Name:
+				regularVPCB.ServerPrefix = prefix
+			}
+
+			return nil
+		})
+	}
+
+	if err := g.Wait(); err != nil {
+		return false, reverts, fmt.Errorf("error configuring networking on servers: %w", err)
+	}
+
+	// TODO: remove this when we move past the oldest release without the iperf server in the butane template
+	for serverName, ssh := range sshClients {
+		if err := ensureIperf3Daemon(ctx, ssh, serverName); err != nil {
+			return false, reverts, fmt.Errorf("ensuring iperf3 daemon on %s: %w", serverName, err)
+		}
+	}
+
+	slog.Debug("Waiting for network convergence...")
+	time.Sleep(30 * time.Second)
+
+	// these are all bidirectional
+	type ConnCheckPair struct {
+		SrcServer string
+		DstServer string
+		Expected  bool
+		SrcIP     netip.Addr
+		DstIP     netip.Addr
+	}
+	pairsToCheck := []ConnCheckPair{
+		{
+			SrcServer: mhServer.Server.Name,
+			DstServer: regularVPCA.Server.Name,
+			SrcIP:     hostBGP.A.VIP.Addr(),
+			DstIP:     regularVPCA.ServerPrefix.Addr(),
+			Expected:  true,
+		},
+		{
+			SrcServer: mhServer.Server.Name,
+			DstServer: regularVPCB.Server.Name,
+			SrcIP:     hostBGP.A.VIP.Addr(),
+			DstIP:     regularVPCB.ServerPrefix.Addr(),
+			Expected:  false,
+		},
+		{
+			SrcServer: mhServer.Server.Name,
+			DstServer: regularVPCB.Server.Name,
+			SrcIP:     hostBGP.B.VIP.Addr(),
+			DstIP:     regularVPCB.ServerPrefix.Addr(),
+			Expected:  true,
+		},
+		{
+			SrcServer: mhServer.Server.Name,
+			DstServer: regularVPCA.Server.Name,
+			SrcIP:     hostBGP.B.VIP.Addr(),
+			DstIP:     regularVPCA.ServerPrefix.Addr(),
+			Expected:  false,
+		},
+	}
+
+	manualConnCheck := func(ctx context.Context, tcOpts TestConnectivityOpts, sshClients map[string]*sshutil.Config, pairsToCheck []ConnCheckPair) []error {
+		checkErrs := []error{}
+		for _, pair := range pairsToCheck {
+			slog.Debug("Manual connectivity check", "srcServer", pair.SrcServer, "srcIP", pair.SrcIP.String(), "dstServer", pair.DstServer, "dstIP", pair.DstIP, "expected", pair.Expected)
+			srcSSH, ok := sshClients[pair.SrcServer]
+			if !ok {
+				return []error{fmt.Errorf("no SSH client for %s", pair.SrcServer)} //nolint:err113
+			}
+			dstSSH, ok := sshClients[pair.DstServer]
+			if !ok {
+				return []error{fmt.Errorf("no SSH client for %s", pair.DstServer)} //nolint:err113
+			}
+			if !pair.SrcIP.IsValid() || !pair.DstIP.IsValid() {
+				return []error{fmt.Errorf("invalid IP pair: src=%s dst=%s", pair.SrcIP, pair.DstIP)} //nolint:err113
+			}
+			pingErr := checkPing(ctx, tcOpts.PingsCount, nil,
+				pair.SrcServer, pair.DstServer, srcSSH,
+				pair.DstIP, &pair.SrcIP, pair.Expected)
+			if pingErr != nil {
+				checkErrs = append(checkErrs, pingErr)
+			}
+			revPingErr := checkPing(ctx, tcOpts.PingsCount, nil,
+				pair.DstServer, pair.SrcServer, dstSSH,
+				pair.SrcIP, &pair.DstIP, pair.Expected)
+			if revPingErr != nil {
+				checkErrs = append(checkErrs, revPingErr)
+			}
+
+			if pair.Expected && pingErr == nil && revPingErr == nil {
+				reach := Reachability{
+					Reachable: pair.Expected,
+					Reason:    ReachabilityReasonSwitchPeering,
+				}
+				iperfErrs := checkIPerf(ctx, tcOpts, pair.SrcServer, pair.DstServer,
+					srcSSH, pair.DstIP, pair.SrcIP, reach, true)
+				for _, i := range iperfErrs {
+					checkErrs = append(checkErrs, i)
+				}
+			}
+		}
+
+		return checkErrs
+	}
+
+	if checkErrs := manualConnCheck(ctx, testCtx.tcOpts, sshClients, pairsToCheck); len(checkErrs) != 0 {
+		return false, reverts, fmt.Errorf("manual connectivity checks failed: %w", errors.Join(checkErrs...))
+	}
+
+	// Link failover: bring down all connections to one of the switches
+	var failoverSwitchName string
+	for k := range mhServer.SwitchConns {
+		failoverSwitchName = k
+
+		break
+	}
+	failoverSw := &wiringapi.Switch{}
+	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: failoverSwitchName}, failoverSw); err != nil {
+		return false, reverts, fmt.Errorf("getting switch %s: %w", failoverSwitchName, err)
+	}
+	failoverProfile := &wiringapi.SwitchProfile{}
+	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: failoverSw.Spec.Profile}, failoverProfile); err != nil {
+		return false, reverts, fmt.Errorf("getting switch profile %s: %w", failoverSw.Spec.Profile, err)
+	}
+	failoverPortMap, err := failoverProfile.Spec.GetAPI2NOSPortsFor(&failoverSw.Spec)
+	if err != nil {
+		return false, reverts, fmt.Errorf("getting API2NOS ports for %s: %w", failoverSwitchName, err)
+	}
+
+	failoverSwSSH, err := testCtx.getSSH(ctx, failoverSwitchName)
+	if err != nil {
+		return false, reverts, fmt.Errorf("getting SSH for switch %s: %w", failoverSwitchName, err)
+	}
+
+	slog.Debug("Disabling HH agent for link failover test", "switch", failoverSwitchName)
+	if err := changeAgentStatus(ctx, failoverSwSSH, failoverSwitchName, false); err != nil {
+		return false, reverts, fmt.Errorf("disabling agent on %s: %w", failoverSwitchName, err)
+	}
+	reverts = append(reverts, func(ctx context.Context) error {
+		return changeAgentStatus(ctx, failoverSwSSH, failoverSwitchName, true)
+	})
+
+	slog.Debug("Shutting down link(s) for failover test", "switch", failoverSwitchName)
+	for _, failoverConn := range mhServer.SwitchConns[failoverSwitchName] {
+		failoverLink := failoverConn.Spec.Unbundled.Link
+		failoverNOSPort, ok := failoverPortMap[failoverLink.Switch.LocalPortName()]
+		if !ok {
+			return false, reverts, fmt.Errorf("port %s not in profile %s for switch %s", failoverLink.Switch.LocalPortName(), failoverProfile.Name, failoverSwitchName) //nolint:goerr113
+		}
+		if err := changeSwitchPortStatus(ctx, failoverSwSSH, failoverSwitchName, failoverNOSPort, false); err != nil {
+			return false, reverts, fmt.Errorf("shutting down port %s on %s: %w", failoverNOSPort, failoverSwitchName, err)
+		}
+		reverts = append(reverts, func(ctx context.Context) error {
+			return changeSwitchPortStatus(ctx, failoverSwSSH, failoverSwitchName, failoverNOSPort, true)
+		})
+	}
+
+	slog.Debug("Waiting for BGP reconvergence after link failover...")
+	time.Sleep(30 * time.Second)
+
+	if checkErrs := manualConnCheck(ctx, testCtx.tcOpts, sshClients, pairsToCheck); len(checkErrs) != 0 {
+		return false, reverts, fmt.Errorf("connectivity check failed after link failover: %w", errors.Join(checkErrs...))
+	}
+
+	return false, reverts, nil
 }

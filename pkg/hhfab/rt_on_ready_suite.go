@@ -7,7 +7,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"iter"
 	"log/slog"
 	"net/netip"
 	"slices"
@@ -23,7 +22,6 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab"
 	"golang.org/x/sync/errgroup"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 func makeOnReadyTestSuite() *JUnitTestSuite {
@@ -289,44 +287,11 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []Re
 		"singleServerVPCs", len(singleServers))
 
 	// ── Phase 6: Allocate VLANs and subnets ──────────────────────────────
-	vlanNS := &wiringapi.VLANNamespace{}
-	if err := kube.Get(ctx, kclient.ObjectKey{Name: testCtx.setupOpts.VLANNamespace, Namespace: kmetav1.NamespaceDefault}, vlanNS); err != nil {
-		return false, nil, fmt.Errorf("getting VLAN namespace %s: %w", testCtx.setupOpts.VLANNamespace, err)
+	alloc, err := newVPCSubnetAllocator(ctx, kube, testCtx.setupOpts.VLANNamespace, testCtx.setupOpts.IPv4Namespace)
+	if err != nil {
+		return false, nil, fmt.Errorf("setting up VPC subnet allocator: %w", err)
 	}
-	nextVLAN, stopVLAN := iter.Pull(VLANsFrom(vlanNS.Spec.Ranges...))
-	defer stopVLAN()
-
-	ipNS := &vpcapi.IPv4Namespace{}
-	if err := kube.Get(ctx, kclient.ObjectKey{Name: testCtx.setupOpts.IPv4Namespace, Namespace: kmetav1.NamespaceDefault}, ipNS); err != nil {
-		return false, nil, fmt.Errorf("getting IPv4 namespace %s: %w", testCtx.setupOpts.IPv4Namespace, err)
-	}
-	prefixes := make([]netip.Prefix, 0)
-	for _, p := range ipNS.Spec.Subnets {
-		parsed, err := netip.ParsePrefix(p)
-		if err != nil {
-			return false, nil, fmt.Errorf("parsing IPv4 namespace prefix %q: %w", p, err)
-		}
-		prefixes = append(prefixes, parsed)
-	}
-	nextPrefix, stopPrefix := iter.Pull(SubPrefixesFrom(24, prefixes...))
-	defer stopPrefix()
-
-	allocVLAN := func() (uint16, error) {
-		v, ok := nextVLAN()
-		if !ok {
-			return 0, fmt.Errorf("no more VLANs available") //nolint:goerr113
-		}
-
-		return v, nil
-	}
-	allocSubnet := func() (string, error) {
-		p, ok := nextPrefix()
-		if !ok {
-			return "", fmt.Errorf("no more subnets available") //nolint:goerr113
-		}
-
-		return p.String(), nil
-	}
+	defer alloc.stop()
 
 	vpcMode := testCtx.setupOpts.VPCMode
 	hashPolicy := testCtx.setupOpts.HashPolicy
@@ -342,35 +307,20 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []Re
 	plans := make([]vpcPlan, 0)
 
 	makeRegularSubnet := func() (*vpcapi.VPCSubnet, error) {
-		cidr, err := allocSubnet()
+		cidr, err := alloc.allocSubnet()
 		if err != nil {
 			return nil, err
 		}
-		vlan, err := allocVLAN()
+		vlan, err := alloc.allocVLAN()
 		if err != nil {
 			return nil, err
 		}
 
 		return &vpcapi.VPCSubnet{
-			Subnet: cidr,
+			Subnet: cidr.String(),
 			VLAN:   vlan,
 			DHCP:   vpcapi.VPCDHCP{Enable: true},
 		}, nil
-	}
-
-	makeAttach := func(connName, vpcName, subnetName string) *vpcapi.VPCAttachment {
-		attachName := fmt.Sprintf("%s--%s--%s", connName, vpcName, subnetName)
-
-		return &vpcapi.VPCAttachment{
-			ObjectMeta: kmetav1.ObjectMeta{
-				Name:      attachName,
-				Namespace: kmetav1.NamespaceDefault,
-			},
-			Spec: vpcapi.VPCAttachmentSpec{
-				Connection: connName,
-				Subnet:     fmt.Sprintf("%s/%s", vpcName, subnetName),
-			},
-		}
 	}
 
 	serverNetconf := func(s ortServerInfo, vlan uint16, hashPolicy string) (string, error) {
@@ -398,8 +348,8 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []Re
 				},
 			},
 		}
-		att1 := makeAttach(vpcAServer1.conn.Name, vpcAName, "subnet-01")
-		att2 := makeAttach(vpcAServer2.conn.Name, vpcAName, "subnet-02")
+		att1 := makeVPCAttachment(vpcAServer1.conn.Name, vpcAName, "subnet-01")
+		att2 := makeVPCAttachment(vpcAServer2.conn.Name, vpcAName, "subnet-02")
 		nc1, err := serverNetconf(vpcAServer1, sub1.VLAN, hashPolicy)
 		if err != nil {
 			return false, nil, fmt.Errorf("netconf for %s: %w", vpcAServer1.name, err)
@@ -419,16 +369,16 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []Re
 	// ── VPC B: 1 hostBGP subnet, 1 server ────────────────────────────────
 	const vpcBName = "ort-b"
 	{
-		subCIDR, err := allocSubnet()
+		subCIDR, err := alloc.allocSubnet()
 		if err != nil {
 			return false, nil, fmt.Errorf("allocating VPC B subnet: %w", err)
 		}
-		vlan, err := allocVLAN()
+		vlan, err := alloc.allocVLAN()
 		if err != nil {
 			return false, nil, fmt.Errorf("allocating VPC B VLAN: %w", err)
 		}
 		sub := &vpcapi.VPCSubnet{
-			Subnet:  subCIDR,
+			Subnet:  subCIDR.String(),
 			HostBGP: true,
 			VLAN:    vlan,
 		}
@@ -441,20 +391,17 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []Re
 				},
 			},
 		}
-		att := makeAttach(hostBGPServer.conn.Name, vpcBName, "subnet-01")
-		subPrefix, err := netip.ParsePrefix(subCIDR)
-		if err != nil {
-			return false, nil, fmt.Errorf("parsing VPC B subnet: %w", err)
-		}
-		hostBGPCmd, err := getServerHostBGPCmd([]HostBGPParams{
+		att := makeVPCAttachment(hostBGPServer.conn.Name, vpcBName, "subnet-01")
+		hostBGPParams := []HostBGPParams{
 			{
 				VPCLabel:     vpcBName,
 				Connections:  []*wiringapi.Connection{&hostBGPServer.conn},
 				VLAN:         vlan,
-				Subnet:       subPrefix,
+				Subnet:       subCIDR,
 				ServerOffset: 1,
 			},
-		})
+		}
+		hostBGPCmd, err := getServerHostBGPCmd(hostBGPParams)
 		if err != nil {
 			return false, nil, fmt.Errorf("hostBGP cmd for %s: %w", hostBGPServer.name, err)
 		}
@@ -482,8 +429,8 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []Re
 				},
 			},
 		}
-		att1 := makeAttach(vpcCServer1.conn.Name, vpcCName, "subnet-01")
-		att2 := makeAttach(vpcCServer2.conn.Name, vpcCName, "subnet-01")
+		att1 := makeVPCAttachment(vpcCServer1.conn.Name, vpcCName, "subnet-01")
+		att2 := makeVPCAttachment(vpcCServer2.conn.Name, vpcCName, "subnet-01")
 		nc1, err := serverNetconf(vpcCServer1, sub.VLAN, hashPolicy)
 		if err != nil {
 			return false, nil, fmt.Errorf("netconf for %s: %w", vpcCServer1.name, err)
@@ -518,7 +465,7 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []Re
 			},
 		}
 		singleServerVPCs[s.name] = vpc
-		att := makeAttach(s.conn.Name, vpcName, "subnet-01")
+		att := makeVPCAttachment(s.conn.Name, vpcName, "subnet-01")
 		nc, err := serverNetconf(s, sub.VLAN, hashPolicy)
 		if err != nil {
 			return false, nil, fmt.Errorf("netconf for %s: %w", s.name, err)
