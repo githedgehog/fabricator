@@ -517,11 +517,19 @@ func runMatrixServerServerPhase(ctx context.Context, opts TestConnectivityOpts, 
 				}
 			}
 
+			// a /32 VIP on lo is never the kernel's own choice of source, and a
+			// host in several hostBGP VPCs has one VIP per VPC
+			srcIP := netip.Addr{}
+			if src.Server.HostBGP {
+				srcIP = src.Server.IP
+			}
+
 			args := pingIperfPairArgs{
 				From:     src.Server.Name,
 				To:       dst.Server.Name,
 				FromSSH:  deps.sshByServer[src.Server.Name],
 				ToIP:     toIP,
+				SrcIP:    srcIP,
 				Expected: expected,
 				Bidir:    bidir,
 				Pings:    deps.pings,
