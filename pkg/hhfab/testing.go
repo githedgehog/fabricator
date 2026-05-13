@@ -2414,7 +2414,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 						}
 						defer iperfs.Release(1)
 
-						for _, ie := range checkIPerf(ctx, opts, serverA, serverB, clientA, ipB.Addr(), expectedReachable, bidir) {
+						for _, ie := range checkIPerf(ctx, opts, serverA, serverB, clientA, ipB.Addr(), netip.Addr{}, expectedReachable, bidir) {
 							errChan <- ie
 						}
 
@@ -3012,7 +3012,7 @@ const iperf3SpeedRetries = 2
 // iperf3RetryDelay is the delay between retry attempts to allow network conditions to stabilize.
 const iperf3RetryDelay = 2 * time.Second
 
-func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string, fromSSH *sshutil.Config, toIP netip.Addr, reachability Reachability, bidir bool) []*IperfError {
+func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string, fromSSH *sshutil.Config, toIP, srcIP netip.Addr, reachability Reachability, bidir bool) []*IperfError {
 	if opts.IPerfsSeconds <= 0 || !reachability.Reachable {
 		return nil
 	}
@@ -3042,7 +3042,7 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string,
 			}
 		}
 
-		ies := runIPerf3Test(ctx, opts, from, to, fromSSH, toIP, iPerfsMinSpeed, bidir)
+		ies := runIPerf3Test(ctx, opts, from, to, fromSSH, toIP, srcIP, iPerfsMinSpeed, bidir)
 		if len(ies) == 0 {
 			if attempt > 0 {
 				slog.Info("iperf3 test succeeded on retry", "from", from, "to", to, "bidir", bidir, "attempt", attempt+1)
@@ -3071,7 +3071,7 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string,
 	return lastErrors
 }
 
-func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to string, fromSSH *sshutil.Config, toIP netip.Addr, iPerfsMinSpeed float64, bidir bool) []*IperfError {
+func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to string, fromSSH *sshutil.Config, toIP, srcIP netip.Addr, iPerfsMinSpeed float64, bidir bool) []*IperfError {
 	minSpeedStr := asMbps(iPerfsMinSpeed * 1_000_000)
 	// Forward direction: client (`from`) sends to server (`to`).
 	fwd := &IperfError{Source: from, Destination: to, MinSpeed: minSpeedStr}
@@ -3091,6 +3091,9 @@ func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to stri
 	// push the 768 MB server VM into ENOMEM during result aggregation. `docker exec` reuses the
 	// running container's namespaces and adds only the iperf3 client process itself.
 	cmd := fmt.Sprintf("sudo docker exec iperf3 timeout %d iperf3 -P 4 -J -c %s -t %d", opts.IPerfsSeconds+25, toIP.String(), opts.IPerfsSeconds)
+	if srcIP.IsValid() {
+		cmd += " -B " + srcIP.String()
+	}
 	if bidir {
 		cmd += " --bidir"
 	}
