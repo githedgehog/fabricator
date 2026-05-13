@@ -446,7 +446,15 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []Re
 		if err != nil {
 			return false, nil, fmt.Errorf("parsing VPC B subnet: %w", err)
 		}
-		hostBGPCmd, err := getServerHostBGPCmd(&hostBGPServer.conn, vlan, subPrefix, 1)
+		hostBGPCmd, err := getServerHostBGPCmd([]HostBGPParams{
+			{
+				VPCLabel:     vpcBName,
+				Connections:  []*wiringapi.Connection{&hostBGPServer.conn},
+				VLAN:         vlan,
+				Subnet:       subPrefix,
+				ServerOffset: 1,
+			},
+		})
 		if err != nil {
 			return false, nil, fmt.Errorf("hostBGP cmd for %s: %w", hostBGPServer.name, err)
 		}
