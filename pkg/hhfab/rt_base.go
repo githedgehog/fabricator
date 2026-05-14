@@ -202,12 +202,17 @@ func findExternals(ctx context.Context, kube kclient.Client, extList *vpcapi.Ext
 		return true
 	}
 
+	// isViableStaticExt: static, has prefixes to advertise, has at least one static attachment.
+	isViableStaticExt := func(ext *vpcapi.External) bool {
+		return ext.Spec.Static != nil && len(ext.Spec.Static.Prefixes) > 0 && hasStaticAttachments(ext.Name)
+	}
+
 	// First pass: prefer hardware externals
 	for _, ext := range extList.Items {
 		if !isHardware(&ext) || !hasAttachment(ext.Name) {
 			continue
 		}
-		if ext.Spec.Static != nil && staticExt == "" && hasStaticAttachments(ext.Name) {
+		if staticExt == "" && isViableStaticExt(&ext) {
 			staticExt = ext.Name
 			slog.Info("Using hardware static external", "external", staticExt)
 		} else if ext.Spec.Static == nil && bgpExt == "" {
@@ -224,7 +229,7 @@ func findExternals(ctx context.Context, kube kclient.Client, extList *vpcapi.Ext
 		if !hasAttachment(ext.Name) || !allAttachmentsHW(ext.Name) {
 			continue
 		}
-		if ext.Spec.Static != nil && staticExt == "" && hasStaticAttachments(ext.Name) {
+		if staticExt == "" && isViableStaticExt(&ext) {
 			staticExt = ext.Name
 			slog.Info("Using virtual static external (hw-attached)", "external", staticExt)
 		} else if ext.Spec.Static == nil && bgpExt == "" {
@@ -241,7 +246,7 @@ func findExternals(ctx context.Context, kube kclient.Client, extList *vpcapi.Ext
 		if !hasAttachment(ext.Name) {
 			continue
 		}
-		if ext.Spec.Static != nil && staticExt == "" && hasStaticAttachments(ext.Name) {
+		if staticExt == "" && isViableStaticExt(&ext) {
 			staticExt = ext.Name
 			slog.Info("Using virtual static external (virtual switch)", "external", staticExt)
 		} else if ext.Spec.Static == nil && bgpExt == "" {
