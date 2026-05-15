@@ -3481,6 +3481,7 @@ type ReleaseTestOpts struct {
 	VPCMode        vpcapi.VPCMode
 	ListTests      bool
 	ShowTechDump   bool
+	IPerfsMinSpeed float64
 }
 
 func (c *Config) ReleaseTest(ctx context.Context, vlab *VLAB, opts ReleaseTestOpts) error {

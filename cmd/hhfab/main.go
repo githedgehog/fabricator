@@ -89,6 +89,7 @@ const (
 	FlagGatewayLogLevel           = "gateway-log-level"
 	FlagGatewayTag                = "gateway-tag"
 	FlagShowTech                  = "show-tech"
+	FlagIPerfsSpeed               = "iperfs-speed"
 )
 
 func main() {
@@ -1572,7 +1573,7 @@ Examples:
 								Value: 10,
 							},
 							&cli.Float64Flag{
-								Name:  "iperfs-speed",
+								Name:  FlagIPerfsSpeed,
 								Usage: "minimum speed in Mbits/s for iperf3 test to consider successful (0 to not check speeds)",
 								Value: 8200,
 							},
@@ -1622,7 +1623,7 @@ Examples:
 								WaitSwitchesReady: c.Bool("wait-switches-ready"),
 								PingsCount:        c.Int("pings"),
 								IPerfsSeconds:     c.Int("iperfs"),
-								IPerfsMinSpeed:    c.Float64("iperfs-speed"),
+								IPerfsMinSpeed:    c.Float64(FlagIPerfsSpeed),
 								CurlsCount:        c.Int("curls"),
 								Sources:           c.StringSlice("source"),
 								Destinations:      c.StringSlice("destination"),
@@ -1734,9 +1735,18 @@ Examples:
 								Usage:   "collect show-tech diagnostics on failure",
 								Value:   true,
 							},
+							&cli.Float64Flag{
+								Name:  FlagIPerfsSpeed,
+								Usage: "minimum speed in Mbits/s for iperf3 test to consider successful (0 to not check speeds)",
+								Value: 8200,
+							},
 						}),
 						Before: before(false),
 						Action: func(c *cli.Context) error {
+							iperfsSpeed := c.Float64(FlagIPerfsSpeed)
+							if iperfsSpeed < 0 {
+								return fmt.Errorf("--%s must be >= 0, got %g", FlagIPerfsSpeed, iperfsSpeed) //nolint:goerr113
+							}
 							opts := hhfab.ReleaseTestOpts{
 								Regexes:        c.StringSlice(FlagRegEx),
 								InvertRegex:    c.Bool(FlagInvertRegex),
@@ -1748,6 +1758,7 @@ Examples:
 								VPCMode:        vpcapi.VPCMode(handleL2VNI(c.String(FlagNameVPCMode))),
 								ListTests:      c.Bool(FlagListTests),
 								ShowTechDump:   c.Bool(FlagShowTech),
+								IPerfsMinSpeed: iperfsSpeed,
 							}
 							if err := hhfab.DoVLABReleaseTest(ctx, workDir, cacheDir, opts); err != nil {
 								return fmt.Errorf("release-test: %w", err)

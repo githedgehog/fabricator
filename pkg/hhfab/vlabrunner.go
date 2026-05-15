@@ -760,6 +760,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						Regexes:        opts.ReleaseTestRegexes,
 						InvertRegex:    opts.ReleaseTestRegexesInvert,
 						ShowTechDump:   true,
+						IPerfsMinSpeed: 8200,
 					}
 					slog.Debug("Running release-test", "opts", releaseTestOpts)
 					if err := c.ReleaseTest(ctx, vlab, releaseTestOpts); err != nil {
