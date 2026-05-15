@@ -89,12 +89,13 @@ func makeTestCtx(ctx context.Context, kube kclient.Client, setupOpts SetupVPCsOp
 	testCtx.vlab = vlab
 	testCtx.setupOpts = setupOpts
 	testCtx.tcOpts = TestConnectivityOpts{
-		WaitSwitchesReady: false,
-		PingsCount:        5,
-		IPerfsSeconds:     3,
-		IPerfsMinSpeed:    8200,
-		CurlsCount:        1,
-		RequireAllServers: setupOpts.VPCMode == vpcapi.VPCModeL2VNI, // L3VNI will skip eslag servers
+		WaitSwitchesReady:   false,
+		PingsCount:          5,
+		IPerfsSeconds:       3,
+		IPerfsMinSpeed:      8200,
+		IPerfsMinSpeedBidir: rtOpts.IPerfsMinSpeedBidir,
+		CurlsCount:          1,
+		RequireAllServers:   setupOpts.VPCMode == vpcapi.VPCModeL2VNI, // L3VNI will skip eslag servers
 	}
 	testCtx.wrOpts = WaitReadyOpts{
 		AppliedFor: waitAppliedFor,

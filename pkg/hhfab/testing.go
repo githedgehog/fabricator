@@ -2065,19 +2065,20 @@ func (ce *CurlError) Error() string {
 }
 
 type TestConnectivityOpts struct {
-	WaitSwitchesReady bool
-	PingsCount        int
-	PingsParallel     int64
-	IPerfsSeconds     int
-	IPerfsMinSpeed    float64
-	IPerfsParallel    int64
-	IPerfsDSCP        uint8
-	IPerfsTOS         uint8
-	CurlsCount        int
-	CurlsParallel     int64
-	Sources           []string
-	Destinations      []string
-	RequireAllServers bool
+	WaitSwitchesReady   bool
+	PingsCount          int
+	PingsParallel       int64
+	IPerfsSeconds       int
+	IPerfsMinSpeed      float64
+	IPerfsMinSpeedBidir float64
+	IPerfsParallel      int64
+	IPerfsDSCP          uint8
+	IPerfsTOS           uint8
+	CurlsCount          int
+	CurlsParallel       int64
+	Sources             []string
+	Destinations        []string
+	RequireAllServers   bool
 }
 
 func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConnectivityOpts) error {
@@ -3002,6 +3003,9 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string,
 	}
 
 	iPerfsMinSpeed := opts.IPerfsMinSpeed
+	if bidir && opts.IPerfsMinSpeedBidir > 0 {
+		iPerfsMinSpeed = opts.IPerfsMinSpeedBidir
+	}
 	// Gateway peering uses kernel-based dataplane; observed sustained throughput on HLAB is
 	// ~5-6.5 Gbps with periodic real packet loss, so cap floor at 5000 to avoid flake.
 	if reachability.Reason == ReachabilityReasonGatewayPeering {
@@ -3471,16 +3475,17 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 }
 
 type ReleaseTestOpts struct {
-	Regexes        []string
-	InvertRegex    bool
-	ResultsFile    string
-	Extended       bool
-	FailFast       bool
-	PauseOnFailure bool
-	HashPolicy     string
-	VPCMode        vpcapi.VPCMode
-	ListTests      bool
-	ShowTechDump   bool
+	Regexes             []string
+	InvertRegex         bool
+	ResultsFile         string
+	Extended            bool
+	FailFast            bool
+	PauseOnFailure      bool
+	HashPolicy          string
+	VPCMode             vpcapi.VPCMode
+	ListTests           bool
+	ShowTechDump        bool
+	IPerfsMinSpeedBidir float64
 }
 
 func (c *Config) ReleaseTest(ctx context.Context, vlab *VLAB, opts ReleaseTestOpts) error {

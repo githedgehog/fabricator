@@ -89,6 +89,8 @@ const (
 	FlagGatewayLogLevel           = "gateway-log-level"
 	FlagGatewayTag                = "gateway-tag"
 	FlagShowTech                  = "show-tech"
+	FlagIPerfsSpeed               = "iperfs-speed"
+	FlagIPerfsBidirSpeed          = "iperfs-bidir-speed"
 )
 
 func main() {
@@ -1572,10 +1574,11 @@ Examples:
 								Value: 10,
 							},
 							&cli.Float64Flag{
-								Name:  "iperfs-speed",
+								Name:  FlagIPerfsSpeed,
 								Usage: "minimum speed in Mbits/s for iperf3 test to consider successful (0 to not check speeds)",
 								Value: 8200,
 							},
+							iperfsBidirSpeedFlag(),
 							&cli.IntFlag{
 								Name:  "curls",
 								Usage: "number of curl tests to run for each server to test external connectivity (0 to disable)",
@@ -1618,17 +1621,26 @@ Examples:
 							if cliTOS > 255 {
 								return fmt.Errorf("tos value must be between 0 and 255, got %d", cliTOS) //nolint:goerr113
 							}
+							iperfsSpeed := c.Float64(FlagIPerfsSpeed)
+							if iperfsSpeed < 0 {
+								return fmt.Errorf("--%s must be >= 0, got %g", FlagIPerfsSpeed, iperfsSpeed) //nolint:goerr113
+							}
+							iperfsBidirSpeed := c.Float64(FlagIPerfsBidirSpeed)
+							if iperfsBidirSpeed < 0 {
+								return fmt.Errorf("--%s must be >= 0, got %g", FlagIPerfsBidirSpeed, iperfsBidirSpeed) //nolint:goerr113
+							}
 							if err := hhfab.DoVLABTestConnectivity(ctx, workDir, cacheDir, hhfab.TestConnectivityOpts{
-								WaitSwitchesReady: c.Bool("wait-switches-ready"),
-								PingsCount:        c.Int("pings"),
-								IPerfsSeconds:     c.Int("iperfs"),
-								IPerfsMinSpeed:    c.Float64("iperfs-speed"),
-								CurlsCount:        c.Int("curls"),
-								Sources:           c.StringSlice("source"),
-								Destinations:      c.StringSlice("destination"),
-								IPerfsDSCP:        uint8(cliDSCP),
-								IPerfsTOS:         uint8(cliTOS),
-								RequireAllServers: c.Bool("all-servers"),
+								WaitSwitchesReady:   c.Bool("wait-switches-ready"),
+								PingsCount:          c.Int("pings"),
+								IPerfsSeconds:       c.Int("iperfs"),
+								IPerfsMinSpeed:      iperfsSpeed,
+								IPerfsMinSpeedBidir: iperfsBidirSpeed,
+								CurlsCount:          c.Int("curls"),
+								Sources:             c.StringSlice("source"),
+								Destinations:        c.StringSlice("destination"),
+								IPerfsDSCP:          uint8(cliDSCP),
+								IPerfsTOS:           uint8(cliTOS),
+								RequireAllServers:   c.Bool("all-servers"),
 							}); err != nil {
 								return fmt.Errorf("test-connectivity: %w", err)
 							}
@@ -1734,20 +1746,26 @@ Examples:
 								Usage:   "collect show-tech diagnostics on failure",
 								Value:   true,
 							},
+							iperfsBidirSpeedFlag(),
 						}),
 						Before: before(false),
 						Action: func(c *cli.Context) error {
+							iperfsBidirSpeed := c.Float64(FlagIPerfsBidirSpeed)
+							if iperfsBidirSpeed < 0 {
+								return fmt.Errorf("--%s must be >= 0, got %g", FlagIPerfsBidirSpeed, iperfsBidirSpeed) //nolint:goerr113
+							}
 							opts := hhfab.ReleaseTestOpts{
-								Regexes:        c.StringSlice(FlagRegEx),
-								InvertRegex:    c.Bool(FlagInvertRegex),
-								ResultsFile:    c.String(FlagResultsFile),
-								Extended:       c.Bool(FlagExtended),
-								FailFast:       c.Bool(FlagNameFailFast),
-								PauseOnFailure: c.Bool(FlagPauseOnFailure),
-								HashPolicy:     c.String(FlagHashPolicy),
-								VPCMode:        vpcapi.VPCMode(handleL2VNI(c.String(FlagNameVPCMode))),
-								ListTests:      c.Bool(FlagListTests),
-								ShowTechDump:   c.Bool(FlagShowTech),
+								Regexes:             c.StringSlice(FlagRegEx),
+								InvertRegex:         c.Bool(FlagInvertRegex),
+								ResultsFile:         c.String(FlagResultsFile),
+								Extended:            c.Bool(FlagExtended),
+								FailFast:            c.Bool(FlagNameFailFast),
+								PauseOnFailure:      c.Bool(FlagPauseOnFailure),
+								HashPolicy:          c.String(FlagHashPolicy),
+								VPCMode:             vpcapi.VPCMode(handleL2VNI(c.String(FlagNameVPCMode))),
+								ListTests:           c.Bool(FlagListTests),
+								ShowTechDump:        c.Bool(FlagShowTech),
+								IPerfsMinSpeedBidir: iperfsBidirSpeed,
 							}
 							if err := hhfab.DoVLABReleaseTest(ctx, workDir, cacheDir, opts); err != nil {
 								return fmt.Errorf("release-test: %w", err)
@@ -2002,4 +2020,12 @@ func handleL2VNI(in string) string {
 	}
 
 	return in
+}
+
+func iperfsBidirSpeedFlag() cli.Flag {
+	return &cli.Float64Flag{
+		Name:  FlagIPerfsBidirSpeed,
+		Usage: "minimum speed in Mbits/s for bidir iperf3 tests (0 to reuse the unidir floor)",
+		Value: 0,
+	}
 }
