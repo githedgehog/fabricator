@@ -765,7 +765,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						OnReadyTest:    opts.ReleaseTestOnReadyOnly,
 					}
 					slog.Debug("Running release-test", "opts", releaseTestOpts)
-					if err := c.ReleaseTest(ctx, vlab, releaseTestOpts); err != nil {
+					if err := ReleaseTest(ctx, c, vlab, releaseTestOpts); err != nil {
 						if c.Shutdown.Load() == int32(ShutdownTypeGraceful) {
 							return nil
 						}

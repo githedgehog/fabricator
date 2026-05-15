@@ -3483,7 +3483,7 @@ type ReleaseTestOpts struct {
 	OnReadyTest    bool
 }
 
-func (c *Config) ReleaseTest(ctx context.Context, vlab *VLAB, opts ReleaseTestOpts) error {
+func ReleaseTest(ctx context.Context, c *Config, vlab *VLAB, opts ReleaseTestOpts) error {
 	if !slices.Contains(HashPolicies, opts.HashPolicy) {
 		return fmt.Errorf("invalid hash policy %q, must be one of %v", opts.HashPolicy, HashPolicies)
 	} else if opts.HashPolicy != HashPolicyL2 && opts.HashPolicy != HashPolicyL2And3 {
