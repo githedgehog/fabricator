@@ -1556,22 +1556,26 @@ outer:
 			return false, nil, fmt.Errorf("listing connections for switch %s: %w", candidateSwitch, err)
 		}
 
+		// Prefer leaves whose server connections are single-homed (Unbundled or
+		// Bundled). MCLAG and ESLAG members err-disable for minutes after a
+		// rebooting peer comes back, which races against the UC3 polling
+		// window. MCLAG is also on the deprecation path, so we don't want
+		// post-RoCE tests baking MCLAG-specific timing assumptions in.
 		for _, conn := range connList.Items {
-			_, servers, _, _, err := conn.Spec.Endpoints()
-			if err == nil && len(servers) > 0 {
+			if connHasSingleHomedServer(candidateSwitch, conn) {
 				swName = candidateSwitch
-				slog.Debug("Selected RoCE leaf with servers", "switch", swName)
+				slog.Debug("Selected RoCE leaf with non-MCLAG server connection", "switch", swName, "connection", conn.Name)
 
 				break outer
 			}
 		}
-		slog.Debug("Skipping RoCE leaf with no servers", "switch", candidateSwitch)
+		slog.Debug("Skipping RoCE leaf with no non-MCLAG server connections", "switch", candidateSwitch)
 	}
 
 	if swName == "" {
-		slog.Info("No RoCE-capable leaves with servers found, skipping test")
+		slog.Info("No RoCE-capable leaves with non-MCLAG server connections found, skipping test")
 
-		return true, nil, fmt.Errorf("no RoCE leaves with servers found") //nolint:goerr113
+		return true, nil, fmt.Errorf("no RoCE leaves with non-MCLAG server connections found") //nolint:goerr113
 	}
 	slog.Debug("Using RoCE leaf switch for test", "switch", swName)
 
