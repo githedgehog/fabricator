@@ -10,60 +10,86 @@ represent.
 
 ## Problem Statement
 
-The current `test-connectivity` ([`testing.go:2066-2424`](https://github.com/githedgehog/fabricator/blob/033b3417fe1944f2522fbec4d7e1045e02be9f08/pkg/hhfab/testing.go#L2066-L2424)) determines expected
-reachability per server pair by querying VPCPeering, GatewayPeering, and
-ExternalPeering CRDs. It then runs ping/iPerf/curl to confirm. This model
-has several shortcomings that forced a bypass when gateway peerings were
-introduced and will break entirely when 5-tuple firewall lands:
+The current `test-connectivity` ([`testing.go:2066-2424`](https://github.com/githedgehog/fabricator/blob/033b3417fe1944f2522fbec4d7e1045e02be9f08/pkg/hhfab/testing.go#L2066-L2424))
+determines expected reachability per server pair by querying VPCPeering,
+GatewayPeering, and ExternalPeering CRDs and runs ping/iPerf/curl to
+confirm. The model works correctly on the slice of the fabric it was
+scoped for; the items below are **fabric features that have not yet been
+wired into the test**, not regressions. Several are features added on
+top after `test-connectivity` was built; each one either errors out
+loudly on master (no silent miss) or has no representation yet because
+the underlying CRD does not exist.
 
-1. **NAT-unaware.** Pings target the server's real IP (`ipB.Addr()`), not the
-   NATted address. Masquerade and static NAT paths are not validated, the
-   release tests in `rt_nat_tests.go` handle this, but `test-connectivity`
-   cannot.
+### What is correctly covered today
 
-2. **No directional asymmetry.** Masquerade NAT is one-directional (initiator
-   only), but `test-connectivity` tests A→B and B→A symmetrically, both
-   directions get the same `IsServerReachable` result since the peering CRD is
-   bidirectional. This affects gateway peerings without NAT (i.e., without
-   `expose.As`); NAT peerings error out at Problem 5 before reaching the ping
-   stage. [`rt_nat_tests.go:293-303`](https://github.com/githedgehog/fabricator/blob/033b3417fe1944f2522fbec4d7e1045e02be9f08/pkg/hhfab/rt_nat_tests.go#L293-L303) works around this in release tests, but
-   `test-connectivity` has no concept of one-way reachability.
+- Same-VPC reachability, including subnet isolation and restriction.
+- Cross-VPC reachability via `VPCPeering` (switch peering), with permit
+  lists and optional per-subnet filters.
+- Gateway peerings **without NAT**: symmetric by API design, so the
+  symmetric verdict is correct for them.
+- Positive *and* negative ICMP/iPerf checks: `checkPing` is invoked for
+  every pair, including pairs expected to be unreachable, so isolation
+  leaks are caught at the ping layer.
+- Single-IP-per-server fabric attachments (one VPC, one subnet) and
+  single-attachment HostBGP servers, where the /32 VIP on `lo` happens
+  to be the only non-management address.
 
-3. **Negative checks are implicit.** "Unreachable" means "no peering found."
-   There is no positive verification that traffic is actually blocked. A
-   firewall DENY rule requires proof of drop, not just absence of ALLOW.
+### Fabric features not yet wired into `test-connectivity`
 
-4. **No protocol/port granularity.** The model is (serverA, serverB) → bool.
-   A 5-tuple firewall needs (serverA:port, serverB:port, protocol) → action.
+1. **Gateway peerings with NAT (`expose.As`).** `isVPCSubnetPresentInPeering`
+   returns an explicit "expose as %s is not supported yet" error
+   ([`testing.go:2722-2723`](https://github.com/githedgehog/fabricator/blob/033b3417fe1944f2522fbec4d7e1045e02be9f08/pkg/hhfab/testing.go#L2722-L2723)). Since `expose.As` is required for all NAT
+   modes, any NAT gateway peering aborts the entire run. Release tests in
+   `rt_nat_tests.go` cover NAT today via a parallel path
+   ([`rt_nat_tests.go:293-303`](https://github.com/githedgehog/fabricator/blob/033b3417fe1944f2522fbec4d7e1045e02be9f08/pkg/hhfab/rt_nat_tests.go#L293-L303)). Once `test-connectivity` handles NAT,
+   two derived gaps surface that are masked today:
+   - **NAT target address.** Pings would need to target the NAT pool
+     address, not `ipB.Addr()`.
+   - **Directional asymmetry.** Masquerade is initiator-only; port-forward
+     is reverse-only. The current symmetric `IsServerReachable` boolean
+     has no way to encode direction.
 
-5. **`expose.As` unsupported.** Peerings that remap subnets to different CIDRs
-   error out ([`testing.go:2722-2723`](https://github.com/githedgehog/fabricator/blob/033b3417fe1944f2522fbec4d7e1045e02be9f08/pkg/hhfab/testing.go#L2722-L2723)). Since `expose.As` is required
-   for all NAT modes, any NAT gateway peering fails the entire test with an
-   error rather than a wrong result, a separate failure mode from Problems 1
-   and 2, which only manifest for gateway peerings without NAT.
-
-6. **Single IP per server.** The IP discovery stores one address per server
+2. **Multi-VPC attachment (VLAN trunking) and HostBGP-with-extras.**
+   IP discovery stores one address per server
    ([`ips.Store(server, addr)`](https://github.com/githedgehog/fabricator/blob/033b3417fe1944f2522fbec4d7e1045e02be9f08/pkg/hhfab/testing.go#L2220)) and errors if a second exists
-   ([`"unexpected multiple ip addrs"`](https://github.com/githedgehog/fabricator/blob/033b3417fe1944f2522fbec4d7e1045e02be9f08/pkg/hhfab/testing.go#L2211), [`testing.go:2209-2220`](https://github.com/githedgehog/fabricator/blob/033b3417fe1944f2522fbec4d7e1045e02be9f08/pkg/hhfab/testing.go#L2209-L2220)). This blocks two
-   common topologies:
-   - **Multi-VPC attachment (VLAN trunking):** a server on `vpc-1` and
-     `vpc-2` has two IPs on two VLAN interfaces; the code errors on the
-     second one. Even if both were stored, the ping path has no way to
-     select the correct per-subnet IP.
-   - **HostBGP subnets:** the reachable address is a /32 VIP on the
-     loopback, not a subnet-assigned interface address. IP discovery does
-     not know to query `hhnet getvips`. For a simple single-attachment
-     HostBGP server (unnumbered BGP, no IPs on fabric interfaces), the
-     /32 VIP on `lo` passes the current filter and is picked up as the
-     sole data-plane IP, which accidentally works for ping. The code
-     breaks as soon as the server has any other non-management address
-     (second subnet attachment, multihoming), erroring with
-     `"unexpected multiple ip addrs"`, and it never treats the address
-     as a HostBGP VIP regardless.
+   ([`"unexpected multiple ip addrs"`](https://github.com/githedgehog/fabricator/blob/033b3417fe1944f2522fbec4d7e1045e02be9f08/pkg/hhfab/testing.go#L2211), [`testing.go:2209-2220`](https://github.com/githedgehog/fabricator/blob/033b3417fe1944f2522fbec4d7e1045e02be9f08/pkg/hhfab/testing.go#L2209-L2220)). This blocks
+   two topologies the fabric supports:
+   - **VLAN trunking**: a server on `vpc-1` + `vpc-2` has two IPs on
+     two VLAN sub-interfaces. The second address trips the error. Even
+     if both were stored, the ping path has no way to select the right
+     per-subnet IP.
+   - **HostBGP servers with additional addresses or multihoming.** The
+     reachable address is a /32 VIP on `lo`. A simple single-attachment
+     HostBGP server (unnumbered BGP, no IPs on fabric interfaces)
+     accidentally works because the VIP on `lo` is the only
+     non-management address and passes the filter as the data-plane IP.
+     Any additional non-management address (second subnet, multihoming)
+     trips the same error, and the discovery never treats the VIP as a
+     HostBGP VIP regardless.
 
-7. **Self-described as temporary.** The gateway peering function is annotated:
-   "It's just a temporary function for simple check only supporting whole VPC
-   subnet CIDRs" ([`testing.go:2643`](https://github.com/githedgehog/fabricator/blob/033b3417fe1944f2522fbec4d7e1045e02be9f08/pkg/hhfab/testing.go#L2643)).
+3. **5-tuple firewall policy.** The model is `(serverA, serverB) → bool`.
+   A future `FirewallPolicy` CRD with per-port DROP rules needs
+   `(serverA:port, serverB:port, protocol) → action`, plus an explicit
+   `DENY` expectation distinguishable from "no peering exists" so a
+   firewall test can verify *which* rule dropped the traffic. Today both
+   collapse into one "unreachable" verdict; the negative ping confirms
+   the dataplane matches the expectation, but the expectation carries
+   no reason. No `FirewallPolicy` CRD exists yet; this is forward-looking.
+
+4. **Gateway-peering helper self-described as temporary.** Annotated:
+   "It's just a temporary function for simple check only supporting whole
+   VPC subnet CIDRs" ([`testing.go:2643`](https://github.com/githedgehog/fabricator/blob/033b3417fe1944f2522fbec4d7e1045e02be9f08/pkg/hhfab/testing.go#L2643)). Fixing items 1 and 2 effectively
+   replaces this helper; it folds into the rest of the work rather than
+   standing as an independent gap.
+
+None of the items above produces a silently wrong result on master.
+Items 1 and 2 fail loudly at the entry point; the derived gaps under
+item 1 (target address, direction) are masked by the item-1 error until
+that is addressed; items 3 and 4 are forward-looking or derived. The
+matrix design below is one way to address them coherently and prepare
+for item 3; an incremental approach (point fixes for items 1 and 2,
+defer item 3 until the CRD lands) is also viable and is a fair
+tradeoff to weigh when reviewing this document.
 
 ## Current Architecture
 
@@ -284,8 +310,8 @@ It does not appear in any VPC, VPCAttachment, or VPCInfo CRD. The only
 authoritative sources are:
 
 1. The server's loopback (`ip addr show lo | grep /32`), requires SSH.
-2. The leaf's BGP table for the VPC VRF (`show ip route vrf VrfV<vpc-name>`)
-  , any connected leaf will have it once BGP converges.
+2. The leaf's BGP table for the VPC VRF (`show ip route vrf VrfV<vpc-name>`),
+   any connected leaf will have it once BGP converges.
 
 The endpoint discovery phase **must use runtime SSH** to the server and
 query `/opt/bin/hhnet getvips` (which returns /32 prefixes from the
@@ -310,9 +336,9 @@ subnet-assigned address, they only have a /32 VIP. The provider must:
 - Mark all endpoints on that subnet as `HostBGP: true`.
 - **Not** attempt to derive the IP from the VPCInfo subnet CIDR or DHCP.
 - Defer IP resolution to the runtime endpoint discovery phase.
-- Still generate the same ALLOW/DENY expectations as for regular subnets
-  (the reachability rules (peering, isolation, restriction) are
-  unchanged; only the target address differs).
+- Still generate the same ALLOW/DENY expectations as for regular subnets.
+  The reachability rules (peering, isolation, restriction) are unchanged;
+  only the target address differs.
 
 ### Multihoming and test scope
 
@@ -981,7 +1007,7 @@ test duration manageable:
 
 ## Integration Points
 
-### Shared Reachability Logic, Current State
+### Shared Reachability Logic: Current State
 
 The reachability logic is layered across two repos:
 
@@ -1099,12 +1125,12 @@ Phase order is **1 → 2 → 4 → 3**. Phase 1 lands the structural change; Pha
 Phase 4 is a small triage-DX improvement (matrix diff on failure, ~150 LOC);
 Phase 3 is last because it is blocked on a firewall CRD that does not exist
 on master yet. The original document had Phases 3 and 4 swapped and bundled
-JUnit XML / NxN visualization into Phase 4, this revision reflects what
+JUnit XML / NxN visualization into Phase 4. This revision reflects what
 was learned while landing Phase 1, including the fact that release-test
 JUnit already covers the higher-level signal and NxN visualization doesn't
 scale to release-test sizes.
 
-### Phase 1: Foundation + Gateway Peering Fix, LANDED
+### Phase 1: Foundation + Gateway Peering Fix
 
 **Goal:** Fix the gateway peering bypass. Make `test-connectivity` correctly
 handle NAT-aware peerings with directional asymmetry.
