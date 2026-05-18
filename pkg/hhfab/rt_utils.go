@@ -523,6 +523,26 @@ func setRoCE(ctx context.Context, kube kclient.Client, swName string, roce bool)
 	return nil
 }
 
+// connHasSingleHomedServer returns true if conn is a server-bearing connection
+// that is single-homed to the named switch (Unbundled or Bundled). MCLAG and
+// ESLAG connections err-disable their LAG members for minutes after a
+// rebooting peer comes back, which deadlines flake tests that need traffic to
+// transit a freshly-rebooted switch; pick a non-MCLAG candidate instead.
+func connHasSingleHomedServer(swName string, conn wiringapi.Connection) bool {
+	switch {
+	case conn.Spec.Unbundled != nil:
+		return conn.Spec.Unbundled.Link.Switch.DeviceName() == swName
+	case conn.Spec.Bundled != nil:
+		for _, link := range conn.Spec.Bundled.Links {
+			if link.Switch.DeviceName() == swName {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
 // single-switch, dumbed down (no update as we don't need it here) version of WaitSwitchesReady
 func waitSwitchReady(ctx context.Context, kube kclient.Client, swName string, appliedFor time.Duration, timeout time.Duration) error {
 	if timeout > 0 {
