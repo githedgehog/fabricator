@@ -72,6 +72,45 @@ run_sonic_cmd() {
     run_sonic_cmd "show mclag brief"
     run_sonic_cmd "show mclag interface"
     run_sonic_cmd "show port-channel summary"
+
+    # teamd per-LAG state captures LACP partner info and member oper status,
+    # which "show port-channel summary" hides when a LAG is err-disabled.
+    # Enumerate via /sys/class/net rather than parsing sonic-cli output, which
+    # is empty on some SONiC builds.
+    echo -e "\n=== Teamd LAG State ==="
+    for pc in $(ls /sys/class/net/ 2>/dev/null | grep '^PortChannel' | sort); do
+        echo -e "\n--- teamdctl $pc state ---"
+        teamdctl "$pc" state 2>&1
+    done
+} >> "$OUTPUT_FILE" 2>&1
+
+# ---------------------------
+# QoS / Queue Counters
+# ---------------------------
+# Direct view of the per-queue transmit/receive counters and PFC state that
+# RoCE / DSCP-marking tests assert on. The agent serialises a filtered subset
+# into kube state, so the raw view is needed when those tests fail.
+{
+    echo -e "\n=== QoS and Queue Counters ==="
+    run_sonic_cmd "show queue counters"
+    run_sonic_cmd "show priority-flow-control statistics"
+    run_sonic_cmd "show qos map dscp-tc"
+    run_sonic_cmd "show qos map tc-queue"
+    run_sonic_cmd "show qos map tc-pg"
+    run_sonic_cmd "show qos scheduler-policy"
+    run_sonic_cmd "show qos wred-policy"
+} >> "$OUTPUT_FILE" 2>&1
+
+# ---------------------------
+# err-disable / link-flap timeline
+# ---------------------------
+# show interface status err-disabled only gives the latest event per port; this
+# filtered syslog view gives the full sequence (with timestamps) so post-mortems
+# can reconstruct flap/recovery against the test timeline. Scan only the current
+# syslog so log rotation can't bury the most recent events under older ones.
+{
+    echo -e "\n=== Error-Disable Timeline ==="
+    grep -hE "ERR_DISABLED|err-disable|err_disable|lag-status-down" /var/log/syslog 2>/dev/null | tail -200
 } >> "$OUTPUT_FILE" 2>&1
 
 # ---------------------------
