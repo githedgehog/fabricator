@@ -188,6 +188,7 @@ func (i *OSInstal) Run(ctx context.Context) error {
 	}
 
 	slog.Info("Expanding On-disk root parition", "dev", i.TargetDisk)
+
 	// have to delete existing partition
 	if err := i.execCmd(ctx, true, "sgdisk", "--delete=9", i.TargetDisk); err != nil {
 		return fmt.Errorf("deleting partition 9 from existing block device: %w", err)
@@ -197,11 +198,9 @@ func (i *OSInstal) Run(ctx context.Context) error {
 		return fmt.Errorf("partprobing: %w", err)
 	}
 
-	// 4857856 is the start sector start of the too small root parition
-	// not expected to change often, disk_layout is set by flatcar
 	// The typecode listed here is a UUID that flatcar uses - https://github.com/flatcar/init/blob/flatcar-master/scripts/extend-filesystems#L15
 	// Called COREOS_RESIZE, we are doing a small expand, then letting the installer exapand to the full disk size.
-	if err := i.execCmd(ctx, true, "sgdisk", "--new=9:4857856:+9G", "--typecode=9:3884dd41-8582-4404-b9a8-e9b84f2df50e", i.TargetDisk); err != nil {
+	if err := i.execCmd(ctx, true, "sgdisk", "--largest-new=9", "--typecode=9:3884dd41-8582-4404-b9a8-e9b84f2df50e", i.TargetDisk); err != nil {
 		return fmt.Errorf("creating partition 9 on existing block device: %w", err)
 	}
 
