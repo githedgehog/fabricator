@@ -394,11 +394,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 				if err := execCmd(ctx, false, vmDir,
 					VLABCmdQemuImg, []string{"resize", VLABOSImageFile, fmt.Sprintf("%dG", vm.Size.Disk)},
 					"vm", vm.Name); err != nil {
-					if err := execCmd(ctx, false, vmDir,
-						VLABCmdQemuImg, []string{"resize", "--shrink", VLABOSImageFile, fmt.Sprintf("%dG", vm.Size.Disk)},
-						"vm", vm.Name); err != nil {
-						return fmt.Errorf("resizing os image: %w", err)
-					}
+					return fmt.Errorf("resizing os image: %w", err)
 				}
 			}
 
