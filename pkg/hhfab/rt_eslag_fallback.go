@@ -22,7 +22,7 @@ const (
 	eslagPxeAttemptsPerLeg = 3
 )
 
-func eslagFallbackTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
+func eslagFallbackTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	if testCtx.setupOpts.VPCMode == vpcapi.VPCModeL3VNI {
 		return true, nil, fmt.Errorf("L3VNI mode is not compatible with ESLAG") //nolint:goerr113
 	}

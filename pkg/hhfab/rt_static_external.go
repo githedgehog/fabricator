@@ -22,7 +22,7 @@ var (
 // staticExternalPeeringTest tests static external connectivity using the External API
 // with spec.static (non-BGP mode). This test requires a static External with an ExternalAttachment
 // it creates the ExternalPeering dynamically to test VPC-to-External connectivity.
-func staticExternalPeeringTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
+func staticExternalPeeringTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	if testCtx.staticExtName == "" {
 		return true, nil, errNoStaticExternalWithAttachment
 	}
