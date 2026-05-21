@@ -130,7 +130,7 @@ func makeMultiVPCSingleSubnetSuite() *JUnitTestSuite {
 // It was presumably chosen because going from this to a full mesh configuration could trigger
 // the gNMI bug. Note that in order to reproduce it one should disable the forced cleanup between
 // tests.
-func vpcPeeringsStarterTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
+func vpcPeeringsStarterTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	// 1+2 1+3 3+5 2+4 4+6 5+6 6+7 7+8 8+9  5~default--5835:s=subnet-01 6~default--5835:s=subnet-01  1~default--5835:s=subnet-01  2~default--5835:s=subnet-01  9~default--5835:s=subnet-01  7~default--5835:s=subnet-01
 	vpcs := &vpcapi.VPCList{}
 	if err := testCtx.kube.List(ctx, vpcs); err != nil {
@@ -162,7 +162,10 @@ func vpcPeeringsStarterTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bo
 	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, nil, true); err != nil {
 		return false, nil, fmt.Errorf("setting up peerings: %w", err)
 	}
-	if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
+	if err := matrix.Repopulate(ctx, testCtx.kube); err != nil {
+		return false, nil, fmt.Errorf("refreshing matrix after peerings: %w", err)
+	}
+	if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts, matrix); err != nil {
 		return false, nil, err
 	}
 
@@ -171,7 +174,7 @@ func vpcPeeringsStarterTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bo
 
 // Test connectivity between all VPCs in a full mesh configuration, including all externals
 // Then, remove one external peering and test connectivity again.
-func vpcPeeringsFullMeshAllExternalsTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
+func vpcPeeringsFullMeshAllExternalsTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec, 15)
 	if err := populateFullMeshVpcPeerings(ctx, testCtx.kube, vpcPeerings); err != nil {
 		return false, nil, fmt.Errorf("populating full mesh VPC peerings: %w", err)
@@ -185,7 +188,10 @@ func vpcPeeringsFullMeshAllExternalsTest(ctx context.Context, testCtx *VPCPeerin
 	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, nil, true); err != nil {
 		return false, nil, fmt.Errorf("setting up peerings: %w", err)
 	}
-	if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
+	if err := matrix.Repopulate(ctx, testCtx.kube); err != nil {
+		return false, nil, fmt.Errorf("refreshing matrix after peerings: %w", err)
+	}
+	if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts, matrix); err != nil {
 		return false, nil, err
 	}
 
@@ -202,7 +208,10 @@ func vpcPeeringsFullMeshAllExternalsTest(ctx context.Context, testCtx *VPCPeerin
 		if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, nil, true); err != nil {
 			return false, nil, fmt.Errorf("setting up peerings: %w", err)
 		}
-		if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
+		if err := matrix.Repopulate(ctx, testCtx.kube); err != nil {
+			return false, nil, fmt.Errorf("refreshing matrix after peerings: %w", err)
+		}
+		if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts, matrix); err != nil {
 			return false, nil, err
 		}
 	}
@@ -211,7 +220,7 @@ func vpcPeeringsFullMeshAllExternalsTest(ctx context.Context, testCtx *VPCPeerin
 }
 
 // Test connectivity between all VPCs with no peering except of the external ones.
-func vpcPeeringsOnlyExternalsTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
+func vpcPeeringsOnlyExternalsTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec, 0)
 	externalPeerings := make(map[string]*vpcapi.ExternalPeeringSpec, 6)
 	if err := populateAllExternalVpcPeerings(ctx, testCtx.kube, externalPeerings); err != nil {
@@ -225,7 +234,10 @@ func vpcPeeringsOnlyExternalsTest(ctx context.Context, testCtx *VPCPeeringTestCt
 	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, nil, true); err != nil {
 		return false, nil, fmt.Errorf("setting up peerings: %w", err)
 	}
-	if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
+	if err := matrix.Repopulate(ctx, testCtx.kube); err != nil {
+		return false, nil, fmt.Errorf("refreshing matrix after peerings: %w", err)
+	}
+	if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts, matrix); err != nil {
 		return false, nil, err
 	}
 
@@ -233,7 +245,7 @@ func vpcPeeringsOnlyExternalsTest(ctx context.Context, testCtx *VPCPeeringTestCt
 }
 
 // Test connectivity between all VPCs in a full loop configuration, including all externals.
-func vpcPeeringsFullLoopAllExternalsTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
+func vpcPeeringsFullLoopAllExternalsTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec, 6)
 	if err := populateFullLoopVpcPeerings(ctx, testCtx.kube, vpcPeerings); err != nil {
 		return false, nil, fmt.Errorf("populating full loop VPC peerings: %w", err)
@@ -245,7 +257,10 @@ func vpcPeeringsFullLoopAllExternalsTest(ctx context.Context, testCtx *VPCPeerin
 	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, nil, true); err != nil {
 		return false, nil, fmt.Errorf("setting up peerings: %w", err)
 	}
-	if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
+	if err := matrix.Repopulate(ctx, testCtx.kube); err != nil {
+		return false, nil, fmt.Errorf("refreshing matrix after peerings: %w", err)
+	}
+	if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts, matrix); err != nil {
 		return false, nil, err
 	}
 
@@ -253,7 +268,7 @@ func vpcPeeringsFullLoopAllExternalsTest(ctx context.Context, testCtx *VPCPeerin
 }
 
 // Arbitrary configuration which again was shown to occasionally trigger the gNMI bug.
-func vpcPeeringsSergeisSpecialTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
+func vpcPeeringsSergeisSpecialTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	// 1+2 2+3 2+4 6+5 1~default--5835:s=subnet-01
 	vpcs := &vpcapi.VPCList{}
 	if err := testCtx.kube.List(ctx, vpcs); err != nil {
@@ -273,7 +288,10 @@ func vpcPeeringsSergeisSpecialTest(ctx context.Context, testCtx *VPCPeeringTestC
 	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, nil, true); err != nil {
 		return false, nil, fmt.Errorf("setting up peerings: %w", err)
 	}
-	if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
+	if err := matrix.Repopulate(ctx, testCtx.kube); err != nil {
+		return false, nil, fmt.Errorf("refreshing matrix after peerings: %w", err)
+	}
+	if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts, matrix); err != nil {
 		return false, nil, err
 	}
 
@@ -283,7 +301,7 @@ func vpcPeeringsSergeisSpecialTest(ctx context.Context, testCtx *VPCPeeringTestC
 // Test basic gateway peering connectivity between two VPCs.
 // Creates a gateway peering between the first two VPCs found, exposing all subnets
 // from each VPC, then tests connectivity to ensure traffic flows through the gateway.
-func gatewayPeeringTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
+func gatewayPeeringTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	vpcs := &vpcapi.VPCList{}
 	if err := testCtx.kube.List(ctx, vpcs); err != nil {
 		return false, nil, fmt.Errorf("listing VPCs: %w", err)
@@ -308,7 +326,11 @@ func gatewayPeeringTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, 
 		return false, nil, fmt.Errorf("setting up gateway peerings: %w", err)
 	}
 
-	if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
+	if err := matrix.Repopulate(ctx, testCtx.kube); err != nil {
+		return false, nil, fmt.Errorf("refreshing matrix after peerings: %w", err)
+	}
+
+	if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts, matrix); err != nil {
 		return false, nil, fmt.Errorf("testing gateway peering connectivity: %w", err)
 	}
 
@@ -317,7 +339,7 @@ func gatewayPeeringTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, 
 
 // Test gateway peering in a loop configuration where each VPC peers with the next one.
 // VPC1↔VPC2↔VPC3↔...↔VPCn↔VPC1. Test connectivity in a complete loop.
-func gatewayPeeringLoopTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
+func gatewayPeeringLoopTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	vpcs := &vpcapi.VPCList{}
 	if err := testCtx.kube.List(ctx, vpcs); err != nil {
 		return false, nil, fmt.Errorf("listing VPCs: %w", err)
@@ -348,6 +370,10 @@ func gatewayPeeringLoopTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bo
 
 	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, gwPeerings, true); err != nil {
 		return false, nil, fmt.Errorf("setting up gateway loop peerings: %w", err)
+	}
+
+	if err := matrix.Repopulate(ctx, testCtx.kube); err != nil {
+		return false, nil, fmt.Errorf("refreshing matrix after peerings: %w", err)
 	}
 
 	// Wait for EVPN Type-5 routes to be installed in leaf switch RIBs before
@@ -387,7 +413,7 @@ func gatewayPeeringLoopTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bo
 		}
 	}
 
-	if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
+	if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts, matrix); err != nil {
 		return false, nil, fmt.Errorf("testing gateway loop connectivity: %w", err)
 	}
 
@@ -396,7 +422,7 @@ func gatewayPeeringLoopTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bo
 
 // Test combining VPC peering and gateway peering in an alternating loop configuration.
 // Create alternating VPC and gateway peerings to form a complete loop through all VPCs.
-func gatewayMixedPeeringLoopTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
+func gatewayMixedPeeringLoopTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	vpcs := &vpcapi.VPCList{}
 	if err := testCtx.kube.List(ctx, vpcs); err != nil {
 		return false, nil, fmt.Errorf("listing VPCs: %w", err)
@@ -435,7 +461,11 @@ func gatewayMixedPeeringLoopTest(ctx context.Context, testCtx *VPCPeeringTestCtx
 		return false, nil, fmt.Errorf("setting up mixed peering loop: %w", err)
 	}
 
-	if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
+	if err := matrix.Repopulate(ctx, testCtx.kube); err != nil {
+		return false, nil, fmt.Errorf("refreshing matrix after peerings: %w", err)
+	}
+
+	if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts, matrix); err != nil {
 		return false, nil, fmt.Errorf("testing mixed peering loop connectivity: %w", err)
 	}
 
@@ -443,7 +473,7 @@ func gatewayMixedPeeringLoopTest(ctx context.Context, testCtx *VPCPeeringTestCtx
 }
 
 // Test combining external peering via fabric and via gateway.
-func mixedGatewayAndFabricExternals(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
+func mixedGatewayAndFabricExternals(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	vpcs := &vpcapi.VPCList{}
 	if err := testCtx.kube.List(ctx, vpcs); err != nil {
 		return false, nil, fmt.Errorf("listing VPCs: %w", err)
@@ -476,7 +506,10 @@ func mixedGatewayAndFabricExternals(ctx context.Context, testCtx *VPCPeeringTest
 	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, gwPeerings, true); err != nil {
 		return false, nil, fmt.Errorf("setting up mixed peering loop: %w", err)
 	}
-	if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
+	if err := matrix.Repopulate(ctx, testCtx.kube); err != nil {
+		return false, nil, fmt.Errorf("refreshing matrix after peerings: %w", err)
+	}
+	if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts, matrix); err != nil {
 		return false, nil, fmt.Errorf("testing mixed peering loop connectivity: %w", err)
 	}
 
@@ -489,7 +522,10 @@ func mixedGatewayAndFabricExternals(ctx context.Context, testCtx *VPCPeeringTest
 	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, gwPeerings, true); err != nil {
 		return false, nil, fmt.Errorf("setting up mixed peering loop: %w", err)
 	}
-	if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
+	if err := matrix.Repopulate(ctx, testCtx.kube); err != nil {
+		return false, nil, fmt.Errorf("refreshing matrix after peerings: %w", err)
+	}
+	if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts, matrix); err != nil {
 		return false, nil, fmt.Errorf("testing mixed peering loop connectivity: %w", err)
 	}
 
