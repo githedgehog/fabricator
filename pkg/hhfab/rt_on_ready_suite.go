@@ -69,7 +69,7 @@ type ortServerInfo struct {
 // At the end of the test, we clean up all VPCs and peerings to leave a clean slate.
 //
 //nolint:cyclop
-func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
+func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	slog.Info("Starting new on-ready test: discovering resources")
 
 	kube := testCtx.kube

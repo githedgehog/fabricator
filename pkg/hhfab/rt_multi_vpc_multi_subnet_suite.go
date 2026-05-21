@@ -74,7 +74,7 @@ func makeMultiVPCMultiSubnetSuite() *JUnitTestSuite {
 // 2. Override isolation with explicit permit list, test connectivity
 // 3. Set restricted flag in subnet-02 in vpc2, test connectivity
 // 4. Remove all restrictions and peerings
-func multiSubnetsIsolationTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
+func multiSubnetsIsolationTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	var returnErr error
 	var vpc1, vpc2 *vpcapi.VPC
 
@@ -210,7 +210,7 @@ func multiSubnetsIsolationTest(ctx context.Context, testCtx *VPCPeeringTestCtx) 
 // Assumes the scenario has at least 2 VPCs with at least 2 subnets each.
 // It creates peering between them, but restricts the peering to only
 // one subnet each. It then tests connectivity.
-func multiSubnetsSubnetFilteringTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
+func multiSubnetsSubnetFilteringTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	vpcList := &vpcapi.VPCList{}
 	if err := testCtx.kube.List(ctx, vpcList); err != nil {
 		return false, nil, fmt.Errorf("listing VPCs: %w", err)
@@ -261,7 +261,11 @@ func multiSubnetsSubnetFilteringTest(ctx context.Context, testCtx *VPCPeeringTes
 		return nil
 	})
 
-	if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
+	if err := matrix.Repopulate(ctx, testCtx.kube); err != nil {
+		return false, reverts, fmt.Errorf("refreshing matrix after peerings: %w", err)
+	}
+
+	if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts, matrix); err != nil {
 		return false, reverts, err
 	}
 
@@ -311,7 +315,7 @@ func (testCtx *VPCPeeringTestCtx) pingStaticExternal(ctx context.Context, source
  * 10a. repeat tests 7a and 7b from a switch that's not the one the static external is attached to (should succeed)
  * 11. cleanup everything and restore the original state
  */
-func staticExternalTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
+func staticExternalTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	// find an unbundled connection not attached to an MCLAG switch (see https://github.com/githedgehog/fabricator/issues/673#issuecomment-3028423762)
 	connList := &wiringapi.ConnectionList{}
 	if err := testCtx.kube.List(ctx, connList, kclient.MatchingLabels{wiringapi.LabelConnectionType: wiringapi.ConnectionTypeUnbundled}); err != nil {

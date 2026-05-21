@@ -1440,7 +1440,7 @@ Examples:
 								return err
 							}
 
-							if err := hhfab.DoVLABSetupVPCs(ctx, workDir, cacheDir, hhfab.SetupVPCsOpts{
+							if _, err := hhfab.DoVLABSetupVPCs(ctx, workDir, cacheDir, hhfab.SetupVPCsOpts{
 								WaitSwitchesReady: c.Bool("wait-switches-ready"),
 								ForceCleanup:      c.Bool("force-cleanup"),
 								VLANNamespace:     c.String("vlanns"),
