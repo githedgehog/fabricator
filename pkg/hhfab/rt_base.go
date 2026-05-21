@@ -75,11 +75,12 @@ type VPCPeeringTestCtx struct {
 // to be run after the test is done, regardless of whether it succeeded or failed.
 type RevertFunc func(context.Context) error
 
-// A test function is a function that runs a test. It takes a go context and a test context, and returns
-// a boolean indicating whether the test was skipped (e.g. due to missing resources),
-// a list of revert functions to be run after the test, and an error if the test failed.
+// A test function is a function that runs a test. It takes a go context, a test context,
+// and a connectivity matrix, and returns a boolean indicating whether the test was skipped
+// (e.g. due to missing resources), a list of revert functions to be run after the test,
+// and an error if the test failed.
 // note that the error contains the reason for the skip if the test was skipped.
-type TestFunc func(context.Context, *VPCPeeringTestCtx) (bool, []RevertFunc, error)
+type TestFunc func(context.Context, *VPCPeeringTestCtx, *ConnectivityMatrix) (bool, []RevertFunc, error)
 
 // Utilities and suite runners
 
@@ -414,28 +415,38 @@ func pauseOnFailure(ctx context.Context) error {
 }
 
 // prepare for a test: create the VPCs according to the options in the test context
-func (testCtx *VPCPeeringTestCtx) setupTest(ctx context.Context, initialSuiteSetup bool) error {
+func (testCtx *VPCPeeringTestCtx) setupTest(ctx context.Context, initialSuiteSetup bool) (*ConnectivityMatrix, error) {
 	if testCtx.noSetup {
 		// nothing to setup, but we still want to wait for the switches to be ready
 		if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
-			return fmt.Errorf("waiting for switches to be ready: %w", err)
+			return nil, fmt.Errorf("waiting for switches to be ready: %w", err)
 		}
 
-		return nil
+		return NewConnectivityMatrix(), nil
 	}
 	// if it is the first setup of the suite, we also want to remove the old VPCs (might have different parameters)
 	opts := testCtx.setupOpts
 	opts.ForceCleanup = initialSuiteSetup
 	// this will also remove all peerings
-	if err := DoVLABSetupVPCs(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, opts); err != nil {
-		return fmt.Errorf("setting up VPCs: %w", err)
+	endpoints, err := DoVLABSetupVPCs(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, opts)
+	if err != nil {
+		return nil, fmt.Errorf("setting up VPCs: %w", err)
 	}
 	// in case of L3 VPC mode, we need to give it time to switch to the longer lease time and switches to learn the routes
 	if opts.VPCMode == vpcapi.VPCModeL3VNI || opts.VPCMode == vpcapi.VPCModeL3Flat {
 		time.Sleep(10 * time.Second)
 	}
 
-	return nil
+	// Wrap discovered endpoints in a matrix with an initial reachability
+	// sweep. Tests that don't use the matrix simply ignore it;
+	// matrix-driven tests call matrix.Repopulate after applying their
+	// peerings to refresh verdicts.
+	matrix, err := BuildConnectivityMatrix(ctx, testCtx.kube, endpoints)
+	if err != nil {
+		return nil, fmt.Errorf("building initial connectivity matrix: %w", err)
+	}
+
+	return matrix, nil
 }
 
 func doRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSuite) (*JUnitTestSuite, error) {
@@ -444,7 +455,8 @@ func doRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 	slog.Info("** Running test suite", "suite", ts.Name, "tests", len(ts.TestCases), "start-time", suiteStart.Format(time.RFC3339))
 
 	// initial setup
-	if err := testCtx.setupTest(ctx, true); err != nil {
+	matrix, err := testCtx.setupTest(ctx, true)
+	if err != nil {
 		slog.Error("Initial test suite setup failed", "suite", ts.Name, "error", err.Error())
 
 		// Collect diagnostics for suite setup failure
@@ -468,7 +480,8 @@ func doRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 		}
 		slog.Info("* Running test", "test", test.Name)
 		if (ranSomeTests && testCtx.wipeBetweenTests) || prevRevertsFailed {
-			if err := testCtx.setupTest(ctx, false); err != nil {
+			matrix, err = testCtx.setupTest(ctx, false)
+			if err != nil {
 				ts.TestCases[i].Failure = &Failure{
 					Message: fmt.Sprintf("Failed to run setupTest between tests: %s", err.Error()),
 				}
@@ -492,7 +505,7 @@ func doRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 		}
 		prevRevertsFailed = false
 		testStart := time.Now()
-		skip, reverts, err := test.F(ctx, testCtx)
+		skip, reverts, err := test.F(ctx, testCtx, matrix)
 		ts.TestCases[i].Time = time.Since(testStart).Seconds()
 		ranSomeTests = true
 		// logic is getting complex, so let's make a recap:

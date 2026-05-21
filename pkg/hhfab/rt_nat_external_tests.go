@@ -9,119 +9,89 @@ import (
 	"log/slog"
 	"net/netip"
 	"sort"
-	"strings"
-	"time"
 
 	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
-	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
-	"go.githedgehog.com/fabric/pkg/util/apiutil"
-	"go.githedgehog.com/fabricator/pkg/util/sshutil"
-	"golang.org/x/sync/semaphore"
 )
 
-// gwNATPortForwardProbeTimeout is the maximum time to wait for the gateway's port-forward
-// NAT rule to become active in the dataplane after the peering is applied. Unlike fabric
-// route propagation (which waitForNATPoolInLeaves gates on), the gateway's DNAT rule
-// programming has its own latency that no Kubernetes condition signals.
-const gwNATPortForwardProbeTimeout = 2 * time.Minute
-
-// gwNATPortForwardProbeInterval is the polling interval between TCP-reachability probes.
-const gwNATPortForwardProbeInterval = 5 * time.Second
-
-// waitForPortForwardReachable retries a TCP connect probe from the given server until it
-// succeeds or gwNATPortForwardProbeTimeout elapses. Used to gate iperf3 port-forward tests
-// on the actual reachability of the NAT-pool target IP:port; once a TCP handshake completes,
-// iperf3 can run exactly once and any failure is a real test failure rather than a
-// programming-lag race.
-func (testCtx *VPCPeeringTestCtx) waitForPortForwardReachable(ctx context.Context, sshCfg *sshutil.Config, server, host string, port int) error {
-	// nc -z performs a TCP connect probe with no data; -w2 caps the connect attempt at 2s.
-	// Same primitive used in show-tech/control.sh, so we know it's available on flatcar.
-	cmd := fmt.Sprintf("nc -zw2 %s %d", host, port)
-	deadline := time.Now().Add(gwNATPortForwardProbeTimeout)
-	var lastErr error
-	for {
-		if _, _, err := retrySSHCmd(ctx, sshCfg, cmd, server); err == nil {
-			return nil
-		} else { //nolint:revive
-			lastErr = err
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("port-forward target %s:%d not reachable after %s: %w", host, port, gwNATPortForwardProbeTimeout, lastErr)
-		}
-		slog.Debug("Port-forward target not reachable yet, retrying", "server", server, "host", host, "port", port, "retryIn", gwNATPortForwardProbeInterval)
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(gwNATPortForwardProbeInterval):
-		}
+// overlayExternalSNAT marks every (server-in-vpcName → extName) Allow entry
+// in the matrix with the given SNAT pool.
+func overlayExternalSNAT(matrix *ConnectivityMatrix, vpcName, extName, sourcePoolCIDR string) error {
+	pool, err := netip.ParsePrefix(sourcePoolCIDR)
+	if err != nil {
+		return fmt.Errorf("parsing SNAT pool %s: %w", sourcePoolCIDR, err)
 	}
+
+	return OverlayMatrixNAT(matrix, ServerInVPC(vpcName), ExternalNamed(extName), func(_, _ *Endpoint, nat *TranslatedAddress) error {
+		nat.SourcePool = pool
+
+		return nil
+	})
 }
 
-// testNATExternalConnectivity tests outbound connectivity from a VPC through a NAT gateway peering
-// by curling 1.0.0.1 directly, bypassing the standard peering check that does not understand NAT
-// expose CIDRs. Callers are expected to gate this on waitForNATPoolInLeaves first when the test
-// depends on a freshly-applied NAT pool route reaching the fabric, so any failure here is a real
-// connectivity failure, not a route-propagation race.
-func (testCtx *VPCPeeringTestCtx) testNATExternalConnectivity(ctx context.Context, vpc *vpcapi.VPC, extName string) error {
-	servers := &wiringapi.ServerList{}
-	if err := testCtx.kube.List(ctx, servers); err != nil {
-		return fmt.Errorf("listing servers: %w", err)
+// pingExternalStability runs a 10-ping probe from every server in vpcName to
+// the external's BGP-neighbor IP (the actual remote device, not 1.0.0.1).
+func (testCtx *VPCPeeringTestCtx) pingExternalStability(ctx context.Context, matrix *ConnectivityMatrix, vpcName, extName string) error {
+	remoteIP, err := getExternalRemoteIP(ctx, testCtx.kube, extName)
+	if err != nil {
+		return fmt.Errorf("getting external remote IP for ping: %w", err)
+	}
+	if remoteIP == "" {
+		return nil
+	}
+	remoteAddr, err := netip.ParseAddr(remoteIP)
+	if err != nil {
+		return fmt.Errorf("parsing external remote IP %s: %w", remoteIP, err)
 	}
 
-	curlSem := semaphore.NewWeighted(1)
-
+	seen := map[string]bool{}
 	var tested int
-	for _, server := range servers.Items {
-		attachedSubnets, err := apiutil.GetAttachedSubnets(ctx, testCtx.kube, server.Name)
-		if err != nil {
+	for _, ep := range matrix.AllEndpoints {
+		if ep.Server == nil || ep.Server.VPC != vpcName {
 			continue
 		}
-
-		inVPC := false
-		for subnetName := range attachedSubnets {
-			if strings.HasPrefix(subnetName, vpc.Name+"/") {
-				inVPC = true
-
-				break
-			}
-		}
-		if !inVPC {
+		if seen[ep.Server.Name] {
 			continue
 		}
+		seen[ep.Server.Name] = true
 
-		sshCfg, err := testCtx.getSSH(ctx, server.Name)
+		sshCfg, err := testCtx.getSSH(ctx, ep.Server.Name)
 		if err != nil {
-			return fmt.Errorf("getting ssh config for %s: %w", server.Name, err)
+			return fmt.Errorf("getting ssh config for %s: %w", ep.Server.Name, err)
 		}
-
-		slog.Debug("Testing NAT external connectivity via curl", "server", server.Name)
-		if curlErr := checkCurl(ctx, testCtx.tcOpts, curlSem, server.Name, sshCfg, "1.0.0.1", true); curlErr != nil {
-			return fmt.Errorf("NAT external connectivity check: %w", curlErr)
+		slog.Debug("Testing NAT external connectivity stability via ping", "server", ep.Server.Name, "target", remoteIP)
+		if pingErr := checkPing(ctx, 10, nil, ep.Server.Name, remoteIP, sshCfg, remoteAddr, nil, true); pingErr != nil {
+			return fmt.Errorf("NAT external connectivity ping stability check: %w", pingErr)
 		}
-
-		if remoteIP, err := getExternalRemoteIP(ctx, testCtx.kube, extName); err != nil {
-			return fmt.Errorf("getting external remote IP for ping: %w", err)
-		} else if remoteIP != "" {
-			remoteAddr, err := netip.ParseAddr(remoteIP)
-			if err != nil {
-				return fmt.Errorf("parsing external remote IP %s: %w", remoteIP, err)
-			}
-			slog.Debug("Testing NAT external connectivity stability via ping", "server", server.Name, "target", remoteIP)
-			pingSem := semaphore.NewWeighted(1)
-			if pingErr := checkPing(ctx, 10, pingSem, server.Name, remoteIP, sshCfg, remoteAddr, nil, true); pingErr != nil {
-				return fmt.Errorf("NAT external connectivity ping stability check: %w", pingErr)
-			}
-		}
-
 		tested++
 	}
 
 	if tested == 0 {
-		return fmt.Errorf("no servers found in VPC %s for NAT external connectivity test", vpc.Name) //nolint:goerr113
+		return fmt.Errorf("no servers found in VPC %s for ping stability check", vpcName) //nolint:goerr113
 	}
 
 	return nil
+}
+
+// overlayExternalPortForward marks every (server-in-vpcName → extName) Allow
+// entry with a DNAT to destIP:destPort, telling the matrix-driven tester to
+// exercise iperf3 against that virtual endpoint. Without any SNAT companion,
+// the curl-to-external check correctly expects failure: the peering routes
+// only the port-forward target, not arbitrary outbound.
+func overlayExternalPortForward(matrix *ConnectivityMatrix, vpcName, extName string, destIP netip.Addr, destPort uint16) error {
+	if destPort == 0 {
+		return fmt.Errorf("destPort must be non-zero for port-forward overlay") //nolint:goerr113
+	}
+	if !destIP.IsValid() {
+		return fmt.Errorf("destIP must be valid for port-forward overlay") //nolint:goerr113
+	}
+
+	return OverlayMatrixNAT(matrix, ServerInVPC(vpcName), ExternalNamed(extName), func(_, _ *Endpoint, nat *TranslatedAddress) error {
+		nat.DestinationIP = destIP
+		nat.DestinationPort = destPort
+
+		return nil
+	})
 }
 
 // Test gateway external peering with no NAT (baseline)
@@ -137,7 +107,7 @@ func (testCtx *VPCPeeringTestCtx) testNATExternalConnectivity(ctx context.Contex
 //	    Expose:
 //	      Ips:
 //	        Cidr:  0.0.0.0/0
-func bgpExternalNoNatTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
+func bgpExternalNoNatTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	if testCtx.extName == "" {
 		return true, nil, fmt.Errorf("no BGP external available for testing") //nolint:goerr113
 	}
@@ -170,7 +140,11 @@ func bgpExternalNoNatTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool
 		return false, nil, fmt.Errorf("waiting for switches to be ready: %w", err)
 	}
 
-	if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
+	if err := matrix.Repopulate(ctx, testCtx.kube); err != nil {
+		return false, nil, fmt.Errorf("refreshing matrix after peerings: %w", err)
+	}
+
+	if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts, matrix); err != nil {
 		return false, nil, fmt.Errorf("testing BGP external connectivity: %w", err)
 	}
 
@@ -194,7 +168,7 @@ func bgpExternalNoNatTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool
 //	    Expose:
 //	      Ips:
 //	        Cidr:  0.0.0.0/0
-func bgpExternalStaticNATTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
+func bgpExternalStaticNATTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	if testCtx.extName == "" {
 		return true, nil, fmt.Errorf("no BGP external available for testing") //nolint:goerr113
 	}
@@ -240,12 +214,22 @@ func bgpExternalStaticNATTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (
 		return false, nil, fmt.Errorf("waiting for switches to be ready: %w", err)
 	}
 
+	if err := matrix.Repopulate(ctx, testCtx.kube); err != nil {
+		return false, nil, fmt.Errorf("refreshing matrix after peerings: %w", err)
+	}
+
 	if err := testCtx.waitForNATPoolInLeaves(ctx, vpc, bgpNATCIDR); err != nil {
 		return false, nil, fmt.Errorf("waiting for NAT pool route to propagate: %w", err)
 	}
 
-	if err := testCtx.testNATExternalConnectivity(ctx, vpc, testCtx.extName); err != nil {
+	if err := overlayExternalSNAT(matrix, vpc.Name, testCtx.extName, bgpNATCIDR); err != nil {
+		return false, nil, fmt.Errorf("annotating matrix with BGP static SNAT pool: %w", err)
+	}
+	if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts, matrix); err != nil {
 		return false, nil, fmt.Errorf("testing BGP external static NAT connectivity: %w", err)
+	}
+	if err := testCtx.pingExternalStability(ctx, matrix, vpc.Name, testCtx.extName); err != nil {
+		return false, nil, fmt.Errorf("BGP external static NAT ping stability: %w", err)
 	}
 
 	return false, nil, nil
@@ -269,7 +253,7 @@ func bgpExternalStaticNATTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (
 //	    Expose:
 //	      Ips:
 //	        Cidr:  0.0.0.0/0
-func bgpExternalMasqueradeNATTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
+func bgpExternalMasqueradeNATTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	if testCtx.extName == "" {
 		return true, nil, fmt.Errorf("no BGP external available for testing") //nolint:goerr113
 	}
@@ -315,12 +299,22 @@ func bgpExternalMasqueradeNATTest(ctx context.Context, testCtx *VPCPeeringTestCt
 		return false, nil, fmt.Errorf("waiting for switches to be ready: %w", err)
 	}
 
+	if err := matrix.Repopulate(ctx, testCtx.kube); err != nil {
+		return false, nil, fmt.Errorf("refreshing matrix after peerings: %w", err)
+	}
+
 	if err := testCtx.waitForNATPoolInLeaves(ctx, vpc, bgpNATCIDR); err != nil {
 		return false, nil, fmt.Errorf("waiting for NAT pool route to propagate: %w", err)
 	}
 
-	if err := testCtx.testNATExternalConnectivity(ctx, vpc, testCtx.extName); err != nil {
+	if err := overlayExternalSNAT(matrix, vpc.Name, testCtx.extName, bgpNATCIDR); err != nil {
+		return false, nil, fmt.Errorf("annotating matrix with BGP masquerade SNAT pool: %w", err)
+	}
+	if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts, matrix); err != nil {
 		return false, nil, fmt.Errorf("testing BGP external masquerade NAT connectivity: %w", err)
+	}
+	if err := testCtx.pingExternalStability(ctx, matrix, vpc.Name, testCtx.extName); err != nil {
+		return false, nil, fmt.Errorf("BGP external masquerade NAT ping stability: %w", err)
 	}
 
 	return false, nil, nil
@@ -352,7 +346,7 @@ func bgpExternalMasqueradeNATTest(ctx context.Context, testCtx *VPCPeeringTestCt
 //	          - Protocol: TCP
 //	            Port: 5201
 //	            As: 15201
-func bgpExternalPortForwardNATTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
+func bgpExternalPortForwardNATTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	if testCtx.extName == "" {
 		return true, nil, fmt.Errorf("no BGP external available for testing") //nolint:goerr113
 	}
@@ -418,11 +412,18 @@ func bgpExternalPortForwardNATTest(ctx context.Context, testCtx *VPCPeeringTestC
 		return false, nil, fmt.Errorf("waiting for switches to be ready: %w", err)
 	}
 
+	if err := matrix.Repopulate(ctx, testCtx.kube); err != nil {
+		return false, nil, fmt.Errorf("refreshing matrix after peerings: %w", err)
+	}
+
 	if err := testCtx.waitForNATPoolInLeaves(ctx, vpc, bgpNATCIDR); err != nil {
 		return false, nil, fmt.Errorf("waiting for NAT pool route to propagate: %w", err)
 	}
 
-	if err := testCtx.testIperfToExternal(ctx, vpc, bgpInvertedNATCIDR); err != nil {
+	if err := overlayExternalPortForward(matrix, vpc.Name, testCtx.extName, netip.AddrFrom4(b), 15201); err != nil {
+		return false, nil, fmt.Errorf("overlaying BGP external port-forward DNAT: %w", err)
+	}
+	if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts, matrix); err != nil {
 		return false, nil, fmt.Errorf("testing BGP external port-forward via iperf3: %w", err)
 	}
 
@@ -456,7 +457,7 @@ func bgpExternalPortForwardNATTest(ctx context.Context, testCtx *VPCPeeringTestC
 //	    Expose:
 //	      Ips:
 //	        Cidr:  0.0.0.0/0
-func bgpExternalMasqueradePortForwardNATTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
+func bgpExternalMasqueradePortForwardNATTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	if testCtx.extName == "" {
 		return true, nil, fmt.Errorf("no BGP external available for testing") //nolint:goerr113
 	}
@@ -506,12 +507,25 @@ func bgpExternalMasqueradePortForwardNATTest(ctx context.Context, testCtx *VPCPe
 		return false, nil, fmt.Errorf("waiting for switches to be ready: %w", err)
 	}
 
+	if err := matrix.Repopulate(ctx, testCtx.kube); err != nil {
+		return false, nil, fmt.Errorf("refreshing matrix after peerings: %w", err)
+	}
+
 	if err := testCtx.waitForNATPoolInLeaves(ctx, vpc, bgpNATCIDR); err != nil {
 		return false, nil, fmt.Errorf("waiting for NAT pool route to propagate: %w", err)
 	}
 
-	if err := testCtx.testNATExternalConnectivity(ctx, vpc, testCtx.extName); err != nil {
+	// Only the outbound (VPC→ext via masquerade) direction is exercised
+	// here. The inbound port-forward (ext→VPC on 15201→5201) requires SSH
+	// to the external device, which the matrix doesn't model.
+	if err := overlayExternalSNAT(matrix, vpc.Name, testCtx.extName, bgpNATCIDR); err != nil {
+		return false, nil, fmt.Errorf("annotating matrix with BGP masquerade SNAT pool: %w", err)
+	}
+	if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts, matrix); err != nil {
 		return false, nil, fmt.Errorf("testing BGP external masquerade+port-forward NAT connectivity: %w", err)
+	}
+	if err := testCtx.pingExternalStability(ctx, matrix, vpc.Name, testCtx.extName); err != nil {
+		return false, nil, fmt.Errorf("BGP external masquerade+port-forward NAT ping stability: %w", err)
 	}
 
 	return false, nil, nil
@@ -530,7 +544,7 @@ func bgpExternalMasqueradePortForwardNATTest(ctx context.Context, testCtx *VPCPe
 //	    Expose:
 //	      Ips:
 //	        Cidr:  0.0.0.0/0
-func staticExternalNoNATGatewayTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
+func staticExternalNoNATGatewayTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	if testCtx.staticExtName == "" {
 		return true, nil, fmt.Errorf("no static external available for testing") //nolint:goerr113
 	}
@@ -563,7 +577,11 @@ func staticExternalNoNATGatewayTest(ctx context.Context, testCtx *VPCPeeringTest
 		return false, nil, fmt.Errorf("waiting for switches to be ready: %w", err)
 	}
 
-	if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
+	if err := matrix.Repopulate(ctx, testCtx.kube); err != nil {
+		return false, nil, fmt.Errorf("refreshing matrix after peerings: %w", err)
+	}
+
+	if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts, matrix); err != nil {
 		return false, nil, fmt.Errorf("testing static external connectivity: %w", err)
 	}
 
@@ -587,7 +605,7 @@ func staticExternalNoNATGatewayTest(ctx context.Context, testCtx *VPCPeeringTest
 //	    Expose:
 //	      Ips:
 //	        Cidr:  0.0.0.0/0
-func staticExternalStaticNATGatewayTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
+func staticExternalStaticNATGatewayTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	if testCtx.staticExtName == "" {
 		return true, nil, fmt.Errorf("no static external available for testing") //nolint:goerr113
 	}
@@ -633,12 +651,22 @@ func staticExternalStaticNATGatewayTest(ctx context.Context, testCtx *VPCPeering
 		return false, nil, fmt.Errorf("waiting for switches to be ready: %w", err)
 	}
 
+	if err := matrix.Repopulate(ctx, testCtx.kube); err != nil {
+		return false, nil, fmt.Errorf("refreshing matrix after peerings: %w", err)
+	}
+
 	if err := testCtx.waitForNATPoolInLeaves(ctx, vpc, staticNATCIDR); err != nil {
 		return false, nil, fmt.Errorf("waiting for NAT pool route to propagate: %w", err)
 	}
 
-	if err := testCtx.testNATExternalConnectivity(ctx, vpc, testCtx.staticExtName); err != nil {
+	if err := overlayExternalSNAT(matrix, vpc.Name, testCtx.staticExtName, staticNATCIDR); err != nil {
+		return false, nil, fmt.Errorf("annotating matrix with static SNAT pool: %w", err)
+	}
+	if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts, matrix); err != nil {
 		return false, nil, fmt.Errorf("testing static external static NAT connectivity: %w", err)
+	}
+	if err := testCtx.pingExternalStability(ctx, matrix, vpc.Name, testCtx.staticExtName); err != nil {
+		return false, nil, fmt.Errorf("static external static NAT ping stability: %w", err)
 	}
 
 	return false, nil, nil
@@ -662,7 +690,7 @@ func staticExternalStaticNATGatewayTest(ctx context.Context, testCtx *VPCPeering
 //	    Expose:
 //	      Ips:
 //	        Cidr:  0.0.0.0/0
-func staticExternalMasqueradeNATGatewayTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
+func staticExternalMasqueradeNATGatewayTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	if testCtx.staticExtName == "" {
 		return true, nil, fmt.Errorf("no static external available for testing") //nolint:goerr113
 	}
@@ -708,77 +736,25 @@ func staticExternalMasqueradeNATGatewayTest(ctx context.Context, testCtx *VPCPee
 		return false, nil, fmt.Errorf("waiting for switches to be ready: %w", err)
 	}
 
+	if err := matrix.Repopulate(ctx, testCtx.kube); err != nil {
+		return false, nil, fmt.Errorf("refreshing matrix after peerings: %w", err)
+	}
+
 	if err := testCtx.waitForNATPoolInLeaves(ctx, vpc, staticNATCIDR); err != nil {
 		return false, nil, fmt.Errorf("waiting for NAT pool route to propagate: %w", err)
 	}
 
-	if err := testCtx.testNATExternalConnectivity(ctx, vpc, testCtx.staticExtName); err != nil {
+	if err := overlayExternalSNAT(matrix, vpc.Name, testCtx.staticExtName, staticNATCIDR); err != nil {
+		return false, nil, fmt.Errorf("annotating matrix with static masquerade SNAT pool: %w", err)
+	}
+	if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts, matrix); err != nil {
 		return false, nil, fmt.Errorf("testing static external masquerade NAT connectivity: %w", err)
+	}
+	if err := testCtx.pingExternalStability(ctx, matrix, vpc.Name, testCtx.staticExtName); err != nil {
+		return false, nil, fmt.Errorf("static external masquerade NAT ping stability: %w", err)
 	}
 
 	return false, nil, nil
-}
-
-// testIperfToExternal runs iperf3 from a VPC server to invertedNATCIDR:15201, testing
-// connectivity through the gateway's inverted port-forward NAT (external side has NAT).
-// One server in the VPC is sufficient. Callers are expected to gate this on
-// waitForNATPoolInLeaves first when the test depends on a freshly-applied NAT pool route, so any
-// failure here is a real connectivity failure rather than a route-propagation race.
-func (testCtx *VPCPeeringTestCtx) testIperfToExternal(ctx context.Context, vpc *vpcapi.VPC, invertedNATCIDR string) error {
-	servers := &wiringapi.ServerList{}
-	if err := testCtx.kube.List(ctx, servers); err != nil {
-		return fmt.Errorf("listing servers: %w", err)
-	}
-
-	extNATIP := strings.SplitN(invertedNATCIDR, "/", 2)[0]
-	secs := testCtx.tcOpts.IPerfsSeconds
-	if secs <= 0 {
-		secs = 5
-	}
-
-	for _, server := range servers.Items {
-		attachedSubnets, err := apiutil.GetAttachedSubnets(ctx, testCtx.kube, server.Name)
-		if err != nil {
-			continue
-		}
-
-		inVPC := false
-		for subnetName := range attachedSubnets {
-			if strings.HasPrefix(subnetName, vpc.Name+"/") {
-				inVPC = true
-
-				break
-			}
-		}
-		if !inVPC {
-			continue
-		}
-
-		sshCfg, err := testCtx.getSSH(ctx, server.Name)
-		if err != nil {
-			return fmt.Errorf("getting ssh config for %s: %w", server.Name, err)
-		}
-
-		// Gate iperf3 on TCP reachability: the gateway's port-forward DNAT rule has its own
-		// programming lag separate from fabric route propagation, and probing a TCP handshake
-		// is the precise signal that both halves of the path (fabric route + gateway DNAT) are
-		// active. After the probe succeeds, iperf3 runs once and any failure is a real test
-		// failure.
-		if err := testCtx.waitForPortForwardReachable(ctx, sshCfg, server.Name, extNATIP, 15201); err != nil {
-			return fmt.Errorf("waiting for port-forward target reachability: %w", err)
-		}
-
-		cmd := fmt.Sprintf("toolbox -E LD_PRELOAD=/lib/x86_64-linux-gnu/libgcc_s.so.1 -q timeout %d iperf3 -J -c %s -p 15201 -t %d",
-			secs+25, extNATIP, secs)
-		slog.Debug("Testing iperf3 through inverted port-forward NAT", "server", server.Name, "target", extNATIP+":15201")
-		if _, _, iperfErr := retrySSHCmd(ctx, sshCfg, cmd, server.Name); iperfErr != nil {
-			return fmt.Errorf("iperf3 from %s to %s:15201: %w", server.Name, extNATIP, iperfErr)
-		}
-
-		return nil
-	}
-
-	return fmt.Errorf("no servers found in VPC %s for iperf3 test", vpc.Name) //nolint:goerr113
 }
 
 // Test gateway static external peering with port-forward NAT (inverted: VPC→external).
@@ -805,7 +781,7 @@ func (testCtx *VPCPeeringTestCtx) testIperfToExternal(ctx context.Context, vpc *
 //	          - Protocol: TCP
 //	            Port: 5201
 //	            As: 15201
-func staticExternalPortForwardNATGatewayTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
+func staticExternalPortForwardNATGatewayTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	if testCtx.staticExtName == "" {
 		return true, nil, fmt.Errorf("no static external available for testing") //nolint:goerr113
 	}
@@ -871,11 +847,18 @@ func staticExternalPortForwardNATGatewayTest(ctx context.Context, testCtx *VPCPe
 		return false, nil, fmt.Errorf("waiting for switches to be ready: %w", err)
 	}
 
+	if err := matrix.Repopulate(ctx, testCtx.kube); err != nil {
+		return false, nil, fmt.Errorf("refreshing matrix after peerings: %w", err)
+	}
+
 	if err := testCtx.waitForNATPoolInLeaves(ctx, vpc, staticNATCIDR); err != nil {
 		return false, nil, fmt.Errorf("waiting for NAT pool route to propagate: %w", err)
 	}
 
-	if err := testCtx.testIperfToExternal(ctx, vpc, staticInvertedNATCIDR); err != nil {
+	if err := overlayExternalPortForward(matrix, vpc.Name, testCtx.staticExtName, netip.AddrFrom4(b), 15201); err != nil {
+		return false, nil, fmt.Errorf("overlaying static external port-forward DNAT: %w", err)
+	}
+	if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts, matrix); err != nil {
 		return false, nil, fmt.Errorf("testing static external port-forward via iperf3: %w", err)
 	}
 
@@ -909,7 +892,7 @@ func staticExternalPortForwardNATGatewayTest(ctx context.Context, testCtx *VPCPe
 //	    Expose:
 //	      Ips:
 //	        Cidr:  0.0.0.0/0
-func staticExternalMasqueradePortForwardNATGatewayTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
+func staticExternalMasqueradePortForwardNATGatewayTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	if testCtx.staticExtName == "" {
 		return true, nil, fmt.Errorf("no static external available for testing") //nolint:goerr113
 	}
@@ -959,12 +942,25 @@ func staticExternalMasqueradePortForwardNATGatewayTest(ctx context.Context, test
 		return false, nil, fmt.Errorf("waiting for switches to be ready: %w", err)
 	}
 
+	if err := matrix.Repopulate(ctx, testCtx.kube); err != nil {
+		return false, nil, fmt.Errorf("refreshing matrix after peerings: %w", err)
+	}
+
 	if err := testCtx.waitForNATPoolInLeaves(ctx, vpc, staticNATCIDR); err != nil {
 		return false, nil, fmt.Errorf("waiting for NAT pool route to propagate: %w", err)
 	}
 
-	if err := testCtx.testNATExternalConnectivity(ctx, vpc, testCtx.staticExtName); err != nil {
+	// Only the outbound (VPC→ext via masquerade) direction is exercised
+	// here. The inbound port-forward (ext→VPC on 15201→5201) requires SSH
+	// to the external device, which the matrix doesn't model.
+	if err := overlayExternalSNAT(matrix, vpc.Name, testCtx.staticExtName, staticNATCIDR); err != nil {
+		return false, nil, fmt.Errorf("annotating matrix with static masquerade SNAT pool: %w", err)
+	}
+	if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts, matrix); err != nil {
 		return false, nil, fmt.Errorf("testing static external masquerade+port-forward NAT connectivity: %w", err)
+	}
+	if err := testCtx.pingExternalStability(ctx, matrix, vpc.Name, testCtx.staticExtName); err != nil {
+		return false, nil, fmt.Errorf("static external masquerade+port-forward NAT ping stability: %w", err)
 	}
 
 	return false, nil, nil

@@ -78,7 +78,7 @@ func makeNoVpcsSuite() *JUnitTestSuite {
 // 2. change breakout to some non default mode
 // 3. wait for all switches to be ready for 1 minute
 // 4. check that all agents report the breakout to be completed and that the port is in the expected mode
-func breakoutTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
+func breakoutTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	// get all agents in the fabric
 	agents := &agentapi.AgentList{}
 	if err := testCtx.kube.List(ctx, agents); err != nil {
@@ -328,7 +328,7 @@ const (
 	AlloyCtrlComponent = "alloy-ctrl"
 )
 
-func lokiObservabilityTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
+func lokiObservabilityTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	lokiEndpoint, _, env, err := getObservabilityQueryURLs(ctx, testCtx.kube)
 	if err != nil {
 		return true, nil, fmt.Errorf("error getting observability endpoints: %w", err)
@@ -605,7 +605,7 @@ func lokiObservabilityTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (boo
 	return false, nil, nil
 }
 
-func prometheusObservabilityTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
+func prometheusObservabilityTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	_, prometheusEndpoint, env, err := getObservabilityQueryURLs(ctx, testCtx.kube)
 	if err != nil {
 		return true, nil, fmt.Errorf("error getting observability endpoints: %w", err)

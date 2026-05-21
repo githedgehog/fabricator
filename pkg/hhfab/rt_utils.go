@@ -233,7 +233,7 @@ func changeSwitchPortStatus(ctx context.Context, ssh *sshutil.Config, deviceName
 }
 
 // disable agent, shutdown port on switch, test connectivity, enable agent, set port up
-func shutDownLinkAndTest(ctx context.Context, testCtx *VPCPeeringTestCtx, link wiringapi.ServerToSwitchLink) (returnErr error) {
+func shutDownLinkAndTest(ctx context.Context, testCtx *VPCPeeringTestCtx, link wiringapi.ServerToSwitchLink, matrix *ConnectivityMatrix) (returnErr error) {
 	switchPort := link.Switch
 	deviceName := switchPort.DeviceName()
 	// get switch profile to find the port name in sonic-cli
@@ -302,7 +302,14 @@ func shutDownLinkAndTest(ctx context.Context, testCtx *VPCPeeringTestCtx, link w
 	slog.Debug("Waiting 5 seconds")
 	time.Sleep(5 * time.Second)
 
-	return DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts)
+	var connCheckErr error
+	if matrix == nil {
+		connCheckErr = DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts)
+	} else {
+		connCheckErr = DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts, matrix)
+	}
+
+	return connCheckErr
 }
 
 // getSwitchesForVPC returns the set of leaf switch names that have VPCAttachments for the given VPC.
