@@ -15,6 +15,10 @@ passwd:
         - wheel
       shell: /bin/bash
 
+kernel_arguments:
+  should_exist:
+    - net.ifname_policy=path
+
 systemd:
   units:
     - name: locksmithd.service
