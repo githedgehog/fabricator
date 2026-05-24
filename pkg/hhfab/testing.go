@@ -2237,11 +2237,6 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 	pings := semaphore.NewWeighted(opts.PingsParallel)
 	iperfs := semaphore.NewWeighted(opts.IPerfsParallel)
 	curls := semaphore.NewWeighted(opts.CurlsParallel)
-	toolboxMutexes := make(map[string]*sync.Mutex, len(serverIDs))
-	for server := range serverIDs {
-		toolboxMutexes[server] = &sync.Mutex{}
-	}
-
 	if len(opts.Sources) == 0 {
 		opts.Sources = make([]string, len(serverIDs))
 		// copy keys of serverIDs to opts.Sources
@@ -2344,16 +2339,6 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 							return fmt.Errorf("acquiring iperf3 semaphore: %s", err)
 						}
 						defer iperfs.Release(1)
-
-						// iperf3 runs in toolbox only on the source side (the destination
-						// is served by a long-lived systemd-managed iperf3 daemon, see
-						// vlab_server_butane.tmpl.yaml), so only the source's toolbox
-						// mutex needs to gate concurrent toolbox usage with other tests.
-						toolboxMutexes[serverA].Lock()
-						defer toolboxMutexes[serverA].Unlock()
-						if err := checkToolboxLock(ctx, serverA, clientA, 2*time.Minute); err != nil {
-							return fmt.Errorf("checkToolboxLock: %w", err)
-						}
 
 						for _, ie := range checkIPerf(ctx, opts, serverA, serverB, clientA, ipB.Addr(), expectedReachable, bidir) {
 							errChan <- ie
@@ -2885,31 +2870,6 @@ func checkPing(ctx context.Context, pingCount int, semaphore *semaphore.Weighted
 	return nil
 }
 
-func checkToolboxLock(ctx context.Context, server string, ssh *sshutil.Config, timeout time.Duration) error {
-	lockCmd := "[ ! -f /var/lib/toolbox/.#core-ghcr.io_githedgehog_toolbox-latest.lck ]"
-	if _, _, err := retrySSHCmd(ctx, ssh, lockCmd, server); err != nil {
-		slog.Warn("toolbox lock file exists on target server, waiting for cleanup", "server", server)
-		timeoutChan := time.After(timeout)
-		for {
-			select {
-			case <-timeoutChan:
-				return fmt.Errorf("timeout waiting for toolbox lock file to be removed on server %s", server) // nolint:goerr113
-			case <-ctx.Done():
-				return fmt.Errorf("context cancelled while waiting for toolbox lock file to be removed on server %s: %w", server, ctx.Err())
-			case <-time.After(5 * time.Second):
-				if _, _, err := retrySSHCmd(ctx, ssh, lockCmd, server); err == nil {
-					slog.Info("toolbox lock file removed, continuing with iperf3 test", "server", server)
-
-					return nil
-				}
-				slog.Debug("toolbox lock file still exists on target server, waiting for cleanup", "server", server)
-			}
-		}
-	}
-
-	return nil
-}
-
 // iperf3DaemonUnit is also planted by vlab_server_butane.tmpl.yaml on fresh
 // installs; ensureIperf3Daemon below covers upgrades from VMs without the
 // butane entry and can be removed once those releases are out of support.
@@ -3033,8 +2993,11 @@ func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to stri
 
 	slog.Debug("Running iperf3", "from", from, "to", to, "bidir", bidir)
 
-	// No server-side setup: every VLAB server VM runs a persistent iperf3 daemon on 5201.
-	cmd := fmt.Sprintf("toolbox -E LD_PRELOAD=/lib/x86_64-linux-gnu/libgcc_s.so.1 -q timeout %d iperf3 -P 4 -J -c %s -t %d", opts.IPerfsSeconds+25, toIP.String(), opts.IPerfsSeconds)
+	// Run the iperf3 client inside the always-on iperf3 container instead of spawning a per-test
+	// toolbox container on the client VM. The fresh container plus the JSON result buffer can
+	// push the 768 MB server VM into ENOMEM during result aggregation. `docker exec` reuses the
+	// running container's namespaces and adds only the iperf3 client process itself.
+	cmd := fmt.Sprintf("sudo docker exec iperf3 timeout %d iperf3 -P 4 -J -c %s -t %d", opts.IPerfsSeconds+25, toIP.String(), opts.IPerfsSeconds)
 	if bidir {
 		cmd += " --bidir"
 	}
