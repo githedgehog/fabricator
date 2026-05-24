@@ -473,6 +473,8 @@ type ServerAttachState struct {
 	Attached   bool
 	ESLAG      bool
 	L3VNI      bool
+	VPCName    string
+	VPCMode    vpcapi.VPCMode
 }
 
 func getServerAttachState(ctx context.Context, kube client.Client, server *wiringapi.Server, checkVPCMode bool) (ServerAttachState, error) {
@@ -508,13 +510,13 @@ func getServerAttachState(ctx context.Context, kube client.Client, server *wirin
 			return sa, fmt.Errorf("expected at most one VPC attachment for connection %q, got %d", conn.Name, numAttaches)
 		}
 		sa.Attached = true
+		sa.VPCName = attaches.Items[0].Spec.VPCName()
 		if checkVPCMode {
-			attach := attaches.Items[0]
-			vpcName := attach.Spec.VPCName()
 			vpc := &vpcapi.VPC{}
-			if err := kube.Get(ctx, client.ObjectKey{Name: vpcName, Namespace: metav1.NamespaceDefault}, vpc); err != nil {
-				return sa, fmt.Errorf("getting VPC %q: %w", vpcName, err)
+			if err := kube.Get(ctx, client.ObjectKey{Name: sa.VPCName, Namespace: metav1.NamespaceDefault}, vpc); err != nil {
+				return sa, fmt.Errorf("getting VPC %q: %w", sa.VPCName, err)
 			}
+			sa.VPCMode = vpc.Spec.Mode
 			if vpc.Spec.Mode != vpcapi.VPCModeL2VNI {
 				sa.L3VNI = true
 			}
@@ -2151,6 +2153,8 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 	}
 
 	serverIDs := map[string]uint64{}
+	serverVPCs := map[string]string{}
+	vpcModes := map[string]vpcapi.VPCMode{}
 	for _, server := range servers.Items {
 		// Skip servers not in the list of sources or destinations, if both are specified
 		if len(opts.Sources) > 0 && len(opts.Destinations) > 0 {
@@ -2158,16 +2162,19 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 				continue
 			}
 		}
-		if sa, err := getServerAttachState(ctx, kube, &server, true); err != nil {
+		sa, err := getServerAttachState(ctx, kube, &server, true)
+		if err != nil {
 			return fmt.Errorf("checking server %q attachment state: %w", server.Name, err)
-		} else if !sa.Attached {
+		}
+		if !sa.Attached {
 			if opts.RequireAllServers {
 				return fmt.Errorf("server %q is not attached, but RequireAllServers is set", server.Name)
 			}
 			slog.Debug("Skipping non-attached server", "server", server.Name)
 
 			continue
-		} else if sa.ESLAG && sa.L3VNI {
+		}
+		if sa.ESLAG && sa.L3VNI {
 			slog.Warn("Skipping server attached to an L3VNI VPC via ESLAG", "server", server.Name)
 
 			continue
@@ -2183,6 +2190,8 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 		}
 
 		serverIDs[server.Name] = serverID
+		serverVPCs[server.Name] = sa.VPCName
+		vpcModes[sa.VPCName] = sa.VPCMode
 	}
 
 	slices.SortFunc(servers.Items, func(a, b wiringapi.Server) int {
@@ -2256,6 +2265,10 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 
 	if err := g.Wait(); err != nil {
 		return fmt.Errorf("discovering server IPs: %w", err)
+	}
+
+	if err := waitForServerRoutesOnLeaves(ctx, c, vlab, kube, &ips, serverVPCs, vpcModes, 3*time.Minute); err != nil {
+		slog.Warn("Gate before connectivity probe did not see all server host routes; continuing anyway", "err", err)
 	}
 
 	slog.Info("Running pings, iperfs and curls", "servers", len(servers.Items))

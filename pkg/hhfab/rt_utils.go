@@ -9,9 +9,11 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"net/netip"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	agentapi "go.githedgehog.com/fabric/api/agent/v1beta1"
@@ -407,10 +409,6 @@ func (testCtx *VPCPeeringTestCtx) waitForNATPoolInLeaves(ctx context.Context, vp
 
 // wait until all switches in a set have a bunch of routes installed, or error out after 3 minutes
 func (testCtx *VPCPeeringTestCtx) waitForRoutesInSwitches(ctx context.Context, switches map[string]bool, routes []string, vrfName string) error {
-	const timeout = 3 * time.Minute
-	slog.Debug("Checking for routes in switches", "switches", switches, "routes", routes, "vrf", vrfName, "timeout", timeout)
-	toCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
 	sshs := make(map[string]*sshutil.Config, len(switches))
 	for sw := range switches {
 		ssh, err := testCtx.getSSH(ctx, sw)
@@ -418,6 +416,21 @@ func (testCtx *VPCPeeringTestCtx) waitForRoutesInSwitches(ctx context.Context, s
 			return fmt.Errorf("getting ssh config for switch %s: %w", sw, err)
 		}
 		sshs[sw] = ssh
+	}
+
+	return waitForRoutesInSwitchesAt(ctx, sshs, switches, routes, vrfName, 3*time.Minute)
+}
+
+// waitForRoutesInSwitchesAt polls every switch in `switches` until each `route` is installed in
+// `vrfName`. SSH configs are looked up in `sshs` by switch name. Times out after `timeout`.
+func waitForRoutesInSwitchesAt(ctx context.Context, sshs map[string]*sshutil.Config, switches map[string]bool, routes []string, vrfName string, timeout time.Duration) error {
+	slog.Debug("Checking for routes in switches", "switches", switches, "routes", routes, "vrf", vrfName, "timeout", timeout)
+	toCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	for sw := range switches {
+		if sshs[sw] == nil {
+			return fmt.Errorf("missing ssh config for switch %s", sw) //nolint:goerr113
+		}
 	}
 
 	for {
@@ -445,6 +458,57 @@ func (testCtx *VPCPeeringTestCtx) waitForRoutesInSwitches(ctx context.Context, s
 		case <-time.After(5 * time.Second):
 		}
 	}
+}
+
+// waitForServerRoutesOnLeaves waits for each discovered server's /32 host route to appear in the
+// FIB of every leaf attached to that server's VPC, in the VPC's VRF. Closes the race between IP
+// discovery (which SSHes the server and sees the freshly-leased address immediately) and EVPN
+// type-5 propagation across all participating leaves. `ips` is the sync.Map populated during the
+// discovery loop in TestConnectivity (server name -> netip.Prefix).
+func waitForServerRoutesOnLeaves(ctx context.Context, c *Config, vlab *VLAB, kube kclient.Client, ips *sync.Map, serverVPCs map[string]string, vpcModes map[string]vpcapi.VPCMode, timeout time.Duration) error {
+	routesByVPC := map[string][]string{}
+	ips.Range(func(k, v any) bool {
+		server, _ := k.(string)
+		addr, _ := v.(netip.Prefix)
+		vpcName := serverVPCs[server]
+		if vpcName == "" {
+			return true
+		}
+		route := netip.PrefixFrom(addr.Addr(), addr.Addr().BitLen()).String()
+		routesByVPC[vpcName] = append(routesByVPC[vpcName], route)
+
+		return true
+	})
+
+	for vpcName, routes := range routesByVPC {
+		leaves, err := getSwitchesForVPC(ctx, kube, vpcName)
+		if err != nil {
+			return fmt.Errorf("getting switches for vpc %s: %w", vpcName, err)
+		}
+		if len(leaves) == 0 {
+			continue
+		}
+		// Resolve SSH for each leaf via c.SSH so both VLAB VM-backed switches and HLAB hardware
+		// switches are covered; the per-server sshConfigs map only has servers.
+		sshs := make(map[string]*sshutil.Config, len(leaves))
+		for sw := range leaves {
+			ssh, err := c.SSH(ctx, vlab, sw)
+			if err != nil {
+				return fmt.Errorf("getting ssh config for switch %s: %w", sw, err)
+			}
+			sshs[sw] = ssh
+		}
+		vrfName := "VrfV" + vpcName
+		if vpcModes[vpcName] == vpcapi.VPCModeL3Flat {
+			vrfName = defaultVRFName
+		}
+		slog.Info("Waiting for server host routes on leaves", "vpc", vpcName, "leaves", leaves, "routes", routes, "vrf", vrfName)
+		if err := waitForRoutesInSwitchesAt(ctx, sshs, leaves, routes, vrfName, timeout); err != nil {
+			return fmt.Errorf("waiting for host routes on vpc %s: %w", vpcName, err)
+		}
+	}
+
+	return nil
 }
 
 // check that the DHCP lease is within the expected range.
