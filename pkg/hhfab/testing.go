@@ -333,43 +333,6 @@ type SetupVPCsOpts struct {
 	P2P               bool
 }
 
-// discoverServerIP returns the single VPC-interface IPv4 address for the
-// given server, discovered via SSH `ip -o -4 addr show`. The loopback
-// 127.0.0.1/8 entry is skipped (but other lo addresses — e.g. hostBGP /32
-// VIPs — are kept), as are the management interface (enp2s0) and the
-// docker bridge (docker0). Returns an error if zero or multiple eligible
-// addresses are present: NAT/matrix tests assume one VPC IP per server.
-func discoverServerIP(ctx context.Context, sshCfg *sshutil.Config, server string) (netip.Addr, error) {
-	stdout, stderr, err := sshCfg.Run(ctx, "ip -o -4 addr show | awk '{print $2, $4}'")
-	if err != nil {
-		return netip.Addr{}, fmt.Errorf("running ip addr show on %s: %w: %s", server, err, stderr)
-	}
-
-	var found netip.Addr
-	for line := range strings.SplitSeq(strings.TrimSpace(stdout), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) != 2 {
-			continue
-		}
-		if (fields[0] == "lo" && fields[1] == "127.0.0.1/8") || fields[0] == "enp2s0" || fields[0] == "docker0" {
-			continue
-		}
-		prefix, err := netip.ParsePrefix(fields[1])
-		if err != nil {
-			return netip.Addr{}, fmt.Errorf("parsing %q on %s: %w", fields[1], server, err)
-		}
-		if found.IsValid() {
-			return netip.Addr{}, fmt.Errorf("server %s has multiple eligible IPs (%s and %s)", server, found, prefix.Addr()) //nolint:goerr113
-		}
-		found = prefix.Addr()
-	}
-	if !found.IsValid() {
-		return netip.Addr{}, fmt.Errorf("no IP discovered for server %s", server) //nolint:goerr113
-	}
-
-	return found, nil
-}
-
 func CreateOrUpdateVpc(ctx context.Context, kube client.Client, vpc *vpcapi.VPC) (bool, error) {
 	var changed bool
 	some := &vpcapi.VPC{ObjectMeta: metav1.ObjectMeta{Name: vpc.Name, Namespace: vpc.Namespace}}
@@ -790,8 +753,6 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	expectedSubnets := map[string]netip.Prefix{}
 	eslagServers := make(map[string]bool, 0)
 	hostBGPServers := map[string]bool{}
-	endpointByServer := map[string]*Endpoint{}
-	endpoints := []*Endpoint{}
 	for _, server := range servers.Items {
 		if opts.VPCMode != vpcapi.VPCModeL2VNI {
 			if sa, err := getServerAttachState(ctx, kube, &server, false); err != nil {
@@ -920,17 +881,6 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		if hostBGP {
 			hostBGPServers[server.Name] = true
 		}
-
-		ep := &Endpoint{
-			Server: &ServerEndpoint{
-				Name:    server.Name,
-				VPC:     vpcName,
-				Subnet:  subnetName,
-				HostBGP: hostBGP,
-			},
-		}
-		endpointByServer[server.Name] = ep
-		endpoints = append(endpoints, ep)
 
 		attachName := fmt.Sprintf("%s--%s--%s", conn.Name, vpcName, subnetName)
 		attachNames[attachName] = true
@@ -1165,10 +1115,6 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 					return fmt.Errorf("unexpected acquired address %q, expected prefix length %d", prefix.String(), expectedBits)
 				}
 
-				if ep, ok := endpointByServer[server.Name]; ok {
-					ep.Server.IP = prefix.Addr()
-				}
-
 				slog.Info("Configured", "server", server.Name, "addr", prefix.String(), "conf", netconfs[server.Name])
 
 				if err := ensureIperf3Daemon(ctx, sshCfg, server.Name); err != nil {
@@ -1189,6 +1135,11 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	}
 
 	slog.Info("All servers configured and verified", "took", time.Since(start))
+
+	endpoints, err := CollectServerEndpoints(ctx, kube, SSHResolverFromMap(sshConfigs), nil)
+	if err != nil {
+		return nil, fmt.Errorf("collecting server endpoints: %w", err)
+	}
 
 	return endpoints, nil
 }
@@ -1907,9 +1858,14 @@ func buildExternalEndpoints(externals []vpcapi.External) []*Endpoint {
 // reports the pair as reachable. Reverse-direction expectations are emitted
 // independently. NAT translation details (SNAT/DNAT/port-forward/masquerade
 // pools) and external-originated traffic are NOT modeled — callers must
-// Add() explicit entries for those. Servers attached to multiple subnets
-// may also get inaccurate verdicts because IsServerReachable considers all
-// attachments collectively, not per (server, vpc, subnet) endpoint.
+// Add() explicit entries for those.
+//
+// TODO: IsServerReachable takes only (srcName, dstName) and so returns the
+// same verdict for every (src_ep, dst_ep) pair sharing those names. For a
+// server with multiple (vpc, subnet) attachments this is incorrect when
+// the attachments live in mutually-isolated VPCs. Fixing it needs a
+// reachability API that takes (server, vpc, subnet) on both sides;
+// tracked as a follow-up to the endpoint-collection refactor.
 func populateConnectivityMatrix(ctx context.Context, kube kclient.Reader, m *ConnectivityMatrix, gatewayEnabled bool) error {
 	// first reset all connectivity expectations
 	m.entries = make(map[EndpointPair]map[ProtoPort]ConnectivityExpectation)
@@ -2468,12 +2424,22 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 			}
 			sshs.Store(server, sshConfig)
 
-			addr, err := discoverServerIP(ctx, sshConfig, server)
+			found, err := discoverServerIPs(ctx, sshConfig, server)
 			if err != nil {
 				return fmt.Errorf("getting server %q IP: %w", server, err)
 			}
-			ips.Store(server, addr)
-			slog.Info("Found", "server", server, "addr", addr.String())
+			// Legacy TestConnectivity assumes one VPC IP per server; the
+			// matrix-driven path (TestConnectivityWithMatrix) is the one
+			// that handles multi-IP servers correctly.
+			switch len(found) {
+			case 0:
+				return fmt.Errorf("no IP discovered for server %q", server) //nolint:goerr113
+			case 1:
+				ips.Store(server, found[0].prefix.Addr())
+				slog.Info("Found", "server", server, "addr", found[0].prefix.String())
+			default:
+				return fmt.Errorf("server %q has multiple eligible IPs, use matrix-based connectivity test", server) //nolint:goerr113
+			}
 
 			return nil
 		})

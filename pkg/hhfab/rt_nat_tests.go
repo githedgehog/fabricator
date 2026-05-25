@@ -15,6 +15,7 @@ import (
 	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
+	"go.githedgehog.com/fabricator/pkg/util/sshutil"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -216,37 +217,25 @@ func overrideVPCToVPCVerdict(matrix *ConnectivityMatrix, srcVPCName, dstVPCName 
 	}
 }
 
-// rebindMatrixServerEndpoint updates the matrix endpoint for serverName to
-// reflect a new (VPC, Subnet) attachment and re-discovers its IP over SSH.
-// Used by the overlap NAT test where one server is moved to a freshly
-// created overlap VPC after the matrix's endpoints were captured at suite
-// setup; without rebinding, VPC-keyed overlays wouldn't match the moved
-// server.
-func (testCtx *VPCPeeringTestCtx) rebindMatrixServerEndpoint(ctx context.Context, matrix *ConnectivityMatrix, serverName, newVPC, newSubnet string) error {
-	var endpoint *Endpoint
-	for _, ep := range matrix.AllEndpoints {
-		if ep.Server != nil && ep.Server.Name == serverName {
-			endpoint = ep
-
-			break
-		}
+// rebindMatrixServerEndpoint refreshes the matrix's endpoint(s) for
+// serverName to reflect the current cluster state. Used after a runtime
+// attachment change (e.g., the overlap NAT test moves one server to a
+// freshly created overlap VPC) so VPC-keyed overlays match the moved
+// server. The (vpc, subnet) the server now belongs to is read from the
+// VPCAttachment CRDs by CollectServerEndpoints — no need for the caller
+// to restate it. Multi-IP servers produce multiple endpoints.
+func (testCtx *VPCPeeringTestCtx) rebindMatrixServerEndpoint(ctx context.Context, matrix *ConnectivityMatrix, serverName string) error {
+	ssh := func(name string) (*sshutil.Config, error) {
+		return testCtx.getSSH(ctx, name)
 	}
-	if endpoint == nil {
-		return fmt.Errorf("server %s not found in matrix", serverName) //nolint:goerr113
-	}
-
-	sshCfg, err := testCtx.getSSH(ctx, serverName)
+	newEPs, err := CollectServerEndpoints(ctx, testCtx.kube, ssh, []string{serverName})
 	if err != nil {
-		return fmt.Errorf("getting ssh config for %s: %w", serverName, err)
+		return fmt.Errorf("collecting endpoints for %s: %w", serverName, err)
 	}
-	ip, err := discoverServerIP(ctx, sshCfg, serverName)
-	if err != nil {
-		return fmt.Errorf("rediscovering IP after rebind: %w", err)
+	if len(newEPs) == 0 {
+		return fmt.Errorf("no endpoints discovered for server %s after rebind", serverName) //nolint:goerr113
 	}
-
-	endpoint.Server.VPC = newVPC
-	endpoint.Server.Subnet = newSubnet
-	endpoint.Server.IP = ip
+	matrix.ReplaceServerEndpoints(serverName, newEPs)
 
 	return nil
 }
@@ -625,22 +614,6 @@ func gatewayPeeringOverlapNATTest(ctx context.Context, testCtx *VPCPeeringTestCt
 	}
 	slog.Debug("Deleted original attachment", "attachment", targetAttachment.Name)
 
-	// Capture the moved server's pre-overlap matrix endpoint state so the
-	// revert below can restore it. Subsequent tests in the same suite reuse
-	// the matrix and would otherwise see vpc-overlap metadata stuck on a
-	// server that is, by then, back in donorVPC.
-	var origMatrixVPC, origMatrixSubnet string
-	var origMatrixIP netip.Addr
-	for _, ep := range matrix.AllEndpoints {
-		if ep.Server != nil && ep.Server.Name == targetServer {
-			origMatrixVPC = ep.Server.VPC
-			origMatrixSubnet = ep.Server.Subnet
-			origMatrixIP = ep.Server.IP
-
-			break
-		}
-	}
-
 	// Revert: restore original attachment and reconfigure server network
 	reverts = append(reverts, func(ctx context.Context) error {
 		slog.Debug("Reverting: restoring original attachment", "name", originalAttachmentName)
@@ -699,19 +672,8 @@ func gatewayPeeringOverlapNATTest(ctx context.Context, testCtx *VPCPeeringTestCt
 			return fmt.Errorf("reconfiguring server %s network: %w: %s", targetServer, err, stderr)
 		}
 
-		// Restore the matrix endpoint to its pre-overlap state so the next
-		// test in the suite sees the server back in donorVPC with its
-		// original IP. The actual server IP will be re-issued by DHCP on
-		// the original VLAN; the cached IP captured at suite setup is the
-		// authoritative source for matrix-driven tests.
-		for _, ep := range matrix.AllEndpoints {
-			if ep.Server != nil && ep.Server.Name == targetServer {
-				ep.Server.VPC = origMatrixVPC
-				ep.Server.Subnet = origMatrixSubnet
-				ep.Server.IP = origMatrixIP
-
-				break
-			}
+		if err := testCtx.rebindMatrixServerEndpoint(ctx, matrix, targetServer); err != nil {
+			return fmt.Errorf("rebinding server endpoint: %w", err)
 		}
 
 		return nil
@@ -805,7 +767,7 @@ func gatewayPeeringOverlapNATTest(ctx context.Context, testCtx *VPCPeeringTestCt
 
 	// Tell the matrix that the moved server now lives in the overlap VPC
 	// and pick up its DHCP-assigned IP from the new subnet.
-	if err := testCtx.rebindMatrixServerEndpoint(ctx, matrix, targetServer, overlapVPCName, overlapSubnet); err != nil {
+	if err := testCtx.rebindMatrixServerEndpoint(ctx, matrix, targetServer); err != nil {
 		return false, reverts, fmt.Errorf("rebinding moved server endpoint to overlap VPC: %w", err)
 	}
 
