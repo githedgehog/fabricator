@@ -262,6 +262,20 @@ func BuildConnectivityMatrix(ctx context.Context, kube kclient.Client, serverEnd
 	return matrix, nil
 }
 
+// BuildConnectivityMatrixFromCluster discovers server endpoints by
+// observing the live cluster (via CollectServerEndpoints) rather than
+// taking a pre-built slice, then assembles a matrix the same way as
+// BuildConnectivityMatrix. Used when a caller needs to build a matrix
+// against a pre-existing topology without re-running SetupVPCs.
+func BuildConnectivityMatrixFromCluster(ctx context.Context, kube kclient.Client, ssh SSHResolver) (*ConnectivityMatrix, error) {
+	endpoints, err := CollectServerEndpoints(ctx, kube, ssh, nil)
+	if err != nil {
+		return nil, fmt.Errorf("collecting server endpoints for matrix: %w", err)
+	}
+
+	return BuildConnectivityMatrix(ctx, kube, endpoints)
+}
+
 // Repopulate clears the matrix's expectation entries and refills Allow
 // entries by querying the live cluster for reachability between every
 // (src, dst) endpoint pair in AllEndpoints. The gatewayEnabled flag is
