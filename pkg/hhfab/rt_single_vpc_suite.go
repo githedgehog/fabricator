@@ -1511,7 +1511,42 @@ func dhcpStaticLeaseTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix
 				return fmt.Errorf("reverting VPC %s DHCP config: %w", serverInfo.VPCName, err)
 			}
 
-			return WaitReady(ctx, testCtx.kube, testCtx.wrOpts)
+			if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
+				return fmt.Errorf("waiting for ready after restoring DHCP config: %w", err)
+			}
+
+			// update the connectivity matrix for all servers attached to the modified subnet
+			subnetServers, err := findAllServersInSubnet(ctx, testCtx.kube, serverInfo.VPCName, serverInfo.SubnetName)
+			if err != nil {
+				return fmt.Errorf("listing servers in subnet %s of VPC %s: %w", serverInfo.SubnetName, serverInfo.VPCName, err)
+			}
+
+			for _, server := range subnetServers {
+				ssh, err := testCtx.getSSH(ctx, server.Name)
+				if err != nil {
+					return fmt.Errorf("getting ssh config for server %s: %w", server.Name, err)
+				}
+
+				_, stderr, err := ssh.Run(ctx, fmt.Sprintf("sudo networkctl reconfigure %s", server.Interface))
+				if err != nil {
+					if stderr != "" {
+						return fmt.Errorf("reconfiguring interface: %w (stderr: %s)", err, stderr)
+					}
+
+					return fmt.Errorf("reconfiguring interface: %w", err)
+				}
+				// Give DHCP a moment to hand out a fresh lease
+				time.Sleep(5 * time.Second)
+
+				// Refresh the matrix entry for this server. Without
+				// this, follow-up tests (MCLAG/ESLAG failover) probe the
+				// stale matrix IP and never reach the server.
+				if err := testCtx.rebindMatrixServerEndpoint(ctx, matrix, server.Name); err != nil {
+					return fmt.Errorf("refreshing matrix endpoint for %s after DHCP revert: %w", server.Name, err)
+				}
+			}
+
+			return nil
 		},
 	}
 
