@@ -3,6 +3,7 @@ package mpb
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"math"
 	"strings"
@@ -61,39 +62,43 @@ type renderFrame struct {
 	err          error
 }
 
-// ProxyReader wraps io.Reader with metrics required for progress
-// tracking. If `r` is 'unknown total/size' reader it's mandatory
-// to call `(*Bar).SetTotal(-1, true)` after the wrapper returns
-// `io.EOF`. If bar is already completed or aborted, returns nil.
-// Panics if `r` is nil.
-func (b *Bar) ProxyReader(r io.Reader) io.ReadCloser {
+// ProxyReader wraps io.Reader with metrics required for progress tracking.
+// Panics if `r` is nil. If `r` is io.ReadCloser then calling Close on `pr`
+// will close underlying `r`s io.ReadCloser. If underlying *Bar instance is
+// already completed or aborted then value of `pr` is nil. If underlying
+// *Bar instance was initialized with total <= 0 then it's necessary to call
+// `(*Bar).SetTotal(-1, true)` after copy operation completes. Most of the
+// time it means that there is need to call `(*Bar).SetTotal(-1, true)` after
+// io.Copy(dst, pr) returns.
+func (b *Bar) ProxyReader(r io.Reader) (pr io.ReadCloser) {
 	if r == nil {
-		panic("expected non nil io.Reader")
+		panic(errors.New("expected non nil io.Reader"))
 	}
-	result := make(chan io.ReadCloser, 1)
+	result := make(chan bool, 1)
 	select {
-	case b.operateState <- func(s *bState) {
-		result <- newProxyReader(r, b, len(s.ewmaDecorators) != 0)
-	}:
-		return <-result
+	case b.operateState <- func(s *bState) { result <- len(s.ewmaDecorators) != 0 }:
+		return newProxyReader(r, b, <-result)
 	case <-b.ctx.Done():
 		return nil
 	}
 }
 
 // ProxyWriter wraps io.Writer with metrics required for progress tracking.
-// If bar is already completed or aborted, returns nil.
-// Panics if `w` is nil.
-func (b *Bar) ProxyWriter(w io.Writer) io.WriteCloser {
+// Panics if `w` is nil. If `w` is io.WriteCloser then calling Close on `pw`
+// will close underlying `w`s io.WriteCloser. If underlying *Bar instance is
+// already completed or aborted then value of `pw` is nil. If underlying
+// *Bar instance was initialized with total <= 0 then it's necessary to call
+// `(*Bar).SetTotal(-1, true)` after copy operation completes. Most of the
+// time it means that there is need to call `(*Bar).SetTotal(-1, true)` after
+// io.Copy(pw, src) returns.
+func (b *Bar) ProxyWriter(w io.Writer) (pw io.WriteCloser) {
 	if w == nil {
-		panic("expected non nil io.Writer")
+		panic(errors.New("expected non nil io.Writer"))
 	}
-	result := make(chan io.WriteCloser, 1)
+	result := make(chan bool, 1)
 	select {
-	case b.operateState <- func(s *bState) {
-		result <- newProxyWriter(w, b, len(s.ewmaDecorators) != 0)
-	}:
-		return <-result
+	case b.operateState <- func(s *bState) { result <- len(s.ewmaDecorators) != 0 }:
+		return newProxyWriter(w, b, <-result)
 	case <-b.ctx.Done():
 		return nil
 	}
