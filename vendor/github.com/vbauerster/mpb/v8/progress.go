@@ -48,9 +48,9 @@ type pState struct {
 	hmQueueLen       int
 	reqWidth         int
 	refreshRate      time.Duration
-	delayRC          <-chan struct{}
-	manualRC         <-chan interface{}
-	shutdownNotifier chan interface{}
+	delayRC          <-chan any
+	manualRC         <-chan any
+	shutdownNotifier chan any
 	handOverBarHeap  chan<- []*Bar
 	queueBars        map[*Bar]*queueBar
 	output           io.Writer
@@ -93,7 +93,7 @@ func NewWithContext(ctx context.Context, options ...ContainerOption) *Progress {
 	}
 
 	if s.shutdownNotifier == nil {
-		s.shutdownNotifier = make(chan interface{})
+		s.shutdownNotifier = make(chan any)
 	}
 
 	s.hm = make(heapManager, s.hmQueueLen)
@@ -132,12 +132,12 @@ func NewWithContext(ctx context.Context, options ...ContainerOption) *Progress {
 
 // AddBar creates a bar with default bar filler.
 func (p *Progress) AddBar(total int64, options ...BarOption) *Bar {
-	return p.New(total, BarStyle(), options...)
+	return p.New(total, barStyleComposer, options...)
 }
 
 // AddSpinner creates a bar with default spinner filler.
 func (p *Progress) AddSpinner(total int64, options ...BarOption) *Bar {
-	return p.New(total, SpinnerStyle(), options...)
+	return p.New(total, spinnerStyleComposer, options...)
 }
 
 // New creates a bar by calling `Build` method on provided `BarFillerBuilder`.
@@ -317,7 +317,6 @@ func (p *Progress) serve(s *pState, cw *cwriter.Writer) {
 			if s.autoRefresh && s.rmOnComplete {
 				if err := s.render(cw); err != nil {
 					_, _ = fmt.Fprintln(s.debugOut, err.Error())
-					return
 				}
 			}
 			return
