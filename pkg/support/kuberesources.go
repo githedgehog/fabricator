@@ -44,7 +44,7 @@ const (
 	githubActionsValue = "true"
 )
 
-var schemeBuilders = []*scheme.Builder{
+var schemeBuilders = []*scheme.Builder{ //nolint:staticcheck
 	comp.CoreAPISchemeBuilder, comp.AppsAPISchemeBuilder, comp.RBACAPISchemeBuilder, comp.MetricsSchemeBuilder, comp.APIExtSchemeBuilder,
 	comp.HelmAPISchemeBuilder,
 	comp.CMApiSchemeBuilder, comp.CMMetaSchemeBuilder,
