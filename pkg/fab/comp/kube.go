@@ -106,35 +106,35 @@ const (
 )
 
 var (
-	CoreAPISchemeBuilder = &scheme.Builder{
+	CoreAPISchemeBuilder = &scheme.Builder{ //nolint:staticcheck
 		GroupVersion:  coreapi.SchemeGroupVersion,
 		SchemeBuilder: coreapi.SchemeBuilder,
 	}
-	AppsAPISchemeBuilder = &scheme.Builder{
+	AppsAPISchemeBuilder = &scheme.Builder{ //nolint:staticcheck
 		GroupVersion:  appsapi.SchemeGroupVersion,
 		SchemeBuilder: appsapi.SchemeBuilder,
 	}
-	RBACAPISchemeBuilder = &scheme.Builder{
+	RBACAPISchemeBuilder = &scheme.Builder{ //nolint:staticcheck
 		GroupVersion:  rbacapi.SchemeGroupVersion,
 		SchemeBuilder: rbacapi.SchemeBuilder,
 	}
-	MetricsSchemeBuilder = &scheme.Builder{
+	MetricsSchemeBuilder = &scheme.Builder{ //nolint:staticcheck
 		GroupVersion:  metricsapi.SchemeGroupVersion,
 		SchemeBuilder: metricsapi.SchemeBuilder,
 	}
-	APIExtSchemeBuilder = &scheme.Builder{
+	APIExtSchemeBuilder = &scheme.Builder{ //nolint:staticcheck
 		GroupVersion:  apiextapi.SchemeGroupVersion,
 		SchemeBuilder: apiextapi.SchemeBuilder,
 	}
-	HelmAPISchemeBuilder = &scheme.Builder{
+	HelmAPISchemeBuilder = &scheme.Builder{ //nolint:staticcheck
 		GroupVersion:  helmapi.SchemeGroupVersion,
 		SchemeBuilder: helmapi.SchemeBuilder,
 	}
-	CMApiSchemeBuilder = &scheme.Builder{
+	CMApiSchemeBuilder = &scheme.Builder{ //nolint:staticcheck
 		GroupVersion:  cmapi.SchemeGroupVersion,
 		SchemeBuilder: cmapi.SchemeBuilder,
 	}
-	CMMetaSchemeBuilder = &scheme.Builder{
+	CMMetaSchemeBuilder = &scheme.Builder{ //nolint:staticcheck
 		GroupVersion:  cmmeta.SchemeGroupVersion,
 		SchemeBuilder: cmmeta.SchemeBuilder,
 	}
