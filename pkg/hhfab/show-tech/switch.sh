@@ -34,6 +34,11 @@ run_sonic_cmd() {
     run_sonic_cmd "show interface description"
     run_sonic_cmd "show interface counters"
     run_sonic_cmd "show lldp table"
+    run_sonic_cmd "show lldp neighbor"
+    echo -e "\n=== lldpcli show neighbors detail (raw lldpd, TTL/time-remaining) ===" >> "$OUTPUT_FILE"
+    docker exec lldp lldpcli show neighbors detail >> "$OUTPUT_FILE" 2>&1
+    echo -e "\n=== lldpcli show statistics ===" >> "$OUTPUT_FILE"
+    docker exec lldp lldpcli show statistics >> "$OUTPUT_FILE" 2>&1
 } >> "$OUTPUT_FILE" 2>&1
 
 # ---------------------------
