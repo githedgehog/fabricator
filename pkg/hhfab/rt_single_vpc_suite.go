@@ -76,6 +76,14 @@ func makeSingleVPCSuite() *JUnitTestSuite {
 			},
 		},
 		{
+			Name: "ESLAG Fallback",
+			F:    eslagFallbackTest,
+			SkipFlags: SkipFlags{
+				VirtualSwitch: true,
+				NoServers:     true,
+			},
+		},
+		{
 			Name: "Bundled Failover",
 			F:    bundledFailoverTest,
 			SkipFlags: SkipFlags{
