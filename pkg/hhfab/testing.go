@@ -3396,6 +3396,11 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 				break
 			}
 		}
+
+		// Snapshot detailed switch/server LLDP state on every failed attempt
+		// so transient failures (issue #1776) don't lose evidence between the
+		// retry loop and the post-inspect show-tech bundle.
+		c.captureLLDPAtFailure(ctx, vlab, attempt+1, lldpOut)
 	}
 
 	if lldpErr != nil {
