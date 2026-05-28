@@ -72,7 +72,7 @@ func (c *Config) captureLLDPAtFailure(ctx context.Context, vlab *VLAB, attempt i
 
 // affectedLLDPTargets returns the switches and servers that have a missing
 // non-external expected neighbor. Output is sorted and deduplicated.
-func affectedLLDPTargets(out *inspect.LLDPOut) (switches, servers []string) {
+func affectedLLDPTargets(out *inspect.LLDPOut) ([]string, []string) {
 	swSet := map[string]struct{}{}
 	srvSet := map[string]struct{}{}
 
@@ -92,9 +92,11 @@ func affectedLLDPTargets(out *inspect.LLDPOut) (switches, servers []string) {
 		}
 	}
 
+	switches := make([]string, 0, len(swSet))
 	for name := range swSet {
 		switches = append(switches, name)
 	}
+	servers := make([]string, 0, len(srvSet))
 	for name := range srvSet {
 		servers = append(servers, name)
 	}
