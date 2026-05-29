@@ -228,6 +228,15 @@ func DoVLABInspect(ctx context.Context, workDir, cacheDir string, opts InspectOp
 	return c.Inspect(ctx, vlab, opts)
 }
 
+func DoVLABInspectPods(ctx context.Context, workDir, cacheDir string, opts InspectPodsOpts) error {
+	c, _, err := loadVLABForHelpers(ctx, workDir, cacheDir)
+	if err != nil {
+		return err
+	}
+
+	return c.InspectPods(ctx, opts)
+}
+
 func DoVLABReleaseTest(ctx context.Context, workDir, cacheDir string, opts ReleaseTestOpts) error {
 	c, vlab, err := loadVLABForHelpers(ctx, workDir, cacheDir)
 	if err != nil && !opts.ListTests {
