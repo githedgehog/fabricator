@@ -362,6 +362,7 @@ jobs:
             ${{ inputs.hybrid && '--controls-restricted=false' || '' }} \
             ${{ (inputs.upgradefrom == '' && inputs.hybrid) && '--ready switch-reinstall' || '' }} \
             --ready=inspect \
+            --ready=inspect-pods \
             "${HHFAB_TEST_ARGS[@]}" \
             --ready=exit \
             ${{ inputs.pause_on_failure && inputs.debug && '--pause-on-failure' || '' }} \

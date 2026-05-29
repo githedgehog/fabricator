@@ -110,6 +110,7 @@ type VLABRunOpts struct {
 	ReleaseTestRegexesInvert bool
 	ReleaseTestOnReadyOnly   bool
 	InterfaceMTU             uint16
+	InspectPodsStrict        bool
 }
 
 type OnReady string
@@ -122,6 +123,7 @@ const (
 	OnReadyTestConnectivity OnReady = "test-connectivity"
 	OnReadyWait             OnReady = "wait"
 	OnReadyInspect          OnReady = "inspect"
+	OnReadyInspectPods      OnReady = "inspect-pods"
 	OnReadyReleaseTest      OnReady = "release-test"
 )
 
@@ -133,6 +135,7 @@ var AllOnReady = []OnReady{
 	OnReadyTestConnectivity,
 	OnReadyWait,
 	OnReadyInspect,
+	OnReadyInspectPods,
 	OnReadyReleaseTest,
 }
 
@@ -143,6 +146,7 @@ var fromShortOnReadyMap = map[string]OnReady{
 	"conns":     OnReadyTestConnectivity,
 	"wait":      OnReadyWait,
 	"inspect":   OnReadyInspect,
+	"pods":      OnReadyInspectPods,
 	"rt":        OnReadyReleaseTest,
 }
 
@@ -752,6 +756,14 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 					slog.Debug("Running inspect", "opts", inspectOpts)
 					if err := c.Inspect(ctx, vlab, inspectOpts); err != nil {
 						return c.handleShutdownWithPause(ctx, vlab, opts, fmt.Errorf("inspecting: %w", err))
+					}
+				case OnReadyInspectPods:
+					inspectPodsOpts := InspectPodsOpts{
+						Strict: opts.InspectPodsStrict,
+					}
+					slog.Debug("Running inspect-pods", "opts", inspectPodsOpts)
+					if err := c.InspectPods(ctx, inspectPodsOpts); err != nil {
+						return c.handleShutdownWithPause(ctx, vlab, opts, fmt.Errorf("inspecting pods: %w", err))
 					}
 				case OnReadyReleaseTest:
 					releaseTestOpts := ReleaseTestOpts{
