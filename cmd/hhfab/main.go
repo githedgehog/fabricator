@@ -1077,6 +1077,12 @@ func Run(ctx context.Context) error {
 								Value: true,
 							},
 							&cli.BoolFlag{
+								Name:    "inspect-pods-strict",
+								Usage:   "fail the run (instead of warn) on container restarts in the fab namespace when using --ready=inspect-pods",
+								EnvVars: []string{"HHFAB_INSPECT_PODS_STRICT"},
+								Value:   false,
+							},
+							&cli.BoolFlag{
 								Name:    FlagPauseOnFailure,
 								Aliases: []string{"p"},
 								Usage:   "pause running on-ready commands or release tests on failure (for troubleshooting)",
@@ -1240,6 +1246,7 @@ func Run(ctx context.Context) error {
 									ReleaseTestRegexesInvert: c.Bool(FlagReleaseTestRegexesInvert),
 									ReleaseTestOnReadyOnly:   c.Bool(FlagReleaseTestOnReadyOnly),
 									InterfaceMTU:             ifMTU,
+									InspectPodsStrict:        c.Bool("inspect-pods-strict"),
 								},
 							}); err != nil {
 								return fmt.Errorf("running VLAB: %w", err)
@@ -1649,6 +1656,29 @@ Examples:
 								Strict:         c.Bool("strict"),
 							}); err != nil {
 								return fmt.Errorf("inspect: %w", err)
+							}
+
+							return nil
+						},
+					},
+					{
+						Name:    "inspect-pods",
+						Aliases: []string{"pods"},
+						Usage:   "check for unexpected container restarts in the fab namespace",
+						Flags: flatten(defaultFlags, []cli.Flag{
+							&cli.BoolFlag{
+								Name:    "strict",
+								Usage:   "fail (error) instead of warn if any container in the fab namespace has restarted",
+								EnvVars: []string{"HHFAB_INSPECT_PODS_STRICT"},
+								Value:   false,
+							},
+						}),
+						Before: before(false),
+						Action: func(c *cli.Context) error {
+							if err := hhfab.DoVLABInspectPods(ctx, workDir, cacheDir, hhfab.InspectPodsOpts{
+								Strict: c.Bool("strict"),
+							}); err != nil {
+								return fmt.Errorf("inspect-pods: %w", err)
 							}
 
 							return nil
