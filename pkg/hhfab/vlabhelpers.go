@@ -923,6 +923,13 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB, opts ShowTechOpts
 
 	slog.Info("Show tech files saved in", "folder", outDir)
 
+	// Phase A: always-on collection of native SONiC tech-support tarballs for
+	// Broadcom vendor escalation (issue #1760). Failures here must not turn
+	// an otherwise-successful run into a failure.
+	if err := c.CollectSonicTechsupport(ctx, vlab, nil, filepath.Join(outDir, "sonic-techsupport")); err != nil {
+		slog.Warn("Failed to collect SONiC tech-support", "err", err)
+	}
+
 	return nil
 }
 
