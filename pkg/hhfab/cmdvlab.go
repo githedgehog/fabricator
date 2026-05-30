@@ -183,6 +183,17 @@ func DoShowTech(ctx context.Context, workDir, cacheDir string) error {
 	return c.VLABShowTech(ctx, vlab, ShowTechOpts{})
 }
 
+func DoSonicShowTech(ctx context.Context, workDir, cacheDir string, switches []string) error {
+	c, vlab, err := loadVLABForHelpers(ctx, workDir, cacheDir)
+	if err != nil {
+		return err
+	}
+
+	outDir := filepath.Join(workDir, "sonic-techsupport")
+
+	return c.CollectSonicTechsupport(ctx, vlab, switches, outDir)
+}
+
 func DoVLABSetupVPCs(ctx context.Context, workDir, cacheDir string, opts SetupVPCsOpts) error {
 	c, vlab, err := loadVLABForHelpers(ctx, workDir, cacheDir)
 	if err != nil {
