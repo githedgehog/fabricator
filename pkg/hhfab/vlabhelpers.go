@@ -700,6 +700,11 @@ func (c *Config) prepareShowTechVMConsoleScript(vmType, script string) (func(), 
 type ShowTechOpts struct {
 	// If empty, defaults to WorkDir/show-tech-output.
 	OutputDir string
+	// OnFailure marks this invocation as part of failure handling. It gates
+	// auxiliary collection that is too expensive to run on every success
+	// (currently: SONiC tech-support tarballs, additionally gated by env var
+	// HHFAB_VLAB_COLLECT_SONIC_TECHSUPPORT).
+	OnFailure bool
 }
 
 func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB, opts ShowTechOpts) error {
@@ -885,11 +890,13 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB, opts ShowTechOpts
 
 	slog.Info("Show tech files saved in", "folder", outDir)
 
-	// Phase A: always-on collection of native SONiC tech-support tarballs for
-	// Broadcom vendor escalation (issue #1760). Failures here must not turn
-	// an otherwise-successful run into a failure.
-	if err := c.CollectSonicTechsupport(ctx, vlab, nil, filepath.Join(outDir, "sonic-techsupport")); err != nil {
-		slog.Warn("Failed to collect SONiC tech-support", "err", err)
+	// Collect SONiC tech-support tarballs for Broadcom vendor escalation
+	// (issue #1760), only on failure paths and only when the env var opts
+	// in. Manual `hhfab vlab switch show-tech` is the unconditional path.
+	if opts.OnFailure && envCollectSonicTechsupport() {
+		if err := c.CollectSonicTechsupport(ctx, vlab, nil, filepath.Join(outDir, "sonic-techsupport")); err != nil {
+			slog.Warn("Failed to collect SONiC tech-support", "err", err)
+		}
 	}
 
 	return nil
@@ -1234,7 +1241,7 @@ func (c *Config) CollectVLABDebug(ctx context.Context, vlab *VLAB, opts VLABRunO
 	}
 
 	if (opts.CollectShowTech && forceShowTech) || opts.ForceCollectShowTech {
-		if err := c.VLABShowTech(ctx, vlab, ShowTechOpts{}); err != nil {
+		if err := c.VLABShowTech(ctx, vlab, ShowTechOpts{OnFailure: forceShowTech}); err != nil {
 			slog.Warn("Failed to collect show-tech diagnostics", "err", err)
 		}
 	}
