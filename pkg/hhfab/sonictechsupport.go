@@ -10,12 +10,19 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 )
+
+// EnvCollectSonicTechsupport opts the failure-path debug bundle into
+// collecting native SONiC tech-support tarballs. Unset or "false" means the
+// expensive collection is skipped even on failure; the manual CLI
+// `hhfab vlab switch show-tech` is unaffected.
+const EnvCollectSonicTechsupport = "HHFAB_VLAB_COLLECT_SONIC_TECHSUPPORT"
 
 const (
 	sonicTechsupportPerSwitchTimeout = 45 * time.Minute
@@ -25,6 +32,12 @@ const (
 	sonicTechsupportStartedMarker    = "tech-support process started"
 	sonicTechsupportInProgressMarker = "in progress"
 )
+
+func envCollectSonicTechsupport() bool {
+	v, _ := strconv.ParseBool(os.Getenv(EnvCollectSonicTechsupport))
+
+	return v
+}
 
 // Matches the tarball path SONiC emits in the status output, for example
 // /var/dump/sonic_dump_ds5000-01_20260530_120000.tar.gz.
