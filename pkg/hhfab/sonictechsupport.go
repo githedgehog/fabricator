@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	sonicTechsupportPerSwitchTimeout = 15 * time.Minute
+	sonicTechsupportPerSwitchTimeout = 45 * time.Minute
 	sonicTechsupportPollInterval     = 15 * time.Second
 	sonicTechsupportStartCmd         = `sonic-cli -c "show tech-support"`
 	sonicTechsupportStatusCmd        = `sonic-cli -c "show tech-support status"`
