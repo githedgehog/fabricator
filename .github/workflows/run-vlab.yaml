@@ -108,6 +108,9 @@ env:
   HHFAB_REG_REPO: 127.0.0.1:30000
   HHFAB_VLAB_COLLECT: true
   HHFAB_VLAB_COLLECT_FORCE: ${{ inputs.collect_show_tech }}
+  # TEMP for #1776 campaign on pau/issue-1776-lldp-instrument: opt the failure
+  # path into Broadcom-grade SONiC tech-support collection. Drop before merge.
+  HHFAB_VLAB_COLLECT_SONIC_TECHSUPPORT: "true"
 
 jobs:
   run:
