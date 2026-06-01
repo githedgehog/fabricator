@@ -3375,11 +3375,20 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 
 	const lldpRetryDelay = 30 * time.Second
 
+	// Per-failed-attempt LLDP captures run detached so they never extend the
+	// retry interval: the snapshot itself does SSH round-trips that, if run
+	// inline, lengthen the inspect window enough for a transient LLDP gap to
+	// self-heal and mask the failure (issue #1776). Joined once after the loop
+	// so the final attempt's snapshot still completes before ctx is cancelled.
+	var captureWG sync.WaitGroup
+
 	for attempt := 0; attempt < opts.Attempts; attempt++ {
 		if attempt > 0 {
 			slog.Info("LLDP inspect retry attempt", "number", attempt+1)
 			select {
 			case <-ctx.Done():
+				captureWG.Wait()
+
 				return fmt.Errorf("context cancelled during retry: %w", ctx.Err())
 			case <-time.After(lldpRetryDelay):
 			}
@@ -3397,11 +3406,14 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 			}
 		}
 
-		// Snapshot detailed switch/server LLDP state on every failed attempt
-		// so transient failures (issue #1776) don't lose evidence between the
-		// retry loop and the post-inspect show-tech bundle.
-		c.captureLLDPAtFailure(ctx, vlab, attempt+1, lldpOut)
+		captureWG.Add(1)
+		go func(attempt int, lldpOut inspect.Out[inspect.LLDPIn]) {
+			defer captureWG.Done()
+			c.captureLLDPAtFailure(ctx, vlab, attempt+1, lldpOut)
+		}(attempt, lldpOut)
 	}
+
+	captureWG.Wait()
 
 	if lldpErr != nil {
 		slog.Error("Failed to inspect LLDP", "err", lldpErr)
