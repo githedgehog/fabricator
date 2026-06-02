@@ -674,6 +674,9 @@ var runnerScript []byte
 //go:embed show-tech/external-switch.sh
 var externalSwitchScript []byte
 
+//go:embed show-tech/external.sh
+var externalScript []byte
+
 const ControlPlaneAPIIP = "172.30.0.5"
 
 type ShowTechScript struct {
@@ -687,7 +690,7 @@ func DefaultShowTechScript() ShowTechScript {
 			VMTypeControl:  controlScript,
 			VMTypeSwitch:   switchScript,
 			VMTypeGateway:  gatewayScript,
-			VMTypeExternal: serverScript,
+			VMTypeExternal: externalScript,
 		},
 	}
 }
