@@ -162,21 +162,44 @@ func mclagTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertF
 // For each eslag connection, set one of the links down by shutting down the port on the switch,
 // then test connectivity. Repeat for the other link.
 func eslagTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
-	// l3vni mode is not compatible with ESLAG, so there will be no servers attached to ESLAG connections
-	if testCtx.setupOpts.VPCMode == vpcapi.VPCModeL3VNI {
-		return true, nil, fmt.Errorf("L3VNI mode is not compatible with ESLAG") //nolint:goerr113
-	}
 	// list connections in the fabric, filter by ES-LAG connection type
 	conns := &wiringapi.ConnectionList{}
 	if err := testCtx.kube.List(ctx, conns, kclient.MatchingLabels{wiringapi.LabelConnectionType: wiringapi.ConnectionTypeESLAG}); err != nil {
 		return false, nil, fmt.Errorf("listing connections: %w", err)
 	}
-	if len(conns.Items) == 0 {
-		slog.Info("No ESLAG connections found, skipping test")
+	// ESLAG is not compatible with L3VNI / L3Flat: SetupVPCs skips those
+	// servers from VPC creation. Keep only ESLAG conns whose attached server
+	// landed in an L2VNI VPC; skip the test if none remain.
+	attachList := &vpcapi.VPCAttachmentList{}
+	if err := testCtx.kube.List(ctx, attachList); err != nil {
+		return false, nil, fmt.Errorf("listing VPCAttachments: %w", err)
+	}
+	vpcs := &vpcapi.VPCList{}
+	if err := testCtx.kube.List(ctx, vpcs); err != nil {
+		return false, nil, fmt.Errorf("listing VPCs: %w", err)
+	}
+	vpcModes := map[string]vpcapi.VPCMode{}
+	for _, vpc := range vpcs.Items {
+		vpcModes[vpc.Name] = vpc.Spec.Mode
+	}
+	l2vniConn := map[string]bool{}
+	for _, attach := range attachList.Items {
+		if mode, ok := vpcModes[attach.Spec.VPCName()]; ok && mode == vpcapi.VPCModeL2VNI {
+			l2vniConn[attach.Spec.Connection] = true
+		}
+	}
+	eligible := make([]wiringapi.Connection, 0, len(conns.Items))
+	for _, conn := range conns.Items {
+		if l2vniConn[conn.Name] {
+			eligible = append(eligible, conn)
+		}
+	}
+	if len(eligible) == 0 {
+		slog.Info("No ESLAG connections with L2VNI-attached servers found, skipping test")
 
 		return true, nil, errNoEslags
 	}
-	for _, conn := range conns.Items {
+	for _, conn := range eligible {
 		slog.Debug("Testing ESLAG connection", "connection", conn.Name)
 		if len(conn.Spec.ESLAG.Links) != 2 {
 			return false, nil, fmt.Errorf("ESLAG connection %s has %d links, expected 2", conn.Name, len(conn.Spec.ESLAG.Links)) //nolint:goerr113
@@ -1022,7 +1045,7 @@ func dnsNtpMtuTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []Rev
 
 	// Set DNS, NTP and MTU
 	slog.Debug("Setting DNS, NTP, MTU and DHCP lease time")
-	l3mode := testCtx.setupOpts.VPCMode == vpcapi.VPCModeL3VNI || testCtx.setupOpts.VPCMode == vpcapi.VPCModeL3Flat
+	l3mode := vpc.Spec.Mode != vpcapi.VPCModeL2VNI
 	dhcpOpts := &vpcapi.VPCDHCPOptions{
 		DNSServers:       []string{"1.1.1.1"},
 		TimeServers:      []string{"1.1.1.1"},
@@ -1073,7 +1096,7 @@ func dnsNtpMtuTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []Rev
 			return fmt.Errorf("bonding interfaces on %s: %w: %s", serverName, err, stderr)
 		}
 		// in case of L3 VPC mode, we need to give it time to switch to the longer lease time and switches to learn the routes
-		if testCtx.setupOpts.VPCMode == vpcapi.VPCModeL3VNI || testCtx.setupOpts.VPCMode == vpcapi.VPCModeL3Flat {
+		if vpc.Spec.Mode != vpcapi.VPCModeL2VNI {
 			time.Sleep(10 * time.Second)
 		}
 
@@ -1302,7 +1325,7 @@ func dhcpRenewalTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []R
 			defer wg.Done()
 
 			start := time.Now()
-			err := testCtx.waitForDHCPRenewal(ctx, srv.Name, srv.Interface, shortLeaseTime)
+			err := testCtx.waitForDHCPRenewal(ctx, srv.Name, srv.Interface, shortLeaseTime, testVPC.Spec.Mode)
 			duration := time.Since(start)
 
 			result := RenewalResult{

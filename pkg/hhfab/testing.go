@@ -573,6 +573,47 @@ func ResolveDefaultServerMTU(ctx context.Context, kube kclient.Client, opts *Set
 	return nil
 }
 
+// hasNonL2VNIServer reports whether any server in the fabric would land in a
+// non-L2VNI VPC under the given override. When override is L2VNI (empty
+// string) the modes are auto-derived per server, matching what SetupVPCs
+// will do, so callers can decide ahead of time whether the run will skip
+// ESLAG-attached servers.
+func hasNonL2VNIServer(ctx context.Context, kube kclient.Client, override vpcapi.VPCMode) (bool, error) {
+	if override != vpcapi.VPCModeL2VNI {
+		return true, nil
+	}
+	switchList := &wiringapi.SwitchList{}
+	if err := kube.List(ctx, switchList); err != nil {
+		return false, fmt.Errorf("listing switches: %w", err)
+	}
+	profileBySwitch := map[string]*wiringapi.SwitchProfile{}
+	for _, sw := range switchList.Items {
+		if _, seen := profileBySwitch[sw.Name]; seen {
+			continue
+		}
+		sp := &wiringapi.SwitchProfile{}
+		if err := kube.Get(ctx, kclient.ObjectKey{Name: sw.Spec.Profile, Namespace: kmetav1.NamespaceDefault}, sp); err != nil {
+			return false, fmt.Errorf("getting switch profile %q: %w", sw.Spec.Profile, err)
+		}
+		profileBySwitch[sw.Name] = sp
+	}
+	servers := &wiringapi.ServerList{}
+	if err := kube.List(ctx, servers); err != nil {
+		return false, fmt.Errorf("listing servers: %w", err)
+	}
+	for _, server := range servers.Items {
+		mode, err := autoDeriveVPCMode(ctx, kube, &server, profileBySwitch)
+		if err != nil {
+			return false, fmt.Errorf("auto-deriving mode for server %q: %w", server.Name, err)
+		}
+		if mode != vpcapi.VPCModeL2VNI {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
 // autoDeriveVPCMode returns the VPC mode hhfab should use for a VPC built
 // around this server. When every leaf the server attaches to advertises
 // Features.L2VNI=true, the result is L2VNI; if any attached leaf is
