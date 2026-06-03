@@ -1,0 +1,139 @@
+{
+  "title": "Hedgehog Fabric Logs",
+  "uid": "hh-fabric-logs",
+  "tags": ["hedgehog", "logs"],
+  "description": "Local VictoriaLogs-native replacement for grafana.com dashboard 24416. Edit the 'Switch' variable's query field for clusters with different hostnames.",
+  "editable": false,
+  "schemaVersion": 39,
+  "version": 1,
+  "timezone": "browser",
+  "time": { "from": "now-1h", "to": "now" },
+  "refresh": "30s",
+  "templating": {
+    "list": [
+      {
+        "name": "node",
+        "label": "Switch",
+        "description": "Hostname to filter logs by — populated from VictoriaLogs",
+        "type": "query",
+        "datasource": "VictoriaLogs",
+        "query": {
+          "refId": "node",
+          "type": "fieldValue",
+          "field": "hostname",
+          "query": "filename:re(\"/var/log/.+\")",
+          "limit": 1000
+        },
+        "refresh": 2,
+        "sort": 1,
+        "includeAll": false,
+        "multi": false,
+        "hide": 0
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 100,
+      "type": "row",
+      "title": "Syslog",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+    },
+    {
+      "id": 1,
+      "type": "logs",
+      "title": "Syslog errors — ${node}",
+      "datasource": "VictoriaLogs",
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 1 },
+      "targets": [
+        {
+          "datasource": "VictoriaLogs",
+          "refId": "A",
+          "expr": "filename:\"/var/log/syslog\" hostname:\"${node}\" \"ERR\""
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "enableLogDetails": true,
+        "sortOrder": "Descending"
+      }
+    },
+    {
+      "id": 2,
+      "type": "logs",
+      "title": "Syslog BGP — ${node}",
+      "datasource": "VictoriaLogs",
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 1 },
+      "targets": [
+        {
+          "datasource": "VictoriaLogs",
+          "refId": "A",
+          "expr": "filename:\"/var/log/syslog\" hostname:\"${node}\" ~\"(?i)bgp\""
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "enableLogDetails": true,
+        "sortOrder": "Descending"
+      }
+    },
+    {
+      "id": 101,
+      "type": "row",
+      "title": "Agent",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 11 }
+    },
+    {
+      "id": 3,
+      "type": "logs",
+      "title": "Agent ERROR — ${node}",
+      "datasource": "VictoriaLogs",
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 12 },
+      "targets": [
+        {
+          "datasource": "VictoriaLogs",
+          "refId": "A",
+          "expr": "filename:\"/var/log/agent.log\" hostname:\"${node}\" | unpack_logfmt | level:ERROR"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "enableLogDetails": true,
+        "sortOrder": "Descending"
+      }
+    },
+    {
+      "id": 4,
+      "type": "logs",
+      "title": "Agent WARN — ${node}",
+      "datasource": "VictoriaLogs",
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 12 },
+      "targets": [
+        {
+          "datasource": "VictoriaLogs",
+          "refId": "A",
+          "expr": "filename:\"/var/log/agent.log\" hostname:\"${node}\" | unpack_logfmt | level:WARN"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "enableLogDetails": true,
+        "sortOrder": "Descending"
+      }
+    }
+  ]
+}
