@@ -11,7 +11,7 @@ dario.cat/mergo
 ## explicit; go 1.18
 github.com/BurntSushi/toml
 github.com/BurntSushi/toml/internal
-# github.com/DeRuina/timberjack v1.4.2
+# github.com/DeRuina/timberjack v1.4.5
 ## explicit; go 1.21
 github.com/DeRuina/timberjack
 # github.com/Masterminds/goutils v1.1.1
