@@ -82,6 +82,24 @@ storage:
           Name=dummy0
           Kind=dummy
 
+    - path: /etc/systemd/network/10-e1000-offloads.link
+      mode: 0644
+      contents:
+        inline: |
+          [Match]
+          Driver=e1000
+
+          [Link]
+          TCPSegmentationOffload=false
+          TCP6SegmentationOffload=false
+          GenericSegmentationOffload=false
+          GenericReceiveOffload=false
+          LargeReceiveOffload=false
+          ReceiveChecksumOffload=false
+          TransmitChecksumOffload=false
+          ReceiveVLANCTAGHardwareAcceleration=false
+          TransmitVLANCTAGHardwareAcceleration=false
+
     - path: /etc/systemd/network/11-dummy.network
       mode: 0644
       contents:
