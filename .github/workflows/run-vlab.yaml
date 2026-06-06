@@ -120,6 +120,15 @@ jobs:
         run: |
           echo "$KUBE_NODE"
 
+      - name: Docker readiness check
+        run: |
+          for i in $(seq 1 30); do
+            docker info > /dev/null 2>&1 && echo "Docker ready after ${i}s" && break
+            echo "Waiting for Docker... ${i}s"
+            sleep 1
+          done
+          docker info
+
       - name: Inputs summary
         run: |
           echo "Inputs:"
