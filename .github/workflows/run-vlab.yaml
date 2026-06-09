@@ -337,7 +337,7 @@ jobs:
                 HHFAB_TEST_ARGS+=(--release-test-regexes-invert)
               fi
             fi
-          elif [[ -n "${{ inputs.upgradefrom }}" ]]; then
+          elif [[ "${{ inputs.hybrid }}" == "true" || -n "${{ inputs.upgradefrom }}" ]]; then
             HHFAB_TEST_ARGS=(--ready=setup-vpcs --ready=setup-peerings --ready=test-connectivity)
           else
             HHFAB_TEST_ARGS+=(--release-test-on-ready-only)
