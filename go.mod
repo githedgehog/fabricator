@@ -42,7 +42,7 @@ require (
 	go.podman.io/image/v5 v5.40.0
 	golang.org/x/crypto v0.52.0
 	golang.org/x/mod v0.36.0
-	golang.org/x/sync v0.20.0
+	golang.org/x/sync v0.21.0
 	golang.org/x/term v0.43.0
 	k8s.io/api v0.36.1
 	k8s.io/apiextensions-apiserver v0.36.1
