@@ -83,7 +83,7 @@ func Run[TIn In, TOut Out[TIn]](ctx context.Context, f Func[TIn, TOut], args Arg
 		vpcapi.SchemeBuilder,
 		agentapi.SchemeBuilder,
 		dhcpapi.SchemeBuilder,
-		&scheme.Builder{
+		&scheme.Builder{ //nolint:staticcheck
 			GroupVersion:  coreapi.SchemeGroupVersion,
 			SchemeBuilder: coreapi.SchemeBuilder,
 		})
@@ -201,4 +201,20 @@ func RenderTable(headers []string, data [][]string) string {
 
 func HumanizeTime(now, then time.Time) string {
 	return humanize.RelTime(then, now, "ago", "from now")
+}
+
+// comparePortNames is a safe wrapper around wiringapi.ComparePortNames that
+// handles empty port names (e.g. BGP neighbors without an associated port),
+// sorting empty names last.
+func comparePortNames(a, b string) int {
+	switch {
+	case a == b:
+		return 0
+	case a == "":
+		return 1
+	case b == "":
+		return -1
+	}
+
+	return wiringapi.ComparePortNames(a, b)
 }
