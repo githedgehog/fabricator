@@ -1177,11 +1177,6 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 		externals[ext.Name] = &ext
 	}
 
-	switchGroupList := &wiringapi.SwitchGroupList{}
-	if err := kube.List(ctx, switchGroupList); err != nil {
-		return fmt.Errorf("listing switch groups: %w", err)
-	}
-
 	// NAT parsing helpers. These options are only meaningful for gateway peerings.
 	type natType string
 	const (
@@ -1407,7 +1402,6 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 				vpc2 = "vpc-" + vpc2
 			}
 
-			remote := ""
 			gw := false
 			vpc1Subnets := []string{}
 			vpc2Subnets := []string{}
@@ -1423,17 +1417,7 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 					optValue = parts[1]
 				}
 
-				if optName == "r" || optName == "remote" {
-					if optValue == "" {
-						if len(switchGroupList.Items) != 1 {
-							return fmt.Errorf("invalid VPC peering option #%d %s, auto switch group only supported when it's exactly one switch group", idx, option)
-						}
-
-						remote = switchGroupList.Items[0].Name
-					} else {
-						remote = optValue
-					}
-				} else if optName == "gw" || optName == "gateway" {
+				if optName == "gw" || optName == "gateway" {
 					gw = true
 				} else if optName == "vpc1" || optName == "vpc1-subnets" {
 					vpc1Subnets = strings.Split(optValue, ",")
@@ -1513,13 +1497,8 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 							},
 						},
 					},
-					Remote: remote,
 				}
 			} else {
-				if remote != "" {
-					return fmt.Errorf("gateway peering cannot be remote")
-				}
-
 				// Build each side's expose for the "real" VPC prefixes.
 				vpc1Expose := gwapi.PeeringEntryExpose{}
 				if vpc, ok := vpcs[vpc1]; ok {
@@ -1904,7 +1883,7 @@ func DoSetupPeerings(ctx context.Context, kube client.Client, vpcPeerings map[st
 		}
 
 		slog.Info("Enforcing VPCPeering", "name", name,
-			"vpc1", vpc1, "vpc2", vpc2, "remote", vpcPeeringSpec.Remote)
+			"vpc1", vpc1, "vpc2", vpc2)
 
 		vpcPeering := &vpcapi.VPCPeering{
 			ObjectMeta: metav1.ObjectMeta{
@@ -2643,17 +2622,6 @@ func IsSubnetReachableWithSwitchPeering(ctx context.Context, kube kclient.Reader
 	}
 
 	for _, vpcPeering := range vpcPeerings.Items {
-		if vpcPeering.Spec.Remote != "" {
-			notEmpty, err := apiutil.IsVPCPeeringRemoteNotEmpty(ctx, kube, &vpcPeering)
-			if err != nil {
-				return Reachability{}, fmt.Errorf("failed to check if VPC peering %s has non-empty remote: %w", vpcPeering.Name, err)
-			}
-
-			if !notEmpty {
-				continue
-			}
-		}
-
 		for _, permit := range vpcPeering.Spec.Permit {
 			vpc1Permit, exist := permit[vpc1Name]
 			if !exist {
