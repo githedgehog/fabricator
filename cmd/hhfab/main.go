@@ -1461,11 +1461,11 @@ Examples:
 
 							Example command:
 
-							$ hhfab vlab setup-peerings 1+2 2+4:r=border 1~as5835 2~as5835:subnets=sub1,sub2:prefixes=0.0.0.0/0,22.22.22.0/24
+							$ hhfab vlab setup-peerings 1+2 2+4 1~as5835 2~as5835:subnets=sub1,sub2:prefixes=0.0.0.0/0,22.22.22.0/24
 
 							Which will produce:
 							1. VPC peering between vpc-01 and vpc-02
-							2. Remote VPC peering between vpc-02 and vpc-04 on switch group named border
+							2. VPC peering between vpc-02 and vpc-04
 							3. External peering for vpc-01 with External as5835 with default vpc subnet and any routes from external permitted
 							4. External peering for vpc-02 with External as5835 with subnets sub1 and sub2 exposed from vpc-02 and default route
 							   from external permitted as well any route that belongs to 22.22.22.0/24
@@ -1475,9 +1475,6 @@ Examples:
 							1+2 -- VPC peering between vpc-01 and vpc-02
 							1+2:gw -- same as above but using gateway peering, only valid if gateway is present
 							demo-1+demo-2 -- VPC peering between vpc-demo-1 and vpc-demo-2
-							1+2:r -- remote VPC peering between vpc-01 and vpc-02 on switch group if only one switch group is present
-							1+2:r=border -- remote VPC peering between vpc-01 and vpc-02 on switch group named border
-							1+2:remote=border -- same as above
 
 							External Peerings:
 
