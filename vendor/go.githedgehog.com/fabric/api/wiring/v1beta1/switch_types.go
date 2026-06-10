@@ -35,7 +35,10 @@ import (
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
 const (
-	AnnotationSwitchRouteSumm = "fabric.githedgehog.com/route-summ"
+	AnnotationSwitchRouteSumm       = "fabric.githedgehog.com/route-summ"
+	DefaultLinkFlapThreshold        = 3
+	DefaultLinkFlapSamplingInterval = 30
+	DefaultLinkFlapRecoveryInterval = 300
 )
 
 // +kubebuilder:validation:Enum=spine;server-leaf;border-leaf;mixed-leaf;virtual-edge
@@ -122,12 +125,40 @@ type SwitchSpec struct {
 	RoCE bool `json:"roce,omitempty"`
 	// ECMP is the ECMP configuration for the switch
 	ECMP SwitchECMP `json:"ecmp,omitempty"`
+	// LinkFlapErrDisable, if set, enables link-flap errdisable protection on all fabric-facing ports.
+	// When a port exceeds FlapThreshold link-down events within SamplingInterval seconds it is
+	// disabled; RecoveryInterval controls how long before it is automatically re-enabled (0 = never).
+	LinkFlapErrDisable *SwitchLinkFlapErrDisable `json:"linkFlapErrDisable,omitempty"`
 }
 
 // SwitchECMP is a struct that defines the ECMP configuration for the switch
 type SwitchECMP struct {
 	// RoCEQPN is a flag to enable RoCE QPN hashing
 	RoCEQPN bool `json:"roceQPN,omitempty"`
+}
+
+// SwitchLinkFlapErrDisable configures link-flap errdisable on fabric-facing ports.
+// Presence of this struct enables the feature; omitting it leaves the ports unprotected.
+type SwitchLinkFlapErrDisable struct {
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=50
+	// +kubebuilder:default=3
+	// FlapThreshold is the number of link-down events within SamplingInterval that triggers errdisable.
+	// Defaults to 3.
+	FlapThreshold *uint8 `json:"flapThreshold,omitempty"`
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
+	// +kubebuilder:default=30
+	// SamplingInterval is the observation window in seconds for counting flap events.
+	// Defaults to 30 s.
+	SamplingInterval *uint32 `json:"samplingInterval,omitempty"`
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=65534
+	// +kubebuilder:default=300
+	// RecoveryInterval is how long in seconds before the port is automatically re-enabled.
+	// 0 means the port is never automatically re-enabled and must be recovered manually.
+	// Defaults to 300 s.
+	RecoveryInterval *uint32 `json:"recoveryInterval,omitempty"`
 }
 
 // SwitchStatus defines the observed state of Switch
@@ -209,6 +240,18 @@ func (sw *Switch) Default() {
 
 	if sw.Spec.Redundancy.Group != "" && !slices.Contains(sw.Spec.Groups, sw.Spec.Redundancy.Group) {
 		sw.Spec.Groups = append(sw.Spec.Groups, sw.Spec.Redundancy.Group)
+	}
+
+	if sw.Spec.LinkFlapErrDisable != nil {
+		if sw.Spec.LinkFlapErrDisable.FlapThreshold == nil {
+			sw.Spec.LinkFlapErrDisable.FlapThreshold = new(uint8(DefaultLinkFlapThreshold))
+		}
+		if sw.Spec.LinkFlapErrDisable.SamplingInterval == nil {
+			sw.Spec.LinkFlapErrDisable.SamplingInterval = new(uint32(DefaultLinkFlapSamplingInterval))
+		}
+		if sw.Spec.LinkFlapErrDisable.RecoveryInterval == nil {
+			sw.Spec.LinkFlapErrDisable.RecoveryInterval = new(uint32(DefaultLinkFlapRecoveryInterval))
+		}
 	}
 
 	for _, group := range sw.Spec.Groups {
@@ -440,6 +483,18 @@ func (sw *Switch) Validate(ctx context.Context, kube kclient.Reader, fabricCfg *
 	}
 	if sw.Spec.Redundancy.Group == "" && sw.Spec.Redundancy.Type != meta.RedundancyTypeNone {
 		return nil, errors.Errorf("redundancy type specified without group")
+	}
+
+	if sw.Spec.LinkFlapErrDisable != nil {
+		if sw.Spec.LinkFlapErrDisable.FlapThreshold == nil {
+			return nil, errors.Errorf("link-flap error-disable is enabled but no flap threshold provided")
+		}
+		if sw.Spec.LinkFlapErrDisable.SamplingInterval == nil {
+			return nil, errors.Errorf("link-flap error-disable is enabled but no sampling interval provided")
+		}
+		if sw.Spec.LinkFlapErrDisable.RecoveryInterval == nil {
+			return nil, errors.Errorf("link-flap error-disable is enabled but no recovery interval provided")
+		}
 	}
 
 	if kube != nil {
