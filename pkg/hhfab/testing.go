@@ -2078,6 +2078,105 @@ type TestConnectivityOpts struct {
 	RequireAllServers bool
 }
 
+// waitForServerHostRoutesInLeaves waits up to 60 s for each server's host /32 to appear in the
+// FIB of every leaf attached to that server's VPC. Without this gate, EVPN type-5 propagation
+// may still be in flight when pings start after a DHCP-churning step, causing spurious failures.
+func (c *Config) waitForServerHostRoutesInLeaves(ctx context.Context, vlab *VLAB, kube kclient.Client, serverIDs map[string]uint64, ips *sync.Map) error {
+	const timeout = 60 * time.Second
+
+	type vpcEntry struct {
+		vrfName string
+		leaves  map[string]bool
+		routes  []string
+	}
+	byVPC := map[string]*vpcEntry{}
+
+	for serverName := range serverIDs {
+		ipR, ok := ips.Load(serverName)
+		if !ok {
+			continue
+		}
+		hostRoute := ipR.(netip.Prefix).Addr().String() + "/32"
+
+		vpcName, vrfName, err := getServerVPCAndVRF(ctx, kube, serverName)
+		if err != nil {
+			return err
+		}
+		if vpcName == "" {
+			continue
+		}
+
+		entry, exists := byVPC[vpcName]
+		if !exists {
+			leaves, err := getSwitchesForVPC(ctx, kube, vpcName)
+			if err != nil {
+				return fmt.Errorf("getting switches for vpc %s: %w", vpcName, err)
+			}
+			if len(leaves) == 0 {
+				continue
+			}
+			entry = &vpcEntry{vrfName: vrfName, leaves: leaves}
+			byVPC[vpcName] = entry
+		}
+		entry.routes = append(entry.routes, hostRoute)
+	}
+
+	if len(byVPC) == 0 {
+		return nil
+	}
+
+	sshs := map[string]*sshutil.Config{}
+	for _, entry := range byVPC {
+		for sw := range entry.leaves {
+			if _, exists := sshs[sw]; exists {
+				continue
+			}
+			ssh, err := c.SSH(ctx, vlab, sw)
+			if err != nil {
+				return fmt.Errorf("getting ssh for switch %s: %w", sw, err)
+			}
+			sshs[sw] = ssh
+		}
+	}
+
+	toCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	for vpcName, entry := range byVPC {
+		slog.Info("Waiting for host routes in leaves", "vpc", vpcName, "routes", entry.routes, "leaves", entry.leaves)
+		for {
+			allFound := true
+			for sw := range entry.leaves {
+				for _, route := range entry.routes {
+					found, err := checkRouteInSwitch(toCtx, sshs[sw], sw, route, entry.vrfName)
+					if err != nil {
+						return fmt.Errorf("checking route %s in switch %s vrf %s: %w", route, sw, entry.vrfName, err)
+					}
+					if !found {
+						slog.Debug("Host route not yet in leaf", "switch", sw, "route", route, "vrf", entry.vrfName)
+						allFound = false
+						break
+					}
+				}
+				if !allFound {
+					break
+				}
+			}
+			if allFound {
+				slog.Debug("All host routes confirmed in leaves", "vpc", vpcName)
+				break
+			}
+			select {
+			case <-toCtx.Done():
+				return fmt.Errorf("timeout waiting for host routes %v in leaves %v (vpc %s)", entry.routes, entry.leaves, vpcName) //nolint:goerr113
+			case <-time.After(5 * time.Second):
+			}
+		}
+	}
+
+	return nil
+}
+
 func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConnectivityOpts) error {
 	if opts.PingsCount == 0 && opts.IPerfsSeconds == 0 && opts.CurlsCount == 0 {
 		return fmt.Errorf("at least one of pings, iperfs or curls should be enabled")
@@ -2254,6 +2353,10 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 
 	if err := g.Wait(); err != nil {
 		return fmt.Errorf("discovering server IPs: %w", err)
+	}
+
+	if err := c.waitForServerHostRoutesInLeaves(ctx, vlab, kube, serverIDs, &ips); err != nil {
+		return fmt.Errorf("waiting for host routes: %w", err)
 	}
 
 	slog.Info("Running pings, iperfs and curls", "servers", len(servers.Items))

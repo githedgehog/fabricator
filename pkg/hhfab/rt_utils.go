@@ -349,6 +349,37 @@ func shutDownLinkAndTest(ctx context.Context, testCtx *VPCPeeringTestCtx, link w
 	return DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts)
 }
 
+// getServerVPCAndVRF returns the VPC name and VRF name for the given server by looking up its
+// VPCAttachment. Returns ("", "", nil) if the server has no VPC attachment.
+func getServerVPCAndVRF(ctx context.Context, kube kclient.Client, serverName string) (string, string, error) {
+	conns := &wiringapi.ConnectionList{}
+	if err := kube.List(ctx, conns, wiringapi.MatchingLabelsForListLabelServer(serverName)); err != nil {
+		return "", "", fmt.Errorf("listing connections for server %q: %w", serverName, err)
+	}
+	for _, conn := range conns.Items {
+		attaches := &vpcapi.VPCAttachmentList{}
+		if err := kube.List(ctx, attaches, kclient.MatchingLabels{wiringapi.LabelConnection: conn.Name}); err != nil {
+			return "", "", fmt.Errorf("listing vpc attachments for connection %q: %w", conn.Name, err)
+		}
+		if len(attaches.Items) == 0 {
+			continue
+		}
+		vpcName := attaches.Items[0].Spec.VPCName()
+		vpc := &vpcapi.VPC{}
+		if err := kube.Get(ctx, kclient.ObjectKey{Name: vpcName, Namespace: kmetav1.NamespaceDefault}, vpc); err != nil {
+			return "", "", fmt.Errorf("getting vpc %q: %w", vpcName, err)
+		}
+		vrfName := "VrfV" + vpcName
+		if vpc.Spec.Mode == vpcapi.VPCModeL3Flat {
+			vrfName = defaultVRFName
+		}
+
+		return vpcName, vrfName, nil
+	}
+
+	return "", "", nil
+}
+
 // getSwitchesForVPC returns the set of leaf switch names that have VPCAttachments for the given VPC.
 func getSwitchesForVPC(ctx context.Context, kube kclient.Client, vpcName string) (map[string]bool, error) {
 	attachments := &vpcapi.VPCAttachmentList{}
