@@ -457,6 +457,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 				"-monitor", fmt.Sprintf("unix:%s,server,nowait", VLABMonSock),
 				"-qmp", fmt.Sprintf("unix:%s,server,nowait", VLABQMPSock),
 				"-global", "ICH9-LPC.disable_s3=1",
+				"-global", "ICH9-LPC.acpi-pci-hotplug-with-bridge-support=off",
 			}
 
 			// TODO fix by copying system OVMF?
