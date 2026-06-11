@@ -1151,7 +1151,7 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 					}
 				}
 
-				kube, err := kubeutil.NewClient(ctx, kubeconfig, fabapi.SchemeBuilder)
+				kube, err := kubeutil.NewClient(ctx, kubeconfig, fabapi.AddToScheme)
 				if err != nil {
 					apiErr = err
 					slog.Debug("Failed to create kube client", "err", err)

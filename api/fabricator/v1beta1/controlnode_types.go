@@ -9,6 +9,7 @@ import (
 
 	"go.githedgehog.com/fabricator/api/meta"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
@@ -65,7 +66,11 @@ type ControlNodeList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&ControlNode{}, &ControlNodeList{})
+	SchemeBuilder.Register(func(s *runtime.Scheme) error {
+		s.AddKnownTypes(GroupVersion, &ControlNode{}, &ControlNodeList{})
+
+		return nil
+	})
 }
 
 func (c *ControlNode) Default() {

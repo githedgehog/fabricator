@@ -38,12 +38,12 @@ func Diagram(ctx context.Context, workDir, cacheDir string, live bool, format di
 	} else {
 		kubeconfig := filepath.Join(workDir, VLABDir, VLABKubeConfig)
 		cacheCancel, kube, err := kubeutil.NewClientWithCache(ctx, kubeconfig,
-			wiringapi.SchemeBuilder,
-			fabapi.SchemeBuilder,
-			vpcapi.SchemeBuilder,
-			dhcpapi.SchemeBuilder,
-			agentapi.SchemeBuilder,
-			gwapi.SchemeBuilder,
+			wiringapi.AddToScheme,
+			fabapi.AddToScheme,
+			vpcapi.AddToScheme,
+			dhcpapi.AddToScheme,
+			agentapi.AddToScheme,
+			gwapi.AddToScheme,
 		)
 		if err != nil {
 			return fmt.Errorf("creating kube client: %w", err)

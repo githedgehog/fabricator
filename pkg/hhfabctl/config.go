@@ -17,7 +17,7 @@ import (
 )
 
 func ConfigExport(ctx context.Context) error {
-	kube, err := kubeutil.NewClient(ctx, "", fabapi.SchemeBuilder)
+	kube, err := kubeutil.NewClient(ctx, "", fabapi.AddToScheme)
 	if err != nil {
 		return fmt.Errorf("creating k8s client: %w", err)
 	}

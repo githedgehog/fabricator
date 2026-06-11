@@ -13,7 +13,10 @@ import (
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
+	cmapi "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
+	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
 	"github.com/go-logr/logr"
+	helmapi "github.com/k3s-io/helm-controller/pkg/apis/helm.cattle.io/v1"
 	"github.com/lmittmann/tint"
 	"github.com/mattn/go-isatty"
 	dhcpapi "go.githedgehog.com/fabric/api/dhcp/v1beta1"
@@ -29,7 +32,6 @@ import (
 
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/controller"
-	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/version"
 	// +kubebuilder:scaffold:imports
 )
@@ -40,9 +42,9 @@ func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(apiext.AddToScheme(scheme))
 
-	utilruntime.Must(comp.HelmAPISchemeBuilder.AddToScheme(scheme))
-	utilruntime.Must(comp.CMApiSchemeBuilder.AddToScheme(scheme))
-	utilruntime.Must(comp.CMMetaSchemeBuilder.AddToScheme(scheme))
+	utilruntime.Must(helmapi.AddToScheme(scheme))
+	utilruntime.Must(cmapi.AddToScheme(scheme))
+	utilruntime.Must(cmmeta.AddToScheme(scheme))
 
 	utilruntime.Must(dhcpapi.AddToScheme(scheme))
 

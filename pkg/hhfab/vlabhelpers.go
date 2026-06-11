@@ -1184,7 +1184,7 @@ func (c *Config) collectVMConsoleDiagnostics(ctx context.Context, vmType, name s
 
 func (c *Config) getSwitchIP(ctx context.Context, entryName string) (string, error) {
 	kubeconfig := filepath.Join(c.WorkDir, VLABDir, VLABKubeConfig)
-	kube, err := kubeutil.NewClient(ctx, kubeconfig, wiringapi.SchemeBuilder)
+	kube, err := kubeutil.NewClient(ctx, kubeconfig, wiringapi.AddToScheme)
 	if err != nil {
 		return "", fmt.Errorf("creating kube client: %w", err)
 	}
@@ -1208,7 +1208,7 @@ func (c *Config) getSwitchIP(ctx context.Context, entryName string) (string, err
 
 func (c *Config) getNodeIP(ctx context.Context, name string) (string, error) {
 	kubeconfig := filepath.Join(c.WorkDir, VLABDir, VLABKubeConfig)
-	kube, err := kubeutil.NewClient(ctx, kubeconfig, fabapi.SchemeBuilder)
+	kube, err := kubeutil.NewClient(ctx, kubeconfig, fabapi.AddToScheme)
 	if err != nil {
 		return "", fmt.Errorf("creating kube client: %w", err)
 	}

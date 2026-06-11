@@ -44,10 +44,10 @@ import (
 	kmeta "k8s.io/apimachinery/pkg/api/meta"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlutil "sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/scheme"
 )
 
 const (
@@ -69,18 +69,15 @@ var HashPolicies = []string{
 	HashPolicyVLANAndSrcMAC,
 }
 
-var schemeBuilders = []*scheme.Builder{
-	wiringapi.SchemeBuilder,
-	vpcapi.SchemeBuilder,
-	agentapi.SchemeBuilder,
-	dhcpapi.SchemeBuilder,
-	fabapi.SchemeBuilder,
-	gwapi.SchemeBuilder,
-	gwintapi.SchemeBuilder,
-	{
-		GroupVersion:  coreapi.SchemeGroupVersion,
-		SchemeBuilder: coreapi.SchemeBuilder,
-	},
+var schemeBuilders = []func(*runtime.Scheme) error{
+	wiringapi.AddToScheme,
+	vpcapi.AddToScheme,
+	agentapi.AddToScheme,
+	dhcpapi.AddToScheme,
+	fabapi.AddToScheme,
+	gwapi.AddToScheme,
+	gwintapi.AddToScheme,
+	coreapi.AddToScheme,
 }
 
 func getKubeClientWithCache(ctx context.Context, workDir string) (context.CancelFunc, client.Client, error) {
