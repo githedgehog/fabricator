@@ -13,6 +13,9 @@ import (
 	"reflect"
 	"strings"
 
+	cmapi "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
+	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
+	helmapi "github.com/k3s-io/helm-controller/pkg/apis/helm.cattle.io/v1"
 	"github.com/samber/lo"
 	agentapi "go.githedgehog.com/fabric/api/agent/v1beta1"
 	dhcpapi "go.githedgehog.com/fabric/api/dhcp/v1beta1"
@@ -23,7 +26,6 @@ import (
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
-	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/libmeta/pkg/alloy"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -35,7 +37,6 @@ import (
 	"k8s.io/client-go/util/retry"
 	metricsapi "k8s.io/metrics/pkg/apis/metrics/v1beta1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/scheme"
 	kyaml "sigs.k8s.io/yaml"
 )
 
@@ -44,13 +45,13 @@ const (
 	githubActionsValue = "true"
 )
 
-var schemeBuilders = []*scheme.Builder{ //nolint:staticcheck
-	comp.CoreAPISchemeBuilder, comp.AppsAPISchemeBuilder, comp.RBACAPISchemeBuilder, comp.MetricsSchemeBuilder, comp.APIExtSchemeBuilder,
-	comp.HelmAPISchemeBuilder,
-	comp.CMApiSchemeBuilder, comp.CMMetaSchemeBuilder,
-	wiringapi.SchemeBuilder, vpcapi.SchemeBuilder, dhcpapi.SchemeBuilder, agentapi.SchemeBuilder,
-	fabapi.SchemeBuilder,
-	gwapi.SchemeBuilder, gwintapi.SchemeBuilder,
+var schemeBuilders = []func(*runtime.Scheme) error{
+	corev1.AddToScheme, appsv1.AddToScheme, rbacv1.AddToScheme, metricsapi.AddToScheme, apiextv1.AddToScheme,
+	helmapi.AddToScheme,
+	cmapi.AddToScheme, cmmeta.AddToScheme,
+	wiringapi.AddToScheme, vpcapi.AddToScheme, dhcpapi.AddToScheme, agentapi.AddToScheme,
+	fabapi.AddToScheme,
+	gwapi.AddToScheme, gwintapi.AddToScheme,
 }
 
 var kubeResourceGVKs = []schema.GroupVersionKind{

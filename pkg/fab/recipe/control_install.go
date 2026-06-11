@@ -14,6 +14,9 @@ import (
 	"strings"
 	"time"
 
+	cmapi "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
+	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
+	helmapi "github.com/k3s-io/helm-controller/pkg/apis/helm.cattle.io/v1"
 	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
@@ -25,6 +28,8 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/zot"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
+	appsapi "k8s.io/api/apps/v1"
+	coreapi "k8s.io/api/core/v1"
 	kapierrors "k8s.io/apimachinery/pkg/api/errors"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -207,9 +212,9 @@ func (c *ControlInstall) installK8s(ctx context.Context) (kclient.Client, error)
 	slog.Debug("Waiting for k8s node ready")
 
 	kube, err := kubeutil.NewClient(ctx, k3s.KubeConfigPath,
-		comp.CoreAPISchemeBuilder, comp.AppsAPISchemeBuilder,
-		comp.HelmAPISchemeBuilder, comp.CMApiSchemeBuilder, comp.CMMetaSchemeBuilder,
-		wiringapi.SchemeBuilder, vpcapi.SchemeBuilder, fabapi.SchemeBuilder, gwapi.SchemeBuilder,
+		coreapi.AddToScheme, appsapi.AddToScheme,
+		helmapi.AddToScheme, cmapi.AddToScheme, cmmeta.AddToScheme,
+		wiringapi.AddToScheme, vpcapi.AddToScheme, fabapi.AddToScheme, gwapi.AddToScheme,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("creating kube client: %w", err)

@@ -15,6 +15,9 @@ import (
 	"time"
 
 	"github.com/Masterminds/semver/v3"
+	cmapi "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
+	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
+	helmapi "github.com/k3s-io/helm-controller/pkg/apis/helm.cattle.io/v1"
 	agentapi "go.githedgehog.com/fabric/api/agent/v1beta1"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
@@ -30,6 +33,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k9s"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/zot"
+	appsapi "k8s.io/api/apps/v1"
 	coreapi "k8s.io/api/core/v1"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -50,9 +54,9 @@ func (c *ControlUpgrade) Run(ctx context.Context) error {
 	slog.Info("Running control node upgrade")
 
 	kube, err := kubeutil.NewClient(ctx, k3s.KubeConfigPath,
-		comp.CoreAPISchemeBuilder, comp.AppsAPISchemeBuilder,
-		comp.HelmAPISchemeBuilder, comp.CMApiSchemeBuilder, comp.CMMetaSchemeBuilder,
-		wiringapi.SchemeBuilder, vpcapi.SchemeBuilder, agentapi.SchemeBuilder, fabapi.SchemeBuilder,
+		coreapi.AddToScheme, appsapi.AddToScheme,
+		helmapi.AddToScheme, cmapi.AddToScheme, cmmeta.AddToScheme,
+		wiringapi.AddToScheme, vpcapi.AddToScheme, agentapi.AddToScheme, fabapi.AddToScheme,
 	)
 	if err != nil {
 		return fmt.Errorf("creating kube client: %w", err)

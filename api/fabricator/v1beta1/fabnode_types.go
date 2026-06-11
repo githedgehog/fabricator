@@ -11,6 +11,7 @@ import (
 	"github.com/samber/lo"
 	kmeta "k8s.io/apimachinery/pkg/api/meta"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -62,7 +63,11 @@ type FabNodeList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&FabNode{}, &FabNodeList{})
+	SchemeBuilder.Register(func(s *runtime.Scheme) error {
+		s.AddKnownTypes(GroupVersion, &FabNode{}, &FabNodeList{})
+
+		return nil
+	})
 }
 
 func (n *FabNode) Default() {

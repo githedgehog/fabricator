@@ -18,6 +18,7 @@ import (
 	"go.githedgehog.com/fabricator/api/meta"
 	"go.githedgehog.com/libmeta/pkg/alloy"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
@@ -460,7 +461,11 @@ type FabricatorList struct {
 var fabricatorValidate *validator.Validate
 
 func init() {
-	SchemeBuilder.Register(&Fabricator{}, &FabricatorList{})
+	SchemeBuilder.Register(func(s *runtime.Scheme) error {
+		s.AddKnownTypes(GroupVersion, &Fabricator{}, &FabricatorList{})
+
+		return nil
+	})
 
 	fabricatorValidate = validator.New()
 

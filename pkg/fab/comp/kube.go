@@ -18,16 +18,13 @@ import (
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 	appsapi "k8s.io/api/apps/v1"
 	coreapi "k8s.io/api/core/v1"
-	rbacapi "k8s.io/api/rbac/v1"
 	apiextapi "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	kapierrors "k8s.io/apimachinery/pkg/api/errors"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
-	metricsapi "k8s.io/metrics/pkg/apis/metrics/v1beta1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlutil "sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/scheme"
 )
 
 const (
@@ -103,41 +100,6 @@ const (
 	BasicAuthUsernameKey                  = coreapi.BasicAuthUsernameKey
 	BasicAuthPasswordKey                  = coreapi.BasicAuthPasswordKey
 	DockerConfigJSONKey                   = coreapi.DockerConfigJsonKey
-)
-
-var (
-	CoreAPISchemeBuilder = &scheme.Builder{ //nolint:staticcheck
-		GroupVersion:  coreapi.SchemeGroupVersion,
-		SchemeBuilder: coreapi.SchemeBuilder,
-	}
-	AppsAPISchemeBuilder = &scheme.Builder{ //nolint:staticcheck
-		GroupVersion:  appsapi.SchemeGroupVersion,
-		SchemeBuilder: appsapi.SchemeBuilder,
-	}
-	RBACAPISchemeBuilder = &scheme.Builder{ //nolint:staticcheck
-		GroupVersion:  rbacapi.SchemeGroupVersion,
-		SchemeBuilder: rbacapi.SchemeBuilder,
-	}
-	MetricsSchemeBuilder = &scheme.Builder{ //nolint:staticcheck
-		GroupVersion:  metricsapi.SchemeGroupVersion,
-		SchemeBuilder: metricsapi.SchemeBuilder,
-	}
-	APIExtSchemeBuilder = &scheme.Builder{ //nolint:staticcheck
-		GroupVersion:  apiextapi.SchemeGroupVersion,
-		SchemeBuilder: apiextapi.SchemeBuilder,
-	}
-	HelmAPISchemeBuilder = &scheme.Builder{ //nolint:staticcheck
-		GroupVersion:  helmapi.SchemeGroupVersion,
-		SchemeBuilder: helmapi.SchemeBuilder,
-	}
-	CMApiSchemeBuilder = &scheme.Builder{ //nolint:staticcheck
-		GroupVersion:  cmapi.SchemeGroupVersion,
-		SchemeBuilder: cmapi.SchemeBuilder,
-	}
-	CMMetaSchemeBuilder = &scheme.Builder{ //nolint:staticcheck
-		GroupVersion:  cmmeta.SchemeGroupVersion,
-		SchemeBuilder: cmmeta.SchemeBuilder,
-	}
 )
 
 var ErrUnsupportedKind = fmt.Errorf("unsupported kind")
