@@ -190,7 +190,7 @@ jobs:
             --fabric-mode=${{ inputs.fabricmode }} \
             --include-onie=${{ inputs.includeonie }} \
             --gateway=${{ inputs.gateway }}
-          old/hhfab vlab gen -v ${{ inputs.mesh && '--mesh-links-count=3' || '' }}
+          old/hhfab vlab gen -v --eslag-leaf-groups="2,2" --orphan-leafs-count=1 ${{ inputs.mesh && '--mesh-links-count=3' || '' }}
 
       - name: (${{ inputs.upgradefrom }}) Init hhfab for hybrid mode
         if: ${{ inputs.upgradefrom != '' && inputs.hybrid }}
