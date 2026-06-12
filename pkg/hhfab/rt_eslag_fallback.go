@@ -18,9 +18,8 @@ import (
 )
 
 const (
-	eslagPxeDHCPTimeoutSec  = 20
-	eslagPxeAttemptsPerLeg  = 3
-	eslagPxeAttemptsPerLegX = 5
+	eslagPxeDHCPTimeoutSec = 20
+	eslagPxeAttemptsPerLeg = 3
 )
 
 func eslagFallbackTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
@@ -48,15 +47,10 @@ func eslagFallbackTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, [
 		candidates = candidates[:1]
 	}
 
-	attempts := eslagPxeAttemptsPerLeg
-	if testCtx.extended {
-		attempts = eslagPxeAttemptsPerLegX
-	}
-
 	reverts := make([]RevertFunc, 0)
-	ranAtLeastOne := false
+	ranAtLeastOnce := false
 	for _, conn := range candidates {
-		vlan, server, err := findESLAGAttachedSubnet(ctx, testCtx.kube, conn)
+		vlan, server, err := findESLAGAttachedVLAN(ctx, testCtx.kube, conn)
 		if err != nil {
 			return false, reverts, fmt.Errorf("finding VPC attachment for connection %s: %w", conn.Name, err)
 		}
@@ -99,26 +93,25 @@ func eslagFallbackTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, [
 		failures := make([]string, 0)
 		for _, slave := range slaves {
 			ok := 0
-			for i := 0; i < attempts; i++ {
+			for i := 0; i < eslagPxeAttemptsPerLeg; i++ {
 				got := pxeAttempt(ctx, ssh, slave, vlan, eslagPxeDHCPTimeoutSec)
 				if got {
 					ok++
 				}
 			}
-			slog.Info("Port-channel fallback leg result", "server", server, "slave", slave, "leaf", leafForSlave[slave], "ok", ok, "attempts", attempts)
+			slog.Info("Port-channel fallback leg result", "server", server, "slave", slave, "leaf", leafForSlave[slave], "ok", ok, "attempts", eslagPxeAttemptsPerLeg)
 			if ok == 0 {
 				failures = append(failures, fmt.Sprintf("slave=%s leaf=%s connection=%s", slave, leafForSlave[slave], conn.Name))
 			}
+			ranAtLeastOnce = true
 		}
-
-		ranAtLeastOne = true
 
 		if len(failures) > 0 {
 			return false, reverts, fmt.Errorf("port-channel fallback DHCP not relayed on legs: %s", strings.Join(failures, "; ")) //nolint:goerr113
 		}
 	}
 
-	if !ranAtLeastOne {
+	if !ranAtLeastOnce {
 		return true, reverts, fmt.Errorf("no ESLAG connection with a VPC attachment found") //nolint:goerr113
 	}
 
@@ -167,8 +160,8 @@ func enableESLAGFallback(ctx context.Context, testCtx *VPCPeeringTestCtx, name s
 	return nil
 }
 
-// findESLAGAttachedSubnet returns vlan=0 if the connection has no attachment.
-func findESLAGAttachedSubnet(ctx context.Context, kube kclient.Client, conn *wiringapi.Connection) (uint16, string, error) {
+// findESLAGAttachedVLAN returns the VLAN for the connection's VPC attachment, or 0 if none.
+func findESLAGAttachedVLAN(ctx context.Context, kube kclient.Client, conn *wiringapi.Connection) (uint16, string, error) {
 	_, serverNames, _, _, err := conn.Spec.Endpoints() //nolint:dogsled
 	if err != nil || len(serverNames) != 1 {
 		return 0, "", fmt.Errorf("connection %s does not have a single server endpoint", conn.Name) //nolint:goerr113
@@ -176,13 +169,10 @@ func findESLAGAttachedSubnet(ctx context.Context, kube kclient.Client, conn *wir
 	server := serverNames[0]
 
 	attaches := &vpcapi.VPCAttachmentList{}
-	if err := kube.List(ctx, attaches); err != nil {
+	if err := kube.List(ctx, attaches, kclient.MatchingLabels{wiringapi.LabelConnection: conn.Name}); err != nil {
 		return 0, server, fmt.Errorf("listing VPCAttachments: %w", err)
 	}
 	for _, a := range attaches.Items {
-		if a.Spec.Connection != conn.Name {
-			continue
-		}
 		vpc := &vpcapi.VPC{}
 		if err := kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: a.Spec.VPCName()}, vpc); err != nil {
 			continue
@@ -198,7 +188,7 @@ func findESLAGAttachedSubnet(ctx context.Context, kube kclient.Client, conn *wir
 	return 0, server, nil
 }
 
-// pxeAttempt bounds hhnet's 5-minute DHCP wait with timeout(1) so a
+// pxeAttempt bounds hhnet's 5-minute DHCP wait with a timeout so a
 // non-relaying leg fails fast.
 func pxeAttempt(ctx context.Context, ssh *sshutil.Config, slave string, vlan uint16, timeoutSec int) bool {
 	cmd := fmt.Sprintf("/opt/bin/hhnet cleanup >/dev/null 2>&1 || true; timeout %d /opt/bin/hhnet vlan %d %s", timeoutSec, vlan, slave)
