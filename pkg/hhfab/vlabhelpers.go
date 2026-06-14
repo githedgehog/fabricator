@@ -774,7 +774,7 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB, opts ShowTechOpts
 	// cluster is unreachable, peer pings are simply skipped.
 	serverHostIPs := map[string]string{}
 	kubeconfig := filepath.Join(c.WorkDir, VLABDir, VLABKubeConfig)
-	if kube, err := kubeutil.NewClient(ctx, kubeconfig, dhcpapi.SchemeBuilder); err != nil {
+	if kube, err := kubeutil.NewClient(ctx, kubeconfig, dhcpapi.AddToScheme); err != nil {
 		slog.Warn("Failed to create kube client for peer server IPs", "err", err)
 	} else {
 		dhcpSubnets := &dhcpapi.DHCPSubnetList{}
