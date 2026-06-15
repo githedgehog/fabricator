@@ -29,7 +29,7 @@ const (
 	FRRVersion = meta.Version("v0.22.0")
 
 	// Broadcom Enterprise SONiC version (including all flavors)
-	BCMSONiCVersion = meta.Version("v4.5.0")
+	BCMSONiCVersion = meta.Version("v4.5.2")
 
 	// Celestica SONiC+ version (including all flavors)
 	CLSSONiCVersion = meta.Version("v4.2.1")
