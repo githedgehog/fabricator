@@ -5,13 +5,13 @@ import "hack/diagrams.just"
 
 # Print list of available recipes
 default:
-  @just --list
+    @just --list
 
 export CGO_ENABLED := "0"
 
 _gotools: _touch_embed
-  go fmt ./...
-  go vet {{go_flags}} ./...
+    go fmt ./...
+    go vet {{ go_flags }} ./...
 
 # Called in CI
 _lint: _license_headers _gotools lint-gha
@@ -21,11 +21,11 @@ all: gen lint test build kube-build && version
 
 # Run linters against code (incl. license headers)
 lint: _lint _golangci_lint
-  {{golangci_lint}} run --show-stats ./...
+    {{ golangci_lint }} run --show-stats ./...
 
 # Run golangci-lint to attempt to fix issues
 lint-fix: _lint _golangci_lint
-  {{golangci_lint}} run --show-stats --fix ./...
+    {{ golangci_lint }} run --show-stats --fix ./...
 
 oem_dir := "./pkg/embed/flatcaroem"
 go_base_flags := "--tags containers_image_openpgp,containers_image_storage_stub,containers_image_docker_daemon_stub"
@@ -34,26 +34,26 @@ go_build := "go build " + go_flags
 go_linux_build := "GOOS=linux GOARCH=amd64 " + go_build
 
 _touch_embed:
-  @touch ./pkg/embed/recipebin/hhfab-recipe.gz
-  @touch {{oem_dir}}/oem.cpio.gz
-  @touch {{oem_dir}}/hhfab-flatcar-install
+    @touch ./pkg/embed/recipebin/hhfab-recipe.gz
+    @touch {{ oem_dir }}/oem.cpio.gz
+    @touch {{ oem_dir }}/hhfab-flatcar-install
 
 _hhfab_embed: _touch_embed
-  # Build hhfab-recipe binary for embedding
-  {{go_linux_build}} -o ./pkg/embed/recipebin/hhfab-recipe ./cmd/hhfab-recipe
-  gzip -fk ./pkg/embed/recipebin/hhfab-recipe
+    # Build hhfab-recipe binary for embedding
+    {{ go_linux_build }} -o ./pkg/embed/recipebin/hhfab-recipe ./cmd/hhfab-recipe
+    gzip -fk ./pkg/embed/recipebin/hhfab-recipe
 
-  # Build flatcar oem.cpio.gz for embedding
-  @mkdir -p {{oem_dir}}/usr/share/oem
-  {{go_linux_build}} -o {{oem_dir}}/hhfab-flatcar-install ./cmd/hhfab-flatcar-install
-  {{butane}} --strict --output {{oem_dir}}/usr/share/oem/config.ign --files-dir {{oem_dir}} ./pkg/fab/recipe/flatcar/os_install_butane.yaml
-  cd {{oem_dir}} && find usr | cpio -o -H newc | gzip -f > oem.cpio.gz
+    # Build flatcar oem.cpio.gz for embedding
+    @mkdir -p {{ oem_dir }}/usr/share/oem
+    {{ go_linux_build }} -o {{ oem_dir }}/hhfab-flatcar-install ./cmd/hhfab-flatcar-install
+    {{ butane }} --strict --output {{ oem_dir }}/usr/share/oem/config.ign --files-dir {{ oem_dir }} ./pkg/fab/recipe/flatcar/os_install_butane.yaml
+    cd {{ oem_dir }} && find usr | cpio -o -H newc | gzip -f > oem.cpio.gz
 
 _kube_gen:
-  # Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject implementations
-  {{controller_gen}} object:headerFile="hack/boilerplate.go.txt" paths="./api/..." paths="./pkg/controller/..."
-  # Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects
-  {{controller_gen}} rbac:roleName=manager-role crd webhook paths="./api/..." paths="./pkg/controller/..." output:crd:artifacts:config=config/crd/bases
+    # Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject implementations
+    {{ controller_gen }} object:headerFile="hack/boilerplate.go.txt" paths="./api/..." paths="./pkg/controller/..."
+    # Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects
+    {{ controller_gen }} rbac:roleName=manager-role crd webhook paths="./api/..." paths="./pkg/controller/..." output:crd:artifacts:config=config/crd/bases
 
 docs_image_name := "ghcr.io/githedgehog/hhdocs"
 docs_image_version := "20241202"
@@ -61,55 +61,55 @@ docs_image := docs_image_name + ":" + docs_image_version
 docs_test_dir := './docs/test'
 
 test-docs:
-  rm -rf "{{docs_test_dir}}" || true
-  mkdir -p "{{docs_test_dir}}/docs"
-  cp docs/api.md "{{docs_test_dir}}/docs/"
+    rm -rf "{{ docs_test_dir }}" || true
+    mkdir -p "{{ docs_test_dir }}/docs"
+    cp docs/api.md "{{ docs_test_dir }}/docs/"
 
-  # Create minimal mkdocs.yml config file; warn on broken links
-  echo 'site_name: API Reference Build Test' > "{{docs_test_dir}}/mkdocs.yml"
-  echo 'validation:'                        >> "{{docs_test_dir}}/mkdocs.yml"
-  echo '  not_found: warn'                  >> "{{docs_test_dir}}/mkdocs.yml"
-  echo '  absolute_links: warn'             >> "{{docs_test_dir}}/mkdocs.yml"
-  echo '  unrecognized_links: warn'         >> "{{docs_test_dir}}/mkdocs.yml"
-  echo '  anchors: warn'                    >> "{{docs_test_dir}}/mkdocs.yml"
+    # Create minimal mkdocs.yml config file; warn on broken links
+    echo 'site_name: API Reference Build Test' > "{{ docs_test_dir }}/mkdocs.yml"
+    echo 'validation:'                        >> "{{ docs_test_dir }}/mkdocs.yml"
+    echo '  not_found: warn'                  >> "{{ docs_test_dir }}/mkdocs.yml"
+    echo '  absolute_links: warn'             >> "{{ docs_test_dir }}/mkdocs.yml"
+    echo '  unrecognized_links: warn'         >> "{{ docs_test_dir }}/mkdocs.yml"
+    echo '  anchors: warn'                    >> "{{ docs_test_dir }}/mkdocs.yml"
 
-  # Make sure that docs/api.md builds as HTML with no warnings
-  docker run --rm \
-      --user "$(id -u):$(id -g)" \
-      -v "{{docs_test_dir}}":/docs \
-      "{{docs_image}}" \
-      mkdocs build --strict
+    # Make sure that docs/api.md builds as HTML with no warnings
+    docker run --rm \
+        --user "$(id -u):$(id -g)" \
+        -v "{{ docs_test_dir }}":/docs \
+        "{{ docs_image }}" \
+        mkdocs build --strict
 
 # Generate docs, code/manifests, things to embed, etc
 gen: _kube_gen _hhfab_embed _crd_ref_docs && test-docs
-  {{crd_ref_docs}} --source-path=./api/ --config=api/docs.config.yaml --renderer=markdown --output-path=./docs/api.md
+    {{ crd_ref_docs }} --source-path=./api/ --config=api/docs.config.yaml --renderer=markdown --output-path=./docs/api.md
 
 hhfab-build: _license_headers _gotools _kube_gen _hhfab_embed && version
-  {{go_linux_build}} -o ./bin/hhfab ./cmd/hhfab
+    {{ go_linux_build }} -o ./bin/hhfab ./cmd/hhfab
 
 hhfabctl-build: _license_headers _gotools _kube_gen && version
-  {{go_linux_build}} -o ./bin/hhfabctl ./cmd/hhfabctl
+    {{ go_linux_build }} -o ./bin/hhfabctl ./cmd/hhfabctl
 
 # Build hhfab for local OS/Arch
 hhfab-build-local: _license_headers _gotools _kube_gen _hhfab_embed && version
-  {{go_build}} -o ./bin/hhfab ./cmd/hhfab
+    {{ go_build }} -o ./bin/hhfab ./cmd/hhfab
 
 _hhfab-build GOOS GOARCH: _license_headers _gotools _kube_gen _hhfab_embed
-  GOOS={{GOOS}} GOARCH={{GOARCH}} {{go_build}} -o ./bin/hhfab-{{GOOS}}-{{GOARCH}}/hhfab ./cmd/hhfab
-  cd bin && tar -czvf hhfab-{{GOOS}}-{{GOARCH}}-{{version}}.tar.gz hhfab-{{GOOS}}-{{GOARCH}}/hhfab
+    GOOS={{ GOOS }} GOARCH={{ GOARCH }} {{ go_build }} -o ./bin/hhfab-{{ GOOS }}-{{ GOARCH }}/hhfab ./cmd/hhfab
+    cd bin && tar -czvf hhfab-{{ GOOS }}-{{ GOARCH }}-{{ version }}.tar.gz hhfab-{{ GOOS }}-{{ GOARCH }}/hhfab
 
 _hhfabctl-build GOOS GOARCH: _license_headers _gotools _kube_gen
-  GOOS={{GOOS}} GOARCH={{GOARCH}} {{go_build}} -o ./bin/hhfabctl-{{GOOS}}-{{GOARCH}}/hhfabctl ./cmd/hhfabctl
-  cd bin && tar -czvf hhfabctl-{{GOOS}}-{{GOARCH}}-{{version}}.tar.gz hhfabctl-{{GOOS}}-{{GOARCH}}/hhfabctl
+    GOOS={{ GOOS }} GOARCH={{ GOARCH }} {{ go_build }} -o ./bin/hhfabctl-{{ GOOS }}-{{ GOARCH }}/hhfabctl ./cmd/hhfabctl
+    cd bin && tar -czvf hhfabctl-{{ GOOS }}-{{ GOARCH }}-{{ version }}.tar.gz hhfabctl-{{ GOOS }}-{{ GOARCH }}/hhfabctl
 
 # Build hhfab and other user-facing binaries for all supported OS/Arch
 build-multi: (_hhfab-build "linux" "amd64") (_hhfab-build "linux" "arm64") (_hhfab-build "darwin" "amd64") (_hhfab-build "darwin" "arm64") (_hhfabctl-build "linux" "amd64") (_hhfabctl-build "linux" "arm64") (_hhfabctl-build "darwin" "amd64") (_hhfabctl-build "darwin" "arm64") && version
 
 # Build all artifacts
 build: _license_headers gen _gotools hhfab-build hhfabctl-build && version
-  {{go_linux_build}} -o ./bin/fabricator ./cmd
-  {{go_linux_build}} -o ./bin/hhfab-node-config ./cmd/hhfab-node-config
-  # Build complete
+    {{ go_linux_build }} -o ./bin/fabricator ./cmd
+    {{ go_linux_build }} -o ./bin/hhfab-node-config ./cmd/hhfab-node-config
+    # Build complete
 
 # TODO rework by using existing recipes and installing with helm chart
 # Run e2e tests on existing Kind cluster
@@ -120,40 +120,40 @@ oci_repo := "127.0.0.1:30000"
 oci_prefix := "githedgehog/fabricator"
 
 _helm-fabricator-api: _helm _kube_gen
-  @rm config/helm/fabricator-api-v*.tgz || true
-  {{kustomize}} build config/crd > config/helm/fabricator-api/templates/crds.yaml
-  {{helm}} package config/helm/fabricator-api --destination config/helm --version {{version}}
-  {{helm}} lint config/helm/fabricator-api-{{version}}.tgz
+    @rm config/helm/fabricator-api-v*.tgz || true
+    {{ kustomize }} build config/crd > config/helm/fabricator-api/templates/crds.yaml
+    {{ helm }} package config/helm/fabricator-api --destination config/helm --version {{ version }}
+    {{ helm }} lint config/helm/fabricator-api-{{ version }}.tgz
 
 _helm-fabricator: _helm _helmify _kube_gen
-  @rm config/helm/fabricator-v*.tgz || true
-  @rm config/helm/fabricator/templates/*.yaml config/helm/fabricator/values.yaml || true
-  {{kustomize}} build config/default | {{helmify}} config/helm/fabricator
-  {{helm}} package config/helm/fabricator --destination config/helm --version {{version}}
-  {{helm}} lint config/helm/fabricator-{{version}}.tgz
+    @rm config/helm/fabricator-v*.tgz || true
+    @rm config/helm/fabricator/templates/*.yaml config/helm/fabricator/values.yaml || true
+    {{ kustomize }} build config/default | {{ helmify }} config/helm/fabricator
+    {{ helm }} package config/helm/fabricator --destination config/helm --version {{ version }}
+    {{ helm }} lint config/helm/fabricator-{{ version }}.tgz
 
 # Build all K8s artifacts (images and charts)
 kube-build: build (_docker-build "fabricator") (_docker-build "hhfab-node-config") _helm-fabricator-api _helm-fabricator (_helm-build "ntp") (_helm-build "control-proxy") && version
-  # Docker images and Helm charts built
+    # Docker images and Helm charts built
 
 # Push all K8s artifacts (images and charts)
 kube-push: kube-build (_helm-push "fabricator-api") (_kube-push "fabricator") (_docker-push "hhfab-node-config") (_helm-push "ntp") (_helm-push "control-proxy") && version
-  # Docker images and Helm charts pushed
+    # Docker images and Helm charts pushed
 
 _hhfab-push-main: _oras hhfab-build && version
-  cd bin && {{localpath}}/{{oras}} push {{oras_insecure}} {{oci_repo}}/{{oci_prefix}}/hhfab:{{version}} hhfab
+    cd bin && {{ localpath }}/{{ oras }} push {{ oras_insecure }} {{ oci_repo }}/{{ oci_prefix }}/hhfab:{{ version }} hhfab
 
 _hhfabctl-push-main: _oras hhfabctl-build && version
-  cd bin && {{localpath}}/{{oras}} push {{oras_insecure}} {{oci_repo}}/{{oci_prefix}}/hhfabctl:{{version}} hhfabctl
+    cd bin && {{ localpath }}/{{ oras }} push {{ oras_insecure }} {{ oci_repo }}/{{ oci_prefix }}/hhfabctl:{{ version }} hhfabctl
 
 # Push all K8s artifacts (images and charts) and binaries
 push: kube-push _hhfab-push-main _hhfabctl-push-main && version
 
 _hhfab-push GOOS GOARCH: _oras (_hhfab-build GOOS GOARCH)
-  cd bin/hhfab-{{GOOS}}-{{GOARCH}} && {{localpath}}/{{oras}} push {{oras_insecure}} {{oci_repo}}/{{oci_prefix}}/hhfab-{{GOOS}}-{{GOARCH}}:{{version}} hhfab
+    cd bin/hhfab-{{ GOOS }}-{{ GOARCH }} && {{ localpath }}/{{ oras }} push {{ oras_insecure }} {{ oci_repo }}/{{ oci_prefix }}/hhfab-{{ GOOS }}-{{ GOARCH }}:{{ version }} hhfab
 
 _hhfabctl-push GOOS GOARCH: _oras (_hhfabctl-build GOOS GOARCH)
-  cd bin/hhfabctl-{{GOOS}}-{{GOARCH}} && {{localpath}}/{{oras}} push {{oras_insecure}} {{oci_repo}}/{{oci_prefix}}/hhfabctl-{{GOOS}}-{{GOARCH}}:{{version}} hhfabctl
+    cd bin/hhfabctl-{{ GOOS }}-{{ GOARCH }} && {{ localpath }}/{{ oras }} push {{ oras_insecure }} {{ oci_repo }}/{{ oci_prefix }}/hhfabctl-{{ GOOS }}-{{ GOARCH }}:{{ version }} hhfabctl
 
 _hhfab-push-multi: (_hhfab-push "linux" "amd64") (_hhfab-push "linux" "arm64") (_hhfab-push "darwin" "amd64") (_hhfab-push "darwin" "arm64")
 
@@ -162,42 +162,43 @@ _hhfabctl-push-multi: (_hhfabctl-push "linux" "amd64") (_hhfabctl-push "linux" "
 # Publish hhfab and other user-facing binaries for all supported OS/Arch
 push-multi: _hhfab-push-multi _hhfabctl-push-multi && version
 
+[private]
 _test_api_kind := "fab-api"
 
 # Install API on a kind cluster and wait for CRDs to be ready
 test-api: _helm _helm-fabricator-api
-  {{helm}} install -n default fabricator-api config/helm/fabricator-api-{{version}}.tgz
-  sleep 10
-  kubectl wait --for condition=established --timeout=60s crd/fabricators.fabricator.githedgehog.com
-  kubectl wait --for condition=established --timeout=60s crd/fabnodes.fabricator.githedgehog.com
-  kubectl get crd | grep fabricator
+    {{ helm }} install -n default fabricator-api config/helm/fabricator-api-{{ version }}.tgz
+    sleep 10
+    kubectl wait --for condition=established --timeout=60s crd/fabricators.fabricator.githedgehog.com
+    kubectl wait --for condition=established --timeout=60s crd/fabnodes.fabricator.githedgehog.com
+    kubectl get crd | grep fabricator
 
 test-api-auto: _kind_prep test-api _kind_cleanup
 
 _kind_prep:
-  kind delete cluster --name {{_test_api_kind}} || kind delete cluster --name {{_test_api_kind}}
-  kind create cluster --name {{_test_api_kind}}
+    kind delete cluster --name {{ _test_api_kind }} || kind delete cluster --name {{ _test_api_kind }}
+    kind create cluster --name {{ _test_api_kind }}
 
 _kind_cleanup:
-  kind delete cluster --name {{_test_api_kind}} || kind delete cluster --name {{_test_api_kind}} || echo "Kind cluster {{_test_api_kind}} deletion failed, you may want to delete it manually"
+    kind delete cluster --name {{ _test_api_kind }} || kind delete cluster --name {{ _test_api_kind }} || echo "Kind cluster {{ _test_api_kind }} deletion failed, you may want to delete it manually"
 
 # Run VLAB Trivy security scan with configurable options
 security-scan *args="": && version
-  @echo "Checking prerequisites for VLAB security scan..."
-  @if [ ! -f "bin/hhfab" ]; then echo "ERROR: hhfab binary not found. Run 'just push' first."; exit 1; fi
-  @echo "Running VLAB Trivy security scan..."
-  @echo "Available options:"
-  @echo "  --control-only     Run only control VM setup and scanning"
-  @echo "  --gateway-only     Run only gateway VM setup and scanning"
-  @echo "  --skip-vlab        Skip launching VLAB (assumes VLAB is already running)"
-  @echo "  --strict           Require all scans to succeed (no partial successes)"
-  @echo "  --help, -h         Show help message"
-  @echo ""
-  ./hack/vlab-trivy-runner.sh {{args}}
+    @echo "Checking prerequisites for VLAB security scan..."
+    @if [ ! -f "bin/hhfab" ]; then echo "ERROR: hhfab binary not found. Run 'just push' first."; exit 1; fi
+    @echo "Running VLAB Trivy security scan..."
+    @echo "Available options:"
+    @echo "  --control-only     Run only control VM setup and scanning"
+    @echo "  --gateway-only     Run only gateway VM setup and scanning"
+    @echo "  --skip-vlab        Skip launching VLAB (assumes VLAB is already running)"
+    @echo "  --strict           Require all scans to succeed (no partial successes)"
+    @echo "  --help, -h         Show help message"
+    @echo ""
+    ./hack/vlab-trivy-runner.sh {{ args }}
 
 # Patch deployment using the default kubeconfig (KUBECONFIG env or ~/.kube/config)
 patch: && version
-  kubectl -n fab patch fab/default --type=merge -p '{"spec":{"overrides":{"versions":{"fabricator":{"api":"{{version}}","controller":"{{version}}","ctl":"{{version}}","nodeConfig":"{{version}}"}}}}}'
+    kubectl -n fab patch fab/default --type=merge -p '{"spec":{"overrides":{"versions":{"fabricator":{"api":"{{ version }}","controller":"{{ version }}","ctl":"{{ version }}","nodeConfig":"{{ version }}"}}}}}'
 
 #
 # Setup local registry
@@ -208,41 +209,41 @@ zot_arch := `hack/arch.sh`
 zot := localbin / "zot" + "-" + zot_os + "-" + zot_arch + "-" + zot_version
 
 @_zot: _localbin
-  [ -f {{zot}} ] || wget --quiet -O {{zot}} https://github.com/project-zot/zot/releases/download/{{zot_version}}/zot-{{zot_os}}-{{zot_arch}} && chmod +x {{zot}}
+    [ -f {{ zot }} ] || wget --quiet -O {{ zot }} https://github.com/project-zot/zot/releases/download/{{ zot_version }}/zot-{{ zot_os }}-{{ zot_arch }} && chmod +x {{ zot }}
 
 _localreg: _zot
-  ./hack/localreg.sh
-  {{zot}} serve .zot/config.json 2>&1 | tee .zot/log
+    ./hack/localreg.sh
+    {{ zot }} serve .zot/config.json 2>&1 | tee .zot/log
 
 # Run specified command with args with minimal Go flags (no version provided)
 run cmd *args:
-  @echo "Running: {{cmd}} {{args}} (run gen manually if needed)"
-  @go run {{go_base_flags}} ./cmd/{{cmd}} {{args}}
+    @echo "Running: {{ cmd }} {{ args }} (run gen manually if needed)"
+    @go run {{ go_base_flags }} ./cmd/{{ cmd }} {{ args }}
 
 bump component version ref="":
-  #!/usr/bin/env bash
-  set -euo pipefail
+    #!/usr/bin/env bash
+    set -euo pipefail
 
-  tidy=false
-  if [ "{{component}}" == "fabric" ]; then
-    echo "Bumping fabric version to {{version}} ref {{ref}}"
-    sed -i.bak "s/^\tFabricVersion.*/\tFabricVersion=meta.Version(\"{{ version }}\")/" pkg/fab/versions.go
-    go get go.githedgehog.com/fabric@{{ ref }}
-    tidy=true
-  elif [ "{{component}}" == "dataplane" ]; then
-    echo "Bumping dataplane version to {{version}}"
-    sed -i.bak "s/^\tDataplaneVersion.*/\tDataplaneVersion=meta.Version(\"{{ version }}\")/" pkg/fab/versions.go
-  elif [ "{{component}}" == "frr" ]; then
-    echo "Bumping frr version to {{version}}"
-    sed -i.bak "s/^\tFRRVersion.*/\tFRRVersion=meta.Version(\"{{ version }}\")/" pkg/fab/versions.go
-  else
-    echo "Unknown component: {{component}}"
-    exit 1
-  fi
+    tidy=false
+    if [ "{{ component }}" == "fabric" ]; then
+      echo "Bumping fabric version to {{ version }} ref {{ ref }}"
+      sed -i.bak "s/^\tFabricVersion.*/\tFabricVersion=meta.Version(\"{{ version }}\")/" pkg/fab/versions.go
+      go get go.githedgehog.com/fabric@{{ ref }}
+      tidy=true
+    elif [ "{{ component }}" == "dataplane" ]; then
+      echo "Bumping dataplane version to {{ version }}"
+      sed -i.bak "s/^\tDataplaneVersion.*/\tDataplaneVersion=meta.Version(\"{{ version }}\")/" pkg/fab/versions.go
+    elif [ "{{ component }}" == "frr" ]; then
+      echo "Bumping frr version to {{ version }}"
+      sed -i.bak "s/^\tFRRVersion.*/\tFRRVersion=meta.Version(\"{{ version }}\")/" pkg/fab/versions.go
+    else
+      echo "Unknown component: {{ component }}"
+      exit 1
+    fi
 
-  if [ "$tidy" == "true" ]; then
-    go mod tidy && go mod vendor && git add vendor
-  fi
+    if [ "$tidy" == "true" ]; then
+      go mod tidy && go mod vendor && git add vendor
+    fi
 
-  rm pkg/fab/versions.go.bak
-  go fmt pkg/fab/versions.go 1>/dev/null
+    rm pkg/fab/versions.go.bak
+    go fmt pkg/fab/versions.go 1>/dev/null
