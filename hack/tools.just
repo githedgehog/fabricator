@@ -80,7 +80,7 @@ oras := localbin / "oras" + "-" + oras_version
   [ -f {{oras}} ] || just _goinstall "oras.land/oras/cmd/oras" {{oras_version}} "oras" {{oras}}
 
 # actionlint
-actionlint_version := "v1.7.3"
+actionlint_version := "v1.7.12"
 actionlint := localbin / "actionlint" + "-" + actionlint_version
 @_actionlint: _localbin
   [ -f {{actionlint}} ] || just _goinstall "github.com/rhysd/actionlint/cmd/actionlint" {{actionlint_version}} "actionlint" {{actionlint}}
@@ -115,7 +115,7 @@ _license_headers: _addlicense
 
 # Run linter for GitHub Actions
 lint-gha: _actionlint
-   {{actionlint}} -verbose
+   {{actionlint}}
 
 # Run tests
 test path="./...": gen _envtest _gcov2lcov
