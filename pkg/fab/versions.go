@@ -32,7 +32,7 @@ const (
 	BCMSONiCVersion = meta.Version("v4.5.2")
 
 	// Celestica SONiC+ version (including all flavors)
-	CLSSONiCVersion = meta.Version("v4.2.1")
+	CLSSONiCVersion = meta.Version("v5.0.0")
 
 	// NVIDIA Cumulus version (including all flavors)
 	CumulusVersion = meta.Version("v5.16.0")

@@ -176,10 +176,10 @@ oras push ghcr.io/githedgehog/sonic-bcm-private/sonic-bcm-vs-img:${BCM_SONIC_VER
 ## Celestica SONiC+
 
 ```bash
-export CLS_SONIC_VERSION="v4.2.1"
+export CLS_SONIC_VERSION="v5.0.0"
 
 oras push ghcr.io/githedgehog/sonic-cls-private/sonic-cls-plus-broadcom:${CLS_SONIC_VERSION} sonic-broadcom.bin
-oras push ghcr.io/githedgehog/sonic-cls-private/sonic-cls-plus-marvell:${CLS_SONIC_VERSION} sonic-innovium.bin
+oras push ghcr.io/githedgehog/sonic-cls-private/sonic-cls-plus-marvell:${CLS_SONIC_VERSION} sonic-marvell-teralynx.bin
 oras push ghcr.io/githedgehog/sonic-cls-private/sonic-cls-plus-vs:${CLS_SONIC_VERSION} sonic-vs.bin
 ```
 
