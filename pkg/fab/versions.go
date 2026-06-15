@@ -29,7 +29,7 @@ const (
 	FRRVersion = meta.Version("v0.22.0")
 
 	// Broadcom Enterprise SONiC version (including all flavors)
-	BCMSONiCVersion = meta.Version("v4.5.0")
+	BCMSONiCVersion = meta.Version("v4.5.2")
 
 	// Celestica SONiC+ version (including all flavors)
 	CLSSONiCVersion = meta.Version("v4.2.1")
@@ -83,7 +83,7 @@ var Versions = fabapi.Versions{
 		Agent:      FabricVersion,
 		Ctl:        FabricVersion,
 		NOS: map[fmeta.NOSType]meta.Version{
-			fmeta.NOSTypeSONiCBCMVS:           BCMSONiCVersion,
+			fmeta.NOSTypeSONiCBCMVS:           meta.Version("v4.5.0"), // TODO: update to 4.5.2 when it's available
 			fmeta.NOSTypeSONiCBCMBase:         BCMSONiCVersion,
 			fmeta.NOSTypeSONiCBCMCampus:       BCMSONiCVersion,
 			fmeta.NOSTypeSONiCCLSPlusVS:       CLSSONiCVersion,
