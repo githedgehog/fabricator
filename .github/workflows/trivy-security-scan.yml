@@ -77,19 +77,19 @@ jobs:
         run: |
           case "${{ github.event.inputs.vm_selection || 'control-gateway' }}" in
             "control-only")
-              echo "args=--control-only" >> $GITHUB_OUTPUT
+              echo "args=--control-only" >> "$GITHUB_OUTPUT"
               ;;
             "gateway-only")
-              echo "args=--gateway-only" >> $GITHUB_OUTPUT
+              echo "args=--gateway-only" >> "$GITHUB_OUTPUT"
               ;;
             "switch-only")
-              echo "args=--switch-only" >> $GITHUB_OUTPUT
+              echo "args=--switch-only" >> "$GITHUB_OUTPUT"
               ;;
             "all")
-              echo "args=--all" >> $GITHUB_OUTPUT
+              echo "args=--all" >> "$GITHUB_OUTPUT"
               ;;
             "control-gateway"|*)
-              echo "args=" >> $GITHUB_OUTPUT
+              echo "args=" >> "$GITHUB_OUTPUT"
               ;;
           esac
 
