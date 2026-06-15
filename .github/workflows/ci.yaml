@@ -211,7 +211,10 @@ jobs:
         run: |
           just --timestamp _zot
           just --timestamp _localreg &
-          for i in $(seq 1 60); do curl -sf http://127.0.0.1:30000/v2/ > /dev/null 2>&1 && break || sleep 1; done
+          for _ in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:30000/v2/ > /dev/null 2>&1; then break; fi
+            sleep 1
+          done
           curl -sf http://127.0.0.1:30000/v2/ > /dev/null 2>&1 || { echo "Local registry failed to start"; exit 1; }
           echo "Local registry is ready"
 
