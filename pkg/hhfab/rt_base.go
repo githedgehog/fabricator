@@ -564,7 +564,7 @@ func doRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 					}
 				}
 
-				break
+				continue
 			}
 		}
 		if testCtx.failFast && err != nil {
