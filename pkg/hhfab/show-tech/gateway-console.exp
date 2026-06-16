@@ -215,6 +215,10 @@ if {$logged_in} {
     run_cmd "ls -la ~/.ssh/" $prompt_re 10
     run_cmd "cat ~/.ssh/authorized_keys" $prompt_re 10
 
+    # Flatcar installer service (present only during USB install; decisive for install-no-reboot failures)
+    run_cmd "systemctl status flatcar-install.service --no-pager" $prompt_re 30
+    run_cmd "journalctl -u flatcar-install --no-pager -n 100" $prompt_re 60
+
     # K3s agent status
     run_cmd "systemctl status k3s-agent --no-pager" $prompt_re 30
     run_cmd "journalctl -u k3s-agent --no-pager -n 50" $prompt_re 60
