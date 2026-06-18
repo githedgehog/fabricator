@@ -109,6 +109,7 @@ type VLABRunOpts struct {
 	ReleaseTestRegexes       []string
 	ReleaseTestRegexesInvert bool
 	ReleaseTestOnReadyOnly   bool
+	ReleaseTestExtended      bool
 	InterfaceMTU             uint16
 }
 
@@ -764,6 +765,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						ShowTechDump:   true,
 						IPerfsMinSpeed: 8200,
 						OnReadyTest:    opts.ReleaseTestOnReadyOnly,
+						Extended:       opts.ReleaseTestExtended,
 					}
 					slog.Debug("Running release-test", "opts", releaseTestOpts)
 					if err := ReleaseTest(ctx, c, vlab, releaseTestOpts); err != nil {
