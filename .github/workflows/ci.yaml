@@ -51,7 +51,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -118,7 +118,7 @@ jobs:
           just run hhfab diagram -f dot -o test-diagrams/default-vlab-diagram.dot -v
 
       - name: Checkout lab-ci repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: githedgehog/lab-ci
           path: "./lab-ci"
@@ -182,7 +182,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -491,7 +491,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -523,7 +523,7 @@ jobs:
       # Bump fabricator docs in the docs repository
 
       - name: Checkout docs repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: githedgehog/docs
           path: docs-repo
@@ -579,7 +579,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
