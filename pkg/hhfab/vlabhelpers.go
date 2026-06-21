@@ -1131,10 +1131,19 @@ func (c *Config) collectRunnerShowTech(ctx context.Context, outputDir string) er
 	execCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(execCtx, "/bin/bash", tmpfile.Name()) //nolint:gosec
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		slog.Warn("Runner show-tech script execution failed", "err", err, "output", string(output))
+	bashPath, lookErr := exec.LookPath("bash")
+
+	var output []byte
+	if lookErr != nil {
+		slog.Warn("Runner show-tech: bash not found in PATH", "err", lookErr)
+		output = fmt.Appendf(nil, "runner-show-tech unavailable: bash not found in PATH: %v\n", lookErr)
+	} else {
+		cmd := exec.CommandContext(execCtx, bashPath, tmpfile.Name())
+		var err error
+		output, err = cmd.CombinedOutput()
+		if err != nil {
+			slog.Warn("Runner show-tech script execution failed", "err", err, "output", string(output))
+		}
 	}
 
 	localFilePath := filepath.Join(outputDir, "runner-show-tech.log")
