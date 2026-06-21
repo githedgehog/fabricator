@@ -70,6 +70,9 @@ run_dp_cmd() {
 
     echo -e "\n=== Link Status ==="
     ip link show
+
+    echo -e "\n=== Interface Statistics ==="
+    ip -s link show
 } >> "$OUTPUT_FILE" 2>&1
 
 # ---------------------------
