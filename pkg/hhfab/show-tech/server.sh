@@ -170,4 +170,35 @@ OUTPUT_FILE="/tmp/show-tech.log"
 
 } >> "$OUTPUT_FILE" 2>&1
 
+# ---------------------------
+# Memory & OOM Diagnostics
+# ---------------------------
+{
+  echo -e "\n=== Memory (free) ==="
+  free -m
+
+  echo -e "\n=== Memory (/proc/meminfo) ==="
+  cat /proc/meminfo
+
+  echo -e "\n=== OOM Events (dmesg) ==="
+  sudo dmesg -T 2>/dev/null | grep -iE "oom|out of memory|killed process" | tail -20 || \
+      echo "No OOM events detected (or dmesg not accessible)"
+
+} >> "$OUTPUT_FILE" 2>&1
+
+# ---------------------------
+# iperf3 Container Diagnostics
+# ---------------------------
+{
+  echo -e "\n=== Docker Container State ==="
+  docker ps -a 2>/dev/null || echo "docker not available"
+
+  echo -e "\n=== iperf3 Container Stats ==="
+  docker stats iperf3 --no-stream 2>/dev/null || echo "iperf3 container not running or docker not available"
+
+  echo -e "\n=== iperf3 Container Logs (last 100) ==="
+  docker logs iperf3 --tail 100 2>&1 || echo "iperf3 container not running or docker not available"
+
+} >> "$OUTPUT_FILE" 2>&1
+
 echo "Diagnostics collected to $OUTPUT_FILE"
