@@ -177,6 +177,16 @@ func CollectServerEndpoints(ctx context.Context, kube kclient.Client, ssh SSHRes
 			return nil, fmt.Errorf("parsing VPC %s/%s subnet CIDR %q: %w", vpc.Name, subnetName, subnet.Subnet, err)
 		}
 
+		// A multihomed hostBGP server has several VPCAttachments pointing at the
+		// same (vpc, subnet) — one per connection — but a single /32 VIP. Collapse
+		// them to one candidate attachment so the server yields exactly one
+		// endpoint instead of dropping the duplicates with misleading warnings.
+		if slices.ContainsFunc(serverAttachments[serverName], func(a serverAttachment) bool {
+			return a.vpcName == vpc.Name && a.subnetName == subnetName
+		}) {
+			continue
+		}
+
 		serverAttachments[serverName] = append(serverAttachments[serverName], serverAttachment{
 			vpcName:    vpc.Name,
 			subnetName: subnetName,
