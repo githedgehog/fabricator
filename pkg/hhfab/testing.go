@@ -1989,13 +1989,57 @@ type PingError struct {
 	Expected    bool
 	Sent        int
 	Received    int
+	Lost        []int
 	CmdOutput   string
 	Msg         string
 }
 
 func (pe *PingError) Error() string {
-	return fmt.Sprintf("ping %s -> %s: %s (sent %d, rcvd %d, expected %v)",
-		pe.Source, pe.Destination, pe.Msg, pe.Sent, pe.Received, pe.Expected)
+	lost := ""
+	if len(pe.Lost) > 0 {
+		lost = fmt.Sprintf(", lost=%v", pe.Lost)
+	}
+
+	return fmt.Sprintf("ping %s -> %s: %s (sent %d, rcvd %d%s, expected %v)",
+		pe.Source, pe.Destination, pe.Msg, pe.Sent, pe.Received, lost, pe.Expected)
+}
+
+// parsePingLostSeqs returns the ICMP sequence numbers in 1..sent that have no
+// reply line in the ping stdout. seq=1 absent points to next-hop resolution
+// (ARP/ND miss); a later seq absent points to mid-flight FIB churn.
+func parsePingLostSeqs(stdout string, sent int) []int {
+	if sent <= 0 {
+		return nil
+	}
+
+	seen := make(map[int]bool, sent)
+	for l := range strings.SplitSeq(stdout, "\n") {
+		// Only count echo replies. ICMP error lines (e.g. "From <gw> icmp_seq=3
+		// Destination Host Unreachable") also carry icmp_seq= but are not replies.
+		if !strings.Contains(l, "bytes from") {
+			continue
+		}
+		i := strings.Index(l, "icmp_seq=")
+		if i < 0 {
+			continue
+		}
+		fields := strings.Fields(l[i+len("icmp_seq="):])
+		if len(fields) == 0 {
+			continue
+		}
+		if n, err := strconv.Atoi(fields[0]); err == nil {
+			seen[n] = true
+		}
+	}
+
+	var lost []int
+	for n := 1; n <= sent; n++ {
+		if !seen[n] {
+			lost = append(lost, n)
+		}
+	}
+
+	return lost
 }
 
 type IperfError struct {
@@ -2832,6 +2876,7 @@ func checkPing(ctx context.Context, pingCount int, semaphore *semaphore.Weighted
 			break
 		}
 	}
+	pe.Lost = parsePingLostSeqs(stdout, pe.Sent)
 	if pe.Sent == 0 && err == nil {
 		pe.Msg = "cannot parse ping output to get sent packets"
 

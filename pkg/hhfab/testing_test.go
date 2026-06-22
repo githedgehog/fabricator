@@ -277,6 +277,91 @@ func TestCollectN(t *testing.T) {
 	}
 }
 
+func TestParsePingLostSeqs(t *testing.T) {
+	// Fixtures are real `ping -i 0.5 -c N -W 1` stdout captured from CI job
+	// https://github.com/githedgehog/fabricator/actions/runs/28009366936/job/82899549177
+	// (h-gw-iso-l2vni-rt), pasted verbatim from the "Ping result" debug lines.
+
+	// 5/5 clean.
+	const allReceived = `PING 10.20.1.4 (10.20.1.4) 56(84) bytes of data.
+64 bytes from 10.20.1.4: icmp_seq=1 ttl=62 time=0.253 ms
+64 bytes from 10.20.1.4: icmp_seq=2 ttl=62 time=0.400 ms
+64 bytes from 10.20.1.4: icmp_seq=3 ttl=62 time=0.487 ms
+64 bytes from 10.20.1.4: icmp_seq=4 ttl=62 time=0.425 ms
+64 bytes from 10.20.1.4: icmp_seq=5 ttl=62 time=0.478 ms
+--- 10.20.1.4 ping statistics ---
+5 packets transmitted, 5 received, 0% packet loss, time 2016ms
+rtt min/avg/max/mdev = 0.253/0.408/0.487/0.084 ms
+`
+
+	// The actual flake: sent 5, rcvd 4, first reply is icmp_seq=2 (seq 1 dropped
+	// during next-hop resolution / convergence tail).
+	const firstLost = `PING 10.20.4.2 (10.20.4.2) 56(84) bytes of data.
+64 bytes from 10.20.4.2: icmp_seq=2 ttl=61 time=0.611 ms
+64 bytes from 10.20.4.2: icmp_seq=3 ttl=61 time=0.844 ms
+64 bytes from 10.20.4.2: icmp_seq=4 ttl=61 time=0.885 ms
+64 bytes from 10.20.4.2: icmp_seq=5 ttl=61 time=1.31 ms
+--- 10.20.4.2 ping statistics ---
+5 packets transmitted, 4 received, 20% packet loss, time 2010ms
+rtt min/avg/max/mdev = 0.611/0.912/1.308/0.251 ms
+`
+
+	// 100% loss (no reply lines at all).
+	const allLost = `PING 10.20.2.3 (10.20.2.3) 56(84) bytes of data.
+--- 10.20.2.3 ping statistics ---
+5 packets transmitted, 0 received, 100% packet loss, time 2014ms
+`
+
+	// Derived from the real reply format above, dropping a middle / last reply.
+	const middleLost = `PING 10.20.1.4 (10.20.1.4) 56(84) bytes of data.
+64 bytes from 10.20.1.4: icmp_seq=1 ttl=62 time=0.253 ms
+64 bytes from 10.20.1.4: icmp_seq=2 ttl=62 time=0.400 ms
+64 bytes from 10.20.1.4: icmp_seq=4 ttl=62 time=0.425 ms
+64 bytes from 10.20.1.4: icmp_seq=5 ttl=62 time=0.478 ms
+--- 10.20.1.4 ping statistics ---
+5 packets transmitted, 4 received, 20% packet loss, time 2016ms
+`
+
+	const lastLost = `PING 10.20.1.4 (10.20.1.4) 56(84) bytes of data.
+64 bytes from 10.20.1.4: icmp_seq=1 ttl=62 time=0.253 ms
+64 bytes from 10.20.1.4: icmp_seq=2 ttl=62 time=0.400 ms
+64 bytes from 10.20.1.4: icmp_seq=3 ttl=62 time=0.487 ms
+64 bytes from 10.20.1.4: icmp_seq=4 ttl=62 time=0.425 ms
+--- 10.20.1.4 ping statistics ---
+5 packets transmitted, 4 received, 20% packet loss, time 2016ms
+`
+
+	// Format guard for the "bytes from" check: an ICMP error line carries
+	// icmp_seq= but is not an echo reply, so that seq must still count as lost.
+	// iputils format; not captured in the run above (no unreachables occurred).
+	const icmpError = `PING 10.20.4.2 (10.20.4.2) 56(84) bytes of data.
+64 bytes from 10.20.4.2: icmp_seq=1 ttl=61 time=0.5 ms
+From 10.20.4.1 icmp_seq=2 Destination Host Unreachable
+64 bytes from 10.20.4.2: icmp_seq=3 ttl=61 time=0.5 ms
+--- 10.20.4.2 ping statistics ---
+3 packets transmitted, 2 received, 33% packet loss, time 2010ms
+`
+
+	for _, test := range []struct {
+		name     string
+		stdout   string
+		sent     int
+		expected []int
+	}{
+		{name: "all received", stdout: allReceived, sent: 5},
+		{name: "first lost (real flake)", stdout: firstLost, sent: 5, expected: []int{1}},
+		{name: "middle lost", stdout: middleLost, sent: 5, expected: []int{3}},
+		{name: "last lost", stdout: lastLost, sent: 5, expected: []int{5}},
+		{name: "all lost", stdout: allLost, sent: 5, expected: []int{1, 2, 3, 4, 5}},
+		{name: "icmp error line is not a reply", stdout: icmpError, sent: 3, expected: []int{2}},
+		{name: "sent zero returns nil", stdout: allReceived, sent: 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, test.expected, parsePingLostSeqs(test.stdout, test.sent))
+		})
+	}
+}
+
 func mapSlice[IN, OUT any](f func(IN) OUT, in []IN) []OUT {
 	out := make([]OUT, len(in))
 	for i, v := range in {
