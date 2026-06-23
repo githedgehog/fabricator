@@ -403,6 +403,42 @@ func (testCtx *VPCPeeringTestCtx) waitForRoutesInSwitches(ctx context.Context, s
 	}
 }
 
+// waitForDatapathConverged polls the standard connectivity test in ping-only
+// mode until one clean round passes or the timeout elapses. Route presence in
+// leaf RIBs does not mean the dataplane (ASIC, neighbor resolution, gateway
+// VTEP) is forwarding yet, so the first packets of the strict probe can hit the
+// reconvergence tail and drop. This gate absorbs that tail by retrying the real
+// test; the strict probe that follows still runs once and tolerates no loss, so
+// steady or intermittent loss is still caught. A path that never converges fails
+// here.
+func (testCtx *VPCPeeringTestCtx) waitForDatapathConverged(ctx context.Context) error {
+	const (
+		convergeTimeout = 90 * time.Second
+		convergePoll    = 5 * time.Second
+	)
+
+	pingOnly := testCtx.tcOpts
+	pingOnly.IPerfsSeconds = 0
+	pingOnly.CurlsCount = 0
+
+	toCtx, cancel := context.WithTimeout(ctx, convergeTimeout)
+	defer cancel()
+
+	slog.Info("Waiting for datapath convergence before strict connectivity test", "timeout", convergeTimeout)
+	for {
+		err := DoVLABTestConnectivity(toCtx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, pingOnly)
+		if err == nil {
+			return nil
+		}
+		slog.Debug("Datapath not converged yet, retrying", "err", err)
+		select {
+		case <-toCtx.Done():
+			return fmt.Errorf("datapath did not converge within %s: %w", convergeTimeout, err)
+		case <-time.After(convergePoll):
+		}
+	}
+}
+
 // check that the DHCP lease is within the expected range.
 func checkDHCPLease(leaseInfo *DHCPLeaseInfo, expectedLease int, tolerance int) error {
 	if leaseInfo == nil {

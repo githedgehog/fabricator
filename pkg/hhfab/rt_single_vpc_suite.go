@@ -538,6 +538,12 @@ func gatewayFailoverTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool,
 			}
 		}
 
+		// Route presence in leaf RIBs does not mean the dataplane is forwarding yet,
+		// so absorb the reconvergence tail before the strict test runs.
+		if err := testCtx.waitForDatapathConverged(ctx); err != nil {
+			return fmt.Errorf("datapath convergence after spine recovery: %w", err)
+		}
+
 		slog.Debug("Testing connectivity after re-enabling spines and agents")
 		if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
 			return fmt.Errorf("connectivity test after re-enabling spines and agents: %w", err)
