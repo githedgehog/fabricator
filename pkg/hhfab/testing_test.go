@@ -342,6 +342,18 @@ From 10.20.4.1 icmp_seq=2 Destination Host Unreachable
 3 packets transmitted, 2 received, 33% packet loss, time 2010ms
 `
 
+	// Same first-packet loss but with -D reply timestamps ([unixtime] prefix, real
+	// `ping -D` format from iputils 20240117); the prefix must not confuse parsing.
+	const firstLostTimestamped = `PING 10.20.4.2 (10.20.4.2) 56(84) bytes of data.
+[1782458023.423317] 64 bytes from 10.20.4.2: icmp_seq=2 ttl=61 time=0.611 ms
+[1782458023.927269] 64 bytes from 10.20.4.2: icmp_seq=3 ttl=61 time=0.844 ms
+[1782458024.431201] 64 bytes from 10.20.4.2: icmp_seq=4 ttl=61 time=0.885 ms
+[1782458024.935112] 64 bytes from 10.20.4.2: icmp_seq=5 ttl=61 time=1.31 ms
+--- 10.20.4.2 ping statistics ---
+5 packets transmitted, 4 received, 20% packet loss, time 2010ms
+rtt min/avg/max/mdev = 0.611/0.912/1.308/0.251 ms
+`
+
 	for _, test := range []struct {
 		name     string
 		stdout   string
@@ -350,6 +362,7 @@ From 10.20.4.1 icmp_seq=2 Destination Host Unreachable
 	}{
 		{name: "all received", stdout: allReceived, sent: 5},
 		{name: "first lost (real flake)", stdout: firstLost, sent: 5, expected: []int{1}},
+		{name: "first lost with -D timestamps", stdout: firstLostTimestamped, sent: 5, expected: []int{1}},
 		{name: "middle lost", stdout: middleLost, sent: 5, expected: []int{3}},
 		{name: "last lost", stdout: lastLost, sent: 5, expected: []int{5}},
 		{name: "all lost", stdout: allLost, sent: 5, expected: []int{1, 2, 3, 4, 5}},
