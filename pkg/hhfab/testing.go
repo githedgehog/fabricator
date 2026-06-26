@@ -2850,7 +2850,10 @@ func checkPing(ctx context.Context, pingCount int, semaphore *semaphore.Weighted
 		slog.Warn("Warm-up ping failed, continuing anyway", "err", err, "stdout", stdout, "stderr", stderr)
 	}
 
-	cmd = fmt.Sprintf("ping -i 0.5 -c %d -W 1", pingCount)
+	// -D timestamps each reply line ([unixtime]) so a lost seq can be placed on
+	// the wall clock; it prefixes reply lines only, not the summary line the
+	// sent/received parser and parsePingLostSeqs read.
+	cmd = fmt.Sprintf("ping -i 0.5 -c %d -W 1 -D", pingCount)
 	if sourceIP != nil {
 		cmd += " -I " + sourceIP.String()
 	}
@@ -2889,7 +2892,19 @@ func checkPing(ctx context.Context, pingCount int, semaphore *semaphore.Weighted
 	slog.Debug("Ping result", "from", from, "to", to,
 		"expected", expected, "ok", pingOk, "fail", pingFail, "err", err, "stdout", stdout, "stderr", stderr)
 
+	// When a ping that should have succeeded fails, surface the per-packet
+	// (timestamped, via -D) output at warn level so the loss pattern is visible
+	// next to the error without re-running with -v. Negative tests fail pings by
+	// design, so only do this when reachability was expected.
+	logExpectedFailure := func() {
+		if expected {
+			slog.Warn("Ping failed (expected reachable)", "from", from, "to", to,
+				"sent", pe.Sent, "rcvd", pe.Received, "lost", pe.Lost, "stdout", stdout, "stderr", stderr)
+		}
+	}
+
 	if pingOk == pingFail {
+		logExpectedFailure()
 		if err != nil {
 			pe.Msg = err.Error()
 		} else {
@@ -2901,6 +2916,7 @@ func checkPing(ctx context.Context, pingCount int, semaphore *semaphore.Weighted
 	}
 
 	if expected && !pingOk {
+		logExpectedFailure()
 		pe.Msg = "should be reachable but ping failed"
 
 		return pe
