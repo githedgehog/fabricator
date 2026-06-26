@@ -112,6 +112,26 @@ storage:
           Gateway={{ .DummyGateway }}
           Destination=0.0.0.0/0
           Metric=42000
+    - path: /etc/ssh/sshd_config.d/40-hedgehog.conf
+      mode: 0600
+      contents:
+        inline: |
+          # Customized by Hedgehog
+          PerSourceMaxStartups 4
+          PerSourcePenalties crash:5m authfail:2m
+          LoginGraceTime 20
+          PermitRootLogin no
+          MaxAuthTries 3
+          MaxSessions 5
+          PasswordAuthentication yes
+          KbdInteractiveAuthentication no
+          Compression no
+          ClientAliveInterval 300
+          ClientAliveCountMax 2
+          MaxStartups 10:30:60
+          KexAlgorithms sntrup761x25519-sha512@openssh.com,curve25519-sha256,curve25519-sha256@libssh.org
+          Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com
+          MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,umac-128-etm@openssh.com
 
     - path: /etc/systemd/network/20-mgmt.network
       mode: 0644
