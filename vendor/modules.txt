@@ -46,8 +46,8 @@ github.com/acarl005/stripansi
 ## explicit; go 1.22
 github.com/andybalholm/brotli
 github.com/andybalholm/brotli/matchfinder
-# github.com/appleboy/easyssh-proxy v1.5.2
-## explicit; go 1.24.0
+# github.com/appleboy/easyssh-proxy v1.5.3
+## explicit; go 1.25.10
 github.com/appleboy/easyssh-proxy
 # github.com/aws/aws-sdk-go-v2 v1.41.2
 ## explicit; go 1.23
