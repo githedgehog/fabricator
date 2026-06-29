@@ -23,7 +23,7 @@ import (
 	"golang.org/x/crypto/ssh/agent"
 )
 
-var (
+const (
 	defaultTimeout    = 60 * time.Second
 	defaultBufferSize = 4096
 )
@@ -31,6 +31,11 @@ var (
 var (
 	// ErrProxyDialTimeout is returned when proxy dial connection times out
 	ErrProxyDialTimeout = errors.New("proxy dial timeout")
+	// ErrFingerprintMismatch is returned when the remote host key fingerprint does not match the configured one.
+	ErrFingerprintMismatch = errors.New("ssh: host key fingerprint mismatch")
+	// ErrInvalidTargetFile is returned when an SCP target filename contains characters
+	// that would corrupt the SCP control stream (newline, carriage return, or NUL).
+	ErrInvalidTargetFile = errors.New("easyssh: invalid characters in target filename")
 )
 
 type Protocol string
@@ -168,8 +173,9 @@ func getSSHConfig(config DefaultConfig) (*ssh.ClientConfig, io.Closer) {
 		}
 	}
 
-	if sshAgent, err := net.Dial("unix", os.Getenv("SSH_AUTH_SOCK")); err == nil {
-		auths = append(auths, ssh.PublicKeysCallback(agent.NewClient(sshAgent).Signers))
+	if sock, err := net.Dial("unix", os.Getenv("SSH_AUTH_SOCK")); err == nil {
+		sshAgent = sock
+		auths = append(auths, ssh.PublicKeysCallback(agent.NewClient(sock).Signers))
 	}
 
 	c := ssh.Config{}
@@ -191,7 +197,7 @@ func getSSHConfig(config DefaultConfig) (*ssh.ClientConfig, io.Closer) {
 	if config.Fingerprint != "" {
 		hostKeyCallback = func(hostname string, remote net.Addr, publicKey ssh.PublicKey) error {
 			if ssh.FingerprintSHA256(publicKey) != config.Fingerprint {
-				return fmt.Errorf("ssh: host key fingerprint mismatch")
+				return ErrFingerprintMismatch
 			}
 			return nil
 		}
@@ -232,7 +238,7 @@ func (ssh_conf *MakeConfig) Connect() (*ssh.Session, *ssh.Client, error) {
 		UseInsecureCipher: ssh_conf.UseInsecureCipher,
 	})
 	if closer != nil {
-		defer closer.Close()
+		defer func() { _ = closer.Close() }()
 	}
 
 	// Enable proxy command
@@ -250,7 +256,7 @@ func (ssh_conf *MakeConfig) Connect() (*ssh.Session, *ssh.Client, error) {
 			UseInsecureCipher: ssh_conf.Proxy.UseInsecureCipher,
 		})
 		if closer != nil {
-			defer closer.Close()
+			defer func() { _ = closer.Close() }()
 		}
 
 		proxyClient, err := ssh.Dial(string(ssh_conf.Proxy.Protocol), net.JoinHostPort(ssh_conf.Proxy.Server, ssh_conf.Proxy.Port), proxyConfig)
@@ -281,7 +287,7 @@ func (ssh_conf *MakeConfig) Connect() (*ssh.Session, *ssh.Client, error) {
 			case <-ctx.Done():
 				// Context was cancelled, clean up the connection if it was established
 				if conn != nil {
-					conn.Close()
+					_ = conn.Close()
 				}
 			}
 		}()
@@ -292,19 +298,27 @@ func (ssh_conf *MakeConfig) Connect() (*ssh.Session, *ssh.Client, error) {
 			conn = result.conn
 			err = result.err
 		case <-ctx.Done():
+			_ = proxyClient.Close()
 			return nil, nil, fmt.Errorf("%w: %v", ErrProxyDialTimeout, ctx.Err())
 		}
 
 		if err != nil {
+			_ = proxyClient.Close()
 			return nil, nil, err
 		}
 
 		ncc, chans, reqs, err := ssh.NewClientConn(conn, net.JoinHostPort(ssh_conf.Server, ssh_conf.Port), targetConfig)
 		if err != nil {
+			_ = proxyClient.Close()
 			return nil, nil, err
 		}
 
 		client = ssh.NewClient(ncc, chans, reqs)
+		// Close the proxy client once the target client is closed by the caller.
+		go func() {
+			_ = client.Wait()
+			_ = proxyClient.Close()
+		}()
 	} else {
 		client, err = ssh.Dial(string(ssh_conf.Protocol), net.JoinHostPort(ssh_conf.Server, ssh_conf.Port), targetConfig)
 		if err != nil {
@@ -325,7 +339,7 @@ func (ssh_conf *MakeConfig) Connect() (*ssh.Session, *ssh.Client, error) {
 			ssh.TTY_OP_OSPEED: 14400, // output speed = 14.4kbaud
 		}
 		if err := session.RequestPty("xterm", 80, 40, modes); err != nil {
-			session.Close()
+			_ = session.Close()
 			return nil, nil, err
 		}
 	}
@@ -343,97 +357,76 @@ func (ssh_conf *MakeConfig) Stream(command string, timeout ...time.Duration) (<-
 	doneChan := make(chan bool)
 	errChan := make(chan error)
 
-	// connect to remote host
 	session, client, err := ssh_conf.Connect()
 	if err != nil {
 		return stdoutChan, stderrChan, doneChan, errChan, err
 	}
-	// defer session.Close()
-	// connect to both outputs (they are of type io.Reader)
+
+	closeBoth := func() {
+		_ = session.Close()
+		_ = client.Close()
+	}
+
 	outReader, err := session.StdoutPipe()
 	if err != nil {
-		client.Close()
-		session.Close()
+		closeBoth()
 		return stdoutChan, stderrChan, doneChan, errChan, err
 	}
 	errReader, err := session.StderrPipe()
 	if err != nil {
-		client.Close()
-		session.Close()
+		closeBoth()
 		return stdoutChan, stderrChan, doneChan, errChan, err
 	}
-	err = session.Start(command)
-	if err != nil {
-		client.Close()
-		session.Close()
+	if err = session.Start(command); err != nil {
+		closeBoth()
 		return stdoutChan, stderrChan, doneChan, errChan, err
 	}
 
-	// combine outputs, create a line-by-line scanner
-	stdoutReader := io.MultiReader(outReader)
-	stderrReader := io.MultiReader(errReader)
+	bufSize := ssh_conf.ReadBuffSize
+	if bufSize <= 0 {
+		bufSize = defaultBufferSize
+	}
+	stdoutScanner := bufio.NewReaderSize(outReader, bufSize)
+	stderrScanner := bufio.NewReaderSize(errReader, bufSize)
 
-	var stdoutScanner *bufio.Reader
-	var stderrScanner *bufio.Reader
-
-	if ssh_conf.ReadBuffSize > 0 {
-		stdoutScanner = bufio.NewReaderSize(stdoutReader, ssh_conf.ReadBuffSize)
-	} else {
-		stdoutScanner = bufio.NewReaderSize(stdoutReader, defaultBufferSize)
+	executeTimeout := defaultTimeout
+	if len(timeout) > 0 {
+		executeTimeout = timeout[0]
 	}
 
-	if ssh_conf.ReadBuffSize > 0 {
-		stderrScanner = bufio.NewReaderSize(stderrReader, ssh_conf.ReadBuffSize)
-	} else {
-		stderrScanner = bufio.NewReaderSize(stderrReader, defaultBufferSize)
-	}
-
-	go func(stdoutScanner, stderrScanner *bufio.Reader, stdoutChan, stderrChan chan string, doneChan chan bool, errChan chan error) {
+	go func() {
 		defer close(doneChan)
 		defer close(errChan)
-		defer client.Close()
-		defer session.Close()
+		defer closeBoth()
 
-		// default timeout value
-		executeTimeout := defaultTimeout
-		if len(timeout) > 0 {
-			executeTimeout = timeout[0]
-		}
 		ctxTimeout, cancel := context.WithTimeout(context.Background(), executeTimeout)
 		defer cancel()
-		res := make(chan struct{}, 1)
+
+		scan := func(r *bufio.Reader, out chan<- string) {
+			defer close(out)
+			for {
+				text, readErr := r.ReadString('\n')
+				if text != "" {
+					select {
+					case out <- strings.TrimRight(text, "\n"):
+					case <-ctxTimeout.Done():
+						return
+					}
+				}
+				if readErr != nil {
+					return
+				}
+			}
+		}
+
 		var resWg sync.WaitGroup
 		resWg.Add(2)
+		go func() { defer resWg.Done(); scan(stdoutScanner, stdoutChan) }()
+		go func() { defer resWg.Done(); scan(stderrScanner, stderrChan) }()
 
-		go func() {
-			defer close(stdoutChan)
-			for {
-				var text string
-				text, err = stdoutScanner.ReadString('\n')
-				if errors.Is(err, io.EOF) {
-					break
-				}
-				stdoutChan <- strings.TrimRight(text, "\n")
-			}
-			resWg.Done()
-		}()
-
-		go func() {
-			defer close(stderrChan)
-			for {
-				var text string
-				text, err = stderrScanner.ReadString('\n')
-				if errors.Is(err, io.EOF) {
-					break
-				}
-				stderrChan <- strings.TrimRight(text, "\n")
-			}
-			resWg.Done()
-		}()
-
+		res := make(chan struct{}, 1)
 		go func() {
 			resWg.Wait()
-			// close all of our open resources
 			res <- struct{}{}
 		}()
 
@@ -442,10 +435,10 @@ func (ssh_conf *MakeConfig) Stream(command string, timeout ...time.Duration) (<-
 			errChan <- session.Wait()
 			doneChan <- true
 		case <-ctxTimeout.Done():
-			errChan <- fmt.Errorf("Run Command Timeout: %v", ctxTimeout.Err())
+			errChan <- fmt.Errorf("Run Command Timeout: %w", ctxTimeout.Err())
 			doneChan <- false
 		}
-	}(stdoutScanner, stderrScanner, stdoutChan, stderrChan, doneChan, errChan)
+	}()
 
 	return stdoutChan, stderrChan, doneChan, errChan, err
 }
@@ -489,14 +482,21 @@ loop:
 
 // WriteFile reads size bytes from the reader and writes them to a file on the remote machine
 func (ssh_conf *MakeConfig) WriteFile(reader io.Reader, size int64, etargetFile string) error {
+	targetFile := filepath.Base(etargetFile)
+	// Reject characters that would either inject extra SCP control records
+	// (\n, \r) or terminate the filename field early (\x00). The remote-side
+	// scp command is invoked through the user's shell, so etargetFile is
+	// single-quoted below to neutralise shell metacharacters.
+	if strings.ContainsAny(etargetFile, "\x00\n\r") || strings.ContainsAny(targetFile, "\x00\n\r") {
+		return ErrInvalidTargetFile
+	}
+
 	session, client, err := ssh_conf.Connect()
 	if err != nil {
 		return err
 	}
-	defer client.Close()
-	defer session.Close()
-
-	targetFile := filepath.Base(etargetFile)
+	defer func() { _ = client.Close() }()
+	defer func() { _ = session.Close() }()
 
 	w, err := session.StdinPipe()
 	if err != nil {
@@ -526,11 +526,11 @@ func (ssh_conf *MakeConfig) WriteFile(reader io.Reader, size int64, etargetFile 
 
 	copyErrC := make(chan error, 1)
 	go func() {
-		defer w.Close()
+		defer func() { _ = w.Close() }()
 		copyErrC <- copyF()
 	}()
 
-	err = session.Run(fmt.Sprintf("scp -tr %s", etargetFile))
+	err = session.Run("scp -tr " + shellQuote(etargetFile))
 	if err != nil {
 		return err
 	}
@@ -539,21 +539,28 @@ func (ssh_conf *MakeConfig) WriteFile(reader io.Reader, size int64, etargetFile 
 	return err
 }
 
+// shellQuote returns s wrapped in POSIX single quotes so it can be passed as
+// one shell word. Embedded single quotes are escaped using the
+// close-quote/backslash-quote/open-quote idiom.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
 // Scp uploads sourceFile to remote machine like native scp console app.
 func (ssh_conf *MakeConfig) Scp(sourceFile string, etargetFile string) error {
 	session, client, err := ssh_conf.Connect()
 	if err != nil {
 		return err
 	}
-	defer client.Close()
-	defer session.Close()
+	defer func() { _ = client.Close() }()
+	defer func() { _ = session.Close() }()
 
 	src, srcErr := os.Open(sourceFile)
 
 	if srcErr != nil {
 		return srcErr
 	}
-	defer src.Close()
+	defer func() { _ = src.Close() }()
 
 	srcStat, statErr := src.Stat()
 

@@ -49,8 +49,8 @@ github.com/andybalholm/brotli v1.2.0 h1:ukwgCxwYrmACq68yiUqwIWnGY0cTPox/M94sVwTo
 github.com/andybalholm/brotli v1.2.0/go.mod h1:rzTDkvFWvIrjDXZHkuS16NPggd91W3kUSvPlQ1pLaKY=
 github.com/antlr4-go/antlr/v4 v4.13.1 h1:SqQKkuVZ+zWkMMNkjy5FZe5mr5WURWnlpmOuzYWrPrQ=
 github.com/antlr4-go/antlr/v4 v4.13.1/go.mod h1:GKmUxMtwp6ZgGwZSva4eWPC5mS6vUAmOABFgjdkM7Nw=
-github.com/appleboy/easyssh-proxy v1.5.2 h1:Fe4/RMNtoU/l36w5DvOEyMX3VcpwUbqZYBdPugqODOs=
-github.com/appleboy/easyssh-proxy v1.5.2/go.mod h1:cv8OlpCbAdxVNYgY/vQcM7f/Ep51UG5oyLK+J2kZhEc=
+github.com/appleboy/easyssh-proxy v1.5.3 h1:ukfO1Eqd0/ARhDFNTCh/HjEnDEviVcN6htrYvqssGNw=
+github.com/appleboy/easyssh-proxy v1.5.3/go.mod h1:DdAJJ4W6l0fL0xblkTpyPbRKTtj7OtrrzKMbeUdWbrk=
 github.com/aws/aws-sdk-go-v2 v1.41.2 h1:LuT2rzqNQsauaGkPK/7813XxcZ3o3yePY0Iy891T2ls=
 github.com/aws/aws-sdk-go-v2 v1.41.2/go.mod h1:IvvlAZQXvTXznUPfRVfryiG1fbzE2NGK6m9u39YQ+S4=
 github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=
