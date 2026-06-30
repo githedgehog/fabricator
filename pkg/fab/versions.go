@@ -26,7 +26,7 @@ const (
 	DataplaneVersion = meta.Version("v0.33.0")
 
 	// Broadcom Enterprise SONiC version (including all flavors)
-	BCMSONiCVersion = meta.Version("v4.5.2")
+	BCMSONiCVersion = meta.Version("v4.6.0")
 
 	// Celestica SONiC+ version (including all flavors)
 	CLSSONiCVersion = meta.Version("v5.0.0")
