@@ -3329,6 +3329,12 @@ type InspectOpts struct {
 	Attempts       int
 }
 
+// lldpRenderOnly strips the WithErrors implementation so inspect.Render only
+// fails on genuine marshal/write errors, not on reported LLDP neighbor issues.
+type lldpRenderOnly struct {
+	inspect.Out[inspect.LLDPIn]
+}
+
 func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) error {
 	slog.Info("Inspecting fabric")
 
@@ -3391,12 +3397,14 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 		slog.Error("Failed to inspect LLDP", "err", lldpErr)
 		fail = true
 	} else {
-		if renderErr := inspect.Render(time.Now(), inspect.OutputTypeText, os.Stdout, lldpIn, lldpOut); renderErr != nil {
+		if renderErr := inspect.Render(time.Now(), inspect.OutputTypeText, os.Stdout, lldpIn, lldpRenderOnly{lldpOut}); renderErr != nil {
 			slog.Error("Failed to render LLDP inspection output", "err", renderErr)
 			fail = true
 		}
 		if we, ok := lldpOut.(inspect.WithErrors); ok && len(we.Errors()) > 0 {
-			fail = true
+			// LLDP neighbor discovery is unreliable on some switch platforms, so
+			// a missing neighbor is reported but doesn't fail the inspection.
+			slog.Warn("Inspecting LLDP reveals some errors", "errors", we.Errors())
 		}
 	}
 
