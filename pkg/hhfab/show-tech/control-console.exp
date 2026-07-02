@@ -215,6 +215,10 @@ if {$logged_in} {
     run_cmd "ls -la ~/.ssh/" $prompt_re 10
     run_cmd "cat ~/.ssh/authorized_keys" $prompt_re 10
 
+    # Flatcar installer service (present only during ISO/USB install; decisive for install-no-reboot failures)
+    run_cmd "systemctl status flatcar-install.service --no-pager" $prompt_re 30
+    run_cmd "journalctl -u flatcar-install --no-pager -n 100" $prompt_re 60
+
     # K8s cluster diagnostics (use sudo -n for non-interactive to avoid hanging on password prompt)
     run_cmd "sudo -n kubectl get nodes -o wide" $prompt_re 60
     run_cmd "sudo -n kubectl get pods -A -o wide" $prompt_re 60
