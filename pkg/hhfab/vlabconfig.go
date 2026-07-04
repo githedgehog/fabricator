@@ -71,13 +71,14 @@ type VLAB struct {
 }
 
 type VM struct {
-	ID         uint
-	Name       string
-	Type       VMType
-	SwitchMode VMSwitchMode
-	Restricted bool
-	NICs       []string
-	Size       VMSize
+	ID            uint
+	Name          string
+	Type          VMType
+	SwitchMode    VMSwitchMode
+	SwitchProfile string
+	Restricted    bool
+	NICs          []string
+	Size          VMSize
 }
 
 type ExternalAttachCfg struct {
@@ -137,9 +138,10 @@ type VMSizes struct {
 }
 
 type VMConfig struct {
-	Type       VMType            `json:"type"`
-	SwitchMode VMSwitchMode      `json:"switchMode,omitempty"`
-	NICs       map[string]string `json:"nics"`
+	Type          VMType            `json:"type"`
+	SwitchMode    VMSwitchMode      `json:"switchMode,omitempty"`
+	SwitchProfile string            `json:"switchProfile,omitempty"`
+	NICs          map[string]string `json:"nics"`
 }
 
 type VMType string
@@ -612,8 +614,9 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 		}
 
 		cfg.VMs[sw.Name] = VMConfig{
-			Type:       VMTypeSwitch,
-			SwitchMode: sm,
+			Type:          VMTypeSwitch,
+			SwitchMode:    sm,
+			SwitchProfile: sw.Spec.Profile,
 			NICs: map[string]string{
 				"M1": mgmt,
 			},
@@ -1094,13 +1097,19 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 			size = cfg.Sizes.External
 		}
 
+		// TODO: remove when figured out why Celestica SONiC+ installer needs extra RAM, likely it's just a bigger bin for some reason
+		if fmeta.SwitchProfileVSCLSP == vm.SwitchProfile {
+			size.RAM += 1024
+		}
+
 		vms = append(vms, VM{
-			ID:         vmID,
-			Name:       name,
-			Type:       vm.Type,
-			SwitchMode: vm.SwitchMode,
-			NICs:       paddedNICs,
-			Size:       size,
+			ID:            vmID,
+			Name:          name,
+			Type:          vm.Type,
+			SwitchMode:    vm.SwitchMode,
+			SwitchProfile: vm.SwitchProfile,
+			NICs:          paddedNICs,
+			Size:          size,
 		})
 	}
 
