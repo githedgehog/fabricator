@@ -50,7 +50,7 @@ const (
 
 var Versions = fabapi.Versions{
 	Platform: fabapi.PlatformVersions{
-		K3s:               "v1.36.1-k3s1",
+		K3s:               "v1.36.2-k3s1",
 		Zot:               "v2.1.16",
 		ZotChart:          "v0.1.67-hh1",
 		CertManager:       "v1.20.2",
