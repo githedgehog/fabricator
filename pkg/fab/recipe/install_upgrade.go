@@ -247,6 +247,32 @@ func DoUpgrade(ctx context.Context, workDir string, yes, skipChecks bool) error 
 	return nil
 }
 
+func copySSHConfig(_ context.Context) error {
+	fileContents := `
+# Customized by Hedgehog
+PerSourceMaxStartups 4
+PerSourcePenalties crash:5m authfail:2m
+LoginGraceTime 20
+PermitRootLogin no
+MaxAuthTries 3
+MaxSessions 5
+PasswordAuthentication yes
+KbdInteractiveAuthentication no
+Compression no
+ClientAliveInterval 300
+ClientAliveCountMax 2
+MaxStartups 10:30:60
+KexAlgorithms sntrup761x25519-sha512@openssh.com,curve25519-sha256,curve25519-sha256@libssh.org
+Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com
+MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,umac-128-etm@openssh.com
+`
+	if err := os.WriteFile("/etc/ssh/sshd_config.d/40-hedgehog.conf", []byte(fileContents), 0o600); err != nil {
+		return fmt.Errorf("writing ssh config: %w", err)
+	}
+
+	return nil
+}
+
 func setupTimesync(ctx context.Context, controlVIP string) error {
 	if ubuntu, err := isUbuntu(); err == nil && ubuntu {
 		// TODO do something on ubuntu
