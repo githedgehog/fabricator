@@ -57,11 +57,13 @@ The suite can also be run by hand against any deployed VLAB or lab environment w
 
 Release gating happens at the product-release level and takes about two days of work. The process is intentionally lightweight; the tracking issue described below is what makes it accountable.
 
+The test plan is iterative, not frozen: besides the fixed release matrix, each cycle adds manual or automated coverage for the features shipping in it, and closes gaps found since the previous cycle, especially issues hit by customers or that escaped earlier rounds of testing. Testing runs continuously through the cycle rather than waiting for a release freeze, supported by existing and in-progress tooling.
+
 ### The tracking issue
 
 For each product release, open a "YY.MM release testing" issue in the internal tracker. It is the evidence record backing the go/no-go decision, structured as:
 
-- a checklist with three sections: the release-test matrix (below), new release tests required for features added in the cycle (with manual testing as a backup while they land), and extra manual checks as the cycle requires (for example input ACLs, host BGP, documentation coverage);
+- a checklist with three sections: the release-test matrix (below), new release tests required for features added in the cycle or for gaps found since the previous one (with manual testing as a backup while they land), and extra manual checks as the cycle requires (for example input ACLs, host BGP, documentation coverage);
 - one comment per completed run, titled `<topology>@<env> (<fabricator version>)`, containing the exact commands used followed by the full release-test recap. Paste recaps verbatim; the previous cycles' issues are the reference for both format and commands.
 
 Ownership started with the release manager and is shifting to QA; there is no formal procedure beyond this issue.
