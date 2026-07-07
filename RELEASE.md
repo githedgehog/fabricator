@@ -81,7 +81,7 @@ The suite currently runs on four topology combinations across two shared lab env
 
 env-5 switches support l3vni mode only, which is why l3vni coverage lives there; ESLAG is incompatible with l3vni, so LAG failover coverage comes from env-1.
 
-The shape of every run, with each environment's fab config and wiring files kept in its home directory (`~/env-1/`, `~/env-5/`):
+The shape of every run (each environment's fab config and wiring files come from the internal lab repository):
 
 ```
 curl -fsSL https://i.hhdev.io/hhfab | USE_SUDO=false INSTALL_DIR=. VERSION=<product release> BINARY_NAME=hhfab-<product release> bash
@@ -111,14 +111,14 @@ A regression in this comparison is a gate failure like any other: it gets invest
 
 The release manager asks QA, usually in a meeting; there is no formal sign-off procedure. Failures found during the gate are investigated and documented on the tracking issue; a problem known to be specific to a test environment does not have to block the release, as long as it is recorded there.
 
-Which product releases the upgrade jobs must pass from is decided by the release manager; a written release support policy is an open gap.
+Which product releases the upgrade jobs must pass from is decided by the release manager; a written release support policy is pending.
 
 ## Pre-release checklist
 
-- Component versions in `pkg/fab/versions.go` are final.
+- A fabricator tag exists and everything below runs against that tag, so the component combination pinned in `pkg/fab/versions.go` is exactly what is tested.
 - The upgrade matrix in `ci.yaml` on `master` tests upgrades from the latest shipped product releases; rotate the `upgradefrom` entries when preparing a release (see the "ci: test upgrades from" commits).
-- CI green on the target ref, including all upgrade jobs.
-- Full release tests pass on the release ref, including upgrade and hardware lab jobs: dispatch CI on the ref with the `releasetest` input, since neither the tag pipeline nor the nightly covers it.
+- CI green on the tag, including all upgrade jobs.
+- Full release tests pass on the tag, including upgrade and hardware lab jobs: dispatch CI on the tag with the `releasetest` input, since neither the tag pipeline nor the nightly covers it.
 
 ## Cutting the release
 
