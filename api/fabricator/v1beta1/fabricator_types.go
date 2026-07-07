@@ -819,6 +819,10 @@ func (f *Fabricator) Validate(ctx context.Context) error {
 		if ph == "" {
 			return fmt.Errorf("default control user password hash is required") //nolint:goerr113
 		}
+		sshKey := f.Spec.Config.Control.DefaultUser.AuthorizedKeys
+		if len(sshKey) == 0 {
+			return fmt.Errorf("must have default ssh key") //nolint:goerr113
+		}
 
 		if !strings.HasPrefix(ph, "$5$") {
 			return fmt.Errorf("default control user password hash must be bcrypt") //nolint:goerr113
