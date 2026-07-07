@@ -20,6 +20,7 @@ import (
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/hhfctl"
+	"go.githedgehog.com/fabricator/pkg/fab"
 	"golang.org/x/sync/errgroup"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -596,7 +597,8 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []Re
 
 				if plan.hostBGP[serverName] {
 					slog.Debug("Starting hostBGP container", "server", serverName, "args", cmd)
-					_, stderr, err := ssh.Run(ctx, "docker run --network=host --privileged --rm --detach --name hostbgp ghcr.io/githedgehog/host-bgp "+cmd)
+					fullCmd := fmt.Sprintf("docker run --network=host --privileged --rm --detach --name hostbgp ghcr.io/githedgehog/host-bgp:%s %s", fab.Versions.Platform.HostBGPContainer, cmd)
+					_, stderr, err := ssh.Run(ctx, fullCmd)
 					if err != nil {
 						return fmt.Errorf("starting hostbgp on %s: %w: %s", serverName, err, stderr)
 					}
