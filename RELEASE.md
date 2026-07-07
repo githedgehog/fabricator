@@ -70,7 +70,7 @@ Ownership started with the release manager and is shifting to QA; there is no fo
 
 ### CI on the release tag
 
-Dispatch the CI workflow on the release tag with the `releasetest` input enabled: full matrix with the `-rt` suffix, including the upgrade and hardware lab jobs. The release-test suite has no automatic retries, and flaky jobs can block the tag's `publish-release` job, so retry failed jobs until the run is green; chasing and fixing flakes is an ongoing effort.
+Dispatch the CI workflow on the release tag with the `releasetest` input enabled: full matrix with the `-rt` suffix, including the upgrade and hardware lab jobs. The release-test suite has no automatic retries, and flaky jobs can block the tag's `publish-release` job. Failures on the release-test critical path are filed and tracked as known flakes in the internal tracker; retrying a job is backed by that list, not a substitute for filing. Chasing and fixing flakes is an ongoing effort.
 
 ### Release tests on physical environments
 
@@ -114,6 +114,13 @@ A regression in this comparison is a gate failure like any other: it gets invest
 The release manager asks QA, usually in a meeting; there is no formal sign-off procedure. Failures found during the gate are investigated and documented on the tracking issue; a problem known to be specific to a test environment does not have to block the release, as long as it is recorded there.
 
 Which product releases the upgrade jobs must pass from is decided by the release manager; a written release support policy is pending.
+
+### To adopt as the process matures
+
+Not current practice yet; adopt when applicable:
+
+- Turn the recurring tracking-issue structure into an issue template in the internal tracker, so each cycle starts from the same checklist instead of copying the previous issue.
+- At go/no-go, record an explicit decision on the tracking issue for every open issue on the release's critical path: ship with it or block on it, with a one-line reason written by the person deciding. A raised issue then cannot be set aside without a trace, and the reasoning survives for the next cycle.
 
 ## Pre-release checklist
 
