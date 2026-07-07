@@ -44,6 +44,15 @@ Each job uploads a `release-test.xml`; results are aggregated into a single "Rel
 
 The tag pipeline does not gate on release tests: publishing only requires the build, bundle, and VLAB jobs on the tag itself, and the nightly schedule covers only `master`. A release ref therefore gets its full release-test coverage from a manual CI dispatch on the tag with the `releasetest` input enabled.
 
+The suite can also be run by hand against any deployed VLAB or lab environment with `hhfab vlab release-test`. Useful flags:
+
+- `--list-tests` prints the available tests; `--regex`/`-r` (repeatable) and `--invert-regex` select a subset.
+- `--mode` sets the VPC mode the tests expect: empty means l2vni, `l3vni` for l3vni environments.
+- `--pause-on-failure` stops at each failing scenario so the environment can be inspected live; show-tech diagnostics are collected on failure by default (`--show-tech`).
+- `--fail-fast` stops on the first failure; `--extended` enables the extended tests.
+- `--iperfs-speed` sets the minimum iperf3 speed in Mbit/s for a connectivity check to pass (default 8200; 0 disables speed checks).
+- `--results-file` exports JUnit XML, which is what CI uploads.
+
 ## Gating a release
 
 Release gating happens at the product-release level and takes about two days of work. The process is intentionally lightweight; the tracking issue described below is what makes it accountable.
@@ -90,7 +99,13 @@ Known environment limitations:
 
 ### Gateway performance baseline
 
-Run the gateway performance tests on env-5 each cycle and record the numbers in the internal tracker, compared against the previous cycle's baseline for regressions.
+Each cycle gets a "Baseline YY.MM performance" issue in the internal tracker recording gateway NAT throughput on env-5, compared against the previous cycle's issue:
+
+- Deploy two VPCs peered through the gateway, exposing the iperf3 server both through masquerade NAT and through a TCP port forward, and confirm the endpoints run at the maximum fabric-allowed MTU.
+- From a server in the peering VPC, run iperf3 through the NAT path with increasing parallelism, `toolbox iperf3 -c <exposed IP> -p <forwarded port> -P <1|2|16|128>` (default 10 s runs), for both the masquerade and the port-forward path.
+- Post on the issue: the deployed topology and `GatewayPeering` spec, the endpoint MTU check, each full iperf3 output, and a comparison table of throughput and retransmits per parallelism level against the previous baseline.
+
+A regression in this comparison is a gate failure like any other: it gets investigated, bisecting the intermediate artifacts if needed, and fixed or reverted before the release ships.
 
 ### Go/no-go
 
