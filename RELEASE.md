@@ -44,6 +44,60 @@ Each job uploads a `release-test.xml`; results are aggregated into a single "Rel
 
 The tag pipeline does not gate on release tests: publishing only requires the build, bundle, and VLAB jobs on the tag itself, and the nightly schedule covers only `master`. A release ref therefore gets its full release-test coverage from a manual CI dispatch on the tag with the `releasetest` input enabled.
 
+## Gating a release
+
+Release gating happens at the product-release level and takes about two days of work. The process is intentionally lightweight; the tracking issue described below is what makes it accountable.
+
+### The tracking issue
+
+For each product release, open a "YY.MM release testing" issue in the internal tracker. It is the evidence record backing the go/no-go decision, structured as:
+
+- a checklist with three sections: the release-test matrix (below), new release tests required for features added in the cycle (with manual testing as a backup while they land), and extra manual checks as the cycle requires (for example input ACLs, host BGP, documentation coverage);
+- one comment per completed run, titled `<topology>@<env> (<fabricator version>)`, containing the exact commands used followed by the full release-test recap. Paste recaps verbatim; the previous cycles' issues are the reference for both format and commands.
+
+Ownership started with the release manager and is shifting to QA; there is no formal procedure beyond this issue.
+
+### CI on the release tag
+
+Dispatch the CI workflow on the release tag with the `releasetest` input enabled: full matrix with the `-rt` suffix, including the upgrade and hardware lab jobs. The release-test suite has no automatic retries, and flaky jobs can block the tag's `publish-release` job, so retry failed jobs until the run is green; chasing and fixing flakes is an ongoing effort.
+
+### Release tests on physical environments
+
+The suite currently runs on four topology combinations across two shared lab environments (reserve the environment via the lab Slack channel topic before starting):
+
+- `sl+l2vni@env-1`: spine-leaf, the only combination exercising MCLAG, ESLAG, bundled, and spine failover.
+- `mesh+l2vni+gw@env-1`: mesh with gateways.
+- `sl+l3vni+gw@env-5`: spine-leaf l3vni with gateways.
+- `mesh+l3vni+gw@env-5`: mesh l3vni with gateways.
+
+env-5 switches support l3vni mode only, which is why l3vni coverage lives there; ESLAG is incompatible with l3vni, so LAG failover coverage comes from env-1.
+
+The shape of every run, with each environment's fab config and wiring files kept in its home directory (`~/env-1/`, `~/env-5/`):
+
+```
+curl -fsSL https://i.hhdev.io/hhfab | USE_SUDO=false INSTALL_DIR=. VERSION=<product release> BINARY_NAME=hhfab-<product release> bash
+./hhfab-<product release> init -f -c <env fab config> -w <env wiring files>
+./hhfab-<product release> vlab up -f -m=manual -r=reinstall -r=inspect
+./hhfab-<product release> vlab release-test
+```
+
+Flags vary per environment and topology (env-5 needs `--vpc-mode=l3vni -r=vpcs --controls-restricted=false` on `vlab up` and `--mode l3vni` on `release-test`); copy the exact command from the same combination in the previous cycle's tracking issue.
+
+Known environment limitations:
+
+- env-1 gateway nodes use NICs that are not officially supported; the Gateway Failover throughput check is inconsistent there.
+- env-4 is not part of the gate: it converges more slowly and some connectivity checks fail on a first attempt and pass on retry.
+
+### Gateway performance baseline
+
+Run the gateway performance tests on env-5 each cycle and record the numbers in the internal tracker, compared against the previous cycle's baseline for regressions.
+
+### Go/no-go
+
+The release manager asks QA, usually in a meeting; there is no formal sign-off procedure. Failures found during the gate are investigated and documented on the tracking issue; a problem known to be specific to a test environment does not have to block the release, as long as it is recorded there.
+
+Which product releases the upgrade jobs must pass from is decided by the release manager; a written release support policy is an open gap.
+
 ## Pre-release checklist
 
 - Component versions in `pkg/fab/versions.go` are final.
