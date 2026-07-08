@@ -80,7 +80,7 @@ github.com/bodgit/sevenzip/internal/zstd
 # github.com/bodgit/windows v1.0.1
 ## explicit; go 1.13
 github.com/bodgit/windows
-# github.com/cert-manager/cert-manager v1.20.2
+# github.com/cert-manager/cert-manager v1.20.3
 ## explicit; go 1.25.0
 github.com/cert-manager/cert-manager/pkg/apis/acme
 github.com/cert-manager/cert-manager/pkg/apis/acme/v1
