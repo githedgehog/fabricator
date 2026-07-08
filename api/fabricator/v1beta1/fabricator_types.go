@@ -529,9 +529,14 @@ func (f *Fabricator) Default() {
 		f.Spec.Config.Fabric.VPCIRBVLANs[0].To = 3899
 	}
 
+	// apply new default to TH5 VLANs if it was unchanged, as BCM SONiC 4.6.0 reserves 3967-4094
+	if len(f.Spec.Config.Fabric.TH5WorkaroundVLANs) == 1 && f.Spec.Config.Fabric.TH5WorkaroundVLANs[0].From == 3900 && f.Spec.Config.Fabric.TH5WorkaroundVLANs[0].To == 3999 {
+		f.Spec.Config.Fabric.TH5WorkaroundVLANs[0].To = 3966
+	}
+
 	if len(f.Spec.Config.Fabric.TH5WorkaroundVLANs) == 0 {
 		f.Spec.Config.Fabric.TH5WorkaroundVLANs = []fmeta.VLANRange{
-			{From: 3900, To: 3999},
+			{From: 3900, To: 3966},
 		}
 	}
 
