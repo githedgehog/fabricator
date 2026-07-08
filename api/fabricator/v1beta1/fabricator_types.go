@@ -221,6 +221,9 @@ type ControlConfig struct {
 	DummySubnet meta.Prefix `json:"dummySubnet,omitempty"`
 
 	DefaultUser ControlUser `json:"defaultUser,omitempty"`
+	// NoPassAuth disables SSH password authentication on control/fab nodes, requiring key-based access.
+	// When true, at least one authorized key must be configured.
+	NoPassAuth bool `json:"noPassAuth,omitempty"`
 
 	NTPServers []string `json:"ntpServers,omitempty"`
 

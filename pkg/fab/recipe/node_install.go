@@ -85,7 +85,7 @@ func (c *NodeInstallUpgrade) Run(ctx context.Context, upgrade bool) error {
 	}
 
 	if upgrade {
-		if err := copySSHConfig(ctx); err != nil {
+		if err := copySSHConfig(ctx, c.Fab.Spec.Config.Control.NoPassAuth); err != nil {
 			return fmt.Errorf("copying ssh config: %w", err)
 		}
 		if err := upgradeFlatcar(ctx, string(flatcar.Version(c.Fab)), c.Yes); err != nil {

@@ -173,7 +173,7 @@ func (c *ControlUpgrade) Run(ctx context.Context) error {
 		return fmt.Errorf("copying k9s bin: %w", err)
 	}
 
-	if err := copySSHConfig(ctx); err != nil {
+	if err := copySSHConfig(ctx, c.Fab.Spec.Config.Control.NoPassAuth); err != nil {
 		return fmt.Errorf("copying ssh config:%w", err)
 	}
 

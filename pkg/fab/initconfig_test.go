@@ -157,8 +157,9 @@ func TestInitConfig(t *testing.T) {
 		{
 			name: "include-onie-import-upstream",
 			in: fab.InitConfigInput{
-				DefaultPasswordHash: "$5$bar",
-				IncludeONIE:         true,
+				DefaultPasswordHash:   "$5$bar",
+				DefaultAuthorizedKeys: []string{"baz"},
+				IncludeONIE:           true,
 				RegUpstream: &fabapi.ControlConfigRegistryUpstream{
 					Repo:        "repo",
 					Prefix:      "prefix",
@@ -186,19 +187,22 @@ func TestInitConfig(t *testing.T) {
 						},
 						Control: fabapi.ControlConfig{
 							DefaultUser: fabapi.ControlUser{
-								PasswordHash: "$5$bar",
+								PasswordHash:   "$5$bar",
+								AuthorizedKeys: []string{"baz"},
 							},
 						},
 						Fabric: fabapi.FabricConfig{
 							IncludeONIE: true,
 							DefaultSwitchUsers: map[string]fabapi.SwitchUser{
 								"admin": {
-									Role:         "admin",
-									PasswordHash: "$5$bar",
+									Role:           "admin",
+									PasswordHash:   "$5$bar",
+									AuthorizedKeys: []string{"baz"},
 								},
 								"op": {
-									Role:         "operator",
-									PasswordHash: "$5$bar",
+									Role:           "operator",
+									PasswordHash:   "$5$bar",
+									AuthorizedKeys: []string{"baz"},
 								},
 							},
 						},
@@ -209,8 +213,9 @@ func TestInitConfig(t *testing.T) {
 		{
 			name: "include-cls",
 			in: fab.InitConfigInput{
-				DefaultPasswordHash: "$5$bar",
-				IncludeCLSP:         true,
+				DefaultPasswordHash:   "$5$bar",
+				IncludeCLSP:           true,
+				DefaultAuthorizedKeys: []string{"baz"},
 			},
 			expectedFab: fabapi.Fabricator{
 				ObjectMeta: metav1.ObjectMeta{
@@ -221,19 +226,22 @@ func TestInitConfig(t *testing.T) {
 					Config: fabapi.FabConfig{
 						Control: fabapi.ControlConfig{
 							DefaultUser: fabapi.ControlUser{
-								PasswordHash: "$5$bar",
+								PasswordHash:   "$5$bar",
+								AuthorizedKeys: []string{"baz"},
 							},
 						},
 						Fabric: fabapi.FabricConfig{
 							IncludeCLSP: true,
 							DefaultSwitchUsers: map[string]fabapi.SwitchUser{
 								"admin": {
-									Role:         "admin",
-									PasswordHash: "$5$bar",
+									Role:           "admin",
+									PasswordHash:   "$5$bar",
+									AuthorizedKeys: []string{"baz"},
 								},
 								"op": {
-									Role:         "operator",
-									PasswordHash: "$5$bar",
+									Role:           "operator",
+									PasswordHash:   "$5$bar",
+									AuthorizedKeys: []string{"baz"},
 								},
 							},
 						},
@@ -244,7 +252,8 @@ func TestInitConfig(t *testing.T) {
 		{
 			name: "control-node-management-link",
 			in: fab.InitConfigInput{
-				DefaultPasswordHash: "$5$bar",
+				DefaultPasswordHash:   "$5$bar",
+				DefaultAuthorizedKeys: []string{"baz"},
 				NodeManagementLinks: map[string]string{
 					"control-1": "pci@0000:00:00.0",
 				},
@@ -258,18 +267,21 @@ func TestInitConfig(t *testing.T) {
 					Config: fabapi.FabConfig{
 						Control: fabapi.ControlConfig{
 							DefaultUser: fabapi.ControlUser{
-								PasswordHash: "$5$bar",
+								PasswordHash:   "$5$bar",
+								AuthorizedKeys: []string{"baz"},
 							},
 						},
 						Fabric: fabapi.FabricConfig{
 							DefaultSwitchUsers: map[string]fabapi.SwitchUser{
 								"admin": {
-									Role:         "admin",
-									PasswordHash: "$5$bar",
+									Role:           "admin",
+									PasswordHash:   "$5$bar",
+									AuthorizedKeys: []string{"baz"},
 								},
 								"op": {
-									Role:         "operator",
-									PasswordHash: "$5$bar",
+									Role:           "operator",
+									PasswordHash:   "$5$bar",
+									AuthorizedKeys: []string{"baz"},
 								},
 							},
 						},

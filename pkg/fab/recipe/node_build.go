@@ -135,10 +135,16 @@ func (b *NodeInstallBuilder) buildIgnition() ([]byte, error) {
 		return nil, fmt.Errorf("dummy IP must be a /31") //nolint:goerr113
 	}
 
+	sshdConfig, err := renderSSHDConfig(b.Fab.Spec.Config.Control.NoPassAuth)
+	if err != nil {
+		return nil, fmt.Errorf("rendering sshd config: %w", err)
+	}
+
 	but, err := tmplutil.FromTemplate("node-butane", nodeButaneTmpl, map[string]any{
 		"Hostname":       b.Node.Name,
 		"PasswordHash":   b.Fab.Spec.Config.Control.DefaultUser.PasswordHash,
 		"AuthorizedKeys": b.Fab.Spec.Config.Control.DefaultUser.AuthorizedKeys,
+		"SSHDConfig":     sshdConfig,
 		"MgmtInterface":  b.Node.Spec.Management.Interface,
 		"MgmtAddress":    b.Node.Spec.Management.IP,
 		"DummyAddress":   dummyIP.Masked().String(),

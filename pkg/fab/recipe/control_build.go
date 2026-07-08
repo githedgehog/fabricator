@@ -255,10 +255,16 @@ func (b *ControlInstallBuilder) buildIgnition() ([]byte, error) {
 		return nil, fmt.Errorf("dummy IP must be a /31") //nolint:goerr113
 	}
 
+	sshdConfig, err := renderSSHDConfig(b.Fab.Spec.Config.Control.NoPassAuth)
+	if err != nil {
+		return nil, fmt.Errorf("rendering sshd config: %w", err)
+	}
+
 	but, err := tmplutil.FromTemplate("control-butane", controlButaneTmpl, map[string]any{
 		"Hostname":       b.Control.Name,
 		"PasswordHash":   b.Fab.Spec.Config.Control.DefaultUser.PasswordHash,
 		"AuthorizedKeys": b.Fab.Spec.Config.Control.DefaultUser.AuthorizedKeys,
+		"SSHDConfig":     sshdConfig,
 		"MgmtInterface":  b.Control.Spec.Management.Interface,
 		"MgmtAddress":    b.Control.Spec.Management.IP,
 		"ControlVIP":     b.Fab.Spec.Config.Control.VIP,

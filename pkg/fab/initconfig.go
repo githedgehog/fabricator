@@ -39,6 +39,7 @@ type InitConfigInput struct {
 	IncludeBCM            bool
 	IncludeCLSP           bool
 	IncludeCumulus        bool
+	NoPassAuth            bool
 	RegUpstream           *fabapi.ControlConfigRegistryUpstream
 	NodeManagementLinks   map[string]string
 	Gateway               bool
@@ -70,10 +71,16 @@ func InitConfig(ctx context.Context, in InitConfigInput) ([]byte, error) {
 		in.DefaultPasswordHash = DevAdminPasswordHash
 		in.DefaultAuthorizedKeys = append(in.DefaultAuthorizedKeys, DevSSHKey)
 
+		in.NoPassAuth = false
+
 		if in.Gateway && in.JoinToken == "" {
 			in.JoinToken = rand.Text()
 			in.SaveJoinToken = true
 		}
+	}
+
+	if in.NoPassAuth && len(in.DefaultAuthorizedKeys) == 0 {
+		return nil, fmt.Errorf("SSH password authentication is disabled but no authorized keys are provided: set --keys or enable password auth with --ctrl-no-pass-auth=false") //nolint:goerr113
 	}
 
 	if in.DefaultPasswordHash != "" && !strings.HasPrefix(in.DefaultPasswordHash, "$5$") {
