@@ -528,7 +528,7 @@ func (f *Fabricator) Default() {
 
 	if len(f.Spec.Config.Fabric.TH5WorkaroundVLANs) == 0 {
 		f.Spec.Config.Fabric.TH5WorkaroundVLANs = []fmeta.VLANRange{
-			{From: 3900, To: 3999},
+			{From: 3900, To: 3966},
 		}
 	}
 
