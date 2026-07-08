@@ -25,23 +25,22 @@ func findEndingPorts(numPorts int, agent *agentapi.Agent) []string {
 
 	currPort := 0
 	i := 0
-	portList := {}string{}
+	portList := []string{}
 	_, exists := agent.Spec.SwitchProfile.Ports["E1/32"]
 	if exists {
 		currPort = 32
 	}
 	// If there isn't a 64th port this will fall through
-	_, exists := agent.Spec.SwitchProfile.Ports["E1/64"]
+	_, exists = agent.Spec.SwitchProfile.Ports["E1/64"]
 	if exists {
-		currPort := 64
+		currPort = 64
 	}
 	for i < numPorts {
-		portList = append(portList,"E1/"+strconv.Itoa(currPort))
+		portList = append(portList, "E1/"+strconv.Itoa(currPort))
 		currPort = currPort - 1
 		i++
 	}
 	return portList
-
 }
 
 func portBreakoutVerify(agent *agentapi.Agent) error {
@@ -68,10 +67,10 @@ func portBreakoutVerify(agent *agentapi.Agent) error {
 	for i := range defaultBreakouts {
 		if err := setPortBreakout(ctx, testCtx.kube, agent.Name, unusedPort, defaultBreakouts[i], true); err != nil {
 			return fmt.Errorf("setting breakout mode back to default for port %s on switch %s: %w", unusedPort, agent.Name, err)
-	}
+		}
 	}
 	// 4. issue the command for two ports at a time, do all the breakouts, waiting for completion before moving onto the second
-	for port,_ := range startingPorts {
+	for port := range startingPorts {
 		// use port to find its breakout capabilities
 		// loop on the breakout modes
 		// set the breakout, verify, and move on to the next one.
