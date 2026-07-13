@@ -515,14 +515,17 @@ func (c *Config) VLABSwitchReinstall(ctx context.Context, opts SwitchReinstallOp
 					}
 
 					var exitErr *exec.ExitError
-					if errors.As(err, &exitErr) && exitErr.ExitCode() == errorConsole {
-						slog.Info("Reinstall attempt failed", "attempt", attempt, "switch", sw.Name, "reason", "console connection error, initiating hard reset")
+					if errors.As(err, &exitErr) && (exitErr.ExitCode() == errorConsole || exitErr.ExitCode() == errorInstall) {
+						reason := "console connection error, initiating hard reset"
+						if exitErr.ExitCode() == errorInstall {
+							reason = "install did not complete, initiating hard reset"
+						}
 						backoffSeconds := baseBackoff * (1 << (attempt - 1))
 
 						slog.Info("Reinstall attempt failed",
 							"attempt", attempt,
 							"switch", sw.Name,
-							"reason", "console connection error, initiating hard reset",
+							"reason", reason,
 							"next_retry_delay", fmt.Sprintf("%ds", backoffSeconds))
 
 						powerOpts := SwitchPowerOpts{
@@ -546,9 +549,10 @@ func (c *Config) VLABSwitchReinstall(ctx context.Context, opts SwitchReinstallOp
 					}
 
 					backoffSeconds := baseBackoff * (1 << (attempt - 1))
-					slog.Info("Reinstall attempt failed with non-console error",
+					slog.Info("Reinstall attempt failed, retrying without hard reset",
 						"attempt", attempt,
 						"switch", sw.Name,
+						"error", err,
 						"next_retry_delay", fmt.Sprintf("%ds", backoffSeconds))
 					time.Sleep(time.Second * time.Duration(backoffSeconds))
 
