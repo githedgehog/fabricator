@@ -333,6 +333,29 @@ func describeUnknownEntry(pair EndpointPair, pp ProtoPort, e ConnectivityExpecta
 	return out
 }
 
+func (m *ConnectivityMatrix) ProtoPortEntries(src, dst *Endpoint) []ConnectivityExpectation {
+	byPP, ok := m.entries[EndpointPair{Source: src, Destination: dst}]
+	if !ok {
+		return nil
+	}
+	out := make([]ConnectivityExpectation, 0, len(byPP))
+	for pp, e := range byPP {
+		if pp == (ProtoPort{}) {
+			continue
+		}
+		out = append(out, e)
+	}
+	slices.SortFunc(out, func(a, b ConnectivityExpectation) int {
+		if a.ProtoPort.Protocol != b.ProtoPort.Protocol {
+			return strings.Compare(a.ProtoPort.Protocol, b.ProtoPort.Protocol)
+		}
+
+		return int(a.ProtoPort.Port) - int(b.ProtoPort.Port)
+	})
+
+	return out
+}
+
 func endpointLabel(ep *Endpoint) string {
 	switch {
 	case ep == nil:
@@ -344,6 +367,20 @@ func endpointLabel(ep *Endpoint) string {
 	default:
 		return "<empty>"
 	}
+}
+
+func (m *ConnectivityMatrix) HasProtoPortEntries(src, dst *Endpoint) bool {
+	byPP, ok := m.entries[EndpointPair{Source: src, Destination: dst}]
+	if !ok {
+		return false
+	}
+	for pp := range byPP {
+		if pp != (ProtoPort{}) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func reachabilityFromExpectation(e ConnectivityExpectation) Reachability {
@@ -390,6 +427,11 @@ func runMatrixServerServerPhase(ctx context.Context, opts TestConnectivityOpts, 
 				continue
 			}
 			if !deps.inDestinations(dst.Server.Name) {
+				continue
+			}
+
+			// Protocol/port-scoped pairs are owned entirely by runMatrixProtoPortPhase
+			if matrix.HasProtoPortEntries(src, dst) {
 				continue
 			}
 
@@ -566,6 +608,136 @@ func runMatrixPortForwardPhase(ctx context.Context, opts TestConnectivityOpts, m
 	}
 }
 
+// persistentIperf3Port is the port the always-on iperf3 -s daemon serves (TCP+UDP).
+const persistentIperf3Port = 5201
+
+func startMatrixProtoPortListeners(ctx context.Context, matrix *ConnectivityMatrix, deps *matrixTestDeps) (func(), error) {
+	type hostPort struct {
+		host string
+		port uint16
+	}
+	wanted := map[hostPort]struct{}{}
+	for _, src := range matrix.AllEndpoints {
+		if src.Server == nil {
+			continue
+		}
+		for _, dst := range matrix.AllEndpoints {
+			if dst.Server == nil || src == dst {
+				continue
+			}
+			for _, e := range matrix.ProtoPortEntries(src, dst) {
+				pp := e.ProtoPort
+				if pp.Protocol != "tcp" && pp.Protocol != "udp" {
+					continue
+				}
+				if pp.Port == 0 || pp.Port == persistentIperf3Port {
+					continue
+				}
+				wanted[hostPort{host: dst.Server.Name, port: pp.Port}] = struct{}{}
+			}
+		}
+	}
+
+	started := make([]hostPort, 0, len(wanted))
+	teardown := func() {
+		// Teardown must run even when the caller's ctx has been canceled
+		tctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		for _, hp := range started {
+			ssh := deps.sshByServer[hp.host]
+			if ssh == nil {
+				continue
+			}
+			cmd := fmt.Sprintf("sudo docker exec iperf3 pkill -f 'iperf3 -s -p %d'", hp.port)
+			if _, stderr, err := retrySSHCmd(tctx, ssh, cmd, hp.host); err != nil {
+				slog.Warn("Failed to stop proto-port iperf3 listener", "host", hp.host, "port", hp.port, "err", err, "stderr", stderr)
+			}
+		}
+	}
+
+	for hp := range wanted {
+		ssh := deps.sshByServer[hp.host]
+		if ssh == nil {
+			teardown()
+
+			return nil, fmt.Errorf("no ssh config for server %q needed as proto-port listener", hp.host) //nolint:goerr113
+		}
+		cmd := fmt.Sprintf("sudo docker exec -d iperf3 iperf3 -s -p %d", hp.port)
+		if _, stderr, err := retrySSHCmd(ctx, ssh, cmd, hp.host); err != nil {
+			teardown()
+
+			return nil, fmt.Errorf("starting proto-port iperf3 listener on %s:%d: %w: %s", hp.host, hp.port, err, stderr)
+		}
+		started = append(started, hp)
+		slog.Debug("Started proto-port iperf3 listener", "host", hp.host, "port", hp.port)
+	}
+
+	return teardown, nil
+}
+
+// runMatrixProtoPortPhase exercises every non-zero ProtoPort matrix entry with a
+// protocol-specific probe: "icmp" → ping, "tcp" → nc connect, "udp" → iperf3 -u
+// loss check.
+func runMatrixProtoPortPhase(ctx context.Context, opts TestConnectivityOpts, matrix *ConnectivityMatrix, deps *matrixTestDeps) {
+	for _, src := range matrix.AllEndpoints {
+		if src.Server == nil || !deps.inSources(src.Server.Name) {
+			continue
+		}
+		for _, dst := range matrix.AllEndpoints {
+			if dst.Server == nil || src == dst {
+				continue
+			}
+			if IsSameEndpointNode(src, dst) {
+				continue
+			}
+			if !deps.inDestinations(dst.Server.Name) {
+				continue
+			}
+			for _, entry := range matrix.ProtoPortEntries(src, dst) {
+				expected := reachabilityFromExpectation(entry)
+				pp := entry.ProtoPort
+				fromName := src.Server.Name
+				toName := dst.Server.Name
+				fromSSH := deps.sshByServer[fromName]
+				toIP := dst.Server.IP
+				if entry.NAT != nil && entry.NAT.DestinationIP.IsValid() {
+					toIP = entry.NAT.DestinationIP
+				}
+				if !toIP.IsValid() {
+					deps.errChan <- fmt.Errorf("matrix proto entry %s→%s (%s/%d) has no valid target IP", fromName, toName, pp.Protocol, pp.Port) //nolint:goerr113
+
+					continue
+				}
+
+				switch pp.Protocol {
+				case "icmp":
+					deps.wg.Go(func() {
+						if pe := checkPing(ctx, opts.PingsCount, deps.pings, fromName, toName, fromSSH, toIP, nil, expected); pe != nil {
+							deps.errChan <- pe
+						}
+					})
+				case "tcp":
+					port := pp.Port
+					deps.wg.Go(func() {
+						if ie := checkTCPPort(ctx, deps.iperfs, fromName, fromSSH, toIP, port, expected.Reachable); ie != nil {
+							deps.errChan <- ie
+						}
+					})
+				case "udp":
+					port := pp.Port
+					deps.wg.Go(func() {
+						if ie := checkUDPPort(ctx, opts, deps.iperfs, fromName, fromSSH, toIP, port, expected.Reachable); ie != nil {
+							deps.errChan <- ie
+						}
+					})
+				default:
+					deps.errChan <- fmt.Errorf("matrix proto entry %s→%s has unsupported protocol %q", fromName, toName, pp.Protocol) //nolint:goerr113
+				}
+			}
+		}
+	}
+}
+
 func (c *Config) TestConnectivityWithMatrix(ctx context.Context, vlab *VLAB, opts TestConnectivityOpts, matrix *ConnectivityMatrix) error {
 	if matrix == nil {
 		return fmt.Errorf("connectivity matrix must be non-nil") //nolint:goerr113
@@ -613,7 +785,16 @@ func (c *Config) TestConnectivityWithMatrix(ctx context.Context, vlab *VLAB, opt
 	}
 
 	n := len(matrix.AllEndpoints)
-	errChan := make(chan error, 2*n*n+n)
+	protoEntries := 0
+	for _, src := range matrix.AllEndpoints {
+		for _, dst := range matrix.AllEndpoints {
+			if src == dst {
+				continue
+			}
+			protoEntries += len(matrix.ProtoPortEntries(src, dst))
+		}
+	}
+	errChan := make(chan error, 2*n*n+n+protoEntries)
 	deps := &matrixTestDeps{
 		sshByServer: sshByServer,
 		pings:       semaphore.NewWeighted(opts.PingsParallel),
@@ -629,6 +810,16 @@ func (c *Config) TestConnectivityWithMatrix(ctx context.Context, vlab *VLAB, opt
 		errChan: errChan,
 	}
 
+	teardownListeners := func() {}
+	if opts.PingsCount > 0 || opts.IPerfsSeconds > 0 {
+		td, err := startMatrixProtoPortListeners(ctx, matrix, deps)
+		if err != nil {
+			return err
+		}
+		teardownListeners = td
+	}
+	defer teardownListeners()
+
 	if opts.PingsCount > 0 || opts.IPerfsSeconds > 0 {
 		if err := runMatrixServerServerPhase(ctx, opts, matrix, deps); err != nil {
 			return err
@@ -639,6 +830,9 @@ func (c *Config) TestConnectivityWithMatrix(ctx context.Context, vlab *VLAB, opt
 	}
 	if opts.IPerfsSeconds > 0 {
 		runMatrixPortForwardPhase(ctx, opts, matrix, deps)
+	}
+	if opts.PingsCount > 0 || opts.IPerfsSeconds > 0 {
+		runMatrixProtoPortPhase(ctx, opts, matrix, deps)
 	}
 
 	deps.wg.Wait()
