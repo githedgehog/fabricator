@@ -121,6 +121,8 @@ func makeMultiVPCSingleSubnetSuite() *JUnitTestSuite {
 	suite.TestCases = append(suite.TestCases, getNATTestCases()...)
 	// Add external NAT test cases
 	suite.TestCases = append(suite.TestCases, getExternalNATTestCases()...)
+	// Add gateway peering ACL test cases
+	suite.TestCases = append(suite.TestCases, getACLTestCases()...)
 	suite.Tests = len(suite.TestCases)
 
 	return suite
