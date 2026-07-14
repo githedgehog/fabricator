@@ -3359,6 +3359,198 @@ func isReportableIperfError(ie *IperfError) bool {
 	return ie.ClientMsg != "" || ie.ServerMsg != ""
 }
 
+// ncProbeMarker prefixes the exit code the TCP probe echoes after nc, so the
+// connection result is read from the marker rather than from the SSH command's
+// own exit status (which conflates transport failures with a refused connect).
+const ncProbeMarker = "NCRC="
+
+// parseNCReturnCode extracts the nc exit code from the "NCRC=<n>" marker the TCP
+// probe appends. ok is false when no valid marker is present (i.e. the probe did
+// not run to completion).
+func parseNCReturnCode(stdout string) (int, bool) {
+	for _, line := range strings.Split(stdout, "\n") {
+		rest, found := strings.CutPrefix(strings.TrimSpace(line), ncProbeMarker)
+		if !found {
+			continue
+		}
+		rc, err := strconv.Atoi(strings.TrimSpace(rest))
+		if err != nil {
+			return 0, false
+		}
+
+		return rc, true
+	}
+
+	return 0, false
+}
+
+// checkTCPPort asserts that a TCP connection from `from` to toIP:port matches
+// expected. It runs `nc -zw2 <ip> <port>` on the source: a completed handshake
+// means the path is open (allow), a refused/timed-out connect (nc exit 1) means
+// it is blocked (deny). Unlike checkIPerf there is no throughput floor — this is
+// a pure reachability check for protocol/port-scoped (ProtoPort) matrix entries.
+//
+// The nc exit code is captured via a shell marker so a genuine connection result
+// is distinguished from an infrastructure failure: an SSH/transport error (no
+// marker, or the command could not run) or any nc exit code other than 0/1 is
+// surfaced as an error for BOTH allow and deny expectations, rather than being
+// silently treated as a successful "deny". Reported as *IperfError so it routes
+// like the other L4 probes.
+func checkTCPPort(ctx context.Context, sem *semaphore.Weighted, from string, fromSSH *sshutil.Config, toIP netip.Addr, port uint16, expected bool) *IperfError {
+	target := fmt.Sprintf("%s:%d", toIP.String(), port)
+	ie := &IperfError{Source: from, Destination: target}
+
+	if sem != nil {
+		if err := sem.Acquire(ctx, 1); err != nil {
+			ie.ClientMsg = fmt.Sprintf("acquiring iperf3 semaphore: %s", err)
+
+			return ie
+		}
+		defer sem.Release(1)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	// Append the marker so the shell exits 0 whenever it ran; a non-nil err
+	// then unambiguously means the probe itself could not execute.
+	cmd := fmt.Sprintf("nc -zw2 %s %d; echo %s$?", toIP.String(), port, ncProbeMarker)
+	stdout, stderr, err := retrySSHCmd(ctx, fromSSH, cmd, from)
+	if err != nil {
+		ie.ClientMsg = fmt.Sprintf("TCP probe could not run: %s: %s", err, strings.TrimSpace(stderr))
+
+		return ie
+	}
+
+	rc, ok := parseNCReturnCode(stdout)
+	if !ok {
+		ie.ClientMsg = fmt.Sprintf("TCP probe produced no result marker (stdout %q, stderr %q)", strings.TrimSpace(stdout), strings.TrimSpace(stderr))
+
+		return ie
+	}
+
+	var connectOk bool
+	switch rc {
+	case 0:
+		connectOk = true
+	case 1:
+		// nc -z exits 1 on connection refused or -w timeout: a genuine block.
+		connectOk = false
+	default:
+		// e.g. 127 (nc not found) — a probe/environment failure, not a verdict.
+		ie.ClientMsg = fmt.Sprintf("TCP probe returned unexpected exit code %d (stdout %q, stderr %q)", rc, strings.TrimSpace(stdout), strings.TrimSpace(stderr))
+
+		return ie
+	}
+
+	slog.Debug("TCP port probe result", "from", from, "to", target, "expected", expected, "ok", connectOk, "rc", rc, "stderr", stderr)
+
+	if expected && !connectOk {
+		ie.ClientMsg = "should be reachable but TCP connect was refused/timed out"
+
+		return ie
+	}
+	if !expected && connectOk {
+		ie.ClientMsg = "should not be reachable but TCP connect succeeded"
+
+		return ie
+	}
+
+	return nil
+}
+
+// udpDenyLossThreshold and udpAllowLossThreshold bound the datagram-loss
+// interpretation of a UDP probe. iperf3 -u runs even when every datagram is
+// dropped, so allow/deny is inferred from loss: near-total loss (or a control-
+// channel error / zero datagrams) means the path is blocked, low-enough loss
+// means it is open. The allow bound is deliberately generous because VS /
+// CumulusVX links drop real packets.
+const (
+	udpDenyLossThreshold  = 99.0
+	udpAllowLossThreshold = 90.0
+)
+
+// checkUDPPort asserts that UDP datagrams from `from` to toIP:port match
+// expected. It runs iperf3 -u inside the always-on iperf3 container (same
+// memory-safe docker-exec path as runIPerf3Test) and interprets datagram loss.
+// No throughput floor.
+//
+// NOTE: iperf3 -u first opens a TCP control channel on the target port, so this
+// cannot distinguish "TCP denied + UDP allowed" on the same port (the control
+// channel would be blocked). Callers must avoid that combination.
+func checkUDPPort(ctx context.Context, opts TestConnectivityOpts, sem *semaphore.Weighted, from string, fromSSH *sshutil.Config, toIP netip.Addr, port uint16, expected bool) *IperfError {
+	target := fmt.Sprintf("%s:%d", toIP.String(), port)
+	ie := &IperfError{Source: from, Destination: target}
+
+	if sem != nil {
+		if err := sem.Acquire(ctx, 1); err != nil {
+			ie.ClientMsg = fmt.Sprintf("acquiring iperf3 semaphore: %s", err)
+
+			return ie
+		}
+		defer sem.Release(1)
+	}
+
+	secs := opts.IPerfsSeconds
+	if secs <= 0 {
+		secs = 3
+	}
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(secs+30)*time.Second)
+	defer cancel()
+
+	cmd := fmt.Sprintf("sudo docker exec iperf3 timeout %d iperf3 -u -J -c %s -p %d -t %d -b 10M -l 1000", secs+25, toIP.String(), port, secs)
+	stdout, stderr, err := retrySSHCmd(ctx, fromSSH, cmd, from)
+	report, parseErr := parseIPerf3Report([]byte(stdout))
+
+	// No parseable iperf3 JSON means the probe did not run to completion
+	// (docker/exec/SSH failure, OOM, or a killed process) — surface it rather
+	// than treating it as a traffic verdict. iperf3 -J emits a JSON report with
+	// an "error" field even when the control channel is refused, so a genuine
+	// denial still parses and is classified below.
+	if parseErr != nil {
+		ie.ClientMsg = fmt.Sprintf("iperf3 UDP probe produced no parseable report (cmd err: %v, stderr: %q): %s", err, strings.TrimSpace(stderr), parseErr)
+
+		return ie
+	}
+
+	reportErr := report.Error
+	packets := report.End.Sum.Packets
+	lost := report.End.Sum.LostPackets
+	lostPercent := report.End.Sum.LostPercent
+	delivered := reportErr == "" && packets > 0 && lostPercent < udpAllowLossThreshold
+	// A blocked path is a validated control-channel denial (report.Error, e.g.
+	// "Connection refused"), zero datagrams, or near-total loss — never an
+	// unexplained command/parse error.
+	blocked := reportErr != "" || packets == 0 || lostPercent >= udpDenyLossThreshold
+
+	slog.Debug("UDP port probe result", "from", from, "to", target, "expected", expected,
+		"delivered", delivered, "blocked", blocked, "packets", packets, "lost", lost, "lostPercent", lostPercent,
+		"err", err, "reportErr", reportErr, "stderr", stderr)
+
+	if expected {
+		if !delivered {
+			if reportErr != "" {
+				ie.ClientMsg = fmt.Sprintf("should be reachable but UDP probe reported error: %s", reportErr)
+			} else {
+				ie.ClientMsg = fmt.Sprintf("should be reachable but UDP datagrams not delivered (packets %d, loss %.1f%%)", packets, lostPercent)
+			}
+
+			return ie
+		}
+
+		return nil
+	}
+
+	// expected == deny.
+	if !blocked {
+		ie.ClientMsg = fmt.Sprintf("should not be reachable but UDP datagrams delivered (packets %d, loss %.1f%%)", packets, lostPercent)
+
+		return ie
+	}
+
+	return nil
+}
+
 func checkCurl(ctx context.Context, opts TestConnectivityOpts, curls *semaphore.Weighted, from string, fromSSH *sshutil.Config, toIP string, expected bool) *CurlError {
 	if opts.CurlsCount <= 0 {
 		return nil
@@ -3432,11 +3624,19 @@ type iperf3ReportEnd struct {
 	SumReceived             iperf3ReportSum `json:"sum_received"`
 	SumSentBidirReverse     iperf3ReportSum `json:"sum_sent_bidir_reverse"`
 	SumReceivedBidirReverse iperf3ReportSum `json:"sum_received_bidir_reverse"`
+	// Sum holds the UDP client summary (iperf3 -u reports it here rather than
+	// in sum_sent/sum_received). Carries the datagram/loss counters.
+	Sum iperf3ReportSum `json:"sum"`
 }
 
 type iperf3ReportSum struct {
 	Bytes         int64   `json:"bytes"`
 	BitsPerSecond float64 `json:"bits_per_second"`
+	// UDP-only fields (populated by iperf3 -u).
+	Packets     int64   `json:"packets"`
+	LostPackets int64   `json:"lost_packets"`
+	LostPercent float64 `json:"lost_percent"`
+	JitterMs    float64 `json:"jitter_ms"`
 }
 
 func parseIPerf3Report(data []byte) (*iperf3Report, error) {

@@ -217,6 +217,38 @@ func overrideVPCToVPCVerdict(matrix *ConnectivityMatrix, srcVPCName, dstVPCName 
 	}
 }
 
+// setVPCToVPCProtoVerdict adds a protocol/port-scoped expectation on every
+// (server-in-srcVPCName → server-in-dstVPCName) pair. Unlike
+// overrideVPCToVPCVerdict (which writes the default ProtoPort{} entry), this
+// keys the entry by pp, so the matrix-driven runner exercises it with a
+// protocol-specific probe (icmp/tcp/udp) in runMatrixProtoPortPhase. Multiple
+// calls with different pp accumulate on the same pair, letting a single peering
+// express e.g. TCP allow + UDP deny. pp must be non-zero. The pair's existing
+// default-entry Peering is preserved for diagnostics.
+func setVPCToVPCProtoVerdict(matrix *ConnectivityMatrix, srcVPCName, dstVPCName string, pp ProtoPort, verdict ConnectivityVerdict) {
+	srcPred := ServerInVPC(srcVPCName)
+	dstPred := ServerInVPC(dstVPCName)
+	for _, src := range matrix.AllEndpoints {
+		if !srcPred(src) {
+			continue
+		}
+		for _, dst := range matrix.AllEndpoints {
+			if !dstPred(dst) {
+				continue
+			}
+			existing := matrix.Lookup(src, dst, ProtoPort{})
+			matrix.Add(ConnectivityExpectation{
+				Pair:      EndpointPair{Source: src, Destination: dst},
+				Verdict:   verdict,
+				Reason:    ReachabilityReasonGatewayPeering,
+				Peering:   existing.Peering,
+				NAT:       existing.NAT,
+				ProtoPort: pp,
+			})
+		}
+	}
+}
+
 // rebindMatrixServerEndpoint refreshes the matrix's endpoint(s) for
 // serverName to reflect the current cluster state. Used after a runtime
 // attachment change (e.g., the overlap NAT test moves one server to a
