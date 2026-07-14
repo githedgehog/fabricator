@@ -257,7 +257,6 @@ func (testCtx *VPCPeeringTestCtx) rebindMatrixServerEndpoint(ctx context.Context
 	return nil
 }
 
-// vpcFirstSubnetCIDR returns the (only) subnet CIDR for a VPC used in the NAT tests.
 func vpcFirstSubnetCIDR(vpc *vpcapi.VPC) (string, error) {
 	if len(vpc.Spec.Subnets) != 1 {
 		return "", fmt.Errorf("VPC %s has %d subnets, NAT test requires exactly one", vpc.Name, len(vpc.Spec.Subnets)) //nolint:goerr113

@@ -769,6 +769,8 @@ type GwPeeringOptions struct {
 	VPC1PortForwardRules []gwapi.PeeringNATPortForwardEntry
 	// VPC2PortForwardRules specifies port-forwarding rules for VPC2
 	VPC2PortForwardRules []gwapi.PeeringNATPortForwardEntry
+	// ACL is an optional peering-scoped ACL applied to the gateway peering.
+	ACL *gwapi.PeeringACL
 }
 
 // GwExtPeeringOptions contains optional parameters for gateway external peering configuration
@@ -914,6 +916,7 @@ func appendGwPeeringSpec(gwPeerings map[string]*gwapi.PeeringSpec, vpc1, vpc2 *v
 				Expose: vpc2Exposes,
 			},
 		},
+		ACL: opts.ACL,
 	}
 
 	return nil
