@@ -1093,7 +1093,7 @@ func (testCtx *VPCPeeringTestCtx) collectDiagnosticsOnFailure(ctx context.Contex
 	slog.Info("Collecting diagnostics for failed test", "suite", suiteName, "test", testName, "output", testDir)
 
 	// Collect show-tech from VMs and switches using existing VLABShowTech
-	if err := testCtx.vlabCfg.VLABShowTech(ctx, testCtx.vlab, ShowTechOpts{OutputDir: testDir}); err != nil {
+	if err := testCtx.vlabCfg.VLABShowTech(ctx, testCtx.vlab, ShowTechOpts{OutputDir: testDir, OnFailure: true}); err != nil {
 		slog.Warn("Failed to collect show-tech diagnostics", "err", err)
 	} else {
 		slog.Info("Diagnostics collected successfully", "path", testDir)

@@ -1843,6 +1843,25 @@ Examples:
 								},
 							},
 							{
+								Name:  "show-tech",
+								Usage: "collect native SONiC tech-support tarballs from switches (if no switches specified, all switches will be targeted)",
+								Flags: flatten(defaultFlags, []cli.Flag{
+									&cli.StringSliceFlag{
+										Name:    "switch",
+										Aliases: []string{"s"},
+										Usage:   "switch name to collect tech-support from (repeatable)",
+									},
+								}),
+								Before: before(false),
+								Action: func(c *cli.Context) error {
+									if err := hhfab.DoSonicShowTech(ctx, workDir, cacheDir, c.StringSlice("switch")); err != nil {
+										return fmt.Errorf("sonic show-tech: %w", err)
+									}
+
+									return nil
+								},
+							},
+							{
 								Name:  "power",
 								Usage: "manage switch power state using the PDU (if no switches specified, all switches will be affected)",
 								Flags: flatten(pduFlags, []cli.Flag{
