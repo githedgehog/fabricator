@@ -4,6 +4,8 @@ flannel-iface: "{{ .FlannelIface }}"
 cluster-cidr: "{{ .ClusterSubnet }}"
 service-cidr: "{{ .ServiceSubnet }}"
 cluster-dns: "{{ .ClusterDNS }}"
+kube-proxy-arg:
+  - "nodeport-addresses={{ .NodeSubnet }}"
 write-kubeconfig-mode: "0644"
 tls-san:
   {{ range .TLSSAN }}
