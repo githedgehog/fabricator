@@ -66,6 +66,7 @@ func ServerConfig(f fabapi.Fabricator, control fabapi.ControlNode) (string, erro
 	cfg, err := tmplutil.FromTemplate("k3s-server-config", k3sServerConfigTmpl, map[string]any{
 		"Name":          control.Name,
 		"NodeIP":        nodeIP.Addr(),
+		"NodeSubnet":    f.Spec.Config.Control.ManagementSubnet,
 		"FlannelIface":  control.Spec.Management.Interface,
 		"ClusterSubnet": f.Spec.Config.Control.KubeClusterSubnet,
 		"ServiceSubnet": f.Spec.Config.Control.KubeServiceSubnet,
