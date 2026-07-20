@@ -31,7 +31,7 @@ func Run(ctx context.Context) error {
 
 	logW := os.Stderr
 	handlers := []slog.Handler{
-		tint.NewHandler(logW, &tint.Options{
+		tint.NewTextHandler(logW, &tint.Options{
 			Level:      logLevel,
 			TimeFormat: time.StampMilli,
 			NoColor:    !isatty.IsTerminal(logW.Fd()),

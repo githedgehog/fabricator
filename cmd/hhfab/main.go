@@ -368,7 +368,7 @@ func Run(ctx context.Context) error {
 			})
 
 			slog.SetDefault(slog.New(slogmulti.Fanout(
-				tint.NewHandler(logW, &tint.Options{
+				tint.NewTextHandler(logW, &tint.Options{
 					Level:      logLevel,
 					TimeFormat: time.TimeOnly,
 					NoColor:    !isatty.IsTerminal(logW.Fd()),
@@ -377,7 +377,7 @@ func Run(ctx context.Context) error {
 			)))
 
 			kubeHandler := slogmulti.Fanout(
-				tint.NewHandler(logW, &tint.Options{
+				tint.NewTextHandler(logW, &tint.Options{
 					Level:      slog.LevelInfo,
 					TimeFormat: time.TimeOnly,
 					NoColor:    !isatty.IsTerminal(logW.Fd()),
