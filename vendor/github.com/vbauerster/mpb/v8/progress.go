@@ -2,7 +2,6 @@ package mpb
 
 import (
 	"bytes"
-	"cmp"
 	"context"
 	"fmt"
 	"io"
@@ -24,12 +23,17 @@ var ErrDone = fmt.Errorf("%T instance can't be reused after %[1]T.Wait()", (*Pro
 
 // Progress represents a container that renders one or more progress bars.
 type Progress struct {
+	// Render error if any, to be inspected after (*Progress).Wait call only.
+	Error error
+
+	ctx          context.Context
+	cancel       func()
 	pwg, bwg     *sync.WaitGroup
 	operateState chan func(*pState)
 	interceptIO  chan func(io.Writer)
-	done         <-chan struct{}
-	ctx          context.Context
-	cancel       func()
+	renderReq    chan time.Time
+	done         chan struct{}
+	autoRefresh  bool
 }
 
 type queueBar struct {
@@ -40,7 +44,6 @@ type queueBar struct {
 // pState holds bars in its priorityQueue, it gets passed to (*Progress).serve monitor goroutine.
 type pState struct {
 	hm          heapManager
-	renderReq   chan time.Time
 	idCount     int
 	popPriority int
 
@@ -59,6 +62,7 @@ type pState struct {
 	popCompleted     bool
 	autoRefresh      bool
 	rmOnComplete     bool
+	forceTTY         bool
 }
 
 // New creates new Progress container instance. It's not possible to
@@ -77,9 +81,8 @@ func NewWithContext(ctx context.Context, options ...ContainerOption) *Progress {
 	ctx, cancel := context.WithCancel(ctx)
 
 	s := &pState{
-		hmQueueLen:  defaultHmQueueLength,
-		renderReq:   make(chan time.Time),
 		popPriority: math.MinInt32,
+		hmQueueLen:  defaultHmQueueLength,
 		refreshRate: defaultRefreshRate,
 		queueBars:   make(map[*Bar]*queueBar),
 		output:      os.Stdout,
@@ -99,34 +102,33 @@ func NewWithContext(ctx context.Context, options ...ContainerOption) *Progress {
 	s.hm = make(heapManager, s.hmQueueLen)
 
 	p := &Progress{
+		ctx:          ctx,
+		cancel:       cancel,
 		pwg:          new(sync.WaitGroup),
 		bwg:          new(sync.WaitGroup),
 		operateState: make(chan func(*pState)),
 		interceptIO:  make(chan func(io.Writer)),
-		ctx:          ctx,
-		cancel:       cancel,
+		done:         make(chan struct{}),
 	}
 
-	cw := cwriter.New(s.output)
+	var refreshStrategy func(*Progress, *pState)
+	cw := cwriter.New(s.output, s.reqWidth, s.forceTTY)
 	switch {
 	case s.manualRC != nil:
-		done := make(chan struct{})
-		p.done = done
-		s.autoRefresh = false
-		go s.manualRefreshListener(ctx, done)
-	case s.autoRefresh || cw.IsTerminal():
-		done := make(chan struct{})
-		p.done = done
-		s.autoRefresh = true
-		go s.autoRefreshListener(ctx, done)
+		p.renderReq = make(chan time.Time)
+		refreshStrategy = (*Progress).manualRefreshListener
+	case s.autoRefresh || s.forceTTY || cw.IsTerminal():
+		p.autoRefresh = true
+		p.renderReq = make(chan time.Time)
+		refreshStrategy = (*Progress).autoRefreshListener
 	default:
-		p.done = ctx.Done()
-		s.autoRefresh = false
+		refreshStrategy = (*Progress).nopRefreshListener
 	}
 
-	p.pwg.Add(2)
+	p.pwg.Add(3)
 	go s.hm.run(p.pwg, s.shutdownNotifier, s.handOverBarHeap)
 	go p.serve(s, cw)
+	go refreshStrategy(p, s)
 	return p
 }
 
@@ -192,21 +194,19 @@ func (p *Progress) Add(total int64, filler BarFiller, options ...BarOption) (*Ba
 func (p *Progress) makeBar(priority int) *Bar {
 	ctx, cancel := context.WithCancel(p.ctx)
 
-	bar := &Bar{
+	return &Bar{
+		ctx:          ctx,
+		cancel:       cancel,
 		priority:     priority,
 		frameCh:      make(chan *renderFrame, 1),
 		operateState: make(chan func(*bState)),
 		bsOk:         make(chan struct{}),
 		container:    p,
-		ctx:          ctx,
-		cancel:       cancel,
 	}
-
-	return bar
 }
 
 // blocks until iteration is done
-func (p *Progress) iterateBars(yield func(*Bar) bool) (ok bool) {
+func (p *Progress) iterateBars(yield func(*Bar) bool) error {
 	seqCh := make(chan iter.Seq[*Bar], 1)
 	select {
 	case p.operateState <- func(s *pState) { s.hm.iter(seqCh) }:
@@ -215,9 +215,9 @@ func (p *Progress) iterateBars(yield func(*Bar) bool) (ok bool) {
 				break
 			}
 		}
-		return true
+		return nil
 	case <-p.done:
-		return false
+		return ErrDone
 	}
 }
 
@@ -256,8 +256,8 @@ func (p *Progress) Write(b []byte) (int, error) {
 	}
 }
 
-// Wait waits for all bars to complete and finally shutdowns container. After
-// this method has been called, there is no way to reuse `*Progress` instance.
+// Wait waits for all bars to complete and then shutdowns the container.
+// There is no way to reuse `*Progress` instance after this method has been called.
 func (p *Progress) Wait() {
 	p.bwg.Wait()
 	p.Shutdown()
@@ -284,7 +284,7 @@ func (p *Progress) serve(s *pState, cw *cwriter.Writer) {
 
 	var dw *cwriter.Writer
 	if s.delayRC != nil {
-		dw = cwriter.New(io.Discard)
+		dw = cwriter.New(io.Discard, 0, false)
 	} else {
 		dw = cw
 	}
@@ -298,25 +298,29 @@ func (p *Progress) serve(s *pState, cw *cwriter.Writer) {
 			op(s)
 		case fn := <-p.interceptIO:
 			fn(cw)
-		case <-s.renderReq:
+		case <-p.renderReq:
 			err := s.render(dw)
 			if err != nil {
 				p.cancel()
-				// (*pState).(autoRefreshListener|manualRefreshListener) may block
-				// if not depleting s.renderReq
+				// refreshStrategy goroutine is sending to p.renderReq unbuffered chan
+				// without any select therefore p.renderReq must be depleted here
+				// otherwise refreshStrategy goroutine may block and leak.
 				for {
 					select {
-					case <-s.renderReq:
+					case <-p.renderReq:
 					case <-p.done:
 						_, _ = fmt.Fprintln(s.debugOut, err.Error())
+						p.Error = err
 						return
 					}
 				}
 			}
 		case <-p.done:
-			if s.autoRefresh && s.rmOnComplete {
-				if err := s.render(cw); err != nil {
+			if p.autoRefresh && s.rmOnComplete {
+				err := s.render(cw)
+				if err != nil {
 					_, _ = fmt.Fprintln(s.debugOut, err.Error())
+					p.Error = err
 				}
 			}
 			return
@@ -324,48 +328,50 @@ func (p *Progress) serve(s *pState, cw *cwriter.Writer) {
 	}
 }
 
-func (s *pState) autoRefreshListener(ctx context.Context, done chan struct{}) {
+func (p *Progress) autoRefreshListener(s *pState) {
+	defer p.pwg.Done()
 	ticker := time.NewTicker(s.refreshRate)
 	defer ticker.Stop()
 	for {
 		select {
 		case t := <-ticker.C:
-			s.renderReq <- t
-		case <-ctx.Done():
-			close(done)
+			p.renderReq <- t
+		case <-p.ctx.Done():
+			close(p.done)
 			return
 		}
 	}
 }
 
-func (s *pState) manualRefreshListener(ctx context.Context, done chan struct{}) {
+func (p *Progress) manualRefreshListener(s *pState) {
+	defer p.pwg.Done()
 	for {
 		select {
 		case x := <-s.manualRC:
 			if t, ok := x.(time.Time); ok {
-				s.renderReq <- t
+				p.renderReq <- t
 			} else {
-				s.renderReq <- time.Now()
+				p.renderReq <- time.Now()
 			}
-		case <-ctx.Done():
-			close(done)
+		case <-p.ctx.Done():
+			close(p.done)
 			return
 		}
 	}
 }
 
-func (s *pState) render(cw *cwriter.Writer) (err error) {
+func (p *Progress) nopRefreshListener(_ *pState) {
+	defer p.pwg.Done()
+	<-p.ctx.Done()
+	close(p.done)
+}
+
+func (s *pState) render(cw *cwriter.Writer) error {
 	s.hm.sync()
 
-	var width, height int
-	if cw.IsTerminal() {
-		width, height, err = cw.GetTermSize()
-		if err != nil {
-			return err
-		}
-	} else {
-		width = cmp.Or(s.reqWidth, 80)
-		height = width
+	width, height, err := cw.GetTermSize()
+	if err != nil {
+		return err
 	}
 
 	return s.flush(cw, height, s.hm.render(width))
@@ -444,9 +450,7 @@ func (s *pState) makeBarState(total int64, filler BarFiller, options ...BarOptio
 		reqWidth:        s.reqWidth,
 		total:           total,
 		filler:          filler,
-		renderReq:       s.renderReq,
 		triggerComplete: total > 0,
-		autoRefresh:     s.autoRefresh,
 	}
 
 	bs.extender = func(_ decor.Statistics, rows ...io.Reader) ([]io.Reader, error) {
