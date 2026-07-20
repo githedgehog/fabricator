@@ -698,8 +698,8 @@ github.com/secure-systems-lab/go-securesystemslib/encrypted
 # github.com/sergi/go-diff v1.4.0
 ## explicit; go 1.13
 github.com/sergi/go-diff/diffmatchpatch
-# github.com/sethvargo/go-password v0.3.1
-## explicit; go 1.21
+# github.com/sethvargo/go-password v0.4.0
+## explicit; go 1.25
 github.com/sethvargo/go-password/password
 # github.com/shirou/gopsutil/v3 v3.24.5
 ## explicit; go 1.18
