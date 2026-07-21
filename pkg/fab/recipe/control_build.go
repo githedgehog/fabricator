@@ -254,11 +254,21 @@ func (b *ControlInstallBuilder) buildIgnition() ([]byte, error) {
 	if dummyIP.Bits() != 31 {
 		return nil, fmt.Errorf("dummy IP must be a /31") //nolint:goerr113
 	}
+	nftRules, err := renderNftablesRules(b.Control.Spec.External.Interface)
+	if err != nil {
+		return nil, fmt.Errorf("rendering nftables rules: %w", err)
+	}
+	nftUnitFile, err := renderNftablesSystemdUnit()
+	if err != nil {
+		return nil, fmt.Errorf("rendering nftables service unit: %w", err)
+	}
 
 	but, err := tmplutil.FromTemplate("control-butane", controlButaneTmpl, map[string]any{
 		"Hostname":       b.Control.Name,
 		"PasswordHash":   b.Fab.Spec.Config.Control.DefaultUser.PasswordHash,
 		"AuthorizedKeys": b.Fab.Spec.Config.Control.DefaultUser.AuthorizedKeys,
+		"NftablesRules":  nftRules,
+		"NftService":     nftUnitFile,
 		"MgmtInterface":  b.Control.Spec.Management.Interface,
 		"MgmtAddress":    b.Control.Spec.Management.IP,
 		"ControlVIP":     b.Fab.Spec.Config.Control.VIP,

@@ -19,6 +19,11 @@ systemd:
   units:
     - name: locksmithd.service
       mask: true
+
+    - name: hh-nftables.service
+      enabled: true
+      contents: |{{ .NftService | nindent 10 }}
+
 {{ if .AutoInstall }}
     - name: hhfab-install.service
       enabled: true
@@ -89,6 +94,12 @@ storage:
       contents:
         inline: |
           Hedgehog Control Node managed by Fabricator
+
+    - path: /etc/hh/nftables.conf
+      overwrite: true
+      mode: 0600
+      contents:
+        inline: |{{ .NftablesRules | nindent 10 }}
 
     - path: /etc/systemd/network/10-dummy.netdev
       mode: 0644
