@@ -19,6 +19,30 @@ systemd:
   units:
     - name: locksmithd.service
       mask: true
+
+    - name: hh-nftables.service
+      enabled: true
+      contents: |
+        [Unit]
+        Description= Hedgehog rules for external interface, scoped only to HH tables
+        Documentation=man:nft(8)
+        Wants=network-pre.target
+        Before=network-pre.target shutdown.target
+        Conflicts=shutdown.target
+        DefaultDependencies=no
+
+        [Service]
+        Type=oneshot
+        RemainAfterExit=yes
+        ProtectSystem=full
+        ProtectHome=true
+        ExecStart=/usr/bin/nft -f /etc/hh/nftables.conf
+        ExecReload=/usr/bin/nft -f /etc/hh/nftables.conf
+        ExecStop=/usr/bin/nft delete table inet HH-ext-intf-fw
+
+        [Install]
+        WantedBy=multi-user.target
+
 {{ if .AutoInstall }}
     - name: hhfab-install.service
       enabled: true
@@ -40,6 +64,7 @@ systemd:
         [Install]
         WantedBy=first-boot-complete.target
 {{ end }}
+
 
 storage:
   files:
@@ -90,6 +115,26 @@ storage:
         inline: |
           Hedgehog Control Node managed by Fabricator
 
+    - path: /etc/hh/nftables.conf
+      overwrite: true
+      mode: 0644
+      contents:
+        inline: |
+          table inet HH-ext-intf-fw {
+              counter ext_dropped {
+                  comment "unexpected inbound connections dropped on external interface"
+              }
+
+              chain input {
+                  type filter hook input priority filter - 5;
+                  policy accept;
+                  # Always allow return traffic for connections this host initiated
+                  iifname "{{ .ExtInterface }}" ct state established,related accept
+                  iifname "{{ .ExtInterface }}" icmp type echo-request accept
+                  iifname "{{ .ExtInterface }}" tcp dport { 22, 6443 } accept
+                  iifname "{{ .ExtInterface }}" counter name ext_dropped drop
+              }
+          }
     - path: /etc/systemd/network/10-dummy.netdev
       mode: 0644
       contents:
