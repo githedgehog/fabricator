@@ -429,42 +429,63 @@ func GetServerNetconfCmd(conn *wiringapi.Connection, opts ServerNetconfOpts) (st
 	return netconfCmd, nil
 }
 
-// TODO: multi subnet support once test-connectivity supports it
-func getServerHostBGPCmd(conn *wiringapi.Connection, vlan uint16, subnet netip.Prefix, serversInSubnet int) (string, error) {
-	if conn == nil {
-		return "", fmt.Errorf("connection is nil")
+type HostBGPParams struct {
+	VPCLabel     string
+	Connections  []*wiringapi.Connection
+	VLAN         uint16
+	Subnet       netip.Prefix
+	ServerOffset int
+}
+
+func getServerHostBGPCmd(params []HostBGPParams) (string, error) {
+	if len(params) == 0 {
+		return "", fmt.Errorf("no params provided")
 	}
 
-	cmd := fmt.Sprintf("vpc:v=%d:i=", vlan)
-	interfaces := []string{}
-	switch {
-	case conn.Spec.Unbundled != nil:
-		interfaces = append(interfaces, conn.Spec.Unbundled.Link.Server.LocalPortName())
-	case conn.Spec.Bundled != nil:
-		for _, link := range conn.Spec.Bundled.Links {
-			interfaces = append(interfaces, link.Server.LocalPortName())
+	cmd := ""
+	for i, param := range params {
+		if i > 0 {
+			cmd += " "
 		}
-	case conn.Spec.MCLAG != nil:
-		for _, link := range conn.Spec.MCLAG.Links {
-			interfaces = append(interfaces, link.Server.LocalPortName())
+		if len(param.Connections) == 0 {
+			return "", fmt.Errorf("no connections provided")
 		}
-	case conn.Spec.ESLAG != nil:
-		for _, link := range conn.Spec.ESLAG.Links {
-			interfaces = append(interfaces, link.Server.LocalPortName())
+		interfaces := []string{}
+		for _, conn := range param.Connections {
+			if conn == nil {
+				return "", fmt.Errorf("connection is nil")
+			}
+			switch {
+			case conn.Spec.Unbundled != nil:
+				interfaces = append(interfaces, conn.Spec.Unbundled.Link.Server.LocalPortName())
+			case conn.Spec.Bundled != nil:
+				for _, link := range conn.Spec.Bundled.Links {
+					interfaces = append(interfaces, link.Server.LocalPortName())
+				}
+			case conn.Spec.MCLAG != nil:
+				for _, link := range conn.Spec.MCLAG.Links {
+					interfaces = append(interfaces, link.Server.LocalPortName())
+				}
+			case conn.Spec.ESLAG != nil:
+				for _, link := range conn.Spec.ESLAG.Links {
+					interfaces = append(interfaces, link.Server.LocalPortName())
+				}
+			default:
+				return "", fmt.Errorf("unexpected connection type for conn %q", conn.Name)
+			}
 		}
-	default:
-		return "", fmt.Errorf("unexpected connection type for conn %q", conn.Name)
-	}
 
-	cmd += strings.Join(interfaces, ":i=")
-	addr := subnet.Addr()
-	for range serversInSubnet {
-		addr = addr.Next()
+		cmd += fmt.Sprintf("%s:v=%d:i=", param.VPCLabel, param.VLAN)
+		cmd += strings.Join(interfaces, ":i=")
+		addr := param.Subnet.Addr()
+		for range param.ServerOffset {
+			addr = addr.Next()
+		}
+		if !addr.IsValid() {
+			return "", fmt.Errorf("failed to get IP address from subnet %s", param.Subnet.String())
+		}
+		cmd += ":a=" + addr.String() + "/32"
 	}
-	if !addr.IsValid() {
-		return "", fmt.Errorf("failed to get IP address from subnet %s", subnet.String())
-	}
-	cmd += ":a=" + addr.String() + "/32"
 
 	return cmd, nil
 }
@@ -776,6 +797,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		}
 
 		conns := &wiringapi.ConnectionList{}
+		multihomed := false
 		if err := kube.List(ctx, conns, wiringapi.MatchingLabelsForListLabelServer(server.Name)); err != nil {
 			return nil, fmt.Errorf("listing connections for server %q: %w", server.Name, err)
 		}
@@ -783,7 +805,12 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 			return nil, fmt.Errorf("no connections for server %q", server.Name)
 		}
 		if len(conns.Items) > 1 {
-			return nil, fmt.Errorf("multiple connections for server %q", server.Name)
+			for _, c := range conns.Items {
+				if c.Spec.Unbundled == nil {
+					return nil, fmt.Errorf("multiple connections for server %q of which some are not unbundled", server.Name)
+				}
+			}
+			multihomed = true
 		}
 		conn := conns.Items[0]
 
@@ -799,10 +826,14 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 
 		vpcName := fmt.Sprintf("vpc-%02d", vpcID+1)
 		subnetName := fmt.Sprintf("subnet-%02d", subnetInVPC+1)
-		hostBGP := opts.HostBGPSubnet && !hostBGPDoneForVPC && conn.Spec.Unbundled != nil && !isMclag
+		hostBGP := multihomed || (opts.HostBGPSubnet && !hostBGPDoneForVPC && conn.Spec.Unbundled != nil && !isMclag)
 		if hostBGP {
 			hostBGPDoneForVPC = true
 		}
+		// hostBGP and P2P are mutually exclusive per server: a hostBGP host uses
+		// its real subnet and a /32 VIP, so the P2P /31 semantics must not apply
+		// (relevant when P2P is force-enabled on an all-Cumulus fabric).
+		useP2P := opts.P2P && !hostBGP
 
 		var vpc *vpcapi.VPC
 		if len(vpcs) > 0 && vpcs[len(vpcs)-1].Name == vpcName {
@@ -855,7 +886,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		}
 
 		p2p := netip.Prefix{}
-		if opts.P2P {
+		if useP2P {
 			subnet, err := netip.ParsePrefix(vpc.Spec.Subnets[subnetName].Subnet)
 			if err != nil {
 				return nil, fmt.Errorf("parsing vpc subnet %s/%s %q: %w", vpcName, subnetName, vpc.Spec.Subnets[subnetName].Subnet, err)
@@ -875,44 +906,62 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 			return nil, fmt.Errorf("parsing vpc subnet %s/%s %q: %w", vpcName, subnetName, vpc.Spec.Subnets[subnetName].Subnet, err)
 		}
 		expectedSubnets[server.Name] = expectedSubnet
-		if opts.P2P {
+		if useP2P {
 			expectedSubnets[server.Name] = p2p
 		}
 		if hostBGP {
 			hostBGPServers[server.Name] = true
 		}
 
-		attachName := fmt.Sprintf("%s--%s--%s", conn.Name, vpcName, subnetName)
-		attachNames[attachName] = true
-		attachAnns := map[string]string{}
-		if opts.P2P {
-			attachAnns[vpcapi.AnnotationVPCAttachmentP2PLink] = p2p.String()
+		// Connections to attach: the single connection normally, all of them for
+		// a multihomed server (which shares one hostBGP subnet across every link).
+		attachConns := []*wiringapi.Connection{&conn}
+		if multihomed {
+			attachConns = nil
+			for i := range conns.Items {
+				attachConns = append(attachConns, &conns.Items[i])
+			}
 		}
 
-		attach := &vpcapi.VPCAttachment{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:        attachName,
-				Namespace:   metav1.NamespaceDefault,
-				Annotations: attachAnns,
-			},
-			Spec: vpcapi.VPCAttachmentSpec{
-				Connection: conn.Name,
-				Subnet:     fmt.Sprintf("%s/%s", vpcName, subnetName),
-			},
-		}
-		attaches = append(attaches, attach)
+		for _, ac := range attachConns {
+			attachName := fmt.Sprintf("%s--%s--%s", ac.Name, vpcName, subnetName)
+			attachNames[attachName] = true
+			attachAnns := map[string]string{}
+			if useP2P {
+				attachAnns[vpcapi.AnnotationVPCAttachmentP2PLink] = p2p.String()
+			}
 
-		vlan := uint16(0)
-		if !attach.Spec.NativeVLAN {
-			vlan = vpc.Spec.Subnets[subnetName].VLAN
+			attaches = append(attaches, &vpcapi.VPCAttachment{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        attachName,
+					Namespace:   metav1.NamespaceDefault,
+					Annotations: attachAnns,
+				},
+				Spec: vpcapi.VPCAttachmentSpec{
+					Connection: ac.Name,
+					Subnet:     fmt.Sprintf("%s/%s", vpcName, subnetName),
+				},
+			})
 		}
+
+		// NativeVLAN is never set on the attachments we build above, so the VLAN
+		// is always the subnet's VLAN.
+		vlan := vpc.Spec.Subnets[subnetName].VLAN
 
 		var confCmd string
 		var confErr error
 
 		if hostBGP {
-			confCmd, confErr = getServerHostBGPCmd(&conn, vlan, expectedSubnet, serverInSubnet)
-		} else if opts.P2P {
+			confCmd, confErr = getServerHostBGPCmd([]HostBGPParams{
+				{
+					VPCLabel:     vpcName,
+					Connections:  attachConns,
+					VLAN:         vlan,
+					Subnet:       expectedSubnet,
+					ServerOffset: serverInSubnet,
+				},
+			})
+		} else if useP2P {
 			confCmd, confErr = GetServerNetconfCmd(&conn, ServerNetconfOpts{
 				P2P: p2p.String(),
 			})

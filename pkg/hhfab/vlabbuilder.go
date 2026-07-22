@@ -55,7 +55,7 @@ type VLABBuilderDefault struct {
 	ESLAGServers        uint8             // number of ESLAG servers to generate for ESLAG switches
 	UnbundledServers    uint8             // number of unbundled servers to generate for switches (only for one of the first switch in the redundancy group or orphan switch)
 	BundledServers      uint8             // number of bundled servers to generate for switches (only for one of the second switch in the redundancy group or orphan switch)
-	MultiHomedServers   uint8             // number of multi-homed servers (2 connections to 2 different orphan leaves)
+	MultiHomedServers   uint8             // number of multi-homed servers (2 connections to 2 different leaves, preferably orphans)
 	NoSwitches          bool              // do not generate any switches
 	GatewayUplinks      uint8             // number of uplinks for gateway node to the spines
 	GatewayDriver       string            // gateway driver to use for gateway node
@@ -219,8 +219,8 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, fabri
 		b.ESLAGServers = 0
 	}
 
-	if b.MultiHomedServers > 0 && b.OrphanLeafsCount < 2 {
-		return fmt.Errorf("at least two orphan leaves are needed for multihomed servers") //nolint:goerr113
+	if b.MultiHomedServers > 0 && b.OrphanLeafsCount+totalESLAGLeafs < 2 {
+		return fmt.Errorf("at least two leaves are needed for multihomed servers") //nolint:goerr113
 	}
 
 	if b.ExtESLAGConnCount > totalESLAGLeafs {
@@ -364,6 +364,7 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, fabri
 	externalConns := []wiringapi.Connection{}
 	extESLAGConns := uint8(0)
 	extOrphanConns := uint8(0)
+	mhLeaves := []string{}
 
 	for eslagID := uint8(0); eslagID < uint8(len(eslagLeafGroups)); eslagID++ { //nolint:gosec
 		sg := fmt.Sprintf("eslag-%d", eslagID+1)
@@ -376,6 +377,10 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, fabri
 		for eslagLeafID := uint8(0); eslagLeafID < leafs; eslagLeafID++ {
 			leafName := fmt.Sprintf("leaf-%02d", leafID+eslagLeafID)
 			leafNames = append(leafNames, leafName)
+			// add eslag leaves to candidates for multihomed servers if there are not enough orphan laves
+			if b.OrphanLeafsCount < 2 {
+				mhLeaves = append(mhLeaves, leafName)
+			}
 
 			if _, err := b.createSwitch(ctx, leafName, wiringapi.SwitchSpec{
 				Role:        wiringapi.SwitchRoleServerLeaf,
@@ -485,7 +490,6 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, fabri
 		}
 	}
 
-	orphanLeaves := []string{}
 	for idx := uint8(1); idx <= b.OrphanLeafsCount; idx++ {
 		leafName := fmt.Sprintf("leaf-%02d", leafID)
 
@@ -495,7 +499,7 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, fabri
 		}, nil); err != nil {
 			return err
 		}
-		orphanLeaves = append(orphanLeaves, leafName)
+		mhLeaves = append(mhLeaves, leafName)
 
 		if extOrphanConns < b.ExtOrphanConnCount {
 			var err error
@@ -562,16 +566,16 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, fabri
 		}
 	}
 
-	orphanIdx := 0
+	mhIdx := 0
 	for range int(b.MultiHomedServers) {
 		serverName := fmt.Sprintf("server-%02d", serverID)
-		orphan1 := orphanLeaves[orphanIdx]
-		orphanIdx = (orphanIdx + 1) % len(orphanLeaves)
-		orphan2 := orphanLeaves[orphanIdx]
-		orphanIdx = (orphanIdx + 1) % len(orphanLeaves)
+		leaf1 := mhLeaves[mhIdx]
+		mhIdx = (mhIdx + 1) % len(mhLeaves)
+		leaf2 := mhLeaves[mhIdx]
+		mhIdx = (mhIdx + 1) % len(mhLeaves)
 
 		if _, err := b.createServer(ctx, serverName, wiringapi.ServerSpec{
-			Description: fmt.Sprintf("S-%02d MultiHomed %s + %s", serverID, orphan1, orphan2),
+			Description: fmt.Sprintf("S-%02d MultiHomed %s + %s", serverID, leaf1, leaf2),
 		}); err != nil {
 			return err
 		}
@@ -580,7 +584,7 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, fabri
 			Unbundled: &wiringapi.ConnUnbundled{
 				Link: wiringapi.ServerToSwitchLink{
 					Server: wiringapi.BasePortName{Port: b.nextServerPort(serverName)},
-					Switch: wiringapi.BasePortName{Port: b.nextSwitchPort(orphan1)},
+					Switch: wiringapi.BasePortName{Port: b.nextSwitchPort(leaf1)},
 				},
 			},
 		}); err != nil {
@@ -590,7 +594,7 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, fabri
 			Unbundled: &wiringapi.ConnUnbundled{
 				Link: wiringapi.ServerToSwitchLink{
 					Server: wiringapi.BasePortName{Port: b.nextServerPort(serverName)},
-					Switch: wiringapi.BasePortName{Port: b.nextSwitchPort(orphan2)},
+					Switch: wiringapi.BasePortName{Port: b.nextSwitchPort(leaf2)},
 				},
 			},
 		}); err != nil {
