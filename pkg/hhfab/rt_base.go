@@ -89,13 +89,23 @@ func makeTestCtx(ctx context.Context, kube kclient.Client, setupOpts SetupVPCsOp
 	testCtx.vlabCfg = vlabCfg
 	testCtx.vlab = vlab
 	testCtx.setupOpts = setupOpts
+	// SetupVPCs skips ESLAG-attached servers when their resolved mode is non-
+	// L2VNI (auto-derived from SwitchProfile.Features.L2VNI or forced via the
+	// override). Relax RequireAllServers whenever any server in the fabric
+	// resolves to non-L2VNI so TestConnectivity does not flag those skips.
+	requireAll := true
+	if hasNonL2VNI, err := hasNonL2VNIServer(ctx, kube, setupOpts.VPCMode); err != nil {
+		slog.Warn("Failed to detect non-L2VNI servers; requiring all servers", "error", err)
+	} else if hasNonL2VNI {
+		requireAll = false
+	}
 	testCtx.tcOpts = TestConnectivityOpts{
 		WaitSwitchesReady: false,
 		PingsCount:        5,
 		IPerfsSeconds:     3,
 		IPerfsMinSpeed:    rtOpts.IPerfsMinSpeed,
 		CurlsCount:        1,
-		RequireAllServers: setupOpts.VPCMode == vpcapi.VPCModeL2VNI, // L3VNI will skip eslag servers
+		RequireAllServers: requireAll,
 	}
 	testCtx.wrOpts = WaitReadyOpts{
 		AppliedFor: waitAppliedFor,
@@ -430,8 +440,14 @@ func (testCtx *VPCPeeringTestCtx) setupTest(ctx context.Context, initialSuiteSet
 	if err := DoVLABSetupVPCs(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, opts); err != nil {
 		return fmt.Errorf("setting up VPCs: %w", err)
 	}
-	// in case of L3 VPC mode, we need to give it time to switch to the longer lease time and switches to learn the routes
-	if opts.VPCMode == vpcapi.VPCModeL3VNI || opts.VPCMode == vpcapi.VPCModeL3Flat {
+	// Any L3 VPC hands out a short DHCP lease on the first request to force a
+	// renewal that makes the leaf learn the host route, then the configured
+	// lease; give the switches time to learn those routes before testing.
+	// RequireAllServers was set to false earlier exactly when the fabric has a
+	// non-L2VNI server (derived from the stable SwitchProfiles), so reuse that
+	// intent instead of re-reading the freshly rewritten VPCs through the
+	// cached client, which can briefly return stale modes.
+	if !testCtx.tcOpts.RequireAllServers {
 		time.Sleep(10 * time.Second)
 	}
 
