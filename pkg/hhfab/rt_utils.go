@@ -7,8 +7,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"iter"
 	"log/slog"
 	"maps"
+	"net/netip"
 	"slices"
 	"strconv"
 	"strings"
@@ -1225,4 +1227,136 @@ func findAnyAttachedServer(ctx context.Context, kube kclient.Client) (*AttachedS
 	}
 
 	return nil, errNoAttachedServers
+}
+
+type MultiHomedServer struct {
+	Server      *wiringapi.Server
+	Connections []*wiringapi.Connection
+	SwitchConns map[string][]*wiringapi.Connection
+}
+
+// find maxNum (or all of them, if 0) multihomed unbundled servers, i.e. servers with
+// two or more unbundled connections to different switches
+func findUnbundledMHServers(ctx context.Context, kube kclient.Client, maxNum int) ([]MultiHomedServer, error) {
+	serverList := wiringapi.ServerList{}
+	mhServers := []MultiHomedServer{}
+	if err := kube.List(ctx, &serverList); err != nil {
+		return mhServers, fmt.Errorf("listing servers: %w", err)
+	}
+	for i, server := range serverList.Items {
+		if maxNum > 0 && len(mhServers) >= maxNum {
+			break
+		}
+		connList := &wiringapi.ConnectionList{}
+		if err := kube.List(ctx, connList, kclient.MatchingLabels{
+			wiringapi.LabelConnectionType:          wiringapi.ConnectionTypeUnbundled,
+			wiringapi.ListLabelServer(server.Name): wiringapi.ListLabelValue,
+		}); err != nil {
+			return mhServers, fmt.Errorf("listing connections: %w", err)
+		}
+		if len(connList.Items) < 2 {
+			continue
+		}
+		switches := map[string][]*wiringapi.Connection{}
+		for _, conn := range connList.Items {
+			if conn.Spec.Unbundled != nil {
+				devName := conn.Spec.Unbundled.Link.Switch.DeviceName()
+				switches[devName] = append(switches[devName], &conn)
+			}
+		}
+		if len(switches) >= 2 {
+			mhs := MultiHomedServer{
+				Server:      &serverList.Items[i],
+				Connections: make([]*wiringapi.Connection, len(connList.Items)),
+				SwitchConns: switches,
+			}
+			for j, conn := range connList.Items {
+				mhs.Connections[j] = &conn
+			}
+			mhServers = append(mhServers, mhs)
+		}
+	}
+
+	return mhServers, nil
+}
+
+// vpcSubnetAllocator provides sequential VLAN and /24 subnet allocation from namespace objects.
+// Call stop() when done (typically via defer alloc.stop()).
+type vpcSubnetAllocator struct {
+	nextVLAN   func() (uint16, bool)
+	stopVLAN   func()
+	nextPrefix func() (netip.Prefix, bool)
+	stopPrefix func()
+}
+
+// newVPCSubnetAllocator initializes iterators over VLANs and /24 subnets from the named
+// VLAN and IPv4 namespaces. Caller must call stop() when done.
+func newVPCSubnetAllocator(ctx context.Context, kube kclient.Client, vlanNamespace, ipv4Namespace string) (*vpcSubnetAllocator, error) {
+	vlanNS := &wiringapi.VLANNamespace{}
+	if err := kube.Get(ctx, kclient.ObjectKey{Name: vlanNamespace, Namespace: kmetav1.NamespaceDefault}, vlanNS); err != nil {
+		return nil, fmt.Errorf("getting VLAN namespace %s: %w", vlanNamespace, err)
+	}
+	nextVLAN, stopVLAN := iter.Pull(VLANsFrom(vlanNS.Spec.Ranges...))
+
+	ipNS := &vpcapi.IPv4Namespace{}
+	if err := kube.Get(ctx, kclient.ObjectKey{Name: ipv4Namespace, Namespace: kmetav1.NamespaceDefault}, ipNS); err != nil {
+		stopVLAN()
+
+		return nil, fmt.Errorf("getting IPv4 namespace %s: %w", ipv4Namespace, err)
+	}
+	prefixes := make([]netip.Prefix, 0, len(ipNS.Spec.Subnets))
+	for _, p := range ipNS.Spec.Subnets {
+		parsed, err := netip.ParsePrefix(p)
+		if err != nil {
+			stopVLAN()
+
+			return nil, fmt.Errorf("parsing IPv4 namespace prefix %q: %w", p, err)
+		}
+		prefixes = append(prefixes, parsed)
+	}
+	nextPrefix, stopPrefix := iter.Pull(SubPrefixesFrom(24, prefixes...))
+
+	return &vpcSubnetAllocator{
+		nextVLAN:   nextVLAN,
+		stopVLAN:   stopVLAN,
+		nextPrefix: nextPrefix,
+		stopPrefix: stopPrefix,
+	}, nil
+}
+
+func (a *vpcSubnetAllocator) stop() {
+	a.stopVLAN()
+	a.stopPrefix()
+}
+
+func (a *vpcSubnetAllocator) allocVLAN() (uint16, error) {
+	v, ok := a.nextVLAN()
+	if !ok {
+		return 0, fmt.Errorf("no more VLANs available") //nolint:goerr113
+	}
+
+	return v, nil
+}
+
+func (a *vpcSubnetAllocator) allocSubnet() (netip.Prefix, error) {
+	p, ok := a.nextPrefix()
+	if !ok {
+		return p, fmt.Errorf("no more subnets available") //nolint:goerr113
+	}
+
+	return p, nil
+}
+
+// makeVPCAttachment creates a VPCAttachment with the standard {conn}--{vpc}--{subnet} naming.
+func makeVPCAttachment(connName, vpcName, subnetName string) *vpcapi.VPCAttachment {
+	return &vpcapi.VPCAttachment{
+		ObjectMeta: kmetav1.ObjectMeta{
+			Name:      fmt.Sprintf("%s--%s--%s", connName, vpcName, subnetName),
+			Namespace: kmetav1.NamespaceDefault,
+		},
+		Spec: vpcapi.VPCAttachmentSpec{
+			Connection: connName,
+			Subnet:     fmt.Sprintf("%s/%s", vpcName, subnetName),
+		},
+	}
 }

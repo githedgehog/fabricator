@@ -427,42 +427,63 @@ func GetServerNetconfCmd(conn *wiringapi.Connection, opts ServerNetconfOpts) (st
 	return netconfCmd, nil
 }
 
-// TODO: multi subnet support once test-connectivity supports it
-func getServerHostBGPCmd(conn *wiringapi.Connection, vlan uint16, subnet netip.Prefix, serversInSubnet int) (string, error) {
-	if conn == nil {
-		return "", fmt.Errorf("connection is nil")
+type HostBGPParams struct {
+	VPCLabel     string
+	Connections  []*wiringapi.Connection
+	VLAN         uint16
+	Subnet       netip.Prefix
+	ServerOffset int
+}
+
+func getServerHostBGPCmd(params []HostBGPParams) (string, error) {
+	if len(params) == 0 {
+		return "", fmt.Errorf("no params provided")
 	}
 
-	cmd := fmt.Sprintf("vpc:v=%d:i=", vlan)
-	interfaces := []string{}
-	switch {
-	case conn.Spec.Unbundled != nil:
-		interfaces = append(interfaces, conn.Spec.Unbundled.Link.Server.LocalPortName())
-	case conn.Spec.Bundled != nil:
-		for _, link := range conn.Spec.Bundled.Links {
-			interfaces = append(interfaces, link.Server.LocalPortName())
+	cmd := ""
+	for i, param := range params {
+		if i > 0 {
+			cmd += " "
 		}
-	case conn.Spec.MCLAG != nil:
-		for _, link := range conn.Spec.MCLAG.Links {
-			interfaces = append(interfaces, link.Server.LocalPortName())
+		if len(param.Connections) == 0 {
+			return "", fmt.Errorf("no connections provided")
 		}
-	case conn.Spec.ESLAG != nil:
-		for _, link := range conn.Spec.ESLAG.Links {
-			interfaces = append(interfaces, link.Server.LocalPortName())
+		interfaces := []string{}
+		for _, conn := range param.Connections {
+			if conn == nil {
+				return "", fmt.Errorf("connection is nil")
+			}
+			switch {
+			case conn.Spec.Unbundled != nil:
+				interfaces = append(interfaces, conn.Spec.Unbundled.Link.Server.LocalPortName())
+			case conn.Spec.Bundled != nil:
+				for _, link := range conn.Spec.Bundled.Links {
+					interfaces = append(interfaces, link.Server.LocalPortName())
+				}
+			case conn.Spec.MCLAG != nil:
+				for _, link := range conn.Spec.MCLAG.Links {
+					interfaces = append(interfaces, link.Server.LocalPortName())
+				}
+			case conn.Spec.ESLAG != nil:
+				for _, link := range conn.Spec.ESLAG.Links {
+					interfaces = append(interfaces, link.Server.LocalPortName())
+				}
+			default:
+				return "", fmt.Errorf("unexpected connection type for conn %q", conn.Name)
+			}
 		}
-	default:
-		return "", fmt.Errorf("unexpected connection type for conn %q", conn.Name)
-	}
 
-	cmd += strings.Join(interfaces, ":i=")
-	addr := subnet.Addr()
-	for range serversInSubnet {
-		addr = addr.Next()
+		cmd += fmt.Sprintf("%s:v=%d:i=", param.VPCLabel, param.VLAN)
+		cmd += strings.Join(interfaces, ":i=")
+		addr := param.Subnet.Addr()
+		for range param.ServerOffset {
+			addr = addr.Next()
+		}
+		if !addr.IsValid() {
+			return "", fmt.Errorf("failed to get IP address from subnet %s", param.Subnet.String())
+		}
+		cmd += ":a=" + addr.String() + "/32"
 	}
-	if !addr.IsValid() {
-		return "", fmt.Errorf("failed to get IP address from subnet %s", subnet.String())
-	}
-	cmd += ":a=" + addr.String() + "/32"
 
 	return cmd, nil
 }
@@ -903,7 +924,15 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		var confErr error
 
 		if hostBGP {
-			confCmd, confErr = getServerHostBGPCmd(&conn, vlan, expectedSubnet, serverInSubnet)
+			confCmd, confErr = getServerHostBGPCmd([]HostBGPParams{
+				{
+					VPCLabel:     vpcName,
+					Connections:  []*wiringapi.Connection{&conn},
+					VLAN:         vlan,
+					Subnet:       expectedSubnet,
+					ServerOffset: serverInSubnet,
+				},
+			})
 		} else if opts.P2P {
 			confCmd, confErr = GetServerNetconfCmd(&conn, ServerNetconfOpts{
 				P2P: p2p.String(),
@@ -2385,7 +2414,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 						}
 						defer iperfs.Release(1)
 
-						for _, ie := range checkIPerf(ctx, opts, serverA, serverB, clientA, ipB.Addr(), expectedReachable, bidir) {
+						for _, ie := range checkIPerf(ctx, opts, serverA, serverB, clientA, ipB.Addr(), netip.Addr{}, expectedReachable, bidir) {
 							errChan <- ie
 						}
 
@@ -2983,7 +3012,7 @@ const iperf3SpeedRetries = 2
 // iperf3RetryDelay is the delay between retry attempts to allow network conditions to stabilize.
 const iperf3RetryDelay = 2 * time.Second
 
-func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string, fromSSH *sshutil.Config, toIP netip.Addr, reachability Reachability, bidir bool) []*IperfError {
+func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string, fromSSH *sshutil.Config, toIP, srcIP netip.Addr, reachability Reachability, bidir bool) []*IperfError {
 	if opts.IPerfsSeconds <= 0 || !reachability.Reachable {
 		return nil
 	}
@@ -3013,7 +3042,7 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string,
 			}
 		}
 
-		ies := runIPerf3Test(ctx, opts, from, to, fromSSH, toIP, iPerfsMinSpeed, bidir)
+		ies := runIPerf3Test(ctx, opts, from, to, fromSSH, toIP, srcIP, iPerfsMinSpeed, bidir)
 		if len(ies) == 0 {
 			if attempt > 0 {
 				slog.Info("iperf3 test succeeded on retry", "from", from, "to", to, "bidir", bidir, "attempt", attempt+1)
@@ -3042,7 +3071,7 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string,
 	return lastErrors
 }
 
-func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to string, fromSSH *sshutil.Config, toIP netip.Addr, iPerfsMinSpeed float64, bidir bool) []*IperfError {
+func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to string, fromSSH *sshutil.Config, toIP, srcIP netip.Addr, iPerfsMinSpeed float64, bidir bool) []*IperfError {
 	minSpeedStr := asMbps(iPerfsMinSpeed * 1_000_000)
 	// Forward direction: client (`from`) sends to server (`to`).
 	fwd := &IperfError{Source: from, Destination: to, MinSpeed: minSpeedStr}
@@ -3062,6 +3091,9 @@ func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to stri
 	// push the 768 MB server VM into ENOMEM during result aggregation. `docker exec` reuses the
 	// running container's namespaces and adds only the iperf3 client process itself.
 	cmd := fmt.Sprintf("sudo docker exec iperf3 timeout %d iperf3 -P 4 -J -c %s -t %d", opts.IPerfsSeconds+25, toIP.String(), opts.IPerfsSeconds)
+	if srcIP.IsValid() {
+		cmd += " -B " + srcIP.String()
+	}
 	if bidir {
 		cmd += " --bidir"
 	}
