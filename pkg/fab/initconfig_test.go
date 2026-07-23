@@ -155,6 +155,94 @@ func TestInitConfig(t *testing.T) {
 			initErr: true,
 		},
 		{
+			// noPassAuth: true with keys present -> rendered into config and round-trips
+			name: "no-pass-auth",
+			in: fab.InitConfigInput{
+				DefaultPasswordHash:   "$5$bar",
+				DefaultAuthorizedKeys: []string{"baz"},
+				NoPassAuth:            true,
+			},
+			expectedFab: fabapi.Fabricator{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      comp.FabName,
+					Namespace: comp.FabNamespace,
+				},
+				Spec: fabapi.FabricatorSpec{
+					Config: fabapi.FabConfig{
+						Control: fabapi.ControlConfig{
+							NoPassAuth: true,
+							DefaultUser: fabapi.ControlUser{
+								PasswordHash:   "$5$bar",
+								AuthorizedKeys: []string{"baz"},
+							},
+						},
+						Fabric: fabapi.FabricConfig{
+							DefaultSwitchUsers: map[string]fabapi.SwitchUser{
+								"admin": {
+									Role:           "admin",
+									PasswordHash:   "$5$bar",
+									AuthorizedKeys: []string{"baz"},
+								},
+								"op": {
+									Role:           "operator",
+									PasswordHash:   "$5$bar",
+									AuthorizedKeys: []string{"baz"},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			// noPassAuth: true with NO keys -> InitConfig must fail fast (empty-keys guard)
+			name: "no-pass-auth-no-keys",
+			in: fab.InitConfigInput{
+				DefaultPasswordHash: "$5$bar",
+				NoPassAuth:          true,
+			},
+			initErr: true,
+		},
+		{
+			// dev mode resets NoPassAuth to false even if requested, so password auth stays on
+			name: "no-pass-auth-dev",
+			in: fab.InitConfigInput{
+				Dev:        true,
+				NoPassAuth: true,
+			},
+			expectedFab: fabapi.Fabricator{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      comp.FabName,
+					Namespace: comp.FabNamespace,
+				},
+				Spec: fabapi.FabricatorSpec{
+					Config: fabapi.FabConfig{
+						Control: fabapi.ControlConfig{
+							// NoPassAuth intentionally omitted (false) — reset by dev mode
+							DefaultUser: fabapi.ControlUser{
+								PasswordHash:   fab.DevAdminPasswordHash,
+								AuthorizedKeys: []string{fab.DevSSHKey},
+							},
+						},
+						Fabric: fabapi.FabricConfig{
+							DefaultSwitchUsers: map[string]fabapi.SwitchUser{
+								"admin": {
+									Role:           "admin",
+									PasswordHash:   fab.DevAdminPasswordHash,
+									AuthorizedKeys: []string{fab.DevSSHKey},
+								},
+								"op": {
+									Role:           "operator",
+									PasswordHash:   fab.DevAdminPasswordHash,
+									AuthorizedKeys: []string{fab.DevSSHKey},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
 			name: "include-onie-import-upstream",
 			in: fab.InitConfigInput{
 				DefaultPasswordHash:   "$5$bar",
