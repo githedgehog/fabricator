@@ -694,7 +694,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						InterfaceMTU:      opts.InterfaceMTU,
 					}
 					slog.Debug("Running setup-vpcs", "opts", setupVPCsOpts)
-					if err := c.SetupVPCs(ctx, vlab, setupVPCsOpts); err != nil {
+					if _, err := c.SetupVPCs(ctx, vlab, setupVPCsOpts); err != nil {
 						return c.handleShutdownWithPause(ctx, vlab, opts, fmt.Errorf("setting up VPCs: %w", err))
 					}
 				case OnReadySetupPeerings:

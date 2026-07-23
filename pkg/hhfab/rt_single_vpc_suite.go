@@ -126,7 +126,7 @@ func makeSingleVPCSuite() *JUnitTestSuite {
 // Basic test for mclag failover.
 // For each mclag connection, set one of the links down by shutting down the port on the switch,
 // then test connectivity. Repeat for the other link.
-func mclagTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
+func mclagTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	// list connections in the fabric, filter by MC-LAG connection type
 	conns := &wiringapi.ConnectionList{}
 	if err := testCtx.kube.List(ctx, conns, kclient.MatchingLabels{wiringapi.LabelConnectionType: wiringapi.ConnectionTypeMCLAG}); err != nil {
@@ -143,7 +143,7 @@ func mclagTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertF
 			return false, nil, fmt.Errorf("MCLAG connection %s has %d links, expected 2", conn.Name, len(conn.Spec.MCLAG.Links)) //nolint:goerr113
 		}
 		for _, link := range conn.Spec.MCLAG.Links {
-			if err := shutDownLinkAndTest(ctx, testCtx, link); err != nil {
+			if err := shutDownLinkAndTest(ctx, testCtx, link, matrix); err != nil {
 				return false, nil, err
 			}
 			// TODO: set other link down too and make sure that connectivity is lost
@@ -161,7 +161,7 @@ func mclagTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertF
 // Basic test for eslag failover.
 // For each eslag connection, set one of the links down by shutting down the port on the switch,
 // then test connectivity. Repeat for the other link.
-func eslagTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
+func eslagTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	// l3vni mode is not compatible with ESLAG, so there will be no servers attached to ESLAG connections
 	if testCtx.setupOpts.VPCMode == vpcapi.VPCModeL3VNI {
 		return true, nil, fmt.Errorf("L3VNI mode is not compatible with ESLAG") //nolint:goerr113
@@ -182,7 +182,7 @@ func eslagTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertF
 			return false, nil, fmt.Errorf("ESLAG connection %s has %d links, expected 2", conn.Name, len(conn.Spec.ESLAG.Links)) //nolint:goerr113
 		}
 		for _, link := range conn.Spec.ESLAG.Links {
-			if err := shutDownLinkAndTest(ctx, testCtx, link); err != nil {
+			if err := shutDownLinkAndTest(ctx, testCtx, link, matrix); err != nil {
 				return false, nil, err
 			}
 			// TODO: set other link down too and make sure that connectivity is lost
@@ -200,7 +200,7 @@ func eslagTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertF
 // Basic test for bundled connection failover.
 // For each bundled connection, set one of the links down by shutting down the port on the switch,
 // then test connectivity. Repeat for the other link(s).
-func bundledFailoverTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
+func bundledFailoverTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	// list connections in the fabric, filter by bundled connection type
 	conns := &wiringapi.ConnectionList{}
 	if err := testCtx.kube.List(ctx, conns, kclient.MatchingLabels{wiringapi.LabelConnectionType: wiringapi.ConnectionTypeBundled}); err != nil {
@@ -217,7 +217,7 @@ func bundledFailoverTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool,
 			return false, nil, fmt.Errorf("MCLAG connection %s has %d links, expected at least 2", conn.Name, len(conn.Spec.Bundled.Links)) //nolint:goerr113
 		}
 		for _, link := range conn.Spec.Bundled.Links {
-			if err := shutDownLinkAndTest(ctx, testCtx, link); err != nil {
+			if err := shutDownLinkAndTest(ctx, testCtx, link, matrix); err != nil {
 				return false, nil, err
 			}
 			// TODO: set other link down too and make sure that connectivity is lost
@@ -235,7 +235,7 @@ func bundledFailoverTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool,
 // Basic test for spine failover.
 // Iterate over the spine switches (skip the first one), and shut down all links towards them.
 // Test connectivity, then re-enable the links.
-func spineFailoverTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
+func spineFailoverTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	var returnErr error
 
 	// list spines, unfortunately we cannot filter by role
@@ -366,7 +366,7 @@ outer:
 // that group, then shuts down all spine ports connected to the primary gateway.
 // After restoring, tests connectivity again.
 // Requires at least 2 gateways and 2 VPCs.
-func gatewayFailoverTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
+func gatewayFailoverTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	var returnErr error
 
 	// list gateways
@@ -679,7 +679,7 @@ func gatewayFailoverTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool,
 // Basic test for mesh failover.
 // Iterate over leaf switches, shutdown all mesh links except for one, test connectivity
 // as soon as we manage to test this on a leaf, return and renable all agents as part of the revert
-func meshFailoverTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
+func meshFailoverTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	// list leaves, unfortunately we cannot filter by role
 	switches := &wiringapi.SwitchList{}
 	if err := testCtx.kube.List(ctx, switches); err != nil {
@@ -813,7 +813,7 @@ func meshFailoverTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []
 }
 
 // Vanilla test for VPC peering, just test connectivity without any further restriction
-func noRestrictionsTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
+func noRestrictionsTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
 		return false, nil, fmt.Errorf("waiting for readiness: %w", err)
 	}
@@ -831,7 +831,7 @@ func noRestrictionsTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, 
 // 3. Set both isolated and restricted flags in the third subnet, test connectivity
 // 4. Override isolation with explicit permit list, test connectivity
 // 5. Remove all restrictions
-func singleVPCWithRestrictionsTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
+func singleVPCWithRestrictionsTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	var returnErr error
 
 	vpcs := &vpcapi.VPCList{}
@@ -966,7 +966,7 @@ outer:
 // for NTP, we check the output of timedatectl show-timesync;
 // for MTU, we check the output of "ip link" on the vlan interface;
 // for DHCP Lease, we check the output of "ip addr" on the server.
-func dnsNtpMtuTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
+func dnsNtpMtuTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	vpcAttaches := &vpcapi.VPCAttachmentList{}
 	if err := testCtx.kube.List(ctx, vpcAttaches); err != nil {
 		return false, nil, fmt.Errorf("listing VPCAttachments: %w", err)
@@ -1149,7 +1149,7 @@ func dnsNtpMtuTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []Rev
 // Uses 1 server by default, all servers in extended mode
 // Sets VPC DHCPOptions to a shorter lease and reconfigures servers via networkctl
 // Waits for DHCP renewal and checks lease time
-func dhcpRenewalTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
+func dhcpRenewalTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	// Find VPC with at least one server attached that has DHCP enabled
 	vpcAttaches := &vpcapi.VPCAttachmentList{}
 	if err := testCtx.kube.List(ctx, vpcAttaches); err != nil {
@@ -1423,7 +1423,7 @@ func (testCtx *VPCPeeringTestCtx) testStaticIPAssignment(ctx context.Context, vp
 // Verifies that static IP assignments work correctly both within and outside the dynamic range.
 // The test finds any server on any subnet, saves the existing DHCP config (if any),
 // forces a hardcoded DHCP config, runs tests, and restores the original config.
-func dhcpStaticLeaseTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
+func dhcpStaticLeaseTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	// 1. Find any server attached to any VPC subnet (regardless of DHCP config)
 	serverInfo, err := findAnyAttachedServer(ctx, testCtx.kube)
 	if errors.Is(err, errNoAttachedServers) {
@@ -1511,7 +1511,42 @@ func dhcpStaticLeaseTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool,
 				return fmt.Errorf("reverting VPC %s DHCP config: %w", serverInfo.VPCName, err)
 			}
 
-			return WaitReady(ctx, testCtx.kube, testCtx.wrOpts)
+			if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
+				return fmt.Errorf("waiting for ready after restoring DHCP config: %w", err)
+			}
+
+			// update the connectivity matrix for all servers attached to the modified subnet
+			subnetServers, err := findAllServersInSubnet(ctx, testCtx.kube, serverInfo.VPCName, serverInfo.SubnetName)
+			if err != nil {
+				return fmt.Errorf("listing servers in subnet %s of VPC %s: %w", serverInfo.SubnetName, serverInfo.VPCName, err)
+			}
+
+			for _, server := range subnetServers {
+				ssh, err := testCtx.getSSH(ctx, server.Name)
+				if err != nil {
+					return fmt.Errorf("getting ssh config for server %s: %w", server.Name, err)
+				}
+
+				_, stderr, err := ssh.Run(ctx, fmt.Sprintf("sudo networkctl reconfigure %s", server.Interface))
+				if err != nil {
+					if stderr != "" {
+						return fmt.Errorf("reconfiguring interface: %w (stderr: %s)", err, stderr)
+					}
+
+					return fmt.Errorf("reconfiguring interface: %w", err)
+				}
+				// Give DHCP a moment to hand out a fresh lease
+				time.Sleep(5 * time.Second)
+
+				// Refresh the matrix entry for this server. Without
+				// this, follow-up tests (MCLAG/ESLAG failover) probe the
+				// stale matrix IP and never reach the server.
+				if err := testCtx.rebindMatrixServerEndpoint(ctx, matrix, server.Name); err != nil {
+					return fmt.Errorf("refreshing matrix endpoint for %s after DHCP revert: %w", server.Name, err)
+				}
+			}
+
+			return nil
 		},
 	}
 
@@ -1533,7 +1568,7 @@ func dhcpStaticLeaseTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool,
 
 // Test RoCE functionality and DSCP traffic marking by enabling RoCE on a leaf switch
 // with servers, generating DSCP 24 marked traffic, and verifying UC3 queue counters.
-func roceBasicTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
+func roceBasicTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	// this should never fail
 	if len(testCtx.roceLeaves) == 0 {
 		slog.Error("RoCE leaves not specified, skipping RoCE basic test")

@@ -233,7 +233,7 @@ func changeSwitchPortStatus(ctx context.Context, ssh *sshutil.Config, deviceName
 }
 
 // disable agent, shutdown port on switch, test connectivity, enable agent, set port up
-func shutDownLinkAndTest(ctx context.Context, testCtx *VPCPeeringTestCtx, link wiringapi.ServerToSwitchLink) (returnErr error) {
+func shutDownLinkAndTest(ctx context.Context, testCtx *VPCPeeringTestCtx, link wiringapi.ServerToSwitchLink, matrix *ConnectivityMatrix) (returnErr error) {
 	switchPort := link.Switch
 	deviceName := switchPort.DeviceName()
 	// get switch profile to find the port name in sonic-cli
@@ -302,7 +302,14 @@ func shutDownLinkAndTest(ctx context.Context, testCtx *VPCPeeringTestCtx, link w
 	slog.Debug("Waiting 5 seconds")
 	time.Sleep(5 * time.Second)
 
-	return DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts)
+	var connCheckErr error
+	if matrix == nil {
+		connCheckErr = DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts)
+	} else {
+		connCheckErr = DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts, matrix)
+	}
+
+	return connCheckErr
 }
 
 // getSwitchesForVPC returns the set of leaf switch names that have VPCAttachments for the given VPC.
@@ -1225,4 +1232,53 @@ func findAnyAttachedServer(ctx context.Context, kube kclient.Client) (*AttachedS
 	}
 
 	return nil, errNoAttachedServers
+}
+
+// finds all servers attached to a subnet in a VPC
+func findAllServersInSubnet(ctx context.Context, kube kclient.Client, vpcName, subnetName string) ([]ServerWithInterface, error) {
+	servers := []ServerWithInterface{}
+	vpc := vpcapi.VPC{}
+	if err := kube.Get(ctx, kclient.ObjectKey{Name: vpcName, Namespace: kmetav1.NamespaceDefault}, &vpc); err != nil {
+		return servers, fmt.Errorf("getting VPC %s: %w", vpcName, err)
+	}
+	subnet, ok := vpc.Spec.Subnets[subnetName]
+	if !ok {
+		return servers, fmt.Errorf("no subnet %s in VPC %s", subnetName, vpcName) //nolint:goerr113
+	}
+	attachList := vpcapi.VPCAttachmentList{}
+	if err := kube.List(ctx, &attachList, kclient.MatchingLabels{
+		vpcapi.LabelSubnet: subnetName,
+		vpcapi.LabelVPC:    vpcName,
+	}); err != nil {
+		return servers, fmt.Errorf("listing attachments to the target server vpc/subnet: %w", err)
+	}
+	for _, attach := range attachList.Items {
+		conn := &wiringapi.Connection{}
+		if err := kube.Get(ctx, kclient.ObjectKey{
+			Namespace: kmetav1.NamespaceDefault,
+			Name:      attach.Spec.Connection,
+		}, conn); err != nil {
+			return servers, fmt.Errorf("getting connection %s for attachment %s: %w", attach.Spec.Connection, attach.Name, err)
+		}
+		var ifName string
+		if conn.Spec.Unbundled != nil {
+			ifName = fmt.Sprintf("%s.%d", conn.Spec.Unbundled.Link.Server.LocalPortName(), subnet.VLAN)
+		} else {
+			ifName = fmt.Sprintf("bond0.%d", subnet.VLAN)
+		}
+
+		_, serverNames, _, _, err := conn.Spec.Endpoints()
+		if err != nil {
+			return servers, fmt.Errorf("getting endpoints for connection %s: %w", conn.Name, err)
+		} else if len(serverNames) != 1 {
+			return servers, fmt.Errorf("expected 1 server for attachment %s, found %d", attach.Name, len(serverNames)) //nolint:goerr113
+		}
+
+		servers = append(servers, ServerWithInterface{
+			Name:      serverNames[0],
+			Interface: ifName,
+		})
+	}
+
+	return servers, nil
 }
