@@ -72,6 +72,11 @@ on:
         type: boolean
         required: false
         default: false
+      releasetest_extended:
+        description: "Include extended-only release tests"
+        type: boolean
+        required: false
+        default: false
       debug:
         description: "Enable tmate debugging"
         type: boolean
@@ -349,6 +354,9 @@ jobs:
               if [[ "${{ inputs.releasetest_regex_invert }}" == "true" ]]; then
                 HHFAB_TEST_ARGS+=(--release-test-regexes-invert)
               fi
+            fi
+            if [[ "${{ inputs.releasetest_extended }}" == "true" ]]; then
+              HHFAB_TEST_ARGS+=(--release-test-extended)
             fi
           elif [[ "${{ inputs.hybrid }}" == "true" || -n "${{ inputs.upgradefrom }}" ]]; then
             HHFAB_TEST_ARGS=(--ready=setup-vpcs --ready=setup-peerings --ready=test-connectivity)
