@@ -20,7 +20,7 @@ require (
 	github.com/charmbracelet/keygen v0.5.3
 	github.com/coreos/butane v0.29.0
 	github.com/diskfs/go-diskfs v1.4.2
-	github.com/go-logr/logr v1.4.3
+	github.com/go-logr/logr v1.4.4
 	github.com/go-playground/validator/v10 v10.30.3
 	github.com/k3s-io/helm-controller v0.17.6
 	github.com/lmittmann/tint v1.2.0
