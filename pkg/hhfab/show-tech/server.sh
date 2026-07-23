@@ -56,15 +56,15 @@ OUTPUT_FILE="/tmp/show-tech.log"
     echo "No default gateway found in routing table"
   fi
 
-  echo -e "\n=== Ping Other Servers ==="
-  OWN_IP=$(ip route get 8.8.8.8 | awk '{for(i=1;i<=NF;i++) if($i=="src") {print $(i+1); exit}}')
-  for i in {1..9}; do
-    TARGET_IP="10.0.$i.2"
-    if [ "$TARGET_IP" == "$OWN_IP" ]; then
-      continue
-    fi
-    ping -c 1 "$TARGET_IP" 2>&1
-  done
+  echo -e "\n=== Ping Peer Servers ==="
+  if [ -n "$PEER_SERVER_IPS" ]; then
+    for PEER_IP in $PEER_SERVER_IPS; do
+      echo -e "\n--- ping $PEER_IP ---"
+      ping -c 1 -W 2 "$PEER_IP" 2>&1
+    done
+  else
+    echo "PEER_SERVER_IPS not set — peer server pings skipped"
+  fi
 } >> "$OUTPUT_FILE" 2>&1
 
 # ---------------------------
@@ -167,6 +167,37 @@ OUTPUT_FILE="/tmp/show-tech.log"
 
   echo -e "\n=== Interface Statistics (ip -s link) ==="
   ip -s link
+
+} >> "$OUTPUT_FILE" 2>&1
+
+# ---------------------------
+# Memory & OOM Diagnostics
+# ---------------------------
+{
+  echo -e "\n=== Memory (free) ==="
+  free -m
+
+  echo -e "\n=== Memory (/proc/meminfo) ==="
+  cat /proc/meminfo
+
+  echo -e "\n=== OOM Events (dmesg) ==="
+  sudo dmesg -T 2>/dev/null | grep -iE "oom|out of memory|killed process" | tail -20 || \
+      echo "No OOM events detected (or dmesg not accessible)"
+
+} >> "$OUTPUT_FILE" 2>&1
+
+# ---------------------------
+# iperf3 Container Diagnostics
+# ---------------------------
+{
+  echo -e "\n=== Docker Container State ==="
+  docker ps -a 2>/dev/null || echo "docker not available"
+
+  echo -e "\n=== iperf3 Container Stats ==="
+  docker stats iperf3 --no-stream 2>/dev/null || echo "iperf3 container not running or docker not available"
+
+  echo -e "\n=== iperf3 Container Logs (last 100) ==="
+  docker logs iperf3 --tail 100 2>&1 || echo "iperf3 container not running or docker not available"
 
 } >> "$OUTPUT_FILE" 2>&1
 

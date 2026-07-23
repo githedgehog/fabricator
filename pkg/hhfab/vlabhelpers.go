@@ -24,6 +24,7 @@ import (
 
 	"github.com/manifoldco/promptui"
 	"github.com/samber/lo"
+	dhcpapi "go.githedgehog.com/fabric/api/dhcp/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/hhfctl"
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
@@ -670,6 +671,12 @@ var gatewayScript []byte
 //go:embed show-tech/runner.sh
 var runnerScript []byte
 
+//go:embed show-tech/external-switch.sh
+var externalSwitchScript []byte
+
+//go:embed show-tech/external.sh
+var externalScript []byte
+
 const ControlPlaneAPIIP = "172.30.0.5"
 
 type ShowTechScript struct {
@@ -683,7 +690,7 @@ func DefaultShowTechScript() ShowTechScript {
 			VMTypeControl:  controlScript,
 			VMTypeSwitch:   switchScript,
 			VMTypeGateway:  gatewayScript,
-			VMTypeExternal: serverScript,
+			VMTypeExternal: externalScript,
 		},
 	}
 }
@@ -761,6 +768,30 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB, opts ShowTechOpts
 		slog.Warn("Failed to list switches", "err", err)
 	}
 
+	// Build hostname→IP map from DHCPSubnet status for peer server ping injection.
+	// DHCP leases are runtime state, so read them from the live cluster (c.Client
+	// is the in-memory wiring loader and never has them). Best-effort: if the
+	// cluster is unreachable, peer pings are simply skipped.
+	serverHostIPs := map[string]string{}
+	kubeconfig := filepath.Join(c.WorkDir, VLABDir, VLABKubeConfig)
+	if kube, err := kubeutil.NewClient(ctx, kubeconfig, dhcpapi.AddToScheme); err != nil {
+		slog.Warn("Failed to create kube client for peer server IPs", "err", err)
+	} else {
+		dhcpSubnets := &dhcpapi.DHCPSubnetList{}
+		if err := kube.List(ctx, dhcpSubnets); err != nil {
+			slog.Warn("Failed to list DHCPSubnets for peer server IPs", "err", err)
+		} else {
+			for _, subnet := range dhcpSubnets.Items {
+				for _, alloc := range subnet.Status.Allocated {
+					if alloc.Discover || alloc.Hostname == "" || alloc.IP == "" {
+						continue
+					}
+					serverHostIPs[alloc.Hostname] = alloc.IP
+				}
+			}
+		}
+	}
+
 	// Build list of all targets to collect from
 	targets := make(map[string]VMType)
 	for _, vm := range vlab.VMs {
@@ -823,16 +854,11 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB, opts ShowTechOpts
 	} else {
 		slog.Warn("Expect not available; console fallback disabled", "err", err)
 	}
-	if switchConsoleScriptPath != "" && (os.Getenv(VLABEnvSwitchUsername) == "" || os.Getenv(VLABEnvSwitchPassword) == "") {
-		slog.Info("Switch console credentials not set; skipping switch console diagnostics",
-			"env", VLABEnvSwitchUsername+"/"+VLABEnvSwitchPassword)
+	switchConsoleMissingCreds := switchConsoleScriptPath != "" && (os.Getenv(VLABEnvSwitchUsername) == "" || os.Getenv(VLABEnvSwitchPassword) == "")
+	if switchConsoleMissingCreds {
 		switchConsoleScriptPath = ""
 	}
 	hasServerCredentials := os.Getenv(VLABEnvServerUsername) != "" && os.Getenv(VLABEnvServerPassword) != ""
-	if (controlConsoleScriptPath != "" || gatewayConsoleScriptPath != "") && !hasServerCredentials {
-		slog.Info("Server credentials not set; control/gateway console diagnostics will only capture visible output",
-			"env", VLABEnvServerUsername+"/"+VLABEnvServerPassword)
-	}
 
 	controlPlaneIP := ControlPlaneAPIIP
 
@@ -872,7 +898,24 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB, opts ShowTechOpts
 				if ssh == nil {
 					showTechErr = fmt.Errorf("getting ssh config for %s: %w", name, err)
 				} else {
-					showTechErr = c.collectShowTech(collectionCtx, name, ssh, script, outDir)
+					scriptToRun := script
+					if vmType == VMTypeServer || vmType == VMTypeExternal {
+						var peerIPs []string
+						for host, ip := range serverHostIPs {
+							if _, ok := targets[host]; ok && host != name {
+								peerIPs = append(peerIPs, ip)
+							}
+						}
+						slices.Sort(peerIPs)
+						peerIPs = slices.Compact(peerIPs)
+						if len(peerIPs) > 0 {
+							injection := []byte("PEER_SERVER_IPS='" + strings.Join(peerIPs, " ") + "'\n")
+							if nl := bytes.IndexByte(script, '\n'); nl >= 0 {
+								scriptToRun = slices.Concat(script[:nl+1], injection, script[nl+1:])
+							}
+						}
+					}
+					showTechErr = c.collectShowTech(collectionCtx, name, ssh, scriptToRun, outDir)
 				}
 			}
 
@@ -882,9 +925,14 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB, opts ShowTechOpts
 				successCount.Add(1)
 			}
 
-			if vmType == VMTypeSwitch && switchConsoleScriptPath != "" && showTechErr != nil {
-				if err := c.collectSwitchConsoleDiagnostics(ctx, name, showTechErr, outDir, switchConsoleScriptPath, controlPlaneIP); err != nil {
-					errChan <- fmt.Errorf("console diagnostics for %s: %w", name, err)
+			if vmType == VMTypeSwitch && showTechErr != nil {
+				if switchConsoleMissingCreds {
+					slog.Info("Switch SSH failed; console fallback skipped (credentials not set)",
+						"name", name, "env", VLABEnvSwitchUsername+"/"+VLABEnvSwitchPassword)
+				} else if switchConsoleScriptPath != "" {
+					if err := c.collectSwitchConsoleDiagnostics(ctx, name, showTechErr, outDir, switchConsoleScriptPath, controlPlaneIP); err != nil {
+						errChan <- fmt.Errorf("console diagnostics for %s: %w", name, err)
+					}
 				}
 			}
 			if vmType == VMTypeServer && serverConsoleScriptPath != "" && showTechErr != nil {
@@ -893,11 +941,19 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB, opts ShowTechOpts
 				}
 			}
 			if vmType == VMTypeControl && controlConsoleScriptPath != "" && showTechErr != nil {
+				if !hasServerCredentials {
+					slog.Info("Control SSH failed; console fallback will only capture visible output (server credentials not set)",
+						"name", name, "env", VLABEnvServerUsername+"/"+VLABEnvServerPassword)
+				}
 				if err := c.collectVMConsoleDiagnostics(ctx, "control", name, showTechErr, outDir, controlConsoleScriptPath); err != nil {
 					errChan <- fmt.Errorf("console fallback for %s: %w", name, err)
 				}
 			}
 			if vmType == VMTypeGateway && gatewayConsoleScriptPath != "" && showTechErr != nil {
+				if !hasServerCredentials {
+					slog.Info("Gateway SSH failed; console fallback will only capture visible output (server credentials not set)",
+						"name", name, "env", VLABEnvServerUsername+"/"+VLABEnvServerPassword)
+				}
 				if err := c.collectVMConsoleDiagnostics(ctx, "gateway", name, showTechErr, outDir, gatewayConsoleScriptPath); err != nil {
 					errChan <- fmt.Errorf("console fallback for %s: %w", name, err)
 				}
@@ -919,6 +975,27 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB, opts ShowTechOpts
 			"success_count", successCount.Load(),
 			"total_count", len(targets),
 			"errors", errors)
+	}
+
+	// Collect show-tech from a hardware external SONiC switch.
+	// All three env vars must be set; management IP is kept out of wiring YAML
+	// to avoid exposing internal addresses in public repos.
+	extUser := os.Getenv(VLABEnvExternalUsername)
+	extPass := os.Getenv(VLABEnvExternalPassword)
+	extIP := os.Getenv(VLABEnvExternalMgmtIP)
+	if extUser == "" || extPass == "" || extIP == "" {
+		slog.Info("External switch env vars not set, skipping external show-tech",
+			"env", VLABEnvExternalUsername+"/"+VLABEnvExternalPassword+"/"+VLABEnvExternalMgmtIP)
+	} else {
+		extSSH := &sshutil.Config{
+			Remote:   sshutil.Remote{User: extUser, Host: extIP, Port: 22},
+			Password: extPass,
+		}
+		collCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+		if err := c.collectShowTech(collCtx, "external", extSSH, externalSwitchScript, outDir); err != nil {
+			slog.Warn("Failed to collect external switch show-tech", "err", err)
+		}
+		cancel()
 	}
 
 	slog.Info("Show tech files saved in", "folder", outDir)
@@ -1054,10 +1131,19 @@ func (c *Config) collectRunnerShowTech(ctx context.Context, outputDir string) er
 	execCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(execCtx, "/bin/bash", tmpfile.Name()) //nolint:gosec
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		slog.Warn("Runner show-tech script execution failed", "err", err, "output", string(output))
+	bashPath, lookErr := exec.LookPath("bash")
+
+	var output []byte
+	if lookErr != nil {
+		slog.Warn("Runner show-tech: bash not found in PATH", "err", lookErr)
+		output = fmt.Appendf(nil, "runner-show-tech unavailable: bash not found in PATH: %v\n", lookErr)
+	} else {
+		cmd := exec.CommandContext(execCtx, bashPath, tmpfile.Name())
+		var err error
+		output, err = cmd.CombinedOutput()
+		if err != nil {
+			slog.Warn("Runner show-tech script execution failed", "err", err, "output", string(output))
+		}
 	}
 
 	localFilePath := filepath.Join(outputDir, "runner-show-tech.log")
