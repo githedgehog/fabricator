@@ -48,7 +48,7 @@ var DefaultConfig = fabapi.FabConfig{
 		DefaultSwitchUsers:  map[string]fabapi.SwitchUser{},
 		DefaultAlloyConfig:  fmeta.AlloyConfig{},
 		TH5WorkaroundVLANs: []fmeta.VLANRange{
-			{From: 3900, To: 3999},
+			{From: 3900, To: 3966}, // the 3967-4094 range is reserved in BCM SONiC
 		},
 	},
 	Gateway: fabapi.GatewayConfig{
