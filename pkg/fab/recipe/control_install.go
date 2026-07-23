@@ -5,6 +5,8 @@ package recipe
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"log/slog"
 	"os"
@@ -270,9 +272,38 @@ func (c *ControlInstall) installFabCA(ctx context.Context, kube kclient.Client) 
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
-	ca, err := certmanager.NewFabCA()
-	if err != nil {
-		return "", fmt.Errorf("creating fab-ca: %w", err)
+	// Reuse the existing CA to avoid invalidating Zot's cert on retry.
+	// Rotating the CA invalidates all leaf certs until cert-manager reissues them,
+	// which takes longer than the install timeout.
+	var ca *certmanager.CA
+	existingSecret := &coreapi.Secret{}
+	if err := kube.Get(ctx, kclient.ObjectKey{Name: comp.FabCASecret, Namespace: comp.FabNamespace}, existingSecret); err == nil {
+		crt := string(existingSecret.Data["tls.crt"])
+		key := string(existingSecret.Data["tls.key"])
+		if crt != "" && key != "" {
+			if certPair, err := tls.X509KeyPair([]byte(crt), []byte(key)); err != nil {
+				slog.Warn("Existing fab-ca has invalid cert/key, regenerating", "err", err)
+			} else if len(certPair.Certificate) == 0 {
+				slog.Warn("Existing fab-ca has no certificate, regenerating")
+			} else if parsed, err := x509.ParseCertificate(certPair.Certificate[0]); err != nil {
+				slog.Warn("Existing fab-ca certificate unparsable, regenerating", "err", err)
+			} else if !parsed.IsCA || !parsed.BasicConstraintsValid || parsed.KeyUsage&x509.KeyUsageCertSign == 0 {
+				slog.Warn("Existing fab-ca certificate is not a usable CA, regenerating")
+			} else {
+				slog.Debug("Reusing existing fab-ca")
+				ca = &certmanager.CA{Crt: crt, Key: key}
+			}
+		}
+	} else if !kapierrors.IsNotFound(err) {
+		return "", fmt.Errorf("checking for existing fab-ca: %w", err)
+	}
+
+	if ca == nil {
+		var err error
+		ca, err = certmanager.NewFabCA()
+		if err != nil {
+			return "", fmt.Errorf("creating fab-ca: %w", err)
+		}
 	}
 
 	if err := comp.EnforceKubeInstall(ctx, kube, c.Fab, certmanager.InstallFabCA(ca)); err != nil {
