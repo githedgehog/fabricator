@@ -74,6 +74,11 @@ storage:
         inline: |
           Hedgehog Node managed by Fabricator
 
+    - path: /etc/ssh/sshd_config.d/40-hedgehog.conf
+      mode: 0600
+      contents:
+        inline: |{{ .SSHDConfig | nindent 10 }}
+
     - path: /etc/systemd/network/10-dummy.netdev
       mode: 0644
       contents:

@@ -35,6 +35,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k9s"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/zot"
+	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 	appsapi "k8s.io/api/apps/v1"
 	coreapi "k8s.io/api/core/v1"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -173,6 +174,16 @@ func (c *ControlUpgrade) Run(ctx context.Context) error {
 		return fmt.Errorf("copying k9s bin: %w", err)
 	}
 
+	// Source NoPassAuth from the fab.yaml bundled in the upgrade artifact
+	noPassAuth, err := bundledNoPassAuth(ctx, c.WorkDir)
+	if err != nil {
+		return fmt.Errorf("reading bundled ssh config: %w", err)
+	}
+
+	if err := copySSHConfig(ctx, noPassAuth); err != nil {
+		return fmt.Errorf("copying ssh config: %w", err)
+	}
+
 	if err := upgradeFlatcar(ctx, string(flatcar.Version(c.Fab)), c.Yes); err != nil {
 		return fmt.Errorf("upgrading Flatcar: %w", err)
 	}
@@ -180,6 +191,30 @@ func (c *ControlUpgrade) Run(ctx context.Context) error {
 	slog.Info("Control node upgrade complete")
 
 	return nil
+}
+
+// bundledNoPassAuth returns Control.NoPassAuth from the fab.yaml shipped in the upgrade
+// artifact (workDir/fab.yaml), i.e. the config this upgrade was built with. This is the
+// authoritative source for node-local settings on upgrade, since a pre-upgrade cluster CR
+// created by an older version cannot carry newly-added fields across the version boundary.
+func bundledNoPassAuth(ctx context.Context, workDir string) (bool, error) {
+	fabCfg, err := os.ReadFile(filepath.Join(workDir, FabName))
+	if err != nil {
+		return false, fmt.Errorf("reading bundled fab config: %w", err)
+	}
+
+	l := apiutil.NewLoader()
+	if err := l.LoadAdd(ctx, apiutil.FabricatorGVKs, fabCfg); err != nil {
+		return false, fmt.Errorf("loading bundled fab config: %w", err)
+	}
+
+	f, _, _, err := fab.GetFabAndNodes(ctx, l.GetClient(),
+		fab.GetFabAndNodesOpts{AllowNotHydrated: true, AllowNoControls: true, NoCalculateVersions: true})
+	if err != nil {
+		return false, fmt.Errorf("parsing bundled fab config: %w", err)
+	}
+
+	return f.Spec.Config.Control.NoPassAuth, nil
 }
 
 func (c *ControlUpgrade) checkUpgradeConstraints(ctx context.Context, kube kclient.Reader) error {

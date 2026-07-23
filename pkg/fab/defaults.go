@@ -18,6 +18,7 @@ var DefaultConfig = fabapi.FabConfig{
 		KubeServiceSubnet: "172.29.0.0/16",
 		KubeClusterDNS:    "172.29.0.10",
 		DummySubnet:       "172.30.90.0/24",
+		NoPassAuth:        false,
 		DefaultUser:       fabapi.ControlUser{},
 	},
 	Registry: fabapi.RegistryConfig{

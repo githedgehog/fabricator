@@ -221,6 +221,9 @@ type ControlConfig struct {
 	DummySubnet meta.Prefix `json:"dummySubnet,omitempty"`
 
 	DefaultUser ControlUser `json:"defaultUser,omitempty"`
+	// NoPassAuth disables SSH password authentication on control/fab nodes, requiring key-based access.
+	// When true, at least one authorized key must be configured.
+	NoPassAuth bool `json:"noPassAuth,omitempty"`
 
 	NTPServers []string `json:"ntpServers,omitempty"`
 
@@ -818,6 +821,10 @@ func (f *Fabricator) Validate(ctx context.Context) error {
 		ph := f.Spec.Config.Control.DefaultUser.PasswordHash
 		if ph == "" {
 			return fmt.Errorf("default control user password hash is required") //nolint:goerr113
+		}
+		sshKey := f.Spec.Config.Control.DefaultUser.AuthorizedKeys
+		if len(sshKey) == 0 {
+			return fmt.Errorf("must have default ssh key") //nolint:goerr113
 		}
 
 		if !strings.HasPrefix(ph, "$5$") {

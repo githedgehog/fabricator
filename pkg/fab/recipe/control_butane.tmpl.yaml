@@ -113,6 +113,11 @@ storage:
           Destination=0.0.0.0/0
           Metric=42000
 
+    - path: /etc/ssh/sshd_config.d/40-hedgehog.conf
+      mode: 0600
+      contents:
+        inline: |{{ .SSHDConfig | nindent 10 }}
+
     - path: /etc/systemd/network/20-mgmt.network
       mode: 0644
       contents:

@@ -247,6 +247,22 @@ func DoUpgrade(ctx context.Context, workDir string, yes, skipChecks bool) error 
 	return nil
 }
 
+func copySSHConfig(_ context.Context, noPassAuth bool) error {
+	// A config from before this option existed unmarshals noPassAuth as false, which keeps
+	// password auth enabled so an upgrade never locks an operator out. When the value is
+	// present it is honored, disabling password auth on the upgraded node.
+	fileContents, err := renderSSHDConfig(noPassAuth)
+	if err != nil {
+		return fmt.Errorf("rendering ssh config: %w", err)
+	}
+
+	if err := os.WriteFile(sshdConfigPath, []byte(fileContents+"\n"), 0o600); err != nil {
+		return fmt.Errorf("writing ssh config: %w", err)
+	}
+
+	return nil
+}
+
 func setupTimesync(ctx context.Context, controlVIP string) error {
 	if ubuntu, err := isUbuntu(); err == nil && ubuntu {
 		// TODO do something on ubuntu

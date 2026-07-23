@@ -39,6 +39,10 @@ spec:
       #joinToken: super-secret-join-token
       {{- end }}
 
+      {{- if .NoPassAuth }}
+      noPassAuth: true # disable SSH password authentication (requires authorizedKeys below)
+      {{- end }}
+
       defaultUser: # user 'core' on all control nodes
         {{- if .DefaultPasswordHash }}
         password: "{{ .DefaultPasswordHash }}" # password hash
@@ -123,7 +127,7 @@ spec:
    disk: "/dev/sda" # disk to install OS on, e.g. "sda" or "nvme0n1"
   external:
     interface: enp2s0 # interface for external
-    ip:	dhcp # IP address for external interface
+    ip: dhcp # IP address for external interface
   management:
     interface: enp2s1 # interface for management
 
