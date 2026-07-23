@@ -262,7 +262,7 @@ func setupTimesync(ctx context.Context, controlVIP string) error {
 
 	// TODO remove if it'll be managed by control agent?
 
-	cfg := []byte(fmt.Sprintf("[Time]\nNTP=%s\n", controlVIP))
+	cfg := fmt.Appendf(nil, "[Time]\nNTP=%s\n", controlVIP)
 	if err := os.WriteFile("/etc/systemd/timesyncd.conf", cfg, 0o644); err != nil { //nolint:gosec
 		return fmt.Errorf("writing timesyncd.conf: %w", err)
 	}
@@ -302,8 +302,8 @@ func upgradeFlatcar(ctx context.Context, targetVersion string, yes bool) error {
 
 	version := ""
 	for line := range strings.Lines(string(content)) {
-		if strings.HasPrefix(line, FlatcarVersionPrefix) {
-			version = strings.TrimSpace(strings.TrimPrefix(line, FlatcarVersionPrefix))
+		if after, ok := strings.CutPrefix(line, FlatcarVersionPrefix); ok {
+			version = strings.TrimSpace(after)
 		}
 	}
 	if version == "" {

@@ -154,7 +154,7 @@ func (testCtx *VPCPeeringTestCtx) testNATGatewayConnectivity(
 		}
 
 		var eligibleAddrs []netip.Addr
-		for _, line := range strings.Split(strings.TrimSpace(stdout), "\n") {
+		for line := range strings.SplitSeq(strings.TrimSpace(stdout), "\n") {
 			fields := strings.Fields(line)
 			if len(fields) != 2 {
 				continue

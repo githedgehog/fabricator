@@ -702,7 +702,7 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 	}
 
 	nextMgmtIP := controlVIP.Addr()
-	for i := 0; i < 4; i++ { // reserve few IPs for future use
+	for range 4 { // reserve few IPs for future use
 		nextMgmtIP = nextMgmtIP.Next()
 	}
 

@@ -469,7 +469,7 @@ func init() {
 
 	fabricatorValidate = validator.New()
 
-	fabricatorValidate.RegisterCustomTypeFunc(func(field reflect.Value) interface{} {
+	fabricatorValidate.RegisterCustomTypeFunc(func(field reflect.Value) any {
 		if version, ok := field.Interface().(meta.Version); ok {
 			_, err := version.Parse()
 			if err != nil {
@@ -480,7 +480,7 @@ func init() {
 		return nil
 	}, meta.Version(""))
 
-	fabricatorValidate.RegisterCustomTypeFunc(func(field reflect.Value) interface{} {
+	fabricatorValidate.RegisterCustomTypeFunc(func(field reflect.Value) any {
 		if addr, ok := field.Interface().(meta.Addr); ok {
 			_, err := addr.Parse()
 			if err != nil {
@@ -491,7 +491,7 @@ func init() {
 		return nil
 	}, meta.Addr(""))
 
-	fabricatorValidate.RegisterCustomTypeFunc(func(field reflect.Value) interface{} {
+	fabricatorValidate.RegisterCustomTypeFunc(func(field reflect.Value) any {
 		if prefix, ok := field.Interface().(meta.Prefix); ok {
 			_, err := prefix.Parse()
 			if err != nil {
