@@ -2883,6 +2883,19 @@ func checkPing(ctx context.Context, pingCount int, semaphore *semaphore.Weighted
 	if pe.Received > 0 && pe.Sent != pe.Received {
 		pe.Lost = parsePingLostSeqs(stdout, pe.Sent)
 	}
+	if err != nil {
+		// Exit 126/127 means the shell never handed off to ping (missing binary,
+		// permission denied); any other non-ExitError means the command never
+		// completed on the remote end (SSH/session failure, ctx timeout). Neither
+		// tells us anything about reachability, so don't let it pass as a deny.
+		// Ping's own exit codes (e.g. 1 for no reply, 2 for no route) fall through
+		// to the existing sent/received classification below.
+		if status, ok := sshutil.ExitStatus(err); !ok || status == 126 || status == 127 {
+			pe.Msg = fmt.Sprintf("ping did not execute: %s", err)
+
+			return pe
+		}
+	}
 	if pe.Sent == 0 && err == nil {
 		pe.Msg = "cannot parse ping output to get sent packets"
 
@@ -3183,6 +3196,18 @@ func checkCurl(ctx context.Context, opts TestConnectivityOpts, curls *semaphore.
 		cmd := fmt.Sprintf("timeout -v 5 curl --insecure --connect-timeout 3 --silent http://%s", toIP)
 		stdout, stderr, err := retrySSHCmd(ctx, fromSSH, cmd, from)
 		ce.Output = stdout
+
+		if err != nil {
+			// Exit 126/127 means the shell never handed off to timeout/curl (missing
+			// binary, permission denied); any other non-ExitError means the command
+			// never completed on the remote end (SSH/session failure, ctx timeout).
+			// Neither is a curl-level deny signal, so don't let it pass as one.
+			if status, ok := sshutil.ExitStatus(err); !ok || status == 126 || status == 127 {
+				ce.Msg = fmt.Sprintf("curl did not execute: %s", err)
+
+				return ce
+			}
+		}
 
 		curlOk := err == nil && strings.Contains(stdout, "301 Moved")
 		curlFail := err != nil && !strings.Contains(stdout, "301 Moved")

@@ -5,6 +5,7 @@ package sshutil
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/appleboy/easyssh-proxy"
 	"github.com/pkg/sftp"
+	"golang.org/x/crypto/ssh"
 )
 
 var ErrTimeout = fmt.Errorf("timeout")
@@ -103,6 +105,19 @@ func (c *Config) Run(ctx context.Context, cmd string) (string, string, error) {
 	}
 
 	return outStr, errStr, nil
+}
+
+// ExitStatus reports the remote process's exit code from an error returned by
+// Run, if the command actually started on the remote end and exited. It
+// returns false for connect/session-setup failures and context
+// cancellation/timeout, where the command may never have run.
+func ExitStatus(err error) (int, bool) {
+	var exitErr *ssh.ExitError
+	if errors.As(err, &exitErr) {
+		return exitErr.ExitStatus(), true
+	}
+
+	return 0, false
 }
 
 func (c *Config) StreamLog(ctx context.Context, cmd string, logName string, log func(msg string, args ...any)) error {
