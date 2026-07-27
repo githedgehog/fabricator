@@ -1,6 +1,6 @@
 //go:build !windows
 
-package cwriter
+package cupwriter
 
 import (
 	"bytes"
@@ -17,7 +17,6 @@ type Writer struct {
 	out      io.Writer
 	ew       escWriter
 	fd       int
-	width    int
 	terminal bool
 	forceTTY bool
 }
@@ -37,8 +36,8 @@ func (w *Writer) Flush(lines int) error {
 	return nil
 }
 
-// GetSize returns the dimensions of the given terminal.
-func GetSize(fd int) (width, height int, err error) {
+// getTermSize returns the dimensions of the given terminal.
+func getTermSize(fd int) (width, height int, err error) {
 	ws, err := unix.IoctlGetWinsize(fd, unix.TIOCGWINSZ)
 	if err != nil {
 		return
@@ -46,8 +45,8 @@ func GetSize(fd int) (width, height int, err error) {
 	return int(ws.Col), int(ws.Row), nil
 }
 
-// IsTerminal returns whether the given file descriptor is a terminal.
-func IsTerminal(fd int) bool {
+// isTerminal returns whether the given file descriptor is a terminal.
+func isTerminal(fd int) bool {
 	_, err := unix.IoctlGetTermios(fd, ioctlReadTermios)
 	return err == nil
 }

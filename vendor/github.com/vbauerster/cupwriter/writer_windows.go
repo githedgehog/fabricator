@@ -1,6 +1,6 @@
 //go:build windows
 
-package cwriter
+package cupwriter
 
 import (
 	"bytes"
@@ -25,7 +25,6 @@ type Writer struct {
 	out      io.Writer
 	ew       escWriter
 	fd       int
-	width    int
 	lines    int
 	terminal bool
 	forceTTY bool
@@ -105,22 +104,23 @@ func (w *Writer) clearLines() error {
 	return nil
 }
 
-// GetSize returns the visible dimensions of the given terminal.
+// getTermSize returns the visible dimensions of the given terminal.
 // These dimensions don't include any scrollback buffer height.
-func GetSize(fd int) (width, height int, err error) {
+func getTermSize(fd int) (width, height int, err error) {
 	var info windows.ConsoleScreenBufferInfo
 	err = windows.GetConsoleScreenBufferInfo(windows.Handle(fd), &info)
 	if err != nil {
 		return
 	}
-	// terminal.GetSize from crypto/ssh adds "+ 1" to both width and height:
+	// there is need to preserve space for a line ending with '\n'
+	// therefore we don't +1 to the width as in reference implementation:
 	// https://go.googlesource.com/crypto/+/refs/heads/release-branch.go1.14/ssh/terminal/util_windows.go#75
-	// but looks like this is a root cause of issue #66, so removing both "+ 1" have fixed it.
-	return int(info.Window.Right - info.Window.Left), int(info.Window.Bottom - info.Window.Top), nil
+	// see https://github.com/vbauerster/mpb/issues/66
+	return int(info.Window.Right - info.Window.Left), int(info.Window.Bottom - info.Window.Top + 1), nil
 }
 
-// IsTerminal returns whether the given file descriptor is a terminal.
-func IsTerminal(fd int) bool {
+// isTerminal returns whether the given file descriptor is a terminal.
+func isTerminal(fd int) bool {
 	var st uint32
 	err := windows.GetConsoleMode(windows.Handle(fd), &st)
 	return err == nil
