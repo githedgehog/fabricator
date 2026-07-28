@@ -407,10 +407,6 @@ func GetServerNetconfCmd(conn *wiringapi.Connection, opts ServerNetconfOpts) (st
 			for _, link := range conn.Spec.Bundled.Links {
 				netconfCmd += " " + link.Server.LocalPortName()
 			}
-		} else if conn.Spec.MCLAG != nil {
-			for _, link := range conn.Spec.MCLAG.Links {
-				netconfCmd += " " + link.Server.LocalPortName()
-			}
 		} else if conn.Spec.ESLAG != nil {
 			for _, link := range conn.Spec.ESLAG.Links {
 				netconfCmd += " " + link.Server.LocalPortName()
@@ -440,10 +436,6 @@ func getServerHostBGPCmd(conn *wiringapi.Connection, vlan uint16, subnet netip.P
 		interfaces = append(interfaces, conn.Spec.Unbundled.Link.Server.LocalPortName())
 	case conn.Spec.Bundled != nil:
 		for _, link := range conn.Spec.Bundled.Links {
-			interfaces = append(interfaces, link.Server.LocalPortName())
-		}
-	case conn.Spec.MCLAG != nil:
-		for _, link := range conn.Spec.MCLAG.Links {
 			interfaces = append(interfaces, link.Server.LocalPortName())
 		}
 	case conn.Spec.ESLAG != nil:

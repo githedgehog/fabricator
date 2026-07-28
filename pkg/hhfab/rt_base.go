@@ -35,7 +35,6 @@ const (
 
 var (
 	errNoExternals       = errors.New("no external peers found")
-	errNoMclags          = errors.New("no MCLAG connections found")
 	errNoEslags          = errors.New("no ESLAG connections found")
 	errNoBundled         = errors.New("no bundled connections found")
 	errNoUnbundled       = errors.New("no unbundled connections found")

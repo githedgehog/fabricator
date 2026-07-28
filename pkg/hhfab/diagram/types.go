@@ -56,7 +56,6 @@ type SubnetInfo struct {
 const (
 	EdgeTypeFabric         = wiringapi.ConnectionTypeFabric
 	EdgeTypeMesh           = wiringapi.ConnectionTypeMesh
-	EdgeTypeMCLAG          = wiringapi.ConnectionTypeMCLAG
 	EdgeTypeSpine          = "spine" // TODO
 	EdgeTypeBundled        = wiringapi.ConnectionTypeBundled
 	EdgeTypeUnbundled      = wiringapi.ConnectionTypeUnbundled
@@ -94,7 +93,6 @@ type serverConnection struct {
 	primaryLeaf   string
 	secondaryLeaf string
 	connTypes     map[string][]string // leaf -> connection types
-	mclagPair     string
 	eslagPair     string
 }
 
@@ -106,7 +104,6 @@ type NodeMetrics struct {
 }
 
 const (
-	PropMCLAGType        = "mclagType"
 	PropSourcePort       = "sourcePort"
 	PropTargetPort       = "targetPort"
 	PropSourcePortStatus = "sourcePortStatus"
@@ -135,16 +132,8 @@ const (
 )
 
 const (
-	MCLAGTypePeer    = "peer"
-	MCLAGTypeSession = "session"
-)
-
-const (
 	LegendKeyFabric         = "fabric"
 	LegendKeyMesh           = "mesh"
-	LegendKeyMCLAGPeer      = "mclag_peer"
-	LegendKeyMCLAGSession   = "mclag_session"
-	LegendKeyMCLAGServer    = "mclag_server"
 	LegendKeyBundled        = "bundled"
 	LegendKeyUnbundled      = "unbundled"
 	LegendKeyESLAGServer    = "eslag_server"
@@ -170,6 +159,5 @@ const (
 )
 
 const (
-	RedundancyTypeMCLAG = "mclag"
 	RedundancyTypeESLAG = "eslag"
 )
