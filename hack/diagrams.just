@@ -2,7 +2,7 @@
 
 test-diagram vlab_workdir="" y="": _check-hhfab
   @if [ -n "{{vlab_workdir}}" ]; then mkdir -p test-diagram/live; fi
-  @mkdir -p test-diagram/default test-diagram/3spine test-diagram/mesh test-diagram/4mclag2orphan
+  @mkdir -p test-diagram/default test-diagram/3spine test-diagram/mesh test-diagram/4eslag2orphan
   @echo "==============================================="
   @echo "Diagram generation test - various topologies, formats, and styles"
   @if [ -n "{{vlab_workdir}}" ]; then echo "Live diagrams from vlab workdir: {{vlab_workdir}}"; fi
@@ -60,7 +60,7 @@ test-diagram vlab_workdir="" y="": _check-hhfab
   bin/hhfab diagram --format mermaid --output test-diagram/default/default.mermaid
 
   @echo "=== Generating diagrams for variant 3-spine topology ==="
-  bin/hhfab vlab gen --spines-count 3 --mclag-leafs-count 2 --orphan-leafs-count 1 --eslag-leaf-groups 2
+  bin/hhfab vlab gen --spines-count 3 --orphan-leafs-count 1 --eslag-leaf-groups 2,2
 
   # Generate all formats and styles for 3-spine topology
   bin/hhfab diagram --format drawio --style default --output test-diagram/3spine/default.drawio
@@ -68,16 +68,6 @@ test-diagram vlab_workdir="" y="": _check-hhfab
   bin/hhfab diagram --format drawio --style hedgehog --output test-diagram/3spine/hedgehog.drawio
   bin/hhfab diagram --format dot --output test-diagram/3spine/3spine.dot
   bin/hhfab diagram --format mermaid --output test-diagram/3spine/3spine.mermaid
-
-  @echo "=== Generating diagrams for 4-mclag-2-orphan topology ==="
-  bin/hhfab vlab gen --mclag-leafs-count 4 --orphan-leafs-count 2
-
-  # Generate all formats and styles for 4-mclag-2-orphan topology
-  bin/hhfab diagram --format drawio --style default --output test-diagram/4mclag2orphan/default.drawio
-  bin/hhfab diagram --format drawio --style cisco --output test-diagram/4mclag2orphan/cisco.drawio
-  bin/hhfab diagram --format drawio --style hedgehog --output test-diagram/4mclag2orphan/hedgehog.drawio
-  bin/hhfab diagram --format dot --output test-diagram/4mclag2orphan/4mclag2orphan.dot
-  bin/hhfab diagram --format mermaid --output test-diagram/4mclag2orphan/4mclag2orphan.mermaid
 
   @echo "=== Generating diagrams for mesh topology ==="
   bin/hhfab vlab gen --mesh-links-count 2
@@ -88,6 +78,16 @@ test-diagram vlab_workdir="" y="": _check-hhfab
   bin/hhfab diagram --format drawio --style hedgehog --output test-diagram/mesh/hedgehog.drawio
   bin/hhfab diagram --format dot --output test-diagram/mesh/mesh.dot
   bin/hhfab diagram --format mermaid --output test-diagram/mesh/mesh.mermaid
+
+  @echo "=== Generating diagrams for 4-eslag-2-orphan topology ==="
+  bin/hhfab vlab gen --eslag-leaf-groups 2,2 --orphan-leafs-count 2
+
+  # Generate all formats and styles for 4-eslag-2-orphan topology
+  bin/hhfab diagram --format drawio --style default --output test-diagram/4eslag2orphan/default.drawio
+  bin/hhfab diagram --format drawio --style cisco --output test-diagram/4eslag2orphan/cisco.drawio
+  bin/hhfab diagram --format drawio --style hedgehog --output test-diagram/4eslag2orphan/hedgehog.drawio
+  bin/hhfab diagram --format dot --output test-diagram/4eslag2orphan/4eslag2orphan.dot
+  bin/hhfab diagram --format mermaid --output test-diagram/4eslag2orphan/4eslag2orphan.mermaid
 
   # Convert DRAWIO files to SVG
   @echo "=== Converting DRAWIO files to SVG ==="
@@ -134,7 +134,7 @@ test-diagram vlab_workdir="" y="": _check-hhfab
   @echo "Summary of generated topology directories:"
   @echo "- Default VLAB topology: test-diagram/default/"
   @echo "- 3-spine VLAB topology: test-diagram/3spine/"
-  @echo "- 4-mclag-2-orphan topology: test-diagram/4mclag2orphan/"
+  @echo "- 4-eslag-2-orphan topology: test-diagram/4eslag2orphan/"
   @echo "- Mesh topology: test-diagram/mesh/"
   @if [ -n "{{vlab_workdir}}" ]; then echo "- Live diagrams (if VLAB in {{vlab_workdir}}): test-diagram/live/"; fi
 
