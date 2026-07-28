@@ -647,14 +647,7 @@ func createLegend(links []Link, style Style) []MxCell {
 	linkTypesMap := make(map[string]bool)
 
 	for _, link := range links {
-		// First check for MCLAG links which use "mclagType" property
-		if mclagType, ok := link.Properties[PropMCLAGType]; ok {
-			if mclagType == MCLAGTypePeer {
-				linkTypesMap[LegendKeyMCLAGPeer] = true
-			} else if mclagType == MCLAGTypeSession {
-				linkTypesMap[LegendKeyMCLAGSession] = true
-			}
-		} else if _, ok := link.Properties[PropBundled]; ok {
+		if _, ok := link.Properties[PropBundled]; ok {
 			linkTypesMap[LegendKeyBundled] = true
 		} else if _, ok := link.Properties[PropESLAGServer]; ok {
 			linkTypesMap[LegendKeyESLAGServer] = true
@@ -662,9 +655,6 @@ func createLegend(links []Link, style Style) []MxCell {
 			linkTypesMap[LegendKeyGateway] = true
 		} else {
 			switch link.Type {
-			case EdgeTypeMCLAG:
-				// If it's an MCLAG link without a specific type, it's a server link
-				linkTypesMap[LegendKeyMCLAGServer] = true
 			case EdgeTypeBundled:
 				linkTypesMap[LegendKeyBundled] = true
 			case EdgeTypeESLAG:
@@ -740,9 +730,6 @@ func createLegend(links []Link, style Style) []MxCell {
 	}{
 		{LegendKeyFabric, style.FabricLinkStyle, "Fabric Links"},
 		{LegendKeyMesh, style.MeshLinkStyle, "Mesh Links"},
-		{LegendKeyMCLAGPeer, style.MCLAGPeerStyle, "MCLAG Peer Links"},
-		{LegendKeyMCLAGSession, style.MCLAGSessionStyle, "MCLAG Session Links"},
-		{LegendKeyMCLAGServer, style.MCLAGServerStyle, "MCLAG Server Links"},
 		{LegendKeyBundled, style.BundledServerStyle, "Bundled Server Links"},
 		{LegendKeyUnbundled, style.UnbundledStyle, "Unbundled Server Links"},
 		{LegendKeyESLAGServer, style.ESLAGServerStyle, "ESLAG Server Links"},
@@ -1453,7 +1440,7 @@ func createRedundancyGroupLayer(model *MxGraphModel, redundancyGroups map[string
 		minX, minY := float64(9999), float64(9999)
 		maxX, maxY := float64(-9999), float64(-9999)
 
-		redundancyType := "mclag"
+		redundancyType := ""
 		for _, switchNode := range switches {
 			if redType, ok := switchNode.Properties[PropRedundancyType]; ok {
 				redundancyType = redType
@@ -1531,9 +1518,6 @@ func createRedundancyGroupLayer(model *MxGraphModel, redundancyGroups map[string
 
 		var strokeColor, strokeStyle string
 		switch redundancyType {
-		case RedundancyTypeMCLAG:
-			strokeColor = "#9cc1f7"
-			strokeStyle = "dashed=1;dashPattern=5 5;"
 		case RedundancyTypeESLAG:
 			strokeColor = "#d79b00"
 			strokeStyle = "dashed=1;dashPattern=5 5;"

@@ -16,7 +16,6 @@ const (
 
 	ColorFabric    = "red"
 	ColorMesh      = "blue"
-	ColorMCLAG     = "blue"
 	ColorBundled   = "green"
 	ColorUnbundled = "gray"
 	ColorESLAG     = "orange"
@@ -137,14 +136,7 @@ func generateDOT(topo Topology) string {
 		}
 
 		// Track link types for legend
-		// Check for MCLAG links which use "mclagType" property
-		if mclagType, ok := link.Properties[PropMCLAGType]; ok {
-			if mclagType == MCLAGTypePeer {
-				linkTypesPresent["mclag_peer"] = true
-			} else if mclagType == MCLAGTypeSession {
-				linkTypesPresent["mclag_session"] = true
-			}
-		} else if _, ok := link.Properties[PropBundled]; ok {
+		if _, ok := link.Properties[PropBundled]; ok {
 			linkTypesPresent["bundled"] = true
 		} else if _, ok := link.Properties[PropESLAGServer]; ok {
 			linkTypesPresent["eslag_server"] = true
@@ -152,8 +144,6 @@ func generateDOT(topo Topology) string {
 			linkTypesPresent["gateway"] = true
 		} else {
 			switch link.Type {
-			case EdgeTypeMCLAG:
-				linkTypesPresent["mclag_server"] = true
 			case EdgeTypeBundled:
 				linkTypesPresent["bundled"] = true
 			case EdgeTypeESLAG:
@@ -267,24 +257,6 @@ func generateDOT(topo Topology) string {
 		b.WriteString("\t\t\t<TR>\n")
 		b.WriteString("\t\t\t<TD ALIGN=\"LEFT\" VALIGN=\"MIDDLE\"><FONT COLOR=\"blue\">────</FONT></TD>\n")
 		b.WriteString(fmt.Sprintf("\t\t\t<TD ALIGN=\"LEFT\">%s</TD>\n", meshLabel))
-		b.WriteString("\t\t\t</TR>\n")
-	}
-	if linkTypesPresent["mclag_peer"] {
-		b.WriteString("\t\t\t<TR>\n")
-		b.WriteString("\t\t\t<TD ALIGN=\"LEFT\" VALIGN=\"MIDDLE\"><FONT COLOR=\"purple\">- - - -</FONT></TD>\n")
-		b.WriteString("\t\t\t<TD ALIGN=\"LEFT\">MCLAG Peer Links</TD>\n")
-		b.WriteString("\t\t\t</TR>\n")
-	}
-	if linkTypesPresent["mclag_session"] {
-		b.WriteString("\t\t\t<TR>\n")
-		b.WriteString("\t\t\t<TD ALIGN=\"LEFT\" VALIGN=\"MIDDLE\"><FONT COLOR=\"purple\">────</FONT></TD>\n")
-		b.WriteString("\t\t\t<TD ALIGN=\"LEFT\">MCLAG Session Links</TD>\n")
-		b.WriteString("\t\t\t</TR>\n")
-	}
-	if linkTypesPresent["mclag_server"] {
-		b.WriteString("\t\t\t<TR>\n")
-		b.WriteString("\t\t\t<TD ALIGN=\"LEFT\" VALIGN=\"MIDDLE\"><FONT COLOR=\"purple\">────</FONT></TD>\n")
-		b.WriteString("\t\t\t<TD ALIGN=\"LEFT\">MCLAG Server Links</TD>\n")
 		b.WriteString("\t\t\t</TR>\n")
 	}
 	if linkTypesPresent["bundled"] {
@@ -623,9 +595,6 @@ func generateDOT(topo Topology) string {
 		case EdgeTypeMesh:
 			color = ColorMesh
 			style = StyleSolid
-		case EdgeTypeMCLAG:
-			color = ColorMCLAG
-			style = StyleDashed
 		case EdgeTypeBundled:
 			color = ColorBundled
 			style = StyleSolid

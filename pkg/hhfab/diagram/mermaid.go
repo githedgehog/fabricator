@@ -43,7 +43,6 @@ func generateMermaid(topo Topology) string {
 	b.WriteString("classDef spine   fill:#F8CECC,stroke:#B85450,stroke-width:1px,color:#000\n")
 	b.WriteString("classDef leaf    fill:#DAE8FC,stroke:#6C8EBF,stroke-width:1px,color:#000\n")
 	b.WriteString("classDef server  fill:#D5E8D4,stroke:#82B366,stroke-width:1px,color:#000\n")
-	b.WriteString("classDef mclag   fill:#F0F8FF,stroke:#6C8EBF,stroke-width:1px,color:#000\n")
 	b.WriteString("classDef eslag   fill:#FFF8E8,stroke:#CC9900,stroke-width:1px,color:#000\n")
 	b.WriteString("classDef external fill:#FFCC99,stroke:#D79B00,stroke-width:1px,color:#000\n")
 	b.WriteString("classDef hidden fill:none,stroke:none\n")
@@ -213,28 +212,6 @@ func generateMermaid(topo Topology) string {
 	bundledConnections := make(map[string]map[string]int) // Track bundled connections
 
 	for _, link := range topo.Links {
-		if link.Type == EdgeTypeMCLAG {
-			sourceIsLeaf := false
-			targetIsLeaf := false
-
-			for _, node := range topo.Nodes {
-				if node.ID == link.Source && node.Type == NodeTypeSwitch {
-					if role, ok := node.Properties[PropRole]; ok && role != SwitchRoleSpine {
-						sourceIsLeaf = true
-					}
-				}
-				if node.ID == link.Target && node.Type == NodeTypeSwitch {
-					if role, ok := node.Properties[PropRole]; ok && role != SwitchRoleSpine {
-						targetIsLeaf = true
-					}
-				}
-			}
-
-			if sourceIsLeaf && targetIsLeaf {
-				continue
-			}
-		}
-
 		// Track bundled connections for aggregation
 		if link.Type == EdgeTypeBundled {
 			var leaf, server string
@@ -289,8 +266,6 @@ func generateMermaid(topo Topology) string {
 				connType = EdgeTypeFabric
 			case EdgeTypeMesh:
 				connType = EdgeTypeMesh
-			case EdgeTypeMCLAG:
-				connType = EdgeTypeMCLAG
 			case EdgeTypeBundled:
 				connType = EdgeTypeBundled
 			case EdgeTypeUnbundled:
@@ -324,7 +299,6 @@ func generateMermaid(topo Topology) string {
 	gatewayLinks := []int{}
 	spineLeafLinks := []int{}
 	meshLinks := []int{}
-	mclagLinks := []int{}
 	bundledLinks := []int{}
 	eslagLinks := []int{}
 	unbundledLinks := []int{}
@@ -560,8 +534,6 @@ func generateMermaid(topo Topology) string {
 
 			connType := leafServerTypes[connectionKey]
 			switch connType {
-			case EdgeTypeMCLAG:
-				mclagLinks = append(mclagLinks, linkIndex)
 			case EdgeTypeBundled:
 				bundledLinks = append(bundledLinks, linkIndex)
 			case EdgeTypeESLAG:
@@ -781,10 +753,6 @@ func generateMermaid(topo Topology) string {
 		b.WriteString("\tL15(( )) --- |\"Mesh Links\"| L16(( ))\n")
 	}
 
-	if len(mclagLinks) > 0 {
-		b.WriteString("\tL3(( )) --- |\"MCLAG Server Links\"| L4(( ))\n")
-	}
-
 	if len(bundledLinks) > 0 {
 		bundledLabel := "Bundled Server Links"
 		if maxParallelConnections["bundled"] > 1 {
@@ -859,14 +827,8 @@ func generateMermaid(topo Topology) string {
 
 	// Use actual redundancy group names in subgraphs
 	for groupName := range redundancySubgraphs {
-		redundancyType := redundancyTypes[groupName]
-		cleanGroupName := cleanID(groupName)
-
-		switch redundancyType {
-		case RedundancyTypeMCLAG:
-			b.WriteString(fmt.Sprintf("class %s mclag\n", cleanGroupName))
-		case RedundancyTypeESLAG:
-			b.WriteString(fmt.Sprintf("class %s eslag\n", cleanGroupName))
+		if redundancyTypes[groupName] == RedundancyTypeESLAG {
+			b.WriteString(fmt.Sprintf("class %s eslag\n", cleanID(groupName)))
 		}
 	}
 
@@ -912,10 +874,6 @@ func generateMermaid(topo Topology) string {
 		b.WriteString(fmt.Sprintf("linkStyle %s stroke:#0078D4,stroke-width:4px\n", formatIndices(meshLinks)))
 	}
 
-	if len(mclagLinks) > 0 {
-		b.WriteString(fmt.Sprintf("linkStyle %s stroke:#99CCFF,stroke-width:4px,stroke-dasharray:5 5\n", formatIndices(mclagLinks)))
-	}
-
 	if len(bundledLinks) > 0 {
 		b.WriteString(fmt.Sprintf("linkStyle %s stroke:#66CC66,stroke-width:4px\n", formatIndices(bundledLinks)))
 	}
@@ -948,11 +906,6 @@ func generateMermaid(topo Topology) string {
 
 	if len(meshLinks) > 0 {
 		b.WriteString(fmt.Sprintf("linkStyle %d stroke:#0078D4,stroke-width:2px\n", legendLinkStart+legendLinkIndex))
-		legendLinkIndex++
-	}
-
-	if len(mclagLinks) > 0 {
-		b.WriteString(fmt.Sprintf("linkStyle %d stroke:#6C8EBF,stroke-width:2px,stroke-dasharray:5 5\n", legendLinkStart+legendLinkIndex))
 		legendLinkIndex++
 	}
 
