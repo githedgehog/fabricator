@@ -91,6 +91,7 @@ _Appears in:_
 | `kubeClusterDNS` _Addr_ |  |  |  |
 | `dummySubnet` _Prefix_ |  |  |  |
 | `defaultUser` _[ControlUser](#controluser)_ |  |  |  |
+| `noPassAuth` _boolean_ | NoPassAuth disables SSH password authentication on control/fab nodes, requiring key-based access.<br />When true, at least one authorized key must be configured. |  |  |
 | `ntpServers` _string array_ |  |  |  |
 | `observability` _[ControlObservability](#controlobservability)_ |  |  |  |
 

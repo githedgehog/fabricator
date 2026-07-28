@@ -54,6 +54,7 @@ const (
 	FlagIncludeONIE               = "include-onie"
 	FlagIncludeCLSP               = "include-clsp"
 	FlagIncludeCumulus            = "include-cumulus"
+	FlagCtrlNoPassAuth            = "ctrl-no-pass-auth" //nolint:gosec // G101 false positive: this is a CLI flag name, not a credential
 	FlagNodeMgmtLinks             = "node-mgmt-links"
 	FlagOOBMgmtIface              = "mgmt-link"
 	FlagGateway                   = "gateway"
@@ -579,6 +580,13 @@ func Run(ctx context.Context) error {
 						Usage:    "default authorized `KEYS` for control and switch users",
 						EnvVars:  []string{"HHFAB_AUTH_KEYS"},
 					},
+					&cli.BoolFlag{
+						Category: FlagCatGenConfig,
+						Name:     FlagCtrlNoPassAuth,
+						Usage:    "disable SSH password authentication on control/fab nodes (requires authorized keys); ignored in --dev mode",
+						Value:    true,
+						EnvVars:  []string{"HHFAB_CTRL_NO_PASS_AUTH"},
+					},
 					&cli.StringFlag{
 						Category: FlagCatGenConfig,
 						Name:     FlagNameDefaultPasswordHash,
@@ -715,6 +723,7 @@ func Run(ctx context.Context) error {
 							IncludeBCM:            c.Bool(FlagIncludeBCM),
 							IncludeCLSP:           c.Bool(FlagIncludeCLSP),
 							IncludeCumulus:        c.Bool(FlagIncludeCumulus),
+							NoPassAuth:            c.Bool(FlagCtrlNoPassAuth),
 							NodeManagementLinks:   mgmtLinks,
 							Gateway:               c.Bool(FlagGateway),
 							Gateways:              c.Int(FlagGateways),
