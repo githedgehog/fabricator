@@ -104,7 +104,6 @@ classDef gateway fill:#FFF2CC,stroke:#999,stroke-width:1px,color:#000
 classDef spine   fill:#F8CECC,stroke:#B85450,stroke-width:1px,color:#000
 classDef leaf    fill:#DAE8FC,stroke:#6C8EBF,stroke-width:1px,color:#000
 classDef server  fill:#D5E8D4,stroke:#82B366,stroke-width:1px,color:#000
-classDef mclag   fill:#F0F8FF,stroke:#6C8EBF,stroke-width:1px,color:#000
 
 subgraph Gateways
 	direction TB
@@ -144,7 +143,6 @@ class Gateway_1 gateway
 class Spine_01,Spine_02 spine
 class Leaf_01 leaf
 class Server_01 server
-class MCLAG mclag
 linkStyle default stroke:#666,stroke-width:2px
 linkStyle 0,1 stroke:#CC9900,stroke-dasharray: 2 2,stroke-width:2px,color:#CC9900 %% Gateway links
 linkStyle 2,3 stroke:#CC3333,stroke-width:4px %% Fabric links
