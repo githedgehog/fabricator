@@ -24,8 +24,8 @@ just test-diagram "/path/to/vlab" "-y"
 The system generates diagrams for these network topologies:
 
 - **Default**: Standard 2-spine, 2-leaf VLAB configuration
-- **3spine**: 3-spine topology with MCLAG and orphan leafs
-- **4mclag2orphan**: 4 MCLAG leafs with 2 orphan leafs
+- **3spine**: 3-spine topology with ESLAG and orphan leafs
+- **4eslag2orphan**: 4 ESLAG leafs (2 groups of 2) with 2 orphan leafs
 - **Mesh**: Mesh topology with inter-leaf connections
 - **Live**: Real-time diagrams from running VLAB (optional)
 
@@ -97,7 +97,7 @@ test-diagram/
 │   └── default.mermaid.svg  # If Mermaid CLI available
 ├── 3spine/
 ├── mesh/
-├── 4mclag2orphan/
+├── 4eslag2orphan/
 ├── live/                    # If vlab_workdir specified
 └── diagram-viewer.html      # Interactive HTML viewer
 ```
