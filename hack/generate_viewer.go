@@ -49,7 +49,7 @@ var (
 			"live":          "🔴 Live",
 			"default":       "🏠 Default",
 			"3spine":        "🌐 Multi-Spine",
-			"4mclag2orphan": "🔗 MCLAG",
+			"4eslag2orphan": "🔗 ESLAG",
 			"mesh":          "🕸️ Mesh",
 			"spine-leaf":    "🌿 Spine-Leaf",
 			"gateway":       "🌐 Gateway",
