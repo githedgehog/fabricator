@@ -266,7 +266,7 @@ func (c *ControlUpgrade) checkUpgradeConstraints(ctx context.Context, kube kclie
 		return fmt.Errorf("listing connections: %w", err)
 	}
 	for _, conn := range connections.Items {
-		if conn.Spec.MCLAG != nil || conn.Spec.MCLAGDomain != nil {
+		if conn.Spec.MCLAG != nil || conn.Spec.MCLAGDomain != nil { //nolint:staticcheck // deprecated on purpose: we're looking for leftover MCLAG to refuse the upgrade
 			mclagConns = append(mclagConns, conn.Name)
 		}
 	}

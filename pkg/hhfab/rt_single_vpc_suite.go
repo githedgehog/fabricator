@@ -60,14 +60,6 @@ func makeSingleVPCSuite() *JUnitTestSuite {
 			F:    dhcpStaticLeaseTest,
 		},
 		{
-			Name: "MCLAG Failover",
-			F:    mclagTest,
-			SkipFlags: SkipFlags{
-				VirtualSwitch: true,
-				NoServers:     true,
-			},
-		},
-		{
 			Name: "ESLAG Failover",
 			F:    eslagTest,
 			SkipFlags: SkipFlags{
@@ -121,41 +113,6 @@ func makeSingleVPCSuite() *JUnitTestSuite {
 	suite.Tests = len(suite.TestCases)
 
 	return suite
-}
-
-// Basic test for mclag failover.
-// For each mclag connection, set one of the links down by shutting down the port on the switch,
-// then test connectivity. Repeat for the other link.
-func mclagTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, []RevertFunc, error) {
-	// list connections in the fabric, filter by MC-LAG connection type
-	conns := &wiringapi.ConnectionList{}
-	if err := testCtx.kube.List(ctx, conns, kclient.MatchingLabels{wiringapi.LabelConnectionType: wiringapi.ConnectionTypeMCLAG}); err != nil {
-		return false, nil, fmt.Errorf("listing connections: %w", err)
-	}
-	if len(conns.Items) == 0 {
-		slog.Info("No MCLAG connections found, skipping test")
-
-		return true, nil, errNoMclags
-	}
-	for _, conn := range conns.Items {
-		slog.Debug("Testing MCLAG connection", "connection", conn.Name)
-		if len(conn.Spec.MCLAG.Links) != 2 {
-			return false, nil, fmt.Errorf("MCLAG connection %s has %d links, expected 2", conn.Name, len(conn.Spec.MCLAG.Links)) //nolint:goerr113
-		}
-		for _, link := range conn.Spec.MCLAG.Links {
-			if err := shutDownLinkAndTest(ctx, testCtx, link); err != nil {
-				return false, nil, err
-			}
-			// TODO: set other link down too and make sure that connectivity is lost
-			if !testCtx.extended {
-				slog.Debug("Skipping other link, set extended=true to iterate over all links")
-
-				break
-			}
-		}
-	}
-
-	return false, nil, nil
 }
 
 // Basic test for eslag failover.

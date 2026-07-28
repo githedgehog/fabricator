@@ -693,7 +693,7 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 	}
 
 	for _, conn := range conns.Items {
-		if conn.Spec.Fabric != nil { //nolint:gocritic
+		if conn.Spec.Fabric != nil {
 			for _, link := range conn.Spec.Fabric.Links {
 				if err := addLink(link.Spine.Port, link.Leaf.Port); err != nil {
 					return nil, fmt.Errorf("failed to add link for fabric connection %s: %w", conn.Name, err)
@@ -721,8 +721,8 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 					return nil, fmt.Errorf("failed to add link for bundled connection %s: %w", conn.Name, err)
 				}
 			}
-		} else if conn.Spec.MCLAG != nil {
-			for _, link := range conn.Spec.MCLAG.Links {
+		} else if mclag := conn.Spec.MCLAG; mclag != nil { //nolint:staticcheck // deprecated, but VLAB should still bring up pre-existing MCLAG wiring
+			for _, link := range mclag.Links {
 				if err := addLink(link.Server.Port, link.Switch.Port); err != nil {
 					return nil, fmt.Errorf("failed to add link for MCLAG connection %s: %w", conn.Name, err)
 				}
@@ -739,13 +739,13 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 					return nil, fmt.Errorf("failed to add link for VPC loopback connection %s: %w", conn.Name, err)
 				}
 			}
-		} else if conn.Spec.MCLAGDomain != nil {
-			for _, link := range conn.Spec.MCLAGDomain.SessionLinks {
+		} else if mclagDomain := conn.Spec.MCLAGDomain; mclagDomain != nil { //nolint:staticcheck // deprecated, but VLAB should still bring up pre-existing MCLAG wiring
+			for _, link := range mclagDomain.SessionLinks {
 				if err := addLink(link.Switch1.Port, link.Switch2.Port); err != nil {
 					return nil, fmt.Errorf("failed to add session link for MCLAG domain connection %s: %w", conn.Name, err)
 				}
 			}
-			for _, link := range conn.Spec.MCLAGDomain.PeerLinks {
+			for _, link := range mclagDomain.PeerLinks {
 				if err := addLink(link.Switch1.Port, link.Switch2.Port); err != nil {
 					return nil, fmt.Errorf("failed to add peer link for MCLAG domain connection %s: %w", conn.Name, err)
 				}

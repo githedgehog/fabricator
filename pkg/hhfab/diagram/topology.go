@@ -108,9 +108,9 @@ func findConnectionTypes(links []Link) map[string]*serverConnection {
 		conn.connTypes[leaf] = append(conn.connTypes[leaf], link.Type)
 	}
 
-	// Find MCLAG/ESLAG pairs
+	// Find ESLAG pairs
 	for s1, conn1 := range serverConns {
-		if conn1.mclagPair != "" || conn1.eslagPair != "" {
+		if conn1.eslagPair != "" {
 			continue
 		}
 
@@ -125,7 +125,7 @@ func findConnectionTypes(links []Link) map[string]*serverConnection {
 
 			// Check if connection patterns match
 			match := true
-			pairType := ""
+			eslag := false
 			for leaf, types1 := range conn1.connTypes {
 				types2, exists := conn2.connTypes[leaf]
 				if !exists || len(types1) != len(types2) {
@@ -142,22 +142,15 @@ func findConnectionTypes(links []Link) map[string]*serverConnection {
 
 						break
 					}
-					if types1[i] == EdgeTypeMCLAG {
-						pairType = EdgeTypeMCLAG
-					} else if types1[i] == EdgeTypeESLAG && pairType == "" {
-						pairType = EdgeTypeESLAG
+					if types1[i] == EdgeTypeESLAG {
+						eslag = true
 					}
 				}
 			}
 
-			if match && pairType != "" {
-				if pairType == EdgeTypeMCLAG {
-					conn1.mclagPair = s2
-					conn2.mclagPair = s1
-				} else {
-					conn1.eslagPair = s2
-					conn2.eslagPair = s1
-				}
+			if match && eslag {
+				conn1.eslagPair = s2
+				conn2.eslagPair = s1
 			}
 		}
 	}
@@ -371,12 +364,6 @@ func sortNodes(nodes []Node, links []Link) TieredNodes {
 			c1, c2 := serverConns[s1], serverConns[s2]
 
 			// Keep pairs together
-			if c1.mclagPair == s2 {
-				return s1 < s2 // Smaller ID first in MCLAG pair
-			}
-			if c2.mclagPair == s1 {
-				return s2 < s1 // Smaller ID first in MCLAG pair
-			}
 			if c1.eslagPair == s2 {
 				return s1 < s2 // Smaller ID first in ESLAG pair
 			}
@@ -420,10 +407,6 @@ func sortNodes(nodes []Node, links []Link) TieredNodes {
 
 				// Add pair immediately after if not yet seen
 				conn := serverConns[server]
-				if conn.mclagPair != "" && !seenServers[conn.mclagPair] {
-					orderedServers = append(orderedServers, conn.mclagPair)
-					seenServers[conn.mclagPair] = true
-				}
 				if conn.eslagPair != "" && !seenServers[conn.eslagPair] {
 					orderedServers = append(orderedServers, conn.eslagPair)
 					seenServers[conn.eslagPair] = true
@@ -700,8 +683,6 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 			serverPort = conn.Spec.Unbundled.Link.Server.Port
 		case conn.Spec.Bundled != nil && len(conn.Spec.Bundled.Links) > 0 && conn.Spec.Bundled.Links[0].Server.Port != "":
 			serverPort = conn.Spec.Bundled.Links[0].Server.Port
-		case conn.Spec.MCLAG != nil && len(conn.Spec.MCLAG.Links) > 0 && conn.Spec.MCLAG.Links[0].Server.Port != "":
-			serverPort = conn.Spec.MCLAG.Links[0].Server.Port
 		case conn.Spec.ESLAG != nil && len(conn.Spec.ESLAG.Links) > 0 && conn.Spec.ESLAG.Links[0].Server.Port != "":
 			serverPort = conn.Spec.ESLAG.Links[0].Server.Port
 		}
@@ -748,9 +729,8 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 		}
 
 		// Handle standard (non-external) connections
-		if conn.Spec.Fabric != nil || conn.Spec.Mesh != nil || conn.Spec.Gateway != nil || conn.Spec.MCLAGDomain != nil ||
-			conn.Spec.Unbundled != nil || conn.Spec.MCLAG != nil || conn.Spec.Bundled != nil ||
-			conn.Spec.ESLAG != nil {
+		if conn.Spec.Fabric != nil || conn.Spec.Mesh != nil || conn.Spec.Gateway != nil ||
+			conn.Spec.Unbundled != nil || conn.Spec.Bundled != nil || conn.Spec.ESLAG != nil {
 			// Build per-port-pair IP map for underlay (fabric/mesh/gateway connections only)
 			type pairIPs struct{ src, dst string }
 			portPairIPs := map[string]pairIPs{}
@@ -794,21 +774,6 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 					if stateMap, ok := bgpNeighborStateMap[link.Source]; ok {
 						if state, ok := stateMap[dstIPOnly]; ok && state != "" {
 							link.Properties[PropBGPState] = string(state)
-						}
-					}
-				}
-
-				if conn.Spec.MCLAGDomain != nil {
-					link.Type = EdgeTypeMCLAG // just to keep compat with current diagram impl
-
-					for _, connLink := range conn.Spec.MCLAGDomain.PeerLinks {
-						if connLink.Switch1.Port == source && connLink.Switch2.Port == target {
-							link.Properties[PropMCLAGType] = MCLAGTypePeer
-						}
-					}
-					for _, connLink := range conn.Spec.MCLAGDomain.SessionLinks {
-						if connLink.Switch1.Port == source && connLink.Switch2.Port == target {
-							link.Properties[PropMCLAGType] = MCLAGTypeSession
 						}
 					}
 				}
