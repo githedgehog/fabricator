@@ -109,6 +109,11 @@ spec:
                         additionalProperties:
                           type: string
                         type: object
+                      noPassAuth:
+                        description: |-
+                          NoPassAuth disables SSH password authentication on control/fab nodes, requiring key-based access.
+                          When true, at least one authorized key must be configured.
+                        type: boolean
                       ntpServers:
                         items:
                           type: string
