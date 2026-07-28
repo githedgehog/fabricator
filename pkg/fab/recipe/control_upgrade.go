@@ -168,6 +168,9 @@ func (c *ControlUpgrade) Run(ctx context.Context) error {
 	if err := c.installFabricCtl(); err != nil {
 		return fmt.Errorf("installing kubectl-fabric: %w", err)
 	}
+	if err := c.installSSHConfig(); err != nil {
+		return fmt.Errorf("installing ssh configuration: %w", err)
+	}
 
 	if err := copyFile(k9s.BinName, filepath.Join(k3s.BinDir, k9s.BinName), 0o755); err != nil {
 		return fmt.Errorf("copying k9s bin: %w", err)
@@ -540,6 +543,26 @@ func (c *ControlUpgrade) setupFirewall(ctx context.Context) error {
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("error on systemctl enable --now %s: %w", nftServiceName, err)
 	}
+
+	return nil
+}
+
+func (c *ControlUpgrade) installSSHConfig() error {
+	// We do not support making changes and doing upgrades in the same step
+	// So this configuration comes from the running instance.
+	// Users will need to manually place the option or wait for the upgrade to 26.04
+	fileContents, err := renderSSHDConfig(c.Fab.Spec.Config.Control.NoPassAuth)
+	if err != nil {
+		return fmt.Errorf("rendering sshd config: %w", err)
+	}
+
+	if err := os.WriteFile(sshdConfigPath, []byte(fileContents+"\n"), 0o600); err != nil {
+		return fmt.Errorf("writing ssh config: %w", err)
+	}
+	// There is no need to reload the sshd. flatcar linux uses socket activation for sshd
+	// which is similar to inetd mode. Each new ssh connection reads the configuration files on start
+	// So the next connection will be using the new config after it is written.
+	// Restarting existing connections is undesirable in an upgrade context.
 
 	return nil
 }
