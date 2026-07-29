@@ -773,6 +773,10 @@ type GwPeeringOptions struct {
 	VPC2PortForwardRules []gwapi.PeeringNATPortForwardEntry
 	// ACL is an optional peering-scoped ACL applied to the gateway peering.
 	ACL *gwapi.PeeringACL
+	// VPC1NotCIDRs specifies CIDRs to exclude from VPC1's exposed prefixes
+	VPC1NotCIDRs []string
+	// VPC2NotCIDRs specifies CIDRs to exclude from VPC2's exposed prefixes
+	VPC2NotCIDRs []string
 }
 
 // GwExtPeeringOptions contains optional parameters for gateway external peering configuration
@@ -824,11 +828,17 @@ func buildNATConfig(mode NATMode, portForwardRules []gwapi.PeeringNATPortForward
 // two entries with the same IPs/As but different NAT blocks is the intended workaround.
 // natCIDRs must be non-empty whenever NAT is configured (gateway API requires expose.As
 // and expose.NAT together). portForwardRules is only used for port-forward modes.
-func buildExposes(subnets, natCIDRs []string, mode NATMode, portForwardRules []gwapi.PeeringNATPortForwardEntry) ([]gwapi.PeeringEntryExpose, error) {
+// notCIDRs are exclusion entries: each becomes a standalone expose.IPs entry with only
+// Not set, appended after the include entries, subtracting that range from the exposed
+// prefixes.
+func buildExposes(subnets, natCIDRs, notCIDRs []string, mode NATMode, portForwardRules []gwapi.PeeringNATPortForwardEntry) ([]gwapi.PeeringEntryExpose, error) {
 	makeBase := func() gwapi.PeeringEntryExpose {
 		e := gwapi.PeeringEntryExpose{}
 		for _, subnet := range subnets {
 			e.IPs = append(e.IPs, gwapi.PeeringEntryIP{CIDR: subnet})
+		}
+		for _, notCIDR := range notCIDRs {
+			e.IPs = append(e.IPs, gwapi.PeeringEntryIP{Not: notCIDR})
 		}
 		for _, natCIDR := range natCIDRs {
 			e.As = append(e.As, gwapi.PeeringEntryAs{CIDR: natCIDR})
@@ -900,11 +910,11 @@ func appendGwPeeringSpec(gwPeerings map[string]*gwapi.PeeringSpec, vpc1, vpc2 *v
 		}
 	}
 
-	vpc1Exposes, err := buildExposes(vpc1Subnets, opts.VPC1NATCIDR, opts.VPC1NATMode, opts.VPC1PortForwardRules)
+	vpc1Exposes, err := buildExposes(vpc1Subnets, opts.VPC1NATCIDR, opts.VPC1NotCIDRs, opts.VPC1NATMode, opts.VPC1PortForwardRules)
 	if err != nil {
 		return fmt.Errorf("building VPC1 exposes for %s: %w", vpc1.Name, err)
 	}
-	vpc2Exposes, err := buildExposes(vpc2Subnets, opts.VPC2NATCIDR, opts.VPC2NATMode, opts.VPC2PortForwardRules)
+	vpc2Exposes, err := buildExposes(vpc2Subnets, opts.VPC2NATCIDR, opts.VPC2NotCIDRs, opts.VPC2NATMode, opts.VPC2PortForwardRules)
 	if err != nil {
 		return fmt.Errorf("building VPC2 exposes for %s: %w", vpc2.Name, err)
 	}
@@ -945,7 +955,7 @@ func appendGwExtPeeringSpecWithNAT(gwPeerings map[string]*gwapi.PeeringSpec, vpc
 		DefaultDestination: true,
 	}
 
-	vpcExposes, err := buildExposes(vpcSubnets, opts.VPCNATCIDR, opts.VPCNATMode, opts.VPCPortForwardRules)
+	vpcExposes, err := buildExposes(vpcSubnets, opts.VPCNATCIDR, nil, opts.VPCNATMode, opts.VPCPortForwardRules)
 	if err != nil {
 		return fmt.Errorf("building VPC exposes for %s: %w", vpc.Name, err)
 	}
