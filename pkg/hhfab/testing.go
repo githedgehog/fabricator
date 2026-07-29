@@ -1966,6 +1966,14 @@ func populateConnectivityMatrix(ctx context.Context, kube kclient.Reader, m *Con
 		}
 	}
 
+	if gatewayEnabled {
+		excluded, err := gatewayExposeExclusions(ctx, kube)
+		if err != nil {
+			return err
+		}
+		applyGatewayExposeExclusions(m, excluded)
+	}
+
 	return nil
 }
 
@@ -2953,6 +2961,13 @@ func IsSubnetReachableWithGatewayPeering(ctx context.Context, kube kclient.Reade
 	return Reachability{}, nil
 }
 
+// isVPCSubnetPresentInPeering reports whether the peering exposes the given VPC
+// subnet. Per the gateway API each expose.IPs entry sets exactly one of
+// cidr/not/vpcSubnet, so a `Not` is a standalone exclusion listed alongside the
+// includes rather than an attribute of one. It narrows an already-exposed range
+// down to individual addresses, which this subnet-level answer cannot express;
+// gatewayExposeExclusions applies it per endpoint IP instead. Skipping `Not`
+// here is what makes the verdict independent of entry order.
 func isVPCSubnetPresentInPeering(peering *gwapi.PeeringEntry, vpc gwapi.VPCInfo, vpcName string, vpcSubnet string) (bool, error) {
 	for _, expose := range peering.Expose {
 		if expose.DefaultDestination {
@@ -2966,20 +2981,22 @@ func isVPCSubnetPresentInPeering(peering *gwapi.PeeringEntry, vpc gwapi.VPCInfo,
 		for _, exposeEntry := range expose.IPs {
 			// TODO make some helper in the gateway project
 			exposeSubnetName := ""
-			if exposeEntry.VPCSubnet != "" {
-				if _, ok := vpc.Spec.Subnets[exposeEntry.VPCSubnet]; ok {
-					exposeSubnetName = exposeEntry.VPCSubnet
-				} else {
+			switch {
+			case exposeEntry.VPCSubnet != "":
+				if _, ok := vpc.Spec.Subnets[exposeEntry.VPCSubnet]; !ok {
 					return false, fmt.Errorf("subnet %s not found in VPC %s", exposeEntry.VPCSubnet, vpcName)
 				}
-			} else if exposeEntry.CIDR != "" {
+				exposeSubnetName = exposeEntry.VPCSubnet
+			case exposeEntry.CIDR != "":
 				for subnetName, subnet := range vpc.Spec.Subnets {
 					if subnet.CIDR == exposeEntry.CIDR {
 						exposeSubnetName = subnetName
 					}
 				}
-			} else {
-				return false, fmt.Errorf("%w: gw peering with non-empty expose 'not' %s in IPs", reachCheckUnsupported, exposeEntry.Not)
+			case exposeEntry.Not != "":
+				continue
+			default:
+				return false, fmt.Errorf("%w: gw peering expose entry with none of cidr, not, vpcSubnet set", reachCheckUnsupported)
 			}
 
 			if exposeSubnetName == vpcSubnet {
@@ -2987,7 +3004,93 @@ func isVPCSubnetPresentInPeering(peering *gwapi.PeeringEntry, vpc gwapi.VPCInfo,
 			}
 		}
 	}
+
 	return false, nil
+}
+
+// gatewayExposeExclusions collects the address ranges each VPC excludes from its
+// own expose via `Not`, keyed by GatewayPeering name and then VPC name.
+func gatewayExposeExclusions(ctx context.Context, kube kclient.Reader) (map[string]map[string][]netip.Prefix, error) {
+	peerings := &gwapi.GatewayPeeringList{}
+	if err := kube.List(ctx, peerings, kclient.InNamespace(kmetav1.NamespaceDefault)); err != nil {
+		return nil, fmt.Errorf("listing gateway peerings: %w", err)
+	}
+
+	excluded := map[string]map[string][]netip.Prefix{}
+	for _, peering := range peerings.Items {
+		byVPC := map[string][]netip.Prefix{}
+		for vpcName, entry := range peering.Spec.Peering {
+			if entry == nil {
+				continue
+			}
+			for _, expose := range entry.Expose {
+				for _, exposeEntry := range expose.IPs {
+					if exposeEntry.Not == "" {
+						continue
+					}
+					prefix, err := netip.ParsePrefix(exposeEntry.Not)
+					if err != nil {
+						return nil, fmt.Errorf("parsing expose not %q of VPC %s in peering %s: %w", exposeEntry.Not, vpcName, peering.Name, err)
+					}
+					byVPC[vpcName] = append(byVPC[vpcName], prefix)
+				}
+			}
+		}
+		if len(byVPC) > 0 {
+			excluded[peering.Name] = byVPC
+		}
+	}
+
+	return excluded, nil
+}
+
+// applyGatewayExposeExclusions turns the Allow entries a gateway peering
+// produced into Deny for endpoint pairs where either side's address falls in
+// that peering's expose `Not` ranges. Both directions are denied: the gateway
+// drops traffic addressed to an excluded host, and the excluded host's own
+// traffic has no return path across the peering.
+//
+// External endpoints are left alone; a `Not` on an external's expose would have
+// to be intersected with the External prefixes, which the matrix does not model.
+func applyGatewayExposeExclusions(m *ConnectivityMatrix, excluded map[string]map[string][]netip.Prefix) {
+	if len(excluded) == 0 {
+		return
+	}
+
+	for pair, byProtoPort := range m.entries {
+		for protoPort, expectation := range byProtoPort {
+			if expectation.Verdict != VerdictAllow || expectation.Reason != ReachabilityReasonGatewayPeering {
+				continue
+			}
+			byVPC, ok := excluded[expectation.Peering]
+			if !ok {
+				continue
+			}
+			if !isEndpointExcluded(pair.Source, byVPC) && !isEndpointExcluded(pair.Destination, byVPC) {
+				continue
+			}
+
+			expectation.Verdict = VerdictDeny
+			byProtoPort[protoPort] = expectation
+		}
+	}
+}
+
+// isEndpointExcluded reports whether a server endpoint's address falls inside
+// one of the ranges its own VPC excludes.
+func isEndpointExcluded(ep *Endpoint, byVPC map[string][]netip.Prefix) bool {
+	if ep == nil || ep.Server == nil || !ep.Server.IP.IsValid() {
+		return false
+	}
+
+	addr := ep.Server.IP.Unmap()
+	for _, prefix := range byVPC[ep.Server.VPC] {
+		if prefix.Contains(addr) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func retrySSHCmd(ctx context.Context, ssh *sshutil.Config, cmd string, target string) (string, string, error) {

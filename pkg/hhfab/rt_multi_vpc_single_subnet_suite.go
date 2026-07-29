@@ -361,10 +361,9 @@ func gatewayPeeringTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix 
 // single /32 exclusion on the second VPC's side.
 //
 // The gateway dataplane materialises `Not` by subtracting the excluded range from the
-// exposed prefixes, so the excluded address is expected to be unreachable. hhfab's
-// expectation model (isVPCSubnetPresentInPeering) does not look at `Not` at all and still
-// expects the whole subnet to be reachable, so this test is expected to fail until the
-// expectation model accounts for exclusions.
+// exposed prefixes. The excluded server is therefore expected to be unreachable in both
+// directions across the peering: traffic addressed to it is dropped, and its own traffic
+// has no return path. Every other pair stays reachable.
 func gatewayPeeringExposeNotTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	vpcs := &vpcapi.VPCList{}
 	if err := testCtx.kube.List(ctx, vpcs); err != nil {
@@ -420,32 +419,16 @@ func gatewayPeeringExposeNotTest(ctx context.Context, testCtx *VPCPeeringTestCtx
 }
 
 // Test gateway peering between two VPCs, same as gatewayPeeringExposeNotTest, except the
-// excluded CIDR is a /32 that is not assigned to any discovered endpoint. Since no server
-// is excluded, the matrix's expectations are untouched and all pairs are still expected to
-// be Allow: this test's expectations should be correct going in, unlike gatewayPeeringExposeNotTest.
+// excluded CIDR is a /32 that is not assigned to any discovered endpoint. No server is
+// excluded, so every pair is still expected to be reachable.
 //
-// This isolates one question left open by that test. On the run that exercised the excluded
-// server's /32, both directions of that server's traffic saw real drops (sent 5, rcvd 0), not
-// just an expectation-model mismatch. Two readings fit that result:
-//
-//   - Host-scoped exclusion (expected behaviour): only traffic to/from the excluded /32 is
-//     affected; the reverse direction failed because echo replies to the excluded address have
-//     no route back. Excluding an unused address here should then affect nothing, and this test
-//     should PASS.
-//   - Prefix collapse (dataplane bug): subtracting a /32 from the /24 fragments the covering
-//     route (config/src/utils/collapse.rs) into /25..host-length pieces, none of which is the
-//     /24 itself. If the FRR prefix-lists built from those fragments
-//     (mgmt/src/processor/confbuild/internal.rs) use Ge(len) matching and the EVPN Type-5 route
-//     for the /24 doesn't match any fragment, the whole subnet could go dark regardless of which
-//     address was excluded. If that's what's happening, this test's server-3<->server-4 pair
-//     FAILS again even though no server address was excluded.
-//
-// This second reading is inference about FRR Ge semantics, not verified; it is falsified if
-// EVPN advertises host /32 routes in the tested mode, or if Ge matching is looser than read.
-//
-// PASS -> host-scoped exclusion confirmed, no dataplane bug, the open question in
-// ISSUE-expose-not-order-dependent.md closes.
-// server-3<->server-4 FAILS again -> prefix collapse is real; file it as its own dataplane bug.
+// This guards the exclusion staying host-scoped. Subtracting a /32 from the exposed /24
+// fragments the covering route into /25..host-length pieces, none of which is the /24
+// itself; if the prefix-lists built from those fragments stopped matching the subnet's
+// route, the whole subnet would go dark regardless of which address was excluded. On a
+// topology with one server per VPC, gatewayPeeringExposeNotTest cannot tell that apart
+// from the excluded host being correctly denied, because it has no other endpoint left in
+// that VPC to probe.
 func gatewayPeeringExposeNotUnusedTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	vpcs := &vpcapi.VPCList{}
 	if err := testCtx.kube.List(ctx, vpcs); err != nil {
