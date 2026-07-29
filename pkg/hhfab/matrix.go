@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/netip"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -55,6 +56,15 @@ type ConnectivityVerdict string
 const (
 	VerdictAllow ConnectivityVerdict = "allow"
 	VerdictDeny  ConnectivityVerdict = "deny"
+
+	// VerdictUnknown marks a pair the generator could not evaluate — today
+	// only peering shapes the reachability helpers don't model (see
+	// reachCheckUnsupported). It exists so that "we can't tell" is
+	// distinguishable from "must not work": a missing entry reads as Deny
+	// and would quietly pass by proving unreachability, while Validate
+	// refuses to run a test against a matrix that still holds one. Tests
+	// that know the real answer overlay it explicitly.
+	VerdictUnknown ConnectivityVerdict = "unknown"
 )
 
 // TranslatedAddress describes NAT translation expected on a path. Each field
@@ -102,6 +112,11 @@ type ConnectivityExpectation struct {
 
 	// Peering: name of the CRD that produced this expectation (diagnostic).
 	Peering string
+
+	// Detail: free-form context for Reason, currently only set on
+	// VerdictUnknown entries to carry why the pair could not be evaluated
+	// (diagnostic; surfaced by Validate).
+	Detail string
 
 	// ProtoPort scopes this expectation to a specific protocol/port. The
 	// zero value applies to the runner's default check.
@@ -154,6 +169,11 @@ type ConnectivityMatrix struct {
 	// entries[pair][protoPort] = expectation. The zero ProtoPort{} key holds
 	// the default-check expectation for the pair.
 	entries map[EndpointPair]map[ProtoPort]ConnectivityExpectation
+
+	// dropped: attachments/addresses endpoint discovery could not turn into
+	// endpoints. Not testable, so not in AllEndpoints — kept here so
+	// Validate can refuse to test a topology it only partially sees.
+	dropped []DroppedEndpoint
 }
 
 // NewConnectivityMatrix returns an empty matrix. AllEndpoints should be set
@@ -180,6 +200,19 @@ func ExternalNamed(name string) EndpointPredicate {
 	return func(ep *Endpoint) bool {
 		return ep.External != nil && ep.External.ExternalName == name
 	}
+}
+
+// overlayReason keeps the reason populate already established for a pair
+// when an overlay rewrites its verdict. Only pairs populate could not see
+// (it has no entry, or could not evaluate one) fall back to gateway
+// peering — which is what every overlay models today: NAT is a gateway
+// feature, and a pair the switch fabric already allows is not overlaid.
+func overlayReason(existing ReachabilityReason) ReachabilityReason {
+	if existing != "" {
+		return existing
+	}
+
+	return ReachabilityReasonGatewayPeering
 }
 
 // NATMutator updates a TranslatedAddress for a specific (src, dst) pair.
@@ -219,7 +252,7 @@ func OverlayMatrixNAT(
 			matrix.Add(ConnectivityExpectation{
 				Pair:    EndpointPair{Source: src, Destination: dst},
 				Verdict: VerdictAllow,
-				Reason:  ReachabilityReasonGatewayPeering,
+				Reason:  overlayReason(existing.Reason),
 				Peering: existing.Peering,
 				NAT:     &nat,
 			})
@@ -245,9 +278,10 @@ func OverlayMatrixNAT(
 // strictly a test-side opt-in. setupTest calls it once at suite startup;
 // matrix-driven tests call Repopulate on the existing matrix after
 // DoSetupPeerings to refresh verdicts to the post-peering state.
-func BuildConnectivityMatrix(ctx context.Context, kube kclient.Client, serverEndpoints []*Endpoint) (*ConnectivityMatrix, error) {
+func BuildConnectivityMatrix(ctx context.Context, kube kclient.Client, serverEndpoints []*Endpoint, dropped []DroppedEndpoint) (*ConnectivityMatrix, error) {
 	matrix := NewConnectivityMatrix()
 	matrix.AllEndpoints = append(matrix.AllEndpoints, serverEndpoints...)
+	matrix.dropped = append(matrix.dropped, dropped...)
 
 	externalList := vpcapi.ExternalList{}
 	if err := kube.List(ctx, &externalList); err != nil {
@@ -268,12 +302,12 @@ func BuildConnectivityMatrix(ctx context.Context, kube kclient.Client, serverEnd
 // BuildConnectivityMatrix. Used when a caller needs to build a matrix
 // against a pre-existing topology without re-running SetupVPCs.
 func BuildConnectivityMatrixFromCluster(ctx context.Context, kube kclient.Client, ssh SSHResolver) (*ConnectivityMatrix, error) {
-	endpoints, err := CollectServerEndpoints(ctx, kube, ssh, nil)
+	endpoints, dropped, err := CollectServerEndpoints(ctx, kube, ssh, nil)
 	if err != nil {
 		return nil, fmt.Errorf("collecting server endpoints for matrix: %w", err)
 	}
 
-	return BuildConnectivityMatrix(ctx, kube, endpoints)
+	return BuildConnectivityMatrix(ctx, kube, endpoints, dropped)
 }
 
 // Repopulate clears the matrix's expectation entries and refills Allow
@@ -329,6 +363,110 @@ func (m *ConnectivityMatrix) Lookup(src, dst *Endpoint, pp ProtoPort) Connectivi
 		Pair:      pair,
 		Verdict:   VerdictDeny,
 		ProtoPort: pp,
+	}
+}
+
+// Validate reports whether the matrix is a sound oracle for a connectivity
+// run. Lookup answers Deny for every pair it has no entry for, so a matrix
+// that silently lost endpoints or could not evaluate a peering would assert
+// unreachability it never established — and pass. Validate is the single
+// gate in front of that: it runs at the top of TestConnectivityWithMatrix,
+// after generators have populated and tests have applied their overlays.
+//
+// It rejects:
+//   - an empty endpoint set (nothing to test, e.g. a matrix built with
+//     noSetup against a topology that was never discovered);
+//   - discovery drops (an attachment or address that never became an
+//     endpoint, so a slice of the topology goes untested);
+//   - leftover VerdictUnknown entries, which mean populate could not
+//     evaluate the pair and no test overlaid the real expectation.
+//
+// It deliberately does not require any Allow entry: a topology of mutually
+// isolated VPCs with no peerings is a legitimate thing to assert.
+//
+// Unknown on a server→external pair is only fatal when that source has no
+// Allow to any external. The reachability helper behind external
+// destinations ORs over every External in the cluster rather than
+// answering per-destination, and runMatrixCurlPhase consumes it the same
+// way, so one Allow settles the source's expectation regardless of the
+// other externals' entries.
+func (m *ConnectivityMatrix) Validate() error {
+	if m == nil {
+		return fmt.Errorf("connectivity matrix is nil") //nolint:goerr113
+	}
+
+	var errs []error
+
+	if len(m.AllEndpoints) == 0 {
+		errs = append(errs, fmt.Errorf("matrix has no endpoints")) //nolint:goerr113
+	}
+
+	if len(m.dropped) > 0 {
+		reasons := make([]string, 0, len(m.dropped))
+		for _, d := range m.dropped {
+			reasons = append(reasons, d.String())
+		}
+		slices.Sort(reasons)
+		errs = append(errs, fmt.Errorf("endpoint discovery dropped %d attachment(s)/address(es), topology only partially visible: %s", //nolint:goerr113
+			len(m.dropped), strings.Join(reasons, "; ")))
+	}
+
+	extAllowBySource := map[*Endpoint]bool{}
+	for pair, byPP := range m.entries {
+		for _, e := range byPP {
+			if e.Verdict == VerdictAllow && pair.Destination != nil && pair.Destination.External != nil {
+				extAllowBySource[pair.Source] = true
+			}
+		}
+	}
+
+	unknowns := []string{}
+	for pair, byPP := range m.entries {
+		for pp, e := range byPP {
+			if e.Verdict != VerdictUnknown {
+				continue
+			}
+			if pair.Destination != nil && pair.Destination.External != nil && extAllowBySource[pair.Source] {
+				continue
+			}
+			unknowns = append(unknowns, describeUnknownEntry(pair, pp, e))
+		}
+	}
+	if len(unknowns) > 0 {
+		slices.Sort(unknowns)
+		errs = append(errs, fmt.Errorf("%d matrix entr(ies) could not be evaluated and were not overlaid by the test: %s", //nolint:goerr113
+			len(unknowns), strings.Join(unknowns, "; ")))
+	}
+
+	return errors.Join(errs...)
+}
+
+// describeUnknownEntry renders a pair for Validate's diagnostics.
+func describeUnknownEntry(pair EndpointPair, pp ProtoPort, e ConnectivityExpectation) string {
+	out := fmt.Sprintf("%s → %s", endpointLabel(pair.Source), endpointLabel(pair.Destination))
+	if pp != (ProtoPort{}) {
+		out += fmt.Sprintf(" [%s/%d]", pp.Protocol, pp.Port)
+	}
+	if e.Detail != "" {
+		out += ": " + e.Detail
+	} else if e.Reason != "" {
+		out += ": " + string(e.Reason)
+	}
+
+	return out
+}
+
+// endpointLabel renders an endpoint for diagnostics.
+func endpointLabel(ep *Endpoint) string {
+	switch {
+	case ep == nil:
+		return "<nil>"
+	case ep.Server != nil:
+		return fmt.Sprintf("%s(%s/%s)", ep.Server.Name, ep.Server.VPC, ep.Server.Subnet)
+	case ep.External != nil:
+		return "external:" + ep.External.ExternalName
+	default:
+		return "<empty>"
 	}
 }
 
@@ -525,7 +663,7 @@ func runMatrixCurlPhase(ctx context.Context, opts TestConnectivityOpts, matrix *
 			}
 			slog.Debug("Checking external connectivity", logArgs...)
 
-			if ce := checkCurl(ctx, opts, deps.curls, name, ssh, "1.0.0.1", expected.Reachable); ce != nil {
+			if ce := checkCurl(ctx, opts, deps.curls, name, ssh, "1.0.0.1", expected); ce != nil {
 				deps.errChan <- ce
 			}
 		})
@@ -537,6 +675,12 @@ func runMatrixCurlPhase(ctx context.Context, opts TestConnectivityOpts, matrix *
 // deduped by (srcServer, IP, port) so the single external iperf3 server is hit once;
 // server destinations exercise every (src, dst) pair for full cross-product
 // coverage.
+//
+// Deny entries that carry port-forward NAT details are probed too: the
+// (IP, port) they name must NOT accept a connection. Without this,
+// negative expectations stop at the port-forward boundary — the
+// server-server phase skips DestinationPort pairs as L4-only, so a Deny
+// port-forward would otherwise be asserted nowhere.
 func runMatrixPortForwardPhase(ctx context.Context, opts TestConnectivityOpts, matrix *ConnectivityMatrix, deps *matrixTestDeps) {
 	type pfTargetKey struct {
 		from string
@@ -556,7 +700,7 @@ func runMatrixPortForwardPhase(ctx context.Context, opts TestConnectivityOpts, m
 				continue
 			}
 			e := matrix.Lookup(src, dst, ProtoPort{})
-			if e.Verdict != VerdictAllow || e.NAT == nil {
+			if e.NAT == nil || (e.Verdict != VerdictAllow && e.Verdict != VerdictDeny) {
 				continue
 			}
 			if !e.NAT.DestinationIP.IsValid() || e.NAT.DestinationPort == 0 {
@@ -565,7 +709,10 @@ func runMatrixPortForwardPhase(ctx context.Context, opts TestConnectivityOpts, m
 			switch {
 			case dst.External != nil:
 				key := pfTargetKey{from: src.Server.Name, ip: e.NAT.DestinationIP, port: e.NAT.DestinationPort}
-				if _, seen := extTargets[key]; seen {
+				// Several externals can share one port-forward virtual
+				// (IP, port); an Allow anywhere in that set wins over a
+				// Deny, since a single probe can't distinguish them.
+				if prev, seen := extTargets[key]; seen && (prev.Reachable || e.Verdict != VerdictAllow) {
 					continue
 				}
 				extTargets[key] = reachabilityFromExpectation(e)
@@ -604,6 +751,11 @@ func (c *Config) TestConnectivityWithMatrix(ctx context.Context, vlab *VLAB, opt
 	if opts.PingsCount == 0 && opts.IPerfsSeconds == 0 && opts.CurlsCount == 0 {
 		return fmt.Errorf("at least one of pings, iperfs or curls should be enabled") //nolint:goerr113
 	}
+	// Deny verdicts drive assertions from here on; refuse to run if the
+	// matrix can't back them (see Validate).
+	if err := matrix.Validate(); err != nil {
+		return fmt.Errorf("connectivity matrix is not a sound oracle: %w", err)
+	}
 	start := time.Now()
 
 	if opts.PingsParallel <= 0 {
@@ -624,16 +776,15 @@ func (c *Config) TestConnectivityWithMatrix(ctx context.Context, vlab *VLAB, opt
 	}
 	defer cacheCancel()
 
-	// Resolve the SSH config and a toolbox mutex for every unique server
-	// name referenced by the matrix.
+	// Resolve the SSH config for every unique server name referenced by
+	// the matrix.
 	sshByServer := map[string]*sshutil.Config{}
-	toolboxMutexes := map[string]*sync.Mutex{}
 	for _, ep := range matrix.AllEndpoints {
 		if ep.Server == nil {
 			continue
 		}
 		name := ep.Server.Name
-		if _, ok := toolboxMutexes[name]; ok {
+		if _, ok := sshByServer[name]; ok {
 			continue
 		}
 		ssh, ok := sshConfigs[name]
@@ -641,7 +792,6 @@ func (c *Config) TestConnectivityWithMatrix(ctx context.Context, vlab *VLAB, opt
 			return fmt.Errorf("no ssh config for server %q referenced by matrix", name) //nolint:goerr113
 		}
 		sshByServer[name] = ssh
-		toolboxMutexes[name] = &sync.Mutex{}
 	}
 
 	n := len(matrix.AllEndpoints)
@@ -711,6 +861,7 @@ func (c *Config) TestConnectivityWithMatrix(ctx context.Context, vlab *VLAB, opt
 // to where the (ip, port) lives.
 func runMatrixIperfPortForward(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphore.Weighted, from string, ssh *sshutil.Config, toIP netip.Addr, toPort uint16, expected Reachability) *IperfError {
 	target := fmt.Sprintf("%s:%d", toIP.String(), toPort)
+	why := expectationWhy(expected)
 	logArgs := []any{"from", from, "target", target, "expected", expected.Reachable}
 	if expected.Reason != "" {
 		logArgs = append(logArgs, "reason", expected.Reason)
@@ -719,6 +870,23 @@ func runMatrixIperfPortForward(ctx context.Context, opts TestConnectivityOpts, i
 		logArgs = append(logArgs, "peering", expected.Peering)
 	}
 	slog.Debug("Checking iperf3 through port-forward NAT (matrix)", logArgs...)
+
+	// Negative expectation: the virtual (IP, port) must refuse the
+	// connection. There is nothing to wait for — no DNAT rule is ever
+	// meant to appear — so a single probe decides it, and a successful
+	// connect is the failure.
+	if !expected.Reachable {
+		if _, _, err := retrySSHCmd(ctx, ssh, fmt.Sprintf("nc -zw2 %s %d", toIP.String(), toPort), from); err == nil {
+			return &IperfError{
+				Source:      from,
+				Destination: target,
+				Why:         why,
+				ClientMsg:   "port-forward target is reachable but the matrix expects it to be denied",
+			}
+		}
+
+		return nil
+	}
 
 	// Gate on TCP reachability: the gateway's port-forward DNAT rule has
 	// its own programming lag separate from fabric route propagation, and
@@ -738,18 +906,19 @@ func runMatrixIperfPortForward(ctx context.Context, opts TestConnectivityOpts, i
 			return &IperfError{
 				Source:      from,
 				Destination: target,
+				Why:         why,
 				ClientMsg:   fmt.Sprintf("port-forward target not reachable after %s: %s", gwNATPortForwardProbeTimeout, lastErr),
 			}
 		}
 		select {
 		case <-ctx.Done():
-			return &IperfError{Source: from, Destination: target, ClientMsg: ctx.Err().Error()}
+			return &IperfError{Source: from, Destination: target, Why: why, ClientMsg: ctx.Err().Error()}
 		case <-time.After(gwNATPortForwardProbeInterval):
 		}
 	}
 
 	if err := iperfs.Acquire(ctx, 1); err != nil {
-		return &IperfError{Source: from, Destination: target, ClientMsg: fmt.Sprintf("acquiring iperf3 semaphore: %s", err)}
+		return &IperfError{Source: from, Destination: target, Why: why, ClientMsg: fmt.Sprintf("acquiring iperf3 semaphore: %s", err)}
 	}
 	defer iperfs.Release(1)
 
@@ -757,7 +926,7 @@ func runMatrixIperfPortForward(ctx context.Context, opts TestConnectivityOpts, i
 	cmd := fmt.Sprintf("toolbox -E LD_PRELOAD=/lib/x86_64-linux-gnu/libgcc_s.so.1 -q timeout %d iperf3 -J -c %s -p %d -t %d",
 		secs+25, toIP.String(), toPort, secs)
 	if _, _, iperfErr := retrySSHCmd(ctx, ssh, cmd, from); iperfErr != nil {
-		return &IperfError{Source: from, Destination: target, ClientMsg: iperfErr.Error()}
+		return &IperfError{Source: from, Destination: target, Why: why, ClientMsg: iperfErr.Error()}
 	}
 
 	return nil

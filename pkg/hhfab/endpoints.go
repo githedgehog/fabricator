@@ -77,6 +77,28 @@ func discoverServerIPs(ctx context.Context, sshCfg *sshutil.Config, server strin
 	return out, nil
 }
 
+// DroppedEndpoint records an attachment or address that endpoint discovery
+// could not turn into a testable *Endpoint. A drop is not an error on its
+// own — plain `hhfab vlab setup-vpcs` tolerates it — but it does mean some
+// part of the topology is invisible to the connectivity matrix, and
+// ConnectivityMatrix.Validate refuses to run a test against a matrix that
+// carries any. VPC/Subnet are empty when the drop is about an address that
+// matched no attachment.
+type DroppedEndpoint struct {
+	Server string
+	VPC    string
+	Subnet string
+	Reason string
+}
+
+func (d DroppedEndpoint) String() string {
+	if d.VPC == "" {
+		return fmt.Sprintf("%s: %s", d.Server, d.Reason)
+	}
+
+	return fmt.Sprintf("%s (%s/%s): %s", d.Server, d.VPC, d.Subnet, d.Reason)
+}
+
 // serverAttachment is the (vpc, subnet) information the collector resolves
 // from a VPCAttachment + its referenced VPC CRD.
 type serverAttachment struct {
@@ -95,17 +117,24 @@ type serverAttachment struct {
 // attachment's Connection); for each candidate server, SSH it and read all
 // IPv4 addresses; match each address to one of its attachments by CIDR
 // containment (narrowest prefix wins on ties). HostBGP is derived from
-// VPCSubnet.HostBGP. An attachment with no matching configured address is
-// dropped with a warning; a server with no configured addresses contributes
-// nothing — this matches today's SetupVPCs behavior, where ESLAG servers
-// in L3VNI mode are skipped before hhnet runs and therefore have no IPs.
+// VPCSubnet.HostBGP.
+//
+// The second return value lists everything discovery could not represent as
+// an endpoint. Two conditions are reported there: an attachment with no
+// matching address on a server that did report addresses, and an address
+// matching none of its server's attachments. Both mean something in the
+// topology would go untested, so ConnectivityMatrix.Validate rejects them.
+// A server with no configured addresses at all is only warned about and is
+// not reported as a drop — this matches today's SetupVPCs behavior, where
+// ESLAG servers in L3VNI mode are skipped before hhnet runs and therefore
+// legitimately have no IPs.
 //
 // Returns an error only when SSH itself fails on a queried server or when a
 // VPCAttachment cannot be resolved to a Connection.
-func CollectServerEndpoints(ctx context.Context, kube kclient.Client, ssh SSHResolver, servers []string) ([]*Endpoint, error) {
+func CollectServerEndpoints(ctx context.Context, kube kclient.Client, ssh SSHResolver, servers []string) ([]*Endpoint, []DroppedEndpoint, error) {
 	attaches := &vpcapi.VPCAttachmentList{}
 	if err := kube.List(ctx, attaches); err != nil {
-		return nil, fmt.Errorf("listing VPCAttachments: %w", err)
+		return nil, nil, fmt.Errorf("listing VPCAttachments: %w", err)
 	}
 
 	connCache := map[string]*wiringapi.Connection{}
@@ -145,11 +174,11 @@ func CollectServerEndpoints(ctx context.Context, kube kclient.Client, ssh SSHRes
 	for _, attach := range attaches.Items {
 		conn, err := getConn(attach.Spec.Connection)
 		if err != nil {
-			return nil, fmt.Errorf("resolving attachment %q: %w", attach.Name, err)
+			return nil, nil, fmt.Errorf("resolving attachment %q: %w", attach.Name, err)
 		}
 		_, srvs, _, _, err := conn.Spec.Endpoints()
 		if err != nil {
-			return nil, fmt.Errorf("getting endpoints of connection %q: %w", conn.Name, err)
+			return nil, nil, fmt.Errorf("getting endpoints of connection %q: %w", conn.Name, err)
 		}
 		if len(srvs) != 1 {
 			// VPCAttachments only reference server-facing connections; if a
@@ -165,16 +194,16 @@ func CollectServerEndpoints(ctx context.Context, kube kclient.Client, ssh SSHRes
 
 		vpc, err := getVPC(attach.Spec.VPCName())
 		if err != nil {
-			return nil, fmt.Errorf("resolving attachment %q: %w", attach.Name, err)
+			return nil, nil, fmt.Errorf("resolving attachment %q: %w", attach.Name, err)
 		}
 		subnetName := attach.Spec.SubnetName()
 		subnet, ok := vpc.Spec.Subnets[subnetName]
 		if !ok {
-			return nil, fmt.Errorf("attachment %q references missing subnet %s/%s", attach.Name, vpc.Name, subnetName) //nolint:goerr113
+			return nil, nil, fmt.Errorf("attachment %q references missing subnet %s/%s", attach.Name, vpc.Name, subnetName) //nolint:goerr113
 		}
 		cidr, err := netip.ParsePrefix(subnet.Subnet)
 		if err != nil {
-			return nil, fmt.Errorf("parsing VPC %s/%s subnet CIDR %q: %w", vpc.Name, subnetName, subnet.Subnet, err)
+			return nil, nil, fmt.Errorf("parsing VPC %s/%s subnet CIDR %q: %w", vpc.Name, subnetName, subnet.Subnet, err)
 		}
 
 		serverAttachments[serverName] = append(serverAttachments[serverName], serverAttachment{
@@ -220,7 +249,7 @@ func CollectServerEndpoints(ctx context.Context, kube kclient.Client, ssh SSHRes
 		})
 	}
 	if err := eg.Wait(); err != nil {
-		return nil, fmt.Errorf("probing servers for IPs: %w", err)
+		return nil, nil, fmt.Errorf("probing servers for IPs: %w", err)
 	}
 
 	// Build endpoints by matching each discovered IP against the server's
@@ -230,10 +259,13 @@ func CollectServerEndpoints(ctx context.Context, kube kclient.Client, ssh SSHRes
 	// /24).
 	slices.SortFunc(probed, func(a, b collected) int { return strings.Compare(a.serverName, b.serverName) })
 	out := []*Endpoint{}
+	dropped := []DroppedEndpoint{}
 	for _, p := range probed {
 		atts := serverAttachments[p.serverName]
 		used := make([]bool, len(atts))
 		if len(p.ips) == 0 {
+			// Expected for ESLAG servers in L3VNI mode, which never run
+			// hhnet; not recorded as a drop (see the function doc).
 			slog.Warn("Server has no configured IPs, skipping endpoints", "server", p.serverName, "attachments", len(atts))
 
 			continue
@@ -252,10 +284,16 @@ func CollectServerEndpoints(ctx context.Context, kube kclient.Client, ssh SSHRes
 			}
 			if bestIdx < 0 {
 				slog.Warn("Server IP does not match any attachment subnet", "server", p.serverName, "iface", ip.iface, "addr", ip.prefix.String())
+				dropped = append(dropped, DroppedEndpoint{
+					Server: p.serverName,
+					Reason: fmt.Sprintf("address %s on %s matches none of the server's %d attachment subnets", ip.prefix.String(), ip.iface, len(atts)),
+				})
 
 				continue
 			}
 			if used[bestIdx] {
+				// The attachment still has an endpoint (the first matching
+				// address won), so nothing goes untested — warn only.
 				slog.Warn("Multiple server IPs match the same attachment, keeping the first one",
 					"server", p.serverName, "iface", ip.iface, "addr", ip.prefix.String(),
 					"vpc", atts[bestIdx].vpcName, "subnet", atts[bestIdx].subnetName)
@@ -279,11 +317,17 @@ func CollectServerEndpoints(ctx context.Context, kube kclient.Client, ssh SSHRes
 			if !used[i] {
 				slog.Warn("Attachment has no matching IP on server, dropping endpoint",
 					"server", p.serverName, "vpc", att.vpcName, "subnet", att.subnetName, "attachment", att.attachName)
+				dropped = append(dropped, DroppedEndpoint{
+					Server: p.serverName,
+					VPC:    att.vpcName,
+					Subnet: att.subnetName,
+					Reason: fmt.Sprintf("attachment %s has no matching address among the server's %d configured addresses", att.attachName, len(p.ips)),
+				})
 			}
 		}
 	}
 
-	return out, nil
+	return out, dropped, nil
 }
 
 // ReplaceServerEndpoints reconciles the matrix's endpoints for one
@@ -363,4 +407,27 @@ func (m *ConnectivityMatrix) ReplaceServerEndpoints(name string, newEPs []*Endpo
 			delete(m.entries, pair)
 		}
 	}
+}
+
+// ReplaceServerDrops swaps the matrix's recorded discovery drops for one
+// server with the ones from a fresh CollectServerEndpoints sweep. Pair it
+// with ReplaceServerEndpoints so a rebind can't leave the matrix carrying
+// drops from a topology the server no longer has (or hide new ones).
+func (m *ConnectivityMatrix) ReplaceServerDrops(name string, dropped []DroppedEndpoint) {
+	if m == nil {
+		return
+	}
+
+	kept := make([]DroppedEndpoint, 0, len(m.dropped)+len(dropped))
+	for _, d := range m.dropped {
+		if d.Server != name {
+			kept = append(kept, d)
+		}
+	}
+	for _, d := range dropped {
+		if d.Server == name {
+			kept = append(kept, d)
+		}
+	}
+	m.dropped = kept
 }

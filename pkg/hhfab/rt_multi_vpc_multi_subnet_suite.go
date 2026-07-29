@@ -285,11 +285,11 @@ func (testCtx *VPCPeeringTestCtx) pingStaticExternal(ctx context.Context, source
 		sIP = pointer.To(netip.MustParseAddr(sourceIP))
 	}
 
-	if err := checkPing(ctx, 3, nil, sourceNode, StaticExternalNH, ssh, seNhIP, sIP, expected); err != nil {
+	if err := checkPing(ctx, 3, nil, sourceNode, StaticExternalNH, ssh, seNhIP, sIP, Reachability{Reachable: expected}); err != nil {
 		return fmt.Errorf("ping to static external next hop: %w", err)
 	}
 	slog.Debug("Pinging static external dummy interface", "sourceNode", sourceNode, "dummy-interface", StaticExternalDummyIface, "expected", expected)
-	if err := checkPing(ctx, 3, nil, sourceNode, StaticExternalDummyIface, ssh, seDummyIP, sIP, expected); err != nil {
+	if err := checkPing(ctx, 3, nil, sourceNode, StaticExternalDummyIface, ssh, seDummyIP, sIP, Reachability{Reachable: expected}); err != nil {
 		return fmt.Errorf("ping to static external dummy interface: %w", err)
 	}
 

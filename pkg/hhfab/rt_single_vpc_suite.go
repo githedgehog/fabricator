@@ -274,7 +274,7 @@ outer:
 		// wait a bit to make sure that the fabric has converged; can't rely on agents as we disabled them
 		slog.Debug("Waiting 30 seconds for fabric to converge")
 		time.Sleep(30 * time.Second)
-		if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
+		if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts, matrix); err != nil {
 			returnErr = err
 		}
 	}
@@ -456,6 +456,16 @@ func gatewayFailoverTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix
 		return nil
 	})
 
+	// The suite-level matrix predates this peering; refresh it so the
+	// connectivity checks below (during failover, and in the reverts while
+	// the peering is still up) assert the peered state. Reverts run in
+	// reverse order, so the teardown registered above runs after them.
+	// Repopulating only once the teardown is registered keeps a failure
+	// here from leaking the peering into the next test.
+	if err := matrix.Repopulate(ctx, testCtx.kube); err != nil {
+		return false, reverts, fmt.Errorf("refreshing matrix after gateway peering: %w", err)
+	}
+
 	// HACK: test connectivity after restoring spines as part of the reverts
 	reverts = append(reverts, func(ctx context.Context) error {
 		slog.Debug("Waiting for agents to converge...")
@@ -496,7 +506,7 @@ func gatewayFailoverTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix
 		}
 
 		slog.Debug("Testing connectivity after re-enabling spines and agents")
-		if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
+		if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts, matrix); err != nil {
 			return fmt.Errorf("connectivity test after re-enabling spines and agents: %w", err)
 		}
 
@@ -625,7 +635,7 @@ func gatewayFailoverTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix
 
 		// test connectivity during failover
 		slog.Debug("Testing connectivity during failover")
-		if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
+		if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts, matrix); err != nil {
 			returnErr = fmt.Errorf("connectivity test during failover: %w", err)
 		}
 	}
@@ -754,7 +764,7 @@ func meshFailoverTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *C
 		// wait a bit to make sure that the fabric has converged; can't rely on agents as we disabled them
 		slog.Debug("Waiting 30 seconds for fabric to converge")
 		time.Sleep(30 * time.Second)
-		if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
+		if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts, matrix); err != nil {
 			return false, reverts, err
 		}
 		someLeafTested = true

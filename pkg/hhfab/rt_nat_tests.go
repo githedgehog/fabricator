@@ -209,7 +209,7 @@ func overrideVPCToVPCVerdict(matrix *ConnectivityMatrix, srcVPCName, dstVPCName 
 			matrix.Add(ConnectivityExpectation{
 				Pair:    EndpointPair{Source: src, Destination: dst},
 				Verdict: verdict,
-				Reason:  ReachabilityReasonGatewayPeering,
+				Reason:  overlayReason(existing.Reason),
 				Peering: existing.Peering,
 				NAT:     existing.NAT,
 			})
@@ -228,7 +228,7 @@ func (testCtx *VPCPeeringTestCtx) rebindMatrixServerEndpoint(ctx context.Context
 	ssh := func(name string) (*sshutil.Config, error) {
 		return testCtx.getSSH(ctx, name)
 	}
-	newEPs, err := CollectServerEndpoints(ctx, testCtx.kube, ssh, []string{serverName})
+	newEPs, dropped, err := CollectServerEndpoints(ctx, testCtx.kube, ssh, []string{serverName})
 	if err != nil {
 		return fmt.Errorf("collecting endpoints for %s: %w", serverName, err)
 	}
@@ -236,6 +236,7 @@ func (testCtx *VPCPeeringTestCtx) rebindMatrixServerEndpoint(ctx context.Context
 		return fmt.Errorf("no endpoints discovered for server %s after rebind", serverName) //nolint:goerr113
 	}
 	matrix.ReplaceServerEndpoints(serverName, newEPs)
+	matrix.ReplaceServerDrops(serverName, dropped)
 
 	return nil
 }

@@ -167,6 +167,104 @@ func TestReplaceServerEndpoints_IgnoresOtherServerNamesInNewEPs(t *testing.T) {
 	require.Contains(t, m.AllEndpoints, stray)
 }
 
+func TestReplaceServerDrops(t *testing.T) {
+	m := NewConnectivityMatrix()
+	m.dropped = []DroppedEndpoint{
+		{Server: "server-1", VPC: "vpc-old", Subnet: "default", Reason: "stale"},
+		{Server: "server-2", VPC: "vpc-x", Subnet: "default", Reason: "other server's drop"},
+	}
+
+	// Rebind of server-1 finds no drops → only server-2's survives.
+	m.ReplaceServerDrops("server-1", nil)
+	require.Len(t, m.dropped, 1)
+	require.Equal(t, "server-2", m.dropped[0].Server)
+
+	// A fresh drop for server-1 is recorded; entries for other servers in
+	// the passed slice are ignored (they belong to their own sweep).
+	m.ReplaceServerDrops("server-1", []DroppedEndpoint{
+		{Server: "server-1", VPC: "vpc-new", Subnet: "default", Reason: "fresh"},
+		{Server: "server-3", VPC: "vpc-y", Subnet: "default", Reason: "not ours"},
+	})
+	require.Len(t, m.dropped, 2)
+	require.Equal(t, "vpc-new", m.dropped[1].VPC)
+}
+
+func TestValidate(t *testing.T) {
+	a := serverEP("server-1", "vpc-1", "default", "10.0.1.1")
+	b := serverEP("server-2", "vpc-2", "default", "10.0.2.1")
+	ext := &Endpoint{External: &ExternalEndpoint{ExternalName: "ext-1"}}
+	ext2 := &Endpoint{External: &ExternalEndpoint{ExternalName: "ext-2"}}
+
+	newMatrix := func() *ConnectivityMatrix {
+		m := NewConnectivityMatrix()
+		m.AllEndpoints = []*Endpoint{a, b, ext, ext2}
+
+		return m
+	}
+
+	t.Run("all-deny topology is valid", func(t *testing.T) {
+		// Isolated VPCs with no peerings: no Allow entry anywhere is a
+		// legitimate thing to assert, not a degenerate matrix.
+		require.NoError(t, newMatrix().Validate())
+	})
+
+	t.Run("no endpoints", func(t *testing.T) {
+		require.ErrorContains(t, NewConnectivityMatrix().Validate(), "no endpoints")
+	})
+
+	t.Run("nil matrix", func(t *testing.T) {
+		var m *ConnectivityMatrix
+		require.Error(t, m.Validate())
+	})
+
+	t.Run("discovery drop", func(t *testing.T) {
+		m := newMatrix()
+		m.dropped = []DroppedEndpoint{{
+			Server: "server-3", VPC: "vpc-3", Subnet: "default", Reason: "attachment has no matching address",
+		}}
+		require.ErrorContains(t, m.Validate(), "server-3 (vpc-3/default): attachment has no matching address")
+	})
+
+	t.Run("unevaluated server pair", func(t *testing.T) {
+		m := newMatrix()
+		m.Add(ConnectivityExpectation{
+			Pair:    EndpointPair{Source: a, Destination: b},
+			Verdict: VerdictUnknown,
+			Detail:  "gw peering with non-empty expose 'As'",
+		})
+		err := m.Validate()
+		require.ErrorContains(t, err, "server-1(vpc-1/default) → server-2(vpc-2/default)")
+		require.ErrorContains(t, err, "non-empty expose 'As'")
+
+		// A test that overlays the real expectation clears it.
+		m.Add(ConnectivityExpectation{
+			Pair: EndpointPair{Source: a, Destination: b}, Verdict: VerdictAllow,
+		})
+		require.NoError(t, m.Validate())
+	})
+
+	t.Run("unevaluated external is settled by another external's allow", func(t *testing.T) {
+		// The external oracle ORs over every External in the cluster, so
+		// one Allow decides the source's expectation for all of them.
+		m := newMatrix()
+		m.Add(ConnectivityExpectation{
+			Pair: EndpointPair{Source: a, Destination: ext}, Verdict: VerdictUnknown, Detail: "unsupported",
+		})
+		require.ErrorContains(t, m.Validate(), "external:ext-1")
+
+		m.Add(ConnectivityExpectation{
+			Pair: EndpointPair{Source: a, Destination: ext2}, Verdict: VerdictAllow,
+		})
+		require.NoError(t, m.Validate())
+
+		// ...but only for that source.
+		m.Add(ConnectivityExpectation{
+			Pair: EndpointPair{Source: b, Destination: ext}, Verdict: VerdictUnknown, Detail: "unsupported",
+		})
+		require.ErrorContains(t, m.Validate(), "server-2(vpc-2/default) → external:ext-1")
+	})
+}
+
 func TestReplaceServerEndpoints_PreservesHostBGP(t *testing.T) {
 	m := NewConnectivityMatrix()
 	ep := &Endpoint{Server: &ServerEndpoint{

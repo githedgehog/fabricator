@@ -183,10 +183,10 @@ func DoShowTech(ctx context.Context, workDir, cacheDir string) error {
 	return c.VLABShowTech(ctx, vlab, ShowTechOpts{})
 }
 
-func DoVLABSetupVPCs(ctx context.Context, workDir, cacheDir string, opts SetupVPCsOpts) ([]*Endpoint, error) {
+func DoVLABSetupVPCs(ctx context.Context, workDir, cacheDir string, opts SetupVPCsOpts) ([]*Endpoint, []DroppedEndpoint, error) {
 	c, vlab, err := loadVLABForHelpers(ctx, workDir, cacheDir)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	return c.SetupVPCs(ctx, vlab, opts)
