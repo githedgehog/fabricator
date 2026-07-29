@@ -5,6 +5,7 @@ package hhfab
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"iter"
@@ -820,6 +821,35 @@ func buildNATConfig(mode NATMode, portForwardRules []gwapi.PeeringNATPortForward
 	}
 
 	return nat, nil
+}
+
+// pickUnusedHostAddress returns a host address inside prefix that is not present in used.
+// It scans host offsets in order, skipping the network address (offset 0) and the
+// all-ones broadcast address (last offset), and returns the first candidate not found
+// in used. IPv4 only.
+func pickUnusedHostAddress(prefix netip.Prefix, used map[netip.Addr]bool) (netip.Addr, error) {
+	if !prefix.Addr().Is4() {
+		return netip.Addr{}, fmt.Errorf("subnet %s is not IPv4", prefix) //nolint:goerr113
+	}
+	bits := prefix.Bits()
+	if bits >= 31 {
+		return netip.Addr{}, fmt.Errorf("subnet %s has no usable host addresses", prefix) //nolint:goerr113
+	}
+
+	base := prefix.Masked().Addr().As4()
+	baseVal := binary.BigEndian.Uint32(base[:])
+	hostCount := uint32(1) << (32 - bits)
+
+	for offset := uint32(1); offset < hostCount-1; offset++ {
+		var b [4]byte
+		binary.BigEndian.PutUint32(b[:], baseVal+offset)
+		candidate := netip.AddrFrom4(b)
+		if !used[candidate] {
+			return candidate, nil
+		}
+	}
+
+	return netip.Addr{}, fmt.Errorf("no unused host address found in subnet %s", prefix) //nolint:goerr113
 }
 
 // buildExposes constructs the PeeringEntryExpose slice for one side of a peering.
