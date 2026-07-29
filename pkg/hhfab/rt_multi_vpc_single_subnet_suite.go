@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/netip"
 	"sort"
 
 	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
@@ -75,6 +76,14 @@ func makeMultiVPCSingleSubnetSuite() *JUnitTestSuite {
 		{
 			Name: "Gateway Peering Expose Not",
 			F:    gatewayPeeringExposeNotTest,
+			SkipFlags: SkipFlags{
+				NoGateway: true,
+				NoServers: true,
+			},
+		},
+		{
+			Name: "Gateway Peering Expose Not Unused",
+			F:    gatewayPeeringExposeNotUnusedTest,
 			SkipFlags: SkipFlags{
 				NoGateway: true,
 				NoServers: true,
@@ -405,6 +414,100 @@ func gatewayPeeringExposeNotTest(ctx context.Context, testCtx *VPCPeeringTestCtx
 
 	if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts, matrix); err != nil {
 		return false, nil, fmt.Errorf("testing gateway peering connectivity with excluded %s: %w", excluded, err)
+	}
+
+	return false, nil, nil
+}
+
+// Test gateway peering between two VPCs, same as gatewayPeeringExposeNotTest, except the
+// excluded CIDR is a /32 that is not assigned to any discovered endpoint. Since no server
+// is excluded, the matrix's expectations are untouched and all pairs are still expected to
+// be Allow: this test's expectations should be correct going in, unlike gatewayPeeringExposeNotTest.
+//
+// This isolates one question left open by that test. On the run that exercised the excluded
+// server's /32, both directions of that server's traffic saw real drops (sent 5, rcvd 0), not
+// just an expectation-model mismatch. Two readings fit that result:
+//
+//   - Host-scoped exclusion (expected behaviour): only traffic to/from the excluded /32 is
+//     affected; the reverse direction failed because echo replies to the excluded address have
+//     no route back. Excluding an unused address here should then affect nothing, and this test
+//     should PASS.
+//   - Prefix collapse (dataplane bug): subtracting a /32 from the /24 fragments the covering
+//     route (config/src/utils/collapse.rs) into /25..host-length pieces, none of which is the
+//     /24 itself. If the FRR prefix-lists built from those fragments
+//     (mgmt/src/processor/confbuild/internal.rs) use Ge(len) matching and the EVPN Type-5 route
+//     for the /24 doesn't match any fragment, the whole subnet could go dark regardless of which
+//     address was excluded. If that's what's happening, this test's server-3<->server-4 pair
+//     FAILS again even though no server address was excluded.
+//
+// This second reading is inference about FRR Ge semantics, not verified; it is falsified if
+// EVPN advertises host /32 routes in the tested mode, or if Ge matching is looser than read.
+//
+// PASS -> host-scoped exclusion confirmed, no dataplane bug, the open question in
+// ISSUE-expose-not-order-dependent.md closes.
+// server-3<->server-4 FAILS again -> prefix collapse is real; file it as its own dataplane bug.
+func gatewayPeeringExposeNotUnusedTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
+	vpcs := &vpcapi.VPCList{}
+	if err := testCtx.kube.List(ctx, vpcs); err != nil {
+		return false, nil, fmt.Errorf("listing VPCs: %w", err)
+	}
+	if len(vpcs.Items) < 2 {
+		return true, nil, fmt.Errorf("not enough VPCs for gateway peering expose-not-unused test: %w", errNotEnoughVPCs)
+	}
+
+	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec, 0)
+	externalPeerings := make(map[string]*vpcapi.ExternalPeeringSpec, 0)
+	gwPeerings := make(map[string]*gwapi.PeeringSpec, 1)
+
+	vpc1 := &vpcs.Items[0]
+	vpc2 := &vpcs.Items[1]
+
+	if len(vpc2.Spec.Subnets) == 0 {
+		return true, nil, fmt.Errorf("VPC %s has no subnets to derive an unused address from", vpc2.Name) //nolint:goerr113
+	}
+	subnetNames := make([]string, 0, len(vpc2.Spec.Subnets))
+	for name := range vpc2.Spec.Subnets {
+		subnetNames = append(subnetNames, name)
+	}
+	sort.Strings(subnetNames)
+	cidr := vpc2.Spec.Subnets[subnetNames[0]].Subnet
+
+	prefix, err := netip.ParsePrefix(cidr)
+	if err != nil {
+		return false, nil, fmt.Errorf("parsing subnet %s of VPC %s: %w", cidr, vpc2.Name, err)
+	}
+
+	usedIPs := make(map[netip.Addr]bool, len(matrix.AllEndpoints))
+	for _, ep := range matrix.AllEndpoints {
+		if ep.Server == nil || !ep.Server.IP.Is4() {
+			continue
+		}
+		usedIPs[ep.Server.IP] = true
+	}
+
+	unused, err := pickUnusedHostAddress(prefix, usedIPs)
+	if err != nil {
+		return false, nil, fmt.Errorf("picking an unused address in subnet %s of VPC %s: %w", prefix, vpc2.Name, err)
+	}
+	excluded := unused.String() + "/32"
+	slog.Info("Excluding an unused address from gateway peering expose", "vpc", vpc2.Name, "subnet", prefix, "not", excluded)
+
+	if err := appendGwPeeringSpec(gwPeerings, vpc1, vpc2, &GwPeeringOptions{
+		VPC2NotCIDRs: []string{excluded},
+	}); err != nil {
+		return false, nil, fmt.Errorf("setting up gateway peering: %w", err)
+	}
+
+	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, gwPeerings, true); err != nil {
+		return false, nil, fmt.Errorf("setting up gateway peerings: %w", err)
+	}
+
+	if err := matrix.Repopulate(ctx, testCtx.kube); err != nil {
+		return false, nil, fmt.Errorf("refreshing matrix after peerings: %w", err)
+	}
+
+	if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts, matrix); err != nil {
+		return false, nil, fmt.Errorf("testing gateway peering connectivity with unused exclusion %s: %w", excluded, err)
 	}
 
 	return false, nil, nil
