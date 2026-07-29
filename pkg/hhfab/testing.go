@@ -572,42 +572,42 @@ func ResolveDefaultServerMTU(ctx context.Context, kube kclient.Client, opts *Set
 // modes are not included in the returned list. Callers that want to drive
 // matrix-based connectivity tests pass the result to BuildConnectivityMatrix;
 // CLI and vlabrunner callers discard it.
-func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) ([]*Endpoint, error) {
+func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) ([]*Endpoint, []DroppedEndpoint, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
 
 	start := time.Now()
 
 	if opts.ServersPerSubnet <= 0 {
-		return nil, fmt.Errorf("servers per subnet must be positive")
+		return nil, nil, fmt.Errorf("servers per subnet must be positive")
 	}
 	if opts.SubnetsPerVPC <= 0 {
-		return nil, fmt.Errorf("subnets per VPC must be positive")
+		return nil, nil, fmt.Errorf("subnets per VPC must be positive")
 	}
 	if !slices.Contains(HashPolicies, opts.HashPolicy) {
-		return nil, fmt.Errorf("invalid hash policy %q, must be one of %v", opts.HashPolicy, HashPolicies)
+		return nil, nil, fmt.Errorf("invalid hash policy %q, must be one of %v", opts.HashPolicy, HashPolicies)
 	} else if opts.HashPolicy != HashPolicyL2 && opts.HashPolicy != HashPolicyL2And3 {
 		slog.Warn("The selected hash policy is not fully 802.3ad compliant, use layer2 or layer2+3 for full compliance", "hashPolicy", opts.HashPolicy)
 	}
 	if !slices.Contains(vpcapi.VPCModes, opts.VPCMode) {
-		return nil, fmt.Errorf("invalid VPC mode %q, must be one of %v", opts.VPCMode, vpcapi.VPCModes)
+		return nil, nil, fmt.Errorf("invalid VPC mode %q, must be one of %v", opts.VPCMode, vpcapi.VPCModes)
 	}
 
 	cacheCancel, kube, err := getKubeClientWithCache(ctx, c.WorkDir)
 	if err != nil {
-		return nil, fmt.Errorf("creating kube client: %w", err)
+		return nil, nil, fmt.Errorf("creating kube client: %w", err)
 	}
 	defer cacheCancel()
 
 	switchList := wiringapi.SwitchList{}
 	if err := kube.List(ctx, &switchList); err != nil {
-		return nil, fmt.Errorf("listing switches: %w", err)
+		return nil, nil, fmt.Errorf("listing switches: %w", err)
 	}
 	allCumulus := true
 	for _, sw := range switchList.Items {
 		sp := &wiringapi.SwitchProfile{}
 		if err := kube.Get(ctx, kclient.ObjectKey{Name: sw.Spec.Profile, Namespace: kmetav1.NamespaceDefault}, sp); err != nil {
-			return nil, fmt.Errorf("getting switch profile %q: %w", sw.Spec.Profile, err)
+			return nil, nil, fmt.Errorf("getting switch profile %q: %w", sw.Spec.Profile, err)
 		}
 
 		if !slices.Contains(meta.NOSTypesCumulus, sp.Spec.NOSType) {
@@ -617,7 +617,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		}
 	}
 	if opts.P2P && !allCumulus {
-		return nil, fmt.Errorf("P2P mode requires all switches to be cumulus")
+		return nil, nil, fmt.Errorf("P2P mode requires all switches to be cumulus")
 	}
 	if !opts.P2P && allCumulus {
 		opts.P2P = true
@@ -625,7 +625,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	}
 
 	if err := ResolveDefaultServerMTU(ctx, kube, &opts); err != nil {
-		return nil, fmt.Errorf("resolving default server MTU: %w", err)
+		return nil, nil, fmt.Errorf("resolving default server MTU: %w", err)
 	}
 
 	{
@@ -648,7 +648,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	sshConfigs := map[string]*sshutil.Config{}
 	for _, vm := range vlab.VMs {
 		if sshCfg, err := c.SSHVM(ctx, vlab, vm); err != nil {
-			return nil, fmt.Errorf("getting ssh config for vm %q: %w", vm.Name, err)
+			return nil, nil, fmt.Errorf("getting ssh config for vm %q: %w", vm.Name, err)
 		} else {
 			sshConfigs[vm.Name] = sshCfg
 		}
@@ -663,32 +663,32 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		}
 
 		if err := client.IgnoreNotFound(kube.DeleteAllOf(ctx, &vpcapi.VPCPeering{}, &delAllOpts)); err != nil {
-			return nil, fmt.Errorf("cleaning up vpc peerings: %w", err)
+			return nil, nil, fmt.Errorf("cleaning up vpc peerings: %w", err)
 		}
 		if err := client.IgnoreNotFound(kube.DeleteAllOf(ctx, &vpcapi.ExternalPeering{}, &delAllOpts)); err != nil {
-			return nil, fmt.Errorf("cleaning up external peerings: %w", err)
+			return nil, nil, fmt.Errorf("cleaning up external peerings: %w", err)
 		}
 		if c.Fab.Spec.Config.Gateway.Enable {
 			if err := client.IgnoreNotFound(kube.DeleteAllOf(ctx, &gwapi.GatewayPeering{}, &delAllOpts)); err != nil {
-				return nil, fmt.Errorf("cleaning up gateway peerings: %w", err)
+				return nil, nil, fmt.Errorf("cleaning up gateway peerings: %w", err)
 			}
 		}
 	}
 
 	servers := &wiringapi.ServerList{}
 	if err := kube.List(ctx, servers); err != nil {
-		return nil, fmt.Errorf("listing servers: %w", err)
+		return nil, nil, fmt.Errorf("listing servers: %w", err)
 	}
 
 	serverIDs := map[string]uint64{}
 	for _, server := range servers.Items {
 		if !strings.HasPrefix(server.Name, ServerNamePrefix) {
-			return nil, fmt.Errorf("unexpected server name %q, should be %s<number>", server.Name, ServerNamePrefix)
+			return nil, nil, fmt.Errorf("unexpected server name %q, should be %s<number>", server.Name, ServerNamePrefix)
 		}
 
 		serverID, err := strconv.ParseUint(server.Name[len(ServerNamePrefix):], 10, 64)
 		if err != nil {
-			return nil, fmt.Errorf("parsing server id: %w", err)
+			return nil, nil, fmt.Errorf("parsing server id: %w", err)
 		}
 
 		serverIDs[server.Name] = serverID
@@ -700,20 +700,20 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 
 	vlanNS := &wiringapi.VLANNamespace{}
 	if err := kube.Get(ctx, client.ObjectKey{Name: opts.VLANNamespace, Namespace: metav1.NamespaceDefault}, vlanNS); err != nil {
-		return nil, fmt.Errorf("getting VLAN namespace %s: %w", opts.VLANNamespace, err)
+		return nil, nil, fmt.Errorf("getting VLAN namespace %s: %w", opts.VLANNamespace, err)
 	}
 	nextVLAN, stopVLAN := iter.Pull(VLANsFrom(vlanNS.Spec.Ranges...))
 	defer stopVLAN()
 
 	ipNS := &vpcapi.IPv4Namespace{}
 	if err := kube.Get(ctx, client.ObjectKey{Name: opts.IPv4Namespace, Namespace: metav1.NamespaceDefault}, ipNS); err != nil {
-		return nil, fmt.Errorf("getting IPv4 namespace %s: %w", opts.IPv4Namespace, err)
+		return nil, nil, fmt.Errorf("getting IPv4 namespace %s: %w", opts.IPv4Namespace, err)
 	}
 	prefixes := []netip.Prefix{}
 	for _, prefix := range ipNS.Spec.Subnets {
 		prefix, err := netip.ParsePrefix(prefix)
 		if err != nil {
-			return nil, fmt.Errorf("parsing IPv4 namespace %s prefix %q: %w", opts.IPv4Namespace, prefix, err)
+			return nil, nil, fmt.Errorf("parsing IPv4 namespace %s prefix %q: %w", opts.IPv4Namespace, prefix, err)
 		}
 		prefixes = append(prefixes, prefix)
 	}
@@ -748,7 +748,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	for _, server := range servers.Items {
 		if opts.VPCMode != vpcapi.VPCModeL2VNI {
 			if sa, err := getServerAttachState(ctx, kube, &server, false); err != nil {
-				return nil, fmt.Errorf("checking server %q attachment state: %w", server.Name, err)
+				return nil, nil, fmt.Errorf("checking server %q attachment state: %w", server.Name, err)
 			} else if sa.ESLAG {
 				eslagServers[server.Name] = true
 				slog.Warn("Skipping ESLAG-connected server", "server", server.Name)
@@ -769,19 +769,19 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 
 		conns := &wiringapi.ConnectionList{}
 		if err := kube.List(ctx, conns, wiringapi.MatchingLabelsForListLabelServer(server.Name)); err != nil {
-			return nil, fmt.Errorf("listing connections for server %q: %w", server.Name, err)
+			return nil, nil, fmt.Errorf("listing connections for server %q: %w", server.Name, err)
 		}
 		if len(conns.Items) == 0 {
-			return nil, fmt.Errorf("no connections for server %q", server.Name)
+			return nil, nil, fmt.Errorf("no connections for server %q", server.Name)
 		}
 		if len(conns.Items) > 1 {
-			return nil, fmt.Errorf("multiple connections for server %q", server.Name)
+			return nil, nil, fmt.Errorf("multiple connections for server %q", server.Name)
 		}
 		conn := conns.Items[0]
 
 		switches, _, _, _, err := conn.Spec.Endpoints()
 		if err != nil {
-			return nil, fmt.Errorf("getting connection %q endpoints: %w", conn.Name, err)
+			return nil, nil, fmt.Errorf("getting connection %q endpoints: %w", conn.Name, err)
 		}
 		isMclag := false
 		for _, sw := range switches {
@@ -816,7 +816,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		if vpc.Spec.Subnets[subnetName] == nil {
 			subnet, ok := nextPrefix()
 			if !ok {
-				return nil, fmt.Errorf("no more subnets available")
+				return nil, nil, fmt.Errorf("no more subnets available")
 			}
 
 			var dhcpOpts *vpcapi.VPCDHCPOptions
@@ -830,7 +830,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 
 			vlan, ok := nextVLAN()
 			if !ok {
-				return nil, fmt.Errorf("no more vlans available")
+				return nil, nil, fmt.Errorf("no more vlans available")
 			}
 			dhcp := vpcapi.VPCDHCP{}
 			if !hostBGP && !opts.P2P {
@@ -850,7 +850,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		if opts.P2P {
 			subnet, err := netip.ParsePrefix(vpc.Spec.Subnets[subnetName].Subnet)
 			if err != nil {
-				return nil, fmt.Errorf("parsing vpc subnet %s/%s %q: %w", vpcName, subnetName, vpc.Spec.Subnets[subnetName].Subnet, err)
+				return nil, nil, fmt.Errorf("parsing vpc subnet %s/%s %q: %w", vpcName, subnetName, vpc.Spec.Subnets[subnetName].Subnet, err)
 			}
 
 			b := subnet.Masked().Addr().As4()
@@ -864,7 +864,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 
 		expectedSubnet, err := netip.ParsePrefix(vpc.Spec.Subnets[subnetName].Subnet)
 		if err != nil {
-			return nil, fmt.Errorf("parsing vpc subnet %s/%s %q: %w", vpcName, subnetName, vpc.Spec.Subnets[subnetName].Subnet, err)
+			return nil, nil, fmt.Errorf("parsing vpc subnet %s/%s %q: %w", vpcName, subnetName, vpc.Spec.Subnets[subnetName].Subnet, err)
 		}
 		expectedSubnets[server.Name] = expectedSubnet
 		if opts.P2P {
@@ -916,7 +916,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 			})
 		}
 		if confErr != nil {
-			return nil, fmt.Errorf("getting conf cmd for server %q: %w", server.Name, confErr)
+			return nil, nil, fmt.Errorf("getting conf cmd for server %q: %w", server.Name, confErr)
 		}
 
 		netconfs[server.Name] = confCmd
@@ -924,7 +924,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 
 	if opts.WaitSwitchesReady {
 		if err := WaitReady(ctx, kube, WaitReadyOpts{AppliedFor: 15 * time.Second, Timeout: 10 * time.Minute}); err != nil {
-			return nil, fmt.Errorf("waiting for ready: %w", err)
+			return nil, nil, fmt.Errorf("waiting for ready: %w", err)
 		}
 	}
 
@@ -934,12 +934,12 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 
 	existingAttaches := &vpcapi.VPCAttachmentList{}
 	if err := kube.List(ctx, existingAttaches); err != nil {
-		return nil, fmt.Errorf("listing existing attachments: %w", err)
+		return nil, nil, fmt.Errorf("listing existing attachments: %w", err)
 	}
 	for _, attach := range existingAttaches.Items {
 		if opts.ForceCleanup || !attachNames[attach.Name] {
 			if err := kube.Delete(ctx, &attach); err != nil {
-				return nil, fmt.Errorf("deleting attachment %q: %w", attach.Name, err)
+				return nil, nil, fmt.Errorf("deleting attachment %q: %w", attach.Name, err)
 			}
 			slog.Info("Deleted", "attachment", attach.Name)
 			changed = true
@@ -948,13 +948,13 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 
 	existingVPCs := &vpcapi.VPCList{}
 	if err := kube.List(ctx, existingVPCs); err != nil {
-		return nil, fmt.Errorf("listing existing VPCs: %w", err)
+		return nil, nil, fmt.Errorf("listing existing VPCs: %w", err)
 	}
 	deletedVPCs := false
 	for _, vpc := range existingVPCs.Items {
 		if opts.ForceCleanup || !vpcNames[vpc.Name] {
 			if err := kube.Delete(ctx, &vpc); err != nil {
-				return nil, fmt.Errorf("deleting VPC %q: %w", vpc.Name, err)
+				return nil, nil, fmt.Errorf("deleting VPC %q: %w", vpc.Name, err)
 			}
 			slog.Info("Deleted", "vpc", vpc.Name)
 			changed = true
@@ -971,7 +971,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 
 		if deletedVPCs && opts.WaitSwitchesReady {
 			if err := WaitReady(ctx, kube, WaitReadyOpts{AppliedFor: 15 * time.Second, Timeout: 10 * time.Minute}); err != nil {
-				return nil, fmt.Errorf("waiting for switches after VPC deletion: %w", err)
+				return nil, nil, fmt.Errorf("waiting for switches after VPC deletion: %w", err)
 			}
 		}
 	}
@@ -979,7 +979,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	for _, vpc := range vpcs {
 		iterChanged, err := CreateOrUpdateVpc(ctx, kube, vpc)
 		if err != nil {
-			return nil, fmt.Errorf("creating or updating vpc %q: %w", vpc.Name, err)
+			return nil, nil, fmt.Errorf("creating or updating vpc %q: %w", vpc.Name, err)
 		}
 		changed = changed || iterChanged
 	}
@@ -994,7 +994,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 			return nil
 		})
 		if err != nil {
-			return nil, fmt.Errorf("creating or updating vpc attachment %q: %w", attach.Name, err)
+			return nil, nil, fmt.Errorf("creating or updating vpc attachment %q: %w", attach.Name, err)
 		}
 
 		switch res {
@@ -1011,12 +1011,12 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		// TODO remove it when we can actually know that changes to VPC/VPCAttachment are reflected in agents
 		select {
 		case <-ctx.Done():
-			return nil, fmt.Errorf("sleeping before waiting for ready: %w", ctx.Err())
+			return nil, nil, fmt.Errorf("sleeping before waiting for ready: %w", ctx.Err())
 		case <-time.After(15 * time.Second):
 		}
 
 		if err := WaitReady(ctx, kube, WaitReadyOpts{AppliedFor: 15 * time.Second, Timeout: 10 * time.Minute}); err != nil {
-			return nil, fmt.Errorf("waiting for ready: %w", err)
+			return nil, nil, fmt.Errorf("waiting for ready: %w", err)
 		}
 	}
 
@@ -1123,17 +1123,17 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	}
 
 	if err := g.Wait(); err != nil {
-		return nil, fmt.Errorf("configuring servers: %w", err)
+		return nil, nil, fmt.Errorf("configuring servers: %w", err)
 	}
 
 	slog.Info("All servers configured and verified", "took", time.Since(start))
 
-	endpoints, err := CollectServerEndpoints(ctx, kube, SSHResolverFromMap(sshConfigs), nil)
+	endpoints, dropped, err := CollectServerEndpoints(ctx, kube, SSHResolverFromMap(sshConfigs), nil)
 	if err != nil {
-		return nil, fmt.Errorf("collecting server endpoints: %w", err)
+		return nil, nil, fmt.Errorf("collecting server endpoints: %w", err)
 	}
 
-	return endpoints, nil
+	return endpoints, dropped, nil
 }
 
 type SetupPeeringsOpts struct {
@@ -1852,6 +1852,12 @@ func buildExternalEndpoints(externals []vpcapi.External) []*Endpoint {
 // pools) and external-originated traffic are NOT modeled — callers must
 // Add() explicit entries for those.
 //
+// Pairs the reachability helpers cannot evaluate (peering shapes behind
+// reachCheckUnsupported) get an explicit VerdictUnknown entry instead of
+// being left out: absence means Deny to Lookup, which would assert
+// unreachability nobody established. The test is expected to overlay the
+// real expectation; ConnectivityMatrix.Validate fails the run otherwise.
+//
 // TODO: IsServerReachable takes only (srcName, dstName) and so returns the
 // same verdict for every (src_ep, dst_ep) pair sharing those names. For a
 // server with multiple (vpc, subnet) attachments this is incorrect when
@@ -1874,8 +1880,20 @@ func populateConnectivityMatrix(ctx context.Context, kube kclient.Reader, m *Con
 				r, err := IsServerReachable(ctx, kube, src.Server.Name, dst.Server.Name, gatewayEnabled)
 				if err != nil {
 					if errors.Is(err, reachCheckUnsupported) {
+						// Record the pair as unevaluated rather than
+						// leaving it absent: absence reads as Deny and
+						// would be asserted as such. The test must
+						// overlay the real expectation (Validate
+						// enforces it).
+						m.Add(ConnectivityExpectation{
+							Pair:    EndpointPair{Source: src, Destination: dst},
+							Verdict: VerdictUnknown,
+							Detail:  err.Error(),
+						})
+
 						continue
 					}
+
 					return fmt.Errorf("checking %s -> %s: %w", src.Server.Name, dst.Server.Name, err)
 				}
 				if r.Reachable {
@@ -1891,8 +1909,17 @@ func populateConnectivityMatrix(ctx context.Context, kube kclient.Reader, m *Con
 					r, err := IsExternalSubnetReachable(ctx, kube, src.Server.Name, prefix.String(), gatewayEnabled)
 					if err != nil {
 						if errors.Is(err, reachCheckUnsupported) {
+							// As above; a later prefix that does resolve
+							// to Allow overwrites this entry.
+							m.Add(ConnectivityExpectation{
+								Pair:    EndpointPair{Source: src, Destination: dst},
+								Verdict: VerdictUnknown,
+								Detail:  err.Error(),
+							})
+
 							continue
 						}
+
 						return fmt.Errorf("checking %s -> %s/%s: %w", src.Server.Name, dst.External.ExternalName, prefix.String(), err)
 					}
 					if r.Reachable {
@@ -2102,11 +2129,14 @@ type PingError struct {
 	Source      string
 	Destination string
 	Expected    bool
-	Sent        int
-	Received    int
-	Lost        []int
-	CmdOutput   string
-	Msg         string
+	// Why: what made Expected what it is (matrix Reason/Peering, or the
+	// live reachability check's).
+	Why       string
+	Sent      int
+	Received  int
+	Lost      []int
+	CmdOutput string
+	Msg       string
 }
 
 func (pe *PingError) Error() string {
@@ -2115,8 +2145,8 @@ func (pe *PingError) Error() string {
 		lost = fmt.Sprintf(", lost=%v", pe.Lost)
 	}
 
-	return fmt.Sprintf("ping %s -> %s: %s (sent %d, rcvd %d%s, expected %v)",
-		pe.Source, pe.Destination, pe.Msg, pe.Sent, pe.Received, lost, pe.Expected)
+	return fmt.Sprintf("ping %s -> %s: %s (sent %d, rcvd %d%s, expected %v%s)",
+		pe.Source, pe.Destination, pe.Msg, pe.Sent, pe.Received, lost, pe.Expected, whySuffix(pe.Why))
 }
 
 // parsePingLostSeqs returns the ICMP sequence numbers in 1..sent that have no
@@ -2158,8 +2188,11 @@ func parsePingLostSeqs(stdout string, sent int) []int {
 }
 
 type IperfError struct {
-	Source          string
-	Destination     string
+	Source      string
+	Destination string
+	// Why: what made the expectation what it is (matrix Reason/Peering,
+	// or the live reachability check's).
+	Why             string
 	MinSpeed        string
 	SentSpeed       string
 	RcvdSpeed       string
@@ -2181,6 +2214,7 @@ func (ie *IperfError) Error() string {
 	if ie.SentSpeed != "" {
 		rs += fmt.Sprintf(" (sent %s, rcvd %s, min expected %s)", ie.SentSpeed, ie.RcvdSpeed, ie.MinSpeed)
 	}
+	rs += whySuffix(ie.Why)
 
 	return rs
 }
@@ -2190,11 +2224,40 @@ type CurlError struct {
 	Expected bool
 	Output   string
 	Msg      string
+	// Why: what made Expected what it is (matrix Reason/Peering, or the
+	// live reachability check's).
+	Why string
 }
 
 func (ce *CurlError) Error() string {
-	return fmt.Sprintf("curl from %s: %s (expected %v)",
-		ce.Source, ce.Msg, ce.Expected)
+	return fmt.Sprintf("curl from %s: %s (expected %v%s)",
+		ce.Source, ce.Msg, ce.Expected, whySuffix(ce.Why))
+}
+
+// expectationWhy renders why a probe was expected to succeed or fail, so a
+// failure message says more than "expected true": which peering the verdict
+// came from. An empty Reason is reported as such rather than guessed at —
+// on a Deny it is the matrix's default-isolation answer, which is also what
+// a lost entry looks like, and callers that pass a bare expectation have no
+// reason to state.
+func expectationWhy(r Reachability) string {
+	switch {
+	case r.Reason != "" && r.Peering != "":
+		return fmt.Sprintf("%s %q", r.Reason, r.Peering)
+	case r.Reason != "":
+		return string(r.Reason)
+	default:
+		return "no reason recorded"
+	}
+}
+
+// whySuffix formats a Why for appending to an error message.
+func whySuffix(why string) string {
+	if why == "" {
+		return ""
+	}
+
+	return ", because: " + why
 }
 
 type TestConnectivityOpts struct {
@@ -2306,7 +2369,7 @@ func runPingIperfPair(ctx context.Context, opts TestConnectivityOpts, args pingI
 	slog.Debug("Checking connectivity", logArgs...)
 
 	var errs []error
-	if pe := checkPing(ctx, opts.PingsCount, args.Pings, args.From, args.To, args.FromSSH, args.ToIP, nil, args.Expected.Reachable); pe != nil {
+	if pe := checkPing(ctx, opts.PingsCount, args.Pings, args.From, args.To, args.FromSSH, args.ToIP, nil, args.Expected); pe != nil {
 		return append(errs, pe)
 	}
 
@@ -2577,7 +2640,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 
 					// switching to 1.0.0.1 since the previously used target 8.8.8.8 was giving us issue
 					// when curling over virtual external peerings
-					if ce := checkCurl(ctx, opts, curls, serverA, client, "1.0.0.1", expectedReachable.Reachable); ce != nil {
+					if ce := checkCurl(ctx, opts, curls, serverA, client, "1.0.0.1", expectedReachable); ce != nil {
 						return ce
 					}
 
@@ -2962,14 +3025,15 @@ func retrySSHCmd(ctx context.Context, ssh *sshutil.Config, cmd string, target st
 	return stdout, stderr, nil
 }
 
-func checkPing(ctx context.Context, pingCount int, semaphore *semaphore.Weighted, from, to string, fromSSH *sshutil.Config, toIP netip.Addr, sourceIP *netip.Addr, expected bool) *PingError {
+func checkPing(ctx context.Context, pingCount int, semaphore *semaphore.Weighted, from, to string, fromSSH *sshutil.Config, toIP netip.Addr, sourceIP *netip.Addr, expected Reachability) *PingError {
 	if pingCount <= 0 {
 		return nil
 	}
 	pe := &PingError{
 		Source:      from,
 		Destination: to,
-		Expected:    expected,
+		Expected:    expected.Reachable,
+		Why:         expectationWhy(expected),
 	}
 
 	if semaphore != nil {
@@ -2984,14 +3048,14 @@ func checkPing(ctx context.Context, pingCount int, semaphore *semaphore.Weighted
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(pingCount+30)*time.Second)
 	defer cancel()
 
-	slog.Debug("Running ping", "from", from, "to", toIP.String(), "sourceIP", sourceIP, "expected", expected)
+	slog.Debug("Running ping", "from", from, "to", toIP.String(), "sourceIP", sourceIP, "expected", expected.Reachable)
 	cmd := "ping -c 1 -W 1"
 	if sourceIP != nil {
 		cmd += " -I " + sourceIP.String()
 	}
 	cmd += " " + toIP.String()
 
-	if stdout, stderr, err := retrySSHCmd(ctx, fromSSH, cmd, from); err != nil && expected {
+	if stdout, stderr, err := retrySSHCmd(ctx, fromSSH, cmd, from); err != nil && expected.Reachable {
 		slog.Warn("Warm-up ping failed, continuing anyway", "err", err, "stdout", stdout, "stderr", stderr)
 	}
 
@@ -3050,14 +3114,14 @@ func checkPing(ctx context.Context, pingCount int, semaphore *semaphore.Weighted
 	pingFail := err != nil && pe.Received == 0
 
 	slog.Debug("Ping result", "from", from, "to", to,
-		"expected", expected, "ok", pingOk, "fail", pingFail, "err", err, "stdout", stdout, "stderr", stderr)
+		"expected", expected.Reachable, "ok", pingOk, "fail", pingFail, "err", err, "stdout", stdout, "stderr", stderr)
 
 	// When a ping that should have succeeded fails, surface the per-packet
 	// (timestamped, via -D) output at warn level so the loss pattern is visible
 	// next to the error without re-running with -v. Negative tests fail pings by
 	// design, so only do this when reachability was expected.
 	logExpectedFailure := func() {
-		if expected {
+		if expected.Reachable {
 			slog.Warn("Ping failed (expected reachable)", "from", from, "to", to,
 				"sent", pe.Sent, "rcvd", pe.Received, "lost", pe.Lost, "stdout", stdout, "stderr", stderr)
 		}
@@ -3075,14 +3139,14 @@ func checkPing(ctx context.Context, pingCount int, semaphore *semaphore.Weighted
 		return pe
 	}
 
-	if expected && !pingOk {
+	if expected.Reachable && !pingOk {
 		logExpectedFailure()
 		pe.Msg = "should be reachable but ping failed"
 
 		return pe
 	}
 
-	if !expected && !pingFail {
+	if !expected.Reachable && !pingFail {
 		pe.Msg = "should not be reachable but ping succeeded"
 
 		return pe
@@ -3171,6 +3235,9 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string,
 		}
 
 		ies := runIPerf3Test(ctx, opts, from, to, fromSSH, toIP, iPerfsMinSpeed, bidir)
+		for _, ie := range ies {
+			ie.Why = expectationWhy(reachability)
+		}
 		if len(ies) == 0 {
 			if attempt > 0 {
 				slog.Info("iperf3 test succeeded on retry", "from", from, "to", to, "bidir", bidir, "attempt", attempt+1)
@@ -3315,13 +3382,14 @@ func isReportableIperfError(ie *IperfError) bool {
 	return ie.ClientMsg != "" || ie.ServerMsg != ""
 }
 
-func checkCurl(ctx context.Context, opts TestConnectivityOpts, curls *semaphore.Weighted, from string, fromSSH *sshutil.Config, toIP string, expected bool) *CurlError {
+func checkCurl(ctx context.Context, opts TestConnectivityOpts, curls *semaphore.Weighted, from string, fromSSH *sshutil.Config, toIP string, expected Reachability) *CurlError {
 	if opts.CurlsCount <= 0 {
 		return nil
 	}
 	ce := &CurlError{
 		Source:   from,
-		Expected: expected,
+		Expected: expected.Reachable,
+		Why:      expectationWhy(expected),
 	}
 
 	if err := curls.Acquire(ctx, 1); err != nil {
@@ -3356,7 +3424,7 @@ func checkCurl(ctx context.Context, opts TestConnectivityOpts, curls *semaphore.
 		curlOk := err == nil && strings.Contains(stdout, "301 Moved")
 		curlFail := err != nil && !strings.Contains(stdout, "301 Moved")
 
-		slog.Debug("Curl result", "from", from, "to", toIP, "expected", expected, "ok", curlOk, "fail", curlFail, "err", err, "stdout", stdout, "stderr", stderr)
+		slog.Debug("Curl result", "from", from, "to", toIP, "expected", expected.Reachable, "ok", curlOk, "fail", curlFail, "err", err, "stdout", stdout, "stderr", stderr)
 
 		if curlOk == curlFail {
 			if err != nil {
@@ -3368,13 +3436,13 @@ func checkCurl(ctx context.Context, opts TestConnectivityOpts, curls *semaphore.
 			return ce
 		}
 
-		if expected && !curlOk {
+		if expected.Reachable && !curlOk {
 			ce.Msg = "should be reachable but curl failed"
 
 			return ce
 		}
 
-		if !expected && !curlFail {
+		if !expected.Reachable && !curlFail {
 			ce.Msg = "should not be reachable but curl succeeded"
 
 			return ce

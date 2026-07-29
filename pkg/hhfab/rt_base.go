@@ -427,7 +427,7 @@ func (testCtx *VPCPeeringTestCtx) setupTest(ctx context.Context, initialSuiteSet
 	opts := testCtx.setupOpts
 	opts.ForceCleanup = initialSuiteSetup
 	// this will also remove all peerings
-	endpoints, err := DoVLABSetupVPCs(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, opts)
+	endpoints, dropped, err := DoVLABSetupVPCs(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, opts)
 	if err != nil {
 		return nil, fmt.Errorf("setting up VPCs: %w", err)
 	}
@@ -440,7 +440,7 @@ func (testCtx *VPCPeeringTestCtx) setupTest(ctx context.Context, initialSuiteSet
 	// sweep. Tests that don't use the matrix simply ignore it;
 	// matrix-driven tests call matrix.Repopulate after applying their
 	// peerings to refresh verdicts.
-	matrix, err := BuildConnectivityMatrix(ctx, testCtx.kube, endpoints)
+	matrix, err := BuildConnectivityMatrix(ctx, testCtx.kube, endpoints, dropped)
 	if err != nil {
 		return nil, fmt.Errorf("building initial connectivity matrix: %w", err)
 	}

@@ -60,7 +60,7 @@ func (testCtx *VPCPeeringTestCtx) pingExternalStability(ctx context.Context, mat
 			return fmt.Errorf("getting ssh config for %s: %w", ep.Server.Name, err)
 		}
 		slog.Debug("Testing NAT external connectivity stability via ping", "server", ep.Server.Name, "target", remoteIP)
-		if pingErr := checkPing(ctx, 10, nil, ep.Server.Name, remoteIP, sshCfg, remoteAddr, nil, true); pingErr != nil {
+		if pingErr := checkPing(ctx, 10, nil, ep.Server.Name, remoteIP, sshCfg, remoteAddr, nil, Reachability{Reachable: true}); pingErr != nil {
 			return fmt.Errorf("NAT external connectivity ping stability check: %w", pingErr)
 		}
 		tested++
