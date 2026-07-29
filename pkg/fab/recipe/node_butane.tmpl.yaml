@@ -17,6 +17,10 @@ passwd:
 
 systemd:
   units:
+    - name: hh-nftables.service
+      enabled: true
+      contents: |{{ .NftService | nindent 10 }}
+
     - name: locksmithd.service
       mask: true
 {{ if .AutoInstall }}
@@ -56,6 +60,12 @@ storage:
       mode: 0644
       contents:
         inline: vfio-pci
+
+    - path: /etc/hh/nftables.conf
+      overwrite: true
+      mode: 0600
+      contents:
+        inline: |{{ .NftablesRules | nindent 10 }}
 
     - path: /etc/hostname
       mode: 0644

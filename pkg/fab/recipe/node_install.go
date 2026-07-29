@@ -85,6 +85,9 @@ func (c *NodeInstallUpgrade) Run(ctx context.Context, upgrade bool) error {
 	}
 
 	if upgrade {
+		if err := c.installNftRules(ctx); err != nil {
+			return fmt.Errorf("installing nftables rules: %w", err)
+		}
 		if err := upgradeFlatcar(ctx, string(flatcar.Version(c.Fab)), c.Yes); err != nil {
 			return fmt.Errorf("upgrading Flatcar: %w", err)
 		}
@@ -232,6 +235,49 @@ EmitLLDP=yes
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("running networkctl reload: %w", err)
+	}
+
+	return nil
+}
+
+func (c *NodeInstallUpgrade) installNftRules(ctx context.Context) error {
+	slog.Info("Configuring nftables")
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
+	// Write the rules file. Ignition creates the parent dir on fresh installs;
+	// on upgrade we must ensure it exists ourselves before writing.
+	nftRulesContents, err := renderNftablesRules(c.Node.Spec.Management.Interface)
+	if err != nil {
+		return fmt.Errorf("rendering nftables rules file: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(nftablesRulesFilePath), 0o755); err != nil {
+		return fmt.Errorf("creating nftables rules dir: %w", err)
+	}
+	if err := os.WriteFile(nftablesRulesFilePath, []byte(nftRulesContents), 0o600); err != nil {
+		return fmt.Errorf("writing nftables rules: %w", err)
+	}
+
+	nftUnitFile, err := renderNftablesSystemdUnit()
+	if err != nil {
+		return fmt.Errorf("rendering nftables service unit: %w", err)
+	}
+	if err := os.WriteFile(nftUnitFilePath, []byte(nftUnitFile), 0o600); err != nil {
+		return fmt.Errorf("writing nftables service unit: %w", err)
+	}
+
+	cmd := exec.CommandContext(ctx, "systemctl", "daemon-reload")
+	cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "systemctl: ")
+	cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "systemctl: ")
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("error on systemctl daemon-reload: %w", err)
+	}
+	cmd = exec.CommandContext(ctx, "systemctl", "enable", "--now", nftServiceName)
+	cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "systemctl: ")
+	cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "systemctl: ")
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("error on systemctl enable --now %s: %w", nftServiceName, err)
 	}
 
 	return nil

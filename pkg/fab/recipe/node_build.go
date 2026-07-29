@@ -134,12 +134,22 @@ func (b *NodeInstallBuilder) buildIgnition() ([]byte, error) {
 	if dummyIP.Bits() != 31 {
 		return nil, fmt.Errorf("dummy IP must be a /31") //nolint:goerr113
 	}
+	nftRules, err := renderNftablesRules(b.Node.Spec.Management.Interface)
+	if err != nil {
+		return nil, fmt.Errorf("rendering nftables rules: %w", err)
+	}
+	nftUnitFile, err := renderNftablesSystemdUnit()
+	if err != nil {
+		return nil, fmt.Errorf("rendering nftables service unit: %w", err)
+	}
 
 	but, err := tmplutil.FromTemplate("node-butane", nodeButaneTmpl, map[string]any{
 		"Hostname":       b.Node.Name,
 		"PasswordHash":   b.Fab.Spec.Config.Control.DefaultUser.PasswordHash,
 		"AuthorizedKeys": b.Fab.Spec.Config.Control.DefaultUser.AuthorizedKeys,
 		"MgmtInterface":  b.Node.Spec.Management.Interface,
+		"NftService":     nftUnitFile,
+		"NftablesRules":  nftRules,
 		"MgmtAddress":    b.Node.Spec.Management.IP,
 		"DummyAddress":   dummyIP.Masked().String(),
 		"DummyGateway":   dummyIP.Masked().Addr().Next().String(),
