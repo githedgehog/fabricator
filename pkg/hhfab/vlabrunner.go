@@ -1124,10 +1124,17 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 		slog.Debug("Node install marker is complete", "vm", vm.Name, "type", vm.Type)
 
 		if vm.Type == VMTypeControl {
-			// Increase SSH connection limits on the control node to prevent errors during show-tech
-			// Only needed for VLAB testing, not in production where the default limits provide DoS protection
+			// Increase SSH connection limits on the control node to prevent errors during show-tech.
+			// Only needed for VLAB testing, not in production where the default limits provide DoS protection.
+			// Named 00- (not 99-) because sshd_config keeps the first value it sees for a repeated
+			// keyword: the hardening baseline in 40-hedgehog.conf sets its own MaxStartups and
+			// PerSourceMaxStartups, and being read first (alphabetically before 99-) it would otherwise
+			// silently win over this override. PerSourceMaxStartups also has to be relaxed explicitly
+			// since 40-hedgehog.conf is the only place that sets it; all VLAB switch/server access is
+			// proxied through this one control node connection, so a strict per-source cap throttles
+			// concurrent show-tech collection even with MaxStartups raised.
 			slog.Debug("Increasing SSH connection limits for VLAB", "vm", vm.Name)
-			sshConfigCmd := `bash -c 'echo -e "MaxStartups 100:30:200\nMaxSessions 50" | sudo tee /etc/ssh/sshd_config.d/99-vlab.conf > /dev/null && sudo systemctl restart sshd'`
+			sshConfigCmd := `bash -c 'echo -e "MaxStartups 100:30:200\nMaxSessions 50\nPerSourceMaxStartups none" | sudo tee /etc/ssh/sshd_config.d/00-vlab.conf > /dev/null && sudo rm -f /etc/ssh/sshd_config.d/99-vlab.conf && sudo systemctl restart sshd'`
 			if _, _, err := ssh.Run(ctx, sshConfigCmd); err != nil {
 				slog.Warn("Failed to increase SSH limits on control node (non-fatal)", "vm", vm.Name, "err", err)
 			}
