@@ -73,6 +73,14 @@ func makeMultiVPCSingleSubnetSuite() *JUnitTestSuite {
 			},
 		},
 		{
+			Name: "Gateway Peering Expose Not",
+			F:    gatewayPeeringExposeNotTest,
+			SkipFlags: SkipFlags{
+				NoGateway: true,
+				NoServers: true,
+			},
+		},
+		{
 			Name: "Gateway Failover",
 			F:    gatewayFailoverTest,
 			SkipFlags: SkipFlags{
@@ -328,6 +336,69 @@ func gatewayPeeringTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix 
 
 	if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts, matrix); err != nil {
 		return false, nil, fmt.Errorf("testing gateway peering connectivity: %w", err)
+	}
+
+	return false, nil, nil
+}
+
+// Test gateway peering between two VPCs where one server's address is excluded from the
+// exposed prefixes with an expose `Not` entry. Same peering as gatewayPeeringTest, plus a
+// single /32 exclusion on the second VPC's side.
+//
+// The gateway dataplane materialises `Not` by subtracting the excluded range from the
+// exposed prefixes, so the excluded address is expected to be unreachable. hhfab's
+// expectation model (isVPCSubnetPresentInPeering) does not look at `Not` at all and still
+// expects the whole subnet to be reachable, so this test is expected to fail until the
+// expectation model accounts for exclusions.
+func gatewayPeeringExposeNotTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
+	vpcs := &vpcapi.VPCList{}
+	if err := testCtx.kube.List(ctx, vpcs); err != nil {
+		return false, nil, fmt.Errorf("listing VPCs: %w", err)
+	}
+	if len(vpcs.Items) < 2 {
+		return true, nil, fmt.Errorf("not enough VPCs for gateway peering expose-not test: %w", errNotEnoughVPCs)
+	}
+
+	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec, 0)
+	externalPeerings := make(map[string]*vpcapi.ExternalPeeringSpec, 0)
+	gwPeerings := make(map[string]*gwapi.PeeringSpec, 1)
+
+	vpc1 := &vpcs.Items[0]
+	vpc2 := &vpcs.Items[1]
+
+	// Pick the first discovered server attachment in vpc2 and exclude its address as a /32.
+	excluded := ""
+	var excludedServer string
+	for _, ep := range matrix.AllEndpoints {
+		if ep.Server == nil || ep.Server.VPC != vpc2.Name || !ep.Server.IP.Is4() {
+			continue
+		}
+		excluded = ep.Server.IP.String() + "/32"
+		excludedServer = ep.Server.Name
+
+		break
+	}
+	if excluded == "" {
+		return true, nil, fmt.Errorf("no IPv4 server attachment discovered in VPC %s to exclude", vpc2.Name) //nolint:goerr113
+	}
+	slog.Info("Excluding server address from gateway peering expose", "server", excludedServer, "vpc", vpc2.Name, "not", excluded)
+
+	if err := appendGwPeeringSpec(gwPeerings, vpc1, vpc2, &GwPeeringOptions{
+		VPC2NotCIDRs: []string{excluded},
+	}); err != nil {
+		return false, nil, fmt.Errorf("setting up gateway peering: %w", err)
+	}
+
+	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, gwPeerings, true); err != nil {
+		return false, nil, fmt.Errorf("setting up gateway peerings: %w", err)
+	}
+
+	if err := matrix.Repopulate(ctx, testCtx.kube); err != nil {
+		return false, nil, fmt.Errorf("refreshing matrix after peerings: %w", err)
+	}
+
+	if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts, matrix); err != nil {
+		return false, nil, fmt.Errorf("testing gateway peering connectivity with excluded %s: %w", excluded, err)
 	}
 
 	return false, nil, nil
