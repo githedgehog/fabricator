@@ -502,7 +502,7 @@ func staticExternalTest(ctx context.Context, testCtx *VPCPeeringTestCtx) (bool, 
 			return fmt.Errorf("configuring VLAN on %s: %w: %s", targetServer, err, stderr)
 		}
 		// in case of L3 VPC mode, we need to give it time to switch to the longer lease time and switches to learn the routes
-		if testCtx.setupOpts.VPCMode == vpcapi.VPCModeL3VNI || testCtx.setupOpts.VPCMode == vpcapi.VPCModeL3Flat {
+		if vpc.Spec.Mode != vpcapi.VPCModeL2VNI {
 			time.Sleep(10 * time.Second)
 		}
 

@@ -952,8 +952,8 @@ func appendGwExtPeeringSpecWithNAT(gwPeerings map[string]*gwapi.PeeringSpec, vpc
 	return nil
 }
 
-func (testCtx *VPCPeeringTestCtx) waitForDHCPRenewal(ctx context.Context, serverName, ifName string, shortLeaseTime uint32) error {
-	isL3Mode := testCtx.setupOpts.VPCMode == vpcapi.VPCModeL3VNI || testCtx.setupOpts.VPCMode == vpcapi.VPCModeL3Flat
+func (testCtx *VPCPeeringTestCtx) waitForDHCPRenewal(ctx context.Context, serverName, ifName string, shortLeaseTime uint32, vpcMode vpcapi.VPCMode) error {
+	isL3Mode := vpcMode != vpcapi.VPCModeL2VNI
 
 	ssh, err := testCtx.getSSH(ctx, serverName)
 	if err != nil {

@@ -698,10 +698,43 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						return c.handleShutdownWithPause(ctx, vlab, opts, fmt.Errorf("setting up VPCs: %w", err))
 					}
 				case OnReadySetupPeerings:
-					// TODO make it configurable
-					peerings := []string{"1+2"}
-					if c.Fab.Spec.Config.Gateway.Enable {
-						peerings = append(peerings, "2+3:gw:vpc1=subnet-01:vpc2=subnet-01")
+					// Build peering requests defensively: only reference VPCs that
+					// actually exist after SetupVPCs. Auto-derived per-server modes
+					// can produce fewer than the canonical 3 VPCs (e.g. all-L3VNI
+					// runs skip ESLAG servers), in which case "2+3:gw" would dangle.
+					peerings, err := func() ([]string, error) {
+						cacheCancel, kube, err := getKubeClientWithCache(ctx, c.WorkDir)
+						if err != nil {
+							return nil, fmt.Errorf("creating kube client: %w", err)
+						}
+						defer cacheCancel()
+
+						vpcs := &vpcapi.VPCList{}
+						if err := kube.List(ctx, vpcs); err != nil {
+							return nil, fmt.Errorf("listing VPCs: %w", err)
+						}
+						existing := map[string]bool{}
+						for _, vpc := range vpcs.Items {
+							existing[vpc.Name] = true
+						}
+
+						out := []string{}
+						if existing["vpc-01"] && existing["vpc-02"] {
+							out = append(out, "1+2")
+						}
+						if c.Fab.Spec.Config.Gateway.Enable && existing["vpc-02"] && existing["vpc-03"] {
+							out = append(out, "2+3:gw:vpc1=subnet-01:vpc2=subnet-01")
+						}
+
+						return out, nil
+					}()
+					if err != nil {
+						return c.handleShutdownWithPause(ctx, vlab, opts, fmt.Errorf("planning peerings: %w", err))
+					}
+					if len(peerings) == 0 {
+						slog.Info("Skipping setup-peerings: not enough VPCs for the canonical 1+2 / 2+3:gw layout")
+
+						break
 					}
 
 					setupPeeringsOpts := SetupPeeringsOpts{
