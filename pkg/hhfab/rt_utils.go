@@ -838,9 +838,11 @@ func pickUnusedHostAddress(prefix netip.Prefix, used map[netip.Addr]bool) (netip
 
 	base := prefix.Masked().Addr().As4()
 	baseVal := binary.BigEndian.Uint32(base[:])
-	hostCount := uint32(1) << (32 - bits)
+	// The bound is computed in uint64 because a /0 holds 2^32 addresses: as a uint32
+	// the count would wrap to 0 and the bound would underflow to the whole space.
+	lastOffset := uint64(1)<<(32-bits) - 2
 
-	for offset := uint32(1); offset < hostCount-1; offset++ {
+	for offset := uint32(1); uint64(offset) <= lastOffset; offset++ {
 		var b [4]byte
 		binary.BigEndian.PutUint32(b[:], baseVal+offset)
 		candidate := netip.AddrFrom4(b)
