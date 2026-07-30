@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"reflect"
 	"strings"
 
@@ -41,8 +40,7 @@ import (
 )
 
 const (
-	RedactedValue      = "SUPPORT-DUMP-REDACTED"
-	githubActionsValue = "true"
+	RedactedValue = "SUPPORT-DUMP-REDACTED"
 )
 
 var schemeBuilders = []func(*runtime.Scheme) error{
@@ -164,14 +162,14 @@ func redactAlloyTarget(target *alloy.Target) {
 	}
 }
 
-func collectKubeResources(ctx context.Context, dump *Dump, kubeconfigPath string) error {
-	kube, err := kubeutil.NewClient(ctx, kubeconfigPath, schemeBuilders...)
+func (c collector) collectKubeResources(ctx context.Context, dump *Dump) error {
+	kube, err := kubeutil.NewClient(ctx, c.kubeconfigPath, schemeBuilders...)
 	if err != nil {
 		return fmt.Errorf("creating kube client: %w", err)
 	}
 
 	resources := &bytes.Buffer{}
-	if err := collectKubeObjects(ctx, kube, kube.Scheme(),
+	if err := c.collectKubeObjects(ctx, kube, kube.Scheme(),
 		kubeResourceGVKs, kubeResourceRedactors, resources); err != nil {
 		return fmt.Errorf("collecting kube objects: %w", err)
 	}
@@ -181,11 +179,11 @@ func collectKubeResources(ctx context.Context, dump *Dump, kubeconfigPath string
 	return nil
 }
 
-func collectKubeObjects(ctx context.Context, kube kclient.Reader, scheme *runtime.Scheme,
+func (c collector) collectKubeObjects(ctx context.Context, kube kclient.Reader, scheme *runtime.Scheme,
 	withGVKs []schema.GroupVersionKind, redactors map[schema.GroupVersionKind]kubeResourceRedactorFunc,
 	w io.Writer,
 ) error {
-	kubeObjListType := reflect.TypeOf((*kclient.ObjectList)(nil)).Elem()
+	kubeObjListType := reflect.TypeFor[kclient.ObjectList]()
 	objs := 0
 
 	for gvk, objType := range scheme.AllKnownTypes() {
@@ -224,7 +222,7 @@ func collectKubeObjects(ctx context.Context, kube kclient.Reader, scheme *runtim
 			continue
 		}
 
-		if os.Getenv("GITHUB_ACTIONS") != githubActionsValue {
+		if !c.quiet {
 			slog.Debug("Collecting Kube resource", "gvk", gvk.String())
 		}
 

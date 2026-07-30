@@ -1252,7 +1252,7 @@ func (c *Config) CollectVLABDebug(ctx context.Context, vlab *VLAB, opts VLABRunO
 		}
 	}
 
-	if dump, err := support.Collect(ctx, "vlab", kubeconfig); err != nil {
+	if dump, err := support.Collect(ctx, "vlab", kubeconfig, false); err != nil {
 		slog.Warn("Failed to collect support dump", "err", err)
 	} else {
 		if data, err := support.Marshal(dump); err != nil {
