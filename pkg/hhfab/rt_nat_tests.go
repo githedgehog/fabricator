@@ -20,16 +20,12 @@ import (
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// peeringSpecs bundles the three peering kinds a NAT test may need to
-// install. Returned by natTestSpec.BuildSpec.
 type peeringSpecs struct {
 	VPC      map[string]*vpcapi.VPCPeeringSpec
 	External map[string]*vpcapi.ExternalPeeringSpec
 	Gateway  map[string]*gwapi.PeeringSpec
 }
 
-// emptyPeeringSpecs returns an initialized peeringSpecs that BuildSpec
-// callbacks can populate without manually constructing each map.
 func emptyPeeringSpecs() peeringSpecs {
 	return peeringSpecs{
 		VPC:      make(map[string]*vpcapi.VPCPeeringSpec),
@@ -41,8 +37,7 @@ func emptyPeeringSpecs() peeringSpecs {
 // natTestSpec describes a VPC-to-VPC NAT test that follows the standard
 // driver shape: pick the first two VPCs (sorted alphabetically), build
 // peerings, refresh the matrix, optionally overlay NAT info, then run the
-// matrix-driven connectivity test. Tests that need a server move (overlap)
-// or external CRD annotation lookup hand-roll instead.
+// matrix-driven connectivity test.
 type natTestSpec struct {
 	Name      string
 	BuildSpec func(vpc1, vpc2 *vpcapi.VPC) (peeringSpecs, error)
@@ -50,8 +45,6 @@ type natTestSpec struct {
 }
 
 // runNATTest executes the standard NAT-test sequence defined by spec.
-// Returns (skip=true) when fewer than two VPCs are available so the suite
-// can mark the case as skipped.
 func (testCtx *VPCPeeringTestCtx) runNATTest(ctx context.Context, matrix *ConnectivityMatrix, spec natTestSpec) (bool, []RevertFunc, error) {
 	vpcs := &vpcapi.VPCList{}
 	if err := testCtx.kube.List(ctx, vpcs); err != nil {
@@ -159,8 +152,7 @@ func overlayVPCToVPCStaticDNAT(matrix *ConnectivityMatrix, srcVPCName, dstVPCNam
 
 // overlayVPCToVPCPortForwardDNAT marks every (server-in-srcVPCName →
 // server-in-dstVPCName) entry with a port-forward DNAT to the destination's
-// NAT IP on destPort. The matrix tester then runs iperf3 against
-// (NAT IP, destPort) without ping for those pairs.
+// NAT IP on destPort.
 func overlayVPCToVPCPortForwardDNAT(matrix *ConnectivityMatrix, srcVPCName, dstVPCName, dstSubnetCIDR, dstNATPoolCIDR string, destPort uint16) error {
 	if destPort == 0 {
 		return fmt.Errorf("destPort must be non-zero for port-forward overlay") //nolint:goerr113
@@ -191,9 +183,6 @@ func overlayVPCToVPCPortForwardDNAT(matrix *ConnectivityMatrix, srcVPCName, dstV
 	})
 }
 
-// overrideVPCToVPCVerdict forces every (server-in-srcVPCName →
-// server-in-dstVPCName) entry to the given verdict.
-// Used to mark direction-asymmetric paths.
 func overrideVPCToVPCVerdict(matrix *ConnectivityMatrix, srcVPCName, dstVPCName string, verdict ConnectivityVerdict) {
 	srcPred := ServerInVPC(srcVPCName)
 	dstPred := ServerInVPC(dstVPCName)
@@ -218,12 +207,7 @@ func overrideVPCToVPCVerdict(matrix *ConnectivityMatrix, srcVPCName, dstVPCName 
 }
 
 // rebindMatrixServerEndpoint refreshes the matrix's endpoint(s) for
-// serverName to reflect the current cluster state. Used after a runtime
-// attachment change (e.g., the overlap NAT test moves one server to a
-// freshly created overlap VPC) so VPC-keyed overlays match the moved
-// server. The (vpc, subnet) the server now belongs to is read from the
-// VPCAttachment CRDs by CollectServerEndpoints — no need for the caller
-// to restate it. Multi-IP servers produce multiple endpoints.
+// serverName to reflect the current cluster state.
 func (testCtx *VPCPeeringTestCtx) rebindMatrixServerEndpoint(ctx context.Context, matrix *ConnectivityMatrix, serverName string) error {
 	ssh := func(name string) (*sshutil.Config, error) {
 		return testCtx.getSSH(ctx, name)
@@ -241,9 +225,7 @@ func (testCtx *VPCPeeringTestCtx) rebindMatrixServerEndpoint(ctx context.Context
 	return nil
 }
 
-// vpcFirstSubnetCIDR returns the (only) subnet CIDR for a VPC used in the
-// NAT tests. The NAT overlays require exactly one subnet per VPC because
-// the static-NAT offset algorithm is unambiguous only then.
+// vpcFirstSubnetCIDR returns the (only) subnet CIDR for a VPC used in the NAT tests.
 func vpcFirstSubnetCIDR(vpc *vpcapi.VPC) (string, error) {
 	if len(vpc.Spec.Subnets) != 1 {
 		return "", fmt.Errorf("VPC %s has %d subnets, NAT test requires exactly one", vpc.Name, len(vpc.Spec.Subnets)) //nolint:goerr113
