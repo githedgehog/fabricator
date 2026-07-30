@@ -20,14 +20,8 @@ import (
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// SSHResolver returns the SSH config for a server. The collector and per-
-// server refresh helpers take one of these instead of a pre-built
-// map[string]*sshutil.Config so callers can share whatever SSH plumbing
-// they already have (SetupVPCs builds a map keyed by VM name; rt_* tests
-// resolve lazily through testCtx.getSSH).
 type SSHResolver func(server string) (*sshutil.Config, error)
 
-// SSHResolverFromMap adapts a pre-built map into an SSHResolver.
 func SSHResolverFromMap(m map[string]*sshutil.Config) SSHResolver {
 	return func(server string) (*sshutil.Config, error) {
 		cfg, ok := m[server]
@@ -39,9 +33,6 @@ func SSHResolverFromMap(m map[string]*sshutil.Config) SSHResolver {
 	}
 }
 
-// discoveredIP pairs a server-side interface name with the address found
-// on it. The interface tells us whether the address is a hostBGP /32 VIP
-// (on `lo`) or a regular subnet address (on the bond/VLAN interface).
 type discoveredIP struct {
 	iface  string
 	prefix netip.Prefix
@@ -78,12 +69,8 @@ func discoverServerIPs(ctx context.Context, sshCfg *sshutil.Config, server strin
 }
 
 // DroppedEndpoint records an attachment or address that endpoint discovery
-// could not turn into a testable *Endpoint. A drop is not an error on its
-// own — plain `hhfab vlab setup-vpcs` tolerates it — but it does mean some
-// part of the topology is invisible to the connectivity matrix, and
-// ConnectivityMatrix.Validate refuses to run a test against a matrix that
-// carries any. VPC/Subnet are empty when the drop is about an address that
-// matched no attachment.
+// could not turn into a testable *Endpoint. ConnectivityMatrix.Validate()
+// refuses to run a test against a matrix that carries any of these.
 type DroppedEndpoint struct {
 	Server string
 	VPC    string
@@ -99,8 +86,6 @@ func (d DroppedEndpoint) String() string {
 	return fmt.Sprintf("%s (%s/%s): %s", d.Server, d.VPC, d.Subnet, d.Reason)
 }
 
-// serverAttachment is the (vpc, subnet) information the collector resolves
-// from a VPCAttachment + its referenced VPC CRD.
 type serverAttachment struct {
 	vpcName    string
 	subnetName string
@@ -112,25 +97,6 @@ type serverAttachment struct {
 // CollectServerEndpoints observes the live cluster and produces one
 // *Endpoint per (server, vpc, subnet) attachment for each server in the
 // `servers` filter (nil → all servers attached to at least one VPC).
-//
-// Algorithm: list VPCAttachments → group by server (resolved via each
-// attachment's Connection); for each candidate server, SSH it and read all
-// IPv4 addresses; match each address to one of its attachments by CIDR
-// containment (narrowest prefix wins on ties). HostBGP is derived from
-// VPCSubnet.HostBGP.
-//
-// The second return value lists everything discovery could not represent as
-// an endpoint. Two conditions are reported there: an attachment with no
-// matching address on a server that did report addresses, and an address
-// matching none of its server's attachments. Both mean something in the
-// topology would go untested, so ConnectivityMatrix.Validate rejects them.
-// A server with no configured addresses at all is only warned about and is
-// not reported as a drop — this matches today's SetupVPCs behavior, where
-// ESLAG servers in L3VNI mode are skipped before hhnet runs and therefore
-// legitimately have no IPs.
-//
-// Returns an error only when SSH itself fails on a queried server or when a
-// VPCAttachment cannot be resolved to a Connection.
 func CollectServerEndpoints(ctx context.Context, kube kclient.Client, ssh SSHResolver, servers []string) ([]*Endpoint, []DroppedEndpoint, error) {
 	attaches := &vpcapi.VPCAttachmentList{}
 	if err := kube.List(ctx, attaches); err != nil {
@@ -181,10 +147,6 @@ func CollectServerEndpoints(ctx context.Context, kube kclient.Client, ssh SSHRes
 			return nil, nil, fmt.Errorf("getting endpoints of connection %q: %w", conn.Name, err)
 		}
 		if len(srvs) != 1 {
-			// VPCAttachments only reference server-facing connections; if a
-			// connection has no server endpoint we skip it as a malformed
-			// attachment rather than erroring out, since fabric webhooks
-			// already gate this.
 			continue
 		}
 		serverName := srvs[0]
@@ -215,8 +177,6 @@ func CollectServerEndpoints(ctx context.Context, kube kclient.Client, ssh SSHRes
 		})
 	}
 
-	// Probe every candidate server in parallel; errgroup mirrors what
-	// SetupVPCs does for the hhnet config loop.
 	type collected struct {
 		serverName string
 		ips        []discoveredIP
@@ -253,10 +213,7 @@ func CollectServerEndpoints(ctx context.Context, kube kclient.Client, ssh SSHRes
 	}
 
 	// Build endpoints by matching each discovered IP against the server's
-	// candidate attachments (already narrowed by VPCAttachment list). When
-	// multiple attachments contain the IP, the narrowest-prefix attachment
-	// wins (handles the P2P /31 case where a /31 sits inside the parent
-	// /24).
+	// candidate attachments; narrowest-prefix attachment wins
 	slices.SortFunc(probed, func(a, b collected) int { return strings.Compare(a.serverName, b.serverName) })
 	out := []*Endpoint{}
 	dropped := []DroppedEndpoint{}
@@ -264,8 +221,7 @@ func CollectServerEndpoints(ctx context.Context, kube kclient.Client, ssh SSHRes
 		atts := serverAttachments[p.serverName]
 		used := make([]bool, len(atts))
 		if len(p.ips) == 0 {
-			// Expected for ESLAG servers in L3VNI mode, which never run
-			// hhnet; not recorded as a drop (see the function doc).
+			// Expected for ESLAG servers in L3VNI mode, which never run hhnet; not recorded as a drop
 			slog.Warn("Server has no configured IPs, skipping endpoints", "server", p.serverName, "attachments", len(atts))
 
 			continue
@@ -292,8 +248,6 @@ func CollectServerEndpoints(ctx context.Context, kube kclient.Client, ssh SSHRes
 				continue
 			}
 			if used[bestIdx] {
-				// The attachment still has an endpoint (the first matching
-				// address won), so nothing goes untested — warn only.
 				slog.Warn("Multiple server IPs match the same attachment, keeping the first one",
 					"server", p.serverName, "iface", ip.iface, "addr", ip.prefix.String(),
 					"vpc", atts[bestIdx].vpcName, "subnet", atts[bestIdx].subnetName)
@@ -332,26 +286,10 @@ func CollectServerEndpoints(ctx context.Context, kube kclient.Client, ssh SSHRes
 
 // ReplaceServerEndpoints reconciles the matrix's endpoints for one
 // server against newEPs:
-//
 //   - Existing endpoints whose (vpc, subnet) match an entry in newEPs
-//     are updated in place — the IP and HostBGP fields are copied
-//     across, but the *Endpoint pointer stays the same. Matrix entries
-//     keyed on that pointer remain valid, so suite setups that don't
-//     wipe between tests keep their verdicts.
-//   - Existing endpoints with no (vpc, subnet) match in newEPs are
-//     dropped from AllEndpoints; entries referencing them are deleted
-//     (the topology those verdicts assumed no longer holds).
-//   - newEPs that don't match any existing endpoint are appended; the
-//     matrix has no entries for them until the next Repopulate or
-//     overlay.
-//
-// Use after a runtime topology change (server moved to a different VPC,
-// or DHCP lease refreshed) to bring the matrix back in sync with the
-// cluster while preserving entries for attachments that didn't change.
-//
-// Entries in newEPs whose Server.Name != name are appended as-is, so
-// mixing External endpoints into the slice is a no-op for the matching
-// pass.
+//     are updated in place
+//   - Existing endpoints with no (vpc, subnet) match in newEPs are dropped
+//   - newEPs that don't match any existing endpoint are appended
 func (m *ConnectivityMatrix) ReplaceServerEndpoints(name string, newEPs []*Endpoint) {
 	if m == nil {
 		return
@@ -409,10 +347,6 @@ func (m *ConnectivityMatrix) ReplaceServerEndpoints(name string, newEPs []*Endpo
 	}
 }
 
-// ReplaceServerDrops swaps the matrix's recorded discovery drops for one
-// server with the ones from a fresh CollectServerEndpoints sweep. Pair it
-// with ReplaceServerEndpoints so a rebind can't leave the matrix carrying
-// drops from a topology the server no longer has (or hide new ones).
 func (m *ConnectivityMatrix) ReplaceServerDrops(name string, dropped []DroppedEndpoint) {
 	if m == nil {
 		return

@@ -22,48 +22,26 @@ import (
 )
 
 // The connectivity matrix models the expected traffic behavior between every
-// pair of test endpoints in a topology. It is populated by generators
-// (typically setup-vpcs / setup-peerings) and consumed by a runner that
-// exercises each pair.
-//
+// pair of test endpoints in a topology.
 // Design assumptions:
-//   - A single matrix represents one steady-state topology. Dynamic changes
-//     (overlap-NAT, gateway failover, peering churn) are modeled as a
-//     sequence of distinct matrices, not as mutations to one.
-//   - Endpoints are canonical: generators allocate one *Endpoint per
-//     (server, vpc, subnet) attachment and one per External CRD; the matrix
-//     references those pointers from AllEndpoints and as EndpointPair keys.
 //   - A server with multiple IPs (attached to several subnets or VPCs) is
 //     represented as multiple endpoints, one per (vpc, subnet). The verdict
-//     depends on which address is used, so collapsing them is not safe.
+//     depends on which address is used.
 //   - Absence of an entry for a pair means default DENY (isolation).
-//     Generators may emit explicit Verdict=Deny entries when a Reason aids
-//     diagnostics.
 
 // gwNATPortForwardProbeTimeout is the maximum time to wait for the gateway's
 // port-forward NAT rule to become active in the dataplane after a peering is
-// applied. Unlike fabric route propagation (which waitForNATPoolInLeaves gates
-// on), the gateway's DNAT rule programming has its own latency that no
-// Kubernetes condition signals.
+// applied.
 const gwNATPortForwardProbeTimeout = 2 * time.Minute
 
 // gwNATPortForwardProbeInterval is the polling interval between TCP-reachability probes.
 const gwNATPortForwardProbeInterval = 5 * time.Second
 
-// ConnectivityVerdict describes what should happen to traffic on a path.
 type ConnectivityVerdict string
 
 const (
-	VerdictAllow ConnectivityVerdict = "allow"
-	VerdictDeny  ConnectivityVerdict = "deny"
-
-	// VerdictUnknown marks a pair the generator could not evaluate — today
-	// only peering shapes the reachability helpers don't model (see
-	// reachCheckUnsupported). It exists so that "we can't tell" is
-	// distinguishable from "must not work": a missing entry reads as Deny
-	// and would quietly pass by proving unreachability, while Validate
-	// refuses to run a test against a matrix that still holds one. Tests
-	// that know the real answer overlay it explicitly.
+	VerdictAllow   ConnectivityVerdict = "allow"
+	VerdictDeny    ConnectivityVerdict = "deny"
 	VerdictUnknown ConnectivityVerdict = "unknown"
 )
 
@@ -71,80 +49,51 @@ const (
 // is optional; an unset field means "no translation on that axis".
 type TranslatedAddress struct {
 	// SourcePool: CIDR from which the destination may observe any source IP
-	// (masquerade SNAT — the runtime pool selection is not predictable, only
-	// the containing range is).
 	SourcePool netip.Prefix
 
 	// DestinationIP: IP the source must target to reach the destination
-	// (DNAT). Unset means use the destination's real IP.
 	DestinationIP netip.Addr
 
 	// DestinationPort: port the destination actually listens on, when
-	// different from the source-facing port in
-	// ConnectivityExpectation.ProtoPort (port-forward DNAT). Zero means no
-	// port translation.
+	// different from the source-facing port. Zero means no port translation.
 	DestinationPort uint16
 }
 
-// ProtoPort is a protocol + port tuple. The zero value (empty protocol,
-// port 0) is the sentinel for "applies to the default connectivity check
-// the runner performs" (today: ICMP + TCP/any).
 type ProtoPort struct {
 	Protocol string // "tcp", "udp", "icmp"
 	Port     uint16
 }
 
 // ConnectivityExpectation describes what should happen on a directional path.
-// To express bidirectional behavior, emit two entries with swapped pairs.
 type ConnectivityExpectation struct {
 	Pair EndpointPair
 
-	// Verdict: should traffic be allowed or denied on this path?
 	Verdict ConnectivityVerdict
 
-	// NAT: optional address translation expected on this path.
 	NAT *TranslatedAddress
 
-	// Reason: why this expectation exists (diagnostic; the ReachabilityReason
-	// enum may be extended with NAT, isolation, and permit-list values as
-	// new generators land).
 	Reason ReachabilityReason
 
-	// Peering: name of the CRD that produced this expectation (diagnostic).
 	Peering string
 
-	// Detail: free-form context for Reason, currently only set on
-	// VerdictUnknown entries to carry why the pair could not be evaluated
-	// (diagnostic; surfaced by Validate).
+	// free-form context for Reason, currently only set on VerdictUnknown entries
 	Detail string
 
-	// ProtoPort scopes this expectation to a specific protocol/port. The
-	// zero value applies to the runner's default check.
 	ProtoPort ProtoPort
 }
 
-// ServerEndpoint identifies one (server, vpc, subnet) attachment. A server
-// attached to multiple subnets is represented by multiple endpoints.
 type ServerEndpoint struct {
-	Name   string // e.g. "server-1"
-	VPC    string // e.g. "vpc-01"
-	Subnet string // e.g. "default"
-
-	// HostBGP: if true, this attachment uses BGP to advertise a /32 VIP on
-	// the loopback; IP holds that VIP (discovered at runtime). Otherwise IP
-	// is the DHCP/static address on the subnet interface.
+	Name    string // e.g. "server-1"
+	VPC     string // e.g. "vpc-01"
+	Subnet  string // e.g. "default"
 	HostBGP bool
 	IP      netip.Addr
 }
 
-// ExternalEndpoint identifies an External CRD.
 type ExternalEndpoint struct {
 	ExternalName string
 	Prefixes     []netip.Prefix
-
-	// SourceIP: optional address used when this external originates traffic.
-	// Empty means the external is destination-only in the matrix.
-	SourceIP netip.Addr
+	SourceIP     netip.Addr
 }
 
 // Endpoint is a tagged union; exactly one of Server, External is non-nil.
@@ -153,49 +102,37 @@ type Endpoint struct {
 	External *ExternalEndpoint
 }
 
-// EndpointPair is a directional (source → destination) key. Both fields must
-// be non-nil and must point to endpoints listed in the owning matrix's
-// AllEndpoints (the matrix uses pointer identity for lookups).
 type EndpointPair struct {
 	Source      *Endpoint
 	Destination *Endpoint
 }
 
-// ConnectivityMatrix holds the complete set of expectations for a topology.
 type ConnectivityMatrix struct {
-	// AllEndpoints: canonical, ordered list of all endpoints in the matrix.
+	// Canonical, ordered list of all endpoints in the matrix.
 	AllEndpoints []*Endpoint
 
-	// entries[pair][protoPort] = expectation. The zero ProtoPort{} key holds
-	// the default-check expectation for the pair.
+	// The zero ProtoPort{} key holds the default-check expectation for the pair.
 	entries map[EndpointPair]map[ProtoPort]ConnectivityExpectation
 
-	// dropped: attachments/addresses endpoint discovery could not turn into
-	// endpoints. Not testable, so not in AllEndpoints — kept here so
-	// Validate can refuse to test a topology it only partially sees.
+	// Attachments/addresses endpoint discovery could not turn into endpoints.
+	// Kept here so Validate can refuse to test a topology it only partially sees.
 	dropped []DroppedEndpoint
 }
 
-// NewConnectivityMatrix returns an empty matrix. AllEndpoints should be set
-// by the caller before adding expectations that reference them.
 func NewConnectivityMatrix() *ConnectivityMatrix {
 	return &ConnectivityMatrix{
 		entries: map[EndpointPair]map[ProtoPort]ConnectivityExpectation{},
 	}
 }
 
-// EndpointPredicate selects endpoints during matrix overlays. Composable
-// with the helpers below (ServerInVPC, ExternalNamed).
 type EndpointPredicate func(*Endpoint) bool
 
-// ServerInVPC matches server endpoints attached to the given VPC.
 func ServerInVPC(vpc string) EndpointPredicate {
 	return func(ep *Endpoint) bool {
 		return ep.Server != nil && ep.Server.VPC == vpc
 	}
 }
 
-// ExternalNamed matches external endpoints with the given External CRD name.
 func ExternalNamed(name string) EndpointPredicate {
 	return func(ep *Endpoint) bool {
 		return ep.External != nil && ep.External.ExternalName == name
@@ -215,18 +152,8 @@ func overlayReason(existing ReachabilityReason) ReachabilityReason {
 	return ReachabilityReasonGatewayPeering
 }
 
-// NATMutator updates a TranslatedAddress for a specific (src, dst) pair.
-// The passed-in nat is seeded from any existing entry's NAT (or zero
-// value if none) and is the value the helper writes back via matrix.Add.
 type NATMutator func(src, dst *Endpoint, nat *TranslatedAddress) error
 
-// OverlayMatrixNAT marks every (src, dst) pair whose endpoints satisfy
-// both predicates as Allow, then runs mutator to set NAT info on the
-// resulting entry.
-//
-// Returns an error if no pair matched the predicates, which almost
-// always indicates mismatched predicates relative to the matrix's
-// AllEndpoints set.
 func OverlayMatrixNAT(
 	matrix *ConnectivityMatrix,
 	srcPred, dstPred EndpointPredicate,
@@ -266,18 +193,6 @@ func OverlayMatrixNAT(
 	return nil
 }
 
-// BuildConnectivityMatrix assembles a matrix from a pre-discovered set of
-// server endpoints (typically returned by SetupVPCs), enumerates external
-// endpoints from the live cluster, and populates Allow entries by querying
-// IsServerReachable / IsExternalSubnetReachable for every endpoint pair.
-// The gatewayEnabled flag is auto-derived from the current Fabricator
-// config. NAT translations are not modeled here — callers overlay them on
-// the returned matrix before running connectivity tests.
-//
-// hhfab's CLI / vlabrunner paths don't build a matrix at all; this is
-// strictly a test-side opt-in. setupTest calls it once at suite startup;
-// matrix-driven tests call Repopulate on the existing matrix after
-// DoSetupPeerings to refresh verdicts to the post-peering state.
 func BuildConnectivityMatrix(ctx context.Context, kube kclient.Client, serverEndpoints []*Endpoint, dropped []DroppedEndpoint) (*ConnectivityMatrix, error) {
 	matrix := NewConnectivityMatrix()
 	matrix.AllEndpoints = append(matrix.AllEndpoints, serverEndpoints...)
@@ -296,11 +211,6 @@ func BuildConnectivityMatrix(ctx context.Context, kube kclient.Client, serverEnd
 	return matrix, nil
 }
 
-// BuildConnectivityMatrixFromCluster discovers server endpoints by
-// observing the live cluster (via CollectServerEndpoints) rather than
-// taking a pre-built slice, then assembles a matrix the same way as
-// BuildConnectivityMatrix. Used when a caller needs to build a matrix
-// against a pre-existing topology without re-running SetupVPCs.
 func BuildConnectivityMatrixFromCluster(ctx context.Context, kube kclient.Client, ssh SSHResolver) (*ConnectivityMatrix, error) {
 	endpoints, dropped, err := CollectServerEndpoints(ctx, kube, ssh, nil)
 	if err != nil {
@@ -312,9 +222,7 @@ func BuildConnectivityMatrixFromCluster(ctx context.Context, kube kclient.Client
 
 // Repopulate clears the matrix's expectation entries and refills Allow
 // entries by querying the live cluster for reachability between every
-// (src, dst) endpoint pair in AllEndpoints. The gatewayEnabled flag is
-// derived from the current Fabricator config. NAT translations are
-// reset; callers re-apply any overlays after a Repopulate.
+// (src, dst) endpoint pair in AllEndpoints.
 func (m *ConnectivityMatrix) Repopulate(ctx context.Context, kube kclient.Client) error {
 	f, _, _, err := fab.GetFabAndNodes(ctx, kube, fab.GetFabAndNodesOpts{AllowNotHydrated: true})
 	if err != nil {
@@ -327,9 +235,7 @@ func (m *ConnectivityMatrix) Repopulate(ctx context.Context, kube kclient.Client
 	return nil
 }
 
-// Add inserts or replaces the expectation for (Pair, ProtoPort). Generators
-// call this to populate the matrix; tests may also call it to override
-// individual entries for advanced scenarios.
+// Add inserts or replaces the expectation for (Pair, ProtoPort).
 func (m *ConnectivityMatrix) Add(e ConnectivityExpectation) {
 	if m.entries == nil {
 		m.entries = map[EndpointPair]map[ProtoPort]ConnectivityExpectation{}
@@ -342,10 +248,6 @@ func (m *ConnectivityMatrix) Add(e ConnectivityExpectation) {
 	byPP[e.ProtoPort] = e
 }
 
-// Lookup returns the expectation for (src, dst, pp). If pp is non-zero and
-// no protocol-specific entry exists, falls back to the default ProtoPort{}
-// entry. If no entry exists at all, returns a synthetic Verdict=Deny
-// expectation (default isolation).
 func (m *ConnectivityMatrix) Lookup(src, dst *Endpoint, pp ProtoPort) ConnectivityExpectation {
 	pair := EndpointPair{Source: src, Destination: dst}
 	if byPP, ok := m.entries[pair]; ok {
@@ -366,30 +268,6 @@ func (m *ConnectivityMatrix) Lookup(src, dst *Endpoint, pp ProtoPort) Connectivi
 	}
 }
 
-// Validate reports whether the matrix is a sound oracle for a connectivity
-// run. Lookup answers Deny for every pair it has no entry for, so a matrix
-// that silently lost endpoints or could not evaluate a peering would assert
-// unreachability it never established — and pass. Validate is the single
-// gate in front of that: it runs at the top of TestConnectivityWithMatrix,
-// after generators have populated and tests have applied their overlays.
-//
-// It rejects:
-//   - an empty endpoint set (nothing to test, e.g. a matrix built with
-//     noSetup against a topology that was never discovered);
-//   - discovery drops (an attachment or address that never became an
-//     endpoint, so a slice of the topology goes untested);
-//   - leftover VerdictUnknown entries, which mean populate could not
-//     evaluate the pair and no test overlaid the real expectation.
-//
-// It deliberately does not require any Allow entry: a topology of mutually
-// isolated VPCs with no peerings is a legitimate thing to assert.
-//
-// Unknown on a server→external pair is only fatal when that source has no
-// Allow to any external. The reachability helper behind external
-// destinations ORs over every External in the cluster rather than
-// answering per-destination, and runMatrixCurlPhase consumes it the same
-// way, so one Allow settles the source's expectation regardless of the
-// other externals' entries.
 func (m *ConnectivityMatrix) Validate() error {
 	if m == nil {
 		return fmt.Errorf("connectivity matrix is nil") //nolint:goerr113
@@ -441,7 +319,6 @@ func (m *ConnectivityMatrix) Validate() error {
 	return errors.Join(errs...)
 }
 
-// describeUnknownEntry renders a pair for Validate's diagnostics.
 func describeUnknownEntry(pair EndpointPair, pp ProtoPort, e ConnectivityExpectation) string {
 	out := fmt.Sprintf("%s → %s", endpointLabel(pair.Source), endpointLabel(pair.Destination))
 	if pp != (ProtoPort{}) {
@@ -456,7 +333,6 @@ func describeUnknownEntry(pair EndpointPair, pp ProtoPort, e ConnectivityExpecta
 	return out
 }
 
-// endpointLabel renders an endpoint for diagnostics.
 func endpointLabel(ep *Endpoint) string {
 	switch {
 	case ep == nil:
@@ -470,9 +346,6 @@ func endpointLabel(ep *Endpoint) string {
 	}
 }
 
-// reachabilityFromExpectation projects a matrix expectation onto the
-// Reachability struct used by the ping/iperf helpers. The matrix's
-// Verdict, Reason, and Peering map directly.
 func reachabilityFromExpectation(e ConnectivityExpectation) Reachability {
 	return Reachability{
 		Reachable: e.Verdict == VerdictAllow,
@@ -481,8 +354,6 @@ func reachabilityFromExpectation(e ConnectivityExpectation) Reachability {
 	}
 }
 
-// check whether two endpoints belong to the same server / external, regardless
-// of the specific IP being tested (in case of multi-homed servers)
 func IsSameEndpointNode(a, b *Endpoint) bool {
 	if a == nil || b == nil {
 		return false
@@ -492,31 +363,6 @@ func IsSameEndpointNode(a, b *Endpoint) bool {
 		(a.Server != nil && b.Server != nil && a.Server.Name == b.Server.Name)
 }
 
-// TestConnectivityWithMatrix runs ping/iperf/curl against the topology, using
-// the supplied ConnectivityMatrix as the authoritative source for both the
-// addresses to target and the expected verdicts. No live reachability
-// queries are made; matrix.Lookup is the only oracle.
-//
-// Server-server pairs run ping always (allow → expect success, deny →
-// expect failure) and iperf only when the matrix allows them. Bidirectional
-// iperf is detected by looking up the reverse pair in the matrix.
-//
-// Externals are treated as in the legacy test: one curl per source server
-// to a hardcoded environment IP ("1.0.0.1"), with the expectation derived
-// from the OR of all (src → *_external) matrix verdicts. External-as-source
-// paths are not exercised — the matrix doesn't track them today.
-//
-// opts.Sources and opts.Destinations filter the matrix iteration by server
-// name (matching the legacy TestConnectivity semantics): a non-empty
-// Sources restricts the source side, a non-empty Destinations restricts the
-// destination side, and bidir only triggers when the reverse pair also
-// falls inside the filters.
-
-// matrixTestDeps bundles the shared scaffolding TestConnectivityWithMatrix
-// hands to its per-phase helpers: SSH map, concurrency
-// semaphores, source/destination filter predicates, the WaitGroup that
-// drives goroutine completion, and the error channel that collects probe
-// failures.
 type matrixTestDeps struct {
 	sshByServer    map[string]*sshutil.Config
 	pings          *semaphore.Weighted
@@ -528,11 +374,6 @@ type matrixTestDeps struct {
 	errChan        chan<- error
 }
 
-// runMatrixServerServerPhase fans out ping (and iperf3 when allowed)
-// goroutines for every (src, dst) server pair the matrix knows about,
-// honoring NAT.DestinationIP when present. Pairs that carry a
-// DestinationPort are skipped here and instead exercised by
-// runMatrixPortForwardPhase, which uses the L4-aware iperf3 helper.
 func runMatrixServerServerPhase(ctx context.Context, opts TestConnectivityOpts, matrix *ConnectivityMatrix, deps *matrixTestDeps) error {
 	for _, src := range matrix.AllEndpoints {
 		if src.Server == nil {
@@ -545,8 +386,6 @@ func runMatrixServerServerPhase(ctx context.Context, opts TestConnectivityOpts, 
 			if dst.Server == nil || src == dst {
 				continue
 			}
-			// Skip pairs that ultimately point at the same host: same-host
-			// traffic short-circuits via lo and does not exercise the fabric.
 			if IsSameEndpointNode(src, dst) {
 				continue
 			}
@@ -609,12 +448,6 @@ func runMatrixServerServerPhase(ctx context.Context, opts TestConnectivityOpts, 
 	return nil
 }
 
-// runMatrixCurlPhase launches one curl per source server in
-// deps.inSources to the hardcoded outbound target ("1.0.0.1").
-// Each server's expected.Reachable is the OR of all (src → *_external)
-// matrix Allow entries that have SNAT info or no NAT at all; DNAT-only
-// (port-forward) entries don't generically route outbound and so don't
-// raise the expectation.
 func runMatrixCurlPhase(ctx context.Context, opts TestConnectivityOpts, matrix *ConnectivityMatrix, deps *matrixTestDeps) {
 	expectedByServer := map[string]Reachability{}
 	for _, src := range matrix.AllEndpoints {
@@ -670,17 +503,6 @@ func runMatrixCurlPhase(ctx context.Context, opts TestConnectivityOpts, matrix *
 	}
 }
 
-// runMatrixPortForwardPhase launches iperf3 against every port-forward
-// NAT virtual endpoint encoded in the matrix. External destinations are
-// deduped by (srcServer, IP, port) so the single external iperf3 server is hit once;
-// server destinations exercise every (src, dst) pair for full cross-product
-// coverage.
-//
-// Deny entries that carry port-forward NAT details are probed too: the
-// (IP, port) they name must NOT accept a connection. Without this,
-// negative expectations stop at the port-forward boundary — the
-// server-server phase skips DestinationPort pairs as L4-only, so a Deny
-// port-forward would otherwise be asserted nowhere.
 func runMatrixPortForwardPhase(ctx context.Context, opts TestConnectivityOpts, matrix *ConnectivityMatrix, deps *matrixTestDeps) {
 	type pfTargetKey struct {
 		from string
@@ -751,8 +573,6 @@ func (c *Config) TestConnectivityWithMatrix(ctx context.Context, vlab *VLAB, opt
 	if opts.PingsCount == 0 && opts.IPerfsSeconds == 0 && opts.CurlsCount == 0 {
 		return fmt.Errorf("at least one of pings, iperfs or curls should be enabled") //nolint:goerr113
 	}
-	// Deny verdicts drive assertions from here on; refuse to run if the
-	// matrix can't back them (see Validate).
 	if err := matrix.Validate(); err != nil {
 		return fmt.Errorf("connectivity matrix is not a sound oracle: %w", err)
 	}
@@ -776,8 +596,6 @@ func (c *Config) TestConnectivityWithMatrix(ctx context.Context, vlab *VLAB, opt
 	}
 	defer cacheCancel()
 
-	// Resolve the SSH config for every unique server name referenced by
-	// the matrix.
 	sshByServer := map[string]*sshutil.Config{}
 	for _, ep := range matrix.AllEndpoints {
 		if ep.Server == nil {
@@ -854,11 +672,6 @@ func (c *Config) TestConnectivityWithMatrix(ctx context.Context, vlab *VLAB, opt
 	return joined
 }
 
-// runMatrixIperfPortForward exercises one port-forward NAT path encoded by
-// the matrix: TCP-probe NAT.DestinationIP:Port until the gateway's DNAT
-// rule is programmed, then run iperf3 once. Targets may be external NAT
-// virtual IPs or other VPCs' NAT pool addresses — the function is agnostic
-// to where the (ip, port) lives.
 func runMatrixIperfPortForward(ctx context.Context, opts TestConnectivityOpts, iperfs *semaphore.Weighted, from string, ssh *sshutil.Config, toIP netip.Addr, toPort uint16, expected Reachability) *IperfError {
 	target := fmt.Sprintf("%s:%d", toIP.String(), toPort)
 	why := expectationWhy(expected)
@@ -871,10 +684,6 @@ func runMatrixIperfPortForward(ctx context.Context, opts TestConnectivityOpts, i
 	}
 	slog.Debug("Checking iperf3 through port-forward NAT (matrix)", logArgs...)
 
-	// Negative expectation: the virtual (IP, port) must refuse the
-	// connection. There is nothing to wait for — no DNAT rule is ever
-	// meant to appear — so a single probe decides it, and a successful
-	// connect is the failure.
 	if !expected.Reachable {
 		if _, _, err := retrySSHCmd(ctx, ssh, fmt.Sprintf("nc -zw2 %s %d", toIP.String(), toPort), from); err == nil {
 			return &IperfError{
@@ -888,11 +697,8 @@ func runMatrixIperfPortForward(ctx context.Context, opts TestConnectivityOpts, i
 		return nil
 	}
 
-	// Gate on TCP reachability: the gateway's port-forward DNAT rule has
-	// its own programming lag separate from fabric route propagation, and
-	// a successful TCP connect is the precise signal that both halves of
-	// the path (fabric route + gateway DNAT) are active. After the probe
-	// succeeds, iperf3 runs once and any failure is a real test failure.
+	// Gate on TCP reachability: a successful TCP connect is the precise signal
+	// that both halves of the path (fabric route + gateway DNAT) are active.
 	probe := fmt.Sprintf("nc -zw2 %s %d", toIP.String(), toPort)
 	deadline := time.Now().Add(gwNATPortForwardProbeTimeout)
 	var lastErr error

@@ -568,10 +568,7 @@ func ResolveDefaultServerMTU(ctx context.Context, kube kclient.Client, opts *Set
 
 // SetupVPCs creates VPCs and VPC attachments per opts, configures servers,
 // and returns one Endpoint per (server, vpc, subnet) attachment with the
-// discovered IP and HostBGP flag populated. ESLAG servers skipped in non-L2VNI
-// modes are not included in the returned list. Callers that want to drive
-// matrix-based connectivity tests pass the result to BuildConnectivityMatrix;
-// CLI and vlabrunner callers discard it.
+// discovered IP and HostBGP flag populated.
 func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) ([]*Endpoint, []DroppedEndpoint, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
@@ -725,14 +722,6 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		nextPrefix()
 	}
 
-	// Collect MCLAG switches for later (needed for hostbgp validation)
-	mclagSwitches := map[string]bool{}
-	for _, sw := range switchList.Items {
-		if sw.Spec.Redundancy.Type == meta.RedundancyTypeMCLAG {
-			mclagSwitches[sw.Name] = true
-		}
-	}
-
 	serverInSubnet := 0
 	subnetInVPC := 0
 	vpcID := 0
@@ -779,19 +768,9 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		}
 		conn := conns.Items[0]
 
-		switches, _, _, _, err := conn.Spec.Endpoints()
-		if err != nil {
-			return nil, nil, fmt.Errorf("getting connection %q endpoints: %w", conn.Name, err)
-		}
-		isMclag := false
-		for _, sw := range switches {
-			_, found := mclagSwitches[sw]
-			isMclag = isMclag || found
-		}
-
 		vpcName := fmt.Sprintf("vpc-%02d", vpcID+1)
 		subnetName := fmt.Sprintf("subnet-%02d", subnetInVPC+1)
-		hostBGP := opts.HostBGPSubnet && !hostBGPDoneForVPC && conn.Spec.Unbundled != nil && !isMclag
+		hostBGP := opts.HostBGPSubnet && !hostBGPDoneForVPC && conn.Spec.Unbundled != nil
 		if hostBGP {
 			hostBGPDoneForVPC = true
 		}
@@ -1847,16 +1826,9 @@ func buildExternalEndpoints(externals []vpcapi.External) []*Endpoint {
 
 // populateConnectivityMatrix iterates all endpoint pairs in m.AllEndpoints
 // and adds an allow expectation when the cluster's current peering state
-// reports the pair as reachable. Reverse-direction expectations are emitted
-// independently. NAT translation details (SNAT/DNAT/port-forward/masquerade
-// pools) and external-originated traffic are NOT modeled — callers must
-// Add() explicit entries for those.
-//
-// Pairs the reachability helpers cannot evaluate (peering shapes behind
-// reachCheckUnsupported) get an explicit VerdictUnknown entry instead of
-// being left out: absence means Deny to Lookup, which would assert
-// unreachability nobody established. The test is expected to overlay the
-// real expectation; ConnectivityMatrix.Validate fails the run otherwise.
+// reports the pair as reachable. NAT translation details
+// (SNAT/DNAT/port-forward/masquerade pools) and external-originated traffic
+// are NOT modeled — callers must Add() explicit entries for those.
 //
 // TODO: IsServerReachable takes only (srcName, dstName) and so returns the
 // same verdict for every (src_ep, dst_ep) pair sharing those names. For a
@@ -1880,11 +1852,6 @@ func populateConnectivityMatrix(ctx context.Context, kube kclient.Reader, m *Con
 				r, err := IsServerReachable(ctx, kube, src.Server.Name, dst.Server.Name, gatewayEnabled)
 				if err != nil {
 					if errors.Is(err, reachCheckUnsupported) {
-						// Record the pair as unevaluated rather than
-						// leaving it absent: absence reads as Deny and
-						// would be asserted as such. The test must
-						// overlay the real expectation (Validate
-						// enforces it).
 						m.Add(ConnectivityExpectation{
 							Pair:    EndpointPair{Source: src, Destination: dst},
 							Verdict: VerdictUnknown,
@@ -1909,8 +1876,6 @@ func populateConnectivityMatrix(ctx context.Context, kube kclient.Reader, m *Con
 					r, err := IsExternalSubnetReachable(ctx, kube, src.Server.Name, prefix.String(), gatewayEnabled)
 					if err != nil {
 						if errors.Is(err, reachCheckUnsupported) {
-							// As above; a later prefix that does resolve
-							// to Allow overwrites this entry.
 							m.Add(ConnectivityExpectation{
 								Pair:    EndpointPair{Source: src, Destination: dst},
 								Verdict: VerdictUnknown,
@@ -1933,8 +1898,6 @@ func populateConnectivityMatrix(ctx context.Context, kube kclient.Reader, m *Con
 						break
 					}
 				}
-				// external-as-source and external-to-external paths are not
-				// auto-generated; the reachability helpers don't model them.
 			}
 		}
 	}
@@ -1942,11 +1905,6 @@ func populateConnectivityMatrix(ctx context.Context, kube kclient.Reader, m *Con
 	return nil
 }
 
-// DoSetupPeerings reconciles VPC/external/gateway peerings to match the
-// caller's specs (deletes anything not in the spec, creates or updates the
-// rest), optionally waits for switches to converge, and returns. It is
-// matrix-agnostic: callers that need a post-peering ConnectivityMatrix
-// invoke BuildConnectivityMatrix afterward.
 func DoSetupPeerings(ctx context.Context, kube client.Client, vpcPeerings map[string]*vpcapi.VPCPeeringSpec,
 	externalPeerings map[string]*vpcapi.ExternalPeeringSpec, gwPeerings map[string]*gwapi.PeeringSpec,
 	waitReady bool,
@@ -2129,14 +2087,12 @@ type PingError struct {
 	Source      string
 	Destination string
 	Expected    bool
-	// Why: what made Expected what it is (matrix Reason/Peering, or the
-	// live reachability check's).
-	Why       string
-	Sent      int
-	Received  int
-	Lost      []int
-	CmdOutput string
-	Msg       string
+	Why         string // what made the expectation what it is
+	Sent        int
+	Received    int
+	Lost        []int
+	CmdOutput   string
+	Msg         string
 }
 
 func (pe *PingError) Error() string {
@@ -2188,11 +2144,9 @@ func parsePingLostSeqs(stdout string, sent int) []int {
 }
 
 type IperfError struct {
-	Source      string
-	Destination string
-	// Why: what made the expectation what it is (matrix Reason/Peering,
-	// or the live reachability check's).
-	Why             string
+	Source          string
+	Destination     string
+	Why             string // what made the expectation what it is
 	MinSpeed        string
 	SentSpeed       string
 	RcvdSpeed       string
@@ -2224,9 +2178,7 @@ type CurlError struct {
 	Expected bool
 	Output   string
 	Msg      string
-	// Why: what made Expected what it is (matrix Reason/Peering, or the
-	// live reachability check's).
-	Why string
+	Why      string // what made Expected what it is
 }
 
 func (ce *CurlError) Error() string {
@@ -2234,12 +2186,6 @@ func (ce *CurlError) Error() string {
 		ce.Source, ce.Msg, ce.Expected, whySuffix(ce.Why))
 }
 
-// expectationWhy renders why a probe was expected to succeed or fail, so a
-// failure message says more than "expected true": which peering the verdict
-// came from. An empty Reason is reported as such rather than guessed at —
-// on a Deny it is the matrix's default-isolation answer, which is also what
-// a lost entry looks like, and callers that pass a bare expectation have no
-// reason to state.
 func expectationWhy(r Reachability) string {
 	switch {
 	case r.Reason != "" && r.Peering != "":
@@ -2276,12 +2222,6 @@ type TestConnectivityOpts struct {
 	RequireAllServers bool
 }
 
-// prepareConnectivityTest does the shared prelude work for connectivity
-// tests: SSH config map for all vlab VMs, kube client with a cache, switch
-// list and the IPerfsMinSpeed adjustment based on switch types, and
-// optional WaitReady. The caller must call cleanup when finished to release
-// the kube cache. opts is mutated in place to apply the IPerfsMinSpeed
-// adjustment.
 func (c *Config) prepareConnectivityTest(ctx context.Context, vlab *VLAB, opts *TestConnectivityOpts) (sshConfigs map[string]*sshutil.Config, kube kclient.Client, cleanup func(), err error) {
 	sshConfigs = map[string]*sshutil.Config{}
 	for _, vm := range vlab.VMs {
@@ -2336,10 +2276,6 @@ func (c *Config) prepareConnectivityTest(ctx context.Context, vlab *VLAB, opts *
 	return sshConfigs, kube, cacheCancel, nil
 }
 
-// pingIperfPairArgs holds the resolved inputs for one directional
-// ping+iperf check between two endpoints. The caller is responsible for
-// looking up the source SSH config, destination IP, expected reachability,
-// and the bidir flag before invoking runPingIperfPair.
 type pingIperfPairArgs struct {
 	From     string
 	To       string
@@ -2351,9 +2287,6 @@ type pingIperfPairArgs struct {
 	Iperfs   *semaphore.Weighted
 }
 
-// runPingIperfPair runs ping and (when enabled and not lex-skipped in bidir
-// mode) iperf for one (From → To) pair, returning every encountered error
-// so the caller can route them.
 func runPingIperfPair(ctx context.Context, opts TestConnectivityOpts, args pingIperfPairArgs) []error {
 	logArgs := []any{
 		"from", args.From,
