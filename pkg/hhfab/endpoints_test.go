@@ -243,6 +243,31 @@ func TestValidate(t *testing.T) {
 		require.NoError(t, m.Validate())
 	})
 
+	t.Run("unevaluated default entry shadowed by proto-port entries", func(t *testing.T) {
+		// Proto-scoped pairs are probed only by runMatrixProtoPortPhase, which
+		// never reads the default entry, so an ACL test overlaying just the
+		// proto verdicts leaves nothing unasserted.
+		m := newMatrix()
+		m.Add(ConnectivityExpectation{
+			Pair: EndpointPair{Source: a, Destination: b}, Verdict: VerdictUnknown, Detail: "unsupported",
+		})
+		require.ErrorContains(t, m.Validate(), "server-1(vpc-1/default) → server-2(vpc-2/default)")
+
+		m.Add(ConnectivityExpectation{
+			Pair: EndpointPair{Source: a, Destination: b}, Verdict: VerdictAllow,
+			ProtoPort: ProtoPort{Protocol: "tcp", Port: 5301},
+		})
+		require.NoError(t, m.Validate())
+
+		// ...unless the default entry is a port-forward, which the
+		// port-forward phase does read.
+		m.Add(ConnectivityExpectation{
+			Pair: EndpointPair{Source: a, Destination: b}, Verdict: VerdictUnknown, Detail: "unsupported",
+			NAT: &TranslatedAddress{DestinationIP: netip.MustParseAddr("10.0.2.1"), DestinationPort: 15201},
+		})
+		require.ErrorContains(t, m.Validate(), "server-1(vpc-1/default) → server-2(vpc-2/default)")
+	})
+
 	t.Run("unevaluated external is settled by another external's allow", func(t *testing.T) {
 		// The external oracle ORs over every External in the cluster, so
 		// one Allow decides the source's expectation for all of them.

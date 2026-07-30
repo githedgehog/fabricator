@@ -86,12 +86,37 @@ func overlayExternalPortForward(matrix *ConnectivityMatrix, vpcName, extName str
 		return fmt.Errorf("destIP must be valid for port-forward overlay") //nolint:goerr113
 	}
 
+	overlayExternalNoEgress(matrix, vpcName, extName)
+
 	return OverlayMatrixNAT(matrix, ServerInVPC(vpcName), ExternalNamed(extName), func(_, _ *Endpoint, nat *TranslatedAddress) error {
 		nat.DestinationIP = destIP
 		nat.DestinationPort = destPort
 
 		return nil
 	})
+}
+
+// overlayExternalNoEgress states the "correctly expects failure" half of the
+// contract above for the externals the peering never mentions. The curl oracle
+// ORs over every external, so leaving them undecided leaves the whole check
+// undecided — and populate cannot decide them itself, since one unevaluable
+// NAT peering aborts its scan over all externals.
+func overlayExternalNoEgress(matrix *ConnectivityMatrix, vpcName, keepExt string) {
+	inVPC := ServerInVPC(vpcName)
+	for _, src := range matrix.AllEndpoints {
+		if !inVPC(src) {
+			continue
+		}
+		for _, dst := range matrix.AllEndpoints {
+			if dst.External == nil || dst.External.ExternalName == keepExt {
+				continue
+			}
+			matrix.Add(ConnectivityExpectation{
+				Pair:    EndpointPair{Source: src, Destination: dst},
+				Verdict: VerdictDeny,
+			})
+		}
+	}
 }
 
 // Test gateway external peering with no NAT (baseline)

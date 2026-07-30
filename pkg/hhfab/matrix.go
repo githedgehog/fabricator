@@ -312,6 +312,9 @@ func (m *ConnectivityMatrix) Validate() error {
 			if pair.Destination != nil && pair.Destination.External != nil && extAllowBySource[pair.Source] {
 				continue
 			}
+			if m.defaultEntryShadowed(pair, pp, e) {
+				continue
+			}
 			unknowns = append(unknowns, describeUnknownEntry(pair, pp, e))
 		}
 	}
@@ -322,6 +325,24 @@ func (m *ConnectivityMatrix) Validate() error {
 	}
 
 	return errors.Join(errs...)
+}
+
+// defaultEntryShadowed reports whether a default-ProtoPort entry is read by no
+// phase at all: runMatrixServerServerPhase hands a pair carrying proto-port
+// entries to runMatrixProtoPortPhase, which reads only those. Port-forward
+// entries are exempt, runMatrixPortForwardPhase still reads them.
+func (m *ConnectivityMatrix) defaultEntryShadowed(pair EndpointPair, pp ProtoPort, e ConnectivityExpectation) bool {
+	if pp != (ProtoPort{}) {
+		return false
+	}
+	if pair.Source == nil || pair.Destination == nil || pair.Source.Server == nil || pair.Destination.Server == nil {
+		return false
+	}
+	if e.NAT != nil && e.NAT.DestinationPort != 0 {
+		return false
+	}
+
+	return m.HasProtoPortEntries(pair.Source, pair.Destination)
 }
 
 func (m *ConnectivityMatrix) externalCurlAllowed(src *Endpoint) (ConnectivityExpectation, bool) {
@@ -897,16 +918,12 @@ func runMatrixIperfPortForward(ctx context.Context, opts TestConnectivityOpts, i
 	slog.Debug("Checking iperf3 through port-forward NAT (matrix)", logArgs...)
 
 	if !expected.Reachable {
-		if _, _, err := retrySSHCmd(ctx, ssh, fmt.Sprintf("nc -zw2 %s %d", toIP.String(), toPort), from); err == nil {
-			return &IperfError{
-				Source:      from,
-				Destination: target,
-				Why:         why,
-				ClientMsg:   "port-forward target is reachable but the matrix expects it to be denied",
-			}
+		ie := checkTCPPort(ctx, nil, from, ssh, toIP, toPort, false)
+		if ie != nil {
+			ie.Why = why
 		}
 
-		return nil
+		return ie
 	}
 
 	// Gate on TCP reachability: a successful TCP connect is the precise signal
