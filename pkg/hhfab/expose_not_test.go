@@ -96,6 +96,44 @@ func TestExposeNotAloneExposesNothing(t *testing.T) {
 	}
 }
 
+func TestPickUnusedHostAddress(t *testing.T) {
+	for _, tc := range []struct {
+		prefix  string
+		used    []string
+		want    string
+		wantErr bool
+	}{
+		{prefix: "10.0.1.0/24", want: "10.0.1.1"},
+		{prefix: "10.0.1.0/24", used: []string{"10.0.1.1", "10.0.1.2"}, want: "10.0.1.3"},
+		// A /0 must stay bounded: the host count does not fit in a uint32.
+		{prefix: "0.0.0.0/0", want: "0.0.0.1"},
+		{prefix: "10.0.1.0/31", wantErr: true},
+		{prefix: "2001:db8::/64", wantErr: true},
+	} {
+		t.Run(tc.prefix, func(t *testing.T) {
+			used := map[netip.Addr]bool{}
+			for _, addr := range tc.used {
+				used[netip.MustParseAddr(addr)] = true
+			}
+
+			got, err := pickUnusedHostAddress(netip.MustParsePrefix(tc.prefix), used)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected an error, got %s", got)
+				}
+
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got.String() != tc.want {
+				t.Errorf("expected %s, got %s", tc.want, got)
+			}
+		})
+	}
+}
+
 func exclusionMatrixFixture() (*ConnectivityMatrix, map[string]*Endpoint) {
 	eps := map[string]*Endpoint{
 		"server-3": {Server: &ServerEndpoint{
