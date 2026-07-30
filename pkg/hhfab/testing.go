@@ -755,6 +755,17 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	expectedSubnets := map[string]netip.Prefix{}
 	eslagServers := make(map[string]bool, 0)
 	hostBGPServers := map[string]bool{}
+	// Rolls the counters forward so the next server starts a fresh subnet,
+	// moving on to the next VPC once this one is full of subnets.
+	nextSubnet := func() {
+		serverInSubnet = 0
+		subnetInVPC++
+		if subnetInVPC >= opts.SubnetsPerVPC {
+			subnetInVPC = 0
+			vpcID++
+			hostBGPDoneForVPC = false
+		}
+	}
 	for _, server := range servers.Items {
 		if opts.VPCMode != vpcapi.VPCModeL2VNI {
 			if sa, err := getServerAttachState(ctx, kube, &server, false); err != nil {
@@ -767,14 +778,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 			}
 		}
 		if serverInSubnet >= opts.ServersPerSubnet {
-			serverInSubnet = 0
-			subnetInVPC++
-		}
-		if subnetInVPC >= opts.SubnetsPerVPC {
-			serverInSubnet = 0
-			subnetInVPC = 0
-			vpcID++
-			hostBGPDoneForVPC = false
+			nextSubnet()
 		}
 
 		conns := &wiringapi.ConnectionList{}
@@ -798,6 +802,17 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		vpcName := fmt.Sprintf("vpc-%02d", vpcID+1)
 		subnetName := fmt.Sprintf("subnet-%02d", subnetInVPC+1)
 		hostBGP := multihomed || (opts.HostBGPSubnet && !hostBGPDoneForVPC && conn.Spec.Unbundled != nil)
+		// A hostBGP subnet has DHCP disabled and only accepts unbundled
+		// attachments, so a subnet shared between hostBGP and regular servers is
+		// rejected by the API or leaves a server without an address. Start a
+		// fresh subnet instead.
+		if last := len(vpcs) - 1; last >= 0 && vpcs[last].Name == vpcName {
+			if s := vpcs[last].Spec.Subnets[subnetName]; s != nil && s.HostBGP != hostBGP {
+				nextSubnet()
+				vpcName = fmt.Sprintf("vpc-%02d", vpcID+1)
+				subnetName = fmt.Sprintf("subnet-%02d", subnetInVPC+1)
+			}
+		}
 		if hostBGP {
 			hostBGPDoneForVPC = true
 		}
