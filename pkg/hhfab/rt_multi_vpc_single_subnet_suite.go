@@ -454,12 +454,18 @@ func gatewayPeeringExposeNotUnusedTest(ctx context.Context, testCtx *VPCPeeringT
 		return false, nil, fmt.Errorf("parsing subnet %s of VPC %s: %w", cidr, vpc2.Name, err)
 	}
 
+	// Unmap so a 4-in-6 endpoint address still matches the plain IPv4 candidates
+	// pickUnusedHostAddress generates, rather than being dropped as non-IPv4.
 	usedIPs := make(map[netip.Addr]bool, len(matrix.AllEndpoints))
 	for _, ep := range matrix.AllEndpoints {
-		if ep.Server == nil || !ep.Server.IP.Is4() {
+		if ep.Server == nil {
 			continue
 		}
-		usedIPs[ep.Server.IP] = true
+		addr := ep.Server.IP.Unmap()
+		if !addr.Is4() {
+			continue
+		}
+		usedIPs[addr] = true
 	}
 
 	unused, err := pickUnusedHostAddress(prefix, usedIPs)
