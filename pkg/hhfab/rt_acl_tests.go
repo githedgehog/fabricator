@@ -230,6 +230,14 @@ func gatewayACLSubnetScopingTest(ctx context.Context, testCtx *VPCPeeringTestCtx
 			if err != nil {
 				return specs, err
 			}
+			vpc1Subnet, err := vpcFirstSubnetName(vpc1)
+			if err != nil {
+				return specs, err
+			}
+			vpc2Subnet, err := vpcFirstSubnetName(vpc2)
+			if err != nil {
+				return specs, err
+			}
 			acl := &gwapi.PeeringACL{
 				Default: gwapi.ACLDefaultDeny,
 				Rules: []gwapi.PeeringACLRule{
@@ -237,8 +245,8 @@ func gatewayACLSubnetScopingTest(ctx context.Context, testCtx *VPCPeeringTestCtx
 						Name: "allow-subnet-fwd", From: vpc1.Name, To: vpc2.Name,
 						Action: gwapi.ACLActionAllow, Scope: gwapi.ACLScopePacket,
 						Match: gwapi.PeeringACLMatch{
-							Source:      []gwapi.PeeringACLMatchEndpoint{{VPCSubnet: "subnet-01"}},
-							Destination: []gwapi.PeeringACLMatchEndpoint{{VPCSubnet: "subnet-01"}},
+							Source:      []gwapi.PeeringACLMatchEndpoint{{VPCSubnet: vpc1Subnet}},
+							Destination: []gwapi.PeeringACLMatchEndpoint{{VPCSubnet: vpc2Subnet}},
 						},
 					},
 					{

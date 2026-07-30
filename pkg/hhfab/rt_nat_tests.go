@@ -257,15 +257,30 @@ func (testCtx *VPCPeeringTestCtx) rebindMatrixServerEndpoint(ctx context.Context
 	return nil
 }
 
-func vpcFirstSubnetCIDR(vpc *vpcapi.VPC) (string, error) {
+func vpcFirstSubnet(vpc *vpcapi.VPC) (string, *vpcapi.VPCSubnet, error) {
 	if len(vpc.Spec.Subnets) != 1 {
-		return "", fmt.Errorf("VPC %s has %d subnets, NAT test requires exactly one", vpc.Name, len(vpc.Spec.Subnets)) //nolint:goerr113
+		return "", nil, fmt.Errorf("VPC %s has %d subnets, NAT test requires exactly one", vpc.Name, len(vpc.Spec.Subnets)) //nolint:goerr113
 	}
-	for _, subnet := range vpc.Spec.Subnets {
-		return subnet.Subnet, nil
+	for name, subnet := range vpc.Spec.Subnets {
+		return name, subnet, nil
 	}
 
-	return "", fmt.Errorf("VPC %s has empty subnet map", vpc.Name) //nolint:goerr113
+	return "", nil, fmt.Errorf("VPC %s has empty subnet map", vpc.Name) //nolint:goerr113
+}
+
+func vpcFirstSubnetName(vpc *vpcapi.VPC) (string, error) {
+	name, _, err := vpcFirstSubnet(vpc)
+
+	return name, err
+}
+
+func vpcFirstSubnetCIDR(vpc *vpcapi.VPC) (string, error) {
+	_, subnet, err := vpcFirstSubnet(vpc)
+	if err != nil {
+		return "", err
+	}
+
+	return subnet.Subnet, nil
 }
 
 // Test gateway peering with masquerade source NAT (only VPC1 has masquerade NAT configured)
