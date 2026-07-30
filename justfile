@@ -1,5 +1,7 @@
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
+export GOPROXY := env("GOPROXY", "https://proxy.golang.org|direct")
+
 import "hack/tools.just"
 import "hack/diagrams.just"
 
