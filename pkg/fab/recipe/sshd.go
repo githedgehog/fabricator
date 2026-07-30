@@ -17,18 +17,18 @@ const sshdConfigPath = "/etc/ssh/sshd_config.d/40-hedgehog.conf"
 // upgrades (written to disk directly), so the two paths can never drift apart.
 // Keep the closing backtick on the MACs line so the body has no trailing newline.
 const sshdConfigTmpl = `# Managed by hh, do not change
-PerSourceMaxStartups 4
+PerSourceMaxStartups 10
 PerSourcePenalties crash:5m authfail:2m
 LoginGraceTime 20
 PermitRootLogin no
 MaxAuthTries 3
-MaxSessions 5
+MaxSessions 50
 PasswordAuthentication {{ .PasswordAuth }}
 KbdInteractiveAuthentication no
 Compression no
 ClientAliveInterval 300
 ClientAliveCountMax 2
-MaxStartups 10:30:60
+MaxStartups 50:30:100
 KexAlgorithms sntrup761x25519-sha512@openssh.com,curve25519-sha256,curve25519-sha256@libssh.org
 Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com
 MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,umac-128-etm@openssh.com`
