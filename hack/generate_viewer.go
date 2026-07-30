@@ -289,8 +289,8 @@ func processFile(work FileWork, outputDirectory string) FileProcessingResult {
 			diagramFile.FilePath = relPath
 		}
 
-		if strings.HasPrefix(work.FileType, "drawio-") {
-			diagramFile.Style = strings.TrimPrefix(work.FileType, "drawio-")
+		if after, ok := strings.CutPrefix(work.FileType, "drawio-"); ok {
+			diagramFile.Style = after
 		}
 	}
 
