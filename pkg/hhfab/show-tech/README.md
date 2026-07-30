@@ -81,7 +81,8 @@ Collected via `sonic-cli` and direct `bcmcmd` (Broadcom SDK).
   VTEP/remote MAC mappings, VLAN-VNI and VRF-VNI maps
 - **L2**: MAC address table, MCLAG brief and interfaces, port-channel summary
 - **BGP/EVPN**: IPv4 BGP summary, L2VPN EVPN summary and neighbors, EVPN routes,
-  route-maps; EVPN VNI/MAC/ES detail, ARP cache; per-VRF route, ARP, and BGP
+  route-maps, BFD peer state and counters; EVPN VNI/MAC/ES detail, ARP cache;
+  per-VRF route, ARP, and BGP
   IPv4 unicast summary
 - **Platform**: environment sensors, fan status, firmware, PSU summary, SSD
   health, temperature
@@ -117,7 +118,8 @@ Collected via `sonic-cli` and direct `bcmcmd` (Broadcom SDK).
   peer IPs are available)
 - **Link detail**: `networkctl list`, `ip -d link show`, bonding configuration
   (`/proc/net/bonding`), MTU, LLDP data, DHCP leases, per-NIC ethtool offload
-  settings, systemd network unit files
+  settings, per-NIC driver counters (`ethtool -S`, nonzero rows only), systemd
+  network unit files
 - **Services and time**: `systemd-timesyncd` status, `timedatectl`,
   `sshd` status
 - **Logs**: hhnet log (`/var/log/hhnet.log`), SSH journal entries,
@@ -125,12 +127,17 @@ Collected via `sonic-cli` and direct `bcmcmd` (Broadcom SDK).
   messages
 - **Misc**: ARP table, listening ports (`ss -tulnp`), DNS resolver
   (`/etc/resolv.conf`, `resolvectl`), bond/802.1q/bridge kernel modules,
-  per-interface packet statistics
+  per-interface packet statistics, protocol counters (`netstat -s`, falling back
+  to `/proc/net/snmp` + `/proc/net/netstat` on Flatcar) — the `Icmp` block
+  distinguishes "request never arrived" from "arrived, reply lost on egress"
 
 ### gateway.sh — gateway node (FRR + dataplane)
 
 - **System**: kernel version, OS release, uptime, hostname, date
-- **Networking**: `ip addr/route/neigh/link`
+- **Networking**: `ip addr/route/neigh/link`, per-interface packet statistics
+  (`ip -s link`), per-NIC driver counters (`ethtool -S`, nonzero rows only),
+  protocol counters (`netstat -s`) — without the driver counters, RX-ring and
+  queue drops on the dataplane uplink are unobservable
 - **Resources**: disk usage, memory, top memory and CPU processes
 - **FRR** (via `vtysh` inside the `frr` container): version, running config,
   BGP summary (IPv4, L2VPN EVPN), BGP routes, per-neighbor state, per-VRF BGP

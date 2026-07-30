@@ -73,6 +73,29 @@ run_dp_cmd() {
 
     echo -e "\n=== Interface Statistics ==="
     ip -s link show
+
+    # Without driver counters, RX-ring and queue drops on the dataplane uplink
+    # are unobservable -- ip -s link alone cannot attribute them.
+    echo -e "\n=== NIC Statistics (ethtool -S, nonzero only) ==="
+    for nic in $(ls /sys/class/net | grep -E '^(enp|eth)'); do
+        echo -e "\n--- $nic ---"
+        nic_stats=$(ethtool -S "$nic" 2>/dev/null | awk -F: 'NF==2 && $2+0 != 0 {print}')
+        if [ -n "$nic_stats" ]; then
+            echo "$nic_stats"
+        elif ethtool -S "$nic" &>/dev/null; then
+            echo "(all counters zero)"
+        else
+            echo "Could not retrieve ethtool -S data for $nic"
+        fi
+    done
+
+    echo -e "\n=== Protocol Counters (netstat -s) ==="
+    if command -v netstat &>/dev/null; then
+        netstat -s 2>/dev/null
+    else
+        echo "netstat unavailable; raw counters follow"
+        cat /proc/net/snmp 2>/dev/null
+    fi
 } >> "$OUTPUT_FILE" 2>&1
 
 # ---------------------------

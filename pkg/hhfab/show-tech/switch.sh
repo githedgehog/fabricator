@@ -127,6 +127,10 @@ queue_sonic_cmd "BGP/EVPN" "show bgp l2vpn evpn neighbor"
 queue_sonic_cmd "BGP/EVPN" "show bgp l2vpn evpn"
 queue_sonic_cmd "BGP/EVPN" "show bgp l2vpn evpn route"
 queue_sonic_cmd "BGP/EVPN" "show route-map"
+# Gateway FRR configures a bfd block, so without this the gateway<->leaf
+# liveness state can be neither confirmed nor excluded.
+queue_sonic_cmd "BFD" "show bfd peers"
+queue_sonic_cmd "BFD" "show bfd peers counters"
 queue_sonic_cmd "EVPN" "show evpn vni"
 queue_sonic_cmd "EVPN" "show evpn mac"
 queue_sonic_cmd "EVPN" "show evpn es"
