@@ -100,6 +100,22 @@ OUTPUT_FILE="/tmp/show-tech.log"
     ethtool -k "$nic" 2>/dev/null || echo "Could not retrieve ethtool data for $nic"
   done
 
+  # Driver counters. Nonzero rows only: a full dump is hundreds of lines per NIC
+  # and the drop/error rows are what matters. Distinguish all-zero from failure,
+  # otherwise an empty section is ambiguous during triage.
+  echo -e "\n=== NIC Statistics (ethtool -S, nonzero only) ==="
+  for nic in $(ls /sys/class/net | grep -E '^(enp|eth)'); do
+    echo -e "\n--- $nic ---"
+    nic_stats=$(ethtool -S "$nic" 2>/dev/null | awk -F: 'NF==2 && $2+0 != 0 {print}')
+    if [ -n "$nic_stats" ]; then
+      echo "$nic_stats"
+    elif ethtool -S "$nic" &>/dev/null; then
+      echo "(all counters zero)"
+    else
+      echo "Could not retrieve ethtool -S data for $nic"
+    fi
+  done
+
   echo -e "\n=== Network Configuration Files ==="
   find /etc/systemd/network -type f -exec echo -e "\nFile: {}" \; -exec cat {} \;
 } >> "$OUTPUT_FILE" 2>&1
@@ -167,6 +183,18 @@ OUTPUT_FILE="/tmp/show-tech.log"
 
   echo -e "\n=== Interface Statistics (ip -s link) ==="
   ip -s link
+
+  # Icmp InEchos vs OutEchoReps tells "request never arrived" apart from
+  # "arrived, reply lost on egress" -- netstat is absent on Flatcar, so fall
+  # back to the raw procfs counters.
+  echo -e "\n=== Protocol Counters (netstat -s) ==="
+  if command -v netstat &>/dev/null; then
+    netstat -s 2>/dev/null
+  else
+    echo "netstat unavailable; raw counters follow"
+    cat /proc/net/snmp 2>/dev/null
+    cat /proc/net/netstat 2>/dev/null
+  fi
 
 } >> "$OUTPUT_FILE" 2>&1
 
