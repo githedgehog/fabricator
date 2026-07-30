@@ -172,7 +172,7 @@ func CollectServerEndpoints(ctx context.Context, kube kclient.Client, ssh SSHRes
 		// same (vpc, subnet) — one per connection — but a single /32 VIP. Collapse
 		// them to one candidate attachment so the server yields exactly one
 		// endpoint instead of dropping the duplicates with misleading warnings.
-		if slices.ContainsFunc(serverAttachments[serverName], func(a serverAttachment) bool {
+		if subnet.HostBGP && slices.ContainsFunc(serverAttachments[serverName], func(a serverAttachment) bool {
 			return a.vpcName == vpc.Name && a.subnetName == subnetName
 		}) {
 			continue

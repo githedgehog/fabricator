@@ -37,6 +37,13 @@ const gwNATPortForwardProbeTimeout = 2 * time.Minute
 // gwNATPortForwardProbeInterval is the polling interval between TCP-reachability probes.
 const gwNATPortForwardProbeInterval = 5 * time.Second
 
+// Bound the wait for an on-demand iperf3 listener to bind its port (~5s total).
+// The interval is a remote shell sleep argument, in seconds.
+const (
+	protoPortListenerBindAttempts = 20
+	protoPortListenerBindSleepArg = "0.25"
+)
+
 type ConnectivityVerdict string
 
 const (
@@ -290,11 +297,9 @@ func (m *ConnectivityMatrix) Validate() error {
 	}
 
 	extAllowBySource := map[*Endpoint]bool{}
-	for pair, byPP := range m.entries {
-		for _, e := range byPP {
-			if e.Verdict == VerdictAllow && pair.Destination != nil && pair.Destination.External != nil {
-				extAllowBySource[pair.Source] = true
-			}
+	for _, src := range m.AllEndpoints {
+		if _, ok := m.externalCurlAllowed(src); ok {
+			extAllowBySource[src] = true
 		}
 	}
 
@@ -312,11 +317,33 @@ func (m *ConnectivityMatrix) Validate() error {
 	}
 	if len(unknowns) > 0 {
 		slices.Sort(unknowns)
-		errs = append(errs, fmt.Errorf("%d matrix entr(ies) could not be evaluated and were not overlaid by the test: %s", //nolint:goerr113
+		errs = append(errs, fmt.Errorf("%d matrix entries could not be evaluated and were not overlaid by the test: %s", //nolint:goerr113
 			len(unknowns), strings.Join(unknowns, "; ")))
 	}
 
 	return errors.Join(errs...)
+}
+
+func (m *ConnectivityMatrix) externalCurlAllowed(src *Endpoint) (ConnectivityExpectation, bool) {
+	if src == nil || src.Server == nil {
+		return ConnectivityExpectation{}, false
+	}
+	for _, dst := range m.AllEndpoints {
+		if dst.External == nil {
+			continue
+		}
+		e := m.Lookup(src, dst, ProtoPort{})
+		if e.Verdict != VerdictAllow {
+			continue
+		}
+		if e.NAT != nil && !e.NAT.SourcePool.IsValid() {
+			continue
+		}
+
+		return e, true
+	}
+
+	return ConnectivityExpectation{}, false
 }
 
 func describeUnknownEntry(pair EndpointPair, pp ProtoPort, e ConnectivityExpectation) string {
@@ -506,20 +533,8 @@ func runMatrixCurlPhase(ctx context.Context, opts TestConnectivityOpts, matrix *
 		if expectedByServer[name].Reachable {
 			continue
 		}
-		for _, dst := range matrix.AllEndpoints {
-			if dst.External == nil {
-				continue
-			}
-			e := matrix.Lookup(src, dst, ProtoPort{})
-			if e.Verdict != VerdictAllow {
-				continue
-			}
-			if e.NAT != nil && !e.NAT.SourcePool.IsValid() {
-				continue
-			}
+		if e, ok := matrix.externalCurlAllowed(src); ok {
 			expectedByServer[name] = reachabilityFromExpectation(e)
-
-			break
 		}
 	}
 
@@ -662,13 +677,16 @@ func startMatrixProtoPortListeners(ctx context.Context, matrix *ConnectivityMatr
 
 			return nil, fmt.Errorf("no ssh config for server %q needed as proto-port listener", hp.host) //nolint:goerr113
 		}
-		cmd := fmt.Sprintf("sudo docker exec -d iperf3 iperf3 -s -p %d", hp.port)
+		// docker exec -d returns as soon as the process is spawned, so wait for
+		// the listener to actually bind.
+		cmd := fmt.Sprintf("sudo docker exec -d iperf3 iperf3 -s -p %d && for i in $(seq 1 %d); do nc -z 127.0.0.1 %d && exit 0; sleep %s; done; exit 1",
+			hp.port, protoPortListenerBindAttempts, hp.port, protoPortListenerBindSleepArg)
+		started = append(started, hp)
 		if _, stderr, err := retrySSHCmd(ctx, ssh, cmd, hp.host); err != nil {
 			teardown()
 
 			return nil, fmt.Errorf("starting proto-port iperf3 listener on %s:%d: %w: %s", hp.host, hp.port, err, stderr)
 		}
-		started = append(started, hp)
 		slog.Debug("Started proto-port iperf3 listener", "host", hp.host, "port", hp.port)
 	}
 

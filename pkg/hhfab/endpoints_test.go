@@ -262,6 +262,26 @@ func TestValidate(t *testing.T) {
 			Pair: EndpointPair{Source: b, Destination: ext}, Verdict: VerdictUnknown, Detail: "unsupported",
 		})
 		require.ErrorContains(t, m.Validate(), "server-2(vpc-2/default) → external:ext-1")
+
+		// A DNAT-only Allow grants no egress, and an Allow scoped to one
+		// proto/port isn't seen by the untargeted curl probe. Neither settles
+		// the Unknown, or Validate would wave through an entry the curl phase
+		// goes on to assert as denied.
+		m.Add(ConnectivityExpectation{
+			Pair: EndpointPair{Source: b, Destination: ext2}, Verdict: VerdictAllow,
+			NAT: &TranslatedAddress{DestinationIP: netip.MustParseAddr("10.0.2.1"), DestinationPort: 8080},
+		})
+		m.Add(ConnectivityExpectation{
+			Pair: EndpointPair{Source: b, Destination: ext2}, Verdict: VerdictAllow,
+			ProtoPort: ProtoPort{Protocol: "tcp", Port: 8080},
+		})
+		require.ErrorContains(t, m.Validate(), "server-2(vpc-2/default) → external:ext-1")
+
+		// An unscoped, non-DNAT Allow does.
+		m.Add(ConnectivityExpectation{
+			Pair: EndpointPair{Source: b, Destination: ext2}, Verdict: VerdictAllow,
+		})
+		require.NoError(t, m.Validate())
 	})
 }
 
