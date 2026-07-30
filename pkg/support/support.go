@@ -39,12 +39,13 @@ type DumpCreator struct {
 }
 
 type Dump struct {
-	DumpVersion `json:",inline"`
-	Name        string                        `json:"name,omitempty"`      // Name of the dump
-	CreatedBy   DumpCreator                   `json:"createdBy,omitempty"` // Information about the creator of the dump
-	CreatedAt   kmetav1.Time                  `json:"createdAt,omitempty"` // Time when the dump was created
-	Resources   string                        `json:"resources,omitempty"` // Serialized resources
-	PodLogs     map[string]map[string]PodLogs `json:"podLogs,omitempty"`   // Logs for all running pods: namespace -> pod name -> container logs
+	DumpVersion     `json:",inline"`
+	Name            string                            `json:"name,omitempty"`            // Name of the dump
+	CreatedBy       DumpCreator                       `json:"createdBy,omitempty"`       // Information about the creator of the dump
+	CreatedAt       kmetav1.Time                      `json:"createdAt,omitempty"`       // Time when the dump was created
+	Resources       string                            `json:"resources,omitempty"`       // Serialized resources
+	PodLogs         map[string]map[string]PodLogs     `json:"podLogs,omitempty"`         // Logs for all running pods: namespace -> pod name -> container logs
+	GatewayInsights map[string]map[string]ExecOutputs `json:"gatewayInsights,omitempty"` // Gateway insights: gateway-name -> exec-cmd -> outputs
 }
 
 type PodLogs map[string]ContainerLogs // Logs for all containers in the pod: container name -> logs
@@ -52,6 +53,12 @@ type PodLogs map[string]ContainerLogs // Logs for all containers in the pod: con
 type ContainerLogs struct {
 	Current  string `json:"current,omitempty"`
 	Previous string `json:"previous,omitempty"`
+}
+
+type ExecOutputs struct {
+	Stdout string `json:"stdout,omitempty"`
+	Stderr string `json:"stderr,omitempty"`
+	Error  string `json:"error,omitempty"`
 }
 
 func Marshal(d *Dump) ([]byte, error) {

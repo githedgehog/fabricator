@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"slices"
 	"strings"
 
@@ -22,10 +21,10 @@ import (
 	"k8s.io/client-go/util/retry"
 )
 
-func collectPodLogs(ctx context.Context, dump *Dump, kubeconfigPath string) error {
+func (c collector) collectPodLogs(ctx context.Context, dump *Dump) error {
 	logs := map[string]map[string]PodLogs{}
 
-	clientset, err := kubeutil.NewClientset(ctx, kubeconfigPath)
+	clientset, err := kubeutil.NewClientset(ctx, c.kubeconfigPath)
 	if err != nil {
 		return fmt.Errorf("creating kubernetes client: %w", err)
 	}
@@ -43,7 +42,7 @@ func collectPodLogs(ctx context.Context, dump *Dump, kubeconfigPath string) erro
 	}
 
 	for _, pod := range pods.Items {
-		if os.Getenv("GITHUB_ACTIONS") != githubActionsValue {
+		if !c.quiet {
 			slog.Debug("Collecting Kube pod logs", "pod", pod.Name, "namespace", pod.Namespace)
 		}
 

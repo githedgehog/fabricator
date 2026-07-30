@@ -17,6 +17,10 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 )
 
+const (
+	githubActionsValue = "true"
+)
+
 var longBackoff = wait.Backoff{
 	Steps:    11,
 	Duration: 100 * time.Millisecond,
@@ -24,7 +28,12 @@ var longBackoff = wait.Backoff{
 	Jitter:   0,
 }
 
-func Collect(ctx context.Context, name, kubeconfigPath string) (*Dump, error) {
+type collector struct {
+	kubeconfigPath string
+	quiet          bool
+}
+
+func Collect(ctx context.Context, name, kubeconfigPath string, quiet bool) (*Dump, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 
@@ -63,12 +72,21 @@ func Collect(ctx context.Context, name, kubeconfigPath string) (*Dump, error) {
 		CreatedAt: kmetav1.Now(),
 	}
 
-	if err := collectKubeResources(ctx, dump, kubeconfigPath); err != nil {
+	c := collector{
+		kubeconfigPath: kubeconfigPath,
+		quiet:          quiet || os.Getenv("GITHUB_ACTIONS") == githubActionsValue,
+	}
+
+	if err := c.collectKubeResources(ctx, dump); err != nil {
 		return nil, fmt.Errorf("collecting kube resources: %w", err)
 	}
 
-	if err := collectPodLogs(ctx, dump, kubeconfigPath); err != nil {
+	if err := c.collectPodLogs(ctx, dump); err != nil {
 		return nil, fmt.Errorf("collecting pod logs: %w", err)
+	}
+
+	if err := c.collectGatewayInsights(ctx, dump); err != nil {
+		return nil, fmt.Errorf("collecting gateway insights: %w", err)
 	}
 
 	return dump, nil
