@@ -24,6 +24,11 @@ import (
 	coreapi "k8s.io/api/core/v1"
 )
 
+const (
+	dropVXLANService  = "hh-drop-vxlan.service"
+	dropVXLANUnitPath = "/etc/systemd/system/" + dropVXLANService
+)
+
 type NodeInstallUpgrade struct {
 	WorkDir string
 	Yes     bool
@@ -185,15 +190,39 @@ func (c *NodeInstallUpgrade) prepForDataplane(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 1*time.Minute)
 	defer cancel()
 
-	slog.Debug("Preparing node for dataplane (iptables drop udp)")
+	slog.Debug("Dropping VXLAN traffic (4789/udp)")
 
-	cmd := exec.CommandContext(ctx, "iptables", "-I", "INPUT", "1", "-p", "udp", "--dport", "4789", "-j", "DROP")
-	cmd.Dir = c.WorkDir
-	cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "iptables: ")
-	cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "iptables: ")
+	if err := os.WriteFile(dropVXLANUnitPath, //nolint:gosec
+		[]byte(`
+[Unit]
+Description=Drop inbound VXLAN (4789/udp)
+Wants=network-pre.target
+Before=network-pre.target
 
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'iptables -C INPUT -p udp --dport 4789 -j DROP 2>/dev/null || iptables -I INPUT 1 -p udp --dport 4789 -j DROP'
+ExecStop=/bin/sh -c 'iptables -D INPUT -p udp --dport 4789 -j DROP || true'
+
+[Install]
+WantedBy=multi-user.target
+`), 0o644); err != nil {
+		return fmt.Errorf("writing drop vxlan unit: %w", err)
+	}
+
+	cmd := exec.CommandContext(ctx, "systemctl", "daemon-reload")
+	cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "systemctl: ")
+	cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "systemctl: ")
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("running iptables drop udp: %w", err)
+		return fmt.Errorf("error on systemctl daemon-reload: %w", err)
+	}
+
+	cmd = exec.CommandContext(ctx, "systemctl", "enable", "--now", dropVXLANService)
+	cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "systemctl: ")
+	cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "systemctl: ")
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("error on systemctl enable --now %s: %w", dropVXLANService, err)
 	}
 
 	return nil
