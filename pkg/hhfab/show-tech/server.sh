@@ -63,7 +63,7 @@ OUTPUT_FILE="/tmp/show-tech.log"
       ping -c 1 -W 2 "$PEER_IP" 2>&1
     done
   else
-    echo "PEER_SERVER_IPS not set — peer server pings skipped"
+    echo "PEER_SERVER_IPS not set - peer server pings skipped"
   fi
 } >> "$OUTPUT_FILE" 2>&1
 

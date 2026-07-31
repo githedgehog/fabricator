@@ -159,7 +159,7 @@ run_dp_cmd() {
     if [ -n "$FRR_CONTAINER_ID" ]; then
         sudo -E crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock logs "$FRR_CONTAINER_ID"
     else
-        echo "FRR container not found — skipping container logs"
+        echo "FRR container not found - skipping container logs"
     fi
 } >> "$OUTPUT_FILE" 2>&1
 
@@ -169,7 +169,7 @@ run_dp_cmd() {
 {
     echo -e "\n=== Dataplane Diagnostics ==="
     if [ -z "$DATAPLANE_CONTAINER_ID" ]; then
-        echo "Dataplane container not found — skipping dataplane diagnostics"
+        echo "Dataplane container not found - skipping dataplane diagnostics"
     else
         run_dp_cmd "show tech"
     fi
@@ -183,7 +183,7 @@ run_dp_cmd() {
     if [ -n "$DATAPLANE_CONTAINER_ID" ]; then
         sudo -E crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock logs "$DATAPLANE_CONTAINER_ID"
     else
-        echo "Dataplane container not found — skipping container logs"
+        echo "Dataplane container not found - skipping container logs"
     fi
 } >> "$OUTPUT_FILE" 2>&1
 
