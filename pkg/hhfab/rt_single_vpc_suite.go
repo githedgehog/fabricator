@@ -107,6 +107,7 @@ func makeSingleVPCSuite() *JUnitTestSuite {
 			SkipFlags: SkipFlags{
 				RoCE:      true,
 				NoServers: true,
+				NoIperf:   true,
 			},
 		},
 	}
@@ -1591,6 +1592,11 @@ outer:
 
 	dscpOpts := testCtx.tcOpts
 	dscpOpts.IPerfsDSCP = 24 // Mapped to traffic class 3
+	// The UC3 counter thresholds below need sustained traffic, which a smoke
+	// probe cannot produce, so this test always sends at full rate. Its
+	// traffic stays within the leaf and never reaches the gateway dataplane,
+	// which is what smoke mode exists to spare.
+	dscpOpts.IPerfsMode = IPerfsModeFull
 
 	slog.Debug("Clearing queue counters on switch", "switch", swName)
 	if err := execConfigCmd(ctx, swSSH, swName, "clear queue counters"); err != nil {

@@ -999,6 +999,7 @@ func getExternalNATTestCases() []JUnitTestCase {
 			SkipFlags: SkipFlags{
 				NoGateway:      true,
 				NoBGPExternals: true,
+				NoIperf:        true,
 			},
 		},
 		{
@@ -1039,6 +1040,7 @@ func getExternalNATTestCases() []JUnitTestCase {
 			SkipFlags: SkipFlags{
 				NoGateway:         true,
 				NoStaticExternals: true,
+				NoIperf:           true,
 			},
 		},
 		{
