@@ -105,6 +105,16 @@ func makeTestCtx(ctx context.Context, kube kclient.Client, setupOpts SetupVPCsOp
 		testCtx.tcOpts.IPerfsSeconds = 10
 		testCtx.tcOpts.CurlsCount = 3
 	}
+	testCtx.tcOpts.IPerfsMode = rtOpts.IPerfsMode
+	if rtOpts.IPerfsSeconds != nil {
+		testCtx.tcOpts.IPerfsSeconds = *rtOpts.IPerfsSeconds
+		if testCtx.tcOpts.IPerfsSeconds == 0 {
+			slog.Info("iperf3 probes disabled, tests that only probe with iperf3 will be skipped")
+		}
+	}
+	if testCtx.tcOpts.IPerfsMode.Smoke() && testCtx.tcOpts.IPerfsSeconds > 0 {
+		slog.Info("Running iperf3 probes in smoke mode, no throughput is measured")
+	}
 	testCtx.wipeBetweenTests = wipeBetweenTests
 	testCtx.extended = rtOpts.Extended
 	testCtx.failFast = rtOpts.FailFast
@@ -285,6 +295,7 @@ type SkipFlags struct {
 	NoLoki            bool `xml:"-"` // skip if Loki is not configured or available
 	NoProm            bool `xml:"-"` // skip if Prometheus is not configured or available
 	NoServers         bool `xml:"-"` // skip if there are no servers in the fabric
+	NoIperf           bool `xml:"-"` // skip if iperf3 probes are disabled
 
 	/* Note about subinterfaces; they are required in the following cases:
 	 * 1. when using VPC loopback workaround - it's applied when we have a pair of vpcs or vpc and external both attached on a switch with peering between them
@@ -330,6 +341,9 @@ func (sf *SkipFlags) PrettyPrint() string {
 	}
 	if sf.NoProm {
 		parts = append(parts, "NoProm")
+	}
+	if sf.NoIperf {
+		parts = append(parts, "NoIperf")
 	}
 	if len(parts) == 0 {
 		return "None"
@@ -638,115 +652,52 @@ func failAllTests(suite *JUnitTestSuite, err error) *JUnitTestSuite {
 	return suite
 }
 
+// skipReason returns the message explaining why the test cannot run in an
+// environment described by env, or an empty string when it can run.
+func (test *JUnitTestCase) skipReason(env SkipFlags) string {
+	switch {
+	case test.SkipFlags.ExtendedOnly && !env.ExtendedOnly:
+		return "Extended tests are not enabled"
+	case test.SkipFlags.VirtualSwitch && env.VirtualSwitch:
+		return "There are virtual switches"
+	case test.SkipFlags.NoBGPExternals && env.NoBGPExternals:
+		return "There are no viable externals"
+	case test.SkipFlags.NoStaticExternals && env.NoStaticExternals:
+		return "There are no viable static externals"
+	case test.SkipFlags.SubInterfaces && env.SubInterfaces:
+		return "There are switches that do not support subinterfaces"
+	case test.SkipFlags.RoCE && env.RoCE:
+		return "There are no switches that support RoCE"
+	case test.SkipFlags.NoFabricLink && env.NoFabricLink:
+		return "There are no fabric (i.e. spine-leaf) links between the switches"
+	case test.SkipFlags.NoMeshLink && env.NoMeshLink:
+		return "There are no mesh (i.e. leaf-leaf) links between the switches"
+	case test.SkipFlags.NoGateway && env.NoGateway:
+		return "Gateway is not enabled or no gateways available"
+	case test.SkipFlags.NoLoki && env.NoLoki:
+		return "Loki is not configured or available"
+	case test.SkipFlags.NoProm && env.NoProm:
+		return "Prometheus is not configured or available"
+	case test.SkipFlags.NoServers && env.NoServers:
+		return "There are no servers in the fabric"
+	case test.SkipFlags.NoIperf && env.NoIperf:
+		return "iperf3 probes are disabled"
+	}
+
+	return ""
+}
+
 func selectAndRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, suite *JUnitTestSuite, regexes []*regexp.Regexp, invertRegex bool, skipFlags SkipFlags) (*JUnitTestSuite, error) {
 	suite = regexpSelection(regexes, invertRegex, suite)
 	for i, test := range suite.TestCases {
 		if test.Skipped != nil {
 			continue
 		}
-		if test.SkipFlags.ExtendedOnly && !skipFlags.ExtendedOnly {
+		if reason := test.skipReason(skipFlags); reason != "" {
 			suite.TestCases[i].Skipped = &Skipped{
-				Message: "Extended tests are not enabled",
+				Message: reason,
 			}
 			suite.Skipped++
-
-			continue
-		}
-		if test.SkipFlags.VirtualSwitch && skipFlags.VirtualSwitch {
-			suite.TestCases[i].Skipped = &Skipped{
-				Message: "There are virtual switches",
-			}
-			suite.Skipped++
-
-			continue
-		}
-		if test.SkipFlags.NoBGPExternals && skipFlags.NoBGPExternals {
-			suite.TestCases[i].Skipped = &Skipped{
-				Message: "There are no viable externals",
-			}
-			suite.Skipped++
-
-			continue
-		}
-		if test.SkipFlags.NoStaticExternals && skipFlags.NoStaticExternals {
-			suite.TestCases[i].Skipped = &Skipped{
-				Message: "There are no viable static externals",
-			}
-			suite.Skipped++
-
-			continue
-		}
-		if test.SkipFlags.SubInterfaces && skipFlags.SubInterfaces {
-			suite.TestCases[i].Skipped = &Skipped{
-				Message: "There are switches that do not support subinterfaces",
-			}
-			suite.Skipped++
-
-			continue
-		}
-		if test.SkipFlags.RoCE && skipFlags.RoCE {
-			suite.TestCases[i].Skipped = &Skipped{
-				Message: "There are no switches that support RoCE",
-			}
-			suite.Skipped++
-
-			continue
-		}
-		if test.SkipFlags.NoFabricLink && skipFlags.NoFabricLink {
-			suite.TestCases[i].Skipped = &Skipped{
-				Message: "There are no fabric (i.e. spine-leaf) links between the switches",
-			}
-			suite.Skipped++
-
-			continue
-		}
-		if test.SkipFlags.NoMeshLink && skipFlags.NoMeshLink {
-			suite.TestCases[i].Skipped = &Skipped{
-				Message: "There are no mesh (i.e. leaf-leaf) links between the switches",
-			}
-			suite.Skipped++
-
-			continue
-		}
-		if test.SkipFlags.NoGateway && skipFlags.NoGateway {
-			suite.TestCases[i].Skipped = &Skipped{
-				Message: "Gateway is not enabled or no gateways available",
-			}
-			suite.Skipped++
-
-			continue
-		}
-		if test.SkipFlags.NoLoki && skipFlags.NoLoki {
-			suite.TestCases[i].Skipped = &Skipped{
-				Message: "Loki is not configured or available",
-			}
-			suite.Skipped++
-
-			continue
-		}
-		if test.SkipFlags.NoProm && skipFlags.NoProm {
-			suite.TestCases[i].Skipped = &Skipped{
-				Message: "Prometheus is not configured or available",
-			}
-			suite.Skipped++
-
-			continue
-		}
-		if test.SkipFlags.NoServers && skipFlags.NoServers {
-			suite.TestCases[i].Skipped = &Skipped{
-				Message: "There are no servers in the fabric",
-			}
-			suite.Skipped++
-
-			continue
-		}
-		if test.SkipFlags.NoStaticExternals && skipFlags.NoStaticExternals {
-			suite.TestCases[i].Skipped = &Skipped{
-				Message: "There are no static externals configured",
-			}
-			suite.Skipped++
-
-			continue
 		}
 	}
 	if suite.Skipped == suite.Tests {
@@ -873,6 +824,7 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOp
 	skipFlags := SkipFlags{
 		ExtendedOnly: rtOpts.Extended,
 		NoServers:    noServers,
+		NoIperf:      testCtx.tcOpts.IPerfsSeconds <= 0,
 	}
 	connList := &wiringapi.ConnectionList{}
 	if err := kube.List(ctx, connList, kclient.MatchingLabels{wiringapi.LabelConnectionType: wiringapi.ConnectionTypeMesh}); err != nil {

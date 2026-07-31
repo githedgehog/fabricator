@@ -113,6 +113,8 @@ type VLABRunOpts struct {
 	ReleaseTestRegexes       []string
 	ReleaseTestRegexesInvert bool
 	ReleaseTestOnReadyOnly   bool
+	ReleaseTestIPerfs        *int
+	ReleaseTestIPerfsMode    IPerfsMode
 	InterfaceMTU             uint16
 }
 
@@ -767,6 +769,8 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						InvertRegex:    opts.ReleaseTestRegexesInvert,
 						ShowTechDump:   true,
 						IPerfsMinSpeed: 8200,
+						IPerfsSeconds:  opts.ReleaseTestIPerfs,
+						IPerfsMode:     opts.ReleaseTestIPerfsMode,
 						OnReadyTest:    opts.ReleaseTestOnReadyOnly,
 					}
 					slog.Debug("Running release-test", "opts", releaseTestOpts)
