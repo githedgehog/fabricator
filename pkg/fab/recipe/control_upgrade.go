@@ -533,10 +533,10 @@ func (c *ControlUpgrade) setupFirewall(ctx context.Context) error {
 	cmd := exec.CommandContext(ctx, "systemctl", "daemon-reload")
 	cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "systemctl: ")
 	cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "systemctl: ")
-
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("error on systemctl daemon-reload: %w", err)
 	}
+
 	cmd = exec.CommandContext(ctx, "systemctl", "enable", "--now", nftServiceName)
 	cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "systemctl: ")
 	cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "systemctl: ")
