@@ -11,8 +11,8 @@ directory.
 | VLAB exits cleanly (pass) | Only if `--force-collect-show-tech` / `HHFAB_VLAB_COLLECT_FORCE=true` |
 | VM startup or post-process failure | Only if `--collect` / `HHFAB_VLAB_COLLECT=true` |
 | Any on-ready step fails (inspect, connectivity, …) | Only if `--collect` / `HHFAB_VLAB_COLLECT=true` |
-| Release test — individual test fails | Only if `--collect` / `HHFAB_VLAB_COLLECT=true` |
-| Release test — suite setup fails | Only if `--collect` / `HHFAB_VLAB_COLLECT=true` |
+| Release test - individual test fails | Only if `--collect` / `HHFAB_VLAB_COLLECT=true` |
+| Release test - suite setup fails | Only if `--collect` / `HHFAB_VLAB_COLLECT=true` |
 
 The `--collect` flag (or `HHFAB_VLAB_COLLECT` env var) enables show-tech
 collection on failure paths. The `--force-collect-show-tech` flag (or
@@ -50,7 +50,7 @@ everything else gets 5 minutes.
 
 ## What each script collects
 
-### runner.sh — CI runner host
+### runner.sh - CI runner host
 
 Collected from the Linux host running the QEMU VMs, not from any VM.
 
@@ -69,7 +69,7 @@ Collected from the Linux host running the QEMU VMs, not from any VM.
   RSS/thread count, KVM/QEMU kernel messages from `dmesg`
 - **Devices**: `/dev/kvm`, `/dev/net/tun` presence and permissions
 
-### switch.sh — SONiC switch
+### switch.sh - SONiC switch
 
 Collected via `sonic-cli` and direct `bcmcmd` (Broadcom SDK).
 
@@ -92,7 +92,7 @@ Collected via `sonic-cli` and direct `bcmcmd` (Broadcom SDK).
   and logs (`/var/log/agent.log`), Docker container list and last 100 log lines
   per container
 
-### control.sh — control node (k3s)
+### control.sh - control node (k3s)
 
 - **System**: kernel version, OS release, k3s version
 - **Networking**: `ip addr/route/neigh/link`, per-NIC ethtool stats and offload
@@ -108,7 +108,7 @@ Collected via `sonic-cli` and direct `bcmcmd` (Broadcom SDK).
   hour), `systemd-networkd` logs, kernel logs, kernel network messages from
   `dmesg`
 
-### server.sh — server VM (Flatcar Linux)
+### server.sh - server VM (Flatcar Linux)
 
 - **System**: kernel version, OS release
 - **Networking**: `networkctl status`, VLAN interfaces (`ip -d link show type
@@ -128,15 +128,15 @@ Collected via `sonic-cli` and direct `bcmcmd` (Broadcom SDK).
 - **Misc**: ARP table, listening ports (`ss -tulnp`), DNS resolver
   (`/etc/resolv.conf`, `resolvectl`), bond/802.1q/bridge kernel modules,
   per-interface packet statistics, protocol counters (`netstat -s`, falling back
-  to `/proc/net/snmp` + `/proc/net/netstat` on Flatcar) — the `Icmp` block
+  to `/proc/net/snmp` + `/proc/net/netstat` on Flatcar) - the `Icmp` block
   distinguishes "request never arrived" from "arrived, reply lost on egress"
 
-### gateway.sh — gateway node (FRR + dataplane)
+### gateway.sh - gateway node (FRR + dataplane)
 
 - **System**: kernel version, OS release, uptime, hostname, date
 - **Networking**: `ip addr/route/neigh/link`, per-interface packet statistics
   (`ip -s link`), per-NIC driver counters (`ethtool -S`, nonzero rows only),
-  protocol counters (`netstat -s`) — without the driver counters, RX-ring and
+  protocol counters (`netstat -s`) - without the driver counters, RX-ring and
   queue drops on the dataplane uplink are unobservable
 - **Resources**: disk usage, memory, top memory and CPU processes
 - **FRR** (via `vtysh` inside the `frr` container): version, running config,
