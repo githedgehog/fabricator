@@ -2363,7 +2363,10 @@ func runPingIperfPair(ctx context.Context, opts TestConnectivityOpts, args pingI
 }
 
 func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConnectivityOpts) error {
-	if opts.PingsCount == 0 && opts.IPerfsSeconds == 0 && opts.CurlsCount == 0 {
+	// <= 0 rather than == 0: a negative count disables its probe further down
+	// the same as 0 does, so comparing to 0 alone would let an all-negative
+	// opts through and report success without running anything.
+	if opts.PingsCount <= 0 && opts.IPerfsSeconds <= 0 && opts.CurlsCount <= 0 {
 		return fmt.Errorf("at least one of pings, iperfs or curls should be enabled")
 	}
 	start := time.Now()
@@ -3739,6 +3742,9 @@ func ReleaseTest(ctx context.Context, c *Config, vlab *VLAB, opts ReleaseTestOpt
 	}
 	if opts.IPerfsMode != "" && !slices.Contains(IPerfsModes, opts.IPerfsMode) {
 		return fmt.Errorf("invalid iperfs mode %q, must be one of %v", opts.IPerfsMode, IPerfsModes)
+	}
+	if opts.IPerfsSeconds != nil && *opts.IPerfsSeconds < 0 {
+		return fmt.Errorf("invalid iperfs seconds %d, must be >= 0", *opts.IPerfsSeconds)
 	}
 	if opts.IPerfsSeconds != nil && *opts.IPerfsSeconds == 0 && opts.IPerfsMode.Smoke() {
 		slog.Warn("iperf3 probes are disabled, ignoring iperfs mode", "mode", opts.IPerfsMode)

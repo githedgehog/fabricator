@@ -601,7 +601,8 @@ func (c *Config) TestConnectivityWithMatrix(ctx context.Context, vlab *VLAB, opt
 	if matrix == nil {
 		return fmt.Errorf("connectivity matrix must be non-nil") //nolint:goerr113
 	}
-	if opts.PingsCount == 0 && opts.IPerfsSeconds == 0 && opts.CurlsCount == 0 {
+	// <= 0 rather than == 0: see the same guard in TestConnectivity.
+	if opts.PingsCount <= 0 && opts.IPerfsSeconds <= 0 && opts.CurlsCount <= 0 {
 		return fmt.Errorf("at least one of pings, iperfs or curls should be enabled") //nolint:goerr113
 	}
 	start := time.Now()

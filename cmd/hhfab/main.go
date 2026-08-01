@@ -1659,11 +1659,19 @@ Examples:
 							if iperfsMode.Smoke() && c.IsSet(FlagIPerfsSpeed) {
 								slog.Warn("iperf3 smoke probes measure no throughput, ignoring", "flag", FlagIPerfsSpeed)
 							}
+							iperfs := c.Int(FlagIPerfs)
+							if iperfs < 0 {
+								return fmt.Errorf("--%s must be >= 0, got %d", FlagIPerfs, iperfs) //nolint:goerr113
+							}
+							iperfsSpeed := c.Float64(FlagIPerfsSpeed)
+							if iperfsSpeed < 0 {
+								return fmt.Errorf("--%s must be >= 0, got %g", FlagIPerfsSpeed, iperfsSpeed) //nolint:goerr113
+							}
 							if err := hhfab.DoVLABTestConnectivity(ctx, workDir, cacheDir, hhfab.TestConnectivityOpts{
 								WaitSwitchesReady: c.Bool("wait-switches-ready"),
 								PingsCount:        c.Int("pings"),
-								IPerfsSeconds:     c.Int(FlagIPerfs),
-								IPerfsMinSpeed:    c.Float64(FlagIPerfsSpeed),
+								IPerfsSeconds:     iperfs,
+								IPerfsMinSpeed:    iperfsSpeed,
 								IPerfsMode:        iperfsMode,
 								CurlsCount:        c.Int("curls"),
 								Sources:           c.StringSlice("source"),
