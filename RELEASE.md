@@ -7,7 +7,8 @@ Runbook for cutting a fabricator release. Release notes for users live in the [d
 - Fabricator releases are pre-1.0 SemVer tags: `v0.MINOR.PATCH`. Pushing a tag is what triggers publishing.
 - Releases are rolling: each product release ships the current fabricator line, and patch releases stabilize that line in the run-up to the product release. Going back to patch an already-shipped minor is exceptional.
 - Fabricator versions are independent from Hedgehog product releases, which are named `YY.MM` (for example `26.01`). Each product release pins the single fabricator version it ships, recorded in the release notes in the docs repository (`26.01` shipped fabricator `v0.45.5`).
-- The CI upgrade matrix is keyed on product releases: upgrade jobs (`*-up<release>-*`, for example `v-up26.01-iso-l2vni`) install that product release's hhfab via the public installer (`i.hhdev.io/hhfab` with `VERSION=<product release>`) and upgrade to the current ref.
+- The mapping from a product release to the fabricator version it installs lives in the `hhfab` script in the [installer repository](https://github.com/githedgehog/i.hhdev.io): `VERSION=<product release>` resolves through a `case` entry to a fabricator tag. An entry for the upcoming release is added early in the cycle and re-pointed as new fabricator tags land, so `VERSION=26.02` during gating installs whatever tag is the current candidate.
+- The CI upgrade matrix is keyed on product releases: upgrade jobs (`*-up<release>-*`, for example `v-up26.01-iso-l2vni`) install that product release's hhfab via the public installer (`https://i.hhdev.io/hhfab` with `VERSION=<product release>`) and upgrade to the current ref.
 
 ## Branches
 
@@ -20,7 +21,7 @@ Fabricator pins the versions of the components it installs in `pkg/fab/versions.
 
 `just bump` covers fabric, dataplane, and FRR:
 
-```
+```sh
 just bump fabric <version> <ref>   # also updates the Go module and vendor/
 just bump dataplane <version>
 just bump frr <version>
@@ -32,17 +33,22 @@ Caveat: `DataplaneVersion` tags both the dataplane and its validator image. The 
 
 ## Release testing
 
-The release test suite is part of the VLAB jobs (`.github/workflows/run-vlab.yaml`). Regular CI runs only the on-ready subset; full release tests run when explicitly enabled, and those jobs carry an `-rt` suffix in their name.
+Release testing means the full matrix of the CI workflow (`.github/workflows/ci.yaml`) with release tests turned on. The suite itself lives in the VLAB jobs (`.github/workflows/run-vlab.yaml`, a reusable workflow CI calls per matrix entry). Regular CI runs only the on-ready subset; jobs running the full suite carry an `-rt` suffix in their name.
 
-Full release tests run in one of three ways:
+Release tests and hardware lab jobs are two separate opt-ins, and CI exposes each of them twice, once per trigger:
 
-- PR labeled `ci:+release` (add `ci:+hlab` to also run the hardware lab `h-*` jobs),
-- manual workflow dispatch with the `releasetest` input (the `releasetest_regex` and `releasetest_regex_invert` inputs select a subset),
-- the nightly scheduled run at 06:00 UTC.
+|                        | Full release tests | Hardware lab (`h-*`) jobs |
+|------------------------|--------------------|---------------------------|
+| On a pull request      | `ci:+release` label | `ci:+hlab` label |
+| Run workflow on a ref  | `releasetest` input | `hlab` input |
+
+Checking `releasetest` without `hlab` gives the full VLAB matrix with release tests but no hardware lab coverage. The nightly scheduled run at 06:00 UTC is the third trigger and enables release tests on `master` only.
+
+"Run workflow" here means dispatching the CI workflow itself. A separate "Custom VLAB" workflow (`.github/workflows/custom-vlab.yaml`) dispatches one VLAB configuration instead of the matrix and is the only place with a `releasetest_regex` input; use it to reproduce a single scenario, not to gate a release.
 
 Each job uploads a `release-test.xml`; results are aggregated into a single "Release Tests" check on the run.
 
-The tag pipeline does not gate on release tests: publishing only requires the build, bundle, and VLAB jobs on the tag itself, and the nightly schedule covers only `master`. A release ref therefore gets its full release-test coverage from a manual CI dispatch on the tag with the `releasetest` input enabled.
+The tag pipeline does not gate on release tests: `publish-release` needs only the build, bundle, and VLAB jobs of the tag's own push, and a push never sets `releasetest`. A release tag therefore gets its coverage from a separate run dispatched on that tag.
 
 The suite can also be run by hand against any deployed VLAB or lab environment with `hhfab vlab release-test`. Useful flags:
 
@@ -70,7 +76,7 @@ Ownership started with the release manager and is shifting to QA; there is no fo
 
 ### CI on the release tag
 
-Dispatch the CI workflow on the release tag with the `releasetest` input enabled: full matrix with the `-rt` suffix, including the upgrade and hardware lab jobs. The release-test suite has no automatic retries, and flaky jobs can block the tag's `publish-release` job. Failures on the release-test critical path are filed and tracked as known flakes in the internal tracker; retrying a job is backed by that list, not a substitute for filing. Chasing and fixing flakes is an ongoing effort.
+A tag has no pull request, so the labels are not available: run the CI workflow on the release tag from the Actions tab with both `releasetest` and `hlab` checked. That gives the full matrix with the `-rt` suffix, including the upgrade and hardware lab jobs. This run is the release gate, not a publishing gate: `publish-release` belongs to the tag's push and never carries release tests. The suite has no automatic retries, so a flaky job leaves the gate red until it is rerun. Failures on the release-test critical path are filed and tracked as known flakes in the internal tracker; retrying a job is backed by that list, not a substitute for filing. Chasing and fixing flakes is an ongoing effort.
 
 ### Release tests on physical environments
 
@@ -85,12 +91,14 @@ env-5 switches support l3vni mode only, which is why l3vni coverage lives there;
 
 The shape of every run (each environment's fab config and wiring files come from the internal lab repository):
 
-```
+```sh
 curl -fsSL https://i.hhdev.io/hhfab | USE_SUDO=false INSTALL_DIR=. VERSION=<product release> BINARY_NAME=hhfab-<product release> bash
 ./hhfab-<product release> init -f -c <env fab config> -w <env wiring files>
 ./hhfab-<product release> vlab up -f -m=manual -r=reinstall -r=inspect
 ./hhfab-<product release> vlab release-test
 ```
+
+`VERSION=<product release>` resolves through the installer mapping to whichever fabricator tag is the current candidate, which is why the run comments record the resolved fabricator version rather than the product release name; check the installer output to confirm which tag was installed.
 
 Flags vary per environment and topology (env-5 needs `--vpc-mode=l3vni -r=vpcs --controls-restricted=false` on `vlab up` and `--mode l3vni` on `release-test`); copy the exact command from the same combination in the previous cycle's tracking issue.
 
@@ -124,14 +132,16 @@ Not current practice yet; adopt when applicable:
 
 ## Pre-release checklist
 
+Fabricator tags are cut and published throughout the cycle without gating (see "Cutting the release"). This checklist is what qualifies one of those tags as the version a product release ships.
+
 - A fabricator tag exists and everything below runs against that tag, so the component combination pinned in `pkg/fab/versions.go` is exactly what is tested.
-- The upgrade matrix in `ci.yaml` on `master` tests upgrades from the latest shipped product releases; rotate the `upgradefrom` entries when preparing a release (see the "ci: test upgrades from" commits).
+- The upgrade matrix in `.github/workflows/ci.yaml` on `master` tests upgrades from the latest shipped product releases; rotate the `upgradefrom` entries when preparing a release (see the "ci: test upgrades from" commits).
 - CI green on the tag, including all upgrade jobs.
-- Full release tests pass on the tag, including upgrade and hardware lab jobs: dispatch CI on the tag with the `releasetest` input, since neither the tag pipeline nor the nightly covers it.
+- Full release tests pass on the tag, including upgrade and hardware lab jobs: run the CI workflow on the tag with `releasetest` and `hlab` checked, since neither the tag's own push nor the nightly covers it.
 
 ## Cutting the release
 
-```
+```sh
 git tag vX.Y.Z <ref>
 git push origin vX.Y.Z
 ```
@@ -147,6 +157,7 @@ Note: the workflow currently marks every tag's GitHub release as latest (`make_l
 ## Post-release
 
 - Merge the automated API reference PR in the docs repository; when the tag ships in a product release, record it in the release notes there.
+- Update the installer repository: re-point the product release's `YY.MM` entry at the tag while it is the candidate, and promote `latest` to it once the release passes go/no-go. A new `YY.MM.Z` entry is how a later patch reaches users.
 - Create the `release/vX.Y` branch when the minor needs a patch after `master` has moved on.
 - Verify the published artifacts, e.g. `hhfab init` with the new version and a VLAB bring-up.
 
