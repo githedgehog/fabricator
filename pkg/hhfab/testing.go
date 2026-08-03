@@ -3405,9 +3405,9 @@ func parseNCReturnCode(stdout string) (int, bool) {
 // expected. It runs `nc -zw2 <ip> <port>` on the source: a completed handshake
 // means the path is open (allow), a refused/timed-out connect (nc exit 1) means
 // it is blocked (deny).
-func checkTCPPort(ctx context.Context, sem *semaphore.Weighted, from string, fromSSH *sshutil.Config, toIP netip.Addr, port uint16, expected bool) *IperfError {
+func checkTCPPort(ctx context.Context, sem *semaphore.Weighted, from string, fromSSH *sshutil.Config, toIP netip.Addr, port uint16, expected Reachability) *IperfError {
 	target := fmt.Sprintf("%s:%d", toIP.String(), port)
-	ie := &IperfError{Source: from, Destination: target}
+	ie := &IperfError{Source: from, Destination: target, Why: expectationWhy(expected)}
 
 	if sem != nil {
 		if err := sem.Acquire(ctx, 1); err != nil {
@@ -3452,14 +3452,14 @@ func checkTCPPort(ctx context.Context, sem *semaphore.Weighted, from string, fro
 		return ie
 	}
 
-	slog.Debug("TCP port probe result", "from", from, "to", target, "expected", expected, "ok", connectOk, "rc", rc, "stderr", stderr)
+	slog.Debug("TCP port probe result", "from", from, "to", target, "expected", expected.Reachable, "ok", connectOk, "rc", rc, "stderr", stderr)
 
-	if expected && !connectOk {
+	if expected.Reachable && !connectOk {
 		ie.ClientMsg = "should be reachable but TCP connect was refused/timed out"
 
 		return ie
 	}
-	if !expected && connectOk {
+	if !expected.Reachable && connectOk {
 		ie.ClientMsg = "should not be reachable but TCP connect succeeded"
 
 		return ie
@@ -3480,9 +3480,9 @@ const (
 // NOTE: iperf3 -u first opens a TCP control channel on the target port, so this
 // cannot distinguish "TCP denied + UDP allowed" on the same port (the control
 // channel would be blocked). Callers must avoid that combination.
-func checkUDPPort(ctx context.Context, opts TestConnectivityOpts, sem *semaphore.Weighted, from string, fromSSH *sshutil.Config, toIP netip.Addr, port uint16, expected bool) *IperfError {
+func checkUDPPort(ctx context.Context, opts TestConnectivityOpts, sem *semaphore.Weighted, from string, fromSSH *sshutil.Config, toIP netip.Addr, port uint16, expected Reachability) *IperfError {
 	target := fmt.Sprintf("%s:%d", toIP.String(), port)
-	ie := &IperfError{Source: from, Destination: target}
+	ie := &IperfError{Source: from, Destination: target, Why: expectationWhy(expected)}
 
 	if sem != nil {
 		if err := sem.Acquire(ctx, 1); err != nil {
@@ -3517,11 +3517,11 @@ func checkUDPPort(ctx context.Context, opts TestConnectivityOpts, sem *semaphore
 	delivered := reportErr == "" && packets > 0 && lostPercent < udpAllowLossThreshold
 	blocked := reportErr != "" || packets == 0 || lostPercent >= udpDenyLossThreshold
 
-	slog.Debug("UDP port probe result", "from", from, "to", target, "expected", expected,
+	slog.Debug("UDP port probe result", "from", from, "to", target, "expected", expected.Reachable,
 		"delivered", delivered, "blocked", blocked, "packets", packets, "lost", lost, "lostPercent", lostPercent,
 		"err", err, "reportErr", reportErr, "stderr", stderr)
 
-	if expected {
+	if expected.Reachable {
 		if !delivered {
 			if reportErr != "" {
 				ie.ClientMsg = fmt.Sprintf("should be reachable but UDP probe reported error: %s", reportErr)
@@ -3535,9 +3535,10 @@ func checkUDPPort(ctx context.Context, opts TestConnectivityOpts, sem *semaphore
 		return nil
 	}
 
-	// expected == deny.
+	// expected == deny. Loss between the two thresholds is neither delivered nor
+	// blocked, so don't claim delivery on what may just be a lossy path.
 	if !blocked {
-		ie.ClientMsg = fmt.Sprintf("should not be reachable but UDP datagrams delivered (packets %d, loss %.1f%%)", packets, lostPercent)
+		ie.ClientMsg = fmt.Sprintf("should not be reachable but UDP traffic was not blocked (packets %d, loss %.1f%%)", packets, lostPercent)
 
 		return ie
 	}
