@@ -29,6 +29,8 @@ just bump frr <version>
 
 NOS versions (`BCMSONiCVersion`, `CLSSONiCVersion`, `CumulusVersion`) are edited directly in `pkg/fab/versions.go`.
 
+The same file carries `Release`, the user-facing product release number referenced in the docs (`26.03.0` during the 26.03 cycle). Bump it to the new cycle's number at the start of the cycle, in the same change as the upgrade matrix rotation.
+
 Caveat: `DataplaneVersion` tags both the dataplane and its validator image. The validator is not built for every dataplane commit; a tag without a validator image makes fabric-ctrl crash-loop. Verify both images exist before bumping.
 
 ## Release testing
@@ -134,7 +136,7 @@ Not current practice yet; adopt when applicable:
 
 Fabricator tags are cut and published throughout the cycle without gating (see "Cutting the release"). This checklist is what qualifies one of those tags as the version a product release ships.
 
-- The upgrade matrix in `.github/workflows/ci.yaml` tests upgrades from the latest shipped product releases and from the release being prepared. Rotate the `upgradefrom` entries on `master` before cutting the tag the gate runs against: a tag's CI uses the `ci.yaml` that tag carries, so rotating afterwards leaves the tag testing the old matrix (see the "ci: test upgrades from" commits). The entry for the cycle's own release resolves only once the installer maps it, so the order is early candidate tag, installer entry, rotation, gate tag.
+- The upgrade matrix in `.github/workflows/ci.yaml` tests upgrades from the two latest shipped product releases, so during the 26.03 cycle it runs from 26.01 and 26.02. Rotation belongs at the start of a cycle rather than at its end: the change that adds the just-shipped release as an `upgradefrom` source is the same one that bumps `Release` in `pkg/fab/versions.go` to the new cycle's number. Landing it that early is what puts it in every tag of the cycle, which matters because a tag's CI uses the `ci.yaml` that tag carries; a late rotation would leave the tag testing the old matrix. Nothing tests upgrading from the release currently being prepared.
 - A fabricator tag exists and everything below runs against that tag, so the component combination pinned in `pkg/fab/versions.go` is what is tested.
 - CI green on the tag, including all upgrade jobs.
 - Full release tests pass on the tag, including upgrade and hardware lab jobs: run the CI workflow on the tag with `releasetest` and `hlab` checked, since neither the tag's own push nor the nightly covers it.
