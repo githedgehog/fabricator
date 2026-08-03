@@ -45,6 +45,10 @@ Port 5201 is served by the always-on `iperf3 -s` daemon (TCP+UDP). Any other por
    flow/conntrack state where masquerade (or port-forward) NAT is present, so a
    `flow`-scoped rule is only valid on such a peering; there conntrack permits the
    return automatically. NAT-free cases therefore use explicit `packet` scope.
+   This is a temporary restriction per [docs#338](https://github.com/githedgehog/docs/pull/338):
+   once `flow` works without NAT it becomes the CRD default, and the
+   packet-everywhere choice below needs revisiting since the default path would
+   then have no coverage.
 
 ## Test cases
 
@@ -63,6 +67,8 @@ noted, and run with `SkipFlags{NoGateway, NoServers}`.
 | **Port Range Scoping** | allow tcp; fwd dst-port range `6000-6500`, rev src-port range | fwd tcp/6201 allow; tcp/5201 + udp + icmp + all rev = deny |
 | **Precedence Allow-Then-Deny** | `[allow tcp/5201, deny-all]` fwd + src-port return rule | fwd tcp/5201 allow; everything else deny |
 | **Precedence Deny-Then-Allow** | same rules, `deny-all` first | all deny (first match wins) |
+| **Numeric Protocol ICMP** | `allow proto "1"` both dirs | icmp allow both ways; tcp+udp deny (fall to default) |
+| **Pre-NAT Destination Match** | bidirectional static NAT + allow both dirs matched by `dst` = peer's `as` pool | all allow both ways — matching post-NAT would deny everything |
 
 ## Coverage
 
@@ -70,17 +76,22 @@ noted, and run with `SkipFlags{NoGateway, NoServers}`.
 |---|---|
 | Default action `deny` / `deny-unless-exposed` | Default Deny / Deny-Unless-Exposed |
 | Rule action `allow` / `deny` | all allow cases / carve-out + precedence |
-| Protocol `tcp` / `udp` / any | Protocol Scoping, Port Range / UDP Carve-Out / Explicit Allow, Subnet |
+| Protocol `tcp` / `udp` / numeric / any | Protocol Scoping, Port Range / UDP Carve-Out / Numeric Protocol ICMP / Explicit Allow, Subnet |
 | Selector `VPCSubnet` / `CIDR` | Subnet/CIDR Scoping (both, one per direction) |
 | Ports single / range, dst / src side | Precedence (single dst+src) / Port Range (range dst+src) |
 | Scope `packet` / `flow` | all packet cases / Flow Scope Masquerade |
 | Rule precedence (first-match) | Precedence Allow-Then-Deny + Deny-Then-Allow |
 | Stateless return-path requirement | Packet One-Way (negative) |
+| ACL evaluated before NAT (`dst` = advertised address) | Pre-NAT Destination Match |
 
 ### Known limitations / assumptions
 
 - **UDP is verifiable only as "denied while TCP allowed."** The `iperf3 -u` probe
   opens a TCP control channel on the same port, so "deny TCP + allow UDP on one
   port" cannot be distinguished from a UDP block — no case relies on it.
-- **ICMP falls to the default action** (it matches neither `tcp` nor `udp`
-  rules). Numeric-protocol matching (e.g. proto `1` for ICMP) is **not** covered.
+- **ACLs on external peerings cannot be asserted.** `runMatrixProtoPortPhase`
+  probes server destinations only, and the external oracle is a single untargeted
+  curl per source server with no protocol/port dimension. `Validate` now rejects a
+  proto-scoped entry towards an external rather than letting it report green while
+  asserting nothing, so covering the docs' egress-allow-list example needs a
+  targeted external probe first.
