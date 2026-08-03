@@ -14,10 +14,14 @@ import (
 const (
 	// aclProbePort is served by the always-on iperf3 daemon (TCP+UDP), so
 	// tests probing it need no on-demand listener.
-	aclProbePort    uint16 = 5201
+	aclProbePort    uint16 = persistentIperf3Port
 	aclAltPort      uint16 = 6201
 	aclAltPortRange        = "6000-6500"
 	aclUnprobedPort uint16 = 9999
+
+	// the dataplane has no icmp keyword yet, a numeric protocol is the only
+	// way to match ICMP explicitly
+	aclProtoICMP gwapi.ACLMatchProtocol = "1"
 )
 
 func setACLDirVerdicts(m *ConnectivityMatrix, srcVPC, dstVPC string, icmp, tcp, udp ConnectivityVerdict) {
@@ -415,6 +419,102 @@ func gatewayACLPrecedenceDenyThenAllowTest(ctx context.Context, testCtx *VPCPeer
 	})
 }
 
+// gatewayACLNumericProtocolICMPTest: match ICMP explicitly via the numeric
+// protocol 1 (there is no icmp keyword yet). Every other ACL case only ever
+// sees ICMP fall through to the default action, so this is the one that asserts
+// a rule can match it. TCP/UDP hit the default deny.
+func gatewayACLNumericProtocolICMPTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
+	return testCtx.runNATTest(ctx, matrix, natTestSpec{
+		Name: "gateway ACL numeric protocol ICMP",
+		BuildSpec: func(vpc1, vpc2 *vpcapi.VPC) (peeringSpecs, error) {
+			specs := emptyPeeringSpecs()
+			acl := &gwapi.PeeringACL{
+				Default: gwapi.ACLDefaultDeny,
+				Rules: []gwapi.PeeringACLRule{
+					{Name: "allow-icmp-fwd", From: vpc1.Name, To: vpc2.Name, Action: gwapi.ACLActionAllow, Scope: gwapi.ACLScopePacket, Match: gwapi.PeeringACLMatch{Protocol: aclProtoICMP}},
+					{Name: "allow-icmp-rev", From: vpc2.Name, To: vpc1.Name, Action: gwapi.ACLActionAllow, Scope: gwapi.ACLScopePacket, Match: gwapi.PeeringACLMatch{Protocol: aclProtoICMP}},
+				},
+			}
+			err := appendGwPeeringSpec(specs.Gateway, vpc1, vpc2, &GwPeeringOptions{ACL: acl})
+
+			return specs, err
+		},
+		Overlay: func(vpc1, vpc2 *vpcapi.VPC, matrix *ConnectivityMatrix) error {
+			setACLDirVerdicts(matrix, vpc1.Name, vpc2.Name, VerdictAllow, VerdictDeny, VerdictDeny)
+			setACLDirVerdicts(matrix, vpc2.Name, vpc1.Name, VerdictAllow, VerdictDeny, VerdictDeny)
+
+			return nil
+		},
+	})
+}
+
+// gatewayACLPreNATDestinationTest: ACL rules are evaluated before NAT, so
+// match.dst is compared against the address the initiator dialed — the peer's
+// advertised (expose "as") pool — not the destination's native IP. Both
+// directions get bidirectional static NAT and a rule matching the peer's NAT
+// pool; an implementation that matched post-NAT would deny everything.
+func gatewayACLPreNATDestinationTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
+	const (
+		vpc1NATCIDR = "192.168.91.0/24"
+		vpc2NATCIDR = "192.168.92.0/24"
+	)
+
+	return testCtx.runNATTest(ctx, matrix, natTestSpec{
+		Name: "gateway ACL pre-NAT destination match",
+		BuildSpec: func(vpc1, vpc2 *vpcapi.VPC) (peeringSpecs, error) {
+			specs := emptyPeeringSpecs()
+			acl := &gwapi.PeeringACL{
+				Default: gwapi.ACLDefaultDeny,
+				Rules: []gwapi.PeeringACLRule{
+					{
+						Name: "allow-as-fwd", From: vpc1.Name, To: vpc2.Name,
+						Action: gwapi.ACLActionAllow, Scope: gwapi.ACLScopePacket,
+						Match: gwapi.PeeringACLMatch{
+							Destination: []gwapi.PeeringACLMatchEndpoint{{CIDR: vpc2NATCIDR}},
+						},
+					},
+					{
+						Name: "allow-as-rev", From: vpc2.Name, To: vpc1.Name,
+						Action: gwapi.ACLActionAllow, Scope: gwapi.ACLScopePacket,
+						Match: gwapi.PeeringACLMatch{
+							Destination: []gwapi.PeeringACLMatchEndpoint{{CIDR: vpc1NATCIDR}},
+						},
+					},
+				},
+			}
+			err := appendGwPeeringSpec(specs.Gateway, vpc1, vpc2, &GwPeeringOptions{
+				VPC1NATCIDR: []string{vpc1NATCIDR},
+				VPC2NATCIDR: []string{vpc2NATCIDR},
+				ACL:         acl,
+			})
+
+			return specs, err
+		},
+		Overlay: func(vpc1, vpc2 *vpcapi.VPC, matrix *ConnectivityMatrix) error {
+			vpc1CIDR, err := vpcFirstSubnetCIDR(vpc1)
+			if err != nil {
+				return err
+			}
+			vpc2CIDR, err := vpcFirstSubnetCIDR(vpc2)
+			if err != nil {
+				return err
+			}
+			// static NAT is bidirectional: each side only knows the other by
+			// its advertised pool, so every probe targets the DNAT address
+			if err := overlayVPCToVPCStaticDNAT(matrix, vpc1.Name, vpc2.Name, vpc2CIDR, vpc2NATCIDR); err != nil {
+				return fmt.Errorf("overlaying vpc2 static DNAT: %w", err)
+			}
+			if err := overlayVPCToVPCStaticDNAT(matrix, vpc2.Name, vpc1.Name, vpc1CIDR, vpc1NATCIDR); err != nil {
+				return fmt.Errorf("overlaying vpc1 static DNAT: %w", err)
+			}
+			setACLDirVerdicts(matrix, vpc1.Name, vpc2.Name, VerdictAllow, VerdictAllow, VerdictAllow)
+			setACLDirVerdicts(matrix, vpc2.Name, vpc1.Name, VerdictAllow, VerdictAllow, VerdictAllow)
+
+			return nil
+		},
+	})
+}
+
 func getACLTestCases() []JUnitTestCase {
 	return []JUnitTestCase{
 		{Name: "Gateway Peering ACL Default Deny", F: gatewayACLDefaultDenyTest, SkipFlags: SkipFlags{NoGateway: true, NoServers: true}},
@@ -427,5 +527,7 @@ func getACLTestCases() []JUnitTestCase {
 		{Name: "Gateway Peering ACL Port Range Scoping", F: gatewayACLPortScopingTest, SkipFlags: SkipFlags{NoGateway: true, NoServers: true}},
 		{Name: "Gateway Peering ACL Precedence Allow-Then-Deny", F: gatewayACLPrecedenceAllowThenDenyTest, SkipFlags: SkipFlags{NoGateway: true, NoServers: true}},
 		{Name: "Gateway Peering ACL Precedence Deny-Then-Allow", F: gatewayACLPrecedenceDenyThenAllowTest, SkipFlags: SkipFlags{NoGateway: true, NoServers: true}},
+		{Name: "Gateway Peering ACL Numeric Protocol ICMP", F: gatewayACLNumericProtocolICMPTest, SkipFlags: SkipFlags{NoGateway: true, NoServers: true}},
+		{Name: "Gateway Peering ACL Pre-NAT Destination Match", F: gatewayACLPreNATDestinationTest, SkipFlags: SkipFlags{NoGateway: true, NoServers: true}},
 	}
 }
