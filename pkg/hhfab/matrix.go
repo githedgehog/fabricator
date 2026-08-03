@@ -509,6 +509,13 @@ type matrixTestDeps struct {
 	errChan        chan<- error
 }
 
+// probesServerPair reports whether the server-to-server phases will probe this
+// pair, so listener setup covers exactly what gets probed.
+func (d *matrixTestDeps) probesServerPair(src, dst *Endpoint) bool {
+	return src.Server != nil && dst.Server != nil &&
+		d.inSources(src.Server.Name) && d.inDestinations(dst.Server.Name)
+}
+
 func runMatrixServerServerPhase(ctx context.Context, opts TestConnectivityOpts, matrix *ConnectivityMatrix, deps *matrixTestDeps) error {
 	for _, src := range matrix.AllEndpoints {
 		if src.Server == nil {
@@ -690,10 +697,10 @@ func startMatrixProtoPortListeners(ctx context.Context, matrix *ConnectivityMatr
 	}
 	wanted := map[hostPort]struct{}{}
 	for _, src := range matrix.AllEndpoints {
-		if src.Server == nil {
-			continue
-		}
 		for _, dst := range matrix.AllEndpoints {
+			if !deps.probesServerPair(src, dst) {
+				continue
+			}
 			for _, e := range matrix.ProtoPortEntries(src, dst) {
 				if matrix.entryOwner(e) != matrixPhaseProtoPort {
 					continue
@@ -756,11 +763,8 @@ func startMatrixProtoPortListeners(ctx context.Context, matrix *ConnectivityMatr
 // loss check.
 func runMatrixProtoPortPhase(ctx context.Context, opts TestConnectivityOpts, matrix *ConnectivityMatrix, deps *matrixTestDeps) {
 	for _, src := range matrix.AllEndpoints {
-		if src.Server == nil || !deps.inSources(src.Server.Name) {
-			continue
-		}
 		for _, dst := range matrix.AllEndpoints {
-			if dst.Server == nil || !deps.inDestinations(dst.Server.Name) {
+			if !deps.probesServerPair(src, dst) {
 				continue
 			}
 			for _, entry := range matrix.ProtoPortEntries(src, dst) {
