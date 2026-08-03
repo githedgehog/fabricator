@@ -134,8 +134,8 @@ Not current practice yet; adopt when applicable:
 
 Fabricator tags are cut and published throughout the cycle without gating (see "Cutting the release"). This checklist is what qualifies one of those tags as the version a product release ships.
 
-- A fabricator tag exists and everything below runs against that tag, so the component combination pinned in `pkg/fab/versions.go` is exactly what is tested.
-- The upgrade matrix in `.github/workflows/ci.yaml` on `master` tests upgrades from the latest shipped product releases; rotate the `upgradefrom` entries when preparing a release (see the "ci: test upgrades from" commits).
+- The upgrade matrix in `.github/workflows/ci.yaml` tests upgrades from the latest shipped product releases and from the release being prepared. Rotate the `upgradefrom` entries on `master` before cutting the tag the gate runs against: a tag's CI uses the `ci.yaml` that tag carries, so rotating afterwards leaves the tag testing the old matrix (see the "ci: test upgrades from" commits). The entry for the cycle's own release resolves only once the installer maps it, so the order is early candidate tag, installer entry, rotation, gate tag.
+- A fabricator tag exists and everything below runs against that tag, so the component combination pinned in `pkg/fab/versions.go` is what is tested.
 - CI green on the tag, including all upgrade jobs.
 - Full release tests pass on the tag, including upgrade and hardware lab jobs: run the CI workflow on the tag with `releasetest` and `hlab` checked, since neither the tag's own push nor the nightly covers it.
 
