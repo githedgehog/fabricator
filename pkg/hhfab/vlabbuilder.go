@@ -365,6 +365,7 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, fabri
 	extESLAGConns := uint8(0)
 	extOrphanConns := uint8(0)
 	mhLeaves := []string{}
+	mhESLAGLeaves := []string{}
 
 	for eslagID := uint8(0); eslagID < uint8(len(eslagLeafGroups)); eslagID++ { //nolint:gosec
 		sg := fmt.Sprintf("eslag-%d", eslagID+1)
@@ -377,10 +378,7 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, fabri
 		for eslagLeafID := uint8(0); eslagLeafID < leafs; eslagLeafID++ {
 			leafName := fmt.Sprintf("leaf-%02d", leafID+eslagLeafID)
 			leafNames = append(leafNames, leafName)
-			// add eslag leaves to candidates for multihomed servers if there are not enough orphan laves
-			if b.OrphanLeafsCount < 2 {
-				mhLeaves = append(mhLeaves, leafName)
-			}
+			mhESLAGLeaves = append(mhESLAGLeaves, leafName)
 
 			if _, err := b.createSwitch(ctx, leafName, wiringapi.SwitchSpec{
 				Role:        wiringapi.SwitchRoleServerLeaf,
@@ -564,6 +562,12 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, fabri
 
 			serverID++
 		}
+	}
+
+	// eslag leaves only top up the multihomed candidates when there aren't enough
+	// orphans, and go last so orphans get picked first
+	if b.OrphanLeafsCount < 2 {
+		mhLeaves = append(mhLeaves, mhESLAGLeaves...)
 	}
 
 	mhIdx := 0
