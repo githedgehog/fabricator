@@ -288,17 +288,12 @@ func TestValidate(t *testing.T) {
 		})
 		require.ErrorContains(t, m.Validate(), "server-2(vpc-2/default) → external:ext-1")
 
-		// A DNAT-only Allow grants no egress, and an Allow scoped to one
-		// proto/port isn't seen by the untargeted curl probe. Neither settles
-		// the Unknown, or Validate would wave through an entry the curl phase
-		// goes on to assert as denied.
+		// A DNAT-only Allow grants no egress, so it doesn't settle the Unknown,
+		// or Validate would wave through an entry the curl phase goes on to
+		// assert as denied.
 		m.Add(ConnectivityExpectation{
 			Pair: EndpointPair{Source: b, Destination: ext2}, Verdict: VerdictAllow,
 			NAT: &TranslatedAddress{DestinationIP: netip.MustParseAddr("10.0.2.1"), DestinationPort: 8080},
-		})
-		m.Add(ConnectivityExpectation{
-			Pair: EndpointPair{Source: b, Destination: ext2}, Verdict: VerdictAllow,
-			ProtoPort: ProtoPort{Protocol: "tcp", Port: 8080},
 		})
 		require.ErrorContains(t, m.Validate(), "server-2(vpc-2/default) → external:ext-1")
 
@@ -307,6 +302,27 @@ func TestValidate(t *testing.T) {
 			Pair: EndpointPair{Source: b, Destination: ext2}, Verdict: VerdictAllow,
 		})
 		require.NoError(t, m.Validate())
+	})
+
+	t.Run("entries no phase can read", func(t *testing.T) {
+		// runMatrixProtoPortPhase probes server destinations only and the curl
+		// probe is untargeted, so this expectation asserts nothing.
+		m := newMatrix()
+		m.Add(ConnectivityExpectation{
+			Pair: EndpointPair{Source: a, Destination: ext}, Verdict: VerdictAllow,
+			ProtoPort: ProtoPort{Protocol: "tcp", Port: 8080},
+		})
+		err := m.Validate()
+		require.ErrorContains(t, err, "no probe phase can read")
+		require.ErrorContains(t, err, "server-1(vpc-1/default) → external:ext-1 [tcp/8080]")
+
+		// A translated port with no address to aim it at is unprobeable too.
+		m = newMatrix()
+		m.Add(ConnectivityExpectation{
+			Pair: EndpointPair{Source: a, Destination: b}, Verdict: VerdictAllow,
+			NAT: &TranslatedAddress{DestinationPort: 15201},
+		})
+		require.ErrorContains(t, m.Validate(), "server-1(vpc-1/default) → server-2(vpc-2/default)")
 	})
 }
 
