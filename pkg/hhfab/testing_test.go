@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.githedgehog.com/fabric/api/meta"
+	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 )
 
 func TestVLANsFrom(t *testing.T) {
@@ -371,6 +372,103 @@ rtt min/avg/max/mdev = 0.611/0.912/1.308/0.251 ms
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			require.Equal(t, test.expected, parsePingLostSeqs(test.stdout, test.sent))
+		})
+	}
+}
+
+func TestGetServerHostBGPCmd(t *testing.T) {
+	unbundled := func(port string) *wiringapi.Connection {
+		return &wiringapi.Connection{Spec: wiringapi.ConnectionSpec{
+			Unbundled: &wiringapi.ConnUnbundled{
+				Link: wiringapi.ServerToSwitchLink{Server: wiringapi.BasePortName{Port: port}},
+			},
+		}}
+	}
+	bundled := func(ports ...string) *wiringapi.Connection {
+		links := []wiringapi.ServerToSwitchLink{}
+		for _, port := range ports {
+			links = append(links, wiringapi.ServerToSwitchLink{Server: wiringapi.BasePortName{Port: port}})
+		}
+
+		return &wiringapi.Connection{Spec: wiringapi.ConnectionSpec{Bundled: &wiringapi.ConnBundled{Links: links}}}
+	}
+
+	for _, test := range []struct {
+		name     string
+		params   []HostBGPParams
+		expected string
+		wantErr  bool
+	}{
+		{name: "no params", wantErr: true},
+		{
+			name: "single vpc single connection",
+			params: []HostBGPParams{{
+				VPCLabel:    "vpc-01",
+				Connections: []*wiringapi.Connection{unbundled("server-01/enp2s1")},
+				VLAN:        1001,
+				Subnet:      netip.MustParsePrefix("10.0.1.0/24"),
+			}},
+			expected: "vpc-01:v=1001:i=enp2s1:a=10.0.1.0/32",
+		},
+		{
+			name: "server offset walks the subnet",
+			params: []HostBGPParams{{
+				VPCLabel:     "vpc-01",
+				Connections:  []*wiringapi.Connection{bundled("server-01/enp2s1", "server-01/enp2s2")},
+				VLAN:         1001,
+				Subnet:       netip.MustParsePrefix("10.0.1.0/24"),
+				ServerOffset: 3,
+			}},
+			expected: "vpc-01:v=1001:i=enp2s1:i=enp2s2:a=10.0.1.3/32",
+		},
+		{
+			name: "two vpcs are space separated",
+			params: []HostBGPParams{
+				{
+					VPCLabel:    "vpc-01",
+					Connections: []*wiringapi.Connection{unbundled("server-01/enp2s1")},
+					VLAN:        1001,
+					Subnet:      netip.MustParsePrefix("10.0.1.0/24"),
+				},
+				{
+					VPCLabel:     "vpc-02",
+					Connections:  []*wiringapi.Connection{unbundled("server-01/enp2s2"), unbundled("server-01/enp2s3")},
+					VLAN:         1002,
+					Subnet:       netip.MustParsePrefix("10.0.2.0/24"),
+					ServerOffset: 1,
+				},
+			},
+			expected: "vpc-01:v=1001:i=enp2s1:a=10.0.1.0/32 vpc-02:v=1002:i=enp2s2:i=enp2s3:a=10.0.2.1/32",
+		},
+		{
+			name:    "no connections",
+			params:  []HostBGPParams{{VPCLabel: "vpc-01", VLAN: 1001, Subnet: netip.MustParsePrefix("10.0.1.0/24")}},
+			wantErr: true,
+		},
+		{
+			name:    "nil connection",
+			params:  []HostBGPParams{{VPCLabel: "vpc-01", Connections: []*wiringapi.Connection{nil}, VLAN: 1001}},
+			wantErr: true,
+		},
+		{
+			name: "unsupported connection type",
+			params: []HostBGPParams{{
+				VPCLabel:    "vpc-01",
+				Connections: []*wiringapi.Connection{{Spec: wiringapi.ConnectionSpec{}}},
+				VLAN:        1001,
+			}},
+			wantErr: true,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cmd, err := getServerHostBGPCmd(test.params)
+			if test.wantErr {
+				require.Error(t, err)
+
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, test.expected, cmd)
 		})
 	}
 }
