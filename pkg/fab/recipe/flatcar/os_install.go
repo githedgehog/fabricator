@@ -208,6 +208,10 @@ func (i *OSInstal) Run(ctx context.Context) error {
 		return fmt.Errorf("partprobing: %w", err)
 	}
 
+	if err := i.execCmd(ctx, true, "udevadm", "wait", "--timeout=30", "--settle", i.TargetDisk); err != nil {
+		return fmt.Errorf("udevadm wait timeout or other error: %w", err)
+	}
+
 	// The partition resize didn't wipe out the exisiting filesystem so we don't
 	// need to remake it, just expand the one that is on disk already. In our
 	// case we just moving the end of it, not the start
