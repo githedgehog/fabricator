@@ -50,14 +50,23 @@ func makeSingleVPCSuite() *JUnitTestSuite {
 		{
 			Name: "DNS/NTP/MTU/DHCP lease",
 			F:    dnsNtpMtuTest,
+			SkipFlags: SkipFlags{
+				NoServers: true,
+			},
 		},
 		{
 			Name: "DHCP renewal",
 			F:    dhcpRenewalTest,
+			SkipFlags: SkipFlags{
+				NoServers: true,
+			},
 		},
 		{
 			Name: "DHCP static lease",
 			F:    dhcpStaticLeaseTest,
+			SkipFlags: SkipFlags{
+				NoServers: true,
+			},
 		},
 		{
 			Name: "ESLAG Failover",
@@ -934,58 +943,31 @@ outer:
 // for MTU, we check the output of "ip link" on the vlan interface;
 // for DHCP Lease, we check the output of "ip addr" on the server.
 func dnsNtpMtuTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
-	vpcAttaches := &vpcapi.VPCAttachmentList{}
-	if err := testCtx.kube.List(ctx, vpcAttaches); err != nil {
-		return false, nil, fmt.Errorf("listing VPCAttachments: %w", err)
-	}
-	if len(vpcAttaches.Items) == 0 {
-		slog.Warn("No VPCAttachments found, skipping DNS/MTU/NTP test")
+	serverInfo, err := findAnyAttachedServer(ctx, testCtx.kube)
+	if err != nil {
+		if errors.Is(err, errNoAttachedServers) {
+			slog.Info("No servers with VPC attachments found, skipping DNS/NTP/MTU test")
 
-		return true, nil, errors.New("no VPCAttachments found") //nolint:goerr113
-	}
-	vpcAttach := vpcAttaches.Items[0]
-	subnetName := vpcAttach.Spec.SubnetName()
-	vpcName := vpcAttach.Spec.VPCName()
-	vpc := &vpcapi.VPC{}
-	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: vpcName}, vpc); err != nil {
-		return false, nil, fmt.Errorf("getting VPC %s: %w", vpcName, err)
-	}
-	subnet, ok := vpc.Spec.Subnets[subnetName]
-	if !ok {
-		return false, nil, fmt.Errorf("subnet %s not found in VPC %s", subnetName, vpcName) //nolint:goerr113
-	}
+			return true, nil, errNoAttachedServers
+		}
 
-	conn := &wiringapi.Connection{}
-	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: vpcAttach.Spec.Connection}, conn); err != nil {
-		return false, nil, fmt.Errorf("getting connection %s for VPCAttachment %s: %w", vpcAttach.Spec.Connection, vpcAttach.Name, err)
+		return false, nil, fmt.Errorf("finding any attached server: %w", err)
 	}
-	_, servers, _, _, epErr := conn.Spec.Endpoints() //nolint:dogsled
-	if epErr != nil {
-		return false, nil, fmt.Errorf("getting endpoints for connection %s: %w", conn.Name, epErr)
-	}
-	if len(servers) != 1 {
-		return false, nil, fmt.Errorf("expected 1 server for connection %s, got %d", conn.Name, len(servers)) //nolint:goerr113
-	}
-	serverName := servers[0]
+	serverName := serverInfo.ServerName
 	serverSSH, sshErr := testCtx.getSSH(ctx, serverName)
 	if sshErr != nil {
 		return false, nil, fmt.Errorf("getting ssh config for server %s: %w", serverName, sshErr)
 	}
-	netconfCmd, netconfErr := GetServerNetconfCmd(conn, ServerNetconfOpts{
-		VLAN:       subnet.VLAN,
+	netconfCmd, netconfErr := GetServerNetconfCmd(serverInfo.Connection, ServerNetconfOpts{
+		VLAN:       serverInfo.Subnet.VLAN,
 		HashPolicy: testCtx.setupOpts.HashPolicy,
 	})
 	if netconfErr != nil {
 		return false, nil, fmt.Errorf("getting netconf command for server %s: %w", serverName, netconfErr)
 	}
-	var ifName string
-	if conn.Spec.Unbundled != nil {
-		ifName = fmt.Sprintf("%s.%d", conn.Spec.Unbundled.Link.Server.LocalPortName(), subnet.VLAN)
-	} else {
-		ifName = fmt.Sprintf("bond0.%d", subnet.VLAN)
-	}
 
-	slog.Debug("Found server for VPCAttachment", "server", serverName, "vpc", vpcName, "subnet", subnetName, "vlan", subnet.VLAN, "ifName", ifName)
+	slog.Debug("Found server for VPCAttachment", "server", serverName, "vpc", serverInfo.VPCName, "subnet", serverInfo.SubnetName, "vlan", serverInfo.Subnet.VLAN, "interface", serverInfo.Interface)
+	backupDHCPCfg := serverInfo.Subnet.DHCP.DeepCopy()
 
 	// Set DNS, NTP and MTU
 	slog.Debug("Setting DNS, NTP, MTU and DHCP lease time")
@@ -998,33 +980,27 @@ func dnsNtpMtuTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *Conn
 		AdvertisedRoutes: []vpcapi.VPCDHCPRoute{
 			{
 				Destination: "9.9.9.9/32",
-				Gateway:     subnet.Gateway,
+				Gateway:     serverInfo.Subnet.Gateway,
 			},
 		},
 		// disable default route for L3 VPC mode to test the advertisement of the subnet route
 		DisableDefaultRoute: l3mode,
 	}
 
-	subnet.DHCP = vpcapi.VPCDHCP{
+	serverInfo.Subnet.DHCP = vpcapi.VPCDHCP{
 		Enable:  true,
 		Options: dhcpOpts,
 	}
-	change, err := CreateOrUpdateVpc(ctx, testCtx.kube, vpc)
+	change, err := CreateOrUpdateVpc(ctx, testCtx.kube, serverInfo.VPC)
 	if err != nil || !change {
-		return false, nil, fmt.Errorf("updating VPC vpc-01: %w", err)
+		return false, nil, fmt.Errorf("updating VPC %s: %w", serverInfo.VPCName, err)
 	}
 	reverts := make([]RevertFunc, 0)
 	reverts = append(reverts, func(ctx context.Context) error {
 		slog.Debug("Cleaning up")
-		for _, sub := range vpc.Spec.Subnets {
-			sub.DHCP = vpcapi.VPCDHCP{
-				Enable:  true,
-				Options: nil,
-			}
-		}
-		_, err = CreateOrUpdateVpc(ctx, testCtx.kube, vpc)
-		if err != nil {
-			return fmt.Errorf("updating VPC vpc-01: %w", err)
+		serverInfo.Subnet.DHCP = *backupDHCPCfg
+		if _, err = CreateOrUpdateVpc(ctx, testCtx.kube, serverInfo.VPC); err != nil {
+			return fmt.Errorf("updating VPC %s: %w", serverInfo.VPCName, err)
 		}
 
 		// Wait for convergence
@@ -1043,6 +1019,9 @@ func dnsNtpMtuTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *Conn
 		if testCtx.setupOpts.VPCMode == vpcapi.VPCModeL3VNI || testCtx.setupOpts.VPCMode == vpcapi.VPCModeL3Flat {
 			time.Sleep(10 * time.Second)
 		}
+		if err := testCtx.rebindMatrixServerEndpoint(ctx, matrix, serverName); err != nil {
+			return fmt.Errorf("rebinding matrix endpoint for %s: %w", serverName, err)
+		}
 
 		return nil
 	})
@@ -1053,7 +1032,7 @@ func dnsNtpMtuTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *Conn
 		return false, reverts, fmt.Errorf("waiting for ready: %w", err)
 	}
 	// Configure network interfaces on target server
-	slog.Debug("Configuring network interfaces", "server", serverName, "netconfCmd", netconfCmd, "ifName", ifName)
+	slog.Debug("Configuring network interfaces", "server", serverName, "netconfCmd", netconfCmd, "interface", serverInfo.Interface)
 	if _, stderr, err := serverSSH.Run(ctx, "/opt/bin/hhnet cleanup"); err != nil {
 		return false, reverts, fmt.Errorf("cleaning up interfaces on %s: %w: %s", serverName, err, stderr)
 	}
@@ -1062,7 +1041,7 @@ func dnsNtpMtuTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *Conn
 	if hhnetErr != nil {
 		return false, reverts, fmt.Errorf("running hhnet %s on %s: %w: %s", netconfCmd, serverName, hhnetErr, hhnetStdErr)
 	}
-	slog.Debug("Network interface configured correctly", "server", serverName, "ifname", ifName, "DHCP address", strings.TrimSpace(hhnetStdOut))
+	slog.Debug("Network interface configured correctly", "server", serverName, "interface", serverInfo.Interface, "DHCP address", strings.TrimSpace(hhnetStdOut))
 
 	// Check DNS, NTP, MTU and DHCP lease
 	slog.Debug("Checking DNS, NTP, MTU and DHCP lease")
@@ -1077,8 +1056,8 @@ func dnsNtpMtuTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *Conn
 	} else {
 		ntpFound = true
 	}
-	if _, stderr, err := serverSSH.Run(ctx, fmt.Sprintf("ip link show dev %s | grep \"mtu 1400\"", ifName)); err != nil {
-		slog.Error("mtu 1400 not found on server interface", "interface", ifName, "error", err, "stderr", stderr)
+	if _, stderr, err := serverSSH.Run(ctx, fmt.Sprintf("ip link show dev %s | grep \"mtu 1400\"", serverInfo.Interface)); err != nil {
+		slog.Error("mtu 1400 not found on server interface", "interface", serverInfo.Interface, "error", err, "stderr", stderr)
 	} else {
 		mtuFound = true
 	}
@@ -1088,7 +1067,7 @@ func dnsNtpMtuTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *Conn
 		time.Sleep(10 * time.Second)
 	}
 
-	lease, leaseErr := fetchAndParseDHCPLease(ctx, serverSSH, ifName)
+	lease, leaseErr := fetchAndParseDHCPLease(ctx, serverSSH, serverInfo.Interface)
 	if leaseErr != nil {
 		slog.Error("failed to get lease time", "error", leaseErr)
 	} else if err := checkDHCPLease(lease, 1800, 120); err != nil {
@@ -1099,7 +1078,7 @@ func dnsNtpMtuTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *Conn
 	stdout, stderr, advRoutesErr := serverSSH.Run(ctx, "ip route show")
 	if advRoutesErr != nil {
 		slog.Error("failed to get IP routes from server", "error", advRoutesErr, "stderr", stderr)
-	} else if err := checkDHCPAdvRoutes(stdout, "9.9.9.9", subnet.Gateway, dhcpOpts.DisableDefaultRoute, l3mode, subnet.Subnet); err != nil {
+	} else if err := checkDHCPAdvRoutes(stdout, "9.9.9.9", serverInfo.Subnet.Gateway, dhcpOpts.DisableDefaultRoute, l3mode, serverInfo.Subnet.Subnet); err != nil {
 		slog.Error("DHCP advertised routes check failed", "error", err)
 	} else {
 		advRoutes = true
