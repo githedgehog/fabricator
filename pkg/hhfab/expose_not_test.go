@@ -4,6 +4,7 @@
 package hhfab
 
 import (
+	"errors"
 	"net/netip"
 	"testing"
 
@@ -70,14 +71,66 @@ func TestExposeNotOrderInvariance(t *testing.T) {
 	for name, ips := range orders {
 		t.Run(name, func(t *testing.T) {
 			peering, vpc := exposeNotFixture(ips)
-			present, err := isVPCSubnetPresentInPeering(peering, vpc, "vpc-1", "default")
+			present, excluded, err := isVPCSubnetPresentInPeering(peering, vpc, "vpc-1", "default")
 			if err != nil {
 				t.Fatalf("expected no error, got: %v", err)
 			}
 			if !present {
 				t.Fatalf("expected the subnet to be reported as exposed")
 			}
+			if len(excluded) != 1 || excluded[0] != netip.MustParsePrefix("10.0.1.128/25") {
+				t.Fatalf("expected the exclusion to be reported, got %v", excluded)
+			}
 		})
+	}
+}
+
+// An exclusion belongs to the expose that lists it, so it must not be reported
+// for a subnet exposed by a different entry of the same peering.
+func TestExposeNotScopedToItsOwnExpose(t *testing.T) {
+	peering := &gwapi.PeeringEntry{
+		Expose: []gwapi.PeeringEntryExpose{
+			{IPs: []gwapi.PeeringEntryIP{
+				{VPCSubnet: "other"},
+				{Not: "10.0.2.5/32"},
+			}},
+			{IPs: []gwapi.PeeringEntryIP{
+				{VPCSubnet: "default"},
+			}},
+		},
+	}
+	vpc := gwapi.VPCInfo{
+		Spec: gwapi.VPCInfoSpec{
+			Subnets: map[string]*gwapi.VPCInfoSubnet{
+				"default": {CIDR: "10.0.1.0/24"},
+				"other":   {CIDR: "10.0.2.0/24"},
+			},
+		},
+	}
+
+	present, excluded, err := isVPCSubnetPresentInPeering(peering, vpc, "vpc-1", "default")
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if !present {
+		t.Fatalf("expected the subnet to be reported as exposed")
+	}
+	if len(excluded) != 0 {
+		t.Fatalf("expected no exclusion for subnet default, got %v", excluded)
+	}
+}
+
+// An expose entry setting none of cidr/not/vpcSubnet is a malformed peering, not
+// a check the helper does not support yet.
+func TestExposeEntryWithoutAnyFieldIsAnError(t *testing.T) {
+	peering, vpc := exposeNotFixture([]gwapi.PeeringEntryIP{{}})
+
+	_, _, err := isVPCSubnetPresentInPeering(peering, vpc, "vpc-1", "default")
+	if err == nil {
+		t.Fatalf("expected an error for a malformed expose entry")
+	}
+	if errors.Is(err, reachCheckUnsupported) {
+		t.Fatalf("expected a plain error, got %v", err)
 	}
 }
 
@@ -87,12 +140,15 @@ func TestExposeNotAloneExposesNothing(t *testing.T) {
 		{Not: "10.0.1.128/25"},
 	})
 
-	present, err := isVPCSubnetPresentInPeering(peering, vpc, "vpc-1", "default")
+	present, excluded, err := isVPCSubnetPresentInPeering(peering, vpc, "vpc-1", "default")
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
 	if present {
 		t.Fatalf("expected the subnet not to be reported as exposed")
+	}
+	if len(excluded) != 0 {
+		t.Fatalf("expected no exclusion for an unexposed subnet, got %v", excluded)
 	}
 }
 
@@ -134,8 +190,8 @@ func TestPickUnusedHostAddress(t *testing.T) {
 	}
 }
 
-func exclusionMatrixFixture() (*ConnectivityMatrix, map[string]*Endpoint) {
-	eps := map[string]*Endpoint{
+func exclusionEndpoints() map[string]*Endpoint {
+	return map[string]*Endpoint{
 		"server-3": {Server: &ServerEndpoint{
 			Name: "server-3", VPC: "vpc-03", Subnet: "default", IP: netip.MustParseAddr("10.10.3.2"),
 		}},
@@ -146,36 +202,30 @@ func exclusionMatrixFixture() (*ConnectivityMatrix, map[string]*Endpoint) {
 			Name: "server-5", VPC: "vpc-04", Subnet: "default", IP: netip.MustParseAddr("10.10.4.3"),
 		}},
 	}
+}
 
-	matrix := NewConnectivityMatrix()
-	for _, ep := range eps {
-		matrix.AllEndpoints = append(matrix.AllEndpoints, ep)
+// vpc-04 excludes server-4's address from its own expose, so the reachability
+// check reports it on whichever side of the pair vpc-04 sits.
+func exclusionReachability(sourceVPC string) Reachability {
+	r := Reachability{
+		Reachable: true,
+		Reason:    ReachabilityReasonGatewayPeering,
+		Peering:   "vpc-03--vpc-04",
 	}
-	for _, src := range matrix.AllEndpoints {
-		for _, dst := range matrix.AllEndpoints {
-			if src == dst || src.Server.VPC == dst.Server.VPC {
-				continue
-			}
-			matrix.Add(ConnectivityExpectation{
-				Pair:    EndpointPair{Source: src, Destination: dst},
-				Verdict: VerdictAllow,
-				Reason:  ReachabilityReasonGatewayPeering,
-				Peering: "vpc-03--vpc-04",
-			})
-		}
+	excluded := []netip.Prefix{netip.MustParsePrefix("10.10.4.2/32")}
+	if sourceVPC == "vpc-04" {
+		r.SourceExclusions = excluded
+	} else {
+		r.DestExclusions = excluded
 	}
 
-	return matrix, eps
+	return r
 }
 
 // Excluding a host address denies that host in both directions across the
 // peering, and leaves every other pair alone.
-func TestApplyGatewayExposeExclusionsIsHostScoped(t *testing.T) {
-	matrix, eps := exclusionMatrixFixture()
-
-	applyGatewayExposeExclusions(matrix, map[string]map[string][]netip.Prefix{
-		"vpc-03--vpc-04": {"vpc-04": {netip.MustParsePrefix("10.10.4.2/32")}},
-	})
+func TestEndpointVerdictExclusionIsHostScoped(t *testing.T) {
+	eps := exclusionEndpoints()
 
 	for _, tc := range []struct {
 		src, dst string
@@ -186,7 +236,8 @@ func TestApplyGatewayExposeExclusionsIsHostScoped(t *testing.T) {
 		{"server-3", "server-5", VerdictAllow},
 		{"server-5", "server-3", VerdictAllow},
 	} {
-		got := matrix.Lookup(eps[tc.src], eps[tc.dst], ProtoPort{}).Verdict
+		src, dst := eps[tc.src], eps[tc.dst]
+		got := endpointVerdict(exclusionReachability(src.Server.VPC), src, dst)
 		if got != tc.want {
 			t.Errorf("%s -> %s: expected %s, got %s", tc.src, tc.dst, tc.want, got)
 		}
@@ -194,34 +245,53 @@ func TestApplyGatewayExposeExclusionsIsHostScoped(t *testing.T) {
 }
 
 // An exclusion covering no assigned address changes nothing.
-func TestApplyGatewayExposeExclusionsUnusedAddress(t *testing.T) {
-	matrix, _ := exclusionMatrixFixture()
+func TestEndpointVerdictUnusedExclusion(t *testing.T) {
+	eps := exclusionEndpoints()
+	r := Reachability{
+		Reachable:      true,
+		Reason:         ReachabilityReasonGatewayPeering,
+		Peering:        "vpc-03--vpc-04",
+		DestExclusions: []netip.Prefix{netip.MustParsePrefix("10.10.4.99/32")},
+	}
 
-	applyGatewayExposeExclusions(matrix, map[string]map[string][]netip.Prefix{
-		"vpc-03--vpc-04": {"vpc-04": {netip.MustParsePrefix("10.10.4.99/32")}},
-	})
-
-	for _, src := range matrix.AllEndpoints {
-		for _, dst := range matrix.AllEndpoints {
+	for _, src := range eps {
+		for _, dst := range eps {
 			if src == dst || src.Server.VPC == dst.Server.VPC {
 				continue
 			}
-			if got := matrix.Lookup(src, dst, ProtoPort{}).Verdict; got != VerdictAllow {
+			if got := endpointVerdict(r, src, dst); got != VerdictAllow {
 				t.Errorf("%s -> %s: expected %s, got %s", src.Server.Name, dst.Server.Name, VerdictAllow, got)
 			}
 		}
 	}
 }
 
-// Exclusions only apply to the entries produced by their own peering.
-func TestApplyGatewayExposeExclusionsScopedToPeering(t *testing.T) {
-	matrix, eps := exclusionMatrixFixture()
+// An external destination has no single address to match, so only the source's
+// own exclusions can decide the verdict.
+func TestEndpointVerdictExternalDestination(t *testing.T) {
+	src := exclusionEndpoints()["server-4"]
+	ext := &Endpoint{External: &ExternalEndpoint{
+		ExternalName: "default",
+		Prefixes:     []netip.Prefix{netip.MustParsePrefix("0.0.0.0/0")},
+	}}
 
-	applyGatewayExposeExclusions(matrix, map[string]map[string][]netip.Prefix{
-		"some-other-peering": {"vpc-04": {netip.MustParsePrefix("10.10.4.2/32")}},
-	})
+	denied := Reachability{
+		Reachable:        true,
+		Reason:           ReachabilityReasonGatewayPeering,
+		Peering:          "vpc-04--external",
+		SourceExclusions: []netip.Prefix{netip.MustParsePrefix("10.10.4.2/32")},
+	}
+	if got := endpointVerdict(denied, src, ext); got != VerdictDeny {
+		t.Errorf("server-4 -> external: expected %s, got %s", VerdictDeny, got)
+	}
 
-	if got := matrix.Lookup(eps["server-3"], eps["server-4"], ProtoPort{}).Verdict; got != VerdictAllow {
-		t.Errorf("server-3 -> server-4: expected %s, got %s", VerdictAllow, got)
+	ignored := Reachability{
+		Reachable:      true,
+		Reason:         ReachabilityReasonGatewayPeering,
+		Peering:        "vpc-04--external",
+		DestExclusions: []netip.Prefix{netip.MustParsePrefix("10.10.4.2/32")},
+	}
+	if got := endpointVerdict(ignored, src, ext); got != VerdictAllow {
+		t.Errorf("server-4 -> external: expected %s, got %s", VerdictAllow, got)
 	}
 }
