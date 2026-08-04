@@ -22,7 +22,7 @@ const (
 	eslagPxeAttemptsPerLeg = 3
 )
 
-func eslagFallbackTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *ConnectivityMatrix) (bool, []RevertFunc, error) {
+func eslagFallbackTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	if testCtx.setupOpts.VPCMode == vpcapi.VPCModeL3VNI {
 		return true, nil, fmt.Errorf("L3VNI mode is not compatible with ESLAG") //nolint:goerr113
 	}
@@ -87,7 +87,14 @@ func eslagFallbackTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Conne
 			return false, reverts, fmt.Errorf("building netconf command for %s: %w", server, err)
 		}
 		reverts = append(reverts, func(ctx context.Context) error {
-			return restoreServerBond(ctx, ssh, netconfCmd)
+			if err := restoreServerBond(ctx, ssh, netconfCmd); err != nil {
+				return fmt.Errorf("restoring server bond for %s: %w", server, err)
+			}
+			if err := testCtx.rebindMatrixServerEndpoint(ctx, matrix, server); err != nil {
+				return fmt.Errorf("refreshing matrix endpoint for %s after restoring the bond: %w", server, err)
+			}
+
+			return nil
 		})
 
 		failures := make([]string, 0)
