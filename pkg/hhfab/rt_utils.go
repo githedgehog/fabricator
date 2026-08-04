@@ -489,10 +489,10 @@ func setRoCE(ctx context.Context, kube kclient.Client, swName string, roce bool)
 }
 
 // connHasSingleHomedServer returns true if conn is a server-bearing connection
-// that is single-homed to the named switch (Unbundled or Bundled). MCLAG and
+// that is single-homed to the named switch (Unbundled or Bundled).
 // ESLAG connections err-disable their LAG members for minutes after a
 // rebooting peer comes back, which deadlines flake tests that need traffic to
-// transit a freshly-rebooted switch; pick a non-MCLAG candidate instead.
+// transit a freshly-rebooted switch; pick a non-ESLAG candidate instead.
 func connHasSingleHomedServer(swName string, conn wiringapi.Connection) bool {
 	switch {
 	case conn.Spec.Unbundled != nil:
@@ -1178,6 +1178,7 @@ type AttachedServerInfo struct {
 	SubnetName string
 	VPC        *vpcapi.VPC
 	Subnet     *vpcapi.VPCSubnet
+	Connection *wiringapi.Connection
 }
 
 var errNoAttachedServers = errors.New("no servers attached to VPC subnets found")
@@ -1233,6 +1234,7 @@ func findAnyAttachedServer(ctx context.Context, kube kclient.Client) (*AttachedS
 			SubnetName: subnetName,
 			VPC:        vpc,
 			Subnet:     subnet,
+			Connection: conn,
 		}, nil
 	}
 
