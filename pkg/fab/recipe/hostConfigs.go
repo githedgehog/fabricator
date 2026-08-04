@@ -6,7 +6,8 @@ package recipe
 
 // sshd drop in
 // nftables
-type unitFile struct {
+// network interace files etc
+type systemdFile struct {
 	tmpl       string
 	tmplValues map[string]string
 	startCmd   string
@@ -14,19 +15,7 @@ type unitFile struct {
 	verifyCmd  string // systemd-analyze verify
 	dstPath    string
 	pritority  string // 10,20,30-filename.network
-}
-
-// dummy interface
-// mgmt interface
-// ext interface
-type networkFile struct {
-	tmpl       string
-	tmplValues map[string]string
-	startCmd   string
-	stopCmd    string
-	verifyCmd  string // systemd-analyze verify
-	dstPath    string
-	pritority  string // 10,20,30-filename.network
+	fileName   string
 }
 
 // hostnamectl
@@ -38,7 +27,6 @@ type cmdSetting struct {
 	startCmd  string
 	stopCmd   string
 	verifyCmd string
-	dstPath   string
 }
 
 // sysctl file
@@ -59,3 +47,42 @@ type Configuration interface {
 // TODO make the settingsFile, cmdSettings, networkFile, unitFil  into a single slice or similar so I can iterate through the slice and call enforce on them
 // TODO
 // TODO things inside the struct will need to be templated, ho
+//
+/* Code from an online example, tbd if it applies
+	package main
+
+	import "fmt"
+
+	// Define an interface
+	type Container interface {
+    Add(value interface{})
+    Get(index int) interface{}
+	}
+
+	// Implement a simple container
+	type MyContainer struct {
+    items []interface{}
+	}
+
+	func (c *MyContainer) Add(value interface{}) {
+    c.items = append(c.items, value)
+	}
+
+	func (c *MyContainer) Get(index int) interface{} {
+    if index < 0 || index >= len(c.items) {
+        return nil
+    }
+    return c.items[index]
+	}
+
+	func main() {
+    container := &MyContainer{}
+    container.Add(42)          // Adding an int
+    container.Add("Hello")     // Adding a string
+    container.Add(3.14)       // Adding a float
+
+    fmt.Println(container.Get(0)) // Outputs: 42
+    fmt.Println(container.Get(1)) // Outputs: Hello
+    fmt.Println(container.Get(2)) // Outputs: 3.14
+	}
+*/
