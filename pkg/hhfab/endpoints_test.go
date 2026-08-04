@@ -302,6 +302,16 @@ func TestValidate(t *testing.T) {
 			Pair: EndpointPair{Source: b, Destination: ext2}, Verdict: VerdictAllow,
 		})
 		require.NoError(t, m.Validate())
+
+		// ...but it settles only the curl expectation. A port-forward entry is
+		// read by its own phase, which has its own verdict to assert.
+		m.Add(ConnectivityExpectation{
+			Pair: EndpointPair{Source: b, Destination: ext}, Verdict: VerdictUnknown, Detail: "unsupported",
+			NAT: &TranslatedAddress{DestinationIP: netip.MustParseAddr("10.99.0.1"), DestinationPort: 8080},
+		})
+		err := m.Validate()
+		require.ErrorContains(t, err, "could not be evaluated")
+		require.ErrorContains(t, err, "server-2(vpc-2/default) → external:ext-1")
 	})
 
 	t.Run("entries no phase can read", func(t *testing.T) {
@@ -323,6 +333,36 @@ func TestValidate(t *testing.T) {
 			NAT: &TranslatedAddress{DestinationPort: 15201},
 		})
 		require.ErrorContains(t, m.Validate(), "server-1(vpc-1/default) → server-2(vpc-2/default)")
+
+		// So is a proto-scoped entry that inherited a port-forward: the proto
+		// probe would dial 5301 on the NAT address instead of the mapped port.
+		m = newMatrix()
+		m.Add(ConnectivityExpectation{
+			Pair: EndpointPair{Source: a, Destination: b}, Verdict: VerdictAllow,
+			ProtoPort: ProtoPort{Protocol: "tcp", Port: 5301},
+			NAT:       &TranslatedAddress{DestinationIP: netip.MustParseAddr("10.99.0.1"), DestinationPort: 15201},
+		})
+		err = m.Validate()
+		require.ErrorContains(t, err, "no probe phase can read")
+		require.ErrorContains(t, err, "server-1(vpc-1/default) → server-2(vpc-2/default) [tcp/5301]")
+
+		// An external Allow behind a NAT with no source pool is a contradiction:
+		// the curl oracle discards it and asserts the source cannot get out.
+		m = newMatrix()
+		m.Add(ConnectivityExpectation{
+			Pair: EndpointPair{Source: a, Destination: ext}, Verdict: VerdictAllow,
+			NAT: &TranslatedAddress{DestinationIP: netip.MustParseAddr("10.99.0.1")},
+		})
+		err = m.Validate()
+		require.ErrorContains(t, err, "no probe phase can read")
+		require.ErrorContains(t, err, "server-1(vpc-1/default) → external:ext-1")
+
+		// A masquerade pool makes it assertable again.
+		m.Add(ConnectivityExpectation{
+			Pair: EndpointPair{Source: a, Destination: ext}, Verdict: VerdictAllow,
+			NAT: &TranslatedAddress{SourcePool: netip.MustParsePrefix("10.99.0.0/24")},
+		})
+		require.NoError(t, m.Validate())
 	})
 }
 

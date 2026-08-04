@@ -296,13 +296,6 @@ func (m *ConnectivityMatrix) Validate() error {
 			len(m.dropped), strings.Join(reasons, "; ")))
 	}
 
-	extAllowBySource := map[*Endpoint]bool{}
-	for _, src := range m.AllEndpoints {
-		if _, ok := m.externalCurlAllowed(src); ok {
-			extAllowBySource[src] = true
-		}
-	}
-
 	unknowns := []string{}
 	unprobed := []string{}
 	for _, byPP := range m.entries {
@@ -313,13 +306,9 @@ func (m *ConnectivityMatrix) Validate() error {
 
 				continue
 			}
-			if owner == matrixPhaseSkipped || e.Verdict != VerdictUnknown {
-				continue
+			if owner != matrixPhaseSkipped && e.Verdict == VerdictUnknown {
+				unknowns = append(unknowns, describeMatrixEntry(e))
 			}
-			if e.Pair.Destination != nil && e.Pair.Destination.External != nil && extAllowBySource[e.Pair.Source] {
-				continue
-			}
-			unknowns = append(unknowns, describeMatrixEntry(e))
 		}
 	}
 	if len(unknowns) > 0 {
@@ -366,6 +355,11 @@ func (m *ConnectivityMatrix) entryOwner(e ConnectivityExpectation) matrixPhase {
 		return matrixPhaseUnprobed
 	}
 	scoped := e.ProtoPort != (ProtoPort{})
+	// the proto-port probes dial ProtoPort.Port, so they would aim past the
+	// translation, and the port-forward probe carries no protocol dimension
+	if portForward && scoped {
+		return matrixPhaseUnprobed
+	}
 
 	switch {
 	case dst.Server != nil:
@@ -387,12 +381,38 @@ func (m *ConnectivityMatrix) entryOwner(e ConnectivityExpectation) matrixPhase {
 			return matrixPhaseUnprobed
 		case portForward:
 			return matrixPhasePortForward
+		case e.Verdict == VerdictAllow && e.NAT != nil && !e.NAT.SourcePool.IsValid():
+			// the curl oracle discards a NAT with no source pool, so it would
+			// assert the opposite of what this entry claims
+			return matrixPhaseUnprobed
+		case e.Verdict == VerdictUnknown && m.hasExternalCurlAllow(src):
+			// one untargeted curl per source, so a sibling external's Allow
+			// already pins its outcome
+			return matrixPhaseSkipped
 		default:
 			return matrixPhaseCurl
 		}
 	default:
 		return matrixPhaseUnprobed
 	}
+}
+
+func (m *ConnectivityMatrix) hasEntriesOwnedBy(p matrixPhase) bool {
+	for _, byPP := range m.entries {
+		for _, e := range byPP {
+			if m.entryOwner(e) == p {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func (m *ConnectivityMatrix) hasExternalCurlAllow(src *Endpoint) bool {
+	_, ok := m.externalCurlAllowed(src)
+
+	return ok
 }
 
 func (m *ConnectivityMatrix) externalCurlAllowed(src *Endpoint) (ConnectivityExpectation, bool) {
@@ -647,11 +667,6 @@ func runMatrixPortForwardPhase(ctx context.Context, opts TestConnectivityOpts, m
 			if matrix.entryOwner(e) != matrixPhasePortForward {
 				continue
 			}
-			// Unknown only survives Validate for an external already settled by
-			// a sibling entry, so there is nothing to assert here.
-			if e.Verdict != VerdictAllow && e.Verdict != VerdictDeny {
-				continue
-			}
 			switch {
 			case dst.External != nil:
 				key := pfTargetKey{from: src.Server.Name, ip: e.NAT.DestinationIP, port: e.NAT.DestinationPort}
@@ -829,6 +844,14 @@ func (c *Config) TestConnectivityWithMatrix(ctx context.Context, vlab *VLAB, opt
 	}
 	if err := matrix.Validate(); err != nil {
 		return fmt.Errorf("connectivity matrix is not a sound oracle: %w", err)
+	}
+	// checkPing/checkIPerf/checkCurl no-op when their count is off, so a phase
+	// left with no enabled probe would pass its entries unasserted
+	if opts.PingsCount <= 0 && opts.IPerfsSeconds <= 0 && matrix.hasEntriesOwnedBy(matrixPhaseServerServer) {
+		return fmt.Errorf("matrix has server-to-server entries but both pings and iperfs are disabled") //nolint:goerr113
+	}
+	if opts.CurlsCount <= 0 && matrix.hasEntriesOwnedBy(matrixPhaseCurl) {
+		return fmt.Errorf("matrix has external entries but curls are disabled") //nolint:goerr113
 	}
 	start := time.Now()
 
