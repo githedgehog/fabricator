@@ -90,10 +90,26 @@ const (
 	FlagGatewayLogLevel           = "gateway-log-level"
 	FlagGatewayTag                = "gateway-tag"
 	FlagShowTech                  = "show-tech"
+	FlagIPerfs                    = "iperfs"
 	FlagIPerfsSpeed               = "iperfs-speed"
+	FlagIPerfsMode                = "iperfs-mode"
 	FlagReleaseTestOnReadyOnly    = "release-test-on-ready-only"
+	FlagReleaseTestIPerfs         = "release-test-iperfs"
+	FlagReleaseTestIPerfsMode     = "release-test-iperfs-mode"
 	FlagOnReadyOnly               = "on-ready-only"
 )
+
+// iperfsModeUsage is the shared usage text for the iperf3 mode flags.
+var iperfsModeUsage = fmt.Sprintf("how much traffic each iperf3 probe sends: %q measures throughput, %q only proves the TCP path works", hhfab.IPerfsModeFull, hhfab.IPerfsModeSmoke)
+
+func parseIPerfsMode(flag, value string) (hhfab.IPerfsMode, error) {
+	mode := hhfab.IPerfsMode(value)
+	if mode != "" && !slices.Contains(hhfab.IPerfsModes, mode) {
+		return "", fmt.Errorf("invalid --%s %q, must be one of %v", flag, value, hhfab.IPerfsModes) //nolint:goerr113
+	}
+
+	return mode, nil
+}
 
 func main() {
 	if err := Run(context.Background()); err != nil {
@@ -1137,6 +1153,18 @@ func Run(ctx context.Context) error {
 								Aliases: []string{"rt-or"},
 								Usage:   "run only the special on-ready suite (used when --ready=release-test)",
 							},
+							&cli.IntFlag{
+								Name:        FlagReleaseTestIPerfs,
+								Aliases:     []string{"rt-iperfs"},
+								Usage:       "seconds of iperf3 test to run between each pair of reachable servers, 0 to disable (used when --ready=release-test)",
+								DefaultText: "3",
+							},
+							&cli.StringFlag{
+								Name:    FlagReleaseTestIPerfsMode,
+								Aliases: []string{"rt-iperfs-mode"},
+								Usage:   iperfsModeUsage + " (used when --ready=release-test)",
+								Value:   string(hhfab.IPerfsModeFull),
+							},
 							&cli.UintFlag{
 								Category: FlagCatVMSizes,
 								Name:     "control-cpus",
@@ -1209,6 +1237,21 @@ func Run(ctx context.Context) error {
 								return err
 							}
 
+							rtIPerfsMode, err := parseIPerfsMode(FlagReleaseTestIPerfsMode, c.String(FlagReleaseTestIPerfsMode))
+							if err != nil {
+								return err
+							}
+							var rtIPerfs *int
+							// Only override the suite defaults when the flag was
+							// actually passed.
+							if c.IsSet(FlagReleaseTestIPerfs) {
+								iperfs := c.Int(FlagReleaseTestIPerfs)
+								if iperfs < 0 {
+									return fmt.Errorf("--%s must be >= 0, got %d", FlagReleaseTestIPerfs, iperfs) //nolint:goerr113
+								}
+								rtIPerfs = &iperfs
+							}
+
 							if err := hhfab.VLABUp(ctx, workDir, cacheDir, hhfab.VLABUpOpts{
 								HydrateMode:          hhfab.HydrateMode(hydrateMode),
 								ReCreate:             c.Bool(FlagNameReCreate),
@@ -1248,6 +1291,8 @@ func Run(ctx context.Context) error {
 									ReleaseTestRegexes:       c.StringSlice(FlagReleaseTestRegexes),
 									ReleaseTestRegexesInvert: c.Bool(FlagReleaseTestRegexesInvert),
 									ReleaseTestOnReadyOnly:   c.Bool(FlagReleaseTestOnReadyOnly),
+									ReleaseTestIPerfs:        rtIPerfs,
+									ReleaseTestIPerfsMode:    rtIPerfsMode,
 									InterfaceMTU:             ifMTU,
 								},
 							}); err != nil {
@@ -1551,7 +1596,7 @@ Examples:
 								Value: 5,
 							},
 							&cli.IntFlag{
-								Name:  "iperfs",
+								Name:  FlagIPerfs,
 								Usage: "seconds of iperf3 test to run between each pair of reachable servers (0 to disable)",
 								Value: 10,
 							},
@@ -1559,6 +1604,11 @@ Examples:
 								Name:  FlagIPerfsSpeed,
 								Usage: "minimum speed in Mbits/s for iperf3 test to consider successful (0 to not check speeds)",
 								Value: 8200,
+							},
+							&cli.StringFlag{
+								Name:  FlagIPerfsMode,
+								Usage: iperfsModeUsage,
+								Value: string(hhfab.IPerfsModeFull),
 							},
 							&cli.IntFlag{
 								Name:  "curls",
@@ -1602,11 +1652,27 @@ Examples:
 							if cliTOS > 255 {
 								return fmt.Errorf("tos value must be between 0 and 255, got %d", cliTOS) //nolint:goerr113
 							}
+							iperfsMode, err := parseIPerfsMode(FlagIPerfsMode, c.String(FlagIPerfsMode))
+							if err != nil {
+								return err
+							}
+							if iperfsMode.Smoke() && c.IsSet(FlagIPerfsSpeed) {
+								slog.Warn("iperf3 smoke probes measure no throughput, ignoring", "flag", FlagIPerfsSpeed)
+							}
+							iperfs := c.Int(FlagIPerfs)
+							if iperfs < 0 {
+								return fmt.Errorf("--%s must be >= 0, got %d", FlagIPerfs, iperfs) //nolint:goerr113
+							}
+							iperfsSpeed := c.Float64(FlagIPerfsSpeed)
+							if iperfsSpeed < 0 {
+								return fmt.Errorf("--%s must be >= 0, got %g", FlagIPerfsSpeed, iperfsSpeed) //nolint:goerr113
+							}
 							if err := hhfab.DoVLABTestConnectivity(ctx, workDir, cacheDir, hhfab.TestConnectivityOpts{
 								WaitSwitchesReady: c.Bool("wait-switches-ready"),
 								PingsCount:        c.Int("pings"),
-								IPerfsSeconds:     c.Int("iperfs"),
-								IPerfsMinSpeed:    c.Float64(FlagIPerfsSpeed),
+								IPerfsSeconds:     iperfs,
+								IPerfsMinSpeed:    iperfsSpeed,
+								IPerfsMode:        iperfsMode,
 								CurlsCount:        c.Int("curls"),
 								Sources:           c.StringSlice("source"),
 								Destinations:      c.StringSlice("destination"),
@@ -1723,6 +1789,16 @@ Examples:
 								Usage: "minimum speed in Mbits/s for iperf3 test to consider successful (0 to not check speeds)",
 								Value: 8200,
 							},
+							&cli.IntFlag{
+								Name:        FlagIPerfs,
+								Usage:       "seconds of iperf3 test to run between each pair of reachable servers (0 to disable)",
+								DefaultText: "3, or 10 with --extended",
+							},
+							&cli.StringFlag{
+								Name:  FlagIPerfsMode,
+								Usage: iperfsModeUsage,
+								Value: string(hhfab.IPerfsModeFull),
+							},
 							&cli.BoolFlag{
 								Name:    FlagOnReadyOnly,
 								Aliases: []string{"on-ready", "o"},
@@ -1734,6 +1810,13 @@ Examples:
 							iperfsSpeed := c.Float64(FlagIPerfsSpeed)
 							if iperfsSpeed < 0 {
 								return fmt.Errorf("--%s must be >= 0, got %g", FlagIPerfsSpeed, iperfsSpeed) //nolint:goerr113
+							}
+							iperfsMode, err := parseIPerfsMode(FlagIPerfsMode, c.String(FlagIPerfsMode))
+							if err != nil {
+								return err
+							}
+							if iperfsMode.Smoke() && c.IsSet(FlagIPerfsSpeed) {
+								slog.Warn("iperf3 smoke probes measure no throughput, ignoring", "flag", FlagIPerfsSpeed)
 							}
 							opts := hhfab.ReleaseTestOpts{
 								Regexes:        c.StringSlice(FlagRegEx),
@@ -1747,7 +1830,17 @@ Examples:
 								ListTests:      c.Bool(FlagListTests),
 								ShowTechDump:   c.Bool(FlagShowTech),
 								IPerfsMinSpeed: iperfsSpeed,
+								IPerfsMode:     iperfsMode,
 								OnReadyTest:    c.Bool(FlagOnReadyOnly),
+							}
+							// Only override the suite defaults, which depend on
+							// --extended, when the flag was actually passed.
+							if c.IsSet(FlagIPerfs) {
+								iperfs := c.Int(FlagIPerfs)
+								if iperfs < 0 {
+									return fmt.Errorf("--%s must be >= 0, got %d", FlagIPerfs, iperfs) //nolint:goerr113
+								}
+								opts.IPerfsSeconds = &iperfs
 							}
 							if err := hhfab.DoVLABReleaseTest(ctx, workDir, cacheDir, opts); err != nil {
 								return fmt.Errorf("release-test: %w", err)

@@ -503,7 +503,7 @@ func runMatrixServerServerPhase(ctx context.Context, opts TestConnectivityOpts, 
 
 			expected := reachabilityFromExpectation(entry)
 			bidir := false
-			if opts.IPerfsSeconds > 0 && expected.Reachable && deps.inSources(dst.Server.Name) && deps.inDestinations(src.Server.Name) {
+			if opts.IPerfsSeconds > 0 && !opts.IPerfsMode.Smoke() && expected.Reachable && deps.inSources(dst.Server.Name) && deps.inDestinations(src.Server.Name) {
 				reverse := matrix.Lookup(dst, src, ProtoPort{})
 				if reverse.Verdict == VerdictAllow {
 					// bidir iperf3 uses one TCP session; both halves share
@@ -781,7 +781,8 @@ func (c *Config) TestConnectivityWithMatrix(ctx context.Context, vlab *VLAB, opt
 	if matrix == nil {
 		return fmt.Errorf("connectivity matrix must be non-nil") //nolint:goerr113
 	}
-	if opts.PingsCount == 0 && opts.IPerfsSeconds == 0 && opts.CurlsCount == 0 {
+	// <= 0 rather than == 0: see the same guard in TestConnectivity.
+	if opts.PingsCount <= 0 && opts.IPerfsSeconds <= 0 && opts.CurlsCount <= 0 {
 		return fmt.Errorf("at least one of pings, iperfs or curls should be enabled") //nolint:goerr113
 	}
 	if err := matrix.Validate(); err != nil {
@@ -957,9 +958,8 @@ func runMatrixIperfPortForward(ctx context.Context, opts TestConnectivityOpts, i
 	}
 	defer iperfs.Release(1)
 
-	secs := opts.IPerfsSeconds
-	cmd := fmt.Sprintf("toolbox -E LD_PRELOAD=/lib/x86_64-linux-gnu/libgcc_s.so.1 -q timeout %d iperf3 -J -c %s -p %d -t %d",
-		secs+25, toIP.String(), toPort, secs)
+	timeoutSecs, iperfArgs := iperf3ClientArgs(opts, toIP, toPort, 1, false)
+	cmd := fmt.Sprintf("toolbox -E LD_PRELOAD=/lib/x86_64-linux-gnu/libgcc_s.so.1 -q timeout %d iperf3 %s", timeoutSecs, iperfArgs)
 	if _, _, iperfErr := retrySSHCmd(ctx, ssh, cmd, from); iperfErr != nil {
 		return &IperfError{Source: from, Destination: target, Why: why, ClientMsg: iperfErr.Error()}
 	}

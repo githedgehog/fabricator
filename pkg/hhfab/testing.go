@@ -2270,6 +2270,36 @@ func whySuffix(why string) string {
 	return ", because: " + why
 }
 
+// IPerfsMode selects how much traffic every iperf3 probe puts on the wire.
+type IPerfsMode string
+
+const (
+	// IPerfsModeFull runs iperf3 at line rate for IPerfsSeconds and asserts
+	// the measured throughput against IPerfsMinSpeed.
+	IPerfsModeFull IPerfsMode = "full"
+	// IPerfsModeSmoke transfers a single small block, just enough to prove
+	// the TCP path works, and asserts nothing about speed.
+	IPerfsModeSmoke IPerfsMode = "smoke"
+
+	// iperf3SmokeBytes is the total volume transferred in smoke mode, and
+	// iperf3SmokeBlockSize the size of a single write. iperf3 sends whole
+	// blocks and stops once the total is reached, so without the matching
+	// block size a small total would still put one default 128K block on
+	// the wire.
+	iperf3SmokeBytes     = "1K"
+	iperf3SmokeBlockSize = "1K"
+)
+
+// IPerfsModes lists the accepted values of IPerfsMode. The empty value is
+// also accepted and resolves to IPerfsModeFull.
+var IPerfsModes = []IPerfsMode{IPerfsModeFull, IPerfsModeSmoke}
+
+// Smoke reports whether the mode is the low-volume one. The zero value is
+// full, so opts built without the field keep the throughput behavior.
+func (m IPerfsMode) Smoke() bool {
+	return m == IPerfsModeSmoke
+}
+
 type TestConnectivityOpts struct {
 	WaitSwitchesReady bool
 	PingsCount        int
@@ -2279,6 +2309,7 @@ type TestConnectivityOpts struct {
 	IPerfsParallel    int64
 	IPerfsDSCP        uint8
 	IPerfsTOS         uint8
+	IPerfsMode        IPerfsMode
 	CurlsCount        int
 	CurlsParallel     int64
 	Sources           []string
@@ -2392,7 +2423,10 @@ func runPingIperfPair(ctx context.Context, opts TestConnectivityOpts, args pingI
 }
 
 func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConnectivityOpts) error {
-	if opts.PingsCount == 0 && opts.IPerfsSeconds == 0 && opts.CurlsCount == 0 {
+	// <= 0 rather than == 0: a negative count disables its probe further down
+	// the same as 0 does, so comparing to 0 alone would let an all-negative
+	// opts through and report success without running anything.
+	if opts.PingsCount <= 0 && opts.IPerfsSeconds <= 0 && opts.CurlsCount <= 0 {
 		return fmt.Errorf("at least one of pings, iperfs or curls should be enabled")
 	}
 	start := time.Now()
@@ -2573,7 +2607,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 					clientA := clientAR.(*sshutil.Config)
 
 					bidir := false
-					if opts.IPerfsSeconds > 0 && expectedReachable.Reachable && requestedPairs[[2]string{serverB, serverA}] {
+					if opts.IPerfsSeconds > 0 && !opts.IPerfsMode.Smoke() && expectedReachable.Reachable && requestedPairs[[2]string{serverB, serverA}] {
 						revReachable, err := IsServerReachable(ctx, kube, serverB, serverA, c.Fab.Spec.Config.Gateway.Enable)
 						if err != nil {
 							errChan <- fmt.Errorf("checking reverse reachability for bidir: %w", err)
@@ -3207,6 +3241,12 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string,
 	}
 
 	iPerfsMinSpeed := opts.IPerfsMinSpeed
+	// Smoke probes transfer a single small block, so there is no meaningful
+	// speed to assert. Zeroing the floor here also neutralizes the low-speed
+	// retry loop below, which only fires on SendSpeedTooLow.
+	if opts.IPerfsMode.Smoke() {
+		iPerfsMinSpeed = 0
+	}
 	// Gateway peering uses kernel-based dataplane; observed sustained throughput on HLAB is
 	// ~5-6.5 Gbps with periodic real packet loss, so cap floor at 5000 to avoid flake.
 	if reachability.Reason == ReachabilityReasonGatewayPeering {
@@ -3263,6 +3303,47 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string,
 	return lastErrors
 }
 
+// iperf3FullStreams is the number of parallel streams a full-mode throughput
+// probe between two servers uses.
+const iperf3FullStreams = 4
+
+// iperf3SmokeTimeoutSeconds bounds a smoke probe. The transfer itself is
+// instant, so the budget only has to cover connection setup.
+const iperf3SmokeTimeoutSeconds = 25
+
+// iperf3ClientArgs builds the iperf3 client invocation shared by the
+// server-to-server throughput probe and the port-forward NAT probe: the
+// `timeout` budget in seconds and the iperf3 arguments themselves. Each
+// caller wraps them in its own way of reaching an iperf3 binary. toPort 0
+// leaves iperf3 on its default port, and streams and bidir only apply in
+// full mode.
+func iperf3ClientArgs(opts TestConnectivityOpts, toIP netip.Addr, toPort uint16, streams int, bidir bool) (int, string) {
+	args := fmt.Sprintf("-J -c %s", toIP.String())
+	if toPort > 0 {
+		args += fmt.Sprintf(" -p %d", toPort)
+	}
+
+	timeout := iperf3SmokeTimeoutSeconds
+	if opts.IPerfsMode.Smoke() {
+		args += fmt.Sprintf(" -P 1 -n %s -l %s", iperf3SmokeBytes, iperf3SmokeBlockSize)
+	} else {
+		timeout = opts.IPerfsSeconds + 25
+		args += fmt.Sprintf(" -P %d -t %d", streams, opts.IPerfsSeconds)
+		if bidir {
+			args += " --bidir"
+		}
+	}
+
+	if opts.IPerfsDSCP > 0 {
+		args += fmt.Sprintf(" --dscp %d", opts.IPerfsDSCP)
+	}
+	if opts.IPerfsTOS > 0 {
+		args += fmt.Sprintf(" --tos %d", opts.IPerfsTOS)
+	}
+
+	return timeout, args
+}
+
 func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to string, fromSSH *sshutil.Config, toIP netip.Addr, iPerfsMinSpeed float64, bidir bool) []*IperfError {
 	minSpeedStr := asMbps(iPerfsMinSpeed * 1_000_000)
 	// Forward direction: client (`from`) sends to server (`to`).
@@ -3273,25 +3354,18 @@ func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to stri
 		rev = &IperfError{Source: to, Destination: from, MinSpeed: minSpeedStr}
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, time.Duration(opts.IPerfsSeconds+30)*time.Second)
+	timeoutSecs, iperfArgs := iperf3ClientArgs(opts, toIP, 0, iperf3FullStreams, bidir)
+
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSecs+5)*time.Second)
 	defer cancel()
 
-	slog.Debug("Running iperf3", "from", from, "to", to, "bidir", bidir)
+	slog.Debug("Running iperf3", "from", from, "to", to, "bidir", bidir, "mode", opts.IPerfsMode)
 
 	// Run the iperf3 client inside the always-on iperf3 container instead of spawning a per-test
 	// toolbox container on the client VM. The fresh container plus the JSON result buffer can
 	// push the 768 MB server VM into ENOMEM during result aggregation. `docker exec` reuses the
 	// running container's namespaces and adds only the iperf3 client process itself.
-	cmd := fmt.Sprintf("sudo docker exec iperf3 timeout %d iperf3 -P 4 -J -c %s -t %d", opts.IPerfsSeconds+25, toIP.String(), opts.IPerfsSeconds)
-	if bidir {
-		cmd += " --bidir"
-	}
-	if opts.IPerfsDSCP > 0 {
-		cmd += fmt.Sprintf(" --dscp %d", opts.IPerfsDSCP)
-	}
-	if opts.IPerfsTOS > 0 {
-		cmd += fmt.Sprintf(" --tos %d", opts.IPerfsTOS)
-	}
+	cmd := fmt.Sprintf("sudo docker exec iperf3 timeout %d iperf3 %s", timeoutSecs, iperfArgs)
 
 	stdout, stderr, err := retrySSHCmd(ctx, fromSSH, cmd, from)
 	report, parseErr := parseIPerf3Report([]byte(stdout))
@@ -3315,7 +3389,7 @@ func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to stri
 	fwdSent := report.End.SumSent
 	fwdRcvd := report.End.SumReceived
 	logArgs := []any{
-		"from", from, "to", to, "bidir", bidir,
+		"from", from, "to", to, "bidir", bidir, "mode", opts.IPerfsMode,
 		"sendSpeed", asMbps(fwdSent.BitsPerSecond),
 		"receiveSpeed", asMbps(fwdRcvd.BitsPerSecond),
 		"sent", asMB(float64(fwdSent.Bytes)),
@@ -3888,7 +3962,12 @@ type ReleaseTestOpts struct {
 	ListTests      bool
 	ShowTechDump   bool
 	IPerfsMinSpeed float64
-	OnReadyTest    bool
+	// IPerfsSeconds overrides the per-pair iperf3 duration, 0 disabling
+	// iperf3 altogether. Nil keeps the suite defaults, which depend on
+	// Extended, so callers that do not care must leave it unset.
+	IPerfsSeconds *int
+	IPerfsMode    IPerfsMode
+	OnReadyTest   bool
 }
 
 func ReleaseTest(ctx context.Context, c *Config, vlab *VLAB, opts ReleaseTestOpts) error {
@@ -3899,6 +3978,15 @@ func ReleaseTest(ctx context.Context, c *Config, vlab *VLAB, opts ReleaseTestOpt
 	}
 	if !slices.Contains(vpcapi.VPCModes, opts.VPCMode) {
 		return fmt.Errorf("invalid VPC mode %q, must be one of %v", opts.VPCMode, vpcapi.VPCModes)
+	}
+	if opts.IPerfsMode != "" && !slices.Contains(IPerfsModes, opts.IPerfsMode) {
+		return fmt.Errorf("invalid iperfs mode %q, must be one of %v", opts.IPerfsMode, IPerfsModes)
+	}
+	if opts.IPerfsSeconds != nil && *opts.IPerfsSeconds < 0 {
+		return fmt.Errorf("invalid iperfs seconds %d, must be >= 0", *opts.IPerfsSeconds)
+	}
+	if opts.IPerfsSeconds != nil && *opts.IPerfsSeconds == 0 && opts.IPerfsMode.Smoke() {
+		slog.Warn("iperf3 probes are disabled, ignoring iperfs mode", "mode", opts.IPerfsMode)
 	}
 
 	return RunReleaseTestSuites(ctx, c, vlab, opts)
