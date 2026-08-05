@@ -2207,6 +2207,44 @@ func parsePingLostSeqs(stdout string, sent int) []int {
 	return lost
 }
 
+// parsePingCounts reads the sent/received totals off ping's summary line and
+// returns 0, 0 when there is no parsable summary.
+func parsePingCounts(stdout string) (int, int) {
+	for l := range strings.SplitSeq(stdout, "\n") {
+		if !strings.Contains(l, "packets transmitted") || !strings.Contains(l, "received") {
+			continue
+		}
+
+		parts := strings.Split(l, ", ")
+		if len(parts) >= 2 {
+			sentStr := strings.TrimSpace(strings.Split(parts[0], " ")[0])
+			receivedStr := strings.TrimSpace(strings.Split(parts[1], " ")[0])
+			sent, err1 := strconv.Atoi(sentStr)
+			received, err2 := strconv.Atoi(receivedStr)
+			if err1 == nil && err2 == nil {
+				return sent, received
+			}
+		}
+
+		break
+	}
+
+	return 0, 0
+}
+
+// pingProbeCmd builds the probe command the connectivity checks measure with.
+// -D timestamps each reply line ([unixtime]) so a lost seq can be placed on the
+// wall clock; it prefixes reply lines only, not the summary line parsePingCounts
+// and parsePingLostSeqs read.
+func pingProbeCmd(pingCount int, toIP netip.Addr, sourceIP *netip.Addr) string {
+	cmd := fmt.Sprintf("ping -i %g -c %d -W 1 -D", pingProbeInterval.Seconds(), pingCount)
+	if sourceIP != nil {
+		cmd += " -I " + sourceIP.String()
+	}
+
+	return cmd + " " + toIP.String()
+}
+
 type IperfError struct {
 	Source          string
 	Destination     string
@@ -3022,6 +3060,77 @@ func retrySSHCmd(ctx context.Context, ssh *sshutil.Config, cmd string, target st
 	return stdout, stderr, nil
 }
 
+const (
+	// pingProbeInterval is the -i pacing of the measured ping.
+	pingProbeInterval = 500 * time.Millisecond
+	// pingReprobeAttempts is how many diagnostic re-probes follow a failed
+	// expected-reachable ping.
+	pingReprobeAttempts = 3
+	// pingReprobeSlack is the per-attempt allowance for SSH setup on top of the
+	// ping itself. It is not sized to fit retrySSHCmd's backoff, which can sleep
+	// 1-5s twice per attempt; the sequence deadline is what bounds that.
+	pingReprobeSlack = 5 * time.Second
+)
+
+// reprobeOutcome names what a re-probe attempt observed, so the log line reads
+// as its own result rather than as the failure that triggered it. ping exits
+// non-zero on plain packet loss, so an error means the probe never ran only when
+// the shell never reached ping or the command never completed, the same reading
+// the verdict path uses.
+func reprobeOutcome(err error, sent, received int) string {
+	if sent == 0 {
+		return "Diagnostic re-probe did not run"
+	}
+	if err != nil {
+		if status, isExit := sshutil.ExitStatus(err); !isExit || status == 126 || status == 127 {
+			return "Diagnostic re-probe did not run"
+		}
+	}
+	if sent != received {
+		return "Diagnostic re-probe still losing packets"
+	}
+
+	return "Diagnostic re-probe recovered"
+}
+
+// reprobeAfterFailure re-runs the exact probe that just failed, a few times back
+// to back, and logs each result. Every drop counter in a show-tech is a lifetime
+// cumulative total, so a single lost packet can never be attributed to one of
+// them; re-probing the same pair right away tells a convergence blip (the
+// re-probes recover) apart from a persistent path problem (they keep losing
+// packets). Diagnostic only: it reports nothing back and must never influence
+// the caller's verdict.
+func reprobeAfterFailure(ctx context.Context, pingCount int, from, to string, fromSSH *sshutil.Config, cmd string) {
+	// The pair still holds its slot in the ping semaphore here, so this delays
+	// pairs queued behind it rather than adding concurrency. Bound the whole
+	// sequence and report what was skipped instead of running past the budget.
+	budget := pingReprobeAttempts * (time.Duration(pingCount)*pingProbeInterval + pingReprobeSlack)
+	ctx, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
+
+	for attempt := 1; attempt <= pingReprobeAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			slog.Warn("Diagnostic re-probe skipped", "from", from, "to", to,
+				"attempt", attempt, "attempts", pingReprobeAttempts, "err", err)
+
+			return
+		}
+
+		stdout, stderr, err := retrySSHCmd(ctx, fromSSH, cmd, from)
+		sent, received := parsePingCounts(stdout)
+		// Unlike the verdict path, name the lost seqs on total loss too, so an
+		// empty list in this line always means nothing was lost.
+		var lost []int
+		if sent != received {
+			lost = parsePingLostSeqs(stdout, sent)
+		}
+
+		slog.Warn(reprobeOutcome(err, sent, received), "from", from, "to", to,
+			"attempt", attempt, "attempts", pingReprobeAttempts,
+			"sent", sent, "rcvd", received, "lost", lost, "err", err, "stdout", stdout, "stderr", stderr)
+	}
+}
+
 func checkPing(ctx context.Context, pingCount int, semaphore *semaphore.Weighted, from, to string, fromSSH *sshutil.Config, toIP netip.Addr, sourceIP *netip.Addr, expected Reachability) *PingError {
 	if pingCount <= 0 {
 		return nil
@@ -3042,6 +3151,9 @@ func checkPing(ctx context.Context, pingCount int, semaphore *semaphore.Weighted
 		defer semaphore.Release(1)
 	}
 
+	// The diagnostic re-probe on the failure path runs after this probe's own
+	// deadline may already have expired, so it gets its own budget off the parent.
+	parentCtx := ctx
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(pingCount+30)*time.Second)
 	defer cancel()
 
@@ -3056,35 +3168,11 @@ func checkPing(ctx context.Context, pingCount int, semaphore *semaphore.Weighted
 		slog.Warn("Warm-up ping failed, continuing anyway", "err", err, "stdout", stdout, "stderr", stderr)
 	}
 
-	// -D timestamps each reply line ([unixtime]) so a lost seq can be placed on
-	// the wall clock; it prefixes reply lines only, not the summary line the
-	// sent/received parser and parsePingLostSeqs read.
-	cmd = fmt.Sprintf("ping -i 0.5 -c %d -W 1 -D", pingCount)
-	if sourceIP != nil {
-		cmd += " -I " + sourceIP.String()
-	}
-	cmd += " " + toIP.String()
+	cmd = pingProbeCmd(pingCount, toIP, sourceIP)
 	stdout, stderr, err := retrySSHCmd(ctx, fromSSH, cmd, from)
 	pe.CmdOutput = stdout
 
-	// parse ping output and extract sent and received packets
-	for l := range strings.SplitSeq(stdout, "\n") {
-		if strings.Contains(l, "packets transmitted") && strings.Contains(l, "received") {
-			parts := strings.Split(l, ", ")
-			if len(parts) >= 2 {
-				sentStr := strings.TrimSpace(strings.Split(parts[0], " ")[0])
-				receivedStr := strings.TrimSpace(strings.Split(parts[1], " ")[0])
-				sent, err1 := strconv.Atoi(sentStr)
-				received, err2 := strconv.Atoi(receivedStr)
-				if err1 == nil && err2 == nil {
-					pe.Sent = sent
-					pe.Received = received
-				}
-			}
-
-			break
-		}
-	}
+	pe.Sent, pe.Received = parsePingCounts(stdout)
 	if pe.Received > 0 && pe.Sent != pe.Received {
 		pe.Lost = parsePingLostSeqs(stdout, pe.Sent)
 	}
@@ -3115,17 +3203,22 @@ func checkPing(ctx context.Context, pingCount int, semaphore *semaphore.Weighted
 
 	// When a ping that should have succeeded fails, surface the per-packet
 	// (timestamped, via -D) output at warn level so the loss pattern is visible
-	// next to the error without re-running with -v. Negative tests fail pings by
-	// design, so only do this when reachability was expected.
-	logExpectedFailure := func() {
+	// next to the error without re-running with -v, then re-probe the same pair
+	// while the fabric is still in the state that lost the packet. Negative tests
+	// fail pings by design, so only do this when reachability was expected.
+	//
+	// The verdict below is already decided by pingOk/pingFail and pe's counts;
+	// neither the logging nor the re-probe may touch either.
+	onExpectedFailure := func() {
 		if expected.Reachable {
 			slog.Warn("Ping failed (expected reachable)", "from", from, "to", to,
 				"sent", pe.Sent, "rcvd", pe.Received, "lost", pe.Lost, "stdout", stdout, "stderr", stderr)
+			reprobeAfterFailure(parentCtx, pingCount, from, to, fromSSH, cmd)
 		}
 	}
 
 	if pingOk == pingFail {
-		logExpectedFailure()
+		onExpectedFailure()
 		if err != nil {
 			pe.Msg = err.Error()
 		} else {
@@ -3137,7 +3230,7 @@ func checkPing(ctx context.Context, pingCount int, semaphore *semaphore.Weighted
 	}
 
 	if expected.Reachable && !pingOk {
-		logExpectedFailure()
+		onExpectedFailure()
 		pe.Msg = "should be reachable but ping failed"
 
 		return pe
