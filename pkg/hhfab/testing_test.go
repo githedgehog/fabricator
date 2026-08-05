@@ -4,6 +4,7 @@
 package hhfab
 
 import (
+	"errors"
 	"net/netip"
 	"slices"
 	"testing"
@@ -474,6 +475,57 @@ func TestGetServerHostBGPCmd(t *testing.T) {
 	}
 }
 
+func TestParsePingCounts(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		stdout   string
+		sent     int
+		received int
+	}{
+		{
+			name: "all received",
+			stdout: `PING 10.20.1.4 (10.20.1.4) 56(84) bytes of data.
+[1782458023.423317] 64 bytes from 10.20.1.4: icmp_seq=1 ttl=62 time=0.253 ms
+--- 10.20.1.4 ping statistics ---
+5 packets transmitted, 5 received, 0% packet loss, time 2016ms
+rtt min/avg/max/mdev = 0.253/0.408/0.487/0.084 ms
+`,
+			sent: 5, received: 5,
+		},
+		{
+			name: "partial loss",
+			stdout: `--- 10.20.4.2 ping statistics ---
+5 packets transmitted, 4 received, 20% packet loss, time 2010ms
+`,
+			sent: 5, received: 4,
+		},
+		{
+			name: "total loss",
+			stdout: `--- 10.20.2.3 ping statistics ---
+5 packets transmitted, 0 received, 100% packet loss, time 2014ms
+`,
+			sent: 5,
+		},
+		{
+			// ping appends "+N errors" after the received count when it saw ICMP
+			// errors, adding a field the counts must survive.
+			name: "errors reported after received",
+			stdout: `--- 10.20.4.2 ping statistics ---
+3 packets transmitted, 0 received, +3 errors, 100% packet loss, time 2040ms
+`,
+			sent: 3,
+		},
+		{name: "no summary line", stdout: "ping: connect: Network is unreachable\n"},
+		{name: "empty output"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			sent, received := parsePingCounts(test.stdout)
+			require.Equal(t, test.sent, sent)
+			require.Equal(t, test.received, received)
+		})
+	}
+}
+
 func TestUDPProbeCmd(t *testing.T) {
 	for _, test := range []struct {
 		name      string
@@ -506,6 +558,40 @@ func TestUDPProbeCmd(t *testing.T) {
 			require.Greater(t, timing.outer, timing.inner+20*time.Second)
 		})
 	}
+}
+
+func TestReprobeOutcome(t *testing.T) {
+	// ping's own exit status 1 on packet loss cannot be built here (ssh.Waitmsg
+	// carries the status in unexported fields), so the loss case is covered with
+	// the counts alone; the branch that reads the status is the did-not-run one.
+	for _, test := range []struct {
+		name     string
+		err      error
+		sent     int
+		received int
+		expected string
+	}{
+		{name: "clean", sent: 5, received: 5, expected: "Diagnostic re-probe recovered"},
+		{name: "partial loss", sent: 5, received: 4, expected: "Diagnostic re-probe still losing packets"},
+		{name: "total loss", sent: 5, expected: "Diagnostic re-probe still losing packets"},
+		{name: "no summary parsed", expected: "Diagnostic re-probe did not run"},
+		{
+			name: "ssh failure with counts", err: errors.New("session failed"),
+			sent: 5, received: 5, expected: "Diagnostic re-probe did not run",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, test.expected, reprobeOutcome(test.err, test.sent, test.received))
+		})
+	}
+}
+
+func TestPingProbeCmd(t *testing.T) {
+	toIP := netip.MustParseAddr("10.20.4.2")
+	sourceIP := netip.MustParseAddr("10.20.1.5")
+
+	require.Equal(t, "ping -i 0.5 -c 5 -W 1 -D 10.20.4.2", pingProbeCmd(5, toIP, nil))
+	require.Equal(t, "ping -i 0.5 -c 3 -W 1 -D -I 10.20.1.5 10.20.4.2", pingProbeCmd(3, toIP, &sourceIP))
 }
 
 func mapSlice[IN, OUT any](f func(IN) OUT, in []IN) []OUT {
