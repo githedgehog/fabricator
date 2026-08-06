@@ -67,7 +67,7 @@ func ServerConfig(f fabapi.Fabricator, control fabapi.ControlNode) (string, erro
 		"Name":          control.Name,
 		"NodeIP":        nodeIP.Addr(),
 		"NodeSubnet":    f.Spec.Config.Control.ManagementSubnet,
-		"FlannelIface":  control.Spec.Management.Interface,
+		"FlannelIface":  "mgmt",
 		"ClusterSubnet": f.Spec.Config.Control.KubeClusterSubnet,
 		"ServiceSubnet": f.Spec.Config.Control.KubeServiceSubnet,
 		"ClusterDNS":    f.Spec.Config.Control.KubeClusterDNS,

@@ -59,12 +59,16 @@ spec:
                     type: string
                   ip:
                     type: string
+                  mac:
+                    type: string
                 type: object
               management:
                 properties:
                   interface:
                     type: string
                   ip:
+                    type: string
+                  mac:
                     type: string
                 type: object
             type: object

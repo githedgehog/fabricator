@@ -66,8 +66,30 @@ storage:
         inline: |
           [Match]
           Driver=e1000
+          OriginalName=enp2s1
 
           [Link]
+          Name=mgmt
+          TCPSegmentationOffload=false
+          TCP6SegmentationOffload=false
+          GenericSegmentationOffload=false
+          GenericReceiveOffload=false
+          LargeReceiveOffload=false
+          ReceiveChecksumOffload=false
+          TransmitChecksumOffload=false
+          ReceiveVLANCTAGHardwareAcceleration=false
+          TransmitVLANCTAGHardwareAcceleration=false
+
+    - path: /etc/systemd/network/09-e1000-offloads.link
+      mode: 0644
+      contents:
+        inline: |
+          [Match]
+          Driver=e1000
+          OriginalName=enp2s0
+
+          [Link]
+          Name=ext
           TCPSegmentationOffload=false
           TCP6SegmentationOffload=false
           GenericSegmentationOffload=false
@@ -129,12 +151,41 @@ storage:
       contents:
         inline: |{{ .SSHDConfig | nindent 10 }}
 
+    - path: /etc/systemd/network/10-mgmt.link
+      mode: 0644
+      contents:
+        inline: |
+          [Match]
+          {{- if .MgmtMAC }}
+          MACAddress={{ .MgmtMAC }}
+          {{- else}}
+          OriginalName={{ .MgmtInterface }}
+          {{- end}}
+          [Link]
+          Name=mgmt
+          Description=Communicate with Fabric switches
+
+    - path: /etc/systemd/network/11-ext.link
+      mode: 0644
+      contents:
+        inline: |
+          [Match]
+          {{- if .ExtMAC }}
+          MACAddress={{ .ExtMAC }}
+          {{- else}}
+          OriginalName={{ .ExtInterface }}
+          {{- end}}
+          [Link]
+          Name=ext
+          Description=Used to communicate outside of the Fabric
+
+
     - path: /etc/systemd/network/20-mgmt.network
       mode: 0644
       contents:
         inline: |
           [Match]
-          Name={{ .MgmtInterface }}
+          Name=mgmt
           Type=ether
 
           [Network]
@@ -152,7 +203,7 @@ storage:
       contents:
         inline: |
           [Match]
-          Name={{ .ExtInterface }}
+          Name=ext
           Type=ether
 {{ if eq .ExtAddress "dhcp" }}
           [Network]

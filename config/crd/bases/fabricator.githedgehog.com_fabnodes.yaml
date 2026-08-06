@@ -70,6 +70,8 @@ spec:
                     type: string
                   ip:
                     type: string
+                  mac:
+                    type: string
                 type: object
               roles:
                 items:
