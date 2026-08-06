@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.githedgehog.com/fabric/api/meta"
@@ -469,6 +470,40 @@ func TestGetServerHostBGPCmd(t *testing.T) {
 			}
 			require.NoError(t, err)
 			require.Equal(t, test.expected, cmd)
+		})
+	}
+}
+
+func TestUDPProbeCmd(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		secs      int
+		reachable bool
+		expected  string
+	}{
+		{
+			name:     "deny probe bounds the control connect",
+			secs:     3,
+			expected: "sudo docker exec iperf3 timeout -k 5 18 iperf3 -u -J --connect-timeout 5000 -c 10.0.1.2 -p 5201 -t 3 -b 10M -l 1000",
+		},
+		{
+			name:      "allow probe gets the longer connect budget",
+			secs:      3,
+			reachable: true,
+			expected:  "sudo docker exec iperf3 timeout -k 5 28 iperf3 -u -J --connect-timeout 15000 -c 10.0.1.2 -p 5201 -t 3 -b 10M -l 1000",
+		},
+		{
+			name:     "extended run stretches the backstop",
+			secs:     10,
+			expected: "sudo docker exec iperf3 timeout -k 5 25 iperf3 -u -J --connect-timeout 5000 -c 10.0.1.2 -p 5201 -t 10 -b 10M -l 1000",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			timing := udpProbeTimingFor(test.secs, test.reachable)
+			require.Equal(t, test.expected, udpProbeCmd(netip.MustParseAddr("10.0.1.2"), 5201, test.secs, timing))
+			// The SSH deadline must outlive the backstop, or a probe that ran to
+			// completion is reported as having produced no result.
+			require.Greater(t, timing.outer, timing.inner+20*time.Second)
 		})
 	}
 }

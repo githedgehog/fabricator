@@ -3477,6 +3477,46 @@ const (
 	udpAllowLossThreshold = 90.0
 )
 
+const (
+	// A denied path neither completes nor refuses the iperf3 -u control connect,
+	// so iperf3 blocks in it until something bounds it. Deny probes get the short
+	// budget: on a path that is in fact open the handshake completes in
+	// milliseconds. Allow probes get a longer one so a momentarily slow but
+	// working path is not called down.
+	udpProbeDenyConnect  = 5 * time.Second
+	udpProbeAllowConnect = 15 * time.Second
+	// Backstop slack around the transfer itself, for iperf3 startup and teardown.
+	udpProbeInnerSlack = 10 * time.Second
+	// Room for the SSH round trip once the backstop has fired: without it, output
+	// from a probe that did its job is cut off and read as no result at all.
+	udpProbeSSHHeadroom = 30 * time.Second
+	udpProbeAttempts    = 2
+)
+
+// udpProbeTiming holds the nested deadlines of one UDP probe: iperf3's own
+// control-connect budget, the `timeout` backstop around it, and the SSH
+// deadline around that.
+type udpProbeTiming struct {
+	connect time.Duration
+	inner   time.Duration
+	outer   time.Duration
+}
+
+func udpProbeTimingFor(secs int, expectReachable bool) udpProbeTiming {
+	connect := udpProbeDenyConnect
+	if expectReachable {
+		connect = udpProbeAllowConnect
+	}
+	inner := connect + time.Duration(secs)*time.Second + udpProbeInnerSlack
+
+	return udpProbeTiming{connect: connect, inner: inner, outer: inner + udpProbeSSHHeadroom}
+}
+
+func udpProbeCmd(toIP netip.Addr, port uint16, secs int, timing udpProbeTiming) string {
+	return fmt.Sprintf("sudo docker exec iperf3 timeout -k 5 %d iperf3 -u -J --connect-timeout %d -c %s -p %d -t %d -b 10M -l 1000",
+		int(timing.inner.Seconds()), timing.connect.Milliseconds(), toIP.String(), port, secs)
+}
+
 // NOTE: iperf3 -u first opens a TCP control channel on the target port, so this
 // cannot distinguish "TCP denied + UDP allowed" on the same port (the control
 // channel would be blocked). Callers must avoid that combination.
@@ -3497,15 +3537,41 @@ func checkUDPPort(ctx context.Context, opts TestConnectivityOpts, sem *semaphore
 	if secs <= 0 {
 		secs = 3
 	}
-	ctx, cancel := context.WithTimeout(ctx, time.Duration(secs+30)*time.Second)
-	defer cancel()
+	timing := udpProbeTimingFor(secs, expected.Reachable)
+	cmd := udpProbeCmd(toIP, port, secs, timing)
 
-	cmd := fmt.Sprintf("sudo docker exec iperf3 timeout %d iperf3 -u -J -c %s -p %d -t %d -b 10M -l 1000", secs+25, toIP.String(), port, secs)
-	stdout, stderr, err := retrySSHCmd(ctx, fromSSH, cmd, from)
-	report, parseErr := parseIPerf3Report([]byte(stdout))
+	var (
+		report  *iperf3Report
+		stderr  string
+		err     error
+		failMsg string
+	)
+	// No report is no verdict, so retry once: the usual cause is a stall on the
+	// SSH/docker path rather than anything about the path under test.
+	for attempt := range udpProbeAttempts {
+		if attempt > 0 {
+			if ctx.Err() != nil {
+				break
+			}
+			slog.Debug("Retrying UDP port probe", "from", from, "to", target, "reason", failMsg)
+		}
 
-	if parseErr != nil {
-		ie.ClientMsg = fmt.Sprintf("iperf3 UDP probe produced no parseable report (cmd err: %v, stderr: %q): %s", err, strings.TrimSpace(stderr), parseErr)
+		probeCtx, cancel := context.WithTimeout(ctx, timing.outer)
+		var stdout string
+		stdout, stderr, err = retrySSHCmd(probeCtx, fromSSH, cmd, from)
+		cancel()
+
+		var parseErr error
+		report, parseErr = parseIPerf3Report([]byte(stdout))
+		if parseErr == nil {
+			break
+		}
+		report = nil
+		failMsg = fmt.Sprintf("iperf3 UDP probe produced no parseable report (cmd err: %v, stderr: %q): %s", err, strings.TrimSpace(stderr), parseErr)
+	}
+
+	if report == nil {
+		ie.ClientMsg = failMsg
 
 		return ie
 	}
