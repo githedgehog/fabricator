@@ -383,3 +383,27 @@ func TestReplaceServerEndpoints_PreservesHostBGP(t *testing.T) {
 	require.Same(t, ep, m.AllEndpoints[0])
 	require.True(t, ep.Server.HostBGP, "HostBGP should be copied across on in-place update")
 }
+
+func TestESLAGL3VNIOnly(t *testing.T) {
+	att := func(eslag, l3vni bool) serverAttachment {
+		return serverAttachment{vpcName: "vpc-1", subnetName: "default", eslag: eslag, l3vni: l3vni}
+	}
+
+	for _, tc := range []struct {
+		name string
+		atts []serverAttachment
+		want bool
+	}{
+		{name: "no attachments", atts: nil, want: false},
+		{name: "eslag l3vni", atts: []serverAttachment{att(true, true)}, want: true},
+		{name: "eslag l2vni", atts: []serverAttachment{att(true, false)}, want: false},
+		{name: "unbundled l3vni", atts: []serverAttachment{att(false, true)}, want: false},
+		{name: "unbundled l2vni", atts: []serverAttachment{att(false, false)}, want: false},
+		{name: "all eslag l3vni", atts: []serverAttachment{att(true, true), att(true, true)}, want: true},
+		{name: "mixed", atts: []serverAttachment{att(true, true), att(false, true)}, want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, eslagL3VNIOnly(tc.atts))
+		})
+	}
+}
