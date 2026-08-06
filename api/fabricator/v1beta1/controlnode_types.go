@@ -6,6 +6,7 @@ package v1beta1
 import (
 	"context"
 	"fmt"
+	"regexp"
 
 	"go.githedgehog.com/fabricator/api/meta"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -28,6 +29,7 @@ type ControlNodeBootstrap struct {
 type ControlNodeManagement struct {
 	IP        meta.Prefix `json:"ip,omitempty"`
 	Interface string      `json:"interface,omitempty"`
+	MACAddr   string      `json:"mac,omitempty"`
 	// TODO support bond
 }
 
@@ -36,6 +38,7 @@ type ControlNodeExternal struct {
 	Gateway   meta.Addr         `json:"gateway,omitempty"`
 	DNS       []meta.Addr       `json:"dns,omitempty"`
 	Interface string            `json:"interface,omitempty"`
+	MACAddr   string            `json:"mac,omitempty"`
 	// TODO support bond
 }
 
@@ -64,6 +67,8 @@ type ControlNodeList struct {
 	kmetav1.ListMeta `json:"metadata,omitempty"`
 	Items            []ControlNode `json:"items"`
 }
+
+var macRE = regexp.MustCompile(`^([[:xdigit:]]{2}:){5}[[:xdigit:]]{2}$|^([[:xdigit:]]{2}-){5}[[:xdigit:]]{2}$`)
 
 func init() {
 	SchemeBuilder.Register(func(s *runtime.Scheme) error {
@@ -126,12 +131,23 @@ func (c *ControlNode) Validate(_ context.Context, fabCfg *FabConfig, allowNotHyd
 		return fmt.Errorf("parsing external IP: %w", err)
 	}
 
-	if c.Spec.Management.Interface == "" {
-		return fmt.Errorf("management interface must be set") //nolint:goerr113
+	if c.Spec.Management.Interface == "" && c.Spec.Management.MACAddr == "" {
+		return fmt.Errorf("management interface name or MAC address must be set") //nolint:goerr113
+	}
+	// Accepts colon and hyphen separated mac addresses, no mixed separators
+	if c.Spec.Management.MACAddr != "" {
+		if !macRE.MatchString(c.Spec.Management.MACAddr) {
+			return fmt.Errorf("invalid management mac address: %q", c.Spec.Management.MACAddr) //nolint:goerr113
+		}
+	}
+	if c.Spec.External.MACAddr != "" {
+		if !macRE.MatchString(c.Spec.External.MACAddr) {
+			return fmt.Errorf("invalid external mac address: %q", c.Spec.External.MACAddr) //nolint:goerr113
+		}
 	}
 
-	if c.Spec.External.Interface == "" {
-		return fmt.Errorf("external interface must be set") //nolint:goerr113
+	if c.Spec.External.Interface == "" && c.Spec.Management.MACAddr == "" {
+		return fmt.Errorf("external interface name or MAC address must be set") //nolint:goerr113
 	}
 
 	if c.Spec.Bootstrap.Disk == "" {
