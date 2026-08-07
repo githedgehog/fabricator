@@ -2250,18 +2250,33 @@ func (ce *CurlError) Error() string {
 		ce.Source, ce.Msg, ce.Expected, whySuffix(ce.Why))
 }
 
+// expectationWhy renders the because-clause of a probe error. ReachabilityReason
+// only ever names the peering that would allow a pair, so a deny has to be
+// phrased against it: either something on that peering withholds the pair
+// (Detail, e.g. an ACL), or no peering covers the pair at all.
 func expectationWhy(r Reachability) string {
+	via := string(r.Reason)
+	if r.Reason != "" && r.Peering != "" {
+		via = fmt.Sprintf("%s %q", r.Reason, r.Peering)
+	}
+
+	if r.Reachable {
+		if via == "" {
+			return "no reason recorded"
+		}
+
+		return via
+	}
+
 	switch {
-	case r.Reason != "" && r.Peering != "":
-		return fmt.Sprintf("%s %q", r.Reason, r.Peering)
-	case r.Reason != "":
-		return string(r.Reason)
-	case !r.Reachable:
-		// ReachabilityReason only ever explains an allow, so a deny has none:
-		// the absence of an allowing peering is itself the reason
-		return "no peering allows it"
+	case r.Detail != "" && via != "":
+		return fmt.Sprintf("%s on %s", r.Detail, via)
+	case r.Detail != "":
+		return r.Detail
+	case via != "":
+		return via + " does not allow it"
 	default:
-		return "no reason recorded"
+		return "no peering allows it"
 	}
 }
 
@@ -2682,6 +2697,7 @@ type Reachability struct {
 	Reachable bool
 	Reason    ReachabilityReason
 	Peering   string
+	Detail    string
 }
 
 type ReachabilityReason string

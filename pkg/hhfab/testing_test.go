@@ -520,3 +520,51 @@ func mapSlice[IN, OUT any](f func(IN) OUT, in []IN) []OUT {
 func prefixToString(prefix netip.Prefix) string {
 	return prefix.String()
 }
+
+func TestExpectationWhy(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		r        Reachability
+		expected string
+	}{
+		{
+			name:     "allow names the peering that grants it",
+			r:        Reachability{Reachable: true, Reason: ReachabilityReasonGatewayPeering, Peering: "vpc-01--vpc-02"},
+			expected: `gateway-peering "vpc-01--vpc-02"`,
+		},
+		{
+			name:     "allow with no peering falls back to the reason alone",
+			r:        Reachability{Reachable: true, Reason: ReachabilityReasonIntraVPC},
+			expected: "intra-vpc",
+		},
+		{
+			name:     "an ACL deny reads as withholding a peered pair",
+			r:        Reachability{Reason: ReachabilityReasonGatewayPeering, Peering: "vpc-01--vpc-02", Detail: "ACL"},
+			expected: `ACL on gateway-peering "vpc-01--vpc-02"`,
+		},
+		{
+			name:     "a deny on a peered pair with no detail still reads as a deny",
+			r:        Reachability{Reason: ReachabilityReasonGatewayPeering, Peering: "vpc-01--vpc-02"},
+			expected: `gateway-peering "vpc-01--vpc-02" does not allow it`,
+		},
+		{
+			name:     "a deny with only a detail reports it",
+			r:        Reachability{Detail: "gw peering with non-empty expose 'As'"},
+			expected: "gw peering with non-empty expose 'As'",
+		},
+		{
+			name:     "a pair no peering covers says so",
+			r:        Reachability{},
+			expected: "no peering allows it",
+		},
+		{
+			name:     "an allow with nothing recorded admits it",
+			r:        Reachability{Reachable: true},
+			expected: "no reason recorded",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, test.expected, expectationWhy(test.r))
+		})
+	}
+}
