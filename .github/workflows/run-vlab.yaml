@@ -374,7 +374,9 @@ jobs:
         if: ${{ inputs.releasetest && !cancelled()}}
         with:
           name: ${{ env.slug }}--test-results
-          path: release-test.xml
+          path: |
+            release-test.xml
+            release-test-connectivity-audit.json
 
       - name: Prepare debug artifacts
         if: ${{ always() && !cancelled() && steps.test-current.outcome != 'skipped' }}

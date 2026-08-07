@@ -66,6 +66,7 @@ type VPCPeeringTestCtx struct {
 	noSetup          bool
 	showTechDump     bool
 	skipFlags        SkipFlags
+	probeAudit       *ProbeAuditReport
 }
 
 // Test function types
@@ -105,6 +106,7 @@ func makeTestCtx(ctx context.Context, kube kclient.Client, setupOpts SetupVPCsOp
 		testCtx.tcOpts.IPerfsSeconds = 10
 		testCtx.tcOpts.CurlsCount = 3
 	}
+	testCtx.probeAudit = &ProbeAuditReport{}
 	testCtx.wipeBetweenTests = wipeBetweenTests
 	testCtx.extended = rtOpts.Extended
 	testCtx.failFast = rtOpts.FailFast
@@ -504,7 +506,11 @@ func doRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 		}
 		prevRevertsFailed = false
 		testStart := time.Now()
-		skip, reverts, err := test.F(ctx, testCtx, matrix)
+		// Scoping the audit sink here is what buckets assertions per test case
+		// without touching any of the connectivity call sites.
+		sink := &ProbeAuditSink{}
+		auditCtx := WithProbeAuditSink(ctx, sink)
+		skip, reverts, err := test.F(auditCtx, testCtx, matrix)
 		ts.TestCases[i].Time = time.Since(testStart).Seconds()
 		ranSomeTests = true
 		// logic is getting complex, so let's make a recap:
@@ -546,7 +552,7 @@ func doRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 		}
 		var revertErr error
 		for j := len(reverts) - 1; j >= 0; j-- {
-			revertErr = reverts[j](ctx)
+			revertErr = reverts[j](auditCtx)
 			if revertErr != nil {
 				slog.Error("REVERT FAIL", "test", test.Name, "error", revertErr.Error())
 				collectDiagnostics := false
@@ -579,6 +585,10 @@ func doRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 				continue
 			}
 		}
+		// Filed before the fail-fast return, so an aborted suite still reports
+		// what it managed to assert.
+		testCtx.probeAudit.Add(ts.Name, test.Name, sink.Runs())
+
 		if testCtx.failFast && err != nil {
 			return ts, fmt.Errorf("test %s failed: %w", test.Name, err)
 		}
@@ -772,7 +782,7 @@ func selectAndRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, suite *J
 	return suite, nil
 }
 
-func recapAndReport(results []JUnitTestSuite, rtOpts ReleaseTestOpts) error {
+func recapAndReport(results []JUnitTestSuite, rtOpts ReleaseTestOpts, audit *ProbeAuditReport) error {
 	slog.Info("*** Recap of the test results ***")
 	for _, suite := range results {
 		printSuiteResults(&suite)
@@ -788,6 +798,9 @@ func recapAndReport(results []JUnitTestSuite, rtOpts ReleaseTestOpts) error {
 		}
 		if err := os.WriteFile(rtOpts.ResultsFile, output, 0o600); err != nil {
 			return fmt.Errorf("writing XML file: %w", err)
+		}
+		if err := WriteProbeAuditReport(rtOpts.ResultsFile, audit); err != nil {
+			return err
 		}
 	}
 
@@ -1027,7 +1040,7 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOp
 			return fmt.Errorf("running on-ready test suite: %w", err)
 		}
 		results = append(results, *ortResults)
-		if err := recapAndReport(results, rtOpts); err != nil {
+		if err := recapAndReport(results, rtOpts, testCtx.probeAudit); err != nil {
 			return fmt.Errorf("recapping and reporting results: %w", err)
 		}
 		slog.Info("OnReady Test Suite completed", "duration", time.Since(testStart).String())
@@ -1066,7 +1079,7 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOp
 	}
 	results = append(results, *basicResults)
 
-	if err := recapAndReport(results, rtOpts); err != nil {
+	if err := recapAndReport(results, rtOpts, testCtx.probeAudit); err != nil {
 		return fmt.Errorf("recapping and reporting results: %w", err)
 	}
 

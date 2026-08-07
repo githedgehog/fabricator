@@ -5,9 +5,12 @@ package hhfab
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -633,4 +636,45 @@ type ProbeAuditSuite struct {
 type ProbeAuditTest struct {
 	Name string          `json:"name"`
 	Runs []ProbeAuditRun `json:"runs"`
+}
+
+// Add files a test case's connectivity runs under its suite, keeping suite and
+// test order as the run produced them.
+func (r *ProbeAuditReport) Add(suite, test string, runs []ProbeAuditRun) {
+	if r == nil || len(runs) == 0 {
+		return
+	}
+	idx := slices.IndexFunc(r.Suites, func(s ProbeAuditSuite) bool { return s.Name == suite })
+	if idx < 0 {
+		r.Suites = append(r.Suites, ProbeAuditSuite{Name: suite})
+		idx = len(r.Suites) - 1
+	}
+	r.Suites[idx].Tests = append(r.Suites[idx].Tests, ProbeAuditTest{Name: test, Runs: runs})
+}
+
+// probeAuditFilePath puts the audit beside the JUnit results, so a CI job that
+// already uploads one artifact directory picks it up unchanged.
+func probeAuditFilePath(resultsFile string) string {
+	ext := filepath.Ext(resultsFile)
+
+	return strings.TrimSuffix(resultsFile, ext) + "-connectivity-audit.json"
+}
+
+// WriteProbeAuditReport writes the artifact, which is what makes a run's
+// assertion counts diffable against the previous green run.
+func WriteProbeAuditReport(resultsFile string, report *ProbeAuditReport) error {
+	if report == nil || len(report.Suites) == 0 {
+		return nil
+	}
+	path := probeAuditFilePath(resultsFile)
+	out, err := json.MarshalIndent(report, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshalling connectivity audit: %w", err)
+	}
+	if err := os.WriteFile(path, out, 0o600); err != nil {
+		return fmt.Errorf("writing connectivity audit %q: %w", path, err)
+	}
+	slog.Info("Wrote connectivity assertion audit", "file", path)
+
+	return nil
 }
