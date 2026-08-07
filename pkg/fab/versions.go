@@ -64,7 +64,7 @@ var Versions = fabapi.Versions{
 		ControlProxy:      "v1.11.2-hh2",
 		ControlProxyChart: FabricatorVersion,
 		BashCompletion:    "v2.16.0",
-		HostBGPContainer:  "v0.4.0",
+		HostBGPContainer:  "v0.4.1",
 	},
 	Fabricator: fabapi.FabricatorVersions{
 		API:            FabricatorVersion,
