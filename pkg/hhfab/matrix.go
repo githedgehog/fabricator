@@ -325,8 +325,11 @@ func (m *ConnectivityMatrix) Validate() error {
 	return errors.Join(errs...)
 }
 
-// matrixPhase is the probe phase that reads an entry. Single source of truth for
-// the phases' skip gates and for Validate.
+// matrixPhase is the probe phase that owns an entry. Single source of truth for
+// the phases' skip gates and for Validate. Ownership is not the same as being
+// probed: the --source/--destination filters gate pairs on top of it, and
+// Validate does not model them, so an owned entry whose pair those filters
+// exclude is never probed.
 type matrixPhase int
 
 const (
@@ -341,6 +344,10 @@ const (
 	matrixPhaseCurl
 )
 
+// entryOwner assumes Validate has already rejected VerdictUnknown: the phases
+// carry no verdict guard of their own, and reachabilityFromExpectation maps
+// Unknown to Reachable:false, so a phase reached without Validate would assert
+// deny on an entry explicitly marked unevaluable.
 func (m *ConnectivityMatrix) entryOwner(e ConnectivityExpectation) matrixPhase {
 	src, dst := e.Pair.Source, e.Pair.Destination
 	if src == nil || dst == nil || src.Server == nil {
@@ -397,16 +404,56 @@ func (m *ConnectivityMatrix) entryOwner(e ConnectivityExpectation) matrixPhase {
 	}
 }
 
-func (m *ConnectivityMatrix) hasEntriesOwnedBy(p matrixPhase) bool {
-	for _, byPP := range m.entries {
-		for _, e := range byPP {
-			if m.entryOwner(e) == p {
-				return true
+// checkProbesEnabled rejects a run whose enabled probes cannot assert every
+// entry a phase will read: checkPing/checkIPerf/checkCurl no-op when their count
+// is off, so those entries would pass unasserted.
+//
+// It walks endpoint pairs rather than m.entries because that is what the phases
+// do, and populate only stores reachable or unevaluable pairs — so a topology
+// whose pairs are all denies has no stored entries at all. The source and
+// destination gates mirror deps.inSources/inDestinations, which the phases apply
+// on top of ownership.
+func (m *ConnectivityMatrix) checkProbesEnabled(opts TestConnectivityOpts) error {
+	var serverServer, external, icmp int
+	for _, src := range m.AllEndpoints {
+		if src.Server == nil || (len(opts.Sources) > 0 && !slices.Contains(opts.Sources, src.Server.Name)) {
+			continue
+		}
+		for _, dst := range m.AllEndpoints {
+			// an external destination has no server name to filter on
+			if dst.Server != nil && len(opts.Destinations) > 0 && !slices.Contains(opts.Destinations, dst.Server.Name) {
+				continue
+			}
+			entries := m.ProtoPortEntries(src, dst)
+			// plus the pair's default entry, which Lookup synthesizes as a Deny
+			// when populate stored nothing for it
+			entries = append(entries, m.Lookup(src, dst, ProtoPort{}))
+			for _, e := range entries {
+				owner := m.entryOwner(e)
+				if owner == matrixPhaseServerServer {
+					serverServer++
+				}
+				if owner == matrixPhaseCurl {
+					external++
+				}
+				if owner == matrixPhaseProtoPort && e.ProtoPort.Protocol == "icmp" {
+					icmp++
+				}
 			}
 		}
 	}
 
-	return false
+	if opts.PingsCount <= 0 && opts.IPerfsSeconds <= 0 && serverServer > 0 {
+		return fmt.Errorf("matrix has %d server-to-server entries but both pings and iperfs are disabled", serverServer) //nolint:goerr113
+	}
+	if opts.CurlsCount <= 0 && external > 0 {
+		return fmt.Errorf("matrix has %d external entries but curls are disabled", external) //nolint:goerr113
+	}
+	if opts.PingsCount <= 0 && icmp > 0 {
+		return fmt.Errorf("matrix has %d icmp proto-port entries but pings are disabled", icmp) //nolint:goerr113
+	}
+
+	return nil
 }
 
 func (m *ConnectivityMatrix) hasExternalCurlAllow(src *Endpoint) bool {
@@ -803,11 +850,6 @@ func runMatrixProtoPortPhase(ctx context.Context, opts TestConnectivityOpts, mat
 
 				switch pp.Protocol {
 				case "icmp":
-					if opts.PingsCount <= 0 {
-						deps.errChan <- fmt.Errorf("matrix proto entry %s→%s expects icmp but pings are disabled", fromName, toName) //nolint:goerr113
-
-						continue
-					}
 					deps.wg.Go(func() {
 						if pe := checkPing(ctx, opts.PingsCount, deps.pings, fromName, toName, fromSSH, toIP, nil, expected); pe != nil {
 							deps.errChan <- pe
@@ -845,13 +887,8 @@ func (c *Config) TestConnectivityWithMatrix(ctx context.Context, vlab *VLAB, opt
 	if err := matrix.Validate(); err != nil {
 		return fmt.Errorf("connectivity matrix is not a sound oracle: %w", err)
 	}
-	// checkPing/checkIPerf/checkCurl no-op when their count is off, so a phase
-	// left with no enabled probe would pass its entries unasserted
-	if opts.PingsCount <= 0 && opts.IPerfsSeconds <= 0 && matrix.hasEntriesOwnedBy(matrixPhaseServerServer) {
-		return fmt.Errorf("matrix has server-to-server entries but both pings and iperfs are disabled") //nolint:goerr113
-	}
-	if opts.CurlsCount <= 0 && matrix.hasEntriesOwnedBy(matrixPhaseCurl) {
-		return fmt.Errorf("matrix has external entries but curls are disabled") //nolint:goerr113
+	if err := matrix.checkProbesEnabled(opts); err != nil {
+		return err
 	}
 	start := time.Now()
 
