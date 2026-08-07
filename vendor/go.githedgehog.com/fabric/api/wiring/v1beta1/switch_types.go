@@ -16,10 +16,12 @@ package v1beta1
 
 import (
 	"context"
+	"fmt"
 	"net/netip"
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/pkg/errors"
 	"go.githedgehog.com/fabric/api/meta"
@@ -40,6 +42,13 @@ const (
 	DefaultLinkFlapThreshold        = 3
 	DefaultLinkFlapSamplingInterval = 30
 	DefaultLinkFlapRecoveryInterval = 300
+
+	// PortLocatorDefaultExpire is the port locator LED expire time used if it's not specified
+	PortLocatorDefaultExpire = 5 * time.Minute
+	// PortLocatorMaxExpire is the maximum port locator LED expire time, longer ones are clamped to it
+	PortLocatorMaxExpire = 20 * time.Minute
+	// PortLocatorAllPorts is the port locator name applying to all ports of the switch, it supersedes any per-port entries
+	PortLocatorAllPorts = "*"
 )
 
 // +kubebuilder:validation:Enum=spine;server-leaf;border-leaf;mixed-leaf;virtual-edge
@@ -133,6 +142,12 @@ type SwitchSpec struct {
 	// Use only as last resort: removing a value from the map does NOT reset the port's FEC to its default,
 	// instead that value persists on the device until a full config reset or a new explicit config
 	PortFECs map[string]PortFECMode `json:"portFECs,omitempty"`
+	// PortLocators is a map of port locator LED expire times, key is the port name such as E1/1 (incl. breakout
+	// sub-ports such as E1/53/1) or "*" to apply to all ports of the switch, value is a duration relative to now
+	// such as 10m, an exact expire time in the "2026-08-05 18:45:47" (UTC) format or empty for the default 5 minutes.
+	// Values are normalized to the exact expire time and clamped to at most 20 minutes from now, already expired
+	// entries are removed as well as all per-port ones if "*" is present
+	PortLocators map[string]string `json:"portLocators,omitempty"`
 	// Boot is the boot/provisioning information of the switch
 	Boot SwitchBoot `json:"boot,omitempty"`
 	// EnableAllPorts is a flag to enable all ports on the switch regardless of them being used or not
@@ -189,10 +204,11 @@ type SwitchStatus struct {
 // +kubebuilder:printcolumn:name="Profile",type=string,JSONPath=`.spec.profile`,priority=0
 // +kubebuilder:printcolumn:name="Role",type=string,JSONPath=`.spec.role`,priority=0
 // +kubebuilder:printcolumn:name="Descr",type=string,JSONPath=`.spec.description`,priority=0
-// +kubebuilder:printcolumn:name="Groups",type=string,JSONPath=`.spec.groups`,priority=0
-// +kubebuilder:printcolumn:name="Redundancy",type=string,JSONPath=`.spec.redundancy`,priority=1
-// +kubebuilder:printcolumn:name="Boot",type=string,JSONPath=`.spec.boot`,priority=1
-// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`,priority=0
+// +kubebuilder:printcolumn:name="Boot",type=string,JSONPath=`.spec.boot`,priority=0
+// +kubebuilder:printcolumn:name="VTEPIP",type=string,JSONPath=`.spec.vtepIP`,priority=0
+// +kubebuilder:printcolumn:name="Redundancy",type=string,JSONPath=`.spec.redundancy.type`,priority=1
+// +kubebuilder:printcolumn:name="Groups",type=string,JSONPath=`.spec.groups`,priority=1
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`,priority=10
 // Switch is the Schema for the switches API
 type Switch struct {
 	kmetav1.TypeMeta   `json:",inline"`
@@ -252,6 +268,31 @@ func (sw *Switch) Default() {
 
 	for name, value := range sw.Spec.PortSpeeds {
 		sw.Spec.PortSpeeds[name], _ = strings.CutPrefix(value, "SPEED_")
+	}
+
+	if _, exists := sw.Spec.PortLocators[PortLocatorAllPorts]; exists {
+		// the all-ports entry supersedes the per-port ones
+		for name := range sw.Spec.PortLocators {
+			if name != PortLocatorAllPorts {
+				delete(sw.Spec.PortLocators, name)
+			}
+		}
+	}
+
+	for name, value := range sw.Spec.PortLocators {
+		ok, expire, err := NormalizePortLocator(value)
+		if err != nil {
+			// leave unparseable values as-is, validation will reject them
+			continue
+		}
+
+		if !ok {
+			delete(sw.Spec.PortLocators, name)
+
+			continue
+		}
+
+		sw.Spec.PortLocators[name] = expire
 	}
 
 	if len(sw.Spec.VLANNamespaces) == 0 {
@@ -633,6 +674,25 @@ func (sw *Switch) Validate(ctx context.Context, kube kclient.Reader, fabricCfg *
 			}
 		}
 
+		apiPorts, err := sp.Spec.GetAvailableAPIPorts(&sw.Spec)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to get available API ports")
+		}
+
+		if len(sw.Spec.PortLocators) > 0 && !sp.Spec.Features.PortLocator {
+			return nil, errors.Errorf("port locators are not supported on switch profile %s", sw.Spec.Profile)
+		}
+
+		for name, expire := range sw.Spec.PortLocators {
+			if name != PortLocatorAllPorts && !apiPorts[name] {
+				return nil, errors.Errorf("port %s is not a valid port for port locators", name)
+			}
+
+			if _, _, err := NormalizePortLocator(expire); err != nil {
+				return nil, errors.Wrapf(err, "invalid port locator expire %q for port %s", expire, name)
+			}
+		}
+
 		if sw.Spec.RoCE && !sp.Spec.Features.RoCE {
 			return nil, errors.Errorf("RoCEv2 is not supported on switch profile %s", sw.Spec.Profile)
 		}
@@ -720,4 +780,33 @@ func (sw *Switch) Validate(ctx context.Context, kube kclient.Reader, fabricCfg *
 	}
 
 	return warnings, nil
+}
+
+// NormalizePortLocator interprets a port locator expire value which could be an empty string (meaning the default
+// expire), a duration relative to now such as "10m" or an exact UTC time in the time.DateTime format. It returns
+// false if the resulting expire time is already in the past, otherwise it returns the expire time clamped to the
+// [now, now+PortLocatorMaxExpire] range and formatted as an exact UTC time.
+func NormalizePortLocator(in string) (bool, string, error) {
+	now := time.Now().UTC()
+
+	var expire time.Time
+	if in == "" {
+		expire = now.Add(PortLocatorDefaultExpire)
+	} else if dur, err := time.ParseDuration(in); err == nil {
+		expire = now.Add(dur)
+	} else if exact, err := time.ParseInLocation(time.DateTime, in, time.UTC); err == nil {
+		expire = exact.UTC()
+	} else {
+		return false, "", fmt.Errorf("expected an empty value, a duration such as 10m or an exact UTC time in the %q format: %w", time.DateTime, err)
+	}
+
+	if expire.Before(now.Add(1 * time.Second)) {
+		return false, "", nil
+	}
+
+	if latest := now.Add(PortLocatorMaxExpire); expire.After(latest) {
+		expire = latest
+	}
+
+	return true, expire.Format(time.DateTime), nil
 }
