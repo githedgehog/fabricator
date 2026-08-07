@@ -2256,6 +2256,10 @@ func expectationWhy(r Reachability) string {
 		return fmt.Sprintf("%s %q", r.Reason, r.Peering)
 	case r.Reason != "":
 		return string(r.Reason)
+	case !r.Reachable:
+		// ReachabilityReason only ever explains an allow, so a deny has none:
+		// the absence of an allowing peering is itself the reason
+		return "no peering allows it"
 	default:
 		return "no reason recorded"
 	}
@@ -3604,7 +3608,13 @@ func checkUDPPort(ctx context.Context, opts TestConnectivityOpts, sem *semaphore
 	// expected == deny. Loss between the two thresholds is neither delivered nor
 	// blocked, so don't claim delivery on what may just be a lossy path.
 	if !blocked {
-		ie.ClientMsg = fmt.Sprintf("should not be reachable but UDP traffic was not blocked (packets %d, loss %.1f%%)", packets, lostPercent)
+		if delivered {
+			ie.ClientMsg = fmt.Sprintf("should not be reachable but UDP datagrams were delivered (packets %d, loss %.1f%% < %.0f%%)",
+				packets, lostPercent, udpAllowLossThreshold)
+		} else {
+			ie.ClientMsg = fmt.Sprintf("should not be reachable but UDP traffic was not blocked; inconclusive: loss %.1f%% is between the %.0f%%/%.0f%% delivered/blocked thresholds (packets %d)",
+				lostPercent, udpAllowLossThreshold, udpDenyLossThreshold, packets)
+		}
 
 		return ie
 	}
