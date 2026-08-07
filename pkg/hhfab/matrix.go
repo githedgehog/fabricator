@@ -83,7 +83,8 @@ type ConnectivityExpectation struct {
 
 	Peering string
 
-	// free-form context for Reason, currently only set on VerdictUnknown entries
+	// free-form context for Reason: why a VerdictUnknown entry could not be
+	// evaluated, or what withholds a VerdictDeny (e.g. an ACL on the peering)
 	Detail string
 
 	ProtoPort ProtoPort
@@ -553,6 +554,7 @@ func reachabilityFromExpectation(e ConnectivityExpectation) Reachability {
 		Reachable: e.Verdict == VerdictAllow,
 		Reason:    e.Reason,
 		Peering:   e.Peering,
+		Detail:    e.Detail,
 	}
 }
 
