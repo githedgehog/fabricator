@@ -372,9 +372,10 @@ func reportProbeAudit(ctx context.Context, a *probeAudit, took time.Duration, co
 	run := a.summarize(took.Round(time.Millisecond).String(), completed)
 	probeAuditSinkFrom(ctx).add(run)
 	if len(run.Shortfall) > 0 {
-		slog.Warn("Connectivity run asserted less than the matrix claimed", "path", run.Path, "entries", len(run.Shortfall))
+		// wording stays path-neutral: the legacy path claims per pair and has no matrix
+		slog.Warn("Connectivity run asserted less than it expected to", "path", run.Path, "entries", len(run.Shortfall))
 		for _, s := range run.Shortfall {
-			slog.Warn("Matrix entry with no assertion", "phase", s.Phase, "entry", s.Entry, "why", s.Why)
+			slog.Warn("Expectation with no assertion", "phase", s.Phase, "entry", s.Entry, "why", s.Why)
 		}
 	}
 
