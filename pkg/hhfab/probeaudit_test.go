@@ -323,6 +323,39 @@ func TestRecordProbe_NoRecorderInContextIsANoOp(t *testing.T) {
 	require.Equal(t, ProbeAuditRun{}, nilAudit.summarize("0s", true))
 }
 
+func TestLogArgs_KeysAreUniqueAndDoNotShadowErrorCounts(t *testing.T) {
+	// The failure log lines prepend a per-kind *error* count under the bare kind
+	// name ("ping", "iperf", "curl"), so an assertion count must not reuse those
+	// keys: one slog record with a duplicate key silently drops one of them.
+	run := ProbeAuditRun{
+		Path:      connectivityPathMatrix,
+		Completed: true,
+		Probes: map[string]ProbeCounts{
+			string(ProbeKindPing):        {Asserted: 20},
+			string(ProbeKindIPerf):       {Skipped: 18},
+			string(ProbeKindCurl):        {Asserted: 5},
+			string(ProbeKindTCP):         {Asserted: 2},
+			string(ProbeKindUDP):         {Asserted: 2},
+			string(ProbeKindPortForward): {Asserted: 1},
+		},
+		Claims: map[string]int{matrixPhaseServerServer.String(): 18},
+	}
+
+	args := append([]any{"ping", 2, "iperf", 4, "curl", 0}, run.LogArgs()...)
+	seen := map[string]struct{}{}
+	for i := 0; i < len(args); i += 2 {
+		key, ok := args[i].(string)
+		require.True(t, ok, "key at %d must be a string", i)
+		_, dup := seen[key]
+		require.False(t, dup, "duplicate log key %q", key)
+		seen[key] = struct{}{}
+	}
+
+	require.Contains(t, seen, "assertedPing")
+	require.Contains(t, seen, "assertedPortforward")
+	require.Contains(t, seen, "ping", "the pre-existing error count keeps its key")
+}
+
 func TestProbeAuditFilePath(t *testing.T) {
 	require.Equal(t, "release-test-connectivity-audit.json", probeAuditFilePath("release-test.xml"))
 	require.Equal(t, "/tmp/a.b/res-connectivity-audit.json", probeAuditFilePath("/tmp/a.b/res.xml"))

@@ -374,8 +374,12 @@ func reportProbeAudit(ctx context.Context, a *probeAudit, took time.Duration, co
 	if len(run.Shortfall) > 0 {
 		// wording stays path-neutral: the legacy path claims per pair and has no matrix
 		slog.Warn("Connectivity run asserted less than it expected to", "path", run.Path, "entries", len(run.Shortfall))
-		for _, s := range run.Shortfall {
-			slog.Warn("Expectation with no assertion", "phase", s.Phase, "entry", s.Entry, "why", s.Why)
+		// A run that never reached its phases is missing everything, and Completed
+		// already says so; listing every entry would bury the error that stopped it.
+		if completed {
+			for _, s := range run.Shortfall {
+				slog.Warn("Expectation with no assertion", "phase", s.Phase, "entry", s.Entry, "why", s.Why)
+			}
 		}
 	}
 
@@ -543,6 +547,15 @@ func (r ProbeAuditRun) Asserted() int {
 	return n
 }
 
+// logKey names a kind's assertion count. Prefixed because the failure log lines
+// already carry a per-kind *error* count under the bare kind name, and one slog
+// record must not use a key twice.
+func (k ProbeKind) logKey() string {
+	s := string(k)
+
+	return "asserted" + strings.ToUpper(s[:1]) + s[1:]
+}
+
 // LogArgs renders the run for the connectivity paths' pass and fail log lines,
 // which until now reported only a duration and an error count.
 func (r ProbeAuditRun) LogArgs() []any {
@@ -552,7 +565,7 @@ func (r ProbeAuditRun) LogArgs() []any {
 		if !ok {
 			continue
 		}
-		out = append(out, string(kind), c.Asserted)
+		out = append(out, kind.logKey(), c.Asserted)
 	}
 	var skipped, inconclusive, claimed int
 	for _, c := range r.Probes {
