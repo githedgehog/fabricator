@@ -207,11 +207,6 @@ func (i *OSInstal) Run(ctx context.Context) error {
 	if err := i.execCmd(ctx, true, "partprobe", i.TargetDisk); err != nil {
 		return fmt.Errorf("partprobing: %w", err)
 	}
-
-	if err := i.execCmd(ctx, true, "udevadm", "wait", "--timeout=30", "--settle", i.TargetDisk); err != nil {
-		return fmt.Errorf("udevadm wait timeout or other error: %w", err)
-	}
-
 	// The partition resize didn't wipe out the exisiting filesystem so we don't
 	// need to remake it, just expand the one that is on disk already. In our
 	// case we just moving the end of it, not the start
@@ -219,6 +214,10 @@ func (i *OSInstal) Run(ctx context.Context) error {
 	partition := "9"
 	if strings.Contains(i.TargetDisk, "nvme") {
 		partition = "p9"
+	}
+
+	if err := i.execCmd(ctx, true, "udevadm", "wait", "--timeout=30", "--settle", i.TargetDisk+partition); err != nil {
+		return fmt.Errorf("udevadm wait timeout or other error: %w", err)
 	}
 	// "-f" in this case is force the check, even if the file system seems clean
 	if err := i.execCmd(ctx, true, "e2fsck", "-f", "-p", i.TargetDisk+partition); err != nil {
