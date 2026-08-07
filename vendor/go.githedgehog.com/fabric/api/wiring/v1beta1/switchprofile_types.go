@@ -63,6 +63,8 @@ type SwitchProfileFeatures struct {
 	ESLAG bool `json:"eslag,omitempty"`
 	// ECMPRoCEQPN defines if switch supports ECMP QPN hashing
 	ECMPRoCEQPN bool `json:"ecmpRoCEQPN,omitempty"`
+	// PortLocator defines if switch supports port locator LED control
+	PortLocator bool `json:"portLocator,omitempty"`
 }
 
 // Defines switch-specific configuration options
@@ -177,8 +179,9 @@ type SwitchProfileStatus struct{}
 // +kubebuilder:resource:categories=hedgehog;wiring;fabric,shortName=sp
 // +kubebuilder:printcolumn:name="DisplayName",type=string,JSONPath=`.spec.displayName`,priority=0
 // +kubebuilder:printcolumn:name="OtherNames",type=string,JSONPath=`.spec.otherNames`,priority=0
+// +kubebuilder:printcolumn:name="Silicon",type=string,JSONPath=`.spec.switchSilicon`,priority=0
 // +kubebuilder:printcolumn:name="Ports",type=string,JSONPath=`.metadata.annotations.fabric\.githedgehog\.com/ports`,priority=0
-// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`,priority=0
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`,priority=10
 // SwitchProfile represents switch capabilities and configuration
 type SwitchProfile struct {
 	kmetav1.TypeMeta   `json:",inline"`
