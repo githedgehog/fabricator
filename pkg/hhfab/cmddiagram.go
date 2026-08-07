@@ -29,7 +29,7 @@ func Diagram(ctx context.Context, workDir, cacheDir string, live bool, format di
 	var client kclient.Reader
 
 	if !live {
-		c, err := load(ctx, workDir, cacheDir, true, HydrateModeIfNotPresent, "")
+		c, err := load(ctx, workDir, cacheDir, nil, true, HydrateModeIfNotPresent, "")
 		if err != nil {
 			return err
 		}

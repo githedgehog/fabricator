@@ -22,7 +22,7 @@ const (
 )
 
 func VLABGenerate(ctx context.Context, workDir, cacheDir string, builder VLABBuilder, target string) error {
-	cfg, err := load(ctx, workDir, cacheDir, false, HydrateModeNever, "")
+	cfg, err := load(ctx, workDir, cacheDir, nil, false, HydrateModeNever, "")
 	if err != nil {
 		return err
 	}
@@ -71,7 +71,7 @@ type VLABUpOpts struct {
 	VLABRunOpts
 }
 
-func VLABUp(ctx context.Context, workDir, cacheDir string, opts VLABUpOpts) error {
+func VLABUp(ctx context.Context, workDir, cacheDir string, extraCacheDirs []string, opts VLABUpOpts) error {
 	if opts.AutoUpgrade {
 		opts.BuildMode = recipe.BuildModeManual
 		opts.VLABRunOpts.BuildMode = recipe.BuildModeManual
@@ -81,7 +81,7 @@ func VLABUp(ctx context.Context, workDir, cacheDir string, opts VLABUpOpts) erro
 		return fmt.Errorf("--upgrade and --recreate (-f) are mutually exclusive: upgrade requires existing VMs") //nolint:goerr113
 	}
 
-	c, err := load(ctx, workDir, cacheDir, true, opts.HydrateMode, opts.SetJoinToken)
+	c, err := load(ctx, workDir, cacheDir, extraCacheDirs, true, opts.HydrateMode, opts.SetJoinToken)
 	if err != nil {
 		return err
 	}
@@ -125,7 +125,7 @@ func loadVLABForHelpers(ctx context.Context, workDir, cacheDir string) (*Config,
 		NoCreate:    true,
 	}
 
-	c, err := load(ctx, workDir, cacheDir, true, opts.HydrateMode, opts.SetJoinToken)
+	c, err := load(ctx, workDir, cacheDir, nil, true, opts.HydrateMode, opts.SetJoinToken)
 	if err != nil {
 		return nil, nil, err
 	}

@@ -19,8 +19,8 @@ type PrecacheOpts struct {
 	VLAB bool
 }
 
-func Precache(ctx context.Context, workDir, cacheDir string, opts PrecacheOpts) error {
-	c, err := load(ctx, workDir, cacheDir, false, HydrateModeNever, "")
+func Precache(ctx context.Context, workDir, cacheDir string, extraCacheDirs []string, opts PrecacheOpts) error {
+	c, err := load(ctx, workDir, cacheDir, extraCacheDirs, false, HydrateModeNever, "")
 	if err != nil {
 		return err
 	}
@@ -29,7 +29,7 @@ func Precache(ctx context.Context, workDir, cacheDir string, opts PrecacheOpts) 
 }
 
 func (c *Config) precache(ctx context.Context, opts PrecacheOpts) error {
-	d, err := artificer.NewDownloaderWithDockerCreds(c.CacheDir, c.Repo, c.Prefix)
+	d, err := artificer.NewDownloaderWithDockerCreds(c.CacheDir, c.ExtraCacheDirs, c.Repo, c.Prefix)
 	if err != nil {
 		return fmt.Errorf("creating downloader: %w", err)
 	}

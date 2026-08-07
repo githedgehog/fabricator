@@ -106,6 +106,7 @@ env:
   slug: "${{ inputs.hybrid && 'h' || 'v' }}-${{ inputs.upgradefrom && 'up' || '' }}${{ inputs.upgradefrom }}${{ inputs.upgradefrom && '-' || '' }}${{ inputs.fabricmode != 'spine-leaf' && inputs.fabricmode || '' }}${{ inputs.mesh && 'mesh-' || '' }}${{ inputs.gateway && 'gw-' || '' }}${{ inputs.includeonie && 'onie-' || '' }}${{ inputs.buildmode }}-${{ inputs.vpcmode }}${{ inputs.releasetest && '-rt' || '' }}${{ inputs.releasetest_regex != '' && 'r' || '' }}${{ (inputs.custom_init_args != '' || inputs.custom_gen_args != '') && '-custom' || '' }}"
   # env vars to configure hhfab
   HHFAB_REG_REPO: 127.0.0.1:30000
+  HHFAB_EXTRA_CACHE_DIRS: /hostcache/.hhfab-cache
   HHFAB_VLAB_COLLECT: true
   HHFAB_VLAB_COLLECT_FORCE: ${{ inputs.collect_show_tech }}
 
@@ -165,6 +166,7 @@ jobs:
           path: "./lab-ci"
 
       - name: Pre-populate hhfab-cache
+        if: ${{ inputs.upgradefrom == '26.01' || inputs.upgradefrom == '26.02' }}
         run: |
           if [ -d "/hostcache/.hhfab-cache" ]; then
             rsync -aW --inplace --exclude='download-*' --stats /hostcache/.hhfab-cache ~/

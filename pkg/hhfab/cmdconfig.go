@@ -38,8 +38,9 @@ var (
 )
 
 type Config struct {
-	WorkDir  string
-	CacheDir string
+	WorkDir        string
+	CacheDir       string
+	ExtraCacheDirs []string
 	RegistryConfig
 	Fab      fabapi.Fabricator
 	Controls []fabapi.ControlNode
@@ -265,7 +266,7 @@ func importFabricGateway(c InitConfig) error {
 }
 
 func Validate(ctx context.Context, workDir, cacheDir string, hMode HydrateMode) error {
-	_, err := load(ctx, workDir, cacheDir, true, hMode, "")
+	_, err := load(ctx, workDir, cacheDir, nil, true, hMode, "")
 	if err != nil {
 		return err
 	}
@@ -292,7 +293,7 @@ func Versions(ctx context.Context, workDir, cacheDir string, hMode HydrateMode) 
 		return nil
 	}
 
-	cfg, err := load(ctx, workDir, cacheDir, true, hMode, "")
+	cfg, err := load(ctx, workDir, cacheDir, nil, true, hMode, "")
 	if err != nil {
 		return err
 	}
@@ -309,7 +310,7 @@ func Versions(ctx context.Context, workDir, cacheDir string, hMode HydrateMode) 
 	return nil
 }
 
-func load(ctx context.Context, workDir, cacheDir string, wiringAndHydration bool, mode HydrateMode, setJoinToken string) (*Config, error) {
+func load(ctx context.Context, workDir, cacheDir string, extraCacheDirs []string, wiringAndHydration bool, mode HydrateMode, setJoinToken string) (*Config, error) {
 	if err := checkWorkCacheDir(workDir, cacheDir); err != nil {
 		return nil, err
 	}
@@ -355,6 +356,7 @@ func load(ctx context.Context, workDir, cacheDir string, wiringAndHydration bool
 	cfg := &Config{
 		WorkDir:        workDir,
 		CacheDir:       cacheDir,
+		ExtraCacheDirs: extraCacheDirs,
 		RegistryConfig: *regConf,
 		Fab:            f,
 		Controls:       controls,
