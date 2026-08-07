@@ -31,10 +31,10 @@ table inet HH-ext-intf-fw {
         type filter hook input priority filter - 5;
         policy accept;
         # Always allow return traffic for connections this host initiated
-        iifname "{{ .ExtInterface }}" ct state established,related accept
-        iifname "{{ .ExtInterface }}" icmp type echo-request accept
-        iifname "{{ .ExtInterface }}" tcp dport { 22, 6443 } accept
-        iifname "{{ .ExtInterface }}" counter name ext_dropped drop
+        iifname ext ct state established,related accept
+        iifname ext icmp type echo-request accept
+        iifname ext tcp dport { 22, 6443 } accept
+        iifname ext counter name ext_dropped drop
     }
 }`
 
