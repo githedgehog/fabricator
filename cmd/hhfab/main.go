@@ -168,6 +168,15 @@ func Run(ctx context.Context) error {
 		Category:    FlagCatGlobal,
 	}
 
+	extraCacheDirs := cli.StringSlice{}
+	extraCacheDirsFlag := &cli.StringSliceFlag{
+		Name:        "extra-cache-dir",
+		Usage:       "additional read-only cache `DIR`s (same layout as --cache-dir) to look up already downloaded files in, comma-separated or repeated",
+		EnvVars:     []string{"HHFAB_EXTRA_CACHE_DIRS"},
+		Destination: &extraCacheDirs,
+		Category:    FlagCatGlobal,
+	}
+
 	fabricModes := []string{}
 	for _, m := range meta.FabricModes {
 		fabricModes = append(fabricModes, string(m))
@@ -404,6 +413,10 @@ func Run(ctx context.Context) error {
 				args = append(args, "cache", cacheDir)
 			}
 
+			if len(extraCacheDirs.Value()) > 0 {
+				args = append(args, "extraCaches", extraCacheDirs.Value())
+			}
+
 			slog.Info("Hedgehog Fabricator", args...)
 
 			return nil
@@ -413,6 +426,7 @@ func Run(ctx context.Context) error {
 	defaultFlags := []cli.Flag{
 		workDirFlag,
 		cacheDirFlag,
+		extraCacheDirsFlag,
 		verboseFlag,
 		briefFlag,
 	}
@@ -849,7 +863,7 @@ func Run(ctx context.Context) error {
 				}),
 				Before: before(false),
 				Action: func(c *cli.Context) error {
-					if err := hhfab.Build(ctx, workDir, cacheDir, hhfab.BuildOpts{
+					if err := hhfab.Build(ctx, workDir, cacheDir, extraCacheDirs.Value(), hhfab.BuildOpts{
 						HydrateMode:          hhfab.HydrateMode(hydrateMode),
 						BuildMode:            recipe.BuildMode(c.String(FlagNameBuildMode)),
 						BuildControls:        c.Bool(FlagNameBuildControls),
@@ -878,7 +892,7 @@ func Run(ctx context.Context) error {
 				}),
 				Before: before(false),
 				Action: func(c *cli.Context) error {
-					if err := hhfab.Precache(ctx, workDir, cacheDir, hhfab.PrecacheOpts{
+					if err := hhfab.Precache(ctx, workDir, cacheDir, extraCacheDirs.Value(), hhfab.PrecacheOpts{
 						All:  c.Bool("all"),
 						VLAB: c.Bool("vlab"),
 					}); err != nil {
@@ -1209,7 +1223,7 @@ func Run(ctx context.Context) error {
 								return err
 							}
 
-							if err := hhfab.VLABUp(ctx, workDir, cacheDir, hhfab.VLABUpOpts{
+							if err := hhfab.VLABUp(ctx, workDir, cacheDir, extraCacheDirs.Value(), hhfab.VLABUpOpts{
 								HydrateMode:          hhfab.HydrateMode(hydrateMode),
 								ReCreate:             c.Bool(FlagNameReCreate),
 								BuildMode:            recipe.BuildMode(c.String(FlagNameBuildMode)),

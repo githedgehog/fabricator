@@ -26,8 +26,8 @@ type BuildOpts struct {
 	ObservabilityTargets string
 }
 
-func Build(ctx context.Context, workDir, cacheDir string, opts BuildOpts) error {
-	c, err := load(ctx, workDir, cacheDir, true, opts.HydrateMode, opts.SetJoinToken)
+func Build(ctx context.Context, workDir, cacheDir string, extraCacheDirs []string, opts BuildOpts) error {
+	c, err := load(ctx, workDir, cacheDir, extraCacheDirs, true, opts.HydrateMode, opts.SetJoinToken)
 	if err != nil {
 		return err
 	}
@@ -88,7 +88,7 @@ func (c *Config) build(ctx context.Context, opts BuildOpts) error {
 		c.Fab.Spec.Config.Observability.Targets.Pyroscope[name] = target
 	}
 
-	d, err := artificer.NewDownloaderWithDockerCreds(c.CacheDir, c.Repo, c.Prefix)
+	d, err := artificer.NewDownloaderWithDockerCreds(c.CacheDir, c.ExtraCacheDirs, c.Repo, c.Prefix)
 	if err != nil {
 		return fmt.Errorf("creating downloader: %w", err)
 	}

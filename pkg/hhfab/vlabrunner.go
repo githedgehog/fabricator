@@ -280,7 +280,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 		disk += vm.Size.Disk
 	}
 
-	d, err := artificer.NewDownloaderWithDockerCreds(c.CacheDir, c.Repo, c.Prefix)
+	d, err := artificer.NewDownloaderWithDockerCreds(c.CacheDir, c.ExtraCacheDirs, c.Repo, c.Prefix)
 	if err != nil {
 		return fmt.Errorf("creating downloader: %w", err)
 	}

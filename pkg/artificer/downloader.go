@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 
@@ -31,17 +32,43 @@ const (
 )
 
 type Downloader struct {
-	cacheDir   string
-	repo       string
-	prefix     string
-	orasClient *auth.Client
-	m          sync.Mutex
+	cacheDir string
+	// extraCacheDirs are read-only caches with the same layout as the primary one, only used for lookups
+	extraCacheDirs []string
+	repo           string
+	prefix         string
+	orasClient     *auth.Client
+	m              sync.Mutex
 }
 
-func NewDownloaderWithDockerCreds(cacheDir, repo, prefix string) (*Downloader, error) {
+func NewDownloaderWithDockerCreds(cacheDir string, extraCacheDirs []string, repo, prefix string) (*Downloader, error) {
 	cacheDir = filepath.Join(cacheDir, Version)
 	if err := os.MkdirAll(cacheDir, 0o700); err != nil {
 		return nil, fmt.Errorf("creating cache dir %q: %w", cacheDir, err)
+	}
+
+	extra := []string{}
+	for _, dir := range extraCacheDirs {
+		if strings.TrimSpace(dir) == "" {
+			continue
+		}
+
+		dir = filepath.Join(filepath.Clean(dir), Version)
+		if dir == cacheDir || slices.Contains(extra, dir) {
+			continue
+		}
+
+		if stat, err := os.Stat(dir); err != nil {
+			slog.Warn("Ignoring extra cache dir", "dir", dir, "err", err)
+
+			continue
+		} else if !stat.IsDir() {
+			slog.Warn("Ignoring extra cache dir, not a directory", "dir", dir)
+
+			continue
+		}
+
+		extra = append(extra, dir)
 	}
 
 	storeOpts := credentials.StoreOptions{}
@@ -50,18 +77,63 @@ func NewDownloaderWithDockerCreds(cacheDir, repo, prefix string) (*Downloader, e
 		return nil, fmt.Errorf("creating docker credential store: %w", err)
 	}
 
-	slog.Info("Downloader", "cache", cacheDir, "repo", repo, "prefix", prefix)
+	slog.Info("Downloader", "cache", cacheDir, "extraCaches", extra, "repo", repo, "prefix", prefix)
 
 	return &Downloader{
-		cacheDir: cacheDir,
-		repo:     repo,
-		prefix:   prefix,
+		cacheDir:       cacheDir,
+		extraCacheDirs: extra,
+		repo:           repo,
+		prefix:         prefix,
 		orasClient: &auth.Client{
 			Client:     retry.DefaultClient,
 			Cache:      auth.DefaultCache,
 			Credential: credentials.Credential(credStore),
 		},
 	}, nil
+}
+
+// lookupCache returns the path to the cached entry in the primary or, if not found there, in one of the
+// read-only extra cache dirs. It returns an empty string if the entry isn't cached anywhere.
+func (d *Downloader) lookupCache(cacheName string) (string, error) {
+	cachePath := filepath.Join(d.cacheDir, cacheName)
+
+	stat, err := os.Stat(cachePath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("stat cache %q: %w", cachePath, err)
+	}
+	if err == nil {
+		if !stat.IsDir() {
+			return "", fmt.Errorf("cache %q is not a directory", cachePath) //nolint:goerr113
+		}
+
+		slog.Debug("Using cache", "entry", cacheName, "dir", d.cacheDir)
+
+		return cachePath, nil
+	}
+
+	for _, dir := range d.extraCacheDirs {
+		extraPath := filepath.Join(dir, cacheName)
+
+		stat, err := os.Stat(extraPath)
+		if err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				slog.Debug("Skipping extra cache entry", "path", extraPath, "err", err)
+			}
+
+			continue
+		}
+		if !stat.IsDir() {
+			slog.Debug("Skipping extra cache entry, not a directory", "path", extraPath)
+
+			continue
+		}
+
+		slog.Debug("Using extra cache", "entry", cacheName, "dir", dir)
+
+		return extraPath, nil
+	}
+
+	return "", nil
 }
 
 type CachePathFunc func(cachePath string) error
@@ -126,17 +198,15 @@ func (d *Downloader) getORAS(ctx context.Context, name string, version meta.Vers
 
 	cacheName := name + "@" + string(version)
 	cacheName = strings.ReplaceAll(cacheName, "/", "_") + ".oras"
-	cachePath := filepath.Join(d.cacheDir, cacheName)
 
-	stat, err := os.Stat(cachePath)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return "", fmt.Errorf("stat cache %q: %w", cachePath, err)
-	}
-	if err == nil && !stat.IsDir() {
-		return "", fmt.Errorf("cache %q is not a directory", cachePath) //nolint:goerr113
+	cachePath, err := d.lookupCache(cacheName)
+	if err != nil {
+		return "", err
 	}
 
-	if err != nil && errors.Is(err, os.ErrNotExist) {
+	if cachePath == "" {
+		cachePath = filepath.Join(d.cacheDir, cacheName)
+
 		tmp, err := os.MkdirTemp(d.cacheDir, "download-*")
 		if err != nil {
 			return "", fmt.Errorf("creating temp dir: %w", err)
@@ -258,17 +328,15 @@ func (d *Downloader) getOCI(ctx context.Context, name string, version meta.Versi
 	defer d.m.Unlock()
 
 	cacheName := ociCacheName(name, version)
-	cachePath := filepath.Join(d.cacheDir, cacheName)
 
-	stat, err := os.Stat(cachePath)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return "", fmt.Errorf("stat cache %q: %w", cachePath, err)
-	}
-	if err == nil && !stat.IsDir() {
-		return "", fmt.Errorf("cache %q is not a directory", cachePath) //nolint:goerr113
+	cachePath, err := d.lookupCache(cacheName)
+	if err != nil {
+		return "", err
 	}
 
-	if err != nil && errors.Is(err, os.ErrNotExist) {
+	if cachePath == "" {
+		cachePath = filepath.Join(d.cacheDir, cacheName)
+
 		tmp, err := os.MkdirTemp(d.cacheDir, "download-*")
 		if err != nil {
 			return "", fmt.Errorf("creating temp dir: %w", err)

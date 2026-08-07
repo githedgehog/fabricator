@@ -8,7 +8,7 @@ import (
 )
 
 func AirGenerate(ctx context.Context, workDir, cacheDir string, hMode HydrateMode) error {
-	cfg, err := load(ctx, workDir, cacheDir, true, hMode, "")
+	cfg, err := load(ctx, workDir, cacheDir, nil, true, hMode, "")
 	if err != nil {
 		return err
 	}
