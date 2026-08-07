@@ -2395,6 +2395,12 @@ func runPingIperfPair(ctx context.Context, opts TestConnectivityOpts, args pingI
 
 	// In bidir mode the lex-larger direction has nothing left to drive.
 	if args.Bidir && args.From > args.To {
+		recordProbe(ctx, ProbeRecord{
+			Kind:     ProbeKindIPerf,
+			Target:   iperfProbeTarget(args.From, args.To),
+			Expected: args.Expected.Reachable,
+		}.skipped(probeSkipIPerfBidirRev))
+
 		return errs
 	}
 
@@ -2415,6 +2421,18 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 		return fmt.Errorf("at least one of pings, iperfs or curls should be enabled")
 	}
 	start := time.Now()
+
+	// The legacy path has no matrix, so no ownership to reconcile against, but it
+	// does compute an expectation per pair; claiming those gives it the same
+	// claimed-against-asserted columns and the same artifact schema.
+	audit := newProbeAudit(connectivityPathLegacy)
+	ctx = withProbeAudit(ctx, audit)
+	phasesDone := false
+	defer func() {
+		if !phasesDone {
+			reportProbeAudit(ctx, audit, time.Since(start), false)
+		}
+	}()
 
 	if opts.PingsParallel <= 0 {
 		opts.PingsParallel = 50
@@ -2582,6 +2600,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 						return
 					}
 					ipB := ipBR.(netip.Addr)
+					audit.claimLegacyPair(serverA, serverB, ipB, expectedReachable)
 
 					clientAR, ok := sshs.Load(serverA)
 					if !ok {
@@ -2645,6 +2664,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 					}
 
 					slog.Debug("Checking external connectivity", logArgs...)
+					audit.claimLegacyCurl(serverA)
 
 					clientR, ok := sshs.Load(serverA)
 					if !ok {
@@ -2654,9 +2674,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 					}
 					client := clientR.(*sshutil.Config)
 
-					// switching to 1.0.0.1 since the previously used target 8.8.8.8 was giving us issue
-					// when curling over virtual external peerings
-					if ce := checkCurl(ctx, opts, curls, serverA, client, "1.0.0.1", expectedReachable); ce != nil {
+					if ce := checkCurl(ctx, opts, curls, serverA, client, externalCurlTarget, expectedReachable); ce != nil {
 						return ce
 					}
 
@@ -2670,6 +2688,10 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 
 	wg.Wait()
 	close(errChan)
+
+	phasesDone = true
+	auditRun := reportProbeAudit(ctx, audit, time.Since(start), true)
+
 	err = nil
 	var numPingErrs, numIperfErrs, numCurlErrs int
 	for e := range errChan {
@@ -2685,9 +2707,10 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 	}
 
 	if err != nil {
-		slog.Error("Test connectivity failed", "ping", numPingErrs, "iperf", numIperfErrs, "curl", numCurlErrs, "took", time.Since(start), "errors", err)
+		logArgs := append([]any{"ping", numPingErrs, "iperf", numIperfErrs, "curl", numCurlErrs}, auditRun.LogArgs()...)
+		slog.Error("Test connectivity failed", append(logArgs, "took", time.Since(start), "errors", err)...)
 	} else {
-		slog.Info("Test connectivity passed", "took", time.Since(start))
+		slog.Info("Test connectivity passed", append(auditRun.LogArgs(), "took", time.Since(start))...)
 	}
 
 	return err
@@ -3043,7 +3066,10 @@ func retrySSHCmd(ctx context.Context, ssh *sshutil.Config, cmd string, target st
 }
 
 func checkPing(ctx context.Context, pingCount int, semaphore *semaphore.Weighted, from, to string, fromSSH *sshutil.Config, toIP netip.Addr, sourceIP *netip.Addr, expected Reachability) *PingError {
+	audit := ProbeRecord{Kind: ProbeKindPing, Target: pingProbeTarget(from, toIP), Expected: expected.Reachable}
 	if pingCount <= 0 {
+		recordProbe(ctx, audit.skipped(probeSkipPingsDisabled))
+
 		return nil
 	}
 	pe := &PingError{
@@ -3056,6 +3082,7 @@ func checkPing(ctx context.Context, pingCount int, semaphore *semaphore.Weighted
 	if semaphore != nil {
 		if err := semaphore.Acquire(ctx, 1); err != nil {
 			pe.Msg = fmt.Sprintf("acquiring ping semaphore: %s", err)
+			recordProbe(ctx, audit.inconclusive(pe.Msg))
 
 			return pe
 		}
@@ -3117,12 +3144,14 @@ func checkPing(ctx context.Context, pingCount int, semaphore *semaphore.Weighted
 		// to the existing sent/received classification below.
 		if status, ok := sshutil.ExitStatus(err); !ok || status == 126 || status == 127 {
 			pe.Msg = fmt.Sprintf("ping did not execute: %s", err)
+			recordProbe(ctx, audit.inconclusive(pe.Msg))
 
 			return pe
 		}
 	}
 	if pe.Sent == 0 && err == nil {
 		pe.Msg = "cannot parse ping output to get sent packets"
+		recordProbe(ctx, audit.inconclusive(pe.Msg))
 
 		return pe
 	}
@@ -3132,6 +3161,7 @@ func checkPing(ctx context.Context, pingCount int, semaphore *semaphore.Weighted
 
 	slog.Debug("Ping result", "from", from, "to", to,
 		"expected", expected.Reachable, "ok", pingOk, "fail", pingFail, "err", err, "stdout", stdout, "stderr", stderr)
+	recordProbe(ctx, audit.asserted())
 
 	// When a ping that should have succeeded fails, surface the per-packet
 	// (timestamped, via -D) output at warn level so the loss pattern is visible
@@ -3222,7 +3252,15 @@ const iperf3SpeedRetries = 2
 const iperf3RetryDelay = 2 * time.Second
 
 func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string, fromSSH *sshutil.Config, toIP netip.Addr, reachability Reachability, bidir bool) []*IperfError {
-	if opts.IPerfsSeconds <= 0 || !reachability.Reachable {
+	audit := ProbeRecord{Kind: ProbeKindIPerf, Target: iperfProbeTarget(from, to), Expected: reachability.Reachable}
+	if opts.IPerfsSeconds <= 0 {
+		recordProbe(ctx, audit.skipped(probeSkipIPerfsDisabled))
+
+		return nil
+	}
+	if !reachability.Reachable {
+		recordProbe(ctx, audit.skipped(probeSkipIPerfDeny))
+
 		return nil
 	}
 
@@ -3313,6 +3351,8 @@ func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to stri
 		cmd += fmt.Sprintf(" --tos %d", opts.IPerfsTOS)
 	}
 
+	audit := ProbeRecord{Kind: ProbeKindIPerf, Target: iperfProbeTarget(from, to), Expected: true}
+
 	stdout, stderr, err := retrySSHCmd(ctx, fromSSH, cmd, from)
 	report, parseErr := parseIPerf3Report([]byte(stdout))
 	if err != nil {
@@ -3321,6 +3361,7 @@ func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to stri
 		} else {
 			fwd.ClientMsg = fmt.Sprintf("%s: %s", err, stderr)
 		}
+		recordProbe(ctx, audit.inconclusive(fwd.ClientMsg))
 
 		return []*IperfError{fwd}
 	}
@@ -3328,6 +3369,7 @@ func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to stri
 		// Log the raw output to help diagnose what iperf3 returned instead of valid JSON
 		slog.Warn("iperf3 client report parse failed", "parseErr", parseErr, "stdout", stdout, "stderr", stderr)
 		fwd.ClientMsg = fmt.Sprintf("cannot parse iperf3 report: %s", parseErr)
+		recordProbe(ctx, audit.inconclusive(fwd.ClientMsg))
 
 		return []*IperfError{fwd}
 	}
@@ -3349,6 +3391,12 @@ func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to stri
 		)
 	}
 	slog.Debug("IPerf3 result", logArgs...)
+	// One session, so one assertion; a bidir session asserts both directions.
+	if bidir {
+		recordProbe(ctx, audit.bidir())
+	} else {
+		recordProbe(ctx, audit.asserted())
+	}
 
 	fwd.SentSpeed = asMbps(fwdSent.BitsPerSecond)
 	fwd.RcvdSpeed = asMbps(fwdRcvd.BitsPerSecond)
@@ -3428,10 +3476,12 @@ func parseNCReturnCode(stdout string) (int, bool) {
 func checkTCPPort(ctx context.Context, sem *semaphore.Weighted, from string, fromSSH *sshutil.Config, toIP netip.Addr, port uint16, expected Reachability) *IperfError {
 	target := fmt.Sprintf("%s:%d", toIP.String(), port)
 	ie := &IperfError{Source: from, Destination: target, Why: expectationWhy(expected)}
+	audit := ProbeRecord{Kind: ProbeKindTCP, Target: portProbeTarget(from, toIP, "tcp", port), Expected: expected.Reachable}
 
 	if sem != nil {
 		if err := sem.Acquire(ctx, 1); err != nil {
 			ie.ClientMsg = fmt.Sprintf("acquiring iperf3 semaphore: %s", err)
+			recordProbe(ctx, audit.inconclusive(ie.ClientMsg))
 
 			return ie
 		}
@@ -3447,6 +3497,7 @@ func checkTCPPort(ctx context.Context, sem *semaphore.Weighted, from string, fro
 	stdout, stderr, err := retrySSHCmd(ctx, fromSSH, cmd, from)
 	if err != nil {
 		ie.ClientMsg = fmt.Sprintf("TCP probe could not run: %s: %s", err, strings.TrimSpace(stderr))
+		recordProbe(ctx, audit.inconclusive(ie.ClientMsg))
 
 		return ie
 	}
@@ -3454,6 +3505,7 @@ func checkTCPPort(ctx context.Context, sem *semaphore.Weighted, from string, fro
 	rc, ok := parseNCReturnCode(stdout)
 	if !ok {
 		ie.ClientMsg = fmt.Sprintf("TCP probe produced no result marker (stdout %q, stderr %q)", strings.TrimSpace(stdout), strings.TrimSpace(stderr))
+		recordProbe(ctx, audit.inconclusive(ie.ClientMsg))
 
 		return ie
 	}
@@ -3468,11 +3520,13 @@ func checkTCPPort(ctx context.Context, sem *semaphore.Weighted, from string, fro
 	default:
 		// e.g. 127 (nc not found) — a probe/environment failure, not a verdict.
 		ie.ClientMsg = fmt.Sprintf("TCP probe returned unexpected exit code %d (stdout %q, stderr %q)", rc, strings.TrimSpace(stdout), strings.TrimSpace(stderr))
+		recordProbe(ctx, audit.inconclusive(ie.ClientMsg))
 
 		return ie
 	}
 
 	slog.Debug("TCP port probe result", "from", from, "to", target, "expected", expected.Reachable, "ok", connectOk, "rc", rc, "stderr", stderr)
+	recordProbe(ctx, audit.asserted())
 
 	if expected.Reachable && !connectOk {
 		ie.ClientMsg = "should be reachable but TCP connect was refused/timed out"
@@ -3543,10 +3597,12 @@ func udpProbeCmd(toIP netip.Addr, port uint16, secs int, timing udpProbeTiming) 
 func checkUDPPort(ctx context.Context, opts TestConnectivityOpts, sem *semaphore.Weighted, from string, fromSSH *sshutil.Config, toIP netip.Addr, port uint16, expected Reachability) *IperfError {
 	target := fmt.Sprintf("%s:%d", toIP.String(), port)
 	ie := &IperfError{Source: from, Destination: target, Why: expectationWhy(expected)}
+	audit := ProbeRecord{Kind: ProbeKindUDP, Target: portProbeTarget(from, toIP, "udp", port), Expected: expected.Reachable}
 
 	if sem != nil {
 		if err := sem.Acquire(ctx, 1); err != nil {
 			ie.ClientMsg = fmt.Sprintf("acquiring iperf3 semaphore: %s", err)
+			recordProbe(ctx, audit.inconclusive(ie.ClientMsg))
 
 			return ie
 		}
@@ -3592,6 +3648,7 @@ func checkUDPPort(ctx context.Context, opts TestConnectivityOpts, sem *semaphore
 
 	if report == nil {
 		ie.ClientMsg = failMsg
+		recordProbe(ctx, audit.inconclusive(failMsg))
 
 		return ie
 	}
@@ -3606,6 +3663,7 @@ func checkUDPPort(ctx context.Context, opts TestConnectivityOpts, sem *semaphore
 	slog.Debug("UDP port probe result", "from", from, "to", target, "expected", expected.Reachable,
 		"delivered", delivered, "blocked", blocked, "packets", packets, "lost", lost, "lostPercent", lostPercent,
 		"err", err, "reportErr", reportErr, "stderr", stderr)
+	recordProbe(ctx, audit.asserted())
 
 	if expected.Reachable {
 		if !delivered {
@@ -3639,7 +3697,10 @@ func checkUDPPort(ctx context.Context, opts TestConnectivityOpts, sem *semaphore
 }
 
 func checkCurl(ctx context.Context, opts TestConnectivityOpts, curls *semaphore.Weighted, from string, fromSSH *sshutil.Config, toIP string, expected Reachability) *CurlError {
+	audit := ProbeRecord{Kind: ProbeKindCurl, Target: curlProbeTarget(from, toIP), Expected: expected.Reachable}
 	if opts.CurlsCount <= 0 {
+		recordProbe(ctx, audit.skipped(probeSkipCurlsDisabled))
+
 		return nil
 	}
 	ce := &CurlError{
@@ -3650,6 +3711,7 @@ func checkCurl(ctx context.Context, opts TestConnectivityOpts, curls *semaphore.
 
 	if err := curls.Acquire(ctx, 1); err != nil {
 		ce.Msg = fmt.Sprintf("acquiring curl semaphore: %s", err)
+		recordProbe(ctx, audit.inconclusive(ce.Msg))
 
 		return ce
 	}
@@ -3672,6 +3734,7 @@ func checkCurl(ctx context.Context, opts TestConnectivityOpts, curls *semaphore.
 			// Neither is a curl-level deny signal, so don't let it pass as one.
 			if status, ok := sshutil.ExitStatus(err); !ok || status == 126 || status == 127 {
 				ce.Msg = fmt.Sprintf("curl did not execute: %s", err)
+				recordProbe(ctx, audit.inconclusive(ce.Msg))
 
 				return ce
 			}
@@ -3681,6 +3744,7 @@ func checkCurl(ctx context.Context, opts TestConnectivityOpts, curls *semaphore.
 		curlFail := err != nil && !strings.Contains(stdout, "301 Moved")
 
 		slog.Debug("Curl result", "from", from, "to", toIP, "expected", expected.Reachable, "ok", curlOk, "fail", curlFail, "err", err, "stdout", stdout, "stderr", stderr)
+		recordProbe(ctx, audit.asserted())
 
 		if curlOk == curlFail {
 			if err != nil {

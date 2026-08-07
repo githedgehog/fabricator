@@ -549,6 +549,21 @@ func (m *ConnectivityMatrix) HasProtoPortEntries(src, dst *Endpoint) bool {
 	return false
 }
 
+// matrixTargetIP resolves the address a probe should dial for an entry: a static
+// DNAT entry replaces the destination's real IP with the NAT pool address the
+// source is expected to target. Shared by the phases and by the audit's claim
+// builder, so a claim names the same address the probe records.
+func matrixTargetIP(e ConnectivityExpectation, dst *Endpoint) netip.Addr {
+	if e.NAT != nil && e.NAT.DestinationIP.IsValid() {
+		return e.NAT.DestinationIP
+	}
+	if dst == nil || dst.Server == nil {
+		return netip.Addr{}
+	}
+
+	return dst.Server.IP
+}
+
 func reachabilityFromExpectation(e ConnectivityExpectation) Reachability {
 	return Reachability{
 		Reachable: e.Verdict == VerdictAllow,
@@ -606,13 +621,7 @@ func runMatrixServerServerPhase(ctx context.Context, opts TestConnectivityOpts, 
 				continue
 			}
 
-			// Resolve the target IP: a static DNAT entry replaces the
-			// destination's real IP with the NAT pool address the source
-			// is expected to target.
-			toIP := dst.Server.IP
-			if entry.NAT != nil && entry.NAT.DestinationIP.IsValid() {
-				toIP = entry.NAT.DestinationIP
-			}
+			toIP := matrixTargetIP(entry, dst)
 			if !toIP.IsValid() {
 				return fmt.Errorf("matrix entry %s→%s (vpc %s/%s) has no valid target IP", src.Server.Name, dst.Server.Name, dst.Server.VPC, dst.Server.Subnet) //nolint:goerr113
 			}
@@ -690,7 +699,7 @@ func runMatrixCurlPhase(ctx context.Context, opts TestConnectivityOpts, matrix *
 			}
 			slog.Debug("Checking external connectivity", logArgs...)
 
-			if ce := checkCurl(ctx, opts, deps.curls, name, ssh, "1.0.0.1", expected); ce != nil {
+			if ce := checkCurl(ctx, opts, deps.curls, name, ssh, externalCurlTarget, expected); ce != nil {
 				deps.errChan <- ce
 			}
 		})
@@ -840,10 +849,7 @@ func runMatrixProtoPortPhase(ctx context.Context, opts TestConnectivityOpts, mat
 				fromName := src.Server.Name
 				toName := dst.Server.Name
 				fromSSH := deps.sshByServer[fromName]
-				toIP := dst.Server.IP
-				if entry.NAT != nil && entry.NAT.DestinationIP.IsValid() {
-					toIP = entry.NAT.DestinationIP
-				}
+				toIP := matrixTargetIP(entry, dst)
 				if !toIP.IsValid() {
 					deps.errChan <- fmt.Errorf("matrix proto entry %s→%s (%s/%d) has no valid target IP", fromName, toName, pp.Protocol, pp.Port) //nolint:goerr113
 
@@ -893,6 +899,16 @@ func (c *Config) TestConnectivityWithMatrix(ctx context.Context, vlab *VLAB, opt
 		return err
 	}
 	start := time.Now()
+
+	audit := newProbeAudit(connectivityPathMatrix)
+	ctx = withProbeAudit(ctx, audit)
+	// A run that returns before its phases finish still reports what it asserted.
+	phasesDone := false
+	defer func() {
+		if !phasesDone {
+			reportProbeAudit(ctx, audit, time.Since(start), false)
+		}
+	}()
 
 	if opts.PingsParallel <= 0 {
 		opts.PingsParallel = 50
@@ -954,6 +970,8 @@ func (c *Config) TestConnectivityWithMatrix(ctx context.Context, vlab *VLAB, opt
 		errChan: errChan,
 	}
 
+	audit.claimMatrix(matrix, deps.inSources, deps.inDestinations)
+
 	teardownListeners := func() {}
 	if opts.PingsCount > 0 || opts.IPerfsSeconds > 0 {
 		td, err := startMatrixProtoPortListeners(ctx, matrix, deps)
@@ -982,6 +1000,9 @@ func (c *Config) TestConnectivityWithMatrix(ctx context.Context, vlab *VLAB, opt
 	deps.wg.Wait()
 	close(errChan)
 
+	phasesDone = true
+	auditRun := reportProbeAudit(ctx, audit, time.Since(start), true)
+
 	var joined error
 	var numPingErrs, numIperfErrs, numCurlErrs int
 	for e := range errChan {
@@ -1002,9 +1023,10 @@ func (c *Config) TestConnectivityWithMatrix(ctx context.Context, vlab *VLAB, opt
 	}
 
 	if joined != nil {
-		slog.Error("Test connectivity (matrix) failed", "ping", numPingErrs, "iperf", numIperfErrs, "curl", numCurlErrs, "took", time.Since(start), "errors", joined)
+		logArgs := append([]any{"ping", numPingErrs, "iperf", numIperfErrs, "curl", numCurlErrs}, auditRun.LogArgs()...)
+		slog.Error("Test connectivity (matrix) failed", append(logArgs, "took", time.Since(start), "errors", joined)...)
 	} else {
-		slog.Info("Test connectivity (matrix) passed", "took", time.Since(start))
+		slog.Info("Test connectivity (matrix) passed", append(auditRun.LogArgs(), "took", time.Since(start))...)
 	}
 
 	return joined
@@ -1023,8 +1045,13 @@ func runMatrixIperfPortForward(ctx context.Context, opts TestConnectivityOpts, i
 	slog.Debug("Checking iperf3 through port-forward NAT (matrix)", logArgs...)
 
 	if !expected.Reachable {
+		// checkTCPPort records the assertion against the same target
 		return checkTCPPort(ctx, nil, from, ssh, toIP, toPort, expected)
 	}
+
+	// This path runs its own iperf3 client rather than checkIPerf, so it is the
+	// one probe that records nothing and logs no result line unless it does so here.
+	audit := ProbeRecord{Kind: ProbeKindPortForward, Target: portProbeTarget(from, toIP, "tcp", toPort), Expected: true}
 
 	// Gate on TCP reachability: a successful TCP connect is the precise signal
 	// that both halves of the path (fabric route + gateway DNAT) are active.
@@ -1038,22 +1065,27 @@ func runMatrixIperfPortForward(ctx context.Context, opts TestConnectivityOpts, i
 			lastErr = err
 		}
 		if time.Now().After(deadline) {
-			return &IperfError{
-				Source:      from,
-				Destination: target,
-				Why:         why,
-				ClientMsg:   fmt.Sprintf("port-forward target not reachable after %s: %s", gwNATPortForwardProbeTimeout, lastErr),
-			}
+			msg := fmt.Sprintf("port-forward target not reachable after %s: %s", gwNATPortForwardProbeTimeout, lastErr)
+			// the connect never completed, which is the assertion: the path is
+			// not open when it was expected to be
+			recordProbe(ctx, audit.asserted())
+
+			return &IperfError{Source: from, Destination: target, Why: why, ClientMsg: msg}
 		}
 		select {
 		case <-ctx.Done():
+			recordProbe(ctx, audit.inconclusive(ctx.Err().Error()))
+
 			return &IperfError{Source: from, Destination: target, Why: why, ClientMsg: ctx.Err().Error()}
 		case <-time.After(gwNATPortForwardProbeInterval):
 		}
 	}
 
 	if err := iperfs.Acquire(ctx, 1); err != nil {
-		return &IperfError{Source: from, Destination: target, Why: why, ClientMsg: fmt.Sprintf("acquiring iperf3 semaphore: %s", err)}
+		msg := fmt.Sprintf("acquiring iperf3 semaphore: %s", err)
+		recordProbe(ctx, audit.inconclusive(msg))
+
+		return &IperfError{Source: from, Destination: target, Why: why, ClientMsg: msg}
 	}
 	defer iperfs.Release(1)
 
@@ -1061,8 +1093,11 @@ func runMatrixIperfPortForward(ctx context.Context, opts TestConnectivityOpts, i
 	cmd := fmt.Sprintf("toolbox -E LD_PRELOAD=/lib/x86_64-linux-gnu/libgcc_s.so.1 -q timeout %d iperf3 -J -c %s -p %d -t %d",
 		secs+25, toIP.String(), toPort, secs)
 	if _, _, iperfErr := retrySSHCmd(ctx, ssh, cmd, from); iperfErr != nil {
+		recordProbe(ctx, audit.asserted())
+
 		return &IperfError{Source: from, Destination: target, Why: why, ClientMsg: iperfErr.Error()}
 	}
+	recordProbe(ctx, audit.asserted())
 
 	return nil
 }
