@@ -58,7 +58,7 @@ var Versions = fabapi.Versions{
 		Toolbox:           "v0.13.0",
 		ReloaderChart:     "2.2.11",
 		Reloader:          "v1.4.16",
-		NTP:               "v0.0.4",
+		NTP:               "v0.0.5",
 		NTPChart:          FabricatorVersion,
 		Alloy:             "v1.16.1",
 		ControlProxy:      "v1.11.2-hh2",
