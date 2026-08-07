@@ -255,7 +255,7 @@ func Run(ctx context.Context) error {
 		},
 		&cli.UintFlag{
 			Name:        "multihomed-servers",
-			Usage:       "number of multihomed servers (2 connections to 2 different orphan leaves)",
+			Usage:       "number of multihomed servers (2 connections to 2 different leaves, preferably orphans)",
 			Destination: &wgMultiHomedServers,
 		},
 		&cli.BoolFlag{
