@@ -356,6 +356,47 @@ func TestLogArgs_KeysAreUniqueAndDoNotShadowErrorCounts(t *testing.T) {
 	require.Contains(t, seen, "ping", "the pre-existing error count keeps its key")
 }
 
+func TestSink_DirectProbesAreAttributedToTheTest(t *testing.T) {
+	// Some tests call checkPing themselves rather than going through a
+	// connectivity run. Those assertions still happened and must be counted.
+	sink := &ProbeAuditSink{}
+	ctx := WithProbeAuditSink(context.Background(), sink)
+	require.Nil(t, probeAuditFrom(ctx), "no connectivity run is in scope")
+
+	recordProbe(ctx, ProbeRecord{
+		Kind:   ProbeKindPing,
+		Target: pingProbeTarget("server-1", netip.MustParseAddr("10.0.2.2")),
+	}.asserted())
+
+	runs := sink.Runs()
+	require.Len(t, runs, 1)
+	require.Equal(t, connectivityPathDirect, runs[0].Path)
+	require.Equal(t, 1, runs[0].Probes[string(ProbeKindPing)].Asserted)
+	require.Empty(t, runs[0].Shortfall, "a direct probe has no expectation set to fall short of")
+}
+
+func TestSink_DirectRunFollowsTheConnectivityRuns(t *testing.T) {
+	sink := &ProbeAuditSink{}
+	sink.add(ProbeAuditRun{Path: connectivityPathMatrix, Completed: true})
+	ctx := WithProbeAuditSink(context.Background(), sink)
+	recordProbe(ctx, ProbeRecord{Kind: ProbeKindPing}.asserted())
+
+	runs := sink.Runs()
+	require.Len(t, runs, 2)
+	require.Equal(t, connectivityPathMatrix, runs[0].Path)
+	require.Equal(t, connectivityPathDirect, runs[1].Path)
+}
+
+func TestRecordProbe_RunRecorderWinsOverTheSink(t *testing.T) {
+	sink := &ProbeAuditSink{}
+	audit := newProbeAudit(connectivityPathMatrix)
+	ctx := withProbeAudit(WithProbeAuditSink(context.Background(), sink), audit)
+	recordProbe(ctx, ProbeRecord{Kind: ProbeKindPing}.asserted())
+
+	require.Empty(t, sink.Runs(), "nothing should land in the ad-hoc run")
+	require.Equal(t, 1, audit.summarize("0s", true).Probes[string(ProbeKindPing)].Asserted)
+}
+
 func TestProbeAuditFilePath(t *testing.T) {
 	require.Equal(t, "release-test-connectivity-audit.json", probeAuditFilePath("release-test.xml"))
 	require.Equal(t, "/tmp/a.b/res-connectivity-audit.json", probeAuditFilePath("/tmp/a.b/res.xml"))

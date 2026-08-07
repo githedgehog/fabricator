@@ -229,8 +229,18 @@ func (a *probeAudit) recordNotProbed(rule string) {
 }
 
 // recordProbe is the helpers' entry point: one call per probe execution.
+//
+// Some tests probe directly rather than through a connectivity run — the static
+// external and NAT external cases call checkPing themselves — so a probe with no
+// run to attach to goes into the test's ad-hoc run instead. Without that those
+// assertions are made and never counted.
 func recordProbe(ctx context.Context, r ProbeRecord) {
-	probeAuditFrom(ctx).record(r)
+	if a := probeAuditFrom(ctx); a != nil {
+		a.record(r)
+
+		return
+	}
+	probeAuditSinkFrom(ctx).recordAdhoc(r)
 }
 
 // connectivityPathMatrix and connectivityPathLegacy name the two connectivity
@@ -238,6 +248,9 @@ func recordProbe(ctx context.Context, r ProbeRecord) {
 const (
 	connectivityPathMatrix = "matrix"
 	connectivityPathLegacy = "legacy"
+	// probes a test made itself, outside any connectivity run, so there is no
+	// expectation set to reconcile them against
+	connectivityPathDirect = "direct"
 )
 
 // externalCurlTarget is the address both paths curl to test external
@@ -600,8 +613,9 @@ func (r ProbeAuditRun) LogArgs() []any {
 // ProbeAuditSink collects the runs of one release test case. Installed on the
 // context by the suite runner, so the connectivity call sites need no changes.
 type ProbeAuditSink struct {
-	mu   sync.Mutex
-	runs []ProbeAuditRun
+	mu    sync.Mutex
+	runs  []ProbeAuditRun
+	adhoc *probeAudit
 }
 
 type probeAuditSinkKeyType struct{}
@@ -627,6 +641,21 @@ func (s *ProbeAuditSink) add(run ProbeAuditRun) {
 	s.runs = append(s.runs, run)
 }
 
+func (s *ProbeAuditSink) recordAdhoc(r ProbeRecord) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	if s.adhoc == nil {
+		s.adhoc = newProbeAudit(connectivityPathDirect)
+	}
+	a := s.adhoc
+	s.mu.Unlock()
+	a.record(r)
+}
+
+// Runs returns the test's connectivity runs, with any directly-made probes
+// folded in last as one ad-hoc run.
 func (s *ProbeAuditSink) Runs() []ProbeAuditRun {
 	if s == nil {
 		return nil
@@ -634,7 +663,12 @@ func (s *ProbeAuditSink) Runs() []ProbeAuditRun {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	return slices.Clone(s.runs)
+	out := slices.Clone(s.runs)
+	if s.adhoc != nil {
+		out = append(out, s.adhoc.summarize("", true))
+	}
+
+	return out
 }
 
 // ProbeAuditReport is the artifact written beside the JUnit results.
