@@ -50,7 +50,7 @@ const (
 
 var Versions = fabapi.Versions{
 	Platform: fabapi.PlatformVersions{
-		K3s:               "v1.36.2-k3s1",
+		K3s:               "v1.36.3-k3s1",
 		Zot:               "v2.1.16",
 		ZotChart:          "v0.1.67-hh1",
 		CertManager:       "v1.20.2",
@@ -71,7 +71,7 @@ var Versions = fabapi.Versions{
 		Controller:     FabricatorVersion,
 		Ctl:            FabricatorVersion,
 		NodeConfig:     FabricatorVersion,
-		Pause:          "3.6", // wait image from k3s // TODO embed wait into node-config image?
+		Pause:          "3.10.2", // wait image from k3s // TODO embed wait into node-config image?
 		ControlUSBRoot: "v4593.2.4-hh2",
 		Flatcar:        "v4593.2.4",
 	},
