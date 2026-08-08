@@ -391,6 +391,8 @@ func buildUSBImage(ctx context.Context, opts buildInstallOpts) error {
 	if err != nil {
 		return fmt.Errorf("creating ignition file: %w", err)
 	}
+	defer ignFile.Close()
+
 	if _, err := ignFile.Write(ign); err != nil {
 		return fmt.Errorf("writing ignition: %w", err)
 	}
