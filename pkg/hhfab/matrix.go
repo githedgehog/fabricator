@@ -83,7 +83,8 @@ type ConnectivityExpectation struct {
 
 	Peering string
 
-	// free-form context for Reason, currently only set on VerdictUnknown entries
+	// free-form context for Reason: why a VerdictUnknown entry could not be
+	// evaluated, or what withholds a VerdictDeny (e.g. an ACL on the peering)
 	Detail string
 
 	ProtoPort ProtoPort
@@ -296,26 +297,19 @@ func (m *ConnectivityMatrix) Validate() error {
 			len(m.dropped), strings.Join(reasons, "; ")))
 	}
 
-	extAllowBySource := map[*Endpoint]bool{}
-	for _, src := range m.AllEndpoints {
-		if _, ok := m.externalCurlAllowed(src); ok {
-			extAllowBySource[src] = true
-		}
-	}
-
 	unknowns := []string{}
-	for pair, byPP := range m.entries {
-		for pp, e := range byPP {
-			if e.Verdict != VerdictUnknown {
+	unprobed := []string{}
+	for _, byPP := range m.entries {
+		for _, e := range byPP {
+			owner := m.entryOwner(e)
+			if owner == matrixPhaseUnprobed {
+				unprobed = append(unprobed, describeMatrixEntry(e))
+
 				continue
 			}
-			if pair.Destination != nil && pair.Destination.External != nil && extAllowBySource[pair.Source] {
-				continue
+			if owner != matrixPhaseSkipped && e.Verdict == VerdictUnknown {
+				unknowns = append(unknowns, describeMatrixEntry(e))
 			}
-			if m.defaultEntryShadowed(pair, pp, e) {
-				continue
-			}
-			unknowns = append(unknowns, describeUnknownEntry(pair, pp, e))
 		}
 	}
 	if len(unknowns) > 0 {
@@ -323,26 +317,150 @@ func (m *ConnectivityMatrix) Validate() error {
 		errs = append(errs, fmt.Errorf("%d matrix entries could not be evaluated and were not overlaid by the test: %s", //nolint:goerr113
 			len(unknowns), strings.Join(unknowns, "; ")))
 	}
+	if len(unprobed) > 0 {
+		slices.Sort(unprobed)
+		errs = append(errs, fmt.Errorf("%d matrix entries no probe phase can read, so they would pass unasserted: %s", //nolint:goerr113
+			len(unprobed), strings.Join(unprobed, "; ")))
+	}
 
 	return errors.Join(errs...)
 }
 
-// defaultEntryShadowed reports whether a default-ProtoPort entry is read by no
-// phase at all: runMatrixServerServerPhase hands a pair carrying proto-port
-// entries to runMatrixProtoPortPhase, which reads only those. Port-forward
-// entries are exempt, runMatrixPortForwardPhase still reads them.
-func (m *ConnectivityMatrix) defaultEntryShadowed(pair EndpointPair, pp ProtoPort, e ConnectivityExpectation) bool {
-	if pp != (ProtoPort{}) {
-		return false
+// matrixPhase is the probe phase that owns an entry. Single source of truth for
+// the phases' skip gates and for Validate. Ownership is not the same as being
+// probed: the --source/--destination filters gate pairs on top of it, and
+// Validate does not model them, so an owned entry whose pair those filters
+// exclude is never probed.
+type matrixPhase int
+
+const (
+	// nothing reads the entry, and nothing makes that intentional
+	matrixPhaseUnprobed matrixPhase = iota
+	// nothing reads the entry by design: self-pair, or default entry superseded
+	// by the pair's proto-port entries
+	matrixPhaseSkipped
+	matrixPhaseServerServer
+	matrixPhasePortForward
+	matrixPhaseProtoPort
+	matrixPhaseCurl
+)
+
+// entryOwner assumes Validate has already rejected VerdictUnknown: the phases
+// carry no verdict guard of their own, and reachabilityFromExpectation maps
+// Unknown to Reachable:false, so a phase reached without Validate would assert
+// deny on an entry explicitly marked unevaluable.
+func (m *ConnectivityMatrix) entryOwner(e ConnectivityExpectation) matrixPhase {
+	src, dst := e.Pair.Source, e.Pair.Destination
+	if src == nil || dst == nil || src.Server == nil {
+		return matrixPhaseUnprobed
 	}
-	if pair.Source == nil || pair.Destination == nil || pair.Source.Server == nil || pair.Destination.Server == nil {
-		return false
+	if src == dst || IsSameEndpointNode(src, dst) {
+		return matrixPhaseSkipped
 	}
-	if e.NAT != nil && e.NAT.DestinationPort != 0 {
-		return false
+	// a translated port makes the path L4-only
+	portForward := e.NAT != nil && e.NAT.DestinationPort != 0
+	if portForward && !e.NAT.DestinationIP.IsValid() {
+		return matrixPhaseUnprobed
+	}
+	scoped := e.ProtoPort != (ProtoPort{})
+	// the proto-port probes dial ProtoPort.Port, so they would aim past the
+	// translation, and the port-forward probe carries no protocol dimension
+	if portForward && scoped {
+		return matrixPhaseUnprobed
 	}
 
-	return m.HasProtoPortEntries(pair.Source, pair.Destination)
+	switch {
+	case dst.Server != nil:
+		switch {
+		case scoped:
+			return matrixPhaseProtoPort
+		case portForward:
+			return matrixPhasePortForward
+		case m.HasProtoPortEntries(src, dst):
+			return matrixPhaseSkipped
+		default:
+			return matrixPhaseServerServer
+		}
+	case dst.External != nil:
+		switch {
+		case scoped:
+			// the curl probe carries no protocol/port dimension and
+			// runMatrixProtoPortPhase only probes server destinations
+			return matrixPhaseUnprobed
+		case portForward:
+			return matrixPhasePortForward
+		case e.Verdict == VerdictAllow && e.NAT != nil && !e.NAT.SourcePool.IsValid():
+			// the curl oracle discards a NAT with no source pool, so it would
+			// assert the opposite of what this entry claims
+			return matrixPhaseUnprobed
+		case e.Verdict == VerdictUnknown && m.hasExternalCurlAllow(src):
+			// one untargeted curl per source, so a sibling external's Allow
+			// already pins its outcome
+			return matrixPhaseSkipped
+		default:
+			return matrixPhaseCurl
+		}
+	default:
+		return matrixPhaseUnprobed
+	}
+}
+
+// checkProbesEnabled rejects a run whose enabled probes cannot assert every
+// entry a phase will read: checkPing/checkIPerf/checkCurl no-op when their count
+// is off, so those entries would pass unasserted.
+//
+// It walks endpoint pairs rather than m.entries because that is what the phases
+// do, and populate only stores reachable or unevaluable pairs — so a topology
+// whose pairs are all denies has no stored entries at all. The source and
+// destination gates mirror deps.inSources/inDestinations, which the phases apply
+// on top of ownership.
+func (m *ConnectivityMatrix) checkProbesEnabled(opts TestConnectivityOpts) error {
+	var serverServer, external, icmp int
+	for _, src := range m.AllEndpoints {
+		if src.Server == nil || (len(opts.Sources) > 0 && !slices.Contains(opts.Sources, src.Server.Name)) {
+			continue
+		}
+		for _, dst := range m.AllEndpoints {
+			// an external destination has no server name to filter on
+			if dst.Server != nil && len(opts.Destinations) > 0 && !slices.Contains(opts.Destinations, dst.Server.Name) {
+				continue
+			}
+			entries := m.ProtoPortEntries(src, dst)
+			// plus the pair's default entry, which Lookup synthesizes as a Deny
+			// when populate stored nothing for it
+			entries = append(entries, m.Lookup(src, dst, ProtoPort{}))
+			for _, e := range entries {
+				owner := m.entryOwner(e)
+				if owner == matrixPhaseServerServer {
+					serverServer++
+				}
+				if owner == matrixPhaseCurl {
+					external++
+				}
+				if owner == matrixPhaseProtoPort && e.ProtoPort.Protocol == "icmp" {
+					icmp++
+				}
+			}
+		}
+	}
+
+	if opts.PingsCount <= 0 && opts.IPerfsSeconds <= 0 && serverServer > 0 {
+		return fmt.Errorf("matrix has %d server-to-server entries but both pings and iperfs are disabled", serverServer) //nolint:goerr113
+	}
+	if opts.CurlsCount <= 0 && external > 0 {
+		return fmt.Errorf("matrix has %d external entries but curls are disabled", external) //nolint:goerr113
+	}
+	if opts.PingsCount <= 0 && icmp > 0 {
+		return fmt.Errorf("matrix has %d icmp proto-port entries but pings are disabled", icmp) //nolint:goerr113
+	}
+
+	return nil
+}
+
+func (m *ConnectivityMatrix) hasExternalCurlAllow(src *Endpoint) bool {
+	_, ok := m.externalCurlAllowed(src)
+
+	return ok
 }
 
 func (m *ConnectivityMatrix) externalCurlAllowed(src *Endpoint) (ConnectivityExpectation, bool) {
@@ -367,10 +485,10 @@ func (m *ConnectivityMatrix) externalCurlAllowed(src *Endpoint) (ConnectivityExp
 	return ConnectivityExpectation{}, false
 }
 
-func describeUnknownEntry(pair EndpointPair, pp ProtoPort, e ConnectivityExpectation) string {
-	out := fmt.Sprintf("%s → %s", endpointLabel(pair.Source), endpointLabel(pair.Destination))
-	if pp != (ProtoPort{}) {
-		out += fmt.Sprintf(" [%s/%d]", pp.Protocol, pp.Port)
+func describeMatrixEntry(e ConnectivityExpectation) string {
+	out := fmt.Sprintf("%s → %s", endpointLabel(e.Pair.Source), endpointLabel(e.Pair.Destination))
+	if e.ProtoPort != (ProtoPort{}) {
+		out += fmt.Sprintf(" [%s/%d]", e.ProtoPort.Protocol, e.ProtoPort.Port)
 	}
 	if e.Detail != "" {
 		out += ": " + e.Detail
@@ -436,6 +554,7 @@ func reachabilityFromExpectation(e ConnectivityExpectation) Reachability {
 		Reachable: e.Verdict == VerdictAllow,
 		Reason:    e.Reason,
 		Peering:   e.Peering,
+		Detail:    e.Detail,
 	}
 }
 
@@ -459,6 +578,13 @@ type matrixTestDeps struct {
 	errChan        chan<- error
 }
 
+// probesServerPair reports whether the server-to-server phases will probe this
+// pair, so listener setup covers exactly what gets probed.
+func (d *matrixTestDeps) probesServerPair(src, dst *Endpoint) bool {
+	return src.Server != nil && dst.Server != nil &&
+		d.inSources(src.Server.Name) && d.inDestinations(dst.Server.Name)
+}
+
 func runMatrixServerServerPhase(ctx context.Context, opts TestConnectivityOpts, matrix *ConnectivityMatrix, deps *matrixTestDeps) error {
 	for _, src := range matrix.AllEndpoints {
 		if src.Server == nil {
@@ -468,25 +594,15 @@ func runMatrixServerServerPhase(ctx context.Context, opts TestConnectivityOpts, 
 			continue
 		}
 		for _, dst := range matrix.AllEndpoints {
-			if dst.Server == nil || src == dst {
-				continue
-			}
-			if IsSameEndpointNode(src, dst) {
+			if dst.Server == nil {
 				continue
 			}
 			if !deps.inDestinations(dst.Server.Name) {
 				continue
 			}
 
-			// Protocol/port-scoped pairs are owned entirely by runMatrixProtoPortPhase
-			if matrix.HasProtoPortEntries(src, dst) {
-				continue
-			}
-
 			entry := matrix.Lookup(src, dst, ProtoPort{})
-			// Port-forward destinations (DestinationPort set) are L4-only
-			// and handled by runMatrixPortForwardPhase below.
-			if entry.NAT != nil && entry.NAT.DestinationPort != 0 {
+			if matrix.entryOwner(entry) != matrixPhaseServerServer {
 				continue
 			}
 
@@ -596,14 +712,8 @@ func runMatrixPortForwardPhase(ctx context.Context, opts TestConnectivityOpts, m
 			continue
 		}
 		for _, dst := range matrix.AllEndpoints {
-			if src == dst {
-				continue
-			}
 			e := matrix.Lookup(src, dst, ProtoPort{})
-			if e.NAT == nil || (e.Verdict != VerdictAllow && e.Verdict != VerdictDeny) {
-				continue
-			}
-			if !e.NAT.DestinationIP.IsValid() || e.NAT.DestinationPort == 0 {
+			if matrix.entryOwner(e) != matrixPhasePortForward {
 				continue
 			}
 			switch {
@@ -617,9 +727,6 @@ func runMatrixPortForwardPhase(ctx context.Context, opts TestConnectivityOpts, m
 				}
 				extTargets[key] = reachabilityFromExpectation(e)
 			case dst.Server != nil:
-				if IsSameEndpointNode(src, dst) {
-					continue
-				}
 				if !deps.inDestinations(dst.Server.Name) {
 					continue
 				}
@@ -654,14 +761,14 @@ func startMatrixProtoPortListeners(ctx context.Context, matrix *ConnectivityMatr
 	}
 	wanted := map[hostPort]struct{}{}
 	for _, src := range matrix.AllEndpoints {
-		if src.Server == nil {
-			continue
-		}
 		for _, dst := range matrix.AllEndpoints {
-			if dst.Server == nil || src == dst {
+			if !deps.probesServerPair(src, dst) {
 				continue
 			}
 			for _, e := range matrix.ProtoPortEntries(src, dst) {
+				if matrix.entryOwner(e) != matrixPhaseProtoPort {
+					continue
+				}
 				pp := e.ProtoPort
 				if pp.Protocol != "tcp" && pp.Protocol != "udp" {
 					continue
@@ -684,7 +791,8 @@ func startMatrixProtoPortListeners(ctx context.Context, matrix *ConnectivityMatr
 			if ssh == nil {
 				continue
 			}
-			cmd := fmt.Sprintf("sudo docker exec iperf3 pkill -f 'iperf3 -s -p %d'", hp.port)
+			// anchored so port 5301 does not match a listener on 53010
+			cmd := fmt.Sprintf("sudo docker exec iperf3 pkill -f 'iperf3 -s -p %d$'", hp.port)
 			if _, stderr, err := retrySSHCmd(tctx, ssh, cmd, hp.host); err != nil {
 				slog.Warn("Failed to stop proto-port iperf3 listener", "host", hp.host, "port", hp.port, "err", err, "stderr", stderr)
 			}
@@ -719,20 +827,14 @@ func startMatrixProtoPortListeners(ctx context.Context, matrix *ConnectivityMatr
 // loss check.
 func runMatrixProtoPortPhase(ctx context.Context, opts TestConnectivityOpts, matrix *ConnectivityMatrix, deps *matrixTestDeps) {
 	for _, src := range matrix.AllEndpoints {
-		if src.Server == nil || !deps.inSources(src.Server.Name) {
-			continue
-		}
 		for _, dst := range matrix.AllEndpoints {
-			if dst.Server == nil || src == dst {
-				continue
-			}
-			if IsSameEndpointNode(src, dst) {
-				continue
-			}
-			if !deps.inDestinations(dst.Server.Name) {
+			if !deps.probesServerPair(src, dst) {
 				continue
 			}
 			for _, entry := range matrix.ProtoPortEntries(src, dst) {
+				if matrix.entryOwner(entry) != matrixPhaseProtoPort {
+					continue
+				}
 				expected := reachabilityFromExpectation(entry)
 				pp := entry.ProtoPort
 				fromName := src.Server.Name
@@ -758,14 +860,14 @@ func runMatrixProtoPortPhase(ctx context.Context, opts TestConnectivityOpts, mat
 				case "tcp":
 					port := pp.Port
 					deps.wg.Go(func() {
-						if ie := checkTCPPort(ctx, deps.iperfs, fromName, fromSSH, toIP, port, expected.Reachable); ie != nil {
+						if ie := checkTCPPort(ctx, deps.iperfs, fromName, fromSSH, toIP, port, expected); ie != nil {
 							deps.errChan <- ie
 						}
 					})
 				case "udp":
 					port := pp.Port
 					deps.wg.Go(func() {
-						if ie := checkUDPPort(ctx, opts, deps.iperfs, fromName, fromSSH, toIP, port, expected.Reachable); ie != nil {
+						if ie := checkUDPPort(ctx, opts, deps.iperfs, fromName, fromSSH, toIP, port, expected); ie != nil {
 							deps.errChan <- ie
 						}
 					})
@@ -786,6 +888,9 @@ func (c *Config) TestConnectivityWithMatrix(ctx context.Context, vlab *VLAB, opt
 	}
 	if err := matrix.Validate(); err != nil {
 		return fmt.Errorf("connectivity matrix is not a sound oracle: %w", err)
+	}
+	if err := matrix.checkProbesEnabled(opts); err != nil {
+		return err
 	}
 	start := time.Now()
 
@@ -918,12 +1023,7 @@ func runMatrixIperfPortForward(ctx context.Context, opts TestConnectivityOpts, i
 	slog.Debug("Checking iperf3 through port-forward NAT (matrix)", logArgs...)
 
 	if !expected.Reachable {
-		ie := checkTCPPort(ctx, nil, from, ssh, toIP, toPort, false)
-		if ie != nil {
-			ie.Why = why
-		}
-
-		return ie
+		return checkTCPPort(ctx, nil, from, ssh, toIP, toPort, expected)
 	}
 
 	// Gate on TCP reachability: a successful TCP connect is the precise signal

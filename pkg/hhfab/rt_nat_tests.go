@@ -217,6 +217,12 @@ func overrideVPCToVPCVerdict(matrix *ConnectivityMatrix, srcVPCName, dstVPCName 
 func setVPCToVPCProtoVerdict(matrix *ConnectivityMatrix, srcVPCName, dstVPCName string, pp ProtoPort, verdict ConnectivityVerdict) {
 	srcPred := ServerInVPC(srcVPCName)
 	dstPred := ServerInVPC(dstVPCName)
+	// the peering allows the pair, so only an ACL can deny one protocol/port of
+	// it — which is what makes a verdict proto-scoped in the first place
+	detail := ""
+	if verdict == VerdictDeny {
+		detail = "ACL"
+	}
 	for _, src := range matrix.AllEndpoints {
 		if !srcPred(src) {
 			continue
@@ -231,6 +237,7 @@ func setVPCToVPCProtoVerdict(matrix *ConnectivityMatrix, srcVPCName, dstVPCName 
 				Verdict:   verdict,
 				Reason:    ReachabilityReasonGatewayPeering,
 				Peering:   existing.Peering,
+				Detail:    detail,
 				NAT:       existing.NAT,
 				ProtoPort: pp,
 			})

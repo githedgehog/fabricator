@@ -189,127 +189,6 @@ func TestReplaceServerDrops(t *testing.T) {
 	require.Equal(t, "vpc-new", m.dropped[1].VPC)
 }
 
-func TestValidate(t *testing.T) {
-	a := serverEP("server-1", "vpc-1", "default", "10.0.1.1")
-	b := serverEP("server-2", "vpc-2", "default", "10.0.2.1")
-	ext := &Endpoint{External: &ExternalEndpoint{ExternalName: "ext-1"}}
-	ext2 := &Endpoint{External: &ExternalEndpoint{ExternalName: "ext-2"}}
-
-	newMatrix := func() *ConnectivityMatrix {
-		m := NewConnectivityMatrix()
-		m.AllEndpoints = []*Endpoint{a, b, ext, ext2}
-
-		return m
-	}
-
-	t.Run("all-deny topology is valid", func(t *testing.T) {
-		// Isolated VPCs with no peerings: no Allow entry anywhere is a
-		// legitimate thing to assert, not a degenerate matrix.
-		require.NoError(t, newMatrix().Validate())
-	})
-
-	t.Run("no endpoints", func(t *testing.T) {
-		require.ErrorContains(t, NewConnectivityMatrix().Validate(), "no endpoints")
-	})
-
-	t.Run("nil matrix", func(t *testing.T) {
-		var m *ConnectivityMatrix
-		require.Error(t, m.Validate())
-	})
-
-	t.Run("discovery drop", func(t *testing.T) {
-		m := newMatrix()
-		m.dropped = []DroppedEndpoint{{
-			Server: "server-3", VPC: "vpc-3", Subnet: "default", Reason: "attachment has no matching address",
-		}}
-		require.ErrorContains(t, m.Validate(), "server-3 (vpc-3/default): attachment has no matching address")
-	})
-
-	t.Run("unevaluated server pair", func(t *testing.T) {
-		m := newMatrix()
-		m.Add(ConnectivityExpectation{
-			Pair:    EndpointPair{Source: a, Destination: b},
-			Verdict: VerdictUnknown,
-			Detail:  "gw peering with non-empty expose 'As'",
-		})
-		err := m.Validate()
-		require.ErrorContains(t, err, "server-1(vpc-1/default) → server-2(vpc-2/default)")
-		require.ErrorContains(t, err, "non-empty expose 'As'")
-
-		// A test that overlays the real expectation clears it.
-		m.Add(ConnectivityExpectation{
-			Pair: EndpointPair{Source: a, Destination: b}, Verdict: VerdictAllow,
-		})
-		require.NoError(t, m.Validate())
-	})
-
-	t.Run("unevaluated default entry shadowed by proto-port entries", func(t *testing.T) {
-		// Proto-scoped pairs are probed only by runMatrixProtoPortPhase, which
-		// never reads the default entry, so an ACL test overlaying just the
-		// proto verdicts leaves nothing unasserted.
-		m := newMatrix()
-		m.Add(ConnectivityExpectation{
-			Pair: EndpointPair{Source: a, Destination: b}, Verdict: VerdictUnknown, Detail: "unsupported",
-		})
-		require.ErrorContains(t, m.Validate(), "server-1(vpc-1/default) → server-2(vpc-2/default)")
-
-		m.Add(ConnectivityExpectation{
-			Pair: EndpointPair{Source: a, Destination: b}, Verdict: VerdictAllow,
-			ProtoPort: ProtoPort{Protocol: "tcp", Port: 5301},
-		})
-		require.NoError(t, m.Validate())
-
-		// ...unless the default entry is a port-forward, which the
-		// port-forward phase does read.
-		m.Add(ConnectivityExpectation{
-			Pair: EndpointPair{Source: a, Destination: b}, Verdict: VerdictUnknown, Detail: "unsupported",
-			NAT: &TranslatedAddress{DestinationIP: netip.MustParseAddr("10.0.2.1"), DestinationPort: 15201},
-		})
-		require.ErrorContains(t, m.Validate(), "server-1(vpc-1/default) → server-2(vpc-2/default)")
-	})
-
-	t.Run("unevaluated external is settled by another external's allow", func(t *testing.T) {
-		// The external oracle ORs over every External in the cluster, so
-		// one Allow decides the source's expectation for all of them.
-		m := newMatrix()
-		m.Add(ConnectivityExpectation{
-			Pair: EndpointPair{Source: a, Destination: ext}, Verdict: VerdictUnknown, Detail: "unsupported",
-		})
-		require.ErrorContains(t, m.Validate(), "external:ext-1")
-
-		m.Add(ConnectivityExpectation{
-			Pair: EndpointPair{Source: a, Destination: ext2}, Verdict: VerdictAllow,
-		})
-		require.NoError(t, m.Validate())
-
-		// ...but only for that source.
-		m.Add(ConnectivityExpectation{
-			Pair: EndpointPair{Source: b, Destination: ext}, Verdict: VerdictUnknown, Detail: "unsupported",
-		})
-		require.ErrorContains(t, m.Validate(), "server-2(vpc-2/default) → external:ext-1")
-
-		// A DNAT-only Allow grants no egress, and an Allow scoped to one
-		// proto/port isn't seen by the untargeted curl probe. Neither settles
-		// the Unknown, or Validate would wave through an entry the curl phase
-		// goes on to assert as denied.
-		m.Add(ConnectivityExpectation{
-			Pair: EndpointPair{Source: b, Destination: ext2}, Verdict: VerdictAllow,
-			NAT: &TranslatedAddress{DestinationIP: netip.MustParseAddr("10.0.2.1"), DestinationPort: 8080},
-		})
-		m.Add(ConnectivityExpectation{
-			Pair: EndpointPair{Source: b, Destination: ext2}, Verdict: VerdictAllow,
-			ProtoPort: ProtoPort{Protocol: "tcp", Port: 8080},
-		})
-		require.ErrorContains(t, m.Validate(), "server-2(vpc-2/default) → external:ext-1")
-
-		// An unscoped, non-DNAT Allow does.
-		m.Add(ConnectivityExpectation{
-			Pair: EndpointPair{Source: b, Destination: ext2}, Verdict: VerdictAllow,
-		})
-		require.NoError(t, m.Validate())
-	})
-}
-
 func TestReplaceServerEndpoints_PreservesHostBGP(t *testing.T) {
 	m := NewConnectivityMatrix()
 	ep := &Endpoint{Server: &ServerEndpoint{
@@ -326,4 +205,28 @@ func TestReplaceServerEndpoints_PreservesHostBGP(t *testing.T) {
 
 	require.Same(t, ep, m.AllEndpoints[0])
 	require.True(t, ep.Server.HostBGP, "HostBGP should be copied across on in-place update")
+}
+
+func TestESLAGL3VNIOnly(t *testing.T) {
+	att := func(eslag, l3vni bool) serverAttachment {
+		return serverAttachment{vpcName: "vpc-1", subnetName: "default", eslag: eslag, l3vni: l3vni}
+	}
+
+	for _, tc := range []struct {
+		name string
+		atts []serverAttachment
+		want bool
+	}{
+		{name: "no attachments", atts: nil, want: false},
+		{name: "eslag l3vni", atts: []serverAttachment{att(true, true)}, want: true},
+		{name: "eslag l2vni", atts: []serverAttachment{att(true, false)}, want: false},
+		{name: "unbundled l3vni", atts: []serverAttachment{att(false, true)}, want: false},
+		{name: "unbundled l2vni", atts: []serverAttachment{att(false, false)}, want: false},
+		{name: "all eslag l3vni", atts: []serverAttachment{att(true, true), att(true, true)}, want: true},
+		{name: "mixed", atts: []serverAttachment{att(true, true), att(false, true)}, want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, eslagL3VNIOnly(tc.atts))
+		})
+	}
 }

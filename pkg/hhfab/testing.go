@@ -2250,14 +2250,33 @@ func (ce *CurlError) Error() string {
 		ce.Source, ce.Msg, ce.Expected, whySuffix(ce.Why))
 }
 
+// expectationWhy renders the because-clause of a probe error. ReachabilityReason
+// only ever names the peering that would allow a pair, so a deny has to be
+// phrased against it: either something on that peering withholds the pair
+// (Detail, e.g. an ACL), or no peering covers the pair at all.
 func expectationWhy(r Reachability) string {
+	via := string(r.Reason)
+	if r.Reason != "" && r.Peering != "" {
+		via = fmt.Sprintf("%s %q", r.Reason, r.Peering)
+	}
+
+	if r.Reachable {
+		if via == "" {
+			return "no reason recorded"
+		}
+
+		return via
+	}
+
 	switch {
-	case r.Reason != "" && r.Peering != "":
-		return fmt.Sprintf("%s %q", r.Reason, r.Peering)
-	case r.Reason != "":
-		return string(r.Reason)
+	case r.Detail != "" && via != "":
+		return fmt.Sprintf("%s on %s", r.Detail, via)
+	case r.Detail != "":
+		return r.Detail
+	case via != "":
+		return via + " does not allow it"
 	default:
-		return "no reason recorded"
+		return "no peering allows it"
 	}
 }
 
@@ -2678,6 +2697,7 @@ type Reachability struct {
 	Reachable bool
 	Reason    ReachabilityReason
 	Peering   string
+	Detail    string
 }
 
 type ReachabilityReason string
@@ -3405,9 +3425,9 @@ func parseNCReturnCode(stdout string) (int, bool) {
 // expected. It runs `nc -zw2 <ip> <port>` on the source: a completed handshake
 // means the path is open (allow), a refused/timed-out connect (nc exit 1) means
 // it is blocked (deny).
-func checkTCPPort(ctx context.Context, sem *semaphore.Weighted, from string, fromSSH *sshutil.Config, toIP netip.Addr, port uint16, expected bool) *IperfError {
+func checkTCPPort(ctx context.Context, sem *semaphore.Weighted, from string, fromSSH *sshutil.Config, toIP netip.Addr, port uint16, expected Reachability) *IperfError {
 	target := fmt.Sprintf("%s:%d", toIP.String(), port)
-	ie := &IperfError{Source: from, Destination: target}
+	ie := &IperfError{Source: from, Destination: target, Why: expectationWhy(expected)}
 
 	if sem != nil {
 		if err := sem.Acquire(ctx, 1); err != nil {
@@ -3452,14 +3472,14 @@ func checkTCPPort(ctx context.Context, sem *semaphore.Weighted, from string, fro
 		return ie
 	}
 
-	slog.Debug("TCP port probe result", "from", from, "to", target, "expected", expected, "ok", connectOk, "rc", rc, "stderr", stderr)
+	slog.Debug("TCP port probe result", "from", from, "to", target, "expected", expected.Reachable, "ok", connectOk, "rc", rc, "stderr", stderr)
 
-	if expected && !connectOk {
+	if expected.Reachable && !connectOk {
 		ie.ClientMsg = "should be reachable but TCP connect was refused/timed out"
 
 		return ie
 	}
-	if !expected && connectOk {
+	if !expected.Reachable && connectOk {
 		ie.ClientMsg = "should not be reachable but TCP connect succeeded"
 
 		return ie
@@ -3477,12 +3497,52 @@ const (
 	udpAllowLossThreshold = 90.0
 )
 
+const (
+	// A denied path neither completes nor refuses the iperf3 -u control connect,
+	// so iperf3 blocks in it until something bounds it. Deny probes get the short
+	// budget: on a path that is in fact open the handshake completes in
+	// milliseconds. Allow probes get a longer one so a momentarily slow but
+	// working path is not called down.
+	udpProbeDenyConnect  = 5 * time.Second
+	udpProbeAllowConnect = 15 * time.Second
+	// Backstop slack around the transfer itself, for iperf3 startup and teardown.
+	udpProbeInnerSlack = 10 * time.Second
+	// Room for the SSH round trip once the backstop has fired: without it, output
+	// from a probe that did its job is cut off and read as no result at all.
+	udpProbeSSHHeadroom = 30 * time.Second
+	udpProbeAttempts    = 2
+)
+
+// udpProbeTiming holds the nested deadlines of one UDP probe: iperf3's own
+// control-connect budget, the `timeout` backstop around it, and the SSH
+// deadline around that.
+type udpProbeTiming struct {
+	connect time.Duration
+	inner   time.Duration
+	outer   time.Duration
+}
+
+func udpProbeTimingFor(secs int, expectReachable bool) udpProbeTiming {
+	connect := udpProbeDenyConnect
+	if expectReachable {
+		connect = udpProbeAllowConnect
+	}
+	inner := connect + time.Duration(secs)*time.Second + udpProbeInnerSlack
+
+	return udpProbeTiming{connect: connect, inner: inner, outer: inner + udpProbeSSHHeadroom}
+}
+
+func udpProbeCmd(toIP netip.Addr, port uint16, secs int, timing udpProbeTiming) string {
+	return fmt.Sprintf("sudo docker exec iperf3 timeout -k 5 %d iperf3 -u -J --connect-timeout %d -c %s -p %d -t %d -b 10M -l 1000",
+		int(timing.inner.Seconds()), timing.connect.Milliseconds(), toIP.String(), port, secs)
+}
+
 // NOTE: iperf3 -u first opens a TCP control channel on the target port, so this
 // cannot distinguish "TCP denied + UDP allowed" on the same port (the control
 // channel would be blocked). Callers must avoid that combination.
-func checkUDPPort(ctx context.Context, opts TestConnectivityOpts, sem *semaphore.Weighted, from string, fromSSH *sshutil.Config, toIP netip.Addr, port uint16, expected bool) *IperfError {
+func checkUDPPort(ctx context.Context, opts TestConnectivityOpts, sem *semaphore.Weighted, from string, fromSSH *sshutil.Config, toIP netip.Addr, port uint16, expected Reachability) *IperfError {
 	target := fmt.Sprintf("%s:%d", toIP.String(), port)
-	ie := &IperfError{Source: from, Destination: target}
+	ie := &IperfError{Source: from, Destination: target, Why: expectationWhy(expected)}
 
 	if sem != nil {
 		if err := sem.Acquire(ctx, 1); err != nil {
@@ -3497,15 +3557,41 @@ func checkUDPPort(ctx context.Context, opts TestConnectivityOpts, sem *semaphore
 	if secs <= 0 {
 		secs = 3
 	}
-	ctx, cancel := context.WithTimeout(ctx, time.Duration(secs+30)*time.Second)
-	defer cancel()
+	timing := udpProbeTimingFor(secs, expected.Reachable)
+	cmd := udpProbeCmd(toIP, port, secs, timing)
 
-	cmd := fmt.Sprintf("sudo docker exec iperf3 timeout %d iperf3 -u -J -c %s -p %d -t %d -b 10M -l 1000", secs+25, toIP.String(), port, secs)
-	stdout, stderr, err := retrySSHCmd(ctx, fromSSH, cmd, from)
-	report, parseErr := parseIPerf3Report([]byte(stdout))
+	var (
+		report  *iperf3Report
+		stderr  string
+		err     error
+		failMsg string
+	)
+	// No report is no verdict, so retry once: the usual cause is a stall on the
+	// SSH/docker path rather than anything about the path under test.
+	for attempt := range udpProbeAttempts {
+		if attempt > 0 {
+			if ctx.Err() != nil {
+				break
+			}
+			slog.Debug("Retrying UDP port probe", "from", from, "to", target, "reason", failMsg)
+		}
 
-	if parseErr != nil {
-		ie.ClientMsg = fmt.Sprintf("iperf3 UDP probe produced no parseable report (cmd err: %v, stderr: %q): %s", err, strings.TrimSpace(stderr), parseErr)
+		probeCtx, cancel := context.WithTimeout(ctx, timing.outer)
+		var stdout string
+		stdout, stderr, err = retrySSHCmd(probeCtx, fromSSH, cmd, from)
+		cancel()
+
+		var parseErr error
+		report, parseErr = parseIPerf3Report([]byte(stdout))
+		if parseErr == nil {
+			break
+		}
+		report = nil
+		failMsg = fmt.Sprintf("iperf3 UDP probe produced no parseable report (cmd err: %v, stderr: %q): %s", err, strings.TrimSpace(stderr), parseErr)
+	}
+
+	if report == nil {
+		ie.ClientMsg = failMsg
 
 		return ie
 	}
@@ -3517,11 +3603,11 @@ func checkUDPPort(ctx context.Context, opts TestConnectivityOpts, sem *semaphore
 	delivered := reportErr == "" && packets > 0 && lostPercent < udpAllowLossThreshold
 	blocked := reportErr != "" || packets == 0 || lostPercent >= udpDenyLossThreshold
 
-	slog.Debug("UDP port probe result", "from", from, "to", target, "expected", expected,
+	slog.Debug("UDP port probe result", "from", from, "to", target, "expected", expected.Reachable,
 		"delivered", delivered, "blocked", blocked, "packets", packets, "lost", lost, "lostPercent", lostPercent,
 		"err", err, "reportErr", reportErr, "stderr", stderr)
 
-	if expected {
+	if expected.Reachable {
 		if !delivered {
 			if reportErr != "" {
 				ie.ClientMsg = fmt.Sprintf("should be reachable but UDP probe reported error: %s", reportErr)
@@ -3535,9 +3621,16 @@ func checkUDPPort(ctx context.Context, opts TestConnectivityOpts, sem *semaphore
 		return nil
 	}
 
-	// expected == deny.
+	// expected == deny. Loss between the two thresholds is neither delivered nor
+	// blocked, so don't claim delivery on what may just be a lossy path.
 	if !blocked {
-		ie.ClientMsg = fmt.Sprintf("should not be reachable but UDP datagrams delivered (packets %d, loss %.1f%%)", packets, lostPercent)
+		if delivered {
+			ie.ClientMsg = fmt.Sprintf("should not be reachable but UDP datagrams were delivered (packets %d, loss %.1f%% < %.0f%%)",
+				packets, lostPercent, udpAllowLossThreshold)
+		} else {
+			ie.ClientMsg = fmt.Sprintf("should not be reachable but UDP traffic was not blocked; inconclusive: loss %.1f%% is between the %.0f%%/%.0f%% delivered/blocked thresholds (packets %d)",
+				lostPercent, udpAllowLossThreshold, udpDenyLossThreshold, packets)
+		}
 
 		return ie
 	}

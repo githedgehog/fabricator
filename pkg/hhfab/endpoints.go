@@ -91,7 +91,22 @@ type serverAttachment struct {
 	subnetName string
 	subnetCIDR netip.Prefix
 	hostBGP    bool
+	eslag      bool
+	l3vni      bool
 	attachName string // for diagnostics
+}
+
+// eslagL3VNIOnly reports whether every one of the server's attachments is an
+// ESLAG connection into a non-L2VNI VPC. Those servers never run hhnet, so
+// discovering no addresses on them is expected rather than a failure.
+func eslagL3VNIOnly(atts []serverAttachment) bool {
+	if len(atts) == 0 {
+		return false
+	}
+
+	return !slices.ContainsFunc(atts, func(a serverAttachment) bool {
+		return !a.eslag || !a.l3vni
+	})
 }
 
 // CollectServerEndpoints observes the live cluster and produces one
@@ -183,6 +198,8 @@ func CollectServerEndpoints(ctx context.Context, kube kclient.Client, ssh SSHRes
 			subnetName: subnetName,
 			subnetCIDR: cidr,
 			hostBGP:    subnet.HostBGP,
+			eslag:      conn.Spec.ESLAG != nil,
+			l3vni:      vpc.Spec.Mode != vpcapi.VPCModeL2VNI,
 			attachName: attach.Name,
 		})
 	}
@@ -230,7 +247,7 @@ func CollectServerEndpoints(ctx context.Context, kube kclient.Client, ssh SSHRes
 	for _, p := range probed {
 		atts := serverAttachments[p.serverName]
 		used := make([]bool, len(atts))
-		if len(p.ips) == 0 {
+		if len(p.ips) == 0 && eslagL3VNIOnly(atts) {
 			// Expected for ESLAG servers in L3VNI mode, which never run hhnet; not recorded as a drop
 			slog.Warn("Server has no configured IPs, skipping endpoints", "server", p.serverName, "attachments", len(atts))
 

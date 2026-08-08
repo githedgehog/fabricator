@@ -7,9 +7,11 @@ import (
 	"net/netip"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.githedgehog.com/fabric/api/meta"
+	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 )
 
 func TestVLANsFrom(t *testing.T) {
@@ -375,6 +377,137 @@ rtt min/avg/max/mdev = 0.611/0.912/1.308/0.251 ms
 	}
 }
 
+func TestGetServerHostBGPCmd(t *testing.T) {
+	unbundled := func(port string) *wiringapi.Connection {
+		return &wiringapi.Connection{Spec: wiringapi.ConnectionSpec{
+			Unbundled: &wiringapi.ConnUnbundled{
+				Link: wiringapi.ServerToSwitchLink{Server: wiringapi.BasePortName{Port: port}},
+			},
+		}}
+	}
+	bundled := func(ports ...string) *wiringapi.Connection {
+		links := []wiringapi.ServerToSwitchLink{}
+		for _, port := range ports {
+			links = append(links, wiringapi.ServerToSwitchLink{Server: wiringapi.BasePortName{Port: port}})
+		}
+
+		return &wiringapi.Connection{Spec: wiringapi.ConnectionSpec{Bundled: &wiringapi.ConnBundled{Links: links}}}
+	}
+
+	for _, test := range []struct {
+		name     string
+		params   []HostBGPParams
+		expected string
+		wantErr  bool
+	}{
+		{name: "no params", wantErr: true},
+		{
+			name: "single vpc single connection",
+			params: []HostBGPParams{{
+				VPCLabel:    "vpc-01",
+				Connections: []*wiringapi.Connection{unbundled("server-01/enp2s1")},
+				VLAN:        1001,
+				Subnet:      netip.MustParsePrefix("10.0.1.0/24"),
+			}},
+			expected: "vpc-01:v=1001:i=enp2s1:a=10.0.1.0/32",
+		},
+		{
+			name: "server offset walks the subnet",
+			params: []HostBGPParams{{
+				VPCLabel:     "vpc-01",
+				Connections:  []*wiringapi.Connection{bundled("server-01/enp2s1", "server-01/enp2s2")},
+				VLAN:         1001,
+				Subnet:       netip.MustParsePrefix("10.0.1.0/24"),
+				ServerOffset: 3,
+			}},
+			expected: "vpc-01:v=1001:i=enp2s1:i=enp2s2:a=10.0.1.3/32",
+		},
+		{
+			name: "two vpcs are space separated",
+			params: []HostBGPParams{
+				{
+					VPCLabel:    "vpc-01",
+					Connections: []*wiringapi.Connection{unbundled("server-01/enp2s1")},
+					VLAN:        1001,
+					Subnet:      netip.MustParsePrefix("10.0.1.0/24"),
+				},
+				{
+					VPCLabel:     "vpc-02",
+					Connections:  []*wiringapi.Connection{unbundled("server-01/enp2s2"), unbundled("server-01/enp2s3")},
+					VLAN:         1002,
+					Subnet:       netip.MustParsePrefix("10.0.2.0/24"),
+					ServerOffset: 1,
+				},
+			},
+			expected: "vpc-01:v=1001:i=enp2s1:a=10.0.1.0/32 vpc-02:v=1002:i=enp2s2:i=enp2s3:a=10.0.2.1/32",
+		},
+		{
+			name:    "no connections",
+			params:  []HostBGPParams{{VPCLabel: "vpc-01", VLAN: 1001, Subnet: netip.MustParsePrefix("10.0.1.0/24")}},
+			wantErr: true,
+		},
+		{
+			name:    "nil connection",
+			params:  []HostBGPParams{{VPCLabel: "vpc-01", Connections: []*wiringapi.Connection{nil}, VLAN: 1001}},
+			wantErr: true,
+		},
+		{
+			name: "unsupported connection type",
+			params: []HostBGPParams{{
+				VPCLabel:    "vpc-01",
+				Connections: []*wiringapi.Connection{{Spec: wiringapi.ConnectionSpec{}}},
+				VLAN:        1001,
+			}},
+			wantErr: true,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cmd, err := getServerHostBGPCmd(test.params)
+			if test.wantErr {
+				require.Error(t, err)
+
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, test.expected, cmd)
+		})
+	}
+}
+
+func TestUDPProbeCmd(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		secs      int
+		reachable bool
+		expected  string
+	}{
+		{
+			name:     "deny probe bounds the control connect",
+			secs:     3,
+			expected: "sudo docker exec iperf3 timeout -k 5 18 iperf3 -u -J --connect-timeout 5000 -c 10.0.1.2 -p 5201 -t 3 -b 10M -l 1000",
+		},
+		{
+			name:      "allow probe gets the longer connect budget",
+			secs:      3,
+			reachable: true,
+			expected:  "sudo docker exec iperf3 timeout -k 5 28 iperf3 -u -J --connect-timeout 15000 -c 10.0.1.2 -p 5201 -t 3 -b 10M -l 1000",
+		},
+		{
+			name:     "extended run stretches the backstop",
+			secs:     10,
+			expected: "sudo docker exec iperf3 timeout -k 5 25 iperf3 -u -J --connect-timeout 5000 -c 10.0.1.2 -p 5201 -t 10 -b 10M -l 1000",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			timing := udpProbeTimingFor(test.secs, test.reachable)
+			require.Equal(t, test.expected, udpProbeCmd(netip.MustParseAddr("10.0.1.2"), 5201, test.secs, timing))
+			// The SSH deadline must outlive the backstop, or a probe that ran to
+			// completion is reported as having produced no result.
+			require.Greater(t, timing.outer, timing.inner+20*time.Second)
+		})
+	}
+}
+
 func mapSlice[IN, OUT any](f func(IN) OUT, in []IN) []OUT {
 	out := make([]OUT, len(in))
 	for i, v := range in {
@@ -386,4 +519,52 @@ func mapSlice[IN, OUT any](f func(IN) OUT, in []IN) []OUT {
 
 func prefixToString(prefix netip.Prefix) string {
 	return prefix.String()
+}
+
+func TestExpectationWhy(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		r        Reachability
+		expected string
+	}{
+		{
+			name:     "allow names the peering that grants it",
+			r:        Reachability{Reachable: true, Reason: ReachabilityReasonGatewayPeering, Peering: "vpc-01--vpc-02"},
+			expected: `gateway-peering "vpc-01--vpc-02"`,
+		},
+		{
+			name:     "allow with no peering falls back to the reason alone",
+			r:        Reachability{Reachable: true, Reason: ReachabilityReasonIntraVPC},
+			expected: "intra-vpc",
+		},
+		{
+			name:     "an ACL deny reads as withholding a peered pair",
+			r:        Reachability{Reason: ReachabilityReasonGatewayPeering, Peering: "vpc-01--vpc-02", Detail: "ACL"},
+			expected: `ACL on gateway-peering "vpc-01--vpc-02"`,
+		},
+		{
+			name:     "a deny on a peered pair with no detail still reads as a deny",
+			r:        Reachability{Reason: ReachabilityReasonGatewayPeering, Peering: "vpc-01--vpc-02"},
+			expected: `gateway-peering "vpc-01--vpc-02" does not allow it`,
+		},
+		{
+			name:     "a deny with only a detail reports it",
+			r:        Reachability{Detail: "gw peering with non-empty expose 'As'"},
+			expected: "gw peering with non-empty expose 'As'",
+		},
+		{
+			name:     "a pair no peering covers says so",
+			r:        Reachability{},
+			expected: "no peering allows it",
+		},
+		{
+			name:     "an allow with nothing recorded admits it",
+			r:        Reachability{Reachable: true},
+			expected: "no reason recorded",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, test.expected, expectationWhy(test.r))
+		})
+	}
 }
