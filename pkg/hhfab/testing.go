@@ -1930,7 +1930,7 @@ func populateConnectivityMatrix(ctx context.Context, kube kclient.Reader, m *Con
 				if r.Reachable {
 					m.Add(ConnectivityExpectation{
 						Pair:    EndpointPair{Source: src, Destination: dst},
-						Verdict: VerdictAllow,
+						Verdict: endpointVerdict(r, src, dst),
 						Reason:  r.Reason,
 						Peering: r.Peering,
 					})
@@ -1954,7 +1954,7 @@ func populateConnectivityMatrix(ctx context.Context, kube kclient.Reader, m *Con
 					if r.Reachable {
 						m.Add(ConnectivityExpectation{
 							Pair:    EndpointPair{Source: src, Destination: dst},
-							Verdict: VerdictAllow,
+							Verdict: endpointVerdict(r, src, dst),
 							Reason:  r.Reason,
 							Peering: r.Peering,
 						})
@@ -1967,6 +1967,26 @@ func populateConnectivityMatrix(ctx context.Context, kube kclient.Reader, m *Con
 	}
 
 	return nil
+}
+
+// endpointVerdict turns a reachable subnet-level verdict into the verdict for one
+// endpoint pair, denying it when a gateway peering `Not` excludes either address.
+// Only server endpoints are matched: a `Not` on an external's expose would have to
+// be intersected with the External prefixes, which the matrix does not model.
+func endpointVerdict(r Reachability, src, dst *Endpoint) ConnectivityVerdict {
+	var srcAddr, dstAddr netip.Addr
+	if src.Server != nil {
+		srcAddr = src.Server.IP
+	}
+	if dst.Server != nil {
+		dstAddr = dst.Server.IP
+	}
+
+	if r.Excludes(srcAddr, dstAddr) {
+		return VerdictDeny
+	}
+
+	return VerdictAllow
 }
 
 func DoSetupPeerings(ctx context.Context, kube client.Client, vpcPeerings map[string]*vpcapi.VPCPeeringSpec,
@@ -2556,6 +2576,14 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 						return
 					}
 
+					ipAR, ok := ips.Load(serverA)
+					if !ok {
+						errChan <- fmt.Errorf("missing IP for %q", serverA)
+
+						return
+					}
+					ipA := ipAR.(netip.Addr)
+
 					ipBR, ok := ips.Load(serverB)
 					if !ok {
 						errChan <- fmt.Errorf("missing IP for %q", serverB)
@@ -2563,6 +2591,8 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 						return
 					}
 					ipB := ipBR.(netip.Addr)
+
+					expectedReachable = applyExclusions(expectedReachable, ipA, ipB)
 
 					clientAR, ok := sshs.Load(serverA)
 					if !ok {
@@ -2580,7 +2610,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 
 							return
 						}
-						if revReachable.Reachable {
+						if applyExclusions(revReachable, ipB, ipA).Reachable {
 							bidir = true
 						}
 					}
@@ -2613,6 +2643,16 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 
 						return ce
 					}
+
+					ipAR, ok := ips.Load(serverA)
+					if !ok {
+						ce.Msg = fmt.Sprintf("missing IP for %q", serverA)
+
+						return ce
+					}
+					// The external side has no single address to match, so only the
+					// source's own exclusions can be evaluated here.
+					expectedReachable = applyExclusions(expectedReachable, ipAR.(netip.Addr), netip.Addr{})
 
 					logArgs := []any{
 						"from", serverA,
@@ -2678,6 +2718,46 @@ type Reachability struct {
 	Reachable bool
 	Reason    ReachabilityReason
 	Peering   string
+	// SourceExclusions and DestExclusions hold the ranges a gateway peering
+	// subtracts from the source's and the destination's own expose via `Not`.
+	// The verdict above is subnet-level and cannot express an exclusion that
+	// narrows an exposed range down to individual addresses, so callers that
+	// know the endpoint addresses narrow it down themselves with Excludes.
+	SourceExclusions []netip.Prefix
+	DestExclusions   []netip.Prefix
+}
+
+// Excludes reports whether a gateway peering `Not` takes this pair of addresses
+// out of an otherwise reachable peering. Both directions are affected: the
+// gateway drops traffic addressed to an excluded host, and an excluded host's
+// own traffic has no return path across the peering.
+func (r Reachability) Excludes(sourceAddr, destAddr netip.Addr) bool {
+	return addrInPrefixes(sourceAddr, r.SourceExclusions) || addrInPrefixes(destAddr, r.DestExclusions)
+}
+
+// applyExclusions drops the reachable verdict when a gateway peering `Not`
+// excludes the pair of addresses actually under test.
+func applyExclusions(r Reachability, sourceAddr, destAddr netip.Addr) Reachability {
+	if r.Reachable && r.Excludes(sourceAddr, destAddr) {
+		r.Reachable = false
+	}
+
+	return r
+}
+
+func addrInPrefixes(addr netip.Addr, prefixes []netip.Prefix) bool {
+	if !addr.IsValid() {
+		return false
+	}
+
+	addr = addr.Unmap()
+	for _, prefix := range prefixes {
+		if prefix.Contains(addr) {
+			return true
+		}
+	}
+
+	return false
 }
 
 type ReachabilityReason string
@@ -2931,21 +3011,23 @@ func IsSubnetReachableWithGatewayPeering(ctx context.Context, kube kclient.Reade
 			continue
 		}
 
-		vpc1Found, err := isVPCSubnetPresentInPeering(vpc1Peering, vpc1, vpc1Name, vpc1Subnet)
+		vpc1Found, vpc1Excluded, err := isVPCSubnetPresentInPeering(vpc1Peering, vpc1, vpc1Name, vpc1Subnet)
 		if err != nil {
 			return Reachability{}, fmt.Errorf("checking if VPC %s subnet %s is present in peering %s: %w", vpc1Name, vpc1Subnet, peering.Name, err)
 		}
 
-		vpc2Found, err := isVPCSubnetPresentInPeering(vpc2Peering, vpc2, vpc2Name, vpc2Subnet)
+		vpc2Found, vpc2Excluded, err := isVPCSubnetPresentInPeering(vpc2Peering, vpc2, vpc2Name, vpc2Subnet)
 		if err != nil {
 			return Reachability{}, fmt.Errorf("checking if VPC %s subnet %s is present in peering %s: %w", vpc2Name, vpc2Subnet, peering.Name, err)
 		}
 
 		if vpc1Found && vpc2Found {
 			return Reachability{
-				Reachable: true,
-				Reason:    ReachabilityReasonGatewayPeering,
-				Peering:   peering.Name,
+				Reachable:        true,
+				Reason:           ReachabilityReasonGatewayPeering,
+				Peering:          peering.Name,
+				SourceExclusions: vpc1Excluded,
+				DestExclusions:   vpc2Excluded,
 			}, nil
 		}
 	}
@@ -2953,41 +3035,65 @@ func IsSubnetReachableWithGatewayPeering(ctx context.Context, kube kclient.Reade
 	return Reachability{}, nil
 }
 
-func isVPCSubnetPresentInPeering(peering *gwapi.PeeringEntry, vpc gwapi.VPCInfo, vpcName string, vpcSubnet string) (bool, error) {
+// isVPCSubnetPresentInPeering reports whether the peering exposes the given VPC
+// subnet, along with the ranges the matching expose subtracts from it via `Not`.
+// Per the gateway API each expose.IPs entry sets exactly one of cidr/not/vpcSubnet,
+// so a `Not` is a standalone exclusion listed alongside the includes rather than an
+// attribute of one, and every entry of the expose is scanned before answering so
+// that the verdict does not depend on their order. A `Not` narrows an exposed range
+// down to individual addresses, which this subnet-level answer cannot express, so it
+// is returned for the caller to apply to the endpoint addresses it knows.
+func isVPCSubnetPresentInPeering(peering *gwapi.PeeringEntry, vpc gwapi.VPCInfo, vpcName string, vpcSubnet string) (bool, []netip.Prefix, error) {
 	for _, expose := range peering.Expose {
 		if expose.DefaultDestination {
-			return true, nil
+			return true, nil, nil
 		}
 
 		if len(expose.As) > 0 {
-			return false, fmt.Errorf("%w: gw peering with non-empty expose 'As' %s", reachCheckUnsupported, expose.As)
+			return false, nil, fmt.Errorf("%w: gw peering with non-empty expose 'As' %v", reachCheckUnsupported, expose.As)
 		}
+
+		found := false
+		var excluded []netip.Prefix
 
 		for _, exposeEntry := range expose.IPs {
 			// TODO make some helper in the gateway project
 			exposeSubnetName := ""
-			if exposeEntry.VPCSubnet != "" {
-				if _, ok := vpc.Spec.Subnets[exposeEntry.VPCSubnet]; ok {
-					exposeSubnetName = exposeEntry.VPCSubnet
-				} else {
-					return false, fmt.Errorf("subnet %s not found in VPC %s", exposeEntry.VPCSubnet, vpcName)
+			switch {
+			case exposeEntry.VPCSubnet != "":
+				if _, ok := vpc.Spec.Subnets[exposeEntry.VPCSubnet]; !ok {
+					return false, nil, fmt.Errorf("subnet %s not found in VPC %s", exposeEntry.VPCSubnet, vpcName)
 				}
-			} else if exposeEntry.CIDR != "" {
+				exposeSubnetName = exposeEntry.VPCSubnet
+			case exposeEntry.CIDR != "":
 				for subnetName, subnet := range vpc.Spec.Subnets {
 					if subnet.CIDR == exposeEntry.CIDR {
 						exposeSubnetName = subnetName
 					}
 				}
-			} else {
-				return false, fmt.Errorf("%w: gw peering with non-empty expose 'not' %s in IPs", reachCheckUnsupported, exposeEntry.Not)
+			case exposeEntry.Not != "":
+				prefix, err := netip.ParsePrefix(exposeEntry.Not)
+				if err != nil {
+					return false, nil, fmt.Errorf("parsing expose not %q of VPC %s: %w", exposeEntry.Not, vpcName, err)
+				}
+				excluded = append(excluded, prefix)
+
+				continue
+			default:
+				return false, nil, fmt.Errorf("gw peering expose entry of VPC %s sets none of cidr, not, vpcSubnet", vpcName) //nolint:goerr113
 			}
 
 			if exposeSubnetName == vpcSubnet {
-				return true, nil
+				found = true
 			}
 		}
+
+		if found {
+			return true, excluded, nil
+		}
 	}
-	return false, nil
+
+	return false, nil, nil
 }
 
 func retrySSHCmd(ctx context.Context, ssh *sshutil.Config, cmd string, target string) (string, string, error) {
