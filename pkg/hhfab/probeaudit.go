@@ -111,13 +111,16 @@ type ProbeRecord struct {
 	Why string
 }
 
+// protoICMP is the ProtoPort.Protocol value the ping probe answers for.
+const protoICMP = "icmp"
+
 // The target constructors are the join between a probe execution and a matrix
 // claim, so both sides must build them the same way. Each kind gets its own
 // Protocol tag: the tag is what keeps an iperf3 throughput run against the
 // persistent 5201 daemon from colliding with a tcp/5201 proto-port probe.
 
 func pingProbeTarget(from string, toIP netip.Addr) ProbeTarget {
-	return ProbeTarget{From: from, To: toIP.String(), Protocol: "icmp"}
+	return ProbeTarget{From: from, To: toIP.String(), Protocol: protoICMP}
 }
 
 func iperfProbeTarget(from, to string) ProbeTarget {
@@ -326,7 +329,7 @@ func matrixClaimTargets(owner matrixPhase, e ConnectivityExpectation, src, dst *
 	case matrixPhasePortForward:
 		return []ProbeTarget{portProbeTarget(from, e.NAT.DestinationIP, "tcp", e.NAT.DestinationPort)}
 	case matrixPhaseProtoPort:
-		if e.ProtoPort.Protocol == "icmp" {
+		if e.ProtoPort.Protocol == protoICMP {
 			return []ProbeTarget{pingProbeTarget(from, matrixTargetIP(e, dst))}
 		}
 
