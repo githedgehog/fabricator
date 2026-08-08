@@ -1,5 +1,20 @@
 name: Custom VLAB
-run-name: "${{ inputs.hybrid && 'h' || 'v' }}-${{ inputs.upgradefrom }}${{ inputs.upgradefrom && '-' || '' }}${{ inputs.mesh && 'mesh-' || '' }}${{ inputs.gateway && 'gw-' || '' }}${{ inputs.buildmode }}-${{ inputs.vpcmode }}${{ inputs.releasetest && '-rt' || '' }}${{ inputs.releasetest_regex != '' && 'r' || '' }}"
+run-name: >-
+  ${{ inputs.hybrid && 'h' || 'v' }}-${{
+    inputs.upgradefrom && format('{0}-', inputs.upgradefrom) || ''
+  }}${{
+    inputs.mesh && 'mesh-' || ''
+  }}${{
+    inputs.gateway && 'gw-' || ''
+  }}${{
+    inputs.buildmode
+  }}-${{
+    inputs.vpcmode
+  }}${{
+    inputs.releasetest && '-rt' || ''
+  }}${{
+    inputs.releasetest_regex != '' && 'r' || ''
+  }}
 
 on:
   workflow_dispatch:
@@ -68,7 +83,22 @@ permissions:
 
 jobs:
   vlab:
-    name: "${{ inputs.hybrid && 'h' || 'v' }}-${{ inputs.upgradefrom && 'up' || '' }}${{ inputs.upgradefrom }}${{ inputs.upgradefrom && '-' || '' }}${{ inputs.mesh && 'mesh-' || '' }}${{ inputs.gateway && 'gw-' || '' }}${{ inputs.buildmode }}-${{ inputs.vpcmode }}${{ inputs.releasetest && '-rt' || '' }}${{ inputs.releasetest_regex != '' && 'r' || '' }}"
+    name: >-
+      ${{ inputs.hybrid && 'h' || 'v' }}-${{
+        inputs.upgradefrom && format('up{0}-', inputs.upgradefrom) || ''
+      }}${{
+        inputs.mesh && 'mesh-' || ''
+      }}${{
+        inputs.gateway && 'gw-' || ''
+      }}${{
+        inputs.buildmode
+      }}-${{
+        inputs.vpcmode
+      }}${{
+        inputs.releasetest && '-rt' || ''
+      }}${{
+        inputs.releasetest_regex != '' && 'r' || ''
+      }}
     uses: ./.github/workflows/run-vlab.yaml
     with:
       fabricatorref: ${{ github.ref }}
