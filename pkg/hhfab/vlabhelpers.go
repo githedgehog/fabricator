@@ -58,6 +58,7 @@ var SSHQuietFlags = []string{
 	"-o", "UserKnownHostsFile=/dev/null",
 	"-o", "StrictHostKeyChecking=no",
 	"-o", "LogLevel=ERROR",
+	"-o", "IdentitiesOnly=yes",
 }
 
 func (c *Config) VLABAccess(ctx context.Context, vlab *VLAB, t VLABAccessType, name, username string, inArgs []string) error {
