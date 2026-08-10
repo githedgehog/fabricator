@@ -115,7 +115,6 @@ func Install(control fabapi.ControlNode) comp.KubeInstall {
 		dhcpValues, err := tmplutil.FromTemplate("dhcp-values", dhcpValuesTmpl, map[string]any{
 			"Repo":            dhcpRef,
 			"Tag":             string(cfg.Status.Versions.Fabric.DHCPD),
-			"ListenInterface": control.Spec.Management.Interface,
 			"AnyDeviceOnMgmt": cfg.Spec.Config.Control.ManagementSubnetAnyDevice,
 		})
 		if err != nil {

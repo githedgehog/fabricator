@@ -175,8 +175,13 @@ func (n *FabNode) Validate(ctx context.Context, fabCfg *FabConfig, allowNotHydra
 		}
 	}
 
-	if n.Spec.Management.Interface == "" {
-		return fmt.Errorf("management interface must be set") //nolint:goerr113
+	if n.Spec.Management.Interface == "" && n.Spec.Management.MACAddr == "" {
+		return fmt.Errorf("management interface or mac must be set") //nolint:goerr113
+	}
+	if n.Spec.Management.MACAddr != "" {
+		if !macRE.MatchString(n.Spec.Management.MACAddr) {
+			return fmt.Errorf("invalid external mac address: %q", n.Spec.Management.MACAddr) //nolint:goerr113
+		}
 	}
 
 	if n.Spec.Bootstrap.Disk == "" {

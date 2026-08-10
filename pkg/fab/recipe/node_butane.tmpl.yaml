@@ -88,8 +88,10 @@ storage:
         inline: |
           [Match]
           Driver=e1000
+          OriginalName=enp2s0
 
           [Link]
+          Name=mgmt
           TCPSegmentationOffload=false
           TCP6SegmentationOffload=false
           GenericSegmentationOffload=false
@@ -115,12 +117,26 @@ storage:
           Destination=0.0.0.0/0
           Metric=42000
 
+    - path: /etc/systemd/network/10-mgmt.link
+      mode: 0644
+      contents:
+        inline: |
+          [Match]
+          {{- if .MgmtMAC }}
+          MACAddress={{ .MgmtMAC }}
+          {{- else}}
+          OriginalName={{ .MgmtInterface }}
+          {{- end}}
+          [Link]
+          Name=mgmt
+          Description=Communicate with Fabric switches
+
     - path: /etc/systemd/network/20-mgmt.network
       mode: 0644
       contents:
         inline: |
           [Match]
-          Name={{ .MgmtInterface }}
+          Name=mgmt
           Type=ether
 
           [Network]

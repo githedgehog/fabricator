@@ -92,7 +92,7 @@ func AgentConfig(_ fabapi.Fabricator, node fabapi.FabNode) (string, error) {
 	cfg, err := tmplutil.FromTemplate("k3s-agent-config", k3sAgentConfigTmpl, map[string]any{
 		"Name":         node.Name,
 		"NodeIP":       nodeIP.Addr(),
-		"FlannelIface": node.Spec.Management.Interface,
+		"FlannelIface": "mgmt",
 	})
 	if err != nil {
 		return "", fmt.Errorf("k3s config: %w", err)

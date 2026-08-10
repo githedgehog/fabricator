@@ -134,6 +134,10 @@ func (b *NodeInstallBuilder) buildIgnition() ([]byte, error) {
 	if dummyIP.Bits() != 31 {
 		return nil, fmt.Errorf("dummy IP must be a /31") //nolint:goerr113
 	}
+	mgmtMacVal := ""
+	if b.Node.Spec.Management.MACAddr != "" {
+		mgmtMacVal = b.Node.Spec.Management.MACAddr
+	}
 
 	but, err := tmplutil.FromTemplate("node-butane", nodeButaneTmpl, map[string]any{
 		"Hostname":       b.Node.Name,
@@ -141,6 +145,7 @@ func (b *NodeInstallBuilder) buildIgnition() ([]byte, error) {
 		"AuthorizedKeys": b.Fab.Spec.Config.Control.DefaultUser.AuthorizedKeys,
 		"MgmtInterface":  b.Node.Spec.Management.Interface,
 		"MgmtAddress":    b.Node.Spec.Management.IP,
+		"MgmtMAC":        mgmtMacVal,
 		"DummyAddress":   dummyIP.Masked().String(),
 		"DummyGateway":   dummyIP.Masked().Addr().Next().String(),
 		"AutoInstall":    autoInstallPath,
