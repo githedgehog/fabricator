@@ -17,6 +17,7 @@ import (
 
 	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
 	fmeta "go.githedgehog.com/fabric/api/meta"
+	"go.githedgehog.com/fabric/api/valid"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/api/meta"
@@ -65,7 +66,9 @@ func (c *Config) loadHydrateValidate(ctx context.Context, mode HydrateMode) erro
 	if err != nil {
 		return fmt.Errorf("getting fabric config: %w", err)
 	}
-	if fabricCfg, err = fabricCfg.Init(); err != nil {
+	if fabricCfg, err = fabricCfg.Init(fmeta.ExtraValidators{
+		Peering: valid.Peering,
+	}); err != nil {
 		return fmt.Errorf("initializing fabric config: %w", err)
 	}
 

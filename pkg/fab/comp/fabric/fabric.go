@@ -12,6 +12,7 @@ import (
 
 	dhcpapi "go.githedgehog.com/fabric/api/dhcp/v1beta1"
 	fmeta "go.githedgehog.com/fabric/api/meta"
+	"go.githedgehog.com/fabric/api/valid"
 	"go.githedgehog.com/fabric/pkg/boot"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
@@ -313,6 +314,10 @@ func GetFabricConfig(f fabapi.Fabricator) (*fmeta.FabricConfig, error) {
 		ToolboxRef:            toolboxRepo + ":" + string(flatcar.ToolboxVersion(f)),
 		DataplaneMetricsPort:  gateway.DataplaneMetricsPort,
 		FRRMetricsPort:        gateway.FRRMetricsPort,
+
+		ExtraValidators: fmeta.ExtraValidators{
+			Peering: valid.Peering,
+		},
 	}, nil
 }
 
