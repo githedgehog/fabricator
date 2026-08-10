@@ -23,10 +23,10 @@ const (
 	FabricVersion = meta.Version("v0.129.2")
 
 	// Gateway Dataplane version (including WASM validator)
-	DataplaneVersion = meta.Version("v0.24.0")
+	DataplaneVersion = meta.Version("v0.25.0")
 
 	// Gateway FRR version
-	FRRVersion = meta.Version("v0.24.0")
+	FRRVersion = meta.Version("v0.25.0")
 
 	// Broadcom Enterprise SONiC version (including all flavors)
 	BCMSONiCVersion = meta.Version("v4.5.2")
