@@ -3089,6 +3089,19 @@ func retrySSHCmd(ctx context.Context, ssh *sshutil.Config, cmd string, target st
 const (
 	// pingProbeInterval is the -i pacing of the measured ping.
 	pingProbeInterval = 500 * time.Millisecond
+	// pingWarmupAttempts bounds the warm-up retry on a pair that is expected to
+	// answer.
+	pingWarmupAttempts = 3
+	// pingWarmupBudget caps the whole warm-up sequence. retrySSHCmd retries three
+	// times on its own with a 1-5s sleep between, so an unbounded warm-up on a
+	// struggling pair could spend the measured probe's entire deadline before it
+	// ever runs. The measured probe is what decides the verdict, so the warm-up
+	// gives way to it.
+	pingWarmupBudget = 12 * time.Second
+	// pingProbeTimeLayout stamps the probe window in the same UTC shape the job
+	// log uses, so a failure line can be lined up against switch and gateway
+	// journals without converting anything.
+	pingProbeTimeLayout = "2006-01-02T15:04:05.000Z"
 	// pingReprobeAttempts is how many diagnostic re-probes follow a failed
 	// expected-reachable ping.
 	pingReprobeAttempts = 3
@@ -3097,6 +3110,97 @@ const (
 	// 1-5s twice per attempt; the sequence deadline is what bounds that.
 	pingReprobeSlack = 5 * time.Second
 )
+
+// collapsePressure folds a multi-line /proc pressure file into one log value.
+func collapsePressure(b []byte) string {
+	fields := []string{}
+	for l := range strings.SplitSeq(string(b), "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			fields = append(fields, l)
+		}
+	}
+
+	return strings.Join(fields, "; ")
+}
+
+// runnerPressure reads the load average and CPU pressure of the host the suite
+// itself runs on. That host also runs every VM under test, so contention on it
+// shows up as latency and loss inside the fabric; a show-tech snapshot taken
+// after the run reports the load at collection time, not at the moment a packet
+// went missing. Both files are local to this process, so sampling them costs no
+// SSH round trip. An unreadable file yields an empty value rather than an error,
+// since this is diagnostic and must never affect a verdict.
+func runnerPressure() (string, string) {
+	loadavg := ""
+	if b, err := os.ReadFile("/proc/loadavg"); err == nil {
+		loadavg = strings.TrimSpace(string(b))
+	}
+
+	cpu := ""
+	if b, err := os.ReadFile("/proc/pressure/cpu"); err == nil {
+		cpu = collapsePressure(b)
+	}
+
+	return loadavg, cpu
+}
+
+// warmUpPing primes a pair before the measured probe and says what that took.
+// Endpoint neighbor entries age out between tests, so a matrix run routinely
+// starts while the leaf is still re-learning the neighbor and the gateway is
+// still installing the host route for it. A single warm-up packet sets that
+// rebuild going without waiting for it, and its result was previously dropped
+// unless it errored, which left the cold start to be inferred from switch logs
+// afterwards. Retrying until the first reply and naming the attempt count makes
+// it visible in the job log instead.
+//
+// Only pairs that are expected to answer are retried: an unreachable pair never
+// replies, and the matrix is mostly negative probes.
+//
+// Diagnostic and best-effort. The verdict comes from the measured probe alone,
+// so this reports nothing back to the caller.
+func warmUpPing(ctx context.Context, from, to string, fromSSH *sshutil.Config, toIP netip.Addr, sourceIP *netip.Addr, expected Reachability) {
+	cmd := "ping -c 1 -W 1"
+	if sourceIP != nil {
+		cmd += " -I " + sourceIP.String()
+	}
+	cmd += " " + toIP.String()
+
+	attempts := 1
+	if expected.Reachable {
+		attempts = pingWarmupAttempts
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, pingWarmupBudget)
+	defer cancel()
+
+	start := time.Now()
+	for attempt := 1; attempt <= attempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			slog.Warn("Warm-up ping budget spent", "from", from, "to", to,
+				"attempt", attempt, "attempts", attempts, "elapsed", time.Since(start), "err", err)
+
+			return
+		}
+
+		stdout, stderr, err := retrySSHCmd(ctx, fromSSH, cmd, from)
+		if err == nil {
+			if attempt > 1 {
+				slog.Warn("Warm-up ping needed retries", "from", from, "to", to,
+					"attempt", attempt, "attempts", attempts, "elapsed", time.Since(start))
+			} else {
+				slog.Debug("Warm-up ping answered", "from", from, "to", to, "elapsed", time.Since(start))
+			}
+
+			return
+		}
+
+		if attempt == attempts && expected.Reachable {
+			slog.Warn("Warm-up ping never answered", "from", from, "to", to,
+				"attempts", attempts, "elapsed", time.Since(start),
+				"err", err, "stdout", stdout, "stderr", stderr)
+		}
+	}
+}
 
 // reprobeOutcome names what a re-probe attempt observed, so the log line reads
 // as its own result rather than as the failure that triggered it. ping exits
@@ -3184,18 +3288,18 @@ func checkPing(ctx context.Context, pingCount int, semaphore *semaphore.Weighted
 	defer cancel()
 
 	slog.Debug("Running ping", "from", from, "to", toIP.String(), "sourceIP", sourceIP, "expected", expected.Reachable)
-	cmd := "ping -c 1 -W 1"
-	if sourceIP != nil {
-		cmd += " -I " + sourceIP.String()
-	}
-	cmd += " " + toIP.String()
 
-	if stdout, stderr, err := retrySSHCmd(ctx, fromSSH, cmd, from); err != nil && expected.Reachable {
-		slog.Warn("Warm-up ping failed, continuing anyway", "err", err, "stdout", stdout, "stderr", stderr)
-	}
+	warmUpPing(ctx, from, to, fromSSH, toIP, sourceIP, expected)
 
-	cmd = pingProbeCmd(pingCount, toIP, sourceIP)
+	// Bound the measured probe on the runner clock. The -D stamps in stdout come
+	// from the source server's clock and only mark replies that arrived, so they
+	// cannot place a lost packet; these two mark the window to search in switch
+	// and gateway journals. They bracket the SSH round trip as well as the ping,
+	// so they are an outer bound, not the ping's own start and end.
+	cmd := pingProbeCmd(pingCount, toIP, sourceIP)
+	probeStart := time.Now()
 	stdout, stderr, err := retrySSHCmd(ctx, fromSSH, cmd, from)
+	probeEnd := time.Now()
 	pe.CmdOutput = stdout
 
 	pe.Sent, pe.Received = parsePingCounts(stdout)
@@ -3237,8 +3341,13 @@ func checkPing(ctx context.Context, pingCount int, semaphore *semaphore.Weighted
 	// neither the logging nor the re-probe may touch either.
 	onExpectedFailure := func() {
 		if expected.Reachable {
+			loadavg, cpuPressure := runnerPressure()
 			slog.Warn("Ping failed (expected reachable)", "from", from, "to", to,
-				"sent", pe.Sent, "rcvd", pe.Received, "lost", pe.Lost, "stdout", stdout, "stderr", stderr)
+				"sent", pe.Sent, "rcvd", pe.Received, "lost", pe.Lost,
+				"probeStart", probeStart.UTC().Format(pingProbeTimeLayout),
+				"probeEnd", probeEnd.UTC().Format(pingProbeTimeLayout),
+				"loadavg", loadavg, "cpuPressure", cpuPressure,
+				"stdout", stdout, "stderr", stderr)
 			reprobeAfterFailure(parentCtx, pingCount, from, to, fromSSH, cmd)
 		}
 	}

@@ -594,6 +594,44 @@ func TestPingProbeCmd(t *testing.T) {
 	require.Equal(t, "ping -i 0.5 -c 3 -W 1 -D -I 10.20.1.5 10.20.4.2", pingProbeCmd(3, toIP, &sourceIP))
 }
 
+func TestCollapsePressure(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		in       string
+		expected string
+	}{
+		{
+			name: "both lines",
+			in: `some avg10=0.06 avg60=13.83 avg300=25.65 total=162667239576
+full avg10=0.00 avg60=0.00 avg300=0.00 total=0
+`,
+			expected: "some avg10=0.06 avg60=13.83 avg300=25.65 total=162667239576; full avg10=0.00 avg60=0.00 avg300=0.00 total=0",
+		},
+		{
+			name:     "single line without trailing newline",
+			in:       "some avg10=0.00 avg60=0.01 avg300=0.00 total=28517747892",
+			expected: "some avg10=0.00 avg60=0.01 avg300=0.00 total=28517747892",
+		},
+		{
+			name:     "empty",
+			in:       "",
+			expected: "",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, test.expected, collapsePressure([]byte(test.in)))
+		})
+	}
+}
+
+func TestRunnerPressure(t *testing.T) {
+	// Both sources are optional by design, so this only pins that reading them
+	// never panics and never returns a value spanning several log lines.
+	loadavg, cpuPressure := runnerPressure()
+	require.NotContains(t, loadavg, "\n")
+	require.NotContains(t, cpuPressure, "\n")
+}
+
 func mapSlice[IN, OUT any](f func(IN) OUT, in []IN) []OUT {
 	out := make([]OUT, len(in))
 	for i, v := range in {
