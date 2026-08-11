@@ -208,9 +208,15 @@ OUTPUT_FILE="/tmp/show-tech.log"
   echo -e "\n=== Memory (/proc/meminfo) ==="
   cat /proc/meminfo
 
-  echo -e "\n=== OOM Events (dmesg) ==="
-  sudo dmesg -T 2>/dev/null | grep -iE "oom|out of memory|killed process" | tail -20 || \
-      echo "No OOM events detected (or dmesg not accessible)"
+  # A refused allocation says "not enough memory for the allocation" and never
+  # mentions OOM, so matching only OOM-killer wording hides it.
+  echo -e "\n=== OOM and Allocation Failure Events (dmesg) ==="
+  mem_events=$(sudo dmesg -T 2>/dev/null | grep -iE "oom|out of memory|killed process|__vm_enough_memory|not enough memory|page allocation failure|allocation failed" | tail -20)
+  if [ -n "$mem_events" ]; then
+      echo "$mem_events"
+  else
+      echo "No OOM or allocation failure events detected (or dmesg not accessible)"
+  fi
 
 } >> "$OUTPUT_FILE" 2>&1
 

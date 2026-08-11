@@ -49,9 +49,13 @@ set +e
     echo -e "\n=== Detailed Memory Info ==="
     cat /proc/meminfo
 
-    echo -e "\n=== Recent OOM Events ==="
-    dmesg -T 2>/dev/null | grep -i "oom\|out of memory\|killed process" | tail -50 || \
-        echo "No OOM events detected (or dmesg not accessible)"
+    echo -e "\n=== Recent OOM and Allocation Failure Events ==="
+    mem_events=$(dmesg -T 2>/dev/null | grep -iE "oom|out of memory|killed process|__vm_enough_memory|not enough memory|page allocation failure|allocation failed" | tail -50)
+    if [ -n "$mem_events" ]; then
+        echo "$mem_events"
+    else
+        echo "No OOM or allocation failure events detected (or dmesg not accessible)"
+    fi
 
     echo -e "\n=== Top Memory Consumers ==="
     ps aux --sort=-%mem | head -30
