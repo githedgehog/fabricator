@@ -304,7 +304,8 @@ jobs:
             VLAB_ORPHAN_LEAVES=3
           fi
           bin/hhfab vlab gen -v --mesh-links-count=$VLAB_MESH_LINKS \
-            --eslag-leaf-groups=$VLAB_ESLAG_GROUPS --orphan-leafs-count=$VLAB_ORPHAN_LEAVES --unbundled-servers=$VLAB_UNBUNDLED_SERVERS \
+            --eslag-leaf-groups=$VLAB_ESLAG_GROUPS --orphan-leafs-count=$VLAB_ORPHAN_LEAVES \
+            --unbundled-servers=$VLAB_UNBUNDLED_SERVERS --multihomed-servers=1 \
             --externals-bgp=1 --externals-static=1 --external-orphan-connections=1 \
             ${{ inputs.custom_gen_args }}
 
