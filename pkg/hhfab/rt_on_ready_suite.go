@@ -40,13 +40,17 @@ func makeOnReadyTestSuite() *JUnitTestSuite {
 	return suite
 }
 
-// ortServerInfo holds information about a server and its connection for the on-ready test.
+// ortServerInfo holds information about a server and its connections for the on-ready test.
 type ortServerInfo struct {
-	name        string
-	conn        wiringapi.Connection
-	switches    []string
-	isUnbundled bool
-	isMclag     bool
+	name string
+	// conn is the connection used when the server is attached over a single link
+	conn wiringapi.Connection
+	// conns holds every connection of the server, more than one only for multihomed ones
+	conns        []wiringapi.Connection
+	switches     []string
+	isUnbundled  bool
+	isMclag      bool
+	isMultihomed bool
 }
 
 // Test to get as much coverage as possible for Fabric while being short and compact
@@ -117,8 +121,16 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connecti
 		if err := kube.List(ctx, conns, wiringapi.MatchingLabelsForListLabelServer(server.Name)); err != nil {
 			return false, nil, fmt.Errorf("listing connections for server %q: %w", server.Name, err)
 		}
-		if len(conns.Items) != 1 {
-			slog.Debug("Skipping server with unexpected connection count", "server", server.Name, "conns", len(conns.Items))
+		if len(conns.Items) == 0 {
+			slog.Debug("Skipping server without connections", "server", server.Name)
+
+			continue
+		}
+		// A multihomed server has several unbundled connections to different switches,
+		// all of them sharing a single hostBGP subnet
+		multihomed := len(conns.Items) > 1
+		if multihomed && slices.ContainsFunc(conns.Items, func(c wiringapi.Connection) bool { return c.Spec.Unbundled == nil }) {
+			slog.Debug("Skipping multi-connection server with non-unbundled connections", "server", server.Name, "conns", len(conns.Items))
 
 			continue
 		}
@@ -137,6 +149,10 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connecti
 
 			continue
 		}
+		// The remaining connections of a multihomed server are all unbundled
+		for _, c := range conns.Items[1:] {
+			switches = append(switches, c.Spec.Unbundled.Link.Switch.DeviceName())
+		}
 		isMclag := false
 		for _, sw := range switches {
 			if mclagSwitches[sw] {
@@ -146,11 +162,13 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connecti
 			}
 		}
 		available = append(available, ortServerInfo{
-			name:        server.Name,
-			conn:        conn,
-			switches:    switches,
-			isUnbundled: conn.Spec.Unbundled != nil,
-			isMclag:     isMclag,
+			name:         server.Name,
+			conn:         conn,
+			conns:        conns.Items,
+			switches:     switches,
+			isUnbundled:  conn.Spec.Unbundled != nil,
+			isMclag:      isMclag,
+			isMultihomed: multihomed,
 		})
 	}
 	slog.Info("Discovered available servers", "count", len(available))
@@ -226,10 +244,17 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connecti
 		return ortServerInfo{}, false
 	}
 
-	// VPC B: 1 hostBGP subnet – needs unbundled, non-MCLAG
+	// VPC B: 1 hostBGP subnet – needs unbundled, non-MCLAG. Prefer a multihomed server,
+	// so that all of its links get attached to the shared hostBGP subnet; any other
+	// multihomed server left for a regular VPC is attached over its first link only.
 	hostBGPServer, ok := take(func(s ortServerInfo) bool {
-		return s.isUnbundled && !s.isMclag
+		return s.isMultihomed && !s.isMclag
 	})
+	if !ok {
+		hostBGPServer, ok = take(func(s ortServerInfo) bool {
+			return s.isUnbundled && !s.isMclag
+		})
+	}
 	if !ok {
 		return false, nil, fmt.Errorf("no unbundled non-MCLAG server available for hostBGP VPC") //nolint:goerr113
 	}
@@ -391,11 +416,17 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connecti
 				},
 			},
 		}
-		att := makeVPCAttachment(hostBGPServer.conn.Name, vpcBName, "subnet-01")
+		// One attachment per link: a multihomed server shares this subnet across all of them
+		attaches := make([]*vpcapi.VPCAttachment, 0, len(hostBGPServer.conns))
+		hostBGPConns := make([]*wiringapi.Connection, 0, len(hostBGPServer.conns))
+		for i := range hostBGPServer.conns {
+			attaches = append(attaches, makeVPCAttachment(hostBGPServer.conns[i].Name, vpcBName, "subnet-01"))
+			hostBGPConns = append(hostBGPConns, &hostBGPServer.conns[i])
+		}
 		hostBGPParams := []HostBGPParams{
 			{
 				VPCLabel:     vpcBName,
-				Connections:  []*wiringapi.Connection{&hostBGPServer.conn},
+				Connections:  hostBGPConns,
 				VLAN:         vlan,
 				Subnet:       subCIDR,
 				ServerOffset: 1,
@@ -407,7 +438,7 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connecti
 		}
 		plans = append(plans, vpcPlan{
 			vpc:      vpc,
-			attaches: []*vpcapi.VPCAttachment{att},
+			attaches: attaches,
 			netconfs: map[string]string{hostBGPServer.name: hostBGPCmd},
 			hostBGP:  map[string]bool{hostBGPServer.name: true},
 		})
