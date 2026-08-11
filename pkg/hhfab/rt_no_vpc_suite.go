@@ -1425,10 +1425,15 @@ func hostBGPTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connectivit
 	// the generated oracle keys reachability on server name, so it cannot tell the
 	// multihomed server's two hostBGP endpoints apart
 	matrix := NewConnectivityMatrix()
-	matrix.AllEndpoints = []*Endpoint{
+	// once the last link to the multihomed server is down the peerings are still
+	// in place, but nothing can reach it anymore
+	isolatedMatrix := NewConnectivityMatrix()
+	endpoints := []*Endpoint{
 		hostBGP.A.Endpoint, hostBGP.B.Endpoint,
 		regularVPCA.Endpoint, regularVPCB.Endpoint,
 	}
+	matrix.AllEndpoints = endpoints
+	isolatedMatrix.AllEndpoints = endpoints
 	for _, exp := range []struct {
 		src, dst *Endpoint
 		peering  string // empty means isolated
@@ -1452,6 +1457,11 @@ func hostBGPTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connectivit
 				Reason:  reason,
 				Peering: exp.peering,
 			})
+			isolatedMatrix.Add(ConnectivityExpectation{
+				Pair:    pair,
+				Verdict: VerdictDeny,
+				Detail:  "every link to the multihomed server is down",
+			})
 		}
 	}
 
@@ -1459,54 +1469,63 @@ func hostBGPTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connectivit
 		return false, reverts, fmt.Errorf("connectivity check failed: %w", err)
 	}
 
-	// Link failover: bring down all connections to one of the switches
-	failoverSwitchName := slices.Min(slices.Collect(maps.Keys(mhServer.SwitchConns)))
-	failoverSw := &wiringapi.Switch{}
-	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: failoverSwitchName}, failoverSw); err != nil {
-		return false, reverts, fmt.Errorf("getting switch %s: %w", failoverSwitchName, err)
-	}
-	failoverProfile := &wiringapi.SwitchProfile{}
-	if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: failoverSw.Spec.Profile}, failoverProfile); err != nil {
-		return false, reverts, fmt.Errorf("getting switch profile %s: %w", failoverSw.Spec.Profile, err)
-	}
-	failoverPortMap, err := failoverProfile.Spec.GetAPI2NOSPortsFor(&failoverSw.Spec)
-	if err != nil {
-		return false, reverts, fmt.Errorf("getting API2NOS ports for %s: %w", failoverSwitchName, err)
-	}
-
-	failoverSwSSH, err := testCtx.getSSH(ctx, failoverSwitchName)
-	if err != nil {
-		return false, reverts, fmt.Errorf("getting SSH for switch %s: %w", failoverSwitchName, err)
-	}
-
-	slog.Debug("Disabling HH agent for link failover test", "switch", failoverSwitchName)
-	if err := changeAgentStatus(ctx, failoverSwSSH, failoverSwitchName, false); err != nil {
-		return false, reverts, fmt.Errorf("disabling agent on %s: %w", failoverSwitchName, err)
-	}
-	reverts = append(reverts, func(ctx context.Context) error {
-		return changeAgentStatus(ctx, failoverSwSSH, failoverSwitchName, true)
-	})
-
-	slog.Debug("Shutting down link(s) for failover test", "switch", failoverSwitchName)
-	for _, failoverConn := range mhServer.SwitchConns[failoverSwitchName] {
-		failoverLink := failoverConn.Spec.Unbundled.Link
-		failoverNOSPort, ok := failoverPortMap[failoverLink.Switch.LocalPortName()]
-		if !ok {
-			return false, reverts, fmt.Errorf("port %s not in profile %s for switch %s", failoverLink.Switch.LocalPortName(), failoverProfile.Name, failoverSwitchName) //nolint:goerr113
+	// Link failover: bring down all connections to one switch at a time. The
+	// multihomed server has to stay reachable until the last switch goes down,
+	// which is what tells us the earlier checks were not passing on their own.
+	failoverSwitches := slices.Sorted(maps.Keys(mhServer.SwitchConns))
+	for i, failoverSwitchName := range failoverSwitches {
+		failoverSw := &wiringapi.Switch{}
+		if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: failoverSwitchName}, failoverSw); err != nil {
+			return false, reverts, fmt.Errorf("getting switch %s: %w", failoverSwitchName, err)
 		}
-		if err := changeSwitchPortStatus(ctx, failoverSwSSH, failoverSwitchName, failoverNOSPort, false); err != nil {
-			return false, reverts, fmt.Errorf("shutting down port %s on %s: %w", failoverNOSPort, failoverSwitchName, err)
+		failoverProfile := &wiringapi.SwitchProfile{}
+		if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: failoverSw.Spec.Profile}, failoverProfile); err != nil {
+			return false, reverts, fmt.Errorf("getting switch profile %s: %w", failoverSw.Spec.Profile, err)
+		}
+		failoverPortMap, err := failoverProfile.Spec.GetAPI2NOSPortsFor(&failoverSw.Spec)
+		if err != nil {
+			return false, reverts, fmt.Errorf("getting API2NOS ports for %s: %w", failoverSwitchName, err)
+		}
+
+		failoverSwSSH, err := testCtx.getSSH(ctx, failoverSwitchName)
+		if err != nil {
+			return false, reverts, fmt.Errorf("getting SSH for switch %s: %w", failoverSwitchName, err)
+		}
+
+		slog.Debug("Disabling HH agent for link failover test", "switch", failoverSwitchName)
+		if err := changeAgentStatus(ctx, failoverSwSSH, failoverSwitchName, false); err != nil {
+			return false, reverts, fmt.Errorf("disabling agent on %s: %w", failoverSwitchName, err)
 		}
 		reverts = append(reverts, func(ctx context.Context) error {
-			return changeSwitchPortStatus(ctx, failoverSwSSH, failoverSwitchName, failoverNOSPort, true)
+			return changeAgentStatus(ctx, failoverSwSSH, failoverSwitchName, true)
 		})
-	}
 
-	slog.Debug("Waiting for BGP reconvergence after link failover...")
-	time.Sleep(30 * time.Second)
+		slog.Debug("Shutting down link(s) for failover test", "switch", failoverSwitchName)
+		for _, failoverConn := range mhServer.SwitchConns[failoverSwitchName] {
+			failoverLink := failoverConn.Spec.Unbundled.Link
+			failoverNOSPort, ok := failoverPortMap[failoverLink.Switch.LocalPortName()]
+			if !ok {
+				return false, reverts, fmt.Errorf("port %s not in profile %s for switch %s", failoverLink.Switch.LocalPortName(), failoverProfile.Name, failoverSwitchName) //nolint:goerr113
+			}
+			if err := changeSwitchPortStatus(ctx, failoverSwSSH, failoverSwitchName, failoverNOSPort, false); err != nil {
+				return false, reverts, fmt.Errorf("shutting down port %s on %s: %w", failoverNOSPort, failoverSwitchName, err)
+			}
+			reverts = append(reverts, func(ctx context.Context) error {
+				return changeSwitchPortStatus(ctx, failoverSwSSH, failoverSwitchName, failoverNOSPort, true)
+			})
+		}
 
-	if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts, matrix); err != nil {
-		return false, reverts, fmt.Errorf("connectivity check failed after link failover: %w", err)
+		expected, stage := matrix, "after link failover"
+		if i == len(failoverSwitches)-1 {
+			expected, stage = isolatedMatrix, "after isolating the multihomed server"
+		}
+
+		slog.Debug("Waiting for BGP reconvergence after link failover...", "switch", failoverSwitchName, "stage", stage)
+		time.Sleep(30 * time.Second)
+
+		if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts, expected); err != nil {
+			return false, reverts, fmt.Errorf("connectivity check failed %s (switch %s): %w", stage, failoverSwitchName, err)
+		}
 	}
 
 	return false, reverts, nil
