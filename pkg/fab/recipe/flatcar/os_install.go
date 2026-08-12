@@ -194,16 +194,13 @@ func (i *OSInstal) Run(ctx context.Context) error {
 		return fmt.Errorf("deleting partition 9 from existing block device: %w", err)
 	}
 
-	if err := i.execCmd(ctx, true, "partprobe", i.TargetDisk); err != nil {
-		return fmt.Errorf("partprobing: %w", err)
-	}
-
 	// The typecode listed here is a UUID that flatcar uses - https://github.com/flatcar/init/blob/flatcar-master/scripts/extend-filesystems#L15
 	// Called COREOS_RESIZE, expand to largest available size
 	if err := i.execCmd(ctx, true, "sgdisk", "--largest-new=9", "--typecode=9:3884dd41-8582-4404-b9a8-e9b84f2df50e", i.TargetDisk); err != nil {
 		return fmt.Errorf("creating partition 9 on existing block device: %w", err)
 	}
 
+	// Make the kernel aware of the new partition
 	if err := i.execCmd(ctx, true, "partprobe", i.TargetDisk); err != nil {
 		return fmt.Errorf("partprobing: %w", err)
 	}
@@ -226,9 +223,9 @@ func (i *OSInstal) Run(ctx context.Context) error {
 	if err := i.execCmd(ctx, true, "resize2fs", i.TargetDisk+partition); err != nil {
 		return fmt.Errorf("resizing filesystem on partition 9 on existing block device: %w", err)
 	}
-
-	if err := i.execCmd(ctx, true, "partprobe", i.TargetDisk); err != nil {
-		return fmt.Errorf("partprobing: %w", err)
+	// Make sure file system operations have settled on the disk before it is used
+	if err := i.execCmd(ctx, true, "udevadm", "wait", "--timeout=30", "--settle", i.TargetDisk+partition); err != nil {
+		return fmt.Errorf("udevadm wait timeout or other error after resize2fs: %w", err)
 	}
 
 	if err := os.MkdirAll(MountDir, 0o755); err != nil {
