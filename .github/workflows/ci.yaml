@@ -36,6 +36,11 @@ on:
         description: "Run hlab"
         required: false
         default: false
+      report_tag:
+        type: string
+        description: "Tag whose GitHub Release should receive the release-test evidence (leave empty when dispatching directly on a tag ref)"
+        required: false
+        default: ""
       debug_enabled:
         type: boolean
         description: "Run the build with tmate debugging enabled (https://github.com/marketplace/actions/debugging-with-tmate)"
@@ -476,6 +481,48 @@ jobs:
           files: "artifacts/**/release-test.xml"
           report_individual_runs: true
           check_name: "Release Tests"
+
+  release-evidence:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.releasetest == true && (startsWith(github.ref, 'refs/tags/') || inputs.report_tag != '') && !cancelled() }}
+    runs-on: lab
+    needs:
+      - vlabs
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Download Artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+
+      - name: Build release test report
+        run: |
+          go run ./hack/release-evidence.go \
+            -artifacts artifacts \
+            -tag "${{ inputs.report_tag != '' && inputs.report_tag || github.ref_name }}" \
+            -run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            -out release-test-report.md \
+            -evidence-dir evidence \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Attach evidence to GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ inputs.report_tag != '' && inputs.report_tag || github.ref_name }}
+          files: |
+            release-test-report.md
+            evidence/*--release-test.xml
 
   publish-release:
     runs-on: lab
