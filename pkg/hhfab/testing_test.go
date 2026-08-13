@@ -594,6 +594,90 @@ func TestPingProbeCmd(t *testing.T) {
 	require.Equal(t, "ping -i 0.5 -c 3 -W 1 -D -I 10.20.1.5 10.20.4.2", pingProbeCmd(3, toIP, &sourceIP))
 }
 
+func TestIperf3ProbeCmd(t *testing.T) {
+	toIP := netip.MustParseAddr("10.30.5.2")
+
+	for _, test := range []struct {
+		name     string
+		opts     TestConnectivityOpts
+		srcIP    netip.Addr
+		secs     int
+		bidir    bool
+		reverse  bool
+		expected string
+	}{
+		{
+			name: "measured probe, one direction",
+			secs: 10,
+			opts: TestConnectivityOpts{IPerfsSeconds: 10},
+			// The wrapper outlives the run, so a client that stalls gets SIGTERM.
+			expected: "sudo docker exec iperf3 timeout 35 iperf3 -P 4 -J -c 10.30.5.2 -t 10",
+		},
+		{
+			name: "measured probe, both directions in one session", secs: 10, bidir: true,
+			opts:     TestConnectivityOpts{IPerfsSeconds: 10},
+			expected: "sudo docker exec iperf3 timeout 35 iperf3 -P 4 -J -c 10.30.5.2 -t 10 --bidir",
+		},
+		{
+			name: "forward re-probe drops --bidir", secs: iperfReprobeSeconds,
+			expected: "sudo docker exec iperf3 timeout 30 iperf3 -P 4 -J -c 10.30.5.2 -t 5",
+		},
+		{
+			name: "reverse re-probe makes the server the sender", secs: iperfReprobeSeconds, reverse: true,
+			expected: "sudo docker exec iperf3 timeout 30 iperf3 -P 4 -J -c 10.30.5.2 -t 5 -R",
+		},
+		{
+			name: "marking flags survive", secs: 10, opts: TestConnectivityOpts{IPerfsSeconds: 10, IPerfsDSCP: 46, IPerfsTOS: 184},
+			expected: "sudo docker exec iperf3 timeout 35 iperf3 -P 4 -J -c 10.30.5.2 -t 10 --dscp 46 --tos 184",
+		},
+		{
+			// A re-probe has to leave from the same address as the session it follows,
+			// or a hostBGP pair is measured from a different source than the one that
+			// stalled.
+			name: "reverse re-probe keeps the source binding", secs: iperfReprobeSeconds, reverse: true,
+			srcIP:    netip.MustParseAddr("10.30.4.100"),
+			expected: "sudo docker exec iperf3 timeout 30 iperf3 -P 4 -J -c 10.30.5.2 -t 5 -B 10.30.4.100 -R",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, test.expected, iperf3ProbeCmd(test.opts, toIP, test.srcIP, test.secs, test.bidir, test.reverse))
+		})
+	}
+}
+
+func TestIperfReprobeOutcome(t *testing.T) {
+	// The stall this chases reaches us as a `timeout` SIGTERM, which iperf3 reports
+	// in its own JSON error field rather than as a shell failure. An ssh exit status
+	// cannot be built here (ssh.Waitmsg keeps it in unexported fields), so the
+	// branch that reads the status is covered by the did-not-run case.
+	for _, test := range []struct {
+		name     string
+		err      error
+		parseErr error
+		report   *iperf3Report
+		expected string
+	}{
+		{name: "report with no error", report: &iperf3Report{}, expected: "Diagnostic iperf re-probe completed"},
+		{
+			name:     "client killed by the timeout wrapper",
+			report:   &iperf3Report{Error: "interrupt - the client has terminated by signal Terminated(15)"},
+			expected: "Diagnostic iperf re-probe stalled",
+		},
+		{
+			name: "output is not a report", parseErr: errors.New("unmarshaling iperf3 report"),
+			expected: "Diagnostic iperf re-probe unreadable",
+		},
+		{
+			name: "ssh session never delivered the command", err: errors.New("session failed"),
+			expected: "Diagnostic iperf re-probe did not run",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, test.expected, iperfReprobeOutcome(test.err, test.parseErr, test.report))
+		})
+	}
+}
+
 func TestCollapsePressure(t *testing.T) {
 	for _, test := range []struct {
 		name     string

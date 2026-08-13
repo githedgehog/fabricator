@@ -3429,6 +3429,23 @@ const iperf3SpeedRetries = 2
 // iperf3RetryDelay is the delay between retry attempts to allow network conditions to stabilize.
 const iperf3RetryDelay = 2 * time.Second
 
+// iperf3WrapperSlack is how long the timeout wrapper outlives the iperf3 run it
+// bounds, covering connection setup for the parallel streams. Exceeding it is
+// what turns a stalled client into SIGTERM rather than a report.
+const iperf3WrapperSlack = 25
+
+const (
+	// iperfReprobeSeconds is how long each one-way diagnostic iperf3 probe runs.
+	// It answers which direction of a dead bidir session stalled, not how fast
+	// either direction is, so it is shorter than the measured probe and its
+	// speeds must never be read against the min-speed floor.
+	iperfReprobeSeconds = 5
+	// iperfReprobeSlack is the per-probe allowance for SSH setup on top of the
+	// iperf3 run and its own timeout wrapper. It is not sized to fit
+	// retrySSHCmd's backoff; the sequence deadline is what bounds that.
+	iperfReprobeSlack = 5 * time.Second
+)
+
 func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string, fromSSH *sshutil.Config, toIP, srcIP netip.Addr, reachability Reachability, bidir bool) []*IperfError {
 	if opts.IPerfsSeconds <= 0 || !reachability.Reachable {
 		return nil
@@ -3491,6 +3508,113 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string,
 	return lastErrors
 }
 
+// iperf3ProbeCmd builds the iperf3 client command. The measured probe and the
+// one-way diagnostic re-probes both go through it, so a re-probe differs from the
+// session it follows only in its duration and direction flags.
+//
+// The client runs inside the always-on iperf3 container instead of a per-test
+// toolbox container on the client VM. The fresh container plus the JSON result
+// buffer can push the 768 MB server VM into ENOMEM during result aggregation;
+// `docker exec` reuses the running container's namespaces and adds only the
+// iperf3 client process itself.
+func iperf3ProbeCmd(opts TestConnectivityOpts, toIP, srcIP netip.Addr, secs int, bidir, reverse bool) string {
+	cmd := fmt.Sprintf("sudo docker exec iperf3 timeout %d iperf3 -P 4 -J -c %s -t %d", secs+iperf3WrapperSlack, toIP.String(), secs)
+	if srcIP.IsValid() {
+		cmd += " -B " + srcIP.String()
+	}
+	if bidir {
+		cmd += " --bidir"
+	}
+	// -R makes the server the sender, so the reverse half is measured from the
+	// same client and needs no SSH config for the peer.
+	if reverse {
+		cmd += " -R"
+	}
+	if opts.IPerfsDSCP > 0 {
+		cmd += fmt.Sprintf(" --dscp %d", opts.IPerfsDSCP)
+	}
+	if opts.IPerfsTOS > 0 {
+		cmd += fmt.Sprintf(" --tos %d", opts.IPerfsTOS)
+	}
+
+	return cmd
+}
+
+// iperfReprobeOutcome names what a one-way re-probe observed, so the log line
+// reads as its own result rather than as the failure that triggered it. A client
+// that produced no report is the signal being chased, so it is named apart from a
+// shell that never reached iperf3 at all.
+func iperfReprobeOutcome(err, parseErr error, report *iperf3Report) string {
+	if err != nil {
+		if status, isExit := sshutil.ExitStatus(err); !isExit || status == 126 || status == 127 {
+			return "Diagnostic iperf re-probe did not run"
+		}
+
+		return "Diagnostic iperf re-probe stalled"
+	}
+	if parseErr != nil {
+		return "Diagnostic iperf re-probe unreadable"
+	}
+	if report.Error != "" {
+		return "Diagnostic iperf re-probe stalled"
+	}
+
+	return "Diagnostic iperf re-probe completed"
+}
+
+// reprobeIperfDirections re-runs a failed bidir pair as two one-way iperf3
+// sessions and logs how each direction fared. A bidir session carries both halves
+// over one TCP session, so when it dies before producing a report there is no
+// per-direction data to attribute the failure to and the error can only name the
+// forward direction, which may be the half that was working. Splitting the halves
+// right away, while the fabric is still in the state that stalled the session,
+// recovers that. Diagnostic only: it reports nothing back and must never
+// influence the caller's verdict.
+func reprobeIperfDirections(ctx context.Context, opts TestConnectivityOpts, from, to string, fromSSH *sshutil.Config, toIP, srcIP netip.Addr) {
+	// The pair still holds its slot in the iperf semaphore here, so this delays
+	// pairs queued behind it rather than adding concurrency. Bound the whole
+	// sequence and report what was skipped instead of running past the budget.
+	budget := 2 * (time.Duration(iperfReprobeSeconds+iperf3WrapperSlack)*time.Second + iperfReprobeSlack)
+	ctx, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
+
+	for _, probe := range []struct {
+		direction string
+		sender    string
+		receiver  string
+		reverse   bool
+	}{
+		{direction: "forward", sender: from, receiver: to, reverse: false},
+		{direction: "reverse", sender: to, receiver: from, reverse: true},
+	} {
+		logArgs := []any{"from", probe.sender, "to", probe.receiver, "direction", probe.direction, "seconds", iperfReprobeSeconds}
+
+		if err := ctx.Err(); err != nil {
+			slog.Warn("Diagnostic iperf re-probe skipped", append(logArgs, "err", err)...)
+
+			continue
+		}
+
+		// Always driven from the pair's original client, bound to the same source
+		// address, so only the direction differs from the session that failed; -R
+		// carries the reverse half.
+		cmd := iperf3ProbeCmd(opts, toIP, srcIP, iperfReprobeSeconds, false, probe.reverse)
+		stdout, stderr, err := retrySSHCmd(ctx, fromSSH, cmd, from)
+		report, parseErr := parseIPerf3Report([]byte(stdout))
+		if parseErr == nil {
+			// Throughput of the direction this probe drove. Far too short to read
+			// against the min-speed floor; it says the direction moved data.
+			logArgs = append(logArgs,
+				"sendSpeed", asMbps(report.End.SumSent.BitsPerSecond),
+				"receiveSpeed", asMbps(report.End.SumReceived.BitsPerSecond),
+				"reportErr", report.Error)
+		}
+
+		slog.Warn(iperfReprobeOutcome(err, parseErr, report),
+			append(logArgs, "err", err, "parseErr", parseErr, "stdout", stdout, "stderr", stderr)...)
+	}
+}
+
 func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to string, fromSSH *sshutil.Config, toIP, srcIP netip.Addr, iPerfsMinSpeed float64, bidir bool) []*IperfError {
 	minSpeedStr := asMbps(iPerfsMinSpeed * 1_000_000)
 	// Forward direction: client (`from`) sends to server (`to`).
@@ -3501,28 +3625,15 @@ func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to stri
 		rev = &IperfError{Source: to, Destination: from, MinSpeed: minSpeedStr}
 	}
 
+	// Keep the caller's deadline for the re-probe below: this probe's own deadline
+	// is spent by the time a stalled session gets here.
+	parentCtx := ctx
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(opts.IPerfsSeconds+30)*time.Second)
 	defer cancel()
 
 	slog.Debug("Running iperf3", "from", from, "to", to, "bidir", bidir)
 
-	// Run the iperf3 client inside the always-on iperf3 container instead of spawning a per-test
-	// toolbox container on the client VM. The fresh container plus the JSON result buffer can
-	// push the 768 MB server VM into ENOMEM during result aggregation. `docker exec` reuses the
-	// running container's namespaces and adds only the iperf3 client process itself.
-	cmd := fmt.Sprintf("sudo docker exec iperf3 timeout %d iperf3 -P 4 -J -c %s -t %d", opts.IPerfsSeconds+25, toIP.String(), opts.IPerfsSeconds)
-	if srcIP.IsValid() {
-		cmd += " -B " + srcIP.String()
-	}
-	if bidir {
-		cmd += " --bidir"
-	}
-	if opts.IPerfsDSCP > 0 {
-		cmd += fmt.Sprintf(" --dscp %d", opts.IPerfsDSCP)
-	}
-	if opts.IPerfsTOS > 0 {
-		cmd += fmt.Sprintf(" --tos %d", opts.IPerfsTOS)
-	}
+	cmd := iperf3ProbeCmd(opts, toIP, srcIP, opts.IPerfsSeconds, bidir, false)
 
 	stdout, stderr, err := retrySSHCmd(ctx, fromSSH, cmd, from)
 	report, parseErr := parseIPerf3Report([]byte(stdout))
@@ -3532,6 +3643,9 @@ func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to stri
 		} else {
 			fwd.ClientMsg = fmt.Sprintf("%s: %s", err, stderr)
 		}
+		if bidir {
+			reprobeIperfDirections(parentCtx, opts, from, to, fromSSH, toIP, srcIP)
+		}
 
 		return []*IperfError{fwd}
 	}
@@ -3539,6 +3653,9 @@ func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to stri
 		// Log the raw output to help diagnose what iperf3 returned instead of valid JSON
 		slog.Warn("iperf3 client report parse failed", "parseErr", parseErr, "stdout", stdout, "stderr", stderr)
 		fwd.ClientMsg = fmt.Sprintf("cannot parse iperf3 report: %s", parseErr)
+		if bidir {
+			reprobeIperfDirections(parentCtx, opts, from, to, fromSSH, toIP, srcIP)
+		}
 
 		return []*IperfError{fwd}
 	}
