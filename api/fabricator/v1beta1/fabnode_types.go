@@ -29,6 +29,8 @@ type FabNodeRole string
 
 const (
 	NodeRoleGateway FabNodeRole = "gateway"
+	MgmtNICName     string      = "mgmt"
+	ExtNICName      string      = "ext"
 )
 
 var NodeRoles = []FabNodeRole{
