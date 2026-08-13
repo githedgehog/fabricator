@@ -8,7 +8,9 @@ import (
 	"encoding/binary"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/netip"
+	"slices"
 	"sort"
 	"time"
 
@@ -80,11 +82,48 @@ func (testCtx *VPCPeeringTestCtx) runNATTest(ctx context.Context, matrix *Connec
 		}
 	}
 
-	if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts, matrix); err != nil {
+	tcOpts := testCtx.tcOpts
+	tcOpts.Sources = natTestProbeServers(matrix, vpc1.Name, vpc2.Name)
+	tcOpts.Destinations = tcOpts.Sources
+	slog.Debug("Probing the VPCs under test", "test", spec.Name, "servers", tcOpts.Sources)
+
+	if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, tcOpts, matrix); err != nil {
 		return false, nil, fmt.Errorf("%s: testing connectivity: %w", spec.Name, err)
 	}
 
 	return false, nil, nil
+}
+
+// natTestProbeServers lists the servers a VPC-to-VPC test should probe: those in
+// the two peered VPCs, plus one outside them as an isolation control. Probing
+// the rest of the matrix only restates that unpeered VPCs cannot talk, at the
+// cost of concurrent probes on the paths under test.
+func natTestProbeServers(matrix *ConnectivityMatrix, vpc1, vpc2 string) []string {
+	underTest := map[string]bool{}
+	var outside []string
+	for _, ep := range matrix.AllEndpoints {
+		if ep.Server == nil {
+			continue
+		}
+		if ep.Server.VPC == vpc1 || ep.Server.VPC == vpc2 {
+			underTest[ep.Server.Name] = true
+
+			continue
+		}
+		outside = append(outside, ep.Server.Name)
+	}
+
+	servers := slices.Sorted(maps.Keys(underTest))
+	slices.Sort(outside)
+	for _, name := range outside {
+		if !underTest[name] {
+			servers = append(servers, name)
+
+			break
+		}
+	}
+
+	return servers
 }
 
 // calculateStaticNATIP calculates the expected NAT IP for a source IP using the static NAT offset algorithm.

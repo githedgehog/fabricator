@@ -362,3 +362,46 @@ func TestValidate(t *testing.T) {
 		require.NoError(t, m.Validate())
 	})
 }
+
+func TestNATTestProbeServers(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		eps      []*Endpoint
+		expected []string
+	}{
+		{
+			name: "no VPC outside the tested pair leaves no control server",
+			eps: []*Endpoint{
+				serverEP("server-1", "vpc-1", "default", "10.0.1.1"),
+				serverEP("server-2", "vpc-2", "default", "10.0.2.2"),
+			},
+			expected: []string{"server-1", "server-2"},
+		},
+		{
+			name: "control server does not depend on endpoint order",
+			eps: []*Endpoint{
+				serverEP("server-4", "vpc-4", "default", "10.0.4.4"),
+				serverEP("server-2", "vpc-2", "default", "10.0.2.2"),
+				serverEP("server-3", "vpc-3", "default", "10.0.3.3"),
+				serverEP("server-1", "vpc-1", "default", "10.0.1.1"),
+			},
+			expected: []string{"server-1", "server-2", "server-3"},
+		},
+		{
+			name: "a server also attached outside the tested pair is not the control",
+			eps: []*Endpoint{
+				serverEP("server-1", "vpc-1", "default", "10.0.1.1"),
+				serverEP("server-2", "vpc-2", "default", "10.0.2.2"),
+				serverEP("server-2", "vpc-3", "default", "10.0.3.2"),
+				serverEP("server-3", "vpc-3", "default", "10.0.3.3"),
+			},
+			expected: []string{"server-1", "server-2", "server-3"},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			m := NewConnectivityMatrix()
+			m.AllEndpoints = test.eps
+			require.Equal(t, test.expected, natTestProbeServers(m, "vpc-1", "vpc-2"))
+		})
+	}
+}
