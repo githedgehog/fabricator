@@ -230,8 +230,11 @@ OUTPUT_FILE="/tmp/show-tech.log"
   echo -e "\n=== iperf3 Container Stats ==="
   docker stats iperf3 --no-stream 2>/dev/null || echo "iperf3 container not running or docker not available"
 
-  echo -e "\n=== iperf3 Container Logs (last 100) ==="
-  docker logs iperf3 --tail 100 2>&1 || echo "iperf3 container not running or docker not available"
+  # iperf3 prints no timestamps of its own, and the server container is shared
+  # by every pair in the run, so without --timestamps a captured line cannot be
+  # tied to the test that produced it. 100 lines covers roughly two tests.
+  echo -e "\n=== iperf3 Container Logs (last 2000, timestamped) ==="
+  docker logs iperf3 --timestamps --tail 2000 2>&1 || echo "iperf3 container not running or docker not available"
 
 } >> "$OUTPUT_FILE" 2>&1
 
