@@ -801,13 +801,14 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOp
 	noVpcSuite := makeNoVpcsSuite()
 	singleVpcSuite := makeSingleVPCSuite()
 	multiVPCMultiSubnetSuite := makeMultiVPCMultiSubnetSuite()
+	gwNATACLSuite := makeGatewayNATACLSuite()
 	multiVPCSingleSubnetSuite := makeMultiVPCSingleSubnetSuite()
 	ortSuite := makeOnReadyTestSuite()
 
 	if rtOpts.OnReadyTest {
 		suites = []*JUnitTestSuite{ortSuite}
 	} else {
-		suites = []*JUnitTestSuite{noVpcSuite, singleVpcSuite, multiVPCMultiSubnetSuite, multiVPCSingleSubnetSuite}
+		suites = []*JUnitTestSuite{noVpcSuite, singleVpcSuite, multiVPCMultiSubnetSuite, gwNATACLSuite, multiVPCSingleSubnetSuite}
 	}
 
 	if rtOpts.ListTests {
@@ -1059,6 +1060,12 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOp
 	results = append(results, *multiVpcResults)
 
 	testCtx.setupOpts.SubnetsPerVPC = 1
+	gwNATACLResults, err := selectAndRunSuite(ctx, testCtx, gwNATACLSuite, regexesCompiled, rtOpts.InvertRegex, skipFlags)
+	if err != nil && rtOpts.FailFast {
+		return fmt.Errorf("running gateway NAT and ACL suite: %w", err)
+	}
+	results = append(results, *gwNATACLResults)
+
 	testCtx.wipeBetweenTests = true
 	basicResults, err := selectAndRunSuite(ctx, testCtx, multiVPCSingleSubnetSuite, regexesCompiled, rtOpts.InvertRegex, skipFlags)
 	if err != nil && rtOpts.FailFast {
@@ -1071,8 +1078,8 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOp
 	}
 
 	slog.Info("All tests completed", "duration", time.Since(testStart).String())
-	if singleVpcResults.Failures > 0 || multiVpcResults.Failures > 0 || basicResults.Failures > 0 || noVpcResults.Failures > 0 {
-		return fmt.Errorf("some tests failed: singleVpc=%d, multiVpc=%d, basic=%d, noVpc=%d", singleVpcResults.Failures, multiVpcResults.Failures, basicResults.Failures, noVpcResults.Failures) //nolint:goerr113
+	if singleVpcResults.Failures > 0 || multiVpcResults.Failures > 0 || gwNATACLResults.Failures > 0 || basicResults.Failures > 0 || noVpcResults.Failures > 0 {
+		return fmt.Errorf("some tests failed: singleVpc=%d, multiVpc=%d, gwNATACL=%d, basic=%d, noVpc=%d", singleVpcResults.Failures, multiVpcResults.Failures, gwNATACLResults.Failures, basicResults.Failures, noVpcResults.Failures) //nolint:goerr113
 	}
 
 	return nil
