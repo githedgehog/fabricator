@@ -139,8 +139,10 @@ Collected via `sonic-cli` and direct `bcmcmd` (Broadcom SDK).
   from `dmesg` - kernel OOM kills plus refused allocations
   (`__vm_enough_memory`, page allocation failures), which is how an iperf3
   client reporting `Cannot allocate memory` is told apart from an OOM kill
-- **iperf3 container**: `docker ps -a`, `docker stats iperf3`, and the last
-  100 lines of `docker logs iperf3`
+- **iperf3 container**: `docker ps -a`, `docker stats iperf3`, and the last 2000
+  lines of `docker logs iperf3 --timestamps` - iperf3 emits no timestamps itself
+  and one server container is shared by every pair, so the timestamps are what
+  ties a line to the test that produced it
 
 ### gateway.sh - gateway node (FRR + dataplane)
 
