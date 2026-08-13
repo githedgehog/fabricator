@@ -3083,9 +3083,10 @@ func checkPing(ctx context.Context, pingCount int, semaphore *semaphore.Weighted
 	}
 
 	// -D timestamps each reply line ([unixtime]) so a lost seq can be placed on
-	// the wall clock; it prefixes reply lines only, not the summary line the
-	// sent/received parser and parsePingLostSeqs read.
-	cmd = fmt.Sprintf("ping -i 0.5 -c %d -W 1 -D", pingCount)
+	// the wall clock, and -O places the loss itself there by reporting each
+	// unanswered seq as it times out. Neither line shape is read as a reply
+	// (they carry no "bytes from") nor as the sent/received summary.
+	cmd = fmt.Sprintf("ping -i 0.5 -c %d -W 1 -D -O", pingCount)
 	if sourceIP != nil {
 		cmd += " -I " + sourceIP.String()
 	}
@@ -3541,8 +3542,11 @@ func udpProbeTimingFor(secs int, expectReachable bool) udpProbeTiming {
 	return udpProbeTiming{connect: connect, inner: inner, outer: inner + udpProbeSSHHeadroom}
 }
 
+// 1Mbps clears the loss thresholds the verdict uses by the same margin any
+// higher rate would, and a higher one congested the software dataplane enough to
+// drop ICMP replies on the paths probed next to it (#1937).
 func udpProbeCmd(toIP netip.Addr, port uint16, secs int, timing udpProbeTiming) string {
-	return fmt.Sprintf("sudo docker exec iperf3 timeout -k 5 %d iperf3 -u -J --connect-timeout %d -c %s -p %d -t %d -b 10M -l 1000",
+	return fmt.Sprintf("sudo docker exec iperf3 timeout -k 5 %d iperf3 -u -J --connect-timeout %d -c %s -p %d -t %d -b 1M -l 1000",
 		int(timing.inner.Seconds()), timing.connect.Milliseconds(), toIP.String(), port, secs)
 }
 

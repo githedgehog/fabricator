@@ -568,9 +568,12 @@ func IsSameEndpointNode(a, b *Endpoint) bool {
 }
 
 type matrixTestDeps struct {
-	sshByServer    map[string]*sshutil.Config
-	pings          *semaphore.Weighted
-	iperfs         *semaphore.Weighted
+	sshByServer map[string]*sshutil.Config
+	pings       *semaphore.Weighted
+	iperfs      *semaphore.Weighted
+	// probes is fixed at 1: overlapping proto-port probes made one probe's
+	// congestion look like another's ACL drop (#1937).
+	probes         *semaphore.Weighted
 	curls          *semaphore.Weighted
 	inSources      func(string) bool
 	inDestinations func(string) bool
@@ -835,57 +838,69 @@ func startMatrixProtoPortListeners(ctx context.Context, matrix *ConnectivityMatr
 
 // runMatrixProtoPortPhase exercises every non-zero ProtoPort matrix entry with a
 // protocol-specific probe: "icmp" → ping, "tcp" → nc connect, "udp" → iperf3 -u
-// loss check.
+// loss check. Probes run one at a time phase-wide, in the (icmp, tcp, udp) order
+// ProtoPortEntries sorts a pair's entries into.
 func runMatrixProtoPortPhase(ctx context.Context, opts TestConnectivityOpts, matrix *ConnectivityMatrix, deps *matrixTestDeps) {
 	for _, src := range matrix.AllEndpoints {
 		for _, dst := range matrix.AllEndpoints {
 			if !deps.probesServerPair(src, dst) {
 				continue
 			}
+			var entries []ConnectivityExpectation
 			for _, entry := range matrix.ProtoPortEntries(src, dst) {
 				if matrix.entryOwner(entry) != matrixPhaseProtoPort {
 					continue
 				}
-				expected := reachabilityFromExpectation(entry)
-				pp := entry.ProtoPort
-				fromName := src.Server.Name
-				toName := dst.Server.Name
-				fromSSH := deps.sshByServer[fromName]
-				toIP := dst.Server.IP
-				if entry.NAT != nil && entry.NAT.DestinationIP.IsValid() {
-					toIP = entry.NAT.DestinationIP
-				}
-				if !toIP.IsValid() {
-					deps.errChan <- fmt.Errorf("matrix proto entry %s→%s (%s/%d) has no valid target IP", fromName, toName, pp.Protocol, pp.Port) //nolint:goerr113
+				entries = append(entries, entry)
+			}
+			if len(entries) == 0 {
+				continue
+			}
 
-					continue
-				}
+			fromName := src.Server.Name
+			toName := dst.Server.Name
+			fromSSH := deps.sshByServer[fromName]
+			dstIP := dst.Server.IP
 
-				switch pp.Protocol {
-				case "icmp":
-					deps.wg.Go(func() {
+			deps.wg.Go(func() {
+				for _, entry := range entries {
+					expected := reachabilityFromExpectation(entry)
+					pp := entry.ProtoPort
+					toIP := dstIP
+					if entry.NAT != nil && entry.NAT.DestinationIP.IsValid() {
+						toIP = entry.NAT.DestinationIP
+					}
+					if !toIP.IsValid() {
+						deps.errChan <- fmt.Errorf("matrix proto entry %s→%s (%s/%d) has no valid target IP", fromName, toName, pp.Protocol, pp.Port) //nolint:goerr113
+
+						continue
+					}
+					if err := deps.probes.Acquire(ctx, 1); err != nil {
+						deps.errChan <- fmt.Errorf("acquiring proto-port probe semaphore for %s→%s: %w", fromName, toName, err)
+
+						return
+					}
+
+					switch pp.Protocol {
+					case "icmp":
 						if pe := checkPing(ctx, opts.PingsCount, deps.pings, fromName, toName, fromSSH, toIP, nil, expected); pe != nil {
 							deps.errChan <- pe
 						}
-					})
-				case "tcp":
-					port := pp.Port
-					deps.wg.Go(func() {
-						if ie := checkTCPPort(ctx, deps.iperfs, fromName, fromSSH, toIP, port, expected); ie != nil {
+					case "tcp":
+						if ie := checkTCPPort(ctx, deps.iperfs, fromName, fromSSH, toIP, pp.Port, expected); ie != nil {
 							deps.errChan <- ie
 						}
-					})
-				case "udp":
-					port := pp.Port
-					deps.wg.Go(func() {
-						if ie := checkUDPPort(ctx, opts, deps.iperfs, fromName, fromSSH, toIP, port, expected); ie != nil {
+					case "udp":
+						if ie := checkUDPPort(ctx, opts, deps.iperfs, fromName, fromSSH, toIP, pp.Port, expected); ie != nil {
 							deps.errChan <- ie
 						}
-					})
-				default:
-					deps.errChan <- fmt.Errorf("matrix proto entry %s→%s has unsupported protocol %q", fromName, toName, pp.Protocol) //nolint:goerr113
+					default:
+						deps.errChan <- fmt.Errorf("matrix proto entry %s→%s has unsupported protocol %q", fromName, toName, pp.Protocol) //nolint:goerr113
+					}
+
+					deps.probes.Release(1)
 				}
-			}
+			})
 		}
 	}
 }
@@ -954,6 +969,7 @@ func (c *Config) TestConnectivityWithMatrix(ctx context.Context, vlab *VLAB, opt
 		sshByServer: sshByServer,
 		pings:       semaphore.NewWeighted(opts.PingsParallel),
 		iperfs:      semaphore.NewWeighted(opts.IPerfsParallel),
+		probes:      semaphore.NewWeighted(1),
 		curls:       semaphore.NewWeighted(opts.CurlsParallel),
 		inSources: func(name string) bool {
 			return len(opts.Sources) == 0 || slices.Contains(opts.Sources, name)
