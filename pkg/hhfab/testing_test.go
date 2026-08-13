@@ -356,6 +356,18 @@ From 10.20.4.1 icmp_seq=2 Destination Host Unreachable
 rtt min/avg/max/mdev = 0.611/0.912/1.308/0.251 ms
 `
 
+	// Same loss with the -D -O pair the probe now runs: -O adds a line per
+	// unanswered seq, which is neither a reply nor the summary.
+	const middleLostReported = `PING 10.20.1.4 (10.20.1.4) 56(84) bytes of data.
+[1782458023.423317] 64 bytes from 10.20.1.4: icmp_seq=1 ttl=62 time=0.253 ms
+[1782458023.927269] 64 bytes from 10.20.1.4: icmp_seq=2 ttl=62 time=0.400 ms
+[1782458024.935112] no answer yet for icmp_seq=3
+[1782458024.431201] 64 bytes from 10.20.1.4: icmp_seq=4 ttl=62 time=0.425 ms
+[1782458024.935112] 64 bytes from 10.20.1.4: icmp_seq=5 ttl=62 time=0.478 ms
+--- 10.20.1.4 ping statistics ---
+5 packets transmitted, 4 received, 20% packet loss, time 2016ms
+`
+
 	for _, test := range []struct {
 		name     string
 		stdout   string
@@ -365,6 +377,7 @@ rtt min/avg/max/mdev = 0.611/0.912/1.308/0.251 ms
 		{name: "all received", stdout: allReceived, sent: 5},
 		{name: "first lost (real flake)", stdout: firstLost, sent: 5, expected: []int{1}},
 		{name: "first lost with -D timestamps", stdout: firstLostTimestamped, sent: 5, expected: []int{1}},
+		{name: "middle lost with -D -O", stdout: middleLostReported, sent: 5, expected: []int{3}},
 		{name: "middle lost", stdout: middleLost, sent: 5, expected: []int{3}},
 		{name: "last lost", stdout: lastLost, sent: 5, expected: []int{5}},
 		{name: "all lost", stdout: allLost, sent: 5, expected: []int{1, 2, 3, 4, 5}},
@@ -484,18 +497,18 @@ func TestUDPProbeCmd(t *testing.T) {
 		{
 			name:     "deny probe bounds the control connect",
 			secs:     3,
-			expected: "sudo docker exec iperf3 timeout -k 5 18 iperf3 -u -J --connect-timeout 5000 -c 10.0.1.2 -p 5201 -t 3 -b 10M -l 1000",
+			expected: "sudo docker exec iperf3 timeout -k 5 18 iperf3 -u -J --connect-timeout 5000 -c 10.0.1.2 -p 5201 -t 3 -b 1M -l 1000",
 		},
 		{
 			name:      "allow probe gets the longer connect budget",
 			secs:      3,
 			reachable: true,
-			expected:  "sudo docker exec iperf3 timeout -k 5 28 iperf3 -u -J --connect-timeout 15000 -c 10.0.1.2 -p 5201 -t 3 -b 10M -l 1000",
+			expected:  "sudo docker exec iperf3 timeout -k 5 28 iperf3 -u -J --connect-timeout 15000 -c 10.0.1.2 -p 5201 -t 3 -b 1M -l 1000",
 		},
 		{
 			name:     "extended run stretches the backstop",
 			secs:     10,
-			expected: "sudo docker exec iperf3 timeout -k 5 25 iperf3 -u -J --connect-timeout 5000 -c 10.0.1.2 -p 5201 -t 10 -b 10M -l 1000",
+			expected: "sudo docker exec iperf3 timeout -k 5 25 iperf3 -u -J --connect-timeout 5000 -c 10.0.1.2 -p 5201 -t 10 -b 1M -l 1000",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
