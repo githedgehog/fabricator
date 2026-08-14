@@ -4,6 +4,7 @@
 package hhfab
 
 import (
+	"errors"
 	"net/netip"
 	"slices"
 	"testing"
@@ -474,6 +475,57 @@ func TestGetServerHostBGPCmd(t *testing.T) {
 	}
 }
 
+func TestParsePingCounts(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		stdout   string
+		sent     int
+		received int
+	}{
+		{
+			name: "all received",
+			stdout: `PING 10.20.1.4 (10.20.1.4) 56(84) bytes of data.
+[1782458023.423317] 64 bytes from 10.20.1.4: icmp_seq=1 ttl=62 time=0.253 ms
+--- 10.20.1.4 ping statistics ---
+5 packets transmitted, 5 received, 0% packet loss, time 2016ms
+rtt min/avg/max/mdev = 0.253/0.408/0.487/0.084 ms
+`,
+			sent: 5, received: 5,
+		},
+		{
+			name: "partial loss",
+			stdout: `--- 10.20.4.2 ping statistics ---
+5 packets transmitted, 4 received, 20% packet loss, time 2010ms
+`,
+			sent: 5, received: 4,
+		},
+		{
+			name: "total loss",
+			stdout: `--- 10.20.2.3 ping statistics ---
+5 packets transmitted, 0 received, 100% packet loss, time 2014ms
+`,
+			sent: 5,
+		},
+		{
+			// ping appends "+N errors" after the received count when it saw ICMP
+			// errors, adding a field the counts must survive.
+			name: "errors reported after received",
+			stdout: `--- 10.20.4.2 ping statistics ---
+3 packets transmitted, 0 received, +3 errors, 100% packet loss, time 2040ms
+`,
+			sent: 3,
+		},
+		{name: "no summary line", stdout: "ping: connect: Network is unreachable\n"},
+		{name: "empty output"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			sent, received := parsePingCounts(test.stdout)
+			require.Equal(t, test.sent, sent)
+			require.Equal(t, test.received, received)
+		})
+	}
+}
+
 func TestUDPProbeCmd(t *testing.T) {
 	for _, test := range []struct {
 		name      string
@@ -506,6 +558,162 @@ func TestUDPProbeCmd(t *testing.T) {
 			require.Greater(t, timing.outer, timing.inner+20*time.Second)
 		})
 	}
+}
+
+func TestReprobeOutcome(t *testing.T) {
+	// ping's own exit status 1 on packet loss cannot be built here (ssh.Waitmsg
+	// carries the status in unexported fields), so the loss case is covered with
+	// the counts alone; the branch that reads the status is the did-not-run one.
+	for _, test := range []struct {
+		name     string
+		err      error
+		sent     int
+		received int
+		expected string
+	}{
+		{name: "clean", sent: 5, received: 5, expected: "Diagnostic re-probe recovered"},
+		{name: "partial loss", sent: 5, received: 4, expected: "Diagnostic re-probe still losing packets"},
+		{name: "total loss", sent: 5, expected: "Diagnostic re-probe still losing packets"},
+		{name: "no summary parsed", expected: "Diagnostic re-probe did not run"},
+		{
+			name: "ssh failure with counts", err: errors.New("session failed"),
+			sent: 5, received: 5, expected: "Diagnostic re-probe did not run",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, test.expected, reprobeOutcome(test.err, test.sent, test.received))
+		})
+	}
+}
+
+func TestPingProbeCmd(t *testing.T) {
+	toIP := netip.MustParseAddr("10.20.4.2")
+	sourceIP := netip.MustParseAddr("10.20.1.5")
+
+	require.Equal(t, "ping -i 0.5 -c 5 -W 1 -D 10.20.4.2", pingProbeCmd(5, toIP, nil))
+	require.Equal(t, "ping -i 0.5 -c 3 -W 1 -D -I 10.20.1.5 10.20.4.2", pingProbeCmd(3, toIP, &sourceIP))
+}
+
+func TestIperf3ProbeCmd(t *testing.T) {
+	toIP := netip.MustParseAddr("10.30.5.2")
+
+	for _, test := range []struct {
+		name     string
+		opts     TestConnectivityOpts
+		srcIP    netip.Addr
+		secs     int
+		bidir    bool
+		reverse  bool
+		expected string
+	}{
+		{
+			name: "measured probe, one direction",
+			secs: 10,
+			opts: TestConnectivityOpts{IPerfsSeconds: 10},
+			// The wrapper outlives the run, so a client that stalls gets SIGTERM.
+			expected: "sudo docker exec iperf3 timeout 35 iperf3 -P 4 -J -c 10.30.5.2 -t 10",
+		},
+		{
+			name: "measured probe, both directions in one session", secs: 10, bidir: true,
+			opts:     TestConnectivityOpts{IPerfsSeconds: 10},
+			expected: "sudo docker exec iperf3 timeout 35 iperf3 -P 4 -J -c 10.30.5.2 -t 10 --bidir",
+		},
+		{
+			name: "forward re-probe drops --bidir", secs: iperfReprobeSeconds,
+			expected: "sudo docker exec iperf3 timeout 30 iperf3 -P 4 -J -c 10.30.5.2 -t 5",
+		},
+		{
+			name: "reverse re-probe makes the server the sender", secs: iperfReprobeSeconds, reverse: true,
+			expected: "sudo docker exec iperf3 timeout 30 iperf3 -P 4 -J -c 10.30.5.2 -t 5 -R",
+		},
+		{
+			name: "marking flags survive", secs: 10, opts: TestConnectivityOpts{IPerfsSeconds: 10, IPerfsDSCP: 46, IPerfsTOS: 184},
+			expected: "sudo docker exec iperf3 timeout 35 iperf3 -P 4 -J -c 10.30.5.2 -t 10 --dscp 46 --tos 184",
+		},
+		{
+			// A re-probe has to leave from the same address as the session it follows,
+			// or a hostBGP pair is measured from a different source than the one that
+			// stalled.
+			name: "reverse re-probe keeps the source binding", secs: iperfReprobeSeconds, reverse: true,
+			srcIP:    netip.MustParseAddr("10.30.4.100"),
+			expected: "sudo docker exec iperf3 timeout 30 iperf3 -P 4 -J -c 10.30.5.2 -t 5 -B 10.30.4.100 -R",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, test.expected, iperf3ProbeCmd(test.opts, toIP, test.srcIP, test.secs, test.bidir, test.reverse))
+		})
+	}
+}
+
+func TestIperfReprobeOutcome(t *testing.T) {
+	// The stall this chases reaches us as a `timeout` SIGTERM, which iperf3 reports
+	// in its own JSON error field rather than as a shell failure. An ssh exit status
+	// cannot be built here (ssh.Waitmsg keeps it in unexported fields), so the
+	// branch that reads the status is covered by the did-not-run case.
+	for _, test := range []struct {
+		name     string
+		err      error
+		parseErr error
+		report   *iperf3Report
+		expected string
+	}{
+		{name: "report with no error", report: &iperf3Report{}, expected: "Diagnostic iperf re-probe completed"},
+		{
+			name:     "client killed by the timeout wrapper",
+			report:   &iperf3Report{Error: "interrupt - the client has terminated by signal Terminated(15)"},
+			expected: "Diagnostic iperf re-probe stalled",
+		},
+		{
+			name: "output is not a report", parseErr: errors.New("unmarshaling iperf3 report"),
+			expected: "Diagnostic iperf re-probe unreadable",
+		},
+		{
+			name: "ssh session never delivered the command", err: errors.New("session failed"),
+			expected: "Diagnostic iperf re-probe did not run",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, test.expected, iperfReprobeOutcome(test.err, test.parseErr, test.report))
+		})
+	}
+}
+
+func TestCollapsePressure(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		in       string
+		expected string
+	}{
+		{
+			name: "both lines",
+			in: `some avg10=0.06 avg60=13.83 avg300=25.65 total=162667239576
+full avg10=0.00 avg60=0.00 avg300=0.00 total=0
+`,
+			expected: "some avg10=0.06 avg60=13.83 avg300=25.65 total=162667239576; full avg10=0.00 avg60=0.00 avg300=0.00 total=0",
+		},
+		{
+			name:     "single line without trailing newline",
+			in:       "some avg10=0.00 avg60=0.01 avg300=0.00 total=28517747892",
+			expected: "some avg10=0.00 avg60=0.01 avg300=0.00 total=28517747892",
+		},
+		{
+			name:     "empty",
+			in:       "",
+			expected: "",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, test.expected, collapsePressure([]byte(test.in)))
+		})
+	}
+}
+
+func TestRunnerPressure(t *testing.T) {
+	// Both sources are optional by design, so this only pins that reading them
+	// never panics and never returns a value spanning several log lines.
+	loadavg, cpuPressure := runnerPressure()
+	require.NotContains(t, loadavg, "\n")
+	require.NotContains(t, cpuPressure, "\n")
 }
 
 func mapSlice[IN, OUT any](f func(IN) OUT, in []IN) []OUT {

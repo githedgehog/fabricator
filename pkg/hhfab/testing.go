@@ -2207,6 +2207,44 @@ func parsePingLostSeqs(stdout string, sent int) []int {
 	return lost
 }
 
+// parsePingCounts reads the sent/received totals off ping's summary line and
+// returns 0, 0 when there is no parsable summary.
+func parsePingCounts(stdout string) (int, int) {
+	for l := range strings.SplitSeq(stdout, "\n") {
+		if !strings.Contains(l, "packets transmitted") || !strings.Contains(l, "received") {
+			continue
+		}
+
+		parts := strings.Split(l, ", ")
+		if len(parts) >= 2 {
+			sentStr := strings.TrimSpace(strings.Split(parts[0], " ")[0])
+			receivedStr := strings.TrimSpace(strings.Split(parts[1], " ")[0])
+			sent, err1 := strconv.Atoi(sentStr)
+			received, err2 := strconv.Atoi(receivedStr)
+			if err1 == nil && err2 == nil {
+				return sent, received
+			}
+		}
+
+		break
+	}
+
+	return 0, 0
+}
+
+// pingProbeCmd builds the probe command the connectivity checks measure with.
+// -D timestamps each reply line ([unixtime]) so a lost seq can be placed on the
+// wall clock; it prefixes reply lines only, not the summary line parsePingCounts
+// and parsePingLostSeqs read.
+func pingProbeCmd(pingCount int, toIP netip.Addr, sourceIP *netip.Addr) string {
+	cmd := fmt.Sprintf("ping -i %g -c %d -W 1 -D", pingProbeInterval.Seconds(), pingCount)
+	if sourceIP != nil {
+		cmd += " -I " + sourceIP.String()
+	}
+
+	return cmd + " " + toIP.String()
+}
+
 type IperfError struct {
 	Source          string
 	Destination     string
@@ -3048,6 +3086,181 @@ func retrySSHCmd(ctx context.Context, ssh *sshutil.Config, cmd string, target st
 	return stdout, stderr, nil
 }
 
+const (
+	// pingProbeInterval is the -i pacing of the measured ping.
+	pingProbeInterval = 500 * time.Millisecond
+	// pingWarmupAttempts bounds the warm-up retry on a pair that is expected to
+	// answer.
+	pingWarmupAttempts = 3
+	// pingWarmupBudget caps the whole warm-up sequence. retrySSHCmd retries three
+	// times on its own with a 1-5s sleep between, so an unbounded warm-up on a
+	// struggling pair could spend the measured probe's entire deadline before it
+	// ever runs. The measured probe is what decides the verdict, so the warm-up
+	// gives way to it.
+	pingWarmupBudget = 12 * time.Second
+	// pingProbeTimeLayout stamps the probe window in the same UTC shape the job
+	// log uses, so a failure line can be lined up against switch and gateway
+	// journals without converting anything.
+	pingProbeTimeLayout = "2006-01-02T15:04:05.000Z"
+	// pingReprobeAttempts is how many diagnostic re-probes follow a failed
+	// expected-reachable ping.
+	pingReprobeAttempts = 3
+	// pingReprobeSlack is the per-attempt allowance for SSH setup on top of the
+	// ping itself. It is not sized to fit retrySSHCmd's backoff, which can sleep
+	// 1-5s twice per attempt; the sequence deadline is what bounds that.
+	pingReprobeSlack = 5 * time.Second
+)
+
+// collapsePressure folds a multi-line /proc pressure file into one log value.
+func collapsePressure(b []byte) string {
+	fields := []string{}
+	for l := range strings.SplitSeq(string(b), "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			fields = append(fields, l)
+		}
+	}
+
+	return strings.Join(fields, "; ")
+}
+
+// runnerPressure reads the load average and CPU pressure of the host the suite
+// itself runs on. That host also runs every VM under test, so contention on it
+// shows up as latency and loss inside the fabric; a show-tech snapshot taken
+// after the run reports the load at collection time, not at the moment a packet
+// went missing. Both files are local to this process, so sampling them costs no
+// SSH round trip. An unreadable file yields an empty value rather than an error,
+// since this is diagnostic and must never affect a verdict.
+func runnerPressure() (string, string) {
+	loadavg := ""
+	if b, err := os.ReadFile("/proc/loadavg"); err == nil {
+		loadavg = strings.TrimSpace(string(b))
+	}
+
+	cpu := ""
+	if b, err := os.ReadFile("/proc/pressure/cpu"); err == nil {
+		cpu = collapsePressure(b)
+	}
+
+	return loadavg, cpu
+}
+
+// warmUpPing primes a pair before the measured probe and says what that took.
+// Endpoint neighbor entries age out between tests, so a matrix run routinely
+// starts while the leaf is still re-learning the neighbor and the gateway is
+// still installing the host route for it. A single warm-up packet sets that
+// rebuild going without waiting for it, and its result was previously dropped
+// unless it errored, which left the cold start to be inferred from switch logs
+// afterwards. Retrying until the first reply and naming the attempt count makes
+// it visible in the job log instead.
+//
+// Only pairs that are expected to answer are retried: an unreachable pair never
+// replies, and the matrix is mostly negative probes.
+//
+// Diagnostic and best-effort. The verdict comes from the measured probe alone,
+// so this reports nothing back to the caller.
+func warmUpPing(ctx context.Context, from, to string, fromSSH *sshutil.Config, toIP netip.Addr, sourceIP *netip.Addr, expected Reachability) {
+	cmd := "ping -c 1 -W 1"
+	if sourceIP != nil {
+		cmd += " -I " + sourceIP.String()
+	}
+	cmd += " " + toIP.String()
+
+	attempts := 1
+	if expected.Reachable {
+		attempts = pingWarmupAttempts
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, pingWarmupBudget)
+	defer cancel()
+
+	start := time.Now()
+	for attempt := 1; attempt <= attempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			slog.Warn("Warm-up ping budget spent", "from", from, "to", to,
+				"attempt", attempt, "attempts", attempts, "elapsed", time.Since(start), "err", err)
+
+			return
+		}
+
+		stdout, stderr, err := retrySSHCmd(ctx, fromSSH, cmd, from)
+		if err == nil {
+			if attempt > 1 {
+				slog.Warn("Warm-up ping needed retries", "from", from, "to", to,
+					"attempt", attempt, "attempts", attempts, "elapsed", time.Since(start))
+			} else {
+				slog.Debug("Warm-up ping answered", "from", from, "to", to, "elapsed", time.Since(start))
+			}
+
+			return
+		}
+
+		if attempt == attempts && expected.Reachable {
+			slog.Warn("Warm-up ping never answered", "from", from, "to", to,
+				"attempts", attempts, "elapsed", time.Since(start),
+				"err", err, "stdout", stdout, "stderr", stderr)
+		}
+	}
+}
+
+// reprobeOutcome names what a re-probe attempt observed, so the log line reads
+// as its own result rather than as the failure that triggered it. ping exits
+// non-zero on plain packet loss, so an error means the probe never ran only when
+// the shell never reached ping or the command never completed, the same reading
+// the verdict path uses.
+func reprobeOutcome(err error, sent, received int) string {
+	if sent == 0 {
+		return "Diagnostic re-probe did not run"
+	}
+	if err != nil {
+		if status, isExit := sshutil.ExitStatus(err); !isExit || status == 126 || status == 127 {
+			return "Diagnostic re-probe did not run"
+		}
+	}
+	if sent != received {
+		return "Diagnostic re-probe still losing packets"
+	}
+
+	return "Diagnostic re-probe recovered"
+}
+
+// reprobeAfterFailure re-runs the exact probe that just failed, a few times back
+// to back, and logs each result. Every drop counter in a show-tech is a lifetime
+// cumulative total, so a single lost packet can never be attributed to one of
+// them; re-probing the same pair right away tells a convergence blip (the
+// re-probes recover) apart from a persistent path problem (they keep losing
+// packets). Diagnostic only: it reports nothing back and must never influence
+// the caller's verdict.
+func reprobeAfterFailure(ctx context.Context, pingCount int, from, to string, fromSSH *sshutil.Config, cmd string) {
+	// The pair still holds its slot in the ping semaphore here, so this delays
+	// pairs queued behind it rather than adding concurrency. Bound the whole
+	// sequence and report what was skipped instead of running past the budget.
+	budget := pingReprobeAttempts * (time.Duration(pingCount)*pingProbeInterval + pingReprobeSlack)
+	ctx, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
+
+	for attempt := 1; attempt <= pingReprobeAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			slog.Warn("Diagnostic re-probe skipped", "from", from, "to", to,
+				"attempt", attempt, "attempts", pingReprobeAttempts, "err", err)
+
+			return
+		}
+
+		stdout, stderr, err := retrySSHCmd(ctx, fromSSH, cmd, from)
+		sent, received := parsePingCounts(stdout)
+		// Unlike the verdict path, name the lost seqs on total loss too, so an
+		// empty list in this line always means nothing was lost.
+		var lost []int
+		if sent != received {
+			lost = parsePingLostSeqs(stdout, sent)
+		}
+
+		slog.Warn(reprobeOutcome(err, sent, received), "from", from, "to", to,
+			"attempt", attempt, "attempts", pingReprobeAttempts,
+			"sent", sent, "rcvd", received, "lost", lost, "err", err, "stdout", stdout, "stderr", stderr)
+	}
+}
+
 func checkPing(ctx context.Context, pingCount int, semaphore *semaphore.Weighted, from, to string, fromSSH *sshutil.Config, toIP netip.Addr, sourceIP *netip.Addr, expected Reachability) *PingError {
 	if pingCount <= 0 {
 		return nil
@@ -3068,49 +3281,28 @@ func checkPing(ctx context.Context, pingCount int, semaphore *semaphore.Weighted
 		defer semaphore.Release(1)
 	}
 
+	// The diagnostic re-probe on the failure path runs after this probe's own
+	// deadline may already have expired, so it gets its own budget off the parent.
+	parentCtx := ctx
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(pingCount+30)*time.Second)
 	defer cancel()
 
 	slog.Debug("Running ping", "from", from, "to", toIP.String(), "sourceIP", sourceIP, "expected", expected.Reachable)
-	cmd := "ping -c 1 -W 1"
-	if sourceIP != nil {
-		cmd += " -I " + sourceIP.String()
-	}
-	cmd += " " + toIP.String()
 
-	if stdout, stderr, err := retrySSHCmd(ctx, fromSSH, cmd, from); err != nil && expected.Reachable {
-		slog.Warn("Warm-up ping failed, continuing anyway", "err", err, "stdout", stdout, "stderr", stderr)
-	}
+	warmUpPing(ctx, from, to, fromSSH, toIP, sourceIP, expected)
 
-	// -D timestamps each reply line ([unixtime]) so a lost seq can be placed on
-	// the wall clock; it prefixes reply lines only, not the summary line the
-	// sent/received parser and parsePingLostSeqs read.
-	cmd = fmt.Sprintf("ping -i 0.5 -c %d -W 1 -D", pingCount)
-	if sourceIP != nil {
-		cmd += " -I " + sourceIP.String()
-	}
-	cmd += " " + toIP.String()
+	// Bound the measured probe on the runner clock. The -D stamps in stdout come
+	// from the source server's clock and only mark replies that arrived, so they
+	// cannot place a lost packet; these two mark the window to search in switch
+	// and gateway journals. They bracket the SSH round trip as well as the ping,
+	// so they are an outer bound, not the ping's own start and end.
+	cmd := pingProbeCmd(pingCount, toIP, sourceIP)
+	probeStart := time.Now()
 	stdout, stderr, err := retrySSHCmd(ctx, fromSSH, cmd, from)
+	probeEnd := time.Now()
 	pe.CmdOutput = stdout
 
-	// parse ping output and extract sent and received packets
-	for l := range strings.SplitSeq(stdout, "\n") {
-		if strings.Contains(l, "packets transmitted") && strings.Contains(l, "received") {
-			parts := strings.Split(l, ", ")
-			if len(parts) >= 2 {
-				sentStr := strings.TrimSpace(strings.Split(parts[0], " ")[0])
-				receivedStr := strings.TrimSpace(strings.Split(parts[1], " ")[0])
-				sent, err1 := strconv.Atoi(sentStr)
-				received, err2 := strconv.Atoi(receivedStr)
-				if err1 == nil && err2 == nil {
-					pe.Sent = sent
-					pe.Received = received
-				}
-			}
-
-			break
-		}
-	}
+	pe.Sent, pe.Received = parsePingCounts(stdout)
 	if pe.Received > 0 && pe.Sent != pe.Received {
 		pe.Lost = parsePingLostSeqs(stdout, pe.Sent)
 	}
@@ -3141,17 +3333,27 @@ func checkPing(ctx context.Context, pingCount int, semaphore *semaphore.Weighted
 
 	// When a ping that should have succeeded fails, surface the per-packet
 	// (timestamped, via -D) output at warn level so the loss pattern is visible
-	// next to the error without re-running with -v. Negative tests fail pings by
-	// design, so only do this when reachability was expected.
-	logExpectedFailure := func() {
+	// next to the error without re-running with -v, then re-probe the same pair
+	// while the fabric is still in the state that lost the packet. Negative tests
+	// fail pings by design, so only do this when reachability was expected.
+	//
+	// The verdict below is already decided by pingOk/pingFail and pe's counts;
+	// neither the logging nor the re-probe may touch either.
+	onExpectedFailure := func() {
 		if expected.Reachable {
+			loadavg, cpuPressure := runnerPressure()
 			slog.Warn("Ping failed (expected reachable)", "from", from, "to", to,
-				"sent", pe.Sent, "rcvd", pe.Received, "lost", pe.Lost, "stdout", stdout, "stderr", stderr)
+				"sent", pe.Sent, "rcvd", pe.Received, "lost", pe.Lost,
+				"probeStart", probeStart.UTC().Format(pingProbeTimeLayout),
+				"probeEnd", probeEnd.UTC().Format(pingProbeTimeLayout),
+				"loadavg", loadavg, "cpuPressure", cpuPressure,
+				"stdout", stdout, "stderr", stderr)
+			reprobeAfterFailure(parentCtx, pingCount, from, to, fromSSH, cmd)
 		}
 	}
 
 	if pingOk == pingFail {
-		logExpectedFailure()
+		onExpectedFailure()
 		if err != nil {
 			pe.Msg = err.Error()
 		} else {
@@ -3163,7 +3365,7 @@ func checkPing(ctx context.Context, pingCount int, semaphore *semaphore.Weighted
 	}
 
 	if expected.Reachable && !pingOk {
-		logExpectedFailure()
+		onExpectedFailure()
 		pe.Msg = "should be reachable but ping failed"
 
 		return pe
@@ -3227,6 +3429,23 @@ const iperf3SpeedRetries = 2
 // iperf3RetryDelay is the delay between retry attempts to allow network conditions to stabilize.
 const iperf3RetryDelay = 2 * time.Second
 
+// iperf3WrapperSlack is how long the timeout wrapper outlives the iperf3 run it
+// bounds, covering connection setup for the parallel streams. Exceeding it is
+// what turns a stalled client into SIGTERM rather than a report.
+const iperf3WrapperSlack = 25
+
+const (
+	// iperfReprobeSeconds is how long each one-way diagnostic iperf3 probe runs.
+	// It answers which direction of a dead bidir session stalled, not how fast
+	// either direction is, so it is shorter than the measured probe and its
+	// speeds must never be read against the min-speed floor.
+	iperfReprobeSeconds = 5
+	// iperfReprobeSlack is the per-probe allowance for SSH setup on top of the
+	// iperf3 run and its own timeout wrapper. It is not sized to fit
+	// retrySSHCmd's backoff; the sequence deadline is what bounds that.
+	iperfReprobeSlack = 5 * time.Second
+)
+
 func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string, fromSSH *sshutil.Config, toIP, srcIP netip.Addr, reachability Reachability, bidir bool) []*IperfError {
 	if opts.IPerfsSeconds <= 0 || !reachability.Reachable {
 		return nil
@@ -3289,6 +3508,113 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string,
 	return lastErrors
 }
 
+// iperf3ProbeCmd builds the iperf3 client command. The measured probe and the
+// one-way diagnostic re-probes both go through it, so a re-probe differs from the
+// session it follows only in its duration and direction flags.
+//
+// The client runs inside the always-on iperf3 container instead of a per-test
+// toolbox container on the client VM. The fresh container plus the JSON result
+// buffer can push the 768 MB server VM into ENOMEM during result aggregation;
+// `docker exec` reuses the running container's namespaces and adds only the
+// iperf3 client process itself.
+func iperf3ProbeCmd(opts TestConnectivityOpts, toIP, srcIP netip.Addr, secs int, bidir, reverse bool) string {
+	cmd := fmt.Sprintf("sudo docker exec iperf3 timeout %d iperf3 -P 4 -J -c %s -t %d", secs+iperf3WrapperSlack, toIP.String(), secs)
+	if srcIP.IsValid() {
+		cmd += " -B " + srcIP.String()
+	}
+	if bidir {
+		cmd += " --bidir"
+	}
+	// -R makes the server the sender, so the reverse half is measured from the
+	// same client and needs no SSH config for the peer.
+	if reverse {
+		cmd += " -R"
+	}
+	if opts.IPerfsDSCP > 0 {
+		cmd += fmt.Sprintf(" --dscp %d", opts.IPerfsDSCP)
+	}
+	if opts.IPerfsTOS > 0 {
+		cmd += fmt.Sprintf(" --tos %d", opts.IPerfsTOS)
+	}
+
+	return cmd
+}
+
+// iperfReprobeOutcome names what a one-way re-probe observed, so the log line
+// reads as its own result rather than as the failure that triggered it. A client
+// that produced no report is the signal being chased, so it is named apart from a
+// shell that never reached iperf3 at all.
+func iperfReprobeOutcome(err, parseErr error, report *iperf3Report) string {
+	if err != nil {
+		if status, isExit := sshutil.ExitStatus(err); !isExit || status == 126 || status == 127 {
+			return "Diagnostic iperf re-probe did not run"
+		}
+
+		return "Diagnostic iperf re-probe stalled"
+	}
+	if parseErr != nil {
+		return "Diagnostic iperf re-probe unreadable"
+	}
+	if report.Error != "" {
+		return "Diagnostic iperf re-probe stalled"
+	}
+
+	return "Diagnostic iperf re-probe completed"
+}
+
+// reprobeIperfDirections re-runs a failed bidir pair as two one-way iperf3
+// sessions and logs how each direction fared. A bidir session carries both halves
+// over one TCP session, so when it dies before producing a report there is no
+// per-direction data to attribute the failure to and the error can only name the
+// forward direction, which may be the half that was working. Splitting the halves
+// right away, while the fabric is still in the state that stalled the session,
+// recovers that. Diagnostic only: it reports nothing back and must never
+// influence the caller's verdict.
+func reprobeIperfDirections(ctx context.Context, opts TestConnectivityOpts, from, to string, fromSSH *sshutil.Config, toIP, srcIP netip.Addr) {
+	// The pair still holds its slot in the iperf semaphore here, so this delays
+	// pairs queued behind it rather than adding concurrency. Bound the whole
+	// sequence and report what was skipped instead of running past the budget.
+	budget := 2 * (time.Duration(iperfReprobeSeconds+iperf3WrapperSlack)*time.Second + iperfReprobeSlack)
+	ctx, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
+
+	for _, probe := range []struct {
+		direction string
+		sender    string
+		receiver  string
+		reverse   bool
+	}{
+		{direction: "forward", sender: from, receiver: to, reverse: false},
+		{direction: "reverse", sender: to, receiver: from, reverse: true},
+	} {
+		logArgs := []any{"from", probe.sender, "to", probe.receiver, "direction", probe.direction, "seconds", iperfReprobeSeconds}
+
+		if err := ctx.Err(); err != nil {
+			slog.Warn("Diagnostic iperf re-probe skipped", append(logArgs, "err", err)...)
+
+			continue
+		}
+
+		// Always driven from the pair's original client, bound to the same source
+		// address, so only the direction differs from the session that failed; -R
+		// carries the reverse half.
+		cmd := iperf3ProbeCmd(opts, toIP, srcIP, iperfReprobeSeconds, false, probe.reverse)
+		stdout, stderr, err := retrySSHCmd(ctx, fromSSH, cmd, from)
+		report, parseErr := parseIPerf3Report([]byte(stdout))
+		if parseErr == nil {
+			// Throughput of the direction this probe drove. Far too short to read
+			// against the min-speed floor; it says the direction moved data.
+			logArgs = append(logArgs,
+				"sendSpeed", asMbps(report.End.SumSent.BitsPerSecond),
+				"receiveSpeed", asMbps(report.End.SumReceived.BitsPerSecond),
+				"reportErr", report.Error)
+		}
+
+		slog.Warn(iperfReprobeOutcome(err, parseErr, report),
+			append(logArgs, "err", err, "parseErr", parseErr, "stdout", stdout, "stderr", stderr)...)
+	}
+}
+
 func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to string, fromSSH *sshutil.Config, toIP, srcIP netip.Addr, iPerfsMinSpeed float64, bidir bool) []*IperfError {
 	minSpeedStr := asMbps(iPerfsMinSpeed * 1_000_000)
 	// Forward direction: client (`from`) sends to server (`to`).
@@ -3299,28 +3625,15 @@ func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to stri
 		rev = &IperfError{Source: to, Destination: from, MinSpeed: minSpeedStr}
 	}
 
+	// Keep the caller's deadline for the re-probe below: this probe's own deadline
+	// is spent by the time a stalled session gets here.
+	parentCtx := ctx
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(opts.IPerfsSeconds+30)*time.Second)
 	defer cancel()
 
 	slog.Debug("Running iperf3", "from", from, "to", to, "bidir", bidir)
 
-	// Run the iperf3 client inside the always-on iperf3 container instead of spawning a per-test
-	// toolbox container on the client VM. The fresh container plus the JSON result buffer can
-	// push the 768 MB server VM into ENOMEM during result aggregation. `docker exec` reuses the
-	// running container's namespaces and adds only the iperf3 client process itself.
-	cmd := fmt.Sprintf("sudo docker exec iperf3 timeout %d iperf3 -P 4 -J -c %s -t %d", opts.IPerfsSeconds+25, toIP.String(), opts.IPerfsSeconds)
-	if srcIP.IsValid() {
-		cmd += " -B " + srcIP.String()
-	}
-	if bidir {
-		cmd += " --bidir"
-	}
-	if opts.IPerfsDSCP > 0 {
-		cmd += fmt.Sprintf(" --dscp %d", opts.IPerfsDSCP)
-	}
-	if opts.IPerfsTOS > 0 {
-		cmd += fmt.Sprintf(" --tos %d", opts.IPerfsTOS)
-	}
+	cmd := iperf3ProbeCmd(opts, toIP, srcIP, opts.IPerfsSeconds, bidir, false)
 
 	stdout, stderr, err := retrySSHCmd(ctx, fromSSH, cmd, from)
 	report, parseErr := parseIPerf3Report([]byte(stdout))
@@ -3330,6 +3643,9 @@ func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to stri
 		} else {
 			fwd.ClientMsg = fmt.Sprintf("%s: %s", err, stderr)
 		}
+		if bidir {
+			reprobeIperfDirections(parentCtx, opts, from, to, fromSSH, toIP, srcIP)
+		}
 
 		return []*IperfError{fwd}
 	}
@@ -3337,6 +3653,9 @@ func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to stri
 		// Log the raw output to help diagnose what iperf3 returned instead of valid JSON
 		slog.Warn("iperf3 client report parse failed", "parseErr", parseErr, "stdout", stdout, "stderr", stderr)
 		fwd.ClientMsg = fmt.Sprintf("cannot parse iperf3 report: %s", parseErr)
+		if bidir {
+			reprobeIperfDirections(parentCtx, opts, from, to, fromSSH, toIP, srcIP)
+		}
 
 		return []*IperfError{fwd}
 	}
