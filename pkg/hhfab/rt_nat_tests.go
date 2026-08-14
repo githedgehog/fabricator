@@ -6,6 +6,7 @@ package hhfab
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -46,20 +47,29 @@ type natTestSpec struct {
 	Overlay   func(vpc1, vpc2 *vpcapi.VPC, matrix *ConnectivityMatrix) error
 }
 
-// runNATTest executes the standard NAT-test sequence defined by spec.
-func (testCtx *VPCPeeringTestCtx) runNATTest(ctx context.Context, matrix *ConnectivityMatrix, spec natTestSpec) (bool, []RevertFunc, error) {
+// firstTwoVPCs returns the two alphabetically first VPCs, i.e. the pair every
+// VPC-to-VPC test peers.
+func firstTwoVPCs(ctx context.Context, kube kclient.Client) (*vpcapi.VPC, *vpcapi.VPC, error) {
 	vpcs := &vpcapi.VPCList{}
-	if err := testCtx.kube.List(ctx, vpcs); err != nil {
-		return false, nil, fmt.Errorf("listing VPCs: %w", err)
+	if err := kube.List(ctx, vpcs); err != nil {
+		return nil, nil, fmt.Errorf("listing VPCs: %w", err)
 	}
 	if len(vpcs.Items) < 2 {
-		return true, nil, fmt.Errorf("not enough VPCs for %s test", spec.Name) //nolint:goerr113
+		return nil, nil, errNotEnoughVPCs
 	}
 	sort.Slice(vpcs.Items, func(i, j int) bool {
 		return vpcs.Items[i].Name < vpcs.Items[j].Name
 	})
-	vpc1 := &vpcs.Items[0]
-	vpc2 := &vpcs.Items[1]
+
+	return &vpcs.Items[0], &vpcs.Items[1], nil
+}
+
+// runNATTest executes the standard NAT-test sequence defined by spec.
+func (testCtx *VPCPeeringTestCtx) runNATTest(ctx context.Context, matrix *ConnectivityMatrix, spec natTestSpec) (bool, []RevertFunc, error) {
+	vpc1, vpc2, err := firstTwoVPCs(ctx, testCtx.kube)
+	if err != nil {
+		return errors.Is(err, errNotEnoughVPCs), nil, fmt.Errorf("%s: %w", spec.Name, err)
+	}
 
 	specs, err := spec.BuildSpec(vpc1, vpc2)
 	if err != nil {

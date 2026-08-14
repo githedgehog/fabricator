@@ -14,6 +14,9 @@ func makeGatewayNATACLSuite() *JUnitTestSuite {
 	suite.TestCases = append(suite.TestCases, getNATTestCases()...)
 	suite.TestCases = append(suite.TestCases, getExternalNATTestCases()...)
 	suite.TestCases = append(suite.TestCases, getACLTestCases()...)
+	// last: it restarts dataplane/frr pods, so a regression where the dataplane
+	// does not recover breaks every subsequent gateway test
+	suite.TestCases = append(suite.TestCases, getGatewayRestartTestCases()...)
 	suite.Tests = len(suite.TestCases)
 
 	return suite
