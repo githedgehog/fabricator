@@ -179,6 +179,9 @@ func (c *ControlUpgrade) Run(ctx context.Context) error {
 	if err := c.setupFirewall(ctx); err != nil {
 		return fmt.Errorf("setup firewall: %w", err)
 	}
+	if err := enforceNICNames(ctx, c.WorkDir, c.Control.Spec.Management.Interface, c.Control.Spec.External.Interface); err != nil {
+		return fmt.Errorf("enforcing nic names: %w", err)
+	}
 
 	if err := upgradeFlatcar(ctx, string(flatcar.Version(c.Fab)), c.Yes); err != nil {
 		return fmt.Errorf("upgrading Flatcar: %w", err)
