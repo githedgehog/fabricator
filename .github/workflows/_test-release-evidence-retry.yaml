@@ -1,0 +1,55 @@
+name: Test Release Evidence Retry
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        type: string
+        required: true
+        default: "31784382624"
+      report_tag:
+        type: string
+        required: true
+        default: "v0.49.2"
+
+permissions:
+  contents: write
+
+jobs:
+  retry:
+    runs-on: lab
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Download Artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          pattern: "*--test-results"
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build release test report
+        run: |
+          go run ./hack/release-evidence.go \
+            -artifacts artifacts \
+            -tag "${{ inputs.report_tag }}" \
+            -run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ inputs.source_run_id }}" \
+            -out release-test-report.md \
+            -evidence-dir evidence \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Attach evidence to GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ inputs.report_tag }}
+          files: |
+            release-test-report.md
+            evidence/*--release-test.xml
