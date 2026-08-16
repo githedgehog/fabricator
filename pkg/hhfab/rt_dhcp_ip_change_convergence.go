@@ -266,7 +266,7 @@ func dhcpIPChangeConvergenceTest(ctx context.Context, testCtx *VPCPeeringTestCtx
 
 	// Prime the prober's leaf: send traffic to the new IP before the victim claims it, so the
 	// leaf installs a failed neighbor on the SVI. These pings are expected to fail.
-	if pe := checkPing(ctx, dhcpIPChangePrimingPings, nil, prober.name, newIPStr, proberSSH, newAddr, &proberAddr, false); pe != nil {
+	if pe := checkPing(ctx, dhcpIPChangePrimingPings, nil, prober.name, newIPStr, proberSSH, newAddr, &proberAddr, Reachability{Reachable: false}); pe != nil {
 		slog.Warn("Priming traffic to the new IP unexpectedly succeeded before assignment", "detail", pe.Error())
 	}
 
@@ -283,7 +283,7 @@ func dhcpIPChangeConvergenceTest(ctx context.Context, testCtx *VPCPeeringTestCtx
 	recovered := false
 	deadline := time.Now().Add(dhcpIPChangeMaxWait)
 	for time.Now().Before(deadline) {
-		reachable := checkPing(ctx, 1, nil, prober.name, newIPStr, proberSSH, newAddr, &proberAddr, true) == nil
+		reachable := checkPing(ctx, 1, nil, prober.name, newIPStr, proberSSH, newAddr, &proberAddr, Reachability{Reachable: true}) == nil
 
 		if assignedAt.IsZero() {
 			if cur, err := getInterfaceIPv4(ctx, victimSSH, victim.iface); err == nil && cur == newIPStr {
