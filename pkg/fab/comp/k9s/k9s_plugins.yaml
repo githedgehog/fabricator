@@ -130,3 +130,21 @@ plugins:
       - --name
       - $NAME
       - --yes
+
+  fabricswitchlocate:
+    shortCut: Shift-L
+    description: Locate (LEDs for 5m)
+    scopes:
+      - switch
+      - agent
+    confirm: false
+    background: false
+    command: kubectl
+    args:
+      - fabric
+      - switch
+      - locate
+      - --name
+      - $NAME
+      - --expiry
+      - 5m
