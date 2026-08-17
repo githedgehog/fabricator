@@ -84,6 +84,11 @@ func (testCtx *VPCPeeringTestCtx) runNATTest(ctx context.Context, matrix *Connec
 
 	tcOpts := testCtx.tcOpts
 	tcOpts.Sources = natTestProbeServers(matrix, vpc1.Name, vpc2.Name)
+	if len(tcOpts.Sources) == 0 {
+		// An empty source list means "no filter" downstream, which would silently
+		// probe the whole matrix instead of the VPCs under test.
+		return false, nil, fmt.Errorf("%s: no servers to probe in VPCs %s and %s", spec.Name, vpc1.Name, vpc2.Name) //nolint:goerr113
+	}
 	tcOpts.Destinations = tcOpts.Sources
 	slog.Debug("Probing the VPCs under test", "test", spec.Name, "servers", tcOpts.Sources)
 
@@ -97,7 +102,9 @@ func (testCtx *VPCPeeringTestCtx) runNATTest(ctx context.Context, matrix *Connec
 // natTestProbeServers lists the servers a VPC-to-VPC test should probe: those in
 // the two peered VPCs, plus one outside them as an isolation control. Probing
 // the rest of the matrix only restates that unpeered VPCs cannot talk, at the
-// cost of concurrent probes on the paths under test.
+// cost of concurrent probes on the paths under test. The control is a single
+// server, picked deterministically, so the test proves isolation from that one
+// VPC and not from every unpeered VPC in the topology.
 func natTestProbeServers(matrix *ConnectivityMatrix, vpc1, vpc2 string) []string {
 	underTest := map[string]bool{}
 	var outside []string
@@ -116,6 +123,8 @@ func natTestProbeServers(matrix *ConnectivityMatrix, vpc1, vpc2 string) []string
 	servers := slices.Sorted(maps.Keys(underTest))
 	slices.Sort(outside)
 	for _, name := range outside {
+		// AllEndpoints is keyed per server and VPC, so a server attached to both
+		// an under-test and an outside VPC lands in both lists.
 		if !underTest[name] {
 			servers = append(servers, name)
 
@@ -980,7 +989,8 @@ func gatewayPeeringMasqueradePortForwardNATTest(ctx context.Context, testCtx *VP
 	})
 }
 
-// getNATTestCases returns the NAT test cases to be added to the multi-VPC single-subnet suite
+// getNATTestCases returns the NAT test cases to be added to the multi-VPC single-subnet suite.
+// Gateway Peering Overlap NAT is not here: makeGatewayNATACLSuite appends it last.
 func getNATTestCases() []JUnitTestCase {
 	return []JUnitTestCase{
 		{
@@ -1000,13 +1010,6 @@ func getNATTestCases() []JUnitTestCase {
 		{
 			Name: "Gateway Peering Bidirectional Static NAT",
 			F:    gatewayPeeringBidirectionalStaticNATTest,
-			SkipFlags: SkipFlags{
-				NoGateway: true,
-			},
-		},
-		{
-			Name: "Gateway Peering Overlap NAT",
-			F:    gatewayPeeringOverlapNATTest,
 			SkipFlags: SkipFlags{
 				NoGateway: true,
 			},

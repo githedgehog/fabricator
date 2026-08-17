@@ -572,7 +572,10 @@ type matrixTestDeps struct {
 	pings       *semaphore.Weighted
 	iperfs      *semaphore.Weighted
 	// probes is fixed at 1: overlapping proto-port probes made one probe's
-	// congestion look like another's ACL drop (#1937).
+	// congestion look like another's ACL drop (#1937). It only covers the
+	// proto-port phase; the server-to-server phase is started into the same
+	// WaitGroup and keeps running its pings concurrently under the wider pings
+	// semaphore.
 	probes         *semaphore.Weighted
 	curls          *semaphore.Weighted
 	inSources      func(string) bool
@@ -881,24 +884,26 @@ func runMatrixProtoPortPhase(ctx context.Context, opts TestConnectivityOpts, mat
 						return
 					}
 
-					switch pp.Protocol {
-					case "icmp":
-						if pe := checkPing(ctx, opts.PingsCount, deps.pings, fromName, toName, fromSSH, toIP, nil, expected); pe != nil {
-							deps.errChan <- pe
-						}
-					case "tcp":
-						if ie := checkTCPPort(ctx, deps.iperfs, fromName, fromSSH, toIP, pp.Port, expected); ie != nil {
-							deps.errChan <- ie
-						}
-					case "udp":
-						if ie := checkUDPPort(ctx, opts, deps.iperfs, fromName, fromSSH, toIP, pp.Port, expected); ie != nil {
-							deps.errChan <- ie
-						}
-					default:
-						deps.errChan <- fmt.Errorf("matrix proto entry %s→%s has unsupported protocol %q", fromName, toName, pp.Protocol) //nolint:goerr113
-					}
+					func() {
+						defer deps.probes.Release(1)
 
-					deps.probes.Release(1)
+						switch pp.Protocol {
+						case "icmp":
+							if pe := checkPing(ctx, opts.PingsCount, deps.pings, fromName, toName, fromSSH, toIP, nil, expected); pe != nil {
+								deps.errChan <- pe
+							}
+						case "tcp":
+							if ie := checkTCPPort(ctx, deps.iperfs, fromName, fromSSH, toIP, pp.Port, expected); ie != nil {
+								deps.errChan <- ie
+							}
+						case "udp":
+							if ie := checkUDPPort(ctx, opts, deps.iperfs, fromName, fromSSH, toIP, pp.Port, expected); ie != nil {
+								deps.errChan <- ie
+							}
+						default:
+							deps.errChan <- fmt.Errorf("matrix proto entry %s→%s has unsupported protocol %q", fromName, toName, pp.Protocol) //nolint:goerr113
+						}
+					}()
 				}
 			})
 		}
