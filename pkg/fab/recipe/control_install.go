@@ -51,7 +51,7 @@ type ControlInstall struct {
 func (c *ControlInstall) Run(ctx context.Context) error {
 	slog.Info("Running control node installation", "name", c.Control.Name)
 
-	if err := checkIfaceAddresses("mgmt",
+	if err := checkIfaceAddresses(fabapi.MgmtNICName,
 		string(c.Control.Spec.Management.IP), string(c.Fab.Spec.Config.Control.VIP),
 	); err != nil {
 		return fmt.Errorf("checking management addresses: %w", err)

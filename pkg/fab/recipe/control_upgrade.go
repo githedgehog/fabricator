@@ -514,7 +514,7 @@ func (c *ControlUpgrade) setupFirewall(ctx context.Context) error {
 
 	// Write the rules file. Ignition creates the parent dir on fresh installs;
 	// on upgrade we must ensure it exists ourselves before writing.
-	nftRulesContents, err := renderNftablesRules(c.Control.Spec.External.Interface)
+	nftRulesContents, err := renderNftablesRules(fabapi.ExtNICName)
 	if err != nil {
 		return fmt.Errorf("rendering nftables rules file: %w", err)
 	}

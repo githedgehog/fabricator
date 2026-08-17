@@ -2,5 +2,5 @@ image:
   repository: {{ .Repo }}
   tag: {{ .Tag }}
 
-listenInterface: "mgmt"
+listenInterface: {{ .ListenInterface }}
 anyDeviceOnMgmt: {{ .AnyDeviceOnMgmt }}

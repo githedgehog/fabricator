@@ -254,7 +254,7 @@ func (b *ControlInstallBuilder) buildIgnition() ([]byte, error) {
 	if dummyIP.Bits() != 31 {
 		return nil, fmt.Errorf("dummy IP must be a /31") //nolint:goerr113
 	}
-	nftRules, err := renderNftablesRules(b.Control.Spec.External.Interface)
+	nftRules, err := renderNftablesRules(fabapi.ExtNICName)
 	if err != nil {
 		return nil, fmt.Errorf("rendering nftables rules: %w", err)
 	}

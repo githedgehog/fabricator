@@ -44,7 +44,7 @@ func (c *NodeInstallUpgrade) Run(ctx context.Context, upgrade bool) error {
 	}
 	slog.Info("Running node "+mode, "name", c.Node.Name, "roles", c.Node.Spec.Roles)
 
-	if err := checkIfaceAddresses("mgmt",
+	if err := checkIfaceAddresses(fabapi.MgmtNICName,
 		string(c.Node.Spec.Management.IP),
 	); err != nil {
 		return fmt.Errorf("checking management addresses: %w", err)
@@ -387,12 +387,8 @@ func enforceNICNames(ctx context.Context, workDir string, mgmtNIC string, extNIC
 				return err
 			}
 		}
-		// udevadm control --reload
-		// udevadm trigger --verbose --settle -s=net --action add /sys/class/net/eth0
-		// sudo networkctl reload
-		// systemctl daemon-reload
-		// systemctl reload hh-nftables.service
 	}
+
 	return nil
 }
 
@@ -400,7 +396,7 @@ func enforceNICNames(ctx context.Context, workDir string, mgmtNIC string, extNIC
 // the file at path, preserving permissions (not owner), return false,nil when no match is found.
 //
 // path must not be a symlink.
-func replaceInFile(path string, existing string, replacement string) (changed bool, err error) {
+func replaceInFile(path string, existing string, replacement string) (bool, error) {
 	fileData, err := os.ReadFile(path)
 	if err != nil {
 		return false, fmt.Errorf("reading file %q: %w", path, err)
