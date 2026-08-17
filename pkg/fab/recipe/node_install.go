@@ -338,7 +338,7 @@ func enforceNICNames(ctx context.Context, workDir string, mgmtNIC string, extNIC
 	newMgmtLinkPath := "/etc/systemd/network/10-mgmt.link"
 	mgmtLinkFile := fmt.Sprintf("[Match]\nOriginalName=%s\n[Link]\nName=%s\nDescription=Communicate with Fabric switches", mgmtNIC, fabapi.MgmtNICName)
 
-	if err := os.WriteFile(newMgmtLinkPath, []byte(mgmtLinkFile), 0o644); err != nil {
+	if err := os.WriteFile(newMgmtLinkPath, []byte(mgmtLinkFile), 0o644); err != nil { //nolint:gosec
 		return fmt.Errorf("writefile error at %q: %w", newMgmtLinkPath, err)
 	}
 
@@ -360,7 +360,7 @@ func enforceNICNames(ctx context.Context, workDir string, mgmtNIC string, extNIC
 		newExtLinkPath := "/etc/systemd/network/11-ext.link"
 		extLinkFile := fmt.Sprintf("[Match]\nOriginalName=%s\n[Link]\nName=%s\nDescription=Used to communicate outside the Fabric", extNIC, fabapi.ExtNICName)
 
-		if err := os.WriteFile(newExtLinkPath, []byte(extLinkFile), 0o644); err != nil {
+		if err := os.WriteFile(newExtLinkPath, []byte(extLinkFile), 0o644); err != nil { //nolint:gosec
 			return fmt.Errorf("writefile error at %q: %w", newExtLinkPath, err)
 		}
 	}
@@ -403,7 +403,7 @@ func replaceInFile(path string, existing string, replacement string) (bool, erro
 	}
 
 	// idempotency check
-	newFileData := bytes.Replace(fileData, []byte(existing), []byte(replacement), -1)
+	newFileData := bytes.ReplaceAll(fileData, []byte(existing), []byte(replacement))
 	if bytes.Equal(fileData, newFileData) {
 		return false, nil
 	}
