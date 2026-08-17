@@ -14,6 +14,16 @@ func makeGatewayNATACLSuite() *JUnitTestSuite {
 	suite.TestCases = append(suite.TestCases, getNATTestCases()...)
 	suite.TestCases = append(suite.TestCases, getExternalNATTestCases()...)
 	suite.TestCases = append(suite.TestCases, getACLTestCases()...)
+	// Last on purpose: unlike the others it creates an IPv4Namespace and a VPC and
+	// re-attaches a server, so without a wipe between tests anything its reverts
+	// miss would be inherited by every test after it.
+	suite.TestCases = append(suite.TestCases, JUnitTestCase{
+		Name: "Gateway Peering Overlap NAT",
+		F:    gatewayPeeringOverlapNATTest,
+		SkipFlags: SkipFlags{
+			NoGateway: true,
+		},
+	})
 	suite.Tests = len(suite.TestCases)
 
 	return suite

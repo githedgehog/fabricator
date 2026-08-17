@@ -362,8 +362,8 @@ rtt min/avg/max/mdev = 0.611/0.912/1.308/0.251 ms
 [1782458023.423317] 64 bytes from 10.20.1.4: icmp_seq=1 ttl=62 time=0.253 ms
 [1782458023.927269] 64 bytes from 10.20.1.4: icmp_seq=2 ttl=62 time=0.400 ms
 [1782458024.935112] no answer yet for icmp_seq=3
-[1782458024.431201] 64 bytes from 10.20.1.4: icmp_seq=4 ttl=62 time=0.425 ms
-[1782458024.935112] 64 bytes from 10.20.1.4: icmp_seq=5 ttl=62 time=0.478 ms
+[1782458024.935634] 64 bytes from 10.20.1.4: icmp_seq=4 ttl=62 time=0.425 ms
+[1782458025.439488] 64 bytes from 10.20.1.4: icmp_seq=5 ttl=62 time=0.478 ms
 --- 10.20.1.4 ping statistics ---
 5 packets transmitted, 4 received, 20% packet loss, time 2016ms
 `
