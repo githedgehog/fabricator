@@ -88,10 +88,8 @@ storage:
         inline: |
           [Match]
           Driver=e1000
-          OriginalName=enp2s0
 
           [Link]
-          Name=mgmt
           TCPSegmentationOffload=false
           TCP6SegmentationOffload=false
           GenericSegmentationOffload=false
@@ -117,7 +115,7 @@ storage:
           Destination=0.0.0.0/0
           Metric=42000
 
-    - path: /etc/systemd/network/10-mgmt.link
+    - path: /etc/systemd/network/08-mgmt.link
       mode: 0644
       contents:
         inline: |

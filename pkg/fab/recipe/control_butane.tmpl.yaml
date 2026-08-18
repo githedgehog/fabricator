@@ -66,30 +66,8 @@ storage:
         inline: |
           [Match]
           Driver=e1000
-          OriginalName=enp2s1
 
           [Link]
-          Name=mgmt
-          TCPSegmentationOffload=false
-          TCP6SegmentationOffload=false
-          GenericSegmentationOffload=false
-          GenericReceiveOffload=false
-          LargeReceiveOffload=false
-          ReceiveChecksumOffload=false
-          TransmitChecksumOffload=false
-          ReceiveVLANCTAGHardwareAcceleration=false
-          TransmitVLANCTAGHardwareAcceleration=false
-
-    - path: /etc/systemd/network/09-e1000-offloads.link
-      mode: 0644
-      contents:
-        inline: |
-          [Match]
-          Driver=e1000
-          OriginalName=enp2s0
-
-          [Link]
-          Name=ext
           TCPSegmentationOffload=false
           TCP6SegmentationOffload=false
           GenericSegmentationOffload=false
@@ -151,7 +129,7 @@ storage:
       contents:
         inline: |{{ .SSHDConfig | nindent 10 }}
 
-    - path: /etc/systemd/network/10-mgmt.link
+    - path: /etc/systemd/network/08-mgmt.link
       mode: 0644
       contents:
         inline: |
@@ -165,7 +143,7 @@ storage:
           Name=mgmt
           Description=Communicate with Fabric switches
 
-    - path: /etc/systemd/network/11-ext.link
+    - path: /etc/systemd/network/09-ext.link
       mode: 0644
       contents:
         inline: |

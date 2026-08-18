@@ -335,7 +335,7 @@ func enforceNICNames(ctx context.Context, workDir string, mgmtNIC string, extNIC
 			reloadServices = true
 		}
 	}
-	newMgmtLinkPath := "/etc/systemd/network/10-mgmt.link"
+	newMgmtLinkPath := "/etc/systemd/network/08-mgmt.link"
 	mgmtLinkFile := fmt.Sprintf("[Match]\nOriginalName=%s\n[Link]\nName=%s\nDescription=Communicate with Fabric switches", mgmtNIC, fabapi.MgmtNICName)
 
 	if err := os.WriteFile(newMgmtLinkPath, []byte(mgmtLinkFile), 0o644); err != nil { //nolint:gosec
@@ -357,7 +357,7 @@ func enforceNICNames(ctx context.Context, workDir string, mgmtNIC string, extNIC
 				reloadServices = true
 			}
 		}
-		newExtLinkPath := "/etc/systemd/network/11-ext.link"
+		newExtLinkPath := "/etc/systemd/network/09-ext.link"
 		extLinkFile := fmt.Sprintf("[Match]\nOriginalName=%s\n[Link]\nName=%s\nDescription=Used to communicate outside the Fabric", extNIC, fabapi.ExtNICName)
 
 		if err := os.WriteFile(newExtLinkPath, []byte(extLinkFile), 0o644); err != nil { //nolint:gosec
