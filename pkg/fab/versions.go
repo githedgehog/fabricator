@@ -17,7 +17,7 @@ import (
 
 const (
 	// User-facing release version for the whole project (as referenced in docs.hedgehog.cloud)
-	Release = "26.03.0"
+	Release = "26.04.0"
 
 	// Fabric version used for all fabric components
 	FabricVersion = meta.Version("v0.129.4")
@@ -43,9 +43,9 @@ var FabricatorVersion = meta.Version(version.Version)
 
 // Upgrade constraints, "-0" to include pre-releases
 const (
-	FabricatorCtrlConstraint = ">=0.45.5-0"
-	FabricAgentConstraint    = ">=0.115.4-0"
-	FabricNOSConstraint      = ">=4.5.0-0" // -0 is to allow -Enterprise_Base suffix
+	FabricatorCtrlConstraint = ">=0.49.3-0"
+	FabricAgentConstraint    = ">=0.129.4-0"
+	FabricNOSConstraint      = ">=4.5.2-0" // -0 is to allow -Enterprise_Base suffix
 )
 
 var Versions = fabapi.Versions{
