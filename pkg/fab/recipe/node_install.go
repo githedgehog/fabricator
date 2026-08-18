@@ -42,8 +42,12 @@ func (c *NodeInstallUpgrade) Run(ctx context.Context, upgrade bool) error {
 	if upgrade {
 		mode = "upgrade"
 	}
+	if upgrade {
+		if err := enforceNICNames(ctx, c.WorkDir, c.Node.Spec.Management.Interface, ""); err != nil {
+			return fmt.Errorf("NIC names: %w", err)
+		}
+	}
 	slog.Info("Running node "+mode, "name", c.Node.Name, "roles", c.Node.Spec.Roles)
-
 	if err := checkIfaceAddresses(fabapi.MgmtNICName,
 		string(c.Node.Spec.Management.IP),
 	); err != nil {
@@ -91,9 +95,6 @@ func (c *NodeInstallUpgrade) Run(ctx context.Context, upgrade bool) error {
 	}
 
 	if upgrade {
-		if err := enforceNICNames(ctx, c.WorkDir, c.Node.Spec.Management.Interface, ""); err != nil {
-			return fmt.Errorf("NIC names: %w", err)
-		}
 		if err := upgradeFlatcar(ctx, string(flatcar.Version(c.Fab)), c.Yes); err != nil {
 			return fmt.Errorf("upgrading Flatcar: %w", err)
 		}
@@ -376,13 +377,23 @@ func enforceNICNames(ctx context.Context, workDir string, mgmtNIC string, extNIC
 
 			return nil
 		}
+		var reloadCmds [][]string
+		if isCtrlr {
+			reloadCmds = [][]string{
+				{"udevadm", "control", "--reload"},
+				{"udevadm", "trigger", "--settle", "--subsystem-match=net", "--action=add"},
+				{"networkctl", "reload"},
+				{"systemctl", "reload", "hh-nftables.service"},
+			}
+		} else {
+			reloadCmds = [][]string{
+				{"udevadm", "control", "--reload"},
+				{"udevadm", "trigger", "--settle", "--subsystem-match=net", "--action=add"},
+				{"networkctl", "reload"},
+			}
+		}
 
-		for _, cmd := range [][]string{
-			{"udevadm", "control", "--reload"},
-			{"udevadm", "trigger", "--settle", "--subsystem-match=net", "--action=add"},
-			{"networkctl", "reload"},
-			{"systemctl", "reload", "hh-nftables.service"},
-		} {
+		for _, cmd := range reloadCmds {
 			if err := run(cmd[0], cmd[1:]...); err != nil {
 				return err
 			}
