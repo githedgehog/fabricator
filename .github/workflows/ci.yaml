@@ -385,59 +385,32 @@ jobs:
           #   hybrid: false
           #   upgradefrom: ""
 
-          # l2vni from 26.01
+          # l2vni from 26.03
           - mesh: false
             gateway: false
             includeonie: false
             buildmode: iso
             vpcmode: l2vni
             hybrid: false
-            upgradefrom: "26.01"
+            upgradefrom: "26.03"
 
-          # gateway l3vni from 26.01
+          # gateway l3vni from 26.03
           - mesh: false
             gateway: true
             includeonie: false
             buildmode: iso
             vpcmode: l3vni
             hybrid: false
-            upgradefrom: "26.01"
+            upgradefrom: "26.03"
 
-          # gateway mesh l2vni from 26.01
+          # gateway mesh l2vni from 26.03
           - mesh: true
             gateway: true
             includeonie: false
             buildmode: iso
             vpcmode: l2vni
             hybrid: false
-            upgradefrom: "26.01"
-
-          # l2vni from 26.02
-          - mesh: false
-            gateway: false
-            includeonie: false
-            buildmode: iso
-            vpcmode: l2vni
-            hybrid: false
-            upgradefrom: "26.02"
-
-          # gateway l3vni from 26.02
-          - mesh: false
-            gateway: true
-            includeonie: false
-            buildmode: iso
-            vpcmode: l3vni
-            hybrid: false
-            upgradefrom: "26.02"
-
-          # gateway mesh l2vni from 26.02
-          - mesh: true
-            gateway: true
-            includeonie: false
-            buildmode: iso
-            vpcmode: l2vni
-            hybrid: false
-            upgradefrom: "26.02"
+            upgradefrom: "26.03"
 
   vlabs:
     runs-on: ubuntu-latest
