@@ -176,6 +176,29 @@ run_dp_cmd() {
 } >> "$OUTPUT_FILE" 2>&1
 
 # ---------------------------
+# Dataplane Metrics
+# ---------------------------
+{
+    echo -e "\n=== Dataplane Metrics ==="
+    # "show tech" reports drop counters by reason, but aggregated across the whole gateway, so it
+    # cannot say which VPC pair or which direction a drop belongs to. The dataplane's own metrics
+    # endpoint carries the complement: per-VPC-pair, directional packet and drop counters
+    # (vpc_pair_drops_packet_count{from=...,to=...}), with no reason attached. Attributing a
+    # single-packet loss needs both halves, so collect both.
+    #
+    # The endpoint listens on the gateway's own loopback, so this scrape runs here on the host,
+    # not inside the dataplane container. Read the address off the process rather than hardcoding
+    # it, so a change to --metrics-address does not silently produce an empty section.
+    METRICS_ADDR=$(ps -eo args | grep -m1 -oE '[-]-metrics-address [^ ]+' | awk '{print $2}')
+    if [ -z "$METRICS_ADDR" ]; then
+        METRICS_ADDR="127.0.0.1:9442"
+        echo "Could not read --metrics-address from the dataplane process, trying $METRICS_ADDR"
+    fi
+    echo "Scraping http://${METRICS_ADDR}/metrics"
+    curl -s --max-time 10 "http://${METRICS_ADDR}/metrics" || echo "Metrics scrape failed"
+} >> "$OUTPUT_FILE" 2>&1
+
+# ---------------------------
 # Dataplane Container Logs
 # ---------------------------
 {
