@@ -146,6 +146,12 @@ Collected via `sonic-cli` and direct `bcmcmd` (Broadcom SDK).
 - **FRR container logs**: full `crictl logs` for the FRR container
 - **Dataplane** (via `dataplane-cli` inside the dataplane container): `show
   tech` output
+- **Dataplane metrics**: full scrape of the dataplane's metrics endpoint, whose
+  address is read off the dataplane process (`--metrics-address`, default
+  `127.0.0.1:9442`) - `show tech` counts drops by reason but aggregated across
+  the gateway, while these counters are per VPC pair and directional
+  (`vpc_pair_drops_packet_count{from=...,to=...}`) with no reason attached, so
+  attributing a single-packet loss to a flow and a direction needs both
 - **Dataplane container logs**: full `crictl logs` for the dataplane container
 - **Services and logs**: `k3s-agent.service` status and last-hour logs,
   `sshd` status, `systemd-networkd` last-hour logs, kernel logs (last hour),
