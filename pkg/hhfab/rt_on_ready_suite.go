@@ -20,6 +20,7 @@ import (
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/hhfctl"
 	"go.githedgehog.com/fabricator/pkg/fab"
+	"go.githedgehog.com/fabricator/pkg/util/sshutil"
 	"golang.org/x/sync/errgroup"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -40,6 +41,11 @@ func makeOnReadyTestSuite() *JUnitTestSuite {
 	return suite
 }
 
+const (
+	ortNATPoolCIDR     = "192.168.61.0/24"
+	ortPortForwardPort = 15201
+)
+
 // ortServerInfo holds information about a server and its connections for the on-ready test.
 type ortServerInfo struct {
 	name string
@@ -57,15 +63,18 @@ type ortServerInfo struct {
 // Unlike the other tests, here we create ad-hoc VPCs and attach them to servers to
 // maximize feature coverage. Specifically we want:
 // - 1 VPC with two subnets, 1 server per subnet
-// - 1 VPC with a single host bgp subnet and a server
+// - 1 VPC with a single host bgp subnet and a server, attached over all of its links if it is multihomed
 // - 1 VPC with a single subnet and 2 servers attached to two different switches
 // - as many VPCs with a single regular subnet and a single server as there are remaining servers (at least 2)
 // in terms of peering, we want to cover:
 // - 1 single-server VPC peered to the bgp external
 // - 1 single-server VPC peered to the static external without proxy
 // - the host bgp VPC peered with a regular VPC
+// - a chain of gateway peerings between the remaining single-server VPCs, the last one with masquerade + port-forward NAT
 // the test should fail if this target setup cannot be achieved, with the only exception of gateway
 // not being enabled, in which case we skip gateway peerings
+// Connectivity is checked against a matrix built from the live cluster, which also asserts that every
+// unpeered pair is isolated.
 // Note that there are more things that we could test but are not supported by virtual switches,
 // such as restricted/isolated flags, multiple peerings to the same external etc.
 // At the end of the test, we clean up all VPCs and peerings to leave a clean slate.
@@ -660,15 +669,35 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connecti
 	appendVpcPeeringSpecByName(vpcPeerings, vpcBName, vpcAName, []string{}, []string{})
 	slog.Debug("Added VPC peering", "vpc1", vpcBName, "vpc2", vpcAName)
 
-	// Extra gateway peerings to increase coverage. TODO: add NAT once test-connectivity supports it.
+	// Extra gateway peerings to increase coverage.
 	// Note that we skip peering between the first two servers as they are respectively peered to the BGP external
 	// and the static non-proxy one, and by peering them the bgp VRF would get a LPM route to the second server
 	// compared to the flat ipv4 namespace route the static external vrf has in the virtual external
+	// The last pair of the chain gets masquerade + port-forward NAT on its second VPC.
+	var natVPC1, natVPC2 *vpcapi.VPC
 	if !testCtx.skipFlags.NoGateway {
 		for i := 1; i <= len(singleServers)-2; i++ {
-			if err := appendGwPeeringSpec(gwPeerings, singleServerVPCs[singleServers[i].name], singleServerVPCs[singleServers[i+1].name], nil); err != nil {
+			vpc1 := singleServerVPCs[singleServers[i].name]
+			vpc2 := singleServerVPCs[singleServers[i+1].name]
+			var gwOpts *GwPeeringOptions
+			if i == len(singleServers)-2 {
+				natVPC1, natVPC2 = vpc1, vpc2
+				gwOpts = &GwPeeringOptions{
+					VPC2NATCIDR: []string{ortNATPoolCIDR},
+					VPC2NATMode: NATModeMasqueradePortForward,
+					VPC2PortForwardRules: []gwapi.PeeringNATPortForwardEntry{
+						{Protocol: gwapi.PeeringNATProtocolTCP, Port: "5201", As: strconv.Itoa(ortPortForwardPort)},
+					},
+				}
+			}
+			if err := appendGwPeeringSpec(gwPeerings, vpc1, vpc2, gwOpts); err != nil {
 				return false, reverts, fmt.Errorf("setting up gateway peering: %w", err)
 			}
+		}
+		if natVPC2 == nil {
+			slog.Warn("Too few single-server VPCs for a gateway peering chain, no NAT'd peering", "vpcs", len(singleServers))
+		} else {
+			slog.Debug("Added masquerade + port-forward gateway peering", "vpc1", natVPC1.Name, "vpc2", natVPC2.Name, "natPool", ortNATPoolCIDR)
 		}
 	}
 
@@ -676,10 +705,36 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connecti
 		return false, reverts, fmt.Errorf("setting up peerings: %w", err)
 	}
 
-	// ── Phase 11: Test connectivity ──────────────────────────────────────
+	// ── Phase 11: Build the connectivity matrix ──────────────────────────
+	// The matrix the suite handed us is empty: on-ready runs with noSetup, so
+	// nothing collected the endpoints of the VPCs we just created.
+	slog.Info("Building connectivity matrix")
+
+	matrix, err := BuildConnectivityMatrixFromCluster(ctx, kube, func(server string) (*sshutil.Config, error) {
+		return testCtx.getSSH(ctx, server)
+	})
+	if err != nil {
+		return false, reverts, fmt.Errorf("building connectivity matrix: %w", err)
+	}
+
+	// A NAT'd peering exposes 'As', which the generated oracle cannot evaluate, so state both
+	// directions: outbound rides masquerade against the peer's real IPs, while inbound is only
+	// reachable through the forwarded port on the NAT pool address.
+	if natVPC2 != nil {
+		overrideVPCToVPCVerdict(matrix, natVPC2.Name, natVPC1.Name, VerdictAllow)
+		natSubnetCIDR, err := vpcFirstSubnetCIDR(natVPC2)
+		if err != nil {
+			return false, reverts, fmt.Errorf("getting subnet of VPC %s: %w", natVPC2.Name, err)
+		}
+		if err := overlayVPCToVPCPortForwardDNAT(matrix, natVPC1.Name, natVPC2.Name, natSubnetCIDR, ortNATPoolCIDR, ortPortForwardPort); err != nil {
+			return false, reverts, fmt.Errorf("overlaying port-forward DNAT: %w", err)
+		}
+	}
+
+	// ── Phase 12: Test connectivity ──────────────────────────────────────
 	slog.Info("Running connectivity test")
 
-	if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts); err != nil {
+	if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts, matrix); err != nil {
 		return false, reverts, fmt.Errorf("connectivity test failed: %w", err)
 	}
 
