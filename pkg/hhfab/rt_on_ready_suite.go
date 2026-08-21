@@ -44,6 +44,9 @@ func makeOnReadyTestSuite() *JUnitTestSuite {
 const (
 	ortNATPoolCIDR     = "192.168.61.0/24"
 	ortPortForwardPort = 15201
+	// host part of the address the proxy static external is masqueraded into, within
+	// the subnet of its attachment
+	ortProxyExtNATHost = 200
 )
 
 // ortServerInfo holds information about a server and its connections for the on-ready test.
@@ -71,8 +74,10 @@ type ortServerInfo struct {
 // - 1 single-server VPC peered to the static external without proxy
 // - the host bgp VPC peered with a regular VPC
 // - a chain of gateway peerings between the remaining single-server VPCs, the last one with masquerade + port-forward NAT
-// the test should fail if this target setup cannot be achieved, with the only exception of gateway
-// not being enabled, in which case we skip gateway peerings
+// - the 2-server VPC peered to the proxy static external with masquerade + port-forward NAT
+// the test should fail if this target setup cannot be achieved, with the only exceptions of gateway
+// not being enabled, in which case we skip gateway peerings, and of there being no proxy static
+// external, which the fabric only supports through a gateway peering with NAT
 // Connectivity is checked against a matrix built from the live cluster, which also asserts that every
 // unpeered pair is isolated.
 // Note that there are more things that we could test but are not supported by virtual switches,
@@ -192,8 +197,7 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connecti
 		return false, nil, fmt.Errorf("listing external attachments: %w", err)
 	}
 
-	var bgpExtName, staticExtNonProxyName string
-	// var staticExtProxyRemoteIP string
+	var bgpExtName, staticExtNonProxyName, staticExtProxyName, staticExtProxyRemoteIP string
 	for _, ext := range extList.Items {
 		if ext.Spec.Static == nil {
 			// BGP external
@@ -208,19 +212,43 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connecti
 				}
 			}
 		} else {
-			// Static external – classify by attachment proxy flag
+			// Static external – classify by the proxy flag of its attachments, which have
+			// to agree: a mix would have us peer the same external over both the switches
+			// and the gateway
+			proxied, plain := 0, 0
+			remoteIP := ""
 			for _, att := range extAttachList.Items {
 				if att.Spec.External != ext.Name || att.Spec.Static == nil {
 					continue
 				}
-				if !att.Spec.Static.Proxy && staticExtNonProxyName == "" {
+				if att.Spec.Static.Proxy {
+					proxied++
+					remoteIP = att.Spec.Static.RemoteIP
+				} else {
+					plain++
+				}
+			}
+			switch {
+			case proxied > 0 && plain > 0:
+				slog.Warn("Skipping static external with both proxied and plain attachments", "external", ext.Name)
+			case plain > 0:
+				if staticExtNonProxyName == "" {
 					staticExtNonProxyName = ext.Name
 				}
+			// the NAT pool below is an address of the /24 that VLAB configures on the
+			// external side of that one attachment, so both bounds matter
+			case proxied == 1 && !isHardware(&ext):
+				if staticExtProxyName == "" {
+					staticExtProxyName = ext.Name
+					staticExtProxyRemoteIP = remoteIP
+				}
+			case proxied > 1:
+				slog.Warn("Skipping proxy static external with several attachments", "external", ext.Name, "attachments", proxied)
 			}
 		}
 	}
 	slog.Info("Discovered externals",
-		"bgp", bgpExtName, "staticNonProxy", staticExtNonProxyName)
+		"bgp", bgpExtName, "staticNonProxy", staticExtNonProxyName, "staticProxy", staticExtProxyName)
 
 	// ── Phase 4: Validate preconditions ──────────────────────────────────
 	if bgpExtName == "" {
@@ -455,6 +483,7 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connecti
 
 	// ── VPC C: 1 subnet, 2 servers on different switches ─────────────────
 	const vpcCName = "ort-c"
+	var vpcC *vpcapi.VPC
 	{
 		sub, err := makeRegularSubnet()
 		if err != nil {
@@ -469,6 +498,7 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connecti
 				},
 			},
 		}
+		vpcC = vpc
 		att1 := makeVPCAttachment(vpcCServer1.conn.Name, vpcCName, "subnet-01")
 		att2 := makeVPCAttachment(vpcCServer2.conn.Name, vpcCName, "subnet-01")
 		nc1, err := serverNetconf(vpcCServer1, sub.VLAN, hashPolicy)
@@ -648,7 +678,21 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connecti
 		time.Sleep(10 * time.Second)
 	}
 
-	// ── Phase 10: Build and apply peerings ───────────────────────────────
+	// ── Phase 10: Build the connectivity matrix ──────────────────────────
+	// The matrix the suite handed us is empty: on-ready runs with noSetup, so nothing
+	// collected the endpoints of the VPCs we just created. Endpoints only depend on the
+	// attachments and on the addresses the servers acquired, so we build them here and
+	// refresh the expectations once the peerings are in place.
+	slog.Info("Building connectivity matrix")
+
+	matrix, err := BuildConnectivityMatrixFromCluster(ctx, kube, func(server string) (*sshutil.Config, error) {
+		return testCtx.getSSH(ctx, server)
+	})
+	if err != nil {
+		return false, reverts, fmt.Errorf("building connectivity matrix: %w", err)
+	}
+
+	// ── Phase 11: Build and apply peerings ───────────────────────────────
 	slog.Info("Setting up peerings")
 
 	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec)
@@ -695,32 +739,85 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connecti
 			}
 		}
 		if natVPC2 == nil {
-			slog.Warn("Too few single-server VPCs for a gateway peering chain, no NAT'd peering", "vpcs", len(singleServers))
-		} else {
-			slog.Debug("Added masquerade + port-forward gateway peering", "vpc1", natVPC1.Name, "vpc2", natVPC2.Name, "natPool", ortNATPoolCIDR)
+			return false, reverts, fmt.Errorf("gateway is enabled but there are only %d single-server VPCs, need at least 3 to chain them", len(singleServers)) //nolint:goerr113
 		}
+		slog.Debug("Added masquerade + port-forward gateway peering", "vpc1", natVPC1.Name, "vpc2", natVPC2.Name, "natPool", ortNATPoolCIDR)
+	}
+
+	// Peering 5: the 2-server VPC peered to the proxy static external, masqueraded into an
+	// address of the subnet the external believes it is directly connected to. The border
+	// leaf answers for that address via proxy-ARP, which is what makes a proxy attachment
+	// work without a switch IP. See docs/user-guide/gateway-peering.md.
+	var proxyExtPool netip.Prefix
+	if staticExtProxyName == "" {
+		slog.Warn("No proxy static external found, skipping its peering")
+	} else if !testCtx.skipFlags.NoGateway {
+		remote, err := netip.ParseAddr(staticExtProxyRemoteIP)
+		if err != nil {
+			return false, reverts, fmt.Errorf("parsing remote IP %q of external %s: %w", staticExtProxyRemoteIP, staticExtProxyName, err)
+		}
+		if !remote.Is4() {
+			return false, reverts, fmt.Errorf("remote IP %s of external %s is not IPv4", remote, staticExtProxyName) //nolint:goerr113
+		}
+		octets := remote.As4()
+		octets[3] = ortProxyExtNATHost
+		proxyExtPool = netip.PrefixFrom(netip.AddrFrom4(octets), 32)
+
+		if err := appendGwExtPeeringSpecWithNAT(gwPeerings, vpcC, staticExtProxyName, &GwExtPeeringOptions{
+			VPCNATCIDR: []string{proxyExtPool.String()},
+			VPCNATMode: NATModeMasquerade,
+		}); err != nil {
+			return false, reverts, fmt.Errorf("setting up proxy external peering: %w", err)
+		}
+
+		// The pool is a single address, so only one server can be reached through the
+		// forwarded port: masquerade covers the whole subnet, the port forward only that
+		// server. That takes two expose entries with different IPs, which
+		// appendGwExtPeeringSpecWithNAT cannot build.
+		var pfHost netip.Addr
+		for _, ep := range matrix.AllEndpoints {
+			if ep.Server != nil && ep.Server.Name == vpcCServer1.name && ep.Server.VPC == vpcCName {
+				pfHost = ep.Server.IP
+
+				break
+			}
+		}
+		if !pfHost.IsValid() {
+			return false, reverts, fmt.Errorf("no %s endpoint for server %s", vpcCName, vpcCServer1.name) //nolint:goerr113
+		}
+		pfNAT, err := buildNATConfig(NATModePortForward, []gwapi.PeeringNATPortForwardEntry{
+			{Protocol: gwapi.PeeringNATProtocolTCP, Port: "5201", As: strconv.Itoa(ortPortForwardPort)},
+		})
+		if err != nil {
+			return false, reverts, fmt.Errorf("building port-forward NAT config: %w", err)
+		}
+		vpcCEntry := gwPeerings[fmt.Sprintf("%s--%s", vpcCName, staticExtProxyName)].Peering[vpcCName]
+		vpcCEntry.Expose = append(vpcCEntry.Expose, gwapi.PeeringEntryExpose{
+			IPs: []gwapi.PeeringEntryIP{{CIDR: netip.PrefixFrom(pfHost, 32).String()}},
+			As:  []gwapi.PeeringEntryAs{{CIDR: proxyExtPool.String()}},
+			NAT: pfNAT,
+		})
+		slog.Debug("Added proxy static external peering", "vpc", vpcCName, "external", staticExtProxyName,
+			"natPool", proxyExtPool.String(), "portForwardTo", pfHost.String())
 	}
 
 	if err := DoSetupPeerings(ctx, kube, vpcPeerings, extPeerings, gwPeerings, true); err != nil {
 		return false, reverts, fmt.Errorf("setting up peerings: %w", err)
 	}
 
-	// ── Phase 11: Build the connectivity matrix ──────────────────────────
-	// The matrix the suite handed us is empty: on-ready runs with noSetup, so
-	// nothing collected the endpoints of the VPCs we just created.
-	slog.Info("Building connectivity matrix")
-
-	matrix, err := BuildConnectivityMatrixFromCluster(ctx, kube, func(server string) (*sshutil.Config, error) {
-		return testCtx.getSSH(ctx, server)
-	})
-	if err != nil {
-		return false, reverts, fmt.Errorf("building connectivity matrix: %w", err)
+	if err := matrix.Repopulate(ctx, kube); err != nil {
+		return false, reverts, fmt.Errorf("refreshing the connectivity matrix: %w", err)
 	}
 
 	// A NAT'd peering exposes 'As', which the generated oracle cannot evaluate, so state both
 	// directions: outbound rides masquerade against the peer's real IPs, while inbound is only
 	// reachable through the forwarded port on the NAT pool address.
 	if natVPC2 != nil {
+		// the peer sees the masqueraded traffic coming from the pool, so its leaves need
+		// that route both to reply and to reach the forwarded port
+		if err := testCtx.waitForNATPoolInLeaves(ctx, natVPC1, ortNATPoolCIDR); err != nil {
+			return false, reverts, fmt.Errorf("waiting for the NAT pool route to propagate: %w", err)
+		}
 		overrideVPCToVPCVerdict(matrix, natVPC2.Name, natVPC1.Name, VerdictAllow)
 		natSubnetCIDR, err := vpcFirstSubnetCIDR(natVPC2)
 		if err != nil {
@@ -729,6 +826,21 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connecti
 		if err := overlayVPCToVPCPortForwardDNAT(matrix, natVPC1.Name, natVPC2.Name, natSubnetCIDR, ortNATPoolCIDR, ortPortForwardPort); err != nil {
 			return false, reverts, fmt.Errorf("overlaying port-forward DNAT: %w", err)
 		}
+	}
+
+	// Same for the proxy external, except that only the outbound half can be asserted:
+	// the inbound port forward would have to be driven from the external itself.
+	if proxyExtPool.IsValid() {
+		// Not the mirror of the wait above: the return path goes through the external VRF on the
+		// border leaf, which this does not look at. Seeing the pool in the VPC's own VRF only
+		// tells us the gateway has programmed the peering, so this is a settle, not an assertion.
+		if err := testCtx.waitForNATPoolInLeaves(ctx, vpcC, proxyExtPool.String()); err != nil {
+			return false, reverts, fmt.Errorf("waiting for the gateway to program the proxy external peering: %w", err)
+		}
+		if err := overlayExternalSNAT(matrix, vpcCName, staticExtProxyName, proxyExtPool.String()); err != nil {
+			return false, reverts, fmt.Errorf("overlaying masquerade SNAT pool: %w", err)
+		}
+		overlayExternalNoEgress(matrix, vpcCName, staticExtProxyName)
 	}
 
 	// ── Phase 12: Test connectivity ──────────────────────────────────────
