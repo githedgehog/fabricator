@@ -306,7 +306,7 @@ jobs:
           bin/hhfab vlab gen -v --mesh-links-count=$VLAB_MESH_LINKS \
             --eslag-leaf-groups=$VLAB_ESLAG_GROUPS --orphan-leafs-count=$VLAB_ORPHAN_LEAVES \
             --unbundled-servers=$VLAB_UNBUNDLED_SERVERS --multihomed-servers=1 \
-            --externals-bgp=1 --externals-static=1 --external-orphan-connections=1 \
+            --externals-bgp=1 --externals-static=1 --externals-static-proxy=1 --external-orphan-connections=1 \
             ${{ inputs.custom_gen_args }}
 
       - name: Init hhfab for hybrid mode
