@@ -82,8 +82,8 @@ Collected via `sonic-cli` and direct `bcmcmd` (Broadcom SDK).
 - **L2**: MAC address table, MCLAG brief and interfaces, port-channel summary
 - **BGP/EVPN**: IPv4 BGP summary, L2VPN EVPN summary and neighbors, EVPN routes,
   route-maps, BFD peer state and counters; EVPN VNI/MAC/ES detail, ARP cache;
-  per-VRF route, ARP, and BGP
-  IPv4 unicast summary
+  per-VRF route, ARP, and BGP IPv4 unicast summary and full table (best-path,
+  communities, route source - not just the neighbor summary)
 - **Platform**: environment sensors, fan status, firmware, PSU summary, SSD
   health, temperature
 - **Broadcom ASIC** (`bcmcmd`): port status, PHY info, L2/L3 tables, ACLs
@@ -161,6 +161,24 @@ Collected via `sonic-cli` and direct `bcmcmd` (Broadcom SDK).
 - **Services and logs**: `k3s-agent.service` status and last-hour logs,
   `sshd` status, `systemd-networkd` last-hour logs, kernel logs (last hour),
   kernel network/bond/VLAN messages from `dmesg`
+
+### external.sh - virtual external node (Flatcar Linux + FRR)
+
+A Flatcar server VM standing in for a real external BGP peer. Runs FRR as a
+docker container (`frr`, `quay.io/frrouting/frr`) via `frr.service`; there is
+no host `vtysh`, so all FRR commands run via `docker exec frr vtysh`.
+
+- **System**: kernel version, OS release, interfaces, routes (all tables),
+  ARP/ND neighbors
+- **FRR container**: `docker ps -a`, `frr.service`/`frr-reload.service`
+  status, `journalctl -u frr.service`, `docker logs frr`, and the FRR debug
+  log itself (`/var/run/frr/frr.log`, read via `docker exec` since the file
+  is owned by the container's `frr` user)
+- **BGP**: `show bgp summary`, per-VRF BGP summary and neighbor detail,
+  running config
+- **Sockets**: `ss -tlnp`, explicit check for a `:179` listener
+- **FRR config files**: `/etc/frr/frr.conf`, `/etc/frr/daemons`,
+  `/etc/frr/vtysh.conf`
 
 ## CI integration
 

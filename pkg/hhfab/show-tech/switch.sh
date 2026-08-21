@@ -175,6 +175,7 @@ for vrf in $vrfs; do
     queue_sonic_cmd "VRF:$vrf" "show ip route vrf $vrf"
     queue_sonic_cmd "VRF:$vrf" "show ip arp vrf $vrf"
     queue_sonic_cmd "VRF:$vrf" "show bgp ipv4 unicast vrf $vrf summary"
+    queue_sonic_cmd "VRF:$vrf" "show bgp ipv4 unicast vrf $vrf"
 done
 wait
 
