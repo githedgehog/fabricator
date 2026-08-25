@@ -42,7 +42,7 @@ func (c *NodeInstallUpgrade) Run(ctx context.Context, upgrade bool) error {
 	if upgrade {
 		mode = "upgrade"
 	}
-	if upgrade {
+	if upgrade && c.Node.Spec.Management.Interface != "" {
 		if err := enforceNICNames(ctx, c.WorkDir, c.Node.Spec.Management.Interface, ""); err != nil {
 			return fmt.Errorf("NIC names: %w", err)
 		}
