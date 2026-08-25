@@ -146,7 +146,7 @@ func (c *ControlNode) Validate(_ context.Context, fabCfg *FabConfig, allowNotHyd
 		}
 	}
 
-	if c.Spec.External.Interface == "" && c.Spec.Management.MACAddr == "" {
+	if c.Spec.External.Interface == "" && c.Spec.External.MACAddr == "" {
 		return fmt.Errorf("external interface name or MAC address must be set") //nolint:goerr113
 	}
 

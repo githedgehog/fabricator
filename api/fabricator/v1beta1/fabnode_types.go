@@ -180,7 +180,7 @@ func (n *FabNode) Validate(ctx context.Context, fabCfg *FabConfig, allowNotHydra
 	}
 	if n.Spec.Management.MACAddr != "" {
 		if !macRE.MatchString(n.Spec.Management.MACAddr) {
-			return fmt.Errorf("invalid external mac address: %q", n.Spec.Management.MACAddr) //nolint:goerr113
+			return fmt.Errorf("invalid management mac address: %q", n.Spec.Management.MACAddr) //nolint:goerr113
 		}
 	}
 
