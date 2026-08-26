@@ -15,7 +15,7 @@ image:
 
 #This section builds out the service account more information can be found here: https://kubernetes.io/docs/concepts/security/service-accounts/
 # This is for setting Kubernetes Annotations to a Pod.
-# For more information checkout: https://kubernetes.io/docs/concepts/overview/working-with-objects/annotations/ 
+# For more information checkout: https://kubernetes.io/docs/concepts/overview/working-with-objects/annotations/
 podAnnotations: {}
 # This is for setting Kubernetes Labels to a Pod.
 # For more information checkout: https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/
@@ -41,6 +41,27 @@ config: |
   Filter "/conf/filters.conf"
   FilterDefaultDeny Yes
   FilterType fnmatch
+  StatFile "/conf/stats.conf"
+
+statFile: |
+  # HELP tinyproxy_open_connections Currently open client connections.
+  # TYPE tinyproxy_open_connections gauge
+  tinyproxy_open_connections {opens}
+  # HELP tinyproxy_requests_total Total requests processed.
+  # TYPE tinyproxy_requests_total counter
+  tinyproxy_requests_total {reqs}
+  # HELP tinyproxy_bad_connections_total Bad/aborted connections.
+  # TYPE tinyproxy_bad_connections_total counter
+  tinyproxy_bad_connections_total {badconns}
+  # HELP tinyproxy_denied_total Connections denied by ACL/filter/auth.
+  # TYPE tinyproxy_denied_total counter
+  tinyproxy_denied_total {deniedconns}
+  # HELP tinyproxy_refused_total Connections refused due to load ceiling.
+  # TYPE tinyproxy_refused_total counter
+  tinyproxy_refused_total {refusedconns}
+  # HELP tinyproxy_build_info Build information for the running tinyproxy.
+  # TYPE tinyproxy_build_info gauge
+  tinyproxy_build_info{version="{version}"} 1
 
 urls: []
 
