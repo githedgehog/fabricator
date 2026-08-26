@@ -33,7 +33,7 @@ func Install(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 		return nil, fmt.Errorf("getting image URL for %q: %w", ImageRef, err)
 	}
 
-	urls := []string{}
+	urls := []string{"tinyproxy.stats"}
 	for _, val := range cfg.Spec.Config.Observability.Targets.Prometheus {
 		u, err := url.Parse(val.URL)
 		if err != nil {
