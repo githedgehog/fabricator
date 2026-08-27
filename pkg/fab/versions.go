@@ -61,7 +61,7 @@ var Versions = fabapi.Versions{
 		NTP:               "v0.0.5",
 		NTPChart:          FabricatorVersion,
 		Alloy:             "v1.16.1",
-		ControlProxy:      "v1.11.2-hh2",
+		ControlProxy:      "v1.11.3-hh1",
 		ControlProxyChart: FabricatorVersion,
 		BashCompletion:    "v2.16.0",
 		HostBGPContainer:  "v0.4.1",
