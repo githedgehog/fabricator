@@ -124,6 +124,7 @@ const (
 	PropVTEPIP           = "vtepIP"
 	PropSrcLinkIP        = "srcLinkIP"
 	PropDstLinkIP        = "dstLinkIP"
+	PropUnnumbered       = "unnumbered"
 	PropBGPState         = "bgpState"
 	PropFabric           = "fabric"
 	PropDomains          = "domains" // comma separated, default domain first
