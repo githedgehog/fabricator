@@ -17,9 +17,12 @@ import (
 )
 
 const (
-	ChartRef = "fabricator/charts/control-proxy"
-	ImageRef = "fabricator/control-proxy"
-	NodePort = 31028
+	ChartRef    = "fabricator/charts/control-proxy"
+	ServiceName = "control-proxy"
+	ImageRef    = "fabricator/control-proxy"
+	NodePort    = 31028
+	Port        = 3128
+	StatHost    = "tinyproxy.stats"
 )
 
 //go:embed values.tmpl.yaml
@@ -33,7 +36,7 @@ func Install(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 		return nil, fmt.Errorf("getting image URL for %q: %w", ImageRef, err)
 	}
 
-	urls := []string{"tinyproxy.stats"}
+	urls := []string{StatHost}
 	for _, val := range cfg.Spec.Config.Observability.Targets.Prometheus {
 		u, err := url.Parse(val.URL)
 		if err != nil {
@@ -66,6 +69,7 @@ func Install(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 		"Repo":          repo,
 		"Tag":           string(cfg.Status.Versions.Platform.ControlProxy),
 		"NodePort":      NodePort,
+		"Port":          Port,
 		"TinyproxyURLs": urls,
 	})
 	if err != nil {
@@ -73,7 +77,7 @@ func Install(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 	}
 
 	chartVersion := string(cfg.Status.Versions.Platform.ControlProxyChart)
-	chart, err := comp.NewHelmChart(cfg, "control-proxy", ChartRef, chartVersion, "", false, values)
+	chart, err := comp.NewHelmChart(cfg, ServiceName, ChartRef, chartVersion, "", false, values)
 	if err != nil {
 		return nil, fmt.Errorf("chart: %w", err)
 	}

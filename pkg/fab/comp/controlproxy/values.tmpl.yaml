@@ -2,6 +2,7 @@ image:
   repository: {{ .Repo }}
   tag: {{ .Tag }}
 service:
+  port: {{ .Port }}
   nodePort: {{ .NodePort }}
 urls:
 {{- range .TinyproxyURLs }}

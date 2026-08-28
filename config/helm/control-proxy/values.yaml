@@ -44,25 +44,19 @@ config: |
   StatFile "/conf/stats.conf"
 
 statFile: |
-  # HELP tinyproxy_open_connections Currently open client connections.
-  # TYPE tinyproxy_open_connections gauge
-  tinyproxy_open_connections {opens}
-  # HELP tinyproxy_requests_total Total requests processed.
-  # TYPE tinyproxy_requests_total counter
-  tinyproxy_requests_total {reqs}
-  # HELP tinyproxy_bad_connections_total Bad/aborted connections.
-  # TYPE tinyproxy_bad_connections_total counter
-  tinyproxy_bad_connections_total {badconns}
-  # HELP tinyproxy_denied_total Connections denied by ACL/filter/auth.
-  # TYPE tinyproxy_denied_total counter
-  tinyproxy_denied_total {deniedconns}
-  # HELP tinyproxy_refused_total Connections refused due to load ceiling.
-  # TYPE tinyproxy_refused_total counter
-  tinyproxy_refused_total {refusedconns}
-  # HELP tinyproxy_build_info Build information for the running tinyproxy.
+  # HELP tinyproxy_connections_open Client connections currently open. Includes the connection serving this scrape, so the observed floor is 1.
+  # TYPE tinyproxy_connections_open gauge
+  tinyproxy_connections_open {opens}
+  # HELP tinyproxy_connections_opened_total Client connections accepted since start. Counts connections, not HTTP requests: one keep-alive or CONNECT connection may carry many requests.
+  # TYPE tinyproxy_connections_opened_total counter
+  tinyproxy_connections_opened_total {reqs}
+  # HELP tinyproxy_connections_failed_total Client connections rejected or aborted, by reason. "bad" is a malformed or unreadable request; "denied" is rejection by the domain/URL filter, the connect ACL, or proxy authentication.
+  # TYPE tinyproxy_connections_failed_total counter
+  tinyproxy_connections_failed_total{reason="bad"} {badconns}
+  tinyproxy_connections_failed_total{reason="denied"} {deniedconns}
+  # HELP tinyproxy_build_info Build information for the running tinyproxy. Always 1; the labels carry the value.
   # TYPE tinyproxy_build_info gauge
-  tinyproxy_build_info{version="{version}"} 1
-
+  tinyproxy_build_info{package="{package}",version="{version}"} 1
 urls: []
 
 # This is for setting up a service more information can be found here: https://kubernetes.io/docs/concepts/services-networking/service/
