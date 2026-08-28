@@ -536,8 +536,8 @@ github.com/yusufpapurcu/wmi v1.2.4 h1:zFUKzehAFReQwLys1b/iSMl+JQGSCSjtVqQn9bBrPo
 github.com/yusufpapurcu/wmi v1.2.4/go.mod h1:SBZ9tNy3G9/m5Oi98Zks0QjeHVDvuK0qfxQmPyzfmi0=
 go.githedgehog.com/fabric v0.129.4 h1:IGFtbqoOfQuplYtgWnYAiZB1saOboHGrOQKoOyZk7ag=
 go.githedgehog.com/fabric v0.129.4/go.mod h1:a3I8VroasgqEcGcs82JWvxYTrWwJaHjSjCTZikkN7dY=
-go.githedgehog.com/libmeta v0.3.0 h1:x1yisQG0iNmCqhO83WSdsB1ybbOVwTkQ5mwGptHY9Yc=
-go.githedgehog.com/libmeta v0.3.0/go.mod h1:cULf4CObrT2p9CSiAQqkS89InQFgx1Gb+a6A+4dQORY=
+go.githedgehog.com/libmeta v0.4.0 h1:JHwmt3SJwauPO3CqSyGe73bTpZ1CJaDovMw71Hd738w=
+go.githedgehog.com/libmeta v0.4.0/go.mod h1:gS8lXwHatQnQZY17EHW++p4IWodfJgQeW7Gbo7E1htk=
 go.opencensus.io v0.21.0/go.mod h1:mSImk1erAIZhrmZN+AvHh14ztQfjbGwt4TtuofqLduU=
 go.opencensus.io v0.22.0/go.mod h1:+kGneAE2xo2IficOXnaByMWTGM9T73dGwxeWcUqIpI8=
 go.opencensus.io v0.22.2/go.mod h1:yxeiOL68Rb0Xd1ddK5vPZ/oVn4vY4Ynel7k9FzqtOIw=
