@@ -254,7 +254,7 @@ func (b *ControlInstallBuilder) buildIgnition() ([]byte, error) {
 	if dummyIP.Bits() != 31 {
 		return nil, fmt.Errorf("dummy IP must be a /31") //nolint:goerr113
 	}
-	nftRules, err := renderNftablesRules(b.Control.Spec.External.Interface)
+	nftRules, err := renderNftablesRules(fabapi.ExtNICName)
 	if err != nil {
 		return nil, fmt.Errorf("rendering nftables rules: %w", err)
 	}
@@ -267,6 +267,15 @@ func (b *ControlInstallBuilder) buildIgnition() ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("rendering sshd config: %w", err)
 	}
+	mgmtMacVal := ""
+	if b.Control.Spec.Management.MACAddr != "" {
+		mgmtMacVal = b.Control.Spec.Management.MACAddr
+	}
+
+	extMacVal := ""
+	if b.Control.Spec.External.MACAddr != "" {
+		extMacVal = b.Control.Spec.External.MACAddr
+	}
 
 	but, err := tmplutil.FromTemplate("control-butane", controlButaneTmpl, map[string]any{
 		"Hostname":       b.Control.Name,
@@ -277,11 +286,13 @@ func (b *ControlInstallBuilder) buildIgnition() ([]byte, error) {
 		"SSHDConfig":     sshdConfig,
 		"MgmtInterface":  b.Control.Spec.Management.Interface,
 		"MgmtAddress":    b.Control.Spec.Management.IP,
+		"MgmtMAC":        mgmtMacVal,
 		"ControlVIP":     b.Fab.Spec.Config.Control.VIP,
 		"ExtInterface":   b.Control.Spec.External.Interface,
 		"ExtAddress":     b.Control.Spec.External.IP,
 		"ExtGateway":     b.Control.Spec.External.Gateway,
 		"ExtDNS":         b.Control.Spec.External.DNS,
+		"ExtMAC":         extMacVal,
 		"DummyAddress":   dummyIP.Masked().String(),
 		"DummyGateway":   dummyIP.Masked().Addr().Next().String(),
 		"AutoInstall":    autoInstallPath,

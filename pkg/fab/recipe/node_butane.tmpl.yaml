@@ -115,12 +115,26 @@ storage:
           Destination=0.0.0.0/0
           Metric=42000
 
+    - path: /etc/systemd/network/08-mgmt.link
+      mode: 0644
+      contents:
+        inline: |
+          [Match]
+          {{- if .MgmtMAC }}
+          MACAddress={{ .MgmtMAC }}
+          {{- else}}
+          OriginalName={{ .MgmtInterface }}
+          {{- end}}
+          [Link]
+          Name=mgmt
+          Description=Communicate with Fabric switches
+
     - path: /etc/systemd/network/20-mgmt.network
       mode: 0644
       contents:
         inline: |
           [Match]
-          Name={{ .MgmtInterface }}
+          Name=mgmt
           Type=ether
 
           [Network]

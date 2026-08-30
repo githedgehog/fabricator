@@ -179,6 +179,11 @@ func (c *ControlUpgrade) Run(ctx context.Context) error {
 	if err := c.setupFirewall(ctx); err != nil {
 		return fmt.Errorf("setup firewall: %w", err)
 	}
+	if c.Control.Spec.Management.Interface != "" && c.Control.Spec.External.Interface != "" {
+		if err := enforceNICNames(ctx, c.WorkDir, c.Control.Spec.Management.Interface, c.Control.Spec.External.Interface); err != nil {
+			return fmt.Errorf("enforcing nic names: %w", err)
+		}
+	}
 
 	if err := upgradeFlatcar(ctx, string(flatcar.Version(c.Fab)), c.Yes); err != nil {
 		return fmt.Errorf("upgrading Flatcar: %w", err)
@@ -511,7 +516,7 @@ func (c *ControlUpgrade) setupFirewall(ctx context.Context) error {
 
 	// Write the rules file. Ignition creates the parent dir on fresh installs;
 	// on upgrade we must ensure it exists ourselves before writing.
-	nftRulesContents, err := renderNftablesRules(c.Control.Spec.External.Interface)
+	nftRulesContents, err := renderNftablesRules(fabapi.ExtNICName)
 	if err != nil {
 		return fmt.Errorf("rendering nftables rules file: %w", err)
 	}

@@ -186,6 +186,7 @@ _Appears in:_
 | `gateway` _Addr_ |  |  |  |
 | `dns` _Addr array_ |  |  |  |
 | `interface` _string_ |  |  |  |
+| `mac` _string_ |  |  |  |
 
 
 #### ControlNodeManagement
@@ -204,6 +205,7 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `ip` _Prefix_ |  |  |  |
 | `interface` _string_ |  |  |  |
+| `mac` _string_ |  |  |  |
 
 
 #### ControlNodeSpec

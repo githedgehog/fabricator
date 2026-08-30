@@ -67,7 +67,7 @@ func ServerConfig(f fabapi.Fabricator, control fabapi.ControlNode) (string, erro
 		"Name":          control.Name,
 		"NodeIP":        nodeIP.Addr(),
 		"NodeSubnet":    f.Spec.Config.Control.ManagementSubnet,
-		"FlannelIface":  control.Spec.Management.Interface,
+		"FlannelIface":  fabapi.MgmtNICName,
 		"ClusterSubnet": f.Spec.Config.Control.KubeClusterSubnet,
 		"ServiceSubnet": f.Spec.Config.Control.KubeServiceSubnet,
 		"ClusterDNS":    f.Spec.Config.Control.KubeClusterDNS,
@@ -92,7 +92,7 @@ func AgentConfig(_ fabapi.Fabricator, node fabapi.FabNode) (string, error) {
 	cfg, err := tmplutil.FromTemplate("k3s-agent-config", k3sAgentConfigTmpl, map[string]any{
 		"Name":         node.Name,
 		"NodeIP":       nodeIP.Addr(),
-		"FlannelIface": node.Spec.Management.Interface,
+		"FlannelIface": fabapi.MgmtNICName,
 	})
 	if err != nil {
 		return "", fmt.Errorf("k3s config: %w", err)
