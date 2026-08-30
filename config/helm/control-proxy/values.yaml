@@ -15,7 +15,7 @@ image:
 
 #This section builds out the service account more information can be found here: https://kubernetes.io/docs/concepts/security/service-accounts/
 # This is for setting Kubernetes Annotations to a Pod.
-# For more information checkout: https://kubernetes.io/docs/concepts/overview/working-with-objects/annotations/ 
+# For more information checkout: https://kubernetes.io/docs/concepts/overview/working-with-objects/annotations/
 podAnnotations: {}
 # This is for setting Kubernetes Labels to a Pod.
 # For more information checkout: https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/
@@ -37,11 +37,26 @@ config: |
   Group 65532
   Port 3128
   LogLevel Connect
-  MaxClients 1024
+  MaxClients 5000
   Filter "/conf/filters.conf"
   FilterDefaultDeny Yes
   FilterType fnmatch
+  StatFile "/conf/stats.conf"
 
+statFile: |
+  # HELP tinyproxy_connections_open Client connections currently open. Includes the connection serving this scrape, so the observed floor is 1.
+  # TYPE tinyproxy_connections_open gauge
+  tinyproxy_connections_open {opens}
+  # HELP tinyproxy_connections_opened_total Client connections accepted since start. Counts connections, not HTTP requests: one keep-alive or CONNECT connection may carry many requests.
+  # TYPE tinyproxy_connections_opened_total counter
+  tinyproxy_connections_opened_total {reqs}
+  # HELP tinyproxy_connections_failed_total Client connections rejected or aborted, by reason. "bad" is a malformed or unreadable request; "denied" is rejection by the domain/URL filter, the connect ACL, or proxy authentication.
+  # TYPE tinyproxy_connections_failed_total counter
+  tinyproxy_connections_failed_total{reason="bad"} {badconns}
+  tinyproxy_connections_failed_total{reason="denied"} {deniedconns}
+  # HELP tinyproxy_build_info Build information for the running tinyproxy. Always 1; the labels carry the value.
+  # TYPE tinyproxy_build_info gauge
+  tinyproxy_build_info{package="{package}",version="{version}"} 1
 urls: []
 
 # This is for setting up a service more information can be found here: https://kubernetes.io/docs/concepts/services-networking/service/

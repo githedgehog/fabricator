@@ -141,6 +141,14 @@ func Install(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 				Events:  cfg.Spec.Config.Control.Observability.KubeEvents,
 			},
 		}
+		// tinyproxy serves its stats page to requests proxied to its StatHost, which is not
+		// a resolvable name, so the scrape has to go through the proxy rather than to it
+		ctrlAlloyCfg.Scrapes["control_proxy"] = alloy.Scrape{
+			Address: net.JoinHostPort(controlproxy.StatHost, "80"),
+			ProxyURL: fmt.Sprintf("http://%s.%s.svc.%s:%d",
+				controlproxy.ServiceName, comp.FabNamespace, comp.ClusterDomain, controlproxy.Port),
+			IntervalSeconds: cfg.Spec.Config.Fabric.Observability.Agent.MetricsInterval,
+		}
 
 		ctrlAlloyConfigData, err := ctrlAlloyCfg.Render()
 		if err != nil {

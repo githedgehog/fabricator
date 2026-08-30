@@ -11,3 +11,5 @@ data:
 {{- range .Values.urls }}
 {{ . | indent 4 }}
 {{- end }}
+  stats.conf: |
+{{ .Values.statFile | indent 4 }}

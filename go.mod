@@ -38,7 +38,7 @@ require (
 	github.com/vbauerster/mpb/v8 v8.15.2
 	github.com/vishvananda/netlink v1.3.1
 	go.githedgehog.com/fabric v0.130.0
-	go.githedgehog.com/libmeta v0.3.0
+	go.githedgehog.com/libmeta v0.4.0
 	go.podman.io/image/v5 v5.41.1
 	golang.org/x/crypto v0.55.0
 	golang.org/x/mod v0.40.0

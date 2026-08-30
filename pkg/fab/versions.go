@@ -23,10 +23,10 @@ const (
 	FabricVersion = meta.Version("v0.130.0")
 
 	// Gateway Dataplane version (including WASM validator)
-	DataplaneVersion = meta.Version("v0.25.2")
+	DataplaneVersion = meta.Version("v0.26.0")
 
 	// Gateway FRR version
-	FRRVersion = meta.Version("v0.25.2")
+	FRRVersion = meta.Version("v0.26.0")
 
 	// Broadcom Enterprise SONiC version (including all flavors)
 	BCMSONiCVersion = meta.Version("v4.5.2")
@@ -61,7 +61,7 @@ var Versions = fabapi.Versions{
 		NTP:               "v0.0.5",
 		NTPChart:          FabricatorVersion,
 		Alloy:             "v1.16.1",
-		ControlProxy:      "v1.11.2-hh2",
+		ControlProxy:      "v1.11.3-hh1",
 		ControlProxyChart: FabricatorVersion,
 		BashCompletion:    "v2.16.0",
 		HostBGPContainer:  "v0.4.1",
