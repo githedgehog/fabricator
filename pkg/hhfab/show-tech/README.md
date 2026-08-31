@@ -147,9 +147,10 @@ Collected via `sonic-cli` and direct `bcmcmd` (Broadcom SDK).
 - **Dataplane** (via `dataplane-cli` inside the dataplane container): `show
   tech` output
 - **Dataplane metrics**: full scrape of the dataplane's metrics endpoint, whose
-  address is read off the dataplane process (`--metrics-address`, default
-  `127.0.0.1:9442`) - `show tech` counts drops by reason but aggregated across
-  the gateway, while these counters are per VPC pair and directional
+  address is read off the dataplane container's own process (`--metrics-address`,
+  default `127.0.0.1:9442`); skipped if the dataplane container isn't running -
+  `show tech` counts drops by reason but aggregated across the gateway, while
+  these counters are per VPC pair and directional
   (`vpc_pair_drops_packet_count{from=...,to=...}`) with no reason attached, so
   attributing a single-packet loss to a flow and a direction needs both
 - **Dataplane container logs**: full `crictl logs` for the dataplane container
