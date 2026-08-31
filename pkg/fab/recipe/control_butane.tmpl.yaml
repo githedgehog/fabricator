@@ -20,6 +20,18 @@ systemd:
     - name: locksmithd.service
       mask: true
 
+    - name: systemd-sysupdate.service
+      mask: true
+
+    - name: systemd-sysupdate-reboot.service
+      mask: true
+
+    - name: systemd-sysupdate.timer
+      mask: true
+
+    - name: systemd-sysupdate-reboot.timer
+      mask: true
+
     - name: hh-nftables.service
       enabled: true
       contents: |{{ .NftService | nindent 10 }}

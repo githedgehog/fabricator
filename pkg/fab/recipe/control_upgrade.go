@@ -180,6 +180,10 @@ func (c *ControlUpgrade) Run(ctx context.Context) error {
 		return fmt.Errorf("setup firewall: %w", err)
 	}
 
+	if err := maskSystemdSysupdate(ctx, c.WorkDir); err != nil {
+		return fmt.Errorf("maskSystemdSysupdate service: %w", err)
+	}
+
 	if err := upgradeFlatcar(ctx, string(flatcar.Version(c.Fab)), c.Yes); err != nil {
 		return fmt.Errorf("upgrading Flatcar: %w", err)
 	}

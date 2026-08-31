@@ -90,6 +90,10 @@ func (c *NodeInstallUpgrade) Run(ctx context.Context, upgrade bool) error {
 	}
 
 	if upgrade {
+		if err := maskSystemdSysupdate(ctx, c.WorkDir); err != nil {
+			return fmt.Errorf("maskSystemdSysupdate service: %w", err)
+		}
+
 		if err := upgradeFlatcar(ctx, string(flatcar.Version(c.Fab)), c.Yes); err != nil {
 			return fmt.Errorf("upgrading Flatcar: %w", err)
 		}
@@ -301,6 +305,36 @@ func installToolbox(ctx context.Context) error {
 
 	if err := os.WriteFile("/etc/default/toolbox", []byte(flatcar.ToolboxConfig), 0o644); err != nil { //nolint:gosec
 		return fmt.Errorf("writing toolbox config: %w", err)
+	}
+
+	return nil
+}
+
+func maskSystemdSysupdate(ctx context.Context, workDir string) error {
+	ctx, cancel := context.WithTimeout(ctx, 1*time.Minute)
+	defer cancel()
+
+	run := func(name string, args ...string) error {
+		cmd := exec.CommandContext(ctx, name, args...)
+		cmd.Dir = workDir
+		sink := logutil.NewSink(ctx, slog.Debug, name+": ")
+		cmd.Stdout, cmd.Stderr = sink, sink
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("running %s %s: %w", name, strings.Join(args, " "), err)
+		}
+
+		return nil
+	}
+	systemdCmds := [][]string{
+		{"systemctl", "mask", "--now", "systemd-sysupdate.service"},
+		{"systemctl", "mask", "--now", "systemd-sysupdate-reboot.service"},
+		{"systemctl", "mask", "--now", "systemd-sysupdate.timer"},
+		{"systemctl", "mask", "--now", "systemd-sysupdate-reboot.timer"},
+	}
+	for _, cmd := range systemdCmds {
+		if err := run(cmd[0], cmd[1:]...); err != nil {
+			return err
+		}
 	}
 
 	return nil
