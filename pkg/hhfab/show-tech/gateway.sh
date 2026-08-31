@@ -187,15 +187,28 @@ run_dp_cmd() {
     # single-packet loss needs both halves, so collect both.
     #
     # The endpoint listens on the gateway's own loopback, so this scrape runs here on the host,
-    # not inside the dataplane container. Read the address off the process rather than hardcoding
-    # it, so a change to --metrics-address does not silently produce an empty section.
-    METRICS_ADDR=$(ps -eo args | grep -m1 -oE '[-]-metrics-address [^ ]+' | awk '{print $2}')
-    if [ -z "$METRICS_ADDR" ]; then
-        METRICS_ADDR="127.0.0.1:9442"
-        echo "Could not read --metrics-address from the dataplane process, trying $METRICS_ADDR"
+    # not inside the dataplane container. Read the address off the dataplane process's own cmdline
+    # rather than hardcoding it, so a change to --metrics-address does not silently produce an
+    # empty section.
+    if [ -z "$DATAPLANE_CONTAINER_ID" ]; then
+        echo "Dataplane container not found - skipping metrics scrape"
+    else
+        DATAPLANE_PID=$(sudo -E crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock \
+            inspect -o go-template --template '{{.info.pid}}' "$DATAPLANE_CONTAINER_ID" 2>>"$OUTPUT_FILE")
+        METRICS_ADDR=""
+        if [ -n "$DATAPLANE_PID" ] && [ -r "/proc/$DATAPLANE_PID/cmdline" ]; then
+            METRICS_ADDR=$(tr '\0' '\n' < "/proc/$DATAPLANE_PID/cmdline" | grep -A1 -m1 -x -- '--metrics-address' | tail -1)
+            if [ -z "$METRICS_ADDR" ]; then
+                METRICS_ADDR=$(tr '\0' '\n' < "/proc/$DATAPLANE_PID/cmdline" | grep -m1 -oE '^--metrics-address=(.+)$' | cut -d= -f2-)
+            fi
+        fi
+        if [ -z "$METRICS_ADDR" ]; then
+            METRICS_ADDR="127.0.0.1:9442"
+            echo "Could not read --metrics-address from the dataplane process, trying $METRICS_ADDR"
+        fi
+        echo "Scraping http://${METRICS_ADDR}/metrics"
+        curl -s --max-time 10 "http://${METRICS_ADDR}/metrics" || echo "Metrics scrape failed"
     fi
-    echo "Scraping http://${METRICS_ADDR}/metrics"
-    curl -s --max-time 10 "http://${METRICS_ADDR}/metrics" || echo "Metrics scrape failed"
 } >> "$OUTPUT_FILE" 2>&1
 
 # ---------------------------
