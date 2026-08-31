@@ -19,6 +19,19 @@ systemd:
   units:
     - name: locksmithd.service
       mask: true
+
+    - name: systemd-sysupdate.service
+      mask: true
+
+    - name: systemd-sysupdate-reboot.service
+      mask: true
+
+    - name: systemd-sysupdate.timer
+      mask: true
+
+    - name: systemd-sysupdate-reboot.timer
+      mask: true
+
 {{ if .AutoInstall }}
     - name: hhfab-install.service
       enabled: true
