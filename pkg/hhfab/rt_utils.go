@@ -823,10 +823,8 @@ func buildNATConfig(mode NATMode, portForwardRules []gwapi.PeeringNATPortForward
 	return nat, nil
 }
 
-// pickUnusedHostAddress returns a host address inside prefix that is not present in used.
-// It scans host offsets in order, skipping the network address (offset 0) and the
-// all-ones broadcast address (last offset), and returns the first candidate not found
-// in used. IPv4 only.
+// pickUnusedHostAddress returns the first host address inside prefix that is not present
+// in used, skipping the network and broadcast addresses. IPv4 only.
 func pickUnusedHostAddress(prefix netip.Prefix, used map[netip.Addr]bool) (netip.Addr, error) {
 	if !prefix.Addr().Is4() {
 		return netip.Addr{}, fmt.Errorf("subnet %s is not IPv4", prefix) //nolint:goerr113
@@ -860,9 +858,7 @@ func pickUnusedHostAddress(prefix netip.Prefix, used map[netip.Addr]bool) (netip
 // two entries with the same IPs/As but different NAT blocks is the intended workaround.
 // natCIDRs must be non-empty whenever NAT is configured (gateway API requires expose.As
 // and expose.NAT together). portForwardRules is only used for port-forward modes.
-// notCIDRs are exclusion entries: each becomes a standalone expose.IPs entry with only
-// Not set, appended after the include entries, subtracting that range from the exposed
-// prefixes.
+// notCIDRs each become a standalone expose.IPs entry with only Not set.
 func buildExposes(subnets, natCIDRs, notCIDRs []string, mode NATMode, portForwardRules []gwapi.PeeringNATPortForwardEntry) ([]gwapi.PeeringEntryExpose, error) {
 	makeBase := func() gwapi.PeeringEntryExpose {
 		e := gwapi.PeeringEntryExpose{}

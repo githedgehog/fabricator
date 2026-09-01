@@ -350,14 +350,9 @@ func gatewayPeeringTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix 
 	return false, nil, nil
 }
 
-// Test gateway peering between two VPCs where one server's address is excluded from the
-// exposed prefixes with an expose `Not` entry. Same peering as gatewayPeeringTest, plus a
-// single /32 exclusion on the second VPC's side.
-//
-// The gateway dataplane materialises `Not` by subtracting the excluded range from the
-// exposed prefixes. The excluded server is therefore expected to be unreachable in both
-// directions across the peering: traffic addressed to it is dropped, and its own traffic
-// has no return path. Every other pair stays reachable.
+// Test gateway peering between two VPCs with one server's address excluded by an expose
+// `Not`. The gateway subtracts the excluded range from the exposed prefixes, so that server
+// is unreachable in both directions across the peering and every other pair stays up.
 func gatewayPeeringExposeNotTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	vpcs := &vpcapi.VPCList{}
 	if err := testCtx.kube.List(ctx, vpcs); err != nil {
@@ -374,9 +369,7 @@ func gatewayPeeringExposeNotTest(ctx context.Context, testCtx *VPCPeeringTestCtx
 	vpc1 := &vpcs.Items[0]
 	vpc2 := &vpcs.Items[1]
 
-	// Pick the first discovered server attachment in vpc2 and exclude its address as a /32.
-	// Unmap so a 4-in-6 endpoint address still counts as IPv4 rather than leaving the
-	// test with nothing to exclude.
+	// Exclude the first discovered IPv4 server attachment in vpc2 as a /32.
 	excluded := ""
 	var excludedServer string
 	for _, ep := range matrix.AllEndpoints {
@@ -418,17 +411,11 @@ func gatewayPeeringExposeNotTest(ctx context.Context, testCtx *VPCPeeringTestCtx
 	return false, nil, nil
 }
 
-// Test gateway peering between two VPCs, same as gatewayPeeringExposeNotTest, except the
-// excluded CIDR is a /32 that is not assigned to any discovered endpoint. No server is
-// excluded, so every pair is still expected to be reachable.
-//
-// This guards the exclusion staying host-scoped. Subtracting a /32 from the exposed /24
-// fragments the covering route into /25..host-length pieces, none of which is the /24
-// itself; if the prefix-lists built from those fragments stopped matching the subnet's
-// route, the whole subnet would go dark regardless of which address was excluded. On a
-// topology with one server per VPC, gatewayPeeringExposeNotTest cannot tell that apart
-// from the excluded host being correctly denied, because it has no other endpoint left in
-// that VPC to probe.
+// Test gateway peering between two VPCs with a `Not` for a /32 no endpoint uses, so every
+// pair stays reachable. Subtracting a /32 fragments the exposed /24 into pieces that no
+// longer include the /24 itself; if that took the whole subnet down,
+// gatewayPeeringExposeNotTest could not tell it apart from the excluded host being denied,
+// having no other endpoint left in that VPC to probe.
 func gatewayPeeringExposeNotUnusedTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	vpcs := &vpcapi.VPCList{}
 	if err := testCtx.kube.List(ctx, vpcs); err != nil {
@@ -460,8 +447,6 @@ func gatewayPeeringExposeNotUnusedTest(ctx context.Context, testCtx *VPCPeeringT
 		return false, nil, fmt.Errorf("parsing subnet %s of VPC %s: %w", cidr, vpc2.Name, err)
 	}
 
-	// Unmap so a 4-in-6 endpoint address still matches the plain IPv4 candidates
-	// pickUnusedHostAddress generates, rather than being dropped as non-IPv4.
 	usedIPs := make(map[netip.Addr]bool, len(matrix.AllEndpoints))
 	for _, ep := range matrix.AllEndpoints {
 		if ep.Server == nil {
