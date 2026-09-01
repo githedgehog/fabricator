@@ -1969,10 +1969,9 @@ func populateConnectivityMatrix(ctx context.Context, kube kclient.Reader, m *Con
 	return nil
 }
 
-// endpointVerdict turns a reachable subnet-level verdict into the verdict for one
-// endpoint pair, denying it when a gateway peering `Not` excludes either address.
-// Only server endpoints are matched: a `Not` on an external's expose would have to
-// be intersected with the External prefixes, which the matrix does not model.
+// endpointVerdict denies a reachable subnet-level verdict for one endpoint pair when a
+// gateway peering `Not` excludes either address. Externals are not matched: a `Not` on
+// their expose would have to be intersected with the External prefixes.
 func endpointVerdict(r Reachability, src, dst *Endpoint) ConnectivityVerdict {
 	var srcAddr, dstAddr netip.Addr
 	if src.Server != nil {
@@ -2675,8 +2674,7 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 
 						return ce
 					}
-					// The external side has no single address to match, so only the
-					// source's own exclusions can be evaluated here.
+					// The external side has no single address, so only the source's exclusions apply.
 					expectedReachable = applyExclusions(expectedReachable, ipAR.(netip.Addr), netip.Addr{})
 
 					logArgs := []any{
@@ -2744,25 +2742,20 @@ type Reachability struct {
 	Reason    ReachabilityReason
 	Peering   string
 	Detail    string
-	// SourceExclusions and DestExclusions hold the ranges a gateway peering
-	// subtracts from the source's and the destination's own expose via `Not`.
-	// The verdict above is subnet-level and cannot express an exclusion that
-	// narrows an exposed range down to individual addresses, so callers that
-	// know the endpoint addresses narrow it down themselves with Excludes.
+	// Ranges a gateway peering subtracts from the source's and the destination's own
+	// expose via `Not`. Reachable above is subnet-level, so callers that know the
+	// endpoint addresses narrow it with Excludes.
 	SourceExclusions []netip.Prefix
 	DestExclusions   []netip.Prefix
 }
 
-// Excludes reports whether a gateway peering `Not` takes this pair of addresses
-// out of an otherwise reachable peering. Both directions are affected: the
-// gateway drops traffic addressed to an excluded host, and an excluded host's
-// own traffic has no return path across the peering.
+// Excludes reports whether a gateway peering `Not` takes this pair of addresses out of an
+// otherwise reachable peering. Both directions: traffic to an excluded host is dropped, and
+// its own traffic has no return path.
 func (r Reachability) Excludes(sourceAddr, destAddr netip.Addr) bool {
 	return addrInPrefixes(sourceAddr, r.SourceExclusions) || addrInPrefixes(destAddr, r.DestExclusions)
 }
 
-// applyExclusions drops the reachable verdict when a gateway peering `Not`
-// excludes the pair of addresses actually under test.
 func applyExclusions(r Reachability, sourceAddr, destAddr netip.Addr) Reachability {
 	if r.Reachable && r.Excludes(sourceAddr, destAddr) {
 		r.Reachable = false
@@ -3061,14 +3054,11 @@ func IsSubnetReachableWithGatewayPeering(ctx context.Context, kube kclient.Reade
 	return Reachability{}, nil
 }
 
-// isVPCSubnetPresentInPeering reports whether the peering exposes the given VPC
-// subnet, along with the ranges the matching expose subtracts from it via `Not`.
-// Per the gateway API each expose.IPs entry sets exactly one of cidr/not/vpcSubnet,
-// so a `Not` is a standalone exclusion listed alongside the includes rather than an
-// attribute of one, and every entry of the expose is scanned before answering so
-// that the verdict does not depend on their order. A `Not` narrows an exposed range
-// down to individual addresses, which this subnet-level answer cannot express, so it
-// is returned for the caller to apply to the endpoint addresses it knows.
+// isVPCSubnetPresentInPeering reports whether the peering exposes the given VPC subnet,
+// along with the ranges the matching expose subtracts from it via `Not`. A `Not` is a
+// standalone expose.IPs entry, so every entry is scanned before answering and the verdict
+// does not depend on their order. Exclusions are returned rather than applied because a
+// subnet-level answer cannot express them.
 func isVPCSubnetPresentInPeering(peering *gwapi.PeeringEntry, vpc gwapi.VPCInfo, vpcName string, vpcSubnet string) (bool, []netip.Prefix, error) {
 	for _, expose := range peering.Expose {
 		if expose.DefaultDestination {
