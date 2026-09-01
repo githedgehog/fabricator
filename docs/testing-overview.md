@@ -81,7 +81,7 @@ as JUnit test suites (`rt_*.go`) that:
 4. Produce JUnit XML reports (`release-test.xml`)
 5. Support regex filtering, fail-fast, pause-on-failure, and show-tech collection
 
-See [Test Coverage Matrix](testing-coverage-matrix.md) for the full list of 45 test cases.
+See [Test Coverage Matrix](testing-coverage-matrix.md) for the full list of 56 test cases.
 
 ### Security Scanning
 

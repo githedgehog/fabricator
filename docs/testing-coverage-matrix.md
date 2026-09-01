@@ -6,12 +6,13 @@ and per-environment coverage.
 
 ## Release Test Suites
 
-45 test cases across 4 suites, executed via `hhfab vlab release-test`.
+56 test cases across 4 suites, executed via `hhfab vlab release-test`.
 
 > **Note:** Test count reflects PR [#1579](https://github.com/githedgehog/fabricator/pull/1579)
-> which adds 12 gateway+external NAT tests covering the full NAT mode × external type matrix.
+> which adds 12 gateway+external NAT tests covering the full NAT mode × external type matrix,
+> plus the later addition of the gateway ACL suite and HostBGP multihoming test described below.
 
-### Suite 1: No VPCs (3 tests)
+### Suite 1: No VPCs (4 tests)
 
 Tests that run without any VPC configuration, validating base fabric functionality.
 
@@ -20,6 +21,7 @@ Tests that run without any VPC configuration, validating base fabric functionali
 | Breakout ports | VirtualSwitch | Port breakout configuration on physical switches |
 | Loki Observability | NoLoki | Log collection pipeline (switch → Alloy → Fabric Proxy → Loki) |
 | Prometheus Observability | NoProm | Metrics collection pipeline |
+| HostBGP Multihoming | SubInterfaces, NoServers | Route advertisement for an unbundled multihomed server via host BGP |
 
 ### Suite 2: Single VPC (11 tests)
 
@@ -32,8 +34,8 @@ Setup: 3 subnets per VPC, ~3 servers per subnet. Validates intra-VPC behavior.
 | DNS/NTP/MTU/DHCP lease | — | DHCP options propagation (DNS, NTP, MTU, lease) |
 | DHCP renewal | — | DHCP lease renewal cycle |
 | DHCP static lease | — | Static MAC→IP DHCP binding |
-| MCLAG Failover | VirtualSwitch, NoServers | Traffic survives MCLAG member link failure |
 | ESLAG Failover | VirtualSwitch, NoServers | Traffic survives ESLAG member link failure |
+| ESLAG Fallback | VirtualSwitch, NoServers | Traffic continuity when an ESLAG connection degrades to a single active link |
 | Bundled Failover | VirtualSwitch, NoServers | Traffic survives bundled (LAG) link failure |
 | Spine Failover | VirtualSwitch, NoFabricLink, NoServers | Traffic survives spine link failure |
 | Mesh Failover | VirtualSwitch, NoMeshLink, NoServers | Traffic survives mesh link failure |
@@ -50,7 +52,7 @@ Setup: 1 server per subnet, 3 subnets per VPC. Validates multi-tenant isolation.
 | Multi-Subnets with filtering | VirtualSwitch, SubInterfaces, NoServers | Permit-list based subnet filtering |
 | StaticExternal | VirtualSwitch, NoServers | Static external peering with multi-subnet VPCs |
 
-### Suite 4: Multi-VPC Single-Subnet (27 tests)
+### Suite 4: Multi-VPC Single-Subnet (37 tests)
 
 Setup: 1 subnet per VPC, wipe between tests for isolation. Validates inter-VPC and
 gateway peering.
@@ -90,6 +92,17 @@ gateway peering.
 | GW Peering Static External Masquerade NAT | NoGateway, NoStaticExternals | Masquerade NAT to static external |
 | GW Peering Static External Port Forward NAT | NoGateway, NoStaticExternals | Port forwarding from static external |
 | GW Peering Static External Masq+PortFwd NAT | NoGateway, NoStaticExternals | Combined masquerade + port-fwd to static external |
+| **Gateway ACL** | | |
+| Gateway Peering ACL Default Deny | NoGateway, NoServers | Traffic denied when no ACL rule matches |
+| Gateway Peering ACL Deny-Unless-Exposed UDP Carve-Out | NoGateway, NoServers | Deny-by-default peering with a narrow UDP allow carve-out |
+| Gateway Peering ACL Explicit Allow | NoGateway, NoServers | Explicit allow rule permits matching traffic |
+| Gateway Peering ACL Protocol Scoping | NoGateway, NoServers | ACL rule scoped to a single protocol (TCP) |
+| Gateway Peering ACL Packet One-Way | NoGateway, NoServers | Packet-scope ACL without a matching return rule |
+| Gateway Peering ACL Flow Scope Masquerade | NoGateway, NoServers | Flow-scope ACL combined with masquerade NAT |
+| Gateway Peering ACL Subnet/CIDR Scoping | NoGateway, NoServers | ACL rule scoped to a subnet/CIDR match |
+| Gateway Peering ACL Port Range Scoping | NoGateway, NoServers | ACL rule scoped to a port range |
+| Gateway Peering ACL Precedence Allow-Then-Deny | NoGateway, NoServers | Rule evaluation order: allow rule followed by a deny-all |
+| Gateway Peering ACL Precedence Deny-Then-Allow | NoGateway, NoServers | Rule evaluation order: deny-all followed by a narrower allow |
 
 The gateway external NAT tests (PR [#1579](https://github.com/githedgehog/fabricator/pull/1579))
 cover the full **external type × NAT mode** matrix:
@@ -158,14 +171,15 @@ Upgrade configs are excluded — they run smoke/connectivity only, not release t
 | Breakout ports | skip^VS | skip^VS | skip^VS | skip^VS | **run** | skip^VS |
 | Loki Observability | run | run | run | run | run | run |
 | Prometheus Observability | run | run | run | run | run | run |
+| HostBGP Multihoming | run | run | run | run | run | run |
 | **Single VPC Suite** |
 | No restrictions | run | run | run | run | **run** | run |
 | VPC with restrictions | skip^VS | skip^VS | skip^VS | skip^VS | **run** | skip^VS |
 | DNS/NTP/MTU/DHCP | run | run | run | run | run | run |
 | DHCP renewal | run | run | run | run | run | run |
 | DHCP static lease | run | run | run | run | run | run |
-| MCLAG Failover | skip^VS | skip^VS | skip^VS | skip^VS | **run** | skip^VS |
 | ESLAG Failover | skip^VS | skip^VS | skip^VS | skip^VS | **run** | skip^VS |
+| ESLAG Fallback | skip^VS | skip^VS | skip^VS | skip^VS | **run** | skip^VS |
 | Bundled Failover | skip^VS | skip^VS | skip^VS | skip^VS | **run** | skip^VS |
 | Spine Failover | skip^VS | skip^VS | skip^VS | skip^VS | **run** | skip^VS |
 | Mesh Failover | skip^NM | skip^NM | skip^NM | skip^NM | skip^NM | skip^VS |
@@ -203,6 +217,16 @@ Upgrade configs are excluded — they run smoke/connectivity only, not release t
 | Static Ext Masquerade NAT | skip^GW | skip^GW | run‡ | run‡ | run | run‡ |
 | Static Ext Port Forward NAT | skip^GW | skip^GW | run‡ | run‡ | run | run‡ |
 | Static Ext Masq+PortFwd NAT | skip^GW | skip^GW | run‡ | run‡ | run | run‡ |
+| Gateway ACL Default Deny | skip^GW | skip^GW | run | run | run | run |
+| Gateway ACL Deny-Unless-Exposed UDP | skip^GW | skip^GW | run | run | run | run |
+| Gateway ACL Explicit Allow | skip^GW | skip^GW | run | run | run | run |
+| Gateway ACL Protocol Scoping | skip^GW | skip^GW | run | run | run | run |
+| Gateway ACL Packet One-Way | skip^GW | skip^GW | run | run | run | run |
+| Gateway ACL Flow Scope Masquerade | skip^GW | skip^GW | run | run | run | run |
+| Gateway ACL Subnet/CIDR Scoping | skip^GW | skip^GW | run | run | run | run |
+| Gateway ACL Port Range Scoping | skip^GW | skip^GW | run | run | run | run |
+| Gateway ACL Precedence Allow-Then-Deny | skip^GW | skip^GW | run | run | run | run |
+| Gateway ACL Precedence Deny-Then-Allow | skip^GW | skip^GW | run | run | run | run |
 
 **Legend:** skip^VS = skipped (virtual switches), skip^GW = skipped (no gateway),
 skip^NM = skipped (no mesh links), run* = depends on hardware RoCE support,
@@ -296,7 +320,7 @@ Observed release-test (-rt) durations (as of April 2025):
 Total wall-clock for a full CI matrix with release tests: **~3+ hours** on the HLAB runner,
 **~66 min** worst-case on VLAB runners (runs in parallel).
 
-As the test suite grows (currently 45 tests), runtime becomes a concern for PR feedback
+As the test suite grows (currently 56 tests), runtime becomes a concern for PR feedback
 loops. The existing `--release-test-regexes` filtering mechanism enables running a subset
 of tests, but the CI pipeline does not yet use it to create fast/full tiers.
 
