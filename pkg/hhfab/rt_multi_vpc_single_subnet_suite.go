@@ -375,13 +375,19 @@ func gatewayPeeringExposeNotTest(ctx context.Context, testCtx *VPCPeeringTestCtx
 	vpc2 := &vpcs.Items[1]
 
 	// Pick the first discovered server attachment in vpc2 and exclude its address as a /32.
+	// Unmap so a 4-in-6 endpoint address still counts as IPv4 rather than leaving the
+	// test with nothing to exclude.
 	excluded := ""
 	var excludedServer string
 	for _, ep := range matrix.AllEndpoints {
-		if ep.Server == nil || ep.Server.VPC != vpc2.Name || !ep.Server.IP.Is4() {
+		if ep.Server == nil || ep.Server.VPC != vpc2.Name {
 			continue
 		}
-		excluded = ep.Server.IP.String() + "/32"
+		addr := ep.Server.IP.Unmap()
+		if !addr.Is4() {
+			continue
+		}
+		excluded = addr.String() + "/32"
 		excludedServer = ep.Server.Name
 
 		break
