@@ -86,8 +86,12 @@ Collected via `sonic-cli` and direct `bcmcmd` (Broadcom SDK).
   IPv4 unicast summary
 - **Platform**: environment sensors, fan status, firmware, PSU summary, SSD
   health, temperature
-- **Broadcom ASIC** (`bcmcmd`): port status, PHY info, L2/L3 tables, ACLs,
-  route and ECMP tables, host table, VLAN table, trunk table
+- **Broadcom ASIC** (`bcmcmd`): port status, PHY info, L2/L3 tables, ACLs
+  (`fp show`), route/ECMP/host tables, VLAN table, trunk table. The route,
+  ECMP and host table commands differ by ASIC/SDK generation, so each tries
+  its older command first and falls back to the newer one; a command
+  rejected by every candidate, or `bcmcmd` missing entirely (VLAB), records
+  an explicit marker line instead of the SDK's raw usage/error text
 - **Services**: system status brief/full, system logs, hedgehog-agent status
   and logs (`/var/log/agent.log`), Docker container list and last 100 log lines
   per container
