@@ -872,6 +872,8 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 
 	unnumbered := c.UnnumberedFabricLinks
 
+	gwPorts := map[string][]string{}
+
 	for _, conn := range conns.Items {
 		if conn.Spec.Fabric != nil { //nolint:gocritic
 			cf := conn.Spec.Fabric
@@ -937,6 +939,15 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 				iface.MTU = fabric.MTU
 				gw.Spec.Interfaces[link.Gateway.LocalPortName()] = iface
 
+				// DPDK-bound ports have no kernel netdev to configure
+				if iface.PCI == "" {
+					kernelName := iface.Kernel
+					if kernelName == "" {
+						kernelName = link.Gateway.LocalPortName()
+					}
+					gwPorts[gwName] = append(gwPorts[gwName], kernelName)
+				}
+
 				switchIP, err := netip.ParsePrefix(link.Switch.IP)
 				if err != nil {
 					return fmt.Errorf("parsing gateway %s link %d switch IP %s: %w", gwName, idx, link.Switch.IP, err)
@@ -977,6 +988,14 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 		if err := kube.Update(ctx, &conn); err != nil {
 			return fmt.Errorf("updating connection %s: %w", conn.Name, err)
 		}
+	}
+
+	for idx := range c.Nodes {
+		node := &c.Nodes[idx]
+
+		ports := gwPorts[node.Name]
+		slices.Sort(ports)
+		node.Spec.GatewayPorts = slices.Compact(ports)
 	}
 
 	gateways := &gwapi.GatewayList{}

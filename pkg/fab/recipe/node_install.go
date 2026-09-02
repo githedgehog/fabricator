@@ -27,6 +27,8 @@ import (
 const (
 	dropVXLANService  = "hh-drop-vxlan.service"
 	dropVXLANUnitPath = "/etc/systemd/system/" + dropVXLANService
+
+	gatewayPortsNetworkPath = "/etc/systemd/network/85-gw-ports.network"
 )
 
 type NodeInstallUpgrade struct {
@@ -84,8 +86,8 @@ func (c *NodeInstallUpgrade) Run(ctx context.Context, upgrade bool) error {
 			return fmt.Errorf("preparing node for dataplane: %w", err)
 		}
 
-		if err := c.enableLLDPOnAllEther(ctx); err != nil {
-			return fmt.Errorf("enabling LLDP on all ether interfaces: %w", err)
+		if err := c.configureGatewayNetwork(ctx); err != nil {
+			return fmt.Errorf("configuring gateway network: %w", err)
 		}
 	}
 
@@ -232,7 +234,7 @@ WantedBy=multi-user.target
 	return nil
 }
 
-func (c *NodeInstallUpgrade) enableLLDPOnAllEther(ctx context.Context) error {
+func (c *NodeInstallUpgrade) configureGatewayNetwork(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 1*time.Minute)
 	defer cancel()
 
@@ -256,6 +258,35 @@ LLDP=yes
 EmitLLDP=yes
 `), 0o644); err != nil {
 		return fmt.Errorf("writing 90-lldp.network: %w", err)
+	}
+
+	// networkd applies a single .network per link, so the gateway ports need a full copy of
+	// the one above rather than a drop-in: they only differ in keeping the IPv6 link-local
+	// address that BGP unnumbered peers with
+	if len(c.Node.Spec.GatewayPorts) > 0 {
+		slog.Debug("Keeping IPv6 link-local on gateway ports", "ports", c.Node.Spec.GatewayPorts)
+
+		if err := os.WriteFile(gatewayPortsNetworkPath, //nolint:gosec
+			[]byte(`# Ports used by gateway connections, link-local kept for BGP unnumbered
+[Match]
+Name=`+strings.Join(c.Node.Spec.GatewayPorts, " ")+`
+Type=ether
+Driver=!veth
+Kind=!*
+
+[Network]
+KeepConfiguration=yes
+DHCP=no
+IPv6AcceptRA=no
+IPv6SendRA=no
+LinkLocalAddressing=ipv6
+LLDP=yes
+EmitLLDP=yes
+`), 0o644); err != nil {
+			return fmt.Errorf("writing %s: %w", gatewayPortsNetworkPath, err)
+		}
+	} else if err := os.Remove(gatewayPortsNetworkPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("removing %s: %w", gatewayPortsNetworkPath, err)
 	}
 
 	cmd := exec.CommandContext(ctx, "networkctl", "reload")
