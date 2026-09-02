@@ -803,12 +803,16 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	serverModes := make(map[string]vpcapi.VPCMode, len(servers.Items))
 	modeOrder := []vpcapi.VPCMode{}
 	seenMode := map[vpcapi.VPCMode]bool{}
+	derivedAwayServers := []string{}
 	for _, server := range servers.Items {
 		mode := opts.VPCMode
 		if mode == vpcapi.VPCModeL2VNI {
 			derived, err := autoDeriveVPCMode(ctx, kube, &server, profileBySwitch)
 			if err != nil {
 				return nil, nil, fmt.Errorf("auto-deriving VPC mode for server %q: %w", server.Name, err)
+			}
+			if derived != vpcapi.VPCModeL2VNI {
+				derivedAwayServers = append(derivedAwayServers, server.Name)
 			}
 			mode = derived
 		}
@@ -817,6 +821,15 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 			seenMode[mode] = true
 			modeOrder = append(modeOrder, mode)
 		}
+	}
+	// L2VNI is both the zero value and the only "unforced" VPCMode, so an
+	// explicit --vpc-mode=l2vni is indistinguishable here from no flag at
+	// all: either way, a switch profile without L2VNI support silently
+	// bumps that server's VPCs to L3VNI. Warn so a forced-l2vni request on
+	// an all-L3VNI-only fabric isn't a silent no-op even when modeOrder
+	// itself never goes above length 1.
+	if len(derivedAwayServers) > 0 {
+		slog.Warn("VPC mode auto-derived away from L2VNI for some servers due to switch profile support", "servers", derivedAwayServers)
 	}
 	if len(modeOrder) > 1 {
 		slog.Info("Mixed VPC modes detected", "modes", modeOrder)
