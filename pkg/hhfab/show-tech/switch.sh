@@ -184,37 +184,48 @@ cat "$PARTS_DIR"/* >> "$OUTPUT_FILE"
 # ---------------------------
 # Broadcom SDK Diagnostics
 # ---------------------------
-{
-    echo -e "\n=== Broadcom Port Status ==="
-    bcmcmd "ps"
+# bcm_cmd LABEL CMD [FALLBACK_CMD ...]
+# Tries each candidate in order and keeps the first one the SDK shell
+# actually answers. bcmcmd exits 0 whether a command is accepted or
+# rejected, so a rejection is detected from its output instead: "Usage ("
+# (unknown subcommand) or "Unsupported command." (known but disabled
+# subcommand). The command set differs by ASIC/SDK generation - DS5000
+# accepts "l3 route/host/ecmp show", everything else needs
+# "l3 defip/l3table/ecmp egress show" - so a rejected first candidate is
+# expected on some platforms, not an error.
+bcm_cmd() {
+    local label="$1"; shift
+    echo -e "\n=== $label ==="
+    local cmd tmp
+    tmp=$(mktemp) || { echo "bcmcmd not run: mktemp failed"; return; }
+    for cmd in "$@"; do
+        bcmcmd "$cmd" > "$tmp" 2>&1
+        if ! grep -qE 'Usage \(|Unsupported command\.' "$tmp"; then
+            cat "$tmp"
+            rm -f "$tmp"
+            return
+        fi
+    done
+    rm -f "$tmp"
+    echo "bcmcmd rejected every candidate on this platform: $(printf '"%s" ' "$@")"
+}
 
-    echo -e "\n=== Broadcom PHY Information ==="
-    bcmcmd "phy info"
-
-    echo -e "\n=== Broadcom L2 Table ==="
-    bcmcmd "l2 show"
-
-    echo -e "\n=== Broadcom L3 Interfaces ==="
-    bcmcmd "l3 intf show"
-
-    echo -e "\n=== Broadcom L3 ACLs ==="
-    bcmcmd "l3 aacl show"
-
-    echo -e "\n=== Broadcom L3 Route Table ==="
-    bcmcmd "l3 route show"
-
-    echo -e "\n=== Broadcom L3 ECMP Table ==="
-    bcmcmd "l3 ecmp show"
-
-    echo -e "\n=== Broadcom L3 Host Table ==="
-    bcmcmd "l3 host show"
-
-    echo -e "\n=== Broadcom VLAN Table ==="
-    bcmcmd "vlan show"
-
-    echo -e "\n=== Broadcom Trunk Table ==="
-    bcmcmd "trunk show"
-} >> "$OUTPUT_FILE" 2>&1
+if command -v bcmcmd >/dev/null 2>&1; then
+    {
+        bcm_cmd "Broadcom Port Status" "ps"
+        bcm_cmd "Broadcom PHY Information" "phy info"
+        bcm_cmd "Broadcom L2 Table" "l2 show"
+        bcm_cmd "Broadcom L3 Interfaces" "l3 intf show"
+        bcm_cmd "Broadcom L3 ACLs" "fp show"
+        bcm_cmd "Broadcom L3 Route Table" "l3 route show" "l3 defip show"
+        bcm_cmd "Broadcom L3 ECMP Table" "l3 ecmp show" "l3 ecmp egress show"
+        bcm_cmd "Broadcom L3 Host Table" "l3 host show" "l3 l3table show"
+        bcm_cmd "Broadcom VLAN Table" "vlan show"
+        bcm_cmd "Broadcom Trunk Table" "trunk show"
+    } >> "$OUTPUT_FILE" 2>&1
+else
+    echo -e "\n=== Broadcom ASIC Diagnostics ===\nbcmcmd not available on this platform" >> "$OUTPUT_FILE"
+fi
 
 # ---------------------------
 # System Logs and Status
