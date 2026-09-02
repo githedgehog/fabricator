@@ -207,7 +207,7 @@ run_dp_cmd() {
             echo "Could not read --metrics-address from the dataplane process, trying $METRICS_ADDR"
         fi
         echo "Scraping http://${METRICS_ADDR}/metrics"
-        curl -s --max-time 10 "http://${METRICS_ADDR}/metrics" || echo "Metrics scrape failed"
+        curl -s --fail --max-time 10 "http://${METRICS_ADDR}/metrics" || echo "Metrics scrape failed"
     fi
 } >> "$OUTPUT_FILE" 2>&1
 
