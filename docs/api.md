@@ -344,6 +344,7 @@ _Appears in:_
 | `bootstrap` _[ControlNodeBootstrap](#controlnodebootstrap)_ |  |  |  |
 | `management` _[ControlNodeManagement](#controlnodemanagement)_ |  |  |  |
 | `dummy` _[ControlNodeDummy](#controlnodedummy)_ |  |  |  |
+| `gatewayPorts` _string array_ | GatewayPorts is the list of kernel interface names used by gateway connections, set by hydration |  |  |
 
 
 #### FabNodeStatus

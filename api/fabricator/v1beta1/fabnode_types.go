@@ -23,6 +23,8 @@ type FabNodeSpec struct {
 	Bootstrap  ControlNodeBootstrap  `json:"bootstrap,omitempty"`
 	Management ControlNodeManagement `json:"management,omitempty"`
 	Dummy      ControlNodeDummy      `json:"dummy,omitempty"`
+	// GatewayPorts is the list of kernel interface names used by gateway connections, set by hydration
+	GatewayPorts []string `json:"gatewayPorts,omitempty"`
 }
 
 type FabNodeRole string

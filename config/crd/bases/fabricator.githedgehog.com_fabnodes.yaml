@@ -64,6 +64,12 @@ spec:
                   ip:
                     type: string
                 type: object
+              gatewayPorts:
+                description: GatewayPorts is the list of kernel interface names used
+                  by gateway connections, set by hydration
+                items:
+                  type: string
+                type: array
               management:
                 properties:
                   interface:

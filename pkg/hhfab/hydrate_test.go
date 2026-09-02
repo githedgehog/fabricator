@@ -35,6 +35,11 @@ func hydrateFixture(t *testing.T, unnumbered bool) (*Config, kclient.Client) {
 		Controls: []fabapi.ControlNode{
 			{ObjectMeta: kmetav1.ObjectMeta{Name: "control-1", Namespace: "fab"}},
 		},
+		Nodes: []fabapi.FabNode{
+			{ObjectMeta: kmetav1.ObjectMeta{Name: "gw-1", Namespace: "fab"}, Spec: fabapi.FabNodeSpec{
+				Roles: []fabapi.FabNodeRole{fabapi.NodeRoleGateway},
+			}},
+		},
 		UnnumberedFabricLinks: unnumbered,
 	}
 
@@ -120,6 +125,8 @@ func TestHydrateNumbered(t *testing.T) {
 		"172.30.128.4/31", "172.30.128.5/31",
 	}, fabricMesh)
 	require.Equal(t, []string{"172.30.128.6/31", "172.30.128.7/31"}, gateway)
+	// the node recipe keeps IPv6 link-local on these ports for BGP unnumbered
+	require.Equal(t, []string{"enp2s1"}, c.Nodes[0].Spec.GatewayPorts)
 
 	h, err = c.getHydration(ctx, kube)
 	require.NoError(t, err)
