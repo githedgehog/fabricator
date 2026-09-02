@@ -16,7 +16,7 @@ export CRI_CONFIG_FILE=/dev/null
 FRR_CONTAINER_ID=$(sudo -E crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock ps --name '^frr$' -q 2>>"$OUTPUT_FILE" | head -1)
 
 # Find the running dataplane container ID
-DATAPLANE_CONTAINER_ID=$(sudo -E crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock ps -q --name dataplane 2>>"$OUTPUT_FILE" | head -1)
+DATAPLANE_CONTAINER_ID=$(sudo -E crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock ps -q --name '^dataplane$' 2>>"$OUTPUT_FILE" | head -1)
 
 # Helper for running vtysh commands inside the FRR container
 run_vtysh_cmd() {
