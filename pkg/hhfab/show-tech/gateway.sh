@@ -31,6 +31,42 @@ run_dp_cmd() {
         /dataplane-cli -c "$1" >> "$OUTPUT_FILE" 2>&1
 }
 
+# `crictl logs` only reads the current on-disk log file for a container. Kubelet
+# rotates that file once it grows past its size threshold, renaming the full file
+# to a sibling `<name>.<timestamp>[.gz]` and starting a fresh one - so on a long
+# test run, `crictl logs` alone can silently miss everything before the last
+# rotation. This reads the rotated siblings (oldest first) plus the current file,
+# so the full run is covered. Falls back to `crictl logs` if the log path can't
+# be resolved.
+capture_container_logs() {
+    local container_id="$1"
+    local log_path
+    log_path=$(sudo -E crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock inspect -o json "$container_id" 2>/dev/null | jq -r '.status.logPath // empty')
+
+    if [ -z "$log_path" ] || ! sudo test -e "$log_path"; then
+        sudo -E crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock logs "$container_id"
+        return
+    fi
+
+    # rotated siblings are named <log_path>.<YYYYMMDD-HHMMSS>[.gz], so a lexical
+    # sort is also chronological; print those first, then the current file.
+    # Capped to the 20 most recent rotations: the file's own mtime is when
+    # gzip compression finished, not when its content was written (observed
+    # lagging the embedded rotation timestamp by hours), so it can't be used
+    # to bound this by age. Capping by count instead keeps this sane on a
+    # long-lived environment where the container may have been running for
+    # days, while still covering well beyond any single CI job's runtime.
+    while IFS= read -r rotated; do
+        [ -n "$rotated" ] || continue
+        if [[ "$rotated" == *.gz ]]; then
+            sudo -E zcat "$rotated" 2>/dev/null
+        else
+            sudo -E cat "$rotated" 2>/dev/null
+        fi
+    done < <(sudo -E find "$(dirname "$log_path")" -maxdepth 1 -name "$(basename "$log_path").*" 2>/dev/null | sort | tail -n 20)
+    sudo -E cat "$log_path" 2>/dev/null
+}
+
 # ---------------------------
 # Basic System Information
 # ---------------------------
@@ -157,7 +193,7 @@ run_dp_cmd() {
 {
     echo -e "\n=== FRR Container Logs ==="
     if [ -n "$FRR_CONTAINER_ID" ]; then
-        sudo -E crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock logs "$FRR_CONTAINER_ID"
+        capture_container_logs "$FRR_CONTAINER_ID"
     else
         echo "FRR container not found - skipping container logs"
     fi
@@ -217,7 +253,7 @@ run_dp_cmd() {
 {
     echo -e "\n=== Dataplane Container Logs ==="
     if [ -n "$DATAPLANE_CONTAINER_ID" ]; then
-        sudo -E crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock logs "$DATAPLANE_CONTAINER_ID"
+        capture_container_logs "$DATAPLANE_CONTAINER_ID"
     else
         echo "Dataplane container not found - skipping container logs"
     fi
