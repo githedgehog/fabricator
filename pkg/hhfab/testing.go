@@ -1594,6 +1594,13 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 				vpc2 = "vpc-" + vpc2
 			}
 
+			if _, ok := vpcs[vpc1]; !ok {
+				return fmt.Errorf("VPC %s not found for VPC peering %s", vpc1, reqName)
+			}
+			if _, ok := vpcs[vpc2]; !ok {
+				return fmt.Errorf("VPC %s not found for VPC peering %s", vpc2, reqName)
+			}
+
 			gw := false
 			vpc1Subnets := []string{}
 			vpc2Subnets := []string{}
@@ -1693,25 +1700,21 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 			} else {
 				// Build each side's expose for the "real" VPC prefixes.
 				vpc1Expose := gwapi.PeeringEntryExpose{}
-				if vpc, ok := vpcs[vpc1]; ok {
-					for subnetName, subnet := range vpc.Spec.Subnets {
-						if len(vpc1Subnets) > 0 && !slices.Contains(vpc1Subnets, subnetName) {
-							continue
-						}
-
-						vpc1Expose.IPs = append(vpc1Expose.IPs, gwapi.PeeringEntryIP{CIDR: subnet.Subnet})
+				for subnetName, subnet := range vpcs[vpc1].Spec.Subnets {
+					if len(vpc1Subnets) > 0 && !slices.Contains(vpc1Subnets, subnetName) {
+						continue
 					}
+
+					vpc1Expose.IPs = append(vpc1Expose.IPs, gwapi.PeeringEntryIP{CIDR: subnet.Subnet})
 				}
 
 				vpc2Expose := gwapi.PeeringEntryExpose{}
-				if vpc, ok := vpcs[vpc2]; ok {
-					for subnetName, subnet := range vpc.Spec.Subnets {
-						if len(vpc2Subnets) > 0 && !slices.Contains(vpc2Subnets, subnetName) {
-							continue
-						}
-
-						vpc2Expose.IPs = append(vpc2Expose.IPs, gwapi.PeeringEntryIP{CIDR: subnet.Subnet})
+				for subnetName, subnet := range vpcs[vpc2].Spec.Subnets {
+					if len(vpc2Subnets) > 0 && !slices.Contains(vpc2Subnets, subnetName) {
+						continue
 					}
+
+					vpc2Expose.IPs = append(vpc2Expose.IPs, gwapi.PeeringEntryIP{CIDR: subnet.Subnet})
 				}
 
 				// NAT handling (PER EXPOSE / PER SIDE):
@@ -1779,6 +1782,10 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 				}
 
 				vpc = "vpc-" + vpc
+			}
+
+			if _, ok := vpcs[vpc]; !ok {
+				return fmt.Errorf("VPC %s not found for external peering %s", vpc, reqName)
 			}
 
 			gw := false
@@ -1918,13 +1925,11 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 				externalPeerings[fmt.Sprintf("%s--%s", vpc, ext)] = extPeering
 			} else {
 				vpcExpose := gwapi.PeeringEntryExpose{}
-				if vpc1, ok := vpcs[vpc]; ok {
-					for subnetName, subnet := range vpc1.Spec.Subnets {
-						if len(vpcSubnets) > 0 && !slices.Contains(vpcSubnets, subnetName) {
-							continue
-						}
-						vpcExpose.IPs = append(vpcExpose.IPs, gwapi.PeeringEntryIP{CIDR: subnet.Subnet})
+				for subnetName, subnet := range vpcs[vpc].Spec.Subnets {
+					if len(vpcSubnets) > 0 && !slices.Contains(vpcSubnets, subnetName) {
+						continue
 					}
+					vpcExpose.IPs = append(vpcExpose.IPs, gwapi.PeeringEntryIP{CIDR: subnet.Subnet})
 				}
 
 				ips := []gwapi.PeeringEntryIP{}
