@@ -44,7 +44,11 @@ OUTPUT_FILE="/tmp/show-tech.log"
   echo -e "\n=== docker logs frr (last 300) ==="
   docker logs --tail 300 frr
   echo -e "\n=== /var/run/frr/frr.log (last 300) ==="
-  tail -n 300 /var/run/frr/frr.log
+  # frr.conf sets "log file /var/run/frr/frr.log debug" inside the container;
+  # that path is owned by the container's frr user, so a host-side tail hits
+  # Permission denied even when the path exists on the host. Read it via
+  # docker exec instead, same as the vtysh wrapper above.
+  docker exec frr tail -n 300 /var/run/frr/frr.log
 } >> "$OUTPUT_FILE" 2>&1
 
 # ---------------------------
