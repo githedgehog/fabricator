@@ -147,7 +147,10 @@ Collected via `sonic-cli` and direct `bcmcmd` (Broadcom SDK).
   BGP summary (IPv4, L2VPN EVPN), BGP routes, per-neighbor state, per-VRF BGP
   and route tables, interface status, FRR logs, protocol summary, zebra status,
   memory usage, thread CPU stats, Hedgehog plugin version and RPC stats
-- **FRR container logs**: full `crictl logs` for the FRR container
+- **FRR container logs**: full container log, read directly from the on-disk
+  log files (current plus up to the 20 most recent rotations) rather than
+  `crictl logs` alone, which only returns the current file and can silently
+  miss everything before the last kubelet log rotation on a long test run
 - **Dataplane** (via `dataplane-cli` inside the dataplane container): `show
   tech` output
 - **Dataplane metrics**: full scrape of the dataplane's metrics endpoint, whose
@@ -157,7 +160,8 @@ Collected via `sonic-cli` and direct `bcmcmd` (Broadcom SDK).
   these counters are per VPC pair and directional
   (`vpc_pair_drops_packet_count{from=...,to=...}`) with no reason attached, so
   attributing a single-packet loss to a flow and a direction needs both halves
-- **Dataplane container logs**: full `crictl logs` for the dataplane container
+- **Dataplane container logs**: same rotation-aware capture as the FRR
+  container logs above
 - **Services and logs**: `k3s-agent.service` status and last-hour logs,
   `sshd` status, `systemd-networkd` last-hour logs, kernel logs (last hour),
   kernel network/bond/VLAN messages from `dmesg`
