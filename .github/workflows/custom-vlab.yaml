@@ -30,6 +30,7 @@ on:
         required: false
         default: "l2vni"
         options:
+          - auto
           - l2vni
           - l3vni
       hybrid:
