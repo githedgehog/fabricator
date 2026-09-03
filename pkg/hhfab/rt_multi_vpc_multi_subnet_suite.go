@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/netip"
+	"slices"
 	"strings"
 	"time"
 
@@ -296,6 +297,129 @@ func (testCtx *VPCPeeringTestCtx) pingStaticExternal(ctx context.Context, source
 	return nil
 }
 
+// vpcAttachedServer is a server attached to a VPC, and the switches its connection lands on.
+type vpcAttachedServer struct {
+	server   string
+	switches []string
+}
+
+// staticExternalSelection is everything staticExternalTest needs to run: the connection whose
+// server it replaces with the static external, and the VPCs and servers it tests from.
+type staticExternalSelection struct {
+	// conn is the unbundled connection whose server is replaced by the static external
+	conn *wiringapi.Connection
+	// targetVPC is the VPC the replaced server was attached to
+	targetVPC string
+	// inVPC is the VPC where we will add the static external, inServer another server in it
+	inVPC    *vpcapi.VPC
+	inServer string
+	// otherVPC is a separate VPC we will use for negative connectivity testing
+	otherVPC    *vpcapi.VPC
+	otherServer string
+	// routeCheckSw are switches where we need to check for route presence later
+	routeCheckSw map[string]bool
+}
+
+// selectStaticExternalTarget picks the unbundled connection whose server staticExternalTest will
+// replace with the static external, along with the VPCs and servers the test needs. Candidates are
+// considered in name order and the first usable one wins: replacing a server takes it out of its
+// VPC, so a candidate that leaves fewer than 2 VPCs with an attached server is passed over, as is
+// one whose connection does not have exactly one VPCAttachment. Fails with errNotEnoughVPCs when
+// no candidate is usable.
+func selectStaticExternalTarget(ctx context.Context, kube kclient.Client, candidates []wiringapi.Connection, vpcList *vpcapi.VPCList) (*staticExternalSelection, error) {
+	attachList := &vpcapi.VPCAttachmentList{}
+	if err := kube.List(ctx, attachList); err != nil {
+		return nil, fmt.Errorf("listing VPCAttachments: %w", err)
+	}
+	connList := &wiringapi.ConnectionList{}
+	if err := kube.List(ctx, connList); err != nil {
+		return nil, fmt.Errorf("listing connections: %w", err)
+	}
+	conns := make(map[string]*wiringapi.Connection, len(connList.Items))
+	for i := range connList.Items {
+		conns[connList.Items[i].Name] = &connList.Items[i]
+	}
+
+	// index the servers attached to each VPC once, so the candidate loop below is in-memory only
+	byVPC := make(map[string][]vpcAttachedServer, len(vpcList.Items))
+	vpcOfConn := make(map[string]string, len(attachList.Items))
+	attachCount := make(map[string]int, len(attachList.Items))
+	for _, attach := range attachList.Items {
+		conn, ok := conns[attach.Spec.Connection]
+		if !ok {
+			return nil, fmt.Errorf("connection %s for VPCAttachment %s not found", attach.Spec.Connection, attach.Name) //nolint:goerr113
+		}
+		switches, servers, _, _, _ := conn.Spec.Endpoints()
+		if len(servers) != 1 {
+			return nil, fmt.Errorf("expected 1 server for connection %s, got %d", conn.Name, len(servers)) //nolint:goerr113
+		}
+		vpcName := attach.Spec.VPCName()
+		byVPC[vpcName] = append(byVPC[vpcName], vpcAttachedServer{server: servers[0], switches: switches})
+		vpcOfConn[conn.Name] = vpcName
+		attachCount[conn.Name]++
+	}
+
+	// kube.List order is not stable, sort so the same candidate is picked on every run
+	slices.SortFunc(candidates, func(a, b wiringapi.Connection) int { return strings.Compare(a.Name, b.Name) })
+	slices.SortFunc(vpcList.Items, func(a, b vpcapi.VPC) int { return strings.Compare(a.Name, b.Name) })
+	// a real API server does not order VPCAttachments, so the servers within a VPC need sorting too.
+	// A server attached through two connections yields two entries with the same name, so tie-break
+	// on the switches to keep the routeCheckSw derived below stable.
+	for vpcName := range byVPC {
+		slices.SortFunc(byVPC[vpcName], func(a, b vpcAttachedServer) int {
+			if c := strings.Compare(a.server, b.server); c != 0 {
+				return c
+			}
+
+			return slices.Compare(a.switches, b.switches)
+		})
+	}
+
+	for i := range candidates {
+		c := &candidates[i]
+		if attachCount[c.Name] != 1 {
+			slog.Debug("Skipping candidate, expected 1 VPCAttachment", "connection", c.Name, "attachments", attachCount[c.Name])
+
+			continue
+		}
+
+		target := c.Spec.Unbundled.Link.Server.DeviceName()
+		sel := &staticExternalSelection{conn: c, targetVPC: vpcOfConn[c.Name], routeCheckSw: map[string]bool{}}
+		for j := range vpcList.Items {
+			vpc := &vpcList.Items[j]
+			for _, s := range byVPC[vpc.Name] {
+				// the target server is about to be replaced, so it cannot be tested from
+				if s.server == target {
+					continue
+				}
+				if sel.inVPC == nil {
+					sel.inVPC, sel.inServer = vpc, s.server
+					for _, sw := range s.switches {
+						sel.routeCheckSw[sw] = true
+					}
+				} else {
+					sel.otherVPC, sel.otherServer = vpc, s.server
+				}
+
+				// one server per VPC is all the test needs
+				break
+			}
+			if sel.otherVPC != nil {
+				break
+			}
+		}
+		if sel.otherVPC == nil {
+			slog.Debug("Skipping candidate, replacing its server leaves fewer than 2 VPCs with an attached server", "connection", c.Name)
+
+			continue
+		}
+
+		return sel, nil
+	}
+
+	return nil, fmt.Errorf("%w: no unbundled connection leaves 2 VPCs with an attached server", errNotEnoughVPCs)
+}
+
 /* This test replaces a server with a "static external" node, Here are the test steps:
  * 0. find an unbundled connection THAT IS NOT ATTACHED TO AN MCLAG SWITCH, take note of params (target server, switch, switch port, server port)
  * 1. find two VPCs with at least one server attached to each, i.e. vpc1 and vpc2
@@ -336,40 +460,16 @@ func staticExternalTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Conn
 			mclagSwitches[sw.Name] = true
 		}
 	}
-	var conn *wiringapi.Connection
-	var targetServerVPC string
+	candidates := make([]wiringapi.Connection, 0, len(connList.Items))
 	for _, c := range connList.Items {
-		swName := c.Spec.Unbundled.Link.Switch.DeviceName()
-		if _, ok := mclagSwitches[swName]; ok {
-			continue
+		if !mclagSwitches[c.Spec.Unbundled.Link.Switch.DeviceName()] {
+			candidates = append(candidates, c)
 		}
-		conn = &c
-		// recall the VPC attached to this connection for later
-		vpcAttachList := &vpcapi.VPCAttachmentList{}
-		if err := testCtx.kube.List(ctx, vpcAttachList, kclient.MatchingLabels{wiringapi.LabelConnection: conn.Name}); err != nil {
-			return false, nil, fmt.Errorf("listing VPCAttachments for connection %s: %w", conn.Name, err)
-		}
-		if len(vpcAttachList.Items) != 1 {
-			return false, nil, fmt.Errorf("expected 1 VPCAttachment for connection %s, got %d", conn.Name, len(vpcAttachList.Items)) //nolint:goerr113
-		}
-		targetServerVPC = vpcAttachList.Items[0].Spec.VPCName()
-
-		break
 	}
-	if conn == nil {
+	if len(candidates) == 0 {
 		slog.Info("No unbundled connections found that are not attached to an MCLAG switch, skipping test")
 
 		return true, nil, errNoUnbundled
-	}
-
-	targetServer := conn.Spec.Unbundled.Link.Server.DeviceName()
-	switchName := conn.Spec.Unbundled.Link.Switch.DeviceName()
-	switchPortName := conn.Spec.Unbundled.Link.Switch.PortName()
-	serverPortName := conn.Spec.Unbundled.Link.Server.LocalPortName()
-	slog.Debug("Found unbundled connection", "connection", conn.Name, "server", targetServer, "switch", switchName, "port", switchPortName, "VPC", targetServerVPC)
-	targetServerSSH, err := testCtx.getSSH(ctx, targetServer)
-	if err != nil {
-		return false, nil, fmt.Errorf("getting ssh config for target server %s: %w", targetServer, err)
 	}
 
 	// find two VPCs with at least a server attached to each, we'll need them later for testing
@@ -382,66 +482,34 @@ func staticExternalTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Conn
 
 		return true, nil, errNotEnoughVPCs
 	}
-	// inVPC is the VPC where we will add the static external
-	// otherVPC is a separate VPC we will use for negative connectivity testing
-	var inVPC, otherVPC *vpcapi.VPC
-	var inServer, otherServer string
+
+	sel, err := selectStaticExternalTarget(ctx, testCtx.kube, candidates, vpcList)
+	if err != nil {
+		if errors.Is(err, errNotEnoughVPCs) {
+			slog.Info("No unbundled connection can be replaced while leaving 2 VPCs with an attached server, skipping test")
+
+			return true, nil, err
+		}
+
+		return false, nil, err
+	}
+	conn := sel.conn
+	inVPC, inServer, otherVPC, otherServer := sel.inVPC, sel.inServer, sel.otherVPC, sel.otherServer
+
+	targetServer := conn.Spec.Unbundled.Link.Server.DeviceName()
+	switchName := conn.Spec.Unbundled.Link.Switch.DeviceName()
+	switchPortName := conn.Spec.Unbundled.Link.Switch.PortName()
+	serverPortName := conn.Spec.Unbundled.Link.Server.LocalPortName()
+	slog.Debug("Found unbundled connection", "connection", conn.Name, "server", targetServer, "switch", switchName, "port", switchPortName, "VPC", sel.targetVPC)
+	targetServerSSH, err := testCtx.getSSH(ctx, targetServer)
+	if err != nil {
+		return false, nil, fmt.Errorf("getting ssh config for target server %s: %w", targetServer, err)
+	}
+
 	// routeCheckSw keeps track of switches where we need to check for route presence later
-	routeCheckSw := map[string]bool{}
+	routeCheckSw := sel.routeCheckSw
 	routeCheckSw[switchName] = true
 
-	vpcAttachList := &vpcapi.VPCAttachmentList{}
-	for _, vpc := range vpcList.Items {
-		if inVPC != nil && otherVPC != nil {
-			break
-		}
-		if err := testCtx.kube.List(ctx, vpcAttachList, kclient.MatchingLabels{wiringapi.LabelVPC: vpc.Name}); err != nil {
-			return false, nil, fmt.Errorf("listing VPCAttachments for VPC %s: %w", vpc.Name, err)
-		}
-		for _, vpcAttach := range vpcAttachList.Items {
-			conn := &wiringapi.Connection{}
-			connName := vpcAttach.Spec.Connection
-			if err := testCtx.kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: connName}, conn); err != nil {
-				return false, nil, fmt.Errorf("getting connection %s for VPC Attach %s: %w", connName, vpcAttach.Name, err)
-			}
-			switches, servers, _, _, _ := conn.Spec.Endpoints()
-			if len(servers) != 1 {
-				return false, nil, fmt.Errorf("expected 1 server for connection %s, got %d", conn.Name, len(servers)) //nolint:goerr113
-			}
-			if servers[0] == targetServer {
-				slog.Debug("Skipping target server", "vpc", vpc.Name, "server", targetServer)
-
-				continue
-			}
-			if inVPC == nil {
-				// if we have not found yet the VPC where we will add the static external and there's a single attachment to the target server,
-				// that means we cannot use this VPC - there would be no other server within the VPC to test from
-				if vpc.Name == targetServerVPC && len(vpcAttachList.Items) == 2 {
-					slog.Debug("VPC has only one additional server beyond target, using it as otherVPC")
-					otherVPC = &vpc
-					otherServer = servers[0]
-
-					break
-				}
-				inVPC = &vpc
-				inServer = servers[0]
-				for _, sw := range switches {
-					routeCheckSw[sw] = true
-				}
-
-				break
-			}
-			otherVPC = &vpc
-			otherServer = servers[0]
-
-			break
-		}
-	}
-	if inVPC == nil || otherVPC == nil || inServer == "" || otherServer == "" {
-		slog.Info("Not enough VPCs with attached servers found, skipping test")
-
-		return true, nil, errNotEnoughVPCs
-	}
 	slog.Debug("Found VPCs and servers", "inVPC", inVPC.Name, "inServer", inServer, "otherVPC", otherVPC.Name, "otherServer", otherServer)
 
 	// get agent generation for the switch
