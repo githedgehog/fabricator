@@ -317,6 +317,10 @@ func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) erro
 	}
 }
 
+// VPCModeAuto is the --vpc-mode value that derives each VPC's mode from the
+// SwitchProfiles of the leaves its servers attach to, i.e. SetupVPCsOpts.AutoVPCMode.
+const VPCModeAuto = "auto"
+
 type SetupVPCsOpts struct {
 	WaitSwitchesReady bool
 	ForceCleanup      bool
@@ -329,6 +333,7 @@ type SetupVPCsOpts struct {
 	InterfaceMTU      uint16
 	HashPolicy        string
 	VPCMode           vpcapi.VPCMode
+	AutoVPCMode       bool
 	KeepPeerings      bool
 	HostBGPSubnet     bool
 	P2P               bool
@@ -589,13 +594,12 @@ func ResolveDefaultServerMTU(ctx context.Context, kube kclient.Client, opts *Set
 }
 
 // hasNonL2VNIServer reports whether any server in the fabric would land in a
-// non-L2VNI VPC under the given override. When override is L2VNI (empty
-// string) the modes are auto-derived per server, matching what SetupVPCs
-// will do, so callers can decide ahead of time whether the run will skip
-// ESLAG-attached servers.
-func hasNonL2VNIServer(ctx context.Context, kube kclient.Client, override vpcapi.VPCMode) (bool, error) {
-	if override != vpcapi.VPCModeL2VNI {
-		return true, nil
+// non-L2VNI VPC for the given mode. When auto is set the modes are derived
+// per server, matching what SetupVPCs will do, so callers can decide ahead
+// of time whether the run will skip ESLAG-attached servers.
+func hasNonL2VNIServer(ctx context.Context, kube kclient.Client, mode vpcapi.VPCMode, auto bool) (bool, error) {
+	if !auto {
+		return mode != vpcapi.VPCModeL2VNI, nil
 	}
 	switchList := &wiringapi.SwitchList{}
 	if err := kube.List(ctx, switchList); err != nil {
@@ -633,7 +637,7 @@ func hasNonL2VNIServer(ctx context.Context, kube kclient.Client, override vpcapi
 // around this server. When every leaf the server attaches to advertises
 // Features.L2VNI=true, the result is L2VNI; if any attached leaf is
 // L3VNI-only (e.g. celestica-ds5000), the result is L3VNI. Servers with no
-// connections default to L2VNI. Used when SetupVPCsOpts.VPCMode is empty
+// connections default to L2VNI. Used when SetupVPCsOpts.AutoVPCMode is set
 // so that the caller does not have to know the hardware capability mix.
 func autoDeriveVPCMode(ctx context.Context, kube kclient.Client, server *wiringapi.Server, profileBySwitch map[string]*wiringapi.SwitchProfile) (vpcapi.VPCMode, error) {
 	conns := &wiringapi.ConnectionList{}
@@ -725,8 +729,12 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	}
 
 	{
+		mode := string(opts.VPCMode)
+		if opts.AutoVPCMode {
+			mode = VPCModeAuto
+		}
 		args := []any{
-			"mode", opts.VPCMode,
+			"mode", mode,
 			"perSubnet", opts.ServersPerSubnet,
 			"perVPC", opts.SubnetsPerVPC,
 			"wait", opts.WaitSwitchesReady,
@@ -794,19 +802,19 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		return cmp.Compare(serverIDs[a.Name], serverIDs[b.Name])
 	})
 
-	// Resolve per-server VPC mode. When opts.VPCMode is set (l3vni / l3flat),
-	// every VPC takes that mode (force-everywhere override). Otherwise the
-	// mode is auto-derived from the SwitchProfile.Features.L2VNI of every
-	// leaf the server attaches to: L3VNI when any attached leaf is L3VNI-only,
-	// L2VNI everywhere else. Mode order = first-occurrence in numeric server
-	// order, so vpc-01 inherits the mode of the lowest-numbered server.
+	// Resolve per-server VPC mode. Without AutoVPCMode every VPC takes
+	// opts.VPCMode. With it, the mode is derived from the
+	// SwitchProfile.Features.L2VNI of every leaf the server attaches to:
+	// L3VNI when any attached leaf is L3VNI-only, L2VNI everywhere else.
+	// Mode order = first-occurrence in numeric server order, so vpc-01
+	// inherits the mode of the lowest-numbered server.
 	serverModes := make(map[string]vpcapi.VPCMode, len(servers.Items))
 	modeOrder := []vpcapi.VPCMode{}
 	seenMode := map[vpcapi.VPCMode]bool{}
 	derivedAwayServers := []string{}
 	for _, server := range servers.Items {
 		mode := opts.VPCMode
-		if mode == vpcapi.VPCModeL2VNI {
+		if opts.AutoVPCMode {
 			derived, err := autoDeriveVPCMode(ctx, kube, &server, profileBySwitch)
 			if err != nil {
 				return nil, nil, fmt.Errorf("auto-deriving VPC mode for server %q: %w", server.Name, err)
@@ -822,14 +830,8 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 			modeOrder = append(modeOrder, mode)
 		}
 	}
-	// L2VNI is both the zero value and the only "unforced" VPCMode, so an
-	// explicit --vpc-mode=l2vni is indistinguishable here from no flag at
-	// all: either way, a switch profile without L2VNI support silently
-	// bumps that server's VPCs to L3VNI. Warn so a forced-l2vni request on
-	// an all-L3VNI-only fabric isn't a silent no-op even when modeOrder
-	// itself never goes above length 1.
 	if len(derivedAwayServers) > 0 {
-		slog.Warn("VPC mode auto-derived away from L2VNI for some servers due to switch profile support", "servers", derivedAwayServers)
+		slog.Info("VPC mode auto-derived to L3VNI for servers on leaves without L2VNI support", "servers", derivedAwayServers)
 	}
 	if len(modeOrder) > 1 {
 		slog.Info("Mixed VPC modes detected", "modes", modeOrder)
@@ -4139,6 +4141,7 @@ type ReleaseTestOpts struct {
 	PauseOnFailure bool
 	HashPolicy     string
 	VPCMode        vpcapi.VPCMode
+	AutoVPCMode    bool
 	ListTests      bool
 	ShowTechDump   bool
 	IPerfsMinSpeed float64

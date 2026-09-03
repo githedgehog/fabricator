@@ -109,6 +109,7 @@ type VLABRunOpts struct {
 	CollectShowTech          bool
 	ForceCollectShowTech     bool
 	VPCMode                  vpcapi.VPCMode
+	AutoVPCMode              bool
 	PauseOnFailure           bool
 	ReleaseTestRegexes       []string
 	ReleaseTestRegexesInvert bool
@@ -695,6 +696,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						TimeServers:       []string{"219.239.35.0"},
 						HashPolicy:        HashPolicyL2And3,
 						VPCMode:           opts.VPCMode,
+						AutoVPCMode:       opts.AutoVPCMode,
 						InterfaceMTU:      opts.InterfaceMTU,
 					}
 					slog.Debug("Running setup-vpcs", "opts", setupVPCsOpts)
@@ -762,6 +764,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						ResultsFile:    "release-test.xml",
 						HashPolicy:     HashPolicyL2And3,
 						VPCMode:        opts.VPCMode,
+						AutoVPCMode:    opts.AutoVPCMode,
 						PauseOnFailure: opts.PauseOnFailure,
 						Regexes:        opts.ReleaseTestRegexes,
 						InvertRegex:    opts.ReleaseTestRegexesInvert,

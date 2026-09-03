@@ -90,11 +90,11 @@ func makeTestCtx(ctx context.Context, kube kclient.Client, setupOpts SetupVPCsOp
 	testCtx.vlab = vlab
 	testCtx.setupOpts = setupOpts
 	// SetupVPCs skips ESLAG-attached servers when their resolved mode is non-
-	// L2VNI (auto-derived from SwitchProfile.Features.L2VNI or forced via the
-	// override). Relax RequireAllServers whenever any server in the fabric
+	// L2VNI (derived from SwitchProfile.Features.L2VNI or forced via
+	// --vpc-mode). Relax RequireAllServers whenever any server in the fabric
 	// resolves to non-L2VNI so TestConnectivity does not flag those skips.
 	requireAll := true
-	if hasNonL2VNI, err := hasNonL2VNIServer(ctx, kube, setupOpts.VPCMode); err != nil {
+	if hasNonL2VNI, err := hasNonL2VNIServer(ctx, kube, setupOpts.VPCMode, setupOpts.AutoVPCMode); err != nil {
 		slog.Warn("Failed to detect non-L2VNI servers; requiring all servers", "error", err)
 	} else if hasNonL2VNI {
 		requireAll = false
@@ -864,6 +864,7 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOp
 		IPv4Namespace:     "default",
 		HashPolicy:        rtOpts.HashPolicy,
 		VPCMode:           rtOpts.VPCMode,
+		AutoVPCMode:       rtOpts.AutoVPCMode,
 	}
 
 	// Resolve the default server MTU up front so testCtx.setupOpts.InterfaceMTU
