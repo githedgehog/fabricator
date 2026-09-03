@@ -133,6 +133,11 @@ func eslagTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *Connecti
 	if err := testCtx.kube.List(ctx, conns, kclient.MatchingLabels{wiringapi.LabelConnectionType: wiringapi.ConnectionTypeESLAG}); err != nil {
 		return false, nil, fmt.Errorf("listing connections: %w", err)
 	}
+	if len(conns.Items) == 0 {
+		slog.Info("No ESLAG connections found, skipping test")
+
+		return true, nil, errNoEslags
+	}
 	// ESLAG is not compatible with L3VNI / L3Flat: SetupVPCs skips those
 	// servers from VPC creation. Keep only ESLAG conns whose attached server
 	// landed in an L2VNI VPC; skip the test if none remain.
