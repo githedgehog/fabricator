@@ -35,13 +35,14 @@ run_dp_cmd() {
 # rotates that file once it grows past its size threshold, renaming the full file
 # to a sibling `<name>.<timestamp>[.gz]` and starting a fresh one - so on a long
 # test run, `crictl logs` alone can silently miss everything before the last
-# rotation. This reads the rotated siblings (oldest first) plus the current file,
-# so the full run is covered. Falls back to `crictl logs` if the log path can't
-# be resolved.
+# rotation. This reads the rotated siblings (oldest first, capped to the 20 most
+# recent) plus the current file. Falls back to `crictl logs` if the log path
+# can't be resolved.
 capture_container_logs() {
     local container_id="$1"
     local log_path
-    log_path=$(sudo -E crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock inspect -o json "$container_id" 2>/dev/null | jq -r '.status.logPath // empty')
+    log_path=$(sudo -E crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock \
+        inspect -o go-template --template '{{.status.logPath}}' "$container_id" 2>/dev/null)
 
     if [ -z "$log_path" ] || ! sudo test -e "$log_path"; then
         sudo -E crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock logs "$container_id"
