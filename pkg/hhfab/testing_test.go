@@ -521,6 +521,73 @@ func TestUDPProbeCmd(t *testing.T) {
 	}
 }
 
+func TestIPerf3ClientArgs(t *testing.T) {
+	toIP := netip.MustParseAddr("10.0.1.10")
+
+	for _, test := range []struct {
+		name            string
+		opts            TestConnectivityOpts
+		toPort          uint16
+		streams         int
+		bidir           bool
+		expectedTimeout int
+		expected        string
+	}{
+		{
+			name:            "full unset mode",
+			opts:            TestConnectivityOpts{IPerfsSeconds: 3},
+			streams:         iperf3FullStreams,
+			expectedTimeout: 28,
+			expected:        "-J -c 10.0.1.10 -P 4 -t 3",
+		},
+		{
+			name:            "full explicit mode bidir",
+			opts:            TestConnectivityOpts{IPerfsSeconds: 10, IPerfsMode: IPerfsModeFull},
+			streams:         iperf3FullStreams,
+			bidir:           true,
+			expectedTimeout: 35,
+			expected:        "-J -c 10.0.1.10 -P 4 -t 10 --bidir",
+		},
+		{
+			name:            "full with port and marking",
+			opts:            TestConnectivityOpts{IPerfsSeconds: 3, IPerfsDSCP: 24, IPerfsTOS: 96},
+			toPort:          15201,
+			streams:         1,
+			expectedTimeout: 28,
+			expected:        "-J -c 10.0.1.10 -p 15201 -P 1 -t 3 --dscp 24 --tos 96",
+		},
+		{
+			name:            "smoke",
+			opts:            TestConnectivityOpts{IPerfsSeconds: 3, IPerfsMode: IPerfsModeSmoke},
+			streams:         iperf3FullStreams,
+			expectedTimeout: iperf3SmokeTimeoutSeconds,
+			expected:        "-J -c 10.0.1.10 -P 1 -n 1K -l 1K",
+		},
+		{
+			name:            "smoke ignores bidir and duration",
+			opts:            TestConnectivityOpts{IPerfsSeconds: 10, IPerfsMode: IPerfsModeSmoke},
+			streams:         iperf3FullStreams,
+			bidir:           true,
+			expectedTimeout: iperf3SmokeTimeoutSeconds,
+			expected:        "-J -c 10.0.1.10 -P 1 -n 1K -l 1K",
+		},
+		{
+			name:            "smoke with port and marking",
+			opts:            TestConnectivityOpts{IPerfsSeconds: 3, IPerfsMode: IPerfsModeSmoke, IPerfsDSCP: 24, IPerfsTOS: 96},
+			toPort:          15201,
+			streams:         1,
+			expectedTimeout: iperf3SmokeTimeoutSeconds,
+			expected:        "-J -c 10.0.1.10 -p 15201 -P 1 -n 1K -l 1K --dscp 24 --tos 96",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			timeout, args := iperf3ClientArgs(test.opts, toIP, netip.Addr{}, test.toPort, test.streams, test.bidir)
+			require.Equal(t, test.expectedTimeout, timeout)
+			require.Equal(t, test.expected, args)
+		})
+	}
+}
+
 func mapSlice[IN, OUT any](f func(IN) OUT, in []IN) []OUT {
 	out := make([]OUT, len(in))
 	for i, v := range in {

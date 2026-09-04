@@ -1029,6 +1029,7 @@ func getNATTestCases() []JUnitTestCase {
 			F:    gatewayPeeringPortForwardNATTest,
 			SkipFlags: SkipFlags{
 				NoGateway: true,
+				NoIperf:   true,
 			},
 		},
 		{
@@ -1036,6 +1037,7 @@ func getNATTestCases() []JUnitTestCase {
 			F:    gatewayPeeringMasqueradePortForwardNATTest,
 			SkipFlags: SkipFlags{
 				NoGateway: true,
+				NoIperf:   true,
 			},
 		},
 	}
