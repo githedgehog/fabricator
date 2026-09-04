@@ -1068,20 +1068,33 @@ func createParallelEdges(model *MxGraphModel, group LinkGroup, cellMap map[strin
 	}
 }
 
+// isLoneTenant reports whether node's tenant is its own single-switch
+// identity, rather than a redundancy group it shares with other switches.
+func isLoneTenant(node Node) bool {
+	return node.Tenant != "" && node.Properties[PropRedundancyGroup] == ""
+}
+
 // edgeTenantParent returns the draw.io layer an edge (and its port/speed
 // labels) belongs to. When one endpoint has a tenant, the edge belongs to
 // that tenant's layer so it hides together with it (this also covers a
 // shared/core node linking into a tenant, e.g. a spine-to-ToR fabric link).
-// When both endpoints have different tenants (e.g. a cross-tenant mgmt
-// uplink between two ToRs), the source's tenant wins, deterministically but
-// arbitrarily — a minor simplification, since such links are rare and not
-// the primary interest of a single-tenant view. Edges between two core nodes
-// stay on the default layer.
+// When both endpoints have different tenants — e.g. a cross-tenant mgmt
+// uplink from an env's ToR into the rack's shared, redundancy-group leaf
+// pair — the single-ToR tenant wins over the redundancy-group one, since
+// the link is conceptually part of setting up that env, not the shared
+// rack; between two same-kind tenants, the source's wins, arbitrarily but
+// deterministically. Edges between two core nodes stay on the default layer.
 func edgeTenantParent(source, target string) string {
 	srcNode := findNode(nodes, source)
 	tgtNode := findNode(nodes, target)
 
 	switch {
+	case srcNode.Tenant != "" && tgtNode.Tenant != "" && srcNode.Tenant != tgtNode.Tenant:
+		if isLoneTenant(tgtNode) && !isLoneTenant(srcNode) {
+			return tenantLayerID(tgtNode.Tenant)
+		}
+
+		return tenantLayerID(srcNode.Tenant)
 	case srcNode.Tenant != "":
 		return tenantLayerID(srcNode.Tenant)
 	case tgtNode.Tenant != "":
