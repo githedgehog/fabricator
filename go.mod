@@ -35,7 +35,7 @@ require (
 	github.com/shirou/gopsutil/v3 v3.24.5
 	github.com/stretchr/testify v1.12.1
 	github.com/urfave/cli/v2 v2.27.7
-	github.com/vbauerster/mpb/v8 v8.15.2
+	github.com/vbauerster/mpb/v8 v8.16.1
 	github.com/vishvananda/netlink v1.3.1
 	go.githedgehog.com/fabric v0.130.3
 	go.githedgehog.com/libmeta v0.4.0
@@ -150,7 +150,7 @@ require (
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
 	github.com/maruel/natural v1.3.0 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
-	github.com/mattn/go-runewidth v0.0.27 // indirect
+	github.com/mattn/go-runewidth v0.0.28 // indirect
 	github.com/mattn/go-sqlite3 v1.14.48 // indirect
 	github.com/miekg/pkcs11 v1.1.2 // indirect
 	github.com/mikelolasagasti/xz v1.0.1 // indirect
