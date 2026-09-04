@@ -1013,14 +1013,14 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 	return topo, nil
 }
 
-// assignTenants groups each non-spine leaf switch, and every server attached
-// to it, into a tenant so the diagram can render them on their own toggleable
-// layer (e.g. one HLAB rack shared by several env-NN test slots, each with
-// its own ToR). Spine switches, gateways, and externals are shared/core and
-// stay untenanted. A leaf's tenant is its redundancy group name when it has
-// one, so an ESLAG-paired leaf pair (and its directly attached servers) forms
-// a single tenant rather than two overlapping ones; otherwise it's the leaf's
-// own name.
+// assignTenants groups each non-spine leaf switch, and every server or
+// external attached to it, into a tenant so the diagram can render them on
+// their own toggleable layer (e.g. one HLAB rack shared by several env-NN
+// test slots, each with its own ToR). Spine switches and gateways are
+// shared/core and stay untenanted. A leaf's tenant is its redundancy group
+// name when it has one, so an ESLAG-paired leaf pair (and everything
+// attached to it) forms a single tenant rather than two overlapping ones;
+// otherwise it's the leaf's own name.
 func assignTenants(topo *Topology) {
 	nodeIndex := make(map[string]int, len(topo.Nodes))
 	for i, node := range topo.Nodes {
@@ -1040,7 +1040,9 @@ func assignTenants(topo *Topology) {
 		topo.Nodes[nodeIndex[node.ID]].Tenant = tenant
 	}
 
-	// Propagate the tenant from each leaf to the servers connected to it.
+	// Propagate the tenant from each leaf to the servers and externals
+	// connected to it.
+	isLeaf := func(t string) bool { return t == NodeTypeServer || t == NodeTypeExternal }
 	for _, link := range topo.Links {
 		srcIdx, srcOK := nodeIndex[link.Source]
 		tgtIdx, tgtOK := nodeIndex[link.Target]
@@ -1049,10 +1051,10 @@ func assignTenants(topo *Topology) {
 		}
 
 		src, tgt := &topo.Nodes[srcIdx], &topo.Nodes[tgtIdx]
-		if src.Type == NodeTypeServer && src.Tenant == "" && tgt.Tenant != "" {
+		if isLeaf(src.Type) && src.Tenant == "" && tgt.Tenant != "" {
 			src.Tenant = tgt.Tenant
 		}
-		if tgt.Type == NodeTypeServer && tgt.Tenant == "" && src.Tenant != "" {
+		if isLeaf(tgt.Type) && tgt.Tenant == "" && src.Tenant != "" {
 			tgt.Tenant = src.Tenant
 		}
 	}

@@ -514,7 +514,7 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 
 			cell := MxCell{
 				ID:     node.ID,
-				Parent: "1",
+				Parent: nodeParent(node),
 				Value:  FormatNodeValue(node, style),
 				Style:  GetNodeStyle(node, style),
 				Vertex: "1",
@@ -573,7 +573,7 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 
 			cell := MxCell{
 				ID:     node.ID,
-				Parent: "1",
+				Parent: nodeParent(node),
 				Value:  FormatNodeValue(node, style),
 				Style:  GetNodeStyle(node, style),
 				Vertex: "1",
@@ -593,28 +593,55 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 	serverNodeWidth := 100
 	var serverSpacing float64 = 60
 
-	totalServerWidth := float64(len(layers.Server)*serverNodeWidth) + serverSpacing*float64(len(layers.Server)-1)
-	serverStartX := leafCenterX - (totalServerWidth / 2)
+	// Each tenant's servers are centered independently, at the same X range
+	// as every other tenant's — tenants are never viewed at the same time
+	// (only one layer is visible by default), so their server rows are meant
+	// to overlap rather than share one wide row sized for every tenant's
+	// servers combined.
+	serversByTenant := make(map[string][]Node)
+	for _, node := range layers.Server {
+		serversByTenant[node.Tenant] = append(serversByTenant[node.Tenant], node)
+	}
 
-	for i, node := range layers.Server {
-		width, height := GetNodeDimensions(node)
-		x := serverStartX + float64(i)*(float64(width)+serverSpacing)
-		cell := MxCell{
-			ID:     node.ID,
-			Parent: nodeParent(node),
-			Value:  FormatNodeValue(node, style),
-			Style:  GetNodeStyle(node, style),
-			Vertex: "1",
-			Geometry: &Geometry{
-				X:      x,
-				Y:      float64(serverY),
-				Width:  width,
-				Height: height,
-				As:     "geometry",
-			},
+	serverTenants := make([]string, 0, len(serversByTenant))
+	for tenant := range serversByTenant {
+		serverTenants = append(serverTenants, tenant)
+	}
+	sort.Strings(serverTenants)
+
+	// totalServerWidth/serverStartX track the widest tenant's row, reused
+	// below only to size/position the (global, all-tenant) VPC legend.
+	var totalServerWidth, serverStartX float64
+	for _, tenant := range serverTenants {
+		group := serversByTenant[tenant]
+		groupWidth := float64(len(group)*serverNodeWidth) + serverSpacing*float64(len(group)-1)
+		groupStartX := leafCenterX - (groupWidth / 2)
+
+		if groupWidth > totalServerWidth {
+			totalServerWidth = groupWidth
+			serverStartX = groupStartX
 		}
-		cellMap[node.ID] = &cell
-		model.Root.MxCell = append(model.Root.MxCell, cell)
+
+		for i, node := range group {
+			width, height := GetNodeDimensions(node)
+			x := groupStartX + float64(i)*(float64(width)+serverSpacing)
+			cell := MxCell{
+				ID:     node.ID,
+				Parent: nodeParent(node),
+				Value:  FormatNodeValue(node, style),
+				Style:  GetNodeStyle(node, style),
+				Vertex: "1",
+				Geometry: &Geometry{
+					X:      x,
+					Y:      float64(serverY),
+					Width:  width,
+					Height: height,
+					As:     "geometry",
+				},
+			}
+			cellMap[node.ID] = &cell
+			model.Root.MxCell = append(model.Root.MxCell, cell)
+		}
 	}
 
 	nodeConnectionsMap = make(map[string][]float64)
