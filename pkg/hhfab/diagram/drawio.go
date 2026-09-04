@@ -94,6 +94,7 @@ type EdgePositionData struct {
 	UnitX    float64
 	UnitY    float64
 	Rotation float64
+	Parent   string // draw.io layer this edge belongs to, see edgeTenantParent
 }
 
 var edgePositions []EdgePositionData
@@ -154,8 +155,82 @@ func GenerateDrawio(workDir string, topo Topology, styleType StyleType, outputPa
 	return nil
 }
 
+// collectTenants returns the distinct tenant names present in nodes, sorted
+// for deterministic output.
+func collectTenants(nodes []Node) []string {
+	seen := make(map[string]bool)
+	tenants := make([]string, 0, len(nodes))
+	for _, node := range nodes {
+		if node.Tenant == "" || seen[node.Tenant] {
+			continue
+		}
+		seen[node.Tenant] = true
+		tenants = append(tenants, node.Tenant)
+	}
+	sort.Strings(tenants)
+
+	return tenants
+}
+
+// tenantLayerID returns the draw.io layer cell id for a tenant name.
+func tenantLayerID(tenant string) string {
+	return "tenant_" + tenant + "_layer"
+}
+
+// createTenantLayers creates one toggleable draw.io layer per tenant. Tenants
+// share the same node positions (only one is meant to be viewed at a time),
+// so only the first (alphabetically) is visible by default; the rest are
+// hidden until switched on from the Layers panel.
+func createTenantLayers(tenants []string) []MxCell {
+	cells := make([]MxCell, 0, len(tenants))
+	for i, tenant := range tenants {
+		visible := "0"
+		if i == 0 {
+			visible = ""
+		}
+		cells = append(cells, MxCell{
+			ID:      tenantLayerID(tenant),
+			Parent:  "0",
+			Value:   "Tenant: " + tenant,
+			Style:   "locked=1;",
+			Visible: visible,
+		})
+	}
+
+	return cells
+}
+
+// nodeParent returns the draw.io layer a node's cell belongs to: its tenant's
+// layer, or the default layer for shared/core nodes.
+func nodeParent(node Node) string {
+	if node.Tenant == "" {
+		return "1"
+	}
+
+	return tenantLayerID(node.Tenant)
+}
+
+// groupTenantParent returns the tenant layer shared by every node in a group
+// (an ASN box, say), or fallback when the group is empty, spans more than one
+// tenant, or has no tenant at all.
+func groupTenantParent(group []Node, fallback string) string {
+	if len(group) == 0 || group[0].Tenant == "" {
+		return fallback
+	}
+
+	tenant := group[0].Tenant
+	for _, n := range group[1:] {
+		if n.Tenant != tenant {
+			return fallback
+		}
+	}
+
+	return tenantLayerID(tenant)
+}
+
 func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 	nodes = topo.Nodes
+	tenants := collectTenants(topo.Nodes)
 
 	model := &MxGraphModel{
 		Dx:         600,
@@ -179,6 +254,8 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 			},
 		},
 	}
+
+	model.Root.MxCell = append(model.Root.MxCell, createTenantLayers(tenants)...)
 
 	layers := sortNodes(topo.Nodes, topo.Links)
 	linkGroups := groupLinks(topo.Links)
@@ -347,7 +424,7 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 
 		cell := MxCell{
 			ID:     node.ID,
-			Parent: "1",
+			Parent: nodeParent(node),
 			Value:  FormatNodeValue(node, style),
 			Style:  GetNodeStyle(node, style),
 			Vertex: "1",
@@ -524,7 +601,7 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 		x := serverStartX + float64(i)*(float64(width)+serverSpacing)
 		cell := MxCell{
 			ID:     node.ID,
-			Parent: "1",
+			Parent: nodeParent(node),
 			Value:  FormatNodeValue(node, style),
 			Style:  GetNodeStyle(node, style),
 			Vertex: "1",
@@ -897,6 +974,10 @@ func createParallelEdges(model *MxGraphModel, group LinkGroup, cellMap map[strin
 	// Check for spine-to-distant-leaf connection that needs special handling
 	isSpineToDistantLeaf, spineLeafOffset := calculateSpineToLeafOffset(group.Source, group.Target, cellMap)
 
+	// Edges (and their port labels) belong to whichever endpoint has a
+	// tenant, so they hide together with it. See edgeTenantParent.
+	edgeParent := edgeTenantParent(group.Source, group.Target)
+
 	// Process each link in the group
 	numLinks := len(group.Links)
 	baseSpacing := 10.0
@@ -939,7 +1020,7 @@ func createParallelEdges(model *MxGraphModel, group LinkGroup, cellMap map[strin
 		// Create the edge cell
 		edgeCell := MxCell{
 			ID:     edgeID,
-			Parent: "1",
+			Parent: edgeParent,
 			Source: group.Source,
 			Target: group.Target,
 			Style:  edgeStyle,
@@ -956,7 +1037,30 @@ func createParallelEdges(model *MxGraphModel, group LinkGroup, cellMap map[strin
 
 		// Generate labels with fixed call
 		ux, uy := calculateUnitVector(srcX, srcY, tgtX, tgtY)
-		generateEdgeLabels(model, edgeID, link, srcX, srcY, tgtX, tgtY, ux, uy)
+		generateEdgeLabels(model, edgeID, link, srcX, srcY, tgtX, tgtY, ux, uy, edgeParent)
+	}
+}
+
+// edgeTenantParent returns the draw.io layer an edge (and its port/speed
+// labels) belongs to. When one endpoint has a tenant, the edge belongs to
+// that tenant's layer so it hides together with it (this also covers a
+// shared/core node linking into a tenant, e.g. a spine-to-ToR fabric link).
+// When both endpoints have different tenants (e.g. a cross-tenant mgmt
+// uplink between two ToRs), the source's tenant wins, deterministically but
+// arbitrarily — a minor simplification, since such links are rare and not
+// the primary interest of a single-tenant view. Edges between two core nodes
+// stay on the default layer.
+func edgeTenantParent(source, target string) string {
+	srcNode := findNode(nodes, source)
+	tgtNode := findNode(nodes, target)
+
+	switch {
+	case srcNode.Tenant != "":
+		return tenantLayerID(srcNode.Tenant)
+	case tgtNode.Tenant != "":
+		return tenantLayerID(tgtNode.Tenant)
+	default:
+		return "1"
 	}
 }
 
@@ -1086,7 +1190,7 @@ func getPortLabelColor(status string) string {
 	}
 }
 
-func generateEdgeLabels(model *MxGraphModel, edgeID string, link Link, srcX, srcY, tgtX, tgtY, ux, uy float64) {
+func generateEdgeLabels(model *MxGraphModel, edgeID string, link Link, srcX, srcY, tgtX, tgtY, ux, uy float64, edgeParent string) {
 	// Calculate vector properties
 	dx := tgtX - srcX
 	dy := tgtY - srcY
@@ -1095,6 +1199,13 @@ func generateEdgeLabels(model *MxGraphModel, edgeID string, link Link, srcX, src
 	// Skip if edge is too short
 	if edgeLength < 10 {
 		return
+	}
+
+	// Port labels for a tenant's edges live on that tenant's layer (so they
+	// hide with it); core edges keep the dedicated, always-present toggle.
+	portLabelParent := "port_labels_layer"
+	if edgeParent != "1" {
+		portLabelParent = edgeParent
 	}
 
 	// Retrieve port labels from link properties
@@ -1169,7 +1280,7 @@ func generateEdgeLabels(model *MxGraphModel, edgeID string, link Link, srcX, src
 		Tooltip: srcPortNOS,
 		ID:      srcLabelID,
 		MxCell: &MxCell{
-			Parent: "port_labels_layer",
+			Parent: portLabelParent,
 			Style:  srcTextStyle,
 			Vertex: "1",
 			Geometry: &Geometry{
@@ -1188,7 +1299,7 @@ func generateEdgeLabels(model *MxGraphModel, edgeID string, link Link, srcX, src
 		Tooltip: tgtPortNOS,
 		ID:      tgtLabelID,
 		MxCell: &MxCell{
-			Parent: "port_labels_layer",
+			Parent: portLabelParent,
 			Style:  tgtTextStyle,
 			Vertex: "1",
 			Geometry: &Geometry{
@@ -1221,6 +1332,7 @@ func generateEdgeLabels(model *MxGraphModel, edgeID string, link Link, srcX, src
 			UnitX:    unitX,
 			UnitY:    unitY,
 			Rotation: angle,
+			Parent:   edgeParent,
 		})
 	}
 }
@@ -1526,9 +1638,17 @@ func createRedundancyGroupLayer(model *MxGraphModel, redundancyGroups map[string
 			strokeStyle = "dashed=1;"
 		}
 
+		// A redundancy group whose switches carry a tenant (i.e. it's a
+		// leaf/ToR group, not a spine one) renders on that tenant's layer
+		// instead of the generic always-visible one, so it hides with it.
+		groupParent := "redundancy_layer"
+		if len(switches) > 0 && switches[0].Tenant != "" {
+			groupParent = tenantLayerID(switches[0].Tenant)
+		}
+
 		groupRect := MxCell{
 			ID:     fmt.Sprintf("redundancy_group_%d", groupIndex),
-			Parent: "redundancy_layer",
+			Parent: groupParent,
 			Value:  groupName,
 			Style: fmt.Sprintf("%s;whiteSpace=wrap;html=1;strokeColor=%s;strokeWidth=2;fillColor=none;%slabelPosition=center;verticalLabelPosition=center;verticalAlign=bottom;fontSize=10;fontStyle=1;",
 				cornerRadius, strokeColor, strokeStyle),
@@ -1667,10 +1787,18 @@ func createVPCLayer(model *MxGraphModel, vpcs map[string]*VPCInfo, cellMap map[s
 			continue
 		}
 
+		// A tenant's server keeps its VPC box on the tenant's own layer, so it
+		// hides along with the server instead of floating on its own; a core
+		// server (no tenant) keeps the dedicated, always-present VPC toggle.
+		parent := "vpc_layer"
+		if tenant := findNode(nodes, serverID).Tenant; tenant != "" {
+			parent = tenantLayerID(tenant)
+		}
+
 		// Create a box for each VPC this server belongs to
 		for vpcIndex, vpcName := range vpcNames {
 			vpcInfo := vpcs[vpcName]
-			createVPCBoxForServer(model, vpcName, vpcInfo, serverID, cell, boxIndex, vpcIndex)
+			createVPCBoxForServer(model, vpcName, vpcInfo, serverID, cell, boxIndex, vpcIndex, parent)
 			boxIndex++
 		}
 	}
@@ -1695,7 +1823,7 @@ func vpcModeDisplay(mode string) string {
 	return strings.ToUpper(mode)
 }
 
-func createVPCBoxForServer(model *MxGraphModel, vpcName string, vpcInfo *VPCInfo, serverID string, serverCell *MxCell, boxIndex int, vpcIndex int) {
+func createVPCBoxForServer(model *MxGraphModel, vpcName string, vpcInfo *VPCInfo, serverID string, serverCell *MxCell, boxIndex int, vpcIndex int, parent string) {
 	// Get server dimensions
 	x := serverCell.Geometry.X
 	y := serverCell.Geometry.Y
@@ -1749,7 +1877,7 @@ func createVPCBoxForServer(model *MxGraphModel, vpcName string, vpcInfo *VPCInfo
 	// Create the VPC box with label at the bottom (like redundancy groups)
 	vpcRect := MxCell{
 		ID:     fmt.Sprintf("vpc_%d", boxIndex),
-		Parent: "vpc_layer",
+		Parent: parent,
 		Value:  labelValue,
 		Style: fmt.Sprintf("rounded=1;arcSize=8;whiteSpace=wrap;html=1;strokeColor=%s;strokeWidth=2;"+
 			"fillColor=none;dashed=1;dashPattern=5 5;"+
@@ -1980,7 +2108,7 @@ func createUnderlayLayer(model *MxGraphModel, topo Topology, cellMap map[string]
 
 		asnBox := MxCell{
 			ID:     fmt.Sprintf("underlay_asn_%d", asnIdx),
-			Parent: "underlay_layer",
+			Parent: groupTenantParent(switchNodes, "underlay_layer"),
 			Value:  fmt.Sprintf("ASN %s", asn),
 			Style: "rounded=1;arcSize=8;whiteSpace=wrap;html=1;" +
 				"dashed=1;dashPattern=8 4;strokeColor=#9673a6;strokeWidth=2;" +
@@ -2088,6 +2216,11 @@ func createUnderlayLayer(model *MxGraphModel, topo Topology, cellMap map[string]
 			continue
 		}
 
+		swParent := "underlay_layer"
+		if node.Tenant != "" {
+			swParent = tenantLayerID(node.Tenant)
+		}
+
 		var infoLines []string
 		if ip, _, ok := strings.Cut(rid, "/"); ok {
 			infoLines = append(infoLines, "lo1: "+ip)
@@ -2104,7 +2237,7 @@ func createUnderlayLayer(model *MxGraphModel, topo Topology, cellMap map[string]
 			iconStyle := strings.ReplaceAll(GetNodeStyle(node, style), "verticalAlign=middle", "verticalAlign=top")
 			iconOverlay := MxCell{
 				ID:     fmt.Sprintf("underlay_sw_%s", node.ID),
-				Parent: "underlay_layer",
+				Parent: swParent,
 				Value:  fmt.Sprintf("<font style=\"color: rgb(0, 0, 0);\"><b>%s</b></font>", node.ID),
 				Style:  iconStyle,
 				Vertex: "1",
@@ -2119,7 +2252,7 @@ func createUnderlayLayer(model *MxGraphModel, topo Topology, cellMap map[string]
 			loHeight := 13 * len(infoLines)
 			loCell := MxCell{
 				ID:     fmt.Sprintf("underlay_sw_%s_lo", node.ID),
-				Parent: "underlay_layer",
+				Parent: swParent,
 				Value:  fmt.Sprintf("<font style=\"color: rgb(0, 0, 0);\">%s</font>", strings.Join(infoLines, "<br>")),
 				Style:  "rounded=0;whiteSpace=wrap;html=1;strokeColor=none;fillColor=none;fontSize=9;align=center;",
 				Vertex: "1",
@@ -2148,7 +2281,7 @@ func createUnderlayLayer(model *MxGraphModel, topo Topology, cellMap map[string]
 
 		overlayCell := MxCell{
 			ID:     fmt.Sprintf("underlay_sw_%s", node.ID),
-			Parent: "underlay_layer",
+			Parent: swParent,
 			Value:  label,
 			Style:  GetNodeStyle(node, style),
 			Vertex: "1",
@@ -2218,6 +2351,11 @@ func createUnderlayLayer(model *MxGraphModel, topo Topology, cellMap map[string]
 
 		strokeColor, fillColor := bgpStateColors(edgeData.Link.Properties[PropBGPState])
 
+		p2pParent := "underlay_layer"
+		if edgeData.Parent != "1" {
+			p2pParent = edgeData.Parent
+		}
+
 		// Midpoint subnet label
 		if srcIP != "" {
 			subnet := subnetOf(srcIP)
@@ -2230,7 +2368,7 @@ func createUnderlayLayer(model *MxGraphModel, topo Topology, cellMap map[string]
 				strokeColor, fillColor, edgeData.Rotation)
 			model.Root.MxCell = append(model.Root.MxCell, MxCell{
 				ID:     fmt.Sprintf("%s_p2p", edgeData.EdgeID),
-				Parent: "underlay_layer",
+				Parent: p2pParent,
 				Value:  subnet,
 				Style:  subnetStyle,
 				Vertex: "1",
@@ -2256,7 +2394,7 @@ func createUnderlayLayer(model *MxGraphModel, topo Topology, cellMap map[string]
 			ly := edgeData.SrcY + edgeData.UnitY*p2pFixedDist + perpY*verticalOffset
 			model.Root.MxCell = append(model.Root.MxCell, MxCell{
 				ID:     fmt.Sprintf("%s_p2p_src", edgeData.EdgeID),
-				Parent: "underlay_layer",
+				Parent: p2pParent,
 				Value:  oct,
 				Style:  octStyle,
 				Vertex: "1",
@@ -2277,7 +2415,7 @@ func createUnderlayLayer(model *MxGraphModel, topo Topology, cellMap map[string]
 			ly := edgeData.TgtY - edgeData.UnitY*p2pFixedDist + perpY*verticalOffset
 			model.Root.MxCell = append(model.Root.MxCell, MxCell{
 				ID:     fmt.Sprintf("%s_p2p_dst", edgeData.EdgeID),
-				Parent: "underlay_layer",
+				Parent: p2pParent,
 				Value:  oct,
 				Style:  octStyle,
 				Vertex: "1",
@@ -2340,10 +2478,17 @@ func createLinkSpeedLayer(model *MxGraphModel) {
 				"whiteSpace=wrap;rounded=1;fontSize=10;rotation=%.1f;",
 				edgeData.Rotation)
 
+			// A tenant's edges keep their speed label on the tenant's own
+			// layer (so it hides with it); core edges use the dedicated toggle.
+			speedParent := "link_speed_layer"
+			if edgeData.Parent != "1" {
+				speedParent = edgeData.Parent
+			}
+
 			speedLabelID := fmt.Sprintf("%s_speed", edgeData.EdgeID)
 			speedLabelCell := MxCell{
 				ID:     speedLabelID,
-				Parent: "link_speed_layer",
+				Parent: speedParent,
 				Value:  speedText,
 				Style:  speedStyle,
 				Vertex: "1",

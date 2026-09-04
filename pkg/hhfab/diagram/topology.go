@@ -1008,7 +1008,54 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 
 	generateUnderlayLayer = hasUnderlayData(topo)
 
+	assignTenants(&topo)
+
 	return topo, nil
+}
+
+// assignTenants groups each non-spine leaf switch, and every server attached
+// to it, into a tenant so the diagram can render them on their own toggleable
+// layer (e.g. one HLAB rack shared by several env-NN test slots, each with
+// its own ToR). Spine switches, gateways, and externals are shared/core and
+// stay untenanted. A leaf's tenant is its redundancy group name when it has
+// one, so an ESLAG-paired leaf pair (and its directly attached servers) forms
+// a single tenant rather than two overlapping ones; otherwise it's the leaf's
+// own name.
+func assignTenants(topo *Topology) {
+	nodeIndex := make(map[string]int, len(topo.Nodes))
+	for i, node := range topo.Nodes {
+		nodeIndex[node.ID] = i
+	}
+
+	for _, node := range topo.Nodes {
+		if node.Type != NodeTypeSwitch || node.Properties[PropRole] == SwitchRoleSpine {
+			continue
+		}
+
+		tenant := node.Properties[PropRedundancyGroup]
+		if tenant == "" {
+			tenant = node.ID
+		}
+
+		topo.Nodes[nodeIndex[node.ID]].Tenant = tenant
+	}
+
+	// Propagate the tenant from each leaf to the servers connected to it.
+	for _, link := range topo.Links {
+		srcIdx, srcOK := nodeIndex[link.Source]
+		tgtIdx, tgtOK := nodeIndex[link.Target]
+		if !srcOK || !tgtOK {
+			continue
+		}
+
+		src, tgt := &topo.Nodes[srcIdx], &topo.Nodes[tgtIdx]
+		if src.Type == NodeTypeServer && src.Tenant == "" && tgt.Tenant != "" {
+			src.Tenant = tgt.Tenant
+		}
+		if tgt.Type == NodeTypeServer && tgt.Tenant == "" && src.Tenant != "" {
+			tgt.Tenant = src.Tenant
+		}
+	}
 }
 
 func getNodeTypeInfo(node Node) (string, string) {
