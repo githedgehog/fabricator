@@ -36,6 +36,11 @@ on:
         description: "Run hlab"
         required: false
         default: false
+      report_tag:
+        type: string
+        description: "Tag label to use in the release-evidence report title (leave empty to use the dispatched ref's name)"
+        required: false
+        default: ""
       debug_enabled:
         type: boolean
         description: "Run the build with tmate debugging enabled (https://github.com/marketplace/actions/debugging-with-tmate)"
@@ -449,6 +454,37 @@ jobs:
           files: "artifacts/**/release-test.xml"
           report_individual_runs: true
           check_name: "Release Tests"
+
+  release-evidence:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.releasetest == true && !cancelled() }}
+    runs-on: lab
+    needs:
+      - vlabs
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Download Artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+
+      - name: Build release test report
+        env:
+          REPORT_TAG: ${{ inputs.report_tag }}
+        run: |
+          go run ./hack/release-evidence \
+            -artifacts artifacts \
+            -tag "${REPORT_TAG:-$GITHUB_REF_NAME}" \
+            -run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            >> "$GITHUB_STEP_SUMMARY"
 
   publish-release:
     runs-on: lab
