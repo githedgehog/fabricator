@@ -57,7 +57,8 @@ Collected from the Linux host running the QEMU VMs, not from any VM.
 - **System resources**: memory (`free`, `/proc/meminfo`), CPU count/model,
   load average, cgroup memory stats (v1 and v2), PSI pressure (memory, CPU,
   I/O)
-- **OOM events**: recent kernel OOM kills from `dmesg`
+- **OOM and allocation failure events**: kernel OOM kills plus refused
+  allocations (`__vm_enough_memory`, page allocation failures) from `dmesg`
 - **Process state**: top memory and CPU consumers, per-QEMU-process RSS/state
 - **Disk and I/O**: `df -h`, `iostat`
 - **VLAB network plumbing**: `hhbr` bridge details, all `hhtap*` tap interfaces
@@ -134,6 +135,14 @@ Collected via `sonic-cli` and direct `bcmcmd` (Broadcom SDK).
   per-interface packet statistics, protocol counters (`netstat -s`, falling back
   to `/proc/net/snmp` + `/proc/net/netstat` on Flatcar) - the `Icmp` block
   distinguishes "request never arrived" from "arrived, reply lost on egress"
+- **Memory**: `free -m`, `/proc/meminfo`, and OOM/allocation failure events
+  from `dmesg` - kernel OOM kills plus refused allocations
+  (`__vm_enough_memory`, page allocation failures), which is how an iperf3
+  client reporting `Cannot allocate memory` is told apart from an OOM kill
+- **iperf3 container**: `docker ps -a`, `docker stats iperf3`, and the last 2000
+  lines of `docker logs iperf3 --timestamps` - iperf3 emits no timestamps itself
+  and one server container is shared by every pair, so the timestamps are what
+  ties a line to the test that produced it
 
 ### gateway.sh - gateway node (FRR + dataplane)
 
