@@ -6,6 +6,7 @@ package diagram
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 
@@ -14,7 +15,9 @@ import (
 	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
+	"go.githedgehog.com/fabric/pkg/util/apiutil"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/fabric"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -587,19 +590,50 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 		}
 	}
 
-	// Build BGP neighbor state map from agents (live mode only)
-	// switchName -> neighborIP (no prefix) -> session state
-	bgpNeighborStateMap := map[string]map[string]agentapi.BGPNeighborSessionState{}
-	if agents != nil {
+	// Build BGP session state map from agents (live mode only)
+	// switchName -> local port -> session state
+	// The agent keys a session by the peer IP when the link is numbered and by the port
+	// when it is not (port.vlan over the TH5 workaround SVI), so go through apiutil
+	// rather than reading the agent state directly and having to know which is which.
+	bgpStateByPort := map[string]map[string]agentapi.BGPNeighborSessionState{}
+	if agents != nil && len(agents.Items) > 0 {
+		f := &fabapi.Fabricator{}
+		if err := client.Get(ctx, kclient.ObjectKey{Namespace: fabapi.FabNamespace, Name: fabapi.FabName}, f); err != nil {
+			return topo, fmt.Errorf("getting fabricator: %w", err)
+		}
+
+		fabCfg, err := fabric.GetFabricConfig(*f)
+		if err != nil {
+			return topo, fmt.Errorf("getting fabric config: %w", err)
+		}
+
+		// driven off the agents rather than the switches, since a switch without one has
+		// no state to report and apiutil needs the agent to exist
 		for i := range agents.Items {
-			agent := &agents.Items[i]
-			bgpNeighborStateMap[agent.Name] = map[string]agentapi.BGPNeighborSessionState{}
-			for _, vrfNeighbors := range agent.Status.State.BGPNeighbors {
-				for neighborIP, neighbor := range vrfNeighbors {
-					ip, _, _ := strings.Cut(neighborIP, "/")
-					bgpNeighborStateMap[agent.Name][ip] = neighbor.SessionState
+			sw, exist := switchMap[agents.Items[i].Name]
+			if !exist {
+				continue
+			}
+
+			// a diagram without session state beats no diagram, and an agent can be
+			// mid-registration with an incomplete spec
+			neighbors, err := apiutil.GetBGPNeighbors(ctx, client, fabCfg, sw)
+			if err != nil {
+				slog.Warn("Skipping BGP session state", "switch", sw.Name, "err", err)
+
+				continue
+			}
+
+			byPort := map[string]agentapi.BGPNeighborSessionState{}
+			for _, vrfNeighbors := range neighbors {
+				for _, neighbor := range vrfNeighbors {
+					if neighbor.Port == "" || neighbor.SessionState == "" {
+						continue
+					}
+					byPort[neighbor.Port] = neighbor.SessionState
 				}
 			}
+			bgpStateByPort[sw.Name] = byPort
 		}
 	}
 
@@ -770,9 +804,12 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 				if ips, ok := portPairIPs[source+"->"+target]; ok {
 					link.Properties[PropSrcLinkIP] = ips.src
 					link.Properties[PropDstLinkIP] = ips.dst
-					dstIPOnly, _, _ := strings.Cut(ips.dst, "/")
-					if stateMap, ok := bgpNeighborStateMap[link.Source]; ok {
-						if state, ok := stateMap[dstIPOnly]; ok && state != "" {
+					if ips.src == "" && ips.dst == "" {
+						link.Properties[PropUnnumbered] = "true"
+					}
+					if stateMap, ok := bgpStateByPort[link.Source]; ok {
+						localPort := (&wiringapi.BasePortName{Port: source}).LocalPortName()
+						if state, ok := stateMap[localPort]; ok {
 							link.Properties[PropBGPState] = string(state)
 						}
 					}
@@ -823,8 +860,9 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 				if spec, ok := extMap[externalName]; ok {
 					link.Properties[PropSrcLinkIP] = spec.Switch.IP
 					link.Properties[PropDstLinkIP] = spec.Neighbor.IP
-					if stateMap, ok := bgpNeighborStateMap[switchID]; ok {
-						if state, ok := stateMap[spec.Neighbor.IP]; ok && state != "" {
+					if stateMap, ok := bgpStateByPort[switchID]; ok {
+						localPort := (&wiringapi.BasePortName{Port: switchPort}).LocalPortName()
+						if state, ok := stateMap[localPort]; ok {
 							link.Properties[PropBGPState] = string(state)
 						}
 					}
