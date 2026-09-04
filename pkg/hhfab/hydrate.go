@@ -593,6 +593,19 @@ func (c *Config) getHydration(ctx context.Context, kube kclient.Reader) (Hydrati
 			cg := conn.Spec.Gateway
 
 			for idx, link := range cg.Links {
+				if unnumbered {
+					if link.Switch.IP != "" {
+						total++
+						missing++
+					}
+					if link.Gateway.IP != "" {
+						total++
+						missing++
+					}
+
+					continue
+				}
+
 				total += 2
 				if link.Switch.IP == "" {
 					missing++
@@ -872,6 +885,8 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 
 	unnumbered := c.UnnumberedFabricLinks
 
+	gwPorts := map[string][]string{}
+
 	for _, conn := range conns.Items {
 		if conn.Spec.Fabric != nil { //nolint:gocritic
 			cf := conn.Spec.Fabric
@@ -914,11 +929,16 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 
 			for idx := range cg.Links {
 				link := &cg.Links[idx]
-				link.Switch.IP = nextFabricIP.String() + "/31"
-				nextFabricIP = nextFabricIP.Next()
+				if unnumbered {
+					link.Switch.IP = ""
+					link.Gateway.IP = ""
+				} else {
+					link.Switch.IP = nextFabricIP.String() + "/31"
+					nextFabricIP = nextFabricIP.Next()
 
-				link.Gateway.IP = nextFabricIP.String() + "/31"
-				nextFabricIP = nextFabricIP.Next()
+					link.Gateway.IP = nextFabricIP.String() + "/31"
+					nextFabricIP = nextFabricIP.Next()
+				}
 
 				gwName := link.Gateway.DeviceName()
 				gw := &gwapi.Gateway{}
@@ -933,13 +953,31 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 				if !exist {
 					return fmt.Errorf("gateway %s does not have interface %s", gwName, link.Gateway.LocalPortName()) //nolint:goerr113
 				}
-				iface.IPs = []string{link.Gateway.IP}
+				iface.IPs = nil
+				if !unnumbered {
+					iface.IPs = []string{link.Gateway.IP}
+				}
 				iface.MTU = fabric.MTU
 				gw.Spec.Interfaces[link.Gateway.LocalPortName()] = iface
 
-				switchIP, err := netip.ParsePrefix(link.Switch.IP)
-				if err != nil {
-					return fmt.Errorf("parsing gateway %s link %d switch IP %s: %w", gwName, idx, link.Switch.IP, err)
+				// DPDK-bound ports have no kernel netdev to configure
+				if iface.PCI == "" {
+					kernelName := iface.Kernel
+					if kernelName == "" {
+						kernelName = link.Gateway.LocalPortName()
+					}
+					gwPorts[gwName] = append(gwPorts[gwName], kernelName)
+				}
+
+				// an unnumbered gateway link has no peer IP, the same way a fabric or mesh
+				// one does not; the source interface is what identifies the neighbor
+				neighborIP := ""
+				if !unnumbered {
+					switchIP, err := netip.ParsePrefix(link.Switch.IP)
+					if err != nil {
+						return fmt.Errorf("parsing gateway %s link %d switch IP %s: %w", gwName, idx, link.Switch.IP, err)
+					}
+					neighborIP = switchIP.Addr().String()
 				}
 
 				asn := uint32(0)
@@ -959,7 +997,7 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 				// link would otherwise leave behind neighbors nobody answers to
 				neighbor := gwapi.GatewayBGPNeighbor{
 					Source: link.Gateway.LocalPortName(),
-					IP:     switchIP.Addr().String(),
+					IP:     neighborIP,
 					ASN:    asn,
 				}
 				gw.Spec.Neighbors = append(slices.DeleteFunc(gw.Spec.Neighbors,
@@ -977,6 +1015,14 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 		if err := kube.Update(ctx, &conn); err != nil {
 			return fmt.Errorf("updating connection %s: %w", conn.Name, err)
 		}
+	}
+
+	for idx := range c.Nodes {
+		node := &c.Nodes[idx]
+
+		ports := gwPorts[node.Name]
+		slices.Sort(ports)
+		node.Spec.GatewayPorts = slices.Compact(ports)
 	}
 
 	gateways := &gwapi.GatewayList{}

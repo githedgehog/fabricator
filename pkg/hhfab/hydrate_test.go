@@ -15,6 +15,7 @@ import (
 
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/fabric"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 )
 
@@ -34,6 +35,11 @@ func hydrateFixture(t *testing.T, unnumbered bool) (*Config, kclient.Client) {
 		Fab: fabricator,
 		Controls: []fabapi.ControlNode{
 			{ObjectMeta: kmetav1.ObjectMeta{Name: "control-1", Namespace: "fab"}},
+		},
+		Nodes: []fabapi.FabNode{
+			{ObjectMeta: kmetav1.ObjectMeta{Name: "gw-1", Namespace: "fab"}, Spec: fabapi.FabNodeSpec{
+				Roles: []fabapi.FabNodeRole{fabapi.NodeRoleGateway},
+			}},
 		},
 		UnnumberedFabricLinks: unnumbered,
 	}
@@ -120,6 +126,8 @@ func TestHydrateNumbered(t *testing.T) {
 		"172.30.128.4/31", "172.30.128.5/31",
 	}, fabricMesh)
 	require.Equal(t, []string{"172.30.128.6/31", "172.30.128.7/31"}, gateway)
+	// the node recipe keeps IPv6 link-local on these ports for BGP unnumbered
+	require.Equal(t, []string{"enp2s1"}, c.Nodes[0].Spec.GatewayPorts)
 
 	h, err = c.getHydration(ctx, kube)
 	require.NoError(t, err)
@@ -145,14 +153,15 @@ func TestHydrateNumbered(t *testing.T) {
 
 	fabricMesh, gateway = linkIPs(ctx, t, kube)
 	require.Equal(t, []string{"", "", "", "", "", ""}, fabricMesh)
-	// the freed /31s renumber the gateway link, which must not leave old neighbors behind
-	require.Equal(t, []string{"172.30.128.0/31", "172.30.128.1/31"}, gateway)
+	require.Equal(t, []string{"", ""}, gateway)
 
+	// the gateway keeps one neighbor per port, identified by the source interface
+	// alone now that the link carries no addresses
 	require.NoError(t, kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: "gw-1"}, gw))
 	require.Equal(t, []gwapi.GatewayBGPNeighbor{
-		{Source: "enp2s1", IP: "172.30.128.0", ASN: 65100},
+		{Source: "enp2s1", ASN: 65100},
 	}, gw.Spec.Neighbors)
-	require.Equal(t, []string{"172.30.128.1/31"}, gw.Spec.Interfaces["enp2s1"].IPs)
+	require.Empty(t, gw.Spec.Interfaces["enp2s1"].IPs)
 
 	h, err = c.getHydration(ctx, kube)
 	require.NoError(t, err)
@@ -171,8 +180,15 @@ func TestHydrateUnnumbered(t *testing.T) {
 
 	fabricMesh, gateway := linkIPs(ctx, t, kube)
 	require.Equal(t, []string{"", "", "", "", "", ""}, fabricMesh)
-	// gateway links stay numbered and start at the base of the fabric subnet
-	require.Equal(t, []string{"172.30.128.0/31", "172.30.128.1/31"}, gateway)
+	require.Equal(t, []string{"", ""}, gateway)
+
+	gw := &gwapi.Gateway{}
+	require.NoError(t, kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: "gw-1"}, gw))
+	require.Equal(t, []gwapi.GatewayBGPNeighbor{
+		{Source: "enp2s1", ASN: 65100},
+	}, gw.Spec.Neighbors)
+	require.Empty(t, gw.Spec.Interfaces["enp2s1"].IPs)
+	require.Equal(t, uint32(fabric.MTU), gw.Spec.Interfaces["enp2s1"].MTU)
 
 	h, err = c.getHydration(ctx, kube)
 	require.NoError(t, err)
