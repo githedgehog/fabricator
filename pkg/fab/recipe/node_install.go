@@ -326,10 +326,11 @@ func maskSystemdSysupdate(ctx context.Context, workDir string) error {
 		return nil
 	}
 	systemdCmds := [][]string{
-		{"systemctl", "mask", "--now", "systemd-sysupdate.service"},
-		{"systemctl", "mask", "--now", "systemd-sysupdate-reboot.service"},
 		{"systemctl", "mask", "--now", "systemd-sysupdate.timer"},
 		{"systemctl", "mask", "--now", "systemd-sysupdate-reboot.timer"},
+		{"systemctl", "mask", "--now", "systemd-sysupdate.service"},
+		{"systemctl", "mask", "--now", "systemd-sysupdate-reboot.service"},
+		{"systemctl", "reset-failed", "systemd-sysupdate*"},
 	}
 	for _, cmd := range systemdCmds {
 		if err := run(cmd[0], cmd[1:]...); err != nil {
