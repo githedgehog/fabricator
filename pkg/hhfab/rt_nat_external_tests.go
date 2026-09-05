@@ -246,6 +246,9 @@ func bgpExternalStaticNATTest(ctx context.Context, testCtx *VPCPeeringTestCtx, m
 	if err := testCtx.waitForNATPoolInLeaves(ctx, vpc, bgpNATCIDR); err != nil {
 		return false, nil, fmt.Errorf("waiting for NAT pool route to propagate: %w", err)
 	}
+	if err := testCtx.waitForNATPoolInExternalVRF(ctx, testCtx.extName, bgpNATCIDR); err != nil {
+		return false, nil, fmt.Errorf("waiting for NAT pool route to propagate to external VRF: %w", err)
+	}
 
 	if err := overlayExternalSNAT(matrix, vpc.Name, testCtx.extName, bgpNATCIDR); err != nil {
 		return false, nil, fmt.Errorf("annotating matrix with BGP static SNAT pool: %w", err)
@@ -330,6 +333,9 @@ func bgpExternalMasqueradeNATTest(ctx context.Context, testCtx *VPCPeeringTestCt
 
 	if err := testCtx.waitForNATPoolInLeaves(ctx, vpc, bgpNATCIDR); err != nil {
 		return false, nil, fmt.Errorf("waiting for NAT pool route to propagate: %w", err)
+	}
+	if err := testCtx.waitForNATPoolInExternalVRF(ctx, testCtx.extName, bgpNATCIDR); err != nil {
+		return false, nil, fmt.Errorf("waiting for NAT pool route to propagate to external VRF: %w", err)
 	}
 
 	if err := overlayExternalSNAT(matrix, vpc.Name, testCtx.extName, bgpNATCIDR); err != nil {
@@ -444,6 +450,9 @@ func bgpExternalPortForwardNATTest(ctx context.Context, testCtx *VPCPeeringTestC
 	if err := testCtx.waitForNATPoolInLeaves(ctx, vpc, bgpNATCIDR); err != nil {
 		return false, nil, fmt.Errorf("waiting for NAT pool route to propagate: %w", err)
 	}
+	if err := testCtx.waitForNATPoolInExternalVRF(ctx, testCtx.extName, bgpNATCIDR); err != nil {
+		return false, nil, fmt.Errorf("waiting for NAT pool route to propagate to external VRF: %w", err)
+	}
 
 	if err := overlayExternalPortForward(matrix, vpc.Name, testCtx.extName, netip.AddrFrom4(b), 15201); err != nil {
 		return false, nil, fmt.Errorf("overlaying BGP external port-forward DNAT: %w", err)
@@ -538,6 +547,9 @@ func bgpExternalMasqueradePortForwardNATTest(ctx context.Context, testCtx *VPCPe
 
 	if err := testCtx.waitForNATPoolInLeaves(ctx, vpc, bgpNATCIDR); err != nil {
 		return false, nil, fmt.Errorf("waiting for NAT pool route to propagate: %w", err)
+	}
+	if err := testCtx.waitForNATPoolInExternalVRF(ctx, testCtx.extName, bgpNATCIDR); err != nil {
+		return false, nil, fmt.Errorf("waiting for NAT pool route to propagate to external VRF: %w", err)
 	}
 
 	// Only the outbound (VPC→ext via masquerade) direction is exercised
@@ -683,6 +695,9 @@ func staticExternalStaticNATGatewayTest(ctx context.Context, testCtx *VPCPeering
 	if err := testCtx.waitForNATPoolInLeaves(ctx, vpc, staticNATCIDR); err != nil {
 		return false, nil, fmt.Errorf("waiting for NAT pool route to propagate: %w", err)
 	}
+	if err := testCtx.waitForNATPoolInExternalVRF(ctx, testCtx.staticExtName, staticNATCIDR); err != nil {
+		return false, nil, fmt.Errorf("waiting for NAT pool route to propagate to external VRF: %w", err)
+	}
 
 	if err := overlayExternalSNAT(matrix, vpc.Name, testCtx.staticExtName, staticNATCIDR); err != nil {
 		return false, nil, fmt.Errorf("annotating matrix with static SNAT pool: %w", err)
@@ -767,6 +782,9 @@ func staticExternalMasqueradeNATGatewayTest(ctx context.Context, testCtx *VPCPee
 
 	if err := testCtx.waitForNATPoolInLeaves(ctx, vpc, staticNATCIDR); err != nil {
 		return false, nil, fmt.Errorf("waiting for NAT pool route to propagate: %w", err)
+	}
+	if err := testCtx.waitForNATPoolInExternalVRF(ctx, testCtx.staticExtName, staticNATCIDR); err != nil {
+		return false, nil, fmt.Errorf("waiting for NAT pool route to propagate to external VRF: %w", err)
 	}
 
 	if err := overlayExternalSNAT(matrix, vpc.Name, testCtx.staticExtName, staticNATCIDR); err != nil {
@@ -879,6 +897,9 @@ func staticExternalPortForwardNATGatewayTest(ctx context.Context, testCtx *VPCPe
 	if err := testCtx.waitForNATPoolInLeaves(ctx, vpc, staticNATCIDR); err != nil {
 		return false, nil, fmt.Errorf("waiting for NAT pool route to propagate: %w", err)
 	}
+	if err := testCtx.waitForNATPoolInExternalVRF(ctx, testCtx.staticExtName, staticNATCIDR); err != nil {
+		return false, nil, fmt.Errorf("waiting for NAT pool route to propagate to external VRF: %w", err)
+	}
 
 	if err := overlayExternalPortForward(matrix, vpc.Name, testCtx.staticExtName, netip.AddrFrom4(b), 15201); err != nil {
 		return false, nil, fmt.Errorf("overlaying static external port-forward DNAT: %w", err)
@@ -973,6 +994,9 @@ func staticExternalMasqueradePortForwardNATGatewayTest(ctx context.Context, test
 
 	if err := testCtx.waitForNATPoolInLeaves(ctx, vpc, staticNATCIDR); err != nil {
 		return false, nil, fmt.Errorf("waiting for NAT pool route to propagate: %w", err)
+	}
+	if err := testCtx.waitForNATPoolInExternalVRF(ctx, testCtx.staticExtName, staticNATCIDR); err != nil {
+		return false, nil, fmt.Errorf("waiting for NAT pool route to propagate to external VRF: %w", err)
 	}
 
 	// Only the outbound (VPC→ext via masquerade) direction is exercised
