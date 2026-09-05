@@ -234,24 +234,6 @@ func nodeParent(node Node) string {
 	return tenantLayerID(node.Tenant)
 }
 
-// groupTenantParent returns the tenant layer shared by every node in a group
-// (an ASN box, say), or fallback when the group is empty, spans more than one
-// tenant, or has no tenant at all.
-func groupTenantParent(group []Node, fallback string) string {
-	if len(group) == 0 || group[0].Tenant == "" {
-		return fallback
-	}
-
-	tenant := group[0].Tenant
-	for _, n := range group[1:] {
-		if n.Tenant != tenant {
-			return fallback
-		}
-	}
-
-	return tenantLayerID(tenant)
-}
-
 func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 	nodes = topo.Nodes
 	tenants := collectTenants(topo.Nodes)
@@ -2007,12 +1989,18 @@ func createVPCLabelForServer(model *MxGraphModel, vpcName string, vpcInfo *VPCIn
 		labelValue = fmt.Sprintf("<b><font color=\"%s\">%s</font></b>: <font color=\"#000000\">%s</font>", color, displayName, serverIP)
 	}
 
+	// Each VPC gets its own small, distinctly-colored dashed border around
+	// just its own row (shorter than vpcLabelLineHeight, so consecutive rows
+	// never touch) — not one shared, uncolored outline, so nothing looks
+	// like a VPC's rectangle went missing when a server belongs to several.
 	const labelTextHeight = 14.0
 	label := MxCell{
 		ID:     fmt.Sprintf("vpc_%d_%d", boxIndex, vpcIndex),
 		Parent: parent,
 		Value:  labelValue,
-		Style:  "text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=bottom;whiteSpace=wrap;fontSize=10;",
+		Style: fmt.Sprintf("rounded=1;arcSize=8;whiteSpace=wrap;html=1;strokeColor=%s;strokeWidth=1.5;"+
+			"fillColor=none;dashed=1;dashPattern=3 3;align=center;verticalAlign=middle;fontSize=10;",
+			color),
 		Vertex: "1",
 		Geometry: &Geometry{
 			X:      x - vpcBoxPadding,
@@ -2237,7 +2225,7 @@ func createUnderlayLayer(model *MxGraphModel, topo Topology, cellMap map[string]
 
 		asnBox := MxCell{
 			ID:     fmt.Sprintf("underlay_asn_%d", asnIdx),
-			Parent: groupTenantParent(switchNodes, "underlay_layer"),
+			Parent: "underlay_layer",
 			Value:  fmt.Sprintf("ASN %s", asn),
 			Style: "rounded=1;arcSize=8;whiteSpace=wrap;html=1;" +
 				"dashed=1;dashPattern=8 4;strokeColor=#9673a6;strokeWidth=2;" +
@@ -2345,10 +2333,13 @@ func createUnderlayLayer(model *MxGraphModel, topo Topology, cellMap map[string]
 			continue
 		}
 
+		// Underlay content always stays on the single, dedicated Underlay
+		// toggle (off by default) rather than following the switch's own
+		// tenant — otherwise it would show whenever that tenant is active,
+		// regardless of whether Underlay itself is switched on. The trade-off
+		// (same as cross-tenant links): turning Underlay on shows it for
+		// every tenant's switches at once, not just the one currently shown.
 		swParent := "underlay_layer"
-		if node.Tenant != "" {
-			swParent = tenantLayerID(node.Tenant)
-		}
 
 		var infoLines []string
 		if ip, _, ok := strings.Cut(rid, "/"); ok {
@@ -2480,10 +2471,9 @@ func createUnderlayLayer(model *MxGraphModel, topo Topology, cellMap map[string]
 
 		strokeColor, fillColor := bgpStateColors(edgeData.Link.Properties[PropBGPState])
 
+		// Same reasoning as swParent above: underlay content stays on the
+		// single dedicated toggle, never following an edge's own tenant.
 		p2pParent := "underlay_layer"
-		if edgeData.Parent != "1" {
-			p2pParent = edgeData.Parent
-		}
 
 		// Midpoint subnet label
 		if srcIP != "" {
