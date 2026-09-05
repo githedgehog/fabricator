@@ -158,6 +158,56 @@ func findConnectionTypes(links []Link) map[string]*serverConnection {
 	return serverConns
 }
 
+// centerLeavesAroundCore reorders leaves (already sorted by description/ID)
+// so a shared rack's own leaf pair — a redundancy group, e.g. an ESLAG pair
+// — sits in the center of the row, with every other, single-switch ToR
+// tenant fanning out alternately to its left and right in the order they
+// were sorted (nearest first): e.g. [env-06-tor, he-f2-leaf-1, he-f2-leaf-2,
+// env-07-tor]. Leaves with no redundancy-group tenant present are returned
+// unchanged, since there's no "core" to center on.
+func centerLeavesAroundCore(leaves []Node) []Node {
+	coreTenant := ""
+	for _, leaf := range leaves {
+		if leaf.Tenant != "" && leaf.Properties[PropRedundancyGroup] != "" {
+			coreTenant = leaf.Tenant
+
+			break
+		}
+	}
+	if coreTenant == "" {
+		return leaves
+	}
+
+	var core, others []Node
+	for _, leaf := range leaves {
+		if leaf.Tenant == coreTenant {
+			core = append(core, leaf)
+		} else {
+			others = append(others, leaf)
+		}
+	}
+
+	left := make([]Node, 0, len(others))
+	right := make([]Node, 0, len(others))
+	for i, leaf := range others {
+		if i%2 == 0 {
+			left = append(left, leaf) // nearest-to-farthest so far
+		} else {
+			right = append(right, leaf) // nearest-to-farthest
+		}
+	}
+	for i, j := 0, len(left)-1; i < j; i, j = i+1, j-1 {
+		left[i], left[j] = left[j], left[i] // farthest-to-nearest, for left-to-right reading
+	}
+
+	result := make([]Node, 0, len(leaves))
+	result = append(result, left...)
+	result = append(result, core...)
+	result = append(result, right...)
+
+	return result
+}
+
 func sortNodes(nodes []Node, links []Link) TieredNodes {
 	var result TieredNodes
 	leafOrder := make(map[string]int)
@@ -228,6 +278,8 @@ func sortNodes(nodes []Node, links []Link) TieredNodes {
 
 		return result.Leaf[i].ID < result.Leaf[j].ID
 	})
+
+	result.Leaf = centerLeavesAroundCore(result.Leaf)
 
 	sort.Slice(result.Gateway, func(i, j int) bool {
 		return result.Gateway[i].ID < result.Gateway[j].ID

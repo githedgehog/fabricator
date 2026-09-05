@@ -447,6 +447,28 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 		model.Root.MxCell = append(model.Root.MxCell, cell)
 	}
 
+	// Anchor X for each tenant's server row: its own ToR's center, or the
+	// midpoint between a redundancy-group pair's two leaves — rather than
+	// the canvas center, so a tenant's servers line up under its own leaf(s)
+	// wherever centerLeavesAroundCore placed them in the row.
+	leafXSumByTenant := make(map[string]float64)
+	leafCountByTenant := make(map[string]int)
+	for _, leaf := range layers.Leaf {
+		if leaf.Tenant == "" {
+			continue
+		}
+		cell, ok := cellMap[leaf.ID]
+		if !ok || cell.Geometry == nil {
+			continue
+		}
+		leafXSumByTenant[leaf.Tenant] += cell.Geometry.X + float64(cell.Geometry.Width)/2
+		leafCountByTenant[leaf.Tenant]++
+	}
+	serverAnchorXByTenant := make(map[string]float64, len(leafXSumByTenant))
+	for tenant, sum := range leafXSumByTenant {
+		serverAnchorXByTenant[tenant] = sum / float64(leafCountByTenant[tenant])
+	}
+
 	// External node positioning fine-tuning
 	if len(layers.External) > 0 {
 		leftExternals, rightExternals := splitExternalNodes(layers.External, topo.Links, layers.Leaf)
@@ -628,7 +650,14 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 	for _, tenant := range serverTenants {
 		group := serversByTenant[tenant]
 		groupWidth := float64(len(group)*serverNodeWidth) + serverSpacing*float64(len(group)-1)
-		groupStartX := leafCenterX - (groupWidth / 2)
+
+		// Center under this tenant's own leaf(s) when known, falling back to
+		// the canvas center (e.g. for the "" core bucket, which has no ToR).
+		anchorX := leafCenterX
+		if x, ok := serverAnchorXByTenant[tenant]; ok {
+			anchorX = x
+		}
+		groupStartX := anchorX - (groupWidth / 2)
 		serverLayoutByTenant[tenant] = serverRowLayout{startX: groupStartX, width: groupWidth, count: len(group)}
 
 		for i, node := range group {
