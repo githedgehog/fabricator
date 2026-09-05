@@ -1877,7 +1877,7 @@ func createVPCLayer(model *MxGraphModel, vpcs map[string]*VPCInfo, cellMap map[s
 		sort.Strings(serverVPCs[serverID])
 	}
 
-	// Create VPC boxes for each server
+	// Create one VPC outline plus one label per membership, for each server
 	boxIndex := 0
 	for serverID, vpcNames := range serverVPCs {
 		cell, ok := cellMap[serverID]
@@ -1885,20 +1885,26 @@ func createVPCLayer(model *MxGraphModel, vpcs map[string]*VPCInfo, cellMap map[s
 			continue
 		}
 
-		// A tenant's server keeps its VPC box on the tenant's own layer, so it
-		// hides along with the server instead of floating on its own; a core
-		// server (no tenant) keeps the dedicated, always-present VPC toggle.
+		// A tenant's server keeps its VPC content on the tenant's own layer,
+		// so it hides along with the server instead of floating on its own;
+		// a core server (no tenant) keeps the dedicated, always-present VPC
+		// toggle.
 		parent := "vpc_layer"
 		if tenant := findNode(nodes, serverID).Tenant; tenant != "" {
 			parent = tenantLayerID(tenant)
 		}
 
-		// Create a box for each VPC this server belongs to
+		// One shared, neutral outline sized to fit every VPC label this
+		// server stacks at the bottom, plus one colored, borderless label
+		// per VPC — instead of one full bordered box per VPC membership
+		// (which nested: same top-left corner, each just taller than the
+		// last, so a server in 2+ VPCs showed multiple overlapping dashed
+		// rectangles cutting across each other).
+		createVPCBoxOutline(model, cell, boxIndex, len(vpcNames), parent)
 		for vpcIndex, vpcName := range vpcNames {
-			vpcInfo := vpcs[vpcName]
-			createVPCBoxForServer(model, vpcName, vpcInfo, serverID, cell, boxIndex, vpcIndex, parent)
-			boxIndex++
+			createVPCLabelForServer(model, vpcName, vpcs[vpcName], serverID, cell, boxIndex, vpcIndex, parent)
 		}
+		boxIndex++
 	}
 }
 
@@ -1921,39 +1927,68 @@ func vpcModeDisplay(mode string) string {
 	return strings.ToUpper(mode)
 }
 
-func createVPCBoxForServer(model *MxGraphModel, vpcName string, vpcInfo *VPCInfo, serverID string, serverCell *MxCell, boxIndex int, vpcIndex int, parent string) {
-	// Get server dimensions
+// VPC box/label layout shared by createVPCBoxOutline and createVPCLabelForServer.
+// A server's VPC labels stack below it: the first uses vpcLabelBaseSpace,
+// each subsequent one adds vpcLabelLineHeight — e.g. label 0 ends 12px below
+// the server, label 1 ends 30px below, label 2 ends 48px below.
+const (
+	vpcBoxPadding      = 8.0
+	vpcLabelBaseSpace  = 12.0
+	vpcLabelLineHeight = 18.0
+)
+
+// vpcColorFor returns this VPC's palette color, chosen from a hash of its
+// name so the same VPC always gets the same color.
+func vpcColorFor(vpcName string) string {
+	colorIndex := 0
+	for _, c := range vpcName {
+		colorIndex += int(c)
+	}
+
+	return VPCColorPalette[colorIndex%len(VPCColorPalette)]
+}
+
+// createVPCBoxOutline draws a single, neutral dashed rounded rect around a
+// server, sized to fit all labelCount VPC labels stacked at its bottom edge
+// (see createVPCLabelForServer). One shared outline — rather than one full
+// box per VPC membership — avoids nested, overlapping borders when a server
+// belongs to more than one VPC.
+func createVPCBoxOutline(model *MxGraphModel, serverCell *MxCell, boxIndex int, labelCount int, parent string) {
 	x := serverCell.Geometry.X
 	y := serverCell.Geometry.Y
 	width := float64(serverCell.Geometry.Width)
 	height := float64(serverCell.Geometry.Height)
 
-	// Add padding around the server
-	padding := 8.0
+	totalLabelSpace := vpcLabelBaseSpace + vpcLabelLineHeight*float64(labelCount-1)
 
-	// Label space at the bottom for VPC labels
-	// Each label needs enough vertical space to be clearly visible
-	// First VPC uses baseLabelSpace (12px)
-	// Each subsequent VPC adds labelHeight (18px) for proper spacing
-	// This means:
-	// - VPC 0: 12 + (18 * 0) = 12px (first VPC)
-	// - VPC 1: 12 + (18 * 1) = 30px (second VPC)
-	// - VPC 2: 12 + (18 * 2) = 48px (third VPC)
-	baseLabelSpace := 12.0
-	labelHeight := 18.0
-	totalLabelSpace := baseLabelSpace + (labelHeight * float64(vpcIndex))
-
-	minX := x - padding
-	minY := y - padding
-	maxX := x + width + padding
-	maxY := y + height + padding + totalLabelSpace
-
-	// Select color from palette based on VPC name hash for consistency
-	colorIndex := 0
-	for _, c := range vpcName {
-		colorIndex += int(c)
+	box := MxCell{
+		ID:     fmt.Sprintf("vpc_box_%d", boxIndex),
+		Parent: parent,
+		Style:  "rounded=1;arcSize=8;whiteSpace=wrap;html=1;strokeColor=#999999;strokeWidth=2;fillColor=none;dashed=1;dashPattern=5 5;",
+		Vertex: "1",
+		Geometry: &Geometry{
+			X:      x - vpcBoxPadding,
+			Y:      y - vpcBoxPadding,
+			Width:  int(width + 2*vpcBoxPadding),
+			Height: int(height + 2*vpcBoxPadding + totalLabelSpace),
+			As:     "geometry",
+		},
 	}
-	color := VPCColorPalette[colorIndex%len(VPCColorPalette)]
+
+	model.Root.MxCell = append(model.Root.MxCell, box)
+}
+
+// createVPCLabelForServer draws one VPC's colored, borderless label at its
+// stacked position below a server, inside the shared outline created by
+// createVPCBoxOutline for the same server.
+func createVPCLabelForServer(model *MxGraphModel, vpcName string, vpcInfo *VPCInfo, serverID string, serverCell *MxCell, boxIndex int, vpcIndex int, parent string) {
+	x := serverCell.Geometry.X
+	y := serverCell.Geometry.Y
+	width := float64(serverCell.Geometry.Width)
+	height := float64(serverCell.Geometry.Height)
+
+	labelBottomY := y + height + vpcBoxPadding + vpcLabelBaseSpace + vpcLabelLineHeight*float64(vpcIndex)
+	color := vpcColorFor(vpcName)
 
 	// Find the server's IP in this VPC (from any of its subnets)
 	serverIP := ""
@@ -1965,34 +2000,30 @@ func createVPCBoxForServer(model *MxGraphModel, vpcName string, vpcInfo *VPCInfo
 		}
 	}
 
-	// Create label with VPC name (bold, colored) and IP (regular, black)
+	// Label with VPC name (bold, colored) and IP (regular, black)
 	displayName := vpcDisplayName(vpcName)
 	labelValue := fmt.Sprintf("<b><font color=\"%s\">%s</font></b>", color, displayName)
 	if serverIP != "" {
 		labelValue = fmt.Sprintf("<b><font color=\"%s\">%s</font></b>: <font color=\"#000000\">%s</font>", color, displayName, serverIP)
 	}
 
-	// Create the VPC box with label at the bottom (like redundancy groups)
-	vpcRect := MxCell{
-		ID:     fmt.Sprintf("vpc_%d", boxIndex),
+	const labelTextHeight = 14.0
+	label := MxCell{
+		ID:     fmt.Sprintf("vpc_%d_%d", boxIndex, vpcIndex),
 		Parent: parent,
 		Value:  labelValue,
-		Style: fmt.Sprintf("rounded=1;arcSize=8;whiteSpace=wrap;html=1;strokeColor=%s;strokeWidth=2;"+
-			"fillColor=none;dashed=1;dashPattern=5 5;"+
-			"labelPosition=center;verticalLabelPosition=center;align=center;verticalAlign=bottom;"+
-			"fontSize=10;",
-			color),
+		Style:  "text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=bottom;whiteSpace=wrap;fontSize=10;",
 		Vertex: "1",
 		Geometry: &Geometry{
-			X:      minX,
-			Y:      minY,
-			Width:  int(maxX - minX),
-			Height: int(maxY - minY),
+			X:      x - vpcBoxPadding,
+			Y:      labelBottomY - labelTextHeight,
+			Width:  int(width + 2*vpcBoxPadding),
+			Height: int(labelTextHeight),
 			As:     "geometry",
 		},
 	}
 
-	model.Root.MxCell = append(model.Root.MxCell, vpcRect)
+	model.Root.MxCell = append(model.Root.MxCell, label)
 }
 
 func createVPCLegend(model *MxGraphModel, vpcs map[string]*VPCInfo, serverBottomY int, numServers int, serverLayerStartX, serverLayerWidth float64, parent string) {
