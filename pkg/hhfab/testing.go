@@ -321,6 +321,16 @@ func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) erro
 // SwitchProfiles of the leaves its servers attach to, i.e. SetupVPCsOpts.AutoVPCMode.
 const VPCModeAuto = "auto"
 
+// vpcModeName renders a VPCMode for logs. L2VNI is the zero value, so without
+// this it prints as nothing.
+func vpcModeName(mode vpcapi.VPCMode) string {
+	if mode == vpcapi.VPCModeL2VNI {
+		return "l2vni"
+	}
+
+	return string(mode)
+}
+
 type SetupVPCsOpts struct {
 	WaitSwitchesReady bool
 	ForceCleanup      bool
@@ -729,7 +739,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	}
 
 	{
-		mode := string(opts.VPCMode)
+		mode := vpcModeName(opts.VPCMode)
 		if opts.AutoVPCMode {
 			mode = VPCModeAuto
 		}
@@ -834,7 +844,11 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		slog.Info("VPC mode auto-derived to L3VNI for servers on leaves without L2VNI support", "servers", derivedAwayServers)
 	}
 	if len(modeOrder) > 1 {
-		slog.Info("Mixed VPC modes detected", "modes", modeOrder)
+		modeNames := make([]string, 0, len(modeOrder))
+		for _, m := range modeOrder {
+			modeNames = append(modeNames, vpcModeName(m))
+		}
+		slog.Info("Mixed VPC modes detected", "modes", modeNames)
 		modeIndex := map[vpcapi.VPCMode]int{}
 		for i, m := range modeOrder {
 			modeIndex[m] = i
