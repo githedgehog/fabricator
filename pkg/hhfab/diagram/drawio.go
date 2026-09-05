@@ -685,14 +685,20 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 	// VPCs that tenant has a server in — parented to that tenant's layer so
 	// it hides along with it. A VPC touching servers in more than one tenant
 	// gets a legend entry under each (harmless: only one tenant is ever
-	// shown at a time). A VPC with no tenanted server at all (shouldn't
-	// happen given every server now has a tenant, but kept as a fallback)
-	// stays on the generic, always-visible vpc_layer.
+	// shown at a time). A VPC with no tenanted server at all stays on the
+	// generic, always-visible vpc_layer — but only when NONE of its
+	// attachments have a tenant; a core-only attachment (e.g. a spine, which
+	// some VPCs here list as "attached" due to how mgmt connections are
+	// modeled) shouldn't also plaster the VPC onto the always-visible layer
+	// when it's already correctly shown under its real tenant(s), which
+	// would render as a duplicate, overlapping legend entry.
 	vpcsByTenant := make(map[string]map[string]*VPCInfo)
 	for vpcName, vpcInfo := range topo.VPCs {
 		tenantsSeen := make(map[string]bool)
 		for _, serverID := range vpcInfo.AttachedServers {
-			tenantsSeen[findNode(nodes, serverID).Tenant] = true
+			if tenant := findNode(nodes, serverID).Tenant; tenant != "" {
+				tenantsSeen[tenant] = true
+			}
 		}
 		if len(tenantsSeen) == 0 {
 			tenantsSeen[""] = true
@@ -1875,13 +1881,53 @@ func createVPCLayer(model *MxGraphModel, vpcs map[string]*VPCInfo, cellMap map[s
 			parent = tenantLayerID(tenant)
 		}
 
+		// This server's boxes all grow from the same top-left corner and
+		// width (only height differs per VPC, see createVPCBoxForServer), so
+		// they need to share one width wide enough for the longest label
+		// among them — otherwise a long VPC name (or name+IP) sized only to
+		// the server's own node width gets clipped or wraps into the row
+		// above/below it.
+		labelWidth := 0
+		for _, vpcName := range vpcNames {
+			if w := estimateVPCLabelWidth(vpcLabelPlainText(vpcName, vpcs[vpcName], serverID)); w > labelWidth {
+				labelWidth = w
+			}
+		}
+
 		// Create a box for each VPC this server belongs to
 		for vpcIndex, vpcName := range vpcNames {
 			vpcInfo := vpcs[vpcName]
-			createVPCBoxForServer(model, vpcName, vpcInfo, serverID, cell, boxIndex, vpcIndex, parent)
+			createVPCBoxForServer(model, vpcName, vpcInfo, serverID, cell, boxIndex, vpcIndex, parent, labelWidth)
 			boxIndex++
 		}
 	}
+}
+
+// vpcLabelPlainText returns the plain-text (no HTML) label a VPC box shows
+// for a server: the VPC's display name, plus the server's IP in that VPC
+// when known.
+func vpcLabelPlainText(vpcName string, vpcInfo *VPCInfo, serverID string) string {
+	serverIP := ""
+	for _, subnet := range vpcInfo.Subnets {
+		if ip, hasIP := subnet.ServerIPs[serverID]; hasIP {
+			serverIP = ip
+
+			break
+		}
+	}
+
+	displayName := vpcDisplayName(vpcName)
+	if serverIP != "" {
+		return displayName + ": " + serverIP
+	}
+
+	return displayName
+}
+
+// estimateVPCLabelWidth estimates the pixel width needed for a VPC box's
+// bold label text, so the box can be widened to fit it.
+func estimateVPCLabelWidth(text string) int {
+	return len(text)*6 + 16
 }
 
 // vpcDisplayName renders a VPC's k8s name with the canonical "VPC-NN" capitalization.
@@ -1903,7 +1949,7 @@ func vpcModeDisplay(mode string) string {
 	return strings.ToUpper(mode)
 }
 
-func createVPCBoxForServer(model *MxGraphModel, vpcName string, vpcInfo *VPCInfo, serverID string, serverCell *MxCell, boxIndex int, vpcIndex int, parent string) {
+func createVPCBoxForServer(model *MxGraphModel, vpcName string, vpcInfo *VPCInfo, serverID string, serverCell *MxCell, boxIndex int, vpcIndex int, parent string, minWidth int) {
 	// Get server dimensions
 	x := serverCell.Geometry.X
 	y := serverCell.Geometry.Y
@@ -1925,9 +1971,17 @@ func createVPCBoxForServer(model *MxGraphModel, vpcName string, vpcInfo *VPCInfo
 	labelHeight := 18.0
 	totalLabelSpace := baseLabelSpace + (labelHeight * float64(vpcIndex))
 
-	minX := x - padding
+	// Widen (centered on the server) when the longest VPC label among this
+	// server's memberships needs more room than the server's own node width.
+	boxWidth := width + 2*padding
+	if float64(minWidth) > boxWidth {
+		boxWidth = float64(minWidth)
+	}
+	centerX := x + width/2
+
+	minX := centerX - boxWidth/2
 	minY := y - padding
-	maxX := x + width + padding
+	maxX := centerX + boxWidth/2
 	maxY := y + height + padding + totalLabelSpace
 
 	// Select color from palette based on VPC name hash for consistency
