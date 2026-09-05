@@ -61,29 +61,17 @@ func StatusDataplane(ctx context.Context, kube kclient.Reader, cfg fabapi.Fabric
 	return res, nil
 }
 
-func StatusFRR(ctx context.Context, kube kclient.Reader, cfg fabapi.Fabricator, nodes []fabapi.FabNode) (map[string]fabapi.ComponentStatus, error) {
-	res := map[string]fabapi.ComponentStatus{}
-	if !cfg.Spec.Config.Gateway.Enable {
-		return res, nil
-	}
-
-	ref, err := comp.ImageURL(cfg, FRRRef)
-	if err != nil {
-		return nil, fmt.Errorf("getting image URL for %q: %w", FRRRef, err)
-	}
-	image := ref + ":" + string(cfg.Status.Versions.Gateway.FRR)
-
-	for _, node := range nodes {
-		if !slices.Contains(node.Spec.Roles, fabapi.NodeRoleGateway) {
-			continue
-		}
-
-		// TODO make name builder reusable in the gateway-ctrl
-		res[node.Name], err = comp.GetDaemonSetStatus(fmt.Sprintf("gw--%s--frr", node.Name), "frr", image)(ctx, kube, cfg)
-		if err != nil {
-			return nil, fmt.Errorf("getting status for FRR on node %q: %w", node.Name, err)
-		}
-	}
-
-	return res, nil
+// StatusFRR reports nothing, because FRR is no longer a component of its own.
+//
+// It used to look up a `gw--<node>--frr` DaemonSet. FRR now runs under `dataplane-init` inside the
+// dataplane pod -- one image, one process tree, shared fate -- so that DaemonSet does not exist and
+// the gateway controller deletes it on sight. StatusDataplane covers what is left.
+//
+// Returning an empty map rather than deleting the function keeps `ComponentsStatus.GatewayFRR` in
+// the API, so no CRD changes with it. Both loops that read it become vacuous, which matters:
+// IsGatewayReady requires every entry to be Ready, and a DaemonSet that is *never* going to exist
+// reports NotFound forever. That does not fail anything -- it hangs `hhfab vlab up --ready` until
+// the timeout, with IsReady still true because it only asks for "not Unknown".
+func StatusFRR(_ context.Context, _ kclient.Reader, _ fabapi.Fabricator, _ []fabapi.FabNode) (map[string]fabapi.ComponentStatus, error) {
+	return map[string]fabapi.ComponentStatus{}, nil
 }
