@@ -177,15 +177,39 @@ func tenantLayerID(tenant string) string {
 	return "tenant_" + tenant + "_layer"
 }
 
+// tenantIsGrouped reports whether tenant is derived from a switch redundancy
+// group (e.g. an ESLAG-paired leaf pair), rather than a single ToR.
+func tenantIsGrouped(tenant string, allNodes []Node) bool {
+	for _, node := range allNodes {
+		if node.Type == NodeTypeSwitch && node.Tenant == tenant {
+			return node.Properties[PropRedundancyGroup] != ""
+		}
+	}
+
+	return false
+}
+
 // createTenantLayers creates one toggleable draw.io layer per tenant. Tenants
 // share the same node positions (only one is meant to be viewed at a time),
-// so only the first (alphabetically) is visible by default; the rest are
-// hidden until switched on from the Layers panel.
-func createTenantLayers(tenants []string) []MxCell {
+// so only one is visible by default; the rest are hidden until switched on
+// from the Layers panel. The default is the first (alphabetically) grouped
+// tenant — a shared redundancy-group leaf pair, e.g. the rack's own base
+// switches — since that's the rack's own identity, not one of the test
+// slots hanging off it; if there's no grouped tenant, the first tenant wins.
+func createTenantLayers(tenants []string, allNodes []Node) []MxCell {
+	defaultIdx := 0
+	for i, tenant := range tenants {
+		if tenantIsGrouped(tenant, allNodes) {
+			defaultIdx = i
+
+			break
+		}
+	}
+
 	cells := make([]MxCell, 0, len(tenants))
 	for i, tenant := range tenants {
 		visible := "0"
-		if i == 0 {
+		if i == defaultIdx {
 			visible = ""
 		}
 		cells = append(cells, MxCell{
@@ -251,11 +275,12 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 				{ID: "0"},
 				{ID: "1", Parent: "0"},
 				{ID: "port_labels_layer", Parent: "0", Value: "Port Labels", Style: "locked=1;"},
+				{ID: crossTenantLayerID, Parent: "0", Value: "Cross-tenant Links", Style: "locked=1;", Visible: "0"},
 			},
 		},
 	}
 
-	model.Root.MxCell = append(model.Root.MxCell, createTenantLayers(tenants)...)
+	model.Root.MxCell = append(model.Root.MxCell, createTenantLayers(tenants, topo.Nodes)...)
 
 	layers := sortNodes(topo.Nodes, topo.Links)
 	linkGroups := groupLinks(topo.Links)
@@ -609,18 +634,20 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 	}
 	sort.Strings(serverTenants)
 
-	// totalServerWidth/serverStartX track the widest tenant's row, reused
-	// below only to size/position the (global, all-tenant) VPC legend.
-	var totalServerWidth, serverStartX float64
+	// Each tenant's own row metrics, reused below to position that tenant's
+	// own VPC legend block in the same spot its server row occupies.
+	type serverRowLayout struct {
+		startX float64
+		width  float64
+		count  int
+	}
+	serverLayoutByTenant := make(map[string]serverRowLayout, len(serverTenants))
+
 	for _, tenant := range serverTenants {
 		group := serversByTenant[tenant]
 		groupWidth := float64(len(group)*serverNodeWidth) + serverSpacing*float64(len(group)-1)
 		groupStartX := leafCenterX - (groupWidth / 2)
-
-		if groupWidth > totalServerWidth {
-			totalServerWidth = groupWidth
-			serverStartX = groupStartX
-		}
+		serverLayoutByTenant[tenant] = serverRowLayout{startX: groupStartX, width: groupWidth, count: len(group)}
 
 		for i, node := range group {
 			width, height := GetNodeDimensions(node)
@@ -672,13 +699,47 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 	}
 	serverBottomY := serverY + serverNodeHeight
 
-	// Add VPC legend below the server layer
-	if len(topo.VPCs) > 0 {
-		// Calculate server layer dimensions for VPC legend positioning
-		numServers := len(layers.Server)
-		serverLayerStartX := serverStartX
-		serverLayerWidth := totalServerWidth
-		createVPCLegend(model, topo.VPCs, serverBottomY, numServers, serverLayerStartX, serverLayerWidth)
+	// Add a VPC legend below each tenant's own server row, listing only the
+	// VPCs that tenant has a server in — parented to that tenant's layer so
+	// it hides along with it. A VPC touching servers in more than one tenant
+	// gets a legend entry under each (harmless: only one tenant is ever
+	// shown at a time). A VPC with no tenanted server at all (shouldn't
+	// happen given every server now has a tenant, but kept as a fallback)
+	// stays on the generic, always-visible vpc_layer.
+	vpcsByTenant := make(map[string]map[string]*VPCInfo)
+	for vpcName, vpcInfo := range topo.VPCs {
+		tenantsSeen := make(map[string]bool)
+		for _, serverID := range vpcInfo.AttachedServers {
+			tenantsSeen[findNode(nodes, serverID).Tenant] = true
+		}
+		if len(tenantsSeen) == 0 {
+			tenantsSeen[""] = true
+		}
+		for tenant := range tenantsSeen {
+			if vpcsByTenant[tenant] == nil {
+				vpcsByTenant[tenant] = make(map[string]*VPCInfo)
+			}
+			vpcsByTenant[tenant][vpcName] = vpcInfo
+		}
+	}
+
+	for tenant, tenantVPCs := range vpcsByTenant {
+		if len(tenantVPCs) == 0 {
+			continue
+		}
+
+		parent := "vpc_layer"
+		layout, ok := serverLayoutByTenant[tenant]
+		if tenant != "" {
+			parent = tenantLayerID(tenant)
+		}
+		if !ok {
+			// No servers in this tenant (only possible for the "" fallback
+			// bucket) — center as if it had none, same as an empty row.
+			layout = serverRowLayout{startX: leafCenterX, width: 0}
+		}
+
+		createVPCLegend(model, tenantVPCs, serverBottomY, layout.count, layout.startX, layout.width, parent)
 	}
 
 	// Add unused switches layer
@@ -1068,33 +1129,30 @@ func createParallelEdges(model *MxGraphModel, group LinkGroup, cellMap map[strin
 	}
 }
 
-// isLoneTenant reports whether node's tenant is its own single-switch
-// identity, rather than a redundancy group it shares with other switches.
-func isLoneTenant(node Node) bool {
-	return node.Tenant != "" && node.Properties[PropRedundancyGroup] == ""
-}
+// crossTenantLayerID is the draw.io layer for edges whose two endpoints
+// belong to different tenants (e.g. an env's mgmt uplink into the rack's
+// shared leaf pair). draw.io layer visibility is a single boolean per layer
+// with no way to say "visible only when tenant A and tenant B are both on",
+// so such an edge can't correctly follow either endpoint's own tenant layer:
+// tied to one tenant, it would render (dangling, its other endpoint hidden)
+// whenever that lone tenant is shown alone. Keeping it on its own toggle,
+// off by default, means it never renders detached from a real, visible
+// counterpart — the trade-off is it must be switched on by hand, together
+// with both tenants it connects, to actually see it.
+const crossTenantLayerID = "cross_tenant_layer"
 
 // edgeTenantParent returns the draw.io layer an edge (and its port/speed
-// labels) belongs to. When one endpoint has a tenant, the edge belongs to
-// that tenant's layer so it hides together with it (this also covers a
-// shared/core node linking into a tenant, e.g. a spine-to-ToR fabric link).
-// When both endpoints have different tenants — e.g. a cross-tenant mgmt
-// uplink from an env's ToR into the rack's shared, redundancy-group leaf
-// pair — the single-ToR tenant wins over the redundancy-group one, since
-// the link is conceptually part of setting up that env, not the shared
-// rack; between two same-kind tenants, the source's wins, arbitrarily but
-// deterministically. Edges between two core nodes stay on the default layer.
+// labels) belongs to: its shared tenant's layer, whichever endpoint's tenant
+// when only one has one (this also covers a shared/core node linking into a
+// tenant, e.g. a spine-to-ToR fabric link), crossTenantLayerID when the two
+// endpoints have different tenants, or the default layer when neither has one.
 func edgeTenantParent(source, target string) string {
 	srcNode := findNode(nodes, source)
 	tgtNode := findNode(nodes, target)
 
 	switch {
 	case srcNode.Tenant != "" && tgtNode.Tenant != "" && srcNode.Tenant != tgtNode.Tenant:
-		if isLoneTenant(tgtNode) && !isLoneTenant(srcNode) {
-			return tenantLayerID(tgtNode.Tenant)
-		}
-
-		return tenantLayerID(srcNode.Tenant)
+		return crossTenantLayerID
 	case srcNode.Tenant != "":
 		return tenantLayerID(srcNode.Tenant)
 	case tgtNode.Tenant != "":
@@ -1937,7 +1995,7 @@ func createVPCBoxForServer(model *MxGraphModel, vpcName string, vpcInfo *VPCInfo
 	model.Root.MxCell = append(model.Root.MxCell, vpcRect)
 }
 
-func createVPCLegend(model *MxGraphModel, vpcs map[string]*VPCInfo, serverBottomY int, numServers int, serverLayerStartX, serverLayerWidth float64) {
+func createVPCLegend(model *MxGraphModel, vpcs map[string]*VPCInfo, serverBottomY int, numServers int, serverLayerStartX, serverLayerWidth float64, parent string) {
 	// Sort VPC names for consistent ordering
 	vpcNames := make([]string, 0, len(vpcs))
 	for vpcName := range vpcs {
@@ -2004,8 +2062,8 @@ func createVPCLegend(model *MxGraphModel, vpcs map[string]*VPCInfo, serverBottom
 		// VPC name header (with mode in parentheses for the legend only)
 		headerText := fmt.Sprintf("%s (%s)", vpcDisplayName(vpcName), vpcModeDisplay(vpcInfo.Mode))
 		vpcHeader := MxCell{
-			ID:     fmt.Sprintf("vpc_legend_header_%d", i),
-			Parent: "vpc_layer",
+			ID:     fmt.Sprintf("vpc_legend_header_%s_%d", parent, i),
+			Parent: parent,
 			Value:  fmt.Sprintf("<b>%s</b>", headerText),
 			Style:  fmt.Sprintf("text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontColor=%s;fontStyle=1;", color),
 			Vertex: "1",
@@ -2033,8 +2091,8 @@ func createVPCLegend(model *MxGraphModel, vpcs map[string]*VPCInfo, serverBottom
 			subnetText := fmt.Sprintf("<b>%s</b>: %s (VLAN %d)", subnetName, subnet.CIDR, subnet.VLAN)
 
 			subnetCell := MxCell{
-				ID:     fmt.Sprintf("vpc_legend_subnet_%d_%d", i, j),
-				Parent: "vpc_layer",
+				ID:     fmt.Sprintf("vpc_legend_subnet_%s_%d_%d", parent, i, j),
+				Parent: parent,
 				Value:  subnetText,
 				Style:  "text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontColor=#666666;",
 				Vertex: "1",
