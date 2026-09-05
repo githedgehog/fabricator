@@ -629,6 +629,16 @@ func hasNonL2VNIServer(ctx context.Context, kube kclient.Client, override vpcapi
 	return false, nil
 }
 
+// vpcModeName renders a VPCMode for logs. L2VNI is the zero value, so without
+// this it prints as nothing.
+func vpcModeName(mode vpcapi.VPCMode) string {
+	if mode == vpcapi.VPCModeL2VNI {
+		return "l2vni"
+	}
+
+	return string(mode)
+}
+
 // autoDeriveVPCMode returns the VPC mode hhfab should use for a VPC built
 // around this server. When every leaf the server attaches to advertises
 // Features.L2VNI=true, the result is L2VNI; if any attached leaf is
@@ -832,7 +842,11 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		slog.Warn("VPC mode auto-derived away from L2VNI for some servers due to switch profile support", "servers", derivedAwayServers)
 	}
 	if len(modeOrder) > 1 {
-		slog.Info("Mixed VPC modes detected", "modes", modeOrder)
+		modeNames := make([]string, 0, len(modeOrder))
+		for _, m := range modeOrder {
+			modeNames = append(modeNames, vpcModeName(m))
+		}
+		slog.Info("Mixed VPC modes detected", "modes", modeNames)
 		modeIndex := map[vpcapi.VPCMode]int{}
 		for i, m := range modeOrder {
 			modeIndex[m] = i
