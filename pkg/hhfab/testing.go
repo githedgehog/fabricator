@@ -4,6 +4,7 @@
 package hhfab
 
 import (
+	"cmp"
 	"context"
 	"encoding/base64"
 	"encoding/binary"
@@ -316,6 +317,20 @@ func WaitReady(ctx context.Context, kube client.Reader, opts WaitReadyOpts) erro
 	}
 }
 
+// VPCModeAuto is the --vpc-mode value that derives each VPC's mode from the
+// SwitchProfiles of the leaves its servers attach to, i.e. SetupVPCsOpts.AutoVPCMode.
+const VPCModeAuto = "auto"
+
+// vpcModeName renders a VPCMode for logs. L2VNI is the zero value, so without
+// this it prints as nothing.
+func vpcModeName(mode vpcapi.VPCMode) string {
+	if mode == vpcapi.VPCModeL2VNI {
+		return "l2vni"
+	}
+
+	return string(mode)
+}
+
 type SetupVPCsOpts struct {
 	WaitSwitchesReady bool
 	ForceCleanup      bool
@@ -328,6 +343,7 @@ type SetupVPCsOpts struct {
 	InterfaceMTU      uint16
 	HashPolicy        string
 	VPCMode           vpcapi.VPCMode
+	AutoVPCMode       bool
 	KeepPeerings      bool
 	HostBGPSubnet     bool
 	P2P               bool
@@ -587,6 +603,76 @@ func ResolveDefaultServerMTU(ctx context.Context, kube kclient.Client, opts *Set
 	return nil
 }
 
+// hasNonL2VNIServer reports whether any server in the fabric would land in a
+// non-L2VNI VPC for the given mode. When auto is set the modes are derived
+// per server, matching what SetupVPCs will do, so callers can decide ahead
+// of time whether the run will skip ESLAG-attached servers.
+func hasNonL2VNIServer(ctx context.Context, kube kclient.Client, mode vpcapi.VPCMode, auto bool) (bool, error) {
+	if !auto {
+		return mode != vpcapi.VPCModeL2VNI, nil
+	}
+	switchList := &wiringapi.SwitchList{}
+	if err := kube.List(ctx, switchList); err != nil {
+		return false, fmt.Errorf("listing switches: %w", err)
+	}
+	profileBySwitch := map[string]*wiringapi.SwitchProfile{}
+	for _, sw := range switchList.Items {
+		if _, seen := profileBySwitch[sw.Name]; seen {
+			continue
+		}
+		sp := &wiringapi.SwitchProfile{}
+		if err := kube.Get(ctx, kclient.ObjectKey{Name: sw.Spec.Profile, Namespace: kmetav1.NamespaceDefault}, sp); err != nil {
+			return false, fmt.Errorf("getting switch profile %q: %w", sw.Spec.Profile, err)
+		}
+		profileBySwitch[sw.Name] = sp
+	}
+	servers := &wiringapi.ServerList{}
+	if err := kube.List(ctx, servers); err != nil {
+		return false, fmt.Errorf("listing servers: %w", err)
+	}
+	for _, server := range servers.Items {
+		mode, err := autoDeriveVPCMode(ctx, kube, &server, profileBySwitch)
+		if err != nil {
+			return false, fmt.Errorf("auto-deriving mode for server %q: %w", server.Name, err)
+		}
+		if mode != vpcapi.VPCModeL2VNI {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+// autoDeriveVPCMode returns the VPC mode hhfab should use for a VPC built
+// around this server. When every leaf the server attaches to advertises
+// Features.L2VNI=true, the result is L2VNI; if any attached leaf is
+// L3VNI-only (e.g. celestica-ds5000), the result is L3VNI. Servers with no
+// connections default to L2VNI. Used when SetupVPCsOpts.AutoVPCMode is set
+// so that the caller does not have to know the hardware capability mix.
+func autoDeriveVPCMode(ctx context.Context, kube kclient.Client, server *wiringapi.Server, profileBySwitch map[string]*wiringapi.SwitchProfile) (vpcapi.VPCMode, error) {
+	conns := &wiringapi.ConnectionList{}
+	if err := kube.List(ctx, conns, wiringapi.MatchingLabelsForListLabelServer(server.Name)); err != nil {
+		return "", fmt.Errorf("listing connections for server %q: %w", server.Name, err)
+	}
+	for _, conn := range conns.Items {
+		switches, _, _, _, err := conn.Spec.Endpoints()
+		if err != nil {
+			return "", fmt.Errorf("getting endpoints for connection %q: %w", conn.Name, err)
+		}
+		for _, swName := range switches {
+			profile, ok := profileBySwitch[swName]
+			if !ok || profile == nil {
+				continue
+			}
+			if !profile.Spec.Features.L2VNI {
+				return vpcapi.VPCModeL3VNI, nil
+			}
+		}
+	}
+
+	return vpcapi.VPCModeL2VNI, nil
+}
+
 // SetupVPCs creates VPCs and VPC attachments per opts, configures servers,
 // and returns one Endpoint per (server, vpc, subnet) attachment with the
 // discovered IP and HostBGP flag populated.
@@ -621,13 +707,19 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	if err := kube.List(ctx, &switchList); err != nil {
 		return nil, nil, fmt.Errorf("listing switches: %w", err)
 	}
-	allCumulus := true
+	profileBySwitch := map[string]*wiringapi.SwitchProfile{}
 	for _, sw := range switchList.Items {
+		if _, seen := profileBySwitch[sw.Name]; seen {
+			continue
+		}
 		sp := &wiringapi.SwitchProfile{}
 		if err := kube.Get(ctx, kclient.ObjectKey{Name: sw.Spec.Profile, Namespace: kmetav1.NamespaceDefault}, sp); err != nil {
 			return nil, nil, fmt.Errorf("getting switch profile %q: %w", sw.Spec.Profile, err)
 		}
-
+		profileBySwitch[sw.Name] = sp
+	}
+	allCumulus := true
+	for _, sp := range profileBySwitch {
 		if !slices.Contains(meta.NOSTypesCumulus, sp.Spec.NOSType) {
 			allCumulus = false
 
@@ -647,8 +739,12 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	}
 
 	{
+		mode := vpcModeName(opts.VPCMode)
+		if opts.AutoVPCMode {
+			mode = VPCModeAuto
+		}
 		args := []any{
-			"mode", opts.VPCMode,
+			"mode", mode,
 			"perSubnet", opts.ServersPerSubnet,
 			"perVPC", opts.SubnetsPerVPC,
 			"wait", opts.WaitSwitchesReady,
@@ -713,8 +809,58 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	}
 
 	slices.SortFunc(servers.Items, func(a, b wiringapi.Server) int {
-		return int(serverIDs[a.Name]) - int(serverIDs[b.Name])
+		return cmp.Compare(serverIDs[a.Name], serverIDs[b.Name])
 	})
+
+	// Resolve per-server VPC mode. Without AutoVPCMode every VPC takes
+	// opts.VPCMode. With it, the mode is derived from the
+	// SwitchProfile.Features.L2VNI of every leaf the server attaches to:
+	// L3VNI when any attached leaf is L3VNI-only, L2VNI everywhere else.
+	// Mode order = first-occurrence in numeric server order, so vpc-01
+	// inherits the mode of the lowest-numbered server.
+	serverModes := make(map[string]vpcapi.VPCMode, len(servers.Items))
+	modeOrder := []vpcapi.VPCMode{}
+	seenMode := map[vpcapi.VPCMode]bool{}
+	derivedAwayServers := []string{}
+	for _, server := range servers.Items {
+		mode := opts.VPCMode
+		if opts.AutoVPCMode {
+			derived, err := autoDeriveVPCMode(ctx, kube, &server, profileBySwitch)
+			if err != nil {
+				return nil, nil, fmt.Errorf("auto-deriving VPC mode for server %q: %w", server.Name, err)
+			}
+			if derived != vpcapi.VPCModeL2VNI {
+				derivedAwayServers = append(derivedAwayServers, server.Name)
+			}
+			mode = derived
+		}
+		serverModes[server.Name] = mode
+		if !seenMode[mode] {
+			seenMode[mode] = true
+			modeOrder = append(modeOrder, mode)
+		}
+	}
+	if len(derivedAwayServers) > 0 {
+		slog.Info("VPC mode auto-derived to L3VNI for servers on leaves without L2VNI support", "servers", derivedAwayServers)
+	}
+	if len(modeOrder) > 1 {
+		modeNames := make([]string, 0, len(modeOrder))
+		for _, m := range modeOrder {
+			modeNames = append(modeNames, vpcModeName(m))
+		}
+		slog.Info("Mixed VPC modes detected", "modes", modeNames)
+		modeIndex := map[vpcapi.VPCMode]int{}
+		for i, m := range modeOrder {
+			modeIndex[m] = i
+		}
+		slices.SortFunc(servers.Items, func(a, b wiringapi.Server) int {
+			if d := modeIndex[serverModes[a.Name]] - modeIndex[serverModes[b.Name]]; d != 0 {
+				return d
+			}
+
+			return cmp.Compare(serverIDs[a.Name], serverIDs[b.Name])
+		})
+	}
 
 	vlanNS := &wiringapi.VLANNamespace{}
 	if err := kube.Get(ctx, client.ObjectKey{Name: opts.VLANNamespace, Namespace: metav1.NamespaceDefault}, vlanNS); err != nil {
@@ -747,6 +893,8 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	subnetInVPC := 0
 	vpcID := 0
 	hostBGPDoneForVPC := false
+	placedAny := false
+	prevPlacedMode := vpcapi.VPCMode("")
 	vpcNames := map[string]bool{}
 	vpcs := []*vpcapi.VPC{}
 	attachNames := map[string]bool{}
@@ -767,7 +915,8 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		}
 	}
 	for _, server := range servers.Items {
-		if opts.VPCMode != vpcapi.VPCModeL2VNI {
+		serverMode := serverModes[server.Name]
+		if serverMode != vpcapi.VPCModeL2VNI {
 			if sa, err := getServerAttachState(ctx, kube, &server, false); err != nil {
 				return nil, nil, fmt.Errorf("checking server %q attachment state: %w", server.Name, err)
 			} else if sa.ESLAG {
@@ -777,6 +926,16 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 				continue
 			}
 		}
+		// Force a new VPC when the resolved mode changes since the last
+		// placed server: every VPC must be homogeneous in Spec.Mode.
+		if placedAny && serverMode != prevPlacedMode {
+			serverInSubnet = 0
+			subnetInVPC = 0
+			vpcID++
+			hostBGPDoneForVPC = false
+		}
+		placedAny = true
+		prevPlacedMode = serverMode
 		if serverInSubnet >= opts.ServersPerSubnet {
 			nextSubnet()
 		}
@@ -831,7 +990,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 					Namespace: metav1.NamespaceDefault,
 				},
 				Spec: vpcapi.VPCSpec{
-					Mode:    opts.VPCMode,
+					Mode:    serverMode,
 					Subnets: map[string]*vpcapi.VPCSubnet{},
 				},
 			}
@@ -1140,7 +1299,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 				expectedSubnet := expectedSubnets[server.Name]
 				// for hostBGP or non-l2vni subnets we expect a /32, else the same prefix lenght of the subnet
 				expectedBits := 32
-				if opts.VPCMode == vpcapi.VPCModeL2VNI && !isHostBGP {
+				if serverModes[server.Name] == vpcapi.VPCModeL2VNI && !isHostBGP {
 					expectedBits = expectedSubnet.Bits()
 				}
 				if !expectedSubnet.Contains(prefix.Addr()) {
@@ -1451,6 +1610,13 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 				vpc2 = "vpc-" + vpc2
 			}
 
+			if _, ok := vpcs[vpc1]; !ok {
+				return fmt.Errorf("VPC %s not found for VPC peering %s", vpc1, reqName)
+			}
+			if _, ok := vpcs[vpc2]; !ok {
+				return fmt.Errorf("VPC %s not found for VPC peering %s", vpc2, reqName)
+			}
+
 			gw := false
 			vpc1Subnets := []string{}
 			vpc2Subnets := []string{}
@@ -1550,25 +1716,21 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 			} else {
 				// Build each side's expose for the "real" VPC prefixes.
 				vpc1Expose := gwapi.PeeringEntryExpose{}
-				if vpc, ok := vpcs[vpc1]; ok {
-					for subnetName, subnet := range vpc.Spec.Subnets {
-						if len(vpc1Subnets) > 0 && !slices.Contains(vpc1Subnets, subnetName) {
-							continue
-						}
-
-						vpc1Expose.IPs = append(vpc1Expose.IPs, gwapi.PeeringEntryIP{CIDR: subnet.Subnet})
+				for subnetName, subnet := range vpcs[vpc1].Spec.Subnets {
+					if len(vpc1Subnets) > 0 && !slices.Contains(vpc1Subnets, subnetName) {
+						continue
 					}
+
+					vpc1Expose.IPs = append(vpc1Expose.IPs, gwapi.PeeringEntryIP{CIDR: subnet.Subnet})
 				}
 
 				vpc2Expose := gwapi.PeeringEntryExpose{}
-				if vpc, ok := vpcs[vpc2]; ok {
-					for subnetName, subnet := range vpc.Spec.Subnets {
-						if len(vpc2Subnets) > 0 && !slices.Contains(vpc2Subnets, subnetName) {
-							continue
-						}
-
-						vpc2Expose.IPs = append(vpc2Expose.IPs, gwapi.PeeringEntryIP{CIDR: subnet.Subnet})
+				for subnetName, subnet := range vpcs[vpc2].Spec.Subnets {
+					if len(vpc2Subnets) > 0 && !slices.Contains(vpc2Subnets, subnetName) {
+						continue
 					}
+
+					vpc2Expose.IPs = append(vpc2Expose.IPs, gwapi.PeeringEntryIP{CIDR: subnet.Subnet})
 				}
 
 				// NAT handling (PER EXPOSE / PER SIDE):
@@ -1636,6 +1798,10 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 				}
 
 				vpc = "vpc-" + vpc
+			}
+
+			if _, ok := vpcs[vpc]; !ok {
+				return fmt.Errorf("VPC %s not found for external peering %s", vpc, reqName)
 			}
 
 			gw := false
@@ -1775,13 +1941,11 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 				externalPeerings[fmt.Sprintf("%s--%s", vpc, ext)] = extPeering
 			} else {
 				vpcExpose := gwapi.PeeringEntryExpose{}
-				if vpc1, ok := vpcs[vpc]; ok {
-					for subnetName, subnet := range vpc1.Spec.Subnets {
-						if len(vpcSubnets) > 0 && !slices.Contains(vpcSubnets, subnetName) {
-							continue
-						}
-						vpcExpose.IPs = append(vpcExpose.IPs, gwapi.PeeringEntryIP{CIDR: subnet.Subnet})
+				for subnetName, subnet := range vpcs[vpc].Spec.Subnets {
+					if len(vpcSubnets) > 0 && !slices.Contains(vpcSubnets, subnetName) {
+						continue
 					}
+					vpcExpose.IPs = append(vpcExpose.IPs, gwapi.PeeringEntryIP{CIDR: subnet.Subnet})
 				}
 
 				ips := []gwapi.PeeringEntryIP{}
@@ -4087,6 +4251,7 @@ type ReleaseTestOpts struct {
 	PauseOnFailure bool
 	HashPolicy     string
 	VPCMode        vpcapi.VPCMode
+	AutoVPCMode    bool
 	ListTests      bool
 	ShowTechDump   bool
 	IPerfsMinSpeed float64

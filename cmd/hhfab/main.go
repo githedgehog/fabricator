@@ -1128,7 +1128,7 @@ func Run(ctx context.Context) error {
 							},
 							&cli.StringFlag{
 								Name:  FlagNameVPCMode,
-								Usage: "VPC mode to be used for on-ready commands: empty is default (l2vni), l3vni, etc.",
+								Usage: "VPC mode to be used for on-ready commands: auto (default, per-VPC from switch profiles), l2vni, l3vni, etc.",
 							},
 							&cli.UintFlag{
 								Name:    "interface-mtu",
@@ -1223,6 +1223,8 @@ func Run(ctx context.Context) error {
 								return err
 							}
 
+							vpcMode, autoVPCMode := vpcModeFromFlag(c.String(FlagNameVPCMode))
+
 							if err := hhfab.VLABUp(ctx, workDir, cacheDir, extraCacheDirs.Value(), hhfab.VLABUpOpts{
 								HydrateMode:          hhfab.HydrateMode(hydrateMode),
 								ReCreate:             c.Bool(FlagNameReCreate),
@@ -1258,7 +1260,8 @@ func Run(ctx context.Context) error {
 									OOBMgmtIface:             c.String(FlagOOBMgmtIface),
 									CollectShowTech:          c.Bool(FlagNameCollectShowTech),
 									ForceCollectShowTech:     c.Bool(FlagNameForceCollectShowTech),
-									VPCMode:                  vpcapi.VPCMode(handleL2VNI(c.String(FlagNameVPCMode))),
+									VPCMode:                  vpcMode,
+									AutoVPCMode:              autoVPCMode,
 									ReleaseTestRegexes:       c.StringSlice(FlagReleaseTestRegexes),
 									ReleaseTestRegexesInvert: c.Bool(FlagReleaseTestRegexesInvert),
 									ReleaseTestOnReadyOnly:   c.Bool(FlagReleaseTestOnReadyOnly),
@@ -1434,7 +1437,7 @@ Examples:
 							&cli.StringFlag{
 								Name:    FlagNameVPCMode,
 								Aliases: []string{"mode"},
-								Usage:   "VPC mode: empty (l2vni) by default or l3vni, etc",
+								Usage:   "VPC mode: auto by default (per-VPC from switch profiles), or l2vni, l3vni, etc",
 							},
 							&cli.BoolFlag{
 								Name:    "keep-peerings",
@@ -1454,6 +1457,8 @@ Examples:
 								return err
 							}
 
+							vpcMode, autoVPCMode := vpcModeFromFlag(c.String(FlagNameVPCMode))
+
 							if _, _, err := hhfab.DoVLABSetupVPCs(ctx, workDir, cacheDir, hhfab.SetupVPCsOpts{
 								WaitSwitchesReady: c.Bool("wait-switches-ready"),
 								ForceCleanup:      c.Bool("force-cleanup"),
@@ -1465,7 +1470,8 @@ Examples:
 								TimeServers:       c.StringSlice("time-servers"),
 								InterfaceMTU:      ifMTU,
 								HashPolicy:        c.String(FlagHashPolicy),
-								VPCMode:           vpcapi.VPCMode(handleL2VNI(c.String(FlagNameVPCMode))),
+								VPCMode:           vpcMode,
+								AutoVPCMode:       autoVPCMode,
 								KeepPeerings:      c.Bool("keep-peerings"),
 								HostBGPSubnet:     c.Bool("host-bgp"),
 							}); err != nil {
@@ -1719,7 +1725,7 @@ Examples:
 							&cli.StringFlag{
 								Name:    FlagNameVPCMode,
 								Aliases: []string{"mode"},
-								Usage:   "VPC mode: empty (l2vni) by default or l3vni, etc",
+								Usage:   "VPC mode: auto by default (per-VPC from switch profiles), or l2vni, l3vni, etc",
 							},
 							&cli.BoolFlag{
 								Name:    FlagListTests,
@@ -1749,6 +1755,7 @@ Examples:
 							if iperfsSpeed < 0 {
 								return fmt.Errorf("--%s must be >= 0, got %g", FlagIPerfsSpeed, iperfsSpeed) //nolint:goerr113
 							}
+							vpcMode, autoVPCMode := vpcModeFromFlag(c.String(FlagNameVPCMode))
 							opts := hhfab.ReleaseTestOpts{
 								Regexes:        c.StringSlice(FlagRegEx),
 								InvertRegex:    c.Bool(FlagInvertRegex),
@@ -1757,7 +1764,8 @@ Examples:
 								FailFast:       c.Bool(FlagNameFailFast),
 								PauseOnFailure: c.Bool(FlagPauseOnFailure),
 								HashPolicy:     c.String(FlagHashPolicy),
-								VPCMode:        vpcapi.VPCMode(handleL2VNI(c.String(FlagNameVPCMode))),
+								VPCMode:        vpcMode,
+								AutoVPCMode:    autoVPCMode,
 								ListTests:      c.Bool(FlagListTests),
 								ShowTechDump:   c.Bool(FlagShowTech),
 								IPerfsMinSpeed: iperfsSpeed,
@@ -2010,10 +2018,16 @@ func parseInterfaceMTU(c *cli.Context) (uint16, error) {
 	return uint16(mtu), nil
 }
 
-func handleL2VNI(in string) string {
-	if in == "l2vni" {
-		return ""
+// vpcModeFromFlag maps the --vpc-mode value onto the VPC mode and whether it
+// should be auto-derived per VPC: unset and "auto" derive, "l2vni" forces the
+// (empty) L2VNI mode, anything else is passed through for validation.
+func vpcModeFromFlag(in string) (vpcapi.VPCMode, bool) {
+	switch in {
+	case "", hhfab.VPCModeAuto:
+		return vpcapi.VPCModeL2VNI, true
+	case "l2vni":
+		return vpcapi.VPCModeL2VNI, false
+	default:
+		return vpcapi.VPCMode(in), false
 	}
-
-	return in
 }
