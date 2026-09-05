@@ -338,6 +338,30 @@ func getSwitchesForVPC(ctx context.Context, kube kclient.Client, vpcName string)
 	return switches, nil
 }
 
+// getSwitchesForExternal returns the set of switch names that have ExternalAttachments for the
+// given External.
+func getSwitchesForExternal(ctx context.Context, kube kclient.Client, extName string) (map[string]bool, error) {
+	attachments := &vpcapi.ExternalAttachmentList{}
+	if err := kube.List(ctx, attachments, kclient.MatchingLabels{vpcapi.LabelExternal: extName}); err != nil {
+		return nil, fmt.Errorf("listing external attachments for %s: %w", extName, err)
+	}
+	switches := map[string]bool{}
+	for _, att := range attachments.Items {
+		conn := &wiringapi.Connection{}
+		if err := kube.Get(ctx, kclient.ObjectKey{
+			Namespace: kmetav1.NamespaceDefault, Name: att.Spec.Connection,
+		}, conn); err != nil {
+			return nil, fmt.Errorf("getting connection %s: %w", att.Spec.Connection, err)
+		}
+		sws, _, _, _, _ := conn.Spec.Endpoints()
+		for _, sw := range sws {
+			switches[sw] = true
+		}
+	}
+
+	return switches, nil
+}
+
 // check that a route is present in a switch (by checking in the sonic-cli)
 func checkRouteInSwitch(ctx context.Context, ssh *sshutil.Config, switchName, route, vrfName string) (bool, error) {
 	cmd := fmt.Sprintf("show ip route vrf %s %s", vrfName, route)
@@ -369,6 +393,28 @@ func (testCtx *VPCPeeringTestCtx) waitForNATPoolInLeaves(ctx context.Context, vp
 	slog.Info("Waiting for NAT pool route on leaves", "vpc", vpc.Name, "leaves", leaves, "pool", poolCIDR, "vrf", vrfName)
 
 	return testCtx.waitForRoutesInSwitches(ctx, leaves, []string{poolCIDR}, vrfName)
+}
+
+// waitForNATPoolInExternalVRF waits until the NAT pool CIDR appears in the external-facing VRF
+// (VrfE<extName>) on the switches attached to the given External. waitForNATPoolInLeaves only
+// confirms the pool is resident in the VPC's own VRF, which for a BGP-external or static-external
+// NAT peering is not the route that gates the return path: the leaf still has to import the pool
+// from the gateway's EVPN advertisement into VrfE<extName> and, for a BGP external, re-advertise it
+// to the real external peer. That can lag the VPC-VRF wait by anywhere from a couple of seconds to
+// tens of minutes, so a connectivity probe that only waits on waitForNATPoolInLeaves can race a
+// route that has not propagated to where it actually matters yet. See internal#421 and internal#479.
+func (testCtx *VPCPeeringTestCtx) waitForNATPoolInExternalVRF(ctx context.Context, extName, poolCIDR string) error {
+	switches, err := getSwitchesForExternal(ctx, testCtx.kube, extName)
+	if err != nil {
+		return fmt.Errorf("getting switches for external %s: %w", extName, err)
+	}
+	if len(switches) == 0 {
+		return nil
+	}
+	vrfName := "VrfE" + extName
+	slog.Info("Waiting for NAT pool route in external VRF", "external", extName, "switches", switches, "pool", poolCIDR, "vrf", vrfName)
+
+	return testCtx.waitForRoutesInSwitches(ctx, switches, []string{poolCIDR}, vrfName)
 }
 
 // wait until all switches in a set have a bunch of routes installed, or error out after 3 minutes
