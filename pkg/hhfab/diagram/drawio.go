@@ -79,8 +79,6 @@ type Point struct {
 	As string  `xml:"as,attr,omitempty"`
 }
 
-var nodeConnectionsMap map[string][]float64
-
 var nodes []Node
 
 // EdgePositionData stores position and rotation information for an edge
@@ -133,7 +131,6 @@ func GenerateDrawio(workDir string, topo Topology, styleType StyleType, outputPa
 
 	style := GetStyle(styleType)
 
-	nodeConnectionsMap = make(map[string][]float64)
 	edgePositions = nil                        // Reset edge positions for this diagram
 	generateLinkSpeedLayer = topo.HasAgentData // Only generate link speed layer when agent data available
 
@@ -682,10 +679,18 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 		}
 	}
 
-	nodeConnectionsMap = make(map[string][]float64)
+	// Precompute, for every node, where each of its edges should exit —
+	// spread apart just enough to avoid landing on the same point, while
+	// preserving each neighbor's original relative angular order. Doing
+	// this as one pass over the whole node (rather than nudging each edge
+	// incrementally as it's processed) means the result doesn't depend on
+	// linkGroups' iteration order, and — the point of it — two edges can
+	// never end up crossing near the node just because a farther neighbor
+	// happened to be processed after a closer one.
+	exitAngles := computeNodeExitAngles(linkGroups, cellMap)
 
 	for i, group := range linkGroups {
-		createParallelEdges(model, group, cellMap, i, style)
+		createParallelEdges(model, group, cellMap, i, style, exitAngles)
 	}
 
 	// Add redundancy group layer
@@ -1025,7 +1030,7 @@ func groupLinks(links []Link) []LinkGroup {
 	return result
 }
 
-func createParallelEdges(model *MxGraphModel, group LinkGroup, cellMap map[string]*MxCell, edgeGroupID int, style Style) {
+func createParallelEdges(model *MxGraphModel, group LinkGroup, cellMap map[string]*MxCell, edgeGroupID int, style Style, exitAngles map[string]map[string]float64) {
 	sourceCell, ok := cellMap[group.Source]
 	if !ok || sourceCell.Geometry == nil {
 		return
@@ -1038,19 +1043,12 @@ func createParallelEdges(model *MxGraphModel, group LinkGroup, cellMap map[strin
 
 	connectionType := getConnectionType(group.Source, group.Target)
 
-	if nodeConnectionsMap == nil {
-		nodeConnectionsMap = make(map[string][]float64)
-	}
-
-	// Calculate center points
-	srcCenterX := sourceCell.Geometry.X + float64(sourceCell.Geometry.Width)/2
-	srcCenterY := sourceCell.Geometry.Y + float64(sourceCell.Geometry.Height)/2
-	tgtCenterX := targetCell.Geometry.X + float64(targetCell.Geometry.Width)/2
-	tgtCenterY := targetCell.Geometry.Y + float64(targetCell.Geometry.Height)/2
-
-	// Calculate connection points
-	sx, sy := calculateOptimalConnectionPoint(sourceCell, tgtCenterX, tgtCenterY, nodeConnectionsMap)
-	tx, ty := calculateOptimalConnectionPoint(targetCell, srcCenterX, srcCenterY, nodeConnectionsMap)
+	// Connection points: precomputed per-node so that edges keep their
+	// original relative angular order around a busy node (see
+	// computeNodeExitAngles) instead of being nudged one at a time as
+	// they're encountered.
+	sx, sy := connectionPointAtAngle(sourceCell, exitAngles[group.Source][group.Target])
+	tx, ty := connectionPointAtAngle(targetCell, exitAngles[group.Target][group.Source])
 
 	// Calculate absolute coordinates of connection points
 	srcDefaultX := sourceCell.Geometry.X + sx*float64(sourceCell.Geometry.Width)
@@ -1497,95 +1495,123 @@ func calculateVerticalOffset(angleDegrees float64) float64 {
 	}
 }
 
-func calculateOptimalConnectionPoint(cell *MxCell, targetX, targetY float64, nodeConnectionsMap map[string][]float64) (float64, float64) {
-	if cell.Geometry == nil || cell.Geometry.Width == 0 || cell.Geometry.Height == 0 {
-		return 0.5, 0.5 // Default to center if no geometry
+// computeNodeExitAngles precomputes, for every node touched by at least one
+// link group, the angle (in degrees) at which each of its edges should exit —
+// spread apart just enough that two edges never land on the same point,
+// while preserving the original angular order between a node's neighbors.
+//
+// This works one node at a time: collect the raw angle (from the node's
+// center to each neighbor's center) for every neighbor, sort those angles,
+// and only push apart the ones that are actually too close together (see
+// spreadAnglesOrdered) — a neighbor's angle is never allowed to cross past
+// another neighbor's, so two edges can never have to cross near the node to
+// reach their real targets. This replaces nudging each edge incrementally as
+// linkGroups happens to iterate them (a Go map, so non-deterministic order),
+// which could push a later-processed close neighbor past an earlier-processed
+// farther one.
+func computeNodeExitAngles(linkGroups []LinkGroup, cellMap map[string]*MxCell) map[string]map[string]float64 {
+	const minGapDegrees = 10.0
+
+	center := func(id string) (float64, float64, bool) {
+		cell, ok := cellMap[id]
+		if !ok || cell.Geometry == nil {
+			return 0, 0, false
+		}
+
+		return cell.Geometry.X + float64(cell.Geometry.Width)/2, cell.Geometry.Y + float64(cell.Geometry.Height)/2, true
 	}
 
-	// Calculate center of the cell
-	cx := cell.Geometry.X + float64(cell.Geometry.Width)/2
-	cy := cell.Geometry.Y + float64(cell.Geometry.Height)/2
+	neighborsOf := make(map[string][]string)
+	for _, group := range linkGroups {
+		neighborsOf[group.Source] = append(neighborsOf[group.Source], group.Target)
+		neighborsOf[group.Target] = append(neighborsOf[group.Target], group.Source)
+	}
 
-	// Calculate vector from center to target
-	dx := targetX - cx
-	dy := targetY - cy
+	result := make(map[string]map[string]float64, len(neighborsOf))
+	for nodeID, others := range neighborsOf {
+		ncx, ncy, ok := center(nodeID)
+		if !ok {
+			continue
+		}
 
-	// Handle the case where target is at the same position as cell center
-	if dx == 0 && dy == 0 {
+		type neighborAngle struct {
+			id    string
+			angle float64
+		}
+
+		entries := make([]neighborAngle, 0, len(others))
+		for _, other := range others {
+			ocx, ocy, ok := center(other)
+			if !ok || (ocx == ncx && ocy == ncy) {
+				continue
+			}
+			entries = append(entries, neighborAngle{other, math.Atan2(ocy-ncy, ocx-ncx) * 180 / math.Pi})
+		}
+		sort.Slice(entries, func(i, j int) bool { return entries[i].angle < entries[j].angle })
+
+		raw := make([]float64, len(entries))
+		for i, e := range entries {
+			raw[i] = e.angle
+		}
+		spread := spreadAnglesOrdered(raw, minGapDegrees)
+
+		byNeighbor := make(map[string]float64, len(entries))
+		for i, e := range entries {
+			byNeighbor[e.id] = spread[i]
+		}
+		result[nodeID] = byNeighbor
+	}
+
+	return result
+}
+
+// spreadAnglesOrdered takes angles sorted ascending and returns angles with
+// at least minGap between every consecutive pair, never reordering them.
+// Within each run of angles too close together, a forward pass enforces the
+// minimum gap (a[i] = a[i-1] + minGap where needed) and the run is then
+// shifted as a whole so its average matches its original average — so a
+// cramped cluster fans out around its original direction instead of
+// drifting entirely to one side. Angles far enough apart already are left
+// untouched.
+func spreadAnglesOrdered(sorted []float64, minGap float64) []float64 {
+	n := len(sorted)
+	result := make([]float64, n)
+	copy(result, sorted)
+
+	for i := 0; i < n; {
+		j := i
+		for j+1 < n && result[j+1]-result[j] < minGap {
+			j++
+			result[j] = result[j-1] + minGap
+		}
+		if j > i {
+			var origSum, newSum float64
+			for k := i; k <= j; k++ {
+				origSum += sorted[k]
+				newSum += result[k]
+			}
+			shift := (origSum - newSum) / float64(j-i+1)
+			for k := i; k <= j; k++ {
+				result[k] += shift
+			}
+		}
+		i = j + 1
+	}
+
+	return result
+}
+
+// connectionPointAtAngle returns the relative (0-1) point where a ray from
+// cell's center at angleDeg exits its rectangular boundary.
+func connectionPointAtAngle(cell *MxCell, angleDeg float64) (float64, float64) {
+	if cell.Geometry == nil || cell.Geometry.Width == 0 || cell.Geometry.Height == 0 {
 		return 0.5, 0.5
 	}
 
-	// Calculate angle of approach (in radians)
-	angle := math.Atan2(dy, dx)
+	angle := angleDeg * math.Pi / 180
+	dx := math.Cos(angle)
+	dy := math.Sin(angle)
 
-	// Convert to degrees for easier comparison
-	angleDeg := angle * 180 / math.Pi
-
-	// Round angle to nearest sector (to group similar approaches)
-	// Using 15-degree sectors as in the original version
-	sectorSize := 15.0
-	sectorAngle := math.Round(angleDeg/sectorSize) * sectorSize
-
-	// Store this angle in the node connections map to track distribution
-	// Using the node ID as key ensures we track per-node
-	connections := nodeConnectionsMap[cell.ID]
-
-	// If this is the first connection at this angle, initialize
-	if connections == nil {
-		connections = make([]float64, 0)
-	}
-
-	// Check if we already have connections at this exact sector angle
-	// We only care about exact matches to maintain symmetry
-	connectionCount := 0
-	for _, existingAngle := range connections {
-		if math.Abs(existingAngle-sectorAngle) < 0.001 { // Almost exact match
-			connectionCount++
-		}
-	}
-
-	// Check for opposing angle - connections from opposite sides need special handling
-	// This is important for symmetry between opposing sides
-	opposingAngle := sectorAngle + 180
-	if opposingAngle > 180 {
-		opposingAngle -= 360
-	}
-	opposingCount := 0
-	for _, existingAngle := range connections {
-		if math.Abs(existingAngle-opposingAngle) < 0.001 {
-			opposingCount++
-		}
-	}
-
-	// Add this angle to the connections
-	nodeConnectionsMap[cell.ID] = append(connections, sectorAngle)
-
-	// Apply minimal adjustment only when we have exact overlaps
-	var adjustmentFactor float64
-
-	// Only adjust if we have multiple connections at the exact same angle
-	if connectionCount > 0 {
-		// Apply a small fixed offset per connection, symmetrically
-		adjustmentFactor = float64(connectionCount) * 0.2
-
-		// Use node metadata for spine-specific adjustment
-		node := findNode(nodes, cell.ID)
-		nodeType, nodeRole := getNodeTypeInfo(node)
-
-		// For spine nodes, which have many connections, apply slightly larger offset
-		if nodeType == NodeTypeSwitch && nodeRole == SwitchRoleSpine && connectionCount > 1 {
-			adjustmentFactor *= 1.1
-		}
-	}
-
-	// Convert back to radians with adjustment
-	adjustedAngle := (sectorAngle + adjustmentFactor) * math.Pi / 180
-
-	// Re-calculate dx, dy with adjusted angle
-	dx = math.Cos(adjustedAngle)
-	dy = math.Sin(adjustedAngle)
-
-	// Find intersection with rectangle sides
 	halfWidth := float64(cell.Geometry.Width) / 2
 	halfHeight := float64(cell.Geometry.Height) / 2
 
@@ -1593,10 +1619,11 @@ func calculateOptimalConnectionPoint(cell *MxCell, targetX, targetY float64, nod
 	scaleY := halfHeight / math.Abs(dy)
 	scale := math.Min(scaleX, scaleY)
 
+	cx := cell.Geometry.X + halfWidth
+	cy := cell.Geometry.Y + halfHeight
 	ix := cx + dx*scale
 	iy := cy + dy*scale
 
-	// Convert to relative coordinates (0-1 range)
 	rx := (ix - cell.Geometry.X) / float64(cell.Geometry.Width)
 	ry := (iy - cell.Geometry.Y) / float64(cell.Geometry.Height)
 
