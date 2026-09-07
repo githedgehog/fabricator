@@ -711,21 +711,26 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 	serverBottomY := serverY + serverNodeHeight
 
 	// Add a VPC legend below each tenant's own server row, listing only the
-	// VPCs that tenant has a server in — parented to that tenant's layer so
-	// it hides along with it. A VPC touching servers in more than one tenant
-	// gets a legend entry under each (harmless: only one tenant is ever
-	// shown at a time). A VPC with no tenanted server at all stays on the
-	// generic, always-visible vpc_layer — but only when NONE of its
-	// attachments have a tenant; a core-only attachment (e.g. a spine, which
-	// some VPCs here list as "attached" due to how mgmt connections are
-	// modeled) shouldn't also plaster the VPC onto the always-visible layer
-	// when it's already correctly shown under its real tenant(s), which
-	// would render as a duplicate, overlapping legend entry.
+	// VPCs that tenant has a real server in — parented to that tenant's
+	// layer so it hides along with it. Only Server-type attachments count:
+	// a switch or gateway attachment (e.g. he-f2's switch-mgmt uplinks,
+	// modeled as Unbundled connections whose "server" side is actually a
+	// switch port) is mgmt-plane wiring, not a tenant/workload VPC
+	// membership — same reasoning as skipping its VPC box, see below, and
+	// for the same consistency: a legend entry with no matching box anywhere
+	// in that tenant would be an orphan. A VPC touching real servers in more
+	// than one tenant gets a legend entry under each (harmless: only one
+	// tenant is ever shown at a time). A VPC with no tenanted server at all
+	// stays on the generic, always-visible vpc_layer.
 	vpcsByTenant := make(map[string]map[string]*VPCInfo)
 	for vpcName, vpcInfo := range topo.VPCs {
 		tenantsSeen := make(map[string]bool)
 		for _, serverID := range vpcInfo.AttachedServers {
-			if tenant := findNode(nodes, serverID).Tenant; tenant != "" {
+			node := findNode(nodes, serverID)
+			if node.Type != NodeTypeServer {
+				continue
+			}
+			if tenant := node.Tenant; tenant != "" {
 				tenantsSeen[tenant] = true
 			}
 		}
@@ -1899,6 +1904,17 @@ func createVPCLayer(model *MxGraphModel, vpcs map[string]*VPCInfo, cellMap map[s
 	for serverID, vpcNames := range serverVPCs {
 		cell, ok := cellMap[serverID]
 		if !ok || cell.Geometry == nil {
+			continue
+		}
+
+		// A VPC's "attached servers" can include a switch or gateway (e.g.
+		// he-f2's switch-mgmt uplinks are modeled as Unbundled connections
+		// whose "server" side is actually a switch port) — that's a real
+		// mgmt-plane wiring choice, not a tenant/workload VPC membership, so
+		// it doesn't get the same box treatment a real server's VPCs do.
+		// Representing mgmt connections as their own thing is a separate
+		// feature; this only avoids mislabeling them as VPC membership.
+		if findNode(nodes, serverID).Type != NodeTypeServer {
 			continue
 		}
 
