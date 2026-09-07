@@ -40,7 +40,7 @@ require (
 	go.githedgehog.com/fabric v0.130.3
 	go.githedgehog.com/libmeta v0.4.0
 	go.podman.io/image/v5 v5.41.1
-	golang.org/x/crypto v0.55.0
+	golang.org/x/crypto v0.56.0
 	golang.org/x/mod v0.40.0
 	golang.org/x/sync v0.22.0
 	golang.org/x/term v0.45.0
