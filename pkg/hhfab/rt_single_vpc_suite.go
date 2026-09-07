@@ -542,6 +542,12 @@ func gatewayFailoverTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix
 			}
 		}
 
+		// Route presence doesn't mean the gateway itself has reconverged yet. One clean round
+		// measured 3/3 failures right after on this test (see the gate's own doc).
+		if err := testCtx.waitForDatapathConverged(ctx, testCtx.tcOpts, matrix, defaultDatapathConvergeTimeout, 2); err != nil {
+			return fmt.Errorf("datapath convergence after spine recovery: %w", err)
+		}
+
 		slog.Debug("Testing connectivity after re-enabling spines and agents")
 		if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts, matrix); err != nil {
 			return fmt.Errorf("connectivity test after re-enabling spines and agents: %w", err)

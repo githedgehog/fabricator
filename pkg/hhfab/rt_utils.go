@@ -420,10 +420,15 @@ const (
 	convergePollInterval = 5 * time.Second
 )
 
-// waitForDatapathConverged polls connectivity, minus the iperf runs, until it passes once or
-// timeout elapses. Ready pods and agents do not mean the dataplane is forwarding: a restarted
-// gateway's BGP session still has to re-establish and its EVPN routes to reinstall, and a strict
-// probe started in that tail loses its first packets.
+// waitForDatapathConverged polls connectivity, minus the iperf runs, until stableRounds
+// consecutive rounds pass or timeout elapses. Ready pods and agents do not mean the dataplane is
+// forwarding: a restarted gateway's BGP session still has to re-establish and its EVPN routes to
+// reinstall, and a strict probe started in that tail loses its first packets.
+//
+// stableRounds > 1 exists because one clean round is not always enough evidence: measured on the
+// gateway-failover revert step, a single successful round still let the strict probe right after
+// it lose a packet in 3/3 tries on one topology, while three consecutive rounds measured 0/37 on
+// the same topology. Callers that don't need that margin can pass 1.
 //
 // Use it only where the test itself caused the reconvergence, never to retry loss the fabric is
 // not supposed to produce.
@@ -431,25 +436,26 @@ const (
 // timeout has to fit a probe round, not just the convergence tail: a round costs more on a matrix
 // with external entries, whose curls each sit on a connect timeout while the path is down. A
 // timeout too short for one round is reported as budget exhaustion, not as a convergence failure.
-func (testCtx *VPCPeeringTestCtx) waitForDatapathConverged(ctx context.Context, opts TestConnectivityOpts, matrix *ConnectivityMatrix, timeout time.Duration) error {
+func (testCtx *VPCPeeringTestCtx) waitForDatapathConverged(ctx context.Context, opts TestConnectivityOpts, matrix *ConnectivityMatrix, timeout time.Duration, stableRounds int) error {
 	// Drop the iperf runs: they measure throughput, not reachability, and dominate a round's cost.
 	// This also drops the port-forward phase, gated on IPerfsSeconds alone; harmless, since that
 	// probe waits for TCP reachability itself. Pings and curls stay, so reachability is asserted.
 	probeOpts := opts
 	probeOpts.IPerfsSeconds = 0
 
-	slog.Info("Waiting for datapath convergence before strict connectivity test", "timeout", timeout)
+	slog.Info("Waiting for datapath convergence before strict connectivity test", "timeout", timeout, "stableRounds", stableRounds)
 
 	start := time.Now()
 	deadline := start.Add(timeout)
 	rounds := 0
+	stable := 0
 	var lastErr error
 	cutShort := false
 
 	for {
 		if !time.Now().Before(deadline) {
 			if lastErr != nil {
-				return fmt.Errorf("datapath did not converge within %s (%d rounds): %w", timeout, rounds, lastErr)
+				return fmt.Errorf("datapath did not converge within %s (%d rounds, %d/%d stable): %w", timeout, rounds, stable, stableRounds, lastErr)
 			}
 
 			note := ""
@@ -471,21 +477,26 @@ func (testCtx *VPCPeeringTestCtx) waitForDatapathConverged(ctx context.Context, 
 		}
 		expired := roundCtx.Err() != nil
 		cancel()
+		rounds++
 
 		switch {
 		case err == nil:
-			slog.Info("Datapath converged", "rounds", rounds+1, "took", time.Since(start))
+			stable++
+			if stable >= stableRounds {
+				slog.Info("Datapath converged", "rounds", rounds, "took", time.Since(start))
 
-			return nil
+				return nil
+			}
+			slog.Debug("Clean round, waiting for more before declaring converged", "round", rounds, "stable", stable)
 		case ctx.Err() != nil:
 			return fmt.Errorf("waiting for datapath convergence: %w", ctx.Err())
 		case expired:
 			// A probe cancelled in flight returns an error that reads like loss without being
 			// evidence of any, so it stays out of lastErr and is reported as budget exhaustion.
 			cutShort = true
-			slog.Debug("Round cut short by the convergence deadline", "round", rounds+1, "err", err)
+			slog.Debug("Round cut short by the convergence deadline", "round", rounds, "err", err)
 		default:
-			rounds++
+			stable = 0
 			lastErr = err
 			slog.Debug("Datapath not converged yet, retrying", "round", rounds, "err", err)
 		}
