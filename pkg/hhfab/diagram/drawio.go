@@ -1088,7 +1088,7 @@ func createParallelEdges(model *MxGraphModel, group LinkGroup, cellMap map[strin
 
 	// Process each link in the group
 	numLinks := len(group.Links)
-	baseSpacing := 10.0
+	baseSpacing := parallelLinkSpacing
 
 	for i, link := range group.Links {
 		// Calculate offset
@@ -1495,6 +1495,14 @@ func calculateVerticalOffset(angleDegrees float64) float64 {
 	}
 }
 
+// parallelLinkSpacing is the perpendicular pixel offset between adjacent
+// parallel links within one link group (see createParallelEdges) — the
+// outermost link in a group of numLinks sits parallelLinkSpacing*(numLinks-1)/2
+// px off the group's own center line. computeNodeExitAngles needs this same
+// value to reserve enough angular room for that fan-out, so it doesn't
+// encroach on a neighboring connection.
+const parallelLinkSpacing = 10.0
+
 // computeNodeExitAngles precomputes, for every node touched by at least one
 // link group, the angle (in degrees) at which each of its edges should exit —
 // spread apart just enough that two edges never land on the same point,
@@ -1509,6 +1517,15 @@ func calculateVerticalOffset(angleDegrees float64) float64 {
 // linkGroups happens to iterate them (a Go map, so non-deterministic order),
 // which could push a later-processed close neighbor past an earlier-processed
 // farther one.
+//
+// A neighbor connected by several parallel links (an ESLAG/bundled group)
+// fans those links out perpendicular to its own direction, by up to
+// parallelLinkSpacing*(numLinks-1)/2 px on each side (see
+// createParallelEdges) — reserving it the same angular gap as a
+// single-link neighbor left its outermost line free to cross into an
+// adjacent connection's space. Each neighbor's half-width — that pixel
+// fan-out converted to degrees at its own distance — is added to the gap
+// spreadAnglesOrdered enforces around it.
 func computeNodeExitAngles(linkGroups []LinkGroup, cellMap map[string]*MxCell) map[string]map[string]float64 {
 	const minGapDegrees = 10.0
 
@@ -1521,10 +1538,15 @@ func computeNodeExitAngles(linkGroups []LinkGroup, cellMap map[string]*MxCell) m
 		return cell.Geometry.X + float64(cell.Geometry.Width)/2, cell.Geometry.Y + float64(cell.Geometry.Height)/2, true
 	}
 
-	neighborsOf := make(map[string][]string)
+	type neighborLinks struct {
+		other    string
+		numLinks int
+	}
+	neighborsOf := make(map[string][]neighborLinks)
 	for _, group := range linkGroups {
-		neighborsOf[group.Source] = append(neighborsOf[group.Source], group.Target)
-		neighborsOf[group.Target] = append(neighborsOf[group.Target], group.Source)
+		numLinks := len(group.Links)
+		neighborsOf[group.Source] = append(neighborsOf[group.Source], neighborLinks{group.Target, numLinks})
+		neighborsOf[group.Target] = append(neighborsOf[group.Target], neighborLinks{group.Source, numLinks})
 	}
 
 	result := make(map[string]map[string]float64, len(neighborsOf))
@@ -1535,25 +1557,35 @@ func computeNodeExitAngles(linkGroups []LinkGroup, cellMap map[string]*MxCell) m
 		}
 
 		type neighborAngle struct {
-			id    string
-			angle float64
+			id        string
+			angle     float64
+			halfWidth float64
 		}
 
 		entries := make([]neighborAngle, 0, len(others))
 		for _, other := range others {
-			ocx, ocy, ok := center(other)
+			ocx, ocy, ok := center(other.other)
 			if !ok || (ocx == ncx && ocy == ncy) {
 				continue
 			}
-			entries = append(entries, neighborAngle{other, math.Atan2(ocy-ncy, ocx-ncx) * 180 / math.Pi})
+			dist := math.Hypot(ocx-ncx, ocy-ncy)
+			pixelHalfSpread := parallelLinkSpacing * float64(other.numLinks-1) / 2
+			halfWidth := math.Atan2(pixelHalfSpread, dist) * 180 / math.Pi
+			entries = append(entries, neighborAngle{
+				other.other,
+				math.Atan2(ocy-ncy, ocx-ncx) * 180 / math.Pi,
+				halfWidth,
+			})
 		}
 		sort.Slice(entries, func(i, j int) bool { return entries[i].angle < entries[j].angle })
 
 		raw := make([]float64, len(entries))
+		halfWidths := make([]float64, len(entries))
 		for i, e := range entries {
 			raw[i] = e.angle
+			halfWidths[i] = e.halfWidth
 		}
-		spread := spreadAnglesOrdered(raw, minGapDegrees)
+		spread := spreadAnglesOrdered(raw, halfWidths, minGapDegrees)
 
 		byNeighbor := make(map[string]float64, len(entries))
 		for i, e := range entries {
@@ -1565,24 +1597,26 @@ func computeNodeExitAngles(linkGroups []LinkGroup, cellMap map[string]*MxCell) m
 	return result
 }
 
-// spreadAnglesOrdered takes angles sorted ascending and returns angles with
-// at least minGap between every consecutive pair, never reordering them.
-// Within each run of angles too close together, a forward pass enforces the
-// minimum gap (a[i] = a[i-1] + minGap where needed) and the run is then
-// shifted as a whole so its average matches its original average — so a
-// cramped cluster fans out around its original direction instead of
-// drifting entirely to one side. Angles far enough apart already are left
-// untouched.
-func spreadAnglesOrdered(sorted []float64, minGap float64) []float64 {
+// spreadAnglesOrdered takes angles sorted ascending, each with its own
+// half-width (the extra angular room its own fan-out of parallel links
+// needs on either side, see computeNodeExitAngles), and returns angles with
+// at least halfWidth[i]+halfWidth[i+1]+minGap between every consecutive
+// pair, never reordering them. Within each run of angles too close
+// together, a forward pass enforces that minimum (pushing later angles
+// forward as needed) and the run is then shifted as a whole so its average
+// matches its original average — so a cramped cluster fans out around its
+// original direction instead of drifting entirely to one side. Angles far
+// enough apart already are left untouched.
+func spreadAnglesOrdered(sorted []float64, halfWidths []float64, minGap float64) []float64 {
 	n := len(sorted)
 	result := make([]float64, n)
 	copy(result, sorted)
 
 	for i := 0; i < n; {
 		j := i
-		for j+1 < n && result[j+1]-result[j] < minGap {
+		for j+1 < n && result[j+1]-result[j] < halfWidths[j]+halfWidths[j+1]+minGap {
 			j++
-			result[j] = result[j-1] + minGap
+			result[j] = result[j-1] + halfWidths[j-1] + halfWidths[j] + minGap
 		}
 		if j > i {
 			var origSum, newSum float64
