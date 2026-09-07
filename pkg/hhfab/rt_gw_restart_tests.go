@@ -140,7 +140,7 @@ func gatewayPodRestartTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matr
 		if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
 			return false, nil, fmt.Errorf("waiting for ready after %s restart: %w", component, err)
 		}
-		if err := testCtx.waitForDatapathConverged(ctx, tcOpts, matrix, defaultDatapathConvergeTimeout); err != nil {
+		if err := testCtx.waitForDatapathConverged(ctx, tcOpts, matrix, defaultDatapathConvergeTimeout, 1); err != nil {
 			return false, nil, fmt.Errorf("datapath convergence after %s restart: %w", component, err)
 		}
 		if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, tcOpts, matrix); err != nil {
