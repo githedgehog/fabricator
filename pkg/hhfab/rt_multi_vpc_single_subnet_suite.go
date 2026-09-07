@@ -558,7 +558,7 @@ func gatewayPeeringLoopTest(ctx context.Context, testCtx *VPCPeeringTestCtx, mat
 
 		slog.Info("Waiting for gateway routes on leaves", "vpc", vpc.Name, "leaves", leavesForVPC, "routes", peerRoutes, "vrf", vrfName)
 		if err := testCtx.waitForRoutesInSwitches(ctx, leavesForVPC, peerRoutes,
-			vrfName); err != nil {
+			vrfName, defaultRouteWaitTimeout); err != nil {
 			return false, nil, fmt.Errorf("waiting for gateway routes in vpc %s: %w", vpc.Name, err)
 		}
 	}
