@@ -413,6 +413,104 @@ func (testCtx *VPCPeeringTestCtx) waitForRoutesInSwitches(ctx context.Context, s
 	}
 }
 
+const (
+	// defaultDatapathConvergeTimeout bounds waitForDatapathConverged. The convergence tails it has
+	// to absorb are much shorter: 5s for the VTEP next-hop-group swap in githedgehog/internal#432,
+	// 12s for the gateway BGP/EVPN resync after an frr pod restart in githedgehog/internal#494.
+	//
+	// What the budget actually has to cover is convergeStableRounds probe rounds plus the polls
+	// between them, and a round's cost scales with the matrix: pings run in parallel but external
+	// entries are curls that can each sit on a connect timeout while the path is still down. Past
+	// roughly (timeout - polls) / convergeStableRounds per round, consecutive clean rounds stop
+	// fitting and the gate cannot pass however healthy the fabric is. The timeout is therefore a
+	// caller parameter, and running out of budget without a single failed round is reported as
+	// exactly that rather than as a convergence failure, so a topology that needs a larger value
+	// says so instead of failing opaquely.
+	defaultDatapathConvergeTimeout = 90 * time.Second
+	// convergePollInterval is the wait between probe rounds.
+	convergePollInterval = 5 * time.Second
+	// convergeStableRounds is how many consecutive clean rounds count as converged.
+	convergeStableRounds = 3
+)
+
+// waitForDatapathConverged polls connectivity, minus the iperf runs, until it passes for
+// convergeStableRounds consecutive rounds, or timeout elapses. Routes present in a leaf RIB, and a
+// pod or agent reporting Ready, do not mean the dataplane is forwarding: the ASIC may still be
+// reprogramming a next-hop group, neighbors may be unresolved, and a restarted gateway's BGP
+// session may still be resyncing. A strict probe run immediately afterward can catch that tail and
+// lose its first packets.
+//
+// Requiring consecutive clean rounds rather than one distinguishes a settled path from a
+// momentarily clean one. This cannot mask a real defect: the strict probe that follows still runs
+// once and tolerates no loss, and a path that never converges fails here.
+func (testCtx *VPCPeeringTestCtx) waitForDatapathConverged(ctx context.Context, opts TestConnectivityOpts, matrix *ConnectivityMatrix, timeout time.Duration) error {
+	// Drop only the iperf runs: they measure throughput rather than reachability and dominate the
+	// cost of a round. Pings and curls both stay, because the matrix asserts server-to-server
+	// reachability with pings and external reachability with curls, and TestConnectivityWithMatrix
+	// refuses a matrix whose external entries could not be checked.
+	probeOpts := opts
+	probeOpts.IPerfsSeconds = 0
+
+	slog.Info("Waiting for datapath convergence before strict connectivity test",
+		"timeout", timeout, "stableRounds", convergeStableRounds)
+
+	start := time.Now()
+	deadline := start.Add(timeout)
+	stable, rounds, longest := 0, 0, 0
+	var lastErr error
+
+	for {
+		// Each round runs on a context bounded by the whole budget rather than by the remaining
+		// budget: a probe cancelled in flight returns a context error indistinguishable from real
+		// loss, which would reset the streak and be reported as a convergence failure. The deadline
+		// decides whether another round starts, not whether the one in flight finishes.
+		roundCtx, cancel := context.WithTimeout(ctx, timeout)
+		var err error
+		if matrix == nil {
+			err = DoVLABTestConnectivity(roundCtx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, probeOpts)
+		} else {
+			err = DoVLABTestConnectivityWithMatrix(roundCtx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, probeOpts, matrix)
+		}
+		cancel()
+		rounds++
+
+		switch {
+		case err == nil:
+			stable++
+			longest = max(longest, stable)
+			if stable >= convergeStableRounds {
+				slog.Info("Datapath converged", "rounds", rounds, "took", time.Since(start))
+
+				return nil
+			}
+		case ctx.Err() != nil:
+			return fmt.Errorf("waiting for datapath convergence: %w", ctx.Err())
+		default:
+			stable = 0
+			lastErr = err
+			slog.Debug("Datapath not converged yet, retrying", "round", rounds, "err", err)
+		}
+
+		if !time.Now().Before(deadline) {
+			if lastErr != nil {
+				return fmt.Errorf("datapath did not converge within %s (%d rounds, longest clean streak %d of %d): %w",
+					timeout, rounds, longest, convergeStableRounds, lastErr)
+			}
+
+			// No round failed, so the path is fine and the budget is not: it did not fit
+			// convergeStableRounds rounds at this topology's probe cost.
+			return fmt.Errorf("datapath convergence gate ran out of budget after %s: %d rounds ran, none failed, longest clean streak %d of %d - the timeout is too short for %d consecutive rounds here", //nolint:goerr113
+				timeout, rounds, longest, convergeStableRounds, convergeStableRounds)
+		}
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("waiting for datapath convergence: %w", ctx.Err())
+		case <-time.After(convergePollInterval):
+		}
+	}
+}
+
 // check that the DHCP lease is within the expected range.
 func checkDHCPLease(leaseInfo *DHCPLeaseInfo, expectedLease int, tolerance int) error {
 	if leaseInfo == nil {

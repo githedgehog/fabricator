@@ -514,6 +514,14 @@ func gatewayFailoverTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix
 			}
 		}
 
+		// The route-presence check above finds the gateway routes while ds5000-01 is still
+		// reprogramming the VTEP next-hop group they point at, so the strict probe below can start
+		// inside a sub-second hardware black hole (githedgehog/internal#432). Absorb that tail on
+		// the same matrix the strict probe asserts.
+		if err := testCtx.waitForDatapathConverged(ctx, testCtx.tcOpts, matrix, defaultDatapathConvergeTimeout); err != nil {
+			return fmt.Errorf("datapath convergence after spine recovery: %w", err)
+		}
+
 		slog.Debug("Testing connectivity after re-enabling spines and agents")
 		if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts, matrix); err != nil {
 			return fmt.Errorf("connectivity test after re-enabling spines and agents: %w", err)
