@@ -130,6 +130,11 @@ func gatewayPodRestartTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matr
 	tcOpts.Sources = natTestProbeServers(matrix, vpc1.Name, vpc2.Name)
 	tcOpts.Destinations = tcOpts.Sources
 
+	// Neither gate below reaches the dataplane: the sleep is a fixed guess and WaitReady only
+	// confirms pod and agent state. Killing frr is the worse of the two, because it forces a full
+	// watchfrr/zebra/bgpd restart and the gateway's BGP session to its leaf has to re-establish
+	// before the peered prefixes come back (githedgehog/internal#494), but the dataplane pass has
+	// no convergence gate either, so both passes wait for the datapath itself.
 	for _, component := range []string{"dataplane", "frr"} {
 		if err := restartGatewayPods(ctx, testCtx.kube, component); err != nil {
 			return false, nil, fmt.Errorf("restarting gateway %s: %w", component, err)
@@ -139,6 +144,9 @@ func gatewayPodRestartTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matr
 		time.Sleep(5 * time.Second)
 		if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
 			return false, nil, fmt.Errorf("waiting for ready after %s restart: %w", component, err)
+		}
+		if err := testCtx.waitForDatapathConverged(ctx, tcOpts, matrix, defaultDatapathConvergeTimeout); err != nil {
+			return false, nil, fmt.Errorf("datapath convergence after %s restart: %w", component, err)
 		}
 		if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, tcOpts, matrix); err != nil {
 			return false, nil, fmt.Errorf("testing connectivity after %s restart: %w", component, err)
