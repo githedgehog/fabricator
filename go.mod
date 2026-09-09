@@ -41,8 +41,8 @@ require (
 	go.githedgehog.com/libmeta v0.4.0
 	go.podman.io/image/v5 v5.41.1
 	golang.org/x/crypto v0.56.0
-	golang.org/x/mod v0.40.0
-	golang.org/x/sync v0.22.0
+	golang.org/x/mod v0.41.0
+	golang.org/x/sync v0.23.0
 	golang.org/x/term v0.45.0
 	k8s.io/api v0.36.4
 	k8s.io/apiextensions-apiserver v0.36.4
