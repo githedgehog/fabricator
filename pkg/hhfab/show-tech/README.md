@@ -93,6 +93,9 @@ Collected via `sonic-cli` and direct `bcmcmd` (Broadcom SDK).
   its older command first and falls back to the newer one; a command
   rejected by every candidate, or `bcmcmd` missing entirely (VLAB), records
   an explicit marker line instead of the SDK's raw usage/error text
+- **ACL rule counters** (`aclshow -a`): per-rule packet/byte hit counts,
+  ASIC-vendor-independent (unlike `bcmcmd`/`fp show` above, which shows rule
+  programming and TCAM capacity but never whether a rule matched a packet)
 - **Services**: system status brief/full, system logs, hedgehog-agent status
   and logs (`/var/log/agent.log`), Docker container list and last 100 log lines
   per container

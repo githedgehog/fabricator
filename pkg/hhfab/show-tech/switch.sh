@@ -229,6 +229,22 @@ else
 fi
 
 # ---------------------------
+# ACL Rule Counters
+# ---------------------------
+# fp show (above) only has rule programming and TCAM slot capacity, not
+# whether a rule ever matched a packet. aclshow is a plain sonic-utilities
+# tool, ASIC-vendor-independent (unlike bcmcmd), so no per-platform fallback
+# is needed.
+{
+    echo -e "\n=== ACL Rule Counters ==="
+    if command -v aclshow >/dev/null 2>&1; then
+        aclshow -a
+    else
+        echo "aclshow not available on this platform"
+    fi
+} >> "$OUTPUT_FILE" 2>&1
+
+# ---------------------------
 # System Logs and Status
 # ---------------------------
 {
