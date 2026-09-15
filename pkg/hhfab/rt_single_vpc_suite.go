@@ -69,6 +69,15 @@ func makeSingleVPCSuite() *JUnitTestSuite {
 			},
 		},
 		{
+			Name: "DHCP IP change cross-leaf convergence",
+			F:    dhcpIPChangeConvergenceTest,
+			SkipFlags: SkipFlags{
+				VirtualSwitch: true,
+				NoServers:     true,
+				ExtendedOnly:  true,
+			},
+		},
+		{
 			Name: "ESLAG Failover",
 			F:    eslagTest,
 			SkipFlags: SkipFlags{
