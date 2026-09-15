@@ -192,9 +192,10 @@ var NICTypes = []string{
 }
 
 type VMSize struct {
-	CPU  uint `json:"cpu"`  // in cores
-	RAM  uint `json:"ram"`  // in MB
-	Disk uint `json:"disk"` // in GB
+	CPU       uint `json:"cpu"`  // in cores
+	RAM       uint `json:"ram"`  // in MB
+	Disk      uint `json:"disk"` // in GB
+	HugePages bool `json:"hugepages"`
 }
 
 var DefaultSizes = VMSizes{
@@ -284,11 +285,11 @@ func (c *Config) PrepareVLAB(ctx context.Context, opts VLABUpOpts) (*VLAB, error
 	}
 	vlabCfg.Sizes = sizes
 
-	slog.Debug("Control VM", "cpus", sizes.Control.CPU, "ram", sizes.Control.RAM, "disk", sizes.Control.Disk)
-	slog.Debug("Gateway VM", "cpus", sizes.Gateway.CPU, "ram", sizes.Gateway.RAM, "disk", sizes.Gateway.Disk)
-	slog.Debug("Server VM", "cpus", sizes.Server.CPU, "ram", sizes.Server.RAM, "disk", sizes.Server.Disk)
-	slog.Debug("Switch VM", "cpus", sizes.Switch.CPU, "ram", sizes.Switch.RAM, "disk", sizes.Switch.Disk)
-	slog.Debug("External VM", "cpus", sizes.External.CPU, "ram", sizes.External.RAM, "disk", sizes.External.Disk)
+	slog.Debug("Control VM", "cpus", sizes.Control.CPU, "ram", sizes.Control.RAM, "hugepages", sizes.Control.HugePages, "disk", sizes.Control.Disk)
+	slog.Debug("Gateway VM", "cpus", sizes.Gateway.CPU, "ram", sizes.Gateway.RAM, "hugepages", sizes.Gateway.HugePages, "disk", sizes.Gateway.Disk)
+	slog.Debug("Server VM", "cpus", sizes.Server.CPU, "ram", sizes.Server.RAM, "hugepages", sizes.Server.HugePages, "disk", sizes.Server.Disk)
+	slog.Debug("Switch VM", "cpus", sizes.Switch.CPU, "ram", sizes.Switch.RAM, "hugepages", sizes.Switch.HugePages, "disk", sizes.Switch.Disk)
+	slog.Debug("External VM", "cpus", sizes.External.CPU, "ram", sizes.External.RAM, "hugepages", sizes.External.HugePages, "disk", sizes.External.Disk)
 
 	for name, vm := range vlabCfg.VMs {
 		if !slices.Contains(VMTypes, vm.Type) {

@@ -278,10 +278,24 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 	cpu := uint(0)
 	ram := uint(0)
 	disk := uint(0)
+	hugepages := uint(0)
 	for _, vm := range vlab.VMs {
 		cpu += vm.Size.CPU
 		ram += vm.Size.RAM
 		disk += vm.Size.Disk
+		if vm.Size.HugePages {
+			if vm.Size.RAM%1024 != 0 {
+				return fmt.Errorf("%s requested HugePages but RAM size %d is not a multiple of 1024", vm.Name, vm.Size.RAM)
+			}
+
+			hugepages += vm.Size.RAM / 1024
+		}
+	}
+
+	if hugepages > 0 {
+		if err := execHelper(ctx, c.WorkDir, append([]string{"hugepages"}, fmt.Sprintf("--count=%d", hugepages))); err != nil {
+			return fmt.Errorf("running helper to allocate hugepages: %w", err)
+		}
 	}
 
 	d, err := artificer.NewDownloaderWithDockerCreds(c.CacheDir, c.ExtraCacheDirs, c.Repo, c.Prefix)
@@ -440,6 +454,8 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 		}
 	}
 
+	slog.Info("Starting VMs", "count", len(vlab.VMs), "cpu", fmt.Sprintf("%d vCPUs", cpu), "ram", fmt.Sprintf("%d MB", ram), "hugepages1G", hugepages, "disk", fmt.Sprintf("%d GB", disk))
+
 	group, ctx := errgroup.WithContext(ctx)
 	postProcesses := &sync.WaitGroup{}
 	postProcessDone := make(chan struct{})
@@ -448,11 +464,16 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 		vmDir := filepath.Join(c.WorkDir, VLABDir, VLABVMsDir, vm.Name)
 
 		group.Go(func() error {
+			memBackend := ""
+			if vm.Size.HugePages {
+				memBackend = ",memory-backend=mem"
+			}
+
 			args := []string{
 				"-name", vm.Name,
 				"-uuid", fmt.Sprintf(VLABUUIDTmpl, vm.ID),
+				"-machine", "q35,accel=kvm,smm=on" + memBackend,
 				"-m", fmt.Sprintf("%dM", vm.Size.RAM),
-				"-machine", "q35,accel=kvm,smm=on",
 				"-cpu", "host",
 				"-smp", fmt.Sprintf("%d", vm.Size.CPU),
 				"-object", "rng-random,filename=/dev/urandom,id=rng0",
@@ -466,6 +487,10 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 				"-qmp", fmt.Sprintf("unix:%s,server,nowait", VLABQMPSock),
 				"-global", "ICH9-LPC.disable_s3=1",
 				"-global", "ICH9-LPC.acpi-pci-hotplug-with-bridge-support=off",
+			}
+
+			if vm.Size.HugePages {
+				args = append(args, "-object", fmt.Sprintf("memory-backend-memfd,id=mem,size=%dM,hugetlb=on,hugetlbsize=1G,prealloc=on,prealloc-threads=8", vm.Size.RAM))
 			}
 
 			// TODO fix by copying system OVMF?
@@ -569,8 +594,6 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 			})
 		}
 	}
-
-	slog.Info("Starting VMs", "count", len(vlab.VMs), "cpu", fmt.Sprintf("%d vCPUs", cpu), "ram", fmt.Sprintf("%d MB", ram), "disk", fmt.Sprintf("%d GB", disk))
 
 	group.Go(func() error {
 		go func() {

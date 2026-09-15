@@ -258,6 +258,111 @@ func isDeviceBoundToVFIO(dev string) bool {
 	return err == nil
 }
 
+const (
+	HugePages1GDir     = "/sys/kernel/mm/hugepages/hugepages-1048576kB"
+	HugePagesNrFile    = "nr_hugepages"
+	HugePagesFreeFile  = "free_hugepages"
+	CompactMemoryFile  = "/proc/sys/vm/compact_memory"
+	HugePagesAttempts  = 3
+	HugePagesRetryWait = 2 * time.Second
+)
+
+// PrepareHugePages makes sure the 1G huge pages pool has at least count pages in total. If it's smaller, it compacts
+// memory, requests the missing pages and checks the resulting pool size, retrying a few times as the kernel can
+// satisfy such a request only partially. It never shrinks the pool.
+func PrepareHugePages(ctx context.Context, count uint) error {
+	if count == 0 {
+		return nil
+	}
+
+	if _, err := os.Stat(HugePages1GDir); err != nil {
+		return fmt.Errorf("1G huge pages aren't supported (checking %q): %w", HugePages1GDir, err)
+	}
+
+	nr, err := readHugePages(HugePagesNrFile)
+	if err != nil {
+		return fmt.Errorf("getting huge pages pool size: %w", err)
+	}
+
+	if nr >= count {
+		slog.Debug("Enough 1G huge pages in the pool", "pool", nr, "needed", count)
+
+		return nil
+	}
+
+	for attempt := range HugePagesAttempts {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("waiting to retry huge pages allocation: %w", ctx.Err())
+			case <-time.After(HugePagesRetryWait):
+			}
+		}
+
+		slog.Info("Not enough 1G huge pages, compacting memory and growing the pool", "pool", nr, "needed", count)
+
+		if err := compactMemory(); err != nil {
+			slog.Warn("Can't compact memory, still trying to allocate huge pages", "err", err)
+		}
+
+		if err := writeHugePages(HugePagesNrFile, count); err != nil {
+			return fmt.Errorf("growing huge pages pool to %d: %w", count, err)
+		}
+
+		// kernel could have allocated only a part of what we asked for, so the actual pool size is what matters
+		if nr, err = readHugePages(HugePagesNrFile); err != nil {
+			return fmt.Errorf("getting huge pages pool size: %w", err)
+		}
+
+		if nr >= count {
+			free, err := readHugePages(HugePagesFreeFile)
+			if err != nil {
+				return fmt.Errorf("getting free huge pages: %w", err)
+			}
+
+			slog.Info("1G huge pages are ready", "pool", nr, "free", free, "needed", count)
+
+			return nil
+		}
+	}
+
+	return fmt.Errorf("only %d of %d 1G huge pages allocated, free up memory or preallocate them at boot", nr, count) //nolint:err113
+}
+
+func readHugePages(name string) (uint, error) {
+	path := filepath.Join(HugePages1GDir, name)
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0, fmt.Errorf("reading %q: %w", path, err)
+	}
+
+	val, err := strconv.ParseUint(strings.TrimSpace(string(data)), 10, 32)
+	if err != nil {
+		return 0, fmt.Errorf("parsing %q: %w", path, err)
+	}
+
+	return uint(val), nil
+}
+
+func writeHugePages(name string, val uint) error {
+	path := filepath.Join(HugePages1GDir, name)
+
+	if err := os.WriteFile(path, []byte(strconv.FormatUint(uint64(val), 10)), 0o644); err != nil {
+		return fmt.Errorf("writing %q: %w", path, err)
+	}
+
+	return nil
+}
+
+func compactMemory() error {
+	if err := os.WriteFile(CompactMemoryFile, []byte("1"), 0o200); err != nil {
+		return fmt.Errorf("writing %q: %w", CompactMemoryFile, err)
+	}
+
+	return nil
+}
+
 func CheckStaleVMs(ctx context.Context, kill bool) ([]int32, error) {
 	processes, err := process.ProcessesWithContext(ctx)
 	if err != nil {

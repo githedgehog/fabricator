@@ -1187,6 +1187,12 @@ func Run(ctx context.Context) error {
 								Usage:    fmt.Sprintf("override gateway node VM RAM (in MB) (if not set: %d)", hhfab.DefaultSizes.Gateway.RAM),
 								EnvVars:  []string{"HHFAB_VLAB_GW_RAM"},
 							},
+							&cli.BoolFlag{
+								Category: FlagCatVMSizes,
+								Name:     "gateway-hugepages",
+								Usage:    fmt.Sprintf("use huge pages for gateway node VM (if not set: %t)", hhfab.DefaultSizes.Gateway.HugePages),
+								EnvVars:  []string{"HHFAB_VLAB_GW_HUGEPAGES"},
+							},
 							&cli.UintFlag{
 								Category: FlagCatVMSizes,
 								Name:     "gateway-disk",
@@ -2003,6 +2009,25 @@ Examples:
 						Action: func(_ *cli.Context) error {
 							if _, err := hhfab.CheckStaleVMs(ctx, true); err != nil {
 								return fmt.Errorf("killing stale vms: %w", err)
+							}
+
+							return nil
+						},
+					},
+					{
+						Name:  "hugepages",
+						Usage: "make sure the 1G huge pages pool is large enough for VLAB VMs",
+						Flags: flatten(defaultFlags, []cli.Flag{
+							&cli.UintFlag{
+								Name:     FlagNameCount,
+								Usage:    "total number of 1G huge pages required",
+								Required: true,
+							},
+						}),
+						Before: before(true),
+						Action: func(c *cli.Context) error {
+							if err := hhfab.PrepareHugePages(ctx, c.Uint(FlagNameCount)); err != nil {
+								return fmt.Errorf("preparing hugepages: %w", err)
 							}
 
 							return nil
