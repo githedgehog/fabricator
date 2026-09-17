@@ -13,6 +13,10 @@ type Node struct {
 	Label       string
 	Properties  map[string]string
 	Description string
+	// Tenant groups a leaf switch and everything attached under it (e.g. an
+	// env's ToR and its servers) into its own toggleable draw.io layer. Empty
+	// for shared/core nodes (spines, gateways, externals). See assignTenants.
+	Tenant string
 }
 
 type Link struct {
