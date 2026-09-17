@@ -213,7 +213,7 @@ const (
 	isoLogicalBlockSize diskfs.SectorSize = 2048
 	MiB                 uint64            = 1024 * 1024
 	GiB                 uint64            = 1024 * 1024 * 1024
-	espSize             uint64            = 500 * MiB
+	espSize             uint64            = 700 * MiB
 	oemSize             uint64            = (9 * GiB)
 	dataSize                              = espSize + oemSize
 	blkSize                               = diskfs.SectorSize512
