@@ -34,8 +34,11 @@ const (
 	// Celestica SONiC+ version (including all flavors)
 	CLSSONiCVersion = meta.Version("v5.0.0")
 
-	// NVIDIA Cumulus version (including all flavors)
-	CumulusVersion = meta.Version("v5.16.0")
+	// NVIDIA Cumulus VX version (used in VLAB only)
+	CumulusVXVersion = meta.Version("v5.16.5")
+
+	// NVIDIA Cumulus MLX version
+	CumulusMLXVersion = meta.Version("v5.18.1")
 )
 
 // Fabricator version is set at build time via ldflags
@@ -89,8 +92,8 @@ var Versions = fabapi.Versions{
 			fmeta.NOSTypeSONiCCLSPlusVS:       CLSSONiCVersion,
 			fmeta.NOSTypeSONiCCLSPlusBroadcom: CLSSONiCVersion,
 			fmeta.NOSTypeSONiCCLSPlusMarvell:  CLSSONiCVersion,
-			fmeta.NOSTypeCumulusVX:            CumulusVersion,
-			fmeta.NOSTypeCumulusMlx:           CumulusVersion,
+			fmeta.NOSTypeCumulusVX:            CumulusVXVersion,
+			fmeta.NOSTypeCumulusMlx:           CumulusMLXVersion,
 		},
 		ONIE: map[string]meta.Version{
 			switchprofile.DellS5232FON.Spec.Platform:         "v0.1.0",
