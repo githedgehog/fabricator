@@ -65,9 +65,9 @@ queue_sonic_cmd "show ip arp vrf all"
 # ---------------------------
 # BGP (all VRFs)
 # ---------------------------
-queue_sonic_cmd "show ip bgp summary"
-queue_sonic_cmd "show ip bgp vrf all summary"
-queue_sonic_cmd "show ip bgp neighbors"
+queue_sonic_cmd "show bgp ipv4 unicast summary"
+queue_sonic_cmd "show bgp ipv4 unicast vrf all summary"
+queue_sonic_cmd "show bgp ipv4 unicast neighbors"
 
 # ---------------------------
 # NAT
