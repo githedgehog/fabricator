@@ -13,6 +13,7 @@ import (
 	"net/netip"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
@@ -45,6 +46,9 @@ type natTestSpec struct {
 	Name      string
 	BuildSpec func(vpc1, vpc2 *vpcapi.VPC) (peeringSpecs, error)
 	Overlay   func(vpc1, vpc2 *vpcapi.VPC, matrix *ConnectivityMatrix) error
+	// PostCheck runs extra assertions on the peering the matrix has just
+	// validated, for paths the matrix cannot express.
+	PostCheck func(ctx context.Context, vpc1, vpc2 *vpcapi.VPC, matrix *ConnectivityMatrix) error
 }
 
 // firstTwoVPCs returns the two alphabetically first VPCs, i.e. the pair every
@@ -104,6 +108,12 @@ func (testCtx *VPCPeeringTestCtx) runNATTest(ctx context.Context, matrix *Connec
 
 	if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, tcOpts, matrix); err != nil {
 		return false, nil, fmt.Errorf("%s: testing connectivity: %w", spec.Name, err)
+	}
+
+	if spec.PostCheck != nil {
+		if err := spec.PostCheck(ctx, vpc1, vpc2, matrix); err != nil {
+			return false, nil, fmt.Errorf("%s: %w", spec.Name, err)
+		}
 	}
 
 	return false, nil, nil
@@ -938,6 +948,159 @@ func gatewayPeeringPortForwardNATTest(ctx context.Context, testCtx *VPCPeeringTe
 	})
 }
 
+const (
+	// bareFrameProbePort is served by the always-on iperf3 daemon, so the
+	// probe needs no on-demand listener.
+	bareFrameProbePort uint16 = 5201
+
+	// bareFrameSynRecvTimeout bounds how long the receiver may keep the probe
+	// connection in SYN-RECV. A handshake that completes clears it in
+	// milliseconds; one whose ACK never lands keeps the socket there while the
+	// SYN-ACK retransmits for about a minute.
+	bareFrameSynRecvTimeout = 5 * time.Second
+)
+
+// checkBareFrameHandshake opens one connection from src to dst with TCP
+// timestamps disabled on the sender. Without the 12-octet timestamp option a
+// bare ACK is 54 octets, so ethernet pads it up to the 60-octet minimum; a NAT
+// path that sums that padding into the transport checksum corrupts the ACK, the
+// receiver drops it and stays in SYN-RECV. The rest of the suite probes over
+// stacks that negotiate timestamps, which never emit a frame short enough to be
+// padded, so this is the only check that covers the padded case.
+func (testCtx *VPCPeeringTestCtx) checkBareFrameHandshake(ctx context.Context, src, dst *ServerEndpoint, natCIDR string) (retErr error) {
+	srcSSH, err := testCtx.getSSH(ctx, src.Name)
+	if err != nil {
+		return fmt.Errorf("ssh to %s: %w", src.Name, err)
+	}
+	dstSSH, err := testCtx.getSSH(ctx, dst.Name)
+	if err != nil {
+		return fmt.Errorf("ssh to %s: %w", dst.Name, err)
+	}
+
+	restore, err := disableTCPTimestamps(ctx, srcSSH, src.Name)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		retErr = errors.Join(retErr, restore())
+	}()
+
+	before, err := synRecvPeers(ctx, dstSSH, dst.Name, natCIDR)
+	if err != nil {
+		return err
+	}
+
+	expected := Reachability{Reachable: true, Reason: ReachabilityReasonGatewayPeering}
+	if ie := checkTCPPort(ctx, nil, src.Name, srcSSH, dst.IP, bareFrameProbePort, expected); ie != nil {
+		return fmt.Errorf("connecting from %s to %s:%d without TCP timestamps: %s", src.Name, dst.IP, bareFrameProbePort, ie.ClientMsg) //nolint:err113
+	}
+
+	var stuck []string
+	for deadline := time.Now().Add(bareFrameSynRecvTimeout); ; {
+		peers, err := synRecvPeers(ctx, dstSSH, dst.Name, natCIDR)
+		if err != nil {
+			return err
+		}
+		stuck = nil
+		for peer := range peers {
+			if !before[peer] {
+				stuck = append(stuck, peer)
+			}
+		}
+		if len(stuck) == 0 {
+			slog.Debug("Handshake without TCP timestamps completed", "from", src.Name, "to", dst.Name, "port", bareFrameProbePort)
+
+			return nil
+		}
+		if time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	slices.Sort(stuck)
+
+	return fmt.Errorf("handshake from %s without TCP timestamps did not complete: %s still holds port %d in SYN-RECV from %s after %s, the ACK completing it never arrived", //nolint:err113
+		src.Name, dst.Name, bareFrameProbePort, strings.Join(stuck, ", "), bareFrameSynRecvTimeout)
+}
+
+// disableTCPTimestamps turns net.ipv4.tcp_timestamps off on server and returns a
+// function putting back the value it found. The toggle only has to bracket the
+// SYN: a connection that negotiates without timestamps keeps them off for its
+// lifetime. Test servers carry no concurrent user traffic during a run, so a
+// VM-wide sysctl is enough and needs no per-netns plumbing.
+func disableTCPTimestamps(ctx context.Context, ssh *sshutil.Config, server string) (func() error, error) {
+	stdout, stderr, err := retrySSHCmd(ctx, ssh, "sysctl -n net.ipv4.tcp_timestamps", server)
+	if err != nil {
+		return nil, fmt.Errorf("reading tcp_timestamps on %s: %w: %s", server, err, strings.TrimSpace(stderr))
+	}
+	original := strings.TrimSpace(stdout)
+	if original == "0" {
+		return func() error { return nil }, nil
+	}
+
+	if _, stderr, err := retrySSHCmd(ctx, ssh, "sudo sysctl -w net.ipv4.tcp_timestamps=0", server); err != nil {
+		return nil, fmt.Errorf("disabling tcp_timestamps on %s: %w: %s", server, err, strings.TrimSpace(stderr))
+	}
+
+	return func() error {
+		// Detached from ctx so the sysctl still goes back when the check
+		// bailed out because ctx was cancelled.
+		rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+
+		cmd := fmt.Sprintf("sudo sysctl -w net.ipv4.tcp_timestamps=%s", original)
+		if _, stderr, err := retrySSHCmd(rctx, ssh, cmd, server); err != nil {
+			return fmt.Errorf("restoring tcp_timestamps=%s on %s: %w: %s", original, server, err, strings.TrimSpace(stderr))
+		}
+
+		return nil
+	}, nil
+}
+
+// synRecvPeers returns the peer addresses of the sockets on server that sit in
+// SYN-RECV on bareFrameProbePort, narrowed to peers inside natCIDR so unrelated
+// traffic cannot skew the result. ss drops the state column when a single
+// state is filtered on, so the peer is the last field either way.
+func synRecvPeers(ctx context.Context, ssh *sshutil.Config, server, natCIDR string) (map[string]bool, error) {
+	cmd := fmt.Sprintf("ss -Htan state syn-recv '( sport = :%d and dst %s )'", bareFrameProbePort, natCIDR)
+	stdout, stderr, err := retrySSHCmd(ctx, ssh, cmd, server)
+	if err != nil {
+		return nil, fmt.Errorf("listing SYN-RECV sockets on %s: %w: %s", server, err, strings.TrimSpace(stderr))
+	}
+
+	peers := map[string]bool{}
+	for line := range strings.SplitSeq(stdout, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 4 {
+			continue
+		}
+		peers[fields[len(fields)-1]] = true
+	}
+
+	return peers, nil
+}
+
+// natTestServerInVPC picks the server a VPC-to-VPC check should drive traffic
+// from or to: the first one in vpcName by name, so the pick is stable across
+// runs.
+func natTestServerInVPC(matrix *ConnectivityMatrix, vpcName string) (*ServerEndpoint, error) {
+	var servers []*ServerEndpoint
+	for _, ep := range matrix.AllEndpoints {
+		if ep.Server == nil || ep.Server.VPC != vpcName || !ep.Server.IP.IsValid() {
+			continue
+		}
+		servers = append(servers, ep.Server)
+	}
+	if len(servers) == 0 {
+		return nil, fmt.Errorf("no server with an address in %s", vpcName) //nolint:err113
+	}
+	slices.SortFunc(servers, func(a, b *ServerEndpoint) int {
+		return strings.Compare(a.Name, b.Name)
+	})
+
+	return servers[0], nil
+}
+
 // Test gateway peering with combined masquerade and port-forwarding NAT
 // Masquerade enables outbound NAT from vpc1 to vpc2; port-forward enables inbound on port 15201→5201.
 // Both directions are tested: outbound via masquerade (vpc1→vpc2) and inbound via port-forward (vpc2→vpc1).
@@ -995,6 +1158,22 @@ func gatewayPeeringMasqueradePortForwardNATTest(ctx context.Context, testCtx *VP
 			}
 
 			return overlayVPCToVPCPortForwardDNAT(matrix, vpc2.Name, vpc1.Name, vpc1SubnetCIDR, vpc1NATCIDR, 15201)
+		},
+		// Every matrix probe rides a stack that negotiates TCP timestamps, which
+		// keeps even a bare ACK past the 60-octet ethernet minimum. Drive one
+		// more connection through the same masquerade path with timestamps off,
+		// so the padded short-frame case gets exercised too.
+		PostCheck: func(ctx context.Context, vpc1, vpc2 *vpcapi.VPC, matrix *ConnectivityMatrix) error {
+			src, err := natTestServerInVPC(matrix, vpc1.Name)
+			if err != nil {
+				return err
+			}
+			dst, err := natTestServerInVPC(matrix, vpc2.Name)
+			if err != nil {
+				return err
+			}
+
+			return testCtx.checkBareFrameHandshake(ctx, src, dst, vpc1NATCIDR)
 		},
 	})
 }
