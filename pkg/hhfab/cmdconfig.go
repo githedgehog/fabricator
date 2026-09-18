@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 
@@ -19,6 +20,8 @@ import (
 	"oras.land/oras-go/v2/registry/remote/credentials"
 	kyaml "sigs.k8s.io/yaml"
 )
+
+const UnnumberedFabricLinksEnv = "HHFAB_UNNUMBERED_FABRIC_LINKS"
 
 const (
 	RegistryConfigFile = ".registry.yaml"
@@ -45,8 +48,11 @@ type Config struct {
 	Fab      fabapi.Fabricator
 	Controls []fabapi.ControlNode
 	Nodes    []fabapi.FabNode
-	Client   apiutil.ReaderWithScheme // all resources (fab, fabric and gateway)
-	Shutdown atomic.Int32
+	// UnnumberedFabricLinks makes hydration leave fabric and mesh link IPs empty so
+	// those links run BGP unnumbered; set from UnnumberedFabricLinksEnv
+	UnnumberedFabricLinks bool
+	Client                apiutil.ReaderWithScheme // all resources (fab, fabric and gateway)
+	Shutdown              atomic.Int32
 }
 
 type RegistryConfig struct {
@@ -353,15 +359,28 @@ func load(ctx context.Context, workDir, cacheDir string, extraCacheDirs []string
 		f.Spec.Config.Control.JoinToken = setJoinToken
 	}
 
+	unnumbered := false
+	// an exported but empty var is how CI passes "unset", so only parse a real value
+	if v := os.Getenv(UnnumberedFabricLinksEnv); v != "" {
+		unnumbered, err = strconv.ParseBool(v)
+		if err != nil {
+			return nil, fmt.Errorf("parsing %s %q: %w", UnnumberedFabricLinksEnv, v, err)
+		}
+		if unnumbered {
+			slog.Info("Fabric and mesh links will be hydrated as BGP unnumbered", "env", UnnumberedFabricLinksEnv)
+		}
+	}
+
 	cfg := &Config{
-		WorkDir:        workDir,
-		CacheDir:       cacheDir,
-		ExtraCacheDirs: extraCacheDirs,
-		RegistryConfig: *regConf,
-		Fab:            f,
-		Controls:       controls,
-		Nodes:          nodes,
-		Client:         l.GetClient(),
+		WorkDir:               workDir,
+		CacheDir:              cacheDir,
+		ExtraCacheDirs:        extraCacheDirs,
+		RegistryConfig:        *regConf,
+		Fab:                   f,
+		Controls:              controls,
+		Nodes:                 nodes,
+		Client:                l.GetClient(),
+		UnnumberedFabricLinks: unnumbered,
 	}
 
 	if wiringAndHydration {
