@@ -121,7 +121,7 @@ queue_sonic_cmd "QoS" "show qos wred-policy"
 # ---------------------------
 # BGP and EVPN Status
 # ---------------------------
-queue_sonic_cmd "BGP/EVPN" "show ip bgp summary"
+queue_sonic_cmd "BGP/EVPN" "show bgp ipv4 unicast summary"
 queue_sonic_cmd "BGP/EVPN" "show bgp l2vpn evpn summary"
 queue_sonic_cmd "BGP/EVPN" "show bgp l2vpn evpn neighbor"
 queue_sonic_cmd "BGP/EVPN" "show bgp l2vpn evpn"
