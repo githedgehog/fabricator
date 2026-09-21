@@ -537,6 +537,54 @@ func Run(ctx context.Context) error {
 			{
 				Name:  "init",
 				Usage: "initializes working dir (current dir by default) with a new fab.yaml and other files",
+				UsageText: strings.TrimSpace(strings.ReplaceAll(`
+					Initialize a working dir: writes fab.yaml and .registry.yaml, and (re)creates include/ and result/.
+					An existing fab.yaml is only replaced with -f/--force, and include/ and result/ are wiped on every run.
+
+					The config is either generated from the flags in "Generate initial config" below, or taken from an
+					existing file with -c/--config. Wiring files passed with -w/--wiring are validated and copied into
+					include/, where 'hhfab validate', 'hhfab build' and 'hhfab vlab up' pick them up later.
+
+					Templated wiring:
+
+					Every -w file is rendered as a Go text/template with sprig functions before it is validated, so a
+					wiring file with no template actions is imported unchanged. Name a template '<name>.tmpl.yaml' or
+					'<name>.yaml.tmpl' and it is imported as 'include/<name>.yaml' -- keeping the .tmpl would make later
+					commands re-read it as plain YAML. Rendering happens only here, at import time, so include/ always
+					ends up holding plain YAML.
+
+					Pass values with --wv/--wiring-values (YAML files, repeatable, merged left to right) and
+					--ws/--wiring-set (KEY=VALUE, applied last, repeatable). Keys may be dotted to nest, so
+					'--ws fabric.leafs.count=4' sets .Values.fabric.leafs.count. Values are parsed as YAML scalars:
+					4 is an int, 1.5 a float, and both true and yes are bools -- quote to force a string, e.g.
+					'--ws version="4"'. A list has to come from a values file, --ws cannot express one.
+
+					Template context:
+
+					.Values             values from --wiring-values and --wiring-set
+					.Version            hhfab version, e.g. v0.49.3 ("(devel)" in dev builds)
+					.Release            user-facing release of the whole project, e.g. 26.04.0
+					.Fab                the Fabricator, with defaults merged in and versions calculated
+					.Controls .Nodes    control and fab nodes from the same config, keyed by name
+
+					.Values is a map, so referencing a key that was never set renders empty and the Helm idioms work:
+					'{{ .Values.count | default 4 }}' and '{{ if .Values.gw }}'. Everything else is a Go struct, so a
+					misspelled field is an error naming the offending type rather than something rendering empty. Look
+					a node up with 'index .Controls "control-1"' and iterate with 'range $name, $c := .Controls' --
+					map iteration is in key order, so the output is stable.
+
+					Example command:
+
+					$ hhfab init --dev -w topo.tmpl.yaml --wv prod.yaml --ws leafs.count=4
+
+					Example template expressions:
+
+					{{ .Fab.Spec.Config.Fabric.Mode }}              spine-leaf
+					{{ .Fab.Spec.Config.Control.VIP }}              172.30.0.1/32
+					{{ .Fab.Status.Versions.Fabric.API }}           v0.133.0
+					{{ (index .Controls "control-1").Name }}        control-1
+					{{ range $i := until (int .Values.leafs.count) }}...{{ end }}
+					`, "					", "")),
 				Flags: flatten(defaultFlags, joinTokenFlags, saveJoinTokenFlags, []cli.Flag{
 					&cli.StringFlag{
 						Name:    FlagNameRegistryRepo,
