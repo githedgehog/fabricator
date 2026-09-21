@@ -16,6 +16,7 @@ import (
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
+	"go.githedgehog.com/fabricator/pkg/util/tmplutil"
 	"oras.land/oras-go/v2/registry/remote/credentials"
 	kyaml "sigs.k8s.io/yaml"
 )
@@ -28,8 +29,27 @@ const (
 	DefaultRepo        = "ghcr.io"
 	DefaultPrefix      = "githedgehog"
 	YAMLExt            = ".yaml"
+	TmplExt            = ".tmpl"
+	TmplYAMLExt        = TmplExt + YAMLExt
+	YAMLTmplExt        = YAMLExt + TmplExt
 	JoinTokenEnv       = "HHFAB_JOIN_TOKEN" //nolint:gosec
 )
+
+func isWiringSource(path string) bool {
+	return strings.HasSuffix(path, YAMLExt) || strings.HasSuffix(path, YAMLTmplExt)
+}
+
+func wiringImportName(name string) string {
+	if base, ok := strings.CutSuffix(name, YAMLTmplExt); ok {
+		return base + YAMLExt
+	}
+
+	if base, ok := strings.CutSuffix(name, TmplYAMLExt); ok {
+		return base + YAMLExt
+	}
+
+	return name
+}
 
 var (
 	ErrExist    = fmt.Errorf("already exists")
@@ -89,6 +109,8 @@ type InitConfig struct {
 	ImportConfig       string
 	Force              bool
 	Wiring             []string
+	WiringValues       []string
+	WiringSet          []string
 	ImportHostUpstream bool
 	fab.InitConfigInput
 }
@@ -98,7 +120,13 @@ func Init(ctx context.Context, c InitConfig) error {
 		return err
 	}
 
-	_, err := os.Stat(filepath.Join(c.WorkDir, FabConfigFile))
+	// do it before anything is written so a bad values file fails early
+	wiringValues, err := LoadWiringValues(c.WiringValues, c.WiringSet)
+	if err != nil {
+		return err
+	}
+
+	_, err = os.Stat(filepath.Join(c.WorkDir, FabConfigFile))
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("checking config %q: %w", FabConfigFile, err)
 	}
@@ -198,7 +226,7 @@ func Init(ctx context.Context, c InitConfig) error {
 		return fmt.Errorf("removing VLAB dir: %w", err)
 	}
 
-	if err := importFabricGateway(c); err != nil {
+	if err := importFabricGateway(c, wiringValues); err != nil {
 		return err
 	}
 
@@ -208,7 +236,7 @@ func Init(ctx context.Context, c InitConfig) error {
 	return nil
 }
 
-func importFabricGateway(c InitConfig) error {
+func importFabricGateway(c InitConfig, values map[string]any) error {
 	for _, wiringFile := range c.Wiring {
 		name := ""
 		source := ""
@@ -219,17 +247,17 @@ func importFabricGateway(c InitConfig) error {
 			}
 
 			source = parts[0]
-			name = parts[1]
+			name = wiringImportName(parts[1])
 			if !strings.HasSuffix(name, YAMLExt) {
 				name += YAMLExt
 			}
 		} else {
 			source = wiringFile
-			name = filepath.Base(wiringFile)
+			name = wiringImportName(filepath.Base(wiringFile))
 		}
 
-		if !strings.HasSuffix(source, YAMLExt) {
-			return fmt.Errorf("importing %q: should have .yaml extension", source) //nolint:goerr113
+		if !isWiringSource(source) {
+			return fmt.Errorf("importing %q: should have %s, %s or %s extension", source, YAMLExt, TmplYAMLExt, YAMLTmplExt) //nolint:goerr113
 		}
 
 		data, err := os.ReadFile(source)
@@ -240,6 +268,12 @@ func importFabricGateway(c InitConfig) error {
 
 			return fmt.Errorf("importing %q: reading: %w", source, err)
 		}
+
+		rendered, err := tmplutil.FromTemplateLenient(source, string(data), map[string]any{"Values": values})
+		if err != nil {
+			return fmt.Errorf("importing %q: rendering template: %w", source, err)
+		}
+		data = []byte(rendered)
 
 		target := filepath.Join(c.WorkDir, IncludeDir, name)
 		relName := filepath.Join(IncludeDir, name)
