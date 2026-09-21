@@ -43,6 +43,8 @@ const (
 	FlagNameConfig                = "config"
 	FlagNameForce                 = "force"
 	FlagNameWiring                = "wiring"
+	FlagNameWiringValues          = "wiring-values"
+	FlagNameWiringSet             = "wiring-set"
 	FlagNameImportHostUpstream    = "import-host-upstream"
 	FlagCatGenConfig              = "Generate initial config (ignored when importing):"
 	FlagNameDefaultPasswordHash   = "default-password-hash"
@@ -563,7 +565,19 @@ func Run(ctx context.Context) error {
 					&cli.StringSliceFlag{
 						Name:    FlagNameWiring,
 						Aliases: []string{"w"},
-						Usage:   "include wiring diagram `FILE` with ext .yaml (any Fabric API objects)",
+						Usage:   "include wiring diagram `FILE` with ext .yaml, .tmpl.yaml or .yaml.tmpl (any Fabric API objects); rendered as a Go template with sprig funcs, values available as .Values",
+					},
+					&cli.StringSliceFlag{
+						Name:    FlagNameWiringValues,
+						Aliases: []string{"wv"},
+						Usage:   "read wiring template values from YAML `FILE`, repeatable and merged left-to-right",
+						EnvVars: []string{"HHFAB_WIRING_VALUES"},
+					},
+					&cli.StringSliceFlag{
+						Name:    FlagNameWiringSet,
+						Aliases: []string{"ws"},
+						Usage:   "set wiring template value `KEY=VALUE` (e.g. leafs.count=4), applied on top of --wiring-values; values are parsed as YAML scalars (quote to force a string), use --wiring-values for lists",
+						EnvVars: []string{"HHFAB_WIRING_SET"},
 					},
 					&cli.StringFlag{
 						Category: FlagCatGenConfig,
@@ -725,6 +739,8 @@ func Run(ctx context.Context) error {
 						ImportConfig:       c.String(FlagNameConfig),
 						Force:              c.Bool(FlagNameForce),
 						Wiring:             c.StringSlice(FlagNameWiring),
+						WiringValues:       c.StringSlice(FlagNameWiringValues),
+						WiringSet:          c.StringSlice(FlagNameWiringSet),
 						ImportHostUpstream: c.Bool(FlagNameImportHostUpstream),
 						InitConfigInput: fab.InitConfigInput{
 							FabricMode:            meta.FabricMode(c.String(FlagNameFabricMode)),
