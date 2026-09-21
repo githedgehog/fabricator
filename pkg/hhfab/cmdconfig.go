@@ -17,6 +17,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 	"go.githedgehog.com/fabricator/pkg/util/tmplutil"
+	"go.githedgehog.com/fabricator/pkg/version"
 	"oras.land/oras-go/v2/registry/remote/credentials"
 	kyaml "sigs.k8s.io/yaml"
 )
@@ -159,6 +160,7 @@ func Init(ctx context.Context, c InitConfig) error {
 	}
 
 	var fabCfgData []byte
+	tmplData := WiringTemplateData{Values: wiringValues, Version: version.Version, Release: fab.Release}
 	if c.ImportConfig != "" {
 		fabCfgData, err = os.ReadFile(c.ImportConfig)
 		if err != nil {
@@ -174,9 +176,12 @@ func Init(ctx context.Context, c InitConfig) error {
 			return fmt.Errorf("loading config to import %q: loading: %w", c.ImportConfig, err)
 		}
 
-		if _, _, _, err := fab.GetFabAndNodes(ctx, l.GetClient(), fab.GetFabAndNodesOpts{AllowNotHydrated: true}); err != nil {
+		f, controls, nodes, err := fab.GetFabAndNodes(ctx, l.GetClient(), fab.GetFabAndNodesOpts{AllowNotHydrated: true})
+		if err != nil {
 			return fmt.Errorf("loading config to import %q: getting fabricator and controls nodes: %w", c.ImportConfig, err)
 		}
+		tmplData.Fab = f
+		tmplData.setNodes(controls, nodes)
 
 		slog.Info("Imported config", "source", c.ImportConfig)
 	} else {
@@ -198,6 +203,18 @@ func Init(ctx context.Context, c InitConfig) error {
 		if err != nil {
 			return fmt.Errorf("generating fab config: %w", err)
 		}
+
+		l := apiutil.NewLoader()
+		if err := l.LoadAdd(ctx, apiutil.FabricatorGVKs, fabCfgData); err != nil {
+			return fmt.Errorf("loading generated config: %w", err)
+		}
+
+		f, controls, nodes, err := fab.GetFabAndNodes(ctx, l.GetClient(), fab.GetFabAndNodesOpts{AllowNotHydrated: true})
+		if err != nil {
+			return fmt.Errorf("loading generated config: getting fabricator and control nodes: %w", err)
+		}
+		tmplData.Fab = f
+		tmplData.setNodes(controls, nodes)
 
 		slog.Info("Generated initial config")
 	}
@@ -226,7 +243,7 @@ func Init(ctx context.Context, c InitConfig) error {
 		return fmt.Errorf("removing VLAB dir: %w", err)
 	}
 
-	if err := importFabricGateway(c, wiringValues); err != nil {
+	if err := importFabricGateway(c, tmplData); err != nil {
 		return err
 	}
 
@@ -236,7 +253,7 @@ func Init(ctx context.Context, c InitConfig) error {
 	return nil
 }
 
-func importFabricGateway(c InitConfig, values map[string]any) error {
+func importFabricGateway(c InitConfig, tmplData WiringTemplateData) error {
 	for _, wiringFile := range c.Wiring {
 		name := ""
 		source := ""
@@ -269,7 +286,8 @@ func importFabricGateway(c InitConfig, values map[string]any) error {
 			return fmt.Errorf("importing %q: reading: %w", source, err)
 		}
 
-		rendered, err := tmplutil.FromTemplateLenient(source, string(data), map[string]any{"Values": values})
+		// plain YAML without any actions is an identity transform through text/template
+		rendered, err := tmplutil.FromTemplateLenient(source, string(data), tmplData)
 		if err != nil {
 			return fmt.Errorf("importing %q: rendering template: %w", source, err)
 		}

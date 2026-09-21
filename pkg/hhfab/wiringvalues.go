@@ -11,8 +11,40 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/samber/lo"
+	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	kyaml "sigs.k8s.io/yaml"
 )
+
+// WiringTemplateData is the context available to a templated wiring file. Values is a map,
+// so referencing an absent key yields an empty string (Helm-like); the rest are Go structs,
+// where an unknown field is a template error.
+type WiringTemplateData struct {
+	// Values is what --wiring-values and --wiring-set produced
+	Values map[string]any
+	// Version is the hhfab version, component versions live under Fab.Status.Versions
+	Version string
+	// Release is the user-facing release version of the whole project, e.g. "26.04.0"
+	Release string
+	// Fab is the fabricator, with defaults merged in and versions calculated
+	Fab fabapi.Fabricator
+	// Controls and Nodes are the control and fab nodes from the same config, keyed by name.
+	// Look one up with `index .Controls "control-1"` and iterate with
+	// `range $name, $c := .Controls` -- text/template ranges maps in key order, so the
+	// iteration is deterministic.
+	Controls map[string]fabapi.ControlNode
+	Nodes    map[string]fabapi.FabNode
+}
+
+// setNodes fills in Controls and Nodes, keying the slices GetFabAndNodes returns by name.
+func (d *WiringTemplateData) setNodes(controls []fabapi.ControlNode, nodes []fabapi.FabNode) {
+	d.Controls = lo.SliceToMap(controls, func(c fabapi.ControlNode) (string, fabapi.ControlNode) {
+		return c.Name, c
+	})
+	d.Nodes = lo.SliceToMap(nodes, func(n fabapi.FabNode) (string, fabapi.FabNode) {
+		return n.Name, n
+	})
+}
 
 // LoadWiringValues builds the template values used to render imported wiring files. Values
 // files are merged left-to-right, then the k=v entries from sets are applied on top. The

@@ -9,7 +9,10 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.githedgehog.com/fabric/api/meta"
+	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
+	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestLoadWiringValues(t *testing.T) {
@@ -309,7 +312,7 @@ func TestImportFabricGatewayTemplated(t *testing.T) {
 				wiring = source + ":" + test.importName
 			}
 
-			err := importFabricGateway(InitConfig{WorkDir: dir, Wiring: []string{wiring}}, test.values)
+			err := importFabricGateway(InitConfig{WorkDir: dir, Wiring: []string{wiring}}, WiringTemplateData{Values: test.values})
 			if test.errContains != "" {
 				require.ErrorContains(t, err, test.errContains)
 
@@ -361,7 +364,7 @@ spec:
 
 	// with no values at all: `default` and `if` must work, and a bare missing key must
 	// render as empty rather than a literal "<no value>"
-	require.NoError(t, importFabricGateway(InitConfig{WorkDir: dir, Wiring: []string{source}}, map[string]any{}))
+	require.NoError(t, importFabricGateway(InitConfig{WorkDir: dir, Wiring: []string{source}}, WiringTemplateData{Values: map[string]any{}}))
 
 	data, err := os.ReadFile(filepath.Join(dir, IncludeDir, "topo.yaml"))
 	require.NoError(t, err)
@@ -393,11 +396,74 @@ spec:
 	source := filepath.Join(dir, "topo.yaml")
 	require.NoError(t, os.WriteFile(source, []byte(plain), 0o600))
 
-	require.NoError(t, importFabricGateway(InitConfig{WorkDir: dir, Wiring: []string{source}}, nil))
+	require.NoError(t, importFabricGateway(InitConfig{WorkDir: dir, Wiring: []string{source}}, WiringTemplateData{}))
 
 	data, err := os.ReadFile(filepath.Join(dir, IncludeDir, "topo.yaml"))
 	require.NoError(t, err)
 	require.Equal(t, plain, string(data), "a wiring file with no template actions must round-trip byte for byte")
+}
+
+func TestImportFabricGatewayContext(t *testing.T) {
+	t.Parallel()
+
+	// exercises every part of the context: .Version, .Fab (struct fields), .Controls keyed
+	// lookup and deterministic map iteration, and .Nodes
+	const tmpl = `apiVersion: wiring.githedgehog.com/v1beta1
+kind: Switch
+metadata:
+  name: sw
+  annotations:
+    hhfab: "{{ .Version }}"
+    release: "{{ .Release }}"
+    mode: "{{ .Fab.Spec.Config.Fabric.Mode }}"
+    fabName: "{{ .Fab.Name }}"
+    byName: "{{ (index .Controls "control-1").Spec.Bootstrap.Disk }}"
+    allControls: "{{ range $name, $c := .Controls }}{{ $name }},{{ end }}"
+    allNodes: "{{ range $name := .Nodes }}{{ $name.Name }},{{ end }}"
+spec:
+  role: server-leaf
+`
+
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, IncludeDir), 0o700))
+
+	source := filepath.Join(dir, "ctx.tmpl.yaml")
+	require.NoError(t, os.WriteFile(source, []byte(tmpl), 0o600))
+
+	tmplData := WiringTemplateData{Values: map[string]any{}, Version: "v1.2.3", Release: "26.04.0"}
+	tmplData.Fab.Name = "default"
+	tmplData.Fab.Spec.Config.Fabric.Mode = meta.FabricModeSpineLeaf
+	// deliberately out of order, to prove range iterates in key order
+	tmplData.setNodes(
+		[]fabapi.ControlNode{
+			{ObjectMeta: kmetav1.ObjectMeta{Name: "control-2"}},
+			{ObjectMeta: kmetav1.ObjectMeta{Name: "control-1"}, Spec: fabapi.ControlNodeSpec{
+				Bootstrap: fabapi.ControlNodeBootstrap{Disk: "/dev/sda"},
+			}},
+		},
+		[]fabapi.FabNode{
+			{ObjectMeta: kmetav1.ObjectMeta{Name: "node-b"}},
+			{ObjectMeta: kmetav1.ObjectMeta{Name: "node-a"}},
+		},
+	)
+
+	require.NoError(t, importFabricGateway(InitConfig{WorkDir: dir, Wiring: []string{source}}, tmplData))
+
+	data, err := os.ReadFile(filepath.Join(dir, IncludeDir, "ctx.yaml"))
+	require.NoError(t, err)
+
+	out := string(data)
+	require.Contains(t, out, `hhfab: "v1.2.3"`)
+	require.Contains(t, out, `release: "26.04.0"`)
+	require.Contains(t, out, `mode: "spine-leaf"`)
+	require.Contains(t, out, `fabName: "default"`)
+	require.Contains(t, out, `byName: "/dev/sda"`, "index .Controls by name")
+	require.Contains(t, out, `allControls: "control-1,control-2,"`, "map range must be in key order")
+	require.Contains(t, out, `allNodes: "node-a,node-b,"`)
+
+	objs, err := apiutil.NewLoader().Load(apiutil.FabricGatewayGVKs, data)
+	require.NoError(t, err)
+	require.Len(t, objs, 1)
 }
 
 func TestImportFabricGatewayRejectsBadExtension(t *testing.T) {
@@ -409,7 +475,7 @@ func TestImportFabricGatewayRejectsBadExtension(t *testing.T) {
 	source := filepath.Join(dir, "topo.yml")
 	require.NoError(t, os.WriteFile(source, []byte("{}\n"), 0o600))
 
-	err := importFabricGateway(InitConfig{WorkDir: dir, Wiring: []string{source}}, nil)
+	err := importFabricGateway(InitConfig{WorkDir: dir, Wiring: []string{source}}, WiringTemplateData{})
 	require.ErrorContains(t, err, "extension")
 	require.NotContains(t, err.Error(), "reading", "should be rejected before reading")
 }
