@@ -456,7 +456,7 @@ jobs:
           check_name: "Release Tests"
 
   release-evidence:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.releasetest == true && !cancelled() }}
+    if: ${{ (inputs.releasetest == true || contains(github.event.pull_request.labels.*.name, 'ci:+release') || github.event.schedule == '0 6 * * *') && !cancelled() }}
     runs-on: lab
     needs:
       - vlabs
@@ -464,6 +464,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Setup Go
         uses: actions/setup-go@v7
@@ -479,11 +481,12 @@ jobs:
       - name: Build release test report
         env:
           REPORT_TAG: ${{ inputs.report_tag }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           go run ./hack/release-evidence \
             -artifacts artifacts \
             -tag "${REPORT_TAG:-$GITHUB_REF_NAME}" \
-            -run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            -run-url "$RUN_URL" \
             >> "$GITHUB_STEP_SUMMARY"
 
   publish-release:
