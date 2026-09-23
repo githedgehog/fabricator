@@ -1,6 +1,6 @@
 module go.githedgehog.com/fabricator
 
-go 1.26.6
+go 1.26.7
 
 replace github.com/diskfs/go-diskfs => github.com/Frostman/go-diskfs v1.4.2-hh3
 
@@ -22,7 +22,7 @@ require (
 	github.com/diskfs/go-diskfs v1.4.2
 	github.com/go-logr/logr v1.4.4
 	github.com/go-playground/validator/v10 v10.30.4
-	github.com/k3s-io/helm-controller v0.17.8
+	github.com/k3s-io/helm-controller v0.17.9
 	github.com/lmittmann/tint v1.2.0
 	github.com/manifoldco/promptui v0.9.0
 	github.com/mattn/go-isatty v0.0.24
@@ -135,7 +135,6 @@ require (
 	github.com/google/gnostic-models v0.7.1 // indirect
 	github.com/google/go-containerregistry v0.21.6 // indirect
 	github.com/google/go-intervals v0.0.2 // indirect
-	github.com/google/pprof v0.0.0-20260115054156-294ebfa9ad83 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/mux v1.8.1 // indirect
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674 // indirect
