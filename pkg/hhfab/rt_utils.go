@@ -416,6 +416,9 @@ func (testCtx *VPCPeeringTestCtx) waitForRoutesInSwitches(ctx context.Context, s
 const (
 	// defaultDatapathConvergeTimeout bounds waitForDatapathConverged; see its doc on sizing.
 	defaultDatapathConvergeTimeout = 90 * time.Second
+	// roceToggleConvergeTimeout is longer: ESLAG members on a rebooted leaf stay err-disabled
+	// for over a minute after its agent is back.
+	roceToggleConvergeTimeout = 3 * time.Minute
 	// convergePollInterval is the wait between probe rounds.
 	convergePollInterval = 5 * time.Second
 )

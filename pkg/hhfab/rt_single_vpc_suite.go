@@ -1606,6 +1606,12 @@ outer:
 		return false, nil, fmt.Errorf("enabling RoCE on switch %s: %w", swName, err)
 	}
 
+	// The toggle reboots the switch: its LAGs and routes are still reconverging when the agent
+	// reports the new generation, and paths through it drop packets until they settle.
+	if err := testCtx.waitForDatapathConverged(ctx, testCtx.tcOpts, nil, roceToggleConvergeTimeout); err != nil {
+		return false, nil, fmt.Errorf("datapath convergence after enabling RoCE on switch %s: %w", swName, err)
+	}
+
 	dscpOpts := testCtx.tcOpts
 	dscpOpts.IPerfsDSCP = 24 // Mapped to traffic class 3
 
