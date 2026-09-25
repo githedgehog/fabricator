@@ -416,8 +416,6 @@ func (testCtx *VPCPeeringTestCtx) waitForRoutesInSwitches(ctx context.Context, s
 const (
 	// defaultDatapathConvergeTimeout bounds waitForDatapathConverged; see its doc on sizing.
 	defaultDatapathConvergeTimeout = 90 * time.Second
-	// roceToggleConvergeTimeout is longer: its rounds probe the whole matrix, not a subset.
-	roceToggleConvergeTimeout = 3 * time.Minute
 	// convergePollInterval is the wait between probe rounds.
 	convergePollInterval = 5 * time.Second
 )

@@ -1610,7 +1610,7 @@ outer:
 	// The toggle reboots the switch: its LAGs and routes are still reconverging when the agent
 	// reports the new generation, and paths through it drop packets until they settle.
 	if changed {
-		if err := testCtx.waitForDatapathConverged(ctx, testCtx.tcOpts, nil, roceToggleConvergeTimeout); err != nil {
+		if err := testCtx.waitForDatapathConverged(ctx, testCtx.tcOpts, nil, defaultDatapathConvergeTimeout); err != nil {
 			return false, nil, fmt.Errorf("datapath convergence after enabling RoCE on switch %s: %w", swName, err)
 		}
 	}
