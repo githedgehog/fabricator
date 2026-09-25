@@ -54,9 +54,9 @@ on:
         default: ""
       releasetest_repeat:
         description: "Repeat the release test suite this many times against the same deployed VLAB"
-        type: number
+        type: string
         required: false
-        default: 1
+        default: "1"
       pause_on_failure:
         description: "Pause on failure (enables debug)"
         type: boolean

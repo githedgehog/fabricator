@@ -74,9 +74,9 @@ on:
         default: false
       releasetest_repeat:
         description: "Repeat the release test suite this many times against the same deployed VLAB"
-        type: number
+        type: string
         required: false
-        default: 1
+        default: "1"
       debug:
         description: "Enable tmate debugging"
         type: boolean
