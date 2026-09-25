@@ -21,7 +21,7 @@ require (
 	github.com/coreos/butane v0.29.0
 	github.com/diskfs/go-diskfs v1.4.2
 	github.com/go-logr/logr v1.4.4
-	github.com/go-playground/validator/v10 v10.30.4
+	github.com/go-playground/validator/v10 v10.30.5
 	github.com/k3s-io/helm-controller v0.17.9
 	github.com/lmittmann/tint v1.2.0
 	github.com/manifoldco/promptui v0.9.0
