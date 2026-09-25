@@ -551,34 +551,35 @@ func checkDHCPAdvRoutes(grepString, expectedPrefix, expectedGw string, disableDe
 	return nil
 }
 
-// Enable or disable RoCE on a particular switch
-func setRoCE(ctx context.Context, kube kclient.Client, swName string, roce bool) error {
+// Enable or disable RoCE on a particular switch, reporting whether the state changed (and the
+// switch rebooted)
+func setRoCE(ctx context.Context, kube kclient.Client, swName string, roce bool) (bool, error) {
 	sw := &wiringapi.Switch{}
 	if err := kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: swName}, sw); err != nil {
-		return fmt.Errorf("getting switch %s: %w", swName, err)
+		return false, fmt.Errorf("getting switch %s: %w", swName, err)
 	}
 	if sw.Spec.RoCE == roce {
 		slog.Debug("RoCE already in the desired state", "switch", swName, "desiredState", roce)
 
-		return nil
+		return false, nil
 	}
 	slog.Debug("Changing RoCE state on switch", "switch", swName, "desiredState", roce)
 	currGen, getGenErr := getAgentGen(ctx, kube, swName)
 	if getGenErr != nil {
-		return getGenErr
+		return false, getGenErr
 	}
 	sw.Spec.RoCE = roce
 	if err := kube.Update(ctx, sw); err != nil {
-		return fmt.Errorf("updating switch %s to set RoCE state: %w", swName, err)
+		return false, fmt.Errorf("updating switch %s to set RoCE state: %w", swName, err)
 	}
 	slog.Debug("Waiting for switch to reboot after changing desired RoCE state", "switch", swName, "desiredState", roce)
 	time.Sleep(6 * time.Minute) // wait for the switch to reboot and apply the changes
 	if err := waitAgentGen(ctx, kube, swName, currGen); err != nil {
-		return fmt.Errorf("waiting for agent generation after changing desired RoCE state: %w", err)
+		return true, fmt.Errorf("waiting for agent generation after changing desired RoCE state: %w", err)
 	}
 	slog.Debug("Switch rebooted and RoCE state changed", "switch", swName, "desiredState", roce)
 
-	return nil
+	return true, nil
 }
 
 // connHasSingleHomedServer returns true if conn is a server-bearing connection
