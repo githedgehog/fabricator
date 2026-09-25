@@ -4,6 +4,8 @@
 package hhfab
 
 import (
+	"context"
+	"net"
 	"net/netip"
 	"slices"
 	"testing"
@@ -12,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.githedgehog.com/fabric/api/meta"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
+	"go.githedgehog.com/fabricator/pkg/util/sshutil"
 )
 
 func TestVLANsFrom(t *testing.T) {
@@ -578,6 +581,60 @@ func TestExpectationWhy(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			require.Equal(t, test.expected, expectationWhy(test.r))
+		})
+	}
+}
+
+func TestRetrySSHCmdStopsOnCancel(t *testing.T) {
+	// closing every connection fails the handshake with an "ssh:" error, which retrySSHCmd retries
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { ln.Close() })
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			c.Close()
+		}
+	}()
+	port := ln.Addr().(*net.TCPAddr).Port //nolint:forcetypeassert
+
+	for _, test := range []struct {
+		name string
+		ctx  func(context.Context) (context.Context, context.CancelFunc)
+	}{
+		{
+			name: "cancelled before the first attempt",
+			ctx: func(ctx context.Context) (context.Context, context.CancelFunc) {
+				ctx, cancel := context.WithCancel(ctx)
+				cancel()
+
+				return ctx, cancel
+			},
+		},
+		{
+			name: "cancelled during the retry wait",
+			ctx: func(ctx context.Context) (context.Context, context.CancelFunc) {
+				return context.WithTimeout(ctx, 200*time.Millisecond)
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ssh := &sshutil.Config{
+				Remote:   sshutil.Remote{User: "test", Host: "127.0.0.1", Port: uint(port)}, //nolint:gosec
+				Password: "test",
+			}
+
+			ctx, cancel := test.ctx(t.Context())
+			defer cancel()
+
+			start := time.Now()
+			_, _, err := retrySSHCmd(ctx, ssh, "true", "test")
+			require.ErrorIs(t, err, ctx.Err())
+			// each retry wait is at least 1s
+			require.Less(t, time.Since(start), 900*time.Millisecond)
 		})
 	}
 }

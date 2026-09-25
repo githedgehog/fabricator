@@ -3282,6 +3282,10 @@ func retrySSHCmd(ctx context.Context, ssh *sshutil.Config, cmd string, target st
 	maxRetries := 3
 	var err error
 	for retries := range maxRetries {
+		// ssh.Run only honors ctx once connected, so don't start a new attempt on a cancelled one
+		if ctx.Err() != nil {
+			return stdout, stderr, fmt.Errorf("cancelled: %w", ctx.Err())
+		}
 		stdout, stderr, err = ssh.Run(ctx, cmd)
 		if err == nil {
 			break
@@ -3292,7 +3296,11 @@ func retrySSHCmd(ctx context.Context, ssh *sshutil.Config, cmd string, target st
 				// random wait in [1, 5] seconds range
 				waitTime := time.Duration(1000+rand.IntN(4000)) * time.Millisecond
 				slog.Debug("Retrying after random wait time (between 1 and 5 seconds)", "waitTime", waitTime)
-				time.Sleep(waitTime)
+				select {
+				case <-ctx.Done():
+					return stdout, stderr, fmt.Errorf("cancelled: %w", ctx.Err())
+				case <-time.After(waitTime):
+				}
 
 				continue
 			} else {
