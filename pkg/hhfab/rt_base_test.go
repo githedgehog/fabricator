@@ -109,3 +109,50 @@ func TestRegexpSelection(t *testing.T) {
 		})
 	}
 }
+
+func TestSkipReason(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		test     SkipFlags
+		env      SkipFlags
+		expected string
+	}{
+		{
+			name: "no requirements",
+			env:  SkipFlags{NoIperf: true, NoGateway: true},
+		},
+		{
+			name: "iperf required and available",
+			test: SkipFlags{NoIperf: true},
+		},
+		{
+			name:     "iperf required and disabled",
+			test:     SkipFlags{NoIperf: true},
+			env:      SkipFlags{NoIperf: true},
+			expected: "iperf3 probes are disabled",
+		},
+		{
+			name:     "gateway wins over iperf",
+			test:     SkipFlags{NoGateway: true, NoIperf: true},
+			env:      SkipFlags{NoGateway: true, NoIperf: true},
+			expected: "Gateway is not enabled or no gateways available",
+		},
+		{
+			name:     "extended only",
+			test:     SkipFlags{ExtendedOnly: true},
+			expected: "Extended tests are not enabled",
+		},
+		{
+			name: "extended only and enabled",
+			test: SkipFlags{ExtendedOnly: true},
+			env:  SkipFlags{ExtendedOnly: true},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			tc := JUnitTestCase{Name: test.name, SkipFlags: test.test}
+			if reason := tc.skipReason(test.env); reason != test.expected {
+				t.Errorf("skipReason = %q, expected %q", reason, test.expected)
+			}
+		})
+	}
+}
