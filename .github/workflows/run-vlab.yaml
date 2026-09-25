@@ -72,6 +72,11 @@ on:
         type: boolean
         required: false
         default: false
+      releasetest_repeat:
+        description: "Repeat the release test suite this many times against the same deployed VLAB"
+        type: number
+        required: false
+        default: 1
       debug:
         description: "Enable tmate debugging"
         type: boolean
@@ -335,6 +340,7 @@ jobs:
           INPUT_VPC_MODE: ${{ inputs.vpcmode }}
           INPUT_BUILD_MODE: ${{ inputs.buildmode }}
           INPUT_RT_REGEX: ${{ inputs.releasetest_regex }}
+          INPUT_RT_REPEAT: ${{ inputs.releasetest_repeat }}
         id: test-current
         run: |
           if [[ "${{ inputs.hybrid }}" == "true" ]]; then
@@ -345,7 +351,10 @@ jobs:
           HHFAB_JOIN_TOKEN=$(openssl rand -base64 24)
           export HHFAB_JOIN_TOKEN
 
-          HHFAB_TEST_ARGS=(--ready=release-test)
+          HHFAB_TEST_ARGS=()
+          for ((i = 0; i < "${INPUT_RT_REPEAT:-1}"; i++)); do
+            HHFAB_TEST_ARGS+=(--ready=release-test)
+          done
           if [[ "${{ inputs.releasetest }}" == "true" ]]; then
             if [[ -n "$INPUT_RT_REGEX" ]]; then
               HHFAB_TEST_ARGS+=("--release-test-regexes=$INPUT_RT_REGEX")
