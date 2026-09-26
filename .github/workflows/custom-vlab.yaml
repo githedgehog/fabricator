@@ -52,6 +52,11 @@ on:
         type: string
         required: false
         default: ""
+      releasetest_repeat:
+        description: "Repeat the release test suite this many times against the same deployed VLAB"
+        type: string
+        required: false
+        default: "1"
       pause_on_failure:
         description: "Pause on failure (enables debug)"
         type: boolean
@@ -82,6 +87,7 @@ jobs:
       upgradefrom: ${{ inputs.upgradefrom }}
       releasetest: ${{ inputs.releasetest }}
       releasetest_regex: ${{ inputs.releasetest_regex }}
+      releasetest_repeat: ${{ inputs.releasetest_repeat }}
       debug: ${{ inputs.pause_on_failure }}
       pause_on_failure: ${{ inputs.pause_on_failure }}
       collect_show_tech: ${{ inputs.collect_show_tech }}

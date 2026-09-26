@@ -1602,8 +1602,17 @@ outer:
 	}
 
 	// enable RoCE on the switch if not already enabled
-	if err := setRoCE(ctx, testCtx.kube, swName, true); err != nil {
+	changed, err := setRoCE(ctx, testCtx.kube, swName, true)
+	if err != nil {
 		return false, nil, fmt.Errorf("enabling RoCE on switch %s: %w", swName, err)
+	}
+
+	// The toggle reboots the switch: its LAGs and routes are still reconverging when the agent
+	// reports the new generation, and paths through it drop packets until they settle.
+	if changed {
+		if err := testCtx.waitForDatapathConverged(ctx, testCtx.tcOpts, nil, defaultDatapathConvergeTimeout); err != nil {
+			return false, nil, fmt.Errorf("datapath convergence after enabling RoCE on switch %s: %w", swName, err)
+		}
 	}
 
 	dscpOpts := testCtx.tcOpts
