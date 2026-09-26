@@ -95,7 +95,9 @@ func followContainerLog(ctx context.Context, ssh *sshutil.Config, nodeName, cont
 		fmt.Fprintf(f, "[log-follower] %s %s\n", time.Now().UTC().Format(time.RFC3339Nano), fmt.Sprintf(format, args...))
 	}
 
-	psCmd := fmt.Sprintf("sudo -E crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock ps -q --name %q", containerName)
+	// anchored: crictl's --name is an unanchored regex, and the frr pod carries a
+	// second "frr-exporter" container whose name would otherwise also match "frr"
+	psCmd := fmt.Sprintf("sudo -E crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock ps -q --name %q", "^"+containerName+"$")
 
 	for ctx.Err() == nil {
 		out, _, err := ssh.Run(ctx, psCmd)
