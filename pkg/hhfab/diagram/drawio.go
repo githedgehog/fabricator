@@ -79,8 +79,6 @@ type Point struct {
 	As string  `xml:"as,attr,omitempty"`
 }
 
-var nodeConnectionsMap map[string][]float64
-
 var nodes []Node
 
 // EdgePositionData stores position and rotation information for an edge
@@ -94,6 +92,7 @@ type EdgePositionData struct {
 	UnitX    float64
 	UnitY    float64
 	Rotation float64
+	Parent   string // draw.io layer this edge belongs to, see edgeTenantParent
 }
 
 var edgePositions []EdgePositionData
@@ -132,7 +131,6 @@ func GenerateDrawio(workDir string, topo Topology, styleType StyleType, outputPa
 
 	style := GetStyle(styleType)
 
-	nodeConnectionsMap = make(map[string][]float64)
 	edgePositions = nil                        // Reset edge positions for this diagram
 	generateLinkSpeedLayer = topo.HasAgentData // Only generate link speed layer when agent data available
 
@@ -154,8 +152,88 @@ func GenerateDrawio(workDir string, topo Topology, styleType StyleType, outputPa
 	return nil
 }
 
+// collectTenants returns the distinct tenant names present in nodes, sorted
+// for deterministic output.
+func collectTenants(nodes []Node) []string {
+	seen := make(map[string]bool)
+	tenants := make([]string, 0, len(nodes))
+	for _, node := range nodes {
+		if node.Tenant == "" || seen[node.Tenant] {
+			continue
+		}
+		seen[node.Tenant] = true
+		tenants = append(tenants, node.Tenant)
+	}
+	sort.Strings(tenants)
+
+	return tenants
+}
+
+// tenantLayerID returns the draw.io layer cell id for a tenant name.
+func tenantLayerID(tenant string) string {
+	return "tenant_" + tenant + "_layer"
+}
+
+// tenantIsGrouped reports whether tenant is derived from a switch redundancy
+// group (e.g. an ESLAG-paired leaf pair), rather than a single ToR.
+func tenantIsGrouped(tenant string, allNodes []Node) bool {
+	for _, node := range allNodes {
+		if node.Type == NodeTypeSwitch && node.Tenant == tenant {
+			return node.Properties[PropRedundancyGroup] != ""
+		}
+	}
+
+	return false
+}
+
+// createTenantLayers creates one toggleable draw.io layer per tenant. Tenants
+// share the same node positions (only one is meant to be viewed at a time),
+// so only one is visible by default; the rest are hidden until switched on
+// from the Layers panel. The default is the first (alphabetically) grouped
+// tenant — a shared redundancy-group leaf pair, e.g. the rack's own base
+// switches — since that's the rack's own identity, not one of the test
+// slots hanging off it; if there's no grouped tenant, the first tenant wins.
+func createTenantLayers(tenants []string, allNodes []Node) []MxCell {
+	defaultIdx := 0
+	for i, tenant := range tenants {
+		if tenantIsGrouped(tenant, allNodes) {
+			defaultIdx = i
+
+			break
+		}
+	}
+
+	cells := make([]MxCell, 0, len(tenants))
+	for i, tenant := range tenants {
+		visible := "0"
+		if i == defaultIdx {
+			visible = ""
+		}
+		cells = append(cells, MxCell{
+			ID:      tenantLayerID(tenant),
+			Parent:  "0",
+			Value:   "Tenant: " + tenant,
+			Style:   "locked=1;",
+			Visible: visible,
+		})
+	}
+
+	return cells
+}
+
+// nodeParent returns the draw.io layer a node's cell belongs to: its tenant's
+// layer, or the default layer for shared/core nodes.
+func nodeParent(node Node) string {
+	if node.Tenant == "" {
+		return "1"
+	}
+
+	return tenantLayerID(node.Tenant)
+}
+
 func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 	nodes = topo.Nodes
+	tenants := collectTenants(topo.Nodes)
 
 	model := &MxGraphModel{
 		Dx:         600,
@@ -176,9 +254,12 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 				{ID: "0"},
 				{ID: "1", Parent: "0"},
 				{ID: "port_labels_layer", Parent: "0", Value: "Port Labels", Style: "locked=1;"},
+				{ID: crossTenantLayerID, Parent: "0", Value: "Cross-tenant Links", Style: "locked=1;", Visible: "0"},
 			},
 		},
 	}
+
+	model.Root.MxCell = append(model.Root.MxCell, createTenantLayers(tenants, topo.Nodes)...)
 
 	layers := sortNodes(topo.Nodes, topo.Links)
 	linkGroups := groupLinks(topo.Links)
@@ -347,7 +428,7 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 
 		cell := MxCell{
 			ID:     node.ID,
-			Parent: "1",
+			Parent: nodeParent(node),
 			Value:  FormatNodeValue(node, style),
 			Style:  GetNodeStyle(node, style),
 			Vertex: "1",
@@ -361,6 +442,28 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 		}
 		cellMap[node.ID] = &cell
 		model.Root.MxCell = append(model.Root.MxCell, cell)
+	}
+
+	// Anchor X for each tenant's server row: its own ToR's center, or the
+	// midpoint between a redundancy-group pair's two leaves — rather than
+	// the canvas center, so a tenant's servers line up under its own leaf(s)
+	// wherever centerLeavesAroundCore placed them in the row.
+	leafXSumByTenant := make(map[string]float64)
+	leafCountByTenant := make(map[string]int)
+	for _, leaf := range layers.Leaf {
+		if leaf.Tenant == "" {
+			continue
+		}
+		cell, ok := cellMap[leaf.ID]
+		if !ok || cell.Geometry == nil {
+			continue
+		}
+		leafXSumByTenant[leaf.Tenant] += cell.Geometry.X + float64(cell.Geometry.Width)/2
+		leafCountByTenant[leaf.Tenant]++
+	}
+	serverAnchorXByTenant := make(map[string]float64, len(leafXSumByTenant))
+	for tenant, sum := range leafXSumByTenant {
+		serverAnchorXByTenant[tenant] = sum / float64(leafCountByTenant[tenant])
 	}
 
 	// External node positioning fine-tuning
@@ -437,7 +540,7 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 
 			cell := MxCell{
 				ID:     node.ID,
-				Parent: "1",
+				Parent: nodeParent(node),
 				Value:  FormatNodeValue(node, style),
 				Style:  GetNodeStyle(node, style),
 				Vertex: "1",
@@ -496,7 +599,7 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 
 			cell := MxCell{
 				ID:     node.ID,
-				Parent: "1",
+				Parent: nodeParent(node),
 				Value:  FormatNodeValue(node, style),
 				Style:  GetNodeStyle(node, style),
 				Vertex: "1",
@@ -516,34 +619,78 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 	serverNodeWidth := 100
 	var serverSpacing float64 = 60
 
-	totalServerWidth := float64(len(layers.Server)*serverNodeWidth) + serverSpacing*float64(len(layers.Server)-1)
-	serverStartX := leafCenterX - (totalServerWidth / 2)
-
-	for i, node := range layers.Server {
-		width, height := GetNodeDimensions(node)
-		x := serverStartX + float64(i)*(float64(width)+serverSpacing)
-		cell := MxCell{
-			ID:     node.ID,
-			Parent: "1",
-			Value:  FormatNodeValue(node, style),
-			Style:  GetNodeStyle(node, style),
-			Vertex: "1",
-			Geometry: &Geometry{
-				X:      x,
-				Y:      float64(serverY),
-				Width:  width,
-				Height: height,
-				As:     "geometry",
-			},
-		}
-		cellMap[node.ID] = &cell
-		model.Root.MxCell = append(model.Root.MxCell, cell)
+	// Each tenant's servers are centered independently, at the same X range
+	// as every other tenant's — tenants are never viewed at the same time
+	// (only one layer is visible by default), so their server rows are meant
+	// to overlap rather than share one wide row sized for every tenant's
+	// servers combined.
+	serversByTenant := make(map[string][]Node)
+	for _, node := range layers.Server {
+		serversByTenant[node.Tenant] = append(serversByTenant[node.Tenant], node)
 	}
 
-	nodeConnectionsMap = make(map[string][]float64)
+	serverTenants := make([]string, 0, len(serversByTenant))
+	for tenant := range serversByTenant {
+		serverTenants = append(serverTenants, tenant)
+	}
+	sort.Strings(serverTenants)
+
+	// Each tenant's own row metrics, reused below to position that tenant's
+	// own VPC legend block in the same spot its server row occupies.
+	type serverRowLayout struct {
+		startX float64
+		width  float64
+		count  int
+	}
+	serverLayoutByTenant := make(map[string]serverRowLayout, len(serverTenants))
+
+	for _, tenant := range serverTenants {
+		group := serversByTenant[tenant]
+		groupWidth := float64(len(group)*serverNodeWidth) + serverSpacing*float64(len(group)-1)
+
+		// Center under this tenant's own leaf(s) when known, falling back to
+		// the canvas center (e.g. for the "" core bucket, which has no ToR).
+		anchorX := leafCenterX
+		if x, ok := serverAnchorXByTenant[tenant]; ok {
+			anchorX = x
+		}
+		groupStartX := anchorX - (groupWidth / 2)
+		serverLayoutByTenant[tenant] = serverRowLayout{startX: groupStartX, width: groupWidth, count: len(group)}
+
+		for i, node := range group {
+			width, height := GetNodeDimensions(node)
+			x := groupStartX + float64(i)*(float64(width)+serverSpacing)
+			cell := MxCell{
+				ID:     node.ID,
+				Parent: nodeParent(node),
+				Value:  FormatNodeValue(node, style),
+				Style:  GetNodeStyle(node, style),
+				Vertex: "1",
+				Geometry: &Geometry{
+					X:      x,
+					Y:      float64(serverY),
+					Width:  width,
+					Height: height,
+					As:     "geometry",
+				},
+			}
+			cellMap[node.ID] = &cell
+			model.Root.MxCell = append(model.Root.MxCell, cell)
+		}
+	}
+
+	// Precompute, for every node, where each of its edges should exit —
+	// spread apart just enough to avoid landing on the same point, while
+	// preserving each neighbor's original relative angular order. Doing
+	// this as one pass over the whole node (rather than nudging each edge
+	// incrementally as it's processed) means the result doesn't depend on
+	// linkGroups' iteration order, and — the point of it — two edges can
+	// never end up crossing near the node just because a farther neighbor
+	// happened to be processed after a closer one.
+	exitAngles := computeNodeExitAngles(linkGroups, cellMap)
 
 	for i, group := range linkGroups {
-		createParallelEdges(model, group, cellMap, i, style)
+		createParallelEdges(model, group, cellMap, i, style, exitAngles)
 	}
 
 	// Add redundancy group layer
@@ -568,13 +715,58 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 	}
 	serverBottomY := serverY + serverNodeHeight
 
-	// Add VPC legend below the server layer
-	if len(topo.VPCs) > 0 {
-		// Calculate server layer dimensions for VPC legend positioning
-		numServers := len(layers.Server)
-		serverLayerStartX := serverStartX
-		serverLayerWidth := totalServerWidth
-		createVPCLegend(model, topo.VPCs, serverBottomY, numServers, serverLayerStartX, serverLayerWidth)
+	// Add a VPC legend below each tenant's own server row, listing only the
+	// VPCs that tenant has a real server in — parented to that tenant's
+	// layer so it hides along with it. Only Server-type attachments count:
+	// a switch or gateway attachment (e.g. he-f2's switch-mgmt uplinks,
+	// modeled as Unbundled connections whose "server" side is actually a
+	// switch port) is mgmt-plane wiring, not a tenant/workload VPC
+	// membership — same reasoning as skipping its VPC box, see below, and
+	// for the same consistency: a legend entry with no matching box anywhere
+	// in that tenant would be an orphan. A VPC touching real servers in more
+	// than one tenant gets a legend entry under each (harmless: only one
+	// tenant is ever shown at a time). A VPC with no tenanted server at all
+	// stays on the generic, always-visible vpc_layer.
+	vpcsByTenant := make(map[string]map[string]*VPCInfo)
+	for vpcName, vpcInfo := range topo.VPCs {
+		tenantsSeen := make(map[string]bool)
+		for _, serverID := range vpcInfo.AttachedServers {
+			node := findNode(nodes, serverID)
+			if node.Type != NodeTypeServer {
+				continue
+			}
+			if tenant := node.Tenant; tenant != "" {
+				tenantsSeen[tenant] = true
+			}
+		}
+		if len(tenantsSeen) == 0 {
+			tenantsSeen[""] = true
+		}
+		for tenant := range tenantsSeen {
+			if vpcsByTenant[tenant] == nil {
+				vpcsByTenant[tenant] = make(map[string]*VPCInfo)
+			}
+			vpcsByTenant[tenant][vpcName] = vpcInfo
+		}
+	}
+
+	for tenant, tenantVPCs := range vpcsByTenant {
+		if len(tenantVPCs) == 0 {
+			continue
+		}
+
+		parent := "vpc_layer"
+		layout, ok := serverLayoutByTenant[tenant]
+		if tenant != "" {
+			parent = tenantLayerID(tenant)
+		}
+		if !ok {
+			// No servers in this tenant (only possible for the "" fallback
+			// bucket) — center as if it had none, same as an empty row.
+			layout = serverRowLayout{startX: leafCenterX, width: 0}
+		}
+
+		createVPCLegend(model, tenantVPCs, serverBottomY, layout.count, layout.startX, layout.width, parent)
 	}
 
 	// Add unused switches layer
@@ -838,7 +1030,7 @@ func groupLinks(links []Link) []LinkGroup {
 	return result
 }
 
-func createParallelEdges(model *MxGraphModel, group LinkGroup, cellMap map[string]*MxCell, edgeGroupID int, style Style) {
+func createParallelEdges(model *MxGraphModel, group LinkGroup, cellMap map[string]*MxCell, edgeGroupID int, style Style, exitAngles map[string]map[string]float64) {
 	sourceCell, ok := cellMap[group.Source]
 	if !ok || sourceCell.Geometry == nil {
 		return
@@ -851,19 +1043,12 @@ func createParallelEdges(model *MxGraphModel, group LinkGroup, cellMap map[strin
 
 	connectionType := getConnectionType(group.Source, group.Target)
 
-	if nodeConnectionsMap == nil {
-		nodeConnectionsMap = make(map[string][]float64)
-	}
-
-	// Calculate center points
-	srcCenterX := sourceCell.Geometry.X + float64(sourceCell.Geometry.Width)/2
-	srcCenterY := sourceCell.Geometry.Y + float64(sourceCell.Geometry.Height)/2
-	tgtCenterX := targetCell.Geometry.X + float64(targetCell.Geometry.Width)/2
-	tgtCenterY := targetCell.Geometry.Y + float64(targetCell.Geometry.Height)/2
-
-	// Calculate connection points
-	sx, sy := calculateOptimalConnectionPoint(sourceCell, tgtCenterX, tgtCenterY, nodeConnectionsMap)
-	tx, ty := calculateOptimalConnectionPoint(targetCell, srcCenterX, srcCenterY, nodeConnectionsMap)
+	// Connection points: precomputed per-node so that edges keep their
+	// original relative angular order around a busy node (see
+	// computeNodeExitAngles) instead of being nudged one at a time as
+	// they're encountered.
+	sx, sy := connectionPointAtAngle(sourceCell, exitAngles[group.Source][group.Target])
+	tx, ty := connectionPointAtAngle(targetCell, exitAngles[group.Target][group.Source])
 
 	// Calculate absolute coordinates of connection points
 	srcDefaultX := sourceCell.Geometry.X + sx*float64(sourceCell.Geometry.Width)
@@ -897,9 +1082,13 @@ func createParallelEdges(model *MxGraphModel, group LinkGroup, cellMap map[strin
 	// Check for spine-to-distant-leaf connection that needs special handling
 	isSpineToDistantLeaf, spineLeafOffset := calculateSpineToLeafOffset(group.Source, group.Target, cellMap)
 
+	// Edges (and their port labels) belong to whichever endpoint has a
+	// tenant, so they hide together with it. See edgeTenantParent.
+	edgeParent := edgeTenantParent(group.Source, group.Target)
+
 	// Process each link in the group
 	numLinks := len(group.Links)
-	baseSpacing := 10.0
+	baseSpacing := parallelLinkSpacing
 
 	for i, link := range group.Links {
 		// Calculate offset
@@ -939,7 +1128,7 @@ func createParallelEdges(model *MxGraphModel, group LinkGroup, cellMap map[strin
 		// Create the edge cell
 		edgeCell := MxCell{
 			ID:     edgeID,
-			Parent: "1",
+			Parent: edgeParent,
 			Source: group.Source,
 			Target: group.Target,
 			Style:  edgeStyle,
@@ -956,7 +1145,40 @@ func createParallelEdges(model *MxGraphModel, group LinkGroup, cellMap map[strin
 
 		// Generate labels with fixed call
 		ux, uy := calculateUnitVector(srcX, srcY, tgtX, tgtY)
-		generateEdgeLabels(model, edgeID, link, srcX, srcY, tgtX, tgtY, ux, uy)
+		generateEdgeLabels(model, edgeID, link, srcX, srcY, tgtX, tgtY, ux, uy, edgeParent)
+	}
+}
+
+// crossTenantLayerID is the draw.io layer for edges whose two endpoints
+// belong to different tenants (e.g. an env's mgmt uplink into the rack's
+// shared leaf pair). draw.io layer visibility is a single boolean per layer
+// with no way to say "visible only when tenant A and tenant B are both on",
+// so such an edge can't correctly follow either endpoint's own tenant layer:
+// tied to one tenant, it would render (dangling, its other endpoint hidden)
+// whenever that lone tenant is shown alone. Keeping it on its own toggle,
+// off by default, means it never renders detached from a real, visible
+// counterpart — the trade-off is it must be switched on by hand, together
+// with both tenants it connects, to actually see it.
+const crossTenantLayerID = "cross_tenant_layer"
+
+// edgeTenantParent returns the draw.io layer an edge (and its port/speed
+// labels) belongs to: its shared tenant's layer, whichever endpoint's tenant
+// when only one has one (this also covers a shared/core node linking into a
+// tenant, e.g. a spine-to-ToR fabric link), crossTenantLayerID when the two
+// endpoints have different tenants, or the default layer when neither has one.
+func edgeTenantParent(source, target string) string {
+	srcNode := findNode(nodes, source)
+	tgtNode := findNode(nodes, target)
+
+	switch {
+	case srcNode.Tenant != "" && tgtNode.Tenant != "" && srcNode.Tenant != tgtNode.Tenant:
+		return crossTenantLayerID
+	case srcNode.Tenant != "":
+		return tenantLayerID(srcNode.Tenant)
+	case tgtNode.Tenant != "":
+		return tenantLayerID(tgtNode.Tenant)
+	default:
+		return "1"
 	}
 }
 
@@ -1086,7 +1308,7 @@ func getPortLabelColor(status string) string {
 	}
 }
 
-func generateEdgeLabels(model *MxGraphModel, edgeID string, link Link, srcX, srcY, tgtX, tgtY, ux, uy float64) {
+func generateEdgeLabels(model *MxGraphModel, edgeID string, link Link, srcX, srcY, tgtX, tgtY, ux, uy float64, edgeParent string) {
 	// Calculate vector properties
 	dx := tgtX - srcX
 	dy := tgtY - srcY
@@ -1095,6 +1317,13 @@ func generateEdgeLabels(model *MxGraphModel, edgeID string, link Link, srcX, src
 	// Skip if edge is too short
 	if edgeLength < 10 {
 		return
+	}
+
+	// Port labels for a tenant's edges live on that tenant's layer (so they
+	// hide with it); core edges keep the dedicated, always-present toggle.
+	portLabelParent := "port_labels_layer"
+	if edgeParent != "1" {
+		portLabelParent = edgeParent
 	}
 
 	// Retrieve port labels from link properties
@@ -1169,7 +1398,7 @@ func generateEdgeLabels(model *MxGraphModel, edgeID string, link Link, srcX, src
 		Tooltip: srcPortNOS,
 		ID:      srcLabelID,
 		MxCell: &MxCell{
-			Parent: "port_labels_layer",
+			Parent: portLabelParent,
 			Style:  srcTextStyle,
 			Vertex: "1",
 			Geometry: &Geometry{
@@ -1188,7 +1417,7 @@ func generateEdgeLabels(model *MxGraphModel, edgeID string, link Link, srcX, src
 		Tooltip: tgtPortNOS,
 		ID:      tgtLabelID,
 		MxCell: &MxCell{
-			Parent: "port_labels_layer",
+			Parent: portLabelParent,
 			Style:  tgtTextStyle,
 			Vertex: "1",
 			Geometry: &Geometry{
@@ -1221,6 +1450,7 @@ func generateEdgeLabels(model *MxGraphModel, edgeID string, link Link, srcX, src
 			UnitX:    unitX,
 			UnitY:    unitY,
 			Rotation: angle,
+			Parent:   edgeParent,
 		})
 	}
 }
@@ -1265,95 +1495,157 @@ func calculateVerticalOffset(angleDegrees float64) float64 {
 	}
 }
 
-func calculateOptimalConnectionPoint(cell *MxCell, targetX, targetY float64, nodeConnectionsMap map[string][]float64) (float64, float64) {
-	if cell.Geometry == nil || cell.Geometry.Width == 0 || cell.Geometry.Height == 0 {
-		return 0.5, 0.5 // Default to center if no geometry
+// parallelLinkSpacing is the perpendicular pixel offset between adjacent
+// parallel links within one link group (see createParallelEdges) — the
+// outermost link in a group of numLinks sits parallelLinkSpacing*(numLinks-1)/2
+// px off the group's own center line. computeNodeExitAngles needs this same
+// value to reserve enough angular room for that fan-out, so it doesn't
+// encroach on a neighboring connection.
+const parallelLinkSpacing = 10.0
+
+// computeNodeExitAngles precomputes, for every node touched by at least one
+// link group, the angle (in degrees) at which each of its edges should exit —
+// spread apart just enough that two edges never land on the same point,
+// while preserving the original angular order between a node's neighbors.
+//
+// This works one node at a time: collect the raw angle (from the node's
+// center to each neighbor's center) for every neighbor, sort those angles,
+// and only push apart the ones that are actually too close together (see
+// spreadAnglesOrdered) — a neighbor's angle is never allowed to cross past
+// another neighbor's, so two edges can never have to cross near the node to
+// reach their real targets. This replaces nudging each edge incrementally as
+// linkGroups happens to iterate them (a Go map, so non-deterministic order),
+// which could push a later-processed close neighbor past an earlier-processed
+// farther one.
+//
+// A neighbor connected by several parallel links (an ESLAG/bundled group)
+// fans those links out perpendicular to its own direction, by up to
+// parallelLinkSpacing*(numLinks-1)/2 px on each side (see
+// createParallelEdges) — reserving it the same angular gap as a
+// single-link neighbor left its outermost line free to cross into an
+// adjacent connection's space. Each neighbor's half-width — that pixel
+// fan-out converted to degrees at its own distance — is added to the gap
+// spreadAnglesOrdered enforces around it.
+func computeNodeExitAngles(linkGroups []LinkGroup, cellMap map[string]*MxCell) map[string]map[string]float64 {
+	const minGapDegrees = 10.0
+
+	center := func(id string) (float64, float64, bool) {
+		cell, ok := cellMap[id]
+		if !ok || cell.Geometry == nil {
+			return 0, 0, false
+		}
+
+		return cell.Geometry.X + float64(cell.Geometry.Width)/2, cell.Geometry.Y + float64(cell.Geometry.Height)/2, true
 	}
 
-	// Calculate center of the cell
-	cx := cell.Geometry.X + float64(cell.Geometry.Width)/2
-	cy := cell.Geometry.Y + float64(cell.Geometry.Height)/2
+	type neighborLinks struct {
+		other    string
+		numLinks int
+	}
+	neighborsOf := make(map[string][]neighborLinks)
+	for _, group := range linkGroups {
+		numLinks := len(group.Links)
+		neighborsOf[group.Source] = append(neighborsOf[group.Source], neighborLinks{group.Target, numLinks})
+		neighborsOf[group.Target] = append(neighborsOf[group.Target], neighborLinks{group.Source, numLinks})
+	}
 
-	// Calculate vector from center to target
-	dx := targetX - cx
-	dy := targetY - cy
+	result := make(map[string]map[string]float64, len(neighborsOf))
+	for nodeID, others := range neighborsOf {
+		ncx, ncy, ok := center(nodeID)
+		if !ok {
+			continue
+		}
 
-	// Handle the case where target is at the same position as cell center
-	if dx == 0 && dy == 0 {
+		type neighborAngle struct {
+			id        string
+			angle     float64
+			halfWidth float64
+		}
+
+		entries := make([]neighborAngle, 0, len(others))
+		for _, other := range others {
+			ocx, ocy, ok := center(other.other)
+			if !ok || (ocx == ncx && ocy == ncy) {
+				continue
+			}
+			dist := math.Hypot(ocx-ncx, ocy-ncy)
+			pixelHalfSpread := parallelLinkSpacing * float64(other.numLinks-1) / 2
+			halfWidth := math.Atan2(pixelHalfSpread, dist) * 180 / math.Pi
+			entries = append(entries, neighborAngle{
+				other.other,
+				math.Atan2(ocy-ncy, ocx-ncx) * 180 / math.Pi,
+				halfWidth,
+			})
+		}
+		sort.Slice(entries, func(i, j int) bool { return entries[i].angle < entries[j].angle })
+
+		raw := make([]float64, len(entries))
+		halfWidths := make([]float64, len(entries))
+		for i, e := range entries {
+			raw[i] = e.angle
+			halfWidths[i] = e.halfWidth
+		}
+		spread := spreadAnglesOrdered(raw, halfWidths, minGapDegrees)
+
+		byNeighbor := make(map[string]float64, len(entries))
+		for i, e := range entries {
+			byNeighbor[e.id] = spread[i]
+		}
+		result[nodeID] = byNeighbor
+	}
+
+	return result
+}
+
+// spreadAnglesOrdered takes angles sorted ascending, each with its own
+// half-width (the extra angular room its own fan-out of parallel links
+// needs on either side, see computeNodeExitAngles), and returns angles with
+// at least halfWidth[i]+halfWidth[i+1]+minGap between every consecutive
+// pair, never reordering them. Within each run of angles too close
+// together, a forward pass enforces that minimum (pushing later angles
+// forward as needed) and the run is then shifted as a whole so its average
+// matches its original average — so a cramped cluster fans out around its
+// original direction instead of drifting entirely to one side. Angles far
+// enough apart already are left untouched.
+func spreadAnglesOrdered(sorted []float64, halfWidths []float64, minGap float64) []float64 {
+	n := len(sorted)
+	result := make([]float64, n)
+	copy(result, sorted)
+
+	for i := 0; i < n; {
+		j := i
+		for j+1 < n && result[j+1]-result[j] < halfWidths[j]+halfWidths[j+1]+minGap {
+			j++
+			result[j] = result[j-1] + halfWidths[j-1] + halfWidths[j] + minGap
+		}
+		if j > i {
+			var origSum, newSum float64
+			for k := i; k <= j; k++ {
+				origSum += sorted[k]
+				newSum += result[k]
+			}
+			shift := (origSum - newSum) / float64(j-i+1)
+			for k := i; k <= j; k++ {
+				result[k] += shift
+			}
+		}
+		i = j + 1
+	}
+
+	return result
+}
+
+// connectionPointAtAngle returns the relative (0-1) point where a ray from
+// cell's center at angleDeg exits its rectangular boundary.
+func connectionPointAtAngle(cell *MxCell, angleDeg float64) (float64, float64) {
+	if cell.Geometry == nil || cell.Geometry.Width == 0 || cell.Geometry.Height == 0 {
 		return 0.5, 0.5
 	}
 
-	// Calculate angle of approach (in radians)
-	angle := math.Atan2(dy, dx)
+	angle := angleDeg * math.Pi / 180
+	dx := math.Cos(angle)
+	dy := math.Sin(angle)
 
-	// Convert to degrees for easier comparison
-	angleDeg := angle * 180 / math.Pi
-
-	// Round angle to nearest sector (to group similar approaches)
-	// Using 15-degree sectors as in the original version
-	sectorSize := 15.0
-	sectorAngle := math.Round(angleDeg/sectorSize) * sectorSize
-
-	// Store this angle in the node connections map to track distribution
-	// Using the node ID as key ensures we track per-node
-	connections := nodeConnectionsMap[cell.ID]
-
-	// If this is the first connection at this angle, initialize
-	if connections == nil {
-		connections = make([]float64, 0)
-	}
-
-	// Check if we already have connections at this exact sector angle
-	// We only care about exact matches to maintain symmetry
-	connectionCount := 0
-	for _, existingAngle := range connections {
-		if math.Abs(existingAngle-sectorAngle) < 0.001 { // Almost exact match
-			connectionCount++
-		}
-	}
-
-	// Check for opposing angle - connections from opposite sides need special handling
-	// This is important for symmetry between opposing sides
-	opposingAngle := sectorAngle + 180
-	if opposingAngle > 180 {
-		opposingAngle -= 360
-	}
-	opposingCount := 0
-	for _, existingAngle := range connections {
-		if math.Abs(existingAngle-opposingAngle) < 0.001 {
-			opposingCount++
-		}
-	}
-
-	// Add this angle to the connections
-	nodeConnectionsMap[cell.ID] = append(connections, sectorAngle)
-
-	// Apply minimal adjustment only when we have exact overlaps
-	var adjustmentFactor float64
-
-	// Only adjust if we have multiple connections at the exact same angle
-	if connectionCount > 0 {
-		// Apply a small fixed offset per connection, symmetrically
-		adjustmentFactor = float64(connectionCount) * 0.2
-
-		// Use node metadata for spine-specific adjustment
-		node := findNode(nodes, cell.ID)
-		nodeType, nodeRole := getNodeTypeInfo(node)
-
-		// For spine nodes, which have many connections, apply slightly larger offset
-		if nodeType == NodeTypeSwitch && nodeRole == SwitchRoleSpine && connectionCount > 1 {
-			adjustmentFactor *= 1.1
-		}
-	}
-
-	// Convert back to radians with adjustment
-	adjustedAngle := (sectorAngle + adjustmentFactor) * math.Pi / 180
-
-	// Re-calculate dx, dy with adjusted angle
-	dx = math.Cos(adjustedAngle)
-	dy = math.Sin(adjustedAngle)
-
-	// Find intersection with rectangle sides
 	halfWidth := float64(cell.Geometry.Width) / 2
 	halfHeight := float64(cell.Geometry.Height) / 2
 
@@ -1361,10 +1653,11 @@ func calculateOptimalConnectionPoint(cell *MxCell, targetX, targetY float64, nod
 	scaleY := halfHeight / math.Abs(dy)
 	scale := math.Min(scaleX, scaleY)
 
+	cx := cell.Geometry.X + halfWidth
+	cy := cell.Geometry.Y + halfHeight
 	ix := cx + dx*scale
 	iy := cy + dy*scale
 
-	// Convert to relative coordinates (0-1 range)
 	rx := (ix - cell.Geometry.X) / float64(cell.Geometry.Width)
 	ry := (iy - cell.Geometry.Y) / float64(cell.Geometry.Height)
 
@@ -1526,9 +1819,17 @@ func createRedundancyGroupLayer(model *MxGraphModel, redundancyGroups map[string
 			strokeStyle = "dashed=1;"
 		}
 
+		// A redundancy group whose switches carry a tenant (i.e. it's a
+		// leaf/ToR group, not a spine one) renders on that tenant's layer
+		// instead of the generic always-visible one, so it hides with it.
+		groupParent := "redundancy_layer"
+		if len(switches) > 0 && switches[0].Tenant != "" {
+			groupParent = tenantLayerID(switches[0].Tenant)
+		}
+
 		groupRect := MxCell{
 			ID:     fmt.Sprintf("redundancy_group_%d", groupIndex),
-			Parent: "redundancy_layer",
+			Parent: groupParent,
 			Value:  groupName,
 			Style: fmt.Sprintf("%s;whiteSpace=wrap;html=1;strokeColor=%s;strokeWidth=2;fillColor=none;%slabelPosition=center;verticalLabelPosition=center;verticalAlign=bottom;fontSize=10;fontStyle=1;",
 				cornerRadius, strokeColor, strokeStyle),
@@ -1667,13 +1968,72 @@ func createVPCLayer(model *MxGraphModel, vpcs map[string]*VPCInfo, cellMap map[s
 			continue
 		}
 
+		// A VPC's "attached servers" can include a switch or gateway (e.g.
+		// he-f2's switch-mgmt uplinks are modeled as Unbundled connections
+		// whose "server" side is actually a switch port) — that's a real
+		// mgmt-plane wiring choice, not a tenant/workload VPC membership, so
+		// it doesn't get the same box treatment a real server's VPCs do.
+		// Representing mgmt connections as their own thing is a separate
+		// feature; this only avoids mislabeling them as VPC membership.
+		if findNode(nodes, serverID).Type != NodeTypeServer {
+			continue
+		}
+
+		// A tenant's server keeps its VPC box on the tenant's own layer, so it
+		// hides along with the server instead of floating on its own; a core
+		// server (no tenant) keeps the dedicated, always-present VPC toggle.
+		parent := "vpc_layer"
+		if tenant := findNode(nodes, serverID).Tenant; tenant != "" {
+			parent = tenantLayerID(tenant)
+		}
+
+		// This server's boxes all grow from the same top-left corner and
+		// width (only height differs per VPC, see createVPCBoxForServer), so
+		// they need to share one width wide enough for the longest label
+		// among them — otherwise a long VPC name (or name+IP) sized only to
+		// the server's own node width gets clipped or wraps into the row
+		// above/below it.
+		labelWidth := 0
+		for _, vpcName := range vpcNames {
+			if w := estimateVPCLabelWidth(vpcLabelPlainText(vpcName, vpcs[vpcName], serverID)); w > labelWidth {
+				labelWidth = w
+			}
+		}
+
 		// Create a box for each VPC this server belongs to
 		for vpcIndex, vpcName := range vpcNames {
 			vpcInfo := vpcs[vpcName]
-			createVPCBoxForServer(model, vpcName, vpcInfo, serverID, cell, boxIndex, vpcIndex)
+			createVPCBoxForServer(model, vpcName, vpcInfo, serverID, cell, boxIndex, vpcIndex, parent, labelWidth)
 			boxIndex++
 		}
 	}
+}
+
+// vpcLabelPlainText returns the plain-text (no HTML) label a VPC box shows
+// for a server: the VPC's display name, plus the server's IP in that VPC
+// when known.
+func vpcLabelPlainText(vpcName string, vpcInfo *VPCInfo, serverID string) string {
+	serverIP := ""
+	for _, subnet := range vpcInfo.Subnets {
+		if ip, hasIP := subnet.ServerIPs[serverID]; hasIP {
+			serverIP = ip
+
+			break
+		}
+	}
+
+	displayName := vpcDisplayName(vpcName)
+	if serverIP != "" {
+		return displayName + ": " + serverIP
+	}
+
+	return displayName
+}
+
+// estimateVPCLabelWidth estimates the pixel width needed for a VPC box's
+// bold label text, so the box can be widened to fit it.
+func estimateVPCLabelWidth(text string) int {
+	return len(text)*6 + 16
 }
 
 // vpcDisplayName renders a VPC's k8s name with the canonical "VPC-NN" capitalization.
@@ -1695,7 +2055,7 @@ func vpcModeDisplay(mode string) string {
 	return strings.ToUpper(mode)
 }
 
-func createVPCBoxForServer(model *MxGraphModel, vpcName string, vpcInfo *VPCInfo, serverID string, serverCell *MxCell, boxIndex int, vpcIndex int) {
+func createVPCBoxForServer(model *MxGraphModel, vpcName string, vpcInfo *VPCInfo, serverID string, serverCell *MxCell, boxIndex int, vpcIndex int, parent string, minWidth int) {
 	// Get server dimensions
 	x := serverCell.Geometry.X
 	y := serverCell.Geometry.Y
@@ -1717,9 +2077,17 @@ func createVPCBoxForServer(model *MxGraphModel, vpcName string, vpcInfo *VPCInfo
 	labelHeight := 18.0
 	totalLabelSpace := baseLabelSpace + (labelHeight * float64(vpcIndex))
 
-	minX := x - padding
+	// Widen (centered on the server) when the longest VPC label among this
+	// server's memberships needs more room than the server's own node width.
+	boxWidth := width + 2*padding
+	if float64(minWidth) > boxWidth {
+		boxWidth = float64(minWidth)
+	}
+	centerX := x + width/2
+
+	minX := centerX - boxWidth/2
 	minY := y - padding
-	maxX := x + width + padding
+	maxX := centerX + boxWidth/2
 	maxY := y + height + padding + totalLabelSpace
 
 	// Select color from palette based on VPC name hash for consistency
@@ -1749,7 +2117,7 @@ func createVPCBoxForServer(model *MxGraphModel, vpcName string, vpcInfo *VPCInfo
 	// Create the VPC box with label at the bottom (like redundancy groups)
 	vpcRect := MxCell{
 		ID:     fmt.Sprintf("vpc_%d", boxIndex),
-		Parent: "vpc_layer",
+		Parent: parent,
 		Value:  labelValue,
 		Style: fmt.Sprintf("rounded=1;arcSize=8;whiteSpace=wrap;html=1;strokeColor=%s;strokeWidth=2;"+
 			"fillColor=none;dashed=1;dashPattern=5 5;"+
@@ -1769,7 +2137,7 @@ func createVPCBoxForServer(model *MxGraphModel, vpcName string, vpcInfo *VPCInfo
 	model.Root.MxCell = append(model.Root.MxCell, vpcRect)
 }
 
-func createVPCLegend(model *MxGraphModel, vpcs map[string]*VPCInfo, serverBottomY int, numServers int, serverLayerStartX, serverLayerWidth float64) {
+func createVPCLegend(model *MxGraphModel, vpcs map[string]*VPCInfo, serverBottomY int, numServers int, serverLayerStartX, serverLayerWidth float64, parent string) {
 	// Sort VPC names for consistent ordering
 	vpcNames := make([]string, 0, len(vpcs))
 	for vpcName := range vpcs {
@@ -1836,8 +2204,8 @@ func createVPCLegend(model *MxGraphModel, vpcs map[string]*VPCInfo, serverBottom
 		// VPC name header (with mode in parentheses for the legend only)
 		headerText := fmt.Sprintf("%s (%s)", vpcDisplayName(vpcName), vpcModeDisplay(vpcInfo.Mode))
 		vpcHeader := MxCell{
-			ID:     fmt.Sprintf("vpc_legend_header_%d", i),
-			Parent: "vpc_layer",
+			ID:     fmt.Sprintf("vpc_legend_header_%s_%d", parent, i),
+			Parent: parent,
 			Value:  fmt.Sprintf("<b>%s</b>", headerText),
 			Style:  fmt.Sprintf("text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontColor=%s;fontStyle=1;", color),
 			Vertex: "1",
@@ -1865,8 +2233,8 @@ func createVPCLegend(model *MxGraphModel, vpcs map[string]*VPCInfo, serverBottom
 			subnetText := fmt.Sprintf("<b>%s</b>: %s (VLAN %d)", subnetName, subnet.CIDR, subnet.VLAN)
 
 			subnetCell := MxCell{
-				ID:     fmt.Sprintf("vpc_legend_subnet_%d_%d", i, j),
-				Parent: "vpc_layer",
+				ID:     fmt.Sprintf("vpc_legend_subnet_%s_%d_%d", parent, i, j),
+				Parent: parent,
 				Value:  subnetText,
 				Style:  "text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontColor=#666666;",
 				Vertex: "1",
@@ -2088,6 +2456,14 @@ func createUnderlayLayer(model *MxGraphModel, topo Topology, cellMap map[string]
 			continue
 		}
 
+		// Underlay content always stays on the single, dedicated Underlay
+		// toggle (off by default) rather than following the switch's own
+		// tenant — otherwise it would show whenever that tenant is active,
+		// regardless of whether Underlay itself is switched on. The trade-off
+		// (same as cross-tenant links): turning Underlay on shows it for
+		// every tenant's switches at once, not just the one currently shown.
+		swParent := "underlay_layer"
+
 		var infoLines []string
 		if ip, _, ok := strings.Cut(rid, "/"); ok {
 			infoLines = append(infoLines, "lo1: "+ip)
@@ -2104,7 +2480,7 @@ func createUnderlayLayer(model *MxGraphModel, topo Topology, cellMap map[string]
 			iconStyle := strings.ReplaceAll(GetNodeStyle(node, style), "verticalAlign=middle", "verticalAlign=top")
 			iconOverlay := MxCell{
 				ID:     fmt.Sprintf("underlay_sw_%s", node.ID),
-				Parent: "underlay_layer",
+				Parent: swParent,
 				Value:  fmt.Sprintf("<font style=\"color: rgb(0, 0, 0);\"><b>%s</b></font>", node.ID),
 				Style:  iconStyle,
 				Vertex: "1",
@@ -2119,7 +2495,7 @@ func createUnderlayLayer(model *MxGraphModel, topo Topology, cellMap map[string]
 			loHeight := 13 * len(infoLines)
 			loCell := MxCell{
 				ID:     fmt.Sprintf("underlay_sw_%s_lo", node.ID),
-				Parent: "underlay_layer",
+				Parent: swParent,
 				Value:  fmt.Sprintf("<font style=\"color: rgb(0, 0, 0);\">%s</font>", strings.Join(infoLines, "<br>")),
 				Style:  "rounded=0;whiteSpace=wrap;html=1;strokeColor=none;fillColor=none;fontSize=9;align=center;",
 				Vertex: "1",
@@ -2148,7 +2524,7 @@ func createUnderlayLayer(model *MxGraphModel, topo Topology, cellMap map[string]
 
 		overlayCell := MxCell{
 			ID:     fmt.Sprintf("underlay_sw_%s", node.ID),
-			Parent: "underlay_layer",
+			Parent: swParent,
 			Value:  label,
 			Style:  GetNodeStyle(node, style),
 			Vertex: "1",
@@ -2218,6 +2594,10 @@ func createUnderlayLayer(model *MxGraphModel, topo Topology, cellMap map[string]
 
 		strokeColor, fillColor := bgpStateColors(edgeData.Link.Properties[PropBGPState])
 
+		// Same reasoning as swParent above: underlay content stays on the
+		// single dedicated toggle, never following an edge's own tenant.
+		p2pParent := "underlay_layer"
+
 		// Midpoint subnet label
 		if srcIP != "" {
 			subnet := subnetOf(srcIP)
@@ -2230,7 +2610,7 @@ func createUnderlayLayer(model *MxGraphModel, topo Topology, cellMap map[string]
 				strokeColor, fillColor, edgeData.Rotation)
 			model.Root.MxCell = append(model.Root.MxCell, MxCell{
 				ID:     fmt.Sprintf("%s_p2p", edgeData.EdgeID),
-				Parent: "underlay_layer",
+				Parent: p2pParent,
 				Value:  subnet,
 				Style:  subnetStyle,
 				Vertex: "1",
@@ -2256,7 +2636,7 @@ func createUnderlayLayer(model *MxGraphModel, topo Topology, cellMap map[string]
 			ly := edgeData.SrcY + edgeData.UnitY*p2pFixedDist + perpY*verticalOffset
 			model.Root.MxCell = append(model.Root.MxCell, MxCell{
 				ID:     fmt.Sprintf("%s_p2p_src", edgeData.EdgeID),
-				Parent: "underlay_layer",
+				Parent: p2pParent,
 				Value:  oct,
 				Style:  octStyle,
 				Vertex: "1",
@@ -2277,7 +2657,7 @@ func createUnderlayLayer(model *MxGraphModel, topo Topology, cellMap map[string]
 			ly := edgeData.TgtY - edgeData.UnitY*p2pFixedDist + perpY*verticalOffset
 			model.Root.MxCell = append(model.Root.MxCell, MxCell{
 				ID:     fmt.Sprintf("%s_p2p_dst", edgeData.EdgeID),
-				Parent: "underlay_layer",
+				Parent: p2pParent,
 				Value:  oct,
 				Style:  octStyle,
 				Vertex: "1",
@@ -2340,10 +2720,17 @@ func createLinkSpeedLayer(model *MxGraphModel) {
 				"whiteSpace=wrap;rounded=1;fontSize=10;rotation=%.1f;",
 				edgeData.Rotation)
 
+			// A tenant's edges keep their speed label on the tenant's own
+			// layer (so it hides with it); core edges use the dedicated toggle.
+			speedParent := "link_speed_layer"
+			if edgeData.Parent != "1" {
+				speedParent = edgeData.Parent
+			}
+
 			speedLabelID := fmt.Sprintf("%s_speed", edgeData.EdgeID)
 			speedLabelCell := MxCell{
 				ID:     speedLabelID,
-				Parent: "link_speed_layer",
+				Parent: speedParent,
 				Value:  speedText,
 				Style:  speedStyle,
 				Vertex: "1",

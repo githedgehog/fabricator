@@ -158,6 +158,56 @@ func findConnectionTypes(links []Link) map[string]*serverConnection {
 	return serverConns
 }
 
+// centerLeavesAroundCore reorders leaves (already sorted by description/ID)
+// so a shared rack's own leaf pair — a redundancy group, e.g. an ESLAG pair
+// — sits in the center of the row, with every other, single-switch ToR
+// tenant fanning out alternately to its left and right in the order they
+// were sorted (nearest first): e.g. [env-06-tor, he-f2-leaf-1, he-f2-leaf-2,
+// env-07-tor]. Leaves with no redundancy-group tenant present are returned
+// unchanged, since there's no "core" to center on.
+func centerLeavesAroundCore(leaves []Node) []Node {
+	coreTenant := ""
+	for _, leaf := range leaves {
+		if leaf.Tenant != "" && leaf.Properties[PropRedundancyGroup] != "" {
+			coreTenant = leaf.Tenant
+
+			break
+		}
+	}
+	if coreTenant == "" {
+		return leaves
+	}
+
+	var core, others []Node
+	for _, leaf := range leaves {
+		if leaf.Tenant == coreTenant {
+			core = append(core, leaf)
+		} else {
+			others = append(others, leaf)
+		}
+	}
+
+	left := make([]Node, 0, len(others))
+	right := make([]Node, 0, len(others))
+	for i, leaf := range others {
+		if i%2 == 0 {
+			left = append(left, leaf) // nearest-to-farthest so far
+		} else {
+			right = append(right, leaf) // nearest-to-farthest
+		}
+	}
+	for i, j := 0, len(left)-1; i < j; i, j = i+1, j-1 {
+		left[i], left[j] = left[j], left[i] // farthest-to-nearest, for left-to-right reading
+	}
+
+	result := make([]Node, 0, len(leaves))
+	result = append(result, left...)
+	result = append(result, core...)
+	result = append(result, right...)
+
+	return result
+}
+
 func sortNodes(nodes []Node, links []Link) TieredNodes {
 	var result TieredNodes
 	leafOrder := make(map[string]int)
@@ -228,6 +278,8 @@ func sortNodes(nodes []Node, links []Link) TieredNodes {
 
 		return result.Leaf[i].ID < result.Leaf[j].ID
 	})
+
+	result.Leaf = centerLeavesAroundCore(result.Leaf)
 
 	sort.Slice(result.Gateway, func(i, j int) bool {
 		return result.Gateway[i].ID < result.Gateway[j].ID
@@ -1008,7 +1060,56 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 
 	generateUnderlayLayer = hasUnderlayData(topo)
 
+	assignTenants(&topo)
+
 	return topo, nil
+}
+
+// assignTenants groups each non-spine leaf switch, and every server or
+// external attached to it, into a tenant so the diagram can render them on
+// their own toggleable layer (e.g. one HLAB rack shared by several env-NN
+// test slots, each with its own ToR). Spine switches and gateways are
+// shared/core and stay untenanted. A leaf's tenant is its redundancy group
+// name when it has one, so an ESLAG-paired leaf pair (and everything
+// attached to it) forms a single tenant rather than two overlapping ones;
+// otherwise it's the leaf's own name.
+func assignTenants(topo *Topology) {
+	nodeIndex := make(map[string]int, len(topo.Nodes))
+	for i, node := range topo.Nodes {
+		nodeIndex[node.ID] = i
+	}
+
+	for _, node := range topo.Nodes {
+		if node.Type != NodeTypeSwitch || node.Properties[PropRole] == SwitchRoleSpine {
+			continue
+		}
+
+		tenant := node.Properties[PropRedundancyGroup]
+		if tenant == "" {
+			tenant = node.ID
+		}
+
+		topo.Nodes[nodeIndex[node.ID]].Tenant = tenant
+	}
+
+	// Propagate the tenant from each leaf to the servers and externals
+	// connected to it.
+	isLeaf := func(t string) bool { return t == NodeTypeServer || t == NodeTypeExternal }
+	for _, link := range topo.Links {
+		srcIdx, srcOK := nodeIndex[link.Source]
+		tgtIdx, tgtOK := nodeIndex[link.Target]
+		if !srcOK || !tgtOK {
+			continue
+		}
+
+		src, tgt := &topo.Nodes[srcIdx], &topo.Nodes[tgtIdx]
+		if isLeaf(src.Type) && src.Tenant == "" && tgt.Tenant != "" {
+			src.Tenant = tgt.Tenant
+		}
+		if isLeaf(tgt.Type) && tgt.Tenant == "" && src.Tenant != "" {
+			tgt.Tenant = src.Tenant
+		}
+	}
 }
 
 func getNodeTypeInfo(node Node) (string, string) {
