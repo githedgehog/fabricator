@@ -242,7 +242,7 @@ func (c collector) collectKubeObjects(ctx context.Context, kube kclient.Reader, 
 		objListValue := reflect.New(objListType)
 		objList := objListValue.Interface().(kclient.ObjectList)
 
-		if err := retry.OnError(longBackoff, func(err error) bool { return true }, func() error {
+		if err := retry.OnError(longBackoff, func(error) bool { return ctx.Err() == nil }, func() error {
 			if err := kube.List(ctx, objList); err != nil {
 				if kmeta.IsNoMatchError(err) {
 					return nil
