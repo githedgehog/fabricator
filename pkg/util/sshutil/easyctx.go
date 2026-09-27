@@ -62,12 +62,20 @@ func streamContext(ctx context.Context, ssh *easyssh.MakeConfig, command string)
 		res := make(chan struct{}, 1)
 		resWg := sync.WaitGroup{}
 
+		// each send races ctx.Done() too: if the caller (StreamLog) has
+		// already abandoned its read loop on cancellation, an unconditional
+		// send here would block forever with no reader left, leaking this
+		// scanner goroutine (and the reader it holds) indefinitely
 		resWg.Go(func() {
 			defer close(stdoutChan)
 
 			stdoutScanner := bufio.NewScanner(outReader)
 			for stdoutScanner.Scan() {
-				stdoutChan <- stdoutScanner.Text()
+				select {
+				case stdoutChan <- stdoutScanner.Text():
+				case <-ctx.Done():
+					return
+				}
 			}
 		})
 
@@ -76,7 +84,11 @@ func streamContext(ctx context.Context, ssh *easyssh.MakeConfig, command string)
 
 			stderrScanner := bufio.NewScanner(errReader)
 			for stderrScanner.Scan() {
-				stderrChan <- stderrScanner.Text()
+				select {
+				case stderrChan <- stderrScanner.Text():
+				case <-ctx.Done():
+					return
+				}
 			}
 		})
 

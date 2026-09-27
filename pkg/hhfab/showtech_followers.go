@@ -53,14 +53,23 @@ func (c *Config) startContainerLogFollowers(ctx context.Context, vlab *VLAB, out
 		}
 
 		for _, target := range containerLogFollowTargets {
+			localPath := filepath.Join(logDir, fmt.Sprintf("%s-%s.log", vm.Name, target.FileSuffix))
+
+			// clear unconditionally, before SSH setup: MkdirAll above leaves a
+			// stale file from an earlier run in this same work directory
+			// untouched, and if SSH setup fails below, followContainerLog's own
+			// O_TRUNC never runs, so a stale file would otherwise survive and
+			// be mistaken for this run's capture
+			if err := os.Remove(localPath); err != nil && !os.IsNotExist(err) {
+				slog.Warn("Failed to clear stale log follower output", "path", localPath, "err", err)
+			}
+
 			ssh, err := c.SSH(followCtx, vlab, vm.Name)
 			if err != nil {
 				slog.Warn("Failed to set up log follower ssh; skipping", "vm", vm.Name, "container", target.ContainerName, "err", err)
 
 				continue
 			}
-
-			localPath := filepath.Join(logDir, fmt.Sprintf("%s-%s.log", vm.Name, target.FileSuffix))
 
 			wg.Add(1)
 			go func(nodeName, containerName, path string) {
@@ -102,15 +111,27 @@ func followContainerLog(ctx context.Context, ssh *sshutil.Config, nodeName, cont
 		}
 	}()
 
+	// writeFailed latches on the first output-write error (e.g. disk full) so
+	// a follower stops instead of silently discarding container output while
+	// presenting an incomplete file as a successful capture.
+	var writeFailed bool
+	logWrite := func(err error) {
+		if err != nil && !writeFailed {
+			writeFailed = true
+			slog.Warn("Log follower output write failed; stopping this follower", "path", localPath, "err", err)
+		}
+	}
 	logLine := func(format string, args ...any) {
-		fmt.Fprintf(f, "[log-follower] %s %s\n", time.Now().UTC().Format(time.RFC3339Nano), fmt.Sprintf(format, args...))
+		_, err := fmt.Fprintf(f, "[log-follower] %s %s\n", time.Now().UTC().Format(time.RFC3339Nano), fmt.Sprintf(format, args...))
+		logWrite(err)
 	}
 
 	// anchored: crictl's --name is an unanchored regex, and the frr pod carries a
 	// second "frr-exporter" container whose name would otherwise also match "frr"
 	psCmd := fmt.Sprintf("sudo -E crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock ps -q --name %q", "^"+containerName+"$")
 
-	for ctx.Err() == nil {
+	var lastCid string
+	for ctx.Err() == nil && !writeFailed {
 		out, _, err := ssh.Run(ctx, psCmd)
 		cid := strings.TrimSpace(out)
 		if idx := strings.LastIndexByte(cid, '\n'); idx >= 0 {
@@ -126,11 +147,21 @@ func followContainerLog(ctx context.Context, ssh *sshutil.Config, nodeName, cont
 		}
 
 		logLine("(re)connecting to %s/%s (cid %s)", nodeName, containerName, cid)
-		logCmd := fmt.Sprintf("sudo -E crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock logs -f --timestamps %s", cid)
+		// crictl logs defaults --tail to "all": reconnecting to the SAME
+		// container (an SSH-level hiccup, not a restart) would otherwise
+		// replay and duplicate everything already captured for it. Only a
+		// genuinely new container ID gets its full retained history.
+		tailArg := ""
+		if cid == lastCid {
+			tailArg = " --tail 0"
+		}
+		lastCid = cid
+		logCmd := fmt.Sprintf("sudo -E crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock logs -f --timestamps%s %s", tailArg, cid)
 		streamErr := ssh.StreamLog(ctx, logCmd, "", func(msg string, _ ...any) {
-			fmt.Fprintln(f, strings.TrimPrefix(msg, ": "))
+			_, err := fmt.Fprintln(f, strings.TrimPrefix(msg, ": "))
+			logWrite(err)
 		})
-		if ctx.Err() != nil {
+		if ctx.Err() != nil || writeFailed {
 			return
 		}
 
