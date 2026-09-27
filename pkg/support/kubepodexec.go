@@ -36,7 +36,7 @@ func (c collector) collectGatewayInsights(ctx context.Context, dump *Dump) error
 	}
 
 	var pods *corev1.PodList
-	if err := retry.OnError(longBackoff, func(err error) bool { return true }, func() error {
+	if err := retry.OnError(longBackoff, func(error) bool { return ctx.Err() == nil }, func() error {
 		pods, err = clientset.CoreV1().Pods(comp.FabNamespace).List(ctx, kmetav1.ListOptions{})
 		if err != nil {
 			return fmt.Errorf("listing pods: %w", err)
@@ -147,7 +147,7 @@ func gatewayName(s string) (string, bool) {
 func execPodContainerCommand(ctx context.Context, clientset *kubernetes.Clientset, cfg *rest.Config, ns, pod, container string, command []string) (string, string, error) {
 	var outBuf, errBuf bytes.Buffer
 
-	if err := retry.OnError(longBackoff, func(err error) bool { return true }, func() error {
+	if err := retry.OnError(longBackoff, func(error) bool { return ctx.Err() == nil }, func() error {
 		outBuf.Reset()
 		errBuf.Reset()
 
