@@ -83,13 +83,24 @@ func (c *Config) startContainerLogFollowers(ctx context.Context, vlab *VLAB, out
 // on every (re)connect, not cached once, in case whatever caused the
 // disconnect (a pod restart, in particular) minted a new container ID.
 func followContainerLog(ctx context.Context, ssh *sshutil.Config, nodeName, containerName, localPath string) {
-	f, err := os.OpenFile(localPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	// O_TRUNC, not O_APPEND: show-tech-output is not cleared when a VLAB is
+	// rerun in the same work directory (setup only resets IncludeDir,
+	// ResultDir and VLABDir - see cmdconfig.go), so appending would prepend
+	// this run's capture onto a stale one from a previous run. Truncating on
+	// open still preserves append-within-a-run: the file stays open across
+	// this follower's own reconnects, so a mid-run disconnect does not lose
+	// what was already written.
+	f, err := os.OpenFile(localPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
 		slog.Warn("Failed to open log follower output", "path", localPath, "err", err)
 
 		return
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			slog.Warn("Failed to close log follower output", "path", localPath, "err", err)
+		}
+	}()
 
 	logLine := func(format string, args ...any) {
 		fmt.Fprintf(f, "[log-follower] %s %s\n", time.Now().UTC().Format(time.RFC3339Nano), fmt.Sprintf(format, args...))

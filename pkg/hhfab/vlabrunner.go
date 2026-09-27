@@ -782,9 +782,13 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						OnReadyTest:    opts.ReleaseTestOnReadyOnly,
 					}
 					slog.Debug("Running release-test", "opts", releaseTestOpts)
-					stopLogFollowers, err := c.startContainerLogFollowers(ctx, vlab, filepath.Join(c.WorkDir, ShowTechOutputDir))
-					if err != nil {
-						slog.Warn("Failed to start container log followers", "err", err)
+					stopLogFollowers := func() {}
+					if releaseTestOpts.ShowTechDump {
+						var followersErr error
+						stopLogFollowers, followersErr = c.startContainerLogFollowers(ctx, vlab, filepath.Join(c.WorkDir, ShowTechOutputDir))
+						if followersErr != nil {
+							slog.Warn("Failed to start container log followers", "err", followersErr)
+						}
 					}
 					if err := ReleaseTest(ctx, c, vlab, releaseTestOpts); err != nil {
 						stopLogFollowers()

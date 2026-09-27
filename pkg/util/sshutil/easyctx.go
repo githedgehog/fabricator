@@ -19,7 +19,12 @@ import (
 func streamContext(ctx context.Context, ssh *easyssh.MakeConfig, command string) (<-chan string, <-chan string, <-chan error, error) {
 	stdoutChan := make(chan string)
 	stderrChan := make(chan string)
-	errChan := make(chan error)
+	// buffered: on ctx cancellation, StreamLog's own select and this func's
+	// goroutine both race on ctx.Done(); if StreamLog returns first, nobody
+	// is left reading errChan, and an unbuffered send here would block
+	// forever, leaking this goroutine's session/client (their Close() calls
+	// are deferred below and would never run)
+	errChan := make(chan error, 1)
 
 	session, client, err := ssh.Connect()
 	if err != nil {
