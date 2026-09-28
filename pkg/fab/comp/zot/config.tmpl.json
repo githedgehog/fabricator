@@ -4,6 +4,8 @@
   "http": {
     "address": "0.0.0.0",
     "port": "5000",
+    "readTimeout": "10m",
+    "writeTimeout": "10m",
     "tls": {
       "cert": "/tls/tls.crt",
       "key": "/tls/tls.key"
