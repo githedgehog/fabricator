@@ -193,8 +193,14 @@ func sortNodes(nodes []Node, links []Link) TieredNodes {
 		}
 	}
 
-	// Sort spine nodes by description first, then by ID
+	// Sort spine nodes by fabric first (so multi-fabric topologies group
+	// contiguously rather than interleaving), then by description, then by ID.
 	sort.Slice(result.Spine, func(i, j int) bool {
+		fabricI, fabricJ := result.Spine[i].Properties[PropFabric], result.Spine[j].Properties[PropFabric]
+		if fabricI != fabricJ {
+			return fabricI < fabricJ
+		}
+
 		descI, hasDescI := result.Spine[i].Properties[PropDescription]
 		descJ, hasDescJ := result.Spine[j].Properties[PropDescription]
 
@@ -211,8 +217,14 @@ func sortNodes(nodes []Node, links []Link) TieredNodes {
 		return result.Spine[i].ID < result.Spine[j].ID
 	})
 
-	// Sort leaf nodes by description first, then by ID
+	// Sort leaf nodes by fabric first (same reason as spine above), then by
+	// description, then by ID.
 	sort.Slice(result.Leaf, func(i, j int) bool {
+		fabricI, fabricJ := result.Leaf[i].Properties[PropFabric], result.Leaf[j].Properties[PropFabric]
+		if fabricI != fabricJ {
+			return fabricI < fabricJ
+		}
+
 		descI, hasDescI := result.Leaf[i].Properties[PropDescription]
 		descJ, hasDescJ := result.Leaf[j].Properties[PropDescription]
 
@@ -621,6 +633,12 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 		node.Label = fmt.Sprintf("%s\n%s", sw.Name, role)
 
 		node.Properties[PropDescription] = sw.Spec.Description
+
+		fabric := sw.Spec.Topology.Fabric
+		if fabric == "" {
+			fabric = wiringapi.DefaultFabric
+		}
+		node.Properties[PropFabric] = fabric
 
 		// Extract redundancy group information
 		if sw.Spec.Redundancy.Group != "" {

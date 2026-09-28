@@ -124,6 +124,7 @@ const (
 	PropSrcLinkIP        = "srcLinkIP"
 	PropDstLinkIP        = "dstLinkIP"
 	PropBGPState         = "bgpState"
+	PropFabric           = "fabric"
 )
 
 const (

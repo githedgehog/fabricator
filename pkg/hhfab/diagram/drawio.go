@@ -546,6 +546,9 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 		createParallelEdges(model, group, cellMap, i, style)
 	}
 
+	// Add fabric group layer (only draws when more than one fabric is present)
+	createFabricGroupLayer(model, topo.Nodes, cellMap)
+
 	// Add redundancy group layer
 	createRedundancyGroupLayer(model, redundancyGroups, cellMap)
 
@@ -1410,6 +1413,98 @@ func getConnectionType(source, target string) string {
 	}
 
 	return ConnTypeUnknown
+}
+
+// createFabricGroupLayer draws one dashed box per distinct Switch.spec.topology.fabric
+// value, enclosing that fabric's switches (spine and leaf tiers). It only draws anything
+// once two or more distinct fabrics are present — a single-fabric topology gets no box.
+func createFabricGroupLayer(model *MxGraphModel, allNodes []Node, cellMap map[string]*MxCell) {
+	fabricGroups := map[string][]Node{}
+	for _, node := range allNodes {
+		if node.Type != NodeTypeSwitch {
+			continue
+		}
+		fabric, ok := node.Properties[PropFabric]
+		if !ok || fabric == "" {
+			continue
+		}
+		if _, hasCell := cellMap[node.ID]; !hasCell {
+			continue
+		}
+		fabricGroups[fabric] = append(fabricGroups[fabric], node)
+	}
+
+	if len(fabricGroups) < 2 {
+		return
+	}
+
+	fabricLayer := MxCell{
+		ID:     "fabric_layer",
+		Parent: "0",
+		Value:  "Fabrics",
+		Style:  "locked=1;",
+	}
+	model.Root.MxCell = append(model.Root.MxCell, fabricLayer)
+
+	fabricNames := make([]string, 0, len(fabricGroups))
+	for fabric := range fabricGroups {
+		fabricNames = append(fabricNames, fabric)
+	}
+	sort.Strings(fabricNames)
+
+	const padding = 16.0
+
+	for i, fabric := range fabricNames {
+		minX, minY := float64(9999), float64(9999)
+		maxX, maxY := float64(-9999), float64(-9999)
+
+		for _, switchNode := range fabricGroups[fabric] {
+			cell, ok := cellMap[switchNode.ID]
+			if !ok || cell.Geometry == nil {
+				continue
+			}
+			x := cell.Geometry.X
+			y := cell.Geometry.Y
+			w := float64(cell.Geometry.Width)
+			h := float64(cell.Geometry.Height)
+			if x < minX {
+				minX = x
+			}
+			if y < minY {
+				minY = y
+			}
+			if x+w > maxX {
+				maxX = x + w
+			}
+			if y+h > maxY {
+				maxY = y + h
+			}
+		}
+
+		minX -= padding
+		minY -= padding
+		maxX += padding
+		maxY += padding
+
+		fabricBox := MxCell{
+			ID:     fmt.Sprintf("fabric_group_%d", i),
+			Parent: "fabric_layer",
+			Value:  fmt.Sprintf("Fabric: %s", fabric),
+			Style: "rounded=1;arcSize=6;whiteSpace=wrap;html=1;" +
+				"dashed=1;dashPattern=8 4;strokeColor=#666666;strokeWidth=2;" +
+				"fillColor=none;labelPosition=center;verticalLabelPosition=top;" +
+				"verticalAlign=bottom;spacingBottom=2;fontSize=11;fontStyle=1;fontColor=#666666;",
+			Vertex: "1",
+			Geometry: &Geometry{
+				X:      minX,
+				Y:      minY,
+				Width:  int(maxX - minX),
+				Height: int(maxY - minY),
+				As:     "geometry",
+			},
+		}
+		model.Root.MxCell = append(model.Root.MxCell, fabricBox)
+	}
 }
 
 func createRedundancyGroupLayer(model *MxGraphModel, redundancyGroups map[string][]Node, cellMap map[string]*MxCell) {
