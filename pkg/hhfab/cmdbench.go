@@ -88,6 +88,64 @@ func DoVLABBenchInit(ctx context.Context, workDir, cacheDir string, opts BenchIn
 	return nil
 }
 
+// BenchHealthOpts configures `hhfab vlab bench health`.
+type BenchHealthOpts struct {
+	QPS   float32
+	Burst int
+}
+
+// DoVLABBenchHealth prints the current state of the control plane.
+func DoVLABBenchHealth(ctx context.Context, workDir, cacheDir string, opts BenchHealthOpts) error {
+	kube, err := bench.NewKubeClient(ctx, filepath.Join(workDir, VLABDir, VLABKubeConfig), opts.QPS, opts.Burst)
+	if err != nil {
+		return err //nolint:wrapcheck
+	}
+
+	// etcd metrics are bound to localhost on the control node and the node
+	// stats obviously are too, so those sections need a shell there. Losing it
+	// degrades the report rather than failing it.
+	run, err := controlNodeRunner(ctx, workDir, cacheDir)
+	if err != nil {
+		slog.Warn("No control node access, skipping etcd and node sections", "err", err)
+	}
+
+	if err := bench.Health(ctx, kube, run, os.Stdout); err != nil {
+		return fmt.Errorf("collecting health: %w", err)
+	}
+
+	return nil
+}
+
+// controlNodeRunner returns a command runner for the VLAB control node.
+func controlNodeRunner(ctx context.Context, workDir, cacheDir string) (bench.Runner, error) {
+	c, vlab, err := loadVLABForHelpers(ctx, workDir, cacheDir)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, vm := range vlab.VMs {
+		if vm.Type != VMTypeControl {
+			continue
+		}
+
+		ssh, err := c.SSHVM(ctx, vlab, vm)
+		if err != nil {
+			return nil, fmt.Errorf("preparing ssh to %s: %w", vm.Name, err)
+		}
+
+		return func(ctx context.Context, cmd string) (string, error) {
+			stdout, stderr, err := ssh.Run(ctx, cmd)
+			if err != nil {
+				return "", fmt.Errorf("running %q on %s: %w: %s", cmd, vm.Name, err, strings.TrimSpace(stderr))
+			}
+
+			return stdout, nil
+		}, nil
+	}
+
+	return nil, fmt.Errorf("no control node in the VLAB") //nolint:err113
+}
+
 // BenchCleanOpts configures `hhfab vlab bench clean`.
 type BenchCleanOpts struct {
 	Fabrics []string

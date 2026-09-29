@@ -1980,6 +1980,33 @@ vpcs=1, attach=1, peerings=0, profile=celestica-ds5000`,
 								},
 							},
 							{
+								Name:  "health",
+								Usage: "show object counts, agent health, etcd and control node state",
+								Flags: flatten(defaultFlags, []cli.Flag{
+									&cli.Float64Flag{
+										Name:  FlagBenchQPS,
+										Usage: "client QPS",
+										Value: bench.DefaultQPS,
+									},
+									&cli.IntFlag{
+										Name:  FlagBenchBurst,
+										Usage: "client burst",
+										Value: bench.DefaultBurst,
+									},
+								}),
+								Before: before(false),
+								Action: func(c *cli.Context) error {
+									if err := hhfab.DoVLABBenchHealth(ctx, workDir, cacheDir, hhfab.BenchHealthOpts{
+										QPS:   float32(c.Float64(FlagBenchQPS)),
+										Burst: c.Int(FlagBenchBurst),
+									}); err != nil {
+										return fmt.Errorf("bench health: %w", err)
+									}
+
+									return nil
+								},
+							},
+							{
 								Name:  "clean",
 								Usage: "remove everything the benchmark created",
 								Flags: flatten(defaultFlags, []cli.Flag{
