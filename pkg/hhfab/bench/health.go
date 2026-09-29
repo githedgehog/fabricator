@@ -40,18 +40,32 @@ const heartbeatStale = time.Minute
 // the live history is roughly one window's worth of writes.
 const compactionWindow = 5 * time.Minute
 
+// HealthOpts configures what Health collects.
+type HealthOpts struct {
+	// Stats pulls object counts, Agent sizes and fabric convergence from the
+	// API. That is the expensive half: listing Agents fetches the full status
+	// of every one, which at a padded 600KB is hundreds of megabytes and is
+	// itself a load on the cluster being measured. Turn it off to read etcd and
+	// the node without perturbing a run in flight.
+	Stats bool
+}
+
 // Health prints what the control plane currently looks like: how much is in it,
 // whether the fabric is keeping up, and how etcd and the node are doing.
 //
 // It deliberately does not diagnose. The benchmark creates load until something
 // breaks; this is the view you investigate with.
-func Health(ctx context.Context, kube kclient.Client, run Runner, w io.Writer) error {
-	if err := healthObjects(ctx, kube, w); err != nil {
-		return err
-	}
+//
+// kube may be nil when opts.Stats is false, since nothing then touches the API.
+func Health(ctx context.Context, kube kclient.Client, run Runner, w io.Writer, opts HealthOpts) error {
+	if opts.Stats {
+		if err := healthObjects(ctx, kube, w); err != nil {
+			return err
+		}
 
-	if err := healthFabric(ctx, kube, w); err != nil {
-		return err
+		if err := healthFabric(ctx, kube, w); err != nil {
+			return err
+		}
 	}
 
 	// The node sections need the control node, which is not always reachable
