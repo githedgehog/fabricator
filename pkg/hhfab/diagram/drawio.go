@@ -360,14 +360,7 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 				continue
 			}
 			fabricHasMeshTriangle[g.fabric] = true
-			if fabricHasGateway[g.fabric] {
-				// Mirrors the single-fabric isMeshTriangle&&hasGateway case: the raised leaf
-				// sits where the spine row normally would, gatewayY+250 below the gateway
-				// (which stays at the true top -- see the gateway Y section below).
-				raisedLeafY[g.nodes[1].ID] = float64(gatewayY) + 250
-			} else {
-				raisedLeafY[g.nodes[1].ID] = float64(leafY) - 150
-			}
+			raisedLeafY[g.nodes[1].ID] = float64(leafY) - 150
 		}
 	}
 
@@ -484,10 +477,20 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 	// A fabric with no spine of its own has nothing occupying the spine row, so its own
 	// gateways sit one tier too high (a ~500px gap to their own leaves) if left at the
 	// standard gatewayY -- move them down to spineY instead, closing that gap the same way
-	// leafY already collapses up to spineY when there's no spine anywhere in the diagram. But
-	// if that same fabric also has its own mesh triangle, the raised leaf needs that spine
-	// slot instead (see raisedLeafY above) -- leave the gateway at the true top in that case,
-	// with the standard tier gap down to the raised leaf.
+	// leafY already collapses up to spineY when there's no spine anywhere in the diagram.
+	//
+	// If that same fabric also has its own mesh triangle, spineY is already taken by the
+	// raised leaf (see raisedLeafY above); putting the gateway at the true top (gatewayY)
+	// instead leaves too little clearance from the fixed-position Hedgehog logo
+	// (createHedgehogLogo: X=820, Y=10, W=150, H=30 -- always in the top-right corner
+	// regardless of content), since a per-fabric-centered gateway can land under it. Use
+	// meshGatewayY instead: clears the logo by the same 160px tier-gap used everywhere else
+	// in this layout (meshGatewayY = logo bottom 40 + 160), while still leaving ~110px to the
+	// raised leaf at leafY-150 -- less than the full 160 tier-gap, but more than the 60px gap
+	// already accepted between the raised leaf and the base leaf row in the plain (no
+	// gateway) mesh-triangle case.
+	const meshGatewayY = 200
+
 	fabricHasSpine := map[string]bool{}
 	for _, sp := range layers.Spine {
 		fabricHasSpine[sp.Properties[PropFabric]] = true
@@ -496,8 +499,12 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 	for i, node := range layers.Gateway {
 		f := node.Properties[PropFabric]
 		gatewayPositionsY[i] = float64(gatewayY)
-		if multiFabric && !fabricHasSpine[f] && !fabricHasMeshTriangle[f] {
-			gatewayPositionsY[i] = float64(spineY)
+		if multiFabric && !fabricHasSpine[f] {
+			if fabricHasMeshTriangle[f] {
+				gatewayPositionsY[i] = meshGatewayY
+			} else {
+				gatewayPositionsY[i] = float64(spineY)
+			}
 		}
 	}
 
