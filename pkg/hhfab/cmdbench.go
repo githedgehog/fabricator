@@ -18,6 +18,7 @@ import (
 	"go.githedgehog.com/fabric/api/valid"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/ctrl/switchprofile"
+	"go.githedgehog.com/fabric/pkg/util/kubeutil"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	fabcomp "go.githedgehog.com/fabricator/pkg/fab/comp/fabric"
 	"go.githedgehog.com/fabricator/pkg/hhfab/bench"
@@ -88,6 +89,56 @@ func DoVLABBenchInit(ctx context.Context, workDir, cacheDir string, opts BenchIn
 	}
 
 	slog.Info("Benchmark topology applied", "took", time.Since(start).Truncate(time.Millisecond))
+
+	return nil
+}
+
+// BenchAgentsOpts configures `hhfab vlab bench agents`.
+type BenchAgentsOpts struct {
+	Duration       time.Duration
+	Interval       time.Duration
+	Agents         []string
+	APIVia         string
+	SyncHeartbeats bool
+	QPS            float32
+	Burst          int
+}
+
+// DoVLABBenchAgents simulates switch agents against the Agent objects in the
+// cluster.
+func DoVLABBenchAgents(ctx context.Context, workDir, cacheDir string, opts BenchAgentsOpts) error {
+	kubeconfig := filepath.Join(workDir, VLABDir, VLABKubeConfig)
+
+	// Discovery needs admin credentials: the per-switch Role grants get and
+	// watch on that switch's own Agent, with no list.
+	admin, err := bench.NewKubeClient(ctx, kubeconfig, opts.QPS, opts.Burst)
+	if err != nil {
+		return err //nolint:wrapcheck
+	}
+
+	// Each agent's own kubeconfig points at the control VIP on the management
+	// network, which the host running the bench has no address on. Reuse
+	// whatever address the admin kubeconfig reaches the API by.
+	apiServer := ""
+	if opts.APIVia == bench.APIViaHostfwd || opts.APIVia == "" {
+		cfg, err := kubeutil.NewClientConfig(ctx, kubeconfig)
+		if err != nil {
+			return fmt.Errorf("reading kubeconfig: %w", err)
+		}
+
+		apiServer = cfg.Host
+	}
+
+	if err := bench.RunAgents(ctx, admin, bench.AgentsOpts{
+		Duration:       opts.Duration,
+		Interval:       opts.Interval,
+		Agents:         opts.Agents,
+		APIVia:         opts.APIVia,
+		APIServer:      apiServer,
+		SyncHeartbeats: opts.SyncHeartbeats,
+	}); err != nil {
+		return fmt.Errorf("running agents: %w", err)
+	}
 
 	return nil
 }
