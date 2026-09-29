@@ -166,12 +166,12 @@ func RunAgents(ctx context.Context, admin kclient.Client, opts AgentsOpts) error
 	}
 
 	wg.Go(func() {
-		stats.report(runCtx, len(sims))
+		stats.report(runCtx, len(sims), opts.Interval)
 	})
 
 	wg.Wait()
 
-	stats.summary(len(sims), time.Since(start))
+	stats.summary(len(sims), time.Since(start), opts.Interval)
 
 	return nil
 }
@@ -760,9 +760,11 @@ func (s *agentStats) drain() window {
 
 // report prints an aggregate line periodically, which is how a long run is
 // watched without per-agent noise.
-func (s *agentStats) report(ctx context.Context, agents int) {
+func (s *agentStats) report(ctx context.Context, agents int, interval time.Duration) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
+
+	expected := expectedRate(agents, interval)
 
 	last := s.heartbeats.Load()
 	lastAt := time.Now()
@@ -782,6 +784,7 @@ func (s *agentStats) report(ctx context.Context, agents int) {
 				"agents", agents,
 				"heartbeats", now,
 				"rate", fmt.Sprintf("%.1f/s", float64(now-last)/elapsed.Seconds()),
+				"expected", expected,
 				"p50", p50.Truncate(time.Millisecond),
 				"p95", p95.Truncate(time.Millisecond),
 				"applies", s.applies.Load(),
@@ -807,18 +810,30 @@ func (s *agentStats) report(ctx context.Context, agents int) {
 	}
 }
 
-func (s *agentStats) summary(agents int, took time.Duration) {
+func (s *agentStats) summary(agents int, took, interval time.Duration) {
 	beats := s.heartbeats.Load()
 
 	slog.Info("Agents stopped",
 		"agents", agents,
 		"heartbeats", beats,
 		"rate", fmt.Sprintf("%.1f/s", float64(beats)/took.Seconds()),
+		"expected", expectedRate(agents, interval),
 		"applies", s.applies.Load(),
 		"conflicts", s.conflicts.Load(),
 		"errors", s.errors.Load(),
 		"watchResets", s.watchResets.Load(),
 		"took", took.Truncate(time.Second))
+}
+
+// expectedRate is the heartbeat rate a fleet produces when every agent keeps
+// its schedule: one write per agent per interval. It is demand, not capacity,
+// so a run that sits below it is falling behind rather than saturating.
+func expectedRate(agents int, interval time.Duration) string {
+	if interval <= 0 {
+		return "n/a"
+	}
+
+	return fmt.Sprintf("%.1f/s", float64(agents)/interval.Seconds())
 }
 
 func percentiles(lat []time.Duration) (time.Duration, time.Duration) {
