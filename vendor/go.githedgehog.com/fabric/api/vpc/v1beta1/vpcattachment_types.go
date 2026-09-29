@@ -63,6 +63,7 @@ type VPCAttachmentStatus struct{}
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:categories=hedgehog;fabric,shortName=vpcattach
+// +kubebuilder:printcolumn:name="Fabric",type=string,JSONPath=`.spec.topology.fabric`,priority=0
 // +kubebuilder:printcolumn:name="VPCSUBNET",type=string,JSONPath=`.spec.subnet`,priority=0
 // +kubebuilder:printcolumn:name="Connection",type=string,JSONPath=`.spec.connection`,priority=0
 // +kubebuilder:printcolumn:name="NativeVLAN",type=string,JSONPath=`.spec.nativeVLAN`,priority=0
@@ -276,6 +277,9 @@ func (attach *VPCAttachment) Validate(ctx context.Context, kube kclient.Reader, 
 
 			if !slices.Contains(sw.Spec.VLANNamespaces, vpc.Spec.VLANNamespace) {
 				return nil, errors.Errorf("switch %s used in connection doesn't have vlan namespace %s", switchName, vpc.Spec.VLANNamespace)
+			}
+			if vpcDomain, swDomains := wiringapi.DomainNameOrDefault(vpc.Spec.Topology.Domain), wiringapi.DomainsOrDefault(sw.Spec.Topology.Domains); !slices.Contains(swDomains, vpcDomain) {
+				return nil, fmt.Errorf("vpc %s is in domain %s but switch %s is in domains %v", vpcName, vpcDomain, switchName, swDomains) //nolint:err113
 			}
 
 			sp := &wiringapi.SwitchProfile{}

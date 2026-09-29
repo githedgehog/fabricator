@@ -6,12 +6,14 @@ package v1beta1
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"go.githedgehog.com/fabric/api/meta"
 	kapierrors "k8s.io/apimachinery/pkg/api/errors"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ktypes "k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/validation"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
@@ -24,6 +26,8 @@ type FabricSpec struct {
 	LeafASNStart uint32 `json:"leafASNStart,omitempty"`
 	// LeafASNEnd is the last ASN of the range leaves of this Fabric are allocated from
 	LeafASNEnd uint32 `json:"leafASNEnd,omitempty"`
+	// DisableBFD disables BFD on the links between switches and on the sessions with the gateways
+	DisableBFD bool `json:"disableBFD,omitempty"`
 	// Domains is the set of spine layers in this Fabric, at least one is required
 	Domains map[string]FabricDomainSpec `json:"domains,omitempty"`
 }
@@ -130,6 +134,44 @@ func (fabric *Fabric) domainASNs() (map[uint32]string, error) {
 	return asns, nil
 }
 
+// DefaultFabricSpec is the spec Fabric/default is seeded with from the controller config
+func DefaultFabricSpec(cfg *meta.FabricConfig) FabricSpec {
+	return FabricSpec{
+		LeafASNStart: cfg.LeafASNStart,
+		LeafASNEnd:   cfg.LeafASNEnd,
+		DisableBFD:   cfg.DisableBFD,
+		Domains: map[string]FabricDomainSpec{
+			DefaultFabricDomain: {SpineASN: cfg.SpineASN, GatewayASN: cfg.GatewayASN},
+		},
+	}
+}
+
+// GetFabricSpec returns the spec of the named fabric. Fabric/default falls back to the controller
+// config while it does not exist: hhfab validates wiring with no controller running, and
+// admission can run before the initializer has created it.
+func GetFabricSpec(ctx context.Context, kube kclient.Reader, cfg *meta.FabricConfig, namespace, fabricName string) (*FabricSpec, error) {
+	name := FabricNameOrDefault(fabricName)
+
+	if kube != nil {
+		fabric := &Fabric{}
+		err := kube.Get(ctx, ktypes.NamespacedName{Name: name, Namespace: namespace}, fabric)
+		if err == nil {
+			return &fabric.Spec, nil
+		}
+		if !kapierrors.IsNotFound(err) {
+			return nil, fmt.Errorf("failed to get fabric %s: %w", name, err) // TODO replace with some internal error to not expose to the user
+		}
+	}
+
+	if name != DefaultFabric || cfg == nil {
+		return nil, fmt.Errorf("fabric %s not found", name) //nolint:err113
+	}
+
+	spec := DefaultFabricSpec(cfg)
+
+	return &spec, nil
+}
+
 func (fabric *Fabric) Default() {
 	meta.DefaultObjectMetadata(fabric)
 }
@@ -155,8 +197,11 @@ func (fabric *Fabric) Validate(ctx context.Context, kube kclient.Reader, _ *meta
 	if len(fabric.Spec.Domains) == 0 {
 		return nil, fmt.Errorf("at least one domain is required") //nolint:err113
 	}
-	if len(fabric.Spec.Domains) > 1 {
-		return nil, fmt.Errorf("a fabric with more than one domain is not supported yet") //nolint:err113
+	for name := range fabric.Spec.Domains {
+		// the name becomes a label key segment
+		if errs := validation.IsDNS1123Label(name); len(errs) > 0 {
+			return nil, fmt.Errorf("invalid domain name %s: %s", name, strings.Join(errs, ", ")) //nolint:err113
+		}
 	}
 
 	asns, err := fabric.domainASNs()
@@ -170,7 +215,7 @@ func (fabric *Fabric) Validate(ctx context.Context, kube kclient.Reader, _ *meta
 	}
 
 	if kube != nil {
-		// fabrics peer with each other as externals, and a route carrying an ASN of the receiving
+		// fabrics can peer with each other as externals, and a route carrying an ASN of the receiving
 		// fabric is silently dropped by the border leaf filter or by BGP loop detection
 		fabrics := &FabricList{}
 		if err := kube.List(ctx, fabrics, kclient.InNamespace(fabric.Namespace)); err != nil {

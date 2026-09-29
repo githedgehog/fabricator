@@ -18,6 +18,7 @@ import (
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	ktypes "k8s.io/apimachinery/pkg/types"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -29,6 +30,9 @@ var ErrInvalidGW = errors.New("invalid gateway")
 type GatewayTopology struct {
 	// Fabric is the name of the Fabric this Gateway belongs to (if not specified, "default" is used)
 	Fabric string `json:"fabric,omitempty"`
+	// Domain is the Fabric domain (spine layer) this Gateway is cabled into (if not specified, "default" is used).
+	// It is immutable
+	Domain string `json:"domain,omitempty"`
 }
 
 // GatewaySpec defines the desired state of Gateway.
@@ -142,6 +146,8 @@ type GatewayStatus struct{}
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:categories=hedgehog;hedgehog-gateway,shortName=gw
+// +kubebuilder:printcolumn:name="Fabric",type=string,JSONPath=`.spec.topology.fabric`,priority=0
+// +kubebuilder:printcolumn:name="Domain",type=string,JSONPath=`.spec.topology.domain`,priority=0
 // +kubebuilder:printcolumn:name="VTEPIP",type=string,JSONPath=`.spec.vtepIP`,priority=0
 // +kubebuilder:printcolumn:name="Groups",type=string,JSONPath=`.spec.groups`,priority=0
 // +kubebuilder:printcolumn:name="Workers",type=integer,JSONPath=`.spec.workers`,priority=1
@@ -201,6 +207,9 @@ func (gw *Gateway) Default() {
 	if gw.Spec.Topology.Fabric == "" {
 		gw.Spec.Topology.Fabric = wiringapi.DefaultFabric
 	}
+	if gw.Spec.Topology.Domain == "" {
+		gw.Spec.Topology.Domain = wiringapi.DefaultFabricDomain
+	}
 
 	if gw.Labels == nil {
 		gw.Labels = map[string]string{}
@@ -209,6 +218,7 @@ func (gw *Gateway) Default() {
 	wiringapi.CleanupFabricLabels(gw.Labels)
 
 	gw.Labels[wiringapi.ListLabelFabric(gw.Spec.Topology.Fabric)] = ListLabelValue
+	gw.Labels[wiringapi.ListLabelDomain(gw.Spec.Topology.Domain)] = ListLabelValue
 
 	slices.SortFunc(gw.Spec.Groups, func(a, b GatewayGroupMembership) int {
 		return strings.Compare(a.Name, b.Name)
@@ -296,6 +306,48 @@ func (gw *Gateway) Validate(ctx context.Context, kube kclient.Reader, fabricCfg 
 
 	if gw.Spec.ASN == 0 {
 		return fmt.Errorf("ASN must be set: %w", ErrInvalidGW)
+	}
+	if fabricCfg != nil {
+		// leaves peer with every gateway of their domain using the domain gateway ASN
+		fabric, err := wiringapi.GetFabricSpec(ctx, kube, fabricCfg, gw.Namespace, gw.Spec.Topology.Fabric)
+		if err != nil {
+			return fmt.Errorf("getting fabric: %w", err)
+		}
+		domainName := wiringapi.DomainNameOrDefault(gw.Spec.Topology.Domain)
+		domain, exists := fabric.Domains[domainName]
+		if !exists {
+			return fmt.Errorf("domain %s not found in fabric %s: %w", domainName, wiringapi.FabricNameOrDefault(gw.Spec.Topology.Fabric), ErrInvalidGW)
+		}
+		if gw.Spec.ASN != domain.GatewayASN {
+			return fmt.Errorf("ASN %d is not the gateway ASN %d of domain %s: %w", gw.Spec.ASN, domain.GatewayASN, domainName, ErrInvalidGW)
+		}
+	}
+
+	// connections can be admitted before their gateway, and checking them here is also what
+	// keeps the domain from changing while the gateway is cabled
+	if kube != nil {
+		conns := &wiringapi.ConnectionList{}
+		if err := kube.List(ctx, conns, kclient.InNamespace(gw.Namespace)); err != nil {
+			return fmt.Errorf("listing connections: %w", err)
+		}
+		domainName := wiringapi.DomainNameOrDefault(gw.Spec.Topology.Domain)
+		for _, conn := range conns.Items {
+			if conn.Spec.Gateway == nil {
+				continue
+			}
+			for _, link := range conn.Spec.Gateway.Links {
+				if link.Gateway.DeviceName() != gw.Name {
+					continue
+				}
+				sw := &wiringapi.Switch{}
+				if err := kube.Get(ctx, ktypes.NamespacedName{Name: link.Switch.DeviceName(), Namespace: gw.Namespace}, sw); err != nil {
+					return fmt.Errorf("getting switch %s of connection %s: %w", link.Switch.DeviceName(), conn.Name, err)
+				}
+				if swDomains := wiringapi.DomainsOrDefault(sw.Spec.Topology.Domains); !slices.Equal(swDomains, []string{domainName}) {
+					return fmt.Errorf("gateway is in domain %s but connection %s cables it to switch %s in domains %v: %w", domainName, conn.Name, sw.Name, swDomains, ErrInvalidGW)
+				}
+			}
+		}
 	}
 
 	if len(gw.Spec.Interfaces) == 0 {
