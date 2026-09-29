@@ -257,6 +257,18 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 		raisedLeafY[layers.Leaf[1].ID] = float64(meshTriangleUpperY)
 	}
 
+	// fabricHasGateway/fabricHasMeshTriangle drive both the raised-leaf Y below and the
+	// gateway Y further down: a fabric with its own gateway AND its own mesh triangle needs
+	// its raised leaf positioned relative to that gateway (not the shared leafY), and its
+	// gateway needs to stay at the very top of the diagram rather than borrowing the spine
+	// row's Y -- the raised leaf takes that slot instead. Without this, the two could crowd
+	// into the same ~10px of clearance instead of the standard tier gap.
+	fabricHasGateway := map[string]bool{}
+	for _, gw := range layers.Gateway {
+		fabricHasGateway[gw.Properties[PropFabric]] = true
+	}
+	fabricHasMeshTriangle := map[string]bool{}
+
 	// --- Fabric-aware leaf layout ---
 	// When more than one fabric shares the canvas: reorder each fabric's leaves so a leaf
 	// carrying an inter-fabric link (see EdgeTypeInterFabric) sits at the boundary nearest the
@@ -347,7 +359,15 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 			if !detectMeshTriangle(g.nodes, topo.Links) {
 				continue
 			}
-			raisedLeafY[g.nodes[1].ID] = float64(leafY) - 150
+			fabricHasMeshTriangle[g.fabric] = true
+			if fabricHasGateway[g.fabric] {
+				// Mirrors the single-fabric isMeshTriangle&&hasGateway case: the raised leaf
+				// sits where the spine row normally would, gatewayY+250 below the gateway
+				// (which stays at the true top -- see the gateway Y section below).
+				raisedLeafY[g.nodes[1].ID] = float64(gatewayY) + 250
+			} else {
+				raisedLeafY[g.nodes[1].ID] = float64(leafY) - 150
+			}
 		}
 	}
 
@@ -464,15 +484,19 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 	// A fabric with no spine of its own has nothing occupying the spine row, so its own
 	// gateways sit one tier too high (a ~500px gap to their own leaves) if left at the
 	// standard gatewayY -- move them down to spineY instead, closing that gap the same way
-	// leafY already collapses up to spineY when there's no spine anywhere in the diagram.
+	// leafY already collapses up to spineY when there's no spine anywhere in the diagram. But
+	// if that same fabric also has its own mesh triangle, the raised leaf needs that spine
+	// slot instead (see raisedLeafY above) -- leave the gateway at the true top in that case,
+	// with the standard tier gap down to the raised leaf.
 	fabricHasSpine := map[string]bool{}
 	for _, sp := range layers.Spine {
 		fabricHasSpine[sp.Properties[PropFabric]] = true
 	}
 	gatewayPositionsY := make([]float64, len(layers.Gateway))
 	for i, node := range layers.Gateway {
+		f := node.Properties[PropFabric]
 		gatewayPositionsY[i] = float64(gatewayY)
-		if multiFabric && !fabricHasSpine[node.Properties[PropFabric]] {
+		if multiFabric && !fabricHasSpine[f] && !fabricHasMeshTriangle[f] {
 			gatewayPositionsY[i] = float64(spineY)
 		}
 	}
