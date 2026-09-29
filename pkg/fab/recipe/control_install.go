@@ -417,15 +417,15 @@ func (c *ControlInstall) installInclude(ctx context.Context, kube kclient.Client
 		&wiringapi.SwitchList{},
 		&wiringapi.ServerList{},
 		&vpcapi.VPCList{},
-		&wiringapi.ConnectionList{}, // can be within VPC
+		&gwapi.GatewayGroupList{},
+		&gwapi.GatewayList{},
+		&wiringapi.ConnectionList{}, // can be within VPC or to a gateway
 		&vpcapi.VPCAttachmentList{},
 		&vpcapi.VPCPeeringList{},
 		&vpcapi.ExternalList{},
 		&vpcapi.ExternalAttachmentList{},
 		&vpcapi.ExternalPeeringList{},
 		// switch/server profiles are intentionally skipped
-		&gwapi.GatewayGroupList{},
-		&gwapi.GatewayList{},
 		&gwapi.VPCInfoList{},
 		&gwapi.GatewayPeeringList{},
 	} {
