@@ -97,6 +97,7 @@ func DoVLABBenchInit(ctx context.Context, workDir, cacheDir string, opts BenchIn
 type BenchAgentsOpts struct {
 	Duration       time.Duration
 	Interval       time.Duration
+	ApplyDelay     time.Duration
 	Agents         []string
 	APIVia         string
 	SyncHeartbeats bool
@@ -132,6 +133,7 @@ func DoVLABBenchAgents(ctx context.Context, workDir, cacheDir string, opts Bench
 	if err := bench.RunAgents(ctx, admin, bench.AgentsOpts{
 		Duration:       opts.Duration,
 		Interval:       opts.Interval,
+		ApplyDelay:     opts.ApplyDelay,
 		Agents:         opts.Agents,
 		APIVia:         opts.APIVia,
 		APIServer:      apiServer,

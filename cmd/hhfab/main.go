@@ -108,6 +108,7 @@ const (
 	FlagBenchDuration             = "duration"
 	FlagBenchInterval             = "interval"
 	FlagBenchAPIVia               = "api-via"
+	FlagBenchApplyDelay           = "apply-delay"
 	FlagBenchSyncHeartbeats       = "sync-heartbeats"
 )
 
@@ -2009,6 +2010,11 @@ inspect and wait-switches rather than as a fabric that never converged.`,
 										Usage: "heartbeat interval, matching the real agent by default",
 										Value: bench.HeartbeatPeriod,
 									},
+									&cli.DurationFlag{
+										Name:  FlagBenchApplyDelay,
+										Usage: "how long a simulated apply takes between its two status writes, 0 to measure the control plane alone",
+										Value: bench.DefaultApplyDelay,
+									},
 									&cli.StringSliceFlag{
 										Name:  FlagBenchOnly,
 										Usage: "only simulate agents whose name starts with `PREFIX` (default: all)",
@@ -2038,6 +2044,7 @@ inspect and wait-switches rather than as a fabric that never converged.`,
 									if err := hhfab.DoVLABBenchAgents(ctx, workDir, cacheDir, hhfab.BenchAgentsOpts{
 										Duration:       c.Duration(FlagBenchDuration),
 										Interval:       c.Duration(FlagBenchInterval),
+										ApplyDelay:     c.Duration(FlagBenchApplyDelay),
 										Agents:         c.StringSlice(FlagBenchOnly),
 										APIVia:         c.String(FlagBenchAPIVia),
 										SyncHeartbeats: c.Bool(FlagBenchSyncHeartbeats),
