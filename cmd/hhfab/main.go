@@ -104,6 +104,7 @@ const (
 	FlagBenchDryRun               = "dry-run"
 	FlagBenchOut                  = "out"
 	FlagBenchOnly                 = "only"
+	FlagBenchSkipValidate         = "skip-validate"
 )
 
 // benchFabrics collects repeated --fabric values verbatim. A StringSliceFlag
@@ -1957,6 +1958,10 @@ vpcs=1, attach=1, peerings=0, profile=celestica-ds5000`,
 										Usage: "write the generated objects to `FILE` instead of stdout (with --dry-run)",
 									},
 									&cli.BoolFlag{
+										Name:  FlagBenchSkipValidate,
+										Usage: "skip local validation and rely on the admission webhooks, which is faster on a large run",
+									},
+									&cli.BoolFlag{
 										Name:  FlagNameForce,
 										Usage: "proceed even if the cluster has switches the bench did not create",
 									},
@@ -1964,14 +1969,15 @@ vpcs=1, attach=1, peerings=0, profile=celestica-ds5000`,
 								Before: before(false),
 								Action: func(c *cli.Context) error {
 									if err := hhfab.DoVLABBenchInit(ctx, workDir, cacheDir, hhfab.BenchInitOpts{
-										Fabrics: benchFabricList.values,
-										Workers: c.Int(FlagBenchWorkers),
-										QPS:     float32(c.Float64(FlagBenchQPS)),
-										Burst:   c.Int(FlagBenchBurst),
-										Phase:   c.String(FlagBenchPhase),
-										Force:   c.Bool(FlagNameForce),
-										DryRun:  c.Bool(FlagBenchDryRun),
-										Out:     c.String(FlagBenchOut),
+										Fabrics:      benchFabricList.values,
+										Workers:      c.Int(FlagBenchWorkers),
+										QPS:          float32(c.Float64(FlagBenchQPS)),
+										Burst:        c.Int(FlagBenchBurst),
+										Phase:        c.String(FlagBenchPhase),
+										Force:        c.Bool(FlagNameForce),
+										DryRun:       c.Bool(FlagBenchDryRun),
+										Out:          c.String(FlagBenchOut),
+										SkipValidate: c.Bool(FlagBenchSkipValidate),
 									}); err != nil {
 										return fmt.Errorf("bench init: %w", err)
 									}

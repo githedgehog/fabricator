@@ -35,6 +35,10 @@ type BenchInitOpts struct {
 	Force   bool
 	DryRun  bool
 	Out     string
+	// SkipValidate bypasses the local check, leaving it to the admission
+	// webhooks. Worth it on a large run, where validating locally costs more
+	// than the apply.
+	SkipValidate bool
 }
 
 // DoVLABBenchInit generates the benchmark topology and applies it to the VLAB
@@ -50,7 +54,7 @@ func DoVLABBenchInit(ctx context.Context, workDir, cacheDir string, opts BenchIn
 		return err
 	}
 
-	gen, l, err := benchGenerate(ctx, c, specs)
+	gen, l, err := benchGenerate(ctx, c, specs, opts.SkipValidate)
 	if err != nil {
 		return err
 	}
@@ -185,7 +189,7 @@ func DoVLABBenchClean(ctx context.Context, workDir, cacheDir string, opts BenchC
 // benchGenerate builds the topology into an in-memory loader and validates it
 // with exactly the Default() plus Validate() the admission webhooks run, so a
 // bad shape fails before anything reaches the cluster.
-func benchGenerate(ctx context.Context, c *Config, specs []bench.FabricSpec) (*bench.Generator, *apiutil.Loader, error) {
+func benchGenerate(ctx context.Context, c *Config, specs []bench.FabricSpec, skipValidate bool) (*bench.Generator, *apiutil.Loader, error) {
 	gateways := uint(0)
 	for _, node := range c.Nodes {
 		if slices.Contains(node.Spec.Roles, fabapi.NodeRoleGateway) {
@@ -227,9 +231,25 @@ func benchGenerate(ctx context.Context, c *Config, specs []bench.FabricSpec) (*b
 		return nil, nil, fmt.Errorf("generating: %w", err)
 	}
 
+	if skipValidate {
+		slog.Warn("Skipping local validation, relying on the admission webhooks")
+
+		return gen, l, nil
+	}
+
+	// Validation is quadratic for the same reason the apply is - Connection
+	// validation lists every other connection - but against the in-memory
+	// client it is slower than the cluster: a full 96 switch fabric takes ~50s
+	// locally against ~20s to apply. Worth it to fail before touching the
+	// cluster at normal sizes, worth skipping on a big run, which is what
+	// --skip-validate is for. The admission webhooks validate either way.
+	start := time.Now()
+
 	if err := apiutil.ValidateFabricGateway(ctx, l, fabricCfg); err != nil {
 		return nil, nil, fmt.Errorf("validating generated topology: %w", err)
 	}
+
+	slog.Info("Validated generated topology", "took", time.Since(start).Truncate(time.Millisecond))
 
 	return gen, l, nil
 }
