@@ -13,6 +13,7 @@ import (
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	coreapi "k8s.io/api/core/v1"
+	rbacapi "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -31,6 +32,7 @@ var schemeBuilders = []func(*runtime.Scheme) error{
 	agentapi.AddToScheme,
 	fabapi.AddToScheme,
 	coreapi.AddToScheme,
+	rbacapi.AddToScheme,
 }
 
 // NewKubeClient builds an uncached client against the given kubeconfig with
