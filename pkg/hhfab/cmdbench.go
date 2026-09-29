@@ -101,6 +101,7 @@ type BenchAgentsOpts struct {
 	Agents         []string
 	APIVia         string
 	SyncHeartbeats bool
+	StatusSize     string
 	QPS            float32
 	Burst          int
 }
@@ -108,6 +109,11 @@ type BenchAgentsOpts struct {
 // DoVLABBenchAgents simulates switch agents against the Agent objects in the
 // cluster.
 func DoVLABBenchAgents(ctx context.Context, workDir, cacheDir string, opts BenchAgentsOpts) error {
+	statusSize, err := bench.ParseSize(opts.StatusSize)
+	if err != nil {
+		return err //nolint:wrapcheck
+	}
+
 	kubeconfig := filepath.Join(workDir, VLABDir, VLABKubeConfig)
 
 	// Discovery needs admin credentials: the per-switch Role grants get and
@@ -138,6 +144,7 @@ func DoVLABBenchAgents(ctx context.Context, workDir, cacheDir string, opts Bench
 		APIVia:         opts.APIVia,
 		APIServer:      apiServer,
 		SyncHeartbeats: opts.SyncHeartbeats,
+		StatusSize:     statusSize,
 	}); err != nil {
 		return fmt.Errorf("running agents: %w", err)
 	}

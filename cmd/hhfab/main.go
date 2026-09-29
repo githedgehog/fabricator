@@ -110,6 +110,7 @@ const (
 	FlagBenchAPIVia               = "api-via"
 	FlagBenchApplyDelay           = "apply-delay"
 	FlagBenchSyncHeartbeats       = "sync-heartbeats"
+	FlagBenchStatusSize           = "status-size"
 )
 
 // benchFabrics collects repeated --fabric values verbatim. A StringSliceFlag
@@ -2028,6 +2029,10 @@ inspect and wait-switches rather than as a fabric that never converged.`,
 										Name:  FlagBenchSyncHeartbeats,
 										Usage: "drop the per-agent phase offset so every agent writes at once",
 									},
+									&cli.StringFlag{
+										Name:  FlagBenchStatusSize,
+										Usage: "pad each Agent status to at least this `SIZE` (e.g. 100KB) to sweep object size; empty leaves it at its natural size",
+									},
 									&cli.Float64Flag{
 										Name:  FlagBenchQPS,
 										Usage: "QPS for the discovery client",
@@ -2048,6 +2053,7 @@ inspect and wait-switches rather than as a fabric that never converged.`,
 										Agents:         c.StringSlice(FlagBenchOnly),
 										APIVia:         c.String(FlagBenchAPIVia),
 										SyncHeartbeats: c.Bool(FlagBenchSyncHeartbeats),
+										StatusSize:     c.String(FlagBenchStatusSize),
 										QPS:            float32(c.Float64(FlagBenchQPS)),
 										Burst:          c.Int(FlagBenchBurst),
 									}); err != nil {
