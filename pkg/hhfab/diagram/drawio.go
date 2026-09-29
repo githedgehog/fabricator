@@ -154,6 +154,21 @@ func GenerateDrawio(workDir string, topo Topology, styleType StyleType, outputPa
 	return nil
 }
 
+// distinctFabrics returns the set of distinct topology.fabric values present among the given
+// switch node slices.
+func distinctFabrics(nodeSlices ...[]Node) map[string]bool {
+	result := map[string]bool{}
+	for _, nodes := range nodeSlices {
+		for _, n := range nodes {
+			if f := n.Properties[PropFabric]; f != "" {
+				result[f] = true
+			}
+		}
+	}
+
+	return result
+}
+
 func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 	nodes = topo.Nodes
 
@@ -231,6 +246,110 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 
 	totalLeafWidth := float64(len(layers.Leaf)*leafNodeWidth) + leafSpacing*float64(len(layers.Leaf)-1)
 	leafCenterX := float64(canvasWidth) / 2
+	leafStartX := leafCenterX - (totalLeafWidth / 2)
+
+	// raisedLeafY maps a leaf ID to the Y it should be drawn at when it sits at the "top" of a
+	// mesh triangle, so mesh links between that fabric's leaves don't cross through the third
+	// leaf. Populated either for the one whole-diagram triangle (single-fabric topologies,
+	// below) or per fabric group (multi-fabric, below that).
+	raisedLeafY := map[string]float64{}
+	if isMeshTriangle {
+		raisedLeafY[layers.Leaf[1].ID] = float64(meshTriangleUpperY)
+	}
+
+	// --- Fabric-aware leaf layout ---
+	// When more than one fabric shares the canvas: reorder each fabric's leaves so a leaf
+	// carrying an inter-fabric link (see EdgeTypeInterFabric) sits at the boundary nearest the
+	// fabric it links to, instead of crossing over that fabric's other leaves to reach it; and
+	// detect a mesh triangle independently per fabric group, so a fabric whose own leaves form
+	// a 3-node full mesh still gets the raised-middle-leaf triangle shape even while sharing
+	// the canvas with other fabrics' leaves.
+	multiFabric := len(distinctFabrics(layers.Spine, layers.Leaf)) > 1
+
+	type fabricNodeGroup struct {
+		fabric string
+		nodes  []Node
+	}
+	var leafGroups []fabricNodeGroup
+	for _, n := range layers.Leaf {
+		f := n.Properties[PropFabric]
+		if len(leafGroups) > 0 && leafGroups[len(leafGroups)-1].fabric == f {
+			leafGroups[len(leafGroups)-1].nodes = append(leafGroups[len(leafGroups)-1].nodes, n)
+		} else {
+			leafGroups = append(leafGroups, fabricNodeGroup{fabric: f, nodes: []Node{n}})
+		}
+	}
+
+	if multiFabric {
+		leafGroupIndex := map[string]int{}
+		for gi, g := range leafGroups {
+			for _, leaf := range g.nodes {
+				leafGroupIndex[leaf.ID] = gi
+			}
+		}
+
+		moveToEnd := func(gi int, leafID string) {
+			leaves := leafGroups[gi].nodes
+			for i, l := range leaves {
+				if l.ID == leafID {
+					reordered := make([]Node, 0, len(leaves))
+					reordered = append(reordered, leaves[:i]...)
+					reordered = append(reordered, leaves[i+1:]...)
+					reordered = append(reordered, l)
+					leafGroups[gi].nodes = reordered
+
+					return
+				}
+			}
+		}
+		moveToStart := func(gi int, leafID string) {
+			leaves := leafGroups[gi].nodes
+			for i, l := range leaves {
+				if l.ID == leafID {
+					reordered := make([]Node, 0, len(leaves))
+					reordered = append(reordered, l)
+					reordered = append(reordered, leaves[:i]...)
+					reordered = append(reordered, leaves[i+1:]...)
+					leafGroups[gi].nodes = reordered
+
+					return
+				}
+			}
+		}
+
+		for _, link := range topo.Links {
+			if link.Type != EdgeTypeInterFabric {
+				continue
+			}
+
+			leftLeaf, rightLeaf := link.Source, link.Target
+			leftGi, okL := leafGroupIndex[leftLeaf]
+			rightGi, okR := leafGroupIndex[rightLeaf]
+			if !okL || !okR || leftGi == rightGi {
+				continue
+			}
+			if leftGi > rightGi {
+				leftLeaf, rightLeaf = rightLeaf, leftLeaf
+				leftGi, rightGi = rightGi, leftGi
+			}
+
+			moveToEnd(leftGi, leftLeaf)
+			moveToStart(rightGi, rightLeaf)
+		}
+
+		reordered := make([]Node, 0, len(layers.Leaf))
+		for _, g := range leafGroups {
+			reordered = append(reordered, g.nodes...)
+		}
+		layers.Leaf = reordered
+
+		for _, g := range leafGroups {
+			if !detectMeshTriangle(g.nodes, topo.Links) {
+				continue
+			}
+			raisedLeafY[g.nodes[1].ID] = float64(leafY) - 150
+		}
+	}
 
 	spineNodeWidth := 100
 	var spineSpacing float64
@@ -250,9 +369,67 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 	spineStartX := leafCenterX - (totalSpineWidth / 2)
 
 	spinePositions := make([]float64, len(layers.Spine))
-	for i, node := range layers.Spine {
-		width, _ := GetNodeDimensions(node)
-		spinePositions[i] = spineStartX + float64(i)*(float64(width)+spineSpacing)
+	if multiFabric {
+		// Center each fabric's own spines over that same fabric's own leaf sub-range,
+		// instead of centering the whole spine row on the canvas -- otherwise a fabric with
+		// a different spine:leaf ratio than its neighbor ends up with its spine positioned
+		// over another fabric's leaves, and the two fabrics' group boxes overlap.
+		fabricLeafRange := map[string][2]float64{}
+		x := leafStartX
+		for _, node := range layers.Leaf {
+			w, _ := GetNodeDimensions(node)
+			f := node.Properties[PropFabric]
+			r, ok := fabricLeafRange[f]
+			if !ok {
+				r = [2]float64{x, x + float64(w)}
+			} else {
+				if x < r[0] {
+					r[0] = x
+				}
+				if end := x + float64(w); end > r[1] {
+					r[1] = end
+				}
+			}
+			fabricLeafRange[f] = r
+			x += float64(w) + leafSpacing
+		}
+
+		var spineGroups []fabricNodeGroup
+		for _, sp := range layers.Spine {
+			f := sp.Properties[PropFabric]
+			if len(spineGroups) > 0 && spineGroups[len(spineGroups)-1].fabric == f {
+				spineGroups[len(spineGroups)-1].nodes = append(spineGroups[len(spineGroups)-1].nodes, sp)
+			} else {
+				spineGroups = append(spineGroups, fabricNodeGroup{fabric: f, nodes: []Node{sp}})
+			}
+		}
+
+		idx := 0
+		for _, group := range spineGroups {
+			n := len(group.nodes)
+			groupCenterX, groupWidth := leafCenterX, totalLeafWidth
+			if r, ok := fabricLeafRange[group.fabric]; ok {
+				groupCenterX = (r[0] + r[1]) / 2
+				groupWidth = r[1] - r[0]
+			}
+
+			var groupSpacing float64
+			if n > 1 {
+				groupSpacing = math.Max(60, (groupWidth-float64(n*spineNodeWidth))/float64(n-1))
+			}
+			groupStartX := groupCenterX - (float64(n*spineNodeWidth)+groupSpacing*float64(n-1))/2
+
+			for j, node := range group.nodes {
+				width, _ := GetNodeDimensions(node)
+				spinePositions[idx] = groupStartX + float64(j)*(float64(width)+groupSpacing)
+				idx++
+			}
+		}
+	} else {
+		for i, node := range layers.Spine {
+			width, _ := GetNodeDimensions(node)
+			spinePositions[i] = spineStartX + float64(i)*(float64(width)+spineSpacing)
+		}
 	}
 
 	gatewayNodeWidth := 100
@@ -333,16 +510,14 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 		model.Root.MxCell = append(model.Root.MxCell, cell)
 	}
 
-	leafStartX := leafCenterX - (totalLeafWidth / 2)
-
 	for i, node := range layers.Leaf {
 		width, height := GetNodeDimensions(node)
 		x := leafStartX + float64(i)*(float64(width)+leafSpacing)
 
-		// For mesh triangle, put the second leaf (index 1) in upper tier
+		// Raise a mesh triangle's middle leaf into the upper tier (see raisedLeafY above).
 		nodeY := float64(leafY)
-		if isMeshTriangle && i == 1 {
-			nodeY = float64(meshTriangleUpperY)
+		if y, ok := raisedLeafY[node.ID]; ok {
+			nodeY = y
 		}
 
 		cell := MxCell{
@@ -417,21 +592,24 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 				y = startY + float64(i)*nodeSpacing
 			}
 
-			// For mesh triangle, adjust Y position based on connections
-			if isMeshTriangle {
-				// Check if this external connects to the upper leaf (index 1)
-				connectsToUpperLeaf := false
-				for _, link := range topo.Links {
-					upperLeafID := layers.Leaf[1].ID
-					if (link.Source == node.ID && link.Target == upperLeafID) ||
-						(link.Target == node.ID && link.Source == upperLeafID) {
-						connectsToUpperLeaf = true
-
-						break
-					}
+			// Shift this external by the same amount its raised (mesh-triangle) leaf was
+			// raised, preserving the spacing above computed against externalCenterY --
+			// overwriting y outright would collapse multiple externals on the same side
+			// onto one point whenever they share (or all connect to) a raised leaf.
+			for _, link := range topo.Links {
+				var otherEnd string
+				switch node.ID {
+				case link.Source:
+					otherEnd = link.Target
+				case link.Target:
+					otherEnd = link.Source
+				default:
+					continue
 				}
-				if connectsToUpperLeaf {
-					y = float64(meshTriangleUpperY)
+				if raisedY, ok := raisedLeafY[otherEnd]; ok {
+					y += raisedY - externalCenterY
+
+					break
 				}
 			}
 
@@ -476,21 +654,24 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 				y = startY + float64(i)*nodeSpacing
 			}
 
-			// For mesh triangle, adjust Y position based on connections
-			if isMeshTriangle {
-				// Check if this external connects to the upper leaf (index 1)
-				connectsToUpperLeaf := false
-				for _, link := range topo.Links {
-					upperLeafID := layers.Leaf[1].ID
-					if (link.Source == node.ID && link.Target == upperLeafID) ||
-						(link.Target == node.ID && link.Source == upperLeafID) {
-						connectsToUpperLeaf = true
-
-						break
-					}
+			// Shift this external by the same amount its raised (mesh-triangle) leaf was
+			// raised, preserving the spacing above computed against externalCenterY --
+			// overwriting y outright would collapse multiple externals on the same side
+			// onto one point whenever they share (or all connect to) a raised leaf.
+			for _, link := range topo.Links {
+				var otherEnd string
+				switch node.ID {
+				case link.Source:
+					otherEnd = link.Target
+				case link.Target:
+					otherEnd = link.Source
+				default:
+					continue
 				}
-				if connectsToUpperLeaf {
-					y = float64(meshTriangleUpperY)
+				if raisedY, ok := raisedLeafY[otherEnd]; ok {
+					y += raisedY - externalCenterY
+
+					break
 				}
 			}
 
