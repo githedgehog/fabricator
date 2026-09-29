@@ -21,9 +21,16 @@ import (
 // DefaultQPS and DefaultBurst replace client-go's defaults of 5 and 10, which
 // would otherwise throttle the loader well below what the apiserver can take
 // and make the bench measure its own rate limiter.
+//
+// These are request budgets, not object budgets: the loader applies through
+// ctrlutil.CreateOrUpdate, which spends a Get plus a Create or Update on every
+// object, so the achievable object rate is half of DefaultQPS. At 200 QPS the
+// loader sat at exactly 100 objects/s through every cheap phase and measured
+// its own limiter rather than the cluster; 400 puts the cap above what the
+// admission webhooks allow, so the observed rate is the server's.
 const (
-	DefaultQPS   = 200
-	DefaultBurst = 400
+	DefaultQPS   = 400
+	DefaultBurst = 800
 )
 
 // benchScheme is the scheme every bench client uses.
