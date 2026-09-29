@@ -27,6 +27,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/fab/recipe"
 	"go.githedgehog.com/fabricator/pkg/hhfab"
+	"go.githedgehog.com/fabricator/pkg/hhfab/bench"
 	"go.githedgehog.com/fabricator/pkg/hhfab/diagram"
 	"go.githedgehog.com/fabricator/pkg/hhfab/pdu"
 	"go.githedgehog.com/fabricator/pkg/version"
@@ -95,7 +96,39 @@ const (
 	FlagIPerfsSpeed               = "iperfs-speed"
 	FlagReleaseTestOnReadyOnly    = "release-test-on-ready-only"
 	FlagOnReadyOnly               = "on-ready-only"
+	FlagBenchFabric               = "fabric"
+	FlagBenchWorkers              = "workers"
+	FlagBenchQPS                  = "qps"
+	FlagBenchBurst                = "burst"
+	FlagBenchPhase                = "phase"
+	FlagBenchDryRun               = "dry-run"
+	FlagBenchOut                  = "out"
 )
+
+// benchFabrics collects repeated --fabric values verbatim. A StringSliceFlag
+// cannot be used: it splits every value on commas, which is exactly the
+// separator the key=value syntax uses, and the separator is an app-wide
+// setting that other flags rely on.
+//
+// The flag must not have aliases. After parsing, urfave/cli normalizeFlags
+// copies a flag's value to each of its aliases by calling Set again, which
+// would append a duplicate here. Its own slice flags avoid that through the
+// Serializer interface; a plain Generic has no such escape.
+type benchFabrics struct {
+	values []string
+}
+
+var _ cli.Generic = (*benchFabrics)(nil)
+
+func (b *benchFabrics) Set(value string) error {
+	b.values = append(b.values, value)
+
+	return nil
+}
+
+func (b *benchFabrics) String() string {
+	return strings.Join(b.values, " ")
+}
 
 func main() {
 	if err := Run(context.Background()); err != nil {
@@ -338,6 +371,8 @@ func Run(ctx context.Context) error {
 			Value:       "enp2s",
 		},
 	}
+
+	benchFabricList := &benchFabrics{}
 
 	var accessName string
 	accessNameFlags := []cli.Flag{
@@ -1862,6 +1897,87 @@ Examples:
 							}
 
 							return nil
+						},
+					},
+					{
+						Hidden: !preview,
+						Name:   "bench",
+						Usage:  "[PREVIEW] generate and drive a synthetic fabric to find control plane scalability limits",
+						Description: `Generates large synthetic topologies against a switchless VLAB and simulates
+switch agent activity, to find where the Fabric control plane gets slow or breaks.
+
+The unit of scale is a "fabric": an isolated spine-leaf fabric sharing nothing with
+the others - its own switches, VLANNamespace, IPv4Namespace and VPCs. Repeat --fabric
+for each one; the order determines its address block, so keep it stable between runs.
+
+Intended to run against a control-node-only VLAB:
+  hhfab init --dev && hhfab vlab gen --no-switches && hhfab vlab up`,
+						Subcommands: []*cli.Command{
+							{
+								Name:  "init",
+								Usage: "generate and apply the benchmark topology",
+								UsageText: `hhfab vlab bench init --fabric name=dc1 [--fabric name=dc2,...]
+
+Keys (with defaults): name (required, <=7 chars), spines=32, leaves=64,
+fabric-links=1, fabric-unnum=false, server-ports=32, server-breakout=4x200G,
+vpcs=1, attach=1, peerings=0, profile=celestica-ds5000`,
+								Flags: flatten(defaultFlags, []cli.Flag{
+									&cli.GenericFlag{
+										Name:     FlagBenchFabric,
+										Usage:    "fabric to generate as key=value pairs, repeat for more than one",
+										Required: true,
+										Value:    benchFabricList,
+									},
+									&cli.IntFlag{
+										Name:  FlagBenchWorkers,
+										Usage: "apply concurrency",
+										Value: bench.DefaultWorkers,
+									},
+									&cli.Float64Flag{
+										Name:  FlagBenchQPS,
+										Usage: "client QPS (client-go defaults to 5, which throttles the loader)",
+										Value: bench.DefaultQPS,
+									},
+									&cli.IntFlag{
+										Name:  FlagBenchBurst,
+										Usage: "client burst",
+										Value: bench.DefaultBurst,
+									},
+									&cli.StringFlag{
+										Name:  FlagBenchPhase,
+										Usage: "stop after this apply phase: one of " + strings.Join(bench.Phases, ", "),
+									},
+									&cli.BoolFlag{
+										Name:  FlagBenchDryRun,
+										Usage: "generate and validate only, without touching the cluster",
+									},
+									&cli.StringFlag{
+										Name:  FlagBenchOut,
+										Usage: "write the generated objects to `FILE` instead of stdout (with --dry-run)",
+									},
+									&cli.BoolFlag{
+										Name:  FlagNameForce,
+										Usage: "proceed even if the cluster has switches the bench did not create",
+									},
+								}),
+								Before: before(false),
+								Action: func(c *cli.Context) error {
+									if err := hhfab.DoVLABBenchInit(ctx, workDir, cacheDir, hhfab.BenchInitOpts{
+										Fabrics: benchFabricList.values,
+										Workers: c.Int(FlagBenchWorkers),
+										QPS:     float32(c.Float64(FlagBenchQPS)),
+										Burst:   c.Int(FlagBenchBurst),
+										Phase:   c.String(FlagBenchPhase),
+										Force:   c.Bool(FlagNameForce),
+										DryRun:  c.Bool(FlagBenchDryRun),
+										Out:     c.String(FlagBenchOut),
+									}); err != nil {
+										return fmt.Errorf("bench init: %w", err)
+									}
+
+									return nil
+								},
+							},
 						},
 					},
 					{
