@@ -351,6 +351,69 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 		}
 	}
 
+	// fabricLeafRange maps a fabric to the X-range its leaves occupy, used below to center
+	// that same fabric's own spines and gateways over its own leaves rather than the whole
+	// canvas -- otherwise a fabric with a different spine/gateway:leaf ratio than its neighbor
+	// ends up with its spine or gateway positioned over another fabric's leaves, and the two
+	// fabrics' group boxes overlap.
+	fabricLeafRange := map[string][2]float64{}
+	if multiFabric {
+		x := leafStartX
+		for _, node := range layers.Leaf {
+			w, _ := GetNodeDimensions(node)
+			f := node.Properties[PropFabric]
+			r, ok := fabricLeafRange[f]
+			if !ok {
+				r = [2]float64{x, x + float64(w)}
+			} else {
+				if x < r[0] {
+					r[0] = x
+				}
+				if end := x + float64(w); end > r[1] {
+					r[1] = end
+				}
+			}
+			fabricLeafRange[f] = r
+			x += float64(w) + leafSpacing
+		}
+	}
+
+	// centerGroupsOverFabric lays out nodeWidth-sized nodes into positions[], grouped by
+	// fabric (groups need not be contiguous in `nodes`), each group centered over its own
+	// fabric's leaf X-range from fabricLeafRange (falling back to the whole canvas if that
+	// fabric has no leaves).
+	centerGroupsOverFabric := func(nodesToPlace []Node, nodeWidth int, minSpacing float64, positions []float64) {
+		byFabric := map[string][]int{} // fabric -> indices into nodesToPlace, in order
+		var fabricOrder []string
+		for i, n := range nodesToPlace {
+			f := n.Properties[PropFabric]
+			if _, ok := byFabric[f]; !ok {
+				fabricOrder = append(fabricOrder, f)
+			}
+			byFabric[f] = append(byFabric[f], i)
+		}
+
+		for _, f := range fabricOrder {
+			indices := byFabric[f]
+			n := len(indices)
+			groupCenterX, groupWidth := leafCenterX, totalLeafWidth
+			if r, ok := fabricLeafRange[f]; ok {
+				groupCenterX = (r[0] + r[1]) / 2
+				groupWidth = r[1] - r[0]
+			}
+
+			var groupSpacing float64
+			if n > 1 {
+				groupSpacing = math.Max(minSpacing, (groupWidth-float64(n*nodeWidth))/float64(n-1))
+			}
+			groupStartX := groupCenterX - (float64(n*nodeWidth)+groupSpacing*float64(n-1))/2
+
+			for j, idx := range indices {
+				positions[idx] = groupStartX + float64(j)*(float64(nodeWidth)+groupSpacing)
+			}
+		}
+	}
+
 	spineNodeWidth := 100
 	var spineSpacing float64
 
@@ -370,61 +433,7 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 
 	spinePositions := make([]float64, len(layers.Spine))
 	if multiFabric {
-		// Center each fabric's own spines over that same fabric's own leaf sub-range,
-		// instead of centering the whole spine row on the canvas -- otherwise a fabric with
-		// a different spine:leaf ratio than its neighbor ends up with its spine positioned
-		// over another fabric's leaves, and the two fabrics' group boxes overlap.
-		fabricLeafRange := map[string][2]float64{}
-		x := leafStartX
-		for _, node := range layers.Leaf {
-			w, _ := GetNodeDimensions(node)
-			f := node.Properties[PropFabric]
-			r, ok := fabricLeafRange[f]
-			if !ok {
-				r = [2]float64{x, x + float64(w)}
-			} else {
-				if x < r[0] {
-					r[0] = x
-				}
-				if end := x + float64(w); end > r[1] {
-					r[1] = end
-				}
-			}
-			fabricLeafRange[f] = r
-			x += float64(w) + leafSpacing
-		}
-
-		var spineGroups []fabricNodeGroup
-		for _, sp := range layers.Spine {
-			f := sp.Properties[PropFabric]
-			if len(spineGroups) > 0 && spineGroups[len(spineGroups)-1].fabric == f {
-				spineGroups[len(spineGroups)-1].nodes = append(spineGroups[len(spineGroups)-1].nodes, sp)
-			} else {
-				spineGroups = append(spineGroups, fabricNodeGroup{fabric: f, nodes: []Node{sp}})
-			}
-		}
-
-		idx := 0
-		for _, group := range spineGroups {
-			n := len(group.nodes)
-			groupCenterX, groupWidth := leafCenterX, totalLeafWidth
-			if r, ok := fabricLeafRange[group.fabric]; ok {
-				groupCenterX = (r[0] + r[1]) / 2
-				groupWidth = r[1] - r[0]
-			}
-
-			var groupSpacing float64
-			if n > 1 {
-				groupSpacing = math.Max(60, (groupWidth-float64(n*spineNodeWidth))/float64(n-1))
-			}
-			groupStartX := groupCenterX - (float64(n*spineNodeWidth)+groupSpacing*float64(n-1))/2
-
-			for j, node := range group.nodes {
-				width, _ := GetNodeDimensions(node)
-				spinePositions[idx] = groupStartX + float64(j)*(float64(width)+groupSpacing)
-				idx++
-			}
-		}
+		centerGroupsOverFabric(layers.Spine, spineNodeWidth, 60, spinePositions)
 	} else {
 		for i, node := range layers.Spine {
 			width, _ := GetNodeDimensions(node)
@@ -443,10 +452,19 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 
 	gatewayStartX := float64(canvasWidth)/2 - (totalGatewayWidth / 2)
 
+	gatewayPositions := make([]float64, len(layers.Gateway))
+	if multiFabric {
+		centerGroupsOverFabric(layers.Gateway, gatewayNodeWidth, 60, gatewayPositions)
+	} else {
+		for i := range layers.Gateway {
+			gatewayPositions[i] = gatewayStartX + float64(i)*(float64(gatewayNodeWidth)+gatewaySpacing)
+		}
+	}
+
 	for i, node := range layers.Gateway {
 		width, height := GetNodeDimensions(node)
 
-		x := gatewayStartX + float64(i)*(float64(width)+gatewaySpacing)
+		x := gatewayPositions[i]
 
 		usingIconStyle := IsIconBasedStyle(style)
 
@@ -1599,13 +1617,13 @@ func getConnectionType(source, target string) string {
 	return ConnTypeUnknown
 }
 
-// createFabricGroupLayer draws one dashed box per distinct Switch.spec.topology.fabric
-// value, enclosing that fabric's switches (spine and leaf tiers). It only draws anything
-// once two or more distinct fabrics are present — a single-fabric topology gets no box.
+// createFabricGroupLayer draws one dashed box per distinct topology.fabric value, enclosing
+// that fabric's switches (spine and leaf tiers) and gateways. It only draws anything once two
+// or more distinct fabrics are present — a single-fabric topology gets no box.
 func createFabricGroupLayer(model *MxGraphModel, allNodes []Node, cellMap map[string]*MxCell) {
 	fabricGroups := map[string][]Node{}
 	for _, node := range allNodes {
-		if node.Type != NodeTypeSwitch {
+		if node.Type != NodeTypeSwitch && node.Type != NodeTypeGateway {
 			continue
 		}
 		fabric, ok := node.Properties[PropFabric]

@@ -1131,6 +1131,12 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 		}
 		topo.Nodes[i].Properties[PropProtocolIP] = spec.ProtocolIP
 		topo.Nodes[i].Properties[PropVTEPIP] = spec.VTEPIP
+
+		fabric := spec.Topology.Fabric
+		if fabric == "" {
+			fabric = wiringapi.DefaultFabric
+		}
+		topo.Nodes[i].Properties[PropFabric] = fabric
 	}
 
 	generateUnderlayLayer = hasUnderlayData(topo)
