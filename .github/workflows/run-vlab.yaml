@@ -72,6 +72,11 @@ on:
         type: boolean
         required: false
         default: false
+      releasetest_repeat:
+        description: "Repeat the release test suite this many times against the same deployed VLAB (only used when running the release tests)"
+        type: string
+        required: false
+        default: "1"
       debug:
         description: "Enable tmate debugging"
         type: boolean
@@ -337,6 +342,7 @@ jobs:
           INPUT_VPC_MODE: ${{ inputs.vpcmode }}
           INPUT_BUILD_MODE: ${{ inputs.buildmode }}
           INPUT_RT_REGEX: ${{ inputs.releasetest_regex }}
+          INPUT_RT_REPEAT: ${{ inputs.releasetest_repeat }}
         id: test-current
         run: |
           if [[ "${{ inputs.hybrid }}" == "true" ]]; then
@@ -349,6 +355,14 @@ jobs:
 
           HHFAB_TEST_ARGS=(--ready=release-test)
           if [[ "${{ inputs.releasetest }}" == "true" ]]; then
+            INPUT_RT_REPEAT="${INPUT_RT_REPEAT:-1}"
+            if ! [[ "$INPUT_RT_REPEAT" =~ ^[0-9]+$ ]] || [ "$INPUT_RT_REPEAT" -lt 1 ]; then
+              echo "releasetest_repeat must be a positive integer, got: $INPUT_RT_REPEAT" >&2
+              exit 1
+            fi
+            for ((i = 1; i < 10#$INPUT_RT_REPEAT; i++)); do
+              HHFAB_TEST_ARGS+=(--ready=release-test)
+            done
             if [[ -n "$INPUT_RT_REGEX" ]]; then
               HHFAB_TEST_ARGS+=("--release-test-regexes=$INPUT_RT_REGEX")
               if [[ "${{ inputs.releasetest_regex_invert }}" == "true" ]]; then
