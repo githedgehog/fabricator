@@ -274,20 +274,49 @@ func healthEtcd(ctx context.Context, run Runner, w io.Writer) {
 		}
 	}
 
-	if size, ok := values["etcd_mvcc_db_total_size_in_bytes"]; ok {
-		if quota, ok := values["etcd_server_quota_backend_bytes"]; ok && quota > 0 {
-			fmt.Fprintf(w, "  %-16s %.1f%% of quota\n", "usage", size/quota*100)
+	// Allocated and live are very different numbers once a cluster has been
+	// busy, and only the allocated one can trip NOSPACE: the quota is enforced
+	// against the backend file, not against what is actually stored. Reporting
+	// a single "usage" conflated the two and read as though the store were
+	// filling up when most of the file was reclaimable free pages.
+	size, haveSize := values["etcd_mvcc_db_total_size_in_bytes"]
+	inUse, haveInUse := values["etcd_mvcc_db_total_size_in_use_in_bytes"]
+	quota, haveQuota := values["etcd_server_quota_backend_bytes"]
+
+	if haveQuota && quota > 0 {
+		if haveSize {
+			fmt.Fprintf(w, "  %-16s %.1f%% of quota (what NOSPACE is checked against)\n",
+				"allocated", size/quota*100)
+		}
+		if haveInUse {
+			fmt.Fprintf(w, "  %-16s %.1f%% of quota\n", "live data", inUse/quota*100)
 		}
 	}
 
+	// The gap is fragmentation, and it only comes back with a defrag.
+	if haveSize && haveInUse && size > 0 {
+		free := size - inUse
+		fmt.Fprintf(w, "  %-16s %s, %.1f%% of the file (reclaimed only by defrag)\n",
+			"free pages", humanBytes(int(free)), free/size*100)
+	}
+
 	// A fired alarm is what turns a full store into a read-only cluster, which
-	// surfaces as write errors rather than anything obviously etcd-shaped.
-	if alarms, err := run(ctx, "k3s etcdctl alarm list 2>/dev/null"); err == nil {
-		if strings.TrimSpace(alarms) == "" {
-			fmt.Fprintf(w, "  %-16s none\n", "alarms")
-		} else {
-			fmt.Fprintf(w, "  %-16s %s\n", "alarms", strings.TrimSpace(alarms))
-		}
+	// surfaces as write errors rather than anything obviously etcd-shaped. etcd
+	// exposes no alarm metric, so this needs etcdctl, and not every k3s build
+	// ships one - report that it could not be read rather than omitting the
+	// line, since a silently absent alarm status is the worst kind of missing.
+	alarms, alarmErr := run(ctx, "/opt/bin/k3s etcdctl alarm list 2>&1 || true")
+	alarmOut := strings.TrimSpace(alarms)
+
+	switch {
+	case alarmErr != nil:
+		fmt.Fprintf(w, "  %-16s unknown (%v)\n", "alarms", alarmErr)
+	case strings.Contains(alarmOut, "No help topic"), strings.Contains(alarmOut, "not found"):
+		fmt.Fprintf(w, "  %-16s unknown (no etcdctl on the control node)\n", "alarms")
+	case alarmOut == "":
+		fmt.Fprintf(w, "  %-16s none\n", "alarms")
+	default:
+		fmt.Fprintf(w, "  %-16s %s\n", "alarms", alarmOut)
 	}
 }
 
