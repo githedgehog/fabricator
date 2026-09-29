@@ -36,6 +36,7 @@ type Style struct {
 	GatewayLinkStyle        string
 	ExternalLinkStyle       string
 	StaticExternalLinkStyle string // New style for static external links
+	InterFabricLinkStyle    string
 	BackgroundColor         string
 }
 
@@ -67,6 +68,7 @@ func getDefaultStyle() Style {
 		GatewayLinkStyle:        "endArrow=none;html=1;strokeWidth=2;strokeColor=#d6b656;",
 		ExternalLinkStyle:       "endArrow=none;html=1;strokeWidth=2;strokeColor=#d79b00;", // Changed from dashed to solid
 		StaticExternalLinkStyle: "endArrow=none;html=1;strokeWidth=2;strokeColor=#d79b00;", // Same as external, solid
+		InterFabricLinkStyle:    "endArrow=none;html=1;strokeWidth=3;strokeColor=#9673a6;",
 		BackgroundColor:         "",
 	}
 }
@@ -103,6 +105,7 @@ func getCiscoStyle() Style {
 		GatewayLinkStyle:        "endArrow=none;html=1;strokeWidth=2;strokeColor=#005073;",
 		ExternalLinkStyle:       "endArrow=none;html=1;strokeWidth=2;strokeColor=#999999;", // Changed from dashed to solid
 		StaticExternalLinkStyle: "endArrow=none;html=1;strokeWidth=2;strokeColor=#999999;", // Same as external, solid
+		InterFabricLinkStyle:    "endArrow=none;html=1;strokeWidth=3;strokeColor=#744DA9;",
 		BackgroundColor:         "#ffffff",
 	}
 }
@@ -139,6 +142,7 @@ func getHedgehogStyle() Style {
 		GatewayLinkStyle:        "endArrow=none;html=1;strokeWidth=2;strokeColor=#D7B98E;",
 		ExternalLinkStyle:       "endArrow=none;html=1;strokeWidth=2;strokeColor=#999999;", // Changed from dashed to solid
 		StaticExternalLinkStyle: "endArrow=none;html=1;strokeWidth=2;strokeColor=#999999;", // Same as external, solid
+		InterFabricLinkStyle:    "endArrow=none;html=1;strokeWidth=3;strokeColor=#9673A6;",
 		BackgroundColor:         "#FFFFFF",
 	}
 }
@@ -189,6 +193,8 @@ func GetLinkStyleFromTheme(link Link, style Style) string {
 		return ExtractStyleParameters(style.ExternalLinkStyle)
 	case EdgeTypeStaticExternal: // New case for static external
 		return ExtractStyleParameters(style.StaticExternalLinkStyle)
+	case EdgeTypeInterFabric:
+		return ExtractStyleParameters(style.InterFabricLinkStyle)
 	default:
 		return baseStyle + "strokeColor=#000000;strokeWidth=2;"
 	}

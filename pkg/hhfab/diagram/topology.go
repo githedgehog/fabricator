@@ -501,12 +501,17 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 		}
 
 		nodeSet[external.Name] = true
+		fabric := external.Spec.Topology.Fabric
+		if fabric == "" {
+			fabric = wiringapi.DefaultFabric
+		}
 		node := Node{
 			ID:    external.Name,
 			Type:  NodeTypeExternal,
 			Label: external.Name,
 			Properties: map[string]string{
-				PropRole: SwitchRoleExternal,
+				PropRole:   SwitchRoleExternal,
+				PropFabric: fabric,
 			},
 		}
 		if asn, ok := externalNodeASN[external.Name]; ok {
@@ -801,6 +806,90 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 		}
 	}
 
+	// Detect inter-fabric links standing in as External connections: two BGP
+	// external attachments, on switches in different fabrics, whose switch/
+	// neighbor IPs reciprocate (each side's switch IP is the other's neighbor
+	// IP) are actually one physical wire between two leaves, not two separate
+	// external networks — there's no native fabric-to-fabric connection type
+	// yet, so this is the workaround fabric#1625 uses. Represent it as a
+	// direct leaf-to-leaf link instead of two disconnected External boxes.
+	switchFabric := map[string]string{}
+	for _, n := range topo.Nodes {
+		if n.Type == NodeTypeSwitch {
+			switchFabric[n.ID] = n.Properties[PropFabric]
+		}
+	}
+
+	type extEndpoint struct {
+		connName     string
+		switchID     string
+		switchPort   string
+		externalName string
+		switchIP     string
+		neighborIP   string
+	}
+	var endpoints []extEndpoint
+	for connName, switchPort := range externalConnections {
+		switchID := wiringapi.SplitPortName(switchPort)[0]
+		extMap, ok := connExtAttachMap[connName]
+		if !ok {
+			continue
+		}
+		for externalName, spec := range extMap {
+			switchIP, _, _ := strings.Cut(spec.Switch.IP, "/")
+			endpoints = append(endpoints, extEndpoint{connName, switchID, switchPort, externalName, switchIP, spec.Neighbor.IP})
+		}
+	}
+
+	totalAttachmentsForExternal := map[string]int{}
+	for _, a := range externalAttachments.Items {
+		totalAttachmentsForExternal[a.Spec.External]++
+	}
+	consumedAttachmentsForExternal := map[string]int{}
+	consumedConnExternal := map[string]map[string]bool{}
+	markConsumed := func(e extEndpoint) {
+		if consumedConnExternal[e.connName] == nil {
+			consumedConnExternal[e.connName] = map[string]bool{}
+		}
+		consumedConnExternal[e.connName][e.externalName] = true
+		consumedAttachmentsForExternal[e.externalName]++
+	}
+
+	for i := range endpoints {
+		for j := i + 1; j < len(endpoints); j++ {
+			a, b := endpoints[i], endpoints[j]
+			if a.switchID == b.switchID {
+				continue
+			}
+			fa, fb := switchFabric[a.switchID], switchFabric[b.switchID]
+			if fa == "" || fa == fb {
+				continue // same fabric (or unknown) -- a genuine external, not a fabric stand-in
+			}
+			if a.switchIP == "" || a.neighborIP == "" || a.switchIP != b.neighborIP || b.switchIP != a.neighborIP {
+				continue
+			}
+
+			topo.Links = append(topo.Links, Link{
+				Source: a.switchID,
+				Target: b.switchID,
+				Type:   EdgeTypeInterFabric,
+				Speed:  getLinkSpeed(a.switchPort, b.switchPort, agents, switchMap, profileMap),
+				Properties: map[string]string{
+					PropSourcePort:       a.switchPort,
+					PropTargetPort:       b.switchPort,
+					PropSourcePortStatus: getPortStatus(a.switchPort, portStatusMap),
+					PropTargetPortStatus: getPortStatus(b.switchPort, portStatusMap),
+					PropSourcePortNOS:    getPortNOSName(a.switchPort, switchMap, profileMap),
+					PropTargetPortNOS:    getPortNOSName(b.switchPort, switchMap, profileMap),
+					PropSrcLinkIP:        a.switchIP,
+					PropDstLinkIP:        b.switchIP,
+				},
+			})
+			markConsumed(a)
+			markConsumed(b)
+		}
+	}
+
 	// Third pass: handle external connections
 	for connName, switchPort := range externalConnections {
 		switchID := wiringapi.SplitPortName(switchPort)[0]
@@ -825,6 +914,10 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 
 		// Create links from switch to each external
 		for _, externalName := range externalNames {
+			if consumedConnExternal[connName][externalName] {
+				continue // represented as an inter-fabric link above instead
+			}
+
 			link := Link{
 				Source: switchID,
 				Target: externalName,
@@ -850,6 +943,22 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 			}
 			topo.Links = append(topo.Links, link)
 		}
+	}
+
+	// Drop External nodes fully absorbed into inter-fabric links above (every
+	// attachment they had was consumed, so they'd otherwise render as an
+	// empty, disconnected box).
+	if len(consumedAttachmentsForExternal) > 0 {
+		remainingNodes := topo.Nodes[:0]
+		for _, n := range topo.Nodes {
+			if n.Type == NodeTypeExternal {
+				if consumed, total := consumedAttachmentsForExternal[n.ID], totalAttachmentsForExternal[n.ID]; total > 0 && consumed == total {
+					continue
+				}
+			}
+			remainingNodes = append(remainingNodes, n)
+		}
+		topo.Nodes = remainingNodes
 	}
 
 	// Fourth pass: handle static external connections

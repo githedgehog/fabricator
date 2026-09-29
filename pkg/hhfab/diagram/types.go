@@ -63,6 +63,7 @@ const (
 	EdgeTypeGateway        = wiringapi.ConnectionTypeGateway
 	EdgeTypeExternal       = wiringapi.ConnectionTypeExternal
 	EdgeTypeStaticExternal = "staticExternal" // New type for static external connections
+	EdgeTypeInterFabric    = "interFabric"    // Leaf-to-leaf link standing in for a fabric-to-fabric connection via External
 	NodeTypeSwitch         = "switch"
 	NodeTypeServer         = "server"
 	NodeTypeGateway        = "gateway"
@@ -142,6 +143,7 @@ const (
 	LegendKeyExternal       = "external"
 	LegendKeyStaticExternal = "static_external" // New legend key
 	LegendKeyVPC            = "vpc"
+	LegendKeyInterFabric    = "inter_fabric"
 )
 
 const (
