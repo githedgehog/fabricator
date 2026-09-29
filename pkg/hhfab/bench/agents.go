@@ -7,12 +7,14 @@ import (
 	"context"
 	crand "crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
 	"net"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -81,6 +83,12 @@ type AgentsOpts struct {
 	// at the same instant, which is the thundering herd worst case rather than
 	// the steady state.
 	SyncHeartbeats bool
+
+	// StatusSize pads each Agent to at least this many bytes, so object size
+	// can be swept without waiting on a realistic State tree, and so a run can
+	// be given headroom above whatever production currently reports. Zero
+	// leaves the status at its natural size.
+	StatusSize int
 }
 
 // RunAgents simulates switch agents against every matching Agent object until
@@ -112,13 +120,24 @@ func RunAgents(ctx context.Context, admin kclient.Client, opts AgentsOpts) error
 	}
 
 	slog.Info("Preparing agents", "count", len(names), "interval", opts.Interval,
-		"applyDelay", opts.ApplyDelay, "via", opts.APIVia)
+		"applyDelay", opts.ApplyDelay, "statusSize", opts.StatusSize, "via", opts.APIVia)
+
+	// One shared filler for the whole fleet: it is junk, so there is no reason
+	// to pay for per-agent randomness. It is random rather than repeated so it
+	// does not compress away and understate what is being stored.
+	filler := ""
+	if opts.StatusSize > 0 {
+		var err error
+		if filler, err = newFiller(opts.StatusSize); err != nil {
+			return err
+		}
+	}
 
 	stats := &agentStats{}
 
 	sims := make([]*agentSim, 0, len(names))
 	for _, name := range names {
-		sim, err := newAgentSim(ctx, admin, name, opts, stats)
+		sim, err := newAgentSim(ctx, admin, name, opts, filler, stats)
 		if err != nil {
 			return fmt.Errorf("preparing agent %s: %w", name, err)
 		}
@@ -197,12 +216,16 @@ type agentSim struct {
 	// loop touches it, so no lock is needed.
 	currentGen int64
 
+	// statusSize, when set, pads every status write up to that many bytes.
+	statusSize int
+	filler     string
+
 	stats *agentStats
 }
 
 // newAgentSim builds a client for one agent from its own ServiceAccount
 // kubeconfig, so every write carries that switch's identity.
-func newAgentSim(ctx context.Context, admin kclient.Client, name string, opts AgentsOpts, stats *agentStats) (*agentSim, error) {
+func newAgentSim(ctx context.Context, admin kclient.Client, name string, opts AgentsOpts, filler string, stats *agentStats) (*agentSim, error) {
 	secret := &coreapi.Secret{}
 	key := kclient.ObjectKey{Name: AgentPrefix + name, Namespace: kmetav1.NamespaceDefault}
 	if err := admin.Get(ctx, key, secret); err != nil {
@@ -243,12 +266,14 @@ func newAgentSim(ctx context.Context, admin kclient.Client, name string, opts Ag
 	}
 
 	return &agentSim{
-		name:      name,
-		kube:      kube,
-		installID: stableID("install", name),
-		runID:     randomID(),
-		bootID:    stableID("boot", name),
-		stats:     stats,
+		name:       name,
+		kube:       kube,
+		installID:  stableID("install", name),
+		runID:      randomID(),
+		bootID:     stableID("boot", name),
+		statusSize: opts.StatusSize,
+		filler:     filler,
+		stats:      stats,
 	}, nil
 }
 
@@ -438,6 +463,10 @@ func (a *agentSim) updateStatus(ctx context.Context, mutate func(*agentapi.Agent
 
 		mutate(agent)
 
+		if err := a.pad(agent); err != nil {
+			return err
+		}
+
 		if err := a.kube.Status().Update(ctx, agent); err != nil {
 			if kapierrors.IsConflict(err) {
 				a.stats.conflicts.Add(1)
@@ -453,6 +482,110 @@ func (a *agentSim) updateStatus(ctx context.Context, mutate func(*agentapi.Agent
 	}
 
 	return nil
+}
+
+// padKeyPrefix marks the entries pad adds, so they can be stripped before
+// measuring rather than compounding on every write.
+const padKeyPrefix = "bench-pad-"
+
+// padConverge bounds the measure-and-grow loop. Each pass closes most of the
+// gap, so this only guards against pathological cases.
+const padConverge = 6
+
+// pad grows the object to at least statusSize bytes.
+//
+// The padding goes into Status.State.Firmware because it is a map[string]string
+// in the CRD's structural schema, so arbitrary keys survive the round trip -
+// anything not in the schema would be pruned by the apiserver. It is also inert
+// for the readers that matter: inspect reads the LLDP and BGP neighbour maps,
+// not firmware.
+func (a *agentSim) pad(agent *agentapi.Agent) error {
+	if a.statusSize <= 0 {
+		return nil
+	}
+
+	if agent.Status.State.Firmware == nil {
+		agent.Status.State.Firmware = map[string]string{}
+	}
+
+	// Drop previous padding so the object is measured at its real size.
+	for key := range agent.Status.State.Firmware {
+		if strings.HasPrefix(key, padKeyPrefix) {
+			delete(agent.Status.State.Firmware, key)
+		}
+	}
+
+	for idx := range padConverge {
+		raw, err := json.Marshal(agent)
+		if err != nil {
+			return fmt.Errorf("measuring agent %s: %w", a.name, err)
+		}
+
+		need := a.statusSize - len(raw)
+		if need <= 0 {
+			return nil
+		}
+
+		if need > len(a.filler) {
+			need = len(a.filler)
+		}
+
+		agent.Status.State.Firmware[fmt.Sprintf("%s%02d", padKeyPrefix, idx)] = a.filler[:need]
+	}
+
+	return nil
+}
+
+// newFiller builds the shared padding: random so it does not compress away,
+// hex-encoded so it is valid UTF-8 for JSON.
+func newFiller(size int) (string, error) {
+	buf := make([]byte, size/2+1)
+	if _, err := crand.Read(buf); err != nil {
+		return "", fmt.Errorf("generating status filler: %w", err)
+	}
+
+	return hex.EncodeToString(buf)[:size], nil
+}
+
+// ParseSize reads a human byte size such as "100KB", "256KiB" or a bare byte
+// count.
+func ParseSize(value string) (int, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0, nil
+	}
+
+	units := []struct {
+		suffix string
+		mult   int
+	}{
+		{"KiB", 1024}, {"MiB", 1024 * 1024},
+		{"KB", 1000}, {"MB", 1000 * 1000},
+		{"K", 1024}, {"M", 1024 * 1024},
+		{"B", 1},
+	}
+
+	upper := strings.ToUpper(value)
+	for _, unit := range units {
+		if !strings.HasSuffix(upper, strings.ToUpper(unit.suffix)) {
+			continue
+		}
+
+		num := strings.TrimSpace(upper[:len(upper)-len(unit.suffix)])
+		parsed, err := strconv.Atoi(num)
+		if err != nil {
+			return 0, fmt.Errorf("invalid size %q", value) //nolint:err113
+		}
+
+		return parsed * unit.mult, nil
+	}
+
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, fmt.Errorf("invalid size %q, expected a byte count or a value like 100KB", value) //nolint:err113
+	}
+
+	return parsed, nil
 }
 
 // setApplied sets the Applied condition the same way the real agent does.
