@@ -154,15 +154,21 @@ func DoVLABBenchAgents(ctx context.Context, workDir, cacheDir string, opts Bench
 
 // BenchHealthOpts configures `hhfab vlab bench health`.
 type BenchHealthOpts struct {
+	Stats bool
 	QPS   float32
 	Burst int
 }
 
 // DoVLABBenchHealth prints the current state of the control plane.
 func DoVLABBenchHealth(ctx context.Context, workDir, cacheDir string, opts BenchHealthOpts) error {
-	kube, err := bench.NewKubeClient(ctx, filepath.Join(workDir, VLABDir, VLABKubeConfig), opts.QPS, opts.Burst)
-	if err != nil {
-		return err //nolint:wrapcheck
+	// Without stats nothing reads the API, so do not even open a client.
+	var kube kclient.Client
+	if opts.Stats {
+		var err error
+		kube, err = bench.NewKubeClient(ctx, filepath.Join(workDir, VLABDir, VLABKubeConfig), opts.QPS, opts.Burst)
+		if err != nil {
+			return err //nolint:wrapcheck
+		}
 	}
 
 	// etcd metrics are bound to localhost on the control node and the node
@@ -173,7 +179,7 @@ func DoVLABBenchHealth(ctx context.Context, workDir, cacheDir string, opts Bench
 		slog.Warn("No control node access, skipping etcd and node sections", "err", err)
 	}
 
-	if err := bench.Health(ctx, kube, run, os.Stdout); err != nil {
+	if err := bench.Health(ctx, kube, run, os.Stdout, bench.HealthOpts{Stats: opts.Stats}); err != nil {
 		return fmt.Errorf("collecting health: %w", err)
 	}
 

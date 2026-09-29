@@ -111,6 +111,7 @@ const (
 	FlagBenchApplyDelay           = "apply-delay"
 	FlagBenchSyncHeartbeats       = "sync-heartbeats"
 	FlagBenchStatusSize           = "status-size"
+	FlagBenchStats                = "stats"
 )
 
 // benchFabrics collects repeated --fabric values verbatim. A StringSliceFlag
@@ -2067,6 +2068,11 @@ inspect and wait-switches rather than as a fabric that never converged.`,
 								Name:  "health",
 								Usage: "show object counts, agent health, etcd and control node state",
 								Flags: flatten(defaultFlags, []cli.Flag{
+									&cli.BoolFlag{
+										Name:  FlagBenchStats,
+										Usage: "read object counts, agent sizes and fabric convergence from the API; listing every Agent pulls its full status, so turn this off to read etcd and the node without loading a run in flight",
+										Value: true,
+									},
 									&cli.Float64Flag{
 										Name:  FlagBenchQPS,
 										Usage: "client QPS",
@@ -2081,6 +2087,7 @@ inspect and wait-switches rather than as a fabric that never converged.`,
 								Before: before(false),
 								Action: func(c *cli.Context) error {
 									if err := hhfab.DoVLABBenchHealth(ctx, workDir, cacheDir, hhfab.BenchHealthOpts{
+										Stats: c.Bool(FlagBenchStats),
 										QPS:   float32(c.Float64(FlagBenchQPS)),
 										Burst: c.Int(FlagBenchBurst),
 									}); err != nil {
