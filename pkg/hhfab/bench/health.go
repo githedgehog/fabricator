@@ -302,21 +302,24 @@ func healthEtcd(ctx context.Context, run Runner, w io.Writer) {
 
 	// A fired alarm is what turns a full store into a read-only cluster, which
 	// surfaces as write errors rather than anything obviously etcd-shaped. etcd
-	// exposes no alarm metric, so this needs etcdctl, and not every k3s build
-	// ships one - report that it could not be read rather than omitting the
-	// line, since a silently absent alarm status is the worst kind of missing.
-	alarms, alarmErr := run(ctx, "/opt/bin/k3s etcdctl alarm list 2>&1 || true")
-	alarmOut := strings.TrimSpace(alarms)
-
-	switch {
-	case alarmErr != nil:
-		fmt.Fprintf(w, "  %-16s unknown (%v)\n", "alarms", alarmErr)
-	case strings.Contains(alarmOut, "No help topic"), strings.Contains(alarmOut, "not found"):
+	// exposes no alarm metric, so reading them needs etcdctl. Report when it
+	// cannot be read rather than omitting the line, since a silently absent
+	// alarm status is the worst kind of missing.
+	bin := findEtcdctl(ctx, run)
+	if bin == "" {
 		fmt.Fprintf(w, "  %-16s unknown (no etcdctl on the control node)\n", "alarms")
-	case alarmOut == "":
+
+		return
+	}
+
+	alarms, err := etcdctl(ctx, run, bin, "alarm list")
+	switch {
+	case err != nil:
+		fmt.Fprintf(w, "  %-16s unknown (%v)\n", "alarms", err)
+	case alarms == "":
 		fmt.Fprintf(w, "  %-16s none\n", "alarms")
 	default:
-		fmt.Fprintf(w, "  %-16s %s\n", "alarms", alarmOut)
+		fmt.Fprintf(w, "  %-16s %s\n", "alarms", alarms)
 	}
 }
 
