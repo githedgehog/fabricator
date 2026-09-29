@@ -105,6 +105,10 @@ const (
 	FlagBenchOut                  = "out"
 	FlagBenchOnly                 = "only"
 	FlagBenchSkipValidate         = "skip-validate"
+	FlagBenchDuration             = "duration"
+	FlagBenchInterval             = "interval"
+	FlagBenchAPIVia               = "api-via"
+	FlagBenchSyncHeartbeats       = "sync-heartbeats"
 )
 
 // benchFabrics collects repeated --fabric values verbatim. A StringSliceFlag
@@ -1980,6 +1984,67 @@ vpcs=1, attach=1, peerings=0, profile=celestica-ds5000`,
 										SkipValidate: c.Bool(FlagBenchSkipValidate),
 									}); err != nil {
 										return fmt.Errorf("bench init: %w", err)
+									}
+
+									return nil
+								},
+							},
+							{
+								Name:  "agents",
+								Usage: "simulate switch agents heartbeating against the Agent objects",
+								Description: `Runs one goroutine per Agent, each with its own client built from that
+switch's own ServiceAccount kubeconfig and its own connection, so the apiserver
+sees N distinct identities rather than one multiplexed client.
+
+Each agent reports its spec as applied, so the fabric reads as healthy to
+inspect and wait-switches rather than as a fabric that never converged.`,
+								Flags: flatten(defaultFlags, []cli.Flag{
+									&cli.DurationFlag{
+										Name:  FlagBenchDuration,
+										Usage: "how long to run, 0 to run until interrupted",
+										Value: 30 * time.Minute,
+									},
+									&cli.DurationFlag{
+										Name:  FlagBenchInterval,
+										Usage: "heartbeat interval, matching the real agent by default",
+										Value: bench.HeartbeatPeriod,
+									},
+									&cli.StringSliceFlag{
+										Name:  FlagBenchOnly,
+										Usage: "only simulate agents whose name starts with `PREFIX` (default: all)",
+									},
+									&cli.StringFlag{
+										Name:  FlagBenchAPIVia,
+										Usage: "how agents reach the API: one of " + strings.Join(bench.APIVias, ", "),
+										Value: bench.APIViaHostfwd,
+									},
+									&cli.BoolFlag{
+										Name:  FlagBenchSyncHeartbeats,
+										Usage: "drop the per-agent phase offset so every agent writes at once",
+									},
+									&cli.Float64Flag{
+										Name:  FlagBenchQPS,
+										Usage: "QPS for the discovery client",
+										Value: bench.DefaultQPS,
+									},
+									&cli.IntFlag{
+										Name:  FlagBenchBurst,
+										Usage: "burst for the discovery client",
+										Value: bench.DefaultBurst,
+									},
+								}),
+								Before: before(false),
+								Action: func(c *cli.Context) error {
+									if err := hhfab.DoVLABBenchAgents(ctx, workDir, cacheDir, hhfab.BenchAgentsOpts{
+										Duration:       c.Duration(FlagBenchDuration),
+										Interval:       c.Duration(FlagBenchInterval),
+										Agents:         c.StringSlice(FlagBenchOnly),
+										APIVia:         c.String(FlagBenchAPIVia),
+										SyncHeartbeats: c.Bool(FlagBenchSyncHeartbeats),
+										QPS:            float32(c.Float64(FlagBenchQPS)),
+										Burst:          c.Int(FlagBenchBurst),
+									}); err != nil {
+										return fmt.Errorf("bench agents: %w", err)
 									}
 
 									return nil

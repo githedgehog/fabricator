@@ -26,6 +26,16 @@ const (
 	DefaultBurst = 400
 )
 
+// benchScheme is the scheme every bench client uses.
+func benchScheme() (*runtime.Scheme, error) {
+	scheme, err := kubeutil.NewScheme(schemeBuilders...)
+	if err != nil {
+		return nil, fmt.Errorf("creating scheme: %w", err)
+	}
+
+	return scheme, nil
+}
+
 var schemeBuilders = []func(*runtime.Scheme) error{
 	wiringapi.AddToScheme,
 	vpcapi.AddToScheme,
@@ -51,9 +61,9 @@ func NewKubeClient(ctx context.Context, kubeconfig string, qps float32, burst in
 	cfg.QPS = qps
 	cfg.Burst = burst
 
-	scheme, err := kubeutil.NewScheme(schemeBuilders...)
+	scheme, err := benchScheme()
 	if err != nil {
-		return nil, fmt.Errorf("creating scheme: %w", err)
+		return nil, err
 	}
 
 	kube, err := kclient.NewWithWatch(cfg, kclient.Options{Scheme: scheme})
