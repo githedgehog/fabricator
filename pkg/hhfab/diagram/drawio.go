@@ -461,10 +461,27 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 		}
 	}
 
+	// A fabric with no spine of its own has nothing occupying the spine row, so its own
+	// gateways sit one tier too high (a ~500px gap to their own leaves) if left at the
+	// standard gatewayY -- move them down to spineY instead, closing that gap the same way
+	// leafY already collapses up to spineY when there's no spine anywhere in the diagram.
+	fabricHasSpine := map[string]bool{}
+	for _, sp := range layers.Spine {
+		fabricHasSpine[sp.Properties[PropFabric]] = true
+	}
+	gatewayPositionsY := make([]float64, len(layers.Gateway))
+	for i, node := range layers.Gateway {
+		gatewayPositionsY[i] = float64(gatewayY)
+		if multiFabric && !fabricHasSpine[node.Properties[PropFabric]] {
+			gatewayPositionsY[i] = float64(spineY)
+		}
+	}
+
 	for i, node := range layers.Gateway {
 		width, height := GetNodeDimensions(node)
 
 		x := gatewayPositions[i]
+		y := gatewayPositionsY[i]
 
 		usingIconStyle := IsIconBasedStyle(style)
 
@@ -479,7 +496,7 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 				Vertex: "1",
 				Geometry: &Geometry{
 					X:      x,
-					Y:      float64(gatewayY),
+					Y:      y,
 					Width:  width,
 					Height: height,
 					As:     "geometry",
@@ -497,7 +514,7 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 				Vertex: "1",
 				Geometry: &Geometry{
 					X:      x,
-					Y:      float64(gatewayY),
+					Y:      y,
 					Width:  width,
 					Height: height,
 					As:     "geometry",
@@ -718,9 +735,72 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 	totalServerWidth := float64(len(layers.Server)*serverNodeWidth) + serverSpacing*float64(len(layers.Server)-1)
 	serverStartX := leafCenterX - (totalServerWidth / 2)
 
+	// Center each fabric's own servers around that same fabric's own leaf sub-range (like
+	// spines/gateways above), instead of the whole server row being centered on the canvas --
+	// otherwise a fabric's servers can sit visibly off-center under its own leaves, or under a
+	// neighboring fabric's leaves entirely. A server's fabric is its (primary) leaf's fabric,
+	// found via any link between them; servers already appear in leaf order (grouped by primary
+	// leaf during sortNodes), so groups here are already contiguous.
+	serverPositions := map[string]float64{}
+	if multiFabric {
+		leafFabricByID := map[string]string{}
+		for _, l := range layers.Leaf {
+			leafFabricByID[l.ID] = l.Properties[PropFabric]
+		}
+
+		var serverGroups []fabricNodeGroup
+		for _, n := range layers.Server {
+			f := ""
+			for _, link := range topo.Links {
+				var other string
+				switch n.ID {
+				case link.Source:
+					other = link.Target
+				case link.Target:
+					other = link.Source
+				default:
+					continue
+				}
+				if lf, ok := leafFabricByID[other]; ok {
+					f = lf
+
+					break
+				}
+			}
+			if len(serverGroups) > 0 && serverGroups[len(serverGroups)-1].fabric == f {
+				serverGroups[len(serverGroups)-1].nodes = append(serverGroups[len(serverGroups)-1].nodes, n)
+			} else {
+				serverGroups = append(serverGroups, fabricNodeGroup{fabric: f, nodes: []Node{n}})
+			}
+		}
+
+		// Pack groups left to right: try to center each one on its own fabric, but never
+		// let it start before the previous group's end -- a fabric with far more servers
+		// than its own leaf-box width allows would otherwise overlap its neighbor's group.
+		minX := math.Inf(-1)
+		for _, group := range serverGroups {
+			n := len(group.nodes)
+			groupWidth := float64(n*serverNodeWidth) + serverSpacing*float64(n-1)
+			groupCenterX := leafCenterX
+			if r, ok := fabricLeafRange[group.fabric]; ok {
+				groupCenterX = (r[0] + r[1]) / 2
+			}
+			groupStartX := math.Max(groupCenterX-groupWidth/2, minX)
+
+			for j, node := range group.nodes {
+				serverPositions[node.ID] = groupStartX + float64(j)*(float64(serverNodeWidth)+serverSpacing)
+			}
+
+			minX = groupStartX + groupWidth + serverSpacing
+		}
+	}
+
 	for i, node := range layers.Server {
 		width, height := GetNodeDimensions(node)
 		x := serverStartX + float64(i)*(float64(width)+serverSpacing)
+		if px, ok := serverPositions[node.ID]; ok {
+			x = px
+		}
 		cell := MxCell{
 			ID:     node.ID,
 			Parent: "1",
