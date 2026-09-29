@@ -103,6 +103,7 @@ const (
 	FlagBenchPhase                = "phase"
 	FlagBenchDryRun               = "dry-run"
 	FlagBenchOut                  = "out"
+	FlagBenchOnly                 = "only"
 )
 
 // benchFabrics collects repeated --fabric values verbatim. A StringSliceFlag
@@ -1973,6 +1974,38 @@ vpcs=1, attach=1, peerings=0, profile=celestica-ds5000`,
 										Out:     c.String(FlagBenchOut),
 									}); err != nil {
 										return fmt.Errorf("bench init: %w", err)
+									}
+
+									return nil
+								},
+							},
+							{
+								Name:  "clean",
+								Usage: "remove everything the benchmark created",
+								Flags: flatten(defaultFlags, []cli.Flag{
+									&cli.StringSliceFlag{
+										Name:  FlagBenchOnly,
+										Usage: "only remove these fabrics by `NAME`, comma-separated or repeated (default: all)",
+									},
+									&cli.Float64Flag{
+										Name:  FlagBenchQPS,
+										Usage: "client QPS",
+										Value: bench.DefaultQPS,
+									},
+									&cli.IntFlag{
+										Name:  FlagBenchBurst,
+										Usage: "client burst",
+										Value: bench.DefaultBurst,
+									},
+								}),
+								Before: before(false),
+								Action: func(c *cli.Context) error {
+									if err := hhfab.DoVLABBenchClean(ctx, workDir, cacheDir, hhfab.BenchCleanOpts{
+										Fabrics: c.StringSlice(FlagBenchOnly),
+										QPS:     float32(c.Float64(FlagBenchQPS)),
+										Burst:   c.Int(FlagBenchBurst),
+									}); err != nil {
+										return fmt.Errorf("bench clean: %w", err)
 									}
 
 									return nil

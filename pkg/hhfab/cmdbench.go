@@ -88,6 +88,42 @@ func DoVLABBenchInit(ctx context.Context, workDir, cacheDir string, opts BenchIn
 	return nil
 }
 
+// BenchCleanOpts configures `hhfab vlab bench clean`.
+type BenchCleanOpts struct {
+	Fabrics []string
+	QPS     float32
+	Burst   int
+}
+
+// DoVLABBenchClean removes everything the benchmark created.
+func DoVLABBenchClean(ctx context.Context, workDir, cacheDir string, opts BenchCleanOpts) error {
+	if _, err := load(ctx, workDir, cacheDir, nil, false, HydrateModeNever, ""); err != nil {
+		return err
+	}
+
+	kube, err := bench.NewKubeClient(ctx, filepath.Join(workDir, VLABDir, VLABKubeConfig), opts.QPS, opts.Burst)
+	if err != nil {
+		return err //nolint:wrapcheck
+	}
+
+	start := time.Now()
+
+	results, err := bench.Clean(ctx, kube, opts.Fabrics)
+
+	total := 0
+	for _, res := range results {
+		total += res.Deleted
+	}
+
+	if err != nil {
+		return fmt.Errorf("cleaning: %w", err)
+	}
+
+	slog.Info("Benchmark objects removed", "count", total, "took", time.Since(start).Truncate(time.Millisecond))
+
+	return nil
+}
+
 // benchGenerate builds the topology into an in-memory loader and validates it
 // with exactly the Default() plus Validate() the admission webhooks run, so a
 // bad shape fails before anything reaches the cluster.
