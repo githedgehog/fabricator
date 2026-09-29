@@ -307,10 +307,13 @@ func healthEtcd(ctx context.Context, run Runner, w io.Writer) {
 		}
 	}
 
-	// The gap is fragmentation, and it only comes back with a defrag.
+	// The gap is fragmentation. etcd reuses these pages for new writes, so they
+	// are not lost capacity - the file only grows once they run out. What a
+	// defrag does is hand them back to the filesystem, which is what shrinks
+	// the allocated size and so the number the quota is checked against.
 	if haveSize && haveInUse && size > 0 {
 		free := size - inUse
-		fmt.Fprintf(w, "  %-16s %s, %.1f%% of the file (reclaimed only by defrag)\n",
+		fmt.Fprintf(w, "  %-16s %s, %.1f%% of the file (reusable by etcd; defrag returns it to the fs)\n",
 			"free pages", humanBytes(int(free)), free/size*100)
 	}
 
