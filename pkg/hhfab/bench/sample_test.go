@@ -266,14 +266,36 @@ func TestReadingFreePagesNotReused(t *testing.T) {
 func TestReadingHealthy(t *testing.T) {
 	t.Parallel()
 
-	// Free space exists and the file holds steady after compaction.
+	// Free space exists and the file holds steady after each compaction, but it
+	// did grow earlier in the window, so the retention reading applies.
 	sizes := []int64{1000, 2000, 3000, 3000, 3000, 3000, 3000, 3000}
 	samples := series(sizes, nil, map[int]bool{2: true, 5: true}, nil)
 
 	stats := analyzeSeries(samples)
 	require.Equal(t, 0, stats.ReuseFailures)
 
-	require.Contains(t, reading(t, samples), "being reused")
+	got := reading(t, samples)
+	require.Contains(t, got, "being reused")
+	require.NotContains(t, got, "steady state")
+}
+
+func TestReadingSteadyState(t *testing.T) {
+	t.Parallel()
+
+	// The file never grows. Reporting "growth is the retention window" against
+	// a measured growth of zero reads as a problem in the one case that is
+	// unambiguously healthy.
+	flat := []int64{5000, 5000, 5000, 5000, 5000, 5000}
+	live := []int64{1000, 1000, 1000, 1000, 1000, 1000}
+	samples := series(flat, live, map[int]bool{1: true, 3: true}, nil)
+
+	stats := analyzeSeries(samples)
+	require.Zero(t, stats.GrowthAfter)
+	require.Equal(t, stats.SizeStart, stats.SizeEnd)
+
+	got := reading(t, samples)
+	require.Contains(t, got, "steady state")
+	require.NotContains(t, got, "retention")
 }
 
 func TestCompactionIntervalNotReportedForOne(t *testing.T) {

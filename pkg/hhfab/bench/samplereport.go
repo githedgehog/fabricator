@@ -349,6 +349,14 @@ func reportReading(w io.Writer, stats seriesStats) {
 	case stats.Compactions < 2:
 		fmt.Fprintf(w, "  %-20s too few compactions to read; sample a longer run\n", "reading")
 
+	case stats.SizeEnd <= stats.SizeStart && stats.GrowthAfter == 0:
+		// Nothing to explain: the file did not grow at all. Saying growth is
+		// the retention window when the measured growth is zero is worse than
+		// saying nothing, and this is the healthy case so it is the one most
+		// likely to be read as a problem.
+		fmt.Fprintf(w, "  %-20s steady state - the file did not grow, compaction frees\n", "reading")
+		fmt.Fprintf(w, "  %-20s as fast as writes arrive and free pages absorb them\n", "")
+
 	case stats.FreePeak < stats.SizePeak/freePagesFloor:
 		fmt.Fprintf(w, "  %-20s file is nearly all live data - compaction is not keeping\n", "reading")
 		fmt.Fprintf(w, "  %-20s up with ingest, so retention interval is the lever\n", "")
