@@ -12,9 +12,14 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
+	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	kapierrors "k8s.io/apimachinery/pkg/api/errors"
+	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	kvalidation "k8s.io/apimachinery/pkg/util/validation"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 func TestUsersOptsDefaults(t *testing.T) {
@@ -248,6 +253,100 @@ func TestWindowCountResetsWithLatencies(t *testing.T) {
 	require.Zero(t, second.Win, "a window with no completions must not report the cumulative count")
 	require.Empty(t, second.Latencies)
 	require.Equal(t, int64(2), second.Count, "cumulative count survives")
+}
+
+// fakeBench returns a fake client holding bench-labelled objects of the given
+// kinds for one fabric.
+func fakeBench(t *testing.T, switches, connections, attachments bool) kclient.Client {
+	t.Helper()
+
+	scheme, err := benchScheme()
+	require.NoError(t, err)
+
+	meta := func(name, fabric string) kmetav1.ObjectMeta {
+		return kmetav1.ObjectMeta{
+			Name: name, Namespace: kmetav1.NamespaceDefault,
+			Labels: map[string]string{LabelFabric: fabric},
+		}
+	}
+
+	objs := []kclient.Object{}
+
+	for _, fabric := range []string{"f1", "f2"} {
+		if switches {
+			objs = append(objs, &wiringapi.Switch{ObjectMeta: meta(fabric+"-leaf-01", fabric)})
+		}
+		if connections {
+			objs = append(objs, &wiringapi.Connection{ObjectMeta: meta(fabric+"-conn", fabric)})
+		}
+		if attachments {
+			objs = append(objs, &vpcapi.VPCAttachment{ObjectMeta: meta(fabric+"-attach", fabric)})
+		}
+	}
+
+	return fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).Build()
+}
+
+func TestDiscoverTargetsInspectOnlyNeedsNoUpdateTargets(t *testing.T) {
+	t.Parallel()
+
+	// No attachments or connections exist. An inspect-only run must not
+	// demand them.
+	kube := fakeBench(t, true, false, false)
+
+	opts := UsersOpts{InspectWorkers: 1}
+	opts.setDefaults()
+
+	got, err := discoverTargets(t.Context(), kube, opts)
+	require.NoError(t, err)
+	require.Len(t, got.switches, 2)
+	require.Empty(t, got.byKind)
+}
+
+func TestDiscoverTargetsUpdateOnlyNeedsNoSwitches(t *testing.T) {
+	t.Parallel()
+
+	kube := fakeBench(t, false, true, true)
+
+	opts := UsersOpts{UpdateWorkers: 1}
+	opts.setDefaults()
+
+	got, err := discoverTargets(t.Context(), kube, opts)
+	require.NoError(t, err)
+	require.Empty(t, got.switches)
+	require.Len(t, got.byKind[KindConnection], 2)
+	require.Len(t, got.byKind[KindVPCAttachment], 2)
+}
+
+func TestDiscoverTargetsStillFailsWhenAUsedHalfIsMissing(t *testing.T) {
+	t.Parallel()
+
+	// Gating on worker count must not hide a genuinely missing topology.
+	kube := fakeBench(t, true, false, false)
+
+	opts := UsersOpts{UpdateWorkers: 1, InspectWorkers: 1}
+	opts.setDefaults()
+
+	_, err := discoverTargets(t.Context(), kube, opts)
+	require.ErrorContains(t, err, "run bench init first")
+}
+
+func TestInspectSwitchesHonoursFabricFilter(t *testing.T) {
+	t.Parallel()
+
+	selected := &targets{switches: []string{"f2-leaf-01", "f2-leaf-02"}}
+
+	// Unscoped and unfiltered: every switch in the cluster, as an operator sees.
+	require.Nil(t, (&userSim{targets: selected}).inspectSwitches())
+
+	// Unscoped but --only: every switch in the selected fabrics, not the
+	// cluster - otherwise the filter would be ignored.
+	require.Equal(t, selected.switches, (&userSim{targets: selected, fabricScoped: true}).inspectSwitches())
+
+	// --inspect-one-switch wins either way.
+	one := (&userSim{targets: selected, fabricScoped: true, oneSwitch: true}).inspectSwitches()
+	require.Len(t, one, 1)
+	require.Contains(t, selected.switches, one[0])
 }
 
 func TestPickStaysInRange(t *testing.T) {
