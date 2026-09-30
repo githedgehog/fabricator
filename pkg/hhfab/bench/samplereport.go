@@ -23,19 +23,32 @@ type seriesStats struct {
 	SizeEnd     int64
 	SizePeak    int64
 	InUsePeak   int64
+	Quota       int64
+	KeysPeak    int64
 	LagMax      int64
 	LagEnd      int64
 	Compactions int
 	MeanCompact time.Duration
 	// GrewAfter counts compactions after which the file still grew, and
 	// GrowthAfter totals that growth. Free pages should be plentiful right
-	// after a compaction, so growth there means they are not being reused -
-	// fragmentation, or pages pinned by long-running reads - rather than the
-	// retention window simply being too wide.
+	// after a compaction, so growth there means they are not being reused.
 	GrewAfter   int
 	GrowthAfter int64
+	// OpenReadsMax is the evidence for why they are not being reused: bbolt
+	// cannot hand back a page a live read transaction can still see.
+	OpenReadsMax    int64
+	WatchersMax     int64
+	SlowWatchersMax int64
+	AlarmsMax       int64
+	CommitMeanMax   time.Duration
+	FsyncMeanMax    time.Duration
+	// GRPCSent is the byte counter's total advance, which measures watch and
+	// read traffic rather than inferring it from object size.
+	GRPCSent int64
+	Puts     int64
 
 	MemSamples  int
+	MemTotal    int64
 	MemUsedPeak int64
 	MemAvailMin int64
 	K3sPeak     int64
@@ -56,6 +69,24 @@ func (s seriesStats) BootGrowthPerHour() int64 {
 	return int64(float64(s.BootEnd-s.BootStart) / s.BootSpan.Hours())
 }
 
+// QuotaPct is the peak allocated size against the quota etcd itself reported.
+func (s seriesStats) QuotaPct() float64 {
+	if s.Quota <= 0 {
+		return 0
+	}
+
+	return float64(s.SizePeak) / float64(s.Quota) * 100
+}
+
+// GRPCRate is the average bytes/s etcd sent to clients over the span.
+func (s seriesStats) GRPCRate() int64 {
+	if s.Span <= 0 {
+		return 0
+	}
+
+	return int64(float64(s.GRPCSent) / s.Span.Seconds())
+}
+
 func analyzeSeries(samples []Sample) seriesStats {
 	stats := seriesStats{Samples: len(samples)}
 	if len(samples) == 0 {
@@ -65,10 +96,11 @@ func analyzeSeries(samples []Sample) seriesStats {
 	stats.Span = samples[len(samples)-1].At.Sub(samples[0].At)
 
 	var (
-		compactAt []time.Time
-		prevEtcd  *Sample
-		firstMem  *Sample
-		lastMem   *Sample
+		compactAt           []time.Time
+		prevEtcd            *Sample
+		firstMem, lastMem   *Sample
+		firstSent, lastSent int64
+		firstPuts, lastPuts int64
 	)
 
 	for idx := range samples {
@@ -76,18 +108,32 @@ func analyzeSeries(samples []Sample) seriesStats {
 
 		if sample.HasEtcd() {
 			stats.EtcdSamples++
+			accumulateEtcd(&stats, sample)
 
 			if stats.SizeStart == 0 {
-				stats.SizeStart = sample.DBSize
+				stats.SizeStart = sample.DBSize()
 			}
 
-			stats.SizeEnd = sample.DBSize
+			stats.SizeEnd = sample.DBSize()
 			stats.LagEnd = sample.Lag()
-			stats.SizePeak = max(stats.SizePeak, sample.DBSize)
-			stats.InUsePeak = max(stats.InUsePeak, sample.DBInUse)
-			stats.LagMax = max(stats.LagMax, sample.Lag())
 
-			if prevEtcd != nil && sample.CompactRev > prevEtcd.CompactRev {
+			if sample.GRPCSent() > 0 {
+				if firstSent == 0 {
+					firstSent = sample.GRPCSent()
+				}
+
+				lastSent = sample.GRPCSent()
+			}
+
+			if sample.Puts() > 0 {
+				if firstPuts == 0 {
+					firstPuts = sample.Puts()
+				}
+
+				lastPuts = sample.Puts()
+			}
+
+			if prevEtcd != nil && sample.CompactRev() > prevEtcd.CompactRev() {
 				compactAt = append(compactAt, sample.At)
 				stats.Compactions++
 
@@ -102,13 +148,14 @@ func analyzeSeries(samples []Sample) seriesStats {
 
 		if sample.HasMem() {
 			stats.MemSamples++
-			stats.MemUsedPeak = max(stats.MemUsedPeak, sample.MemUsed)
-			stats.K3sPeak = max(stats.K3sPeak, sample.RSSK3s)
-			stats.CtrlPeak = max(stats.CtrlPeak, sample.RSSFabricCtrl)
-			stats.BootPeak = max(stats.BootPeak, sample.RSSFabricBoot)
+			stats.MemTotal = max(stats.MemTotal, sample.MemTotal())
+			stats.MemUsedPeak = max(stats.MemUsedPeak, sample.MemUsed())
+			stats.K3sPeak = max(stats.K3sPeak, sample.RSSK3s())
+			stats.CtrlPeak = max(stats.CtrlPeak, sample.RSSFabricCtrl())
+			stats.BootPeak = max(stats.BootPeak, sample.RSSFabricBoot())
 
-			if stats.MemAvailMin == 0 || sample.MemAvail < stats.MemAvailMin {
-				stats.MemAvailMin = sample.MemAvail
+			if stats.MemAvailMin == 0 || sample.MemAvail() < stats.MemAvailMin {
+				stats.MemAvailMin = sample.MemAvail()
 			}
 
 			if firstMem == nil {
@@ -119,9 +166,13 @@ func analyzeSeries(samples []Sample) seriesStats {
 		}
 	}
 
+	// Counters only ever advance, so the run's total is last minus first.
+	stats.GRPCSent = lastSent - firstSent
+	stats.Puts = lastPuts - firstPuts
+
 	if firstMem != nil && lastMem != nil {
-		stats.BootStart = firstMem.RSSFabricBoot
-		stats.BootEnd = lastMem.RSSFabricBoot
+		stats.BootStart = firstMem.RSSFabricBoot()
+		stats.BootEnd = lastMem.RSSFabricBoot()
 		stats.BootSpan = lastMem.At.Sub(firstMem.At)
 	}
 
@@ -132,12 +183,26 @@ func analyzeSeries(samples []Sample) seriesStats {
 	return stats
 }
 
+func accumulateEtcd(stats *seriesStats, sample Sample) {
+	stats.SizePeak = max(stats.SizePeak, sample.DBSize())
+	stats.InUsePeak = max(stats.InUsePeak, sample.DBInUse())
+	stats.LagMax = max(stats.LagMax, sample.Lag())
+	stats.Quota = max(stats.Quota, sample.Quota())
+	stats.KeysPeak = max(stats.KeysPeak, sample.Keys())
+	stats.OpenReadsMax = max(stats.OpenReadsMax, sample.OpenReads())
+	stats.WatchersMax = max(stats.WatchersMax, sample.Watchers())
+	stats.SlowWatchersMax = max(stats.SlowWatchersMax, sample.SlowWatchers())
+	stats.AlarmsMax = max(stats.AlarmsMax, sample.Alarms())
+	stats.CommitMeanMax = max(stats.CommitMeanMax, sample.CommitMean())
+	stats.FsyncMeanMax = max(stats.FsyncMeanMax, sample.FsyncMean())
+}
+
 // growthAfter reports how much the file grew in the window following the
 // compaction observed at idx.
 func growthAfter(samples []Sample, idx int) int64 {
 	base := samples[idx]
 	deadline := base.At.Add(postCompactWindow)
-	peak := base.DBSize
+	peak := base.DBSize()
 
 	for _, sample := range samples[idx+1:] {
 		if sample.At.After(deadline) {
@@ -145,46 +210,88 @@ func growthAfter(samples []Sample, idx int) int64 {
 		}
 
 		if sample.HasEtcd() {
-			peak = max(peak, sample.DBSize)
+			peak = max(peak, sample.DBSize())
 		}
 	}
 
-	return peak - base.DBSize
+	return peak - base.DBSize()
 }
 
 // healthSeries prints what a sampled run showed, if there is one.
+//
+// etcd and the node are printed as separate sections rather than one mixed
+// list, so no line's subject has to be guessed at. They also have separate
+// sample counts: the two are collected independently and etcd's endpoint goes
+// away during exactly the outages worth measuring.
 func healthSeries(w io.Writer, samples []Sample) {
 	if len(samples) == 0 {
 		return
 	}
 
 	stats := analyzeSeries(samples)
-
-	fmt.Fprintf(w, "\nSAMPLED OVER TIME (%s, %d samples over %s)\n",
-		SeriesFile, stats.Samples, stats.Span.Truncate(time.Second))
+	span := stats.Span.Truncate(time.Second)
 
 	if stats.EtcdSamples > 0 {
+		fmt.Fprintf(w, "\nETCD OVER TIME (%s, %d of %d samples over %s)\n",
+			SeriesFile, stats.EtcdSamples, stats.Samples, span)
 		reportEtcdSeries(w, stats)
+
+		// Gaps are themselves a result: the sampler keeps running across
+		// outages, so missing samples mean etcd was unreachable then.
+		if stats.EtcdSamples < stats.Samples {
+			fmt.Fprintf(w, "  %-20s %d samples had no etcd metrics (endpoint down)\n",
+				"gaps", stats.Samples-stats.EtcdSamples)
+		}
 	}
 
 	if stats.MemSamples > 0 {
+		fmt.Fprintf(w, "\nNODE OVER TIME (%s, %d of %d samples over %s)\n",
+			SeriesFile, stats.MemSamples, stats.Samples, span)
 		reportMemSeries(w, stats)
-	}
-
-	// Gaps are themselves a result: the sampler keeps running across outages,
-	// so a group missing from some samples means that subsystem was unreachable.
-	if stats.EtcdSamples < stats.Samples {
-		fmt.Fprintf(w, "  %-20s %d of %d samples had no etcd metrics (endpoint down)\n",
-			"etcd gaps", stats.Samples-stats.EtcdSamples, stats.Samples)
 	}
 }
 
 func reportEtcdSeries(w io.Writer, stats seriesStats) {
-	fmt.Fprintf(w, "  %-20s %s -> %s, peak %s\n", "etcd allocated",
+	fmt.Fprintf(w, "  %-20s %s -> %s, peak %s", "allocated",
 		humanBytes(int(stats.SizeStart)), humanBytes(int(stats.SizeEnd)), humanBytes(int(stats.SizePeak)))
-	fmt.Fprintf(w, "  %-20s peak %s\n", "etcd live data", humanBytes(int(stats.InUsePeak)))
+
+	// The quota comes from etcd rather than from anyone's memory of the flag.
+	if stats.Quota > 0 {
+		fmt.Fprintf(w, " (%.1f%% of %s quota)", stats.QuotaPct(), humanBytes(int(stats.Quota)))
+	}
+
+	fmt.Fprintf(w, "\n")
+	fmt.Fprintf(w, "  %-20s peak %s\n", "live data", humanBytes(int(stats.InUsePeak)))
+
+	if stats.KeysPeak > 0 {
+		fmt.Fprintf(w, "  %-20s peak %d\n", "keys", stats.KeysPeak)
+	}
+
 	fmt.Fprintf(w, "  %-20s max %d, ended at %d\n", "uncompacted revs", stats.LagMax, stats.LagEnd)
 
+	if stats.AlarmsMax > 0 {
+		fmt.Fprintf(w, "  %-20s ALARM RAISED during the run (NOSPACE or CORRUPT)\n", "alarms")
+	}
+
+	reportCompaction(w, stats)
+
+	if stats.WatchersMax > 0 {
+		fmt.Fprintf(w, "  %-20s peak %d, slow peak %d\n", "watchers",
+			stats.WatchersMax, stats.SlowWatchersMax)
+	}
+
+	if stats.GRPCSent > 0 {
+		fmt.Fprintf(w, "  %-20s %s total, %s/s average\n", "sent to clients",
+			humanBytes(int(stats.GRPCSent)), humanBytes(int(stats.GRPCRate())))
+	}
+
+	if stats.CommitMeanMax > 0 {
+		fmt.Fprintf(w, "  %-20s commit %s, wal fsync %s\n", "disk mean (worst)",
+			stats.CommitMeanMax.Truncate(time.Microsecond), stats.FsyncMeanMax.Truncate(time.Microsecond))
+	}
+}
+
+func reportCompaction(w io.Writer, stats seriesStats) {
 	if stats.Compactions == 0 {
 		fmt.Fprintf(w, "  %-20s none observed in this window\n", "compactions")
 		fmt.Fprintf(w, "  %-20s inconclusive, no compaction seen\n", "reading")
@@ -197,11 +304,20 @@ func reportEtcdSeries(w io.Writer, stats seriesStats) {
 	fmt.Fprintf(w, "  %-20s %d of %d grew the file, +%s total\n", "after compaction",
 		stats.GrewAfter, stats.Compactions, humanBytes(int(stats.GrowthAfter)))
 
+	if stats.OpenReadsMax > 0 {
+		fmt.Fprintf(w, "  %-20s peak %d\n", "open read txns", stats.OpenReadsMax)
+	}
+
 	// The whole reason for sampling: separate "retention window too wide" from
-	// "freed pages are not being reused".
+	// "freed pages are not being reused", and if the latter, say why.
 	if stats.GrewAfter*2 > stats.Compactions {
 		fmt.Fprintf(w, "  %-20s file grows after most compactions - freed pages are not\n", "reading")
-		fmt.Fprintf(w, "  %-20s being reused (fragmentation, or pages pinned by long reads)\n", "")
+
+		if stats.OpenReadsMax > 1 {
+			fmt.Fprintf(w, "  %-20s being reused, with read txns open to pin them\n", "")
+		} else {
+			fmt.Fprintf(w, "  %-20s being reused, and not because of open read txns\n", "")
+		}
 	} else {
 		fmt.Fprintf(w, "  %-20s file is stable after compaction - growth is the retention\n", "reading")
 		fmt.Fprintf(w, "  %-20s window, so a shorter interval should bound it\n", "")
@@ -211,8 +327,16 @@ func reportEtcdSeries(w io.Writer, stats seriesStats) {
 func reportMemSeries(w io.Writer, stats seriesStats) {
 	// System used is the honest figure: k3s's RSS counts the mmap'd etcd
 	// backend, so it routinely exceeds total system usage.
-	fmt.Fprintf(w, "  %-20s peak %s, min available %s\n", "memory used",
+	fmt.Fprintf(w, "  %-20s peak %s, min available %s", "memory used",
 		humanBytes(int(stats.MemUsedPeak)), humanBytes(int(stats.MemAvailMin)))
+
+	// Against the size of the box, which changes between runs when the VM is
+	// resized and otherwise has to be remembered.
+	if stats.MemTotal > 0 {
+		fmt.Fprintf(w, " (of %s)", humanBytes(int(stats.MemTotal)))
+	}
+
+	fmt.Fprintf(w, "\n")
 	fmt.Fprintf(w, "  %-20s peak %s\n", "k3s-server rss", humanBytes(int(stats.K3sPeak)))
 	fmt.Fprintf(w, "  %-20s peak %s\n", "fabric-ctrl rss", humanBytes(int(stats.CtrlPeak)))
 

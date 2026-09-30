@@ -30,47 +30,8 @@ const DefaultSampleInterval = 15 * time.Second
 // are converted to bytes at the source so nothing downstream has to remember a
 // unit.
 const sampleCmd = `curl -s --max-time 10 http://127.0.0.1:2381/metrics
-free -m | awk '/^Mem:/{printf "bench_mem_used_bytes %d\nbench_mem_available_bytes %d\n", $3*1048576, $7*1048576}'
+free -m | awk '/^Mem:/{printf "bench_mem_total_bytes %d\nbench_mem_used_bytes %d\nbench_mem_available_bytes %d\n", $2*1048576, $3*1048576, $7*1048576}'
 ps -eo rss=,comm= | awk '{r[$2]+=$1} END{printf "bench_rss_k3s_bytes %d\nbench_rss_fabric_ctrl_bytes %d\nbench_rss_fabric_boot_bytes %d\n", r["k3s-server"]*1024, r["fabric"]*1024, r["fabric-boot"]*1024}'`
-
-// Sample is one observation of the control node.
-//
-// For etcd the distinction that matters is DBSize vs DBInUse. Compaction frees
-// pages inside the file but never shrinks it; only defrag returns space to the
-// filesystem. NOSPACE is checked against DBSize, so the quota is consumed by a
-// high-water mark of peak demand rather than by steady-state usage, and a run
-// can sit at 96% free pages while still marching toward the limit.
-//
-// For memory, MemUsed is the honest figure rather than RSSK3s: k3s's RSS counts
-// the mmap'd etcd backend, so it routinely exceeds total system usage.
-type Sample struct {
-	At         time.Time
-	DBSize     int64
-	DBInUse    int64
-	CompactRev int64
-	CurrentRev int64
-
-	MemUsed       int64
-	MemAvail      int64
-	RSSK3s        int64
-	RSSFabricCtrl int64
-	RSSFabricBoot int64
-}
-
-// Lag is how many revisions exist that compaction has not yet reclaimed. A lag
-// that grows over a run means compaction is falling behind; a lag that stays
-// flat while DBSize grows means the file is growing for some other reason,
-// which is the interesting case.
-func (s Sample) Lag() int64 {
-	return s.CurrentRev - s.CompactRev
-}
-
-// HasEtcd and HasMem say whether that half of the sample was collected. They
-// are recorded independently because the two fail separately: a collapsed k3s
-// takes etcd's metrics endpoint with it at exactly the moment memory is most
-// worth recording.
-func (s Sample) HasEtcd() bool { return s.DBSize > 0 }
-func (s Sample) HasMem() bool  { return s.MemUsed > 0 }
 
 // The two groups fail independently: a collapsed k3s takes etcd's metrics
 // endpoint with it at exactly the moment memory is most worth recording.
@@ -79,49 +40,186 @@ const (
 	groupMem  = "mem"
 )
 
-const (
-	metricDBSize     = "etcd_mvcc_db_total_size_in_bytes"
-	metricDBInUse    = "etcd_mvcc_db_total_size_in_use_in_bytes"
-	metricCompactRev = "etcd_debugging_mvcc_compact_revision"
-	metricCurrentRev = "etcd_debugging_mvcc_current_revision"
-
-	metricMemUsed  = "bench_mem_used_bytes"
-	metricMemAvail = "bench_mem_available_bytes"
-	metricRSSK3s   = "bench_rss_k3s_bytes"
-	metricRSSCtrl  = "bench_rss_fabric_ctrl_bytes"
-	metricRSSBoot  = "bench_rss_fabric_boot_bytes"
-)
-
-var sampleGroups = map[string]string{
-	metricDBSize:     groupEtcd,
-	metricDBInUse:    groupEtcd,
-	metricCompactRev: groupEtcd,
-	metricCurrentRev: groupEtcd,
-
-	metricMemUsed:  groupMem,
-	metricMemAvail: groupMem,
-	metricRSSK3s:   groupMem,
-	metricRSSCtrl:  groupMem,
-	metricRSSBoot:  groupMem,
+// metric is one column of the series.
+//
+// Required metrics gate whether their group is usable: a partial etcd scrape
+// that left compact_rev at zero would make Lag enormous, and a wrong derived
+// value is worse than an absent one. Optional metrics are recorded when present
+// and left at zero otherwise - etcd_debugging_server_alarms, for instance, is
+// simply not emitted while no alarm is armed, which is the healthy case.
+type metric struct {
+	col      string
+	name     string
+	group    string
+	required bool
 }
 
-// groupSizes is how many metrics each group needs to be considered complete.
-var groupSizes = func() map[string]int {
-	out := map[string]int{}
-	for _, group := range sampleGroups {
-		out[group]++
+// seriesMetrics is the ordered set of columns. Adding an observation is one
+// line here; nothing else needs to change.
+var seriesMetrics = []metric{
+	// What the quota is actually checked against, and what is really live.
+	{"db_size", "etcd_mvcc_db_total_size_in_bytes", groupEtcd, true},
+	{"db_in_use", "etcd_mvcc_db_total_size_in_use_in_bytes", groupEtcd, true},
+	{"compact_rev", "etcd_debugging_mvcc_compact_revision", groupEtcd, true},
+	{"current_rev", "etcd_debugging_mvcc_current_revision", groupEtcd, true},
+
+	// Read from the server rather than assumed, so a percentage of quota is
+	// never computed against a number someone remembered wrong.
+	{"quota", "etcd_server_quota_backend_bytes", groupEtcd, false},
+	{"alarms", "etcd_debugging_server_alarms", groupEtcd, false},
+
+	// Live keys, which separates "more objects" from "more revisions".
+	{"keys", "etcd_debugging_mvcc_keys_total", groupEtcd, false},
+
+	// Open read transactions pin pages against reuse: bbolt cannot hand a freed
+	// page back while a read txn can still see it. If the file keeps growing
+	// after compaction while this sits above zero, that is the reason.
+	{"open_reads", "etcd_mvcc_db_open_read_transactions", groupEtcd, false},
+
+	// Watch health. A consumer that cannot keep up shows up as a slow watcher
+	// before it gets dropped, which is the fabric-boot reconnect storm.
+	{"watchers", "etcd_debugging_mvcc_watcher_total", groupEtcd, false},
+	{"slow_watchers", "etcd_debugging_mvcc_slow_watcher_total", groupEtcd, false},
+	{"pending_events", "etcd_debugging_mvcc_pending_events_total", groupEtcd, false},
+
+	// Backpressure and stability.
+	{"proposals_pending", "etcd_server_proposals_pending", groupEtcd, false},
+	{"slow_applies", "etcd_server_slow_apply_total", groupEtcd, false},
+	{"leader_changes", "etcd_server_leader_changes_seen_total", groupEtcd, false},
+
+	// Operation and byte counters. Differenced across samples these give real
+	// rates, rather than write volume inferred from agent count times object
+	// size.
+	{"puts", "etcd_mvcc_put_total", groupEtcd, false},
+	{"ranges", "etcd_mvcc_range_total", groupEtcd, false},
+	{"grpc_sent", "etcd_network_client_grpc_sent_bytes_total", groupEtcd, false},
+	{"grpc_recv", "etcd_network_client_grpc_received_bytes_total", groupEtcd, false},
+
+	// Histogram sums and counts, which are plain series; their ratio is the
+	// mean, which is all we need to see disk latency move.
+	{"commit_sum", "etcd_disk_backend_commit_duration_seconds_sum", groupEtcd, false},
+	{"commit_count", "etcd_disk_backend_commit_duration_seconds_count", groupEtcd, false},
+	{"fsync_sum", "etcd_disk_wal_fsync_duration_seconds_sum", groupEtcd, false},
+	{"fsync_count", "etcd_disk_wal_fsync_duration_seconds_count", groupEtcd, false},
+	{"compact_pause_sum", "etcd_debugging_mvcc_db_compaction_pause_duration_milliseconds_sum", groupEtcd, false},
+
+	// The node. MemUsed is the honest figure rather than rss_k3s: k3s's RSS
+	// counts the mmap'd etcd backend, so it routinely exceeds system usage.
+	// Total is recorded so a peak is always readable against the box it ran on,
+	// which changes between runs when the VM is resized.
+	{"mem_total", "bench_mem_total_bytes", groupMem, false},
+	{"mem_used", "bench_mem_used_bytes", groupMem, true},
+	{"mem_available", "bench_mem_available_bytes", groupMem, true},
+	{"rss_k3s", "bench_rss_k3s_bytes", groupMem, true},
+	{"rss_fabric_ctrl", "bench_rss_fabric_ctrl_bytes", groupMem, true},
+	{"rss_fabric_boot", "bench_rss_fabric_boot_bytes", groupMem, true},
+}
+
+var (
+	metricsByName = func() map[string]metric {
+		out := make(map[string]metric, len(seriesMetrics))
+		for _, m := range seriesMetrics {
+			out[m.name] = m
+		}
+
+		return out
+	}()
+
+	requiredPerGroup = func() map[string]int {
+		out := map[string]int{}
+
+		for _, m := range seriesMetrics {
+			if m.required {
+				out[m.group]++
+			}
+		}
+
+		return out
+	}()
+
+	seriesHeader = func() []string {
+		out := make([]string, 0, len(seriesMetrics)+1)
+		out = append(out, "time")
+
+		for _, m := range seriesMetrics {
+			out = append(out, m.col)
+		}
+
+		return out
+	}()
+)
+
+// Sample is one observation of the control node, keyed by column name.
+type Sample struct {
+	At     time.Time
+	Values map[string]float64
+}
+
+func (s Sample) num(col string) int64   { return int64(s.Values[col]) }
+func (s Sample) val(col string) float64 { return s.Values[col] }
+
+func (s Sample) has(col string) bool {
+	_, ok := s.Values[col]
+
+	return ok
+}
+
+// Accessors for the fields the report reads, so the reporting code is not
+// stringly typed throughout.
+func (s Sample) DBSize() int64        { return s.num("db_size") }
+func (s Sample) DBInUse() int64       { return s.num("db_in_use") }
+func (s Sample) CompactRev() int64    { return s.num("compact_rev") }
+func (s Sample) CurrentRev() int64    { return s.num("current_rev") }
+func (s Sample) Quota() int64         { return s.num("quota") }
+func (s Sample) Keys() int64          { return s.num("keys") }
+func (s Sample) OpenReads() int64     { return s.num("open_reads") }
+func (s Sample) Watchers() int64      { return s.num("watchers") }
+func (s Sample) SlowWatchers() int64  { return s.num("slow_watchers") }
+func (s Sample) Alarms() int64        { return s.num("alarms") }
+func (s Sample) GRPCSent() int64      { return s.num("grpc_sent") }
+func (s Sample) Puts() int64          { return s.num("puts") }
+func (s Sample) MemUsed() int64       { return s.num("mem_used") }
+func (s Sample) MemAvail() int64      { return s.num("mem_available") }
+func (s Sample) MemTotal() int64      { return s.num("mem_total") }
+func (s Sample) RSSK3s() int64        { return s.num("rss_k3s") }
+func (s Sample) RSSFabricCtrl() int64 { return s.num("rss_fabric_ctrl") }
+func (s Sample) RSSFabricBoot() int64 { return s.num("rss_fabric_boot") }
+
+// CommitMean and FsyncMean turn a histogram's sum and count into the mean.
+func (s Sample) CommitMean() time.Duration {
+	return meanDuration(s.val("commit_sum"), s.val("commit_count"))
+}
+func (s Sample) FsyncMean() time.Duration {
+	return meanDuration(s.val("fsync_sum"), s.val("fsync_count"))
+}
+
+func meanDuration(sum, count float64) time.Duration {
+	if count <= 0 {
+		return 0
 	}
 
-	return out
-}()
+	return time.Duration(sum / count * float64(time.Second))
+}
 
-// parseSample pulls the fields out of a `name value` exposition.
+// Lag is how many revisions exist that compaction has not yet reclaimed. A lag
+// that grows over a run means compaction is falling behind; a lag that stays
+// flat while DBSize grows means the file is growing for some other reason,
+// which is the interesting case.
+func (s Sample) Lag() int64 {
+	return s.CurrentRev() - s.CompactRev()
+}
+
+// HasEtcd and HasMem say whether that half of the sample was collected.
+func (s Sample) HasEtcd() bool { return s.has("db_size") }
+func (s Sample) HasMem() bool  { return s.has("mem_used") }
+
+// parseSample pulls the declared metrics out of a `name value` exposition.
 //
-// A group is kept only if it arrived complete. A partial etcd scrape would
-// otherwise leave CompactRev at zero and make Lag enormous, which is worse than
-// recording nothing: derived values would be wrong rather than absent.
+// A group is kept only if all of its required metrics arrived; optional ones
+// are recorded when present. Labelled series are skipped, since every metric we
+// declare is label-free and `name{...}` will not match an exact name.
 func parseSample(at time.Time, raw string) (Sample, error) {
-	values := map[string]int64{}
+	found := map[string]float64{}
 	seen := map[string]int{}
 
 	for line := range strings.Lines(raw) {
@@ -135,7 +233,7 @@ func parseSample(at time.Time, raw string) (Sample, error) {
 			continue
 		}
 
-		group, wanted := sampleGroups[name]
+		m, wanted := metricsByName[name]
 		if !wanted {
 			continue
 		}
@@ -145,28 +243,32 @@ func parseSample(at time.Time, raw string) (Sample, error) {
 			continue
 		}
 
-		values[name] = int64(num)
-		seen[group]++
+		found[m.col] = num
+
+		if m.required {
+			seen[m.group]++
+		}
 	}
 
-	sample := Sample{At: at}
+	sample := Sample{At: at, Values: map[string]float64{}}
 	kept := 0
 
-	if seen[groupEtcd] >= groupSizes[groupEtcd] {
-		kept++
-		sample.DBSize = values[metricDBSize]
-		sample.DBInUse = values[metricDBInUse]
-		sample.CompactRev = values[metricCompactRev]
-		sample.CurrentRev = values[metricCurrentRev]
-	}
+	for group, need := range requiredPerGroup {
+		if seen[group] < need {
+			continue
+		}
 
-	if seen[groupMem] >= groupSizes[groupMem] {
 		kept++
-		sample.MemUsed = values[metricMemUsed]
-		sample.MemAvail = values[metricMemAvail]
-		sample.RSSK3s = values[metricRSSK3s]
-		sample.RSSFabricCtrl = values[metricRSSCtrl]
-		sample.RSSFabricBoot = values[metricRSSBoot]
+
+		for _, m := range seriesMetrics {
+			if m.group != group {
+				continue
+			}
+
+			if val, ok := found[m.col]; ok {
+				sample.Values[m.col] = val
+			}
+		}
 	}
 
 	if kept == 0 {
@@ -186,22 +288,21 @@ func takeSample(ctx context.Context, run Runner) (Sample, error) {
 	return parseSample(time.Now(), out)
 }
 
-var seriesHeader = []string{
-	"time", "db_size", "db_in_use", "compact_rev", "current_rev",
-	"mem_used", "mem_available", "rss_k3s", "rss_fabric_ctrl", "rss_fabric_boot",
-}
-
+// record renders a sample in column order. A metric that was absent is written
+// empty rather than zero, so "not collected" and "zero" stay distinguishable.
 func (s Sample) record() []string {
-	nums := []int64{
-		s.DBSize, s.DBInUse, s.CompactRev, s.CurrentRev,
-		s.MemUsed, s.MemAvail, s.RSSK3s, s.RSSFabricCtrl, s.RSSFabricBoot,
-	}
-
 	out := make([]string, 0, len(seriesHeader))
 	out = append(out, s.At.UTC().Format(time.RFC3339))
 
-	for _, num := range nums {
-		out = append(out, strconv.FormatInt(num, 10))
+	for _, m := range seriesMetrics {
+		val, ok := s.Values[m.col]
+		if !ok {
+			out = append(out, "")
+
+			continue
+		}
+
+		out = append(out, strconv.FormatFloat(val, 'f', -1, 64))
 	}
 
 	return out
@@ -295,8 +396,9 @@ func SampleTo(ctx context.Context, run Runner, interval time.Duration, path stri
 	}
 }
 
-// LoadSeries reads a series back. A missing file is not an error: health runs
-// whether or not a sampled run has happened.
+// LoadSeries reads a series back, matching columns by header name so a file
+// written by an older or newer build still loads. A missing file is not an
+// error: health runs whether or not a sampled run has happened.
 func LoadSeries(path string) ([]Sample, error) {
 	file, err := os.Open(path)
 	if os.IsNotExist(err) {
@@ -307,15 +409,23 @@ func LoadSeries(path string) ([]Sample, error) {
 	}
 	defer file.Close()
 
-	rows, err := csv.NewReader(file).ReadAll()
+	reader := csv.NewReader(file)
+	reader.FieldsPerRecord = -1
+
+	rows, err := reader.ReadAll()
 	if err != nil {
 		return nil, fmt.Errorf("reading series %s: %w", path, err)
 	}
 
-	samples := make([]Sample, 0, len(rows))
+	if len(rows) == 0 {
+		return nil, nil
+	}
 
-	for idx, row := range rows {
-		if idx == 0 || len(row) != len(seriesHeader) {
+	header := rows[0]
+	samples := make([]Sample, 0, len(rows)-1)
+
+	for _, row := range rows[1:] {
+		if len(row) == 0 {
 			continue
 		}
 
@@ -324,28 +434,22 @@ func LoadSeries(path string) ([]Sample, error) {
 			continue
 		}
 
-		nums := make([]int64, len(seriesHeader)-1)
-		bad := false
+		sample := Sample{At: at, Values: map[string]float64{}}
 
-		for pos := range nums {
-			nums[pos], err = strconv.ParseInt(row[pos+1], 10, 64)
-			if err != nil {
-				bad = true
-
-				break
+		for pos := 1; pos < len(row) && pos < len(header); pos++ {
+			if row[pos] == "" {
+				continue
 			}
+
+			val, err := strconv.ParseFloat(row[pos], 64)
+			if err != nil {
+				continue
+			}
+
+			sample.Values[header[pos]] = val
 		}
 
-		if bad {
-			continue
-		}
-
-		samples = append(samples, Sample{
-			At:     at,
-			DBSize: nums[0], DBInUse: nums[1], CompactRev: nums[2], CurrentRev: nums[3],
-			MemUsed: nums[4], MemAvail: nums[5],
-			RSSK3s: nums[6], RSSFabricCtrl: nums[7], RSSFabricBoot: nums[8],
-		})
+		samples = append(samples, sample)
 	}
 
 	return samples, nil
