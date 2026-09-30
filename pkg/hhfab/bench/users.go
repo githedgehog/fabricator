@@ -149,23 +149,20 @@ type targets struct {
 	switches []string
 }
 
+// discoverTargets lists what a run may touch. Each half is only discovered when
+// a worker will use it, so an inspect-only run does not demand attachments and
+// connections it will never touch, nor an update-only run switches it will
+// never inspect.
 func discoverTargets(ctx context.Context, kube kclient.Client, opts UsersOpts) (*targets, error) {
 	out := &targets{byKind: map[string][]string{}}
 
-	for _, kind := range opts.Kinds {
-		names, err := benchNames(ctx, kube, kind, opts.Fabrics)
-		if err != nil {
+	if opts.UpdateWorkers > 0 {
+		if err := discoverUpdateTargets(ctx, kube, opts, out); err != nil {
 			return nil, err
 		}
-
-		if len(names) == 0 {
-			return nil, fmt.Errorf("no bench %s objects found; run bench init first", kind) //nolint:err113
-		}
-
-		out.byKind[kind] = names
 	}
 
-	if len(opts.Inspects) > 0 {
+	if opts.InspectWorkers > 0 && len(opts.Inspects) > 0 {
 		names, err := benchSwitchNames(ctx, kube, opts.Fabrics)
 		if err != nil {
 			return nil, err
@@ -179,6 +176,23 @@ func discoverTargets(ctx context.Context, kube kclient.Client, opts UsersOpts) (
 	}
 
 	return out, nil
+}
+
+func discoverUpdateTargets(ctx context.Context, kube kclient.Client, opts UsersOpts, out *targets) error {
+	for _, kind := range opts.Kinds {
+		names, err := benchNames(ctx, kube, kind, opts.Fabrics)
+		if err != nil {
+			return err
+		}
+
+		if len(names) == 0 {
+			return fmt.Errorf("no bench %s objects found; run bench init first", kind) //nolint:err113
+		}
+
+		out.byKind[kind] = names
+	}
+
+	return nil
 }
 
 // benchNames lists the bench-owned objects of one kind, keeping only names.
@@ -308,6 +322,8 @@ type userSim struct {
 	sleep     time.Duration
 	role      string
 	oneSwitch bool
+	// fabricScoped is set when --only narrowed the run to some fabrics.
+	fabricScoped bool
 }
 
 func newUserSims(ctx context.Context, opts UsersOpts, found *targets, stats *userStats, count int, role string) ([]*userSim, error) {
@@ -326,7 +342,8 @@ func newUserSims(ctx context.Context, opts UsersOpts, found *targets, stats *use
 
 		sims = append(sims, &userSim{
 			kube: kube, targets: found, stats: stats, sleep: sleep, role: role,
-			oneSwitch: opts.InspectOneSwitch,
+			oneSwitch:    opts.InspectOneSwitch,
+			fabricScoped: len(opts.Fabrics) > 0,
 		})
 	}
 
@@ -426,16 +443,30 @@ func (u *userSim) inspect(ctx context.Context, opts UsersOpts) {
 	u.stats.record(ctx, "inspect:"+name, time.Since(start), err)
 }
 
-func (u *userSim) runInspect(ctx context.Context, name string) error {
-	// An empty switch list means every switch, which is what an operator gets
-	// by typing `kubectl fabric inspect lldp`. Since the per-switch work is
-	// itself O(N), scoping to one switch is not a smaller version of the same
-	// operation - it is roughly N^2 times cheaper, and measuring it would
-	// understate a real user by orders of magnitude.
-	var sw []string
-	if u.oneSwitch {
-		sw = []string{pick(u.targets.switches)}
+// inspectSwitches is the switch list handed to lldp, bgp and bfd.
+//
+// An empty list means every switch, which is what an operator gets by typing
+// `kubectl fabric inspect lldp`. Since the per-switch work is itself O(N),
+// scoping to one switch is not a smaller version of the same operation - it is
+// roughly N^2 times cheaper, and measuring it would understate a real user by
+// orders of magnitude.
+//
+// With --only, "unscoped" means every switch in the selected fabrics rather
+// than every switch in the cluster, or the filter would be silently ignored.
+// mac is the exception by nature: it lists every Agent whatever it is given.
+func (u *userSim) inspectSwitches() []string {
+	switch {
+	case u.oneSwitch:
+		return []string{pick(u.targets.switches)}
+	case u.fabricScoped:
+		return u.targets.switches
 	}
+
+	return nil
+}
+
+func (u *userSim) runInspect(ctx context.Context, name string) error {
+	sw := u.inspectSwitches()
 
 	switch name {
 	case InspectLLDP:
