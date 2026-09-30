@@ -63,11 +63,15 @@ type HealthOpts struct {
 // kube may be nil when opts.Stats is false, since nothing then touches the API.
 func Health(ctx context.Context, kube kclient.Client, run Runner, w io.Writer, opts HealthOpts) error {
 	if opts.Stats {
-		if err := healthObjects(ctx, kube, w); err != nil {
+		// One List of every Agent serves both sections. With padded statuses
+		// that is hundreds of megabytes, and fetching it twice would make health
+		// a noticeable load on the cluster it is measuring.
+		agents, err := healthObjects(ctx, kube, w)
+		if err != nil {
 			return err
 		}
 
-		if err := healthFabric(ctx, kube, w); err != nil {
+		if err := healthFabric(ctx, kube, agents, w); err != nil {
 			return err
 		}
 	}
@@ -98,8 +102,9 @@ func Health(ctx context.Context, kube kclient.Client, run Runner, w io.Writer, o
 }
 
 // healthObjects counts what is in the cluster and measures Agent size, which is
-// the parameter that drives etcd write volume.
-func healthObjects(ctx context.Context, kube kclient.Client, w io.Writer) error {
+// the parameter that drives etcd write volume. It returns the Agents it listed
+// so the fabric section can reuse them.
+func healthObjects(ctx context.Context, kube kclient.Client, w io.Writer) (*agentapi.AgentList, error) {
 	fmt.Fprintf(w, "OBJECTS\n")
 
 	counts := []struct {
@@ -118,7 +123,7 @@ func healthObjects(ctx context.Context, kube kclient.Client, w io.Writer) error 
 
 	for _, c := range counts {
 		if err := kube.List(ctx, c.list); err != nil {
-			return fmt.Errorf("listing %s: %w", c.kind, err)
+			return nil, fmt.Errorf("listing %s: %w", c.kind, err)
 		}
 
 		total, bench := 0, 0
@@ -138,14 +143,14 @@ func healthObjects(ctx context.Context, kube kclient.Client, w io.Writer) error 
 	agents := &agentapi.AgentList{}
 	start := time.Now()
 	if err := kube.List(ctx, agents); err != nil {
-		return fmt.Errorf("listing agents: %w", err)
+		return nil, fmt.Errorf("listing agents: %w", err)
 	}
 	listTook := time.Since(start)
 
 	fmt.Fprintf(w, "  %-16s %6d  (listed in %s)\n", "Agent", len(agents.Items), listTook.Truncate(time.Millisecond))
 
 	if len(agents.Items) == 0 {
-		return nil
+		return agents, nil
 	}
 
 	sizes := make([]int, 0, len(agents.Items))
@@ -155,7 +160,7 @@ func healthObjects(ctx context.Context, kube kclient.Client, w io.Writer) error 
 	for idx := range agents.Items {
 		raw, err := json.Marshal(&agents.Items[idx])
 		if err != nil {
-			return fmt.Errorf("marshalling agent %s: %w", agents.Items[idx].Name, err)
+			return nil, fmt.Errorf("marshalling agent %s: %w", agents.Items[idx].Name, err)
 		}
 
 		sizes = append(sizes, len(raw))
@@ -179,17 +184,13 @@ func healthObjects(ctx context.Context, kube kclient.Client, w io.Writer) error 
 	fmt.Fprintf(w, "  etcd history/%s  %s at one heartbeat per %s\n",
 		compactionWindow, humanBytes(perWindow), HeartbeatPeriod)
 
-	return nil
+	return agents, nil
 }
 
-// healthFabric reports whether the agents are keeping up with their specs.
-func healthFabric(ctx context.Context, kube kclient.Client, w io.Writer) error {
+// healthFabric reports whether the agents are keeping up with their specs,
+// from the Agents healthObjects already listed.
+func healthFabric(ctx context.Context, kube kclient.Client, agents *agentapi.AgentList, w io.Writer) error {
 	fmt.Fprintf(w, "\nFABRIC\n")
-
-	agents := &agentapi.AgentList{}
-	if err := kube.List(ctx, agents); err != nil {
-		return fmt.Errorf("listing agents: %w", err)
-	}
 
 	var noHeartbeat, stale, notApplied int
 	for idx := range agents.Items {

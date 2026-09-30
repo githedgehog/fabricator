@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/csv"
 	"fmt"
+	"maps"
 	"os"
 	"strconv"
 	"strings"
@@ -125,6 +126,15 @@ var (
 		return out
 	}()
 
+	metricsByCol = func() map[string]metric {
+		out := make(map[string]metric, len(seriesMetrics))
+		for _, m := range seriesMetrics {
+			out[m.col] = m
+		}
+
+		return out
+	}()
+
 	requiredPerGroup = func() map[string]int {
 		out := map[string]int{}
 
@@ -213,7 +223,6 @@ func (s Sample) HasMem() bool  { return s.has("mem_used") }
 // declare is label-free and `name{...}` will not match an exact name.
 func parseSample(at time.Time, raw string) (Sample, error) {
 	found := map[string]float64{}
-	seen := map[string]int{}
 
 	for line := range strings.Lines(raw) {
 		line = strings.TrimSpace(line)
@@ -237,13 +246,56 @@ func parseSample(at time.Time, raw string) (Sample, error) {
 		}
 
 		found[m.col] = num
+	}
 
-		if m.required {
+	values, kept := completeGroups(found)
+	if kept == 0 {
+		return Sample{}, fmt.Errorf("no complete metric group in sample output") //nolint:err113
+	}
+
+	return Sample{At: at, Values: values}, nil
+}
+
+// loadedSample applies completeGroups to a row read from disk. Columns this
+// build does not declare are kept as they are, so a file written by a newer
+// build still loads without losing them; only the groups whose required columns
+// are known get the completeness check.
+func loadedSample(sample Sample) Sample {
+	known := map[string]float64{}
+	unknown := map[string]float64{}
+
+	for col, val := range sample.Values {
+		if _, declared := metricsByCol[col]; declared {
+			known[col] = val
+		} else {
+			unknown[col] = val
+		}
+	}
+
+	values, _ := completeGroups(known)
+	maps.Copy(values, unknown)
+
+	return Sample{At: sample.At, Values: values}
+}
+
+// completeGroups keeps only the metric groups whose required columns are all
+// present, returning the filtered values and how many groups survived.
+//
+// It is applied both to a fresh scrape and to rows loaded back from disk. The
+// second matters as much as the first: a run that ends by taking the machine
+// down can leave a final line cut off mid-write, and without this a row holding
+// only db_size would load as an etcd sample whose missing revisions read as
+// zero, turning into an enormous fake lag rather than a gap.
+func completeGroups(found map[string]float64) (map[string]float64, int) {
+	seen := map[string]int{}
+
+	for _, m := range seriesMetrics {
+		if _, ok := found[m.col]; ok && m.required {
 			seen[m.group]++
 		}
 	}
 
-	sample := Sample{At: at, Values: map[string]float64{}}
+	out := map[string]float64{}
 	kept := 0
 
 	for group, need := range requiredPerGroup {
@@ -259,16 +311,12 @@ func parseSample(at time.Time, raw string) (Sample, error) {
 			}
 
 			if val, ok := found[m.col]; ok {
-				sample.Values[m.col] = val
+				out[m.col] = val
 			}
 		}
 	}
 
-	if kept == 0 {
-		return Sample{}, fmt.Errorf("no complete metric group in sample output") //nolint:err113
-	}
-
-	return sample, nil
+	return out, kept
 }
 
 // takeSample collects one observation from the control node.
@@ -373,8 +421,10 @@ func (s *seriesWriter) Close() error {
 // row, so an outage that took the whole control node away still shows up as
 // samples with no metrics rather than as a silent hole between two timestamps.
 func SampleTo(ctx context.Context, run Runner, interval time.Duration, path string) error {
+	// Refused rather than treated as "nothing to do": returning quietly left no
+	// series behind while the caller reported one written.
 	if interval <= 0 {
-		return nil
+		return fmt.Errorf("sampling interval must be positive, got %s", interval) //nolint:err113
 	}
 
 	series, err := createSeries(path)
@@ -474,7 +524,7 @@ func LoadSeries(path string) ([]Sample, error) {
 			sample.Values[header[pos]] = val
 		}
 
-		samples = append(samples, sample)
+		samples = append(samples, loadedSample(sample))
 	}
 
 	return samples, nil

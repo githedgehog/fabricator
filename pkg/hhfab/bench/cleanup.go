@@ -129,10 +129,13 @@ func cleanAgents(ctx context.Context, kube kclient.Client, names []string) ([]Cl
 	for _, name := range names {
 		agent := &agentapi.Agent{ObjectMeta: kmetav1.ObjectMeta{Name: name, Namespace: kmetav1.NamespaceDefault}}
 
-		if err := kube.Delete(ctx, agent); err != nil && !isNotFound(err) {
+		deleted, err := deleteIfPresent(ctx, kube, agent)
+		if err != nil {
 			return nil, fmt.Errorf("deleting agent %s: %w", name, err)
 		}
-		agentRes.Deleted++
+		if deleted {
+			agentRes.Deleted++
+		}
 	}
 
 	agentRes.Took = time.Since(start)
@@ -155,10 +158,13 @@ func cleanAgents(ctx context.Context, kube kclient.Client, names []string) ([]Cl
 		}
 
 		for _, obj := range objs {
-			if err := kube.Delete(ctx, obj); err != nil && !isNotFound(err) {
+			deleted, err := deleteIfPresent(ctx, kube, obj)
+			if err != nil {
 				return nil, fmt.Errorf("deleting %T %s: %w", obj, obj.GetName(), err)
 			}
-			rbacRes.Deleted++
+			if deleted {
+				rbacRes.Deleted++
+			}
 		}
 	}
 
@@ -203,4 +209,21 @@ func wantFabric(fabric string, fabrics []string) bool {
 
 func isNotFound(err error) bool {
 	return kclient.IgnoreNotFound(err) == nil
+}
+
+// deleteIfPresent deletes obj and reports whether anything was there to
+// delete. A missing object is not an error - a partial or repeated clean hits
+// that constantly - but it must not be counted as removed either, or the
+// summary claims deletions that never happened.
+func deleteIfPresent(ctx context.Context, kube kclient.Client, obj kclient.Object) (bool, error) {
+	err := kube.Delete(ctx, obj)
+
+	switch {
+	case err == nil:
+		return true, nil
+	case isNotFound(err):
+		return false, nil
+	default:
+		return false, err //nolint:wrapcheck // callers add the object identity
+	}
 }

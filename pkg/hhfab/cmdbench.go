@@ -63,6 +63,14 @@ func DoVLABBenchInit(ctx context.Context, workDir, cacheDir string, opts BenchIn
 	summarize(specs, gen)
 
 	if opts.DryRun {
+		// Allowed, because it is the quick way to see what a large topology
+		// would contain - local validation at that size takes hours. But nothing
+		// has checked the result: skip-validate normally leaves that to the
+		// admission webhooks, and a dry run never reaches them.
+		if opts.SkipValidate {
+			slog.Warn("Dry run with --skip-validate: the generated objects have not been validated by anything")
+		}
+
 		return benchDryRun(ctx, l, opts.Out)
 	}
 
@@ -215,6 +223,11 @@ type BenchSampleOpts struct {
 // the control node is one section of several, it is the whole point here - so a
 // missing one fails rather than quietly producing an empty series.
 func DoVLABBenchSample(ctx context.Context, workDir, cacheDir string, opts BenchSampleOpts) error {
+	// Checked before reaching for the control node, so a bad flag fails fast.
+	if opts.Interval <= 0 {
+		return fmt.Errorf("--interval must be positive, got %s", opts.Interval) //nolint:err113
+	}
+
 	run, err := controlNodeRunner(ctx, workDir, cacheDir)
 	if err != nil {
 		return fmt.Errorf("sampling needs the control node: %w", err)
