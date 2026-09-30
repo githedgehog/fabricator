@@ -101,7 +101,7 @@ type BenchAgentsOpts struct {
 	Agents         []string
 	APIVia         string
 	SyncHeartbeats bool
-	StatusSize     string
+	PadSize        string
 	QPS            float32
 	Burst          int
 }
@@ -109,7 +109,7 @@ type BenchAgentsOpts struct {
 // DoVLABBenchAgents simulates switch agents against the Agent objects in the
 // cluster.
 func DoVLABBenchAgents(ctx context.Context, workDir, cacheDir string, opts BenchAgentsOpts) error {
-	statusSize, err := bench.ParseSize(opts.StatusSize)
+	padSize, err := bench.ParseSize(opts.PadSize)
 	if err != nil {
 		return err //nolint:wrapcheck
 	}
@@ -144,7 +144,7 @@ func DoVLABBenchAgents(ctx context.Context, workDir, cacheDir string, opts Bench
 		APIVia:         opts.APIVia,
 		APIServer:      apiServer,
 		SyncHeartbeats: opts.SyncHeartbeats,
-		StatusSize:     statusSize,
+		PadSize:        padSize,
 	}); err != nil {
 		return fmt.Errorf("running agents: %w", err)
 	}

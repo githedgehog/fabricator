@@ -110,7 +110,7 @@ const (
 	FlagBenchAPIVia               = "api-via"
 	FlagBenchApplyDelay           = "apply-delay"
 	FlagBenchSyncHeartbeats       = "sync-heartbeats"
-	FlagBenchStatusSize           = "status-size"
+	FlagBenchPadSize              = "pad-size"
 	FlagBenchUpdateWorkers        = "update-workers"
 	FlagBenchUpdateSleep          = "update-sleep"
 	FlagBenchInspectWorkers       = "inspect-workers"
@@ -2012,8 +2012,7 @@ inspect and wait-switches rather than as a fabric that never converged.`,
 								Flags: flatten(defaultFlags, []cli.Flag{
 									&cli.DurationFlag{
 										Name:  FlagBenchDuration,
-										Usage: "how long to run, 0 to run until interrupted",
-										Value: 30 * time.Minute,
+										Usage: "how long to run; unset runs until interrupted",
 									},
 									&cli.DurationFlag{
 										Name:  FlagBenchInterval,
@@ -2039,7 +2038,7 @@ inspect and wait-switches rather than as a fabric that never converged.`,
 										Usage: "drop the per-agent phase offset so every agent writes at once",
 									},
 									&cli.StringFlag{
-										Name:  FlagBenchStatusSize,
+										Name:  FlagBenchPadSize,
 										Usage: "pad each Agent to at least this total object `SIZE` (e.g. 100KB, 256KiB), spec included, to sweep object size; empty leaves it at its natural size",
 									},
 									&cli.Float64Flag{
@@ -2062,7 +2061,7 @@ inspect and wait-switches rather than as a fabric that never converged.`,
 										Agents:         c.StringSlice(FlagBenchOnly),
 										APIVia:         c.String(FlagBenchAPIVia),
 										SyncHeartbeats: c.Bool(FlagBenchSyncHeartbeats),
-										StatusSize:     c.String(FlagBenchStatusSize),
+										PadSize:        c.String(FlagBenchPadSize),
 										QPS:            float32(c.Float64(FlagBenchQPS)),
 										Burst:          c.Int(FlagBenchBurst),
 									}); err != nil {
@@ -2078,8 +2077,7 @@ inspect and wait-switches rather than as a fabric that never converged.`,
 								Flags: flatten(defaultFlags, []cli.Flag{
 									&cli.DurationFlag{
 										Name:  FlagBenchDuration,
-										Usage: "how long to run for",
-										Value: 30 * time.Minute,
+										Usage: "how long to run; unset runs until interrupted",
 									},
 									&cli.IntFlag{
 										Name:  FlagBenchUpdateWorkers,
@@ -2163,7 +2161,7 @@ inspect and wait-switches rather than as a fabric that never converged.`,
 								Flags: flatten(defaultFlags, []cli.Flag{
 									&cli.DurationFlag{
 										Name:  FlagBenchDuration,
-										Usage: "how long to sample for; 0 samples until interrupted",
+										Usage: "how long to sample for; unset samples until interrupted",
 									},
 									&cli.DurationFlag{
 										Name:  FlagBenchInterval,

@@ -84,11 +84,11 @@ type AgentsOpts struct {
 	// the steady state.
 	SyncHeartbeats bool
 
-	// StatusSize pads each Agent to at least this many bytes, so object size
+	// PadSize pads each Agent to at least this many bytes, so object size
 	// can be swept without waiting on a realistic State tree, and so a run can
 	// be given headroom above whatever production currently reports. Zero
 	// leaves the status at its natural size.
-	StatusSize int
+	PadSize int
 }
 
 // RunAgents simulates switch agents against every matching Agent object until
@@ -120,15 +120,15 @@ func RunAgents(ctx context.Context, admin kclient.Client, opts AgentsOpts) error
 	}
 
 	slog.Info("Preparing agents", "count", len(names), "interval", opts.Interval,
-		"applyDelay", opts.ApplyDelay, "statusSize", opts.StatusSize, "via", opts.APIVia)
+		"applyDelay", opts.ApplyDelay, "padSize", opts.PadSize, "via", opts.APIVia)
 
 	// One shared filler for the whole fleet: it is junk, so there is no reason
 	// to pay for per-agent randomness. It is random rather than repeated so it
 	// does not compress away and understate what is being stored.
 	filler := ""
-	if opts.StatusSize > 0 {
+	if opts.PadSize > 0 {
 		var err error
-		if filler, err = newFiller(opts.StatusSize); err != nil {
+		if filler, err = newFiller(opts.PadSize); err != nil {
 			return err
 		}
 	}
@@ -225,9 +225,9 @@ type agentSim struct {
 	// loop touches it, so no lock is needed.
 	currentGen int64
 
-	// statusSize, when set, pads every status write up to that many bytes.
-	statusSize int
-	filler     string
+	// padSize, when set, pads every status write up to that many bytes.
+	padSize int
+	filler  string
 
 	stats *agentStats
 }
@@ -275,14 +275,14 @@ func newAgentSim(ctx context.Context, admin kclient.Client, name string, opts Ag
 	}
 
 	return &agentSim{
-		name:       name,
-		kube:       kube,
-		installID:  stableID("install", name),
-		runID:      randomID(),
-		bootID:     stableID("boot", name),
-		statusSize: opts.StatusSize,
-		filler:     filler,
-		stats:      stats,
+		name:      name,
+		kube:      kube,
+		installID: stableID("install", name),
+		runID:     randomID(),
+		bootID:    stableID("boot", name),
+		padSize:   opts.PadSize,
+		filler:    filler,
+		stats:     stats,
 	}, nil
 }
 
@@ -509,7 +509,7 @@ const padKeyPrefix = "bench-pad-"
 // gap, so this only guards against pathological cases.
 const padConverge = 6
 
-// pad grows the whole Agent object to at least statusSize bytes. The target is
+// pad grows the whole Agent object to at least padSize bytes. The target is
 // the marshalled object, spec included, not the status subtree alone - a switch
 // with a large spec therefore needs less filler to reach the same total.
 //
@@ -519,7 +519,7 @@ const padConverge = 6
 // for the readers that matter: inspect reads the LLDP and BGP neighbour maps,
 // not firmware.
 func (a *agentSim) pad(agent *agentapi.Agent) error {
-	if a.statusSize <= 0 {
+	if a.padSize <= 0 {
 		return nil
 	}
 
@@ -540,7 +540,7 @@ func (a *agentSim) pad(agent *agentapi.Agent) error {
 			return fmt.Errorf("measuring agent %s: %w", a.name, err)
 		}
 
-		need := a.statusSize - len(raw)
+		need := a.padSize - len(raw)
 		if need <= 0 {
 			return nil
 		}
