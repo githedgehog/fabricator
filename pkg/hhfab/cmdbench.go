@@ -152,6 +152,54 @@ func DoVLABBenchAgents(ctx context.Context, workDir, cacheDir string, opts Bench
 	return nil
 }
 
+// BenchUsersOpts configures `hhfab vlab bench users`.
+type BenchUsersOpts struct {
+	Duration         time.Duration
+	UpdateWorkers    int
+	UpdateSleep      time.Duration
+	InspectWorkers   int
+	InspectSleep     time.Duration
+	Kinds            []string
+	Inspects         []string
+	Fabrics          []string
+	OpTimeout        time.Duration
+	InspectOneSwitch bool
+	QPS              float32
+	Burst            int
+}
+
+// DoVLABBenchUsers simulates operators changing objects and running inspect.
+func DoVLABBenchUsers(ctx context.Context, workDir, cacheDir string, opts BenchUsersOpts) error {
+	kubeconfig := filepath.Join(workDir, VLABDir, VLABKubeConfig)
+
+	// Discovery only; every worker builds its own isolated client so the load
+	// looks like separate operators rather than one process.
+	admin, err := bench.NewKubeClient(ctx, kubeconfig, opts.QPS, opts.Burst)
+	if err != nil {
+		return err //nolint:wrapcheck
+	}
+
+	if err := bench.RunUsers(ctx, admin, bench.UsersOpts{
+		Kubeconfig:       kubeconfig,
+		Duration:         opts.Duration,
+		UpdateWorkers:    opts.UpdateWorkers,
+		UpdateSleep:      opts.UpdateSleep,
+		InspectWorkers:   opts.InspectWorkers,
+		InspectSleep:     opts.InspectSleep,
+		Kinds:            opts.Kinds,
+		Inspects:         opts.Inspects,
+		Fabrics:          opts.Fabrics,
+		OpTimeout:        opts.OpTimeout,
+		InspectOneSwitch: opts.InspectOneSwitch,
+		QPS:              opts.QPS,
+		Burst:            opts.Burst,
+	}); err != nil {
+		return fmt.Errorf("running users: %w", err)
+	}
+
+	return nil
+}
+
 // BenchSampleOpts configures `hhfab vlab bench sample`.
 type BenchSampleOpts struct {
 	Duration time.Duration

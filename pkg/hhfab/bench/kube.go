@@ -6,8 +6,11 @@ package bench
 import (
 	"context"
 	"fmt"
+	"net"
+	"time"
 
 	agentapi "go.githedgehog.com/fabric/api/agent/v1beta1"
+	dhcpapi "go.githedgehog.com/fabric/api/dhcp/v1beta1"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
@@ -47,6 +50,9 @@ var schemeBuilders = []func(*runtime.Scheme) error{
 	wiringapi.AddToScheme,
 	vpcapi.AddToScheme,
 	agentapi.AddToScheme,
+	// inspect mac reads DHCP leases alongside the Agent interfaces, so the
+	// scheme needs the DHCP types even though the bench never writes them.
+	dhcpapi.AddToScheme,
 	fabapi.AddToScheme,
 	coreapi.AddToScheme,
 	rbacapi.AddToScheme,
@@ -60,6 +66,21 @@ var schemeBuilders = []func(*runtime.Scheme) error{
 // which is pure overhead for a writer and would make the driver's own memory
 // the thing that breaks first.
 func NewKubeClient(ctx context.Context, kubeconfig string, qps float32, burst int) (kclient.WithWatch, error) {
+	return newKubeClient(ctx, kubeconfig, qps, burst, false)
+}
+
+// NewKubeClientIsolated builds an uncached client that shares no HTTP transport
+// with any other client in the process.
+//
+// client-go caches transports keyed on TLS config rather than on anything per
+// caller, so clients built from the same kubeconfig would otherwise share one
+// http.Transport and its connection pool - N simulated users would reach the
+// apiserver as one. A non-nil Dial bypasses that cache.
+func NewKubeClientIsolated(ctx context.Context, kubeconfig string, qps float32, burst int) (kclient.WithWatch, error) {
+	return newKubeClient(ctx, kubeconfig, qps, burst, true)
+}
+
+func newKubeClient(ctx context.Context, kubeconfig string, qps float32, burst int, isolate bool) (kclient.WithWatch, error) {
 	cfg, err := kubeutil.NewClientConfig(ctx, kubeconfig)
 	if err != nil {
 		return nil, fmt.Errorf("creating kube config: %w", err)
@@ -67,6 +88,10 @@ func NewKubeClient(ctx context.Context, kubeconfig string, qps float32, burst in
 
 	cfg.QPS = qps
 	cfg.Burst = burst
+
+	if isolate {
+		cfg.Dial = (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext
+	}
 
 	scheme, err := benchScheme()
 	if err != nil {
