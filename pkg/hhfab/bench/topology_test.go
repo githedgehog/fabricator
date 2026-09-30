@@ -271,8 +271,10 @@ func TestGeneratorRefusesOversizedShape(t *testing.T) {
 	require.ErrorContains(t, err, "data ports")
 }
 
-// 8x100G on every server port would exceed the DS5000's per-pipeline limit.
-func TestGeneratorRefusesUnsupportedBreakout(t *testing.T) {
+// 1x800G is the one server breakout that uses a single subport per port, so it
+// exercises the E1/N/1 naming path for single-subport modes and must be
+// accepted.
+func TestGeneratorAcceptsSingleSubportBreakout(t *testing.T) {
 	t.Parallel()
 
 	ctx := t.Context()

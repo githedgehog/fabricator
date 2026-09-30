@@ -2030,7 +2030,7 @@ inspect and wait-switches rather than as a fabric that never converged.`,
 									},
 									&cli.StringFlag{
 										Name:  FlagBenchAPIVia,
-										Usage: "how agents reach the API: one of " + strings.Join(bench.APIVias, ", "),
+										Usage: "how agents reach the API; only " + bench.APIViaHostfwd + " (the VLAB port forward) is implemented, " + bench.APIViaBridge + " (per-agent source addresses on the management bridge) is not yet",
 										Value: bench.APIViaHostfwd,
 									},
 									&cli.BoolFlag{
