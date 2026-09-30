@@ -270,8 +270,9 @@ var etcdMetrics = []struct {
 	{"etcd_server_quota_backend_bytes", "quota", true},
 	{"etcd_debugging_mvcc_current_revision", "revision", false},
 	{"etcd_debugging_mvcc_compact_revision", "compacted at", false},
-	{"etcd_server_has_leader", "has leader", false},
-	{"etcd_server_leader_changes_seen_total", "leader changes", false},
+	// Leadership is not reported: the VLAB control plane is a single etcd
+	// member, so "has leader" is always 1 and leader changes only ever count
+	// restarts, which the node section shows more directly.
 	{"etcd_server_slow_apply_total", "slow applies", false},
 	{"etcd_server_slow_read_indexes_total", "slow reads", false},
 }

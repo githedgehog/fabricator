@@ -152,7 +152,10 @@ func mk(at time.Time, vals map[string]float64) Sample {
 // series builds samples 30s apart. Revisions advance steadily; compaction
 // catches up to just behind the current revision at the listed indices, which
 // is how a real series looks - compaction always trails.
-func series(sizes []int64, compactAt map[int]bool, extra map[string]float64) []Sample {
+//
+// inUse gives live bytes per sample; nil means half the file is live, so free
+// pages exist and "were they reused" is a meaningful question.
+func series(sizes, inUse []int64, compactAt map[int]bool, extra map[string]float64) []Sample {
 	base := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
 	out := make([]Sample, 0, len(sizes))
 
@@ -165,9 +168,14 @@ func series(sizes []int64, compactAt map[int]bool, extra map[string]float64) []S
 			compact = current - 50
 		}
 
+		live := size / 2
+		if inUse != nil {
+			live = inUse[idx]
+		}
+
 		vals := map[string]float64{
 			"db_size":     float64(size),
-			"db_in_use":   1000,
+			"db_in_use":   float64(live),
 			"compact_rev": float64(compact),
 			"current_rev": float64(current),
 		}
@@ -182,12 +190,110 @@ func series(sizes []int64, compactAt map[int]bool, extra map[string]float64) []S
 	return out
 }
 
+// reading renders a series and returns the "reading" verdict lines.
+func reading(t *testing.T, samples []Sample) string {
+	t.Helper()
+
+	var buf strings.Builder
+
+	healthSeries(&buf, samples)
+
+	out := []string{}
+	keep := false
+
+	for _, line := range strings.Split(buf.String(), "\n") {
+		switch {
+		case strings.Contains(line, "reading"):
+			keep = true
+		case keep && strings.HasPrefix(line, "                       "):
+			// continuation line of the verdict
+		default:
+			keep = false
+		}
+
+		if keep {
+			out = append(out, strings.TrimSpace(line))
+		}
+	}
+
+	return strings.Join(out, " ")
+}
+
+func TestReadingRefusesWithOneCompaction(t *testing.T) {
+	t.Parallel()
+
+	// One compaction cannot distinguish anything; saying so is the right answer.
+	samples := series([]int64{100, 200, 300, 400}, nil, map[int]bool{1: true}, nil)
+
+	require.Contains(t, reading(t, samples), "too few compactions")
+}
+
+func TestReadingIngestOutpacingCompaction(t *testing.T) {
+	t.Parallel()
+
+	// The file is entirely live data: there are no free pages, so growth is
+	// accumulation and reuse never enters into it. This is the 800KB run.
+	sizes := []int64{100, 200, 300, 400, 500, 600, 700, 800}
+	samples := series(sizes, sizes, map[int]bool{2: true, 5: true}, nil)
+
+	stats := analyzeSeries(samples)
+	require.Zero(t, stats.FreePeak)
+	require.Equal(t, 0, stats.ReuseFailures)
+
+	got := reading(t, samples)
+	require.Contains(t, got, "not keeping")
+	require.NotContains(t, got, "not being reused")
+}
+
+func TestReadingFreePagesNotReused(t *testing.T) {
+	t.Parallel()
+
+	// Most of the file is free the whole way and growth is small, so the free
+	// space could easily have absorbed it - yet the file grew anyway. That is
+	// the real reuse-failure signature, as distinct from ingest outrunning
+	// compaction.
+	sizes := []int64{10000, 10100, 10200, 10300, 10400, 10500, 10600, 10700}
+	live := []int64{1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000}
+	samples := series(sizes, live, map[int]bool{2: true, 5: true}, nil)
+
+	stats := analyzeSeries(samples)
+	require.Positive(t, stats.FreePeak)
+	require.Equal(t, 2, stats.ReuseFailures)
+
+	require.Contains(t, reading(t, samples), "not being reused")
+}
+
+func TestReadingHealthy(t *testing.T) {
+	t.Parallel()
+
+	// Free space exists and the file holds steady after compaction.
+	sizes := []int64{1000, 2000, 3000, 3000, 3000, 3000, 3000, 3000}
+	samples := series(sizes, nil, map[int]bool{2: true, 5: true}, nil)
+
+	stats := analyzeSeries(samples)
+	require.Equal(t, 0, stats.ReuseFailures)
+
+	require.Contains(t, reading(t, samples), "being reused")
+}
+
+func TestCompactionIntervalNotReportedForOne(t *testing.T) {
+	t.Parallel()
+
+	// "every ~0s" was wrong: an interval needs two events.
+	var buf strings.Builder
+
+	healthSeries(&buf, series([]int64{100, 200, 300}, nil, map[int]bool{1: true}, nil))
+
+	require.NotContains(t, buf.String(), "every ~0s")
+	require.Contains(t, buf.String(), "too few to measure an interval")
+}
+
 func TestAnalyzeSeriesGrowsAfterCompaction(t *testing.T) {
 	t.Parallel()
 
 	// The file keeps growing through and past each compaction, which is the
 	// signature of freed pages not being reused.
-	samples := series([]int64{100, 200, 300, 400, 500, 600, 700, 800},
+	samples := series([]int64{100, 200, 300, 400, 500, 600, 700, 800}, nil,
 		map[int]bool{2: true, 5: true}, map[string]float64{"open_reads": 4})
 
 	stats := analyzeSeries(samples)
@@ -211,7 +317,7 @@ func TestAnalyzeSeriesStableAfterCompaction(t *testing.T) {
 
 	// The file grows up to a compaction and then holds, which means the
 	// retention window is what sets the peak and a shorter one would bound it.
-	samples := series([]int64{100, 200, 300, 300, 300, 300, 300, 300},
+	samples := series([]int64{100, 200, 300, 300, 300, 300, 300, 300}, nil,
 		map[int]bool{2: true, 5: true}, nil)
 
 	stats := analyzeSeries(samples)
@@ -250,7 +356,7 @@ func TestAnalyzeSeriesQuotaAndCounters(t *testing.T) {
 func TestAnalyzeSeriesLagAndInterval(t *testing.T) {
 	t.Parallel()
 
-	samples := series([]int64{100, 100, 100, 100, 100}, map[int]bool{1: true, 3: true}, nil)
+	samples := series([]int64{100, 100, 100, 100, 100}, nil, map[int]bool{1: true, 3: true}, nil)
 
 	stats := analyzeSeries(samples)
 
