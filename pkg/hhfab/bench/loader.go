@@ -91,15 +91,14 @@ func Apply(ctx context.Context, kube kclient.Client, l *apiutil.Loader, opts App
 	results := make([]PhaseResult, 0, len(Phases))
 
 	for _, phase := range Phases {
-		objs := grouped[phase]
-		if len(objs) == 0 {
-			continue
-		}
-
-		res, err := applyPhase(ctx, kube, phase, objs, opts.Workers)
-		results = append(results, res)
-		if err != nil {
-			return results, err
+		// An empty phase has nothing to apply but still has to honour --phase,
+		// or asking to stop after it would run every phase that follows.
+		if objs := grouped[phase]; len(objs) > 0 {
+			res, err := applyPhase(ctx, kube, phase, objs, opts.Workers)
+			results = append(results, res)
+			if err != nil {
+				return results, err
+			}
 		}
 
 		if opts.Phase == phase {

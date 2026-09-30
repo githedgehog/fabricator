@@ -418,24 +418,33 @@ func benchGenerate(ctx context.Context, c *Config, specs []bench.FabricSpec, ski
 
 // benchDryRun writes the generated objects as YAML instead of applying them.
 func benchDryRun(ctx context.Context, l *apiutil.Loader, out string) error {
-	w := os.Stdout
-	if out != "" {
-		f, err := os.OpenFile(out, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
-		if err != nil {
-			return fmt.Errorf("creating %q: %w", out, err)
+	if out == "" {
+		if err := apiutil.PrintInclude(ctx, l.GetClient(), os.Stdout); err != nil {
+			return fmt.Errorf("writing objects: %w", err)
 		}
-		defer f.Close()
 
-		w = f
+		return nil
 	}
 
-	if err := apiutil.PrintInclude(ctx, l.GetClient(), w); err != nil {
-		return fmt.Errorf("writing objects: %w", err)
+	f, err := os.OpenFile(out, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return fmt.Errorf("creating %q: %w", out, err)
 	}
 
-	if out != "" {
-		slog.Info("Wrote generated topology", "path", out)
+	writeErr := apiutil.PrintInclude(ctx, l.GetClient(), f)
+
+	// Close is checked rather than deferred: it is where a buffered write that
+	// failed finally reports it, and ignoring it would claim a file was written
+	// that is incomplete.
+	if err := f.Close(); err != nil && writeErr == nil {
+		writeErr = fmt.Errorf("closing %q: %w", out, err)
 	}
+
+	if writeErr != nil {
+		return fmt.Errorf("writing objects: %w", writeErr)
+	}
+
+	slog.Info("Wrote generated topology", "path", out)
 
 	return nil
 }
@@ -460,6 +469,10 @@ func checkCoexistence(ctx context.Context, kube kclient.Client, force bool) erro
 		return nil
 	}
 
+	// Counted before the list is cut down for display, and counting only the
+	// foreign switches: on a re-run the bench's own switches are there too.
+	count := len(foreign)
+
 	sort.Strings(foreign)
 	if len(foreign) > 5 {
 		foreign = append(foreign[:5], "...")
@@ -467,10 +480,10 @@ func checkCoexistence(ctx context.Context, kube kclient.Client, force bool) erro
 
 	if !force {
 		return fmt.Errorf("cluster already has %d switch(es) the bench did not create (%s); the address allocator assumes it owns the pools, so use a switchless VLAB (hhfab vlab gen --no-switches) or pass --force to proceed anyway", //nolint:err113
-			len(switches.Items), strings.Join(foreign, ", "))
+			count, strings.Join(foreign, ", "))
 	}
 
-	slog.Warn("Proceeding with non-bench switches present", "switches", strings.Join(foreign, ", "))
+	slog.Warn("Proceeding with non-bench switches present", "count", count, "switches", strings.Join(foreign, ", "))
 
 	return nil
 }
