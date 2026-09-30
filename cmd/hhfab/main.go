@@ -111,6 +111,14 @@ const (
 	FlagBenchApplyDelay           = "apply-delay"
 	FlagBenchSyncHeartbeats       = "sync-heartbeats"
 	FlagBenchStatusSize           = "status-size"
+	FlagBenchUpdateWorkers        = "update-workers"
+	FlagBenchUpdateSleep          = "update-sleep"
+	FlagBenchInspectWorkers       = "inspect-workers"
+	FlagBenchInspectSleep         = "inspect-sleep"
+	FlagBenchKinds                = "kinds"
+	FlagBenchInspects             = "inspects"
+	FlagBenchOpTimeout            = "op-timeout"
+	FlagBenchInspectOneSwitch     = "inspect-one-switch"
 	FlagBenchStats                = "stats"
 )
 
@@ -2059,6 +2067,91 @@ inspect and wait-switches rather than as a fabric that never converged.`,
 										Burst:          c.Int(FlagBenchBurst),
 									}); err != nil {
 										return fmt.Errorf("bench agents: %w", err)
+									}
+
+									return nil
+								},
+							},
+							{
+								Name:  "users",
+								Usage: "simulate operators changing objects and running inspect against the fabric",
+								Flags: flatten(defaultFlags, []cli.Flag{
+									&cli.DurationFlag{
+										Name:  FlagBenchDuration,
+										Usage: "how long to run for",
+										Value: 30 * time.Minute,
+									},
+									&cli.IntFlag{
+										Name:  FlagBenchUpdateWorkers,
+										Usage: "operators changing objects, each with its own uncached client",
+										Value: bench.DefaultUpdateWorkers,
+									},
+									&cli.DurationFlag{
+										Name:  FlagBenchUpdateSleep,
+										Usage: "think time between changes, per worker",
+										Value: bench.DefaultUpdateSleep,
+									},
+									&cli.IntFlag{
+										Name:  FlagBenchInspectWorkers,
+										Usage: "operators running inspect, each with its own uncached client",
+										Value: bench.DefaultInspectWorkers,
+									},
+									&cli.DurationFlag{
+										Name:  FlagBenchInspectSleep,
+										Usage: "think time between inspects, per worker",
+										Value: bench.DefaultInspectSleep,
+									},
+									&cli.StringSliceFlag{
+										Name:  FlagBenchKinds,
+										Usage: "object `KIND`s to change, comma-separated or repeated",
+										Value: cli.NewStringSlice(bench.DefaultUserKinds...),
+									},
+									&cli.StringSliceFlag{
+										Name:  FlagBenchInspects,
+										Usage: "inspect `COMMAND`s to run, comma-separated or repeated",
+										Value: cli.NewStringSlice(bench.DefaultUserInspects...),
+									},
+									&cli.StringSliceFlag{
+										Name:  FlagBenchOnly,
+										Usage: "only touch these fabrics by `NAME`, comma-separated or repeated (default: all)",
+									},
+									&cli.DurationFlag{
+										Name:  FlagBenchOpTimeout,
+										Usage: "bound on one operation, so a stuck inspect cannot stall a worker for the run",
+										Value: bench.DefaultOpTimeout,
+									},
+									&cli.BoolFlag{
+										Name:  FlagBenchInspectOneSwitch,
+										Usage: "scope lldp/bgp/bfd to one random switch; by default they run unscoped, as an operator runs them, which is far more expensive",
+									},
+									&cli.Float64Flag{
+										Name:  FlagBenchQPS,
+										Usage: "per-worker client QPS",
+										Value: bench.DefaultQPS,
+									},
+									&cli.IntFlag{
+										Name:  FlagBenchBurst,
+										Usage: "per-worker client burst",
+										Value: bench.DefaultBurst,
+									},
+								}),
+								Before: before(false),
+								Action: func(c *cli.Context) error {
+									if err := hhfab.DoVLABBenchUsers(ctx, workDir, cacheDir, hhfab.BenchUsersOpts{
+										Duration:         c.Duration(FlagBenchDuration),
+										UpdateWorkers:    c.Int(FlagBenchUpdateWorkers),
+										UpdateSleep:      c.Duration(FlagBenchUpdateSleep),
+										InspectWorkers:   c.Int(FlagBenchInspectWorkers),
+										InspectSleep:     c.Duration(FlagBenchInspectSleep),
+										Kinds:            c.StringSlice(FlagBenchKinds),
+										Inspects:         c.StringSlice(FlagBenchInspects),
+										Fabrics:          c.StringSlice(FlagBenchOnly),
+										OpTimeout:        c.Duration(FlagBenchOpTimeout),
+										InspectOneSwitch: c.Bool(FlagBenchInspectOneSwitch),
+										QPS:              float32(c.Float64(FlagBenchQPS)),
+										Burst:            c.Int(FlagBenchBurst),
+									}); err != nil {
+										return fmt.Errorf("bench users: %w", err)
 									}
 
 									return nil
