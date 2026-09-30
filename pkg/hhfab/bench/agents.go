@@ -492,7 +492,9 @@ const padKeyPrefix = "bench-pad-"
 // gap, so this only guards against pathological cases.
 const padConverge = 6
 
-// pad grows the object to at least statusSize bytes.
+// pad grows the whole Agent object to at least statusSize bytes. The target is
+// the marshalled object, spec included, not the status subtree alone - a switch
+// with a large spec therefore needs less filler to reach the same total.
 //
 // The padding goes into Status.State.Firmware because it is a map[string]string
 // in the CRD's structural schema, so arbitrary keys survive the round trip -

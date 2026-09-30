@@ -2032,7 +2032,7 @@ inspect and wait-switches rather than as a fabric that never converged.`,
 									},
 									&cli.StringFlag{
 										Name:  FlagBenchStatusSize,
-										Usage: "pad each Agent status to at least this `SIZE` (e.g. 100KB) to sweep object size; empty leaves it at its natural size",
+										Usage: "pad each Agent to at least this total object `SIZE` (e.g. 100KB, 256KiB), spec included, to sweep object size; empty leaves it at its natural size",
 									},
 									&cli.Float64Flag{
 										Name:  FlagBenchQPS,
