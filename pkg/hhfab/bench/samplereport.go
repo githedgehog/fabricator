@@ -257,31 +257,41 @@ func intervalMean(prev, cur Sample, sumCol, countCol string) time.Duration {
 
 // growthAfter reports how much the file grew in the window following the
 // compaction observed at idx, and whether the series actually covers that whole
-// window - it does not when the run ended, or etcd went away, before the window
-// closed.
+// window.
+//
+// A window is complete only if etcd answered every sample inside it and at
+// least one sample reached the deadline. A sample without etcd metrics in the
+// middle of the window is a hole in the evidence, not a sample to skip: if the
+// growth happened while etcd was unreachable, skipping it and then counting the
+// window as observed would record zero growth for a window nobody saw, and
+// outages are exactly what the benchmark provokes.
 func growthAfter(samples []Sample, idx int) (int64, bool) {
 	base := samples[idx]
 	deadline := base.At.Add(postCompactWindow)
 	peak := base.DBSize()
-	complete := false
 
 	for _, sample := range samples[idx+1:] {
-		if !sample.HasEtcd() {
-			continue
-		}
-
-		if !sample.At.Before(deadline) {
-			complete = true
-		}
-
 		if sample.At.After(deadline) {
-			break
+			// The first sample beyond the window. Every sample inside it had
+			// etcd, so the window counts as observed as long as etcd was still
+			// answering when it closed. This sample is outside the window, so it
+			// does not contribute to the growth.
+			return peak - base.DBSize(), sample.HasEtcd()
+		}
+
+		if !sample.HasEtcd() {
+			return 0, false
 		}
 
 		peak = max(peak, sample.DBSize())
+
+		if !sample.At.Before(deadline) {
+			return peak - base.DBSize(), true
+		}
 	}
 
-	return peak - base.DBSize(), complete
+	// The series ended before the window did.
+	return peak - base.DBSize(), false
 }
 
 // healthSeries prints what a sampled run showed, if there is one.
