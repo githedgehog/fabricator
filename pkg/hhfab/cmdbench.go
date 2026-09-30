@@ -152,6 +152,53 @@ func DoVLABBenchAgents(ctx context.Context, workDir, cacheDir string, opts Bench
 	return nil
 }
 
+// BenchSampleOpts configures `hhfab vlab bench sample`.
+type BenchSampleOpts struct {
+	Duration time.Duration
+	Interval time.Duration
+	Out      string
+}
+
+// DoVLABBenchSample records etcd and control node memory over time, to a file
+// bench health reads back.
+//
+// It is deliberately its own command rather than part of a load generator: what
+// it observes is a property of the cluster, not of any particular load, so it
+// runs alongside agents, users, init, or nothing at all. Unlike health, where
+// the control node is one section of several, it is the whole point here - so a
+// missing one fails rather than quietly producing an empty series.
+func DoVLABBenchSample(ctx context.Context, workDir, cacheDir string, opts BenchSampleOpts) error {
+	run, err := controlNodeRunner(ctx, workDir, cacheDir)
+	if err != nil {
+		return fmt.Errorf("sampling needs the control node: %w", err)
+	}
+
+	path := opts.Out
+	if path == "" {
+		path = filepath.Join(workDir, bench.SeriesFile)
+	}
+
+	// A zero duration samples until interrupted, which is the common case when
+	// it is started next to a run of unknown length.
+	if opts.Duration > 0 {
+		var stop context.CancelFunc
+
+		ctx, stop = context.WithTimeout(ctx, opts.Duration)
+		defer stop()
+	}
+
+	slog.Info("Sampling etcd and node memory",
+		"interval", opts.Interval, "duration", opts.Duration, "out", path)
+
+	if err := bench.SampleTo(ctx, run, opts.Interval, path); err != nil {
+		return fmt.Errorf("sampling: %w", err)
+	}
+
+	slog.Info("Wrote series", "path", path)
+
+	return nil
+}
+
 // BenchHealthOpts configures `hhfab vlab bench health`.
 type BenchHealthOpts struct {
 	Stats bool
@@ -179,7 +226,10 @@ func DoVLABBenchHealth(ctx context.Context, workDir, cacheDir string, opts Bench
 		slog.Warn("No control node access, skipping etcd and node sections", "err", err)
 	}
 
-	if err := bench.Health(ctx, kube, run, os.Stdout, bench.HealthOpts{Stats: opts.Stats}); err != nil {
+	if err := bench.Health(ctx, kube, run, os.Stdout, bench.HealthOpts{
+		Stats:  opts.Stats,
+		Series: filepath.Join(workDir, bench.SeriesFile),
+	}); err != nil {
 		return fmt.Errorf("collecting health: %w", err)
 	}
 

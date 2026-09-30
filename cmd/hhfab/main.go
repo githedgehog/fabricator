@@ -2065,6 +2065,37 @@ inspect and wait-switches rather than as a fabric that never converged.`,
 								},
 							},
 							{
+								Name:  "sample",
+								Usage: "record etcd size, compaction and control node memory over time for bench health to read back",
+								Flags: flatten(defaultFlags, []cli.Flag{
+									&cli.DurationFlag{
+										Name:  FlagBenchDuration,
+										Usage: "how long to sample for; 0 samples until interrupted",
+									},
+									&cli.DurationFlag{
+										Name:  FlagBenchInterval,
+										Usage: "time between samples",
+										Value: bench.DefaultSampleInterval,
+									},
+									&cli.StringFlag{
+										Name:  FlagBenchOut,
+										Usage: "write the series to `FILE` (default: " + bench.SeriesFile + " in the work dir)",
+									},
+								}),
+								Before: before(false),
+								Action: func(c *cli.Context) error {
+									if err := hhfab.DoVLABBenchSample(ctx, workDir, cacheDir, hhfab.BenchSampleOpts{
+										Duration: c.Duration(FlagBenchDuration),
+										Interval: c.Duration(FlagBenchInterval),
+										Out:      c.String(FlagBenchOut),
+									}); err != nil {
+										return fmt.Errorf("bench sample: %w", err)
+									}
+
+									return nil
+								},
+							},
+							{
 								Name:  "health",
 								Usage: "show object counts, agent health, etcd and control node state",
 								Flags: flatten(defaultFlags, []cli.Flag{

@@ -48,6 +48,10 @@ type HealthOpts struct {
 	// itself a load on the cluster being measured. Turn it off to read etcd and
 	// the node without perturbing a run in flight.
 	Stats bool
+
+	// Series is the path to samples left by `bench sample`, if any. Empty skips
+	// the section; a missing file is not an error.
+	Series string
 }
 
 // Health prints what the control plane currently looks like: how much is in it,
@@ -66,6 +70,17 @@ func Health(ctx context.Context, kube kclient.Client, run Runner, w io.Writer, o
 		if err := healthFabric(ctx, kube, w); err != nil {
 			return err
 		}
+	}
+
+	// A sampled run leaves a series behind. It is read from the local work dir,
+	// so it is available even when the control node is not.
+	if opts.Series != "" {
+		samples, err := LoadSeries(opts.Series)
+		if err != nil {
+			return err
+		}
+
+		healthSeries(w, samples)
 	}
 
 	// The node sections need the control node, which is not always reachable
