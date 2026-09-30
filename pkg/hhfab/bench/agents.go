@@ -57,9 +57,20 @@ const conditionApplied = "Applied"
 // to the NOS between the two status writes of an apply.
 const DefaultApplyDelay = 5 * time.Second
 
-// eventCoalesce is how long the real agent drains queued watch events before
-// acting on them, so a burst of spec rewrites costs one apply rather than many.
-const eventCoalesce = 5 * time.Second
+// The real agent debounces its watch before acting on an event
+// (fabric/pkg/agent/agent.go, "skip queued events"): it keeps draining while
+// events arrive no more than eventQuiet apart, and gives up after eventCoalesce
+// however busy the watch is. A burst of spec rewrites therefore costs one
+// apply, while a lone rewrite waits only eventQuiet rather than the full cap.
+const (
+	eventQuiet    = time.Second
+	eventCoalesce = 5 * time.Second
+)
+
+// watchRetryDelay is how long an agent waits before reopening a watch that
+// failed or was closed. The real agent exits when its watch closes and is
+// restarted by systemd, so it too comes back after a pause rather than at once.
+const watchRetryDelay = 5 * time.Second
 
 // AgentsOpts configures the agent simulation.
 type AgentsOpts struct {
@@ -321,10 +332,19 @@ func (a *agentSim) run(ctx context.Context, stop <-chan struct{}, opts AgentsOpt
 	ticker := time.NewTicker(opts.Interval)
 	defer ticker.Stop()
 
+	// retry is armed whenever there is no watch - because opening one failed or
+	// the apiserver closed it - and reopens it after watchRetryDelay. Without
+	// it a single failed watch would leave the agent heartbeating but never
+	// applying for the rest of the run, and a watch the apiserver keeps closing
+	// would be reopened in a tight loop against the server being measured.
+	var retry <-chan time.Time
+
 	for {
 		var events <-chan watchEvent
 		if watcher != nil {
 			events = watcher.events
+		} else if retry == nil {
+			retry = time.After(watchRetryDelay)
 		}
 
 		select {
@@ -334,12 +354,13 @@ func (a *agentSim) run(ctx context.Context, stop <-chan struct{}, opts AgentsOpt
 			return
 		case <-ticker.C:
 			a.beat(ctx)
+		case <-retry:
+			retry = nil
+			watcher = a.watch(ctx)
 		case ev, ok := <-events:
 			if !ok {
-				// The apiserver closed the watch; re-establish it rather than
-				// spinning on a dead channel.
 				watcher.Stop()
-				watcher = a.watch(ctx)
+				watcher = nil
 				a.stats.watchResets.Add(1)
 
 				continue
@@ -679,9 +700,9 @@ func (a *agentSim) watch(ctx context.Context) *agentWatch {
 
 			gen := agent.Generation
 
-			// Coalesce whatever else is already queued: a burst of spec
-			// rewrites should cost one apply, not one per event.
-			gen = drainWatch(ctx, watcher.ResultChan(), gen)
+			// Debounce like the real agent: a burst of spec rewrites should
+			// cost one apply, not one per event.
+			gen = drainWatch(ctx, watcher.ResultChan(), gen, eventQuiet, eventCoalesce)
 
 			select {
 			case out <- watchEvent{generation: gen}:
@@ -694,17 +715,24 @@ func (a *agentSim) watch(ctx context.Context) *agentWatch {
 	return &agentWatch{events: out, stop: watcher.Stop}
 }
 
-// drainWatch consumes further events that arrive within the coalesce window,
-// returning the newest generation seen.
-func drainWatch(ctx context.Context, ch <-chan watch.Event, gen int64) int64 {
-	deadline := time.NewTimer(eventCoalesce)
+// drainWatch consumes further events until the watch has been quiet for
+// eventQuiet or eventCoalesce has passed, returning the newest generation seen.
+// It must block: returning as soon as nothing is queued would give every
+// rewrite in a burst its own apply, overstating the writes a real fleet makes.
+func drainWatch(ctx context.Context, ch <-chan watch.Event, gen int64, quietFor, limit time.Duration) int64 {
+	deadline := time.NewTimer(limit)
 	defer deadline.Stop()
+
+	quiet := time.NewTimer(quietFor)
+	defer quiet.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return gen
 		case <-deadline.C:
+			return gen
+		case <-quiet.C:
 			return gen
 		case raw, ok := <-ch:
 			if !ok {
@@ -713,8 +741,9 @@ func drainWatch(ctx context.Context, ch <-chan watch.Event, gen int64) int64 {
 			if agent, ok := raw.Object.(*agentapi.Agent); ok && agent.Generation > gen {
 				gen = agent.Generation
 			}
-		default:
-			return gen
+
+			// Another event arrived, so the quiet period starts over.
+			quiet.Reset(quietFor)
 		}
 	}
 }
