@@ -630,6 +630,58 @@ func TestAnalyzeSeriesIgnoresCompactionWithoutFullWindow(t *testing.T) {
 	require.Contains(t, buf.String(), "too few compactions to read", "one observed window is not enough to conclude")
 }
 
+func TestAnalyzeSeriesEtcdGapMakesWindowIncomplete(t *testing.T) {
+	t.Parallel()
+
+	// etcd drops out right after the compaction and is back only once the
+	// window has passed. The file may well have grown while nobody was looking,
+	// so the window must not count as observed - and certainly not as "did
+	// not grow".
+	base := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+	etcd := func(size, compact float64) map[string]float64 {
+		return map[string]float64{"db_size": size, "db_in_use": size / 2, "compact_rev": compact, "current_rev": 1000}
+	}
+
+	samples := []Sample{
+		mk(base, etcd(100, 10)),
+		mk(base.Add(30*time.Second), etcd(100, 20)), // compaction
+		{At: base.Add(45 * time.Second), Values: map[string]float64{}},
+		{At: base.Add(60 * time.Second), Values: map[string]float64{}},
+		{At: base.Add(75 * time.Second), Values: map[string]float64{}},
+		mk(base.Add(105*time.Second), etcd(900, 20)), // back, well after the window
+	}
+
+	growth, complete := growthAfter(samples, 1)
+	require.False(t, complete, "a window with a hole in it is not observed")
+	require.Zero(t, growth)
+
+	stats := analyzeSeries(samples)
+	require.Equal(t, 1, stats.Compactions)
+	require.Zero(t, stats.Observed)
+}
+
+func TestGrowthAfterCompleteWindow(t *testing.T) {
+	t.Parallel()
+
+	// Healthy samples all the way through: complete, and growth is measured
+	// only up to the deadline.
+	base := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+	etcd := func(size float64) map[string]float64 {
+		return map[string]float64{"db_size": size, "db_in_use": 1, "compact_rev": 1, "current_rev": 2}
+	}
+
+	samples := []Sample{
+		mk(base, etcd(100)),
+		mk(base.Add(30*time.Second), etcd(150)),
+		mk(base.Add(60*time.Second), etcd(200)),   // at the deadline: inside
+		mk(base.Add(90*time.Second), etcd(10000)), // beyond: must not count
+	}
+
+	growth, complete := growthAfter(samples, 0)
+	require.True(t, complete)
+	require.Equal(t, int64(100), growth)
+}
+
 func TestAnalyzeSeriesKeepsZeroAvailableMemory(t *testing.T) {
 	t.Parallel()
 
