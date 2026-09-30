@@ -148,10 +148,19 @@ func RunAgents(ctx context.Context, admin kclient.Client, opts AgentsOpts) error
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	// The duration ends the run by closing stop, not by cancelling the context.
+	// Agents then leave their loops and close their watches while the context is
+	// still live, so client-go finishes its in-flight reads cleanly. Cancelling
+	// instead aborts those reads mid-body, which the client logs as an error and
+	// which makes a run that finished correctly look like it failed.
+	//
+	// Cancelling the parent context still works for an interrupt: every loop
+	// selects on both.
+	stop := make(chan struct{})
+
 	if opts.Duration > 0 {
-		var timerCancel context.CancelFunc
-		runCtx, timerCancel = context.WithTimeout(runCtx, opts.Duration)
-		defer timerCancel()
+		timer := time.AfterFunc(opts.Duration, func() { close(stop) })
+		defer timer.Stop()
 	}
 
 	slog.Info("Starting agents", "count", len(sims), "duration", opts.Duration)
@@ -161,12 +170,12 @@ func RunAgents(ctx context.Context, admin kclient.Client, opts AgentsOpts) error
 	var wg sync.WaitGroup
 	for _, sim := range sims {
 		wg.Go(func() {
-			sim.run(runCtx, opts)
+			sim.run(runCtx, stop, opts)
 		})
 	}
 
 	wg.Go(func() {
-		stats.report(runCtx, len(sims), opts.Interval)
+		stats.report(runCtx, stop, len(sims), opts.Interval)
 	})
 
 	wg.Wait()
@@ -277,11 +286,15 @@ func newAgentSim(ctx context.Context, admin kclient.Client, name string, opts Ag
 	}, nil
 }
 
-// run drives one agent until the context is done: a startup write, then a
-// single loop selecting over the heartbeat ticker and the watch, exactly as the
-// real agent does. Keeping both in one loop is also what stops a heartbeat and
-// an apply from racing on the same status.
-func (a *agentSim) run(ctx context.Context, opts AgentsOpts) {
+// run drives one agent until stop closes or the context is done: a startup
+// write, then a single loop selecting over the heartbeat ticker and the watch,
+// exactly as the real agent does. Keeping both in one loop is also what stops a
+// heartbeat and an apply from racing on the same status.
+//
+// stop is the orderly end of the run and ctx.Done an interrupt. Returning on
+// stop lets the deferred watch close run against a live context, which is what
+// keeps a finished run quiet in the log.
+func (a *agentSim) run(ctx context.Context, stop <-chan struct{}, opts AgentsOpts) {
 	// Real agents are not synchronised, so spread the first write across the
 	// interval unless the herd is what is being measured.
 	if !opts.SyncHeartbeats {
@@ -289,6 +302,8 @@ func (a *agentSim) run(ctx context.Context, opts AgentsOpts) {
 
 		select {
 		case <-ctx.Done():
+			return
+		case <-stop:
 			return
 		case <-time.After(offset):
 		}
@@ -314,6 +329,8 @@ func (a *agentSim) run(ctx context.Context, opts AgentsOpts) {
 
 		select {
 		case <-ctx.Done():
+			return
+		case <-stop:
 			return
 		case <-ticker.C:
 			a.beat(ctx)
@@ -353,7 +370,7 @@ func (a *agentSim) startup(ctx context.Context) {
 
 		setApplied(agent, true, fmt.Sprintf("Config applied, gen=%d", agent.Generation))
 	})
-	if err != nil {
+	if err != nil && ctx.Err() == nil {
 		a.stats.errors.Add(1)
 		a.stats.recordErr(err)
 	}
@@ -762,7 +779,7 @@ func (s *agentStats) drain() window {
 
 // report prints an aggregate line periodically, which is how a long run is
 // watched without per-agent noise.
-func (s *agentStats) report(ctx context.Context, agents int, interval time.Duration) {
+func (s *agentStats) report(ctx context.Context, stop <-chan struct{}, agents int, interval time.Duration) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
@@ -774,6 +791,8 @@ func (s *agentStats) report(ctx context.Context, agents int, interval time.Durat
 	for {
 		select {
 		case <-ctx.Done():
+			return
+		case <-stop:
 			return
 		case <-ticker.C:
 			now := s.heartbeats.Load()
