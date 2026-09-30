@@ -864,7 +864,19 @@ func percentiles(lat []time.Duration) (time.Duration, time.Duration) {
 
 	slices.Sort(lat)
 
-	return lat[len(lat)*50/100], lat[min(len(lat)*95/100, len(lat)-1)]
+	return lat[nearestRank(len(lat), 50)], lat[nearestRank(len(lat), 95)]
+}
+
+// nearestRank is the index of the pth percentile, ceil(p/100 * n) - 1.
+//
+// The obvious n*p/100 biases high on small samples: with two observations it
+// picks the larger for p50, so p50 and p95 come out identical and a pair of
+// wildly different measurements reads as one. That matters here because an
+// inspect worker produces only a handful of samples per reporting window.
+func nearestRank(n, p int) int {
+	idx := (n*p+99)/100 - 1
+
+	return max(0, min(idx, n-1))
 }
 
 // stableID derives an ID that stays the same across runs for a given switch,
