@@ -82,10 +82,10 @@ var seriesMetrics = []metric{
 	{"slow_watchers", "etcd_debugging_mvcc_slow_watcher_total", groupEtcd, false},
 	{"pending_events", "etcd_debugging_mvcc_pending_events_total", groupEtcd, false},
 
-	// Backpressure and stability.
+	// Backpressure. Leadership is not collected: this is a single etcd member,
+	// so there is nothing to lose it to.
 	{"proposals_pending", "etcd_server_proposals_pending", groupEtcd, false},
 	{"slow_applies", "etcd_server_slow_apply_total", groupEtcd, false},
-	{"leader_changes", "etcd_server_leader_changes_seen_total", groupEtcd, false},
 
 	// Operation and byte counters. Differenced across samples these give real
 	// rates, rather than write volume inferred from agent count times object
@@ -199,6 +199,13 @@ func meanDuration(sum, count float64) time.Duration {
 	}
 
 	return time.Duration(sum / count * float64(time.Second))
+}
+
+// FreePages is space inside the file that compaction has released and etcd can
+// reuse. Only defrag returns it to the filesystem, so it counts against the
+// quota; when it sits near zero the file is all live data.
+func (s Sample) FreePages() int64 {
+	return s.DBSize() - s.DBInUse()
 }
 
 // Lag is how many revisions exist that compaction has not yet reclaimed. A lag

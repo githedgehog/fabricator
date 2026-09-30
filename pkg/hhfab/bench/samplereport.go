@@ -34,6 +34,15 @@ type seriesStats struct {
 	// after a compaction, so growth there means they are not being reused.
 	GrewAfter   int
 	GrowthAfter int64
+	// ReuseFailures counts only the compactions that grew the file *while
+	// enough free space existed to absorb that growth*. Growth on its own
+	// proves nothing: under steady ingest the file grows after every
+	// compaction whether or not pages are reusable.
+	ReuseFailures int
+	// FreePeak is the most free space ever seen inside the file. When it stays
+	// near zero the file is all live data, so compaction is simply not keeping
+	// up with ingest and reuse never enters into it.
+	FreePeak int64
 	// OpenReadsMax is the evidence for why they are not being reused: bbolt
 	// cannot hand back a page a live read transaction can still see.
 	OpenReadsMax    int64
@@ -140,6 +149,12 @@ func analyzeSeries(samples []Sample) seriesStats {
 				if growth := growthAfter(samples, idx); growth > 0 {
 					stats.GrewAfter++
 					stats.GrowthAfter += growth
+
+					// Only evidence of reuse failure if the free space sitting
+					// in the file could have taken that growth instead.
+					if sample.FreePages() > growth {
+						stats.ReuseFailures++
+					}
 				}
 			}
 
@@ -189,6 +204,7 @@ func accumulateEtcd(stats *seriesStats, sample Sample) {
 	stats.LagMax = max(stats.LagMax, sample.Lag())
 	stats.Quota = max(stats.Quota, sample.Quota())
 	stats.KeysPeak = max(stats.KeysPeak, sample.Keys())
+	stats.FreePeak = max(stats.FreePeak, sample.FreePages())
 	stats.OpenReadsMax = max(stats.OpenReadsMax, sample.OpenReads())
 	stats.WatchersMax = max(stats.WatchersMax, sample.Watchers())
 	stats.SlowWatchersMax = max(stats.SlowWatchersMax, sample.SlowWatchers())
@@ -299,27 +315,55 @@ func reportCompaction(w io.Writer, stats seriesStats) {
 		return
 	}
 
-	fmt.Fprintf(w, "  %-20s %d, every ~%s\n", "compactions",
-		stats.Compactions, stats.MeanCompact.Truncate(time.Second))
+	// An interval needs two events to measure; with one it is not "every 0s".
+	if stats.Compactions > 1 {
+		fmt.Fprintf(w, "  %-20s %d, every ~%s\n", "compactions",
+			stats.Compactions, stats.MeanCompact.Truncate(time.Second))
+	} else {
+		fmt.Fprintf(w, "  %-20s 1 (too few to measure an interval)\n", "compactions")
+	}
+
 	fmt.Fprintf(w, "  %-20s %d of %d grew the file, +%s total\n", "after compaction",
 		stats.GrewAfter, stats.Compactions, humanBytes(int(stats.GrowthAfter)))
+	fmt.Fprintf(w, "  %-20s peak %s\n", "free pages", humanBytes(int(stats.FreePeak)))
 
 	if stats.OpenReadsMax > 0 {
 		fmt.Fprintf(w, "  %-20s peak %d\n", "open read txns", stats.OpenReadsMax)
 	}
 
-	// The whole reason for sampling: separate "retention window too wide" from
-	// "freed pages are not being reused", and if the latter, say why.
-	if stats.GrewAfter*2 > stats.Compactions {
-		fmt.Fprintf(w, "  %-20s file grows after most compactions - freed pages are not\n", "reading")
+	reportReading(w, stats)
+}
+
+// freePagesFloor is how much free space the file needs before "were freed pages
+// reused" is even a meaningful question.
+const freePagesFloor = 20
+
+// reportReading says what the series means, and refuses to say it when the
+// evidence does not support a conclusion.
+//
+// Growth after a compaction is not on its own evidence that pages cannot be
+// reused: under steady ingest the file grows after every compaction regardless.
+// It only counts when there was free space that could have absorbed it.
+func reportReading(w io.Writer, stats seriesStats) {
+	switch {
+	case stats.Compactions < 2:
+		fmt.Fprintf(w, "  %-20s too few compactions to read; sample a longer run\n", "reading")
+
+	case stats.FreePeak < stats.SizePeak/freePagesFloor:
+		fmt.Fprintf(w, "  %-20s file is nearly all live data - compaction is not keeping\n", "reading")
+		fmt.Fprintf(w, "  %-20s up with ingest, so retention interval is the lever\n", "")
+
+	case stats.ReuseFailures*2 > stats.Compactions:
+		fmt.Fprintf(w, "  %-20s file grew while free pages were available - they are not\n", "reading")
 
 		if stats.OpenReadsMax > 1 {
 			fmt.Fprintf(w, "  %-20s being reused, with read txns open to pin them\n", "")
 		} else {
 			fmt.Fprintf(w, "  %-20s being reused, and not because of open read txns\n", "")
 		}
-	} else {
-		fmt.Fprintf(w, "  %-20s file is stable after compaction - growth is the retention\n", "reading")
+
+	default:
+		fmt.Fprintf(w, "  %-20s free pages are being reused - growth is the retention\n", "reading")
 		fmt.Fprintf(w, "  %-20s window, so a shorter interval should bound it\n", "")
 	}
 }
