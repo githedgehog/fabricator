@@ -29,6 +29,12 @@ type opStat struct {
 	Timeouts  int64
 	Latencies []time.Duration
 	All       []time.Duration
+
+	// Win counts operations in the current reporting window, and is reset with
+	// Latencies. The periodic line has to describe one set of operations: a
+	// cumulative count beside windowed percentiles reads as "8 calls took 0s"
+	// when what happened is that none of the 8 finished in this window.
+	Win int64
 }
 
 // userStats collects latency and errors only. The bench creates load and does
@@ -63,6 +69,7 @@ func (s *userStats) record(ctx context.Context, op string, took time.Duration, e
 	}
 
 	stat.Count++
+	stat.Win++
 
 	switch {
 	case err == nil:
@@ -123,6 +130,7 @@ func (s *userStats) snapshot(drain bool) userSnapshot {
 
 		if drain {
 			stat.Latencies = nil
+			stat.Win = 0
 		}
 	}
 
@@ -183,9 +191,15 @@ func opTotals(ops map[string]opStat) []any {
 		rejected += stat.Rejected
 		timeouts += stat.Timeouts
 
+		// Window count with window percentiles, so both describe the same
+		// operations; the cumulative totals are in the head and the summary.
+		if stat.Win == 0 {
+			continue
+		}
+
 		p50, p95 := percentiles(stat.Latencies)
 		args = append(args, name, fmt.Sprintf("%d p50=%s p95=%s",
-			stat.Count, p50.Truncate(time.Millisecond), p95.Truncate(time.Millisecond)))
+			stat.Win, p50.Truncate(time.Millisecond), p95.Truncate(time.Millisecond)))
 	}
 
 	head := []any{"ops", count, "errors", errs}

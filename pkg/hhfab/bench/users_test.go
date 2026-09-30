@@ -174,6 +174,82 @@ func TestStatsDrainsLatenciesPerWindow(t *testing.T) {
 	require.Len(t, snap.ops["inspect:mac"].All, 1)
 }
 
+func TestPercentilesOnSmallSamples(t *testing.T) {
+	t.Parallel()
+
+	ms := func(vals ...int) []time.Duration {
+		out := make([]time.Duration, 0, len(vals))
+		for _, v := range vals {
+			out = append(out, time.Duration(v)*time.Millisecond)
+		}
+
+		return out
+	}
+
+	for name, tc := range map[string]struct {
+		in            []time.Duration
+		wantP50       time.Duration
+		wantP95       time.Duration
+		distinctNotes string
+	}{
+		"empty":  {in: nil, wantP50: 0, wantP95: 0},
+		"single": {in: ms(100), wantP50: 100 * time.Millisecond, wantP95: 100 * time.Millisecond},
+		// The case that prompted this: two very different samples must not
+		// collapse to one number.
+		"pair": {
+			in: ms(10, 1000), wantP50: 10 * time.Millisecond, wantP95: 1000 * time.Millisecond,
+			distinctNotes: "p50 must be the lower of two, not the higher",
+		},
+		"three":      {in: ms(10, 50, 1000), wantP50: 50 * time.Millisecond, wantP95: 1000 * time.Millisecond},
+		"four":       {in: ms(10, 20, 30, 40), wantP50: 20 * time.Millisecond, wantP95: 40 * time.Millisecond},
+		"unsorted":   {in: ms(40, 10, 30, 20), wantP50: 20 * time.Millisecond, wantP95: 40 * time.Millisecond},
+		"ten":        {in: ms(1, 2, 3, 4, 5, 6, 7, 8, 9, 10), wantP50: 5 * time.Millisecond, wantP95: 10 * time.Millisecond},
+		"twenty_p95": {in: ms(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 100), wantP50: 10 * time.Millisecond, wantP95: 19 * time.Millisecond},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			p50, p95 := percentiles(tc.in)
+			require.Equal(t, tc.wantP50, p50, "p50 %s", tc.distinctNotes)
+			require.Equal(t, tc.wantP95, p95, "p95 %s", tc.distinctNotes)
+		})
+	}
+}
+
+func TestNearestRankStaysInBounds(t *testing.T) {
+	t.Parallel()
+
+	for n := 1; n <= 200; n++ {
+		for _, p := range []int{0, 50, 95, 100} {
+			idx := nearestRank(n, p)
+			require.GreaterOrEqual(t, idx, 0, "n=%d p=%d", n, p)
+			require.Less(t, idx, n, "n=%d p=%d", n, p)
+		}
+	}
+}
+
+func TestWindowCountResetsWithLatencies(t *testing.T) {
+	t.Parallel()
+
+	// The periodic line pairs Win with the window's percentiles, so the two
+	// have to be drained together or the count describes a different set of
+	// operations than the latencies do.
+	stats := &userStats{ops: map[string]*opStat{}}
+	ctx := t.Context()
+
+	stats.record(ctx, "inspect:bfd", time.Second, nil)
+	stats.record(ctx, "inspect:bfd", 2*time.Second, nil)
+
+	first := stats.snapshot(true).ops["inspect:bfd"]
+	require.Equal(t, int64(2), first.Win)
+	require.Len(t, first.Latencies, 2)
+
+	second := stats.snapshot(false).ops["inspect:bfd"]
+	require.Zero(t, second.Win, "a window with no completions must not report the cumulative count")
+	require.Empty(t, second.Latencies)
+	require.Equal(t, int64(2), second.Count, "cumulative count survives")
+}
+
 func TestPickStaysInRange(t *testing.T) {
 	t.Parallel()
 
