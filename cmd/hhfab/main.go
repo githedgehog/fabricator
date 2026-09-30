@@ -2168,17 +2168,12 @@ inspect and wait-switches rather than as a fabric that never converged.`,
 										Usage: "time between samples",
 										Value: bench.DefaultSampleInterval,
 									},
-									&cli.StringFlag{
-										Name:  FlagBenchOut,
-										Usage: "write the series to `FILE` (default: " + bench.SeriesFile + " in the work dir)",
-									},
 								}),
 								Before: before(false),
 								Action: func(c *cli.Context) error {
 									if err := hhfab.DoVLABBenchSample(ctx, workDir, cacheDir, hhfab.BenchSampleOpts{
 										Duration: c.Duration(FlagBenchDuration),
 										Interval: c.Duration(FlagBenchInterval),
-										Out:      c.String(FlagBenchOut),
 									}); err != nil {
 										return fmt.Errorf("bench sample: %w", err)
 									}
