@@ -176,8 +176,6 @@ func (s Sample) OpenReads() int64     { return s.num("open_reads") }
 func (s Sample) Watchers() int64      { return s.num("watchers") }
 func (s Sample) SlowWatchers() int64  { return s.num("slow_watchers") }
 func (s Sample) Alarms() int64        { return s.num("alarms") }
-func (s Sample) GRPCSent() int64      { return s.num("grpc_sent") }
-func (s Sample) Puts() int64          { return s.num("puts") }
 func (s Sample) MemUsed() int64       { return s.num("mem_used") }
 func (s Sample) MemAvail() int64      { return s.num("mem_available") }
 func (s Sample) MemTotal() int64      { return s.num("mem_total") }
@@ -185,21 +183,9 @@ func (s Sample) RSSK3s() int64        { return s.num("rss_k3s") }
 func (s Sample) RSSFabricCtrl() int64 { return s.num("rss_fabric_ctrl") }
 func (s Sample) RSSFabricBoot() int64 { return s.num("rss_fabric_boot") }
 
-// CommitMean and FsyncMean turn a histogram's sum and count into the mean.
-func (s Sample) CommitMean() time.Duration {
-	return meanDuration(s.val("commit_sum"), s.val("commit_count"))
-}
-func (s Sample) FsyncMean() time.Duration {
-	return meanDuration(s.val("fsync_sum"), s.val("fsync_count"))
-}
-
-func meanDuration(sum, count float64) time.Duration {
-	if count <= 0 {
-		return 0
-	}
-
-	return time.Duration(sum / count * float64(time.Second))
-}
+// Counters and histogram sums deliberately have no per-sample accessors: a
+// single sample of a cumulative counter describes the life of the etcd
+// process, not the run. See accumulateInterval for how they are read.
 
 // FreePages is space inside the file that compaction has released and etcd can
 // reuse. Only defrag returns it to the filesystem, so it counts against the
@@ -328,17 +314,21 @@ func createSeries(path string) (*seriesWriter, error) {
 		return nil, fmt.Errorf("creating series %s: %w", path, err)
 	}
 
-	out := csv.NewWriter(file)
+	series := &seriesWriter{file: file, out: csv.NewWriter(file)}
 
-	if err := out.Write(seriesHeader); err != nil {
+	if err := series.Write(seriesHeader); err != nil {
 		file.Close()
 
-		return nil, fmt.Errorf("writing series header: %w", err)
+		return nil, err
 	}
 
-	out.Flush()
+	if err := series.Flush(); err != nil {
+		file.Close()
 
-	return &seriesWriter{file: file, out: out}, nil
+		return nil, err
+	}
+
+	return series, nil
 }
 
 func (s *seriesWriter) Write(rec []string) error {
@@ -351,25 +341,37 @@ func (s *seriesWriter) Write(rec []string) error {
 
 // Flush pushes buffered records to disk. It is called after every sample so the
 // series survives a run that ends by taking the machine down with it.
-func (s *seriesWriter) Flush() {
+//
+// csv.Writer reports a failed write only through Error after a flush, so it
+// has to be checked here: otherwise a full disk drops every sample while the
+// command carries on and exits successfully.
+func (s *seriesWriter) Flush() error {
 	s.out.Flush()
-}
 
-func (s *seriesWriter) Close() error {
-	s.out.Flush()
-
-	if err := s.file.Close(); err != nil {
-		return fmt.Errorf("closing series: %w", err)
+	if err := s.out.Error(); err != nil {
+		return fmt.Errorf("flushing series: %w", err)
 	}
 
 	return nil
 }
 
+func (s *seriesWriter) Close() error {
+	flushErr := s.Flush()
+
+	if err := s.file.Close(); err != nil {
+		return fmt.Errorf("closing series: %w", err)
+	}
+
+	return flushErr
+}
+
 // SampleTo appends samples to path until ctx is done.
 //
-// Failures are skipped rather than fatal: the point is to keep observing across
-// the outages the benchmark is trying to cause, and a gap in the series is
-// itself a measurement.
+// Collection failures are not fatal: the point is to keep observing across the
+// outages the benchmark is trying to cause, and a gap in the series is itself a
+// measurement. A failed collection is therefore written as a timestamp-only
+// row, so an outage that took the whole control node away still shows up as
+// samples with no metrics rather than as a silent hole between two timestamps.
 func SampleTo(ctx context.Context, run Runner, interval time.Duration, path string) error {
 	if interval <= 0 {
 		return nil
@@ -379,8 +381,17 @@ func SampleTo(ctx context.Context, run Runner, interval time.Duration, path stri
 	if err != nil {
 		return err
 	}
-	defer series.Close()
 
+	err = sampleLoop(ctx, run, interval, series)
+
+	if closeErr := series.Close(); err == nil {
+		err = closeErr
+	}
+
+	return err
+}
+
+func sampleLoop(ctx context.Context, run Runner, interval time.Duration, series *seriesWriter) error {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
@@ -391,14 +402,21 @@ func SampleTo(ctx context.Context, run Runner, interval time.Duration, path stri
 		case <-ticker.C:
 			sample, err := takeSample(ctx, run)
 			if err != nil {
-				continue
+				// Stopping is not an outage.
+				if ctx.Err() != nil {
+					return nil
+				}
+
+				sample = Sample{At: time.Now(), Values: map[string]float64{}}
 			}
 
 			if err := series.Write(sample.record()); err != nil {
 				return err
 			}
 
-			series.Flush()
+			if err := series.Flush(); err != nil {
+				return err
+			}
 		}
 	}
 }

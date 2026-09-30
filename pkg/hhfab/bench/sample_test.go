@@ -74,8 +74,10 @@ func TestParseSampleFull(t *testing.T) {
 	// Absent optional metric stays absent rather than reading as zero.
 	require.Zero(t, sample.Alarms())
 
-	// sum/count become a mean: 0.81s over 127 commits.
-	require.InDelta(t, 6.38, sample.CommitMean().Seconds()*1000, 0.01)
+	// Histogram sum and count are recorded raw; means are only ever taken over
+	// an interval between two samples.
+	require.InDelta(t, 0.81, sample.val("commit_sum"), 1e-9)
+	require.InDelta(t, 127, sample.val("commit_count"), 1e-9)
 }
 
 func TestParseSampleIgnoresLabelledSeries(t *testing.T) {
@@ -354,7 +356,7 @@ func TestAnalyzeSeriesQuotaAndCounters(t *testing.T) {
 
 	base := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
 
-	// Counters only advance, so a run's total is last minus first.
+	// Without a restart, the summed deltas equal last minus first.
 	samples := []Sample{
 		mk(base, map[string]float64{
 			"db_size": 100, "db_in_use": 10, "compact_rev": 1, "current_rev": 2,
@@ -373,6 +375,71 @@ func TestAnalyzeSeriesQuotaAndCounters(t *testing.T) {
 	require.Equal(t, int64(3600), stats.GRPCSent)
 	require.Equal(t, int64(3600), stats.Puts)
 	require.Equal(t, int64(1), stats.GRPCRate()) // 3600 bytes over 3600s
+}
+
+// etcdAt builds an etcd sample with the required fields plus the given
+// counters, a minute apart per step.
+func etcdAt(step int, counters map[string]float64) Sample {
+	vals := map[string]float64{
+		"db_size": 100, "db_in_use": 50, "compact_rev": 1, "current_rev": 2,
+	}
+	for col, val := range counters {
+		vals[col] = val
+	}
+
+	return mk(time.Date(2026, 9, 29, 12, step, 0, 0, time.UTC), vals)
+}
+
+func TestAnalyzeSeriesCountersSurviveRestart(t *testing.T) {
+	t.Parallel()
+
+	// k3s restarts mid-run and the counters start again from zero. Last minus
+	// first would give 30 - 1000 = -970; the real total is 500 before the
+	// restart plus 30 after it.
+	samples := []Sample{
+		etcdAt(0, map[string]float64{"grpc_sent": 500, "puts": 5}),
+		etcdAt(1, map[string]float64{"grpc_sent": 1000, "puts": 9}),
+		etcdAt(2, map[string]float64{"grpc_sent": 10, "puts": 1}), // restarted
+		etcdAt(3, map[string]float64{"grpc_sent": 30, "puts": 4}),
+	}
+
+	stats := analyzeSeries(samples)
+
+	require.Equal(t, int64(500+10+20), stats.GRPCSent)
+	require.Equal(t, int64(4+1+3), stats.Puts)
+	require.Positive(t, stats.GRPCRate())
+}
+
+func TestAnalyzeSeriesLatencyIsPerInterval(t *testing.T) {
+	t.Parallel()
+
+	// A long quiet history (1000 commits at 1ms) followed by a slow minute
+	// (10 commits at 100ms). The lifetime mean is ~2ms and would hide it; the
+	// worst interval is what the run actually experienced.
+	samples := []Sample{
+		etcdAt(0, map[string]float64{"commit_sum": 1.0, "commit_count": 1000}),
+		etcdAt(1, map[string]float64{"commit_sum": 2.0, "commit_count": 2000}),
+		etcdAt(2, map[string]float64{"commit_sum": 3.0, "commit_count": 2010}),
+	}
+
+	stats := analyzeSeries(samples)
+
+	require.Equal(t, 100*time.Millisecond, stats.CommitMeanMax.Round(time.Millisecond))
+}
+
+func TestAnalyzeSeriesLatencyAcrossRestart(t *testing.T) {
+	t.Parallel()
+
+	// After a restart the histogram starts again; the interval that spans it
+	// is read from the new values alone rather than as a negative delta.
+	samples := []Sample{
+		etcdAt(0, map[string]float64{"fsync_sum": 50, "fsync_count": 10000}),
+		etcdAt(1, map[string]float64{"fsync_sum": 0.2, "fsync_count": 10}), // restarted
+	}
+
+	stats := analyzeSeries(samples)
+
+	require.Equal(t, 20*time.Millisecond, stats.FsyncMeanMax.Round(time.Millisecond))
 }
 
 func TestAnalyzeSeriesLagAndInterval(t *testing.T) {
@@ -462,6 +529,57 @@ func TestSeriesRoundTrip(t *testing.T) {
 
 	// An absent optional metric round trips as absent, not as zero.
 	require.NotContains(t, got[0].Values, "alarms")
+}
+
+func TestSeriesGapRowRoundTripsAsEmpty(t *testing.T) {
+	t.Parallel()
+
+	// A failed collection is written as a timestamp-only row. It must read back
+	// as a sample with neither half, so an outage counts as gaps in both the
+	// etcd and node sections rather than disappearing.
+	path := filepath.Join(t.TempDir(), "series.csv")
+
+	out, err := createSeries(path)
+	require.NoError(t, err)
+
+	full, err := parseSample(time.Now().Truncate(time.Second).UTC(), fullSampleOutput)
+	require.NoError(t, err)
+
+	gap := Sample{At: full.At.Add(15 * time.Second), Values: map[string]float64{}}
+
+	require.NoError(t, out.Write(full.record()))
+	require.NoError(t, out.Write(gap.record()))
+	require.NoError(t, out.Close())
+
+	got, err := LoadSeries(path)
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	require.False(t, got[1].HasEtcd())
+	require.False(t, got[1].HasMem())
+
+	stats := analyzeSeries(got)
+	require.Equal(t, 2, stats.Samples)
+	require.Equal(t, 1, stats.EtcdSamples)
+	require.Equal(t, 1, stats.MemSamples)
+
+	var buf strings.Builder
+
+	healthSeries(&buf, got)
+	require.Contains(t, buf.String(), "1 samples had no etcd metrics")
+	require.Contains(t, buf.String(), "1 samples had no node metrics")
+}
+
+func TestSeriesFlushReportsWriteFailure(t *testing.T) {
+	t.Parallel()
+
+	// csv.Writer only reports a failed write through Error after a flush.
+	// Closing the file underneath it stands in for a full disk.
+	out, err := createSeries(filepath.Join(t.TempDir(), "series.csv"))
+	require.NoError(t, err)
+	require.NoError(t, out.file.Close())
+
+	require.NoError(t, out.Write([]string{"x"}), "Write only buffers")
+	require.Error(t, out.Flush(), "the failure must surface at flush")
 }
 
 func TestLoadSeriesMatchesColumnsByName(t *testing.T) {

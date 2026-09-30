@@ -49,10 +49,13 @@ type seriesStats struct {
 	WatchersMax     int64
 	SlowWatchersMax int64
 	AlarmsMax       int64
-	CommitMeanMax   time.Duration
-	FsyncMeanMax    time.Duration
-	// GRPCSent is the byte counter's total advance, which measures watch and
-	// read traffic rather than inferring it from object size.
+	// CommitMeanMax and FsyncMeanMax are the worst mean latency over any one
+	// sampling interval, not the etcd-lifetime mean.
+	CommitMeanMax time.Duration
+	FsyncMeanMax  time.Duration
+	// GRPCSent is how many bytes etcd sent to clients over the run, summed
+	// across counter resets. It measures watch and read traffic rather than
+	// inferring it from object size.
 	GRPCSent int64
 	Puts     int64
 
@@ -105,11 +108,9 @@ func analyzeSeries(samples []Sample) seriesStats {
 	stats.Span = samples[len(samples)-1].At.Sub(samples[0].At)
 
 	var (
-		compactAt           []time.Time
-		prevEtcd            *Sample
-		firstMem, lastMem   *Sample
-		firstSent, lastSent int64
-		firstPuts, lastPuts int64
+		compactAt         []time.Time
+		prevEtcd          *Sample
+		firstMem, lastMem *Sample
 	)
 
 	for idx := range samples {
@@ -126,20 +127,8 @@ func analyzeSeries(samples []Sample) seriesStats {
 			stats.SizeEnd = sample.DBSize()
 			stats.LagEnd = sample.Lag()
 
-			if sample.GRPCSent() > 0 {
-				if firstSent == 0 {
-					firstSent = sample.GRPCSent()
-				}
-
-				lastSent = sample.GRPCSent()
-			}
-
-			if sample.Puts() > 0 {
-				if firstPuts == 0 {
-					firstPuts = sample.Puts()
-				}
-
-				lastPuts = sample.Puts()
+			if prevEtcd != nil {
+				accumulateInterval(&stats, *prevEtcd, sample)
 			}
 
 			if prevEtcd != nil && sample.CompactRev() > prevEtcd.CompactRev() {
@@ -181,10 +170,6 @@ func analyzeSeries(samples []Sample) seriesStats {
 		}
 	}
 
-	// Counters only ever advance, so the run's total is last minus first.
-	stats.GRPCSent = lastSent - firstSent
-	stats.Puts = lastPuts - firstPuts
-
 	if firstMem != nil && lastMem != nil {
 		stats.BootStart = firstMem.RSSFabricBoot()
 		stats.BootEnd = lastMem.RSSFabricBoot()
@@ -209,8 +194,50 @@ func accumulateEtcd(stats *seriesStats, sample Sample) {
 	stats.WatchersMax = max(stats.WatchersMax, sample.Watchers())
 	stats.SlowWatchersMax = max(stats.SlowWatchersMax, sample.SlowWatchers())
 	stats.AlarmsMax = max(stats.AlarmsMax, sample.Alarms())
-	stats.CommitMeanMax = max(stats.CommitMeanMax, sample.CommitMean())
-	stats.FsyncMeanMax = max(stats.FsyncMeanMax, sample.FsyncMean())
+}
+
+// accumulateInterval folds in what happened between two consecutive etcd
+// samples.
+//
+// Everything here is derived from Prometheus counters, which only advance for
+// the life of the process - and resetting that process is exactly what the
+// benchmark sets out to cause. So totals are summed from per-interval deltas
+// rather than taken as last minus first, which after a restart comes out low
+// or negative. Latency means likewise come from the interval's own sum and
+// count: the ratio of the cumulative values is a lifetime average, in which
+// hours of quiet history hide a slowdown during the run.
+func accumulateInterval(stats *seriesStats, prev, cur Sample) {
+	stats.GRPCSent += int64(counterDelta(prev, cur, "grpc_sent"))
+	stats.Puts += int64(counterDelta(prev, cur, "puts"))
+
+	stats.CommitMeanMax = max(stats.CommitMeanMax, intervalMean(prev, cur, "commit_sum", "commit_count"))
+	stats.FsyncMeanMax = max(stats.FsyncMeanMax, intervalMean(prev, cur, "fsync_sum", "fsync_count"))
+}
+
+// counterDelta is how much a counter advanced between two samples. A counter
+// that went down was reset by a restart, so everything it now holds happened
+// since; a counter missing from either sample contributes nothing.
+func counterDelta(prev, cur Sample, col string) float64 {
+	if !prev.has(col) || !cur.has(col) {
+		return 0
+	}
+
+	if delta := cur.val(col) - prev.val(col); delta >= 0 {
+		return delta
+	}
+
+	return cur.val(col)
+}
+
+// intervalMean is a histogram's mean over one sampling interval, in seconds of
+// sum per observation.
+func intervalMean(prev, cur Sample, sumCol, countCol string) time.Duration {
+	count := counterDelta(prev, cur, countCol)
+	if count <= 0 {
+		return 0
+	}
+
+	return time.Duration(counterDelta(prev, cur, sumCol) / count * float64(time.Second))
 }
 
 // growthAfter reports how much the file grew in the window following the
@@ -264,6 +291,18 @@ func healthSeries(w io.Writer, samples []Sample) {
 		fmt.Fprintf(w, "\nNODE OVER TIME (%s, %d of %d samples over %s)\n",
 			SeriesFile, stats.MemSamples, stats.Samples, span)
 		reportMemSeries(w, stats)
+
+		if stats.MemSamples < stats.Samples {
+			fmt.Fprintf(w, "  %-20s %d samples had no node metrics (control node unreachable)\n",
+				"gaps", stats.Samples-stats.MemSamples)
+		}
+	}
+
+	// Every collection failed: without this the series would print nothing at
+	// all, which reads as "no sampled run" rather than "the node was down".
+	if stats.EtcdSamples == 0 && stats.MemSamples == 0 {
+		fmt.Fprintf(w, "\nSAMPLED OVER TIME (%s): %d samples over %s, none collected any metrics\n",
+			SeriesFile, stats.Samples, span)
 	}
 }
 
@@ -302,7 +341,7 @@ func reportEtcdSeries(w io.Writer, stats seriesStats) {
 	}
 
 	if stats.CommitMeanMax > 0 {
-		fmt.Fprintf(w, "  %-20s commit %s, wal fsync %s\n", "disk mean (worst)",
+		fmt.Fprintf(w, "  %-20s commit %s, wal fsync %s\n", "disk (worst mean)",
 			stats.CommitMeanMax.Truncate(time.Microsecond), stats.FsyncMeanMax.Truncate(time.Microsecond))
 	}
 }

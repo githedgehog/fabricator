@@ -204,7 +204,6 @@ func DoVLABBenchUsers(ctx context.Context, workDir, cacheDir string, opts BenchU
 type BenchSampleOpts struct {
 	Duration time.Duration
 	Interval time.Duration
-	Out      string
 }
 
 // DoVLABBenchSample records etcd and control node memory over time, to a file
@@ -221,10 +220,9 @@ func DoVLABBenchSample(ctx context.Context, workDir, cacheDir string, opts Bench
 		return fmt.Errorf("sampling needs the control node: %w", err)
 	}
 
-	path := opts.Out
-	if path == "" {
-		path = filepath.Join(workDir, bench.SeriesFile)
-	}
+	// Always the work-dir file: that is where health looks, and a configurable
+	// path would only produce a series health cannot find.
+	path := filepath.Join(workDir, bench.SeriesFile)
 
 	// A zero duration samples until interrupted, which is the common case when
 	// it is started next to a run of unknown length.
