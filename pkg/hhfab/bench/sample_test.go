@@ -582,6 +582,88 @@ func TestSeriesFlushReportsWriteFailure(t *testing.T) {
 	require.Error(t, out.Flush(), "the failure must surface at flush")
 }
 
+func TestLoadSeriesDropsTruncatedEtcdGroup(t *testing.T) {
+	t.Parallel()
+
+	// A run that ends by taking the machine down can leave the last line cut
+	// off. Loaded as-is it would be an etcd sample with no revisions, reading
+	// as an enormous lag; it must load as a gap instead.
+	raw := strings.Join([]string{
+		"time,db_size,db_in_use,compact_rev,current_rev,mem_used,mem_available,rss_k3s,rss_fabric_ctrl,rss_fabric_boot",
+		"2026-09-29T12:00:00Z,4096,2048,400,500,10,90,5,1,1",
+		"2026-09-29T12:00:15Z,4096",
+		"",
+	}, "\n")
+
+	path := filepath.Join(t.TempDir(), "cut.csv")
+	require.NoError(t, os.WriteFile(path, []byte(raw), 0o600))
+
+	samples, err := LoadSeries(path)
+	require.NoError(t, err)
+	require.Len(t, samples, 2)
+
+	require.True(t, samples[0].HasEtcd())
+	require.False(t, samples[1].HasEtcd(), "a partial etcd group must be dropped, not loaded")
+	require.Zero(t, samples[1].Lag())
+
+	stats := analyzeSeries(samples)
+	require.Equal(t, int64(100), stats.LagMax, "the cut-off row must not produce a fake lag")
+}
+
+func TestAnalyzeSeriesIgnoresCompactionWithoutFullWindow(t *testing.T) {
+	t.Parallel()
+
+	// Compactions at 30s and 60s, but the series stops at 90s: the second has
+	// only 30s of follow-up. Counting it as "did not grow" would be evidence
+	// from nothing.
+	samples := series([]int64{100, 100, 100, 100}, nil, map[int]bool{1: true, 2: true}, nil)
+
+	stats := analyzeSeries(samples)
+
+	require.Equal(t, 2, stats.Compactions)
+	require.Equal(t, 1, stats.Observed, "only the compaction with a full minute after it is observed")
+
+	var buf strings.Builder
+
+	healthSeries(&buf, samples)
+	require.Contains(t, buf.String(), "1 too recent to judge")
+	require.Contains(t, buf.String(), "too few compactions to read", "one observed window is not enough to conclude")
+}
+
+func TestAnalyzeSeriesKeepsZeroAvailableMemory(t *testing.T) {
+	t.Parallel()
+
+	// A node that really reached zero available must stay reported as zero, not
+	// be overwritten by the next positive reading.
+	base := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+	node := func(avail float64) map[string]float64 {
+		return map[string]float64{
+			"mem_used": 90, "mem_available": avail, "rss_k3s": 1, "rss_fabric_ctrl": 1, "rss_fabric_boot": 1,
+		}
+	}
+
+	samples := []Sample{
+		mk(base, node(0)),
+		mk(base.Add(time.Minute), node(40)),
+	}
+
+	require.Zero(t, analyzeSeries(samples).MemAvailMin)
+}
+
+func TestSampleToRejectsNonPositiveInterval(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "series.csv")
+
+	for _, interval := range []time.Duration{0, -time.Second} {
+		err := SampleTo(t.Context(), nil, interval, path)
+		require.ErrorContains(t, err, "must be positive")
+	}
+
+	_, err := os.Stat(path)
+	require.True(t, os.IsNotExist(err), "a refused run must not leave a series behind")
+}
+
 func TestLoadSeriesMatchesColumnsByName(t *testing.T) {
 	t.Parallel()
 

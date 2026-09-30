@@ -28,6 +28,9 @@ type seriesStats struct {
 	LagMax      int64
 	LagEnd      int64
 	Compactions int
+	// Observed counts the compactions followed by a full postCompactWindow of
+	// samples, which are the only ones the growth reading may draw on.
+	Observed    int
 	MeanCompact time.Duration
 	// GrewAfter counts compactions after which the file still grew, and
 	// GrowthAfter totals that growth. Free pages should be plentiful right
@@ -135,7 +138,16 @@ func analyzeSeries(samples []Sample) seriesStats {
 				compactAt = append(compactAt, sample.At)
 				stats.Compactions++
 
-				if growth := growthAfter(samples, idx); growth > 0 {
+				// A compaction too close to the end of the series has no full
+				// follow-up window. Counting it as "did not grow" would be a
+				// conclusion drawn from no evidence, and it would push the
+				// reading towards "reused" or "steady state".
+				growth, complete := growthAfter(samples, idx)
+				if complete {
+					stats.Observed++
+				}
+
+				if complete && growth > 0 {
 					stats.GrewAfter++
 					stats.GrowthAfter += growth
 
@@ -158,7 +170,10 @@ func analyzeSeries(samples []Sample) seriesStats {
 			stats.CtrlPeak = max(stats.CtrlPeak, sample.RSSFabricCtrl())
 			stats.BootPeak = max(stats.BootPeak, sample.RSSFabricBoot())
 
-			if stats.MemAvailMin == 0 || sample.MemAvail() < stats.MemAvailMin {
+			// The first observation seeds the minimum by count, not by treating
+			// zero as unset: a node that really hit zero available is exactly
+			// the reading that must not be overwritten.
+			if stats.MemSamples == 1 || sample.MemAvail() < stats.MemAvailMin {
 				stats.MemAvailMin = sample.MemAvail()
 			}
 
@@ -241,23 +256,32 @@ func intervalMean(prev, cur Sample, sumCol, countCol string) time.Duration {
 }
 
 // growthAfter reports how much the file grew in the window following the
-// compaction observed at idx.
-func growthAfter(samples []Sample, idx int) int64 {
+// compaction observed at idx, and whether the series actually covers that whole
+// window - it does not when the run ended, or etcd went away, before the window
+// closed.
+func growthAfter(samples []Sample, idx int) (int64, bool) {
 	base := samples[idx]
 	deadline := base.At.Add(postCompactWindow)
 	peak := base.DBSize()
+	complete := false
 
 	for _, sample := range samples[idx+1:] {
+		if !sample.HasEtcd() {
+			continue
+		}
+
+		if !sample.At.Before(deadline) {
+			complete = true
+		}
+
 		if sample.At.After(deadline) {
 			break
 		}
 
-		if sample.HasEtcd() {
-			peak = max(peak, sample.DBSize())
-		}
+		peak = max(peak, sample.DBSize())
 	}
 
-	return peak - base.DBSize()
+	return peak - base.DBSize(), complete
 }
 
 // healthSeries prints what a sampled run showed, if there is one.
@@ -362,8 +386,14 @@ func reportCompaction(w io.Writer, stats seriesStats) {
 		fmt.Fprintf(w, "  %-20s 1 (too few to measure an interval)\n", "compactions")
 	}
 
-	fmt.Fprintf(w, "  %-20s %d of %d grew the file, +%s total\n", "after compaction",
-		stats.GrewAfter, stats.Compactions, humanBytes(int(stats.GrowthAfter)))
+	fmt.Fprintf(w, "  %-20s %d of %d grew the file, +%s total", "after compaction",
+		stats.GrewAfter, stats.Observed, humanBytes(int(stats.GrowthAfter)))
+
+	if pending := stats.Compactions - stats.Observed; pending > 0 {
+		fmt.Fprintf(w, " (%d too recent to judge)", pending)
+	}
+
+	fmt.Fprintf(w, "\n")
 	fmt.Fprintf(w, "  %-20s peak %s\n", "free pages", humanBytes(int(stats.FreePeak)))
 
 	if stats.OpenReadsMax > 0 {
@@ -384,8 +414,10 @@ const freePagesFloor = 20
 // reused: under steady ingest the file grows after every compaction regardless.
 // It only counts when there was free space that could have absorbed it.
 func reportReading(w io.Writer, stats seriesStats) {
+	// Everything below reasons from compactions whose follow-up window was
+	// fully observed, so that is the count that has to be large enough.
 	switch {
-	case stats.Compactions < 2:
+	case stats.Observed < 2:
 		fmt.Fprintf(w, "  %-20s too few compactions to read; sample a longer run\n", "reading")
 
 	case stats.SizeEnd <= stats.SizeStart && stats.GrowthAfter == 0:
@@ -400,7 +432,7 @@ func reportReading(w io.Writer, stats seriesStats) {
 		fmt.Fprintf(w, "  %-20s file is nearly all live data - compaction is not keeping\n", "reading")
 		fmt.Fprintf(w, "  %-20s up with ingest, so retention interval is the lever\n", "")
 
-	case stats.ReuseFailures*2 > stats.Compactions:
+	case stats.ReuseFailures*2 > stats.Observed:
 		fmt.Fprintf(w, "  %-20s file grew while free pages were available - they are not\n", "reading")
 
 		if stats.OpenReadsMax > 1 {
