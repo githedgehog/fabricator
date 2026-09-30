@@ -418,7 +418,7 @@ func parsePromMetrics(body string) map[string]float64 {
 }
 
 // humanBytes formats a byte count in binary units, labelled as binary units.
-// The distinction matters here: --status-size parses KB as 1000, so printing a
+// The distinction matters here: --pad-size parses KB as 1000, so printing a
 // 600000-byte object as "586.0 KB" reads as if the padding fell short when it
 // hit its target exactly.
 func humanBytes(n int) string {
