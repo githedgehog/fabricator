@@ -4,6 +4,7 @@
 package hhfab
 
 import (
+	"fmt"
 	"net/netip"
 	"slices"
 	"testing"
@@ -11,7 +12,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.githedgehog.com/fabric/api/meta"
+	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
+	"go.githedgehog.com/fabricator/pkg/util/apiutil"
+	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestVLANsFrom(t *testing.T) {
@@ -578,6 +582,77 @@ func TestExpectationWhy(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			require.Equal(t, test.expected, expectationWhy(test.r))
+		})
+	}
+}
+
+func TestServerTopology(t *testing.T) {
+	t.Parallel()
+
+	switches := map[string]*wiringapi.Switch{
+		"leaf-01": {Spec: wiringapi.SwitchSpec{}},
+		"leaf-02": {Spec: wiringapi.SwitchSpec{Topology: wiringapi.SwitchTopology{Domains: []string{"domain-b", "default"}}}},
+		"leaf-03": {Spec: wiringapi.SwitchSpec{Topology: wiringapi.SwitchTopology{Domains: []string{"domain-b"}}}},
+		"leaf-b1": {Spec: wiringapi.SwitchSpec{Topology: wiringapi.SwitchTopology{Fabric: "fab-b"}}},
+	}
+
+	for _, test := range []struct {
+		name     string
+		leaves   []string
+		expected vpcapi.VPCTopology
+		err      string
+	}{
+		{
+			name:     "legacy leaf",
+			leaves:   []string{"leaf-01"},
+			expected: vpcapi.VPCTopology{Fabric: "default", Domains: []string{"default"}},
+		},
+		{
+			name:     "shared leaf keeps both domains",
+			leaves:   []string{"leaf-02"},
+			expected: vpcapi.VPCTopology{Fabric: "default", Domains: []string{"default", "domain-b"}},
+		},
+		{
+			name:     "intersection",
+			leaves:   []string{"leaf-02", "leaf-03"},
+			expected: vpcapi.VPCTopology{Fabric: "default", Domains: []string{"domain-b"}},
+		},
+		{
+			name:     "no domain in common",
+			leaves:   []string{"leaf-01", "leaf-03"},
+			expected: vpcapi.VPCTopology{Fabric: "default", Domains: []string{}},
+		},
+		{
+			name:   "two fabrics",
+			leaves: []string{"leaf-01", "leaf-b1"},
+			err:    "attached to fabrics default and fab-b",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			l := apiutil.NewLoader()
+			for idx, leaf := range test.leaves {
+				conn := &wiringapi.Connection{
+					ObjectMeta: kmetav1.ObjectMeta{Name: fmt.Sprintf("conn-%d", idx), Namespace: kmetav1.NamespaceDefault},
+					Spec: wiringapi.ConnectionSpec{Unbundled: &wiringapi.ConnUnbundled{Link: wiringapi.ServerToSwitchLink{
+						Server: wiringapi.BasePortName{Port: fmt.Sprintf("server-01/enp2s%d", idx+1)},
+						Switch: wiringapi.BasePortName{Port: leaf + "/E1/1"},
+					}}},
+				}
+				conn.Default()
+				require.NoError(t, l.Add(t.Context(), conn))
+			}
+
+			server := &wiringapi.Server{ObjectMeta: kmetav1.ObjectMeta{Name: "server-01"}}
+			topology, err := serverTopology(t.Context(), l.GetClient(), server, switches)
+			if test.err != "" {
+				require.ErrorContains(t, err, test.err)
+
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, test.expected, topology)
 		})
 	}
 }
