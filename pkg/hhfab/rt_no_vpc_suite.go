@@ -1016,6 +1016,7 @@ func (testCtx *VPCPeeringTestCtx) checkGatewayMetrics(ctx context.Context, prome
 // prerequisites: no existing VPCs, at least 1 unbundled multihomed server, at least 2 other servers.
 // look for a server with unbundled connections to different switches; create two separate hostBGP VPCs,
 // and attach them both to the server via all of its connections.
+// Attach the same connections to a regular subnet and detach them once the switches applied it.
 // Create two regular VPCs and attach them to the 2 other servers.
 // Peer each hostBGP VPC with one of the regular VPCs and check connectivity by manually building
 // a small connectivity matrix.
@@ -1248,10 +1249,35 @@ func hostBGPTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connectivit
 			return false, reverts, fmt.Errorf("creating VPC %s: %w", vpc.Name, err)
 		}
 	}
-	for _, attach := range allAttaches {
+	// also attach the multihomed server's connections to a regular subnet, then detach them in a
+	// later generation, so the hostBGP subinterfaces stay on ports that lose their last switched VLAN
+	l2Attaches := []*vpcapi.VPCAttachment{}
+	for i := range mhConns.Items {
+		l2Attaches = append(l2Attaches, makeVPCAttachment(mhConns.Items[i].Name, regularVPCAName, regularSubnetID))
+	}
+	mhSwitches := slices.Collect(maps.Keys(mhServer.SwitchConns))
+	gens, err := getAgentGens(ctx, testCtx.kube, mhSwitches)
+	if err != nil {
+		return false, reverts, err
+	}
+	for _, attach := range append(allAttaches, l2Attaches...) {
 		if err := testCtx.kube.Create(ctx, attach); err != nil {
 			return false, reverts, fmt.Errorf("creating attachment %s: %w", attach.Name, err)
 		}
+	}
+	if err := waitAgentGens(ctx, testCtx, gens); err != nil {
+		return false, reverts, fmt.Errorf("waiting for switches after attaching: %w", err)
+	}
+	if gens, err = getAgentGens(ctx, testCtx.kube, mhSwitches); err != nil {
+		return false, reverts, err
+	}
+	for _, attach := range l2Attaches {
+		if err := testCtx.kube.Delete(ctx, attach); err != nil {
+			return false, reverts, fmt.Errorf("deleting attachment %s: %w", attach.Name, err)
+		}
+	}
+	if err := waitAgentGens(ctx, testCtx, gens); err != nil {
+		return false, reverts, fmt.Errorf("waiting for switches after detaching: %w", err)
 	}
 
 	peeringA := vpcapi.VPCPeering{

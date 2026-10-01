@@ -1480,6 +1480,34 @@ func findUnbundledMHServers(ctx context.Context, kube kclient.Client, maxNum int
 	return mhServers, nil
 }
 
+// getAgentGens returns the last applied generation of the agent on each of the given switches
+func getAgentGens(ctx context.Context, kube kclient.Client, switches []string) (map[string]int64, error) {
+	gens := map[string]int64{}
+	for _, swName := range switches {
+		gen, err := getAgentGen(ctx, kube, swName)
+		if err != nil {
+			return nil, err
+		}
+		gens[swName] = gen
+	}
+
+	return gens, nil
+}
+
+// waitAgentGens waits until the agent on each switch moved past the given generation and all switches are ready
+func waitAgentGens(ctx context.Context, testCtx *VPCPeeringTestCtx, gens map[string]int64) error {
+	for swName, gen := range gens {
+		if err := waitAgentGen(ctx, testCtx.kube, swName, gen); err != nil {
+			return err
+		}
+	}
+	if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
+		return fmt.Errorf("waiting for ready: %w", err)
+	}
+
+	return nil
+}
+
 // vpcSubnetAllocator provides sequential VLAN and /24 subnet allocation from namespace objects.
 // Call stop() when done (typically via defer alloc.stop()).
 type vpcSubnetAllocator struct {
