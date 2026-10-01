@@ -254,6 +254,8 @@ func Run(ctx context.Context) error {
 	var wgESLAGLeafGroups string
 	var wgESLAGServers, wgUnbundledServers, wgBundledServers, wgMultiHomedServers uint
 	var wgNoSwitches bool
+	var wgExtraDomain bool
+	var wgSharedLeafsCount uint
 	var wgGatewayUplinks uint
 	var wgGatewayDriver string
 	var wgGatewayWorkers uint
@@ -286,6 +288,16 @@ func Run(ctx context.Context) error {
 			Name:        "orphan-leafs-count",
 			Usage:       "number of orphan leafs",
 			Destination: &wgOrphanLeafsCount,
+		},
+		&cli.BoolFlag{
+			Name:        "extra-domain",
+			Usage:       "generate in a fabric of its own with a second domain of as many spines; orphan leafs move to it (2 by default)",
+			Destination: &wgExtraDomain,
+		},
+		&cli.UintFlag{
+			Name:        "shared-leafs-count",
+			Usage:       "number of orphan leafs in both domains, the last ones (default 1 with --extra-domain)",
+			Destination: &wgSharedLeafsCount,
 		},
 		&cli.UintFlag{
 			Name:        "eslag-servers",
@@ -1077,6 +1089,8 @@ func Run(ctx context.Context) error {
 								ExtStaticProxyCount: uint8(wgStaticExternalsProxy), //nolint:gosec
 								ExtESLAGConnCount:   uint8(wgExtESLAGConns),        //nolint:gosec
 								ExtOrphanConnCount:  uint8(wgExtOrphanConns),       //nolint:gosec
+								ExtraDomain:         wgExtraDomain,
+								SharedLeafsCount:    uint8(wgSharedLeafsCount), //nolint:gosec
 								YesFlag:             yes,
 								VLABBuilderBase: hhfab.VLABBuilderBase{
 									DefaultSwitchProfile:   wgDefaultSwitchProfile,
