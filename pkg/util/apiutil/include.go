@@ -156,6 +156,7 @@ func defaultAndValidate(ctx context.Context, kube kclient.Reader, objList meta.O
 }
 
 var printIncludeLists = []kclient.ObjectList{
+	&wiringapi.FabricList{},
 	&wiringapi.VLANNamespaceList{},
 	&vpcapi.IPv4NamespaceList{},
 	&wiringapi.SwitchGroupList{},

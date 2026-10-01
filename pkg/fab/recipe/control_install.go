@@ -411,6 +411,7 @@ func (c *ControlInstall) installInclude(ctx context.Context, kube kclient.Client
 	slog.Info("Installing included wiring")
 
 	for _, objList := range []kclient.ObjectList{
+		&wiringapi.FabricList{}, // must precede anything with spec.topology.fabric
 		&wiringapi.VLANNamespaceList{},
 		&vpcapi.IPv4NamespaceList{},
 		&wiringapi.SwitchGroupList{},
