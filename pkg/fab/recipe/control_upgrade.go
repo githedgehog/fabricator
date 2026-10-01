@@ -20,6 +20,7 @@ import (
 	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
 	helmapi "github.com/k3s-io/helm-controller/pkg/apis/helm.cattle.io/v1"
 	agentapi "go.githedgehog.com/fabric/api/agent/v1beta1"
+	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
 	"go.githedgehog.com/fabric/api/meta"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
@@ -35,8 +36,10 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/k9s"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/zot"
+	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 	appsapi "k8s.io/api/apps/v1"
 	coreapi "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
@@ -58,7 +61,7 @@ func (c *ControlUpgrade) Run(ctx context.Context) error {
 	kube, err := kubeutil.NewClient(ctx, k3s.KubeConfigPath,
 		coreapi.AddToScheme, appsapi.AddToScheme,
 		helmapi.AddToScheme, cmapi.AddToScheme, cmmeta.AddToScheme,
-		wiringapi.AddToScheme, vpcapi.AddToScheme, agentapi.AddToScheme, fabapi.AddToScheme,
+		wiringapi.AddToScheme, vpcapi.AddToScheme, agentapi.AddToScheme, fabapi.AddToScheme, gwapi.AddToScheme,
 	)
 	if err != nil {
 		return fmt.Errorf("creating kube client: %w", err)
@@ -163,6 +166,10 @@ func (c *ControlUpgrade) Run(ctx context.Context) error {
 
 	if err := c.installFabricator(ctx, kube, false); err != nil {
 		return fmt.Errorf("installing fabricator and config: %w", err)
+	}
+
+	if err := backfillTopology(ctx, kube); err != nil {
+		return fmt.Errorf("backfilling fabric topology: %w", err)
 	}
 
 	if err := c.installFabricCtl(); err != nil {
@@ -493,6 +500,73 @@ func (c *ControlUpgrade) installFabricator(ctx context.Context, kube kclient.Cli
 		}); err != nil {
 		return fmt.Errorf("waiting for fabricator ready: %w", err)
 	}
+
+	return nil
+}
+
+// backfillTopology re-defaults objects written before they declared a fabric and domain, which the
+// webhooks never revisit, so their spec.topology and labels stay empty. Generated config treats empty
+// as default, so a failed write only leaves the object out of label-filtered lists and is not fatal.
+func backfillTopology(ctx context.Context, kube kclient.Client) error {
+	slog.Info("Backfilling fabric and domain on existing objects")
+
+	updated, failed := 0, 0
+	for _, objList := range []kclient.ObjectList{
+		&wiringapi.SwitchGroupList{},
+		&wiringapi.SwitchList{},
+		&wiringapi.ConnectionList{},
+		&vpcapi.IPv4NamespaceList{},
+		&vpcapi.VPCList{},
+		&vpcapi.VPCAttachmentList{},
+		&vpcapi.VPCPeeringList{},
+		&vpcapi.ExternalList{},
+		&vpcapi.ExternalAttachmentList{},
+		&vpcapi.ExternalPeeringList{},
+		&gwapi.GatewayGroupList{},
+		&gwapi.GatewayList{},
+		&gwapi.GatewayPeeringList{},
+	} {
+		if err := kube.List(ctx, objList); err != nil {
+			return fmt.Errorf("listing %T: %w", objList, err)
+		}
+
+		for _, obj := range apiutil.KubeListItems(objList) {
+			defaultable, ok := obj.(interface{ Default() })
+			if !ok {
+				return fmt.Errorf("%T has no Default()", obj) //nolint:goerr113
+			}
+
+			// a controller may write the object between the list and the update, and nothing
+			// retries the backfill later, so re-read it on a conflict
+			listed, changed := true, false
+			if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+				if !listed {
+					if err := kube.Get(ctx, kclient.ObjectKeyFromObject(obj), obj); err != nil {
+						return fmt.Errorf("getting: %w", err)
+					}
+				}
+				listed = false
+
+				orig := obj.DeepCopyObject()
+				defaultable.Default()
+				if changed = !equality.Semantic.DeepEqual(orig, obj); !changed {
+					return nil
+				}
+
+				return kube.Update(ctx, obj)
+			}); err != nil {
+				slog.Warn("Failed to backfill fabric topology", "type", fmt.Sprintf("%T", obj), "name", obj.GetName(), "err", err)
+				failed++
+
+				continue
+			}
+			if changed {
+				updated++
+			}
+		}
+	}
+
+	slog.Info("Backfilled fabric and domain", "updated", updated, "failed", failed)
 
 	return nil
 }
