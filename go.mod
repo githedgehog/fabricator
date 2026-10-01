@@ -1,6 +1,6 @@
 module go.githedgehog.com/fabricator
 
-go 1.26.7
+go 1.26.8
 
 replace github.com/diskfs/go-diskfs => github.com/Frostman/go-diskfs v1.4.2-hh3
 
