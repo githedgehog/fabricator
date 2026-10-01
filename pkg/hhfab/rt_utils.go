@@ -22,6 +22,7 @@ import (
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/util/sshutil"
+	kapierrors "k8s.io/apimachinery/pkg/api/errors"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -1506,6 +1507,118 @@ func waitAgentGens(ctx context.Context, testCtx *VPCPeeringTestCtx, gens map[str
 	}
 
 	return nil
+}
+
+// unbundleESLAGServer replaces an ESLAG connection with one link per switch by one unbundled connection
+// per link, so tests that need an unbundled multihomed server can run on wirings without one.
+// It expects no attachments on the ESLAG connection. The returned revert restores the original connection
+// (a no-op if there is no such connection) and has to be registered even if an error is returned.
+func unbundleESLAGServer(ctx context.Context, testCtx *VPCPeeringTestCtx) (RevertFunc, error) {
+	eslagConns := &wiringapi.ConnectionList{}
+	if err := testCtx.kube.List(ctx, eslagConns, kclient.MatchingLabels{
+		wiringapi.LabelConnectionType: wiringapi.ConnectionTypeESLAG,
+	}); err != nil {
+		return func(context.Context) error { return nil }, fmt.Errorf("listing ESLAG connections: %w", err)
+	}
+
+	var eslag *wiringapi.Connection
+	var switches []string
+	for i := range eslagConns.Items {
+		conn := &eslagConns.Items[i]
+		connSwitches := []string{}
+		for _, link := range conn.Spec.ESLAG.Links {
+			connSwitches = append(connSwitches, link.Switch.DeviceName())
+		}
+		slices.Sort(connSwitches)
+		if len(slices.Compact(slices.Clone(connSwitches))) == len(connSwitches) {
+			eslag, switches = conn, connSwitches
+
+			break
+		}
+	}
+	if eslag == nil {
+		return func(context.Context) error { return nil }, nil
+	}
+
+	unbundled := []*wiringapi.Connection{}
+	for _, link := range eslag.Spec.ESLAG.Links {
+		unbundled = append(unbundled, &wiringapi.Connection{
+			ObjectMeta: kmetav1.ObjectMeta{
+				Name:      fmt.Sprintf("%s--unbundled--%s", link.Server.DeviceName(), link.Switch.DeviceName()),
+				Namespace: eslag.Namespace,
+			},
+			Spec: wiringapi.ConnectionSpec{
+				Unbundled: &wiringapi.ConnUnbundled{
+					Link:                         link,
+					ServerFacingConnectionConfig: eslag.Spec.ESLAG.ServerFacingConnectionConfig,
+				},
+			},
+		})
+	}
+	original := &wiringapi.Connection{
+		ObjectMeta: kmetav1.ObjectMeta{
+			Name:        eslag.Name,
+			Namespace:   eslag.Namespace,
+			Labels:      maps.Clone(eslag.Labels),
+			Annotations: maps.Clone(eslag.Annotations),
+		},
+		Spec: eslag.Spec,
+	}
+
+	deleted := false
+	revert := func(ctx context.Context) error {
+		if !deleted {
+			return nil
+		}
+		// remove the unbundled connections (and whatever is still configured on them) in a generation of
+		// their own, as the agent can't turn a port with subinterfaces into a port channel member in one go
+		gens, err := getAgentGens(ctx, testCtx.kube, switches)
+		if err != nil {
+			return err
+		}
+		removed := false
+		for _, conn := range unbundled {
+			err := testCtx.kube.Delete(ctx, conn)
+			if kclient.IgnoreNotFound(err) != nil {
+				return fmt.Errorf("deleting connection %s: %w", conn.Name, err)
+			}
+			removed = removed || err == nil
+		}
+		if removed {
+			if err := waitAgentGens(ctx, testCtx, gens); err != nil {
+				return err
+			}
+			if gens, err = getAgentGens(ctx, testCtx.kube, switches); err != nil {
+				return err
+			}
+		}
+		if err := testCtx.kube.Create(ctx, original.DeepCopy()); err != nil {
+			if kapierrors.IsAlreadyExists(err) {
+				return nil
+			}
+
+			return fmt.Errorf("restoring connection %s: %w", original.Name, err)
+		}
+
+		return waitAgentGens(ctx, testCtx, gens)
+	}
+
+	gens, err := getAgentGens(ctx, testCtx.kube, switches)
+	if err != nil {
+		return revert, err
+	}
+	slog.Debug("Replacing ESLAG connection with unbundled ones", "connection", eslag.Name)
+	if err := testCtx.kube.Delete(ctx, eslag); err != nil {
+		return revert, fmt.Errorf("deleting connection %s: %w", eslag.Name, err)
+	}
+	deleted = true
+	for _, conn := range unbundled {
+		if err := testCtx.kube.Create(ctx, conn); err != nil {
+			return revert, fmt.Errorf("creating connection %s: %w", conn.Name, err)
+		}
+	}
+
+	return revert, waitAgentGens(ctx, testCtx, gens)
 }
 
 // vpcSubnetAllocator provides sequential VLAN and /24 subnet allocation from namespace objects.

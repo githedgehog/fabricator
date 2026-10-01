@@ -1013,8 +1013,31 @@ func (testCtx *VPCPeeringTestCtx) checkGatewayMetrics(ctx context.Context, prome
 	return nil
 }
 
+// wipeExistingVPCs removes any VPCs and their attachments and waits for the switches to apply it
+func wipeExistingVPCs(ctx context.Context, testCtx *VPCPeeringTestCtx) error {
+	existingVPCs := &vpcapi.VPCList{}
+	if err := testCtx.kube.List(ctx, existingVPCs); err != nil {
+		return fmt.Errorf("listing existing VPCs: %w", err)
+	}
+	if len(existingVPCs.Items) == 0 {
+		return nil
+	}
+	slog.Debug("Wiping existing VPCs", "vpcs", len(existingVPCs.Items))
+	if err := hhfctl.VPCWipeWithClient(ctx, testCtx.kube); err != nil {
+		return fmt.Errorf("wiping existing VPCs: %w", err)
+	}
+	// deleting and recreating VPCs too quickly upsets the switches (fabric#656)
+	time.Sleep(3 * time.Second)
+	if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
+		return fmt.Errorf("waiting for switches after wiping VPCs: %w", err)
+	}
+
+	return nil
+}
+
 // prerequisites: no existing VPCs, at least 1 unbundled multihomed server, at least 2 other servers.
-// look for a server with unbundled connections to different switches; create two separate hostBGP VPCs,
+// look for a server with unbundled connections to different switches, replacing an ESLAG connection with
+// unbundled ones if there is none; create two separate hostBGP VPCs,
 // and attach them both to the server via all of its connections.
 // Attach the same connections to a regular subnet and detach them once the switches applied it.
 // Create two regular VPCs and attach them to the 2 other servers.
@@ -1028,6 +1051,20 @@ func hostBGPTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connectivit
 	mhServers, err := findUnbundledMHServers(ctx, testCtx.kube, 1)
 	if err != nil {
 		return false, reverts, fmt.Errorf("looking for unbundled multihomed servers: %w", err)
+	}
+	if len(mhServers) == 0 {
+		// the ESLAG connection to replace must have no attachments
+		if err := wipeExistingVPCs(ctx, testCtx); err != nil {
+			return false, reverts, err
+		}
+		revert, err := unbundleESLAGServer(ctx, testCtx)
+		reverts = append(reverts, revert)
+		if err != nil {
+			return false, reverts, fmt.Errorf("unbundling an ESLAG server: %w", err)
+		}
+		if mhServers, err = findUnbundledMHServers(ctx, testCtx.kube, 1); err != nil {
+			return false, reverts, fmt.Errorf("looking for unbundled multihomed servers: %w", err)
+		}
 	}
 	if len(mhServers) != 1 {
 		return true, reverts, fmt.Errorf("no available unbundled multihomed server") //nolint:err113
@@ -1223,20 +1260,8 @@ func hostBGPTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connectivit
 
 	// the suite runs with noSetup, so VPCs left over by an earlier suite are still
 	// around and their subnets would collide with the ones allocated above
-	existingVPCs := &vpcapi.VPCList{}
-	if err := testCtx.kube.List(ctx, existingVPCs); err != nil {
-		return false, reverts, fmt.Errorf("listing existing VPCs: %w", err)
-	}
-	if len(existingVPCs.Items) > 0 {
-		slog.Debug("Wiping existing VPCs before hostBGP test", "vpcs", len(existingVPCs.Items))
-		if err := hhfctl.VPCWipeWithClient(ctx, testCtx.kube); err != nil {
-			return false, reverts, fmt.Errorf("wiping existing VPCs: %w", err)
-		}
-		// deleting and recreating VPCs too quickly upsets the switches (fabric#656)
-		time.Sleep(3 * time.Second)
-		if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
-			return false, reverts, fmt.Errorf("waiting for switches after wiping VPCs: %w", err)
-		}
+	if err := wipeExistingVPCs(ctx, testCtx); err != nil {
+		return false, reverts, err
 	}
 
 	// Register cleanup revert before creating any resources
