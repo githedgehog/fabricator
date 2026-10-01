@@ -39,6 +39,11 @@ func ValidateFabricGateway(ctx context.Context, l *Loader, fabricCfg *meta.Fabri
 		return fmt.Errorf("enforcing default switch profiles for validation: %w", err)
 	}
 
+	kube, err := defaultedCopy(ctx, kube)
+	if err != nil {
+		return err
+	}
+
 	if err := validateFabrics(ctx, kube, fabricCfg); err != nil {
 		return fmt.Errorf("validating fabrics: %w", err)
 	}
@@ -146,6 +151,27 @@ func ValidateFabricGateway(ctx context.Context, l *Loader, fabricCfg *meta.Fabri
 	return nil
 }
 
+// defaultedCopy returns the objects as admission stores them. Validators find related objects
+// through the labels Default() sets, which the loaded wiring only gets from the webhooks on install.
+func defaultedCopy(ctx context.Context, kube kclient.Reader) (kclient.Client, error) {
+	builder := fake.NewClientBuilder().WithScheme(scheme)
+	for _, objList := range append([]kclient.ObjectList{&wiringapi.SwitchProfileList{}, &wiringapi.ServerProfileList{}}, printIncludeLists()...) {
+		if err := kube.List(ctx, objList); err != nil {
+			return nil, fmt.Errorf("listing %T: %w", objList, err)
+		}
+		for _, obj := range KubeListItems(objList) {
+			obj = obj.DeepCopyObject().(kclient.Object) //nolint:forcetypeassert
+			if defaultable, ok := obj.(interface{ Default() }); ok {
+				defaultable.Default()
+			}
+			obj.SetResourceVersion("")
+			builder = builder.WithObjects(obj)
+		}
+	}
+
+	return builder.Build(), nil
+}
+
 // validateFabrics checks the wiring's Fabrics against each other and against Fabric/default, which
 // the controller seeds from the config and so must not be in the wiring
 func validateFabrics(ctx context.Context, kube kclient.Reader, fabricCfg *meta.FabricConfig) error {
@@ -191,28 +217,31 @@ func defaultAndValidate(ctx context.Context, kube kclient.Reader, objList meta.O
 	return nil
 }
 
-var printIncludeLists = []kclient.ObjectList{
-	&wiringapi.FabricList{},
-	&wiringapi.VLANNamespaceList{},
-	&vpcapi.IPv4NamespaceList{},
-	&wiringapi.SwitchGroupList{},
-	&wiringapi.SwitchList{},
-	&wiringapi.ServerList{},
-	&wiringapi.ConnectionList{},
-	&vpcapi.ExternalList{},
-	&vpcapi.ExternalAttachmentList{},
-	&vpcapi.VPCList{},
-	&vpcapi.VPCAttachmentList{},
-	&vpcapi.VPCPeeringList{},
-	&vpcapi.ExternalPeeringList{},
-	&gwapi.GatewayGroupList{},
-	&gwapi.GatewayList{},
-	&gwapi.VPCInfoList{},
-	&gwapi.GatewayPeeringList{},
+// a function and not a var since listing fills the lists in, and validation may run concurrently
+func printIncludeLists() []kclient.ObjectList {
+	return []kclient.ObjectList{
+		&wiringapi.FabricList{},
+		&wiringapi.VLANNamespaceList{},
+		&vpcapi.IPv4NamespaceList{},
+		&wiringapi.SwitchGroupList{},
+		&wiringapi.SwitchList{},
+		&wiringapi.ServerList{},
+		&wiringapi.ConnectionList{},
+		&vpcapi.ExternalList{},
+		&vpcapi.ExternalAttachmentList{},
+		&vpcapi.VPCList{},
+		&vpcapi.VPCAttachmentList{},
+		&vpcapi.VPCPeeringList{},
+		&vpcapi.ExternalPeeringList{},
+		&gwapi.GatewayGroupList{},
+		&gwapi.GatewayList{},
+		&gwapi.VPCInfoList{},
+		&gwapi.GatewayPeeringList{},
+	}
 }
 
 func PrintInclude(ctx context.Context, kube ReaderWithScheme, w io.Writer) error {
-	if err := printKubeObjects(ctx, kube, w, printIncludeLists...); err != nil {
+	if err := printKubeObjects(ctx, kube, w, printIncludeLists()...); err != nil {
 		return fmt.Errorf("printing kube objects: %w", err)
 	}
 
