@@ -182,6 +182,33 @@ func (c *Config) ensureHydrated(ctx context.Context, kube kclient.Client, mode H
 	return fmt.Errorf("unknown hydration mode %q or invalid hydration status", mode) //nolint:goerr113
 }
 
+func fabricSpecs(ctx context.Context, kube kclient.Reader) (map[string]wiringapi.FabricSpec, error) {
+	fabrics := &wiringapi.FabricList{}
+	if err := kube.List(ctx, fabrics); err != nil {
+		return nil, fmt.Errorf("listing fabrics: %w", err)
+	}
+
+	specs := map[string]wiringapi.FabricSpec{}
+	for _, f := range fabrics.Items {
+		specs[f.Name] = f.Spec
+	}
+
+	return specs, nil
+}
+
+func fabricDomain(fabrics map[string]wiringapi.FabricSpec, fabricName, domainName string) (wiringapi.FabricDomainSpec, error) {
+	f, ok := fabrics[fabricName]
+	if !ok {
+		return wiringapi.FabricDomainSpec{}, fmt.Errorf("fabric %s not found", fabricName) //nolint:goerr113
+	}
+	domain, ok := f.Domains[domainName]
+	if !ok {
+		return wiringapi.FabricDomainSpec{}, fmt.Errorf("domain %s not found in fabric %s", domainName, fabricName) //nolint:goerr113
+	}
+
+	return domain, nil
+}
+
 func (c *Config) getHydration(ctx context.Context, kube kclient.Reader) (HydrationStatus, error) {
 	status := HydrationStatusPartial
 
@@ -304,9 +331,10 @@ func (c *Config) getHydration(ctx context.Context, kube kclient.Reader) (Hydrati
 
 	protocolIPs := map[netip.Addr]bool{}
 
-	asnSpine := c.Fab.Spec.Config.Fabric.SpineASN
-	asnLeafStart := c.Fab.Spec.Config.Fabric.LeafASNStart
-	asnLeafEnd := c.Fab.Spec.Config.Fabric.LeafASNEnd
+	fabrics, err := fabricSpecs(ctx, kube)
+	if err != nil {
+		return status, err
+	}
 
 	leafASNs := map[uint32]bool{}
 
@@ -372,9 +400,14 @@ func (c *Config) getHydration(ctx context.Context, kube kclient.Reader) (Hydrati
 
 		total++
 		if sw.Spec.ASN > 0 {
+			swFabric := sw.Spec.Topology.Fabric
 			if sw.Spec.Role.IsLeaf() {
-				if sw.Spec.ASN < asnLeafStart || sw.Spec.ASN > asnLeafEnd {
-					return status, fmt.Errorf("leaf %s ASN %d is not in the leaf ASN range %d-%d", sw.Name, sw.Spec.ASN, asnLeafStart, asnLeafEnd) //nolint:goerr113
+				f, ok := fabrics[swFabric]
+				if !ok {
+					return status, fmt.Errorf("switch %s fabric %s not found", sw.Name, swFabric) //nolint:goerr113
+				}
+				if sw.Spec.ASN < f.LeafASNStart || sw.Spec.ASN > f.LeafASNEnd {
+					return status, fmt.Errorf("leaf %s ASN %d is not in the fabric %s leaf ASN range %d-%d", sw.Name, sw.Spec.ASN, swFabric, f.LeafASNStart, f.LeafASNEnd) //nolint:goerr113
 				}
 
 				if sw.Spec.Redundancy.Type == fmeta.RedundancyTypeMCLAG {
@@ -395,8 +428,14 @@ func (c *Config) getHydration(ctx context.Context, kube kclient.Reader) (Hydrati
 				leafASNs[sw.Spec.ASN] = true
 			}
 
-			if sw.Spec.Role.IsSpine() && sw.Spec.ASN != asnSpine {
-				return status, fmt.Errorf("spine %s ASN %d is not %d", sw.Name, sw.Spec.ASN, asnSpine) //nolint:goerr113
+			if sw.Spec.Role.IsSpine() {
+				domain, err := fabricDomain(fabrics, swFabric, sw.Spec.Topology.Domains[0])
+				if err != nil {
+					return status, fmt.Errorf("spine %s: %w", sw.Name, err)
+				}
+				if sw.Spec.ASN != domain.SpineASN {
+					return status, fmt.Errorf("spine %s ASN %d is not %d", sw.Name, sw.Spec.ASN, domain.SpineASN) //nolint:goerr113
+				}
 			}
 		} else {
 			missing++
@@ -625,8 +664,12 @@ func (c *Config) getHydration(ctx context.Context, kube kclient.Reader) (Hydrati
 	for _, gw := range gateways.Items {
 		total++
 		if gw.Spec.ASN != 0 {
-			if gw.Spec.ASN != c.Fab.Spec.Config.Gateway.ASN {
-				return status, fmt.Errorf("gateway %s ASN %d is not %d", gw.Name, gw.Spec.ASN, c.Fab.Spec.Config.Gateway.ASN) //nolint:goerr113
+			domain, err := fabricDomain(fabrics, gw.Spec.Topology.Fabric, gw.Spec.Topology.Domain)
+			if err != nil {
+				return status, fmt.Errorf("gateway %s: %w", gw.Name, err)
+			}
+			if gw.Spec.ASN != domain.GatewayASN {
+				return status, fmt.Errorf("gateway %s ASN %d is not %d", gw.Name, gw.Spec.ASN, domain.GatewayASN) //nolint:goerr113
 			}
 		} else {
 			missing++
@@ -756,8 +799,14 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 	}
 	nextProtoIP := protocolSubnet.Masked().Addr()
 
-	spineASN := c.Fab.Spec.Config.Fabric.SpineASN
-	nextLeafASN := c.Fab.Spec.Config.Fabric.LeafASNStart
+	fabrics, err := fabricSpecs(ctx, kube)
+	if err != nil {
+		return err
+	}
+	nextLeafASN := map[string]uint32{}
+	for name, f := range fabrics {
+		nextLeafASN[name] = f.LeafASNStart
+	}
 
 	switches := &wiringapi.SwitchList{}
 	if err := kube.List(ctx, switches); err != nil {
@@ -797,8 +846,17 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 		sw.Spec.ProtocolIP = netip.PrefixFrom(nextProtoIP, 32).String()
 		nextProtoIP = nextProtoIP.Next()
 
+		swFabric := sw.Spec.Topology.Fabric
+		if _, ok := fabrics[swFabric]; !ok {
+			return fmt.Errorf("switch %s fabric %s not found", sw.Name, swFabric) //nolint:goerr113
+		}
+
 		if sw.Spec.Role.IsSpine() {
-			sw.Spec.ASN = spineASN
+			domain, err := fabricDomain(fabrics, swFabric, sw.Spec.Topology.Domains[0])
+			if err != nil {
+				return fmt.Errorf("spine %s: %w", sw.Name, err)
+			}
+			sw.Spec.ASN = domain.SpineASN
 		}
 
 		if sw.Spec.Redundancy.Type == fmeta.RedundancyTypeMCLAG {
@@ -813,8 +871,8 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 		}
 
 		if sw.Spec.Role.IsLeaf() {
-			sw.Spec.ASN = nextLeafASN
-			nextLeafASN++
+			sw.Spec.ASN = nextLeafASN[swFabric]
+			nextLeafASN[swFabric]++
 
 			sw.Spec.VTEPIP = ""
 			sw.Spec.VTEPIP = netip.PrefixFrom(nextVTEPIP, 32).String()
@@ -946,7 +1004,11 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 	})
 
 	for _, gw := range gateways.Items {
-		gw.Spec.ASN = c.Fab.Spec.Config.Gateway.ASN
+		domain, err := fabricDomain(fabrics, gw.Spec.Topology.Fabric, gw.Spec.Topology.Domain)
+		if err != nil {
+			return fmt.Errorf("gateway %s: %w", gw.Name, err)
+		}
+		gw.Spec.ASN = domain.GatewayASN
 
 		gw.Spec.ProtocolIP = netip.PrefixFrom(nextProtoIP, 32).String()
 		nextProtoIP = nextProtoIP.Next()
