@@ -33,6 +33,7 @@ import (
 	appsapi "k8s.io/api/apps/v1"
 	coreapi "k8s.io/api/core/v1"
 	kapierrors "k8s.io/apimachinery/pkg/api/errors"
+	kmeta "k8s.io/apimachinery/pkg/api/meta"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
@@ -408,9 +409,24 @@ func (c *ControlInstall) installInclude(ctx context.Context, kube kclient.Client
 		checkedProfiles[sw.Spec.Profile] = true
 	}
 
+	// fabrics are validated against Fabric/default, which the controller seeds on startup
+	slog.Info("Waiting for default fabric ready")
+
+	if err := kube.Get(ctx, kclient.ObjectKey{Name: wiringapi.DefaultFabric, Namespace: kmetav1.NamespaceDefault}, &wiringapi.Fabric{}); kmeta.IsNoMatchError(err) {
+		return fmt.Errorf("installed fabric version %s has no Fabric type: %w", c.Fab.Status.Versions.Fabric.Controller, err)
+	}
+
+	if err := waitKube(ctx, kube, wiringapi.DefaultFabric, kmetav1.NamespaceDefault,
+		&wiringapi.Fabric{}, func(obj *wiringapi.Fabric) (bool, error) {
+			return obj.Spec.LeafASNStart != 0, nil
+		}); err != nil {
+		return fmt.Errorf("waiting for default fabric ready: %w", err)
+	}
+
 	slog.Info("Installing included wiring")
 
 	for _, objList := range []kclient.ObjectList{
+		&wiringapi.FabricList{},
 		&wiringapi.VLANNamespaceList{},
 		&vpcapi.IPv4NamespaceList{},
 		&wiringapi.SwitchGroupList{},
@@ -445,6 +461,7 @@ func (c *ControlInstall) installInclude(ctx context.Context, kube kclient.Client
 			obj.SetResourceVersion("")
 
 			attempt := 0
+			var lastErr error
 
 			if err := retry.OnError(wait.Backoff{
 				Steps:    17,
@@ -452,10 +469,12 @@ func (c *ControlInstall) installInclude(ctx context.Context, kube kclient.Client
 				Factor:   1.5,
 				Jitter:   0.1,
 			}, func(err error) bool {
+				lastErr = err
+
 				return !kapierrors.IsConflict(err)
 			}, func() error {
 				if attempt > 0 {
-					slog.Debug("Retrying installing wiring", "kind", kind, "name", name, "attempt", attempt)
+					slog.Debug("Retrying installing wiring", "kind", kind, "name", name, "attempt", attempt, "err", lastErr)
 				}
 
 				attempt++

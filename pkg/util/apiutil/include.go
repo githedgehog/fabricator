@@ -13,7 +13,9 @@ import (
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/ctrl/switchprofile"
+	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 func ValidateFabricGateway(ctx context.Context, l *Loader, fabricCfg *meta.FabricConfig) error {
@@ -35,6 +37,10 @@ func ValidateFabricGateway(ctx context.Context, l *Loader, fabricCfg *meta.Fabri
 
 	if err := profiles.Enforce(ctx, kube, fabricCfg, false); err != nil {
 		return fmt.Errorf("enforcing default switch profiles for validation: %w", err)
+	}
+
+	if err := validateFabrics(ctx, kube, fabricCfg); err != nil {
+		return fmt.Errorf("validating fabrics: %w", err)
 	}
 
 	if err := defaultAndValidate(ctx, kube, &wiringapi.SwitchProfileList{}, fabricCfg); err != nil {
@@ -140,6 +146,36 @@ func ValidateFabricGateway(ctx context.Context, l *Loader, fabricCfg *meta.Fabri
 	return nil
 }
 
+// validateFabrics checks the wiring's Fabrics against each other and against Fabric/default, which
+// the controller seeds from the config and so must not be in the wiring
+func validateFabrics(ctx context.Context, kube kclient.Reader, fabricCfg *meta.FabricConfig) error {
+	fabrics := &wiringapi.FabricList{}
+	if err := kube.List(ctx, fabrics); err != nil {
+		return fmt.Errorf("listing fabrics: %w", err)
+	}
+
+	withDefault := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&wiringapi.Fabric{
+		ObjectMeta: kmetav1.ObjectMeta{Name: wiringapi.DefaultFabric, Namespace: kmetav1.NamespaceDefault},
+		Spec:       wiringapi.DefaultFabricSpec(fabricCfg),
+	})
+	for _, fabric := range fabrics.Items {
+		if fabric.Name == wiringapi.DefaultFabric {
+			return fmt.Errorf("fabric %s is created from the config and must not be in the wiring", wiringapi.DefaultFabric) //nolint:goerr113
+		}
+		withDefault = withDefault.WithObjects(&fabric)
+	}
+	withDefaultKube := withDefault.Build()
+
+	for _, fabric := range fabrics.Items {
+		fabric.Default()
+		if _, err := fabric.Validate(ctx, withDefaultKube, fabricCfg); err != nil {
+			return fmt.Errorf("validating fabric %q: %w", fabric.Name, err)
+		}
+	}
+
+	return nil
+}
+
 func defaultAndValidate(ctx context.Context, kube kclient.Reader, objList meta.ObjectList, cfg *meta.FabricConfig) error {
 	if err := kube.List(ctx, objList); err != nil {
 		return fmt.Errorf("listing %T: %w", objList, err)
@@ -156,6 +192,7 @@ func defaultAndValidate(ctx context.Context, kube kclient.Reader, objList meta.O
 }
 
 var printIncludeLists = []kclient.ObjectList{
+	&wiringapi.FabricList{},
 	&wiringapi.VLANNamespaceList{},
 	&vpcapi.IPv4NamespaceList{},
 	&wiringapi.SwitchGroupList{},
