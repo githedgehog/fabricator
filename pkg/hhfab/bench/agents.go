@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	"net"
+	"net/netip"
 	"slices"
 	"sort"
 	"strconv"
@@ -39,11 +40,11 @@ import (
 // ServiceAccount identity - and with it the real RBAC path and API Priority and
 // Fairness flow - while giving up the distinct source address per agent.
 const (
-	APIViaHostfwd = "hostfwd"
-	APIViaBridge  = "bridge"
+	APIViaHostfwd  = "hostfwd"
+	APIViaBridgeIP = "bridgeip"
 )
 
-var APIVias = []string{APIViaHostfwd, APIViaBridge}
+var APIVias = []string{APIViaHostfwd, APIViaBridgeIP}
 
 // AgentKubeconfigKey is the key holding the kubeconfig in the per-switch Secret
 // the Fabric controller creates.
@@ -85,10 +86,18 @@ type AgentsOpts struct {
 	// these prefixes; empty means every agent in the cluster.
 	Agents []string
 
+	// APIVia records how APIServer reaches the API: hostfwd through the VM's
+	// user-mode networking, or bridgeip to the control VIP from an address on
+	// the management bridge. It is reported, and the caller resolves APIServer
+	// and SourceAddr to match.
 	APIVia string
-	// APIServer overrides the server address in each agent's kubeconfig, which
-	// is needed whenever the control VIP is not routable from here.
+	// APIServer overrides the server address in each agent's kubeconfig, so
+	// the bench decides the path rather than whatever the controller wrote.
 	APIServer string
+	// SourceAddr, when set, is the local address every agent dials from. Bound
+	// explicitly so the traffic can only leave over the interface holding it,
+	// whatever else the host's routing table says about the destination.
+	SourceAddr netip.Addr
 
 	// SyncHeartbeats removes the per-agent phase offset so every agent writes
 	// at the same instant, which is the thundering herd worst case rather than
@@ -117,9 +126,6 @@ func RunAgents(ctx context.Context, admin kclient.Client, opts AgentsOpts) error
 	}
 	if !slices.Contains(APIVias, opts.APIVia) {
 		return fmt.Errorf("unknown --api-via %q, valid values are %s", opts.APIVia, strings.Join(APIVias, ", ")) //nolint:err113
-	}
-	if opts.APIVia == APIViaBridge {
-		return fmt.Errorf("--api-via=%s is not implemented yet: it needs per-agent addresses on the management bridge", APIViaBridge) //nolint:err113
 	}
 
 	names, err := discoverAgents(ctx, admin, opts.Agents)
@@ -273,7 +279,11 @@ func newAgentSim(ctx context.Context, admin kclient.Client, name string, opts Ag
 	// keys on TLS config rather than on the bearer token. Without it every
 	// agent would share one connection and the apiserver would see a single
 	// multiplexed client instead of N.
-	cfg.Dial = (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext
+	dialer := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
+	if opts.SourceAddr.IsValid() {
+		dialer.LocalAddr = &net.TCPAddr{IP: opts.SourceAddr.AsSlice()}
+	}
+	cfg.Dial = dialer.DialContext
 
 	scheme, err := benchScheme()
 	if err != nil {
