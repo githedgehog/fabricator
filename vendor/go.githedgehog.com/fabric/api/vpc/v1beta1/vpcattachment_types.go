@@ -39,8 +39,16 @@ const (
 
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
+// VPCAttachmentTopology is where a VPCAttachment sits in the fabric topology
+type VPCAttachmentTopology struct {
+	// Fabric is the name of the Fabric this VPCAttachment belongs to (if not specified, "default" is used)
+	Fabric string `json:"fabric,omitempty"`
+}
+
 // VPCAttachmentSpec defines the desired state of VPCAttachment
 type VPCAttachmentSpec struct {
+	// Topology is where the VPCAttachment sits in the fabric topology
+	Topology VPCAttachmentTopology `json:"topology,omitempty"`
 	// Subnet is the full name of the VPC subnet to attach to, such as "vpc-1/default"
 	Subnet string `json:"subnet,omitempty"`
 	// Connection is the name of the connection to attach to the VPC
@@ -55,6 +63,7 @@ type VPCAttachmentStatus struct{}
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:categories=hedgehog;fabric,shortName=vpcattach
+// +kubebuilder:printcolumn:name="Fabric",type=string,JSONPath=`.spec.topology.fabric`,priority=0
 // +kubebuilder:printcolumn:name="VPCSUBNET",type=string,JSONPath=`.spec.subnet`,priority=0
 // +kubebuilder:printcolumn:name="Connection",type=string,JSONPath=`.spec.connection`,priority=0
 // +kubebuilder:printcolumn:name="NativeVLAN",type=string,JSONPath=`.spec.nativeVLAN`,priority=0
@@ -136,6 +145,10 @@ func (s *VPCAttachmentSpec) Labels() map[string]string {
 func (attach *VPCAttachment) Default() {
 	meta.DefaultObjectMetadata(attach)
 
+	if attach.Spec.Topology.Fabric == "" {
+		attach.Spec.Topology.Fabric = wiringapi.DefaultFabric
+	}
+
 	parts := strings.SplitN(attach.Spec.Subnet, "/", 2)
 	if len(parts[0]) == 0 {
 		return // it'll be handled in validation stage
@@ -151,11 +164,17 @@ func (attach *VPCAttachment) Default() {
 	wiringapi.CleanupFabricLabels(attach.Labels)
 
 	maps.Copy(attach.Labels, attach.Spec.Labels())
+
+	attach.Labels[wiringapi.ListLabelFabric(attach.Spec.Topology.Fabric)] = ListLabelValue
 }
 
 func (attach *VPCAttachment) Validate(ctx context.Context, kube kclient.Reader, _ *meta.FabricConfig) (admission.Warnings, error) {
 	if err := meta.ValidateObjectMetadata(attach); err != nil {
 		return nil, errors.Wrapf(err, "failed to validate metadata")
+	}
+
+	if err := wiringapi.CheckFabricExists(ctx, kube, attach.Namespace, attach.Spec.Topology.Fabric); err != nil {
+		return nil, fmt.Errorf("failed to validate fabric: %w", err)
 	}
 
 	if attach.Spec.Subnet == "" {
@@ -212,6 +231,14 @@ func (attach *VPCAttachment) Validate(ctx context.Context, kube kclient.Reader, 
 			return nil, errors.Wrapf(err, "failed to get connection %s", attach.Spec.Connection) // TODO replace with some internal error to not expose to the user
 		}
 
+		attachFabric := wiringapi.FabricNameOrDefault(attach.Spec.Topology.Fabric)
+		if vpcFabric := wiringapi.FabricNameOrDefault(vpc.Spec.Topology.Fabric); vpcFabric != attachFabric {
+			return nil, fmt.Errorf("attachment is in fabric %s but vpc %s is in fabric %s", attachFabric, vpcName, vpcFabric) //nolint:err113
+		}
+		if connFabric := wiringapi.FabricNameOrDefault(conn.Spec.Topology.Fabric); connFabric != attachFabric {
+			return nil, fmt.Errorf("attachment is in fabric %s but connection %s is in fabric %s", attachFabric, attach.Spec.Connection, connFabric) //nolint:err113
+		}
+
 		if conn.Spec.ESLAG != nil && vpc.Spec.Mode != VPCModeL2VNI {
 			return nil, errors.Errorf("vpc mode %s is not supported for ESLAG connections", vpc.Spec.Mode)
 		}
@@ -250,6 +277,11 @@ func (attach *VPCAttachment) Validate(ctx context.Context, kube kclient.Reader, 
 
 			if !slices.Contains(sw.Spec.VLANNamespaces, vpc.Spec.VLANNamespace) {
 				return nil, errors.Errorf("switch %s used in connection doesn't have vlan namespace %s", switchName, vpc.Spec.VLANNamespace)
+			}
+			// a VPC is reachable from each of its domains only if every switch it is attached to is in all of them
+			vpcDomains, swDomains := wiringapi.DomainsOrDefault(vpc.Spec.Topology.Domains), wiringapi.DomainsOrDefault(sw.Spec.Topology.Domains)
+			if slices.ContainsFunc(vpcDomains, func(domain string) bool { return !slices.Contains(swDomains, domain) }) {
+				return nil, fmt.Errorf("vpc %s is in domains %v but switch %s is in domains %v", vpcName, vpcDomains, switchName, swDomains) //nolint:err113
 			}
 
 			sp := &wiringapi.SwitchProfile{}

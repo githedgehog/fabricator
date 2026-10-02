@@ -60,6 +60,12 @@ type AgentSpec struct {
 	PowerReset           string                                   `json:"powerReset,omitempty"` // set to RunID to power reset
 	Catalog              CatalogSpec                              `json:"catalog,omitempty"`
 
+	// BenchTouch is the newest bench.githedgehog.com/touch label seen on the
+	// objects that make up this Agent's spec. It exists so a benchmark can
+	// trigger a real spec change - and with it the agent apply cycle - without
+	// altering switch configuration. It has no effect on the agent.
+	BenchTouch int64 `json:"benchTouch,omitempty"`
+
 	// TODO impl
 	StatusUpdates []ApplyStatusUpdate `json:"statusUpdates,omitempty"`
 }
@@ -93,6 +99,9 @@ type AgentSpecConfig struct {
 	GatewayBFD            bool                      `json:"gatewayBFD,omitempty"`
 	Alloy                 alloy.Config              `json:"alloy,omitempty"`
 	GatewayCommunities    map[string]string         `json:"gatewayCommunities,omitempty"`
+	// Domains holds every domain of the switch's fabric. It replaces GatewayASN and SpineASN, which
+	// are still filled in for older agents and read only from configs saved before Domains existed.
+	Domains map[string]wiringapi.FabricDomainSpec `json:"domains,omitempty"`
 }
 
 type AgentSpecConfigSpineLeaf struct{}

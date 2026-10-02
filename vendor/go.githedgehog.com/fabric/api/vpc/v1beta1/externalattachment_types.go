@@ -16,6 +16,7 @@ package v1beta1
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/netip"
 	"slices"
@@ -183,8 +184,16 @@ func (spec *ACLSpec) Validate() (admission.Warnings, error) {
 	return nil, nil
 }
 
+// ExternalAttachmentTopology is where a ExternalAttachment sits in the fabric topology
+type ExternalAttachmentTopology struct {
+	// Fabric is the name of the Fabric this ExternalAttachment belongs to (if not specified, "default" is used)
+	Fabric string `json:"fabric,omitempty"`
+}
+
 // ExternalAttachmentSpec defines the desired state of ExternalAttachment
 type ExternalAttachmentSpec struct {
+	// Topology is where the ExternalAttachment sits in the fabric topology
+	Topology ExternalAttachmentTopology `json:"topology,omitempty"`
 	// External is the name of the External object this attachment belongs to
 	External string `json:"external,omitempty"`
 	// Connection is the name of the Connection object this attachment belongs to (essentially the name of the switch/port)
@@ -263,6 +272,7 @@ type ExternalAttachmentStatus struct{}
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:categories=hedgehog;fabric;external,shortName=extattach
+// +kubebuilder:printcolumn:name="Fabric",type=string,JSONPath=`.spec.topology.fabric`,priority=0
 // +kubebuilder:printcolumn:name="External",type=string,JSONPath=`.spec.external`,priority=0
 // +kubebuilder:printcolumn:name="Connection",type=string,JSONPath=`.spec.connection`,priority=0
 // +kubebuilder:printcolumn:name="SwVLAN",type=string,JSONPath=`.spec.switch.vlan`,priority=1
@@ -316,6 +326,10 @@ func (extAttachList *ExternalAttachmentList) GetItems() []meta.Object {
 func (attach *ExternalAttachment) Default() {
 	meta.DefaultObjectMetadata(attach)
 
+	if attach.Spec.Topology.Fabric == "" {
+		attach.Spec.Topology.Fabric = wiringapi.DefaultFabric
+	}
+
 	if attach.Labels == nil {
 		attach.Labels = map[string]string{}
 	}
@@ -324,11 +338,31 @@ func (attach *ExternalAttachment) Default() {
 
 	attach.Labels[wiringapi.LabelConnection] = attach.Spec.Connection
 	attach.Labels[LabelExternal] = attach.Spec.External
+	attach.Labels[wiringapi.ListLabelFabric(attach.Spec.Topology.Fabric)] = ListLabelValue
+}
+
+// asnCollision returns what asn collides with in a fabric, if anything
+func asnCollision(fabric *wiringapi.FabricSpec, asn uint32) string {
+	if asn >= fabric.LeafASNStart && asn <= fabric.LeafASNEnd {
+		return fmt.Sprintf("within the leaf ASN range %d-%d", fabric.LeafASNStart, fabric.LeafASNEnd)
+	}
+	for name, domain := range fabric.Domains {
+		if asn == domain.SpineASN || asn == domain.GatewayASN {
+			return fmt.Sprintf("the spine or gateway ASN of domain %s", name)
+		}
+	}
+
+	return ""
 }
 
 func (attach *ExternalAttachment) Validate(ctx context.Context, kube kclient.Reader, fabricCfg *meta.FabricConfig) (admission.Warnings, error) {
+	var warns admission.Warnings
 	if err := meta.ValidateObjectMetadata(attach); err != nil {
 		return nil, errors.Wrapf(err, "failed to validate metadata")
+	}
+
+	if err := wiringapi.CheckFabricExists(ctx, kube, attach.Namespace, attach.Spec.Topology.Fabric); err != nil {
+		return nil, fmt.Errorf("failed to validate fabric: %w", err)
 	}
 
 	if attach.Spec.External == "" {
@@ -352,6 +386,33 @@ func (attach *ExternalAttachment) Validate(ctx context.Context, kube kclient.Rea
 		}
 		if ip := net.ParseIP(attach.Spec.Neighbor.IP); ip == nil {
 			return nil, errors.New("neighbor.ip is not a valid IP address") //nolint: goerr113
+		}
+
+		// the border leaf drops external routes carrying its fabric's spine or gateway ASN, and a
+		// leaf drops those carrying its own ASN through BGP loop detection
+		if fabricCfg != nil {
+			fabric, err := wiringapi.GetFabricSpec(ctx, kube, fabricCfg, attach.Namespace, attach.Spec.Topology.Fabric)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get fabric: %w", err)
+			}
+			if what := asnCollision(fabric, attach.Spec.Neighbor.ASN); what != "" {
+				return nil, fmt.Errorf("neighbor.asn %d is %s of its own fabric", attach.Spec.Neighbor.ASN, what) //nolint:err113
+			}
+		}
+		// the same happens in another fabric only if the two exchange routes through externals
+		if kube != nil {
+			fabrics := &wiringapi.FabricList{}
+			if err := kube.List(ctx, fabrics, kclient.InNamespace(attach.Namespace)); err != nil {
+				return nil, fmt.Errorf("failed to list fabrics: %w", err) // TODO hide internal error
+			}
+			for _, fabric := range fabrics.Items {
+				if fabric.Name == wiringapi.FabricNameOrDefault(attach.Spec.Topology.Fabric) {
+					continue
+				}
+				if what := asnCollision(&fabric.Spec, attach.Spec.Neighbor.ASN); what != "" {
+					warns = append(warns, fmt.Sprintf("neighbor.asn %d is %s of fabric %s, which will drop its routes if they reach it", attach.Spec.Neighbor.ASN, what, fabric.Name))
+				}
+			}
 		}
 	} else {
 		if attach.Spec.Switch.IP != "" || attach.Spec.Switch.VLAN != 0 {
@@ -381,12 +442,17 @@ func (attach *ExternalAttachment) Validate(ctx context.Context, kube kclient.Rea
 		}
 	}
 
-	var warns admission.Warnings
 	if bfd := attach.Spec.BFD; bfd != nil {
 		// disableBFD wins, and nothing downstream reports that it did: without this the session
 		// silently runs on the FRR defaults of 60/180 instead of the sub-second detection asked for
-		if fabricCfg != nil && fabricCfg.DisableBFD {
-			warns = append(warns, "bfd is ignored because disableBFD is set for the whole fabric")
+		if fabricCfg != nil {
+			fabric, err := wiringapi.GetFabricSpec(ctx, kube, fabricCfg, attach.Namespace, attach.Spec.Topology.Fabric)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get fabric: %w", err)
+			}
+			if fabric.DisableBFD {
+				warns = append(warns, "bfd is ignored because disableBFD is set for the whole fabric")
+			}
 		}
 		if bfd.MinRX != 0 && (bfd.MinRX < BFDMinIntervalMS || bfd.MinRX > BFDMaxIntervalMS) {
 			return nil, errors.Errorf("bfd.minRX must be between %d and %d ms", BFDMinIntervalMS, BFDMaxIntervalMS)
@@ -417,6 +483,9 @@ func (attach *ExternalAttachment) Validate(ctx context.Context, kube kclient.Rea
 		if attach.Spec.Static != nil && ext.Spec.Static == nil {
 			return nil, errors.Errorf("external attachment is static but external %s has no static prefixes", attach.Spec.External)
 		}
+		if attach.Spec.Static == nil && ext.Spec.LocalASN != 0 && attach.Spec.Neighbor.ASN == ext.Spec.LocalASN {
+			return nil, fmt.Errorf("neighbor.asn %d is the localASN of external %s", attach.Spec.Neighbor.ASN, attach.Spec.External) //nolint:err113
+		}
 
 		conn := &wiringapi.Connection{}
 		if err := kube.Get(ctx, ktypes.NamespacedName{Name: attach.Spec.Connection, Namespace: attach.Namespace}, conn); err != nil {
@@ -427,8 +496,29 @@ func (attach *ExternalAttachment) Validate(ctx context.Context, kube kclient.Rea
 			return nil, errors.Wrapf(err, "failed to read connection %s", attach.Spec.Connection) // TODO replace with some internal error to not expose to the user
 		}
 
+		attachFabric := wiringapi.FabricNameOrDefault(attach.Spec.Topology.Fabric)
+		if extFabric := wiringapi.FabricNameOrDefault(ext.Spec.Topology.Fabric); extFabric != attachFabric {
+			return nil, fmt.Errorf("attachment is in fabric %s but external %s is in fabric %s", attachFabric, attach.Spec.External, extFabric) //nolint:err113
+		}
+		if connFabric := wiringapi.FabricNameOrDefault(conn.Spec.Topology.Fabric); connFabric != attachFabric {
+			return nil, fmt.Errorf("attachment is in fabric %s but connection %s is in fabric %s", attachFabric, attach.Spec.Connection, connFabric) //nolint:err113
+		}
+
 		if conn.Spec.External == nil {
 			return nil, errors.Errorf("connection %s is not external", attach.Spec.Connection)
+		}
+
+		// border leaves in different domains attaching one External build the same VRF, so a leaf in
+		// both would merge the two domains' routes to it
+		extSwitches, err := ConnectionSwitches(ctx, kube, attach.Namespace, []string{attach.Spec.Connection})
+		if err != nil {
+			return nil, err
+		}
+		extDomain := wiringapi.DomainNameOrDefault(ext.Spec.Topology.Domain)
+		for name, sw := range extSwitches {
+			if swDomains := wiringapi.DomainsOrDefault(sw.Spec.Topology.Domains); !slices.Contains(swDomains, extDomain) {
+				return nil, fmt.Errorf("external %s is in domain %s but switch %s is in domains %v", attach.Spec.External, extDomain, name, swDomains) //nolint:err113
+			}
 		}
 
 		// validate VLAN collision
