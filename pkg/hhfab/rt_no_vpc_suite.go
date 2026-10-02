@@ -81,6 +81,20 @@ func makeNoVpcsSuite() *JUnitTestSuite {
 				NoServers:     true,
 			},
 		},
+		{
+			Name: "External Inbound ACL",
+			F:    externalInboundACLTest,
+			SkipFlags: SkipFlags{
+				VirtualSwitch: true,
+			},
+		},
+		{
+			Name: "External Inbound User ACL",
+			F:    externalInboundUserACLTest,
+			SkipFlags: SkipFlags{
+				VirtualSwitch: true,
+			},
+		},
 	}
 	suite.Tests = len(suite.TestCases)
 
