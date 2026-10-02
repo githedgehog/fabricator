@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -973,6 +974,8 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOp
 	if err := kube.List(ctx, extList, kclient.MatchingLabels{vpcapi.LabelIPv4NS: testCtx.setupOpts.IPv4Namespace}); err != nil {
 		return fmt.Errorf("listing externals: %w", err)
 	}
+	// interconnect Externals lead to another fabric, not to an external system
+	extList.Items = slices.DeleteFunc(extList.Items, func(ext vpcapi.External) bool { return ext.Annotations[VLABInterconnectAnnotation] != "" })
 	extAttachList := &vpcapi.ExternalAttachmentList{}
 	if err := kube.List(ctx, extAttachList); err != nil {
 		return fmt.Errorf("listing external attachments: %w", err)

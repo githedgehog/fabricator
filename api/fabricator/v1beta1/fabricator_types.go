@@ -270,9 +270,12 @@ type FabricConfig struct {
 	ManagementDHCPStart meta.Addr `json:"managementDHCPStart,omitempty"`
 	ManagementDHCPEnd   meta.Addr `json:"managementDHCPEnd,omitempty"`
 
-	SpineASN     uint32 `json:"spineASN,omitempty"`
+	// Only seeds Fabric/default on install, later changes are ignored
+	SpineASN uint32 `json:"spineASN,omitempty"`
+	// Only seeds Fabric/default on install, later changes are ignored
 	LeafASNStart uint32 `json:"leafASNStart,omitempty"`
-	LeafASNEnd   uint32 `json:"leafASNEnd,omitempty"`
+	// Only seeds Fabric/default on install, later changes are ignored
+	LeafASNEnd uint32 `json:"leafASNEnd,omitempty"`
 
 	ProtocolSubnet      meta.Prefix `json:"protocolSubnet,omitempty"`
 	VTEPSubnet          meta.Prefix `json:"vtepSubnet,omitempty"`
@@ -302,6 +305,7 @@ type FabricConfig struct {
 	IncludeCLSP          bool `json:"includeCLSP,omitempty"`
 	IncludeCumulus       bool `json:"includeCumulus,omitempty"`
 
+	// Only seeds Fabric/default on install, later changes are ignored
 	DisableBFD bool `json:"disableBFD,omitempty"`
 
 	Observability *fmeta.Observability `json:"observability,omitempty"`
@@ -314,7 +318,8 @@ type SwitchUser struct {
 }
 
 type GatewayConfig struct {
-	Enable        bool                  `json:"enable,omitempty"`
+	Enable bool `json:"enable,omitempty"`
+	// Only seeds Fabric/default on install, later changes are ignored
 	ASN           uint32                `json:"asn,omitempty"`
 	MAC           string                `json:"mac,omitempty"`
 	Observability *GatewayObservability `json:"observability,omitempty"`

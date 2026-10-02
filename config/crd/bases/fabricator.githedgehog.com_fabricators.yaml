@@ -223,6 +223,8 @@ spec:
                           type: object
                         type: object
                       disableBFD:
+                        description: Only seeds Fabric/default on install, later changes
+                          are ignored
                         type: boolean
                       eslagESIPrefix:
                         type: string
@@ -241,9 +243,13 @@ spec:
                       includeONIE:
                         type: boolean
                       leafASNEnd:
+                        description: Only seeds Fabric/default on install, later changes
+                          are ignored
                         format: int32
                         type: integer
                       leafASNStart:
+                        description: Only seeds Fabric/default on install, later changes
+                          are ignored
                         format: int32
                         type: integer
                       loopbackWorkaroundDisable:
@@ -324,6 +330,8 @@ spec:
                       proxyExternalSubnet:
                         type: string
                       spineASN:
+                        description: Only seeds Fabric/default on install, later changes
+                          are ignored
                         format: int32
                         type: integer
                       th5WorkaroundVLANs:
@@ -361,6 +369,8 @@ spec:
                   gateway:
                     properties:
                       asn:
+                        description: Only seeds Fabric/default on install, later changes
+                          are ignored
                         format: int32
                         type: integer
                       communities:

@@ -25,8 +25,19 @@ var ErrInvalidGW = errors.New("invalid gateway")
 
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
+// GatewayTopology is where a Gateway sits in the fabric topology
+type GatewayTopology struct {
+	// Fabric is the name of the Fabric this Gateway belongs to (if not specified, "default" is used)
+	Fabric string `json:"fabric,omitempty"`
+	// Domain is the Fabric domain (spine layer) this Gateway is cabled into (if not specified, "default" is used).
+	// It is immutable
+	Domain string `json:"domain,omitempty"`
+}
+
 // GatewaySpec defines the desired state of Gateway.
 type GatewaySpec struct {
+	// Topology is where the Gateway sits in the fabric topology
+	Topology GatewayTopology `json:"topology,omitempty"`
 	// ProtocolIP is used as a loopback IP and BGP Router ID
 	ProtocolIP string `json:"protocolIP,omitempty"`
 	// VTEP IP to be used by the gateway
@@ -134,6 +145,8 @@ type GatewayStatus struct{}
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:categories=hedgehog;hedgehog-gateway,shortName=gw
+// +kubebuilder:printcolumn:name="Fabric",type=string,JSONPath=`.spec.topology.fabric`,priority=0
+// +kubebuilder:printcolumn:name="Domain",type=string,JSONPath=`.spec.topology.domain`,priority=0
 // +kubebuilder:printcolumn:name="VTEPIP",type=string,JSONPath=`.spec.vtepIP`,priority=0
 // +kubebuilder:printcolumn:name="Groups",type=string,JSONPath=`.spec.groups`,priority=0
 // +kubebuilder:printcolumn:name="Workers",type=integer,JSONPath=`.spec.workers`,priority=1
@@ -190,6 +203,22 @@ func (gw *Gateway) Default() {
 		gw.Spec.Workers = 4
 	}
 
+	if gw.Spec.Topology.Fabric == "" {
+		gw.Spec.Topology.Fabric = wiringapi.DefaultFabric
+	}
+	if gw.Spec.Topology.Domain == "" {
+		gw.Spec.Topology.Domain = wiringapi.DefaultFabricDomain
+	}
+
+	if gw.Labels == nil {
+		gw.Labels = map[string]string{}
+	}
+
+	wiringapi.CleanupFabricLabels(gw.Labels)
+
+	gw.Labels[wiringapi.ListLabelFabric(gw.Spec.Topology.Fabric)] = ListLabelValue
+	gw.Labels[wiringapi.ListLabelDomain(gw.Spec.Topology.Domain)] = ListLabelValue
+
 	slices.SortFunc(gw.Spec.Groups, func(a, b GatewayGroupMembership) int {
 		return strings.Compare(a.Name, b.Name)
 	})
@@ -209,6 +238,10 @@ func (gw *Gateway) Validate(ctx context.Context, kube kclient.Reader, fabricCfg 
 	}
 	if gw.Namespace != kmetav1.NamespaceDefault {
 		return fmt.Errorf("gateway namespace must be %s: %w", kmetav1.NamespaceDefault, ErrInvalidGW)
+	}
+
+	if err := wiringapi.CheckFabricExists(ctx, kube, gw.Namespace, gw.Spec.Topology.Fabric); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidGW, err)
 	}
 
 	if gw.Spec.Workers == 0 || gw.Spec.Workers > 64 {
@@ -272,6 +305,21 @@ func (gw *Gateway) Validate(ctx context.Context, kube kclient.Reader, fabricCfg 
 
 	if gw.Spec.ASN == 0 {
 		return fmt.Errorf("ASN must be set: %w", ErrInvalidGW)
+	}
+	if fabricCfg != nil {
+		// leaves peer with every gateway of their domain using the domain gateway ASN
+		fabric, err := wiringapi.GetFabricSpec(ctx, kube, fabricCfg, gw.Namespace, gw.Spec.Topology.Fabric)
+		if err != nil {
+			return fmt.Errorf("getting fabric: %w", err)
+		}
+		domainName := wiringapi.DomainNameOrDefault(gw.Spec.Topology.Domain)
+		domain, exists := fabric.Domains[domainName]
+		if !exists {
+			return fmt.Errorf("domain %s not found in fabric %s: %w", domainName, wiringapi.FabricNameOrDefault(gw.Spec.Topology.Fabric), ErrInvalidGW)
+		}
+		if gw.Spec.ASN != domain.GatewayASN {
+			return fmt.Errorf("ASN %d is not the gateway ASN %d of domain %s: %w", gw.Spec.ASN, domain.GatewayASN, domainName, ErrInvalidGW)
+		}
 	}
 
 	if len(gw.Spec.Interfaces) == 0 {
@@ -464,13 +512,22 @@ func (gw *Gateway) Validate(ctx context.Context, kube kclient.Reader, fabricCfg 
 		if err := kube.List(ctx, gwGroupList, kclient.InNamespace(kmetav1.NamespaceDefault)); err != nil {
 			return fmt.Errorf("listing gateway groups: %w", err)
 		}
-		gwGroups := map[string]bool{}
+		gwGroupTopologies := map[string]GatewayGroupTopology{}
 		for _, gwGroup := range gwGroupList.Items {
-			gwGroups[gwGroup.Name] = true
+			gwGroupTopologies[gwGroup.Name] = gwGroup.Spec.Topology
 		}
+		gwFabric := wiringapi.FabricNameOrDefault(gw.Spec.Topology.Fabric)
+		gwDomain := wiringapi.DomainNameOrDefault(gw.Spec.Topology.Domain)
 		for _, gwGroup := range gw.Spec.Groups {
-			if !gwGroups[gwGroup.Name] {
+			groupTopology, exists := gwGroupTopologies[gwGroup.Name]
+			if !exists {
 				return fmt.Errorf("gateway group %s not found: %w", gwGroup.Name, ErrInvalidGW)
+			}
+			if groupFabric := wiringapi.FabricNameOrDefault(groupTopology.Fabric); groupFabric != gwFabric {
+				return fmt.Errorf("gateway is in fabric %s but gateway group %s is in fabric %s: %w", gwFabric, gwGroup.Name, groupFabric, ErrInvalidGW)
+			}
+			if groupDomain := wiringapi.DomainNameOrDefault(groupTopology.Domain); groupDomain != gwDomain {
+				return fmt.Errorf("gateway is in domain %s but gateway group %s is in domain %s: %w", gwDomain, gwGroup.Name, groupDomain, ErrInvalidGW)
 			}
 			if fabricCfg != nil && len(fabricCfg.GatewayCommunities) > 0 && gwGroupMembers[gwGroup.Name] >= len(fabricCfg.GatewayCommunities) {
 				return fmt.Errorf("gateway group %s already has too many members (%d), max is %d: %w", gwGroup.Name, gwGroupMembers[gwGroup.Name], len(fabricCfg.GatewayCommunities), ErrInvalidGW)

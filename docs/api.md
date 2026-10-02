@@ -391,9 +391,9 @@ _Appears in:_
 | `mode` _FabricMode_ |  |  |  |
 | `managementDHCPStart` _Addr_ |  |  |  |
 | `managementDHCPEnd` _Addr_ |  |  |  |
-| `spineASN` _integer_ |  |  |  |
-| `leafASNStart` _integer_ |  |  |  |
-| `leafASNEnd` _integer_ |  |  |  |
+| `spineASN` _integer_ | Only seeds Fabric/default on install, later changes are ignored |  |  |
+| `leafASNStart` _integer_ | Only seeds Fabric/default on install, later changes are ignored |  |  |
+| `leafASNEnd` _integer_ | Only seeds Fabric/default on install, later changes are ignored |  |  |
 | `protocolSubnet` _Prefix_ |  |  |  |
 | `vtepSubnet` _Prefix_ |  |  |  |
 | `fabricSubnet` _Prefix_ |  |  |  |
@@ -414,7 +414,7 @@ _Appears in:_
 | `includeBCM` _boolean_ |  |  |  |
 | `includeCLSP` _boolean_ |  |  |  |
 | `includeCumulus` _boolean_ |  |  |  |
-| `disableBFD` _boolean_ |  |  |  |
+| `disableBFD` _boolean_ | Only seeds Fabric/default on install, later changes are ignored |  |  |
 | `observability` _Observability_ |  |  |  |
 
 
@@ -541,7 +541,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `enable` _boolean_ |  |  |  |
-| `asn` _integer_ |  |  |  |
+| `asn` _integer_ | Only seeds Fabric/default on install, later changes are ignored |  |  |
 | `mac` _string_ |  |  |  |
 | `observability` _[GatewayObservability](#gatewayobservability)_ |  |  |  |
 | `communities` _object (keys:string, values:string)_ |  |  |  |

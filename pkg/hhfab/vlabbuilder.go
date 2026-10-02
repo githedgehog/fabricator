@@ -21,6 +21,19 @@ import (
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// Fabric/default can't gain domains once seeded, so a two-domain VLAB gets a fabric of its own
+const (
+	VLABExtraDomainFabric = "vlab"
+	VLABExtraDomain       = "domain-b"
+)
+
+// The extra fabric has no gateway or virtual external. An interconnect External, annotated with
+// the name of its peer, connects it to a leaf of the main fabric.
+const (
+	VLABExtraFabric            = "fabric-b"
+	VLABInterconnectAnnotation = "hhfab.githedgehog.com/interconnect"
+)
+
 const (
 	GatewayDriverKernel = "kernel"
 	GatewayDriverDPDK   = "dpdk"
@@ -32,7 +45,7 @@ var GatewayDrivers = []string{
 }
 
 type VLABBuilder interface {
-	Build(ctx context.Context, l *apiutil.Loader, fabricMode meta.FabricMode, nodes []fabapi.FabNode) error
+	Build(ctx context.Context, l *apiutil.Loader, cfg fabapi.FabConfig, nodes []fabapi.FabNode) error
 }
 
 type VLABBuilderBase struct {
@@ -42,6 +55,7 @@ type VLABBuilderBase struct {
 	ServerPortBase         string            // base for server port interfaces (e.g. enp2s for ports like enp2s1, enp2s2, etc.)
 
 	data         *apiutil.Loader
+	fabric       string           // fabric every generated object declares, empty for the default one
 	ifaceTracker map[string]uint8 // next available interface ID for each switch
 	switchID     uint             // switch ID counter
 }
@@ -67,6 +81,10 @@ type VLABBuilderDefault struct {
 	ExtStaticProxyCount uint8             // number of static externals to generate (with proxy)
 	ExtESLAGConnCount   uint8             // number of external connections to generate from ESLAG leaves
 	ExtOrphanConnCount  uint8             // number of external connections to generate from orphan leaves
+	ExtraDomain         bool              // generate in a fabric of its own with a second domain of as many spines, orphan leaves move to it (2 orphans by default)
+	SharedLeafsCount    uint8             // number of orphan leaves in both domains, the last ones (default 1 with ExtraDomain)
+	ExtraFabric         bool              // generate a second fabric of two mesh leaves with a server each
+	InterconnectFabrics bool              // connect a leaf of each fabric with an External on both sides
 	YesFlag             bool
 
 	VLABBuilderBase
@@ -74,11 +92,12 @@ type VLABBuilderDefault struct {
 
 var _ VLABBuilder = (*VLABBuilderDefault)(nil)
 
-func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, fabricMode meta.FabricMode, nodes []fabapi.FabNode) error {
+func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, cfg fabapi.FabConfig, nodes []fabapi.FabNode) error {
 	if l == nil {
 		return fmt.Errorf("loader is nil") //nolint:goerr113
 	}
 	b.data = l
+	fabricMode := cfg.Fabric.Mode
 
 	switch fabricMode {
 	case meta.FabricModeSpineLeaf:
@@ -97,6 +116,10 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, fabri
 				if b.OrphanLeafsCount == 0 && b.ESLAGLeafGroups == "" {
 					b.ESLAGLeafGroups = "2"
 					b.OrphanLeafsCount = 1
+					if b.ExtraDomain {
+						// one leaf in the extra domain only, one shared
+						b.OrphanLeafsCount = 2
+					}
 				}
 			} else {
 				// new defaults for mesh
@@ -219,6 +242,58 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, fabri
 		b.ESLAGServers = 0
 	}
 
+	if b.ExtraDomain {
+		if fabricMode != meta.FabricModeSpineLeaf || b.MeshLinksCount > 0 || b.NoSwitches || b.SpinesCount == 0 {
+			return fmt.Errorf("extra domain needs spines and no mesh links") //nolint:goerr113
+		}
+		if b.SharedLeafsCount == 0 {
+			b.SharedLeafsCount = 1
+		}
+		if b.SharedLeafsCount > b.OrphanLeafsCount {
+			return fmt.Errorf("shared leafs count must be less than or equal to orphan leaves") //nolint:goerr113
+		}
+		// a leaf with an external connection must be in a single domain
+		if b.ExtOrphanConnCount > b.OrphanLeafsCount-b.SharedLeafsCount {
+			return fmt.Errorf("external orphan connections count must be less than or equal to orphan leaves that are not shared") //nolint:goerr113
+		}
+	} else if b.SharedLeafsCount > 0 {
+		return fmt.Errorf("shared leafs count requires an extra domain") //nolint:goerr113
+	}
+
+	if b.ExtraFabric && b.NoSwitches {
+		return fmt.Errorf("extra fabric needs switches") //nolint:goerr113
+	}
+	// the last leaf of the default domain, where the gateways are
+	icLeafID := totalESLAGLeafs + b.OrphanLeafsCount
+	if b.ExtraDomain {
+		icLeafID = totalESLAGLeafs
+	}
+	if b.InterconnectFabrics {
+		if !b.ExtraFabric {
+			return fmt.Errorf("interconnecting fabrics requires an extra fabric") //nolint:goerr113
+		}
+		if icLeafID == 0 {
+			return fmt.Errorf("interconnecting fabrics needs a leaf in the default domain only") //nolint:goerr113
+		}
+	}
+
+	// leaves are numbered ESLAG first, then orphans. ESLAG groups stay in the default domain, since
+	// peers must be in the same domains. Shared leaves are the last orphans, as orphan external
+	// connections start from the first and a leaf with one must be in a single domain. nil means
+	// the default domain.
+	leafDomains := func(leafID uint8) []string {
+		switch {
+		case !b.ExtraDomain:
+			return nil
+		case leafID > totalESLAGLeafs+b.OrphanLeafsCount-b.SharedLeafsCount:
+			return []string{wiringapi.DefaultFabricDomain, VLABExtraDomain}
+		case leafID > totalESLAGLeafs:
+			return []string{VLABExtraDomain}
+		default:
+			return nil
+		}
+	}
+
 	if b.MultiHomedServers > 0 && b.OrphanLeafsCount+totalESLAGLeafs < 2 {
 		return fmt.Errorf("at least two leaves are needed for multihomed servers") //nolint:goerr113
 	}
@@ -265,6 +340,12 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, fabri
 	if fabricMode == meta.FabricModeSpineLeaf {
 		slog.Info(">>>", "spinesCount", b.SpinesCount, "fabricLinksCount", b.FabricLinksCount, "meshLinksCount", b.MeshLinksCount)
 		slog.Info(">>>", "eslagLeafGroups", b.ESLAGLeafGroups)
+		if b.ExtraDomain {
+			slog.Info(">>>", "extraDomain", VLABExtraDomain, "sharedLeafsCount", b.SharedLeafsCount)
+		}
+		if b.ExtraFabric {
+			slog.Info(">>>", "extraFabric", VLABExtraFabric, "interconnectFabrics", b.InterconnectFabrics)
+		}
 		if isGw {
 			slog.Info(">>>", "gateways", len(gws), "gatewayUplinks", b.GatewayUplinks, "gatewayDriver", b.GatewayDriver)
 		}
@@ -291,15 +372,43 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, fabri
 		return fmt.Errorf("creating VLAN namespace: %w", err) //nolint:goerr113
 	}
 
+	ipnsName := "default"
+	if b.ExtraDomain {
+		// disjoint from Fabric/default, which keeps the ASNs from the config
+		if err := b.data.Add(ctx, &wiringapi.Fabric{
+			TypeMeta: kmetav1.TypeMeta{
+				Kind:       wiringapi.KindFabric,
+				APIVersion: wiringapi.GroupVersion.String(),
+			},
+			ObjectMeta: kmetav1.ObjectMeta{
+				Name: VLABExtraDomainFabric,
+			},
+			Spec: wiringapi.FabricSpec{
+				LeafASNStart: 64601,
+				LeafASNEnd:   64699,
+				DisableBFD:   cfg.Fabric.DisableBFD,
+				Domains: map[string]wiringapi.FabricDomainSpec{
+					wiringapi.DefaultFabricDomain: {SpineASN: 64700, GatewayASN: 64701},
+					VLABExtraDomain:               {SpineASN: 64702, GatewayASN: 64703},
+				},
+			},
+		}); err != nil {
+			return fmt.Errorf("creating fabric: %w", err)
+		}
+		b.fabric = VLABExtraDomainFabric
+		ipnsName = VLABExtraDomainFabric
+	}
+
 	if err := b.data.Add(ctx, &vpcapi.IPv4Namespace{
 		TypeMeta: kmetav1.TypeMeta{
 			Kind:       vpcapi.KindIPv4Namespace,
 			APIVersion: vpcapi.GroupVersion.String(),
 		},
 		ObjectMeta: kmetav1.ObjectMeta{
-			Name: "default",
+			Name: ipnsName,
 		},
 		Spec: vpcapi.IPv4NamespaceSpec{
+			Topology: vpcapi.IPv4NamespaceTopology{Fabric: b.fabric},
 			Subnets: []string{
 				"10.0.0.0/16",
 			},
@@ -362,6 +471,7 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, fabri
 	leafID := uint8(1)   // leaf ID counter
 	serverID := uint8(1) // server ID counter
 	externalConns := []wiringapi.Connection{}
+	extLeafDomains := [][]string{}
 	extESLAGConns := uint8(0)
 	extOrphanConns := uint8(0)
 	mhLeaves := []string{}
@@ -388,6 +498,7 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, fabri
 					Group: sg,
 					Type:  meta.RedundancyTypeESLAG,
 				},
+				Topology: wiringapi.SwitchTopology{Domains: leafDomains(leafID + eslagLeafID)},
 			}, nil); err != nil {
 				return err
 			}
@@ -397,6 +508,7 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, fabri
 				if err != nil {
 					return err
 				}
+				extLeafDomains = append(extLeafDomains, wiringapi.DomainsOrDefault(leafDomains(leafID+eslagLeafID)))
 				extESLAGConns++
 			}
 		}
@@ -494,6 +606,7 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, fabri
 		if _, err := b.createSwitch(ctx, leafName, wiringapi.SwitchSpec{
 			Role:        wiringapi.SwitchRoleServerLeaf,
 			Description: fmt.Sprintf("VS-%02d", switchID),
+			Topology:    wiringapi.SwitchTopology{Domains: leafDomains(leafID)},
 		}, nil); err != nil {
 			return err
 		}
@@ -505,6 +618,7 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, fabri
 			if err != nil {
 				return err
 			}
+			extLeafDomains = append(extLeafDomains, wiringapi.DomainsOrDefault(leafDomains(leafID)))
 			extOrphanConns++
 		}
 
@@ -608,12 +722,23 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, fabri
 		serverID++
 	}
 
-	for spineID := uint8(1); spineID <= b.SpinesCount; spineID++ {
+	totalSpines := b.SpinesCount
+	if b.ExtraDomain {
+		totalSpines *= 2
+	}
+	for spineID := uint8(1); spineID <= totalSpines; spineID++ {
 		spineName := fmt.Sprintf("spine-%02d", spineID)
+		spineDomain := wiringapi.DefaultFabricDomain
+		var spineDomains []string
+		if spineID > b.SpinesCount {
+			spineDomain = VLABExtraDomain
+			spineDomains = []string{VLABExtraDomain}
+		}
 
 		if _, err := b.createSwitch(ctx, spineName, wiringapi.SwitchSpec{
 			Role:        wiringapi.SwitchRoleSpine,
 			Description: fmt.Sprintf("VS-%02d", switchID),
+			Topology:    wiringapi.SwitchTopology{Domains: spineDomains},
 		}, nil); err != nil {
 			return err
 		}
@@ -622,6 +747,9 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, fabri
 
 		for leafID := uint8(1); leafID <= b.OrphanLeafsCount+totalESLAGLeafs; leafID++ {
 			leafName := fmt.Sprintf("leaf-%02d", leafID)
+			if !slices.Contains(wiringapi.DomainsOrDefault(leafDomains(leafID)), spineDomain) {
+				continue
+			}
 
 			links := []wiringapi.FabricLink{}
 			for spinePortID := uint8(0); spinePortID < b.FabricLinksCount; spinePortID++ {
@@ -737,6 +865,18 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, fabri
 		}
 	}
 
+	// every External is attached on every external connection, so it needs a domain all those leaves are in
+	extDomainIdx := slices.IndexFunc([]string{wiringapi.DefaultFabricDomain, VLABExtraDomain}, func(domain string) bool {
+		return !slices.ContainsFunc(extLeafDomains, func(domains []string) bool { return !slices.Contains(domains, domain) })
+	})
+	if extDomainIdx < 0 {
+		return fmt.Errorf("external connections are on leaves with no domain in common") //nolint:goerr113
+	}
+	extTopology := vpcapi.ExternalTopology{Fabric: b.fabric}
+	if extDomainIdx == 1 {
+		extTopology.Domain = VLABExtraDomain
+	}
+
 	externals := []vpcapi.External{}
 	extAsn := 64102
 
@@ -761,7 +901,8 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, fabri
 		for i := uint8(1); i <= b.ExtBGPCount; i++ {
 			externalName := fmt.Sprintf("ext-bgp-%02d", i)
 			externalSpec := vpcapi.ExternalSpec{
-				IPv4Namespace:     "default",
+				Topology:          extTopology,
+				IPv4Namespace:     ipnsName,
 				InboundCommunity:  fmt.Sprintf("%d:%d", inboundCommPrefix, communityRuleID),
 				OutboundCommunity: fmt.Sprintf("%d:%d", extAsn, communityRuleID),
 			}
@@ -793,7 +934,8 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, fabri
 				}
 			}
 			externalSpec := vpcapi.ExternalSpec{
-				IPv4Namespace: "default",
+				Topology:      extTopology,
+				IPv4Namespace: ipnsName,
 				Static: &vpcapi.ExternalStaticSpec{
 					Prefixes: []string{"0.0.0.0/0"},
 				},
@@ -844,6 +986,160 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, fabri
 		}
 	}
 
+	if !b.ExtraFabric {
+		return nil
+	}
+
+	// each side presents its own local ASN, as leaf ASNs are only known after hydration
+	const mainICASN, extraICASN = 64910, 64911
+	mainFabric := b.fabric
+	mainICExt := "to-" + VLABExtraFabric
+	extraICExt := "to-" + wiringapi.FabricNameOrDefault(mainFabric)
+	if b.InterconnectFabrics {
+		icLeafName := fmt.Sprintf("leaf-%02d", icLeafID)
+		// named apart from <leaf>--external, which the leaf may already have
+		icConn, err := b.createConnectionWithName(ctx, icLeafName+"--interconnect", wiringapi.ConnectionSpec{
+			External: &wiringapi.ConnExternal{Link: wiringapi.ConnExternalLink{Switch: wiringapi.BasePortName{Port: b.nextSwitchPort(icLeafName)}}},
+		})
+		if err != nil {
+			return err
+		}
+		if _, err := b.createExternal(ctx, mainICExt, vpcapi.ExternalSpec{
+			IPv4Namespace:     ipnsName,
+			InboundCommunity:  fmt.Sprintf("%d:100", extraICASN),
+			OutboundCommunity: fmt.Sprintf("%d:100", mainICASN),
+			LocalASN:          mainICASN,
+		}, map[string]string{VLABInterconnectAnnotation: extraICExt}); err != nil {
+			return err
+		}
+		if _, err := b.createExternalAttach(ctx, fmt.Sprintf("%s--%s", icLeafName, mainICExt), vpcapi.ExternalAttachmentSpec{
+			External:   mainICExt,
+			Connection: icConn.Name,
+			Switch:     vpcapi.ExternalAttachmentSwitch{VLAN: 10, IP: "100.64.0.1/30"},
+			Neighbor:   vpcapi.ExternalAttachmentNeighbor{ASN: extraICASN, IP: "100.64.0.2"},
+		}); err != nil {
+			return err
+		}
+	}
+
+	b.fabric = VLABExtraFabric
+
+	if err := b.data.Add(ctx, &wiringapi.Fabric{
+		TypeMeta: kmetav1.TypeMeta{
+			Kind:       wiringapi.KindFabric,
+			APIVersion: wiringapi.GroupVersion.String(),
+		},
+		ObjectMeta: kmetav1.ObjectMeta{
+			Name: VLABExtraFabric,
+		},
+		Spec: wiringapi.FabricSpec{
+			LeafASNStart: 64801,
+			LeafASNEnd:   64899,
+			DisableBFD:   cfg.Fabric.DisableBFD,
+			Domains: map[string]wiringapi.FabricDomainSpec{
+				wiringapi.DefaultFabricDomain: {SpineASN: 64900, GatewayASN: 64901},
+			},
+		},
+	}); err != nil {
+		return fmt.Errorf("creating fabric: %w", err)
+	}
+
+	if err := b.data.Add(ctx, &vpcapi.IPv4Namespace{
+		TypeMeta: kmetav1.TypeMeta{
+			Kind:       vpcapi.KindIPv4Namespace,
+			APIVersion: vpcapi.GroupVersion.String(),
+		},
+		ObjectMeta: kmetav1.ObjectMeta{
+			Name: VLABExtraFabric,
+		},
+		Spec: vpcapi.IPv4NamespaceSpec{
+			Topology: vpcapi.IPv4NamespaceTopology{Fabric: VLABExtraFabric},
+			Subnets: []string{
+				"10.1.0.0/16",
+			},
+		},
+	}); err != nil {
+		return fmt.Errorf("creating IPv4 namespace: %w", err) //nolint:goerr113
+	}
+
+	extraLeafs := []string{}
+	for range 2 {
+		leafName := fmt.Sprintf("leaf-%02d", leafID)
+		extraLeafs = append(extraLeafs, leafName)
+
+		if _, err := b.createSwitch(ctx, leafName, wiringapi.SwitchSpec{
+			Role:        wiringapi.SwitchRoleServerLeaf,
+			Description: fmt.Sprintf("VS-%02d %s", switchID, VLABExtraFabric),
+		}, nil); err != nil {
+			return err
+		}
+
+		switchID++
+		leafID++
+
+		serverName := fmt.Sprintf("server-%02d", serverID)
+		if _, err := b.createServer(ctx, serverName, wiringapi.ServerSpec{
+			Description: fmt.Sprintf("S-%02d Unbundled %s", serverID, leafName),
+		}); err != nil {
+			return err
+		}
+
+		if _, err := b.createConnection(ctx, wiringapi.ConnectionSpec{
+			Unbundled: &wiringapi.ConnUnbundled{
+				Link: wiringapi.ServerToSwitchLink{
+					Server: wiringapi.BasePortName{Port: b.nextServerPort(serverName)},
+					Switch: wiringapi.BasePortName{Port: b.nextSwitchPort(leafName)},
+				},
+			},
+		}); err != nil {
+			return err
+		}
+
+		serverID++
+	}
+
+	meshLinks := []wiringapi.MeshLink{}
+	for range 2 {
+		meshLinks = append(meshLinks, wiringapi.MeshLink{
+			Leaf1: wiringapi.ConnFabricLinkSwitch{BasePortName: wiringapi.BasePortName{Port: b.nextSwitchPort(extraLeafs[0])}},
+			Leaf2: wiringapi.ConnFabricLinkSwitch{BasePortName: wiringapi.BasePortName{Port: b.nextSwitchPort(extraLeafs[1])}},
+		})
+	}
+	if _, err := b.createConnection(ctx, wiringapi.ConnectionSpec{
+		Mesh: &wiringapi.ConnMesh{
+			Links: meshLinks,
+		},
+	}); err != nil {
+		return err
+	}
+
+	if !b.InterconnectFabrics {
+		return nil
+	}
+
+	icConn, err := b.createConnectionWithName(ctx, extraLeafs[0]+"--interconnect", wiringapi.ConnectionSpec{
+		External: &wiringapi.ConnExternal{Link: wiringapi.ConnExternalLink{Switch: wiringapi.BasePortName{Port: b.nextSwitchPort(extraLeafs[0])}}},
+	})
+	if err != nil {
+		return err
+	}
+	if _, err := b.createExternal(ctx, extraICExt, vpcapi.ExternalSpec{
+		IPv4Namespace:     VLABExtraFabric,
+		InboundCommunity:  fmt.Sprintf("%d:100", mainICASN),
+		OutboundCommunity: fmt.Sprintf("%d:100", extraICASN),
+		LocalASN:          extraICASN,
+	}, map[string]string{VLABInterconnectAnnotation: mainICExt}); err != nil {
+		return err
+	}
+	if _, err := b.createExternalAttach(ctx, fmt.Sprintf("%s--%s", extraLeafs[0], extraICExt), vpcapi.ExternalAttachmentSpec{
+		External:   extraICExt,
+		Connection: icConn.Name,
+		Switch:     vpcapi.ExternalAttachmentSwitch{VLAN: 10, IP: "100.64.0.2/30"},
+		Neighbor:   vpcapi.ExternalAttachmentNeighbor{ASN: mainICASN, IP: "100.64.0.1"},
+	}); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -858,7 +1154,7 @@ type VLABBuilderGPURail struct {
 
 var _ VLABBuilder = (*VLABBuilderGPURail)(nil)
 
-func (b *VLABBuilderGPURail) Build(ctx context.Context, l *apiutil.Loader, fabricMode meta.FabricMode, nodes []fabapi.FabNode) error {
+func (b *VLABBuilderGPURail) Build(ctx context.Context, l *apiutil.Loader, _ fabapi.FabConfig, nodes []fabapi.FabNode) error {
 	if l == nil {
 		return fmt.Errorf("loader is nil") //nolint:goerr113
 	}
@@ -1102,6 +1398,8 @@ func (b *VLABBuilderBase) createSwitchGroup(ctx context.Context, name string) (*
 		Spec: wiringapi.SwitchGroupSpec{},
 	}
 
+	sg.Spec.Topology.Fabric = b.fabric
+
 	if err := b.data.Add(ctx, sg); err != nil {
 		return nil, fmt.Errorf("creating switch group %s: %w", name, err) //nolint:goerr113
 	}
@@ -1129,6 +1427,8 @@ func (b *VLABBuilderBase) createSwitch(ctx context.Context, name string, spec wi
 		},
 		Spec: spec,
 	}
+
+	sw.Spec.Topology.Fabric = b.fabric
 
 	if err := b.data.Add(ctx, sw); err != nil {
 		return nil, fmt.Errorf("creating switch %s: %w", name, err) //nolint:goerr113
@@ -1169,6 +1469,8 @@ func (b *VLABBuilderBase) createGateway(ctx context.Context, name string, spec g
 		Spec: spec,
 	}
 
+	gw.Spec.Topology.Fabric = b.fabric
+
 	if err := b.data.Add(ctx, gw); err != nil {
 		return nil, fmt.Errorf("creating gateway %s: %w", name, err) //nolint:goerr113
 	}
@@ -1187,6 +1489,8 @@ func (b *VLABBuilderBase) createGatewayGroup(ctx context.Context, name string) (
 			Namespace: kmetav1.NamespaceDefault,
 		},
 	}
+
+	gw.Spec.Topology.Fabric = b.fabric
 
 	if err := b.data.Add(ctx, gw); err != nil {
 		return nil, fmt.Errorf("creating gateway group %s: %w", name, err) //nolint:goerr113
@@ -1212,6 +1516,8 @@ func (b *VLABBuilderBase) createConnectionWithName(ctx context.Context, name str
 		Spec: spec,
 	}
 
+	conn.Spec.Topology.Fabric = b.fabric
+
 	if err := b.data.Add(ctx, conn); err != nil {
 		return nil, fmt.Errorf("creating connection %s: %w", name, err) //nolint:goerr113
 	}
@@ -1232,6 +1538,8 @@ func (b *VLABBuilderBase) createExternal(ctx context.Context, name string, spec 
 		Spec: spec,
 	}
 
+	external.Spec.Topology.Fabric = b.fabric
+
 	if err := b.data.Add(ctx, external); err != nil {
 		return nil, fmt.Errorf("creating external %s: %w", name, err) //nolint:goerr113
 	}
@@ -1239,7 +1547,7 @@ func (b *VLABBuilderBase) createExternal(ctx context.Context, name string, spec 
 	return external, nil
 }
 
-func (b *VLABBuilderBase) createExternalAttach(ctx context.Context, name string, spec vpcapi.ExternalAttachmentSpec) (*vpcapi.ExternalAttachment, error) {
+func (b *VLABBuilderBase) createExternalAttach(ctx context.Context, name string, spec vpcapi.ExternalAttachmentSpec) (*vpcapi.ExternalAttachment, error) { //nolint:unparam
 	externalAttach := &vpcapi.ExternalAttachment{
 		TypeMeta: kmetav1.TypeMeta{
 			Kind:       "ExternalAttachment",
@@ -1250,6 +1558,8 @@ func (b *VLABBuilderBase) createExternalAttach(ctx context.Context, name string,
 		},
 		Spec: spec,
 	}
+
+	externalAttach.Spec.Topology.Fabric = b.fabric
 
 	if err := b.data.Add(ctx, externalAttach); err != nil {
 		return nil, fmt.Errorf("creating external attachment %s: %w", name, err) //nolint:goerr113
@@ -1270,6 +1580,8 @@ func (b *VLABBuilderBase) createVPC(ctx context.Context, name string, spec vpcap
 		Spec: spec,
 	}
 
+	vpc.Spec.Topology.Fabric = b.fabric
+
 	if err := b.data.Add(ctx, vpc); err != nil {
 		return nil, fmt.Errorf("creating vpc %s: %w", name, err) //nolint:goerr113
 	}
@@ -1289,6 +1601,8 @@ func (b *VLABBuilderBase) createVPCAttachment(ctx context.Context, name string, 
 		},
 		Spec: spec,
 	}
+
+	vpc.Spec.Topology.Fabric = b.fabric
 
 	if err := b.data.Add(ctx, vpc); err != nil {
 		return nil, fmt.Errorf("creating vpc attachment %s: %w", name, err) //nolint:goerr113

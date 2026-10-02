@@ -4,9 +4,17 @@
 package hhfab
 
 import (
+	"maps"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.githedgehog.com/fabric/api/meta"
+	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
+	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
+	"go.githedgehog.com/fabricator/pkg/util/apiutil"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 func TestGetNICID(t *testing.T) {
@@ -141,4 +149,32 @@ func TestGetNICID(t *testing.T) {
 			require.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func TestCreateVLABConfigInterconnect(t *testing.T) {
+	l := apiutil.NewLoader()
+	b := &VLABBuilderDefault{
+		ExtBGPCount:         1,
+		ExtOrphanConnCount:  1,
+		ExtraFabric:         true,
+		InterconnectFabrics: true,
+		VLABBuilderBase:     VLABBuilderBase{DefaultSwitchProfile: meta.SwitchProfileVS},
+	}
+	require.NoError(t, b.Build(t.Context(), l, fabapi.FabConfig{Fabric: fabapi.FabricConfig{Mode: meta.FabricModeSpineLeaf}}, nil))
+
+	cfg, err := createVLABConfig(t.Context(), nil, nil, l.GetClient())
+	require.NoError(t, err)
+
+	// leaf-03 is the last leaf of the main fabric, and also has the connection to the virtual external
+	ports := []string{}
+	for _, name := range []string{"leaf-03--interconnect", "leaf-04--interconnect"} {
+		conn := &wiringapi.Connection{}
+		require.NoError(t, l.GetClient().Get(t.Context(), kclient.ObjectKey{Name: name}, conn))
+		ports = append(ports, conn.Spec.External.Link.Switch.Port)
+	}
+	require.Equal(t, NICTypeDirect+NICTypeSep+ports[1], cfg.VMs["leaf-03"].NICs[strings.SplitN(ports[0], "/", 2)[1]])
+	require.Equal(t, NICTypeDirect+NICTypeSep+ports[0], cfg.VMs["leaf-04"].NICs[strings.SplitN(ports[1], "/", 2)[1]])
+
+	require.Equal(t, []string{"ext-bgp-01"}, slices.Collect(maps.Keys(cfg.Externals.VRFs)))
+	require.Len(t, cfg.Externals.NICs, 1)
 }

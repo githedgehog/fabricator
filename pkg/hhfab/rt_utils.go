@@ -113,7 +113,7 @@ func populateFullLoopVpcPeerings(ctx context.Context, kube kclient.Client, vpcPe
 }
 
 // populate the externalPeerings map with all possible external VPC peering combinations, skipping proxy static externals
-// as they require gateway peerings with NAT to work
+// as they require gateway peerings with NAT to work, and interconnect Externals as they lead to another fabric
 func populateAllExternalVpcPeerings(ctx context.Context, kube kclient.Client, extPeerings map[string]*vpcapi.ExternalPeeringSpec) error {
 	vpcs := &vpcapi.VPCList{}
 	if err := kube.List(ctx, vpcs); err != nil {
@@ -136,7 +136,7 @@ func populateAllExternalVpcPeerings(ctx context.Context, kube kclient.Client, ex
 
 	for i, vpc := range vpcs.Items {
 		for _, ext := range exts.Items {
-			if ext.Spec.Static != nil && proxyExts[ext.Name] {
+			if ext.Spec.Static != nil && proxyExts[ext.Name] || ext.Annotations[VLABInterconnectAnnotation] != "" {
 				continue
 			}
 			if ext.Spec.IPv4Namespace == vpc.Spec.IPv4Namespace {

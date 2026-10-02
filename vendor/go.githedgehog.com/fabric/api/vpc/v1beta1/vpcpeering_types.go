@@ -16,6 +16,7 @@ package v1beta1
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"sort"
 
@@ -32,8 +33,16 @@ import (
 
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
+// VPCPeeringTopology is where a VPCPeering sits in the fabric topology
+type VPCPeeringTopology struct {
+	// Fabric is the name of the Fabric this VPCPeering belongs to (if not specified, "default" is used)
+	Fabric string `json:"fabric,omitempty"`
+}
+
 // VPCPeeringSpec defines the desired state of VPCPeering
 type VPCPeeringSpec struct {
+	// Topology is where the VPCPeering sits in the fabric topology
+	Topology VPCPeeringTopology `json:"topology,omitempty"`
 	// Deprecated and no longer supported
 	Remote string `json:"remote,omitempty"`
 	//+kubebuilder:validation:MinItems=1
@@ -55,6 +64,7 @@ type VPCPeeringStatus struct{}
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:categories=hedgehog;fabric,shortName=vpcpeer
+// +kubebuilder:printcolumn:name="Fabric",type=string,JSONPath=`.spec.topology.fabric`,priority=0
 // +kubebuilder:printcolumn:name="VPC1",type=string,JSONPath=`.metadata.labels.fabric\.githedgehog\.com/vpc1`,priority=0
 // +kubebuilder:printcolumn:name="VPC2",type=string,JSONPath=`.metadata.labels.fabric\.githedgehog\.com/vpc2`,priority=0
 // +kubebuilder:printcolumn:name="Remote",type=string,JSONPath=`.spec.remote`,priority=0
@@ -135,11 +145,17 @@ func (s *VPCPeeringSpec) VPCs() (string, string, error) {
 func (peering *VPCPeering) Default() {
 	meta.DefaultObjectMetadata(peering)
 
+	if peering.Spec.Topology.Fabric == "" {
+		peering.Spec.Topology.Fabric = wiringapi.DefaultFabric
+	}
+
 	if peering.Labels == nil {
 		peering.Labels = map[string]string{}
 	}
 
 	wiringapi.CleanupFabricLabels(peering.Labels)
+
+	peering.Labels[wiringapi.ListLabelFabric(peering.Spec.Topology.Fabric)] = ListLabelValue
 
 	vpc1, vpc2, err := peering.Spec.VPCs()
 	if err != nil {
@@ -155,6 +171,10 @@ func (peering *VPCPeering) Default() {
 func (peering *VPCPeering) Validate(ctx context.Context, kube kclient.Reader, fabricCfg *meta.FabricConfig) (admission.Warnings, error) {
 	if err := meta.ValidateObjectMetadata(peering); err != nil {
 		return nil, errors.Wrapf(err, "failed to validate metadata")
+	}
+
+	if err := wiringapi.CheckFabricExists(ctx, kube, peering.Namespace, peering.Spec.Topology.Fabric); err != nil {
+		return nil, fmt.Errorf("failed to validate fabric: %w", err)
 	}
 
 	if fabricCfg != nil && fabricCfg.VPCPeeringDisabled {
@@ -183,6 +203,7 @@ func (peering *VPCPeering) Validate(ctx context.Context, kube kclient.Reader, fa
 			}
 		}
 
+		peeringFabric := wiringapi.FabricNameOrDefault(peering.Spec.Topology.Fabric)
 		ipv4Namespaces := []string{}
 		vlanNamespaces := []string{}
 		for _, vpcName := range []string{vpc1Name, vpc2Name} {
@@ -194,6 +215,10 @@ func (peering *VPCPeering) Validate(ctx context.Context, kube kclient.Reader, fa
 				}
 
 				return nil, errors.Wrapf(err, "failed to list VPCs") // TODO replace with some internal error to not expose to the user
+			}
+
+			if vpcFabric := wiringapi.FabricNameOrDefault(vpc.Spec.Topology.Fabric); vpcFabric != peeringFabric {
+				return nil, fmt.Errorf("peering is in fabric %s but vpc %s is in fabric %s", peeringFabric, vpcName, vpcFabric) //nolint:err113
 			}
 
 			ipv4Namespaces = append(ipv4Namespaces, vpc.Spec.IPv4Namespace)
@@ -232,6 +257,12 @@ func (peering *VPCPeering) Validate(ctx context.Context, kube kclient.Reader, fa
 			}
 
 			return nil, errors.Wrapf(err, "failed to get VPC %s", vpc2Name) // TODO replace with some internal error to not expose to the user
+		}
+
+		// VPCs with no domain in common could only reach each other through a leaf shared by their domains
+		vpc1Domains, vpc2Domains := wiringapi.DomainsOrDefault(vpc1.Spec.Topology.Domains), wiringapi.DomainsOrDefault(vpc2.Spec.Topology.Domains)
+		if !slices.ContainsFunc(vpc1Domains, func(domain string) bool { return slices.Contains(vpc2Domains, domain) }) {
+			return nil, fmt.Errorf("vpc %s is in domains %v and vpc %s in domains %v, they must share one", vpc1Name, vpc1Domains, vpc2Name, vpc2Domains) //nolint:err113
 		}
 
 		for _, permit := range peering.Spec.Permit {

@@ -254,6 +254,9 @@ func Run(ctx context.Context) error {
 	var wgESLAGLeafGroups string
 	var wgESLAGServers, wgUnbundledServers, wgBundledServers, wgMultiHomedServers uint
 	var wgNoSwitches bool
+	var wgExtraDomain bool
+	var wgSharedLeafsCount uint
+	var wgExtraFabric, wgInterconnectFabrics bool
 	var wgGatewayUplinks uint
 	var wgGatewayDriver string
 	var wgGatewayWorkers uint
@@ -286,6 +289,26 @@ func Run(ctx context.Context) error {
 			Name:        "orphan-leafs-count",
 			Usage:       "number of orphan leafs",
 			Destination: &wgOrphanLeafsCount,
+		},
+		&cli.BoolFlag{
+			Name:        "extra-domain",
+			Usage:       "generate in a fabric of its own with a second domain of as many spines; orphan leafs move to it (2 by default)",
+			Destination: &wgExtraDomain,
+		},
+		&cli.UintFlag{
+			Name:        "shared-leafs-count",
+			Usage:       "number of orphan leafs in both domains, the last ones (default 1 with --extra-domain)",
+			Destination: &wgSharedLeafsCount,
+		},
+		&cli.BoolFlag{
+			Name:        "extra-fabric",
+			Usage:       "generate a second fabric of two mesh leafs with a server each, with no gateway or virtual external",
+			Destination: &wgExtraFabric,
+		},
+		&cli.BoolFlag{
+			Name:        "interconnect-fabrics",
+			Usage:       "connect a leaf of each fabric with an External on both sides, so the extra fabric can reach the internet through the main one",
+			Destination: &wgInterconnectFabrics,
 		},
 		&cli.UintFlag{
 			Name:        "eslag-servers",
@@ -1077,6 +1100,10 @@ func Run(ctx context.Context) error {
 								ExtStaticProxyCount: uint8(wgStaticExternalsProxy), //nolint:gosec
 								ExtESLAGConnCount:   uint8(wgExtESLAGConns),        //nolint:gosec
 								ExtOrphanConnCount:  uint8(wgExtOrphanConns),       //nolint:gosec
+								ExtraDomain:         wgExtraDomain,
+								SharedLeafsCount:    uint8(wgSharedLeafsCount), //nolint:gosec
+								ExtraFabric:         wgExtraFabric,
+								InterconnectFabrics: wgInterconnectFabrics,
 								YesFlag:             yes,
 								VLABBuilderBase: hhfab.VLABBuilderBase{
 									DefaultSwitchProfile:   wgDefaultSwitchProfile,
@@ -1621,6 +1648,10 @@ Examples:
 							1+2 -- VPC peering between vpc-01 and vpc-02
 							1+2:gw -- same as above but using gateway peering, only valid if gateway is present
 							demo-1+demo-2 -- VPC peering between vpc-demo-1 and vpc-demo-2
+							ext.ext-a+ext.ext-b:gw -- gateway peering between Externals ext-a and ext-b (only through the gateway), so that
+								a fabric connected with an interconnect External (see vlab gen --interconnect-fabrics) reaches the internet
+								through this one; the interconnect External exposes the IPv4 namespace of the fabric on its other side, any
+								other the default route
 
 							External Peerings:
 
@@ -1647,6 +1678,9 @@ Examples:
 							Example of VPC↔VPC with NAT via gateway:
 							1+2:gw:vpc1-as=10.10.0.0/24:vpc1-nat=masquerade:vpc2-as=172.16.0.0/16:vpc2-nat=static
 							1+2:gw:as1=10.10.0.0/24:nat1=port-forward:pf1=tcp/80=8080:as2=172.16.0.0/16
+
+							Example of External↔External with masquerade on the interconnect side (ext.ext-bgp-01 sorts first, so it is side 1):
+							ext.to-fabric-b+ext.ext-bgp-01:gw:as2=192.168.91.0/24:nat2=masquerade
 
 							Example of VPC↔External with NAT via gateway:
 							1~as5835:gw:vpc-as=10.10.0.1/32:vpc-nat=masquerade:ext-as=192.0.2.0/24:ext-nat=port-forward:ext-pf=udp/53=5353:p=1.0.0.0/8
