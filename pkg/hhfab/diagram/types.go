@@ -123,6 +123,7 @@ const (
 	PropVTEPIP           = "vtepIP"
 	PropSrcLinkIP        = "srcLinkIP"
 	PropDstLinkIP        = "dstLinkIP"
+	PropUnnumbered       = "unnumbered"
 	PropBGPState         = "bgpState"
 )
 
