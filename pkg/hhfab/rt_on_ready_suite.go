@@ -192,6 +192,8 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connecti
 	if err := kube.List(ctx, extList); err != nil {
 		return false, nil, fmt.Errorf("listing externals: %w", err)
 	}
+	// interconnect Externals lead to another fabric, not to an external system
+	extList.Items = slices.DeleteFunc(extList.Items, func(ext vpcapi.External) bool { return ext.Annotations[VLABInterconnectAnnotation] != "" })
 	extAttachList := &vpcapi.ExternalAttachmentList{}
 	if err := kube.List(ctx, extAttachList); err != nil {
 		return false, nil, fmt.Errorf("listing external attachments: %w", err)

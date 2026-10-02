@@ -11,11 +11,13 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
 	"go.githedgehog.com/fabric/api/meta"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 func TestVLANsFrom(t *testing.T) {
@@ -653,6 +655,184 @@ func TestServerTopology(t *testing.T) {
 			}
 			require.NoError(t, err)
 			require.Equal(t, test.expected, topology)
+		})
+	}
+}
+
+func TestIsExternalSubnetReachableInterconnect(t *testing.T) {
+	t.Parallel()
+
+	extPeering := func(vpc, ext string) *vpcapi.ExternalPeering {
+		return &vpcapi.ExternalPeering{
+			ObjectMeta: kmetav1.ObjectMeta{Name: vpc + "--" + ext},
+			Spec: vpcapi.ExternalPeeringSpec{Permit: vpcapi.ExternalPeeringSpecPermit{
+				VPC:      vpcapi.ExternalPeeringSpecVPC{Name: vpc, Subnets: []string{"default"}},
+				External: vpcapi.ExternalPeeringSpecExternal{Name: ext, Prefixes: []vpcapi.ExternalPeeringSpecPrefix{{Prefix: "0.0.0.0/0"}}},
+			}},
+		}
+	}
+	transit := func(icCIDR string, icAs ...gwapi.PeeringEntryAs) *gwapi.GatewayPeering {
+		return &gwapi.GatewayPeering{
+			ObjectMeta: kmetav1.ObjectMeta{Name: "to-fabric-b--ext-bgp-01"},
+			Spec: gwapi.PeeringSpec{Peering: map[string]*gwapi.PeeringEntry{
+				"ext.to-fabric-b": {Expose: []gwapi.PeeringEntryExpose{{IPs: []gwapi.PeeringEntryIP{{CIDR: icCIDR}}, As: icAs}}},
+				"ext.ext-bgp-01":  {Expose: []gwapi.PeeringEntryExpose{{DefaultDestination: true}}},
+			}},
+		}
+	}
+
+	natted := gwapi.PeeringEntryAs{CIDR: "192.168.91.0/24"}
+	bothPeered := func(objs ...kclient.Object) []kclient.Object {
+		return append([]kclient.Object{extPeering("vpc-01", "ext-bgp-01"), extPeering("vpc-02", "to-default")}, objs...)
+	}
+
+	for _, test := range []struct {
+		name         string
+		server       string
+		dest         string // another server, the internet if empty
+		objs         []kclient.Object
+		checkGateway bool
+		expected     Reachability
+	}{
+		{
+			name:         "external in the server's fabric",
+			server:       "server-01",
+			objs:         []kclient.Object{extPeering("vpc-01", "ext-bgp-01")},
+			checkGateway: true,
+			expected:     Reachability{Reachable: true, Reason: ReachabilityReasonSwitchPeering},
+		},
+		{
+			name:         "interconnect without transit",
+			server:       "server-02",
+			objs:         []kclient.Object{extPeering("vpc-02", "to-default")},
+			checkGateway: true,
+		},
+		{
+			name:         "interconnect with transit",
+			server:       "server-02",
+			objs:         []kclient.Object{extPeering("vpc-02", "to-default"), transit("10.1.0.0/16")},
+			checkGateway: true,
+			expected:     Reachability{Reachable: true, Reason: ReachabilityReasonGatewayPeering, Peering: "to-fabric-b--ext-bgp-01"},
+		},
+		{
+			name:   "interconnect with transit but no gateway",
+			server: "server-02",
+			objs:   []kclient.Object{extPeering("vpc-02", "to-default"), transit("10.1.0.0/16")},
+		},
+		{
+			name:   "gateway peering with an interconnect",
+			server: "server-01",
+			objs: []kclient.Object{&gwapi.GatewayPeering{
+				ObjectMeta: kmetav1.ObjectMeta{Name: "vpc-01--to-fabric-b"},
+				Spec: gwapi.PeeringSpec{Peering: map[string]*gwapi.PeeringEntry{
+					"vpc-01":          {Expose: []gwapi.PeeringEntryExpose{{IPs: []gwapi.PeeringEntryIP{{VPCSubnet: "default"}}}}},
+					"ext.to-fabric-b": {Expose: []gwapi.PeeringEntryExpose{{DefaultDestination: true}}},
+				}},
+			}},
+			checkGateway: true,
+		},
+		{
+			name:         "server in the other fabric through transit",
+			server:       "server-01",
+			dest:         "server-02",
+			objs:         bothPeered(transit("10.1.0.0/16")),
+			checkGateway: true,
+			expected:     Reachability{Reachable: true, Reason: ReachabilityReasonGatewayPeering, Peering: "to-fabric-b--ext-bgp-01"},
+		},
+		{
+			name:         "server in the other fabric through transit, from behind the interconnect",
+			server:       "server-02",
+			dest:         "server-01",
+			objs:         bothPeered(transit("10.1.0.0/16")),
+			checkGateway: true,
+			expected:     Reachability{Reachable: true, Reason: ReachabilityReasonGatewayPeering, Peering: "to-fabric-b--ext-bgp-01"},
+		},
+		{
+			name:         "server behind a NATed interconnect",
+			server:       "server-01",
+			dest:         "server-02",
+			objs:         bothPeered(transit("10.1.0.0/16", natted)),
+			checkGateway: true,
+		},
+		{
+			name:         "server from behind a NATed interconnect",
+			server:       "server-02",
+			dest:         "server-01",
+			objs:         bothPeered(transit("10.1.0.0/16", natted)),
+			checkGateway: true,
+			expected:     Reachability{Reachable: true, Reason: ReachabilityReasonGatewayPeering, Peering: "to-fabric-b--ext-bgp-01"},
+		},
+		{
+			name:         "server in the other fabric without an external peering",
+			server:       "server-02",
+			dest:         "server-01",
+			objs:         []kclient.Object{extPeering("vpc-02", "to-default"), transit("10.1.0.0/16")},
+			checkGateway: true,
+		},
+		{
+			name:         "transit not exposing the source",
+			server:       "server-02",
+			objs:         []kclient.Object{extPeering("vpc-02", "to-default"), transit("10.2.0.0/16")},
+			checkGateway: true,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			objs := []kclient.Object{
+				&vpcapi.External{ObjectMeta: kmetav1.ObjectMeta{Name: "ext-bgp-01"}},
+				&vpcapi.External{ObjectMeta: kmetav1.ObjectMeta{Name: "to-fabric-b", Annotations: map[string]string{VLABInterconnectAnnotation: "to-default"}}},
+				&vpcapi.External{ObjectMeta: kmetav1.ObjectMeta{Name: "to-default", Annotations: map[string]string{VLABInterconnectAnnotation: "to-fabric-b"}}},
+			}
+			for _, ext := range []string{"ext-bgp-01", "to-fabric-b", "to-default"} {
+				objs = append(objs, &vpcapi.ExternalAttachment{
+					ObjectMeta: kmetav1.ObjectMeta{Name: "attach--" + ext},
+					Spec:       vpcapi.ExternalAttachmentSpec{External: ext, Connection: "conn--" + ext},
+				}, &gwapi.VPCInfo{
+					ObjectMeta: kmetav1.ObjectMeta{Name: gwapi.VPCInfoExtPrefix + ext},
+					Spec:       gwapi.VPCInfoSpec{Subnets: map[string]*gwapi.VPCInfoSubnet{"external": {CIDR: "0.0.0.0/0"}}},
+				})
+			}
+			for idx, subnet := range []string{"10.0.1.0/24", "10.1.1.0/24"} {
+				server := fmt.Sprintf("server-%02d", idx+1)
+				vpc := fmt.Sprintf("vpc-%02d", idx+1)
+				conn := &wiringapi.Connection{
+					ObjectMeta: kmetav1.ObjectMeta{Name: server + "--unbundled"},
+					Spec: wiringapi.ConnectionSpec{Unbundled: &wiringapi.ConnUnbundled{Link: wiringapi.ServerToSwitchLink{
+						Server: wiringapi.BasePortName{Port: server + "/enp2s1"},
+						Switch: wiringapi.BasePortName{Port: fmt.Sprintf("leaf-%02d/E1/1", idx+1)},
+					}}},
+				}
+				objs = append(objs,
+					&wiringapi.Server{ObjectMeta: kmetav1.ObjectMeta{Name: server}},
+					conn,
+					&vpcapi.VPC{ObjectMeta: kmetav1.ObjectMeta{Name: vpc}, Spec: vpcapi.VPCSpec{Subnets: map[string]*vpcapi.VPCSubnet{"default": {Subnet: subnet}}}},
+					&gwapi.VPCInfo{ObjectMeta: kmetav1.ObjectMeta{Name: vpc}, Spec: gwapi.VPCInfoSpec{Subnets: map[string]*gwapi.VPCInfoSubnet{"default": {CIDR: subnet}}}},
+					&vpcapi.VPCAttachment{
+						ObjectMeta: kmetav1.ObjectMeta{Name: server + "--" + vpc},
+						Spec:       vpcapi.VPCAttachmentSpec{Subnet: vpc + "/default", Connection: conn.Name},
+					},
+				)
+			}
+
+			l := apiutil.NewLoader()
+			for _, obj := range append(objs, test.objs...) {
+				if obj, ok := obj.(interface{ Default() }); ok {
+					obj.Default()
+				}
+				obj.SetNamespace(kmetav1.NamespaceDefault)
+				require.NoError(t, l.Add(t.Context(), obj))
+			}
+
+			var r Reachability
+			var err error
+			if test.dest != "" {
+				r, err = IsServerReachable(t.Context(), l.GetClient(), test.server, test.dest, test.checkGateway)
+			} else {
+				r, err = IsExternalSubnetReachable(t.Context(), l.GetClient(), test.server, "0.0.0.0/0", test.checkGateway)
+			}
+			require.NoError(t, err)
+			require.Equal(t, test.expected, r)
 		})
 	}
 }

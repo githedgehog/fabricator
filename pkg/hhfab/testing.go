@@ -1653,6 +1653,42 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 		return nil
 	}
 
+	// an interconnect External exposes the IPv4 namespace of the fabric on its other side, any other the default route
+	gwPeeringExpose := func(name string, subnets []string) (gwapi.PeeringEntryExpose, error) {
+		expose := gwapi.PeeringEntryExpose{}
+		ext, isExt := strings.CutPrefix(name, gwapi.VPCInfoExtPrefix)
+		if !isExt {
+			for subnetName, subnet := range vpcs[name].Spec.Subnets {
+				if len(subnets) > 0 && !slices.Contains(subnets, subnetName) {
+					continue
+				}
+
+				expose.IPs = append(expose.IPs, gwapi.PeeringEntryIP{CIDR: subnet.Subnet})
+			}
+
+			return expose, nil
+		}
+
+		peer := externals[ext].Annotations[VLABInterconnectAnnotation]
+		if peer == "" {
+			expose.DefaultDestination = true
+
+			return expose, nil
+		}
+		if _, ok := externals[peer]; !ok {
+			return expose, fmt.Errorf("peer %s of interconnect external %s not found", peer, ext) //nolint:goerr113
+		}
+		ipns := &vpcapi.IPv4Namespace{}
+		if err := kube.Get(ctx, kclient.ObjectKey{Name: externals[peer].Spec.IPv4Namespace, Namespace: kmetav1.NamespaceDefault}, ipns); err != nil {
+			return expose, fmt.Errorf("getting IPv4 namespace of external %s: %w", peer, err)
+		}
+		for _, subnet := range ipns.Spec.Subnets {
+			expose.IPs = append(expose.IPs, gwapi.PeeringEntryIP{CIDR: subnet})
+		}
+
+		return expose, nil
+	}
+
 	vpcPeerings := map[string]*vpcapi.VPCPeeringSpec{}
 	externalPeerings := map[string]*vpcapi.ExternalPeeringSpec{}
 	gwPeerings := map[string]*gwapi.PeeringSpec{}
@@ -1690,26 +1726,44 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 				return fmt.Errorf("invalid VPC peering request %s, both VPCs should be non-empty", reqName)
 			}
 
-			if !strings.HasPrefix(vpc1, "vpc-") {
-				if vpcID, err := strconv.ParseUint(vpc1, 10, 64); err == nil {
-					vpc1 = fmt.Sprintf("%02d", vpcID)
+			// Externals are named as in gateway peerings, and can only be peered with each other
+			ext1, isExt := strings.CutPrefix(vpc1, gwapi.VPCInfoExtPrefix)
+			ext2, isExt2 := strings.CutPrefix(vpc2, gwapi.VPCInfoExtPrefix)
+			if isExt != isExt2 {
+				return fmt.Errorf("invalid VPC peering request %s, a VPC is peered with an External with ~", reqName) //nolint:goerr113
+			}
+
+			if isExt {
+				for _, ext := range []string{ext1, ext2} {
+					if _, ok := externals[ext]; !ok {
+						return fmt.Errorf("external %s not found for peering %s", ext, reqName)
+					}
+				}
+			} else {
+				if !strings.HasPrefix(vpc1, "vpc-") {
+					if vpcID, err := strconv.ParseUint(vpc1, 10, 64); err == nil {
+						vpc1 = fmt.Sprintf("%02d", vpcID)
+					}
+
+					vpc1 = "vpc-" + vpc1
+				}
+				if !strings.HasPrefix(vpc2, "vpc-") {
+					if vpcID, err := strconv.ParseUint(vpc2, 10, 64); err == nil {
+						vpc2 = fmt.Sprintf("%02d", vpcID)
+					}
+
+					vpc2 = "vpc-" + vpc2
 				}
 
-				vpc1 = "vpc-" + vpc1
-			}
-			if !strings.HasPrefix(vpc2, "vpc-") {
-				if vpcID, err := strconv.ParseUint(vpc2, 10, 64); err == nil {
-					vpc2 = fmt.Sprintf("%02d", vpcID)
+				if _, ok := vpcs[vpc1]; !ok {
+					return fmt.Errorf("VPC %s not found for VPC peering %s", vpc1, reqName)
 				}
-
-				vpc2 = "vpc-" + vpc2
+				if _, ok := vpcs[vpc2]; !ok {
+					return fmt.Errorf("VPC %s not found for VPC peering %s", vpc2, reqName)
+				}
 			}
-
-			if _, ok := vpcs[vpc1]; !ok {
-				return fmt.Errorf("VPC %s not found for VPC peering %s", vpc1, reqName)
-			}
-			if _, ok := vpcs[vpc2]; !ok {
-				return fmt.Errorf("VPC %s not found for VPC peering %s", vpc2, reqName)
+			if vpc1 == vpc2 {
+				return fmt.Errorf("invalid VPC peering request %s, %s can't be peered with itself", reqName, vpc1) //nolint:goerr113
 			}
 
 			gw := false
@@ -1790,6 +1844,13 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 				}
 			}
 
+			if isExt && !gw {
+				return fmt.Errorf("invalid peering request %s, Externals can only be peered through the gateway (:gw)", reqName) //nolint:goerr113
+			}
+			if isExt && (len(vpc1Subnets) > 0 || len(vpc2Subnets) > 0) {
+				return fmt.Errorf("invalid peering request %s, Externals have no subnets to select", reqName) //nolint:goerr113
+			}
+
 			if !gw {
 				// NAT options are only supported for gateway peerings.
 				if vpc1Nat.asRaw != "" || vpc2Nat.asRaw != "" || vpc1Nat.nat != natTypeNone || vpc2Nat.nat != natTypeNone || vpc1Nat.pfRaw != "" || vpc2Nat.pfRaw != "" {
@@ -1809,23 +1870,13 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 					},
 				}
 			} else {
-				// Build each side's expose for the "real" VPC prefixes.
-				vpc1Expose := gwapi.PeeringEntryExpose{}
-				for subnetName, subnet := range vpcs[vpc1].Spec.Subnets {
-					if len(vpc1Subnets) > 0 && !slices.Contains(vpc1Subnets, subnetName) {
-						continue
-					}
-
-					vpc1Expose.IPs = append(vpc1Expose.IPs, gwapi.PeeringEntryIP{CIDR: subnet.Subnet})
+				vpc1Expose, err := gwPeeringExpose(vpc1, vpc1Subnets)
+				if err != nil {
+					return err
 				}
-
-				vpc2Expose := gwapi.PeeringEntryExpose{}
-				for subnetName, subnet := range vpcs[vpc2].Spec.Subnets {
-					if len(vpc2Subnets) > 0 && !slices.Contains(vpc2Subnets, subnetName) {
-						continue
-					}
-
-					vpc2Expose.IPs = append(vpc2Expose.IPs, gwapi.PeeringEntryIP{CIDR: subnet.Subnet})
+				vpc2Expose, err := gwPeeringExpose(vpc2, vpc2Subnets)
+				if err != nil {
+					return err
 				}
 
 				// NAT handling (PER EXPOSE / PER SIDE):
@@ -1857,7 +1908,11 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 					}
 				}
 
-				gwPeerings[fmt.Sprintf("%s--%s", vpc1, vpc2)] = &gwapi.PeeringSpec{
+				name := fmt.Sprintf("%s--%s", vpc1, vpc2)
+				if isExt {
+					name = fmt.Sprintf("%s--%s", ext1, ext2)
+				}
+				gwPeerings[name] = &gwapi.PeeringSpec{
 					Peering: map[string]*gwapi.PeeringEntry{
 						vpc1: {
 							Expose: []gwapi.PeeringEntryExpose{vpc1Expose},
@@ -3085,24 +3140,55 @@ const (
 )
 
 func IsExternalSubnetReachable(ctx context.Context, kube kclient.Reader, sourceServer, destSubnet string, checkGateway bool) (Reachability, error) {
-	switchPeeringReachable, err := apiutil.IsExternalSubnetReachable(ctx, kube, sourceServer, destSubnet)
+	sourceSubnets, err := apiutil.GetAttachedSubnets(ctx, kube, sourceServer)
 	if err != nil {
-		return Reachability{}, fmt.Errorf("checking if external subnet %s is reachable from server %s: %w", destSubnet, sourceServer, err)
+		return Reachability{}, fmt.Errorf("getting attached subnets for source server %s: %w", sourceServer, err)
 	}
-	if switchPeeringReachable {
-		return Reachability{
-			Reachable: true,
-			Reason:    ReachabilityReasonSwitchPeering,
-		}, nil
+
+	// as apiutil.IsExternalSubnetReachable, except that an interconnect External only leads further
+	// through a gateway peering in the fabric on its other side
+	for sourceSubnetName := range sourceSubnets {
+		sourceVPC, sourceSubnet, ok := strings.Cut(sourceSubnetName, "/")
+		if !ok {
+			return Reachability{}, fmt.Errorf("source must be full VPC subnet name (<vpc-name>/<subnet-name>)")
+		}
+
+		exts, err := peeredExternals(ctx, kube, sourceVPC, sourceSubnet, destSubnet)
+		if err != nil {
+			return Reachability{}, err
+		}
+		for _, ext := range exts {
+			if peer := ext.Annotations[VLABInterconnectAnnotation]; peer != "" {
+				if !checkGateway {
+					continue
+				}
+				vpc := &vpcapi.VPC{}
+				if err := kube.Get(ctx, kclient.ObjectKey{Name: sourceVPC, Namespace: kmetav1.NamespaceDefault}, vpc); err != nil {
+					return Reachability{}, fmt.Errorf("getting VPC %s: %w", sourceVPC, err)
+				}
+				if vpc.Spec.Subnets[sourceSubnet] == nil {
+					return Reachability{}, fmt.Errorf("subnet %s not found in VPC %s", sourceSubnet, sourceVPC)
+				}
+				if r, err := isReachableThroughInterconnect(ctx, kube, peer, vpc.Spec.Subnets[sourceSubnet].Subnet, "", destSubnet, true); err != nil || r.Reachable {
+					return r, err
+				}
+
+				continue
+			}
+
+			if attached, err := apiutil.IsExternalAttached(ctx, kube, ext.Name); err != nil {
+				return Reachability{}, fmt.Errorf("checking if external %s is attached: %w", ext.Name, err)
+			} else if attached {
+				return Reachability{
+					Reachable: true,
+					Reason:    ReachabilityReasonSwitchPeering,
+				}, nil
+			}
+		}
 	}
 
 	if !checkGateway {
 		return Reachability{}, nil
-	}
-
-	sourceSubnets, err := apiutil.GetAttachedSubnets(ctx, kube, sourceServer)
-	if err != nil {
-		return Reachability{}, fmt.Errorf("getting attached subnets for source server %s: %w", sourceServer, err)
 	}
 
 	externals := &vpcapi.ExternalList{}
@@ -3113,9 +3199,12 @@ func IsExternalSubnetReachable(ctx context.Context, kube kclient.Reader, sourceS
 		// No externals defined, can't be reachable via gateway
 		return Reachability{}, nil
 	}
-	externalNames := make([]string, len(externals.Items))
-	for i, ext := range externals.Items {
-		externalNames[i] = ext.Name
+	externalNames := []string{}
+	for _, ext := range externals.Items {
+		// an interconnect External leads to another fabric, handled above
+		if ext.Annotations[VLABInterconnectAnnotation] == "" {
+			externalNames = append(externalNames, ext.Name)
+		}
 	}
 
 	for sourceSubnetName := range sourceSubnets {
@@ -3129,6 +3218,155 @@ func IsExternalSubnetReachable(ctx context.Context, kube kclient.Reader, sourceS
 				return Reachability{}, err
 			} else if r.Reachable {
 				return r, nil
+			}
+		}
+	}
+
+	return Reachability{}, nil
+}
+
+// peeredExternals returns the Externals a VPC subnet is peered with through the switches, for routes covering prefix
+func peeredExternals(ctx context.Context, kube kclient.Reader, vpcName, subnet, prefix string) ([]vpcapi.External, error) {
+	extPeerings := vpcapi.ExternalPeeringList{}
+	if err := kube.List(ctx, &extPeerings, kclient.InNamespace(kmetav1.NamespaceDefault), kclient.MatchingLabels{vpcapi.LabelVPC: vpcName}); err != nil {
+		return nil, fmt.Errorf("listing external peerings of VPC %s: %w", vpcName, err)
+	}
+
+	exts := []vpcapi.External{}
+	for _, extPeering := range extPeerings.Items {
+		if !slices.Contains(extPeering.Spec.Permit.VPC.Subnets, subnet) {
+			continue
+		}
+
+		permitted := false
+		for _, permit := range extPeering.Spec.Permit.External.Prefixes {
+			var err error
+			if permitted, err = apiutil.SubnetContains(permit.Prefix, prefix); err != nil {
+				return nil, fmt.Errorf("checking if external prefix %s contains %s: %w", permit.Prefix, prefix, err)
+			} else if permitted {
+				break
+			}
+		}
+		if !permitted {
+			continue
+		}
+
+		ext := vpcapi.External{}
+		if err := kube.Get(ctx, kclient.ObjectKey{Name: extPeering.Spec.Permit.External.Name, Namespace: kmetav1.NamespaceDefault}, &ext); err != nil {
+			return nil, fmt.Errorf("getting external %s: %w", extPeering.Spec.Permit.External.Name, err)
+		}
+		exts = append(exts, ext)
+	}
+
+	return exts, nil
+}
+
+// IsSubnetReachableThroughInterconnect checks for two VPCs peered through the switches with the Externals on
+// either side of a transit gateway peering: an interconnect External, and another one in the fabric of its peer.
+// This models what the fabric does today, not necessarily what we want: a default expose of the other External
+// also reaches the VPCs peered with it.
+func IsSubnetReachableThroughInterconnect(ctx context.Context, kube kclient.Reader, vpc1Name, vpc1Subnet, vpc2Name, vpc2Subnet string) (Reachability, error) {
+	prefixes := []string{}
+	for _, vpcSubnet := range [][2]string{{vpc1Name, vpc1Subnet}, {vpc2Name, vpc2Subnet}} {
+		vpc := &vpcapi.VPC{}
+		if err := kube.Get(ctx, kclient.ObjectKey{Name: vpcSubnet[0], Namespace: kmetav1.NamespaceDefault}, vpc); err != nil {
+			return Reachability{}, fmt.Errorf("getting VPC %s: %w", vpcSubnet[0], err)
+		}
+		if vpc.Spec.Subnets[vpcSubnet[1]] == nil {
+			return Reachability{}, fmt.Errorf("subnet %s not found in VPC %s", vpcSubnet[1], vpcSubnet[0])
+		}
+		prefixes = append(prefixes, vpc.Spec.Subnets[vpcSubnet[1]].Subnet)
+	}
+
+	exts1, err := peeredExternals(ctx, kube, vpc1Name, vpc1Subnet, prefixes[1])
+	if err != nil {
+		return Reachability{}, err
+	}
+	exts2, err := peeredExternals(ctx, kube, vpc2Name, vpc2Subnet, prefixes[0])
+	if err != nil {
+		return Reachability{}, err
+	}
+	for _, ext1 := range exts1 {
+		for _, ext2 := range exts2 {
+			peer1, peer2 := ext1.Annotations[VLABInterconnectAnnotation], ext2.Annotations[VLABInterconnectAnnotation]
+			var r Reachability
+			switch {
+			case peer1 != "" && peer2 == "":
+				r, err = isReachableThroughInterconnect(ctx, kube, peer1, prefixes[0], ext2.Name, prefixes[1], true)
+			case peer1 == "" && peer2 != "":
+				r, err = isReachableThroughInterconnect(ctx, kube, peer2, prefixes[1], ext1.Name, prefixes[0], false)
+			default:
+				continue
+			}
+			if err != nil || r.Reachable {
+				return r, err
+			}
+		}
+	}
+
+	return Reachability{}, nil
+}
+
+// isReachableThroughInterconnect checks for a gateway peering between the peer of an interconnect External,
+// exposing peerPrefix, and the attached External ext (any if empty), exposing extPrefix. If the peer side is
+// NATed, only a source behind the interconnect can reach the other side.
+func isReachableThroughInterconnect(ctx context.Context, kube kclient.Reader, peerExt, peerPrefix, ext, extPrefix string, fromInterconnect bool) (Reachability, error) {
+	exposeFor := func(entry *gwapi.PeeringEntry, prefix string) (*gwapi.PeeringEntryExpose, error) {
+		for _, expose := range entry.Expose {
+			if expose.DefaultDestination {
+				return &expose, nil
+			}
+			for _, ip := range expose.IPs {
+				if ip.CIDR == "" {
+					continue
+				}
+				contained, err := apiutil.SubnetContains(ip.CIDR, prefix)
+				if err != nil {
+					return nil, fmt.Errorf("checking if %s contains %s: %w", ip.CIDR, prefix, err)
+				}
+				if contained {
+					return &expose, nil
+				}
+			}
+		}
+
+		return nil, nil
+	}
+
+	peerKey := gwapi.VPCInfoExtPrefix + peerExt
+	peerings := gwapi.GatewayPeeringList{}
+	if err := kube.List(ctx, &peerings, kclient.InNamespace(kmetav1.NamespaceDefault), kclient.MatchingLabels{gwapi.ListLabelVPC(peerKey): gwapi.ListLabelValue}); err != nil {
+		return Reachability{}, fmt.Errorf("listing gateway peerings of %s: %w", peerKey, err)
+	}
+	for _, peering := range peerings.Items {
+		peerEntry := peering.Spec.Peering[peerKey]
+		if peerEntry == nil {
+			continue
+		}
+		if expose, err := exposeFor(peerEntry, peerPrefix); err != nil {
+			return Reachability{}, fmt.Errorf("checking gateway peering %s: %w", peering.Name, err)
+		} else if expose == nil || !fromInterconnect && len(expose.As) > 0 {
+			continue
+		}
+
+		for key, entry := range peering.Spec.Peering {
+			name, isExt := strings.CutPrefix(key, gwapi.VPCInfoExtPrefix)
+			if !isExt || key == peerKey || ext != "" && name != ext {
+				continue
+			}
+			if expose, err := exposeFor(entry, extPrefix); err != nil {
+				return Reachability{}, fmt.Errorf("checking gateway peering %s: %w", peering.Name, err)
+			} else if expose == nil {
+				continue
+			}
+			if attached, err := apiutil.IsExternalAttached(ctx, kube, name); err != nil {
+				return Reachability{}, fmt.Errorf("checking if external %s is attached: %w", name, err)
+			} else if attached {
+				return Reachability{
+					Reachable: true,
+					Reason:    ReachabilityReasonGatewayPeering,
+					Peering:   peering.Name,
+				}, nil
 			}
 		}
 	}
@@ -3202,6 +3440,12 @@ func IsSubnetReachable(ctx context.Context, kube kclient.Reader, source, dest st
 		}
 
 		if r.Reachable {
+			return r, nil
+		}
+
+		if r, err = IsSubnetReachableThroughInterconnect(ctx, kube, sourceVPC, sourceSubnet, destVPC, destSubnet); err != nil {
+			return Reachability{}, fmt.Errorf("checking if subnets %s and %s are reachable through an interconnect: %w", source, dest, err)
+		} else if r.Reachable {
 			return r, nil
 		}
 	}
