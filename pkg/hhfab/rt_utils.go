@@ -315,27 +315,55 @@ func shutDownLinkAndTest(ctx context.Context, testCtx *VPCPeeringTestCtx, link w
 	return connCheckErr
 }
 
-// getSwitchesForVPC returns the set of leaf switch names that have VPCAttachments for the given VPC.
-func getSwitchesForVPC(ctx context.Context, kube kclient.Client, vpcName string) (map[string]bool, error) {
-	attachments := &vpcapi.VPCAttachmentList{}
-	if err := kube.List(ctx, attachments, kclient.MatchingLabels{wiringapi.LabelVPC: vpcName}); err != nil {
-		return nil, fmt.Errorf("listing attachments for vpc %s: %w", vpcName, err)
-	}
+// switchesOnConnections returns the set of switch names that terminate the named connections.
+func switchesOnConnections(ctx context.Context, kube kclient.Client, connNames []string) (map[string]bool, error) {
 	switches := map[string]bool{}
-	for _, att := range attachments.Items {
+	for _, connName := range connNames {
 		conn := &wiringapi.Connection{}
 		if err := kube.Get(ctx, kclient.ObjectKey{
-			Namespace: kmetav1.NamespaceDefault, Name: att.Spec.Connection,
+			Namespace: kmetav1.NamespaceDefault, Name: connName,
 		}, conn); err != nil {
-			return nil, fmt.Errorf("getting connection %s: %w", att.Spec.Connection, err)
+			return nil, fmt.Errorf("getting connection %s: %w", connName, err)
 		}
-		sws, _, _, _, _ := conn.Spec.Endpoints()
+		sws, _, _, _, err := conn.Spec.Endpoints()
+		if err != nil {
+			return nil, fmt.Errorf("getting endpoints of connection %s: %w", connName, err)
+		}
 		for _, sw := range sws {
 			switches[sw] = true
 		}
 	}
 
 	return switches, nil
+}
+
+// getSwitchesForVPC returns the set of leaf switch names that have VPCAttachments for the given VPC.
+func getSwitchesForVPC(ctx context.Context, kube kclient.Client, vpcName string) (map[string]bool, error) {
+	attachments := &vpcapi.VPCAttachmentList{}
+	if err := kube.List(ctx, attachments, kclient.MatchingLabels{wiringapi.LabelVPC: vpcName}); err != nil {
+		return nil, fmt.Errorf("listing attachments for vpc %s: %w", vpcName, err)
+	}
+	conns := make([]string, 0, len(attachments.Items))
+	for _, att := range attachments.Items {
+		conns = append(conns, att.Spec.Connection)
+	}
+
+	return switchesOnConnections(ctx, kube, conns)
+}
+
+// getSwitchesForExternal returns the set of border leaf switch names that have
+// ExternalAttachments for the given External.
+func getSwitchesForExternal(ctx context.Context, kube kclient.Client, extName string) (map[string]bool, error) {
+	attachments := &vpcapi.ExternalAttachmentList{}
+	if err := kube.List(ctx, attachments, kclient.MatchingLabels{vpcapi.LabelExternal: extName}); err != nil {
+		return nil, fmt.Errorf("listing external attachments for %s: %w", extName, err)
+	}
+	conns := make([]string, 0, len(attachments.Items))
+	for _, att := range attachments.Items {
+		conns = append(conns, att.Spec.Connection)
+	}
+
+	return switchesOnConnections(ctx, kube, conns)
 }
 
 // check that a route is present in a switch (by checking in the sonic-cli)
@@ -360,7 +388,10 @@ func (testCtx *VPCPeeringTestCtx) waitForNATPoolInLeaves(ctx context.Context, vp
 		return fmt.Errorf("getting switches for vpc %s: %w", vpc.Name, err)
 	}
 	if len(leaves) == 0 {
-		return nil
+		// Every caller NATs traffic from servers attached to this VPC, so an empty set means the
+		// attachments or their labels are not what the test assumes, not that there is nothing to
+		// wait for. Returning nil here would pass the gate without checking a single switch.
+		return fmt.Errorf("no switches attached to vpc %s", vpc.Name) //nolint:goerr113
 	}
 	vrfName := "VrfV" + vpc.Name
 	if vpc.Spec.Mode == vpcapi.VPCModeL3Flat {
@@ -368,12 +399,59 @@ func (testCtx *VPCPeeringTestCtx) waitForNATPoolInLeaves(ctx context.Context, vp
 	}
 	slog.Info("Waiting for NAT pool route on leaves", "vpc", vpc.Name, "leaves", leaves, "pool", poolCIDR, "vrf", vrfName)
 
-	return testCtx.waitForRoutesInSwitches(ctx, leaves, []string{poolCIDR}, vrfName)
+	return testCtx.waitForRoutesInSwitches(ctx, leaves, []string{poolCIDR}, vrfName, defaultRouteWaitTimeout)
 }
 
-// wait until all switches in a set have a bunch of routes installed, or error out after 3 minutes
-func (testCtx *VPCPeeringTestCtx) waitForRoutesInSwitches(ctx context.Context, switches map[string]bool, routes []string, vrfName string) error {
-	const timeout = 3 * time.Minute
+// waitForNATPoolInExternalVRF waits until the NAT pool CIDR appears in the external-facing VRF
+// (VrfE<extName>) on the border leaves attached to the given External. This is the route that gates
+// the return path of a NAT'd external peering: the leaf only has it once it has imported the
+// gateway's EVPN advertisement into that VRF.
+//
+// It does not cover the real external peer's own FIB, which can lag far longer with no BGP session
+// reset involved (githedgehog/internal#479 observed 65 minutes). By the time this returns, the leaf
+// has re-advertised the route to the peer, but nothing here confirms the peer installed it.
+func (testCtx *VPCPeeringTestCtx) waitForNATPoolInExternalVRF(ctx context.Context, extName, poolCIDR string) error {
+	switches, err := getSwitchesForExternal(ctx, testCtx.kube, extName)
+	if err != nil {
+		return fmt.Errorf("getting switches for external %s: %w", extName, err)
+	}
+	if len(switches) == 0 {
+		// Same reasoning as waitForNATPoolInLeaves: every caller peers a VPC with this External,
+		// so an empty set is a broken assumption, not an empty wait.
+		return fmt.Errorf("no switches attached to external %s", extName) //nolint:goerr113
+	}
+	vrfName := "VrfE" + extName
+	slog.Info("Waiting for NAT pool route in external VRF", "external", extName, "switches", switches, "pool", poolCIDR, "vrf", vrfName)
+
+	return testCtx.waitForRoutesInSwitches(ctx, switches, []string{poolCIDR}, vrfName, natPoolExternalVRFTimeout)
+}
+
+// waitForNATPool gates a NAT'd external peering on both halves of the pool route: the VPC's own VRF
+// on the VPC's leaves, and the external-facing VRF on the border leaves. Callers that peer a VPC
+// with an External want both, and the second half is the one that gates the return path, so they
+// are exposed as one call rather than two the caller has to remember to pair.
+func (testCtx *VPCPeeringTestCtx) waitForNATPool(ctx context.Context, vpc *vpcapi.VPC, extName, poolCIDR string) error {
+	if err := testCtx.waitForNATPoolInLeaves(ctx, vpc, poolCIDR); err != nil {
+		return err
+	}
+
+	return testCtx.waitForNATPoolInExternalVRF(ctx, extName, poolCIDR)
+}
+
+const (
+	// defaultRouteWaitTimeout is the timeout waitForRoutesInSwitches applied unconditionally before
+	// it took an explicit timeout per caller. Every pre-existing caller passes it, so their
+	// behavior is unchanged.
+	defaultRouteWaitTimeout = 3 * time.Minute
+	// natPoolExternalVRFTimeout bounds waitForNATPoolInExternalVRF. It covers EVPN import into
+	// VrfE<extName>, measured at one to sixty seconds in githedgehog/internal#421, with an order of
+	// magnitude of margin. It deliberately does not try to cover internal#479's 65 minute lag on
+	// the external peer's own FIB, which this wait cannot observe.
+	natPoolExternalVRFTimeout = 10 * time.Minute
+)
+
+// wait until all switches in a set have a bunch of routes installed, or error out after timeout
+func (testCtx *VPCPeeringTestCtx) waitForRoutesInSwitches(ctx context.Context, switches map[string]bool, routes []string, vrfName string, timeout time.Duration) error {
 	slog.Debug("Checking for routes in switches", "switches", switches, "routes", routes, "vrf", vrfName, "timeout", timeout)
 	toCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
