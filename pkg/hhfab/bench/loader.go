@@ -124,27 +124,8 @@ func applyPhase(ctx context.Context, kube kclient.Client, phase string, objs []k
 	// Progress is worth printing per phase: the create rate visibly decays as
 	// the Connection webhook's per-create List grows.
 	var done atomic.Int64
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-
-	progressCtx, stopProgress := context.WithCancel(ctx)
+	stopProgress := logProgress(ctx, "Applying", "phase", phase, len(objs), &done)
 	defer stopProgress()
-
-	var wg sync.WaitGroup
-	wg.Go(func() {
-		for {
-			select {
-			case <-progressCtx.Done():
-				return
-			case <-ticker.C:
-				n := done.Load()
-				elapsed := time.Since(start)
-				rate := float64(n) / elapsed.Seconds()
-				slog.Info("Applying", "phase", phase, "done", n, "total", len(objs),
-					"rate", fmt.Sprintf("%.1f/s", rate), "elapsed", elapsed.Truncate(time.Second))
-			}
-		}
-	})
 
 	eg, egCtx := errgroup.WithContext(ctx)
 	eg.SetLimit(workers)
@@ -175,7 +156,6 @@ func applyPhase(ctx context.Context, kube kclient.Client, phase string, objs []k
 	err := eg.Wait()
 
 	stopProgress()
-	wg.Wait()
 
 	res.Created = int(created.Load())
 	res.Updated = int(updated.Load())
@@ -189,6 +169,42 @@ func applyPhase(ctx context.Context, kube kclient.Client, phase string, objs []k
 		"created", res.Created, "updated", res.Updated, "took", res.Took.Truncate(time.Millisecond))
 
 	return res, nil
+}
+
+// progressInterval is how often a long apply or clean reports how far it got.
+const progressInterval = 30 * time.Second
+
+// logProgress logs done out of total every progressInterval until the returned
+// stop is called, as msg with key=name identifying what is being worked on.
+// stop waits for the logger to exit and is safe to call more than once.
+func logProgress(ctx context.Context, msg, key, name string, total int, done *atomic.Int64) func() {
+	start := time.Now()
+
+	ctx, cancel := context.WithCancel(ctx)
+
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		ticker := time.NewTicker(progressInterval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				n := done.Load()
+				elapsed := time.Since(start)
+				rate := float64(n) / elapsed.Seconds()
+				slog.Info(msg, key, name, "done", n, "total", total,
+					"rate", fmt.Sprintf("%.1f/s", rate), "elapsed", elapsed.Truncate(time.Second))
+			}
+		}
+	})
+
+	return func() {
+		cancel()
+		wg.Wait()
+	}
 }
 
 // applyOne creates or updates a single object, copying spec and labels from
