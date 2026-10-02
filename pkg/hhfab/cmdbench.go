@@ -507,7 +507,8 @@ func summarize(specs []bench.FabricSpec, gen *bench.Generator) {
 		slog.Info("Fabric", "name", spec.Name, "domains", spec.Domains,
 			"spines", spec.Spines, "leaves", spec.Leaves,
 			"serverPorts", spec.ServerPorts, "breakout", spec.ServerBreakout,
-			"servers", spec.Servers(), "vpcs", spec.VPCs, "attach", spec.Attach, "peerings", spec.Peerings)
+			"servers", spec.Servers(), "sysnameOverride", fmt.Sprintf("%d%%", spec.SysNameOverride),
+			"vpcs", spec.VPCs, "attach", spec.Attach, "peerings", spec.Peerings)
 	}
 
 	objects := gen.Objects()

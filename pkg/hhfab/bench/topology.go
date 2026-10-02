@@ -607,12 +607,17 @@ func (g *Generator) generateServers(ctx context.Context, l *apiutil.Loader, d *d
 				serverIdx := leafIdx*perLeaf + uint(portIdx)*plan.subports + sub //nolint:gosec // portIdx is bounded by ServerPorts
 				server := d.serverName(serverIdx)
 
+				srvSpec := wiringapi.ServerSpec{
+					Description: fmt.Sprintf("bench %s server %d", d.prefix(), serverIdx+1),
+				}
+				if spec.OverridesSysName(serverIdx) {
+					srvSpec.Inspect.ExpectedSystemName = server + SysNameSuffix
+				}
+
 				if err := l.Add(ctx, &wiringapi.Server{
 					TypeMeta:   kmetav1.TypeMeta{Kind: wiringapi.KindServer, APIVersion: wiringapi.GroupVersion.String()},
 					ObjectMeta: objMeta(server, labels),
-					Spec: wiringapi.ServerSpec{
-						Description: fmt.Sprintf("bench %s server %d", d.prefix(), serverIdx+1),
-					},
+					Spec:       srvSpec,
 				}); err != nil {
 					return fmt.Errorf("adding server %d: %w", serverIdx+1, err)
 				}

@@ -170,6 +170,36 @@ func TestGeneratedObjectsBelongToTheirFabric(t *testing.T) {
 	require.NoError(t, apiutil.ValidateFabricGateway(ctx, l, cfg))
 }
 
+// The servers that override their expected LLDP system name get their own name
+// plus the suffix, and the rest keep it unset, which is what inspect reads.
+func TestServersOverrideSysName(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	l, cfg := generate(t, []string{"name=dc1,domains=2,spines=1,leaves=2,server-ports=2"})
+
+	servers := &wiringapi.ServerList{}
+	require.NoError(t, l.List(ctx, servers))
+	require.Len(t, servers.Items, 2*2*2*4) // domains * leaves * ports * subports
+
+	overridden := 0
+	for _, srv := range servers.Items {
+		if name := srv.Spec.Inspect.ExpectedSystemName; name != "" {
+			require.Equal(t, srv.Name+bench.SysNameSuffix, name)
+			overridden++
+		}
+	}
+	require.Equal(t, len(servers.Items)/2, overridden, "the default is 50%%")
+
+	require.NoError(t, apiutil.ValidateFabricGateway(ctx, l, cfg))
+
+	l, _ = generate(t, []string{"name=dc1,spines=1,leaves=1,server-ports=1,sysname-override=0"})
+	require.NoError(t, l.List(ctx, servers))
+	for _, srv := range servers.Items {
+		require.Empty(t, srv.Spec.Inspect.ExpectedSystemName, "server %s", srv.Name)
+	}
+}
+
 // A single domain keeps the default domain name and the names a fabric always
 // had, so a one-domain fabric is indistinguishable from before domains existed.
 func TestSingleDomainKeepsDefaultNames(t *testing.T) {

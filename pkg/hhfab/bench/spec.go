@@ -52,7 +52,16 @@ const (
 	DefaultVPCs           = 1
 	DefaultAttach         = 1
 	DefaultPeerings       = 0
+
+	// DefaultSysNameOverride is the percentage of servers whose expected LLDP
+	// system name differs from their object name, as a real server named by
+	// its FQDN would.
+	DefaultSysNameOverride = 50
 )
+
+// SysNameSuffix is appended to a server's name to make the LLDP system name it
+// is expected to advertise when it overrides it.
+const SysNameSuffix = "-b"
 
 // DefaultProfile is the switch profile used for both spines and leaves unless
 // overridden.
@@ -71,7 +80,7 @@ var ServerBreakouts = []string{"1x800G", "2x400G", "4x200G"}
 // and error messages.
 var FabricSpecKeys = []string{
 	"name", "domains", "spines", "leaves", "fabric-links", "fabric-unnum",
-	"server-ports", "server-breakout", "vpcs", "attach", "peerings", "profile",
+	"server-ports", "server-breakout", "sysname-override", "vpcs", "attach", "peerings", "profile",
 }
 
 // FabricSpec describes one synthetic fabric. Every field is per-fabric so that
@@ -96,6 +105,8 @@ type FabricSpec struct {
 	ServerPorts    uint   // leaf ports facing servers
 	ServerBreakout string // breakout mode for those ports
 
+	SysNameOverride uint // percent of servers expected to advertise an LLDP system name other than their own
+
 	VPCs     uint // VPCs
 	Attach   uint // VPCAttachments per unbundled connection, each to a distinct VPC
 	Peerings uint // VPCPeerings
@@ -107,16 +118,17 @@ type FabricSpec struct {
 // is expected to set Name.
 func DefaultFabricSpec() FabricSpec {
 	return FabricSpec{
-		Domains:        DefaultDomains,
-		Spines:         DefaultSpines,
-		Leaves:         DefaultLeaves,
-		FabricLinks:    DefaultFabricLinks,
-		ServerPorts:    DefaultServerPorts,
-		ServerBreakout: DefaultServerBreakout,
-		VPCs:           DefaultVPCs,
-		Attach:         DefaultAttach,
-		Peerings:       DefaultPeerings,
-		Profile:        DefaultProfile,
+		Domains:         DefaultDomains,
+		Spines:          DefaultSpines,
+		Leaves:          DefaultLeaves,
+		FabricLinks:     DefaultFabricLinks,
+		ServerPorts:     DefaultServerPorts,
+		ServerBreakout:  DefaultServerBreakout,
+		SysNameOverride: DefaultSysNameOverride,
+		VPCs:            DefaultVPCs,
+		Attach:          DefaultAttach,
+		Peerings:        DefaultPeerings,
+		Profile:         DefaultProfile,
 	}
 }
 
@@ -166,6 +178,14 @@ func (f FabricSpec) Servers() uint {
 // Attachments is the total number of VPCAttachments.
 func (f FabricSpec) Attachments() uint {
 	return f.Servers() * f.Attach
+}
+
+// OverridesSysName reports whether the server at idx within its domain is
+// expected to advertise an LLDP system name other than its own. The overrides
+// are spread evenly - every other server at 50% - rather than bunched, and
+// exactly floor(n * SysNameOverride / 100) of n servers get one.
+func (f FabricSpec) OverridesSysName(idx uint) bool {
+	return (idx+1)*f.SysNameOverride/100 > idx*f.SysNameOverride/100
 }
 
 // DomainName is the name of a domain, by index. A single domain keeps the
@@ -232,6 +252,10 @@ func (f FabricSpec) Validate() error {
 		return fmt.Errorf("server-breakout %q must be one of %s", f.ServerBreakout, strings.Join(ServerBreakouts, ", ")) //nolint:err113
 	}
 
+	if f.SysNameOverride > 100 {
+		return fmt.Errorf("sysname-override is a percentage of servers, got %d", f.SysNameOverride) //nolint:err113
+	}
+
 	if f.VPCs*f.Domains > MaxVPCsPerFabric {
 		return fmt.Errorf("%d vpcs in each of %d domains requested, maximum is %d in total with the <fabric>-NNN naming scheme", //nolint:err113
 			f.VPCs, f.Domains, MaxVPCsPerFabric)
@@ -295,6 +319,8 @@ func ParseFabricSpec(value string) (FabricSpec, error) {
 			spec.ServerPorts, err = parseUint(key, val)
 		case "server-breakout":
 			spec.ServerBreakout = val
+		case "sysname-override":
+			spec.SysNameOverride, err = parseUint(key, val)
 		case "vpcs":
 			spec.VPCs, err = parseUint(key, val)
 		case "attach":
