@@ -51,8 +51,8 @@ github.com/andybalholm/brotli v1.2.0 h1:ukwgCxwYrmACq68yiUqwIWnGY0cTPox/M94sVwTo
 github.com/andybalholm/brotli v1.2.0/go.mod h1:rzTDkvFWvIrjDXZHkuS16NPggd91W3kUSvPlQ1pLaKY=
 github.com/antlr4-go/antlr/v4 v4.13.1 h1:SqQKkuVZ+zWkMMNkjy5FZe5mr5WURWnlpmOuzYWrPrQ=
 github.com/antlr4-go/antlr/v4 v4.13.1/go.mod h1:GKmUxMtwp6ZgGwZSva4eWPC5mS6vUAmOABFgjdkM7Nw=
-github.com/appleboy/easyssh-proxy v1.5.3 h1:ukfO1Eqd0/ARhDFNTCh/HjEnDEviVcN6htrYvqssGNw=
-github.com/appleboy/easyssh-proxy v1.5.3/go.mod h1:DdAJJ4W6l0fL0xblkTpyPbRKTtj7OtrrzKMbeUdWbrk=
+github.com/appleboy/easyssh-proxy v1.5.4 h1:C5up791KMPewtAjHd/qDkaKjOdZ9VLVGKYBlo2PB3S4=
+github.com/appleboy/easyssh-proxy v1.5.4/go.mod h1:5AV+4AeOwjAy5N65BFiU8QVM2Ij+yjVIF10DaOzTagE=
 github.com/armon/go-socks5 v0.0.0-20160902184237-e75332964ef5 h1:0CwZNZbxp69SHPdPJAN/hZIm0C4OItdklCFmMRWYpio=
 github.com/armon/go-socks5 v0.0.0-20160902184237-e75332964ef5/go.mod h1:wHh0iHkYZB8zMSxRWpUBQtwG5a7fFgvEO+odwuTv2gs=
 github.com/aws/aws-sdk-go-v2 v1.42.0 h1:XvXMJTkFQtpBKIWZnmr9ZEOc2InWM2yldjXEJ/bymhA=
