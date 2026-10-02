@@ -5,6 +5,7 @@ package bench_test
 
 import (
 	"fmt"
+	"net/netip"
 	"slices"
 	"testing"
 
@@ -352,6 +353,40 @@ func TestAllocatorRefusesOversizedFabric(t *testing.T) {
 
 	_, err = bench.NewAllocator(defaultFab(), 1, 0, 0, specs)
 	require.NoError(t, err)
+}
+
+func TestLastHostAddr(t *testing.T) {
+	t.Parallel()
+
+	for subnet, want := range map[string]string{
+		"172.30.0.0/21": "172.30.7.254",
+		"172.30.0.5/21": "172.30.7.254", // host bits are ignored
+		"10.0.0.0/8":    "10.255.255.254",
+		"192.0.2.0/30":  "192.0.2.2",
+	} {
+		got, err := bench.LastHostAddr(netip.MustParsePrefix(subnet))
+		require.NoError(t, err, subnet)
+		require.Equal(t, want, got.String(), subnet)
+	}
+
+	for _, subnet := range []string{"192.0.2.0/31", "192.0.2.1/32", "fd00::/64"} {
+		_, err := bench.LastHostAddr(netip.MustParsePrefix(subnet))
+		require.Error(t, err, subnet)
+	}
+
+	// The stock management subnet's last address stays clear of everything the
+	// allocator hands out.
+	f := defaultFab()
+	subnet, err := f.Spec.Config.Control.ManagementSubnet.Parse()
+	require.NoError(t, err)
+	last, err := bench.LastHostAddr(subnet)
+	require.NoError(t, err)
+
+	a, err := bench.NewAllocator(f, 1, 0, 0, defaultSpecs(t, 8))
+	require.NoError(t, err)
+	top, err := a.SwitchMgmtIP(a.Units()-1, bench.StrideSwitches-1)
+	require.NoError(t, err)
+	require.Equal(t, -1, top.Addr().Compare(last))
 }
 
 func TestAllocatorIndexBounds(t *testing.T) {

@@ -385,6 +385,24 @@ func (a *Allocator) checkIdx(unit, idx, stride uint) error {
 	return nil
 }
 
+// LastHostAddr returns the last usable address of an IPv4 subnet, the one
+// before its broadcast address. The bench puts it on the management bridge to
+// reach the control node, since it is the address least likely to be taken by
+// the control plane or the switches, which are numbered from the bottom.
+func LastHostAddr(subnet netip.Prefix) (netip.Addr, error) {
+	if !subnet.Addr().Is4() || subnet.Bits() > 30 {
+		return netip.Addr{}, fmt.Errorf("need an IPv4 subnet of /30 or wider, got %s", subnet) //nolint:err113
+	}
+
+	raw := subnet.Masked().Addr().As4()
+	broadcast := uint64(binary.BigEndian.Uint32(raw[:])) | (uint64(1)<<(32-subnet.Bits()) - 1)
+
+	var out [4]byte
+	binary.BigEndian.PutUint32(out[:], uint32(broadcast-1)) //nolint:gosec // a /30 or wider IPv4 subnet
+
+	return netip.AddrFrom4(out), nil
+}
+
 // addrAdd returns base + n for an IPv4 address.
 func addrAdd(base netip.Addr, n uint64) (netip.Addr, error) {
 	if !base.Is4() {

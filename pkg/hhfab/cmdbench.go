@@ -7,10 +7,14 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
+	"net/netip"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,6 +25,7 @@ import (
 	"go.githedgehog.com/fabric/pkg/util/kubeutil"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	fabcomp "go.githedgehog.com/fabricator/pkg/fab/comp/fabric"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/k3s"
 	"go.githedgehog.com/fabricator/pkg/hhfab/bench"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -131,11 +136,20 @@ func DoVLABBenchAgents(ctx context.Context, workDir, cacheDir string, opts Bench
 		return err //nolint:wrapcheck
 	}
 
-	// Each agent's own kubeconfig points at the control VIP on the management
-	// network, which the host running the bench has no address on. Reuse
-	// whatever address the admin kubeconfig reaches the API by.
 	apiServer := ""
-	if opts.APIVia == bench.APIViaHostfwd || opts.APIVia == "" {
+	sourceAddr := netip.Addr{}
+	switch opts.APIVia {
+	case bench.APIViaBridgeIP:
+		// The way real switches reach the control node: the control VIP over
+		// the management bridge, rather than through the VM's user-mode
+		// networking, which serialises every agent through one slirp loop.
+		if apiServer, sourceAddr, err = benchBridgeIP(ctx, workDir, cacheDir); err != nil {
+			return err
+		}
+	case bench.APIViaHostfwd, "":
+		// Each agent's own kubeconfig points at the control VIP on the
+		// management network, which the host may have no address on. Reuse
+		// whatever address the admin kubeconfig reaches the API by.
 		cfg, err := kubeutil.NewClientConfig(ctx, kubeconfig)
 		if err != nil {
 			return fmt.Errorf("reading kubeconfig: %w", err)
@@ -151,10 +165,89 @@ func DoVLABBenchAgents(ctx context.Context, workDir, cacheDir string, opts Bench
 		Agents:         opts.Agents,
 		APIVia:         opts.APIVia,
 		APIServer:      apiServer,
+		SourceAddr:     sourceAddr,
 		SyncHeartbeats: opts.SyncHeartbeats,
 		PadSize:        padSize,
 	}); err != nil {
 		return fmt.Errorf("running agents: %w", err)
+	}
+
+	return nil
+}
+
+// benchBridgeIP prepares --api-via=bridgeip: the API at the control VIP from
+// the Fabricator config, reached from the last address of the management
+// subnet on the VLAB management bridge. The address is added to the bridge if
+// it is not there yet, and the VIP is probed from it so a broken path fails
+// here rather than as every agent timing out on its own dial.
+func benchBridgeIP(ctx context.Context, workDir, cacheDir string) (string, netip.Addr, error) {
+	c, err := load(ctx, workDir, cacheDir, nil, true, HydrateModeIfNotPresent, "")
+	if err != nil {
+		return "", netip.Addr{}, err
+	}
+
+	vip, err := c.Fab.Spec.Config.Control.VIP.Parse()
+	if err != nil {
+		return "", netip.Addr{}, fmt.Errorf("parsing control VIP: %w", err)
+	}
+	subnet, err := c.Fab.Spec.Config.Control.ManagementSubnet.Parse()
+	if err != nil {
+		return "", netip.Addr{}, fmt.Errorf("parsing management subnet: %w", err)
+	}
+
+	source, err := bench.LastHostAddr(subnet)
+	if err != nil {
+		return "", netip.Addr{}, fmt.Errorf("picking an address on the management bridge: %w", err)
+	}
+
+	if err := ensureBridgeAddr(ctx, netip.PrefixFrom(source, subnet.Bits())); err != nil {
+		return "", netip.Addr{}, err
+	}
+
+	addr := net.JoinHostPort(vip.Addr().String(), strconv.Itoa(k3s.APIPort))
+
+	dialer := &net.Dialer{Timeout: 5 * time.Second, LocalAddr: &net.TCPAddr{IP: source.AsSlice()}}
+	conn, err := dialer.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return "", netip.Addr{}, fmt.Errorf("control VIP %s is not reachable from %s on %s: %w", addr, source, VLABBridge, err)
+	}
+	if err := conn.Close(); err != nil {
+		return "", netip.Addr{}, fmt.Errorf("closing probe connection to %s: %w", addr, err)
+	}
+
+	slog.Info("Reaching the API over the management bridge", "bridge", VLABBridge, "source", source, "api", addr)
+
+	return "https://" + addr, source, nil
+}
+
+// ensureBridgeAddr puts addr on the VLAB management bridge unless it is there
+// already. Reading the bridge's addresses needs no privileges, so sudo is only
+// run - and can only prompt - when something has to change.
+func ensureBridgeAddr(ctx context.Context, addr netip.Prefix) error {
+	iface, err := net.InterfaceByName(VLABBridge)
+	if err != nil {
+		return fmt.Errorf("getting management bridge %s, is the VLAB running: %w", VLABBridge, err)
+	}
+
+	existing, err := iface.Addrs()
+	if err != nil {
+		return fmt.Errorf("listing addresses on %s: %w", VLABBridge, err)
+	}
+	for _, a := range existing {
+		if ipNet, ok := a.(*net.IPNet); ok && ipNet.IP.Equal(addr.Addr().AsSlice()) {
+			return nil
+		}
+	}
+
+	slog.Info("Adding address to the management bridge", "bridge", VLABBridge, "addr", addr)
+
+	cmd := exec.CommandContext(ctx, VLABCmdSudo, "ip", "addr", "add", addr.String(), "dev", VLABBridge) //nolint:gosec // addr is a parsed prefix, formatted by netip
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("adding %s to %s: %w", addr, VLABBridge, err)
 	}
 
 	return nil
