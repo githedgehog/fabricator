@@ -27,6 +27,13 @@ const (
 	VLABExtraDomain       = "domain-b"
 )
 
+// The extra fabric has no gateway or virtual external. An interconnect External, annotated with
+// the name of its peer, connects it to a leaf of the main fabric.
+const (
+	VLABExtraFabric            = "fabric-b"
+	VLABInterconnectAnnotation = "hhfab.githedgehog.com/interconnect"
+)
+
 const (
 	GatewayDriverKernel = "kernel"
 	GatewayDriverDPDK   = "dpdk"
@@ -76,6 +83,8 @@ type VLABBuilderDefault struct {
 	ExtOrphanConnCount  uint8             // number of external connections to generate from orphan leaves
 	ExtraDomain         bool              // generate in a fabric of its own with a second domain of as many spines, orphan leaves move to it (2 orphans by default)
 	SharedLeafsCount    uint8             // number of orphan leaves in both domains, the last ones (default 1 with ExtraDomain)
+	ExtraFabric         bool              // generate a second fabric of two mesh leaves with a server each
+	InterconnectFabrics bool              // connect a leaf of each fabric with an External on both sides
 	YesFlag             bool
 
 	VLABBuilderBase
@@ -251,6 +260,23 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, cfg f
 		return fmt.Errorf("shared leafs count requires an extra domain") //nolint:goerr113
 	}
 
+	if b.ExtraFabric && b.NoSwitches {
+		return fmt.Errorf("extra fabric needs switches") //nolint:goerr113
+	}
+	// the last leaf of the default domain, where the gateways are
+	icLeafID := totalESLAGLeafs + b.OrphanLeafsCount
+	if b.ExtraDomain {
+		icLeafID = totalESLAGLeafs
+	}
+	if b.InterconnectFabrics {
+		if !b.ExtraFabric {
+			return fmt.Errorf("interconnecting fabrics requires an extra fabric") //nolint:goerr113
+		}
+		if icLeafID == 0 {
+			return fmt.Errorf("interconnecting fabrics needs a leaf in the default domain only") //nolint:goerr113
+		}
+	}
+
 	// leaves are numbered ESLAG first, then orphans. ESLAG groups stay in the default domain, since
 	// peers must be in the same domains. Shared leaves are the last orphans, as orphan external
 	// connections start from the first and a leaf with one must be in a single domain. nil means
@@ -316,6 +342,9 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, cfg f
 		slog.Info(">>>", "eslagLeafGroups", b.ESLAGLeafGroups)
 		if b.ExtraDomain {
 			slog.Info(">>>", "extraDomain", VLABExtraDomain, "sharedLeafsCount", b.SharedLeafsCount)
+		}
+		if b.ExtraFabric {
+			slog.Info(">>>", "extraFabric", VLABExtraFabric, "interconnectFabrics", b.InterconnectFabrics)
 		}
 		if isGw {
 			slog.Info(">>>", "gateways", len(gws), "gatewayUplinks", b.GatewayUplinks, "gatewayDriver", b.GatewayDriver)
@@ -957,6 +986,160 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, cfg f
 		}
 	}
 
+	if !b.ExtraFabric {
+		return nil
+	}
+
+	// each side presents its own local ASN, as leaf ASNs are only known after hydration
+	const mainICASN, extraICASN = 64910, 64911
+	mainFabric := b.fabric
+	mainICExt := "to-" + VLABExtraFabric
+	extraICExt := "to-" + wiringapi.FabricNameOrDefault(mainFabric)
+	if b.InterconnectFabrics {
+		icLeafName := fmt.Sprintf("leaf-%02d", icLeafID)
+		// named apart from <leaf>--external, which the leaf may already have
+		icConn, err := b.createConnectionWithName(ctx, icLeafName+"--interconnect", wiringapi.ConnectionSpec{
+			External: &wiringapi.ConnExternal{Link: wiringapi.ConnExternalLink{Switch: wiringapi.BasePortName{Port: b.nextSwitchPort(icLeafName)}}},
+		})
+		if err != nil {
+			return err
+		}
+		if _, err := b.createExternal(ctx, mainICExt, vpcapi.ExternalSpec{
+			IPv4Namespace:     ipnsName,
+			InboundCommunity:  fmt.Sprintf("%d:100", extraICASN),
+			OutboundCommunity: fmt.Sprintf("%d:100", mainICASN),
+			LocalASN:          mainICASN,
+		}, map[string]string{VLABInterconnectAnnotation: extraICExt}); err != nil {
+			return err
+		}
+		if _, err := b.createExternalAttach(ctx, fmt.Sprintf("%s--%s", icLeafName, mainICExt), vpcapi.ExternalAttachmentSpec{
+			External:   mainICExt,
+			Connection: icConn.Name,
+			Switch:     vpcapi.ExternalAttachmentSwitch{VLAN: 10, IP: "100.64.0.1/30"},
+			Neighbor:   vpcapi.ExternalAttachmentNeighbor{ASN: extraICASN, IP: "100.64.0.2"},
+		}); err != nil {
+			return err
+		}
+	}
+
+	b.fabric = VLABExtraFabric
+
+	if err := b.data.Add(ctx, &wiringapi.Fabric{
+		TypeMeta: kmetav1.TypeMeta{
+			Kind:       wiringapi.KindFabric,
+			APIVersion: wiringapi.GroupVersion.String(),
+		},
+		ObjectMeta: kmetav1.ObjectMeta{
+			Name: VLABExtraFabric,
+		},
+		Spec: wiringapi.FabricSpec{
+			LeafASNStart: 64801,
+			LeafASNEnd:   64899,
+			DisableBFD:   cfg.Fabric.DisableBFD,
+			Domains: map[string]wiringapi.FabricDomainSpec{
+				wiringapi.DefaultFabricDomain: {SpineASN: 64900, GatewayASN: 64901},
+			},
+		},
+	}); err != nil {
+		return fmt.Errorf("creating fabric: %w", err)
+	}
+
+	if err := b.data.Add(ctx, &vpcapi.IPv4Namespace{
+		TypeMeta: kmetav1.TypeMeta{
+			Kind:       vpcapi.KindIPv4Namespace,
+			APIVersion: vpcapi.GroupVersion.String(),
+		},
+		ObjectMeta: kmetav1.ObjectMeta{
+			Name: VLABExtraFabric,
+		},
+		Spec: vpcapi.IPv4NamespaceSpec{
+			Topology: vpcapi.IPv4NamespaceTopology{Fabric: VLABExtraFabric},
+			Subnets: []string{
+				"10.1.0.0/16",
+			},
+		},
+	}); err != nil {
+		return fmt.Errorf("creating IPv4 namespace: %w", err) //nolint:goerr113
+	}
+
+	extraLeafs := []string{}
+	for range 2 {
+		leafName := fmt.Sprintf("leaf-%02d", leafID)
+		extraLeafs = append(extraLeafs, leafName)
+
+		if _, err := b.createSwitch(ctx, leafName, wiringapi.SwitchSpec{
+			Role:        wiringapi.SwitchRoleServerLeaf,
+			Description: fmt.Sprintf("VS-%02d %s", switchID, VLABExtraFabric),
+		}, nil); err != nil {
+			return err
+		}
+
+		switchID++
+		leafID++
+
+		serverName := fmt.Sprintf("server-%02d", serverID)
+		if _, err := b.createServer(ctx, serverName, wiringapi.ServerSpec{
+			Description: fmt.Sprintf("S-%02d Unbundled %s", serverID, leafName),
+		}); err != nil {
+			return err
+		}
+
+		if _, err := b.createConnection(ctx, wiringapi.ConnectionSpec{
+			Unbundled: &wiringapi.ConnUnbundled{
+				Link: wiringapi.ServerToSwitchLink{
+					Server: wiringapi.BasePortName{Port: b.nextServerPort(serverName)},
+					Switch: wiringapi.BasePortName{Port: b.nextSwitchPort(leafName)},
+				},
+			},
+		}); err != nil {
+			return err
+		}
+
+		serverID++
+	}
+
+	meshLinks := []wiringapi.MeshLink{}
+	for range 2 {
+		meshLinks = append(meshLinks, wiringapi.MeshLink{
+			Leaf1: wiringapi.ConnFabricLinkSwitch{BasePortName: wiringapi.BasePortName{Port: b.nextSwitchPort(extraLeafs[0])}},
+			Leaf2: wiringapi.ConnFabricLinkSwitch{BasePortName: wiringapi.BasePortName{Port: b.nextSwitchPort(extraLeafs[1])}},
+		})
+	}
+	if _, err := b.createConnection(ctx, wiringapi.ConnectionSpec{
+		Mesh: &wiringapi.ConnMesh{
+			Links: meshLinks,
+		},
+	}); err != nil {
+		return err
+	}
+
+	if !b.InterconnectFabrics {
+		return nil
+	}
+
+	icConn, err := b.createConnectionWithName(ctx, extraLeafs[0]+"--interconnect", wiringapi.ConnectionSpec{
+		External: &wiringapi.ConnExternal{Link: wiringapi.ConnExternalLink{Switch: wiringapi.BasePortName{Port: b.nextSwitchPort(extraLeafs[0])}}},
+	})
+	if err != nil {
+		return err
+	}
+	if _, err := b.createExternal(ctx, extraICExt, vpcapi.ExternalSpec{
+		IPv4Namespace:     VLABExtraFabric,
+		InboundCommunity:  fmt.Sprintf("%d:100", mainICASN),
+		OutboundCommunity: fmt.Sprintf("%d:100", extraICASN),
+		LocalASN:          extraICASN,
+	}, map[string]string{VLABInterconnectAnnotation: mainICExt}); err != nil {
+		return err
+	}
+	if _, err := b.createExternalAttach(ctx, fmt.Sprintf("%s--%s", extraLeafs[0], extraICExt), vpcapi.ExternalAttachmentSpec{
+		External:   extraICExt,
+		Connection: icConn.Name,
+		Switch:     vpcapi.ExternalAttachmentSwitch{VLAN: 10, IP: "100.64.0.2/30"},
+		Neighbor:   vpcapi.ExternalAttachmentNeighbor{ASN: mainICASN, IP: "100.64.0.1"},
+	}); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -1364,7 +1547,7 @@ func (b *VLABBuilderBase) createExternal(ctx context.Context, name string, spec 
 	return external, nil
 }
 
-func (b *VLABBuilderBase) createExternalAttach(ctx context.Context, name string, spec vpcapi.ExternalAttachmentSpec) (*vpcapi.ExternalAttachment, error) {
+func (b *VLABBuilderBase) createExternalAttach(ctx context.Context, name string, spec vpcapi.ExternalAttachmentSpec) (*vpcapi.ExternalAttachment, error) { //nolint:unparam
 	externalAttach := &vpcapi.ExternalAttachment{
 		TypeMeta: kmetav1.TypeMeta{
 			Kind:       "ExternalAttachment",

@@ -524,9 +524,15 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 		},
 	}
 	tableID := uint32(1000)
+	icPeers := map[string]string{}
 	for _, external := range externals.Items {
 		if isHardware(&external) {
 			hwExternals[external.Name] = true
+
+			continue
+		}
+		if peer := external.Annotations[VLABInterconnectAnnotation]; peer != "" {
+			icPeers[external.Name] = peer
 
 			continue
 		}
@@ -692,8 +698,31 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 		return nil, fmt.Errorf("failed to list external attachments: %w", err)
 	}
 
+	// an interconnect External's connection is cabled to that of its peer, not to the virtual external
+	icConns := map[string]string{}
+	for _, extAttach := range externalAttachs.Items {
+		if icPeers[extAttach.Spec.External] != "" {
+			icConns[extAttach.Spec.External] = extAttach.Spec.Connection
+		}
+	}
+	icPeerConns := map[string]*wiringapi.Connection{}
+	for ext, peer := range icPeers {
+		peerIdx := slices.IndexFunc(conns.Items, func(conn wiringapi.Connection) bool { return conn.Name == icConns[peer] })
+		if icConns[ext] == "" || peerIdx < 0 {
+			return nil, fmt.Errorf("interconnect external %q or its peer %q has no connection", ext, peer) //nolint:goerr113
+		}
+		icPeerConns[icConns[ext]] = &conns.Items[peerIdx]
+	}
+
 	for _, conn := range conns.Items {
-		if conn.Spec.Fabric != nil {
+		if peerConn := icPeerConns[conn.Name]; peerConn != nil {
+			// cabled once, from the connection that sorts first
+			if conn.Name < peerConn.Name {
+				if err := addLink(conn.Spec.External.Link.Switch.Port, peerConn.Spec.External.Link.Switch.Port); err != nil {
+					return nil, fmt.Errorf("failed to add link for interconnect connection %q: %w", conn.Name, err)
+				}
+			}
+		} else if conn.Spec.Fabric != nil {
 			for _, link := range conn.Spec.Fabric.Links {
 				if err := addLink(link.Spine.Port, link.Leaf.Port); err != nil {
 					return nil, fmt.Errorf("failed to add link for fabric connection %s: %w", conn.Name, err)
