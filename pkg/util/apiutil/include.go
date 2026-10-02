@@ -41,6 +41,10 @@ func ValidateFabricGateway(ctx context.Context, l *Loader, fabricCfg *meta.Fabri
 		return fmt.Errorf("validating switch profiles: %w", err)
 	}
 
+	if err := defaultAndValidate(ctx, kube, &wiringapi.FabricList{}, fabricCfg); err != nil {
+		return fmt.Errorf("validating fabric: %w", err)
+	}
+
 	if err := defaultAndValidate(ctx, kube, &wiringapi.VLANNamespaceList{}, fabricCfg); err != nil {
 		return fmt.Errorf("validating vlan namespaces: %w", err)
 	}
@@ -156,6 +160,7 @@ func defaultAndValidate(ctx context.Context, kube kclient.Reader, objList meta.O
 }
 
 var printIncludeLists = []kclient.ObjectList{
+	&wiringapi.FabricList{},
 	&wiringapi.VLANNamespaceList{},
 	&vpcapi.IPv4NamespaceList{},
 	&wiringapi.SwitchGroupList{},

@@ -51,7 +51,8 @@ type ControlInstall struct {
 func (c *ControlInstall) Run(ctx context.Context) error {
 	slog.Info("Running control node installation", "name", c.Control.Name)
 
-	if err := checkIfaceAddresses(c.Control.Spec.Management.Interface,
+	if err := checkIfaceAddresses(
+		c.Control.Spec.Management.Interface,
 		string(c.Control.Spec.Management.IP), string(c.Fab.Spec.Config.Control.VIP),
 	); err != nil {
 		return fmt.Errorf("checking management addresses: %w", err)
@@ -194,7 +195,8 @@ func (c *ControlInstall) installK8s(ctx context.Context) (kclient.Client, error)
 
 	slog.Debug("Running k3s install")
 	cmd := exec.CommandContext(ctx, k3sInstall, "--disable=servicelb,traefik")
-	cmd.Env = append(os.Environ(),
+	cmd.Env = append(
+		os.Environ(),
 		"INSTALL_K3S_SKIP_DOWNLOAD=true",
 		"INSTALL_K3S_BIN_DIR=/opt/bin",
 		"K3S_TOKEN="+c.Fab.Spec.Config.Control.JoinToken,
@@ -213,7 +215,8 @@ func (c *ControlInstall) installK8s(ctx context.Context) (kclient.Client, error)
 
 	slog.Debug("Waiting for k8s node ready")
 
-	kube, err := kubeutil.NewClient(ctx, k3s.KubeConfigPath,
+	kube, err := kubeutil.NewClient(
+		ctx, k3s.KubeConfigPath,
 		coreapi.AddToScheme, appsapi.AddToScheme,
 		helmapi.AddToScheme, cmapi.AddToScheme, cmmeta.AddToScheme,
 		wiringapi.AddToScheme, vpcapi.AddToScheme, fabapi.AddToScheme, gwapi.AddToScheme,
@@ -411,6 +414,7 @@ func (c *ControlInstall) installInclude(ctx context.Context, kube kclient.Client
 	slog.Info("Installing included wiring")
 
 	for _, objList := range []kclient.ObjectList{
+		&wiringapi.FabricList{},
 		&wiringapi.VLANNamespaceList{},
 		&vpcapi.IPv4NamespaceList{},
 		&wiringapi.SwitchGroupList{},
