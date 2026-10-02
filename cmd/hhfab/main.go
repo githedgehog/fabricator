@@ -1937,7 +1937,10 @@ Intended to run against a control-node-only VLAB:
 
 Keys (with defaults): name (required, <=7 chars), domains=1, spines=32, leaves=64,
 fabric-links=1, fabric-unnum=false, server-ports=32, server-breakout=4x200G,
-vpcs=1, attach=1, peerings=0, profile=celestica-ds5000
+sysname-override=50, vpcs=1, attach=1, peerings=0, profile=celestica-ds5000
+
+sysname-override is the percentage of servers, spread evenly, that are expected
+to advertise an LLDP system name other than their own: <server>-b.
 
 Each fabric is one Fabric object with its own ASNs. With domains=N it has N
 spine layers, each a full copy of every other count, and nothing crosses from

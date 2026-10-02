@@ -4,6 +4,7 @@
 package bench_test
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -25,6 +26,7 @@ func TestParseFabricSpecDefaults(t *testing.T) {
 	require.False(t, spec.FabricUnnum)
 	require.Equal(t, uint(bench.DefaultServerPorts), spec.ServerPorts)
 	require.Equal(t, bench.DefaultServerBreakout, spec.ServerBreakout)
+	require.Equal(t, uint(bench.DefaultSysNameOverride), spec.SysNameOverride)
 	require.Equal(t, uint(bench.DefaultVPCs), spec.VPCs)
 	require.Equal(t, uint(bench.DefaultAttach), spec.Attach)
 	require.Equal(t, uint(bench.DefaultPeerings), spec.Peerings)
@@ -71,6 +73,41 @@ func TestParseFabricSpecOverrides(t *testing.T) {
 	require.Equal(t, uint(128), spec.Attachments())
 }
 
+// The overrides are an exact share of the servers, spread evenly rather than
+// bunched at the start of each leaf.
+func TestOverridesSysName(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		pct, n, want uint
+	}{
+		{0, 100, 0},
+		{50, 100, 50},
+		{50, 101, 50},
+		{25, 8, 2},
+		{100, 7, 7},
+	} {
+		spec, err := bench.ParseFabricSpec(fmt.Sprintf("name=dc1,sysname-override=%d", tc.pct))
+		require.NoError(t, err)
+
+		got := uint(0)
+		for idx := range tc.n {
+			if spec.OverridesSysName(idx) {
+				got++
+			}
+		}
+		require.Equal(t, tc.want, got, "%d%% of %d", tc.pct, tc.n)
+	}
+
+	// At 50% it alternates, so every leaf gets its half.
+	spec, err := bench.ParseFabricSpec("name=dc1")
+	require.NoError(t, err)
+	require.False(t, spec.OverridesSysName(0))
+	require.True(t, spec.OverridesSysName(1))
+	require.False(t, spec.OverridesSysName(2))
+	require.True(t, spec.OverridesSysName(3))
+}
+
 // Every count describes one domain, so the shape helpers stay per domain and
 // only the object total multiplies; the Fabric and the namespaces and group
 // are shared by every domain.
@@ -111,6 +148,7 @@ func TestParseFabricSpecRejects(t *testing.T) {
 		"zero leaves":      {"name=dc1,leaves=0", "leaves must be >= 1"},
 		"zero links":       {"name=dc1,fabric-links=0", "fabric-links must be >= 1"},
 		"bad breakout":     {"name=dc1,server-breakout=3x100G", "server-breakout"},
+		"sysname over 100": {"name=dc1,sysname-override=101", "percentage of servers"},
 		"attach over vpcs": {"name=dc1,vpcs=2,attach=3", "each attachment goes to a distinct VPC"},
 		"peering one vpc":  {"name=dc1,vpcs=1,peerings=1", "requires at least 2 vpcs"},
 		"peering too many": {"name=dc1,vpcs=3,peerings=4", "at most 3 distinct pairs"},
