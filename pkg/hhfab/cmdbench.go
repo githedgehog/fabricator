@@ -139,14 +139,15 @@ func DoVLABBenchAgents(ctx context.Context, workDir, cacheDir string, opts Bench
 	apiServer := ""
 	sourceAddr := netip.Addr{}
 	switch opts.APIVia {
-	case bench.APIViaBridgeIP:
+	case bench.APIViaBridgeIP, "":
 		// The way real switches reach the control node: the control VIP over
 		// the management bridge, rather than through the VM's user-mode
-		// networking, which serialises every agent through one slirp loop.
+		// networking, which serialises every agent through one slirp loop and
+		// has crashed QEMU when a large fleet's connections all close at once.
 		if apiServer, sourceAddr, err = benchBridgeIP(ctx, workDir, cacheDir); err != nil {
 			return err
 		}
-	case bench.APIViaHostfwd, "":
+	case bench.APIViaHostfwd:
 		// Each agent's own kubeconfig points at the control VIP on the
 		// management network, which the host may have no address on. Reuse
 		// whatever address the admin kubeconfig reaches the API by.

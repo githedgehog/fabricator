@@ -2037,8 +2037,8 @@ inspect and wait-switches rather than as a fabric that never converged.`,
 									},
 									&cli.StringFlag{
 										Name:  FlagBenchAPIVia,
-										Usage: "how agents reach the API: " + bench.APIViaHostfwd + " (the VLAB port forward, through the VM's user-mode networking) or " + bench.APIViaBridgeIP + " (the control VIP over the management bridge, like real switches, from the last address of the management subnet, added to the bridge with sudo if missing)",
-										Value: bench.APIViaHostfwd,
+										Usage: "how agents reach the API: " + bench.APIViaBridgeIP + " (the control VIP over the management bridge, like real switches, from the last address of the management subnet, added to the bridge with sudo if missing) or " + bench.APIViaHostfwd + " (the VLAB port forward, through the VM's user-mode networking, which does not hold up under a large fleet)",
+										Value: bench.APIViaBridgeIP,
 									},
 									&cli.BoolFlag{
 										Name:  FlagBenchSyncHeartbeats,

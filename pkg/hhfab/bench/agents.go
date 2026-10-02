@@ -122,7 +122,7 @@ func RunAgents(ctx context.Context, admin kclient.Client, opts AgentsOpts) error
 		opts.Interval = HeartbeatPeriod
 	}
 	if opts.APIVia == "" {
-		opts.APIVia = APIViaHostfwd
+		opts.APIVia = APIViaBridgeIP
 	}
 	if !slices.Contains(APIVias, opts.APIVia) {
 		return fmt.Errorf("unknown --api-via %q, valid values are %s", opts.APIVia, strings.Join(APIVias, ", ")) //nolint:err113
