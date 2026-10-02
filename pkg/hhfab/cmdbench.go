@@ -504,7 +504,7 @@ func checkCoexistence(ctx context.Context, kube kclient.Client, force bool) erro
 // summarize prints what is about to be created, per the plan: counts, then go.
 func summarize(specs []bench.FabricSpec, gen *bench.Generator) {
 	for _, spec := range specs {
-		slog.Info("Fabric", "name", spec.Name,
+		slog.Info("Fabric", "name", spec.Name, "domains", spec.Domains,
 			"spines", spec.Spines, "leaves", spec.Leaves,
 			"serverPorts", spec.ServerPorts, "breakout", spec.ServerBreakout,
 			"servers", spec.Servers(), "vpcs", spec.VPCs, "attach", spec.Attach, "peerings", spec.Peerings)

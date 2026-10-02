@@ -111,6 +111,7 @@ func healthObjects(ctx context.Context, kube kclient.Client, w io.Writer) (*agen
 		kind string
 		list kclient.ObjectList
 	}{
+		{"Fabric", &wiringapi.FabricList{}},
 		{"Switch", &wiringapi.SwitchList{}},
 		{"Server", &wiringapi.ServerList{}},
 		{"Connection", &wiringapi.ConnectionList{}},

@@ -17,6 +17,8 @@ func TestParseFabricSpecDefaults(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, "dc1", spec.Name)
+	require.Equal(t, uint(bench.DefaultDomains), spec.Domains)
+	require.Equal(t, "default", spec.DomainName(0))
 	require.Equal(t, uint(bench.DefaultSpines), spec.Spines)
 	require.Equal(t, uint(bench.DefaultLeaves), spec.Leaves)
 	require.Equal(t, uint(bench.DefaultFabricLinks), spec.FabricLinks)
@@ -69,6 +71,30 @@ func TestParseFabricSpecOverrides(t *testing.T) {
 	require.Equal(t, uint(128), spec.Attachments())
 }
 
+// Every count describes one domain, so the shape helpers stay per domain and
+// only the object total multiplies; the Fabric and the namespaces and group
+// are shared by every domain.
+func TestParseFabricSpecDomains(t *testing.T) {
+	t.Parallel()
+
+	one, err := bench.ParseFabricSpec("name=dc1,spines=2,leaves=4,server-ports=1,vpcs=2,peerings=1")
+	require.NoError(t, err)
+	three, err := bench.ParseFabricSpec("name=dc1,domains=3,spines=2,leaves=4,server-ports=1,vpcs=2,peerings=1")
+	require.NoError(t, err)
+
+	require.Equal(t, uint(3), three.Domains)
+	require.Equal(t, one.Switches(), three.Switches())
+	require.Equal(t, one.Servers(), three.Servers())
+	require.Equal(t, (one.Objects()-4)*3+4, three.Objects())
+
+	require.Equal(t, []string{"domain-1", "domain-2", "domain-3"},
+		[]string{three.DomainName(0), three.DomainName(1), three.DomainName(2)})
+
+	// VPCs share the fabric-wide numbering, so the cap is on the total.
+	_, err = bench.ParseFabricSpec("name=dc1,domains=2,vpcs=500")
+	require.ErrorContains(t, err, "maximum is 999 in total")
+}
+
 func TestParseFabricSpecRejects(t *testing.T) {
 	t.Parallel()
 
@@ -80,6 +106,7 @@ func TestParseFabricSpecRejects(t *testing.T) {
 		"name too long":    {"name=toolongx", "maximum is 7"},
 		"name uppercase":   {"name=DC1", "RFC 1123"},
 		"name underscore":  {"name=dc_1", "RFC 1123"},
+		"name default":     {"name=default", "reserved for the cluster's own Fabric"},
 		"zero spines":      {"name=dc1,spines=0", "spines must be >= 1"},
 		"zero leaves":      {"name=dc1,leaves=0", "leaves must be >= 1"},
 		"zero links":       {"name=dc1,fabric-links=0", "fabric-links must be >= 1"},

@@ -55,7 +55,8 @@ func Clean(ctx context.Context, kube kclient.Client, fabrics []string) ([]CleanR
 
 	// Reverse dependency order. VPC-side objects first: a VPC cannot be deleted
 	// while attachments reference it, and a Connection cannot go while an
-	// attachment points at it.
+	// attachment points at it. Fabrics go last, since the delete webhook refuses
+	// one while any object still names it.
 	kinds := []struct {
 		name string
 		list func() kclient.ObjectList
@@ -69,6 +70,7 @@ func Clean(ctx context.Context, kube kclient.Client, fabrics []string) ([]CleanR
 		{"SwitchGroup", func() kclient.ObjectList { return &wiringapi.SwitchGroupList{} }},
 		{"VLANNamespace", func() kclient.ObjectList { return &wiringapi.VLANNamespaceList{} }},
 		{"IPv4Namespace", func() kclient.ObjectList { return &vpcapi.IPv4NamespaceList{} }},
+		{"Fabric", func() kclient.ObjectList { return &wiringapi.FabricList{} }},
 	}
 
 	for _, kind := range kinds {
