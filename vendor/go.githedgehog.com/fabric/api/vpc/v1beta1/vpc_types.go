@@ -16,6 +16,7 @@ package v1beta1
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/netip"
 	"slices"
@@ -38,6 +39,15 @@ import (
 // TODO specify gateway explicitly?
 // TODO rename VPCSubnet.Subnet to CIDR? or CIDRBlock like in AWS?
 
+// VPCTopology is where a VPC sits in the fabric topology
+type VPCTopology struct {
+	// Fabric is the name of the Fabric this VPC belongs to (if not specified, "default" is used)
+	Fabric string `json:"fabric,omitempty"`
+	// Domains are the Fabric domains the VPC is in (if not specified, "default" is used). It can only
+	// be attached to switches that are in all of them, and they are immutable
+	Domains []string `json:"domains,omitempty"`
+}
+
 // VPCSpec defines the desired state of VPC.
 // At least one subnet is required.
 type VPCSpec struct {
@@ -45,6 +55,8 @@ type VPCSpec struct {
 	Mode VPCMode `json:"mode,omitempty"`
 	// Subnets is the list of VPC subnets to configure
 	Subnets map[string]*VPCSubnet `json:"subnets,omitempty"`
+	// Topology is where the VPC sits in the fabric topology
+	Topology VPCTopology `json:"topology,omitempty"`
 	// IPv4Namespace is the name of the IPv4Namespace this VPC belongs to (if not specified, "default" is used)
 	IPv4Namespace string `json:"ipv4Namespace,omitempty"`
 	// VLANNamespace is the name of the VLANNamespace this VPC belongs to (if not specified, "default" is used)
@@ -249,6 +261,8 @@ type VPCStatus struct{}
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:categories=hedgehog;fabric
+// +kubebuilder:printcolumn:name="Fabric",type=string,JSONPath=`.spec.topology.fabric`,priority=0
+// +kubebuilder:printcolumn:name="Domains",type=string,JSONPath=`.spec.topology.domains`,priority=0
 // +kubebuilder:printcolumn:name="IPv4NS",type=string,JSONPath=`.spec.ipv4Namespace`,priority=0
 // +kubebuilder:printcolumn:name="VLANNS",type=string,JSONPath=`.spec.vlanNamespace`,priority=0
 // +kubebuilder:printcolumn:name="Subnets",type=string,JSONPath=`.spec.subnets`,priority=1
@@ -318,6 +332,13 @@ func (vpc *VPCSpec) IsSubnetRestricted(subnetName string) bool {
 func (vpc *VPC) Default() {
 	meta.DefaultObjectMetadata(vpc)
 
+	if vpc.Spec.Topology.Fabric == "" {
+		vpc.Spec.Topology.Fabric = wiringapi.DefaultFabric
+	}
+	if len(vpc.Spec.Topology.Domains) == 0 {
+		vpc.Spec.Topology.Domains = []string{wiringapi.DefaultFabricDomain}
+	}
+	slices.Sort(vpc.Spec.Topology.Domains)
 	if vpc.Spec.IPv4Namespace == "" {
 		vpc.Spec.IPv4Namespace = DefaultIPv4Namespace
 	}
@@ -333,6 +354,13 @@ func (vpc *VPC) Default() {
 
 	vpc.Labels[LabelIPv4NS] = vpc.Spec.IPv4Namespace
 	vpc.Labels[LabelVLANNS] = vpc.Spec.VLANNamespace
+	vpc.Labels[wiringapi.ListLabelFabric(vpc.Spec.Topology.Fabric)] = ListLabelValue
+	for _, domain := range vpc.Spec.Topology.Domains {
+		// validation rejects an empty name, but as a label key it would be refused first with a vaguer error
+		if domain != "" {
+			vpc.Labels[wiringapi.ListLabelDomain(domain)] = ListLabelValue
+		}
+	}
 
 	for _, subnet := range vpc.Spec.Subnets {
 		cidr, err := iputil.ParseCIDR(subnet.Subnet)
@@ -421,6 +449,18 @@ func (vpc *VPC) Default() {
 func (vpc *VPC) Validate(ctx context.Context, kube kclient.Reader, fabricCfg *meta.FabricConfig) (admission.Warnings, error) {
 	if err := meta.ValidateObjectMetadata(vpc); err != nil {
 		return nil, errors.Wrapf(err, "failed to validate metadata")
+	}
+
+	if err := wiringapi.CheckFabricExists(ctx, kube, vpc.Namespace, vpc.Spec.Topology.Fabric); err != nil {
+		return nil, fmt.Errorf("failed to validate fabric: %w", err)
+	}
+
+	domains := slices.Sorted(slices.Values(wiringapi.DomainsOrDefault(vpc.Spec.Topology.Domains)))
+	if slices.Contains(domains, "") {
+		return nil, fmt.Errorf("domain name cannot be empty") //nolint:err113
+	}
+	if len(slices.Compact(slices.Clone(domains))) != len(domains) {
+		return nil, fmt.Errorf("domains must be unique") //nolint:err113
 	}
 
 	if len(vpc.Name) > 11 {
@@ -779,6 +819,21 @@ func (vpc *VPC) Validate(ctx context.Context, kube kclient.Reader, fabricCfg *me
 			}
 
 			return nil, errors.Wrapf(err, "failed to get IPv4Namespace %s", vpc.Spec.IPv4Namespace) // TODO replace with some internal error to not expose to the user
+		}
+
+		vpcFabric := wiringapi.FabricNameOrDefault(vpc.Spec.Topology.Fabric)
+		if nsFabric := wiringapi.FabricNameOrDefault(ipNs.Spec.Topology.Fabric); nsFabric != vpcFabric {
+			return nil, fmt.Errorf("vpc is in fabric %s but its IPv4Namespace %s is in fabric %s", vpcFabric, ipNs.Name, nsFabric) //nolint:err113
+		}
+
+		fabric, err := wiringapi.GetFabricSpec(ctx, kube, fabricCfg, vpc.Namespace, vpc.Spec.Topology.Fabric)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get fabric: %w", err)
+		}
+		for _, domain := range domains {
+			if _, exists := fabric.Domains[domain]; !exists {
+				return nil, fmt.Errorf("domain %s not found in fabric %s, topology.domains must name its domains", domain, vpcFabric) //nolint:err113
+			}
 		}
 
 		vlanNs := &wiringapi.VLANNamespace{}

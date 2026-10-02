@@ -16,6 +16,7 @@ import (
 
 	"go.githedgehog.com/fabric/api/meta"
 	"go.githedgehog.com/fabric/api/vpc/v1beta1"
+	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/util/iputil"
 	kapierrors "k8s.io/apimachinery/pkg/api/errors"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -34,8 +35,16 @@ var nameChecker = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9](
 
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
+// GatewayPeeringTopology is where a GatewayPeering sits in the fabric topology
+type GatewayPeeringTopology struct {
+	// Fabric is the name of the Fabric this GatewayPeering belongs to (if not specified, "default" is used)
+	Fabric string `json:"fabric,omitempty"`
+}
+
 // PeeringSpec defines the desired state of Peering.
 type PeeringSpec struct {
+	// Topology is where the GatewayPeering sits in the fabric topology
+	Topology GatewayPeeringTopology `json:"topology,omitempty"`
 	// GatewayGroup is the name of the gateway group that should process the peering
 	GatewayGroup string `json:"gatewayGroup,omitempty"`
 	// Peerings is a map of peering entries for each VPC participating in the peering (keyed by VPC name)
@@ -207,6 +216,7 @@ type PeeringStatus struct{}
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:categories=hedgehog;hedgehog-gateway,shortName=gwpeer
+// +kubebuilder:printcolumn:name="Fabric",type=string,JSONPath=`.spec.topology.fabric`,priority=0
 // +kubebuilder:printcolumn:name="Group",type=string,JSONPath=`.spec.gatewayGroup`,priority=0
 // +kubebuilder:printcolumn:name="VPCs",type=string,JSONPath=`.metadata.annotations.gateway\.githedgehog\.com/vpcs`,priority=0
 // +kubebuilder:printcolumn:name="NAT",type=string,JSONPath=`.metadata.annotations.gateway\.githedgehog\.com/nat`,priority=0
@@ -247,6 +257,14 @@ func (p *GatewayPeering) Default() {
 	if p.Annotations == nil {
 		p.Annotations = map[string]string{}
 	}
+
+	if p.Spec.Topology.Fabric == "" {
+		p.Spec.Topology.Fabric = wiringapi.DefaultFabric
+	}
+
+	wiringapi.CleanupFabricLabels(p.Labels)
+
+	p.Labels[wiringapi.ListLabelFabric(p.Spec.Topology.Fabric)] = ListLabelValue
 
 	vpcs := slices.Sorted(maps.Keys(p.Spec.Peering))
 	if len(vpcs) != 2 {
@@ -319,6 +337,10 @@ func (p *GatewayPeering) Validate(ctx context.Context, kube kclient.Reader, fabr
 	}
 	if p.Spec.GatewayGroup == "" {
 		return fmt.Errorf("gateway group must be specified %s", p.Name) //nolint:err113
+	}
+
+	if err := wiringapi.CheckFabricExists(ctx, kube, p.Namespace, p.Spec.Topology.Fabric); err != nil {
+		return fmt.Errorf("invalid gateway peering: %w", err)
 	}
 
 	vpcs := slices.Collect(maps.Keys(p.Spec.Peering))
@@ -496,6 +518,13 @@ func (p *GatewayPeering) Validate(ctx context.Context, kube kclient.Reader, fabr
 			return fmt.Errorf("failed to get gateway group %s: %w", p.Spec.GatewayGroup, err)
 		}
 
+		peeringFabric := wiringapi.FabricNameOrDefault(p.Spec.Topology.Fabric)
+		if groupFabric := wiringapi.FabricNameOrDefault(gwGroup.Spec.Topology.Fabric); groupFabric != peeringFabric {
+			return fmt.Errorf("peering is in fabric %s but gateway group %s is in fabric %s", peeringFabric, p.Spec.GatewayGroup, groupFabric) //nolint:err113
+		}
+		// the gateways handling the peering are reachable only from leaves in their domain
+		groupDomain := wiringapi.DomainNameOrDefault(gwGroup.Spec.Topology.Domain)
+
 		if fabricCfg != nil && fabricCfg.ExtraValidators.Peering != nil {
 			if err := fabricCfg.ExtraValidators.Peering(ctx, kube, p); err != nil {
 				return err //nolint:wrapcheck
@@ -505,9 +534,6 @@ func (p *GatewayPeering) Validate(ctx context.Context, kube kclient.Reader, fabr
 		peeringVPCs := make(map[string]*v1beta1.VPC, len(p.Spec.Peering))
 		// check that the exposed CIDRs actually belong to the VPCs the peering is for
 		for vpcName, peering := range p.Spec.Peering {
-			if peering == nil {
-				continue
-			}
 			// A GatewayPeering could be with an external too; in this case, the name will start with
 			// the VPCInfoExtPrefix prefix (currently "ext.")
 			if extName, isExt := strings.CutPrefix(vpcName, v1beta1.VPCInfoExtPrefix); isExt {
@@ -518,6 +544,13 @@ func (p *GatewayPeering) Validate(ctx context.Context, kube kclient.Reader, fabr
 					}
 
 					return fmt.Errorf("failed to get External %s: %w", extName, err)
+				}
+
+				if extFabric := wiringapi.FabricNameOrDefault(external.Spec.Topology.Fabric); extFabric != peeringFabric {
+					return fmt.Errorf("peering is in fabric %s but external %s is in fabric %s", peeringFabric, extName, extFabric) //nolint:err113
+				}
+				if extDomain := wiringapi.DomainNameOrDefault(external.Spec.Topology.Domain); extDomain != groupDomain {
+					return fmt.Errorf("gateway group %s is in domain %s but external %s is in domain %s", p.Spec.GatewayGroup, groupDomain, extName, extDomain) //nolint:err113
 				}
 
 				// checking whether the prefix is part of the external is possible only if the external
@@ -533,7 +566,18 @@ func (p *GatewayPeering) Validate(ctx context.Context, kube kclient.Reader, fabr
 
 				return fmt.Errorf("failed to get VPC %s: %w", vpcName, err)
 			}
+			if vpcFabric := wiringapi.FabricNameOrDefault(vpc.Spec.Topology.Fabric); vpcFabric != peeringFabric {
+				return fmt.Errorf("peering is in fabric %s but vpc %s is in fabric %s", peeringFabric, vpcName, vpcFabric) //nolint:err113
+			}
+			if vpcDomains := wiringapi.DomainsOrDefault(vpc.Spec.Topology.Domains); !slices.Contains(vpcDomains, groupDomain) {
+				return fmt.Errorf("gateway group %s is in domain %s but vpc %s is in domains %v", p.Spec.GatewayGroup, groupDomain, vpcName, vpcDomains) //nolint:err113
+			}
+
 			peeringVPCs[vpcName] = &vpc
+			// only the exposes are optional: a nil entry still names a VPC, which must be in this fabric
+			if peering == nil {
+				continue
+			}
 			for _, expose := range peering.Expose {
 				if expose.DefaultDestination {
 					continue
