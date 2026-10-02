@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"sync/atomic"
 	"time"
 
 	agentapi "go.githedgehog.com/fabric/api/agent/v1beta1"
@@ -99,18 +100,29 @@ func deleteLabeled(ctx context.Context, kube kclient.Client, kind string, list k
 		return res, fmt.Errorf("listing %s: %w", kind, err)
 	}
 
+	objs := []kclient.Object{}
 	for _, obj := range apiutil.KubeListItems(list) {
-		if !wantFabric(obj.GetLabels()[LabelFabric], fabrics) {
-			continue
+		if wantFabric(obj.GetLabels()[LabelFabric], fabrics) {
+			objs = append(objs, obj)
 		}
+	}
 
+	// Like the apply, a kind with tens of thousands of objects takes minutes,
+	// so report how far it got rather than staying silent until it is done.
+	var done atomic.Int64
+	stopProgress := logProgress(ctx, "Deleting", "kind", kind, len(objs), &done)
+	defer stopProgress()
+
+	for _, obj := range objs {
 		if err := kube.Delete(ctx, obj); err != nil && !isNotFound(err) {
 			return res, fmt.Errorf("deleting %s %s: %w", kind, obj.GetName(), err)
 		}
 
 		res.Deleted++
+		done.Add(1)
 	}
 
+	stopProgress()
 	res.Took = time.Since(start)
 
 	if res.Deleted > 0 {
