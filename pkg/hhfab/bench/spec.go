@@ -6,8 +6,8 @@
 // Fabric/Fabricator control plane.
 //
 // The unit of scale is a "fabric": an isolated spine-leaf fabric that shares
-// nothing with the others - its own switches, VLANNamespace, IPv4Namespace,
-// VPCs, VPCAttachments and VPCPeerings.
+// nothing with the others - its own Fabric object and ASNs, switches,
+// VLANNamespace, IPv4Namespace, VPCs, VPCAttachments and VPCPeerings.
 package bench
 
 import (
@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 
+	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/ctrl/switchprofile"
 )
 
@@ -27,15 +28,22 @@ import (
 // not the binding constraint.
 const MaxFabricNameLen = 7
 
-// MaxVPCsPerFabric follows from the "<fabric>-NNN" VPC naming scheme. In
+// MaxVPCsPerFabric follows from the "<fabric>-NNN" VPC naming scheme, and
+// covers every domain of the fabric since they share the numbering. In
 // practice the usable VLANs in a VLANNamespace (1-2999 plus 4000-4094, the
 // rest being reserved for VPCIRBVLANs and TH5WorkaroundVLANs) bind first.
 const MaxVPCsPerFabric = 999
+
+// MaxDomains is how many domains fit the per-fabric ASN block: the leaf range
+// after ASNLeafOffset has room for this many domains' worth of leaves, and the
+// spine and gateway ASNs below it for as many of each.
+const MaxDomains = (StrideASNs - ASNLeafOffset) / StrideLeaves
 
 // Defaults for a fabric, matching the shape a DS5000 fills exactly: 32 spines
 // of 64 ports each (one per leaf), 64 leaves using 32 ports for uplinks and 32
 // broken out 4x200G for servers.
 const (
+	DefaultDomains        = 1
 	DefaultSpines         = 32
 	DefaultLeaves         = 64
 	DefaultFabricLinks    = 1
@@ -62,15 +70,22 @@ var ServerBreakouts = []string{"1x800G", "2x400G", "4x200G"}
 // FabricSpecKeys lists every key accepted by ParseFabricSpec, for help text
 // and error messages.
 var FabricSpecKeys = []string{
-	"name", "spines", "leaves", "fabric-links", "fabric-unnum",
+	"name", "domains", "spines", "leaves", "fabric-links", "fabric-unnum",
 	"server-ports", "server-breakout", "vpcs", "attach", "peerings", "profile",
 }
 
 // FabricSpec describes one synthetic fabric. Every field is per-fabric so that
 // heterogeneous fabrics - closer to a real mixed deployment - can be described
 // without changing the generator, allocator or preflight.
+//
+// A fabric has Domains spine layers, and every other count describes one
+// domain: each is a full copy of the shape, and nothing - connections, VPCs,
+// attachments, peerings - crosses from one domain to another. The shape
+// helpers below are per domain too.
 type FabricSpec struct {
 	Name string
+
+	Domains uint // spine layers, each a full copy of the shape below
 
 	Spines uint // spine switches
 	Leaves uint // leaf switches
@@ -81,9 +96,9 @@ type FabricSpec struct {
 	ServerPorts    uint   // leaf ports facing servers
 	ServerBreakout string // breakout mode for those ports
 
-	VPCs     uint // VPCs in this fabric
+	VPCs     uint // VPCs
 	Attach   uint // VPCAttachments per unbundled connection, each to a distinct VPC
-	Peerings uint // VPCPeerings in this fabric
+	Peerings uint // VPCPeerings
 
 	Profile string // switch profile for spines and leaves
 }
@@ -92,6 +107,7 @@ type FabricSpec struct {
 // is expected to set Name.
 func DefaultFabricSpec() FabricSpec {
 	return FabricSpec{
+		Domains:        DefaultDomains,
 		Spines:         DefaultSpines,
 		Leaves:         DefaultLeaves,
 		FabricLinks:    DefaultFabricLinks,
@@ -152,17 +168,29 @@ func (f FabricSpec) Attachments() uint {
 	return f.Servers() * f.Attach
 }
 
-// Objects is a rough count of the API objects this fabric creates directly. It
-// excludes the Agent and the five RBAC/Secret objects the Fabric controller
-// mints per switch.
+// DomainName is the name of a domain, by index. A single domain keeps the
+// default name, so a one-domain fabric looks exactly like any other Fabric.
+func (f FabricSpec) DomainName(domain uint) string {
+	if f.Domains == 1 {
+		return wiringapi.DefaultFabricDomain
+	}
+
+	return fmt.Sprintf("domain-%d", domain+1)
+}
+
+// Objects is a rough count of the API objects this fabric creates directly,
+// across all its domains. It excludes the Agent and the five RBAC/Secret
+// objects the Fabric controller mints per switch.
 func (f FabricSpec) Objects() uint {
-	return f.Switches() +
+	perDomain := f.Switches() +
 		f.FabricConns() +
 		f.Servers()*2 + // Server + unbundled Connection
 		f.Attachments() +
 		f.VPCs +
-		f.Peerings +
-		3 // SwitchGroup, VLANNamespace, IPv4Namespace
+		f.Peerings
+
+	return perDomain*f.Domains +
+		4 // Fabric, SwitchGroup, VLANNamespace, IPv4Namespace
 }
 
 // Validate checks the spec in isolation. Limits that depend on the switch
@@ -180,6 +208,15 @@ func (f FabricSpec) Validate() error {
 	if !fabricNameRe.MatchString(f.Name) {
 		return fmt.Errorf("name %q must be a lowercase RFC 1123 label", f.Name) //nolint:err113
 	}
+	// Each bench fabric is a Fabric object of the same name, and the default
+	// one belongs to the cluster: the bench must never redefine or delete it.
+	if f.Name == wiringapi.DefaultFabric {
+		return fmt.Errorf("name %q is reserved for the cluster's own Fabric", f.Name) //nolint:err113
+	}
+
+	if f.Domains < 1 || f.Domains > MaxDomains {
+		return fmt.Errorf("domains must be between 1 and %d", MaxDomains) //nolint:err113
+	}
 
 	if f.Spines < 1 {
 		return fmt.Errorf("spines must be >= 1") //nolint:err113
@@ -195,8 +232,9 @@ func (f FabricSpec) Validate() error {
 		return fmt.Errorf("server-breakout %q must be one of %s", f.ServerBreakout, strings.Join(ServerBreakouts, ", ")) //nolint:err113
 	}
 
-	if f.VPCs > MaxVPCsPerFabric {
-		return fmt.Errorf("%d vpcs requested, maximum is %d with the <fabric>-NNN naming scheme", f.VPCs, MaxVPCsPerFabric) //nolint:err113
+	if f.VPCs*f.Domains > MaxVPCsPerFabric {
+		return fmt.Errorf("%d vpcs in each of %d domains requested, maximum is %d in total with the <fabric>-NNN naming scheme", //nolint:err113
+			f.VPCs, f.Domains, MaxVPCsPerFabric)
 	}
 
 	if f.Attach > f.VPCs {
@@ -243,6 +281,8 @@ func ParseFabricSpec(value string) (FabricSpec, error) {
 		switch key {
 		case "name":
 			spec.Name = val
+		case "domains":
+			spec.Domains, err = parseUint(key, val)
 		case "spines":
 			spec.Spines, err = parseUint(key, val)
 		case "leaves":

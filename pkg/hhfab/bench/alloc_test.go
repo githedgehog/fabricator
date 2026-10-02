@@ -5,6 +5,7 @@ package bench_test
 
 import (
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -38,20 +39,19 @@ func defaultSpecs(t *testing.T, n int) []bench.FabricSpec {
 	return specs
 }
 
-// The stock fab.yaml supports exactly 6 fabrics, bounded by the leaf ASN range.
+// ASNs do not come from fab.yaml, so its leaf ASN range is not a limit. On the
+// stock config the binding one is the fabric link subnet: a /17 holds the /31s
+// for exactly 8 numbered fabrics of the default shape.
 func TestAllocatorCapacityOnStockDefaults(t *testing.T) {
 	t.Parallel()
 
-	for n := 1; n <= 6; n++ {
+	for n := 1; n <= 8; n++ {
 		_, err := bench.NewAllocator(defaultFab(), 1, 0, 0, defaultSpecs(t, n))
 		require.NoError(t, err, "%d fabrics should fit on stock defaults", n)
 	}
 
-	_, err := bench.NewAllocator(defaultFab(), 1, 0, 0, defaultSpecs(t, 7))
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "leaf ASNs")
-	require.Contains(t, err.Error(), "leafASNEnd")
-	require.Contains(t, err.Error(), "4-byte ASNs")
+	_, err := bench.NewAllocator(defaultFab(), 1, 0, 0, defaultSpecs(t, 9))
+	require.ErrorContains(t, err, "fabricSubnet")
 }
 
 // Bench addresses must never collide with the control VIP or the control
@@ -102,9 +102,9 @@ func TestAllocatorStableAsFabricsAreAdded(t *testing.T) {
 		}
 
 		for idx := range uint(bench.StrideLeaves) {
-			a, err := four.LeafASN(slot, idx)
+			a, err := four.LeafASN(slot, 0, idx)
 			require.NoError(t, err)
-			b, err := six.LeafASN(slot, idx)
+			b, err := six.LeafASN(slot, 0, idx)
 			require.NoError(t, err)
 			require.Equal(t, a, b, "leaf ASN moved for slot %d leaf %d", slot, idx)
 
@@ -139,9 +139,9 @@ func TestAllocatorStableWhenFabricShrinks(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, x, y)
 
-		xa, err := a.LeafASN(slot, 0)
+		xa, err := a.LeafASN(slot, 0, 0)
 		require.NoError(t, err)
-		ya, err := b.LeafASN(slot, 0)
+		ya, err := b.LeafASN(slot, 0, 0)
 		require.NoError(t, err)
 		require.Equal(t, xa, ya)
 	}
@@ -161,16 +161,137 @@ func TestAllocatorValues(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "172.30.12.0/32", vtep.String())
 
-	asn, err := a.LeafASN(0, 0)
+	// Slot s owns the block starting at 4200000000 + s*1000.
+	asns, err := a.ASNs(0)
 	require.NoError(t, err)
-	require.Equal(t, uint32(65101), asn)
+	require.Equal(t, bench.ASNBlock{
+		Spines:    []uint32{4_200_000_001},
+		Gateways:  []uint32{4_200_000_051},
+		LeafStart: 4_200_000_100,
+		LeafEnd:   4_200_000_163,
+	}, asns)
 
-	// Slot 1 starts a full stride later.
-	asn, err = a.LeafASN(1, 0)
+	asn, err := a.LeafASN(0, 0, 0)
 	require.NoError(t, err)
-	require.Equal(t, uint32(65101+bench.StrideLeaves), asn)
+	require.Equal(t, uint32(4_200_000_100), asn)
 
-	require.Equal(t, fab.DefaultConfig.Fabric.SpineASN, a.SpineASN())
+	asn, err = a.LeafASN(1, 0, 0)
+	require.NoError(t, err)
+	require.Equal(t, uint32(4_200_001_100), asn)
+}
+
+// Each domain of a fabric is its own address unit, so a fabric with several
+// takes consecutive units and pushes the next fabric along by as many. Its ASNs
+// stay in the one per-fabric block: a spine and gateway ASN per domain, and the
+// leaves of all its domains in one range.
+func TestAllocatorDomains(t *testing.T) {
+	t.Parallel()
+
+	specs, err := bench.ParseFabricSpecs([]string{"name=f0,domains=3", "name=f1"})
+	require.NoError(t, err)
+
+	a, err := bench.NewAllocator(defaultFab(), 1, 0, 0, specs)
+	require.NoError(t, err)
+	require.Equal(t, uint(2), a.Slots())
+	require.Equal(t, uint(4), a.Units())
+
+	for domain, want := range []uint{0, 1, 2} {
+		unit, err := a.Unit(0, uint(domain)) //nolint:gosec // tiny
+		require.NoError(t, err)
+		require.Equal(t, want, unit)
+	}
+	unit, err := a.Unit(1, 0)
+	require.NoError(t, err)
+	require.Equal(t, uint(3), unit, "the next fabric starts after every domain of the previous one")
+
+	_, err = a.Unit(0, 3)
+	require.ErrorContains(t, err, "domain 3 out of range")
+
+	asns, err := a.ASNs(0)
+	require.NoError(t, err)
+	require.Equal(t, bench.ASNBlock{
+		Spines:    []uint32{4_200_000_001, 4_200_000_002, 4_200_000_003},
+		Gateways:  []uint32{4_200_000_051, 4_200_000_052, 4_200_000_053},
+		LeafStart: 4_200_000_100,
+		LeafEnd:   4_200_000_100 + 3*bench.StrideLeaves - 1,
+	}, asns)
+
+	asn, err := a.LeafASN(0, 2, 0)
+	require.NoError(t, err)
+	require.Equal(t, uint32(4_200_000_100+2*bench.StrideLeaves), asn)
+
+	// The second fabric's ASNs are keyed by its slot, not its unit.
+	asn, err = a.LeafASN(1, 0, 0)
+	require.NoError(t, err)
+	require.Equal(t, uint32(4_200_001_100), asn)
+
+	// Addresses are keyed by unit: domain 1 of f0 sits a full stride after
+	// domain 0.
+	d0, err := a.SwitchMgmtIP(0, 0)
+	require.NoError(t, err)
+	d1, err := a.SwitchMgmtIP(1, 0)
+	require.NoError(t, err)
+	require.NotEqual(t, d0, d1)
+}
+
+// At the largest allowed domain count the leaf range still ends inside the
+// fabric's ASN block, and the spine and gateway ASNs never reach each other or
+// the leaves. Checked on the layout itself: stock fab.yaml runs out of
+// management addresses well before MaxDomains, so no allocator gets this far.
+func TestMaxDomainsFitASNBlock(t *testing.T) {
+	t.Parallel()
+
+	require.Less(t, bench.ASNSpineOffset+bench.MaxDomains-1, bench.ASNGatewayOffset, "spine ASNs reach the gateway ASNs")
+	require.Less(t, bench.ASNGatewayOffset+bench.MaxDomains-1, bench.ASNLeafOffset, "gateway ASNs reach the leaf range")
+	require.LessOrEqual(t, bench.ASNLeafOffset+bench.MaxDomains*bench.StrideLeaves, bench.StrideASNs, "leaf range overflows the block")
+
+	_, err := bench.ParseFabricSpecs([]string{fmt.Sprintf("name=f0,domains=%d", bench.MaxDomains+1)})
+	require.ErrorContains(t, err, "domains must be between")
+
+	_, err = bench.ParseFabricSpecs([]string{"name=f0,domains=0"})
+	require.ErrorContains(t, err, "domains must be between")
+}
+
+// Every leaf ASN the allocator hands out has to sit inside its own fabric's
+// leaf range, and the spine and gateway ASNs outside every fabric's, or the
+// Fabric and Switch webhooks refuse them.
+func TestAllocatorASNBlocksAreConsistent(t *testing.T) {
+	t.Parallel()
+
+	a, err := bench.NewAllocator(defaultFab(), 1, 0, 0, defaultSpecs(t, 6))
+	require.NoError(t, err)
+
+	blocks := make([]bench.ASNBlock, 0, a.Slots())
+	for slot := range a.Slots() {
+		block, err := a.ASNs(slot)
+		require.NoError(t, err)
+		require.Equal(t, uint32(bench.StrideLeaves), block.LeafEnd-block.LeafStart+1)
+
+		for idx := range uint(bench.StrideLeaves) {
+			asn, err := a.LeafASN(slot, 0, idx)
+			require.NoError(t, err)
+			require.True(t, asn >= block.LeafStart && asn <= block.LeafEnd, "slot %d leaf %d ASN %d outside %d-%d", slot, idx, asn, block.LeafStart, block.LeafEnd)
+		}
+
+		blocks = append(blocks, block)
+	}
+
+	for i, block := range blocks {
+		for j, other := range blocks {
+			for _, asn := range append(slices.Clone(block.Spines), block.Gateways...) {
+				require.False(t, asn >= other.LeafStart && asn <= other.LeafEnd, "slot %d ASN %d inside slot %d leaf range", i, asn, j)
+			}
+			if i != j {
+				require.False(t, block.LeafStart <= other.LeafEnd && other.LeafStart <= block.LeafEnd, "slots %d and %d leaf ranges overlap", i, j)
+			}
+		}
+	}
+
+	// All of it is in the 32-bit private range, clear of the stock 16-bit ASNs.
+	last := blocks[len(blocks)-1]
+	require.GreaterOrEqual(t, blocks[0].Spines[0], uint32(bench.ASNPrivate32Start))
+	require.LessOrEqual(t, last.LeafEnd, uint32(bench.ASNPrivate32End))
+	require.Greater(t, blocks[0].Spines[0], fab.DefaultConfig.Fabric.LeafASNEnd)
 }
 
 // Fabric link addresses must be a /31 pair in the same subnet, which
@@ -208,7 +329,7 @@ func TestAllocatorRefusesOversizedFabric(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = bench.NewAllocator(defaultFab(), 1, 0, 0, specs)
-	require.ErrorContains(t, err, "per-fabric reservation is 96")
+	require.ErrorContains(t, err, "per-domain reservation is 96")
 
 	// Few enough switches to pass the switch check, but too many leaves for the
 	// leaf ASN and VTEP strides.
@@ -216,7 +337,7 @@ func TestAllocatorRefusesOversizedFabric(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = bench.NewAllocator(defaultFab(), 1, 0, 0, specs)
-	require.ErrorContains(t, err, "per-fabric reservation is 64")
+	require.ErrorContains(t, err, "per-domain reservation is 64")
 
 	// Two links per pair doubles the address need past the reservation.
 	specs, err = bench.ParseFabricSpecs([]string{"name=big,fabric-links=2"})
@@ -240,11 +361,17 @@ func TestAllocatorIndexBounds(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = a.SwitchMgmtIP(1, 0)
-	require.ErrorContains(t, err, "slot 1 out of range")
+	require.ErrorContains(t, err, "unit 1 out of range")
 
 	_, err = a.SwitchMgmtIP(0, bench.StrideSwitches)
 	require.ErrorContains(t, err, "out of range")
 
-	_, err = a.LeafASN(0, bench.StrideLeaves)
+	_, err = a.LeafASN(0, 0, bench.StrideLeaves)
 	require.ErrorContains(t, err, "out of range")
+
+	_, err = a.LeafASN(0, 1, 0)
+	require.ErrorContains(t, err, "domain 1 out of range")
+
+	_, err = a.ASNs(1)
+	require.ErrorContains(t, err, "slot 1 out of range")
 }

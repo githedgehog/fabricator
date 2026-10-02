@@ -29,11 +29,14 @@ import (
 // controller's CPU rather than by how many requests are in flight.
 const DefaultWorkers = 16
 
-// Phase names, in apply order. Phases up to and including unbundled
-// connections only enqueue the switches they touch; VPCs, attachments and
-// peerings fan out to every switch through the Agent controller's
-// enqueueAllSwitches, so they go last and are measured separately.
+// Phase names, in apply order. Fabrics come first and alone: every other kind
+// names its Fabric, and admission refuses a reference to one that does not
+// exist yet. Phases up to and including unbundled connections only enqueue the
+// switches they touch; VPCs, attachments and peerings fan out to every switch
+// through the Agent controller's enqueueAllSwitches, so they go last and are
+// measured separately.
 const (
+	PhaseFabrics     = "fabrics"
 	PhaseNamespaces  = "namespaces"
 	PhaseSwitches    = "switches"
 	PhaseFabricConns = "fabric-conns"
@@ -46,6 +49,7 @@ const (
 
 // Phases in apply order.
 var Phases = []string{
+	PhaseFabrics,
 	PhaseNamespaces,
 	PhaseSwitches,
 	PhaseFabricConns,
@@ -194,6 +198,14 @@ func applyOne(ctx context.Context, kube kclient.Client, obj kclient.Object) (ctr
 	var err error
 
 	switch src := obj.(type) {
+	case *wiringapi.Fabric:
+		dst := &wiringapi.Fabric{ObjectMeta: objectKey(src)}
+		res, err = ctrlutil.CreateOrUpdate(ctx, kube, dst, func() error {
+			dst.Spec = src.Spec
+			setLabels(dst, src)
+
+			return nil
+		})
 	case *wiringapi.VLANNamespace:
 		dst := &wiringapi.VLANNamespace{ObjectMeta: objectKey(src)}
 		res, err = ctrlutil.CreateOrUpdate(ctx, kube, dst, func() error {
@@ -301,6 +313,14 @@ func collect(ctx context.Context, l *apiutil.Loader) (map[string][]kclient.Objec
 
 	add := func(phase string, obj kclient.Object) {
 		out[phase] = append(out[phase], obj)
+	}
+
+	fabrics := &wiringapi.FabricList{}
+	if err := l.List(ctx, fabrics); err != nil {
+		return nil, fmt.Errorf("listing fabrics: %w", err)
+	}
+	for idx := range fabrics.Items {
+		add(PhaseFabrics, &fabrics.Items[idx])
 	}
 
 	vlanNSs := &wiringapi.VLANNamespaceList{}

@@ -1935,9 +1935,13 @@ Intended to run against a control-node-only VLAB:
 								Usage: "generate and apply the benchmark topology",
 								UsageText: `hhfab vlab bench init --fabric name=dc1 [--fabric name=dc2,...]
 
-Keys (with defaults): name (required, <=7 chars), spines=32, leaves=64,
+Keys (with defaults): name (required, <=7 chars), domains=1, spines=32, leaves=64,
 fabric-links=1, fabric-unnum=false, server-ports=32, server-breakout=4x200G,
-vpcs=1, attach=1, peerings=0, profile=celestica-ds5000`,
+vpcs=1, attach=1, peerings=0, profile=celestica-ds5000
+
+Each fabric is one Fabric object with its own ASNs. With domains=N it has N
+spine layers, each a full copy of every other count, and nothing crosses from
+one to another.`,
 								Flags: flatten(defaultFlags, []cli.Flag{
 									&cli.GenericFlag{
 										Name:     FlagBenchFabric,
