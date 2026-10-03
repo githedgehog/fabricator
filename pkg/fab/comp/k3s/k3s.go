@@ -37,6 +37,8 @@ const (
 	KubeConfigPath     = "/etc/rancher/k3s/k3s.yaml"
 	KubeRegistriesPath = "/etc/rancher/k3s/registries.yaml"
 	PauseImageURL      = "docker.io/rancher/mirrored-pause"
+
+	EtcdQuotaBackendBytes = 32 << 30 // 32 GiB
 )
 
 func Version(f fabapi.Fabricator) meta.Version {
@@ -76,6 +78,7 @@ func ServerConfig(f fabapi.Fabricator, control fabapi.ControlNode) (string, erro
 		"ClusterDNS":    f.Spec.Config.Control.KubeClusterDNS,
 		"TLSSAN":        tlsSAN,
 		"DropInDir":     ConfigDropInDir,
+		"EtcdQuota":     EtcdQuotaBackendBytes,
 
 		"MaxRequestsInflight":         MaxRequestsInflight,
 		"MaxMutatingRequestsInflight": MaxMutatingRequestsInflight,
