@@ -36,6 +36,9 @@ const (
 	VLABSwitchMACTmpl = "0c:20:12:ff:%02x:00"
 	VLABMACTmpl       = "0c:20:12:fe:%02x:%02x"
 
+	// VLABVirtioNetSpeed is the link speed, in Mb/s, VLAB's virtio-net NICs report.
+	VLABVirtioNetSpeed = "10000"
+
 	HHFabCfgPrefix     = ".hhfab.githedgehog.com"
 	HHFabCfgType       = "type" + HHFabCfgPrefix
 	HHFabCfgTypeHW     = "hw"
@@ -1065,8 +1068,22 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 				if vm.Type == VMTypeSwitch && vm.SwitchMode == VMSwitchModeImage {
 					nic = "virtio-net-pci"
 				}
+				// Every switch agent reaches the control node over the management network.
+				// The emulated e1000 has one queue and a legacy interrupt, so all of that
+				// traffic is processed on a single guest CPU, which saturates under a large
+				// fleet; virtio-net takes a fraction of the interrupts for the same traffic.
+				// The VLAB naming rule (flatcar.VLABVirtioNamesLink) keeps the interface's
+				// name. Gateways get the rule too, so they can follow in a later release.
+				link := ""
+				if nicType == NICTypeManagement && vm.Type == VMTypeControl {
+					nic = "virtio-net-pci"
+					// virtio-net reports no link speed or duplex unless told, which LACP
+					// bonds and anything else reading them cannot work with; this only
+					// sets what the guest sees, it does not limit the traffic
+					link = ",speed=" + VLABVirtioNetSpeed + ",duplex=full"
+				}
 
-				device = fmt.Sprintf("%s,netdev=eth%02d,mac=%s", nic, nicID, mac)
+				device = fmt.Sprintf("%s,netdev=eth%02d,mac=%s%s", nic, nicID, mac, link)
 			}
 			device += fmt.Sprintf(",bus=%s%d,addr=0x%x", VLABPCIBridgePrefix, nicID/VLABNICsPerPCIBridge, nicID%VLABNICsPerPCIBridge)
 

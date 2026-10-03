@@ -159,6 +159,14 @@ storage:
           Name=enp2s2
           MACAddressPolicy=persistent
 
+    # VLAB-only: matches only VMs carrying the VLAB SMBIOS asset tag
+    - path: {{ .VLABVirtioNamesLinkPath }}
+      mode: 0644
+      overwrite: true
+      contents:
+        inline: |
+{{ .VLABVirtioNamesLink | indent 10 }}
+
     - path: /etc/sysctl.d/arp.conf
       mode: 0644
       contents:

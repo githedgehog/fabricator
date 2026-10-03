@@ -94,6 +94,10 @@ func (c *NodeInstallUpgrade) Run(ctx context.Context, upgrade bool) error {
 			return fmt.Errorf("maskSystemdSysupdate service: %w", err)
 		}
 
+		if err := installVLABVirtioNames(); err != nil {
+			return err
+		}
+
 		if err := upgradeFlatcar(ctx, string(flatcar.Version(c.Fab)), c.Yes); err != nil {
 			return fmt.Errorf("upgrading Flatcar: %w", err)
 		}

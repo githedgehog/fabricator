@@ -144,6 +144,9 @@ func (b *NodeInstallBuilder) buildIgnition() ([]byte, error) {
 		"DummyAddress":   dummyIP.Masked().String(),
 		"DummyGateway":   dummyIP.Masked().Addr().Next().String(),
 		"AutoInstall":    autoInstallPath,
+
+		"VLABVirtioNamesLinkPath": flatcar.VLABVirtioNamesLinkPath,
+		"VLABVirtioNamesLink":     flatcar.VLABVirtioNamesLink,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("butane: %w", err)
