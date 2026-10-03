@@ -13,6 +13,8 @@ kube-proxy-arg:
 kube-apiserver-arg:
   - "max-requests-inflight={{ .MaxRequestsInflight }}"
   - "max-mutating-requests-inflight={{ .MaxMutatingRequestsInflight }}"
+etcd-arg:
+  - "quota-backend-bytes={{ .EtcdQuota }}"
 write-kubeconfig-mode: "0644"
 tls-san:
   {{ range .TLSSAN }}
