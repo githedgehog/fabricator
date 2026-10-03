@@ -90,6 +90,14 @@ storage:
           ReceiveVLANCTAGHardwareAcceleration=false
           TransmitVLANCTAGHardwareAcceleration=false
 
+    # VLAB-only: matches only VMs carrying the VLAB SMBIOS asset tag
+    - path: {{ .VLABVirtioNamesLinkPath }}
+      mode: 0644
+      overwrite: true
+      contents:
+        inline: |
+{{ .VLABVirtioNamesLink | indent 10 }}
+
     - path: /etc/hostname
       mode: 0644
       overwrite: true

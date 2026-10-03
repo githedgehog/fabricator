@@ -55,6 +55,11 @@ type ControlUpgrade struct {
 func (c *ControlUpgrade) Run(ctx context.Context) error {
 	slog.Info("Running control node upgrade")
 
+	// before anything talks to k3s, which cannot start without its interface
+	if err := ensureVLABIfaceNames(ctx); err != nil {
+		return fmt.Errorf("ensuring VLAB interface names: %w", err)
+	}
+
 	kube, err := kubeutil.NewClient(ctx, k3s.KubeConfigPath,
 		coreapi.AddToScheme, appsapi.AddToScheme,
 		helmapi.AddToScheme, cmapi.AddToScheme, cmmeta.AddToScheme,
@@ -182,6 +187,10 @@ func (c *ControlUpgrade) Run(ctx context.Context) error {
 
 	if err := maskSystemdSysupdate(ctx, c.WorkDir); err != nil {
 		return fmt.Errorf("maskSystemdSysupdate service: %w", err)
+	}
+
+	if err := installVLABVirtioNames(); err != nil {
+		return err
 	}
 
 	if err := upgradeFlatcar(ctx, string(flatcar.Version(c.Fab)), c.Yes); err != nil {
@@ -673,6 +682,26 @@ func (c *ControlUpgrade) upgradeK8s(ctx context.Context, kube kclient.Reader) er
 	}
 
 	slog.Debug("Registry ready after K8s upgrade")
+
+	return nil
+}
+
+// installVLABVirtioNames writes the VLAB-only virtio NIC naming rule an install
+// gets from its ignition, so that a VLAB upgraded from e1000 keeps its
+// interface names once its VMs restart with virtio-net. It matches only VLAB
+// VMs, so writing it anywhere else changes nothing.
+func installVLABVirtioNames() error {
+	if err := os.MkdirAll(filepath.Dir(flatcar.VLABVirtioNamesLinkPath), 0o755); err != nil {
+		return fmt.Errorf("creating %q: %w", filepath.Dir(flatcar.VLABVirtioNamesLinkPath), err)
+	}
+
+	changed, err := updateConfigFile(flatcar.VLABVirtioNamesLinkPath, flatcar.VLABVirtioNamesLink)
+	if err != nil {
+		return fmt.Errorf("writing VLAB virtio NIC naming: %w", err)
+	}
+	if changed {
+		slog.Debug("Installed VLAB virtio NIC naming", "path", flatcar.VLABVirtioNamesLinkPath)
+	}
 
 	return nil
 }

@@ -468,6 +468,13 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 				"-global", "ICH9-LPC.acpi-pci-hotplug-with-bridge-support=off",
 			}
 
+			// Mark Flatcar VMs as VLAB in SMBIOS, where VLAB-only host config can match on it
+			// (see flatcar.VLABVirtioNamesLink). The chassis asset tag is set by nothing else and
+			// read by nothing else, unlike the vendor and product fields switch images may use.
+			if vm.Type == VMTypeControl || vm.Type == VMTypeGateway || vm.Type == VMTypeServer {
+				args = append(args, "-smbios", "type=3,asset="+flatcar.VLABAssetTag)
+			}
+
 			// TODO fix by copying system OVMF?
 			// e.g. on ubuntu there is ovmf package (seems like installed together with the qemu one)
 			// /usr/share/OVMF/OVMF_CODE_4M.fd
@@ -928,6 +935,9 @@ func serverIgnition(fab fabapi.Fabricator, vm VM) (string, []byte, error) {
 		"Hostname":       vm.Name,
 		"PasswordHash":   fab.Spec.Config.Control.DefaultUser.PasswordHash,
 		"AuthorizedKeys": fab.Spec.Config.Control.DefaultUser.AuthorizedKeys,
+
+		"VLABVirtioNamesLinkPath": flatcar.VLABVirtioNamesLinkPath,
+		"VLABVirtioNamesLink":     flatcar.VLABVirtioNamesLink,
 	})
 	if err != nil {
 		return but, nil, fmt.Errorf("butane: %w", err)
