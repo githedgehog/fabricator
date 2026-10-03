@@ -782,7 +782,17 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						OnReadyTest:    opts.ReleaseTestOnReadyOnly,
 					}
 					slog.Debug("Running release-test", "opts", releaseTestOpts)
+					stopLogFollowers := func() {}
+					if releaseTestOpts.ShowTechDump {
+						var followersErr error
+						stopLogFollowers, followersErr = c.startContainerLogFollowers(ctx, vlab, filepath.Join(c.WorkDir, ShowTechOutputDir))
+						if followersErr != nil {
+							slog.Warn("Failed to start container log followers", "err", followersErr)
+						}
+					}
 					if err := ReleaseTest(ctx, c, vlab, releaseTestOpts); err != nil {
+						stopLogFollowers()
+
 						if c.Shutdown.Load() == int32(ShutdownTypeGraceful) {
 							return nil
 						}
@@ -793,6 +803,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 
 						return fmt.Errorf("release test: %w", err)
 					}
+					stopLogFollowers()
 				}
 			}
 
