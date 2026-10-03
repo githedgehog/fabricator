@@ -38,7 +38,8 @@ const (
 	KubeRegistriesPath = "/etc/rancher/k3s/registries.yaml"
 	PauseImageURL      = "docker.io/rancher/mirrored-pause"
 
-	EtcdQuotaBackendBytes = 32 << 30 // 32 GiB
+	EtcdQuotaBackendBytes  = 32 << 30 // 32 GiB
+	EtcdCompactionInterval = "4m"
 )
 
 func Version(f fabapi.Fabricator) meta.Version {
@@ -79,6 +80,8 @@ func ServerConfig(f fabapi.Fabricator, control fabapi.ControlNode) (string, erro
 		"TLSSAN":        tlsSAN,
 		"DropInDir":     ConfigDropInDir,
 		"EtcdQuota":     EtcdQuotaBackendBytes,
+
+		"EtcdCompactionInterval": EtcdCompactionInterval,
 
 		"MaxRequestsInflight":         MaxRequestsInflight,
 		"MaxMutatingRequestsInflight": MaxMutatingRequestsInflight,

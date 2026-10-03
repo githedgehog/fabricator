@@ -162,6 +162,7 @@ func TestServerConfigRaisesInflight(t *testing.T) {
 	require.Contains(t, cfg, "max-mutating-requests-inflight=")
 
 	require.Contains(t, cfg, "quota-backend-bytes=34359738368")
+	require.Contains(t, cfg, "etcd-compaction-interval=4m")
 
 	// It is rewritten on upgrade, so it has to say so to anyone editing it.
 	require.Contains(t, cfg, "Managed by Hedgehog Fabricator")
