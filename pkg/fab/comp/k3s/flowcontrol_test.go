@@ -160,4 +160,8 @@ func TestServerConfigRaisesInflight(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, cfg, "max-requests-inflight=")
 	require.Contains(t, cfg, "max-mutating-requests-inflight=")
+
+	// It is rewritten on upgrade, so it has to say so to anyone editing it.
+	require.Contains(t, cfg, "Managed by Hedgehog Fabricator")
+	require.Contains(t, cfg, k3s.ConfigDropInDir)
 }

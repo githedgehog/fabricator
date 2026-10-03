@@ -1,3 +1,7 @@
+# Managed by Hedgehog Fabricator: rewritten on upgrade, local changes here are lost.
+# Local overrides are not recommended, but if one is needed, put it in {{ .DropInDir }}/*.yaml,
+# which k3s merges over this file; use "key+:" there (e.g. "kube-apiserver-arg+:") to append
+# to a list set here instead of replacing it.
 node-name: "{{ .Name }}"
 node-ip: "{{ .NodeIP }}"
 flannel-iface: "{{ .FlannelIface }}"
