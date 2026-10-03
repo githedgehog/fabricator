@@ -584,24 +584,46 @@ func (c *ControlUpgrade) upgradeK8s(ctx context.Context, kube kclient.Reader) er
 
 	actual := node.Status.NodeInfo.KubeletVersion
 	desired := k3s.KubeVersion(c.Fab)
-	if actual == desired {
-		slog.Info("System already running desired K8s version", "version", desired)
+	upgrade := actual != desired
+
+	// The server config is only written at install otherwise, so a release that
+	// changes it would never reach an upgraded cluster. Render it every time
+	// and restart k3s for it if it changed, even with no new k3s to install.
+	cfg, err := k3s.ServerConfig(c.Fab, c.Control)
+	if err != nil {
+		return fmt.Errorf("generating k3s config: %w", err)
+	}
+	cfgChanged, err := updateConfigFile(k3s.ConfigPath, cfg)
+	if err != nil {
+		return fmt.Errorf("updating k3s config: %w", err)
+	}
+
+	if !upgrade && !cfgChanged {
+		slog.Info("System already running desired K8s version and config", "version", desired)
 
 		return nil
 	}
 
-	slog.Info("Upgrading K8s", "from", actual, "to", desired)
-
-	if err := copyFile(k3s.BinName, filepath.Join(k3s.BinDir, k3s.BinName), 0o755); err != nil {
-		return fmt.Errorf("copying k3s bin: %w", err)
+	if cfgChanged {
+		slog.Warn("K3s config updated, any local changes to it are replaced", "path", k3s.ConfigPath, "dropIns", k3s.ConfigDropInDir)
 	}
 
-	if err := os.MkdirAll(k3s.ImagesDir, 0o755); err != nil {
-		return fmt.Errorf("creating k3s images dir %q: %w", k3s.ImagesDir, err)
-	}
+	if upgrade {
+		slog.Info("Upgrading K8s", "from", actual, "to", desired)
 
-	if err := copyFile(k3s.AirgapName, filepath.Join(k3s.ImagesDir, k3s.AirgapName), 0o644); err != nil {
-		return fmt.Errorf("copying k3s airgap: %w", err)
+		if err := copyFile(k3s.BinName, filepath.Join(k3s.BinDir, k3s.BinName), 0o755); err != nil {
+			return fmt.Errorf("copying k3s bin: %w", err)
+		}
+
+		if err := os.MkdirAll(k3s.ImagesDir, 0o755); err != nil {
+			return fmt.Errorf("creating k3s images dir %q: %w", k3s.ImagesDir, err)
+		}
+
+		if err := copyFile(k3s.AirgapName, filepath.Join(k3s.ImagesDir, k3s.AirgapName), 0o644); err != nil {
+			return fmt.Errorf("copying k3s airgap: %w", err)
+		}
+	} else {
+		slog.Info("Restarting K8s to apply the updated config", "version", desired)
 	}
 
 	slog.Debug("Restarting K3s")
@@ -653,6 +675,24 @@ func (c *ControlUpgrade) upgradeK8s(ctx context.Context, kube kclient.Reader) er
 	slog.Debug("Registry ready after K8s upgrade")
 
 	return nil
+}
+
+// updateConfigFile writes content to path unless it already holds exactly
+// that, reporting whether it wrote. A missing file counts as changed.
+func updateConfigFile(path, content string) (bool, error) {
+	current, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return false, fmt.Errorf("reading %q: %w", path, err)
+	}
+	if err == nil && string(current) == content {
+		return false, nil
+	}
+
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil { //nolint:gosec // same mode the install writes it with
+		return false, fmt.Errorf("writing %q: %w", path, err)
+	}
+
+	return true, nil
 }
 
 func (c *ControlUpgrade) installK9s() error {
