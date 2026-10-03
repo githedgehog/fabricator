@@ -72,6 +72,9 @@ func ServerConfig(f fabapi.Fabricator, control fabapi.ControlNode) (string, erro
 		"ServiceSubnet": f.Spec.Config.Control.KubeServiceSubnet,
 		"ClusterDNS":    f.Spec.Config.Control.KubeClusterDNS,
 		"TLSSAN":        tlsSAN,
+
+		"MaxRequestsInflight":         MaxRequestsInflight,
+		"MaxMutatingRequestsInflight": MaxMutatingRequestsInflight,
 	})
 	if err != nil {
 		return "", fmt.Errorf("k3s config: %w", err)

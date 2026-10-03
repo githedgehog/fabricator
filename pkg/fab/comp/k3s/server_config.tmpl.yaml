@@ -6,6 +6,9 @@ service-cidr: "{{ .ServiceSubnet }}"
 cluster-dns: "{{ .ClusterDNS }}"
 kube-proxy-arg:
   - "nodeport-addresses={{ .NodeSubnet }}"
+kube-apiserver-arg:
+  - "max-requests-inflight={{ .MaxRequestsInflight }}"
+  - "max-mutating-requests-inflight={{ .MaxMutatingRequestsInflight }}"
 write-kubeconfig-mode: "0644"
 tls-san:
   {{ range .TLSSAN }}
