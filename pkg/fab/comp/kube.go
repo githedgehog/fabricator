@@ -18,6 +18,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 	appsapi "k8s.io/api/apps/v1"
 	coreapi "k8s.io/api/core/v1"
+	flowcontrolapi "k8s.io/api/flowcontrol/v1"
 	apiextapi "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	kapierrors "k8s.io/apimachinery/pkg/api/errors"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -412,6 +413,20 @@ func CreateOrUpdate(ctx context.Context, kube kclient.Client, obj kclient.Object
 		})
 	case *fabapi.FabNode:
 		tmp := &fabapi.FabNode{ObjectMeta: obj.ObjectMeta}
+		res, err = ctrlutil.CreateOrUpdate(ctx, kube, tmp, func() error {
+			tmp.Spec = obj.Spec
+
+			return nil
+		})
+	case *flowcontrolapi.PriorityLevelConfiguration:
+		tmp := &flowcontrolapi.PriorityLevelConfiguration{ObjectMeta: obj.ObjectMeta}
+		res, err = ctrlutil.CreateOrUpdate(ctx, kube, tmp, func() error {
+			tmp.Spec = obj.Spec
+
+			return nil
+		})
+	case *flowcontrolapi.FlowSchema:
+		tmp := &flowcontrolapi.FlowSchema{ObjectMeta: obj.ObjectMeta}
 		res, err = ctrlutil.CreateOrUpdate(ctx, kube, tmp, func() error {
 			tmp.Spec = obj.Spec
 

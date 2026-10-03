@@ -17,23 +17,29 @@ import (
 )
 
 const (
-	Ref                = "fabricator/k3s-airgap"
-	BinName            = "k3s"
-	BinDir             = "/opt/bin"
-	InstallName        = "k3s-install.sh"
-	AirgapName         = "k3s-airgap-images-amd64.tar.gz"
-	AgentDir           = "/var/lib/rancher/k3s/agent"
-	ImagesDir          = "/var/lib/rancher/k3s/agent/images"
-	ServerDir          = "/var/lib/rancher/k3s/server"
-	ChartsDir          = "/var/lib/rancher/k3s/server/static/" + comp.BootstrapChartsPrefix
-	ServerServiceName  = "k3s.service"
-	AgentServiceName   = "k3s-agent.service"
-	APIPort            = 6443
-	ConfigDir          = "/etc/rancher/k3s"
-	ConfigPath         = "/etc/rancher/k3s/config.yaml"
+	Ref               = "fabricator/k3s-airgap"
+	BinName           = "k3s"
+	BinDir            = "/opt/bin"
+	InstallName       = "k3s-install.sh"
+	AirgapName        = "k3s-airgap-images-amd64.tar.gz"
+	AgentDir          = "/var/lib/rancher/k3s/agent"
+	ImagesDir         = "/var/lib/rancher/k3s/agent/images"
+	ServerDir         = "/var/lib/rancher/k3s/server"
+	ChartsDir         = "/var/lib/rancher/k3s/server/static/" + comp.BootstrapChartsPrefix
+	ServerServiceName = "k3s.service"
+	AgentServiceName  = "k3s-agent.service"
+	APIPort           = 6443
+	ConfigDir         = "/etc/rancher/k3s"
+	ConfigPath        = "/etc/rancher/k3s/config.yaml"
+	// ConfigDropInDir holds local additions k3s merges over ConfigPath, which
+	// fabricator owns and rewrites on upgrade.
+	ConfigDropInDir    = "/etc/rancher/k3s/config.yaml.d"
 	KubeConfigPath     = "/etc/rancher/k3s/k3s.yaml"
 	KubeRegistriesPath = "/etc/rancher/k3s/registries.yaml"
 	PauseImageURL      = "docker.io/rancher/mirrored-pause"
+
+	EtcdQuotaBackendBytes  = 32 << 30 // 32 GiB
+	EtcdCompactionInterval = "4m"
 )
 
 func Version(f fabapi.Fabricator) meta.Version {
@@ -72,6 +78,13 @@ func ServerConfig(f fabapi.Fabricator, control fabapi.ControlNode) (string, erro
 		"ServiceSubnet": f.Spec.Config.Control.KubeServiceSubnet,
 		"ClusterDNS":    f.Spec.Config.Control.KubeClusterDNS,
 		"TLSSAN":        tlsSAN,
+		"DropInDir":     ConfigDropInDir,
+		"EtcdQuota":     EtcdQuotaBackendBytes,
+
+		"EtcdCompactionInterval": EtcdCompactionInterval,
+
+		"MaxRequestsInflight":         MaxRequestsInflight,
+		"MaxMutatingRequestsInflight": MaxMutatingRequestsInflight,
 	})
 	if err != nil {
 		return "", fmt.Errorf("k3s config: %w", err)

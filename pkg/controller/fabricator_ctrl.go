@@ -54,6 +54,9 @@ import (
 
 // +kubebuilder:rbac:groups=apiextensions.k8s.io,resources=customresourcedefinitions,verbs=get;list;watch
 
+// +kubebuilder:rbac:groups=flowcontrol.apiserver.k8s.io,resources=flowschemas,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=flowcontrol.apiserver.k8s.io,resources=prioritylevelconfigurations,verbs=get;list;watch;create;update;patch;delete
+
 // +kubebuilder:rbac:groups=helm.cattle.io,resources=helmcharts,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=helm.cattle.io,resources=helmcharts/status,verbs=get
 
@@ -191,6 +194,10 @@ func (r *FabricatorReconciler) Reconcile(ctx context.Context, req kctrl.Request)
 
 		if err := f.CalculateVersions(fab.Versions); err != nil {
 			return kctrl.Result{}, fmt.Errorf("calculating versions: %w", err)
+		}
+
+		if err := comp.EnforceKubeInstall(ctx, r.Client, *f, k3s.InstallFlowControl); err != nil {
+			return kctrl.Result{}, fmt.Errorf("enforcing apiserver flow control install: %w", err)
 		}
 
 		if err := comp.EnforceKubeInstall(ctx, r.Client, *f, reloader.Install); err != nil {

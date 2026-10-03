@@ -119,6 +119,19 @@ rules:
   - patch
   - update
 - apiGroups:
+  - flowcontrol.apiserver.k8s.io
+  resources:
+  - flowschemas
+  - prioritylevelconfigurations
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - helm.cattle.io
   resources:
   - helmcharts
