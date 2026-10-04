@@ -143,6 +143,10 @@ Collected via `sonic-cli` and direct `bcmcmd` (Broadcom SDK).
   lines of `docker logs iperf3 --timestamps` - iperf3 emits no timestamps itself
   and one server container is shared by every pair, so the timestamps are what
   ties a line to the test that produced it
+- **iperf3 service**: `systemctl status` and restart counters of `iperf3.service`
+  plus its journal. The container runs with `--rm` and is recreated on restart,
+  so after a daemon crash `docker logs` is empty; the unit's exit status,
+  restart count and start/stop times are still recorded here
 
 ### gateway.sh - gateway node (FRR + dataplane)
 
