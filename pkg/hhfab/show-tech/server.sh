@@ -236,6 +236,16 @@ OUTPUT_FILE="/tmp/show-tech.log"
   echo -e "\n=== iperf3 Container Logs (last 2000, timestamped) ==="
   docker logs iperf3 --timestamps --tail 2000 2>&1 || echo "iperf3 container not running or docker not available"
 
+  # The unit runs the container with --rm and restarts it on failure, so a
+  # crashed daemon takes its container logs with it; the unit status and
+  # journal keep its exit status and restart times.
+  echo -e "\n=== iperf3.service status ==="
+  systemctl status iperf3.service --no-pager 2>&1 || true
+  systemctl show iperf3.service -p NRestarts -p Result -p ExecMainStatus -p ExecMainCode -p ActiveEnterTimestamp 2>&1 || true
+
+  echo -e "\n=== iperf3.service journal ==="
+  journalctl -u iperf3.service --no-pager -o short-iso 2>&1 || echo "journalctl not available"
+
 } >> "$OUTPUT_FILE" 2>&1
 
 echo "Diagnostics collected to $OUTPUT_FILE"
