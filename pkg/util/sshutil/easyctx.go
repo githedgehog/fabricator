@@ -19,7 +19,12 @@ import (
 func streamContext(ctx context.Context, ssh *easyssh.MakeConfig, command string) (<-chan string, <-chan string, <-chan error, error) {
 	stdoutChan := make(chan string)
 	stderrChan := make(chan string)
-	errChan := make(chan error)
+	// buffered: on ctx cancellation, StreamLog's own select and this func's
+	// goroutine both race on ctx.Done(); if StreamLog returns first, nobody
+	// is left reading errChan, and an unbuffered send here would block
+	// forever, leaking this goroutine's session/client (their Close() calls
+	// are deferred below and would never run)
+	errChan := make(chan error, 1)
 
 	session, client, err := ssh.Connect()
 	if err != nil {
@@ -57,12 +62,20 @@ func streamContext(ctx context.Context, ssh *easyssh.MakeConfig, command string)
 		res := make(chan struct{}, 1)
 		resWg := sync.WaitGroup{}
 
+		// each send races ctx.Done() too: if the caller (StreamLog) has
+		// already abandoned its read loop on cancellation, an unconditional
+		// send here would block forever with no reader left, leaking this
+		// scanner goroutine (and the reader it holds) indefinitely
 		resWg.Go(func() {
 			defer close(stdoutChan)
 
 			stdoutScanner := bufio.NewScanner(outReader)
 			for stdoutScanner.Scan() {
-				stdoutChan <- stdoutScanner.Text()
+				select {
+				case stdoutChan <- stdoutScanner.Text():
+				case <-ctx.Done():
+					return
+				}
 			}
 		})
 
@@ -71,7 +84,11 @@ func streamContext(ctx context.Context, ssh *easyssh.MakeConfig, command string)
 
 			stderrScanner := bufio.NewScanner(errReader)
 			for stderrScanner.Scan() {
-				stderrChan <- stderrScanner.Text()
+				select {
+				case stderrChan <- stderrScanner.Text():
+				case <-ctx.Done():
+					return
+				}
 			}
 		})
 
