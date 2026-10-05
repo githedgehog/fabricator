@@ -471,7 +471,7 @@ func (u *userSim) runInspect(ctx context.Context, name string) error {
 	switch name {
 	case InspectLLDP:
 		if _, err := inspect.LLDP(ctx, u.kube, inspect.LLDPIn{
-			Switches: sw, Fabric: true, Server: true,
+			Switches: sw, FabricConns: true, ServerConns: true, GatewayConns: true,
 		}); err != nil {
 			return fmt.Errorf("inspect lldp: %w", err)
 		}

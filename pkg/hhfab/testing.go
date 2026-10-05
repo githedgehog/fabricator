@@ -2038,7 +2038,6 @@ func buildExternalEndpoints(externals []vpcapi.External) []*Endpoint {
 	out := make([]*Endpoint, 0, len(names))
 	defaultPrefix, _ := netip.ParsePrefix("0.0.0.0/0")
 	for _, name := range names {
-
 		out = append(out, &Endpoint{
 			External: &ExternalEndpoint{
 				ExternalName: name,
@@ -3103,7 +3102,8 @@ func IsSubnetReachableWithSwitchPeering(ctx context.Context, kube kclient.Reader
 	}
 
 	vpcPeerings := vpcapi.VPCPeeringList{}
-	if err := kube.List(ctx, &vpcPeerings,
+	if err := kube.List(
+		ctx, &vpcPeerings,
 		kclient.InNamespace(kmetav1.NamespaceDefault),
 		kclient.MatchingLabels{
 			vpcapi.ListLabelVPC(vpc1Name): vpcapi.ListLabelValue,
@@ -3171,7 +3171,8 @@ func IsSubnetReachableWithGatewayPeering(ctx context.Context, kube kclient.Reade
 	}
 
 	peerings := gwapi.GatewayPeeringList{}
-	if err := kube.List(ctx, &peerings,
+	if err := kube.List(
+		ctx, &peerings,
 		kclient.InNamespace(kmetav1.NamespaceDefault),
 		kclient.MatchingLabels{
 			gwapi.ListLabelVPC(vpc1Name): gwapi.ListLabelValue,
@@ -3502,7 +3503,8 @@ func checkIPerf(ctx context.Context, opts TestConnectivityOpts, from, to string,
 		if attempt > 0 {
 			logArgs := []any{"from", from, "to", to, "bidir", bidir, "attempt", attempt + 1, "maxAttempts", iperf3SpeedRetries + 1}
 			for _, le := range lastErrors {
-				logArgs = append(logArgs,
+				logArgs = append(
+					logArgs,
 					fmt.Sprintf("previousSentSpeed[%s->%s]", le.Source, le.Destination), le.SentSpeed,
 					fmt.Sprintf("previousRcvdSpeed[%s->%s]", le.Source, le.Destination), le.RcvdSpeed,
 				)
@@ -3611,7 +3613,8 @@ func runIPerf3Test(ctx context.Context, opts TestConnectivityOpts, from, to stri
 		"minSpeed", asMbps(iPerfsMinSpeed * 1_000_000),
 	}
 	if bidir {
-		logArgs = append(logArgs,
+		logArgs = append(
+			logArgs,
 			"reverseSendSpeed", asMbps(report.End.SumSentBidirReverse.BitsPerSecond),
 			"reverseReceiveSpeed", asMbps(report.End.SumReceivedBidirReverse.BitsPerSecond),
 		)
@@ -4133,10 +4136,10 @@ func (c *Config) Inspect(ctx context.Context, vlab *VLAB, opts InspectOpts) erro
 	}
 
 	lldpIn := inspect.LLDPIn{
-		Strict:   opts.Strict,
-		Fabric:   true,
-		External: true,
-		Server:   true,
+		Strict:        opts.Strict,
+		FabricConns:   true,
+		ExternalConns: true,
+		ServerConns:   true,
 	}
 	var lldpOut inspect.Out[inspect.LLDPIn]
 	var lldpErr error
