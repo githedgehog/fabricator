@@ -17,6 +17,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 	coreapi "k8s.io/api/core/v1"
 	rbacapi "k8s.io/api/rbac/v1"
+	kmeta "k8s.io/apimachinery/pkg/api/meta"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -97,6 +98,12 @@ func deleteLabeled(ctx context.Context, kube kclient.Client, kind string, list k
 	start := time.Now()
 
 	if err := kube.List(ctx, list, kclient.HasLabels{LabelFabric}); err != nil {
+		// A release from before Fabric objects does not serve the kind at all,
+		// which leaves nothing of it to clean.
+		if kmeta.IsNoMatchError(err) {
+			return res, nil
+		}
+
 		return res, fmt.Errorf("listing %s: %w", kind, err)
 	}
 

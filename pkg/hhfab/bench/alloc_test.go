@@ -410,3 +410,38 @@ func TestAllocatorIndexBounds(t *testing.T) {
 	_, err = a.ASNs(1)
 	require.ErrorContains(t, err, "slot 1 out of range")
 }
+
+// In the default fabric every fabric's leaves share the fab.yaml leaf range, in
+// --fabric order, so they have to fit it together.
+func TestAllocatorDefaultFabric(t *testing.T) {
+	t.Parallel()
+
+	f := defaultFab()
+	cfg := f.Spec.Config.Fabric
+
+	a, err := bench.NewAllocator(f, 1, 0, 0, defaultSpecs(t, 2))
+	require.NoError(t, err)
+	require.NoError(t, a.CheckDefaultFabric())
+	require.Equal(t, cfg.SpineASN, a.DefaultSpineASN())
+
+	first, err := a.DefaultLeafASN(0, 0)
+	require.NoError(t, err)
+	require.Equal(t, cfg.LeafASNStart, first)
+
+	second, err := a.DefaultLeafASN(1, 0)
+	require.NoError(t, err)
+	require.Equal(t, cfg.LeafASNStart+bench.StrideLeaves, second, "the second fabric continues after the first one's leaves")
+
+	_, err = a.DefaultLeafASN(0, bench.StrideLeaves)
+	require.ErrorContains(t, err, "out of range")
+
+	// a range of exactly six fabrics' leaves takes six, not seven
+	f.Spec.Config.Fabric.LeafASNEnd = cfg.LeafASNStart + 6*bench.StrideLeaves - 1
+	a, err = bench.NewAllocator(f, 1, 0, 0, defaultSpecs(t, 6))
+	require.NoError(t, err)
+	require.NoError(t, a.CheckDefaultFabric())
+
+	a, err = bench.NewAllocator(f, 1, 0, 0, defaultSpecs(t, 7))
+	require.NoError(t, err)
+	require.ErrorContains(t, a.CheckDefaultFabric(), "leaves need more ASNs")
+}

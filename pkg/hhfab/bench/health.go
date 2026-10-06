@@ -20,6 +20,7 @@ import (
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 	coreapi "k8s.io/api/core/v1"
+	kmeta "k8s.io/apimachinery/pkg/api/meta"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -124,6 +125,13 @@ func healthObjects(ctx context.Context, kube kclient.Client, w io.Writer) (*agen
 
 	for _, c := range counts {
 		if err := kube.List(ctx, c.list); err != nil {
+			// Releases from before Fabric objects do not serve the kind.
+			if kmeta.IsNoMatchError(err) {
+				fmt.Fprintf(w, "  %-16s %6s  (not served by this release)\n", c.kind, "-")
+
+				continue
+			}
+
 			return nil, fmt.Errorf("listing %s: %w", c.kind, err)
 		}
 
