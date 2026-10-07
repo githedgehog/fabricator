@@ -831,10 +831,7 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connecti
 	// Same for the proxy external, except that only the outbound half can be asserted:
 	// the inbound port forward would have to be driven from the external itself.
 	if proxyExtPool.IsValid() {
-		// Not the mirror of the wait above: the return path goes through the external VRF on the
-		// border leaf, which this does not look at. Seeing the pool in the VPC's own VRF only
-		// tells us the gateway has programmed the peering, so this is a settle, not an assertion.
-		if err := testCtx.waitForNATPoolInLeaves(ctx, vpcC, proxyExtPool.String()); err != nil {
+		if err := testCtx.waitForNATPool(ctx, vpcC, staticExtProxyName, proxyExtPool.String()); err != nil {
 			return false, reverts, fmt.Errorf("waiting for the gateway to program the proxy external peering: %w", err)
 		}
 		if err := overlayExternalSNAT(matrix, vpcCName, staticExtProxyName, proxyExtPool.String()); err != nil {
