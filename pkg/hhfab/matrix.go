@@ -1090,7 +1090,9 @@ func runMatrixIperfPortForward(ctx context.Context, opts TestConnectivityOpts, i
 	defer iperfs.Release(1)
 
 	secs := opts.IPerfsSeconds
-	cmd := fmt.Sprintf("toolbox -E LD_PRELOAD=/lib/x86_64-linux-gnu/libgcc_s.so.1 -q timeout %d iperf3 -J -c %s -p %d -t %d",
+	// Client runs in the always-on iperf3 container, like runIPerf3Test: besides the memory
+	// argument there, virt-external has that container but no toolbox (only servers get one).
+	cmd := fmt.Sprintf("sudo docker exec iperf3 timeout %d iperf3 -J -c %s -p %d -t %d",
 		secs+25, toIP.String(), toPort, secs)
 	if _, _, iperfErr := retrySSHCmd(ctx, ssh, cmd, from); iperfErr != nil {
 		return &IperfError{Source: from, Destination: target, Why: why, ClientMsg: iperfErr.Error()}
