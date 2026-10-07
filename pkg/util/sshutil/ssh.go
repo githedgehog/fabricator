@@ -135,6 +135,30 @@ func (c *Config) StreamLog(ctx context.Context, cmd string, logName string, log 
 	for {
 		select {
 		case <-ctx.Done():
+			// best-effort, non-blocking drain: a line can already be sitting
+			// in these channels (or a scanner goroutine blocked mid-send on
+			// one of them) at the exact instant of cancellation; grab
+			// whatever is immediately available before giving up, so a
+			// just-arrived line is not silently dropped
+			for drained := true; drained; {
+				select {
+				case line, ok := <-stdoutCh:
+					if !ok {
+						stdoutCh = nil
+					} else if line != "" {
+						log(logName + ": " + line)
+					}
+				case line, ok := <-stderrCh:
+					if !ok {
+						stderrCh = nil
+					} else if line != "" {
+						log(logName + ": " + line)
+					}
+				default:
+					drained = false
+				}
+			}
+
 			return fmt.Errorf("cancelled: %w", ctx.Err())
 		case err := <-errCh:
 			if err != nil {
