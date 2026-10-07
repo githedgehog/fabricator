@@ -102,7 +102,7 @@ func DoInstall(ctx context.Context, workDir string, yes bool) error {
 			return fmt.Errorf("reading include: %w", err)
 		}
 
-		if err := l.LoadAdd(ctx, apiutil.FabricGatewayGVKs, includeData); err != nil {
+		if err := l.LoadAddWiring(ctx, includeData); err != nil {
 			return fmt.Errorf("loading include: %w", err)
 		}
 

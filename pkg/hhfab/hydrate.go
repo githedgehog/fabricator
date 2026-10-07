@@ -128,7 +128,7 @@ func (c *Config) loadWiring(ctx context.Context) (*apiutil.Loader, error) {
 			return nil, fmt.Errorf("reading wiring %q: %w", relName, err)
 		}
 
-		if err := l.LoadAdd(ctx, apiutil.FabricGatewayGVKs, data); err != nil {
+		if err := l.LoadAddWiring(ctx, data); err != nil {
 			return nil, fmt.Errorf("loading include %q: %w", relName, err)
 		}
 	}
