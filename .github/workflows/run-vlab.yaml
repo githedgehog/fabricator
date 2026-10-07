@@ -109,6 +109,8 @@ env:
   HHFAB_EXTRA_CACHE_DIRS: /hostcache/.hhfab-cache
   HHFAB_VLAB_COLLECT: true
   HHFAB_VLAB_COLLECT_FORCE: ${{ inputs.collect_show_tech }}
+  # lets the new hhfab handle wiring from the release being upgraded from, empty when not upgrading
+  HHFAB_UPGRADE_FROM: ${{ inputs.upgradefrom }}
 
 jobs:
   run:
