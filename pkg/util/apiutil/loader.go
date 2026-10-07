@@ -90,6 +90,25 @@ func (l *Loader) LoadAdd(ctx context.Context, gvks []schema.GroupVersionKind, da
 	return l.Add(ctx, objs...)
 }
 
+// LoadAddWiring loads Fabric and Gateway API objects, defaulting each one as the
+// admission webhooks would before storing it. Whatever reads them afterwards -
+// validation comparing an object with the ones it references, hydration, the
+// build - then sees the fields and labels the cluster would have.
+func (l *Loader) LoadAddWiring(ctx context.Context, data []byte) error {
+	objs, err := l.Load(FabricGatewayGVKs, data)
+	if err != nil {
+		return err
+	}
+
+	for _, obj := range objs {
+		if defaulted, ok := obj.(interface{ Default() }); ok {
+			defaulted.Default()
+		}
+	}
+
+	return l.Add(ctx, objs...)
+}
+
 func (l *Loader) Add(ctx context.Context, objs ...kclient.Object) error {
 	for _, obj := range objs {
 		obj.SetResourceVersion("")
