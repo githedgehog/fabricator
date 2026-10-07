@@ -95,6 +95,7 @@ const (
 	FlagShowTech                  = "show-tech"
 	FlagIPerfsSpeed               = "iperfs-speed"
 	FlagReleaseTestOnReadyOnly    = "release-test-on-ready-only"
+	FlagReleaseTestExtended       = "release-test-extended"
 	FlagOnReadyOnly               = "on-ready-only"
 	FlagBenchFabric               = "fabric"
 	FlagBenchWorkers              = "workers"
@@ -1274,6 +1275,11 @@ func Run(ctx context.Context) error {
 								Aliases: []string{"rt-or"},
 								Usage:   "run only the special on-ready suite (used when --ready=release-test)",
 							},
+							&cli.BoolFlag{
+								Name:    FlagReleaseTestExtended,
+								Aliases: []string{"rt-extended"},
+								Usage:   "include extended-only release tests (used when --ready=release-test)",
+							},
 							&cli.UintFlag{
 								Category: FlagCatVMSizes,
 								Name:     "control-cpus",
@@ -1385,6 +1391,7 @@ func Run(ctx context.Context) error {
 									ReleaseTestRegexes:       c.StringSlice(FlagReleaseTestRegexes),
 									ReleaseTestRegexesInvert: c.Bool(FlagReleaseTestRegexesInvert),
 									ReleaseTestOnReadyOnly:   c.Bool(FlagReleaseTestOnReadyOnly),
+									ReleaseTestExtended:      c.Bool(FlagReleaseTestExtended),
 									InterfaceMTU:             ifMTU,
 									InspectPodsStrict:        c.Bool("inspect-pods-strict"),
 								},
