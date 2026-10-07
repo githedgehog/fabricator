@@ -124,11 +124,18 @@ for kind in "${!KIND_DIR[@]}"; do
     | while read -r name; do
         [ -z "${name}" ] && continue
         # Per-item export, scrub mutating-webhook-injected metadata + status.
+        # Also drop kubectl's last-applied annotation (present when the object
+        # was created via `kubectl apply`) and Argo CD's tracking-id (present
+        # on re-imports): kubectl rewrites last-applied on every apply, so
+        # keeping it in git leaves the Application permanently OutOfSync.
         kubectl get "${kind}" "${name}" -n "${DEFAULT_NAMESPACE}" -o yaml \
           | yq eval '
               del(.metadata.resourceVersion, .metadata.uid, .metadata.creationTimestamp,
                   .metadata.generation, .metadata.managedFields, .metadata.ownerReferences,
+                  .metadata.annotations["kubectl.kubernetes.io/last-applied-configuration"],
+                  .metadata.annotations["argocd.argoproj.io/tracking-id"],
                   .status)
+              | del(.metadata.annotations | select(length == 0))
             ' - \
           > "${WORK}/${dir}__${name}.yaml"
         echo "${dir}/${name}.yaml"
