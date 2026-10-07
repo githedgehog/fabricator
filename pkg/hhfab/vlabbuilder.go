@@ -17,6 +17,7 @@ import (
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
+	fabcomp "go.githedgehog.com/fabricator/pkg/fab/comp/fabric"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -32,7 +33,7 @@ var GatewayDrivers = []string{
 }
 
 type VLABBuilder interface {
-	Build(ctx context.Context, l *apiutil.Loader, fabricMode meta.FabricMode, nodes []fabapi.FabNode) error
+	Build(ctx context.Context, l *apiutil.Loader, f fabapi.Fabricator, nodes []fabapi.FabNode) error
 }
 
 type VLABBuilderBase struct {
@@ -74,11 +75,13 @@ type VLABBuilderDefault struct {
 
 var _ VLABBuilder = (*VLABBuilderDefault)(nil)
 
-func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, fabricMode meta.FabricMode, nodes []fabapi.FabNode) error {
+func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fabapi.Fabricator, nodes []fabapi.FabNode) error {
 	if l == nil {
 		return fmt.Errorf("loader is nil") //nolint:goerr113
 	}
 	b.data = l
+
+	fabricMode := f.Spec.Config.Fabric.Mode
 
 	switch fabricMode {
 	case meta.FabricModeSpineLeaf:
@@ -273,6 +276,10 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, fabri
 	slog.Info(">>>", "eslagServers", b.ESLAGServers, "unbundledServers", b.UnbundledServers, "bundledServers", b.BundledServers, "multihomedServers", b.MultiHomedServers)
 	slog.Info(">>>", "externalBGPCount", b.ExtBGPCount, "externalStaticCount", b.ExtStaticCount, "externalStaticProxyCount", b.ExtStaticProxyCount)
 	slog.Info(">>>", "externalEslagConnCount", b.ExtESLAGConnCount, "externalOrphanConnCount", b.ExtOrphanConnCount)
+
+	if err := b.createDefaultFabric(ctx, f); err != nil {
+		return err
+	}
 
 	if err := b.data.Add(ctx, &wiringapi.VLANNamespace{
 		TypeMeta: kmetav1.TypeMeta{
@@ -858,7 +865,7 @@ type VLABBuilderGPURail struct {
 
 var _ VLABBuilder = (*VLABBuilderGPURail)(nil)
 
-func (b *VLABBuilderGPURail) Build(ctx context.Context, l *apiutil.Loader, fabricMode meta.FabricMode, nodes []fabapi.FabNode) error {
+func (b *VLABBuilderGPURail) Build(ctx context.Context, l *apiutil.Loader, f fabapi.Fabricator, nodes []fabapi.FabNode) error {
 	if l == nil {
 		return fmt.Errorf("loader is nil") //nolint:goerr113
 	}
@@ -880,6 +887,10 @@ func (b *VLABBuilderGPURail) Build(ctx context.Context, l *apiutil.Loader, fabri
 		slog.Info(">>>", overrides...)
 	}
 	slog.Info(">>>", "units", b.ScalableUnits, "vpcCount", b.VPCs, "serversPerVPCPerUnit", b.ServersPerVPCPerUnit, "p2p", b.P2P)
+
+	if err := b.createDefaultFabric(ctx, f); err != nil {
+		return err
+	}
 
 	if err := b.data.Add(ctx, &wiringapi.VLANNamespace{
 		TypeMeta: kmetav1.TypeMeta{
@@ -1087,6 +1098,30 @@ func (b *VLABBuilderBase) nextServerPort(serverName string) string {
 	b.ifaceTracker[serverName] = ifaceID
 
 	return portName
+}
+
+// createDefaultFabric adds Fabric/default with the spec the controller seeds it
+// with from the fabric config, which everything the builders generate is in.
+func (b *VLABBuilderBase) createDefaultFabric(ctx context.Context, f fabapi.Fabricator) error {
+	cfg, err := fabcomp.GetFabricConfig(f)
+	if err != nil {
+		return fmt.Errorf("getting fabric config: %w", err)
+	}
+
+	if err := b.data.Add(ctx, &wiringapi.Fabric{
+		TypeMeta: kmetav1.TypeMeta{
+			Kind:       wiringapi.KindFabric,
+			APIVersion: wiringapi.GroupVersion.String(),
+		},
+		ObjectMeta: kmetav1.ObjectMeta{
+			Name: wiringapi.DefaultFabric,
+		},
+		Spec: wiringapi.DefaultFabricSpec(cfg),
+	}); err != nil {
+		return fmt.Errorf("creating default fabric: %w", err)
+	}
+
+	return nil
 }
 
 func (b *VLABBuilderBase) createSwitchGroup(ctx context.Context, name string) (*wiringapi.SwitchGroup, error) { //nolint:unparam
