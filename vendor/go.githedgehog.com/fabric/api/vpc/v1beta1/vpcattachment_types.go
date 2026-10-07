@@ -217,6 +217,11 @@ func (attach *VPCAttachment) Validate(ctx context.Context, kube kclient.Reader, 
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to get vpc %s", vpcName) // TODO replace with some internal error to not expose to the user
 		}
+		// a stored VPC the refresh on fabric-ctrl initialization had to leave alone may have none, and the switch
+		// domains check below would pass when there's nothing to compare
+		if len(vpc.Spec.Topology.Domains) == 0 {
+			return nil, fmt.Errorf("vpc %s has no domains", vpcName) //nolint:err113
+		}
 		if vpc.Spec.Subnets == nil || vpc.Spec.Subnets[subnet] == nil {
 			return nil, errors.Errorf("subnet %s not found in vpc %s", subnet, vpcName)
 		}
@@ -231,11 +236,11 @@ func (attach *VPCAttachment) Validate(ctx context.Context, kube kclient.Reader, 
 			return nil, errors.Wrapf(err, "failed to get connection %s", attach.Spec.Connection) // TODO replace with some internal error to not expose to the user
 		}
 
-		attachFabric := wiringapi.FabricNameOrDefault(attach.Spec.Topology.Fabric)
-		if vpcFabric := wiringapi.FabricNameOrDefault(vpc.Spec.Topology.Fabric); vpcFabric != attachFabric {
+		attachFabric := attach.Spec.Topology.Fabric
+		if vpcFabric := vpc.Spec.Topology.Fabric; vpcFabric != attachFabric {
 			return nil, fmt.Errorf("attachment is in fabric %s but vpc %s is in fabric %s", attachFabric, vpcName, vpcFabric) //nolint:err113
 		}
-		if connFabric := wiringapi.FabricNameOrDefault(conn.Spec.Topology.Fabric); connFabric != attachFabric {
+		if connFabric := conn.Spec.Topology.Fabric; connFabric != attachFabric {
 			return nil, fmt.Errorf("attachment is in fabric %s but connection %s is in fabric %s", attachFabric, attach.Spec.Connection, connFabric) //nolint:err113
 		}
 
@@ -279,7 +284,7 @@ func (attach *VPCAttachment) Validate(ctx context.Context, kube kclient.Reader, 
 				return nil, errors.Errorf("switch %s used in connection doesn't have vlan namespace %s", switchName, vpc.Spec.VLANNamespace)
 			}
 			// a VPC is reachable from each of its domains only if every switch it is attached to is in all of them
-			vpcDomains, swDomains := wiringapi.DomainsOrDefault(vpc.Spec.Topology.Domains), wiringapi.DomainsOrDefault(sw.Spec.Topology.Domains)
+			vpcDomains, swDomains := vpc.Spec.Topology.Domains, sw.Spec.Topology.Domains
 			if slices.ContainsFunc(vpcDomains, func(domain string) bool { return !slices.Contains(swDomains, domain) }) {
 				return nil, fmt.Errorf("vpc %s is in domains %v but switch %s is in domains %v", vpcName, vpcDomains, switchName, swDomains) //nolint:err113
 			}

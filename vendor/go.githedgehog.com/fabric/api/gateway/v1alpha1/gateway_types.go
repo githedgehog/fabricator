@@ -232,16 +232,26 @@ func (gw *Gateway) Default() {
 
 var linuxIfaceNameRegex = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_.-]{0,8}[a-zA-Z0-9]$`)
 
+// MaxGatewayNameLength leaves room for the gateway's daemonset names, gw--<name>--dataplane at most, which are used as
+// the app.kubernetes.io/name label value of their pods as well, and label values are capped at 63 characters
+const MaxGatewayNameLength = 63 - len("gw--") - len("--dataplane")
+
 func (gw *Gateway) Validate(ctx context.Context, kube kclient.Reader, fabricCfg *meta.FabricConfig) error {
 	if fabricCfg != nil && !fabricCfg.EnableGateway {
 		return fmt.Errorf("gateway support is not enabled: %w", ErrInvalidGW)
 	}
-	if gw.Namespace != kmetav1.NamespaceDefault {
-		return fmt.Errorf("gateway namespace must be %s: %w", kmetav1.NamespaceDefault, ErrInvalidGW)
+	if err := meta.ValidateObjectMetadata(gw); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidGW, err)
+	}
+	if len(gw.Name) > MaxGatewayNameLength {
+		return fmt.Errorf("name %s is too long, must be <= %d characters: %w", gw.Name, MaxGatewayNameLength, ErrInvalidGW)
 	}
 
 	if err := wiringapi.CheckFabricExists(ctx, kube, gw.Namespace, gw.Spec.Topology.Fabric); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidGW, err)
+	}
+	if gw.Spec.Topology.Domain == "" {
+		return fmt.Errorf("topology.domain is required: %w", ErrInvalidGW)
 	}
 
 	if gw.Spec.Workers == 0 || gw.Spec.Workers > 64 {
@@ -306,16 +316,16 @@ func (gw *Gateway) Validate(ctx context.Context, kube kclient.Reader, fabricCfg 
 	if gw.Spec.ASN == 0 {
 		return fmt.Errorf("ASN must be set: %w", ErrInvalidGW)
 	}
-	if fabricCfg != nil {
+	if fabricCfg != nil && kube != nil {
 		// leaves peer with every gateway of their domain using the domain gateway ASN
-		fabric, err := wiringapi.GetFabricSpec(ctx, kube, fabricCfg, gw.Namespace, gw.Spec.Topology.Fabric)
+		fabric, err := wiringapi.GetFabricSpec(ctx, kube, gw.Namespace, gw.Spec.Topology.Fabric)
 		if err != nil {
 			return fmt.Errorf("getting fabric: %w", err)
 		}
-		domainName := wiringapi.DomainNameOrDefault(gw.Spec.Topology.Domain)
+		domainName := gw.Spec.Topology.Domain
 		domain, exists := fabric.Domains[domainName]
 		if !exists {
-			return fmt.Errorf("domain %s not found in fabric %s: %w", domainName, wiringapi.FabricNameOrDefault(gw.Spec.Topology.Fabric), ErrInvalidGW)
+			return fmt.Errorf("domain %s not found in fabric %s: %w", domainName, gw.Spec.Topology.Fabric, ErrInvalidGW)
 		}
 		if gw.Spec.ASN != domain.GatewayASN {
 			return fmt.Errorf("ASN %d is not the gateway ASN %d of domain %s: %w", gw.Spec.ASN, domain.GatewayASN, domainName, ErrInvalidGW)
@@ -516,17 +526,17 @@ func (gw *Gateway) Validate(ctx context.Context, kube kclient.Reader, fabricCfg 
 		for _, gwGroup := range gwGroupList.Items {
 			gwGroupTopologies[gwGroup.Name] = gwGroup.Spec.Topology
 		}
-		gwFabric := wiringapi.FabricNameOrDefault(gw.Spec.Topology.Fabric)
-		gwDomain := wiringapi.DomainNameOrDefault(gw.Spec.Topology.Domain)
+		gwFabric := gw.Spec.Topology.Fabric
+		gwDomain := gw.Spec.Topology.Domain
 		for _, gwGroup := range gw.Spec.Groups {
 			groupTopology, exists := gwGroupTopologies[gwGroup.Name]
 			if !exists {
 				return fmt.Errorf("gateway group %s not found: %w", gwGroup.Name, ErrInvalidGW)
 			}
-			if groupFabric := wiringapi.FabricNameOrDefault(groupTopology.Fabric); groupFabric != gwFabric {
+			if groupFabric := groupTopology.Fabric; groupFabric != gwFabric {
 				return fmt.Errorf("gateway is in fabric %s but gateway group %s is in fabric %s: %w", gwFabric, gwGroup.Name, groupFabric, ErrInvalidGW)
 			}
-			if groupDomain := wiringapi.DomainNameOrDefault(groupTopology.Domain); groupDomain != gwDomain {
+			if groupDomain := groupTopology.Domain; groupDomain != gwDomain {
 				return fmt.Errorf("gateway is in domain %s but gateway group %s is in domain %s: %w", gwDomain, gwGroup.Name, groupDomain, ErrInvalidGW)
 			}
 			if fabricCfg != nil && len(fabricCfg.GatewayCommunities) > 0 && gwGroupMembers[gwGroup.Name] >= len(fabricCfg.GatewayCommunities) {
