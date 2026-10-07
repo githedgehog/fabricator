@@ -5,6 +5,7 @@ package v1beta1
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -94,12 +95,16 @@ func (fabricList *FabricList) GetItems() []meta.Object {
 	return items
 }
 
-// CheckFabricExists checks that a fabric reference names a Fabric that exists. The default fabric
-// is exempt: it is ensured at controller startup, and an object admitted before that has run would
-// otherwise be refused.
-func CheckFabricExists(ctx context.Context, kube kclient.Reader, namespace, fabricName string) error {
-	name := FabricNameOrDefault(fabricName)
-	if kube == nil || name == DefaultFabric {
+// ErrFabricNotSet is returned for an empty fabric reference: defaulting sets it, so only an object the refresh on
+// fabric-ctrl initialization had to leave alone or one validated without defaulting can have it empty
+var ErrFabricNotSet = errors.New("topology.fabric is required")
+
+// CheckFabricExists checks that a fabric reference is set and, given a client, names a Fabric that exists
+func CheckFabricExists(ctx context.Context, kube kclient.Reader, namespace, name string) error {
+	if name == "" {
+		return ErrFabricNotSet
+	}
+	if kube == nil {
 		return nil
 	}
 
@@ -146,30 +151,25 @@ func DefaultFabricSpec(cfg *meta.FabricConfig) FabricSpec {
 	}
 }
 
-// GetFabricSpec returns the spec of the named fabric. Fabric/default falls back to the controller
-// config while it does not exist: hhfab validates wiring with no controller running, and
-// admission can run before the initializer has created it.
-func GetFabricSpec(ctx context.Context, kube kclient.Reader, cfg *meta.FabricConfig, namespace, fabricName string) (*FabricSpec, error) {
-	name := FabricNameOrDefault(fabricName)
-
-	if kube != nil {
-		fabric := &Fabric{}
-		err := kube.Get(ctx, ktypes.NamespacedName{Name: name, Namespace: namespace}, fabric)
-		if err == nil {
-			return &fabric.Spec, nil
-		}
-		if !kapierrors.IsNotFound(err) {
-			return nil, fmt.Errorf("failed to get fabric %s: %w", name, err) // TODO replace with some internal error to not expose to the user
-		}
+// GetFabricSpec returns the spec of the named fabric
+func GetFabricSpec(ctx context.Context, kube kclient.Reader, namespace, name string) (*FabricSpec, error) {
+	if name == "" {
+		return nil, ErrFabricNotSet
+	}
+	if kube == nil {
+		return nil, fmt.Errorf("can't get fabric %s without a client", name) //nolint:err113
 	}
 
-	if name != DefaultFabric || cfg == nil {
-		return nil, fmt.Errorf("fabric %s not found", name) //nolint:err113
+	fabric := &Fabric{}
+	if err := kube.Get(ctx, ktypes.NamespacedName{Name: name, Namespace: namespace}, fabric); err != nil {
+		if kapierrors.IsNotFound(err) {
+			return nil, fmt.Errorf("fabric %s not found", name) //nolint:err113
+		}
+
+		return nil, fmt.Errorf("failed to get fabric %s: %w", name, err) // TODO replace with some internal error to not expose to the user
 	}
 
-	spec := DefaultFabricSpec(cfg)
-
-	return &spec, nil
+	return &fabric.Spec, nil
 }
 
 func (fabric *Fabric) Default() {
@@ -179,12 +179,6 @@ func (fabric *Fabric) Default() {
 func (fabric *Fabric) Validate(ctx context.Context, kube kclient.Reader, _ *meta.FabricConfig) (admission.Warnings, error) {
 	if err := meta.ValidateObjectMetadata(fabric); err != nil {
 		return nil, fmt.Errorf("failed to validate metadata: %w", err)
-	}
-
-	// the name becomes a label key segment, which Kubernetes caps at 63 characters. Without this
-	// the failure surfaces as an opaque label error on every object that references the fabric
-	if len(fabric.Name) > 63 {
-		return nil, fmt.Errorf("name %s is too long, must be <= 63 characters", fabric.Name) //nolint:err113
 	}
 
 	if fabric.Spec.LeafASNStart == 0 || fabric.Spec.LeafASNEnd == 0 {
@@ -201,6 +195,9 @@ func (fabric *Fabric) Validate(ctx context.Context, kube kclient.Reader, _ *meta
 		// the name becomes a label key segment
 		if errs := validation.IsDNS1123Label(name); len(errs) > 0 {
 			return nil, fmt.Errorf("invalid domain name %s: %s", name, strings.Join(errs, ", ")) //nolint:err113
+		}
+		if len(name) > meta.MaxNameLength {
+			return nil, fmt.Errorf("domain name %s is too long, must be <= %d characters", name, meta.MaxNameLength) //nolint:err113
 		}
 	}
 

@@ -753,9 +753,17 @@ func (conn *Connection) Default() {
 
 // ValidateDomains checks the connection does not cross domains where it must not, given its switches by name
 func (connSpec *ConnectionSpec) ValidateDomains(switches map[string]*Switch) error {
+	// a stored switch the refresh on fabric-ctrl initialization had to leave alone may have none, and the checks
+	// below would let a link through when there's nothing to compare
+	for _, name := range slices.Sorted(maps.Keys(switches)) {
+		if len(switches[name].Spec.Topology.Domains) == 0 {
+			return fmt.Errorf("switch %s has no domains", name) //nolint:err113
+		}
+	}
+
 	domainsOf := func(name string) []string {
 		if sw, exists := switches[name]; exists {
-			return DomainsOrDefault(sw.Spec.Topology.Domains)
+			return sw.Spec.Topology.Domains
 		}
 
 		return nil
@@ -907,14 +915,14 @@ func (conn *Connection) Validate(ctx context.Context, kube kclient.Reader, fabri
 		return nil, errors.Errorf("gateway connection is not allowed in current fabric configuration")
 	}
 
+	if err := CheckFabricExists(ctx, kube, conn.Namespace, conn.Spec.Topology.Fabric); err != nil {
+		return nil, err
+	}
+
 	if kube != nil {
 		rGroup := ""
 		rType := meta.RedundancyTypeNone
-		connFabric := FabricNameOrDefault(conn.Spec.Topology.Fabric)
-
-		if err := CheckFabricExists(ctx, kube, conn.Namespace, conn.Spec.Topology.Fabric); err != nil {
-			return nil, err
-		}
+		connFabric := conn.Spec.Topology.Fabric
 
 		switchObjs := map[string]*Switch{}
 		for _, switchName := range switches {
@@ -927,7 +935,7 @@ func (conn *Connection) Validate(ctx context.Context, kube kclient.Reader, fabri
 				return nil, errors.Wrapf(err, "failed to get switch %s", switchName) // TODO replace with some internal error to not expose to the user
 			}
 
-			if swFabric := FabricNameOrDefault(sw.Spec.Topology.Fabric); swFabric != connFabric {
+			if swFabric := sw.Spec.Topology.Fabric; swFabric != connFabric {
 				return nil, fmt.Errorf("connection is in fabric %s but switch %s is in fabric %s", connFabric, switchName, swFabric) //nolint:err113
 			}
 			switchObjs[switchName] = sw
