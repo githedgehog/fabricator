@@ -164,6 +164,9 @@ func (external *External) Validate(ctx context.Context, kube kclient.Reader, fab
 	if err := wiringapi.CheckFabricExists(ctx, kube, external.Namespace, external.Spec.Topology.Fabric); err != nil {
 		return nil, fmt.Errorf("failed to validate fabric: %w", err)
 	}
+	if external.Spec.Topology.Domain == "" {
+		return nil, fmt.Errorf("topology.domain is required") //nolint:err113
+	}
 
 	if len(external.Name) > 11 {
 		return nil, errors.Errorf("name %s is too long, must be <= 11 characters", external.Name)
@@ -223,16 +226,16 @@ func (external *External) Validate(ctx context.Context, kube kclient.Reader, fab
 			return nil, errors.Wrapf(err, "failed to get IPv4Namespace %s", external.Spec.IPv4Namespace) // TODO replace with some internal error to not expose to the user
 		}
 
-		extFabric := wiringapi.FabricNameOrDefault(external.Spec.Topology.Fabric)
-		if nsFabric := wiringapi.FabricNameOrDefault(ipNs.Spec.Topology.Fabric); nsFabric != extFabric {
+		extFabric := external.Spec.Topology.Fabric
+		if nsFabric := ipNs.Spec.Topology.Fabric; nsFabric != extFabric {
 			return nil, fmt.Errorf("external is in fabric %s but its IPv4Namespace %s is in fabric %s", extFabric, ipNs.Name, nsFabric) //nolint:err113
 		}
 
-		fabric, err := wiringapi.GetFabricSpec(ctx, kube, fabricCfg, external.Namespace, external.Spec.Topology.Fabric)
+		fabric, err := wiringapi.GetFabricSpec(ctx, kube, external.Namespace, external.Spec.Topology.Fabric)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get fabric: %w", err)
 		}
-		domain := wiringapi.DomainNameOrDefault(external.Spec.Topology.Domain)
+		domain := external.Spec.Topology.Domain
 		if _, exists := fabric.Domains[domain]; !exists {
 			return nil, fmt.Errorf("domain %s not found in fabric %s, topology.domain must name one of its domains", domain, extFabric) //nolint:err113
 		}
@@ -271,8 +274,8 @@ func (external *External) Validate(ctx context.Context, kube kclient.Reader, fab
 				return nil, fmt.Errorf("failed to list externals: %w", err) // TODO hide internal error
 			}
 			for _, other := range externals.Items {
-				if other.Spec.LocalASN == localASN && wiringapi.FabricNameOrDefault(other.Spec.Topology.Fabric) != extFabric {
-					warns = append(warns, fmt.Sprintf("localASN %d is also used by external %s of fabric %s, so the two fabrics can't reach each other through external systems", localASN, other.Name, wiringapi.FabricNameOrDefault(other.Spec.Topology.Fabric)))
+				if other.Spec.LocalASN == localASN && other.Spec.Topology.Fabric != extFabric {
+					warns = append(warns, fmt.Sprintf("localASN %d is also used by external %s of fabric %s, so the two fabrics can't reach each other through external systems", localASN, other.Name, other.Spec.Topology.Fabric))
 				}
 			}
 		}

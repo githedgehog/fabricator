@@ -103,22 +103,25 @@ func (gg *GatewayGroup) Validate(ctx context.Context, kube kclient.Reader, fabri
 	if fabricCfg != nil && !fabricCfg.EnableGateway {
 		return fmt.Errorf("gateway support is not enabled") //nolint:err113
 	}
-	if gg.Namespace != kmetav1.NamespaceDefault {
-		return fmt.Errorf("gatewaygroup namespace must be %s", kmetav1.NamespaceDefault) //nolint:err113
+	if err := meta.ValidateObjectMetadata(gg); err != nil {
+		return fmt.Errorf("invalid gatewaygroup: %w", err)
 	}
 
 	if err := wiringapi.CheckFabricExists(ctx, kube, gg.Namespace, gg.Spec.Topology.Fabric); err != nil {
 		return fmt.Errorf("invalid gateway group: %w", err)
 	}
+	if gg.Spec.Topology.Domain == "" {
+		return fmt.Errorf("invalid gateway group: topology.domain is required") //nolint:err113
+	}
 
-	if fabricCfg != nil {
-		fabric, err := wiringapi.GetFabricSpec(ctx, kube, fabricCfg, gg.Namespace, gg.Spec.Topology.Fabric)
+	if fabricCfg != nil && kube != nil {
+		fabric, err := wiringapi.GetFabricSpec(ctx, kube, gg.Namespace, gg.Spec.Topology.Fabric)
 		if err != nil {
 			return fmt.Errorf("getting fabric: %w", err)
 		}
-		domainName := wiringapi.DomainNameOrDefault(gg.Spec.Topology.Domain)
+		domainName := gg.Spec.Topology.Domain
 		if _, exists := fabric.Domains[domainName]; !exists {
-			return fmt.Errorf("domain %s not found in fabric %s", domainName, wiringapi.FabricNameOrDefault(gg.Spec.Topology.Fabric)) //nolint:err113
+			return fmt.Errorf("domain %s not found in fabric %s", domainName, gg.Spec.Topology.Fabric) //nolint:err113
 		}
 	}
 

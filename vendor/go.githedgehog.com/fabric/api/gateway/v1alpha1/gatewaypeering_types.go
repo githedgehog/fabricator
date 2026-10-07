@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"maps"
 	"net/netip"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -22,6 +21,7 @@ import (
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ktypes "k8s.io/apimachinery/pkg/types"
+	kvalidation "k8s.io/apimachinery/pkg/util/validation"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -29,9 +29,6 @@ const (
 	DefaultMasqueradeIdleTimeout  = 2 * time.Minute
 	DefaultPortForwardIdleTimeout = 2 * time.Minute
 )
-
-// TODO: deduplicate and expose from fabric meta package
-var nameChecker = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`)
 
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
@@ -332,8 +329,8 @@ func (p *GatewayPeering) Validate(ctx context.Context, kube kclient.Reader, fabr
 	if fabricCfg != nil && !fabricCfg.EnableGateway {
 		return fmt.Errorf("gateway support is not enabled") //nolint:err113
 	}
-	if p.Namespace != kmetav1.NamespaceDefault {
-		return fmt.Errorf("gatewaypeering namespace must be %s", kmetav1.NamespaceDefault) //nolint:err113
+	if err := meta.ValidateObjectMetadata(p); err != nil {
+		return fmt.Errorf("invalid gatewaypeering: %w", err)
 	}
 	if p.Spec.GatewayGroup == "" {
 		return fmt.Errorf("gateway group must be specified %s", p.Name) //nolint:err113
@@ -448,7 +445,7 @@ func (p *GatewayPeering) Validate(ctx context.Context, kube kclient.Reader, fabr
 		for i, rule := range acl.Rules {
 			ruleBlob := ""
 			if rule.Name != "" {
-				if !nameChecker.MatchString(rule.Name) {
+				if len(kvalidation.IsDNS1123Subdomain(rule.Name)) > 0 {
 					return fmt.Errorf("invalid rule name %q in ACL rule %d", rule.Name, i) //nolint:err113
 				}
 				if len(rule.Name) > 64 {
@@ -518,12 +515,17 @@ func (p *GatewayPeering) Validate(ctx context.Context, kube kclient.Reader, fabr
 			return fmt.Errorf("failed to get gateway group %s: %w", p.Spec.GatewayGroup, err)
 		}
 
-		peeringFabric := wiringapi.FabricNameOrDefault(p.Spec.Topology.Fabric)
-		if groupFabric := wiringapi.FabricNameOrDefault(gwGroup.Spec.Topology.Fabric); groupFabric != peeringFabric {
+		peeringFabric := p.Spec.Topology.Fabric
+		if groupFabric := gwGroup.Spec.Topology.Fabric; groupFabric != peeringFabric {
 			return fmt.Errorf("peering is in fabric %s but gateway group %s is in fabric %s", peeringFabric, p.Spec.GatewayGroup, groupFabric) //nolint:err113
 		}
 		// the gateways handling the peering are reachable only from leaves in their domain
-		groupDomain := wiringapi.DomainNameOrDefault(gwGroup.Spec.Topology.Domain)
+		groupDomain := gwGroup.Spec.Topology.Domain
+		// a stored gateway group the refresh on fabric-ctrl initialization had to leave alone may have none, and an
+		// external without one too would then look like it's in the same domain
+		if groupDomain == "" {
+			return fmt.Errorf("gateway group %s has no domain", p.Spec.GatewayGroup) //nolint:err113
+		}
 
 		if fabricCfg != nil && fabricCfg.ExtraValidators.Peering != nil {
 			if err := fabricCfg.ExtraValidators.Peering(ctx, kube, p); err != nil {
@@ -546,10 +548,10 @@ func (p *GatewayPeering) Validate(ctx context.Context, kube kclient.Reader, fabr
 					return fmt.Errorf("failed to get External %s: %w", extName, err)
 				}
 
-				if extFabric := wiringapi.FabricNameOrDefault(external.Spec.Topology.Fabric); extFabric != peeringFabric {
+				if extFabric := external.Spec.Topology.Fabric; extFabric != peeringFabric {
 					return fmt.Errorf("peering is in fabric %s but external %s is in fabric %s", peeringFabric, extName, extFabric) //nolint:err113
 				}
-				if extDomain := wiringapi.DomainNameOrDefault(external.Spec.Topology.Domain); extDomain != groupDomain {
+				if extDomain := external.Spec.Topology.Domain; extDomain != groupDomain {
 					return fmt.Errorf("gateway group %s is in domain %s but external %s is in domain %s", p.Spec.GatewayGroup, groupDomain, extName, extDomain) //nolint:err113
 				}
 
@@ -566,10 +568,10 @@ func (p *GatewayPeering) Validate(ctx context.Context, kube kclient.Reader, fabr
 
 				return fmt.Errorf("failed to get VPC %s: %w", vpcName, err)
 			}
-			if vpcFabric := wiringapi.FabricNameOrDefault(vpc.Spec.Topology.Fabric); vpcFabric != peeringFabric {
+			if vpcFabric := vpc.Spec.Topology.Fabric; vpcFabric != peeringFabric {
 				return fmt.Errorf("peering is in fabric %s but vpc %s is in fabric %s", peeringFabric, vpcName, vpcFabric) //nolint:err113
 			}
-			if vpcDomains := wiringapi.DomainsOrDefault(vpc.Spec.Topology.Domains); !slices.Contains(vpcDomains, groupDomain) {
+			if vpcDomains := vpc.Spec.Topology.Domains; !slices.Contains(vpcDomains, groupDomain) {
 				return fmt.Errorf("gateway group %s is in domain %s but vpc %s is in domains %v", p.Spec.GatewayGroup, groupDomain, vpcName, vpcDomains) //nolint:err113
 			}
 

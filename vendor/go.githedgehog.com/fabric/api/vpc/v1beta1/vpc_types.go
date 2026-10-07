@@ -455,7 +455,10 @@ func (vpc *VPC) Validate(ctx context.Context, kube kclient.Reader, fabricCfg *me
 		return nil, fmt.Errorf("failed to validate fabric: %w", err)
 	}
 
-	domains := slices.Sorted(slices.Values(wiringapi.DomainsOrDefault(vpc.Spec.Topology.Domains)))
+	domains := slices.Sorted(slices.Values(vpc.Spec.Topology.Domains))
+	if len(domains) == 0 {
+		return nil, fmt.Errorf("at least one domain is required") //nolint:err113
+	}
 	if slices.Contains(domains, "") {
 		return nil, fmt.Errorf("domain name cannot be empty") //nolint:err113
 	}
@@ -493,6 +496,10 @@ func (vpc *VPC) Validate(ctx context.Context, kube kclient.Reader, fabricCfg *me
 	vlans := map[uint16]bool{}
 	hostBGPSubnets := 0
 	for subnetName, subnetCfg := range vpc.Spec.Subnets {
+		// the name is used in labels and in the name of the subnet's DHCPSubnet, as <vpc>--<subnet>
+		if err := meta.ValidateName("subnet name", subnetName); err != nil {
+			return nil, err //nolint:wrapcheck
+		}
 		if subnetCfg.Subnet == "" {
 			return nil, errors.Errorf("subnet %s: missing subnet", subnetName)
 		}
@@ -821,12 +828,12 @@ func (vpc *VPC) Validate(ctx context.Context, kube kclient.Reader, fabricCfg *me
 			return nil, errors.Wrapf(err, "failed to get IPv4Namespace %s", vpc.Spec.IPv4Namespace) // TODO replace with some internal error to not expose to the user
 		}
 
-		vpcFabric := wiringapi.FabricNameOrDefault(vpc.Spec.Topology.Fabric)
-		if nsFabric := wiringapi.FabricNameOrDefault(ipNs.Spec.Topology.Fabric); nsFabric != vpcFabric {
+		vpcFabric := vpc.Spec.Topology.Fabric
+		if nsFabric := ipNs.Spec.Topology.Fabric; nsFabric != vpcFabric {
 			return nil, fmt.Errorf("vpc is in fabric %s but its IPv4Namespace %s is in fabric %s", vpcFabric, ipNs.Name, nsFabric) //nolint:err113
 		}
 
-		fabric, err := wiringapi.GetFabricSpec(ctx, kube, fabricCfg, vpc.Namespace, vpc.Spec.Topology.Fabric)
+		fabric, err := wiringapi.GetFabricSpec(ctx, kube, vpc.Namespace, vpc.Spec.Topology.Fabric)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get fabric: %w", err)
 		}
@@ -883,10 +890,26 @@ func (vpc *VPC) Validate(ctx context.Context, kube kclient.Reader, fabricCfg *me
 				err := kube.Get(ctx, ktypes.NamespacedName{Name: subnetCfg.DHCP.RelayVPC, Namespace: vpc.Namespace}, relayVPC)
 				if err != nil {
 					if kapierrors.IsNotFound(err) {
-						return nil, errors.Errorf("subnet %s: dhcp relay VPC %s not found", subnetName, subnetCfg.DHCP.RelayVPC)
+						return nil, fmt.Errorf("subnet %s: dhcp relay VPC %s not found", subnetName, subnetCfg.DHCP.RelayVPC) //nolint:err113
 					}
 
-					return nil, errors.Wrapf(err, "subnet %s: failed to get dhcp relay VPC %s", subnetName, subnetCfg.DHCP.RelayVPC) // TODO replace with some internal error to not expose to the user
+					return nil, fmt.Errorf("subnet %s: failed to get dhcp relay VPC %s: %w", subnetName, subnetCfg.DHCP.RelayVPC, err) // TODO replace with some internal error to not expose to the user
+				}
+
+				// the relay VPC is built on the switches the subnet is attached to, so it has to be one the VPC could
+				// peer with
+				if relayFabric := relayVPC.Spec.Topology.Fabric; relayFabric != vpcFabric {
+					return nil, fmt.Errorf("subnet %s: vpc is in fabric %s but dhcp relay vpc %s is in fabric %s", subnetName, vpcFabric, relayVPC.Name, relayFabric) //nolint:err113
+				}
+				vpcDomains, relayDomains := vpc.Spec.Topology.Domains, relayVPC.Spec.Topology.Domains
+				if !slices.ContainsFunc(vpcDomains, func(domain string) bool { return slices.Contains(relayDomains, domain) }) {
+					return nil, fmt.Errorf("subnet %s: vpc is in domains %v and dhcp relay vpc %s in domains %v, they must share one", subnetName, vpcDomains, relayVPC.Name, relayDomains) //nolint:err113
+				}
+				if relayNs := relayVPC.Spec.IPv4Namespace; relayNs != vpc.Spec.IPv4Namespace {
+					return nil, fmt.Errorf("subnet %s: vpc is in IPv4 namespace %s but dhcp relay vpc %s is in %s", subnetName, vpc.Spec.IPv4Namespace, relayVPC.Name, relayNs) //nolint:err113
+				}
+				if relayNs := relayVPC.Spec.VLANNamespace; relayNs != vpc.Spec.VLANNamespace {
+					return nil, fmt.Errorf("subnet %s: vpc is in VLAN namespace %s but dhcp relay vpc %s is in %s", subnetName, vpc.Spec.VLANNamespace, relayVPC.Name, relayNs) //nolint:err113
 				}
 			}
 		}
