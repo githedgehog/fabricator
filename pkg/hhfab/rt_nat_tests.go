@@ -668,6 +668,14 @@ func gatewayPeeringOverlapNATTest(ctx context.Context, testCtx *VPCPeeringTestCt
 			return lastErr == nil || !strings.Contains(lastErr.Error(), "IPv4Namespace has VPCs"), nil
 		})
 		if err = errors.Join(lastErr, err); err != nil {
+			vpcs := &vpcapi.VPCList{}
+			if listErr := testCtx.kube.List(ctx, vpcs, kclient.MatchingLabels{vpcapi.LabelIPv4NS: overlapNSName}); listErr != nil {
+				err = errors.Join(err, fmt.Errorf("listing remaining vpcs: %w", listErr))
+			}
+			for _, vpc := range vpcs.Items {
+				err = errors.Join(err, fmt.Errorf("vpc %s remains: deletionTimestamp=%v finalizers=%v", vpc.Name, vpc.DeletionTimestamp, vpc.Finalizers))
+			}
+
 			return fmt.Errorf("deleting overlap namespace: %w", err)
 		}
 		slog.Info("Deleted overlap namespace", "name", overlapNSName, "attempts", attempts, "took", time.Since(start))
