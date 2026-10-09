@@ -181,7 +181,7 @@ type stats struct {
 	started, bound, failed                    atomic.Int64
 	sent, retransmits, naks                   atomic.Int64
 	renewsOK, renewsFailed, ipChanges, leases atomic.Int64
-	lateReplies, badReplies                   atomic.Int64
+	lateReplies, badReplies, emptyReplies     atomic.Int64
 }
 
 func (s *stats) add(dst *[]time.Duration, d time.Duration) {
@@ -367,6 +367,12 @@ func (r *runner) exchange(ctx context.Context, cl *client, build func(xid dhcpv4
 				break recv
 			case resp := <-ch:
 				if slices.Contains(want, resp.MessageType()) {
+					// dhcpd answers with an empty OFFER/ACK when it failed to allocate, that's not a lease
+					if resp.MessageType() != dhcpv4.MessageTypeNak && resp.YourIPAddr.IsUnspecified() {
+						r.stats.emptyReplies.Add(1)
+
+						continue
+					}
 					timer.Stop()
 
 					return resp, attempt + 1, time.Since(sentAt), nil
@@ -630,7 +636,7 @@ func Run(ctx context.Context, c *Config) (*Result, error) {
 		dora := st.latLine("dora", st.doraLat)
 		st.m.Unlock()
 		slog.Info("Progress", "t", time.Since(begin).Round(time.Second), "started", st.started.Load(), "bound", st.bound.Load(),
-			"failed", st.failed.Load(), "sent", st.sent.Load(), "retx", st.retransmits.Load(), "naks", st.naks.Load(),
+			"failed", st.failed.Load(), "sent", st.sent.Load(), "retx", st.retransmits.Load(), "naks", st.naks.Load(), "empty", st.emptyReplies.Load(),
 			"renewOK", st.renewsOK.Load(), "renewFail", st.renewsFailed.Load(), "late", st.lateReplies.Load())
 		slog.Info("Latency " + dora)
 	}
@@ -658,8 +664,8 @@ loop:
 	if at := r.allBoundAt.Load(); at > 0 {
 		fmt.Fprintf(w, "all clients bound after %s\n", time.Duration(at).Round(time.Millisecond))
 	}
-	fmt.Fprintf(w, "sent=%d retransmits=%d naks=%d late_replies=%d bad_replies=%d\n", st.sent.Load(), st.retransmits.Load(),
-		st.naks.Load(), st.lateReplies.Load(), st.badReplies.Load())
+	fmt.Fprintf(w, "sent=%d retransmits=%d naks=%d late_replies=%d bad_replies=%d empty_replies=%d\n", st.sent.Load(), st.retransmits.Load(),
+		st.naks.Load(), st.lateReplies.Load(), st.badReplies.Load(), st.emptyReplies.Load())
 	fmt.Fprintf(w, "renews_ok=%d renews_failed=%d ip_changes=%d\n", st.renewsOK.Load(), st.renewsFailed.Load(), st.ipChanges.Load())
 	fmt.Fprintln(w, st.latLine("offer", st.offerLat))
 	fmt.Fprintln(w, st.latLine("ack", st.ackLat))

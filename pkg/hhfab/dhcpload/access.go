@@ -208,6 +208,9 @@ func (v *vlanEndpoint) open(parent netlink.Link) error {
 // openAccessEndpoints creates a VLAN interface on c.Iface for every subnet, the leaf port the interface is wired to has
 // to have the VPC subnets attached with their VLANs tagged
 func (c *Config) openAccessEndpoints(ctx context.Context, st *stats) ([]endpoint, error) {
+	if c.Iface == "" {
+		return nil, errors.New("access mode needs an interface") //nolint:err113
+	}
 	parent, err := netlink.LinkByName(c.Iface)
 	if err != nil {
 		return nil, fmt.Errorf("getting interface %s: %w", c.Iface, err)
