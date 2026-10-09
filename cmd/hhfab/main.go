@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"slices"
@@ -28,6 +29,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab/recipe"
 	"go.githedgehog.com/fabricator/pkg/hhfab"
 	"go.githedgehog.com/fabricator/pkg/hhfab/bench"
+	"go.githedgehog.com/fabricator/pkg/hhfab/dhcpload"
 	"go.githedgehog.com/fabricator/pkg/hhfab/diagram"
 	"go.githedgehog.com/fabricator/pkg/hhfab/pdu"
 	"go.githedgehog.com/fabricator/pkg/version"
@@ -262,6 +264,7 @@ func Run(ctx context.Context) error {
 	var wgDefaultSwitchProfile string
 	wgSwitchProfileOverrides := cli.NewStringSlice()
 	var wgServerPortBase string
+	dhcpDefaults := dhcpload.DefaultConfig()
 	vlabWiringGenFlags := []cli.Flag{
 		&cli.UintFlag{
 			Name:        "spines-count",
@@ -1753,6 +1756,76 @@ Examples:
 								RequireAllServers: c.Bool("all-servers"),
 							}); err != nil {
 								return fmt.Errorf("test-connectivity: %w", err)
+							}
+
+							return nil
+						},
+					},
+					{
+						Name:  "dhcp-load",
+						Usage: "[PREVIEW] load test fabric-dhcpd with emulated leaf relays and DHCP clients (needs root and a running VLAB)",
+						Description: `Emulates leaf DHCP relays and thousands of DHCP clients behind them against the control node of the running VLAB.
+
+It registers the relay IPs as fake leaf Switches (cloned from a real leaf, the fabric controller creates Agents for them
+that never come up), creates a VPC with DHCP-enabled subnets, runs the clients from a network namespace attached to the
+VLAB management bridge and removes everything on exit (unless --keep is set). Don't use on a VLAB serving other purposes.`,
+						Flags: flatten(defaultFlags, []cli.Flag{
+							&cli.IntFlag{Name: "servers", Usage: "number of emulated servers", Value: dhcpDefaults.Servers},
+							&cli.IntFlag{Name: "nics", Usage: "DHCP clients (NICs) per server", Value: dhcpDefaults.NICs},
+							&cli.IntFlag{Name: "leaves", Usage: "number of emulated leaf relays", Value: dhcpDefaults.Leaves},
+							&cli.StringFlag{Name: "layout", Usage: "subnet layout: rail (one subnet per NIC index), flat (one subnet) or leaf (one subnet per leaf x NIC)", Value: dhcpDefaults.Layout},
+							&cli.DurationFlag{Name: "ramp", Usage: "spread client start times uniformly over this window (0 = all at once)", Value: dhcpDefaults.Ramp},
+							&cli.StringFlag{Name: "retries", Usage: "retransmit schedule: pxe (4,8,16,32s) or rfc (4,8,16,32,64s, +-1s jitter)", Value: dhcpDefaults.Retries},
+							&cli.IntFlag{Name: "max-attempts", Usage: "max transmissions per DISCOVER/REQUEST exchange (0 = length of the retry schedule)"},
+							&cli.DurationFlag{Name: "duration", Usage: "total run time incl. renewals, 0 = stop once every client is bound or gave up"},
+							&cli.DurationFlag{Name: "renew-every", Usage: "override the renewal interval (default T1 from the ACK, i.e. lease/2)"},
+							&cli.IntFlag{Name: "lease", Usage: "DHCP lease time of the VPC subnets in seconds", Value: dhcpDefaults.LeaseTime},
+							&cli.BoolFlag{Name: "release", Usage: "send RELEASE for every bound client on exit"},
+							&cli.StringFlag{Name: "relay-base", Usage: "first emulated leaf relay IP (giaddr), leaves use consecutive IPs, must be in the management subnet outside of the management DHCP range", Value: dhcpDefaults.RelayBase.String()},
+							&cli.StringFlag{Name: "cidr-base", Usage: "subnet i of the VPC gets the /20 at cidr-base + i*4096, must be inside the default IPv4 namespace", Value: dhcpDefaults.CIDRBase.String()},
+							&cli.IntFlag{Name: "vlan-base", Usage: "VLAN of the first VPC subnet, must be inside the VLAN namespace of the leaves", Value: dhcpDefaults.VLANBase},
+							&cli.StringFlag{Name: "vpc", Usage: "name of the VPC to create", Value: dhcpDefaults.VPC},
+							&cli.StringFlag{Name: "out", Usage: "write per-client results CSV to this file"},
+							&cli.StringFlag{Name: "fake-protocol-base", Usage: "protocol IP of the first fake leaf, must not be used by real switches", Value: "172.30.11.1"},
+							&cli.StringFlag{Name: "fake-vtep-base", Usage: "VTEP IP of the first fake leaf, must not be used by real switches (empty = none)", Value: "172.30.15.1"},
+							&cli.UintFlag{Name: "fake-asn-base", Usage: "ASN of the first fake leaf, must not be used by real switches", Value: 65400},
+							&cli.BoolFlag{Name: "keep", Usage: "don't remove the fake switches, the VPC and the network namespace on exit (for debugging)"},
+							&cli.BoolFlag{Name: "skip-ready-check", Usage: "don't wait for the fabric to be ready before the test"},
+						}),
+						Before: before(false),
+						Action: func(c *cli.Context) error {
+							cfg := dhcpload.DefaultConfig()
+							var err error
+							if cfg.RelayBase, err = netip.ParseAddr(c.String("relay-base")); err != nil {
+								return fmt.Errorf("parsing relay-base: %w", err)
+							}
+							if cfg.CIDRBase, err = netip.ParseAddr(c.String("cidr-base")); err != nil {
+								return fmt.Errorf("parsing cidr-base: %w", err)
+							}
+							cfg.Servers = c.Int("servers")
+							cfg.NICs = c.Int("nics")
+							cfg.Leaves = c.Int("leaves")
+							cfg.Layout = c.String("layout")
+							cfg.Ramp = c.Duration("ramp")
+							cfg.Retries = c.String("retries")
+							cfg.MaxAttempts = c.Int("max-attempts")
+							cfg.Duration = c.Duration("duration")
+							cfg.RenewEvery = c.Duration("renew-every")
+							cfg.LeaseTime = c.Int("lease")
+							cfg.Release = c.Bool("release")
+							cfg.VLANBase = c.Int("vlan-base")
+							cfg.VPC = c.String("vpc")
+							cfg.CSVPath = c.String("out")
+
+							if err := hhfab.DoVLABDHCPLoad(ctx, workDir, cacheDir, hhfab.DHCPLoadOpts{
+								Config:           *cfg,
+								FakeProtocolBase: c.String("fake-protocol-base"),
+								FakeVTEPBase:     c.String("fake-vtep-base"),
+								FakeASNBase:      uint32(c.Uint("fake-asn-base")), //nolint:gosec
+								Keep:             c.Bool("keep"),
+								SkipReadyCheck:   c.Bool("skip-ready-check"),
+							}); err != nil {
+								return fmt.Errorf("dhcp-load: %w", err)
 							}
 
 							return nil
