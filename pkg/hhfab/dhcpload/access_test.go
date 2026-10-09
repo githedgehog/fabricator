@@ -67,8 +67,6 @@ func TestParseFrame(t *testing.T) {
 func TestValidateAccess(t *testing.T) {
 	c := testConfig()
 	c.Mode = ModeAccess
-	require.Error(t, c.Validate(), "no interface")
-	c.Iface = "enp2s1"
 	require.NoError(t, c.Validate())
 	c.Layout = LayoutLeaf
 	require.Error(t, c.Validate())

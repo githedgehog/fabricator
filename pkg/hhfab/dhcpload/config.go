@@ -106,8 +106,8 @@ func (c *Config) Validate() error {
 	if !slices.Contains([]string{ModeRelay, ModeAccess}, c.Mode) {
 		return fmt.Errorf("invalid mode %q", c.Mode) //nolint:err113
 	}
-	if c.Mode == ModeAccess && (c.Layout == LayoutLeaf || c.Iface == "") {
-		return errors.New("access mode needs an interface and the rail or flat layout") //nolint:err113
+	if c.Mode == ModeAccess && c.Layout == LayoutLeaf {
+		return errors.New("access mode needs the rail or flat layout") //nolint:err113
 	}
 	if !slices.Contains([]string{LayoutRail, LayoutFlat, LayoutLeaf}, c.Layout) {
 		return fmt.Errorf("invalid layout %q", c.Layout) //nolint:err113
