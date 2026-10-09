@@ -6,6 +6,7 @@ package diagram
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -193,8 +194,12 @@ func sortNodes(nodes []Node, links []Link) TieredNodes {
 		}
 	}
 
-	// Sort spine nodes by description first, then by ID
+	// Sort spine nodes by fabric and domains, then description, then ID
 	sort.Slice(result.Spine, func(i, j int) bool {
+		if c := compareTopology(result.Spine[i], result.Spine[j]); c != 0 {
+			return c < 0
+		}
+
 		descI, hasDescI := result.Spine[i].Properties[PropDescription]
 		descJ, hasDescJ := result.Spine[j].Properties[PropDescription]
 
@@ -211,8 +216,12 @@ func sortNodes(nodes []Node, links []Link) TieredNodes {
 		return result.Spine[i].ID < result.Spine[j].ID
 	})
 
-	// Sort leaf nodes by description first, then by ID
+	// Sort leaf nodes by fabric and domains, then description, then ID
 	sort.Slice(result.Leaf, func(i, j int) bool {
+		if c := compareTopology(result.Leaf[i], result.Leaf[j]); c != 0 {
+			return c < 0
+		}
+
 		descI, hasDescI := result.Leaf[i].Properties[PropDescription]
 		descJ, hasDescJ := result.Leaf[j].Properties[PropDescription]
 
@@ -230,6 +239,10 @@ func sortNodes(nodes []Node, links []Link) TieredNodes {
 	})
 
 	sort.Slice(result.Gateway, func(i, j int) bool {
+		if c := compareTopology(result.Gateway[i], result.Gateway[j]); c != 0 {
+			return c < 0
+		}
+
 		return result.Gateway[i].ID < result.Gateway[j].ID
 	})
 
@@ -497,6 +510,7 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 				PropRole: SwitchRoleExternal,
 			},
 		}
+		setTopologyProps(node.Properties, external.Spec.Topology.Fabric, external.Spec.Topology.Domain)
 		if asn, ok := externalNodeASN[external.Name]; ok {
 			node.Properties[PropASN] = fmt.Sprintf("%d", asn)
 		}
@@ -621,6 +635,7 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 		node.Label = fmt.Sprintf("%s\n%s", sw.Name, role)
 
 		node.Properties[PropDescription] = sw.Spec.Description
+		setTopologyProps(node.Properties, sw.Spec.Topology.Fabric, sw.Spec.Topology.Domains...)
 
 		// Extract redundancy group information
 		if sw.Spec.Redundancy.Group != "" {
@@ -834,6 +849,22 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 		}
 	}
 
+	// Externals attached with each other's switch IP as neighbor are the two ends of a link between fabrics
+	for i, a := range externalAttachments.Items {
+		aIP, _, _ := strings.Cut(a.Spec.Switch.IP, "/")
+		for _, b := range externalAttachments.Items[i+1:] {
+			bIP, _, _ := strings.Cut(b.Spec.Switch.IP, "/")
+			if aIP != "" && bIP != "" && aIP == b.Spec.Neighbor.IP && bIP == a.Spec.Neighbor.IP {
+				topo.Links = append(topo.Links, Link{
+					Source:     a.Spec.External,
+					Target:     b.Spec.External,
+					Type:       EdgeTypeInterconnect,
+					Properties: map[string]string{},
+				})
+			}
+		}
+	}
+
 	// Fourth pass: handle static external connections
 	for connName, switchPort := range staticExternalConnections {
 		switchID := wiringapi.SplitPortName(switchPort)[0]
@@ -999,6 +1030,7 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 		if topo.Nodes[i].Properties == nil {
 			topo.Nodes[i].Properties = map[string]string{}
 		}
+		setTopologyProps(topo.Nodes[i].Properties, spec.Topology.Fabric, spec.Topology.Domain)
 		if spec.ASN != 0 {
 			topo.Nodes[i].Properties[PropASN] = fmt.Sprintf("%d", spec.ASN)
 		}
@@ -1006,9 +1038,72 @@ func GetTopologyFor(ctx context.Context, client kclient.Reader) (Topology, error
 		topo.Nodes[i].Properties[PropVTEPIP] = spec.VTEPIP
 	}
 
+	fabrics := map[string]string{}
+	for _, node := range topo.Nodes {
+		if node.Type == NodeTypeSwitch {
+			fabrics[node.ID] = node.Properties[PropFabric]
+		}
+	}
+	for i, node := range topo.Nodes {
+		if node.Type != NodeTypeServer {
+			continue
+		}
+		for _, link := range topo.Links {
+			if fabric := fabrics[link.Source]; link.Target == node.ID && fabric != "" {
+				node.Properties[PropFabric] = fabric
+			}
+			if fabric := fabrics[link.Target]; link.Source == node.ID && fabric != "" {
+				node.Properties[PropFabric] = fabric
+			}
+		}
+		topo.Nodes[i] = node
+	}
+
 	generateUnderlayLayer = hasUnderlayData(topo)
 
 	return topo, nil
+}
+
+func setTopologyProps(props map[string]string, fabric string, domains ...string) {
+	if fabric == "" {
+		fabric = wiringapi.DefaultFabric
+	}
+	domains = slices.DeleteFunc(slices.Clone(domains), func(d string) bool { return d == "" })
+	if len(domains) == 0 {
+		domains = []string{wiringapi.DefaultFabricDomain}
+	}
+	slices.SortFunc(domains, compareTopologyNames)
+	props[PropFabric] = fabric
+	props[PropDomains] = strings.Join(domains, ",")
+}
+
+// compareTopologyNames orders fabric or domain names with the default one first (both are "default")
+func compareTopologyNames(a, b string) int {
+	switch {
+	case a == b:
+		return 0
+	case a == wiringapi.DefaultFabric:
+		return -1
+	case b == wiringapi.DefaultFabric:
+		return 1
+	}
+
+	return strings.Compare(a, b)
+}
+
+// compareTopology orders nodes by fabric, then by domains: for two domains, the nodes only in the first
+// one come before the ones in both, followed by the ones only in the second
+func compareTopology(a, b Node) int {
+	if c := compareTopologyNames(a.Properties[PropFabric], b.Properties[PropFabric]); c != 0 {
+		return c
+	}
+	domainsA := strings.Split(a.Properties[PropDomains], ",")
+	domainsB := strings.Split(b.Properties[PropDomains], ",")
+	if c := compareTopologyNames(domainsA[0], domainsB[0]); c != 0 {
+		return c
+	}
+
+	return compareTopologyNames(domainsA[len(domainsA)-1], domainsB[len(domainsB)-1])
 }
 
 func getNodeTypeInfo(node Node) (string, string) {
