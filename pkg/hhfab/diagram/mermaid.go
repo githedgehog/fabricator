@@ -5,8 +5,10 @@ package diagram
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -67,142 +69,82 @@ func generateMermaid(topo Topology) string {
 	redundancySubgraphs := make(map[string][]Node)
 	redundancyTypes := make(map[string]string)
 
-	// Only add gateway subgraph if gateways are present
-	if len(layers.Gateway) > 0 {
-		b.WriteString("subgraph Gateways[\" \"]\n")
-		b.WriteString("\tdirection LR\n")
-		for _, node := range layers.Gateway {
-			nodeID := cleanID(node.ID)
-			label := formatLabel(node.Label)
-			b.WriteString(fmt.Sprintf("\t%s[\"%s\"]\n", nodeID, label))
+	fabrics := []string{}
+	for _, node := range slices.Concat(layers.Leaf, layers.Spine) {
+		if !slices.Contains(fabrics, node.Properties[PropFabric]) {
+			fabrics = append(fabrics, node.Properties[PropFabric])
 		}
-		b.WriteString("end\n\n")
 	}
+	slices.SortFunc(fabrics, compareTopologyNames)
 
-	if len(leftExternals) > 0 {
-		b.WriteString("subgraph ExternalsLeft[\" \"]\n")
-		b.WriteString("\tdirection TB\n")
-		for _, node := range leftExternals {
-			nodeID := cleanID(node.ID)
-			label := formatLabel(node.Label)
-			b.WriteString(fmt.Sprintf("\t%s[\"%s\"]\n", nodeID, label))
-		}
-		b.WriteString("end\n\n")
-	}
-
-	if len(layers.Spine) > 0 {
-		b.WriteString("subgraph Spines[\" \"]\n")
-		b.WriteString("\tdirection LR\n")
-
-		for _, node := range layers.Spine {
-			nodeID := cleanID(node.ID)
-			label := formatLabel(node.Label)
-			b.WriteString(fmt.Sprintf("\tsubgraph %s_Group [\" \"]\n", nodeID))
-			b.WriteString("\t\tdirection TB\n")
-			b.WriteString(fmt.Sprintf("\t\t%s[\"%s\"]\n", nodeID, label))
-			b.WriteString("\tend\n")
-		}
-		b.WriteString("end\n\n")
-	}
-
-	if len(rightExternals) > 0 {
-		b.WriteString("subgraph ExternalsRight[\" \"]\n")
-		b.WriteString("\tdirection TB\n")
-		for _, node := range rightExternals {
-			nodeID := cleanID(node.ID)
-			label := formatLabel(node.Label)
-			b.WriteString(fmt.Sprintf("\t%s[\"%s\"]\n", nodeID, label))
-		}
-		b.WriteString("end\n\n")
-	}
-
-	if len(layers.Leaf) > 0 {
-		b.WriteString("subgraph Leaves[\" \"]\n")
-		b.WriteString("\tdirection LR\n")
-
-		singleLeaves := []Node{}
-
-		for _, node := range layers.Leaf {
-			if groupName, hasGroup := node.Properties[PropRedundancyGroup]; hasGroup && groupName != "" {
-				if _, alreadyProcessed := redundancySubgraphs[groupName]; !alreadyProcessed {
-					var groupSwitches []Node
-					var redundancyType string
-
-					for _, otherNode := range layers.Leaf {
-						if otherGroupName, ok := otherNode.Properties[PropRedundancyGroup]; ok && otherGroupName == groupName {
-							groupSwitches = append(groupSwitches, otherNode)
-							if redType, hasType := otherNode.Properties[PropRedundancyType]; hasType && redundancyType == "" {
-								redundancyType = redType
-							}
-						}
-					}
-
-					if len(groupSwitches) > 1 {
-						redundancySubgraphs[groupName] = groupSwitches
-						redundancyTypes[groupName] = redundancyType
-					}
-				}
-			} else {
-				isPartOfGroup := false
-				for _, groupNodes := range redundancySubgraphs {
-					for _, groupNode := range groupNodes {
-						if groupNode.ID == node.ID {
-							isPartOfGroup = true
-
-							break
-						}
-					}
-					if isPartOfGroup {
-						break
-					}
+	var invisibleSubgraphs []string
+	if len(fabrics) <= 1 {
+		invisibleSubgraphs = writeMermaidNodes(&b, layers, leftExternals, rightExternals, "", redundancySubgraphs, redundancyTypes)
+	} else {
+		inFabric := func(nodes []Node, fabric string) []Node {
+			return slices.DeleteFunc(slices.Clone(nodes), func(node Node) bool {
+				// nodes with no fabric, like unconnected servers, go in the first one
+				nodeFabric := node.Properties[PropFabric]
+				if !slices.Contains(fabrics, nodeFabric) {
+					nodeFabric = fabrics[0]
 				}
 
-				if !isPartOfGroup {
-					singleLeaves = append(singleLeaves, node)
-				}
+				return nodeFabric != fabric
+			})
+		}
+
+		interconnects := []Node{}
+		for _, link := range topo.Links {
+			if link.Type == EdgeTypeInterconnect {
+				interconnects = append(interconnects, findNode(topo.Nodes, link.Source), findNode(topo.Nodes, link.Target))
 			}
 		}
-
-		var sortedGroupNames []string
-		for groupName := range redundancySubgraphs {
-			sortedGroupNames = append(sortedGroupNames, groupName)
+		isInterconnect := func(node Node) bool {
+			return slices.ContainsFunc(interconnects, func(n Node) bool { return n.ID == node.ID })
 		}
-		sort.Strings(sortedGroupNames)
-
-		for _, groupName := range sortedGroupNames {
-			nodes := redundancySubgraphs[groupName]
-			cleanGroupName := cleanID(groupName)
-			b.WriteString(fmt.Sprintf("\tsubgraph %s [\"%s\"]\n", cleanGroupName, groupName))
-			b.WriteString("\t\tdirection LR\n")
-
+		externals := slices.DeleteFunc(slices.Clone(layers.External), isInterconnect)
+		writeExternals := func(subgraph string, nodes []Node) {
+			if len(nodes) == 0 {
+				return
+			}
+			invisibleSubgraphs = append(invisibleSubgraphs, subgraph)
+			b.WriteString(fmt.Sprintf("subgraph %s[\" \"]\n", subgraph))
+			b.WriteString("\tdirection TB\n")
 			for _, node := range nodes {
-				nodeID := cleanID(node.ID)
-				label := formatLabel(node.Label)
-				b.WriteString(fmt.Sprintf("\t\t%s[\"%s\"]\n", nodeID, label))
+				b.WriteString(fmt.Sprintf("\t%s[\"%s\"]\n", cleanID(node.ID), formatLabel(node.Label)))
+			}
+			b.WriteString("end\n\n")
+		}
+
+		// The externals of a fabric are on its sides, outside of it, with those of interconnects facing the other
+		// fabric. The fabrics are declared last to first, as the layout places the first one on the right.
+		for i, fabric := range slices.Backward(fabrics) {
+			fabricLayers := TieredNodes{
+				Spine:   inFabric(layers.Spine, fabric),
+				Leaf:    inFabric(layers.Leaf, fabric),
+				Server:  inFabric(layers.Server, fabric),
+				Gateway: inFabric(layers.Gateway, fabric),
+			}
+			left, right := splitMermaidExternalNodes(inFabric(externals, fabric), topo.Links, fabricLayers.Leaf)
+			if i == 0 {
+				right = append(right, inFabric(interconnects, fabric)...)
+			} else {
+				left = append(inFabric(interconnects, fabric), left...)
 			}
 
-			b.WriteString("\tend\n\n")
+			suffix := "_" + cleanID(fabric)
+			writeExternals("ExternalsLeft"+suffix, left)
+			fabricID := "Fabric" + suffix
+			b.WriteString(fmt.Sprintf("subgraph %s[\"Fabric: %s\"]\n", fabricID, fabric))
+			// otherwise a fabric with no links to others is laid out left to right
+			b.WriteString("\tdirection TB\n")
+			invisibleSubgraphs = append(invisibleSubgraphs,
+				writeMermaidNodes(&b, fabricLayers, nil, nil, suffix, redundancySubgraphs, redundancyTypes)...)
+			b.WriteString("end\n")
+			b.WriteString(fmt.Sprintf("style %s fill:#FAFAFA,stroke:#666,stroke-width:2px\n\n", fabricID))
+			writeExternals("ExternalsRight"+suffix, right)
 		}
-
-		for _, node := range singleLeaves {
-			nodeID := cleanID(node.ID)
-			label := formatLabel(node.Label)
-			b.WriteString(fmt.Sprintf("\t%s[\"%s\"]\n", nodeID, label))
-		}
-
-		b.WriteString("end\n\n")
-	}
-
-	if len(layers.Server) > 0 {
-		b.WriteString("subgraph Servers[\" \"]\n")
-		b.WriteString("\tdirection TB\n")
-
-		for _, node := range layers.Server {
-			nodeID := cleanID(node.ID)
-			label := formatLabel(node.Label)
-			b.WriteString(fmt.Sprintf("\t%s[\"%s\"]\n", nodeID, label))
-		}
-		b.WriteString("end\n\n")
+		b.WriteString("\n")
 	}
 
 	connectionMap := make(map[string]map[string][]string)
@@ -286,6 +228,14 @@ func generateMermaid(topo Topology) string {
 		}
 	}
 
+	// sorted for a stable layout, which depends on the order of the edges
+	connectionKeys := slices.Sorted(maps.Keys(connectionMap))
+	for _, connTypes := range connectionMap {
+		for _, ports := range connTypes {
+			slices.Sort(ports)
+		}
+	}
+
 	// Calculate max parallel connections for bundled links
 	for _, serverConnections := range bundledConnections {
 		for _, count := range serverConnections {
@@ -313,7 +263,8 @@ func generateMermaid(topo Topology) string {
 	if len(layers.Gateway) > 0 {
 		hasGatewayConnections := false
 
-		for key, connTypes := range connectionMap {
+		for _, key := range connectionKeys {
+			connTypes := connectionMap[key]
 			parts := strings.Split(key, "->")
 			sourceID := parts[0]
 			targetID := parts[1]
@@ -384,7 +335,8 @@ func generateMermaid(topo Topology) string {
 	// Group spine-leaf connections by spine
 	spineLeafMapBySpine := make(map[string][]string)
 
-	for key, connTypes := range connectionMap {
+	for _, key := range connectionKeys {
+		connTypes := connectionMap[key]
 		parts := strings.Split(key, "->")
 		sourceID := parts[0]
 		targetID := parts[1]
@@ -442,7 +394,8 @@ func generateMermaid(topo Topology) string {
 
 	leafServerTypes := make(map[string]string)
 
-	for key, connTypes := range connectionMap {
+	for _, key := range connectionKeys {
+		connTypes := connectionMap[key]
 		parts := strings.Split(key, "->")
 		sourceID := parts[0]
 		targetID := parts[1]
@@ -552,7 +505,8 @@ func generateMermaid(topo Topology) string {
 
 	// Collect all mesh connections first
 	meshConnections := []string{}
-	for key, connTypes := range connectionMap {
+	for _, key := range connectionKeys {
+		connTypes := connectionMap[key]
 		parts := strings.Split(key, "->")
 		sourceID := parts[0]
 		targetID := parts[1]
@@ -695,7 +649,8 @@ func generateMermaid(topo Topology) string {
 
 	// External connections
 	b.WriteString("%% External connections\n")
-	for key, connTypes := range connectionMap {
+	for _, key := range connectionKeys {
+		connTypes := connectionMap[key]
 		parts := strings.Split(key, "->")
 		sourceID := parts[0]
 		targetID := parts[1]
@@ -739,6 +694,23 @@ func generateMermaid(topo Topology) string {
 	}
 	b.WriteString("\n")
 
+	interconnectLinks := []int{}
+	for _, link := range topo.Links {
+		if link.Type == EdgeTypeInterconnect {
+			// from the external of the fabric on the right, which keeps the fabrics on the same rows
+			source, target := link.Source, link.Target
+			if compareTopologyNames(findNode(topo.Nodes, source).Properties[PropFabric], findNode(topo.Nodes, target).Properties[PropFabric]) < 0 {
+				source, target = target, source
+			}
+			b.WriteString(fmt.Sprintf("%s ---|\"interconnect\"| %s\n", cleanID(source), cleanID(target)))
+			interconnectLinks = append(interconnectLinks, linkIndex)
+			linkIndex++
+		}
+	}
+	if len(interconnectLinks) > 0 {
+		b.WriteString("\n")
+	}
+
 	// Create the legend subgraph
 	b.WriteString("subgraph Legend[\"Network Connection Types\"]\n")
 	b.WriteString("\tdirection LR\n")
@@ -779,6 +751,10 @@ func generateMermaid(topo Topology) string {
 
 	if len(staticExternalLinks) > 0 {
 		b.WriteString("\tL17(( )) --- |\"Static External Links\"| L18(( ))\n")
+	}
+
+	if len(interconnectLinks) > 0 {
+		b.WriteString("\tL19(( )) --- |\"Fabric Interconnect Links\"| L20(( ))\n")
 	}
 
 	b.WriteString("\tP1(( )) --- |\"Label Notation: Downstream ↔ Upstream\"| P2(( ))\n")
@@ -843,6 +819,9 @@ func generateMermaid(topo Topology) string {
 	if len(meshLinks) > 0 {
 		hiddenNodes = append(hiddenNodes, "L15", "L16")
 	}
+	if len(interconnectLinks) > 0 {
+		hiddenNodes = append(hiddenNodes, "L19", "L20")
+	}
 	b.WriteString(fmt.Sprintf("class %s hidden\n", strings.Join(hiddenNodes, ",")))
 
 	b.WriteString("class Legend legendBox\n")
@@ -894,6 +873,10 @@ func generateMermaid(topo Topology) string {
 		b.WriteString(fmt.Sprintf("linkStyle %s stroke:#D79B00,stroke-width:2px\n", formatIndices(staticExternalLinks)))
 	}
 
+	if len(interconnectLinks) > 0 {
+		b.WriteString(fmt.Sprintf("linkStyle %s stroke:#9673A6,stroke-width:3px,stroke-dasharray:5 5\n", formatIndices(interconnectLinks)))
+	}
+
 	// Calculate legend link indices
 	legendLinkStart := linkIndex
 	legendLinkIndex := 0
@@ -939,33 +922,204 @@ func generateMermaid(topo Topology) string {
 		legendLinkIndex++
 	}
 
+	if len(interconnectLinks) > 0 {
+		b.WriteString(fmt.Sprintf("linkStyle %d stroke:#9673A6,stroke-width:2px,stroke-dasharray:5 5\n", legendLinkStart+legendLinkIndex))
+		legendLinkIndex++
+	}
+
 	// Style the label notation line - just use a single white stroke
 	b.WriteString(fmt.Sprintf("linkStyle %d stroke:#FFFFFF\n", legendLinkStart+legendLinkIndex))
 
 	b.WriteString("\n%% Make subgraph containers invisible\n")
-	if len(layers.Gateway) > 0 {
-		b.WriteString("style Gateways fill:none,stroke:none\n")
-	}
-	if len(leftExternals) > 0 {
-		b.WriteString("style ExternalsLeft fill:none,stroke:none\n")
-	}
-	if len(layers.Spine) > 0 {
-		b.WriteString("style Spines fill:none,stroke:none\n")
-	}
-	if len(rightExternals) > 0 {
-		b.WriteString("style ExternalsRight fill:none,stroke:none\n")
-	}
-	b.WriteString("style Leaves fill:none,stroke:none\n")
-	b.WriteString("style Servers fill:none,stroke:none\n")
-
-	if len(layers.Spine) > 0 {
-		for _, node := range layers.Spine {
-			spineID := cleanID(node.ID)
-			b.WriteString(fmt.Sprintf("style %s_Group fill:none,stroke:none\n", spineID))
-		}
+	for _, subgraph := range invisibleSubgraphs {
+		b.WriteString(fmt.Sprintf("style %s fill:none,stroke:none\n", subgraph))
 	}
 
 	return b.String()
+}
+
+// writeMermaidNodes declares the nodes in invisible subgraphs, one per layer, and returns their names. The suffix
+// keeps apart the subgraphs of each fabric. If the spines are in several domains, the spines and gateways of each
+// domain are in a visible subgraph instead.
+func writeMermaidNodes(b *strings.Builder, layers TieredNodes, leftExternals, rightExternals []Node, suffix string,
+	redundancySubgraphs map[string][]Node, redundancyTypes map[string]string,
+) []string {
+	invisible := []string{}
+
+	// Only add gateway subgraph if gateways are present
+	domains := []string{}
+	for _, node := range layers.Spine {
+		if !slices.Contains(domains, node.Properties[PropDomains]) {
+			domains = append(domains, node.Properties[PropDomains])
+		}
+	}
+	if len(domains) > 1 {
+		slices.SortFunc(domains, compareTopologyNames)
+		for _, domain := range domains {
+			domainID := "Domain" + suffix + "_" + cleanID(domain)
+			b.WriteString(fmt.Sprintf("subgraph %s[\"Domain: %s\"]\n", domainID, domain))
+			b.WriteString("\tdirection TB\n")
+			for _, node := range slices.Concat(layers.Gateway, layers.Spine) {
+				if node.Properties[PropDomains] == domain {
+					b.WriteString(fmt.Sprintf("\t%s[\"%s\"]\n", cleanID(node.ID), formatLabel(node.Label)))
+				}
+			}
+			b.WriteString("end\n")
+			b.WriteString(fmt.Sprintf("style %s fill:#EEF3F8,stroke:#6C8EBF,stroke-dasharray:5 5\n\n", domainID))
+		}
+		layers.Gateway, layers.Spine = nil, nil
+	}
+
+	if len(layers.Gateway) > 0 {
+		invisible = append(invisible, "Gateways"+suffix)
+		b.WriteString("subgraph Gateways" + suffix + "[\" \"]\n")
+		b.WriteString("\tdirection LR\n")
+		for _, node := range layers.Gateway {
+			nodeID := cleanID(node.ID)
+			label := formatLabel(node.Label)
+			b.WriteString(fmt.Sprintf("\t%s[\"%s\"]\n", nodeID, label))
+		}
+		b.WriteString("end\n\n")
+	}
+
+	if len(leftExternals) > 0 {
+		invisible = append(invisible, "ExternalsLeft"+suffix)
+		b.WriteString("subgraph ExternalsLeft" + suffix + "[\" \"]\n")
+		b.WriteString("\tdirection TB\n")
+		for _, node := range leftExternals {
+			nodeID := cleanID(node.ID)
+			label := formatLabel(node.Label)
+			b.WriteString(fmt.Sprintf("\t%s[\"%s\"]\n", nodeID, label))
+		}
+		b.WriteString("end\n\n")
+	}
+
+	if len(layers.Spine) > 0 {
+		invisible = append(invisible, "Spines"+suffix)
+		b.WriteString("subgraph Spines" + suffix + "[\" \"]\n")
+		b.WriteString("\tdirection LR\n")
+
+		for _, node := range layers.Spine {
+			nodeID := cleanID(node.ID)
+			label := formatLabel(node.Label)
+			b.WriteString(fmt.Sprintf("\tsubgraph %s_Group [\" \"]\n", nodeID))
+			b.WriteString("\t\tdirection TB\n")
+			b.WriteString(fmt.Sprintf("\t\t%s[\"%s\"]\n", nodeID, label))
+			b.WriteString("\tend\n")
+		}
+		b.WriteString("end\n\n")
+	}
+
+	if len(rightExternals) > 0 {
+		invisible = append(invisible, "ExternalsRight"+suffix)
+		b.WriteString("subgraph ExternalsRight" + suffix + "[\" \"]\n")
+		b.WriteString("\tdirection TB\n")
+		for _, node := range rightExternals {
+			nodeID := cleanID(node.ID)
+			label := formatLabel(node.Label)
+			b.WriteString(fmt.Sprintf("\t%s[\"%s\"]\n", nodeID, label))
+		}
+		b.WriteString("end\n\n")
+	}
+
+	invisible = append(invisible, "Leaves"+suffix, "Servers"+suffix)
+	if len(layers.Leaf) > 0 {
+		b.WriteString("subgraph Leaves" + suffix + "[\" \"]\n")
+		b.WriteString("\tdirection LR\n")
+
+		singleLeaves := []Node{}
+
+		for _, node := range layers.Leaf {
+			if groupName, hasGroup := node.Properties[PropRedundancyGroup]; hasGroup && groupName != "" {
+				if _, alreadyProcessed := redundancySubgraphs[groupName]; !alreadyProcessed {
+					var groupSwitches []Node
+					var redundancyType string
+
+					for _, otherNode := range layers.Leaf {
+						if otherGroupName, ok := otherNode.Properties[PropRedundancyGroup]; ok && otherGroupName == groupName {
+							groupSwitches = append(groupSwitches, otherNode)
+							if redType, hasType := otherNode.Properties[PropRedundancyType]; hasType && redundancyType == "" {
+								redundancyType = redType
+							}
+						}
+					}
+
+					if len(groupSwitches) > 1 {
+						redundancySubgraphs[groupName] = groupSwitches
+						redundancyTypes[groupName] = redundancyType
+					}
+				}
+			} else {
+				isPartOfGroup := false
+				for _, groupNodes := range redundancySubgraphs {
+					for _, groupNode := range groupNodes {
+						if groupNode.ID == node.ID {
+							isPartOfGroup = true
+
+							break
+						}
+					}
+					if isPartOfGroup {
+						break
+					}
+				}
+
+				if !isPartOfGroup {
+					singleLeaves = append(singleLeaves, node)
+				}
+			}
+		}
+
+		var sortedGroupNames []string
+		for groupName, groupNodes := range redundancySubgraphs {
+			// groups are collected across fabrics
+			if slices.ContainsFunc(layers.Leaf, func(node Node) bool { return node.ID == groupNodes[0].ID }) {
+				sortedGroupNames = append(sortedGroupNames, groupName)
+			}
+		}
+		sort.Strings(sortedGroupNames)
+
+		for _, groupName := range sortedGroupNames {
+			nodes := redundancySubgraphs[groupName]
+			cleanGroupName := cleanID(groupName)
+			b.WriteString(fmt.Sprintf("\tsubgraph %s [\"%s\"]\n", cleanGroupName, groupName))
+			b.WriteString("\t\tdirection LR\n")
+
+			for _, node := range nodes {
+				nodeID := cleanID(node.ID)
+				label := formatLabel(node.Label)
+				b.WriteString(fmt.Sprintf("\t\t%s[\"%s\"]\n", nodeID, label))
+			}
+
+			b.WriteString("\tend\n\n")
+		}
+
+		for _, node := range singleLeaves {
+			nodeID := cleanID(node.ID)
+			label := formatLabel(node.Label)
+			b.WriteString(fmt.Sprintf("\t%s[\"%s\"]\n", nodeID, label))
+		}
+
+		b.WriteString("end\n\n")
+	}
+
+	if len(layers.Server) > 0 {
+		b.WriteString("subgraph Servers" + suffix + "[\" \"]\n")
+		b.WriteString("\tdirection TB\n")
+
+		for _, node := range layers.Server {
+			nodeID := cleanID(node.ID)
+			label := formatLabel(node.Label)
+			b.WriteString(fmt.Sprintf("\t%s[\"%s\"]\n", nodeID, label))
+		}
+		b.WriteString("end\n\n")
+	}
+
+	for _, node := range layers.Spine {
+		invisible = append(invisible, cleanID(node.ID)+"_Group")
+	}
+
+	return invisible
 }
 
 func splitMermaidExternalNodes(externals []Node, links []Link, leaves []Node) ([]Node, []Node) {
