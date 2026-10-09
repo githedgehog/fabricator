@@ -13,6 +13,7 @@ import (
 	"net/netip"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
@@ -20,6 +21,7 @@ import (
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/util/sshutil"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -655,9 +657,28 @@ func gatewayPeeringOverlapNATTest(ctx context.Context, testCtx *VPCPeeringTestCt
 	// Revert: delete overlap namespace
 	reverts = append(reverts, func(ctx context.Context) error {
 		slog.Debug("Reverting: deleting overlap namespace", "name", overlapNSName)
-		if err := testCtx.kube.Delete(ctx, overlapNS); err != nil {
+		// The VPC delete returns before the webhook stops seeing the VPC, so retry while it is denied
+		var lastErr error
+		attempts := 0
+		start := time.Now()
+		err := wait.PollUntilContextTimeout(ctx, 100*time.Millisecond, 10*time.Second, true, func(ctx context.Context) (bool, error) {
+			attempts++
+			lastErr = kclient.IgnoreNotFound(testCtx.kube.Delete(ctx, overlapNS))
+
+			return lastErr == nil || !strings.Contains(lastErr.Error(), "IPv4Namespace has VPCs"), nil
+		})
+		if err = errors.Join(lastErr, err); err != nil {
+			vpcs := &vpcapi.VPCList{}
+			if listErr := testCtx.kube.List(ctx, vpcs, kclient.MatchingLabels{vpcapi.LabelIPv4NS: overlapNSName}); listErr != nil {
+				err = errors.Join(err, fmt.Errorf("listing remaining vpcs: %w", listErr))
+			}
+			for _, vpc := range vpcs.Items {
+				err = errors.Join(err, fmt.Errorf("vpc %s remains: deletionTimestamp=%v finalizers=%v", vpc.Name, vpc.DeletionTimestamp, vpc.Finalizers))
+			}
+
 			return fmt.Errorf("deleting overlap namespace: %w", err)
 		}
+		slog.Info("Deleted overlap namespace", "name", overlapNSName, "attempts", attempts, "took", time.Since(start))
 
 		return nil
 	})
