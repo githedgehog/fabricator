@@ -79,14 +79,53 @@ func (c *Config) placement(clientIdx int) (int, int) {
 	}
 }
 
+// openEndpoints opens one UDP socket per emulated leaf (relay mode) or one VLAN interface per subnet (access mode), the
+// slice is returned even on error so that what was opened can be closed
+func (c *Config) openEndpoints(ctx context.Context, st *stats) ([]endpoint, error) {
+	if c.Mode == ModeAccess {
+		return c.openAccessEndpoints(ctx, st)
+	}
+
+	serverAddr := net.UDPAddrFromAddrPort(c.Server)
+	xids := &sync.Map{}
+	eps := make([]endpoint, c.Leaves)
+	for i := range c.Leaves {
+		ip := c.relayIP(i)
+		conn, err := net.ListenUDP("udp4", net.UDPAddrFromAddrPort(netip.AddrPortFrom(ip, uint16(c.RelayPort)))) //nolint:gosec
+		if err != nil {
+			return eps, fmt.Errorf("binding relay %s:%d (is the IP configured locally, are you root?): %w", ip, c.RelayPort, err)
+		}
+		if err := conn.SetReadBuffer(8 << 20); err != nil {
+			slog.Warn("Setting socket read buffer", "err", err)
+		}
+		r := &relay{ip: ip, conn: conn, server: serverAddr, xids: xids}
+		eps[i] = r
+		go r.serve(ctx, st)
+	}
+
+	return eps, nil
+}
+
 // relays: one UDP socket per emulated leaf, bound to giaddr:67; replies are routed to clients by xid
 
-type relay struct {
-	ip      netip.Addr
-	conn    *net.UDPConn
-	server  *net.UDPAddr
-	pending *sync.Map // xid -> chan *dhcpv4.DHCPv4
+// endpoint is where clients send from and receive replies at: an emulated leaf relay or a VLAN interface of a server
+type endpoint interface {
+	name() string
+	pending() *sync.Map
+	send(cl *client, msg *dhcpv4.DHCPv4) error
+	close()
 }
+
+type relay struct {
+	ip     netip.Addr
+	conn   *net.UDPConn
+	server *net.UDPAddr
+	xids   *sync.Map // xid -> chan *dhcpv4.DHCPv4
+}
+
+func (r *relay) name() string       { return r.ip.String() }
+func (r *relay) pending() *sync.Map { return r.xids }
+func (r *relay) close()             { r.conn.Close() }
 
 func (r *relay) serve(ctx context.Context, stats *stats) {
 	buf := make([]byte, 4096)
@@ -99,26 +138,31 @@ func (r *relay) serve(ctx context.Context, stats *stats) {
 
 			continue
 		}
-		msg, err := dhcpv4.FromBytes(buf[:n])
-		if err != nil {
-			stats.badReplies.Add(1)
-
-			continue
-		}
-		ch, ok := r.pending.Load(msg.TransactionID)
-		if !ok {
-			stats.lateReplies.Add(1) // retransmit answered after we moved on, or not ours
-
-			continue
-		}
-		select {
-		case ch.(chan *dhcpv4.DHCPv4) <- msg:
-		default:
-		}
+		deliver(r.xids, buf[:n], stats)
 	}
 }
 
-func (r *relay) send(msg *dhcpv4.DHCPv4) error {
+// deliver hands a received DHCP payload to the client waiting for its xid
+func deliver(xids *sync.Map, payload []byte, stats *stats) {
+	msg, err := dhcpv4.FromBytes(payload)
+	if err != nil {
+		stats.badReplies.Add(1)
+
+		return
+	}
+	ch, ok := xids.Load(msg.TransactionID)
+	if !ok {
+		stats.lateReplies.Add(1) // retransmit answered after we moved on, or not ours
+
+		return
+	}
+	select {
+	case ch.(chan *dhcpv4.DHCPv4) <- msg:
+	default:
+	}
+}
+
+func (r *relay) send(_ *client, msg *dhcpv4.DHCPv4) error {
 	_, err := r.conn.WriteToUDP(msg.ToBytes(), r.server)
 
 	return err //nolint:wrapcheck
@@ -182,7 +226,7 @@ type client struct {
 	idx      int
 	mac      net.HardwareAddr
 	hostname string
-	relay    *relay
+	ep       endpoint
 	subnet   subnet
 
 	// results, written by the client goroutine only, read after it exits
@@ -247,22 +291,31 @@ func (r *runner) baseMsg(cl *client, mt dhcpv4.MessageType, xid dhcpv4.Transacti
 		dhcpv4.WithTransactionID(xid),
 		dhcpv4.WithHwAddr(cl.mac),
 		dhcpv4.WithMessageType(mt),
-		dhcpv4.WithGatewayIP(cl.relay.ip.AsSlice()),
 		dhcpv4.WithOption(dhcpv4.OptHostName(cl.hostname)),
 		dhcpv4.WithOption(dhcpv4.OptParameterRequestList(reqOpts...)),
+	}
+	if r.cfg.Mode == ModeAccess {
+		// a real leaf relays this, adding giaddr and option 82 itself; replies come back as broadcasts
+		all = append(all, dhcpv4.WithBroadcast(true))
+	} else {
+		all = append(all, dhcpv4.WithGatewayIP(cl.ep.(*relay).ip.AsSlice()))
 	}
 	if r.cfg.VendorClass != "" {
 		all = append(all, dhcpv4.WithOption(dhcpv4.OptClassIdentifier(r.cfg.VendorClass)))
 	}
 	all = append(all, mods...)
-	// relay agent info must be the last option before END
-	all = append(all, dhcpv4.WithOption(dhcpv4.OptRelayAgentInfo(rai...)))
+	if r.cfg.Mode != ModeAccess {
+		// relay agent info must be the last option before END
+		all = append(all, dhcpv4.WithOption(dhcpv4.OptRelayAgentInfo(rai...)))
+	}
 
 	msg, err := dhcpv4.New(all...)
 	if err != nil {
 		return nil, fmt.Errorf("building %s: %w", mt, err)
 	}
-	msg.HopCount = 1
+	if r.cfg.Mode != ModeAccess {
+		msg.HopCount = 1
+	}
 
 	return msg, nil
 }
@@ -277,8 +330,8 @@ func (r *runner) exchange(ctx context.Context, cl *client, build func(xid dhcpv4
 		return nil, 0, 0, fmt.Errorf("generating xid: %w", err)
 	}
 	ch := make(chan *dhcpv4.DHCPv4, 4)
-	cl.relay.pending.Store(xid, ch)
-	defer cl.relay.pending.Delete(xid)
+	cl.ep.pending().Store(xid, ch)
+	defer cl.ep.pending().Delete(xid)
 
 	msg, err := build(xid)
 	if err != nil {
@@ -293,7 +346,7 @@ func (r *runner) exchange(ctx context.Context, cl *client, build func(xid dhcpv4
 	for attempt := range attempts {
 		msg.NumSeconds = uint16(min(time.Since(start)/time.Second, 0xffff)) //nolint:gosec
 		sentAt := time.Now()
-		if err := cl.relay.send(msg); err != nil {
+		if err := cl.ep.send(cl, msg); err != nil {
 			return nil, attempt + 1, 0, fmt.Errorf("sending %s: %w", msg.MessageType(), err)
 		}
 		r.stats.sent.Add(1)
@@ -462,7 +515,7 @@ func (r *runner) releaseAll(clients []*client) {
 		if err != nil {
 			continue
 		}
-		if err := cl.relay.send(msg); err != nil {
+		if err := cl.ep.send(cl, msg); err != nil {
 			slog.Warn("Release failed", "mac", cl.mac, "err", err)
 		}
 	}
@@ -484,7 +537,7 @@ func writeCSV(path string, clients []*client) error {
 			ip = cl.ip.String()
 		}
 		_ = w.Write([]string{
-			strconv.Itoa(cl.idx), cl.mac.String(), cl.hostname, cl.relay.ip.String(), cl.subnet.circuitID, string(cl.state), ip,
+			strconv.Itoa(cl.idx), cl.mac.String(), cl.hostname, cl.ep.name(), cl.subnet.circuitID, string(cl.state), ip,
 			strconv.Itoa(cl.discoverTries), strconv.Itoa(cl.requestTries), strconv.FormatInt(cl.dora.Milliseconds(), 10),
 			strconv.Itoa(cl.renewsOK), strconv.Itoa(cl.renewsFailed), strconv.Itoa(cl.ipChanges), strconv.Itoa(cl.naks), cl.lastErr,
 		})
@@ -512,41 +565,34 @@ func Run(ctx context.Context, c *Config) (*Result, error) {
 		r.schedule = []time.Duration{4 * time.Second, 8 * time.Second, 16 * time.Second, 32 * time.Second}
 	}
 
-	serverAddr := net.UDPAddrFromAddrPort(c.Server)
-	pending := &sync.Map{}
-	relays := make([]*relay, c.Leaves)
 	rctx, rcancel := context.WithCancel(context.WithoutCancel(ctx))
+	eps, err := c.openEndpoints(rctx, st)
 	defer func() {
 		rcancel()
-		for _, r := range relays {
-			if r != nil {
-				r.conn.Close()
+		for _, ep := range eps {
+			if ep != nil {
+				ep.close()
 			}
 		}
 	}()
-	for i := range c.Leaves {
-		ip := c.relayIP(i)
-		conn, err := net.ListenUDP("udp4", net.UDPAddrFromAddrPort(netip.AddrPortFrom(ip, uint16(c.RelayPort)))) //nolint:gosec
-		if err != nil {
-			return nil, fmt.Errorf("binding relay %s:%d (is the IP configured locally, are you root?): %w", ip, c.RelayPort, err)
-		}
-		if err := conn.SetReadBuffer(8 << 20); err != nil {
-			slog.Warn("Setting socket read buffer", "err", err)
-		}
-		relays[i] = &relay{ip: ip, conn: conn, server: serverAddr, pending: pending}
-		go relays[i].serve(rctx, st)
+	if err != nil {
+		return nil, err
 	}
 
 	total := c.Servers * c.NICs
 	clients := make([]*client, total)
 	for i := range total {
 		leaf, sub := c.placement(i)
+		epIdx := leaf
+		if c.Mode == ModeAccess {
+			epIdx = sub
+		}
 		mac := net.HardwareAddr{0x02, 0x4c, 0x54, byte(i >> 16), byte(i >> 8), byte(i)}
 		clients[i] = &client{
 			idx:      i,
 			mac:      mac,
 			hostname: fmt.Sprintf("gpu-%04d-nic%d", i/c.NICs, i%c.NICs),
-			relay:    relays[leaf],
+			ep:       eps[epIdx],
 			subnet:   c.subnet(sub),
 		}
 	}
