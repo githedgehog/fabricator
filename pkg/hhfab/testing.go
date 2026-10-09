@@ -672,6 +672,46 @@ func autoDeriveVPCMode(ctx context.Context, kube kclient.Client, server *wiringa
 // SetupVPCs creates VPCs and VPC attachments per opts, configures servers,
 // and returns one Endpoint per (server, vpc, subnet) attachment with the
 // discovered IP and HostBGP flag populated.
+// serverTopology is the fabric of the switches a server is attached to and the domains they all share
+func serverTopology(ctx context.Context, kube kclient.Reader, server *wiringapi.Server, switchByName map[string]*wiringapi.Switch) (vpcapi.VPCTopology, error) {
+	conns := &wiringapi.ConnectionList{}
+	if err := kube.List(ctx, conns, wiringapi.MatchingLabelsForListLabelServer(server.Name)); err != nil {
+		return vpcapi.VPCTopology{}, fmt.Errorf("listing connections for server %q: %w", server.Name, err)
+	}
+	if len(conns.Items) == 0 {
+		return vpcapi.VPCTopology{}, fmt.Errorf("no connections for server %q", server.Name)
+	}
+
+	topology := vpcapi.VPCTopology{}
+	for _, conn := range conns.Items {
+		switches, _, _, _, err := conn.Spec.Endpoints()
+		if err != nil {
+			return vpcapi.VPCTopology{}, fmt.Errorf("getting endpoints of connection %q: %w", conn.Name, err)
+		}
+		for _, swName := range switches {
+			sw := switchByName[swName]
+			if sw == nil {
+				return vpcapi.VPCTopology{}, fmt.Errorf("switch %q of server %q not found", swName, server.Name)
+			}
+			fabric := sw.Spec.Topology.Fabric
+			domains := sw.Spec.Topology.Domains
+			if topology.Fabric == "" {
+				topology.Fabric = fabric
+				topology.Domains = slices.Clone(domains)
+
+				continue
+			}
+			if topology.Fabric != fabric {
+				return vpcapi.VPCTopology{}, fmt.Errorf("server %q is attached to fabrics %s and %s", server.Name, topology.Fabric, fabric)
+			}
+			topology.Domains = slices.DeleteFunc(topology.Domains, func(domain string) bool { return !slices.Contains(domains, domain) })
+		}
+	}
+	slices.Sort(topology.Domains)
+
+	return topology, nil
+}
+
 func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) ([]*Endpoint, []DroppedEndpoint, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
@@ -704,7 +744,9 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		return nil, nil, fmt.Errorf("listing switches: %w", err)
 	}
 	profileBySwitch := map[string]*wiringapi.SwitchProfile{}
+	switchByName := map[string]*wiringapi.Switch{}
 	for _, sw := range switchList.Items {
+		switchByName[sw.Name] = &sw
 		if _, seen := profileBySwitch[sw.Name]; seen {
 			continue
 		}
@@ -814,6 +856,10 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	modeOrder := []vpcapi.VPCMode{}
 	seenMode := map[vpcapi.VPCMode]bool{}
 	derivedAwayServers := []string{}
+	// every VPC must be homogeneous in mode, fabric and domains, so servers are grouped by all three
+	serverTopologies := make(map[string]vpcapi.VPCTopology, len(servers.Items))
+	serverGroups := make(map[string]string, len(servers.Items))
+	groupIndex := map[string]int{}
 	for _, server := range servers.Items {
 		mode := opts.VPCMode
 		if mode == vpcapi.VPCModeL2VNI {
@@ -831,6 +877,17 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 			seenMode[mode] = true
 			modeOrder = append(modeOrder, mode)
 		}
+
+		topology, err := serverTopology(ctx, kube, &server, switchByName)
+		if err != nil {
+			return nil, nil, err
+		}
+		serverTopologies[server.Name] = topology
+		group := fmt.Sprintf("%s/%s/%v", mode, topology.Fabric, topology.Domains)
+		serverGroups[server.Name] = group
+		if _, seen := groupIndex[group]; !seen {
+			groupIndex[group] = len(groupIndex)
+		}
 	}
 	// L2VNI is both the zero value and the only "unforced" VPCMode, so an
 	// explicit --vpc-mode=l2vni is indistinguishable here from no flag at
@@ -847,12 +904,10 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 			modeNames = append(modeNames, vpcModeName(m))
 		}
 		slog.Info("Mixed VPC modes detected", "modes", modeNames)
-		modeIndex := map[vpcapi.VPCMode]int{}
-		for i, m := range modeOrder {
-			modeIndex[m] = i
-		}
+	}
+	if len(groupIndex) > 1 {
 		slices.SortFunc(servers.Items, func(a, b wiringapi.Server) int {
-			if d := modeIndex[serverModes[a.Name]] - modeIndex[serverModes[b.Name]]; d != 0 {
+			if d := groupIndex[serverGroups[a.Name]] - groupIndex[serverGroups[b.Name]]; d != 0 {
 				return d
 			}
 
@@ -867,24 +922,44 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	nextVLAN, stopVLAN := iter.Pull(VLANsFrom(vlanNS.Spec.Ranges...))
 	defer stopVLAN()
 
-	ipNS := &vpcapi.IPv4Namespace{}
-	if err := kube.Get(ctx, client.ObjectKey{Name: opts.IPv4Namespace, Namespace: metav1.NamespaceDefault}, ipNS); err != nil {
-		return nil, nil, fmt.Errorf("getting IPv4 namespace %s: %w", opts.IPv4Namespace, err)
+	// --ipns is for the default fabric, every other fabric uses its only IPv4Namespace
+	ipNamespaces := &vpcapi.IPv4NamespaceList{}
+	if err := kube.List(ctx, ipNamespaces); err != nil {
+		return nil, nil, fmt.Errorf("listing IPv4 namespaces: %w", err)
 	}
-	prefixes := []netip.Prefix{}
-	for _, prefix := range ipNS.Spec.Subnets {
-		prefix, err := netip.ParsePrefix(prefix)
-		if err != nil {
-			return nil, nil, fmt.Errorf("parsing IPv4 namespace %s prefix %q: %w", opts.IPv4Namespace, prefix, err)
+	fabricIPNS := map[string]*vpcapi.IPv4Namespace{}
+	for _, ns := range ipNamespaces.Items {
+		fabric := ns.Spec.Topology.Fabric
+		switch {
+		case fabric == wiringapi.DefaultFabric:
+			if ns.Name == opts.IPv4Namespace {
+				fabricIPNS[fabric] = &ns
+			}
+		case fabricIPNS[fabric] != nil:
+			return nil, nil, fmt.Errorf("fabric %s has more than one IPv4 namespace", fabric)
+		default:
+			fabricIPNS[fabric] = &ns
 		}
-		prefixes = append(prefixes, prefix)
 	}
-	nextPrefix, stopPrefix := iter.Pull(SubPrefixesFrom(24, prefixes...))
-	defer stopPrefix()
-
+	nextPrefixes := map[string]func() (netip.Prefix, bool){}
+	for fabric, ns := range fabricIPNS {
+		prefixes := []netip.Prefix{}
+		for _, prefix := range ns.Spec.Subnets {
+			prefix, err := netip.ParsePrefix(prefix)
+			if err != nil {
+				return nil, nil, fmt.Errorf("parsing IPv4 namespace %s prefix %q: %w", ns.Name, prefix, err)
+			}
+			prefixes = append(prefixes, prefix)
+		}
+		next, stop := iter.Pull(SubPrefixesFrom(24, prefixes...))
+		defer stop()
+		nextPrefixes[fabric] = next
+	}
 	if len(servers.Items) > 0 && serverIDs[servers.Items[0].Name] > 0 {
 		nextVLAN()
-		nextPrefix()
+		if next := nextPrefixes[wiringapi.DefaultFabric]; next != nil {
+			next()
+		}
 	}
 
 	serverInSubnet := 0
@@ -892,7 +967,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	vpcID := 0
 	hostBGPDoneForVPC := false
 	placedAny := false
-	prevPlacedMode := vpcapi.VPCMode("")
+	prevPlacedGroup := ""
 	vpcNames := map[string]bool{}
 	vpcs := []*vpcapi.VPC{}
 	attachNames := map[string]bool{}
@@ -924,16 +999,22 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 				continue
 			}
 		}
-		// Force a new VPC when the resolved mode changes since the last
-		// placed server: every VPC must be homogeneous in Spec.Mode.
-		if placedAny && serverMode != prevPlacedMode {
+		serverTopo := serverTopologies[server.Name]
+		if len(serverTopo.Domains) == 0 {
+			slog.Warn("Skipping server attached to switches with no domain in common", "server", server.Name)
+
+			continue
+		}
+		// Force a new VPC when the mode, fabric or domains change since the
+		// last placed server: every VPC must be homogeneous in all three.
+		if placedAny && serverGroups[server.Name] != prevPlacedGroup {
 			serverInSubnet = 0
 			subnetInVPC = 0
 			vpcID++
 			hostBGPDoneForVPC = false
 		}
 		placedAny = true
-		prevPlacedMode = serverMode
+		prevPlacedGroup = serverGroups[server.Name]
 		if serverInSubnet >= opts.ServersPerSubnet {
 			nextSubnet()
 		}
@@ -982,21 +1063,29 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 		if len(vpcs) > 0 && vpcs[len(vpcs)-1].Name == vpcName {
 			vpc = vpcs[len(vpcs)-1]
 		} else {
+			ipns := fabricIPNS[serverTopo.Fabric]
+			if ipns == nil && serverTopo.Fabric == wiringapi.DefaultFabric {
+				return nil, nil, fmt.Errorf("IPv4 namespace %s not found in fabric %s", opts.IPv4Namespace, wiringapi.DefaultFabric)
+			} else if ipns == nil {
+				return nil, nil, fmt.Errorf("no IPv4 namespace in fabric %s for server %q", serverTopo.Fabric, server.Name)
+			}
 			vpc = &vpcapi.VPC{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      vpcName,
 					Namespace: metav1.NamespaceDefault,
 				},
 				Spec: vpcapi.VPCSpec{
-					Mode:    serverMode,
-					Subnets: map[string]*vpcapi.VPCSubnet{},
+					Mode:          serverMode,
+					Topology:      serverTopo,
+					IPv4Namespace: ipns.Name,
+					Subnets:       map[string]*vpcapi.VPCSubnet{},
 				},
 			}
 			vpcNames[vpcName] = true
 			vpcs = append(vpcs, vpc)
 		}
 		if vpc.Spec.Subnets[subnetName] == nil {
-			subnet, ok := nextPrefix()
+			subnet, ok := nextPrefixes[serverTopo.Fabric]()
 			if !ok {
 				return nil, nil, fmt.Errorf("no more subnets available")
 			}
@@ -1081,6 +1170,7 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 					Annotations: attachAnns,
 				},
 				Spec: vpcapi.VPCAttachmentSpec{
+					Topology:   vpcapi.VPCAttachmentTopology{Fabric: serverTopo.Fabric},
 					Connection: ac.Name,
 					Subnet:     fmt.Sprintf("%s/%s", vpcName, subnetName),
 				},
@@ -1152,6 +1242,13 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 	}
 	deletedVPCs := false
 	for _, vpc := range existingVPCs.Items {
+		for _, want := range vpcs {
+			if want.Name == vpc.Name && !opts.ForceCleanup &&
+				(vpc.Spec.Topology.Fabric != want.Spec.Topology.Fabric ||
+					!slices.Equal(vpc.Spec.Topology.Domains, want.Spec.Topology.Domains)) {
+				return nil, nil, fmt.Errorf("VPC %q is in a different fabric or domains than needed now, use --force-cleanup", vpc.Name)
+			}
+		}
 		if opts.ForceCleanup || !vpcNames[vpc.Name] {
 			if err := kube.Delete(ctx, &vpc); err != nil {
 				return nil, nil, fmt.Errorf("deleting VPC %q: %w", vpc.Name, err)
@@ -2149,6 +2246,25 @@ func endpointVerdict(r Reachability, src, dst *Endpoint) ConnectivityVerdict {
 	return VerdictAllow
 }
 
+// peeredFabric is the fabric of a peered VPC, or of an External when prefixed as in gateway peerings
+func peeredFabric(ctx context.Context, kube kclient.Reader, name string) (string, error) {
+	if ext, isExt := strings.CutPrefix(name, gwapi.VPCInfoExtPrefix); isExt {
+		external := &vpcapi.External{}
+		if err := kube.Get(ctx, kclient.ObjectKey{Name: ext, Namespace: metav1.NamespaceDefault}, external); err != nil {
+			return "", fmt.Errorf("getting external %s: %w", ext, err)
+		}
+
+		return external.Spec.Topology.Fabric, nil
+	}
+
+	vpc := &vpcapi.VPC{}
+	if err := kube.Get(ctx, kclient.ObjectKey{Name: name, Namespace: metav1.NamespaceDefault}, vpc); err != nil {
+		return "", fmt.Errorf("getting vpc %s: %w", name, err)
+	}
+
+	return vpc.Spec.Topology.Fabric, nil
+}
+
 func DoSetupPeerings(ctx context.Context, kube client.Client, vpcPeerings map[string]*vpcapi.VPCPeeringSpec,
 	externalPeerings map[string]*vpcapi.ExternalPeeringSpec, gwPeerings map[string]*gwapi.PeeringSpec,
 	waitReady bool,
@@ -2232,6 +2348,11 @@ func DoSetupPeerings(ctx context.Context, kube client.Client, vpcPeerings map[st
 				Namespace: metav1.NamespaceDefault,
 			},
 		}
+		if vpcPeeringSpec.Topology.Fabric == "" {
+			if vpcPeeringSpec.Topology.Fabric, err = peeredFabric(ctx, kube, vpc1); err != nil {
+				return err
+			}
+		}
 		res, err := ctrlutil.CreateOrUpdate(ctx, kube, vpcPeering, func() error {
 			vpcPeering.Spec = *vpcPeeringSpec
 
@@ -2260,6 +2381,13 @@ func DoSetupPeerings(ctx context.Context, kube client.Client, vpcPeerings map[st
 				Name:      name,
 				Namespace: metav1.NamespaceDefault,
 			},
+		}
+		if extPeeringSpec.Topology.Fabric == "" {
+			fabric, err := peeredFabric(ctx, kube, extPeeringSpec.Permit.VPC.Name)
+			if err != nil {
+				return err
+			}
+			extPeeringSpec.Topology.Fabric = fabric
 		}
 		res, err := ctrlutil.CreateOrUpdate(ctx, kube, extPeering, func() error {
 			extPeering.Spec = *extPeeringSpec
@@ -2292,6 +2420,13 @@ func DoSetupPeerings(ctx context.Context, kube client.Client, vpcPeerings map[st
 				Name:      name,
 				Namespace: metav1.NamespaceDefault,
 			},
+		}
+		if gwPeeringSpec.Topology.Fabric == "" {
+			fabric, err := peeredFabric(ctx, kube, vpcs[0])
+			if err != nil {
+				return err
+			}
+			gwPeeringSpec.Topology.Fabric = fabric
 		}
 		res, err := ctrlutil.CreateOrUpdate(ctx, kube, gwPeering, func() error {
 			gwPeering.Spec = *gwPeeringSpec

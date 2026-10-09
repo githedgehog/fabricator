@@ -63,6 +63,7 @@ const (
 	EdgeTypeGateway        = wiringapi.ConnectionTypeGateway
 	EdgeTypeExternal       = wiringapi.ConnectionTypeExternal
 	EdgeTypeStaticExternal = "staticExternal" // New type for static external connections
+	EdgeTypeInterconnect   = "interconnect"   // between the two Externals of a link connecting two fabrics
 	NodeTypeSwitch         = "switch"
 	NodeTypeServer         = "server"
 	NodeTypeGateway        = "gateway"
@@ -124,6 +125,8 @@ const (
 	PropSrcLinkIP        = "srcLinkIP"
 	PropDstLinkIP        = "dstLinkIP"
 	PropBGPState         = "bgpState"
+	PropFabric           = "fabric"
+	PropDomains          = "domains" // comma separated, default domain first
 )
 
 const (
@@ -140,6 +143,7 @@ const (
 	LegendKeyGateway        = "gateway"
 	LegendKeyExternal       = "external"
 	LegendKeyStaticExternal = "static_external" // New legend key
+	LegendKeyInterconnect   = "interconnect"
 	LegendKeyVPC            = "vpc"
 )
 

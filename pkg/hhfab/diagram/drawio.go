@@ -6,9 +6,11 @@ package diagram
 import (
 	"encoding/xml"
 	"fmt"
+	"maps"
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -229,30 +231,97 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 		leafSpacing = 120
 	}
 
-	totalLeafWidth := float64(len(layers.Leaf)*leafNodeWidth) + leafSpacing*float64(len(layers.Leaf)-1)
-	leafCenterX := float64(canvasWidth) / 2
+	serverNodeWidth := 100
+	var serverSpacing float64 = 60
 
-	spineNodeWidth := 100
-	var spineSpacing float64
-
-	if len(layers.Spine) > 1 {
-		if len(layers.Spine) >= len(layers.Leaf) {
-			spineSpacing = math.Max(120, (totalLeafWidth-float64(len(layers.Spine)*spineNodeWidth))/float64(len(layers.Spine)-1))
-		} else {
-			maxSpineWidth := totalLeafWidth * 0.8
-			spineSpacing = math.Min(350, math.Max(150, (maxSpineWidth-float64(len(layers.Spine)*spineNodeWidth))/float64(len(layers.Spine)-1)))
+	// Each fabric is a block of its leaves with its servers centered below them. Blocks are side by side,
+	// with a gap for the Externals connecting fabrics.
+	fabricGap := 480.0
+	blockFabrics := []string{}
+	leafCount := map[string]int{}
+	for _, node := range layers.Leaf {
+		if !slices.Contains(blockFabrics, node.Properties[PropFabric]) {
+			blockFabrics = append(blockFabrics, node.Properties[PropFabric])
 		}
-	} else {
-		spineSpacing = 250
+		leafCount[node.Properties[PropFabric]]++
+	}
+	if len(blockFabrics) == 0 {
+		blockFabrics = []string{""}
+	}
+	blockOf := func(node Node) string {
+		if slices.Contains(blockFabrics, node.Properties[PropFabric]) {
+			return node.Properties[PropFabric]
+		}
+
+		return blockFabrics[0]
+	}
+	serverCount := map[string]int{}
+	for _, node := range layers.Server {
+		serverCount[blockOf(node)]++
 	}
 
-	totalSpineWidth := float64(len(layers.Spine)*spineNodeWidth) + spineSpacing*float64(len(layers.Spine)-1)
-	spineStartX := leafCenterX - (totalSpineWidth / 2)
+	blockX, blockWidth := map[string]float64{}, map[string]float64{}
+	totalWidth := fabricGap * float64(len(blockFabrics)-1)
+	for _, f := range blockFabrics {
+		blockWidth[f] = math.Max(float64(leafCount[f]*leafNodeWidth)+leafSpacing*float64(leafCount[f]-1),
+			float64(serverCount[f]*serverNodeWidth)+serverSpacing*float64(serverCount[f]-1))
+		totalWidth += blockWidth[f]
+	}
+	nextBlockX := float64(canvasWidth)/2 - totalWidth/2
+	for _, f := range blockFabrics {
+		blockX[f] = nextBlockX
+		nextBlockX += blockWidth[f] + fabricGap
+	}
 
+	rowPositions := func(row []Node, nodeWidth int, spacing float64) []float64 {
+		positions := make([]float64, len(row))
+		for _, f := range blockFabrics {
+			idxs := []int{}
+			for i, node := range row {
+				if blockOf(node) == f {
+					idxs = append(idxs, i)
+				}
+			}
+			startX := blockX[f] + (blockWidth[f]-float64(len(idxs)*nodeWidth)-spacing*float64(len(idxs)-1))/2
+			for j, i := range idxs {
+				positions[i] = startX + float64(j)*(float64(nodeWidth)+spacing)
+			}
+		}
+
+		return positions
+	}
+	leafPositions := rowPositions(layers.Leaf, leafNodeWidth, leafSpacing)
+	serverPositions := rowPositions(layers.Server, serverNodeWidth, serverSpacing)
+
+	// Spines are centered above the leaves of their fabric
+	spineNodeWidth := 100
 	spinePositions := make([]float64, len(layers.Spine))
-	for i, node := range layers.Spine {
-		width, _ := GetNodeDimensions(node)
-		spinePositions[i] = spineStartX + float64(i)*(float64(width)+spineSpacing)
+	for _, f := range blockFabrics {
+		spines := []int{}
+		for i, node := range layers.Spine {
+			if blockOf(node) == f {
+				spines = append(spines, i)
+			}
+		}
+		totalLeafWidth := float64(leafCount[f]*leafNodeWidth) + leafSpacing*float64(leafCount[f]-1)
+
+		var spineSpacing float64
+		if len(spines) > 1 {
+			if len(spines) >= leafCount[f] {
+				spineSpacing = math.Max(120, (totalLeafWidth-float64(len(spines)*spineNodeWidth))/float64(len(spines)-1))
+			} else {
+				maxSpineWidth := totalLeafWidth * 0.8
+				spineSpacing = math.Min(350, math.Max(150, (maxSpineWidth-float64(len(spines)*spineNodeWidth))/float64(len(spines)-1)))
+			}
+		} else {
+			spineSpacing = 250
+		}
+
+		totalSpineWidth := float64(len(spines)*spineNodeWidth) + spineSpacing*float64(len(spines)-1)
+		spineStartX := blockX[f] + blockWidth[f]/2 - totalSpineWidth/2
+		for j, i := range spines {
+			spinePositions[i] = spineStartX + float64(j)*(float64(spineNodeWidth)+spineSpacing)
+		}
 	}
 
 	gatewayNodeWidth := 100
@@ -262,14 +331,38 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 		gatewaySpacing = 150.0
 	}
 
-	totalGatewayWidth := float64(len(layers.Gateway)*gatewayNodeWidth) + gatewaySpacing*float64(len(layers.Gateway)-1)
+	// Gateways are centered above the spines of their domain, or the leaves of their fabric if there are none.
+	// They are sorted by fabric and domain, so each group is contiguous.
+	gatewayPositions := make([]float64, len(layers.Gateway))
+	for start := 0; start < len(layers.Gateway); {
+		f, domain := blockOf(layers.Gateway[start]), layers.Gateway[start].Properties[PropDomains]
+		end := start + 1
+		for end < len(layers.Gateway) && blockOf(layers.Gateway[end]) == f && layers.Gateway[end].Properties[PropDomains] == domain {
+			end++
+		}
 
-	gatewayStartX := float64(canvasWidth)/2 - (totalGatewayWidth / 2)
+		centerX := blockX[f] + blockWidth[f]/2
+		minX, maxX := math.Inf(1), math.Inf(-1)
+		for i, spine := range layers.Spine {
+			if blockOf(spine) == f && slices.Contains(strings.Split(spine.Properties[PropDomains], ","), domain) {
+				minX, maxX = math.Min(minX, spinePositions[i]), math.Max(maxX, spinePositions[i]+float64(spineNodeWidth))
+			}
+		}
+		if minX < maxX {
+			centerX = (minX + maxX) / 2
+		}
+
+		totalGatewayWidth := float64((end-start)*gatewayNodeWidth) + gatewaySpacing*float64(end-start-1)
+		for i := start; i < end; i++ {
+			gatewayPositions[i] = centerX - totalGatewayWidth/2 + float64(i-start)*(float64(gatewayNodeWidth)+gatewaySpacing)
+		}
+		start = end
+	}
 
 	for i, node := range layers.Gateway {
 		width, height := GetNodeDimensions(node)
 
-		x := gatewayStartX + float64(i)*(float64(width)+gatewaySpacing)
+		x := gatewayPositions[i]
 
 		usingIconStyle := IsIconBasedStyle(style)
 
@@ -333,11 +426,9 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 		model.Root.MxCell = append(model.Root.MxCell, cell)
 	}
 
-	leafStartX := leafCenterX - (totalLeafWidth / 2)
-
 	for i, node := range layers.Leaf {
 		width, height := GetNodeDimensions(node)
-		x := leafStartX + float64(i)*(float64(width)+leafSpacing)
+		x := leafPositions[i]
 
 		// For mesh triangle, put the second leaf (index 1) in upper tier
 		nodeY := float64(leafY)
@@ -363,9 +454,34 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 		model.Root.MxCell = append(model.Root.MxCell, cell)
 	}
 
+	interconnectExternals := map[string]bool{}
+	for _, link := range topo.Links {
+		if link.Type == EdgeTypeInterconnect {
+			interconnectExternals[link.Source] = true
+			interconnectExternals[link.Target] = true
+		}
+	}
+	externals := slices.DeleteFunc(slices.Clone(layers.External), func(node Node) bool { return interconnectExternals[node.ID] })
+	// with several fabrics, the externals on the right of the first one go in the gap after it
+	var gapExternals []Node
+
 	// External node positioning fine-tuning
-	if len(layers.External) > 0 {
-		leftExternals, rightExternals := splitExternalNodes(layers.External, topo.Links, layers.Leaf)
+	if len(externals) > 0 {
+		var leftExternals, rightExternals []Node
+		if len(blockFabrics) > 1 {
+			var firstExternals []Node
+			for _, node := range externals {
+				if blockOf(node) == blockFabrics[0] {
+					firstExternals = append(firstExternals, node)
+				} else {
+					rightExternals = append(rightExternals, node)
+				}
+			}
+			firstLeaves := slices.DeleteFunc(slices.Clone(layers.Leaf), func(node Node) bool { return blockOf(node) != blockFabrics[0] })
+			leftExternals, gapExternals = splitExternalNodes(firstExternals, topo.Links, firstLeaves)
+		} else {
+			leftExternals, rightExternals = splitExternalNodes(externals, topo.Links, layers.Leaf)
+		}
 
 		externalCenterY := float64(externalY)
 
@@ -382,8 +498,8 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 			externalDistance = 120.0
 		}
 
-		leftmostLeafX := leafStartX
-		rightmostLeafX := leafStartX + totalLeafWidth - 100
+		leftmostLeafX := slices.Min(leafPositions)
+		rightmostLeafX := slices.Max(leafPositions)
 		leftExternalX := leftmostLeafX - externalDistance
 		rightExternalX := rightmostLeafX + externalDistance
 
@@ -513,15 +629,64 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 		}
 	}
 
-	serverNodeWidth := 100
-	var serverSpacing float64 = 60
+	// The two Externals of a link between fabrics are side by side in the gap after the fabric on the left
+	gapPairs := map[string]int{}
+	for _, link := range topo.Links {
+		if link.Type != EdgeTypeInterconnect {
+			continue
+		}
+		left, right := findNode(nodes, link.Source), findNode(nodes, link.Target)
+		if blockX[blockOf(left)] > blockX[blockOf(right)] {
+			left, right = right, left
+		}
+		gapX := blockX[blockOf(left)] + blockWidth[blockOf(left)]
+		y := float64(externalY + 150*gapPairs[blockOf(left)])
+		gapPairs[blockOf(left)]++
 
-	totalServerWidth := float64(len(layers.Server)*serverNodeWidth) + serverSpacing*float64(len(layers.Server)-1)
-	serverStartX := leafCenterX - (totalServerWidth / 2)
+		for i, node := range []Node{left, right} {
+			width, height := GetNodeDimensions(node)
+			cell := MxCell{
+				ID:     node.ID,
+				Parent: "1",
+				Value:  FormatNodeValue(node, style),
+				Style:  GetNodeStyle(node, style),
+				Vertex: "1",
+				Geometry: &Geometry{
+					X:      gapX + 90 + float64(i)*(fabricGap-180-float64(width)),
+					Y:      y,
+					Width:  width,
+					Height: height,
+					As:     "geometry",
+				},
+			}
+			cellMap[node.ID] = &cell
+			model.Root.MxCell = append(model.Root.MxCell, cell)
+		}
+	}
+	for _, node := range gapExternals {
+		width, height := GetNodeDimensions(node)
+		cell := MxCell{
+			ID:     node.ID,
+			Parent: "1",
+			Value:  FormatNodeValue(node, style),
+			Style:  GetNodeStyle(node, style),
+			Vertex: "1",
+			Geometry: &Geometry{
+				X:      blockX[blockFabrics[0]] + blockWidth[blockFabrics[0]] + fabricGap/2 - float64(width)/2,
+				Y:      float64(externalY + 150*gapPairs[blockFabrics[0]]),
+				Width:  width,
+				Height: height,
+				As:     "geometry",
+			},
+		}
+		gapPairs[blockFabrics[0]]++
+		cellMap[node.ID] = &cell
+		model.Root.MxCell = append(model.Root.MxCell, cell)
+	}
 
 	for i, node := range layers.Server {
 		width, height := GetNodeDimensions(node)
-		x := serverStartX + float64(i)*(float64(width)+serverSpacing)
+		x := serverPositions[i]
 		cell := MxCell{
 			ID:     node.ID,
 			Parent: "1",
@@ -549,6 +714,15 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 	// Add redundancy group layer
 	createRedundancyGroupLayer(model, redundancyGroups, cellMap)
 
+	// the fabric boxes start from the top, so the legend moves out of their way
+	if topologyMinX, ok := createTopologyLayer(model, cellMap); ok {
+		for i := range model.Root.MxCell {
+			if model.Root.MxCell[i].ID == "legend_container" {
+				model.Root.MxCell[i].Geometry.X = topologyMinX - float64(model.Root.MxCell[i].Geometry.Width) - 40
+			}
+		}
+	}
+
 	// Add VPC layer
 	createVPCLayer(model, topo.VPCs, cellMap)
 
@@ -572,8 +746,11 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 	if len(topo.VPCs) > 0 {
 		// Calculate server layer dimensions for VPC legend positioning
 		numServers := len(layers.Server)
-		serverLayerStartX := serverStartX
-		serverLayerWidth := totalServerWidth
+		serverLayerStartX, serverLayerWidth := float64(canvasWidth)/2, 0.0
+		if numServers > 0 {
+			serverLayerStartX = slices.Min(serverPositions)
+			serverLayerWidth = slices.Max(serverPositions) + float64(serverNodeWidth) - serverLayerStartX
+		}
 		createVPCLegend(model, topo.VPCs, serverBottomY, numServers, serverLayerStartX, serverLayerWidth)
 	}
 
@@ -665,6 +842,8 @@ func createLegend(links []Link, style Style) []MxCell {
 				linkTypesMap[LegendKeyExternal] = true
 			case EdgeTypeStaticExternal:
 				linkTypesMap[LegendKeyStaticExternal] = true
+			case EdgeTypeInterconnect:
+				linkTypesMap[LegendKeyInterconnect] = true
 			case EdgeTypeMesh:
 				linkTypesMap[LegendKeyMesh] = true
 			case EdgeTypeFabric:
@@ -736,6 +915,7 @@ func createLegend(links []Link, style Style) []MxCell {
 		{LegendKeyGateway, style.GatewayLinkStyle, "Gateway Links"},
 		{LegendKeyExternal, style.ExternalLinkStyle, "External Links"},
 		{LegendKeyStaticExternal, style.StaticExternalLinkStyle, "Static External Links"},
+		{LegendKeyInterconnect, style.InterconnectLinkStyle, "Fabric Interconnect Links"},
 	}
 
 	cells := make([]MxCell, 0, 3+4*len(legendEntries))
@@ -1545,6 +1725,83 @@ func createRedundancyGroupLayer(model *MxGraphModel, redundancyGroups map[string
 		model.Root.MxCell = append(model.Root.MxCell, groupRect)
 		groupIndex++
 	}
+}
+
+// createTopologyLayer draws a box around each fabric, if there are several, and one around the spines and
+// gateways of each domain of a fabric with several. The layer goes below the nodes, as the boxes are filled.
+func createTopologyLayer(model *MxGraphModel, cellMap map[string]*MxCell) (float64, bool) {
+	fabrics := map[string][]*MxCell{}
+	domains := map[[2]string][]*MxCell{}
+	for _, node := range nodes {
+		cell, ok := cellMap[node.ID]
+		if !ok || node.Type == NodeTypeExternal || node.Properties[PropFabric] == "" {
+			continue
+		}
+		fabric := node.Properties[PropFabric]
+		fabrics[fabric] = append(fabrics[fabric], cell)
+		if _, role := getNodeTypeInfo(node); role == SwitchRoleSpine || node.Type == NodeTypeGateway {
+			key := [2]string{fabric, node.Properties[PropDomains]}
+			domains[key] = append(domains[key], cell)
+		}
+	}
+
+	domainCount := map[string]int{}
+	for key := range domains {
+		domainCount[key[0]]++
+	}
+
+	type box struct {
+		label   string
+		cells   []*MxCell
+		padding float64
+		style   string
+	}
+	// fabrics first, so that their domains are drawn on top of them
+	boxes := []box{}
+	if len(fabrics) > 1 {
+		for _, fabric := range slices.Sorted(maps.Keys(fabrics)) {
+			boxes = append(boxes, box{"Fabric: " + fabric, fabrics[fabric], 50,
+				"rounded=1;arcSize=2;fillColor=#FAFAFA;strokeColor=#666666;strokeWidth=2;verticalAlign=top;align=left;spacingLeft=10;fontStyle=1;fontSize=14;"})
+		}
+	}
+	for _, key := range slices.SortedFunc(maps.Keys(domains), func(a, b [2]string) int { return strings.Compare(a[0]+"/"+a[1], b[0]+"/"+b[1]) }) {
+		if domainCount[key[0]] > 1 {
+			boxes = append(boxes, box{"Domain: " + key[1], domains[key], 25,
+				"rounded=1;arcSize=4;dashed=1;fillColor=#EEF3F8;strokeColor=#6C8EBF;verticalAlign=top;align=left;spacingLeft=8;spacingTop=-2;fontStyle=1;"})
+		}
+	}
+	if len(boxes) == 0 {
+		return 0, false
+	}
+
+	// right after the root, so that it is the bottom layer
+	model.Root.MxCell = slices.Insert(model.Root.MxCell, 1, MxCell{ID: "topology_layer", Parent: "0", Value: "Fabrics and Domains", Style: "locked=1;"})
+	boxesMinX := math.Inf(1)
+	for i, b := range boxes {
+		minX, minY, maxX, maxY := math.Inf(1), math.Inf(1), math.Inf(-1), math.Inf(-1)
+		for _, cell := range b.cells {
+			minX, minY = math.Min(minX, cell.Geometry.X), math.Min(minY, cell.Geometry.Y)
+			maxX = math.Max(maxX, cell.Geometry.X+float64(cell.Geometry.Width))
+			maxY = math.Max(maxY, cell.Geometry.Y+float64(cell.Geometry.Height))
+		}
+		model.Root.MxCell = append(model.Root.MxCell, MxCell{
+			ID:     fmt.Sprintf("topology_box_%d", i),
+			Parent: "topology_layer",
+			Value:  b.label,
+			Style:  b.style,
+			Vertex: "1",
+			Geometry: &Geometry{
+				X:      minX - b.padding,
+				Y:      minY - b.padding,
+				Width:  int(maxX - minX + 2*b.padding),
+				Height: int(maxY - minY + 2*b.padding),
+				As:     "geometry",
+			},
+		})
+		boxesMinX = math.Min(boxesMinX, minX-b.padding)
+	}
+
+	return boxesMinX, true
 }
 
 func createUnusedSwitchesLayer(model *MxGraphModel, unusedSwitches []Node, serverY int, style Style) {

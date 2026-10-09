@@ -255,6 +255,9 @@ func Run(ctx context.Context) error {
 	var wgESLAGLeafGroups string
 	var wgESLAGServers, wgUnbundledServers, wgBundledServers, wgMultiHomedServers uint
 	var wgNoSwitches bool
+	var wgExtraDomain bool
+	var wgSharedLeafsCount uint
+	var wgExtraFabric, wgInterconnectFabrics bool
 	var wgGatewayUplinks uint
 	var wgGatewayDriver string
 	var wgGatewayWorkers uint
@@ -287,6 +290,26 @@ func Run(ctx context.Context) error {
 			Name:        "orphan-leafs-count",
 			Usage:       "number of orphan leafs",
 			Destination: &wgOrphanLeafsCount,
+		},
+		&cli.BoolFlag{
+			Name:        "extra-domain",
+			Usage:       "add a second domain of as many spines; orphan leafs move to it (2 by default)",
+			Destination: &wgExtraDomain,
+		},
+		&cli.UintFlag{
+			Name:        "shared-leafs-count",
+			Usage:       "number of orphan leafs in both domains, the last ones (default 1 with --extra-domain)",
+			Destination: &wgSharedLeafsCount,
+		},
+		&cli.BoolFlag{
+			Name:        "extra-fabric",
+			Usage:       "generate a second fabric of two mesh leafs with a server each, with no gateway or virtual external",
+			Destination: &wgExtraFabric,
+		},
+		&cli.BoolFlag{
+			Name:        "interconnect-fabrics",
+			Usage:       "connect a leaf of each fabric with an External on both sides, so the extra fabric can reach the internet through the main one",
+			Destination: &wgInterconnectFabrics,
 		},
 		&cli.UintFlag{
 			Name:        "eslag-servers",
@@ -1078,6 +1101,10 @@ func Run(ctx context.Context) error {
 								ExtStaticProxyCount: uint8(wgStaticExternalsProxy), //nolint:gosec
 								ExtESLAGConnCount:   uint8(wgExtESLAGConns),        //nolint:gosec
 								ExtOrphanConnCount:  uint8(wgExtOrphanConns),       //nolint:gosec
+								ExtraDomain:         wgExtraDomain,
+								SharedLeafsCount:    uint8(wgSharedLeafsCount), //nolint:gosec
+								ExtraFabric:         wgExtraFabric,
+								InterconnectFabrics: wgInterconnectFabrics,
 								YesFlag:             yes,
 								VLABBuilderBase: hhfab.VLABBuilderBase{
 									DefaultSwitchProfile:   wgDefaultSwitchProfile,
