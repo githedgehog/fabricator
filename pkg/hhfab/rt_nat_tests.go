@@ -632,6 +632,8 @@ func gatewayPeeringOverlapNATTest(ctx context.Context, testCtx *VPCPeeringTestCt
 	preservedMTU := testCtx.setupOpts.InterfaceMTU
 
 	newVLAN := originalVLAN + 100 // Use different VLAN to avoid conflicts
+
+	measureNamespaceDeleteDenial(ctx, testCtx.kube, existingVPC.Spec.Mode, originalVLAN+200, 30)
 	// Create the new IPv4Namespace with the same subnet range as the existing VPC's namespace
 	overlapNS := &vpcapi.IPv4Namespace{
 		TypeMeta: kmetav1.TypeMeta{
