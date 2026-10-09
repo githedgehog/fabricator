@@ -998,6 +998,22 @@ func Run(ctx context.Context) error {
 				},
 			},
 			{
+				Name:   "dhcp-load-agent",
+				Usage:  "runs the DHCP clients of 'vlab dhcp-load --mode access' on a server",
+				Hidden: true,
+				Flags: []cli.Flag{
+					&cli.StringFlag{Name: "config", Usage: "JSON config of the load test", Required: true},
+				},
+				Before: before(false),
+				Action: func(c *cli.Context) error {
+					if err := hhfab.RunDHCPLoadAgent(ctx, c.String("config")); err != nil {
+						return fmt.Errorf("dhcp-load-agent: %w", err)
+					}
+
+					return nil
+				},
+			},
+			{
 				Name:  "precache",
 				Usage: "precache artifacts (only ones needed for build command by default)",
 				Flags: flatten(defaultFlags, []cli.Flag{
@@ -1781,6 +1797,9 @@ VLAB management bridge and removes everything on exit (unless --keep is set). Do
 							&cli.DurationFlag{Name: "renew-every", Usage: "override the renewal interval (default T1 from the ACK, i.e. lease/2)"},
 							&cli.IntFlag{Name: "lease", Usage: "DHCP lease time of the VPC subnets in seconds", Value: dhcpDefaults.LeaseTime},
 							&cli.BoolFlag{Name: "release", Usage: "send RELEASE for every bound client on exit"},
+							&cli.StringFlag{Name: "mode", Usage: "relay: emulate leaf relays from a netns on the VLAB host (needs L2 to the control node management network); access: run the clients on a VLAB server wired to a real leaf, which relays their DHCP", Value: dhcpDefaults.Mode},
+							&cli.StringFlag{Name: "access-server", Usage: "access mode: server running the clients, the first one with an unbundled connection if empty"},
+							&cli.StringFlag{Name: "access-iface", Usage: "access mode: server interface wired to the leaf, taken from the connection if empty"},
 							&cli.StringFlag{Name: "relay-base", Usage: "first emulated leaf relay IP (giaddr), leaves use consecutive IPs, must be in the management subnet outside of the management DHCP range", Value: dhcpDefaults.RelayBase.String()},
 							&cli.StringFlag{Name: "cidr-base", Usage: "subnet i of the VPC gets the /20 at cidr-base + i*4096, must be inside the default IPv4 namespace", Value: dhcpDefaults.CIDRBase.String()},
 							&cli.IntFlag{Name: "vlan-base", Usage: "VLAN of the first VPC subnet, must be inside the VLAN namespace of the leaves", Value: dhcpDefaults.VLANBase},
@@ -1802,6 +1821,8 @@ VLAB management bridge and removes everything on exit (unless --keep is set). Do
 							if cfg.CIDRBase, err = netip.ParseAddr(c.String("cidr-base")); err != nil {
 								return fmt.Errorf("parsing cidr-base: %w", err)
 							}
+							cfg.Mode = c.String("mode")
+							cfg.Iface = c.String("access-iface")
 							cfg.Servers = c.Int("servers")
 							cfg.NICs = c.Int("nics")
 							cfg.Leaves = c.Int("leaves")
@@ -1822,6 +1843,7 @@ VLAB management bridge and removes everything on exit (unless --keep is set). Do
 								FakeProtocolBase: c.String("fake-protocol-base"),
 								FakeVTEPBase:     c.String("fake-vtep-base"),
 								FakeASNBase:      uint32(c.Uint("fake-asn-base")), //nolint:gosec
+								Server:           c.String("access-server"),
 								Keep:             c.Bool("keep"),
 								SkipReadyCheck:   c.Bool("skip-ready-check"),
 							}); err != nil {
