@@ -22,7 +22,6 @@ import (
 
 	agentapi "go.githedgehog.com/fabric/api/agent/v1beta1"
 	dhcpapi "go.githedgehog.com/fabric/api/dhcp/v1beta1"
-	"go.githedgehog.com/fabric/api/meta"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/hhfab/dhcpload"
@@ -43,7 +42,7 @@ const (
 type DHCPLoadOpts struct {
 	dhcpload.Config
 	FakeProtocolBase string
-	FakeVTEPBase     string // empty = no VTEP IPs
+	FakeVTEPBase     string
 	FakeASNBase      uint32
 	// Server is the VLAB server running the clients in access mode, the first one with an unbundled connection if empty
 	Server string
@@ -234,10 +233,8 @@ func (c *Config) prepareRelays(opts *DHCPLoadOpts, switches []wiringapi.Switch) 
 	if fakeOpts.ProtocolBase, err = netip.ParseAddr(opts.FakeProtocolBase); err != nil {
 		return nil, nil, netip.Prefix{}, fmt.Errorf("parsing fake protocol base: %w", err)
 	}
-	if opts.FakeVTEPBase != "" {
-		if fakeOpts.VTEPBase, err = netip.ParseAddr(opts.FakeVTEPBase); err != nil {
-			return nil, nil, netip.Prefix{}, fmt.Errorf("parsing fake VTEP base: %w", err)
-		}
+	if fakeOpts.VTEPBase, err = netip.ParseAddr(opts.FakeVTEPBase); err != nil {
+		return nil, nil, netip.Prefix{}, fmt.Errorf("parsing fake VTEP base: %w", err)
 	}
 
 	controlPrefix, err := c.Controls[0].Spec.Management.IP.Parse()
@@ -478,15 +475,6 @@ func (c *Config) runAccess(ctx context.Context, vlab *VLAB, opts DHCPLoadOpts, s
 
 // checkDHCPLoadNamespaces makes sure the VPC subnets and VLANs fit the namespaces the VPC webhook checks them against
 func checkDHCPLoadNamespaces(ctx context.Context, kube kclient.Reader, cfg *dhcpload.Config, leaf *wiringapi.Switch) error {
-	var vlans []meta.VLANRange
-	for _, name := range leaf.Spec.VLANNamespaces {
-		ns := &wiringapi.VLANNamespace{}
-		if err := kube.Get(ctx, kclient.ObjectKey{Name: name, Namespace: kmetav1.NamespaceDefault}, ns); err != nil {
-			return fmt.Errorf("getting VLAN namespace %s: %w", name, err)
-		}
-		vlans = append(vlans, ns.Spec.Ranges...)
-	}
-
 	// the VPC uses the default IPv4 namespace, there is no per-leaf one
 	v4 := &vpcapi.IPv4Namespace{}
 	if err := kube.Get(ctx, kclient.ObjectKey{Name: "default", Namespace: kmetav1.NamespaceDefault}, v4); err != nil {
@@ -501,7 +489,23 @@ func checkDHCPLoadNamespaces(ctx context.Context, kube kclient.Reader, cfg *dhcp
 		ipv4 = append(ipv4, p)
 	}
 
-	return dhcpload.CheckNamespaces(cfg, ipv4, vlans) //nolint:wrapcheck
+	// a VPC belongs to a single VLAN namespace, so one namespace of the leaf has to hold every generated VLAN
+	errs := make([]error, 0, len(leaf.Spec.VLANNamespaces))
+	for _, name := range leaf.Spec.VLANNamespaces {
+		ns := &wiringapi.VLANNamespace{}
+		if err := kube.Get(ctx, kclient.ObjectKey{Name: name, Namespace: kmetav1.NamespaceDefault}, ns); err != nil {
+			return fmt.Errorf("getting VLAN namespace %s: %w", name, err)
+		}
+		err := dhcpload.CheckNamespaces(cfg, ipv4, ns.Spec.Ranges)
+		if err == nil {
+			cfg.VLANNamespace = name
+
+			return nil
+		}
+		errs = append(errs, fmt.Errorf("VLAN namespace %s: %w", name, err))
+	}
+
+	return fmt.Errorf("no VLAN namespace of leaf %s fits the VPC: %w", leaf.Name, errors.Join(errs...))
 }
 
 func waitDHCPSubnets(ctx context.Context, kube kclient.Reader, cfg *dhcpload.Config) error {

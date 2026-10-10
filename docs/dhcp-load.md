@@ -25,8 +25,8 @@ In `access` mode the command picks the first server with an unbundled connection
 
 Constraints on the flags:
 
-- `--cidr-base`: subnet i gets the /20 at `cidr-base + i * 4096`; all must be inside the default IPv4 namespace.
-- `--vlan-base`: VLAN of the first subnet; all must be inside the leaves' VLAN namespace and unused.
+- `--cidr-base`, `--subnet-prefix`: subnet i gets a prefix of length `subnet-prefix` (default 20, 16 to 28) at `cidr-base` plus i times its size; all must be inside the default IPv4 namespace. Subnets of /24 and longer keep only the gateway out of the pool, so a /24 holds 250 clients.
+- `--vlan-base`: VLAN of the first subnet; all must be inside one VLAN namespace of the leaf and unused; the VPC is created in that namespace.
 - `--layout`: `rail` (one subnet per NIC index, the default), `flat` (one subnet) or `leaf` (one subnet per leaf × NIC, `relay` only).
 - `--ramp`: client start times are spread uniformly over this window from a fixed seed; 0 starts all at once.
 - `--lease`, `--duration`, `--renew-every`: with a duration, bound clients renew at T1 (half the lease, or the override) until it ends; without one the run ends when every client is bound or gave up.

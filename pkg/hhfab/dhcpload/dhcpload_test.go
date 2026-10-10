@@ -4,8 +4,11 @@
 package dhcpload
 
 import (
+	"math"
+	"net"
 	"net/netip"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.githedgehog.com/fabric/api/meta"
@@ -29,11 +32,48 @@ func TestValidate(t *testing.T) {
 		"retries": func(c *Config) { c.Retries = "wat" },
 		"leaves":  func(c *Config) { c.Leaves = 0 },
 		"relay":   func(c *Config) { c.RelayBase = netip.MustParseAddr("::1") },
+		"lease0":  func(c *Config) { c.LeaseTime = 0 },
+		"lease-1": func(c *Config) { c.LeaseTime = -1 },
+		"lease64": func(c *Config) { c.LeaseTime = math.MaxUint32 + 1 },
+		"cidr":    func(c *Config) { c.CIDRBase = netip.MustParseAddr("10.0.128.1") },
+		"cidr-20": func(c *Config) { c.CIDRBase = netip.MustParseAddr("10.0.136.0") },
 	} {
 		c := testConfig()
 		mod(c)
 		require.Error(t, c.Validate(), name)
 	}
+}
+
+func TestClaimDuplicates(t *testing.T) {
+	r := &runner{}
+	a := &client{idx: 1, subnet: subnet{circuitID: "Vlan1000"}}
+	b := &client{idx: 2, subnet: subnet{circuitID: "Vlan1000"}}
+	ip1, ip2 := net.ParseIP("10.0.0.10"), net.ParseIP("10.0.0.11")
+
+	r.claim(a, ip1)
+	a.ip = ip1
+	r.claim(a, ip1) // renewal with the same address is not a duplicate
+	require.Empty(t, r.dupLog)
+
+	r.claim(b, ip1) // handed out while a still holds it, a moves away afterwards
+	b.ip = ip1
+	require.Len(t, r.dupLog, 1)
+	r.claim(a, ip2)
+	a.ip = ip2
+	require.Len(t, r.dupLog, 1)
+
+	r.claim(b, ip2) // a holds ip2
+	require.Len(t, r.dupLog, 2)
+}
+
+func TestLatenciesBounded(t *testing.T) {
+	var l latencies
+	for i := range 3 * maxLatSamples {
+		l.add(time.Duration(i) * time.Millisecond)
+	}
+	require.Len(t, l.samples, maxLatSamples)
+	require.Equal(t, 3*maxLatSamples, l.n)
+	require.Equal(t, time.Duration(3*maxLatSamples-1)*time.Millisecond, l.max)
 }
 
 func TestRelayIPs(t *testing.T) {
@@ -86,6 +126,27 @@ func TestSubnet(t *testing.T) {
 	require.Equal(t, "Vlan1002", s.circuitID)
 }
 
+func TestSubnetPrefix(t *testing.T) {
+	c := testConfig()
+	c.SubnetPrefix = 24
+	c.NICs = 16
+
+	require.NoError(t, c.Validate())
+	require.Equal(t, "10.0.128.0/24", c.subnet(0).prefix.String())
+	require.Equal(t, "10.0.131.0/24", c.subnet(3).prefix.String())
+
+	// a /24 pool holds 250 clients: everything after the gateway up to the last host
+	sub := BuildVPC(c).Spec.Subnets["subnet-3"]
+	require.NotNil(t, sub)
+	require.Equal(t, "10.0.131.0/24", sub.Subnet)
+	require.Equal(t, "10.0.131.1", sub.Gateway)
+	require.Equal(t, "10.0.131.2", sub.DHCP.Range.Start)
+	require.Equal(t, "10.0.131.254", sub.DHCP.Range.End)
+
+	c.SubnetPrefix = 29
+	require.Error(t, c.Validate())
+}
+
 func TestBuildVPC(t *testing.T) {
 	c := testConfig()
 	c.VPC = "LoadTest"
@@ -111,6 +172,7 @@ func TestBuildVPC(t *testing.T) {
 func TestBuildFakeSwitches(t *testing.T) {
 	c := testConfig()
 	tmpl := &wiringapi.Switch{Spec: wiringapi.SwitchSpec{
+		Topology:       wiringapi.SwitchTopology{Fabric: "other", Domains: []string{"d1"}},
 		Role:           wiringapi.SwitchRoleServerLeaf,
 		Profile:        "vs",
 		Groups:         []string{"g"},
@@ -149,9 +211,10 @@ func TestBuildFakeSwitches(t *testing.T) {
 	require.Equal(t, "172.30.0.8/21", tmpl.Spec.IP)
 	require.NotEmpty(t, tmpl.Spec.Groups)
 
-	fakes, err = BuildFakeSwitches(c, tmpl, FakeSwitchOpts{ProtocolBase: netip.MustParseAddr("172.30.11.1")})
-	require.NoError(t, err)
-	require.Empty(t, fakes[0].Spec.VTEPIP)
+	require.Equal(t, tmpl.Spec.Topology, last.Spec.Topology)
+
+	_, err = BuildFakeSwitches(c, tmpl, FakeSwitchOpts{ProtocolBase: netip.MustParseAddr("172.30.11.1")})
+	require.Error(t, err, "VTEP base is required")
 
 	tmpl.Spec.IP = "nope"
 	_, err = BuildFakeSwitches(c, tmpl, FakeSwitchOpts{ProtocolBase: netip.MustParseAddr("172.30.11.1")})

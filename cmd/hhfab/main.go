@@ -1807,12 +1807,13 @@ Don't use on a VLAB serving other purposes.`,
 							&cli.StringFlag{Name: "access-server", Usage: "access mode: server running the clients, the first one with an unbundled connection if empty"},
 							&cli.StringFlag{Name: "access-iface", Usage: "access mode: server interface wired to the leaf, taken from the connection if empty"},
 							&cli.StringFlag{Name: "relay-base", Usage: "first emulated leaf relay IP (giaddr), leaves use consecutive IPs, must be in the management subnet outside of the management DHCP range", Value: dhcpDefaults.RelayBase.String()},
-							&cli.StringFlag{Name: "cidr-base", Usage: "subnet i of the VPC gets the /20 at cidr-base + i*4096, must be inside the default IPv4 namespace", Value: dhcpDefaults.CIDRBase.String()},
+							&cli.IntFlag{Name: "subnet-prefix", Usage: "prefix length of the VPC subnets (16 to 28)", Value: dhcpload.DefaultSubnetPrefix},
+							&cli.StringFlag{Name: "cidr-base", Usage: "subnet i of the VPC gets the subnet-prefix sized prefix at cidr-base + i * its size, must be inside the default IPv4 namespace", Value: dhcpDefaults.CIDRBase.String()},
 							&cli.IntFlag{Name: "vlan-base", Usage: "VLAN of the first VPC subnet, must be inside the VLAN namespace of the leaves", Value: dhcpDefaults.VLANBase},
 							&cli.StringFlag{Name: "vpc", Usage: "name of the VPC to create", Value: dhcpDefaults.VPC},
 							&cli.StringFlag{Name: "out", Usage: "write per-client results CSV to this file"},
 							&cli.StringFlag{Name: "fake-protocol-base", Usage: "protocol IP of the first fake leaf, must not be used by real switches", Value: "172.30.11.1"},
-							&cli.StringFlag{Name: "fake-vtep-base", Usage: "VTEP IP of the first fake leaf, must not be used by real switches (empty = none)", Value: "172.30.15.1"},
+							&cli.StringFlag{Name: "fake-vtep-base", Usage: "VTEP IP of the first fake leaf, must not be used by real switches", Value: "172.30.15.1"},
 							&cli.UintFlag{Name: "fake-asn-base", Usage: "ASN of the first fake leaf, must not be used by real switches", Value: 65400},
 							&cli.BoolFlag{Name: "keep", Usage: "don't remove the fake switches, the VPC and the network namespace on exit (for debugging)"},
 							&cli.BoolFlag{Name: "skip-ready-check", Usage: "don't wait for the fabric to be ready before the test"},
@@ -1840,6 +1841,7 @@ Don't use on a VLAB serving other purposes.`,
 							cfg.RenewEvery = c.Duration("renew-every")
 							cfg.LeaseTime = c.Int("lease")
 							cfg.Release = c.Bool("release")
+							cfg.SubnetPrefix = c.Int("subnet-prefix")
 							cfg.VLANBase = c.Int("vlan-base")
 							cfg.VPC = c.String("vpc")
 							cfg.CSVPath = c.String("out")

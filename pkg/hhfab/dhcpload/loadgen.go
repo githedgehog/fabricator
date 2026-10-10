@@ -44,7 +44,7 @@ func (c *Config) NumSubnets() int {
 }
 
 func (c *Config) subnet(idx int) subnet {
-	base := binary.BigEndian.Uint32(c.CIDRBase.AsSlice()) + uint32(idx)*4096 //nolint:gosec
+	base := binary.BigEndian.Uint32(c.CIDRBase.AsSlice()) + uint32(idx)<<(32-c.subnetPrefix()) //nolint:gosec
 	var b [4]byte
 	binary.BigEndian.PutUint32(b[:], base)
 
@@ -52,7 +52,7 @@ func (c *Config) subnet(idx int) subnet {
 		idx:       idx,
 		vlan:      c.VLANBase + idx,
 		circuitID: fmt.Sprintf("Vlan%d", c.VLANBase+idx),
-		prefix:    netip.PrefixFrom(netip.AddrFrom4(b), 20),
+		prefix:    netip.PrefixFrom(netip.AddrFrom4(b), c.subnetPrefix()),
 	}
 }
 
@@ -283,7 +283,13 @@ type runner struct {
 	allBoundAt atomic.Int64
 }
 
-var errNoReply = errors.New("no reply")
+var (
+	errNoReply = errors.New("no reply")
+	errNAK     = errors.New("NAK")
+)
+
+// minRenewRetry is the lower bound of the delay before a failed renewal is retried
+const minRenewRetry = 5 * time.Second
 
 func (r *runner) jitter() time.Duration {
 	if r.cfg.Retries != RetriesRFC {
@@ -496,7 +502,7 @@ func (r *runner) renew(ctx context.Context, cl *client) error {
 		cl.naks++
 		r.stats.naks.Add(1)
 
-		return errors.New("NAK") //nolint:err113
+		return errNAK
 	}
 	r.stats.add(&r.stats.renewLat, lat)
 	r.bind(cl, ack)
@@ -528,30 +534,43 @@ func (r *runner) runClient(ctx context.Context, cl *client, startAfter time.Dura
 		r.allBoundAt.Store(int64(time.Since(r.begin)))
 	}
 
+	next := cl.boundAt.Add(cl.renewAt)
 	for keepRenewing {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(time.Until(cl.boundAt.Add(cl.renewAt))):
+		case <-time.After(time.Until(next)):
 		}
-		if err := r.renew(ctx, cl); err != nil {
-			if ctx.Err() != nil {
-				return
-			}
-			cl.renewsFailed++
-			cl.lastErr = "renew: " + err.Error()
-			r.stats.renewsFailed.Add(1)
-			// lease gone: start over, a real client would also rebind first
-			if time.Since(cl.boundAt) >= cl.lease {
-				if err := r.dora(ctx, cl); err != nil && ctx.Err() == nil {
-					cl.lastErr = err.Error()
-				}
-			}
+		err := r.renew(ctx, cl)
+		if err == nil {
+			cl.renewsOK++
+			r.stats.renewsOK.Add(1)
+			next = cl.boundAt.Add(cl.renewAt)
 
 			continue
 		}
-		cl.renewsOK++
-		r.stats.renewsOK.Add(1)
+		if ctx.Err() != nil {
+			return
+		}
+		cl.renewsFailed++
+		cl.lastErr = "renew: " + err.Error()
+		r.stats.renewsFailed.Add(1)
+
+		// a NAK or a gone lease means starting over, a real client would also rebind first
+		if errors.Is(err, errNAK) || time.Since(cl.boundAt) >= cl.lease {
+			if err := r.dora(ctx, cl); err == nil {
+				next = cl.boundAt.Add(cl.renewAt)
+
+				continue
+			} else if ctx.Err() == nil {
+				cl.lastErr = err.Error()
+			}
+			next = time.Now().Add(minRenewRetry)
+
+			continue
+		}
+		// retry after half of the remaining lease, like RFC 2131 clients do
+		next = time.Now().Add(max((cl.lease-time.Since(cl.boundAt))/2, minRenewRetry))
 	}
 }
 

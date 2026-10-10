@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/netip"
 	"slices"
 	"strings"
@@ -24,6 +25,9 @@ const (
 	ModeRelay = "relay"
 	// ModeAccess sends broadcast DHCP from VLAN interfaces of a server wired to a real leaf, which relays them
 	ModeAccess = "access"
+
+	// DefaultSubnetPrefix is the prefix length of the generated subnets
+	DefaultSubnetPrefix = 20
 
 	RetriesPXE = "pxe" // 4, 8, 16, 32s
 	RetriesRFC = "rfc" // 4, 8, 16, 32, 64s +-1s
@@ -49,9 +53,13 @@ type Config struct {
 	VPC string `json:"vpc"`
 	// VLANBase is the VLAN of subnet 0, sent as circuit-id Vlan<n>
 	VLANBase int `json:"vlanBase"`
-	// CIDRBase and LeaseTime are used to build the VPC: subnet i gets the /20 at CIDRBase + i*4096
-	CIDRBase  netip.Addr `json:"cidrBase"`
-	LeaseTime int        `json:"leaseTime"`
+	// CIDRBase, SubnetPrefix and LeaseTime are used to build the VPC: subnet i gets the SubnetPrefix-long prefix
+	// (default /20) at CIDRBase + i * size of the prefix
+	CIDRBase     netip.Addr `json:"cidrBase"`
+	SubnetPrefix int        `json:"subnetPrefix"`
+	LeaseTime    int        `json:"leaseTime"`
+	// VLANNamespace is the VLAN namespace of the VPC, empty = the default one
+	VLANNamespace string `json:"vlanNamespace,omitempty"`
 	// Ramp spreads client start times uniformly over this window
 	Ramp    time.Duration `json:"ramp"`
 	Retries string        `json:"retries"`
@@ -78,21 +86,22 @@ type Config struct {
 
 func DefaultConfig() *Config {
 	return &Config{
-		RelayBase: netip.MustParseAddr("172.30.3.1"),
-		RelayPort: 67,
-		Leaves:    32,
-		Servers:   500,
-		NICs:      8,
-		Mode:      ModeRelay,
-		Layout:    LayoutRail,
-		VPC:       "loadtest",
-		VLANBase:  1000,
-		CIDRBase:  netip.MustParseAddr("10.0.128.0"),
-		LeaseTime: 3600,
-		Ramp:      60 * time.Second,
-		Retries:   RetriesPXE,
-		Progress:  5 * time.Second,
-		Seed:      1,
+		RelayBase:    netip.MustParseAddr("172.30.3.1"),
+		RelayPort:    67,
+		Leaves:       32,
+		Servers:      500,
+		NICs:         8,
+		Mode:         ModeRelay,
+		Layout:       LayoutRail,
+		VPC:          "loadtest",
+		VLANBase:     1000,
+		CIDRBase:     netip.MustParseAddr("10.0.128.0"),
+		SubnetPrefix: DefaultSubnetPrefix,
+		LeaseTime:    3600,
+		Ramp:         60 * time.Second,
+		Retries:      RetriesPXE,
+		Progress:     5 * time.Second,
+		Seed:         1,
 	}
 }
 
@@ -115,11 +124,29 @@ func (c *Config) Validate() error {
 	if !slices.Contains([]string{RetriesPXE, RetriesRFC}, c.Retries) {
 		return fmt.Errorf("invalid retries %q", c.Retries) //nolint:err113
 	}
+	if c.SubnetPrefix != 0 && (c.SubnetPrefix < 16 || c.SubnetPrefix > 28) {
+		return fmt.Errorf("subnet prefix /%d is outside /16../28", c.SubnetPrefix) //nolint:err113
+	}
+	if c.LeaseTime < 1 || int64(c.LeaseTime) > math.MaxUint32 {
+		return fmt.Errorf("lease time %d is outside 1..%d seconds", c.LeaseTime, uint32(math.MaxUint32)) //nolint:err113
+	}
+	if base := netip.PrefixFrom(c.CIDRBase, c.subnetPrefix()).Masked().Addr(); c.CIDRBase != base {
+		return fmt.Errorf("CIDR base %s is not the network address of its /%d, use %s", c.CIDRBase, c.subnetPrefix(), base) //nolint:err113
+	}
 	if c.Progress <= 0 {
 		c.Progress = 5 * time.Second
 	}
 
 	return nil
+}
+
+// subnetPrefix is the prefix length of the generated subnets, 0 means the default
+func (c *Config) subnetPrefix() int {
+	if c.SubnetPrefix == 0 {
+		return DefaultSubnetPrefix
+	}
+
+	return c.SubnetPrefix
 }
 
 // VPCName is the name of the VPC object, which is also the VRF name dhcpd matches subnets by (lowercased)

@@ -39,6 +39,10 @@ func BuildFakeSwitches(c *Config, template *wiringapi.Switch, opts FakeSwitchOpt
 	if !opts.ProtocolBase.Is4() {
 		return nil, errors.New("fake protocol base must be an IPv4 address") //nolint:err113
 	}
+	// the Switch webhook requires a VTEP IP on every leaf in spine-leaf mode
+	if !opts.VTEPBase.Is4() {
+		return nil, errors.New("fake VTEP base must be an IPv4 address") //nolint:err113
+	}
 
 	res := make([]*wiringapi.Switch, 0, c.Leaves)
 	protocolIP, vtepIP := opts.ProtocolBase, opts.VTEPBase
@@ -54,6 +58,7 @@ func BuildFakeSwitches(c *Config, template *wiringapi.Switch, opts FakeSwitchOpt
 				Labels:    map[string]string{FakeLabel: "true"},
 			},
 			Spec: wiringapi.SwitchSpec{
+				Topology:       *template.Spec.Topology.DeepCopy(),
 				Role:           wiringapi.SwitchRoleServerLeaf,
 				Description:    "fake leaf for DHCP load testing",
 				Profile:        template.Spec.Profile,
@@ -64,10 +69,8 @@ func BuildFakeSwitches(c *Config, template *wiringapi.Switch, opts FakeSwitchOpt
 			},
 		}
 		protocolIP = protocolIP.Next()
-		if opts.VTEPBase.IsValid() {
-			sw.Spec.VTEPIP = netip.PrefixFrom(vtepIP, 32).String()
-			vtepIP = vtepIP.Next()
-		}
+		sw.Spec.VTEPIP = netip.PrefixFrom(vtepIP, 32).String()
+		vtepIP = vtepIP.Next()
 		res = append(res, sw)
 	}
 
