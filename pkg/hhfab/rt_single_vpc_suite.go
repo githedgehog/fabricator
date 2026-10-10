@@ -1608,8 +1608,26 @@ outer:
 	}
 
 	// enable RoCE on the switch if not already enabled
-	if err := setRoCE(ctx, testCtx.kube, swName, true); err != nil {
+	upBefore, err := operUpInterfaces(ctx, testCtx.kube, swName)
+	if err != nil {
+		return false, nil, fmt.Errorf("listing oper up interfaces on switch %s: %w", swName, err)
+	}
+
+	changed, err := setRoCE(ctx, testCtx.kube, swName, true)
+	if err != nil {
 		return false, nil, fmt.Errorf("enabling RoCE on switch %s: %w", swName, err)
+	}
+
+	// The toggle reboots the switch: its LAGs and routes are still reconverging when the agent
+	// reports the new generation, and paths through it drop packets until they settle. First wait
+	// for the interfaces that were up to be up again, then for the datapath itself.
+	if changed {
+		if _, err := waitInterfacesOperUp(ctx, testCtx.kube, swName, upBefore, 3*time.Minute); err != nil {
+			return false, nil, fmt.Errorf("waiting for interfaces after enabling RoCE on switch %s: %w", swName, err)
+		}
+		if err := testCtx.waitForDatapathConverged(ctx, testCtx.tcOpts, nil, defaultDatapathConvergeTimeout, 2); err != nil {
+			return false, nil, fmt.Errorf("datapath convergence after enabling RoCE on switch %s: %w", swName, err)
+		}
 	}
 
 	dscpOpts := testCtx.tcOpts
