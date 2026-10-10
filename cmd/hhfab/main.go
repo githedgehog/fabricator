@@ -1779,12 +1779,18 @@ Examples:
 					},
 					{
 						Name:  "dhcp-load",
-						Usage: "[PREVIEW] load test fabric-dhcpd with emulated leaf relays and DHCP clients (needs root and a running VLAB)",
-						Description: `Emulates leaf DHCP relays and thousands of DHCP clients behind them against the control node of the running VLAB.
+						Usage: "[PREVIEW] load test fabric-dhcpd with thousands of DHCP clients (needs a running VLAB)",
+						Description: `Runs thousands of DHCP clients against fabric-dhcpd on the control node of the running VLAB.
 
-It registers the relay IPs as fake leaf Switches (cloned from a real leaf, the fabric controller creates Agents for them
-that never come up), creates a VPC with DHCP-enabled subnets, runs the clients from a network namespace attached to the
-VLAB management bridge and removes everything on exit (unless --keep is set). Don't use on a VLAB serving other purposes.`,
+--mode access (clients on a VLAB server behind a real leaf): attaches the VPC subnets to the server's unbundled connection with
+tagged VLANs, uploads this binary to the server and runs the clients there, one VLAN interface per subnet. The leaf relays.
+
+--mode relay (needs root and L2 to the control node management network): registers the relay IPs as fake leaf Switches cloned
+from a real leaf (the fabric controller creates Agents for them that never come up), and runs the clients from a network
+namespace attached to the VLAB management bridge.
+
+Both modes create a VPC with DHCP-enabled subnets and remove everything on exit (unless --keep is set).
+Don't use on a VLAB serving other purposes.`,
 						Flags: flatten(defaultFlags, []cli.Flag{
 							&cli.IntFlag{Name: "servers", Usage: "number of emulated servers", Value: dhcpDefaults.Servers},
 							&cli.IntFlag{Name: "nics", Usage: "DHCP clients (NICs) per server", Value: dhcpDefaults.NICs},
