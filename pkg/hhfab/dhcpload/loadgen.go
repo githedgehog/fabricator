@@ -44,7 +44,7 @@ func (c *Config) NumSubnets() int {
 }
 
 func (c *Config) subnet(idx int) subnet {
-	base := binary.BigEndian.Uint32(c.CIDRBase.AsSlice()) + uint32(idx)*4096 //nolint:gosec
+	base := binary.BigEndian.Uint32(c.CIDRBase.AsSlice()) + uint32(idx)<<(32-c.subnetPrefix()) //nolint:gosec
 	var b [4]byte
 	binary.BigEndian.PutUint32(b[:], base)
 
@@ -52,7 +52,7 @@ func (c *Config) subnet(idx int) subnet {
 		idx:       idx,
 		vlan:      c.VLANBase + idx,
 		circuitID: fmt.Sprintf("Vlan%d", c.VLANBase+idx),
-		prefix:    netip.PrefixFrom(netip.AddrFrom4(b), 20),
+		prefix:    netip.PrefixFrom(netip.AddrFrom4(b), c.subnetPrefix()),
 	}
 }
 

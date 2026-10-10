@@ -44,12 +44,18 @@ func BuildVPC(c *Config) *vpcapi.VPC {
 		s := c.subnet(i)
 		first := s.prefix.Addr()
 		gw := first.Next()
+		// the pool starts a few addresses after the gateway, small subnets only reserve the gateway so that a /24
+		// still holds 250 clients
+		skip := 9
+		if s.prefix.Bits() >= 24 {
+			skip = 1
+		}
 		start := gw
-		for range 9 {
+		for range skip {
 			start = start.Next()
 		}
 		var last [4]byte
-		binary.BigEndian.PutUint32(last[:], binary.BigEndian.Uint32(first.AsSlice())+4094)
+		binary.BigEndian.PutUint32(last[:], binary.BigEndian.Uint32(first.AsSlice())+uint32(1)<<(32-s.prefix.Bits())-2)
 
 		vpc.Spec.Subnets[SubnetName(i)] = &vpcapi.VPCSubnet{
 			Subnet:  s.prefix.String(),

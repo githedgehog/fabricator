@@ -86,6 +86,27 @@ func TestSubnet(t *testing.T) {
 	require.Equal(t, "Vlan1002", s.circuitID)
 }
 
+func TestSubnetPrefix(t *testing.T) {
+	c := testConfig()
+	c.SubnetPrefix = 24
+	c.NICs = 16
+
+	require.NoError(t, c.Validate())
+	require.Equal(t, "10.0.128.0/24", c.subnet(0).prefix.String())
+	require.Equal(t, "10.0.131.0/24", c.subnet(3).prefix.String())
+
+	// a /24 pool holds 250 clients: everything after the gateway up to the last host
+	sub := BuildVPC(c).Spec.Subnets["subnet-3"]
+	require.NotNil(t, sub)
+	require.Equal(t, "10.0.131.0/24", sub.Subnet)
+	require.Equal(t, "10.0.131.1", sub.Gateway)
+	require.Equal(t, "10.0.131.2", sub.DHCP.Range.Start)
+	require.Equal(t, "10.0.131.254", sub.DHCP.Range.End)
+
+	c.SubnetPrefix = 29
+	require.Error(t, c.Validate())
+}
+
 func TestBuildVPC(t *testing.T) {
 	c := testConfig()
 	c.VPC = "LoadTest"
