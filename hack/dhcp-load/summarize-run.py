@@ -32,6 +32,16 @@ def dhcpd_errors(path, win=None):
             c["409 conflict, retries exhausted" if "the object has been modified" in l else "not found" if "not found" in l else "504/timeout" if ("Timeout" in l or "timeout" in l) else "429" if re.search(r"\b429\b", l.split("err=",1)[-1]) or "Too many" in l else "other"] += 1
     return c
 
+def k3s_cpu(path):
+    """max and mean millicores of k3s-server from the cumulative tick column of sampler.tsv (100 ticks per CPU second)"""
+    rows = [l.rstrip("\n").split("\t") for l in open(path)][1:]
+    pts = []
+    for x in rows:
+        if len(x) > 11 and x[11].isdigit() and re.fullmatch(r"\d\d:\d\d:\d\d", x[0]):
+            h, m, s_ = map(int, x[0].split(":")); pts.append((h * 3600 + m * 60 + s_, int(x[11])))
+    rates = [(b[1] - a[1]) * 10 / (b[0] - a[0]) for a, b in zip(pts, pts[1:]) if b[0] > a[0]]
+    return (round(max(rates)), round(sum(rates) / len(rates))) if rates else None
+
 def one(d):
     L = []
     run = open(f"{d}/run.log", errors="replace").read() if os.path.exists(f"{d}/run.log") else ""
@@ -58,6 +68,9 @@ def one(d):
         def mx(i): 
             v = [int(x[i]) for x in rows if len(x) > i and x[i].strip().isdigit()]; return max(v) if v else None
         L.append(f"sampler: max hh-control queue {mx(6)}, max dhcpd RSS {mx(3)} kB, min available memory {min([int(x[2]) for x in rows if len(x)>2 and x[2].isdigit()] or [0])} MB")
+    if os.path.exists(f"{d}/sampler.tsv"):
+        cpu = k3s_cpu(f"{d}/sampler.tsv")
+        L.append("k3s CPU (millicores between samples): " + (f"max {cpu[0]}, mean {cpu[1]}" if cpu else "not sampled"))
     if os.path.exists(f"{d}/dhcpd.raw"):
         win = None
         try:
