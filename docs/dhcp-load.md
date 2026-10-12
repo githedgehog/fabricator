@@ -34,6 +34,35 @@ Constraints on the flags:
 
 Clients get MAC `02:4c:54:xx:xx:xx` by index. The exit status is non-zero when any client did not bind, a renewal failed or a duplicate IP was seen.
 
+## Relay mode on a virtual VLAB
+
+Use `relay` when the VLAB has no hardware leaf. The clients run on the VLAB host in a network namespace and send relayed DHCP (giaddr and option 82 as a leaf adds them) straight to dhcpd, so no switch is in the path. Run it on the host that runs the VLAB, not on the control VM.
+
+The host needs:
+
+- root: the command creates a network namespace and a veth pair attached to the `hhbr` bridge and binds UDP port 67 on the relay IPs, so run it with `sudo` (`sudo --preserve-env=HOME` keeps your hhfab cache and workdir lookups);
+- the `hhbr` bridge, which exists while the VLAB runs, and with it layer 2 to the control node's management network;
+- relay IPs (`--relay-base`, default `172.30.3.1`, one per `--leaves`, default 32) inside the management subnet, outside the management DHCP range and not used by any switch;
+- a leaf Switch with a management IP: the command clones it into `--leaves` fake leaf Switches labeled `loadgen.githedgehog.com/fake=true`, so dhcpd accepts the relay IPs as giaddr. They and the VPC are removed on exit and on Ctrl-C.
+
+Subnets must be inside the default IPv4 namespace (`10.0.0.0/16` on a generated VLAB, so set `--cidr-base` explicitly) and the VLANs inside the leaves' VLAN namespace (1000 to 2999 on a generated VLAB). 500 clients on one /20 subnet:
+
+```
+sudo --preserve-env=HOME ./hhfab vlab dhcp-load --mode relay --cidr-base 10.0.64.0 --vlan-base 2000 \
+  --servers 500 --nics 1 --ramp 200s --out clients.csv
+```
+
+16 subnets do not fit as /20 (that is a whole /16); use /22 (1020 clients each):
+
+```
+sudo --preserve-env=HOME ./hhfab vlab dhcp-load --mode relay --cidr-base 10.0.64.0 --subnet-prefix 22 \
+  --vlan-base 2000 --servers 500 --nics 16 --ramp 2000s --out clients.csv
+```
+
+`run-steps.sh` runs the generator without `sudo`: set `HHFAB_BIN` to an executable script that runs `exec sudo --preserve-env=HOME /path/to/hhfab "$@"` and add `EXTRA="--mode relay --cidr-base 10.0.64.0 --nics 16 --subnet-prefix 22"`.
+
+The virtual switch VMs use host CPU even when idle: with 1 spine and 3 leaves (each VM near 77% of a CPU) and a 6 vCPU control VM, a 16 CPU host had a load average of 17 to 21 during runs. The control VM and the generator share that CPU, so size the host for the VLAB plus the generator; retransmits and latency from an overcommitted host say nothing about dhcpd.
+
 ## What the summary reports
 
 - bound: clients with an ACK carrying a non-zero IP. An OFFER or ACK with IP 0.0.0.0 (dhcpd sends one when its allocation fails) counts as a failure and is reported as `empty_replies`.
@@ -114,4 +143,4 @@ Report these with every result:
 
 ## Limits of the generator
 
-All clients of a run share one leaf and one server NIC in `access` mode; renewals are broadcast where real clients send unicast; PXE options and the vendor class are not sent.
+All clients of a run share one leaf and one server NIC in `access` mode; renewals are broadcast where real clients send unicast; PXE options and the vendor class are not sent. In `relay` mode there is no leaf: no remote ID is sent, the hop count is 1 and the packets are unicast to dhcpd.
