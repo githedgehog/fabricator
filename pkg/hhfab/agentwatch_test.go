@@ -55,16 +55,39 @@ func TestAgentsNotApplied(t *testing.T) {
 
 		return ag
 	}
+	before := map[string]int64{"leaf-01": 5, "leaf-02": 5, "leaf-03": 3, "spine-01": 2}
 
-	require.Empty(t, AgentsNotApplied([]agentapi.Agent{agent("leaf-01", 5, 5, kmetav1.ConditionTrue, "ApplySucceeded")}))
+	// applied and True, changed or not
+	failures, notes := AgentsNotApplied([]agentapi.Agent{
+		agent("leaf-01", 6, 6, kmetav1.ConditionTrue, "ApplySucceeded"),
+		agent("leaf-02", 5, 5, kmetav1.ConditionTrue, "ApplySucceeded"),
+	}, before)
+	require.Empty(t, failures)
+	require.Empty(t, notes)
 
-	got := AgentsNotApplied([]agentapi.Agent{
-		agent("leaf-01", 5, 5, kmetav1.ConditionFalse, "ApplyPending"),
-		agent("leaf-02", 6, 5, kmetav1.ConditionTrue, "ApplySucceeded"),
-		agent("leaf-03", 3, 3, "", ""),
-	})
-	require.Len(t, got, 3)
-	require.Contains(t, got[0], "Applied=False reason=ApplyPending")
-	require.Contains(t, got[1], "lastAppliedGen=5 generation=6")
-	require.Contains(t, got[2], "no Applied condition")
+	// a changed Agent stuck on ApplyPending with the generation applied
+	failures, _ = AgentsNotApplied([]agentapi.Agent{agent("leaf-01", 6, 6, kmetav1.ConditionFalse, "ApplyPending")}, before)
+	require.Len(t, failures, 1)
+	require.Contains(t, failures[0], "Applied=False reason=ApplyPending")
+
+	// a changed Agent that never wrote the condition fails, an untouched one is only noted
+	failures, notes = AgentsNotApplied([]agentapi.Agent{
+		agent("leaf-03", 4, 4, "", ""),
+		agent("spine-01", 2, 2, "", ""),
+	}, before)
+	require.Len(t, failures, 1)
+	require.Contains(t, failures[0], "leaf-03: no Applied condition after generation 4 was applied")
+	require.Equal(t, []string{"spine-01: no Applied condition, its generation did not change so nothing was checked"}, notes)
+
+	// an Agent not in the snapshot is new, so changed; an untouched one with a bad condition still fails
+	failures, _ = AgentsNotApplied([]agentapi.Agent{
+		agent("leaf-09", 1, 1, "", ""),
+		agent("leaf-02", 5, 5, kmetav1.ConditionFalse, "ApplyPending"),
+	}, before)
+	require.Len(t, failures, 2)
+
+	// the generation not applied fails whatever the condition says
+	failures, _ = AgentsNotApplied([]agentapi.Agent{agent("leaf-02", 6, 5, kmetav1.ConditionTrue, "ApplySucceeded")}, before)
+	require.Len(t, failures, 1)
+	require.Contains(t, failures[0], "lastAppliedGen=5 generation=6")
 }

@@ -137,25 +137,45 @@ func renderSpecValue(v any) string {
 	return string(raw)
 }
 
-// AgentsNotApplied returns, per Agent, why it doesn't report the current generation as applied.
-// The Applied condition has to be True on top of lastAppliedGen == generation: after a
-// reinstall the generation can match while the condition still says ApplyPending.
-func AgentsNotApplied(agents []agentapi.Agent) []string {
-	var out []string
+// AgentGenerations returns the generation of every Agent by name.
+func AgentGenerations(agents []agentapi.Agent) map[string]int64 {
+	gens := make(map[string]int64, len(agents))
+	for _, ag := range agents {
+		gens[ag.Name] = ag.Generation
+	}
+
+	return gens
+}
+
+// AgentsNotApplied returns, per Agent, why it doesn't report the current generation as applied,
+// and notes about what it could not judge. The Applied condition has to be True on top of
+// lastAppliedGen == generation: after a reinstall the generation can match while the condition
+// still says ApplyPending.
+//
+// An Agent writes the condition when it processes a generation change, not when it starts. So an
+// Agent whose generation is not in before, or differs from it, has just processed a change and
+// must report Applied=True. One that didn't change fails only on a condition that exists and
+// isn't True; a missing condition there is a note, nothing was applied that could be checked.
+func AgentsNotApplied(agents []agentapi.Agent, before map[string]int64) ([]string, []string) {
+	var failures, notes []string
 	for _, ag := range agents {
 		cond := kmeta.FindStatusCondition(ag.Status.Conditions, "Applied")
+		prev, seen := before[ag.Name]
+		changed := !seen || prev != ag.Generation
 		switch {
 		case ag.Generation == 0 || ag.Status.LastAppliedGen != ag.Generation:
-			out = append(out, fmt.Sprintf("%s: lastAppliedGen=%d generation=%d", ag.Name, ag.Status.LastAppliedGen, ag.Generation))
+			failures = append(failures, fmt.Sprintf("%s: lastAppliedGen=%d generation=%d", ag.Name, ag.Status.LastAppliedGen, ag.Generation))
+		case cond == nil && changed:
+			failures = append(failures, fmt.Sprintf("%s: no Applied condition after generation %d was applied", ag.Name, ag.Generation))
 		case cond == nil:
-			out = append(out, fmt.Sprintf("%s: no Applied condition (generation=%d)", ag.Name, ag.Generation))
+			notes = append(notes, fmt.Sprintf("%s: no Applied condition, its generation did not change so nothing was checked", ag.Name))
 		case cond.Status != kmetav1.ConditionTrue:
-			out = append(out, fmt.Sprintf("%s: Applied=%s reason=%s message=%q (lastAppliedGen == generation == %d)",
+			failures = append(failures, fmt.Sprintf("%s: Applied=%s reason=%s message=%q (lastAppliedGen == generation == %d)",
 				ag.Name, cond.Status, cond.Reason, cond.Message, ag.Generation))
 		}
 	}
 
-	return out
+	return failures, notes
 }
 
 // WaitAgentsSettled waits until every Agent reports lastAppliedGen == generation and no
