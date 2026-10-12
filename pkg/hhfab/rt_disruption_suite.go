@@ -475,7 +475,8 @@ func (env *disruptionEnv) buildProbes(ctx context.Context, matrix *ConnectivityM
 		}
 		// the matrix probes externals with curl; whether this one answers ping is not known up front
 		if _, stderr, err := ssh.Run(ctx, "ping -c 3 -W 1 "+disruptionExternalTarget); err != nil {
-			slog.Warn("External does not answer ping, no background traffic towards it", "server", d.server.Name, "target", disruptionExternalTarget, "err", err, "stderr", stderr)
+			slog.Debug("Ping to the external failed", "server", d.server.Name, "err", err, "stderr", stderr)
+			env.testCtx.addNote(fmt.Sprintf("external not probed: no ping reply from %s (from %s)", disruptionExternalTarget, d.server.Name))
 
 			continue
 		}

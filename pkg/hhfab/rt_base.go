@@ -67,6 +67,8 @@ type VPCPeeringTestCtx struct {
 	noSetup          bool
 	showTechDump     bool
 	skipFlags        SkipFlags
+	// testNotes are remarks of the running test that belong in its result, see addNote
+	testNotes []string
 }
 
 // Test function types
@@ -351,12 +353,14 @@ func (sf *SkipFlags) PrettyPrint() string {
 }
 
 type JUnitTestCase struct {
-	XMLName   xml.Name  `xml:"testcase"`
-	ClassName string    `xml:"classname,attr"`
-	Name      string    `xml:"name,attr"`
-	Time      float64   `xml:"time,attr"`
-	Failure   *Failure  `xml:"failure,omitempty"`
-	Error     *Error    `xml:"error,omitempty"`
+	XMLName   xml.Name `xml:"testcase"`
+	ClassName string   `xml:"classname,attr"`
+	Name      string   `xml:"name,attr"`
+	Time      float64  `xml:"time,attr"`
+	Failure   *Failure `xml:"failure,omitempty"`
+	Error     *Error   `xml:"error,omitempty"`
+	// SystemOut carries the notes a test made with addNote, whatever its outcome
+	SystemOut string    `xml:"system-out,omitempty"`
 	Skipped   *Skipped  `xml:"skipped,omitempty"`
 	F         TestFunc  `xml:"-"` // function to run
 	SkipFlags SkipFlags `xml:"-"` // flags to determine whether to skip the test
@@ -435,6 +439,12 @@ func pauseOnFailure(ctx context.Context) error {
 	slog.Info("Continuing...")
 
 	return nil
+}
+
+// addNote records a remark in the result of the running test, which a log line alone would lose.
+func (testCtx *VPCPeeringTestCtx) addNote(note string) {
+	slog.Warn(note)
+	testCtx.testNotes = append(testCtx.testNotes, note)
 }
 
 // prepare for a test: create the VPCs according to the options in the test context
@@ -534,8 +544,10 @@ func doRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 		}
 		prevRevertsFailed = false
 		testStart := time.Now()
+		testCtx.testNotes = nil
 		skip, reverts, err := test.F(ctx, testCtx, matrix)
 		ts.TestCases[i].Time = time.Since(testStart).Seconds()
+		ts.TestCases[i].SystemOut = strings.Join(testCtx.testNotes, "\n")
 		ranSomeTests = true
 		// logic is getting complex, so let's make a recap:
 		// - if skip is true, we mark the test as skipped, use the error as the skip message, and nullify it
