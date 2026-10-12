@@ -257,13 +257,13 @@ func (env *disruptionEnv) setup(ctx context.Context) error {
 		if len(sc.SingleLeaf[leaf]) == 0 {
 			continue
 		}
-		vpc, err := env.newVPC(fmt.Sprintf("dt-single-%d", i+1))
+		vpc, err := env.newVPC(fmt.Sprintf("dt-s%d", i+1))
 		if err != nil {
 			return err
 		}
 		singles = append(singles, disruptionVPC{vpc: vpc, server: sc.SingleLeaf[leaf][0]})
 	}
-	eslagVPC, err := env.newVPC("dt-eslag")
+	eslagVPC, err := env.newVPC("dt-e")
 	if err != nil {
 		return err
 	}
@@ -331,12 +331,12 @@ func (env *disruptionEnv) setup(ctx context.Context) error {
 
 	// entries on a single leaf: more VPCs attached to the connection of a server on that leaf
 	// alone. No server is configured for them, the controller allocates for them all the same.
-	for _, leaf := range sc.Leaves {
+	for i, leaf := range sc.Leaves {
 		if len(sc.SingleLeaf[leaf]) == 0 {
 			continue
 		}
 		for n := range disruptionMinEntries - 1 {
-			vpc, err := env.newVPC(fmt.Sprintf("dt-fill-%s-%d", leaf, n+1))
+			vpc, err := env.newVPC(fmt.Sprintf("dt-f%d-%d", i+1, n+1))
 			if err != nil {
 				return err
 			}
@@ -686,7 +686,7 @@ func (env *disruptionEnv) runUnrelated(ctx context.Context, op string, do func(c
 }
 
 func (env *disruptionEnv) opCreateDeleteVPC(ctx context.Context) error {
-	vpc, err := env.newVPC("dt-unattached")
+	vpc, err := env.newVPC("dt-un")
 	if err != nil {
 		return err
 	}
