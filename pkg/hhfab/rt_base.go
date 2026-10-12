@@ -44,6 +44,7 @@ var (
 	errNotEnoughVPCs     = errors.New("not enough VPCs found")
 	errNoRoceLeaves      = errors.New("no leaves supporting RoCE found")
 	errInitialSetup      = errors.New("initial setup failed")
+	errInconclusive      = errors.New("inconclusive")
 
 	// nonAlphanumRegex matches any sequence of non-alphanumeric characters
 	nonAlphanumRegex = regexp.MustCompile(`[^a-z0-9]+`)
@@ -276,6 +277,7 @@ type JUnitTestSuite struct {
 	Name      string          `xml:"name,attr"`
 	Tests     int             `xml:"tests,attr"`
 	Failures  int             `xml:"failures,attr"`
+	Errors    int             `xml:"errors,attr"`
 	Skipped   int             `xml:"skipped,attr"`
 	Time      float64         `xml:"time,attr"`
 	TimeHuman time.Duration   `xml:"-"`
@@ -354,6 +356,7 @@ type JUnitTestCase struct {
 	Name      string    `xml:"name,attr"`
 	Time      float64   `xml:"time,attr"`
 	Failure   *Failure  `xml:"failure,omitempty"`
+	Error     *Error    `xml:"error,omitempty"`
 	Skipped   *Skipped  `xml:"skipped,omitempty"`
 	F         TestFunc  `xml:"-"` // function to run
 	SkipFlags SkipFlags `xml:"-"` // flags to determine whether to skip the test
@@ -361,6 +364,14 @@ type JUnitTestCase struct {
 
 type Failure struct {
 	XMLName xml.Name `xml:"failure"`
+	Message string   `xml:"message,attr"`
+	Type    string   `xml:"type,attr"`
+}
+
+// Error marks a test that could not reach a verdict, e.g. because its own precondition
+// did not hold. Tests return errInconclusive (wrapped) to have it reported this way.
+type Error struct {
+	XMLName xml.Name `xml:"error"`
 	Message string   `xml:"message,attr"`
 	Type    string   `xml:"type,attr"`
 }
@@ -378,12 +389,15 @@ func printTestSuite(ts *JUnitTestSuite) {
 }
 
 func printSuiteResults(ts *JUnitTestSuite) {
-	var numFailed, numSkipped, numPassed int
+	var numFailed, numErrored, numSkipped, numPassed int
 	slog.Info("Test suite results", "suite", ts.Name)
 	for _, test := range ts.TestCases {
 		if test.Skipped != nil { //nolint:gocritic
 			slog.Warn("SKIP", "test", test.Name, "reason", test.Skipped.Message)
 			numSkipped++
+		} else if test.Error != nil {
+			slog.Error("ERROR", "test", test.Name, "error", strings.ReplaceAll(test.Error.Message, "\n", "; "))
+			numErrored++
 		} else if test.Failure != nil {
 			slog.Error("FAIL", "test", test.Name, "error", strings.ReplaceAll(test.Failure.Message, "\n", "; "))
 			numFailed++
@@ -392,7 +406,7 @@ func printSuiteResults(ts *JUnitTestSuite) {
 			numPassed++
 		}
 	}
-	slog.Info("Test suite summary", "tests", len(ts.TestCases), "passed", numPassed, "skipped", numSkipped, "failed", numFailed, "duration", ts.TimeHuman)
+	slog.Info("Test suite summary", "tests", len(ts.TestCases), "passed", numPassed, "skipped", numSkipped, "failed", numFailed, "errored", numErrored, "duration", ts.TimeHuman)
 }
 
 func pauseOnFailure(ctx context.Context) error {
@@ -544,7 +558,16 @@ func doRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 			ts.Skipped++
 			slog.Warn("SKIP", "test", test.Name, "reason", skipMsg)
 		}
-		if err != nil {
+		if err != nil && errors.Is(err, errInconclusive) {
+			ts.TestCases[i].Error = &Error{
+				Message: err.Error(),
+			}
+			ts.Errors++
+			slog.Error("ERROR", "test", test.Name, "error", err.Error())
+
+			// no verdict, so no diagnostics: nothing failed
+			err = nil
+		} else if err != nil {
 			ts.TestCases[i].Failure = &Failure{
 				Message: err.Error(),
 			}
@@ -599,7 +622,7 @@ func doRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 			return ts, fmt.Errorf("test %s failed: %w", test.Name, err)
 		}
 
-		if !skip && err == nil && revertErr == nil {
+		if !skip && err == nil && revertErr == nil && ts.TestCases[i].Error == nil {
 			slog.Info("PASS", "test", test.Name)
 		}
 	}
