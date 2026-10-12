@@ -57,12 +57,15 @@ jobs:
           CGO_ENABLED: "0"
         run: govulncheck -tags containers_image_openpgp,containers_image_storage_stub -format=sarif ./... > govulncheck.sarif
 
+      # govulncheck emits identical call stacks twice for some stdlib results,
+      # which the SARIF schema (uniqueItems) rejects on upload, so dedupe them.
       - name: Filter dismissed vulns from SARIF
         if: always()
         run: |
           pattern="^($(printf '%s\n' "$DISMISSED_VULNS" | tr ',' '|'))$"
           jq --arg pattern "$pattern" \
-            'del(.runs[].results[] | select(.ruleId | test($pattern)))' \
+            'del(.runs[].results[] | select(.ruleId | test($pattern)))
+             | .runs[].results[] |= (if .stacks then .stacks |= unique else . end)' \
             govulncheck.sarif > govulncheck-filtered.sarif
 
       - name: Upload SARIF file
