@@ -75,6 +75,8 @@ Other scenarios: rolling boot (batches at a fixed interval), steady renewals at 
 
 Per run, keep together under one name: the generator log and CSV; the control VM sampled every 5 seconds (memory used and available, dhcpd and k3s memory and CPU); the API server's counters before and after (`apiserver_request_total` for `dhcpsubnets`, by verb and code; `apiserver_flowcontrol_current_inqueue_requests` and `apiserver_flowcontrol_rejected_requests_total` for the `hh-control` level); dhcpd's log including the rotated, compressed files under `/var/log/pods/fab_fabric-dhcpd-*/fabric-dhcpd/` (the current file holds only the last minutes); the control VM's UDP counters; the versions of hhfab, fabric, dhcpd and k3s; the flow-control and k3s configuration; the VM's CPU, memory and disk.
 
+`hack/dhcp-load/run-steps.sh <prefix> <ramp> <servers>` does all of this around each run (it waits for the drain, snapshots the counters, samples, copies the logs, writes `manifest.json` and `summary.txt`); settings are environment variables listed at the top of the script. The pass criteria are not evaluated by the scripts: `summary.txt` reports the counts and the generator prints the empty replies.
+
 Check that the generator is not the limit: the control VM's UDP received count matches what the generator sent, and the generator VM's CPU stays below saturation.
 
 ## Reference configuration
