@@ -92,6 +92,8 @@ type disruptionEnv struct {
 	evidenceDir string
 	// touched holds the leaves that got a touch label, to remove it in the end
 	touched map[string]bool
+	// noted holds the notes already in the result
+	noted map[string]bool
 }
 
 // disruptionTest runs the common changes under background traffic and fails on any disruption
@@ -119,6 +121,7 @@ func disruptionTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connecti
 		sc:          sc,
 		probeClass:  map[string]string{},
 		touched:     map[string]bool{},
+		noted:       map[string]bool{},
 		evidenceDir: filepath.Join(testCtx.vlabCfg.WorkDir, ShowTechOutputDir, sanitizeNameForFolder("Disruption Suite"), sanitizeNameForFolder("Disruption Under Traffic"), "disruption"),
 	}
 
@@ -635,6 +638,16 @@ func (env *disruptionEnv) specsAfterSettle(ctx context.Context) (AgentSpecs, []a
 	return specs, agents, nil
 }
 
+// noteOnce puts notes in the test result, each one once however many operations repeat it.
+func (env *disruptionEnv) noteOnce(notes []string) {
+	for _, n := range notes {
+		if !env.noted[n] {
+			env.noted[n] = true
+			env.testCtx.addNote(n)
+		}
+	}
+}
+
 // fail records the evidence of a failed operation and returns the error to report.
 func (env *disruptionEnv) fail(res *checkResult) error {
 	if err := os.MkdirAll(env.evidenceDir, 0o755); err != nil {
@@ -654,7 +667,7 @@ func (env *disruptionEnv) fail(res *checkResult) error {
 // runUnrelated runs an operation that must not disturb anything: no lost ping, no change in any
 // Agent spec but the touch marker, every Agent applied.
 func (env *disruptionEnv) runUnrelated(ctx context.Context, op string, do func(context.Context) error) error {
-	before, _, err := env.specsAfterSettle(ctx)
+	before, beforeAgents, err := env.specsAfterSettle(ctx)
 	if err != nil {
 		return fmt.Errorf("%s: %w", op, err)
 	}
@@ -686,7 +699,9 @@ func (env *disruptionEnv) runUnrelated(ctx context.Context, op string, do func(c
 		res.failures = append(res.failures, fmt.Sprintf("Agent specs changed: %s", strings.Join(diffs, ", ")))
 		res.files["spec-diff.txt"] = strings.Join(diffs, "\n") + "\n"
 	}
-	if pending := AgentsNotApplied(agents); len(pending) > 0 {
+	pending, notes := AgentsNotApplied(agents, AgentGenerations(beforeAgents))
+	env.noteOnce(notes)
+	if len(pending) > 0 {
 		res.failures = append(res.failures, fmt.Sprintf("Agents not applied: %s", strings.Join(pending, ", ")))
 	}
 	if len(res.failures) == 0 {
@@ -831,7 +846,7 @@ func (env *disruptionEnv) opReinstall(ctx context.Context) error {
 		}
 	}
 
-	before, _, err := env.specsAfterSettle(ctx)
+	before, beforeAgents, err := env.specsAfterSettle(ctx)
 	if err != nil {
 		return fmt.Errorf("reinstall: %w", err)
 	}
@@ -902,7 +917,9 @@ func (env *disruptionEnv) opReinstall(ctx context.Context) error {
 		res.failures = append(res.failures, fmt.Sprintf("Agent specs changed: %s", strings.Join(diffs, ", ")))
 		res.files["spec-diff.txt"] = strings.Join(diffs, "\n") + "\n"
 	}
-	if pending := AgentsNotApplied(agents); len(pending) > 0 {
+	pending, notes := AgentsNotApplied(agents, AgentGenerations(beforeAgents))
+	env.noteOnce(notes)
+	if len(pending) > 0 {
 		res.failures = append(res.failures, fmt.Sprintf("Agents not applied: %s", strings.Join(pending, ", ")))
 	}
 	if len(res.failures) == 0 {
