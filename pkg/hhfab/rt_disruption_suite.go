@@ -825,7 +825,7 @@ func (env *disruptionEnv) opReinstall(ctx context.Context) error {
 			return fmt.Errorf("getting switch %s: %w", leaf, err)
 		}
 		if sw.Spec.Profile == meta.SwitchProfileVS {
-			slog.Warn("Skipping the reinstall: virtual switch in the pair, the Agent reinstall is only run on hardware", "switch", leaf)
+			env.testCtx.addNote(fmt.Sprintf("agent reinstall not run: %s is a virtual switch, the reinstall is only run on hardware", leaf))
 
 			return nil
 		}
