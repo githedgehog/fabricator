@@ -4,6 +4,8 @@ go 1.26.8
 
 replace github.com/diskfs/go-diskfs => github.com/Frostman/go-diskfs v1.4.2-hh3
 
+replace go.githedgehog.com/fabric => ../fabric
+
 tool (
 	github.com/coreos/butane/internal
 	sigs.k8s.io/controller-tools/cmd/controller-gen

@@ -20,7 +20,7 @@ const (
 	Release = "26.05.0"
 
 	// Fabric version used for all fabric components
-	FabricVersion = meta.Version("v0.136.1")
+	FabricVersion = meta.Version("v0.136.1-16-g41f0063b")
 
 	// Gateway Dataplane version (including WASM validator)
 	DataplaneVersion = meta.Version("v0.29.0")
