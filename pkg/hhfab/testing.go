@@ -2349,6 +2349,32 @@ func (pe *PingError) Error() string {
 		pe.Source, pe.Destination, pe.Msg, pe.Sent, pe.Received, lost, pe.Expected, whySuffix(pe.Why))
 }
 
+// parsePingReplySeq returns the ICMP sequence number of an echo reply line.
+// Only echo replies count: ICMP error lines (e.g. "From <gw> icmp_seq=3
+// Destination Host Unreachable") also carry icmp_seq= but are not replies.
+func parsePingReplySeq(line string) (int, bool) {
+	if !strings.Contains(line, "bytes from") {
+		return 0, false
+	}
+
+	return parsePingSeqAfter(line, "icmp_seq=")
+}
+
+// parsePingSeqAfter returns the integer that follows marker in line.
+func parsePingSeqAfter(line, marker string) (int, bool) {
+	i := strings.Index(line, marker)
+	if i < 0 {
+		return 0, false
+	}
+	fields := strings.Fields(line[i+len(marker):])
+	if len(fields) == 0 {
+		return 0, false
+	}
+	n, err := strconv.Atoi(fields[0])
+
+	return n, err == nil
+}
+
 // parsePingLostSeqs returns the ICMP sequence numbers in 1..sent that have no
 // reply line in the ping stdout. seq=1 absent points to next-hop resolution
 // (ARP/ND miss); a later seq absent points to mid-flight FIB churn.
@@ -2359,20 +2385,7 @@ func parsePingLostSeqs(stdout string, sent int) []int {
 
 	seen := make(map[int]bool, sent)
 	for l := range strings.SplitSeq(stdout, "\n") {
-		// Only count echo replies. ICMP error lines (e.g. "From <gw> icmp_seq=3
-		// Destination Host Unreachable") also carry icmp_seq= but are not replies.
-		if !strings.Contains(l, "bytes from") {
-			continue
-		}
-		i := strings.Index(l, "icmp_seq=")
-		if i < 0 {
-			continue
-		}
-		fields := strings.Fields(l[i+len("icmp_seq="):])
-		if len(fields) == 0 {
-			continue
-		}
-		if n, err := strconv.Atoi(fields[0]); err == nil {
+		if n, ok := parsePingReplySeq(l); ok {
 			seen[n] = true
 		}
 	}
