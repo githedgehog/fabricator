@@ -75,9 +75,29 @@ Other scenarios: rolling boot (batches at a fixed interval), steady renewals at 
 
 Per run, keep together under one name: the generator log and CSV; the control VM sampled every 5 seconds (memory used and available, dhcpd and k3s memory and CPU); the API server's counters before and after (`apiserver_request_total` for `dhcpsubnets`, by verb and code; `apiserver_flowcontrol_current_inqueue_requests` and `apiserver_flowcontrol_rejected_requests_total` for the `hh-control` level); dhcpd's log including the rotated, compressed files under `/var/log/pods/fab_fabric-dhcpd-*/fabric-dhcpd/` (the current file holds only the last minutes); the control VM's UDP counters; the versions of hhfab, fabric, dhcpd and k3s; the flow-control and k3s configuration; the VM's CPU, memory and disk.
 
-`hack/dhcp-load/run-steps.sh <prefix> <ramp> <servers>` does all of this around each run (it waits for the drain, snapshots the counters, samples, copies the logs, writes `manifest.json` and `summary.txt`); settings are environment variables listed at the top of the script. The pass criteria are not evaluated by the scripts: `summary.txt` reports the counts and the generator prints the empty replies.
-
 Check that the generator is not the limit: the control VM's UDP received count matches what the generator sent, and the generator VM's CPU stays below saturation.
+
+## Run scripts
+
+`hack/dhcp-load/` holds the wrapper used for the recorded runs. Copy the directory to the host that runs the VLAB and run `run-steps.sh <prefix> <ramp> <servers>...` from it; `EXTRA` adds generator flags. Settings are environment variables listed at the top of the script (`HHFAB_DIR`, `HHFAB_BIN`, `CTRL_PORT`, `OUT_DIR`, `ENV_FILE`).
+
+- `run-steps.sh`: per server count, waits until the `hh-control` queue is empty three checks in a row, snapshots the API server and UDP counters, starts `sampler.sh`, runs the generator, snapshots again, copies the dhcpd logs and writes the files below.
+- `sampler.sh`: every 5 s reads memory, dhcpd and k3s memory, dhcpd CPU, the `hh-control` queue depth and the status PUT counts from the control VM.
+- `manifest.py`: writes `manifest.json` (command, binary hash and commit, VM sizes, versions, script hashes, drain result, outcome).
+- `summarize-run.py` and `metrics-delta.py`: write `summary.txt` from the raw files.
+
+The scripts don't apply the pass criteria: the generator counts bound clients and empty replies, and `summary.txt` reports them next to the counter differences, UDP received against sent and the drain result.
+
+Each run leaves `<OUT_DIR>/<prefix>-<servers>/`:
+
+- `summary.txt`: bound clients, DORA latency percentiles, retransmits, empty replies, API server counter differences, UDP received against sent, sampler peaks, dhcpd error count
+- `run.log`, `clients.csv`: generator output, one row per client
+- `sampler.tsv`: the control VM every 5 s
+- `metrics-before.txt`, `metrics-after.txt`: API server and UDP counters around the run
+- `dhcpd.raw`: dhcpd log including rotated files
+- `drain.txt`, `manifest.json`: the wait before the run, the run's command and versions
+
+`<OUT_DIR>/<prefix>-config/` holds the k3s and flow-control settings the prefix ran with.
 
 ## Reference configuration
 
