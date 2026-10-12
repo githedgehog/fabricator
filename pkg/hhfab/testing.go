@@ -4269,6 +4269,8 @@ type ReleaseTestOpts struct {
 	ShowTechDump   bool
 	IPerfsMinSpeed float64
 	OnReadyTest    bool
+	// DisruptionTest runs only the disruption suite: common changes under background traffic
+	DisruptionTest bool
 }
 
 func ReleaseTest(ctx context.Context, c *Config, vlab *VLAB, opts ReleaseTestOpts) error {

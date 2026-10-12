@@ -122,3 +122,20 @@ func TestPickDisruptionScenarioSkipReasons(t *testing.T) {
 	}, nil)
 	require.ErrorIs(t, err, errDisruptionNoSingleLeaf)
 }
+
+func TestSingleLeafEntries(t *testing.T) {
+	specs := AgentSpecs{
+		"leaf-01": {"catalog": map[string]any{"irbVLANs": map[string]any{"ext@default": 3000, "vpc-01": 3001, "vpc-03": 3004, "vpc-04": 3005}}},
+		"leaf-02": {"catalog": map[string]any{"irbVLANs": map[string]any{"ext@default": 3000, "vpc-01": 3001, "vpc-02": 3003}}},
+		"leaf-03": {},
+	}
+
+	got := singleLeafEntries(specs, [2]string{"leaf-01", "leaf-02"})
+	require.Equal(t, []string{"vpc-03", "vpc-04"}, got["leaf-01"])
+	require.Equal(t, []string{"vpc-02"}, got["leaf-02"])
+
+	// an Agent without a catalog holds nothing, and nothing is shared with it
+	got = singleLeafEntries(specs, [2]string{"leaf-01", "leaf-03"})
+	require.Len(t, got["leaf-01"], 4)
+	require.Empty(t, got["leaf-03"])
+}

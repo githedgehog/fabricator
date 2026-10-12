@@ -63,7 +63,7 @@ func pickDisruptionScenario(switches []wiringapi.Switch, conns []wiringapi.Conne
 		}
 	}
 
-	var candidates []*disruptionScenario
+	candidates := make([]*disruptionScenario, 0, len(groups))
 	sawESLAGServer := false
 	for _, group := range sortedKeys(groups) {
 		leaves := groups[group]

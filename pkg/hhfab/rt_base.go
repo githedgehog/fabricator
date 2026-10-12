@@ -843,10 +843,18 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOp
 	gwNATACLSuite := makeGatewayNATACLSuite()
 	multiVPCSingleSubnetSuite := makeMultiVPCSingleSubnetSuite()
 	ortSuite := makeOnReadyTestSuite()
+	disruptionSuite := makeDisruptionTestSuite()
 
-	if rtOpts.OnReadyTest {
+	if rtOpts.OnReadyTest && rtOpts.DisruptionTest {
+		return fmt.Errorf("the on-ready and the disruption suites are selected one at a time") //nolint:goerr113
+	}
+
+	switch {
+	case rtOpts.OnReadyTest:
 		suites = []*JUnitTestSuite{ortSuite}
-	} else {
+	case rtOpts.DisruptionTest:
+		suites = []*JUnitTestSuite{disruptionSuite}
+	default:
 		suites = []*JUnitTestSuite{noVpcSuite, singleVpcSuite, multiVPCMultiSubnetSuite, gwNATACLSuite, multiVPCSingleSubnetSuite}
 	}
 
@@ -1073,6 +1081,23 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOp
 		slog.Info("OnReady Test Suite completed", "duration", time.Since(testStart).String())
 		if ortResults.Failures > 0 {
 			return fmt.Errorf("some tests failed: onReady=%d", ortResults.Failures) //nolint:goerr113
+		}
+
+		return nil
+	}
+
+	if rtOpts.DisruptionTest {
+		disruptionResults, err := selectAndRunSuite(ctx, testCtx, disruptionSuite, regexesCompiled, rtOpts.InvertRegex, skipFlags)
+		if err != nil && rtOpts.FailFast {
+			return fmt.Errorf("running disruption test suite: %w", err)
+		}
+		results = append(results, *disruptionResults)
+		if err := recapAndReport(results, rtOpts); err != nil {
+			return fmt.Errorf("recapping and reporting results: %w", err)
+		}
+		slog.Info("Disruption Test Suite completed", "duration", time.Since(testStart).String())
+		if disruptionResults.Failures > 0 || disruptionResults.Errors > 0 {
+			return fmt.Errorf("some tests did not pass: disruption failed=%d, errored=%d", disruptionResults.Failures, disruptionResults.Errors) //nolint:goerr113
 		}
 
 		return nil

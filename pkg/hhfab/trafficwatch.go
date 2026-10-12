@@ -134,6 +134,8 @@ type ProbeTimeline struct {
 	Probe   string
 	Samples []pingSample
 	Replies int
+	// Raw is the ping output as read, for evidence.
+	Raw string
 }
 
 // LostPing is one unanswered echo, placed on the runner's clock.
@@ -266,7 +268,7 @@ func (w *TrafficWatch) Snapshot(ctx context.Context) ([]ProbeTimeline, error) {
 			return nil, fmt.Errorf("reading probe %s: %w: %s", p.Name, err, stderr)
 		}
 		off := w.offsets[p.From]
-		tl := ProbeTimeline{Probe: p.Name, Samples: parsePingTimeline(stdout)}
+		tl := ProbeTimeline{Probe: p.Name, Samples: parsePingTimeline(stdout), Raw: stdout}
 		for i := range tl.Samples {
 			if !tl.Samples[i].At.IsZero() {
 				tl.Samples[i].At = tl.Samples[i].At.Add(-off)
