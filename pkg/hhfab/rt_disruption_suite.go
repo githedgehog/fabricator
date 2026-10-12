@@ -237,8 +237,11 @@ type disruptionVPC struct {
 }
 
 // setup builds the VPCs the traffic runs between, adds the entries that live on a single leaf,
-// and starts the traffic. Layout: one VPC per leaf with a server attached to that leaf alone,
-// one with an ESLAG server, the single-leaf ones peered with it and with the external.
+// and starts the traffic. Layout: a VPC per server attached to a leaf alone (two per leaf at
+// most), one with an ESLAG server that is peered with the external. Two single-leaf VPCs of a
+// leaf are peered with each other, so that traffic crosses entries that only that leaf holds;
+// a lone one is peered with the ESLAG VPC. A VPC peered with one on both leaves is requested by
+// both, so it doesn't count as a single-leaf entry.
 func (env *disruptionEnv) setup(ctx context.Context) error {
 	testCtx, kube, sc := env.testCtx, env.kube, env.sc
 
@@ -252,16 +255,27 @@ func (env *disruptionEnv) setup(ctx context.Context) error {
 	}
 	env.alloc = alloc
 
-	singles := make([]disruptionVPC, 0, len(sc.Leaves))
+	singles := make([]disruptionVPC, 0, 2*len(sc.Leaves))
+	leafOnly := map[string]int{}
+	var intra [][2]string
+	var lone []string
 	for i, leaf := range sc.Leaves {
-		if len(sc.SingleLeaf[leaf]) == 0 {
-			continue
+		var mine []disruptionVPC
+		for j, srv := range sc.SingleLeaf[leaf][:min(2, len(sc.SingleLeaf[leaf]))] {
+			vpc, err := env.newVPC(fmt.Sprintf("dt-%d%c", i+1, 'a'+j))
+			if err != nil {
+				return err
+			}
+			mine = append(mine, disruptionVPC{vpc: vpc, server: srv})
 		}
-		vpc, err := env.newVPC(fmt.Sprintf("dt-s%d", i+1))
-		if err != nil {
-			return err
+		switch len(mine) {
+		case 2:
+			intra = append(intra, [2]string{mine[0].vpc.Name, mine[1].vpc.Name})
+			leafOnly[leaf] = 2
+		case 1:
+			lone = append(lone, mine[0].vpc.Name)
 		}
-		singles = append(singles, disruptionVPC{vpc: vpc, server: sc.SingleLeaf[leaf][0]})
+		singles = append(singles, mine...)
 	}
 	eslagVPC, err := env.newVPC("dt-e")
 	if err != nil {
@@ -314,10 +328,13 @@ func (env *disruptionEnv) setup(ctx context.Context) error {
 
 	vpcPeerings := map[string]*vpcapi.VPCPeeringSpec{}
 	extPeerings := map[string]*vpcapi.ExternalPeeringSpec{}
-	for _, d := range singles {
-		appendVpcPeeringSpecByName(vpcPeerings, d.vpc.Name, eslagVPC.Name, []string{}, []string{})
-		appendExtPeeringSpecByName(extPeerings, d.vpc.Name, testCtx.extName, []string{"subnet-01"}, AllZeroPrefix)
+	for _, pair := range intra {
+		appendVpcPeeringSpecByName(vpcPeerings, pair[0], pair[1], []string{}, []string{})
 	}
+	for _, name := range lone {
+		appendVpcPeeringSpecByName(vpcPeerings, name, eslagVPC.Name, []string{}, []string{})
+	}
+	appendExtPeeringSpecByName(extPeerings, eslagVPC.Name, testCtx.extName, []string{"subnet-01"}, AllZeroPrefix)
 	if err := DoSetupPeerings(ctx, kube, vpcPeerings, extPeerings, map[string]*gwapi.PeeringSpec{}, true); err != nil {
 		return fmt.Errorf("setting up peerings: %w", err)
 	}
@@ -335,7 +352,7 @@ func (env *disruptionEnv) setup(ctx context.Context) error {
 		if len(sc.SingleLeaf[leaf]) == 0 {
 			continue
 		}
-		for n := range disruptionMinEntries - 1 {
+		for n := range disruptionMinEntries - leafOnly[leaf] {
 			vpc, err := env.newVPC(fmt.Sprintf("dt-f%d-%d", i+1, n+1))
 			if err != nil {
 				return err
@@ -372,7 +389,7 @@ func (env *disruptionEnv) setup(ctx context.Context) error {
 	}
 	slog.Info("Entries held by a single leaf of the pair", "entries", entries)
 
-	probes, err := env.buildProbes(ctx, matrix, singles)
+	probes, err := env.buildProbes(ctx, matrix, []disruptionVPC{{vpc: eslagVPC, server: sc.ESLAG[0]}})
 	if err != nil {
 		return err
 	}
@@ -410,7 +427,7 @@ func singleLeafEntries(specs AgentSpecs, leaves [2]string) map[string][]string {
 // buildProbes turns what the matrix expects to be reachable into background pings. A pair where
 // either end sits on the second leaf alone is hard for the reinstall, one with an ESLAG server
 // or an external soft, the rest strict.
-func (env *disruptionEnv) buildProbes(ctx context.Context, matrix *ConnectivityMatrix, singles []disruptionVPC) ([]TrafficProbe, error) {
+func (env *disruptionEnv) buildProbes(ctx context.Context, matrix *ConnectivityMatrix, externalSources []disruptionVPC) ([]TrafficProbe, error) {
 	sc := env.sc
 	target := sc.Leaves[1]
 	onTarget := map[string]bool{}
@@ -457,7 +474,7 @@ func (env *disruptionEnv) buildProbes(ctx context.Context, matrix *ConnectivityM
 		}
 	}
 
-	for _, d := range singles {
+	for _, d := range externalSources {
 		var src *Endpoint
 		for _, ep := range matrix.AllEndpoints {
 			if ep.Server != nil && ep.Server.Name == d.server.Name {
