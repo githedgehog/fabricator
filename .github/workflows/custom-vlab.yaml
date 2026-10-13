@@ -1,9 +1,8 @@
 name: Custom VLAB
-run-name: "${{ inputs.hybrid && 'h' || 'v' }}-${{ inputs.upgradefrom }}${{ inputs.upgradefrom && '-' || '' }}${{ inputs.mesh && 'mesh-' || '' }}${{ inputs.gateway == 'kernel' && 'gwk-' || inputs.gateway == 'dpdk' && 'gwd-' || '' }}${{ inputs.buildmode }}-${{ inputs.vpcmode }}${{ inputs.releasetest && '-rt' || '' }}${{ inputs.releasetest_regex != '' && 'r' || '' }}"
+run-name: "${{ inputs.hybrid && 'h' || 'v' }}-${{ inputs.upgradefrom }}${{ inputs.upgradefrom && '-' || '' }}${{ inputs.mesh && 'mesh-' || '' }}${{ inputs.gateway == 'kernel' && 'gwk-' || inputs.gateway == 'dpdk' && 'gwd-' || '' }}${{ inputs.buildmode }}-${{ inputs.vpcmode }}${{ inputs.releasetest && '-rt' || '' }}${{ inputs.releasetest_regex != '' && 'r' || '' }}${{ inputs.disruptiontest && '-dt' || '' }}"
 
 on:
   workflow_dispatch:
-    # github actions only supports 10 inputs for workflow_dispatch so keeping only most important ones
     inputs:
       mesh:
         description: "Use spine-leaf with mesh-only connections"
@@ -56,6 +55,11 @@ on:
         type: string
         required: false
         default: ""
+      disruptiontest:
+        description: "Run only the disruption suite (common changes under background traffic), not the release tests"
+        type: boolean
+        required: false
+        default: false
       pause_on_failure:
         description: "Pause on failure (enables debug)"
         type: boolean
@@ -72,7 +76,7 @@ permissions:
 
 jobs:
   vlab:
-    name: "${{ inputs.hybrid && 'h' || 'v' }}-${{ inputs.upgradefrom && 'up' || '' }}${{ inputs.upgradefrom }}${{ inputs.upgradefrom && '-' || '' }}${{ inputs.mesh && 'mesh-' || '' }}${{ inputs.gateway == 'kernel' && 'gwk-' || inputs.gateway == 'dpdk' && 'gwd-' || '' }}${{ inputs.buildmode }}-${{ inputs.vpcmode }}${{ inputs.releasetest && '-rt' || '' }}${{ inputs.releasetest_regex != '' && 'r' || '' }}"
+    name: "${{ inputs.hybrid && 'h' || 'v' }}-${{ inputs.upgradefrom && 'up' || '' }}${{ inputs.upgradefrom }}${{ inputs.upgradefrom && '-' || '' }}${{ inputs.mesh && 'mesh-' || '' }}${{ inputs.gateway == 'kernel' && 'gwk-' || inputs.gateway == 'dpdk' && 'gwd-' || '' }}${{ inputs.buildmode }}-${{ inputs.vpcmode }}${{ inputs.releasetest && '-rt' || '' }}${{ inputs.releasetest_regex != '' && 'r' || '' }}${{ inputs.disruptiontest && '-dt' || '' }}"
     uses: ./.github/workflows/run-vlab.yaml
     with:
       fabricatorref: ${{ github.ref }}
@@ -87,12 +91,13 @@ jobs:
       upgradefrom: ${{ inputs.upgradefrom }}
       releasetest: ${{ inputs.releasetest }}
       releasetest_regex: ${{ inputs.releasetest_regex }}
+      disruptiontest: ${{ inputs.disruptiontest }}
       debug: ${{ inputs.pause_on_failure }}
       pause_on_failure: ${{ inputs.pause_on_failure }}
       collect_show_tech: ${{ inputs.collect_show_tech }}
 
   publish-test-results:
-    if: ${{ inputs.releasetest && !cancelled() }}
+    if: ${{ (inputs.releasetest || inputs.disruptiontest) && !cancelled() }}
     runs-on: lab
     needs:
       - vlab
