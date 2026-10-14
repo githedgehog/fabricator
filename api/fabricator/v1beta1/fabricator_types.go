@@ -302,6 +302,8 @@ type FabricConfig struct {
 	IncludeCLSP          bool `json:"includeCLSP,omitempty"`
 	IncludeCumulus       bool `json:"includeCumulus,omitempty"`
 
+	AllowExtraSwitchProfiles bool `json:"allowExtraSwitchProfiles,omitempty"`
+
 	DisableBFD bool `json:"disableBFD,omitempty"`
 
 	Observability *fmeta.Observability `json:"observability,omitempty"`
