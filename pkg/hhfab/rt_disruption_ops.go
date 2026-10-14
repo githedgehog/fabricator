@@ -24,13 +24,7 @@ import (
 )
 
 func summarizeLoss(lost []lostPing) string {
-	windows := groupLoss(lost, 3*trafficPingInterval)
-	parts := make([]string, 0, len(windows))
-	for _, w := range windows {
-		parts = append(parts, fmt.Sprintf("%s %s..%s (%d pings)", w.Probe, w.From.Format("15:04:05.000"), w.To.Format("15:04:05.000"), w.Pings))
-	}
-
-	return strings.Join(parts, "; ")
+	return summarizeWindows(groupLoss(lost, 3*trafficPingInterval))
 }
 
 // checkResult is what one operation is judged on.
@@ -258,8 +252,69 @@ func waitRollout(ctx context.Context, kc kclient.Client, key kclient.ObjectKey) 
 	}
 }
 
-// opReinstall reinstalls the second leaf of the pair through the Agent. Only on hardware for now.
+// leafCycle is an operation that takes the second leaf of the pair away through its Agent and
+// waits for it to come back: a reinstall or a reboot. Only on hardware for now.
+type leafCycle struct {
+	name string // as in the notes and the logs
+	// specField is the Agent spec field the request sets, it is the one spec change expected
+	specField string
+	// max is how long the leaf may take to come back
+	max time.Duration
+	// request asks the Agent for the cycle and returns what it logs about it; it fails when the
+	// Agent can't do it
+	request func(ag *agentapi.Agent) (string, error)
+	// back says whether the Agent has come back, given the Agent as it was before the request
+	back func(before, now *agentapi.Agent) bool
+}
+
 func (env *disruptionEnv) opReinstall(ctx context.Context) error {
+	return env.opLeafCycle(ctx, leafCycle{
+		name:      "reinstall",
+		specField: "reinstall",
+		max:       disruptionReinstallMax,
+		request: func(ag *agentapi.Agent) (string, error) {
+			if ag.Status.InstallID == "" {
+				return "", fmt.Errorf("agent %s is not installed (missing .status.installID)", ag.Name) //nolint:err113
+			}
+			ag.Spec.Reinstall = ag.Status.InstallID
+
+			return "installID " + ag.Status.InstallID, nil
+		},
+		// a new install ID and a heartbeat newer than the one before (both stamped by the switch,
+		// so no comparison with the runner clock) and the current generation applied
+		back: func(before, now *agentapi.Agent) bool {
+			return now.Status.InstallID != "" && now.Status.InstallID != before.Status.InstallID &&
+				now.Status.LastHeartbeat.Time.After(before.Status.LastHeartbeat.Time) && now.Status.LastAppliedGen == now.Generation
+		},
+	})
+}
+
+// opReboot reboots the second leaf of the pair through the Agent, which reboots when the spec holds
+// the boot ID it is running on.
+func (env *disruptionEnv) opReboot(ctx context.Context) error {
+	return env.opLeafCycle(ctx, leafCycle{
+		name:      "reboot",
+		specField: "reboot",
+		max:       disruptionRebootMax,
+		request: func(ag *agentapi.Agent) (string, error) {
+			if ag.Status.BootID == "" {
+				return "", fmt.Errorf("agent %s doesn't report a boot ID (missing .status.bootID)", ag.Name) //nolint:err113
+			}
+			ag.Spec.Reboot = ag.Status.BootID
+
+			return "bootID " + ag.Status.BootID, nil
+		},
+		back: func(before, now *agentapi.Agent) bool {
+			return now.Status.BootID != "" && now.Status.BootID != before.Status.BootID &&
+				!now.Status.LastHeartbeat.Time.Equal(before.Status.LastHeartbeat.Time) && now.Status.LastAppliedGen == now.Generation
+		},
+	})
+}
+
+// opLeafCycle takes the second leaf of the pair away through its Agent under traffic and waits for
+// it to come back. The traffic is judged by judgeLeafCycle; on top of that no Agent spec may change
+// but the requested field, and every Agent must have applied.
+func (env *disruptionEnv) opLeafCycle(ctx context.Context, cycle leafCycle) error {
 	target := env.sc.Leaves[1]
 
 	for _, leaf := range env.sc.Leaves {
@@ -268,7 +323,7 @@ func (env *disruptionEnv) opReinstall(ctx context.Context) error {
 			return fmt.Errorf("getting switch %s: %w", leaf, err)
 		}
 		if sw.Spec.Profile == meta.SwitchProfileVS || sw.Spec.Profile == meta.SwitchProfileVSCLSP {
-			env.testCtx.addNote(fmt.Sprintf("agent reinstall not run: %s is a virtual switch, the reinstall is only run on hardware", leaf))
+			env.testCtx.addNote(fmt.Sprintf("agent %s not run: %s is a virtual switch, the %s is only run on hardware", cycle.name, leaf, cycle.name))
 
 			return nil
 		}
@@ -284,34 +339,33 @@ func (env *disruptionEnv) opReinstall(ctx context.Context) error {
 
 	before, beforeAgents, err := env.specsAfterSettle(ctx)
 	if err != nil {
-		return fmt.Errorf("reinstall: %w", err)
+		return fmt.Errorf("%s: %w", cycle.name, err)
 	}
 
 	agent := &agentapi.Agent{}
 	if err := env.kube.Get(ctx, kclient.ObjectKey{Name: target, Namespace: kmetav1.NamespaceDefault}, agent); err != nil {
 		return fmt.Errorf("getting agent %s: %w", target, err)
 	}
-	oldInstall := agent.Status.InstallID
-	oldHeartbeat := agent.Status.LastHeartbeat.Time
-	if oldInstall == "" {
-		return fmt.Errorf("agent %s is not installed (missing .status.installID)", target) //nolint:err113
-	}
-
-	res := &checkResult{op: "reinstall-" + target, started: time.Now(), files: map[string]string{}}
-	slog.Info("Reinstalling switch through the Agent", "switch", target, "installID", oldInstall)
+	agentBefore := agent.DeepCopy()
 	patch := kclient.MergeFrom(agent.DeepCopy())
-	agent.Spec.Reinstall = oldInstall
-	if err := env.kube.Patch(ctx, agent, patch); err != nil {
-		return fmt.Errorf("requesting reinstall of %s: %w", target, err)
+	what, err := cycle.request(agent)
+	if err != nil {
+		return err
 	}
 
-	settled, err := env.waitReinstalled(ctx, target, oldInstall, oldHeartbeat)
+	res := &checkResult{op: cycle.name + "-" + target, started: time.Now(), files: map[string]string{}}
+	slog.Info("Taking switch away through the Agent", "operation", cycle.name, "switch", target, "state", what)
+	if err := env.kube.Patch(ctx, agent, patch); err != nil {
+		return fmt.Errorf("requesting %s of %s: %w", cycle.name, target, err)
+	}
+
+	settled, err := env.waitAgentBack(ctx, target, cycle, agentBefore)
 	if err != nil {
 		return err
 	}
 	after, agents, err := env.specsAfterSettle(ctx)
 	if err != nil {
-		return fmt.Errorf("reinstall: %w", err)
+		return fmt.Errorf("%s: %w", cycle.name, err)
 	}
 
 	if err := sleepCtx(ctx, disruptionRecovery+disruptionWatchAfter+disruptionTrailGrace); err != nil {
@@ -321,38 +375,20 @@ func (env *disruptionEnv) opReinstall(ctx context.Context) error {
 
 	tl, err := env.tw.Snapshot(ctx)
 	if err != nil {
-		return fmt.Errorf("reinstall: %w", err)
+		return fmt.Errorf("%s: %w", cycle.name, err)
 	}
 	if stale := staleProbes(tl, end.Add(-disruptionTrailGrace)); len(stale) > 0 {
 		return fmt.Errorf("%w: reinstall: probes stopped recording, the traffic can't be judged: %s", errInconclusive, strings.Join(stale, ", "))
 	}
 
-	// strict probes never cross the leaf; hard and soft ones may lose pings until the leaf has
-	// applied its config and the dataplane had disruptionRecovery to converge
-	var strict, away []probeTimeline
-	for _, p := range tl {
-		if env.probeClass[p.Probe] == probeStrict {
-			strict = append(strict, p)
-		} else {
-			away = append(away, p)
-		}
-	}
-	lostStrict := lostPings(strict, env.cursor, end)
-	lostAfter := lostPings(away, settled.Add(disruptionRecovery), end)
-	lastAway := lostPings(away, env.cursor, end)
+	v := judgeLeafCycle(tl, env.probeClass, target, leafCycleTimes{from: env.cursor, requested: res.started, settled: settled, end: end})
 	env.cursor = end
 	checked = true
-
-	if len(lostStrict) > 0 {
-		res.failures = append(res.failures, fmt.Sprintf("%d pings lost on pairs that don't cross %s: %s", len(lostStrict), target, summarizeLoss(lostStrict)))
-	}
-	if len(lostAfter) > 0 {
-		res.failures = append(res.failures, fmt.Sprintf("%d pings lost more than %s after %s applied its config: %s", len(lostAfter), disruptionRecovery, target, summarizeLoss(lostAfter)))
-	}
-	slog.Info("Loss while the leaf was away", "switch", target, "pings", len(lastAway), "windows", summarizeLoss(lastAway), "applied-at", settled.Format("15:04:05"))
+	res.failures = v.failures
+	slog.Info("Loss while the leaf was away", "operation", cycle.name, "switch", target, "pings", len(v.away), "windows", summarizeLoss(v.away), "applied-at", settled.Format("15:04:05"))
 
 	ignore := func(agent, path string) bool {
-		return ignoreBenchTouch(agent, path) || (agent == target && path == "reinstall")
+		return ignoreBenchTouch(agent, path) || (agent == target && path == cycle.specField)
 	}
 	if diffs := diffAgentSpecs(before, after, ignore); len(diffs) > 0 {
 		res.failures = append(res.failures, fmt.Sprintf("Agent specs changed: %s", strings.Join(diffs, ", ")))
@@ -376,24 +412,110 @@ func (env *disruptionEnv) opReinstall(ctx context.Context) error {
 	return env.fail(res)
 }
 
-// waitReinstalled waits for the Agent of the switch to come back from the install: a new install
-// ID, a heartbeat newer than the one before the reinstall (both stamped by the switch, so no
-// comparison with the runner clock) and the current generation applied. It returns when it saw that.
-func (env *disruptionEnv) waitReinstalled(ctx context.Context, name, oldInstall string, oldHeartbeat time.Time) (time.Time, error) {
-	ctx, cancel := context.WithTimeout(ctx, disruptionReinstallMax)
+// leafCycleTimes are the moments a leaf cycle is judged against.
+type leafCycleTimes struct {
+	from      time.Time // where the traffic check starts: the end of the previous check
+	requested time.Time // when the cycle was requested from the Agent
+	settled   time.Time // when the leaf was back and had applied its config
+	end       time.Time // where the traffic check ends
+}
+
+// leafCycleVerdict is how the traffic of a leaf cycle was judged.
+type leafCycleVerdict struct {
+	failures []string
+	// away is the loss on the pairs that cross the leaf, for the log
+	away []lostPing
+}
+
+// judgeLeafCycle judges the traffic of a cycle of the leaf target:
+//   - strict pairs don't cross the leaf and may lose nothing
+//   - hard and soft pairs may lose pings until the leaf has applied its config and the dataplane had
+//     disruptionRecovery to converge, and nothing after that
+//   - soft pairs have the other leaf to go through, so from the request on none of their loss
+//     windows may last more than disruptionESLAGMaxLoss
+func judgeLeafCycle(tl []probeTimeline, class map[string]string, target string, at leafCycleTimes) leafCycleVerdict {
+	var strict, away, soft []probeTimeline
+	for _, p := range tl {
+		switch class[p.Probe] {
+		case probeStrict:
+			strict = append(strict, p)
+		case probeSoft:
+			soft = append(soft, p)
+			away = append(away, p)
+		default:
+			away = append(away, p)
+		}
+	}
+	lostStrict := lostPings(strict, at.from, at.end)
+	lostAfter := lostPings(away, at.settled.Add(disruptionRecovery), at.end)
+	lostSoft := lostPings(soft, at.requested, at.end)
+
+	v := leafCycleVerdict{away: lostPings(away, at.from, at.end)}
+	if len(lostStrict) > 0 {
+		v.failures = append(v.failures, fmt.Sprintf("%d pings lost on pairs that don't cross %s: %s", len(lostStrict), target, summarizeLoss(lostStrict)))
+	}
+	if long := longLossWindows(lostSoft); len(long) > 0 {
+		v.failures = append(v.failures, fmt.Sprintf("%.1f s loss on ESLAG pairs while %s rejoined (internal#417 pattern, loss windows of at most %s allowed): %s",
+			longestLossWindow(long).Seconds(), target, disruptionESLAGMaxLoss, summarizeWindows(long)))
+	}
+	if len(lostAfter) > 0 {
+		v.failures = append(v.failures, fmt.Sprintf("%d pings lost more than %s after %s applied its config: %s", len(lostAfter), disruptionRecovery, target, summarizeLoss(lostAfter)))
+	}
+
+	return v
+}
+
+// waitAgentBack waits for the Agent of the switch to come back from the cycle and returns when it saw that.
+func (env *disruptionEnv) waitAgentBack(ctx context.Context, name string, cycle leafCycle, before *agentapi.Agent) (time.Time, error) {
+	ctx, cancel := context.WithTimeout(ctx, cycle.max)
 	defer cancel()
 
 	for {
 		ag := &agentapi.Agent{}
 		if err := env.kube.Get(ctx, kclient.ObjectKey{Name: name, Namespace: kmetav1.NamespaceDefault}, ag); err != nil {
-			return time.Time{}, fmt.Errorf("getting agent %s while it reinstalls: %w", name, err)
+			return time.Time{}, fmt.Errorf("getting agent %s during its %s: %w", name, cycle.name, err)
 		}
-		if ag.Status.InstallID != "" && ag.Status.InstallID != oldInstall &&
-			ag.Status.LastHeartbeat.Time.After(oldHeartbeat) && ag.Status.LastAppliedGen == ag.Generation {
+		if cycle.back(before, ag) {
 			return time.Now(), nil
 		}
 		if err := sleepCtx(ctx, 2*time.Second); err != nil {
-			return time.Time{}, fmt.Errorf("waiting for %s to be reinstalled (took more than %s): %w", name, disruptionReinstallMax, err)
+			return time.Time{}, fmt.Errorf("waiting for %s to be back from the %s (took more than %s): %w", name, cycle.name, cycle.max, err)
 		}
 	}
+}
+
+// longLossWindows returns the loss windows of the lost pings that are longer than disruptionESLAGMaxLoss.
+func longLossWindows(lost []lostPing) []lossWindow {
+	var out []lossWindow
+	for _, w := range groupLoss(lost, 3*trafficPingInterval) {
+		if lossWindowLength(w) > disruptionESLAGMaxLoss {
+			out = append(out, w)
+		}
+	}
+
+	return out
+}
+
+// lossWindowLength is the time the probe was without replies: first to last lost echo, plus the
+// interval the last one stands for.
+func lossWindowLength(w lossWindow) time.Duration {
+	return w.To.Sub(w.From) + trafficPingInterval
+}
+
+func longestLossWindow(windows []lossWindow) time.Duration {
+	var longest time.Duration
+	for _, w := range windows {
+		longest = max(longest, lossWindowLength(w))
+	}
+
+	return longest
+}
+
+func summarizeWindows(windows []lossWindow) string {
+	parts := make([]string, 0, len(windows))
+	for _, w := range windows {
+		parts = append(parts, fmt.Sprintf("%s %s..%s (%d pings)", w.Probe, w.From.Format("15:04:05.000"), w.To.Format("15:04:05.000"), w.Pings))
+	}
+
+	return strings.Join(parts, "; ")
 }

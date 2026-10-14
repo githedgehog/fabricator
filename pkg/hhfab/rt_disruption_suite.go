@@ -31,6 +31,11 @@ const (
 	disruptionTrailGrace   = 2 * time.Second
 	disruptionMaxClockSkew = 500 * time.Millisecond
 	disruptionReinstallMax = 30 * time.Minute
+	disruptionRebootMax    = 20 * time.Minute
+	// disruptionESLAGMaxLoss is the longest loss window allowed on a pair that fails over to the
+	// other leaf, where lost pings less than three intervals apart are one window: a leaf going
+	// away costs two pings at most
+	disruptionESLAGMaxLoss = time.Second
 	// once the leaf that was away has applied its config, the dataplane gets disruptionRecovery
 	// to converge; after that, loss is checked for disruptionWatchAfter
 	disruptionRecovery   = 5 * time.Second
@@ -141,6 +146,7 @@ func disruptionTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connecti
 		{"create and delete an unattached VPC", env.opCreateDeleteVPC},
 		{"touch label on the leaves of the pair", env.opTouchLeaves},
 		{"fabric-ctrl restart", env.opRestartController},
+		{"agent reboot", env.opReboot},
 		{"agent reinstall", env.opReinstall},
 	} {
 		slog.Info("Disruption operation", "operation", group.name)
