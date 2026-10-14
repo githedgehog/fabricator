@@ -136,6 +136,11 @@ func TestSingleLeafEntries(t *testing.T) {
 
 	// an Agent without a catalog holds nothing, and nothing is shared with it
 	got = singleLeafEntries(specs, [2]string{"leaf-01", "leaf-03"})
-	require.Len(t, got["leaf-01"], 4)
+	require.Equal(t, []string{"vpc-01", "vpc-03", "vpc-04"}, got["leaf-01"])
 	require.Empty(t, got["leaf-03"])
+
+	// an external that only one leaf holds is no entry of a VPC
+	specs["leaf-01"]["catalog"].(map[string]any)["irbVLANs"].(map[string]any)["ext@static-ext"] = 3006
+	got = singleLeafEntries(specs, [2]string{"leaf-01", "leaf-02"})
+	require.Equal(t, []string{"vpc-03", "vpc-04"}, got["leaf-01"])
 }

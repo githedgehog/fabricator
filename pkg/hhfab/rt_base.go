@@ -69,6 +69,8 @@ type VPCPeeringTestCtx struct {
 	skipFlags        SkipFlags
 	// testNotes are remarks of the running test that belong in its result, see addNote
 	testNotes []string
+	// disruption is the environment of the disruption suite, shared by its tests
+	disruption *disruptionState
 }
 
 // Test function types
@@ -284,6 +286,8 @@ type JUnitTestSuite struct {
 	Time      float64         `xml:"time,attr"`
 	TimeHuman time.Duration   `xml:"-"`
 	TestCases []JUnitTestCase `xml:"testcase"`
+	// Teardown runs once after the last test of the suite, whatever happened
+	Teardown func(context.Context, *VPCPeeringTestCtx) error `xml:"-"`
 }
 
 type SkipFlags struct {
@@ -354,7 +358,7 @@ func (sf *SkipFlags) PrettyPrint() string {
 
 type JUnitTestCase struct {
 	XMLName   xml.Name `xml:"testcase"`
-	ClassName string   `xml:"classname,attr"`
+	ClassName string   `xml:"classname,attr,omitempty"`
 	Name      string   `xml:"name,attr"`
 	Time      float64  `xml:"time,attr"`
 	Failure   *Failure `xml:"failure,omitempty"`
@@ -369,7 +373,7 @@ type JUnitTestCase struct {
 type Failure struct {
 	XMLName xml.Name `xml:"failure"`
 	Message string   `xml:"message,attr"`
-	Type    string   `xml:"type,attr"`
+	Type    string   `xml:"type,attr,omitempty"`
 }
 
 // Error marks a test that could not reach a verdict, e.g. because its own precondition
@@ -377,7 +381,7 @@ type Failure struct {
 type Error struct {
 	XMLName xml.Name `xml:"error"`
 	Message string   `xml:"message,attr"`
-	Type    string   `xml:"type,attr"`
+	Type    string   `xml:"type,attr,omitempty"`
 }
 
 type Skipped struct {
@@ -488,9 +492,30 @@ func (testCtx *VPCPeeringTestCtx) setupTest(ctx context.Context, initialSuiteSet
 	return matrix, nil
 }
 
+// needsSetupBetweenTests says whether the VPCs are rebuilt before the next test. The tests of a
+// suite that keeps its traffic running across them (the disruption suite) set wipeBetweenTests off.
+func (testCtx *VPCPeeringTestCtx) needsSetupBetweenTests(ranSomeTests, prevRevertsFailed bool) bool {
+	return (ranSomeTests && testCtx.wipeBetweenTests) || prevRevertsFailed
+}
+
+// runSuiteTeardown runs the teardown of the suite, if it has one. A teardown that fails leaves the
+// environment dirty, so it is a failed test of its own and the suite can't end green.
+func runSuiteTeardown(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSuite) {
+	if ts.Teardown == nil {
+		return
+	}
+	if err := ts.Teardown(context.WithoutCancel(ctx), testCtx); err != nil {
+		slog.Error("REVERT FAIL", "suite", ts.Name, "error", err.Error())
+		ts.TestCases = append(ts.TestCases, JUnitTestCase{Name: ts.Name + " Cleanup", Failure: &Failure{Message: err.Error()}})
+		ts.Tests++
+		ts.Failures++
+	}
+}
+
 func doRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSuite) (*JUnitTestSuite, error) {
 	suiteStart := time.Now()
 	ranSomeTests := false
+	defer runSuiteTeardown(ctx, testCtx, ts)
 	slog.Info("** Running test suite", "suite", ts.Name, "tests", len(ts.TestCases), "start-time", suiteStart.Format(time.RFC3339))
 
 	// initial setup
@@ -518,7 +543,7 @@ func doRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 			continue
 		}
 		slog.Info("* Running test", "test", test.Name)
-		if (ranSomeTests && testCtx.wipeBetweenTests) || prevRevertsFailed {
+		if testCtx.needsSetupBetweenTests(ranSomeTests, prevRevertsFailed) {
 			matrix, err = testCtx.setupTest(ctx, false)
 			if err != nil {
 				ts.TestCases[i].Failure = &Failure{
@@ -649,7 +674,6 @@ func doRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 	ts.TimeHuman = time.Since(suiteStart).Round(time.Second)
 	ts.Time = ts.TimeHuman.Seconds()
 	slog.Info("** Finished test suite", "suite", ts.Name, "duration", ts.TimeHuman.String())
-	printSuiteResults(ts)
 
 	return ts, nil
 }
@@ -832,8 +856,14 @@ func selectAndRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, suite *J
 
 func recapAndReport(results []JUnitTestSuite, rtOpts ReleaseTestOpts) error {
 	slog.Info("*** Recap of the test results ***")
-	for _, suite := range results {
-		printSuiteResults(&suite)
+	for i := range results {
+		printSuiteResults(&results[i])
+		// the publisher of the test results groups the tests by class
+		for j := range results[i].TestCases {
+			if results[i].TestCases[j].ClassName == "" {
+				results[i].TestCases[j].ClassName = results[i].Name
+			}
+		}
 	}
 
 	if rtOpts.ResultsFile != "" {
