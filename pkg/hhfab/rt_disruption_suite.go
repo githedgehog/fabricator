@@ -38,7 +38,7 @@ const (
 	disruptionCtrlRestarts = 3
 	// disruptionMinEntries is how many IRB VLAN entries each leaf of the pair must hold alone:
 	// with fewer the allocator hands the lone entry the lowest free id every time and a
-	// renumbering never shows.
+	// renumbering never shows (fabric#1649).
 	disruptionMinEntries   = 3
 	disruptionSettleQuiet  = 10 * time.Second
 	disruptionSettleMax    = 5 * time.Minute
@@ -59,16 +59,49 @@ const (
 	disruptionTouchLabel     = meta.BenchTouchLabel
 )
 
+const (
+	disruptionSuiteName = "Disruption Suite"
+
+	testDisruptionSetup     = "Disruption Setup and Baseline"
+	testDisruptionVPC       = "Disruption VPC Create/Delete"
+	testDisruptionTouch     = "Disruption Leaf Touch"
+	testDisruptionCtrl      = "Disruption Fabric Controller Restart"
+	testDisruptionReboot    = "Disruption Agent Reboot"
+	testDisruptionReinstall = "Disruption Agent Reinstall"
+)
+
+// The issues the tests are meant to expose, named in each test's doc comment and in its failure message.
+const (
+	// issueIRBRenumber: fabric-ctrl renumbers the IRB VLANs of entries attached to one leaf of an
+	// ESLAG pair on any reconcile of that leaf, which loses traffic
+	issueIRBRenumber = "fabric#1649"
+	// issueApplyPending: the Agent Applied condition stays ApplyPending after a reinstall
+	issueApplyPending = "fabric#1663"
+	// issueESLAGRejoin: traffic of an ESLAG dual-homed host is unstable after a leaf comes back
+	issueESLAGRejoin = "fabric#1488"
+)
+
+// errDisruptionHardwareOnly makes a test skip: it can't run on the leaves of the pair.
+var errDisruptionHardwareOnly = errors.New("hardware only")
+
+// makeDisruptionTestSuite is one test per operation. The first builds the VPCs, starts the
+// traffic and watches it with no change; the others each apply one kind of change to the same
+// running traffic and check only what happens from their own start. The traffic is stopped and
+// the VPCs removed once, after the last test, by the suite teardown.
 func makeDisruptionTestSuite() *JUnitTestSuite {
 	suite := &JUnitTestSuite{
-		Name: "Disruption Suite",
+		Name: disruptionSuiteName,
+		Teardown: func(ctx context.Context, testCtx *VPCPeeringTestCtx) error {
+			return testCtx.teardownDisruption(ctx)
+		},
 	}
 	suite.TestCases = []JUnitTestCase{
-		{
-			Name:      "Disruption Under Traffic",
-			F:         disruptionTest,
-			SkipFlags: SkipFlags{NoServers: true},
-		},
+		{Name: testDisruptionSetup, F: disruptionSetupTest, SkipFlags: SkipFlags{NoServers: true}},
+		{Name: testDisruptionVPC, F: disruptionVPCTest, SkipFlags: SkipFlags{NoServers: true}},
+		{Name: testDisruptionTouch, F: disruptionTouchTest, SkipFlags: SkipFlags{NoServers: true}},
+		{Name: testDisruptionCtrl, F: disruptionCtrlTest, SkipFlags: SkipFlags{NoServers: true}},
+		{Name: testDisruptionReboot, F: disruptionRebootTest, SkipFlags: SkipFlags{NoServers: true}},
+		{Name: testDisruptionReinstall, F: disruptionReinstallTest, SkipFlags: SkipFlags{NoServers: true}},
 	}
 	suite.Tests = len(suite.TestCases)
 
@@ -100,86 +133,206 @@ type disruptionEnv struct {
 	noted map[string]bool
 }
 
-// disruptionTest runs the common changes under background traffic and fails on any disruption
-// the change was not expected to cause, on a spec change it was not expected to make and on an
-// Agent that doesn't report the generation as applied.
-func disruptionTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *ConnectivityMatrix) (bool, []RevertFunc, error) {
+// disruptionState is what the setup produced, kept on the test context for the tests that follow.
+type disruptionState struct {
+	env *disruptionEnv
+	// skip is why the suite can't run on this fabric: every test of it skips with the same reason
+	skip error
+	// err is why the setup or the baseline did not succeed: the other tests have no verdict
+	err error
+	// started is set once the traffic runs
+	started bool
+}
+
+// ensureDisruption builds the environment on the first call, and returns it on the others, so a
+// selection of tests that leaves out the setup test still works.
+func (testCtx *VPCPeeringTestCtx) ensureDisruption(ctx context.Context) *disruptionState {
+	if testCtx.disruption == nil {
+		testCtx.disruption = testCtx.setupDisruption(ctx)
+	}
+
+	return testCtx.disruption
+}
+
+func (testCtx *VPCPeeringTestCtx) setupDisruption(ctx context.Context) *disruptionState {
+	st := &disruptionState{}
 	kube := testCtx.kube
 
 	if testCtx.setupOpts.VPCMode != vpcapi.VPCModeL2VNI {
-		return true, nil, fmt.Errorf("VPC mode is %q, ESLAG servers only take part in l2vni", testCtx.setupOpts.VPCMode) //nolint:goerr113
+		st.skip = fmt.Errorf("VPC mode is %q, ESLAG servers only take part in l2vni", testCtx.setupOpts.VPCMode) //nolint:goerr113
+
+		return st
 	}
 	if testCtx.extName == "" {
-		return true, nil, errNoExternals
+		st.skip = errNoExternals
+
+		return st
 	}
 
 	sc, err := discoverDisruptionScenario(ctx, kube)
-	if err != nil {
-		return true, nil, err
+	switch {
+	case errors.Is(err, errDisruptionNoPair), errors.Is(err, errDisruptionNoESLAGServer), errors.Is(err, errDisruptionNoSingleLeaf):
+		st.skip = err
+
+		return st
+	case err != nil:
+		st.err = err
+
+		return st
 	}
 	slog.Info("Disruption scenario", "scenario", sc.describe())
 
 	env := &disruptionEnv{
-		testCtx:     testCtx,
-		kube:        kube,
-		sc:          sc,
-		probeClass:  map[string]string{},
-		touched:     map[string]bool{},
-		noted:       map[string]bool{},
-		evidenceDir: filepath.Join(testCtx.vlabCfg.WorkDir, ShowTechOutputDir, sanitizeNameForFolder("Disruption Suite"), sanitizeNameForFolder("Disruption Under Traffic"), "disruption"),
+		testCtx:    testCtx,
+		kube:       kube,
+		sc:         sc,
+		probeClass: map[string]string{},
+		touched:    map[string]bool{},
+		noted:      map[string]bool{},
 	}
-
-	reverts := []RevertFunc{env.cleanup}
+	st.env = env
 
 	if err := env.setup(ctx); err != nil {
-		return false, reverts, err
+		st.err = err
+
+		return st
 	}
 
 	env.aw = NewAgentWatch(kube)
 	env.aw.Start(ctx)
-	defer env.aw.Stop()
-	defer func() {
-		if err := env.tw.Stop(context.WithoutCancel(ctx)); err != nil {
-			slog.Warn("Stopping background traffic failed", "err", err)
-		}
-	}()
-
 	if err := env.tw.Start(ctx); err != nil {
-		return false, reverts, fmt.Errorf("starting background traffic: %w", err)
+		st.err = fmt.Errorf("starting background traffic: %w", err)
+
+		return st
 	}
+	st.started = true
 
 	if err := env.baseline(ctx); err != nil {
-		return false, reverts, err
+		st.err = err
 	}
+
+	return st
+}
+
+// disruptionSetupTest builds the VPCs, starts the traffic and watches it with no change. Loss in
+// the baseline makes the whole suite inconclusive, and it is reported here.
+//
+// Builds the entries that only one leaf holds, which the renumbering in
+// fabric#1649 needs to show.
+func disruptionSetupTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *ConnectivityMatrix) (bool, []RevertFunc, error) {
+	st := testCtx.ensureDisruption(ctx)
+	if st.skip != nil {
+		return true, nil, st.skip
+	}
+
+	return false, nil, st.err
+}
+
+// disruptionVPCTest creates and deletes a VPC that is attached nowhere, 5 times. Nothing that
+// carries traffic changes, so nothing may be lost and no Agent spec may change.
+//
+// Targets fabric#1649: the reconcile renumbers the IRB
+// VLANs of the entries that only one leaf of the pair holds.
+func disruptionVPCTest(ctx context.Context, testCtx *VPCPeeringTestCtx, m *ConnectivityMatrix) (bool, []RevertFunc, error) {
+	return disruptionOpTest(testDisruptionVPC, []string{issueIRBRenumber}, (*disruptionEnv).opCreateDeleteVPC)(ctx, testCtx, m)
+}
+
+// disruptionTouchTest puts a label on each leaf of the pair in turn, 12 times. The label reaches
+// no config, so nothing may be lost and no Agent spec may change but the touch marker.
+//
+// Targets fabric#1649: any reconcile of one leaf renumbers
+// the IRB VLANs of the entries attached to that leaf alone.
+func disruptionTouchTest(ctx context.Context, testCtx *VPCPeeringTestCtx, m *ConnectivityMatrix) (bool, []RevertFunc, error) {
+	return disruptionOpTest(testDisruptionTouch, []string{issueIRBRenumber}, (*disruptionEnv).opTouchLeaves)(ctx, testCtx, m)
+}
+
+// disruptionCtrlTest restarts fabric-ctrl through a rollout, 3 times. A new controller reconciles
+// everything again and has to arrive at what was there.
+//
+// Targets fabric#1649: the first reconcile of a new
+// controller renumbers the IRB VLANs of the entries attached to one leaf alone.
+func disruptionCtrlTest(ctx context.Context, testCtx *VPCPeeringTestCtx, m *ConnectivityMatrix) (bool, []RevertFunc, error) {
+	return disruptionOpTest(testDisruptionCtrl, []string{issueIRBRenumber}, (*disruptionEnv).opRestartController)(ctx, testCtx, m)
+}
+
+// disruptionRebootTest reboots the second leaf of the pair through its Agent. Hardware only: it
+// skips when a leaf of the pair is a virtual switch.
+//
+// Targets fabric#1488: the traffic of ESLAG dual-homed
+// servers is unstable after the leaf comes back.
+func disruptionRebootTest(ctx context.Context, testCtx *VPCPeeringTestCtx, m *ConnectivityMatrix) (bool, []RevertFunc, error) {
+	return disruptionOpTest(testDisruptionReboot, []string{issueESLAGRejoin}, (*disruptionEnv).opReboot)(ctx, testCtx, m)
+}
+
+// disruptionReinstallTest reinstalls the second leaf of the pair through its Agent. Hardware
+// only: it skips when a leaf of the pair is a virtual switch.
+//
+// Targets fabric#1663, the Agent Applied condition that stays
+// ApplyPending after a reinstall, and fabric#1488, the
+// ESLAG dual-homed servers that lose traffic while the leaf comes back.
+func disruptionReinstallTest(ctx context.Context, testCtx *VPCPeeringTestCtx, m *ConnectivityMatrix) (bool, []RevertFunc, error) {
+	return disruptionOpTest(testDisruptionReinstall, []string{issueApplyPending, issueESLAGRejoin}, (*disruptionEnv).opReinstall)(ctx, testCtx, m)
+}
+
+// disruptionOpTest makes a test of one operation under the running traffic. It checks loss only
+// from its own start, so one test's loss is never charged to the next. Without a clean setup it
+// has no verdict. A failure names the issues the test targets.
+func disruptionOpTest(name string, targets []string, run func(*disruptionEnv, context.Context) error) TestFunc {
+	return func(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *ConnectivityMatrix) (bool, []RevertFunc, error) {
+		st := testCtx.ensureDisruption(ctx)
+		if st.skip != nil {
+			return true, nil, st.skip
+		}
+		if st.err != nil {
+			return false, nil, fmt.Errorf("%w: setup and baseline did not succeed: %w", errInconclusive, st.err)
+		}
+
+		env := st.env
+		env.evidenceDir = filepath.Join(testCtx.vlabCfg.WorkDir, ShowTechOutputDir, sanitizeNameForFolder(disruptionSuiteName), sanitizeNameForFolder(name), "disruption")
+		env.cursor = time.Now()
+
+		if err := run(env, ctx); err != nil {
+			if errors.Is(err, errDisruptionHardwareOnly) {
+				return true, nil, err
+			}
+
+			return false, nil, fmt.Errorf("%w (targets %s)", err, strings.Join(targets, ", "))
+		}
+
+		return false, nil, nil
+	}
+}
+
+// teardownDisruption stops the traffic and removes what the setup created. It runs once, after the last test.
+func (testCtx *VPCPeeringTestCtx) teardownDisruption(ctx context.Context) error {
+	st := testCtx.disruption
+	if st == nil || st.env == nil {
+		return nil
+	}
+	testCtx.disruption = nil
+	env := st.env
 
 	var errs []error
-	for _, group := range []struct {
-		name string
-		run  func(context.Context) error
-	}{
-		{"create and delete an unattached VPC", env.opCreateDeleteVPC},
-		{"touch label on the leaves of the pair", env.opTouchLeaves},
-		{"fabric-ctrl restart", env.opRestartController},
-		{"agent reboot", env.opReboot},
-		{"agent reinstall", env.opReinstall},
-	} {
-		slog.Info("Disruption operation", "operation", group.name)
-		if err := group.run(ctx); err != nil {
-			slog.Error("FAIL", "operation", group.name, "error", err.Error())
-			errs = append(errs, fmt.Errorf("%s: %w", group.name, err))
-
-			continue
+	if env.tw != nil {
+		if st.started {
+			if drift, err := env.tw.ClockDrift(ctx); err != nil {
+				slog.Warn("Measuring server clock drift failed", "err", err)
+			} else if drift > disruptionMaxClockSkew {
+				slog.Warn("Server clocks drifted during the run, the times of lost pings are approximate", "drift", drift)
+			}
 		}
-		slog.Info("PASS", "operation", group.name)
+		if err := env.tw.Stop(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("stopping background traffic: %w", err))
+		}
+	}
+	if env.aw != nil {
+		env.aw.Stop()
+	}
+	if err := env.cleanup(ctx); err != nil {
+		errs = append(errs, err)
 	}
 
-	if drift, err := env.tw.ClockDrift(ctx); err != nil {
-		slog.Warn("Measuring server clock drift failed", "err", err)
-	} else if drift > disruptionMaxClockSkew {
-		slog.Warn("Server clocks drifted during the run, the times of lost pings are approximate", "drift", drift)
-	}
-
-	return false, reverts, errors.Join(errs...)
+	return errors.Join(errs...)
 }
 
 func discoverDisruptionScenario(ctx context.Context, kube kclient.Client) (*disruptionScenario, error) {
@@ -924,9 +1077,7 @@ func (env *disruptionEnv) opLeafCycle(ctx context.Context, cycle leafCycle) erro
 			return fmt.Errorf("getting switch %s: %w", leaf, err)
 		}
 		if sw.Spec.Profile == meta.SwitchProfileVS {
-			env.testCtx.addNote(fmt.Sprintf("agent %s not run: %s is a virtual switch, the %s is only run on hardware", cycle.name, leaf, cycle.name))
-
-			return nil
+			return fmt.Errorf("%w: %s is a virtual switch, the %s is only run on hardware", errDisruptionHardwareOnly, leaf, cycle.name)
 		}
 	}
 
@@ -1005,8 +1156,8 @@ func (env *disruptionEnv) opLeafCycle(ctx context.Context, cycle leafCycle) erro
 		res.failures = append(res.failures, fmt.Sprintf("%d pings lost on pairs that don't cross %s: %s", len(lostStrict), target, summarizeLoss(lostStrict)))
 	}
 	if long := longLossWindows(lostSoft); len(long) > 0 {
-		res.failures = append(res.failures, fmt.Sprintf("%.1f s loss on ESLAG pairs while %s rejoined (internal#417 pattern, at most %s in a row allowed): %s",
-			longestLossWindow(long).Seconds(), target, disruptionESLAGMaxLoss, summarizeWindows(long)))
+		res.failures = append(res.failures, fmt.Sprintf("%.1f s loss on ESLAG pairs while %s rejoined (%s pattern, at most %s in a row allowed): %s",
+			longestLossWindow(long).Seconds(), target, issueESLAGRejoin, disruptionESLAGMaxLoss, summarizeWindows(long)))
 	}
 	if len(lostAfter) > 0 {
 		res.failures = append(res.failures, fmt.Sprintf("%d pings lost more than %s after %s applied its config: %s", len(lostAfter), disruptionRecovery, target, summarizeLoss(lostAfter)))
