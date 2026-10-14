@@ -59,6 +59,7 @@ spec:
 
     fabric:
       mode: {{ .FabricMode }} # "spine-leaf"
+      {{ if .AllowExtraSwitchProfiles }}allowExtraSwitchProfiles: true{{ end }}
       {{ if .ExcludeNOSInstallers }}excludeNOSInstallers: true{{ end }}
       {{ if .IncludeONIE }}includeONIE: true{{ end }}
       {{ if .IncludeBCM }}includeBCM: true{{ end }}

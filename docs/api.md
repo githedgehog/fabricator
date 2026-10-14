@@ -414,6 +414,7 @@ _Appears in:_
 | `includeBCM` _boolean_ |  |  |  |
 | `includeCLSP` _boolean_ |  |  |  |
 | `includeCumulus` _boolean_ |  |  |  |
+| `allowExtraSwitchProfiles` _boolean_ |  |  |  |
 | `disableBFD` _boolean_ |  |  |  |
 | `observability` _Observability_ |  |  |  |
 

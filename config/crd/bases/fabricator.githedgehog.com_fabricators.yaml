@@ -132,6 +132,8 @@ spec:
                     type: object
                   fabric:
                     properties:
+                      allowExtraSwitchProfiles:
+                        type: boolean
                       baseVPCCommunity:
                         type: string
                       defaultAlloyConfig:

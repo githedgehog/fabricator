@@ -29,25 +29,26 @@ const (
 )
 
 type InitConfigInput struct {
-	FabricMode            meta.FabricMode
-	TLSSAN                []string
-	DefaultPasswordHash   string
-	DefaultAuthorizedKeys []string
-	Dev                   bool
-	ExcludeNOSInstallers  bool
-	IncludeONIE           bool
-	IncludeBCM            bool
-	IncludeCLSP           bool
-	IncludeCumulus        bool
-	NoPassAuth            bool
-	RegUpstream           *fabapi.ControlConfigRegistryUpstream
-	NodeManagementLinks   map[string]string
-	Gateway               bool
-	Gateways              int
-	JoinToken             string
-	SaveJoinToken         bool
-	O11yDefaults          fabapi.ObservabilityDefaults
-	O11yLabels            map[string]string
+	FabricMode               meta.FabricMode
+	TLSSAN                   []string
+	DefaultPasswordHash      string
+	DefaultAuthorizedKeys    []string
+	Dev                      bool
+	ExcludeNOSInstallers     bool
+	IncludeONIE              bool
+	IncludeBCM               bool
+	IncludeCLSP              bool
+	IncludeCumulus           bool
+	NoPassAuth               bool
+	AllowExtraSwitchProfiles bool
+	RegUpstream              *fabapi.ControlConfigRegistryUpstream
+	NodeManagementLinks      map[string]string
+	Gateway                  bool
+	Gateways                 int
+	JoinToken                string
+	SaveJoinToken            bool
+	O11yDefaults             fabapi.ObservabilityDefaults
+	O11yLabels               map[string]string
 }
 
 func InitConfig(ctx context.Context, in InitConfigInput) ([]byte, error) {

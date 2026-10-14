@@ -279,7 +279,7 @@ func GetFabricConfig(f fabapi.Fabricator) (*fmeta.FabricConfig, error) {
 		Observability:            observability,
 		ControlProxyURL:          fmt.Sprintf("http://%s:%d", controlVIP.Addr().String(), controlproxy.NodePort),
 		DefaultMaxPathsEBGP:      64,
-		AllowExtraSwitchProfiles: false,
+		AllowExtraSwitchProfiles: f.Spec.Config.Fabric.AllowExtraSwitchProfiles,
 		MCLAGSessionSubnet:       string(f.Spec.Config.Fabric.MCLAGSessionSubnet),
 		GatewayASN:               f.Spec.Config.Gateway.ASN,
 		GatewayAPISync:           f.Spec.Config.Gateway.Enable,
