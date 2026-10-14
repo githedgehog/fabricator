@@ -7,8 +7,10 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -22,6 +24,47 @@ import (
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+// summarizeProbeLoss says per probe how many pings were lost and between when, one line each, in
+// the order the probes first lost one. It is empty without loss.
+func summarizeProbeLoss(lost []lostPing, class map[string]string) string {
+	type span struct {
+		count       int
+		first, last time.Time
+	}
+	spans := map[string]*span{}
+	var order []string
+	for _, l := range lost {
+		s, ok := spans[l.Probe]
+		if !ok {
+			s = &span{}
+			spans[l.Probe] = s
+			order = append(order, l.Probe)
+		}
+		s.count++
+		if l.At.IsZero() {
+			continue
+		}
+		if s.first.IsZero() || l.At.Before(s.first) {
+			s.first = l.At
+		}
+		if l.At.After(s.last) {
+			s.last = l.At
+		}
+	}
+
+	var b strings.Builder
+	for _, probe := range order {
+		s := spans[probe]
+		fmt.Fprintf(&b, "%s (%s): %d pings lost", probe, class[probe], s.count)
+		if !s.first.IsZero() {
+			fmt.Fprintf(&b, ", %s to %s", s.first.Format("15:04:05.000"), s.last.Format("15:04:05.000"))
+		}
+		b.WriteString("\n")
+	}
+
+	return b.String()
+}
 
 func summarizeLoss(lost []lostPing) string {
 	return summarizeWindows(groupLoss(lost, 3*trafficPingInterval))
@@ -58,39 +101,116 @@ func (env *disruptionEnv) noteOnce(notes []string) {
 	}
 }
 
-// fail records the evidence of a failed operation and returns the error to report.
-func (env *disruptionEnv) fail(res *checkResult) error {
+// writeEvidence saves files in the evidence directory, each one's name starting with prefix. Empty
+// files are left out: a file that says nothing only gets in the way.
+func (env *disruptionEnv) writeEvidence(prefix string, files map[string]string) {
 	if err := os.MkdirAll(env.evidenceDir, 0o755); err != nil {
 		slog.Warn("Creating evidence directory failed", "dir", env.evidenceDir, "err", err)
-	} else {
-		for name, content := range res.files {
-			file := filepath.Join(env.evidenceDir, sanitizeNameForFolder(res.op)+"-"+name)
-			if err := os.WriteFile(file, []byte(content), 0o644); err != nil { //nolint:gosec
-				slog.Warn("Writing evidence failed", "file", file, "err", err)
-			}
+
+		return
+	}
+	for name, content := range files {
+		if content == "" {
+			continue
+		}
+		if prefix != "" {
+			name = sanitizeNameForFolder(prefix) + "-" + name
+		}
+		file := filepath.Join(env.evidenceDir, name)
+		if err := os.WriteFile(file, []byte(content), 0o644); err != nil { //nolint:gosec
+			slog.Warn("Writing evidence failed", "file", file, "err", err)
 		}
 	}
+}
+
+// fail records the evidence of a failed operation and returns the error to report.
+func (env *disruptionEnv) fail(res *checkResult) error {
+	env.writeEvidence(res.op, res.files)
 
 	return fmt.Errorf("%s: %s (evidence in %s)", res.op, strings.Join(res.failures, "; "), env.evidenceDir) //nolint:err113
 }
 
-// runUnrelated runs an operation that must not disturb anything: no lost ping, no change in any
-// Agent spec but the touch marker, every Agent applied.
-func (env *disruptionEnv) runUnrelated(ctx context.Context, op string, do func(context.Context) error) error {
-	// an operation that errors out before its traffic check must not leave its loss to the next one
-	checked := false
-	defer func() {
-		if !checked {
-			env.cursor = time.Now()
-		}
-	}()
+// roundReport collects what the rounds of one operation found. A round whose only finding is a
+// change in Agent specs is recorded and the next round runs, so that a change that repeats shows
+// whether it ever costs traffic. Lost pings and Agents that did not apply end the operation.
+type roundReport struct {
+	total   int // rounds the operation has
+	ran     int
+	specs   []string // per round with changed Agent specs: the round and which Agents
+	losses  []string // per round with lost pings: the round and the loss windows
+	pending []string // per round with Agents that did not apply: the round and which
+	// first is the first round with changed Agent specs and what changed in it
+	first string
+}
 
+func (r *roundReport) failed() bool {
+	return len(r.specs)+len(r.losses)+len(r.pending) > 0
+}
+
+// stop says whether the operation ends here: lost pings and Agents that did not apply do, spec changes alone don't.
+func (r *roundReport) stop() bool {
+	return len(r.losses)+len(r.pending) > 0
+}
+
+// summary says what the rounds found, spec changes and loss apart.
+func (r *roundReport) summary() string {
+	var parts []string
+	if len(r.specs) > 0 {
+		parts = append(parts, fmt.Sprintf("Agent specs changed in %d of %d rounds (%s); first: %s", len(r.specs), r.ran, strings.Join(r.specs, "; "), r.first))
+	}
+	if len(r.losses) > 0 {
+		parts = append(parts, fmt.Sprintf("pings lost in %d of %d rounds: %s", len(r.losses), r.ran, strings.Join(r.losses, "; ")))
+	} else {
+		parts = append(parts, fmt.Sprintf("no ping lost in any of the %d rounds", r.ran))
+	}
+	if len(r.pending) > 0 {
+		parts = append(parts, fmt.Sprintf("Agents not applied in %d of %d rounds: %s", len(r.pending), r.ran, strings.Join(r.pending, "; ")))
+	}
+	if r.ran < r.total {
+		parts = append(parts, fmt.Sprintf("stopped after %d of %d rounds", r.ran, r.total))
+	}
+
+	return strings.Join(parts, "; ")
+}
+
+// finish returns the operation's error: what the rounds found, prefixed by err when a round
+// could not run.
+func (env *disruptionEnv) finish(rep *roundReport, err error) error {
+	if !rep.failed() {
+		return err
+	}
+	if err != nil {
+		return fmt.Errorf("%w; before that: %s (evidence in %s)", err, rep.summary(), env.evidenceDir)
+	}
+
+	return fmt.Errorf("%s (evidence in %s)", rep.summary(), env.evidenceDir) //nolint:err113
+}
+
+// summarizeSpecDiffs counts the changes per Agent: "leaf-01 3, leaf-02 3". Each change reads "<agent>: <path>: <old> -> <new>".
+func summarizeSpecDiffs(diffs []string) string {
+	counts := map[string]int{}
+	for _, d := range diffs {
+		agent, _, _ := strings.Cut(d, ": ")
+		counts[agent]++
+	}
+	parts := make([]string, 0, len(counts))
+	for _, agent := range slices.Sorted(maps.Keys(counts)) {
+		parts = append(parts, fmt.Sprintf("%s %d", agent, counts[agent]))
+	}
+
+	return strings.Join(parts, ", ")
+}
+
+// runUnrelated runs one round of an operation that must not disturb anything: no lost ping, no
+// Agent spec change other than the touch marker, and every Agent applied. Findings go to rep;
+// the returned error only means the round could not run.
+func (env *disruptionEnv) runUnrelated(ctx context.Context, rep *roundReport, op string, do func(context.Context) error) error {
 	before, beforeAgents, err := env.specsAfterSettle(ctx)
 	if err != nil {
 		return fmt.Errorf("%s: %w", op, err)
 	}
 
-	res := &checkResult{op: op, started: time.Now(), files: map[string]string{}}
+	started := time.Now()
 	if err := do(ctx); err != nil {
 		return fmt.Errorf("%s: %w", op, err)
 	}
@@ -112,67 +232,84 @@ func (env *disruptionEnv) runUnrelated(ctx context.Context, op string, do func(c
 	}
 	lost := lostPings(tl, env.cursor, end)
 	env.cursor = end
-	checked = true
 
-	if len(lost) > 0 {
-		res.failures = append(res.failures, fmt.Sprintf("%d pings lost: %s", len(lost), summarizeLoss(lost)))
-	}
+	rep.ran++
+	files := map[string]string{}
 	if diffs := diffAgentSpecs(before, after, ignoreBenchTouch); len(diffs) > 0 {
-		res.failures = append(res.failures, fmt.Sprintf("Agent specs changed: %s", strings.Join(diffs, ", ")))
-		res.files["spec-diff.txt"] = strings.Join(diffs, "\n") + "\n"
+		rep.specs = append(rep.specs, fmt.Sprintf("%s: %s", op, summarizeSpecDiffs(diffs)))
+		if rep.first == "" {
+			rep.first = fmt.Sprintf("%s: %s", op, strings.Join(diffs, ", "))
+		}
+		files["spec-diff.txt"] = strings.Join(diffs, "\n") + "\n"
+	}
+	if len(lost) > 0 {
+		rep.losses = append(rep.losses, fmt.Sprintf("%s: %d pings lost: %s", op, len(lost), summarizeLoss(lost)))
+		files["lost-pings.txt"] = formatLostPings(lost)
 	}
 	pending, notes := agentsNotApplied(agents, agentGenerations(beforeAgents))
 	env.noteOnce(notes)
 	if len(pending) > 0 {
-		res.failures = append(res.failures, fmt.Sprintf("Agents not applied: %s", strings.Join(pending, ", ")))
+		rep.pending = append(rep.pending, fmt.Sprintf("%s: %s", op, strings.Join(pending, ", ")))
 	}
-	if len(res.failures) == 0 {
-		return nil
-	}
-
-	res.files["lost-pings.txt"] = formatLostPings(lost)
-	res.files["agent-timeline.txt"] = formatAgentRows(env.aw.Rows(res.started, end))
-	for _, p := range tl {
-		res.files["ping-"+sanitizeNameForFolder(p.Probe)+".log"] = p.Raw
+	if len(files) > 0 || len(pending) > 0 {
+		files["agent-timeline.txt"] = formatAgentRows(env.aw.Rows(started, end))
+		env.writeEvidence(op, files)
 	}
 
-	return env.fail(res)
+	return nil
 }
 
+// opCreateDeleteVPC creates and deletes a VPC that is attached nowhere, disruptionVPCCycles times.
+// Nothing that carries traffic changes, so nothing may be lost and no Agent spec may change.
+// Targets fabric#1649: the reconcile renumbers the IRB VLANs of the entries that only one leaf of
+// the pair holds.
 func (env *disruptionEnv) opCreateDeleteVPC(ctx context.Context) error {
 	vpc, err := env.newVPC("dt-un")
 	if err != nil {
 		return err
 	}
+	// a round that stops the operation between the create and the delete must not leave the VPC behind
+	defer func() {
+		if err := kclient.IgnoreNotFound(env.kube.Delete(context.WithoutCancel(ctx), vpc.DeepCopy())); err != nil {
+			slog.Warn("Removing the VPC of the create and delete rounds failed", "vpc", vpc.Name, "err", err)
+		}
+	}()
 
-	for cycle := 1; cycle <= disruptionVPCCycles; cycle++ {
-		if err := env.runUnrelated(ctx, fmt.Sprintf("create-vpc-%d", cycle), func(ctx context.Context) error {
+	rep := &roundReport{total: 2 * disruptionVPCCycles}
+	for cycle := 1; cycle <= disruptionVPCCycles && !rep.stop(); cycle++ {
+		if err := env.runUnrelated(ctx, rep, fmt.Sprintf("create-vpc-%d", cycle), func(ctx context.Context) error {
 			_, err := CreateOrUpdateVpc(ctx, env.kube, vpc.DeepCopy())
 
 			return err
 		}); err != nil {
-			return err
+			return env.finish(rep, err)
 		}
-		if err := env.runUnrelated(ctx, fmt.Sprintf("delete-vpc-%d", cycle), func(ctx context.Context) error {
+		if rep.stop() {
+			break
+		}
+		if err := env.runUnrelated(ctx, rep, fmt.Sprintf("delete-vpc-%d", cycle), func(ctx context.Context) error {
 			if err := env.kube.Delete(ctx, vpc.DeepCopy()); err != nil {
 				return fmt.Errorf("deleting VPC: %w", err)
 			}
 
 			return nil
 		}); err != nil {
-			return err
+			return env.finish(rep, err)
 		}
 	}
 
-	return nil
+	return env.finish(rep, nil)
 }
 
-// opTouchLeaves puts the benchmark touch label on the leaves of the pair in turn. The first failing
-// round ends the operation.
+// opTouchLeaves puts the benchmark touch label on the leaves of the pair in turn,
+// disruptionTouchRounds times. The label reaches no config, so nothing may be lost and no Agent
+// spec may change but the touch marker. Targets fabric#1649: any reconcile of one leaf renumbers
+// the IRB VLANs of the entries attached to that leaf alone.
 func (env *disruptionEnv) opTouchLeaves(ctx context.Context) error {
-	for round := 1; round <= disruptionTouchRounds; round++ {
+	rep := &roundReport{total: disruptionTouchRounds}
+	for round := 1; round <= disruptionTouchRounds && !rep.stop(); round++ {
 		leaf := env.sc.Leaves[(round-1)%2]
-		if err := env.runUnrelated(ctx, fmt.Sprintf("touch-%d-%s", round, leaf), func(ctx context.Context) error {
+		if err := env.runUnrelated(ctx, rep, fmt.Sprintf("touch-%d-%s", round, leaf), func(ctx context.Context) error {
 			sw := &wiringapi.Switch{}
 			if err := env.kube.Get(ctx, kclient.ObjectKey{Name: leaf, Namespace: kmetav1.NamespaceDefault}, sw); err != nil {
 				return fmt.Errorf("getting switch %s: %w", leaf, err)
@@ -189,14 +326,17 @@ func (env *disruptionEnv) opTouchLeaves(ctx context.Context) error {
 
 			return nil
 		}); err != nil {
-			return fmt.Errorf("round %d of %d: %w", round, disruptionTouchRounds, err)
+			return env.finish(rep, fmt.Errorf("round %d of %d: %w", round, disruptionTouchRounds, err))
 		}
 	}
 
-	return nil
+	return env.finish(rep, nil)
 }
 
-// opRestartController restarts fabric-ctrl the way kubectl rollout restart does.
+// opRestartController restarts fabric-ctrl the way kubectl rollout restart does,
+// disruptionCtrlRestarts times. A new controller reconciles everything again and has to arrive at
+// what was there. Targets fabric#1649: the first reconcile of a new controller renumbers the IRB
+// VLANs of the entries attached to one leaf alone.
 func (env *disruptionEnv) opRestartController(ctx context.Context) error {
 	kubeconfig := filepath.Join(env.testCtx.vlabCfg.WorkDir, VLABDir, VLABKubeConfig)
 	kc, err := kubeutil.NewClient(ctx, kubeconfig, appsapi.AddToScheme)
@@ -205,8 +345,9 @@ func (env *disruptionEnv) opRestartController(ctx context.Context) error {
 	}
 	key := kclient.ObjectKey{Namespace: comp.FabNamespace, Name: "fabric-ctrl"}
 
-	for n := 1; n <= disruptionCtrlRestarts; n++ {
-		if err := env.runUnrelated(ctx, fmt.Sprintf("restart-fabric-ctrl-%d", n), func(ctx context.Context) error {
+	rep := &roundReport{total: disruptionCtrlRestarts}
+	for n := 1; n <= disruptionCtrlRestarts && !rep.stop(); n++ {
+		if err := env.runUnrelated(ctx, rep, fmt.Sprintf("restart-fabric-ctrl-%d", n), func(ctx context.Context) error {
 			dep := &appsapi.Deployment{}
 			if err := kc.Get(ctx, key, dep); err != nil {
 				return fmt.Errorf("getting deployment %s: %w", key, err)
@@ -222,11 +363,11 @@ func (env *disruptionEnv) opRestartController(ctx context.Context) error {
 
 			return waitRollout(ctx, kc, key)
 		}); err != nil {
-			return err
+			return env.finish(rep, err)
 		}
 	}
 
-	return nil
+	return env.finish(rep, nil)
 }
 
 func waitRollout(ctx context.Context, kc kclient.Client, key kclient.ObjectKey) error {
@@ -267,6 +408,9 @@ type leafCycle struct {
 	back func(before, now *agentapi.Agent) bool
 }
 
+// opReinstall reinstalls the second leaf of the pair through its Agent, on hardware only. Targets
+// fabric#1663, the Agent Applied condition that stays ApplyPending after a reinstall, and
+// fabric#1488, the ESLAG dual-homed servers that lose traffic while the leaf comes back.
 func (env *disruptionEnv) opReinstall(ctx context.Context) error {
 	return env.opLeafCycle(ctx, leafCycle{
 		name:      "reinstall",
@@ -290,7 +434,8 @@ func (env *disruptionEnv) opReinstall(ctx context.Context) error {
 }
 
 // opReboot reboots the second leaf of the pair through the Agent, which reboots when the spec holds
-// the boot ID it is running on.
+// the boot ID it is running on. Hardware only. Targets fabric#1488: the traffic of ESLAG
+// dual-homed servers is unstable after the leaf comes back.
 func (env *disruptionEnv) opReboot(ctx context.Context) error {
 	return env.opLeafCycle(ctx, leafCycle{
 		name:      "reboot",
@@ -323,19 +468,9 @@ func (env *disruptionEnv) opLeafCycle(ctx context.Context, cycle leafCycle) erro
 			return fmt.Errorf("getting switch %s: %w", leaf, err)
 		}
 		if sw.Spec.Profile == meta.SwitchProfileVS || sw.Spec.Profile == meta.SwitchProfileVSCLSP {
-			env.testCtx.addNote(fmt.Sprintf("agent %s not run: %s is a virtual switch, the %s is only run on hardware", cycle.name, leaf, cycle.name))
-
-			return nil
+			return fmt.Errorf("%w: %s is a virtual switch, the %s is only run on hardware", errDisruptionHardwareOnly, leaf, cycle.name)
 		}
 	}
-
-	// an operation that errors out before its traffic check must not leave its loss to the next one
-	checked := false
-	defer func() {
-		if !checked {
-			env.cursor = time.Now()
-		}
-	}()
 
 	before, beforeAgents, err := env.specsAfterSettle(ctx)
 	if err != nil {
@@ -378,12 +513,11 @@ func (env *disruptionEnv) opLeafCycle(ctx context.Context, cycle leafCycle) erro
 		return fmt.Errorf("%s: %w", cycle.name, err)
 	}
 	if stale := staleProbes(tl, end.Add(-disruptionTrailGrace)); len(stale) > 0 {
-		return fmt.Errorf("%w: reinstall: probes stopped recording, the traffic can't be judged: %s", errInconclusive, strings.Join(stale, ", "))
+		return fmt.Errorf("%w: %s: probes stopped recording, the traffic can't be judged: %s", errInconclusive, cycle.name, strings.Join(stale, ", "))
 	}
 
 	v := judgeLeafCycle(tl, env.probeClass, target, leafCycleTimes{from: env.cursor, requested: res.started, settled: settled, end: end})
 	env.cursor = end
-	checked = true
 	res.failures = v.failures
 	slog.Info("Loss while the leaf was away", "operation", cycle.name, "switch", target, "pings", len(v.away), "windows", summarizeLoss(v.away), "applied-at", settled.Format("15:04:05"))
 
@@ -403,11 +537,9 @@ func (env *disruptionEnv) opLeafCycle(ctx context.Context, cycle leafCycle) erro
 		return nil
 	}
 
-	res.files["lost-pings.txt"] = formatLostPings(lostPings(tl, res.started, end))
-	res.files["agent-timeline.txt"] = formatAgentRows(env.aw.Rows(res.started, end))
-	for _, p := range tl {
-		res.files["ping-"+sanitizeNameForFolder(p.Probe)+".log"] = p.Raw
-	}
+	// line by line only what the checks judged; the rest is the loss expected while the leaf is away
+	res.files["lost-pings.txt"] = formatLostPings(v.judged)
+	res.files["expected-loss.txt"] = summarizeProbeLoss(v.expected, env.probeClass)
 
 	return env.fail(res)
 }
@@ -425,6 +557,8 @@ type leafCycleVerdict struct {
 	failures []string
 	// away is the loss on the pairs that cross the leaf, for the log
 	away []lostPing
+	// judged is the loss the checks looked at, expected the rest: loss allowed while the leaf is away
+	judged, expected []lostPing
 }
 
 // judgeLeafCycle judges the traffic of a cycle of the leaf target:
@@ -455,11 +589,25 @@ func judgeLeafCycle(tl []probeTimeline, class map[string]string, target string, 
 		v.failures = append(v.failures, fmt.Sprintf("%d pings lost on pairs that don't cross %s: %s", len(lostStrict), target, summarizeLoss(lostStrict)))
 	}
 	if long := longLossWindows(lostSoft); len(long) > 0 {
-		v.failures = append(v.failures, fmt.Sprintf("%.1f s loss on ESLAG pairs while %s rejoined (internal#417 pattern, loss windows of at most %s allowed): %s",
+		v.failures = append(v.failures, fmt.Sprintf("%.1fs loss on ESLAG pairs while %s rejoined (loss windows of at most %s allowed): %s",
 			longestLossWindow(long).Seconds(), target, disruptionESLAGMaxLoss, summarizeWindows(long)))
 	}
 	if len(lostAfter) > 0 {
 		v.failures = append(v.failures, fmt.Sprintf("%d pings lost more than %s after %s applied its config: %s", len(lostAfter), disruptionRecovery, target, summarizeLoss(lostAfter)))
+	}
+
+	judged := map[lostPing]bool{}
+	for _, list := range [][]lostPing{lostStrict, lostSoft, lostAfter} {
+		for _, l := range list {
+			judged[l] = true
+		}
+	}
+	for _, l := range lostPings(tl, at.from, at.end) {
+		if judged[l] {
+			v.judged = append(v.judged, l)
+		} else {
+			v.expected = append(v.expected, l)
+		}
 	}
 
 	return v

@@ -216,43 +216,55 @@ func (env *disruptionEnv) setup(ctx context.Context) error {
 
 	// entries on a single leaf: more VPCs attached to the connection of a server on that leaf
 	// alone. No server is configured for them, the controller allocates for them all the same.
-	for i, leaf := range sc.Leaves {
-		if len(sc.SingleLeaf[leaf]) == 0 {
-			continue
-		}
-		for n := range disruptionMinEntries - leafOnly[leaf] {
-			vpc, err := env.newVPC(fmt.Sprintf("dt-f%d-%d", i+1, n+1))
-			if err != nil {
-				return err
-			}
-			if _, err := CreateOrUpdateVpc(ctx, kube, vpc); err != nil {
-				return fmt.Errorf("creating VPC %s: %w", vpc.Name, err)
-			}
-			if err := kube.Create(ctx, makeVPCAttachment(sc.SingleLeaf[leaf][0].Conn.Name, vpc.Name, "subnet-01")); err != nil {
-				return fmt.Errorf("attaching VPC %s: %w", vpc.Name, err)
-			}
-		}
-	}
-
-	if _, err := waitAgentsSettled(ctx, kube, disruptionSettleQuiet, disruptionSettleMax); err != nil {
-		return err
-	}
-	if err := WaitReady(ctx, kube, testCtx.wrOpts); err != nil {
-		return fmt.Errorf("waiting for ready after adding entries: %w", err)
-	}
-
-	specs, err := snapshotAgentSpecs(ctx, kube)
-	if err != nil {
-		return err
-	}
-	entries := singleLeafEntries(specs, sc.Leaves)
+	// The entries the Agents then hold are counted, and a leaf that is still short gets more.
+	need := map[string]int{}
 	for _, leaf := range sc.Leaves {
-		if len(sc.SingleLeaf[leaf]) == 0 {
-			continue
+		if len(sc.SingleLeaf[leaf]) > 0 {
+			need[leaf] = disruptionMinEntries - leafOnly[leaf]
 		}
-		if len(entries[leaf]) < disruptionMinEntries {
-			return fmt.Errorf("leaf %s holds %d IRB VLAN entries alone (%v), need at least %d for a renumbering to show", //nolint:err113
-				leaf, len(entries[leaf]), entries[leaf], disruptionMinEntries)
+	}
+	fillers := 0
+	var entries map[string][]string
+	for pass := 1; ; pass++ {
+		for i, leaf := range sc.Leaves {
+			for range need[leaf] {
+				fillers++
+				vpc, err := env.newVPC(fmt.Sprintf("dt-f%d-%d", i+1, fillers))
+				if err != nil {
+					return err
+				}
+				if _, err := CreateOrUpdateVpc(ctx, kube, vpc); err != nil {
+					return fmt.Errorf("creating VPC %s: %w", vpc.Name, err)
+				}
+				if err := kube.Create(ctx, makeVPCAttachment(sc.SingleLeaf[leaf][0].Conn.Name, vpc.Name, "subnet-01")); err != nil {
+					return fmt.Errorf("attaching VPC %s: %w", vpc.Name, err)
+				}
+			}
+		}
+
+		if _, err := waitAgentsSettled(ctx, kube, disruptionSettleQuiet, disruptionSettleMax); err != nil {
+			return err
+		}
+		if err := WaitReady(ctx, kube, testCtx.wrOpts); err != nil {
+			return fmt.Errorf("waiting for ready after adding entries: %w", err)
+		}
+
+		specs, err := snapshotAgentSpecs(ctx, kube)
+		if err != nil {
+			return err
+		}
+		entries = singleLeafEntries(specs, sc.Leaves)
+		short := false
+		for leaf := range need {
+			need[leaf] = max(0, disruptionMinEntries-len(entries[leaf]))
+			short = short || need[leaf] > 0
+		}
+		if !short {
+			break
+		}
+		if pass == 3 {
+			return fmt.Errorf("leaves of the pair hold too few VPC IRB VLAN entries alone, need at least %d each for a renumbering to show: %v", //nolint:err113
+				disruptionMinEntries, entries)
 		}
 	}
 	slog.Info("Entries held by a single leaf of the pair", "entries", entries)
@@ -269,8 +281,9 @@ func (env *disruptionEnv) setup(ctx context.Context) error {
 	return nil
 }
 
-// singleLeafEntries returns, per leaf of the pair, the IRB VLAN entries its Agent holds that the
-// other leaf's Agent doesn't.
+// singleLeafEntries returns, per leaf of the pair, the VPC IRB VLAN entries its Agent holds that the
+// other leaf's Agent doesn't. The entries of externals ("ext@<name>") are left out: the setup
+// doesn't build them, and one on a single leaf would make up for a VPC entry that is missing.
 func singleLeafEntries(specs agentSpecs, leaves [2]string) map[string][]string {
 	irb := func(leaf string) map[string]any {
 		cat, _ := specs[leaf]["catalog"].(map[string]any)
@@ -282,6 +295,9 @@ func singleLeafEntries(specs agentSpecs, leaves [2]string) map[string][]string {
 	for i, leaf := range leaves {
 		other := irb(leaves[1-i])
 		for name := range irb(leaf) {
+			if strings.HasPrefix(name, "ext@") {
+				continue
+			}
 			if _, shared := other[name]; !shared {
 				out[leaf] = append(out[leaf], name)
 			}
