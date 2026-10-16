@@ -669,9 +669,6 @@ func autoDeriveVPCMode(ctx context.Context, kube kclient.Client, server *wiringa
 	return vpcapi.VPCModeL2VNI, nil
 }
 
-// SetupVPCs creates VPCs and VPC attachments per opts, configures servers,
-// and returns one Endpoint per (server, vpc, subnet) attachment with the
-// discovered IP and HostBGP flag populated.
 // serverTopology is the fabric of the switches a server is attached to and the domains they all share
 func serverTopology(ctx context.Context, kube kclient.Reader, server *wiringapi.Server, switchByName map[string]*wiringapi.Switch) (vpcapi.VPCTopology, error) {
 	conns := &wiringapi.ConnectionList{}
@@ -712,6 +709,9 @@ func serverTopology(ctx context.Context, kube kclient.Reader, server *wiringapi.
 	return topology, nil
 }
 
+// SetupVPCs creates VPCs and VPC attachments per opts, configures servers,
+// and returns one Endpoint per (server, vpc, subnet) attachment with the
+// discovered IP and HostBGP flag populated.
 func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) ([]*Endpoint, []DroppedEndpoint, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
