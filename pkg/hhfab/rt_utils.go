@@ -5,7 +5,9 @@ package hhfab
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"iter"
@@ -22,6 +24,7 @@ import (
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/util/sshutil"
+	kapierrors "k8s.io/apimachinery/pkg/api/errors"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -1480,6 +1483,206 @@ func findUnbundledMHServers(ctx context.Context, kube kclient.Client, maxNum int
 	return mhServers, nil
 }
 
+// getAgentGens returns the last applied generation of the agent on each of the given switches
+func getAgentGens(ctx context.Context, kube kclient.Client, switches []string) (map[string]int64, error) {
+	gens := map[string]int64{}
+	for _, swName := range switches {
+		gen, err := getAgentGen(ctx, kube, swName)
+		if err != nil {
+			return nil, err
+		}
+		gens[swName] = gen
+	}
+
+	return gens, nil
+}
+
+// waitAgentGens waits until the agent on each switch moved past the given generation and all switches are ready
+func waitAgentGens(ctx context.Context, testCtx *VPCPeeringTestCtx, gens map[string]int64) error {
+	for swName, gen := range gens {
+		if err := waitAgentGen(ctx, testCtx.kube, swName, gen); err != nil {
+			return err
+		}
+	}
+	if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
+		return fmt.Errorf("waiting for ready: %w", err)
+	}
+
+	return nil
+}
+
+// deleteConnectionRetrying deletes a connection, retrying for a short while while the webhook still sees
+// attachments that are already gone
+func deleteConnectionRetrying(ctx context.Context, kube kclient.Client, conn *wiringapi.Connection) error {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	for {
+		err := kube.Delete(ctx, conn)
+		if err == nil || !strings.Contains(err.Error(), "connection has attachments") {
+			return err //nolint:wrapcheck
+		}
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("deleting connection %s: %w", conn.Name, errors.Join(err, ctx.Err()))
+		case <-time.After(time.Second):
+		}
+	}
+}
+
+// unbundledConnName is the name of the unbundled connection that replaces an ESLAG link
+func unbundledConnName(link wiringapi.ServerToSwitchLink) string {
+	return fmt.Sprintf("%s--unbundled--%s", link.Server.DeviceName(), link.Switch.DeviceName())
+}
+
+// unbundleESLAGServer replaces an ESLAG connection with one link per switch by one unbundled connection
+// per link, so tests that need an unbundled multihomed server can run on wirings without one.
+// Only a server for which eligible returns true and whose unbundled connection names are free is considered.
+// It expects no attachments on the ESLAG connection. The returned revert restores the original connection
+// (a no-op if there is no such connection) and has to be registered even if an error is returned.
+func unbundleESLAGServer(ctx context.Context, testCtx *VPCPeeringTestCtx, eligible func(server string) (bool, error)) (RevertFunc, error) {
+	eslagConns := &wiringapi.ConnectionList{}
+	if err := testCtx.kube.List(ctx, eslagConns, kclient.MatchingLabels{
+		wiringapi.LabelConnectionType: wiringapi.ConnectionTypeESLAG,
+	}); err != nil {
+		return func(context.Context) error { return nil }, fmt.Errorf("listing ESLAG connections: %w", err)
+	}
+
+	allConns := &wiringapi.ConnectionList{}
+	if err := testCtx.kube.List(ctx, allConns); err != nil {
+		return func(context.Context) error { return nil }, fmt.Errorf("listing connections: %w", err)
+	}
+	existing := map[string]bool{}
+	for _, conn := range allConns.Items {
+		existing[conn.Name] = true
+	}
+
+	var eslag *wiringapi.Connection
+	var switches []string
+	for i := range eslagConns.Items {
+		conn := &eslagConns.Items[i]
+		connSwitches := []string{}
+		for _, link := range conn.Spec.ESLAG.Links {
+			connSwitches = append(connSwitches, link.Switch.DeviceName())
+		}
+		slices.Sort(connSwitches)
+		if len(slices.Compact(slices.Clone(connSwitches))) != len(connSwitches) {
+			continue
+		}
+		if slices.ContainsFunc(conn.Spec.ESLAG.Links, func(link wiringapi.ServerToSwitchLink) bool {
+			return existing[unbundledConnName(link)]
+		}) {
+			continue
+		}
+		ok, err := eligible(conn.Spec.ESLAG.Links[0].Server.DeviceName())
+		if err != nil {
+			return func(context.Context) error { return nil }, fmt.Errorf("checking ESLAG server: %w", err)
+		}
+		if ok {
+			eslag, switches = conn, connSwitches
+
+			break
+		}
+	}
+	if eslag == nil {
+		return func(context.Context) error { return nil }, nil
+	}
+
+	unbundled := []*wiringapi.Connection{}
+	for _, link := range eslag.Spec.ESLAG.Links {
+		unbundled = append(unbundled, &wiringapi.Connection{
+			ObjectMeta: kmetav1.ObjectMeta{
+				Name:      unbundledConnName(link),
+				Namespace: eslag.Namespace,
+			},
+			Spec: wiringapi.ConnectionSpec{
+				Topology: eslag.Spec.Topology,
+				Unbundled: &wiringapi.ConnUnbundled{
+					Link:                         link,
+					ServerFacingConnectionConfig: eslag.Spec.ESLAG.ServerFacingConnectionConfig,
+				},
+			},
+		})
+	}
+	original := &wiringapi.Connection{
+		ObjectMeta: kmetav1.ObjectMeta{
+			Name:        eslag.Name,
+			Namespace:   eslag.Namespace,
+			Labels:      maps.Clone(eslag.Labels),
+			Annotations: maps.Clone(eslag.Annotations),
+		},
+		Spec: eslag.Spec,
+	}
+
+	deleted := false
+	revert := func(ctx context.Context) error {
+		if !deleted {
+			return nil
+		}
+		// attachments deleted by an earlier revert have to be applied (and gone from the webhook's cache)
+		// before the connections can be deleted, and must not count towards the generation waited on below
+		if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
+			return fmt.Errorf("waiting for ready: %w", err)
+		}
+		// remove the unbundled connections (and whatever is still configured on them) in a generation of
+		// their own, as the agent can't turn a port with subinterfaces into a port channel member in one go
+		gens, err := getAgentGens(ctx, testCtx.kube, switches)
+		if err != nil {
+			return err
+		}
+		removed := false
+		for _, conn := range unbundled {
+			err := deleteConnectionRetrying(ctx, testCtx.kube, conn)
+			if kclient.IgnoreNotFound(err) != nil {
+				return fmt.Errorf("deleting connection %s: %w", conn.Name, err)
+			}
+			removed = removed || err == nil
+		}
+		if removed {
+			if err := waitAgentGens(ctx, testCtx, gens); err != nil {
+				return err
+			}
+			if gens, err = getAgentGens(ctx, testCtx.kube, switches); err != nil {
+				return err
+			}
+		}
+		if err := testCtx.kube.Create(ctx, original.DeepCopy()); err != nil {
+			if kapierrors.IsAlreadyExists(err) {
+				return nil
+			}
+
+			return fmt.Errorf("restoring connection %s: %w", original.Name, err)
+		}
+
+		return waitAgentGens(ctx, testCtx, gens)
+	}
+
+	gens, err := getAgentGens(ctx, testCtx.kube, switches)
+	if err != nil {
+		return revert, err
+	}
+	slog.Debug("Replacing ESLAG connection with unbundled ones", "connection", eslag.Name)
+	if err := testCtx.kube.Delete(ctx, eslag); err != nil {
+		return revert, fmt.Errorf("deleting connection %s: %w", eslag.Name, err)
+	}
+	deleted = true
+	// the webhook rejects connections reusing ports of one it still sees, so let the deletion settle first
+	if err := waitAgentGens(ctx, testCtx, gens); err != nil {
+		return revert, fmt.Errorf("waiting for switches after deleting connection %s: %w", eslag.Name, err)
+	}
+	if gens, err = getAgentGens(ctx, testCtx.kube, switches); err != nil {
+		return revert, err
+	}
+	for _, conn := range unbundled {
+		if err := testCtx.kube.Create(ctx, conn); err != nil {
+			return revert, fmt.Errorf("creating connection %s: %w", conn.Name, err)
+		}
+	}
+
+	return revert, waitAgentGens(ctx, testCtx, gens)
+}
+
 // vpcSubnetAllocator provides sequential VLAN and /24 subnet allocation from namespace objects.
 // Call stop() when done (typically via defer alloc.stop()).
 type vpcSubnetAllocator struct {
@@ -1547,11 +1750,28 @@ func (a *vpcSubnetAllocator) allocSubnet() (netip.Prefix, error) {
 	return p, nil
 }
 
+// maxResourceNameLen is the longest resource name the fabric webhooks accept
+const maxResourceNameLen = 62
+
+// vpcAttachmentName builds <connection>--<vpc>--<subnet>, shortened with a hash suffix if it'd be too long
+// for a resource name (ESLAG connection names on wirings with long switch names get there)
+func vpcAttachmentName(connName, vpcName, subnetName string) string {
+	name := fmt.Sprintf("%s--%s--%s", connName, vpcName, subnetName)
+	if len(name) <= maxResourceNameLen {
+		return name
+	}
+
+	sum := sha256.Sum256([]byte(name))
+	suffix := hex.EncodeToString(sum[:4])
+
+	return strings.TrimRight(name[:maxResourceNameLen-len(suffix)-1], "-.") + "-" + suffix
+}
+
 // makeVPCAttachment creates a VPCAttachment with the standard {conn}--{vpc}--{subnet} naming.
 func makeVPCAttachment(connName, vpcName, subnetName string) *vpcapi.VPCAttachment {
 	return &vpcapi.VPCAttachment{
 		ObjectMeta: kmetav1.ObjectMeta{
-			Name:      fmt.Sprintf("%s--%s--%s", connName, vpcName, subnetName),
+			Name:      vpcAttachmentName(connName, vpcName, subnetName),
 			Namespace: kmetav1.NamespaceDefault,
 		},
 		Spec: vpcapi.VPCAttachmentSpec{

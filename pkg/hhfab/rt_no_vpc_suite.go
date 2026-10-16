@@ -1013,9 +1013,89 @@ func (testCtx *VPCPeeringTestCtx) checkGatewayMetrics(ctx context.Context, prome
 	return nil
 }
 
-// prerequisites: no existing VPCs, at least 1 unbundled multihomed server, at least 2 other servers.
-// look for a server with unbundled connections to different switches; create two separate hostBGP VPCs,
+// wipeExistingVPCs removes any VPCs and their attachments and waits for the switches to apply it
+func wipeExistingVPCs(ctx context.Context, testCtx *VPCPeeringTestCtx) error {
+	existingVPCs := &vpcapi.VPCList{}
+	if err := testCtx.kube.List(ctx, existingVPCs); err != nil {
+		return fmt.Errorf("listing existing VPCs: %w", err)
+	}
+	if len(existingVPCs.Items) == 0 {
+		return nil
+	}
+	slog.Debug("Wiping existing VPCs", "vpcs", len(existingVPCs.Items))
+	if err := hhfctl.VPCWipeWithClient(ctx, testCtx.kube); err != nil {
+		return fmt.Errorf("wiping existing VPCs: %w", err)
+	}
+	// deleting and recreating VPCs too quickly upsets the switches (fabric#656)
+	time.Sleep(3 * time.Second)
+	if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
+		return fmt.Errorf("waiting for switches after wiping VPCs: %w", err)
+	}
+
+	return nil
+}
+
+// regularServerConn is a server together with the connection a regular VPC is attached through
+type regularServerConn struct {
+	Server     *wiringapi.Server
+	Connection *wiringapi.Connection
+}
+
+// findRegularServers returns up to 2 servers other than the excluded one that can be attached to a regular VPC
+func findRegularServers(ctx context.Context, testCtx *VPCPeeringTestCtx, exclude string) ([]regularServerConn, error) {
+	serverList := &wiringapi.ServerList{}
+	if err := testCtx.kube.List(ctx, serverList); err != nil {
+		return nil, fmt.Errorf("listing servers: %w", err)
+	}
+
+	regulars := []regularServerConn{}
+	for _, server := range serverList.Items {
+		if server.Name == exclude {
+			continue
+		}
+		connList := &wiringapi.ConnectionList{}
+		if err := testCtx.kube.List(ctx, connList, kclient.MatchingLabels{
+			wiringapi.ListLabelServer(server.Name): wiringapi.ListLabelValue,
+		}); err != nil {
+			return nil, fmt.Errorf("listing connections for server %s: %w", server.Name, err)
+		}
+		if len(connList.Items) == 0 {
+			continue
+		}
+		connIndex := 0
+		if testCtx.setupOpts.VPCMode != vpcapi.VPCModeL2VNI {
+			found := false
+			for i, conn := range connList.Items {
+				if conn.Spec.ESLAG != nil {
+					continue
+				}
+				found = true
+				connIndex = i
+
+				break
+			}
+			if !found {
+				slog.Debug("skipping server as it only has ESLAG connections and we are not in L2VNI mode", "server", server.Name)
+
+				continue
+			}
+		}
+
+		regulars = append(regulars, regularServerConn{Server: &server, Connection: &connList.Items[connIndex]})
+		if len(regulars) == 2 {
+			break
+		}
+	}
+
+	return regulars, nil
+}
+
+// prerequisites: no existing VPCs, at least 2 other servers, and either an unbundled multihomed server
+// or an ESLAG server with one link per switch.
+// look for a server with unbundled connections to different switches, replacing an ESLAG connection with
+// unbundled ones if there is none; create two separate hostBGP VPCs,
 // and attach them both to the server via all of its connections.
+// Attach the same connections to a regular subnet and detach them once the switches applied it.
 // Create two regular VPCs and attach them to the 2 other servers.
 // Peer each hostBGP VPC with one of the regular VPCs and check connectivity by manually building
 // a small connectivity matrix.
@@ -1027,6 +1107,24 @@ func hostBGPTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connectivit
 	mhServers, err := findUnbundledMHServers(ctx, testCtx.kube, 1)
 	if err != nil {
 		return false, reverts, fmt.Errorf("looking for unbundled multihomed servers: %w", err)
+	}
+	if len(mhServers) == 0 {
+		// the ESLAG connection to replace must have no attachments
+		if err := wipeExistingVPCs(ctx, testCtx); err != nil {
+			return false, reverts, err
+		}
+		revert, err := unbundleESLAGServer(ctx, testCtx, func(server string) (bool, error) {
+			regulars, err := findRegularServers(ctx, testCtx, server)
+
+			return len(regulars) >= 2, err
+		})
+		reverts = append(reverts, revert)
+		if err != nil {
+			return false, reverts, fmt.Errorf("unbundling an ESLAG server: %w", err)
+		}
+		if mhServers, err = findUnbundledMHServers(ctx, testCtx.kube, 1); err != nil {
+			return false, reverts, fmt.Errorf("looking for unbundled multihomed servers: %w", err)
+		}
 	}
 	if len(mhServers) != 1 {
 		return true, reverts, fmt.Errorf("no available unbundled multihomed server") //nolint:err113
@@ -1125,56 +1223,15 @@ func hostBGPTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connectivit
 	}
 
 	// Find 2 other servers and create regular VPCs for them
-	serverList := &wiringapi.ServerList{}
-	if err := testCtx.kube.List(ctx, serverList); err != nil {
-		return false, reverts, fmt.Errorf("listing servers: %w", err)
+	regulars, err := findRegularServers(ctx, testCtx, mhServer.Server.Name)
+	if err != nil {
+		return false, reverts, err
 	}
-
-	for _, server := range serverList.Items {
-		if server.Name == mhServer.Server.Name {
-			continue
-		}
-		connList := &wiringapi.ConnectionList{}
-		if err := testCtx.kube.List(ctx, connList, kclient.MatchingLabels{
-			wiringapi.ListLabelServer(server.Name): wiringapi.ListLabelValue,
-		}); err != nil {
-			return false, reverts, fmt.Errorf("listing connections for server %s: %w", server.Name, err)
-		}
-		if len(connList.Items) == 0 {
-			continue
-		}
-		connIndex := 0
-		if testCtx.setupOpts.VPCMode != vpcapi.VPCModeL2VNI {
-			found := false
-			for i, conn := range connList.Items {
-				if conn.Spec.ESLAG != nil {
-					continue
-				}
-				found = true
-				connIndex = i
-
-				break
-			}
-			if !found {
-				slog.Debug("skipping server as it only has ESLAG connections and we are not in L2VNI mode", "server", server.Name)
-
-				continue
-			}
-		}
-
-		if regularVPCA.Server == nil {
-			regularVPCA.Server = &server
-			regularVPCA.Connection = &connList.Items[connIndex]
-		} else {
-			regularVPCB.Server = &server
-			regularVPCB.Connection = &connList.Items[connIndex]
-
-			break
-		}
-	}
-	if regularVPCB.Server == nil {
+	if len(regulars) < 2 {
 		return true, reverts, fmt.Errorf("not enough servers to create two regular VPCs") //nolint:err113
 	}
+	regularVPCA.Server, regularVPCA.Connection = regulars[0].Server, regulars[0].Connection
+	regularVPCB.Server, regularVPCB.Connection = regulars[1].Server, regulars[1].Connection
 	slog.Debug("Found regular servers for hostBGP test", "serverA", regularVPCA.Server.Name, "connA", regularVPCA.Connection.Name, "serverB", regularVPCB.Server.Name, "connB", regularVPCB.Connection.Name)
 
 	for _, vpcName := range []string{regularVPCAName, regularVPCBName} {
@@ -1222,20 +1279,8 @@ func hostBGPTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connectivit
 
 	// the suite runs with noSetup, so VPCs left over by an earlier suite are still
 	// around and their subnets would collide with the ones allocated above
-	existingVPCs := &vpcapi.VPCList{}
-	if err := testCtx.kube.List(ctx, existingVPCs); err != nil {
-		return false, reverts, fmt.Errorf("listing existing VPCs: %w", err)
-	}
-	if len(existingVPCs.Items) > 0 {
-		slog.Debug("Wiping existing VPCs before hostBGP test", "vpcs", len(existingVPCs.Items))
-		if err := hhfctl.VPCWipeWithClient(ctx, testCtx.kube); err != nil {
-			return false, reverts, fmt.Errorf("wiping existing VPCs: %w", err)
-		}
-		// deleting and recreating VPCs too quickly upsets the switches (fabric#656)
-		time.Sleep(3 * time.Second)
-		if err := WaitReady(ctx, testCtx.kube, testCtx.wrOpts); err != nil {
-			return false, reverts, fmt.Errorf("waiting for switches after wiping VPCs: %w", err)
-		}
+	if err := wipeExistingVPCs(ctx, testCtx); err != nil {
+		return false, reverts, err
 	}
 
 	// Register cleanup revert before creating any resources
@@ -1248,10 +1293,35 @@ func hostBGPTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connectivit
 			return false, reverts, fmt.Errorf("creating VPC %s: %w", vpc.Name, err)
 		}
 	}
-	for _, attach := range allAttaches {
+	// also attach the multihomed server's connections to a regular subnet, then detach them in a
+	// later generation, so the hostBGP subinterfaces stay on ports that lose their last switched VLAN
+	l2Attaches := []*vpcapi.VPCAttachment{}
+	for i := range mhConns.Items {
+		l2Attaches = append(l2Attaches, makeVPCAttachment(mhConns.Items[i].Name, regularVPCAName, regularSubnetID))
+	}
+	mhSwitches := slices.Collect(maps.Keys(mhServer.SwitchConns))
+	gens, err := getAgentGens(ctx, testCtx.kube, mhSwitches)
+	if err != nil {
+		return false, reverts, err
+	}
+	for _, attach := range append(allAttaches, l2Attaches...) {
 		if err := testCtx.kube.Create(ctx, attach); err != nil {
 			return false, reverts, fmt.Errorf("creating attachment %s: %w", attach.Name, err)
 		}
+	}
+	if err := waitAgentGens(ctx, testCtx, gens); err != nil {
+		return false, reverts, fmt.Errorf("waiting for switches after attaching: %w", err)
+	}
+	if gens, err = getAgentGens(ctx, testCtx.kube, mhSwitches); err != nil {
+		return false, reverts, err
+	}
+	for _, attach := range l2Attaches {
+		if err := testCtx.kube.Delete(ctx, attach); err != nil {
+			return false, reverts, fmt.Errorf("deleting attachment %s: %w", attach.Name, err)
+		}
+	}
+	if err := waitAgentGens(ctx, testCtx, gens); err != nil {
+		return false, reverts, fmt.Errorf("waiting for switches after detaching: %w", err)
 	}
 
 	peeringA := vpcapi.VPCPeering{
