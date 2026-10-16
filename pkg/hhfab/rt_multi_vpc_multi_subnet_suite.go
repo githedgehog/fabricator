@@ -694,7 +694,7 @@ func staticExternalTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Conn
 		return nil
 	})
 	// look for routes in the switch(es) before pinging, see https://github.com/githedgehog/fabricator/issues/932#issuecomment-3322976488
-	if err := testCtx.waitForRoutesInSwitches(ctx, routeCheckSw, []string{StaticExternalNH, StaticExternalDummyIface}, "VrfV"+inVPC.Name); err != nil {
+	if err := testCtx.waitForRoutesInSwitches(ctx, routeCheckSw, []string{StaticExternalNH, StaticExternalDummyIface}, "VrfV"+inVPC.Name, defaultRouteWaitTimeout); err != nil {
 		return false, reverts, fmt.Errorf("waiting for routes in switch %s vrf VrfV%s: %w", switchName, inVPC.Name, err)
 	}
 
@@ -756,7 +756,7 @@ func staticExternalTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Conn
 		return false, reverts, fmt.Errorf("waiting for switches to be ready: %w", err)
 	}
 	// look for routes in the switch(es) before pinging, see https://github.com/githedgehog/fabricator/issues/932#issuecomment-3322976488
-	if err := testCtx.waitForRoutesInSwitches(ctx, routeCheckSw, []string{StaticExternalNH, StaticExternalDummyIface}, defaultVRFName); err != nil {
+	if err := testCtx.waitForRoutesInSwitches(ctx, routeCheckSw, []string{StaticExternalNH, StaticExternalDummyIface}, defaultVRFName, defaultRouteWaitTimeout); err != nil {
 		return false, reverts, fmt.Errorf("waiting for routes in switch %s vrf default: %w", switchName, err)
 	}
 
