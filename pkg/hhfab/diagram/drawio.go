@@ -262,6 +262,33 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 		serverCount[blockOf(node)]++
 	}
 
+	// The second leaf of a triangle of meshed leaves is raised. With several fabrics, each one has its own triangle.
+	meshUpper := map[string]bool{}
+	meshFabrics := map[string]bool{}
+	if len(blockFabrics) > 1 {
+		for _, f := range blockFabrics {
+			fabricLeaves := slices.DeleteFunc(slices.Clone(layers.Leaf), func(node Node) bool { return blockOf(node) != f })
+			if detectMeshTriangle(fabricLeaves, topo.Links) {
+				meshUpper[fabricLeaves[1].ID] = true
+				meshFabrics[f] = true
+			}
+		}
+		isMeshTriangle = len(meshUpper) > 0
+		meshTriangleUpperY = leafY - 150
+
+		// with no spine anywhere, the tiers move down for the gateways of a triangle, as with a single fabric
+		if len(layers.Spine) == 0 && slices.ContainsFunc(layers.Gateway, func(node Node) bool { return meshFabrics[blockOf(node)] }) {
+			leafY = gatewayY + 400
+			meshTriangleUpperY = gatewayY + 250
+			serverY = leafY + 250
+			externalY = gatewayY + 250
+		} else if len(layers.Spine) == 0 && isMeshTriangle {
+			externalY = leafY - 75
+		}
+	} else if isMeshTriangle {
+		meshUpper[layers.Leaf[1].ID] = true
+	}
+
 	blockX, blockWidth := map[string]float64{}, map[string]float64{}
 	totalWidth := fabricGap * float64(len(blockFabrics)-1)
 	for _, f := range blockFabrics {
@@ -333,6 +360,25 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 		gatewaySpacing = 150.0
 	}
 
+	// A fabric with no spine of its own, next to fabrics with one, has its gateways one tier down, so they stay
+	// close to its leaves. If it has a mesh triangle, they stay above the raised leaf and clear of the logo.
+	fabricHasSpine := map[string]bool{}
+	for _, node := range layers.Spine {
+		fabricHasSpine[blockOf(node)] = true
+	}
+	gatewayYs := make([]int, len(layers.Gateway))
+	for i, node := range layers.Gateway {
+		f := blockOf(node)
+		switch {
+		case len(blockFabrics) < 2 || len(layers.Spine) == 0 || fabricHasSpine[f]:
+			gatewayYs[i] = gatewayY
+		case meshFabrics[f]:
+			gatewayYs[i] = gatewayY + 150
+		default:
+			gatewayYs[i] = spineY
+		}
+	}
+
 	// Gateways are centered above the spines of their domain, or the leaves of their fabric if there are none.
 	// They are sorted by fabric and domain, so each group is contiguous.
 	gatewayPositions := make([]float64, len(layers.Gateway))
@@ -379,7 +425,7 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 				Vertex: "1",
 				Geometry: &Geometry{
 					X:      x,
-					Y:      float64(gatewayY),
+					Y:      float64(gatewayYs[i]),
 					Width:  width,
 					Height: height,
 					As:     "geometry",
@@ -397,7 +443,7 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 				Vertex: "1",
 				Geometry: &Geometry{
 					X:      x,
-					Y:      float64(gatewayY),
+					Y:      float64(gatewayYs[i]),
 					Width:  width,
 					Height: height,
 					As:     "geometry",
@@ -432,9 +478,9 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 		width, height := GetNodeDimensions(node)
 		x := leafPositions[i]
 
-		// For mesh triangle, put the second leaf (index 1) in upper tier
+		// For mesh triangle, put the second leaf in upper tier
 		nodeY := float64(leafY)
-		if isMeshTriangle && i == 1 {
+		if meshUpper[node.ID] {
 			nodeY = float64(meshTriangleUpperY)
 		}
 
@@ -540,16 +586,15 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 				// Check if this external connects to the upper leaf (index 1)
 				connectsToUpperLeaf := false
 				for _, link := range topo.Links {
-					upperLeafID := layers.Leaf[1].ID
-					if (link.Source == node.ID && link.Target == upperLeafID) ||
-						(link.Target == node.ID && link.Source == upperLeafID) {
+					if (link.Source == node.ID && meshUpper[link.Target]) ||
+						(link.Target == node.ID && meshUpper[link.Source]) {
 						connectsToUpperLeaf = true
 
 						break
 					}
 				}
 				if connectsToUpperLeaf {
-					y = float64(meshTriangleUpperY)
+					y += float64(meshTriangleUpperY) - externalCenterY
 				}
 			}
 
@@ -599,16 +644,15 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 				// Check if this external connects to the upper leaf (index 1)
 				connectsToUpperLeaf := false
 				for _, link := range topo.Links {
-					upperLeafID := layers.Leaf[1].ID
-					if (link.Source == node.ID && link.Target == upperLeafID) ||
-						(link.Target == node.ID && link.Source == upperLeafID) {
+					if (link.Source == node.ID && meshUpper[link.Target]) ||
+						(link.Target == node.ID && meshUpper[link.Source]) {
 						connectsToUpperLeaf = true
 
 						break
 					}
 				}
 				if connectsToUpperLeaf {
-					y = float64(meshTriangleUpperY)
+					y += float64(meshTriangleUpperY) - externalCenterY
 				}
 			}
 
@@ -716,13 +760,14 @@ func createDrawioModel(topo Topology, style Style) *MxGraphModel {
 	// Add redundancy group layer
 	createRedundancyGroupLayer(model, redundancyGroups, cellMap)
 
-	// the fabric boxes start from the top, so the legend moves out of their way
+	// the fabric boxes start from the top, so the legend moves out of their way, and so does the logo
 	if topologyMinX, ok := createTopologyLayer(model, cellMap); ok {
 		for i := range model.Root.MxCell {
 			if model.Root.MxCell[i].ID == "legend_container" {
 				model.Root.MxCell[i].Geometry.X = topologyMinX - float64(model.Root.MxCell[i].Geometry.Width) - 40
 			}
 		}
+		moveLogoAboveBoxes(model)
 	}
 
 	// Add VPC layer
@@ -1808,6 +1853,33 @@ func createTopologyLayer(model *MxGraphModel, cellMap map[string]*MxCell) (float
 	}
 
 	return boxesMinX, true
+}
+
+// moveLogoAboveBoxes lifts the logo above the topology boxes it overlaps, as it stays in the top right corner
+// whatever the diagram looks like.
+func moveLogoAboveBoxes(model *MxGraphModel) {
+	var logo *MxCell
+	for i := range model.Root.MxCell {
+		if model.Root.MxCell[i].ID == "hedgehog_logo" {
+			logo = &model.Root.MxCell[i]
+		}
+	}
+	if logo == nil || logo.Geometry == nil {
+		return
+	}
+
+	lg := logo.Geometry
+	top := lg.Y
+	for _, cell := range model.Root.MxCell {
+		if !strings.HasPrefix(cell.ID, "topology_box_") || cell.Geometry == nil {
+			continue
+		}
+		g := cell.Geometry
+		if lg.X < g.X+float64(g.Width) && g.X < lg.X+float64(lg.Width) && lg.Y < g.Y+float64(g.Height) && g.Y < lg.Y+float64(lg.Height) {
+			top = math.Min(top, g.Y-float64(lg.Height)-10)
+		}
+	}
+	lg.Y = top
 }
 
 func createUnusedSwitchesLayer(model *MxGraphModel, unusedSwitches []Node, serverY int, style Style) {
