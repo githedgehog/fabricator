@@ -22,6 +22,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/util/sshutil"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -828,8 +829,8 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connecti
 		}
 	}
 
-	// Same for the proxy external, except that only the outbound half can be asserted:
-	// the inbound port forward would have to be driven from the external itself.
+	// Same for the proxy external, for the outbound half: the inbound port forward is
+	// driven from the external VM after the matrix run.
 	if proxyExtPool.IsValid() {
 		// Not the mirror of the wait above: the return path goes through the external VRF on the
 		// border leaf, which this does not look at. Seeing the pool in the VPC's own VRF only
@@ -848,6 +849,26 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connecti
 
 	if err := DoVLABTestConnectivityWithMatrix(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, testCtx.tcOpts, matrix); err != nil {
 		return false, reverts, fmt.Errorf("connectivity test failed: %w", err)
+	}
+
+	// The matrix only probes from the servers, so the port forward of the proxy external peering
+	// is checked here: the VLAB external is a VM we can log into, and its default VRF has a route
+	// to the attachment subnet, so it reaches the pool address the border leaf answers for.
+	if proxyExtPool.IsValid() {
+		slog.Info("Testing the proxy external port forward from the external side")
+		extSSH, err := testCtx.getSSH(ctx, ExternalVMName)
+		if err != nil {
+			return false, reverts, fmt.Errorf("getting SSH for %s: %w", ExternalVMName, err)
+		}
+		iperfs := semaphore.NewWeighted(1)
+		poolAddr := proxyExtPool.Addr()
+		if ie := runMatrixIperfPortForward(ctx, testCtx.tcOpts, iperfs, ExternalVMName, extSSH, poolAddr, ortPortForwardPort, Reachability{Reachable: true}); ie != nil {
+			return false, reverts, fmt.Errorf("port forward from the proxy external: %w", ie)
+		}
+		// masquerade opens no inbound path of its own, so a port that is not forwarded stays closed
+		if ie := runMatrixIperfPortForward(ctx, testCtx.tcOpts, iperfs, ExternalVMName, extSSH, poolAddr, persistentIperf3Port, Reachability{}); ie != nil {
+			return false, reverts, fmt.Errorf("unforwarded port reachable from the proxy external: %w", ie)
+		}
 	}
 
 	slog.Info("On-ready test completed successfully")
