@@ -2201,7 +2201,9 @@ func createUnderlayLayer(model *MxGraphModel, topo Topology, cellMap map[string]
 	for _, edgeData := range edgePositions {
 		srcIP := edgeData.Link.Properties[PropSrcLinkIP]
 		dstIP := edgeData.Link.Properties[PropDstLinkIP]
-		if srcIP == "" && dstIP == "" {
+		// an unnumbered link has no addresses to label, but is still worth marking
+		unnumbered := edgeData.Link.Properties[PropUnnumbered] == "true"
+		if srcIP == "" && dstIP == "" && !unnumbered {
 			continue
 		}
 
@@ -2219,8 +2221,11 @@ func createUnderlayLayer(model *MxGraphModel, topo Topology, cellMap map[string]
 		strokeColor, fillColor := bgpStateColors(edgeData.Link.Properties[PropBGPState])
 
 		// Midpoint subnet label
-		if srcIP != "" {
-			subnet := subnetOf(srcIP)
+		if srcIP != "" || unnumbered {
+			subnet := "unnumbered"
+			if srcIP != "" {
+				subnet = subnetOf(srcIP)
+			}
 			midX := (edgeData.SrcX + edgeData.TgtX) / 2
 			midY := (edgeData.SrcY + edgeData.TgtY) / 2
 			subnetWidth := len(subnet)*4 + 8
