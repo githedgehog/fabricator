@@ -85,6 +85,10 @@ Collected via `sonic-cli` and direct `bcmcmd` (Broadcom SDK).
   route-maps, BFD peer state and counters; EVPN VNI/MAC/ES detail, ARP cache;
   per-VRF route, ARP, and BGP IPv4 unicast summary and full table (best-path,
   communities, route source - not just the neighbor summary)
+- **Kernel and zebra MAC/neighbor state**: kernel bridge FDB and neighbor
+  table, and zebra's EVPN MAC (detail), Ethernet Segment (detail) and ARP
+  cache views via `docker exec bgp vtysh`, to tell a MAC the ASIC holds from
+  one zebra has learned and can originate as a type-2 route
 - **Platform**: environment sensors, fan status, firmware, PSU summary, SSD
   health, temperature
 - **Broadcom ASIC** (`bcmcmd`): port status, PHY info, L2/L3 tables, ACLs
@@ -118,7 +122,8 @@ Collected via `sonic-cli` and direct `bcmcmd` (Broadcom SDK).
 - **System**: kernel version, OS release
 - **Networking**: `networkctl status`, VLAN interfaces (`ip -d link show type
   vlan`), `ip addr`, full and per-table routing (`ip route show table all`)
-- **Connectivity**: ping to default gateway, ping to peer server IPs
+- **Connectivity**: ping to default gateway, ping to peer server IPs (`-D`,
+  each reply line carries its epoch timestamp)
   injected via `PEER_SERVER_IPS` from DHCP allocations (skipped when no
   peer IPs are available)
 - **Link detail**: `networkctl list`, `ip -d link show`, bonding configuration
