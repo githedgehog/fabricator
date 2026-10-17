@@ -50,7 +50,7 @@ OUTPUT_FILE="/tmp/show-tech.log"
   DEFAULT_GW=$(ip route | awk '/^default/ {print $3}')
   if [ -n "$DEFAULT_GW" ]; then
     echo -e "\n=== Ping Default Gateway ($DEFAULT_GW) ==="
-    ping -c 1 "$DEFAULT_GW" 2>&1
+    ping -D -c 1 "$DEFAULT_GW" 2>&1
   else
     echo -e "\n=== Ping Default Gateway ==="
     echo "No default gateway found in routing table"
@@ -60,7 +60,7 @@ OUTPUT_FILE="/tmp/show-tech.log"
   if [ -n "$PEER_SERVER_IPS" ]; then
     for PEER_IP in $PEER_SERVER_IPS; do
       echo -e "\n--- ping $PEER_IP ---"
-      ping -c 1 -W 2 "$PEER_IP" 2>&1
+      ping -D -c 1 -W 2 "$PEER_IP" 2>&1
     done
   else
     echo "PEER_SERVER_IPS not set - peer server pings skipped"
