@@ -139,6 +139,25 @@ queue_sonic_cmd "EVPN" "show evpn vni detail"
 queue_sonic_cmd "EVPN" "show evpn arp-cache"
 
 # ---------------------------
+# Kernel and zebra MAC/neighbor state
+# ---------------------------
+# A MAC can sit in the ASIC L2 table and the CLI MAC table while zebra's EVPN
+# MAC table never learns it, so no type-2 route is originated. The kernel
+# bridge FDB (what fdbsyncd programs and zebra reads) and zebra's own detail
+# view tell those cases apart. stderr is kept: an unsupported command must not
+# look like an empty table.
+{
+    echo -e "\n=== Kernel Bridge FDB ==="
+    PATH="$PATH:/sbin:/usr/sbin" bridge fdb show 2>&1
+    echo -e "\n=== Kernel Neighbors ==="
+    ip neigh show 2>&1
+    for cmd in "show evpn mac vni all detail" "show evpn es detail" "show evpn arp-cache vni all"; do
+        echo -e "\n=== [zebra] vtysh -c '$cmd' ==="
+        docker exec bgp vtysh -c "$cmd" 2>&1
+    done
+} >> "$OUTPUT_FILE" 2>&1
+
+# ---------------------------
 # Route Tables
 # ---------------------------
 queue_sonic_cmd "Routes" "show ip route"
