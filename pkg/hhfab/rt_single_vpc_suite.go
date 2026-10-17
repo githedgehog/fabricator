@@ -1607,6 +1607,16 @@ outer:
 		return false, nil, fmt.Errorf("getting ssh config for switch %s: %w", swName, sshErr)
 	}
 
+	// Probe before touching the switch: a failure here is known not to come from the toggle, and
+	// the reboot and the waits after it are not spent on a fabric that was already broken.
+	baselineOpts := testCtx.tcOpts
+	baselineOpts.IPerfsSeconds = 0
+	baselineStart := time.Now()
+	if err := DoVLABTestConnectivity(ctx, testCtx.vlabCfg.WorkDir, testCtx.vlabCfg.CacheDir, baselineOpts); err != nil {
+		return false, nil, fmt.Errorf("datapath not working before enabling RoCE on switch %s: %w", swName, err)
+	}
+	slog.Info("Datapath before RoCE toggle ok", "switch", swName, "took", time.Since(baselineStart))
+
 	// enable RoCE on the switch if not already enabled
 	upBefore, err := operUpInterfaces(ctx, testCtx.kube, swName)
 	if err != nil {
