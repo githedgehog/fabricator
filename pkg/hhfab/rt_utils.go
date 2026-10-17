@@ -560,34 +560,103 @@ func checkDHCPAdvRoutes(grepString, expectedPrefix, expectedGw string, disableDe
 	return nil
 }
 
-// Enable or disable RoCE on a particular switch
-func setRoCE(ctx context.Context, kube kclient.Client, swName string, roce bool) error {
+// Enable or disable RoCE on a particular switch, reporting whether the state changed (and the
+// switch rebooted)
+func setRoCE(ctx context.Context, kube kclient.Client, swName string, roce bool) (bool, error) {
 	sw := &wiringapi.Switch{}
 	if err := kube.Get(ctx, kclient.ObjectKey{Namespace: "default", Name: swName}, sw); err != nil {
-		return fmt.Errorf("getting switch %s: %w", swName, err)
+		return false, fmt.Errorf("getting switch %s: %w", swName, err)
 	}
 	if sw.Spec.RoCE == roce {
 		slog.Debug("RoCE already in the desired state", "switch", swName, "desiredState", roce)
 
-		return nil
+		return false, nil
 	}
 	slog.Debug("Changing RoCE state on switch", "switch", swName, "desiredState", roce)
 	currGen, getGenErr := getAgentGen(ctx, kube, swName)
 	if getGenErr != nil {
-		return getGenErr
+		return false, getGenErr
 	}
 	sw.Spec.RoCE = roce
 	if err := kube.Update(ctx, sw); err != nil {
-		return fmt.Errorf("updating switch %s to set RoCE state: %w", swName, err)
+		return false, fmt.Errorf("updating switch %s to set RoCE state: %w", swName, err)
 	}
 	slog.Debug("Waiting for switch to reboot after changing desired RoCE state", "switch", swName, "desiredState", roce)
 	time.Sleep(6 * time.Minute) // wait for the switch to reboot and apply the changes
 	if err := waitAgentGen(ctx, kube, swName, currGen); err != nil {
-		return fmt.Errorf("waiting for agent generation after changing desired RoCE state: %w", err)
+		return true, fmt.Errorf("waiting for agent generation after changing desired RoCE state: %w", err)
 	}
 	slog.Debug("Switch rebooted and RoCE state changed", "switch", swName, "desiredState", roce)
 
-	return nil
+	return true, nil
+}
+
+// operUpInterfaces returns the names of the switch's interfaces, port channels included, that the
+// agent currently reports oper up.
+func operUpInterfaces(ctx context.Context, kube kclient.Client, swName string) ([]string, error) {
+	ag := &agentapi.Agent{}
+	if err := kube.Get(ctx, kclient.ObjectKey{Name: swName, Namespace: kmetav1.NamespaceDefault}, ag); err != nil {
+		return nil, fmt.Errorf("getting agent %q: %w", swName, err)
+	}
+
+	up := []string{}
+	for name, iface := range ag.Status.State.Interfaces {
+		if iface.OperStatus == agentapi.OperStatusUp {
+			up = append(up, name)
+		}
+	}
+	slices.Sort(up)
+
+	return up, nil
+}
+
+// waitInterfacesOperUp waits until every interface in want is oper up and not err-disabled in an
+// agent report sent after the call started, so a report from before a reboot cannot satisfy it.
+// Returns how long it took. A switch's bundles come back seconds after its agent reports the new
+// generation, and probes started before then lose packets.
+func waitInterfacesOperUp(ctx context.Context, kube kclient.Client, swName string, want []string, timeout time.Duration) (time.Duration, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	start := time.Now()
+	var pending []string
+	for {
+		ag := &agentapi.Agent{}
+		if err := kube.Get(ctx, kclient.ObjectKey{Name: swName, Namespace: kmetav1.NamespaceDefault}, ag); err != nil {
+			return 0, fmt.Errorf("getting agent %q: %w", swName, err)
+		}
+
+		// Both conditions are logged per poll, so a slow wait can be told apart: interfaces still
+		// down, or only the next agent report outstanding.
+		stale := ag.Status.LastHeartbeat.Time.Before(start)
+		pending = pending[:0]
+		for _, name := range want {
+			iface, ok := ag.Status.State.Interfaces[name]
+			if !ok || iface.OperStatus != agentapi.OperStatusUp || iface.ErrDisabled {
+				pending = append(pending, name)
+			}
+		}
+
+		reportAge := time.Since(ag.Status.LastHeartbeat.Time).Round(time.Millisecond)
+
+		if !stale && len(pending) == 0 {
+			took := time.Since(start)
+			// The wait can only end on a report, so took is bounded below by the report cadence.
+			slog.Info("Switch interfaces are oper up", "switch", swName, "interfaces", len(want), "took", took,
+				"reportAge", reportAge)
+
+			return took, nil
+		}
+
+		slog.Debug("Switch interfaces not yet oper up", "switch", swName, "elapsed", time.Since(start).Round(time.Millisecond),
+			"noReportSinceStart", stale, "reportAge", reportAge, "pendingInReport", pending)
+
+		select {
+		case <-ctx.Done():
+			return 0, fmt.Errorf("switch %s interfaces not oper up after %s (no report since start: %t, pending in last report: %v): %w", swName, timeout, stale, pending, ctx.Err())
+		case <-time.After(5 * time.Second):
+		}
+	}
 }
 
 // connHasSingleHomedServer returns true if conn is a server-bearing connection
