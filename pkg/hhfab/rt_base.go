@@ -44,6 +44,7 @@ var (
 	errNotEnoughVPCs     = errors.New("not enough VPCs found")
 	errNoRoceLeaves      = errors.New("no leaves supporting RoCE found")
 	errInitialSetup      = errors.New("initial setup failed")
+	errInconclusive      = errors.New("inconclusive")
 
 	// nonAlphanumRegex matches any sequence of non-alphanumeric characters
 	nonAlphanumRegex = regexp.MustCompile(`[^a-z0-9]+`)
@@ -66,6 +67,10 @@ type VPCPeeringTestCtx struct {
 	noSetup          bool
 	showTechDump     bool
 	skipFlags        SkipFlags
+	// testNotes are remarks of the running test that belong in its result, see addNote
+	testNotes []string
+	// disruption is the environment of the disruption suite, shared by its tests
+	disruption *disruptionState
 }
 
 // Test function types
@@ -276,10 +281,13 @@ type JUnitTestSuite struct {
 	Name      string          `xml:"name,attr"`
 	Tests     int             `xml:"tests,attr"`
 	Failures  int             `xml:"failures,attr"`
+	Errors    int             `xml:"errors,attr"`
 	Skipped   int             `xml:"skipped,attr"`
 	Time      float64         `xml:"time,attr"`
 	TimeHuman time.Duration   `xml:"-"`
 	TestCases []JUnitTestCase `xml:"testcase"`
+	// Teardown runs once after the last test of the suite, whatever happened
+	Teardown func(context.Context, *VPCPeeringTestCtx) error `xml:"-"`
 }
 
 type SkipFlags struct {
@@ -349,11 +357,14 @@ func (sf *SkipFlags) PrettyPrint() string {
 }
 
 type JUnitTestCase struct {
-	XMLName   xml.Name  `xml:"testcase"`
-	ClassName string    `xml:"classname,attr"`
-	Name      string    `xml:"name,attr"`
-	Time      float64   `xml:"time,attr"`
-	Failure   *Failure  `xml:"failure,omitempty"`
+	XMLName   xml.Name `xml:"testcase"`
+	ClassName string   `xml:"classname,attr,omitempty"`
+	Name      string   `xml:"name,attr"`
+	Time      float64  `xml:"time,attr"`
+	Failure   *Failure `xml:"failure,omitempty"`
+	Error     *Error   `xml:"error,omitempty"`
+	// SystemOut carries the notes a test made with addNote, whatever its outcome
+	SystemOut string    `xml:"system-out,omitempty"`
 	Skipped   *Skipped  `xml:"skipped,omitempty"`
 	F         TestFunc  `xml:"-"` // function to run
 	SkipFlags SkipFlags `xml:"-"` // flags to determine whether to skip the test
@@ -362,7 +373,15 @@ type JUnitTestCase struct {
 type Failure struct {
 	XMLName xml.Name `xml:"failure"`
 	Message string   `xml:"message,attr"`
-	Type    string   `xml:"type,attr"`
+	Type    string   `xml:"type,attr,omitempty"`
+}
+
+// Error marks a test that could not reach a verdict, e.g. because its own precondition
+// did not hold. Tests return errInconclusive (wrapped) to have it reported this way.
+type Error struct {
+	XMLName xml.Name `xml:"error"`
+	Message string   `xml:"message,attr"`
+	Type    string   `xml:"type,attr,omitempty"`
 }
 
 type Skipped struct {
@@ -378,12 +397,15 @@ func printTestSuite(ts *JUnitTestSuite) {
 }
 
 func printSuiteResults(ts *JUnitTestSuite) {
-	var numFailed, numSkipped, numPassed int
+	var numFailed, numErrored, numSkipped, numPassed int
 	slog.Info("Test suite results", "suite", ts.Name)
 	for _, test := range ts.TestCases {
 		if test.Skipped != nil { //nolint:gocritic
 			slog.Warn("SKIP", "test", test.Name, "reason", test.Skipped.Message)
 			numSkipped++
+		} else if test.Error != nil {
+			slog.Error("ERROR", "test", test.Name, "error", strings.ReplaceAll(test.Error.Message, "\n", "; "))
+			numErrored++
 		} else if test.Failure != nil {
 			slog.Error("FAIL", "test", test.Name, "error", strings.ReplaceAll(test.Failure.Message, "\n", "; "))
 			numFailed++
@@ -392,7 +414,7 @@ func printSuiteResults(ts *JUnitTestSuite) {
 			numPassed++
 		}
 	}
-	slog.Info("Test suite summary", "tests", len(ts.TestCases), "passed", numPassed, "skipped", numSkipped, "failed", numFailed, "duration", ts.TimeHuman)
+	slog.Info("Test suite summary", "tests", len(ts.TestCases), "passed", numPassed, "skipped", numSkipped, "failed", numFailed, "errored", numErrored, "duration", ts.TimeHuman)
 }
 
 func pauseOnFailure(ctx context.Context) error {
@@ -421,6 +443,12 @@ func pauseOnFailure(ctx context.Context) error {
 	slog.Info("Continuing...")
 
 	return nil
+}
+
+// addNote records a remark in the result of the running test, which a log line alone would lose.
+func (testCtx *VPCPeeringTestCtx) addNote(note string) {
+	slog.Warn(note)
+	testCtx.testNotes = append(testCtx.testNotes, note)
 }
 
 // prepare for a test: create the VPCs according to the options in the test context
@@ -464,9 +492,30 @@ func (testCtx *VPCPeeringTestCtx) setupTest(ctx context.Context, initialSuiteSet
 	return matrix, nil
 }
 
+// needsSetupBetweenTests says whether the VPCs are rebuilt before the next test. The tests of a
+// suite that keeps its traffic running across them (the disruption suite) set wipeBetweenTests off.
+func (testCtx *VPCPeeringTestCtx) needsSetupBetweenTests(ranSomeTests, prevRevertsFailed bool) bool {
+	return (ranSomeTests && testCtx.wipeBetweenTests) || prevRevertsFailed
+}
+
+// runSuiteTeardown runs the teardown of the suite, if it has one. A teardown that fails leaves the
+// environment dirty, so it is a failed test of its own and the suite can't end green.
+func runSuiteTeardown(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSuite) {
+	if ts.Teardown == nil {
+		return
+	}
+	if err := ts.Teardown(context.WithoutCancel(ctx), testCtx); err != nil {
+		slog.Error("REVERT FAIL", "suite", ts.Name, "error", err.Error())
+		ts.TestCases = append(ts.TestCases, JUnitTestCase{Name: ts.Name + " Cleanup", Failure: &Failure{Message: err.Error()}})
+		ts.Tests++
+		ts.Failures++
+	}
+}
+
 func doRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSuite) (*JUnitTestSuite, error) {
 	suiteStart := time.Now()
 	ranSomeTests := false
+	defer runSuiteTeardown(ctx, testCtx, ts)
 	slog.Info("** Running test suite", "suite", ts.Name, "tests", len(ts.TestCases), "start-time", suiteStart.Format(time.RFC3339))
 
 	// initial setup
@@ -494,7 +543,7 @@ func doRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 			continue
 		}
 		slog.Info("* Running test", "test", test.Name)
-		if (ranSomeTests && testCtx.wipeBetweenTests) || prevRevertsFailed {
+		if testCtx.needsSetupBetweenTests(ranSomeTests, prevRevertsFailed) {
 			matrix, err = testCtx.setupTest(ctx, false)
 			if err != nil {
 				ts.TestCases[i].Failure = &Failure{
@@ -520,8 +569,10 @@ func doRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 		}
 		prevRevertsFailed = false
 		testStart := time.Now()
+		testCtx.testNotes = nil
 		skip, reverts, err := test.F(ctx, testCtx, matrix)
 		ts.TestCases[i].Time = time.Since(testStart).Seconds()
+		ts.TestCases[i].SystemOut = strings.Join(testCtx.testNotes, "\n")
 		ranSomeTests = true
 		// logic is getting complex, so let's make a recap:
 		// - if skip is true, we mark the test as skipped, use the error as the skip message, and nullify it
@@ -544,7 +595,17 @@ func doRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 			ts.Skipped++
 			slog.Warn("SKIP", "test", test.Name, "reason", skipMsg)
 		}
-		if err != nil {
+		inconclusive := err != nil && errors.Is(err, errInconclusive)
+		if inconclusive {
+			ts.TestCases[i].Error = &Error{
+				Message: err.Error(),
+			}
+			ts.Errors++
+			slog.Error("ERROR", "test", test.Name, "error", err.Error())
+
+			// no verdict, so no diagnostics: nothing failed
+			err = nil
+		} else if err != nil {
 			ts.TestCases[i].Failure = &Failure{
 				Message: err.Error(),
 			}
@@ -569,6 +630,12 @@ func doRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 				if err == nil {
 					// the test had passed, but now we must mark it as failed
 					err = revertErr
+					if inconclusive {
+						// one outcome per test: the failed revert replaces the inconclusive result
+						ts.TestCases[i].Error = nil
+						ts.Errors--
+						inconclusive = false
+					}
 					ts.Failures++
 					collectDiagnostics = true
 				} else {
@@ -599,7 +666,7 @@ func doRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 			return ts, fmt.Errorf("test %s failed: %w", test.Name, err)
 		}
 
-		if !skip && err == nil && revertErr == nil {
+		if !skip && err == nil && revertErr == nil && ts.TestCases[i].Error == nil {
 			slog.Info("PASS", "test", test.Name)
 		}
 	}
@@ -607,7 +674,6 @@ func doRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 	ts.TimeHuman = time.Since(suiteStart).Round(time.Second)
 	ts.Time = ts.TimeHuman.Seconds()
 	slog.Info("** Finished test suite", "suite", ts.Name, "duration", ts.TimeHuman.String())
-	printSuiteResults(ts)
 
 	return ts, nil
 }
@@ -790,8 +856,14 @@ func selectAndRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, suite *J
 
 func recapAndReport(results []JUnitTestSuite, rtOpts ReleaseTestOpts) error {
 	slog.Info("*** Recap of the test results ***")
-	for _, suite := range results {
-		printSuiteResults(&suite)
+	for i := range results {
+		printSuiteResults(&results[i])
+		// the publisher of the test results groups the tests by class
+		for j := range results[i].TestCases {
+			if results[i].TestCases[j].ClassName == "" {
+				results[i].TestCases[j].ClassName = results[i].Name
+			}
+		}
 	}
 
 	if rtOpts.ResultsFile != "" {
@@ -820,10 +892,18 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOp
 	gwNATACLSuite := makeGatewayNATACLSuite()
 	multiVPCSingleSubnetSuite := makeMultiVPCSingleSubnetSuite()
 	ortSuite := makeOnReadyTestSuite()
+	disruptionSuite := makeDisruptionTestSuite()
 
-	if rtOpts.OnReadyTest {
+	if rtOpts.OnReadyTest && rtOpts.DisruptionTest {
+		return fmt.Errorf("the on-ready and the disruption suites are selected one at a time") //nolint:goerr113
+	}
+
+	switch {
+	case rtOpts.OnReadyTest:
 		suites = []*JUnitTestSuite{ortSuite}
-	} else {
+	case rtOpts.DisruptionTest:
+		suites = []*JUnitTestSuite{disruptionSuite}
+	default:
 		suites = []*JUnitTestSuite{noVpcSuite, singleVpcSuite, multiVPCMultiSubnetSuite, gwNATACLSuite, multiVPCSingleSubnetSuite}
 	}
 
@@ -1050,6 +1130,25 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOp
 		slog.Info("OnReady Test Suite completed", "duration", time.Since(testStart).String())
 		if ortResults.Failures > 0 {
 			return fmt.Errorf("some tests failed: onReady=%d", ortResults.Failures) //nolint:goerr113
+		}
+
+		return nil
+	}
+
+	if rtOpts.DisruptionTest {
+		disruptionResults, runErr := selectAndRunSuite(ctx, testCtx, disruptionSuite, regexesCompiled, rtOpts.InvertRegex, skipFlags)
+		// the report is written even when fail-fast ends the run: the suite is expected to fail
+		// and its evidence is the report
+		results = append(results, *disruptionResults)
+		if err := recapAndReport(results, rtOpts); err != nil {
+			return fmt.Errorf("recapping and reporting results: %w", err)
+		}
+		if runErr != nil && rtOpts.FailFast {
+			return fmt.Errorf("running disruption test suite: %w", runErr)
+		}
+		slog.Info("Disruption Test Suite completed", "duration", time.Since(testStart).String())
+		if disruptionResults.Failures > 0 || disruptionResults.Errors > 0 {
+			return fmt.Errorf("some tests did not pass: disruption failed=%d, errored=%d", disruptionResults.Failures, disruptionResults.Errors) //nolint:goerr113
 		}
 
 		return nil

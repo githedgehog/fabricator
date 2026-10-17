@@ -96,6 +96,8 @@ const (
 	FlagIPerfsSpeed               = "iperfs-speed"
 	FlagReleaseTestOnReadyOnly    = "release-test-on-ready-only"
 	FlagOnReadyOnly               = "on-ready-only"
+	FlagReleaseTestDisruptionOnly = "release-test-disruption-only"
+	FlagDisruptionOnly            = "disruption-only"
 	FlagBenchFabric               = "fabric"
 	FlagBenchWorkers              = "workers"
 	FlagBenchQPS                  = "qps"
@@ -1301,6 +1303,10 @@ func Run(ctx context.Context) error {
 								Aliases: []string{"rt-or"},
 								Usage:   "run only the special on-ready suite (used when --ready=release-test)",
 							},
+							&cli.BoolFlag{
+								Name:  FlagReleaseTestDisruptionOnly,
+								Usage: "run only the disruption suite: common changes under background traffic (used when --ready=release-test)",
+							},
 							&cli.UintFlag{
 								Category: FlagCatVMSizes,
 								Name:     "control-cpus",
@@ -1397,23 +1403,24 @@ func Run(ctx context.Context) error {
 									},
 								},
 								VLABRunOpts: hhfab.VLABRunOpts{
-									KillStale:                c.Bool(FlagNameKillStale),
-									ControlsRestricted:       c.Bool(FlagNameControlsRestricted),
-									ServersRestricted:        c.Bool(FlagNameServersRestricted),
-									BuildMode:                recipe.BuildMode(c.String(FlagNameBuildMode)),
-									AutoUpgrade:              c.Bool(FlagNameAutoUpgrade),
-									FailFast:                 c.Bool(FlagNameFailFast),
-									PauseOnFailure:           c.Bool(FlagPauseOnFailure),
-									OnReady:                  onReady,
-									OOBMgmtIface:             c.String(FlagOOBMgmtIface),
-									CollectShowTech:          c.Bool(FlagNameCollectShowTech),
-									ForceCollectShowTech:     c.Bool(FlagNameForceCollectShowTech),
-									VPCMode:                  vpcapi.VPCMode(handleL2VNI(c.String(FlagNameVPCMode))),
-									ReleaseTestRegexes:       c.StringSlice(FlagReleaseTestRegexes),
-									ReleaseTestRegexesInvert: c.Bool(FlagReleaseTestRegexesInvert),
-									ReleaseTestOnReadyOnly:   c.Bool(FlagReleaseTestOnReadyOnly),
-									InterfaceMTU:             ifMTU,
-									InspectPodsStrict:        c.Bool("inspect-pods-strict"),
+									KillStale:                 c.Bool(FlagNameKillStale),
+									ControlsRestricted:        c.Bool(FlagNameControlsRestricted),
+									ServersRestricted:         c.Bool(FlagNameServersRestricted),
+									BuildMode:                 recipe.BuildMode(c.String(FlagNameBuildMode)),
+									AutoUpgrade:               c.Bool(FlagNameAutoUpgrade),
+									FailFast:                  c.Bool(FlagNameFailFast),
+									PauseOnFailure:            c.Bool(FlagPauseOnFailure),
+									OnReady:                   onReady,
+									OOBMgmtIface:              c.String(FlagOOBMgmtIface),
+									CollectShowTech:           c.Bool(FlagNameCollectShowTech),
+									ForceCollectShowTech:      c.Bool(FlagNameForceCollectShowTech),
+									VPCMode:                   vpcapi.VPCMode(handleL2VNI(c.String(FlagNameVPCMode))),
+									ReleaseTestRegexes:        c.StringSlice(FlagReleaseTestRegexes),
+									ReleaseTestRegexesInvert:  c.Bool(FlagReleaseTestRegexesInvert),
+									ReleaseTestOnReadyOnly:    c.Bool(FlagReleaseTestOnReadyOnly),
+									ReleaseTestDisruptionOnly: c.Bool(FlagReleaseTestDisruptionOnly),
+									InterfaceMTU:              ifMTU,
+									InspectPodsStrict:         c.Bool("inspect-pods-strict"),
 								},
 							}); err != nil {
 								return fmt.Errorf("running VLAB: %w", err)
@@ -1916,6 +1923,10 @@ Examples:
 								Aliases: []string{"on-ready", "o"},
 								Usage:   "Run only the special OnReady test suite, replacing old on-ready vlab jobs",
 							},
+							&cli.BoolFlag{
+								Name:  FlagDisruptionOnly,
+								Usage: "Run only the disruption suite: common changes under background traffic, failing on unexpected disruption",
+							},
 						}),
 						Before: before(false),
 						Action: func(c *cli.Context) error {
@@ -1936,6 +1947,7 @@ Examples:
 								ShowTechDump:   c.Bool(FlagShowTech),
 								IPerfsMinSpeed: iperfsSpeed,
 								OnReadyTest:    c.Bool(FlagOnReadyOnly),
+								DisruptionTest: c.Bool(FlagDisruptionOnly),
 							}
 							if err := hhfab.DoVLABReleaseTest(ctx, workDir, cacheDir, opts); err != nil {
 								return fmt.Errorf("release-test: %w", err)
