@@ -121,6 +121,7 @@ dashboards live under the `hedgehog` provider:
 | Hedgehog Fabric Logs (local, bundled)      | VictoriaLogs     | —      |
 | Hedgehog Fabric Platform Stats             | VictoriaMetrics  | 24417  |
 | Hedgehog Node Exporter                     | VictoriaMetrics  | 24419  |
+| Hedgehog RoCE (local, bundled)             | VictoriaMetrics  | —      |
 
 To add another dashboard from grafana.com, edit `setup.sh` (search for
 `dashboards:`) and re-run. To edit the bundled `Hedgehog Fabric Logs`
@@ -130,6 +131,14 @@ the local dashboard ships via a separate `hedgehog-local` provider so the
 grafana.com pulls aren't disturbed. The Fabric Logs dashboard is local
 because grafana.com's 24416 is authored against Loki LogQL, which the
 VictoriaLogs read API doesn't speak.
+
+The bundled `Hedgehog RoCE` dashboard
+([`roce.dashboard.json`](./roce.dashboard.json)) shows RoCE traffic as seen
+by the switches: egress on the lossless queue (`UC3` with Hedgehog's RoCE
+QoS) per port, the per-queue breakdown, ECN marks, drops and buffer
+watermarks. Narrow it down with the Switch / Port dropdowns; switch egress
+on a port is the traffic delivered to the device behind it. PFC pause
+counters aren't exported by the switch agent, so they aren't shown.
 
 ## What gets patched on the Fabricator CR
 
