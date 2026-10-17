@@ -141,6 +141,7 @@ info "Applying local dashboard ConfigMap"
 kubectl create configmap hedgehog-dashboards-local \
   -n "${NAMESPACE}" \
   --from-file=fabric-logs.json="${SCRIPT_DIR}/fabric-logs.dashboard.json" \
+  --from-file=roce.json="${SCRIPT_DIR}/roce.dashboard.json" \
   --dry-run=client -o yaml | kubectl apply -f -
 
 info "Applying HelmChart objects in namespace '${NAMESPACE}'"
@@ -456,6 +457,7 @@ Grafana home:      http://${NODE_IP}:${GRAFANA_NODEPORT}    (anonymous Editor, n
 Switch counters:   http://${NODE_IP}:${GRAFANA_NODEPORT}/d/a5e5b12d-b340-4753-8f83-af8d54304822/hedgehog-switch-interface-counters
 Switch fabric:     http://${NODE_IP}:${GRAFANA_NODEPORT}/d/ab831ceb-cf5c-474a-b7e9-83dcd075c218/hedgehog-fabric
 Fabric logs:       http://${NODE_IP}:${GRAFANA_NODEPORT}/d/hh-fabric-logs/hedgehog-fabric-logs
+RoCE:              http://${NODE_IP}:${GRAFANA_NODEPORT}/d/hh-roce/hedgehog-roce
 
 VictoriaMetrics: ${VM_FQDN}     (in-cluster only)
 VictoriaLogs:    ${VL_FQDN}     (in-cluster only)

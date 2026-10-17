@@ -1,0 +1,1085 @@
+{
+  "title": "Hedgehog RoCE",
+  "uid": "hh-roce",
+  "tags": [
+    "hedgehog",
+    "roce"
+  ],
+  "description": "RoCE traffic as seen by the fabric switches: lossless-queue throughput, ECN marks, drops and buffer watermarks per switch port.",
+  "editable": false,
+  "schemaVersion": 39,
+  "version": 1,
+  "timezone": "browser",
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "refresh": "10s",
+  "graphTooltip": 1,
+  "templating": {
+    "list": [
+      {
+        "name": "switch",
+        "label": "Switch",
+        "description": "Switches to include",
+        "type": "query",
+        "datasource": "VictoriaMetrics",
+        "query": {
+          "query": "label_values(fabric_agent_interface_queue_transmit_pkts, hostname)",
+          "refId": "switch"
+        },
+        "definition": "label_values(fabric_agent_interface_queue_transmit_pkts, hostname)",
+        "refresh": 2,
+        "sort": 1,
+        "regex": "",
+        "multi": true,
+        "includeAll": true,
+        "hide": 0,
+        "allValue": ".*",
+        "current": {
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        }
+      },
+      {
+        "name": "interface",
+        "label": "Port",
+        "description": "Switch ports to include",
+        "type": "query",
+        "datasource": "VictoriaMetrics",
+        "query": {
+          "query": "label_values(fabric_agent_interface_queue_transmit_pkts{hostname=~\"$switch\", interface!~\"CPU|M[0-9]+\"}, interface)",
+          "refId": "interface"
+        },
+        "definition": "label_values(fabric_agent_interface_queue_transmit_pkts{hostname=~\"$switch\", interface!~\"CPU|M[0-9]+\"}, interface)",
+        "refresh": 2,
+        "sort": 1,
+        "regex": "",
+        "multi": true,
+        "includeAll": true,
+        "hide": 0,
+        "allValue": ".*",
+        "current": {
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        }
+      },
+      {
+        "name": "roce_queue",
+        "label": "RoCE queue",
+        "description": "Lossless unicast queue RoCE traffic is mapped to (UC3 with Hedgehog's RoCE QoS)",
+        "type": "query",
+        "datasource": "VictoriaMetrics",
+        "query": {
+          "query": "label_values(fabric_agent_interface_queue_transmit_pkts{hostname=~\"$switch\"}, queue)",
+          "refId": "roce_queue"
+        },
+        "definition": "label_values(fabric_agent_interface_queue_transmit_pkts{hostname=~\"$switch\"}, queue)",
+        "refresh": 2,
+        "sort": 1,
+        "regex": "/^UC\\d+$/",
+        "multi": false,
+        "includeAll": false,
+        "hide": 0,
+        "current": {
+          "text": "UC3",
+          "value": "UC3"
+        }
+      },
+      {
+        "name": "topn",
+        "label": "Top N",
+        "description": "How many ports to show in per-port panels",
+        "type": "custom",
+        "query": "5,10,20",
+        "multi": false,
+        "includeAll": false,
+        "hide": 0,
+        "current": {
+          "text": "10",
+          "value": "10"
+        },
+        "options": [
+          {
+            "selected": false,
+            "text": "5",
+            "value": "5"
+          },
+          {
+            "selected": true,
+            "text": "10",
+            "value": "10"
+          },
+          {
+            "selected": false,
+            "text": "20",
+            "value": "20"
+          }
+        ]
+      }
+    ]
+  },
+  "annotations": {
+    "list": []
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Overview",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "RoCE throughput",
+      "description": "RoCE traffic leaving the selected switch ports on the RoCE queue (switch egress = traffic delivered to the attached devices).",
+      "datasource": "VictoriaMetrics",
+      "gridPos": {
+        "h": 5,
+        "w": 5,
+        "x": 0,
+        "y": 1
+      },
+      "targets": [
+        {
+          "datasource": "VictoriaMetrics",
+          "refId": "A",
+          "expr": "sum(fabric_agent_interface_queue_transmit_bits_per_second{hostname=~\"$switch\", interface=~\"$interface\", interface!~\"CPU|M[0-9]+\", queue=\"$roce_queue\"})",
+          "legendFormat": "RoCE"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bps",
+          "noValue": "0",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "RoCE packet rate",
+      "description": "Packets per second leaving the selected ports on the RoCE queue.",
+      "datasource": "VictoriaMetrics",
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 5,
+        "y": 1
+      },
+      "targets": [
+        {
+          "datasource": "VictoriaMetrics",
+          "refId": "A",
+          "expr": "sum(fabric_agent_interface_queue_transmit_pkts_per_second{hostname=~\"$switch\", interface=~\"$interface\", interface!~\"CPU|M[0-9]+\", queue=\"$roce_queue\"})",
+          "legendFormat": "RoCE"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "pps",
+          "noValue": "0",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "purple",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Peak throughput",
+      "description": "Highest RoCE throughput across the selected ports in the time range.",
+      "datasource": "VictoriaMetrics",
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 9,
+        "y": 1
+      },
+      "targets": [
+        {
+          "datasource": "VictoriaMetrics",
+          "refId": "A",
+          "expr": "sum(fabric_agent_interface_queue_transmit_bits_per_second{hostname=~\"$switch\", interface=~\"$interface\", interface!~\"CPU|M[0-9]+\", queue=\"$roce_queue\"})",
+          "legendFormat": "peak"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bps",
+          "noValue": "0",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "orange",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "max"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Active RoCE ports",
+      "description": "Selected ports currently sending more than 1 Mbps on the RoCE queue.",
+      "datasource": "VictoriaMetrics",
+      "gridPos": {
+        "h": 5,
+        "w": 3,
+        "x": 13,
+        "y": 1
+      },
+      "targets": [
+        {
+          "datasource": "VictoriaMetrics",
+          "refId": "A",
+          "expr": "count(fabric_agent_interface_queue_transmit_bits_per_second{hostname=~\"$switch\", interface=~\"$interface\", interface!~\"CPU|M[0-9]+\", queue=\"$roce_queue\"} > 1e6) or vector(0)",
+          "legendFormat": "ports"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "0",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "RoCE share of traffic",
+      "description": "Fraction of all egress traffic on the selected ports that rides the RoCE queue.",
+      "datasource": "VictoriaMetrics",
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 16,
+        "y": 1
+      },
+      "targets": [
+        {
+          "datasource": "VictoriaMetrics",
+          "refId": "A",
+          "expr": "sum(fabric_agent_interface_queue_transmit_bits_per_second{hostname=~\"$switch\", interface=~\"$interface\", interface!~\"CPU|M[0-9]+\", queue=\"$roce_queue\"}) / sum(fabric_agent_interface_queue_transmit_bits_per_second{hostname=~\"$switch\", interface=~\"$interface\", interface!~\"CPU|M[0-9]+\"})",
+          "legendFormat": "share"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "noValue": "0",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 0.5
+              }
+            ]
+          },
+          "decimals": 1,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      }
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "ECN marks",
+      "description": "ECN-marked packets on the RoCE queue in the time range. 0 = no congestion signalled.",
+      "datasource": "VictoriaMetrics",
+      "gridPos": {
+        "h": 5,
+        "w": 2,
+        "x": 20,
+        "y": 1
+      },
+      "targets": [
+        {
+          "datasource": "VictoriaMetrics",
+          "refId": "A",
+          "expr": "sum(increase(fabric_agent_interface_queue_ecn_marked_pkts{hostname=~\"$switch\", interface=~\"$interface\", interface!~\"CPU|M[0-9]+\", queue=\"$roce_queue\"}[$__range]))",
+          "legendFormat": "ecn",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "0",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      }
+    },
+    {
+      "id": 8,
+      "type": "stat",
+      "title": "Drops",
+      "description": "Packets dropped (tail + WRED) on the RoCE queue in the time range. Lossless class: should stay 0.",
+      "datasource": "VictoriaMetrics",
+      "gridPos": {
+        "h": 5,
+        "w": 2,
+        "x": 22,
+        "y": 1
+      },
+      "targets": [
+        {
+          "datasource": "VictoriaMetrics",
+          "refId": "A",
+          "expr": "(sum(increase(fabric_agent_interface_queue_dropped_pkts{hostname=~\"$switch\", interface=~\"$interface\", interface!~\"CPU|M[0-9]+\", queue=\"$roce_queue\"}[$__range])) or vector(0)) + (sum(increase(fabric_agent_interface_queue_wred_dropped_pkts{hostname=~\"$switch\", interface=~\"$interface\", interface!~\"CPU|M[0-9]+\", queue=\"$roce_queue\"}[$__range])) or vector(0))",
+          "legendFormat": "drops",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "0",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      }
+    },
+    {
+      "id": 9,
+      "type": "row",
+      "title": "Throughput",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 6
+      },
+      "panels": []
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "RoCE throughput per port (top $topn)",
+      "description": "RoCE-queue egress per switch port, i.e. RoCE traffic delivered to the device on that port.",
+      "datasource": "VictoriaMetrics",
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 7
+      },
+      "targets": [
+        {
+          "datasource": "VictoriaMetrics",
+          "refId": "A",
+          "expr": "topk_max($topn, sum by (hostname, interface) (fabric_agent_interface_queue_transmit_bits_per_second{hostname=~\"$switch\", interface=~\"$interface\", interface!~\"CPU|M[0-9]+\", queue=\"$roce_queue\"}))",
+          "legendFormat": "{{hostname}} {{interface}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bps",
+          "noValue": "0",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 20,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "spanNulls": true,
+            "lineInterpolation": "smooth",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "axisSoftMin": 0
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "sortBy": "Max",
+          "sortDesc": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Egress per queue (stacked)",
+      "description": "Egress per unicast queue across the selected ports. RoCE lands in $roce_queue (lossless); the rest is regular traffic.",
+      "datasource": "VictoriaMetrics",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "targets": [
+        {
+          "datasource": "VictoriaMetrics",
+          "refId": "A",
+          "expr": "sum by (queue) (fabric_agent_interface_queue_transmit_bits_per_second{hostname=~\"$switch\", interface=~\"$interface\", interface!~\"CPU|M[0-9]+\", queue=~\"UC[0-7]\"})",
+          "legendFormat": "{{queue}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bps",
+          "noValue": "0",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 60,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "spanNulls": true,
+            "lineInterpolation": "smooth",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            },
+            "axisSoftMin": 0
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "sortBy": "Max",
+          "sortDesc": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "RoCE packet rate per port (top $topn)",
+      "description": "Packets per second leaving the RoCE queue per switch port.",
+      "datasource": "VictoriaMetrics",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "targets": [
+        {
+          "datasource": "VictoriaMetrics",
+          "refId": "A",
+          "expr": "topk_max($topn, sum by (hostname, interface) (fabric_agent_interface_queue_transmit_pkts_per_second{hostname=~\"$switch\", interface=~\"$interface\", interface!~\"CPU|M[0-9]+\", queue=\"$roce_queue\"}))",
+          "legendFormat": "{{hostname}} {{interface}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "pps",
+          "noValue": "0",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "spanNulls": true,
+            "lineInterpolation": "smooth",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "axisSoftMin": 0
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "sortBy": "Max",
+          "sortDesc": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 13,
+      "type": "row",
+      "title": "Lossless health (RoCE queue)",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 24
+      },
+      "panels": []
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "ECN-marked packets (top $topn)",
+      "description": "Packets marked ECN CE on the RoCE queue (DCQCN congestion signal). Flat 0 = no congestion.",
+      "datasource": "VictoriaMetrics",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 25
+      },
+      "targets": [
+        {
+          "datasource": "VictoriaMetrics",
+          "refId": "A",
+          "expr": "topk_max($topn, sum by (hostname, interface) (rate(fabric_agent_interface_queue_ecn_marked_pkts{hostname=~\"$switch\", interface=~\"$interface\", interface!~\"CPU|M[0-9]+\", queue=\"$roce_queue\"}[$__rate_interval])))",
+          "legendFormat": "{{hostname}} {{interface}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "pps",
+          "noValue": "0",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "spanNulls": true,
+            "lineInterpolation": "smooth",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "axisSoftMin": 0
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "max"
+          ],
+          "sortBy": "Max",
+          "sortDesc": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "Queue drops, tail + WRED (top $topn)",
+      "description": "Packets dropped on the RoCE queue. A lossless class should never drop.",
+      "datasource": "VictoriaMetrics",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 25
+      },
+      "targets": [
+        {
+          "datasource": "VictoriaMetrics",
+          "refId": "A",
+          "expr": "topk_max($topn, sum by (hostname, interface) (rate(fabric_agent_interface_queue_dropped_pkts{hostname=~\"$switch\", interface=~\"$interface\", interface!~\"CPU|M[0-9]+\", queue=\"$roce_queue\"}[$__rate_interval]) + rate(fabric_agent_interface_queue_wred_dropped_pkts{hostname=~\"$switch\", interface=~\"$interface\", interface!~\"CPU|M[0-9]+\", queue=\"$roce_queue\"}[$__rate_interval])))",
+          "legendFormat": "{{hostname}} {{interface}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "pps",
+          "noValue": "0",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "spanNulls": true,
+            "lineInterpolation": "smooth",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "axisSoftMin": 0
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "max"
+          ],
+          "sortBy": "Max",
+          "sortDesc": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "Buffer watermark (top $topn)",
+      "description": "Peak buffer occupancy of the RoCE queue per collection interval.",
+      "datasource": "VictoriaMetrics",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 25
+      },
+      "targets": [
+        {
+          "datasource": "VictoriaMetrics",
+          "refId": "A",
+          "expr": "topk_max($topn, max by (hostname, interface) (fabric_agent_interface_queue_periodic_watermark{hostname=~\"$switch\", interface=~\"$interface\", interface!~\"CPU|M[0-9]+\", queue=\"$roce_queue\"}))",
+          "legendFormat": "{{hostname}} {{interface}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "noValue": "0",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "spanNulls": true,
+            "lineInterpolation": "smooth",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "axisSoftMin": 0
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "max"
+          ],
+          "sortBy": "Max",
+          "sortDesc": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 17,
+      "type": "row",
+      "title": "Links",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 33
+      },
+      "panels": []
+    },
+    {
+      "id": 18,
+      "type": "bargauge",
+      "title": "Link utilization (top $topn RoCE ports)",
+      "description": "Switch-reported egress utilization of the ports carrying the most RoCE traffic right now.",
+      "datasource": "VictoriaMetrics",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 34
+      },
+      "targets": [
+        {
+          "datasource": "VictoriaMetrics",
+          "refId": "A",
+          "expr": "max by (hostname, interface) (fabric_agent_interface_out_utilization{hostname=~\"$switch\", interface=~\"$interface\", interface!~\"CPU|M[0-9]+\"}) and on (hostname, interface) topk($topn, sum by (hostname, interface) (fabric_agent_interface_queue_transmit_bits_per_second{hostname=~\"$switch\", interface=~\"$interface\", interface!~\"CPU|M[0-9]+\", queue=\"$roce_queue\"}))",
+          "legendFormat": "{{hostname}} {{interface}}",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "noValue": "0",
+          "color": {
+            "mode": "continuous-GrYlRd"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": true,
+        "valueMode": "color",
+        "namePlacement": "left",
+        "sizing": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 19,
+      "type": "timeseries",
+      "title": "Interface errors and discards (top $topn)",
+      "description": "In + out errors and discards on the selected ports (all traffic classes).",
+      "datasource": "VictoriaMetrics",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 34
+      },
+      "targets": [
+        {
+          "datasource": "VictoriaMetrics",
+          "refId": "A",
+          "expr": "topk_max($topn, sum by (hostname, interface) (rate(fabric_agent_interface_in_errors{hostname=~\"$switch\", interface=~\"$interface\", interface!~\"CPU|M[0-9]+\"}[$__rate_interval]) + rate(fabric_agent_interface_out_errors{hostname=~\"$switch\", interface=~\"$interface\", interface!~\"CPU|M[0-9]+\"}[$__rate_interval])))",
+          "legendFormat": "errors {{hostname}} {{interface}}"
+        },
+        {
+          "datasource": "VictoriaMetrics",
+          "refId": "B",
+          "expr": "topk_max($topn, sum by (hostname, interface) (rate(fabric_agent_interface_in_discards{hostname=~\"$switch\", interface=~\"$interface\", interface!~\"CPU|M[0-9]+\"}[$__rate_interval]) + rate(fabric_agent_interface_out_discards{hostname=~\"$switch\", interface=~\"$interface\", interface!~\"CPU|M[0-9]+\"}[$__rate_interval])))",
+          "legendFormat": "discards {{hostname}} {{interface}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "pps",
+          "noValue": "0",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "gradientMode": "opacity",
+            "showPoints": "never",
+            "spanNulls": true,
+            "lineInterpolation": "smooth",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "axisSoftMin": 0
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "max"
+          ],
+          "sortBy": "Max",
+          "sortDesc": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    }
+  ]
+}
