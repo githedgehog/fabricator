@@ -579,6 +579,12 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 
 	slog.Info("Starting VMs", "count", len(vlab.VMs), "cpu", fmt.Sprintf("%d vCPUs", cpu), "ram", fmt.Sprintf("%d MB", ram), "disk", fmt.Sprintf("%d GB", disk))
 
+	hwNodes := map[string]bool{}
+	for _, node := range c.hardwareNodes() {
+		hwNodes[node.Name] = true
+		warnHardwareNodeInstall(node.Name, opts)
+	}
+
 	group.Go(func() error {
 		go func() {
 			postProcesses.Wait()
@@ -599,8 +605,16 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 				expected[vm.Name] = true
 			}
 		}
+		for name := range hwNodes {
+			expected[name] = true
+		}
 
 		slog.Info("Waiting for all nodes to show up in K8s", "expected", lo.Keys(expected))
+
+		// hardware nodes are installed manually, so keep reminding about them as it may take a while
+		const hwReminderInterval = 5 * time.Minute
+		waitStart := time.Now()
+		var lastHWReminder time.Time // zero to remind right away on the first wait
 
 		kubeconfig := filepath.Join(c.WorkDir, VLABDir, VLABKubeConfig)
 		ready := false
@@ -663,6 +677,18 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 
 				readyErr = fmt.Errorf("some k8s nodes are not ready") //nolint:goerr113
 				slog.Debug("Some K8s nodes are not ready", "ready", ready, "missing", missing, "notReady", notReady)
+
+				if time.Since(lastHWReminder) >= hwReminderInterval {
+					pending := lo.Filter(append(missing, notReady...), func(name string, _ int) bool { return hwNodes[name] })
+					if len(pending) > 0 {
+						lastHWReminder = time.Now()
+						slices.Sort(pending)
+						slog.Warn("Waiting for hardware nodes to be installed and ready in K8s", "nodes", pending, "waiting", time.Since(waitStart).Round(time.Second))
+						for _, name := range pending {
+							warnHardwareNodeInstall(name, opts)
+						}
+					}
+				}
 
 				continue
 			}
@@ -975,6 +1001,14 @@ func orasUploadAndInstall(ctx context.Context, d *artificer.Downloader, ssh *ssh
 	}
 
 	return nil
+}
+
+func warnHardwareNodeInstall(name string, opts VLABRunOpts) {
+	done := "installed"
+	if opts.AutoUpgrade {
+		done = "upgraded"
+	}
+	slog.Warn("Hardware node has to be "+done+" manually using the installer from the result dir", "node", name, "dir", ResultDir)
 }
 
 func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Downloader, vm VM, opts VLABRunOpts) error {

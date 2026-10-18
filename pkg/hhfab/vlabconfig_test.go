@@ -4,6 +4,7 @@
 package hhfab
 
 import (
+	"fmt"
 	"maps"
 	"slices"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
+	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -180,4 +182,63 @@ func TestCreateVLABConfigInterconnect(t *testing.T) {
 
 	require.Equal(t, []string{"ext-bgp-01"}, slices.Collect(maps.Keys(cfg.Externals.VRFs)))
 	require.Len(t, cfg.Externals.NICs, 1)
+}
+
+func TestCreateVLABConfigHardwareGateway(t *testing.T) {
+	nodes := []fabapi.FabNode{}
+	for _, name := range []string{"gateway-1", "gateway-2"} {
+		nodes = append(nodes, fabapi.FabNode{
+			ObjectMeta: kmetav1.ObjectMeta{Name: name},
+			Spec: fabapi.FabNodeSpec{
+				Roles:      []fabapi.FabNodeRole{fabapi.NodeRoleGateway},
+				Management: fabapi.ControlNodeManagement{Interface: "enp2s0"},
+			},
+		})
+	}
+
+	l := apiutil.NewLoader()
+	b := &VLABBuilderDefault{
+		GatewayLogLevel: "info",
+		VLABBuilderBase: VLABBuilderBase{DefaultSwitchProfile: meta.SwitchProfileVS},
+	}
+	f := fabapi.Fabricator{Spec: fabapi.FabricatorSpec{Config: fab.DefaultConfig}}
+	f.Default()
+	require.NoError(t, b.Build(t.Context(), l, f, nodes))
+
+	// switch port -> gateway port for the hardware gateway
+	hwLinks := map[string]string{}
+	conns := &wiringapi.ConnectionList{}
+	require.NoError(t, l.GetClient().List(t.Context(), conns))
+	for _, conn := range conns.Items {
+		if conn.Spec.Gateway == nil {
+			continue
+		}
+		for _, link := range conn.Spec.Gateway.Links {
+			if strings.HasPrefix(link.Gateway.Port, "gateway-2/") {
+				hwLinks[link.Switch.Port] = link.Gateway.Port
+			}
+		}
+	}
+	require.NotEmpty(t, hwLinks)
+
+	nodes[1].Annotations = map[string]string{HHFabCfgType: HHFabCfgTypeHW}
+
+	_, err := createVLABConfig(t.Context(), nil, nodes, l.GetClient())
+	require.ErrorContains(t, err, "missing passthrough link for gateway-2/")
+
+	pcis := map[string]string{}
+	for swPort, gwPort := range hwLinks {
+		pci := fmt.Sprintf("0000:3b:00.%d", len(pcis))
+		pcis[swPort] = pci
+		nodes[1].Annotations[HHFabCfgLinkPrefix+strings.SplitN(gwPort, "/", 2)[1]] = HHFabCfgPCIPrefix + pci
+	}
+
+	cfg, err := createVLABConfig(t.Context(), nil, nodes, l.GetClient())
+	require.NoError(t, err)
+	require.Contains(t, cfg.VMs, "gateway-1")
+	require.NotContains(t, cfg.VMs, "gateway-2")
+	for swPort, pci := range pcis {
+		parts := strings.SplitN(swPort, "/", 2)
+		require.Equal(t, NICTypePassthrough+NICTypeSep+pci, cfg.VMs[parts[0]].NICs[parts[1]], swPort)
+	}
 }
