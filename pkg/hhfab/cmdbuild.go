@@ -46,6 +46,15 @@ func (c *Config) build(ctx context.Context, opts BuildOpts) error {
 		}
 	}
 
+	// installers built manually in a work dir with VLAB should include the VLAB SSH key same as vlab up does
+	vlabKey, err := getVLABSSHKey(c.WorkDir)
+	if err != nil {
+		return err
+	}
+	if vlabKey != "" && c.addAuthorizedKey(vlabKey) {
+		slog.Info("Including VLAB SSH key into installers", "file", filepath.Join(VLABDir, VLABSSHKeyFile))
+	}
+
 	targets := alloy.Targets{}
 	if err := kyaml.Unmarshal([]byte(opts.ObservabilityTargets), &targets); err != nil {
 		return fmt.Errorf("unmarshaling extra observability targets: %w", err)
