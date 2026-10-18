@@ -23,6 +23,7 @@ import (
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
+	"golang.org/x/crypto/ssh"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 	kyaml "sigs.k8s.io/yaml"
 )
@@ -329,12 +330,7 @@ func (c *Config) PrepareVLAB(ctx context.Context, opts VLABUpOpts) (*VLAB, error
 	}
 	vlabCfg.SSHKey = prv
 
-	c.Fab.Spec.Config.Control.DefaultUser.AuthorizedKeys = append(c.Fab.Spec.Config.Control.DefaultUser.AuthorizedKeys, pub)
-
-	for username, user := range c.Fab.Spec.Config.Fabric.DefaultSwitchUsers {
-		user.AuthorizedKeys = append(user.AuthorizedKeys, pub)
-		c.Fab.Spec.Config.Fabric.DefaultSwitchUsers[username] = user
-	}
+	c.addAuthorizedKey(pub)
 
 	for idx := range c.Controls {
 		if !isHardware(&c.Controls[idx]) {
@@ -1282,6 +1278,48 @@ func getDirectNICPort(vmID uint, nicID uint) uint {
 
 func getSSHPort(vmID uint) uint {
 	return VLABBaseSSHPort + vmID
+}
+
+// addAuthorizedKey adds the public key to the default control node and switch users, returns true if anything changed
+func (c *Config) addAuthorizedKey(pub string) bool {
+	added := false
+
+	if !slices.Contains(c.Fab.Spec.Config.Control.DefaultUser.AuthorizedKeys, pub) {
+		c.Fab.Spec.Config.Control.DefaultUser.AuthorizedKeys = append(c.Fab.Spec.Config.Control.DefaultUser.AuthorizedKeys, pub)
+		added = true
+	}
+
+	for username, user := range c.Fab.Spec.Config.Fabric.DefaultSwitchUsers {
+		if slices.Contains(user.AuthorizedKeys, pub) {
+			continue
+		}
+
+		user.AuthorizedKeys = append(user.AuthorizedKeys, pub)
+		c.Fab.Spec.Config.Fabric.DefaultSwitchUsers[username] = user
+		added = true
+	}
+
+	return added
+}
+
+// getVLABSSHKey returns the public VLAB SSH key if the work dir has one, or an empty string otherwise, never creates it
+func getVLABSSHKey(workDir string) (string, error) {
+	path := filepath.Join(workDir, VLABDir, VLABSSHKeyFile)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+
+		return "", fmt.Errorf("reading VLAB SSH key: %w", err)
+	}
+
+	key, err := ssh.ParsePrivateKey(data)
+	if err != nil {
+		return "", fmt.Errorf("parsing VLAB SSH key: %w", err)
+	}
+
+	return strings.TrimSpace(string(ssh.MarshalAuthorizedKey(key.PublicKey()))), nil
 }
 
 func getOrCreateSSHKey(path string) (string, string, error) {

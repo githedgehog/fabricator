@@ -6,6 +6,8 @@ package hhfab
 import (
 	"fmt"
 	"maps"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -182,6 +184,36 @@ func TestCreateVLABConfigInterconnect(t *testing.T) {
 
 	require.Equal(t, []string{"ext-bgp-01"}, slices.Collect(maps.Keys(cfg.Externals.VRFs)))
 	require.Len(t, cfg.Externals.NICs, 1)
+}
+
+func TestVLABSSHKey(t *testing.T) {
+	workDir := t.TempDir()
+
+	pub, err := getVLABSSHKey(workDir)
+	require.NoError(t, err)
+	require.Empty(t, pub, "no key without VLAB dir")
+
+	require.NoError(t, os.MkdirAll(filepath.Join(workDir, VLABDir), 0o700))
+	pub, err = getVLABSSHKey(workDir)
+	require.NoError(t, err)
+	require.Empty(t, pub, "no key without key file")
+	require.NoFileExists(t, filepath.Join(workDir, VLABDir, VLABSSHKeyFile), "key must never be created")
+
+	created, _, err := getOrCreateSSHKey(filepath.Join(workDir, VLABDir, VLABSSHKeyFile))
+	require.NoError(t, err)
+
+	pub, err = getVLABSSHKey(workDir)
+	require.NoError(t, err)
+	require.Equal(t, created, pub, "must match the keygen format vlab up uses, otherwise the key is added twice")
+
+	c := &Config{Fab: fabapi.Fabricator{Spec: fabapi.FabricatorSpec{Config: fab.DefaultConfig}}}
+	c.Fab.Spec.Config.Control.DefaultUser.AuthorizedKeys = []string{"ssh-ed25519 existing"}
+	c.Fab.Spec.Config.Fabric.DefaultSwitchUsers = map[string]fabapi.SwitchUser{"admin": {Role: "admin"}}
+
+	require.True(t, c.addAuthorizedKey(pub))
+	require.False(t, c.addAuthorizedKey(pub), "already added")
+	require.Equal(t, []string{"ssh-ed25519 existing", pub}, c.Fab.Spec.Config.Control.DefaultUser.AuthorizedKeys)
+	require.Equal(t, []string{pub}, c.Fab.Spec.Config.Fabric.DefaultSwitchUsers["admin"].AuthorizedKeys)
 }
 
 func TestCreateVLABConfigHardwareGateway(t *testing.T) {
