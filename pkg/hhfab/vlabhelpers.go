@@ -633,6 +633,13 @@ func (c *Config) getVLABEntries(ctx context.Context, vlab *VLAB) (map[string]VLA
 		}
 	}
 
+	// Gather hardware node entries, ssh only as there is no local serial
+	for _, node := range c.hardwareNodes() {
+		entries[node.Name] = VLABAccessInfo{
+			IsNode: true,
+		}
+	}
+
 	// Gather switch entries
 	switches := wiringapi.SwitchList{}
 	if err := c.Client.List(ctx, &switches); err != nil {
@@ -804,7 +811,12 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB, opts ShowTechOpts
 			targets[vm.Name] = vm.Type
 		}
 	}
-	// Add all switches (SSH helper will handle VM vs hardware switches automatically)
+	// Add hardware nodes and all switches (SSH helper will handle VM vs hardware automatically)
+	hwNodes := map[string]bool{}
+	for _, node := range c.hardwareNodes() {
+		hwNodes[node.Name] = true
+		targets[node.Name] = VMTypeGateway
+	}
 	for _, sw := range switches.Items {
 		if _, exists := targets[sw.Name]; !exists {
 			targets[sw.Name] = VMTypeSwitch
@@ -954,7 +966,7 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB, opts ShowTechOpts
 					errChan <- fmt.Errorf("console fallback for %s: %w", name, err)
 				}
 			}
-			if vmType == VMTypeGateway && gatewayConsoleScriptPath != "" && showTechErr != nil {
+			if vmType == VMTypeGateway && gatewayConsoleScriptPath != "" && showTechErr != nil && !hwNodes[name] {
 				if !hasServerCredentials {
 					slog.Info("Gateway SSH failed; console fallback will only capture visible output (server credentials not set)",
 						"name", name, "env", VLABEnvServerUsername+"/"+VLABEnvServerPassword)

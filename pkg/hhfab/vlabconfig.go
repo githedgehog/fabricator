@@ -452,6 +452,13 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 			return nil, fmt.Errorf("failed to add passthrough links for node %q: %w", node.Name, err)
 		}
 
+		// installed manually, its links to virtual switches use passthrough annotations same as hardware switches
+		if isHardware(&node) {
+			hw[node.Name] = true
+
+			continue
+		}
+
 		mgmtIface := node.Spec.Management.Interface
 		if mgmtIface == "" {
 			return nil, fmt.Errorf("node VM %q has no management interface", node.Name) //nolint:goerr113
@@ -466,10 +473,6 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 
 		if len(links) > 0 {
 			return nil, fmt.Errorf("unexpected passthrough links for node %q: %v", node.Name, links) //nolint:goerr113
-		}
-
-		if isHardware(&node) {
-			return nil, fmt.Errorf("node VM %q can't be hardware", node.Name) //nolint:goerr113
 		}
 
 		cfg.VMs[node.Name] = VMConfig{
@@ -1198,6 +1201,18 @@ func isHardware(obj kclient.Object) bool {
 	}
 
 	return false
+}
+
+// hardwareNodes returns the nodes that aren't VMs in VLAB and so are installed manually
+func (c *Config) hardwareNodes() []fabapi.FabNode {
+	nodes := []fabapi.FabNode{}
+	for _, node := range c.Nodes {
+		if isHardware(&node) {
+			nodes = append(nodes, node)
+		}
+	}
+
+	return nodes
 }
 
 func getPassthroughLinks(obj kclient.Object) map[string]string {

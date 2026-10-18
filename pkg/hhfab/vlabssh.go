@@ -36,6 +36,27 @@ func getControlProxy(vlab *VLAB) (*sshutil.Remote, error) {
 	}, nil
 }
 
+func (c *Config) nodeSSHRemote(name string) (*sshutil.Remote, error) {
+	for _, node := range c.Nodes {
+		if node.Name != name {
+			continue
+		}
+
+		prefix, err := node.Spec.Management.IP.Parse()
+		if err != nil {
+			return nil, fmt.Errorf("parsing node %s management IP: %w", name, err)
+		}
+
+		return &sshutil.Remote{
+			User: "core",
+			Host: prefix.Addr().String(),
+			Port: 22,
+		}, nil
+	}
+
+	return nil, fmt.Errorf("node %s not found", name) //nolint:err113
+}
+
 func (c *Config) SSHVM(ctx context.Context, vlab *VLAB, vm VM) (*sshutil.Config, error) {
 	ssh := &sshutil.Config{
 		SSHKey: vlab.SSHKey,
@@ -69,28 +90,12 @@ func (c *Config) SSHVM(ctx context.Context, vlab *VLAB, vm VM) (*sshutil.Config,
 			Port: 22,
 		}
 	case VMTypeGateway:
-		nodeIP := ""
-		for _, node := range c.Nodes {
-			if node.Name == vm.Name {
-				prefix, err := node.Spec.Management.IP.Parse()
-				if err != nil {
-					return nil, fmt.Errorf("parsing node %s management IP: %w", vm.Name, err)
-				}
-				nodeIP = prefix.Addr().String()
-
-				break
-			}
+		remote, err := c.nodeSSHRemote(vm.Name)
+		if err != nil {
+			return nil, err
 		}
 
-		if nodeIP == "" {
-			return nil, fmt.Errorf("node %s not found", vm.Name) //nolint:err113
-		}
-
-		ssh.Remote = sshutil.Remote{
-			User: "core",
-			Host: nodeIP,
-			Port: 22,
-		}
+		ssh.Remote = *remote
 	}
 
 	if ssh.Remote.Host != "127.0.0.1" {
@@ -113,7 +118,29 @@ func (c *Config) SSH(ctx context.Context, vlab *VLAB, target string) (*sshutil.C
 		return c.SSHVM(ctx, vlab, vm)
 	}
 
-	// hardware switches are not added to the VLAB VM list
+	// hardware nodes and switches are not added to the VLAB VM list
+	for _, node := range c.hardwareNodes() {
+		if node.Name != target {
+			continue
+		}
+
+		remote, err := c.nodeSSHRemote(node.Name)
+		if err != nil {
+			return nil, err
+		}
+
+		proxy, err := getControlProxy(vlab)
+		if err != nil {
+			return nil, fmt.Errorf("getting control proxy: %w", err)
+		}
+
+		return &sshutil.Config{
+			SSHKey: vlab.SSHKey,
+			Remote: *remote,
+			Proxy:  proxy,
+		}, nil
+	}
+
 	swIP, err := c.getSwitchIP(ctx, target)
 	if err != nil {
 		if kapierrors.IsNotFound(err) {
