@@ -12,19 +12,6 @@ permissions:
   contents: read
   security-events: write
 
-# Vulnerabilities dismissed pending an available fix in the Go module ecosystem.
-# GO-2026-4887: github.com/docker/docker AuthZ plugin bypass (GHSA-x744-4wpc-v9h2)
-#   Fixed in moby/moby docker-v29.3.1, but that release uses a new module path
-#   (github.com/moby/moby/v2) with no compatible drop-in replacement for
-#   github.com/docker/docker. We only use Docker client libs (not the daemon or
-#   AuthZ plugins), so this is not exploitable here.
-# GO-2026-4883: github.com/docker/docker off-by-one in plugin privilege validation (GHSA-pxq6-2prw-chj9)
-#   Same root cause: fix only in github.com/moby/moby/v2 >= 2.0.0-beta.8, no fix
-#   available for github.com/docker/docker. Daemon-side issue, not exploitable here.
-# Remove both entries once go.podman.io/image/v5 migrates to github.com/moby/moby/v2.
-env:
-  DISMISSED_VULNS: "GO-2026-4887,GO-2026-4883"
-
 jobs:
   govulncheck:
     runs-on: lab
@@ -59,33 +46,28 @@ jobs:
 
       # govulncheck emits identical call stacks twice for some stdlib results,
       # which the SARIF schema (uniqueItems) rejects on upload, so dedupe them.
-      - name: Filter dismissed vulns from SARIF
+      - name: Dedupe call stacks in SARIF
         if: always()
         run: |
-          pattern="^($(printf '%s\n' "$DISMISSED_VULNS" | tr ',' '|'))$"
-          jq --arg pattern "$pattern" \
-            'del(.runs[].results[] | select(.ruleId | test($pattern)))
-             | .runs[].results[] |= (if .stacks then .stacks |= unique else . end)' \
-            govulncheck.sarif > govulncheck-filtered.sarif
+          jq '.runs[].results[] |= (if .stacks then .stacks |= unique else . end)' \
+            govulncheck.sarif > govulncheck-deduped.sarif
 
       - name: Upload SARIF file
         if: always()
         uses: github/codeql-action/upload-sarif@v4.38.3
         with:
-          sarif_file: govulncheck-filtered.sarif
+          sarif_file: govulncheck-deduped.sarif
           category: govulncheck
 
       - name: Fail if vulnerabilities found
         if: steps.govulncheck.outcome == 'failure'
         run: |
-          # govulncheck-filtered.sarif has already had DISMISSED_VULNS stripped out;
-          # any remaining results are unexpected.
-          unexpected=$(jq -r '[.runs[]?.results[]?.ruleId | select(. != null and . != "")] | unique | .[]' \
-            govulncheck-filtered.sarif)
+          found=$(jq -r '[.runs[]?.results[]?.ruleId | select(. != null and . != "")] | unique | .[]' \
+            govulncheck-deduped.sarif)
 
-          if [ -n "$unexpected" ]; then
-            echo "Unexpected vulnerabilities found (not in dismissed list):"
-            echo "$unexpected"
+          if [ -n "$found" ]; then
+            echo "Vulnerabilities found:"
+            echo "$found"
             exit 1
           fi
-          echo "All findings are in the dismissed list: $DISMISSED_VULNS"
+          echo "govulncheck failed but reported no findings"
