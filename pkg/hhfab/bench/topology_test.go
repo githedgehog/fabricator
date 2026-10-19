@@ -361,6 +361,32 @@ func TestSingleDomainKeepsDefaultNames(t *testing.T) {
 	require.NoError(t, l.GetClient().Get(ctx, kclient.ObjectKey{Namespace: "default", Name: "dc1-leaf-01"}, sw))
 }
 
+// Every switch, spine or leaf, in every domain and fabric, boots with its own
+// serial and MAC, so fabric-boot can tell each one apart.
+func TestSwitchesHaveBootIdentifiers(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	l, _ := generate(t, []string{
+		"name=dc1,domains=2,spines=2,leaves=2,server-ports=1",
+		"name=dc2,spines=1,leaves=2,server-ports=1",
+	})
+
+	switches := &wiringapi.SwitchList{}
+	require.NoError(t, l.List(ctx, switches))
+	require.Len(t, switches.Items, 11)
+
+	serials, macs := map[string]string{}, map[string]string{}
+	for _, sw := range switches.Items {
+		require.NotEmpty(t, sw.Spec.Boot.Serial, "switch %s", sw.Name)
+		require.NotEmpty(t, sw.Spec.Boot.MAC, "switch %s", sw.Name)
+
+		require.NotContains(t, serials, sw.Spec.Boot.Serial, "switch %s reuses %s's serial", sw.Name, serials[sw.Spec.Boot.Serial])
+		require.NotContains(t, macs, sw.Spec.Boot.MAC, "switch %s reuses %s's MAC", sw.Name, macs[sw.Spec.Boot.MAC])
+		serials[sw.Spec.Boot.Serial], macs[sw.Spec.Boot.MAC] = sw.Name, sw.Name
+	}
+}
+
 // Each domain is a full copy of the shape inside one Fabric, and nothing
 // crosses from one to another: every connection, attachment and peering stays
 // within the domain of the objects it joins.

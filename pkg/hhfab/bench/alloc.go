@@ -7,8 +7,10 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"net"
 	"net/netip"
 
+	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 )
 
@@ -300,6 +302,38 @@ func (a *Allocator) SwitchProtocolIP(unit, switchIdx uint) (netip.Prefix, error)
 	}
 
 	return netip.PrefixFrom(addr, 32), nil
+}
+
+// Boot identifiers are what ONIE reports and fabric-boot looks a switch up by.
+// The MAC is locally administered, so it cannot collide with a real NIC, and
+// its prefix is distinct from the 0c:20:12 the VLAB gives its own switches.
+const (
+	BootSerialFmt = "BENCH-%07d"
+	bootMACPrefix = 0x02_b0_00
+	maxBootIndex  = 1 << 24 // what the MAC leaves for the index
+)
+
+// SwitchBoot returns the serial and MAC a switch boots with. Like the switch's
+// addresses they are a pure function of (unit, switchIdx), so they are unique
+// across fabrics and domains and survive fabrics being added.
+func (a *Allocator) SwitchBoot(unit, switchIdx uint) (wiringapi.SwitchBoot, error) {
+	if err := a.checkIdx(unit, switchIdx, StrideSwitches); err != nil {
+		return wiringapi.SwitchBoot{}, err
+	}
+
+	idx := uint64(unit)*StrideSwitches + uint64(switchIdx)
+	if idx >= maxBootIndex {
+		return wiringapi.SwitchBoot{}, fmt.Errorf("switch %d of unit %d is past the %d boot MACs available", switchIdx, unit, maxBootIndex) //nolint:err113
+	}
+
+	mac := make(net.HardwareAddr, 6)
+	binary.BigEndian.PutUint32(mac[0:4], bootMACPrefix<<8|uint32(idx>>16)) //nolint:gosec // idx is below 1<<24
+	binary.BigEndian.PutUint16(mac[4:6], uint16(idx))                      //nolint:gosec // low 16 bits on purpose
+
+	return wiringapi.SwitchBoot{
+		Serial: fmt.Sprintf(BootSerialFmt, idx),
+		MAC:    mac.String(),
+	}, nil
 }
 
 // LeafVTEPIP returns the /32 VTEP IP for a leaf. Spines have none.

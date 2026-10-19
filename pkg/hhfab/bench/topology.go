@@ -545,6 +545,10 @@ func (g *Generator) generateSwitches(ctx context.Context, l *apiutil.Loader, d *
 		if err != nil {
 			return err
 		}
+		boot, err := g.alloc.SwitchBoot(d.unit, idx)
+		if err != nil {
+			return err
+		}
 
 		if err := l.Add(ctx, &wiringapi.Switch{
 			TypeMeta:   kmetav1.TypeMeta{Kind: wiringapi.KindSwitch, APIVersion: wiringapi.GroupVersion.String()},
@@ -559,6 +563,7 @@ func (g *Generator) generateSwitches(ctx context.Context, l *apiutil.Loader, d *
 				ASN:            d.spineASN,
 				IP:             mgmt.String(),
 				ProtocolIP:     proto.String(),
+				Boot:           boot,
 			},
 		}); err != nil {
 			return fmt.Errorf("adding spine %d: %w", idx+1, err)
@@ -589,6 +594,10 @@ func (g *Generator) generateSwitches(ctx context.Context, l *apiutil.Loader, d *
 		if err != nil {
 			return err
 		}
+		boot, err := g.alloc.SwitchBoot(d.unit, switchIdx)
+		if err != nil {
+			return err
+		}
 
 		if err := l.Add(ctx, &wiringapi.Switch{
 			TypeMeta:   kmetav1.TypeMeta{Kind: wiringapi.KindSwitch, APIVersion: wiringapi.GroupVersion.String()},
@@ -605,6 +614,7 @@ func (g *Generator) generateSwitches(ctx context.Context, l *apiutil.Loader, d *
 				ProtocolIP:     proto.String(),
 				VTEPIP:         vtep.String(),
 				PortBreakouts:  copyLabels(breakouts),
+				Boot:           boot,
 			},
 		}); err != nil {
 			return fmt.Errorf("adding leaf %d: %w", idx+1, err)
