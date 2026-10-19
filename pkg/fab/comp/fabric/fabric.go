@@ -362,7 +362,6 @@ func GetFabricBootConfig(f fabapi.Fabricator) (*boot.ServerConfig, error) {
 		ONIERepos:            onieRepos,
 		ONIEPlatformVersions: onieVersions,
 		AgentRef:             comp.JoinURLParts(regURL, comp.RegistryPrefix, AgentRef),
-		AgentVersion:         string(f.Status.Versions.Fabric.Agent),
 	}, nil
 }
 
