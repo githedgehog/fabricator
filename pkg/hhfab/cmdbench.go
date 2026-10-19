@@ -14,7 +14,6 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -157,9 +156,14 @@ func DoVLABBenchAgents(ctx context.Context, workDir, cacheDir string, opts Bench
 		// the management bridge, rather than through the VM's user-mode
 		// networking, which serialises every agent through one slirp loop and
 		// has crashed QEMU when a large fleet's connections all close at once.
-		if apiServer, sourceAddr, err = benchBridgeIP(ctx, workDir, cacheDir); err != nil {
+		addr, source, err := benchBridgeIP(ctx, workDir, cacheDir, k3s.APIPort)
+		if err != nil {
 			return err
 		}
+
+		slog.Info("Reaching the API over the management bridge", "bridge", VLABBridge, "source", source, "api", addr)
+
+		apiServer, sourceAddr = "https://"+addr.String(), source
 	case bench.APIViaHostfwd:
 		// Each agent's own kubeconfig points at the control VIP on the
 		// management network, which the host may have no address on. Reuse
@@ -189,49 +193,47 @@ func DoVLABBenchAgents(ctx context.Context, workDir, cacheDir string, opts Bench
 	return nil
 }
 
-// benchBridgeIP prepares --api-via=bridgeip: the API at the control VIP from
-// the Fabricator config, reached from the last address of the management
-// subnet on the VLAB management bridge. The address is added to the bridge if
-// it is not there yet, and the VIP is probed from it so a broken path fails
-// here rather than as every agent timing out on its own dial.
-func benchBridgeIP(ctx context.Context, workDir, cacheDir string) (string, netip.Addr, error) {
+// benchBridgeIP reaches a control node service the way real switches do: port
+// on the control VIP from the Fabricator config, from the last address of the
+// management subnet on the VLAB management bridge. The address is added to the
+// bridge if it is not there yet, and the VIP is probed from it so a broken path
+// fails here rather than as every simulated switch timing out on its own dial.
+func benchBridgeIP(ctx context.Context, workDir, cacheDir string, port uint16) (netip.AddrPort, netip.Addr, error) {
 	c, err := benchLoad(ctx, workDir, cacheDir)
 	if err != nil {
-		return "", netip.Addr{}, err
+		return netip.AddrPort{}, netip.Addr{}, err
 	}
 
 	vip, err := c.Fab.Spec.Config.Control.VIP.Parse()
 	if err != nil {
-		return "", netip.Addr{}, fmt.Errorf("parsing control VIP: %w", err)
+		return netip.AddrPort{}, netip.Addr{}, fmt.Errorf("parsing control VIP: %w", err)
 	}
 	subnet, err := c.Fab.Spec.Config.Control.ManagementSubnet.Parse()
 	if err != nil {
-		return "", netip.Addr{}, fmt.Errorf("parsing management subnet: %w", err)
+		return netip.AddrPort{}, netip.Addr{}, fmt.Errorf("parsing management subnet: %w", err)
 	}
 
 	source, err := bench.LastHostAddr(subnet)
 	if err != nil {
-		return "", netip.Addr{}, fmt.Errorf("picking an address on the management bridge: %w", err)
+		return netip.AddrPort{}, netip.Addr{}, fmt.Errorf("picking an address on the management bridge: %w", err)
 	}
 
 	if err := ensureBridgeAddr(ctx, netip.PrefixFrom(source, subnet.Bits())); err != nil {
-		return "", netip.Addr{}, err
+		return netip.AddrPort{}, netip.Addr{}, err
 	}
 
-	addr := net.JoinHostPort(vip.Addr().String(), strconv.Itoa(k3s.APIPort))
+	addr := netip.AddrPortFrom(vip.Addr(), port)
 
 	dialer := &net.Dialer{Timeout: 5 * time.Second, LocalAddr: &net.TCPAddr{IP: source.AsSlice()}}
-	conn, err := dialer.DialContext(ctx, "tcp", addr)
+	conn, err := dialer.DialContext(ctx, "tcp", addr.String())
 	if err != nil {
-		return "", netip.Addr{}, fmt.Errorf("control VIP %s is not reachable from %s on %s: %w", addr, source, VLABBridge, err)
+		return netip.AddrPort{}, netip.Addr{}, fmt.Errorf("control VIP %s is not reachable from %s on %s: %w", addr, source, VLABBridge, err)
 	}
 	if err := conn.Close(); err != nil {
-		return "", netip.Addr{}, fmt.Errorf("closing probe connection to %s: %w", addr, err)
+		return netip.AddrPort{}, netip.Addr{}, fmt.Errorf("closing probe connection to %s: %w", addr, err)
 	}
 
-	slog.Info("Reaching the API over the management bridge", "bridge", VLABBridge, "source", source, "api", addr)
-
-	return "https://" + addr, source, nil
+	return addr, source, nil
 }
 
 // ensureBridgeAddr puts addr on the VLAB management bridge unless it is there
@@ -262,6 +264,51 @@ func ensureBridgeAddr(ctx context.Context, addr netip.Prefix) error {
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("adding %s to %s: %w", addr, VLABBridge, err)
+	}
+
+	return nil
+}
+
+// BenchBootsOpts configures `hhfab vlab bench boots`.
+type BenchBootsOpts struct {
+	Rounds      int
+	Switches    []string
+	LogLines    int
+	InstallTime time.Duration
+	RetryDelay  time.Duration
+	MaxFailures int
+	QPS         float32
+	Burst       int
+}
+
+// DoVLABBenchBoots simulates every bench switch reinstalling itself from
+// fabric-boot through ONIE, all at once.
+func DoVLABBenchBoots(ctx context.Context, workDir, cacheDir string, opts BenchBootsOpts) error {
+	admin, err := bench.NewKubeClient(ctx, filepath.Join(workDir, VLABDir, VLABKubeConfig), opts.QPS, opts.Burst)
+	if err != nil {
+		return err //nolint:wrapcheck
+	}
+
+	// fabric-boot is on the control VIP, which switches reach over the
+	// management network, so the bench comes from the management bridge too.
+	addr, source, err := benchBridgeIP(ctx, workDir, cacheDir, fabcomp.BootPort)
+	if err != nil {
+		return err
+	}
+
+	slog.Info("Reaching fabric-boot over the management bridge", "bridge", VLABBridge, "source", source, "boot", addr)
+
+	if err := bench.RunBoots(ctx, admin, bench.BootsOpts{
+		URL:         "http://" + addr.String(),
+		SourceAddr:  source,
+		Switches:    opts.Switches,
+		Rounds:      opts.Rounds,
+		LogLines:    opts.LogLines,
+		InstallTime: opts.InstallTime,
+		RetryDelay:  opts.RetryDelay,
+		MaxFailures: opts.MaxFailures,
+	}); err != nil {
+		return fmt.Errorf("running boots: %w", err)
 	}
 
 	return nil

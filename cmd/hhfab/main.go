@@ -121,6 +121,11 @@ const (
 	FlagBenchOpTimeout            = "op-timeout"
 	FlagBenchInspectOneSwitch     = "inspect-one-switch"
 	FlagBenchStats                = "stats"
+	FlagBenchRounds               = "rounds"
+	FlagBenchLogLines             = "log-lines"
+	FlagBenchInstallTime          = "install-time"
+	FlagBenchRetryDelay           = "retry-delay"
+	FlagBenchMaxFailures          = "max-failures"
 )
 
 // benchFabrics collects repeated --fabric values verbatim. A StringSliceFlag
@@ -2106,6 +2111,81 @@ inspect and wait-switches rather than as a fabric that never converged.`,
 										Burst:          c.Int(FlagBenchBurst),
 									}); err != nil {
 										return fmt.Errorf("bench agents: %w", err)
+									}
+
+									return nil
+								},
+							},
+							{
+								Name:  "boots",
+								Usage: "simulate every switch reinstalling itself from fabric-boot through ONIE, all at once",
+								Description: `Runs one goroutine per bench switch, all released at the same instant: the
+worst case of a whole datacenter powering up into ONIE together. Each switch
+requests its installer the way ONIE does, by serial and MAC, from fabric-boot on
+the control VIP over the management bridge, reads all of it, then posts its
+install log back line by line as the installer would. fabric-boot admits a few
+downloads at a time and turns the rest away; they retry after a delay.
+
+Every switch installs once per round, and each round starts the whole fleet
+together once the last switch is through the previous one, so every round is
+the worst case again. A line is printed as each round ends with how long it
+took, and the run ends after --rounds with a summary of the whole fleet.
+
+Switches need boot serials and MACs, which bench init sets.`,
+								Flags: flatten(defaultFlags, []cli.Flag{
+									&cli.IntFlag{
+										Name:  FlagBenchRounds,
+										Usage: "how many times every switch installs",
+										Value: bench.DefaultBootRounds,
+									},
+									&cli.StringSliceFlag{
+										Name:  FlagBenchOnly,
+										Usage: "only boot switches whose name starts with `PREFIX` (default: all)",
+									},
+									&cli.IntFlag{
+										Name:  FlagBenchLogLines,
+										Usage: "log lines each install posts to fabric-boot",
+										Value: bench.DefaultBootLogLines,
+									},
+									&cli.DurationFlag{
+										Name:  FlagBenchInstallTime,
+										Usage: "how long an install takes after the download, with its log lines spread over it",
+										Value: bench.DefaultBootInstallTime,
+									},
+									&cli.DurationFlag{
+										Name:  FlagBenchRetryDelay,
+										Usage: "how long a switch waits before retrying a download fabric-boot turned away or that failed, with jitter",
+										Value: bench.DefaultBootRetryDelay,
+									},
+									&cli.IntFlag{
+										Name:  FlagBenchMaxFailures,
+										Usage: "failed downloads, not counting being turned away by the throttle, before a switch gives up on a round",
+										Value: bench.DefaultBootMaxFailures,
+									},
+									&cli.Float64Flag{
+										Name:  FlagBenchQPS,
+										Usage: "QPS for the discovery client",
+										Value: bench.DefaultQPS,
+									},
+									&cli.IntFlag{
+										Name:  FlagBenchBurst,
+										Usage: "burst for the discovery client",
+										Value: bench.DefaultBurst,
+									},
+								}),
+								Before: before(false),
+								Action: func(c *cli.Context) error {
+									if err := hhfab.DoVLABBenchBoots(ctx, workDir, cacheDir, hhfab.BenchBootsOpts{
+										Rounds:      c.Int(FlagBenchRounds),
+										Switches:    c.StringSlice(FlagBenchOnly),
+										LogLines:    c.Int(FlagBenchLogLines),
+										InstallTime: c.Duration(FlagBenchInstallTime),
+										RetryDelay:  c.Duration(FlagBenchRetryDelay),
+										MaxFailures: c.Int(FlagBenchMaxFailures),
+										QPS:         float32(c.Float64(FlagBenchQPS)),
+										Burst:       c.Int(FlagBenchBurst),
+									}); err != nil {
+										return fmt.Errorf("bench boots: %w", err)
 									}
 
 									return nil
