@@ -340,6 +340,18 @@ func DoVLABBenchSample(ctx context.Context, workDir, cacheDir string, opts Bench
 		return fmt.Errorf("sampling needs the control node: %w", err)
 	}
 
+	// The VIP finds the management NIC on the control node; without it the
+	// sample just leaves the NIC out.
+	c, err := benchLoad(ctx, workDir, cacheDir)
+	if err != nil {
+		return err
+	}
+
+	vip, err := c.Fab.Spec.Config.Control.VIP.Parse()
+	if err != nil {
+		slog.Warn("Not sampling the management NIC, no control VIP", "err", err)
+	}
+
 	// Always the work-dir file: that is where health looks, and a configurable
 	// path would only produce a series health cannot find.
 	path := filepath.Join(workDir, bench.SeriesFile)
@@ -356,7 +368,7 @@ func DoVLABBenchSample(ctx context.Context, workDir, cacheDir string, opts Bench
 	slog.Info("Sampling etcd and node memory",
 		"interval", opts.Interval, "duration", opts.Duration, "out", path)
 
-	if err := bench.SampleTo(ctx, run, opts.Interval, path); err != nil {
+	if err := bench.SampleTo(ctx, run, opts.Interval, path, vip); err != nil {
 		return fmt.Errorf("sampling: %w", err)
 	}
 

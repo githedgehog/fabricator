@@ -8,6 +8,7 @@ import (
 	"encoding/csv"
 	"fmt"
 	"maps"
+	"net/netip"
 	"os"
 	"strconv"
 	"strings"
@@ -30,9 +31,31 @@ const DefaultSampleInterval = 15 * time.Second
 // summed per command name because fabric-ctrl reports as "fabric", and values
 // are converted to bytes at the source so nothing downstream has to remember a
 // unit.
+//
+// CPU is cumulative user plus system seconds per command name, from every
+// process's stat; fabric-boot's disk reads show whether the installers it
+// serves come from the page cache. Both are counters, like etcd's.
 const sampleCmd = `curl -s --max-time 10 http://127.0.0.1:2381/metrics
 free -m | awk '/^Mem:/{printf "bench_mem_total_bytes %d\nbench_mem_used_bytes %d\nbench_mem_available_bytes %d\n", $2*1048576, $3*1048576, $7*1048576}'
-ps -eo rss=,comm= | awk '{r[$2]+=$1} END{printf "bench_rss_k3s_bytes %d\nbench_rss_fabric_ctrl_bytes %d\nbench_rss_fabric_boot_bytes %d\n", r["k3s-server"]*1024, r["fabric"]*1024, r["fabric-boot"]*1024}'`
+ps -eo rss=,comm= | awk '{r[$2]+=$1} END{printf "bench_rss_k3s_bytes %d\nbench_rss_fabric_ctrl_bytes %d\nbench_rss_fabric_boot_bytes %d\n", r["k3s-server"]*1024, r["fabric"]*1024, r["fabric-boot"]*1024}'
+cat /proc/[0-9]*/stat 2>/dev/null | awk -v t="$(getconf CLK_TCK 2>/dev/null || echo 100)" '{c[$2]+=$14+$15} END{printf "bench_cpu_k3s_seconds %.2f\nbench_cpu_fabric_ctrl_seconds %.2f\nbench_cpu_fabric_boot_seconds %.2f\n", c["(k3s-server)"]/t, c["(fabric)"]/t, c["(fabric-boot)"]/t}'
+p=$(pgrep -xo fabric-boot) && sudo awk '/^read_bytes:/{print "bench_io_read_fabric_boot_bytes", $2}' /proc/$p/io`
+
+// sampleNetCmd adds the traffic of the interface holding the control VIP: the
+// management NIC, which switches reach the API and fabric-boot through. It is
+// found by the VIP because its name differs between VLAB and hardware.
+const sampleNetCmd = `
+dev=$(ip -o -4 addr show | awk -v a=%q '$4==a{print $2; exit}') && [ -n "$dev" ] && sed 's/:/ /' /proc/net/dev | awk -v d="$dev" '$1==d{printf "bench_net_rx_bytes %%s\nbench_net_tx_bytes %%s\n", $2, $10}'`
+
+// sampleCommand is the collection command for a control node with the given
+// VIP; without one the NIC is not sampled.
+func sampleCommand(vip netip.Prefix) string {
+	if !vip.IsValid() {
+		return sampleCmd
+	}
+
+	return sampleCmd + fmt.Sprintf(sampleNetCmd, vip.String())
+}
 
 // The two groups fail independently: a collapsed k3s takes etcd's metrics
 // endpoint with it at exactly the moment memory is most worth recording.
@@ -114,6 +137,16 @@ var seriesMetrics = []metric{
 	{"rss_k3s", "bench_rss_k3s_bytes", groupMem, true},
 	{"rss_fabric_ctrl", "bench_rss_fabric_ctrl_bytes", groupMem, true},
 	{"rss_fabric_boot", "bench_rss_fabric_boot_bytes", groupMem, true},
+
+	// Counters, read as rates between samples: where the CPU goes, whether
+	// fabric-boot serves from the page cache, and what leaves through the
+	// management NIC.
+	{"cpu_k3s", "bench_cpu_k3s_seconds", groupMem, false},
+	{"cpu_fabric_ctrl", "bench_cpu_fabric_ctrl_seconds", groupMem, false},
+	{"cpu_fabric_boot", "bench_cpu_fabric_boot_seconds", groupMem, false},
+	{"io_read_fabric_boot", "bench_io_read_fabric_boot_bytes", groupMem, false},
+	{"net_rx", "bench_net_rx_bytes", groupMem, false},
+	{"net_tx", "bench_net_tx_bytes", groupMem, false},
 }
 
 var (
@@ -320,8 +353,8 @@ func completeGroups(found map[string]float64) (map[string]float64, int) {
 }
 
 // takeSample collects one observation from the control node.
-func takeSample(ctx context.Context, run Runner) (Sample, error) {
-	out, err := run(ctx, sampleCmd)
+func takeSample(ctx context.Context, run Runner, cmd string) (Sample, error) {
+	out, err := run(ctx, cmd)
 	if err != nil {
 		return Sample{}, fmt.Errorf("collecting sample: %w", err)
 	}
@@ -420,7 +453,9 @@ func (s *seriesWriter) Close() error {
 // measurement. A failed collection is therefore written as a timestamp-only
 // row, so an outage that took the whole control node away still shows up as
 // samples with no metrics rather than as a silent hole between two timestamps.
-func SampleTo(ctx context.Context, run Runner, interval time.Duration, path string) error {
+//
+// controlVIP finds the management NIC to sample; left zero, it is not sampled.
+func SampleTo(ctx context.Context, run Runner, interval time.Duration, path string, controlVIP netip.Prefix) error {
 	// Refused rather than treated as "nothing to do": returning quietly left no
 	// series behind while the caller reported one written.
 	if interval <= 0 {
@@ -432,7 +467,7 @@ func SampleTo(ctx context.Context, run Runner, interval time.Duration, path stri
 		return err
 	}
 
-	err = sampleLoop(ctx, run, interval, series)
+	err = sampleLoop(ctx, run, interval, series, sampleCommand(controlVIP))
 
 	if closeErr := series.Close(); err == nil {
 		err = closeErr
@@ -441,7 +476,7 @@ func SampleTo(ctx context.Context, run Runner, interval time.Duration, path stri
 	return err
 }
 
-func sampleLoop(ctx context.Context, run Runner, interval time.Duration, series *seriesWriter) error {
+func sampleLoop(ctx context.Context, run Runner, interval time.Duration, series *seriesWriter, cmd string) error {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
@@ -450,7 +485,7 @@ func sampleLoop(ctx context.Context, run Runner, interval time.Duration, series 
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			sample, err := takeSample(ctx, run)
+			sample, err := takeSample(ctx, run, cmd)
 			if err != nil {
 				// Stopping is not an outage.
 				if ctx.Err() != nil {

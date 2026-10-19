@@ -72,6 +72,51 @@ type seriesStats struct {
 	BootEnd     int64
 	BootPeak    int64
 	BootSpan    time.Duration
+
+	// Node counters read as rates: CPU in cores, the rest in bytes/s.
+	CPUK3s   rateStat
+	CPUCtrl  rateStat
+	CPUBoot  rateStat
+	BootRead rateStat
+	NetRx    rateStat
+	NetTx    rateStat
+}
+
+// rateStat is a counter over the run: its total, and the fastest it went over
+// any one sampling interval, which is where a burst like a fleet reinstalling
+// shows up after the average has smoothed it away.
+type rateStat struct {
+	Total float64
+	Peak  float64
+	Span  time.Duration
+}
+
+// add folds in one interval between consecutive samples, across counter resets
+// the same way the etcd counters are.
+func (r *rateStat) add(prev, cur Sample, col string) {
+	if !prev.has(col) || !cur.has(col) {
+		return
+	}
+
+	elapsed := cur.At.Sub(prev.At)
+	if elapsed <= 0 {
+		return
+	}
+
+	delta := counterDelta(prev, cur, col)
+
+	r.Total += delta
+	r.Span += elapsed
+	r.Peak = max(r.Peak, delta/elapsed.Seconds())
+}
+
+// Avg is the mean rate over the intervals the counter was seen in.
+func (r rateStat) Avg() float64 {
+	if r.Span <= 0 {
+		return 0
+	}
+
+	return r.Total / r.Span.Seconds()
 }
 
 // BootGrowthPerHour extrapolates fabric-boot's growth over the sampled span. A
@@ -177,6 +222,10 @@ func analyzeSeries(samples []Sample) seriesStats {
 				stats.MemAvailMin = sample.MemAvail()
 			}
 
+			if lastMem != nil {
+				accumulateNode(&stats, *lastMem, sample)
+			}
+
 			if firstMem == nil {
 				firstMem = &samples[idx]
 			}
@@ -227,6 +276,17 @@ func accumulateInterval(stats *seriesStats, prev, cur Sample) {
 
 	stats.CommitMeanMax = max(stats.CommitMeanMax, intervalMean(prev, cur, "commit_sum", "commit_count"))
 	stats.FsyncMeanMax = max(stats.FsyncMeanMax, intervalMean(prev, cur, "fsync_sum", "fsync_count"))
+}
+
+// accumulateNode folds in the node counters between two consecutive node
+// samples.
+func accumulateNode(stats *seriesStats, prev, cur Sample) {
+	stats.CPUK3s.add(prev, cur, "cpu_k3s")
+	stats.CPUCtrl.add(prev, cur, "cpu_fabric_ctrl")
+	stats.CPUBoot.add(prev, cur, "cpu_fabric_boot")
+	stats.BootRead.add(prev, cur, "io_read_fabric_boot")
+	stats.NetRx.add(prev, cur, "net_rx")
+	stats.NetTx.add(prev, cur, "net_tx")
 }
 
 // counterDelta is how much a counter advanced between two samples. A counter
@@ -483,4 +543,29 @@ func reportMemSeries(w io.Writer, stats seriesStats) {
 	}
 
 	fmt.Fprintf(w, "\n")
+
+	// Series sampled before these counters existed simply have none.
+	for _, cpu := range []struct {
+		name string
+		stat rateStat
+	}{
+		{"k3s-server cpu", stats.CPUK3s},
+		{"fabric-ctrl cpu", stats.CPUCtrl},
+		{"fabric-boot cpu", stats.CPUBoot},
+	} {
+		if cpu.stat.Span > 0 {
+			fmt.Fprintf(w, "  %-20s avg %.2f cores, peak %.2f\n", cpu.name, cpu.stat.Avg(), cpu.stat.Peak)
+		}
+	}
+
+	if stats.BootRead.Span > 0 {
+		fmt.Fprintf(w, "  %-20s %s read from disk, avg %s/s, peak %s/s\n", "fabric-boot disk",
+			humanBytes(int(stats.BootRead.Total)), humanBytes(int(stats.BootRead.Avg())), humanBytes(int(stats.BootRead.Peak)))
+	}
+
+	if stats.NetTx.Span > 0 || stats.NetRx.Span > 0 {
+		fmt.Fprintf(w, "  %-20s tx %s (avg %s/s, peak %s/s), rx %s (avg %s/s, peak %s/s)\n", "management nic",
+			humanBytes(int(stats.NetTx.Total)), humanBytes(int(stats.NetTx.Avg())), humanBytes(int(stats.NetTx.Peak)),
+			humanBytes(int(stats.NetRx.Total)), humanBytes(int(stats.NetRx.Avg())), humanBytes(int(stats.NetRx.Peak)))
+	}
 }
