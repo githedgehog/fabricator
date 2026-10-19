@@ -5,8 +5,10 @@ package bench_test
 
 import (
 	"fmt"
+	"net"
 	"net/netip"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -116,6 +118,65 @@ func TestAllocatorStableAsFabricsAreAdded(t *testing.T) {
 			require.Equal(t, va, vb, "VTEP IP moved for slot %d leaf %d", slot, idx)
 		}
 	}
+}
+
+// Every switch boots with its own serial and MAC, across fabrics and domains,
+// and adding fabrics leaves the existing switches' identifiers alone, since
+// fabric-boot finds a switch by them.
+func TestAllocatorSwitchBoot(t *testing.T) {
+	t.Parallel()
+
+	specs, err := bench.ParseFabricSpecs([]string{"name=f0,domains=2", "name=f1"})
+	require.NoError(t, err)
+
+	a, err := bench.NewAllocator(defaultFab(), 1, 0, 0, specs)
+	require.NoError(t, err)
+
+	first, err := a.SwitchBoot(0, 0)
+	require.NoError(t, err)
+	require.Equal(t, "BENCH-0000000", first.Serial)
+	require.Equal(t, "02:b0:00:00:00:00", first.MAC)
+
+	last, err := a.SwitchBoot(2, bench.StrideSwitches-1)
+	require.NoError(t, err)
+	require.Equal(t, "BENCH-0000287", last.Serial)
+	require.Equal(t, "02:b0:00:00:01:1f", last.MAC)
+
+	serials, macs := map[string]bool{}, map[string]bool{}
+	for unit := range a.Units() {
+		for idx := range uint(bench.StrideSwitches) {
+			boot, err := a.SwitchBoot(unit, idx)
+			require.NoError(t, err)
+
+			_, err = net.ParseMAC(boot.MAC)
+			require.NoError(t, err, "MAC %q", boot.MAC)
+			require.Equal(t, strings.ToLower(boot.MAC), boot.MAC, "fabric-boot normalizes to lower case")
+
+			require.False(t, serials[boot.Serial], "serial %s reused", boot.Serial)
+			require.False(t, macs[boot.MAC], "MAC %s reused", boot.MAC)
+			serials[boot.Serial], macs[boot.MAC] = true, true
+		}
+	}
+
+	more, err := bench.NewAllocator(defaultFab(), 1, 0, 0, defaultSpecs(t, 5))
+	require.NoError(t, err)
+	fewer, err := bench.NewAllocator(defaultFab(), 1, 0, 0, defaultSpecs(t, 3))
+	require.NoError(t, err)
+
+	for unit := range uint(3) {
+		for idx := range uint(bench.StrideSwitches) {
+			b1, err := fewer.SwitchBoot(unit, idx)
+			require.NoError(t, err)
+			b2, err := more.SwitchBoot(unit, idx)
+			require.NoError(t, err)
+			require.Equal(t, b1, b2, "boot identifiers moved for unit %d switch %d", unit, idx)
+		}
+	}
+
+	_, err = a.SwitchBoot(a.Units(), 0)
+	require.ErrorContains(t, err, "out of range")
+	_, err = a.SwitchBoot(0, bench.StrideSwitches)
+	require.ErrorContains(t, err, "out of range")
 }
 
 // A smaller fabric in an earlier slot must not shift the later ones either,
