@@ -4,6 +4,7 @@
 package bench
 
 import (
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -42,6 +43,12 @@ bench_mem_available_bytes 21231927296
 bench_rss_k3s_bytes 56482004992
 bench_rss_fabric_ctrl_bytes 1742003200
 bench_rss_fabric_boot_bytes 4850352128
+bench_cpu_k3s_seconds 81234.56
+bench_cpu_fabric_ctrl_seconds 4321.00
+bench_cpu_fabric_boot_seconds 12.34
+bench_io_read_fabric_boot_bytes 3557130240
+bench_net_rx_bytes 987654321
+bench_net_tx_bytes 123456789012
 `
 
 func TestParseSampleFull(t *testing.T) {
@@ -78,6 +85,62 @@ func TestParseSampleFull(t *testing.T) {
 	// an interval between two samples.
 	require.InDelta(t, 0.81, sample.val("commit_sum"), 1e-9)
 	require.InDelta(t, 127, sample.val("commit_count"), 1e-9)
+
+	// Node counters are recorded raw too, and read as rates between samples.
+	require.InDelta(t, 12.34, sample.val("cpu_fabric_boot"), 1e-9)
+	require.InDelta(t, 3557130240, sample.val("io_read_fabric_boot"), 1e-9)
+	require.InDelta(t, 123456789012, sample.val("net_tx"), 1e-9)
+}
+
+// The NIC is found by the control VIP, so it is only sampled when there is one.
+func TestSampleCommandFindsNICByVIP(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, sampleCmd, sampleCommand(netip.Prefix{}))
+
+	cmd := sampleCommand(netip.MustParsePrefix("172.30.0.1/32"))
+	require.True(t, strings.HasPrefix(cmd, sampleCmd))
+	require.Contains(t, cmd, `awk -v a="172.30.0.1/32"`)
+	require.Contains(t, cmd, "bench_net_tx_bytes %s")
+}
+
+// Node counters become rates per interval: an average over the run and the
+// busiest interval, surviving a process restart that resets its counter.
+func TestAnalyzeSeriesNodeRates(t *testing.T) {
+	t.Parallel()
+
+	base := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+	node := func(step int, vals map[string]float64) Sample {
+		vals["mem_used"], vals["mem_available"] = 1, 1
+		vals["rss_k3s"], vals["rss_fabric_ctrl"], vals["rss_fabric_boot"] = 1, 1, 1
+
+		return mk(base.Add(time.Duration(step)*10*time.Second), vals)
+	}
+
+	samples := []Sample{
+		node(0, map[string]float64{"cpu_fabric_boot": 100, "net_tx": 0}),
+		node(1, map[string]float64{"cpu_fabric_boot": 110, "net_tx": 1000}),
+		node(2, map[string]float64{"cpu_fabric_boot": 150, "net_tx": 11000}),
+		node(3, map[string]float64{"cpu_fabric_boot": 5, "net_tx": 12000}), // fabric-boot restarted
+	}
+
+	stats := analyzeSeries(samples)
+
+	require.InDelta(t, 10+40+5, stats.CPUBoot.Total, 1e-9)
+	require.InDelta(t, 4.0, stats.CPUBoot.Peak, 1e-9, "40 CPU seconds in 10s is 4 cores")
+	require.InDelta(t, 55.0/30, stats.CPUBoot.Avg(), 1e-9)
+
+	require.InDelta(t, 12000, stats.NetTx.Total, 1e-9)
+	require.InDelta(t, 1000, stats.NetTx.Peak, 1e-9)
+
+	// Never sampled, so nothing to report rather than a zero rate.
+	require.Zero(t, stats.NetRx.Span)
+
+	var buf strings.Builder
+	healthSeries(&buf, samples)
+	require.Contains(t, buf.String(), "fabric-boot cpu      avg 1.83 cores, peak 4.00")
+	require.Contains(t, buf.String(), "management nic")
+	require.NotContains(t, buf.String(), "k3s-server cpu")
 }
 
 func TestParseSampleIgnoresLabelledSeries(t *testing.T) {
@@ -708,7 +771,7 @@ func TestSampleToRejectsNonPositiveInterval(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "series.csv")
 
 	for _, interval := range []time.Duration{0, -time.Second} {
-		err := SampleTo(t.Context(), nil, interval, path)
+		err := SampleTo(t.Context(), nil, interval, path, netip.Prefix{})
 		require.ErrorContains(t, err, "must be positive")
 	}
 
