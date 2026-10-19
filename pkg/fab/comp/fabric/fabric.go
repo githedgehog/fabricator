@@ -49,6 +49,9 @@ const (
 	MTU                   = 9100 // TODO actually use in in the fabric, make configurable
 	ServerFacingMTUOffset = 64   // TODO use in the fabric, make configurable
 	ServerFacingMTU       = MTU - ServerFacingMTUOffset
+
+	// BootPort is where fabric-boot serves ONIE and ZTP on the control VIP
+	BootPort = 32000
 )
 
 //go:embed ctrl_values.tmpl.yaml
@@ -183,8 +186,8 @@ func InstallManagementDHCPSubnet(cfg fabapi.Fabricator) ([]kclient.Object, error
 			Gateway:          mgmt.Addr().Next().String(),
 			StartIP:          string(cfg.Spec.Config.Fabric.ManagementDHCPStart),
 			EndIP:            string(cfg.Spec.Config.Fabric.ManagementDHCPEnd),
-			LeaseTimeSeconds: 1800,                                              // 30 mins should be enough for ZTP needs
-			ZTPBaseURL:       "http://" + controlVIP.Addr().String() + ":32000", // TODO port from const
+			LeaseTimeSeconds: 1800, // 30 mins should be enough for ZTP needs
+			ZTPBaseURL:       "http://" + netip.AddrPortFrom(controlVIP.Addr(), BootPort).String(),
 			DNSServers:       []string{},
 			TimeServers:      []string{},
 			Static:           static,
