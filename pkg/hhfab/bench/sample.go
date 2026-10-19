@@ -37,8 +37,8 @@ const DefaultSampleInterval = 15 * time.Second
 // serves come from the page cache. Both are counters, like etcd's.
 const sampleCmd = `curl -s --max-time 10 http://127.0.0.1:2381/metrics
 free -m | awk '/^Mem:/{printf "bench_mem_total_bytes %d\nbench_mem_used_bytes %d\nbench_mem_available_bytes %d\n", $2*1048576, $3*1048576, $7*1048576}'
-ps -eo rss=,comm= | awk '{r[$2]+=$1} END{printf "bench_rss_k3s_bytes %d\nbench_rss_fabric_ctrl_bytes %d\nbench_rss_fabric_boot_bytes %d\n", r["k3s-server"]*1024, r["fabric"]*1024, r["fabric-boot"]*1024}'
-cat /proc/[0-9]*/stat 2>/dev/null | awk -v t="$(getconf CLK_TCK 2>/dev/null || echo 100)" '{c[$2]+=$14+$15} END{printf "bench_cpu_k3s_seconds %.2f\nbench_cpu_fabric_ctrl_seconds %.2f\nbench_cpu_fabric_boot_seconds %.2f\n", c["(k3s-server)"]/t, c["(fabric)"]/t, c["(fabric-boot)"]/t}'
+ps -eo rss=,comm= | awk '{r[$2]+=$1} END{printf "bench_rss_k3s_bytes %d\nbench_rss_fabric_ctrl_bytes %d\nbench_rss_fabric_boot_bytes %d\nbench_rss_fabric_dhcpd_bytes %d\n", r["k3s-server"]*1024, r["fabric"]*1024, r["fabric-boot"]*1024, r["fabric-dhcpd"]*1024}'
+cat /proc/[0-9]*/stat 2>/dev/null | awk -v t="$(getconf CLK_TCK 2>/dev/null || echo 100)" '{c[$2]+=$14+$15} END{printf "bench_cpu_k3s_seconds %.2f\nbench_cpu_fabric_ctrl_seconds %.2f\nbench_cpu_fabric_boot_seconds %.2f\nbench_cpu_fabric_dhcpd_seconds %.2f\n", c["(k3s-server)"]/t, c["(fabric)"]/t, c["(fabric-boot)"]/t, c["(fabric-dhcpd)"]/t}'
 p=$(pgrep -xo fabric-boot) && sudo awk '/^read_bytes:/{print "bench_io_read_fabric_boot_bytes", $2}' /proc/$p/io`
 
 // sampleNetCmd adds the traffic of the interface holding the control VIP: the
@@ -137,6 +137,7 @@ var seriesMetrics = []metric{
 	{"rss_k3s", "bench_rss_k3s_bytes", groupMem, true},
 	{"rss_fabric_ctrl", "bench_rss_fabric_ctrl_bytes", groupMem, true},
 	{"rss_fabric_boot", "bench_rss_fabric_boot_bytes", groupMem, true},
+	{"rss_fabric_dhcpd", "bench_rss_fabric_dhcpd_bytes", groupMem, false},
 
 	// Counters, read as rates between samples: where the CPU goes, whether
 	// fabric-boot serves from the page cache, and what leaves through the
@@ -144,6 +145,7 @@ var seriesMetrics = []metric{
 	{"cpu_k3s", "bench_cpu_k3s_seconds", groupMem, false},
 	{"cpu_fabric_ctrl", "bench_cpu_fabric_ctrl_seconds", groupMem, false},
 	{"cpu_fabric_boot", "bench_cpu_fabric_boot_seconds", groupMem, false},
+	{"cpu_fabric_dhcpd", "bench_cpu_fabric_dhcpd_seconds", groupMem, false},
 	{"io_read_fabric_boot", "bench_io_read_fabric_boot_bytes", groupMem, false},
 	{"net_rx", "bench_net_rx_bytes", groupMem, false},
 	{"net_tx", "bench_net_tx_bytes", groupMem, false},
@@ -209,22 +211,23 @@ func (s Sample) has(col string) bool {
 
 // Accessors for the fields the report reads, so the reporting code is not
 // stringly typed throughout.
-func (s Sample) DBSize() int64        { return s.num("db_size") }
-func (s Sample) DBInUse() int64       { return s.num("db_in_use") }
-func (s Sample) CompactRev() int64    { return s.num("compact_rev") }
-func (s Sample) CurrentRev() int64    { return s.num("current_rev") }
-func (s Sample) Quota() int64         { return s.num("quota") }
-func (s Sample) Keys() int64          { return s.num("keys") }
-func (s Sample) OpenReads() int64     { return s.num("open_reads") }
-func (s Sample) Watchers() int64      { return s.num("watchers") }
-func (s Sample) SlowWatchers() int64  { return s.num("slow_watchers") }
-func (s Sample) Alarms() int64        { return s.num("alarms") }
-func (s Sample) MemUsed() int64       { return s.num("mem_used") }
-func (s Sample) MemAvail() int64      { return s.num("mem_available") }
-func (s Sample) MemTotal() int64      { return s.num("mem_total") }
-func (s Sample) RSSK3s() int64        { return s.num("rss_k3s") }
-func (s Sample) RSSFabricCtrl() int64 { return s.num("rss_fabric_ctrl") }
-func (s Sample) RSSFabricBoot() int64 { return s.num("rss_fabric_boot") }
+func (s Sample) DBSize() int64         { return s.num("db_size") }
+func (s Sample) DBInUse() int64        { return s.num("db_in_use") }
+func (s Sample) CompactRev() int64     { return s.num("compact_rev") }
+func (s Sample) CurrentRev() int64     { return s.num("current_rev") }
+func (s Sample) Quota() int64          { return s.num("quota") }
+func (s Sample) Keys() int64           { return s.num("keys") }
+func (s Sample) OpenReads() int64      { return s.num("open_reads") }
+func (s Sample) Watchers() int64       { return s.num("watchers") }
+func (s Sample) SlowWatchers() int64   { return s.num("slow_watchers") }
+func (s Sample) Alarms() int64         { return s.num("alarms") }
+func (s Sample) MemUsed() int64        { return s.num("mem_used") }
+func (s Sample) MemAvail() int64       { return s.num("mem_available") }
+func (s Sample) MemTotal() int64       { return s.num("mem_total") }
+func (s Sample) RSSK3s() int64         { return s.num("rss_k3s") }
+func (s Sample) RSSFabricCtrl() int64  { return s.num("rss_fabric_ctrl") }
+func (s Sample) RSSFabricBoot() int64  { return s.num("rss_fabric_boot") }
+func (s Sample) RSSFabricDHCPD() int64 { return s.num("rss_fabric_dhcpd") }
 
 // Counters and histogram sums deliberately have no per-sample accessors: a
 // single sample of a cumulative counter describes the life of the etcd

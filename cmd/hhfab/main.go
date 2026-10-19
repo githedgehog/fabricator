@@ -126,6 +126,16 @@ const (
 	FlagBenchInstallTime          = "install-time"
 	FlagBenchRetryDelay           = "retry-delay"
 	FlagBenchMaxFailures          = "max-failures"
+	FlagBenchVPCs                 = "vpcs"
+	FlagBenchSubnets              = "subnets"
+	FlagBenchServers              = "servers"
+	FlagBenchRepeats              = "repeats"
+	FlagBenchRepeatInterval       = "repeat-interval"
+	FlagBenchSpread               = "spread"
+	FlagBenchRoundTimeout         = "round-timeout"
+	FlagBenchPXE                  = "pxe"
+	FlagBenchRelay                = "relay"
+	FlagBenchSudo                 = "sudo"
 )
 
 // benchFabrics collects repeated --fabric values verbatim. A StringSliceFlag
@@ -2186,6 +2196,112 @@ Switches need boot serials and MACs, which bench init sets.`,
 										Burst:       c.Int(FlagBenchBurst),
 									}); err != nil {
 										return fmt.Errorf("bench boots: %w", err)
+									}
+
+									return nil
+								},
+							},
+							{
+								Name:  "dhcp",
+								Usage: "storm fabric-dhcpd with a fleet of servers booting through DHCP at once",
+								Description: `Creates its own DHCP VPCs (L3VNI, no attachments) in dedicated bench-dhcp
+VLAN and IPv4 namespaces, --vpcs of --subnets subnets of --servers servers
+each, and simulates every server booting at once through a DHCP relay. The
+relay is a bench leaf's management IP, which dhcpd accepts relayed requests
+from, put on the management bridge; nothing else from bench init is used.
+
+Each round starts from an empty dhcpd: the DHCP VPCs are deleted and created
+again. Then every server does a full DORA and its first renewal, followed by
+--repeats REQUESTs alternating its own IP and an IP another server holds. With
+--pxe a PXE firmware DORA comes first, as UEFI firmware does it.
+
+It reports how long every round took, latencies, retransmits and how dhcpd
+answered the repeats, and counts plain misbehaviour such as an IP handed to two
+servers, 0.0.0.0 replies or leases missing from dhcpd's own record.
+
+The relay binds UDP port 67, which needs root: run it under sudo, or with --sudo
+to have it re-run itself under sudo.`,
+								Flags: flatten(defaultFlags, []cli.Flag{
+									&cli.IntFlag{
+										Name:  FlagBenchVPCs,
+										Usage: "DHCP VPCs to create",
+										Value: bench.DefaultDHCPVPCs,
+									},
+									&cli.IntFlag{
+										Name:  FlagBenchSubnets,
+										Usage: "subnets per VPC",
+										Value: bench.DefaultDHCPSubnets,
+									},
+									&cli.IntFlag{
+										Name:  FlagBenchServers,
+										Usage: "servers per subnet, which sizes its prefix",
+										Value: bench.DefaultDHCPServers,
+									},
+									&cli.IntFlag{
+										Name:  FlagBenchRounds,
+										Usage: "rounds, each starting from an empty dhcpd",
+										Value: bench.DefaultDHCPRounds,
+									},
+									&cli.IntFlag{
+										Name:  FlagBenchRepeats,
+										Usage: "REQUESTs each server sends after it is bound, alternating its own IP and one another server holds",
+										Value: bench.DefaultDHCPRepeats,
+									},
+									&cli.DurationFlag{
+										Name:  FlagBenchRepeatInterval,
+										Usage: "pause before each repeat, with jitter",
+										Value: bench.DefaultDHCPRepeatInterval,
+									},
+									&cli.DurationFlag{
+										Name:  FlagBenchSpread,
+										Usage: "spread each round's starts over this long; 0 starts every server at once",
+									},
+									&cli.DurationFlag{
+										Name:  FlagBenchRoundTimeout,
+										Usage: "how long a round may take; servers without a lease by then count as unbound",
+										Value: bench.DefaultDHCPRoundTimeout,
+									},
+									&cli.BoolFlag{
+										Name:  FlagBenchPXE,
+										Usage: "boot every server through a PXE firmware DORA before the OS one, as UEFI firmware does",
+									},
+									&cli.StringFlag{
+										Name:  FlagBenchRelay,
+										Usage: "bench leaf `NAME` to relay as (default: the first bench leaf)",
+									},
+									&cli.BoolFlag{
+										Name:  FlagBenchSudo,
+										Usage: "re-run under sudo when not root, which binding port 67 needs",
+									},
+									&cli.Float64Flag{
+										Name:  FlagBenchQPS,
+										Usage: "QPS for the API client",
+										Value: bench.DefaultQPS,
+									},
+									&cli.IntFlag{
+										Name:  FlagBenchBurst,
+										Usage: "burst for the API client",
+										Value: bench.DefaultBurst,
+									},
+								}),
+								Before: before(false),
+								Action: func(c *cli.Context) error {
+									if err := hhfab.DoVLABBenchDHCP(ctx, workDir, cacheDir, hhfab.BenchDHCPOpts{
+										VPCs:           c.Int(FlagBenchVPCs),
+										Subnets:        c.Int(FlagBenchSubnets),
+										Servers:        c.Int(FlagBenchServers),
+										Rounds:         c.Int(FlagBenchRounds),
+										Repeats:        c.Int(FlagBenchRepeats),
+										RepeatInterval: c.Duration(FlagBenchRepeatInterval),
+										Spread:         c.Duration(FlagBenchSpread),
+										RoundTimeout:   c.Duration(FlagBenchRoundTimeout),
+										PXE:            c.Bool(FlagBenchPXE),
+										Relay:          c.String(FlagBenchRelay),
+										Sudo:           c.Bool(FlagBenchSudo),
+										QPS:            float32(c.Float64(FlagBenchQPS)),
+										Burst:          c.Int(FlagBenchBurst),
+									}); err != nil {
+										return fmt.Errorf("bench dhcp: %w", err)
 									}
 
 									return nil
