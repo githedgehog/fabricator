@@ -72,11 +72,13 @@ type seriesStats struct {
 	BootEnd     int64
 	BootPeak    int64
 	BootSpan    time.Duration
+	DHCPDPeak   int64
 
 	// Node counters read as rates: CPU in cores, the rest in bytes/s.
 	CPUK3s   rateStat
 	CPUCtrl  rateStat
 	CPUBoot  rateStat
+	CPUDHCPD rateStat
 	BootRead rateStat
 	NetRx    rateStat
 	NetTx    rateStat
@@ -214,6 +216,7 @@ func analyzeSeries(samples []Sample) seriesStats {
 			stats.K3sPeak = max(stats.K3sPeak, sample.RSSK3s())
 			stats.CtrlPeak = max(stats.CtrlPeak, sample.RSSFabricCtrl())
 			stats.BootPeak = max(stats.BootPeak, sample.RSSFabricBoot())
+			stats.DHCPDPeak = max(stats.DHCPDPeak, sample.RSSFabricDHCPD())
 
 			// The first observation seeds the minimum by count, not by treating
 			// zero as unset: a node that really hit zero available is exactly
@@ -284,6 +287,7 @@ func accumulateNode(stats *seriesStats, prev, cur Sample) {
 	stats.CPUK3s.add(prev, cur, "cpu_k3s")
 	stats.CPUCtrl.add(prev, cur, "cpu_fabric_ctrl")
 	stats.CPUBoot.add(prev, cur, "cpu_fabric_boot")
+	stats.CPUDHCPD.add(prev, cur, "cpu_fabric_dhcpd")
 	stats.BootRead.add(prev, cur, "io_read_fabric_boot")
 	stats.NetRx.add(prev, cur, "net_rx")
 	stats.NetTx.add(prev, cur, "net_tx")
@@ -544,6 +548,10 @@ func reportMemSeries(w io.Writer, stats seriesStats) {
 
 	fmt.Fprintf(w, "\n")
 
+	if stats.DHCPDPeak > 0 {
+		fmt.Fprintf(w, "  %-20s peak %s\n", "fabric-dhcpd rss", humanBytes(int(stats.DHCPDPeak)))
+	}
+
 	// Series sampled before these counters existed simply have none.
 	for _, cpu := range []struct {
 		name string
@@ -552,6 +560,7 @@ func reportMemSeries(w io.Writer, stats seriesStats) {
 		{"k3s-server cpu", stats.CPUK3s},
 		{"fabric-ctrl cpu", stats.CPUCtrl},
 		{"fabric-boot cpu", stats.CPUBoot},
+		{"fabric-dhcpd cpu", stats.CPUDHCPD},
 	} {
 		if cpu.stat.Span > 0 {
 			fmt.Fprintf(w, "  %-20s avg %.2f cores, peak %.2f\n", cpu.name, cpu.stat.Avg(), cpu.stat.Peak)

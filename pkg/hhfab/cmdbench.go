@@ -15,6 +15,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	fmeta "go.githedgehog.com/fabric/api/meta"
@@ -312,6 +313,139 @@ func DoVLABBenchBoots(ctx context.Context, workDir, cacheDir string, opts BenchB
 	}
 
 	return nil
+}
+
+// BenchDHCPOpts configures `hhfab vlab bench dhcp`.
+type BenchDHCPOpts struct {
+	VPCs           int
+	Subnets        int
+	Servers        int
+	Rounds         int
+	Repeats        int
+	RepeatInterval time.Duration
+	Spread         time.Duration
+	RoundTimeout   time.Duration
+	PXE            bool
+	Relay          string
+	Sudo           bool
+	QPS            float32
+	Burst          int
+}
+
+// DoVLABBenchDHCP storms fabric-dhcpd with a fleet of servers booting at once,
+// relayed from a bench leaf's management IP. Binding the relay's port 67 needs
+// root, so without it this fails, or with Sudo runs itself again under sudo.
+func DoVLABBenchDHCP(ctx context.Context, workDir, cacheDir string, opts BenchDHCPOpts) error {
+	if os.Geteuid() != 0 {
+		if !opts.Sudo {
+			return fmt.Errorf("bench dhcp binds UDP port 67 as the relay, which needs root: run it with --sudo, or under sudo") //nolint:err113
+		}
+
+		return reexecUnderSudo()
+	}
+
+	c, err := benchLoad(ctx, workDir, cacheDir)
+	if err != nil {
+		return err
+	}
+
+	vip, err := c.Fab.Spec.Config.Control.VIP.Parse()
+	if err != nil {
+		return fmt.Errorf("parsing control VIP: %w", err)
+	}
+
+	kube, err := bench.NewKubeClient(ctx, filepath.Join(workDir, VLABDir, VLABKubeConfig), opts.QPS, opts.Burst)
+	if err != nil {
+		return err //nolint:wrapcheck
+	}
+
+	relay, err := bench.FindDHCPRelay(ctx, kube, opts.Relay)
+	if err != nil {
+		return err //nolint:wrapcheck
+	}
+
+	// The relay's address is a bench leaf's management IP: no real switch
+	// holds it, so the host can, and dhcpd's replies to it come over the
+	// management bridge like any other management traffic.
+	if err := ensureBridgeAddr(ctx, relay.IP); err != nil {
+		return err
+	}
+
+	server := netip.AddrPortFrom(vip.Addr(), bench.DHCPServerPort)
+
+	transport, err := bench.ListenDHCPRelay(relay.IP.Addr(), server)
+	if err != nil {
+		return err //nolint:wrapcheck
+	}
+	defer transport.Close()
+
+	slog.Info("Relaying to dhcpd over the management bridge", "bridge", VLABBridge, "relay", relay.Name, "giaddr", relay.IP.Addr(), "server", server)
+
+	if err := bench.RunDHCP(ctx, kube, transport, bench.DHCPOpts{
+		Layout:         bench.DHCPLayout{VPCs: opts.VPCs, Subnets: opts.Subnets, Servers: opts.Servers},
+		Rounds:         opts.Rounds,
+		Repeats:        opts.Repeats,
+		RepeatInterval: opts.RepeatInterval,
+		Spread:         opts.Spread,
+		RoundTimeout:   opts.RoundTimeout,
+		PXE:            opts.PXE,
+		Relay:          relay,
+		Server:         server,
+	}); err != nil {
+		return fmt.Errorf("running dhcp storm: %w", err)
+	}
+
+	return nil
+}
+
+// reexecUnderSudo replaces this process with the same command under sudo,
+// minus --sudo. HOME is kept so the cache dir stays the user's, and HHFAB_*
+// so the preview gate and any other setting survive the switch.
+func reexecUnderSudo() error {
+	exe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("finding the hhfab binary: %w", err)
+	}
+
+	sudo, err := exec.LookPath(VLABCmdSudo)
+	if err != nil {
+		return fmt.Errorf("finding sudo: %w", err)
+	}
+
+	keep := []string{"HOME"}
+	for _, kv := range os.Environ() {
+		if name, _, ok := strings.Cut(kv, "="); ok && strings.HasPrefix(name, "HHFAB_") {
+			keep = append(keep, name)
+		}
+	}
+
+	args := []string{VLABCmdSudo, "--preserve-env=" + strings.Join(keep, ","), exe}
+	args = append(args, withoutSudoFlag(os.Args[1:])...)
+
+	slog.Info("Running again under sudo to bind UDP port 67")
+
+	if err := syscall.Exec(sudo, args, os.Environ()); err != nil {
+		return fmt.Errorf("running under sudo: %w", err)
+	}
+
+	return nil
+}
+
+// withoutSudoFlag drops --sudo in any of its spellings, so the command run
+// under sudo doesn't try to re-run itself again.
+func withoutSudoFlag(args []string) []string {
+	out := make([]string, 0, len(args))
+
+	for _, arg := range args {
+		name := strings.TrimLeft(arg, "-")
+		if strings.HasPrefix(arg, "-") && (name == "sudo" || strings.HasPrefix(name, "sudo=")) {
+			continue
+		}
+
+		out = append(out, arg)
+	}
+
+	return out
 }
 
 // BenchUsersOpts configures `hhfab vlab bench users`.

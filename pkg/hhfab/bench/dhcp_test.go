@@ -1,0 +1,652 @@
+// Copyright 2026 Hedgehog
+// SPDX-License-Identifier: Apache-2.0
+
+package bench
+
+import (
+	"fmt"
+	"net"
+	"net/netip"
+	"strings"
+	"sync"
+	"testing"
+	"testing/synctest"
+	"time"
+
+	"github.com/insomniacslk/dhcp/dhcpv4"
+	"github.com/stretchr/testify/require"
+	dhcpapi "go.githedgehog.com/fabric/api/dhcp/v1beta1"
+	fmeta "go.githedgehog.com/fabric/api/meta"
+	"go.githedgehog.com/fabric/api/valid"
+	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
+	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
+	"go.githedgehog.com/fabricator/pkg/fab"
+	"go.githedgehog.com/fabricator/pkg/fab/comp/fabric"
+	"go.githedgehog.com/fabricator/pkg/util/apiutil"
+	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
+// The default fleet is 20 subnets of 1000 servers: /22s, each with room for the
+// servers and the probe, on their own VLANs, carved in order and never
+// overlapping.
+func TestPlanDHCPDefaults(t *testing.T) {
+	t.Parallel()
+
+	plan, err := planDHCP(DHCPLayout{VPCs: DefaultDHCPVPCs, Subnets: DefaultDHCPSubnets, Servers: DefaultDHCPServers})
+	require.NoError(t, err)
+	require.Len(t, plan, 20)
+
+	first := plan[0]
+	require.Equal(t, "dhcp-0001", first.vpc)
+	require.Equal(t, "s01", first.name)
+	require.Equal(t, "dhcp-0001--s01", first.dhcpSubnetName())
+	require.Equal(t, uint16(DHCPVLANFrom), first.vlan)
+	require.Equal(t, "10.0.0.0/22", first.prefix.String())
+	require.Equal(t, "10.0.0.1", first.gateway.String())
+	require.Equal(t, "10.0.0.2", first.start.String())
+	require.Equal(t, "10.0.3.254", first.end.String())
+
+	last := plan[len(plan)-1]
+	require.Equal(t, "dhcp-0010", last.vpc)
+	require.Equal(t, "s02", last.name)
+	require.Equal(t, uint16(DHCPVLANFrom+19), last.vlan)
+
+	for idx, sub := range plan {
+		require.Equal(t, idx, sub.index)
+		require.GreaterOrEqual(t, rangeSize(sub), DefaultDHCPServers+1, "room for every server and the probe in %s", sub.dhcpSubnetName())
+		require.False(t, sub.usable(sub.prefix.Addr()), "network address")
+		require.False(t, sub.usable(sub.gateway), "gateway")
+
+		if idx > 0 {
+			require.False(t, sub.prefix.Overlaps(plan[idx-1].prefix))
+		}
+	}
+}
+
+func rangeSize(sub *dhcpSubnet) int {
+	n := 1
+	for ip := sub.start; ip != sub.end; ip = ip.Next() {
+		n++
+	}
+
+	return n
+}
+
+// The prefix grows exactly when the servers plus network, gateway, broadcast and
+// probe no longer fit.
+func TestPlanDHCPPrefixSizing(t *testing.T) {
+	t.Parallel()
+
+	for servers, bits := range map[int]int{1: 29, 4: 29, 5: 28, 1020: 22, 1021: 21, 8000: 19} {
+		plan, err := planDHCP(DHCPLayout{VPCs: 1, Subnets: 1, Servers: servers})
+		require.NoError(t, err)
+		require.Equal(t, bits, plan[0].prefix.Bits(), "%d servers", servers)
+		require.GreaterOrEqual(t, rangeSize(plan[0]), servers+1, "%d servers", servers)
+	}
+}
+
+func TestPlanDHCPRefusesWhatCannotExist(t *testing.T) {
+	t.Parallel()
+
+	for name, layout := range map[string]DHCPLayout{
+		"no vpcs":           {VPCs: 0, Subnets: 1, Servers: 1},
+		"too many subnets":  {VPCs: 1, Subnets: MaxDHCPSubnetsPerVPC + 1, Servers: 1},
+		"no servers":        {VPCs: 1, Subnets: 1, Servers: 0},
+		"out of VLANs":      {VPCs: 101, Subnets: 20, Servers: 1},
+		"out of addresses":  {VPCs: 10, Subnets: 20, Servers: 100_000},
+		"too many vpc name": {VPCs: maxDHCPVPCs + 1, Subnets: 1, Servers: 1},
+	} {
+		_, err := planDHCP(layout)
+		require.Error(t, err, name)
+	}
+}
+
+// The bench's own objects pass the admission webhooks' defaulting and
+// validation against Fabric/default, with and without a PXE URL.
+func TestDHCPObjectsValidate(t *testing.T) {
+	t.Parallel()
+
+	for _, pxeURL := range []string{"", "http://172.30.0.1/bench/pxe.efi"} {
+		ctx := t.Context()
+
+		f := fabapi.Fabricator{Spec: fabapi.FabricatorSpec{Config: fab.DefaultConfig}}
+		f.Default()
+
+		cfg, err := fabric.GetFabricConfig(f)
+		require.NoError(t, err)
+
+		l := apiutil.NewLoader()
+		require.NoError(t, l.Add(ctx, &wiringapi.Fabric{
+			TypeMeta:   kmetav1.TypeMeta{Kind: wiringapi.KindFabric, APIVersion: wiringapi.GroupVersion.String()},
+			ObjectMeta: kmetav1.ObjectMeta{Name: wiringapi.DefaultFabric, Namespace: kmetav1.NamespaceDefault},
+			Spec:       wiringapi.DefaultFabricSpec(cfg),
+		}))
+
+		plan, err := planDHCP(DHCPLayout{VPCs: 3, Subnets: MaxDHCPSubnetsPerVPC, Servers: 100})
+		require.NoError(t, err)
+
+		for _, obj := range dhcpObjects(plan, pxeURL) {
+			if defaulted, ok := obj.(interface{ Default() }); ok {
+				defaulted.Default()
+			}
+			require.NoError(t, l.Add(ctx, obj))
+		}
+
+		cfg, err = cfg.Init(fmeta.ExtraValidators{Peering: valid.Peering})
+		require.NoError(t, err)
+		require.NoError(t, apiutil.ValidateFabricGateway(ctx, l, cfg), "pxe %q", pxeURL)
+	}
+}
+
+// A relayed request carries what dhcpd keys the subnet on, in the encoding it
+// strips: circuit-id as is, and the VSS sub-option as a type byte then VrfV and
+// the VRF.
+func TestDHCPMessageCarriesRelayInfo(t *testing.T) {
+	t.Parallel()
+
+	sub := &dhcpSubnet{vpc: "dhcp-0001", name: "s01", vrf: "dhcp-0001", circuitID: "vlan1000"}
+	srv := &dhcpServer{sub: sub, mac: dhcpServerMAC(7), hostname: dhcpHostname(sub, 7)}
+	c := &dhcpClients{relay: net.ParseIP("172.30.0.38")}
+
+	msg, err := c.message(srv, dhcpv4.MessageTypeDiscover, dhcpv4.TransactionID{1, 2, 3, 4}, false)
+	require.NoError(t, err)
+
+	parsed, err := dhcpv4.FromBytes(msg.ToBytes())
+	require.NoError(t, err)
+
+	require.Equal(t, "172.30.0.38", parsed.GatewayIPAddr.String())
+	require.Equal(t, uint8(1), parsed.HopCount)
+	require.Equal(t, "02:dc:00:00:00:07", parsed.ClientHWAddr.String())
+	require.Equal(t, "dhcp-0001-s01-00008", parsed.HostName())
+
+	rai := parsed.RelayAgentInfo()
+	require.NotNil(t, rai)
+	require.Equal(t, "vlan1000", string(rai.Get(dhcpv4.AgentCircuitIDSubOption)))
+
+	// What dhcpd does with it (pkg/dhcp/handlers.go): lowercase, trim, drop the
+	// type byte, drop the vrfv prefix.
+	vss := strings.ToLower(strings.TrimSpace(string(rai.Get(dhcpv4.VirtualSubnetSelectionSubOption))))
+	require.Equal(t, "dhcp-0001", strings.TrimPrefix(vss[1:], "vrfv"))
+
+	pxe, err := c.message(srv, dhcpv4.MessageTypeDiscover, dhcpv4.TransactionID{1, 2, 3, 5}, true)
+	require.NoError(t, err)
+	require.True(t, strings.HasPrefix(pxe.ClassIdentifier(), "PXEClient:"))
+	require.True(t, pxe.IsOptionRequested(dhcpv4.OptionBootfileName))
+}
+
+// fakeDHCPD answers like a correct dhcpd, with switches to misbehave the ways
+// the checks look for.
+type fakeDHCPD struct {
+	demux    *dhcpDemux
+	plan     []*dhcpSubnet
+	serverID net.IP
+
+	mu     sync.Mutex
+	leases map[string]netip.Addr      // MAC → IP
+	offers map[string]netip.Addr      // MAC → IP offered, not yet requested
+	owners map[netip.Addr]string      // IP → MAC
+	next   map[*dhcpSubnet]netip.Addr // next free IP
+
+	silent     bool // never answer, like an unreachable dhcpd
+	zeroFirst  bool // answer each MAC's first DISCOVER with 0.0.0.0
+	nakFirst   bool // NAK each MAC's first REQUEST
+	zeroAck    bool // answer each MAC's first REQUEST with an ACK for 0.0.0.0
+	grantTaken bool // ACK a REQUEST for another MAC's IP
+	shareIP    bool // hand every server in a subnet the same IP
+	discovers  map[string]int
+	requests   map[string]int
+}
+
+func newFakeDHCPD(demux *dhcpDemux, plan []*dhcpSubnet) *fakeDHCPD {
+	f := &fakeDHCPD{
+		demux:     demux,
+		plan:      plan,
+		serverID:  net.ParseIP("172.30.0.1"),
+		leases:    map[string]netip.Addr{},
+		offers:    map[string]netip.Addr{},
+		owners:    map[netip.Addr]string{},
+		next:      map[*dhcpSubnet]netip.Addr{},
+		discovers: map[string]int{},
+		requests:  map[string]int{},
+	}
+	for _, sub := range plan {
+		f.next[sub] = sub.start
+	}
+
+	return f
+}
+
+func (f *fakeDHCPD) subnet(msg *dhcpv4.DHCPv4) *dhcpSubnet {
+	circuit := string(msg.RelayAgentInfo().Get(dhcpv4.AgentCircuitIDSubOption))
+	for _, sub := range f.plan {
+		if sub.circuitID == circuit {
+			return sub
+		}
+	}
+
+	return nil
+}
+
+func (f *fakeDHCPD) send(msg *dhcpv4.DHCPv4) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if f.silent {
+		return nil
+	}
+
+	mac := msg.ClientHWAddr.String()
+	sub := f.subnet(msg)
+
+	reply := func(mt dhcpv4.MessageType, ip netip.Addr, lease time.Duration) {
+		mods := []dhcpv4.Modifier{dhcpv4.WithMessageType(mt)}
+		if ip.IsValid() {
+			mods = append(mods,
+				dhcpv4.WithYourIP(ip.AsSlice()),
+				dhcpv4.WithOption(dhcpv4.OptServerIdentifier(f.serverID)),
+				dhcpv4.WithOption(dhcpv4.OptIPAddressLeaseTime(lease)))
+		}
+
+		resp, err := dhcpv4.NewReplyFromRequest(msg, mods...)
+		if err != nil {
+			panic(err)
+		}
+
+		f.demux.deliver(resp, netip.MustParseAddr("172.30.0.5"))
+	}
+
+	switch msg.MessageType() { //nolint:exhaustive // a fake answers what the bench sends
+	case dhcpv4.MessageTypeDiscover:
+		f.discovers[mac]++
+		if f.zeroFirst && f.discovers[mac] == 1 {
+			reply(dhcpv4.MessageTypeOffer, netip.Addr{}, 0)
+
+			return nil
+		}
+
+		ip, ok := f.leases[mac]
+		if !ok {
+			ip, ok = f.offers[mac]
+		}
+		if !ok {
+			ip = f.next[sub]
+			if !f.shareIP {
+				f.next[sub] = ip.Next()
+			}
+			f.offers[mac] = ip
+		}
+
+		reply(dhcpv4.MessageTypeOffer, ip, 10*time.Second)
+	case dhcpv4.MessageTypeRequest:
+		f.requests[mac]++
+
+		if ciaddr, _ := netip.AddrFromSlice(msg.ClientIPAddr.To4()); ciaddr.IsValid() && !ciaddr.IsUnspecified() {
+			reply(dhcpv4.MessageTypeAck, ciaddr, time.Hour)
+
+			return nil
+		}
+
+		if f.zeroAck && f.requests[mac] == 1 {
+			reply(dhcpv4.MessageTypeAck, netip.Addr{}, 0)
+
+			return nil
+		}
+
+		if f.nakFirst && f.requests[mac] == 1 {
+			reply(dhcpv4.MessageTypeNak, netip.Addr{}, 0)
+
+			return nil
+		}
+
+		want, _ := netip.AddrFromSlice(msg.RequestedIPAddress().To4())
+		if owner, ok := f.owners[want]; ok && owner != mac && !f.grantTaken && !f.shareIP {
+			reply(dhcpv4.MessageTypeNak, netip.Addr{}, 0)
+
+			return nil
+		}
+
+		f.leases[mac] = want
+		f.owners[want] = mac
+		reply(dhcpv4.MessageTypeAck, want, 10*time.Second)
+	}
+
+	return nil
+}
+
+// storm runs a round's storm against the fake on a fake clock.
+func storm(t *testing.T, layout DHCPLayout, opts DHCPOpts, setup func(*fakeDHCPD)) (*dhcpRoundResult, []*dhcpServer, *fakeDHCPD) {
+	t.Helper()
+
+	plan, err := planDHCP(layout)
+	require.NoError(t, err)
+
+	for _, sub := range plan {
+		sub.vrf, sub.circuitID = sub.vpc, fmt.Sprintf("vlan%d", sub.vlan)
+	}
+
+	demux := newDHCPDemux()
+	fake := newFakeDHCPD(demux, plan)
+	if setup != nil {
+		setup(fake)
+	}
+
+	stats := newDHCPRoundStats(0, 1, totalDHCPServers(layout))
+	checks := newDHCPChecks()
+	clients := &dhcpClients{
+		send: fake.send, demux: demux, relay: net.ParseIP("172.30.0.38"), stats: stats, checks: checks,
+		osSched: osSchedule, pxeSched: pxeSchedule, repeatSched: repeatSchedule,
+	}
+
+	opts.Layout = layout
+	if opts.RoundTimeout == 0 {
+		opts.RoundTimeout = time.Hour
+	}
+
+	held := newDHCPHeld(plan)
+	servers := newDHCPServers(plan, layout.Servers)
+	took := runDHCPStorm(t.Context(), clients, servers, held, opts, stats)
+
+	return stats.result(0, took, checks, servers), servers, fake
+}
+
+func failedChecks(res *dhcpRoundResult) map[checkName]int64 {
+	out := map[checkName]int64{}
+	for _, name := range checkOrder {
+		if n := res.checks.count(name); n > 0 {
+			out[name] = n
+		}
+	}
+
+	return out
+}
+
+// Against a correct dhcpd every server binds, renews, gets its own IP back and
+// a NAK for another's, and nothing is flagged.
+func TestDHCPStormClean(t *testing.T) {
+	t.Parallel()
+
+	synctest.Test(t, func(t *testing.T) {
+		res, servers, _ := storm(t, DHCPLayout{VPCs: 2, Subnets: 2, Servers: 5}, DHCPOpts{Repeats: 4, RepeatInterval: time.Second}, nil)
+
+		require.Equal(t, int64(20), res.bound)
+		require.Zero(t, res.timedOut)
+		require.Empty(t, failedChecks(res))
+		require.Len(t, res.doraLat, 20)
+		require.Len(t, res.renewLat, 20)
+
+		require.Equal(t, int64(40), res.repeats[repeatOwn][outcomeAckSame])
+		require.Equal(t, int64(40), res.repeats[repeatTaken][outcomeNak])
+
+		for _, srv := range servers {
+			require.True(t, srv.sub.usable(srv.ip), "%s got %s", srv.hostname, srv.ip)
+			require.False(t, srv.leaseEnd.IsZero())
+			require.Zero(t, srv.retransmits)
+		}
+	})
+}
+
+// A 0.0.0.0 offer is counted and ignored; the client retransmits on its
+// schedule and binds on the next try.
+func TestDHCPStormZeroReplyRetransmits(t *testing.T) {
+	t.Parallel()
+
+	synctest.Test(t, func(t *testing.T) {
+		res, servers, _ := storm(t, DHCPLayout{VPCs: 1, Subnets: 1, Servers: 3}, DHCPOpts{}, func(f *fakeDHCPD) { f.zeroFirst = true })
+
+		require.Equal(t, int64(3), res.bound)
+		require.Equal(t, int64(3), res.zeroOffer)
+		require.Zero(t, res.zeroAck)
+		require.Equal(t, map[checkName]int64{checkZeroOffer: 3}, failedChecks(res))
+
+		for _, srv := range servers {
+			require.Equal(t, 1, srv.retransmits)
+		}
+	})
+}
+
+// A 0.0.0.0 ACK is counted apart from a 0.0.0.0 offer; the client keeps
+// retransmitting its REQUEST and binds on the next answer.
+func TestDHCPStormZeroAckRetransmits(t *testing.T) {
+	t.Parallel()
+
+	synctest.Test(t, func(t *testing.T) {
+		res, servers, _ := storm(t, DHCPLayout{VPCs: 1, Subnets: 1, Servers: 3}, DHCPOpts{}, func(f *fakeDHCPD) { f.zeroAck = true })
+
+		require.Equal(t, int64(3), res.bound)
+		require.Zero(t, res.zeroOffer)
+		require.Equal(t, int64(3), res.zeroAck)
+		require.Equal(t, map[checkName]int64{checkZeroAck: 3}, failedChecks(res))
+
+		for _, srv := range servers {
+			require.Equal(t, 1, srv.retransmits)
+		}
+	})
+}
+
+// A NAK during DORA sends the client back to DISCOVER, which is counted, not
+// flagged.
+func TestDHCPStormNakRestarts(t *testing.T) {
+	t.Parallel()
+
+	synctest.Test(t, func(t *testing.T) {
+		res, _, fake := storm(t, DHCPLayout{VPCs: 1, Subnets: 1, Servers: 3}, DHCPOpts{}, func(f *fakeDHCPD) { f.nakFirst = true })
+
+		require.Equal(t, int64(3), res.bound)
+		require.Equal(t, int64(3), res.nakDORA)
+		require.Empty(t, failedChecks(res))
+
+		for mac, n := range fake.discovers {
+			require.Equal(t, 2, n, "%s started over once", mac)
+		}
+	})
+}
+
+// Granting another server's IP to a taken repeat is the misbehaviour; handing
+// two servers the same IP is caught as it happens.
+func TestDHCPStormFlagsTakenAndShared(t *testing.T) {
+	t.Parallel()
+
+	synctest.Test(t, func(t *testing.T) {
+		res, _, _ := storm(t, DHCPLayout{VPCs: 1, Subnets: 1, Servers: 4}, DHCPOpts{Repeats: 2, RepeatInterval: time.Second},
+			func(f *fakeDHCPD) { f.grantTaken = true })
+
+		require.Equal(t, int64(4), res.repeats[repeatTaken][outcomeAckSame])
+		require.Equal(t, int64(4), failedChecks(res)[checkTakenGranted])
+	})
+
+	synctest.Test(t, func(t *testing.T) {
+		res, _, _ := storm(t, DHCPLayout{VPCs: 1, Subnets: 1, Servers: 3}, DHCPOpts{}, func(f *fakeDHCPD) { f.shareIP = true })
+
+		require.Equal(t, int64(2), failedChecks(res)[checkOverlap])
+	})
+}
+
+// PXE firmware that never hears back gives up after 4, 8, 16 and 32 s and
+// stops for the round; nothing else of the server runs.
+func TestDHCPStormPXEGivesUp(t *testing.T) {
+	t.Parallel()
+
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		res, servers, _ := storm(t, DHCPLayout{VPCs: 1, Subnets: 1, Servers: 2}, DHCPOpts{PXE: true}, func(f *fakeDHCPD) { f.silent = true })
+
+		require.Equal(t, 60*time.Second, time.Since(start))
+		require.Equal(t, int64(2), res.pxeDead)
+		require.Zero(t, res.bound)
+		require.Zero(t, res.timedOut, "dead in PXE is not timed out")
+		require.Equal(t, int64(2), failedChecks(res)[checkUnbound])
+
+		for _, srv := range servers {
+			require.True(t, srv.pxeDead)
+			require.Equal(t, 3, srv.retransmits)
+		}
+	})
+}
+
+// With PXE the firmware's DORA comes first and dwells for its first timeout
+// before requesting, then the OS binds as usual.
+func TestDHCPStormPXEThenOS(t *testing.T) {
+	t.Parallel()
+
+	synctest.Test(t, func(t *testing.T) {
+		res, _, fake := storm(t, DHCPLayout{VPCs: 1, Subnets: 1, Servers: 2}, DHCPOpts{PXE: true}, nil)
+
+		require.Equal(t, int64(2), res.bound)
+		require.Len(t, res.pxeLat, 2)
+		for _, lat := range res.pxeLat {
+			require.Equal(t, 4*time.Second, lat, "EDK2 waits out its first timeout before requesting")
+		}
+		require.Empty(t, failedChecks(res))
+
+		for mac, n := range fake.discovers {
+			require.Equal(t, 2, n, "%s: one DISCOVER from the firmware, one from the OS", mac)
+		}
+	})
+}
+
+// A server that never hears back runs out of round and is counted unbound.
+func TestDHCPStormRoundTimeout(t *testing.T) {
+	t.Parallel()
+
+	synctest.Test(t, func(t *testing.T) {
+		res, _, _ := storm(t, DHCPLayout{VPCs: 1, Subnets: 1, Servers: 2}, DHCPOpts{RoundTimeout: 5 * time.Minute},
+			func(f *fakeDHCPD) { f.silent = true })
+
+		require.Zero(t, res.bound)
+		require.Equal(t, 2, res.timedOut)
+		require.Equal(t, int64(2), failedChecks(res)[checkUnbound])
+	})
+}
+
+// A reply for another MAC is never taken.
+func TestDHCPExchangeIgnoresMismatchedReply(t *testing.T) {
+	t.Parallel()
+
+	synctest.Test(t, func(t *testing.T) {
+		demux := newDHCPDemux()
+		checks := newDHCPChecks()
+		c := &dhcpClients{demux: demux, checks: checks, stats: newDHCPRoundStats(0, 1, 1)}
+
+		srv := &dhcpServer{mac: dhcpServerMAC(1), hostname: "a"}
+		other := dhcpServerMAC(2)
+
+		xid, replies := demux.open()
+		c.send = func(msg *dhcpv4.DHCPv4) error {
+			wrong, err := dhcpv4.New(dhcpv4.WithTransactionID(xid), dhcpv4.WithHwAddr(other), dhcpv4.WithMessageType(dhcpv4.MessageTypeOffer))
+			require.NoError(t, err)
+			demux.deliver(wrong, netip.Addr{})
+
+			return nil
+		}
+
+		msg, err := dhcpv4.New(dhcpv4.WithTransactionID(xid), dhcpv4.WithHwAddr(srv.mac))
+		require.NoError(t, err)
+
+		_, err = c.exchange(t.Context(), srv, msg, replies, repeatSchedule, false, func(*dhcpv4.DHCPv4) verdict { return take })
+		require.ErrorIs(t, err, errNoReply)
+		require.Equal(t, int64(3), checks.count(checkMismatchedReply))
+	})
+}
+
+// The taken-IP picker only ever returns an IP another server in the same
+// subnet holds, and waits while there is none.
+func TestDHCPHeldPicksOthersOnly(t *testing.T) {
+	t.Parallel()
+
+	synctest.Test(t, func(t *testing.T) {
+		plan, err := planDHCP(DHCPLayout{VPCs: 1, Subnets: 2, Servers: 3})
+		require.NoError(t, err)
+
+		held := newDHCPHeld(plan)
+		servers := newDHCPServers(plan, 3)
+
+		mine := servers[0]
+		mine.ip = plan[0].start
+		require.Nil(t, held.hold(mine))
+
+		// Another subnet's server holds an IP; still nothing for mine.
+		elsewhere := servers[3]
+		elsewhere.ip = plan[1].start
+		require.Nil(t, held.hold(elsewhere))
+
+		got := make(chan netip.Addr)
+		go func() {
+			ip, ok := held.pickOther(t.Context(), mine)
+			require.True(t, ok)
+			got <- ip
+		}()
+
+		synctest.Wait()
+		select {
+		case <-got:
+			t.Fatal("picked while no other server in the subnet held an IP")
+		default:
+		}
+
+		neighbour := servers[1]
+		neighbour.ip = plan[0].start.Next()
+		require.Nil(t, held.hold(neighbour))
+		require.Equal(t, neighbour.ip, <-got)
+
+		for range 20 {
+			ip, ok := held.pickOther(t.Context(), mine)
+			require.True(t, ok)
+			require.Equal(t, neighbour.ip, ip)
+		}
+
+		// Two servers on one IP: the second is reported, the first keeps it.
+		dup := servers[2]
+		dup.ip = neighbour.ip
+		require.Equal(t, neighbour, held.hold(dup))
+	})
+}
+
+// The stored-state checks fire on what they are for and on nothing else; the
+// probe's leftover offer is expected.
+func TestCheckStored(t *testing.T) {
+	t.Parallel()
+
+	plan, err := planDHCP(DHCPLayout{VPCs: 1, Subnets: 1, Servers: 4})
+	require.NoError(t, err)
+
+	sub := plan[0]
+	servers := newDHCPServers(plan, 4)
+	now := time.Now()
+
+	ip := sub.start
+	for _, srv := range servers {
+		srv.ip = ip
+		srv.leaseEnd = now.Add(time.Hour)
+		ip = ip.Next()
+	}
+
+	lease := func(ip netip.Addr, expiry time.Time) dhcpapi.DHCPAllocated {
+		return dhcpapi.DHCPAllocated{IP: ip.String(), Expiry: kmetav1.NewTime(expiry)}
+	}
+
+	clean := map[string]dhcpapi.DHCPAllocated{dhcpProbeMAC(sub.index).String(): lease(ip, now.Add(time.Minute))}
+	for _, srv := range servers {
+		// Padding on top is fine, and so is clock skew within a minute.
+		clean[srv.mac.String()] = lease(srv.ip, srv.leaseEnd.Add(-30*time.Second))
+	}
+
+	checks := newDHCPChecks()
+	checkStored(checks, plan, servers, map[int]map[string]dhcpapi.DHCPAllocated{0: clean}, 4)
+	require.Zero(t, checks.failed())
+
+	broken := map[string]dhcpapi.DHCPAllocated{
+		servers[0].mac.String(): lease(servers[0].ip, now.Add(time.Hour)),
+		// servers[1] missing
+		servers[2].mac.String(): lease(servers[0].ip, now.Add(time.Hour)),   // another's IP: overlap and wrong
+		servers[3].mac.String(): lease(servers[3].ip, now.Add(time.Minute)), // expires under it
+		"02:aa:00:00:00:01":     lease(ip.Next(), now),
+	}
+
+	checks = newDHCPChecks()
+	checkStored(checks, plan, servers, map[int]map[string]dhcpapi.DHCPAllocated{0: broken}, 4)
+
+	require.Equal(t, int64(1), checks.count(checkOverlapLease))
+	require.Equal(t, int64(2), checks.count(checkMissingLease))
+	require.Equal(t, int64(1), checks.count(checkShortLease))
+	require.Equal(t, int64(1), checks.count(checkUnknownLease))
+}
