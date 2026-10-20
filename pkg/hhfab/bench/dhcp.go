@@ -6,6 +6,7 @@ package bench
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"math/bits"
 	"net"
 	"net/netip"
@@ -381,23 +382,41 @@ func clearDHCPKeys(plan []*dhcpSubnet) {
 	}
 }
 
-// pollUntil calls check every second until it reports done, fails, or timeout
-// passes.
+// pollUntil calls check every second until it reports done, the apiserver
+// rejects a request, or timeout passes. Any other error, such as the apiserver
+// restarting after an etcd stall, is waited out: it is logged when it starts
+// and when it clears, and polling goes on.
 func pollUntil(ctx context.Context, timeout time.Duration, what string, check func() (bool, error)) error {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
+	var lastErr error
+
 	for {
 		done, err := check()
-		if err != nil {
+		switch {
+		case err != nil && isRejection(err):
 			return err
+		case err != nil:
+			if lastErr == nil {
+				slog.Warn("Retrying while waiting for "+what, "err", err)
+			}
+			lastErr = err
+		case lastErr != nil:
+			slog.Info("Recovered while waiting for " + what)
+			lastErr = nil
 		}
-		if done {
+
+		if done && err == nil {
 			return nil
 		}
 
 		select {
 		case <-ctx.Done():
+			if lastErr != nil {
+				return fmt.Errorf("waiting for %s: %w: %w", what, ctx.Err(), lastErr)
+			}
+
 			return fmt.Errorf("waiting for %s: %w", what, ctx.Err())
 		case <-time.After(time.Second):
 		}

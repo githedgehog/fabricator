@@ -4,6 +4,8 @@
 package bench
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
@@ -23,6 +25,7 @@ import (
 	"go.githedgehog.com/fabricator/pkg/fab"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/fabric"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
+	kapierrors "k8s.io/apimachinery/pkg/api/errors"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -192,6 +195,8 @@ type fakeDHCPD struct {
 	nakFirst   bool // NAK each MAC's first REQUEST
 	zeroAck    bool // answer each MAC's first REQUEST with an ACK for 0.0.0.0
 	grantTaken bool // ACK a REQUEST for another MAC's IP
+	ackOwn     bool // ACK a REQUEST for another MAC's IP with the requester's own, like today's dhcpd
+	ackStray   bool // ACK a REQUEST for another MAC's IP with a free one
 	shareIP    bool // hand every server in a subnet the same IP
 	discovers  map[string]int
 	requests   map[string]int
@@ -300,7 +305,15 @@ func (f *fakeDHCPD) send(msg *dhcpv4.DHCPv4) error {
 
 		want, _ := netip.AddrFromSlice(msg.RequestedIPAddress().To4())
 		if owner, ok := f.owners[want]; ok && owner != mac && !f.grantTaken && !f.shareIP {
-			reply(dhcpv4.MessageTypeNak, netip.Addr{}, 0)
+			switch {
+			case f.ackOwn:
+				reply(dhcpv4.MessageTypeAck, f.leases[mac], 10*time.Second)
+			case f.ackStray:
+				reply(dhcpv4.MessageTypeAck, f.next[sub], 10*time.Second)
+				f.next[sub] = f.next[sub].Next()
+			default:
+				reply(dhcpv4.MessageTypeNak, netip.Addr{}, 0)
+			}
 
 			return nil
 		}
@@ -458,6 +471,72 @@ func TestDHCPStormFlagsTakenAndShared(t *testing.T) {
 		res, _, _ := storm(t, DHCPLayout{VPCs: 1, Subnets: 1, Servers: 3}, DHCPOpts{}, func(f *fakeDHCPD) { f.shareIP = true })
 
 		require.Equal(t, int64(2), failedChecks(res)[checkOverlap])
+	})
+}
+
+// Waiting out the apiserver: errors it fails to serve with are retried until the
+// check is done, while a rejection ends the wait at once.
+func TestPollUntilRetriesUnavailable(t *testing.T) {
+	t.Parallel()
+
+	synctest.Test(t, func(t *testing.T) {
+		calls := 0
+		err := pollUntil(t.Context(), time.Minute, "test", func() (bool, error) {
+			calls++
+			if calls <= 3 {
+				return false, errors.New("read: connection reset by peer") //nolint:err113
+			}
+
+			return true, nil
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, 4, calls)
+	})
+
+	synctest.Test(t, func(t *testing.T) {
+		calls := 0
+		err := pollUntil(t.Context(), time.Minute, "test", func() (bool, error) {
+			calls++
+
+			return false, kapierrors.NewBadRequest("no")
+		})
+
+		require.True(t, kapierrors.IsBadRequest(err))
+		require.Equal(t, 1, calls)
+	})
+
+	synctest.Test(t, func(t *testing.T) {
+		err := pollUntil(t.Context(), 5*time.Second, "test", func() (bool, error) {
+			return false, errors.New("read: connection reset by peer") //nolint:err113
+		})
+
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		require.ErrorContains(t, err, "connection reset by peer")
+	})
+}
+
+// A taken repeat asks for an IP another server holds. Today's dhcpd ACKs it with
+// the asking server's own IP instead of a NAK: that counts as ack-other and is
+// not flagged. An ACK for an IP that is neither the server's own nor the taken
+// one also counts as ack-other, and is flagged as wrong IP.
+func TestDHCPStormTakenAckedOther(t *testing.T) {
+	t.Parallel()
+
+	synctest.Test(t, func(t *testing.T) {
+		res, _, _ := storm(t, DHCPLayout{VPCs: 1, Subnets: 1, Servers: 4}, DHCPOpts{Repeats: 2, RepeatInterval: time.Second},
+			func(f *fakeDHCPD) { f.ackOwn = true })
+
+		require.Equal(t, int64(4), res.repeats[repeatTaken][outcomeAckOther])
+		require.Empty(t, failedChecks(res))
+	})
+
+	synctest.Test(t, func(t *testing.T) {
+		res, _, _ := storm(t, DHCPLayout{VPCs: 1, Subnets: 1, Servers: 4}, DHCPOpts{Repeats: 2, RepeatInterval: time.Second},
+			func(f *fakeDHCPD) { f.ackStray = true })
+
+		require.Equal(t, int64(4), res.repeats[repeatTaken][outcomeAckOther])
+		require.Equal(t, map[checkName]int64{checkWrongIP: 4}, failedChecks(res))
 	})
 }
 

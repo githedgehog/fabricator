@@ -547,8 +547,11 @@ const (
 type repeatOutcome int
 
 const (
-	outcomeAckSame  repeatOutcome = iota // ACK for the IP asked for
-	outcomeAckOther                      // ACK for some other IP
+	outcomeAckSame repeatOutcome = iota // ACK for the IP asked for
+	// ACK for an IP other than the one asked for. For a taken repeat that is
+	// normally the server's own IP; an IP that is neither its own nor the taken
+	// one is flagged as wrong IP as well.
+	outcomeAckOther
 	outcomeNak
 	outcomeZero    // 0.0.0.0
 	outcomeNoReply // nothing usable after every retransmit

@@ -422,6 +422,9 @@ func (c *dhcpClients) repeats(ctx context.Context, srv *dhcpServer, held *dhcpHe
 			c.checks.record(checkWrongIP, "%s asked again for its %s, got an ACK for %s", srv.hostname, want, got)
 		case kind == repeatTaken && got == want:
 			c.checks.record(checkTakenGranted, "%s was granted %s, which another server holds", srv.hostname, want)
+		case kind == repeatTaken && got != srv.ip:
+			c.checks.record(checkWrongIP, "%s asked for %s, which another server holds, got an ACK for %s instead of its own %s",
+				srv.hostname, want, got, srv.ip)
 		}
 	}
 }
