@@ -9,6 +9,7 @@ import (
 
 	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
+	"k8s.io/utils/ptr"
 )
 
 const (
@@ -18,11 +19,21 @@ const (
 	aclAltPort      uint16 = 6201
 	aclAltPortRange        = "6000-6500"
 	aclUnprobedPort uint16 = 9999
-
-	// the dataplane has no icmp keyword yet, a numeric protocol is the only
-	// way to match ICMP explicitly
-	aclProtoICMP gwapi.ACLMatchProtocol = "1"
 )
+
+func aclProtoTCP() *gwapi.PeeringACLMatchProtocol {
+	return &gwapi.PeeringACLMatchProtocol{TCP: &gwapi.PeeringACLMatchTCP{}}
+}
+
+func aclProtoUDP() *gwapi.PeeringACLMatchProtocol {
+	return &gwapi.PeeringACLMatchProtocol{UDP: &gwapi.PeeringACLMatchUDP{}}
+}
+
+// the dataplane has no icmp block yet, a protocol number is the only way to
+// match ICMP explicitly
+func aclProtoICMP() *gwapi.PeeringACLMatchProtocol {
+	return &gwapi.PeeringACLMatchProtocol{Number: ptr.To(uint8(1))}
+}
 
 func setACLDirVerdicts(m *ConnectivityMatrix, srcVPC, dstVPC string, icmp, tcp, udp ConnectivityVerdict) {
 	setVPCToVPCProtoVerdict(m, srcVPC, dstVPC, ProtoPort{Protocol: "icmp"}, icmp)
@@ -45,7 +56,7 @@ func gatewayACLDefaultDenyTest(ctx context.Context, testCtx *VPCPeeringTestCtx, 
 					Name: "allow-unprobed", From: vpc1.Name, To: vpc2.Name,
 					Action: gwapi.ACLActionAllow, Scope: gwapi.ACLScopePacket,
 					Match: gwapi.PeeringACLMatch{
-						Protocol:    gwapi.ACLMatchProtocolTCP,
+						Protocol:    aclProtoTCP(),
 						Destination: []gwapi.PeeringACLMatchEndpoint{{Ports: []string{fmt.Sprintf("%d", aclUnprobedPort)}}},
 					},
 				}},
@@ -75,8 +86,8 @@ func gatewayACLDenyUnlessExposedTest(ctx context.Context, testCtx *VPCPeeringTes
 			acl := &gwapi.PeeringACL{
 				Default: gwapi.ACLDefaultDenyUnlessExposed,
 				Rules: []gwapi.PeeringACLRule{
-					{Name: "deny-udp-fwd", From: vpc1.Name, To: vpc2.Name, Action: gwapi.ACLActionDeny, Scope: gwapi.ACLScopePacket, Match: gwapi.PeeringACLMatch{Protocol: gwapi.ACLMatchProtocolUDP}},
-					{Name: "deny-udp-rev", From: vpc2.Name, To: vpc1.Name, Action: gwapi.ACLActionDeny, Scope: gwapi.ACLScopePacket, Match: gwapi.PeeringACLMatch{Protocol: gwapi.ACLMatchProtocolUDP}},
+					{Name: "deny-udp-fwd", From: vpc1.Name, To: vpc2.Name, Action: gwapi.ACLActionDeny, Scope: gwapi.ACLScopePacket, Match: gwapi.PeeringACLMatch{Protocol: aclProtoUDP()}},
+					{Name: "deny-udp-rev", From: vpc2.Name, To: vpc1.Name, Action: gwapi.ACLActionDeny, Scope: gwapi.ACLScopePacket, Match: gwapi.PeeringACLMatch{Protocol: aclProtoUDP()}},
 				},
 			}
 			err := appendGwPeeringSpec(specs.Gateway, vpc1, vpc2, &GwPeeringOptions{ACL: acl})
@@ -130,8 +141,8 @@ func gatewayACLProtocolScopingTest(ctx context.Context, testCtx *VPCPeeringTestC
 			acl := &gwapi.PeeringACL{
 				Default: gwapi.ACLDefaultDeny,
 				Rules: []gwapi.PeeringACLRule{
-					{Name: "allow-tcp-fwd", From: vpc1.Name, To: vpc2.Name, Action: gwapi.ACLActionAllow, Scope: gwapi.ACLScopePacket, Match: gwapi.PeeringACLMatch{Protocol: gwapi.ACLMatchProtocolTCP}},
-					{Name: "allow-tcp-rev", From: vpc2.Name, To: vpc1.Name, Action: gwapi.ACLActionAllow, Scope: gwapi.ACLScopePacket, Match: gwapi.PeeringACLMatch{Protocol: gwapi.ACLMatchProtocolTCP}},
+					{Name: "allow-tcp-fwd", From: vpc1.Name, To: vpc2.Name, Action: gwapi.ACLActionAllow, Scope: gwapi.ACLScopePacket, Match: gwapi.PeeringACLMatch{Protocol: aclProtoTCP()}},
+					{Name: "allow-tcp-rev", From: vpc2.Name, To: vpc1.Name, Action: gwapi.ACLActionAllow, Scope: gwapi.ACLScopePacket, Match: gwapi.PeeringACLMatch{Protocol: aclProtoTCP()}},
 				},
 			}
 			err := appendGwPeeringSpec(specs.Gateway, vpc1, vpc2, &GwPeeringOptions{ACL: acl})
@@ -293,7 +304,7 @@ func gatewayACLPortScopingTest(ctx context.Context, testCtx *VPCPeeringTestCtx, 
 						Name: "allow-alt-fwd", From: vpc1.Name, To: vpc2.Name,
 						Action: gwapi.ACLActionAllow, Scope: gwapi.ACLScopePacket,
 						Match: gwapi.PeeringACLMatch{
-							Protocol:    gwapi.ACLMatchProtocolTCP,
+							Protocol:    aclProtoTCP(),
 							Destination: []gwapi.PeeringACLMatchEndpoint{{Ports: []string{aclAltPortRange}}},
 						},
 					},
@@ -301,7 +312,7 @@ func gatewayACLPortScopingTest(ctx context.Context, testCtx *VPCPeeringTestCtx, 
 						Name: "allow-alt-ret", From: vpc2.Name, To: vpc1.Name,
 						Action: gwapi.ACLActionAllow, Scope: gwapi.ACLScopePacket,
 						Match: gwapi.PeeringACLMatch{
-							Protocol: gwapi.ACLMatchProtocolTCP,
+							Protocol: aclProtoTCP(),
 							Source:   []gwapi.PeeringACLMatchEndpoint{{Ports: []string{aclAltPortRange}}},
 						},
 					},
@@ -346,7 +357,7 @@ func gatewayACLPrecedenceAllowThenDenyTest(ctx context.Context, testCtx *VPCPeer
 						Name: "allow-tcp", From: vpc1.Name, To: vpc2.Name,
 						Action: gwapi.ACLActionAllow, Scope: gwapi.ACLScopePacket,
 						Match: gwapi.PeeringACLMatch{
-							Protocol:    gwapi.ACLMatchProtocolTCP,
+							Protocol:    aclProtoTCP(),
 							Destination: []gwapi.PeeringACLMatchEndpoint{{Ports: []string{probePortStr}}},
 						},
 					},
@@ -355,7 +366,7 @@ func gatewayACLPrecedenceAllowThenDenyTest(ctx context.Context, testCtx *VPCPeer
 						Name: "allow-tcp-ret", From: vpc2.Name, To: vpc1.Name,
 						Action: gwapi.ACLActionAllow, Scope: gwapi.ACLScopePacket,
 						Match: gwapi.PeeringACLMatch{
-							Protocol: gwapi.ACLMatchProtocolTCP,
+							Protocol: aclProtoTCP(),
 							Source:   []gwapi.PeeringACLMatchEndpoint{{Ports: []string{probePortStr}}},
 						},
 					},
@@ -392,7 +403,7 @@ func gatewayACLPrecedenceDenyThenAllowTest(ctx context.Context, testCtx *VPCPeer
 						Name: "allow-tcp", From: vpc1.Name, To: vpc2.Name,
 						Action: gwapi.ACLActionAllow, Scope: gwapi.ACLScopePacket,
 						Match: gwapi.PeeringACLMatch{
-							Protocol:    gwapi.ACLMatchProtocolTCP,
+							Protocol:    aclProtoTCP(),
 							Destination: []gwapi.PeeringACLMatchEndpoint{{Ports: []string{probePortStr}}},
 						},
 					},
@@ -400,7 +411,7 @@ func gatewayACLPrecedenceDenyThenAllowTest(ctx context.Context, testCtx *VPCPeer
 						Name: "allow-tcp-ret", From: vpc2.Name, To: vpc1.Name,
 						Action: gwapi.ACLActionAllow, Scope: gwapi.ACLScopePacket,
 						Match: gwapi.PeeringACLMatch{
-							Protocol: gwapi.ACLMatchProtocolTCP,
+							Protocol: aclProtoTCP(),
 							Source:   []gwapi.PeeringACLMatchEndpoint{{Ports: []string{probePortStr}}},
 						},
 					},
@@ -431,8 +442,8 @@ func gatewayACLNumericProtocolICMPTest(ctx context.Context, testCtx *VPCPeeringT
 			acl := &gwapi.PeeringACL{
 				Default: gwapi.ACLDefaultDeny,
 				Rules: []gwapi.PeeringACLRule{
-					{Name: "allow-icmp-fwd", From: vpc1.Name, To: vpc2.Name, Action: gwapi.ACLActionAllow, Scope: gwapi.ACLScopePacket, Match: gwapi.PeeringACLMatch{Protocol: aclProtoICMP}},
-					{Name: "allow-icmp-rev", From: vpc2.Name, To: vpc1.Name, Action: gwapi.ACLActionAllow, Scope: gwapi.ACLScopePacket, Match: gwapi.PeeringACLMatch{Protocol: aclProtoICMP}},
+					{Name: "allow-icmp-fwd", From: vpc1.Name, To: vpc2.Name, Action: gwapi.ACLActionAllow, Scope: gwapi.ACLScopePacket, Match: gwapi.PeeringACLMatch{Protocol: aclProtoICMP()}},
+					{Name: "allow-icmp-rev", From: vpc2.Name, To: vpc1.Name, Action: gwapi.ACLActionAllow, Scope: gwapi.ACLScopePacket, Match: gwapi.PeeringACLMatch{Protocol: aclProtoICMP()}},
 				},
 			}
 			err := appendGwPeeringSpec(specs.Gateway, vpc1, vpc2, &GwPeeringOptions{ACL: acl})
