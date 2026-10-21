@@ -385,12 +385,18 @@ func (c *dhcpClients) checkAssigned(srv *dhcpServer, held *dhcpHeld) {
 }
 
 // repeats sends the server's repeat REQUESTs, alternating its own IP and one
-// another server holds, each after a jittered pause.
+// another server holds, each after a jittered pause. A server alone in its
+// subnet has no one to take an IP from, so it only asks for its own.
 func (c *dhcpClients) repeats(ctx context.Context, srv *dhcpServer, held *dhcpHeld, opts DHCPOpts) {
 	c.stats.enter(phaseRepeat)
 	defer c.stats.leave(phaseRepeat)
 
 	for idx := range opts.Repeats {
+		taken := idx%2 == 1
+		if taken && srv.sub.servers < 2 {
+			continue
+		}
+
 		select {
 		case <-ctx.Done():
 			return
@@ -398,7 +404,7 @@ func (c *dhcpClients) repeats(ctx context.Context, srv *dhcpServer, held *dhcpHe
 		}
 
 		kind, want := repeatOwn, srv.ip
-		if idx%2 == 1 {
+		if taken {
 			kind = repeatTaken
 
 			var ok bool

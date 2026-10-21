@@ -626,6 +626,23 @@ func TestDHCPStormRenewalNaked(t *testing.T) {
 	})
 }
 
+// A server alone in its subnet has no other server's IP to ask for, so it
+// skips the taken repeats instead of waiting the round out for one.
+func TestDHCPStormLoneServer(t *testing.T) {
+	t.Parallel()
+
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		res, _, _ := storm(t, DHCPLayout{VPCs: 1, Subnets: 2, Servers: 2}, DHCPOpts{Repeats: 4, RepeatInterval: time.Second}, nil)
+
+		require.Less(t, time.Since(start), time.Minute)
+		require.Equal(t, int64(2), res.bound)
+		require.Equal(t, int64(4), res.repeats[repeatOwn][outcomeAckSame])
+		require.Equal(t, [repeatOutcomes]int64{}, res.repeats[repeatTaken])
+		require.Empty(t, failedChecks(res))
+	})
+}
+
 // PXE firmware that never hears back gives up after 4, 8, 16 and 32 s and
 // stops for the round; nothing else of the server runs.
 func TestDHCPStormPXEGivesUp(t *testing.T) {
