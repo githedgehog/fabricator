@@ -20,6 +20,7 @@ import (
 	dhcpapi "go.githedgehog.com/fabric/api/dhcp/v1beta1"
 	fmeta "go.githedgehog.com/fabric/api/meta"
 	"go.githedgehog.com/fabric/api/valid"
+	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab"
@@ -27,7 +28,45 @@ import (
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 	kapierrors "k8s.io/apimachinery/pkg/api/errors"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
+
+// A namespace or VPC with a bench name that the bench didn't create stops the
+// round before anything is deleted or applied, so it is never taken over and
+// later removed by bench clean. The bench's own objects from an earlier run
+// are fine.
+func TestResetDHCPObjectsRefusesForeignObjects(t *testing.T) {
+	t.Parallel()
+
+	plan, err := planDHCP(DHCPLayout{Servers: 4, Subnets: 2, VPCs: 1})
+	require.NoError(t, err)
+
+	objs := dhcpObjects(plan, "")
+
+	scheme, err := benchScheme()
+	require.NoError(t, err)
+
+	ours := func() kclient.Object {
+		return &vpcapi.VPC{ObjectMeta: objMeta("dhcp-0001", map[string]string{LabelFabric: DHCPLabel})}
+	}
+	require.NoError(t, checkDHCPOwnership(t.Context(), fake.NewClientBuilder().WithScheme(scheme).WithObjects(ours()).Build(), objs))
+
+	for name, existing := range map[string][]kclient.Object{
+		// The bench's own VPC would be deleted for the round, but isn't.
+		"namespace": {&vpcapi.IPv4Namespace{ObjectMeta: objMeta(DHCPNamespace, nil)}, ours()},
+		"vpc":       {&vpcapi.VPC{ObjectMeta: objMeta("dhcp-0001", map[string]string{LabelFabric: "other"})}},
+	} {
+		kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(existing...).Build()
+
+		err := resetDHCPObjects(t.Context(), kube, plan, objs)
+		require.ErrorContains(t, err, "isn't the bench's", name)
+
+		left := &vpcapi.VPCList{}
+		require.NoError(t, kube.List(t.Context(), left))
+		require.Len(t, left.Items, 1, "%s: nothing deleted", name)
+	}
+}
 
 // The default fleet is 20k servers in VPCs of at most 1000: 40 subnets of 500
 // servers, /23s each with room for the servers and the probe, on their own
