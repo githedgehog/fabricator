@@ -153,7 +153,7 @@ func (c *dhcpChecks) log(scope string) {
 // MACs, every bound server's lease present with the IP it was ACKed and an
 // expiry no earlier than the lease it was given, and nothing for MACs the
 // bench never used. The probe's leftover offer is the one expected stranger.
-func checkStored(checks *dhcpChecks, plan []*dhcpSubnet, servers []*dhcpServer, stored map[int]map[string]dhcpapi.DHCPAllocated, perSubnet int) {
+func checkStored(checks *dhcpChecks, plan []*dhcpSubnet, servers []*dhcpServer, stored map[int]map[string]dhcpapi.DHCPAllocated) {
 	known := make(map[string]*dhcpServer, len(servers))
 	for _, srv := range servers {
 		known[srv.mac.String()] = srv
@@ -184,8 +184,7 @@ func checkStored(checks *dhcpChecks, plan []*dhcpSubnet, servers []*dhcpServer, 
 			}
 		}
 
-		for idx := range perSubnet {
-			srv := servers[sub.index*perSubnet+idx]
+		for _, srv := range servers[sub.first : sub.first+sub.servers] {
 			if srv.leaseEnd.IsZero() {
 				continue
 			}

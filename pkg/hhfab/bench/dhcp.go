@@ -49,29 +49,43 @@ const (
 	maxDHCPVPCs   = 9999
 )
 
-// Defaults for `bench dhcp`: 10 VPCs of 2 subnets of 1000 servers is a 20k
-// server fleet, each subnet well below the ~8k leases at which a DHCPSubnet's
-// status nears etcd's request size limit.
+// Defaults for `bench dhcp`: a 20k server fleet in subnets of at most 1000
+// servers, so 10 VPCs of 2 subnets of 1000 servers, each subnet well below the
+// ~8k leases at which a DHCPSubnet's status nears etcd's request size limit.
 const (
-	DefaultDHCPVPCs           = 10
-	DefaultDHCPSubnets        = 2
-	DefaultDHCPServers        = 1000
-	DefaultDHCPRounds         = 3
-	DefaultDHCPRepeats        = 5
-	DefaultDHCPRepeatInterval = 10 * time.Second
-	DefaultDHCPRoundTimeout   = 30 * time.Minute
+	DefaultDHCPServers          = 20_000
+	DefaultDHCPSubnets          = 2
+	DefaultDHCPVPCs             = 0
+	DefaultDHCPMaxSubnetServers = 1000
+	DefaultDHCPRounds           = 3
+	DefaultDHCPRepeats          = 5
+	DefaultDHCPRepeatInterval   = 10 * time.Second
+	DefaultDHCPRoundTimeout     = 30 * time.Minute
 )
 
 // dhcpObjectsTimeout bounds each wait on the controllers during cleanup: the
 // VPCs going away with their DHCPSubnets, and coming back.
 const dhcpObjectsTimeout = 5 * time.Minute
 
-// DHCPLayout is the requested fleet: so many VPCs of so many subnets of so many
-// servers each.
+// DHCPLayout is the requested fleet: so many servers in total, spread evenly
+// over VPCs of so many subnets each. With VPCs left at 0 there are just enough
+// VPCs for at most MaxSubnetServers servers in each subnet.
 type DHCPLayout struct {
-	VPCs    int
-	Subnets int
-	Servers int
+	Servers          int
+	Subnets          int
+	VPCs             int
+	MaxSubnetServers int
+}
+
+// vpcs is how many VPCs the fleet is spread over.
+func (l DHCPLayout) vpcs() int {
+	if l.VPCs > 0 || l.Subnets < 1 || l.MaxSubnetServers < 1 {
+		return l.VPCs
+	}
+
+	perVPC := l.Subnets * l.MaxSubnetServers
+
+	return (l.Servers + perVPC - 1) / perVPC
 }
 
 // dhcpSubnet is one bench DHCP subnet: where it sits, and once dhcpd's
@@ -85,6 +99,10 @@ type dhcpSubnet struct {
 	gateway netip.Addr
 	start   netip.Addr
 	end     netip.Addr
+
+	// Its servers are numbered first to first+servers-1 across the fleet.
+	first   int
+	servers int
 
 	// From the DHCPSubnet the VPC controller creates, so the relay sends what
 	// dhcpd looks the subnet up by rather than a guess at it.
@@ -104,42 +122,65 @@ func (s *dhcpSubnet) usable(ip netip.Addr) bool {
 }
 
 // planDHCP lays the fleet out: VPC and subnet names, VLANs, and CIDRs carved in
-// order from DHCPIPv4Subnet, each with room for its servers plus the network,
-// gateway and broadcast addresses and the readiness probe, whose DISCOVER holds
-// an address for a while without ever being requested.
+// order from DHCPIPv4Subnet. The servers are spread evenly over the subnets,
+// the first ones taking one more when they don't divide; every subnet gets the
+// same prefix, with room for the most servers any of them has plus the
+// network, gateway and broadcast addresses and the readiness probe, whose
+// DISCOVER holds an address for a while without ever being requested.
 func planDHCP(layout DHCPLayout) ([]*dhcpSubnet, error) {
+	vpcs := layout.vpcs()
+
 	switch {
-	case layout.VPCs < 1 || layout.VPCs > maxDHCPVPCs:
-		return nil, fmt.Errorf("vpcs must be between 1 and %d, got %d", maxDHCPVPCs, layout.VPCs) //nolint:err113
+	case layout.Servers < 1:
+		return nil, fmt.Errorf("servers must be at least 1, got %d", layout.Servers) //nolint:err113
+	case layout.Servers > maxDHCPServers:
+		return nil, fmt.Errorf("%d servers exceed the %d the bench MAC scheme can number", layout.Servers, maxDHCPServers) //nolint:err113
 	case layout.Subnets < 1 || layout.Subnets > MaxDHCPSubnetsPerVPC:
 		return nil, fmt.Errorf("subnets per vpc must be between 1 and %d, got %d", MaxDHCPSubnetsPerVPC, layout.Subnets) //nolint:err113
-	case layout.Servers < 1:
-		return nil, fmt.Errorf("servers per subnet must be at least 1, got %d", layout.Servers) //nolint:err113
+	case layout.VPCs < 0:
+		return nil, fmt.Errorf("vpcs must not be negative, got %d", layout.VPCs) //nolint:err113
+	case layout.VPCs == 0 && layout.MaxSubnetServers < 1:
+		return nil, fmt.Errorf("max servers per subnet must be at least 1 to pick the vpcs, got %d", layout.MaxSubnetServers) //nolint:err113
+	case vpcs > maxDHCPVPCs:
+		return nil, fmt.Errorf("%d vpcs exceed the %d the bench can name", vpcs, maxDHCPVPCs) //nolint:err113
 	}
 
-	total := layout.VPCs * layout.Subnets
+	total := vpcs * layout.Subnets
+	if total > layout.Servers {
+		return nil, fmt.Errorf("%d servers can't fill %d vpcs of %d subnets, every subnet needs at least one", //nolint:err113
+			layout.Servers, vpcs, layout.Subnets)
+	}
 	if vlans := DHCPVLANTo - DHCPVLANFrom + 1; total > vlans {
 		return nil, fmt.Errorf("%d subnets need %d VLANs, the bench DHCP VLAN range %d-%d has %d", //nolint:err113
 			total, total, DHCPVLANFrom, DHCPVLANTo, vlans)
 	}
 
-	// Network, gateway, broadcast and the probe's address.
-	need := uint64(layout.Servers) + 4
-	hostBits := max(bits.Len64(need-1), 2) // the VPC API takes nothing longer than /30
-	if servers := totalDHCPServers(layout); servers > maxDHCPServers {
-		return nil, fmt.Errorf("%d servers exceed the %d the bench MAC scheme can number", servers, maxDHCPServers) //nolint:err113
+	perSubnet, extra := layout.Servers/total, layout.Servers%total
+	most := perSubnet
+	if extra > 0 {
+		most++
 	}
+
+	// Network, gateway, broadcast and the probe's address.
+	need := uint64(most) + 4               //nolint:gosec // at least 1, checked above
+	hostBits := max(bits.Len64(need-1), 2) // the VPC API takes nothing longer than /30
 
 	base := netip.MustParsePrefix(DHCPIPv4Subnet)
 	if hostBits > 32-base.Bits() || uint64(total)<<hostBits > uint64(1)<<(32-base.Bits()) { //nolint:gosec // bounded above
 		return nil, fmt.Errorf("%d subnets of %d servers (/%d each) do not fit in %s", //nolint:err113
-			total, layout.Servers, 32-hostBits, DHCPIPv4Subnet)
+			total, most, 32-hostBits, DHCPIPv4Subnet)
 	}
 
 	out := make([]*dhcpSubnet, 0, total)
-	for vpcIdx := range layout.VPCs {
+	first := 0
+	for vpcIdx := range vpcs {
 		for subIdx := range layout.Subnets {
 			idx := vpcIdx*layout.Subnets + subIdx
+
+			servers := perSubnet
+			if idx < extra {
+				servers++
+			}
 
 			network, err := addrAdd(base.Addr(), uint64(idx)<<hostBits) //nolint:gosec // idx is non-negative
 			if err != nil {
@@ -163,7 +204,10 @@ func planDHCP(layout DHCPLayout) ([]*dhcpSubnet, error) {
 				gateway: gateway,
 				start:   gateway.Next(),
 				end:     broadcast.Prev(),
+				first:   first,
+				servers: servers,
 			})
+			first += servers
 		}
 	}
 
@@ -174,8 +218,19 @@ func dhcpVPCName(idx int) string {
 	return fmt.Sprintf("%s%04d", dhcpVPCPrefix, idx+1)
 }
 
-func totalDHCPServers(layout DHCPLayout) int {
-	return layout.VPCs * layout.Subnets * layout.Servers
+// dhcpServersPerSubnet shows how many servers each subnet has: one number, or
+// the range when they don't divide evenly.
+func dhcpServersPerSubnet(plan []*dhcpSubnet) string {
+	least, most := plan[0].servers, plan[0].servers
+	for _, sub := range plan {
+		least, most = min(least, sub.servers), max(most, sub.servers)
+	}
+
+	if least == most {
+		return fmt.Sprint(most)
+	}
+
+	return fmt.Sprintf("%d-%d", least, most)
 }
 
 // dhcpObjects builds the namespaces and VPCs for a plan. pxeURL, when set,

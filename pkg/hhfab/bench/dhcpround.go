@@ -76,9 +76,9 @@ func RunDHCP(ctx context.Context, kube kclient.Client, transport *DHCPTransport,
 
 	objs := dhcpObjects(plan, pxeURL)
 
-	slog.Info("Preparing DHCP storm", "vpcs", opts.Layout.VPCs, "subnetsPerVPC", opts.Layout.Subnets,
-		"serversPerSubnet", opts.Layout.Servers, "servers", totalDHCPServers(opts.Layout), "prefix", plan[0].prefix.Bits(),
-		"rounds", opts.Rounds, "repeats", opts.Repeats, "pxe", opts.PXE, "relay", opts.Relay.Name, "giaddr", opts.Relay.IP.Addr(),
+	slog.Info("Preparing DHCP storm", "servers", opts.Layout.Servers, "vpcs", opts.Layout.vpcs(), "subnetsPerVPC", opts.Layout.Subnets,
+		"serversPerSubnet", dhcpServersPerSubnet(plan), "prefix", plan[0].prefix.Bits(),
+		"rounds", opts.Rounds, "spread", opts.Spread, "repeats", opts.Repeats, "pxe", opts.PXE, "relay", opts.Relay.Name, "giaddr", opts.Relay.IP.Addr(),
 		"server", opts.Server)
 
 	demux := newDHCPDemux()
@@ -117,7 +117,7 @@ func runDHCPRound(ctx context.Context, kube kclient.Client, send func(*dhcpv4.DH
 		return nil, err
 	}
 
-	stats := newDHCPRoundStats(round, opts.Rounds, totalDHCPServers(opts.Layout))
+	stats := newDHCPRoundStats(round, opts.Rounds, opts.Layout.Servers)
 	checks := newDHCPChecks()
 
 	clients := &dhcpClients{
@@ -142,7 +142,7 @@ func runDHCPRound(ctx context.Context, kube kclient.Client, send func(*dhcpv4.DH
 	late, dropped, garbled := demux.late.Load(), demux.dropped.Load(), demux.garbled.Load()
 
 	held := newDHCPHeld(plan)
-	servers := newDHCPServers(plan, opts.Layout.Servers)
+	servers := newDHCPServers(plan)
 
 	reportCtx, stopReport := context.WithCancel(ctx)
 
@@ -159,7 +159,7 @@ func runDHCPRound(ctx context.Context, kube kclient.Client, send func(*dhcpv4.DH
 		return nil, err
 	}
 
-	checkStored(checks, plan, servers, stored, opts.Layout.Servers)
+	checkStored(checks, plan, servers, stored)
 
 	res := stats.result(cleanup, storm, checks, servers)
 	res.late = demux.late.Load() - late
@@ -209,12 +209,15 @@ func probeDHCP(ctx context.Context, clients *dhcpClients, plan []*dhcpSubnet) er
 	return nil
 }
 
-func newDHCPServers(plan []*dhcpSubnet, perSubnet int) []*dhcpServer {
-	out := make([]*dhcpServer, 0, len(plan)*perSubnet)
+// newDHCPServers numbers the fleet's servers in plan order, so each subnet's
+// are servers[sub.first:sub.first+sub.servers].
+func newDHCPServers(plan []*dhcpSubnet) []*dhcpServer {
+	last := plan[len(plan)-1]
+	out := make([]*dhcpServer, 0, last.first+last.servers)
 
 	for _, sub := range plan {
-		for idx := range perSubnet {
-			global := sub.index*perSubnet + idx
+		for idx := range sub.servers {
+			global := sub.first + idx
 			out = append(out, &dhcpServer{
 				idx:      global,
 				sub:      sub,

@@ -29,15 +29,18 @@ import (
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// The default fleet is 20 subnets of 1000 servers: /22s, each with room for the
-// servers and the probe, on their own VLANs, carved in order and never
-// overlapping.
+// The default fleet is 20k servers in VPCs of at most 1000: 40 subnets of 500
+// servers, /23s each with room for the servers and the probe, on their own
+// VLANs, carved in order and never overlapping.
 func TestPlanDHCPDefaults(t *testing.T) {
 	t.Parallel()
 
-	plan, err := planDHCP(DHCPLayout{VPCs: DefaultDHCPVPCs, Subnets: DefaultDHCPSubnets, Servers: DefaultDHCPServers})
+	plan, err := planDHCP(DHCPLayout{
+		Servers: DefaultDHCPServers, Subnets: DefaultDHCPSubnets, VPCs: DefaultDHCPVPCs, MaxSubnetServers: DefaultDHCPMaxSubnetServers,
+	})
 	require.NoError(t, err)
 	require.Len(t, plan, 20)
+	require.Equal(t, "1000", dhcpServersPerSubnet(plan))
 
 	first := plan[0]
 	require.Equal(t, "dhcp-0001", first.vpc)
@@ -53,10 +56,12 @@ func TestPlanDHCPDefaults(t *testing.T) {
 	require.Equal(t, "dhcp-0010", last.vpc)
 	require.Equal(t, "s02", last.name)
 	require.Equal(t, uint16(DHCPVLANFrom+19), last.vlan)
+	require.Equal(t, DefaultDHCPServers, last.first+last.servers)
 
 	for idx, sub := range plan {
 		require.Equal(t, idx, sub.index)
-		require.GreaterOrEqual(t, rangeSize(sub), DefaultDHCPServers+1, "room for every server and the probe in %s", sub.dhcpSubnetName())
+		require.Equal(t, idx*1000, sub.first)
+		require.GreaterOrEqual(t, rangeSize(sub), sub.servers+1, "room for every server and the probe in %s", sub.dhcpSubnetName())
 		require.False(t, sub.usable(sub.prefix.Addr()), "network address")
 		require.False(t, sub.usable(sub.gateway), "gateway")
 
@@ -88,16 +93,56 @@ func TestPlanDHCPPrefixSizing(t *testing.T) {
 	}
 }
 
+// Without --vpcs there are just enough VPCs for the max servers per subnet,
+// and servers that don't divide evenly go one more to the first subnets.
+func TestPlanDHCPSpreadsServers(t *testing.T) {
+	t.Parallel()
+
+	plan, err := planDHCP(DHCPLayout{Servers: 2500, Subnets: 2, MaxSubnetServers: 500})
+	require.NoError(t, err)
+	require.Len(t, plan, 6)
+	require.Equal(t, "dhcp-0003", plan[5].vpc)
+	require.Equal(t, "416-417", dhcpServersPerSubnet(plan))
+
+	first := 0
+	for idx, sub := range plan {
+		want := 416
+		if idx < 4 {
+			want = 417
+		}
+
+		require.Equal(t, want, sub.servers, sub.dhcpSubnetName())
+		require.Equal(t, first, sub.first, sub.dhcpSubnetName())
+		first += sub.servers
+	}
+	require.Equal(t, 2500, first)
+
+	servers := newDHCPServers(plan)
+	require.Len(t, servers, 2500)
+	for idx, srv := range servers {
+		require.Equal(t, idx, srv.idx)
+	}
+
+	// --vpcs wins over the max.
+	plan, err = planDHCP(DHCPLayout{Servers: 2500, Subnets: 2, VPCs: 1, MaxSubnetServers: 500})
+	require.NoError(t, err)
+	require.Len(t, plan, 2)
+	require.Equal(t, "1250", dhcpServersPerSubnet(plan))
+}
+
 func TestPlanDHCPRefusesWhatCannotExist(t *testing.T) {
 	t.Parallel()
 
 	for name, layout := range map[string]DHCPLayout{
-		"no vpcs":           {VPCs: 0, Subnets: 1, Servers: 1},
-		"too many subnets":  {VPCs: 1, Subnets: MaxDHCPSubnetsPerVPC + 1, Servers: 1},
-		"no servers":        {VPCs: 1, Subnets: 1, Servers: 0},
-		"out of VLANs":      {VPCs: 101, Subnets: 20, Servers: 1},
-		"out of addresses":  {VPCs: 10, Subnets: 20, Servers: 100_000},
-		"too many vpc name": {VPCs: maxDHCPVPCs + 1, Subnets: 1, Servers: 1},
+		"no vpcs nor max":            {Servers: 1, Subnets: 1},
+		"negative vpcs":              {Servers: 1, Subnets: 1, VPCs: -1},
+		"too many subnets":           {Servers: 100, Subnets: MaxDHCPSubnetsPerVPC + 1, VPCs: 1},
+		"no servers":                 {Servers: 0, Subnets: 1, VPCs: 1},
+		"fewer servers than subnets": {Servers: 1, Subnets: 2, MaxSubnetServers: 1000},
+		"out of VLANs":               {Servers: 3000, Subnets: 20, VPCs: 101},
+		"out of addresses":           {Servers: 16_000_000, Subnets: 20, VPCs: 10},
+		"too many servers":           {Servers: maxDHCPServers + 1, Subnets: 1, VPCs: 1},
+		"too many vpc names":         {Servers: 20_000, Subnets: 1, MaxSubnetServers: 1},
 	} {
 		_, err := planDHCP(layout)
 		require.Error(t, err, name)
@@ -125,7 +170,7 @@ func TestDHCPObjectsValidate(t *testing.T) {
 			Spec:       wiringapi.DefaultFabricSpec(cfg),
 		}))
 
-		plan, err := planDHCP(DHCPLayout{VPCs: 3, Subnets: MaxDHCPSubnetsPerVPC, Servers: 100})
+		plan, err := planDHCP(DHCPLayout{Servers: 6000, Subnets: MaxDHCPSubnetsPerVPC, VPCs: 3})
 		require.NoError(t, err)
 
 		for _, obj := range dhcpObjects(plan, pxeURL) {
@@ -353,7 +398,7 @@ func storm(t *testing.T, layout DHCPLayout, opts DHCPOpts, setup func(*fakeDHCPD
 		setup(fake)
 	}
 
-	stats := newDHCPRoundStats(0, 1, totalDHCPServers(layout))
+	stats := newDHCPRoundStats(0, 1, layout.Servers)
 	checks := newDHCPChecks()
 	clients := &dhcpClients{
 		send: fake.send, demux: demux, relay: net.ParseIP("172.30.0.38"), stats: stats, checks: checks,
@@ -366,7 +411,7 @@ func storm(t *testing.T, layout DHCPLayout, opts DHCPOpts, setup func(*fakeDHCPD
 	}
 
 	held := newDHCPHeld(plan)
-	servers := newDHCPServers(plan, layout.Servers)
+	servers := newDHCPServers(plan)
 	took := runDHCPStorm(t.Context(), clients, servers, held, opts, stats)
 
 	return stats.result(0, took, checks, servers), servers, fake
@@ -389,7 +434,7 @@ func TestDHCPStormClean(t *testing.T) {
 	t.Parallel()
 
 	synctest.Test(t, func(t *testing.T) {
-		res, servers, _ := storm(t, DHCPLayout{VPCs: 2, Subnets: 2, Servers: 5}, DHCPOpts{Repeats: 4, RepeatInterval: time.Second}, nil)
+		res, servers, _ := storm(t, DHCPLayout{VPCs: 2, Subnets: 2, Servers: 20}, DHCPOpts{Repeats: 4, RepeatInterval: time.Second}, nil)
 
 		require.Equal(t, int64(20), res.bound)
 		require.Zero(t, res.timedOut)
@@ -656,11 +701,11 @@ func TestDHCPHeldPicksOthersOnly(t *testing.T) {
 	t.Parallel()
 
 	synctest.Test(t, func(t *testing.T) {
-		plan, err := planDHCP(DHCPLayout{VPCs: 1, Subnets: 2, Servers: 3})
+		plan, err := planDHCP(DHCPLayout{VPCs: 1, Subnets: 2, Servers: 6})
 		require.NoError(t, err)
 
 		held := newDHCPHeld(plan)
-		servers := newDHCPServers(plan, 3)
+		servers := newDHCPServers(plan)
 
 		mine := servers[0]
 		mine.ip = plan[0].start
@@ -712,7 +757,7 @@ func TestCheckStored(t *testing.T) {
 	require.NoError(t, err)
 
 	sub := plan[0]
-	servers := newDHCPServers(plan, 4)
+	servers := newDHCPServers(plan)
 	now := time.Now()
 
 	ip := sub.start
@@ -733,7 +778,7 @@ func TestCheckStored(t *testing.T) {
 	}
 
 	checks := newDHCPChecks()
-	checkStored(checks, plan, servers, map[int]map[string]dhcpapi.DHCPAllocated{0: clean}, 4)
+	checkStored(checks, plan, servers, map[int]map[string]dhcpapi.DHCPAllocated{0: clean})
 	require.Zero(t, checks.failed())
 
 	broken := map[string]dhcpapi.DHCPAllocated{
@@ -745,7 +790,7 @@ func TestCheckStored(t *testing.T) {
 	}
 
 	checks = newDHCPChecks()
-	checkStored(checks, plan, servers, map[int]map[string]dhcpapi.DHCPAllocated{0: broken}, 4)
+	checkStored(checks, plan, servers, map[int]map[string]dhcpapi.DHCPAllocated{0: broken})
 
 	require.Equal(t, int64(1), checks.count(checkOverlapLease))
 	require.Equal(t, int64(2), checks.count(checkMissingLease))
