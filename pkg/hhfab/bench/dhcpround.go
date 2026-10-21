@@ -307,9 +307,9 @@ func (c *dhcpClients) boot(ctx context.Context, srv *dhcpServer, held *dhcpHeld,
 // bind runs DORA and the first renewal until the server holds a renewed lease,
 // starting over whenever dhcpd NAKs it.
 func (c *dhcpClients) bind(ctx context.Context, srv *dhcpServer, held *dhcpHeld) bool {
-	start := time.Now()
-
 	for {
+		start := time.Now()
+
 		c.stats.enter(phaseDORA)
 		ack, err := c.dora(ctx, srv, clientProfile{sched: c.osSched})
 		c.stats.leave(phaseDORA)
