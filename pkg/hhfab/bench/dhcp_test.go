@@ -536,7 +536,7 @@ func TestPollUntilRetriesUnavailable(t *testing.T) {
 
 	synctest.Test(t, func(t *testing.T) {
 		calls := 0
-		err := pollUntil(t.Context(), time.Minute, "test", func() (bool, error) {
+		err := pollUntil(t.Context(), time.Minute, "test", func(context.Context) (bool, error) {
 			calls++
 			if calls <= 3 {
 				return false, errors.New("read: connection reset by peer") //nolint:err113
@@ -551,7 +551,7 @@ func TestPollUntilRetriesUnavailable(t *testing.T) {
 
 	synctest.Test(t, func(t *testing.T) {
 		calls := 0
-		err := pollUntil(t.Context(), time.Minute, "test", func() (bool, error) {
+		err := pollUntil(t.Context(), time.Minute, "test", func(context.Context) (bool, error) {
 			calls++
 
 			return false, kapierrors.NewBadRequest("no")
@@ -562,12 +562,25 @@ func TestPollUntilRetriesUnavailable(t *testing.T) {
 	})
 
 	synctest.Test(t, func(t *testing.T) {
-		err := pollUntil(t.Context(), 5*time.Second, "test", func() (bool, error) {
+		err := pollUntil(t.Context(), 5*time.Second, "test", func(context.Context) (bool, error) {
 			return false, errors.New("read: connection reset by peer") //nolint:err113
 		})
 
 		require.ErrorIs(t, err, context.DeadlineExceeded)
 		require.ErrorContains(t, err, "connection reset by peer")
+	})
+
+	// A request that hangs ends with the timeout rather than outlasting it.
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		err := pollUntil(t.Context(), 5*time.Second, "test", func(ctx context.Context) (bool, error) {
+			<-ctx.Done()
+
+			return false, ctx.Err()
+		})
+
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		require.Equal(t, 5*time.Second, time.Since(start))
 	})
 }
 

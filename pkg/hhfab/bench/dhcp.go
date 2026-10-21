@@ -376,7 +376,7 @@ func resetDHCPObjects(ctx context.Context, kube kclient.Client, plan []*dhcpSubn
 // A VPC being deleted can't be recreated under its name, and the DHCPSubnets,
 // which it owns, only go once the garbage collector gets to them.
 func waitDHCPGone(ctx context.Context, kube kclient.Client) error {
-	return pollUntil(ctx, dhcpObjectsTimeout, "the old bench DHCP VPCs and subnets to go away", func() (bool, error) {
+	return pollUntil(ctx, dhcpObjectsTimeout, "the old bench DHCP VPCs and subnets to go away", func(ctx context.Context) (bool, error) {
 		vpcs := &vpcapi.VPCList{}
 		if err := kube.List(ctx, vpcs, kclient.MatchingLabels{LabelFabric: DHCPLabel}); err != nil {
 			return false, fmt.Errorf("listing bench DHCP VPCs: %w", err)
@@ -403,7 +403,7 @@ func waitDHCPGone(ctx context.Context, kube kclient.Client) error {
 // waitDHCPSubnets waits until the controller has created every DHCPSubnet of
 // the plan and fills in what dhcpd keys each one on.
 func waitDHCPSubnets(ctx context.Context, kube kclient.Client, plan []*dhcpSubnet) error {
-	return pollUntil(ctx, dhcpObjectsTimeout, "the bench DHCP subnets to be created", func() (bool, error) {
+	return pollUntil(ctx, dhcpObjectsTimeout, "the bench DHCP subnets to be created", func(ctx context.Context) (bool, error) {
 		for _, sub := range plan {
 			if sub.vrf != "" {
 				continue
@@ -440,15 +440,16 @@ func clearDHCPKeys(plan []*dhcpSubnet) {
 // pollUntil calls check every second until it reports done, the apiserver
 // rejects a request, or timeout passes. Any other error, such as the apiserver
 // restarting after an etcd stall, is waited out: it is logged when it starts
-// and when it clears, and polling goes on.
-func pollUntil(ctx context.Context, timeout time.Duration, what string, check func() (bool, error)) error {
+// and when it clears, and polling goes on. check gets a context that ends with
+// the timeout, so a request that hangs can't outlast it.
+func pollUntil(ctx context.Context, timeout time.Duration, what string, check func(context.Context) (bool, error)) error {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	var lastErr error
 
 	for {
-		done, err := check()
+		done, err := check(ctx)
 		switch {
 		case err != nil && isRejection(err):
 			return err
