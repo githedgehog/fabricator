@@ -23,10 +23,10 @@ func setDHCPBuffers(conn *net.UDPConn, size int) error {
 
 	var sockErr error
 	if err := raw.Control(func(fd uintptr) {
-		if sockErr = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_RCVBUFFORCE, size); sockErr != nil { //nolint:gosec // fd fits an int
+		if sockErr = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_RCVBUFFORCE, size); sockErr != nil {
 			return
 		}
-		sockErr = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_SNDBUFFORCE, size) //nolint:gosec // fd fits an int
+		sockErr = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_SNDBUFFORCE, size)
 	}); err != nil {
 		return fmt.Errorf("controlling socket: %w", err)
 	}
