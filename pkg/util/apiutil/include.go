@@ -7,12 +7,14 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"slices"
 
 	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
 	"go.githedgehog.com/fabric/api/meta"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	"go.githedgehog.com/fabric/pkg/ctrl/switchprofile"
+	kmeta "k8s.io/apimachinery/pkg/api/meta"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -179,10 +181,66 @@ var printIncludeLists = []kclient.ObjectList{
 	&gwapi.GatewayPeeringList{},
 }
 
+// StagedAnnotation marks wiring objects that are held back at install and created later through the API
+const StagedAnnotation = "hhfab.githedgehog.com/staged"
+
+// IsStaged reports whether the object is held back at install
+func IsStaged(obj kclient.Object) bool {
+	return obj.GetAnnotations()[StagedAnnotation] == "true"
+}
+
 func PrintInclude(ctx context.Context, kube ReaderWithScheme, w io.Writer) error {
-	if err := printKubeObjects(ctx, kube, w, printIncludeLists...); err != nil {
+	if err := printKubeObjects(ctx, kube, w, nil, printIncludeLists...); err != nil {
 		return fmt.Errorf("printing kube objects: %w", err)
 	}
 
 	return nil
+}
+
+// PrintIncludeInstalled prints the wiring objects that are installed, leaving out the staged ones
+func PrintIncludeInstalled(ctx context.Context, kube ReaderWithScheme, w io.Writer) error {
+	if err := printKubeObjects(ctx, kube, w, func(obj kclient.Object) bool { return !IsStaged(obj) }, printIncludeLists...); err != nil {
+		return fmt.Errorf("printing kube objects: %w", err)
+	}
+
+	return nil
+}
+
+// ListWiring returns all the wiring objects in the order they have to be created
+func ListWiring(ctx context.Context, kube kclient.Reader) ([]kclient.Object, error) {
+	objs := []kclient.Object{}
+
+	for _, objList := range printIncludeLists {
+		list, ok := objList.DeepCopyObject().(kclient.ObjectList)
+		if !ok {
+			return nil, fmt.Errorf("%T is not an object list", objList) //nolint:err113
+		}
+		if err := kube.List(ctx, list); err != nil {
+			return nil, fmt.Errorf("listing %T: %w", list, err)
+		}
+
+		items, err := kmeta.ExtractList(list)
+		if err != nil {
+			return nil, fmt.Errorf("extracting items of %T: %w", list, err)
+		}
+		for _, item := range items {
+			obj, ok := item.(kclient.Object)
+			if !ok {
+				return nil, fmt.Errorf("item of %T is not an object", list) //nolint:err113
+			}
+			objs = append(objs, obj)
+		}
+	}
+
+	return objs, nil
+}
+
+// ListStaged returns the staged wiring objects, in the order they have to be created
+func ListStaged(ctx context.Context, kube kclient.Reader) ([]kclient.Object, error) {
+	all, err := ListWiring(ctx, kube)
+	if err != nil {
+		return nil, err
+	}
+
+	return slices.DeleteFunc(all, func(obj kclient.Object) bool { return !IsStaged(obj) }), nil
 }

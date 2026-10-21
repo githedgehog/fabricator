@@ -20,7 +20,8 @@ type ReaderWithScheme interface {
 	Scheme() *runtime.Scheme
 }
 
-func printKubeObjects(ctx context.Context, kube ReaderWithScheme, w io.Writer, objLists ...kclient.ObjectList) error {
+// printKubeObjects prints the objects of the lists, only the ones keep returns true for if it is set
+func printKubeObjects(ctx context.Context, kube ReaderWithScheme, w io.Writer, keep func(kclient.Object) bool, objLists ...kclient.ObjectList) error {
 	objs := 0
 
 	for _, objList := range objLists {
@@ -34,19 +35,26 @@ func printKubeObjects(ctx context.Context, kube ReaderWithScheme, w io.Writer, o
 		}
 
 		itemsLen := items.Len()
-		if itemsLen > 0 {
-			_, err := fmt.Fprintf(w, "#\n# %s\n#\n", reflect.TypeOf(objList).Elem().Name())
-			if err != nil {
-				return fmt.Errorf("writing comment: %w", err)
-			}
-		}
-
+		kept := []kclient.Object{}
 		for idx := range itemsLen {
 			itemValue, ok := reflect.TypeAssert[kclient.Object](items.Index(idx).Addr())
 			if !ok {
 				return fmt.Errorf("item %d of %T is not an object", idx, objList) //nolint:err113
 			}
 
+			if keep == nil || keep(itemValue) {
+				kept = append(kept, itemValue)
+			}
+		}
+
+		if len(kept) > 0 {
+			_, err := fmt.Fprintf(w, "#\n# %s\n#\n", reflect.TypeOf(objList).Elem().Name())
+			if err != nil {
+				return fmt.Errorf("writing comment: %w", err)
+			}
+		}
+
+		for idx, itemValue := range kept {
 			if objs > 0 {
 				if _, err := fmt.Fprintf(w, "---\n"); err != nil {
 					return fmt.Errorf("writing separator: %w", err)

@@ -274,3 +274,91 @@ func TestCreateVLABConfigHardwareGateway(t *testing.T) {
 		require.Equal(t, NICTypePassthrough+NICTypeSep+pci, cfg.VMs[parts[0]].NICs[parts[1]], swPort)
 	}
 }
+
+func TestMarkStagedAddFabric(t *testing.T) {
+	l := apiutil.NewLoader()
+	b := &VLABBuilderDefault{
+		ExtBGPCount:         1,
+		ExtOrphanConnCount:  1,
+		ExtraFabric:         true,
+		AddFabric:           true,
+		InterconnectFabrics: true,
+		VLABBuilderBase:     VLABBuilderBase{DefaultSwitchProfile: meta.SwitchProfileVS},
+	}
+	f := fabapi.Fabricator{Spec: fabapi.FabricatorSpec{Config: fab.DefaultConfig}}
+	f.Default()
+	require.NoError(t, b.Build(t.Context(), l, f, nil))
+	require.NoError(t, b.MarkStaged(t.Context(), l))
+
+	objs, err := apiutil.ListWiring(t.Context(), l.GetClient())
+	require.NoError(t, err)
+
+	staged := map[string]bool{}
+	installed := map[string]bool{}
+	for _, obj := range objs {
+		key := fmt.Sprintf("%T/%s", obj, obj.GetName())
+		if apiutil.IsStaged(obj) {
+			staged[key] = true
+		} else {
+			installed[key] = true
+		}
+	}
+
+	// the extra fabric with its switches and its interconnect, on both sides
+	for _, key := range []string{
+		"*v1beta1.Fabric/fabric-b", "*v1beta1.IPv4Namespace/fabric-b",
+		"*v1beta1.Switch/leaf-04", "*v1beta1.Switch/leaf-05",
+		"*v1beta1.Connection/leaf-03--interconnect", "*v1beta1.Connection/leaf-04--interconnect",
+		"*v1beta1.External/to-fabric-b", "*v1beta1.External/to-default",
+		"*v1beta1.ExternalAttachment/leaf-03--to-fabric-b", "*v1beta1.ExternalAttachment/leaf-04--to-default",
+	} {
+		require.True(t, staged[key], "%s must be staged", key)
+	}
+
+	// everything of the default fabric, including its virtual external, is installed
+	for _, key := range []string{
+		"*v1beta1.Fabric/default", "*v1beta1.Switch/leaf-01", "*v1beta1.Switch/leaf-02", "*v1beta1.Switch/leaf-03",
+		"*v1beta1.External/ext-bgp-01",
+	} {
+		require.True(t, installed[key], "%s must be installed", key)
+	}
+
+	// a server is staged exactly when all of its connections are
+	stagedConns := map[string]bool{}
+	for _, obj := range objs {
+		if conn, ok := obj.(*wiringapi.Connection); ok {
+			stagedConns[conn.Name] = apiutil.IsStaged(conn)
+		}
+	}
+	for _, obj := range objs {
+		server, ok := obj.(*wiringapi.Server)
+		if !ok {
+			continue
+		}
+
+		all, any := true, false
+		for _, obj := range objs {
+			conn, ok := obj.(*wiringapi.Connection)
+			if !ok {
+				continue
+			}
+			_, servers, _, _, err := conn.Spec.Endpoints()
+			require.NoError(t, err)
+			if slices.Contains(servers, server.Name) {
+				any = true
+				all = all && stagedConns[conn.Name]
+			}
+		}
+		require.True(t, any, "server %s has no connection", server.Name)
+		require.Equal(t, all, apiutil.IsStaged(server), "server %s", server.Name)
+	}
+
+	// without AddFabric nothing is staged
+	l2 := apiutil.NewLoader()
+	b.AddFabric = false
+	require.NoError(t, b.Build(t.Context(), l2, f, nil))
+	require.NoError(t, b.MarkStaged(t.Context(), l2))
+	none, err := apiutil.ListStaged(t.Context(), l2.GetClient())
+	require.NoError(t, err)
+	require.Empty(t, none)
+}

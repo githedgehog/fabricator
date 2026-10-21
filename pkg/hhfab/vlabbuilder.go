@@ -21,6 +21,7 @@ import (
 	fabcomp "go.githedgehog.com/fabricator/pkg/fab/comp/fabric"
 	"go.githedgehog.com/fabricator/pkg/util/apiutil"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const VLABExtraDomain = "domain-b"
@@ -82,6 +83,7 @@ type VLABBuilderDefault struct {
 	SharedLeafsCount    uint8             // number of orphan leaves in both domains, the last ones (default 1 with ExtraDomain)
 	ExtraFabric         bool              // generate a second fabric of two mesh leaves with a server each
 	InterconnectFabrics bool              // connect a leaf of each fabric with an External on both sides
+	AddFabric           bool              // generate the extra fabric but leave it out of the install, it is added later by add-fabric (implies ExtraFabric)
 	YesFlag             bool
 
 	VLABBuilderBase
@@ -1532,4 +1534,111 @@ func (b *VLABBuilderBase) createVPCAttachment(ctx context.Context, name string, 
 	}
 
 	return vpc, nil
+}
+
+// VLABStager is implemented by builders that can leave part of the wiring they generate out of the install
+type VLABStager interface {
+	MarkStaged(ctx context.Context, l *apiutil.Loader) error
+}
+
+var _ VLABStager = (*VLABBuilderDefault)(nil)
+
+// MarkStaged annotates everything of the extra fabric, plus what connects it to the default one, as staged.
+// The VLAB still gets the VMs and links of all of it, only the installer leaves the objects out.
+func (b *VLABBuilderDefault) MarkStaged(ctx context.Context, l *apiutil.Loader) error {
+	if !b.AddFabric {
+		return nil
+	}
+	if !b.ExtraFabric {
+		return fmt.Errorf("add-fabric requires the extra fabric") //nolint:err113
+	}
+
+	kube := l.GetClient()
+	objs, err := apiutil.ListWiring(ctx, kube)
+	if err != nil {
+		return fmt.Errorf("listing wiring: %w", err)
+	}
+
+	fabricOf := func(obj kclient.Object) string {
+		switch o := obj.(type) {
+		case *wiringapi.Fabric:
+			return o.Name
+		case *wiringapi.Switch:
+			return o.Spec.Topology.Fabric
+		case *wiringapi.Connection:
+			return o.Spec.Topology.Fabric
+		case *vpcapi.IPv4Namespace:
+			return o.Spec.Topology.Fabric
+		case *vpcapi.External:
+			return o.Spec.Topology.Fabric
+		case *vpcapi.ExternalAttachment:
+			return o.Spec.Topology.Fabric
+		}
+
+		return ""
+	}
+
+	held := map[kclient.Object]bool{}
+	heldExternals := map[string]bool{}
+	for _, obj := range objs {
+		_, interconnect := obj.GetAnnotations()[VLABInterconnectAnnotation]
+		if conn, ok := obj.(*wiringapi.Connection); ok && strings.HasSuffix(conn.Name, "--interconnect") {
+			interconnect = true
+		}
+		if fabricOf(obj) == VLABExtraFabric || interconnect {
+			held[obj] = true
+			if ext, ok := obj.(*vpcapi.External); ok {
+				heldExternals[ext.Name] = true
+			}
+		}
+	}
+
+	// attachments of held back externals, and servers that are only connected through held back connections
+	serverConns := map[string][]bool{}
+	for _, obj := range objs {
+		switch o := obj.(type) {
+		case *vpcapi.ExternalAttachment:
+			if heldExternals[o.Spec.External] {
+				held[obj] = true
+			}
+		case *wiringapi.Connection:
+			_, servers, _, _, err := o.Spec.Endpoints()
+			if err != nil {
+				return fmt.Errorf("getting endpoints of connection %s: %w", o.Name, err)
+			}
+			for _, server := range servers {
+				serverConns[server] = append(serverConns[server], held[obj])
+			}
+		}
+	}
+	for _, obj := range objs {
+		if server, ok := obj.(*wiringapi.Server); ok && len(serverConns[server.Name]) > 0 && !slices.Contains(serverConns[server.Name], false) {
+			held[obj] = true
+		}
+	}
+
+	if len(held) == 0 {
+		return fmt.Errorf("nothing to stage") //nolint:err113
+	}
+
+	for _, obj := range objs {
+		if !held[obj] {
+			continue
+		}
+
+		anns := obj.GetAnnotations()
+		if anns == nil {
+			anns = map[string]string{}
+		}
+		anns[apiutil.StagedAnnotation] = "true"
+		obj.SetAnnotations(anns)
+
+		if err := kube.Update(ctx, obj); err != nil {
+			return fmt.Errorf("annotating %T %s: %w", obj, obj.GetName(), err)
+		}
+	}
+
+	slog.Info("Staged objects", "objects", len(held))
+
+	return nil
 }

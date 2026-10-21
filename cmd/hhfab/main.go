@@ -272,7 +272,7 @@ func Run(ctx context.Context) error {
 	var wgNoSwitches bool
 	var wgExtraDomain bool
 	var wgSharedLeafsCount uint
-	var wgExtraFabric, wgInterconnectFabrics bool
+	var wgExtraFabric, wgInterconnectFabrics, wgAddFabric bool
 	var wgGatewayUplinks uint
 	var wgGatewayDriver string
 	var wgGatewayWorkers uint
@@ -320,6 +320,11 @@ func Run(ctx context.Context) error {
 			Name:        "extra-fabric",
 			Usage:       "generate a second fabric of two mesh leafs with a server each, with no gateway or virtual external",
 			Destination: &wgExtraFabric,
+		},
+		&cli.BoolFlag{
+			Name:        "add-fabric",
+			Usage:       "generate the extra fabric like --extra-fabric, but leave it out of the install: its VMs run and are added to the running VLAB by 'hhfab vlab add-fabric' or --ready=add-fabric (not together with --extra-fabric)",
+			Destination: &wgAddFabric,
 		},
 		&cli.BoolFlag{
 			Name:        "interconnect-fabrics",
@@ -1093,6 +1098,10 @@ func Run(ctx context.Context) error {
 								gwTags[key] = value
 							}
 
+							if wgExtraFabric && wgAddFabric {
+								return fmt.Errorf("--extra-fabric and --add-fabric are mutually exclusive") //nolint:err113
+							}
+
 							builder := &hhfab.VLABBuilderDefault{
 								SpinesCount:            uint8(wgSpinesCount),      //nolint:gosec
 								FabricLinksCount:       uint8(wgFabricLinksCount), //nolint:gosec
@@ -1116,8 +1125,9 @@ func Run(ctx context.Context) error {
 								ExtOrphanConnCount:     uint8(wgExtOrphanConns),       //nolint:gosec
 								ExtraDomain:            wgExtraDomain,
 								SharedLeafsCount:       uint8(wgSharedLeafsCount), //nolint:gosec
-								ExtraFabric:            wgExtraFabric,
+								ExtraFabric:            wgExtraFabric || wgAddFabric,
 								InterconnectFabrics:    wgInterconnectFabrics,
+								AddFabric:              wgAddFabric,
 								YesFlag:                yes,
 								DefaultSwitchProfile:   wgDefaultSwitchProfile,
 								SwitchProfileOverrides: overrides,
@@ -1789,6 +1799,19 @@ Examples:
 								RequireAllServers: c.Bool("all-servers"),
 							}); err != nil {
 								return fmt.Errorf("test-connectivity: %w", err)
+							}
+
+							return nil
+						},
+					},
+					{
+						Name:   "add-fabric",
+						Usage:  "create the objects left out of the install (see vlab gen --add-fabric) and wait for their switches",
+						Flags:  defaultFlags,
+						Before: before(false),
+						Action: func(_ *cli.Context) error {
+							if err := hhfab.DoVLABAddFabric(ctx, workDir, cacheDir); err != nil {
+								return fmt.Errorf("add-fabric: %w", err)
 							}
 
 							return nil
