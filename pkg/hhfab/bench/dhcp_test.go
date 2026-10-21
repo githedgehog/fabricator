@@ -193,6 +193,7 @@ type fakeDHCPD struct {
 	silent     bool // never answer, like an unreachable dhcpd
 	zeroFirst  bool // answer each MAC's first DISCOVER with 0.0.0.0
 	nakFirst   bool // NAK each MAC's first REQUEST
+	nakRenewal bool // NAK each MAC's first renewal
 	zeroAck    bool // answer each MAC's first REQUEST with an ACK for 0.0.0.0
 	grantTaken bool // ACK a REQUEST for another MAC's IP
 	ackOwn     bool // ACK a REQUEST for another MAC's IP with the requester's own, like today's dhcpd
@@ -200,6 +201,7 @@ type fakeDHCPD struct {
 	shareIP    bool // hand every server in a subnet the same IP
 	discovers  map[string]int
 	requests   map[string]int
+	renewals   map[string]int
 }
 
 func newFakeDHCPD(demux *dhcpDemux, plan []*dhcpSubnet) *fakeDHCPD {
@@ -213,6 +215,7 @@ func newFakeDHCPD(demux *dhcpDemux, plan []*dhcpSubnet) *fakeDHCPD {
 		next:      map[*dhcpSubnet]netip.Addr{},
 		discovers: map[string]int{},
 		requests:  map[string]int{},
+		renewals:  map[string]int{},
 	}
 	for _, sub := range plan {
 		f.next[sub] = sub.start
@@ -286,6 +289,13 @@ func (f *fakeDHCPD) send(msg *dhcpv4.DHCPv4) error {
 		f.requests[mac]++
 
 		if ciaddr, _ := netip.AddrFromSlice(msg.ClientIPAddr.To4()); ciaddr.IsValid() && !ciaddr.IsUnspecified() {
+			f.renewals[mac]++
+			if f.nakRenewal && f.renewals[mac] == 1 {
+				reply(dhcpv4.MessageTypeNak, netip.Addr{}, 0)
+
+				return nil
+			}
+
 			reply(dhcpv4.MessageTypeAck, ciaddr, time.Hour)
 
 			return nil
@@ -436,8 +446,8 @@ func TestDHCPStormZeroAckRetransmits(t *testing.T) {
 	})
 }
 
-// A NAK during DORA sends the client back to DISCOVER, which is counted, not
-// flagged.
+// A NAK for the IP dhcpd has just offered is flagged, and sends the client back
+// to DISCOVER.
 func TestDHCPStormNakRestarts(t *testing.T) {
 	t.Parallel()
 
@@ -446,7 +456,7 @@ func TestDHCPStormNakRestarts(t *testing.T) {
 
 		require.Equal(t, int64(3), res.bound)
 		require.Equal(t, int64(3), res.nakDORA)
-		require.Empty(t, failedChecks(res))
+		require.Equal(t, map[checkName]int64{checkOfferNaked: 3}, failedChecks(res))
 
 		for mac, n := range fake.discovers {
 			require.Equal(t, 2, n, "%s started over once", mac)
@@ -516,27 +526,40 @@ func TestPollUntilRetriesUnavailable(t *testing.T) {
 	})
 }
 
-// A taken repeat asks for an IP another server holds. Today's dhcpd ACKs it with
-// the asking server's own IP instead of a NAK: that counts as ack-other and is
-// not flagged. An ACK for an IP that is neither the server's own nor the taken
-// one also counts as ack-other, and is flagged as wrong IP.
-func TestDHCPStormTakenAckedOther(t *testing.T) {
+// A taken repeat asks for an IP another server holds, and RFC 2131 wants a NAK
+// for it. An ACK for any other IP is flagged, whether it is the asking server's
+// own IP, as today's dhcpd answers, or a free one.
+func TestDHCPStormTakenNotNaked(t *testing.T) {
+	t.Parallel()
+
+	for name, setup := range map[string]func(*fakeDHCPD){
+		"own":   func(f *fakeDHCPD) { f.ackOwn = true },
+		"stray": func(f *fakeDHCPD) { f.ackStray = true },
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			synctest.Test(t, func(t *testing.T) {
+				res, _, _ := storm(t, DHCPLayout{VPCs: 1, Subnets: 1, Servers: 4}, DHCPOpts{Repeats: 2, RepeatInterval: time.Second}, setup)
+
+				require.Equal(t, int64(4), res.repeats[repeatTaken][outcomeAckOther])
+				require.Equal(t, map[checkName]int64{checkTakenNotNaked: 4}, failedChecks(res))
+			})
+		})
+	}
+}
+
+// A NAK for a lease dhcpd has just ACKed is flagged; the client starts over and
+// binds.
+func TestDHCPStormRenewalNaked(t *testing.T) {
 	t.Parallel()
 
 	synctest.Test(t, func(t *testing.T) {
-		res, _, _ := storm(t, DHCPLayout{VPCs: 1, Subnets: 1, Servers: 4}, DHCPOpts{Repeats: 2, RepeatInterval: time.Second},
-			func(f *fakeDHCPD) { f.ackOwn = true })
+		res, _, _ := storm(t, DHCPLayout{VPCs: 1, Subnets: 1, Servers: 3}, DHCPOpts{}, func(f *fakeDHCPD) { f.nakRenewal = true })
 
-		require.Equal(t, int64(4), res.repeats[repeatTaken][outcomeAckOther])
-		require.Empty(t, failedChecks(res))
-	})
-
-	synctest.Test(t, func(t *testing.T) {
-		res, _, _ := storm(t, DHCPLayout{VPCs: 1, Subnets: 1, Servers: 4}, DHCPOpts{Repeats: 2, RepeatInterval: time.Second},
-			func(f *fakeDHCPD) { f.ackStray = true })
-
-		require.Equal(t, int64(4), res.repeats[repeatTaken][outcomeAckOther])
-		require.Equal(t, map[checkName]int64{checkWrongIP: 4}, failedChecks(res))
+		require.Equal(t, int64(3), res.bound)
+		require.Equal(t, int64(3), res.nakRenewal)
+		require.Equal(t, map[checkName]int64{checkLeaseNaked: 3}, failedChecks(res))
 	})
 }
 
