@@ -32,6 +32,12 @@ func VLABGenerate(ctx context.Context, workDir, cacheDir string, builder VLABBui
 		return err //nolint:wrapcheck
 	}
 
+	if marker, ok := builder.(VLABStager); ok {
+		if err := marker.MarkStaged(ctx, includeL); err != nil {
+			return err //nolint:wrapcheck
+		}
+	}
+
 	includeDir := filepath.Join(workDir, IncludeDir)
 	wiringFile, err := os.OpenFile(filepath.Join(includeDir, target), os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
@@ -190,6 +196,15 @@ func DoVLABSetupVPCs(ctx context.Context, workDir, cacheDir string, opts SetupVP
 	}
 
 	return c.SetupVPCs(ctx, vlab, opts)
+}
+
+func DoVLABAddFabric(ctx context.Context, workDir, cacheDir string) error {
+	c, vlab, err := loadVLABForHelpers(ctx, workDir, cacheDir)
+	if err != nil {
+		return err
+	}
+
+	return c.AddFabric(ctx, vlab)
 }
 
 func DoVLABSetupPeerings(ctx context.Context, workDir, cacheDir string, opts SetupPeeringsOpts) error {

@@ -121,6 +121,7 @@ type OnReady string
 
 const (
 	OnReadyExit             OnReady = "exit"
+	OnReadyAddFabric        OnReady = "add-fabric"
 	OnReadySetupVPCs        OnReady = "setup-vpcs"
 	OnReadySetupPeerings    OnReady = "setup-peerings"
 	OnReadySwitchReinstall  OnReady = "switch-reinstall"
@@ -133,6 +134,7 @@ const (
 
 var AllOnReady = []OnReady{
 	OnReadyExit,
+	OnReadyAddFabric,
 	OnReadySetupVPCs,
 	OnReadySetupPeerings,
 	OnReadySwitchReinstall,
@@ -728,6 +730,10 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 					slog.Debug("Running switch-reinstall", "mode", reinstallOpts.Mode, "waitReady", reinstallOpts.WaitReady)
 					if err := c.VLABSwitchReinstall(ctx, reinstallOpts); err != nil {
 						return c.handleShutdownWithPause(ctx, vlab, opts, fmt.Errorf("reinstalling switches: %w", err))
+					}
+				case OnReadyAddFabric:
+					if err := c.AddFabric(ctx, vlab); err != nil {
+						return c.handleShutdownWithPause(ctx, vlab, opts, fmt.Errorf("adding fabric: %w", err))
 					}
 				case OnReadySetupVPCs:
 					setupVPCsOpts := SetupVPCsOpts{

@@ -377,6 +377,66 @@ func TestEnsureHydratedAutoOnPartiallyHydrated(t *testing.T) {
 	require.NoError(t, c.ensureHydrated(ctx, kube, HydrateModeNever))
 }
 
+// both objects sort before the installed ones of their kind, so hydrating them with the rest would shift every value
+const hydrateTestStagedObjects = `
+apiVersion: wiring.githedgehog.com/v1beta1
+kind: Switch
+metadata:
+  name: leaf-00
+  annotations:
+    hhfab.githedgehog.com/staged: "true"
+spec:
+  role: server-leaf
+  profile: vs
+---
+apiVersion: gateway.githedgehog.com/v1alpha1
+kind: Gateway
+metadata:
+  name: gateway-a
+  annotations:
+    hhfab.githedgehog.com/staged: "true"
+spec:
+  topology:
+    fabric: fab-b
+    domain: plane-a
+`
+
+func TestHydrateStagedObjectsDoNotShiftInstalledOnes(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	c := &Config{Fab: fabapi.Fabricator{Spec: fabapi.FabricatorSpec{Config: fab.DefaultConfig}}}
+
+	installedOnly := apiutil.NewLoader()
+	require.NoError(t, installedOnly.LoadAddWiring(ctx, []byte(hydrateTestWiring)))
+	require.NoError(t, c.hydrate(ctx, installedOnly.GetClient()))
+
+	withStaged := apiutil.NewLoader()
+	require.NoError(t, withStaged.LoadAddWiring(ctx, []byte(hydrateTestWiring+"\n---\n"+hydrateTestStagedObjects)))
+	require.NoError(t, c.hydrate(ctx, withStaged.GetClient()))
+
+	for _, name := range []string{"spine-01", "leaf-01", "spine-b1", "spine-b2", "leaf-b1"} {
+		require.Equal(t, switchSpec(t, installedOnly.GetClient(), name), switchSpec(t, withStaged.GetClient(), name), name)
+	}
+	require.Equal(t, gatewaySpec(t, installedOnly.GetClient(), "gateway-b"), gatewaySpec(t, withStaged.GetClient(), "gateway-b"))
+
+	// the staged ones still get hydrated, after the installed ones
+	status, err := c.getHydration(ctx, withStaged.GetClient())
+	require.NoError(t, err)
+	require.Equal(t, HydrationStatusFull, status)
+
+	leaf00 := switchSpec(t, withStaged.GetClient(), "leaf-00")
+	leaf01 := switchSpec(t, withStaged.GetClient(), "leaf-01")
+	require.Equal(t, uint32(65102), leaf00.ASN)
+	require.NotEqual(t, leaf01.IP, leaf00.IP)
+	require.NotEqual(t, leaf01.VTEPIP, leaf00.VTEPIP)
+
+	gwA := gatewaySpec(t, withStaged.GetClient(), "gateway-a")
+	gwB := gatewaySpec(t, withStaged.GetClient(), "gateway-b")
+	require.NotEqual(t, gwB.VTEPMAC, gwA.VTEPMAC)
+	require.NotEqual(t, gwB.ProtocolIP, gwA.ProtocolIP)
+}
+
 const hydrateTestMeshLinks = `
 apiVersion: wiring.githedgehog.com/v1beta1
 kind: Connection

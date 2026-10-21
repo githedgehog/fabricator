@@ -12,6 +12,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -902,18 +903,23 @@ const (
 	maxGatewayVTEPMACs   = 254
 )
 
-// hydrate allocates all the values from scratch, replacing the ones already set
+// hydrate allocates all the values from scratch, replacing the ones already set. The staged objects are
+// left out of that, so the values of the installed ones do not depend on them, and get theirs afterwards.
 func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
-	return c.hydrateValues(ctx, kube, false)
+	if err := c.hydrateValues(ctx, kube, false, true); err != nil {
+		return err
+	}
+
+	return c.hydrateMissing(ctx, kube)
 }
 
 // hydrateMissing allocates only the values that are not set yet, continuing each pool after the ones in use, so
 // objects added to a hydrated wiring get values that do not collide with the existing ones
 func (c *Config) hydrateMissing(ctx context.Context, kube kclient.Client) error {
-	return c.hydrateValues(ctx, kube, true)
+	return c.hydrateValues(ctx, kube, true, false)
 }
 
-func (c *Config) hydrateValues(ctx context.Context, kube kclient.Client, onlyMissing bool) error {
+func (c *Config) hydrateValues(ctx context.Context, kube kclient.Client, onlyMissing, skipStaged bool) error {
 	mgmtSubnet, err := c.Fab.Spec.Config.Control.ManagementSubnet.Parse()
 	if err != nil {
 		return fmt.Errorf("parsing management subnet: %w", err)
@@ -980,6 +986,11 @@ func (c *Config) hydrateValues(ctx context.Context, kube kclient.Client, onlyMis
 	gateways := &gwapi.GatewayList{}
 	if err := kube.List(ctx, gateways); err != nil {
 		return fmt.Errorf("listing gateways: %w", err)
+	}
+	if skipStaged {
+		switches.Items = slices.DeleteFunc(switches.Items, func(sw wiringapi.Switch) bool { return apiutil.IsStaged(&sw) })
+		conns.Items = slices.DeleteFunc(conns.Items, func(conn wiringapi.Connection) bool { return apiutil.IsStaged(&conn) })
+		gateways.Items = slices.DeleteFunc(gateways.Items, func(gw gwapi.Gateway) bool { return apiutil.IsStaged(&gw) })
 	}
 	if len(gateways.Items) > maxGatewayVTEPMACs {
 		return fmt.Errorf("too many gateways (%d) for our current VTEPMAC hydration scheme, maximum is %d", len(gateways.Items), maxGatewayVTEPMACs) //nolint:err113
@@ -1087,8 +1098,10 @@ func (c *Config) hydrateValues(ctx context.Context, kube kclient.Client, onlyMis
 
 	mclagPeer := map[string]*wiringapi.Switch{}
 
+	origSwitches := map[string]wiringapi.SwitchSpec{}
 	for idx := range switches.Items {
 		sw := &switches.Items[idx]
+		origSwitches[sw.Name] = *sw.Spec.DeepCopy()
 		if sw.Spec.Role == "" {
 			return fmt.Errorf("switch %s role is not set", sw.Name) //nolint:err113
 		}
@@ -1158,6 +1171,10 @@ func (c *Config) hydrateValues(ctx context.Context, kube kclient.Client, onlyMis
 	}
 
 	for _, sw := range switches.Items {
+		if onlyMissing && reflect.DeepEqual(origSwitches[sw.Name], sw.Spec) {
+			continue
+		}
+
 		if err := kube.Update(ctx, &sw); err != nil {
 			return fmt.Errorf("updating switch %s: %w", sw.Name, err)
 		}
@@ -1283,6 +1300,10 @@ func (c *Config) hydrateValues(ctx context.Context, kube kclient.Client, onlyMis
 	if len(gateways.Items) > MaxVTEPMACs {
 		return fmt.Errorf("too many gateways (%d) for our current VTEPMAC hydration scheme, maximum is %d", len(gateways.Items), MaxVTEPMACs) //nolint:err113
 	}
+	if skipStaged {
+		gateways.Items = slices.DeleteFunc(gateways.Items, func(gw gwapi.Gateway) bool { return apiutil.IsStaged(&gw) })
+	}
+
 	nextMACFinalOctet := uint8(1)
 
 	slices.SortFunc(gateways.Items, func(a, b gwapi.Gateway) int {
@@ -1290,6 +1311,7 @@ func (c *Config) hydrateValues(ctx context.Context, kube kclient.Client, onlyMis
 	})
 
 	for _, gw := range gateways.Items {
+		origGW := *gw.Spec.DeepCopy()
 		domain, err := fabricDomain(fabrics, gw.Spec.Topology.Fabric, gw.Spec.Topology.Domain)
 		if err != nil {
 			return fmt.Errorf("gateway %s: %w", gw.Name, err)
@@ -1313,6 +1335,10 @@ func (c *Config) hydrateValues(ctx context.Context, kube kclient.Client, onlyMis
 			nextMACFinalOctet++
 		}
 		gw.Spec.VTEPMTU = fabric.ServerFacingMTU
+
+		if onlyMissing && reflect.DeepEqual(origGW, gw.Spec) {
+			continue
+		}
 
 		if err := kube.Update(ctx, &gw); err != nil {
 			return fmt.Errorf("updating gateway %s: %w", gw.Name, err)
