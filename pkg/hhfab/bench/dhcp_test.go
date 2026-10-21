@@ -240,6 +240,7 @@ type fakeDHCPD struct {
 	nakFirst   bool // NAK each MAC's first REQUEST
 	nakRenewal bool // NAK each MAC's first renewal
 	zeroAck    bool // answer each MAC's first REQUEST with an ACK for 0.0.0.0
+	zeroRepeat bool // answer each MAC's first repeat with an ACK for 0.0.0.0
 	grantTaken bool // ACK a REQUEST for another MAC's IP
 	ackOwn     bool // ACK a REQUEST for another MAC's IP with the requester's own, like today's dhcpd
 	ackStray   bool // ACK a REQUEST for another MAC's IP with a free one
@@ -346,7 +347,8 @@ func (f *fakeDHCPD) send(msg *dhcpv4.DHCPv4) error {
 			return nil
 		}
 
-		if f.zeroAck && f.requests[mac] == 1 {
+		// The DORA's REQUEST is the first, the renewal the second.
+		if (f.zeroAck && f.requests[mac] == 1) || (f.zeroRepeat && f.requests[mac] == 3) {
 			reply(dhcpv4.MessageTypeAck, netip.Addr{}, 0)
 
 			return nil
@@ -640,6 +642,21 @@ func TestDHCPStormLoneServer(t *testing.T) {
 		require.Equal(t, int64(4), res.repeats[repeatOwn][outcomeAckSame])
 		require.Equal(t, [repeatOutcomes]int64{}, res.repeats[repeatTaken])
 		require.Empty(t, failedChecks(res))
+	})
+}
+
+// A 0.0.0.0 ACK to a repeat is flagged when it comes, even though the
+// retransmit then gets the right answer.
+func TestDHCPStormZeroAckRepeat(t *testing.T) {
+	t.Parallel()
+
+	synctest.Test(t, func(t *testing.T) {
+		res, _, _ := storm(t, DHCPLayout{VPCs: 1, Subnets: 1, Servers: 3}, DHCPOpts{Repeats: 1, RepeatInterval: time.Second},
+			func(f *fakeDHCPD) { f.zeroRepeat = true })
+
+		require.Equal(t, int64(3), res.zeroAck)
+		require.Equal(t, int64(3), res.repeats[repeatOwn][outcomeAckSame])
+		require.Equal(t, map[checkName]int64{checkZeroAck: 3}, failedChecks(res))
 	})
 }
 
