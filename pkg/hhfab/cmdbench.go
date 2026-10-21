@@ -317,19 +317,20 @@ func DoVLABBenchBoots(ctx context.Context, workDir, cacheDir string, opts BenchB
 
 // BenchDHCPOpts configures `hhfab vlab bench dhcp`.
 type BenchDHCPOpts struct {
-	VPCs           int
-	Subnets        int
-	Servers        int
-	Rounds         int
-	Repeats        int
-	RepeatInterval time.Duration
-	Spread         time.Duration
-	RoundTimeout   time.Duration
-	PXE            bool
-	Relay          string
-	Sudo           bool
-	QPS            float32
-	Burst          int
+	Servers          int
+	Subnets          int
+	VPCs             int
+	MaxSubnetServers int
+	Rounds           int
+	Repeats          int
+	RepeatInterval   time.Duration
+	Spread           time.Duration
+	RoundTimeout     time.Duration
+	PXE              bool
+	Relay            string
+	Sudo             bool
+	QPS              float32
+	Burst            int
 }
 
 // DoVLABBenchDHCP storms fabric-dhcpd with a fleet of servers booting at once,
@@ -382,7 +383,7 @@ func DoVLABBenchDHCP(ctx context.Context, workDir, cacheDir string, opts BenchDH
 	slog.Info("Relaying to dhcpd over the management bridge", "bridge", VLABBridge, "relay", relay.Name, "giaddr", relay.IP.Addr(), "server", server)
 
 	if err := bench.RunDHCP(ctx, kube, transport, bench.DHCPOpts{
-		Layout:         bench.DHCPLayout{VPCs: opts.VPCs, Subnets: opts.Subnets, Servers: opts.Servers},
+		Layout:         bench.DHCPLayout{Servers: opts.Servers, Subnets: opts.Subnets, VPCs: opts.VPCs, MaxSubnetServers: opts.MaxSubnetServers},
 		Rounds:         opts.Rounds,
 		Repeats:        opts.Repeats,
 		RepeatInterval: opts.RepeatInterval,

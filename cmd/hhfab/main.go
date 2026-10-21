@@ -129,6 +129,7 @@ const (
 	FlagBenchVPCs                 = "vpcs"
 	FlagBenchSubnets              = "subnets"
 	FlagBenchServers              = "servers"
+	FlagBenchMaxSubnetServers     = "max-subnet-servers"
 	FlagBenchRepeats              = "repeats"
 	FlagBenchRepeatInterval       = "repeat-interval"
 	FlagBenchSpread               = "spread"
@@ -2205,8 +2206,9 @@ Switches need boot serials and MACs, which bench init sets.`,
 								Name:  "dhcp",
 								Usage: "storm fabric-dhcpd with a fleet of servers booting through DHCP at once",
 								Description: `Creates its own DHCP VPCs (L3VNI, no attachments) in dedicated bench-dhcp
-VLAN and IPv4 namespaces, --vpcs of --subnets subnets of --servers servers
-each, and simulates every server booting at once through a DHCP relay. The
+VLAN and IPv4 namespaces, spreads --servers servers evenly over them, --subnets
+subnets per VPC and as many VPCs as --max-subnet-servers needs unless --vpcs says,
+and simulates every server booting at once through a DHCP relay. The
 relay is a bench leaf's management IP, which dhcpd accepts relayed requests
 from, put on the management bridge; nothing else from bench init is used.
 
@@ -2223,9 +2225,9 @@ The relay binds UDP port 67, which needs root: run it under sudo, or with --sudo
 to have it re-run itself under sudo.`,
 								Flags: flatten(defaultFlags, []cli.Flag{
 									&cli.IntFlag{
-										Name:  FlagBenchVPCs,
-										Usage: "DHCP VPCs to create",
-										Value: bench.DefaultDHCPVPCs,
+										Name:  FlagBenchServers,
+										Usage: "servers in total, spread evenly over the subnets",
+										Value: bench.DefaultDHCPServers,
 									},
 									&cli.IntFlag{
 										Name:  FlagBenchSubnets,
@@ -2233,9 +2235,14 @@ to have it re-run itself under sudo.`,
 										Value: bench.DefaultDHCPSubnets,
 									},
 									&cli.IntFlag{
-										Name:  FlagBenchServers,
-										Usage: "servers per subnet, which sizes its prefix",
-										Value: bench.DefaultDHCPServers,
+										Name:  FlagBenchVPCs,
+										Usage: "DHCP VPCs to create, 0 for as many as --max-subnet-servers needs",
+										Value: bench.DefaultDHCPVPCs,
+									},
+									&cli.IntFlag{
+										Name:  FlagBenchMaxSubnetServers,
+										Usage: "most servers per subnet when picking the number of VPCs",
+										Value: bench.DefaultDHCPMaxSubnetServers,
 									},
 									&cli.IntFlag{
 										Name:  FlagBenchRounds,
@@ -2287,19 +2294,20 @@ to have it re-run itself under sudo.`,
 								Before: before(false),
 								Action: func(c *cli.Context) error {
 									if err := hhfab.DoVLABBenchDHCP(ctx, workDir, cacheDir, hhfab.BenchDHCPOpts{
-										VPCs:           c.Int(FlagBenchVPCs),
-										Subnets:        c.Int(FlagBenchSubnets),
-										Servers:        c.Int(FlagBenchServers),
-										Rounds:         c.Int(FlagBenchRounds),
-										Repeats:        c.Int(FlagBenchRepeats),
-										RepeatInterval: c.Duration(FlagBenchRepeatInterval),
-										Spread:         c.Duration(FlagBenchSpread),
-										RoundTimeout:   c.Duration(FlagBenchRoundTimeout),
-										PXE:            c.Bool(FlagBenchPXE),
-										Relay:          c.String(FlagBenchRelay),
-										Sudo:           c.Bool(FlagBenchSudo),
-										QPS:            float32(c.Float64(FlagBenchQPS)),
-										Burst:          c.Int(FlagBenchBurst),
+										Servers:          c.Int(FlagBenchServers),
+										Subnets:          c.Int(FlagBenchSubnets),
+										VPCs:             c.Int(FlagBenchVPCs),
+										MaxSubnetServers: c.Int(FlagBenchMaxSubnetServers),
+										Rounds:           c.Int(FlagBenchRounds),
+										Repeats:          c.Int(FlagBenchRepeats),
+										RepeatInterval:   c.Duration(FlagBenchRepeatInterval),
+										Spread:           c.Duration(FlagBenchSpread),
+										RoundTimeout:     c.Duration(FlagBenchRoundTimeout),
+										PXE:              c.Bool(FlagBenchPXE),
+										Relay:            c.String(FlagBenchRelay),
+										Sudo:             c.Bool(FlagBenchSudo),
+										QPS:              float32(c.Float64(FlagBenchQPS)),
+										Burst:            c.Int(FlagBenchBurst),
 									}); err != nil {
 										return fmt.Errorf("bench dhcp: %w", err)
 									}
