@@ -66,3 +66,15 @@ All created VPCs, peerings, and server network configurations are torn down rega
 | `gateway=true` | GatewayPeerings created between consecutive `ort-d2..N` VPCs; `NoGateway` skip lifted |
 | `gateway=false` | Gateway peerings skipped; test still passes as long as other preconditions are met |
 | `mesh=true` | mesh-only switch connections (does not affect the on-ready test logic directly) |
+
+## The add-fabric job
+
+The `v-iso-l2vni-mf` job (`addfabric=true`) does not run the OnReady Suite or release tests, whatever `releasetest` is. It generates two Fabrics with `--add-fabric --interconnect-fabrics`: the default Fabric with 2 orphan leaves and the extra Fabric with 2 mesh leaves, one server per leaf, 1 BGP + 1 static external, no ESLAG and no gateways. The extra Fabric is left out of the install: its VMs boot and its switches wait for their Switch objects.
+
+The ready steps then run in this order:
+
+- `add-fabric` creates the objects of the extra Fabric and waits for all switches, including the two new leaves, to be ready
+- `inspect` and `inspect-pods`
+- `setup-vpcs` creates the VPCs and attachments of all four servers, and checks that each server is configured and reaches its gateway through its leaf
+
+Traffic between the two Fabrics over the interconnect is not asserted yet, as the on-ready peerings and the connectivity model are not Fabric-aware.
