@@ -53,6 +53,10 @@ type HealthOpts struct {
 	// Series is the path to samples left by `bench sample`, if any. Empty skips
 	// the section; a missing file is not an error.
 	Series string
+
+	// Throttle is the fab pods' CPU throttling `bench sample` left next to the
+	// series, read the same way.
+	Throttle string
 }
 
 // Health prints what the control plane currently looks like: how much is in it,
@@ -86,6 +90,15 @@ func Health(ctx context.Context, kube kclient.Client, run Runner, w io.Writer, o
 		}
 
 		healthSeries(w, samples)
+	}
+
+	if opts.Throttle != "" {
+		rows, err := loadThrottle(opts.Throttle)
+		if err != nil {
+			return err
+		}
+
+		healthThrottle(w, rows)
 	}
 
 	// The node sections need the control node, which is not always reachable
