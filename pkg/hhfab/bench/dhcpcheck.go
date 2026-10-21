@@ -195,6 +195,9 @@ func checkStored(checks *dhcpChecks, plan []*dhcpSubnet, servers []*dhcpServer, 
 				checks.record(checkMissingLease, "%s holds %s, %s has no lease for it", srv.hostname, srv.ip, sub.dhcpSubnetName())
 			case lease.IP != srv.ip.String():
 				checks.record(checkMissingLease, "%s holds %s, %s stores %s for it", srv.hostname, srv.ip, sub.dhcpSubnetName(), lease.IP)
+			case lease.Discover:
+				// What dhcpd keeps for an offer: the ACKed lease never replaced it.
+				checks.record(checkMissingLease, "%s holds %s, %s only stores an offer for it", srv.hostname, srv.ip, sub.dhcpSubnetName())
 			case lease.Expiry.Add(dhcpLeaseSkew).Before(srv.leaseEnd):
 				checks.record(checkShortLease, "%s's lease runs to %s, %s stores an expiry of %s",
 					srv.hostname, srv.leaseEnd.UTC().Format(time.RFC3339), sub.dhcpSubnetName(), lease.Expiry.UTC().Format(time.RFC3339))
