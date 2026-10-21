@@ -33,13 +33,15 @@ const (
 	HydrateModeNever        HydrateMode = "never"
 	HydrateModeIfNotPresent HydrateMode = "if-not-present"
 	HydrateModeOverride     HydrateMode = "override"
-	// TODO "auto" to only allocate missing values
+	// HydrateModeAuto only allocates the values that are not set yet, continuing each pool after the ones in use
+	HydrateModeAuto HydrateMode = "auto"
 )
 
 var HydrateModes = []HydrateMode{
 	HydrateModeNever,
 	HydrateModeIfNotPresent,
 	HydrateModeOverride,
+	HydrateModeAuto,
 }
 
 type HydrationStatus string
@@ -146,13 +148,14 @@ func (c *Config) ensureHydrated(ctx context.Context, kube kclient.Client, mode H
 		return fmt.Errorf("checking if hydrated: %w", err)
 	}
 
-	if mode == HydrateModeNever {
+	switch mode {
+	case HydrateModeNever:
 		if h != HydrationStatusFull {
 			return fmt.Errorf("wiring is not fully hydrated while hydration is disabled, cleanup and/or change hydration mode") //nolint:err113
 		}
 
 		return nil
-	} else if mode == HydrateModeIfNotPresent || mode == HydrateModeOverride {
+	case HydrateModeAuto, HydrateModeIfNotPresent, HydrateModeOverride:
 		if mode == HydrateModeIfNotPresent && h == HydrationStatusFull {
 			return nil
 		}
@@ -161,7 +164,11 @@ func (c *Config) ensureHydrated(ctx context.Context, kube kclient.Client, mode H
 			return fmt.Errorf("wiring is already partially hydrated, cleanup or change hydration mode") //nolint:err113
 		}
 
-		if err := c.hydrate(ctx, kube); err != nil {
+		if mode == HydrateModeAuto {
+			if err := c.hydrateMissing(ctx, kube); err != nil {
+				return fmt.Errorf("hydrating missing values: %w", err)
+			}
+		} else if err := c.hydrate(ctx, kube); err != nil {
 			return fmt.Errorf("hydrating: %w", err)
 		}
 
@@ -280,7 +287,10 @@ func (c *Config) getHydration(ctx context.Context, kube kclient.Reader) (Hydrati
 			}
 
 			mgmtIPs[controlIP.Addr()] = true
+		}
 
+		// checked apart from the management IP, so a node missing only one of them is partially hydrated
+		if dummy.IP != "" {
 			dummyIP, err := dummy.IP.Parse()
 			if err != nil {
 				return fmt.Errorf("parsing control node %s dummy IP %s: %w", name, dummy.IP, err)
@@ -298,7 +308,9 @@ func (c *Config) getHydration(ctx context.Context, kube kclient.Reader) (Hydrati
 			}
 
 			dummyIPs[dummyIP.Addr()] = true
-		} else {
+		}
+
+		if mgmt.IP == "" || dummy.IP == "" {
 			missing++
 		}
 
@@ -736,7 +748,172 @@ func (c *Config) getHydration(ctx context.Context, kube kclient.Reader) (Hydrati
 	return status, fmt.Errorf("invalid hydration status: total=%d, missing=%d", total, missing) //nolint:err113
 }
 
+// addrPool hands out addresses in order, skipping the ones already in use. Without any in use it gives the same
+// sequence as a plain counter, which is what hydrating from scratch needs.
+type addrPool struct {
+	next netip.Addr
+	step int
+	used map[netip.Addr]bool
+}
+
+func newAddrPool(start netip.Addr, step int) *addrPool {
+	return &addrPool{next: start, step: step, used: map[netip.Addr]bool{}}
+}
+
+func (p *addrPool) advance(addr netip.Addr) netip.Addr {
+	for range p.step {
+		addr = addr.Next()
+	}
+
+	return addr
+}
+
+func (p *addrPool) take() netip.Addr {
+	for p.used[p.next] {
+		p.next = p.advance(p.next)
+	}
+
+	addr := p.next
+	p.used[addr] = true
+	p.next = p.advance(p.next)
+
+	return addr
+}
+
+// markUsed takes an address or a prefix and ignores empty and invalid values, as those are validated elsewhere
+func (p *addrPool) markUsed(value string) {
+	if value == "" {
+		return
+	}
+
+	if prefix, err := netip.ParsePrefix(value); err == nil {
+		p.used[prefix.Addr()] = true
+
+		return
+	}
+
+	if addr, err := netip.ParseAddr(value); err == nil {
+		p.used[addr] = true
+	}
+}
+
+func isEvenAddr(addr netip.Addr) bool {
+	b := addr.AsSlice()
+
+	return b[len(b)-1]&1 == 0
+}
+
+// linkPartner returns the other address of the /31 the given address is in
+func linkPartner(value string) (netip.Addr, error) {
+	prefix, err := netip.ParsePrefix(value)
+	if err != nil {
+		return netip.Addr{}, fmt.Errorf("parsing link address %q: %w", value, err)
+	}
+	if prefix.Bits() != 31 {
+		return netip.Addr{}, fmt.Errorf("link address %s is not a /31", value) //nolint:err113
+	}
+
+	b := prefix.Addr().AsSlice()
+	b[len(b)-1] ^= 1
+	addr, _ := netip.AddrFromSlice(b)
+
+	return addr, nil
+}
+
+// fillLink sets the two ends of a link, which are the two addresses of a /31. Hydrating from scratch always takes
+// the next free /31. With onlyMissing it keeps the ends that are set, a half set link gets the other address of its
+// /31 (reserved when the used addresses were collected), and a link with no ends gets the next free /31.
+func (p *addrPool) fillLink(a, b *string, onlyMissing bool) (bool, error) {
+	if onlyMissing {
+		switch {
+		case *a != "" && *b != "":
+			return false, nil
+		case *a != "" || *b != "":
+			set, missing := a, b
+			if *a == "" {
+				set, missing = b, a
+			}
+
+			partner, err := linkPartner(*set)
+			if err != nil {
+				return false, err
+			}
+			p.used[partner] = true
+			*missing = partner.String() + "/31"
+
+			return true, nil
+		}
+	}
+
+	for p.used[p.next] || p.used[p.next.Next()] || !isEvenAddr(p.next) {
+		p.next = p.next.Next()
+	}
+	first, second := p.next, p.next.Next()
+	p.used[first], p.used[second] = true, true
+	p.next = second.Next()
+	*a, *b = first.String()+"/31", second.String()+"/31"
+
+	return true, nil
+}
+
+// markLinkUsed marks the addresses of a link as used, and the other address of the /31 of a half set one, as that is
+// the one fillLink gives its missing end
+func (p *addrPool) markLinkUsed(a, b string) {
+	p.markUsed(a)
+	p.markUsed(b)
+
+	if (a == "") != (b == "") {
+		set := a
+		if set == "" {
+			set = b
+		}
+		if partner, err := linkPartner(set); err == nil {
+			p.used[partner] = true
+		}
+	}
+}
+
+// asnPool hands out the ASNs of a range in order, skipping the ones in use. It only enforces the end of the range
+// when limited, as hydrating from scratch leaves that to the validation that follows.
+type asnPool struct {
+	next    uint32
+	end     uint32
+	limited bool
+	used    map[uint32]bool
+}
+
+func (p *asnPool) take() (uint32, error) {
+	for p.used[p.next] {
+		p.next++
+	}
+	if p.limited && p.next > p.end {
+		return 0, fmt.Errorf("no free ASN left in the leaf ASN range ending at %d", p.end) //nolint:err113
+	}
+
+	asn := p.next
+	p.used[asn] = true
+	p.next++
+
+	return asn, nil
+}
+
+const (
+	gatewayVTEPMACPrefix = "CA:FE:BA:BE:01:"
+	maxGatewayVTEPMACs   = 254
+)
+
+// hydrate allocates all the values from scratch, replacing the ones already set
 func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
+	return c.hydrateValues(ctx, kube, false)
+}
+
+// hydrateMissing allocates only the values that are not set yet, continuing each pool after the ones in use, so
+// objects added to a hydrated wiring get values that do not collide with the existing ones
+func (c *Config) hydrateMissing(ctx context.Context, kube kclient.Client) error {
+	return c.hydrateValues(ctx, kube, true)
+}
+
+func (c *Config) hydrateValues(ctx context.Context, kube kclient.Client, onlyMissing bool) error {
 	mgmtSubnet, err := c.Fab.Spec.Config.Control.ManagementSubnet.Parse()
 	if err != nil {
 		return fmt.Errorf("parsing management subnet: %w", err)
@@ -751,17 +928,122 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 		return fmt.Errorf("control VIP %s is not the first IP of the management subnet %s", controlVIP, mgmtSubnet) //nolint:err113
 	}
 
-	nextMgmtIP := controlVIP.Addr()
+	firstMgmtIP := controlVIP.Addr()
 	for range 4 { // reserve few IPs for future use
-		nextMgmtIP = nextMgmtIP.Next()
+		firstMgmtIP = firstMgmtIP.Next()
 	}
+	mgmtPool := newAddrPool(firstMgmtIP, 1)
 
 	dummySubnet, err := c.Fab.Spec.Config.Control.DummySubnet.Parse()
 	if err != nil {
 		return fmt.Errorf("parsing dummy subnet: %w", err)
 	}
+	dummyPool := newAddrPool(dummySubnet.Masked().Addr(), 2)
 
-	nextDummyIP := dummySubnet.Masked().Addr()
+	vtepSubnet, err := c.Fab.Spec.Config.Fabric.VTEPSubnet.Parse()
+	if err != nil {
+		return fmt.Errorf("parsing VTEP subnet: %w", err)
+	}
+	vtepPool := newAddrPool(vtepSubnet.Masked().Addr(), 1)
+
+	protocolSubnet, err := c.Fab.Spec.Config.Fabric.ProtocolSubnet.Parse()
+	if err != nil {
+		return fmt.Errorf("parsing protocol subnet: %w", err)
+	}
+	protoPool := newAddrPool(protocolSubnet.Masked().Addr(), 1)
+
+	fabricSubnet, err := c.Fab.Spec.Config.Fabric.FabricSubnet.Parse()
+	if err != nil {
+		return fmt.Errorf("parsing fabric subnet: %w", err)
+	}
+	fabricPool := newAddrPool(fabricSubnet.Masked().Addr(), 1)
+
+	fabrics, err := fabricSpecs(ctx, kube)
+	if err != nil {
+		return err
+	}
+	leafASNs := map[string]*asnPool{}
+	for name, f := range fabrics {
+		leafASNs[name] = &asnPool{next: f.LeafASNStart, end: f.LeafASNEnd, limited: onlyMissing, used: map[uint32]bool{}}
+	}
+
+	switches := &wiringapi.SwitchList{}
+	if err := kube.List(ctx, switches); err != nil {
+		return fmt.Errorf("listing switches: %w", err)
+	}
+
+	conns := &wiringapi.ConnectionList{}
+	if err := kube.List(ctx, conns); err != nil {
+		return fmt.Errorf("listing connections: %w", err)
+	}
+
+	gateways := &gwapi.GatewayList{}
+	if err := kube.List(ctx, gateways); err != nil {
+		return fmt.Errorf("listing gateways: %w", err)
+	}
+	if len(gateways.Items) > maxGatewayVTEPMACs {
+		return fmt.Errorf("too many gateways (%d) for our current VTEPMAC hydration scheme, maximum is %d", len(gateways.Items), maxGatewayVTEPMACs) //nolint:err113
+	}
+	usedMACOctets := map[uint8]bool{}
+
+	// the ASN and VTEP IP an MCLAG group already has, whichever of its peers carries them
+	groupASN := map[string]uint32{}
+	groupVTEP := map[string]string{}
+
+	if onlyMissing {
+		for _, control := range c.Controls {
+			mgmtPool.markUsed(string(control.Spec.Management.IP))
+			dummyPool.markUsed(string(control.Spec.Dummy.IP))
+		}
+		for _, node := range c.Nodes {
+			mgmtPool.markUsed(string(node.Spec.Management.IP))
+			dummyPool.markUsed(string(node.Spec.Dummy.IP))
+		}
+
+		for _, sw := range switches.Items {
+			mgmtPool.markUsed(sw.Spec.IP)
+			protoPool.markUsed(sw.Spec.ProtocolIP)
+			vtepPool.markUsed(sw.Spec.VTEPIP)
+			if pool, ok := leafASNs[sw.Spec.Topology.Fabric]; ok && sw.Spec.Role.IsLeaf() && sw.Spec.ASN != 0 {
+				pool.used[sw.Spec.ASN] = true
+			}
+			if sw.Spec.Redundancy.Type == fmeta.RedundancyTypeMCLAG {
+				if sw.Spec.ASN != 0 {
+					groupASN[sw.Spec.Redundancy.Group] = sw.Spec.ASN
+				}
+				if sw.Spec.VTEPIP != "" {
+					groupVTEP[sw.Spec.Redundancy.Group] = sw.Spec.VTEPIP
+				}
+			}
+		}
+
+		for _, gw := range gateways.Items {
+			protoPool.markUsed(gw.Spec.ProtocolIP)
+			vtepPool.markUsed(gw.Spec.VTEPIP)
+
+			var octet uint8
+			if _, err := fmt.Sscanf(strings.ToUpper(gw.Spec.VTEPMAC), gatewayVTEPMACPrefix+"%02x", &octet); err == nil {
+				usedMACOctets[octet] = true
+			}
+		}
+
+		for _, conn := range conns.Items {
+			switch {
+			case conn.Spec.Fabric != nil:
+				for _, link := range conn.Spec.Fabric.Links {
+					fabricPool.markLinkUsed(link.Spine.IP, link.Leaf.IP)
+				}
+			case conn.Spec.Mesh != nil:
+				for _, link := range conn.Spec.Mesh.Links {
+					fabricPool.markLinkUsed(link.Leaf1.IP, link.Leaf2.IP)
+				}
+			case conn.Spec.Gateway != nil:
+				for _, link := range conn.Spec.Gateway.Links {
+					fabricPool.markLinkUsed(link.Switch.IP, link.Gateway.IP)
+				}
+			}
+		}
+	}
 
 	slices.SortFunc(c.Controls, func(a, b fabapi.ControlNode) int {
 		return cmp.Compare(a.Name, b.Name)
@@ -769,48 +1051,22 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 
 	for idx := range c.Controls {
 		control := &c.Controls[idx]
-
-		control.Spec.Management.IP = meta.Prefix(netip.PrefixFrom(nextMgmtIP, mgmtSubnet.Bits()).String())
-		nextMgmtIP = nextMgmtIP.Next()
-
-		control.Spec.Dummy.IP = meta.Prefix(netip.PrefixFrom(nextDummyIP, 31).String())
-		nextDummyIP = nextDummyIP.Next().Next()
+		if !onlyMissing || control.Spec.Management.IP == "" {
+			control.Spec.Management.IP = meta.Prefix(netip.PrefixFrom(mgmtPool.take(), mgmtSubnet.Bits()).String())
+		}
+		if !onlyMissing || control.Spec.Dummy.IP == "" {
+			control.Spec.Dummy.IP = meta.Prefix(netip.PrefixFrom(dummyPool.take(), 31).String())
+		}
 	}
 
 	for idx := range c.Nodes {
 		node := &c.Nodes[idx]
-
-		node.Spec.Management.IP = meta.Prefix(netip.PrefixFrom(nextMgmtIP, mgmtSubnet.Bits()).String())
-		nextMgmtIP = nextMgmtIP.Next()
-
-		node.Spec.Dummy.IP = meta.Prefix(netip.PrefixFrom(nextDummyIP, 31).String())
-		nextDummyIP = nextDummyIP.Next().Next()
-	}
-
-	vtepSubnet, err := c.Fab.Spec.Config.Fabric.VTEPSubnet.Parse()
-	if err != nil {
-		return fmt.Errorf("parsing VTEP subnet: %w", err)
-	}
-	nextVTEPIP := vtepSubnet.Masked().Addr()
-
-	protocolSubnet, err := c.Fab.Spec.Config.Fabric.ProtocolSubnet.Parse()
-	if err != nil {
-		return fmt.Errorf("parsing protocol subnet: %w", err)
-	}
-	nextProtoIP := protocolSubnet.Masked().Addr()
-
-	fabrics, err := fabricSpecs(ctx, kube)
-	if err != nil {
-		return err
-	}
-	nextLeafASN := map[string]uint32{}
-	for name, f := range fabrics {
-		nextLeafASN[name] = f.LeafASNStart
-	}
-
-	switches := &wiringapi.SwitchList{}
-	if err := kube.List(ctx, switches); err != nil {
-		return fmt.Errorf("listing switches: %w", err)
+		if !onlyMissing || node.Spec.Management.IP == "" {
+			node.Spec.Management.IP = meta.Prefix(netip.PrefixFrom(mgmtPool.take(), mgmtSubnet.Bits()).String())
+		}
+		if !onlyMissing || node.Spec.Dummy.IP == "" {
+			node.Spec.Dummy.IP = meta.Prefix(netip.PrefixFrom(dummyPool.take(), 31).String())
+		}
 	}
 
 	slices.SortFunc(switches.Items, func(a, b wiringapi.Switch) int {
@@ -840,11 +1096,13 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 			return fmt.Errorf("switch %s role %q is invalid", sw.Name, sw.Spec.Role) //nolint:err113
 		}
 
-		sw.Spec.IP = netip.PrefixFrom(nextMgmtIP, mgmtSubnet.Bits()).String()
-		nextMgmtIP = nextMgmtIP.Next()
+		if !onlyMissing || sw.Spec.IP == "" {
+			sw.Spec.IP = netip.PrefixFrom(mgmtPool.take(), mgmtSubnet.Bits()).String()
+		}
 
-		sw.Spec.ProtocolIP = netip.PrefixFrom(nextProtoIP, 32).String()
-		nextProtoIP = nextProtoIP.Next()
+		if !onlyMissing || sw.Spec.ProtocolIP == "" {
+			sw.Spec.ProtocolIP = netip.PrefixFrom(protoPool.take(), 32).String()
+		}
 
 		swFabric := sw.Spec.Topology.Fabric
 		if _, ok := fabrics[swFabric]; !ok {
@@ -861,22 +1119,41 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 
 		if sw.Spec.Redundancy.Type == fmeta.RedundancyTypeMCLAG {
 			if peer, exist := mclagPeer[sw.Spec.Redundancy.Group]; exist {
-				sw.Spec.ASN = peer.Spec.ASN
-				sw.Spec.VTEPIP = peer.Spec.VTEPIP
+				if !onlyMissing || sw.Spec.ASN == 0 {
+					sw.Spec.ASN = peer.Spec.ASN
+				}
+				if !onlyMissing || sw.Spec.VTEPIP == "" {
+					sw.Spec.VTEPIP = peer.Spec.VTEPIP
+				}
 
 				continue
 			}
 
 			mclagPeer[sw.Spec.Redundancy.Group] = sw
+
+			// the first peer by name can be the new one, so it takes what the group already has before drawing from the pools
+			if onlyMissing {
+				if sw.Spec.ASN == 0 {
+					sw.Spec.ASN = groupASN[sw.Spec.Redundancy.Group]
+				}
+				if sw.Spec.VTEPIP == "" {
+					sw.Spec.VTEPIP = groupVTEP[sw.Spec.Redundancy.Group]
+				}
+			}
 		}
 
 		if sw.Spec.Role.IsLeaf() {
-			sw.Spec.ASN = nextLeafASN[swFabric]
-			nextLeafASN[swFabric]++
+			if !onlyMissing || sw.Spec.ASN == 0 {
+				asn, err := leafASNs[swFabric].take()
+				if err != nil {
+					return fmt.Errorf("leaf %s of fabric %s: %w", sw.Name, swFabric, err)
+				}
+				sw.Spec.ASN = asn
+			}
 
-			sw.Spec.VTEPIP = ""
-			sw.Spec.VTEPIP = netip.PrefixFrom(nextVTEPIP, 32).String()
-			nextVTEPIP = nextVTEPIP.Next()
+			if !onlyMissing || sw.Spec.VTEPIP == "" {
+				sw.Spec.VTEPIP = netip.PrefixFrom(vtepPool.take(), 32).String()
+			}
 		}
 	}
 
@@ -886,54 +1163,45 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 		}
 	}
 
-	fabricSubnet, err := c.Fab.Spec.Config.Fabric.FabricSubnet.Parse()
-	if err != nil {
-		return fmt.Errorf("parsing fabric subnet: %w", err)
-	}
-	nextFabricIP := fabricSubnet.Masked().Addr()
-
-	conns := &wiringapi.ConnectionList{}
-	if err := kube.List(ctx, conns); err != nil {
-		return fmt.Errorf("listing connections: %w", err)
-	}
-
 	slices.SortFunc(conns.Items, func(a, b wiringapi.Connection) int {
 		return cmp.Compare(a.Name, b.Name)
 	})
 
 	for _, conn := range conns.Items {
+		changed := !onlyMissing
+
 		if conn.Spec.Fabric != nil { //nolint:gocritic
 			cf := conn.Spec.Fabric
 
 			for idx := range cf.Links {
 				link := &cf.Links[idx]
-				link.Spine.IP = nextFabricIP.String() + "/31"
-				nextFabricIP = nextFabricIP.Next()
-
-				link.Leaf.IP = nextFabricIP.String() + "/31"
-				nextFabricIP = nextFabricIP.Next()
+				linkChanged, err := fabricPool.fillLink(&link.Spine.IP, &link.Leaf.IP, onlyMissing)
+				if err != nil {
+					return fmt.Errorf("connection %s: %w", conn.Name, err)
+				}
+				changed = changed || linkChanged
 			}
 		} else if conn.Spec.Mesh != nil {
 			cm := conn.Spec.Mesh
 
 			for idx := range cm.Links {
 				link := &cm.Links[idx]
-				link.Leaf1.IP = nextFabricIP.String() + "/31"
-				nextFabricIP = nextFabricIP.Next()
-
-				link.Leaf2.IP = nextFabricIP.String() + "/31"
-				nextFabricIP = nextFabricIP.Next()
+				linkChanged, err := fabricPool.fillLink(&link.Leaf1.IP, &link.Leaf2.IP, onlyMissing)
+				if err != nil {
+					return fmt.Errorf("connection %s: %w", conn.Name, err)
+				}
+				changed = changed || linkChanged
 			}
 		} else if conn.Spec.Gateway != nil {
 			cg := conn.Spec.Gateway
 
 			for idx := range cg.Links {
 				link := &cg.Links[idx]
-				link.Switch.IP = nextFabricIP.String() + "/31"
-				nextFabricIP = nextFabricIP.Next()
-
-				link.Gateway.IP = nextFabricIP.String() + "/31"
-				nextFabricIP = nextFabricIP.Next()
+				linkChanged, err := fabricPool.fillLink(&link.Switch.IP, &link.Gateway.IP, onlyMissing)
+				if err != nil {
+					return fmt.Errorf("connection %s: %w", conn.Name, err)
+				}
+				changed = changed || linkChanged
 
 				gwName := link.Gateway.DeviceName()
 				gw := &gwapi.Gateway{}
@@ -948,13 +1216,25 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 				if !exist {
 					return fmt.Errorf("gateway %s does not have interface %s", gwName, link.Gateway.LocalPortName()) //nolint:err113
 				}
-				iface.IPs = []string{link.Gateway.IP}
-				iface.MTU = fabric.MTU
-				gw.Spec.Interfaces[link.Gateway.LocalPortName()] = iface
 
 				switchIP, err := netip.ParsePrefix(link.Switch.IP)
 				if err != nil {
 					return fmt.Errorf("parsing gateway %s link %d switch IP %s: %w", gwName, idx, link.Switch.IP, err)
+				}
+
+				// a link whose addresses were already set can still leave the gateway side to fill in
+				ifaceMissing := len(iface.IPs) == 0
+				neighborMissing := !slices.ContainsFunc(gw.Spec.Neighbors, func(n gwapi.GatewayBGPNeighbor) bool {
+					return n.Source == link.Gateway.LocalPortName() && n.IP == switchIP.Addr().String()
+				})
+				if !linkChanged && !ifaceMissing && !neighborMissing {
+					continue
+				}
+
+				if linkChanged || ifaceMissing {
+					iface.IPs = []string{link.Gateway.IP}
+					iface.MTU = fabric.MTU
+					gw.Spec.Interfaces[link.Gateway.LocalPortName()] = iface
 				}
 
 				asn := uint32(0)
@@ -969,12 +1249,13 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 					return fmt.Errorf("switch %s not found or ASN not set", link.Switch.DeviceName()) //nolint:err113
 				}
 
-				// TODO check that it's not already set?
-				gw.Spec.Neighbors = append(gw.Spec.Neighbors, gwapi.GatewayBGPNeighbor{
-					Source: link.Gateway.LocalPortName(),
-					IP:     switchIP.Addr().String(),
-					ASN:    asn,
-				})
+				if neighborMissing {
+					gw.Spec.Neighbors = append(gw.Spec.Neighbors, gwapi.GatewayBGPNeighbor{
+						Source: link.Gateway.LocalPortName(),
+						IP:     switchIP.Addr().String(),
+						ASN:    asn,
+					})
+				}
 
 				if err := kube.Update(ctx, gw); err != nil {
 					return fmt.Errorf("updating gateway %s: %w", gw.Name, err)
@@ -984,12 +1265,17 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 			continue
 		}
 
+		if !changed {
+			continue
+		}
+
 		if err := kube.Update(ctx, &conn); err != nil {
 			return fmt.Errorf("updating connection %s: %w", conn.Name, err)
 		}
 	}
 
-	gateways := &gwapi.GatewayList{}
+	// the gateway links above updated the gateways in the cluster, so read them again before filling in their own values
+	gateways = &gwapi.GatewayList{}
 	if err := kube.List(ctx, gateways); err != nil {
 		return fmt.Errorf("listing gateways: %w", err)
 	}
@@ -1010,14 +1296,22 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 		}
 		gw.Spec.ASN = domain.GatewayASN
 
-		gw.Spec.ProtocolIP = netip.PrefixFrom(nextProtoIP, 32).String()
-		nextProtoIP = nextProtoIP.Next()
+		if !onlyMissing || gw.Spec.ProtocolIP == "" {
+			gw.Spec.ProtocolIP = netip.PrefixFrom(protoPool.take(), 32).String()
+		}
 
-		gw.Spec.VTEPIP = netip.PrefixFrom(nextVTEPIP, 32).String()
-		nextVTEPIP = nextVTEPIP.Next()
+		if !onlyMissing || gw.Spec.VTEPIP == "" {
+			gw.Spec.VTEPIP = netip.PrefixFrom(vtepPool.take(), 32).String()
+		}
 
-		gw.Spec.VTEPMAC = fmt.Sprintf("CA:FE:BA:BE:01:%02x", nextMACFinalOctet)
-		nextMACFinalOctet++
+		if !onlyMissing || gw.Spec.VTEPMAC == "" {
+			for usedMACOctets[nextMACFinalOctet] {
+				nextMACFinalOctet++
+			}
+			gw.Spec.VTEPMAC = fmt.Sprintf("%s%02x", gatewayVTEPMACPrefix, nextMACFinalOctet)
+			usedMACOctets[nextMACFinalOctet] = true
+			nextMACFinalOctet++
+		}
 		gw.Spec.VTEPMTU = fabric.ServerFacingMTU
 
 		if err := kube.Update(ctx, &gw); err != nil {
