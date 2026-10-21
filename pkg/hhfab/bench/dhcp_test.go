@@ -608,7 +608,7 @@ func TestDHCPStormTakenNotNaked(t *testing.T) {
 }
 
 // A NAK for a lease dhcpd has just ACKed is flagged; the client starts over and
-// binds.
+// binds. Each DORA is measured on its own, not from the first one's start.
 func TestDHCPStormRenewalNaked(t *testing.T) {
 	t.Parallel()
 
@@ -618,6 +618,11 @@ func TestDHCPStormRenewalNaked(t *testing.T) {
 		require.Equal(t, int64(3), res.bound)
 		require.Equal(t, int64(3), res.nakRenewal)
 		require.Equal(t, map[checkName]int64{checkLeaseNaked: 3}, failedChecks(res))
+
+		require.Len(t, res.doraLat, 6)
+		for _, lat := range res.doraLat {
+			require.Zero(t, lat, "a DORA answered at once")
+		}
 	})
 }
 
