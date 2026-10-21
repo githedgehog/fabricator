@@ -68,6 +68,34 @@ func TestResetDHCPObjectsRefusesForeignObjects(t *testing.T) {
 	}
 }
 
+// Cleanup waits only for the DHCPSubnets of the bench's own VPCs: another
+// VPC's, however it is named, never holds it up.
+func TestWaitDHCPGoneOnlyWaitsForOurs(t *testing.T) {
+	t.Parallel()
+
+	scheme, err := benchScheme()
+	require.NoError(t, err)
+
+	ours := map[string]bool{"dhcp-0001": true}
+	subnet := func(name string) kclient.Object {
+		return &dhcpapi.DHCPSubnet{ObjectMeta: objMeta(name, nil)}
+	}
+
+	synctest.Test(t, func(t *testing.T) {
+		kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(subnet("dhcp-prod--s01")).Build()
+
+		start := time.Now()
+		require.NoError(t, waitDHCPGone(t.Context(), kube, ours))
+		require.Zero(t, time.Since(start))
+	})
+
+	synctest.Test(t, func(t *testing.T) {
+		kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(subnet("dhcp-0001--s01")).Build()
+
+		require.ErrorIs(t, waitDHCPGone(t.Context(), kube, ours), context.DeadlineExceeded)
+	})
+}
+
 // The default fleet is 20k servers in subnets of at most 1000: 10 VPCs of 2
 // subnets of 1000 servers, /22s each with room for the servers and the probe,
 // on their own VLANs, carved in order and never overlapping.

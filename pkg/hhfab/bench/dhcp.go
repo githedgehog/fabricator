@@ -357,13 +357,22 @@ func resetDHCPObjects(ctx context.Context, kube kclient.Client, plan []*dhcpSubn
 		return fmt.Errorf("listing bench DHCP VPCs: %w", err)
 	}
 
+	// The VPCs whose DHCPSubnets have to be gone: those deleted now, and those
+	// about to be created, whose names an earlier run's subnets may still hold.
+	ours := map[string]bool{}
+	for _, sub := range plan {
+		ours[sub.vpc] = true
+	}
+
 	for idx := range vpcs.Items {
+		ours[vpcs.Items[idx].Name] = true
+
 		if err := kube.Delete(ctx, &vpcs.Items[idx]); kclient.IgnoreNotFound(err) != nil {
 			return fmt.Errorf("deleting VPC %s: %w", vpcs.Items[idx].Name, err)
 		}
 	}
 
-	if err := waitDHCPGone(ctx, kube); err != nil {
+	if err := waitDHCPGone(ctx, kube, ours); err != nil {
 		return err
 	}
 
@@ -406,16 +415,17 @@ func checkDHCPOwnership(ctx context.Context, kube kclient.Client, objs []kclient
 	return nil
 }
 
-// waitDHCPGone waits until no bench DHCP VPC and no DHCPSubnet of one is left.
-// A VPC being deleted can't be recreated under its name, and the DHCPSubnets,
-// which it owns, only go once the garbage collector gets to them.
-func waitDHCPGone(ctx context.Context, kube kclient.Client) error {
+// waitDHCPGone waits until no bench DHCP VPC and no DHCPSubnet of the vpcs is
+// left. A VPC being deleted can't be recreated under its name, and the
+// DHCPSubnets, which it owns, only go once the garbage collector gets to them.
+// Other VPCs' subnets don't matter, whatever they are named.
+func waitDHCPGone(ctx context.Context, kube kclient.Client, vpcs map[string]bool) error {
 	return pollUntil(ctx, dhcpObjectsTimeout, "the old bench DHCP VPCs and subnets to go away", func(ctx context.Context) (bool, error) {
-		vpcs := &vpcapi.VPCList{}
-		if err := kube.List(ctx, vpcs, kclient.MatchingLabels{LabelFabric: DHCPLabel}); err != nil {
+		left := &vpcapi.VPCList{}
+		if err := kube.List(ctx, left, kclient.MatchingLabels{LabelFabric: DHCPLabel}); err != nil {
 			return false, fmt.Errorf("listing bench DHCP VPCs: %w", err)
 		}
-		if len(vpcs.Items) > 0 {
+		if len(left.Items) > 0 {
 			return false, nil
 		}
 
@@ -424,8 +434,9 @@ func waitDHCPGone(ctx context.Context, kube kclient.Client) error {
 			return false, fmt.Errorf("listing DHCP subnets: %w", err)
 		}
 
+		// The VPC controller names a VPC's DHCPSubnets <vpc>--<subnet>.
 		for _, sub := range subnets.Items {
-			if strings.HasPrefix(sub.Name, dhcpVPCPrefix) && strings.Contains(sub.Name, "--") {
+			if vpc, _, ok := strings.Cut(sub.Name, "--"); ok && vpcs[vpc] {
 				return false, nil
 			}
 		}
