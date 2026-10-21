@@ -495,7 +495,9 @@ func (c *dhcpClients) dora(ctx context.Context, srv *dhcpServer, prof clientProf
 		}
 
 		if ack.MessageType() == dhcpv4.MessageTypeNak {
+			// dhcpd made the offer itself, so it should still hold it.
 			c.stats.nakDORA.Add(1)
+			c.checks.record(checkOfferNaked, "%s requested %s it was offered, got a NAK", srv.hostname, offered)
 
 			continue
 		}
@@ -547,11 +549,8 @@ const (
 type repeatOutcome int
 
 const (
-	outcomeAckSame repeatOutcome = iota // ACK for the IP asked for
-	// ACK for an IP other than the one asked for. For a taken repeat that is
-	// normally the server's own IP; an IP that is neither its own nor the taken
-	// one is flagged as wrong IP as well.
-	outcomeAckOther
+	outcomeAckSame  repeatOutcome = iota // ACK for the IP asked for
+	outcomeAckOther                      // ACK for some other IP
 	outcomeNak
 	outcomeZero    // 0.0.0.0
 	outcomeNoReply // nothing usable after every retransmit

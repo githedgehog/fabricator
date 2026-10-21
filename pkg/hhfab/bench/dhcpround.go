@@ -339,6 +339,7 @@ func (c *dhcpClients) bind(ctx context.Context, srv *dhcpServer, held *dhcpHeld)
 
 		if renewal.MessageType() == dhcpv4.MessageTypeNak {
 			c.stats.nakRenewal.Add(1)
+			c.checks.record(checkLeaseNaked, "%s renewed %s it was ACKed, got a NAK", srv.hostname, srv.ip)
 			held.release(srv)
 
 			continue
@@ -412,19 +413,18 @@ func (c *dhcpClients) repeats(ctx context.Context, srv *dhcpServer, held *dhcpHe
 
 		c.stats.repeat(kind, outcome, time.Since(start))
 
-		if reply == nil || reply.MessageType() != dhcpv4.MessageTypeAck {
-			continue
-		}
-
-		got := leaseIP(reply)
+		// RFC 2131 4.3.2: a REQUEST in INIT-REBOOT is ACKed with the IP asked
+		// for when it is the client's, and NAKed when it is not.
 		switch {
-		case kind == repeatOwn && got != want:
-			c.checks.record(checkWrongIP, "%s asked again for its %s, got an ACK for %s", srv.hostname, want, got)
-		case kind == repeatTaken && got == want:
+		case kind == repeatOwn && outcome == outcomeNak:
+			c.checks.record(checkLeaseNaked, "%s asked again for its %s, got a NAK", srv.hostname, want)
+		case kind == repeatOwn && outcome == outcomeAckOther:
+			c.checks.record(checkWrongIP, "%s asked again for its %s, got an ACK for %s", srv.hostname, want, leaseIP(reply))
+		case kind == repeatTaken && outcome == outcomeAckSame:
 			c.checks.record(checkTakenGranted, "%s was granted %s, which another server holds", srv.hostname, want)
-		case kind == repeatTaken && got != srv.ip:
-			c.checks.record(checkWrongIP, "%s asked for %s, which another server holds, got an ACK for %s instead of its own %s",
-				srv.hostname, want, got, srv.ip)
+		case kind == repeatTaken && outcome == outcomeAckOther:
+			c.checks.record(checkTakenNotNaked, "%s asked for %s, which another server holds, got an ACK for %s (its own is %s)",
+				srv.hostname, want, leaseIP(reply), srv.ip)
 		}
 	}
 }

@@ -15,8 +15,9 @@ import (
 )
 
 // The bench measures load; these are the few things plain enough on the wire or
-// in dhcpd's own record to call misbehaviour. None fails a run, every one is
-// counted and shown with examples.
+// in dhcpd's own record to call misbehaviour. They hold dhcpd to RFC 2131, not
+// to what today's dhcpd does. None fails a run, every one is counted and shown
+// with examples.
 type checkName string
 
 const (
@@ -27,6 +28,9 @@ const (
 	checkZeroAck          checkName = "zero ack"
 	checkWrongIP          checkName = "wrong IP"
 	checkTakenGranted     checkName = "taken IP granted"
+	checkTakenNotNaked    checkName = "taken IP not NAKed"
+	checkOfferNaked       checkName = "offer NAKed"
+	checkLeaseNaked       checkName = "lease NAKed"
 	checkRenewalChangedIP checkName = "renewal changed IP"
 	checkMismatchedReply  checkName = "mismatched reply"
 	checkServerIDChanged  checkName = "server ID changed"
@@ -43,8 +47,8 @@ const (
 
 // checkOrder is the order checks are reported in.
 var checkOrder = []checkName{
-	checkOverlap, checkOutOfRange, checkZeroOffer, checkZeroAck, checkWrongIP, checkTakenGranted, checkRenewalChangedIP,
-	checkMismatchedReply, checkServerIDChanged, checkNoLeaseTime, checkNoServerID, checkUnbound,
+	checkOverlap, checkOutOfRange, checkZeroOffer, checkZeroAck, checkWrongIP, checkTakenGranted, checkTakenNotNaked,
+	checkOfferNaked, checkLeaseNaked, checkRenewalChangedIP, checkMismatchedReply, checkServerIDChanged, checkNoLeaseTime, checkNoServerID, checkUnbound,
 	checkOverlapLease, checkMissingLease, checkUnknownLease, checkShortLease,
 }
 
