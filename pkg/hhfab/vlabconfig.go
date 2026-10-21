@@ -1144,7 +1144,7 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 
 		// TODO: remove when figured out why Celestica SONiC+ installer needs extra RAM, likely it's just a bigger bin for some reason
 		if fmeta.SwitchProfileVSCLSP == vm.SwitchProfile {
-			size.RAM += 1024
+			size.RAM += 2048
 		}
 
 		vms = append(vms, VM{
