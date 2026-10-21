@@ -573,29 +573,20 @@ func (c *dhcpClients) repeat(ctx context.Context, srv *dhcpServer, want netip.Ad
 		return outcomeNoReply, nil, err
 	}
 
+	// judgeAck counts every 0.0.0.0 ACK as it comes, even when a usable reply
+	// follows; zero only tells a repeat that got nothing else apart.
+	judge := c.judgeAck(srv)
 	zero := false
 	reply, err := c.exchange(ctx, srv, msg, replies, c.repeatSched, false, func(reply *dhcpv4.DHCPv4) verdict {
-		switch reply.MessageType() { //nolint:exhaustive // anything else is ignored
-		case dhcpv4.MessageTypeNak:
-			return take
-		case dhcpv4.MessageTypeAck:
-			if reply.YourIPAddr.IsUnspecified() {
-				zero = true
-
-				return ignore
-			}
-
-			return take
-		default:
-			return ignore
+		if reply.MessageType() == dhcpv4.MessageTypeAck && reply.YourIPAddr.IsUnspecified() {
+			zero = true
 		}
+
+		return judge(reply)
 	})
 
 	switch {
 	case errors.Is(err, errNoReply) && zero:
-		c.stats.zeroAcks.Add(1)
-		c.checks.record(checkZeroAck, "%s asked for %s, got an ACK for 0.0.0.0", srv.hostname, want)
-
 		return outcomeZero, nil, nil
 	case errors.Is(err, errNoReply):
 		return outcomeNoReply, nil, nil
