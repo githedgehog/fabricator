@@ -547,14 +547,16 @@ func DoVLABBenchSample(ctx context.Context, workDir, cacheDir string, opts Bench
 		defer stop()
 	}
 
-	slog.Info("Sampling etcd and node memory",
-		"interval", opts.Interval, "duration", opts.Duration, "out", path)
+	throttlePath := filepath.Join(workDir, bench.ThrottleFile)
 
-	if err := bench.SampleTo(ctx, run, opts.Interval, path, vip); err != nil {
+	slog.Info("Sampling etcd and node memory",
+		"interval", opts.Interval, "duration", opts.Duration, "out", path, "throttling", throttlePath)
+
+	if err := bench.SampleTo(ctx, run, opts.Interval, path, throttlePath, vip); err != nil {
 		return fmt.Errorf("sampling: %w", err)
 	}
 
-	slog.Info("Wrote series", "path", path)
+	slog.Info("Wrote series", "path", path, "throttling", throttlePath)
 
 	return nil
 }
@@ -587,8 +589,9 @@ func DoVLABBenchHealth(ctx context.Context, workDir, cacheDir string, opts Bench
 	}
 
 	if err := bench.Health(ctx, kube, run, os.Stdout, bench.HealthOpts{
-		Stats:  opts.Stats,
-		Series: filepath.Join(workDir, bench.SeriesFile),
+		Stats:    opts.Stats,
+		Series:   filepath.Join(workDir, bench.SeriesFile),
+		Throttle: filepath.Join(workDir, bench.ThrottleFile),
 	}); err != nil {
 		return fmt.Errorf("collecting health: %w", err)
 	}

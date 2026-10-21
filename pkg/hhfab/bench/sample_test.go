@@ -769,14 +769,17 @@ func TestSampleToRejectsNonPositiveInterval(t *testing.T) {
 	t.Parallel()
 
 	path := filepath.Join(t.TempDir(), "series.csv")
+	throttlePath := filepath.Join(t.TempDir(), "throttle.csv")
 
 	for _, interval := range []time.Duration{0, -time.Second} {
-		err := SampleTo(t.Context(), nil, interval, path, netip.Prefix{})
+		err := SampleTo(t.Context(), nil, interval, path, throttlePath, netip.Prefix{})
 		require.ErrorContains(t, err, "must be positive")
 	}
 
-	_, err := os.Stat(path)
-	require.True(t, os.IsNotExist(err), "a refused run must not leave a series behind")
+	for _, path := range []string{path, throttlePath} {
+		_, err := os.Stat(path)
+		require.True(t, os.IsNotExist(err), "a refused run must not leave %s behind", path)
+	}
 }
 
 func TestLoadSeriesMatchesColumnsByName(t *testing.T) {

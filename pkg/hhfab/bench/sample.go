@@ -34,11 +34,14 @@ const DefaultSampleInterval = 15 * time.Second
 //
 // CPU is cumulative user plus system seconds per command name, from every
 // process's stat; fabric-boot's disk reads show whether the installers it
-// serves come from the page cache. Both are counters, like etcd's.
+// serves come from the page cache. Both are counters, like etcd's. The fab
+// pods' CPU throttling (throttleCmd) comes in the same round trip, but goes to
+// ThrottleFile, since which pods there are changes during a run.
 const sampleCmd = `curl -s --max-time 10 http://127.0.0.1:2381/metrics
 free -m | awk '/^Mem:/{printf "bench_mem_total_bytes %d\nbench_mem_used_bytes %d\nbench_mem_available_bytes %d\n", $2*1048576, $3*1048576, $7*1048576}'
 ps -eo rss=,comm= | awk '{r[$2]+=$1} END{printf "bench_rss_k3s_bytes %d\nbench_rss_fabric_ctrl_bytes %d\nbench_rss_fabric_boot_bytes %d\nbench_rss_fabric_dhcpd_bytes %d\n", r["k3s-server"]*1024, r["fabric"]*1024, r["fabric-boot"]*1024, r["fabric-dhcpd"]*1024}'
 cat /proc/[0-9]*/stat 2>/dev/null | awk -v t="$(getconf CLK_TCK 2>/dev/null || echo 100)" '{c[$2]+=$14+$15} END{printf "bench_cpu_k3s_seconds %.2f\nbench_cpu_fabric_ctrl_seconds %.2f\nbench_cpu_fabric_boot_seconds %.2f\nbench_cpu_fabric_dhcpd_seconds %.2f\n", c["(k3s-server)"]/t, c["(fabric)"]/t, c["(fabric-boot)"]/t, c["(fabric-dhcpd)"]/t}'
+` + throttleCmd + `
 p=$(pgrep -xo fabric-boot) && sudo awk '/^read_bytes:/{print "bench_io_read_fabric_boot_bytes", $2}' /proc/$p/io`
 
 // sampleNetCmd adds the traffic of the interface holding the control VIP: the
@@ -355,14 +358,20 @@ func completeGroups(found map[string]float64) (map[string]float64, int) {
 	return out, kept
 }
 
-// takeSample collects one observation from the control node.
-func takeSample(ctx context.Context, run Runner, cmd string) (Sample, error) {
+// takeSample collects one observation from the control node, with the fab
+// pods' CPU throttling at the same moment.
+func takeSample(ctx context.Context, run Runner, cmd string) (Sample, []PodCPU, error) {
 	out, err := run(ctx, cmd)
 	if err != nil {
-		return Sample{}, fmt.Errorf("collecting sample: %w", err)
+		return Sample{}, nil, fmt.Errorf("collecting sample: %w", err)
 	}
 
-	return parseSample(time.Now(), out)
+	sample, err := parseSample(time.Now(), out)
+	if err != nil {
+		return Sample{}, nil, err
+	}
+
+	return sample, parsePodCPU(out), nil
 }
 
 // record renders a sample in column order. A metric that was absent is written
@@ -393,6 +402,12 @@ type seriesWriter struct {
 
 // createSeries truncates path and writes the header.
 func createSeries(path string) (*seriesWriter, error) {
+	return createCSV(path, seriesHeader)
+}
+
+// createCSV truncates path and writes header, for the series and for
+// ThrottleFile alike.
+func createCSV(path string, header []string) (*seriesWriter, error) {
 	file, err := os.Create(path)
 	if err != nil {
 		return nil, fmt.Errorf("creating series %s: %w", path, err)
@@ -400,7 +415,7 @@ func createSeries(path string) (*seriesWriter, error) {
 
 	series := &seriesWriter{file: file, out: csv.NewWriter(file)}
 
-	if err := series.Write(seriesHeader); err != nil {
+	if err := series.Write(header); err != nil {
 		file.Close()
 
 		return nil, err
@@ -458,7 +473,9 @@ func (s *seriesWriter) Close() error {
 // samples with no metrics rather than as a silent hole between two timestamps.
 //
 // controlVIP finds the management NIC to sample; left zero, it is not sampled.
-func SampleTo(ctx context.Context, run Runner, interval time.Duration, path string, controlVIP netip.Prefix) error {
+// The fab pods' CPU throttling goes to throttlePath, a row per pod per sample;
+// a failed collection leaves no rows there, its gap row in path says so.
+func SampleTo(ctx context.Context, run Runner, interval time.Duration, path, throttlePath string, controlVIP netip.Prefix) error {
 	// Refused rather than treated as "nothing to do": returning quietly left no
 	// series behind while the caller reported one written.
 	if interval <= 0 {
@@ -470,16 +487,27 @@ func SampleTo(ctx context.Context, run Runner, interval time.Duration, path stri
 		return err
 	}
 
-	err = sampleLoop(ctx, run, interval, series, sampleCommand(controlVIP))
+	throttle, err := createCSV(throttlePath, throttleHeader)
+	if err != nil {
+		series.Close()
+
+		return err
+	}
+
+	err = sampleLoop(ctx, run, interval, series, throttle, sampleCommand(controlVIP))
 
 	if closeErr := series.Close(); err == nil {
+		err = closeErr
+	}
+
+	if closeErr := throttle.Close(); err == nil {
 		err = closeErr
 	}
 
 	return err
 }
 
-func sampleLoop(ctx context.Context, run Runner, interval time.Duration, series *seriesWriter, cmd string) error {
+func sampleLoop(ctx context.Context, run Runner, interval time.Duration, series, throttle *seriesWriter, cmd string) error {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
@@ -488,7 +516,7 @@ func sampleLoop(ctx context.Context, run Runner, interval time.Duration, series 
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			sample, err := takeSample(ctx, run, cmd)
+			sample, pods, err := takeSample(ctx, run, cmd)
 			if err != nil {
 				// Stopping is not an outage.
 				if ctx.Err() != nil {
@@ -503,6 +531,16 @@ func sampleLoop(ctx context.Context, run Runner, interval time.Duration, series 
 			}
 
 			if err := series.Flush(); err != nil {
+				return err
+			}
+
+			for _, pod := range pods {
+				if err := throttle.Write(podCPUAt{At: sample.At, PodCPU: pod}.record()); err != nil {
+					return err
+				}
+			}
+
+			if err := throttle.Flush(); err != nil {
 				return err
 			}
 		}
