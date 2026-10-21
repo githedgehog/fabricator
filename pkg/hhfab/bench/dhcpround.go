@@ -272,6 +272,7 @@ func runDHCPStorm(ctx context.Context, clients *dhcpClients, servers []*dhcpServ
 // DORA and first renewal, then the repeats.
 func (c *dhcpClients) boot(ctx context.Context, srv *dhcpServer, held *dhcpHeld, opts DHCPOpts) {
 	defer c.stats.finish(srv)
+	defer held.done(srv)
 
 	if opts.PXE {
 		c.stats.enter(phasePXE)
@@ -409,7 +410,11 @@ func (c *dhcpClients) repeats(ctx context.Context, srv *dhcpServer, held *dhcpHe
 
 			var ok bool
 			if want, ok = held.pickOther(ctx, srv); !ok {
-				return
+				if ctx.Err() != nil {
+					return
+				}
+
+				continue
 			}
 		}
 
@@ -445,6 +450,10 @@ type dhcpHeld struct {
 	mu      sync.Mutex
 	changed *sync.Cond
 	subnets map[int]*heldSubnet
+
+	// Servers of each subnet still in their round, bound or not: until none
+	// is left but the one asking, someone may yet hold an IP to ask for.
+	running map[int]int
 }
 
 type heldSubnet struct {
@@ -453,14 +462,25 @@ type heldSubnet struct {
 }
 
 func newDHCPHeld(plan []*dhcpSubnet) *dhcpHeld {
-	h := &dhcpHeld{subnets: make(map[int]*heldSubnet, len(plan))}
+	h := &dhcpHeld{subnets: make(map[int]*heldSubnet, len(plan)), running: make(map[int]int, len(plan))}
 	h.changed = sync.NewCond(&h.mu)
 
 	for _, sub := range plan {
 		h.subnets[sub.index] = &heldSubnet{owner: map[netip.Addr]*dhcpServer{}}
+		h.running[sub.index] = sub.servers
 	}
 
 	return h
+}
+
+// done records srv leaving its round. What it holds stays held: its lease
+// outlives the round.
+func (h *dhcpHeld) done(srv *dhcpServer) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	h.running[srv.sub.index]--
+	h.changed.Broadcast()
 }
 
 // hold records srv as holding srv.ip and returns another server already
@@ -503,7 +523,9 @@ func (h *dhcpHeld) release(srv *dhcpServer) {
 }
 
 // pickOther returns an IP another server in srv's subnet holds right now,
-// waiting until there is one. It reports false if the round ends first.
+// waiting until there is one. It reports false if the round ends first, or
+// once no other server holds one and none is left that still could, such as
+// when every other one gave up in PXE.
 func (h *dhcpHeld) pickOther(ctx context.Context, srv *dhcpServer) (netip.Addr, bool) {
 	stop := context.AfterFunc(ctx, func() {
 		h.mu.Lock()
@@ -532,6 +554,10 @@ func (h *dhcpHeld) pickOther(ctx context.Context, srv *dhcpServer) (netip.Addr, 
 			}
 
 			return sub.ips[idx], true
+		}
+
+		if h.running[srv.sub.index] <= 1 {
+			return netip.Addr{}, false
 		}
 
 		h.changed.Wait()

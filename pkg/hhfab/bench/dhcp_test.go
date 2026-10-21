@@ -235,16 +235,17 @@ type fakeDHCPD struct {
 	owners map[netip.Addr]string      // IP → MAC
 	next   map[*dhcpSubnet]netip.Addr // next free IP
 
-	silent     bool // never answer, like an unreachable dhcpd
-	zeroFirst  bool // answer each MAC's first DISCOVER with 0.0.0.0
-	nakFirst   bool // NAK each MAC's first REQUEST
-	nakRenewal bool // NAK each MAC's first renewal
-	zeroAck    bool // answer each MAC's first REQUEST with an ACK for 0.0.0.0
-	zeroRepeat bool // answer each MAC's first repeat with an ACK for 0.0.0.0
-	grantTaken bool // ACK a REQUEST for another MAC's IP
-	ackOwn     bool // ACK a REQUEST for another MAC's IP with the requester's own, like today's dhcpd
-	ackStray   bool // ACK a REQUEST for another MAC's IP with a free one
-	shareIP    bool // hand every server in a subnet the same IP
+	silent     bool            // never answer, like an unreachable dhcpd
+	deaf       map[string]bool // never answer these MACs
+	zeroFirst  bool            // answer each MAC's first DISCOVER with 0.0.0.0
+	nakFirst   bool            // NAK each MAC's first REQUEST
+	nakRenewal bool            // NAK each MAC's first renewal
+	zeroAck    bool            // answer each MAC's first REQUEST with an ACK for 0.0.0.0
+	zeroRepeat bool            // answer each MAC's first repeat with an ACK for 0.0.0.0
+	grantTaken bool            // ACK a REQUEST for another MAC's IP
+	ackOwn     bool            // ACK a REQUEST for another MAC's IP with the requester's own, like today's dhcpd
+	ackStray   bool            // ACK a REQUEST for another MAC's IP with a free one
+	shareIP    bool            // hand every server in a subnet the same IP
 	discovers  map[string]int
 	requests   map[string]int
 	renewals   map[string]int
@@ -285,11 +286,11 @@ func (f *fakeDHCPD) send(msg *dhcpv4.DHCPv4) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	if f.silent {
+	mac := msg.ClientHWAddr.String()
+	if f.silent || f.deaf[mac] {
 		return nil
 	}
 
-	mac := msg.ClientHWAddr.String()
 	sub := f.subnet(msg)
 
 	reply := func(mt dhcpv4.MessageType, ip netip.Addr, lease time.Duration) {
@@ -642,6 +643,26 @@ func TestDHCPStormLoneServer(t *testing.T) {
 		require.Equal(t, int64(4), res.repeats[repeatOwn][outcomeAckSame])
 		require.Equal(t, [repeatOutcomes]int64{}, res.repeats[repeatTaken])
 		require.Empty(t, failedChecks(res))
+	})
+}
+
+// When the only other server in a subnet gives up in PXE, no one is left who
+// could hold an IP to ask for, so the taken repeats are skipped once it does
+// instead of waiting the round out.
+func TestDHCPStormTakenWithoutPeers(t *testing.T) {
+	t.Parallel()
+
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		res, servers, _ := storm(t, DHCPLayout{VPCs: 1, Subnets: 1, Servers: 2}, DHCPOpts{PXE: true, Repeats: 4, RepeatInterval: time.Second},
+			func(f *fakeDHCPD) { f.deaf = map[string]bool{dhcpServerMAC(1).String(): true} })
+
+		require.Less(t, time.Since(start), 5*time.Minute)
+		require.True(t, servers[1].pxeDead)
+		require.Equal(t, int64(1), res.bound)
+		require.Equal(t, int64(2), res.repeats[repeatOwn][outcomeAckSame])
+		require.Equal(t, [repeatOutcomes]int64{}, res.repeats[repeatTaken])
+		require.Equal(t, map[checkName]int64{checkUnbound: 1}, failedChecks(res))
 	})
 }
 
