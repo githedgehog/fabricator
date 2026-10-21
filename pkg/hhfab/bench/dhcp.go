@@ -348,6 +348,10 @@ func FindDHCPRelay(ctx context.Context, kube kclient.Reader, name string) (DHCPR
 // again, waits for the controller to create every DHCPSubnet, and reads the
 // VRF and circuit ID dhcpd will look each subnet up by.
 func resetDHCPObjects(ctx context.Context, kube kclient.Client, plan []*dhcpSubnet, objs []kclient.Object) error {
+	if err := checkDHCPOwnership(ctx, kube, objs); err != nil {
+		return err
+	}
+
 	vpcs := &vpcapi.VPCList{}
 	if err := kube.List(ctx, vpcs, kclient.MatchingLabels{LabelFabric: DHCPLabel}); err != nil {
 		return fmt.Errorf("listing bench DHCP VPCs: %w", err)
@@ -370,6 +374,36 @@ func resetDHCPObjects(ctx context.Context, kube kclient.Client, plan []*dhcpSubn
 	}
 
 	return waitDHCPSubnets(ctx, kube, plan)
+}
+
+// checkDHCPOwnership refuses to go on when an object the bench would apply
+// already exists without the bench's label, such as a namespace someone named
+// bench-dhcp: applying would take it over, and `bench clean` would then delete
+// it. It runs before anything is deleted or applied.
+func checkDHCPOwnership(ctx context.Context, kube kclient.Client, objs []kclient.Object) error {
+	for _, obj := range objs {
+		kind := obj.GetObjectKind().GroupVersionKind().Kind
+
+		cur, ok := obj.DeepCopyObject().(kclient.Object)
+		if !ok {
+			return fmt.Errorf("copying %s %s", kind, obj.GetName()) //nolint:err113
+		}
+
+		if err := kube.Get(ctx, kclient.ObjectKeyFromObject(obj), cur); err != nil {
+			if kapierrors.IsNotFound(err) {
+				continue
+			}
+
+			return fmt.Errorf("getting %s %s: %w", kind, obj.GetName(), err)
+		}
+
+		if cur.GetLabels()[LabelFabric] != DHCPLabel {
+			return fmt.Errorf("%s %s exists without the %s=%s label, so it isn't the bench's; not taking it over", //nolint:err113
+				kind, obj.GetName(), LabelFabric, DHCPLabel)
+		}
+	}
+
+	return nil
 }
 
 // waitDHCPGone waits until no bench DHCP VPC and no DHCPSubnet of one is left.
