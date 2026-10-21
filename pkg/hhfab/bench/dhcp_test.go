@@ -68,9 +68,9 @@ func TestResetDHCPObjectsRefusesForeignObjects(t *testing.T) {
 	}
 }
 
-// The default fleet is 20k servers in VPCs of at most 1000: 40 subnets of 500
-// servers, /23s each with room for the servers and the probe, on their own
-// VLANs, carved in order and never overlapping.
+// The default fleet is 20k servers in subnets of at most 1000: 10 VPCs of 2
+// subnets of 1000 servers, /22s each with room for the servers and the probe,
+// on their own VLANs, carved in order and never overlapping.
 func TestPlanDHCPDefaults(t *testing.T) {
 	t.Parallel()
 
