@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	"go.githedgehog.com/fabric/pkg/util/apiutil"
@@ -109,4 +110,60 @@ func externalPeeringCovering(ctx context.Context, kube kclient.Reader, vpc, subn
 	}
 
 	return "", nil
+}
+
+// isExternalSubnetReachableViaPeering is apiutil.IsExternalSubnetReachable without the External
+// peerings to interconnect Externals: those carry traffic to another Fabric, and reach anything
+// else only through a gateway peering in that Fabric, which has its own check.
+func isExternalSubnetReachableViaPeering(ctx context.Context, kube kclient.Reader, sourceServer, destSubnet string) (bool, error) {
+	sourceSubnets, err := apiutil.GetAttachedSubnets(ctx, kube, sourceServer)
+	if err != nil {
+		return false, fmt.Errorf("getting attached subnets for server %s: %w", sourceServer, err)
+	}
+
+	for subnetName := range sourceSubnets {
+		vpc, subnet, ok := strings.Cut(subnetName, "/")
+		if !ok {
+			return false, fmt.Errorf("source subnet name must be full VPC subnet name (<vpc-name>/<subnet-name>)") //nolint:err113
+		}
+
+		peerings := &vpcapi.ExternalPeeringList{}
+		if err := kube.List(ctx, peerings, kclient.InNamespace(kmetav1.NamespaceDefault), kclient.MatchingLabels{vpcapi.LabelVPC: vpc}); err != nil {
+			return false, fmt.Errorf("listing external peerings of VPC %s: %w", vpc, err)
+		}
+
+		for _, peering := range peerings.Items {
+			if !slices.Contains(peering.Spec.Permit.VPC.Subnets, subnet) {
+				continue
+			}
+
+			ext := &vpcapi.External{}
+			if err := kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: peering.Spec.Permit.External.Name}, ext); err != nil {
+				return false, fmt.Errorf("getting external %s: %w", peering.Spec.Permit.External.Name, err)
+			}
+			if _, interconnect := ext.Annotations[VLABInterconnectAnnotation]; interconnect {
+				continue
+			}
+
+			for _, prefix := range peering.Spec.Permit.External.Prefixes {
+				covers, err := apiutil.SubnetContains(prefix.Prefix, destSubnet)
+				if err != nil {
+					return false, fmt.Errorf("checking prefix %s of external peering %s: %w", prefix.Prefix, peering.Name, err)
+				}
+				if !covers {
+					continue
+				}
+
+				attached, err := apiutil.IsExternalAttached(ctx, kube, ext.Name)
+				if err != nil {
+					return false, fmt.Errorf("checking external %s is attached: %w", ext.Name, err)
+				}
+				if attached {
+					return true, nil
+				}
+			}
+		}
+	}
+
+	return false, nil
 }
