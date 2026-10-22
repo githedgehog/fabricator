@@ -525,8 +525,27 @@ func pollUntil(ctx context.Context, timeout time.Duration, what string, check fu
 }
 
 // storedLeases reads every bench DHCPSubnet's allocations, keyed by subnet
-// index, for the checks against dhcpd's own record of the round.
+// index, for the checks against dhcpd's own record of the round. It comes
+// right after the storm, when the apiserver is likeliest to be struggling, so
+// it waits out errors the way cleanup does.
 func storedLeases(ctx context.Context, kube kclient.Reader, plan []*dhcpSubnet) (map[int]map[string]dhcpapi.DHCPAllocated, error) {
+	var out map[int]map[string]dhcpapi.DHCPAllocated
+
+	err := pollUntil(ctx, dhcpObjectsTimeout, "dhcpd's stored leases", func(ctx context.Context) (bool, error) {
+		got, err := readStoredLeases(ctx, kube, plan)
+		if err != nil {
+			return false, err
+		}
+
+		out = got
+
+		return true, nil
+	})
+
+	return out, err
+}
+
+func readStoredLeases(ctx context.Context, kube kclient.Reader, plan []*dhcpSubnet) (map[int]map[string]dhcpapi.DHCPAllocated, error) {
 	out := make(map[int]map[string]dhcpapi.DHCPAllocated, len(plan))
 
 	for _, sub := range plan {

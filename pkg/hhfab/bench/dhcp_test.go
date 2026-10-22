@@ -30,6 +30,7 @@ import (
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 )
 
 // A namespace or VPC with a bench name that the bench didn't create stops the
@@ -66,6 +67,60 @@ func TestResetDHCPObjectsRefusesForeignObjects(t *testing.T) {
 		require.NoError(t, kube.List(t.Context(), left))
 		require.Len(t, left.Items, 1, "%s: nothing deleted", name)
 	}
+}
+
+// Reading dhcpd's record after the storm waits out a struggling apiserver
+// rather than losing the round.
+func TestStoredLeasesRetries(t *testing.T) {
+	t.Parallel()
+
+	plan, err := planDHCP(DHCPLayout{Servers: 2, Subnets: 1, VPCs: 1})
+	require.NoError(t, err)
+
+	scheme, err := benchScheme()
+	require.NoError(t, err)
+
+	stored := &dhcpapi.DHCPSubnet{
+		ObjectMeta: objMeta(plan[0].dhcpSubnetName(), nil),
+		Status:     dhcpapi.DHCPSubnetStatus{Allocated: map[string]dhcpapi.DHCPAllocated{"02:dc:00:00:00:00": {IP: "10.0.0.2"}}},
+	}
+
+	synctest.Test(t, func(t *testing.T) {
+		fails := 2
+		kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(stored).WithInterceptorFuncs(interceptor.Funcs{
+			Get: func(ctx context.Context, kube kclient.WithWatch, key kclient.ObjectKey, obj kclient.Object, opts ...kclient.GetOption) error {
+				if fails > 0 {
+					fails--
+
+					return errors.New("read: connection reset by peer") //nolint:err113
+				}
+
+				return kube.Get(ctx, key, obj, opts...)
+			},
+		}).Build()
+
+		start := time.Now()
+		got, err := storedLeases(t.Context(), kube, plan)
+		require.NoError(t, err)
+		require.Equal(t, 2*time.Second, time.Since(start), "retried every second")
+		require.Equal(t, "10.0.0.2", got[0]["02:dc:00:00:00:00"].IP)
+	})
+
+	// Still unreadable once the wait is over: the checks against it didn't run,
+	// and the round must not pass as clean.
+	synctest.Test(t, func(t *testing.T) {
+		kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(stored).WithInterceptorFuncs(interceptor.Funcs{
+			Get: func(context.Context, kclient.WithWatch, kclient.ObjectKey, kclient.Object, ...kclient.GetOption) error {
+				return errors.New("read: connection reset by peer") //nolint:err113
+			},
+		}).Build()
+
+		checks := newDHCPChecks()
+		checkStoredLeases(t.Context(), kube, checks, plan, newDHCPServers(plan))
+
+		require.Equal(t, 1, checks.failed())
+		require.Equal(t, int64(1), checks.count(checkLeasesUnread))
+	})
 }
 
 // Cleanup waits only for the DHCPSubnets of the bench's own VPCs: another

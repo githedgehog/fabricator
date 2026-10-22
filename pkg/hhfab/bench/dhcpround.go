@@ -154,12 +154,7 @@ func runDHCPRound(ctx context.Context, kube kclient.Client, send func(*dhcpv4.DH
 	stopReport()
 	reportWG.Wait()
 
-	stored, err := storedLeases(ctx, kube, plan)
-	if err != nil {
-		return nil, err
-	}
-
-	checkStored(checks, plan, servers, stored)
+	checkStoredLeases(ctx, kube, checks, plan, servers)
 
 	res := stats.result(cleanup, storm, checks, servers)
 	res.late = demux.late.Load() - late
