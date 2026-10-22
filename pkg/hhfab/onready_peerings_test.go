@@ -130,3 +130,34 @@ func TestBuildExternalEndpointsSkipsInterconnect(t *testing.T) {
 	}
 	require.Equal(t, []string{"ext-bgp", "ext-static"}, names)
 }
+
+func TestExternalPeerableWithVPC(t *testing.T) {
+	ext := func(fabric, domain string) *vpcapi.External {
+		return &vpcapi.External{Spec: vpcapi.ExternalSpec{Topology: vpcapi.ExternalTopology{Fabric: fabric, Domain: domain}}}
+	}
+	vpc := func(fabric string, domains ...string) *vpcapi.VPC {
+		v := testVPC("vpc", fabric, domains...)
+
+		return &v
+	}
+	interconnect := testInterconnect("to-fabric-b", "to-default", "", "default")
+
+	for _, tt := range []struct {
+		name string
+		ext  *vpcapi.External
+		vpc  *vpcapi.VPC
+		want bool
+	}{
+		{name: "defaults match", ext: ext("", ""), vpc: vpc(""), want: true},
+		{name: "same domain", ext: ext("", "domain-b"), vpc: vpc("", "domain-b"), want: true},
+		{name: "one of the VPC domains", ext: ext("", "domain-b"), vpc: vpc("", "default", "domain-b"), want: true},
+		{name: "other domain", ext: ext("", "domain-b"), vpc: vpc("", "default"), want: false},
+		{name: "external in domain, vpc default", ext: ext("", "domain-b"), vpc: vpc(""), want: false},
+		{name: "other fabric", ext: ext("fabric-b", ""), vpc: vpc(""), want: false},
+		{name: "interconnect", ext: &interconnect, vpc: vpc(""), want: false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, externalPeerableWithVPC(tt.ext, tt.vpc))
+		})
+	}
+}
