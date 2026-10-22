@@ -366,6 +366,7 @@ type fakeDHCPD struct {
 	nakRenewal bool            // NAK each MAC's first renewal
 	zeroAck    bool            // answer each MAC's first REQUEST with an ACK for 0.0.0.0
 	zeroRepeat bool            // answer each MAC's first repeat with an ACK for 0.0.0.0
+	deafRepeat bool            // never answer a repeat
 	grantTaken bool            // ACK a REQUEST for another MAC's IP
 	ackOwn     bool            // ACK a REQUEST for another MAC's IP with the requester's own, like today's dhcpd
 	ackStray   bool            // ACK a REQUEST for another MAC's IP with a free one
@@ -476,14 +477,15 @@ func (f *fakeDHCPD) send(msg *dhcpv4.DHCPv4) error {
 			return nil
 		}
 
-		// The DORA's REQUEST is the first, the renewal the second.
+		// The DORA's REQUEST is the first, the renewal the second, the repeats
+		// come after.
 		if (f.zeroAck && f.requests[mac] == 1) || (f.zeroRepeat && f.requests[mac] == 3) {
 			reply(dhcpv4.MessageTypeAck, netip.Addr{}, 0)
 
 			return nil
 		}
 
-		if f.requests[mac] <= f.deafFirst {
+		if f.requests[mac] <= f.deafFirst || (f.deafRepeat && f.requests[mac] >= 3) {
 			return nil
 		}
 
@@ -872,6 +874,23 @@ func TestDHCPStormTakenWithoutPeers(t *testing.T) {
 		require.Equal(t, int64(2), res.repeats[repeatOwn][outcomeAckSame])
 		require.Equal(t, [repeatOutcomes]int64{}, res.repeats[repeatTaken])
 		require.Equal(t, map[checkName]int64{checkUnbound: 1}, failedChecks(res))
+	})
+}
+
+// dhcpd holds a lease for a server that repeats its REQUEST, so RFC 2131
+// 4.3.2 wants an answer, ACK or NAK; silence through every retransmit is
+// flagged, not just counted.
+func TestDHCPStormRepeatUnanswered(t *testing.T) {
+	t.Parallel()
+
+	synctest.Test(t, func(t *testing.T) {
+		res, _, _ := storm(t, DHCPLayout{VPCs: 1, Subnets: 1, Servers: 3}, DHCPOpts{Repeats: 2, RepeatInterval: time.Second},
+			func(f *fakeDHCPD) { f.deafRepeat = true })
+
+		require.Equal(t, int64(3), res.bound)
+		require.Equal(t, int64(3), res.repeats[repeatOwn][outcomeNoReply])
+		require.Equal(t, int64(3), res.repeats[repeatTaken][outcomeNoReply])
+		require.Equal(t, map[checkName]int64{checkRepeatUnanswered: 6}, failedChecks(res))
 	})
 }
 
