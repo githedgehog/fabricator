@@ -38,7 +38,7 @@ require (
 	github.com/urfave/cli/v2 v2.27.7
 	github.com/vbauerster/mpb/v8 v8.15.2
 	github.com/vishvananda/netlink v1.3.1
-	go.githedgehog.com/fabric v0.136.1
+	go.githedgehog.com/fabric v0.137.0
 	go.githedgehog.com/libmeta v0.4.0
 	go.podman.io/image/v5 v5.41.2
 	golang.org/x/crypto v0.58.0
@@ -145,7 +145,7 @@ require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/josharian/native v1.1.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
-	github.com/klauspost/compress v1.19.1 // indirect
+	github.com/klauspost/compress v1.20.1 // indirect
 	github.com/klauspost/pgzip v1.2.6 // indirect
 	github.com/kr/fs v0.1.0 // indirect
 	github.com/leodido/go-urn v1.5.0 // indirect
@@ -185,10 +185,10 @@ require (
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/power-devops/perfstat v0.0.0-20210106213030-5aafc221ea8c // indirect
 	github.com/proglottis/gpgme v0.1.6 // indirect
-	github.com/prometheus/client_golang v1.24.1 // indirect
+	github.com/prometheus/client_golang v1.25.0 // indirect
 	github.com/prometheus/client_model v0.6.3 // indirect
-	github.com/prometheus/common v0.70.1 // indirect
-	github.com/prometheus/procfs v0.21.1 // indirect
+	github.com/prometheus/common v0.72.0 // indirect
+	github.com/prometheus/procfs v0.22.0 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/samber/slog-common v0.21.0 // indirect
 	github.com/secure-systems-lab/go-securesystemslib v0.11.0 // indirect
@@ -232,7 +232,7 @@ require (
 	go4.org v0.0.0-20230225012048-214862532bf5 // indirect
 	golang.org/x/exp v0.0.0-20260218203240-3dfff04db8fa // indirect
 	golang.org/x/net v0.60.0 // indirect
-	golang.org/x/oauth2 v0.36.0 // indirect
+	golang.org/x/oauth2 v0.37.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	golang.org/x/tools v0.51.0 // indirect

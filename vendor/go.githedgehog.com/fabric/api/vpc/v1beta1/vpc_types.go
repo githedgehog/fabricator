@@ -175,7 +175,8 @@ type VPCDHCP struct {
 	RelayVPC string `json:"relayVPC,omitempty"`
 	// Enable enables DHCP server for the subnet
 	Enable bool `json:"enable,omitempty"`
-	// Range (optional) is the DHCP range for the subnet if DHCP server is enabled
+	// Range (optional) is the DHCP range for the subnet if DHCP server is enabled. The gateway, subnet and broadcast
+	// addresses are never handed out, even if the range includes them (all addresses of a /31 or /32 are usable).
 	Range *VPCDHCPRange `json:"range,omitempty"`
 	// Options (optional) is the DHCP options for the subnet if DHCP server is enabled
 	Options *VPCDHCPOptions `json:"options,omitempty"`
@@ -408,7 +409,7 @@ func (vpc *VPC) Default() {
 			}
 
 			if subnet.DHCP.Options.InterfaceMTU == 0 {
-				subnet.DHCP.Options.InterfaceMTU = 9036 // TODO Magic number should be named constant somewhere.
+				subnet.DHCP.Options.InterfaceMTU = DefaultDHCPMTU
 			}
 
 			if subnet.DHCP.Options.DNSServers == nil {
@@ -422,7 +423,7 @@ func (vpc *VPC) Default() {
 			slices.Sort(subnet.DHCP.Options.TimeServers)
 
 			if subnet.DHCP.Options.LeaseTimeSeconds == 0 {
-				subnet.DHCP.Options.LeaseTimeSeconds = 3600 // TODO Magic number should be named constant somewhere.
+				subnet.DHCP.Options.LeaseTimeSeconds = DefaultDHCPLeaseTimeSeconds
 			}
 
 			if subnet.DHCP.Options.AdvertisedRoutes == nil {
@@ -677,18 +678,6 @@ func (vpc *VPC) Validate(ctx context.Context, kube kclient.Reader, fabricCfg *me
 			}
 
 			if subnetCfg.DHCP.Options != nil {
-				for _, dnsServer := range subnetCfg.DHCP.Options.DNSServers {
-					if _, err := netip.ParseAddr(dnsServer); err != nil {
-						return nil, errors.Errorf("subnet %s: dns address %s is not a valid IP", subnetName, dnsServer)
-					}
-				}
-
-				for _, timeServer := range subnetCfg.DHCP.Options.TimeServers {
-					if _, err := netip.ParseAddr(timeServer); err != nil {
-						return nil, errors.Errorf("subnet %s: time server %s address is not a valid IP", subnetName, timeServer)
-					}
-				}
-
 				if subnetCfg.DHCP.Options.InterfaceMTU < 96 {
 					return nil, errors.Errorf("subnet %s: MTU cannot be set smaller than 96", subnetName)
 				}
@@ -699,62 +688,12 @@ func (vpc *VPC) Validate(ctx context.Context, kube kclient.Reader, fabricCfg *me
 					return nil, errors.Errorf("subnet %s: LeaseTimeSeconds cannot be set smaller than 1", subnetName)
 				}
 				// TODO: max lease time?
-
-				for _, advertisedRoute := range subnetCfg.DHCP.Options.AdvertisedRoutes {
-					if advertisedRoute.Destination == "" {
-						return nil, errors.Errorf("subnet %s: advertised route destination is required", subnetName)
-					}
-					if advertisedRoute.Gateway == "" {
-						return nil, errors.Errorf("subnet %s: advertised route gateway is required", subnetName)
-					}
-
-					_, err := netip.ParsePrefix(advertisedRoute.Destination)
-					if err != nil {
-						return nil, errors.Wrapf(err, "subnet %s: failed to parse advertised route destination %s", subnetName, advertisedRoute.Destination)
-					}
-
-					gwIP, err := netip.ParseAddr(advertisedRoute.Gateway)
-					if err != nil {
-						return nil, errors.Errorf("subnet %s: invalid advertised route gateway %s", subnetName, advertisedRoute.Gateway)
-					}
-					if !ipNet.Contains(gwIP) {
-						return nil, errors.Errorf("subnet %s: advertised route gateway %s is not in the subnet", subnetName, advertisedRoute.Gateway)
-					}
-				}
 			}
 
-			staticIPs := map[string]string{}
-			for mac, static := range subnetCfg.DHCP.Static {
-				if static.IP == "" {
-					return nil, errors.Errorf("subnet %s: empty static IP assigned to MAC %s", subnetName, mac)
-				}
-				if mac == "" {
-					return nil, errors.Errorf("subnet %s: static IP %s assigned to empty MAC address", subnetName, static.IP)
-				}
-				if _, err := net.ParseMAC(mac); err != nil {
-					return nil, errors.Errorf("subnet %s: invalid MAC %s for static IP %s", subnetName, mac, static.IP)
-				}
-				ip, err := netip.ParseAddr(static.IP)
-				if err != nil {
-					return nil, errors.Errorf("subnet %s: invalid static IP %s", subnetName, static.IP)
-				}
-				if !ipNet.Contains(ip) {
-					return nil, errors.Errorf("subnet %s: static IP %s is not in the subnet", subnetName, static.IP)
-				}
-				if ip == ipNet.Masked().Addr() {
-					return nil, errors.Errorf("subnet %s: static IP %s is the same as the subnet IP", subnetName, static.IP)
-				}
-				if static.IP == subnetCfg.Gateway {
-					return nil, errors.Errorf("subnet %s: static IP %s is the same as the gateway IP", subnetName, static.IP)
-				}
-				if static.IP == iputil.LastIPNetip(ipNet).String() {
-					return nil, errors.Errorf("subnet %s: static IP %s is the same as the broadcast IP", subnetName, static.IP)
-				}
-
-				if _, ok := staticIPs[static.IP]; ok {
-					return nil, errors.Errorf("subnet %s: static IP %s is already assigned to another MAC address", subnetName, static.IP)
-				}
-				staticIPs[static.IP] = mac
+			// same checks as the DHCP server does on the DHCPSubnet, so an accepted VPC is always served
+			dhcpSpec := vpc.DHCPSubnetSpec(subnetName, subnetCfg)
+			if err := dhcpSpec.Validate(); err != nil {
+				return nil, fmt.Errorf("subnet %s: dhcp: %w", subnetName, err)
 			}
 		}
 
