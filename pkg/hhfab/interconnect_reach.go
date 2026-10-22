@@ -6,9 +6,12 @@ package hhfab
 import (
 	"context"
 	"fmt"
+	"maps"
+	"net/netip"
 	"slices"
 	"strings"
 
+	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	"go.githedgehog.com/fabric/pkg/util/apiutil"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -166,4 +169,175 @@ func isExternalSubnetReachableViaPeering(ctx context.Context, kube kclient.Reade
 	}
 
 	return false, nil
+}
+
+// IsExternalReachableOverInterconnect reports whether a server in one Fabric reaches an External
+// of another Fabric through that Fabric's gateway: its VPC has an External peering to the
+// interconnect External of its own Fabric that covers one of the prefixes, and a gateway peering
+// in the External's Fabric joins the interconnect External of that side to the External and
+// exposes the VPC subnet. Both Externals of that Fabric must be attached.
+func IsExternalReachableOverInterconnect(ctx context.Context, kube kclient.Reader, sourceServer, external string, prefixes []string) (Reachability, error) {
+	sourceSubnets, err := apiutil.GetAttachedSubnets(ctx, kube, sourceServer)
+	if err != nil {
+		return Reachability{}, fmt.Errorf("getting attached subnets for server %s: %w", sourceServer, err)
+	}
+
+	target := &vpcapi.External{}
+	if err := kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: external}, target); err != nil {
+		return Reachability{}, fmt.Errorf("getting external %s: %w", external, err)
+	}
+	targetFabric := fabricOrDefault(target.Spec.Topology.Fabric)
+
+	targetAttached, err := apiutil.IsExternalAttached(ctx, kube, external)
+	if err != nil {
+		return Reachability{}, fmt.Errorf("checking external %s is attached: %w", external, err)
+	}
+	if !targetAttached {
+		return Reachability{}, nil
+	}
+
+	externals := &vpcapi.ExternalList{}
+	if err := kube.List(ctx, externals); err != nil {
+		return Reachability{}, fmt.Errorf("listing externals: %w", err)
+	}
+	gwPeerings := &gwapi.GatewayPeeringList{}
+	if err := kube.List(ctx, gwPeerings); err != nil {
+		return Reachability{}, fmt.Errorf("listing gateway peerings: %w", err)
+	}
+
+	subnetNames := slices.Sorted(maps.Keys(sourceSubnets))
+	for _, subnetName := range subnetNames {
+		vpcName, subnet, ok := strings.Cut(subnetName, "/")
+		if !ok {
+			return Reachability{}, fmt.Errorf("source subnet name must be full VPC subnet name (<vpc-name>/<subnet-name>)") //nolint:err113
+		}
+
+		vpc := &vpcapi.VPC{}
+		if err := kube.Get(ctx, kclient.ObjectKey{Namespace: kmetav1.NamespaceDefault, Name: vpcName}, vpc); err != nil {
+			return Reachability{}, fmt.Errorf("getting VPC %s: %w", vpcName, err)
+		}
+		vpcFabric := fabricOrDefault(vpc.Spec.Topology.Fabric)
+		if vpcFabric == targetFabric || vpc.Spec.Subnets[subnet] == nil {
+			continue
+		}
+		subnetCIDR := vpc.Spec.Subnets[subnet].Subnet
+
+		for _, interconnect := range externals.Items {
+			peerName, isInterconnect := interconnect.Annotations[VLABInterconnectAnnotation]
+			if !isInterconnect || fabricOrDefault(interconnect.Spec.Topology.Fabric) != vpcFabric {
+				continue
+			}
+
+			for _, peer := range externals.Items {
+				if peer.Name != peerName || fabricOrDefault(peer.Spec.Topology.Fabric) != targetFabric {
+					continue
+				}
+
+				var peering string
+				for _, prefix := range prefixes {
+					if peering, err = externalPeeringCovering(ctx, kube, vpcName, subnet, interconnect.Name, prefix); err != nil {
+						return Reachability{}, err
+					} else if peering != "" {
+						break
+					}
+				}
+				if peering == "" {
+					continue
+				}
+
+				attached, err := apiutil.IsExternalAttached(ctx, kube, peer.Name)
+				if err != nil {
+					return Reachability{}, fmt.Errorf("checking external %s is attached: %w", peer.Name, err)
+				}
+				if !attached {
+					continue
+				}
+
+				gwPeering, excluded, err := gatewayPeeringBetween(gwPeerings.Items, targetFabric, peer.Name, target.Name, subnetCIDR, prefixes)
+				if err != nil {
+					return Reachability{}, err
+				}
+				if gwPeering != "" {
+					return Reachability{
+						Reachable:        true,
+						Reason:           ReachabilityReasonInterconnectGateway,
+						Peering:          peering + "," + gwPeering,
+						SourceExclusions: excluded,
+					}, nil
+				}
+			}
+		}
+	}
+
+	return Reachability{}, nil
+}
+
+// gatewayPeeringBetween is the name of a gateway peering of the Fabric between two Externals where
+// the first exposes the subnet and the second exposes one of the prefixes, or nothing, with the
+// ranges the first one's expose takes out of the subnet with `Not`
+func gatewayPeeringBetween(peerings []gwapi.GatewayPeering, fabric, first, second, subnet string, prefixes []string) (string, []netip.Prefix, error) {
+	// a `Not` is an entry of its own in the expose, so the whole expose is read before answering
+	covers := func(entry *gwapi.PeeringEntry, targets []string) (bool, []netip.Prefix, error) {
+		if entry == nil {
+			return false, nil, nil
+		}
+
+		for _, expose := range entry.Expose {
+			if expose.DefaultDestination {
+				return true, nil, nil
+			}
+
+			found := false
+			var excluded []netip.Prefix
+			for _, ip := range expose.IPs {
+				if ip.Not != "" {
+					prefix, err := netip.ParsePrefix(ip.Not)
+					if err != nil {
+						return false, nil, fmt.Errorf("parsing expose not %q: %w", ip.Not, err)
+					}
+					excluded = append(excluded, prefix)
+
+					continue
+				}
+				if ip.CIDR == "" {
+					continue
+				}
+
+				for _, target := range targets {
+					contained, err := apiutil.SubnetContains(ip.CIDR, target)
+					if err != nil {
+						return false, nil, fmt.Errorf("checking expose %s: %w", ip.CIDR, err)
+					}
+					if contained {
+						found = true
+					}
+				}
+			}
+			if found {
+				return true, excluded, nil
+			}
+		}
+
+		return false, nil, nil
+	}
+
+	for _, peering := range peerings {
+		if fabricOrDefault(peering.Spec.Topology.Fabric) != fabric {
+			continue
+		}
+
+		firstCovers, excluded, err := covers(peering.Spec.Peering[gwapi.VPCInfoExtPrefix+first], []string{subnet})
+		if err != nil {
+			return "", nil, err
+		}
+		secondCovers, _, err := covers(peering.Spec.Peering[gwapi.VPCInfoExtPrefix+second], prefixes)
+		if err != nil {
+			return "", nil, err
+		}
+		if firstCovers && secondCovers {
+			return peering.Name, excluded, nil
+		}
+	}
+
+	return "", nil, nil
 }
