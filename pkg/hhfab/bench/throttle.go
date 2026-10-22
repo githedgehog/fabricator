@@ -18,35 +18,48 @@ import (
 )
 
 // ThrottleFile is where `bench sample` records the CPU throttling of the pods
-// in the fab namespace, one row per pod per sample, next to SeriesFile. Pods
-// come and go during a run, so they get rows of their own rather than columns.
+// in the fab namespace, a row per limited cgroup per sample, next to
+// SeriesFile. Pods come and go during a run, so they get rows of their own
+// rather than columns.
 const ThrottleFile = "bench-throttle.csv"
 
-// throttleCmd reports every fab pod that has a CPU limit, from its pod cgroup's
-// cpu.stat: the enforcement periods it ran in, how many of them it was
-// throttled in, and how long it was frozen for. Pods without a limit can't be
-// throttled and are left out.
+// throttleCmd reports the CPU bandwidth counters of every fab pod that has a
+// CPU limit: a line for the pod's cgroup and one for each container's that has
+// a limit of its own, from their cpu.stat. A cgroup's counters only count the
+// throttling its own limit caused, and a container's limit is enforced apart
+// from the pod's, so either may be the one that throttles. Pause containers
+// have no limit and are left out, and so are pods with none at any level,
+// which can't be throttled. It also says how many fab pods it found and for
+// how many it found a cgroup, so a collection that couldn't see them isn't
+// taken for none being limited.
 //
 // Pods are found through the kubelet's log directories, named namespace_pod_uid,
 // rather than the API, which is what goes away during the outages worth
-// measuring. The pod cgroup is the one that throttles: its quota is the sum of
-// its containers', and it also holds the pause container. Guaranteed pods sit
-// directly under kubepods.slice, the others under their QoS class.
+// measuring. Guaranteed pods sit directly under kubepods.slice, the others
+// under their QoS class.
 //
 // It never fails: a failed command would lose the whole sample.
-const throttleCmd = `sudo ls /var/log/pods 2>/dev/null | awk -F_ '$1=="fab"{print $2, $3}' | while read -r pod uid; do u=$(echo "$uid" | tr - _); for d in /sys/fs/cgroup/kubepods.slice/kubepods-pod$u.slice /sys/fs/cgroup/kubepods.slice/kubepods-*.slice/kubepods-*-pod$u.slice; do [ -r "$d/cpu.stat" ] && awk -v p="$pod" 'FNR==NR{q=$1; per=$2; next} /^nr_periods /{n=$2} /^nr_throttled /{t=$2} /^throttled_usec /{u=$2} END{if (q != "max") printf "bench_throttle %s %g %.0f %.0f %.0f\n", p, q/per, n, t, u}' "$d/cpu.max" "$d/cpu.stat"; done; done; true`
+const throttleCmd = `p=$(sudo ls /var/log/pods 2>/dev/null | awk -F_ '$1=="fab"{print $2, $3}'); echo "bench_throttle_pods $(printf '%s\n' "$p" | grep -c .)"; printf '%s\n' "$p" | while read -r pod uid; do [ -n "$uid" ] || continue; u=$(echo "$uid" | tr - _); for d in /sys/fs/cgroup/kubepods.slice/kubepods-pod$u.slice /sys/fs/cgroup/kubepods.slice/kubepods-*.slice/kubepods-*-pod$u.slice; do [ -d "$d" ] || continue; echo bench_throttle_found; for c in "$d" "$d"/*.scope; do [ -r "$c/cpu.stat" ] || continue; case "$c" in *.scope) g=$(basename "$c" .scope | sed 's/.*-//' | cut -c1-12);; *) g=pod;; esac; awk -v p="$pod" -v id="$uid" -v g="$g" 'FNR==NR{q=$1; per=$2; next} /^nr_periods /{n=$2} /^nr_throttled /{t=$2} /^throttled_usec /{u=$2} END{if (q != "max") printf "bench_throttle %s %s %s %g %.0f %.0f %.0f\n", p, id, g, q/per, n, t, u}' "$c/cpu.max" "$c/cpu.stat"; done; done; done | awk '$1=="bench_throttle_found"{n++; next} {print} END{print "bench_throttle_running", n+0}'; true`
 
-// PodCPU is one pod's CPU bandwidth counters at a sample.
+// cgroupPod marks a pod's own cgroup; a container's is its short ID.
+const cgroupPod = "pod"
+
+// PodCPU is the CPU bandwidth counters of one of a pod's limited cgroups at a
+// sample: the pod's own, or one of its containers'.
 type PodCPU struct {
-	Pod   string
-	Limit float64 // cores
+	Pod    string
+	UID    string
+	Cgroup string  // cgroupPod, or the container's short ID
+	Limit  float64 // cores
 
-	// Counters for the pod's life. Periods only counts the enforcement periods
-	// the pod had something to run in, so Throttled against it is the share of
-	// the time it wanted CPU and was held back.
-	Periods   int64
-	Throttled int64
-	Frozen    time.Duration
+	// Counters for the cgroup's life. Periods only counts the enforcement
+	// periods it had something to run in, so Throttled against it is the
+	// share of the time it wanted CPU and was held back. ThrottledTime is how
+	// long its run queues were held back, one per CPU, added up: with a limit
+	// of more than one CPU it can outrun the wall clock.
+	Periods       int64
+	Throttled     int64
+	ThrottledTime time.Duration
 }
 
 // parsePodCPU picks the throttleCmd lines out of a sample's output.
@@ -55,29 +68,30 @@ func parsePodCPU(raw string) []PodCPU {
 
 	for line := range strings.Lines(raw) {
 		fields := strings.Fields(line)
-		if len(fields) != 6 || fields[0] != "bench_throttle" {
+		if len(fields) != 8 || fields[0] != "bench_throttle" {
 			continue
 		}
 
-		limit, errLimit := strconv.ParseFloat(fields[2], 64)
-		periods, errPeriods := strconv.ParseInt(fields[3], 10, 64)
-		throttled, errThrottled := strconv.ParseInt(fields[4], 10, 64)
-		usec, errUsec := strconv.ParseInt(fields[5], 10, 64)
+		limit, errLimit := strconv.ParseFloat(fields[4], 64)
+		periods, errPeriods := strconv.ParseInt(fields[5], 10, 64)
+		throttled, errThrottled := strconv.ParseInt(fields[6], 10, 64)
+		usec, errUsec := strconv.ParseInt(fields[7], 10, 64)
 		if errors.Join(errLimit, errPeriods, errThrottled, errUsec) != nil {
 			continue
 		}
 
 		out = append(out, PodCPU{
-			Pod: fields[1], Limit: limit, Periods: periods, Throttled: throttled, Frozen: time.Duration(usec) * time.Microsecond,
+			Pod: fields[1], UID: fields[2], Cgroup: fields[3], Limit: limit,
+			Periods: periods, Throttled: throttled, ThrottledTime: time.Duration(usec) * time.Microsecond,
 		})
 	}
 
 	return out
 }
 
-var throttleHeader = []string{"time", "pod", "limit", "periods", "throttled", "throttled_seconds"}
+var throttleHeader = []string{"time", "pod", "uid", "cgroup", "limit", "periods", "throttled", "throttled_seconds"}
 
-// podCPUAt is a pod's counters as read at one sample.
+// podCPUAt is a cgroup's counters as read at one sample.
 type podCPUAt struct {
 	At time.Time
 	PodCPU
@@ -87,10 +101,12 @@ func (p podCPUAt) record() []string {
 	return []string{
 		p.At.UTC().Format(time.RFC3339),
 		p.Pod,
+		p.UID,
+		p.Cgroup,
 		strconv.FormatFloat(p.Limit, 'f', -1, 64),
 		strconv.FormatInt(p.Periods, 10),
 		strconv.FormatInt(p.Throttled, 10),
-		strconv.FormatFloat(p.Frozen.Seconds(), 'f', -1, 64),
+		strconv.FormatFloat(p.ThrottledTime.Seconds(), 'f', -1, 64),
 	}
 }
 
@@ -153,16 +169,18 @@ func loadThrottle(path string) ([]podCPUAt, error) {
 		limit, errLimit := strconv.ParseFloat(field(row, "limit"), 64)
 		periods, errPeriods := strconv.ParseInt(field(row, "periods"), 10, 64)
 		throttled, errThrottled := strconv.ParseInt(field(row, "throttled"), 10, 64)
-		frozen, errFrozen := strconv.ParseFloat(field(row, "throttled_seconds"), 64)
+		seconds, errSeconds := strconv.ParseFloat(field(row, "throttled_seconds"), 64)
 		pod := field(row, "pod")
-		if pod == "" || errors.Join(errAt, errLimit, errPeriods, errThrottled, errFrozen) != nil {
+		if pod == "" || errors.Join(errAt, errLimit, errPeriods, errThrottled, errSeconds) != nil {
 			continue
 		}
 
 		// cpu.stat counts in microseconds, which the seconds column holds
-		// exactly but a float product may miss by a nanosecond.
+		// exactly but a float product may miss by a nanosecond. A file from
+		// before cgroups were told apart only had the pod's.
 		out = append(out, podCPUAt{At: at, PodCPU: PodCPU{
-			Pod: pod, Limit: limit, Periods: periods, Throttled: throttled, Frozen: time.Duration(math.Round(frozen*1e6)) * time.Microsecond,
+			Pod: pod, UID: field(row, "uid"), Cgroup: cmp.Or(field(row, "cgroup"), cgroupPod), Limit: limit,
+			Periods: periods, Throttled: throttled, ThrottledTime: time.Duration(math.Round(seconds*1e6)) * time.Microsecond,
 		}})
 	}
 
@@ -204,30 +222,49 @@ func generatedName(s string) bool {
 // workloadThrottle is one workload's throttling over a run, its pods summed:
 // a restarted pod's replacement counts towards the same workload.
 type workloadThrottle struct {
-	Workload  string
-	Limit     float64
-	Periods   int64
-	Throttled int64
-	Frozen    time.Duration
+	Workload      string
+	Limit         float64
+	Intervals     int
+	Periods       int64
+	Throttled     int64
+	ThrottledTime time.Duration
 
 	// The largest share of throttled periods between two samples, which is
 	// where a storm shows up after the run's share has averaged it away.
 	Peak float64
 }
 
+// throttlePeakMinPeriods is how many periods an interval needs for its share to
+// count towards the peak: one throttled period of the only one a nearly idle
+// pod ran in would read as a 100% peak.
+const throttlePeakMinPeriods = 10
+
 // Share is the part of the periods the workload ran in that it was throttled
-// in.
+// in. Where a pod's cgroup and a container's are throttled in the same period
+// it is counted twice, so the share is capped at all of them.
 func (w workloadThrottle) Share() float64 {
 	if w.Periods == 0 {
 		return 0
 	}
 
-	return float64(w.Throttled) / float64(w.Periods)
+	return min(1, float64(w.Throttled)/float64(w.Periods))
 }
 
-// analyzeThrottle sums each pod's counters over the run from one sample to the
-// next, the same way the node counters are. A pod that only shows up after the
-// first sample started during the run, so all it counted happened in it.
+// podID tells pods apart: by UID, so a pod recreated under the same name is a
+// new one, or by name in a file written before the UID was recorded.
+func podID(p PodCPU) string {
+	return cmp.Or(p.UID, p.Pod)
+}
+
+// analyzeThrottle works out each cgroup's counters from one sample to the next,
+// the same way the node counters are, so a container restarted within its pod
+// is a new cgroup counting from zero rather than its pod's counters dropping. A
+// cgroup that only shows up after the first sample started during the run, so
+// all it counted happened in it.
+//
+// A pod's throttled periods and time are its cgroups' added up. The periods it
+// ran in are its own cgroup's when it has a limit, which every container runs
+// within; without one, its limited containers' added up.
 func analyzeThrottle(rows []podCPUAt) []workloadThrottle {
 	if len(rows) == 0 {
 		return nil
@@ -237,46 +274,108 @@ func analyzeThrottle(rows []podCPUAt) []workloadThrottle {
 	slices.SortStableFunc(rows, func(a, b podCPUAt) int { return a.At.Compare(b.At) })
 
 	first := rows[0].At
+
+	limitedPod := map[string]bool{}
+	for _, row := range rows {
+		if row.Cgroup == cgroupPod {
+			limitedPod[podID(row.PodCPU)] = true
+		}
+	}
+
+	// A pod's share of each interval, before it goes into its workload's.
+	type interval struct {
+		workload         string
+		podLimit, ctrSum float64
+		periods, thrott  int64
+		throttledTime    time.Duration
+		counted          bool
+	}
+
+	type intervalKey struct {
+		pod string
+		at  time.Time
+	}
+
 	prev := map[string]PodCPU{}
-	byName := map[string]*workloadThrottle{}
+	intervals := map[intervalKey]*interval{}
+	var order []intervalKey
 
 	for _, row := range rows {
-		name := workloadName(row.Pod)
+		pod := podID(row.PodCPU)
 
-		stats := byName[name]
-		if stats == nil {
-			stats = &workloadThrottle{Workload: name}
-			byName[name] = stats
+		key := intervalKey{pod, row.At}
+		iv := intervals[key]
+		if iv == nil {
+			iv = &interval{workload: workloadName(row.Pod)}
+			intervals[key] = iv
+			order = append(order, key)
 		}
 
-		stats.Limit = max(stats.Limit, row.Limit)
+		if row.Cgroup == cgroupPod {
+			iv.podLimit = row.Limit
+		} else {
+			iv.ctrSum += row.Limit
+		}
 
-		last, seen := prev[row.Pod]
-		prev[row.Pod] = row.PodCPU
+		cgroup := pod + "/" + row.Cgroup
+		last, seen := prev[cgroup]
+		prev[cgroup] = row.PodCPU
 
 		if !seen && !row.At.After(first) {
 			continue
 		}
 
-		periods := grown(last.Periods, row.Periods)
-		throttled := grown(last.Throttled, row.Throttled)
+		iv.counted = true
+		iv.thrott += grown(last.Throttled, row.Throttled)
+		iv.throttledTime += time.Duration(grown(int64(last.ThrottledTime), int64(row.ThrottledTime)))
 
-		stats.Periods += periods
-		stats.Throttled += throttled
-		stats.Frozen += time.Duration(grown(int64(last.Frozen), int64(row.Frozen)))
+		if row.Cgroup == cgroupPod || !limitedPod[pod] {
+			iv.periods += grown(last.Periods, row.Periods)
+		}
+	}
 
-		if periods > 0 {
-			stats.Peak = max(stats.Peak, float64(throttled)/float64(periods))
+	byName := map[string]*workloadThrottle{}
+	peaked := map[string]bool{}
+
+	for _, key := range order {
+		iv := intervals[key]
+
+		stats := byName[iv.workload]
+		if stats == nil {
+			stats = &workloadThrottle{Workload: iv.workload}
+			byName[iv.workload] = stats
+		}
+
+		stats.Limit = max(stats.Limit, cmp.Or(iv.podLimit, iv.ctrSum))
+
+		if !iv.counted {
+			continue
+		}
+
+		stats.Intervals++
+		stats.Periods += iv.periods
+		stats.Throttled += iv.thrott
+		stats.ThrottledTime += iv.throttledTime
+
+		if iv.periods >= throttlePeakMinPeriods {
+			stats.Peak = max(stats.Peak, min(1, float64(iv.thrott)/float64(iv.periods)))
+			peaked[iv.workload] = true
 		}
 	}
 
 	out := make([]workloadThrottle, 0, len(byName))
-	for _, stats := range byName {
+	for name, stats := range byName {
+		// No interval was busy enough to judge on its own: the run's share is
+		// the best there is.
+		if !peaked[name] {
+			stats.Peak = stats.Share()
+		}
+
 		out = append(out, *stats)
 	}
 
 	slices.SortFunc(out, func(a, b workloadThrottle) int {
-		return cmp.Or(cmp.Compare(b.Frozen, a.Frozen), cmp.Compare(a.Workload, b.Workload))
+		return cmp.Or(cmp.Compare(b.ThrottledTime, a.ThrottledTime), cmp.Compare(a.Workload, b.Workload))
 	})
 
 	return out
@@ -293,10 +392,33 @@ func grown(prev, cur int64) int64 {
 }
 
 // healthThrottle prints the fab workloads' CPU throttling over a sampled run,
-// the most frozen first.
-func healthThrottle(w io.Writer, rows []podCPUAt) {
+// the most throttled first. samples are the series sampled with it: they say
+// how many fab pods the collection found and saw the cgroups of, so a run
+// where it saw none says so instead of leaving the section out.
+func healthThrottle(w io.Writer, rows []podCPUAt, samples []Sample) {
 	stats := analyzeThrottle(rows)
+
 	if len(stats) == 0 {
+		collected, pods, running := false, int64(0), int64(0)
+		for _, sample := range samples {
+			if sample.has("throttle_pods") {
+				collected = true
+				pods = max(pods, sample.num("throttle_pods"))
+				running = max(running, sample.num("throttle_running"))
+			}
+		}
+
+		switch {
+		case !collected:
+			// Sampled before throttling was, or no sampled run at all.
+		case pods == 0:
+			fmt.Fprintf(w, "\nCPU THROTTLING (%s): not collected, no fab pods found on the control node\n", ThrottleFile)
+		case running == 0:
+			fmt.Fprintf(w, "\nCPU THROTTLING (%s): not collected, none of the %d fab pods' cgroups found\n", ThrottleFile, pods)
+		default:
+			fmt.Fprintf(w, "\nCPU THROTTLING (%s): none of the %d running fab pods has a CPU limit\n", ThrottleFile, running)
+		}
+
 		return
 	}
 
@@ -306,13 +428,14 @@ func healthThrottle(w io.Writer, rows []podCPUAt) {
 	for _, stats := range stats {
 		fmt.Fprintf(w, "  %-20s limit %g cpu, ", stats.Workload, stats.Limit)
 
-		if stats.Throttled == 0 {
+		switch {
+		case stats.Intervals == 0:
+			fmt.Fprintf(w, "no data, seen in a single sample\n")
+		case stats.Throttled == 0:
 			fmt.Fprintf(w, "never throttled\n")
-
-			continue
+		default:
+			fmt.Fprintf(w, "throttled in %.1f%% of periods (peak %.1f%%), %s held back across its CPUs\n",
+				stats.Share()*100, stats.Peak*100, stats.ThrottledTime.Truncate(time.Millisecond))
 		}
-
-		fmt.Fprintf(w, "throttled in %.1f%% of periods (peak %.1f%%), frozen %s\n",
-			stats.Share()*100, stats.Peak*100, stats.Frozen.Truncate(time.Millisecond))
 	}
 }
