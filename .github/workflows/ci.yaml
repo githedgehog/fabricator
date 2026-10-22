@@ -282,7 +282,7 @@ jobs:
           fi
 
   vlab:
-    name: "${{ matrix.hybrid && 'h' || 'v' }}-${{ matrix.upgradefrom && 'up' || '' }}${{ matrix.upgradefrom }}${{ matrix.upgradefrom && '-' || '' }}${{ matrix.mesh && 'mesh-' || '' }}${{ matrix.gateway && 'gw-' || '' }}${{ matrix.includeonie && 'onie-' || '' }}${{ matrix.buildmode }}-${{ matrix.vpcmode }}${{ matrix.addfabric && '-mf' || '' }}${{ (matrix.addfabric != true && (inputs.releasetest == true || contains(github.event.pull_request.labels.*.name, 'ci:+release') || github.event.schedule == '0 6 * * *')) && '-rt' || '' }}"
+    name: "${{ matrix.hybrid && 'h' || 'v' }}-${{ matrix.upgradefrom && 'up' || '' }}${{ matrix.upgradefrom }}${{ matrix.upgradefrom && '-' || '' }}${{ matrix.mesh && 'mesh-' || '' }}${{ matrix.gateway && 'gw-' || '' }}${{ matrix.includeonie && 'onie-' || '' }}${{ matrix.buildmode }}-${{ matrix.vpcmode }}${{ matrix.addfabric && '-mf' || '' }}${{ matrix.multidomain && '-md' || '' }}${{ (matrix.addfabric != true && matrix.multidomain != true && (inputs.releasetest == true || contains(github.event.pull_request.labels.*.name, 'ci:+release') || github.event.schedule == '0 6 * * *')) && '-rt' || '' }}"
     needs:
       - test-build
     uses: ./.github/workflows/run-vlab.yaml
@@ -305,10 +305,11 @@ jobs:
       mesh: ${{ matrix.mesh }}
       gateway: ${{ matrix.gateway }}
       addfabric: ${{ matrix.addfabric == true }}
+      multidomain: ${{ matrix.multidomain == true }}
       includeonie: ${{ matrix.includeonie }}
       buildmode: ${{ matrix.buildmode }}
       vpcmode: ${{ matrix.vpcmode }}
-      releasetest: ${{ matrix.addfabric != true && (inputs.releasetest == true || contains(github.event.pull_request.labels.*.name, 'ci:+release') || github.event.schedule == '0 6 * * *') }}
+      releasetest: ${{ matrix.addfabric != true && matrix.multidomain != true && (inputs.releasetest == true || contains(github.event.pull_request.labels.*.name, 'ci:+release') || github.event.schedule == '0 6 * * *') }}
       hybrid: ${{ matrix.hybrid }}
       upgradefrom: ${{ matrix.upgradefrom }}
 
@@ -349,6 +350,16 @@ jobs:
             hybrid: false
             upgradefrom: ""
             addfabric: true
+
+          # second domain in the fabric, with a leaf shared by both
+          - mesh: false
+            gateway: false
+            includeonie: false
+            buildmode: iso
+            vpcmode: l2vni
+            hybrid: false
+            upgradefrom: ""
+            multidomain: true
 
           # gateway l2vni w/ onie, usb (max artifacts)
           - mesh: false
