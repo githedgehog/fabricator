@@ -321,49 +321,73 @@ func (c *dhcpClients) bind(ctx context.Context, srv *dhcpServer, held *dhcpHeld)
 		srv.ip = leaseIP(ack)
 		c.checkAssigned(srv, held)
 
-		c.stats.enter(phaseRenew)
-		select {
-		case <-ctx.Done():
-			c.stats.leave(phaseRenew)
-
+		switch c.renewLease(ctx, srv, held, ack) {
+		case renewalStopped:
 			return false
-		case <-time.After(renewalWait(ack)):
-		}
-
-		renewStart := time.Now()
-		renewal, err := c.renew(ctx, srv)
-		c.stats.leave(phaseRenew)
-
-		if err != nil {
-			return false
-		}
-
-		if renewal.MessageType() == dhcpv4.MessageTypeNak {
-			c.stats.nakRenewal.Add(1)
-			c.checks.record(checkLeaseNaked, "%s renewed %s it was ACKed, got a NAK", srv.hostname, srv.ip)
-			held.release(srv)
-
+		case renewalNaked:
 			if !srv.restart(ctx) {
 				return false
 			}
 
 			continue
+		case renewed:
 		}
 
-		c.stats.observe(&c.stats.renewLat, time.Since(renewStart))
-
-		if got := leaseIP(renewal); got != srv.ip {
-			c.checks.record(checkRenewalChangedIP, "%s renewed %s, got %s", srv.hostname, srv.ip, got)
-			held.release(srv)
-			srv.ip = got
-			c.checkAssigned(srv, held)
-		}
-
-		srv.leaseEnd = time.Now().Add(leaseDuration(renewal))
 		srv.restartDelay = 0
 
 		return true
 	}
+}
+
+// renewal is how renewing a lease went.
+type renewal int
+
+const (
+	renewed        renewal = iota
+	renewalNaked           // the lease is lost and the server must start over
+	renewalStopped         // the round ended first
+)
+
+// renewLease renews the lease ack granted at its T1, as a client holding it
+// does: a NAK for a lease dhcpd just granted is flagged and the lease given
+// up, an ACK makes the renewed lease the one the server holds.
+func (c *dhcpClients) renewLease(ctx context.Context, srv *dhcpServer, held *dhcpHeld, ack *dhcpv4.DHCPv4) renewal {
+	c.stats.enter(phaseRenew)
+	defer c.stats.leave(phaseRenew)
+
+	select {
+	case <-ctx.Done():
+		return renewalStopped
+	case <-time.After(renewalWait(ack)):
+	}
+
+	renewStart := time.Now()
+
+	reply, err := c.renew(ctx, srv)
+	if err != nil {
+		return renewalStopped
+	}
+
+	if reply.MessageType() == dhcpv4.MessageTypeNak {
+		c.stats.nakRenewal.Add(1)
+		c.checks.record(checkLeaseNaked, "%s renewed %s it was ACKed, got a NAK", srv.hostname, srv.ip)
+		held.release(srv)
+
+		return renewalNaked
+	}
+
+	c.stats.observe(&c.stats.renewLat, time.Since(renewStart))
+
+	if got := leaseIP(reply); got != srv.ip {
+		c.checks.record(checkRenewalChangedIP, "%s renewed %s, got %s", srv.hostname, srv.ip, got)
+		held.release(srv)
+		srv.ip = got
+		c.checkAssigned(srv, held)
+	}
+
+	srv.leaseEnd = renewStart.Add(leaseDuration(reply))
+
+	return renewed
 }
 
 // dhcpMaxRenewalWait caps the wait for T1. In L3VNI dhcpd's first lease is
@@ -445,6 +469,27 @@ func (c *dhcpClients) repeats(ctx context.Context, srv *dhcpServer, held *dhcpHe
 		case kind == repeatTaken && outcome == outcomeAckOther:
 			c.checks.record(checkTakenNotNaked, "%s asked for %s, which another server holds, got an ACK for %s (its own is %s)",
 				srv.hostname, want, leaseIP(reply), srv.ip)
+		}
+
+		// An ACK for the server's own IP is the lease it holds now (RFC 2131
+		// 4.4.1), however short: dhcpd's first lease is 10s. Like a rebooted
+		// client it renews that at T1 rather than let it lapse while the bench
+		// still counts the IP as held.
+		if reply == nil || reply.MessageType() != dhcpv4.MessageTypeAck || leaseIP(reply) != srv.ip {
+			continue
+		}
+
+		srv.leaseEnd = start.Add(leaseDuration(reply))
+
+		switch c.renewLease(ctx, srv, held, reply) {
+		case renewalStopped:
+			return
+		case renewalNaked:
+			// The lease is lost: back to the start, as a client would.
+			if !srv.restart(ctx) || !c.bind(ctx, srv, held) {
+				return
+			}
+		case renewed:
 		}
 	}
 }
