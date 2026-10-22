@@ -140,6 +140,7 @@ func runDHCPRound(ctx context.Context, kube kclient.Client, send func(*dhcpv4.DH
 	// The demux outlives rounds, so its counters are read as this round's
 	// share.
 	late, dropped, garbled := demux.late.Load(), demux.dropped.Load(), demux.garbled.Load()
+	overflowed, readErrors := demux.overflowed.Load(), demux.readErrors.Load()
 
 	held := newDHCPHeld(plan)
 	servers := newDHCPServers(plan)
@@ -160,6 +161,8 @@ func runDHCPRound(ctx context.Context, kube kclient.Client, send func(*dhcpv4.DH
 	res.late = demux.late.Load() - late
 	res.dropped = demux.dropped.Load() - dropped
 	res.garbled = demux.garbled.Load() - garbled
+	res.overflowed = demux.overflowed.Load() - overflowed
+	res.readErrors = demux.readErrors.Load() - readErrors
 	res.log()
 
 	return res, nil

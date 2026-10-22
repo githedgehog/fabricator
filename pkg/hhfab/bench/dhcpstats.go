@@ -173,6 +173,8 @@ type dhcpRoundResult struct {
 	dropped    int64
 	garbled    int64
 	sendErrors int64
+	overflowed int64
+	readErrors int64
 
 	repeats   [2][repeatOutcomes]int64
 	repeatLat [2][]time.Duration
@@ -235,11 +237,19 @@ func (r *dhcpRoundResult) log() {
 	args = append(args, "zeroOffer", r.zeroOffer, "zeroAck", r.zeroAck, "nakDORA", r.nakDORA, "nakRenewal", r.nakRenewal,
 		"requestRestarts", r.restarts, "late", r.late)
 
-	if r.dropped > 0 || r.garbled > 0 || r.sendErrors > 0 {
-		args = append(args, "dropped", r.dropped, "garbled", r.garbled, "sendErrors", r.sendErrors)
+	lost := r.dropped > 0 || r.overflowed > 0 || r.readErrors > 0 || r.sendErrors > 0
+	if lost || r.garbled > 0 {
+		args = append(args, "dropped", r.dropped, "overflowed", r.overflowed, "readErrors", r.readErrors,
+			"sendErrors", r.sendErrors, "garbled", r.garbled)
 	}
 
 	slog.Info("Round done", args...)
+
+	// Not dhcpd's doing, but it skews what is blamed on it.
+	if lost {
+		slog.Warn("  Packets were lost on the bench host, so retransmits and latencies overstate dhcpd's",
+			"dropped", r.dropped, "overflowed", r.overflowed, "readErrors", r.readErrors, "sendErrors", r.sendErrors)
+	}
 	logRepeats(r.repeats, r.repeatLat)
 	r.checks.log(fmt.Sprintf("round %d", r.round+1))
 }
