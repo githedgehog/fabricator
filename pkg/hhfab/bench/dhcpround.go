@@ -191,36 +191,42 @@ func runDHCPRound(ctx context.Context, kube kclient.Client, send func(*dhcpv4.DH
 // DHCPSubnet the controller just created. The probe uses a MAC no server has,
 // whose offer is left to expire; subnets are sized so it never starves one.
 func probeDHCP(ctx context.Context, clients *dhcpClients, plan []*dhcpSubnet) error {
+	for _, sub := range plan {
+		if err := probeDHCPSubnet(ctx, clients, sub); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// probeDHCPSubnet probes one subnet, with a timeout of its own: after a storm
+// dhcpd may be slow to see the new subnets, and the first ones shouldn't use
+// up the wait of the rest.
+func probeDHCPSubnet(ctx context.Context, clients *dhcpClients, sub *dhcpSubnet) error {
 	ctx, cancel := context.WithTimeout(ctx, dhcpProbeTimeout)
 	defer cancel()
 
-	probe := func(attempt int) (time.Duration, bool) { return 2 * time.Second, true }
+	probe := func(int) (time.Duration, bool) { return 2 * time.Second, true }
+	srv := &dhcpServer{idx: -1, sub: sub, mac: dhcpProbeMAC(sub.index), hostname: "probe-" + sub.dhcpSubnetName()}
 
-	for _, sub := range plan {
-		srv := &dhcpServer{idx: -1, sub: sub, mac: dhcpProbeMAC(sub.index), hostname: "probe-" + sub.dhcpSubnetName()}
+	xid, replies := clients.demux.open()
+	defer clients.demux.close(xid)
 
-		xid, replies := clients.demux.open()
+	msg, err := clients.message(srv, dhcpv4.MessageTypeDiscover, xid, false)
+	if err != nil {
+		return err
+	}
 
-		msg, err := clients.message(srv, dhcpv4.MessageTypeDiscover, xid, false)
-		if err != nil {
-			clients.demux.close(xid)
-
-			return err
+	if _, err := clients.exchange(ctx, srv, msg, replies, probe, false, func(reply *dhcpv4.DHCPv4) verdict {
+		if reply.MessageType() == dhcpv4.MessageTypeOffer && !reply.YourIPAddr.IsUnspecified() {
+			return take
 		}
 
-		_, err = clients.exchange(ctx, srv, msg, replies, probe, false, func(reply *dhcpv4.DHCPv4) verdict {
-			if reply.MessageType() == dhcpv4.MessageTypeOffer && !reply.YourIPAddr.IsUnspecified() {
-				return take
-			}
-
-			return ignore
-		})
-		clients.demux.close(xid)
-
-		if err != nil {
-			return fmt.Errorf("dhcpd never offered an address in %s (circuit %s, vrf %s) within %s: %w",
-				sub.dhcpSubnetName(), sub.circuitID, sub.vrf, dhcpProbeTimeout, err)
-		}
+		return ignore
+	}); err != nil {
+		return fmt.Errorf("dhcpd never offered an address in %s (circuit %s, vrf %s) within %s: %w",
+			sub.dhcpSubnetName(), sub.circuitID, sub.vrf, dhcpProbeTimeout, err)
 	}
 
 	return nil
