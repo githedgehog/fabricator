@@ -889,6 +889,7 @@ go.githedgehog.com/fabric/api/vpc/v1beta1
 go.githedgehog.com/fabric/api/wiring/v1beta1
 go.githedgehog.com/fabric/pkg/boot
 go.githedgehog.com/fabric/pkg/ctrl/switchprofile
+go.githedgehog.com/fabric/pkg/dhcp/config
 go.githedgehog.com/fabric/pkg/hhfctl
 go.githedgehog.com/fabric/pkg/hhfctl/inspect
 go.githedgehog.com/fabric/pkg/manager/librarian
