@@ -123,10 +123,7 @@ func externalPeerableWithVPC(ext *vpcapi.External, vpc *vpcapi.VPC) bool {
 		return false
 	}
 
-	domain := ext.Spec.Topology.Domain
-	if domain == "" {
-		domain = defaultDomain
-	}
+	domain := externalDomain(ext)
 	if len(vpc.Spec.Topology.Domains) == 0 {
 		return domain == defaultDomain
 	}
