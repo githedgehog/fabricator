@@ -584,7 +584,7 @@ func TestDHCPStormClean(t *testing.T) {
 		require.Zero(t, res.timedOut)
 		require.Empty(t, failedChecks(res))
 		require.Len(t, res.doraLat, 20)
-		require.Len(t, res.renewLat, 20)
+		require.Len(t, res.renewLat, 20*3, "the first renewal and one after each own repeat's ACK")
 
 		require.Equal(t, int64(40), res.repeats[repeatOwn][outcomeAckSame])
 		require.Equal(t, int64(40), res.repeats[repeatTaken][outcomeNak])
@@ -891,6 +891,25 @@ func TestDHCPStormRepeatUnanswered(t *testing.T) {
 		require.Equal(t, int64(3), res.repeats[repeatOwn][outcomeNoReply])
 		require.Equal(t, int64(3), res.repeats[repeatTaken][outcomeNoReply])
 		require.Equal(t, map[checkName]int64{checkRepeatUnanswered: 6}, failedChecks(res))
+	})
+}
+
+// The lease a server holds is the one in the newest ACK: an own repeat ACKed
+// with dhcpd's 10s first lease is renewed at its T1, as a rebooted client
+// does, so the server ends up with the renewal's hour rather than a lease that
+// ran out while the bench still counted the IP as held.
+func TestDHCPStormLeaseFollowsNewestAck(t *testing.T) {
+	t.Parallel()
+
+	synctest.Test(t, func(t *testing.T) {
+		res, servers, fake := storm(t, DHCPLayout{VPCs: 1, Subnets: 1, Servers: 3}, DHCPOpts{Repeats: 1, RepeatInterval: time.Second}, nil)
+
+		require.Equal(t, int64(3), res.repeats[repeatOwn][outcomeAckSame])
+		require.Empty(t, failedChecks(res))
+		for _, srv := range servers {
+			require.Equal(t, 2, fake.renewals[srv.mac.String()], "the first renewal and one after the repeat")
+			require.WithinDuration(t, time.Now().Add(time.Hour), srv.leaseEnd, 2*time.Second, srv.hostname)
+		}
 	})
 }
 

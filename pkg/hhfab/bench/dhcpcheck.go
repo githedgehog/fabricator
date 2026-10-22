@@ -61,8 +61,10 @@ var checkOrder = []checkName{
 const maxCheckExamples = 5
 
 // dhcpLeaseSkew is how far dhcpd's clock and the bench's may disagree before a
-// stored expiry counts as short. dhcpd stamps the lease when it sends the ACK,
-// the bench when it reads it, and the two run on different machines.
+// stored expiry counts as short. The bench counts a lease from when it sent
+// the request, as RFC 2131 4.4.1 has the client do, so dhcpd, which can only
+// stamp it on receipt, never stores an earlier end unless the clocks of the
+// two machines disagree.
 const dhcpLeaseSkew = time.Minute
 
 type dhcpChecks struct {
