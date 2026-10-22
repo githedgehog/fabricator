@@ -91,8 +91,10 @@ func (s *dhcpRoundStats) repeat(kind repeatKind, outcome repeatOutcome, d time.D
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Only a usable answer has a latency: a repeat that got nothing, or only
+	// 0.0.0.0, took as long as its retransmits, which says nothing of dhcpd.
 	s.repeats[kind][outcome]++
-	if outcome != outcomeNoReply {
+	if outcome != outcomeNoReply && outcome != outcomeZero {
 		s.repeatLat[kind] = append(s.repeatLat[kind], d)
 	}
 }

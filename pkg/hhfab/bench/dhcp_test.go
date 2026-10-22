@@ -894,6 +894,23 @@ func TestDHCPStormRepeatUnanswered(t *testing.T) {
 	})
 }
 
+// Repeat latency is how fast dhcpd answered: a repeat that got nothing or only
+// 0.0.0.0 is counted but has no latency, since all it measured is its own
+// retransmits.
+func TestRepeatLatencyOnlyForAnswers(t *testing.T) {
+	t.Parallel()
+
+	stats := newDHCPRoundStats(0, 1, 1)
+	stats.repeat(repeatOwn, outcomeAckSame, time.Millisecond)
+	stats.repeat(repeatOwn, outcomeZero, 28*time.Second)
+	stats.repeat(repeatOwn, outcomeNoReply, 28*time.Second)
+	stats.repeat(repeatTaken, outcomeNak, 2*time.Millisecond)
+
+	require.Equal(t, [repeatOutcomes]int64{outcomeAckSame: 1, outcomeZero: 1, outcomeNoReply: 1}, stats.repeats[repeatOwn])
+	require.Equal(t, []time.Duration{time.Millisecond}, stats.repeatLat[repeatOwn])
+	require.Equal(t, []time.Duration{2 * time.Millisecond}, stats.repeatLat[repeatTaken])
+}
+
 // A 0.0.0.0 ACK to a repeat is flagged when it comes, even though the
 // retransmit then gets the right answer.
 func TestDHCPStormZeroAckRepeat(t *testing.T) {
