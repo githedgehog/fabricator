@@ -342,7 +342,7 @@ func DoVLABBenchDHCP(ctx context.Context, workDir, cacheDir string, opts BenchDH
 			return fmt.Errorf("bench dhcp binds UDP port 67 as the relay, which needs root: run it with --sudo, or under sudo") //nolint:err113
 		}
 
-		return reexecUnderSudo()
+		return reexecUnderSudo(cacheDir)
 	}
 
 	c, err := benchLoad(ctx, workDir, cacheDir)
@@ -400,9 +400,11 @@ func DoVLABBenchDHCP(ctx context.Context, workDir, cacheDir string, opts BenchDH
 }
 
 // reexecUnderSudo replaces this process with the same command under sudo,
-// minus --sudo. HOME is kept so the cache dir stays the user's, and HHFAB_*
-// so the preview gate and any other setting survive the switch.
-func reexecUnderSudo() error {
+// minus --sudo. The cache dir this process resolved is created here, as the
+// user, and handed over explicitly, so root uses the same one rather than
+// creating it as its own. HOME and HHFAB_* are kept so the preview gate and
+// any other setting survive the switch.
+func reexecUnderSudo(cacheDir string) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("finding the hhfab binary: %w", err)
@@ -413,24 +415,51 @@ func reexecUnderSudo() error {
 		return fmt.Errorf("finding sudo: %w", err)
 	}
 
-	keep := []string{"HOME"}
-	for _, kv := range os.Environ() {
-		if name, _, ok := strings.Cut(kv, "="); ok && strings.HasPrefix(name, "HHFAB_") {
-			keep = append(keep, name)
-		}
+	if err := os.MkdirAll(cacheDir, 0o700); err != nil {
+		return fmt.Errorf("creating cache dir %q: %w", cacheDir, err)
 	}
 
-	args := []string{VLABCmdSudo, "--preserve-env=" + strings.Join(keep, ","), exe}
-	args = append(args, withoutSudoFlag(os.Args[1:])...)
+	argv, env := sudoCommand(exe, os.Args[1:], os.Environ(), cacheDir)
 
-	slog.Info("Running again under sudo to bind UDP port 67")
+	slog.Info("Running again under sudo to bind UDP port 67", "cacheDir", cacheDir)
 
-	if err := syscall.Exec(sudo, args, os.Environ()); err != nil {
+	if err := syscall.Exec(sudo, argv, env); err != nil {
 		return fmt.Errorf("running under sudo: %w", err)
 	}
 
 	return nil
 }
+
+// sudoCommand is the argv and environment to run exe with args under sudo:
+// args without --sudo, and HHFAB_CACHE_DIR set to cacheDir, kept through sudo
+// with HOME and every other HHFAB_* variable.
+func sudoCommand(exe string, args, environ []string, cacheDir string) ([]string, []string) {
+	env := make([]string, 0, len(environ)+1)
+	keep := []string{"HOME"}
+
+	for _, kv := range environ {
+		name, _, ok := strings.Cut(kv, "=")
+		if ok && name == envCacheDir {
+			continue
+		}
+
+		env = append(env, kv)
+		if ok && strings.HasPrefix(name, "HHFAB_") {
+			keep = append(keep, name)
+		}
+	}
+
+	env = append(env, envCacheDir+"="+cacheDir)
+	keep = append(keep, envCacheDir)
+
+	argv := []string{VLABCmdSudo, "--preserve-env=" + strings.Join(keep, ","), exe}
+	argv = append(argv, withoutSudoFlag(args)...)
+
+	return argv, env
+}
+
+// envCacheDir sets the cache dir like --cache-dir does.
+const envCacheDir = "HHFAB_CACHE_DIR"
 
 // withoutSudoFlag drops --sudo in any of its spellings, so the command run
 // under sudo doesn't try to re-run itself again.
