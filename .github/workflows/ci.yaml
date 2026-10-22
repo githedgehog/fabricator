@@ -340,9 +340,9 @@ jobs:
             hybrid: false
             upgradefrom: ""
 
-          # second fabric added to the running vlab
+          # second fabric added to the running vlab, with gateways in the default fabric
           - mesh: false
-            gateway: false
+            gateway: true
             includeonie: false
             buildmode: iso
             vpcmode: l2vni
