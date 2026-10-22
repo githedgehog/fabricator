@@ -31,6 +31,7 @@ const (
 	checkWrongIP          checkName = "wrong IP"
 	checkTakenGranted     checkName = "taken IP granted"
 	checkTakenNotNaked    checkName = "taken IP not NAKed"
+	checkRepeatUnanswered checkName = "repeat unanswered"
 	checkOfferNaked       checkName = "offer NAKed"
 	checkLeaseNaked       checkName = "lease NAKed"
 	checkRenewalChangedIP checkName = "renewal changed IP"
@@ -51,7 +52,7 @@ const (
 
 // checkOrder is the order checks are reported in.
 var checkOrder = []checkName{
-	checkOverlap, checkOutOfRange, checkZeroOffer, checkZeroAck, checkWrongIP, checkTakenGranted, checkTakenNotNaked,
+	checkOverlap, checkOutOfRange, checkZeroOffer, checkZeroAck, checkWrongIP, checkTakenGranted, checkTakenNotNaked, checkRepeatUnanswered,
 	checkOfferNaked, checkLeaseNaked, checkRenewalChangedIP, checkMismatchedReply, checkServerIDChanged, checkNoLeaseTime, checkNoServerID, checkUnbound,
 	checkLeasesUnread, checkOverlapLease, checkMissingLease, checkUnknownLease, checkShortLease,
 }

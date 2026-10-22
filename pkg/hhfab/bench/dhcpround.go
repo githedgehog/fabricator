@@ -430,8 +430,12 @@ func (c *dhcpClients) repeats(ctx context.Context, srv *dhcpServer, held *dhcpHe
 		c.stats.repeat(kind, outcome, time.Since(start))
 
 		// RFC 2131 4.3.2: a REQUEST in INIT-REBOOT is ACKed with the IP asked
-		// for when it is the client's, and NAKed when it is not.
+		// for when it is the client's, and NAKed when it is not. dhcpd may only
+		// stay silent for a client it has no record of, and it has this one's.
 		switch {
+		case outcome == outcomeNoReply:
+			c.checks.record(checkRepeatUnanswered, "%s asked for %s (%s) and got no answer to any retransmit",
+				srv.hostname, want, repeatKindNames[kind])
 		case kind == repeatOwn && outcome == outcomeNak:
 			c.checks.record(checkLeaseNaked, "%s asked again for its %s, got a NAK", srv.hostname, want)
 		case kind == repeatOwn && outcome == outcomeAckOther:
