@@ -379,7 +379,7 @@ jobs:
           if [[ "$INPUT_ADD_FABRIC" == "true" ]]; then
             # the second Fabric is added before anything inspects the VLAB, then its servers get their VPCs and peerings
             HHFAB_PRE_ARGS=(--ready=add-fabric)
-            HHFAB_TEST_ARGS=(--ready=setup-vpcs --ready=setup-peerings)
+            HHFAB_TEST_ARGS=(--ready=setup-vpcs --ready=setup-peerings --ready=test-connectivity)
           elif [[ "${{ inputs.releasetest }}" == "true" ]]; then
             if [[ -n "$INPUT_RT_REGEX" ]]; then
               HHFAB_TEST_ARGS+=("--release-test-regexes=$INPUT_RT_REGEX")

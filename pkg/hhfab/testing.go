@@ -3089,6 +3089,7 @@ const (
 	ReachabilityReasonIntraVPC       ReachabilityReason = "intra-vpc"
 	ReachabilityReasonSwitchPeering  ReachabilityReason = "switch-peering"
 	ReachabilityReasonGatewayPeering ReachabilityReason = "gateway-peering"
+	ReachabilityReasonInterconnect   ReachabilityReason = "interconnect"
 )
 
 func IsExternalSubnetReachable(ctx context.Context, kube kclient.Reader, sourceServer, destSubnet string, checkGateway bool) (Reachability, error) {
@@ -3197,6 +3198,14 @@ func IsSubnetReachable(ctx context.Context, kube kclient.Reader, source, dest st
 	r, err := IsSubnetReachableWithSwitchPeering(ctx, kube, sourceVPC, sourceSubnet, destVPC, destSubnet)
 	if err != nil {
 		return Reachability{}, fmt.Errorf("checking if subnets %s and %s are reachable through fabric: %w", source, dest, err)
+	}
+	if r.Reachable {
+		return r, nil
+	}
+
+	r, err = IsSubnetReachableOverInterconnect(ctx, kube, sourceVPC, sourceSubnet, destVPC, destSubnet)
+	if err != nil {
+		return Reachability{}, fmt.Errorf("checking if subnets %s and %s are reachable over the interconnect: %w", source, dest, err)
 	}
 	if r.Reachable {
 		return r, nil
