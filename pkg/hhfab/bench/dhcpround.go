@@ -278,10 +278,10 @@ func (c *dhcpClients) boot(ctx context.Context, srv *dhcpServer, held *dhcpHeld,
 		c.stats.leave(phasePXE)
 
 		switch {
-		case errors.Is(err, errNoReply):
+		case errors.Is(err, errNoReply), errors.Is(err, errPXEAborted):
 			srv.pxeDead = true
 			c.stats.pxeDead.Add(1)
-			c.checks.record(checkUnbound, "%s: PXE firmware gave up", srv.hostname)
+			c.checks.record(checkUnbound, "%s: PXE firmware gave up: %v", srv.hostname, err)
 
 			return
 		case err != nil:
@@ -314,6 +314,8 @@ func (c *dhcpClients) bind(ctx context.Context, srv *dhcpServer, held *dhcpHeld)
 			return false
 		}
 
+		// How long the server waited for a lease, restarts and the waits
+		// before them included: what dhcpd's NAKs and silence cost a client.
 		c.stats.observe(&c.stats.doraLat, time.Since(start))
 
 		srv.ip = leaseIP(ack)
@@ -341,6 +343,10 @@ func (c *dhcpClients) bind(ctx context.Context, srv *dhcpServer, held *dhcpHeld)
 			c.checks.record(checkLeaseNaked, "%s renewed %s it was ACKed, got a NAK", srv.hostname, srv.ip)
 			held.release(srv)
 
+			if !srv.restart(ctx) {
+				return false
+			}
+
 			continue
 		}
 
@@ -354,6 +360,7 @@ func (c *dhcpClients) bind(ctx context.Context, srv *dhcpServer, held *dhcpHeld)
 		}
 
 		srv.leaseEnd = time.Now().Add(leaseDuration(renewal))
+		srv.restartDelay = 0
 
 		return true
 	}
