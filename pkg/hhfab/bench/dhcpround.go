@@ -90,23 +90,30 @@ func RunDHCP(ctx context.Context, kube kclient.Client, transport *DHCPTransport,
 
 	summary := newDHCPSummary()
 
+	// A round that can't be set up, or is interrupted, ends the run, but the
+	// rounds that finished are still summed up before that's reported.
+	var runErr error
+
 	for round := range opts.Rounds {
+		// An interrupted round comes back with what it found, to be summed up
+		// with the rest.
 		res, err := runDHCPRound(ctx, kube, transport.send, demux, plan, objs, opts, round)
-		if err != nil && ctx.Err() == nil {
-			return fmt.Errorf("round %d: %w", round+1, err)
+		if res != nil {
+			summary.add(res)
 		}
 
-		// Interrupted: the summary covers the rounds that finished.
-		if res == nil {
+		if err != nil {
+			if ctx.Err() == nil {
+				runErr = fmt.Errorf("round %d: %w", round+1, err)
+			}
+
 			break
 		}
-
-		summary.add(res)
 	}
 
-	summary.report(opts.Rounds, demux.replySources())
+	summary.report(opts.Rounds, demux.totals())
 
-	return nil
+	return runErr
 }
 
 // runDHCPRound is one round: reset, probe, storm, check.
@@ -158,15 +165,24 @@ func runDHCPRound(ctx context.Context, kube kclient.Client, send func(*dhcpv4.DH
 	stopReport()
 	reportWG.Wait()
 
-	checkStoredLeases(ctx, kube, checks, plan, servers)
+	// A storm cut short keeps what it found, but its unbound servers didn't
+	// fail to bind, they were stopped, and dhcpd's record can't be read.
+	interrupted := ctx.Err() != nil
+	if !interrupted {
+		checkStoredLeases(ctx, kube, checks, plan, servers)
+	}
 
-	res := stats.result(cleanup, storm, checks, servers)
+	res := stats.result(cleanup, storm, checks, servers, interrupted)
 	res.late = demux.late.Load() - late
 	res.dropped = demux.dropped.Load() - dropped
 	res.garbled = demux.garbled.Load() - garbled
 	res.overflowed = demux.overflowed.Load() - overflowed
 	res.readErrors = demux.readErrors.Load() - readErrors
 	res.log()
+
+	if interrupted {
+		return res, fmt.Errorf("storm interrupted: %w", ctx.Err())
+	}
 
 	return res, nil
 }
