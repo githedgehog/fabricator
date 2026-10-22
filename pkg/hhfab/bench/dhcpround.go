@@ -49,6 +49,9 @@ func (o DHCPOpts) validate() error {
 		return fmt.Errorf("spread must not be negative, got %s", o.Spread) //nolint:err113
 	case o.RoundTimeout <= 0:
 		return fmt.Errorf("round timeout must be positive, got %s", o.RoundTimeout) //nolint:err113
+	case o.Spread >= o.RoundTimeout:
+		// Servers that would start after the round ends would count as unbound.
+		return fmt.Errorf("spread %s must be shorter than the round timeout %s", o.Spread, o.RoundTimeout) //nolint:err113
 	}
 
 	return nil
