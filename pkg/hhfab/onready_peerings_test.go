@@ -116,3 +116,17 @@ func TestBuildOnReadyPeerings(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildExternalEndpointsSkipsInterconnect(t *testing.T) {
+	externals := []vpcapi.External{
+		testInterconnect("to-fabric-b", "to-default", "", "default"),
+		{ObjectMeta: kmetav1.ObjectMeta{Name: "ext-bgp"}},
+		{ObjectMeta: kmetav1.ObjectMeta{Name: "ext-static"}},
+	}
+
+	var names []string
+	for _, ep := range buildExternalEndpoints(externals) {
+		names = append(names, ep.External.ExternalName)
+	}
+	require.Equal(t, []string{"ext-bgp", "ext-static"}, names)
+}
