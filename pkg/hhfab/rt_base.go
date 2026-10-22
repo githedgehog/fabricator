@@ -152,6 +152,13 @@ func makeTestCtx(ctx context.Context, kube kclient.Client, setupOpts SetupVPCsOp
 func findExternals(ctx context.Context, kube kclient.Client, extList *vpcapi.ExternalList, extAttachList *vpcapi.ExternalAttachmentList) (string, string) {
 	bgpExt, staticExt := "", ""
 
+	// an interconnect External carries traffic to another Fabric, there is no external system behind it
+	candidates := slices.DeleteFunc(slices.Clone(extList.Items), func(ext vpcapi.External) bool {
+		_, interconnect := ext.Annotations[VLABInterconnectAnnotation]
+
+		return interconnect
+	})
+
 	hasAttachment := func(extName string) bool {
 		for _, attach := range extAttachList.Items {
 			if attach.Spec.External == extName {
@@ -214,7 +221,7 @@ func findExternals(ctx context.Context, kube kclient.Client, extList *vpcapi.Ext
 	}
 
 	// First pass: prefer hardware externals
-	for _, ext := range extList.Items {
+	for _, ext := range candidates {
 		if !isHardware(&ext) || !hasAttachment(ext.Name) {
 			continue
 		}
@@ -231,7 +238,7 @@ func findExternals(ctx context.Context, kube kclient.Client, extList *vpcapi.Ext
 	}
 
 	// Second pass: virtual externals with all-hardware attachments
-	for _, ext := range extList.Items {
+	for _, ext := range candidates {
 		if !hasAttachment(ext.Name) || !allAttachmentsHW(ext.Name) {
 			continue
 		}
@@ -248,7 +255,7 @@ func findExternals(ctx context.Context, kube kclient.Client, extList *vpcapi.Ext
 	}
 
 	// Third pass: any external with attachments (pure VLAB: both switch and external are virtual)
-	for _, ext := range extList.Items {
+	for _, ext := range candidates {
 		if !hasAttachment(ext.Name) {
 			continue
 		}
