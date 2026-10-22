@@ -62,7 +62,7 @@ func TestResetDHCPObjectsRefusesForeignObjects(t *testing.T) {
 		kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(existing...).Build()
 
 		err := resetDHCPObjects(t.Context(), kube, plan, objs)
-		require.ErrorContains(t, err, "isn't the bench's", name)
+		require.ErrorContains(t, err, "aren't the bench's", name)
 
 		left := &vpcapi.VPCList{}
 		require.NoError(t, kube.List(t.Context(), left))
@@ -121,6 +121,54 @@ func TestStoredLeasesRetries(t *testing.T) {
 
 		require.Equal(t, 1, checks.failed())
 		require.Equal(t, int64(1), checks.count(checkLeasesUnread))
+	})
+}
+
+// Cleanup comes right after a storm, so its deletes and applies wait out a
+// struggling apiserver like its waits do, rather than ending the run.
+func TestResetDHCPObjectsRetries(t *testing.T) {
+	t.Parallel()
+
+	plan, err := planDHCP(DHCPLayout{Servers: 2, Subnets: 1, VPCs: 1})
+	require.NoError(t, err)
+
+	objs := dhcpObjects(plan, "")
+
+	scheme, err := benchScheme()
+	require.NoError(t, err)
+
+	old := &vpcapi.VPC{ObjectMeta: objMeta("dhcp-0007", map[string]string{LabelFabric: DHCPLabel})}
+	reset := errors.New("read: connection reset by peer") //nolint:err113
+
+	synctest.Test(t, func(t *testing.T) {
+		deletes, creates := 0, 0
+		kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(old).WithInterceptorFuncs(interceptor.Funcs{
+			Delete: func(ctx context.Context, kube kclient.WithWatch, obj kclient.Object, opts ...kclient.DeleteOption) error {
+				if deletes++; deletes == 1 {
+					return reset
+				}
+
+				return kube.Delete(ctx, obj, opts...)
+			},
+			Create: func(ctx context.Context, kube kclient.WithWatch, obj kclient.Object, opts ...kclient.CreateOption) error {
+				if creates++; creates == 1 {
+					return reset
+				}
+
+				return kube.Create(ctx, obj, opts...)
+			},
+		}).Build()
+
+		// No VPC controller makes the DHCPSubnets, so it ends waiting for them,
+		// past both failures.
+		err := resetDHCPObjects(t.Context(), kube, plan, objs)
+		require.ErrorContains(t, err, "the bench DHCP subnets to be created")
+
+		vpcs := &vpcapi.VPCList{}
+		require.NoError(t, kube.List(t.Context(), vpcs))
+		require.Len(t, vpcs.Items, 1)
+		require.Equal(t, "dhcp-0001", vpcs.Items[0].Name, "the old VPC deleted, the planned one applied")
+		require.NoError(t, kube.Get(t.Context(), kclient.ObjectKey{Name: DHCPNamespace, Namespace: kmetav1.NamespaceDefault}, &vpcapi.IPv4Namespace{}))
 	})
 }
 
