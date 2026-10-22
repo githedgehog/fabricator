@@ -760,7 +760,8 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 
 					setupPeeringsOpts := SetupPeeringsOpts{
 						WaitSwitchesReady: true,
-						Requests:          peerings,
+						Requests:          peerings.Requests,
+						GatewayPeerings:   peerings.Gateway,
 					}
 					slog.Debug("Running setup-peerings", "opts", setupPeeringsOpts)
 					if err := c.SetupPeerings(ctx, vlab, setupPeeringsOpts); err != nil {

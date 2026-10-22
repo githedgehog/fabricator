@@ -47,14 +47,23 @@ func vpcRequestID(name string) string {
 	return strings.TrimPrefix(name, "vpc-")
 }
 
-// buildOnReadyPeerings returns the setup-peerings requests for the on-ready step. A single Fabric
-// and domain keep the fixed requests, with several of them the requests are built from the cluster:
-// a VPC peering between the first two VPCs of each Fabric and domain group, a gateway peering
-// between the second and third VPC of a group in a Fabric that has a Gateway, and an External
-// peering from the first VPC of each Fabric to its interconnect External.
+// onReadyPeeringSet is what the on-ready setup-peerings step creates: requests in the syntax of
+// setup-peerings, and gateway peerings that the syntax can not express (two Externals)
+type onReadyPeeringSet struct {
+	Requests []string
+	Gateway  map[string]*gwapi.PeeringSpec
+}
+
+// buildOnReadyPeerings returns the peerings for the on-ready step. A single Fabric and domain keep
+// the fixed requests, with several of them the peerings are built from the cluster: a VPC peering
+// between the first two VPCs of each Fabric and domain group, a gateway peering between the second
+// and third VPC of a group in a Fabric that has a Gateway, and an External peering from the first
+// VPC of each Fabric to its interconnect External. When the Fabric behind the interconnect has a
+// Gateway and an External with a NAT pool, that Fabric also gets a gateway peering between its
+// interconnect External and that External, so the VPC reaches it through the Gateway.
 func buildOnReadyPeerings(vpcs []vpcapi.VPC, externals []vpcapi.External, gateways []gwapi.Gateway,
 	namespaces []vpcapi.IPv4Namespace, gatewayEnabled bool,
-) []string {
+) onReadyPeeringSet {
 	var groups []*vpcGroup
 	byKey := map[[2]string]*vpcGroup{}
 
@@ -78,7 +87,7 @@ func buildOnReadyPeerings(vpcs []vpcapi.VPC, externals []vpcapi.External, gatewa
 			peerings = append(peerings, "2+3"+onReadyGatewayPeeringOpts)
 		}
 
-		return peerings
+		return onReadyPeeringSet{Requests: peerings}
 	}
 
 	gatewayFabrics := map[string]bool{}
@@ -87,6 +96,7 @@ func buildOnReadyPeerings(vpcs []vpcapi.VPC, externals []vpcapi.External, gatewa
 	}
 
 	peerings := make([]string, 0, 2*len(groups)+len(externals))
+	gatewayPeerings := map[string]*gwapi.PeeringSpec{}
 	for _, group := range groups {
 		if len(group.vpcs) < 2 {
 			slog.Info("Skipping VPC peering, group has fewer than two VPCs", "fabric", group.fabric, "domains", group.domain, "vpcs", group.vpcs)
@@ -142,10 +152,20 @@ func buildOnReadyPeerings(vpcs []vpcapi.VPC, externals []vpcapi.External, gatewa
 		// the External of the other Fabric names the address space reachable through it
 		var prefixes []string
 		if peer, ok := externalsByName[peerName]; ok {
-			peerFabric := fabricOrDefault(peer.Spec.Topology.Fabric)
-			for _, ns := range namespaces {
-				if ns.Name == peer.Spec.IPv4Namespace && fabricOrDefault(ns.Spec.Topology.Fabric) == peerFabric {
-					prefixes = append(prefixes, ns.Spec.Subnets...)
+			prefixes = namespaceSubnets(namespaces, peer)
+
+			if internet, pool := transitExternal(sortedExternals, peer); internet != nil && gatewayFabrics[fabricOrDefault(peer.Spec.Topology.Fabric)] {
+				exposes, err := buildExposes(namespaceSubnets(namespaces, ext), []string{pool}, nil, NATModeMasquerade, nil)
+				if err != nil {
+					slog.Warn("Skipping gateway transit peering", "external", ext.Name, "err", err)
+				} else {
+					prefixes = append(prefixes, AllZeroPrefix...)
+					gatewayPeerings[peer.Name+"--"+internet.Name] = &gwapi.PeeringSpec{
+						Peering: map[string]*gwapi.PeeringEntry{
+							gwapi.VPCInfoExtPrefix + peer.Name:     {Expose: exposes},
+							gwapi.VPCInfoExtPrefix + internet.Name: {Expose: []gwapi.PeeringEntryExpose{{DefaultDestination: true}}},
+						},
+					}
 				}
 			}
 		}
@@ -157,32 +177,73 @@ func buildOnReadyPeerings(vpcs []vpcapi.VPC, externals []vpcapi.External, gatewa
 		peerings = append(peerings, req)
 	}
 
-	return peerings
+	return onReadyPeeringSet{Requests: peerings, Gateway: gatewayPeerings}
 }
 
-// onReadyPeerings lists the cluster objects and builds the setup-peerings requests from them
-func (c *Config) onReadyPeerings(ctx context.Context) ([]string, error) {
+// namespaceSubnets are the subnets of the IPv4Namespace of the External, in the External's Fabric
+func namespaceSubnets(namespaces []vpcapi.IPv4Namespace, ext *vpcapi.External) []string {
+	var subnets []string
+	fabric := fabricOrDefault(ext.Spec.Topology.Fabric)
+	for _, ns := range namespaces {
+		if ns.Name == ext.Spec.IPv4Namespace && fabricOrDefault(ns.Spec.Topology.Fabric) == fabric {
+			subnets = append(subnets, ns.Spec.Subnets...)
+		}
+	}
+
+	return subnets
+}
+
+// transitExternal is the first External of the interconnect External's Fabric and domain that
+// has a BGP NAT pool and is not an interconnect External, with its pool. It is what the Fabric's
+// Gateway reaches for the VPCs behind the interconnect.
+func transitExternal(externals []vpcapi.External, interconnect *vpcapi.External) (*vpcapi.External, string) {
+	domain := func(ext *vpcapi.External) string {
+		if ext.Spec.Topology.Domain == "" {
+			return defaultDomain
+		}
+
+		return ext.Spec.Topology.Domain
+	}
+
+	for idx := range externals {
+		ext := &externals[idx]
+		if _, isInterconnect := ext.Annotations[VLABInterconnectAnnotation]; isInterconnect {
+			continue
+		}
+		if fabricOrDefault(ext.Spec.Topology.Fabric) != fabricOrDefault(interconnect.Spec.Topology.Fabric) || domain(ext) != domain(interconnect) {
+			continue
+		}
+		if pool := ext.Annotations[extBGPNATAnnotation]; pool != "" {
+			return ext, pool
+		}
+	}
+
+	return nil, ""
+}
+
+// onReadyPeerings lists the cluster objects and builds the on-ready peerings from them
+func (c *Config) onReadyPeerings(ctx context.Context) (onReadyPeeringSet, error) {
 	cacheCancel, kube, err := getKubeClientWithCache(ctx, c.WorkDir)
 	if err != nil {
-		return nil, fmt.Errorf("creating kube client: %w", err)
+		return onReadyPeeringSet{}, fmt.Errorf("creating kube client: %w", err)
 	}
 	defer cacheCancel()
 
 	vpcs := &vpcapi.VPCList{}
 	if err := kube.List(ctx, vpcs); err != nil {
-		return nil, fmt.Errorf("listing VPCs: %w", err)
+		return onReadyPeeringSet{}, fmt.Errorf("listing VPCs: %w", err)
 	}
 	externals := &vpcapi.ExternalList{}
 	if err := kube.List(ctx, externals); err != nil {
-		return nil, fmt.Errorf("listing externals: %w", err)
+		return onReadyPeeringSet{}, fmt.Errorf("listing externals: %w", err)
 	}
 	gateways := &gwapi.GatewayList{}
 	if err := kube.List(ctx, gateways); err != nil {
-		return nil, fmt.Errorf("listing gateways: %w", err)
+		return onReadyPeeringSet{}, fmt.Errorf("listing gateways: %w", err)
 	}
 	namespaces := &vpcapi.IPv4NamespaceList{}
 	if err := kube.List(ctx, namespaces); err != nil {
-		return nil, fmt.Errorf("listing IPv4 namespaces: %w", err)
+		return onReadyPeeringSet{}, fmt.Errorf("listing IPv4 namespaces: %w", err)
 	}
 
 	return buildOnReadyPeerings(vpcs.Items, externals.Items, gateways.Items, namespaces.Items, c.Fab.Spec.Config.Gateway.Enable), nil
