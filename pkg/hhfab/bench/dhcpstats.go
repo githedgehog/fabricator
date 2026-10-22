@@ -48,6 +48,9 @@ type dhcpRoundStats struct {
 	nakRenewal atomic.Int64
 	sendErrors atomic.Int64
 
+	// DORAs started over because no one answered the REQUEST.
+	requestRestarts atomic.Int64
+
 	mu         sync.Mutex
 	start      time.Time
 	doraLat    []time.Duration
@@ -163,6 +166,7 @@ type dhcpRoundResult struct {
 	zeroAck    int64
 	nakDORA    int64
 	nakRenewal int64
+	restarts   int64
 	late       int64
 	dropped    int64
 	garbled    int64
@@ -204,6 +208,7 @@ func (s *dhcpRoundStats) result(cleanup, storm time.Duration, checks *dhcpChecks
 		zeroAck:    s.zeroAcks.Load(),
 		nakDORA:    s.nakDORA.Load(),
 		nakRenewal: s.nakRenewal.Load(),
+		restarts:   s.requestRestarts.Load(),
 		sendErrors: s.sendErrors.Load(),
 		repeats:    s.repeats,
 		repeatLat:  s.repeatLat,
@@ -225,7 +230,8 @@ func (r *dhcpRoundResult) log() {
 	args = append(args, latencyArgs("renew", r.renewLat)...)
 	args = append(args, latencyArgs("pxe", r.pxeLat)...)
 	args = append(args, retransmitArgs(r.retransmit)...)
-	args = append(args, "zeroOffer", r.zeroOffer, "zeroAck", r.zeroAck, "nakDORA", r.nakDORA, "nakRenewal", r.nakRenewal, "late", r.late)
+	args = append(args, "zeroOffer", r.zeroOffer, "zeroAck", r.zeroAck, "nakDORA", r.nakDORA, "nakRenewal", r.nakRenewal,
+		"requestRestarts", r.restarts, "late", r.late)
 
 	if r.dropped > 0 || r.garbled > 0 || r.sendErrors > 0 {
 		args = append(args, "dropped", r.dropped, "garbled", r.garbled, "sendErrors", r.sendErrors)
@@ -324,6 +330,7 @@ func (s *dhcpSummary) report(planned int, sources map[netip.Addr]int64) {
 		timedOut              int
 		zeroOffer, zeroAck    int64
 		nakDORA, nakRenewal   int64
+		restarts              int64
 		late                  int64
 		repeats               [2][repeatOutcomes]int64
 		repeatLat             [2][]time.Duration
@@ -344,6 +351,7 @@ func (s *dhcpSummary) report(planned int, sources map[netip.Addr]int64) {
 		zeroAck += r.zeroAck
 		nakDORA += r.nakDORA
 		nakRenewal += r.nakRenewal
+		restarts += r.restarts
 		late += r.late
 
 		for kind := range repeats {
@@ -374,7 +382,8 @@ func (s *dhcpSummary) report(planned int, sources map[netip.Addr]int64) {
 	}
 
 	args = retransmitArgs(retransmit)
-	args = append(args, "zeroOffer", zeroOffer, "zeroAck", zeroAck, "nakDORA", nakDORA, "nakRenewal", nakRenewal, "late", late)
+	args = append(args, "zeroOffer", zeroOffer, "zeroAck", zeroAck, "nakDORA", nakDORA, "nakRenewal", nakRenewal,
+		"requestRestarts", restarts, "late", late)
 	slog.Info("  replies", args...)
 
 	logRepeats(repeats, repeatLat)

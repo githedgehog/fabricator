@@ -192,6 +192,30 @@ func osSchedule(attempt int) (time.Duration, bool) {
 	return base + fuzz, true
 }
 
+// dhcpMaxRequestAttempts is how many times an OS client sends a REQUEST for an
+// offer before it goes back to DISCOVER, as RFC 2131 §4.4.1 has it and
+// systemd does (MAX_REQUEST_ATTEMPTS).
+const dhcpMaxRequestAttempts = 5
+
+// boundedSchedule is sched giving up after attempts tries.
+func boundedSchedule(sched dhcpSchedule, attempts int) dhcpSchedule {
+	return func(attempt int) (time.Duration, bool) {
+		wait, again := sched(attempt)
+
+		return wait, again && attempt < attempts-1
+	}
+}
+
+// An OS client that has to start over, after a NAK or a REQUEST nobody
+// answered, waits first, twice as long each time: systemd's
+// RESTART_AFTER_NAK_MIN_USEC and RESTART_AFTER_NAK_MAX_USEC. Without it a
+// dhcpd that keeps NAKing would get the whole fleet back at once, as fast as
+// it answers.
+const (
+	dhcpRestartFirst   = time.Second
+	dhcpRestartLongest = 30 * time.Minute
+)
+
 // pxeSchedule is EDK2's UEFI PXE (mPxeDhcpTimeout, PXE 2.1 §2.2.2): 4, 8, 16
 // and 32 s with no jitter, then the firmware gives up and moves on to the next
 // boot entry. DISCOVER and REQUEST both use it.
@@ -310,7 +334,24 @@ type dhcpServer struct {
 	leaseEnd time.Time
 	pxeDead  bool
 
+	// How long the OS client waited before its last restart; it starts from
+	// scratch once the server is bound.
+	restartDelay time.Duration
+
 	retransmits int
+}
+
+// restart waits before an OS client starts over, longer each time, and reports
+// false if the round ends first.
+func (srv *dhcpServer) restart(ctx context.Context) bool {
+	srv.restartDelay = min(max(2*srv.restartDelay, dhcpRestartFirst), dhcpRestartLongest)
+
+	select {
+	case <-ctx.Done():
+		return false
+	case <-time.After(srv.restartDelay):
+		return true
+	}
 }
 
 // clientProfile is the client a DORA is done as: the OS, or the PXE firmware
@@ -433,10 +474,21 @@ func (c *dhcpClients) checkRequired(srv *dhcpServer, reply *dhcpv4.DHCPv4) {
 	}
 }
 
+// errPXEAborted is the PXE firmware ending its session over a reply it can't
+// go on with, as EDK2 does on a NAK or an ACK for another IP than offered.
+var errPXEAborted = errors.New("PXE firmware ended the session")
+
 // dora gets a lease the way the profile's client does: DISCOVER until a usable
-// OFFER, then REQUEST it, starting over on a NAK. It fails only when the
-// profile gives up (PXE) or the round ends.
+// OFFER, then REQUEST it. The OS client starts over, after a wait, on a NAK or
+// when no one answers its REQUEST; the PXE firmware ends its session on a NAK
+// or an ACK for another IP. It fails only when the profile gives up (PXE) or
+// the round ends.
 func (c *dhcpClients) dora(ctx context.Context, srv *dhcpServer, prof clientProfile) (*dhcpv4.DHCPv4, error) {
+	requestSched := prof.sched
+	if !prof.pxe {
+		requestSched = boundedSchedule(prof.sched, dhcpMaxRequestAttempts)
+	}
+
 	for {
 		xid, replies := c.demux.open()
 
@@ -471,14 +523,18 @@ func (c *dhcpClients) dora(ctx context.Context, srv *dhcpServer, prof clientProf
 
 		judge := c.judgeAck(srv)
 		if prof.pxe {
-			// EDK2 drops an ACK that doesn't match the offer it requested.
+			// EDK2 (DhcpHandleRequest) ignores an ACK or NAK from another server
+			// than the one it requested from; of the rest, it takes a NAK and an
+			// ACK for another IP only to end the session over them.
 			inner := judge
 			judge = func(reply *dhcpv4.DHCPv4) verdict {
 				if inner(reply) != take {
 					return ignore
 				}
-				if reply.MessageType() == dhcpv4.MessageTypeAck && (!reply.YourIPAddr.Equal(offered) || !reply.ServerIdentifier().Equal(serverID)) {
-					c.compareAck(srv, offered, serverID, reply)
+				if !reply.ServerIdentifier().Equal(serverID) {
+					if reply.MessageType() == dhcpv4.MessageTypeAck {
+						c.compareAck(srv, offered, serverID, reply)
+					}
 
 					return ignore
 				}
@@ -487,10 +543,19 @@ func (c *dhcpClients) dora(ctx context.Context, srv *dhcpServer, prof clientProf
 			}
 		}
 
-		ack, err := c.exchange(ctx, srv, request, replies, prof.sched, false, judge)
+		ack, err := c.exchange(ctx, srv, request, replies, requestSched, false, judge)
 		c.demux.close(xid)
 
-		if err != nil {
+		switch {
+		case errors.Is(err, errNoReply) && !prof.pxe:
+			// RFC 2131 §4.4.1: neither an ACK nor a NAK, so back to INIT.
+			c.stats.requestRestarts.Add(1)
+			if !srv.restart(ctx) {
+				return nil, ctx.Err() //nolint:wrapcheck
+			}
+
+			continue
+		case err != nil:
 			return nil, err
 		}
 
@@ -499,11 +564,21 @@ func (c *dhcpClients) dora(ctx context.Context, srv *dhcpServer, prof clientProf
 			c.stats.nakDORA.Add(1)
 			c.checks.record(checkOfferNaked, "%s requested %s it was offered, got a NAK", srv.hostname, offered)
 
+			if prof.pxe {
+				return nil, errPXEAborted
+			}
+			if !srv.restart(ctx) {
+				return nil, ctx.Err() //nolint:wrapcheck
+			}
+
 			continue
 		}
 
-		if !prof.pxe {
-			c.compareAck(srv, offered, serverID, ack)
+		c.compareAck(srv, offered, serverID, ack)
+
+		if prof.pxe && !ack.YourIPAddr.Equal(offered) {
+			// EDK2 declines it and ends the session.
+			return nil, errPXEAborted
 		}
 
 		return ack, nil

@@ -360,7 +360,9 @@ type fakeDHCPD struct {
 	silent     bool            // never answer, like an unreachable dhcpd
 	deaf       map[string]bool // never answer these MACs
 	zeroFirst  bool            // answer each MAC's first DISCOVER with 0.0.0.0
-	nakFirst   bool            // NAK each MAC's first REQUEST
+	nakFirst   int             // NAK each MAC's first so many REQUESTs
+	deafFirst  int             // ignore each MAC's first so many REQUESTs
+	wrongAck   bool            // ACK each MAC's first REQUEST with another IP than offered
 	nakRenewal bool            // NAK each MAC's first renewal
 	zeroAck    bool            // answer each MAC's first REQUEST with an ACK for 0.0.0.0
 	zeroRepeat bool            // answer each MAC's first repeat with an ACK for 0.0.0.0
@@ -417,11 +419,15 @@ func (f *fakeDHCPD) send(msg *dhcpv4.DHCPv4) error {
 
 	reply := func(mt dhcpv4.MessageType, ip netip.Addr, lease time.Duration) {
 		mods := []dhcpv4.Modifier{dhcpv4.WithMessageType(mt)}
-		if ip.IsValid() {
+		switch {
+		case ip.IsValid():
 			mods = append(mods,
 				dhcpv4.WithYourIP(ip.AsSlice()),
 				dhcpv4.WithOption(dhcpv4.OptServerIdentifier(f.serverID)),
 				dhcpv4.WithOption(dhcpv4.OptIPAddressLeaseTime(lease)))
+		case mt == dhcpv4.MessageTypeNak:
+			// RFC 2131 Table 3: a NAK carries the server identifier too.
+			mods = append(mods, dhcpv4.WithOption(dhcpv4.OptServerIdentifier(f.serverID)))
 		}
 
 		resp, err := dhcpv4.NewReplyFromRequest(msg, mods...)
@@ -477,7 +483,18 @@ func (f *fakeDHCPD) send(msg *dhcpv4.DHCPv4) error {
 			return nil
 		}
 
-		if f.nakFirst && f.requests[mac] == 1 {
+		if f.requests[mac] <= f.deafFirst {
+			return nil
+		}
+
+		if f.wrongAck && f.requests[mac] == 1 {
+			reply(dhcpv4.MessageTypeAck, f.next[sub], 10*time.Second)
+			f.next[sub] = f.next[sub].Next()
+
+			return nil
+		}
+
+		if f.requests[mac] <= f.nakFirst {
 			reply(dhcpv4.MessageTypeNak, netip.Addr{}, 0)
 
 			return nil
@@ -622,7 +639,7 @@ func TestDHCPStormNakRestarts(t *testing.T) {
 	t.Parallel()
 
 	synctest.Test(t, func(t *testing.T) {
-		res, _, fake := storm(t, DHCPLayout{VPCs: 1, Subnets: 1, Servers: 3}, DHCPOpts{}, func(f *fakeDHCPD) { f.nakFirst = true })
+		res, _, fake := storm(t, DHCPLayout{VPCs: 1, Subnets: 1, Servers: 3}, DHCPOpts{}, func(f *fakeDHCPD) { f.nakFirst = 1 })
 
 		require.Equal(t, int64(3), res.bound)
 		require.Equal(t, int64(3), res.nakDORA)
@@ -632,6 +649,76 @@ func TestDHCPStormNakRestarts(t *testing.T) {
 			require.Equal(t, 2, n, "%s started over once", mac)
 		}
 	})
+
+	// Like systemd, a client NAKed again and again waits before each new
+	// start, twice as long each time, instead of coming straight back.
+	synctest.Test(t, func(t *testing.T) {
+		res, _, fake := storm(t, DHCPLayout{VPCs: 1, Subnets: 1, Servers: 3}, DHCPOpts{}, func(f *fakeDHCPD) { f.nakFirst = 3 })
+
+		require.Equal(t, int64(3), res.bound)
+		require.Equal(t, int64(9), res.nakDORA)
+		for _, lat := range res.doraLat {
+			require.Equal(t, (1+2+4)*time.Second, lat)
+		}
+		for mac, n := range fake.discovers {
+			require.Equal(t, 4, n, "%s started over three times", mac)
+		}
+	})
+}
+
+// RFC 2131 §4.4.1: a REQUEST that gets neither an ACK nor a NAK after the
+// retransmits sends the client back to INIT, as systemd does after five; it
+// doesn't retry the same REQUEST for the rest of the round. The restart is
+// counted, not flagged: an overloaded dhcpd may drop requests.
+func TestDHCPStormUnansweredRequestRestarts(t *testing.T) {
+	t.Parallel()
+
+	synctest.Test(t, func(t *testing.T) {
+		res, servers, fake := storm(t, DHCPLayout{VPCs: 1, Subnets: 1, Servers: 3}, DHCPOpts{}, func(f *fakeDHCPD) { f.deafFirst = dhcpMaxRequestAttempts })
+
+		require.Equal(t, int64(3), res.bound)
+		require.Equal(t, int64(3), res.restarts)
+		require.Empty(t, failedChecks(res))
+		for mac, n := range fake.discovers {
+			require.Equal(t, 2, n, "%s started over once", mac)
+		}
+		for _, srv := range servers {
+			require.Equal(t, dhcpMaxRequestAttempts-1, srv.retransmits)
+		}
+	})
+}
+
+// EDK2 ends its PXE session on a NAK and on an ACK for another IP than it
+// was offered, and the server is out for the round like one whose firmware
+// gave up waiting.
+func TestDHCPStormPXEAborts(t *testing.T) {
+	t.Parallel()
+
+	for name, tc := range map[string]struct {
+		setup func(*fakeDHCPD)
+		check checkName
+	}{
+		"nak":      {func(f *fakeDHCPD) { f.nakFirst = 1 }, checkOfferNaked},
+		"wrong ip": {func(f *fakeDHCPD) { f.wrongAck = true }, checkWrongIP},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			synctest.Test(t, func(t *testing.T) {
+				res, servers, fake := storm(t, DHCPLayout{VPCs: 1, Subnets: 1, Servers: 2}, DHCPOpts{PXE: true}, tc.setup)
+
+				require.Equal(t, int64(2), res.pxeDead)
+				require.Zero(t, res.bound)
+				require.Equal(t, map[checkName]int64{tc.check: 2, checkUnbound: 2}, failedChecks(res))
+				for _, srv := range servers {
+					require.True(t, srv.pxeDead)
+				}
+				for mac, n := range fake.discovers {
+					require.Equal(t, 1, n, "%s didn't start over", mac)
+				}
+			})
+		})
+	}
 }
 
 // Granting another server's IP to a taken repeat is the misbehaviour; handing
