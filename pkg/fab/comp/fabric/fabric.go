@@ -14,6 +14,7 @@ import (
 	fmeta "go.githedgehog.com/fabric/api/meta"
 	"go.githedgehog.com/fabric/api/valid"
 	"go.githedgehog.com/fabric/pkg/boot"
+	dhcpcfg "go.githedgehog.com/fabric/pkg/dhcp/config"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
 	"go.githedgehog.com/fabricator/pkg/fab/comp"
 	"go.githedgehog.com/fabricator/pkg/fab/comp/alloy"
@@ -87,6 +88,11 @@ func Install(control fabapi.ControlNode) comp.KubeInstall {
 			return nil, fmt.Errorf("marshalling fabric boot config: %w", err)
 		}
 
+		dhcpCfgYaml, err := kyaml.Marshal(GetFabricDHCPConfig(cfg, control))
+		if err != nil {
+			return nil, fmt.Errorf("marshalling fabric dhcp config: %w", err)
+		}
+
 		apiHelm, err := comp.NewHelmChart(cfg, "fabric-api", APIChartRef,
 			string(cfg.Status.Versions.Fabric.API), "", true, "")
 		if err != nil {
@@ -115,10 +121,8 @@ func Install(control fabapi.ControlNode) comp.KubeInstall {
 			return nil, fmt.Errorf("getting image URL for %q: %w", DHCPRef, err)
 		}
 		dhcpValues, err := tmplutil.FromTemplate("dhcp-values", dhcpValuesTmpl, map[string]any{
-			"Repo":            dhcpRef,
-			"Tag":             string(cfg.Status.Versions.Fabric.DHCPD),
-			"ListenInterface": control.Spec.Management.Interface,
-			"AnyDeviceOnMgmt": cfg.Spec.Config.Control.ManagementSubnetAnyDevice,
+			"Repo": dhcpRef,
+			"Tag":  string(cfg.Status.Versions.Fabric.DHCPD),
 		})
 		if err != nil {
 			return nil, fmt.Errorf("dhcp values: %w", err)
@@ -153,6 +157,9 @@ func Install(control fabapi.ControlNode) comp.KubeInstall {
 				"config.yaml": string(fabricCfgYaml),
 			}),
 			ctrlHelm,
+			comp.NewConfigMap("fabric-dhcpd-config", map[string]string{
+				"config.yaml": string(dhcpCfgYaml),
+			}),
 			dhcpHelm,
 			comp.NewConfigMap("fabric-boot-config", map[string]string{
 				"config.yaml": string(bootCfgYaml),
@@ -171,6 +178,14 @@ func InstallManagementDHCPSubnet(cfg fabapi.Fabricator) ([]kclient.Object, error
 	return []kclient.Object{
 		comp.NewDHCPSubnet(dhcpapi.ManagementSubnet, spec),
 	}, nil
+}
+
+func GetFabricDHCPConfig(f fabapi.Fabricator, control fabapi.ControlNode) *dhcpcfg.ServerConfig {
+	return &dhcpcfg.ServerConfig{
+		ListenInterface: control.Spec.Management.Interface,
+		AnyDeviceOnMgmt: f.Spec.Config.Control.ManagementSubnetAnyDevice,
+		ControlVIP:      string(f.Spec.Config.Control.VIP),
+	}
 }
 
 func GetFabricConfig(f fabapi.Fabricator) (*fmeta.FabricConfig, error) {
