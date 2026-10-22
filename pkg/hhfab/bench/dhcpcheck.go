@@ -4,6 +4,7 @@
 package bench
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net/netip"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	dhcpapi "go.githedgehog.com/fabric/api/dhcp/v1beta1"
+	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // The bench measures load; these are the few things plain enough on the wire or
@@ -38,7 +40,9 @@ const (
 	checkNoServerID       checkName = "no server ID"
 	checkUnbound          checkName = "unbound"
 
-	// Against what dhcpd stored.
+	// Against what dhcpd stored. When it can't be read the others can't run,
+	// which is no proof of misbehaviour but never a clean round either.
+	checkLeasesUnread checkName = "stored leases unread"
 	checkOverlapLease checkName = "overlapping lease"
 	checkMissingLease checkName = "missing lease"
 	checkUnknownLease checkName = "unknown lease"
@@ -49,7 +53,7 @@ const (
 var checkOrder = []checkName{
 	checkOverlap, checkOutOfRange, checkZeroOffer, checkZeroAck, checkWrongIP, checkTakenGranted, checkTakenNotNaked,
 	checkOfferNaked, checkLeaseNaked, checkRenewalChangedIP, checkMismatchedReply, checkServerIDChanged, checkNoLeaseTime, checkNoServerID, checkUnbound,
-	checkOverlapLease, checkMissingLease, checkUnknownLease, checkShortLease,
+	checkLeasesUnread, checkOverlapLease, checkMissingLease, checkUnknownLease, checkShortLease,
 }
 
 // maxCheckExamples is how many instances of a check are kept to show.
@@ -147,6 +151,20 @@ func (c *dhcpChecks) log(scope string) {
 	} else {
 		slog.Warn(fmt.Sprintf("  %d checks failed", failed), "scope", scope)
 	}
+}
+
+// checkStoredLeases reads what dhcpd stored and checks the round against it.
+// When it can't be read, that is recorded as a failed check: the round's
+// figures are still worth keeping, but it must not pass as clean.
+func checkStoredLeases(ctx context.Context, kube kclient.Reader, checks *dhcpChecks, plan []*dhcpSubnet, servers []*dhcpServer) {
+	stored, err := storedLeases(ctx, kube, plan)
+	if err != nil {
+		checks.record(checkLeasesUnread, "the checks against dhcpd's record didn't run: %v", err)
+
+		return
+	}
+
+	checkStored(checks, plan, servers, stored)
 }
 
 // checkStored compares the round with what dhcpd stored: no IP held by two
