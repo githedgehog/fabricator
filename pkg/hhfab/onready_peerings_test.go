@@ -4,7 +4,9 @@
 package hhfab
 
 import (
+	"slices"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
@@ -49,6 +51,22 @@ func TestBuildOnReadyPeerings(t *testing.T) {
 		testInterconnect("to-default", "to-fabric-b", "fabric-b", "fabric-b"),
 	}
 
+	internet := func(annotations map[string]string) vpcapi.External {
+		return vpcapi.External{ObjectMeta: kmetav1.ObjectMeta{Name: "ext-bgp-01", Annotations: annotations}}
+	}
+	withPool := internet(map[string]string{extBGPNATAnnotation: "192.168.91.0/24"})
+	transitPeering := map[string]*gwapi.PeeringSpec{
+		"to-fabric-b--ext-bgp-01": {Peering: map[string]*gwapi.PeeringEntry{
+			"ext.to-fabric-b": {Expose: []gwapi.PeeringEntryExpose{{
+				IPs: []gwapi.PeeringEntryIP{{CIDR: "10.1.0.0/16"}},
+				As:  []gwapi.PeeringEntryAs{{CIDR: "192.168.91.0/24"}},
+				NAT: &gwapi.PeeringNAT{Masquerade: &gwapi.PeeringNATMasquerade{IdleTimeout: kmetav1.Duration{Duration: 5 * time.Minute}}},
+			}}},
+			"ext.ext-bgp-01": {Expose: []gwapi.PeeringEntryExpose{{DefaultDestination: true}}},
+		}},
+	}
+	twoFabrics := []vpcapi.VPC{testVPC("vpc-01", ""), testVPC("vpc-02", "fabric-b")}
+
 	for _, tt := range []struct {
 		name           string
 		vpcs           []vpcapi.VPC
@@ -56,6 +74,7 @@ func TestBuildOnReadyPeerings(t *testing.T) {
 		gateways       []gwapi.Gateway
 		gatewayEnabled bool
 		want           []string
+		wantGateway    map[string]*gwapi.PeeringSpec
 	}{
 		{
 			name: "single fabric and domain",
@@ -100,6 +119,36 @@ func TestBuildOnReadyPeerings(t *testing.T) {
 			want:     []string{"01+02", "02+03:gw:vpc1=subnet-01:vpc2=subnet-01", "04+05"},
 		},
 		{
+			name:      "transit through the Fabric that has a gateway",
+			vpcs:      twoFabrics,
+			externals: append(slices.Clone(interconnects), withPool),
+			gateways:  []gwapi.Gateway{testGateway("")},
+			want: []string{
+				"02~to-default:subnets=subnet-01:prefixes=10.0.0.0/16,0.0.0.0/0",
+				"01~to-fabric-b:subnets=subnet-01:prefixes=10.1.0.0/16",
+			},
+			wantGateway: transitPeering,
+		},
+		{
+			name:      "no transit without a gateway",
+			vpcs:      twoFabrics,
+			externals: append(slices.Clone(interconnects), withPool),
+			want: []string{
+				"02~to-default:subnets=subnet-01:prefixes=10.0.0.0/16",
+				"01~to-fabric-b:subnets=subnet-01:prefixes=10.1.0.0/16",
+			},
+		},
+		{
+			name:      "no transit without a NAT pool",
+			vpcs:      twoFabrics,
+			externals: append(slices.Clone(interconnects), internet(nil)),
+			gateways:  []gwapi.Gateway{testGateway("")},
+			want: []string{
+				"02~to-default:subnets=subnet-01:prefixes=10.0.0.0/16",
+				"01~to-fabric-b:subnets=subnet-01:prefixes=10.1.0.0/16",
+			},
+		},
+		{
 			name:      "group with fewer than two VPCs gets no VPC peering",
 			vpcs:      []vpcapi.VPC{testVPC("vpc-01", ""), testVPC("vpc-02", ""), testVPC("vpc-03", "fabric-b")},
 			externals: interconnects,
@@ -112,7 +161,12 @@ func TestBuildOnReadyPeerings(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			got := buildOnReadyPeerings(tt.vpcs, tt.externals, tt.gateways, namespaces, tt.gatewayEnabled)
-			require.Equal(t, tt.want, got)
+			require.Equal(t, tt.want, got.Requests)
+			if tt.wantGateway == nil {
+				require.Empty(t, got.Gateway)
+			} else {
+				require.Equal(t, tt.wantGateway, got.Gateway)
+			}
 		})
 	}
 }

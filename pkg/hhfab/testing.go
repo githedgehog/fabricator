@@ -1427,6 +1427,8 @@ func (c *Config) SetupVPCs(ctx context.Context, vlab *VLAB, opts SetupVPCsOpts) 
 type SetupPeeringsOpts struct {
 	WaitSwitchesReady bool
 	Requests          []string
+	// GatewayPeerings are created as they are, next to the ones Requests describe
+	GatewayPeerings map[string]*gwapi.PeeringSpec
 }
 
 // SetupPeerings creates/updates peerings per opts.Requests. It is matrix-
@@ -2103,6 +2105,13 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 		default:
 			return fmt.Errorf("invalid request name %s", reqName) //nolint:err113
 		}
+	}
+
+	for name, spec := range opts.GatewayPeerings {
+		if _, exists := gwPeerings[name]; exists {
+			return fmt.Errorf("gateway peering %s is both requested and given", name) //nolint:err113
+		}
+		gwPeerings[name] = spec
 	}
 
 	if err := DoSetupPeerings(ctx, kube, vpcPeerings, externalPeerings, gwPeerings, opts.WaitSwitchesReady); err != nil {
