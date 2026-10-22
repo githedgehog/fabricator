@@ -3093,7 +3093,7 @@ const (
 )
 
 func IsExternalSubnetReachable(ctx context.Context, kube kclient.Reader, sourceServer, destSubnet string, checkGateway bool) (Reachability, error) {
-	switchPeeringReachable, err := apiutil.IsExternalSubnetReachable(ctx, kube, sourceServer, destSubnet)
+	switchPeeringReachable, err := isExternalSubnetReachableViaPeering(ctx, kube, sourceServer, destSubnet)
 	if err != nil {
 		return Reachability{}, fmt.Errorf("checking if external subnet %s is reachable from server %s: %w", destSubnet, sourceServer, err)
 	}
