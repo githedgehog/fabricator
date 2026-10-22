@@ -152,6 +152,12 @@ var seriesMetrics = []metric{
 	{"io_read_fabric_boot", "bench_io_read_fabric_boot_bytes", groupMem, false},
 	{"net_rx", "bench_net_rx_bytes", groupMem, false},
 	{"net_tx", "bench_net_tx_bytes", groupMem, false},
+
+	// How many fab pods the throttling collection found, and for how many it
+	// found a cgroup, so seeing none doesn't pass for none of them being
+	// limited.
+	{"throttle_pods", "bench_throttle_pods", groupMem, false},
+	{"throttle_running", "bench_throttle_running", groupMem, false},
 }
 
 var (

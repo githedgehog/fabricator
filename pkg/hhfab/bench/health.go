@@ -83,9 +83,11 @@ func Health(ctx context.Context, kube kclient.Client, run Runner, w io.Writer, o
 
 	// A sampled run leaves a series behind. It is read from the local work dir,
 	// so it is available even when the control node is not.
+	var samples []Sample
+
 	if opts.Series != "" {
-		samples, err := LoadSeries(opts.Series)
-		if err != nil {
+		var err error
+		if samples, err = LoadSeries(opts.Series); err != nil {
 			return err
 		}
 
@@ -98,7 +100,7 @@ func Health(ctx context.Context, kube kclient.Client, run Runner, w io.Writer, o
 			return err
 		}
 
-		healthThrottle(w, rows)
+		healthThrottle(w, rows, samples)
 	}
 
 	// The node sections need the control node, which is not always reachable
