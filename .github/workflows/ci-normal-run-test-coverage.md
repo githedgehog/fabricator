@@ -77,5 +77,4 @@ The ready steps then run in this order:
 - `inspect` and `inspect-pods`
 - `setup-vpcs` creates the VPCs and attachments of all four servers, and checks that each server is configured and reaches its gateway through its leaf
 - `setup-peerings` creates a VPC peering inside each Fabric and an External peering from the first VPC of each Fabric to its interconnect External, built from the cluster
-
-Traffic between the two Fabrics over the interconnect is not asserted yet, as the on-ready peerings and the connectivity model are not Fabric-aware.
+- `test-connectivity` checks every server pair and External against the connectivity matrix. A pair in different Fabrics must reach each other when both VPCs have an External peering to the interconnect External of their own Fabric, one covering the other's subnet, and nothing else carries traffic between Fabrics. Interconnect Externals are not probe targets
