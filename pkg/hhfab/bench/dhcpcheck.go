@@ -58,6 +58,32 @@ var checkOrder = []checkName{
 	checkLeasesUnread, checkOverlapLease, checkMissingLease, checkUnknownLease, checkShortLease,
 }
 
+// checkMeaning says what a failed check means, for the run's reading.
+var checkMeaning = map[checkName]string{
+	checkOverlap:          "same IP handed to two servers at once",
+	checkOutOfRange:       "IP handed out outside the subnet's DHCP range",
+	checkZeroOffer:        "OFFER for 0.0.0.0, a failure dhcpd didn't report as one",
+	checkZeroAck:          "ACK for 0.0.0.0, a failure dhcpd didn't report as one",
+	checkWrongIP:          "ACK for a different IP than requested",
+	checkTakenGranted:     "server granted an IP another server holds",
+	checkTakenNotNaked:    "request for a peer's IP ACKed with some other IP instead of NAKed",
+	checkRepeatUnanswered: "no answer to a server dhcpd holds a lease for (RFC 2131 4.3.2 requires one)",
+	checkOfferNaked:       "NAK for an IP dhcpd had just offered",
+	checkLeaseNaked:       "NAK for a lease dhcpd had granted",
+	checkRenewalChangedIP: "renewal ACKed with a different IP",
+	checkMismatchedReply:  "reply carried another client's MAC",
+	checkServerIDChanged:  "ACK from a different server ID than the OFFER",
+	checkNoLeaseTime:      "OFFER or ACK without a lease time (required by RFC 2131)",
+	checkNoServerID:       "OFFER or ACK without a server ID (required by RFC 2131)",
+	checkUnbound:          "no lease at round end, or PXE firmware gave up",
+	checkCutOff:           "round timed out before bound servers finished their repeats, so those weren't checked",
+	checkLeasesUnread:     "dhcpd's stored leases couldn't be read, so they weren't checked",
+	checkOverlapLease:     "same IP stored for two MACs",
+	checkMissingLease:     "bound server's lease missing from dhcpd's record, stored with another IP, or only as an offer",
+	checkUnknownLease:     "lease stored for a MAC the bench never used",
+	checkShortLease:       "stored expiry earlier than the end of the lease given",
+}
+
 // maxCheckExamples is how many instances of a check are kept to show.
 const maxCheckExamples = 5
 

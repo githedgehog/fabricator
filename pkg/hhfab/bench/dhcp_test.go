@@ -1009,6 +1009,56 @@ func TestRunDHCPReportsWhenSetupFails(t *testing.T) { //nolint:paralleltest // s
 	require.NotContains(t, out.String(), "No misbehaviour seen", "a run that checked nothing isn't clean")
 }
 
+// The run is read back in plain words: what was done, how dhcpd kept up and
+// whether it misbehaved, with what each failed check means.
+func TestDHCPSummaryExplains(t *testing.T) {
+	t.Parallel()
+
+	opts := DHCPOpts{Layout: DHCPLayout{VPCs: 1, Subnets: 1, Servers: 4}, Rounds: 1, Repeats: 2, RepeatInterval: time.Second}
+
+	read := func(setup func(*fakeDHCPD)) string {
+		var res *dhcpRoundResult
+
+		synctest.Test(t, func(t *testing.T) {
+			res, _, _ = storm(t, opts.Layout, opts, setup)
+		})
+
+		summary := newDHCPSummary()
+		summary.add(res)
+
+		lines := summary.explain(dhcpRunFigures{
+			finished: 1, planned: 1, dora: res.doraLat, renew: res.renewLat, retransmit: res.retransmit,
+			bound: res.bound, total: int64(res.total), timedOut: res.timedOut, repeats: res.repeats,
+		}, dhcpRunTotals{}, opts)
+
+		t.Log("\n" + strings.Join(lines, "\n"))
+
+		return strings.Join(lines, "\n")
+	}
+
+	clean := read(nil)
+	require.Contains(t, clean, "load: 4 servers per round, all at once")
+	require.Contains(t, clean, "lease: 4/4 servers bound; DORA p50 0s, p95 0s, max 0s")
+	require.Contains(t, clean, "retransmits: none")
+	require.Contains(t, clean, "repeats: own IP ACKed 4/4, peer's IP NAKed 4/4")
+	require.Contains(t, clean, "verdict: no misbehaviour")
+
+	broken := read(func(f *fakeDHCPD) { f.zeroFirst, f.grantTaken = true, true })
+	require.Contains(t, broken, "retransmits: 4, per server p50 1, max 1")
+	require.Contains(t, broken, "verdict: failed checks: 2")
+	require.Contains(t, broken, "zero offer: 4, OFFER for 0.0.0.0, a failure dhcpd didn't report as one")
+	require.Contains(t, broken, "taken IP granted: 4, server granted an IP another server holds")
+}
+
+// Every check says what it means when it fails.
+func TestCheckMeanings(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range checkOrder {
+		require.NotEmpty(t, checkMeaning[name], name)
+	}
+}
+
 // A round timeout that stops bound servers before they got through their
 // repeats leaves those probes unsent, so the round isn't clean.
 func TestDHCPStormCutOffByRoundTimeout(t *testing.T) {

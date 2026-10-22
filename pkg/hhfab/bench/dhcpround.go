@@ -111,7 +111,7 @@ func RunDHCP(ctx context.Context, kube kclient.Client, transport *DHCPTransport,
 		}
 	}
 
-	summary.report(opts.Rounds, demux.totals())
+	summary.report(opts, demux.totals())
 
 	return runErr
 }

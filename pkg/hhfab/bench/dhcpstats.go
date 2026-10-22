@@ -366,8 +366,11 @@ func (d *dhcpDemux) totals() dhcpRunTotals {
 
 // report prints the run: how long each round's storm and cleanup took, the
 // figures over every round, who answered, and the misbehaviour block, which
-// always ends with whether anything failed.
-func (s *dhcpSummary) report(planned int, totals dhcpRunTotals) {
+// always ends with whether anything failed; then all of it read back in plain
+// words.
+func (s *dhcpSummary) report(opts DHCPOpts, totals dhcpRunTotals) {
+	planned := opts.Rounds
+
 	storms := make([]string, 0, len(s.rounds))
 	cleanups := make([]string, 0, len(s.rounds))
 
@@ -473,13 +476,167 @@ func (s *dhcpSummary) report(planned int, totals dhcpRunTotals) {
 	// Nothing seen is only worth saying of rounds that ran.
 	if len(s.rounds) == 0 {
 		slog.Warn("  Nothing was checked, no round ran")
+	} else {
+		s.checks.log("run")
 
-		return
+		if finished < planned {
+			slog.Warn(fmt.Sprintf("  Only %d of %d rounds ran their course", finished, planned))
+		}
 	}
 
-	s.checks.log("run")
+	slog.Info("Reading the run")
 
-	if finished < planned {
-		slog.Warn(fmt.Sprintf("  Only %d of %d rounds ran their course", finished, planned))
+	for _, line := range s.explain(dhcpRunFigures{
+		finished: finished, planned: planned,
+		dora: dora, renew: renew, retransmit: retransmit,
+		bound: bound, total: total, pxeDead: pxeDead, timedOut: timedOut,
+		restarts: restarts, sendErrors: sendErrors, repeats: repeats,
+	}, totals, opts) {
+		slog.Info("  " + line)
 	}
+}
+
+// dhcpRunFigures is what report added up over the rounds, for explain.
+type dhcpRunFigures struct {
+	finished, planned int
+
+	dora, renew []time.Duration
+	retransmit  []int
+
+	bound, total, pxeDead int64
+	timedOut              int
+	restarts, sendErrors  int64
+	repeats               [2][repeatOutcomes]int64
+}
+
+// explain reads the run's figures back in plain words: what the bench did, how
+// dhcpd coped with it, and whether anything dhcpd did was wrong.
+func (s *dhcpSummary) explain(fig dhcpRunFigures, totals dhcpRunTotals, opts DHCPOpts) []string {
+	if len(s.rounds) == 0 {
+		return []string{"nothing to read: no round ran, see the error above"}
+	}
+
+	var out []string
+
+	add := func(format string, args ...any) { out = append(out, fmt.Sprintf(format, args...)) }
+
+	start := "all at once"
+	if opts.Spread > 0 {
+		start = fmt.Sprintf("spread over %s (%.0f/s)", opts.Spread, float64(opts.Layout.Servers)/opts.Spread.Seconds())
+	}
+
+	steps := "DORA, renewal at T1"
+	if opts.PXE {
+		steps = "PXE firmware DORA, OS DORA, renewal at T1"
+	}
+
+	add("load: %d servers per round, %s, dhcpd starting on fresh empty subnets. Per server: %s, then %d repeats "+
+		"(reboot-style REQUESTs, alternating its own IP and a peer's IP)", opts.Layout.Servers, start, steps, opts.Repeats)
+
+	storms := make([]string, 0, len(s.rounds))
+	for _, r := range s.rounds {
+		storms = append(storms, r.storm.Truncate(time.Second).String())
+	}
+
+	add("rounds: %d/%d completed, storm took %s (first server start to last server done)",
+		fig.finished, fig.planned, strings.Join(storms, ", "))
+
+	if p50, p95, worst, ok := latencySpread(fig.dora); ok {
+		add("lease: %d/%d servers bound; DORA p50 %s, p95 %s, max %s (first DISCOVER to final ACK, retries and restarts included)",
+			fig.bound, fig.total, p50, p95, worst)
+	}
+
+	if fig.timedOut > 0 || fig.pxeDead > 0 {
+		add("  not bound: %d without a lease at round end, %d gave up in PXE firmware", fig.timedOut, fig.pxeDead)
+	}
+
+	resent := 0
+	for _, n := range fig.retransmit {
+		resent += n
+	}
+
+	if resent == 0 {
+		add("retransmits: none, dhcpd answered every request within the client's first 4s timeout, i.e. kept up with the arrival rate")
+	} else {
+		sorted := slices.Clone(fig.retransmit)
+		slices.Sort(sorted)
+
+		add("retransmits: %d, per server p50 %d, max %d. A client resends when no usable answer arrives in time (4s doubling "+
+			"to 64s): dhcpd fell behind, or answered with something unusable (see verdict). These waits are what drive DORA "+
+			"times up", resent, sorted[nearestRank(len(sorted), 50)], sorted[len(sorted)-1])
+	}
+
+	if fig.restarts > 0 {
+		add("  restarts: %d DORAs went back to DISCOVER after 5 unanswered REQUESTs, i.e. dhcpd dropped them, as it does "+
+			"when lease writes exceed its update budget", fig.restarts)
+	}
+
+	if totals.late > 0 {
+		add("  late answers: %d, arriving after the client stopped waiting (a resent request already answered, or one "+
+			"given up on), a sign of dhcpd working through a backlog", totals.late)
+	}
+
+	if p50, p95, worst, ok := latencySpread(fig.renew); ok {
+		add("renewals: p50 %s, p95 %s, max %s", p50, p95, worst)
+	}
+
+	own, taken := fig.repeats[repeatOwn], fig.repeats[repeatTaken]
+	if sumOutcomes(own)+sumOutcomes(taken) > 0 {
+		add("repeats: own IP ACKed %d/%d, peer's IP NAKed %d/%d (RFC 2131 expects all of both)",
+			own[outcomeAckSame], sumOutcomes(own), taken[outcomeNak], sumOutcomes(taken))
+	}
+
+	if lost := totals.dropped + totals.overflowed + totals.readErrors + fig.sendErrors; lost > 0 {
+		add("bench host: %d packets lost locally, not by dhcpd, so retransmits and times above overstate dhcpd's", lost)
+	} else {
+		add("bench host: no packets lost locally, the figures above are dhcpd's alone")
+	}
+
+	failed := 0
+	for _, name := range checkOrder {
+		if s.checks.count(name) > 0 {
+			failed++
+		}
+	}
+
+	switch {
+	case failed == 0 && fig.finished == fig.planned:
+		add("verdict: no misbehaviour, every answer followed RFC 2131 and the stored leases match what servers were given")
+	case failed == 0:
+		add("verdict: no misbehaviour in the completed rounds, but only %d/%d completed", fig.finished, fig.planned)
+	default:
+		add("verdict: failed checks: %d (examples under Misbehaviour above)", failed)
+
+		for _, name := range checkOrder {
+			if n := s.checks.count(name); n > 0 {
+				add("  %s: %d, %s", name, n, checkMeaning[name])
+			}
+		}
+	}
+
+	return out
+}
+
+// latencySpread is the median, 95th percentile and worst of a series, to the
+// millisecond.
+func latencySpread(lat []time.Duration) (time.Duration, time.Duration, time.Duration, bool) {
+	if len(lat) == 0 {
+		return 0, 0, 0, false
+	}
+
+	sorted := slices.Clone(lat)
+	slices.Sort(sorted)
+
+	at := func(p int) time.Duration { return sorted[nearestRank(len(sorted), p)].Truncate(time.Millisecond) }
+
+	return at(50), at(95), sorted[len(sorted)-1].Truncate(time.Millisecond), true
+}
+
+func sumOutcomes(outcomes [repeatOutcomes]int64) int64 {
+	sum := int64(0)
+	for _, n := range outcomes {
+		sum += n
+	}
+
+	return sum
 }
