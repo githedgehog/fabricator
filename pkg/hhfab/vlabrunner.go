@@ -745,10 +745,9 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						return c.handleShutdownWithPause(ctx, vlab, opts, fmt.Errorf("setting up VPCs: %w", err))
 					}
 				case OnReadySetupPeerings:
-					// TODO make it configurable
-					peerings := []string{"1+2"}
-					if c.Fab.Spec.Config.Gateway.Enable {
-						peerings = append(peerings, "2+3:gw:vpc1=subnet-01:vpc2=subnet-01")
+					peerings, err := c.onReadyPeerings(ctx)
+					if err != nil {
+						return c.handleShutdownWithPause(ctx, vlab, opts, fmt.Errorf("building peerings: %w", err))
 					}
 
 					setupPeeringsOpts := SetupPeeringsOpts{

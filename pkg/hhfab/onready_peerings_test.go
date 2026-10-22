@@ -1,0 +1,118 @@
+// Copyright 2026 Hedgehog
+// SPDX-License-Identifier: Apache-2.0
+
+package hhfab
+
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
+	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
+	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
+func testVPC(name, fabric string, domains ...string) vpcapi.VPC {
+	return vpcapi.VPC{
+		ObjectMeta: kmetav1.ObjectMeta{Name: name},
+		Spec:       vpcapi.VPCSpec{Topology: vpcapi.VPCTopology{Fabric: fabric, Domains: domains}},
+	}
+}
+
+func testInterconnect(name, peer, fabric, namespace string) vpcapi.External {
+	return vpcapi.External{
+		ObjectMeta: kmetav1.ObjectMeta{Name: name, Annotations: map[string]string{VLABInterconnectAnnotation: peer}},
+		Spec: vpcapi.ExternalSpec{
+			Topology:      vpcapi.ExternalTopology{Fabric: fabric},
+			IPv4Namespace: namespace,
+		},
+	}
+}
+
+func testGateway(fabric string) gwapi.Gateway {
+	return gwapi.Gateway{Spec: gwapi.GatewaySpec{Topology: gwapi.GatewayTopology{Fabric: fabric}}}
+}
+
+func TestBuildOnReadyPeerings(t *testing.T) {
+	namespaces := []vpcapi.IPv4Namespace{
+		{ObjectMeta: kmetav1.ObjectMeta{Name: "default"}, Spec: vpcapi.IPv4NamespaceSpec{Subnets: []string{"10.0.0.0/16"}}},
+		{
+			ObjectMeta: kmetav1.ObjectMeta{Name: "fabric-b"},
+			Spec: vpcapi.IPv4NamespaceSpec{
+				Topology: vpcapi.IPv4NamespaceTopology{Fabric: "fabric-b"},
+				Subnets:  []string{"10.1.0.0/16"},
+			},
+		},
+	}
+	interconnects := []vpcapi.External{
+		testInterconnect("to-fabric-b", "to-default", "", "default"),
+		testInterconnect("to-default", "to-fabric-b", "fabric-b", "fabric-b"),
+	}
+
+	for _, tt := range []struct {
+		name           string
+		vpcs           []vpcapi.VPC
+		externals      []vpcapi.External
+		gateways       []gwapi.Gateway
+		gatewayEnabled bool
+		want           []string
+	}{
+		{
+			name: "single fabric and domain",
+			vpcs: []vpcapi.VPC{testVPC("vpc-01", ""), testVPC("vpc-02", "default"), testVPC("vpc-03", "")},
+			want: []string{"1+2"},
+		},
+		{
+			name:           "single fabric and domain with gateway",
+			vpcs:           []vpcapi.VPC{testVPC("vpc-01", ""), testVPC("vpc-02", ""), testVPC("vpc-03", "")},
+			gateways:       []gwapi.Gateway{testGateway("")},
+			gatewayEnabled: true,
+			want:           []string{"1+2", "2+3:gw:vpc1=subnet-01:vpc2=subnet-01"},
+		},
+		{
+			name: "two domains",
+			vpcs: []vpcapi.VPC{
+				testVPC("vpc-01", "", "default"), testVPC("vpc-02", "", "default"),
+				testVPC("vpc-03", "", "domain-b"), testVPC("vpc-04", "", "domain-b"),
+			},
+			want: []string{"01+02", "03+04"},
+		},
+		{
+			name: "two fabrics with the interconnect",
+			vpcs: []vpcapi.VPC{
+				testVPC("vpc-01", ""), testVPC("vpc-02", ""),
+				testVPC("vpc-03", "fabric-b"), testVPC("vpc-04", "fabric-b"),
+			},
+			externals: interconnects,
+			want: []string{
+				"01+02", "03+04",
+				"03~to-default:subnets=subnet-01:prefixes=10.0.0.0/16",
+				"01~to-fabric-b:subnets=subnet-01:prefixes=10.1.0.0/16",
+			},
+		},
+		{
+			name: "gateway peering only in the fabric that has a gateway",
+			vpcs: []vpcapi.VPC{
+				testVPC("vpc-01", ""), testVPC("vpc-02", ""), testVPC("vpc-03", ""),
+				testVPC("vpc-04", "fabric-b"), testVPC("vpc-05", "fabric-b"), testVPC("vpc-06", "fabric-b"),
+			},
+			gateways: []gwapi.Gateway{testGateway("default")},
+			want:     []string{"01+02", "02+03:gw:vpc1=subnet-01:vpc2=subnet-01", "04+05"},
+		},
+		{
+			name:      "group with fewer than two VPCs gets no VPC peering",
+			vpcs:      []vpcapi.VPC{testVPC("vpc-01", ""), testVPC("vpc-02", ""), testVPC("vpc-03", "fabric-b")},
+			externals: interconnects,
+			want: []string{
+				"01+02",
+				"03~to-default:subnets=subnet-01:prefixes=10.0.0.0/16",
+				"01~to-fabric-b:subnets=subnet-01:prefixes=10.1.0.0/16",
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildOnReadyPeerings(tt.vpcs, tt.externals, tt.gateways, namespaces, tt.gatewayEnabled)
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
