@@ -913,6 +913,18 @@ func TestDHCPStormLeaseFollowsNewestAck(t *testing.T) {
 	})
 }
 
+// A spread at least as long as the round would start servers after it ends,
+// to be counted unbound for the bench's own setting.
+func TestDHCPOptsRefusesSpreadPastTimeout(t *testing.T) {
+	t.Parallel()
+
+	opts := DHCPOpts{Rounds: 1, RoundTimeout: 10 * time.Minute, Spread: 10 * time.Minute}
+	require.ErrorContains(t, opts.validate(), "shorter than the round timeout")
+
+	opts.Spread = 9 * time.Minute
+	require.NoError(t, opts.validate())
+}
+
 // Repeat latency is how fast dhcpd answered: a repeat that got nothing or only
 // 0.0.0.0 is counted but has no latency, since all it measured is its own
 // retransmits.
