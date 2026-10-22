@@ -31,6 +31,13 @@ func testInterconnect(name, peer, fabric, namespace string) vpcapi.External {
 	}
 }
 
+func domainExternal(name, domain string) vpcapi.External {
+	return vpcapi.External{
+		ObjectMeta: kmetav1.ObjectMeta{Name: name},
+		Spec:       vpcapi.ExternalSpec{Topology: vpcapi.ExternalTopology{Domain: domain}},
+	}
+}
+
 func testGateway(fabric string) gwapi.Gateway {
 	return gwapi.Gateway{Spec: gwapi.GatewaySpec{Topology: gwapi.GatewayTopology{Fabric: fabric}}}
 }
@@ -95,6 +102,33 @@ func TestBuildOnReadyPeerings(t *testing.T) {
 				testVPC("vpc-03", "", "domain-b"), testVPC("vpc-04", "", "domain-b"),
 			},
 			want: []string{"01+02", "03+04"},
+		},
+		{
+			name: "domains that share a domain are peered, shared-leaf VPC included",
+			vpcs: []vpcapi.VPC{
+				testVPC("vpc-01", "", "domain-b"), testVPC("vpc-02", "", "domain-b"),
+				testVPC("vpc-03", "", "default", "domain-b"),
+			},
+			want: []string{"01+02", "01+03"},
+		},
+		{
+			name: "first External of each domain is peered in a Fabric with several domains",
+			vpcs: []vpcapi.VPC{
+				testVPC("vpc-01", "", "domain-b"),
+				testVPC("vpc-02", "", "default", "domain-b"),
+			},
+			externals: []vpcapi.External{
+				domainExternal("ext-snp-01", "domain-b"), domainExternal("ext-bgp-01", "domain-b"),
+			},
+			want: []string{"01+02", "01~ext-bgp-01:subnets=subnet-01:prefixes=0.0.0.0/0"},
+		},
+		{
+			name: "Externals of a single-domain Fabric are left alone",
+			vpcs: []vpcapi.VPC{testVPC("vpc-01", ""), testVPC("vpc-02", "fabric-b")},
+			externals: []vpcapi.External{
+				domainExternal("ext-bgp-01", ""),
+			},
+			want: []string{},
 		},
 		{
 			name: "two fabrics with the interconnect",

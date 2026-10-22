@@ -20,9 +20,10 @@ const defaultDomain = "default"
 const onReadyGatewayPeeringOpts = ":gw:vpc1=subnet-01:vpc2=subnet-01"
 
 type vpcGroup struct {
-	fabric string
-	domain string
-	vpcs   []string
+	fabric  string
+	domain  string
+	domains []string
+	vpcs    []string
 }
 
 func fabricOrDefault(name string) string {
@@ -33,14 +34,22 @@ func fabricOrDefault(name string) string {
 	return name
 }
 
-func vpcGroupKey(vpc *vpcapi.VPC) (string, string) {
+func vpcGroupKey(vpc *vpcapi.VPC) (string, []string) {
 	domains := slices.Clone(vpc.Spec.Topology.Domains)
 	if len(domains) == 0 {
 		domains = []string{defaultDomain}
 	}
 	slices.Sort(domains)
 
-	return fabricOrDefault(vpc.Spec.Topology.Fabric), strings.Join(domains, ",")
+	return fabricOrDefault(vpc.Spec.Topology.Fabric), domains
+}
+
+func externalDomain(ext *vpcapi.External) string {
+	if ext.Spec.Topology.Domain == "" {
+		return defaultDomain
+	}
+
+	return ext.Spec.Topology.Domain
 }
 
 func vpcRequestID(name string) string {
@@ -70,11 +79,11 @@ func buildOnReadyPeerings(vpcs []vpcapi.VPC, externals []vpcapi.External, gatewa
 	sorted := slices.Clone(vpcs)
 	slices.SortFunc(sorted, func(a, b vpcapi.VPC) int { return strings.Compare(a.Name, b.Name) })
 	for idx := range sorted {
-		fabric, domain := vpcGroupKey(&sorted[idx])
-		key := [2]string{fabric, domain}
+		fabric, domains := vpcGroupKey(&sorted[idx])
+		key := [2]string{fabric, strings.Join(domains, ",")}
 		group, ok := byKey[key]
 		if !ok {
-			group = &vpcGroup{fabric: fabric, domain: domain}
+			group = &vpcGroup{fabric: fabric, domain: key[1], domains: domains}
 			byKey[key] = group
 			groups = append(groups, group)
 		}
@@ -115,13 +124,65 @@ func buildOnReadyPeerings(vpcs []vpcapi.VPC, externals []vpcapi.External, gatewa
 		peerings = append(peerings, vpcRequestID(group.vpcs[1])+"+"+vpcRequestID(group.vpcs[2])+onReadyGatewayPeeringOpts)
 	}
 
+	sortedExternals := slices.Clone(externals)
+	slices.SortFunc(sortedExternals, func(a, b vpcapi.External) int { return strings.Compare(a.Name, b.Name) })
+
+	// VPCs of different domains of a Fabric can be peered when they share a domain, which is
+	// what a VPC on a shared leaf has with the VPCs of each of its domains
+	for i, first := range groups {
+		for _, second := range groups[i+1:] {
+			if first.fabric == second.fabric && slices.ContainsFunc(first.domains, func(domain string) bool { return slices.Contains(second.domains, domain) }) {
+				peerings = append(peerings, vpcRequestID(first.vpcs[0])+"+"+vpcRequestID(second.vpcs[0]))
+			}
+		}
+	}
+
+	// a Fabric with several domains has Externals in them, so the first External of each domain is
+	// peered with the first VPC that is in that domain
+	fabricDomains := map[string]map[string]bool{}
+	for _, group := range groups {
+		if fabricDomains[group.fabric] == nil {
+			fabricDomains[group.fabric] = map[string]bool{}
+		}
+		for _, domain := range group.domains {
+			fabricDomains[group.fabric][domain] = true
+		}
+	}
+	domainExternals := map[[2]string]bool{}
+	for idx := range sortedExternals {
+		ext := &sortedExternals[idx]
+		if _, interconnect := ext.Annotations[VLABInterconnectAnnotation]; interconnect {
+			continue
+		}
+
+		fabric, domain := fabricOrDefault(ext.Spec.Topology.Fabric), externalDomain(ext)
+		if len(fabricDomains[fabric]) < 2 || domainExternals[[2]string{fabric, domain}] {
+			continue
+		}
+
+		var vpc string
+		for _, group := range groups {
+			if group.fabric == fabric && slices.Contains(group.domains, domain) {
+				vpc = group.vpcs[0]
+
+				break
+			}
+		}
+		if vpc == "" {
+			slog.Info("Skipping External peering, no VPC in the External's domain", "external", ext.Name, "fabric", fabric, "domain", domain)
+
+			continue
+		}
+
+		domainExternals[[2]string{fabric, domain}] = true
+		peerings = append(peerings, fmt.Sprintf("%s~%s:subnets=subnet-01:prefixes=%s", vpcRequestID(vpc), ext.Name, strings.Join(AllZeroPrefix, ",")))
+	}
+
 	externalsByName := map[string]*vpcapi.External{}
 	for idx := range externals {
 		externalsByName[externals[idx].Name] = &externals[idx]
 	}
 
-	sortedExternals := slices.Clone(externals)
-	slices.SortFunc(sortedExternals, func(a, b vpcapi.External) int { return strings.Compare(a.Name, b.Name) })
 	for idx := range sortedExternals {
 		ext := &sortedExternals[idx]
 		peerName, ok := ext.Annotations[VLABInterconnectAnnotation]
@@ -129,11 +190,7 @@ func buildOnReadyPeerings(vpcs []vpcapi.VPC, externals []vpcapi.External, gatewa
 			continue
 		}
 
-		fabric := fabricOrDefault(ext.Spec.Topology.Fabric)
-		domain := ext.Spec.Topology.Domain
-		if domain == "" {
-			domain = defaultDomain
-		}
+		fabric, domain := fabricOrDefault(ext.Spec.Topology.Fabric), externalDomain(ext)
 
 		var vpc string
 		for _, group := range groups {
@@ -197,20 +254,12 @@ func namespaceSubnets(namespaces []vpcapi.IPv4Namespace, ext *vpcapi.External) [
 // has a BGP NAT pool and is not an interconnect External, with its pool. It is what the Fabric's
 // Gateway reaches for the VPCs behind the interconnect.
 func transitExternal(externals []vpcapi.External, interconnect *vpcapi.External) (*vpcapi.External, string) {
-	domain := func(ext *vpcapi.External) string {
-		if ext.Spec.Topology.Domain == "" {
-			return defaultDomain
-		}
-
-		return ext.Spec.Topology.Domain
-	}
-
 	for idx := range externals {
 		ext := &externals[idx]
 		if _, isInterconnect := ext.Annotations[VLABInterconnectAnnotation]; isInterconnect {
 			continue
 		}
-		if fabricOrDefault(ext.Spec.Topology.Fabric) != fabricOrDefault(interconnect.Spec.Topology.Fabric) || domain(ext) != domain(interconnect) {
+		if fabricOrDefault(ext.Spec.Topology.Fabric) != fabricOrDefault(interconnect.Spec.Topology.Fabric) || externalDomain(ext) != externalDomain(interconnect) {
 			continue
 		}
 		if pool := ext.Annotations[extBGPNATAnnotation]; pool != "" {
