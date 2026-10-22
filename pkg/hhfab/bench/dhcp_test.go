@@ -1009,6 +1009,24 @@ func TestRunDHCPReportsWhenSetupFails(t *testing.T) { //nolint:paralleltest // s
 	require.NotContains(t, out.String(), "No misbehaviour seen", "a run that checked nothing isn't clean")
 }
 
+// A round timeout that stops bound servers before they got through their
+// repeats leaves those probes unsent, so the round isn't clean.
+func TestDHCPStormCutOffByRoundTimeout(t *testing.T) {
+	t.Parallel()
+
+	synctest.Test(t, func(t *testing.T) {
+		res, servers, _ := storm(t, DHCPLayout{VPCs: 1, Subnets: 1, Servers: 3},
+			DHCPOpts{Repeats: 5, RepeatInterval: 10 * time.Second, RoundTimeout: 20 * time.Second}, nil)
+
+		require.Equal(t, int64(3), res.bound)
+		require.Zero(t, res.timedOut)
+		require.Equal(t, map[checkName]int64{checkCutOff: 3}, failedChecks(res))
+		for _, srv := range servers {
+			require.False(t, srv.finished)
+		}
+	})
+}
+
 // A round stopped during its storm keeps what it found, but the servers it
 // stopped before they bound aren't counted as failing to.
 func TestDHCPRoundResultInterrupted(t *testing.T) {

@@ -352,6 +352,7 @@ type dhcpServer struct {
 	ip       netip.Addr
 	leaseEnd time.Time
 	pxeDead  bool
+	finished bool // got through all of its repeats
 
 	// How long the OS client waited before its last restart; it starts from
 	// scratch once the server is bound.
