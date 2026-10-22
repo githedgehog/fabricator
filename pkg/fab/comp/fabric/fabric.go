@@ -50,8 +50,7 @@ const (
 	ServerFacingMTUOffset = 64   // TODO use in the fabric, make configurable
 	ServerFacingMTU       = MTU - ServerFacingMTUOffset
 
-	// BootPort is where fabric-boot serves ONIE and ZTP on the control VIP
-	BootPort = 32000
+	BootPort = fabapi.BootPort
 )
 
 //go:embed ctrl_values.tmpl.yaml
@@ -164,34 +163,13 @@ func Install(control fabapi.ControlNode) comp.KubeInstall {
 }
 
 func InstallManagementDHCPSubnet(cfg fabapi.Fabricator) ([]kclient.Object, error) {
-	mgmt, err := cfg.Spec.Config.Control.ManagementSubnet.Parse()
+	spec, err := cfg.ManagementDHCPSubnetSpec()
 	if err != nil {
-		return nil, fmt.Errorf("parsing management subnet: %w", err)
-	}
-
-	controlVIP, err := cfg.Spec.Config.Control.VIP.Parse()
-	if err != nil {
-		return nil, fmt.Errorf("parsing control VIP: %w", err)
-	}
-
-	static := map[string]dhcpapi.DHCPSubnetStatic{}
-	for mac, ip := range cfg.Spec.Config.Control.ManagementSubnetStatic {
-		static[mac] = dhcpapi.DHCPSubnetStatic{IP: ip}
+		return nil, fmt.Errorf("building management DHCP subnet: %w", err)
 	}
 
 	return []kclient.Object{
-		comp.NewDHCPSubnet(dhcpapi.ManagementSubnet, dhcpapi.DHCPSubnetSpec{
-			Subnet:           dhcpapi.ManagementSubnet,
-			CIDRBlock:        mgmt.Masked().String(),
-			Gateway:          mgmt.Addr().Next().String(),
-			StartIP:          string(cfg.Spec.Config.Fabric.ManagementDHCPStart),
-			EndIP:            string(cfg.Spec.Config.Fabric.ManagementDHCPEnd),
-			LeaseTimeSeconds: 1800, // 30 mins should be enough for ZTP needs
-			ZTPBaseURL:       "http://" + netip.AddrPortFrom(controlVIP.Addr(), BootPort).String(),
-			DNSServers:       []string{},
-			TimeServers:      []string{},
-			Static:           static,
-		}),
+		comp.NewDHCPSubnet(dhcpapi.ManagementSubnet, spec),
 	}, nil
 }
 

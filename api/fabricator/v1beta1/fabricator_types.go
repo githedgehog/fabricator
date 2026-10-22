@@ -784,6 +784,15 @@ func (f *Fabricator) Validate(ctx context.Context) error {
 		return fmt.Errorf("control VIP must be /32") //nolint:goerr113
 	}
 
+	// fabric-dhcpd doesn't serve an invalid subnet and skips invalid static entries, so catch them here
+	mgmtDHCPSubnet, err := f.ManagementDHCPSubnetSpec()
+	if err != nil {
+		return fmt.Errorf("building management DHCP subnet: %w", err)
+	}
+	if err := mgmtDHCPSubnet.Validate(); err != nil {
+		return fmt.Errorf("validating management DHCP subnet: %w", err)
+	}
+
 	kubeServiceSubnet, err := f.Spec.Config.Control.KubeServiceSubnet.Parse()
 	if err != nil {
 		return fmt.Errorf("parsing kube service subnet: %w", err)
