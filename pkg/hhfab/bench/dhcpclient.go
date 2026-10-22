@@ -49,6 +49,10 @@ func ListenDHCPRelay(relay netip.Addr, server netip.AddrPort) (*DHCPTransport, e
 		slog.Warn("Could not enlarge the relay socket buffers, bursts may be dropped locally", "err", err)
 	}
 
+	if err := enableDropCount(conn); err != nil {
+		slog.Warn("Replies dropped on this host for want of buffer space won't be counted", "err", err)
+	}
+
 	return &DHCPTransport{conn: conn, server: net.UDPAddrFromAddrPort(server)}, nil
 }
 
@@ -70,18 +74,26 @@ func (t *DHCPTransport) send(msg *dhcpv4.DHCPv4) error {
 
 // receive hands every reply to the demux until the socket is closed. Packets
 // that don't parse are counted, not fatal: the bench measures, it doesn't
-// stop on what dhcpd sends.
+// stop on what dhcpd sends. So are read errors, and the kernel's count of
+// replies it dropped before the bench could read them.
 func (t *DHCPTransport) receive(demux *dhcpDemux) {
 	buf := make([]byte, 64<<10)
+	oob := make([]byte, 128)
 
 	for {
-		n, from, err := t.conn.ReadFromUDPAddrPort(buf)
+		n, oobn, _, from, err := t.conn.ReadMsgUDPAddrPort(buf, oob)
 		if err != nil {
 			if errors.Is(err, net.ErrClosed) {
 				return
 			}
 
+			demux.readErrors.Add(1)
+
 			continue
+		}
+
+		if drops, ok := socketDrops(oob[:oobn]); ok {
+			demux.overflowed.Store(int64(drops))
 		}
 
 		msg, err := dhcpv4.FromBytes(buf[:n])
@@ -108,6 +120,13 @@ type dhcpDemux struct {
 	late    atomic.Int64
 	dropped atomic.Int64
 	garbled atomic.Int64
+
+	// Lost on the bench host: replies the kernel dropped with the socket's
+	// buffer full (its running total, which it only tells with the next packet
+	// it delivers, so drops at the very end of a round count towards the
+	// next), and reads that failed.
+	overflowed atomic.Int64
+	readErrors atomic.Int64
 }
 
 func newDHCPDemux() *dhcpDemux {
