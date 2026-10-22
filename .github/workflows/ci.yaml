@@ -322,8 +322,8 @@ jobs:
           - { vpcmode: l3vni,             gateway: dpdk, includeonie: true }
           - { vpcmode: l2vni, mesh: true, gateway: dpdk }
 
-          # second fabric added to the running vlab
-          - { vpcmode: l2vni, addfabric: true }
+          # second fabric added to the running vlab, with gateways in the default fabric
+          - { vpcmode: l2vni, gateway: kernel, addfabric: true }
           # TODO: consider enabling it again after removing limitation on ESLAG conns
           # - { vpcmode: l3vni, mesh: true, gateway: dpdk }
 
