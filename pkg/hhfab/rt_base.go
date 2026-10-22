@@ -144,6 +144,18 @@ func makeTestCtx(ctx context.Context, kube kclient.Client, setupOpts SetupVPCsOp
 	return testCtx
 }
 
+// isMultiFabric is whether there are several Fabrics, which the peerings and the reachability checks
+// of the suites that assume a single one can not handle
+func isMultiFabric(fabrics []wiringapi.Fabric) bool {
+	return len(fabrics) > 1
+}
+
+// isMultiDomain is whether a Fabric has several domains, which the peerings and the reachability
+// checks of the suites that assume a single one can not handle
+func isMultiDomain(fabrics []wiringapi.Fabric) bool {
+	return slices.ContainsFunc(fabrics, func(fabric wiringapi.Fabric) bool { return len(fabric.Spec.Domains) > 1 })
+}
+
 // findExternals finds a viable BGP external and a viable static external, returning (bgpExtName, staticExtName).
 // Three passes ensure hardware externals always win regardless of API response order: pass 1 selects
 // hardware externals, pass 2 accepts virtual externals whose attachments all go through hardware
@@ -288,6 +300,11 @@ type JUnitTestSuite struct {
 	Time      float64         `xml:"time,attr"`
 	TimeHuman time.Duration   `xml:"-"`
 	TestCases []JUnitTestCase `xml:"testcase"`
+
+	// MultiFabric and MultiDomain are set by the suites that work with several Fabrics, or with a
+	// Fabric with several domains, in the cluster, the others skip when there are
+	MultiFabric bool `xml:"-"`
+	MultiDomain bool `xml:"-"`
 }
 
 type SkipFlags struct {
@@ -303,6 +320,8 @@ type SkipFlags struct {
 	NoLoki            bool `xml:"-"` // skip if Loki is not configured or available
 	NoProm            bool `xml:"-"` // skip if Prometheus is not configured or available
 	NoServers         bool `xml:"-"` // skip if there are no servers in the fabric
+	MultiFabric       bool `xml:"-"` // skip, unless the suite supports it, if there are several Fabrics
+	MultiDomain       bool `xml:"-"` // skip, unless the suite supports it, if a Fabric has several domains
 
 	/* Note about subinterfaces; they are required in the following cases:
 	 * 1. when attaching External on a VLAN - we'll create a subinterface for it, but if no VLAN specified we'll configure on the interface itself
@@ -341,6 +360,12 @@ func (sf *SkipFlags) PrettyPrint() string {
 	}
 	if sf.NoServers {
 		parts = append(parts, "NoSrvs")
+	}
+	if sf.MultiFabric {
+		parts = append(parts, "MultiFabric")
+	}
+	if sf.MultiDomain {
+		parts = append(parts, "MultiDomain")
 	}
 	if sf.NoLoki {
 		parts = append(parts, "NoLoki")
@@ -667,6 +692,22 @@ func selectAndRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, suite *J
 		if test.Skipped != nil {
 			continue
 		}
+		if skipFlags.MultiFabric && !suite.MultiFabric {
+			suite.TestCases[i].Skipped = &Skipped{
+				Message: "There are several Fabrics and the suite does not support them",
+			}
+			suite.Skipped++
+
+			continue
+		}
+		if skipFlags.MultiDomain && !suite.MultiDomain {
+			suite.TestCases[i].Skipped = &Skipped{
+				Message: "There are Fabrics with several domains and the suite does not support them",
+			}
+			suite.Skipped++
+
+			continue
+		}
 		if test.SkipFlags.ExtendedOnly && !skipFlags.ExtendedOnly {
 			suite.TestCases[i].Skipped = &Skipped{
 				Message: "Extended tests are not enabled",
@@ -931,6 +972,19 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOp
 			slog.Info("No gateways found, gateway tests will be skipped")
 			skipFlags.NoGateway = true
 		}
+	}
+
+	fabrics := &wiringapi.FabricList{}
+	if err := kube.List(ctx, fabrics); err != nil {
+		return fmt.Errorf("listing fabrics: %w", err)
+	}
+	if isMultiFabric(fabrics.Items) {
+		slog.Info("Several Fabrics found, suites that do not support them will be skipped")
+		skipFlags.MultiFabric = true
+	}
+	if isMultiDomain(fabrics.Items) {
+		slog.Info("Fabric with several domains found, suites that do not support them will be skipped")
+		skipFlags.MultiDomain = true
 	}
 
 	swList := &wiringapi.SwitchList{}
