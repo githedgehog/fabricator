@@ -2119,9 +2119,14 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 // use in test.
 // SourceIP is left empty; callers that need to model external-originated
 // traffic must populate it manually.
+// Interconnect Externals are paths to another Fabric with nothing behind them to probe, so
+// they get no endpoint.
 func buildExternalEndpoints(externals []vpcapi.External) []*Endpoint {
 	names := make([]string, 0, len(externals))
 	for _, ext := range externals {
+		if _, interconnect := ext.Annotations[VLABInterconnectAnnotation]; interconnect {
+			continue
+		}
 		names = append(names, ext.Name)
 	}
 	slices.Sort(names)
