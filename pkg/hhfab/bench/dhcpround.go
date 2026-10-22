@@ -326,6 +326,7 @@ func (c *dhcpClients) boot(ctx context.Context, srv *dhcpServer, held *dhcpHeld,
 	c.stats.bound.Add(1)
 
 	c.repeats(ctx, srv, held, opts)
+	srv.finished = ctx.Err() == nil
 }
 
 // bind runs DORA and the first renewal until the server holds a renewed lease,

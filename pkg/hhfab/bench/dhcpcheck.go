@@ -40,6 +40,7 @@ const (
 	checkNoLeaseTime      checkName = "no lease time"
 	checkNoServerID       checkName = "no server ID"
 	checkUnbound          checkName = "unbound"
+	checkCutOff           checkName = "cut off" // the round ended before a bound server's repeats did
 
 	// Against what dhcpd stored. When it can't be read the others can't run,
 	// which is no proof of misbehaviour but never a clean round either.
@@ -53,7 +54,7 @@ const (
 // checkOrder is the order checks are reported in.
 var checkOrder = []checkName{
 	checkOverlap, checkOutOfRange, checkZeroOffer, checkZeroAck, checkWrongIP, checkTakenGranted, checkTakenNotNaked, checkRepeatUnanswered,
-	checkOfferNaked, checkLeaseNaked, checkRenewalChangedIP, checkMismatchedReply, checkServerIDChanged, checkNoLeaseTime, checkNoServerID, checkUnbound,
+	checkOfferNaked, checkLeaseNaked, checkRenewalChangedIP, checkMismatchedReply, checkServerIDChanged, checkNoLeaseTime, checkNoServerID, checkUnbound, checkCutOff,
 	checkLeasesUnread, checkOverlapLease, checkMissingLease, checkUnknownLease, checkShortLease,
 }
 

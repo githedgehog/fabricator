@@ -188,13 +188,19 @@ type dhcpRoundResult struct {
 
 // result closes the round: servers that neither bound nor died in PXE ran out
 // of round, and are counted as unbound, unless the round was interrupted and
-// they were stopped instead.
+// they were stopped instead. Bound servers the round timeout stopped before
+// they got through their repeats are flagged too: those probes never ran, so
+// the round can't pass as clean, whether dhcpd was slow or the timeout short.
 func (s *dhcpRoundStats) result(cleanup, storm time.Duration, checks *dhcpChecks, servers []*dhcpServer, interrupted bool) *dhcpRoundResult {
 	timedOut := 0
 	for _, srv := range servers {
-		if srv.leaseEnd.IsZero() && !srv.pxeDead && !interrupted {
+		switch {
+		case interrupted, srv.pxeDead, srv.finished:
+		case srv.leaseEnd.IsZero():
 			timedOut++
 			checks.record(checkUnbound, "%s: no lease by the end of the round", srv.hostname)
+		default:
+			checks.record(checkCutOff, "%s: bound, but the round timed out before it got through its repeats", srv.hostname)
 		}
 	}
 
