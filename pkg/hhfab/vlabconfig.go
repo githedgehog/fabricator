@@ -764,12 +764,6 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 					return nil, fmt.Errorf("failed to add link for ESLAG connection %s: %w", conn.Name, err)
 				}
 			}
-		} else if conn.Spec.VPCLoopback != nil {
-			for _, link := range conn.Spec.VPCLoopback.Links {
-				if err := addLink(link.Switch1.Port, link.Switch2.Port); err != nil {
-					return nil, fmt.Errorf("failed to add link for VPC loopback connection %s: %w", conn.Name, err)
-				}
-			}
 		} else if mclagDomain := conn.Spec.MCLAGDomain; mclagDomain != nil { //nolint:staticcheck // deprecated, but VLAB should still bring up pre-existing MCLAG wiring
 			for _, link := range mclagDomain.SessionLinks {
 				if err := addLink(link.Switch1.Port, link.Switch2.Port); err != nil {

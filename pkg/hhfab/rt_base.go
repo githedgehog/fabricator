@@ -297,9 +297,8 @@ type SkipFlags struct {
 	NoServers         bool `xml:"-"` // skip if there are no servers in the fabric
 
 	/* Note about subinterfaces; they are required in the following cases:
-	 * 1. when using VPC loopback workaround - it's applied when we have a pair of vpcs or vpc and external both attached on a switch with peering between them
-	 * 2. when attaching External on a VLAN - we'll create a subinterface for it, but if no VLAN specified we'll configure on the interface itself
-	 * 3. when using StaticExternal connection - same thing - if VLAN it'll be a subinterface, if no VLAN - just interface itself gets a config
+	 * 1. when attaching External on a VLAN - we'll create a subinterface for it, but if no VLAN specified we'll configure on the interface itself
+	 * 2. when using StaticExternal connection - same thing - if VLAN it'll be a subinterface, if no VLAN - just interface itself gets a config
 	 */
 }
 
