@@ -180,14 +180,19 @@ type dhcpRoundResult struct {
 	repeatLat [2][]time.Duration
 
 	checks *dhcpChecks
+
+	// The run was stopped during the storm: what it found stands, but it
+	// didn't run its course.
+	interrupted bool
 }
 
 // result closes the round: servers that neither bound nor died in PXE ran out
-// of round, and are counted as unbound.
-func (s *dhcpRoundStats) result(cleanup, storm time.Duration, checks *dhcpChecks, servers []*dhcpServer) *dhcpRoundResult {
+// of round, and are counted as unbound, unless the round was interrupted and
+// they were stopped instead.
+func (s *dhcpRoundStats) result(cleanup, storm time.Duration, checks *dhcpChecks, servers []*dhcpServer, interrupted bool) *dhcpRoundResult {
 	timedOut := 0
 	for _, srv := range servers {
-		if srv.leaseEnd.IsZero() && !srv.pxeDead {
+		if srv.leaseEnd.IsZero() && !srv.pxeDead && !interrupted {
 			timedOut++
 			checks.record(checkUnbound, "%s: no lease by the end of the round", srv.hostname)
 		}
@@ -217,6 +222,8 @@ func (s *dhcpRoundStats) result(cleanup, storm time.Duration, checks *dhcpChecks
 		repeats:    s.repeats,
 		repeatLat:  s.repeatLat,
 		checks:     checks,
+
+		interrupted: interrupted,
 	}
 }
 
@@ -243,7 +250,12 @@ func (r *dhcpRoundResult) log() {
 			"sendErrors", r.sendErrors, "garbled", r.garbled)
 	}
 
-	slog.Info("Round done", args...)
+	msg := "Round done"
+	if r.interrupted {
+		msg = "Round interrupted"
+	}
+
+	slog.Info(msg, args...)
 
 	// Not dhcpd's doing, but it skews what is blamed on it.
 	if lost {
@@ -328,10 +340,28 @@ func (s *dhcpSummary) add(res *dhcpRoundResult) {
 	s.checks.merge(res.checks)
 }
 
+// dhcpRunTotals is what the demux counted over the whole run. Replies keep
+// coming between rounds, while the next one is set up, so these are taken
+// from it rather than added up from the rounds; late ones then also include
+// what the readiness probes got after they had their answer.
+type dhcpRunTotals struct {
+	late, dropped, garbled int64
+	overflowed, readErrors int64
+	sources                map[netip.Addr]int64
+}
+
+func (d *dhcpDemux) totals() dhcpRunTotals {
+	return dhcpRunTotals{
+		late: d.late.Load(), dropped: d.dropped.Load(), garbled: d.garbled.Load(),
+		overflowed: d.overflowed.Load(), readErrors: d.readErrors.Load(),
+		sources: d.replySources(),
+	}
+}
+
 // report prints the run: how long each round's storm and cleanup took, the
 // figures over every round, who answered, and the misbehaviour block, which
 // always ends with whether anything failed.
-func (s *dhcpSummary) report(planned int, sources map[netip.Addr]int64) {
+func (s *dhcpSummary) report(planned int, totals dhcpRunTotals) {
 	storms := make([]string, 0, len(s.rounds))
 	cleanups := make([]string, 0, len(s.rounds))
 
@@ -343,7 +373,7 @@ func (s *dhcpSummary) report(planned int, sources map[netip.Addr]int64) {
 		zeroOffer, zeroAck    int64
 		nakDORA, nakRenewal   int64
 		restarts              int64
-		late                  int64
+		sendErrors            int64
 		repeats               [2][repeatOutcomes]int64
 		repeatLat             [2][]time.Duration
 	)
@@ -364,7 +394,7 @@ func (s *dhcpSummary) report(planned int, sources map[netip.Addr]int64) {
 		nakDORA += r.nakDORA
 		nakRenewal += r.nakRenewal
 		restarts += r.restarts
-		late += r.late
+		sendErrors += r.sendErrors
 
 		for kind := range repeats {
 			for outcome := range repeatOutcomes {
@@ -374,12 +404,19 @@ func (s *dhcpSummary) report(planned int, sources map[netip.Addr]int64) {
 		}
 	}
 
+	finished := 0
+	for _, r := range s.rounds {
+		if !r.interrupted {
+			finished++
+		}
+	}
+
 	msg := "DHCP storm finished"
-	if len(s.rounds) < planned {
+	if finished < planned {
 		msg = "DHCP storm interrupted"
 	}
 
-	slog.Info(msg, "rounds", fmt.Sprintf("%d/%d", len(s.rounds), planned),
+	slog.Info(msg, "rounds", fmt.Sprintf("%d/%d", finished, planned),
 		"bound", fmt.Sprintf("%d/%d", bound, total), "pxeDead", pxeDead, "timedOut", timedOut)
 
 	if len(storms) > 0 {
@@ -395,26 +432,48 @@ func (s *dhcpSummary) report(planned int, sources map[netip.Addr]int64) {
 
 	args = retransmitArgs(retransmit)
 	args = append(args, "zeroOffer", zeroOffer, "zeroAck", zeroAck, "nakDORA", nakDORA, "nakRenewal", nakRenewal,
-		"requestRestarts", restarts, "late", late)
+		"requestRestarts", restarts, "late", totals.late)
 	slog.Info("  replies", args...)
 
 	logRepeats(repeats, repeatLat)
 
-	if len(sources) > 0 {
-		addrs := make([]netip.Addr, 0, len(sources))
-		for addr := range sources {
+	if len(totals.sources) > 0 {
+		addrs := make([]netip.Addr, 0, len(totals.sources))
+		for addr := range totals.sources {
 			addrs = append(addrs, addr)
 		}
 		sort.Slice(addrs, func(i, j int) bool { return addrs[i].Less(addrs[j]) })
 
 		parts := make([]string, 0, len(addrs))
 		for _, addr := range addrs {
-			parts = append(parts, fmt.Sprintf("%s=%d", addr, sources[addr]))
+			parts = append(parts, fmt.Sprintf("%s=%d", addr, totals.sources[addr]))
 		}
 
 		slog.Info("  replies from", "sources", strings.Join(parts, " "))
 	}
 
+	if lost := totals.dropped + totals.overflowed + totals.readErrors + sendErrors; lost > 0 || totals.garbled > 0 {
+		args := []any{"dropped", totals.dropped, "overflowed", totals.overflowed, "readErrors", totals.readErrors,
+			"sendErrors", sendErrors, "garbled", totals.garbled}
+		if lost > 0 {
+			slog.Warn("  packets lost on the bench host, so retransmits and latencies overstate dhcpd's", args...)
+		} else {
+			slog.Info("  packets", args...)
+		}
+	}
+
 	slog.Info("Misbehaviour over the run")
+
+	// Nothing seen is only worth saying of rounds that ran.
+	if len(s.rounds) == 0 {
+		slog.Warn("  Nothing was checked, no round ran")
+
+		return
+	}
+
 	s.checks.log("run")
+
+	if finished < planned {
+		slog.Warn(fmt.Sprintf("  Only %d of %d rounds ran their course", finished, planned))
+	}
 }

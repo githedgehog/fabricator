@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/netip"
 	"strings"
@@ -558,7 +559,7 @@ func storm(t *testing.T, layout DHCPLayout, opts DHCPOpts, setup func(*fakeDHCPD
 	servers := newDHCPServers(plan)
 	took := runDHCPStorm(t.Context(), clients, servers, held, opts, stats)
 
-	return stats.result(0, took, checks, servers), servers, fake
+	return stats.result(0, took, checks, servers, false), servers, fake
 }
 
 func failedChecks(res *dhcpRoundResult) map[checkName]int64 {
@@ -923,6 +924,65 @@ func TestDHCPOptsRefusesSpreadPastTimeout(t *testing.T) {
 
 	opts.Spread = 9 * time.Minute
 	require.NoError(t, opts.validate())
+}
+
+// A round that can't be set up ends the run, but the run is still summed up,
+// as interrupted, before the error is returned.
+func TestRunDHCPReportsWhenSetupFails(t *testing.T) { //nolint:paralleltest // swaps the default logger
+	var out strings.Builder
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&out, nil)))
+	defer slog.SetDefault(prev)
+
+	conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	require.NoError(t, err)
+
+	transport := &DHCPTransport{conn: conn, server: conn.LocalAddr().(*net.UDPAddr)} //nolint:forcetypeassert // a UDP listener's address
+	defer transport.Close()
+
+	scheme, err := benchScheme()
+	require.NoError(t, err)
+
+	// Someone else's namespace under the bench's name: the first round's setup
+	// refuses to take it over.
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&vpcapi.IPv4Namespace{ObjectMeta: objMeta(DHCPNamespace, nil)}).Build()
+
+	err = RunDHCP(t.Context(), kube, transport, DHCPOpts{
+		Layout:       DHCPLayout{Servers: 2, Subnets: 1, VPCs: 1},
+		Rounds:       2,
+		RoundTimeout: time.Minute,
+		Relay:        DHCPRelay{Name: "leaf", IP: netip.MustParsePrefix("127.0.0.1/32")},
+		Server:       conn.LocalAddr().(*net.UDPAddr).AddrPort(), //nolint:forcetypeassert // a UDP listener's address
+	})
+	require.ErrorContains(t, err, "round 1")
+	require.Contains(t, out.String(), "DHCP storm interrupted")
+	require.Contains(t, out.String(), "rounds=0/2")
+	require.Contains(t, out.String(), "Nothing was checked, no round ran")
+	require.NotContains(t, out.String(), "No misbehaviour seen", "a run that checked nothing isn't clean")
+}
+
+// A round stopped during its storm keeps what it found, but the servers it
+// stopped before they bound aren't counted as failing to.
+func TestDHCPRoundResultInterrupted(t *testing.T) {
+	t.Parallel()
+
+	plan, err := planDHCP(DHCPLayout{Servers: 2, Subnets: 1, VPCs: 1})
+	require.NoError(t, err)
+
+	servers := newDHCPServers(plan)
+	stats := newDHCPRoundStats(0, 1, len(servers))
+
+	checks := newDHCPChecks()
+	checks.record(checkOverlap, "found before the stop")
+
+	res := stats.result(0, time.Minute, checks, servers, true)
+	require.True(t, res.interrupted)
+	require.Zero(t, res.timedOut)
+	require.Equal(t, map[checkName]int64{checkOverlap: 1}, failedChecks(res))
+
+	res = stats.result(0, time.Minute, newDHCPChecks(), servers, false)
+	require.Equal(t, 2, res.timedOut)
+	require.Equal(t, map[checkName]int64{checkUnbound: 2}, failedChecks(res))
 }
 
 // Repeat latency is how fast dhcpd answered: a repeat that got nothing or only
