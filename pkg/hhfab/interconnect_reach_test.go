@@ -5,9 +5,11 @@ package hhfab
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -143,4 +145,173 @@ func TestExternalReachableViaPeeringIgnoresInterconnect(t *testing.T) {
 	reachable, err = isExternalSubnetReachableViaPeering(context.Background(), kube, "server-02", "0.0.0.0/0")
 	require.NoError(t, err)
 	require.False(t, reachable, "peering to the interconnect External only")
+}
+
+func icTransitPeering(transitCIDR string) *gwapi.GatewayPeering {
+	return &gwapi.GatewayPeering{
+		ObjectMeta: kmetav1.ObjectMeta{Name: "to-fabric-b--ext-bgp-01", Namespace: kmetav1.NamespaceDefault},
+		Spec: gwapi.PeeringSpec{
+			Topology: gwapi.GatewayPeeringTopology{Fabric: "default"},
+			Peering: map[string]*gwapi.PeeringEntry{
+				"ext.to-fabric-b": {Expose: []gwapi.PeeringEntryExpose{{IPs: []gwapi.PeeringEntryIP{{CIDR: transitCIDR}}}}},
+				"ext.ext-bgp-01":  {Expose: []gwapi.PeeringEntryExpose{{DefaultDestination: true}}},
+			},
+		},
+	}
+}
+
+func TestIsExternalReachableOverInterconnect(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, vpcapi.AddToScheme(scheme))
+	require.NoError(t, wiringapi.AddToScheme(scheme))
+	require.NoError(t, gwapi.AddToScheme(scheme))
+
+	toB := testInterconnect("to-fabric-b", "to-default", "", "default")
+	toA := testInterconnect("to-default", "to-fabric-b", "fabric-b", "fabric-b")
+	toA.Namespace, toB.Namespace = kmetav1.NamespaceDefault, kmetav1.NamespaceDefault
+	internet := vpcapi.External{ObjectMeta: kmetav1.ObjectMeta{Name: "ext-bgp-01", Namespace: kmetav1.NamespaceDefault}}
+
+	base := func(vpcPrefix string, gwPeering *gwapi.GatewayPeering) []kclient.Object {
+		objs := []kclient.Object{
+			icVPC("vpc-01", "", "10.0.1.0/24"), icVPC("vpc-02", "fabric-b", "10.1.1.0/24"),
+			&toB, &toA, &internet,
+			icAttachment("to-fabric-b"), icAttachment("to-default"), icAttachment("ext-bgp-01"),
+			icExternalPeering("b", "vpc-02", "to-default", vpcPrefix),
+		}
+		objs = append(objs, icServer("server-01", "leaf-01", "vpc-01")...)
+		objs = append(objs, icServer("server-02", "leaf-03", "vpc-02")...)
+		if gwPeering != nil {
+			objs = append(objs, gwPeering)
+		}
+
+		return objs
+	}
+
+	for _, tt := range []struct {
+		name   string
+		objs   []kclient.Object
+		source string
+		want   bool
+	}{
+		{name: "through the gateway of the other Fabric", objs: base("0.0.0.0/0", icTransitPeering("10.1.0.0/16")), source: "server-02", want: true},
+		{name: "no gateway peering", objs: base("0.0.0.0/0", nil), source: "server-02", want: false},
+		{name: "gateway peering does not expose the VPC subnet", objs: base("0.0.0.0/0", icTransitPeering("10.2.0.0/16")), source: "server-02", want: false},
+		{name: "VPC peering does not cover the prefix", objs: base("10.0.0.0/16", icTransitPeering("10.1.0.0/16")), source: "server-02", want: false},
+		{name: "server in the Fabric of the External", objs: base("0.0.0.0/0", icTransitPeering("10.1.0.0/16")), source: "server-01", want: false},
+		{name: "External not attached", objs: slices.DeleteFunc(base("0.0.0.0/0", icTransitPeering("10.1.0.0/16")), func(obj kclient.Object) bool {
+			return obj.GetName() == "leaf--ext-bgp-01"
+		}), source: "server-02", want: false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tt.objs...).Build()
+			r, err := IsExternalReachableOverInterconnect(context.Background(), kube, tt.source, "ext-bgp-01", []string{"0.0.0.0/0"})
+			require.NoError(t, err)
+			require.Equal(t, tt.want, r.Reachable)
+			if tt.want {
+				require.Equal(t, ReachabilityReasonInterconnectGateway, r.Reason)
+			}
+		})
+	}
+}
+
+// the gateway peering the on-ready step builds is the one the matrix accepts as transit
+func TestOnReadyTransitPeeringIsReachable(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, vpcapi.AddToScheme(scheme))
+	require.NoError(t, wiringapi.AddToScheme(scheme))
+	require.NoError(t, gwapi.AddToScheme(scheme))
+
+	toB := testInterconnect("to-fabric-b", "to-default", "", "default")
+	toA := testInterconnect("to-default", "to-fabric-b", "fabric-b", "fabric-b")
+	internet := vpcapi.External{ObjectMeta: kmetav1.ObjectMeta{
+		Name: "ext-bgp-01", Annotations: map[string]string{extBGPNATAnnotation: "192.168.91.0/24"},
+	}}
+	namespaces := []vpcapi.IPv4Namespace{
+		{ObjectMeta: kmetav1.ObjectMeta{Name: "default"}, Spec: vpcapi.IPv4NamespaceSpec{Subnets: []string{"10.0.0.0/16"}}},
+		{
+			ObjectMeta: kmetav1.ObjectMeta{Name: "fabric-b"},
+			Spec: vpcapi.IPv4NamespaceSpec{
+				Topology: vpcapi.IPv4NamespaceTopology{Fabric: "fabric-b"},
+				Subnets:  []string{"10.1.0.0/16"},
+			},
+		},
+	}
+
+	set := buildOnReadyPeerings(
+		[]vpcapi.VPC{testVPC("vpc-01", ""), testVPC("vpc-02", "fabric-b")},
+		[]vpcapi.External{toB, toA, internet}, []gwapi.Gateway{testGateway("")}, namespaces, true,
+	)
+	require.Len(t, set.Gateway, 1)
+
+	toA.Namespace, toB.Namespace, internet.Namespace = kmetav1.NamespaceDefault, kmetav1.NamespaceDefault, kmetav1.NamespaceDefault
+	objs := []kclient.Object{
+		icVPC("vpc-01", "", "10.0.1.0/24"), icVPC("vpc-02", "fabric-b", "10.1.1.0/24"),
+		&toB, &toA, &internet,
+		icAttachment("to-fabric-b"), icAttachment("to-default"), icAttachment("ext-bgp-01"),
+		icExternalPeering("b", "vpc-02", "to-default", "10.0.0.0/16"),
+	}
+	for name, spec := range set.Gateway {
+		spec.Topology.Fabric = "default"
+		objs = append(objs, &gwapi.GatewayPeering{ObjectMeta: kmetav1.ObjectMeta{Name: name, Namespace: kmetav1.NamespaceDefault}, Spec: *spec})
+	}
+	// the VPC prefixes the builder asked for, as the External peering would carry them
+	objs[len(objs)-len(set.Gateway)-1] = icExternalPeering("b", "vpc-02", "to-default", "0.0.0.0/0")
+	objs = append(objs, icServer("server-02", "leaf-03", "vpc-02")...)
+
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).Build()
+	r, err := IsExternalReachableOverInterconnect(context.Background(), kube, "server-02", "ext-bgp-01", []string{"0.0.0.0/0"})
+	require.NoError(t, err)
+	require.True(t, r.Reachable)
+}
+
+// test-connectivity decides what a server must reach outside with IsExternalSubnetReachable, so it
+// has to see the transit through the gateway of the other Fabric too
+func TestIsExternalSubnetReachableSeesTransit(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, vpcapi.AddToScheme(scheme))
+	require.NoError(t, wiringapi.AddToScheme(scheme))
+	require.NoError(t, gwapi.AddToScheme(scheme))
+
+	toB := testInterconnect("to-fabric-b", "to-default", "", "default")
+	toA := testInterconnect("to-default", "to-fabric-b", "fabric-b", "fabric-b")
+	toA.Namespace, toB.Namespace = kmetav1.NamespaceDefault, kmetav1.NamespaceDefault
+	internet := vpcapi.External{ObjectMeta: kmetav1.ObjectMeta{Name: "ext-bgp-01", Namespace: kmetav1.NamespaceDefault}}
+
+	vpcInfo := func(name string, subnets map[string]*gwapi.VPCInfoSubnet) *gwapi.VPCInfo {
+		return &gwapi.VPCInfo{
+			ObjectMeta: kmetav1.ObjectMeta{Name: name, Namespace: kmetav1.NamespaceDefault},
+			Spec:       gwapi.VPCInfoSpec{Subnets: subnets},
+		}
+	}
+
+	for _, tt := range []struct {
+		name      string
+		gwPeering *gwapi.GatewayPeering
+		want      bool
+	}{
+		{name: "with the gateway peering", gwPeering: icTransitPeering("10.1.0.0/16"), want: true},
+		{name: "without the gateway peering", want: false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			objs := []kclient.Object{
+				icVPC("vpc-01", "", "10.0.1.0/24"), icVPC("vpc-02", "fabric-b", "10.1.1.0/24"),
+				&toB, &toA, &internet,
+				icAttachment("to-fabric-b"), icAttachment("to-default"), icAttachment("ext-bgp-01"),
+				icExternalPeering("b", "vpc-02", "to-default", "0.0.0.0/0"),
+				vpcInfo("vpc-02", map[string]*gwapi.VPCInfoSubnet{"subnet-01": {CIDR: "10.1.1.0/24"}}),
+				vpcInfo("ext.to-default", map[string]*gwapi.VPCInfoSubnet{"external": {CIDR: "0.0.0.0/0"}}),
+				vpcInfo("ext.to-fabric-b", map[string]*gwapi.VPCInfoSubnet{"external": {CIDR: "0.0.0.0/0"}}),
+				vpcInfo("ext.ext-bgp-01", map[string]*gwapi.VPCInfoSubnet{"external": {CIDR: "0.0.0.0/0"}}),
+			}
+			objs = append(objs, icServer("server-02", "leaf-03", "vpc-02")...)
+			if tt.gwPeering != nil {
+				objs = append(objs, tt.gwPeering)
+			}
+
+			kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).Build()
+			r, err := IsExternalSubnetReachable(context.Background(), kube, "server-02", "0.0.0.0/0", true)
+			require.NoError(t, err)
+			require.Equal(t, tt.want, r.Reachable)
+		})
+	}
 }

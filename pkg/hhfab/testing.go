@@ -3099,6 +3099,8 @@ const (
 	ReachabilityReasonSwitchPeering  ReachabilityReason = "switch-peering"
 	ReachabilityReasonGatewayPeering ReachabilityReason = "gateway-peering"
 	ReachabilityReasonInterconnect   ReachabilityReason = "interconnect"
+	// ReachabilityReasonInterconnectGateway is an External of another Fabric reached through its gateway
+	ReachabilityReasonInterconnectGateway ReachabilityReason = "interconnect-gateway"
 )
 
 func IsExternalSubnetReachable(ctx context.Context, kube kclient.Reader, sourceServer, destSubnet string, checkGateway bool) (Reachability, error) {
@@ -3147,6 +3149,18 @@ func IsExternalSubnetReachable(ctx context.Context, kube kclient.Reader, sourceS
 			} else if r.Reachable {
 				return r, nil
 			}
+		}
+	}
+
+	// an External of another Fabric, reached through the gateway of that Fabric
+	for _, ext := range externals.Items {
+		if _, interconnect := ext.Annotations[VLABInterconnectAnnotation]; interconnect {
+			continue
+		}
+		if r, err := IsExternalReachableOverInterconnect(ctx, kube, sourceServer, ext.Name, []string{destSubnet}); err != nil {
+			return Reachability{}, err
+		} else if r.Reachable {
+			return r, nil
 		}
 	}
 
