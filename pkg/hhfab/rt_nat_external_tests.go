@@ -8,7 +8,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/netip"
-	"sort"
+	"slices"
+	"strings"
 
 	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
@@ -145,8 +146,8 @@ func bgpExternalNoNatTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matri
 		return true, nil, fmt.Errorf("no VPCs available for external NAT test") //nolint:err113
 	}
 
-	sort.Slice(vpcs.Items, func(i, j int) bool {
-		return vpcs.Items[i].Name < vpcs.Items[j].Name
+	slices.SortFunc(vpcs.Items, func(a, b vpcapi.VPC) int {
+		return strings.Compare(a.Name, b.Name)
 	})
 
 	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec)
@@ -214,8 +215,8 @@ func bgpExternalStaticNATTest(ctx context.Context, testCtx *VPCPeeringTestCtx, m
 		return true, nil, fmt.Errorf("no VPCs available for external static NAT test") //nolint:err113
 	}
 
-	sort.Slice(vpcs.Items, func(i, j int) bool {
-		return vpcs.Items[i].Name < vpcs.Items[j].Name
+	slices.SortFunc(vpcs.Items, func(a, b vpcapi.VPC) int {
+		return strings.Compare(a.Name, b.Name)
 	})
 
 	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec)
@@ -299,8 +300,8 @@ func bgpExternalMasqueradeNATTest(ctx context.Context, testCtx *VPCPeeringTestCt
 		return true, nil, fmt.Errorf("no VPCs available for external masquerade NAT test") //nolint:err113
 	}
 
-	sort.Slice(vpcs.Items, func(i, j int) bool {
-		return vpcs.Items[i].Name < vpcs.Items[j].Name
+	slices.SortFunc(vpcs.Items, func(a, b vpcapi.VPC) int {
+		return strings.Compare(a.Name, b.Name)
 	})
 
 	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec)
@@ -414,8 +415,8 @@ func bgpExternalPortForwardNATTest(ctx context.Context, testCtx *VPCPeeringTestC
 		return true, nil, fmt.Errorf("no VPCs available for BGP external port-forward NAT test") //nolint:err113
 	}
 
-	sort.Slice(vpcs.Items, func(i, j int) bool {
-		return vpcs.Items[i].Name < vpcs.Items[j].Name
+	slices.SortFunc(vpcs.Items, func(a, b vpcapi.VPC) int {
+		return strings.Compare(a.Name, b.Name)
 	})
 
 	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec)
@@ -503,8 +504,8 @@ func bgpExternalMasqueradePortForwardNATTest(ctx context.Context, testCtx *VPCPe
 		return true, nil, fmt.Errorf("no VPCs available for external masquerade+port-forward NAT test") //nolint:err113
 	}
 
-	sort.Slice(vpcs.Items, func(i, j int) bool {
-		return vpcs.Items[i].Name < vpcs.Items[j].Name
+	slices.SortFunc(vpcs.Items, func(a, b vpcapi.VPC) int {
+		return strings.Compare(a.Name, b.Name)
 	})
 
 	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec)
@@ -582,8 +583,8 @@ func staticExternalNoNATGatewayTest(ctx context.Context, testCtx *VPCPeeringTest
 		return true, nil, fmt.Errorf("no VPCs available for static external no NAT test") //nolint:err113
 	}
 
-	sort.Slice(vpcs.Items, func(i, j int) bool {
-		return vpcs.Items[i].Name < vpcs.Items[j].Name
+	slices.SortFunc(vpcs.Items, func(a, b vpcapi.VPC) int {
+		return strings.Compare(a.Name, b.Name)
 	})
 
 	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec)
@@ -651,8 +652,8 @@ func staticExternalStaticNATGatewayTest(ctx context.Context, testCtx *VPCPeering
 		return true, nil, fmt.Errorf("no VPCs available for static external static NAT test") //nolint:err113
 	}
 
-	sort.Slice(vpcs.Items, func(i, j int) bool {
-		return vpcs.Items[i].Name < vpcs.Items[j].Name
+	slices.SortFunc(vpcs.Items, func(a, b vpcapi.VPC) int {
+		return strings.Compare(a.Name, b.Name)
 	})
 
 	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec)
@@ -736,8 +737,8 @@ func staticExternalMasqueradeNATGatewayTest(ctx context.Context, testCtx *VPCPee
 		return true, nil, fmt.Errorf("no VPCs available for static external masquerade NAT test") //nolint:err113
 	}
 
-	sort.Slice(vpcs.Items, func(i, j int) bool {
-		return vpcs.Items[i].Name < vpcs.Items[j].Name
+	slices.SortFunc(vpcs.Items, func(a, b vpcapi.VPC) int {
+		return strings.Compare(a.Name, b.Name)
 	})
 
 	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec)
@@ -849,8 +850,8 @@ func staticExternalPortForwardNATGatewayTest(ctx context.Context, testCtx *VPCPe
 		return true, nil, fmt.Errorf("no VPCs available for static external port-forward test") //nolint:err113
 	}
 
-	sort.Slice(vpcs.Items, func(i, j int) bool {
-		return vpcs.Items[i].Name < vpcs.Items[j].Name
+	slices.SortFunc(vpcs.Items, func(a, b vpcapi.VPC) int {
+		return strings.Compare(a.Name, b.Name)
 	})
 
 	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec)
@@ -938,8 +939,8 @@ func staticExternalMasqueradePortForwardNATGatewayTest(ctx context.Context, test
 		return true, nil, fmt.Errorf("no VPCs available for static external masquerade+port-forward NAT test") //nolint:err113
 	}
 
-	sort.Slice(vpcs.Items, func(i, j int) bool {
-		return vpcs.Items[i].Name < vpcs.Items[j].Name
+	slices.SortFunc(vpcs.Items, func(a, b vpcapi.VPC) int {
+		return strings.Compare(a.Name, b.Name)
 	})
 
 	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec)

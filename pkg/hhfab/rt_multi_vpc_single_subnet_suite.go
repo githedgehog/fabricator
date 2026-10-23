@@ -8,7 +8,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/netip"
-	"sort"
+	"slices"
+	"strings"
 
 	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
@@ -439,7 +440,7 @@ func gatewayPeeringExposeNotUnusedTest(ctx context.Context, testCtx *VPCPeeringT
 	for name := range vpc2.Spec.Subnets {
 		subnetNames = append(subnetNames, name)
 	}
-	sort.Strings(subnetNames)
+	slices.Sort(subnetNames)
 	cidr := vpc2.Spec.Subnets[subnetNames[0]].Subnet
 
 	prefix, err := netip.ParsePrefix(cidr)
@@ -499,8 +500,8 @@ func gatewayPeeringLoopTest(ctx context.Context, testCtx *VPCPeeringTestCtx, mat
 	}
 
 	// Sort VPCs by name to ensure proper loop order
-	sort.Slice(vpcs.Items, func(i, j int) bool {
-		return vpcs.Items[i].Name < vpcs.Items[j].Name
+	slices.SortFunc(vpcs.Items, func(a, b vpcapi.VPC) int {
+		return strings.Compare(a.Name, b.Name)
 	})
 
 	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec, 0)
@@ -582,8 +583,8 @@ func gatewayMixedPeeringLoopTest(ctx context.Context, testCtx *VPCPeeringTestCtx
 	}
 
 	// Sort VPCs by name to ensure consistent ordering
-	sort.Slice(vpcs.Items, func(i, j int) bool {
-		return vpcs.Items[i].Name < vpcs.Items[j].Name
+	slices.SortFunc(vpcs.Items, func(a, b vpcapi.VPC) int {
+		return strings.Compare(a.Name, b.Name)
 	})
 
 	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec, 0)
@@ -633,8 +634,8 @@ func mixedGatewayAndFabricExternals(ctx context.Context, testCtx *VPCPeeringTest
 	}
 
 	// Sort VPCs by name to ensure consistent ordering
-	sort.Slice(vpcs.Items, func(i, j int) bool {
-		return vpcs.Items[i].Name < vpcs.Items[j].Name
+	slices.SortFunc(vpcs.Items, func(a, b vpcapi.VPC) int {
+		return strings.Compare(a.Name, b.Name)
 	})
 
 	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec, 0)

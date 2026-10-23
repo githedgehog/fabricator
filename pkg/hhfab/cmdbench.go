@@ -13,7 +13,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -835,7 +834,7 @@ func checkCoexistence(ctx context.Context, kube kclient.Client, force bool) erro
 	// foreign switches: on a re-run the bench's own switches are there too.
 	count := len(foreign)
 
-	sort.Strings(foreign)
+	slices.Sort(foreign)
 	if len(foreign) > 5 {
 		foreign = append(foreign[:5], "...")
 	}
@@ -866,7 +865,7 @@ func summarize(specs []bench.FabricSpec, gen *bench.Generator) {
 	for kind := range objects {
 		kinds = append(kinds, kind)
 	}
-	sort.Strings(kinds)
+	slices.Sort(kinds)
 
 	total := uint(0)
 	for _, kind := range kinds {

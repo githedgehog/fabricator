@@ -7,7 +7,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -178,7 +178,7 @@ func opTotals(ops map[string]opStat) []any {
 		names = append(names, name)
 	}
 
-	sort.Strings(names)
+	slices.Sort(names)
 
 	var count, errs, rejected, timeouts int64
 
@@ -222,7 +222,7 @@ func (s *userStats) summary(took time.Duration) {
 		names = append(names, name)
 	}
 
-	sort.Strings(names)
+	slices.Sort(names)
 
 	var total, errs, rejected, timeouts int64
 

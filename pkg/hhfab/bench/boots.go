@@ -5,6 +5,7 @@ package bench
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -17,7 +18,6 @@ import (
 	"net/http"
 	"net/netip"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -184,7 +184,7 @@ func discoverBootTargets(ctx context.Context, admin kclient.Client, prefixes []s
 	}
 
 	if len(missing) > 0 {
-		sort.Strings(missing)
+		slices.Sort(missing)
 
 		return nil, fmt.Errorf("%d switches have no boot serial and MAC, e.g. %s; re-run bench init to set them", len(missing), missing[0]) //nolint:err113
 	}
@@ -192,7 +192,7 @@ func discoverBootTargets(ctx context.Context, admin kclient.Client, prefixes []s
 		return nil, fmt.Errorf("no bench switches found to boot") //nolint:err113
 	}
 
-	sort.Slice(targets, func(i, j int) bool { return targets[i].name < targets[j].name })
+	slices.SortFunc(targets, func(a, b bootTarget) int { return strings.Compare(a.name, b.name) })
 
 	return targets, nil
 }
@@ -648,7 +648,7 @@ func installLog(n int, total time.Duration) []logLine {
 		lines = append(lines, logLine{at: total, msg: installLogTail[len(installLogTail)-tail+i]})
 	}
 
-	sort.SliceStable(lines, func(i, j int) bool { return lines[i].at < lines[j].at })
+	slices.SortStableFunc(lines, func(a, b logLine) int { return cmp.Compare(a.at, b.at) })
 
 	return lines
 }

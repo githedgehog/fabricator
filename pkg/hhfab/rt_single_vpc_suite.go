@@ -11,7 +11,6 @@ import (
 	"log/slog"
 	"net"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -386,8 +385,8 @@ func gatewayFailoverTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix
 	}
 
 	// sort gateways alphabetically for consistent selection
-	sort.Slice(gateways.Items, func(i, j int) bool {
-		return gateways.Items[i].Name < gateways.Items[j].Name
+	slices.SortFunc(gateways.Items, func(a, b gwapi.Gateway) int {
+		return strings.Compare(a.Name, b.Name)
 	})
 
 	// create a custom gateway group to exercise the GatewayGroup API

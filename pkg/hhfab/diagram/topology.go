@@ -4,10 +4,10 @@
 package diagram
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"slices"
-	"sort"
 	"strings"
 
 	agentapi "go.githedgehog.com/fabric/api/agent/v1beta1"
@@ -135,8 +135,8 @@ func findConnectionTypes(links []Link) map[string]*serverConnection {
 					break
 				}
 
-				sort.Strings(types1)
-				sort.Strings(types2)
+				slices.Sort(types1)
+				slices.Sort(types2)
 				for i := range types1 {
 					if types1[i] != types2[i] {
 						match = false
@@ -195,55 +195,51 @@ func sortNodes(nodes []Node, links []Link) TieredNodes {
 	}
 
 	// Sort spine nodes by fabric and domains, then description, then ID
-	sort.Slice(result.Spine, func(i, j int) bool {
-		if c := compareTopology(result.Spine[i], result.Spine[j]); c != 0 {
-			return c < 0
+	slices.SortFunc(result.Spine, func(a, b Node) int {
+		if c := compareTopology(a, b); c != 0 {
+			return c
 		}
 
-		descI, hasDescI := result.Spine[i].Properties[PropDescription]
-		descJ, hasDescJ := result.Spine[j].Properties[PropDescription]
+		descA, hasDescA := a.Properties[PropDescription]
+		descB, hasDescB := b.Properties[PropDescription]
 
-		if hasDescI && hasDescJ { //nolint:gocritic
-			if descI != descJ {
-				return descI < descJ
+		if hasDescA && hasDescB { //nolint:gocritic
+			if descA != descB {
+				return strings.Compare(descA, descB)
 			}
-		} else if hasDescI {
-			return true
-		} else if hasDescJ {
-			return false
+		} else if hasDescA {
+			return -1
+		} else if hasDescB {
+			return 1
 		}
 
-		return result.Spine[i].ID < result.Spine[j].ID
+		return strings.Compare(a.ID, b.ID)
 	})
 
 	// Sort leaf nodes by fabric and domains, then description, then ID
-	sort.Slice(result.Leaf, func(i, j int) bool {
-		if c := compareTopology(result.Leaf[i], result.Leaf[j]); c != 0 {
-			return c < 0
+	slices.SortFunc(result.Leaf, func(a, b Node) int {
+		if c := compareTopology(a, b); c != 0 {
+			return c
 		}
 
-		descI, hasDescI := result.Leaf[i].Properties[PropDescription]
-		descJ, hasDescJ := result.Leaf[j].Properties[PropDescription]
+		descA, hasDescA := a.Properties[PropDescription]
+		descB, hasDescB := b.Properties[PropDescription]
 
-		if hasDescI && hasDescJ { //nolint:gocritic
-			if descI != descJ {
-				return descI < descJ
+		if hasDescA && hasDescB { //nolint:gocritic
+			if descA != descB {
+				return strings.Compare(descA, descB)
 			}
-		} else if hasDescI {
-			return true
-		} else if hasDescJ {
-			return false
+		} else if hasDescA {
+			return -1
+		} else if hasDescB {
+			return 1
 		}
 
-		return result.Leaf[i].ID < result.Leaf[j].ID
+		return strings.Compare(a.ID, b.ID)
 	})
 
-	sort.Slice(result.Gateway, func(i, j int) bool {
-		if c := compareTopology(result.Gateway[i], result.Gateway[j]); c != 0 {
-			return c < 0
-		}
-
-		return result.Gateway[i].ID < result.Gateway[j].ID
+	slices.SortFunc(result.Gateway, func(a, b Node) int {
+		return cmp.Or(compareTopology(a, b), strings.Compare(a.ID, b.ID))
 	})
 
 	// Special handling for mesh triangle with gateways:
@@ -300,8 +296,8 @@ func sortNodes(nodes []Node, links []Link) TieredNodes {
 	}
 
 	// Sort external nodes by ID
-	sort.Slice(result.External, func(i, j int) bool {
-		return result.External[i].ID < result.External[j].ID
+	slices.SortFunc(result.External, func(a, b Node) int {
+		return strings.Compare(a.ID, b.ID)
 	})
 
 	// Create leaf order map
@@ -328,8 +324,8 @@ func sortNodes(nodes []Node, links []Link) TieredNodes {
 		for leaf := range conn.connTypes {
 			leaves = append(leaves, leaf)
 		}
-		sort.Slice(leaves, func(i, j int) bool {
-			return leafOrder[leaves[i]] < leafOrder[leaves[j]]
+		slices.SortFunc(leaves, func(a, b string) int {
+			return cmp.Compare(leafOrder[a], leafOrder[b])
 		})
 
 		// Prefer bundled connection for primary leaf
@@ -372,24 +368,23 @@ func sortNodes(nodes []Node, links []Link) TieredNodes {
 
 	// Sort servers within each leaf group
 	for leaf, servers := range serversByLeaf {
-		sort.Slice(servers, func(i, j int) bool {
-			s1, s2 := servers[i], servers[j]
+		slices.SortFunc(servers, func(s1, s2 string) int {
 			c1, c2 := serverConns[s1], serverConns[s2]
 
 			// Keep pairs together
 			if c1.eslagPair == s2 {
-				return s1 < s2 // Smaller ID first in ESLAG pair
+				return strings.Compare(s1, s2) // Smaller ID first in ESLAG pair
 			}
 			if c2.eslagPair == s1 {
-				return s2 < s1 // Smaller ID first in ESLAG pair
+				return strings.Compare(s2, s1) // Smaller ID first in ESLAG pair
 			}
 
 			// For ESLAG pairs, try to place them next to their connected servers
 			if c1.eslagPair != "" && c2.eslagPair == "" {
-				return false // Non-ESLAG servers first
+				return 1 // Non-ESLAG servers first
 			}
 			if c1.eslagPair == "" && c2.eslagPair != "" {
-				return true // Non-ESLAG servers first
+				return -1 // Non-ESLAG servers first
 			}
 
 			// Handle left vs right leaf
@@ -398,11 +393,15 @@ func sortNodes(nodes []Node, links []Link) TieredNodes {
 			// For left leaves: single-homed first, multi-homed last
 			// For right leaves: multi-homed first, single-homed last
 			if (c1.secondaryLeaf == "") != (c2.secondaryLeaf == "") {
-				return (isLeftLeaf == (c1.secondaryLeaf == ""))
+				if isLeftLeaf == (c1.secondaryLeaf == "") {
+					return -1
+				}
+
+				return 1
 			}
 
 			// Both single-homed or both multi-homed: sort by ID
-			return s1 < s2
+			return strings.Compare(s1, s2)
 		})
 		serversByLeaf[leaf] = servers
 	}
@@ -429,30 +428,30 @@ func sortNodes(nodes []Node, links []Link) TieredNodes {
 	}
 
 	// Sort server nodes based on the ordered list
-	sort.Slice(result.Server, func(i, j int) bool {
-		posI := -1
-		posJ := -1
+	slices.SortFunc(result.Server, func(a, b Node) int {
+		posA := -1
+		posB := -1
 		for idx, id := range orderedServers {
-			if result.Server[i].ID == id {
-				posI = idx
+			if a.ID == id {
+				posA = idx
 			}
-			if result.Server[j].ID == id {
-				posJ = idx
+			if b.ID == id {
+				posB = idx
 			}
 		}
-		if posI == -1 {
-			return false
+		if posA == -1 {
+			return 1
 		}
-		if posJ == -1 {
-			return true
+		if posB == -1 {
+			return -1
 		}
 
-		return posI < posJ
+		return cmp.Compare(posA, posB)
 	})
 
 	// Sort unused nodes by ID
-	sort.Slice(result.Unused, func(i, j int) bool {
-		return result.Unused[i].ID < result.Unused[j].ID
+	slices.SortFunc(result.Unused, func(a, b Node) int {
+		return strings.Compare(a.ID, b.ID)
 	})
 
 	return result
@@ -1227,8 +1226,8 @@ func splitExternalNodes(externals []Node, links []Link, leaves []Node) ([]Node, 
 		// Sort externals by ID for deterministic output
 		sortedExternals := make([]Node, len(externals))
 		copy(sortedExternals, externals)
-		sort.Slice(sortedExternals, func(i, j int) bool {
-			return sortedExternals[i].ID < sortedExternals[j].ID
+		slices.SortFunc(sortedExternals, func(a, b Node) int {
+			return strings.Compare(a.ID, b.ID)
 		})
 
 		for _, ext := range sortedExternals {
@@ -1355,8 +1354,8 @@ func splitExternalNodes(externals []Node, links []Link, leaves []Node) ([]Node, 
 	// Sort externals by ID to ensure deterministic output
 	sortedExternals := make([]Node, len(externals))
 	copy(sortedExternals, externals)
-	sort.Slice(sortedExternals, func(i, j int) bool {
-		return sortedExternals[i].ID < sortedExternals[j].ID
+	slices.SortFunc(sortedExternals, func(a, b Node) int {
+		return strings.Compare(a.ID, b.ID)
 	})
 
 	// Assign nodes to left or right based on connection weights
