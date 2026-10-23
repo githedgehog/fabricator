@@ -98,9 +98,11 @@ type EdgePositionData struct {
 	Rotation float64
 }
 
-var edgePositions []EdgePositionData
-var generateLinkSpeedLayer bool // Only generate when agent data is available
-var generateUnderlayLayer bool  // Only generate when underlay data is available
+var (
+	edgePositions          []EdgePositionData
+	generateLinkSpeedLayer bool // Only generate when agent data is available
+	generateUnderlayLayer  bool // Only generate when underlay data is available
+)
 
 func hasUnderlayData(topo Topology) bool {
 	for _, node := range topo.Nodes {
@@ -1760,14 +1762,18 @@ func createTopologyLayer(model *MxGraphModel, cellMap map[string]*MxCell) (float
 	boxes := []box{}
 	if len(fabrics) > 1 {
 		for _, fabric := range slices.Sorted(maps.Keys(fabrics)) {
-			boxes = append(boxes, box{"Fabric: " + fabric, fabrics[fabric], 50,
-				"rounded=1;arcSize=2;fillColor=#FAFAFA;strokeColor=#666666;strokeWidth=2;verticalAlign=top;align=left;spacingLeft=10;fontStyle=1;fontSize=14;"})
+			boxes = append(boxes, box{
+				"Fabric: " + fabric, fabrics[fabric], 50,
+				"rounded=1;arcSize=2;fillColor=#FAFAFA;strokeColor=#666666;strokeWidth=2;verticalAlign=top;align=left;spacingLeft=10;fontStyle=1;fontSize=14;",
+			})
 		}
 	}
 	for _, key := range slices.SortedFunc(maps.Keys(domains), func(a, b [2]string) int { return strings.Compare(a[0]+"/"+a[1], b[0]+"/"+b[1]) }) {
 		if domainCount[key[0]] > 1 {
-			boxes = append(boxes, box{"Domain: " + key[1], domains[key], 25,
-				"rounded=1;arcSize=4;dashed=1;fillColor=#EEF3F8;strokeColor=#6C8EBF;verticalAlign=top;align=left;spacingLeft=8;spacingTop=-2;fontStyle=1;"})
+			boxes = append(boxes, box{
+				"Domain: " + key[1], domains[key], 25,
+				"rounded=1;arcSize=4;dashed=1;fillColor=#EEF3F8;strokeColor=#6C8EBF;verticalAlign=top;align=left;spacingLeft=8;spacingTop=-2;fontStyle=1;",
+			})
 		}
 	}
 	if len(boxes) == 0 {
