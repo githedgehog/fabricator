@@ -47,7 +47,7 @@ func eslagFallbackTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *
 		candidates = candidates[:1]
 	}
 
-	reverts := make([]RevertFunc, 0)
+	reverts := []RevertFunc{}
 	ranAtLeastOnce := false
 	for _, conn := range candidates {
 		vlan, server, err := findESLAGAttachedVLAN(ctx, testCtx.kube, conn)

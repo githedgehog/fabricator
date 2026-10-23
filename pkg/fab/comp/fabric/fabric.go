@@ -190,7 +190,7 @@ func GetFabricDHCPConfig(f fabapi.Fabricator, control fabapi.ControlNode) *dhcpc
 
 func GetFabricConfig(f fabapi.Fabricator) (*fmeta.FabricConfig, error) {
 	// TODO align APIs (user creds)
-	users := []fmeta.UserCreds{}
+	users := []fmeta.UserCreds{} //nolint:prealloc
 	for name, user := range f.Spec.Config.Fabric.DefaultSwitchUsers {
 		users = append(users, fmeta.UserCreds{
 			Name:     name,

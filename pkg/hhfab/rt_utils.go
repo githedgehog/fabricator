@@ -189,7 +189,7 @@ func waitAgentGen(ctx context.Context, kube kclient.Client, swName string, lastG
 // Each of the strings in cmds is going to be wrapped in double quotes and
 // passed as a separate argument to sonic-cli.
 func execConfigCmd(ctx context.Context, ssh *sshutil.Config, swName string, cmds ...string) error {
-	cmdList := []string{"sonic-cli", "-c", "configure"}
+	cmdList := []string{"sonic-cli", "-c", "configure"} //nolint:prealloc
 	for _, c := range cmds {
 		// add escaped double quotes around the command
 		cmdList = append(cmdList, "-c", fmt.Sprintf("\"%s\"", c))

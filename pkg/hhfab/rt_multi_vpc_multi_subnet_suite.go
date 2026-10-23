@@ -109,7 +109,7 @@ func multiSubnetsIsolationTest(ctx context.Context, testCtx *VPCPeeringTestCtx, 
 	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, nil, nil, false); err != nil {
 		return false, nil, fmt.Errorf("setting up VPC peerings: %w", err)
 	}
-	reverts := make([]RevertFunc, 0)
+	reverts := []RevertFunc{}
 	reverts = append(reverts, func(ctx context.Context) error {
 		if err := DoSetupPeerings(ctx, testCtx.kube, nil, nil, nil, true); err != nil {
 			return fmt.Errorf("removing VPC peerings: %w", err)
@@ -253,7 +253,7 @@ func multiSubnetsSubnetFilteringTest(ctx context.Context, testCtx *VPCPeeringTes
 	if err := DoSetupPeerings(ctx, testCtx.kube, vpcPeerings, externalPeerings, nil, true); err != nil {
 		return false, nil, fmt.Errorf("setting up peerings: %w", err)
 	}
-	reverts := make([]RevertFunc, 0)
+	reverts := []RevertFunc{} //nolint:prealloc
 	reverts = append(reverts, func(ctx context.Context) error {
 		if err := DoSetupPeerings(ctx, testCtx.kube, nil, nil, nil, true); err != nil {
 			return fmt.Errorf("removing VPC peerings: %w", err)
@@ -540,7 +540,7 @@ func staticExternalTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Conn
 	if err := testCtx.kube.Delete(ctx, &vpcAtt); err != nil {
 		return false, nil, fmt.Errorf("deleting VPCAttachment %s: %w", vpcAtt.Name, err)
 	}
-	reverts := make([]RevertFunc, 0)
+	reverts := []RevertFunc{}
 	reverts = append(reverts, func(ctx context.Context) error {
 		newVpcAtt := &vpcapi.VPCAttachment{
 			ObjectMeta: kmetav1.ObjectMeta{

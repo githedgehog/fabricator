@@ -715,7 +715,7 @@ func meshFailoverTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *C
 	}
 	var someLeafTested bool
 
-	reverts := make([]RevertFunc, 0)
+	reverts := []RevertFunc{} //nolint:prealloc
 	reverts = append(reverts, func(ctx context.Context) error {
 		for _, leaf := range leaves {
 			maxRetries := 5
@@ -887,7 +887,7 @@ outer:
 		return false, nil, fmt.Errorf("updating VPC %s: %w", vpc.Name, err)
 	}
 
-	reverts := make([]RevertFunc, 0)
+	reverts := []RevertFunc{}
 	reverts = append(reverts, func(ctx context.Context) error {
 		slog.Debug("Removing all restrictions")
 		vpc.Spec.Permit = make([][]string, 0)
@@ -1029,7 +1029,7 @@ func dnsNtpMtuTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *Conn
 	if err != nil {
 		return false, nil, fmt.Errorf("updating VPC %s: %w", serverInfo.VPCName, err)
 	}
-	reverts := make([]RevertFunc, 0)
+	reverts := []RevertFunc{} //nolint:prealloc
 	reverts = append(reverts, func(ctx context.Context) error {
 		slog.Debug("Cleaning up")
 		serverInfo.Subnet.DHCP = *backupDHCPCfg
@@ -1216,7 +1216,7 @@ func dhcpRenewalTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *Co
 		}
 	}
 
-	reverts := make([]RevertFunc, 0)
+	reverts := []RevertFunc{} //nolint:prealloc
 	reverts = append(reverts, func(ctx context.Context) error {
 		slog.Debug("Reverting DHCP lease time for all subnets", "vpc", testVPC.Name)
 
