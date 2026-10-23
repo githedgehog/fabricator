@@ -317,3 +317,31 @@ func (c *Config) onReadyPeerings(ctx context.Context) (onReadyPeeringSet, error)
 
 	return buildOnReadyPeerings(vpcs.Items, externals.Items, gateways.Items, namespaces.Items, c.Fab.Spec.Config.Gateway.Enable), nil
 }
+
+// countInterconnectPairs is the number of interconnect pairs: each has an External on both sides
+func countInterconnectPairs(externals []vpcapi.External) int {
+	count := 0
+	for idx := range externals {
+		if _, ok := externals[idx].Annotations[VLABInterconnectAnnotation]; ok {
+			count++
+		}
+	}
+
+	return count / 2
+}
+
+// interconnectPairs lists the Externals of the cluster and counts the interconnect pairs
+func (c *Config) interconnectPairs(ctx context.Context) (int, error) {
+	cacheCancel, kube, err := getKubeClientWithCache(ctx, c.WorkDir)
+	if err != nil {
+		return 0, fmt.Errorf("creating kube client: %w", err)
+	}
+	defer cacheCancel()
+
+	externals := &vpcapi.ExternalList{}
+	if err := kube.List(ctx, externals); err != nil {
+		return 0, fmt.Errorf("listing externals: %w", err)
+	}
+
+	return countInterconnectPairs(externals.Items), nil
+}

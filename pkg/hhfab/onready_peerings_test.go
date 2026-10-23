@@ -284,3 +284,17 @@ func TestExternalPeerableWithVPC(t *testing.T) {
 		})
 	}
 }
+
+func TestCountInterconnectPairs(t *testing.T) {
+	one := []vpcapi.External{
+		testInterconnect("to-fabric-b", "to-default", "", "default"),
+		testInterconnect("to-default", "to-fabric-b", "fabric-b", "fabric-b"),
+		domainExternal("ext-bgp-01", ""),
+	}
+	require.Equal(t, 0, countInterconnectPairs(nil))
+	require.Equal(t, 1, countInterconnectPairs(one))
+	require.Equal(t, 2, countInterconnectPairs(append(slices.Clone(one),
+		testInterconnect("to-fb-2", "to-def-2", "", "default"),
+		testInterconnect("to-def-2", "to-fb-2", "fabric-b", "fabric-b"),
+	)))
+}
