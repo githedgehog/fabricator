@@ -368,7 +368,8 @@ jobs:
             VLAB_UNBUNDLED_SERVERS=1
             VLAB_MULTIHOMED_SERVERS=0
             VLAB_STATIC_PROXY_EXTERNALS=0
-            VLAB_ADD_FABRIC_ARGS=(--add-fabric --interconnect-fabrics --bundled-servers=0)
+            # two interconnect pairs on the same leaves, so the run checks that VPCs on separate pairs cannot reach each other
+            VLAB_ADD_FABRIC_ARGS=(--add-fabric --interconnect-fabrics --interconnect-links=2 --bundled-servers=0)
           fi
           if [[ "$INPUT_MULTI_DOMAIN" == "true" ]]; then
             # a second domain doubles the spines, so one server per leaf and no ESLAG. The orphan leaves are in
