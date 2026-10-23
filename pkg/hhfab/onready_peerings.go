@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"strconv"
 	"strings"
 
 	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
@@ -66,10 +67,13 @@ type onReadyPeeringSet struct {
 // buildOnReadyPeerings returns the peerings for the on-ready step. A single Fabric and domain keep
 // the fixed requests, with several of them the peerings are built from the cluster: a VPC peering
 // between the first two VPCs of each Fabric and domain group, a gateway peering between the second
-// and third VPC of a group in a Fabric that has a Gateway, and an External peering from the first
-// VPC of each Fabric to its interconnect External. When the Fabric behind the interconnect has a
-// Gateway and an External with a NAT pool, that Fabric also gets a gateway peering between its
-// interconnect External and that External, so the VPC reaches it through the Gateway.
+// and third VPC of a group in a Fabric that has a Gateway, a VPC peering between the first VPCs of
+// groups of a Fabric that share a domain, an External peering from the first VPC of each domain to
+// the first External of that domain when the Fabric has several, and an External peering from the
+// k-th VPC of each Fabric to the External of its k-th interconnect pair. When the Fabric behind the
+// interconnect has a Gateway and an External with a NAT pool, that Fabric also gets a gateway
+// peering between its interconnect External and that External, so the VPC reaches it through the
+// Gateway.
 func buildOnReadyPeerings(vpcs []vpcapi.VPC, externals []vpcapi.External, gateways []gwapi.Gateway,
 	namespaces []vpcapi.IPv4Namespace, gatewayEnabled bool,
 ) onReadyPeeringSet {
@@ -183,6 +187,8 @@ func buildOnReadyPeerings(vpcs []vpcapi.VPC, externals []vpcapi.External, gatewa
 		externalsByName[externals[idx].Name] = &externals[idx]
 	}
 
+	// the k-th interconnect pair is peered with the k-th VPC of the group on both sides, so VPCs on
+	// different pairs have no path to each other
 	for idx := range sortedExternals {
 		ext := &sortedExternals[idx]
 		peerName, ok := ext.Annotations[VLABInterconnectAnnotation]
@@ -195,13 +201,15 @@ func buildOnReadyPeerings(vpcs []vpcapi.VPC, externals []vpcapi.External, gatewa
 		var vpc string
 		for _, group := range groups {
 			if group.fabric == fabric && group.domain == domain {
-				vpc = group.vpcs[0]
+				if ordinal := interconnectOrdinal(ext.Name); ordinal < len(group.vpcs) {
+					vpc = group.vpcs[ordinal]
+				}
 
 				break
 			}
 		}
 		if vpc == "" {
-			slog.Info("Skipping External peering, no VPC in the External's Fabric and domain", "external", ext.Name, "fabric", fabric, "domain", domain)
+			slog.Info("Skipping External peering, no VPC in the External's Fabric and domain for it", "external", ext.Name, "fabric", fabric, "domain", domain)
 
 			continue
 		}
@@ -235,6 +243,18 @@ func buildOnReadyPeerings(vpcs []vpcapi.VPC, externals []vpcapi.External, gatewa
 	}
 
 	return onReadyPeeringSet{Requests: peerings, Gateway: gatewayPeerings}
+}
+
+// interconnectOrdinal is the 0-based number of the interconnect pair an External belongs to, from
+// the number the generator adds to the names of the second pair on
+func interconnectOrdinal(name string) int {
+	if _, number, ok := strings.CutLast(name, "-"); ok {
+		if k, err := strconv.Atoi(number); err == nil && k > 1 {
+			return k - 1
+		}
+	}
+
+	return 0
 }
 
 // namespaceSubnets are the subnets of the IPv4Namespace of the External, in the External's Fabric
