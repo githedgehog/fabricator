@@ -122,10 +122,8 @@ linters:
         # Not planned: unhandled errors duplicate errcheck
         - G104
       config:
-        # Allow 0755 instead of 0750 for dirs and chmod as the system dirs and executables have to be world-readable,
-        # files written with WriteFile still have to be 0600 (G306)
+        # Allow 0755 instead of 0750 for dirs as the system ones have to be world-readable
         G301: "0755"
-        G302: "0755"
     gomoddirectives:
       replace-allow-list:
         # our fork for better performance
