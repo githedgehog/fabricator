@@ -37,12 +37,12 @@ func Build(ctx context.Context, workDir, cacheDir string, extraCacheDirs []strin
 
 func (c *Config) build(ctx context.Context, opts BuildOpts) error {
 	if !slices.Contains(recipe.BuildModes, opts.BuildMode) {
-		return fmt.Errorf("invalid build mode %q", opts.BuildMode) //nolint:goerr113
+		return fmt.Errorf("invalid build mode %q", opts.BuildMode) //nolint:err113
 	}
 
 	for _, node := range c.Nodes {
 		if !slices.Equal(node.Spec.Roles, []fabapi.FabNodeRole{fabapi.NodeRoleGateway}) {
-			return fmt.Errorf("unsupported node roles %q (only gateway role is currently supported)", node.Spec.Roles) //nolint:goerr113
+			return fmt.Errorf("unsupported node roles %q (only gateway role is currently supported)", node.Spec.Roles) //nolint:err113
 		}
 	}
 
@@ -127,7 +127,7 @@ func (c *Config) build(ctx context.Context, opts BuildOpts) error {
 
 		for _, node := range c.Nodes {
 			if len(node.Spec.Roles) != 1 {
-				return fmt.Errorf("unsupported node roles %q (only one role is currently supported)", node.Spec.Roles) //nolint:goerr113
+				return fmt.Errorf("unsupported node roles %q (only one role is currently supported)", node.Spec.Roles) //nolint:err113
 			}
 
 			if err := (&recipe.NodeInstallBuilder{

@@ -236,7 +236,7 @@ func (c collector) collectKubeObjects(ctx context.Context, kube kclient.Reader, 
 		}
 
 		if !reflect.PointerTo(objListType).Implements(kubeObjListType) {
-			return fmt.Errorf("list type for %s doesn't implement ObjectList", gvk.String()) //nolint:goerr113
+			return fmt.Errorf("list type for %s doesn't implement ObjectList", gvk.String()) //nolint:err113
 		}
 
 		objListValue := reflect.New(objListType)
@@ -258,14 +258,14 @@ func (c collector) collectKubeObjects(ctx context.Context, kube kclient.Reader, 
 
 		items := objListValue.Elem().FieldByName("Items")
 		if items.Kind() != reflect.Slice {
-			return fmt.Errorf("items field is not a slice in %s", gvk.String()) //nolint:goerr113
+			return fmt.Errorf("items field is not a slice in %s", gvk.String()) //nolint:err113
 		}
 
 		itemsLen := items.Len()
 		for idx := range itemsLen {
 			itemValue, ok := items.Index(idx).Addr().Interface().(kclient.Object)
 			if !ok {
-				return fmt.Errorf("item %d of %s list is not a client object", idx, gvk.String()) //nolint:goerr113
+				return fmt.Errorf("item %d of %s list is not a client object", idx, gvk.String()) //nolint:err113
 			}
 
 			itemValue.GetObjectKind().SetGroupVersionKind(gvk)

@@ -31,7 +31,7 @@ const (
 func DoConfig(ctx context.Context) error {
 	nodeName := os.Getenv(EnvNodeName)
 	if nodeName == "" {
-		return fmt.Errorf(EnvNodeName + " not set") //nolint:goerr113
+		return fmt.Errorf(EnvNodeName + " not set") //nolint:err113
 	}
 
 	hostname, err := os.Hostname()
@@ -40,7 +40,7 @@ func DoConfig(ctx context.Context) error {
 	}
 
 	if nodeName != hostname {
-		return fmt.Errorf("hostname mismatch: running on %q while installer expects %q", hostname, nodeName) //nolint:goerr113
+		return fmt.Errorf("hostname mismatch: running on %q while installer expects %q", hostname, nodeName) //nolint:err113
 	}
 
 	slog.Info("Configuring node", "nodename", nodeName)
@@ -57,12 +57,12 @@ func enforceK3sConfigs(ctx context.Context) error {
 
 	ca := os.Getenv(EnvCA)
 	if ca == "" {
-		return fmt.Errorf(EnvCA + " not set") //nolint:goerr113
+		return fmt.Errorf(EnvCA + " not set") //nolint:err113
 	}
 
 	registries := os.Getenv(EnvRegistries)
 	if registries == "" {
-		return fmt.Errorf(EnvRegistries + " not set") //nolint:goerr113
+		return fmt.Errorf(EnvRegistries + " not set") //nolint:err113
 	}
 
 	restart := false
@@ -123,7 +123,7 @@ func enforceK3sConfigs(ctx context.Context) error {
 				return fmt.Errorf("restarting k3s agent: %w", err)
 			}
 		} else {
-			return fmt.Errorf("not a k3s server or agent") //nolint:goerr113
+			return fmt.Errorf("not a k3s server or agent") //nolint:err113
 		}
 	}
 
@@ -133,7 +133,7 @@ func enforceK3sConfigs(ctx context.Context) error {
 func enforceFile(path string, expectedContent []byte, mode os.FileMode) (bool, error) {
 	actualContent, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
-		return false, fmt.Errorf("reading file %q: %w", path, err) //nolint:goerr113
+		return false, fmt.Errorf("reading file %q: %w", path, err)
 	}
 
 	if string(actualContent) != string(expectedContent) {
@@ -165,7 +165,7 @@ func isK3sServer() (bool, error) {
 
 		return false, fmt.Errorf("stat %q: %w", k3s.ServerDir, err)
 	} else if !stat.IsDir() {
-		return false, fmt.Errorf("expected %q to be a directory", k3s.ServerDir) //nolint:goerr113
+		return false, fmt.Errorf("expected %q to be a directory", k3s.ServerDir) //nolint:err113
 	}
 
 	return true, nil
@@ -179,7 +179,7 @@ func isK3sAgent() (bool, error) {
 
 		return false, fmt.Errorf("stat %q: %w", k3s.AgentDir, err)
 	} else if !stat.IsDir() {
-		return false, fmt.Errorf("expected %q to be a directory", k3s.AgentDir) //nolint:goerr113
+		return false, fmt.Errorf("expected %q to be a directory", k3s.AgentDir) //nolint:err113
 	}
 
 	return true, nil
@@ -221,7 +221,7 @@ func isK3sNeedsRestart(ctx context.Context) (bool, error) {
 
 	imageURL := os.Getenv(EnvImage)
 	if imageURL == "" {
-		return false, fmt.Errorf(EnvImage + " not set") //nolint:goerr113
+		return false, fmt.Errorf(EnvImage + " not set") //nolint:err113
 	}
 
 	slog.Info("Checking if k3s needs restart by pulling test image")
@@ -261,7 +261,7 @@ func isK3sNeedsRestart(ctx context.Context) (bool, error) {
 		return false, nil
 	}
 
-	return false, fmt.Errorf("unexpected output from crictl: %q", stdOutStr) //nolint:goerr113
+	return false, fmt.Errorf("unexpected output from crictl: %q", stdOutStr) //nolint:err113
 }
 
 func updateCACertificates(ctx context.Context) error {

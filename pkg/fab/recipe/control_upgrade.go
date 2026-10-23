@@ -85,7 +85,7 @@ func (c *ControlUpgrade) Run(ctx context.Context) error {
 		}
 
 		if len(control) != 1 {
-			return fmt.Errorf("expected 1 control node, got %d", len(control)) //nolint:goerr113
+			return fmt.Errorf("expected 1 control node, got %d", len(control)) //nolint:err113
 		}
 
 		c.Fab = f
@@ -141,7 +141,7 @@ func (c *ControlUpgrade) Run(ctx context.Context) error {
 
 	regPassword, ok := regSecret.Data[comp.BasicAuthPasswordKey]
 	if !ok {
-		return errors.New("registry user secret missing password") //nolint:goerr113
+		return errors.New("registry user secret missing password") //nolint:err113
 	}
 
 	if c.Fab.Spec.Config.Registry.IsAirgap() {
@@ -791,7 +791,7 @@ func (c *ControlUpgrade) waitRegistry(ctx context.Context, kube kclient.Reader) 
 	}
 
 	if caCM.Data == nil || caCM.Data[comp.FabCAConfigMapKey] == "" {
-		return errors.New("CA config map missing data") //nolint:goerr113
+		return errors.New("CA config map missing data") //nolint:err113
 	}
 
 	if err := waitURL(ctx, "https://"+regURL+"/v2/_catalog", caCM.Data[comp.FabCAConfigMapKey]); err != nil {

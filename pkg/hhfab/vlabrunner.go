@@ -168,7 +168,7 @@ func (c *Config) checkForBins() error {
 	for _, cmd := range VLABCmds {
 		_, err := exec.LookPath(cmd)
 		if err != nil {
-			return fmt.Errorf("required command %q is not available", cmd) //nolint:goerr113
+			return fmt.Errorf("required command %q is not available", cmd) //nolint:err113
 		}
 	}
 
@@ -214,7 +214,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 
 	for _, cmd := range opts.OnReady {
 		if !slices.Contains(AllOnReady, cmd) {
-			return fmt.Errorf("unsupported on-ready command %q", cmd) //nolint:goerr113
+			return fmt.Errorf("unsupported on-ready command %q", cmd) //nolint:err113
 		}
 	}
 
@@ -233,7 +233,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 	}
 	if len(stale) > 0 {
 		if !opts.KillStale {
-			return fmt.Errorf("%d stale or detached VM(s) found: rerun with --kill-stale for autocleanup", len(stale)) //nolint:goerr113
+			return fmt.Errorf("%d stale or detached VM(s) found: rerun with --kill-stale for autocleanup", len(stale)) //nolint:err113
 		}
 
 		if err := execHelper(ctx, c.WorkDir, []string{"kill-stale-vms"}); err != nil {
@@ -247,7 +247,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 		}
 
 		if len(stale) > 0 {
-			return fmt.Errorf("%d stale or detached VM(s) found after cleanup", len(stale)) //nolint:goerr113
+			return fmt.Errorf("%d stale or detached VM(s) found after cleanup", len(stale)) //nolint:err113
 		}
 	}
 
@@ -395,7 +395,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 					}
 				}
 			} else {
-				return fmt.Errorf("unsupported VM type %q", vm.Type) //nolint:goerr113
+				return fmt.Errorf("unsupported VM type %q", vm.Type) //nolint:err113
 			}
 
 			if resize {
@@ -675,7 +675,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 					}
 				}
 
-				readyErr = fmt.Errorf("some k8s nodes are not ready") //nolint:goerr113
+				readyErr = fmt.Errorf("some k8s nodes are not ready") //nolint:err113
 				slog.Debug("Some K8s nodes are not ready", "ready", ready, "missing", missing, "notReady", notReady)
 
 				if time.Since(lastHWReminder) >= hwReminderInterval {
@@ -1044,7 +1044,7 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 
 	hostname := strings.TrimSpace(out)
 	if hostname != vm.Name {
-		return fmt.Errorf("hostname mismatch: got %q, want %q", hostname, vm.Name) //nolint:goerr113
+		return fmt.Errorf("hostname mismatch: got %q, want %q", hostname, vm.Name) //nolint:err113
 	}
 
 	ftp, cleanup, err := ssh.NewSftp()
@@ -1097,7 +1097,7 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 			if err == nil && marker != recipe.InstallMarkerComplete {
 				slog.Error("Node install was already attempted but not completed", "vm", vm.Name, "type", vm.Type, "marker", marker)
 
-				return fmt.Errorf("not complete install marker: %q", marker) //nolint:goerr113
+				return fmt.Errorf("not complete install marker: %q", marker) //nolint:err113
 			}
 			if err == nil && !opts.AutoUpgrade && marker == recipe.InstallMarkerComplete {
 				slog.Info("Node install was already completed", "vm", vm.Name, "type", vm.Type)
@@ -1173,7 +1173,7 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 					}
 
 					if marker != recipe.InstallMarkerComplete {
-						return fmt.Errorf("not complete install marker: %q", marker) //nolint:goerr113
+						return fmt.Errorf("not complete install marker: %q", marker) //nolint:err113
 					} else {
 						installed = true
 					}
@@ -1221,18 +1221,18 @@ func (c *Config) vmPostProcess(ctx context.Context, vlab *VLAB, d *artificer.Dow
 				}
 
 				if len(fabs.Items) == 0 {
-					apiErr = fmt.Errorf("no fabricator configs found") //nolint:goerr113
+					apiErr = fmt.Errorf("no fabricator configs found") //nolint:err113
 					slog.Debug("No fabricator configs found", "vm", vm.Name, "type", vm.Type)
 
 					continue
 				}
 
 				if len(fabs.Items) > 1 {
-					return fmt.Errorf("multiple fabricator configs found") //nolint:goerr113
+					return fmt.Errorf("multiple fabricator configs found") //nolint:err113
 				}
 
 				if fabs.Items[0].Name != comp.FabName || fabs.Items[0].Namespace != comp.FabNamespace {
-					return fmt.Errorf("fabricator config mismatch: got %s/%s, want %s/%s", fabs.Items[0].Namespace, fabs.Items[0].Name, comp.FabNamespace, comp.FabName) //nolint:goerr113
+					return fmt.Errorf("fabricator config mismatch: got %s/%s, want %s/%s", fabs.Items[0].Namespace, fabs.Items[0].Name, comp.FabNamespace, comp.FabName) //nolint:err113
 				}
 
 				apiErr = nil

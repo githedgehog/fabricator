@@ -68,7 +68,7 @@ func ImageURL(cfg fabapi.Fabricator, name string) (string, error) {
 func ChartURL(cfg fabapi.Fabricator, name, bootstrap string) (string, error) {
 	if cfg.Status.IsBootstrap {
 		if len(bootstrap) == 0 {
-			return "", fmt.Errorf("bootstrap chart name is required") //nolint:goerr113
+			return "", fmt.Errorf("bootstrap chart name is required") //nolint:err113
 		}
 
 		return JoinURLParts(BootstrapStatic, BootstrapChartsPrefix, bootstrap), nil

@@ -67,7 +67,7 @@ func (testCtx *VPCPeeringTestCtx) pingExternalStability(ctx context.Context, mat
 	}
 
 	if tested == 0 {
-		return fmt.Errorf("no servers found in VPC %s for ping stability check", vpcName) //nolint:goerr113
+		return fmt.Errorf("no servers found in VPC %s for ping stability check", vpcName) //nolint:err113
 	}
 
 	return nil
@@ -80,10 +80,10 @@ func (testCtx *VPCPeeringTestCtx) pingExternalStability(ctx context.Context, mat
 // only the port-forward target, not arbitrary outbound.
 func overlayExternalPortForward(matrix *ConnectivityMatrix, vpcName, extName string, destIP netip.Addr, destPort uint16) error {
 	if destPort == 0 {
-		return fmt.Errorf("destPort must be non-zero for port-forward overlay") //nolint:goerr113
+		return fmt.Errorf("destPort must be non-zero for port-forward overlay") //nolint:err113
 	}
 	if !destIP.IsValid() {
-		return fmt.Errorf("destIP must be valid for port-forward overlay") //nolint:goerr113
+		return fmt.Errorf("destIP must be valid for port-forward overlay") //nolint:err113
 	}
 
 	overlayExternalNoEgress(matrix, vpcName, extName)
@@ -134,7 +134,7 @@ func overlayExternalNoEgress(matrix *ConnectivityMatrix, vpcName, keepExt string
 //	        Cidr:  0.0.0.0/0
 func bgpExternalNoNatTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	if testCtx.extName == "" {
-		return true, nil, fmt.Errorf("no BGP external available for testing") //nolint:goerr113
+		return true, nil, fmt.Errorf("no BGP external available for testing") //nolint:err113
 	}
 
 	vpcs := &vpcapi.VPCList{}
@@ -142,7 +142,7 @@ func bgpExternalNoNatTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matri
 		return false, nil, fmt.Errorf("listing VPCs: %w", err)
 	}
 	if len(vpcs.Items) < 1 {
-		return true, nil, fmt.Errorf("no VPCs available for external NAT test") //nolint:goerr113
+		return true, nil, fmt.Errorf("no VPCs available for external NAT test") //nolint:err113
 	}
 
 	sort.Slice(vpcs.Items, func(i, j int) bool {
@@ -195,7 +195,7 @@ func bgpExternalNoNatTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matri
 //	        Cidr:  0.0.0.0/0
 func bgpExternalStaticNATTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	if testCtx.extName == "" {
-		return true, nil, fmt.Errorf("no BGP external available for testing") //nolint:goerr113
+		return true, nil, fmt.Errorf("no BGP external available for testing") //nolint:err113
 	}
 
 	bgpNATCIDR, err := getExternalBGPNATCIDR(ctx, testCtx.kube, testCtx.extName)
@@ -203,7 +203,7 @@ func bgpExternalStaticNATTest(ctx context.Context, testCtx *VPCPeeringTestCtx, m
 		return false, nil, fmt.Errorf("getting BGP NAT CIDR for external %s: %w", testCtx.extName, err)
 	}
 	if bgpNATCIDR == "" {
-		return true, nil, fmt.Errorf("no BGP NAT pool annotation (%s) on external %s", extBGPNATAnnotation, testCtx.extName) //nolint:goerr113
+		return true, nil, fmt.Errorf("no BGP NAT pool annotation (%s) on external %s", extBGPNATAnnotation, testCtx.extName) //nolint:err113
 	}
 
 	vpcs := &vpcapi.VPCList{}
@@ -211,7 +211,7 @@ func bgpExternalStaticNATTest(ctx context.Context, testCtx *VPCPeeringTestCtx, m
 		return false, nil, fmt.Errorf("listing VPCs: %w", err)
 	}
 	if len(vpcs.Items) < 1 {
-		return true, nil, fmt.Errorf("no VPCs available for external static NAT test") //nolint:goerr113
+		return true, nil, fmt.Errorf("no VPCs available for external static NAT test") //nolint:err113
 	}
 
 	sort.Slice(vpcs.Items, func(i, j int) bool {
@@ -280,7 +280,7 @@ func bgpExternalStaticNATTest(ctx context.Context, testCtx *VPCPeeringTestCtx, m
 //	        Cidr:  0.0.0.0/0
 func bgpExternalMasqueradeNATTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	if testCtx.extName == "" {
-		return true, nil, fmt.Errorf("no BGP external available for testing") //nolint:goerr113
+		return true, nil, fmt.Errorf("no BGP external available for testing") //nolint:err113
 	}
 
 	bgpNATCIDR, err := getExternalBGPNATCIDR(ctx, testCtx.kube, testCtx.extName)
@@ -288,7 +288,7 @@ func bgpExternalMasqueradeNATTest(ctx context.Context, testCtx *VPCPeeringTestCt
 		return false, nil, fmt.Errorf("getting BGP NAT CIDR for external %s: %w", testCtx.extName, err)
 	}
 	if bgpNATCIDR == "" {
-		return true, nil, fmt.Errorf("no BGP NAT pool annotation (%s) on external %s", extBGPNATAnnotation, testCtx.extName) //nolint:goerr113
+		return true, nil, fmt.Errorf("no BGP NAT pool annotation (%s) on external %s", extBGPNATAnnotation, testCtx.extName) //nolint:err113
 	}
 
 	vpcs := &vpcapi.VPCList{}
@@ -296,7 +296,7 @@ func bgpExternalMasqueradeNATTest(ctx context.Context, testCtx *VPCPeeringTestCt
 		return false, nil, fmt.Errorf("listing VPCs: %w", err)
 	}
 	if len(vpcs.Items) < 1 {
-		return true, nil, fmt.Errorf("no VPCs available for external masquerade NAT test") //nolint:goerr113
+		return true, nil, fmt.Errorf("no VPCs available for external masquerade NAT test") //nolint:err113
 	}
 
 	sort.Slice(vpcs.Items, func(i, j int) bool {
@@ -373,7 +373,7 @@ func bgpExternalMasqueradeNATTest(ctx context.Context, testCtx *VPCPeeringTestCt
 //	            As: 15201
 func bgpExternalPortForwardNATTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	if testCtx.extName == "" {
-		return true, nil, fmt.Errorf("no BGP external available for testing") //nolint:goerr113
+		return true, nil, fmt.Errorf("no BGP external available for testing") //nolint:err113
 	}
 
 	bgpNATCIDR, err := getExternalBGPNATCIDR(ctx, testCtx.kube, testCtx.extName)
@@ -381,7 +381,7 @@ func bgpExternalPortForwardNATTest(ctx context.Context, testCtx *VPCPeeringTestC
 		return false, nil, fmt.Errorf("getting BGP NAT CIDR for external %s: %w", testCtx.extName, err)
 	}
 	if bgpNATCIDR == "" {
-		return true, nil, fmt.Errorf("no BGP NAT pool annotation (%s) on external %s", extBGPNATAnnotation, testCtx.extName) //nolint:goerr113
+		return true, nil, fmt.Errorf("no BGP NAT pool annotation (%s) on external %s", extBGPNATAnnotation, testCtx.extName) //nolint:err113
 	}
 
 	prefix, err := netip.ParsePrefix(bgpNATCIDR)
@@ -389,7 +389,7 @@ func bgpExternalPortForwardNATTest(ctx context.Context, testCtx *VPCPeeringTestC
 		return false, nil, fmt.Errorf("parsing BGP NAT CIDR %s: %w", bgpNATCIDR, err)
 	}
 	if prefix.Bits() != 24 {
-		return false, nil, fmt.Errorf("BGP NAT CIDR %s must be a /24 for the .200 inverted NAT address to be valid", bgpNATCIDR) //nolint:goerr113
+		return false, nil, fmt.Errorf("BGP NAT CIDR %s must be a /24 for the .200 inverted NAT address to be valid", bgpNATCIDR) //nolint:err113
 	}
 	// .200 within the NAT pool is the virtual IP representing the external device; traffic to it
 	// is port-forwarded to the real neighbor IP. Chosen to avoid VPC server IPs (low end of
@@ -403,7 +403,7 @@ func bgpExternalPortForwardNATTest(ctx context.Context, testCtx *VPCPeeringTestC
 		return false, nil, fmt.Errorf("getting remote IP for external %s: %w", testCtx.extName, err)
 	}
 	if extRemoteIP == "" {
-		return true, nil, fmt.Errorf("no remote IP found in ExternalAttachment for %s", testCtx.extName) //nolint:goerr113
+		return true, nil, fmt.Errorf("no remote IP found in ExternalAttachment for %s", testCtx.extName) //nolint:err113
 	}
 
 	vpcs := &vpcapi.VPCList{}
@@ -411,7 +411,7 @@ func bgpExternalPortForwardNATTest(ctx context.Context, testCtx *VPCPeeringTestC
 		return false, nil, fmt.Errorf("listing VPCs: %w", err)
 	}
 	if len(vpcs.Items) < 1 {
-		return true, nil, fmt.Errorf("no VPCs available for BGP external port-forward NAT test") //nolint:goerr113
+		return true, nil, fmt.Errorf("no VPCs available for BGP external port-forward NAT test") //nolint:err113
 	}
 
 	sort.Slice(vpcs.Items, func(i, j int) bool {
@@ -484,7 +484,7 @@ func bgpExternalPortForwardNATTest(ctx context.Context, testCtx *VPCPeeringTestC
 //	        Cidr:  0.0.0.0/0
 func bgpExternalMasqueradePortForwardNATTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	if testCtx.extName == "" {
-		return true, nil, fmt.Errorf("no BGP external available for testing") //nolint:goerr113
+		return true, nil, fmt.Errorf("no BGP external available for testing") //nolint:err113
 	}
 
 	bgpNATCIDR, err := getExternalBGPNATCIDR(ctx, testCtx.kube, testCtx.extName)
@@ -492,7 +492,7 @@ func bgpExternalMasqueradePortForwardNATTest(ctx context.Context, testCtx *VPCPe
 		return false, nil, fmt.Errorf("getting BGP NAT CIDR for external %s: %w", testCtx.extName, err)
 	}
 	if bgpNATCIDR == "" {
-		return true, nil, fmt.Errorf("no BGP NAT pool annotation (%s) on external %s", extBGPNATAnnotation, testCtx.extName) //nolint:goerr113
+		return true, nil, fmt.Errorf("no BGP NAT pool annotation (%s) on external %s", extBGPNATAnnotation, testCtx.extName) //nolint:err113
 	}
 
 	vpcs := &vpcapi.VPCList{}
@@ -500,7 +500,7 @@ func bgpExternalMasqueradePortForwardNATTest(ctx context.Context, testCtx *VPCPe
 		return false, nil, fmt.Errorf("listing VPCs: %w", err)
 	}
 	if len(vpcs.Items) < 1 {
-		return true, nil, fmt.Errorf("no VPCs available for external masquerade+port-forward NAT test") //nolint:goerr113
+		return true, nil, fmt.Errorf("no VPCs available for external masquerade+port-forward NAT test") //nolint:err113
 	}
 
 	sort.Slice(vpcs.Items, func(i, j int) bool {
@@ -571,7 +571,7 @@ func bgpExternalMasqueradePortForwardNATTest(ctx context.Context, testCtx *VPCPe
 //	        Cidr:  0.0.0.0/0
 func staticExternalNoNATGatewayTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	if testCtx.staticExtName == "" {
-		return true, nil, fmt.Errorf("no static external available for testing") //nolint:goerr113
+		return true, nil, fmt.Errorf("no static external available for testing") //nolint:err113
 	}
 
 	vpcs := &vpcapi.VPCList{}
@@ -579,7 +579,7 @@ func staticExternalNoNATGatewayTest(ctx context.Context, testCtx *VPCPeeringTest
 		return false, nil, fmt.Errorf("listing VPCs: %w", err)
 	}
 	if len(vpcs.Items) < 1 {
-		return true, nil, fmt.Errorf("no VPCs available for static external no NAT test") //nolint:goerr113
+		return true, nil, fmt.Errorf("no VPCs available for static external no NAT test") //nolint:err113
 	}
 
 	sort.Slice(vpcs.Items, func(i, j int) bool {
@@ -632,7 +632,7 @@ func staticExternalNoNATGatewayTest(ctx context.Context, testCtx *VPCPeeringTest
 //	        Cidr:  0.0.0.0/0
 func staticExternalStaticNATGatewayTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	if testCtx.staticExtName == "" {
-		return true, nil, fmt.Errorf("no static external available for testing") //nolint:goerr113
+		return true, nil, fmt.Errorf("no static external available for testing") //nolint:err113
 	}
 
 	staticNATCIDR, err := getExternalStaticNATCIDR(ctx, testCtx.kube, testCtx.staticExtName)
@@ -640,7 +640,7 @@ func staticExternalStaticNATGatewayTest(ctx context.Context, testCtx *VPCPeering
 		return false, nil, fmt.Errorf("getting static NAT CIDR for external %s: %w", testCtx.staticExtName, err)
 	}
 	if staticNATCIDR == "" {
-		return true, nil, fmt.Errorf("no static NAT pool annotation (%s) on external %s", extStaticNATPoolAnnotation, testCtx.staticExtName) //nolint:goerr113
+		return true, nil, fmt.Errorf("no static NAT pool annotation (%s) on external %s", extStaticNATPoolAnnotation, testCtx.staticExtName) //nolint:err113
 	}
 
 	vpcs := &vpcapi.VPCList{}
@@ -648,7 +648,7 @@ func staticExternalStaticNATGatewayTest(ctx context.Context, testCtx *VPCPeering
 		return false, nil, fmt.Errorf("listing VPCs: %w", err)
 	}
 	if len(vpcs.Items) < 1 {
-		return true, nil, fmt.Errorf("no VPCs available for static external static NAT test") //nolint:goerr113
+		return true, nil, fmt.Errorf("no VPCs available for static external static NAT test") //nolint:err113
 	}
 
 	sort.Slice(vpcs.Items, func(i, j int) bool {
@@ -717,7 +717,7 @@ func staticExternalStaticNATGatewayTest(ctx context.Context, testCtx *VPCPeering
 //	        Cidr:  0.0.0.0/0
 func staticExternalMasqueradeNATGatewayTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	if testCtx.staticExtName == "" {
-		return true, nil, fmt.Errorf("no static external available for testing") //nolint:goerr113
+		return true, nil, fmt.Errorf("no static external available for testing") //nolint:err113
 	}
 
 	staticNATCIDR, err := getExternalStaticNATCIDR(ctx, testCtx.kube, testCtx.staticExtName)
@@ -725,7 +725,7 @@ func staticExternalMasqueradeNATGatewayTest(ctx context.Context, testCtx *VPCPee
 		return false, nil, fmt.Errorf("getting static NAT CIDR for external %s: %w", testCtx.staticExtName, err)
 	}
 	if staticNATCIDR == "" {
-		return true, nil, fmt.Errorf("no static NAT pool annotation (%s) on external %s", extStaticNATPoolAnnotation, testCtx.staticExtName) //nolint:goerr113
+		return true, nil, fmt.Errorf("no static NAT pool annotation (%s) on external %s", extStaticNATPoolAnnotation, testCtx.staticExtName) //nolint:err113
 	}
 
 	vpcs := &vpcapi.VPCList{}
@@ -733,7 +733,7 @@ func staticExternalMasqueradeNATGatewayTest(ctx context.Context, testCtx *VPCPee
 		return false, nil, fmt.Errorf("listing VPCs: %w", err)
 	}
 	if len(vpcs.Items) < 1 {
-		return true, nil, fmt.Errorf("no VPCs available for static external masquerade NAT test") //nolint:goerr113
+		return true, nil, fmt.Errorf("no VPCs available for static external masquerade NAT test") //nolint:err113
 	}
 
 	sort.Slice(vpcs.Items, func(i, j int) bool {
@@ -808,7 +808,7 @@ func staticExternalMasqueradeNATGatewayTest(ctx context.Context, testCtx *VPCPee
 //	            As: 15201
 func staticExternalPortForwardNATGatewayTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	if testCtx.staticExtName == "" {
-		return true, nil, fmt.Errorf("no static external available for testing") //nolint:goerr113
+		return true, nil, fmt.Errorf("no static external available for testing") //nolint:err113
 	}
 
 	staticNATCIDR, err := getExternalStaticNATCIDR(ctx, testCtx.kube, testCtx.staticExtName)
@@ -816,7 +816,7 @@ func staticExternalPortForwardNATGatewayTest(ctx context.Context, testCtx *VPCPe
 		return false, nil, fmt.Errorf("getting static NAT CIDR for external %s: %w", testCtx.staticExtName, err)
 	}
 	if staticNATCIDR == "" {
-		return true, nil, fmt.Errorf("no static NAT pool annotation (%s) on external %s", extStaticNATPoolAnnotation, testCtx.staticExtName) //nolint:goerr113
+		return true, nil, fmt.Errorf("no static NAT pool annotation (%s) on external %s", extStaticNATPoolAnnotation, testCtx.staticExtName) //nolint:err113
 	}
 
 	prefix, err := netip.ParsePrefix(staticNATCIDR)
@@ -824,7 +824,7 @@ func staticExternalPortForwardNATGatewayTest(ctx context.Context, testCtx *VPCPe
 		return false, nil, fmt.Errorf("parsing static NAT CIDR %s: %w", staticNATCIDR, err)
 	}
 	if prefix.Bits() != 24 {
-		return false, nil, fmt.Errorf("static NAT CIDR %s must be a /24 for the .200 inverted NAT address to be valid", staticNATCIDR) //nolint:goerr113
+		return false, nil, fmt.Errorf("static NAT CIDR %s must be a /24 for the .200 inverted NAT address to be valid", staticNATCIDR) //nolint:err113
 	}
 	// .200 within the NAT pool is the virtual IP representing the external device; traffic to it
 	// is port-forwarded to the real remote IP. DS2000 has a static route for the whole /24 so
@@ -838,7 +838,7 @@ func staticExternalPortForwardNATGatewayTest(ctx context.Context, testCtx *VPCPe
 		return false, nil, fmt.Errorf("getting remote IP for external %s: %w", testCtx.staticExtName, err)
 	}
 	if extRemoteIP == "" {
-		return true, nil, fmt.Errorf("no remote IP found in ExternalAttachment for %s", testCtx.staticExtName) //nolint:goerr113
+		return true, nil, fmt.Errorf("no remote IP found in ExternalAttachment for %s", testCtx.staticExtName) //nolint:err113
 	}
 
 	vpcs := &vpcapi.VPCList{}
@@ -846,7 +846,7 @@ func staticExternalPortForwardNATGatewayTest(ctx context.Context, testCtx *VPCPe
 		return false, nil, fmt.Errorf("listing VPCs: %w", err)
 	}
 	if len(vpcs.Items) < 1 {
-		return true, nil, fmt.Errorf("no VPCs available for static external port-forward test") //nolint:goerr113
+		return true, nil, fmt.Errorf("no VPCs available for static external port-forward test") //nolint:err113
 	}
 
 	sort.Slice(vpcs.Items, func(i, j int) bool {
@@ -919,7 +919,7 @@ func staticExternalPortForwardNATGatewayTest(ctx context.Context, testCtx *VPCPe
 //	        Cidr:  0.0.0.0/0
 func staticExternalMasqueradePortForwardNATGatewayTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	if testCtx.staticExtName == "" {
-		return true, nil, fmt.Errorf("no static external available for testing") //nolint:goerr113
+		return true, nil, fmt.Errorf("no static external available for testing") //nolint:err113
 	}
 
 	staticNATCIDR, err := getExternalStaticNATCIDR(ctx, testCtx.kube, testCtx.staticExtName)
@@ -927,7 +927,7 @@ func staticExternalMasqueradePortForwardNATGatewayTest(ctx context.Context, test
 		return false, nil, fmt.Errorf("getting static NAT CIDR for external %s: %w", testCtx.staticExtName, err)
 	}
 	if staticNATCIDR == "" {
-		return true, nil, fmt.Errorf("no static NAT pool annotation (%s) on external %s", extStaticNATPoolAnnotation, testCtx.staticExtName) //nolint:goerr113
+		return true, nil, fmt.Errorf("no static NAT pool annotation (%s) on external %s", extStaticNATPoolAnnotation, testCtx.staticExtName) //nolint:err113
 	}
 
 	vpcs := &vpcapi.VPCList{}
@@ -935,7 +935,7 @@ func staticExternalMasqueradePortForwardNATGatewayTest(ctx context.Context, test
 		return false, nil, fmt.Errorf("listing VPCs: %w", err)
 	}
 	if len(vpcs.Items) < 1 {
-		return true, nil, fmt.Errorf("no VPCs available for static external masquerade+port-forward NAT test") //nolint:goerr113
+		return true, nil, fmt.Errorf("no VPCs available for static external masquerade+port-forward NAT test") //nolint:err113
 	}
 
 	sort.Slice(vpcs.Items, func(i, j int) bool {

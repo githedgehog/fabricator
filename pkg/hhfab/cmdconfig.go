@@ -260,7 +260,7 @@ func importFabricGateway(c InitConfig, tmplData WiringTemplateData) error {
 		if strings.Contains(wiringFile, ":") {
 			parts := strings.Split(wiringFile, ":")
 			if len(parts) != 2 {
-				return fmt.Errorf("importing %q: should be '<path>' or '<path>:<import-name>'", wiringFile) //nolint:goerr113
+				return fmt.Errorf("importing %q: should be '<path>' or '<path>:<import-name>'", wiringFile) //nolint:err113
 			}
 
 			source = parts[0]
@@ -274,7 +274,7 @@ func importFabricGateway(c InitConfig, tmplData WiringTemplateData) error {
 		}
 
 		if !isWiringSource(source) {
-			return fmt.Errorf("importing %q: should have %s, %s or %s extension", source, YAMLExt, TmplYAMLExt, YAMLTmplExt) //nolint:goerr113
+			return fmt.Errorf("importing %q: should have %s, %s or %s extension", source, YAMLExt, TmplYAMLExt, YAMLTmplExt) //nolint:err113
 		}
 
 		data, err := os.ReadFile(source)

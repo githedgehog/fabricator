@@ -23,10 +23,10 @@ func SupportDump(ctx context.Context, opts SupportDumpOpts) error {
 	slog.Info("Creating support dump", "workdir", opts.WorkDir, "name", opts.Name)
 
 	if opts.WorkDir == "" {
-		return fmt.Errorf("empty path") //nolint:goerr113
+		return fmt.Errorf("empty path") //nolint:err113
 	}
 	if opts.Name == "" {
-		return fmt.Errorf("empty name") //nolint:goerr113
+		return fmt.Errorf("empty name") //nolint:err113
 	}
 
 	if err := os.MkdirAll(opts.WorkDir, 0o755); err != nil {
@@ -36,18 +36,18 @@ func SupportDump(ctx context.Context, opts SupportDumpOpts) error {
 	if stat, err := os.Stat(opts.WorkDir); err != nil {
 		return fmt.Errorf("stat path: %w", err)
 	} else if !stat.IsDir() {
-		return fmt.Errorf("path is not a directory") //nolint:goerr113
+		return fmt.Errorf("path is not a directory") //nolint:err113
 	}
 
 	fullPath := filepath.Join(opts.WorkDir, opts.Name+support.FileExt)
 
 	if stat, err := os.Stat(fullPath); err == nil {
 		if !opts.Force {
-			return fmt.Errorf("dump file already exists") //nolint:goerr113
+			return fmt.Errorf("dump file already exists") //nolint:err113
 		}
 
 		if !stat.Mode().IsRegular() {
-			return fmt.Errorf("existing dump file is not a regular file") //nolint:goerr113
+			return fmt.Errorf("existing dump file is not a regular file") //nolint:err113
 		}
 
 		if err := os.RemoveAll(fullPath); err != nil {

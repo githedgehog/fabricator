@@ -91,7 +91,7 @@ func DoOSInstall(ctx context.Context, workDir string) error {
 			return fmt.Errorf("getting fabricator, controls and nodes: %w", err)
 		}
 		if len(controls) > 1 {
-			return fmt.Errorf("only one control node supported, got %d", len(controls)+len(nodes)) //nolint:goerr113
+			return fmt.Errorf("only one control node supported, got %d", len(controls)+len(nodes)) //nolint:err113
 		}
 
 		found := false
@@ -127,7 +127,7 @@ func DoOSInstall(ctx context.Context, workDir string) error {
 		}
 
 		if !found {
-			return fmt.Errorf("no expected %s/%s node or control node found in fabricator config", cfg.Type, cfg.Name) //nolint:goerr113
+			return fmt.Errorf("no expected %s/%s node or control node found in fabricator config", cfg.Type, cfg.Name) //nolint:err113
 		}
 
 		slog.Info("Installing", "name", cfg.Name, "type", cfg.Type, "role", role, "disk", targetDisk)
@@ -139,7 +139,7 @@ func DoOSInstall(ctx context.Context, workDir string) error {
 		}).Run(ctx)
 	}
 
-	return fmt.Errorf("no install dirs found in %q", workDir) //nolint:goerr113
+	return fmt.Errorf("no install dirs found in %q", workDir) //nolint:err113
 }
 
 type OSInstal struct {
@@ -150,7 +150,7 @@ type OSInstal struct {
 
 func (i *OSInstal) Run(ctx context.Context) error {
 	if i.TargetDisk == "" {
-		return fmt.Errorf("no target disk found in fabricator config") //nolint:goerr113
+		return fmt.Errorf("no target disk found in fabricator config") //nolint:err113
 	}
 
 	ignition := filepath.Join(i.WorkDir, recipe.IgnitionFile)
@@ -170,7 +170,7 @@ func (i *OSInstal) Run(ctx context.Context) error {
 		}
 		lineToRemove := "(exec 2>/dev/null ; echo \"done\" > \"${WORKDIR}/disk_modified\") &"
 		if !strings.Contains(string(flatcarInstall), lineToRemove) {
-			return fmt.Errorf("line to be removed not found in flatcar-install: %q", lineToRemove) //nolint:goerr113
+			return fmt.Errorf("line to be removed not found in flatcar-install: %q", lineToRemove) //nolint:err113
 		}
 		flatcarInstall = []byte(strings.ReplaceAll(string(flatcarInstall), lineToRemove, ""))
 		if err := os.WriteFile("/tmp/flatcar-install", flatcarInstall, 0o755); err != nil { //nolint:gosec

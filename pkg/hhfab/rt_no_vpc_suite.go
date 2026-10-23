@@ -431,17 +431,17 @@ func lokiObservabilityTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *C
 	// Check connectivity and authentication
 	if resp.StatusCode == http.StatusUnauthorized {
 		if bodyErr != nil {
-			return false, nil, fmt.Errorf("loki authentication failed (could not read body: %w)", bodyErr) //nolint:goerr113
+			return false, nil, fmt.Errorf("loki authentication failed (could not read body: %w)", bodyErr)
 		}
 
-		return false, nil, fmt.Errorf("loki authentication failed: %s", string(body)) //nolint:goerr113
+		return false, nil, fmt.Errorf("loki authentication failed: %s", string(body)) //nolint:err113
 	}
 	if resp.StatusCode != http.StatusOK {
 		if bodyErr != nil {
-			return false, nil, fmt.Errorf("loki API connectivity check failed: status %d (could not read body: %w)", resp.StatusCode, bodyErr) //nolint:goerr113
+			return false, nil, fmt.Errorf("loki API connectivity check failed: status %d (could not read body: %w)", resp.StatusCode, bodyErr)
 		}
 
-		return false, nil, fmt.Errorf("loki API connectivity check failed: status %d", resp.StatusCode) //nolint:goerr113
+		return false, nil, fmt.Errorf("loki API connectivity check failed: status %d", resp.StatusCode) //nolint:err113
 	}
 
 	if bodyErr != nil {
@@ -604,10 +604,10 @@ func lokiObservabilityTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *C
 	if len(foundLogs) == 0 && len(expectedHostnames) > 0 {
 		// Show a sample error to help debug without overwhelming with all errors
 		if errorSample != "" {
-			return false, nil, fmt.Errorf("no logs found for any devices: %s", errorSample) //nolint:goerr113
+			return false, nil, fmt.Errorf("no logs found for any devices: %s", errorSample) //nolint:err113
 		}
 
-		return false, nil, fmt.Errorf("no logs found for any devices; checked %d devices", len(expectedHostnames)) //nolint:goerr113
+		return false, nil, fmt.Errorf("no logs found for any devices; checked %d devices", len(expectedHostnames)) //nolint:err113
 	}
 
 	if len(missingLogs) > 0 {
@@ -678,17 +678,17 @@ func prometheusObservabilityTest(ctx context.Context, testCtx *VPCPeeringTestCtx
 	// Check connectivity and authentication
 	if resp.StatusCode == http.StatusUnauthorized {
 		if bodyErr != nil {
-			return false, nil, fmt.Errorf("prometheus authentication failed (could not read body: %w)", bodyErr) //nolint:goerr113
+			return false, nil, fmt.Errorf("prometheus authentication failed (could not read body: %w)", bodyErr)
 		}
 
-		return false, nil, fmt.Errorf("prometheus authentication failed: %s", string(body)) //nolint:goerr113
+		return false, nil, fmt.Errorf("prometheus authentication failed: %s", string(body)) //nolint:err113
 	}
 	if resp.StatusCode != http.StatusOK {
 		if bodyErr != nil {
-			return false, nil, fmt.Errorf("prometheus API connectivity check failed: status %d (could not read body: %w)", resp.StatusCode, bodyErr) //nolint:goerr113
+			return false, nil, fmt.Errorf("prometheus API connectivity check failed: status %d (could not read body: %w)", resp.StatusCode, bodyErr)
 		}
 
-		return false, nil, fmt.Errorf("prometheus API connectivity check failed: status %d", resp.StatusCode) //nolint:goerr113
+		return false, nil, fmt.Errorf("prometheus API connectivity check failed: status %d", resp.StatusCode) //nolint:err113
 	}
 
 	if bodyErr != nil {
@@ -729,10 +729,10 @@ func prometheusObservabilityTest(ctx context.Context, testCtx *VPCPeeringTestCtx
 
 	if resp.StatusCode != http.StatusOK {
 		if bodyErr != nil {
-			return false, nil, fmt.Errorf("metric query failed: status %d (could not read body: %w)", resp.StatusCode, bodyErr) //nolint:goerr113
+			return false, nil, fmt.Errorf("metric query failed: status %d (could not read body: %w)", resp.StatusCode, bodyErr)
 		}
 
-		return false, nil, fmt.Errorf("metric query failed: status %d", resp.StatusCode) //nolint:goerr113
+		return false, nil, fmt.Errorf("metric query failed: status %d", resp.StatusCode) //nolint:err113
 	}
 
 	if bodyErr != nil {
@@ -748,12 +748,12 @@ func prometheusObservabilityTest(ctx context.Context, testCtx *VPCPeeringTestCtx
 	slog.Debug("Prometheus query details", "query", queryExpr, "status", resp.Status, "count", len(promResp.Data.Result))
 
 	if promResp.Status != promStatusSuccess {
-		return false, nil, fmt.Errorf("metric query returned non-success status: %s", promResp.Status) //nolint:goerr113
+		return false, nil, fmt.Errorf("metric query returned non-success status: %s", promResp.Status) //nolint:err113
 	}
 
 	// Check if we got any results
 	if len(promResp.Data.Result) == 0 {
-		return false, nil, fmt.Errorf("no '%s' metrics found for any switches with env=%s", metricName, env) //nolint:goerr113
+		return false, nil, fmt.Errorf("no '%s' metrics found for any switches with env=%s", metricName, env) //nolint:err113
 	}
 
 	// Process results
@@ -809,7 +809,7 @@ func prometheusObservabilityTest(ctx context.Context, testCtx *VPCPeeringTestCtx
 
 	// As long as we found metrics, consider the test successful
 	if len(foundHostnames) == 0 {
-		return false, nil, fmt.Errorf("no fresh '%s' metrics found for any switches", metricName) //nolint:goerr113
+		return false, nil, fmt.Errorf("no fresh '%s' metrics found for any switches", metricName) //nolint:err113
 	}
 
 	slog.Info("Verified Prometheus metrics delivery", "metric", metricName, "metrics_count", len(foundHostnames), "switches_checked", len(switches.Items))
@@ -920,10 +920,10 @@ func (testCtx *VPCPeeringTestCtx) checkGatewayMetrics(ctx context.Context, prome
 
 		if gwResp.StatusCode != http.StatusOK {
 			if gwBodyErr != nil {
-				return fmt.Errorf("%s metric query failed: status %d (could not read body: %w)", gm.name, gwResp.StatusCode, gwBodyErr) //nolint:goerr113
+				return fmt.Errorf("%s metric query failed: status %d (could not read body: %w)", gm.name, gwResp.StatusCode, gwBodyErr)
 			}
 
-			return fmt.Errorf("%s metric query failed: status %d, body: %s", gm.name, gwResp.StatusCode, string(gwBody)) //nolint:goerr113
+			return fmt.Errorf("%s metric query failed: status %d, body: %s", gm.name, gwResp.StatusCode, string(gwBody)) //nolint:err113
 		}
 
 		if gwBodyErr != nil {
@@ -942,7 +942,7 @@ func (testCtx *VPCPeeringTestCtx) checkGatewayMetrics(ctx context.Context, prome
 			"result_count", len(gwPromResp.Data.Result))
 
 		if gwPromResp.Status != promStatusSuccess {
-			return fmt.Errorf("%s metric query returned non-success status: %s", gm.name, gwPromResp.Status) //nolint:goerr113
+			return fmt.Errorf("%s metric query returned non-success status: %s", gm.name, gwPromResp.Status) //nolint:err113
 		}
 
 		// Process results and match to gateways
@@ -1003,7 +1003,7 @@ func (testCtx *VPCPeeringTestCtx) checkGatewayMetrics(ctx context.Context, prome
 	}
 
 	if len(failedGateways) > 0 {
-		return fmt.Errorf("gateways missing required metrics: %s", strings.Join(failedGateways, "; ")) //nolint:goerr113
+		return fmt.Errorf("gateways missing required metrics: %s", strings.Join(failedGateways, "; ")) //nolint:err113
 	}
 
 	slog.Info("Verified gateway metrics delivery",
@@ -1505,7 +1505,7 @@ func hostBGPTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connectivit
 			failoverLink := failoverConn.Spec.Unbundled.Link
 			failoverNOSPort, ok := failoverPortMap[failoverLink.Switch.LocalPortName()]
 			if !ok {
-				return false, reverts, fmt.Errorf("port %s not in profile %s for switch %s", failoverLink.Switch.LocalPortName(), failoverProfile.Name, failoverSwitchName) //nolint:goerr113
+				return false, reverts, fmt.Errorf("port %s not in profile %s for switch %s", failoverLink.Switch.LocalPortName(), failoverProfile.Name, failoverSwitchName) //nolint:err113
 			}
 			if err := changeSwitchPortStatus(ctx, failoverSwSSH, failoverSwitchName, failoverNOSPort, false); err != nil {
 				return false, reverts, fmt.Errorf("shutting down port %s on %s: %w", failoverNOSPort, failoverSwitchName, err)

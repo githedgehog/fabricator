@@ -31,7 +31,7 @@ func SetupControlNodeWebhookWith(mgr kctrl.Manager) error {
 		WithDefaulter(w).
 		WithValidator(w).
 		Complete(); err != nil {
-		return fmt.Errorf("creating webhook: %w", err) //nolint:goerr113
+		return fmt.Errorf("creating webhook: %w", err)
 	}
 
 	return nil
@@ -62,5 +62,5 @@ func (w *ControlNodeWebhook) ValidateUpdate(ctx context.Context, _ *fabapi.Contr
 }
 
 func (w *ControlNodeWebhook) ValidateDelete(_ context.Context, _ *fabapi.ControlNode) (admission.Warnings, error) {
-	return nil, fmt.Errorf("not allowed to delete ControlNode object") //nolint:goerr113
+	return nil, fmt.Errorf("not allowed to delete ControlNode object") //nolint:err113
 }

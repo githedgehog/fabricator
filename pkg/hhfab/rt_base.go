@@ -1048,7 +1048,7 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOp
 		}
 		slog.Info("OnReady Test Suite completed", "duration", time.Since(testStart).String())
 		if ortResults.Failures > 0 {
-			return fmt.Errorf("some tests failed: onReady=%d", ortResults.Failures) //nolint:goerr113
+			return fmt.Errorf("some tests failed: onReady=%d", ortResults.Failures) //nolint:err113
 		}
 
 		return nil
@@ -1094,7 +1094,7 @@ func RunReleaseTestSuites(ctx context.Context, vlabCfg *Config, vlab *VLAB, rtOp
 
 	slog.Info("All tests completed", "duration", time.Since(testStart).String())
 	if singleVpcResults.Failures > 0 || multiVpcResults.Failures > 0 || gwNATACLResults.Failures > 0 || basicResults.Failures > 0 || noVpcResults.Failures > 0 {
-		return fmt.Errorf("some tests failed: singleVpc=%d, multiVpc=%d, gwNATACL=%d, basic=%d, noVpc=%d", singleVpcResults.Failures, multiVpcResults.Failures, gwNATACLResults.Failures, basicResults.Failures, noVpcResults.Failures) //nolint:goerr113
+		return fmt.Errorf("some tests failed: singleVpc=%d, multiVpc=%d, gwNATACL=%d, basic=%d, noVpc=%d", singleVpcResults.Failures, multiVpcResults.Failures, gwNATACLResults.Failures, basicResults.Failures, noVpcResults.Failures) //nolint:err113
 	}
 
 	return nil

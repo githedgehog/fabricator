@@ -18,10 +18,10 @@ import (
 
 func ValidateFabricGateway(ctx context.Context, l *Loader, fabricCfg *meta.FabricConfig) error {
 	if l == nil {
-		return fmt.Errorf("loader is nil") //nolint:goerr113
+		return fmt.Errorf("loader is nil") //nolint:err113
 	}
 	if fabricCfg == nil {
-		return fmt.Errorf("fabric config is nil") //nolint:goerr113
+		return fmt.Errorf("fabric config is nil") //nolint:err113
 	}
 
 	kube := l.kube

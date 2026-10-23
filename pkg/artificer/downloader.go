@@ -103,7 +103,7 @@ func (d *Downloader) lookupCache(cacheName string) (string, error) {
 	}
 	if err == nil {
 		if !stat.IsDir() {
-			return "", fmt.Errorf("cache %q is not a directory", cachePath) //nolint:goerr113
+			return "", fmt.Errorf("cache %q is not a directory", cachePath) //nolint:err113
 		}
 
 		slog.Debug("Using cache", "entry", cacheName, "dir", d.cacheDir)
@@ -152,7 +152,7 @@ type ORASFile struct {
 
 func (d *Downloader) FromORAS(ctx context.Context, destPath, name string, version meta.Version, files []ORASFile) error {
 	if len(files) == 0 {
-		return fmt.Errorf("no files to download") //nolint:goerr113
+		return fmt.Errorf("no files to download") //nolint:err113
 	}
 
 	return d.WithORAS(ctx, name, version, func(cachePath string) error {

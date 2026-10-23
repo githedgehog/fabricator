@@ -148,7 +148,7 @@ func (c *Config) ensureHydrated(ctx context.Context, kube kclient.Client, mode H
 
 	if mode == HydrateModeNever {
 		if h != HydrationStatusFull {
-			return fmt.Errorf("wiring is not fully hydrated while hydration is disabled, cleanup and/or change hydration mode") //nolint:goerr113
+			return fmt.Errorf("wiring is not fully hydrated while hydration is disabled, cleanup and/or change hydration mode") //nolint:err113
 		}
 
 		return nil
@@ -158,7 +158,7 @@ func (c *Config) ensureHydrated(ctx context.Context, kube kclient.Client, mode H
 		}
 
 		if mode == HydrateModeIfNotPresent && h != HydrationStatusNone {
-			return fmt.Errorf("wiring is already partially hydrated, cleanup or change hydration mode") //nolint:goerr113
+			return fmt.Errorf("wiring is already partially hydrated, cleanup or change hydration mode") //nolint:err113
 		}
 
 		if err := c.hydrate(ctx, kube); err != nil {
@@ -173,13 +173,13 @@ func (c *Config) ensureHydrated(ctx context.Context, kube kclient.Client, mode H
 		}
 
 		if uh != HydrationStatusFull {
-			return fmt.Errorf("wiring is not fully hydrated after hydration") //nolint:goerr113
+			return fmt.Errorf("wiring is not fully hydrated after hydration") //nolint:err113
 		}
 
 		return nil
 	}
 
-	return fmt.Errorf("unknown hydration mode %q or invalid hydration status", mode) //nolint:goerr113
+	return fmt.Errorf("unknown hydration mode %q or invalid hydration status", mode) //nolint:err113
 }
 
 func fabricSpecs(ctx context.Context, kube kclient.Reader) (map[string]wiringapi.FabricSpec, error) {
@@ -199,11 +199,11 @@ func fabricSpecs(ctx context.Context, kube kclient.Reader) (map[string]wiringapi
 func fabricDomain(fabrics map[string]wiringapi.FabricSpec, fabricName, domainName string) (wiringapi.FabricDomainSpec, error) {
 	f, ok := fabrics[fabricName]
 	if !ok {
-		return wiringapi.FabricDomainSpec{}, fmt.Errorf("fabric %s not found", fabricName) //nolint:goerr113
+		return wiringapi.FabricDomainSpec{}, fmt.Errorf("fabric %s not found", fabricName) //nolint:err113
 	}
 	domain, ok := f.Domains[domainName]
 	if !ok {
-		return wiringapi.FabricDomainSpec{}, fmt.Errorf("domain %s not found in fabric %s", domainName, fabricName) //nolint:goerr113
+		return wiringapi.FabricDomainSpec{}, fmt.Errorf("domain %s not found in fabric %s", domainName, fabricName) //nolint:err113
 	}
 
 	return domain, nil
@@ -234,7 +234,7 @@ func (c *Config) getHydration(ctx context.Context, kube kclient.Reader) (Hydrati
 		return status, fmt.Errorf("parsing management DHCP start: %w", err)
 	}
 	if !mgmtSubnet.Contains(mgmtDHCPStart) {
-		return status, fmt.Errorf("management DHCP start %s is not in the management subnet %s", mgmtDHCPStart, mgmtSubnet) //nolint:goerr113
+		return status, fmt.Errorf("management DHCP start %s is not in the management subnet %s", mgmtDHCPStart, mgmtSubnet) //nolint:err113
 	}
 
 	mgmtDHCPEnd, err := c.Fab.Spec.Config.Fabric.ManagementDHCPEnd.Parse()
@@ -242,11 +242,11 @@ func (c *Config) getHydration(ctx context.Context, kube kclient.Reader) (Hydrati
 		return status, fmt.Errorf("parsing management DHCP end: %w", err)
 	}
 	if !mgmtSubnet.Contains(mgmtDHCPEnd) {
-		return status, fmt.Errorf("management DHCP end %s is not in the management subnet %s", mgmtDHCPStart, mgmtSubnet) //nolint:goerr113
+		return status, fmt.Errorf("management DHCP end %s is not in the management subnet %s", mgmtDHCPStart, mgmtSubnet) //nolint:err113
 	}
 
 	if mgmtDHCPStart.Compare(mgmtDHCPEnd) >= 0 {
-		return status, fmt.Errorf("management DHCP start %s should be less than the management DHCP end %s", mgmtDHCPStart, mgmtDHCPEnd) //nolint:goerr113
+		return status, fmt.Errorf("management DHCP start %s should be less than the management DHCP end %s", mgmtDHCPStart, mgmtDHCPEnd) //nolint:err113
 	}
 
 	dummySubnet, err := c.Fab.Spec.Config.Control.DummySubnet.Parse()
@@ -254,7 +254,7 @@ func (c *Config) getHydration(ctx context.Context, kube kclient.Reader) (Hydrati
 		return status, fmt.Errorf("parsing dummy subnet: %w", err)
 	}
 	if dummySubnet.Bits() > 24 {
-		return status, fmt.Errorf("dummy subnet %s should be at least a /24", dummySubnet) //nolint:goerr113
+		return status, fmt.Errorf("dummy subnet %s should be at least a /24", dummySubnet) //nolint:err113
 	}
 
 	dummyIPs := map[netip.Addr]bool{}
@@ -268,15 +268,15 @@ func (c *Config) getHydration(ctx context.Context, kube kclient.Reader) (Hydrati
 			}
 
 			if !mgmtSubnet.Contains(controlIP.Addr()) {
-				return fmt.Errorf("control node %s management IP %s is not in the management subnet %s", name, controlIP, mgmtSubnet) //nolint:goerr113
+				return fmt.Errorf("control node %s management IP %s is not in the management subnet %s", name, controlIP, mgmtSubnet) //nolint:err113
 			}
 
 			if controlIP.Addr().Compare(mgmtDHCPStart) >= 0 {
-				return fmt.Errorf("control node %s management IP %s should be less than the management DHCP start %s", name, controlIP, mgmtDHCPStart) //nolint:goerr113
+				return fmt.Errorf("control node %s management IP %s should be less than the management DHCP start %s", name, controlIP, mgmtDHCPStart) //nolint:err113
 			}
 
 			if _, exist := mgmtIPs[controlIP.Addr()]; exist {
-				return fmt.Errorf("control node %s management IP %s is already in use", name, controlIP) //nolint:goerr113
+				return fmt.Errorf("control node %s management IP %s is already in use", name, controlIP) //nolint:err113
 			}
 
 			mgmtIPs[controlIP.Addr()] = true
@@ -286,15 +286,15 @@ func (c *Config) getHydration(ctx context.Context, kube kclient.Reader) (Hydrati
 				return fmt.Errorf("parsing control node %s dummy IP %s: %w", name, dummy.IP, err)
 			}
 			if dummyIP.Bits() != 31 {
-				return fmt.Errorf("control node %s dummy IP %s must be a /31", name, dummyIP) //nolint:goerr113
+				return fmt.Errorf("control node %s dummy IP %s must be a /31", name, dummyIP) //nolint:err113
 			}
 
 			if !dummySubnet.Contains(dummyIP.Addr()) {
-				return fmt.Errorf("control node %s dummy IP %s is not in the dummy subnet %s", name, dummyIP, dummySubnet) //nolint:goerr113
+				return fmt.Errorf("control node %s dummy IP %s is not in the dummy subnet %s", name, dummyIP, dummySubnet) //nolint:err113
 			}
 
 			if _, exist := dummyIPs[dummyIP.Addr()]; exist {
-				return fmt.Errorf("control node %s dummy IP %s is already in use", name, dummyIP) //nolint:goerr113
+				return fmt.Errorf("control node %s dummy IP %s is already in use", name, dummyIP) //nolint:err113
 			}
 
 			dummyIPs[dummyIP.Addr()] = true
@@ -347,10 +347,10 @@ func (c *Config) getHydration(ctx context.Context, kube kclient.Reader) (Hydrati
 
 	for _, sw := range switches.Items {
 		if sw.Spec.Role == "" {
-			return status, fmt.Errorf("switch %s role is not set", sw.Name) //nolint:goerr113
+			return status, fmt.Errorf("switch %s role is not set", sw.Name) //nolint:err113
 		}
 		if !slices.Contains(wiringapi.SwitchRoles, sw.Spec.Role) {
-			return status, fmt.Errorf("switch %s role %q is invalid", sw.Name, sw.Spec.Role) //nolint:goerr113
+			return status, fmt.Errorf("switch %s role %q is invalid", sw.Name, sw.Spec.Role) //nolint:err113
 		}
 
 		total++
@@ -361,15 +361,15 @@ func (c *Config) getHydration(ctx context.Context, kube kclient.Reader) (Hydrati
 			}
 
 			if !mgmtSubnet.Contains(swIP.Addr()) {
-				return status, fmt.Errorf("switch %s IP %s is not in the management subnet %s", sw.Name, swIP, mgmtSubnet) //nolint:goerr113
+				return status, fmt.Errorf("switch %s IP %s is not in the management subnet %s", sw.Name, swIP, mgmtSubnet) //nolint:err113
 			}
 
 			if swIP.Addr().Compare(mgmtDHCPStart) >= 0 {
-				return status, fmt.Errorf("switch %s IP %s should be less than the management DHCP start %s", sw.Name, swIP, mgmtDHCPStart) //nolint:goerr113
+				return status, fmt.Errorf("switch %s IP %s should be less than the management DHCP start %s", sw.Name, swIP, mgmtDHCPStart) //nolint:err113
 			}
 
 			if _, exist := mgmtIPs[swIP.Addr()]; exist {
-				return status, fmt.Errorf("switch %s (management) IP %s is already in use", sw.Name, swIP) //nolint:goerr113
+				return status, fmt.Errorf("switch %s (management) IP %s is already in use", sw.Name, swIP) //nolint:err113
 			}
 			mgmtIPs[swIP.Addr()] = true
 		} else {
@@ -383,15 +383,15 @@ func (c *Config) getHydration(ctx context.Context, kube kclient.Reader) (Hydrati
 				return status, fmt.Errorf("parsing switch %s protocol IP %s: %w", sw.Name, sw.Spec.ProtocolIP, err)
 			}
 			if swProtoIP.Bits() != 32 {
-				return status, fmt.Errorf("switch %s protocol IP %s must be a /32", sw.Name, swProtoIP) //nolint:goerr113
+				return status, fmt.Errorf("switch %s protocol IP %s must be a /32", sw.Name, swProtoIP) //nolint:err113
 			}
 
 			if !protocolSubnet.Contains(swProtoIP.Addr()) {
-				return status, fmt.Errorf("switch %s protocol IP %s is not in the protocol subnet %s", sw.Name, swProtoIP, protocolSubnet) //nolint:goerr113
+				return status, fmt.Errorf("switch %s protocol IP %s is not in the protocol subnet %s", sw.Name, swProtoIP, protocolSubnet) //nolint:err113
 			}
 
 			if _, exist := protocolIPs[swProtoIP.Addr()]; exist {
-				return status, fmt.Errorf("switch %s protocol IP %s is already in use", sw.Name, swProtoIP) //nolint:goerr113
+				return status, fmt.Errorf("switch %s protocol IP %s is already in use", sw.Name, swProtoIP) //nolint:err113
 			}
 			protocolIPs[swProtoIP.Addr()] = true
 		} else {
@@ -404,26 +404,26 @@ func (c *Config) getHydration(ctx context.Context, kube kclient.Reader) (Hydrati
 			if sw.Spec.Role.IsLeaf() {
 				f, ok := fabrics[swFabric]
 				if !ok {
-					return status, fmt.Errorf("switch %s fabric %s not found", sw.Name, swFabric) //nolint:goerr113
+					return status, fmt.Errorf("switch %s fabric %s not found", sw.Name, swFabric) //nolint:err113
 				}
 				if sw.Spec.ASN < f.LeafASNStart || sw.Spec.ASN > f.LeafASNEnd {
-					return status, fmt.Errorf("leaf %s ASN %d is not in the fabric %s leaf ASN range %d-%d", sw.Name, sw.Spec.ASN, swFabric, f.LeafASNStart, f.LeafASNEnd) //nolint:goerr113
+					return status, fmt.Errorf("leaf %s ASN %d is not in the fabric %s leaf ASN range %d-%d", sw.Name, sw.Spec.ASN, swFabric, f.LeafASNStart, f.LeafASNEnd) //nolint:err113
 				}
 
 				if sw.Spec.Redundancy.Type == fmeta.RedundancyTypeMCLAG {
 					if peer, exist := mclagPeer[sw.Spec.Redundancy.Group]; exist {
 						if peer.Spec.ASN != sw.Spec.ASN {
-							return status, fmt.Errorf("mclag peers should have same ASNs: %s and %s", sw.Name, peer.Name) //nolint:goerr113
+							return status, fmt.Errorf("mclag peers should have same ASNs: %s and %s", sw.Name, peer.Name) //nolint:err113
 						}
 					} else {
 						mclagPeer[sw.Spec.Redundancy.Group] = &sw
 
 						if _, exist := leafASNs[sw.Spec.ASN]; exist {
-							return status, fmt.Errorf("leaf %s ASN %d is already in use", sw.Name, sw.Spec.ASN) //nolint:goerr113
+							return status, fmt.Errorf("leaf %s ASN %d is already in use", sw.Name, sw.Spec.ASN) //nolint:err113
 						}
 					}
 				} else if _, exist := leafASNs[sw.Spec.ASN]; exist {
-					return status, fmt.Errorf("leaf %s ASN %d is already in use", sw.Name, sw.Spec.ASN) //nolint:goerr113
+					return status, fmt.Errorf("leaf %s ASN %d is already in use", sw.Name, sw.Spec.ASN) //nolint:err113
 				}
 				leafASNs[sw.Spec.ASN] = true
 			}
@@ -434,7 +434,7 @@ func (c *Config) getHydration(ctx context.Context, kube kclient.Reader) (Hydrati
 					return status, fmt.Errorf("spine %s: %w", sw.Name, err)
 				}
 				if sw.Spec.ASN != domain.SpineASN {
-					return status, fmt.Errorf("spine %s ASN %d is not %d", sw.Name, sw.Spec.ASN, domain.SpineASN) //nolint:goerr113
+					return status, fmt.Errorf("spine %s ASN %d is not %d", sw.Name, sw.Spec.ASN, domain.SpineASN) //nolint:err113
 				}
 			}
 		} else {
@@ -442,7 +442,7 @@ func (c *Config) getHydration(ctx context.Context, kube kclient.Reader) (Hydrati
 		}
 
 		if sw.Spec.VTEPIP != "" && sw.Spec.Role.IsSpine() {
-			return status, fmt.Errorf("spine %s should not have VTEP IP", sw.Name) //nolint:goerr113
+			return status, fmt.Errorf("spine %s should not have VTEP IP", sw.Name) //nolint:err113
 		}
 
 		if sw.Spec.Role.IsLeaf() {
@@ -453,27 +453,27 @@ func (c *Config) getHydration(ctx context.Context, kube kclient.Reader) (Hydrati
 					return status, fmt.Errorf("parsing switch %s VTEP IP %s: %w", sw.Name, sw.Spec.VTEPIP, err)
 				}
 				if swVTEPIP.Bits() != 32 {
-					return status, fmt.Errorf("switch %s VTEP IP %s must be a /32", sw.Name, swVTEPIP) //nolint:goerr113
+					return status, fmt.Errorf("switch %s VTEP IP %s must be a /32", sw.Name, swVTEPIP) //nolint:err113
 				}
 
 				if !vtepSubnet.Contains(swVTEPIP.Addr()) {
-					return status, fmt.Errorf("switch %s VTEP IP %s is not in the VTEP subnet %s", sw.Name, swVTEPIP, vtepSubnet) //nolint:goerr113
+					return status, fmt.Errorf("switch %s VTEP IP %s is not in the VTEP subnet %s", sw.Name, swVTEPIP, vtepSubnet) //nolint:err113
 				}
 
 				if sw.Spec.Redundancy.Type == fmeta.RedundancyTypeMCLAG {
 					if peer, exist := mclagPeer[sw.Spec.Redundancy.Group]; exist {
 						if peer.Spec.VTEPIP != sw.Spec.VTEPIP {
-							return status, fmt.Errorf("mclag peers should have same VTEP IPs: %s and %s", sw.Name, peer.Name) //nolint:goerr113
+							return status, fmt.Errorf("mclag peers should have same VTEP IPs: %s and %s", sw.Name, peer.Name) //nolint:err113
 						}
 					} else {
 						mclagPeer[sw.Spec.Redundancy.Group] = &sw
 
 						if _, exist := vtepIPs[swVTEPIP.Addr()]; exist {
-							return status, fmt.Errorf("switch %s VTEP IP %s is already in use", sw.Name, swVTEPIP) //nolint:goerr113
+							return status, fmt.Errorf("switch %s VTEP IP %s is already in use", sw.Name, swVTEPIP) //nolint:err113
 						}
 					}
 				} else if _, exist := vtepIPs[swVTEPIP.Addr()]; exist {
-					return status, fmt.Errorf("switch %s VTEP IP %s is already in use", sw.Name, swVTEPIP) //nolint:goerr113
+					return status, fmt.Errorf("switch %s VTEP IP %s is already in use", sw.Name, swVTEPIP) //nolint:err113
 				}
 				vtepIPs[swVTEPIP.Addr()] = true
 			} else {
@@ -515,15 +515,15 @@ func (c *Config) getHydration(ctx context.Context, kube kclient.Reader) (Hydrati
 					return status, fmt.Errorf("parsing fabric connection %s link %d spine IP %s: %w", conn.Name, idx, link.Spine.IP, err)
 				}
 				if spinePrefix.Bits() != 31 {
-					return status, fmt.Errorf("fabric connection %s link %d spine IP %s is not a /31", conn.Name, idx, spinePrefix) //nolint:goerr113
+					return status, fmt.Errorf("fabric connection %s link %d spine IP %s is not a /31", conn.Name, idx, spinePrefix) //nolint:err113
 				}
 
 				spineIP := spinePrefix.Addr()
 				if !fabricSubnet.Contains(spineIP) {
-					return status, fmt.Errorf("fabric connection %s link %d spine IP %s is not in the fabric subnet %s", conn.Name, idx, spineIP, fabricSubnet) //nolint:goerr113
+					return status, fmt.Errorf("fabric connection %s link %d spine IP %s is not in the fabric subnet %s", conn.Name, idx, spineIP, fabricSubnet) //nolint:err113
 				}
 				if _, exist := fabricIPs[spineIP]; exist {
-					return status, fmt.Errorf("fabric connection %s link %d spine IP %s is already in use", conn.Name, idx, spineIP) //nolint:goerr113
+					return status, fmt.Errorf("fabric connection %s link %d spine IP %s is already in use", conn.Name, idx, spineIP) //nolint:err113
 				}
 				fabricIPs[spineIP] = true
 
@@ -532,20 +532,20 @@ func (c *Config) getHydration(ctx context.Context, kube kclient.Reader) (Hydrati
 					return status, fmt.Errorf("parsing fabric connection %s link %d leaf IP %s: %w", conn.Name, idx, link.Leaf.IP, err)
 				}
 				if leafPrefix.Bits() != 31 {
-					return status, fmt.Errorf("fabric connection %s link %d leaf IP %s is not a /31", conn.Name, idx, leafPrefix) //nolint:goerr113
+					return status, fmt.Errorf("fabric connection %s link %d leaf IP %s is not a /31", conn.Name, idx, leafPrefix) //nolint:err113
 				}
 
 				leafIP := leafPrefix.Addr()
 				if !fabricSubnet.Contains(leafIP) {
-					return status, fmt.Errorf("fabric connection %s link %d leaf IP %s is not in the fabric subnet %s", conn.Name, idx, leafIP, fabricSubnet) //nolint:goerr113
+					return status, fmt.Errorf("fabric connection %s link %d leaf IP %s is not in the fabric subnet %s", conn.Name, idx, leafIP, fabricSubnet) //nolint:err113
 				}
 				if _, exist := fabricIPs[leafIP]; exist {
-					return status, fmt.Errorf("fabric connection %s link %d leaf IP %s is already in use", conn.Name, idx, leafIP) //nolint:goerr113
+					return status, fmt.Errorf("fabric connection %s link %d leaf IP %s is already in use", conn.Name, idx, leafIP) //nolint:err113
 				}
 				fabricIPs[leafIP] = true
 
 				if spinePrefix.Masked() != leafPrefix.Masked() {
-					return status, fmt.Errorf("fabric connection %s link %d spine IP %s and leaf IP %s are not in the same subnet", conn.Name, idx, spineIP, leafIP) //nolint:goerr113
+					return status, fmt.Errorf("fabric connection %s link %d spine IP %s and leaf IP %s are not in the same subnet", conn.Name, idx, spineIP, leafIP) //nolint:err113
 				}
 			}
 		} else if conn.Spec.Mesh != nil {
@@ -568,15 +568,15 @@ func (c *Config) getHydration(ctx context.Context, kube kclient.Reader) (Hydrati
 					return status, fmt.Errorf("parsing mesh connection %s link %d leaf1 IP %s: %w", conn.Name, idx, link.Leaf1.IP, err)
 				}
 				if leaf1Prefix.Bits() != 31 {
-					return status, fmt.Errorf("mesh connection %s link %d leaf1 IP %s is not a /31", conn.Name, idx, leaf1Prefix) //nolint:goerr113
+					return status, fmt.Errorf("mesh connection %s link %d leaf1 IP %s is not a /31", conn.Name, idx, leaf1Prefix) //nolint:err113
 				}
 
 				leaf1IP := leaf1Prefix.Addr()
 				if !fabricSubnet.Contains(leaf1IP) {
-					return status, fmt.Errorf("mesh connection %s link %d leaf1 IP %s is not in the fabric subnet %s", conn.Name, idx, leaf1IP, fabricSubnet) //nolint:goerr113
+					return status, fmt.Errorf("mesh connection %s link %d leaf1 IP %s is not in the fabric subnet %s", conn.Name, idx, leaf1IP, fabricSubnet) //nolint:err113
 				}
 				if _, exist := fabricIPs[leaf1IP]; exist {
-					return status, fmt.Errorf("mesh connection %s link %d leaf1 IP %s is already in use", conn.Name, idx, leaf1IP) //nolint:goerr113
+					return status, fmt.Errorf("mesh connection %s link %d leaf1 IP %s is already in use", conn.Name, idx, leaf1IP) //nolint:err113
 				}
 				fabricIPs[leaf1IP] = true
 
@@ -585,20 +585,20 @@ func (c *Config) getHydration(ctx context.Context, kube kclient.Reader) (Hydrati
 					return status, fmt.Errorf("parsing mesh connection %s link %d leaf2 IP %s: %w", conn.Name, idx, link.Leaf2.IP, err)
 				}
 				if leaf2Prefix.Bits() != 31 {
-					return status, fmt.Errorf("mesh connection %s link %d leaf2 IP %s is not a /31", conn.Name, idx, leaf2Prefix) //nolint:goerr113
+					return status, fmt.Errorf("mesh connection %s link %d leaf2 IP %s is not a /31", conn.Name, idx, leaf2Prefix) //nolint:err113
 				}
 
 				leaf2IP := leaf2Prefix.Addr()
 				if !fabricSubnet.Contains(leaf2IP) {
-					return status, fmt.Errorf("mesh connection %s link %d leaf2 IP %s is not in the fabric subnet %s", conn.Name, idx, leaf2IP, fabricSubnet) //nolint:goerr113
+					return status, fmt.Errorf("mesh connection %s link %d leaf2 IP %s is not in the fabric subnet %s", conn.Name, idx, leaf2IP, fabricSubnet) //nolint:err113
 				}
 				if _, exist := fabricIPs[leaf2IP]; exist {
-					return status, fmt.Errorf("mesh connection %s link %d leaf2 IP %s is already in use", conn.Name, idx, leaf2IP) //nolint:goerr113
+					return status, fmt.Errorf("mesh connection %s link %d leaf2 IP %s is already in use", conn.Name, idx, leaf2IP) //nolint:err113
 				}
 				fabricIPs[leaf2IP] = true
 
 				if leaf1Prefix.Masked() != leaf2Prefix.Masked() {
-					return status, fmt.Errorf("mesh connection %s link %d spine IP %s and leaf IP %s are not in the same subnet", conn.Name, idx, leaf1IP, leaf2IP) //nolint:goerr113
+					return status, fmt.Errorf("mesh connection %s link %d spine IP %s and leaf IP %s are not in the same subnet", conn.Name, idx, leaf1IP, leaf2IP) //nolint:err113
 				}
 			}
 		} else if conn.Spec.Gateway != nil {
@@ -621,15 +621,15 @@ func (c *Config) getHydration(ctx context.Context, kube kclient.Reader) (Hydrati
 					return status, fmt.Errorf("parsing gateway connection %s link %d switch IP %s: %w", conn.Name, idx, link.Switch.IP, err)
 				}
 				if switchPrefix.Bits() != 31 {
-					return status, fmt.Errorf("gateway connection %s link %d switch IP %s is not a /31", conn.Name, idx, switchPrefix) //nolint:goerr113
+					return status, fmt.Errorf("gateway connection %s link %d switch IP %s is not a /31", conn.Name, idx, switchPrefix) //nolint:err113
 				}
 
 				switchIP := switchPrefix.Addr()
 				if !fabricSubnet.Contains(switchIP) {
-					return status, fmt.Errorf("gateway connection %s link %d switch IP %s is not in the fabric subnet %s", conn.Name, idx, switchIP, fabricSubnet) //nolint:goerr113
+					return status, fmt.Errorf("gateway connection %s link %d switch IP %s is not in the fabric subnet %s", conn.Name, idx, switchIP, fabricSubnet) //nolint:err113
 				}
 				if _, exist := fabricIPs[switchIP]; exist {
-					return status, fmt.Errorf("gateway connection %s link %d switch IP %s is already in use", conn.Name, idx, switchIP) //nolint:goerr113
+					return status, fmt.Errorf("gateway connection %s link %d switch IP %s is already in use", conn.Name, idx, switchIP) //nolint:err113
 				}
 				fabricIPs[switchIP] = true
 
@@ -638,20 +638,20 @@ func (c *Config) getHydration(ctx context.Context, kube kclient.Reader) (Hydrati
 					return status, fmt.Errorf("parsing gateway connection %s link %d gateway IP %s: %w", conn.Name, idx, link.Gateway.IP, err)
 				}
 				if gwPrefix.Bits() != 31 {
-					return status, fmt.Errorf("gateway connection %s link %d gateway IP %s is not a /31", conn.Name, idx, gwPrefix) //nolint:goerr113
+					return status, fmt.Errorf("gateway connection %s link %d gateway IP %s is not a /31", conn.Name, idx, gwPrefix) //nolint:err113
 				}
 
 				gwIP := gwPrefix.Addr()
 				if !fabricSubnet.Contains(gwIP) {
-					return status, fmt.Errorf("gateway connection %s link %d gateway IP %s is not in the fabric subnet %s", conn.Name, idx, gwIP, fabricSubnet) //nolint:goerr113
+					return status, fmt.Errorf("gateway connection %s link %d gateway IP %s is not in the fabric subnet %s", conn.Name, idx, gwIP, fabricSubnet) //nolint:err113
 				}
 				if _, exist := fabricIPs[gwIP]; exist {
-					return status, fmt.Errorf("gateway connection %s link %d gateway IP %s is already in use", conn.Name, idx, gwIP) //nolint:goerr113
+					return status, fmt.Errorf("gateway connection %s link %d gateway IP %s is already in use", conn.Name, idx, gwIP) //nolint:err113
 				}
 				fabricIPs[gwIP] = true
 
 				if switchPrefix.Masked() != gwPrefix.Masked() {
-					return status, fmt.Errorf("gateway connection %s link %d spine IP %s and gateway IP %s are not in the same subnet", conn.Name, idx, switchIP, gwIP) //nolint:goerr113
+					return status, fmt.Errorf("gateway connection %s link %d spine IP %s and gateway IP %s are not in the same subnet", conn.Name, idx, switchIP, gwIP) //nolint:err113
 				}
 			}
 		}
@@ -669,7 +669,7 @@ func (c *Config) getHydration(ctx context.Context, kube kclient.Reader) (Hydrati
 				return status, fmt.Errorf("gateway %s: %w", gw.Name, err)
 			}
 			if gw.Spec.ASN != domain.GatewayASN {
-				return status, fmt.Errorf("gateway %s ASN %d is not %d", gw.Name, gw.Spec.ASN, domain.GatewayASN) //nolint:goerr113
+				return status, fmt.Errorf("gateway %s ASN %d is not %d", gw.Name, gw.Spec.ASN, domain.GatewayASN) //nolint:err113
 			}
 		} else {
 			missing++
@@ -683,15 +683,15 @@ func (c *Config) getHydration(ctx context.Context, kube kclient.Reader) (Hydrati
 				return status, fmt.Errorf("parsing gateway %s protocol IP %s: %w", gw.Name, gw.Spec.ProtocolIP, err)
 			}
 			if gwProtoIP.Bits() != 32 {
-				return status, fmt.Errorf("gateway %s protocol IP %s must be a /32", gw.Name, gwProtoIP) //nolint:goerr113
+				return status, fmt.Errorf("gateway %s protocol IP %s must be a /32", gw.Name, gwProtoIP) //nolint:err113
 			}
 
 			if !protocolSubnet.Contains(gwProtoIP.Addr()) {
-				return status, fmt.Errorf("gateway %s protocol IP %s is not in the protocol subnet %s", gw.Name, gwProtoIP, protocolSubnet) //nolint:goerr113
+				return status, fmt.Errorf("gateway %s protocol IP %s is not in the protocol subnet %s", gw.Name, gwProtoIP, protocolSubnet) //nolint:err113
 			}
 
 			if _, exist := protocolIPs[gwProtoIP.Addr()]; exist {
-				return status, fmt.Errorf("gateway %s protocol IP %s is already in use", gw.Name, gwProtoIP) //nolint:goerr113
+				return status, fmt.Errorf("gateway %s protocol IP %s is already in use", gw.Name, gwProtoIP) //nolint:err113
 			}
 			protocolIPs[gwProtoIP.Addr()] = true
 		} else {
@@ -706,15 +706,15 @@ func (c *Config) getHydration(ctx context.Context, kube kclient.Reader) (Hydrati
 				return status, fmt.Errorf("parsing gateway %s vtep IP %s: %w", gw.Name, gw.Spec.VTEPIP, err)
 			}
 			if gwVTEPIP.Bits() != 32 {
-				return status, fmt.Errorf("gateway %s vtep IP %s must be a /32", gw.Name, gwVTEPIP) //nolint:goerr113
+				return status, fmt.Errorf("gateway %s vtep IP %s must be a /32", gw.Name, gwVTEPIP) //nolint:err113
 			}
 
 			if !vtepSubnet.Contains(gwVTEPIP.Addr()) {
-				return status, fmt.Errorf("gateway %s vtep IP %s is not in the vtep subnet %s", gw.Name, gwVTEPIP, vtepSubnet) //nolint:goerr113
+				return status, fmt.Errorf("gateway %s vtep IP %s is not in the vtep subnet %s", gw.Name, gwVTEPIP, vtepSubnet) //nolint:err113
 			}
 
 			if _, exist := vtepIPs[gwVTEPIP.Addr()]; exist {
-				return status, fmt.Errorf("gateway %s vtep IP %s is already in use", gw.Name, gwVTEPIP) //nolint:goerr113
+				return status, fmt.Errorf("gateway %s vtep IP %s is already in use", gw.Name, gwVTEPIP) //nolint:err113
 			}
 			vtepIPs[gwVTEPIP.Addr()] = true
 		} else {
@@ -733,7 +733,7 @@ func (c *Config) getHydration(ctx context.Context, kube kclient.Reader) (Hydrati
 		return HydrationStatusPartial, nil
 	}
 
-	return status, fmt.Errorf("invalid hydration status: total=%d, missing=%d", total, missing) //nolint:goerr113
+	return status, fmt.Errorf("invalid hydration status: total=%d, missing=%d", total, missing) //nolint:err113
 }
 
 func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
@@ -748,7 +748,7 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 	}
 
 	if controlVIP.Addr() != mgmtSubnet.Masked().Addr().Next() {
-		return fmt.Errorf("control VIP %s is not the first IP of the management subnet %s", controlVIP, mgmtSubnet) //nolint:goerr113
+		return fmt.Errorf("control VIP %s is not the first IP of the management subnet %s", controlVIP, mgmtSubnet) //nolint:err113
 	}
 
 	nextMgmtIP := controlVIP.Addr()
@@ -834,10 +834,10 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 	for idx := range switches.Items {
 		sw := &switches.Items[idx]
 		if sw.Spec.Role == "" {
-			return fmt.Errorf("switch %s role is not set", sw.Name) //nolint:goerr113
+			return fmt.Errorf("switch %s role is not set", sw.Name) //nolint:err113
 		}
 		if !slices.Contains(wiringapi.SwitchRoles, sw.Spec.Role) {
-			return fmt.Errorf("switch %s role %q is invalid", sw.Name, sw.Spec.Role) //nolint:goerr113
+			return fmt.Errorf("switch %s role %q is invalid", sw.Name, sw.Spec.Role) //nolint:err113
 		}
 
 		sw.Spec.IP = netip.PrefixFrom(nextMgmtIP, mgmtSubnet.Bits()).String()
@@ -848,7 +848,7 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 
 		swFabric := sw.Spec.Topology.Fabric
 		if _, ok := fabrics[swFabric]; !ok {
-			return fmt.Errorf("switch %s fabric %s not found", sw.Name, swFabric) //nolint:goerr113
+			return fmt.Errorf("switch %s fabric %s not found", sw.Name, swFabric) //nolint:err113
 		}
 
 		if sw.Spec.Role.IsSpine() {
@@ -946,7 +946,7 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 
 				iface, exist := gw.Spec.Interfaces[link.Gateway.LocalPortName()]
 				if !exist {
-					return fmt.Errorf("gateway %s does not have interface %s", gwName, link.Gateway.LocalPortName()) //nolint:goerr113
+					return fmt.Errorf("gateway %s does not have interface %s", gwName, link.Gateway.LocalPortName()) //nolint:err113
 				}
 				iface.IPs = []string{link.Gateway.IP}
 				iface.MTU = fabric.MTU
@@ -995,7 +995,7 @@ func (c *Config) hydrate(ctx context.Context, kube kclient.Client) error {
 	}
 	const MaxVTEPMACs = 254
 	if len(gateways.Items) > MaxVTEPMACs {
-		return fmt.Errorf("too many gateways (%d) for our current VTEPMAC hydration scheme, maximum is %d", len(gateways.Items), MaxVTEPMACs) //nolint:goerr113
+		return fmt.Errorf("too many gateways (%d) for our current VTEPMAC hydration scheme, maximum is %d", len(gateways.Items), MaxVTEPMACs) //nolint:err113
 	}
 	nextMACFinalOctet := uint8(1)
 

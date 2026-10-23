@@ -72,11 +72,11 @@ func (c *Config) SSHVM(ctx context.Context, vlab *VLAB, vm VM) (*sshutil.Config,
 	case VMTypeSwitch:
 		sw := &wiringapi.Switch{}
 		if err := c.Client.Get(ctx, kclient.ObjectKey{Name: vm.Name, Namespace: kmetav1.NamespaceDefault}, sw); err != nil {
-			return nil, fmt.Errorf("getting switch object: %w", err) //nolint:goerr113
+			return nil, fmt.Errorf("getting switch object: %w", err)
 		}
 
 		if sw.Spec.IP == "" {
-			return nil, fmt.Errorf("switch IP not found: %s", vm.Name) //nolint:goerr113
+			return nil, fmt.Errorf("switch IP not found: %s", vm.Name) //nolint:err113
 		}
 
 		swIP, err := netip.ParsePrefix(sw.Spec.IP)

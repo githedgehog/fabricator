@@ -24,7 +24,7 @@ const (
 
 func eslagFallbackTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *ConnectivityMatrix) (bool, []RevertFunc, error) {
 	if testCtx.setupOpts.VPCMode == vpcapi.VPCModeL3VNI {
-		return true, nil, fmt.Errorf("L3VNI mode is not compatible with ESLAG") //nolint:goerr113
+		return true, nil, fmt.Errorf("L3VNI mode is not compatible with ESLAG") //nolint:err113
 	}
 
 	conns := &wiringapi.ConnectionList{}
@@ -114,12 +114,12 @@ func eslagFallbackTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *
 		}
 
 		if len(failures) > 0 {
-			return false, reverts, fmt.Errorf("port-channel fallback DHCP not relayed on legs: %s", strings.Join(failures, "; ")) //nolint:goerr113
+			return false, reverts, fmt.Errorf("port-channel fallback DHCP not relayed on legs: %s", strings.Join(failures, "; ")) //nolint:err113
 		}
 	}
 
 	if !ranAtLeastOnce {
-		return true, reverts, fmt.Errorf("no ESLAG connection with a VPC attachment found") //nolint:goerr113
+		return true, reverts, fmt.Errorf("no ESLAG connection with a VPC attachment found") //nolint:err113
 	}
 
 	return false, reverts, nil
@@ -131,7 +131,7 @@ func enableESLAGFallback(ctx context.Context, testCtx *VPCPeeringTestCtx, name s
 		return fmt.Errorf("getting Connection %s: %w", name, err)
 	}
 	if latest.Spec.ESLAG == nil {
-		return fmt.Errorf("connection %s has no ESLAG spec", name) //nolint:goerr113
+		return fmt.Errorf("connection %s has no ESLAG spec", name) //nolint:err113
 	}
 	originalFallback := latest.Spec.ESLAG.Fallback
 	if originalFallback {
@@ -171,7 +171,7 @@ func enableESLAGFallback(ctx context.Context, testCtx *VPCPeeringTestCtx, name s
 func findESLAGAttachedVLAN(ctx context.Context, kube kclient.Client, conn *wiringapi.Connection) (uint16, string, error) {
 	_, serverNames, _, _, err := conn.Spec.Endpoints() //nolint:dogsled
 	if err != nil || len(serverNames) != 1 {
-		return 0, "", fmt.Errorf("connection %s does not have a single server endpoint", conn.Name) //nolint:goerr113
+		return 0, "", fmt.Errorf("connection %s does not have a single server endpoint", conn.Name) //nolint:err113
 	}
 	server := serverNames[0]
 

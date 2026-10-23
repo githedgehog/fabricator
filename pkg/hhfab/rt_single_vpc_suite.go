@@ -173,7 +173,7 @@ func eslagTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *Connecti
 	for _, conn := range eligible {
 		slog.Debug("Testing ESLAG connection", "connection", conn.Name)
 		if len(conn.Spec.ESLAG.Links) != 2 {
-			return false, nil, fmt.Errorf("ESLAG connection %s has %d links, expected 2", conn.Name, len(conn.Spec.ESLAG.Links)) //nolint:goerr113
+			return false, nil, fmt.Errorf("ESLAG connection %s has %d links, expected 2", conn.Name, len(conn.Spec.ESLAG.Links)) //nolint:err113
 		}
 		for _, link := range conn.Spec.ESLAG.Links {
 			if err := shutDownLinkAndTest(ctx, testCtx, link, matrix); err != nil {
@@ -208,7 +208,7 @@ func bundledFailoverTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix
 	for _, conn := range conns.Items {
 		slog.Debug("Testing Bundled connection", "connection", conn.Name)
 		if len(conn.Spec.Bundled.Links) < 2 {
-			return false, nil, fmt.Errorf("MCLAG connection %s has %d links, expected at least 2", conn.Name, len(conn.Spec.Bundled.Links)) //nolint:goerr113
+			return false, nil, fmt.Errorf("MCLAG connection %s has %d links, expected at least 2", conn.Name, len(conn.Spec.Bundled.Links)) //nolint:err113
 		}
 		for _, link := range conn.Spec.Bundled.Links {
 			if err := shutDownLinkAndTest(ctx, testCtx, link, matrix); err != nil {
@@ -274,7 +274,7 @@ outer:
 		// disable agent on spine
 		spineSSH, ok := spinesSSH[spine.Name]
 		if !ok {
-			return false, nil, fmt.Errorf("no ssh config found for spine switch %s", spine.Name) //nolint:goerr113
+			return false, nil, fmt.Errorf("no ssh config found for spine switch %s", spine.Name) //nolint:err113
 		}
 		if err := changeAgentStatus(ctx, spineSSH, spine.Name, false); err != nil {
 			return false, nil, fmt.Errorf("disabling HH agent: %w", err)
@@ -293,7 +293,7 @@ outer:
 				spinePort := link.Spine.LocalPortName()
 				nosPortName, ok := portMap[spinePort]
 				if !ok {
-					returnErr = fmt.Errorf("port %s not found in switch profile %s for switch %s", spinePort, profile.Name, spine.Name) //nolint:goerr113
+					returnErr = fmt.Errorf("port %s not found in switch profile %s for switch %s", spinePort, profile.Name, spine.Name) //nolint:err113
 
 					break outer
 				}
@@ -327,7 +327,7 @@ outer:
 		for i := range maxRetries {
 			spineSSH, ok := spinesSSH[spine.Name]
 			if !ok {
-				return false, nil, fmt.Errorf("no ssh config found for spine switch %s", spine.Name) //nolint:goerr113
+				return false, nil, fmt.Errorf("no ssh config found for spine switch %s", spine.Name) //nolint:err113
 			}
 			if err := changeAgentStatus(ctx, spineSSH, spine.Name, true); err != nil {
 				slog.Error("Enabling HH agent", "switch", spine.Name, "error", err)
@@ -346,9 +346,9 @@ outer:
 		}
 		// if we get here, we failed to enable the agent
 		if returnErr != nil {
-			returnErr = errors.Join(returnErr, fmt.Errorf("could not enable HH agent on switch %s after %d attempts", spine.Name, maxRetries)) //nolint:goerr113
+			returnErr = errors.Join(returnErr, fmt.Errorf("could not enable HH agent on switch %s after %d attempts", spine.Name, maxRetries)) //nolint:err113
 		} else {
-			returnErr = fmt.Errorf("could not enable HH agent on switch %s after %d attempts", spine.Name, maxRetries) //nolint:goerr113
+			returnErr = fmt.Errorf("could not enable HH agent on switch %s after %d attempts", spine.Name, maxRetries) //nolint:err113
 		}
 	}
 
@@ -621,7 +621,7 @@ func gatewayFailoverTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix
 			}
 			nosPortName, ok := portMap[spinePortName]
 			if !ok {
-				return false, reverts, fmt.Errorf("port %s not found in switch profile for switch %s", spinePortName, spineName) //nolint:goerr113
+				return false, reverts, fmt.Errorf("port %s not found in switch profile for switch %s", spinePortName, spineName) //nolint:err113
 			}
 
 			spinePorts = append(spinePorts, spinePort{spineName: spineName, nosPortName: nosPortName})
@@ -629,7 +629,7 @@ func gatewayFailoverTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix
 	}
 
 	if len(spinePorts) == 0 {
-		return false, reverts, fmt.Errorf("no spine ports found for gateway %s", targetGateway) //nolint:goerr113
+		return false, reverts, fmt.Errorf("no spine ports found for gateway %s", targetGateway) //nolint:err113
 	}
 
 	slog.Debug("Found spine ports to shut down", "gateway", targetGateway, "ports", len(spinePorts))
@@ -724,7 +724,7 @@ func meshFailoverTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *C
 			for i := range maxRetries {
 				leafSSH, ok := leavesSSH[leaf.Name]
 				if !ok {
-					return fmt.Errorf("no ssh config found for leaf switch %s", leaf.Name) //nolint:goerr113
+					return fmt.Errorf("no ssh config found for leaf switch %s", leaf.Name) //nolint:err113
 				}
 				if err := changeAgentStatus(ctx, leafSSH, leaf.Name, true); err != nil {
 					slog.Error("Enabling HH agent", "switch", leaf.Name, "error", err)
@@ -742,7 +742,7 @@ func meshFailoverTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *C
 				continue
 			}
 			// if we get here, we failed to enable the agent
-			return fmt.Errorf("could not enable HH agent on switch %s after %d attempts", leaf.Name, maxRetries) //nolint:goerr113
+			return fmt.Errorf("could not enable HH agent on switch %s after %d attempts", leaf.Name, maxRetries) //nolint:err113
 		}
 
 		return nil
@@ -771,7 +771,7 @@ func meshFailoverTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *C
 		// disable agent on leaf
 		leafSSH, ok := leavesSSH[leaf.Name]
 		if !ok {
-			return false, nil, fmt.Errorf("no ssh config found for leaf switch %s", leaf.Name) //nolint:goerr113
+			return false, nil, fmt.Errorf("no ssh config found for leaf switch %s", leaf.Name) //nolint:err113
 		}
 		if err := changeAgentStatus(ctx, leafSSH, leaf.Name, false); err != nil {
 			return false, nil, fmt.Errorf("disabling HH agent: %w", err)
@@ -790,13 +790,13 @@ func meshFailoverTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *C
 				case link.Leaf2.DeviceName() == leaf.Name:
 					linkSwitch = &link.Leaf2
 				default:
-					return false, reverts, fmt.Errorf("leaf %s not found in mesh link of connection %s", leaf.Name, conn.Name) //nolint:goerr113
+					return false, reverts, fmt.Errorf("leaf %s not found in mesh link of connection %s", leaf.Name, conn.Name) //nolint:err113
 				}
 
 				swPort := linkSwitch.LocalPortName()
 				nosPortName, ok := portMap[swPort]
 				if !ok {
-					return false, reverts, fmt.Errorf("port %s not found in switch profile %s for switch %s", swPort, profile.Name, leaf.Name) //nolint:goerr113
+					return false, reverts, fmt.Errorf("port %s not found in switch profile %s for switch %s", swPort, profile.Name, leaf.Name) //nolint:err113
 				}
 				if err := changeSwitchPortStatus(ctx, leafSSH, leaf.Name, nosPortName, false); err != nil {
 					return false, reverts, fmt.Errorf("setting switch port down: %w", err)
@@ -816,7 +816,7 @@ func meshFailoverTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *C
 	}
 
 	if !someLeafTested {
-		return true, reverts, errors.New("no mesh leaves could be tested") //nolint:goerr113
+		return true, reverts, errors.New("no mesh leaves could be tested") //nolint:err113
 	}
 
 	return false, reverts, nil
@@ -874,7 +874,7 @@ outer:
 		}
 	}
 	if vpc == nil {
-		return true, nil, errors.New("no VPC with at least 3 subnets found") //nolint:goerr113
+		return true, nil, errors.New("no VPC with at least 3 subnets found") //nolint:err113
 	}
 	permitList := []string{subnet1Name, subnet2Name, subnet3Name}
 	waitTime := 5 * time.Second
@@ -1119,7 +1119,7 @@ func dnsNtpMtuTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *Conn
 	}
 
 	if !dnsFound || !ntpFound || !mtuFound || !leaseCheck || !advRoutes {
-		return false, reverts, fmt.Errorf("DNS: %v, NTP: %v, MTU: %v, DHCP lease: %v, Advertised Routes: %v", dnsFound, ntpFound, mtuFound, leaseCheck, advRoutes) //nolint:goerr113
+		return false, reverts, fmt.Errorf("DNS: %v, NTP: %v, MTU: %v, DHCP lease: %v, Advertised Routes: %v", dnsFound, ntpFound, mtuFound, leaseCheck, advRoutes) //nolint:err113
 	}
 
 	return false, reverts, nil
@@ -1197,7 +1197,7 @@ func dhcpRenewalTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *Co
 	if testVPC == nil || len(testServers) == 0 {
 		slog.Info("No servers with DHCP-enabled VPC attachments found, skipping DHCP renewal test")
 
-		return true, nil, fmt.Errorf("no servers with DHCP-enabled VPC attachments found") //nolint:goerr113
+		return true, nil, fmt.Errorf("no servers with DHCP-enabled VPC attachments found") //nolint:err113
 	}
 
 	testServerCount := 1
@@ -1314,7 +1314,7 @@ func dhcpRenewalTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix *Co
 	}
 
 	if len(failures) > 0 {
-		return false, reverts, fmt.Errorf("DHCP renewal failures: %v", failures) //nolint:goerr113
+		return false, reverts, fmt.Errorf("DHCP renewal failures: %v", failures) //nolint:err113
 	}
 
 	slog.Info("DHCP renewal test completed successfully", "servers", len(testServers), "maxDuration", maxDuration)
@@ -1370,7 +1370,7 @@ func (testCtx *VPCPeeringTestCtx) testStaticIPAssignment(ctx context.Context, vp
 		return fmt.Errorf("getting IP address from %s: %w", server.Name, err)
 	}
 	if assignedIP != staticIP.String() {
-		return fmt.Errorf("server %s did not get static IP: expected %s, got %s", server.Name, staticIP.String(), assignedIP) //nolint:goerr113
+		return fmt.Errorf("server %s did not get static IP: expected %s, got %s", server.Name, staticIP.String(), assignedIP) //nolint:err113
 	}
 
 	slog.Info("Static IP assignment verified", "description", description, "server", server.Name, "ip", assignedIP)
@@ -1387,11 +1387,11 @@ func (testCtx *VPCPeeringTestCtx) testStaticIPAssignment(ctx context.Context, vp
 
 	allocation, found := dhcpSubnet.Status.Allocated[serverMAC]
 	if !found {
-		return fmt.Errorf("static allocation for MAC %s not found in DHCPSubnet status", serverMAC) //nolint:goerr113
+		return fmt.Errorf("static allocation for MAC %s not found in DHCPSubnet status", serverMAC) //nolint:err113
 	}
 
 	if allocation.IP != staticIP.String() {
-		return fmt.Errorf("DHCPSubnet allocation mismatch: expected %s, got %s", staticIP.String(), allocation.IP) //nolint:goerr113
+		return fmt.Errorf("DHCPSubnet allocation mismatch: expected %s, got %s", staticIP.String(), allocation.IP) //nolint:err113
 	}
 
 	slog.Info("Static IP test passed", "description", description, "ip", staticIP.String())
@@ -1443,7 +1443,7 @@ func dhcpStaticLeaseTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix
 	}
 	baseIP := subnetCIDR.IP.To4()
 	if baseIP == nil {
-		return false, nil, fmt.Errorf("subnet %s is not IPv4", subnet.Subnet) //nolint:goerr113
+		return false, nil, fmt.Errorf("subnet %s is not IPv4", subnet.Subnet) //nolint:err113
 	}
 	baseInt := binary.BigEndian.Uint32(baseIP)
 
@@ -1598,7 +1598,7 @@ outer:
 	if swName == "" {
 		slog.Info("No RoCE-capable leaves with non-MCLAG server connections found, skipping test")
 
-		return true, nil, fmt.Errorf("no RoCE leaves with non-MCLAG server connections found") //nolint:goerr113
+		return true, nil, fmt.Errorf("no RoCE leaves with non-MCLAG server connections found") //nolint:err113
 	}
 	slog.Debug("Using RoCE leaf switch for test", "switch", swName)
 
@@ -1673,7 +1673,7 @@ outer:
 			slog.Debug("No UC3 transmit bits/pkts found yet, retrying in 10 seconds", "switch", swName, "attempt", i+1, "maxAttempts", maxAttempts)
 			time.Sleep(10 * time.Second)
 		} else {
-			return false, nil, fmt.Errorf("no UC3 transmit bits/pkts found on switch %s after %d attempts", swName, maxAttempts) //nolint:goerr113
+			return false, nil, fmt.Errorf("no UC3 transmit bits/pkts found on switch %s after %d attempts", swName, maxAttempts) //nolint:err113
 		}
 	}
 

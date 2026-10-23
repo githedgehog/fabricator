@@ -1494,7 +1494,7 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 
 	parseNatType := func(optValue string) (natType, error) {
 		if optValue == "" {
-			return natTypeNone, fmt.Errorf("nat type should be non-empty") //nolint:goerr113
+			return natTypeNone, fmt.Errorf("nat type should be non-empty") //nolint:err113
 		}
 		nt := strings.TrimSpace(strings.ToLower(optValue))
 		switch nt {
@@ -1505,7 +1505,7 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 		case string(natTypePortFwd), "portforward", "port_forward", "pf":
 			return natTypePortFwd, nil
 		default:
-			return natTypeNone, fmt.Errorf("unknown nat type %q (supported: static, masquerade, port-forward)", optValue) //nolint:goerr113
+			return natTypeNone, fmt.Errorf("unknown nat type %q (supported: static, masquerade, port-forward)", optValue) //nolint:err113
 		}
 	}
 
@@ -1513,14 +1513,14 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 		// Format: "10.0.0.0/24,!10.0.0.128/25" (multiple entries allowed)
 		// "!" means Not.
 		if raw == "" {
-			return nil, fmt.Errorf("invalid as prefixes: should not be empty") //nolint:goerr113
+			return nil, fmt.Errorf("invalid as prefixes: should not be empty") //nolint:err113
 		}
 		items := strings.Split(raw, ",")
 		out := make([]gwapi.PeeringEntryAs, 0, len(items))
 		for idx, item := range items {
 			item = strings.TrimSpace(item)
 			if item == "" {
-				return nil, fmt.Errorf("invalid as prefix at index %d: should not be empty", idx) //nolint:goerr113
+				return nil, fmt.Errorf("invalid as prefix at index %d: should not be empty", idx) //nolint:err113
 			}
 
 			as := gwapi.PeeringEntryAs{}
@@ -1550,24 +1550,24 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 		// Protocol is optional, defaults to any.
 		// Port ranges are allowed
 		if raw == "" {
-			return nil, fmt.Errorf("invalid port-forward rules: should not be empty") //nolint:goerr113
+			return nil, fmt.Errorf("invalid port-forward rules: should not be empty") //nolint:err113
 		}
 		rules := strings.Split(raw, ",")
 		out := make([]gwapi.PeeringNATPortForwardEntry, 0, len(rules))
 		for idx, rule := range rules {
 			rule = strings.TrimSpace(rule)
 			if rule == "" {
-				return nil, fmt.Errorf("invalid port-forward rule at index %d: should not be empty", idx) //nolint:goerr113
+				return nil, fmt.Errorf("invalid port-forward rule at index %d: should not be empty", idx) //nolint:err113
 			}
 
 			kv := strings.Split(rule, "=")
 			if len(kv) != 2 {
-				return nil, fmt.Errorf("invalid port-forward rule %q at index %d: must be in format [proto/]port=as", rule, idx) //nolint:goerr113
+				return nil, fmt.Errorf("invalid port-forward rule %q at index %d: must be in format [proto/]port=as", rule, idx) //nolint:err113
 			}
 			left := strings.TrimSpace(kv[0])
 			right := strings.TrimSpace(kv[1])
 			if left == "" || right == "" {
-				return nil, fmt.Errorf("invalid port-forward rule %q at index %d: port and as must be non-empty", rule, idx) //nolint:goerr113
+				return nil, fmt.Errorf("invalid port-forward rule %q at index %d: port and as must be non-empty", rule, idx) //nolint:err113
 			}
 
 			entry := gwapi.PeeringNATPortForwardEntry{
@@ -1578,12 +1578,12 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 			if strings.Contains(left, "/") {
 				portParts := strings.Split(left, "/")
 				if len(portParts) != 2 {
-					return nil, fmt.Errorf("invalid port-forward rule %q at index %d: left side must be in format proto/port", rule, idx) //nolint:goerr113
+					return nil, fmt.Errorf("invalid port-forward rule %q at index %d: left side must be in format proto/port", rule, idx) //nolint:err113
 				}
 				proto := strings.TrimSpace(portParts[0])
 				port := strings.TrimSpace(portParts[1])
 				if proto == "" || port == "" {
-					return nil, fmt.Errorf("invalid port-forward rule %q at index %d: proto and port must be non-empty", rule, idx) //nolint:goerr113
+					return nil, fmt.Errorf("invalid port-forward rule %q at index %d: proto and port must be non-empty", rule, idx) //nolint:err113
 				}
 				switch proto {
 				case string(gwapi.PeeringNATProtocolTCP):
@@ -1593,7 +1593,7 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 				case string(gwapi.PeeringNATProtocolAny):
 					entry.Protocol = gwapi.PeeringNATProtocolAny
 				default:
-					return nil, fmt.Errorf("invalid port-forward rule %q at index %d: unknown protocol %q (supported: tcp, udp)", rule, idx, proto) //nolint:goerr113
+					return nil, fmt.Errorf("invalid port-forward rule %q at index %d: unknown protocol %q (supported: tcp, udp)", rule, idx, proto) //nolint:err113
 				}
 				entry.Port = port
 			} else {
@@ -1604,10 +1604,10 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 
 			// only the most basic of validation, let's not duplicate code; alternatively, let's make the validation function in gwapi public
 			if strings.Contains(entry.Port, ",") || strings.TrimSpace(entry.Port) != entry.Port || entry.Port == "" {
-				return nil, fmt.Errorf("invalid port %q in port-forward rule %q at index %d", entry.Port, rule, idx) //nolint:goerr113
+				return nil, fmt.Errorf("invalid port %q in port-forward rule %q at index %d", entry.Port, rule, idx) //nolint:err113
 			}
 			if strings.Contains(entry.As, ",") || strings.TrimSpace(entry.As) != entry.As || entry.As == "" {
-				return nil, fmt.Errorf("invalid as %q in port-forward rule %q at index %d", entry.As, rule, idx) //nolint:goerr113
+				return nil, fmt.Errorf("invalid as %q in port-forward rule %q at index %d", entry.As, rule, idx) //nolint:err113
 			}
 
 			out = append(out, entry)
@@ -1642,7 +1642,7 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 			expose.NAT.Masquerade = &gwapi.PeeringNATMasquerade{}
 		case natTypePortFwd:
 			if cfg.pfRaw == "" {
-				return fmt.Errorf("port-forward NAT requires port-forward rules (pf=...)") //nolint:goerr113
+				return fmt.Errorf("port-forward NAT requires port-forward rules (pf=...)") //nolint:err113
 			}
 			ports, err := parsePortForwardRuleList(cfg.pfRaw)
 			if err != nil {
@@ -1650,7 +1650,7 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 			}
 			expose.NAT.PortForward = &gwapi.PeeringNATPortForward{Ports: ports}
 		default:
-			return fmt.Errorf("unexpected NAT type %q", nat) //nolint:goerr113
+			return fmt.Errorf("unexpected NAT type %q", nat) //nolint:err113
 		}
 
 		return nil
@@ -1741,7 +1741,7 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 						return fmt.Errorf("invalid VPC peering option #%d %s, vpc1-as should be non-empty", idx, option)
 					}
 					if vpc1Nat.asRaw != "" {
-						return fmt.Errorf("invalid VPC peering option #%d %s, vpc1-as already specified", idx, option) //nolint:goerr113
+						return fmt.Errorf("invalid VPC peering option #%d %s, vpc1-as already specified", idx, option) //nolint:err113
 					}
 					vpc1Nat.asRaw = optValue
 				} else if optName == "vpc2-as" || optName == "as2" {
@@ -1749,7 +1749,7 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 						return fmt.Errorf("invalid VPC peering option #%d %s, vpc2-as should be non-empty", idx, option)
 					}
 					if vpc2Nat.asRaw != "" {
-						return fmt.Errorf("invalid VPC peering option #%d %s, vpc2-as already specified", idx, option) //nolint:goerr113
+						return fmt.Errorf("invalid VPC peering option #%d %s, vpc2-as already specified", idx, option) //nolint:err113
 					}
 					vpc2Nat.asRaw = optValue
 				} else if optName == "vpc1-nat" || optName == "nat1" {
@@ -1758,7 +1758,7 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 						return fmt.Errorf("invalid VPC peering option #%d %s, %w", idx, option, err)
 					}
 					if vpc1Nat.nat != natTypeNone && vpc1Nat.nat != n {
-						return fmt.Errorf("invalid VPC peering option #%d %s, multiple NAT types specified for vpc1 (%s and %s)", idx, option, vpc1Nat.nat, n) //nolint:goerr113
+						return fmt.Errorf("invalid VPC peering option #%d %s, multiple NAT types specified for vpc1 (%s and %s)", idx, option, vpc1Nat.nat, n) //nolint:err113
 					}
 					vpc1Nat.nat = n
 				} else if optName == "vpc2-nat" || optName == "nat2" {
@@ -1767,7 +1767,7 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 						return fmt.Errorf("invalid VPC peering option #%d %s, %w", idx, option, err)
 					}
 					if vpc2Nat.nat != natTypeNone && vpc2Nat.nat != n {
-						return fmt.Errorf("invalid VPC peering option #%d %s, multiple NAT types specified for vpc2 (%s and %s)", idx, option, vpc2Nat.nat, n) //nolint:goerr113
+						return fmt.Errorf("invalid VPC peering option #%d %s, multiple NAT types specified for vpc2 (%s and %s)", idx, option, vpc2Nat.nat, n) //nolint:err113
 					}
 					vpc2Nat.nat = n
 				} else if optName == "vpc1-pf" || optName == "pf1" {
@@ -1775,7 +1775,7 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 						return fmt.Errorf("invalid VPC peering option #%d %s, vpc1 port-forward rules should be non-empty", idx, option)
 					}
 					if vpc1Nat.pfRaw != "" {
-						return fmt.Errorf("invalid VPC peering option #%d %s, vpc1 port-forward rules already specified", idx, option) //nolint:goerr113
+						return fmt.Errorf("invalid VPC peering option #%d %s, vpc1 port-forward rules already specified", idx, option) //nolint:err113
 					}
 					vpc1Nat.pfRaw = optValue
 				} else if optName == "vpc2-pf" || optName == "pf2" {
@@ -1783,11 +1783,11 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 						return fmt.Errorf("invalid VPC peering option #%d %s, vpc2 port-forward rules should be non-empty", idx, option)
 					}
 					if vpc2Nat.pfRaw != "" {
-						return fmt.Errorf("invalid VPC peering option #%d %s, vpc2 port-forward rules already specified", idx, option) //nolint:goerr113
+						return fmt.Errorf("invalid VPC peering option #%d %s, vpc2 port-forward rules already specified", idx, option) //nolint:err113
 					}
 					vpc2Nat.pfRaw = optValue
 				} else if optName == "nat" || optName == "nat-type" || optName == "pf" || optName == "port-forward" {
-					return fmt.Errorf("invalid VPC peering option #%d %s, use per-side NAT options (vpc1-nat/nat1, vpc2-nat/nat2, vpc1-pf/pf1, vpc2-pf/pf2)", idx, option) //nolint:goerr113
+					return fmt.Errorf("invalid VPC peering option #%d %s, use per-side NAT options (vpc1-nat/nat1, vpc2-nat/nat2, vpc1-pf/pf1, vpc2-pf/pf2)", idx, option) //nolint:err113
 				} else {
 					return fmt.Errorf("invalid peering option #%d %s", idx, option)
 				}
@@ -1796,7 +1796,7 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 			if !gw {
 				// NAT options are only supported for gateway peerings.
 				if vpc1Nat.asRaw != "" || vpc2Nat.asRaw != "" || vpc1Nat.nat != natTypeNone || vpc2Nat.nat != natTypeNone || vpc1Nat.pfRaw != "" || vpc2Nat.pfRaw != "" {
-					return fmt.Errorf("NAT options (as*, nat, port-forward) are only supported for gateway peerings") //nolint:goerr113
+					return fmt.Errorf("NAT options (as*, nat, port-forward) are only supported for gateway peerings") //nolint:err113
 				}
 
 				vpcPeerings[fmt.Sprintf("%s--%s", vpc1, vpc2)] = &vpcapi.VPCPeeringSpec{
@@ -1837,16 +1837,16 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 				// - If NAT type is specified without As, reject.
 				// - For port-forward NAT, rules must be provided on that same side.
 				if vpc1Nat.asRaw == "" && (vpc1Nat.nat != natTypeNone || vpc1Nat.pfRaw != "") {
-					return fmt.Errorf("NAT options specified for vpc1 without vpc1-as") //nolint:goerr113
+					return fmt.Errorf("NAT options specified for vpc1 without vpc1-as") //nolint:err113
 				}
 				if vpc2Nat.asRaw == "" && (vpc2Nat.nat != natTypeNone || vpc2Nat.pfRaw != "") {
-					return fmt.Errorf("NAT options specified for vpc2 without vpc2-as") //nolint:goerr113
+					return fmt.Errorf("NAT options specified for vpc2 without vpc2-as") //nolint:err113
 				}
 				if vpc1Nat.pfRaw != "" && vpc1Nat.nat != natTypePortFwd {
-					return fmt.Errorf("vpc1 port-forward rules specified but vpc1-nat is not port-forward") //nolint:goerr113
+					return fmt.Errorf("vpc1 port-forward rules specified but vpc1-nat is not port-forward") //nolint:err113
 				}
 				if vpc2Nat.pfRaw != "" && vpc2Nat.nat != natTypePortFwd {
-					return fmt.Errorf("vpc2 port-forward rules specified but vpc2-nat is not port-forward") //nolint:goerr113
+					return fmt.Errorf("vpc2 port-forward rules specified but vpc2-nat is not port-forward") //nolint:err113
 				}
 
 				if vpc1Nat.asRaw != "" {
@@ -1935,7 +1935,7 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 						return fmt.Errorf("invalid external peering option #%d %s, vpc-as should be non-empty", idx, option)
 					}
 					if vpcNat.asRaw != "" {
-						return fmt.Errorf("invalid external peering option #%d %s, vpc-as already specified", idx, option) //nolint:goerr113
+						return fmt.Errorf("invalid external peering option #%d %s, vpc-as already specified", idx, option) //nolint:err113
 					}
 					vpcNat.asRaw = optValue
 				case "ext-as", "as-ext":
@@ -1943,7 +1943,7 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 						return fmt.Errorf("invalid external peering option #%d %s, ext-as should be non-empty", idx, option)
 					}
 					if extNat.asRaw != "" {
-						return fmt.Errorf("invalid external peering option #%d %s, ext-as already specified", idx, option) //nolint:goerr113
+						return fmt.Errorf("invalid external peering option #%d %s, ext-as already specified", idx, option) //nolint:err113
 					}
 					extNat.asRaw = optValue
 				case "vpc-nat", "nat-vpc":
@@ -1952,7 +1952,7 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 						return fmt.Errorf("invalid external peering option #%d %s, %w", idx, option, err)
 					}
 					if vpcNat.nat != natTypeNone && vpcNat.nat != n {
-						return fmt.Errorf("invalid external peering option #%d %s, multiple NAT types specified for VPC side (%s and %s)", idx, option, vpcNat.nat, n) //nolint:goerr113
+						return fmt.Errorf("invalid external peering option #%d %s, multiple NAT types specified for VPC side (%s and %s)", idx, option, vpcNat.nat, n) //nolint:err113
 					}
 					vpcNat.nat = n
 				case "ext-nat", "nat-ext":
@@ -1961,7 +1961,7 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 						return fmt.Errorf("invalid external peering option #%d %s, %w", idx, option, err)
 					}
 					if extNat.nat != natTypeNone && extNat.nat != n {
-						return fmt.Errorf("invalid external peering option #%d %s, multiple NAT types specified for external side (%s and %s)", idx, option, extNat.nat, n) //nolint:goerr113
+						return fmt.Errorf("invalid external peering option #%d %s, multiple NAT types specified for external side (%s and %s)", idx, option, extNat.nat, n) //nolint:err113
 					}
 					extNat.nat = n
 				case "vpc-pf", "pf-vpc":
@@ -1969,7 +1969,7 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 						return fmt.Errorf("invalid external peering option #%d %s, VPC port-forward rules should be non-empty", idx, option)
 					}
 					if vpcNat.pfRaw != "" {
-						return fmt.Errorf("invalid external peering option #%d %s, VPC port-forward rules already specified", idx, option) //nolint:goerr113
+						return fmt.Errorf("invalid external peering option #%d %s, VPC port-forward rules already specified", idx, option) //nolint:err113
 					}
 					vpcNat.pfRaw = optValue
 				case "ext-pf", "pf-ext":
@@ -1977,11 +1977,11 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 						return fmt.Errorf("invalid external peering option #%d %s, external port-forward rules should be non-empty", idx, option)
 					}
 					if extNat.pfRaw != "" {
-						return fmt.Errorf("invalid external peering option #%d %s, external port-forward rules already specified", idx, option) //nolint:goerr113
+						return fmt.Errorf("invalid external peering option #%d %s, external port-forward rules already specified", idx, option) //nolint:err113
 					}
 					extNat.pfRaw = optValue
 				case "nat", "nat-type", "pf", "port-forward", "port-forward-rules":
-					return fmt.Errorf("invalid external peering option #%d %s, use per-side NAT options (vpc-nat/ext-nat and vpc-pf/ext-pf)", idx, option) //nolint:goerr113
+					return fmt.Errorf("invalid external peering option #%d %s, use per-side NAT options (vpc-nat/ext-nat and vpc-pf/ext-pf)", idx, option) //nolint:err113
 				default:
 					return fmt.Errorf("invalid peering option #%d %s", idx, option)
 				}
@@ -1990,7 +1990,7 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 			if !gw {
 				// NAT options are only supported for gateway peerings.
 				if vpcNat.asRaw != "" || extNat.asRaw != "" || vpcNat.nat != natTypeNone || extNat.nat != natTypeNone || vpcNat.pfRaw != "" || extNat.pfRaw != "" {
-					return fmt.Errorf("NAT options (as*, nat, port-forward) are only supported for gateway peerings") //nolint:goerr113
+					return fmt.Errorf("NAT options (as*, nat, port-forward) are only supported for gateway peerings") //nolint:err113
 				}
 
 				extPeering := &vpcapi.ExternalPeeringSpec{
@@ -2062,7 +2062,7 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 				if len(ips) == 0 {
 					defaultDestination = true
 				} else if defaultDestination {
-					return fmt.Errorf("cannot expose default route and other IP prefixes at the same time") //nolint:goerr113
+					return fmt.Errorf("cannot expose default route and other IP prefixes at the same time") //nolint:err113
 				}
 				extExpose := gwapi.PeeringEntryExpose{
 					IPs:                ips,
@@ -2075,16 +2075,16 @@ func (c *Config) SetupPeerings(ctx context.Context, vlab *VLAB, opts SetupPeerin
 				// - If NAT type is specified without As for that side, reject.
 				// - For port-forward NAT, rules must be provided on that same side.
 				if vpcNat.asRaw == "" && (vpcNat.nat != natTypeNone || vpcNat.pfRaw != "") {
-					return fmt.Errorf("NAT options specified for VPC side without vpc-as") //nolint:goerr113
+					return fmt.Errorf("NAT options specified for VPC side without vpc-as") //nolint:err113
 				}
 				if extNat.asRaw == "" && (extNat.nat != natTypeNone || extNat.pfRaw != "") {
-					return fmt.Errorf("NAT options specified for external side without ext-as") //nolint:goerr113
+					return fmt.Errorf("NAT options specified for external side without ext-as") //nolint:err113
 				}
 				if vpcNat.pfRaw != "" && vpcNat.nat != natTypePortFwd {
-					return fmt.Errorf("VPC port-forward rules specified but vpc-nat is not port-forward") //nolint:goerr113
+					return fmt.Errorf("VPC port-forward rules specified but vpc-nat is not port-forward") //nolint:err113
 				}
 				if extNat.pfRaw != "" && extNat.nat != natTypePortFwd {
-					return fmt.Errorf("external port-forward rules specified but ext-nat is not port-forward") //nolint:goerr113
+					return fmt.Errorf("external port-forward rules specified but ext-nat is not port-forward") //nolint:err113
 				}
 
 				if vpcNat.asRaw != "" {
@@ -2828,12 +2828,12 @@ func (c *Config) TestConnectivity(ctx context.Context, vlab *VLAB, opts TestConn
 			// that handles multi-IP servers correctly.
 			switch len(found) {
 			case 0:
-				return fmt.Errorf("no IP discovered for server %q", server) //nolint:goerr113
+				return fmt.Errorf("no IP discovered for server %q", server) //nolint:err113
 			case 1:
 				ips.Store(server, found[0].prefix.Addr())
 				slog.Info("Found", "server", server, "addr", found[0].prefix.String())
 			default:
-				return fmt.Errorf("server %q has multiple eligible IPs, use matrix-based connectivity test", server) //nolint:goerr113
+				return fmt.Errorf("server %q has multiple eligible IPs, use matrix-based connectivity test", server) //nolint:err113
 			}
 
 			return nil
@@ -3397,7 +3397,7 @@ func isVPCSubnetPresentInPeering(peering *gwapi.PeeringEntry, vpc gwapi.VPCInfo,
 
 				continue
 			default:
-				return false, nil, fmt.Errorf("gw peering expose entry of VPC %s sets none of cidr, not, vpcSubnet", vpcName) //nolint:goerr113
+				return false, nil, fmt.Errorf("gw peering expose entry of VPC %s sets none of cidr, not, vpcSubnet", vpcName) //nolint:err113
 			}
 
 			if exposeSubnetName == vpcSubnet {

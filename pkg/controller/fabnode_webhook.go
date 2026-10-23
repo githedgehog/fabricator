@@ -31,7 +31,7 @@ func SetupNodeWebhookWith(mgr kctrl.Manager) error {
 		WithDefaulter(w).
 		WithValidator(w).
 		Complete(); err != nil {
-		return fmt.Errorf("creating webhook: %w", err) //nolint:goerr113
+		return fmt.Errorf("creating webhook: %w", err)
 	}
 
 	return nil
@@ -64,7 +64,7 @@ func (w *FabNodeWebhook) ValidateUpdate(ctx context.Context, _ *fabapi.FabNode, 
 func (w *FabNodeWebhook) ValidateDelete(_ context.Context, _ *fabapi.FabNode) (admission.Warnings, error) {
 	// TODO check when ControlNode is migrated to FabNode
 	// if slices.Contains(n.Spec.Roles, fabapi.NodeRoleControl) {
-	// 	return nil, fmt.Errorf("not allowed to delete control node") //nolint:goerr113
+	// 	return nil, fmt.Errorf("not allowed to delete control node") //nolint:err113
 	// }
 
 	return nil, nil

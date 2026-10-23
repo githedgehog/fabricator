@@ -78,7 +78,7 @@ func VLABUp(ctx context.Context, workDir, cacheDir string, extraCacheDirs []stri
 	}
 
 	if opts.AutoUpgrade && opts.ReCreate {
-		return fmt.Errorf("--upgrade and --recreate (-f) are mutually exclusive: upgrade requires existing VMs") //nolint:goerr113
+		return fmt.Errorf("--upgrade and --recreate (-f) are mutually exclusive: upgrade requires existing VMs") //nolint:err113
 	}
 
 	c, err := load(ctx, workDir, cacheDir, extraCacheDirs, true, opts.HydrateMode, opts.SetJoinToken)

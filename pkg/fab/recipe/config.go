@@ -50,11 +50,11 @@ func LoadConfig(dir string) (*Config, error) {
 
 func (cfg *Config) Validate() error {
 	if !slices.Contains(AllTypes, cfg.Type) {
-		return fmt.Errorf("invalid type %q", cfg.Type) //nolint:goerr113
+		return fmt.Errorf("invalid type %q", cfg.Type) //nolint:err113
 	}
 
 	if cfg.Name == "" {
-		return fmt.Errorf("name is required") //nolint:goerr113
+		return fmt.Errorf("name is required") //nolint:err113
 	}
 
 	return nil

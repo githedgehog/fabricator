@@ -30,7 +30,7 @@ func SetupFabricatorWebhookWith(mgr kctrl.Manager) error {
 		WithDefaulter(w).
 		WithValidator(w).
 		Complete(); err != nil {
-		return fmt.Errorf("creating webhook: %w", err) //nolint:goerr113
+		return fmt.Errorf("creating webhook: %w", err)
 	}
 
 	return nil
@@ -51,5 +51,5 @@ func (w *FabricatorWebhook) ValidateUpdate(ctx context.Context, _ *fabapi.Fabric
 }
 
 func (w *FabricatorWebhook) ValidateDelete(_ context.Context, _ *fabapi.Fabricator) (admission.Warnings, error) {
-	return nil, fmt.Errorf("not allowed to delete Fabricator object") //nolint:goerr113
+	return nil, fmt.Errorf("not allowed to delete Fabricator object") //nolint:err113
 }

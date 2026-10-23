@@ -26,7 +26,7 @@ func SSHResolverFromMap(m map[string]*sshutil.Config) SSHResolver {
 	return func(server string) (*sshutil.Config, error) {
 		cfg, ok := m[server]
 		if !ok {
-			return nil, fmt.Errorf("no ssh config for server %q", server) //nolint:goerr113
+			return nil, fmt.Errorf("no ssh config for server %q", server) //nolint:err113
 		}
 
 		return cfg, nil
@@ -176,7 +176,7 @@ func CollectServerEndpoints(ctx context.Context, kube kclient.Client, ssh SSHRes
 		subnetName := attach.Spec.SubnetName()
 		subnet, ok := vpc.Spec.Subnets[subnetName]
 		if !ok {
-			return nil, nil, fmt.Errorf("attachment %q references missing subnet %s/%s", attach.Name, vpc.Name, subnetName) //nolint:goerr113
+			return nil, nil, fmt.Errorf("attachment %q references missing subnet %s/%s", attach.Name, vpc.Name, subnetName) //nolint:err113
 		}
 		cidr, err := netip.ParsePrefix(subnet.Subnet)
 		if err != nil {

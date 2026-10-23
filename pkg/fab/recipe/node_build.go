@@ -48,7 +48,7 @@ func (b *NodeInstallBuilder) Build(ctx context.Context) error {
 		slog.Warn("Set one in the fab.yaml file (.spec.config.control.joinToken) or by using environment variable HHFAB_JOIN_TOKEN")
 		slog.Warn("If you already have first control node deployed, you can get the token from it", "path", "/var/lib/rancher/k3s/server/token")
 
-		return fmt.Errorf("missing join token in fabricator config") //nolint:goerr113
+		return fmt.Errorf("missing join token in fabricator config") //nolint:err113
 	}
 
 	return buildInstall(ctx, buildInstallOpts{
@@ -132,7 +132,7 @@ func (b *NodeInstallBuilder) buildIgnition() ([]byte, error) {
 		return nil, fmt.Errorf("parsing dummy IP: %w", err)
 	}
 	if dummyIP.Bits() != 31 {
-		return nil, fmt.Errorf("dummy IP must be a /31") //nolint:goerr113
+		return nil, fmt.Errorf("dummy IP must be a /31") //nolint:err113
 	}
 
 	but, err := tmplutil.FromTemplate("node-butane", nodeButaneTmpl, map[string]any{
