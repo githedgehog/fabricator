@@ -189,7 +189,7 @@ func (c *ControlInstall) installK8s(ctx context.Context) (kclient.Client, error)
 	}
 
 	k3sInstall := "./" + k3s.InstallName
-	if err := os.Chmod(k3sInstall, 0o755); err != nil {
+	if err := os.Chmod(k3sInstall, 0o755); err != nil { //nolint:gosec // executable script
 		return nil, fmt.Errorf("chmod k3s install: %w", err)
 	}
 

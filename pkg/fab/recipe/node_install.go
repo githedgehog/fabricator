@@ -158,7 +158,7 @@ func (c *NodeInstallUpgrade) joinK8s(ctx context.Context) error {
 	}
 
 	k3sInstall := "./" + k3s.InstallName
-	if err := os.Chmod(k3sInstall, 0o755); err != nil {
+	if err := os.Chmod(k3sInstall, 0o755); err != nil { //nolint:gosec // executable script
 		return fmt.Errorf("chmod k3s install: %w", err)
 	}
 

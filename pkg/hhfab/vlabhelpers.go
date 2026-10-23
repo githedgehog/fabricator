@@ -1138,7 +1138,7 @@ func (c *Config) collectRunnerShowTech(ctx context.Context, outputDir string) er
 		return fmt.Errorf("closing temporary script file: %w", err)
 	}
 
-	if err := os.Chmod(tmpfile.Name(), 0o755); err != nil {
+	if err := os.Chmod(tmpfile.Name(), 0o755); err != nil { //nolint:gosec // executable script
 		return fmt.Errorf("making script executable: %w", err)
 	}
 
