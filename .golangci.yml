@@ -3,16 +3,16 @@ version: "2"
 # Migrated from golangci-lint v1.64.8 keeping the v1 coverage. Everything the upgraded or new checks report on the
 # current code is disabled below with a TODO. Plan to enable them, roughly cheapest first (issue counts as of v2.15.0):
 #
-#   1. Linters with no issues on the current code: nilnesserr, exptostd, fatcontext, mirror, iface, sloglint,
-#      gochecksumtype, iotamixing
-#   2. staticcheck QF* quickfix checks (new in v2): 80 issues, auto-fixable with `just lint-fix`
-#   3. goconst detection in composite literals: 55 issues
-#   4. Linting tests and the release tests helpers: 134 issues, see linters.exclusions.paths
-#   5. Default exclusions inherited from v1, see linters.exclusions.presets
-#   6. nolintlint require-explanation: 765 directives without explanation
-#   7. Linters with issues on the current code: modernize (45), intrange (26), wastedassign (7), canonicalheader (8),
+#   1. staticcheck QF* quickfix checks (new in v2): 80 issues, auto-fixable with `just lint-fix`
+#   2. goconst detection in composite literals: 55 issues
+#   3. Linting tests and the release tests helpers: 134 issues, see linters.exclusions.paths
+#   4. Default exclusions inherited from v1, see linters.exclusions.presets
+#   5. nolintlint require-explanation: 765 directives without explanation
+#   6. Linters with issues on the current code: modernize (45), intrange (26), wastedassign (7), canonicalheader (8),
 #      forcetypeassert (16), recvcheck (3), nosprintfhostport (2), dupword (3), gomoddirectives (1), godoclint (29),
 #      perfsprint (217), forbidigo (23, needs settings as it forbids fmt.Print* by default)
+#   7. Stricter sloglint options: kv-only (no issues), msg-style capitalized (22), static-msg (26), key-naming-case
+#      camel (52) or snake (79), args-on-sep-lines (293), no-raw-keys (671)
 #   8. goconst detection in function call arguments: 531 issues, needs evaluation as it may be too noisy
 #
 # Complexity and line length linters (cyclop, funlen, gocognit, gocyclo, maintidx, nestif, lll, ...) aren't planned.
@@ -49,21 +49,28 @@ linters:
     - errname
     - errorlint
     - exhaustive
+    - exptostd
     - copyloopvar
+    - fatcontext
     - ginkgolinter
     - gocheckcompilerdirectives
+    - gochecksumtype
     - goconst
     - gocritic
     - err113
     - goprintffuncname
     - gosec
+    - iface
     - importas
+    - iotamixing
     - loggercheck
     - makezero
+    - mirror
     - misspell
     - musttag
     - nakedret
     - nilerr
+    - nilnesserr
     - nilnil
     - nlreturn
     - noctx
@@ -74,6 +81,7 @@ linters:
     - promlinter
     - reassign
     - revive
+    - sloglint
     # Not planned: conflicts with the K8s API conventions (e.g. fabricatorAPI instead of fabricatorApi) and external
     # APIs field names, 40 issues
     # - tagliatelle
@@ -104,6 +112,14 @@ linters:
         # files written with WriteFile still have to be 0600 (G306)
         G301: "0755"
         G302: "0755"
+    iface:
+      # all analyzers, only identical is enabled by default
+      enable:
+        - identical
+        - unused
+        - opaque
+        - unexported
+        - unusedmethod
     govet:
       enable-all: true
       disable:
@@ -138,10 +154,7 @@ linters:
           deny:
             - pkg: "github.com/pkg/errors$"
               desc: use stdlib errors package
-            - pkg: "golang.org/x/exp/maps$"
-              desc: use stdlib maps or samber/lo package
-            - pkg: "golang.org/x/exp/slices$"
-              desc: use stdlib slices or samber/lo package
+            # golang.org/x/exp maps and slices are reported by exptostd, but not slog
             - pkg: "golang.org/x/exp/slog$"
               desc: use stdlib slog package
             - pkg: "k8s.io/utils/strings/slices$"
