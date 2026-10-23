@@ -54,7 +54,7 @@ func staticExternalPeeringTest(ctx context.Context, testCtx *VPCPeeringTestCtx, 
 		return true, nil, fmt.Errorf("%w: external %s has no static attachments", errNoStaticExternalWithAttachment, testCtx.staticExtName)
 	}
 
-	reverts := []RevertFunc{}
+	reverts := []RevertFunc{} //nolint:prealloc
 
 	// Get VPCs and create ExternalPeering for the first one
 	vpcs := &vpcapi.VPCList{}

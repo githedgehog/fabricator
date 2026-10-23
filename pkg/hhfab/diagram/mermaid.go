@@ -248,7 +248,7 @@ func generateMermaid(topo Topology) string {
 	// Track link indices for each type of connection
 	gatewayLinks := []int{}
 	spineLeafLinks := []int{}
-	meshLinks := []int{}
+	meshLinks := []int{} //nolint:prealloc
 	bundledLinks := []int{}
 	eslagLinks := []int{}
 	unbundledLinks := []int{}
@@ -762,7 +762,7 @@ func generateMermaid(topo Topology) string {
 	b.WriteString("end\n\n")
 
 	if len(layers.Gateway) > 0 {
-		gatewayIDs := []string{}
+		gatewayIDs := []string{} //nolint:prealloc
 		for _, node := range layers.Gateway {
 			gatewayIDs = append(gatewayIDs, cleanID(node.ID))
 		}
@@ -770,7 +770,7 @@ func generateMermaid(topo Topology) string {
 	}
 
 	if len(layers.Spine) > 0 {
-		spineIDs := []string{}
+		spineIDs := []string{} //nolint:prealloc
 		for _, node := range layers.Spine {
 			spineIDs = append(spineIDs, cleanID(node.ID))
 		}
@@ -778,7 +778,7 @@ func generateMermaid(topo Topology) string {
 	}
 
 	if len(layers.Leaf) > 0 {
-		leafIDs := []string{}
+		leafIDs := []string{} //nolint:prealloc
 		for _, node := range layers.Leaf {
 			leafIDs = append(leafIDs, cleanID(node.ID))
 		}
@@ -786,7 +786,7 @@ func generateMermaid(topo Topology) string {
 	}
 
 	if len(layers.Server) > 0 {
-		serverIDs := []string{}
+		serverIDs := []string{} //nolint:prealloc
 		for _, node := range layers.Server {
 			serverIDs = append(serverIDs, cleanID(node.ID))
 		}
@@ -794,7 +794,7 @@ func generateMermaid(topo Topology) string {
 	}
 
 	if len(layers.External) > 0 {
-		externalIDs := []string{}
+		externalIDs := []string{} //nolint:prealloc
 		for _, node := range layers.External {
 			externalIDs = append(externalIDs, cleanID(node.ID))
 		}

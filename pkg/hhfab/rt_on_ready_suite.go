@@ -89,7 +89,7 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connecti
 	slog.Info("Starting new on-ready test: discovering resources")
 
 	kube := testCtx.kube
-	reverts := make([]RevertFunc, 0)
+	reverts := []RevertFunc{} //nolint:prealloc
 
 	// ── Phase 1: Discover switches and classify MCLAG ────────────────────
 	swList := &wiringapi.SwitchList{}

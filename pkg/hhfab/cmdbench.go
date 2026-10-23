@@ -452,7 +452,7 @@ func sudoCommand(exe string, args, environ []string, cacheDir string) ([]string,
 	env = append(env, envCacheDir+"="+cacheDir)
 	keep = append(keep, envCacheDir)
 
-	argv := []string{VLABCmdSudo, "--preserve-env=" + strings.Join(keep, ","), exe}
+	argv := []string{VLABCmdSudo, "--preserve-env=" + strings.Join(keep, ","), exe} //nolint:prealloc
 	argv = append(argv, withoutSudoFlag(args)...)
 
 	return argv, env

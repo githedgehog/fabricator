@@ -31,7 +31,7 @@ func Run(ctx context.Context) error {
 	logLevel := slog.LevelDebug
 
 	logW := os.Stderr
-	handlers := []slog.Handler{
+	handlers := []slog.Handler{ //nolint:prealloc
 		tint.NewTextHandler(logW, &tint.Options{
 			Level:      logLevel,
 			TimeFormat: time.StampMilli,
@@ -57,7 +57,7 @@ func Run(ctx context.Context) error {
 	logger := slog.New(handler)
 	slog.SetDefault(logger)
 
-	args := []any{
+	args := []any{ //nolint:prealloc
 		"version", version.Version,
 	}
 
