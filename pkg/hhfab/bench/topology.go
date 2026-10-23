@@ -363,7 +363,7 @@ func (d *domainGen) vpcName(idx uint) string {
 // Generate emits every object for every fabric into the loader.
 func (g *Generator) Generate(ctx context.Context, l *apiutil.Loader) error {
 	for slot, spec := range g.specs {
-		if err := g.generateFabric(ctx, l, uint(slot), spec); err != nil { //nolint:gosec // slot is bounded by len(specs)
+		if err := g.generateFabric(ctx, l, uint(slot), spec); err != nil { // slot is bounded by len(specs)
 			return fmt.Errorf("fabric %q: %w", spec.Name, err)
 		}
 	}
@@ -677,7 +677,7 @@ func (g *Generator) generateServers(ctx context.Context, l *apiutil.Loader, d *d
 
 		for portIdx, port := range plan.serverPorts {
 			for sub := range plan.subports {
-				serverIdx := leafIdx*perLeaf + uint(portIdx)*plan.subports + sub //nolint:gosec // portIdx is bounded by ServerPorts
+				serverIdx := leafIdx*perLeaf + uint(portIdx)*plan.subports + sub // portIdx is bounded by ServerPorts
 				server := d.serverName(serverIdx)
 
 				srvSpec := wiringapi.ServerSpec{
@@ -769,7 +769,7 @@ func (g *Generator) generateAttachments(ctx context.Context, l *apiutil.Loader, 
 
 		for portIdx, port := range plan.serverPorts {
 			for sub := range plan.subports {
-				serverIdx := leafIdx*perLeaf + uint(portIdx)*plan.subports + sub //nolint:gosec // portIdx is bounded by ServerPorts
+				serverIdx := leafIdx*perLeaf + uint(portIdx)*plan.subports + sub // portIdx is bounded by ServerPorts
 				server := d.serverName(serverIdx)
 
 				connSpec := wiringapi.ConnectionSpec{
@@ -862,7 +862,7 @@ func vpcSubnets(spec FabricSpec) ([]netip.Prefix, error) {
 		return nil, fmt.Errorf("%d vpcs of %d hosts do not fit in %s", total, perVPC, IPv4Subnet) //nolint:err113
 	}
 
-	step := uint64(1) << uint(hostBits) //nolint:gosec // hostBits <= 32 by construction
+	step := uint64(1) << uint(hostBits) // hostBits <= 32 by construction
 
 	out := make([]netip.Prefix, 0, total)
 	for idx := range total {

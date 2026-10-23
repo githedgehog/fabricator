@@ -39,10 +39,10 @@ func getDisplayPath(workDir, filePath string) string {
 
 func Generate(ctx context.Context, workDir, resultDir string, client kclient.Reader, format Format, style StyleType, outputPath string) error {
 	if !slices.Contains(Formats, format) {
-		return fmt.Errorf("unsupported diagram format: %s", format) //nolint:goerr113
+		return fmt.Errorf("unsupported diagram format: %s", format) //nolint:err113
 	}
 	if !slices.Contains(StyleTypes, style) {
-		return fmt.Errorf("unsupported diagram style: %s", style) //nolint:goerr113
+		return fmt.Errorf("unsupported diagram style: %s", style) //nolint:err113
 	}
 
 	topo, err := GetTopologyFor(ctx, client)
@@ -104,7 +104,7 @@ func Generate(ctx context.Context, workDir, resultDir string, client kclient.Rea
 		fmt.Printf("1. Visit https://mermaid.live/ or use a Markdown editor with Mermaid support\n")
 		fmt.Printf("2. Copy the contents of %s into the editor\n", displayPath)
 	default:
-		return fmt.Errorf("unsupported diagram format: %s", format) //nolint:goerr113
+		return fmt.Errorf("unsupported diagram format: %s", format) //nolint:err113
 	}
 
 	return nil

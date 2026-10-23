@@ -62,7 +62,7 @@ func Run(ctx context.Context) error {
 	}
 
 	if len(os.Args) != 2 {
-		return fmt.Errorf("usage: %s <workdir>", os.Args[0]) //nolint:goerr113
+		return fmt.Errorf("usage: %s <workdir>", os.Args[0]) //nolint:err113
 	}
 
 	workDir := os.Args[1]

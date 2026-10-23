@@ -195,7 +195,7 @@ func OverlayMatrixNAT(
 		}
 	}
 	if touched == 0 {
-		return fmt.Errorf("matrix overlay applied to no entries (check predicates)") //nolint:goerr113
+		return fmt.Errorf("matrix overlay applied to no entries (check predicates)") //nolint:err113
 	}
 
 	return nil
@@ -278,13 +278,13 @@ func (m *ConnectivityMatrix) Lookup(src, dst *Endpoint, pp ProtoPort) Connectivi
 
 func (m *ConnectivityMatrix) Validate() error {
 	if m == nil {
-		return fmt.Errorf("connectivity matrix is nil") //nolint:goerr113
+		return fmt.Errorf("connectivity matrix is nil") //nolint:err113
 	}
 
 	var errs []error
 
 	if len(m.AllEndpoints) == 0 {
-		errs = append(errs, fmt.Errorf("matrix has no endpoints")) //nolint:goerr113
+		errs = append(errs, fmt.Errorf("matrix has no endpoints")) //nolint:err113
 	}
 
 	if len(m.dropped) > 0 {
@@ -293,7 +293,7 @@ func (m *ConnectivityMatrix) Validate() error {
 			reasons = append(reasons, d.String())
 		}
 		slices.Sort(reasons)
-		errs = append(errs, fmt.Errorf("endpoint discovery dropped %d attachment(s)/address(es), topology only partially visible: %s", //nolint:goerr113
+		errs = append(errs, fmt.Errorf("endpoint discovery dropped %d attachment(s)/address(es), topology only partially visible: %s", //nolint:err113
 			len(m.dropped), strings.Join(reasons, "; ")))
 	}
 
@@ -314,12 +314,12 @@ func (m *ConnectivityMatrix) Validate() error {
 	}
 	if len(unknowns) > 0 {
 		slices.Sort(unknowns)
-		errs = append(errs, fmt.Errorf("%d matrix entries could not be evaluated and were not overlaid by the test: %s", //nolint:goerr113
+		errs = append(errs, fmt.Errorf("%d matrix entries could not be evaluated and were not overlaid by the test: %s", //nolint:err113
 			len(unknowns), strings.Join(unknowns, "; ")))
 	}
 	if len(unprobed) > 0 {
 		slices.Sort(unprobed)
-		errs = append(errs, fmt.Errorf("%d matrix entries no probe phase can read, so they would pass unasserted: %s", //nolint:goerr113
+		errs = append(errs, fmt.Errorf("%d matrix entries no probe phase can read, so they would pass unasserted: %s", //nolint:err113
 			len(unprobed), strings.Join(unprobed, "; ")))
 	}
 
@@ -445,13 +445,13 @@ func (m *ConnectivityMatrix) checkProbesEnabled(opts TestConnectivityOpts) error
 	}
 
 	if opts.PingsCount <= 0 && opts.IPerfsSeconds <= 0 && serverServer > 0 {
-		return fmt.Errorf("matrix has %d server-to-server entries but both pings and iperfs are disabled", serverServer) //nolint:goerr113
+		return fmt.Errorf("matrix has %d server-to-server entries but both pings and iperfs are disabled", serverServer) //nolint:err113
 	}
 	if opts.CurlsCount <= 0 && external > 0 {
-		return fmt.Errorf("matrix has %d external entries but curls are disabled", external) //nolint:goerr113
+		return fmt.Errorf("matrix has %d external entries but curls are disabled", external) //nolint:err113
 	}
 	if opts.PingsCount <= 0 && icmp > 0 {
-		return fmt.Errorf("matrix has %d icmp proto-port entries but pings are disabled", icmp) //nolint:goerr113
+		return fmt.Errorf("matrix has %d icmp proto-port entries but pings are disabled", icmp) //nolint:err113
 	}
 
 	return nil
@@ -620,7 +620,7 @@ func runMatrixServerServerPhase(ctx context.Context, opts TestConnectivityOpts, 
 				toIP = entry.NAT.DestinationIP
 			}
 			if !toIP.IsValid() {
-				return fmt.Errorf("matrix entry %s→%s (vpc %s/%s) has no valid target IP", src.Server.Name, dst.Server.Name, dst.Server.VPC, dst.Server.Subnet) //nolint:goerr113
+				return fmt.Errorf("matrix entry %s→%s (vpc %s/%s) has no valid target IP", src.Server.Name, dst.Server.Name, dst.Server.VPC, dst.Server.Subnet) //nolint:err113
 			}
 
 			expected := reachabilityFromExpectation(entry)
@@ -821,7 +821,7 @@ func startMatrixProtoPortListeners(ctx context.Context, matrix *ConnectivityMatr
 		if ssh == nil {
 			teardown()
 
-			return nil, fmt.Errorf("no ssh config for server %q needed as proto-port listener", hp.host) //nolint:goerr113
+			return nil, fmt.Errorf("no ssh config for server %q needed as proto-port listener", hp.host) //nolint:err113
 		}
 		// docker exec -d returns as soon as the process is spawned, so wait for
 		// the listener to actually bind.
@@ -874,7 +874,7 @@ func runMatrixProtoPortPhase(ctx context.Context, opts TestConnectivityOpts, mat
 						toIP = entry.NAT.DestinationIP
 					}
 					if !toIP.IsValid() {
-						deps.errChan <- fmt.Errorf("matrix proto entry %s→%s (%s/%d) has no valid target IP", fromName, toName, pp.Protocol, pp.Port) //nolint:goerr113
+						deps.errChan <- fmt.Errorf("matrix proto entry %s→%s (%s/%d) has no valid target IP", fromName, toName, pp.Protocol, pp.Port) //nolint:err113
 
 						continue
 					}
@@ -901,7 +901,7 @@ func runMatrixProtoPortPhase(ctx context.Context, opts TestConnectivityOpts, mat
 								deps.errChan <- ie
 							}
 						default:
-							deps.errChan <- fmt.Errorf("matrix proto entry %s→%s has unsupported protocol %q", fromName, toName, pp.Protocol) //nolint:goerr113
+							deps.errChan <- fmt.Errorf("matrix proto entry %s→%s has unsupported protocol %q", fromName, toName, pp.Protocol) //nolint:err113
 						}
 					}()
 				}
@@ -912,10 +912,10 @@ func runMatrixProtoPortPhase(ctx context.Context, opts TestConnectivityOpts, mat
 
 func (c *Config) TestConnectivityWithMatrix(ctx context.Context, vlab *VLAB, opts TestConnectivityOpts, matrix *ConnectivityMatrix) error {
 	if matrix == nil {
-		return fmt.Errorf("connectivity matrix must be non-nil") //nolint:goerr113
+		return fmt.Errorf("connectivity matrix must be non-nil") //nolint:err113
 	}
 	if opts.PingsCount == 0 && opts.IPerfsSeconds == 0 && opts.CurlsCount == 0 {
-		return fmt.Errorf("at least one of pings, iperfs or curls should be enabled") //nolint:goerr113
+		return fmt.Errorf("at least one of pings, iperfs or curls should be enabled") //nolint:err113
 	}
 	if err := matrix.Validate(); err != nil {
 		return fmt.Errorf("connectivity matrix is not a sound oracle: %w", err)
@@ -954,7 +954,7 @@ func (c *Config) TestConnectivityWithMatrix(ctx context.Context, vlab *VLAB, opt
 		}
 		ssh, ok := sshConfigs[name]
 		if !ok {
-			return fmt.Errorf("no ssh config for server %q referenced by matrix", name) //nolint:goerr113
+			return fmt.Errorf("no ssh config for server %q referenced by matrix", name) //nolint:err113
 		}
 		sshByServer[name] = ssh
 	}

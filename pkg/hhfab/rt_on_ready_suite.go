@@ -252,14 +252,14 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connecti
 
 	// ── Phase 4: Validate preconditions ──────────────────────────────────
 	if bgpExtName == "" {
-		return false, nil, fmt.Errorf("no BGP external found, cannot run on-ready test") //nolint:goerr113
+		return false, nil, fmt.Errorf("no BGP external found, cannot run on-ready test") //nolint:err113
 	}
 	if staticExtNonProxyName == "" {
-		return false, nil, fmt.Errorf("no static external without proxy found, cannot run on-ready test") //nolint:goerr113
+		return false, nil, fmt.Errorf("no static external without proxy found, cannot run on-ready test") //nolint:err113
 	}
 	const minServers = 7
 	if len(available) < minServers {
-		return false, nil, fmt.Errorf("not enough servers: need at least %d, found %d", minServers, len(available)) //nolint:goerr113
+		return false, nil, fmt.Errorf("not enough servers: need at least %d, found %d", minServers, len(available)) //nolint:err113
 	}
 
 	// ── Phase 5: Allocate servers to VPC roles ───────────────────────────
@@ -293,13 +293,13 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connecti
 		})
 	}
 	if !ok {
-		return false, nil, fmt.Errorf("no unbundled non-MCLAG server available for hostBGP VPC") //nolint:goerr113
+		return false, nil, fmt.Errorf("no unbundled non-MCLAG server available for hostBGP VPC") //nolint:err113
 	}
 
 	// VPC C: 1 subnet, 2 servers on different non mclag switches
 	vpcCServer1, ok := take(func(s ortServerInfo) bool { return !s.isMclag })
 	if !ok {
-		return false, nil, fmt.Errorf("not enough servers for multi-switch VPC") //nolint:goerr113
+		return false, nil, fmt.Errorf("not enough servers for multi-switch VPC") //nolint:err113
 	}
 	vpcCServer2, ok := take(func(s ortServerInfo) bool {
 		if s.isMclag {
@@ -317,17 +317,17 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connecti
 		return true
 	})
 	if !ok {
-		return false, nil, fmt.Errorf("no server on a different switch found for multi-switch VPC") //nolint:goerr113
+		return false, nil, fmt.Errorf("no server on a different switch found for multi-switch VPC") //nolint:err113
 	}
 
 	// VPC A: 2 subnets, 1 server per subnet
 	vpcAServer1, ok := take(func(s ortServerInfo) bool { return true })
 	if !ok {
-		return false, nil, fmt.Errorf("not enough servers for dual-subnet VPC (server 1)") //nolint:goerr113
+		return false, nil, fmt.Errorf("not enough servers for dual-subnet VPC (server 1)") //nolint:err113
 	}
 	vpcAServer2, ok := take(func(s ortServerInfo) bool { return true })
 	if !ok {
-		return false, nil, fmt.Errorf("not enough servers for dual-subnet VPC (server 2)") //nolint:goerr113
+		return false, nil, fmt.Errorf("not enough servers for dual-subnet VPC (server 2)") //nolint:err113
 	}
 
 	// VPC D+: remaining servers, need at least 2 for BGP external + static external peerings
@@ -340,7 +340,7 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connecti
 		singleServers = append(singleServers, s)
 	}
 	if len(singleServers) < 2 {
-		return false, nil, fmt.Errorf("not enough remaining servers for single-server VPCs: need at least 2, got %d", len(singleServers)) //nolint:goerr113
+		return false, nil, fmt.Errorf("not enough remaining servers for single-server VPCs: need at least 2, got %d", len(singleServers)) //nolint:err113
 	}
 	slog.Info("Server allocation complete",
 		"vpcA", []string{vpcAServer1.name, vpcAServer2.name},
@@ -649,7 +649,7 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connecti
 						}
 					}
 					if !acquired {
-						return fmt.Errorf("hostBGP on %s did not acquire VIP in time", serverName) //nolint:goerr113
+						return fmt.Errorf("hostBGP on %s did not acquire VIP in time", serverName) //nolint:err113
 					}
 				} else {
 					slog.Debug("Configuring server networking", "server", serverName, "cmd", cmd)
@@ -659,7 +659,7 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connecti
 					}
 					addr := strings.TrimSpace(stdout)
 					if _, parseErr := netip.ParsePrefix(addr); parseErr != nil {
-						return fmt.Errorf("unexpected hhnet output on %s: %q", serverName, addr) //nolint:goerr113
+						return fmt.Errorf("unexpected hhnet output on %s: %q", serverName, addr) //nolint:err113
 					}
 					slog.Debug("Server configured", "server", serverName, "addr", addr)
 				}
@@ -739,7 +739,7 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connecti
 			}
 		}
 		if natVPC2 == nil {
-			return false, reverts, fmt.Errorf("gateway is enabled but there are only %d single-server VPCs, need at least 3 to chain them", len(singleServers)) //nolint:goerr113
+			return false, reverts, fmt.Errorf("gateway is enabled but there are only %d single-server VPCs, need at least 3 to chain them", len(singleServers)) //nolint:err113
 		}
 		slog.Debug("Added masquerade + port-forward gateway peering", "vpc1", natVPC1.Name, "vpc2", natVPC2.Name, "natPool", ortNATPoolCIDR)
 	}
@@ -757,7 +757,7 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connecti
 			return false, reverts, fmt.Errorf("parsing remote IP %q of external %s: %w", staticExtProxyRemoteIP, staticExtProxyName, err)
 		}
 		if !remote.Is4() {
-			return false, reverts, fmt.Errorf("remote IP %s of external %s is not IPv4", remote, staticExtProxyName) //nolint:goerr113
+			return false, reverts, fmt.Errorf("remote IP %s of external %s is not IPv4", remote, staticExtProxyName) //nolint:err113
 		}
 		octets := remote.As4()
 		octets[3] = ortProxyExtNATHost
@@ -783,7 +783,7 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connecti
 			}
 		}
 		if !pfHost.IsValid() {
-			return false, reverts, fmt.Errorf("no %s endpoint for server %s", vpcCName, vpcCServer1.name) //nolint:goerr113
+			return false, reverts, fmt.Errorf("no %s endpoint for server %s", vpcCName, vpcCServer1.name) //nolint:err113
 		}
 		pfNAT, err := buildNATConfig(NATModePortForward, []gwapi.PeeringNATPortForwardEntry{
 			{Protocol: gwapi.PeeringNATProtocolTCP, Port: "5201", As: strconv.Itoa(ortPortForwardPort)},

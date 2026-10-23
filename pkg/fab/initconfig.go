@@ -66,7 +66,7 @@ func InitConfig(ctx context.Context, in InitConfigInput) ([]byte, error) {
 
 	if in.Dev {
 		if in.DefaultPasswordHash != "" {
-			return nil, fmt.Errorf("dev mode overrides default password hash") //nolint:goerr113
+			return nil, fmt.Errorf("dev mode overrides default password hash") //nolint:err113
 		}
 
 		in.DefaultPasswordHash = DevAdminPasswordHash
@@ -81,11 +81,11 @@ func InitConfig(ctx context.Context, in InitConfigInput) ([]byte, error) {
 	}
 
 	if in.NoPassAuth && len(in.DefaultAuthorizedKeys) == 0 {
-		return nil, fmt.Errorf("SSH password authentication is disabled but no authorized keys are provided: set --keys or enable password auth with --ctrl-no-pass-auth=false") //nolint:goerr113
+		return nil, fmt.Errorf("SSH password authentication is disabled but no authorized keys are provided: set --keys or enable password auth with --ctrl-no-pass-auth=false") //nolint:err113
 	}
 
 	if in.DefaultPasswordHash != "" && !strings.HasPrefix(in.DefaultPasswordHash, "$5$") {
-		return nil, fmt.Errorf("default password hash must start with $5$: %q", in.DefaultPasswordHash) //nolint:goerr113
+		return nil, fmt.Errorf("default password hash must start with $5$: %q", in.DefaultPasswordHash) //nolint:err113
 	}
 
 	if !in.SaveJoinToken {

@@ -55,7 +55,7 @@ func DoInstall(ctx context.Context, workDir string, yes bool) error {
 
 		slog.Info("Node seems to be partially installed, cleanup and re-run", "status", marker, "marker", InstallMarkerFile)
 
-		return fmt.Errorf("partially installed: %s", marker) //nolint:goerr113
+		return fmt.Errorf("partially installed: %s", marker) //nolint:err113
 	}
 
 	cfg, err := LoadConfig(workDir)
@@ -69,7 +69,7 @@ func DoInstall(ctx context.Context, workDir string, yes bool) error {
 	}
 
 	if cfg.Name != hostname {
-		return fmt.Errorf("hostname mismatch: running on %q while installer expects %q", hostname, cfg.Name) //nolint:goerr113
+		return fmt.Errorf("hostname mismatch: running on %q while installer expects %q", hostname, cfg.Name) //nolint:err113
 	}
 
 	if err := os.MkdirAll(HedgehogDir, 0o755); err != nil {
@@ -94,7 +94,7 @@ func DoInstall(ctx context.Context, workDir string, yes bool) error {
 		}
 
 		if len(controls) != 1 {
-			return fmt.Errorf("expected exactly 1 control node, got %d", len(controls)) //nolint:goerr113
+			return fmt.Errorf("expected exactly 1 control node, got %d", len(controls)) //nolint:err113
 		}
 
 		includeData, err := os.ReadFile(filepath.Join(workDir, IncludeName))
@@ -144,7 +144,7 @@ func DoInstall(ctx context.Context, workDir string, yes bool) error {
 		}
 
 		if len(nodes) != 1 {
-			return fmt.Errorf("expected exactly 1 node, got %d", len(nodes)) //nolint:goerr113
+			return fmt.Errorf("expected exactly 1 node, got %d", len(nodes)) //nolint:err113
 		}
 
 		if err := (&NodeInstallUpgrade{
@@ -155,7 +155,7 @@ func DoInstall(ctx context.Context, workDir string, yes bool) error {
 			return fmt.Errorf("running node install: %w", err)
 		}
 	default:
-		return fmt.Errorf("unknown installer type %q", cfg.Type) //nolint:goerr113
+		return fmt.Errorf("unknown installer type %q", cfg.Type) //nolint:err113
 	}
 
 	if err := os.WriteFile(InstallMarkerFile, []byte(InstallMarkerComplete), 0o644); err != nil { //nolint:gosec
@@ -197,7 +197,7 @@ func DoUpgrade(ctx context.Context, workDir string, yes, skipChecks bool) error 
 	}
 
 	if cfg.Name != hostname {
-		return fmt.Errorf("hostname mismatch: running on %q while upgrader expects %q", hostname, cfg.Name) //nolint:goerr113
+		return fmt.Errorf("hostname mismatch: running on %q while upgrader expects %q", hostname, cfg.Name) //nolint:err113
 	}
 
 	switch cfg.Type {
@@ -226,7 +226,7 @@ func DoUpgrade(ctx context.Context, workDir string, yes, skipChecks bool) error 
 		}
 
 		if len(nodes) != 1 {
-			return fmt.Errorf("expected exactly 1 node, got %d", len(nodes)) //nolint:goerr113
+			return fmt.Errorf("expected exactly 1 node, got %d", len(nodes)) //nolint:err113
 		}
 
 		if err := (&NodeInstallUpgrade{
@@ -237,7 +237,7 @@ func DoUpgrade(ctx context.Context, workDir string, yes, skipChecks bool) error 
 			return fmt.Errorf("running node upgrade: %w", err)
 		}
 	default:
-		return fmt.Errorf("unknown upgrader type %q", cfg.Type) //nolint:goerr113
+		return fmt.Errorf("unknown upgrader type %q", cfg.Type) //nolint:err113
 	}
 
 	if err := os.WriteFile(InstallMarkerFile, []byte(InstallMarkerComplete), 0o644); err != nil { //nolint:gosec
@@ -307,7 +307,7 @@ func upgradeFlatcar(ctx context.Context, targetVersion string, yes bool) error {
 		}
 	}
 	if version == "" {
-		return fmt.Errorf("could not find flatcar version in /etc/os-release") //nolint:goerr113
+		return fmt.Errorf("could not find flatcar version in /etc/os-release") //nolint:err113
 	}
 
 	if version == strings.TrimPrefix(targetVersion, "v") {
@@ -327,7 +327,7 @@ func upgradeFlatcar(ctx context.Context, targetVersion string, yes bool) error {
 			slog.Debug("Retrying upgrading Flatcar", "attempt", attempt)
 		}
 
-		cmd := exec.CommandContext(ctx, "flatcar-update", "--to-version", targetVersion, "--to-payload", flatcar.UpdateBinName) //nolint:gosec
+		cmd := exec.CommandContext(ctx, "flatcar-update", "--to-version", targetVersion, "--to-payload", flatcar.UpdateBinName)
 		cmd.Stdout = logutil.NewSink(ctx, slog.Debug, "flatcar-update: ")
 		cmd.Stderr = logutil.NewSink(ctx, slog.Debug, "flatcar-update: ")
 
@@ -410,7 +410,7 @@ func waitURL(ctx context.Context, url string, ca string) error {
 	if ca != "" {
 		rootCAs := x509.NewCertPool()
 		if !rootCAs.AppendCertsFromPEM([]byte(ca)) {
-			return errors.New("failed to append CA cert to rootCAs") //nolint:goerr113
+			return errors.New("failed to append CA cert to rootCAs") //nolint:err113
 		}
 
 		baseTransport.TLSClientConfig = &tls.Config{
@@ -508,7 +508,7 @@ func checkIfaceAddresses(ifaceName string, expected ...string) error {
 
 			for _, exp := range expected {
 				if !actual[exp] {
-					return fmt.Errorf("expected address %q not found on interface %q", exp, ifaceName) //nolint:goerr113
+					return fmt.Errorf("expected address %q not found on interface %q", exp, ifaceName) //nolint:err113
 				}
 			}
 

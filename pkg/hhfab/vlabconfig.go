@@ -216,16 +216,16 @@ func (c *Config) PrepareVLAB(ctx context.Context, opts VLABUpOpts) (*VLAB, error
 	if stat, err := os.Stat(vlabDir); err != nil {
 		if os.IsNotExist(err) {
 			if opts.NoCreate {
-				return nil, fmt.Errorf("VLAB directory does not exist: %q", vlabDir) //nolint:goerr113
+				return nil, fmt.Errorf("VLAB directory does not exist: %q", vlabDir) //nolint:err113
 			}
 			if err := os.Mkdir(vlabDir, 0o700); err != nil {
-				return nil, fmt.Errorf("creating VLAB directory: %w", err) //nolint:goerr113
+				return nil, fmt.Errorf("creating VLAB directory: %w", err)
 			}
 		} else {
 			return nil, fmt.Errorf("checking VLAB directory: %w", err)
 		}
 	} else if !stat.IsDir() {
-		return nil, fmt.Errorf("VLAB directory is not a directory: %q", vlabDir) //nolint:goerr113
+		return nil, fmt.Errorf("VLAB directory is not a directory: %q", vlabDir) //nolint:err113
 	}
 
 	createCfg := opts.ReCreate
@@ -233,7 +233,7 @@ func (c *Config) PrepareVLAB(ctx context.Context, opts VLABUpOpts) (*VLAB, error
 	if _, err := os.Stat(vlabCfgFile); err != nil {
 		if os.IsNotExist(err) {
 			if opts.NoCreate {
-				return nil, fmt.Errorf("VLAB config file does not exist: %q", vlabCfgFile) //nolint:goerr113
+				return nil, fmt.Errorf("VLAB config file does not exist: %q", vlabCfgFile) //nolint:err113
 			}
 			createCfg = true
 		} else {
@@ -296,16 +296,16 @@ func (c *Config) PrepareVLAB(ctx context.Context, opts VLABUpOpts) (*VLAB, error
 
 	for name, vm := range vlabCfg.VMs {
 		if !slices.Contains(VMTypes, vm.Type) {
-			return nil, fmt.Errorf("invalid VM type %q for VM %q", vm.Type, name) //nolint:goerr113
+			return nil, fmt.Errorf("invalid VM type %q for VM %q", vm.Type, name) //nolint:err113
 		}
 
 		if vm.Type != VMTypeSwitch {
 			if vm.SwitchMode != "" {
-				return nil, fmt.Errorf("non-switch VM %s should not have switch mode", name) //nolint:goerr113
+				return nil, fmt.Errorf("non-switch VM %s should not have switch mode", name) //nolint:err113
 			}
 		} else {
 			if !slices.Contains(VMSwitchModes, vm.SwitchMode) {
-				return nil, fmt.Errorf("invalid switch mode %q for switch VM %q", vm.SwitchMode, name) //nolint:goerr113
+				return nil, fmt.Errorf("invalid switch mode %q for switch VM %q", vm.SwitchMode, name) //nolint:err113
 			}
 		}
 
@@ -316,7 +316,7 @@ func (c *Config) PrepareVLAB(ctx context.Context, opts VLABUpOpts) (*VLAB, error
 
 			nicType := strings.SplitN(nicConfig, NICTypeSep, 2)[0]
 			if !slices.Contains(NICTypes, nicType) {
-				return nil, fmt.Errorf("invalid NIC type %q for NIC %q of VM %q", nicType, nicName, name) //nolint:goerr113
+				return nil, fmt.Errorf("invalid NIC type %q for NIC %q of VM %q", nicType, nicName, name) //nolint:err113
 			}
 
 			// TODO some more validation
@@ -375,12 +375,12 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 
 		for k, v := range links {
 			if _, exist := usedPassthroughs[v]; exist {
-				return nil, fmt.Errorf("duplicate pci address: %q", v) //nolint:goerr113
+				return nil, fmt.Errorf("duplicate pci address: %q", v) //nolint:err113
 			}
 			usedPassthroughs[v] = true
 
 			if _, exist := passthrough[k]; exist {
-				return nil, fmt.Errorf("duplicate passthrough link: %q", k) //nolint:goerr113
+				return nil, fmt.Errorf("duplicate passthrough link: %q", k) //nolint:err113
 			}
 
 			passthrough[k] = v
@@ -391,7 +391,7 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 
 	for _, control := range controls {
 		if _, exists := cfg.VMs[control.Name]; exists {
-			return nil, fmt.Errorf("duplicate VM name (control): %q", control.Name) //nolint:goerr113
+			return nil, fmt.Errorf("duplicate VM name (control): %q", control.Name) //nolint:err113
 		}
 
 		links, err := addPassthroughLinks(&control)
@@ -401,12 +401,12 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 
 		mgmtIface := control.Spec.Management.Interface
 		if mgmtIface == "" {
-			return nil, fmt.Errorf("control VM %q has no management interface", control.Name) //nolint:goerr113
+			return nil, fmt.Errorf("control VM %q has no management interface", control.Name) //nolint:err113
 		}
 
 		extIface := control.Spec.External.Interface
 		if extIface == "" {
-			return nil, fmt.Errorf("control VM %q has no external interface", control.Name) //nolint:goerr113
+			return nil, fmt.Errorf("control VM %q has no external interface", control.Name) //nolint:err113
 		}
 
 		mgmt := NICTypeManagement
@@ -417,11 +417,11 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 		delete(links, control.Name+"/"+mgmtIface)
 
 		if len(links) > 0 {
-			return nil, fmt.Errorf("unexpected passthrough links for control %q: %v", control.Name, links) //nolint:goerr113
+			return nil, fmt.Errorf("unexpected passthrough links for control %q: %v", control.Name, links) //nolint:err113
 		}
 
 		if isHardware(&control) {
-			return nil, fmt.Errorf("control VM %q can't be hardware", control.Name) //nolint:goerr113
+			return nil, fmt.Errorf("control VM %q can't be hardware", control.Name) //nolint:err113
 		}
 
 		cfg.VMs[control.Name] = VMConfig{
@@ -436,11 +436,11 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 	// TODO deduplicate
 	for _, node := range nodes {
 		if len(node.Spec.Roles) != 1 || node.Spec.Roles[0] != fabapi.NodeRoleGateway {
-			return nil, fmt.Errorf("node %q isn't a gateway role", node.Name) //nolint:goerr113
+			return nil, fmt.Errorf("node %q isn't a gateway role", node.Name) //nolint:err113
 		}
 
 		if _, exists := cfg.VMs[node.Name]; exists {
-			return nil, fmt.Errorf("duplicate VM name (node): %q", node.Name) //nolint:goerr113
+			return nil, fmt.Errorf("duplicate VM name (node): %q", node.Name) //nolint:err113
 		}
 
 		links, err := addPassthroughLinks(&node)
@@ -457,7 +457,7 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 
 		mgmtIface := node.Spec.Management.Interface
 		if mgmtIface == "" {
-			return nil, fmt.Errorf("node VM %q has no management interface", node.Name) //nolint:goerr113
+			return nil, fmt.Errorf("node VM %q has no management interface", node.Name) //nolint:err113
 		}
 
 		mgmt := NICTypeManagement
@@ -468,7 +468,7 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 		delete(links, node.Name+"/"+mgmtIface)
 
 		if len(links) > 0 {
-			return nil, fmt.Errorf("unexpected passthrough links for node %q: %v", node.Name, links) //nolint:goerr113
+			return nil, fmt.Errorf("unexpected passthrough links for node %q: %v", node.Name, links) //nolint:err113
 		}
 
 		cfg.VMs[node.Name] = VMConfig{
@@ -489,7 +489,7 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 
 	for _, server := range servers.Items {
 		if _, exists := cfg.VMs[server.Name]; exists {
-			return nil, fmt.Errorf("duplicate VM name (server): %q", server.Name) //nolint:goerr113
+			return nil, fmt.Errorf("duplicate VM name (server): %q", server.Name) //nolint:err113
 		}
 
 		if _, err := addPassthroughLinks(&server); err != nil {
@@ -516,7 +516,7 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 		return nil, fmt.Errorf("failed to list externals: %w", err)
 	}
 	if _, exists := cfg.VMs[ExternalVMName]; exists {
-		return nil, fmt.Errorf("VM name %s is reserved for externals", ExternalVMName) //nolint:goerr113
+		return nil, fmt.Errorf("VM name %s is reserved for externals", ExternalVMName) //nolint:err113
 	}
 
 	cfg.VMs[ExternalVMName] = VMConfig{
@@ -539,7 +539,7 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 			continue
 		}
 		if _, exists := cfg.Externals.VRFs[external.Name]; exists {
-			return nil, fmt.Errorf("duplicate external VRF name: %q", external.Name) //nolint:goerr113
+			return nil, fmt.Errorf("duplicate external VRF name: %q", external.Name) //nolint:err113
 		}
 		if external.Spec.Static == nil {
 			asn := getAsn(&external)
@@ -563,7 +563,7 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 					return nil, fmt.Errorf("invalid %s annotation on external %q: %q: %w", extStaticNATPoolAnnotation, external.Name, natPoolCIDR, err)
 				}
 				if !prefix.Addr().Is4() || prefix.Bits() != 24 {
-					return nil, fmt.Errorf("invalid %s annotation on external %q: %q: must be an IPv4 /24 prefix", extStaticNATPoolAnnotation, external.Name, natPoolCIDR) //nolint:goerr113
+					return nil, fmt.Errorf("invalid %s annotation on external %q: %q: must be an IPv4 /24 prefix", extStaticNATPoolAnnotation, external.Name, natPoolCIDR) //nolint:err113
 				}
 				natPoolCIDR = prefix.Masked().String()
 			}
@@ -589,7 +589,7 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 
 	for _, sw := range switches.Items {
 		if _, exists := cfg.VMs[sw.Name]; exists {
-			return nil, fmt.Errorf("duplicate VM name (switch): %q", sw.Name) //nolint:goerr113
+			return nil, fmt.Errorf("duplicate VM name (switch): %q", sw.Name) //nolint:err113
 		}
 
 		links, err := addPassthroughLinks(&sw)
@@ -604,11 +604,11 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 		}
 
 		if sw.Spec.Profile != fmeta.SwitchProfileVS && sw.Spec.Profile != fmeta.SwitchProfileVSCLSP && sw.Spec.Profile != fmeta.SwitchProfileCmlsVX {
-			return nil, fmt.Errorf("switch %q has unsupported profile: %q", sw.Name, sw.Spec.Profile) //nolint:goerr113
+			return nil, fmt.Errorf("switch %q has unsupported profile: %q", sw.Name, sw.Spec.Profile) //nolint:err113
 		}
 
 		if sw.Spec.Boot.MAC == "" {
-			return nil, fmt.Errorf("switch %q has no MAC", sw.Name) //nolint:goerr113
+			return nil, fmt.Errorf("switch %q has no MAC", sw.Name) //nolint:err113
 		}
 
 		mgmt := NICTypeManagement + NICTypeSep + sw.Spec.Boot.MAC
@@ -655,22 +655,22 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 		toVM, toVMExist := cfg.VMs[toName]
 
 		if !fromHW && !fromVMExist {
-			return fmt.Errorf("VM %s not found", fromName) //nolint:goerr113
+			return fmt.Errorf("VM %s not found", fromName) //nolint:err113
 		}
 		if !toHW && !toVMExist {
-			return fmt.Errorf("VM %s not found", toName) //nolint:goerr113
+			return fmt.Errorf("VM %s not found", toName) //nolint:err113
 		}
 
 		if fromVM.Type == VMTypeControl || toVM.Type == VMTypeControl {
-			return fmt.Errorf("control VMs can't have links from wiring") //nolint:goerr113
+			return fmt.Errorf("control VMs can't have links from wiring") //nolint:err113
 		}
 
 		if !fromHW && !toHW { //nolint:gocritic
 			if _, exist := fromVM.NICs[fromNIC]; exist {
-				return fmt.Errorf("NIC %s/%s is already in use", fromName, fromNIC) //nolint:goerr113
+				return fmt.Errorf("NIC %s/%s is already in use", fromName, fromNIC) //nolint:err113
 			}
 			if _, exist := toVM.NICs[toNIC]; exist {
-				return fmt.Errorf("NIC %s/%s is already in use", toName, toNIC) //nolint:goerr113
+				return fmt.Errorf("NIC %s/%s is already in use", toName, toNIC) //nolint:err113
 			}
 
 			fromVM.NICs[fromNIC] = NICTypeDirect + NICTypeSep + to
@@ -678,14 +678,14 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 		} else if fromHW {
 			pci, exist := passthrough[from]
 			if !exist {
-				return fmt.Errorf("missing passthrough link for %s", from) //nolint:goerr113
+				return fmt.Errorf("missing passthrough link for %s", from) //nolint:err113
 			}
 
 			toVM.NICs[toNIC] = NICTypePassthrough + NICTypeSep + pci
 		} else if toHW {
 			pci, exist := passthrough[to]
 			if !exist {
-				return fmt.Errorf("missing passthrough link for %s", to) //nolint:goerr113
+				return fmt.Errorf("missing passthrough link for %s", to) //nolint:err113
 			}
 
 			fromVM.NICs[fromNIC] = NICTypePassthrough + NICTypeSep + pci
@@ -711,7 +711,7 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 	for ext, peer := range icPeers {
 		peerIdx := slices.IndexFunc(conns.Items, func(conn wiringapi.Connection) bool { return conn.Name == icConns[peer] })
 		if icConns[ext] == "" || peerIdx < 0 {
-			return nil, fmt.Errorf("interconnect external %q or its peer %q has no connection", ext, peer) //nolint:goerr113
+			return nil, fmt.Errorf("interconnect external %q or its peer %q has no connection", ext, peer) //nolint:err113
 		}
 		icPeerConns[icConns[ext]] = &conns.Items[peerIdx]
 	}
@@ -793,7 +793,7 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 			// here we want to do a bunch of stuff only if there are virtual externals attached on this connection
 			switch {
 			case hwExt && virtExt:
-				return nil, fmt.Errorf("external connection %q has both hardware and virtual external attachments", conn.Name) //nolint:goerr113
+				return nil, fmt.Errorf("external connection %q has both hardware and virtual external attachments", conn.Name) //nolint:err113
 			case !hwExt && !virtExt:
 				slog.Debug("Skipping external connection as it has no attachments", "connection", conn.Name)
 
@@ -806,7 +806,7 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 			// now that we know that the connection is for virtual externals, we can add a link towards them,
 			// which could be using a passthrough if the source is a hardware switch
 			if externalID > MaxExternalConns {
-				return nil, fmt.Errorf("too many external connections") //nolint:goerr113
+				return nil, fmt.Errorf("too many external connections") //nolint:err113
 			}
 			switchName := conn.Spec.External.Link.Switch.DeviceName()
 			nicName := fmt.Sprintf("enp2s%d", externalID)
@@ -832,11 +832,11 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 				extName := extAttach.Spec.External
 				// just a paranoid extra safety (unreachable, we already checked)
 				if hwExternals[extName] {
-					return nil, fmt.Errorf("external attachment %q is for hardware external %q", extAttach.Name, extName) //nolint:goerr113
+					return nil, fmt.Errorf("external attachment %q is for hardware external %q", extAttach.Name, extName) //nolint:err113
 				}
 				extVrf, ok := cfg.Externals.VRFs[extName]
 				if !ok {
-					return nil, fmt.Errorf("virtual external attachment %q has no associated VRF for the external %q", extAttach.Name, extName) //nolint:goerr113
+					return nil, fmt.Errorf("virtual external attachment %q has no associated VRF for the external %q", extAttach.Name, extName) //nolint:err113
 				}
 				if extVrf.IsStatic {
 					// update VRF config with some attachment specs that are handy to keep there for the template
@@ -871,7 +871,7 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 						extVrf.BGPCfg.ASN = extAttach.Spec.Neighbor.ASN
 						cfg.Externals.VRFs[extName] = extVrf
 					} else if extVrf.BGPCfg.ASN != extAttach.Spec.Neighbor.ASN {
-						return nil, fmt.Errorf("external attachment %q has inconsistent ASN: connection %q, attach ASN %d, previously known ASN %d", extAttach.Name, conn.Name, extAttach.Spec.Neighbor.ASN, extVrf.BGPCfg.ASN) //nolint:goerr113
+						return nil, fmt.Errorf("external attachment %q has inconsistent ASN: connection %q, attach ASN %d, previously known ASN %d", extAttach.Name, conn.Name, extAttach.Spec.Neighbor.ASN, extVrf.BGPCfg.ASN) //nolint:err113
 					}
 					// Fetch the switch to retrieve its ASN
 					sw := &wiringapi.Switch{}
@@ -902,7 +902,7 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 				}
 				if (extAttach.Spec.Static != nil && extAttach.Spec.Static.VLAN == 0) || (extAttach.Spec.Static == nil && extAttach.Spec.Switch.VLAN == 0) {
 					if extNicCfg.Untagged {
-						return nil, fmt.Errorf("multiple untagged attachments for the same virtual external %s", extName) //nolint:goerr113
+						return nil, fmt.Errorf("multiple untagged attachments for the same virtual external %s", extName) //nolint:err113
 					}
 					extNicCfg.Untagged = true
 					extNicCfg.UntaggedCfg = attachCfg
@@ -912,7 +912,7 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 					tagged = true
 				}
 				if tagged && untagged {
-					return nil, fmt.Errorf("both tagged and untagged attachments for the same virtual external connection %s, this is not supported", conn.Name) //nolint:goerr113
+					return nil, fmt.Errorf("both tagged and untagged attachments for the same virtual external connection %s, this is not supported", conn.Name) //nolint:err113
 				}
 				slog.Debug("Added attachment to virtual external",
 					"NIC name",
@@ -961,7 +961,7 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 
 	vmIDs := map[string]uint{}
 	for idx, name := range orderedVMNames {
-		vmIDs[name] = uint(idx) //nolint:gosec
+		vmIDs[name] = uint(idx)
 	}
 
 	vms := []VM{}
@@ -985,7 +985,7 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 		}
 
 		if maxNICID >= VLABMaxNICs {
-			return nil, fmt.Errorf("too many NICs for VM %q: %d", name, len(nics)) //nolint:goerr113
+			return nil, fmt.Errorf("too many NICs for VM %q: %d", name, len(nics)) //nolint:err113
 		}
 
 		paddedNICs := make([]string, int(maxNICID)+1)
@@ -1000,7 +1000,7 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 		usernet := 0
 		for nicID, nicCfgRaw := range paddedNICs {
 			if nicID >= VLABMaxNICs {
-				return nil, fmt.Errorf("too many NICs for VM %q: %d", name, len(nics)) //nolint:goerr113
+				return nil, fmt.Errorf("too many NICs for VM %q: %d", name, len(nics)) //nolint:err113
 			}
 
 			mac := fmt.Sprintf(VLABMACTmpl, vmID, nicID)
@@ -1014,7 +1014,7 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 
 			netdev := ""
 			device := ""
-			port := getDirectNICPort(vmID, uint(nicID)) //nolint:gosec
+			port := getDirectNICPort(vmID, uint(nicID))
 			switch nicType {
 			case NICTypeNoop:
 				// Gap-filler NIC: needs a valid QEMU netdev but no peer. Use TCP listen
@@ -1022,18 +1022,18 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 				netdev = fmt.Sprintf("socket,listen=127.0.0.1:%d", port)
 			case NICTypeDirect:
 				if nicCfg == "" {
-					return nil, fmt.Errorf("missing NIC config for direct NIC %d of VM %q, nicCfgRaw: %q", nicID, name, nicCfgRaw) //nolint:goerr113
+					return nil, fmt.Errorf("missing NIC config for direct NIC %d of VM %q, nicCfgRaw: %q", nicID, name, nicCfgRaw) //nolint:err113
 				}
 
 				parts := strings.SplitN(nicCfg, "/", 2)
 				if len(parts) != 2 {
-					return nil, fmt.Errorf("invalid NIC config %q for VM %q", nicCfg, name) //nolint:goerr113
+					return nil, fmt.Errorf("invalid NIC config %q for VM %q", nicCfg, name) //nolint:err113
 				}
 
 				otherVM, otherNIC := parts[0], parts[1]
 				otherVMID, ok := vmIDs[otherVM]
 				if !ok {
-					return nil, fmt.Errorf("unknown VM %q in NIC config %q for VM %q", otherVM, nicCfg, name) //nolint:goerr113
+					return nil, fmt.Errorf("unknown VM %q in NIC config %q for VM %q", otherVM, nicCfg, name) //nolint:err113
 				}
 
 				otherNICID, err := getNICID(otherNIC)
@@ -1045,7 +1045,7 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 				netdev = fmt.Sprintf("socket,udp=127.0.0.1:%d,localaddr=127.0.0.1:%d", port, otherPort)
 			case NICTypeUsernet:
 				if usernet > 0 {
-					return nil, fmt.Errorf("multiple usernet NICs for VM %q", name) //nolint:goerr113
+					return nil, fmt.Errorf("multiple usernet NICs for VM %q", name) //nolint:err113
 				}
 				usernet++
 
@@ -1071,13 +1071,13 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 				tapID++
 			case NICTypePassthrough:
 				if nicCfg == "" {
-					return nil, fmt.Errorf("missing NIC config for passthrough NIC %d of VM %q", nicID, name) //nolint:goerr113
+					return nil, fmt.Errorf("missing NIC config for passthrough NIC %d of VM %q", nicID, name) //nolint:err113
 				}
 
 				passthroughs = append(passthroughs, nicCfg)
 				device = fmt.Sprintf("vfio-pci,host=%s", nicCfg)
 			default:
-				return nil, fmt.Errorf("unknown NIC type %q for VM %q", nicType, name) //nolint:goerr113
+				return nil, fmt.Errorf("unknown NIC type %q for VM %q", nicType, name) //nolint:err113
 			}
 
 			if netdev != "" {
@@ -1244,7 +1244,7 @@ func getNICID(nic string) (uint, error) {
 		if devlinkPhysPort.MatchString(nic) {
 			idx := strings.LastIndex(nic[len(srvPrefix):], "np")
 			if idx < 0 {
-				return 0, fmt.Errorf("invalid NIC ID %q: np not found", nic) //nolint:goerr113
+				return 0, fmt.Errorf("invalid NIC ID %q: np not found", nic) //nolint:err113
 			}
 			nic = nic[:len(srvPrefix)+idx]
 		}
@@ -1255,7 +1255,7 @@ func getNICID(nic string) (uint, error) {
 	} else if strings.HasPrefix(nic, gwPrefix) {
 		raw = nic[len(gwPrefix):]
 	} else {
-		return 0, fmt.Errorf("invalid NIC ID %q", nic) //nolint:goerr113
+		return 0, fmt.Errorf("invalid NIC ID %q", nic) //nolint:err113
 	}
 
 	v, err := strconv.ParseUint(raw, 10, 8)

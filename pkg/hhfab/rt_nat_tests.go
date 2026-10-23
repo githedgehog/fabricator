@@ -97,7 +97,7 @@ func (testCtx *VPCPeeringTestCtx) runNATTest(ctx context.Context, matrix *Connec
 	if len(tcOpts.Sources) == 0 {
 		// An empty source list means "no filter" downstream, which would silently
 		// probe the whole matrix instead of the VPCs under test.
-		return false, nil, fmt.Errorf("%s: no servers to probe in VPCs %s and %s", spec.Name, vpc1.Name, vpc2.Name) //nolint:goerr113
+		return false, nil, fmt.Errorf("%s: no servers to probe in VPCs %s and %s", spec.Name, vpc1.Name, vpc2.Name) //nolint:err113
 	}
 	tcOpts.Destinations = tcOpts.Sources
 	slog.Debug("Probing the VPCs under test", "test", spec.Name, "servers", tcOpts.Sources)
@@ -196,7 +196,7 @@ func overlayVPCToVPCStaticDNAT(matrix *ConnectivityMatrix, srcVPCName, dstVPCNam
 
 	return OverlayMatrixNAT(matrix, ServerInVPC(srcVPCName), ServerInVPC(dstVPCName), func(_, dst *Endpoint, nat *TranslatedAddress) error {
 		if !dst.Server.IP.IsValid() {
-			return fmt.Errorf("matrix endpoint for %s has no IP", dst.Server.Name) //nolint:goerr113
+			return fmt.Errorf("matrix endpoint for %s has no IP", dst.Server.Name) //nolint:err113
 		}
 		natIP, err := calculateStaticNATIP(dst.Server.IP, subnetStart, poolStart)
 		if err != nil {
@@ -213,7 +213,7 @@ func overlayVPCToVPCStaticDNAT(matrix *ConnectivityMatrix, srcVPCName, dstVPCNam
 // NAT IP on destPort.
 func overlayVPCToVPCPortForwardDNAT(matrix *ConnectivityMatrix, srcVPCName, dstVPCName, dstSubnetCIDR, dstNATPoolCIDR string, destPort uint16) error {
 	if destPort == 0 {
-		return fmt.Errorf("destPort must be non-zero for port-forward overlay") //nolint:goerr113
+		return fmt.Errorf("destPort must be non-zero for port-forward overlay") //nolint:err113
 	}
 	subnetPrefix, err := netip.ParsePrefix(dstSubnetCIDR)
 	if err != nil {
@@ -228,7 +228,7 @@ func overlayVPCToVPCPortForwardDNAT(matrix *ConnectivityMatrix, srcVPCName, dstV
 
 	return OverlayMatrixNAT(matrix, ServerInVPC(srcVPCName), ServerInVPC(dstVPCName), func(_, dst *Endpoint, nat *TranslatedAddress) error {
 		if !dst.Server.IP.IsValid() {
-			return fmt.Errorf("matrix endpoint for %s has no IP", dst.Server.Name) //nolint:goerr113
+			return fmt.Errorf("matrix endpoint for %s has no IP", dst.Server.Name) //nolint:err113
 		}
 		natIP, err := calculateStaticNATIP(dst.Server.IP, subnetStart, poolStart)
 		if err != nil {
@@ -314,7 +314,7 @@ func (testCtx *VPCPeeringTestCtx) rebindMatrixServerEndpoint(ctx context.Context
 		return fmt.Errorf("collecting endpoints for %s: %w", serverName, err)
 	}
 	if len(newEPs) == 0 {
-		return fmt.Errorf("no endpoints discovered for server %s after rebind", serverName) //nolint:goerr113
+		return fmt.Errorf("no endpoints discovered for server %s after rebind", serverName) //nolint:err113
 	}
 	matrix.ReplaceServerEndpoints(serverName, newEPs)
 	matrix.ReplaceServerDrops(serverName, dropped)
@@ -324,13 +324,13 @@ func (testCtx *VPCPeeringTestCtx) rebindMatrixServerEndpoint(ctx context.Context
 
 func vpcFirstSubnet(vpc *vpcapi.VPC) (string, *vpcapi.VPCSubnet, error) {
 	if len(vpc.Spec.Subnets) != 1 {
-		return "", nil, fmt.Errorf("VPC %s has %d subnets, NAT test requires exactly one", vpc.Name, len(vpc.Spec.Subnets)) //nolint:goerr113
+		return "", nil, fmt.Errorf("VPC %s has %d subnets, NAT test requires exactly one", vpc.Name, len(vpc.Spec.Subnets)) //nolint:err113
 	}
 	for name, subnet := range vpc.Spec.Subnets {
 		return name, subnet, nil
 	}
 
-	return "", nil, fmt.Errorf("VPC %s has empty subnet map", vpc.Name) //nolint:goerr113
+	return "", nil, fmt.Errorf("VPC %s has empty subnet map", vpc.Name) //nolint:err113
 }
 
 func vpcFirstSubnetName(vpc *vpcapi.VPC) (string, error) {
@@ -558,7 +558,7 @@ func gatewayPeeringOverlapNATTest(ctx context.Context, testCtx *VPCPeeringTestCt
 		break
 	}
 	if existingSubnetCIDR == "" {
-		return false, nil, fmt.Errorf("existing VPC %s has no subnets", existingVPC.Name) //nolint:goerr113
+		return false, nil, fmt.Errorf("existing VPC %s has no subnets", existingVPC.Name) //nolint:err113
 	}
 
 	// Get the IPv4Namespace from the existing VPC to create an overlapping namespace
@@ -570,7 +570,7 @@ func gatewayPeeringOverlapNATTest(ctx context.Context, testCtx *VPCPeeringTestCt
 		return false, nil, fmt.Errorf("getting IPv4Namespace %s: %w", existingVPC.Spec.IPv4Namespace, err)
 	}
 	if len(existingNS.Spec.Subnets) == 0 {
-		return false, nil, fmt.Errorf("IPv4Namespace %s has no subnets", existingNS.Name) //nolint:goerr113
+		return false, nil, fmt.Errorf("IPv4Namespace %s has no subnets", existingNS.Name) //nolint:err113
 	}
 	// Use the same subnet range as the existing namespace to create overlap
 	namespaceSubnet := existingNS.Spec.Subnets[0]
@@ -611,7 +611,7 @@ func gatewayPeeringOverlapNATTest(ctx context.Context, testCtx *VPCPeeringTestCt
 		}
 	}
 	if targetAttachment == nil {
-		return false, nil, fmt.Errorf("no suitable server found to move to overlap VPC") //nolint:goerr113
+		return false, nil, fmt.Errorf("no suitable server found to move to overlap VPC") //nolint:err113
 	}
 
 	slog.Debug("Found target server for overlap test",

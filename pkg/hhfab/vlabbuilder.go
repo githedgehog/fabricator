@@ -91,7 +91,7 @@ var _ VLABBuilder = (*VLABBuilderDefault)(nil)
 
 func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fabapi.Fabricator, nodes []fabapi.FabNode) error {
 	if l == nil {
-		return fmt.Errorf("loader is nil") //nolint:goerr113
+		return fmt.Errorf("loader is nil") //nolint:err113
 	}
 	b.data = l
 
@@ -100,7 +100,7 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 	switch fabricMode {
 	case meta.FabricModeSpineLeaf:
 		if b.MeshLinksCount > 0 && b.FabricLinksCount > 0 {
-			return fmt.Errorf("cannot use both mesh and fabric links at the same time") //nolint:goerr113
+			return fmt.Errorf("cannot use both mesh and fabric links at the same time") //nolint:err113
 		}
 		if !b.NoSwitches {
 			if b.MeshLinksCount == 0 {
@@ -122,7 +122,7 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 			} else {
 				// new defaults for mesh
 				if b.SpinesCount != 0 {
-					return fmt.Errorf("spines not supported for when using mesh connections") //nolint:goerr113
+					return fmt.Errorf("spines not supported for when using mesh connections") //nolint:err113
 				}
 				if b.OrphanLeafsCount == 0 && b.ESLAGLeafGroups == "" {
 					b.ESLAGLeafGroups = "2"
@@ -131,15 +131,15 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 			}
 		}
 	default:
-		return fmt.Errorf("unsupported fabric mode %s", fabricMode) //nolint:goerr113
+		return fmt.Errorf("unsupported fabric mode %s", fabricMode) //nolint:err113
 	}
 
 	if !slices.Contains(meta.VirtualSwitchProfiles, b.DefaultSwitchProfile) {
-		return fmt.Errorf("unsupported default switch profile %s", b.DefaultSwitchProfile) //nolint:goerr113
+		return fmt.Errorf("unsupported default switch profile %s", b.DefaultSwitchProfile) //nolint:err113
 	}
 	for _, profile := range b.SwitchProfileOverrides {
 		if !slices.Contains(meta.VirtualSwitchProfiles, profile) {
-			return fmt.Errorf("unsupported switch profile override %s", profile) //nolint:goerr113
+			return fmt.Errorf("unsupported switch profile override %s", profile) //nolint:err113
 		}
 	}
 
@@ -159,7 +159,7 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 
 	if isGw {
 		if fabricMode != meta.FabricModeSpineLeaf {
-			return fmt.Errorf("gateway node only supported for spine-leaf fabric mode") //nolint:goerr113
+			return fmt.Errorf("gateway node only supported for spine-leaf fabric mode") //nolint:err113
 		}
 
 		if b.GatewayDriver == "" {
@@ -170,18 +170,18 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 		}
 
 		if !slices.Contains(GatewayDrivers, b.GatewayDriver) {
-			return fmt.Errorf("unsupported gateway driver %s", b.GatewayDriver) //nolint:goerr113
+			return fmt.Errorf("unsupported gateway driver %s", b.GatewayDriver) //nolint:err113
 		}
 
 		gwLogLevel = gwapi.GatewayLogLevel(b.GatewayLogLevel)
 		if !slices.Contains(gwapi.GatewayLogLevels, gwLogLevel) {
-			return fmt.Errorf("invalid gateway log level %s", b.GatewayLogLevel) //nolint:goerr113
+			return fmt.Errorf("invalid gateway log level %s", b.GatewayLogLevel) //nolint:err113
 		}
 
 		for tagTarget, tagLevel := range b.GatewayTags {
 			gwTagLevel := gwapi.GatewayLogLevel(tagLevel)
 			if !slices.Contains(gwapi.GatewayLogLevels, gwTagLevel) {
-				return fmt.Errorf("invalid gateway log level %s for tag target %s", tagLevel, tagTarget) //nolint:goerr113
+				return fmt.Errorf("invalid gateway log level %s for tag target %s", tagLevel, tagTarget) //nolint:err113
 			}
 			gwTags[tagTarget] = gwTagLevel
 		}
@@ -199,16 +199,16 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 			if b.SpinesCount > 0 {
 				b.GatewayUplinks = min(2, b.SpinesCount)
 			} else if b.MeshLinksCount > 0 {
-				b.GatewayUplinks = min(2, uint8(totalESLAGLeafs)+b.OrphanLeafsCount) //nolint:gosec
+				b.GatewayUplinks = min(2, uint8(totalESLAGLeafs)+b.OrphanLeafsCount)
 			}
 		} else {
 			if b.MeshLinksCount > 0 {
-				if b.GatewayUplinks > uint8(totalESLAGLeafs)+b.OrphanLeafsCount { //nolint:gosec
-					return fmt.Errorf("gateway uplinks count must be ≤ total leaf switches (ESLAG + orphan)") //nolint:goerr113
+				if b.GatewayUplinks > uint8(totalESLAGLeafs)+b.OrphanLeafsCount {
+					return fmt.Errorf("gateway uplinks count must be ≤ total leaf switches (ESLAG + orphan)") //nolint:err113
 				}
 			} else {
 				if b.GatewayUplinks > b.SpinesCount {
-					return fmt.Errorf("gateway uplinks count must be ≤ spines count") //nolint:goerr113
+					return fmt.Errorf("gateway uplinks count must be ≤ spines count") //nolint:err113
 				}
 			}
 		}
@@ -223,11 +223,11 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 			part = strings.TrimSpace(part)
 			leafs, err := strconv.ParseUint(part, 10, 8)
 			if err != nil {
-				return fmt.Errorf("invalid ESLAG leaf group %s", part) //nolint:goerr113
+				return fmt.Errorf("invalid ESLAG leaf group %s", part) //nolint:err113
 			}
 
 			if leafs < 2 || leafs > 4 {
-				return fmt.Errorf("ESLAG leaf group must have 2-4 leafs") //nolint:goerr113
+				return fmt.Errorf("ESLAG leaf group must have 2-4 leafs") //nolint:err113
 			}
 
 			totalESLAGLeafs += uint8(leafs)
@@ -242,24 +242,24 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 
 	if b.ExtraDomain {
 		if fabricMode != meta.FabricModeSpineLeaf || b.MeshLinksCount > 0 || b.NoSwitches || b.SpinesCount == 0 {
-			return fmt.Errorf("extra domain needs spines and no mesh links") //nolint:goerr113
+			return fmt.Errorf("extra domain needs spines and no mesh links") //nolint:err113
 		}
 		if b.SharedLeafsCount == 0 {
 			b.SharedLeafsCount = 1
 		}
 		if b.SharedLeafsCount > b.OrphanLeafsCount {
-			return fmt.Errorf("shared leafs count must be less than or equal to orphan leaves") //nolint:goerr113
+			return fmt.Errorf("shared leafs count must be less than or equal to orphan leaves") //nolint:err113
 		}
 		// a leaf with an external connection must be in a single domain
 		if b.ExtOrphanConnCount > b.OrphanLeafsCount-b.SharedLeafsCount {
-			return fmt.Errorf("external orphan connections count must be less than or equal to orphan leaves that are not shared") //nolint:goerr113
+			return fmt.Errorf("external orphan connections count must be less than or equal to orphan leaves that are not shared") //nolint:err113
 		}
 	} else if b.SharedLeafsCount > 0 {
-		return fmt.Errorf("shared leafs count requires an extra domain") //nolint:goerr113
+		return fmt.Errorf("shared leafs count requires an extra domain") //nolint:err113
 	}
 
 	if b.ExtraFabric && b.NoSwitches {
-		return fmt.Errorf("extra fabric needs switches") //nolint:goerr113
+		return fmt.Errorf("extra fabric needs switches") //nolint:err113
 	}
 	// the last leaf of the default domain, where the gateways are
 	icLeafID := totalESLAGLeafs + b.OrphanLeafsCount
@@ -268,10 +268,10 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 	}
 	if b.InterconnectFabrics {
 		if !b.ExtraFabric {
-			return fmt.Errorf("interconnecting fabrics requires an extra fabric") //nolint:goerr113
+			return fmt.Errorf("interconnecting fabrics requires an extra fabric") //nolint:err113
 		}
 		if icLeafID == 0 {
-			return fmt.Errorf("interconnecting fabrics needs a leaf in the default domain only") //nolint:goerr113
+			return fmt.Errorf("interconnecting fabrics needs a leaf in the default domain only") //nolint:err113
 		}
 	}
 
@@ -290,14 +290,14 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 	}
 
 	if b.MultiHomedServers > 0 && b.OrphanLeafsCount+totalESLAGLeafs < 2 {
-		return fmt.Errorf("at least two leaves are needed for multihomed servers") //nolint:goerr113
+		return fmt.Errorf("at least two leaves are needed for multihomed servers") //nolint:err113
 	}
 
 	if b.ExtESLAGConnCount > totalESLAGLeafs {
-		return fmt.Errorf("external ESLAG connections count must be less than or equal to total ESLAG leaves") //nolint:goerr113
+		return fmt.Errorf("external ESLAG connections count must be less than or equal to total ESLAG leaves") //nolint:err113
 	}
 	if b.ExtOrphanConnCount > b.OrphanLeafsCount {
-		return fmt.Errorf("external orphan connections count must be less than or equal to orphan leaves") //nolint:goerr113
+		return fmt.Errorf("external orphan connections count must be less than or equal to orphan leaves") //nolint:err113
 	}
 
 	// warn about https://github.com/githedgehog/internal/issues/145 if there are multiple external connections
@@ -314,13 +314,13 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 			slog.Error(logMsg, logArgs...)
 			slog.Error("Use --yes to proceed anyway")
 
-			return errors.New(logMsg) //nolint:goerr113
+			return errors.New(logMsg) //nolint:err113
 		}
 	}
 
 	// multiple non-proxy static externals would cause ecmp between them when returning packets from the fabric, so forbid it
 	if b.ExtStaticCount > 1 {
-		return fmt.Errorf("multiple non-proxy static externals are not supported") //nolint:goerr113
+		return fmt.Errorf("multiple non-proxy static externals are not supported") //nolint:err113
 	}
 
 	slog.Info("Building VLAB wiring diagram", "fabricMode", fabricMode)
@@ -372,7 +372,7 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 			},
 		},
 	}); err != nil {
-		return fmt.Errorf("creating VLAN namespace: %w", err) //nolint:goerr113
+		return fmt.Errorf("creating VLAN namespace: %w", err)
 	}
 
 	if err := b.data.Add(ctx, &vpcapi.IPv4Namespace{
@@ -389,7 +389,7 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 			},
 		},
 	}); err != nil {
-		return fmt.Errorf("creating IPv4 namespace: %w", err) //nolint:goerr113
+		return fmt.Errorf("creating IPv4 namespace: %w", err)
 	}
 
 	b.ifaceTracker = map[string]uint8{}
@@ -845,7 +845,7 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 		return !slices.ContainsFunc(extLeafDomains, func(domains []string) bool { return !slices.Contains(domains, domain) })
 	})
 	if extDomainIdx < 0 {
-		return fmt.Errorf("external connections are on leaves with no domain in common") //nolint:goerr113
+		return fmt.Errorf("external connections are on leaves with no domain in common") //nolint:err113
 	}
 	extTopology := vpcapi.ExternalTopology{}
 	if extDomainIdx == 1 {
@@ -862,11 +862,11 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 	const maxExtBGPForNATPool = 9
 	const maxExtStaticForNATPool = 9
 	if b.ExtBGPCount > maxExtBGPForNATPool {
-		return fmt.Errorf("ExtBGPCount=%d exceeds %d (NAT pool CIDR scheme limit)", b.ExtBGPCount, maxExtBGPForNATPool) //nolint:goerr113
+		return fmt.Errorf("ExtBGPCount=%d exceeds %d (NAT pool CIDR scheme limit)", b.ExtBGPCount, maxExtBGPForNATPool) //nolint:err113
 	}
 	totalStaticExternals := int(b.ExtStaticCount) + int(b.ExtStaticProxyCount)
 	if totalStaticExternals > maxExtStaticForNATPool {
-		return fmt.Errorf("ExtStaticCount+ExtStaticProxyCount=%d exceeds %d (NAT pool CIDR scheme limit)", totalStaticExternals, maxExtStaticForNATPool) //nolint:goerr113
+		return fmt.Errorf("ExtStaticCount+ExtStaticProxyCount=%d exceeds %d (NAT pool CIDR scheme limit)", totalStaticExternals, maxExtStaticForNATPool) //nolint:err113
 	}
 
 	if b.ExtBGPCount > 0 {
@@ -1031,7 +1031,7 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 			},
 		},
 	}); err != nil {
-		return fmt.Errorf("creating IPv4 namespace: %w", err) //nolint:goerr113
+		return fmt.Errorf("creating IPv4 namespace: %w", err)
 	}
 
 	extraLeafs := []string{}
@@ -1134,7 +1134,7 @@ var _ VLABBuilder = (*VLABBuilderGPURail)(nil)
 
 func (b *VLABBuilderGPURail) Build(ctx context.Context, l *apiutil.Loader, f fabapi.Fabricator, nodes []fabapi.FabNode) error {
 	if l == nil {
-		return fmt.Errorf("loader is nil") //nolint:goerr113
+		return fmt.Errorf("loader is nil") //nolint:err113
 	}
 	b.data = l
 
@@ -1173,7 +1173,7 @@ func (b *VLABBuilderGPURail) Build(ctx context.Context, l *apiutil.Loader, f fab
 			},
 		},
 	}); err != nil {
-		return fmt.Errorf("creating VLAN namespace: %w", err) //nolint:goerr113
+		return fmt.Errorf("creating VLAN namespace: %w", err)
 	}
 
 	if err := b.data.Add(ctx, &vpcapi.IPv4Namespace{
@@ -1190,7 +1190,7 @@ func (b *VLABBuilderGPURail) Build(ctx context.Context, l *apiutil.Loader, f fab
 			},
 		},
 	}); err != nil {
-		return fmt.Errorf("creating IPv4 namespace: %w", err) //nolint:goerr113
+		return fmt.Errorf("creating IPv4 namespace: %w", err)
 	}
 
 	b.ifaceTracker = map[string]uint8{}
@@ -1245,7 +1245,7 @@ func (b *VLABBuilderGPURail) Build(ctx context.Context, l *apiutil.Loader, f fab
 			Subnets: map[string]*vpcapi.VPCSubnet{
 				"default": {
 					Subnet: vpcSubnetStr,
-					VLAN:   startingVLAN + uint16(vpcID), //nolint:gosec
+					VLAN:   startingVLAN + uint16(vpcID),
 				},
 			},
 		}); err != nil {
@@ -1343,7 +1343,7 @@ func (b *VLABBuilderBase) nextSwitchPort(switchName string) string {
 	if ifaceID >= 48 {
 		offset = 4
 	}
-	ifaceID += uint8(offset) //nolint:gosec
+	ifaceID += uint8(offset)
 
 	if ifaceID > 76 {
 		slog.Error("Too many interfaces for switch", "switch", switchName)
@@ -1408,7 +1408,7 @@ func (b *VLABBuilderBase) createSwitchGroup(ctx context.Context, name string) (*
 	}
 
 	if err := b.data.Add(ctx, sg); err != nil {
-		return nil, fmt.Errorf("creating switch group %s: %w", name, err) //nolint:goerr113
+		return nil, fmt.Errorf("creating switch group %s: %w", name, err)
 	}
 
 	return sg, nil
@@ -1436,7 +1436,7 @@ func (b *VLABBuilderBase) createSwitch(ctx context.Context, name string, spec wi
 	}
 
 	if err := b.data.Add(ctx, sw); err != nil {
-		return nil, fmt.Errorf("creating switch %s: %w", name, err) //nolint:goerr113
+		return nil, fmt.Errorf("creating switch %s: %w", name, err)
 	}
 
 	return sw, nil
@@ -1455,7 +1455,7 @@ func (b *VLABBuilderBase) createServer(ctx context.Context, name string, spec wi
 	}
 
 	if err := b.data.Add(ctx, server); err != nil {
-		return nil, fmt.Errorf("creating server %s: %w", name, err) //nolint:goerr113
+		return nil, fmt.Errorf("creating server %s: %w", name, err)
 	}
 
 	return server, nil
@@ -1475,7 +1475,7 @@ func (b *VLABBuilderBase) createGateway(ctx context.Context, name string, spec g
 	}
 
 	if err := b.data.Add(ctx, gw); err != nil {
-		return nil, fmt.Errorf("creating gateway %s: %w", name, err) //nolint:goerr113
+		return nil, fmt.Errorf("creating gateway %s: %w", name, err)
 	}
 
 	return gw, nil
@@ -1494,7 +1494,7 @@ func (b *VLABBuilderBase) createGatewayGroup(ctx context.Context, name string) (
 	}
 
 	if err := b.data.Add(ctx, gw); err != nil {
-		return nil, fmt.Errorf("creating gateway group %s: %w", name, err) //nolint:goerr113
+		return nil, fmt.Errorf("creating gateway group %s: %w", name, err)
 	}
 
 	return gw, nil
@@ -1518,7 +1518,7 @@ func (b *VLABBuilderBase) createConnectionWithName(ctx context.Context, name str
 	}
 
 	if err := b.data.Add(ctx, conn); err != nil {
-		return nil, fmt.Errorf("creating connection %s: %w", name, err) //nolint:goerr113
+		return nil, fmt.Errorf("creating connection %s: %w", name, err)
 	}
 
 	return conn, nil
@@ -1538,7 +1538,7 @@ func (b *VLABBuilderBase) createExternal(ctx context.Context, name string, spec 
 	}
 
 	if err := b.data.Add(ctx, external); err != nil {
-		return nil, fmt.Errorf("creating external %s: %w", name, err) //nolint:goerr113
+		return nil, fmt.Errorf("creating external %s: %w", name, err)
 	}
 
 	return external, nil
@@ -1557,7 +1557,7 @@ func (b *VLABBuilderBase) createExternalAttach(ctx context.Context, name string,
 	}
 
 	if err := b.data.Add(ctx, externalAttach); err != nil {
-		return nil, fmt.Errorf("creating external attachment %s: %w", name, err) //nolint:goerr113
+		return nil, fmt.Errorf("creating external attachment %s: %w", name, err)
 	}
 
 	return externalAttach, nil
@@ -1576,7 +1576,7 @@ func (b *VLABBuilderBase) createVPC(ctx context.Context, name string, spec vpcap
 	}
 
 	if err := b.data.Add(ctx, vpc); err != nil {
-		return nil, fmt.Errorf("creating vpc %s: %w", name, err) //nolint:goerr113
+		return nil, fmt.Errorf("creating vpc %s: %w", name, err)
 	}
 
 	return vpc, nil
@@ -1596,7 +1596,7 @@ func (b *VLABBuilderBase) createVPCAttachment(ctx context.Context, name string, 
 	}
 
 	if err := b.data.Add(ctx, vpc); err != nil {
-		return nil, fmt.Errorf("creating vpc attachment %s: %w", name, err) //nolint:goerr113
+		return nil, fmt.Errorf("creating vpc attachment %s: %w", name, err)
 	}
 
 	return vpc, nil

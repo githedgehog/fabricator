@@ -244,7 +244,7 @@ func bindDeviceToVFIO(dev string) error {
 	}
 
 	if _, err := os.Stat(vfioDevicePath); err != nil {
-		return fmt.Errorf("%s is still not bound to vfio-pci", dev) //nolint:goerr113
+		return fmt.Errorf("%s is still not bound to vfio-pci", dev) //nolint:err113
 	}
 
 	return nil

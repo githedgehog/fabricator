@@ -378,7 +378,7 @@ func Artifacts(cfg fabapi.Fabricator) (comp.OCIArtifacts, error) {
 
 	for nosType, version := range cfg.Status.Versions.Fabric.NOS {
 		if nosType == "" || version == "" {
-			return nil, fmt.Errorf("empty NOS type or version") //nolint:goerr113
+			return nil, fmt.Errorf("empty NOS type or version") //nolint:err113
 		}
 
 		if !isIncludeNOS(cfg, nosType) {
@@ -390,7 +390,7 @@ func Artifacts(cfg fabapi.Fabricator) (comp.OCIArtifacts, error) {
 
 	for platform, version := range cfg.Status.Versions.Fabric.ONIE {
 		if platform == "" || version == "" {
-			return nil, fmt.Errorf("empty ONIE platform or version") //nolint:goerr113
+			return nil, fmt.Errorf("empty ONIE platform or version") //nolint:err113
 		}
 
 		arts[comp.JoinURLParts(OnieRefBase, platform)] = version

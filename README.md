@@ -251,14 +251,3 @@ This repo enforces:
   `commitlint` workflow checks this and blocks merge commits.
 
 CI rejects PRs that fail either check. Run `just lint` before pushing.
-
-**Troubleshooting: golangci-lint version error after a Go bump.** If `just
-lint` fails with `can't load config: the Go language version (goX.Y) used to
-build golangci-lint is lower than the targeted Go version (...)`, the cached
-linter in `bin/` was built with an older Go. The install step is skipped when
-the binary already exists, so remove it and re-run to rebuild it against your
-current Go:
-
-```
-rm -f bin/golangci-lint-* && just lint
-```

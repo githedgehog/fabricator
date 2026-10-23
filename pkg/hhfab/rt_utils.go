@@ -255,7 +255,7 @@ func shutDownLinkAndTest(ctx context.Context, testCtx *VPCPeeringTestCtx, link w
 	}
 	nosPortName, ok := portMap[switchPort.LocalPortName()]
 	if !ok {
-		return fmt.Errorf("port %s not found in switch profile %s for switch %s", switchPort.LocalPortName(), profile.Name, deviceName) //nolint:goerr113
+		return fmt.Errorf("port %s not found in switch profile %s for switch %s", switchPort.LocalPortName(), profile.Name, deviceName) //nolint:err113
 	}
 	// disable agent
 	swSSH, sshErr := testCtx.getSSH(ctx, deviceName)
@@ -280,9 +280,9 @@ func shutDownLinkAndTest(ctx context.Context, testCtx *VPCPeeringTestCtx, link w
 			}
 		}
 		if returnErr != nil {
-			returnErr = errors.Join(returnErr, fmt.Errorf("could not enable HH agent on switch %s after %d attempts", deviceName, maxRetries)) //nolint:goerr113
+			returnErr = errors.Join(returnErr, fmt.Errorf("could not enable HH agent on switch %s after %d attempts", deviceName, maxRetries)) //nolint:err113
 		} else {
-			returnErr = fmt.Errorf("could not enable HH agent on switch %s after %d attempts", deviceName, maxRetries) //nolint:goerr113
+			returnErr = fmt.Errorf("could not enable HH agent on switch %s after %d attempts", deviceName, maxRetries) //nolint:err113
 		}
 	}()
 
@@ -407,7 +407,7 @@ func (testCtx *VPCPeeringTestCtx) waitForRoutesInSwitches(ctx context.Context, s
 		}
 		select {
 		case <-toCtx.Done():
-			return fmt.Errorf("timeout waiting for routes %v in switches %v", routes, switches) //nolint:goerr113
+			return fmt.Errorf("timeout waiting for routes %v in switches %v", routes, switches) //nolint:err113
 		case <-time.After(5 * time.Second):
 		}
 	}
@@ -463,7 +463,7 @@ func (testCtx *VPCPeeringTestCtx) waitForDatapathConverged(ctx context.Context, 
 				note = ", last round cut short by the deadline"
 			}
 
-			return fmt.Errorf("datapath convergence gate ran out of budget after %s: no round completed%s", timeout, note) //nolint:goerr113
+			return fmt.Errorf("datapath convergence gate ran out of budget after %s: no round completed%s", timeout, note) //nolint:err113
 		}
 
 		// The shared deadline, not a fresh timeout per round: otherwise a round starting just
@@ -517,16 +517,16 @@ func (testCtx *VPCPeeringTestCtx) waitForDatapathConverged(ctx context.Context, 
 // check that the DHCP lease is within the expected range.
 func checkDHCPLease(leaseInfo *DHCPLeaseInfo, expectedLease int, tolerance int) error {
 	if leaseInfo == nil {
-		return fmt.Errorf("DHCP lease info is nil") //nolint:goerr113
+		return fmt.Errorf("DHCP lease info is nil") //nolint:err113
 	}
 	if !leaseInfo.HasLease {
-		return fmt.Errorf("no DHCP lease found") //nolint:goerr113
+		return fmt.Errorf("no DHCP lease found") //nolint:err113
 	}
 	if leaseInfo.ValidLifetime > expectedLease {
-		return fmt.Errorf("DHCP lease valid lifetime %d is greater than expected %d", leaseInfo.ValidLifetime, expectedLease) //nolint:goerr113
+		return fmt.Errorf("DHCP lease valid lifetime %d is greater than expected %d", leaseInfo.ValidLifetime, expectedLease) //nolint:err113
 	}
 	if leaseInfo.ValidLifetime < expectedLease-tolerance {
-		return fmt.Errorf("DHCP lease valid lifetime %d is less than expected %d (tolerance %d)", leaseInfo.ValidLifetime, expectedLease, tolerance) //nolint:goerr113
+		return fmt.Errorf("DHCP lease valid lifetime %d is less than expected %d (tolerance %d)", leaseInfo.ValidLifetime, expectedLease, tolerance) //nolint:err113
 	}
 	slog.Debug("DHCP lease check passed", "lease", leaseInfo.ValidLifetime, "expected", expectedLease, "tolerance", tolerance)
 
@@ -537,22 +537,22 @@ func checkDHCPAdvRoutes(grepString, expectedPrefix, expectedGw string, disableDe
 	// check default route
 	defaultRoutePresent := strings.Contains(grepString, "default via")
 	if disableDefaultRoute && defaultRoutePresent {
-		return fmt.Errorf("DHCP advertised routes contain default route: %s", grepString) //nolint:goerr113
+		return fmt.Errorf("DHCP advertised routes contain default route: %s", grepString) //nolint:err113
 	} else if !disableDefaultRoute && !defaultRoutePresent {
-		return fmt.Errorf("DHCP advertised routes do not contain default route, expected it to be present: %s", grepString) //nolint:goerr113
+		return fmt.Errorf("DHCP advertised routes do not contain default route, expected it to be present: %s", grepString) //nolint:err113
 	}
 	slog.Debug("DHCP default route check passed", "present", defaultRoutePresent, "disabled", disableDefaultRoute)
 	// in l3mode, if default route is disabled, we expect the subnet to be present
 	if l3mode && disableDefaultRoute {
 		if !strings.Contains(grepString, fmt.Sprintf("%s via", subnet)) {
-			return fmt.Errorf("DHCP advertised routes do not contain expected subnet %s in l3mode: %s", subnet, grepString) //nolint:goerr113
+			return fmt.Errorf("DHCP advertised routes do not contain expected subnet %s in l3mode: %s", subnet, grepString) //nolint:err113
 		}
 		slog.Debug("DHCP advertised subnet check passed in l3mode", "subnet", subnet)
 	}
 
 	// check that the expected advertised route is present
 	if !strings.Contains(grepString, fmt.Sprintf("%s via %s", expectedPrefix, expectedGw)) {
-		return fmt.Errorf("DHCP advertised routes do not contain expected route %s via %s: %s", expectedPrefix, expectedGw, grepString) //nolint:goerr113
+		return fmt.Errorf("DHCP advertised routes do not contain expected route %s via %s: %s", expectedPrefix, expectedGw, grepString) //nolint:err113
 	}
 	slog.Debug("DHCP advertised route check passed", "route", expectedPrefix, "gateway", expectedGw)
 	slog.Debug("All DHCP advertised routes checks passed")
@@ -689,10 +689,10 @@ func setPortBreakout(ctx context.Context, kube kclient.Client, swName string, po
 			}
 			bkStatus, ok := agent.Status.State.Breakouts[port]
 			if !ok {
-				return fmt.Errorf("breakout mode %s for port %s on switch %s not found in agent status after applying breakout mode", targetMode, port, swName) //nolint:goerr113
+				return fmt.Errorf("breakout mode %s for port %s on switch %s not found in agent status after applying breakout mode", targetMode, port, swName) //nolint:err113
 			}
 			if bkStatus.Mode != targetMode {
-				return fmt.Errorf("breakout mode %s for port %s on switch %s not applied, expected %s but got %s", targetMode, port, swName, targetMode, bkStatus.Mode) //nolint:goerr113
+				return fmt.Errorf("breakout mode %s for port %s on switch %s not applied, expected %s but got %s", targetMode, port, swName, targetMode, bkStatus.Mode) //nolint:err113
 			}
 			if bkStatus.Status == "Completed" {
 				slog.Debug("Breakout mode applied successfully", "switch", swName, "port", port, "mode", targetMode)
@@ -705,7 +705,7 @@ func setPortBreakout(ctx context.Context, kube kclient.Client, swName string, po
 			}
 		}
 
-		return fmt.Errorf("breakout mode %s for port %s on switch %s not completed after %d retries", targetMode, port, swName, maxRetries) //nolint:goerr113
+		return fmt.Errorf("breakout mode %s for port %s on switch %s not completed after %d retries", targetMode, port, swName, maxRetries) //nolint:err113
 	}
 
 	return nil
@@ -907,7 +907,7 @@ func buildNATConfig(mode NATMode, portForwardRules []gwapi.PeeringNATPortForward
 		}
 	case NATModePortForward:
 		if len(portForwardRules) == 0 {
-			return nil, fmt.Errorf("NATModePortForward requires at least one port-forward rule") //nolint:goerr113
+			return nil, fmt.Errorf("NATModePortForward requires at least one port-forward rule") //nolint:err113
 		}
 		nat.PortForward = &gwapi.PeeringNATPortForward{
 			IdleTimeout: kmetav1.Duration{Duration: 5 * time.Minute},
@@ -916,9 +916,9 @@ func buildNATConfig(mode NATMode, portForwardRules []gwapi.PeeringNATPortForward
 	case NATModeMasqueradePortForward:
 		// unreachable: buildExposes splits this mode into two separate expose entries
 		// (NATModeMasquerade + NATModePortForward) before calling buildNATConfig.
-		return nil, fmt.Errorf("NATModeMasqueradePortForward should not be passed to buildNATConfig directly") //nolint:goerr113
+		return nil, fmt.Errorf("NATModeMasqueradePortForward should not be passed to buildNATConfig directly") //nolint:err113
 	default:
-		return nil, fmt.Errorf("unknown NATMode %d passed to buildNATConfig", mode) //nolint:goerr113
+		return nil, fmt.Errorf("unknown NATMode %d passed to buildNATConfig", mode) //nolint:err113
 	}
 
 	return nat, nil
@@ -928,11 +928,11 @@ func buildNATConfig(mode NATMode, portForwardRules []gwapi.PeeringNATPortForward
 // in used, skipping the network and broadcast addresses. IPv4 only.
 func pickUnusedHostAddress(prefix netip.Prefix, used map[netip.Addr]bool) (netip.Addr, error) {
 	if !prefix.Addr().Is4() {
-		return netip.Addr{}, fmt.Errorf("subnet %s is not IPv4", prefix) //nolint:goerr113
+		return netip.Addr{}, fmt.Errorf("subnet %s is not IPv4", prefix) //nolint:err113
 	}
 	bits := prefix.Bits()
 	if bits >= 31 {
-		return netip.Addr{}, fmt.Errorf("subnet %s has no usable host addresses", prefix) //nolint:goerr113
+		return netip.Addr{}, fmt.Errorf("subnet %s has no usable host addresses", prefix) //nolint:err113
 	}
 
 	base := prefix.Masked().Addr().As4()
@@ -950,7 +950,7 @@ func pickUnusedHostAddress(prefix netip.Prefix, used map[netip.Addr]bool) (netip
 		}
 	}
 
-	return netip.Addr{}, fmt.Errorf("no unused host address found in subnet %s", prefix) //nolint:goerr113
+	return netip.Addr{}, fmt.Errorf("no unused host address found in subnet %s", prefix) //nolint:err113
 }
 
 // buildExposes constructs the PeeringEntryExpose slice for one side of a peering.
@@ -978,7 +978,7 @@ func buildExposes(subnets, natCIDRs, notCIDRs []string, mode NATMode, portForwar
 
 	if mode == NATModeMasqueradePortForward {
 		if len(natCIDRs) == 0 {
-			return nil, fmt.Errorf("NATModeMasqueradePortForward requires natCIDRs: gateway API requires expose.As and expose.NAT together") //nolint:goerr113
+			return nil, fmt.Errorf("NATModeMasqueradePortForward requires natCIDRs: gateway API requires expose.As and expose.NAT together") //nolint:err113
 		}
 		masq := makeBase()
 		masqNAT, err := buildNATConfig(NATModeMasquerade, nil)
@@ -999,7 +999,7 @@ func buildExposes(subnets, natCIDRs, notCIDRs []string, mode NATMode, portForwar
 	e := makeBase()
 	if len(natCIDRs) > 0 || len(portForwardRules) > 0 {
 		if len(natCIDRs) == 0 {
-			return nil, fmt.Errorf("NAT configuration requires natCIDRs: gateway API requires expose.As and expose.NAT together") //nolint:goerr113
+			return nil, fmt.Errorf("NAT configuration requires natCIDRs: gateway API requires expose.As and expose.NAT together") //nolint:err113
 		}
 		natCfg, err := buildNATConfig(mode, portForwardRules)
 		if err != nil {
@@ -1146,7 +1146,7 @@ func (testCtx *VPCPeeringTestCtx) waitForDHCPRenewal(ctx context.Context, server
 			// Wait for full lease
 			if info.ValidLifetime >= int(shortLeaseTime)-10 {
 				if !shortLeaseFound {
-					return fmt.Errorf("L3VNI mode requires 2-step lease process, but no short lease detected before full lease on %s", ifName) //nolint:goerr113
+					return fmt.Errorf("L3VNI mode requires 2-step lease process, but no short lease detected before full lease on %s", ifName) //nolint:err113
 				}
 				slog.Debug("L3 mode 2-step reconfiguration completed", "server", serverName, "final_lease", info.ValidLifetime)
 
@@ -1167,7 +1167,7 @@ func (testCtx *VPCPeeringTestCtx) waitForDHCPRenewal(ctx context.Context, server
 		return fmt.Errorf("parsing initial lease: %w", err)
 	}
 	if !initialInfo.HasLease {
-		return fmt.Errorf("no initial lease found on %s", ifName) //nolint:goerr113
+		return fmt.Errorf("no initial lease found on %s", ifName) //nolint:err113
 	}
 	slog.Info("Initial short lease acquired", "server", serverName, "interface", ifName,
 		"lease_time", initialInfo.ValidLifetime, "expected_short", shortLeaseTime)
@@ -1191,7 +1191,7 @@ func (testCtx *VPCPeeringTestCtx) waitForDHCPRenewal(ctx context.Context, server
 		return fmt.Errorf("parsing renewed lease: %w", err)
 	}
 	if !renewedInfo.HasLease {
-		return fmt.Errorf("no lease found after renewal period on %s", ifName) //nolint:goerr113
+		return fmt.Errorf("no lease found after renewal period on %s", ifName) //nolint:err113
 	}
 	slog.Info("Post-renewal lease state", "server", serverName, "interface", ifName,
 		"lease_time", renewedInfo.ValidLifetime, "initial_lease", initialInfo.ValidLifetime)
@@ -1205,7 +1205,7 @@ func (testCtx *VPCPeeringTestCtx) waitForDHCPRenewal(ctx context.Context, server
 
 	// Also verify that renewal actually happened (lease didn't just count down)
 	if renewedInfo.ValidLifetime <= initialInfo.ValidLifetime/2 {
-		return fmt.Errorf("lease doesn't appear to have been renewed - time not refreshed (initial: %d, renewed: %d)", //nolint:goerr113
+		return fmt.Errorf("lease doesn't appear to have been renewed - time not refreshed (initial: %d, renewed: %d)", //nolint:err113
 			initialInfo.ValidLifetime, renewedInfo.ValidLifetime)
 	}
 
@@ -1269,7 +1269,7 @@ func parseDHCPLease(output string) (*DHCPLeaseInfo, error) {
 	}
 
 	if info.HasLease && info.ValidLifetime == 0 {
-		return nil, fmt.Errorf("failed to parse lease time from: %s", info.LeaseText) //nolint:goerr113
+		return nil, fmt.Errorf("failed to parse lease time from: %s", info.LeaseText) //nolint:err113
 	}
 
 	return info, nil
@@ -1389,7 +1389,7 @@ func findAllServersInSubnet(ctx context.Context, kube kclient.Client, vpcName, s
 	}
 	subnet, ok := vpc.Spec.Subnets[subnetName]
 	if !ok {
-		return servers, fmt.Errorf("no subnet %s in VPC %s", subnetName, vpcName) //nolint:goerr113
+		return servers, fmt.Errorf("no subnet %s in VPC %s", subnetName, vpcName) //nolint:err113
 	}
 	attachList := vpcapi.VPCAttachmentList{}
 	if err := kube.List(ctx, &attachList, kclient.MatchingLabels{
@@ -1417,7 +1417,7 @@ func findAllServersInSubnet(ctx context.Context, kube kclient.Client, vpcName, s
 		if err != nil {
 			return servers, fmt.Errorf("getting endpoints for connection %s: %w", conn.Name, err)
 		} else if len(serverNames) != 1 {
-			return servers, fmt.Errorf("expected 1 server for attachment %s, found %d", attach.Name, len(serverNames)) //nolint:goerr113
+			return servers, fmt.Errorf("expected 1 server for attachment %s, found %d", attach.Name, len(serverNames)) //nolint:err113
 		}
 
 		servers = append(servers, ServerWithInterface{
@@ -1532,7 +1532,7 @@ func (a *vpcSubnetAllocator) stop() {
 func (a *vpcSubnetAllocator) allocVLAN() (uint16, error) {
 	v, ok := a.nextVLAN()
 	if !ok {
-		return 0, fmt.Errorf("no more VLANs available") //nolint:goerr113
+		return 0, fmt.Errorf("no more VLANs available") //nolint:err113
 	}
 
 	return v, nil
@@ -1541,7 +1541,7 @@ func (a *vpcSubnetAllocator) allocVLAN() (uint16, error) {
 func (a *vpcSubnetAllocator) allocSubnet() (netip.Prefix, error) {
 	p, ok := a.nextPrefix()
 	if !ok {
-		return p, fmt.Errorf("no more subnets available") //nolint:goerr113
+		return p, fmt.Errorf("no more subnets available") //nolint:err113
 	}
 
 	return p, nil

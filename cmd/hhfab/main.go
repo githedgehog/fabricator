@@ -728,7 +728,7 @@ func Run(ctx context.Context) error {
 						EnvVars:  []string{"HHFAB_FABRIC_MODE"},
 						Action: func(_ *cli.Context, mode string) error {
 							if !slices.Contains(fabricModes, mode) {
-								return fmt.Errorf("invalid fabric mode %q", mode) //nolint:goerr113
+								return fmt.Errorf("invalid fabric mode %q", mode) //nolint:err113
 							}
 
 							return nil
@@ -1777,11 +1777,11 @@ Examples:
 						Action: func(c *cli.Context) error {
 							cliDSCP := c.Uint("dscp")
 							if cliDSCP > 63 {
-								return fmt.Errorf("dscp value must be between 0 and 63, got %d", cliDSCP) //nolint:goerr113
+								return fmt.Errorf("dscp value must be between 0 and 63, got %d", cliDSCP) //nolint:err113
 							}
 							cliTOS := c.Uint("tos")
 							if cliTOS > 255 {
-								return fmt.Errorf("tos value must be between 0 and 255, got %d", cliTOS) //nolint:goerr113
+								return fmt.Errorf("tos value must be between 0 and 255, got %d", cliTOS) //nolint:err113
 							}
 							if err := hhfab.DoVLABTestConnectivity(ctx, workDir, cacheDir, hhfab.TestConnectivityOpts{
 								WaitSwitchesReady: c.Bool("wait-switches-ready"),
@@ -1937,7 +1937,7 @@ Examples:
 						Action: func(c *cli.Context) error {
 							iperfsSpeed := c.Float64(FlagIPerfsSpeed)
 							if iperfsSpeed < 0 {
-								return fmt.Errorf("--%s must be >= 0, got %g", FlagIPerfsSpeed, iperfsSpeed) //nolint:goerr113
+								return fmt.Errorf("--%s must be >= 0, got %g", FlagIPerfsSpeed, iperfsSpeed) //nolint:err113
 							}
 							opts := hhfab.ReleaseTestOpts{
 								Regexes:        c.StringSlice(FlagRegEx),
@@ -2534,7 +2534,7 @@ to have it re-run itself under sudo.`,
 								Action: func(c *cli.Context) error {
 									mode := c.String("mode")
 									if !slices.Contains(reinstallModes, mode) {
-										return fmt.Errorf("invalid mode: %s", mode) //nolint:goerr113
+										return fmt.Errorf("invalid mode: %s", mode) //nolint:err113
 									}
 
 									if err := yesCheck(c); err != nil {
@@ -2562,12 +2562,12 @@ to have it re-run itself under sudo.`,
 										}
 
 										if username == "" || password == "" {
-											return fmt.Errorf("credentials required for reboot mode") //nolint:goerr113
+											return fmt.Errorf("credentials required for reboot mode") //nolint:err113
 										}
 									}
 
 									if mode == string(hhfab.ReinstallModeHardReset) && (c.String("pdu-username") == "" || c.String("pdu-password") == "") {
-										return fmt.Errorf("PDU credentials required for hard reset mode") //nolint:goerr113
+										return fmt.Errorf("PDU credentials required for hard reset mode") //nolint:err113
 									}
 
 									opts := hhfab.SwitchReinstallOpts{
@@ -2609,7 +2609,7 @@ to have it re-run itself under sudo.`,
 								Action: func(c *cli.Context) error {
 									action := strings.ToLower(c.String("action"))
 									if !slices.Contains(powerActions, action) {
-										return fmt.Errorf("invalid action: %s", action) //nolint:goerr113
+										return fmt.Errorf("invalid action: %s", action) //nolint:err113
 									}
 
 									if err := yesCheck(c); err != nil {
@@ -2649,11 +2649,11 @@ to have it re-run itself under sudo.`,
 								Required: true,
 								Action: func(_ *cli.Context, v int) error {
 									if v < 0 {
-										return fmt.Errorf("count must be zero or positive") //nolint:goerr113
+										return fmt.Errorf("count must be zero or positive") //nolint:err113
 									}
 
 									if v > 100 {
-										return fmt.Errorf("count must be less than 100") //nolint:goerr113
+										return fmt.Errorf("count must be less than 100") //nolint:err113
 									}
 
 									return nil

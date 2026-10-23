@@ -63,7 +63,7 @@ var SSHQuietFlags = []string{
 
 func (c *Config) VLABAccess(ctx context.Context, vlab *VLAB, t VLABAccessType, name, username string, inArgs []string) error {
 	if len(inArgs) > 0 && t != VLABAccessSSH && t != VLABAccessSCP {
-		return fmt.Errorf("arguments only supported for ssh and scp") //nolint:goerr113
+		return fmt.Errorf("arguments only supported for ssh and scp") //nolint:err113
 	}
 
 	if t == VLABAccessSSH && username == "" {
@@ -121,7 +121,7 @@ func (c *Config) VLABAccess(ctx context.Context, vlab *VLAB, t VLABAccessType, n
 
 	entry, ok := entries[name]
 	if !ok {
-		return fmt.Errorf("access info not found: %s", name) //nolint:goerr113
+		return fmt.Errorf("access info not found: %s", name) //nolint:err113
 	}
 
 	sudo := false
@@ -180,7 +180,7 @@ func (c *Config) VLABAccess(ctx context.Context, vlab *VLAB, t VLABAccessType, n
 				"core@"+nodeIP,
 			)
 		} else {
-			return fmt.Errorf("SSH not available: %s", name) //nolint:goerr113
+			return fmt.Errorf("SSH not available: %s", name) //nolint:err113
 		}
 
 		if len(inArgs) > 0 {
@@ -188,7 +188,7 @@ func (c *Config) VLABAccess(ctx context.Context, vlab *VLAB, t VLABAccessType, n
 		}
 	case VLABAccessSCP:
 		if len(inArgs) < 2 {
-			return fmt.Errorf("scp requires source and destination arguments") //nolint:goerr113
+			return fmt.Errorf("scp requires source and destination arguments") //nolint:err113
 		}
 
 		if username == "" {
@@ -251,7 +251,7 @@ func (c *Config) VLABAccess(ctx context.Context, vlab *VLAB, t VLABAccessType, n
 				"-o", "ProxyCommand="+proxyCmd,
 			)
 		} else {
-			return fmt.Errorf("SCP not available: %s", name) //nolint:goerr113
+			return fmt.Errorf("SCP not available: %s", name) //nolint:err113
 		}
 
 		var hasRemote bool
@@ -264,7 +264,7 @@ func (c *Config) VLABAccess(ctx context.Context, vlab *VLAB, t VLABAccessType, n
 			}
 		}
 		if !hasRemote {
-			return fmt.Errorf("scp requires at least one remote path; prefix the remote path with ':' (for example: hhfab vlab scp -n %s :/etc/hostname .)", name) //nolint:goerr113
+			return fmt.Errorf("scp requires at least one remote path; prefix the remote path with ':' (for example: hhfab vlab scp -n %s :/etc/hostname .)", name) //nolint:err113
 		}
 	case VLABAccessSerial:
 		if entry.SerialSock != "" { //nolint:gocritic
@@ -282,14 +282,14 @@ func (c *Config) VLABAccess(ctx context.Context, vlab *VLAB, t VLABAccessType, n
 
 			parts := strings.SplitN(entry.RemoteSerial, ":", 2)
 			if len(parts) != 2 {
-				return fmt.Errorf("invalid remote serial (expected host:port): %s", entry.RemoteSerial) //nolint:goerr113
+				return fmt.Errorf("invalid remote serial (expected host:port): %s", entry.RemoteSerial) //nolint:err113
 			}
 
 			cmdName = VLABCmdSSH
 			args = append(slices.Clone(SSHQuietFlags), "-p", parts[1], parts[0])
 			slog.Info("Connected over SSH; use <Enter>~? to list SSH escape commands, safe to use Ctrl+C/Ctrl+Z")
 		} else {
-			return fmt.Errorf("serial not available: %s", name) //nolint:goerr113
+			return fmt.Errorf("serial not available: %s", name) //nolint:err113
 		}
 	case VLABAccessSerialLog:
 		if entry.SerialLog != "" {
@@ -298,10 +298,10 @@ func (c *Config) VLABAccess(ctx context.Context, vlab *VLAB, t VLABAccessType, n
 			cmdName = VLABCmdLess
 			args = []string{"-r", entry.SerialLog}
 		} else {
-			return fmt.Errorf("serial log not available: %s", name) //nolint:goerr113
+			return fmt.Errorf("serial log not available: %s", name) //nolint:err113
 		}
 	default:
-		return fmt.Errorf("unknown access type: %s", t) //nolint:goerr113
+		return fmt.Errorf("unknown access type: %s", t) //nolint:err113
 	}
 
 	slog.Debug("Running", "cmd", strings.Join(append([]string{cmdName}, args...), " "))
@@ -420,7 +420,7 @@ func wrapError(switchName string, exitCode int) error {
 	case errorUnknown:
 		baseErr = ErrUnknown
 	default:
-		return fmt.Errorf("%s: unknown error (exit code: %d)", switchName, exitCode) //nolint:goerr113
+		return fmt.Errorf("%s: unknown error (exit code: %d)", switchName, exitCode) //nolint:err113
 	}
 
 	return fmt.Errorf("%s: %w (error code: %d)", switchName, baseErr, exitCode)
@@ -432,7 +432,7 @@ func (c *Config) VLABSwitchReinstall(ctx context.Context, opts SwitchReinstallOp
 
 	_, err := exec.LookPath(VLABCmdExpect)
 	if err != nil {
-		return fmt.Errorf("required command %q is not available", VLABCmdExpect) //nolint:goerr113
+		return fmt.Errorf("required command %q is not available", VLABCmdExpect) //nolint:err113
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
@@ -450,7 +450,7 @@ func (c *Config) VLABSwitchReinstall(ctx context.Context, opts SwitchReinstallOp
 		}
 		for _, sw := range opts.Switches {
 			if !sws[sw] {
-				return fmt.Errorf("switch not found: %s", sw) //nolint:goerr113
+				return fmt.Errorf("switch not found: %s", sw) //nolint:err113
 			}
 		}
 	}
@@ -545,7 +545,7 @@ func (c *Config) VLABSwitchReinstall(ctx context.Context, opts SwitchReinstallOp
 
 						return
 					} else if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-						lastErr = fmt.Errorf("%s: timeout (context deadline exceeded)", sw.Name) //nolint:goerr113
+						lastErr = fmt.Errorf("%s: timeout (context deadline exceeded)", sw.Name) //nolint:err113
 
 						return
 					}
@@ -984,7 +984,7 @@ func (c *Config) VLABShowTech(ctx context.Context, vlab *VLAB, opts ShowTechOpts
 	errors := lo.ChannelToSlice(errChan)
 
 	if successCount.Load() == 0 {
-		return fmt.Errorf("failed to collect any diagnostics: %v", errors) //nolint:goerr113
+		return fmt.Errorf("failed to collect any diagnostics: %v", errors) //nolint:err113
 	}
 
 	if len(errors) > 0 {
@@ -1024,7 +1024,7 @@ func (c *Config) VLABSwitchPower(ctx context.Context, opts SwitchPowerOpts) erro
 	slog.Info("Power managing switches", "action", opts.Action, "switches", opts.Switches)
 
 	if opts.PDUUsername == "" || opts.PDUPassword == "" {
-		return errors.New("PDU credentials required") //nolint:goerr113
+		return errors.New("PDU credentials required") //nolint:err113
 	}
 
 	switches := wiringapi.SwitchList{}
@@ -1040,7 +1040,7 @@ func (c *Config) VLABSwitchPower(ctx context.Context, opts SwitchPowerOpts) erro
 
 		for _, sw := range opts.Switches {
 			if !sws[sw] {
-				return fmt.Errorf("switch not found: %s", sw) //nolint:goerr113
+				return fmt.Errorf("switch not found: %s", sw) //nolint:err113
 			}
 		}
 	}
@@ -1052,7 +1052,7 @@ func (c *Config) VLABSwitchPower(ctx context.Context, opts SwitchPowerOpts) erro
 
 		powerInfo := hhfctl.GetPowerInfo(&sw)
 		if len(powerInfo) == 0 {
-			return fmt.Errorf("no power info found for switch: %s", sw.Name) //nolint:goerr113
+			return fmt.Errorf("no power info found for switch: %s", sw.Name) //nolint:err113
 		}
 
 		for psuName, url := range powerInfo {
@@ -1103,7 +1103,7 @@ func (c *Config) collectShowTech(ctx context.Context, entryName string, ssh *ssh
 	chmodCmd := fmt.Sprintf("chmod +x %s && %s", remoteScriptPath, remoteScriptPath)
 	_, stderr, err := ssh.Run(ctx, chmodCmd)
 	if err != nil {
-		return fmt.Errorf("executing show-tech on %s: %w", entryName, err) //nolint:goerr113
+		return fmt.Errorf("executing show-tech on %s: %w", entryName, err)
 	}
 
 	if stderr != "" {
@@ -1294,11 +1294,11 @@ func (c *Config) getSwitchIP(ctx context.Context, entryName string) (string, err
 
 	sw := &wiringapi.Switch{}
 	if err := kube.Get(ctx, kclient.ObjectKey{Name: entryName, Namespace: kmetav1.NamespaceDefault}, sw); err != nil {
-		return "", fmt.Errorf("getting switch object: %w", err) //nolint:goerr113
+		return "", fmt.Errorf("getting switch object: %w", err)
 	}
 
 	if sw.Spec.IP == "" {
-		return "", fmt.Errorf("switch IP not found: %s", entryName) //nolint:goerr113
+		return "", fmt.Errorf("switch IP not found: %s", entryName) //nolint:err113
 	}
 
 	swIP, err := netip.ParsePrefix(sw.Spec.IP)
@@ -1318,11 +1318,11 @@ func (c *Config) getNodeIP(ctx context.Context, name string) (string, error) {
 
 	node := &fabapi.FabNode{}
 	if err := kube.Get(ctx, kclient.ObjectKey{Name: name, Namespace: comp.FabNamespace}, node); err != nil {
-		return "", fmt.Errorf("getting node object: %w", err) //nolint:goerr113
+		return "", fmt.Errorf("getting node object: %w", err)
 	}
 
 	if node.Spec.Management.IP == "" {
-		return "", fmt.Errorf("node mgmt IP not found: %s", name) //nolint:goerr113
+		return "", fmt.Errorf("node mgmt IP not found: %s", name) //nolint:err113
 	}
 
 	nodeIP, err := node.Spec.Management.IP.Parse()

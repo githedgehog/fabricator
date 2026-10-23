@@ -30,7 +30,7 @@ func printKubeObjects(ctx context.Context, kube ReaderWithScheme, w io.Writer, o
 
 		items := reflect.ValueOf(objList).Elem().FieldByName("Items")
 		if items.Kind() != reflect.Slice {
-			return fmt.Errorf("items field is not a slice in %T", objList) //nolint:goerr113
+			return fmt.Errorf("items field is not a slice in %T", objList) //nolint:err113
 		}
 
 		itemsLen := items.Len()
@@ -44,7 +44,7 @@ func printKubeObjects(ctx context.Context, kube ReaderWithScheme, w io.Writer, o
 		for idx := 0; idx < itemsLen; idx++ {
 			itemValue, ok := items.Index(idx).Addr().Interface().(kclient.Object)
 			if !ok {
-				return fmt.Errorf("item %d of %T is not an object", idx, objList) //nolint:goerr113
+				return fmt.Errorf("item %d of %T is not an object", idx, objList) //nolint:err113
 			}
 
 			if objs > 0 {

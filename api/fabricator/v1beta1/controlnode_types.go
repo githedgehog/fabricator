@@ -78,11 +78,11 @@ func (c *ControlNode) Default() {
 
 func (c *ControlNode) Validate(_ context.Context, fabCfg *FabConfig, allowNotHydrated bool) error {
 	if fabCfg == nil {
-		return fmt.Errorf("fabricator config must be non-nil") //nolint:goerr113
+		return fmt.Errorf("fabricator config must be non-nil") //nolint:err113
 	}
 
 	if c.Namespace != FabNamespace {
-		return fmt.Errorf("control node must be in the fabricator namespace %q", FabNamespace) //nolint:goerr113
+		return fmt.Errorf("control node must be in the fabricator namespace %q", FabNamespace) //nolint:err113
 	}
 
 	if !allowNotHydrated {
@@ -97,10 +97,10 @@ func (c *ControlNode) Validate(_ context.Context, fabCfg *FabConfig, allowNotHyd
 		}
 
 		if !dummySubnet.Contains(dummyAddr.Addr()) {
-			return fmt.Errorf("dummy IP %s not in dummy subnet %s", dummyAddr.String(), dummySubnet.String()) //nolint:goerr113
+			return fmt.Errorf("dummy IP %s not in dummy subnet %s", dummyAddr.String(), dummySubnet.String()) //nolint:err113
 		}
 		if dummyAddr.Bits() != 31 {
-			return fmt.Errorf("dummy IP %s should be /31", dummyAddr.String()) //nolint:goerr113
+			return fmt.Errorf("dummy IP %s should be /31", dummyAddr.String()) //nolint:err113
 		}
 
 		managementAddr, err := c.Spec.Management.IP.Parse()
@@ -114,11 +114,11 @@ func (c *ControlNode) Validate(_ context.Context, fabCfg *FabConfig, allowNotHyd
 		}
 
 		if !managementSubnet.Contains(managementAddr.Addr()) {
-			return fmt.Errorf("management IP %s not in management subnet %s", managementAddr.String(), managementSubnet.String()) //nolint:goerr113
+			return fmt.Errorf("management IP %s not in management subnet %s", managementAddr.String(), managementSubnet.String()) //nolint:err113
 		}
 
 		if managementAddr.Bits() != managementSubnet.Bits() {
-			return fmt.Errorf("management IP %s not the same subnet as management subnet %s", managementAddr.String(), managementSubnet.String()) //nolint:goerr113
+			return fmt.Errorf("management IP %s not the same subnet as management subnet %s", managementAddr.String(), managementSubnet.String()) //nolint:err113
 		}
 	}
 
@@ -127,15 +127,15 @@ func (c *ControlNode) Validate(_ context.Context, fabCfg *FabConfig, allowNotHyd
 	}
 
 	if c.Spec.Management.Interface == "" {
-		return fmt.Errorf("management interface must be set") //nolint:goerr113
+		return fmt.Errorf("management interface must be set") //nolint:err113
 	}
 
 	if c.Spec.External.Interface == "" {
-		return fmt.Errorf("external interface must be set") //nolint:goerr113
+		return fmt.Errorf("external interface must be set") //nolint:err113
 	}
 
 	if c.Spec.Bootstrap.Disk == "" {
-		return fmt.Errorf("bootstrap disk must be set") //nolint:goerr113
+		return fmt.Errorf("bootstrap disk must be set") //nolint:err113
 	}
 
 	return nil

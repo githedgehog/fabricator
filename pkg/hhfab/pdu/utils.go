@@ -49,13 +49,13 @@ func ExtractOutletID(url string) (int, error) {
 
 	// Check if URL has at least 1 part (outlet ID is expected to be the last part)
 	if len(parts) < 1 {
-		return 0, fmt.Errorf("invalid URL format: expected at least one part") //nolint:goerr113
+		return 0, fmt.Errorf("invalid URL format: expected at least one part") //nolint:err113
 	}
 
 	outletID := parts[len(parts)-1]
 	id, err := strconv.Atoi(outletID)
 	if err != nil {
-		return 0, fmt.Errorf("error extracting outlet ID from '%s': %w", outletID, err) //nolint:goerr113
+		return 0, fmt.Errorf("error extracting outlet ID from '%s': %w", outletID, err)
 	}
 
 	return id, nil
@@ -66,7 +66,7 @@ func GetPDUIPFromURL(url string) (string, error) {
 
 	// URL must have at least 3 parts: http://PDUIP/outlet/PORT
 	if len(parts) < 3 {
-		return "", fmt.Errorf("invalid URL format: expected at least 3 parts, got %d", len(parts)) //nolint:goerr113
+		return "", fmt.Errorf("invalid URL format: expected at least 3 parts, got %d", len(parts)) //nolint:err113
 	}
 
 	return parts[2], nil

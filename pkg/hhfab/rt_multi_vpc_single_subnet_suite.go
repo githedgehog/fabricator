@@ -320,7 +320,7 @@ func gatewayPeeringTest(ctx context.Context, testCtx *VPCPeeringTestCtx, matrix 
 		return false, nil, fmt.Errorf("listing VPCs: %w", err)
 	}
 	if len(vpcs.Items) < 2 {
-		return true, nil, fmt.Errorf("not enough VPCs for gateway peering test") //nolint:goerr113
+		return true, nil, fmt.Errorf("not enough VPCs for gateway peering test") //nolint:err113
 	}
 
 	vpcPeerings := make(map[string]*vpcapi.VPCPeeringSpec, 0)
@@ -386,7 +386,7 @@ func gatewayPeeringExposeNotTest(ctx context.Context, testCtx *VPCPeeringTestCtx
 		break
 	}
 	if excluded == "" {
-		return true, nil, fmt.Errorf("no IPv4 server attachment discovered in VPC %s to exclude", vpc2.Name) //nolint:goerr113
+		return true, nil, fmt.Errorf("no IPv4 server attachment discovered in VPC %s to exclude", vpc2.Name) //nolint:err113
 	}
 	slog.Info("Excluding server address from gateway peering expose", "server", excludedServer, "vpc", vpc2.Name, "not", excluded)
 
@@ -433,7 +433,7 @@ func gatewayPeeringExposeNotUnusedTest(ctx context.Context, testCtx *VPCPeeringT
 	vpc2 := &vpcs.Items[1]
 
 	if len(vpc2.Spec.Subnets) == 0 {
-		return true, nil, fmt.Errorf("VPC %s has no subnets to derive an unused address from", vpc2.Name) //nolint:goerr113
+		return true, nil, fmt.Errorf("VPC %s has no subnets to derive an unused address from", vpc2.Name) //nolint:err113
 	}
 	subnetNames := make([]string, 0, len(vpc2.Spec.Subnets))
 	for name := range vpc2.Spec.Subnets {
@@ -495,7 +495,7 @@ func gatewayPeeringLoopTest(ctx context.Context, testCtx *VPCPeeringTestCtx, mat
 		return false, nil, fmt.Errorf("listing VPCs: %w", err)
 	}
 	if len(vpcs.Items) < 3 {
-		return true, nil, fmt.Errorf("not enough VPCs for gateway peering loop test (need at least 3)") //nolint:goerr113
+		return true, nil, fmt.Errorf("not enough VPCs for gateway peering loop test (need at least 3)") //nolint:err113
 	}
 
 	// Sort VPCs by name to ensure proper loop order
@@ -578,7 +578,7 @@ func gatewayMixedPeeringLoopTest(ctx context.Context, testCtx *VPCPeeringTestCtx
 		return false, nil, fmt.Errorf("listing VPCs: %w", err)
 	}
 	if len(vpcs.Items) < 4 {
-		return true, nil, fmt.Errorf("not enough VPCs for mixed peering loop test (need at least 4)") //nolint:goerr113
+		return true, nil, fmt.Errorf("not enough VPCs for mixed peering loop test (need at least 4)") //nolint:err113
 	}
 
 	// Sort VPCs by name to ensure consistent ordering

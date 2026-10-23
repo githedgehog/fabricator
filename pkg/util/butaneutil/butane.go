@@ -23,7 +23,7 @@ func Translate(but string) ([]byte, error) {
 	if len(report.Entries) > 0 {
 		slog.Error("butane", "report", report.String())
 
-		return nil, fmt.Errorf("butane produced warnings and strict mode is enabled") //nolint:goerr113
+		return nil, fmt.Errorf("butane produced warnings and strict mode is enabled") //nolint:err113
 	}
 
 	return ign, nil

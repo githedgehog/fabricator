@@ -252,7 +252,7 @@ func (b *ControlInstallBuilder) buildIgnition() ([]byte, error) {
 		return nil, fmt.Errorf("parsing dummy IP: %w", err)
 	}
 	if dummyIP.Bits() != 31 {
-		return nil, fmt.Errorf("dummy IP must be a /31") //nolint:goerr113
+		return nil, fmt.Errorf("dummy IP must be a /31") //nolint:err113
 	}
 	nftRules, err := renderNftablesRules(b.Control.Spec.External.Interface)
 	if err != nil {

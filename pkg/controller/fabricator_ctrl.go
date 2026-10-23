@@ -134,10 +134,10 @@ func (r *FabricatorReconciler) Reconcile(ctx context.Context, req kctrl.Request)
 			return kctrl.Result{}, fmt.Errorf("listing controls: %w", err)
 		}
 		if len(controls.Items) == 0 {
-			return kctrl.Result{}, fmt.Errorf("no control nodes found") //nolint:goerr113
+			return kctrl.Result{}, fmt.Errorf("no control nodes found") //nolint:err113
 		}
 		if len(controls.Items) > 1 {
-			return kctrl.Result{}, fmt.Errorf("multiple control nodes found") //nolint:goerr113
+			return kctrl.Result{}, fmt.Errorf("multiple control nodes found") //nolint:err113
 		}
 		control := controls.Items[0]
 		control.Default()
@@ -159,7 +159,7 @@ func (r *FabricatorReconciler) Reconcile(ctx context.Context, req kctrl.Request)
 
 		regPassword, ok := regSecret.Data[comp.BasicAuthPasswordKey]
 		if !ok || len(regPassword) == 0 {
-			return kctrl.Result{}, errors.New("registry reader user secret missing password") //nolint:goerr113
+			return kctrl.Result{}, errors.New("registry reader user secret missing password") //nolint:err113
 		}
 
 		// doing the actual reconciliation

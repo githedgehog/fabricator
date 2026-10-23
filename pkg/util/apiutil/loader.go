@@ -59,12 +59,12 @@ func (l *Loader) Load(gvks []schema.GroupVersionKind, data []byte) ([]kclient.Ob
 
 		gvk := rObj.GetObjectKind().GroupVersionKind()
 		if !isAllowedGVK(gvk, gvks) {
-			return nil, fmt.Errorf("object %d: %s: not allowed GVK", idx, gvk.String()) //nolint:goerr113
+			return nil, fmt.Errorf("object %d: %s: not allowed GVK", idx, gvk.String()) //nolint:err113
 		}
 
 		obj, ok := rObj.(kclient.Object)
 		if !ok {
-			return nil, fmt.Errorf("object %d: %s: not a client.Object", idx, gvk.Kind) //nolint:goerr113
+			return nil, fmt.Errorf("object %d: %s: not a client.Object", idx, gvk.Kind) //nolint:err113
 		}
 
 		if obj.GetNamespace() == "" {
@@ -131,10 +131,10 @@ func (l *Loader) List(ctx context.Context, list kclient.ObjectList, opts ...kcli
 
 func validateObject(obj kclient.Object) error {
 	if len(obj.GetName()) > 253 {
-		return fmt.Errorf("maximum name length is 253 characters") //nolint:goerr113
+		return fmt.Errorf("maximum name length is 253 characters") //nolint:err113
 	}
 	if !nameChecker.MatchString(obj.GetName()) {
-		return fmt.Errorf("name should match a lowercase RFC 1123 subdomain") //nolint:goerr113
+		return fmt.Errorf("name should match a lowercase RFC 1123 subdomain") //nolint:err113
 	}
 
 	return nil

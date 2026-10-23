@@ -61,7 +61,7 @@ func GetStatus(pduIP, username, password string) (*Response, error) {
 		body, _ := io.ReadAll(resp.Body)
 		slog.Error("Error response from PDU", "body", body)
 
-		return nil, fmt.Errorf("unexpected response status: %d", resp.StatusCode) //nolint:goerr113
+		return nil, fmt.Errorf("unexpected response status: %d", resp.StatusCode) //nolint:err113
 	}
 
 	var Resp Response
@@ -113,7 +113,7 @@ func ControlOutlet(ctx context.Context, pduIP, username, password string, outlet
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to control outlet: %s", resp.Status) //nolint:goerr113
+		return fmt.Errorf("failed to control outlet: %s", resp.Status) //nolint:err113
 	}
 
 	return nil
@@ -135,7 +135,7 @@ func GetPDUName(ctx context.Context, pduIP, username, password string) (string, 
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("unexpected status code: %d", resp.StatusCode) //nolint:goerr113
+		return "", fmt.Errorf("unexpected status code: %d", resp.StatusCode) //nolint:err113
 	}
 
 	body, err := io.ReadAll(resp.Body)

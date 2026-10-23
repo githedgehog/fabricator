@@ -61,7 +61,7 @@ func Run(ctx context.Context) error {
 	}
 
 	if len(os.Args) != 1 {
-		return fmt.Errorf("usage: %s", os.Args[0]) //nolint:goerr113
+		return fmt.Errorf("usage: %s", os.Args[0]) //nolint:err113
 	}
 
 	slog.Info("Hedgehog Fabricator Node Config", args...)

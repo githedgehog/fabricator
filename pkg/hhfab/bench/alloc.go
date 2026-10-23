@@ -327,7 +327,7 @@ func (a *Allocator) SwitchBoot(unit, switchIdx uint) (wiringapi.SwitchBoot, erro
 	}
 
 	mac := make(net.HardwareAddr, 6)
-	binary.BigEndian.PutUint32(mac[0:4], bootMACPrefix<<8|uint32(idx>>16)) //nolint:gosec // idx is below 1<<24
+	binary.BigEndian.PutUint32(mac[0:4], bootMACPrefix<<8|uint32(idx>>16)) // idx is below 1<<24
 	binary.BigEndian.PutUint16(mac[4:6], uint16(idx))                      //nolint:gosec // low 16 bits on purpose
 
 	return wiringapi.SwitchBoot{

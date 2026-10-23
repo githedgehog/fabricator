@@ -84,7 +84,7 @@ func multiSubnetsIsolationTest(ctx context.Context, testCtx *VPCPeeringTestCtx, 
 		return false, nil, fmt.Errorf("listing VPCs: %w", err)
 	}
 	if len(vpcs.Items) < 2 {
-		return true, nil, errors.New("not enough VPCs found for multi-subnet isolation test") //nolint:goerr113
+		return true, nil, errors.New("not enough VPCs found for multi-subnet isolation test") //nolint:err113
 	}
 	// check that we have at least 2 VPCs with at least 2 subnets each
 	for _, vpc := range vpcs.Items {
@@ -100,7 +100,7 @@ func multiSubnetsIsolationTest(ctx context.Context, testCtx *VPCPeeringTestCtx, 
 		}
 	}
 	if vpc1 == nil || vpc2 == nil {
-		return true, nil, errors.New("not enough VPCs with at least 2 subnets found") //nolint:goerr113
+		return true, nil, errors.New("not enough VPCs with at least 2 subnets found") //nolint:err113
 	}
 
 	// peer the VPCs
@@ -217,7 +217,7 @@ func multiSubnetsSubnetFilteringTest(ctx context.Context, testCtx *VPCPeeringTes
 		return false, nil, fmt.Errorf("listing VPCs: %w", err)
 	}
 	if len(vpcList.Items) < 2 {
-		return true, nil, errors.New("not enough VPCs found for multi-subnet filtering test") //nolint:goerr113
+		return true, nil, errors.New("not enough VPCs found for multi-subnet filtering test") //nolint:err113
 	}
 	var vpc1, vpc2 *vpcapi.VPC
 	for _, vpc := range vpcList.Items {
@@ -233,7 +233,7 @@ func multiSubnetsSubnetFilteringTest(ctx context.Context, testCtx *VPCPeeringTes
 		}
 	}
 	if vpc1 == nil || vpc2 == nil {
-		return true, nil, errors.New("not enough VPCs with at least 2 subnets found") //nolint:goerr113
+		return true, nil, errors.New("not enough VPCs with at least 2 subnets found") //nolint:err113
 	}
 	var sub1, sub2 string
 	for subName := range vpc1.Spec.Subnets {
@@ -350,11 +350,11 @@ func selectStaticExternalTarget(ctx context.Context, kube kclient.Client, candid
 		attach := &attachList.Items[i]
 		conn, ok := conns[attach.Spec.Connection]
 		if !ok {
-			return nil, fmt.Errorf("connection %s for VPCAttachment %s not found", attach.Spec.Connection, attach.Name) //nolint:goerr113
+			return nil, fmt.Errorf("connection %s for VPCAttachment %s not found", attach.Spec.Connection, attach.Name) //nolint:err113
 		}
 		switches, servers, _, _, _ := conn.Spec.Endpoints()
 		if len(servers) != 1 {
-			return nil, fmt.Errorf("expected 1 server for connection %s, got %d", conn.Name, len(servers)) //nolint:goerr113
+			return nil, fmt.Errorf("expected 1 server for connection %s, got %d", conn.Name, len(servers)) //nolint:err113
 		}
 		vpcName := attach.Spec.VPCName()
 		byVPC[vpcName] = append(byVPC[vpcName], vpcAttachedServer{server: servers[0], switches: switches})
@@ -795,7 +795,7 @@ func staticExternalTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Conn
 		break
 	}
 	if !success {
-		return false, reverts, fmt.Errorf("could not find a leaf switch to ping from after removing VPC constraint") //nolint:goerr113
+		return false, reverts, fmt.Errorf("could not find a leaf switch to ping from after removing VPC constraint") //nolint:err113
 	}
 
 	slog.Debug("All good, cleaning up")

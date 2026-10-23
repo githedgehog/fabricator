@@ -722,11 +722,11 @@ func (f *Fabricator) Validate(ctx context.Context) error {
 	f.Default()
 
 	if f.Name != FabName {
-		return fmt.Errorf("fabricator name must be %q", FabName) //nolint:goerr113
+		return fmt.Errorf("fabricator name must be %q", FabName) //nolint:err113
 	}
 
 	if f.Namespace != FabNamespace {
-		return fmt.Errorf("fabricator namespace must be %q", FabNamespace) //nolint:goerr113
+		return fmt.Errorf("fabricator namespace must be %q", FabNamespace) //nolint:err113
 	}
 
 	err := fabricatorValidate.StructCtx(ctx, f)
@@ -735,20 +735,20 @@ func (f *Fabricator) Validate(ctx context.Context) error {
 	}
 
 	if f.Spec.Config.Registry.Mode != RegistryModeAirgap && f.Spec.Config.Registry.Mode != RegistryModeUpstream {
-		return fmt.Errorf("invalid registry mode %q", f.Spec.Config.Registry.Mode) //nolint:goerr113
+		return fmt.Errorf("invalid registry mode %q", f.Spec.Config.Registry.Mode) //nolint:err113
 	}
 
 	if f.Spec.Config.Registry.IsAirgap() && f.Spec.Config.Registry.Upstream != nil {
-		return fmt.Errorf("airgap registry doesn't support upstream") //nolint:goerr113
+		return fmt.Errorf("airgap registry doesn't support upstream") //nolint:err113
 	}
 
 	if !f.Spec.Config.Registry.IsAirgap() {
 		if f.Spec.Config.Registry.Upstream == nil {
-			return fmt.Errorf("non-airgap registry requires upstream") //nolint:goerr113
+			return fmt.Errorf("non-airgap registry requires upstream") //nolint:err113
 		}
 
 		if f.Spec.Config.Registry.Upstream.Repo == "" {
-			return fmt.Errorf("upstream registry requires repo") //nolint:goerr113
+			return fmt.Errorf("upstream registry requires repo") //nolint:err113
 		}
 	}
 
@@ -762,7 +762,7 @@ func (f *Fabricator) Validate(ctx context.Context) error {
 		return fmt.Errorf("parsing management DHCP start: %w", err)
 	}
 	if !mgmtSubnet.Contains(mgmtDHCPStart) {
-		return fmt.Errorf("management DHCP start not in management subnet") //nolint:goerr113
+		return fmt.Errorf("management DHCP start not in management subnet") //nolint:err113
 	}
 
 	mgmtDHCPEnd, err := f.Spec.Config.Fabric.ManagementDHCPEnd.Parse()
@@ -770,7 +770,7 @@ func (f *Fabricator) Validate(ctx context.Context) error {
 		return fmt.Errorf("parsing management DHCP end: %w", err)
 	}
 	if !mgmtSubnet.Contains(mgmtDHCPEnd) {
-		return fmt.Errorf("management DHCP end not in management subnet") //nolint:goerr113
+		return fmt.Errorf("management DHCP end not in management subnet") //nolint:err113
 	}
 
 	controlVIP, err := f.Spec.Config.Control.VIP.Parse()
@@ -778,10 +778,10 @@ func (f *Fabricator) Validate(ctx context.Context) error {
 		return fmt.Errorf("parsing control VIP: %w", err)
 	}
 	if !mgmtSubnet.Contains(controlVIP.Addr()) {
-		return fmt.Errorf("control VIP not in management subnet") //nolint:goerr113
+		return fmt.Errorf("control VIP not in management subnet") //nolint:err113
 	}
 	if controlVIP.Bits() != 32 {
-		return fmt.Errorf("control VIP must be /32") //nolint:goerr113
+		return fmt.Errorf("control VIP must be /32") //nolint:err113
 	}
 
 	// fabric-dhcpd doesn't serve an invalid subnet and skips invalid static entries, so catch them here
@@ -808,19 +808,19 @@ func (f *Fabricator) Validate(ctx context.Context) error {
 		return fmt.Errorf("parsing kube cluster DNS: %w", err)
 	}
 	if !kubeServiceSubnet.Contains(kubeClusterDNS) {
-		return fmt.Errorf("kube cluster DNS not in kube service subnet") //nolint:goerr113
+		return fmt.Errorf("kube cluster DNS not in kube service subnet") //nolint:err113
 	}
 
 	if kubeClusterSubnet.Overlaps(kubeServiceSubnet) {
-		return fmt.Errorf("kube cluster subnet overlaps kube service subnet") //nolint:goerr113
+		return fmt.Errorf("kube cluster subnet overlaps kube service subnet") //nolint:err113
 	}
 
 	if mgmtSubnet.Overlaps(kubeServiceSubnet) {
-		return fmt.Errorf("management subnet overlaps kube service subnet") //nolint:goerr113
+		return fmt.Errorf("management subnet overlaps kube service subnet") //nolint:err113
 	}
 
 	if mgmtSubnet.Overlaps(kubeClusterSubnet) {
-		return fmt.Errorf("management subnet overlaps kube cluster subnet") //nolint:goerr113
+		return fmt.Errorf("management subnet overlaps kube cluster subnet") //nolint:err113
 	}
 
 	dummySubnet, err := f.Spec.Config.Control.DummySubnet.Parse()
@@ -831,14 +831,14 @@ func (f *Fabricator) Validate(ctx context.Context) error {
 	{
 		ph := f.Spec.Config.Control.DefaultUser.PasswordHash
 		if ph == "" {
-			return fmt.Errorf("default control user password hash is required") //nolint:goerr113
+			return fmt.Errorf("default control user password hash is required") //nolint:err113
 		}
 		if f.Spec.Config.Control.NoPassAuth && len(f.Spec.Config.Control.DefaultUser.AuthorizedKeys) == 0 {
-			return fmt.Errorf("noPassAuth is true; but no default authorized keys are configured") //nolint:goerr113
+			return fmt.Errorf("noPassAuth is true; but no default authorized keys are configured") //nolint:err113
 		}
 
 		if !strings.HasPrefix(ph, "$5$") {
-			return fmt.Errorf("default control user password hash must be bcrypt") //nolint:goerr113
+			return fmt.Errorf("default control user password hash must be bcrypt") //nolint:err113
 		}
 	}
 
@@ -850,54 +850,54 @@ func (f *Fabricator) Validate(ctx context.Context) error {
 			}
 
 			if !slices.Contains([]string{"admin", "operator"}, user.Role) {
-				return fmt.Errorf("invalid switch user %q role %q", username, user.Role) //nolint:goerr113
+				return fmt.Errorf("invalid switch user %q role %q", username, user.Role) //nolint:err113
 			}
 
 			if user.PasswordHash == "" {
-				return fmt.Errorf("switch user %q password hash is required", username) //nolint:goerr113
+				return fmt.Errorf("switch user %q password hash is required", username) //nolint:err113
 			}
 
 			if !strings.HasPrefix(user.PasswordHash, "$5$") {
-				return fmt.Errorf("switch user %q password hash must be bcrypt", username) //nolint:goerr113
+				return fmt.Errorf("switch user %q password hash must be bcrypt", username) //nolint:err113
 			}
 		}
 
 		if !admin {
-			return fmt.Errorf("admin switch user with role admin is required") //nolint:goerr113
+			return fmt.Errorf("admin switch user with role admin is required") //nolint:err113
 		}
 	}
 
 	fm := f.Spec.Config.Fabric.Mode
 	if !slices.Contains(fmeta.FabricModes, fm) {
-		return fmt.Errorf("invalid fabric mode %q", fm) //nolint:goerr113
+		return fmt.Errorf("invalid fabric mode %q", fm) //nolint:err113
 	}
 
 	if fm == fmeta.FabricModeSpineLeaf {
 		if f.Spec.Config.Fabric.SpineASN == 0 {
-			return fmt.Errorf("spine ASN is required for spine-leaf mode") //nolint:goerr113
+			return fmt.Errorf("spine ASN is required for spine-leaf mode") //nolint:err113
 		}
 		if f.Spec.Config.Fabric.SpineASN >= f.Spec.Config.Fabric.LeafASNStart && f.Spec.Config.Fabric.SpineASN <= f.Spec.Config.Fabric.LeafASNEnd {
-			return fmt.Errorf("spine ASN must be outside leaf ASN range") //nolint:goerr113
+			return fmt.Errorf("spine ASN must be outside leaf ASN range") //nolint:err113
 		}
 
 		if f.Spec.Config.Fabric.LeafASNStart == 0 {
-			return fmt.Errorf("leaf ASN start is required for spine-leaf mode") //nolint:goerr113
+			return fmt.Errorf("leaf ASN start is required for spine-leaf mode") //nolint:err113
 		}
 		if f.Spec.Config.Fabric.LeafASNEnd == 0 {
-			return fmt.Errorf("leaf ASN end is required for spine-leaf mode") //nolint:goerr113
+			return fmt.Errorf("leaf ASN end is required for spine-leaf mode") //nolint:err113
 		}
 		if f.Spec.Config.Fabric.LeafASNStart >= f.Spec.Config.Fabric.LeafASNEnd {
-			return fmt.Errorf("leaf ASN start must be less than leaf ASN end") //nolint:goerr113
+			return fmt.Errorf("leaf ASN start must be less than leaf ASN end") //nolint:err113
 		}
 
 		if f.Spec.Config.Gateway.ASN == 0 {
-			return fmt.Errorf("gateway ASN is required for spine-leaf mode") //nolint:goerr113
+			return fmt.Errorf("gateway ASN is required for spine-leaf mode") //nolint:err113
 		}
 		if f.Spec.Config.Gateway.ASN == f.Spec.Config.Fabric.SpineASN {
-			return fmt.Errorf("gateway ASN must be different from spine ASN") //nolint:goerr113
+			return fmt.Errorf("gateway ASN must be different from spine ASN") //nolint:err113
 		}
 		if f.Spec.Config.Gateway.ASN >= f.Spec.Config.Fabric.LeafASNStart && f.Spec.Config.Gateway.ASN <= f.Spec.Config.Fabric.LeafASNEnd {
-			return fmt.Errorf("gateway ASN must be outside leaf ASN range") //nolint:goerr113
+			return fmt.Errorf("gateway ASN must be outside leaf ASN range") //nolint:err113
 		}
 	}
 
@@ -928,22 +928,22 @@ func (f *Fabricator) Validate(ctx context.Context) error {
 
 	// TODO validate actual community
 	if f.Spec.Config.Fabric.BaseVPCCommunity == "" {
-		return fmt.Errorf("base VPC community is required") //nolint:goerr113
+		return fmt.Errorf("base VPC community is required") //nolint:err113
 	}
 
 	// TODO validate actual VLANs and that it's a reasonable range
 	if len(f.Spec.Config.Fabric.VPCIRBVLANs) == 0 {
-		return fmt.Errorf("VPC IRB VLANs are required") //nolint:goerr113
+		return fmt.Errorf("VPC IRB VLANs are required") //nolint:err113
 	}
 
 	// TODO validate actual VLANs and that it's a reasonable range
 	if len(f.Spec.Config.Fabric.VPCWorkaroundVLANs) == 0 {
-		return fmt.Errorf("VPC workaround VLANs are required") //nolint:goerr113
+		return fmt.Errorf("VPC workaround VLANs are required") //nolint:err113
 	}
 
 	// TODO validate actual VLANs and that it's a reasonable range
 	if len(f.Spec.Config.Fabric.TH5WorkaroundVLANs) == 0 {
-		return fmt.Errorf("TH5 workaround VLANs are required") //nolint:goerr113
+		return fmt.Errorf("TH5 workaround VLANs are required") //nolint:err113
 	}
 
 	// Ensure that TH5 and IRB VLANs do not overlap. VPC workaround VLANs are not a problem
@@ -954,11 +954,11 @@ func (f *Fabricator) Validate(ctx context.Context) error {
 
 	// TODO validate MAC base
 	if f.Spec.Config.Fabric.ESLAGMACBase == "" {
-		return fmt.Errorf("ESLAG MAC base is required") //nolint:goerr113
+		return fmt.Errorf("ESLAG MAC base is required") //nolint:err113
 	}
 
 	if f.Spec.Config.Fabric.ESLAGESIPrefix == "" {
-		return fmt.Errorf("ESLAG ESI prefix is required") //nolint:goerr113
+		return fmt.Errorf("ESLAG ESI prefix is required") //nolint:err113
 	}
 
 	// TODO validate Alloy config
@@ -980,7 +980,7 @@ func (f *Fabricator) Validate(ctx context.Context) error {
 			}
 
 			if some.Overlaps(other) {
-				return fmt.Errorf("subnets %s and %s overlap", some, other) //nolint:goerr113
+				return fmt.Errorf("subnets %s and %s overlap", some, other) //nolint:err113
 			}
 		}
 	}
@@ -1087,7 +1087,7 @@ var knownSwitchUsers = []string{
 func (f *Fabricator) CheckForKnownSwitchUsers() error {
 	for userName := range f.Spec.Config.Fabric.DefaultSwitchUsers {
 		if slices.Contains(knownSwitchUsers, userName) {
-			return fmt.Errorf("switch user can't be named %q", userName) //nolint:goerr113
+			return fmt.Errorf("switch user can't be named %q", userName) //nolint:err113
 		}
 	}
 

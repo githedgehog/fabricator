@@ -101,7 +101,7 @@ type buildInstallOpts struct {
 
 func buildInstall(ctx context.Context, opts buildInstallOpts) error {
 	if !slices.Contains(BuildModes, opts.Mode) {
-		return fmt.Errorf("invalid build mode %q", opts.Mode) //nolint:goerr113
+		return fmt.Errorf("invalid build mode %q", opts.Mode) //nolint:err113
 	}
 
 	slog := slog.With("name", opts.Name, "type", opts.Type, "mode", opts.Mode)
@@ -199,7 +199,7 @@ func buildInstall(ctx context.Context, opts buildInstallOpts) error {
 			return fmt.Errorf("building USB image: %w", err)
 		}
 	default:
-		return fmt.Errorf("unsupported build mode %q", opts.Mode) //nolint:goerr113
+		return fmt.Errorf("unsupported build mode %q", opts.Mode) //nolint:err113
 	}
 
 	if err := os.WriteFile(installHashFile, []byte(opts.Hash), 0o600); err != nil {
@@ -337,9 +337,9 @@ func buildUSBImage(ctx context.Context, opts buildInstallOpts) error {
 		fs1 = isoFS
 		fs2 = isoFS
 	case BuildModeManual:
-		return fmt.Errorf("manual build mode is not supported for USB images") //nolint:goerr113
+		return fmt.Errorf("manual build mode is not supported for USB images") //nolint:err113
 	default:
-		return fmt.Errorf("unsupported build mode %q", opts.Mode) //nolint:goerr113
+		return fmt.Errorf("unsupported build mode %q", opts.Mode) //nolint:err113
 	}
 
 	slog.Info("Adding /EFI to image", "fs", fs1.Label())

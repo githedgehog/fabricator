@@ -34,7 +34,7 @@ func restartGatewayPods(ctx context.Context, kube kclient.Client, component stri
 		return fmt.Errorf("listing gateways: %w", err)
 	}
 	if len(gws.Items) == 0 {
-		return fmt.Errorf("no gateways found") //nolint:goerr113
+		return fmt.Errorf("no gateways found") //nolint:err113
 	}
 
 	selectors := map[string]kclient.MatchingLabels{}
@@ -48,7 +48,7 @@ func restartGatewayPods(ctx context.Context, kube kclient.Client, component stri
 			return fmt.Errorf("listing %s pods of gateway %s: %w", component, gw.Name, err)
 		}
 		if len(pods.Items) == 0 {
-			return fmt.Errorf("no %s pods found for gateway %s", component, gw.Name) //nolint:goerr113
+			return fmt.Errorf("no %s pods found for gateway %s", component, gw.Name) //nolint:err113
 		}
 
 		for i := range pods.Items {
@@ -92,7 +92,7 @@ func restartGatewayPods(ctx context.Context, kube kclient.Client, component stri
 		}
 
 		if time.Since(start) > gwPodRestartTimeout {
-			return fmt.Errorf("timed out waiting for %s pods to restart on gateways %v", component, notReady) //nolint:goerr113
+			return fmt.Errorf("timed out waiting for %s pods to restart on gateways %v", component, notReady) //nolint:err113
 		}
 
 		select {

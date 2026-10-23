@@ -40,7 +40,7 @@ func GetFabAndNodes(ctx context.Context, kube kclient.Reader, optsSlice ...GetFa
 		return fabapi.Fabricator{}, nil, nil, fmt.Errorf("listing fabricators: %w", err)
 	}
 	if len(fabs.Items) != 1 {
-		return fabapi.Fabricator{}, nil, nil, fmt.Errorf("exactly one fabricator is required") //nolint:goerr113
+		return fabapi.Fabricator{}, nil, nil, fmt.Errorf("exactly one fabricator is required") //nolint:err113
 	}
 
 	if err := mergo.Merge(&f.Spec.Config, *DefaultConfig.DeepCopy()); err != nil {
@@ -64,10 +64,10 @@ func GetFabAndNodes(ctx context.Context, kube kclient.Reader, optsSlice ...GetFa
 		return fabapi.Fabricator{}, nil, nil, fmt.Errorf("listing control nodes: %w", err)
 	}
 	if !opts.AllowNoControls && len(controls.Items) == 0 {
-		return fabapi.Fabricator{}, nil, nil, fmt.Errorf("no control nodes found") //nolint:goerr113
+		return fabapi.Fabricator{}, nil, nil, fmt.Errorf("no control nodes found") //nolint:err113
 	}
 	if len(controls.Items) > 1 {
-		return fabapi.Fabricator{}, nil, nil, fmt.Errorf("only one control node is currently allowed") //nolint:goerr113
+		return fabapi.Fabricator{}, nil, nil, fmt.Errorf("only one control node is currently allowed") //nolint:err113
 	}
 
 	for _, control := range controls.Items {
@@ -95,7 +95,7 @@ func GetFabAndNodes(ctx context.Context, kube kclient.Reader, optsSlice ...GetFa
 		}
 
 		if nodeNames[node.Name] {
-			return fabapi.Fabricator{}, nil, nil, fmt.Errorf("duplicate node name %q", node.Name) //nolint:goerr113
+			return fabapi.Fabricator{}, nil, nil, fmt.Errorf("duplicate node name %q", node.Name) //nolint:err113
 		}
 		nodeNames[node.Name] = true
 	}
