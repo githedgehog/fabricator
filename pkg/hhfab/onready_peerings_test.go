@@ -112,6 +112,15 @@ func TestBuildOnReadyPeerings(t *testing.T) {
 			want: []string{"01+02", "01+03"},
 		},
 		{
+			name: "domains with their own VPCs are only linked through the shared-leaf VPC",
+			vpcs: []vpcapi.VPC{
+				testVPC("vpc-01", "", "default"), testVPC("vpc-02", "", "default"),
+				testVPC("vpc-03", "", "domain-b"),
+				testVPC("vpc-04", "", "default", "domain-b"),
+			},
+			want: []string{"01+02", "01+04", "03+04"},
+		},
+		{
 			name: "first External of each domain is peered in a Fabric with several domains",
 			vpcs: []vpcapi.VPC{
 				testVPC("vpc-01", "", "domain-b"),
