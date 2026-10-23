@@ -81,10 +81,10 @@ The ready steps then run in this order:
 
 ## The multi-domain job
 
-The `v-iso-l2vni-md` job (`multidomain=true`) does not run the OnReady Suite or release tests either. It generates one Fabric with a second domain: `--extra-domain --shared-leafs-count=1` with 3 orphan leaves, one server per leaf, 1 BGP + 1 static external, no ESLAG and no gateways. The orphan leaves and the externals are in the second domain, `domain-b`, and the third leaf is shared by `default` and `domain-b`. The default domain has two spines and no leaf of its own, which is why no VPC of the default domain alone is created.
+The `v-iso-l2vni-md` job (`multidomain=true`) does not run the OnReady Suite or release tests either. It generates one Fabric with a second domain: `--extra-domain --shared-leafs-count=1` with one ESLAG group of 2 leaves, 3 orphan leaves, one server per orphan leaf and the ESLAG servers, 1 BGP + 1 static external and no gateways. The ESLAG group stays in the default domain, so `leaf-01` and `leaf-02` are in `default` only. The orphan leaves and the externals are in the second domain, `domain-b`: `leaf-03` and `leaf-04` are in `domain-b` only and `leaf-05` is shared by `default` and `domain-b`.
 
 The ready steps run in this order: `inspect`, `inspect-pods`, `setup-vpcs`, `setup-peerings`, `test-connectivity`.
 
-- `setup-vpcs` creates a VPC in `domain-b` for the two orphan-leaf servers and a VPC in both domains for the server on the shared leaf
-- `setup-peerings` peers the two VPCs, which share `domain-b`, and peers the first VPC of `domain-b` with the first External of that domain
-- `test-connectivity` checks every pair against the peerings: the servers of the `domain-b` VPC and the shared-leaf server reach each other, and only the peered subnet reaches the External
+- `setup-vpcs` creates VPCs in `default` for the three servers of the ESLAG group, a VPC in `domain-b` for the two orphan-leaf servers, and a VPC in both domains for the server on the shared leaf
+- `setup-peerings` peers the VPCs of the same domain, peers the first VPC of `default` and the first VPC of `domain-b` with the VPC on the shared leaf, and peers the first VPC of `domain-b` with the first External of that domain
+- `test-connectivity` checks every pair against the peerings: a server in `default` and a server in `domain-b` must not reach each other, although both VPCs are peered to the VPC on the shared leaf, so the shared leaf is not a path between domains. Only the peered subnet reaches the External

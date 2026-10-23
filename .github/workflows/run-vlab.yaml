@@ -372,9 +372,8 @@ jobs:
             VLAB_ADD_FABRIC_ARGS=(--add-fabric --interconnect-fabrics --interconnect-links=2 --bundled-servers=0)
           fi
           if [[ "$INPUT_MULTI_DOMAIN" == "true" ]]; then
-            # a second domain doubles the spines, so one server per leaf and no ESLAG. The orphan leaves are in
-            # the second domain, so the third leaf is the one shared by both domains
-            VLAB_ESLAG_GROUPS=""
+            # a second domain doubles the spines, so one server per leaf. The ESLAG group stays in the default
+            # domain, the orphan leaves are in the second domain, and the last one is shared by both domains
             VLAB_ORPHAN_LEAVES=3
             VLAB_UNBUNDLED_SERVERS=1
             VLAB_MULTIHOMED_SERVERS=0
