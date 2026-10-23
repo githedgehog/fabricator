@@ -26,6 +26,11 @@ run:
     - containers_image_openpgp
     - containers_image_storage_stub
 
+issues:
+  # report all issues instead of the first 50 per linter and 3 with the same text
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
 linters:
   default: none
   # Look at this for details: https://golangci-lint.run/docs/linters/
@@ -217,6 +222,8 @@ linters:
         #
         - name: bool-literal-in-expr
         - name: constant-logical-expr
+        - name: empty-block
+        - name: comment-spacings
     sloglint:
       # key-value pairs only, no slog.Attr, as it's what's used everywhere
       kv-only: true
