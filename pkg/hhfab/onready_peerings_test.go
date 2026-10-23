@@ -144,6 +144,41 @@ func TestBuildOnReadyPeerings(t *testing.T) {
 			},
 		},
 		{
+			name: "each interconnect pair is peered with its own VPC",
+			vpcs: []vpcapi.VPC{
+				testVPC("vpc-01", ""), testVPC("vpc-02", ""),
+				testVPC("vpc-03", "fabric-b"), testVPC("vpc-04", "fabric-b"),
+			},
+			externals: append(slices.Clone(interconnects),
+				testInterconnect("to-fb-2", "to-def-2", "", "default"),
+				testInterconnect("to-def-2", "to-fb-2", "fabric-b", "fabric-b"),
+			),
+			want: []string{
+				"01+02", "03+04",
+				"04~to-def-2:subnets=subnet-01:prefixes=10.0.0.0/16",
+				"03~to-default:subnets=subnet-01:prefixes=10.0.0.0/16",
+				"01~to-fabric-b:subnets=subnet-01:prefixes=10.1.0.0/16",
+				"02~to-fb-2:subnets=subnet-01:prefixes=10.1.0.0/16",
+			},
+		},
+		{
+			name: "interconnect pair without a VPC of its own is skipped",
+			vpcs: []vpcapi.VPC{
+				testVPC("vpc-01", ""), testVPC("vpc-02", ""),
+				testVPC("vpc-03", "fabric-b"),
+			},
+			externals: append(slices.Clone(interconnects),
+				testInterconnect("to-fb-2", "to-def-2", "", "default"),
+				testInterconnect("to-def-2", "to-fb-2", "fabric-b", "fabric-b"),
+			),
+			want: []string{
+				"01+02",
+				"03~to-default:subnets=subnet-01:prefixes=10.0.0.0/16",
+				"01~to-fabric-b:subnets=subnet-01:prefixes=10.1.0.0/16",
+				"02~to-fb-2:subnets=subnet-01:prefixes=10.1.0.0/16",
+			},
+		},
+		{
 			name: "gateway peering only in the fabric that has a gateway",
 			vpcs: []vpcapi.VPC{
 				testVPC("vpc-01", ""), testVPC("vpc-02", ""), testVPC("vpc-03", ""),
