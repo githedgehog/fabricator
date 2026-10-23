@@ -33,4 +33,7 @@ config/helm/*.tgz
 *.swo
 *~
 
+# Claude Code worktrees
+.claude/worktrees/
+
 docs/test
