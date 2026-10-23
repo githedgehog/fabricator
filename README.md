@@ -14,7 +14,7 @@ as OCI compliant artifacts.
 ## Local Build Instructions
 
 ### Prerequisites
-- Go v1.26+
+- Go v1.27+
 - Docker 17.03+ (used for logging into ghcr.io)
 - [zot v2.1.5](https://zotregistry.dev/v2.1.5/)
 - A GitHub classic token with package **read** permissions
