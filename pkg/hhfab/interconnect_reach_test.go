@@ -99,6 +99,40 @@ func TestIsSubnetReachableOverInterconnect(t *testing.T) {
 	}
 }
 
+func TestIsSubnetReachableOverInterconnectPairs(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, vpcapi.AddToScheme(scheme))
+
+	toB, toA := testInterconnect("to-fabric-b", "to-default", "", "default"), testInterconnect("to-default", "to-fabric-b", "fabric-b", "fabric-b")
+	toB2, toA2 := testInterconnect("to-fb-2", "to-def-2", "", "default"), testInterconnect("to-def-2", "to-fb-2", "fabric-b", "fabric-b")
+	objs := []kclient.Object{
+		icVPC("vpc-01", "", "10.0.1.0/24"), icVPC("vpc-02", "", "10.0.2.0/24"),
+		icVPC("vpc-03", "fabric-b", "10.1.1.0/24"), icVPC("vpc-04", "fabric-b", "10.1.2.0/24"),
+		&toB, &toA, &toB2, &toA2,
+		icAttachment("to-fabric-b"), icAttachment("to-default"), icAttachment("to-fb-2"), icAttachment("to-def-2"),
+		icExternalPeering("a", "vpc-01", "to-fabric-b", "10.1.0.0/16"),
+		icExternalPeering("b", "vpc-03", "to-default", "10.0.0.0/16"),
+		icExternalPeering("c", "vpc-02", "to-fb-2", "10.1.0.0/16"),
+		icExternalPeering("d", "vpc-04", "to-def-2", "10.0.0.0/16"),
+	}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).Build()
+
+	// VPCs of the same pair reach each other, VPCs on separate pairs do not
+	for _, tt := range []struct {
+		src, dst string
+		want     bool
+	}{
+		{"vpc-01", "vpc-03", true},
+		{"vpc-02", "vpc-04", true},
+		{"vpc-01", "vpc-04", false},
+		{"vpc-02", "vpc-03", false},
+	} {
+		r, err := IsSubnetReachableOverInterconnect(context.Background(), kube, tt.src, "subnet-01", tt.dst, "subnet-01")
+		require.NoError(t, err)
+		require.Equal(t, tt.want, r.Reachable, "%s to %s", tt.src, tt.dst)
+	}
+}
+
 // icServer is a server attached to the subnet of a VPC over an unbundled connection
 func icServer(name, switchName, vpc string) []kclient.Object {
 	conn := seUnbundledConn(name, switchName)
