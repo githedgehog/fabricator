@@ -302,8 +302,8 @@ func upgradeFlatcar(ctx context.Context, targetVersion string, yes bool) error {
 
 	version := ""
 	for line := range strings.Lines(string(content)) {
-		if strings.HasPrefix(line, FlatcarVersionPrefix) {
-			version = strings.TrimSpace(strings.TrimPrefix(line, FlatcarVersionPrefix))
+		if after, ok := strings.CutPrefix(line, FlatcarVersionPrefix); ok {
+			version = strings.TrimSpace(after)
 		}
 	}
 	if version == "" {

@@ -20,7 +20,7 @@ func KubeListItems(objList kclient.ObjectList) iter.Seq2[int, kclient.Object] {
 	itemsLen := items.Len()
 
 	return func(yield func(int, kclient.Object) bool) {
-		for i := 0; i < itemsLen; i++ {
+		for i := range itemsLen {
 			if !yield(i, items.Index(i).Addr().Interface().(kclient.Object)) {
 				break
 			}

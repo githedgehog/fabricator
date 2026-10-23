@@ -38,10 +38,8 @@ func InstallFabCA(ca *CA) comp.KubeInstall {
 				comp.FabCAConfigMapKey: ca.Crt, // changing key will break fabric manager
 			}),
 			comp.NewIssuer(comp.FabCAIssuer, comp.IssuerSpec{
-				IssuerConfig: comp.IssuerConfig{
-					CA: &comp.CAIssuer{
-						SecretName: comp.FabCASecret,
-					},
+				CA: &comp.CAIssuer{
+					SecretName: comp.FabCASecret,
 				},
 			}),
 		}, nil

@@ -16,7 +16,6 @@ import (
 	appsapi "k8s.io/api/apps/v1"
 	coreapi "k8s.io/api/core/v1"
 	kmetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/ptr"
 	kclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -88,7 +87,7 @@ func InstallNodeConfig(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 							Image:           image,
 							ImagePullPolicy: coreapi.PullIfNotPresent,
 							SecurityContext: &coreapi.SecurityContext{
-								Privileged: ptr.To(true),
+								Privileged: new(true),
 							},
 							Command: []string{
 								"/bin/sh",
@@ -113,10 +112,8 @@ func InstallNodeConfig(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 									Name: node.EnvCA,
 									ValueFrom: &coreapi.EnvVarSource{
 										ConfigMapKeyRef: &coreapi.ConfigMapKeySelector{
-											LocalObjectReference: coreapi.LocalObjectReference{
-												Name: comp.FabCAConfigMap,
-											},
-											Key: comp.FabCAConfigMapKey,
+											Name: comp.FabCAConfigMap,
+											Key:  comp.FabCAConfigMapKey,
 										},
 									},
 								},
@@ -124,10 +121,8 @@ func InstallNodeConfig(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 									Name: node.EnvRegistries,
 									ValueFrom: &coreapi.EnvVarSource{
 										SecretKeyRef: &coreapi.SecretKeySelector{
-											LocalObjectReference: coreapi.LocalObjectReference{
-												Name: comp.FabNodeRegistriesSecret,
-											},
-											Key: comp.FabNodeRegistriesSecretKey,
+											Name: comp.FabNodeRegistriesSecret,
+											Key:  comp.FabNodeRegistriesSecretKey,
 										},
 									},
 								},

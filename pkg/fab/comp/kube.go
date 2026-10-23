@@ -187,14 +187,10 @@ func NewHelmChart(cfg fabapi.Fabricator, name, chart, version, bootstrapChart st
 	}
 
 	return &helmapi.HelmChart{
-		TypeMeta: kmetav1.TypeMeta{
-			APIVersion: helmapi.SchemeGroupVersion.String(),
-			Kind:       "HelmChart",
-		},
-		ObjectMeta: kmetav1.ObjectMeta{
-			Name:      name,
-			Namespace: FabNamespace,
-		},
+		APIVersion: helmapi.SchemeGroupVersion.String(),
+		Kind:       "HelmChart",
+		Name:       name,
+		Namespace:  FabNamespace,
 		Spec: helmapi.HelmChartSpec{
 			Chart:                chartURL,
 			Version:              version,
@@ -210,29 +206,21 @@ func NewHelmChart(cfg fabapi.Fabricator, name, chart, version, bootstrapChart st
 
 func NewIssuer(name string, spec cmapi.IssuerSpec) kclient.Object {
 	return &cmapi.Issuer{
-		TypeMeta: kmetav1.TypeMeta{
-			APIVersion: cmapi.SchemeGroupVersion.String(),
-			Kind:       "Issuer",
-		},
-		ObjectMeta: kmetav1.ObjectMeta{
-			Name:      name,
-			Namespace: FabNamespace,
-		},
-		Spec: spec,
+		APIVersion: cmapi.SchemeGroupVersion.String(),
+		Kind:       "Issuer",
+		Name:       name,
+		Namespace:  FabNamespace,
+		Spec:       spec,
 	}
 }
 
 func NewCertificate(name string, spec CertificateSpec) kclient.Object {
 	return &cmapi.Certificate{
-		TypeMeta: kmetav1.TypeMeta{
-			APIVersion: cmapi.SchemeGroupVersion.String(),
-			Kind:       "Certificate",
-		},
-		ObjectMeta: kmetav1.ObjectMeta{
-			Name:      name,
-			Namespace: FabNamespace,
-		},
-		Spec: spec,
+		APIVersion: cmapi.SchemeGroupVersion.String(),
+		Kind:       "Certificate",
+		Name:       name,
+		Namespace:  FabNamespace,
+		Spec:       spec,
 	}
 }
 
@@ -246,13 +234,9 @@ func NewIssuerRef(name string) CMObjectReference {
 
 func NewNamespace(name string) kclient.Object {
 	return &coreapi.Namespace{
-		TypeMeta: kmetav1.TypeMeta{
-			APIVersion: coreapi.SchemeGroupVersion.String(),
-			Kind:       "Namespace",
-		},
-		ObjectMeta: kmetav1.ObjectMeta{
-			Name: name,
-		},
+		APIVersion: coreapi.SchemeGroupVersion.String(),
+		Kind:       "Namespace",
+		Name:       name,
 	}
 }
 
@@ -260,14 +244,10 @@ func NewSecret(name string, t SecretType, data map[string]string) kclient.Object
 	// TODO base64 encode data and Data instead of StringData so DeepEqual works correctly
 
 	return &coreapi.Secret{
-		TypeMeta: kmetav1.TypeMeta{
-			APIVersion: coreapi.SchemeGroupVersion.String(),
-			Kind:       "Secret",
-		},
-		ObjectMeta: kmetav1.ObjectMeta{
-			Name:      name,
-			Namespace: FabNamespace,
-		},
+		APIVersion: coreapi.SchemeGroupVersion.String(),
+		Kind:       "Secret",
+		Name:       name,
+		Namespace:  FabNamespace,
 		StringData: data,
 		Type:       t,
 	}
@@ -275,57 +255,41 @@ func NewSecret(name string, t SecretType, data map[string]string) kclient.Object
 
 func NewConfigMap(name string, data map[string]string) kclient.Object {
 	return &coreapi.ConfigMap{
-		TypeMeta: kmetav1.TypeMeta{
-			APIVersion: coreapi.SchemeGroupVersion.String(),
-			Kind:       "ConfigMap",
-		},
-		ObjectMeta: kmetav1.ObjectMeta{
-			Name:      name,
-			Namespace: FabNamespace,
-		},
-		Data: data,
+		APIVersion: coreapi.SchemeGroupVersion.String(),
+		Kind:       "ConfigMap",
+		Name:       name,
+		Namespace:  FabNamespace,
+		Data:       data,
 	}
 }
 
 func NewService(name string, spec coreapi.ServiceSpec) kclient.Object {
 	return &coreapi.Service{
-		TypeMeta: kmetav1.TypeMeta{
-			APIVersion: coreapi.SchemeGroupVersion.String(),
-			Kind:       "Service",
-		},
-		ObjectMeta: kmetav1.ObjectMeta{
-			Name:      name,
-			Namespace: FabNamespace,
-		},
-		Spec: spec,
+		APIVersion: coreapi.SchemeGroupVersion.String(),
+		Kind:       "Service",
+		Name:       name,
+		Namespace:  FabNamespace,
+		Spec:       spec,
 	}
 }
 
 func NewDHCPSubnet(name string, spec dhcpapi.DHCPSubnetSpec) kclient.Object {
 	return &dhcpapi.DHCPSubnet{
-		TypeMeta: kmetav1.TypeMeta{
-			APIVersion: dhcpapi.GroupVersion.String(),
-			Kind:       "DHCPSubnet",
-		},
-		ObjectMeta: kmetav1.ObjectMeta{
-			Name:      name,
-			Namespace: kmetav1.NamespaceDefault,
-		},
-		Spec: spec,
+		APIVersion: dhcpapi.GroupVersion.String(),
+		Kind:       "DHCPSubnet",
+		Name:       name,
+		Namespace:  kmetav1.NamespaceDefault,
+		Spec:       spec,
 	}
 }
 
 func NewDaemonSet(name string, spec appsapi.DaemonSetSpec) kclient.Object {
 	return &appsapi.DaemonSet{
-		TypeMeta: kmetav1.TypeMeta{
-			APIVersion: appsapi.SchemeGroupVersion.String(),
-			Kind:       "DaemonSet",
-		},
-		ObjectMeta: kmetav1.ObjectMeta{
-			Name:      name,
-			Namespace: FabNamespace,
-		},
-		Spec: spec,
+		APIVersion: appsapi.SchemeGroupVersion.String(),
+		Kind:       "DaemonSet",
+		Name:       name,
+		Namespace:  FabNamespace,
+		Spec:       spec,
 	}
 }
 
@@ -457,14 +421,10 @@ func DeleteIfPresent(ctx context.Context, kube kclient.Client, obj kclient.Objec
 
 func DeleteHelmChartIfPresent(ctx context.Context, kube kclient.Client, name string) error {
 	return DeleteIfPresent(ctx, kube, &helmapi.HelmChart{
-		TypeMeta: kmetav1.TypeMeta{
-			APIVersion: helmapi.SchemeGroupVersion.String(),
-			Kind:       "HelmChart",
-		},
-		ObjectMeta: kmetav1.ObjectMeta{
-			Name:      name,
-			Namespace: FabNamespace,
-		},
+		APIVersion: helmapi.SchemeGroupVersion.String(),
+		Kind:       "HelmChart",
+		Name:       name,
+		Namespace:  FabNamespace,
 	})
 }
 

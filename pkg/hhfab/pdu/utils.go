@@ -37,7 +37,7 @@ func ParseOutletJSON(jsonFilePath string) (map[string]string, []string, error) {
 			return nil, nil, fmt.Errorf("failed to parse URL %q: %w", urlStr, err)
 		}
 
-		ip := strings.Split(parsedURL.Host, ":")[0] // Get the host without port
+		ip, _, _ := strings.Cut(parsedURL.Host, ":") // Get the host without port
 		ipSet[ip] = struct{}{}
 	}
 

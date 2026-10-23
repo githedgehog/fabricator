@@ -8,10 +8,8 @@ version: "2"
 #   3. Linting tests and the release tests helpers: 134 issues, see linters.exclusions.paths
 #   4. Default exclusions inherited from v1, see linters.exclusions.presets
 #   5. nolintlint require-explanation: 765 directives without explanation
-#   6. Linters with issues on the current code: modernize (166, auto-fixable, incl. 107 embedlit for Go 1.27 promoted
-#      fields in composite literals and 3 omitzero disabled by controller-runtime and kubebuilder), intrange (26),
-#      forcetypeassert (16), godoclint (29), perfsprint (217), forbidigo (23, needs settings as it forbids fmt.Print*
-#      by default)
+#   6. Linters with issues on the current code: intrange (26), forcetypeassert (16), godoclint (29), perfsprint (217),
+#      forbidigo (23, needs settings as it forbids fmt.Print* by default)
 #   7. Stricter sloglint options: msg-style capitalized (22), static-msg (26), key-naming-case camel (52) or snake
 #      (79), args-on-sep-lines (293), no-raw-keys (671)
 #   8. goconst detection in function call arguments: 531 issues, needs evaluation as it may be too noisy
@@ -80,6 +78,7 @@ linters:
     - makezero
     - mirror
     - misspell
+    - modernize
     - musttag
     - nakedret
     - nilerr
@@ -139,6 +138,11 @@ linters:
         - opaque
         - unexported
         - unusedmethod
+    modernize:
+      disable:
+        # Not planned: against the K8s API conventions that use omitempty for the optional fields (disabled by
+        # controller-runtime and kubebuilder as well)
+        - omitzero
     govet:
       enable-all: true
       disable:

@@ -157,8 +157,7 @@ func loadThrottle(path string) ([]podCPUAt, error) {
 		if err != nil {
 			// A run that took the machine down can leave the last line cut off;
 			// everything before it still counts.
-			var parseErr *csv.ParseError
-			if errors.As(err, &parseErr) {
+			if _, ok := errors.AsType[*csv.ParseError](err); ok {
 				continue
 			}
 
@@ -178,10 +177,11 @@ func loadThrottle(path string) ([]podCPUAt, error) {
 		// cpu.stat counts in microseconds, which the seconds column holds
 		// exactly but a float product may miss by a nanosecond. A file from
 		// before cgroups were told apart only had the pod's.
-		out = append(out, podCPUAt{At: at, PodCPU: PodCPU{
+		out = append(out, podCPUAt{
+			At:  at,
 			Pod: pod, UID: field(row, "uid"), Cgroup: cmp.Or(field(row, "cgroup"), cgroupPod), Limit: limit,
 			Periods: periods, Throttled: throttled, ThrottledTime: time.Duration(math.Round(seconds*1e6)) * time.Microsecond,
-		}})
+		})
 	}
 
 	return out, nil
@@ -205,12 +205,12 @@ func workloadName(pod string) string {
 }
 
 func cutLast(s, sep string) (string, string, bool) {
-	idx := strings.LastIndex(s, sep)
-	if idx < 0 {
+	before, after, ok := strings.CutLast(s, sep)
+	if !ok {
 		return s, "", false
 	}
 
-	return s[:idx], s[idx+len(sep):], true
+	return before, after, true
 }
 
 // generatedName reports whether s only has characters from the alphabet

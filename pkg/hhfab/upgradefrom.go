@@ -67,15 +67,11 @@ func injectUpgradeDefaultFabric(ctx context.Context, l *apiutil.Loader, f fabapi
 	}
 
 	defaultFabric := &wiringapi.Fabric{
-		TypeMeta: kmetav1.TypeMeta{
-			Kind:       wiringapi.KindFabric,
-			APIVersion: wiringapi.GroupVersion.String(),
-		},
-		ObjectMeta: kmetav1.ObjectMeta{
-			Name:      wiringapi.DefaultFabric,
-			Namespace: kmetav1.NamespaceDefault,
-		},
-		Spec: wiringapi.DefaultFabricSpec(cfg),
+		Kind:       wiringapi.KindFabric,
+		APIVersion: wiringapi.GroupVersion.String(),
+		Name:       wiringapi.DefaultFabric,
+		Namespace:  kmetav1.NamespaceDefault,
+		Spec:       wiringapi.DefaultFabricSpec(cfg),
 	}
 	defaultFabric.Default()
 

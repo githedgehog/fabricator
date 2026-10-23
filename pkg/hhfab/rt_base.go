@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -560,8 +561,8 @@ func doRunSuite(ctx context.Context, testCtx *VPCPeeringTestCtx, ts *JUnitTestSu
 			}
 		}
 		var revertErr error
-		for j := len(reverts) - 1; j >= 0; j-- {
-			revertErr = reverts[j](ctx)
+		for _, revert := range slices.Backward(reverts) {
+			revertErr = revert(ctx)
 			if revertErr != nil {
 				slog.Error("REVERT FAIL", "test", test.Name, "error", revertErr.Error())
 				collectDiagnostics := false

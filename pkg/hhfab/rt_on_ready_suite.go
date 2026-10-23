@@ -307,10 +307,8 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connecti
 		}
 		// Must be on a different switch than vpcCServer1
 		for _, sw := range s.switches {
-			for _, sw1 := range vpcCServer1.switches {
-				if sw == sw1 {
-					return false
-				}
+			if slices.Contains(vpcCServer1.switches, sw) {
+				return false
 			}
 		}
 
@@ -401,7 +399,7 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connecti
 			return false, nil, fmt.Errorf("allocating VPC A subnet-02: %w", err)
 		}
 		vpc := &vpcapi.VPC{
-			ObjectMeta: kmetav1.ObjectMeta{Name: vpcAName, Namespace: kmetav1.NamespaceDefault},
+			Name: vpcAName, Namespace: kmetav1.NamespaceDefault,
 			Spec: vpcapi.VPCSpec{
 				Mode: vpcMode,
 				Subnets: map[string]*vpcapi.VPCSubnet{
@@ -445,7 +443,7 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connecti
 			VLAN:    vlan,
 		}
 		vpc := &vpcapi.VPC{
-			ObjectMeta: kmetav1.ObjectMeta{Name: vpcBName, Namespace: kmetav1.NamespaceDefault},
+			Name: vpcBName, Namespace: kmetav1.NamespaceDefault,
 			Spec: vpcapi.VPCSpec{
 				Mode: vpcMode,
 				Subnets: map[string]*vpcapi.VPCSubnet{
@@ -490,7 +488,7 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connecti
 			return false, nil, fmt.Errorf("allocating VPC C subnet: %w", err)
 		}
 		vpc := &vpcapi.VPC{
-			ObjectMeta: kmetav1.ObjectMeta{Name: vpcCName, Namespace: kmetav1.NamespaceDefault},
+			Name: vpcCName, Namespace: kmetav1.NamespaceDefault,
 			Spec: vpcapi.VPCSpec{
 				Mode: vpcMode,
 				Subnets: map[string]*vpcapi.VPCSubnet{
@@ -526,7 +524,7 @@ func newOnReadyTest(ctx context.Context, testCtx *VPCPeeringTestCtx, _ *Connecti
 			return false, nil, fmt.Errorf("allocating %s subnet: %w", vpcName, err)
 		}
 		vpc := &vpcapi.VPC{
-			ObjectMeta: kmetav1.ObjectMeta{Name: vpcName, Namespace: kmetav1.NamespaceDefault},
+			Name: vpcName, Namespace: kmetav1.NamespaceDefault,
 			Spec: vpcapi.VPCSpec{
 				Mode: vpcMode,
 				Subnets: map[string]*vpcapi.VPCSubnet{

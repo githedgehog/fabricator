@@ -397,7 +397,7 @@ func (g *Generator) generateFabric(ctx context.Context, l *apiutil.Loader, slot 
 		}
 
 		if err := l.Add(ctx, &wiringapi.Fabric{
-			TypeMeta:   kmetav1.TypeMeta{Kind: wiringapi.KindFabric, APIVersion: wiringapi.GroupVersion.String()},
+			Kind: wiringapi.KindFabric, APIVersion: wiringapi.GroupVersion.String(),
 			ObjectMeta: objMeta(spec.Name, labels),
 			Spec: wiringapi.FabricSpec{
 				LeafASNStart: asns.LeafStart,
@@ -410,7 +410,7 @@ func (g *Generator) generateFabric(ctx context.Context, l *apiutil.Loader, slot 
 	}
 
 	if err := l.Add(ctx, &wiringapi.VLANNamespace{
-		TypeMeta:   kmetav1.TypeMeta{Kind: wiringapi.KindVLANNamespace, APIVersion: wiringapi.GroupVersion.String()},
+		Kind: wiringapi.KindVLANNamespace, APIVersion: wiringapi.GroupVersion.String(),
 		ObjectMeta: objMeta(spec.Name, labels),
 		Spec: wiringapi.VLANNamespaceSpec{
 			Ranges: []meta.VLANRange{{From: VLANFrom, To: VLANTo}},
@@ -420,7 +420,7 @@ func (g *Generator) generateFabric(ctx context.Context, l *apiutil.Loader, slot 
 	}
 
 	if err := l.Add(ctx, &vpcapi.IPv4Namespace{
-		TypeMeta:   kmetav1.TypeMeta{Kind: vpcapi.KindIPv4Namespace, APIVersion: vpcapi.GroupVersion.String()},
+		Kind: vpcapi.KindIPv4Namespace, APIVersion: vpcapi.GroupVersion.String(),
 		ObjectMeta: objMeta(spec.Name, labels),
 		Spec: vpcapi.IPv4NamespaceSpec{
 			Topology: vpcapi.IPv4NamespaceTopology{Fabric: fabricRef},
@@ -431,7 +431,7 @@ func (g *Generator) generateFabric(ctx context.Context, l *apiutil.Loader, slot 
 	}
 
 	if err := l.Add(ctx, &wiringapi.SwitchGroup{
-		TypeMeta:   kmetav1.TypeMeta{Kind: wiringapi.KindSwitchGroup, APIVersion: wiringapi.GroupVersion.String()},
+		Kind: wiringapi.KindSwitchGroup, APIVersion: wiringapi.GroupVersion.String(),
 		ObjectMeta: objMeta(spec.Name, labels),
 		Spec: wiringapi.SwitchGroupSpec{
 			Topology: wiringapi.SwitchGroupTopology{Fabric: fabricRef},
@@ -551,7 +551,7 @@ func (g *Generator) generateSwitches(ctx context.Context, l *apiutil.Loader, d *
 		}
 
 		if err := l.Add(ctx, &wiringapi.Switch{
-			TypeMeta:   kmetav1.TypeMeta{Kind: wiringapi.KindSwitch, APIVersion: wiringapi.GroupVersion.String()},
+			Kind: wiringapi.KindSwitch, APIVersion: wiringapi.GroupVersion.String(),
 			ObjectMeta: objMeta(d.spineName(idx), labels),
 			Spec: wiringapi.SwitchSpec{
 				Role:           wiringapi.SwitchRoleSpine,
@@ -600,7 +600,7 @@ func (g *Generator) generateSwitches(ctx context.Context, l *apiutil.Loader, d *
 		}
 
 		if err := l.Add(ctx, &wiringapi.Switch{
-			TypeMeta:   kmetav1.TypeMeta{Kind: wiringapi.KindSwitch, APIVersion: wiringapi.GroupVersion.String()},
+			Kind: wiringapi.KindSwitch, APIVersion: wiringapi.GroupVersion.String(),
 			ObjectMeta: objMeta(d.leafName(idx), labels),
 			Spec: wiringapi.SwitchSpec{
 				Role:           wiringapi.SwitchRoleServerLeaf,
@@ -688,7 +688,7 @@ func (g *Generator) generateServers(ctx context.Context, l *apiutil.Loader, d *d
 				}
 
 				if err := l.Add(ctx, &wiringapi.Server{
-					TypeMeta:   kmetav1.TypeMeta{Kind: wiringapi.KindServer, APIVersion: wiringapi.GroupVersion.String()},
+					Kind: wiringapi.KindServer, APIVersion: wiringapi.GroupVersion.String(),
 					ObjectMeta: objMeta(server, labels),
 					Spec:       srvSpec,
 				}); err != nil {
@@ -724,7 +724,7 @@ func (g *Generator) generateVPCs(ctx context.Context, l *apiutil.Loader, d *doma
 		gateway := d.subnets[idx].Addr().Next()
 
 		if err := l.Add(ctx, &vpcapi.VPC{
-			TypeMeta:   kmetav1.TypeMeta{Kind: vpcapi.KindVPC, APIVersion: vpcapi.GroupVersion.String()},
+			Kind: vpcapi.KindVPC, APIVersion: vpcapi.GroupVersion.String(),
 			ObjectMeta: objMeta(d.vpcName(idx), labels),
 			Spec: vpcapi.VPCSpec{
 				// DS5000 has Features.L2VNI false, so VPCs must be L3VNI. This
@@ -787,7 +787,7 @@ func (g *Generator) generateAttachments(ctx context.Context, l *apiutil.Loader, 
 					vpc := d.vpcName(vpcIdx)
 
 					if err := l.Add(ctx, &vpcapi.VPCAttachment{
-						TypeMeta:   kmetav1.TypeMeta{Kind: vpcapi.KindVPCAttachment, APIVersion: vpcapi.GroupVersion.String()},
+						Kind: vpcapi.KindVPCAttachment, APIVersion: vpcapi.GroupVersion.String(),
 						ObjectMeta: objMeta(fmt.Sprintf("%s--%s", connName, vpc), labels),
 						Spec: vpcapi.VPCAttachmentSpec{
 							Topology:   vpcapi.VPCAttachmentTopology{Fabric: d.fabricRef()},
@@ -819,7 +819,7 @@ func (g *Generator) generatePeerings(ctx context.Context, l *apiutil.Loader, d *
 			vpcA, vpcB := d.vpcName(a), d.vpcName(b)
 
 			if err := l.Add(ctx, &vpcapi.VPCPeering{
-				TypeMeta:   kmetav1.TypeMeta{Kind: vpcapi.KindVPCPeering, APIVersion: vpcapi.GroupVersion.String()},
+				Kind: vpcapi.KindVPCPeering, APIVersion: vpcapi.GroupVersion.String(),
 				ObjectMeta: objMeta(fmt.Sprintf("%s--%s", vpcA, vpcB), labels),
 				Spec: vpcapi.VPCPeeringSpec{
 					Topology: vpcapi.VPCPeeringTopology{Fabric: d.fabricRef()},
@@ -888,7 +888,7 @@ func (g *Generator) addConn(ctx context.Context, l *apiutil.Loader, fabric strin
 	spec.Topology = wiringapi.ConnectionTopology{Fabric: fabric}
 
 	conn := &wiringapi.Connection{
-		TypeMeta:   kmetav1.TypeMeta{Kind: wiringapi.KindConnection, APIVersion: wiringapi.GroupVersion.String()},
+		Kind: wiringapi.KindConnection, APIVersion: wiringapi.GroupVersion.String(),
 		ObjectMeta: objMeta(spec.GenerateName(), labels),
 		Spec:       spec,
 	}

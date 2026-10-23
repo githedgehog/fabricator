@@ -2048,16 +2048,10 @@ func createVPCLegend(model *MxGraphModel, vpcs map[string]*VPCInfo, serverBottom
 
 	// Calculate available horizontal space based on server layout
 	// A VPC legend entry (320px column) spans approximately 2 servers
-	maxColumns := (numServers + 1) / 2
-	if maxColumns < 1 {
-		maxColumns = 1
-	}
+	maxColumns := max((numServers+1)/2, 1)
 
 	// Minimize rows by using as many columns as possible
-	numColumns := min(len(vpcNames), maxColumns)
-	if numColumns < 1 {
-		numColumns = 1
-	}
+	numColumns := max(min(len(vpcNames), maxColumns), 1)
 
 	maxVPCsPerColumn := (len(vpcNames) + numColumns - 1) / numColumns
 
@@ -2429,31 +2423,31 @@ func createUnderlayLayer(model *MxGraphModel, topo Topology, cellMap map[string]
 	// --- 3. P2P link IP labels on fabric/mesh/gateway edges ---
 	lastOctet := func(cidr string) string {
 		ip, _, _ := strings.Cut(cidr, "/")
-		dot := strings.LastIndex(ip, ".")
-		if dot < 0 {
+		_, after, ok := strings.CutLast(ip, ".")
+		if !ok {
 			return cidr
 		}
 
-		return "." + ip[dot+1:]
+		return "." + after
 	}
 	subnetOf := func(cidr string) string {
 		ip, prefix, ok := strings.Cut(cidr, "/")
 		if !ok {
 			return cidr
 		}
-		dot := strings.LastIndex(ip, ".")
-		if dot < 0 {
+		before, after, ok := strings.CutLast(ip, ".")
+		if !ok {
 			return cidr
 		}
 		var octet int
-		for _, ch := range ip[dot+1:] {
+		for _, ch := range after {
 			if ch < '0' || ch > '9' {
 				return cidr
 			}
 			octet = octet*10 + int(ch-'0')
 		}
 
-		return fmt.Sprintf("%s.%d/%s", ip[:dot], octet&^1, prefix)
+		return fmt.Sprintf("%s.%d/%s", before, octet&^1, prefix)
 	}
 
 	const p2pFixedDist = 30.0

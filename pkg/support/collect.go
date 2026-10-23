@@ -58,11 +58,9 @@ func Collect(ctx context.Context, name, kubeconfigPath string, quiet bool) (*Dum
 	}
 
 	dump := &Dump{
-		DumpVersion: DumpVersion{
-			Version:       CurrentVersion.String(),
-			parsedVersion: CurrentVersion,
-		},
-		Name: name,
+		Version:       CurrentVersion.String(),
+		parsedVersion: CurrentVersion,
+		Name:          name,
 		CreatedBy: DumpCreator{
 			Hostname:   hostname,
 			Username:   username,

@@ -12,9 +12,10 @@ import (
 )
 
 func Translate(but string) ([]byte, error) {
-	options := butanecommon.TranslateBytesOptions{}
-	options.NoResourceAutoCompression = true
-	options.Pretty = true
+	options := butanecommon.TranslateBytesOptions{
+		NoResourceAutoCompression: true,
+		Pretty:                    true,
+	}
 
 	ign, report, err := butane.TranslateBytes([]byte(but), options)
 	if err != nil {
