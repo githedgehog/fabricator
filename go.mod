@@ -1,5 +1,6 @@
 module go.githedgehog.com/fabricator
 
+// Always use a full Go version (e.g. 1.27.3, not 1.27) as just uses it as GOTOOLCHAIN.
 go 1.27.3
 
 replace github.com/diskfs/go-diskfs => github.com/Frostman/go-diskfs v1.4.2-hh3
