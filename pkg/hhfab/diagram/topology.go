@@ -372,7 +372,7 @@ func sortNodes(nodes []Node, links []Link) TieredNodes {
 				return strings.Compare(s1, s2) // Smaller ID first in ESLAG pair
 			}
 			if c2.eslagPair == s1 {
-				return strings.Compare(s2, s1) // Smaller ID first in ESLAG pair
+				return strings.Compare(s1, s2) // Smaller ID first in ESLAG pair
 			}
 
 			// For ESLAG pairs, try to place them next to their connected servers
@@ -434,6 +434,9 @@ func sortNodes(nodes []Node, links []Link) TieredNodes {
 			if b.ID == id {
 				posB = idx
 			}
+		}
+		if posA == -1 && posB == -1 {
+			return 0
 		}
 		if posA == -1 {
 			return 1
