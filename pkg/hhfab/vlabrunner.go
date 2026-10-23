@@ -748,6 +748,15 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						VPCMode:           opts.VPCMode,
 						InterfaceMTU:      opts.InterfaceMTU,
 					}
+					// each interconnect pair is peered with a VPC of its own in every Fabric, so a group
+					// of servers needs a VPC per pair and the VPCs get a subnet each
+					pairs, err := c.interconnectPairs(ctx)
+					if err != nil {
+						return c.handleShutdownWithPause(ctx, vlab, opts, fmt.Errorf("counting interconnect pairs: %w", err))
+					}
+					if pairs > 1 {
+						setupVPCsOpts.SubnetsPerVPC = 1
+					}
 					slog.Debug("Running setup-vpcs", "opts", setupVPCsOpts)
 					if _, _, err := c.SetupVPCs(ctx, vlab, setupVPCsOpts); err != nil {
 						return c.handleShutdownWithPause(ctx, vlab, opts, fmt.Errorf("setting up VPCs: %w", err))
