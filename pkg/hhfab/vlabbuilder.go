@@ -415,7 +415,7 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 					// }
 				case GatewayDriverDPDK:
 					ifaces[fmt.Sprintf("port%d", i)] = gwapi.GatewayInterface{
-						PCI: fmt.Sprintf("0000:02:%02d.0", i),
+						PCI: VLABGatewayDPDKPCI(uint(i)),
 					}
 				}
 			}

@@ -468,6 +468,15 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 				"-global", "ICH9-LPC.acpi-pci-hotplug-with-bridge-support=off",
 			}
 
+			// An emulated Intel IOMMU, so the DPDK driver can bind its NICs to vfio-pci. Interrupt
+			// remapping needs the split irqchip. The Flatcar kernel enables the IOMMU by default.
+			// It goes right after the machine, ahead of every PCI device it translates for.
+			if vm.IOMMU {
+				idx := slices.Index(args, "-machine") + 2
+				args[idx-1] += ",kernel-irqchip=split"
+				args = slices.Insert(args, idx, "-device", "intel-iommu,intremap=on")
+			}
+
 			// Mark Flatcar VMs as VLAB in SMBIOS, where VLAB-only host config can match on it
 			// (see flatcar.VLABVirtioNamesLink). The chassis asset tag is set by nothing else and
 			// read by nothing else, unlike the vendor and product fields switch images may use.

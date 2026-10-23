@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
 	"go.githedgehog.com/fabric/api/meta"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
 	fabapi "go.githedgehog.com/fabricator/api/fabricator/v1beta1"
@@ -272,5 +273,72 @@ func TestCreateVLABConfigHardwareGateway(t *testing.T) {
 	for swPort, pci := range pcis {
 		parts := strings.SplitN(swPort, "/", 2)
 		require.Equal(t, NICTypePassthrough+NICTypeSep+pci, cfg.VMs[parts[0]].NICs[parts[1]], swPort)
+	}
+}
+
+func TestCreateVLABConfigDPDKGatewayIOMMU(t *testing.T) {
+	nodes := []fabapi.FabNode{}
+	for _, name := range []string{"gateway-1", "gateway-2"} {
+		nodes = append(nodes, fabapi.FabNode{
+			ObjectMeta: kmetav1.ObjectMeta{Name: name},
+			Spec: fabapi.FabNodeSpec{
+				Roles:      []fabapi.FabNodeRole{fabapi.NodeRoleGateway},
+				Management: fabapi.ControlNodeManagement{Interface: "enp2s0"},
+			},
+		})
+	}
+
+	for _, driver := range GatewayDrivers {
+		t.Run(driver, func(t *testing.T) {
+			l := apiutil.NewLoader()
+			b := &VLABBuilderDefault{
+				GatewayLogLevel: "info",
+				GatewayDriver:   driver,
+				VLABBuilderBase: VLABBuilderBase{DefaultSwitchProfile: meta.SwitchProfileVS},
+			}
+			f := fabapi.Fabricator{Spec: fabapi.FabricatorSpec{Config: fab.DefaultConfig}}
+			f.Default()
+			require.NoError(t, b.Build(t.Context(), l, f, nodes))
+
+			cfg, err := createVLABConfig(t.Context(), nil, nodes, l.GetClient())
+			require.NoError(t, err)
+
+			vlab, err := vlabFromConfig(cfg, VLABRunOpts{})
+			require.NoError(t, err)
+
+			dpdk := driver == GatewayDriverDPDK
+			gws := 0
+			for _, vm := range vlab.VMs {
+				if vm.Type != VMTypeGateway {
+					require.False(t, vm.IOMMU, vm.Name)
+
+					continue
+				}
+				gws++
+				require.Equal(t, dpdk, vm.IOMMU, vm.Name)
+
+				// the management NIC stays behind the PCI bridge, where its name comes from
+				require.Contains(t, vm.NICs[0], ",bus="+VLABPCIBridgePrefix+"0,addr=0x0", vm.Name)
+				if !dpdk {
+					continue
+				}
+
+				gw := &gwapi.Gateway{}
+				require.NoError(t, l.GetClient().Get(t.Context(), kclient.ObjectKey{Name: vm.Name, Namespace: "default"}, gw))
+				require.NotEmpty(t, gw.Spec.Interfaces, vm.Name)
+				for ifaceName, iface := range gw.Spec.Interfaces {
+					var nicID uint
+					_, err := fmt.Sscanf(ifaceName, "port%d", &nicID)
+					require.NoError(t, err, ifaceName)
+
+					// the address the gateway is told is where the VM's NIC is
+					var slot uint
+					_, err = fmt.Sscanf(iface.PCI, "0000:00:%02x.0", &slot)
+					require.NoError(t, err, iface.PCI)
+					require.Contains(t, vm.NICs[nicID], fmt.Sprintf(",bus=pcie.0,addr=0x%x", slot), vm.Name+"/"+ifaceName)
+				}
+			}
+			require.Equal(t, 2, gws)
+		})
 	}
 }

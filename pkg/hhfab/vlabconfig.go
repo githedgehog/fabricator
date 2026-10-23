@@ -19,6 +19,7 @@ import (
 
 	"dario.cat/mergo"
 	"github.com/charmbracelet/keygen"
+	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
 	fmeta "go.githedgehog.com/fabric/api/meta"
 	vpcapi "go.githedgehog.com/fabric/api/vpc/v1beta1"
 	wiringapi "go.githedgehog.com/fabric/api/wiring/v1beta1"
@@ -58,6 +59,12 @@ const (
 	VLABNICsPerPCIBridge = 32
 	VLABPCIBridges       = 2
 	VLABMaxNICs          = VLABNICsPerPCIBridge * VLABPCIBridges
+	// A gateway VM with a virtual IOMMU keeps its management NIC behind the PCI bridge and puts
+	// its other NICs on the root bus from this slot on. Everything behind a conventional PCI
+	// bridge shares one IOMMU group, and vfio-pci can only hand a group to DPDK whole, so a
+	// dataplane NIC there would take the management NIC with it.
+	VLABIOMMUNICBaseSlot = 0x10
+	VLABIOMMUMaxNICs     = 0x1f - VLABIOMMUNICBaseSlot // slot 0x1f is the q35 LPC/SATA/SMBus
 	VLABBaseSSHPort      = 22000
 	VLABBaseDirectPort   = 22100
 	VLABTapPrefix        = "hhtap"
@@ -83,6 +90,7 @@ type VM struct {
 	Restricted    bool
 	NICs          []string
 	Size          VMSize
+	IOMMU         bool
 }
 
 type ExternalAttachCfg struct {
@@ -146,6 +154,7 @@ type VMConfig struct {
 	SwitchMode    VMSwitchMode      `json:"switchMode,omitempty"`
 	SwitchProfile string            `json:"switchProfile,omitempty"`
 	NICs          map[string]string `json:"nics"`
+	IOMMU         bool              `json:"iommu,omitempty"`
 }
 
 type VMType string
@@ -433,6 +442,12 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 		}
 	}
 
+	// The DPDK driver binds its NICs to vfio-pci, which needs an IOMMU in the VM.
+	dpdkGateways, err := getDPDKGateways(ctx, wiring)
+	if err != nil {
+		return nil, err
+	}
+
 	// TODO deduplicate
 	for _, node := range nodes {
 		if len(node.Spec.Roles) != 1 || node.Spec.Roles[0] != fabapi.NodeRoleGateway {
@@ -476,6 +491,7 @@ func createVLABConfig(ctx context.Context, controls []fabapi.ControlNode, nodes 
 			NICs: map[string]string{
 				mgmtIface: mgmt,
 			},
+			IOMMU: dpdkGateways[node.Name],
 		}
 	}
 
@@ -1107,7 +1123,14 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 
 				device = fmt.Sprintf("%s,netdev=eth%02d,mac=%s%s", nic, nicID, mac, link)
 			}
-			device += fmt.Sprintf(",bus=%s%d,addr=0x%x", VLABPCIBridgePrefix, nicID/VLABNICsPerPCIBridge, nicID%VLABNICsPerPCIBridge)
+			if vm.IOMMU && nicID > 0 {
+				if nicID > VLABIOMMUMaxNICs {
+					return nil, fmt.Errorf("too many NICs for VM %q with IOMMU: %d", name, nicID) //nolint:goerr113
+				}
+				device += fmt.Sprintf(",bus=pcie.0,addr=0x%x", VLABIOMMUNICBaseSlot+nicID)
+			} else {
+				device += fmt.Sprintf(",bus=%s%d,addr=0x%x", VLABPCIBridgePrefix, nicID/VLABNICsPerPCIBridge, nicID%VLABNICsPerPCIBridge)
+			}
 
 			nic := ""
 			if netdev != "" {
@@ -1149,6 +1172,7 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 			SwitchProfile: vm.SwitchProfile,
 			NICs:          paddedNICs,
 			Size:          size,
+			IOMMU:         vm.IOMMU,
 		})
 	}
 
@@ -1159,6 +1183,34 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 		Passthroughs: passthroughs,
 		Externals:    cfg.Externals,
 	}, nil
+}
+
+// VLABGatewayDPDKPCI is the PCI address a DPDK gateway VM's NIC nicID has: on the root bus, see
+// VLABIOMMUNICBaseSlot.
+func VLABGatewayDPDKPCI(nicID uint) string {
+	return fmt.Sprintf("0000:00:%02x.0", VLABIOMMUNICBaseSlot+nicID)
+}
+
+// getDPDKGateways returns the gateways that use the DPDK driver: those with an interface given by
+// PCI address, the same way the gateway API defaults its driver.
+func getDPDKGateways(ctx context.Context, wiring kclient.Reader) (map[string]bool, error) {
+	gws := &gwapi.GatewayList{}
+	if err := wiring.List(ctx, gws); err != nil {
+		return nil, fmt.Errorf("listing gateways: %w", err)
+	}
+
+	dpdk := map[string]bool{}
+	for _, gw := range gws.Items {
+		for _, iface := range gw.Spec.Interfaces {
+			if iface.PCI != "" {
+				dpdk[gw.Name] = true
+
+				break
+			}
+		}
+	}
+
+	return dpdk, nil
 }
 
 func getAsn(obj kclient.Object) uint32 {
