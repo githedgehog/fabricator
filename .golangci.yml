@@ -6,15 +6,14 @@ version: "2"
 #   1. Linters with no issues on the current code: nilnesserr, exptostd, fatcontext, mirror, iface, sloglint,
 #      gochecksumtype, iotamixing
 #   2. staticcheck QF* quickfix checks (new in v2): 80 issues, auto-fixable with `just lint-fix`
-#   3. gosec taint analysis rules G702/G703: 4 issues
-#   4. goconst detection in composite literals: 55 issues
-#   5. Linting tests and the release tests helpers: 134 issues, see linters.exclusions.paths
-#   6. Default exclusions inherited from v1, see linters.exclusions.presets
-#   7. nolintlint require-explanation: 765 directives without explanation
-#   8. Linters with issues on the current code: modernize (45), intrange (26), wastedassign (7), canonicalheader (8),
+#   3. goconst detection in composite literals: 55 issues
+#   4. Linting tests and the release tests helpers: 134 issues, see linters.exclusions.paths
+#   5. Default exclusions inherited from v1, see linters.exclusions.presets
+#   6. nolintlint require-explanation: 765 directives without explanation
+#   7. Linters with issues on the current code: modernize (45), intrange (26), wastedassign (7), canonicalheader (8),
 #      forcetypeassert (16), recvcheck (3), nosprintfhostport (2), dupword (3), gomoddirectives (1), godoclint (29),
 #      perfsprint (217), forbidigo (23, needs settings as it forbids fmt.Print* by default)
-#   9. goconst detection in function call arguments: 531 issues, needs evaluation as it may be too noisy
+#   8. goconst detection in function call arguments: 531 issues, needs evaluation as it may be too noisy
 #
 # Complexity and line length linters (cyclop, funlen, gocognit, gocyclo, maintidx, nestif, lll, ...) aren't planned.
 
@@ -96,11 +95,6 @@ linters:
         - Call
         # TODO enable detection in composite literals added in goconst v1.11.0 (v1 had v1.7.1): 55 issues
         - CompositeLit
-    gosec:
-      excludes:
-        # TODO enable taint analysis rules added after gosec v2.22.2 used by v1 (v2 has v2.29.0): 4 issues
-        - G702 # command injection
-        - G703 # path traversal
     govet:
       enable-all: true
       disable:
