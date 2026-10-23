@@ -118,7 +118,7 @@ func (o *UsersOpts) setDefaults() {
 	}
 }
 
-func (o UsersOpts) validate() error {
+func (o *UsersOpts) validate() error {
 	for _, kind := range o.Kinds {
 		if kind != KindVPCAttachment && kind != KindConnection {
 			return fmt.Errorf("unknown kind %q, want %s or %s", kind, KindVPCAttachment, KindConnection) //nolint:err113

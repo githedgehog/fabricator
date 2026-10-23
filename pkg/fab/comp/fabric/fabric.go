@@ -7,6 +7,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"net"
 	"net/netip"
 	"strconv"
 
@@ -47,7 +48,7 @@ const (
 	CtlBinName     = "hhfctl"
 	CtlDestBinName = "kubectl-fabric"
 
-	MTU                   = 9100 // TODO actually use in in the fabric, make configurable
+	MTU                   = 9100 // TODO actually use in the fabric, make configurable
 	ServerFacingMTUOffset = 64   // TODO use in the fabric, make configurable
 	ServerFacingMTU       = MTU - ServerFacingMTUOffset
 
@@ -273,7 +274,7 @@ func GetFabricConfig(f fabapi.Fabricator) (*fmeta.FabricConfig, error) {
 		AlloyVersion:             string(alloy.Version(f)),
 		AlloyTargets:             f.Spec.Config.Observability.Targets,
 		Observability:            observability,
-		ControlProxyURL:          fmt.Sprintf("http://%s:%d", controlVIP.Addr().String(), controlproxy.NodePort),
+		ControlProxyURL:          "http://" + net.JoinHostPort(controlVIP.Addr().String(), strconv.Itoa(controlproxy.NodePort)),
 		DefaultMaxPathsEBGP:      64,
 		AllowExtraSwitchProfiles: f.Spec.Config.Fabric.AllowExtraSwitchProfiles,
 		MCLAGSessionSubnet:       string(f.Spec.Config.Fabric.MCLAGSessionSubnet),

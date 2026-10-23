@@ -113,7 +113,7 @@ func (r *rateStat) add(prev, cur Sample, col string) {
 }
 
 // Avg is the mean rate over the intervals the counter was seen in.
-func (r rateStat) Avg() float64 {
+func (r *rateStat) Avg() float64 {
 	if r.Span <= 0 {
 		return 0
 	}
