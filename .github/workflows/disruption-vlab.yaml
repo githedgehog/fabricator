@@ -1,0 +1,67 @@
+name: Disruption VLAB
+run-name: "${{ inputs.hybrid && 'h' || 'v' }}-l2vni-dt"
+
+on:
+  workflow_dispatch:
+    inputs:
+      hybrid:
+        description: "Enable hybrid mode (use env with physical switches)"
+        type: boolean
+        required: false
+        default: false
+      gateway:
+        description: "Enable gateway"
+        type: boolean
+        required: false
+        default: false
+      pause_on_failure:
+        description: "Pause on failure (enables debug)"
+        type: boolean
+        required: false
+        default: false
+      collect_show_tech:
+        description: "Force show-tech collection on all exits including success"
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  vlab:
+    name: "${{ inputs.hybrid && 'h' || 'v' }}-${{ inputs.gateway && 'gw-' || '' }}l2vni-dt"
+    uses: ./.github/workflows/run-vlab.yaml
+    with:
+      fabricatorref: ${{ github.ref }}
+      fabricmode: "spine-leaf"
+      gateway: ${{ inputs.gateway }}
+      includeonie: false
+      buildmode: "iso"
+      vpcmode: "l2vni"
+      hybrid: ${{ inputs.hybrid }}
+      disruptiontest: true
+      debug: ${{ inputs.pause_on_failure }}
+      pause_on_failure: ${{ inputs.pause_on_failure }}
+      collect_show_tech: ${{ inputs.collect_show_tech }}
+
+  publish-test-results:
+    if: ${{ !cancelled() }}
+    runs-on: lab
+    needs:
+      - vlab
+
+    steps:
+      - name: Download Artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+
+      - name: Publish Test Results
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        with:
+          files: "artifacts/**/release-test.xml"
+          report_individual_runs: true
+          check_run: false
+          job_summary: true
+          comment_mode: off

@@ -98,23 +98,24 @@ var VLABCmds = []string{
 }
 
 type VLABRunOpts struct {
-	KillStale                bool
-	ControlsRestricted       bool
-	ServersRestricted        bool
-	BuildMode                recipe.BuildMode
-	AutoUpgrade              bool
-	FailFast                 bool
-	OnReady                  []OnReady
-	OOBMgmtIface             string
-	CollectShowTech          bool
-	ForceCollectShowTech     bool
-	VPCMode                  vpcapi.VPCMode
-	PauseOnFailure           bool
-	ReleaseTestRegexes       []string
-	ReleaseTestRegexesInvert bool
-	ReleaseTestOnReadyOnly   bool
-	InterfaceMTU             uint16
-	InspectPodsStrict        bool
+	KillStale                 bool
+	ControlsRestricted        bool
+	ServersRestricted         bool
+	BuildMode                 recipe.BuildMode
+	AutoUpgrade               bool
+	FailFast                  bool
+	OnReady                   []OnReady
+	OOBMgmtIface              string
+	CollectShowTech           bool
+	ForceCollectShowTech      bool
+	VPCMode                   vpcapi.VPCMode
+	PauseOnFailure            bool
+	ReleaseTestRegexes        []string
+	ReleaseTestRegexesInvert  bool
+	ReleaseTestOnReadyOnly    bool
+	ReleaseTestDisruptionOnly bool
+	InterfaceMTU              uint16
+	InspectPodsStrict         bool
 }
 
 type OnReady string
@@ -813,6 +814,7 @@ func (c *Config) VLABRun(ctx context.Context, vlab *VLAB, opts VLABRunOpts) erro
 						ShowTechDump:   true,
 						IPerfsMinSpeed: 8200,
 						OnReadyTest:    opts.ReleaseTestOnReadyOnly,
+						DisruptionTest: opts.ReleaseTestDisruptionOnly,
 					}
 					slog.Debug("Running release-test", "opts", releaseTestOpts)
 					if err := ReleaseTest(ctx, c, vlab, releaseTestOpts); err != nil {
