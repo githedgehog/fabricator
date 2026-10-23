@@ -273,6 +273,7 @@ func Run(ctx context.Context) error {
 	var wgExtraDomain bool
 	var wgSharedLeafsCount uint
 	var wgExtraFabric, wgInterconnectFabrics, wgAddFabric bool
+	var wgInterconnectLinks uint
 	var wgGatewayUplinks uint
 	var wgGatewayDriver string
 	var wgGatewayWorkers uint
@@ -330,6 +331,11 @@ func Run(ctx context.Context) error {
 			Name:        "interconnect-fabrics",
 			Usage:       "connect a leaf of each fabric with an External on both sides, so the extra fabric can reach the internet through the main one",
 			Destination: &wgInterconnectFabrics,
+		},
+		&cli.UintFlag{
+			Name:        "interconnect-links",
+			Usage:       "number of independent interconnect pairs, each with its own two Externals and attachments on a port of the same leaf on each side (default 1, needs --interconnect-fabrics)",
+			Destination: &wgInterconnectLinks,
 		},
 		&cli.UintFlag{
 			Name:        "eslag-servers",
@@ -1127,6 +1133,7 @@ func Run(ctx context.Context) error {
 								SharedLeafsCount:       uint8(wgSharedLeafsCount), //nolint:gosec
 								ExtraFabric:            wgExtraFabric || wgAddFabric,
 								InterconnectFabrics:    wgInterconnectFabrics,
+								InterconnectLinks:      uint8(wgInterconnectLinks), //nolint:gosec
 								AddFabric:              wgAddFabric,
 								YesFlag:                yes,
 								DefaultSwitchProfile:   wgDefaultSwitchProfile,
