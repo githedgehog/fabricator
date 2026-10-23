@@ -14,7 +14,6 @@ import (
 	"net"
 	"net/netip"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -222,7 +221,7 @@ func discoverAgents(ctx context.Context, admin kclient.Client, prefixes []string
 		names = append(names, agent.Name)
 	}
 
-	sort.Strings(names)
+	slices.Sort(names)
 
 	return names, nil
 }

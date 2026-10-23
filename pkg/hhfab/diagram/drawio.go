@@ -4,6 +4,7 @@
 package diagram
 
 import (
+	"cmp"
 	"encoding/xml"
 	"fmt"
 	"maps"
@@ -11,7 +12,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strings"
 
 	agentapi "go.githedgehog.com/fabric/api/agent/v1beta1"
@@ -1011,8 +1011,8 @@ func groupLinks(links []Link) []LinkGroup {
 	}
 	result := make([]LinkGroup, 0, len(linkMap))
 	for _, group := range linkMap {
-		sort.Slice(group.Links, func(i, j int) bool {
-			return group.Links[i].Speed < group.Links[j].Speed
+		slices.SortFunc(group.Links, func(a, b Link) int {
+			return strings.Compare(a.Speed, b.Speed)
 		})
 		result = append(result, group)
 	}
@@ -1199,12 +1199,12 @@ func calculateSpineToLeafOffset(source, target string, cellMap map[string]*MxCel
 		return false, 0
 	}
 
-	sort.Slice(spineIDs, func(i, j int) bool {
-		return spinePositions[spineIDs[i]] < spinePositions[spineIDs[j]]
+	slices.SortFunc(spineIDs, func(a, b string) int {
+		return cmp.Compare(spinePositions[a], spinePositions[b])
 	})
 
-	sort.Slice(leafIDs, func(i, j int) bool {
-		return leafPositions[leafIDs[i]] < leafPositions[leafIDs[j]]
+	slices.SortFunc(leafIDs, func(a, b string) int {
+		return cmp.Compare(leafPositions[a], leafPositions[b])
 	})
 
 	// Find the leaf's position in the sorted array
@@ -1919,7 +1919,7 @@ func createVPCLayer(model *MxGraphModel, vpcs map[string]*VPCInfo, cellMap map[s
 
 	// Sort VPC names in each server's list for consistent ordering
 	for serverID := range serverVPCs {
-		sort.Strings(serverVPCs[serverID])
+		slices.Sort(serverVPCs[serverID])
 	}
 
 	// Create VPC boxes for each server
@@ -2038,7 +2038,7 @@ func createVPCLegend(model *MxGraphModel, vpcs map[string]*VPCInfo, serverBottom
 	for vpcName := range vpcs {
 		vpcNames = append(vpcNames, vpcName)
 	}
-	sort.Strings(vpcNames)
+	slices.Sort(vpcNames)
 
 	// Calculate dimensions
 	vpcEntrySpacing := 10.0
@@ -2120,7 +2120,7 @@ func createVPCLegend(model *MxGraphModel, vpcs map[string]*VPCInfo, serverBottom
 		for subnetName := range vpcInfo.Subnets {
 			subnetNames = append(subnetNames, subnetName)
 		}
-		sort.Strings(subnetNames)
+		slices.Sort(subnetNames)
 
 		// Add subnet details
 		for j, subnetName := range subnetNames {
@@ -2199,7 +2199,7 @@ func createUnderlayLayer(model *MxGraphModel, topo Topology, cellMap map[string]
 	for asn := range asnGroups {
 		asnKeys = append(asnKeys, asn)
 	}
-	sort.Strings(asnKeys)
+	slices.Sort(asnKeys)
 
 	for asnIdx, asn := range asnKeys {
 		switchNodes := asnGroups[asn]
@@ -2278,7 +2278,7 @@ func createUnderlayLayer(model *MxGraphModel, topo Topology, cellMap map[string]
 	for asn := range extAsnGroups {
 		extAsnKeys = append(extAsnKeys, asn)
 	}
-	sort.Strings(extAsnKeys)
+	slices.Sort(extAsnKeys)
 
 	for extAsnIdx, asn := range extAsnKeys {
 		extNodes := extAsnGroups[asn]

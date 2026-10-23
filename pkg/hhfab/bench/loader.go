@@ -9,7 +9,7 @@ import (
 	"log/slog"
 	"maps"
 	"slices"
-	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -419,8 +419,8 @@ func collect(ctx context.Context, l *apiutil.Loader) (map[string][]kclient.Objec
 	// Stable order so a re-run applies objects the same way, which makes
 	// interrupted runs resume predictably.
 	for phase := range out {
-		sort.Slice(out[phase], func(i, j int) bool {
-			return out[phase][i].GetName() < out[phase][j].GetName()
+		slices.SortFunc(out[phase], func(a, b kclient.Object) int {
+			return strings.Compare(a.GetName(), b.GetName())
 		})
 	}
 

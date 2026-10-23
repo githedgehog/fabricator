@@ -4,11 +4,11 @@
 package bench
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"log/slog"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -504,12 +504,8 @@ func slowestSwitches(perSwitch map[string]time.Duration, n int) []string {
 		names = append(names, name)
 	}
 
-	sort.Slice(names, func(i, j int) bool {
-		if perSwitch[names[i]] != perSwitch[names[j]] {
-			return perSwitch[names[i]] > perSwitch[names[j]]
-		}
-
-		return names[i] < names[j]
+	slices.SortFunc(names, func(a, b string) int {
+		return cmp.Or(cmp.Compare(perSwitch[b], perSwitch[a]), strings.Compare(a, b))
 	})
 
 	out := make([]string, 0, n)

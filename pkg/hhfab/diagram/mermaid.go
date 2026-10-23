@@ -4,12 +4,12 @@
 package diagram
 
 import (
+	"cmp"
 	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 )
@@ -56,13 +56,13 @@ func generateMermaid(topo Topology) string {
 	leftExternals, rightExternals := splitMermaidExternalNodes(layers.External, topo.Links, layers.Leaf)
 
 	// Sort gateways explicitly by ID
-	sort.Slice(layers.Gateway, func(i, j int) bool {
-		return layers.Gateway[i].ID < layers.Gateway[j].ID
+	slices.SortFunc(layers.Gateway, func(a, b Node) int {
+		return strings.Compare(a.ID, b.ID)
 	})
 
 	// Sort spines explicitly by ID
-	sort.Slice(layers.Spine, func(i, j int) bool {
-		return layers.Spine[i].ID < layers.Spine[j].ID
+	slices.SortFunc(layers.Spine, func(a, b Node) int {
+		return strings.Compare(a.ID, b.ID)
 	})
 
 	// Declare variables for redundancy handling at function level
@@ -376,7 +376,7 @@ func generateMermaid(topo Topology) string {
 	for spineID := range spineLeafMapBySpine {
 		spineIDs = append(spineIDs, spineID)
 	}
-	sort.Strings(spineIDs)
+	slices.Sort(spineIDs)
 
 	// Output connections grouped by spine with appropriate headers
 	for _, spineID := range spineIDs {
@@ -473,7 +473,7 @@ func generateMermaid(topo Topology) string {
 	for leafID := range leafServerMap {
 		leafIDs = append(leafIDs, leafID)
 	}
-	sort.Strings(leafIDs)
+	slices.Sort(leafIDs)
 
 	for _, leafID := range leafIDs {
 		connections := leafServerMap[leafID]
@@ -567,13 +567,13 @@ func generateMermaid(topo Topology) string {
 		for node := range meshNodeSet {
 			meshNodes = append(meshNodes, node)
 		}
-		sort.Strings(meshNodes)
+		slices.Sort(meshNodes)
 
 		// If we have exactly 3 nodes (triangle), use optimal ordering
 		if len(meshNodes) == 3 {
 			// Custom sort for mesh triangle to minimize crossings
 			// Optimal order: [0->1, 1->2, 0->2] where 0,1,2 are sorted node indices
-			sort.Slice(meshConnections, func(i, j int) bool {
+			slices.SortFunc(meshConnections, func(a, b string) int {
 				getSourceTarget := func(conn string) (string, string) {
 					parts := strings.Split(conn, " ---|")
 					if len(parts) < 2 {
@@ -589,8 +589,8 @@ func generateMermaid(topo Topology) string {
 					return source, target
 				}
 
-				sourceI, targetI := getSourceTarget(meshConnections[i])
-				sourceJ, targetJ := getSourceTarget(meshConnections[j])
+				sourceA, targetA := getSourceTarget(a)
+				sourceB, targetB := getSourceTarget(b)
 
 				// Get node indices in sorted order
 				getNodeIndex := func(nodeID string) int {
@@ -625,18 +625,15 @@ func generateMermaid(topo Topology) string {
 					}
 				}
 
-				priorityI := getPriority(sourceI, targetI)
-				priorityJ := getPriority(sourceJ, targetJ)
-
-				return priorityI < priorityJ
+				return cmp.Compare(getPriority(sourceA, targetA), getPriority(sourceB, targetB))
 			})
 		} else {
 			// For non-triangle mesh (more than 3 nodes), use simple alphabetical sort
-			sort.Strings(meshConnections)
+			slices.Sort(meshConnections)
 		}
 	} else {
 		// For simple cases, use alphabetical sort
-		sort.Strings(meshConnections)
+		slices.Sort(meshConnections)
 	}
 
 	// Output sorted mesh connections
@@ -1077,7 +1074,7 @@ func writeMermaidNodes(b *strings.Builder, layers TieredNodes, leftExternals, ri
 				sortedGroupNames = append(sortedGroupNames, groupName)
 			}
 		}
-		sort.Strings(sortedGroupNames)
+		slices.Sort(sortedGroupNames)
 
 		for _, groupName := range sortedGroupNames {
 			nodes := redundancySubgraphs[groupName]

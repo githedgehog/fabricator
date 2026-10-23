@@ -4,13 +4,14 @@
 package main
 
 import (
+	"cmp"
 	"embed"
 	"flag"
 	"fmt"
 	"html/template"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -357,12 +358,8 @@ func deduplicateDiagrams(diagrams []DiagramFile) []DiagramFile {
 		result = append(result, diagram)
 	}
 
-	sort.Slice(result, func(i, j int) bool {
-		if result[i].Environment != result[j].Environment {
-			return result[i].Environment < result[j].Environment
-		}
-
-		return result[i].Name < result[j].Name
+	slices.SortFunc(result, func(a, b DiagramFile) int {
+		return cmp.Or(strings.Compare(a.Environment, b.Environment), strings.Compare(a.Name, b.Name))
 	})
 
 	return result

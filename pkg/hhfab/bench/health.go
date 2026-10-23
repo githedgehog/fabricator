@@ -4,12 +4,12 @@
 package bench
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -195,7 +195,7 @@ func healthObjects(ctx context.Context, kube kclient.Client, w io.Writer) (*agen
 		}
 	}
 
-	sort.Ints(sizes)
+	slices.Sort(sizes)
 
 	fmt.Fprintf(w, "\nAGENT SIZE\n")
 	fmt.Fprintf(w, "  median           %s\n", humanBytes(sizes[len(sizes)/2]))
@@ -275,7 +275,7 @@ func healthFabric(ctx context.Context, kube kclient.Client, agents *agentapi.Age
 		return nil
 	}
 
-	sort.Slice(issues, func(i, j int) bool { return issues[i].restarts > issues[j].restarts })
+	slices.SortFunc(issues, func(a, b podIssue) int { return cmp.Compare(b.restarts, a.restarts) })
 	for _, issue := range issues {
 		fmt.Fprintf(w, "  %-20s %s x%d %s\n", "pod restarts", issue.name, issue.restarts, issue.reason)
 	}

@@ -12,7 +12,7 @@ import (
 	"maps"
 	"net/netip"
 	"slices"
-	"sort"
+	"strings"
 	"time"
 
 	gwapi "go.githedgehog.com/fabric/api/gateway/v1alpha1"
@@ -57,8 +57,8 @@ func firstTwoVPCs(ctx context.Context, kube kclient.Client) (*vpcapi.VPC, *vpcap
 	if len(vpcs.Items) < 2 {
 		return nil, nil, errNotEnoughVPCs
 	}
-	sort.Slice(vpcs.Items, func(i, j int) bool {
-		return vpcs.Items[i].Name < vpcs.Items[j].Name
+	slices.SortFunc(vpcs.Items, func(a, b vpcapi.VPC) int {
+		return strings.Compare(a.Name, b.Name)
 	})
 
 	return &vpcs.Items[0], &vpcs.Items[1], nil
@@ -543,8 +543,8 @@ func gatewayPeeringOverlapNATTest(ctx context.Context, testCtx *VPCPeeringTestCt
 		return true, nil, nil
 	}
 
-	sort.Slice(vpcs.Items, func(i, j int) bool {
-		return vpcs.Items[i].Name < vpcs.Items[j].Name
+	slices.SortFunc(vpcs.Items, func(a, b vpcapi.VPC) int {
+		return strings.Compare(a.Name, b.Name)
 	})
 
 	// Use VPC1 as the "existing" VPC we'll peer with

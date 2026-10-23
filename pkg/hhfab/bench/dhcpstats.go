@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"net/netip"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -451,7 +450,7 @@ func (s *dhcpSummary) report(opts DHCPOpts, totals dhcpRunTotals) {
 		for addr := range totals.sources {
 			addrs = append(addrs, addr)
 		}
-		sort.Slice(addrs, func(i, j int) bool { return addrs[i].Less(addrs[j]) })
+		slices.SortFunc(addrs, netip.Addr.Compare)
 
 		parts := make([]string, 0, len(addrs))
 		for _, addr := range addrs {
