@@ -53,7 +53,7 @@ func Install(cfg fabapi.Fabricator) ([]kclient.Object, error) {
 		if err != nil {
 			return nil, fmt.Errorf("parsing control VIP: %w", err)
 		}
-		proxyURL := fmt.Sprintf("http://%s:%d", controlVIP.Addr().String(), controlproxy.NodePort)
+		proxyURL := "http://" + net.JoinHostPort(controlVIP.Addr().String(), strconv.Itoa(controlproxy.NodePort))
 
 		tolerations, err := kyaml.Marshal([]corev1.Toleration{
 			{

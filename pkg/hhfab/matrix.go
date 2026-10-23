@@ -825,7 +825,7 @@ func startMatrixProtoPortListeners(ctx context.Context, matrix *ConnectivityMatr
 		}
 		// docker exec -d returns as soon as the process is spawned, so wait for
 		// the listener to actually bind.
-		cmd := fmt.Sprintf("sudo docker exec -d iperf3 iperf3 -s -p %d && for i in $(seq 1 %d); do nc -z 127.0.0.1 %d && exit 0; sleep %s; done; exit 1",
+		cmd := fmt.Sprintf("sudo docker exec -d iperf3 iperf3 -s -p %d && for i in $(seq 1 %d); do nc -z 127.0.0.1 %d && exit 0; sleep %s; done; exit 1", //nolint:dupword // container and command names
 			hp.port, protoPortListenerBindAttempts, hp.port, protoPortListenerBindSleepArg)
 		started = append(started, hp)
 		if _, stderr, err := retrySSHCmd(ctx, ssh, cmd, hp.host); err != nil {

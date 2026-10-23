@@ -403,14 +403,14 @@ func (b *bootRunner) download(ctx context.Context, t bootTarget) downloadResult 
 // always sends both the serial and the MAC, so fabric-boot looks up both.
 func setONIEHeaders(req *http.Request, t bootTarget) {
 	req.Header.Set("User-Agent", "onie/1.0 (x86_64-"+bootMachine+"-r0; ONIE bench)")
-	req.Header.Set("ONIE-SERIAL-NUMBER", t.serial)
-	req.Header.Set("ONIE-ETH-ADDR", t.mac)
-	req.Header.Set("ONIE-VENDOR-ID", "0")
-	req.Header.Set("ONIE-MACHINE", bootMachine)
-	req.Header.Set("ONIE-MACHINE-REV", "0")
-	req.Header.Set("ONIE-ARCH", "x86_64")
-	req.Header.Set("ONIE-OPERATION", "os-install")
-	req.Header.Set("ONIE-VERSION", "bench")
+	req.Header.Set("Onie-Serial-Number", t.serial)
+	req.Header.Set("Onie-Eth-Addr", t.mac)
+	req.Header.Set("Onie-Vendor-Id", "0")
+	req.Header.Set("Onie-Machine", bootMachine)
+	req.Header.Set("Onie-Machine-Rev", "0")
+	req.Header.Set("Onie-Arch", "x86_64")
+	req.Header.Set("Onie-Operation", "os-install")
+	req.Header.Set("Onie-Version", "bench")
 }
 
 // tailWriter counts what passes through it and keeps the last bytes, which is
