@@ -5,17 +5,16 @@ version: "2"
 #
 #   1. Linters with no issues on the current code: nilnesserr, exptostd, fatcontext, mirror, iface, sloglint,
 #      gochecksumtype, iotamixing
-#   2. Single findings from the upgraded linters, see linters.exclusions.rules
-#   3. staticcheck QF* quickfix checks (new in v2): 80 issues, auto-fixable with `just lint-fix`
-#   4. gosec taint analysis rules G702/G703: 4 issues
-#   5. goconst detection in composite literals: 55 issues
-#   6. Linting tests and the release tests helpers: 134 issues, see linters.exclusions.paths
-#   7. Default exclusions inherited from v1, see linters.exclusions.presets
-#   8. nolintlint require-explanation: 762 directives without explanation
-#   9. Linters with issues on the current code: modernize (45), intrange (26), wastedassign (7), canonicalheader (8),
+#   2. staticcheck QF* quickfix checks (new in v2): 80 issues, auto-fixable with `just lint-fix`
+#   3. gosec taint analysis rules G702/G703: 4 issues
+#   4. goconst detection in composite literals: 55 issues
+#   5. Linting tests and the release tests helpers: 134 issues, see linters.exclusions.paths
+#   6. Default exclusions inherited from v1, see linters.exclusions.presets
+#   7. nolintlint require-explanation: 765 directives without explanation
+#   8. Linters with issues on the current code: modernize (45), intrange (26), wastedassign (7), canonicalheader (8),
 #      forcetypeassert (16), recvcheck (3), nosprintfhostport (2), dupword (3), gomoddirectives (1), godoclint (29),
 #      perfsprint (217), forbidigo (23, needs settings as it forbids fmt.Print* by default)
-#  10. goconst detection in function call arguments: 531 issues, needs evaluation as it may be too noisy
+#   9. goconst detection in function call arguments: 531 issues, needs evaluation as it may be too noisy
 #
 # Complexity and line length linters (cyclop, funlen, gocognit, gocyclo, maintidx, nestif, lll, ...) aren't planned.
 
@@ -217,48 +216,6 @@ linters:
       - test
       # Not planned: third-party code
       - vendor
-    # Findings of the upgraded linters, reported by the versions in v2 but not by the ones in v1, each rule is limited
-    # to the current findings so that new code is still checked
-    rules:
-      # TODO fill or nolint the empty map literals (exhaustive v0.15.0, v1 had v0.12.0): 3 issues
-      - linters:
-          - exhaustive
-        path: (pkg/fab/comp/fabric/fabric|pkg/hhfab/bench/dhcpcheck)\.go
-        text: "missing keys in map literal"
-        source: "\\{\\}"
-      # TODO rename record to recordf (go-printf-func-name v0.1.1, v1 had v0.1.0): 1 issue
-      - linters:
-          - goprintffuncname
-        path: pkg/hhfab/bench/dhcpcheck\.go
-        text: "'record' should be named 'recordf'"
-      # TODO alias the image copy package import as imports are checked now (predeclared v0.3.0, v1 had v0.2.2): 1 issue
-      - linters:
-          - predeclared
-        path: pkg/artificer/oci\.go
-        text: "^copy: "
-      # TODO use exec.CommandContext as os/exec is checked now (noctx v0.5.1, v1 had v0.1.0): 1 issue
-      - linters:
-          - noctx
-        path: pkg/hhfab/cmdhelpers\.go
-        text: "os/exec.Command must not be called"
-      # TODO don't reuse the capitalized log message as an error string (staticcheck v0.8.2, v1 had v0.6.1): 1 issue
-      - linters:
-          - staticcheck
-        path: pkg/hhfab/vlabbuilder\.go
-        text: "ST1005:"
-        source: "errors\\.New\\(logMsg\\)"
-      # TODO stop setting GatewayBFD, deprecated in fabric v0.137.0 as it's not read anymore (staticcheck v0.8.2, v1
-      # had v0.6.1): 1 issue
-      - linters:
-          - staticcheck
-        path: pkg/fab/comp/fabric/fabric\.go
-        text: "SA1019: .*GatewayBFD is deprecated"
-      # TODO nolint with justification as the bytes are truncated on purpose (gosec v2.29.0, v1 had v2.22.2): 3 issues
-      - linters:
-          - gosec
-        path: pkg/hhfab/bench/dhcp(client)?\.go
-        text: "G115:"
-        source: "(HardwareAddr|TransactionID)\\{"
 
 formatters:
   enable:

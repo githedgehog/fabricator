@@ -600,13 +600,13 @@ func readStoredLeases(ctx context.Context, kube kclient.Reader, plan []*dhcpSubn
 // dhcpServerMAC numbers servers under a locally administered prefix of their
 // own, apart from the switches' 02:b0:00 and the VLAB's 0c:20:12.
 func dhcpServerMAC(idx int) net.HardwareAddr {
-	return net.HardwareAddr{0x02, 0xdc, 0x00, byte(idx >> 16), byte(idx >> 8), byte(idx)}
+	return net.HardwareAddr{0x02, 0xdc, 0x00, byte(idx >> 16), byte(idx >> 8), byte(idx)} //nolint:gosec // truncated to bytes on purpose
 }
 
 // dhcpProbeMAC is the readiness probe's MAC for a subnet, apart from every
 // server's so its leftover offer is never mistaken for one.
 func dhcpProbeMAC(subnetIdx int) net.HardwareAddr {
-	return net.HardwareAddr{0x02, 0xdc, 0x01, byte(subnetIdx >> 16), byte(subnetIdx >> 8), byte(subnetIdx)}
+	return net.HardwareAddr{0x02, 0xdc, 0x01, byte(subnetIdx >> 16), byte(subnetIdx >> 8), byte(subnetIdx)} //nolint:gosec // truncated to bytes on purpose
 }
 
 const maxDHCPServers = 1 << 24

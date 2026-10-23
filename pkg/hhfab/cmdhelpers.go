@@ -155,13 +155,13 @@ func SetupOOBMgmtNet(_ context.Context, count int, includeIfaces []string) error
 	return nil
 }
 
-func PreparePassthrough(_ context.Context, devs []string) error {
+func PreparePassthrough(ctx context.Context, devs []string) error {
 	if len(devs) == 0 {
 		return nil
 	}
 
 	slog.Debug("Preparing devices for passthrough", "devices", devs)
-	cmd := exec.Command("modprobe", "vfio-pci")
+	cmd := exec.CommandContext(ctx, "modprobe", "vfio-pci")
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("cannot insert vfio-pci: %w", err)
 	}

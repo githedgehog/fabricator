@@ -314,7 +314,7 @@ func (b *VLABBuilderDefault) Build(ctx context.Context, l *apiutil.Loader, f fab
 			slog.Error(logMsg, logArgs...)
 			slog.Error("Use --yes to proceed anyway")
 
-			return errors.New(logMsg) //nolint:err113
+			return errors.New("multiple external connections are not supported if using virtual switches") //nolint:err113
 		}
 	}
 

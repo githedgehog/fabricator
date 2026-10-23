@@ -101,11 +101,11 @@ type dhcpChecks struct {
 }
 
 func newDHCPChecks() *dhcpChecks {
-	return &dhcpChecks{counts: map[checkName]int64{}, examples: map[checkName][]string{}}
+	return &dhcpChecks{counts: map[checkName]int64{}, examples: map[checkName][]string{}} //nolint:exhaustive
 }
 
-// record counts one instance of a check, keeping the first few as examples.
-func (c *dhcpChecks) record(name checkName, format string, args ...any) {
+// recordf counts one instance of a check, keeping the first few as examples.
+func (c *dhcpChecks) recordf(name checkName, format string, args ...any) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -189,7 +189,7 @@ func (c *dhcpChecks) log(scope string) {
 func checkStoredLeases(ctx context.Context, kube kclient.Reader, checks *dhcpChecks, plan []*dhcpSubnet, servers []*dhcpServer) {
 	stored, err := storedLeases(ctx, kube, plan)
 	if err != nil {
-		checks.record(checkLeasesUnread, "the checks against dhcpd's record didn't run: %v", err)
+		checks.recordf(checkLeasesUnread, "the checks against dhcpd's record didn't run: %v", err)
 
 		return
 	}
@@ -221,14 +221,14 @@ func checkStored(checks *dhcpChecks, plan []*dhcpSubnet, servers []*dhcpServer, 
 			case ok && srv.sub == sub:
 			case mac == dhcpProbeMAC(sub.index).String():
 			default:
-				checks.record(checkUnknownLease, "%s has a lease for unknown MAC %s (%s)", sub.dhcpSubnetName(), mac, lease.IP)
+				checks.recordf(checkUnknownLease, "%s has a lease for unknown MAC %s (%s)", sub.dhcpSubnetName(), mac, lease.IP)
 			}
 		}
 
 		for ip, macs := range byIP {
 			if len(macs) > 1 {
 				slices.Sort(macs)
-				checks.record(checkOverlapLease, "%s stores %s for %v", sub.dhcpSubnetName(), ip, macs)
+				checks.recordf(checkOverlapLease, "%s stores %s for %v", sub.dhcpSubnetName(), ip, macs)
 			}
 		}
 
@@ -240,14 +240,14 @@ func checkStored(checks *dhcpChecks, plan []*dhcpSubnet, servers []*dhcpServer, 
 			lease, ok := allocated[srv.mac.String()]
 			switch {
 			case !ok:
-				checks.record(checkMissingLease, "%s holds %s, %s has no lease for it", srv.hostname, srv.ip, sub.dhcpSubnetName())
+				checks.recordf(checkMissingLease, "%s holds %s, %s has no lease for it", srv.hostname, srv.ip, sub.dhcpSubnetName())
 			case lease.IP != srv.ip.String():
-				checks.record(checkMissingLease, "%s holds %s, %s stores %s for it", srv.hostname, srv.ip, sub.dhcpSubnetName(), lease.IP)
+				checks.recordf(checkMissingLease, "%s holds %s, %s stores %s for it", srv.hostname, srv.ip, sub.dhcpSubnetName(), lease.IP)
 			case lease.Discover:
 				// What dhcpd keeps for an offer: the ACKed lease never replaced it.
-				checks.record(checkMissingLease, "%s holds %s, %s only stores an offer for it", srv.hostname, srv.ip, sub.dhcpSubnetName())
+				checks.recordf(checkMissingLease, "%s holds %s, %s only stores an offer for it", srv.hostname, srv.ip, sub.dhcpSubnetName())
 			case lease.Expiry.Add(dhcpLeaseSkew).Before(srv.leaseEnd):
-				checks.record(checkShortLease, "%s's lease runs to %s, %s stores an expiry of %s",
+				checks.recordf(checkShortLease, "%s's lease runs to %s, %s stores an expiry of %s",
 					srv.hostname, srv.leaseEnd.UTC().Format(time.RFC3339), sub.dhcpSubnetName(), lease.Expiry.UTC().Format(time.RFC3339))
 			}
 		}

@@ -1089,7 +1089,7 @@ func TestDHCPRoundResultInterrupted(t *testing.T) {
 	stats := newDHCPRoundStats(0, 1, len(servers))
 
 	checks := newDHCPChecks()
-	checks.record(checkOverlap, "found before the stop")
+	checks.recordf(checkOverlap, "found before the stop")
 
 	res := stats.result(0, time.Minute, checks, servers, true)
 	require.True(t, res.interrupted)

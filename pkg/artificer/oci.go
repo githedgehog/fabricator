@@ -15,7 +15,7 @@ import (
 	"github.com/vbauerster/mpb/v8"
 	"github.com/vbauerster/mpb/v8/decor"
 	"go.githedgehog.com/fabricator/api/meta"
-	"go.podman.io/image/v5/copy"
+	imagecopy "go.podman.io/image/v5/copy"
 	"go.podman.io/image/v5/signature"
 	"go.podman.io/image/v5/transports/alltransports"
 	"go.podman.io/image/v5/types"
@@ -116,10 +116,10 @@ func copyOCI(ctx context.Context, src, dst string, srcAuth, dstAuth *types.Docke
 		}
 	}
 
-	_, err = copy.Image(ctx, policyCtx, destRef, srcRef, &copy.Options{
+	_, err = imagecopy.Image(ctx, policyCtx, destRef, srcRef, &imagecopy.Options{
 		ProgressInterval:   1 * time.Second,
 		Progress:           progressChan,
-		ImageListSelection: copy.CopyAllImages,
+		ImageListSelection: imagecopy.CopyAllImages,
 		SourceCtx: &types.SystemContext{
 			DockerInsecureSkipTLSVerify: sourceInsecure,
 			DockerAuthConfig:            srcAuth,

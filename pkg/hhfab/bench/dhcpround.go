@@ -309,7 +309,7 @@ func (c *dhcpClients) boot(ctx context.Context, srv *dhcpServer, held *dhcpHeld,
 		case errors.Is(err, errNoReply), errors.Is(err, errPXEAborted):
 			srv.pxeDead = true
 			c.stats.pxeDead.Add(1)
-			c.checks.record(checkUnbound, "%s: PXE firmware gave up: %v", srv.hostname, err)
+			c.checks.recordf(checkUnbound, "%s: PXE firmware gave up: %v", srv.hostname, err)
 
 			return
 		case err != nil:
@@ -399,7 +399,7 @@ func (c *dhcpClients) renewLease(ctx context.Context, srv *dhcpServer, held *dhc
 
 	if reply.MessageType() == dhcpv4.MessageTypeNak {
 		c.stats.nakRenewal.Add(1)
-		c.checks.record(checkLeaseNaked, "%s renewed %s it was ACKed, got a NAK", srv.hostname, srv.ip)
+		c.checks.recordf(checkLeaseNaked, "%s renewed %s it was ACKed, got a NAK", srv.hostname, srv.ip)
 		held.release(srv)
 
 		return renewalNaked
@@ -408,7 +408,7 @@ func (c *dhcpClients) renewLease(ctx context.Context, srv *dhcpServer, held *dhc
 	c.stats.observe(&c.stats.renewLat, time.Since(renewStart))
 
 	if got := leaseIP(reply); got != srv.ip {
-		c.checks.record(checkRenewalChangedIP, "%s renewed %s, got %s", srv.hostname, srv.ip, got)
+		c.checks.recordf(checkRenewalChangedIP, "%s renewed %s, got %s", srv.hostname, srv.ip, got)
 		held.release(srv)
 		srv.ip = got
 		c.checkAssigned(srv, held)
@@ -432,11 +432,11 @@ func renewalWait(ack *dhcpv4.DHCPv4) time.Duration {
 // the subnet's range or already held by another server.
 func (c *dhcpClients) checkAssigned(srv *dhcpServer, held *dhcpHeld) {
 	if !srv.sub.usable(srv.ip) {
-		c.checks.record(checkOutOfRange, "%s got %s, outside %s-%s of %s", srv.hostname, srv.ip, srv.sub.start, srv.sub.end, srv.sub.prefix)
+		c.checks.recordf(checkOutOfRange, "%s got %s, outside %s-%s of %s", srv.hostname, srv.ip, srv.sub.start, srv.sub.end, srv.sub.prefix)
 	}
 
 	if other := held.hold(srv); other != nil {
-		c.checks.record(checkOverlap, "%s and %s both hold %s", srv.hostname, other.hostname, srv.ip)
+		c.checks.recordf(checkOverlap, "%s and %s both hold %s", srv.hostname, other.hostname, srv.ip)
 	}
 }
 
@@ -487,16 +487,16 @@ func (c *dhcpClients) repeats(ctx context.Context, srv *dhcpServer, held *dhcpHe
 		// stay silent for a client it has no record of, and it has this one's.
 		switch {
 		case outcome == outcomeNoReply:
-			c.checks.record(checkRepeatUnanswered, "%s asked for %s (%s) and got no answer to any retransmit",
+			c.checks.recordf(checkRepeatUnanswered, "%s asked for %s (%s) and got no answer to any retransmit",
 				srv.hostname, want, repeatKindNames[kind])
 		case kind == repeatOwn && outcome == outcomeNak:
-			c.checks.record(checkLeaseNaked, "%s asked again for its %s, got a NAK", srv.hostname, want)
+			c.checks.recordf(checkLeaseNaked, "%s asked again for its %s, got a NAK", srv.hostname, want)
 		case kind == repeatOwn && outcome == outcomeAckOther:
-			c.checks.record(checkWrongIP, "%s asked again for its %s, got an ACK for %s", srv.hostname, want, leaseIP(reply))
+			c.checks.recordf(checkWrongIP, "%s asked again for its %s, got an ACK for %s", srv.hostname, want, leaseIP(reply))
 		case kind == repeatTaken && outcome == outcomeAckSame:
-			c.checks.record(checkTakenGranted, "%s was granted %s, which another server holds", srv.hostname, want)
+			c.checks.recordf(checkTakenGranted, "%s was granted %s, which another server holds", srv.hostname, want)
 		case kind == repeatTaken && outcome == outcomeAckOther:
-			c.checks.record(checkTakenNotNaked, "%s asked for %s, which another server holds, got an ACK for %s (its own is %s)",
+			c.checks.recordf(checkTakenNotNaked, "%s asked for %s, which another server holds, got an ACK for %s (its own is %s)",
 				srv.hostname, want, leaseIP(reply), srv.ip)
 		}
 
