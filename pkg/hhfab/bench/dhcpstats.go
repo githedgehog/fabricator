@@ -198,9 +198,9 @@ func (s *dhcpRoundStats) result(cleanup, storm time.Duration, checks *dhcpChecks
 		case interrupted, srv.pxeDead, srv.finished:
 		case srv.leaseEnd.IsZero():
 			timedOut++
-			checks.record(checkUnbound, "%s: no lease by the end of the round", srv.hostname)
+			checks.recordf(checkUnbound, "%s: no lease by the end of the round", srv.hostname)
 		default:
-			checks.record(checkCutOff, "%s: bound, but the round timed out before it got through its repeats", srv.hostname)
+			checks.recordf(checkCutOff, "%s: bound, but the round timed out before it got through its repeats", srv.hostname)
 		}
 	}
 

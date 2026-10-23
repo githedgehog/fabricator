@@ -293,7 +293,6 @@ func GetFabricConfig(f fabapi.Fabricator) (*fmeta.FabricConfig, error) {
 		ManagementDHCPStart:      string(f.Spec.Config.Fabric.ManagementDHCPStart),
 		ManagementDHCPEnd:        string(f.Spec.Config.Fabric.ManagementDHCPEnd),
 		GatewayCommunities:       gwComms,
-		GatewayBFD:               true,
 		EnableGateway:            f.Spec.Config.Gateway.Enable,
 		GatewayNamespace:         comp.FabNamespace,
 		GatewayTolerations: []corev1.Toleration{
@@ -322,7 +321,7 @@ func GetFabricBootConfig(f fabapi.Fabricator) (*boot.ServerConfig, error) {
 		return nil, fmt.Errorf("getting registry URL: %w", err)
 	}
 
-	nosRepos := map[fmeta.NOSType]string{}
+	nosRepos := map[fmeta.NOSType]string{} //nolint:exhaustive
 	for nosType := range f.Status.Versions.Fabric.NOS {
 		if !isIncludeNOS(f, nosType) {
 			continue
@@ -331,7 +330,7 @@ func GetFabricBootConfig(f fabapi.Fabricator) (*boot.ServerConfig, error) {
 		nosRepos[nosType] = comp.JoinURLParts(regURL, comp.RegistryPrefix, getNOSRefBase(nosType), string(nosType))
 	}
 
-	nosVersions := map[fmeta.NOSType]string{}
+	nosVersions := map[fmeta.NOSType]string{} //nolint:exhaustive
 	for nosType, version := range f.Status.Versions.Fabric.NOS {
 		if !isIncludeNOS(f, nosType) {
 			continue

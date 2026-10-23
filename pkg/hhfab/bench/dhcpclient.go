@@ -146,7 +146,7 @@ func newDHCPDemux() *dhcpDemux {
 // arrive on. Registering before the first send means no reply can race it.
 func (d *dhcpDemux) open() (dhcpv4.TransactionID, chan *dhcpv4.DHCPv4) {
 	n := d.next.Add(1)
-	xid := dhcpv4.TransactionID{byte(n >> 24), byte(n >> 16), byte(n >> 8), byte(n)}
+	xid := dhcpv4.TransactionID{byte(n >> 24), byte(n >> 16), byte(n >> 8), byte(n)} //nolint:gosec // truncated to bytes on purpose
 	ch := make(chan *dhcpv4.DHCPv4, 4)
 
 	d.mu.Lock()
@@ -306,7 +306,7 @@ func (c *dhcpClients) exchange(ctx context.Context, srv *dhcpServer, msg *dhcpv4
 				return nil, ctx.Err() //nolint:wrapcheck
 			case reply := <-replies:
 				if !bytes.Equal(reply.ClientHWAddr, srv.mac) {
-					c.checks.record(checkMismatchedReply, "%s got a reply for %s", srv.hostname, reply.ClientHWAddr)
+					c.checks.recordf(checkMismatchedReply, "%s got a reply for %s", srv.hostname, reply.ClientHWAddr)
 
 					continue
 				}
@@ -447,7 +447,7 @@ func (c *dhcpClients) judgeOffer(srv *dhcpServer) func(*dhcpv4.DHCPv4) verdict {
 
 		if reply.YourIPAddr.IsUnspecified() {
 			c.stats.zeroOffers.Add(1)
-			c.checks.record(checkZeroOffer, "%s got an OFFER for 0.0.0.0", srv.hostname)
+			c.checks.recordf(checkZeroOffer, "%s got an OFFER for 0.0.0.0", srv.hostname)
 
 			return ignore
 		}
@@ -469,7 +469,7 @@ func (c *dhcpClients) judgeAck(srv *dhcpServer) func(*dhcpv4.DHCPv4) verdict {
 		case dhcpv4.MessageTypeAck:
 			if reply.YourIPAddr.IsUnspecified() {
 				c.stats.zeroAcks.Add(1)
-				c.checks.record(checkZeroAck, "%s got an ACK for 0.0.0.0", srv.hostname)
+				c.checks.recordf(checkZeroAck, "%s got an ACK for 0.0.0.0", srv.hostname)
 
 				return ignore
 			}
@@ -487,10 +487,10 @@ func (c *dhcpClients) judgeAck(srv *dhcpServer) func(*dhcpv4.DHCPv4) verdict {
 // MUST: the lease time and the server identifier.
 func (c *dhcpClients) checkRequired(srv *dhcpServer, reply *dhcpv4.DHCPv4) {
 	if reply.Options.Get(dhcpv4.OptionIPAddressLeaseTime) == nil {
-		c.checks.record(checkNoLeaseTime, "%s got a %s for %s without a lease time", srv.hostname, reply.MessageType(), reply.YourIPAddr)
+		c.checks.recordf(checkNoLeaseTime, "%s got a %s for %s without a lease time", srv.hostname, reply.MessageType(), reply.YourIPAddr)
 	}
 	if reply.ServerIdentifier() == nil {
-		c.checks.record(checkNoServerID, "%s got a %s for %s without a server identifier", srv.hostname, reply.MessageType(), reply.YourIPAddr)
+		c.checks.recordf(checkNoServerID, "%s got a %s for %s without a server identifier", srv.hostname, reply.MessageType(), reply.YourIPAddr)
 	}
 }
 
@@ -582,7 +582,7 @@ func (c *dhcpClients) dora(ctx context.Context, srv *dhcpServer, prof clientProf
 		if ack.MessageType() == dhcpv4.MessageTypeNak {
 			// dhcpd made the offer itself, so it should still hold it.
 			c.stats.nakDORA.Add(1)
-			c.checks.record(checkOfferNaked, "%s requested %s it was offered, got a NAK", srv.hostname, offered)
+			c.checks.recordf(checkOfferNaked, "%s requested %s it was offered, got a NAK", srv.hostname, offered)
 
 			if prof.pxe {
 				return nil, errPXEAborted
@@ -608,10 +608,10 @@ func (c *dhcpClients) dora(ctx context.Context, srv *dhcpServer, prof clientProf
 // compareAck counts an ACK that isn't for the offer that was requested.
 func (c *dhcpClients) compareAck(srv *dhcpServer, offered, serverID net.IP, ack *dhcpv4.DHCPv4) {
 	if !ack.YourIPAddr.Equal(offered) {
-		c.checks.record(checkWrongIP, "%s requested %s, got an ACK for %s", srv.hostname, offered, ack.YourIPAddr)
+		c.checks.recordf(checkWrongIP, "%s requested %s, got an ACK for %s", srv.hostname, offered, ack.YourIPAddr)
 	}
 	if !ack.ServerIdentifier().Equal(serverID) {
-		c.checks.record(checkServerIDChanged, "%s was offered by %s, ACKed by %s", srv.hostname, serverID, ack.ServerIdentifier())
+		c.checks.recordf(checkServerIDChanged, "%s was offered by %s, ACKed by %s", srv.hostname, serverID, ack.ServerIdentifier())
 	}
 }
 
