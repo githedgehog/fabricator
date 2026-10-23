@@ -423,7 +423,7 @@ func reexecUnderSudo(cacheDir string) error {
 
 	slog.Info("Running again under sudo to bind UDP port 67", "cacheDir", cacheDir)
 
-	if err := syscall.Exec(sudo, argv, env); err != nil {
+	if err := syscall.Exec(sudo, argv, env); err != nil { //nolint:gosec // re-executes itself with its own args on purpose
 		return fmt.Errorf("running under sudo: %w", err)
 	}
 

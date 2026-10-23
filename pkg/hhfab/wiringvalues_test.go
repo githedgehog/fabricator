@@ -403,6 +403,31 @@ spec:
 	require.Equal(t, plain, string(data), "a wiring file with no template actions must round-trip byte for byte")
 }
 
+func TestImportFabricGatewayNameNotFile(t *testing.T) {
+	t.Parallel()
+
+	const plain = `apiVersion: wiring.githedgehog.com/v1beta1
+kind: Switch
+metadata:
+  name: leaf-1
+spec:
+  role: server-leaf
+  profile: vs
+`
+
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, IncludeDir), 0o700))
+
+	source := filepath.Join(dir, "topo.yaml")
+	require.NoError(t, os.WriteFile(source, []byte(plain), 0o600))
+
+	for _, name := range []string{"../escaped", "sub/topo", "/abs/topo"} {
+		err := importFabricGateway(InitConfig{WorkDir: dir, Wiring: []string{source + ":" + name}}, WiringTemplateData{})
+		require.ErrorContains(t, err, "should be a file name", "for %q", name)
+	}
+	require.NoFileExists(t, filepath.Join(dir, "escaped.yaml"), "the import must not escape the include dir")
+}
+
 func TestImportFabricGatewayContext(t *testing.T) {
 	t.Parallel()
 

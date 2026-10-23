@@ -137,7 +137,7 @@ func enforceFile(path string, expectedContent []byte, mode os.FileMode) (bool, e
 	}
 
 	if string(actualContent) != string(expectedContent) {
-		if err := os.WriteFile(path, expectedContent, mode); err != nil {
+		if err := os.WriteFile(path, expectedContent, mode); err != nil { //nolint:gosec // only called with fixed system paths
 			return false, fmt.Errorf("writing file %q: %w", path, err)
 		}
 

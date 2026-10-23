@@ -219,7 +219,7 @@ func Init(ctx context.Context, c InitConfig) error {
 		slog.Info("Generated initial config")
 	}
 
-	if err := os.WriteFile(filepath.Join(c.WorkDir, FabConfigFile), fabCfgData, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(c.WorkDir, FabConfigFile), fabCfgData, 0o600); err != nil { //nolint:gosec // the user picks the workdir
 		return fmt.Errorf("writing fab config: %w", err)
 	}
 
@@ -264,6 +264,9 @@ func importFabricGateway(c InitConfig, tmplData WiringTemplateData) error {
 			}
 
 			source = parts[0]
+			if parts[1] != filepath.Base(parts[1]) {
+				return fmt.Errorf("importing %q: import name %q should be a file name", wiringFile, parts[1]) //nolint:err113
+			}
 			name = wiringImportName(parts[1])
 			if !strings.HasSuffix(name, YAMLExt) {
 				name += YAMLExt
@@ -307,7 +310,7 @@ func importFabricGateway(c InitConfig, tmplData WiringTemplateData) error {
 			return fmt.Errorf("importing %q: loading: %w", source, err)
 		}
 
-		if err := os.WriteFile(target, data, 0o600); err != nil {
+		if err := os.WriteFile(target, data, 0o600); err != nil { //nolint:gosec // the user picks the workdir, the import name is checked to be a file name
 			return fmt.Errorf("importing %q: target %q: writing: %w", source, relName, err)
 		}
 
