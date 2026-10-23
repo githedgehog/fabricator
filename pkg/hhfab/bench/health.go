@@ -204,7 +204,7 @@ func healthObjects(ctx context.Context, kube kclient.Client, w io.Writer) (*agen
 
 	// Each heartbeat rewrites the whole object and every revision is kept until
 	// compaction, so this is roughly the live history etcd carries.
-	perWindow := total * int(compactionWindow/(HeartbeatPeriod))
+	perWindow := total * int(compactionWindow/HeartbeatPeriod)
 	fmt.Fprintf(w, "  etcd history/%s  %s at one heartbeat per %s\n",
 		compactionWindow, humanBytes(perWindow), HeartbeatPeriod)
 

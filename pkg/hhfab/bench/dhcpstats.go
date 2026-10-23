@@ -462,8 +462,10 @@ func (s *dhcpSummary) report(opts DHCPOpts, totals dhcpRunTotals) {
 	}
 
 	if lost := totals.dropped + totals.overflowed + totals.readErrors + sendErrors; lost > 0 || totals.garbled > 0 {
-		args := []any{"dropped", totals.dropped, "overflowed", totals.overflowed, "readErrors", totals.readErrors,
-			"sendErrors", sendErrors, "garbled", totals.garbled}
+		args := []any{
+			"dropped", totals.dropped, "overflowed", totals.overflowed, "readErrors", totals.readErrors,
+			"sendErrors", sendErrors, "garbled", totals.garbled,
+		}
 		if lost > 0 {
 			slog.Warn("  packets lost on the bench host, so retransmits and latencies overstate dhcpd's", args...)
 		} else {
