@@ -319,6 +319,7 @@ func TestCreateVLABConfigDPDKGatewayIOMMU(t *testing.T) {
 
 				// the management NIC stays behind the PCI bridge, where its name comes from
 				require.Contains(t, vm.NICs[0], ",bus="+VLABPCIBridgePrefix+"0,addr=0x0", vm.Name)
+				require.Contains(t, vm.NICs[0], "-device e1000,", vm.Name)
 				if !dpdk {
 					continue
 				}
@@ -336,6 +337,7 @@ func TestCreateVLABConfigDPDKGatewayIOMMU(t *testing.T) {
 					_, err = fmt.Sscanf(iface.PCI, "0000:00:%02x.0", &slot)
 					require.NoError(t, err, iface.PCI)
 					require.Contains(t, vm.NICs[nicID], fmt.Sprintf(",bus=pcie.0,addr=0x%x", slot), vm.Name+"/"+ifaceName)
+					require.Contains(t, vm.NICs[nicID], "-device e1000e,", vm.Name+"/"+ifaceName)
 				}
 			}
 			require.Equal(t, 2, gws)

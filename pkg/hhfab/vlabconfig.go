@@ -1120,6 +1120,13 @@ func vlabFromConfig(cfg *VLABConfig, opts VLABRunOpts) (*VLAB, error) {
 					// sets what the guest sees, it does not limit the traffic
 					link = ",speed=" + VLABVirtioNetSpeed + ",duplex=full"
 				}
+				// The DPDK driver gives each port a transmit queue per worker and one more for
+				// the control plane. The e1000 (82540EM) has a single transmit ring, though its
+				// DPDK driver advertises two, so what is sent on the second never leaves; the
+				// e1000e (82574L) has two.
+				if vm.IOMMU && nicID > 0 {
+					nic = "e1000e"
+				}
 
 				device = fmt.Sprintf("%s,netdev=eth%02d,mac=%s%s", nic, nicID, mac, link)
 			}
